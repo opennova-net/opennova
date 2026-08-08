@@ -32,7 +32,8 @@ String normalized_base_dir(const String &path) {
 	return path.replace("\\", "/").get_base_dir();
 }
 
-// Convert Godot Color to CBIN color (RGB 24-bit).
+// Convert Godot Color to CBIN color (RGB 24-bit) — the Godot-type edge; the
+// display-state semantics live in cbin (credits_display_items and friends).
 uint32_t color_to_cbin(const Color &c) {
 	uint32_t r = static_cast<uint32_t>(c.r * 255) & 0xFF;
 	uint32_t g = static_cast<uint32_t>(c.g * 255) & 0xFF;
@@ -40,10 +41,27 @@ uint32_t color_to_cbin(const Color &c) {
 	return (r << 16) | (g << 8) | b;
 }
 
-// Check if two colors are approximately equal.
-bool colors_equal(const Color &a, const Color &b) {
-	// Compare using 8-bit precision (what CBIN uses).
-	return color_to_cbin(a) == color_to_cbin(b);
+// Convert CBIN RGB24 to Godot Color.
+Color cbin_to_color(uint32_t rgb) {
+	return Color(((rgb >> 16) & 0xFF) / 255.0f, ((rgb >> 8) & 0xFF) / 255.0f,
+			(rgb & 0xFF) / 255.0f);
+}
+
+CbinJustify to_godot_justify(cbin::Justify j) {
+	switch (j) {
+		case cbin::Justify::Left: return CBIN_JUSTIFY_LEFT;
+		case cbin::Justify::Right: return CBIN_JUSTIFY_RIGHT;
+		case cbin::Justify::Center: break;
+	}
+	return CBIN_JUSTIFY_CENTER;
+}
+
+cbin::Justify to_cbin_justify(CbinJustify j) {
+	switch (j) {
+		case CBIN_JUSTIFY_LEFT: return cbin::Justify::Left;
+		case CBIN_JUSTIFY_RIGHT: return cbin::Justify::Right;
+		default: return cbin::Justify::Center;
+	}
 }
 
 }  // namespace
@@ -134,25 +152,20 @@ Variant KdaResourceFormatLoader::_load(const String &p_path, const String &p_ori
 		resource->set_bottom_y(credits.bottom_y);
 	}
 
-	// Track current state for applying to text entries.
-	// The CBIN format uses separate Color and Justify control codes that affect
-	// subsequent text. We collapse these into properties on each TextEntry.
-	Color current_color(1, 1, 1);  // Default white
-	CbinJustify current_justify = CBIN_JUSTIFY_CENTER;
-
-	// Convert entries - track state from Color/Justify entries and apply to Text entries.
-	for (const auto &src : credits.entries) {
-		switch (src.type) {
+	// The Color/Justify control-code collapse lives in cbin
+	// (credits_display_items — seeded white/center); this loop only mints the
+	// Godot Resource per stamped item and resolves fonts/textures.
+	for (const auto &item : cbin::credits_display_items(credits)) {
+		switch (item.type) {
 			case cbin::EntryType::Text: {
 				Ref<CbinTextEntry> text_entry;
 				text_entry.instantiate();
 				// Replace underscores with spaces for display.
-				text_entry->set_text(underscore_to_space(src.text));
-				// Apply current state.
-				text_entry->set_color(current_color);
-				text_entry->set_justify(current_justify);
-				if (!src.font.empty()) {
-					String font_name(src.font.c_str());
+				text_entry->set_text(underscore_to_space(item.text));
+				text_entry->set_color(cbin_to_color(item.color));
+				text_entry->set_justify(to_godot_justify(item.justify));
+				if (!item.font.empty()) {
+					String font_name(item.font.c_str());
 					text_entry->set_font_name(font_name);
 					Ref<Resource> font = find_font(font_name);
 					if (font.is_valid()) {
@@ -160,14 +173,6 @@ Variant KdaResourceFormatLoader::_load(const String &p_path, const String &p_ori
 					}
 				}
 				resource->add_entry(text_entry);
-				break;
-			}
-			case cbin::EntryType::Color: {
-				// Update state - don't create an entry.
-				float r = ((src.color >> 16) & 0xFF) / 255.0f;
-				float g = ((src.color >> 8) & 0xFF) / 255.0f;
-				float b = (src.color & 0xFF) / 255.0f;
-				current_color = Color(r, g, b);
 				break;
 			}
 			case cbin::EntryType::Newline: {
@@ -179,8 +184,8 @@ Variant KdaResourceFormatLoader::_load(const String &p_path, const String &p_ori
 			case cbin::EntryType::Image: {
 				Ref<CbinImageEntry> image_entry;
 				image_entry.instantiate();
-				if (!src.image_path.empty()) {
-					String texture_name = String(src.image_path.c_str());
+				if (!item.image_path.empty()) {
+					String texture_name = String(item.image_path.c_str());
 					// Always record the original name so placeholders can display it.
 					image_entry->set_texture_name(texture_name);
 					Ref<Resource> texture = find_texture(texture_name);
@@ -189,22 +194,15 @@ Variant KdaResourceFormatLoader::_load(const String &p_path, const String &p_ori
 					}
 				}
 				// ~F format: display offsets from viewport
-				image_entry->set_display_x(src.image_display_x);
-				image_entry->set_display_y(src.image_display_y);
+				image_entry->set_display_x(item.image_display_x);
+				image_entry->set_display_y(item.image_display_y);
 				// ~I images (simple format) scroll with content, ~F images are fixed overlays.
-				image_entry->set_advances_y(src.use_simple_image_format);
+				image_entry->set_advances_y(item.use_simple_image_format);
 				resource->add_entry(image_entry);
 				break;
 			}
-			case cbin::EntryType::Justify: {
-				// Update state - don't create an entry.
-				switch (src.justify) {
-					case cbin::Justify::Left: current_justify = CBIN_JUSTIFY_LEFT; break;
-					case cbin::Justify::Center: current_justify = CBIN_JUSTIFY_CENTER; break;
-					case cbin::Justify::Right: current_justify = CBIN_JUSTIFY_RIGHT; break;
-				}
-				break;
-			}
+			default:
+				break;  // display items never carry control types
 		}
 	}
 
@@ -231,14 +229,13 @@ Error KdaResourceFormatSaver::_save(const Ref<Resource> &p_resource, const Strin
 		credits.bottom_y = cbin_resource->get_bottom_y();
 	}
 
-	// Track current state - when a TextEntry has different state, emit control codes first.
-	// Default state matches what the loader starts with.
-	Color current_color(1, 1, 1);  // White
-	CbinJustify current_justify = CBIN_JUSTIFY_CENTER;
-
-	// Convert entries.
+	// Build display items at the Godot-type edge (Color quantized to RGB24,
+	// spaces back to underscores); the control-code re-emission by diff lives
+	// in cbin (credits_entries_from_display — controls only before Text,
+	// color before justify, seeded white/center).
+	std::vector<cbin::CreditsDisplayItem> items;
 	int entry_count = cbin_resource->get_entry_count();
-	credits.entries.reserve(entry_count * 2);  // May emit control codes
+	items.reserve(entry_count);
 
 	for (int i = 0; i < entry_count; ++i) {
 		Ref<CbinEntry> src = cbin_resource->get_entry(i);
@@ -246,65 +243,41 @@ Error KdaResourceFormatSaver::_save(const Ref<Resource> &p_resource, const Strin
 
 		// Check actual type using dynamic cast.
 		if (Ref<CbinTextEntry> text_entry = Object::cast_to<CbinTextEntry>(src.ptr()); text_entry.is_valid()) {
-			// Check if we need to emit control codes before this text.
-			Color entry_color = text_entry->get_color();
-			CbinJustify entry_justify = text_entry->get_justify();
-
-			// Emit color change if needed.
-			if (!colors_equal(entry_color, current_color)) {
-				cbin::Entry color_entry;
-				color_entry.type = cbin::EntryType::Color;
-				color_entry.color = color_to_cbin(entry_color);
-				credits.entries.push_back(std::move(color_entry));
-				current_color = entry_color;
-			}
-
-			// Emit justify change if needed.
-			if (entry_justify != current_justify) {
-				cbin::Entry justify_entry;
-				justify_entry.type = cbin::EntryType::Justify;
-				switch (entry_justify) {
-					case CBIN_JUSTIFY_LEFT: justify_entry.justify = cbin::Justify::Left; break;
-					case CBIN_JUSTIFY_CENTER: justify_entry.justify = cbin::Justify::Center; break;
-					case CBIN_JUSTIFY_RIGHT: justify_entry.justify = cbin::Justify::Right; break;
-				}
-				credits.entries.push_back(std::move(justify_entry));
-				current_justify = entry_justify;
-			}
-
-			// Now emit the text entry.
-			cbin::Entry dst;
-			dst.type = cbin::EntryType::Text;
+			cbin::CreditsDisplayItem item;
+			item.type = cbin::EntryType::Text;
 			// Replace spaces with underscores for CBIN format.
-			dst.text = space_to_underscore(text_entry->get_text());
-			// Font name from resource path.
+			item.text = space_to_underscore(text_entry->get_text());
 			String font_name = text_entry->get_font_name();
 			if (!font_name.is_empty()) {
-				dst.font = font_name.utf8().get_data();
+				item.font = font_name.utf8().get_data();
 			}
-			credits.entries.push_back(std::move(dst));
+			item.color = color_to_cbin(text_entry->get_color());
+			item.justify = to_cbin_justify(text_entry->get_justify());
+			items.push_back(std::move(item));
 		} else if (Ref<CbinNewlineEntry> newline_entry = Object::cast_to<CbinNewlineEntry>(src.ptr()); newline_entry.is_valid()) {
-			cbin::Entry dst;
-			dst.type = cbin::EntryType::Newline;
-			credits.entries.push_back(std::move(dst));
+			cbin::CreditsDisplayItem item;
+			item.type = cbin::EntryType::Newline;
+			items.push_back(std::move(item));
 		} else if (Ref<CbinImageEntry> image_entry = Object::cast_to<CbinImageEntry>(src.ptr()); image_entry.is_valid()) {
-			cbin::Entry dst;
-			dst.type = cbin::EntryType::Image;
+			cbin::CreditsDisplayItem item;
+			item.type = cbin::EntryType::Image;
 			// Get image path from texture resource.
 			String texture_path = image_entry->get_texture_path();
 			if (!texture_path.is_empty()) {
-				dst.image_path = texture_path.utf8().get_data();
+				item.image_path = texture_path.utf8().get_data();
 			}
-			dst.image_display_x = image_entry->get_display_x();
-			dst.image_display_y = image_entry->get_display_y();
+			item.image_display_x = image_entry->get_display_x();
+			item.image_display_y = image_entry->get_display_y();
 			// advances_y true = ~I format (scrolling), false = ~F format (fixed overlay)
-			dst.use_simple_image_format = image_entry->get_advances_y();
-			credits.entries.push_back(std::move(dst));
+			item.use_simple_image_format = image_entry->get_advances_y();
+			items.push_back(std::move(item));
 		} else {
 			// Unknown entry type, skip.
 			continue;
 		}
 	}
+
+	credits.entries = cbin::credits_entries_from_display(items);
 
 	// Encode to bytes.
 	std::vector<uint8_t> data;

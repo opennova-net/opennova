@@ -127,4 +127,44 @@ bool encode(const Credits& credits, std::vector<uint8_t>& out, std::string& erro
 // Encode Credits to file.
 bool encode_file(const Credits& credits, const std::string& path, std::string& error);
 
+// ---------------------------------------------------------------------------
+// The display view: the Color/Justify CONTROL entries collapsed into effective
+// per-item state, so every consumer of the credits sees stamped items instead
+// of re-deriving the control-code state machine. Semantics carried over from
+// the ONED .kda editor (no [orig] witnesses yet — the retail read path is the
+// cbin-re.md PAR-R5 gap); the seeds and emission quirks below are the observed
+// stock-file conventions the editor round-trips against.
+
+// Seeded display state: white text, center justify.
+inline constexpr uint32_t kDefaultDisplayColor = 0xFFFFFF;
+
+// A display item — Text, Newline, or Image only; controls are folded into the
+// effective color/justify stamped on every item.
+struct CreditsDisplayItem {
+    EntryType type = EntryType::Text;
+    // Text items
+    std::string text;
+    std::string font;
+    uint32_t color = kDefaultDisplayColor;  // RGB24
+    Justify justify = Justify::Center;
+    // Image items
+    std::string image_path;
+    int image_display_x = 0;
+    int image_display_y = 0;
+    bool use_simple_image_format = false;
+};
+
+// Collapse the entry stream into display items: Color/Justify entries update
+// the running state (seeded white/center) and emit nothing; Text items take
+// the current state; Newline/Image items pass through unstamped.
+std::vector<CreditsDisplayItem> credits_display_items(const Credits& credits);
+
+// The inverse: re-emit Color/Justify controls by diffing each TEXT item's
+// state against the running state (seeded white/center). Controls are emitted
+// only immediately before Text items — color before justify — and never
+// before Newline/Image items. Redundant control runs canonicalize away, so
+// display-view round-trips are semantic, not byte-identical.
+std::vector<Entry> credits_entries_from_display(
+    const std::vector<CreditsDisplayItem>& items);
+
 }  // namespace cbin
