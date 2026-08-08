@@ -106,8 +106,11 @@ name through a 212-byte-entry collection (`sound_bank_collection_add_or_ref @ 0x
 from `CUIElement_ParseXMLDefinition @ 0x648ada`) — menu-slice grill scope.
 
 `NovaMissionAudio` loads one merged chain instead: co-named bank first (it carries the dialog
-voices), then `gamelocl.LWF`, `game.lwf`, `game3.lwf`, `game2.lwf` in the engine's slot order.
-Divergences from the original, accepted and documented:
+voices), then the global slots in the engine's order. The slot table itself is native — 
+`audio::global_bank_chain` (engine/runtime/audio bank_chain.h, S13 close-out 2026-08-08)
+returns the ordered names with the expansion pair folded in when one is mounted; the shell
+iterates it via `NovaAmbientMixer.global_bank_chain` (ctest `audio_bank_chain` pins the
+order both ways). Divergences from the original, accepted and documented:
 
 - **D-SND-1 (bank scope):** the engine scopes the co-named bank to dialog playback; we keep it
   in the single search chain (a superset — dialog set names do not collide with ambient sets in
@@ -163,7 +166,7 @@ and a per-frame updater plays the queue **one audio channel at a time**:
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-SND-4 | `NovaMissionAudio.play_dialog` **enqueues** the resolved line set-name(s) and plays them one at a time, starting the next on the previous voice's `finished` (`_dialog_queue` + `spawn_oneshot_2d`) | one dialog channel, `dword_A895FC`-gated, advanced by `Dialog_UpdatePlayback` | reimpl-side serialization that reproduces the observable behavior (no dialog overlap). The prior reimpl played every drained `dialog` effect immediately and non-blocking, so a mission's PreMission/early `PlayWavList` actions blared simultaneously at t=0. We do not model the 16-active-slot table or the per-line countdown timing (the reimpl presents on stream `finished`); the *id -> "dlg%03d" -> .DBF group lines* resolution matches the engine's `"dlg%03i"` path. |
+| D-SND-4 | `NovaMissionAudio.play_dialog` **enqueues** the resolved line set-name(s) and plays them one at a time, starting the next on the previous voice's `finished` (`_dialog_queue` + `spawn_oneshot_2d`) | one dialog channel, `dword_A895FC`-gated, advanced by `Dialog_UpdatePlayback` | reimpl-side serialization that reproduces the observable behavior (no dialog overlap). The prior reimpl played every drained `dialog` effect immediately and non-blocking, so a mission's PreMission/early `PlayWavList` actions blared simultaneously at t=0. We do not model the 16-active-slot table or the per-line countdown timing (the reimpl presents on stream `finished`); the *id -> "dlg%03d" -> .DBF group lines* resolution matches the engine's `"dlg%03i"` path. S13 close-out (2026-08-08): the FIFO stays **shell-owned by decision** — its advance trigger is the stream's `finished` signal (node/stream lifetime, the shell's half under the end-state rule), so a native queue would move no policy, only the Array. The witnessed one-channel serialization rule is this row. |
 
 ## WAC scripted voice — `wave` / `pwave` (grilled 2026-06-15; re-confirmed 2026-07-09)
 
