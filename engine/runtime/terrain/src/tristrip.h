@@ -22,7 +22,8 @@ struct TriStripResult {
 //
 // face_indices: array of vertex index triples (3 uint16 per face)
 // face_count: number of faces
-// vertex_count: total vertices (unused, kept for interface compatibility)
+// vertex_count: total vertices — unused by the strip walk; retained as a
+// structural mirror of sub_4068E0's parameter list
 TriStripResult build_triangle_strips(
     const uint16_t* face_indices, int face_count, int vertex_count);
 

@@ -398,27 +398,15 @@ struct Document {
   const Screen *first_screen() const;
 };
 
-// Parse options.
-struct ParseOptions {
-  bool fix_malformed_xml = true; // Fix common XML errors (bare attributes, etc.)
-};
-
 // Parse MNU content from a string buffer.
 // Returns true on success, false on error with description in `error`.
-bool parse(const std::string &content, Document &out, std::string &error,
-           const ParseOptions &options = {});
+bool parse(const std::string &content, Document &out, std::string &error);
 
 // Parse MNU content from a byte buffer.
-bool parse(const uint8_t *data, size_t size, Document &out, std::string &error,
-           const ParseOptions &options = {});
+bool parse(const uint8_t *data, size_t size, Document &out, std::string &error);
 
 // Parse MNU file from disk.
-bool parse_file(const std::string &path, Document &out, std::string &error,
-                const ParseOptions &options = {});
-
-// Preprocess MNU content to fix common XML errors.
-// Called automatically by parse() if fix_malformed_xml is true.
-std::string fix_malformed_xml(const std::string &content);
+bool parse_file(const std::string &path, Document &out, std::string &error);
 
 // Strip {hot} marker from text for display.
 // Returns the display text with {hot} removed.

@@ -229,12 +229,15 @@ public:
 	// Route a literal Unicode accelerator (case-insensitive). Kept separate from
 	// handle_hotkey so a non-VIRTUAL "VK_ESCAPE" remains literal text.
 	bool handle_character_hotkey(const String &p_character);
-	// Route one widget action by its MNU verb (screen/window/pop/quit). Emits
-	// action_dispatched. Returns true if the action was handled.
+	// Script-facing action dispatch by MNU verb (screen/window/pop/quit) — the
+	// seam GDScript tests and tools drive, and the correspondence surface for
+	// the original dispatcher [orig: CUIWidget_HandleScriptedAction @ 0x6497f0].
+	// Emits action_dispatched. Returns true if the action was handled.
 	bool dispatch_action(const String &p_type, const String &p_target,
 			const String &p_file, const String &p_window_state);
-	// Complete native action path used by built widgets. Unlike the script
-	// compatibility wrapper above, this retains TOGGLE and shell-owned fields.
+	// Complete native action path used by built widgets (button/goto). Takes
+	// the full MnuActionData, retaining TOGGLE and shell-owned fields the
+	// four-string form cannot carry.
 	bool dispatch_widget_action(const MnuActionData &p_action);
 	void clear_navigation_stack();
 

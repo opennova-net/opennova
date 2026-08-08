@@ -108,8 +108,9 @@ $lanEnvironment = @{
     NW_LAN_NAME = $Name.Trim()
 }
 if (-not [string]::IsNullOrWhiteSpace($MissionOverride)) {
-    # Compatibility only for older direct-load runtime builds. This is deliberately
-    # opt-in: a normal LAN join learns the mission from the host/session flow.
+    # Debug-only expectation hint: the runtime treats NW_LAN_MISSION as a
+    # display/expectation value, never a local load override (D-NET-194). A
+    # normal LAN join learns the mission from the host/session flow.
     $lanEnvironment["NW_LAN_MISSION"] = $MissionOverride.Trim()
 }
 if (-not [string]::IsNullOrWhiteSpace($IntegrityProfile)) {

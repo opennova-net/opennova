@@ -135,10 +135,10 @@ func test_mute_knobs_drive_and_mirror_the_real_buses() -> void:
 	page.refresh()
 	var sfx_bus := AudioServer.get_bus_index("SFX")
 	if sfx_bus < 0:
-		pass_test("no SFX bus in this layout; the knob disables itself")
+		pass_test("no SFX bus in this layout; no row is built for it")
 		return
-	var check := page.find_child("MuteSFX", true, false) as CheckBox
-	assert_false(check.disabled, "a real bus arms its knob")
+	var check := page.find_child("BusMuteSFX", true, false) as CheckBox
+	assert_not_null(check, "a real bus builds its mute knob")
 
 	check.toggled.emit(true)
 	assert_eq(shell.calls, [[&"mute", "SFX", true]],

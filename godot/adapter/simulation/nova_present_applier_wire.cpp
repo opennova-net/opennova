@@ -252,13 +252,11 @@ void NovaPresentApplier::append_wire_deferred(Object *node) {
 
 bool NovaPresentApplier::wire_plan_is_current(int64_t snapshot_size, int stride,
 		int64_t layout_revision, int64_t index_generation, int local_handle) {
-	// Without a source revision, preserve compatibility by taking the cold path.
 	// The revision keys on exactly the per-row identity quintet
 	// (wire_handle/type_id/bms_id/kind/index — nova_simulation_present.cpp), so
 	// revision equality replaces the GDScript plan's per-row identity re-reads;
 	// node swaps mark the plan dirty through release_wire_handle.
-	if (wire_plan_dirty_ || layout_revision < 0 ||
-			wire_plan_revision_ != layout_revision ||
+	if (wire_plan_dirty_ || wire_plan_revision_ != layout_revision ||
 			wire_plan_stride_ != stride ||
 			wire_plan_snapshot_size_ != snapshot_size ||
 			wire_plan_index_generation_ != index_generation ||

@@ -430,11 +430,10 @@ configuration. `-PlanOnly` validates and prints the resolved role/arguments
 without creating artifacts or launching retail.
 
 The normal join launch contract contains only the endpoint and callsign; the LAN
-session supplies its own mission metadata. For debugging an older direct-load
-runtime that still requires the pre-session environment hook, opt in explicitly
-with `join_opennova.ps1 -MissionOverride ASH_I5A.BMS` or
-`run_lan_pair.ps1 -JoinMissionOverride ASH_I5A.BMS`. The override sets
-`NW_LAN_MISSION` solely for that compatibility path and is not part of normal LAN
+session supplies its own mission metadata. `join_opennova.ps1 -MissionOverride
+ASH_I5A.BMS` (or `run_lan_pair.ps1 -JoinMissionOverride ASH_I5A.BMS`) sets
+`NW_LAN_MISSION`, a debug-only expectation/display hint — the runtime never
+uses it as a local load override (D-NET-194) and it is not part of normal LAN
 discovery.
 
 Each launcher clears inherited `NW_LAN_*` variables before starting its child and

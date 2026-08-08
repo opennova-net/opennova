@@ -60,6 +60,15 @@ p::EffectSpawnRequest spawn_request(p::EffectHandle effect) {
 	return request;
 }
 
+// Compose the production pair: advance the simulation, then materialize the
+// resulting frame the way embedders do.
+p::ParticleFrameSnapshot advance_frame(p::EffectScene &scene, float dt) {
+	scene.advance_simulation({dt});
+	p::ParticleFrameSnapshot snapshot;
+	scene.write_snapshot(snapshot);
+	return snapshot;
+}
+
 const p::EffectGroupDebugSnapshot *debug_group(
 		const p::EffectDebugSnapshot &snapshot, p::EffectGroupId id) {
 	for (const auto &group : snapshot.groups)
@@ -104,7 +113,7 @@ bool catalog_and_stock_alias_contract() {
 	const auto alias_receipt = scene.spawn(spawn_request(alias));
 	if (!check(receipt.spawned() && alias_receipt.spawned(),
 			"first-win and stock-alias effects spawn")) return false;
-	const auto frame = scene.advance({0.0f});
+	const auto frame = advance_frame(scene, 0.0f);
 	if (!check(frame.groups.size() == 2 &&
 			frame.groups[0].source == "first.ptl" &&
 			frame.groups[1].source == "first.ptl",
@@ -140,7 +149,7 @@ bool pdef_reference_resolution_is_case_insensitive_contract() {
 	const auto flash = scene.intern("flash");
 	const auto receipt = scene.spawn(spawn_request(flash));
 	if (!check(receipt.spawned(), "case-resolved effect spawns")) return false;
-	const auto frame = scene.advance({0.0f});
+	const auto frame = advance_frame(scene, 0.0f);
 	if (!check(frame.groups.size() == 1, "one group spawned")) return false;
 	const auto def_index =
 			frame.emitters[frame.groups[0].first_emitter].definition_index;
@@ -215,7 +224,7 @@ bool slot_owner_and_admission_contract() {
 	const auto *always_group = debug_group(debug, always_receipt.group);
 	if (!check(always_group && !always_group->slot,
 			"Always stores no admission slot")) return false;
-	const auto frame = scene.advance({0.0f});
+	const auto frame = advance_frame(scene, 0.0f);
 	const auto *followed = frame_group(frame, admitted.group);
 	return check(followed && near(followed->pose.position.x, 12.0),
 			"owner pose composes independently from slot");
@@ -294,7 +303,7 @@ bool fixed_age_and_order_contract() {
 	const auto second_receipt = scene.spawn(second);
 	if (!check(first_receipt.spawned() && second_receipt.spawned(),
 			"ordered events spawn")) return false;
-	auto frame = scene.advance({0.010f});
+	auto frame = advance_frame(scene, 0.010f);
 	if (!check(frame.groups.size() == 2 &&
 			frame.groups[0].id == first_receipt.group &&
 			frame.groups[1].id == second_receipt.group,
@@ -312,10 +321,10 @@ bool fixed_age_and_order_contract() {
 			"initial age replays whole 0.016-second ticks")) return false;
 	if (!check(near(frame.simulation_time_seconds, 0.0),
 			"sub-tick delta remains accumulated")) return false;
-	frame = scene.advance({0.005f});
+	frame = advance_frame(scene, 0.005f);
 	if (!check(near(frame.emitters[0].age, 0.032),
 			"accumulated 0.015 seconds remains sub-tick")) return false;
-	frame = scene.advance({0.002f});
+	frame = advance_frame(scene, 0.002f);
 	return check(near(frame.simulation_time_seconds, 0.016) &&
 			near(frame.emitters[0].age, 0.048) &&
 			near(frame.emitters[1].age, 0.016),
@@ -420,10 +429,11 @@ bool deferred_snapshot_contract() {
 	scene.write_snapshot(frame);
 	if (!check(frame.frame_index == 2,
 			"snapshot materialization does not advance frame identity")) return false;
-	const auto compatibility_frame = scene.advance({0.0f});
-	return check(compatibility_frame.frame_index == 3 &&
-			near(compatibility_frame.emitters[0].age, 0.032),
-			"value-returning advance preserves frame progression");
+	scene.advance_simulation({0.0f});
+	scene.write_snapshot(frame);
+	return check(frame.frame_index == 3 &&
+			near(frame.emitters[0].age, 0.032),
+			"a zero-delta advance still progresses frame identity");
 }
 
 bool initial_age_is_bounded_contract() {
@@ -435,7 +445,7 @@ bool initial_age_is_bounded_contract() {
 	request.initial_age_ticks = p::kEffectInitialAgeTickLimit + 100;
 	if (!check(scene.spawn(request).spawned(),
 			"bounded pre-age effect spawns")) return false;
-	const auto frame = scene.advance({0.0f});
+	const auto frame = advance_frame(scene, 0.0f);
 	const double capped_age = static_cast<double>(p::kEffectInitialAgeTickLimit) *
 			static_cast<double>(config.simulation_tick_seconds);
 	return check(frame.emitters.size() == 1 &&
@@ -470,7 +480,7 @@ bool immutable_snapshot_contract() {
 	const auto first = scene.intern("first");
 	if (!check(scene.spawn(spawn_request(first)).spawned(),
 			"first catalog effect spawns")) return false;
-	const auto old_snapshot = scene.advance({0.0f});
+	const auto old_snapshot = advance_frame(scene, 0.0f);
 	if (!check(old_snapshot.definitions &&
 			old_snapshot.definitions->size() == 1,
 			"old snapshot owns compiled definitions")) return false;
@@ -478,7 +488,7 @@ bool immutable_snapshot_contract() {
 	const auto second = scene.intern("second");
 	if (!check(scene.spawn(spawn_request(second)).spawned(),
 			"replacement catalog effect spawns")) return false;
-	const auto new_snapshot = scene.advance({0.0f});
+	const auto new_snapshot = advance_frame(scene, 0.0f);
 	if (!check(old_snapshot.definitions.get() !=
 			new_snapshot.definitions.get(),
 			"reopen publishes new immutable definitions")) return false;
@@ -557,7 +567,7 @@ bool runtime_reset_preserves_catalog_identity_contract() {
 			"runtime reset clears admission state so the effect respawns")) {
 		return false;
 	}
-	const auto respawn_frame = scene.advance({0.0f});
+	const auto respawn_frame = advance_frame(scene, 0.0f);
 	return check(respawn_frame.groups.size() == 1 &&
 			near(respawn_frame.groups[0].pose.position.x, 1.0) &&
 			near(respawn_frame.groups[0].pose.position.y, 2.0) &&
@@ -604,7 +614,7 @@ bool child_reaping_and_group_suppression_lifetime_contract() {
 			"both live child emitters initially consume capacity")) return false;
 	// Run past the quick child's whole life (emit 0.05 s + particle age 0.05 s)
 	// while the slow child keeps emitting.
-	scene.advance({0.5f});
+	scene.advance_simulation({0.5f});
 	const p::EffectLiveCounts partially_drained = scene.live_counts();
 	const auto debug = scene.inspect();
 	const auto *original = debug_group(debug, admitted.group);
@@ -624,7 +634,7 @@ bool child_reaping_and_group_suppression_lifetime_contract() {
 		return false;
 	}
 
-	scene.advance({2.0f});
+	scene.advance_simulation({2.0f});
 	if (!check(scene.live_counts().group_count == 0 &&
 			scene.live_counts().emitter_count == 0,
 			"groups are destroyed after their final children drain")) return false;

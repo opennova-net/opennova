@@ -458,8 +458,3 @@ def scan_directory_result(base_dir: str) -> ScanResult:
         return ScanResult(ok=False, error=str(exc))
 
     return ScanResult(ok=True, items=items)
-
-
-def scan_directory(base_dir: str) -> list[dict[str, str]]:
-    """Compatibility wrapper returning only scanned items."""
-    return [item.to_dict() for item in scan_directory_result(base_dir).items]

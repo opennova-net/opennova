@@ -1,8 +1,7 @@
 extends GutTest
 
 ## The Strings workspace as the document-tabs pilot: N open tables, dirty
-## isolation, tab-aware reopen/cross-jump, and multi-tab session restore
-## (including the pre-tabs last_path fallback).
+## isolation, tab-aware reopen/cross-jump, and multi-tab session restore.
 
 const EditorWorkstationScene = preload("res://modtools/editor/editor_workstation.tscn")
 const EditorWorkstationScript = preload("res://modtools/editor/editor_workstation.gd")
@@ -96,19 +95,6 @@ func test_session_restore_reopens_all_tabs_and_active_index() -> void:
 	assert_eq(tabs.size(), 2, "both tables reopen")
 	assert_eq(ws2.get_active_document_index(), 0, "the active tab is restored")
 	assert_eq(ws2.strings_editor.current_path, FIXTURE, "the alias points at the restored active tab")
-
-
-func test_legacy_last_path_session_still_restores_one_tab() -> void:
-	var cfg := ConfigFile.new()
-	cfg.set_value("session", "last_path", FIXTURE)
-	cfg.save(STATE_PATH)
-
-	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
-	var ws = _strings_ws(workstation)
-	await get_tree().process_frame
-	assert_eq(ws.get_document_tabs().size(), 1, "a pre-tabs session restores a single tab")
-	assert_eq(ws.strings_editor.current_path, FIXTURE, "…holding the last-opened table")
-	assert_false(ws.strings_editor.is_dirty, "a restored table starts clean")
 
 
 func test_new_strings_opens_its_own_tab_beside_unsaved_work() -> void:

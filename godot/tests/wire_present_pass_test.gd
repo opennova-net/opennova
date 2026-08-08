@@ -75,6 +75,12 @@ class FakeSim:
 	var entities: Array = []
 	var local_player_present := true
 	var local_player_handle := 1
+	# present() reads the plan-cache revision unguarded, so every sim double
+	# carries one; bumping it invalidates the pass's wire plan.
+	var layout_revision := 1
+
+	func get_present_layout_revision() -> int:
+		return layout_revision
 
 	func get_present_stride() -> int:
 		return NovaSimulation.PF_STRIDE
@@ -189,15 +195,8 @@ class FakeSim:
 		return out
 
 
-class RevisionFakeSim:
-	extends FakeSim
-	var layout_revision := 1
-	func get_present_layout_revision() -> int:
-		return layout_revision
-
-
 class ClockedRevisionFakeSim:
-	extends RevisionFakeSim
+	extends FakeSim
 	var logic_tick := 100
 	func get_logic_tick() -> int:
 		return logic_tick
@@ -274,7 +273,7 @@ class SpawnObserver:
 		})
 
 
-func test_present_snapshot_rejects_a_legacy_short_stride() -> void:
+func test_present_snapshot_rejects_a_short_stride() -> void:
 	var sim := FakeSim.new()
 	sim.local_player_present = false
 	var placer := FakePlacer.new()
@@ -282,11 +281,11 @@ func test_present_snapshot_rejects_a_legacy_short_stride() -> void:
 	add_child_autofree(container)
 	var presenter := WirePresentPass.new()
 	presenter.setup(sim, placer, container, null, EmptyIndex.new())
-	var legacy_stride := NovaSimulation.PF_STRIDE - 1
+	var short_stride := NovaSimulation.PF_STRIDE - 1
 	var snapshot := PackedFloat32Array()
-	snapshot.resize(legacy_stride)
+	snapshot.resize(short_stride)
 
-	presenter.present_snapshot(snapshot, legacy_stride)
+	presenter.present_snapshot(snapshot, short_stride, sim.layout_revision)
 
 	assert_true(placer.built.is_empty(),
 			"a row that predates the blend tuple cannot be cross-read")
@@ -426,7 +425,10 @@ func test_unresolved_slot_retries_immediately_when_type_changes() -> void:
 	presenter.setup(sim, placer, container)
 	presenter.present()
 
+	# type_id is in the identity quintet the plan revision keys on, so the
+	# producer bumps the revision with the change — the double mirrors that.
 	sim.entities[0]["type_id"] = 167
+	sim.layout_revision += 1
 	presenter.present()
 	assert_eq(placer.attempts, [166, 167])
 	assert_eq(presenter.entity_count(), 1)
@@ -443,7 +445,9 @@ func test_live_slot_type_change_rebuilds_the_visual() -> void:
 	presenter.present()
 	var first := presenter.resolve_wire_handle(0x1004)
 
+	# The identity-quintet change rides a revision bump, as in the producer.
 	sim.entities[0]["type_id"] = 167
+	sim.layout_revision += 1
 	presenter.present()
 	var second := presenter.resolve_wire_handle(0x1004)
 	assert_eq(placer.attempts, [166, 167])
@@ -452,7 +456,7 @@ func test_live_slot_type_change_rebuilds_the_visual() -> void:
 
 
 func test_stable_host_layout_skips_repeat_defer_resolution() -> void:
-	var sim := RevisionFakeSim.new()
+	var sim := FakeSim.new()
 	sim.entities = [{
 		"type_id": 166,
 		"handle": 0x1004,
@@ -579,7 +583,7 @@ func test_admitted_player_row_with_synthetic_origin_builds_on_the_host() -> void
 
 
 func test_wire_plan_survives_reorder_then_prunes_and_rebuilds_reused_type() -> void:
-	var sim := RevisionFakeSim.new()
+	var sim := FakeSim.new()
 	sim.entities = [
 		{"type_id": 166, "handle": 0x1004, "x": 4.0},
 		{"type_id": 167, "handle": 0x1005, "x": 5.0},
@@ -624,7 +628,7 @@ func test_wire_plan_survives_reorder_then_prunes_and_rebuilds_reused_type() -> v
 
 
 func test_cold_materialization_is_bounded_and_converges_while_live_rows_update() -> void:
-	var sim := RevisionFakeSim.new()
+	var sim := FakeSim.new()
 	sim.entities = [
 		{"type_id": 166, "handle": 0x1004, "x": 4.0},
 		{"type_id": 167, "handle": 0x1005, "x": 5.0},
@@ -696,7 +700,7 @@ func test_cold_materialization_is_bounded_and_converges_while_live_rows_update()
 
 
 func test_layout_change_mid_backlog_discards_stale_rows_and_rebudgets_replacements() -> void:
-	var sim := RevisionFakeSim.new()
+	var sim := FakeSim.new()
 	sim.entities = [
 		{"type_id": 166, "handle": 0x1004, "x": 4.0},
 		{"type_id": 167, "handle": 0x1005, "x": 5.0},
@@ -740,7 +744,7 @@ func test_layout_change_mid_backlog_discards_stale_rows_and_rebudgets_replacemen
 
 
 func test_unresolved_attempt_consumes_budget_without_stranding_later_rows() -> void:
-	var sim := RevisionFakeSim.new()
+	var sim := FakeSim.new()
 	sim.entities = [
 		{"type_id": 166, "handle": 0x1004},
 		{"type_id": 167, "handle": 0x1005},
@@ -927,7 +931,7 @@ func test_wire_model_receives_the_transition_pulse_before_the_current_state() ->
 	# anim byte per record [orig: @0x4c1153] — so the locked roll clip accepts
 	# and the follow-up state queues behind it at the model. Revisioned sim: the
 	# second leg pins the edge gate staying closed once the pulse is drained.
-	var sim := RevisionFakeSim.new()
+	var sim := FakeSim.new()
 	sim.entities = [{
 		"type_id": 4567,
 		"handle": 0x1004,
@@ -1034,7 +1038,7 @@ func test_host_current_body_state_uses_authoritative_blend_tuple() -> void:
 
 
 func test_remote_blend_advances_on_steady_fixed_tick_without_redispatch() -> void:
-	var sim := RevisionFakeSim.new()
+	var sim := FakeSim.new()
 	sim.entities = [{
 		"type_id": 4567,
 		"handle": 0x0004,
@@ -1158,7 +1162,10 @@ func test_wire_model_resets_remote_body_channel_on_respawn_revision_change() -> 
 	sim.entities[0]["anim_phase"] = 6
 	presenter.present()
 	assert_eq(model.reset_remote_body_calls, 1)
-	assert_eq(model.pose_call_order, ["right_hand", "overlay", "reset", "body"],
+	# A respawn keeps the row's identity quintet, so the plan stays WARM: the
+	# native walk drives the reset + body request; the hand/overlay channels
+	# are change-driven and stay untouched (their own tests cover the edges).
+	assert_eq(model.pose_call_order, ["reset", "body"],
 			"respawn reset runs before the compact animation is applied")
 	assert_eq(model.remote_body_calls[-1], [67, "anim_emplaced",
 			NovaSimulation.infantry_anim_flags(67), 6])
@@ -1167,7 +1174,8 @@ func test_wire_model_resets_remote_body_channel_on_respawn_revision_change() -> 
 	presenter.present()
 	assert_eq(model.reset_remote_body_calls, 1,
 			"a steady revision does not repeatedly reset local clip playback")
-	assert_eq(model.pose_call_order, ["right_hand", "overlay"])
+	assert_eq(model.pose_call_order, [],
+			"a steady warm present re-poses nothing")
 
 
 func test_wire_model_applies_and_restores_mounted_right_hand_collapse() -> void:

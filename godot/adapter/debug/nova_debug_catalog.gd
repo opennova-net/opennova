@@ -57,7 +57,7 @@ static func install(session: NovaDebugSession) -> void:
 	if session == null:
 		return
 	for row in NovaDebugOptions.OPTIONS:
-		session.register_control(_legacy_definition(row))
+		session.register_control(_options_definition(row))
 	_install_terrain(session)
 	_install_rendering(session)
 	_install_edit_actions(session)
@@ -124,10 +124,10 @@ static func bind_runtime_targets(
 				"The game shell is not available.")
 
 
-static func _legacy_definition(row: Dictionary) -> NovaDebugControlDef:
+static func _options_definition(row: Dictionary) -> NovaDebugControlDef:
 	var definition := NovaDebugControlDef.check(
 			StringName(row["id"]),
-			StringName(row.get("page", _legacy_page(StringName(row["id"])))),
+			StringName(row["page"]),
 			String(row["label"]),
 			String(row.get("tooltip", "")),
 			StringName(row["target"]),
@@ -135,23 +135,10 @@ static func _legacy_definition(row: Dictionary) -> NovaDebugControlDef:
 			StringName(row["setter"]),
 			bool(row.get("default", false)))
 	definition.expensive = bool(row.get("expensive", false))
+	# OPTIONS rows are applied by the game reading recorded intents, so they
+	# stay togglable before their target world binds.
 	definition.allow_unresolved_intent = true
 	return definition
-
-
-static func _legacy_page(id: StringName) -> StringName:
-	if id == &"show_skeletons" or id == &"show_user_points":
-		return &"Animation"
-	if id == &"show_collision" or id == &"show_round_trails" \
-			or id == &"show_hit_meshes":
-		return &"Rounds"
-	if id == &"hide_foliage":
-		return &"Terrain"
-	if id == &"hide_particles" or id == &"show_effect_boxes":
-		return &"Particles"
-	if id == &"show_portal_faces":
-		return &"Occlusion"
-	return &"Player"
 
 
 static func _install_terrain(session: NovaDebugSession) -> void:

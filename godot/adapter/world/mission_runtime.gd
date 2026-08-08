@@ -560,19 +560,13 @@ func _present_entity_rows(stats_on := false) -> void:
 	var layout_revision := int(_sim.get_present_layout_revision())
 	if _present != null:
 		var mission_start := Time.get_ticks_usec() if stats_on else 0
-		if _present.has_method("present_snapshot"):
-			_present.present_snapshot(snapshot, stride, layout_revision)
-		else:
-			_present.present()
+		_present.present_snapshot(snapshot, stride, layout_revision)
 		if stats_on:
 			_frame_stats.add(FrameStatsBoard.PRESENT_MISSION,
 					Time.get_ticks_usec() - mission_start)
 	if _wire_present != null:
 		var wire_start := Time.get_ticks_usec() if stats_on else 0
-		if _wire_present.has_method("present_snapshot"):
-			_wire_present.present_snapshot(snapshot, stride, layout_revision)
-		else:
-			_wire_present.present()
+		_wire_present.present_snapshot(snapshot, stride, layout_revision)
 		if stats_on:
 			_frame_stats.add(FrameStatsBoard.PRESENT_WIRE,
 					Time.get_ticks_usec() - wire_start)

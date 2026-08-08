@@ -25,7 +25,7 @@ header-width pass, which landed the `oversize_cpp_files` ratchet); Wave 4
 landed as #357–#375 (closed by #375's W4-6 modtools splits and the
 `oversize_gd_files` ratchet at its residual floor of 7 — `game_world.gd`
 stays whole by design as the load path); the remaining W5 slices are
-tracked in [`TODO.md`](../TODO.md) § "Quality campaign — remaining slices".
+tracked in [`TODO.md`](../TODO.md) § "Cleanup & verification backlog".
 
 ## The standing loop for a fidelity slice
 

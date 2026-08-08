@@ -211,16 +211,12 @@ func present() -> void:
 	if stride < NovaSimulation.PF_STRIDE:
 		return
 	var snap: PackedFloat32Array = _sim.get_present_snapshot()
-	var layout_revision := -1
-	if _sim.has_method("get_present_layout_revision"):
-		layout_revision = int(_sim.get_present_layout_revision())
-	present_snapshot(snap, stride, layout_revision)
+	present_snapshot(snap, stride, int(_sim.get_present_layout_revision()))
 
 
-## Present a snapshot already fetched by MissionRuntime. Compatible sources
-## without a topology revision rebuild their routing plan every call.
+## Present a snapshot already fetched by MissionRuntime.
 func present_snapshot(
-		snap: PackedFloat32Array, stride: int, layout_revision: int = -1) -> void:
+		snap: PackedFloat32Array, stride: int, layout_revision: int) -> void:
 	if (_sim == null or _placer == null or _container == null
 			or not is_instance_valid(_container)
 			or stride < NovaSimulation.PF_STRIDE):

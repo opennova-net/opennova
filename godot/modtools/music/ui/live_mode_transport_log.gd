@@ -198,12 +198,6 @@ func _log_typed(type: int, text: String) -> void:
 		_lm._events.ensure_current_is_visible()
 
 
-# Back-compat shim: untyped log lines are system events. Kept so callers/tests
-# that use _log() keep working.
-func _log(text: String) -> void:
-	_log_typed(_lm.EvType.SYSTEM, text)
-
-
 func _timestamp() -> String:
 	var t := Time.get_time_dict_from_system()
 	return "%02d:%02d:%02d" % [t["hour"], t["minute"], t["second"]]

@@ -138,6 +138,11 @@ class FakeSim:
 	extends RefCounted
 	var entities: Array = []
 	var muzzle_pushes: Array = []
+	# present() reads the plan-cache revision unguarded, so every sim double
+	# carries one; bumping it invalidates the pass's routing plan.
+	var layout_revision := 1
+	func get_present_layout_revision() -> int:
+		return layout_revision
 	func set_ai_muzzle_world(net_id: int, position: Vector3) -> void:
 		muzzle_pushes.append([net_id, position])
 	func _write_phase(out: PackedFloat32Array, base: int,
@@ -232,13 +237,6 @@ class FakeSim:
 		return out
 
 
-class RevisionFakeSim:
-	extends FakeSim
-	var layout_revision := 1
-	func get_present_layout_revision() -> int:
-		return layout_revision
-
-
 func _make_pass(index, sim, options: Dictionary = {}) -> Object:
 	var p := PresentPass.new()
 	p.setup(sim, index, options)
@@ -292,7 +290,7 @@ func test_part_channel_releases_while_inactive_and_catches_up_when_reactivated()
 	add_child_autofree(model)
 	var index := CountingIndex.new()
 	index.by_bms_id = { 1: model }
-	var sim := RevisionFakeSim.new()
+	var sim := FakeSim.new()
 	sim.entities = [{ "bms_id": 1, "active1": 1, "phase1": 100 }]
 	var presenter := _make_pass(index, sim)
 	presenter.present()
@@ -324,7 +322,7 @@ func test_offscreen_row_skips_presentation_writers_until_reentry() -> void:
 	add_child_autofree(model)
 	var index := CountingIndex.new()
 	index.by_bms_id = { 7: model }
-	var sim := RevisionFakeSim.new()
+	var sim := FakeSim.new()
 	sim.entities = [{ "bms_id": 7, "active1": 1, "phase1": 100,
 			"emplaced_controls_valid": 1, "emplaced_gun_yaw": 40,
 			"emplaced_gun_pitch": 8 }]
@@ -360,7 +358,7 @@ func test_offscreen_falling_edge_releases_at_the_next_submission() -> void:
 	add_child_autofree(model)
 	var index := CountingIndex.new()
 	index.by_bms_id = { 3: model }
-	var sim := RevisionFakeSim.new()
+	var sim := FakeSim.new()
 	sim.entities = [{ "bms_id": 3, "active1": 1, "phase1": 100 }]
 	var presenter := _make_pass(index, sim)
 	presenter.present()
@@ -384,7 +382,7 @@ func test_offscreen_muzzle_row_keeps_fire_origin_feedback_and_pose() -> void:
 	add_child_autofree(plain_model)
 	var index := CountingIndex.new()
 	index.by_bms_id = { 5: muzzle_model, 6: plain_model }
-	var sim := RevisionFakeSim.new()
+	var sim := FakeSim.new()
 	sim.entities = [
 		{ "bms_id": 5, "net_id": 9, "anim_state": 3, "anim_phase": 12 },
 		{ "bms_id": 6, "anim_state": 3, "anim_phase": 12 },
@@ -488,7 +486,7 @@ func test_vehicle_motion_controls_share_one_owned_batch_and_release() -> void:
 	add_child_autofree(model)
 	var index := FakeIndex.new()
 	index.by_bms_id = {61: model}
-	var sim := RevisionFakeSim.new()
+	var sim := FakeSim.new()
 	sim.entities = [{
 		"bms_id": 61,
 		"vehicle_motion_valid": 1,
@@ -528,7 +526,7 @@ func test_sector_and_zone_controls_preserve_write_validity_and_owners() -> void:
 	model.set_ctrl_override("foreign", "FOREIGN_CTRL", 77)
 	var index := FakeIndex.new()
 	index.by_bms_id = {62: model}
-	var sim := RevisionFakeSim.new()
+	var sim := FakeSim.new()
 	sim.entities = [{
 		"bms_id": 62,
 		"tex_team_valid": 1,
@@ -622,7 +620,7 @@ func test_first_invalid_emplaced_state_clears_stale_node_controls() -> void:
 	add_child_autofree(model)
 	var index := CountingIndex.new()
 	index.by_bms_id = { 8: model }
-	var sim := RevisionFakeSim.new()
+	var sim := FakeSim.new()
 	sim.entities = [{
 		"bms_id": 8,
 		"emplaced_controls_valid": 0,
@@ -682,7 +680,7 @@ func test_dismount_restores_unchanged_generic_values_for_aliased_registers() -> 
 	add_child_autofree(model)
 	var index := CountingIndex.new()
 	index.by_bms_id = { 9: model }
-	var sim := RevisionFakeSim.new()
+	var sim := FakeSim.new()
 	sim.entities = [{
 		"bms_id": 9,
 		"active1": 1,
@@ -728,7 +726,7 @@ func test_aim_and_right_hand_changes_repose_stable_body_state() -> void:
 	add_child_autofree(model)
 	var index := CountingIndex.new()
 	index.by_bms_id = { 11: model }
-	var sim := RevisionFakeSim.new()
+	var sim := FakeSim.new()
 	sim.entities = [{
 		"bms_id": 11,
 		"anim_state": 43,
@@ -759,7 +757,7 @@ func test_hidden_body_catches_up_when_it_becomes_presentable() -> void:
 	add_child_autofree(model)
 	var index := CountingIndex.new()
 	index.by_bms_id = { 11: model }
-	var sim := RevisionFakeSim.new()
+	var sim := FakeSim.new()
 	sim.entities = [{
 		"bms_id": 11,
 		"hidden": 1,
@@ -789,7 +787,7 @@ func test_body_clip_poses_authoritative_two_channel_blend() -> void:
 	add_child_autofree(model)
 	var index := CountingIndex.new()
 	index.by_bms_id = {11: model}
-	var sim := RevisionFakeSim.new()
+	var sim := FakeSim.new()
 	sim.entities = [{
 		"bms_id": 11,
 		"anim_source_state": 43,
@@ -992,7 +990,7 @@ func test_changed_aim_body_updates_root_with_stable_entity_transform() -> void:
 	add_child_autofree(model)
 	var index := CountingIndex.new()
 	index.by_bms_id = { 21: model }
-	var sim := RevisionFakeSim.new()
+	var sim := FakeSim.new()
 	sim.entities = [{
 		"bms_id": 21,
 		"handle": 2,
@@ -1020,7 +1018,7 @@ func test_stable_revisioned_snapshot_caches_pose_and_reasserts_live_publishers()
 	add_child_autofree(model)
 	var index := CountingIndex.new()
 	index.by_bms_id = { 21: model }
-	var sim := RevisionFakeSim.new()
+	var sim := FakeSim.new()
 	sim.entities = [{
 		"bms_id": 21,
 		"handle": 2,
@@ -1107,7 +1105,7 @@ func test_stable_layout_reuses_resolution_but_reads_fresh_pose() -> void:
 	add_child_autofree(model)
 	var index := CountingIndex.new()
 	index.by_bms_id = { 21: model }
-	var sim := RevisionFakeSim.new()
+	var sim := FakeSim.new()
 	sim.entities = [
 		{ "bms_id": 21, "handle": 2, "type_id": 101, "pos_x": 1.0 },
 		{ "bms_id": 999, "handle": 3, "type_id": 102, "pos_x": 50.0 },
@@ -1134,7 +1132,7 @@ func test_layout_plan_rebinds_after_reorder_removal_and_replacement() -> void:
 	add_child_autofree(c)
 	var index := CountingIndex.new()
 	index.by_bms_id = { 11: a, 22: b, 33: c }
-	var sim := RevisionFakeSim.new()
+	var sim := FakeSim.new()
 	sim.entities = [
 		{ "bms_id": 11, "handle": 2, "type_id": 101, "pos_x": 1.0 },
 		{ "bms_id": 22, "handle": 3, "type_id": 102, "pos_x": 2.0 },
@@ -1176,7 +1174,7 @@ func test_freed_cached_node_marks_revisioned_plan_for_rebind() -> void:
 	var old_model := FakeModel.new()
 	var index := CountingIndex.new()
 	index.by_bms_id = { 21: old_model }
-	var sim := RevisionFakeSim.new()
+	var sim := FakeSim.new()
 	sim.entities = [{
 		"bms_id": 21,
 		"handle": 2,
@@ -1324,7 +1322,7 @@ func test_reenabled_output_channels_catch_up_to_current_state() -> void:
 	add_child_autofree(model)
 	var index := CountingIndex.new()
 	index.by_bms_id = { 9: model }
-	var sim := RevisionFakeSim.new()
+	var sim := FakeSim.new()
 	sim.entities = [{
 		"bms_id": 9,
 		"pos_x": 1.0,

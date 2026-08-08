@@ -142,11 +142,6 @@ const CollisionModel *CollisionWorld::model_for(
     return instance != nullptr ? model(instance->model_id) : nullptr;
 }
 
-const CollisionModel *CollisionWorld::model_for(EntityHandle h) const {
-    const auto it = instances_.find(h.packed);
-    return it != instances_.end() ? model(it->second.model_id) : nullptr;
-}
-
 bool CollisionWorld::ensure_entity_instance(World &world, EntityHandle h) {
     auto existing = instances_.find(h.packed);
     if (existing != instances_.end()) {

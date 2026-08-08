@@ -99,12 +99,6 @@ struct Credits {
     bool has_bhd_bounds() const;
 };
 
-// Legacy raw text entry (for backwards compatibility)
-struct TextEntry {
-    std::string content;
-    std::string font;
-};
-
 // Special tokens in TEXT content
 namespace tokens {
     constexpr const char* kNewline = "<CR>";
