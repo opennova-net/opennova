@@ -1,5 +1,6 @@
 add_library(opennova_mnu STATIC
     src/mnu.cpp
+    src/mnu_layout.cpp
     src/mnu_xml.cpp
 )
 
