@@ -117,6 +117,7 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_local_player_pitch_deg"), &NovaSimulation::get_local_player_pitch_deg);
 	ClassDB::bind_method(D_METHOD("get_local_player_body_anim_slot"), &NovaSimulation::get_local_player_body_anim_slot);
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_key"), &NovaSimulation::get_local_player_anim_key);
+	ClassDB::bind_method(D_METHOD("get_local_player_stance"), &NovaSimulation::get_local_player_stance);
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_phase_ticks"), &NovaSimulation::get_local_player_anim_phase_ticks);
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_source_key"), &NovaSimulation::get_local_player_anim_source_key);
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_source_phase_ticks"), &NovaSimulation::get_local_player_anim_source_phase_ticks);

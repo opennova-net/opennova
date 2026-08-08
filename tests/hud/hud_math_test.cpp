@@ -116,6 +116,40 @@ int main() {
 	expect(!hud::crosshair_should_draw(true, false), "aimed hides");
 	expect(hud::crosshair_should_draw(true, true), "the gunner leg keeps it");
 
+	// The capacity-1 reserve fold [orig: HUD_BuildEntityInfo @0x4b85ef].
+	expect(hud::folded_reserve(1, 5, 1) == 6, "capacity-1 folds the chamber");
+	expect(hud::folded_reserve(3, 9, 30) == 9, "magazines never fold");
+	expect(hud::folded_reserve(-1, 5, 1) == 5, "clip sentinel never folds");
+	expect(hud::folded_reserve(1, -1, 1) == -1, "reserve sentinel never folds");
+
+	// The waypoint distance [orig: @0x5947e5..0x594836 — truncated meters].
+	expect(hud::waypoint_distance_m(3.0, 4.0) == 5, "2D hypotenuse");
+	expect(hud::waypoint_distance_m(10.9, 0.0) == 10, "truncates, never rounds");
+	expect(hud::waypoint_distance_m(0.0, 0.0) == 0, "zero at the marker");
+
+	// The heat bar [orig: HUD_DrawWeaponHeatBar spans @0x5997a1..0x59981f].
+	expect(hud::heat_fill_span(100, 0x8000) == 50, "half heat fills half");
+	expect(hud::heat_fill_span(100, 0x20000) == 100,
+			"heat clamps at the 0xFFFF gauge top");
+	expect(hud::heat_fill_span(100, 0) == 0, "cold bar fills nothing");
+	expect(hud::heat_bar_is_horizontal(10.0, 4.0), "wide rects fill sideways");
+	expect(!hud::heat_bar_is_horizontal(4.0, 10.0), "tall rects fill upward");
+	expect(hud::heat_bar_is_horizontal(4.0, 4.0), "square takes the wide leg");
+
+	// The PowerThrow windup curve [orig: @0x5998ad; fill @0x599964].
+	expect(hud::power_throw_progress_fp16(0) == 0x10000,
+			"the tap window throws at full power");
+	expect(hud::power_throw_progress_fp16(30) == 0x10000,
+			"full through the 31st held tick");
+	expect(hud::power_throw_progress_fp16(31) == 0,
+			"the ramp restarts at zero after the tap window");
+	expect(hud::power_throw_progress_fp16(31 + 46) == 32415,
+			"(held - 31) / 93 in 16.16");
+	expect(hud::power_throw_progress_fp16(31 + 93) == 0x10000, "ramp clamps at 1");
+	expect(hud::power_throw_progress_fp16(500) == 0x10000, "held past full stays full");
+	expect(hud::power_fill_span(0x10000, 80) == 80, "full fill spans the bar");
+	expect(hud::power_fill_span(0x8000, 80) == 40, "half fill rounds the span");
+
 	if (failures) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
 		return 1;

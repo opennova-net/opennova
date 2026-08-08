@@ -83,6 +83,12 @@ public:
 	static String format_ammo(int p_clip, int p_reserve, int p_capacity);
 	static int weapon_name_x_nudge(bool p_narrow_surface, int p_align);
 	static int round_icon_count(int p_clip, int p_reserve, int p_capacity, int p_divisor);
+	static int folded_reserve(int p_clip, int p_reserve, int p_capacity);
+	static int waypoint_distance_m(const Vector2 &p_ground_delta);
+	static int heat_fill_span(int p_extent_px, int p_heat);
+	static bool heat_bar_is_horizontal(const Vector2 &p_bar_size);
+	static int power_throw_progress_fp16(int p_held_ticks);
+	static int power_fill_span(int p_progress_fp16, int p_extent_px);
 	static double crosshair_spread_px_fp16(int p_spread_fp16, double p_fov_deg,
 			double p_screen_w);
 	static int crosshair_total_spread_fp16(int p_error_fp16,

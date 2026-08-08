@@ -332,6 +332,16 @@ String NovaSimulation::get_local_player_anim_key() const {
 	return infantry_anim_key(p->inf.anim_state);
 }
 
+int NovaSimulation::get_local_player_stance() const {
+	// [orig: HUD_BuildEntityInfo @0x4b860c — entity+300 flags 0x200=crouch -> 1,
+	// 0x100=prone -> 2]; InfantryState::Stance already carries the icon order
+	// (kStand 0 / kCrouch 1 / kProne 2).
+	if (!world_ || !world_->ai || !world_->cached.local_player.valid()) return 0;
+	const AiEntity *p = world_->ai->for_handle(world_->cached.local_player);
+	if (!p) return 0;
+	return static_cast<int>(p->inf.stance);
+}
+
 int NovaSimulation::get_local_player_anim_phase_ticks() const {
 	if (!world_ || !world_->ai || !world_->cached.local_player.valid()) return 0;
 	const AiEntity *p = world_->ai->for_handle(world_->cached.local_player);
