@@ -85,6 +85,9 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/sbf/src/sbf.cpp
     # scr — obfuscated text container
     ${CMAKE_CURRENT_SOURCE_DIR}/scr/src/scr.cpp
+    # sph — the /PROFILE server-log FOURCC chunk container (payload records:
+    # engine/net/npwire serverlog_decode)
+    ${CMAKE_CURRENT_SOURCE_DIR}/sph/src/sph.cpp
     # tdp — OED project structs
     ${CMAKE_CURRENT_SOURCE_DIR}/tdp/src/tdp.cpp
     # threedi — the .3di model format (3DI3 first-class, ADR 0027)
@@ -149,6 +152,7 @@ target_include_directories(opennova_formats
         ${CMAKE_CURRENT_SOURCE_DIR}/rtxt/include
         ${CMAKE_CURRENT_SOURCE_DIR}/sbf/include
         ${CMAKE_CURRENT_SOURCE_DIR}/scr/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/sph/include
         ${CMAKE_CURRENT_SOURCE_DIR}/tdp/include
         ${CMAKE_CURRENT_SOURCE_DIR}/threedi/include
         ${CMAKE_CURRENT_SOURCE_DIR}/til/include
