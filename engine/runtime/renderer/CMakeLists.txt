@@ -6,6 +6,7 @@ add_library(opennova_renderer STATIC
     src/particle_atlas.cpp
     src/particle_frame.cpp
     src/render_order.cpp
+    src/tracer_frame.cpp
     src/uv_anim.cpp
 )
 

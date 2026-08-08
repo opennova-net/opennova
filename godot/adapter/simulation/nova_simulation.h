@@ -1432,6 +1432,16 @@ public:
 	// in world/tracer_trails.h.]
 	PackedFloat32Array get_tracer_trails() const;
 
+	// The styled ribbon compile over trail rows (renderer/tracer_frame.h owns
+	// the witnessed style tables and the camera-facing build
+	// [orig: CEffectChannel_RenderRibbon @ 0x5DB8A0]). Static so the present
+	// pass and stub-sim tests share the one native seam:
+	// {additive: {positions, colors}, alpha: {positions, colors}, channels} —
+	// each family one triangle-strip vertex run (channels joined by degenerate
+	// pairs), ready for verbatim ImmediateMesh upload.
+	static Dictionary compile_tracer_ribbons(const PackedFloat32Array &rows,
+			const Vector3 &camera);
+
 	// The destruction presentation drain (world/destruction.h; world-wac-ai-re
 	// §24): {effects[], sounds[], husk_swaps[], debris_bursts[], glass_breaks[],
 	// explosions_processed, items_destroyed}, godot-space positions, cleared on

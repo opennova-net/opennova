@@ -166,6 +166,9 @@ void NovaSimulation::_bind_methods() {
 					"pos_raw_units", "tpos_raw_units"),
 			&NovaSimulation::local_player_viewmodel_bias_view_units);
 	ClassDB::bind_method(D_METHOD("get_tracer_trails"), &NovaSimulation::get_tracer_trails);
+	ClassDB::bind_static_method("NovaSimulation",
+			D_METHOD("compile_tracer_ribbons", "rows", "camera"),
+			&NovaSimulation::compile_tracer_ribbons);
 	ClassDB::bind_method(D_METHOD("drain_destruction_events"),
 			&NovaSimulation::drain_destruction_events);
 	ClassDB::bind_method(D_METHOD("get_death_pieces"), &NovaSimulation::get_death_pieces);
