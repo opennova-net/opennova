@@ -215,20 +215,6 @@ void NovaSimulation::_bind_methods() {
 			&NovaSimulation::get_panm_time_ms);
 	ClassDB::bind_method(D_METHOD("debug_set_panm_time_ms", "time_ms"),
 			&NovaSimulation::debug_set_panm_time_ms);
-	ClassDB::bind_method(D_METHOD("debug_set_collision_pose_mode", "mode"),
-			&NovaSimulation::debug_set_collision_pose_mode);
-	ClassDB::bind_method(D_METHOD("debug_get_collision_pose_mode"),
-			&NovaSimulation::debug_get_collision_pose_mode);
-	ClassDB::bind_method(D_METHOD("debug_collision_pose_ab_stats"),
-			&NovaSimulation::debug_collision_pose_ab_stats);
-	ClassDB::bind_method(D_METHOD("debug_set_mounted_pose_mode", "mode"),
-			&NovaSimulation::debug_set_mounted_pose_mode);
-	ClassDB::bind_method(D_METHOD("debug_get_mounted_pose_mode"),
-			&NovaSimulation::debug_get_mounted_pose_mode);
-	ClassDB::bind_method(D_METHOD("debug_mounted_pose_ab_stats"),
-			&NovaSimulation::debug_mounted_pose_ab_stats);
-	ClassDB::bind_method(D_METHOD("debug_native_seat_spec_diff", "item_db"),
-			&NovaSimulation::debug_native_seat_spec_diff);
 	ClassDB::bind_method(D_METHOD("debug_set_remote_body_native_publish", "native"),
 			&NovaSimulation::debug_set_remote_body_native_publish);
 	ClassDB::bind_method(D_METHOD("debug_remote_body_native_publish"),

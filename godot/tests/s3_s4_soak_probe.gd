@@ -1,13 +1,14 @@
 extends SceneTree
 
-# S3/S4 soak probe (ADR 0028 gates): boots retail 00TRg with BOTH pose sources
-# installed (render placer = legacy authoritative, asset root = native shadow,
-# Compare mode default) plus the shell-extracted seat-spec table, then runs an
-# extended live-shaped load: thousands of 62.5 Hz ticks with the mission's AI
-# thinking, walking, and command-mounted on the 50cals (bms 37 -> SSN 65,
-# 51 -> 64), a spawned local player with an installed weapon, and periodic
-# full-registry hitbox sweeps. Every tick resolves the mounted UseGun frames
-# through the S4 compare seam and every sweep/raycast drives the S3 one.
+# S3/S4 native soak probe (ADR 0028): boots retail 00TRg with the sim's own
+# asset root installed (the native SimCollisionPoseProvider + native mounted
+# resolver are AUTHORITATIVE — the legacy A/B this soak once compared is retired)
+# plus the seat-spec table, then runs an extended live-shaped load: thousands of
+# 62.5 Hz ticks with the mission's AI thinking, walking, and command-mounted on
+# the 50cals (bms 37 -> SSN 65, 51 -> 64), a spawned local player with an
+# installed weapon, and periodic full-registry hitbox sweeps. Every tick resolves
+# the mounted UseGun frames natively and every sweep/raycast drives the native
+# collision pose path; the run must keep producing live hitboxes.
 #
 # Run:
 #   NOVA_RESOURCE_DIR=<retail JOX corpus> godot --headless --path godot \
@@ -54,10 +55,10 @@ func _run() -> void:
 		_fail("cannot load items.def: %s" % item_db.get_last_error())
 		return
 
-	# The FULL runtime boot (the S9 engine sequence incl. the host-spawn
-	# promote leg that command-mounts the 50cal gunners) with the render
-	# placer supplied, so the sim carries BOTH pose sources and mounted AI
-	# resolve their UseGun frames through the S4 compare every tick.
+	# The FULL runtime boot (the S9 engine sequence incl. the spawn-promote
+	# leg that command-mounts the 50cal gunners) with the render placer
+	# supplied, so mounted AI resolve their UseGun frames through the native
+	# pose path every tick.
 	var placer := MissionObjectPlacer.new(root, item_db)
 	var runtime := MissionRuntime.new()
 	get_root().add_child(runtime)
@@ -84,30 +85,29 @@ func _run() -> void:
 
 	print("[soak] 00TRg runtime up: boot=%d rounds=%d (%d ticks)" % [
 			boot_count, rounds, rounds * 62])
+	# The native pose paths are AUTHORITATIVE (ADR 0028): the A/B that this soak
+	# once compared is retired. This is now a long-run native-stability smoke —
+	# thousands of ticks with the mission's AI thinking/walking and command-mounted
+	# on the 50cals, every sweep driving build_section_matrices through the sim's
+	# own SimCollisionPoseProvider. It must keep producing live hitboxes and never
+	# regress to zero.
+	var max_hitbox_entities := 0
+	var min_hitbox_entities := 0x7fffffff
 	for r in rounds:
 		for _t in 62:
 			runtime.tick()
-		var _hb: Dictionary = sim.get_hitbox_debug()
+		var hb: Dictionary = sim.get_hitbox_debug()
+		var entity_count := int((hb.get("entities", []) as Array).size())
+		max_hitbox_entities = maxi(max_hitbox_entities, entity_count)
+		if entity_count > 0:
+			min_hitbox_entities = mini(min_hitbox_entities, entity_count)
 		if (r + 1) % 60 == 0 or r == rounds - 1:
-			print("[soak] round %d/%d s3=%s" % [
-					r + 1, rounds, str(sim.debug_collision_pose_ab_stats())])
-			print("[soak] round %d/%d s4=%s" % [
-					r + 1, rounds, str(sim.debug_mounted_pose_ab_stats())])
+			print("[soak] round %d/%d hitbox_entities=%d" % [
+					r + 1, rounds, entity_count])
 
-	var s3: Dictionary = sim.debug_collision_pose_ab_stats()
-	var s4: Dictionary = sim.debug_mounted_pose_ab_stats()
-	if int(s3.get("queries", 0)) <= 0:
-		_fail("S3 compare saw no queries")
+	if max_hitbox_entities <= 0:
+		_fail("native collision produced no hitboxes across the soak")
 		return
-	if int(s3.get("divergences", 0)) != 0 or int(s3.get("result_mismatches", 0)) != 0:
-		_fail("S3 divergence: %s" % str(s3))
-		return
-	if int(s4.get("queries", 0)) <= 0:
-		_fail("S4 compare saw no mounted queries")
-		return
-	if int(s4.get("divergences", 0)) != 0:
-		_fail("S4 divergence: %s" % str(s4))
-		return
-	print("s3_s4_soak_probe: PASS (s3 queries=%d, s4 queries=%d, 0 divergences)" % [
-			int(s3.get("queries", 0)), int(s4.get("queries", 0))])
+	print("s3_s4_soak_probe: PASS (native soak, hitbox_entities min=%d max=%d over %d ticks)" % [
+			min_hitbox_entities, max_hitbox_entities, rounds * 62])
 	quit(0)

@@ -176,53 +176,40 @@ func _run() -> void:
 	sim.free()
 	sim_legacy.free()
 
-	# S3 (ADR 0028): the pose-provider A/B. One sim carries BOTH sources —
-	# the render placer feeds the legacy binding path and the asset root feeds
-	# the engine-side provider — and the default Compare mode shadows every
-	# build_section_matrices query. get_hitbox_debug drives both legs (PANM
-	# entity tris + organic skeletal spheres) with the world advancing.
+	# S3/S4 (ADR 0028): the native pose paths are AUTHORITATIVE (the A/B soak that
+	# gated them is retired). One sim with the asset root installed poses collision
+	# through its own SimCollisionPoseProvider and mounts through the native
+	# resolver; installing the seat-spec table feeds the native mounted model
+	# source. Drive get_hitbox_debug (PANM entity tris + organic skeletal spheres)
+	# with the world advancing and confirm the native provider produces live
+	# hitboxes on retail data. The attach count still matches the reference leg.
 	var sim_ab := NovaSimulation.new()
 	if not sim_ab.load_from_mission_data(mission):
 		sim_ab.free()
-		_fail("NovaSimulation (A/B leg) rejected %s" % MISSION)
+		_fail("NovaSimulation (native pose leg) rejected %s" % MISSION)
 		return
 	sim_ab.set_asset_root(root)
 	var placer_ab := MissionObjectPlacer.new(root, item_db)
 	var attached_ab := int(sim_ab.resolve_collision_instances(item_db, placer_ab))
 	if attached_ab != attached_legacy:
 		sim_ab.free()
-		_fail("A/B leg attach mismatch: %d vs %d" % [attached_ab, attached_legacy])
+		_fail("native pose leg attach mismatch: %d vs %d" % [attached_ab, attached_legacy])
 		return
 	sim_ab.resolve_item_traits(item_db)
-	# S4 (ADR 0028): the static seat-spec A/B — install the shell-extracted
-	# table, then re-extract natively (retained def rows + sim parses) and
-	# diff the typed records.
 	sim_ab.set_item_seat_specs(
 			ItemSeatSpecs.build_item_seat_specs(mission, root, item_db))
-	var seat_diff: Dictionary = sim_ab.debug_native_seat_spec_diff(item_db)
-	print("[wave1] s4 seat diff: %s" % str(seat_diff))
-	if int(seat_diff.get("compared", 0)) <= 0:
-		sim_ab.free()
-		_fail("S4 seat-spec diff compared nothing")
-		return
-	if int(seat_diff.get("mismatches", 0)) != 0 \
-			or int(seat_diff.get("native_missing", 0)) != 0:
-		sim_ab.free()
-		_fail("S4 seat-spec divergence: %s" % str(seat_diff))
-		return
+	var hitbox_entities := 0
 	for _round in 8:
-		var _hb: Dictionary = sim_ab.get_hitbox_debug()
+		var hb: Dictionary = sim_ab.get_hitbox_debug()
+		hitbox_entities = maxi(
+				hitbox_entities, int((hb.get("entities", []) as Array).size()))
 		for _t in 8:
 			sim_ab.step()
-	var ab: Dictionary = sim_ab.debug_collision_pose_ab_stats()
-	print("[wave1] s3 pose ab: %s" % str(ab))
-	if int(ab.get("queries", 0)) <= 0:
+	print("[wave1] native pose leg: attached=%d hitbox_entities=%d" % [
+			attached_ab, hitbox_entities])
+	if hitbox_entities <= 0:
 		sim_ab.free()
-		_fail("S3 compare mode saw no posed-collision queries")
-		return
-	if int(ab.get("divergences", 0)) != 0 or int(ab.get("result_mismatches", 0)) != 0:
-		sim_ab.free()
-		_fail("S3 pose divergence: %s" % str(ab))
+		_fail("native collision provider produced no hitboxes")
 		return
 	sim_ab.free()
 

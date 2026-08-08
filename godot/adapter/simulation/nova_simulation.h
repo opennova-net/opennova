@@ -348,30 +348,16 @@ private:
 	// A non-negative value is the shell's once-per-frame retail presentation
 	// DWORD. Direct/headless simulations use deterministic logic time.
 	int64_t panm_time_override_ms_ = -1;
-	// The engine-side pose provider (S3, ADR 0028) beside the legacy binding
-	// path, and the A/B soak that gates the legacy delete: Compare evaluates
-	// BOTH per query, counts divergent final matrices, and returns the LEGACY
-	// result. Native is the post-soak cutover mode.
-	enum class CollisionPoseMode { Legacy = 0, Compare = 1, Native = 2 };
+	// The engine-side collision pose provider (S3, ADR 0028) — AUTHORITATIVE
+	// wherever it has a registered source. Production always installs the sim's
+	// own asset root, so the provider poses every collision entity there and the
+	// legacy render-bound builder below is never reached. That builder survives
+	// ONLY as the fallback for the GUT stub worlds that resolve collision through
+	// a duck-typed placer with no asset root: the native provider cannot serve
+	// them because it loads skeletal .adm rigs and retains PANM model parses
+	// through a resource index those worlds never install (build_section_matrices
+	// tries native first, then this builder when native has no source).
 	opennova::simassets::SimCollisionPoseProvider collision_pose_native_;
-	CollisionPoseMode collision_pose_mode_ = CollisionPoseMode::Compare;
-	struct CollisionPoseAbStats {
-		uint64_t queries = 0;           // compare-mode queries evaluated
-		uint64_t divergences = 0;       // any tolerance-exceeding matrix delta
-		uint64_t divergences_skeletal = 0; // ... on the skeletal leg
-		uint64_t divergences_generic = 0;  // ... on the PANM/generic leg
-		uint64_t result_mismatches = 0; // both posed but section counts differed
-		uint64_t native_declined = 0;   // legacy posed, native had no source
-		uint64_t native_posed_only = 0; // native posed where legacy declined
-		int32_t max_delta = 0;          // worst |fixed delta| seen (headroom)
-		int32_t last_model_id = -1;     // last divergent query's model
-		int32_t last_section = -1;      // last divergent section ordinal
-		int32_t last_delta = 0;         // that section's max |fixed delta|
-		int32_t last_kind = -1;         // 0 = generic/PANM, 1 = skeletal
-		int32_t last_legacy_m[16] = {}; // that section's legacy matrix
-		int32_t last_native_m[16] = {}; // that section's native matrix
-	};
-	CollisionPoseAbStats collision_pose_ab_;
 	bool build_section_matrices_legacy(opennova::world::World &p_world,
 			opennova::world::EntityHandle p_entity, int32_t p_model_id,
 			const opennova::world::CollisionMatrix &p_entity_world,
@@ -384,39 +370,25 @@ private:
 			const opennova::world::CollisionMatrix &p_entity_world,
 			const opennova::world::CollisionModel &p_model,
 			std::vector<opennova::world::CollisionMatrix> &r_out) override;
+	// The mounted-pose resolver (S4, ADR 0028) is native-only: the engine-side
+	// resolver over the sim's own parse is the sole host-authority path.
 	bool resolve_mounted_pose(opennova::world::World &p_world,
 			const opennova::world::Entity &p_carrier,
 			const opennova::world::Seat &p_seat,
 			opennova::world::MountedPose &r_out) override;
-	// The S4 A/B seam (ADR 0028): the engine-side mounted-pose resolver over
-	// the sim's own parses beside the legacy model-bound path, same
-	// Legacy/Compare/Native discipline as the collision seam.
-	bool resolve_mounted_pose_legacy(opennova::world::World &p_world,
-			const opennova::world::Entity &p_carrier,
-			const opennova::world::Seat &p_seat,
-			opennova::world::MountedPose &r_out);
 	bool resolve_mounted_pose_native(opennova::world::World &p_world,
 			const opennova::world::Entity &p_carrier,
 			const opennova::world::Seat &p_seat,
 			opennova::world::MountedPose &r_out);
-	// The native mounted-pose model source: type id -> the sim cache's parse,
-	// filled beside mounted_pose_data_by_type_ (and like it, kept across
-	// reset_world — the table installs before mission promotion).
+	// The native mounted-pose model source: type id -> a parsed model. Filled by
+	// set_item_seat_specs from either the sim cache's parse (production, keyed by
+	// graphic) or the installed spec's model_data->native_model() (test/tool
+	// worlds); the paired Ref in mounted_pose_data_by_type_ keeps that parse
+	// alive. Kept across reset_world — the table installs before mission promotion.
 	std::unordered_map<int32_t, const Threedi3di3 *> mounted_pose_native_models_;
-	CollisionPoseMode mounted_pose_mode_ = CollisionPoseMode::Compare;
 	// D-NET-209 dual-publish: armed replica rows present the arbitrated
 	// simulation channel directly (default); false = legacy rollback.
 	bool remote_body_native_publish_ = true;
-	struct MountedPoseAbStats {
-		uint64_t queries = 0;
-		uint64_t divergences = 0;
-		uint64_t native_declined = 0;
-		uint64_t native_posed_only = 0;
-		float max_position_delta = 0.0f;
-		int32_t max_angle_delta = 0;
-		int32_t last_carrier_type = -1;
-	};
-	MountedPoseAbStats mounted_pose_ab_;
 	// Rendering occlusion: the portal/section-mask engine (world/occlusion.h) —
 	// models attached alongside collision by resolve_collision_instances, the
 	// portal weld run by occlusion_init_mission, per-frame masks/gates by
@@ -886,8 +858,13 @@ private:
 	// The two witnessed .aip profile speeds per ai_textfile, fed to
 	// PromoteOptions before promotion (see promote.h AiProfileSpeeds).
 	std::vector<opennova::mission::PromoteOptions::AiProfileSpeeds> ai_profile_speeds_;
-	// Model resources paired with the persistent seat table. Kept across
-	// reset_world because set_item_seat_specs runs before mission promotion.
+	// Model Refs paired with the persistent seat table, keyed by raw type id.
+	// Two consumers keep this alive: the joiner's client attachment-pose
+	// reconstruction (resolve_client_eweap_attachment_pose over the present
+	// projection) reads its evaluate_panm, and it owns the parse that
+	// mounted_pose_native_models_ points at so the native mounted resolver has a
+	// stable model. Kept across reset_world (set_item_seat_specs runs before
+	// mission promotion).
 	std::unordered_map<int32_t, Ref<NovaObjectData>> mounted_pose_data_by_type_;
 	void refresh_item_seat_spec(opennova::world::Entity &p_entity);
 	// Resolve each spec's turret clamp window from its primary weapon's
@@ -1507,21 +1484,6 @@ public:
 	void set_panm_time_ms(int64_t p_time_ms);
 	int64_t get_panm_time_ms() const;
 	void debug_set_panm_time_ms(int64_t p_time_ms);
-	// The S3 A/B seam (ADR 0028): 0 = legacy only, 1 = compare (legacy
-	// authoritative, native shadowed + divergence counters), 2 = native only.
-	void debug_set_collision_pose_mode(int p_mode);
-	int debug_get_collision_pose_mode() const;
-	// {queries, divergences, result_mismatches, native_declined,
-	//  last_model_id, last_section, last_delta}; counters reset on world reset.
-	Dictionary debug_collision_pose_ab_stats() const;
-	// The S4 A/B seam: the mounted-pose resolver modes + counters (same
-	// 0/1/2 semantics), and the static seat-spec table diff — the installed
-	// (shell-extracted) table vs the engine-side extraction over the retained
-	// def rows + sim model parses. Returns {compared, mismatches,
-	// native_missing, first_mismatch}.
-	void debug_set_mounted_pose_mode(int p_mode);
-	int debug_get_mounted_pose_mode() const;
-	Dictionary debug_mounted_pose_ab_stats() const;
 	// The S11 dual-publish seam (D-NET-209): true (default) presents armed
 	// replica rows from the simulation-arbitrated channel directly; false
 	// routes them through the legacy remote-request publish (model-side FSM).
@@ -1530,8 +1492,6 @@ public:
 	// flag is a presentation A/B, not a full pre-S11 rollback.
 	void debug_set_remote_body_native_publish(bool p_native);
 	bool debug_remote_body_native_publish() const;
-	Dictionary debug_native_seat_spec_diff(
-			const Ref<class NovaItemDatabase> &p_item_db);
 	// Whole-bank snapshots of the script variable stores (V0..V511 / G0..G255 /
 	// M0..M15 [orig: dword_C6B240 / dword_C6BA40 / music bank]): ONE packed call
 	// for a low-Hz overlay refresh instead of hundreds of boxed scalar reads.

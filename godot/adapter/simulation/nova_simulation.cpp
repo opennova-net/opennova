@@ -165,8 +165,6 @@ void NovaSimulation::reset_world() {
 	collision_pose_data_.clear();
 	collision_skeletal_sources_.clear();
 	collision_pose_native_.clear();
-	collision_pose_ab_ = CollisionPoseAbStats{};
-	mounted_pose_ab_ = MountedPoseAbStats{};
 	infantry_adm_resource_root_.unref();
 	infantry_adm_item_db_.unref();
 	infantry_adm_resolved_ai_count_ = 0;
