@@ -136,7 +136,7 @@ Modular libraries for the NovaLogic formats and runtime systems. The format pars
 | **cpt** | `.cpt` | Compiled terrain mesh, collision and render (DPTH and CDEP flavors). |
 | **tpj** | `.tpj` | Editable terrain project: a terrain config plus editor lock coordinates and project metadata. |
 | **cbin** | `.kda` | Rolling credits: obfuscated text compiled to a CBIN blob. |
-| **particle** | `.ptl` | Particle effects: the effect/emitter definition parser and writer, plus the emitter integrator and effect scene the runtime and the editor preview share. |
+| **ptl** | `.ptl` | Particle effects: the effect/emitter definition model, parser, writer, and enum/field tables. |
 | **mnu** | `.mnu` | Menu screens: window tree, widgets, and Actions, with a round-trip writer that preserves the format superset. Includes the NovaLogic-flavored XML reader. |
 | **mns** | `.mns` | Menu stylesheets: named style variables the menu screens reference. |
 | **lwf** | `.lwf` | Sound profiles (LWF1): trigger sets of layered member sounds. |
@@ -158,6 +158,7 @@ Modular libraries for the NovaLogic formats and runtime systems. The format pars
 | **wac** | WAC scripting: lexer, parser, compiler, and bytecode VM. |
 | **mission** | `.bms`/`.mis` missions: records and schema reflection, the BMS event runtime, and mission-to-world promotion. Two targets: `opennova_mission_format` (parse/write/schema) and `opennova_mission` (event runtime + promotion). |
 | **anim** | Skeletal animation: the evaluator that samples `.bad` clips into per-bone transforms. |
+| **particle** | The particle simulator: the emitter integrator and effect scene the runtime and the editor preview share (the `.ptl` format itself lives in the ptl parser lib). |
 | **audio** | Sound-set member-selection state machine shared by the runtime and the editor. |
 | **vfs** | Virtual file system: loose directories and PFF archives behind one lookup, with SCR/BFC1 decode. |
 | **gameprofile** | Per-game profiles: one source of truth for game identity, archive keys, and SCR codec policy. |

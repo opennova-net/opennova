@@ -27,10 +27,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/src/event_runtime.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/src/promote.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/src/runtime_boot.cpp
-    # particle — .ptl parse/write + emitter/effect-scene sim
-    ${CMAKE_CURRENT_SOURCE_DIR}/particle/src/parser.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/particle/src/particle.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/particle/src/writer.cpp
+    # particle — the emitter/effect-scene sim (.ptl model+parse+write: engine/formats/ptl)
     ${CMAKE_CURRENT_SOURCE_DIR}/particle/src/emitter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/particle/src/effect_scene.cpp
     # renderer — fixed-function material/light/order math
