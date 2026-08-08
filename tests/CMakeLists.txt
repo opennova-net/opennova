@@ -1260,11 +1260,18 @@ target_include_directories(root_motion_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(root_motion_test PRIVATE cxx_std_17)
 add_test(NAME root_motion COMMAND root_motion_test)
 
-# WAC scripting: registry oracle (165-command ISA + 28 param types from the binary),
-# VM behavior (var math, entity mutation, temporal/edge firing, env, authority),
-# and a zero-crash parse over the real shipped .wac corpus (dirs via argv, else the
-# dev defaults; absent dirs skip).
-foreach(test registry_oracle behavior corpus)
+# WAC scripting. The registry oracle (165-command ISA + 28 param types from the
+# binary) exercises only the language front end (engine/formats/wac); VM behavior
+# (var math, entity mutation, temporal/edge firing, env, authority) and the
+# zero-crash parse over the real shipped .wac corpus compile against the world
+# (dirs via argv, else the dev defaults; absent dirs skip).
+add_executable(wac_registry_oracle_test wac/wac_registry_oracle_test.cpp)
+target_link_libraries(wac_registry_oracle_test PRIVATE opennova_formats)
+target_include_directories(wac_registry_oracle_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(wac_registry_oracle_test PRIVATE cxx_std_17)
+add_test(NAME wac_registry_oracle COMMAND wac_registry_oracle_test)
+
+foreach(test behavior corpus)
     add_executable(wac_${test}_test wac/wac_${test}_test.cpp)
     target_link_libraries(wac_${test}_test PRIVATE opennova_runtime)
     target_include_directories(wac_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

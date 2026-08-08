@@ -147,6 +147,7 @@ Modular libraries for the NovaLogic formats and runtime systems. The format pars
 | **dbf** | `.dbf` | Dialog banks (DLG0): grouped dialog and voice entries. |
 | **sbf** | `.sbf` | Sound-buffer banks: the sample banks behind interactive music. |
 | **mus** | `.bin` | Interactive-music scripts (SCR0/MU01): parser, compiler, and VM. |
+| **wac** | `.wac` | Mission scripts, the language front end: lexer, parser/AST, the 165-command table, and the compiled-program model. |
 | **scr** | | SCR decryption (multiple keys for different game editions). |
 | **sph** | `.sph` | The `/PROFILE` server-log FOURCC chunk container (payload records decode in the net stack). |
 | **bfc1** | | BFC1 decompression (zlib-based). |
@@ -160,7 +161,7 @@ Modular libraries for the NovaLogic formats and runtime systems. The format pars
 | **foliage** | Procedural foliage scatter from the foliage map, distance cull, dispatch. |
 | **renderer** | Material classification and per-vertex/object light evaluation shared by runtime and editor. |
 | **world** | World substrate: entity registry and pools, variable store, the logic tick, and the ported gameplay systems on top of it: AI and the infantry motor, collision and occlusion queries, the weapon FSM/inventory/tables, rounds and ballistics, throwables, vehicle mount and drive, item destruction, spawn selection, zones, and the player view. |
-| **wac** | WAC scripting: lexer, parser, compiler, and bytecode VM. |
+| **wac** | WAC scripting: the compiler (binds script names and vars against the live world) and the bytecode VM (the language front end lives in the wac parser lib). |
 | **mission** (runtime half) | The BMS event runtime and mission-to-world promotion over the parsed mission (the `.bms`/`.mis` document model itself lives in the mission format lib). |
 | **anim** | Skeletal animation: the evaluator that samples `.bad` clips into per-bone transforms. |
 | **particle** | The particle simulator: the emitter integrator and effect scene the runtime and the editor preview share (the `.ptl` format itself lives in the ptl parser lib). |
