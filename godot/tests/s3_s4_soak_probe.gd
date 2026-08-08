@@ -86,21 +86,34 @@ func _run() -> void:
 	print("[soak] 00TRg runtime up: boot=%d rounds=%d (%d ticks)" % [
 			boot_count, rounds, rounds * 62])
 	# The native pose paths are AUTHORITATIVE (ADR 0028): the A/B that this soak
-	# once compared is retired. This is now a long-run native-stability smoke —
-	# thousands of ticks with the mission's AI thinking/walking and command-mounted
-	# on the 50cals, every sweep driving build_section_matrices through the sim's
-	# own SimCollisionPoseProvider. It must keep producing live hitboxes and never
-	# regress to zero.
+	# once compared is retired. This is the long-run native-stability gate —
+	# thousands of ticks with the mission's AI thinking/walking and
+	# command-mounted on the 50cals. The invariants are ENFORCED, not narrated:
+	# hitboxes must appear and never regress to zero mid-run, the mounted
+	# resolver must actually be queried (a degenerate soak once passed on
+	# silent declines), and NEITHER native path may decline a single
+	# production query across the whole run (debug_native_pose_stats replaces
+	# the retired divergence counters as the masked-failure signal).
 	var max_hitbox_entities := 0
 	var min_hitbox_entities := 0x7fffffff
+	var seen_hitboxes := false
 	for r in rounds:
 		for _t in 62:
 			runtime.tick()
 		var hb: Dictionary = sim.get_hitbox_debug()
 		var entity_count := int((hb.get("entities", []) as Array).size())
 		max_hitbox_entities = maxi(max_hitbox_entities, entity_count)
-		if entity_count > 0:
+		if seen_hitboxes:
+			# Zero rounds COUNT once live hitboxes exist — a mid-soak
+			# regression to zero must fail, not slip past a skipping tracker.
 			min_hitbox_entities = mini(min_hitbox_entities, entity_count)
+			if entity_count <= 0:
+				_fail("hitboxes regressed to zero at round %d/%d" % [
+						r + 1, rounds])
+				return
+		elif entity_count > 0:
+			seen_hitboxes = true
+			min_hitbox_entities = entity_count
 		if (r + 1) % 60 == 0 or r == rounds - 1:
 			print("[soak] round %d/%d hitbox_entities=%d" % [
 					r + 1, rounds, entity_count])
@@ -108,6 +121,22 @@ func _run() -> void:
 	if max_hitbox_entities <= 0:
 		_fail("native collision produced no hitboxes across the soak")
 		return
-	print("s3_s4_soak_probe: PASS (native soak, hitbox_entities min=%d max=%d over %d ticks)" % [
-			min_hitbox_entities, max_hitbox_entities, rounds * 62])
+	var pose_stats: Dictionary = sim.debug_native_pose_stats()
+	print("[soak] native pose stats: %s" % str(pose_stats))
+	if int(pose_stats.get("collision_queries", 0)) <= 0 \
+			or int(pose_stats.get("collision_declines", -1)) != 0:
+		_fail("native collision declined in production: %s" % str(pose_stats))
+		return
+	if int(pose_stats.get("mounted_queries", 0)) <= 0:
+		_fail("the soak drove no mounted-pose queries (degenerate — the 50cal gunners never resolved): %s" % str(pose_stats))
+		return
+	if int(pose_stats.get("mounted_declines", -1)) != 0:
+		_fail("native mounted resolver declined in production: %s" % str(pose_stats))
+		return
+	if int(pose_stats.get("mounted_graphic_sources", 0)) <= 0:
+		_fail("no native mounted model sources installed: %s" % str(pose_stats))
+		return
+	print("s3_s4_soak_probe: PASS (native soak, hitbox_entities min=%d max=%d over %d ticks, mounted_queries=%d, 0 declines)" % [
+			min_hitbox_entities, max_hitbox_entities, rounds * 62,
+			int(pose_stats.get("mounted_queries", 0))])
 	quit(0)

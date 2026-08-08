@@ -1,7 +1,6 @@
 extends GutTest
 
 const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
-const ItemSeatSpecs := preload("res://adapter/world/item_seat_specs.gd")
 const NovaObjectModelScript := preload("res://adapter/object/nova_object_model.gd")
 const PresentAimOverlay := preload("res://adapter/world/aim_overlay_present_pass.gd")
 const NATIVE_RUNTIME_TIMING_KEYS := [
@@ -15,6 +14,137 @@ const NATIVE_RUNTIME_TIMING_KEYS := [
 # NovaSimulation (the GDExtension binding): promote a synthetic BMS mission into a live
 # world + AI system, tick it, and confirm the AI walks entities along their authored route.
 # This is the in-Godot end of step 1 (promotion) + step 2 (locomotion).
+
+# --- Native fixture roots (S16) ---------------------------------------------
+# The Dictionary seat seam (set_item_seat_specs) and the render-placer
+# collision sources are gone: a sim poses/attaches ONLY from its own asset
+# root (set_asset_root) and the native extractor
+# (install_seat_specs_for_type_ids over items.def rows + model userpoints).
+# Tests compose a flat loose dir of committed fixtures. NovaResourceRoot
+# rejects user:// paths, so the dirs live under OS.get_cache_dir().
+
+var _native_fixture_dirs: Array[String] = []
+
+
+func after_each() -> void:
+	for dir in _native_fixture_dirs:
+		for file_name in DirAccess.get_files_at(dir):
+			DirAccess.remove_absolute(dir.path_join(file_name))
+		DirAccess.remove_absolute(dir)
+	_native_fixture_dirs.clear()
+
+
+func _native_fixture_dir() -> String:
+	var dir := OS.get_cache_dir().path_join("nova_sim_native_%d_%d" % [
+			Time.get_ticks_usec(), _native_fixture_dirs.size()])
+	assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
+	_native_fixture_dirs.append(dir)
+	return dir
+
+
+func _write_fixture_bytes(dir: String, name: String, bytes: PackedByteArray) -> void:
+	var file := FileAccess.open(dir.path_join(name), FileAccess.WRITE)
+	assert_not_null(file)
+	if file == null:
+		return
+	file.store_buffer(bytes)
+	file.close()
+
+
+func _write_fixture_text(dir: String, name: String, text: String) -> void:
+	var file := FileAccess.open(dir.path_join(name), FileAccess.WRITE)
+	assert_not_null(file)
+	if file == null:
+		return
+	file.store_string(text)
+	file.close()
+
+
+func _copy_fixture(dir: String, source_res_path: String, dest_name: String) -> void:
+	_write_fixture_bytes(dir, dest_name, FileAccess.get_file_as_bytes(source_res_path))
+
+
+func _fixture_items_text() -> String:
+	return FileAccess.get_file_as_bytes(
+			"res://../fixtures/def/items.def").get_string_from_ascii()
+
+
+func _item_db_from_text(dir: String, text: String) -> NovaItemDatabase:
+	_write_fixture_text(dir, "items.def", text)
+	var db := NovaItemDatabase.new()
+	assert_eq(db.load(dir.path_join("items.def")), OK)
+	return db
+
+
+# Rename one 16-byte USRP name field in raw .3di bytes (whole-name match) —
+# the same byte-patch technique the KZ husk test uses — so a committed model
+# can stand in for any retail seat prefix without another binary fixture.
+func _bytes_with_renamed_user_point(bytes: PackedByteArray, from_name: String,
+		to_name: String) -> PackedByteArray:
+	var needle := from_name.to_ascii_buffer()
+	var offset := -1
+	for i in range(bytes.size() - needle.size()):
+		var matches := true
+		for j in range(needle.size()):
+			if bytes[i + j] != needle[j]:
+				matches = false
+				break
+		if matches and bytes[i + needle.size()] == 0:
+			offset = i
+			break
+	assert_gte(offset, 0, "user point %s present in the model bytes" % from_name)
+	if offset < 0:
+		return bytes
+	for j in range(16):
+		bytes[offset + j] = 0
+	var replacement := to_name.to_ascii_buffer()
+	for j in range(replacement.size()):
+		bytes[offset + j] = replacement[j]
+	return bytes
+
+
+# Serialize an edited NovaObjectData back to .3di bytes so the sim's own
+# parse-once cache (the only pose/collision source) consumes authored edits.
+func _exported_3di_bytes(data: NovaObjectData) -> PackedByteArray:
+	var export_dir := _native_fixture_dir()
+	assert_eq(data.export_3di_to_dir(export_dir), OK)
+	for file_name in DirAccess.get_files_at(export_dir):
+		if String(file_name).to_lower().ends_with(".3di"):
+			return FileAccess.get_file_as_bytes(export_dir.path_join(file_name))
+	assert_true(false, "export produced no .3di")
+	return PackedByteArray()
+
+
+# The 19-bone CharModel + BINOC rig as a named organic graphic: <graphic>.3di,
+# <graphic>.adm (the anim map the native pose provider resolves through the
+# item's anim_def), and the shared BINOC.bad clip.
+func _write_char_rig(dir: String, graphic: String) -> void:
+	_copy_fixture(dir, "res://../fixtures/threedi/3di3/CharModel.3di",
+			graphic + ".3di")
+	_copy_fixture(dir, "res://../fixtures/bad/BINOC.bad", "BINOC.bad")
+	var quote := String.chr(34)
+	_write_fixture_text(dir, graphic + ".adm",
+			"anim_reset %sBINOC.bad%s\n" % [quote, quote]
+			+ "anim_idle %sBINOC.bad%s\n" % [quote, quote]
+			+ "anim_idle_2 %sBINOC.bad%s\n" % [quote, quote]
+			+ "anim_emplaced %sBINOC.bad%s\n" % [quote, quote])
+
+
+func _install_native_seat_table(sim: NovaSimulation, dir: String,
+		item_db: NovaItemDatabase, type_ids: PackedInt32Array) -> NovaResourceRoot:
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(dir), OK)
+	sim.set_asset_root(root)
+	assert_true(sim.install_seat_specs_for_type_ids(item_db, type_ids),
+			"native seat-spec install over the composed fixture root")
+	return root
+
+
+func _native_asset_root(sim: NovaSimulation, dir: String) -> NovaResourceRoot:
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(dir), OK)
+	sim.set_asset_root(root)
+	return root
 
 
 func _model_with_special1_in_local_slot_zero(
@@ -61,7 +191,7 @@ func _vehicle_ctrl_item_db() -> NovaItemDatabase:
 	file.store_string("""begin "CTRL Vehicle Fixture"
   id 105007
   type vehicle
-  graphic StaticCrate1
+  graphic dm1a1
   sid ctrlvehicle
   ai_function cveh
   render_function cveh
@@ -419,60 +549,9 @@ func test_waypoint_hud_view_tracks_the_demo_route() -> void:
 const ANIM_FIXTURES := "res://../fixtures/anim"
 
 
-class ObjectDataPlacerStub:
-	extends RefCounted
-	var data: NovaObjectData
-
-	func _init(p_data: NovaObjectData) -> void:
-		data = p_data
-
-	func object_data_for(_graphic: String) -> NovaObjectData:
-		return data
-
-
-class GraphicDataPlacerStub:
-	extends RefCounted
-	var data_by_graphic: Dictionary
-
-	func _init(p_data_by_graphic: Dictionary) -> void:
-		data_by_graphic = p_data_by_graphic
-
-	func object_data_for(graphic: String) -> NovaObjectData:
-		return data_by_graphic.get(graphic) as NovaObjectData
-
-
-class SkeletalDataPlacerStub:
-	extends RefCounted
-	var data: NovaObjectData
-	var skeletal: NovaSkeletalAnim
-
-	func _init(p_data: NovaObjectData, p_skeletal: NovaSkeletalAnim) -> void:
-		data = p_data
-		skeletal = p_skeletal
-
-	func object_data_for(_graphic: String) -> NovaObjectData:
-		return data
-
-	func skeletal_anim_for(
-			_item_id: int, _graphic: String) -> NovaSkeletalAnim:
-		return skeletal
-
-
-class PlayerOnlySkeletalPlacerStub:
-	extends RefCounted
-	var data: NovaObjectData
-	var skeletal: NovaSkeletalAnim
-
-	func _init(p_data: NovaObjectData, p_skeletal: NovaSkeletalAnim) -> void:
-		data = p_data
-		skeletal = p_skeletal
-
-	func object_data_for(graphic: String) -> NovaObjectData:
-		return data if graphic.nocasecmp_to("US01") == 0 else null
-
-	func skeletal_anim_for(
-			_item_id: int, graphic: String) -> NovaSkeletalAnim:
-		return skeletal if graphic.nocasecmp_to("US01") == 0 else null
+# (The duck-typed placer stubs are gone with S3b: resolve_collision_instances
+# ignores its placer argument — every pose/collision source is the sim's own
+# asset root, composed per test from the committed fixtures.)
 
 func _anim_root() -> NovaResourceRoot:
 	var root := NovaResourceRoot.new()
@@ -566,14 +645,11 @@ func test_authoritative_cveh_snapshot_publishes_vehicle_motion_controls() -> voi
 
 	var sim := NovaSimulation.new()
 	sim.enable_listen_server(true)
-	sim.set_item_seat_specs([{
-		"type_id": 5007,
-		"seats": [{
-			"type": 2,
-			"position": Vector3.ZERO,
-			"source_name": "ctrlx00",
-		}],
-	}])
+	# The fixture def's dm1a1 graphic carries the one authored ctrlx25 point,
+	# so the native extraction installs the controller seat the drive needs.
+	var dir := _native_fixture_dir()
+	_copy_fixture(dir, "res://../fixtures/3dp/dm1a1/dm1a1.3di", "dm1a1.3di")
+	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([5007]))
 	assert_true(sim.load_from_mission_data(md))
 	sim.resolve_item_traits(item_db)
 	sim.step()
@@ -686,25 +762,26 @@ func _mounted_npc_right_hand_verdict(seat_type: int) -> int:
 	assert_true(md.set_entity_property_int(
 			NovaMissionData.KIND_ORGANIC, int(npc["index"]),
 			"wp_number", int(mount["bms_id"])))
-	var source_names := {
-		1: "sitex00",
-		2: "ctrlx00",
-		3: "UseGun",
-		5: "drvrx00",
-	}
+	# One-seat carrier per retail prefix: B50cal's authored Usegun row (bone 6),
+	# byte-renamed for the sitex/ctrlx/drvrx variants.
+	var renames := {1: "sitex00", 2: "ctrlx00", 5: "drvrx00"}
+	var dir := _native_fixture_dir()
+	var model_bytes := FileAccess.get_file_as_bytes(
+			"res://../fixtures/3dp/B50Cal/B50Cal.3di")
+	if renames.has(seat_type):
+		model_bytes = _bytes_with_renamed_user_point(
+				model_bytes, "Usegun", String(renames[seat_type]))
+	_write_fixture_bytes(dir, "seatgun.3di", model_bytes)
+	var item_db := _item_db_from_text(dir, """begin "Seat Verdict Gun"
+  id 101294
+  type object
+  graphic seatgun
+  phrase_set 6
+end
+""")
 	var sim := NovaSimulation.new()
 	sim.enable_listen_server(true)
-	sim.set_item_seat_specs([{
-		"type_id": 1294,
-		"mount_config_valid": true,
-		"mount_config": 6,
-		"seats": [{
-			"type": seat_type,
-			"bone_index": 6,
-			"position": Vector3.ZERO,
-			"source_name": String(source_names.get(seat_type, "")),
-		}],
-	}])
+	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
 	sim.step()
 	var verdict := _present_field_for_origin(
@@ -1410,29 +1487,18 @@ func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 
 	var sim := NovaSimulation.new()
 	sim.enable_listen_server(true)
-	sim.set_item_seat_specs([{
-		"type_id": 1294,
-		"seats": [{"type": 3, "position": Vector3.ZERO, "yaw_offset": 0}],
-	}])
+	# Native root: the guns pose their UseGun seat from B50cal's authored
+	# Usegun point; both enemies pose their COBJ sections from the US02
+	# CharModel + BINOC rig resolved through their anim_def.
+	var dir := _native_fixture_dir()
+	_copy_fixture(dir, "res://../fixtures/3dp/B50Cal/B50Cal.3di", "B50cal.3di")
+	_write_char_rig(dir, "us02")
+	var item_db := _item_db_from_text(dir, _fixture_items_text().replace(
+			"id 101294", "id 101294\n  graphic B50cal"))
+	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
-	var item_db := NovaItemDatabase.new()
-	assert_eq(item_db.load(ProjectSettings.globalize_path(
-			"res://../fixtures/def/items.def")), OK)
 	sim.resolve_item_traits(item_db)
-	var data := NovaObjectData.new()
-	assert_eq(data.open_file(ProjectSettings.globalize_path(
-			"res://../fixtures/threedi/3di3/CharModel.3di")), OK)
-	var bad_root := NovaResourceRoot.new()
-	assert_eq(bad_root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../fixtures/bad")), OK)
-	var skeletal := NovaSkeletalAnim.new()
-	assert_true(skeletal.load_from_bad_files(
-			bad_root, "BINOC.bad", {
-				"anim_idle": "BINOC.bad",
-				"anim_emplaced": "BINOC.bad",
-			}, data.get_bone_origins(), data.get_bone_parents()))
-	assert_gte(sim.resolve_collision_instances(
-			item_db, SkeletalDataPlacerStub.new(data, skeletal)), 2,
+	assert_gte(sim.resolve_collision_instances(item_db, null), 2,
 			"precondition: both enemies use authored posed COBJ collision")
 	var reference_card: Dictionary = sim.get_entity_debug(0)
 	var rotated_card: Dictionary = sim.get_entity_debug(1)
@@ -1570,24 +1636,18 @@ func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot(
 
 	var sim := NovaSimulation.new()
 	sim.enable_listen_server(true)
-	sim.set_item_seat_specs([{
-		"type_id": 1294,
-		"mount_config_valid": true,
-		"mount_config": 6,
-		"seats": [{
-			"type": 3,
-			"bone_index": 6,
-			"position": Vector3.ZERO,
-			"yaw_offset": 0,
-			"source_name": "UseGun",
-		}],
-	}])
+	# Native sim sources: B50cal's authored Usegun seat (bone 6) with the def's
+	# phrase_set 6, plus the US02 CharModel + BINOC rig for the mounted pose.
+	var dir := _native_fixture_dir()
+	_copy_fixture(dir, "res://../fixtures/3dp/B50Cal/B50Cal.3di", "B50cal.3di")
+	_write_char_rig(dir, "us02")
+	var item_db := _item_db_from_text(dir, _fixture_items_text().replace(
+			"id 101294", "id 101294\n  graphic B50cal\n  phrase_set 6"))
+	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
-
-	var item_db := NovaItemDatabase.new()
-	assert_eq(item_db.load(ProjectSettings.globalize_path(
-			"res://../fixtures/def/items.def")), OK)
 	sim.resolve_item_traits(item_db)
+	# The render-side witness model keeps its own rig objects; the sim no
+	# longer reads them (native-only pose sources).
 	var data := NovaObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(
 			"res://../fixtures/threedi/3di3/CharModel.3di")), OK)
@@ -1599,8 +1659,7 @@ func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot(
 			bad_root, "BINOC.bad", {"anim_emplaced": "BINOC.bad"},
 			data.get_bone_origins(), data.get_bone_parents()),
 			"mounted CharModel rig loads: %s" % skeletal.get_last_error())
-	assert_gte(sim.resolve_collision_instances(
-			item_db, SkeletalDataPlacerStub.new(data, skeletal)), 1,
+	assert_gte(sim.resolve_collision_instances(item_db, null), 1,
 			"the mounted enemy owns authored posed COBJ collision")
 	var ammo_root := NovaResourceRoot.new()
 	assert_eq(ammo_root.set_root_dir(ProjectSettings.globalize_path(
@@ -2118,22 +2177,17 @@ func test_late_spawn_player_resolves_own_adm_before_configured_usegun_pose() -> 
 	assert_false(md.add_entity(
 			NovaMissionData.KIND_ITEM, 101419,
 			Vector3(2, 0, 0), Vector3.ZERO).is_empty())
-	var object_data := NovaObjectData.new()
-	assert_eq(object_data.open_file(ProjectSettings.globalize_path(
-			"res://../fixtures/3dp/B50Cal/B50Cal.3di")), OK)
 	var sim := NovaSimulation.new()
-	sim.set_item_seat_specs([{
-			"type_id": 1419,
-			"seats": ItemSeatSpecs.seat_specs_from_model(object_data),
-			"mount_config_valid": true,
-			"mount_config": 4,
-			"primary_weapon": "WPN_EMPLCD50NA",
-	}])
-	assert_true(sim.load_from_mission_data(md))
-	assert_gt(sim.set_infantry_anim_map(_anim_root(), "soldier.adm"), 0)
+	# The fixture def row (101419) authors graphic B50cal, phrase_set 4, and
+	# primary_weapon WPN_EMPLCD50NA — the native install reads all three.
 	var item_db := NovaItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
 			"res://../fixtures/def/items.def")), OK)
+	var dir := _native_fixture_dir()
+	_copy_fixture(dir, "res://../fixtures/3dp/B50Cal/B50Cal.3di", "B50cal.3di")
+	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1419]))
+	assert_true(sim.load_from_mission_data(md))
+	assert_gt(sim.set_infantry_anim_map(_anim_root(), "soldier.adm"), 0)
 	# Reproduce the production ordering bug: the one-time sweep happens before
 	# this player exists.
 	sim.resolve_infantry_adm_ids(_anim_root(), item_db)
@@ -2173,17 +2227,14 @@ func test_load_from_editor_mission_data() -> void:
 	sim.free()
 
 func test_item_seat_specs_mount_command_125_spawn() -> void:
-	var fixture_dir := OS.get_cache_dir().path_join(
-			"vehicle_idle_sim_%d" % Time.get_ticks_usec())
-	assert_eq(DirAccess.make_dir_recursive_absolute(fixture_dir), OK)
-	var items_path := fixture_dir.path_join("items.def")
-	var items_file := FileAccess.open(items_path, FileAccess.WRITE)
-	assert_not_null(items_file)
-	if items_file == null:
-		return
-	items_file.store_string("""begin "Drivable Transport Truck"
+	# dsuv1 authors one ctrlx13 point plus four sitexNN points: the native
+	# extraction supplies the seat table the Dictionary seam used to fake.
+	var fixture_dir := _native_fixture_dir()
+	_copy_fixture(fixture_dir, "res://../fixtures/3dp/dsuv1/dsuv1.3di", "dsuv1.3di")
+	var item_db := _item_db_from_text(fixture_dir, """begin "Drivable Transport Truck"
   id 101294
   type vehicle
+  graphic dsuv1
   attrib: PlayerControl
   physics 1
   player_speed 60
@@ -2199,42 +2250,43 @@ begin "Driver"
   type person
 end
 """)
-	items_file.close()
 	var sndprof_path := fixture_dir.path_join("SndProf.def")
-	var sndprof_file := FileAccess.open(sndprof_path, FileAccess.WRITE)
-	assert_not_null(sndprof_file)
-	if sndprof_file == null:
-		DirAccess.remove_absolute(items_path)
-		DirAccess.remove_absolute(fixture_dir)
-		return
-	sndprof_file.store_string("""begin "SP_Transport"
+	_write_fixture_text(fixture_dir, "SndProf.def", """begin "SP_Transport"
   soundloop_1 V_TRUCK_ILP .8 1.2
 end
 """)
-	sndprof_file.close()
-	var item_db := NovaItemDatabase.new()
-	assert_eq(item_db.load(items_path), OK)
+	var suv := NovaObjectData.new()
+	assert_eq(suv.open_file(fixture_dir.path_join("dsuv1.3di")), OK)
+	var ctrl_point := Vector3.INF
+	var passenger_point := Vector3.INF
+	for point_index in range(suv.get_user_point_count()):
+		var info: Dictionary = suv.get_user_point_info(point_index)
+		match String(info.get("name", "")):
+			"ctrlx13":
+				ctrl_point = info.get("position", Vector3.ZERO)
+			"sitex00d":
+				passenger_point = info.get("position", Vector3.ZERO)
+	assert_true(ctrl_point.is_finite(), "dsuv1 authors its ctrlx13 point")
+	assert_true(passenger_point.is_finite(), "dsuv1 authors its sitex00d point")
 
 	var md := NovaMissionData.new()
 	assert_eq(md.create_default(), OK)
 	var vehicle := md.add_entity(NovaMissionData.KIND_ITEM, 101294, Vector3(10, 0, 0), Vector3.ZERO)
 	var soldier := md.add_entity(NovaMissionData.KIND_ORGANIC, 102072, Vector3(11, 0, 0), Vector3.ZERO)
+	# A second command-125 rider: with the controller seat claimed it takes the
+	# first passenger row (sitex00d), whose authored direction faces backward —
+	# the yaw-offset carry witness.
+	var rider := md.add_entity(NovaMissionData.KIND_ORGANIC, 102072, Vector3(9, 0, 0), Vector3.ZERO)
 	assert_false(vehicle.is_empty())
 	assert_false(soldier.is_empty())
-	assert_true(md.set_entity_property_int(NovaMissionData.KIND_ORGANIC, int(soldier["index"]), "waypoint_id", 125))
-	assert_true(md.set_entity_property_int(NovaMissionData.KIND_ORGANIC, int(soldier["index"]), "wp_number", int(vehicle["bms_id"])))
+	assert_false(rider.is_empty())
+	for organic in [soldier, rider]:
+		assert_true(md.set_entity_property_int(NovaMissionData.KIND_ORGANIC, int((organic as Dictionary)["index"]), "waypoint_id", 125))
+		assert_true(md.set_entity_property_int(NovaMissionData.KIND_ORGANIC, int((organic as Dictionary)["index"]), "wp_number", int(vehicle["bms_id"])))
 
 	var sim := NovaSimulation.new()
 	sim.enable_listen_server(true)
-	sim.set_item_seat_specs([
-		{
-			"type_id": 1294,
-			"seats": [
-				{"type": 1, "position": Vector3(9, 0, 0), "yaw_offset": 0, "source_name": "sitex00"},
-				{"type": 2, "position": Vector3(0, 1, 2), "yaw_offset": 45, "pose_index": 24, "source_name": "ctrlx24"}
-			],
-		}
-	])
+	_install_native_seat_table(sim, fixture_dir, item_db, PackedInt32Array([1294]))
 	sim.set_sound_profiles(FileAccess.get_file_as_bytes(sndprof_path))
 	assert_true(sim.load_from_mission_data(md), "loaded command-125 mission with seat specs")
 	sim.resolve_item_traits(item_db)
@@ -2286,36 +2338,68 @@ end
 	var soldier_idx := _first_organic_ai_index(sim)
 	assert_true(soldier_idx >= 0, "found the soldier's AI row")
 	var pos := sim.get_entity_position(soldier_idx)
-	assert_true(pos.is_equal_approx(Vector3(10, 2, -1)),
+	# The mounted origin is the model's authored ctrlx13 point through the
+	# placer's entity transform — the same identity the render side applies.
+	var expected_ctrl := MissionObjectPlacer.entity_transform(
+			Vector3(10, 0, 0), Vector3.ZERO) * ctrl_point
+	assert_lt(pos.distance_to(expected_ctrl), 0.001,
 		"command-125 soldier uses the IDA-priority ctrlx seat, converted to Godot axes")
-	assert_almost_eq(sim.get_entity_yaw_deg(soldier_idx), 45.0, 0.01,
-		"non-gunner mounted seats carry their local yaw offset")
-	# The mounted anim state (100 = anim_sit_24) is asserted via the debug card below; the present
+	assert_almost_eq(sim.get_entity_yaw_deg(soldier_idx), 0.0, 0.01,
+		"the forward-facing ctrlx13 point carries a zero yaw offset")
+	# The mounted anim state (89 = anim_sit_13) is asserted via the debug card below; the present
 	# snapshot is the listen-server ClientState now (covered by nova_listen_server_test).
 	var card: Dictionary = sim.get_entity_debug(soldier_idx)
 	assert_true(bool(card["mounted"]), "debug card marks mounted occupants")
 	assert_eq(int(card["mount_target_net_id"]), int(vehicle["bms_id"]))
-	assert_eq(int(card["mount_seat"]), 1, "ctrlx seat was selected by original priority")
+	assert_eq(int(card["mount_seat"]), 0, "ctrlx seat was selected by original priority")
 	assert_eq(int(card["mount_type"]), 2, "seat type is ctrlx/controller")
-	assert_eq(int(card["mount_seat_bone"]), 0)
-	assert_eq(int(card["mount_seat_pose_index"]), 24)
-	assert_eq(String(card["mount_seat_source_name"]), "ctrlx24")
-	assert_eq(Vector3(card["mount_seat_local"]), Vector3(0, 1, 2))
-	assert_eq(int(card["mount_seat_yaw_offset"]), 45)
+	assert_eq(int(card["mount_seat_bone"]), 1, "the 1-based USRP row of ctrlx13")
+	assert_eq(int(card["mount_seat_pose_index"]), 13)
+	assert_eq(String(card["mount_seat_source_name"]), "ctrlx13")
+	assert_true(Vector3(card["mount_seat_local"]).is_equal_approx(
+			Vector3(-ctrl_point.x, ctrl_point.z, ctrl_point.y)),
+			"seat local is the authored point in the mission seat frame")
+	assert_eq(int(card["mount_seat_yaw_offset"]), 0)
 	var target_seats: Array = card["mount_target_seats"]
-	assert_eq(target_seats.size(), 2, "debug card carries every target seat candidate")
-	assert_eq(String((target_seats[0] as Dictionary)["source_name"]), "sitex00")
-	assert_eq(int((target_seats[0] as Dictionary)["type"]), 1)
-	assert_eq(int((target_seats[0] as Dictionary)["retail_slot"]), 0)
-	assert_eq(String((target_seats[1] as Dictionary)["source_name"]), "ctrlx24")
-	assert_eq(int((target_seats[1] as Dictionary)["pose_index"]), 24)
-	assert_eq(int((target_seats[1] as Dictionary)["retail_slot"]), 8)
-	assert_eq(int(card["anim_state"]), 100)
-	assert_eq(String(card["anim_key"]), "anim_sit_24")
+	assert_eq(target_seats.size(), 5, "debug card carries every target seat candidate")
+	assert_eq(String((target_seats[0] as Dictionary)["source_name"]), "ctrlx13")
+	assert_eq(int((target_seats[0] as Dictionary)["type"]), 2)
+	assert_eq(int((target_seats[0] as Dictionary)["pose_index"]), 13)
+	assert_eq(int((target_seats[0] as Dictionary)["retail_slot"]), 8)
+	assert_eq(String((target_seats[1] as Dictionary)["source_name"]), "sitex00d")
+	assert_eq(int((target_seats[1] as Dictionary)["type"]), 1)
+	assert_eq(int((target_seats[1] as Dictionary)["retail_slot"]), 0)
+	assert_eq(int(card["anim_state"]), 89)
+	assert_eq(String(card["anim_key"]), "anim_sit_13")
+
+	# The second rider found the controller claimed and took the first
+	# passenger row; sitex00d faces backward, so the seat's non-zero yaw
+	# offset must reach the mounted entity's authoritative yaw.
+	var rider_idx := -1
+	for ai_index in range(sim.get_entity_count()):
+		if ai_index == soldier_idx:
+			continue
+		var row: Dictionary = sim.get_entity_debug(ai_index)
+		if row.is_empty():
+			break
+		if int(row.get("pool", -1)) == 0:
+			rider_idx = ai_index
+			break
+	assert_gte(rider_idx, 0, "found the rider's AI row")
+	var rider_card: Dictionary = sim.get_entity_debug(rider_idx)
+	assert_true(bool(rider_card["mounted"]))
+	assert_eq(int(rider_card["mount_type"]), 1, "the rider fell back to sitex00d")
+	assert_eq(String(rider_card["mount_seat_source_name"]), "sitex00d")
+	assert_eq(absi(int(rider_card["mount_seat_yaw_offset"])), 180,
+			"the backward-facing passenger point extracts a half-turn offset")
+	assert_almost_eq(absf(wrapf(sim.get_entity_yaw_deg(rider_idx), -180.0, 180.0)),
+			180.0, 0.01, "non-gunner mounted seats carry their local yaw offset")
+	var expected_rider := MissionObjectPlacer.entity_transform(
+			Vector3(10, 0, 0), Vector3.ZERO) * passenger_point
+	assert_lt(sim.get_entity_position(rider_idx).distance_to(expected_rider), 0.001)
+	assert_eq(int(rider_card["anim_state"]), 76)
+	assert_eq(String(rider_card["anim_key"]), "anim_sit")
 	sim.free()
-	DirAccess.remove_absolute(items_path)
-	DirAccess.remove_absolute(sndprof_path)
-	DirAccess.remove_absolute(fixture_dir)
 
 
 
@@ -2329,17 +2413,23 @@ func test_attach_labels_seats() -> void:
 	var vehicle := md.add_entity(NovaMissionData.KIND_ITEM, 101294, Vector3(10, 0, 0), Vector3.ZERO)
 	assert_false(vehicle.is_empty())
 	var sim := NovaSimulation.new()
-	sim.set_item_seat_specs([
-		{
-			"type_id": 1294,
-			"seats": [
-				{"type": 1, "position": Vector3(0, 2, 0), "source_name": "sitex00"},
-				{"type": 3, "position": Vector3(0, -1, 1), "source_name": "UseGun"},
-			],
-			"armory_points": [Vector3(0, 0, 1.5)],
-			"primary_weapon": "WPN_EMPLCD50",
-		}
-	])
+	# B50cal byte-renamed: heat -> a sitex00 passenger beside the authored
+	# Usegun, BCasing -> an armory1 anchor behind the def's Armory attrib.
+	var dir := _native_fixture_dir()
+	var model_bytes := FileAccess.get_file_as_bytes(
+			"res://../fixtures/3dp/B50Cal/B50Cal.3di")
+	model_bytes = _bytes_with_renamed_user_point(model_bytes, "heat", "sitex00")
+	model_bytes = _bytes_with_renamed_user_point(model_bytes, "BCasing", "armory1")
+	_write_fixture_bytes(dir, "labelgun.3di", model_bytes)
+	var item_db := _item_db_from_text(dir, """begin "Labels Gun"
+  id 101294
+  type object
+  attrib: Armory
+  graphic labelgun
+  primary_weapon WPN_EMPLCD50
+end
+""")
+	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md), "loaded the labels mission")
 	assert_true(sim.spawn_local_player(Vector3(12, 0, 0), 0.0, 1), "spawned the local player")
 	var labels: Array = sim.get_attach_labels()
@@ -2374,15 +2464,21 @@ func test_attach_labels_hide_occupied_and_out_of_range() -> void:
 	# vehicle instead [orig: Vehicle_HasEnemyOccupant @0x4359f0].
 	assert_true(md.set_entity_property_int(NovaMissionData.KIND_ORGANIC, int(soldier["index"]), "team", 1))
 	var sim := NovaSimulation.new()
-	sim.set_item_seat_specs([
-		{
-			"type_id": 1294,
-			"seats": [
-				{"type": 2, "position": Vector3(0, 1, 1), "source_name": "ctrlx00"},
-				{"type": 1, "position": Vector3(0, -2, 1), "source_name": "sitex00"},
-			],
-		}
-	])
+	# Two-seat carrier: B50cal renamed to one ctrlx00 (the command-125 target)
+	# plus one sitex00 passenger.
+	var dir := _native_fixture_dir()
+	var model_bytes := FileAccess.get_file_as_bytes(
+			"res://../fixtures/3dp/B50Cal/B50Cal.3di")
+	model_bytes = _bytes_with_renamed_user_point(model_bytes, "Usegun", "ctrlx00")
+	model_bytes = _bytes_with_renamed_user_point(model_bytes, "heat", "sitex00")
+	_write_fixture_bytes(dir, "ctrlgun.3di", model_bytes)
+	var item_db := _item_db_from_text(dir, """begin "Occupied Labels Gun"
+  id 101294
+  type object
+  graphic ctrlgun
+end
+""")
+	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3(12, 0, 0), 0.0, 1))
 	var labels: Array = sim.get_attach_labels()
@@ -2397,9 +2493,17 @@ func test_attach_labels_empty_out_of_range() -> void:
 	var vehicle := md.add_entity(NovaMissionData.KIND_ITEM, 101294, Vector3(10, 0, 0), Vector3.ZERO)
 	assert_false(vehicle.is_empty())
 	var sim := NovaSimulation.new()
-	sim.set_item_seat_specs([
-		{"type_id": 1294, "seats": [{"type": 1, "position": Vector3.ZERO, "source_name": "sitex00"}]}
-	])
+	var dir := _native_fixture_dir()
+	_write_fixture_bytes(dir, "sitgun.3di", _bytes_with_renamed_user_point(
+			FileAccess.get_file_as_bytes("res://../fixtures/3dp/B50Cal/B50Cal.3di"),
+			"Usegun", "sitex00"))
+	var item_db := _item_db_from_text(dir, """begin "One Seat Gun"
+  id 101294
+  type object
+  graphic sitgun
+end
+""")
+	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3(40, 0, 0), 0.0, 1), "spawned far away")
 	assert_eq(sim.get_attach_labels().size(), 0,
@@ -2429,23 +2533,31 @@ func test_mounted_seat_local_matches_rotated_vehicle_userpoint() -> void:
 	assert_true(md.set_entity_property_int(NovaMissionData.KIND_ORGANIC, int(soldier["index"]), "wp_number", int(vehicle["bms_id"])))
 
 	var sim := NovaSimulation.new()
-	sim.set_item_seat_specs([
-		{
-			"type_id": 1294,
-			"seats": [
-				{
-					"type": 2,
-					"position": Vector3(-0.7148895, -0.1189880, 2.1048889),
-					"source_name": "ctrlx10",
-				}
-			],
-		}
-	])
+	var dir := _native_fixture_dir()
+	_copy_fixture(dir, "res://../fixtures/3dp/dsuv1/dsuv1.3di", "dsuv1.3di")
+	var item_db := _item_db_from_text(dir, """begin "Rotated SUV"
+  id 101294
+  type vehicle
+  graphic dsuv1
+end
+""")
+	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md), "loaded rotated command-125 mount")
 	var soldier_idx := _first_organic_ai_index(sim)
 	assert_true(soldier_idx >= 0, "found the soldier's AI row")
 	var pos := sim.get_entity_position(soldier_idx)
-	var expected := Vector3(10.1189880, 2.1048889, 0.7148895)
+	# Command 125 selects dsuv1's authored ctrlx13; the mounted origin is that
+	# model point through the same rotated entity transform the placer renders.
+	var suv := NovaObjectData.new()
+	assert_eq(suv.open_file(dir.path_join("dsuv1.3di")), OK)
+	var ctrl_point := Vector3.INF
+	for point_index in range(suv.get_user_point_count()):
+		var info: Dictionary = suv.get_user_point_info(point_index)
+		if String(info.get("name", "")) == "ctrlx13":
+			ctrl_point = info.get("position", Vector3.ZERO)
+	assert_true(ctrl_point.is_finite())
+	var expected := MissionObjectPlacer.entity_transform(
+			Vector3(10, 0, 0), Vector3(0, -90, 0)) * ctrl_point
 	assert_lt(pos.distance_to(expected), 0.001,
 		"mounted seat local follows the same rotated side as the selected model userpoint")
 	sim.free()
@@ -2459,14 +2571,17 @@ func test_local_player_toggle_mount_weapon_busy_gate() -> void:
 	var vehicle := md.add_entity(NovaMissionData.KIND_ITEM, 101294, Vector3(2, 0, 0), Vector3.ZERO)
 	assert_false(vehicle.is_empty())
 	var sim := NovaSimulation.new()
-	sim.set_item_seat_specs([
-		{
-			"type_id": 1294,
-			"seats": [
-				{"type": 1, "position": Vector3(0, -1, 1), "yaw_offset": 0, "source_name": "sitex00"},
-			],
-		}
-	])
+	var dir := _native_fixture_dir()
+	_write_fixture_bytes(dir, "sitgun.3di", _bytes_with_renamed_user_point(
+			FileAccess.get_file_as_bytes("res://../fixtures/3dp/B50Cal/B50Cal.3di"),
+			"Usegun", "sitex00"))
+	var item_db := _item_db_from_text(dir, """begin "One Seat Truck"
+  id 101294
+  type object
+  graphic sitgun
+end
+""")
+	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md), "loaded the one-truck mission")
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	sim.set_local_player_weapon({
@@ -2516,16 +2631,15 @@ func test_local_first_person_usegun_parent_cull_follows_live_mount_slot() -> voi
 	assert_false(gun.is_empty())
 	var sim := NovaSimulation.new()
 	sim.enable_listen_server(true)
-	sim.set_item_seat_specs([{
-		"type_id": 1294,
-		"seats": [{"type": 3, "position": Vector3(0, -1, 1),
-				"source_name": "UseGun"}],
-		"primary_weapon": "WPN_EMPLCD50",
-	}])
+	# This cull witness pairs the emplacement with WPN_EMPLCD50 (a def with an
+	# authored gfx1), so the superset def overrides the fixture's AVENGER row.
+	var dir := _native_fixture_dir()
+	_copy_fixture(dir, "res://../fixtures/3dp/B50Cal/B50Cal.3di", "B50cal.3di")
+	var item_db := _item_db_from_text(dir, _fixture_items_text()
+			.replace("id 101294", "id 101294\n  graphic B50cal")
+			.replace("primary_weapon WPN_AVENGER", "primary_weapon WPN_EMPLCD50"))
+	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
-	var item_db := NovaItemDatabase.new()
-	assert_eq(item_db.load(ProjectSettings.globalize_path(
-			"res://../fixtures/def/items.def")), OK)
 	sim.resolve_item_traits(item_db)
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	var root := NovaResourceRoot.new()
@@ -2616,26 +2730,22 @@ func test_world_model_heat_glow_samples_parent_slot_and_caps_below_fp() -> void:
 
 	var sim := NovaSimulation.new()
 	sim.enable_listen_server(true)
-	var seat_specs := ItemSeatSpecs.seat_specs_from_model(object_data)
-	assert_eq(seat_specs.size(), 1)
-	sim.set_item_seat_specs([{
-		"type_id": 1419,
-		"seats": seat_specs,
-		"primary_weapon": "WPN_EMPLCD50NA",
-	}])
-	assert_true(sim.load_from_mission_data(md))
+	# The authored HEAT_GLOW track rides the exported model bytes; the sim's
+	# own parse of B50cal.3di is the only seat/collision source.
+	var dir := _native_fixture_dir()
+	_write_fixture_bytes(dir, "B50cal.3di", _exported_3di_bytes(object_data))
 	var item_db := NovaItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
 			"res://../fixtures/def/items.def")), OK)
+	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1419]))
+	assert_eq(int(sim.debug_native_pose_stats().get("mounted_graphic_sources", 0)), 1,
+			"the exported model resolves as the one mounted-pose source")
+	assert_true(sim.load_from_mission_data(md))
 	sim.resolve_item_traits(item_db)
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	# Listen-host player creation rebuilds the authoritative registry. Bind the
 	# collision instance to that final registry identity, as GameWorld does.
-	var collision_placer := GraphicDataPlacerStub.new({
-		"B50cal": object_data,
-	})
-	assert_eq(sim.resolve_collision_instances(
-			item_db, collision_placer), 1)
+	assert_eq(sim.resolve_collision_instances(item_db, null), 1)
 
 	var root := NovaResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
@@ -2730,10 +2840,12 @@ func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
 	var object_data := NovaObjectData.new()
 	assert_eq(object_data.open_file(ProjectSettings.globalize_path(
 			"res://../fixtures/3dp/B50Cal/B50Cal.3di")), OK)
-	var seat_specs := ItemSeatSpecs.seat_specs_from_model(object_data)
-	assert_eq(seat_specs.size(), 1, "B50Cal exposes its authored Usegun seat")
-	var usegun_info: Dictionary = object_data.get_user_point_info(
-			int((seat_specs[0] as Dictionary).get("bone_index", 0)) - 1)
+	var usegun_info: Dictionary = {}
+	for point_index in range(object_data.get_user_point_count()):
+		var info: Dictionary = object_data.get_user_point_info(point_index)
+		if String(info.get("name", "")).nocasecmp_to("Usegun") == 0:
+			usegun_info = info
+	assert_false(usegun_info.is_empty(), "B50Cal exposes its authored Usegun seat")
 	var expected_usegun_world := MissionObjectPlacer.entity_transform(
 			Vector3(2, 0, 0), Vector3.ZERO) * Vector3(
 					usegun_info.get("position", Vector3.ZERO))
@@ -2741,14 +2853,11 @@ func test_local_usegun_aim_articulates_emplaced_weapon_model() -> void:
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
 			"res://../fixtures/def/items.def")), OK)
 	var sim := NovaSimulation.new()
-	sim.set_item_seat_specs([{
-			"type_id": 1419,
-			"seats": seat_specs,
-			"primary_weapon": "WPN_EMPLCD50NA",
-	}])
+	var dir := _native_fixture_dir()
+	_copy_fixture(dir, "res://../fixtures/3dp/B50Cal/B50Cal.3di", "B50cal.3di")
+	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1419]))
 	assert_true(sim.load_from_mission_data(md))
-	assert_eq(sim.resolve_collision_instances(
-			item_db, ObjectDataPlacerStub.new(object_data)), 1)
+	assert_eq(sim.resolve_collision_instances(item_db, null), 1)
 	# Start well off the gun's authored zero yaw. Retail's attach request snaps the
 	# requester's look/body heading to the UseGun heading before establishing the
 	# relationship; leaving this stale produces the visible torso twist at the grips.
@@ -2862,16 +2971,14 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 			NovaMissionData.KIND_ITEM, 101294, Vector3(2, 0, 0), Vector3.ZERO)
 	assert_false(gun.is_empty())
 	var sim := NovaSimulation.new()
-	sim.set_item_seat_specs([{
-		"type_id": 1294,
-		"seats": [{
-			"type": 3,
-			"position": Vector3(0, -1, 1),
-			"source_name": "UseGun",
-		}],
-		# A finite clip makes parent-slot persistence observable across remounts.
-		"primary_weapon": "WPN_AVENGER",
-	}])
+	# The fixture def row already authors primary_weapon WPN_AVENGER (a finite
+	# clip makes parent-slot persistence observable across remounts); the
+	# superset adds the B50cal graphic for the authored Usegun seat.
+	var dir := _native_fixture_dir()
+	_copy_fixture(dir, "res://../fixtures/3dp/B50Cal/B50Cal.3di", "B50cal.3di")
+	var item_db := _item_db_from_text(dir, _fixture_items_text().replace(
+			"id 101294", "id 101294\n  graphic B50cal"))
+	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	var root := NovaResourceRoot.new()
@@ -3044,30 +3151,18 @@ func test_local_usegun_direct_swap_targets_latest_parent_without_switchto() -> v
 	assert_false(third_gun.is_empty())
 	var sim := NovaSimulation.new()
 	sim.enable_listen_server(true)
-	sim.set_item_seat_specs([
-		{
-			"type_id": 1294,
-			"seats": [{"type": 3, "position": Vector3(0, -1, 1),
-					"source_name": "UseGun"}],
-			"primary_weapon": "WPN_AVENGER",
-		},
-		{
-			"type_id": 1295,
-			"seats": [{"type": 3, "position": Vector3(0, -1, 1),
-					"source_name": "UseGun"}],
-			"primary_weapon": "WPN_EMPLCD50",
-		},
-		{
-			"type_id": 1296,
-			"seats": [{"type": 3, "position": Vector3(0, -1, 1),
-					"source_name": "UseGun"}],
-			"primary_weapon": "WPN_EMPLCD50",
-		},
-	])
+	# All three fixture emplacement rows keep their authored primaries
+	# (AVENGER / EMPLCD50 / EMPLCD50); the shared B50cal graphic supplies the
+	# one authored Usegun seat per gun.
+	var dir := _native_fixture_dir()
+	_copy_fixture(dir, "res://../fixtures/3dp/B50Cal/B50Cal.3di", "B50cal.3di")
+	var item_db := _item_db_from_text(dir, _fixture_items_text()
+			.replace("id 101294", "id 101294\n  graphic B50cal")
+			.replace("id 101295", "id 101295\n  graphic B50cal")
+			.replace("id 101296", "id 101296\n  graphic B50cal"))
+	_install_native_seat_table(sim, dir, item_db,
+			PackedInt32Array([1294, 1295, 1296]))
 	assert_true(sim.load_from_mission_data(md))
-	var item_db := NovaItemDatabase.new()
-	assert_eq(item_db.load(ProjectSettings.globalize_path(
-			"res://../fixtures/def/items.def")), OK)
 	sim.resolve_item_traits(item_db)
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	var root := NovaResourceRoot.new()
@@ -3182,12 +3277,11 @@ func test_death_during_usegun_draw_restores_personal_weapon() -> void:
 	assert_false(md.add_entity(NovaMissionData.KIND_ITEM, 101294,
 			Vector3(2, 0, 0), Vector3.ZERO).is_empty())
 	var sim := NovaSimulation.new()
-	sim.set_item_seat_specs([{
-		"type_id": 1294,
-		"seats": [{"type": 3, "position": Vector3(0, -1, 1),
-				"source_name": "UseGun"}],
-		"primary_weapon": "WPN_AVENGER",
-	}])
+	var dir := _native_fixture_dir()
+	_copy_fixture(dir, "res://../fixtures/3dp/B50Cal/B50Cal.3di", "B50cal.3di")
+	var item_db := _item_db_from_text(dir, _fixture_items_text().replace(
+			"id 101294", "id 101294\n  graphic B50cal"))
+	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	var root := NovaResourceRoot.new()
@@ -3243,12 +3337,11 @@ func test_unarmed_offline_local_usegun_toggle_is_rejected() -> void:
 	assert_false(md.add_entity(NovaMissionData.KIND_ITEM, 101294,
 			Vector3(2, 0, 0), Vector3.ZERO).is_empty())
 	var sim := NovaSimulation.new()
-	sim.set_item_seat_specs([{
-		"type_id": 1294,
-		"seats": [{"type": 3, "position": Vector3(0, -1, 1),
-				"source_name": "UseGun"}],
-		"primary_weapon": "WPN_AVENGER",
-	}])
+	var dir := _native_fixture_dir()
+	_copy_fixture(dir, "res://../fixtures/3dp/B50Cal/B50Cal.3di", "B50cal.3di")
+	var item_db := _item_db_from_text(dir, _fixture_items_text().replace(
+			"id 101294", "id 101294\n  graphic B50cal"))
+	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	sim.clear_local_player_weapon()
@@ -3263,11 +3356,19 @@ func test_unarmed_offline_local_ordinary_seat_toggle_is_allowed() -> void:
 	assert_false(md.add_entity(NovaMissionData.KIND_ITEM, 101294,
 			Vector3(2, 0, 0), Vector3.ZERO).is_empty())
 	var sim := NovaSimulation.new()
-	sim.set_item_seat_specs([{
-		"type_id": 1294,
-		"seats": [{"type": 1, "position": Vector3(0, -1, 1),
-				"source_name": "sitex00"}],
-	}])
+	# A passenger-only carrier (no primary weapon): B50cal's Usegun row renamed
+	# to sitex00 in a minimal authored def.
+	var dir := _native_fixture_dir()
+	_write_fixture_bytes(dir, "sitgun.3di", _bytes_with_renamed_user_point(
+			FileAccess.get_file_as_bytes("res://../fixtures/3dp/B50Cal/B50Cal.3di"),
+			"Usegun", "sitex00"))
+	var item_db := _item_db_from_text(dir, """begin "Unarmed Seat Carrier"
+  id 101294
+  type object
+  graphic sitgun
+end
+""")
+	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 	sim.clear_local_player_weapon()
@@ -3287,16 +3388,16 @@ func test_command_125_usegun_mount_renders_emplaced_pose() -> void:
 	assert_true(md.set_entity_property_int(NovaMissionData.KIND_ORGANIC, int(soldier["index"]), "wp_number", int(gun["bms_id"])))
 
 	var sim := NovaSimulation.new()
-	sim.set_item_seat_specs([
-		{
-			"type_id": 1294,
-			"mount_config_valid": true,
-			"mount_config": 3,
-			"seats": [
-				{"type": 3, "position": Vector3.ZERO, "yaw_offset": 0}
-			],
-		}
-	])
+	var dir := _native_fixture_dir()
+	_copy_fixture(dir, "res://../fixtures/3dp/B50Cal/B50Cal.3di", "B50cal.3di")
+	var item_db := _item_db_from_text(dir, """begin "Config3 UseGun"
+  id 101294
+  type object
+  graphic B50cal
+  phrase_set 3
+end
+""")
+	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md), "loaded command-125 UseGun mount")
 	# The mounted anim state (67 = anim_emplaced) is asserted via the debug card below; the present
 	# snapshot is the listen-server ClientState now (covered by nova_listen_server_test).
@@ -3572,11 +3673,13 @@ func test_collision_backed_building_without_oobj_keeps_batch_visibility() -> voi
 		ProjectSettings.globalize_path("res://../fixtures/threedi/3di3/House.3di")), OK)
 	assert_true(data.has_collision())
 	assert_false(data.has_occlusion(), "fixture must exercise collision without OOBJ")
-	var placer := ObjectDataPlacerStub.new(data)
 
 	var sim := NovaSimulation.new()
 	assert_true(sim.load_from_mission_data(md))
-	assert_eq(sim.resolve_collision_instances(item_db, placer), 1)
+	var dir := _native_fixture_dir()
+	_copy_fixture(dir, "res://../fixtures/threedi/3di3/House.3di", "GuardTwr1.3di")
+	_native_asset_root(sim, dir)
+	assert_eq(sim.resolve_collision_instances(item_db, null), 1)
 	sim.occlusion_init_mission()
 	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 0.05, 500.0, -100.0, false)
 	var visibility: PackedInt64Array = sim.get_building_visibility()
@@ -3602,13 +3705,12 @@ func test_occlusion_delta_calls_emit_changes_only() -> void:
 	assert_false(placed.is_empty())
 	var item_db := NovaItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path("res://../fixtures/def/items.def")), OK)
-	var data := NovaObjectData.new()
-	assert_eq(data.open_file(
-		ProjectSettings.globalize_path("res://../fixtures/threedi/3di3/House.3di")), OK)
-	var placer := ObjectDataPlacerStub.new(data)
 	var sim := NovaSimulation.new()
 	assert_true(sim.load_from_mission_data(md))
-	assert_eq(sim.resolve_collision_instances(item_db, placer), 1)
+	var dir := _native_fixture_dir()
+	_copy_fixture(dir, "res://../fixtures/threedi/3di3/House.3di", "GuardTwr1.3di")
+	_native_asset_root(sim, dir)
+	assert_eq(sim.resolve_collision_instances(item_db, null), 1)
 	sim.occlusion_init_mission()
 	sim.run_occlusion_frame(Transform3D.IDENTITY, 90.0, 1.0, 0.05, 500.0, -100.0, false)
 
@@ -3647,9 +3749,6 @@ func test_first_husk_kz_userpoints_feed_death_blast_traits() -> void:
 	var item_db := NovaItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
 			"res://../fixtures/def/items.def")), OK)
-	var main_data := NovaObjectData.new()
-	assert_eq(main_data.open_file(ProjectSettings.globalize_path(
-			"res://../fixtures/threedi/3di3/House.3di")), OK)
 	# Armry01 is a committed, loadable 3DI3 model with two user points. Relabel
 	# those two 16-byte name fields in a temporary copy so the integration test
 	# owns an exact multi-KZ witness without checking in another binary fixture.
@@ -3676,16 +3775,11 @@ func test_first_husk_kz_userpoints_feed_death_blast_traits() -> void:
 		var replacement := "KZ" if source_name == "Armory" else "kz"
 		bytes[name_offset] = replacement.unicode_at(0)
 		bytes[name_offset + 1] = replacement.unicode_at(1)
-	var kz_fixture_path := ProjectSettings.globalize_path(
-			"user://nova_simulation_kz_husk.3di")
-	var fixture_file := FileAccess.open(kz_fixture_path, FileAccess.WRITE)
-	assert_not_null(fixture_file)
-	if fixture_file != null:
-		fixture_file.store_buffer(bytes)
-		fixture_file.close()
+	var husk_dir := _native_fixture_dir()
+	_copy_fixture(husk_dir, "res://../fixtures/threedi/3di3/House.3di", "Barrel1.3di")
+	_write_fixture_bytes(husk_dir, "Barrel1X.3di", bytes)
 	var husk_data := NovaObjectData.new()
-	assert_eq(husk_data.open_file(kz_fixture_path), OK)
-	assert_eq(DirAccess.remove_absolute(kz_fixture_path), OK)
+	assert_eq(husk_data.open_file(husk_dir.path_join("Barrel1X.3di")), OK)
 
 	var expected := PackedVector3Array()
 	for point_index in range(husk_data.get_user_point_count()):
@@ -3700,13 +3794,10 @@ func test_first_husk_kz_userpoints_feed_death_blast_traits() -> void:
 	var sim := NovaSimulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	sim.resolve_item_traits(item_db)
-	var placer := GraphicDataPlacerStub.new({
-		"Barrel1": main_data,
-		"Barrel1X": husk_data,
-		# Deliberately omit Barrel1XF: KZ belongs to the first husk, while
-		# the final husk is only the preferred death-piece model.
-	})
-	assert_eq(sim.resolve_collision_instances(item_db, placer), 1)
+	# The root deliberately omits Barrel1XF: KZ belongs to the first husk,
+	# while the final husk is only the preferred death-piece model.
+	_native_asset_root(sim, husk_dir)
+	assert_eq(sim.resolve_collision_instances(item_db, null), 1)
 	var debug := sim.get_destruction_debug(bms_id)
 	assert_true(bool(debug.get("husk_model_loaded", false)),
 			"a successfully opened first husk supplies the retail live-model gate")
@@ -3754,11 +3845,12 @@ func test_first_husk_kz_userpoints_feed_death_blast_traits() -> void:
 	var final_only_sim := NovaSimulation.new()
 	assert_true(final_only_sim.load_from_mission_data(final_only_md))
 	final_only_sim.resolve_item_traits(final_only_db)
-	assert_eq(final_only_sim.resolve_collision_instances(
-			final_only_db, GraphicDataPlacerStub.new({
-				"Barrel1": main_data,
-				"Barrel1XF": husk_data,
-			})), 1)
+	var final_only_dir := _native_fixture_dir()
+	_copy_fixture(final_only_dir,
+			"res://../fixtures/threedi/3di3/House.3di", "Barrel1.3di")
+	_write_fixture_bytes(final_only_dir, "Barrel1XF.3di", bytes)
+	_native_asset_root(final_only_sim, final_only_dir)
+	assert_eq(final_only_sim.resolve_collision_instances(final_only_db, null), 1)
 	var final_only_debug := final_only_sim.get_destruction_debug(
 			int(final_only_placed.get("bms_id", 0)))
 	assert_true(bool(final_only_debug.get("husk_model_loaded", false)),
@@ -3772,8 +3864,11 @@ func test_first_husk_kz_userpoints_feed_death_blast_traits() -> void:
 	var missing_sim := NovaSimulation.new()
 	assert_true(missing_sim.load_from_mission_data(md))
 	missing_sim.resolve_item_traits(item_db)
-	assert_eq(missing_sim.resolve_collision_instances(
-			item_db, GraphicDataPlacerStub.new({"Barrel1": main_data})), 1)
+	var missing_dir := _native_fixture_dir()
+	_copy_fixture(missing_dir,
+			"res://../fixtures/threedi/3di3/House.3di", "Barrel1.3di")
+	_native_asset_root(missing_sim, missing_dir)
+	assert_eq(missing_sim.resolve_collision_instances(item_db, null), 1)
 	var missing_debug := missing_sim.get_destruction_debug(bms_id)
 	assert_true(bool(missing_debug.get("has_husk", false)),
 			"items.def still records the authored husk name")
@@ -3794,13 +3889,13 @@ func test_face_only_cfac_model_attaches_for_projectile_raycast() -> void:
 
 	var item_db := NovaItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path("res://../fixtures/def/items.def")), OK)
-	var data := NovaObjectData.new()
-	assert_eq(data.open_file(
-		ProjectSettings.globalize_path("res://../fixtures/threedi/3di3/Bird1.3di")), OK)
 
 	var sim := NovaSimulation.new()
 	assert_true(sim.load_from_mission_data(md))
-	assert_eq(sim.resolve_collision_instances(item_db, ObjectDataPlacerStub.new(data)), 1,
+	var dir := _native_fixture_dir()
+	_copy_fixture(dir, "res://../fixtures/threedi/3di3/Bird1.3di", "GuardTwr1.3di")
+	_native_asset_root(sim, dir)
+	assert_eq(sim.resolve_collision_instances(item_db, null), 1,
 		"face-only CFAC remains a real collision model")
 	var entities: Array = sim.get_hitbox_debug().get("entities", [])
 	assert_eq(entities.size(), 1)
@@ -3896,8 +3991,10 @@ func test_collision_uses_effective_lod0_and_never_first_live_lod() -> void:
 		"res://../fixtures/def/items.def")), OK)
 	var sim := NovaSimulation.new()
 	assert_true(sim.load_from_mission_data(md))
-	assert_eq(sim.resolve_collision_instances(
-		item_db, ObjectDataPlacerStub.new(data)), 1)
+	var dir := _native_fixture_dir()
+	_write_fixture_bytes(dir, "GuardTwr1.3di", _exported_3di_bytes(data))
+	_native_asset_root(sim, dir)
+	assert_eq(sim.resolve_collision_instances(item_db, null), 1)
 	sim.debug_set_panm_time_ms(0)
 	var before: PackedVector3Array = (
 		(sim.get_hitbox_debug().get("entities", [])[0] as Dictionary)
@@ -3928,14 +4025,16 @@ func test_listen_snapshot_exports_authoritative_part_anim_channels() -> void:
 	}).is_empty())
 	var sim := NovaSimulation.new()
 	sim.enable_listen_server(true)
-	sim.set_item_seat_specs([{
-		"type_id": 5004,
-		"seats": [{
-			"type": 2,
-			"position": Vector3.ZERO,
-			"source_name": "ctrlx00",
-		}],
-	}])
+	# The crate's controller seat comes from the committed Armry01 model with
+	# its Armory point byte-renamed to ctrlx00 (the fixture def's graphic).
+	var dir := _native_fixture_dir()
+	_write_fixture_bytes(dir, "StaticCrate1.3di", _bytes_with_renamed_user_point(
+			FileAccess.get_file_as_bytes("res://../fixtures/3dp/armry01/Armry01.3di"),
+			"Armory", "ctrlx00"))
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(ProjectSettings.globalize_path(
+			"res://../fixtures/def/items.def")), OK)
+	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([5004]))
 	assert_true(sim.load_from_mission_data(md))
 	for _tick in range(80):
 		sim.step()
@@ -4006,14 +4105,11 @@ func test_fast_rope_suppresses_only_special1_publication() -> void:
 		return
 	var sim := NovaSimulation.new()
 	sim.enable_listen_server(true)
-	sim.set_item_seat_specs([{
-		"type_id": 5006,
-		"seats": [{
-			"type": 2,
-			"position": Vector3.ZERO,
-			"source_name": "ctrlx00",
-		}],
-	}])
+	var dir := _native_fixture_dir()
+	_write_fixture_bytes(dir, "StaticCrate1.3di", _bytes_with_renamed_user_point(
+			FileAccess.get_file_as_bytes("res://../fixtures/3dp/armry01/Armry01.3di"),
+			"Armory", "ctrlx00"))
+	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([5006]))
 	assert_true(sim.load_from_mission_data(md))
 	sim.resolve_item_traits(item_db)
 	for _tick in range(80):
@@ -4095,31 +4191,18 @@ func test_listen_snapshot_attachment_follows_animated_userpoint() -> void:
 
 	var sim := NovaSimulation.new()
 	sim.enable_listen_server(true)
-	sim.set_item_seat_specs([{
-		"type_id": 1291,
-		"model_data": data,
-		"seats": [{
-			"type": 2,
-			"position": Vector3.ZERO,
-			"source_name": "ctrlx00",
-		}],
-		"emplacement_attachments": [{
-			"item_id": 101419,
-			"stored_slot": 1,
-			"anchor_found": true,
-			"bone_index": anchor_index + 1,
-			"source_name": String(anchor_info.get("name", "")),
-			"local": ItemSeatSpecs.seat_local_from_user_point_position(
-					anchor_info.get("position", Vector3.ZERO)),
-		}],
-	}])
+	# The carrier def authors the addeweap row; the exported edited model
+	# resolves the ewep01 anchor natively (dm1a1 also authors the ctrlx25
+	# controller seat the old dict spec faked). This attachment lifecycle needs
+	# the real carrier/child rows (health, class, and NoNetworkCallback), so
+	# the def is the fixture superset, not an isolated FastRope fixture.
+	var dir := _native_fixture_dir()
+	_write_fixture_bytes(dir, "dm1a1.3di", _exported_3di_bytes(data))
+	var item_db := _item_db_from_text(dir, _fixture_items_text()
+			.replace("graphic Dbuggy1", "graphic dm1a1")
+			.replace("id 101291", "id 101291\n  addeweap ewep01 101419"))
+	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1291]))
 	assert_true(sim.load_from_mission_data(md))
-	# This attachment lifecycle needs the real carrier/child rows (health,
-	# class, and NoNetworkCallback), not the isolated FastRope fixture used by
-	# the neighboring publication tests.
-	var item_db := NovaItemDatabase.new()
-	assert_eq(item_db.load(ProjectSettings.globalize_path(
-			"res://../fixtures/def/items.def")), OK)
 	sim.resolve_item_traits(item_db)
 
 	# First fold materializes the synthetic row before the scripted animation has
@@ -4239,20 +4322,15 @@ func _fast_rope_collision_moved_vertices(register_name: String, channel: int) ->
 			0, anim, "translation", "x", 0.0, 4.0, 0.0))
 
 	var sim := NovaSimulation.new()
-	sim.set_item_seat_specs([{
-		"type_id": 5006,
-		"seats": [{
-			"type": 2,
-			"position": Vector3.ZERO,
-			"source_name": "ctrlx00",
-		}],
-	}])
+	# One exported model carries both the register-driven PANM edit and the
+	# ctrlx00 controller seat (Armory byte-renamed post-export).
+	var dir := _native_fixture_dir()
+	_write_fixture_bytes(dir, "StaticCrate1.3di", _bytes_with_renamed_user_point(
+			_exported_3di_bytes(data), "Armory", "ctrlx00"))
+	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([5006]))
 	assert_true(sim.load_from_mission_data(md))
 	sim.resolve_item_traits(item_db)
-	var collision_placer := GraphicDataPlacerStub.new({
-		"StaticCrate1": data,
-	})
-	assert_eq(sim.resolve_collision_instances(item_db, collision_placer), 1)
+	assert_eq(sim.resolve_collision_instances(item_db, null), 1)
 	var before_rows: Array = sim.get_hitbox_debug().get("entities", [])
 	assert_eq(before_rows.size(), 1)
 	if before_rows.size() != 1:
@@ -4320,18 +4398,13 @@ func test_animated_collision_uses_retail_section_ordinal_headlessly() -> void:
 		0.0, 4.0, 0.0))
 
 	var sim := NovaSimulation.new()
-	sim.set_item_seat_specs([{
-		'type_id': 5004,
-		'seats': [{
-			'type': 2,
-			'position': Vector3.ZERO,
-			'source_name': 'ctrlx00',
-		}],
-	}])
+	var dir := _native_fixture_dir()
+	_write_fixture_bytes(dir, "StaticCrate1.3di", _bytes_with_renamed_user_point(
+			_exported_3di_bytes(data), "Armory", "ctrlx00"))
+	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([5004]))
 	assert_true(sim.load_from_mission_data(md))
 	assert_eq(sim.get_entity_count(), 1)
-	assert_eq(sim.resolve_collision_instances(
-		item_db, ObjectDataPlacerStub.new(data)), 1)
+	assert_eq(sim.resolve_collision_instances(item_db, null), 1)
 	var before_debug: Array = sim.get_hitbox_debug().get(
 		'entities', [])
 	assert_eq(before_debug.size(), 1)
@@ -4373,22 +4446,14 @@ func test_organic_collision_samples_current_skeletal_pose_headlessly() -> void:
 	# BINOC is a committed 19-bone, three-frame BAD. Pair it with CharModel's
 	# canonical 19-row model table/COBJ block so the real NovaSkeletalAnim ->
 	# NovaSimulation -> CollisionWorld path can be tested without retail assets.
-	var tmp := ProjectSettings.globalize_path(
-			"res://.godot/person_collision_pose_test")
-	assert_eq(DirAccess.make_dir_recursive_absolute(tmp), OK)
-	var bad_out := FileAccess.open(tmp.path_join("BINOC.bad"), FileAccess.WRITE)
-	assert_not_null(bad_out)
-	if bad_out == null:
-		return
-	bad_out.store_buffer(FileAccess.get_file_as_bytes(
-			"res://../fixtures/bad/BINOC.bad"))
-	bad_out.close()
+	var dir := _native_fixture_dir()
+	_write_char_rig(dir, "us02")
 	# BINOC is a static three-frame clip. Turn BN15/head frame 1 into an
 	# identity quaternion at its parser-pinned rotation offset (1324 + 16)
 	# to make a deterministic moving-bone fixture while retaining its real
 	# 19-bone hierarchy and every other shipped byte.
 	var moving_bad := FileAccess.open(
-			tmp.path_join("BINOC.bad"), FileAccess.READ_WRITE)
+			dir.path_join("BINOC.bad"), FileAccess.READ_WRITE)
 	assert_not_null(moving_bad)
 	if moving_bad == null:
 		return
@@ -4398,20 +4463,9 @@ func test_organic_collision_samples_current_skeletal_pose_headlessly() -> void:
 	moving_bad.store_float(0.0)
 	moving_bad.store_float(1.0)
 	moving_bad.close()
-	var adm_out := FileAccess.open(
-			tmp.path_join("person_collision.adm"), FileAccess.WRITE)
-	assert_not_null(adm_out)
-	if adm_out == null:
-		return
-	var quote := String.chr(34)
-	adm_out.store_string(
-			"anim_reset %sBINOC.bad%s\n" % [quote, quote] +
-			"anim_idle %sBINOC.bad%s\n" % [quote, quote] +
-			"anim_idle_2 %sBINOC.bad%s\n" % [quote, quote])
-	adm_out.close()
 
 	var root := NovaResourceRoot.new()
-	assert_eq(root.set_root_dir(tmp), OK)
+	assert_eq(root.set_root_dir(dir), OK)
 	var data := NovaObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(
 			"res://../fixtures/threedi/3di3/CharModel.3di")), OK)
@@ -4441,9 +4495,9 @@ func test_organic_collision_samples_current_skeletal_pose_headlessly() -> void:
 			"res://../fixtures/def/items.def")), OK)
 	var sim := NovaSimulation.new()
 	assert_true(sim.load_from_mission_data(md))
-	assert_gt(sim.set_infantry_anim_map(root, "person_collision.adm"), 0)
-	assert_eq(sim.resolve_collision_instances(
-			item_db, SkeletalDataPlacerStub.new(data, skeletal)), 1)
+	assert_gt(sim.set_infantry_anim_map(root, "us02.adm"), 0)
+	sim.set_asset_root(root)
+	assert_eq(sim.resolve_collision_instances(item_db, null), 1)
 
 	var before: Array = sim.get_hitbox_debug().get("organics", [])
 	assert_eq(before.size(), 19, "one posed sphere per CharModel COBJ/bone")
@@ -4475,10 +4529,6 @@ func test_organic_collision_samples_current_skeletal_pose_headlessly() -> void:
 			"current BAD pose, not bind/entity-only matrices, drives collision")
 	sim.free()
 
-	DirAccess.remove_absolute(tmp.path_join("BINOC.bad"))
-	DirAccess.remove_absolute(tmp.path_join("person_collision.adm"))
-	DirAccess.remove_absolute(tmp)
-
 
 func test_late_spawned_player_resolves_posed_collision_on_demand() -> void:
 	# Mission collision is resolved before deploy in production. A player added
@@ -4489,22 +4539,15 @@ func test_late_spawned_player_resolves_posed_collision_on_demand() -> void:
 	var item_db := NovaItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
 			"res://../fixtures/def/items.def")), OK)
-	var data := NovaObjectData.new()
-	assert_eq(data.open_file(ProjectSettings.globalize_path(
-			"res://../fixtures/threedi/3di3/CharModel.3di")), OK)
-	var bad_root := NovaResourceRoot.new()
-	assert_eq(bad_root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../fixtures/bad")), OK)
-	var skeletal := NovaSkeletalAnim.new()
-	assert_true(skeletal.load_from_bad_files(
-			bad_root, "BINOC.bad", {"anim_idle": "BINOC.bad"},
-			data.get_bone_origins(), data.get_bone_parents()),
-			"late-spawn rig loads: %s" % skeletal.get_last_error())
+	# The player's own graphic (US01) + rig live in the sim's asset root; the
+	# demand resolve must find them there after the sweep already ran.
+	var dir := _native_fixture_dir()
+	_write_char_rig(dir, "us01")
 
 	var sim := NovaSimulation.new()
 	assert_true(sim.load_from_mission_data(md))
-	assert_eq(sim.resolve_collision_instances(
-			item_db, SkeletalDataPlacerStub.new(data, skeletal)), 0,
+	_native_asset_root(sim, dir)
+	assert_eq(sim.resolve_collision_instances(item_db, null), 0,
 			"the initial pre-deploy sweep has no player to attach")
 	assert_true(sim.spawn_local_player(Vector3(10, 0, 0), 0.0, 1))
 
@@ -4532,21 +4575,13 @@ func test_f3_hides_local_player_and_omits_distant_posed_organic() -> void:
 	var item_db := NovaItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
 			"res://../fixtures/def/items.def")), OK)
-	var data := NovaObjectData.new()
-	assert_eq(data.open_file(ProjectSettings.globalize_path(
-			"res://../fixtures/threedi/3di3/CharModel.3di")), OK)
-	var bad_root := NovaResourceRoot.new()
-	assert_eq(bad_root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../fixtures/bad")), OK)
-	var skeletal := NovaSkeletalAnim.new()
-	assert_true(skeletal.load_from_bad_files(
-			bad_root, "BINOC.bad", {"anim_idle": "BINOC.bad"},
-			data.get_bone_origins(), data.get_bone_parents()))
+	var dir := _native_fixture_dir()
+	_write_char_rig(dir, "us02")
 
 	var sim := NovaSimulation.new()
 	assert_true(sim.load_from_mission_data(md))
-	assert_eq(sim.resolve_collision_instances(
-			item_db, SkeletalDataPlacerStub.new(data, skeletal)), 1)
+	_native_asset_root(sim, dir)
+	assert_eq(sim.resolve_collision_instances(item_db, null), 1)
 	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
 
 	var rows: Array = sim.get_hitbox_debug().get("organics", [])
@@ -4588,21 +4623,15 @@ func test_reused_player_slot_invalidates_old_collision_attempt_identity() -> voi
 	var item_db := NovaItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
 			"res://../fixtures/def/items.def")), OK)
-	var data := NovaObjectData.new()
-	assert_eq(data.open_file(ProjectSettings.globalize_path(
-			"res://../fixtures/threedi/3di3/CharModel.3di")), OK)
-	var bad_root := NovaResourceRoot.new()
-	assert_eq(bad_root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../fixtures/bad")), OK)
-	var skeletal := NovaSkeletalAnim.new()
-	assert_true(skeletal.load_from_bad_files(
-			bad_root, "BINOC.bad", {"anim_idle": "BINOC.bad"},
-			data.get_bone_origins(), data.get_bone_parents()))
-	var placer := PlayerOnlySkeletalPlacerStub.new(data, skeletal)
+	# A US01-only root: the placed US02 soldier deliberately cannot resolve,
+	# while the replacement local player's graphic can.
+	var dir := _native_fixture_dir()
+	_write_char_rig(dir, "us01")
 
 	var sim := NovaSimulation.new()
 	assert_true(sim.load_from_mission_data(md))
-	assert_eq(sim.resolve_collision_instances(item_db, placer), 0,
+	_native_asset_root(sim, dir)
+	assert_eq(sim.resolve_collision_instances(item_db, null), 0,
 			"US02 records one unresolved attempt on slot 0")
 	for _tick in 16:
 		sim.step()
@@ -4642,21 +4671,16 @@ func test_restart_re_resolves_the_restored_collision_identity() -> void:
 	var item_db := NovaItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
 			"res://../fixtures/def/items.def")), OK)
-	var data := NovaObjectData.new()
-	assert_eq(data.open_file(ProjectSettings.globalize_path(
-			"res://../fixtures/threedi/3di3/CharModel.3di")), OK)
-	var bad_root := NovaResourceRoot.new()
-	assert_eq(bad_root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../fixtures/bad")), OK)
-	var skeletal := NovaSkeletalAnim.new()
-	assert_true(skeletal.load_from_bad_files(
-			bad_root, "BINOC.bad", {"anim_idle": "BINOC.bad"},
-			data.get_bone_origins(), data.get_bone_parents()))
-	var placer := SkeletalDataPlacerStub.new(data, skeletal)
+	# Both the placed US02 soldier and the replacement US01 local player
+	# resolve from the same root.
+	var dir := _native_fixture_dir()
+	_write_char_rig(dir, "us02")
+	_write_char_rig(dir, "us01")
 
 	var sim := NovaSimulation.new()
 	assert_true(sim.load_from_mission_data(md))
-	assert_eq(sim.resolve_collision_instances(item_db, placer), 1)
+	_native_asset_root(sim, dir)
+	assert_eq(sim.resolve_collision_instances(item_db, null), 1)
 	assert_true(bool(sim.get_destruction_debug(
 			bms_id).get("has_collision_instance", false)))
 	for _tick in 16:
@@ -4750,8 +4774,10 @@ func test_time_driven_collision_advances_without_an_ai_brain() -> void:
 	var sim := NovaSimulation.new()
 	assert_true(sim.load_from_mission_data(md))
 	assert_eq(sim.get_entity_count(), 0, 'static has no AiEntity controls')
-	assert_eq(sim.resolve_collision_instances(
-		item_db, ObjectDataPlacerStub.new(data)), 1)
+	var dir := _native_fixture_dir()
+	_write_fixture_bytes(dir, "GuardTwr1.3di", _exported_3di_bytes(data))
+	_native_asset_root(sim, dir)
+	assert_eq(sim.resolve_collision_instances(item_db, null), 1)
 	var fallback_tick := sim.get_logic_tick()
 	var fallback_before: PackedVector3Array = (
 		(sim.get_hitbox_debug().get('entities', [])[0] as Dictionary)

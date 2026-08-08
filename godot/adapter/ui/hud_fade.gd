@@ -10,7 +10,9 @@ extends RefCounted
 ## 255 → 0 over the ramp: fade = 255 − u8(u16((elapsed<<16)/ticks − 1) >> 8).
 ## [orig: draw_hud_ammo_indicator @0x599af9; draw-stance @0x599fc0]
 
-const PERCENT_TO_ALPHA := 2.55
+# The engine's witnessed factor (hud/hud_math.h kPercentToAlpha) through
+# the binding — float class constants cannot BIND_CONSTANT.
+static var PERCENT_TO_ALPHA := NovaHudPos.percent_to_alpha()
 const SECONDS_TO_TICKS := 62.0
 
 

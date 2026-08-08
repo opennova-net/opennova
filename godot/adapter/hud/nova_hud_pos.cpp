@@ -6,6 +6,22 @@
 #include <def/def.h>
 #include <hud/hud_math.h>
 
+// The GDScript-facing mirrors are pinned to the engine's witnessed values —
+// a drifted copy here would silently split the native expiry policy from the
+// shell's wrap/trim consumers.
+static_assert(godot::NovaHudPos::MESSAGE_LIFE_TICKS ==
+		opennova::hud::kMessageLifeTicks);
+static_assert(godot::NovaHudPos::MESSAGE_EXPIRY_STAGGER ==
+		opennova::hud::kMessageExpiryStagger);
+static_assert(godot::NovaHudPos::MESSAGE_TEXT_MAX ==
+		opennova::hud::kMessageTextMax);
+static_assert(godot::NovaHudPos::MESSAGE_SLOT_COUNT ==
+		opennova::hud::kMessageSlotCount);
+
+double godot::NovaHudPos::percent_to_alpha() {
+	return opennova::hud::kPercentToAlpha;
+}
+
 using namespace godot;
 
 namespace {
@@ -98,6 +114,12 @@ void NovaHudPos::_bind_methods() {
 
 	BIND_CONSTANT(DESIGN_WIDTH);
 	BIND_CONSTANT(DESIGN_HEIGHT);
+	BIND_CONSTANT(MESSAGE_LIFE_TICKS);
+	BIND_CONSTANT(MESSAGE_EXPIRY_STAGGER);
+	BIND_CONSTANT(MESSAGE_TEXT_MAX);
+	BIND_CONSTANT(MESSAGE_SLOT_COUNT);
+	ClassDB::bind_static_method("NovaHudPos", D_METHOD("percent_to_alpha"),
+			&NovaHudPos::percent_to_alpha);
 }
 
 NovaHudPos::NovaHudPos() {}

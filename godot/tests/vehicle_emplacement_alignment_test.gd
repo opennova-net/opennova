@@ -1,7 +1,6 @@
 extends GutTest
 
 const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
-const ItemSeatSpecs := preload("res://adapter/world/item_seat_specs.gd")
 
 const MISSION := "03TR.bms"
 const CARRIER_ITEM_ID := 102010
@@ -53,6 +52,38 @@ func _blackhawk_anchors(data: NovaObjectData) -> Array:
 				anchors.append(candidate)
 				break
 	return anchors
+
+
+func _authored_attachment_anchors(
+		item_db: NovaItemDatabase, item_id: int, data: NovaObjectData) -> Array:
+	# Oracle-side rebuild of the authored addeweap anchors: the items.def row
+	# names the child item + userpoint, the .3di USRP row supplies the raw
+	# retail frame. Whole-name case-insensitive resolve, first match — the same
+	# rule the runtime applies, so the expected frames pair with produced rows.
+	var rows: Array = []
+	for raw in item_db.get_emplacement_attachments(item_id):
+		var authored: Dictionary = raw
+		var wanted := String(authored.get("userpoint", "")).strip_edges()
+		var row := {
+			"item_id": int(authored.get("item_id", 0)),
+			"source_name": wanted,
+			"subobject": -1,
+			"raw_position": Vector3.ZERO,
+			"raw_rotation": Vector3.ZERO,
+			"anchor_found": false,
+		}
+		for index in range(data.get_user_point_count()):
+			var up: Dictionary = data.get_user_point_info(index)
+			if String(up.get("name", "")).strip_edges().nocasecmp_to(wanted) != 0:
+				continue
+			row["anchor_found"] = true
+			row["source_name"] = String(up.get("name", ""))
+			row["subobject"] = int(up.get("subobject", -1))
+			row["raw_position"] = up.get("position", Vector3.ZERO)
+			row["raw_rotation"] = up.get("rotation", Vector3.ZERO)
+			break
+		rows.append(row)
+	return rows
 
 
 func _present_miniguns(sim: NovaSimulation) -> Array:
@@ -149,12 +180,18 @@ func test_03tr_blackhawk_miniguns_follow_authored_ewep_forward() -> void:
 						* Vector3.BACK).normalized(),
 			})
 
-	var carrier_spec := ItemSeatSpecs.seat_specs_for_item(
-			root, item_db, CARRIER_ITEM_ID, CARRIER_TYPE_ID, true)
-	assert_eq((carrier_spec.get("emplacement_attachments", []) as Array).size(), 2)
+	var carrier_card: Dictionary = item_db.extract_seat_specs_for_item(
+			root, CARRIER_ITEM_ID)
+	assert_eq((carrier_card.get("emplacement_attachments", []) as Array).size(), 2)
+	# S16: the seat/mount table is the native extraction over items.def rows +
+	# .3di userpoints — the asset root must be installed before the seed walk.
 	var sim := NovaSimulation.new()
 	sim.enable_listen_server(true)
-	sim.set_item_seat_specs([carrier_spec])
+	sim.set_asset_root(root)
+	assert_true(sim.install_seat_specs_for_type_ids(
+			item_db, PackedInt32Array([CARRIER_TYPE_ID])))
+	assert_gt(int(sim.debug_native_pose_stats().get("mounted_graphic_sources", 0)), 0,
+			"the native install fed the mounted-pose resolver")
 	assert_true(sim.load_from_mission_data(mission))
 	sim.resolve_item_traits(item_db)
 	sim.step()
@@ -199,20 +236,22 @@ func test_mrk5_nonplanar_anchors_use_the_retail_row_matrix_frame() -> void:
 	var item_db := NovaItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
 	assert_eq(String(item_db.get_graphic(MRK5_ITEM_ID)), MRK5_GRAPHIC)
-	var carrier_spec := ItemSeatSpecs.seat_specs_for_item(
-			root, item_db, MRK5_ITEM_ID, MRK5_TYPE_ID, true)
-	var attachments: Array = carrier_spec.get(
-			"emplacement_attachments", []) as Array
-	assert_eq(attachments.size(), 4, "the shipped MRK5 has four attachment anchors")
+	var carrier_card: Dictionary = item_db.extract_seat_specs_for_item(
+			root, MRK5_ITEM_ID)
+	assert_eq((carrier_card.get("emplacement_attachments", []) as Array).size(), 4,
+			"the shipped MRK5 has four attachment anchors")
+	var data := NovaObjectData.new()
+	var open_err := data.open_from_resource_root(root, MRK5_GRAPHIC + ".3di")
+	assert_eq(open_err, OK)
+	if open_err != OK:
+		return
+	var attachments := _authored_attachment_anchors(item_db, MRK5_ITEM_ID, data)
+	assert_eq(attachments.size(), 4)
 	var child_types := {}
 	for raw in attachments:
 		var attachment: Dictionary = raw
 		child_types[int(attachment.get("item_id", 0)) - 100000] = true
 
-	var data := carrier_spec.get("model_data") as NovaObjectData
-	assert_not_null(data)
-	if data == null:
-		return
 	var rest_parts := data.evaluate_panm(0, 0, {})
 	var live_parts := data.evaluate_panm(0, 16, {})
 	var mission := NovaMissionData.new()
@@ -256,7 +295,11 @@ func test_mrk5_nonplanar_anchors_use_the_retail_row_matrix_frame() -> void:
 
 	var sim := NovaSimulation.new()
 	sim.enable_listen_server(true)
-	sim.set_item_seat_specs([carrier_spec])
+	sim.set_asset_root(root)
+	assert_true(sim.install_seat_specs_for_type_ids(
+			item_db, PackedInt32Array([MRK5_TYPE_ID])))
+	assert_gt(int(sim.debug_native_pose_stats().get("mounted_graphic_sources", 0)), 0,
+			"the native install fed the mounted-pose resolver")
 	assert_true(sim.load_from_mission_data(mission))
 	sim.resolve_item_traits(item_db)
 	sim.step()
@@ -303,12 +346,19 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 	var item_db := NovaItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
 	assert_eq(String(item_db.get_graphic(DBUGGY_ITEM_ID)), DBUGGY_GRAPHIC)
-	var carrier_spec := ItemSeatSpecs.seat_specs_for_item(
-			root, item_db, DBUGGY_ITEM_ID, DBUGGY_TYPE_ID, true)
-	var attachments: Array = carrier_spec.get(
-			"emplacement_attachments", []) as Array
-	assert_gt(attachments.size(), 0,
+	var carrier_card: Dictionary = item_db.extract_seat_specs_for_item(
+			root, DBUGGY_ITEM_ID)
+	assert_gt((carrier_card.get("emplacement_attachments", []) as Array).size(), 0,
 			"the shipped DBuggy authors at least one child emplacement")
+	var data := NovaObjectData.new()
+	var open_err := data.open_from_resource_root(root, DBUGGY_GRAPHIC + ".3di")
+	assert_eq(open_err, OK)
+	if open_err != OK:
+		return
+	var attachments := _authored_attachment_anchors(item_db, DBUGGY_ITEM_ID, data)
+	assert_eq(attachments.size(),
+			(carrier_card.get("emplacement_attachments", []) as Array).size(),
+			"the native extraction carries every authored DBuggy attachment")
 	var child_types := {}
 	var attachment_by_type := {}
 	for raw in attachments:

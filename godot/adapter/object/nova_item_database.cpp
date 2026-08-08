@@ -1,4 +1,9 @@
 #include "nova_item_database.h"
+#include "resource_index/nova_resource_root.h"
+
+#include <mission/mission.h> // kItemIdOffset
+#include <simassets/seat_spec_extract.h>
+#include <simassets/sim_model_cache.h>
 
 #include "mission/nova_mission_data.h"
 #include "resource_index/nova_resource_root.h"
@@ -57,6 +62,9 @@ void NovaItemDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_light_transfer", "id"), &NovaItemDatabase::get_light_transfer);
 	ClassDB::bind_method(D_METHOD("is_ai_capable", "id"), &NovaItemDatabase::is_ai_capable);
 	ClassDB::bind_method(D_METHOD("get_display_name", "id"), &NovaItemDatabase::get_display_name);
+	ClassDB::bind_method(
+			D_METHOD("extract_seat_specs_for_item", "resource_root", "item_id"),
+			&NovaItemDatabase::extract_seat_specs_for_item);
 	ClassDB::bind_method(D_METHOD("get_ammo_closeattack", "id"), &NovaItemDatabase::get_ammo_closeattack);
 	ClassDB::bind_method(D_METHOD("get_clipsize", "id"), &NovaItemDatabase::get_clipsize);
 	ClassDB::bind_method(D_METHOD("get_deathtime_ticks", "id"), &NovaItemDatabase::get_deathtime_ticks);
@@ -709,5 +717,97 @@ Array NovaItemDatabase::get_items() const {
 				get_emplacement_attachment_markers(item->id);
 		out.push_back(entry);
 	}
+	return out;
+}
+
+Dictionary NovaItemDatabase::extract_seat_specs_for_item(
+		const Ref<NovaResourceRoot> &p_root, int p_item_id) {
+	Dictionary out;
+	out["item_id"] = p_item_id;
+	out["type_id"] =
+			p_item_id - static_cast<int>(opennova::mission::kItemIdOffset);
+	out["display_name"] = String();
+	out["graphic"] = String();
+	out["model"] = String();
+	out["seats"] = Array();
+	out["armory_points"] = Array();
+	out["emplacement_attachments"] = Array();
+	out["primary_weapon"] = String();
+	out["mount_config_valid"] = false;
+	out["mount_config"] = 0;
+	out["error"] = String();
+	if (p_root.is_null()) {
+		out["error"] = "missing_resource_root_or_item_db";
+		return out;
+	}
+	if (!has_item(p_item_id)) {
+		out["error"] = "item_not_found";
+		return out;
+	}
+	const String graphic = get_graphic(p_item_id);
+	out["display_name"] = get_display_name(p_item_id);
+	out["graphic"] = graphic;
+	if (!graphic.is_empty())
+		out["model"] = graphic.get_file().get_basename() + ".3di";
+
+	opennova::simassets::SimModelCache models;
+	models.set_index(&p_root->native_index());
+	opennova::simassets::SeatSpecExtraction native;
+	opennova::simassets::extract_item_seat_specs(
+			native_items(),
+			[&models](const std::string &key) { return models.model_for(key); },
+			{p_item_id}, native);
+	const int32_t type_id =
+			p_item_id - static_cast<int>(opennova::mission::kItemIdOffset);
+	const opennova::mission::ItemSeatSpec *spec = nullptr;
+	for (const opennova::mission::ItemSeatSpec &candidate : native.specs) {
+		if (candidate.type_id == type_id) {
+			spec = &candidate;
+			break;
+		}
+	}
+	if (spec == nullptr) return out; // no runtime metadata — an empty card
+
+	static const char *kSeatTypeLabels[] = {
+			"none", "passenger", "controller", "gunner", "armory", "driver"};
+	Array seats;
+	for (const opennova::world::Seat &seat : spec->seats) {
+		Dictionary row;
+		const int seat_type = static_cast<int>(seat.type);
+		row["type"] = seat_type;
+		constexpr int kSeatTypeLabelCount =
+				static_cast<int>(sizeof(kSeatTypeLabels) / sizeof(kSeatTypeLabels[0]));
+		row["type_label"] = seat_type >= 0 && seat_type < kSeatTypeLabelCount
+				? String(kSeatTypeLabels[seat_type])
+				: String("none");
+		row["retail_slot"] = seat.retail_slot;
+		row["bone_index"] = seat.bone_index;
+		row["pose_index"] = seat.pose_index;
+		row["yaw_offset"] = seat.yaw_offset;
+		row["local"] = Vector3(seat.seat_local.x, seat.seat_local.y,
+				seat.seat_local.z);
+		row["source_name"] = String(seat.source_name.c_str());
+		row["occupied"] = false;
+		seats.push_back(row);
+	}
+	out["seats"] = seats;
+	Array armory;
+	for (const opennova::world::Vec3 &p : spec->armory_points)
+		armory.push_back(Vector3(p.x, p.y, p.z));
+	out["armory_points"] = armory;
+	Array attachments;
+	for (const opennova::mission::ItemEmplacementAttachmentSpec &attachment :
+			spec->emplacement_attachments) {
+		Dictionary row;
+		row["child_type_id"] = attachment.child_type_id;
+		row["item_id"] = attachment.child_type_id +
+				static_cast<int>(opennova::mission::kItemIdOffset);
+		row["anchor_found"] = attachment.anchor_found;
+		attachments.push_back(row);
+	}
+	out["emplacement_attachments"] = attachments;
+	out["primary_weapon"] = String(spec->primary_weapon.c_str());
+	out["mount_config_valid"] = spec->mount_config_valid;
+	out["mount_config"] = spec->mount_config;
 	return out;
 }

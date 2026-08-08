@@ -122,7 +122,7 @@ void project_client_replica_present_row(
 	// (the retail +0x2C0 park's visible outcome).
 	const bool root_motion_armed =
 			entity.rm_adm_id >= 0 && entity.rm_state >= 0;
-	if (context.remote_body_native_publish && root_motion_armed) {
+	if (root_motion_armed) {
 		// The channel already ran the per-record receive arbitration + the
 		// deferred promotion in the fold/tick (D-NET-209), so it presents
 		// DIRECTLY in the host-loopback tuple shape: current + playhead +

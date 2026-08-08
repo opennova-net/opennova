@@ -328,6 +328,9 @@ private:
 	// one displaced-detect full update and self-corrects.
 	std::unordered_map<uint16_t, world::CollisionWorld::ResolveState>
 			replica_resolve_states_;
+	// Scratch for the replica contact resolver's netsim->world peer copy
+	// (cleared per call; grows once to the session's peer cap).
+	std::vector<world::CollisionWorld::ReplicaPeer> replica_peer_scratch_;
 };
 
 } // namespace opennova::np

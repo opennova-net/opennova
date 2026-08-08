@@ -6,9 +6,11 @@
 
 #include <simassets/item_traits.h>
 #include <simassets/mounted_pose.h>      // the native mounted-pose resolver (S4, ADR 0028)
+#include <simassets/seat_spec_extract.h> // the native seat-spec extraction (S4, ADR 0028)
 #include <threedi/threedi_ctrl_catalog.h>
 #include <threedi/threedi_panm_pose.h> // the native PANM liveness gate (S3, ADR 0028)
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>
@@ -189,9 +191,10 @@ void NovaSimulation::apply_collision_to_ai() {
 
 // The mounted-pose resolver (S4, ADR 0028) is native-only: the engine-side
 // resolver over the sim's own parse (simassets::resolve_model_mounted_pose) is
-// the sole host-authority path. Its model source is mounted_pose_native_models_,
-// filled by set_item_seat_specs from the sim cache (production) or the installed
-// spec's model_data (test/tool worlds).
+// the sole host-authority path. Its model source resolves AT QUERY TIME —
+// the spec's graphic through the sim cache (production; survives asset-root
+// switches because the cache re-parses under the live index), else the
+// installed spec's Ref-kept model_data parse (boot order / test worlds).
 bool NovaSimulation::resolve_mounted_pose(
 		opennova::world::World &p_world,
 		const opennova::world::Entity &p_carrier,
@@ -209,12 +212,22 @@ bool NovaSimulation::resolve_mounted_pose_native(
 			p_seat.type != opennova::world::SeatType::Gunner ||
 			p_seat.bone_index == 0)
 		return false;
-	const auto found = mounted_pose_native_models_.find(p_carrier.item_id);
-	if (found == mounted_pose_native_models_.end() || found->second == nullptr)
+	++mounted_native_queries_;
+	const Threedi3di3 *model_ptr = nullptr;
+	const auto found_graphic =
+			mounted_pose_native_graphics_.find(p_carrier.item_id);
+	if (found_graphic != mounted_pose_native_graphics_.end() &&
+			sim_models_.has_index())
+		model_ptr = sim_models_.model_for(found_graphic->second);
+	if (model_ptr == nullptr) {
+		++mounted_native_declines_;
 		return false;
-	const Threedi3di3 &model = *found->second;
-	if (model.ctrl.count > 0 && model.ctrl.registers == nullptr)
+	}
+	const Threedi3di3 &model = *model_ptr;
+	if (model.ctrl.count > 0 && model.ctrl.registers == nullptr) {
+		++mounted_native_declines_;
 		return false;
+	}
 	// The same three CTRL sources the legacy resolver publishes, written by
 	// ordinal onto the retail bus.
 	int32_t ctrl_values[THREEDI_CTRL_REGISTER_COUNT] = {};
@@ -240,20 +253,20 @@ bool NovaSimulation::resolve_mounted_pose_native(
 	const uint32_t time_ms = panm_time_override_ms_ >= 0
 			? static_cast<uint32_t>(panm_time_override_ms_)
 			: p_world.logic_tick * 16u;
-	return opennova::simassets::resolve_model_mounted_pose(
+	const bool resolved = opennova::simassets::resolve_model_mounted_pose(
 			model, p_carrier, p_seat, ctrl_values, time_ms, r_out);
+	if (!resolved) ++mounted_native_declines_;
+	return resolved;
 }
 
 bool NovaSimulation::ensure_collision_instance(
 		opennova::world::World &p_world,
 		opennova::world::EntityHandle p_entity) {
-	if (!world_ || &p_world != world_.get() ||
-			collision_item_db_.is_null() || collision_placer_.is_null())
+	if (!world_ || &p_world != world_.get() || collision_item_db_.is_null())
 		return false;
 	const opennova::world::Entity *entity = p_world.registry.get(p_entity);
 	if (entity == nullptr) {
 		collision_world_.remove_entity_instance(p_entity);
-		collision_skeletal_sources_.erase(p_entity.packed);
 		collision_pose_native_.remove_entity(p_entity);
 		collision_resolution_attempted_.erase(p_entity.packed);
 		return false;
@@ -264,7 +277,6 @@ bool NovaSimulation::ensure_collision_instance(
 		if (attempted->second == entity->registry_spawn_id)
 			return collision_world_.has_instance(p_world, p_entity);
 		collision_world_.remove_entity_instance(p_entity);
-		collision_skeletal_sources_.erase(p_entity.packed);
 		collision_pose_native_.remove_entity(p_entity);
 		collision_resolution_attempted_.erase(attempted);
 	}
@@ -272,7 +284,7 @@ bool NovaSimulation::ensure_collision_instance(
 	// Re-run the idempotent attach sweep against the retained mission caches.
 	// It resolves every entity that appeared since the previous sweep, including
 	// a player deployed after load, without registering another graphic model.
-	resolve_collision_instances(collision_item_db_, collision_placer_.ptr());
+	resolve_collision_instances(collision_item_db_, nullptr);
 	return collision_world_.has_instance(p_world, p_entity);
 }
 
@@ -293,227 +305,33 @@ bool NovaSimulation::build_section_matrices(opennova::world::World &p_world,
 	// The provider consumes the same per-query sim state this binding reads.
 	collision_pose_native_.weapon_active = local_weapon_.active;
 	collision_pose_native_.panm_time_override_ms = panm_time_override_ms_;
+	++collision_native_queries_;
 	if (collision_pose_native_.build_section_matrices(p_world, p_entity,
 			p_model_id, p_entity_world, p_model, r_out))
 		return true;
-	// Fallback for asset-rootless stub worlds only (see the header note).
-	return build_section_matrices_legacy(p_world, p_entity, p_model_id,
-			p_entity_world, p_model, r_out);
+	// Native-only (S3b full). False WITHOUT a registered source is the
+	// normal rigid path — most placed items carry no live PANM and no rig,
+	// and CollisionWorld poses them as identity sections. False WITH a
+	// source is a real decline (the masked-failure signal the soak/probes
+	// gate on); the legacy render-bound builder that once silently absorbed
+	// these is gone.
+	if (collision_pose_native_.has_skeletal_entity(p_entity) ||
+			collision_pose_native_.has_generic_model(p_model_id))
+		++collision_native_declines_;
+	return false;
 }
 
-void NovaSimulation::debug_set_remote_body_native_publish(bool p_native) {
-	remote_body_native_publish_ = p_native;
+Dictionary NovaSimulation::debug_native_pose_stats() const {
+	Dictionary out;
+	out["collision_queries"] = static_cast<int64_t>(collision_native_queries_);
+	out["collision_declines"] = static_cast<int64_t>(collision_native_declines_);
+	out["mounted_queries"] = static_cast<int64_t>(mounted_native_queries_);
+	out["mounted_declines"] = static_cast<int64_t>(mounted_native_declines_);
+	out["mounted_graphic_sources"] =
+			static_cast<int64_t>(mounted_pose_native_graphics_.size());
+	return out;
 }
 
-bool NovaSimulation::debug_remote_body_native_publish() const {
-	return remote_body_native_publish_;
-}
-
-bool NovaSimulation::build_section_matrices_legacy(opennova::world::World &p_world,
-		opennova::world::EntityHandle p_entity, int32_t p_model_id,
-		const opennova::world::CollisionMatrix &p_entity_world,
-		const opennova::world::CollisionModel &p_model,
-		std::vector<opennova::world::CollisionMatrix> &r_out) {
-	const auto skeletal_found =
-			collision_skeletal_sources_.find(p_entity.packed);
-	const opennova::world::Entity *entity =
-			p_world.registry.get(p_entity);
-	if (skeletal_found != collision_skeletal_sources_.end() &&
-			skeletal_found->second.model_id == p_model_id &&
-			entity != nullptr && skeletal_found->second.registry_spawn_id ==
-					entity->registry_spawn_id) {
-		const SkeletalCollisionSource &source = skeletal_found->second;
-		AiEntity *ai_entity = ai_ ? ai_->for_handle(p_entity) : nullptr;
-		const size_t section_count = p_model.sections.size();
-		if (source.anim.is_null() || ai_entity == nullptr || entity == nullptr ||
-				source.parents.size() < section_count ||
-				source.rest_global.size() < section_count ||
-				source.overlay_classes.size() < static_cast<int64_t>(section_count))
-			return false;
-
-		const String reset_key("anim_reset");
-		auto resolve_primary_key = [&](const String &p_key) {
-			if (source.anim->has_clip(p_key)) return p_key;
-			return source.anim->has_clip(reset_key) ? reset_key : p_key;
-		};
-		const String primary_key =
-				resolve_primary_key(infantry_anim_key(ai_entity->inf.anim_state));
-		if (primary_key.is_empty()) return false;
-		const float primary_fps = source.anim->get_clip_fps(primary_key, 0);
-		const double primary_seconds = primary_fps > 0.0f
-				? static_cast<double>(std::max(ai_entity->inf.clip_phase, 0)) /
-						(2.0 * primary_fps)
-				: 0.0;
-		String source_key;
-		double source_seconds = 0.0;
-		const bool primary_blend = ai_entity->inf.body_blend_active();
-		if (primary_blend) {
-			source_key = resolve_primary_key(
-					infantry_anim_key(ai_entity->inf.anim_prev));
-			const float source_fps = source.anim->get_clip_fps(source_key, 0);
-			if (source_fps > 0.0f)
-				source_seconds =
-						static_cast<double>(
-								std::max(ai_entity->inf.anim_prev_clip_phase, 0)) /
-						(2.0 * source_fps);
-		}
-
-		const opennova::anim::AimOverlayInputs inputs =
-				aim_overlay_inputs_for(*ai_entity, *entity);
-		opennova::anim::AimOverlayAngles
-				angles[opennova::anim::kOverlayClassCount];
-		opennova::anim::compute_aim_overlay_angles(inputs, angles);
-		const Array deltas = aim_overlay_deltas_for(angles);
-
-		String weapon_key;
-		double weapon_seconds = 0.0;
-		const bool collapse_right_hand =
-				mount_collapses_right_hand_row(*entity);
-		if (p_world.cached.local_player.valid() &&
-				p_entity.packed == p_world.cached.local_player.packed &&
-				opennova::world::infantry_weapon_channel_visible(
-						ai_entity->inf, local_weapon_.active,
-						mount_blocks_weapon_channel(*entity))) {
-			weapon_key = infantry_anim_key(ai_entity->inf.wpn_state);
-			const float weapon_fps = source.anim->get_clip_fps(weapon_key, 0);
-			if (weapon_fps > 0.0f)
-				weapon_seconds =
-						static_cast<double>(
-								std::max(ai_entity->inf.wpn_clip_phase, 0)) /
-						(2.0 * weapon_fps);
-		}
-
-		const Array pose = primary_blend
-				? source.anim->eval_pose_blended_overlay(
-						source_key, source_seconds,
-						primary_key, primary_seconds,
-						ai_entity->inf.anim_blend_weight,
-						source.overlay_classes, deltas,
-						weapon_key, weapon_seconds, collapse_right_hand)
-				: source.anim->eval_pose_overlay(
-						primary_key, primary_seconds,
-						source.overlay_classes, deltas,
-						weapon_key, weapon_seconds, collapse_right_hand);
-		if (pose.size() < static_cast<int64_t>(section_count)) return false;
-
-		// The callback result is FINAL world-space. Build the body placement from
-		// the overlay's body class (not the aim heading), then apply the skinned
-		// deformation exactly once. At bind pose pose_global*rest_global^-1 is
-		// identity, which guards against both double-rest and double-entity
-		// translation. COBJ parent/offset/CXLT are deliberately not selectors:
-		// COBJ[i] pairs strictly with this output slot i.
-		const int32_t position[3] = {
-				p_entity_world.m[3], p_entity_world.m[7], p_entity_world.m[11]};
-		const opennova::world::CollisionMatrix body_world =
-				opennova::world::collision_matrix_from_euler(
-						angles[opennova::anim::kOverlayBody].yaw,
-						angles[opennova::anim::kOverlayBody].pitch,
-						angles[opennova::anim::kOverlayBody].roll, position);
-		std::vector<Transform3D> pose_global(section_count);
-		r_out.resize(section_count);
-		for (size_t i = 0; i < section_count; ++i) {
-			const Variant value = pose[static_cast<int64_t>(i)];
-			if (value.get_type() != Variant::TRANSFORM3D) return false;
-			const Transform3D local = static_cast<Transform3D>(value);
-			const int32_t parent = source.parents[i];
-			// eval_pose_overlay emits BN17's zero-scale local clip pose.
-			// Retail zeroes the FINAL collision row after overlay/re-anchor. Preserve
-			// that literal collision result for COBJ 16: composing body_world here
-			// would incorrectly reintroduce the entity translation.
-			// [orig: special row @0x4b1290]
-			const bool collapsed_right_hand =
-					collapse_right_hand && i == 16;
-			if (collapsed_right_hand) {
-				pose_global[i] = local;
-				r_out[i] = opennova::world::CollisionMatrix{};
-				continue;
-			}
-			pose_global[i] = parent >= 0
-					? pose_global[static_cast<size_t>(parent)] * local
-					: local;
-			const Transform3D deformation =
-					pose_global[i] * source.rest_global[i].affine_inverse();
-			float render_pose[16];
-			panm_render_matrix_from_godot(deformation, render_pose);
-			if (!opennova::world::collision_matrix_apply_render_pose(
-						body_world, render_pose, r_out[i]))
-				return false;
-		}
-		return true;
-	}
-
-	const auto found = collision_pose_data_.find(p_model_id);
-	if (found == collision_pose_data_.end() || found->second.is_null()) return false;
-	const Ref<NovaObjectData> &data = found->second;
-	// Retail Generic collision always transforms the canonical first RLOD. It
-	// never follows the render-selected LOD or scans for another live PANM.
-	constexpr int lod_index = 0;
-	if (!data->has_live_panm_for_lod(lod_index)) return false;
-	const PackedInt32Array targets =
-			data->get_effective_panm_targets(lod_index);
-	if (targets.is_empty()) return false;
-	const Threedi3di3 &model = data->native_model();
-	if (model.ctrl.count > 0 && model.ctrl.registers == nullptr)
-		return false;
-
-	// PLAYPARTANIM publishes its two phase accumulators to the fixed retail
-	// VEHICLE_SPECIAL1/2 registers. A brainless static still evaluates
-	// free-running PANM with zero phase values.
-	Dictionary controls;
-	AiEntity *ai_entity = ai_ ? ai_->for_handle(p_entity) : nullptr;
-	assign_part_anim_phases(
-			controls, entity == nullptr || (entity->item_attrib & 0x1000u) == 0,
-			[ai_entity](int p_channel) {
-		return ai_entity != nullptr
-				? ai_entity->brain.f[
-						AiBrain::kPartAnimPhase0 + p_channel]
-				: 0;
-	});
-	// The generic collision frame receives HEAT_GLOW only when this model is the
-	// carrier in that same live UseGun attachment relation. The helper omits it
-	// for every other entity; a scoped cold slot still writes literal zero.
-	// [orig: attachment caller @ 0x546518;
-	//  HUD_CacheWeaponSlotInfo cold/hot stores @ 0x440969/@0x440991]
-	if (entity != nullptr)
-		assign_world_model_heat_glow(controls, p_world, *entity);
-	// EWEAP yaw/pitch are independent semantic CTRL writers. B50Cal consumes
-	// this pair and is unaffected by the VEHICLE_SPECIAL publication above.
-	EmplacedWeaponControls emplaced;
-	if (entity != nullptr &&
-			emplaced_weapon_controls_for(p_world, ai_.get(), *entity, emplaced)) {
-		controls[String(kEmplacedGunYawRegister)] =
-				static_cast<int>(emplaced.gun_yaw);
-		controls[String(kEmplacedGunPitchRegister)] =
-				static_cast<int>(emplaced.gun_pitch);
-	}
-	const uint32_t time_ms = panm_time_override_ms_ >= 0
-			? static_cast<uint32_t>(panm_time_override_ms_)
-			: (world_ != nullptr ? world_->logic_tick * 16u : 0u);
-	const Dictionary transforms =
-			data->evaluate_panm(lod_index, time_ms, controls);
-	if (transforms.is_empty()) return false;
-
-	// Default every COBJ slot to the Simple callback. Override only PANM nodes
-	// whose target part ordinal exists as a collision section. This intentionally
-	// ignores COBJ parent metadata and CXLT/offset records: CVRT is model-space.
-	r_out.assign(p_model.sections.size(), p_entity_world);
-	bool matched_section = false;
-	for (int i = 0; i < targets.size(); ++i) {
-		const int section = targets[i];
-		if (static_cast<size_t>(section) >= r_out.size() ||
-				!transforms.has(section))
-			continue;
-		const Variant value = transforms[section];
-		if (value.get_type() != Variant::TRANSFORM3D) return false;
-		float pose[16];
-		panm_render_matrix_from_godot(static_cast<Transform3D>(value), pose);
-		if (!opennova::world::collision_matrix_apply_render_pose(
-					p_entity_world, pose, r_out[static_cast<size_t>(section)]))
-			return false;
-		matched_section = true;
-	}
-	return matched_section;
-}
 
 void NovaSimulation::set_asset_root(const Ref<NovaResourceRoot> &p_root) {
 	asset_root_ = p_root;
@@ -525,19 +343,17 @@ void NovaSimulation::set_asset_root(const Ref<NovaResourceRoot> &p_root) {
 
 int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_item_db,
                                                 Object *p_placer) {
-	if (!world_ || p_item_db.is_null() || p_placer == nullptr) return 0;
+	if (!world_ || p_item_db.is_null()) return 0;
+	(void)p_placer; // retained in the bound signature; the render placer no
+	                // longer participates (S3b full: sim-cache-only sources).
 	// Production installs the sim's own asset source first (ADR 0028); the
 	// no-root leg below is the GUT stub seam and dies with S3.
 	if (!sim_models_.has_index()) {
 		godot::UtilityFunctions::print_verbose(
-				"NovaSimulation: no asset root installed — collision extraction "
-				"falls back to the placer (test seam; production calls "
-				"set_asset_root first)");
+				"NovaSimulation: no asset root installed — collision/occlusion "
+				"extraction has no model source (install set_asset_root first)");
 	}
-	RefCounted *placer_ref = Object::cast_to<RefCounted>(p_placer);
-	if (placer_ref == nullptr) return 0;
 	collision_item_db_ = p_item_db;
-	collision_placer_ = placer_ref;
 	apply_collision_to_ai();
 	std::vector<opennova::world::EntityHandle> handles;
 	world_->registry.for_each(
@@ -552,7 +368,6 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 		if (previous_attempt != collision_resolution_attempted_.end() &&
 				previous_attempt->second != e->registry_spawn_id) {
 			collision_world_.remove_entity_instance(h);
-			collision_skeletal_sources_.erase(h.packed);
 			collision_pose_native_.remove_entity(h);
 		}
 		collision_resolution_attempted_[h.packed] = e->registry_spawn_id;
@@ -579,13 +394,11 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 					if (collision_model_from_3di(m3->collision, model,
 							opennova::simassets::model_has_collision(*m3))) {
 						model_id = collision_world_.add_model(std::move(model));
-						Ref<NovaObjectData> pose_data =
-								p_placer->call("object_data_for", graphic);
-						if (pose_data.is_valid() &&
-								pose_data->has_live_panm_for_lod(0))
-							collision_pose_data_[model_id] = pose_data;
 						// S3 (ADR 0028): the engine-side provider poses this
-						// model from the sim's own retained parse.
+						// model from the sim's own retained parse. The legacy
+						// pose map stays empty in production — the fallback is
+						// stub-world-only, so a shadow render-bound copy here
+						// could only mask a native decline.
 						if (threedi_panm_lod_has_live(*m3, 0))
 							collision_pose_native_.register_generic_model(
 									model_id, m3);
@@ -594,24 +407,6 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 					if (occlusion_model_from_3di(*m3, occ))
 						occlusion_id = occlusion_world_.add_model(std::move(occ));
 					bound_radius = model_bound_radius_from_3di(*m3);
-				}
-			} else {
-				// Duck-typed MissionObjectPlacer.object_data_for(graphic) — the
-				// legacy render-cache extraction. Test-only once production
-				// installs the asset root; deleted with S3.
-				Ref<NovaObjectData> data = p_placer->call("object_data_for", graphic);
-				if (data.is_valid()) {
-					opennova::world::CollisionModel model;
-					if (collision_model_from_3di(
-							data->native_model().collision, model, data->has_collision())) {
-						model_id = collision_world_.add_model(std::move(model));
-						if (data->has_live_panm_for_lod(0))
-							collision_pose_data_[model_id] = data;
-					}
-					opennova::world::OcclusionModel occ;
-					if (occlusion_model_from_3di(data->native_model(), occ))
-						occlusion_id = occlusion_world_.add_model(std::move(occ));
-					bound_radius = model_bound_radius_from_3di(data->native_model());
 				}
 			}
 			it = collision_model_by_graphic_.emplace(key, model_id).first;
@@ -639,13 +434,8 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 				const Threedi3di3 *vm3 = sim_models_.has_index()
 						? sim_models_.model_for(key)
 						: nullptr;
-				Ref<NovaObjectData> vdata;
-				if (vm3 == nullptr && !sim_models_.has_index())
-					vdata = p_placer->call("object_data_for", graphic);
-				if (vm3 != nullptr || vdata.is_valid()) {
-					const ThreediCollisionModel *col = vm3 != nullptr
-							? vm3->collision
-							: vdata->native_model().collision;
+				if (vm3 != nullptr) {
+					const ThreediCollisionModel *col = vm3->collision;
 					if (col != nullptr && col->objects != nullptr &&
 							col->object_count > 0) {
 						int32_t lo[3] = {INT32_MAX, INT32_MAX, INT32_MAX};
@@ -678,7 +468,6 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 					h, it->second, e->registry_spawn_id);
 			++attached;
 			if (is_organic) {
-				collision_skeletal_sources_.erase(h.packed);
 				collision_pose_native_.remove_entity(h);
 				// S3 (ADR 0028): the native skeletal source resolves from
 				// the retained def rows + the sim's own model parse; the
@@ -697,58 +486,6 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 								adm_name, sim_models_.model_for(key));
 					}
 				}
-				Ref<NovaSkeletalAnim> skeletal =
-						p_placer->call("skeletal_anim_for", def_id, graphic);
-				const opennova::world::CollisionModel *person_model =
-						collision_world_.model(it->second);
-				if (skeletal.is_valid() && skeletal->is_loaded() &&
-						person_model != nullptr) {
-					const Array bones = skeletal->get_skeleton_bones();
-					const size_t section_count = person_model->sections.size();
-					if (bones.size() >= static_cast<int64_t>(section_count)) {
-						SkeletalCollisionSource source;
-						source.model_id = it->second;
-						source.registry_spawn_id = e->registry_spawn_id;
-						source.anim = skeletal;
-						source.overlay_classes =
-								skeletal->get_overlay_classes();
-						source.parents.resize(section_count, -1);
-						source.rest_global.resize(section_count);
-						bool valid_rig =
-								source.overlay_classes.size() >=
-								static_cast<int64_t>(section_count);
-						for (size_t i = 0; valid_rig && i < section_count; ++i) {
-							const Variant bone_value =
-									bones[static_cast<int64_t>(i)];
-							if (bone_value.get_type() != Variant::DICTIONARY) {
-								valid_rig = false;
-								break;
-							}
-							const Dictionary bone = bone_value;
-							const int32_t parent =
-									static_cast<int32_t>(bone.get(
-											"parent_index", -1));
-							const Variant rest_value =
-									bone.get("rest", Transform3D());
-							if (parent < -1 ||
-									parent >= static_cast<int32_t>(i) ||
-									rest_value.get_type() != Variant::TRANSFORM3D) {
-								valid_rig = false;
-								break;
-							}
-							const Transform3D rest =
-									static_cast<Transform3D>(rest_value);
-							source.parents[i] = parent;
-							source.rest_global[i] = parent >= 0
-									? source.rest_global[
-											static_cast<size_t>(parent)] * rest
-									: rest;
-						}
-						if (valid_rig)
-							collision_skeletal_sources_[h.packed] =
-									std::move(source);
-					}
-				}
 			}
 		}
 		// The husk-stage collision model: attached beside the graphic instance so
@@ -765,61 +502,40 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 			// entity. A successfully opened model supplies that pointer even when
 			// it has no collision block; missing/corrupt assets leave it null.
 			// [orig: Entity_ProcessBuildingDeath @ 0x49442c]
-			const bool native_assets = sim_models_.has_index();
+			// S3b full: husk models resolve exclusively through the sim cache's
+			// parse-once source.
 			const Threedi3di3 *first_husk_m3 = nullptr;
 			const Threedi3di3 *final_husk_m3 = nullptr;
-			Ref<NovaObjectData> first_husk_data;
-			Ref<NovaObjectData> final_husk_data;
-			if (native_assets) {
+			if (sim_models_.has_index()) {
 				if (!first_husk_name_s.is_empty())
 					first_husk_m3 = sim_models_.model_for(
 							std::string(first_husk_name_s.utf8().get_data()));
 				if (!final_husk_name_s.is_empty())
 					final_husk_m3 = sim_models_.model_for(
 							std::string(final_husk_name_s.utf8().get_data()));
-			} else {
-				if (!first_husk_name_s.is_empty())
-					first_husk_data = p_placer->call("object_data_for", first_husk_name_s);
-				if (!final_husk_name_s.is_empty())
-					final_husk_data = p_placer->call("object_data_for", final_husk_name_s);
 			}
 			if (opennova::world::ItemDeathTraits *t =
 						world_->item_death_traits.get_mutable(e->item_id))
-				t->husk_model_loaded = native_assets
-						? (first_husk_m3 != nullptr || final_husk_m3 != nullptr)
-						: (first_husk_data.is_valid() || final_husk_data.is_valid());
-			const std::string husk_key(husk_name_s.utf8().get_data());
-			Ref<NovaObjectData> husk_data = first_husk_name_s.is_empty()
-					? final_husk_data
-					: first_husk_data;
-			// One model view for both modes: the sim cache's parse, or the
-			// legacy render object's (the S3-retired stub seam).
-			const Threedi3di3 *husk_m3 = native_assets
-					? (first_husk_name_s.is_empty() ? final_husk_m3 : first_husk_m3)
-					: (husk_data.is_valid() ? &husk_data->native_model() : nullptr);
+				t->husk_model_loaded =
+						first_husk_m3 != nullptr || final_husk_m3 != nullptr;
+						const std::string husk_key(husk_name_s.utf8().get_data());
+			const Threedi3di3 *husk_m3 = first_husk_name_s.is_empty()
+					? final_husk_m3
+					: first_husk_m3;
 			auto hit = collision_model_by_graphic_.find(husk_key);
 			if (hit == collision_model_by_graphic_.end()) {
 				int32_t husk_model_id = -1;
 				if (husk_m3 != nullptr) {
 					opennova::world::CollisionModel hmodel;
-					const bool husk_spheres = native_assets
-							? opennova::simassets::model_has_collision(*husk_m3)
-							: husk_data->has_collision();
+					const bool husk_spheres =
+							opennova::simassets::model_has_collision(*husk_m3);
 					if (collision_model_from_3di(
 							husk_m3->collision, hmodel, husk_spheres)) {
 						husk_model_id = collision_world_.add_model(std::move(hmodel));
-						Ref<NovaObjectData> husk_pose = native_assets
-								? Ref<NovaObjectData>(
-										p_placer->call("object_data_for", husk_name_s))
-								: husk_data;
-						if (husk_pose.is_valid() &&
-								husk_pose->has_live_panm_for_lod(0))
-							collision_pose_data_[husk_model_id] = husk_pose;
-						// S3 (ADR 0028): only sim-cache parses are
-						// lifetime-stable enough for the native provider (the
-						// stub-placer husk view dies with its Ref).
-						if (native_assets &&
-								threedi_panm_lod_has_live(*husk_m3, 0))
+						// S3b full: the provider poses husks from the sim
+						// cache's lifetime-stable parse (the provider drops
+						// registrations whenever the index switches).
+						if (threedi_panm_lod_has_live(*husk_m3, 0))
 							collision_pose_native_.register_generic_model(
 									husk_model_id, husk_m3);
 					}
@@ -886,13 +602,9 @@ int NovaSimulation::resolve_collision_instances(const Ref<NovaItemDatabase> &p_i
 			auto hs = collision_husk_pieces_by_graphic_.find(piece_key);
 			if (hs == collision_husk_pieces_by_graphic_.end()) {
 				CollisionHuskPieceInfo info;
-				Ref<NovaObjectData> hdata = final_husk_name_s.is_empty()
-						? first_husk_data
-						: final_husk_data;
-				const Threedi3di3 *piece_m3 = native_assets
-						? (final_husk_name_s.is_empty() ? first_husk_m3
-						                                : final_husk_m3)
-						: (hdata.is_valid() ? &hdata->native_model() : nullptr);
+				const Threedi3di3 *piece_m3 = final_husk_name_s.is_empty()
+						? first_husk_m3
+						: final_husk_m3;
 				if (piece_m3 != nullptr && piece_m3->lod_count > 0 &&
 				    piece_m3->lods != nullptr) {
 					const ThreediLod &lod = piece_m3->lods[0];
@@ -1118,200 +830,10 @@ void NovaSimulation::refresh_item_seat_spec(
 // (set_ai_profile_speeds retired with S9b: the .aip resolve is native in
 // mission::resolve_ai_profile_speeds, driven by boot_mission.)
 
-void NovaSimulation::set_item_seat_specs(const Array &p_specs) {
-	item_seat_specs_.clear();
-	mounted_pose_data_by_type_.clear();
-	mounted_pose_native_models_.clear();
-	for (int64_t i = 0; i < p_specs.size(); ++i) {
-		const Variant spec_v = p_specs[i];
-		if (spec_v.get_type() != Variant::DICTIONARY) continue;
-		const Dictionary spec_d = spec_v;
-
-		opennova::mission::ItemSeatSpec spec;
-		spec.type_id = static_cast<int32_t>(spec_d.get("type_id", 0));
-		if (spec.type_id == 0) continue;
-		const Variant model_data_value =
-				spec_d.get("model_data", Variant());
-		if (model_data_value.get_type() == Variant::OBJECT) {
-			Ref<NovaObjectData> model_data(model_data_value);
-			if (model_data.is_valid() && model_data->has_document()) {
-				mounted_pose_data_by_type_[spec.type_id] = model_data;
-				// S4 (ADR 0028): the native mounted-pose resolver reads a parsed
-				// Threedi3di3. Point it at this model's parse — the Ref stored
-				// above keeps that parse alive. This is the sole native source at
-				// mission boot (install_seat_specs runs before the asset root),
-				// and the source for the test/tool worlds that never install one.
-				mounted_pose_native_models_[spec.type_id] =
-						&model_data->native_model();
-			}
-		}
-		// S4 (ADR 0028): when an asset root is installed the native mounted-pose
-		// resolver prefers the sim cache's own lifetime-stable parse of the
-		// graphic; it agrees with the model_data parse above. Dictionary-only
-		// test worlds carry no graphic/index and rely on that model_data parse.
-		if (sim_models_.has_index() && spec_d.has("graphic")) {
-			const std::string graphic_key(
-					String(spec_d.get("graphic", String())).utf8().get_data());
-			if (!graphic_key.empty()) {
-				if (const Threedi3di3 *m3 = sim_models_.model_for(graphic_key))
-					mounted_pose_native_models_[spec.type_id] = m3;
-			}
-		}
-		if (spec_d.has("mount_config_valid")) {
-			spec.mount_config_valid = static_cast<bool>(spec_d.get("mount_config_valid", false));
-			spec.mount_config = spec.mount_config_valid
-			                        ? static_cast<int32_t>(spec_d.get("mount_config", 0))
-			                        : 0;
-		}
-
-		const Variant seats_v = spec_d.get("seats", Array());
-		if (seats_v.get_type() != Variant::ARRAY) continue;
-		const Array seats_a = seats_v;
-		bool retail_slots_used[10] = {};
-		int inferred_passenger_slot = 0;
-		for (int64_t j = 0; j < seats_a.size(); ++j) {
-			const Variant seat_v = seats_a[j];
-			if (seat_v.get_type() != Variant::DICTIONARY) continue;
-			const Dictionary seat_d = seat_v;
-
-			opennova::world::Seat seat;
-			seat.type = seat_type_from_variant(static_cast<int>(seat_d.get("type", 0)));
-			if (seat.type == opennova::world::SeatType::None) continue;
-			int retail_slot = -1;
-			if (seat_d.has("retail_slot")) {
-				retail_slot = static_cast<int>(seat_d.get("retail_slot", -1));
-			} else {
-				// Compatibility for tests/tools that construct seat dictionaries
-				// directly. Production extraction supplies the explicit slot.
-				switch (seat.type) {
-					case opennova::world::SeatType::Passenger:
-						while (inferred_passenger_slot < 8 &&
-						       retail_slots_used[inferred_passenger_slot])
-							++inferred_passenger_slot;
-						if (inferred_passenger_slot < 8)
-							retail_slot = inferred_passenger_slot++;
-						break;
-					case opennova::world::SeatType::Controller:
-					case opennova::world::SeatType::Driver:
-						retail_slot = 8;
-						break;
-					case opennova::world::SeatType::Gunner:
-						retail_slot = 9;
-						break;
-					default:
-						break;
-				}
-			}
-			const bool slot_matches_type =
-					(retail_slot >= 0 && retail_slot < 8 &&
-					 seat.type == opennova::world::SeatType::Passenger) ||
-					(retail_slot == 8 &&
-					 opennova::world::is_vehicle_control_seat(seat.type)) ||
-					(retail_slot == 9 &&
-					 seat.type == opennova::world::SeatType::Gunner);
-			if (slot_matches_type && !retail_slots_used[retail_slot]) {
-				seat.retail_slot = static_cast<uint8_t>(retail_slot);
-				retail_slots_used[retail_slot] = true;
-			}
-			seat.bone_index = static_cast<uint8_t>(
-			    std::clamp(static_cast<int>(seat_d.get("bone_index", 0)), 0, 255));
-			seat.pose_index = static_cast<uint8_t>(
-			    std::clamp(static_cast<int>(seat_d.get("pose_index", 0)), 0, 30));
-			seat.source_name = String(seat_d.get("source_name", String())).utf8().get_data();
-			const Vector3 pos = seat_d.get("position", Vector3());
-			seat.seat_local = {static_cast<float>(pos.x), static_cast<float>(pos.y),
-			                   static_cast<float>(pos.z)};
-			seat.yaw_offset = static_cast<int16_t>(
-			    std::clamp(static_cast<int>(seat_d.get("yaw_offset", 0)), -32768, 32767));
-			spec.seats.push_back(seat);
-		}
-		const Variant attachments_v =
-				spec_d.get("emplacement_attachments", Array());
-		if (attachments_v.get_type() == Variant::ARRAY) {
-			const Array attachments_a = attachments_v;
-			for (int64_t j = 0; j < attachments_a.size(); ++j) {
-				const Variant attachment_v = attachments_a[j];
-				if (attachment_v.get_type() != Variant::DICTIONARY) continue;
-				const Dictionary attachment_d = attachment_v;
-				const int full_child_id =
-						static_cast<int>(attachment_d.get("item_id", 0));
-				const int child_type_id = full_child_id - 100000;
-				if (child_type_id <= 0) continue;
-				opennova::mission::ItemEmplacementAttachmentSpec attachment;
-				attachment.child_type_id =
-						static_cast<int32_t>(child_type_id);
-				attachment.kind =
-						static_cast<opennova::mission::EmplacementAttachmentKind>(
-								std::clamp(static_cast<int>(
-										attachment_d.get("kind", 0)), 0, 2));
-				attachment.stored_slot = static_cast<uint8_t>(
-						std::clamp(static_cast<int>(
-								attachment_d.get("stored_slot", 0)), 0, 4));
-				if (static_cast<bool>(
-						attachment_d.get("designated_c", false)))
-					attachment.attachment_flags |= 1;
-				if (static_cast<bool>(
-						attachment_d.get("designated_g", false)))
-					attachment.attachment_flags |= 2;
-				attachment.anchor_found = static_cast<bool>(
-						attachment_d.get("anchor_found", false));
-				attachment.anchor.type =
-						opennova::world::SeatType::Gunner;
-				attachment.anchor.attachment_frame = true;
-				attachment.anchor.bone_index = static_cast<uint8_t>(
-						std::clamp(static_cast<int>(
-								attachment_d.get("bone_index", 0)), 0, 255));
-				attachment.anchor.source_name =
-						String(attachment_d.get(
-								"source_name", String())).utf8().get_data();
-				const Vector3 local =
-						attachment_d.get("local", Vector3());
-				attachment.anchor.seat_local = {
-						static_cast<float>(local.x),
-						static_cast<float>(local.y),
-						static_cast<float>(local.z)};
-				attachment.anchor.yaw_offset = static_cast<int16_t>(
-						std::clamp(static_cast<int>(
-								attachment_d.get("yaw_offset", 0)),
-								-32768, 32767));
-				attachment.angle_count = static_cast<uint8_t>(
-						static_cast<int>(
-								attachment_d.get("angle_count", 0)) == 4
-								? 4 : 0);
-				attachment.down_limit_bam = static_cast<int32_t>(
-						attachment_d.get("down_limit_bam", 0));
-				attachment.up_limit_bam = static_cast<int32_t>(
-						attachment_d.get("up_limit_bam", 0));
-				attachment.right_limit_bam = static_cast<int32_t>(
-						attachment_d.get("right_limit_bam", 0));
-				attachment.left_limit_bam = static_cast<int32_t>(
-						attachment_d.get("left_limit_bam", 0));
-				spec.emplacement_attachments.push_back(
-						std::move(attachment));
-			}
-		}
-		// The attach-label sources: "armory*" userpoint locals (Armory-attrib items
-		// only — the host gates on itemdef attrib 0x80000) + the ewep primary_weapon
-		// link [orig: @0x4361ee/@0x5a36f5; ItemDef+0x54B].
-		const Variant armory_v = spec_d.get("armory_points", Array());
-		if (armory_v.get_type() == Variant::ARRAY) {
-			const Array armory_a = armory_v;
-			for (int64_t j = 0; j < armory_a.size(); ++j) {
-				if (armory_a[j].get_type() != Variant::VECTOR3) continue;
-				const Vector3 p = armory_a[j];
-				spec.armory_points.push_back({static_cast<float>(p.x),
-				                              static_cast<float>(p.y),
-				                              static_cast<float>(p.z)});
-			}
-		}
-		spec.primary_weapon =
-		    String(spec_d.get("primary_weapon", String())).utf8().get_data();
-		if (spec.mount_config_valid || !spec.seats.empty() || !spec.armory_points.empty() ||
-		    !spec.primary_weapon.empty() || !spec.emplacement_attachments.empty())
-			item_seat_specs_.push_back(std::move(spec));
-	}
+void NovaSimulation::finalize_installed_seat_specs() {
 	// Lookup table, ordered for the binary search in item_seat_spec_for_type —
-	// a joiner probes it once per present row per frame.
+	// a joiner probes it once per present row per frame. (The native
+	// extraction emits sorted specs already; kept for the wire-type installs.)
 	std::sort(item_seat_specs_.begin(), item_seat_specs_.end(),
 			[](const opennova::mission::ItemSeatSpec &a,
 					const opennova::mission::ItemSeatSpec &b) {
@@ -1340,4 +862,46 @@ void NovaSimulation::set_item_seat_specs(const Array &p_specs) {
 		if (joiner_bridge_.wire_header_world() && runtime_ != nullptr)
 			(void)joiner_bridge_.materializer().sync(runtime_->state(), *world_);
 	}
+}
+
+// S16 (ADR 0028): the production seat/mount install IS the native extraction —
+// simassets::extract_item_seat_specs over the retained items.def rows and the
+// sim's own parse-once models. The shell GDScript extractor and its Dictionary
+// install seam are gone; before this cutover the two extractions were diffed
+// live on retail 00TRg (29/29 specs identical, 0 mismatches, 0 native-missing,
+// 2026-08-07). Model userpoints resolve through the sim cache at install, so
+// boot wires the asset root before the steps run.
+void NovaSimulation::install_native_seat_specs(
+		const Ref<NovaItemDatabase> &p_item_db,
+		const std::vector<int> &p_seed_item_ids) {
+	item_seat_specs_.clear();
+	mounted_pose_native_graphics_.clear();
+	if (p_item_db.is_valid() && !p_seed_item_ids.empty()) {
+		opennova::simassets::SeatSpecExtraction native;
+		opennova::simassets::extract_item_seat_specs(
+				p_item_db->native_items(),
+				[this](const std::string &graphic) {
+					return sim_models_.model_for(graphic);
+				},
+				p_seed_item_ids, native);
+		item_seat_specs_ = std::move(native.specs);
+		mounted_pose_native_graphics_ = std::move(native.graphic_by_type);
+	}
+	finalize_installed_seat_specs();
+}
+
+bool NovaSimulation::install_seat_specs_for_type_ids(
+		const Ref<NovaItemDatabase> &p_item_db,
+		const PackedInt32Array &p_type_ids) {
+	if (p_item_db.is_null() || !sim_models_.has_index()) return false;
+	std::vector<int> seeds;
+	seeds.reserve(static_cast<size_t>(p_type_ids.size()));
+	for (int64_t i = 0; i < p_type_ids.size(); ++i) {
+		const int32_t type_id = p_type_ids[i];
+		if (type_id > 0)
+			seeds.push_back(static_cast<int>(type_id) +
+					static_cast<int>(opennova::mission::kItemIdOffset));
+	}
+	install_native_seat_specs(p_item_db, seeds);
+	return true;
 }

@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include <npruntime/session_status.h>
+#include <threedi/threedi_panm_pose.h> // the native PANM liveness gate (S3, ADR 0028)
 #include <npwire/ingame_decode.h> // kRoundEventFlag* (the fire-mode byte)
 #include <npwire/ingame_message_id.h>
 #include <npwire/wire_handle.h>  // pool()/kPoolItem/kInvalid (the wire handle home)
@@ -370,7 +371,7 @@ void NovaSimulation::on_replica_world_changed(
 		const opennova::world::EntityHandle handle = lifetime.handle;
 		collision_world_.remove_entity_instance(handle);
 		occlusion_world_.remove_entity_instance(handle);
-		collision_skeletal_sources_.erase(handle.packed);
+		collision_pose_native_.remove_entity(handle);
 		collision_resolution_attempted_.erase(handle.packed);
 	}
 
@@ -398,9 +399,8 @@ void NovaSimulation::on_replica_world_changed(
 	// seat's fixed retail_slot.
 	(void)joiner_bridge_.materializer().sync(runtime_->state(), *world_);
 
-	if (collision_item_db_.is_valid() && collision_placer_.is_valid())
-		resolve_collision_instances(
-				collision_item_db_, collision_placer_.ptr());
+	if (collision_item_db_.is_valid())
+		resolve_collision_instances(collision_item_db_, nullptr);
 }
 
 Dictionary NovaSimulation::get_client_entity_debug(int p_handle) const {
@@ -581,7 +581,7 @@ NovaSimulation::WireCollisionShape NovaSimulation::wire_collision_shape_for_type
 	const auto cached = wire_collision_shape_by_type_.find(p_type_id);
 	if (cached != wire_collision_shape_by_type_.end()) return cached->second;
 	WireCollisionShape shape;
-	if (collision_item_db_.is_valid() && collision_placer_.is_valid()) {
+	if (collision_item_db_.is_valid()) {
 		// The same items.def graphic resolution the registry sweep runs
 		// (resolve_collision_instances), keyed by the WIRE type id. Sharing the
 		// by-graphic caches means a mission whose local load already registered
@@ -604,36 +604,22 @@ NovaSimulation::WireCollisionShape NovaSimulation::wire_collision_shape_for_type
 						if (collision_model_from_3di(m3->collision, model,
 								opennova::simassets::model_has_collision(*m3))) {
 							model_id = collision_world_.add_model(std::move(model));
-							Ref<NovaObjectData> pose_data =
-									collision_placer_->call("object_data_for", graphic);
-							if (pose_data.is_valid() &&
-									pose_data->has_live_panm_for_lod(0))
-								collision_pose_data_[model_id] = pose_data;
+							// S3b full: wire-ghost models pose through the
+							// native provider like the registry sweep's —
+							// this leg previously fed only the legacy map,
+							// which silently swapped joiner PANM collision
+							// onto the render-bound builder.
+							if (threedi_panm_lod_has_live(*m3, 0))
+								collision_pose_native_.register_generic_model(
+										model_id, m3);
 						}
 						opennova::world::OcclusionModel occ;
 						if (occlusion_model_from_3di(*m3, occ))
 							occlusion_id = occlusion_world_.add_model(std::move(occ));
 						bound_radius = model_bound_radius_from_3di(*m3);
 					}
-				} else {
-					// Legacy render-cache extraction (test seam; dies with S3).
-					Ref<NovaObjectData> data =
-							collision_placer_->call("object_data_for", graphic);
-					if (data.is_valid()) {
-						opennova::world::CollisionModel model;
-						if (collision_model_from_3di(data->native_model().collision, model,
-								data->has_collision())) {
-							model_id = collision_world_.add_model(std::move(model));
-							if (data->has_live_panm_for_lod(0))
-								collision_pose_data_[model_id] = data;
-						}
-						opennova::world::OcclusionModel occ;
-						if (occlusion_model_from_3di(data->native_model(), occ))
-							occlusion_id = occlusion_world_.add_model(std::move(occ));
-						bound_radius = model_bound_radius_from_3di(data->native_model());
-					}
 				}
-				it = collision_model_by_graphic_.emplace(key, model_id).first;
+				it = collision_model_by_graphic_.emplace(key, model_id).first;				it = collision_model_by_graphic_.emplace(key, model_id).first;
 				collision_occlusion_by_graphic_.emplace(key, occlusion_id);
 				collision_radius_by_graphic_.emplace(key, bound_radius);
 			}

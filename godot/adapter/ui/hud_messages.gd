@@ -13,10 +13,12 @@ extends RefCounted
 ## chat pipeline (channels, input line, geometry table, per-line fade curve) is a
 ## recorded follow-up (docs/interface/hud-re.md D-HUD-6).
 
-const LINE_LIFE_TICKS := 930   # [orig: the 930 literal @0x51f216]
-const EXPIRY_STAGGER := 186    # [orig: @0x49894e prev+186 floor]
-const LINE_TEXT_MAX := 119     # [orig: @0x49884e 120-byte slots]
-const DISPLAY_SLOT_COUNT := 40 # [orig: Chat_RebuildDisplayBuffers @0x498bd0]
+# The engine's witnessed values (hud/hud_math.h), consumed through the
+# binding so the native expiry policy and the shell wrap/trim can never split.
+const LINE_LIFE_TICKS := NovaHudPos.MESSAGE_LIFE_TICKS   # [orig: @0x51f216]
+const EXPIRY_STAGGER := NovaHudPos.MESSAGE_EXPIRY_STAGGER # [orig: @0x49894e]
+const LINE_TEXT_MAX := NovaHudPos.MESSAGE_TEXT_MAX       # [orig: @0x49884e]
+const DISPLAY_SLOT_COUNT := NovaHudPos.MESSAGE_SLOT_COUNT # [orig: @0x498bd0]
 
 var _lines: Array[Dictionary] = [] # {text: String, color: Color, expire: int}
 

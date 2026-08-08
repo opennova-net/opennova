@@ -52,7 +52,16 @@ public:
 	enum {
 		DESIGN_WIDTH = 1024,
 		DESIGN_HEIGHT = 768,
+		// The witnessed message-feed policy constants (hud/hud_math.h is the
+		// single source; the cpp static_asserts pin these mirrors to it).
+		MESSAGE_LIFE_TICKS = 930,
+		MESSAGE_EXPIRY_STAGGER = 186,
+		MESSAGE_TEXT_MAX = 119,
+		MESSAGE_SLOT_COUNT = 40,
 	};
+	// kPercentToAlpha (2.55 — authored percent -> 0..255 alpha), bound as a
+	// method because class constants are integer-only.
+	static double percent_to_alpha();
 
 	// The HUD view-helper math (one impl in engine/runtime/hud hud_math.h;
 	// the GDScript Hud* helpers delegate here and keep only the CanvasItem

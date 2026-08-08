@@ -1105,8 +1105,7 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_replicas() const
 			local_player->mount_type == opennova::world::SeatType::Gunner;
 	const int count = static_cast<int>(cs.entities.size());
 	const ClientReplicaPresentContext replica_present_context{
-			&item_seat_specs_, &world_->weapons, joiner_,
-			remote_body_native_publish_};
+			&item_seat_specs_, &world_->weapons, joiner_};
 	out.resize(static_cast<int64_t>(count) * PF_STRIDE);
 	float *w = out.ptrw();
 	for (int i = 0; i < count; ++i) {
@@ -1271,8 +1270,8 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_replicas() const
 				: world_->logic_tick * 16u;
 		const bool reconstructed_client_attachment_pose = joiner_ &&
 				resolve_client_eweap_attachment_pose(
-						es, cs, item_seat_specs_, mounted_pose_data_by_type_,
-						attachment_time_ms, client_attachment_pose);
+						es, cs, item_seat_specs_, mounted_pose_native_graphics_,
+						sim_models_, attachment_time_ms, client_attachment_pose);
 		if (authoritative_attachment_pose) {
 			// NoNetworkCallback addeweap children have only their 0x0D spawn pose in
 			// ClientState. The host has already advanced their authoritative userpoint

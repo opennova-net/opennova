@@ -16,15 +16,6 @@ struct ClientReplicaPresentContext {
 	const std::vector<opennova::mission::ItemSeatSpec> *item_seat_specs = nullptr;
 	const opennova::world::WeaponTable *weapons = nullptr;
 	bool project_remote_appearance = true;
-	// D-NET-209 dual-publish (a presentation A/B, not a pre-S11 rollback):
-	// true presents an ARMED row's simulation-arbitrated channel directly (the
-	// host-loopback tuple, remote_request 0 — the model-side remote FSM is
-	// bypassed); false keeps the legacy remote-request publish (wire byte +
-	// pulse re-arbitrated at the model). The per-record arbitration AND the
-	// deferred/insert channel work run in the fold either way — the root
-	// channel always chases the arbitrated state, so `false` compares the two
-	// PUBLISH paths, it does not restore pre-S11 fold timing.
-	bool remote_body_native_publish = true;
 };
 
 // Initialize one NovaSimulation::PF_* row, including every non-zero sentinel.

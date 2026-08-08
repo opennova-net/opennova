@@ -8,6 +8,8 @@
 
 #include "simulation/nova_simulation.h"
 
+#include <simassets/mounted_pose.h> // the ONE mounted matrix path (S4b)
+#include <threedi/threedi_ctrl_catalog.h>
 #include <wac/compiler.h>
 #include <world/turret_window.h>
 
@@ -576,190 +578,21 @@ using opennova::simassets::model_bound_radius_from_3di;
 using opennova::simassets::occlusion_model_from_3di;
 
 
-inline void panm_render_matrix_from_godot(const Transform3D &transform, float out[16]) {
-	// Exact inverse of NovaObjectData::panm_matrix_to_transform: recover the
-	// row-major, row-vector render matrix emitted by the native PANM evaluator.
-	std::memset(out, 0, sizeof(float) * 16);
-	const Basis &basis = transform.basis;
-	out[0] = basis[0].x;
-	out[4] = -basis[0].y;
-	out[8] = -basis[0].z;
-	out[1] = -basis[1].x;
-	out[5] = basis[1].y;
-	out[9] = basis[1].z;
-	out[2] = -basis[2].x;
-	out[6] = basis[2].y;
-	out[10] = basis[2].z;
-	out[12] = -transform.origin.x;
-	out[13] = transform.origin.y;
-	out[14] = transform.origin.z;
-	out[15] = 1.0f;
-}
-
 inline constexpr double kHalfPi = 1.57079632679489661923;
 inline constexpr double kRadiansPerDegree =
 		3.14159265358979323846 / 180.0;
 
-// C++ twin of MissionObjectPlacer.bms_to_godot_basis for ordinary mission
-// eulers. Kept here because the mounted provider must produce the same world
-// frame without depending on presentation/GDScript.
-inline Basis godot_model_basis_from_mission_euler(
-		double pitch_deg, double yaw_deg, double roll_deg) {
-	return Basis(Vector3(0.0, 1.0, 0.0),
-			(90.0 - yaw_deg) * kRadiansPerDegree) *
-			Basis(Vector3(0.0, 0.0, 1.0),
-					pitch_deg * kRadiansPerDegree) *
-			Basis(Vector3(1.0, 0.0, 0.0),
-					roll_deg * kRadiansPerDegree) *
-			Basis(Vector3(0.0, 1.0, 0.0), kHalfPi);
-}
-
-inline bool finite_vector3(const Vector3 &value) {
-	return std::isfinite(static_cast<double>(value.x)) &&
-			std::isfinite(static_cast<double>(value.y)) &&
-			std::isfinite(static_cast<double>(value.z));
-}
-
-inline bool finite_basis(const Basis &value) {
-	return finite_vector3(value[0]) && finite_vector3(value[1]) &&
-			finite_vector3(value[2]);
-}
-
-inline bool resolve_model_mounted_pose(
-		const Ref<NovaObjectData> &data,
-		const opennova::world::Entity &carrier,
-		const opennova::world::Seat &seat,
-		const Dictionary &controls, uint32_t time_ms,
-		opennova::world::MountedPose &out) {
-	if (data.is_null() || seat.type != opennova::world::SeatType::Gunner ||
-			seat.bone_index == 0)
-		return false;
-	const int userpoint_index = static_cast<int>(seat.bone_index) - 1;
-	if (userpoint_index < 0 || userpoint_index >= data->get_user_point_count())
-		return false;
-	const Dictionary userpoint = data->get_user_point_info(userpoint_index);
-	const int part_index = static_cast<int>(userpoint.get("subobject", -1));
-	const Vector3 authored_model_position = userpoint.get("position", Vector3());
-	const Vector3 authored_model_direction =
-			userpoint.get("rotation", Vector3());
-	if (part_index < 0 || !finite_vector3(authored_model_position)) return false;
-
-	constexpr int lod_index = 0;
-	const Dictionary rest_parts = data->evaluate_panm(lod_index, 0, Dictionary());
-	const Dictionary live_parts = data->evaluate_panm(lod_index, time_ms, controls);
-	if (!rest_parts.has(part_index) || !live_parts.has(part_index)) return false;
-	const Variant rest_value = rest_parts[part_index];
-	const Variant live_value = live_parts[part_index];
-	if (rest_value.get_type() != Variant::TRANSFORM3D ||
-			live_value.get_type() != Variant::TRANSFORM3D)
-		return false;
-	const Transform3D rest_part = static_cast<Transform3D>(rest_value);
-	const Transform3D live_part = static_cast<Transform3D>(live_value);
-	if (!finite_vector3(rest_part.origin) || !finite_basis(rest_part.basis) ||
-			!finite_vector3(live_part.origin) || !finite_basis(live_part.basis) ||
-			std::abs(static_cast<double>(rest_part.basis.determinant())) < 1.0e-8)
-		return false;
-
-	const Vector3 point_in_part =
-			rest_part.affine_inverse().xform(authored_model_position);
-	const Vector3 live_model_position = live_part.xform(point_in_part);
-	const Basis carrier_basis = godot_model_basis_from_mission_euler(
-			carrier.pitch, carrier.yaw, carrier.roll);
-	if (!finite_vector3(live_model_position) || !finite_basis(carrier_basis) ||
-			std::abs(static_cast<double>(carrier_basis.determinant())) < 1.0e-8)
-		return false;
-	const Vector3 carrier_origin(
-			carrier.position.x, carrier.position.z, -carrier.position.y);
-	const Vector3 live_world_position =
-			Transform3D(carrier_basis, carrier_origin).xform(live_model_position);
-	if (!finite_vector3(live_world_position)) return false;
-	out.position = {
-			static_cast<float>(live_world_position.x),
-			static_cast<float>(-live_world_position.z),
-			static_cast<float>(live_world_position.y)};
-
-	Basis live_basis;
-	if (seat.attachment_frame &&
-			finite_vector3(authored_model_direction) &&
-			authored_model_direction.length_squared() > 1.0e-8) {
-		// An addeweap child owns the complete EWeap userpoint frame. Build the
-		// same direction look-at frame retail multiplies through the live bone:
-		// forward = direction; right = (forward.z, 0, -forward.x);
-		// up = forward x right. Retail's result is a row-vector render matrix,
-		// so transpose and conjugate by the loader's X mirror exactly as
-		// panm_matrix_to_transform does before composing it in Godot. The
-		// rest-bone inverse then makes that authored model-space frame
-		// part-local; the live bone carries both position and orientation
-		// through PANM.
-		// [orig: build_bone_attachment_matrix @0x56C630;
-		// build_direction_look_at_matrix @0x612C90]
-		const Vector3 forward = authored_model_direction.normalized();
-		Vector3 right(forward.z, 0.0, -forward.x);
-		if (right.length_squared() <= 1.0e-8)
-			right = Vector3(1.0, 0.0, 0.0);
-		else
-			right.normalize();
-		Vector3 up = forward.cross(right);
-		if (up.length_squared() <= 1.0e-8) return false;
-		up.normalize();
-		const Basis retail_frame(right, up, forward);
-		const Basis render_x_flip(
-				Vector3(-1.0, 0.0, 0.0),
-				Vector3(0.0, 1.0, 0.0),
-				Vector3(0.0, 0.0, 1.0));
-		const Basis authored_basis =
-				render_x_flip * retail_frame.transposed() * render_x_flip;
-		const Basis attachment_in_part =
-				rest_part.basis.inverse() * authored_basis;
-		live_basis =
-				carrier_basis * live_part.basis * attachment_in_part;
-	} else {
-		const double baseline_yaw =
-				seat.attachment_frame
-				? static_cast<double>(carrier.yaw + seat.yaw_offset)
-				: seat.type == opennova::world::SeatType::Gunner
-				? static_cast<double>(carrier.yaw - seat.yaw_offset)
-				: static_cast<double>(carrier.yaw + seat.yaw_offset);
-		const Basis baseline_basis = godot_model_basis_from_mission_euler(
-				carrier.pitch, baseline_yaw, carrier.roll);
-		const Basis part_delta =
-				live_part.basis * rest_part.basis.inverse();
-		live_basis = carrier_basis * part_delta *
-				carrier_basis.inverse() * baseline_basis;
-	}
-	if (!finite_basis(live_basis) ||
-			std::abs(static_cast<double>(live_basis.determinant())) < 1.0e-8)
-		return false;
-	live_basis = live_basis.orthonormalized();
-	const Basis euler_basis = live_basis *
-			Basis(Vector3(0.0, 1.0, 0.0), -kHalfPi);
-	const double pitch_rad = std::asin(std::clamp(
-			static_cast<double>(euler_basis[1].x), -1.0, 1.0));
-	if (std::abs(std::cos(pitch_rad)) < 1.0e-6) return false;
-	const double heading_rad = std::atan2(
-			-static_cast<double>(euler_basis[2].x),
-			static_cast<double>(euler_basis[0].x));
-	const double roll_rad = std::atan2(
-			-static_cast<double>(euler_basis[1].z),
-			static_cast<double>(euler_basis[1].y));
-	const double yaw_deg = opennova::world::normalize_mission_yaw_deg(
-			90.0 - heading_rad / kRadiansPerDegree);
-	const double pitch_deg = pitch_rad / kRadiansPerDegree;
-	const double roll_deg = roll_rad / kRadiansPerDegree;
-	if (!std::isfinite(yaw_deg) || !std::isfinite(pitch_deg) ||
-			!std::isfinite(roll_deg))
-		return false;
-	out.yaw = static_cast<int16_t>(std::lround(yaw_deg));
-	out.pitch = static_cast<int16_t>(std::lround(pitch_deg));
-	out.roll = static_cast<int16_t>(std::lround(roll_deg));
-	return true;
-}
-
+// S4b (ADR 0028): the joiner's addeweap reconstruction rides the SAME engine
+// resolver the host authority runs (simassets::resolve_model_mounted_pose) —
+// one mounted matrix path; the adapter's Dictionary evaluate_panm twin is
+// gone. The model resolves through the sim cache by the installed spec's
+// graphic key, exactly like the host-side resolver.
 inline bool resolve_client_eweap_attachment_pose(
 		const opennova::netsim::ClientEntityState &child,
 		const opennova::netsim::ClientState &state,
 		const std::vector<opennova::mission::ItemSeatSpec> &specs,
-		const std::unordered_map<int32_t, Ref<NovaObjectData>> &model_data_by_type,
+		const std::unordered_map<int32_t, std::string> &graphics_by_type,
+		opennova::simassets::SimModelCache &models,
 		uint32_t time_ms, opennova::world::MountedPose &out) {
 	if (child.parent_handle == opennova::world::EntityHandle::kInvalid) return false;
 	const opennova::netsim::ClientEntityState *parent =
@@ -784,10 +617,11 @@ inline bool resolve_client_eweap_attachment_pose(
 	if (attachment == nullptr || !attachment->anchor_found ||
 			attachment->anchor.bone_index == 0)
 		return false;
-	const auto data_found = model_data_by_type.find(parent->type_id);
-	if (data_found == model_data_by_type.end() || data_found->second.is_null())
+	const auto graphic_found = graphics_by_type.find(parent->type_id);
+	if (graphic_found == graphics_by_type.end() || !models.has_index())
 		return false;
-	const Ref<NovaObjectData> &data = data_found->second;
+	const Threedi3di3 *model_ptr = models.model_for(graphic_found->second);
+	if (model_ptr == nullptr) return false;
 
 	// Remote generic PLAYPARTANIM phases are not in ClientEntityState. Do not
 	// synthesize them from timing or repurpose a wire field. EWEAP is the one safe
@@ -797,7 +631,7 @@ inline bool resolve_client_eweap_attachment_pose(
 	if (!emplaced_weapon_controls_for_client(
 				*parent, state, specs, emplaced))
 		return false;
-	const Threedi3di3 &model = data->native_model();
+	const Threedi3di3 &model = *model_ptr;
 	if (model.ctrl.count > 0 && model.ctrl.registers == nullptr)
 		return false;
 	bool has_eweap_control = false;
@@ -810,11 +644,11 @@ inline bool resolve_client_eweap_attachment_pose(
 		}
 	}
 	if (!has_eweap_control) return false;
-	Dictionary controls;
-	controls[String(kEmplacedGunYawRegister)] =
-			static_cast<int>(emplaced.gun_yaw);
-	controls[String(kEmplacedGunPitchRegister)] =
-			static_cast<int>(emplaced.gun_pitch);
+	int32_t ctrl_values[THREEDI_CTRL_REGISTER_COUNT] = {};
+	ctrl_values[THREEDI_CTRL_EWEAP_GUNYAW] =
+			static_cast<int32_t>(emplaced.gun_yaw);
+	ctrl_values[THREEDI_CTRL_EWEAP_GUNPITCH] =
+			static_cast<int32_t>(emplaced.gun_pitch);
 
 	opennova::world::Entity carrier;
 	carrier.item_id = static_cast<int32_t>(parent->type_id);
@@ -831,8 +665,8 @@ inline bool resolve_client_eweap_attachment_pose(
 	carrier.roll = static_cast<int16_t>(std::lround(
 			static_cast<double>(parent->roll_bam) *
 				opennova::world::kDegreesPerBam));
-	return resolve_model_mounted_pose(
-			data, carrier, attachment->anchor, controls, time_ms, out);
+	return opennova::simassets::resolve_model_mounted_pose(
+			model, carrier, attachment->anchor, ctrl_values, time_ms, out);
 }
 
 // Coordinate converters shared by the debug views and present getters.

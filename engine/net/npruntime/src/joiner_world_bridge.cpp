@@ -152,7 +152,13 @@ void JoinerWorldBridge::wire_frame_providers(const PumpContext &ctx) {
 					CollisionWorld *col = world_->ai->collision;
 					CollisionWorld::ResolveState &st =
 							replica_resolve_states_[q.row_handle];
-					std::vector<CollisionWorld::ReplicaPeer> peers;
+					// Bridge-member scratch: this resolver runs per armed
+					// replica row per 62.5 Hz pump — a fresh heap vector per
+					// call was pure allocator churn for a field-order copy
+					// between the two mirrored peer PODs.
+					std::vector<CollisionWorld::ReplicaPeer> &peers =
+							replica_peer_scratch_;
+					peers.clear();
 					peers.reserve(static_cast<size_t>(q.peer_count));
 					for (int32_t i = 0; i < q.peer_count; ++i) {
 						CollisionWorld::ReplicaPeer p;
@@ -578,33 +584,11 @@ void JoinerWorldBridge::apply_authoritative_health(
 					world::InfantryState &inf = local_ai->inf;
 					inf.active = true;
 					inf.is_local_player = true;
-					inf.player_moving = false;
-					inf.player_move_dir_index = 0;
-					inf.move_mode = 0;
-					inf.target_dist = 0;
-					inf.reset_body_animation(world::anim_state::kIdle);
-					inf.reload_anim_ticks = 0;
-					inf.arms_dip_ticks = 0;
-					inf.pitch_kick_accum = 0;
-					inf.recoil_pitch = 0;
-					inf.weapon_weight_spread = 0;
-					inf.aimed_shot_available = false;
-					inf.idle_counter = 0;
-					inf.lean_left = false;
-					inf.lean_right = false;
-					inf.lean_angle = 0;
-					inf.torso_roll = 0;
-					inf.body_heading = heading;
-					inf.target_heading = heading;
-					inf.leg_yaw[0] = inf.leg_yaw[1] = heading;
-					inf.leg_target[0] = inf.leg_target[1] = heading;
-					inf.vel[0] = inf.vel[1] = inf.vel[2] = 0;
-					inf.stance = world::InfantryState::Stance::kStand;
-					inf.standing_on_entity = false;
-					inf.airborne = false;
-					inf.jump_requested = false;
-					inf.jump_cooldown = 0;
-					inf.ground_cache_valid = false;
+					// The shared spawn/revive reset (InfantryState::
+					// reset_for_spawn): one field list with the host spawn
+					// seeding, so a NEW motor field re-defaults here without
+					// a second hand-list to forget.
+					inf.reset_for_spawn(heading);
 
 					ctx.weapon.fire_held = false;
 					ctx.weapon.fire_pressed = false;

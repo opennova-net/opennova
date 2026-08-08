@@ -746,8 +746,9 @@ func _mount_analysis_row(organic: Dictionary, target: Dictionary, command_id: in
 		target_card["found"] = true
 		var type_id := int(target.get("type_id", 0))
 		if not seat_cache.has(type_id):
-			seat_cache[type_id] = ItemSeatSpecs.seat_specs_for_item(
-					root, item_db, int(target.get("item_id", 0)), type_id, true)
+			# S16: the native extractor card (the GDScript extraction is gone).
+			seat_cache[type_id] = item_db.extract_seat_specs_for_item(
+					root, int(target.get("item_id", 0)))
 		var spec: Dictionary = seat_cache[type_id]
 		seats = spec.get("seats", [])
 		target_card["display_name"] = spec.get("display_name", target_card.get("display_name", ""))

@@ -280,6 +280,42 @@ struct InfantryState {
         last_events = 0;
         prev_capsule_bottom = 0;
     }
+
+    // The ONE spawn/revive body reset — the host spawn seeding and the joiner
+    // redeploy-revive leg share this list so the two paths can never drift
+    // (a hand-maintained copy of it once lived inline in the revive leg).
+    // Returns the body to a fresh standing state facing `heading`; the caller
+    // owns identity/loadout fields (active, is_local_player, adm_id, health
+    // caps, weapon-channel mirrors) and any post-reset seeding.
+    void reset_for_spawn(int32_t heading) {
+        player_moving = false;
+        player_move_dir_index = 0;
+        move_mode = 0;
+        target_dist = 0;
+        reset_body_animation(anim_state::kIdle);
+        reload_anim_ticks = 0;
+        arms_dip_ticks = 0;
+        pitch_kick_accum = 0;
+        recoil_pitch = 0;
+        weapon_weight_spread = 0;
+        aimed_shot_available = false;
+        idle_counter = 0;
+        lean_left = false;
+        lean_right = false;
+        lean_angle = 0;
+        torso_roll = 0;
+        body_heading = heading;
+        target_heading = heading;
+        leg_yaw[0] = leg_yaw[1] = heading;
+        leg_target[0] = leg_target[1] = heading;
+        vel[0] = vel[1] = vel[2] = 0;
+        stance = Stance::kStand;
+        standing_on_entity = false;
+        airborne = false;
+        jump_requested = false;
+        jump_cooldown = 0;
+        ground_cache_valid = false;
+    }
     // The SECONDARY (upper-body weapon) AnimMap channel's state pair + playhead:
     // target state, clip-end-deferred state, and its own playhead — the entity
     // +0x2C8/+0x2C4 pair the dual-channel update swaps through the shared machinery.

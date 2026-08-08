@@ -146,6 +146,13 @@ func test_fade_alphas() -> void:
 	# ALPHAFADE 30 50 3 -> base 76, max 127, ramp 186 ticks.
 	assert_eq(int(30 * HudFade.PERCENT_TO_ALPHA), 76)
 	assert_eq(int(50 * HudFade.PERCENT_TO_ALPHA), 127)
+	# The witnessed literals pin the BINDING (the single native source) — a
+	# re-witness that changes hud_math.h must show up here, not drift silently.
+	assert_almost_eq(float(NovaHudPos.percent_to_alpha()), 2.55, 0.0001)
+	assert_eq(NovaHudPos.MESSAGE_LIFE_TICKS, 930)
+	assert_eq(NovaHudPos.MESSAGE_EXPIRY_STAGGER, 186)
+	assert_eq(NovaHudPos.MESSAGE_TEXT_MAX, 119)
+	assert_eq(NovaHudPos.MESSAGE_SLOT_COUNT, 40)
 	assert_eq(int(3 * HudFade.SECONDS_TO_TICKS), 186)
 	# Fractional file fields survive: the original converts through atof
 	# [orig: @0x5a0882..0x5a08c2] — 1.5 s is a 93-tick ramp, not 62.

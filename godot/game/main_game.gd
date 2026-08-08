@@ -1006,7 +1006,7 @@ func _on_resume() -> void:
 		return
 	if _armory_presenter != null and _armory_presenter.is_open():
 		_armory_presenter.close()  # Esc from ARMORY closes the overlay (no re-entry: closed
-		                      # only fires while open)
+							  # only fires while open)
 	_menu_shell.hide_menu()
 	# A joiner who paused from the deploy screen still owes its pick, so resume back
 	# into DEPLOY rather than handing the cursor back to the world.

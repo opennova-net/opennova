@@ -23,13 +23,10 @@ namespace {
 constexpr double kRadToDeg = 180.0 / 3.14159265358979323846;
 
 std::string trimmed(const char *name) {
-	std::string out(name != nullptr ? name : "");
-	const auto is_space = [](unsigned char c) { return std::isspace(c) != 0; };
-	while (!out.empty() && is_space(static_cast<unsigned char>(out.front())))
-		out.erase(out.begin());
-	while (!out.empty() && is_space(static_cast<unsigned char>(out.back())))
-		out.pop_back();
-	return out;
+	// strutil::trim spells its whitespace set out so canonicalization never
+	// depends on the process locale (a hand-rolled std::isspace loop here
+	// once could classify extra bytes under non-C locales).
+	return strutil::trim(name != nullptr ? name : "");
 }
 
 // Entity_GetBoneSlotType performs a case-insensitive comparison at byte zero

@@ -1,33 +1,21 @@
 extends SceneTree
 
-# Wave-1 smoke (ADR 0028 trunk): with an asset root installed the sim resolves
-# its collision/occlusion .3di data through its OWN SimModelCache — proven by
-# attaching against a placer that supplies NOTHING — and the attach count
-# matches the legacy render-cache extraction exactly. Also pins the native
-# TickAccumulator bank the runtime loop now drives, and (S3) runs the
-# collision pose A/B on retail data: one sim with BOTH the render placer
-# (legacy leg) and the native asset root, compare mode counting divergent
-# final section matrices across the PANM and skeletal legs.
+# Wave-1 smoke (ADR 0028 trunk, S3b/S16 full): the sim resolves every
+# collision/occlusion .3di through its OWN SimModelCache (the render-cache
+# extraction is gone — the placer no longer participates), the runtime boot
+# installs the seat/mount table through the NATIVE extractor, the booted
+# world keeps producing native hitboxes with ZERO provider declines, and the
+# native TickAccumulator bank drives the loop. WAVE1_EXPECT_ATTACH overrides
+# the retail-00TRg attach pin (859 on the JOX corpus).
 #
 # Run:
 #   NOVA_RESOURCE_DIR=<loose JOX> godot --headless --path godot \
 #     -s res://tests/wave1_native_assets_probe.gd
 
 const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
-const ItemSeatSpecs := preload("res://adapter/world/item_seat_specs.gd")
 const MissionRuntime := preload("res://adapter/world/mission_runtime.gd")
 
 const MISSION := "00TRg.bms"
-
-
-class NullPlacer:
-	extends RefCounted
-
-	func object_data_for(_graphic: String) -> NovaObjectData:
-		return null
-
-	func skeletal_anim_for(_item_id: int, _graphic: String):
-		return null
 
 
 func _init() -> void:
@@ -92,36 +80,27 @@ func _run() -> void:
 		_fail("cannot load items.def: %s" % item_db.get_last_error())
 		return
 
-	# Native leg: the placer supplies nothing — every attach comes from the
-	# sim's own cache.
+	# The sim resolves every attach from its own cache (the placer argument is
+	# vestigial post-S3b; the render extraction it once selected is gone). The
+	# legacy reference leg died with that extraction — the pin is the recorded
+	# retail attach count instead.
+	var expect_attach := 859
+	var expect_env := OS.get_environment("WAVE1_EXPECT_ATTACH").strip_edges()
+	if not expect_env.is_empty():
+		expect_attach = int(expect_env)
 	var sim := NovaSimulation.new()
 	if not sim.load_from_mission_data(mission):
 		sim.free()
 		_fail("NovaSimulation rejected %s" % MISSION)
 		return
 	sim.set_asset_root(root)
-	var attached_native := int(sim.resolve_collision_instances(item_db, NullPlacer.new()))
+	var attached_native := int(sim.resolve_collision_instances(item_db, null))
 
-	# Legacy reference leg: the pre-ADR-0028 render-cache extraction.
-	var sim_legacy := NovaSimulation.new()
-	if not sim_legacy.load_from_mission_data(mission):
+	print("[wave1] attached native=%d (expect %d)" % [attached_native, expect_attach])
+	if attached_native != expect_attach:
 		sim.free()
-		sim_legacy.free()
-		_fail("NovaSimulation (legacy leg) rejected %s" % MISSION)
-		return
-	var placer := MissionObjectPlacer.new(root, item_db)
-	var attached_legacy := int(sim_legacy.resolve_collision_instances(item_db, placer))
-
-	print("[wave1] attached native=%d legacy=%d" % [attached_native, attached_legacy])
-	if attached_native <= 0:
-		sim.free()
-		sim_legacy.free()
-		_fail("native asset cache attached nothing")
-		return
-	if attached_native != attached_legacy:
-		sim.free()
-		sim_legacy.free()
-		_fail("native/legacy attach mismatch: %d vs %d" % [attached_native, attached_legacy])
+		_fail("native attach count %d != recorded retail %d" % [
+				attached_native, expect_attach])
 		return
 
 	# S6b: the one-step by-name mount — the sim's RETAINED weapon.def row bakes
@@ -129,17 +108,14 @@ func _run() -> void:
 	# no render model involved [orig: WeaponSlotTable_LoadAllFromDefs @0x5414e0].
 	if sim.load_weapon_table(root, "weapon.def") != OK:
 		sim.free()
-		sim_legacy.free()
 		_fail("load_weapon_table failed on the retail root")
 		return
 	if not bool(sim.spawn_local_player(Vector3.ZERO, 0.0, 1)):
 		sim.free()
-		sim_legacy.free()
 		_fail("spawn_local_player failed")
 		return
 	if not bool(sim.install_local_player_weapon_by_name("WPN_M4AUTO")):
 		sim.free()
-		sim_legacy.free()
 		_fail("by-name install of WPN_M4AUTO failed against the retail root")
 		return
 	var wstate: Dictionary = sim.get_local_player_weapon_state()
@@ -147,71 +123,28 @@ func _run() -> void:
 			str(wstate.get("active", false)), int(wstate.get("clip", -1))])
 	if not bool(wstate.get("active", false)):
 		sim.free()
-		sim_legacy.free()
 		_fail("by-name install left no active weapon FSM")
 		return
 	if bool(sim.install_local_player_weapon_by_name("WPN_NOT_A_WEAPON")):
 		sim.free()
-		sim_legacy.free()
 		_fail("unknown weapon name must not install")
 		return
 
 	# The native 62.5 Hz bank [orig: Game_MainLoop @ 0x52b630].
 	if int(sim.bank_realtime(0.032)) != 2:
 		sim.free()
-		sim_legacy.free()
 		_fail("bank_realtime(0.032) != 2")
 		return
 	if int(sim.bank_realtime(0.001)) != 0:
 		sim.free()
-		sim_legacy.free()
 		_fail("bank_realtime(0.001) != 0")
 		return
 	if int(sim.bank_realtime(2.0)) != 31:
 		sim.free()
-		sim_legacy.free()
 		_fail("bank_realtime(2.0) != 31 (spiral clamp)")
 		return
 
 	sim.free()
-	sim_legacy.free()
-
-	# S3/S4 (ADR 0028): the native pose paths are AUTHORITATIVE (the A/B soak that
-	# gated them is retired). One sim with the asset root installed poses collision
-	# through its own SimCollisionPoseProvider and mounts through the native
-	# resolver; installing the seat-spec table feeds the native mounted model
-	# source. Drive get_hitbox_debug (PANM entity tris + organic skeletal spheres)
-	# with the world advancing and confirm the native provider produces live
-	# hitboxes on retail data. The attach count still matches the reference leg.
-	var sim_ab := NovaSimulation.new()
-	if not sim_ab.load_from_mission_data(mission):
-		sim_ab.free()
-		_fail("NovaSimulation (native pose leg) rejected %s" % MISSION)
-		return
-	sim_ab.set_asset_root(root)
-	var placer_ab := MissionObjectPlacer.new(root, item_db)
-	var attached_ab := int(sim_ab.resolve_collision_instances(item_db, placer_ab))
-	if attached_ab != attached_legacy:
-		sim_ab.free()
-		_fail("native pose leg attach mismatch: %d vs %d" % [attached_ab, attached_legacy])
-		return
-	sim_ab.resolve_item_traits(item_db)
-	sim_ab.set_item_seat_specs(
-			ItemSeatSpecs.build_item_seat_specs(mission, root, item_db))
-	var hitbox_entities := 0
-	for _round in 8:
-		var hb: Dictionary = sim_ab.get_hitbox_debug()
-		hitbox_entities = maxi(
-				hitbox_entities, int((hb.get("entities", []) as Array).size()))
-		for _t in 8:
-			sim_ab.step()
-	print("[wave1] native pose leg: attached=%d hitbox_entities=%d" % [
-			attached_ab, hitbox_entities])
-	if hitbox_entities <= 0:
-		sim_ab.free()
-		_fail("native collision provider produced no hitboxes")
-		return
-	sim_ab.free()
 
 	# S9 (ADR 0028): the mission boot on retail data through the runtime
 	# driver — setup() routes the feed/load/spawn/tables sequence through the
@@ -222,15 +155,53 @@ func _run() -> void:
 	get_root().add_child(runtime)
 	var boot_container := Node3D.new()
 	get_root().add_child(boot_container)
+	# The placer gates the boot's resolve_collision/occlusion steps (the
+	# runtime_boot contract still names it even though the sweep itself is
+	# sim-cache-only now) — without it the hitbox/query gates below see an
+	# unattached world.
+	var boot_placer := MissionObjectPlacer.new(root, item_db)
 	var boot_count := int(runtime.setup(mission, boot_container, {
 		"resource_root": root,
 		"item_db": item_db,
 		"mission_file": MISSION,
+		"placer": boot_placer,
 		"playable": true,
 	}))
 	if boot_count <= 0 or int(runtime.get_setup_error()) != OK:
 		_fail("S9 boot on %s failed (count=%d err=%d)" % [
 				MISSION, boot_count, int(runtime.get_setup_error())])
+		return
+	# S3b/S16 (full cutover): the booted world poses natively end to end.
+	# Drive the runtime and gate on the provider health counters — queries
+	# flow and NOTHING declines — plus the native seat/mount install the boot
+	# ran (the shell extractor is gone; sources > 0 proves the S16 step fed
+	# the mounted resolver).
+	var boot_sim: NovaSimulation = runtime.get_sim()
+	if boot_sim == null:
+		_fail("runtime has no sim")
+		return
+	var hitbox_entities := 0
+	for _round in 8:
+		for _t in 8:
+			runtime.tick()
+		var hb: Dictionary = boot_sim.get_hitbox_debug()
+		hitbox_entities = maxi(
+				hitbox_entities, int((hb.get("entities", []) as Array).size()))
+	var pose_stats: Dictionary = boot_sim.debug_native_pose_stats()
+	print("[wave1] native pose: hitbox_entities=%d stats=%s" % [
+			hitbox_entities, str(pose_stats)])
+	if hitbox_entities <= 0:
+		_fail("native collision provider produced no hitboxes")
+		return
+	if int(pose_stats.get("collision_queries", 0)) <= 0 \
+			or int(pose_stats.get("collision_declines", -1)) != 0:
+		_fail("native collision declined in production: %s" % str(pose_stats))
+		return
+	if int(pose_stats.get("mounted_declines", -1)) != 0:
+		_fail("native mounted resolver declined: %s" % str(pose_stats))
+		return
+	if int(pose_stats.get("mounted_graphic_sources", 0)) <= 0:
+		_fail("the boot installed no native mounted model sources: %s" % str(pose_stats))
 		return
 	var boot_debug: Dictionary = runtime.get_sim().get_mission_boot_debug()
 	var legacy_text := PackedByteArray()

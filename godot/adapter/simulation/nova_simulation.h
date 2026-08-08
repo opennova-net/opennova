@@ -144,8 +144,7 @@ public:
 		// D-NET-209 the per-record receive arbitration [orig: @0x4c1153] runs
 		// natively in the fold and ARMED rows publish the arbitrated channel
 		// (remote_request 0); the pulse remains the DISARMED-row fallback (a
-		// TAPPED prone roll on a dead/carried/adm-less row) and the legacy
-		// publish rollback seam (debug_set_remote_body_native_publish(false)).
+		// TAPPED prone roll on a dead/carried/adm-less row).
 		// Presentation dispatches the pulse BEFORE the current state so the
 		// model's arbitration replays retail's per-record order.
 		// -1 = none; MUST stay ahead of PF_AIM_OVERLAY_VALID (zero-fill would read
@@ -298,12 +297,13 @@ private:
 		float rest_max_z = 0.0f;
 	};
 	Ref<NovaItemDatabase> collision_item_db_;
-	Ref<RefCounted> collision_placer_;
 	// The sim's own asset source (ADR 0028): the mounted root pinned for its
 	// index lifetime + the parse-once model cache the collision/occlusion/
-	// radius extraction reads. Render caches stay render-only.
+	// radius extraction reads. Render caches stay render-only. Mutable: it is
+	// a parse-on-miss CACHE — the const present path resolves the joiner's
+	// attachment models through it (one mounted matrix path, S4b).
 	Ref<NovaResourceRoot> asset_root_;
-	opennova::simassets::SimModelCache sim_models_;
+	mutable opennova::simassets::SimModelCache sim_models_;
 	// The 62.5 Hz real-time bank (S14, [orig: Game_MainLoop @ 0x52b630]).
 	opennova::world::TickAccumulator tick_accum_;
 	std::unordered_map<std::string, int32_t> collision_model_by_graphic_;
@@ -327,42 +327,23 @@ private:
 		float bound_radius = 0.0f;
 	};
 	std::unordered_map<uint16_t, WireCollisionShape> wire_collision_shape_by_type_;
-	// Only models with a sampler-live PANM track enter the Generic callback
-	// path. Inert PANM rows remain on CollisionWorld's bit-exact Simple path.
-	std::unordered_map<int32_t, Ref<NovaObjectData>> collision_pose_data_;
-	// Organic/person collision is driven by the same ADM + canonical model-bone
-	// table as rendering, but sampled synchronously from simulation state so
-	// headless authority and F3 see the exact current pose. One source per entity:
-	// different actors sharing a graphic can be on different clips/playheads.
-	struct SkeletalCollisionSource {
-		// Exact intact/main collision model this living ADM rig was built for.
-		// A husk or alternate model on the same entity must use its own callback.
-		int32_t model_id = -1;
-		uint64_t registry_spawn_id = 0;
-		Ref<NovaSkeletalAnim> anim;
-		std::vector<int32_t> parents;
-		std::vector<Transform3D> rest_global;
-		PackedInt32Array overlay_classes;
-	};
-	std::unordered_map<uint16_t, SkeletalCollisionSource> collision_skeletal_sources_;
 	// A non-negative value is the shell's once-per-frame retail presentation
 	// DWORD. Direct/headless simulations use deterministic logic time.
 	int64_t panm_time_override_ms_ = -1;
-	// The engine-side collision pose provider (S3, ADR 0028) — AUTHORITATIVE
-	// wherever it has a registered source. Production always installs the sim's
-	// own asset root, so the provider poses every collision entity there and the
-	// legacy render-bound builder below is never reached. That builder survives
-	// ONLY as the fallback for the GUT stub worlds that resolve collision through
-	// a duck-typed placer with no asset root: the native provider cannot serve
-	// them because it loads skeletal .adm rigs and retains PANM model parses
-	// through a resource index those worlds never install (build_section_matrices
-	// tries native first, then this builder when native has no source).
+	// The engine-side collision pose provider (S3b full, ADR 0028) — the ONE
+	// section-matrix source. It poses from the sim's own parse-once models and
+	// .adm rigs over the installed asset root; a world without a root has no
+	// model source and every query is a counted decline (the legacy
+	// render-bound builder is gone).
 	opennova::simassets::SimCollisionPoseProvider collision_pose_native_;
-	bool build_section_matrices_legacy(opennova::world::World &p_world,
-			opennova::world::EntityHandle p_entity, int32_t p_model_id,
-			const opennova::world::CollisionMatrix &p_entity_world,
-			const opennova::world::CollisionModel &p_model,
-			std::vector<opennova::world::CollisionMatrix> &r_out);
+	// Post-A/B native-path health counters (the cutover retired the divergence
+	// stats; these keep declines observable): cumulative queries/declines on the
+	// two native-authoritative pose paths. A production decline is the
+	// masked-failure signal the soak/probes gate on (debug_native_pose_stats).
+	uint64_t collision_native_queries_ = 0;
+	uint64_t collision_native_declines_ = 0;
+	uint64_t mounted_native_queries_ = 0;
+	uint64_t mounted_native_declines_ = 0;
 	bool ensure_collision_instance(opennova::world::World &p_world,
 			opennova::world::EntityHandle p_entity) override;
 	bool build_section_matrices(opennova::world::World &p_world,
@@ -380,15 +361,15 @@ private:
 			const opennova::world::Entity &p_carrier,
 			const opennova::world::Seat &p_seat,
 			opennova::world::MountedPose &r_out);
-	// The native mounted-pose model source: type id -> a parsed model. Filled by
-	// set_item_seat_specs from either the sim cache's parse (production, keyed by
-	// graphic) or the installed spec's model_data->native_model() (test/tool
-	// worlds); the paired Ref in mounted_pose_data_by_type_ keeps that parse
-	// alive. Kept across reset_world — the table installs before mission promotion.
-	std::unordered_map<int32_t, const Threedi3di3 *> mounted_pose_native_models_;
-	// D-NET-209 dual-publish: armed replica rows present the arbitrated
-	// simulation channel directly (default); false = legacy rollback.
-	bool remote_body_native_publish_ = true;
+	// The native mounted-pose model sources: type id -> the spec's graphic
+	// name (SeatSpecExtraction::graphic_by_type), resolved through the sim
+	// cache AT QUERY TIME. The cache frees its parses whenever set_asset_root
+	// switches the index, so this table stores the graphic name and never a
+	// raw pointer (a retained pointer here was a use-after-free across root
+	// switches). Kept across reset_world — the table installs before mission
+	// promotion; boot wires the asset root before the steps run, so the cache
+	// serves every query.
+	std::unordered_map<int32_t, std::string> mounted_pose_native_graphics_;
 	// Rendering occlusion: the portal/section-mask engine (world/occlusion.h) —
 	// models attached alongside collision by resolve_collision_instances, the
 	// portal weld run by occlusion_init_mission, per-frame masks/gates by
@@ -858,14 +839,10 @@ private:
 	// The two witnessed .aip profile speeds per ai_textfile, fed to
 	// PromoteOptions before promotion (see promote.h AiProfileSpeeds).
 	std::vector<opennova::mission::PromoteOptions::AiProfileSpeeds> ai_profile_speeds_;
-	// Model Refs paired with the persistent seat table, keyed by raw type id.
-	// Two consumers keep this alive: the joiner's client attachment-pose
-	// reconstruction (resolve_client_eweap_attachment_pose over the present
-	// projection) reads its evaluate_panm, and it owns the parse that
-	// mounted_pose_native_models_ points at so the native mounted resolver has a
-	// stable model. Kept across reset_world (set_item_seat_specs runs before
-	// mission promotion).
-	std::unordered_map<int32_t, Ref<NovaObjectData>> mounted_pose_data_by_type_;
+	// The shared install tail (both install orders): sort for the per-frame
+	// binary search, stamp turret clamps, refresh live pool-1 rows, and re-sync
+	// the header-only materializer image.
+	void finalize_installed_seat_specs();
 	void refresh_item_seat_spec(opennova::world::Entity &p_entity);
 	// Resolve each spec's turret clamp window from its primary weapon's
 	// weapon.def rows. Called from BOTH install orders (specs-then-table and
@@ -919,7 +896,7 @@ public:
 	int64_t boot_mission(const Ref<NovaMissionData> &p_mission,
 			const Ref<NovaResourceRoot> &p_resource_root,
 			const Ref<NovaItemDatabase> &p_item_db, Object *p_placer,
-			const Ref<NovaTerrainData> &p_terrain, const Array &p_seat_specs,
+			const Ref<NovaTerrainData> &p_terrain,
 			const PackedByteArray &p_terrain_til, const String &p_wac_basename,
 			const String &p_infantry_adm, const String &p_mission_file_basename,
 			bool p_playable);
@@ -1490,8 +1467,11 @@ public:
 	// This toggles ONLY the PUBLISH path — the per-record receive arbitration
 	// and the deferred/insert channel work in the fold run either way, so the
 	// flag is a presentation A/B, not a full pre-S11 rollback.
-	void debug_set_remote_body_native_publish(bool p_native);
-	bool debug_remote_body_native_publish() const;
+	// Native pose-path health: cumulative queries/declines for the collision
+	// provider and the mounted resolver, plus the installed mounted model
+	// sources. The soak gates on declines == 0 — the A/B divergence stats this
+	// replaces were retired with the cutover.
+	Dictionary debug_native_pose_stats() const;
 	// Whole-bank snapshots of the script variable stores (V0..V511 / G0..G255 /
 	// M0..M15 [orig: dword_C6B240 / dword_C6BA40 / music bank]): ONE packed call
 	// for a low-Hz overlay refresh instead of hundreds of boxed scalar reads.
@@ -1626,7 +1606,22 @@ public:
 	// Null/unloaded clears grounding (entities keep their authored Z). GameWorld
 	// and direct test/tooling fixtures call this through MissionRuntime.setup().
 	void set_terrain_height_field(const Ref<NovaTerrainData> &p_terrain);
-	void set_item_seat_specs(const Array &p_specs);
+	// S16 (ADR 0028): the seat/mount table installs through the NATIVE
+	// extractor (simassets::extract_item_seat_specs) over the retained def
+	// rows + the sim's own model parses. Seeds are full 1xxxxx def ids; the
+	// extractor walks authored addeweap children transitively. The shell
+	// GDScript extraction + its Dictionary install seam are gone — proven
+	// equivalent live before the cutover (29/29 specs identical, 0 mismatches
+	// on retail 00TRg, 2026-08-07).
+	void install_native_seat_specs(const Ref<class NovaItemDatabase> &p_item_db,
+			const std::vector<int> &p_seed_item_ids);
+	// The joiner prewarm's wire-type install (a header-only join has no
+	// mission-body table): seeds = streamed type ids + kItemIdOffset,
+	// replacing the whole installed table exactly like the boot install.
+	// False when the item db or the sim's asset root is missing.
+	bool install_seat_specs_for_type_ids(
+			const Ref<class NovaItemDatabase> &p_item_db,
+			const PackedInt32Array &p_type_ids);
 
 	// The AI-speed -> world-units locomotion factor (see AiSystem::loco_scale).
 	void set_loco_scale(int p_scale);

@@ -51,7 +51,14 @@ public:
 	// The rig source for skeletal registrations (the same mounted index the
 	// SimModelCache reads). The provider never loads models itself — the
 	// embedder's collision sweep passes each entity's parsed Threedi3di3.
-	void set_resource_index(const ResourceIndex *index) { index_ = index; }
+	// Switching the index drops every registration and cached rig: the
+	// registered model pointers belong to the embedder's parse cache, whose
+	// parses die with the old index (SimModelCache::set_index resets), and
+	// the rigs were loaded from the old index's bytes.
+	void set_resource_index(const ResourceIndex *index) {
+		if (index_ != index) clear();
+		index_ = index;
+	}
 	void clear();
 
 	// Register the pose model for a collision model id whose canonical first
@@ -73,6 +80,13 @@ public:
 			const Threedi3di3 *model);
 	void remove_entity(world::EntityHandle entity);
 	bool has_skeletal_entity(world::EntityHandle entity) const;
+	// Whether a query for this model id has a registered pose source at all.
+	// A build_section_matrices false WITHOUT a source is the normal rigid
+	// path (CollisionWorld's identity sections); false WITH one is a real
+	// decline — the embedder's masked-failure counter keys on this.
+	bool has_generic_model(int32_t model_id) const {
+		return generic_models_.find(model_id) != generic_models_.end();
+	}
 	// Diagnostics: the registered rig for an entity (null when none).
 	const AdmSkeletalClips *skeletal_rig(world::EntityHandle entity) const {
 		const auto it = skeletal_sources_.find(entity.packed);

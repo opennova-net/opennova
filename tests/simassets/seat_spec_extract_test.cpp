@@ -225,6 +225,44 @@ int main() {
     CHECK(os.emplacement_attachments.size() == 1 &&
             !os.emplacement_attachments[0].anchor_found);
 
+    // ---- prefix-at-byte-zero negatives + the pose-digit clamp ----
+    // Embedded tokens are not seats — the witnessed compare runs at name byte
+    // zero [orig: strnicmp(name, "sitex"/"ctrlx"/"UseGun"/"drvrx", 5/6)
+    // @ 0x434ED0] — and authored pose digits clamp to the 0..30 sit window.
+    // (These two rows were pinned in the retired GDScript extractor's tests.)
+    std::vector<ThreediUserPoint> edge_points = {
+        up("fooUseGun", 1, 0, 0), // embedded token: never a gunner seat
+        up("xctrlx", 2, 0, 0),    // embedded token: never a controller
+        up("sitex99", 3, 0, 0),   // pose digits 99 clamp to 30
+    };
+    Threedi3di3 edge_model;
+    std::memset(&edge_model, 0, sizeof(edge_model));
+    edge_model.user_points = edge_points.data();
+    edge_model.user_point_count = edge_points.size();
+    DefItemDef edge_defs[1] = {def_row(100800, "edge")};
+    DefItemsFile edge_items;
+    edge_items.entries = edge_defs;
+    edge_items.count = 1;
+    std::unordered_map<std::string, const Threedi3di3 *> edge_models = {
+        {"edge", &edge_model},
+    };
+    const ModelLookupFn edge_lookup = [&](const std::string &graphic) {
+        const auto it = edge_models.find(graphic);
+        return it == edge_models.end() ? nullptr : it->second;
+    };
+    SeatSpecExtraction edge_out;
+    extract_item_seat_specs(edge_items, edge_lookup, {100800}, edge_out);
+    CHECK(edge_out.specs.size() == 1);
+    if (!edge_out.specs.empty()) {
+        const mission::ItemSeatSpec &es = edge_out.specs[0];
+        CHECK(es.seats.size() == 1); // only sitex99 typed; both tokens rejected
+        if (es.seats.size() == 1) {
+            CHECK(es.seats[0].type == world::SeatType::Passenger);
+            CHECK(es.seats[0].pose_index == 30);
+            CHECK(es.seats[0].source_name == "sitex99");
+        }
+    }
+
     if (failures == 0) std::printf("simassets_seat_spec_extract: OK\n");
     return failures == 0 ? 0 : 1;
 }

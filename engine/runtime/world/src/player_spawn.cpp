@@ -104,12 +104,10 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     ae.health = static_cast<int16_t>(hp); // hp was explicitly narrowed/sign-extended above
     ae.inf.active = true;
     ae.inf.is_local_player = is_local;
-    ae.inf.body_heading = ae.heading;
-    ae.inf.target_heading = ae.heading;
-    ae.inf.leg_yaw[0] = ae.inf.leg_yaw[1] = ae.heading;
-    ae.inf.leg_target[0] = ae.inf.leg_target[1] = ae.heading;
+    // The shared spawn/revive body reset (fresh attach: everything is default
+    // already — this pins both call sites to ONE field list).
+    ae.inf.reset_for_spawn(ae.heading);
     ae.inf.max_health = static_cast<int16_t>(hp);
-    ae.inf.reset_body_animation(anim_state::kIdle);
 
     // Publish the local-player handle ONLY for the host's own player — the net anchor + present
     // resolve it. A remote peer never becomes the local player. [ADR 0012]

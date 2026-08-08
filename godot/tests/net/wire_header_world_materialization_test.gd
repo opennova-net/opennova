@@ -14,6 +14,116 @@ const DESIGNATED_G_PARENT_DEF_ID := 105005
 const DESIGNATED_G_PARENT_TYPE := 5005
 const DESIGNATED_G_CHILD_TYPE := 1419
 
+# S16 native seat tables: the Dictionary install seam is gone. The tests
+# compose a flat asset dir under the gitignored res://.godot (NovaResourceRoot
+# rejects user:// roots), wire it with sim.set_asset_root FIRST, then
+# install_seat_specs_for_type_ids(item_db, ...) runs the ONE engine extractor
+# (simassets::extract_item_seat_specs) over items.def rows + .3di userpoints.
+# Three composed models re-author committed fixtures at the byte level
+# (48-byte USRP records; the name field at +32):
+# - dm1a1.3di      (verbatim)  one ctrlx control seat, retail slot 8, bone 1.
+# - dsuvswap.3di   (dsuv1)     ctrlx13 -> sitex13 and sitex00d -> ctrlx01, so
+#                              a passenger row precedes the controller in
+#                              dense extraction order (the refresh pin).
+# - dm1a1gp.3di    (dm1a1)     ctrlx25 retired and ewep01 moved to authored
+#                              (0, 3, 0) mission-local — the designated-G
+#                              parent anchor the old hand table carried.
+const NATIVE_MODEL_DIR := "res://.godot/native_3dp_wire_header"
+
+
+static func _repo_file_bytes(res_path: String) -> PackedByteArray:
+	var file := FileAccess.open(
+			ProjectSettings.globalize_path(res_path), FileAccess.READ)
+	if file == null:
+		return PackedByteArray()
+	var bytes := file.get_buffer(file.get_length())
+	file.close()
+	return bytes
+
+
+static func _pattern_offset(data: PackedByteArray, pattern: String) -> int:
+	var wanted := pattern.to_ascii_buffer()
+	if wanted.is_empty() or data.size() < wanted.size():
+		return -1
+	var at := data.find(wanted[0], 0)
+	while at >= 0 and at + wanted.size() <= data.size():
+		if data.slice(at, at + wanted.size()) == wanted:
+			return at
+		at = data.find(wanted[0], at + 1)
+	return -1
+
+
+static func _with_renamed_user_point(data: PackedByteArray, old_name: String,
+		new_name: String) -> PackedByteArray:
+	var offset := _pattern_offset(data, old_name)
+	var replacement := new_name.to_ascii_buffer()
+	if offset < 0 or replacement.size() > 16:
+		return PackedByteArray()
+	for i in range(16):
+		data[offset + i] = replacement[i] if i < replacement.size() else 0
+	return data
+
+
+static func _with_user_point_position(data: PackedByteArray, name: String,
+		raw_x: int, raw_y: int, raw_z: int) -> PackedByteArray:
+	var offset := _pattern_offset(data, name)
+	if offset < 32:
+		return PackedByteArray()
+	data.encode_s32(offset - 32, raw_x)
+	data.encode_s32(offset - 28, raw_y)
+	data.encode_s32(offset - 24, raw_z)
+	return data
+
+
+static func _write_native_model(name: String, bytes: PackedByteArray) -> bool:
+	if bytes.is_empty():
+		return false
+	var file := FileAccess.open(
+			NATIVE_MODEL_DIR.path_join(name), FileAccess.WRITE)
+	if file == null:
+		return false
+	file.store_buffer(bytes)
+	file.close()
+	return true
+
+
+func before_all() -> void:
+	DirAccess.make_dir_recursive_absolute(
+			ProjectSettings.globalize_path(NATIVE_MODEL_DIR))
+	assert_true(DirAccess.dir_exists_absolute(
+			ProjectSettings.globalize_path(NATIVE_MODEL_DIR)),
+			"created the flat native asset dir")
+	assert_true(_write_native_model("dm1a1.3di",
+			_repo_file_bytes("res://../fixtures/3dp/dm1a1/dm1a1.3di")),
+			"composed the single-control-seat vehicle fixture")
+	assert_true(_write_native_model("B50Cal.3di",
+			_repo_file_bytes("res://../fixtures/3dp/B50Cal/B50Cal.3di")),
+			"composed the B50 child fixture")
+	var swap := _with_renamed_user_point(
+			_repo_file_bytes("res://../fixtures/3dp/dsuv1/dsuv1.3di"),
+			"ctrlx13", "sitex13")
+	swap = _with_renamed_user_point(swap, "sitex00d", "ctrlx01")
+	assert_true(_write_native_model("dsuvswap.3di", swap),
+			"composed the passenger-before-controller refresh fixture")
+	# seat_local reads (-y, x, z)/65536 over the raw authored ints, so raw
+	# (196608, 0, 0) lands the anchor at mission-local (0, 3, 0) — the exact
+	# offset the retired hand table authored for this fixture.
+	var parent := _with_renamed_user_point(
+			_repo_file_bytes("res://../fixtures/3dp/dm1a1/dm1a1.3di"),
+			"ctrlx25", "cxrlx25")
+	parent = _with_user_point_position(parent, "ewep01", 196608, 0, 0)
+	assert_true(_write_native_model("dm1a1gp.3di", parent),
+			"composed the seatless designated-G parent fixture")
+
+
+func _native_asset_root() -> NovaResourceRoot:
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path(NATIVE_MODEL_DIR)), OK)
+	assert_true(root.has_file("dm1a1.3di"),
+			"the composed flat asset dir indexes the fixture models")
+	return root
+
 
 func _mission_fixture() -> Dictionary:
 	var mission := NovaMissionData.new()
@@ -71,7 +181,10 @@ func _designated_g_mission_fixture() -> Dictionary:
 	}
 
 
-func _item_db() -> NovaItemDatabase:
+# variant "" = the authoritative table; "refresh" swaps the vehicle graphic to
+# dsuvswap (the dense-reorder refresh); "ambiguous" authors a second addeweap
+# row of the same child type on the parent (stored slot 2, missing anchor).
+func _item_db(variant := "") -> NovaItemDatabase:
 	var base_path := ProjectSettings.globalize_path(
 			"res://../fixtures/def/items.def")
 	var base_file := FileAccess.open(base_path, FileAccess.READ)
@@ -80,8 +193,15 @@ func _item_db() -> NovaItemDatabase:
 		return null
 	var text := base_file.get_as_text().replace("\r\n", "\n")
 	base_file.close()
+	# Native seat extraction walks the graphic's .3di userpoints; the Dune
+	# Buggy row rides the committed dm1a1 model (one ctrlx control seat).
+	assert_true(text.contains("  graphic Dbuggy1\n"))
+	text = text.replace("  graphic Dbuggy1\n",
+			"  graphic dsuvswap\n" if variant == "refresh"
+			else "  graphic dm1a1\n")
 	var path := ProjectSettings.globalize_path(
-			"res://.godot/wire_header_world_items.def")
+			"res://.godot/wire_header_world_items%s.def" % (
+			"" if variant.is_empty() else "_" + variant))
 	var file := FileAccess.open(path, FileAccess.WRITE)
 	assert_not_null(file)
 	if file == null:
@@ -101,6 +221,7 @@ end
 begin "Wire Header Designated-G Parent"
   id 105005
   type vehicle
+  graphic dm1a1gp
   sid wire_header_designated_g_parent
   hp 1000
   attrib: EWeap
@@ -108,48 +229,15 @@ begin "Wire Header Designated-G Parent"
   render_function cveh
   move_function cveh
   primary_weapon WPN_EMPLCD50NA
-end
+  addeweapG ewep01 101419
 """)
+	if variant == "ambiguous":
+		file.store_string("  addeweap missing 101419\n")
+	file.store_string("end\n")
 	file.close()
 	var db := NovaItemDatabase.new()
 	assert_eq(db.load(path), OK)
 	return db
-
-
-func _vehicle_seats() -> Array:
-	return [{
-		"type_id": VEHICLE_TYPE,
-		"seats": [{
-			"type": 2,
-			"retail_slot": 8,
-			"bone_index": 1,
-			"position": Vector3.ZERO,
-			"source_name": "ctrlx00",
-		}],
-	}]
-
-
-func _designated_g_specs() -> Array:
-	return [{
-		"type_id": DESIGNATED_G_PARENT_TYPE,
-		"primary_weapon": "WPN_EMPLCD50NA",
-		"emplacement_attachments": [{
-			"item_id": 101419,
-			"stored_slot": 1,
-			"designated_g": true,
-			"local": Vector3(0, 3, 0),
-		}],
-	}, {
-		"type_id": DESIGNATED_G_CHILD_TYPE,
-		"seats": [{
-			"type": NovaSimulation.SEAT_GUNNER,
-			"retail_slot": 9,
-			"bone_index": 1,
-			"position": Vector3.ZERO,
-			"source_name": "usegunx00",
-		}],
-		"primary_weapon": "WPN_EMPLCD50NA",
-	}]
 
 
 func _install_combat_tables(sim: NovaSimulation, db: NovaItemDatabase) -> void:
@@ -235,12 +323,17 @@ func test_true_wire_header_materializes_exact_deploy_and_vehicle_rows() -> void:
 	assert_not_null(db)
 	if db == null:
 		return
-	var seats := _vehicle_seats()
+	var root := _native_asset_root()
 
 	var host := NovaSimulation.new()
 	_configure_dedicated_host(host)
 	assert_true(host.enable_host_listen(0))
-	host.set_item_seat_specs(seats)
+	host.set_asset_root(root)
+	assert_true(host.install_seat_specs_for_type_ids(
+			db, PackedInt32Array([VEHICLE_TYPE])))
+	assert_gt(int(host.debug_native_pose_stats().get(
+			"mounted_graphic_sources", 0)), 0,
+			"the native install resolved the vehicle model source")
 	assert_true(host.load_from_mission_data(mission))
 	host.resolve_item_traits(db)
 	var host_vehicle: Dictionary = host.get_world_entity_debug(
@@ -332,7 +425,9 @@ func test_true_wire_header_materializes_exact_deploy_and_vehicle_rows() -> void:
 	# Install model-derived metadata AFTER the pool-1 row exists. This must
 	# refresh that same registry row; presentation-only seat knowledge is not
 	# sufficient for the local scan or the authority's carrier validation.
-	joiner.set_item_seat_specs(seats)
+	joiner.set_asset_root(root)
+	assert_true(joiner.install_seat_specs_for_type_ids(
+			db, PackedInt32Array([VEHICLE_TYPE])))
 	for _settle in range(12):
 		joiner.step()
 		host.step()
@@ -357,25 +452,12 @@ func test_true_wire_header_materializes_exact_deploy_and_vehicle_rows() -> void:
 			"the authority echoes the joiner's exact pool-1 carrier identity")
 	if mounted:
 		# Dense list order is presentation metadata. Retail occupancy is keyed by
-		# the fixed mountHandles slot, so a late model refresh that inserts a
-		# passenger before the controller must move both the occupant and its
-		# mount_seat index to the controller's new dense row.
-		joiner.set_item_seat_specs([{
-			"type_id": VEHICLE_TYPE,
-			"seats": [{
-				"type": 1,
-				"retail_slot": 0,
-				"bone_index": 3,
-				"position": Vector3.ZERO,
-				"source_name": "sitex00",
-			}, {
-				"type": 2,
-				"retail_slot": 8,
-				"bone_index": 2,
-				"position": Vector3.ZERO,
-				"source_name": "ctrlx01",
-			}],
-		}])
+		# the fixed mountHandles slot, so a late model refresh that inserts
+		# passenger rows before the controller must move both the occupant and
+		# its mount_seat index to the controller's new dense row (dsuvswap
+		# authors sitex13 ahead of ctrlx01, then three more sitex rows).
+		assert_true(joiner.install_seat_specs_for_type_ids(
+				_item_db("refresh"), PackedInt32Array([VEHICLE_TYPE])))
 	if mounted and joiner_player_index >= 0:
 		var local_card: Dictionary = joiner.get_entity_debug(joiner_player_index)
 		assert_true(bool(local_card.get("mounted", false)))
@@ -383,10 +465,10 @@ func test_true_wire_header_materializes_exact_deploy_and_vehicle_rows() -> void:
 				"the occupant's dense index follows retail slot 8")
 		assert_eq(String(local_card.get("mount_seat_source_name", "")),
 				"ctrlx01")
-		assert_eq(int(local_card.get("mount_target_seat_count", 0)), 2)
+		assert_eq(int(local_card.get("mount_target_seat_count", 0)), 5)
 		var target_seats: Array = local_card.get("mount_target_seats", [])
-		assert_eq(target_seats.size(), 2)
-		if target_seats.size() == 2:
+		assert_eq(target_seats.size(), 5)
+		if target_seats.size() == 5:
 			var seat: Dictionary = target_seats[1]
 			assert_eq(int(seat.get("retail_slot", -1)), 8)
 			assert_eq(String(seat.get("source_name", "")), "ctrlx01")
@@ -412,12 +494,19 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	assert_not_null(db)
 	if db == null:
 		return
-	var specs := _designated_g_specs()
+	var root := _native_asset_root()
 
 	var host := NovaSimulation.new()
 	_configure_dedicated_host(host)
 	assert_true(host.enable_host_listen(0))
-	host.set_item_seat_specs(specs)
+	host.set_asset_root(root)
+	# The addeweapG row recurses the B50 child type into the same table, so
+	# the parent seed installs both halves of the designated-G family.
+	assert_true(host.install_seat_specs_for_type_ids(
+			db, PackedInt32Array([DESIGNATED_G_PARENT_TYPE])))
+	assert_gt(int(host.debug_native_pose_stats().get(
+			"mounted_graphic_sources", 0)), 0,
+			"the native install resolved the parent and child model sources")
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host, db)
 	var host_parent: Dictionary = host.get_world_entity_debug(parent_bms_id)
@@ -470,20 +559,23 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 		return
 
 	# Model/seat resolution commonly completes after the stock 0x0D rows. First
-	# install a deliberately ambiguous same-type sibling. The joiner cannot know
-	# which authored slot produced its child, so its exact rigid 0x0D pose remains
-	# authoritative. The promoted host does know stored slot 1 and must retain
-	# that identity across the same duplicate-table refresh.
-	var ambiguous_specs: Array = specs.duplicate(true)
-	var ambiguous_attachments: Array = \
-			ambiguous_specs[0]["emplacement_attachments"]
-	ambiguous_attachments.append({
-		"item_id": 101419,
-		"stored_slot": 2,
-		"local": Vector3(7, 0, 0),
-	})
-	host.set_item_seat_specs(ambiguous_specs)
-	joiner.set_item_seat_specs(ambiguous_specs)
+	# install a deliberately ambiguous same-type sibling (a second authored
+	# addeweap row of the same child type, stored slot 2, missing anchor). The
+	# joiner cannot know which authored slot produced its child, so its exact
+	# rigid 0x0D pose remains authoritative. The promoted host does know stored
+	# slot 1 and must retain that identity across the same duplicate-table
+	# refresh.
+	var ambiguous_db := _item_db("ambiguous")
+	assert_not_null(ambiguous_db)
+	if ambiguous_db == null:
+		joiner.free()
+		host.free()
+		return
+	assert_true(host.install_seat_specs_for_type_ids(
+			ambiguous_db, PackedInt32Array([DESIGNATED_G_PARENT_TYPE])))
+	joiner.set_asset_root(root)
+	assert_true(joiner.install_seat_specs_for_type_ids(
+			ambiguous_db, PackedInt32Array([DESIGNATED_G_PARENT_TYPE])))
 	var joiner_parent_before := _present_position_for_type(
 			joiner, DESIGNATED_G_PARENT_TYPE)
 	var joiner_child_before := _present_position_for_type(
@@ -524,7 +616,8 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 		host.step()
 		joiner.step()
 		OS.delay_msec(1)
-	joiner.set_item_seat_specs(specs)
+	assert_true(joiner.install_seat_specs_for_type_ids(
+			db, PackedInt32Array([DESIGNATED_G_PARENT_TYPE])))
 
 	var deploy_rows := joiner.get_deploy_spawn_zones()
 	var zone_param := int((deploy_rows[0] as Dictionary).get("param", 0))

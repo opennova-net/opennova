@@ -1,12 +1,26 @@
 extends GutTest
 
 const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
-const ItemSeatSpecs := preload("res://adapter/world/item_seat_specs.gd")
 
 const MISSION := "00TRc.bms"
 const GUN_BMS_ID := 88
 const GUN_ITEM_ID := 101881
 const GUN_GRAPHIC := "E50triB"
+
+
+func _mission_type_ids(mission: NovaMissionData) -> PackedInt32Array:
+	# The S16 boot seeding: every mission entity type id, deduplicated. The
+	# native extractor walks authored addeweap children transitively and drops
+	# rows without runtime metadata itself.
+	var seen := {}
+	var type_ids := PackedInt32Array()
+	for raw in mission.get_all_entities():
+		var entity: Dictionary = raw
+		var type_id := int(entity.get("type_id", 0))
+		if type_id > 0 and not seen.has(type_id):
+			seen[type_id] = true
+			type_ids.append(type_id)
+	return type_ids
 
 
 func test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame() -> void:
@@ -49,16 +63,22 @@ func test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame() -> void:
 	var part_index := int(userpoint.get("subobject", -1))
 	assert_eq(part_index, 1, "E50triB Usegun is owned by the articulated gun part")
 
-	var seats := ItemSeatSpecs.seat_specs_from_model(data, true)
+	var card: Dictionary = item_db.extract_seat_specs_for_item(root, GUN_ITEM_ID)
+	var seats: Array = card.get("seats", []) as Array
 	assert_eq(seats.size(), 1)
 	var seat: Dictionary = seats[0]
 	assert_eq(String(seat.get("source_name", "")).to_lower(), "usegun")
 	assert_eq(int(seat.get("bone_index", 0)) - 1, userpoint_index,
 			"the runtime selected the exact retail Usegun row")
 
+	# S16: the seat/mount table is the native extraction over items.def rows +
+	# .3di userpoints — the asset root must be installed before the seed walk.
 	var sim := NovaSimulation.new()
-	sim.set_item_seat_specs(ItemSeatSpecs.build_item_seat_specs(
-			mission, root, item_db, true))
+	sim.set_asset_root(root)
+	assert_true(sim.install_seat_specs_for_type_ids(
+			item_db, _mission_type_ids(mission)))
+	assert_gt(int(sim.debug_native_pose_stats().get("mounted_graphic_sources", 0)), 0,
+			"the native install fed the mounted-pose resolver")
 	assert_true(sim.load_from_mission_data(mission))
 	assert_eq(sim.spawn_local_player_at_start(), 1)
 	sim.resolve_item_traits(item_db)

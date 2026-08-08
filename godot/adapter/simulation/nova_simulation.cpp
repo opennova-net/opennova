@@ -153,7 +153,6 @@ void NovaSimulation::reset_world() {
 	// Collision models/instances are mission-scoped: drop them with the world (the
 	// sweep re-registers on the next load) and re-point the fresh ai_ at the container.
 	collision_item_db_.unref();
-	collision_placer_.unref();
 	item_traits_db_.unref();
 	collision_model_by_graphic_.clear();
 	collision_occlusion_by_graphic_.clear();
@@ -162,8 +161,6 @@ void NovaSimulation::reset_world() {
 	collision_husk_pieces_by_graphic_.clear();
 	collision_resolution_attempted_.clear();
 	wire_collision_shape_by_type_.clear();
-	collision_pose_data_.clear();
-	collision_skeletal_sources_.clear();
 	collision_pose_native_.clear();
 	infantry_adm_resource_root_.unref();
 	infantry_adm_item_db_.unref();
@@ -479,7 +476,7 @@ void NovaSimulation::apply_host_session_mission_header(const opennova::bms::File
 int64_t NovaSimulation::boot_mission(const Ref<NovaMissionData> &p_mission,
 		const Ref<NovaResourceRoot> &p_resource_root,
 		const Ref<NovaItemDatabase> &p_item_db, Object *p_placer,
-		const Ref<NovaTerrainData> &p_terrain, const Array &p_seat_specs,
+		const Ref<NovaTerrainData> &p_terrain,
 		const PackedByteArray &p_terrain_til, const String &p_wac_basename,
 		const String &p_infantry_adm, const String &p_mission_file_basename,
 		bool p_playable) {
@@ -502,6 +499,14 @@ int64_t NovaSimulation::boot_mission(const Ref<NovaMissionData> &p_mission,
 	boot_debug_ = MissionBootDebug{};
 	boot_debug_.infantry_adm = std::string(infantry_adm.utf8().get_data());
 
+	// S16 (ADR 0028): the native seat extraction resolves model userpoints at
+	// install time, and the witnessed boot order runs the seat step FIRST.
+	// Wire the sim's own model source up front — pure source wiring (no world
+	// mutation); the ordered install_asset_root step later re-affirms the same
+	// root (same index -> the parse cache is untouched).
+	if (p_resource_root.is_valid())
+		set_asset_root(p_resource_root);
+
 	ms::BootParams params;
 	params.is_joiner = joiner_;
 	params.playable = p_playable;
@@ -513,7 +518,31 @@ int64_t NovaSimulation::boot_mission(const Ref<NovaMissionData> &p_mission,
 	params.has_wac = !p_wac_basename.is_empty();
 
 	ms::BootSteps steps;
-	steps.install_seat_specs = [&] { set_item_seat_specs(p_seat_specs); };
+	steps.install_seat_specs = [&] {
+		// S16: seeds = every mission entity's full items.def id; the native
+		// extractor walks authored addeweap children transitively and drops
+		// rows without runtime metadata, exactly like the shell extractor
+		// this replaces.
+		std::vector<int> seeds;
+		if (p_mission.is_valid()) {
+			using BmsEntity = opennova::bms::Entity;
+			const opennova::bms::File &mission_doc =
+					p_mission->native_document().bms_file();
+			const auto seed_group = [&seeds](const std::vector<BmsEntity> &v) {
+				for (const BmsEntity &e : v) {
+					if (e.type_id > 0)
+						seeds.push_back(static_cast<int>(e.type_id) +
+								static_cast<int>(
+										opennova::mission::kItemIdOffset));
+				}
+			};
+			seed_group(mission_doc.items);
+			seed_group(mission_doc.buildings);
+			seed_group(mission_doc.markers);
+			seed_group(mission_doc.organics);
+		}
+		install_native_seat_specs(p_item_db, seeds);
+	};
 	steps.install_ai_profile_speeds = [&] {
 		// The native .aip resolve (runtime_boot). Assigning an empty row set
 		// clears the retained table, exactly like the shell resolver's empty
@@ -793,8 +822,8 @@ void NovaSimulation::restart() {
 		local_weapon_.slot.clip = clip;
 		local_weapon_.slot.reserve = reserve;
 	}
-	if (collision_item_db_.is_valid() && collision_placer_.is_valid())
-		resolve_collision_instances(collision_item_db_, collision_placer_.ptr());
+	if (collision_item_db_.is_valid())
+		resolve_collision_instances(collision_item_db_, nullptr);
 	local_weapon_.anim_tick = world_->logic_tick;
 	reset_local_player_view_effects();
 	// The restored world can share a tick number with a previously cached view.

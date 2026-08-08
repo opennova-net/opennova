@@ -26,7 +26,7 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("load_from_mission_data", "mission"), &NovaSimulation::load_from_mission_data);
 	ClassDB::bind_method(D_METHOD("load_mission_file", "path"), &NovaSimulation::load_mission_file);
 	ClassDB::bind_method(D_METHOD("boot_mission", "mission", "resource_root",
-			"item_db", "placer", "terrain", "seat_specs", "terrain_til",
+			"item_db", "placer", "terrain", "terrain_til",
 			"wac_basename", "infantry_adm", "mission_file_basename", "playable"),
 			&NovaSimulation::boot_mission);
 	ClassDB::bind_method(D_METHOD("get_mission_boot_debug"),
@@ -215,10 +215,8 @@ void NovaSimulation::_bind_methods() {
 			&NovaSimulation::get_panm_time_ms);
 	ClassDB::bind_method(D_METHOD("debug_set_panm_time_ms", "time_ms"),
 			&NovaSimulation::debug_set_panm_time_ms);
-	ClassDB::bind_method(D_METHOD("debug_set_remote_body_native_publish", "native"),
-			&NovaSimulation::debug_set_remote_body_native_publish);
-	ClassDB::bind_method(D_METHOD("debug_remote_body_native_publish"),
-			&NovaSimulation::debug_remote_body_native_publish);
+	ClassDB::bind_method(D_METHOD("debug_native_pose_stats"),
+			&NovaSimulation::debug_native_pose_stats);
 	ClassDB::bind_method(D_METHOD("get_mission_variables_snapshot"), &NovaSimulation::get_mission_variables_snapshot);
 	ClassDB::bind_method(D_METHOD("get_global_variables_snapshot"), &NovaSimulation::get_global_variables_snapshot);
 	ClassDB::bind_method(D_METHOD("get_music_variables_snapshot"), &NovaSimulation::get_music_variables_snapshot);
@@ -278,7 +276,9 @@ void NovaSimulation::_bind_methods() {
 			&NovaSimulation::get_present_layout_revision);
 	ClassDB::bind_method(D_METHOD("get_present_stride"), &NovaSimulation::get_present_stride);
 	ClassDB::bind_method(D_METHOD("set_terrain_height_field", "terrain"), &NovaSimulation::set_terrain_height_field);
-	ClassDB::bind_method(D_METHOD("set_item_seat_specs", "specs"), &NovaSimulation::set_item_seat_specs);
+	ClassDB::bind_method(
+			D_METHOD("install_seat_specs_for_type_ids", "item_db", "type_ids"),
+			&NovaSimulation::install_seat_specs_for_type_ids);
 	ClassDB::bind_method(D_METHOD("set_infantry_anim_map", "resource_root", "adm_name"), &NovaSimulation::set_infantry_anim_map);
 	ClassDB::bind_method(D_METHOD("resolve_infantry_adm_ids", "resource_root", "item_db"), &NovaSimulation::resolve_infantry_adm_ids);
 	ClassDB::bind_method(D_METHOD("resolve_item_traits", "item_db"), &NovaSimulation::resolve_item_traits);

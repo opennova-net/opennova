@@ -36,7 +36,6 @@ const WirePresentPass := preload("res://adapter/world/wire_present_pass.gd")
 const FirePresentPass := preload("res://adapter/world/fire_present_pass.gd")
 const DestructionPresentPass := preload("res://adapter/world/destruction_present_pass.gd")
 const ThrowablePresentPass := preload("res://adapter/world/throwable_present_pass.gd")
-const ItemSeatSpecs := preload("res://adapter/world/item_seat_specs.gd")
 
 # Fixed-timestep accumulator. The original decouples the simulation from rendering: the master
 # loop accumulates real elapsed time and dispatches the logic update once per 16 ms (62.5 Hz),
@@ -75,16 +74,10 @@ var _mission_file := ""
 var _mission_name := ""
 var _setup_error := OK
 
-# Value-only attachment poses for the current authoritative tick. Production
-# lookups stay in NovaSimulation's generation-bound native index; these boxed
-# maps remain only as a compatibility path for snapshot-source test seams.
-var _has_native_present_effect_pose_lookup := false
+# The current authoritative present tick (-1 = none yet). Attachment-pose
+# lookups are NovaSimulation's generation-bound native index — the one path;
+# test sims implement the same compact API.
 var _effect_pose_snapshot_tick := -1
-var _effect_pose_snapshot_ready := false
-var _effect_poses_by_bms_id: Dictionary = {}
-var _effect_poses_by_origin: Dictionary = {}
-var _effect_poses_by_wire_handle: Dictionary = {}
-var _effect_poses_by_ssn: Dictionary = {}
 
 
 ## Create + promote the mission, build the shared index over the placed nodes (`container`), and wire
@@ -116,7 +109,6 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	if _mission_name.is_empty() and not _mission_file.is_empty():
 		_mission_name = _mission_file.get_file().get_basename()
 
-	_has_native_present_effect_pose_lookup = _sim != null
 	if options.has("loco_scale"):
 		_sim.set_loco_scale(int(options["loco_scale"]))
 	# P7 / ADR 0011: every authoritative live mission is an in-process listen server, stood up BEFORE
@@ -148,7 +140,6 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 			_sim.free()
 			_sim = null
 			_has_trace_stats_sampling = false
-			_has_native_present_effect_pose_lookup = false
 			return 0
 		if needs_join_connection and not _sim.enable_join(
 				join_target.host_ip, join_target.port, join_target.player_name):
@@ -200,7 +191,6 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 			_sim.free()
 			_sim = null
 			_has_trace_stats_sampling = false
-			_has_native_present_effect_pose_lookup = false
 			return 0
 	else:
 		# Standalone SP (or an isolated tooling/test preview): the in-process listen server. ONED live
@@ -209,20 +199,15 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	# S9 (ADR 0028): the ordered mission boot. The sequence, its gates, and the
 	# file-resolution policy (mission-text fallback, .aip profile speeds, the
 	# adm default) live in engine/runtime/mission runtime_boot; boot_mission
-	# supplies the step bodies over the sim's feeds. Role bring-up ran above;
-	# presentation composition follows below. Seat specs still ride the
-	# GDScript extractor until S4b, so the built rows pass through as an
-	# argument.
-	var seat_specs: Array = []
-	if options.get("resource_root") != null and options.get("item_db") != null:
-		seat_specs = _build_item_seat_specs(mission, options["resource_root"], options["item_db"])
+	# supplies the step bodies over the sim's feeds — including the S16 native
+	# seat-spec extraction (the GDScript extractor and its Array pass-through
+	# are gone). Role bring-up ran above; presentation composition follows.
 	var boot_err := int(_sim.boot_mission(
 			mission,
 			options.get("resource_root"),
 			options.get("item_db"),
 			options.get("placer"),
 			options.get("terrain"),
-			seat_specs,
 			options.get("terrain_til", PackedByteArray()),
 			String(options.get("wac_basename", "")),
 			String(options.get("infantry_adm", "")),
@@ -233,7 +218,6 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 		_sim.free()  # NovaSimulation is a Node (not RefCounted); free the orphan on load failure
 		_sim = null
 		_has_trace_stats_sampling = false
-		_has_native_present_effect_pose_lookup = false
 		return 0
 	# The shared render/PANM presentation DWORD — re-stamped after the boot
 	# because the load reset cleared it (an order-free scalar, not a boot step).
@@ -362,11 +346,8 @@ func entity_effect_transform_for_ssn(ssn: int) -> Variant:
 	# render pass will present for that tick. Before the first tick there is no
 	# such snapshot, so retain the authoritative registry lookup as the seed.
 	if has_current_present_effect_snapshot():
-		if _has_native_present_effect_pose_lookup:
-			return _effect_transform_from_state(
-					_sim.get_present_effect_state_for_ssn(ssn))
-		_ensure_present_effect_poses()
-		return _effect_poses_by_ssn.get(ssn)
+		return _effect_transform_from_state(
+				_sim.get_present_effect_state_for_ssn(ssn))
 	var state: PackedVector3Array = _sim.get_entity_effect_state_for_ssn(ssn)
 	return _effect_transform_from_state(state)
 
@@ -386,35 +367,21 @@ func presented_entity_effect_transform(entity_ref: Dictionary) -> Variant:
 		return null
 	var has_wire_handle := entity_ref.has("wire_handle")
 	var wire_handle := int(entity_ref.get("wire_handle", -1))
-	if _has_native_present_effect_pose_lookup:
-		var state := PackedVector3Array()
-		if has_wire_handle and wire_handle >= 0 and wire_handle <= 0xffff:
-			state = _sim.get_present_effect_state_for_wire_handle(wire_handle)
-		else:
-			var native_bms_id := int(entity_ref.get("bms_id", 0))
-			if native_bms_id > 0:
-				state = _sim.get_present_effect_state_for_bms_id(native_bms_id)
-			else:
-				var native_kind := int(entity_ref.get(
-						"kind", entity_ref.get("origin_kind", -1)))
-				var native_index := int(entity_ref.get("index", -1))
-				if native_kind >= 0 and native_index >= 0:
-					state = _sim.get_present_effect_state_for_origin(
-							native_kind, native_index)
-		return _effect_transform_from_state(state)
-
-	# Compatibility path for a snapshot-source test seam without the compact API.
-	_ensure_present_effect_poses()
+	var state := PackedVector3Array()
 	if has_wire_handle and wire_handle >= 0 and wire_handle <= 0xffff:
-		return _effect_poses_by_wire_handle.get(wire_handle)
-	var bms_id := int(entity_ref.get("bms_id", 0))
-	if bms_id > 0:
-		return _effect_poses_by_bms_id.get(bms_id)
-	var kind := int(entity_ref.get("kind", entity_ref.get("origin_kind", -1)))
-	var index := int(entity_ref.get("index", -1))
-	if kind >= 0 and index >= 0:
-		return _effect_poses_by_origin.get(_effect_origin_key(kind, index))
-	return null
+		state = _sim.get_present_effect_state_for_wire_handle(wire_handle)
+	else:
+		var native_bms_id := int(entity_ref.get("bms_id", 0))
+		if native_bms_id > 0:
+			state = _sim.get_present_effect_state_for_bms_id(native_bms_id)
+		else:
+			var native_kind := int(entity_ref.get(
+					"kind", entity_ref.get("origin_kind", -1)))
+			var native_index := int(entity_ref.get("index", -1))
+			if native_kind >= 0 and native_index >= 0:
+				state = _sim.get_present_effect_state_for_origin(
+						native_kind, native_index)
+	return _effect_transform_from_state(state)
 
 
 func _effect_transform_from_state(state: PackedVector3Array) -> Variant:
@@ -434,62 +401,12 @@ func get_mission_name() -> String:
 	return _mission_name
 
 
-func _effect_origin_key(kind: int, index: int) -> String:
-	return "%d:%d" % [kind, index]
-
-
 func _clear_present_effect_poses() -> void:
 	_effect_pose_snapshot_tick = -1
-	_effect_pose_snapshot_ready = false
-	_effect_poses_by_bms_id.clear()
-	_effect_poses_by_origin.clear()
-	_effect_poses_by_wire_handle.clear()
-	_effect_poses_by_ssn.clear()
 
 
 func _begin_present_effect_tick(logic_tick: int) -> void:
 	_effect_pose_snapshot_tick = logic_tick
-	_effect_pose_snapshot_ready = false
-	_effect_poses_by_bms_id.clear()
-	_effect_poses_by_origin.clear()
-	_effect_poses_by_wire_handle.clear()
-	_effect_poses_by_ssn.clear()
-
-
-func _ensure_present_effect_poses() -> void:
-	if _effect_pose_snapshot_ready or _sim == null or _effect_pose_snapshot_tick < 0:
-		return
-	_effect_pose_snapshot_ready = true
-	var stride := int(_sim.get_present_stride())
-	if stride <= 0:
-		return
-	var snapshot: PackedFloat32Array = _sim.get_present_snapshot()
-	var count: int = snapshot.size() / stride
-	for i in range(count):
-		var base := i * stride
-		var transform := Transform3D(
-				MissionObjectPlacer.bms_to_godot_basis(Vector3(
-					snapshot[base + NovaSimulation.PF_PITCH_DEG],
-					snapshot[base + NovaSimulation.PF_YAW_DEG],
-					snapshot[base + NovaSimulation.PF_ROLL_DEG])),
-				Vector3(
-					snapshot[base + NovaSimulation.PF_POS_X],
-					snapshot[base + NovaSimulation.PF_POS_Y],
-					snapshot[base + NovaSimulation.PF_POS_Z]))
-		var wire_handle := int(snapshot[base + NovaSimulation.PF_WIRE_HANDLE])
-		var type_id := int(snapshot[base + NovaSimulation.PF_TYPE_ID])
-		if type_id != 0 and wire_handle >= 0 and wire_handle <= 0xffff:
-			_effect_poses_by_wire_handle[wire_handle] = transform
-		var bms_id := int(snapshot[base + NovaSimulation.PF_BMS_ID])
-		if bms_id > 0:
-			_effect_poses_by_bms_id[bms_id] = transform
-		var kind := int(snapshot[base + NovaSimulation.PF_KIND])
-		var index := int(snapshot[base + NovaSimulation.PF_INDEX])
-		if kind >= 0 and index >= 0:
-			_effect_poses_by_origin[_effect_origin_key(kind, index)] = transform
-		var ssn := int(snapshot[base + NovaSimulation.PF_NET_ID])
-		if ssn > 0:
-			_effect_poses_by_ssn[ssn] = transform
 
 
 # --- the local player (Phase 2; ADR 0012). W4-1 removed the pass-through
@@ -622,34 +539,6 @@ func get_wire_presenter() -> RefCounted:
 
 func entity_count() -> int:
 	return _sim.get_entity_count() if _sim != null else 0
-
-
-func _build_item_seat_specs(mission, resource_root, item_db) -> Array:
-	return ItemSeatSpecs.build_item_seat_specs(mission, resource_root, item_db)
-
-
-func _model_name_for_graphic(graphic: String) -> String:
-	return ItemSeatSpecs.model_name_for_graphic(graphic)
-
-
-func _seat_specs_from_model(data: NovaObjectData) -> Array:
-	return ItemSeatSpecs.seat_specs_from_model(data)
-
-
-func _seat_local_from_user_point_position(pos: Vector3) -> Vector3:
-	return ItemSeatSpecs.seat_local_from_user_point_position(pos)
-
-
-func _seat_yaw_offset_from_user_point_rotation(direction: Vector3) -> int:
-	return ItemSeatSpecs.seat_yaw_offset_from_user_point_rotation(direction)
-
-
-func _seat_type_for_user_point(name: String) -> int:
-	return ItemSeatSpecs.seat_type_for_user_point(name)
-
-
-func _seat_pose_index_for_user_point(name: String) -> int:
-	return ItemSeatSpecs.seat_pose_index_for_user_point(name)
 
 
 func is_playing() -> bool:
@@ -999,7 +888,6 @@ func _exit_tree() -> void:
 	if _sim != null:
 		_sim.set_runtime_profiling_enabled(false)
 	_clear_present_effect_poses()
-	_has_native_present_effect_pose_lookup = false
 	if _fire_present != null:
 		_fire_present.teardown()  # frees the tracer mesh instance under the container
 		_fire_present = null

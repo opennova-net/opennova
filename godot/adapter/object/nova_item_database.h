@@ -274,6 +274,13 @@ public:
 	// @0x49d870; consumer Entity_UpdateVehiclePhysics @0x48af00]
 	PackedInt32Array get_vehicle_physics(int id) const;
 	String get_display_name(int id) const;
+	// S16 tooling: the native seat-spec extraction for ONE item, shaped like
+	// the retired GDScript seat_specs_for_item card (the MCP mission tools'
+	// static mount analysis). Static data only — "occupied" is always false;
+	// seats/armory need the model, authored attachment rows survive without
+	// anchors, exactly like the production boot install.
+	Dictionary extract_seat_specs_for_item(
+			const Ref<class NovaResourceRoot> &p_root, int p_item_id);
 	// items.def ammo_closeattack — the person-item anim-fire round NAME, resolved
 	// against the ammo table at mission load by the sim's AI weapon seed (D-AI-5);
 	// empty if none authored. [orig: ItemDef_ParseProperty @ 0x4a1823 -> def+0x56B;

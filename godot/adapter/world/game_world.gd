@@ -21,7 +21,6 @@ extends Node3D
 const VegAssets := preload("res://adapter/terrain/veg_assets.gd")
 const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
 const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
-const ItemSeatSpecs := preload("res://adapter/world/item_seat_specs.gd")
 const NovaSunShadowScript := preload("res://adapter/environment/nova_sun_shadow.gd")
 const MissionRuntime := preload("res://adapter/world/mission_runtime.gd")
 const PanmClockScript := preload("res://adapter/world/panm_clock.gd")
@@ -1482,12 +1481,17 @@ func _prewarm_loaded_model_challenge_definitions() -> void:
 		if _loaded_mission != null and _loaded_mission.is_wire_header_only():
 			var item_db: NovaItemDatabase = _placer.get_item_db()
 			if item_db != null:
-				challenge_sim.set_item_seat_specs(
-						ItemSeatSpecs.build_item_seat_specs_for_type_ids(
-								warmed_types.keys(), _resource_root, item_db))
-				challenge_sim.resolve_item_traits(item_db)
+				# S16: the native extractor reads model userpoints through the
+				# sim's own parse cache, so the asset root wires FIRST (the
+				# shell extractor that read models render-side is gone).
 				if _resource_root != null:
 					challenge_sim.set_asset_root(_resource_root)
+				var wire_type_ids := PackedInt32Array()
+				for warmed_type in warmed_types.keys():
+					wire_type_ids.append(int(warmed_type))
+				challenge_sim.install_seat_specs_for_type_ids(
+						item_db, wire_type_ids)
+				challenge_sim.resolve_item_traits(item_db)
 				challenge_sim.resolve_collision_instances(item_db, _placer)
 				challenge_sim.occlusion_init_mission()
 	var player_visual_item_id := int(_placer.resolve_player_visual_item_id(0x14B9))
