@@ -65,12 +65,8 @@ public:
 	void advance_to_tick(int64_t tick);
 	void advance_seconds(float dt);
 
-	// Legacy ranked-candidate ABI: [candidate_id, vol, x, y, z], stride 5.
-	// Keep this stable for scripts paired with an older native extension.
+	// Ranked candidates: [candidate_id, vol, pitch_q16, x, y, z], stride 6.
 	PackedFloat32Array mix(const Vector3 &listener);
-	// Pitch-aware ranked candidates:
-	// [candidate_id, vol, pitch_q16, x, y, z], stride 6.
-	PackedFloat32Array mix_v2(const Vector3 &listener);
 
 	int live_slot_count() const;
 	int64_t clock_tick() const;
@@ -90,9 +86,6 @@ public:
 	// four static banks. The shell iterates this instead of re-minting the
 	// witnessed table.
 	static PackedStringArray global_bank_chain(const String &expansion_name);
-
-private:
-	PackedFloat32Array mix_rows(const Vector3 &listener, bool include_pitch);
 };
 
 } // namespace godot

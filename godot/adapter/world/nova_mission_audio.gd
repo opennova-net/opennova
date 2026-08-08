@@ -554,7 +554,7 @@ func tick(camera_pos: Vector3, delta: float = 0.0) -> void:
 	_flush_sound_emitters(int(_mixer.clock_tick()))
 	if not _world_driven_ticks and delta > 0.0:
 		_mixer.advance_seconds(delta)
-	var rows: PackedFloat32Array = _mixer.mix_v2(camera_pos)
+	var rows: PackedFloat32Array = _mixer.mix(camera_pos)
 	const row_stride := 6
 	# Ranked loudest-first (candidate-id tie-break) by the native mixer; a
 	# physical incumbent is never rebound merely because its rank within the

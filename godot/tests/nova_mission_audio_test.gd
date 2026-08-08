@@ -82,25 +82,19 @@ func _player_at_position(container: Node, pos: Vector3) -> AudioStreamPlayer3D:
 	return null
 
 
-func test_native_mixer_keeps_legacy_rows_and_versions_pitch_rows() -> void:
+func test_native_mixer_rows_carry_pitch() -> void:
 	var mixer := NovaAmbientMixer.new()
 	var layer := PackedInt32Array([7, 2000, 0, 255, 255])
 	mixer.add_marker(Vector3(10, 2, 3), 0, 0, 30,
 		PackedInt32Array([0, 0, 0, 0]), [layer])
 	mixer.advance_to_tick(0)
-	var legacy: PackedFloat32Array = mixer.mix(Vector3.ZERO)
-	var pitched: PackedFloat32Array = mixer.mix_v2(Vector3.ZERO)
-	assert_eq(legacy.size(), 5,
-		"mix() retains its public stride-5 ABI for older scripts")
-	assert_eq(pitched.size(), 6,
-		"mix_v2() carries pitch without silently reframing legacy rows")
-	if legacy.size() == 5 and pitched.size() == 6:
-		assert_eq(int(legacy[0]), 7)
-		assert_eq(int(pitched[0]), 7)
-		assert_eq(int(pitched[2]), 0x10000)
-		assert_eq(
-			Vector3(legacy[2], legacy[3], legacy[4]),
-			Vector3(pitched[3], pitched[4], pitched[5]))
+	var rows: PackedFloat32Array = mixer.mix(Vector3.ZERO)
+	assert_eq(rows.size(), 6,
+		"mix() rows are [candidate_id, vol, pitch_q16, x, y, z], stride 6")
+	if rows.size() == 6:
+		assert_eq(int(rows[0]), 7)
+		assert_eq(int(rows[2]), 0x10000)
+		assert_eq(Vector3(rows[3], rows[4], rows[5]), Vector3(10, 2, 3))
 
 
 func test_only_the_loudest_eight_candidates_mix() -> void:
