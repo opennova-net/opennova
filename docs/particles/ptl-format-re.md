@@ -490,7 +490,6 @@ damping, force vec); our struct does not mirror byte layout.
 | `nova_particle_table.{h,cpp}` | tabledef LUT | 32×8 logical curve; `sample(t)` linearly interpolates for editor visualization only |
 | `nova_effect_scene.{h,cpp}` | `CEffectWorld` value ownership | Resource adapter over the portable catalog/group/emitter scene; the 62.5 Hz mission tick is the only runtime simulation owner |
 | `nova_particle_renderer.{h,cpp}` + `nova_particle_compositor.{h,cpp}` | `CParticleManager` compile/upload/draw seam | one Node facade publishes immutable packet generations to one POST_TRANSPARENT RD compositor, with persistent growable buffers and renderer-owned value diagnostics |
-| `nova_particle_emitter.{h,cpp}` | `CParticleEmitter` | legacy single-def authoring/test convenience wrapper; neither GameWorld nor ONED uses it for runtime presentation |
 | `ptl_resource_format.{h,cpp}` | (no engine analogue) | Godot ResourceFormat loader/saver for `.ptl`, round-trips |
 
 These rows map responsibilities; they are not a blanket parity verdict. The ONED workspace
