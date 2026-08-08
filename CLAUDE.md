@@ -8,15 +8,18 @@ easier to relay than to rediscover.
 
 ## Map
 
-- `engine/` — the engine: the portable, Godot-free C++ core (ADR 0028; CMake targets
-  `opennova_<domain>`, namespace `opennova` — names unchanged by the 2026-08 move).
-  Four groups, directories only — never link groups or namespaces:
+- `engine/` — the engine: the portable, Godot-free C++ core (ADR 0028; namespace
+  `opennova`, unchanged). Four groups — the directories and, since ADR 0029, the CMake
+  build targets too (five STATIC group targets: `opennova_base`, `opennova_formats`,
+  `opennova_runtime`, `opennova_net`, plus the separate `opennova_novaworld_service`;
+  header-only `opennova_io`/`opennova_oned_edit`; no per-lib targets):
   `base/` (io, vfs, resource_index, gameprofile, pcapio, oned_edit, refs),
-  `formats/` (one lib per NovaLogic format — pff, threedi, def, mnu, env, oed, ...;
-  ADR 0024), `runtime/` (world, wac, mission, anim, audio, particle, renderer,
-  controls, terrain, terrain_query), `net/` (novacrypto, napi, npwire, novaworld,
-  netsim, npruntime). Consumed via the flat C ABI by Python and the DCC plugins,
-  by direct static link everywhere else. See `engine/CLAUDE.md`.
+  `formats/` (one directory per NovaLogic format — pff, threedi, def, mnu, env, oed, ...;
+  ADR 0024 layout; the target also builds mission's format half), `runtime/` (world,
+  wac, mission, anim, audio, particle, renderer, controls, terrain, terrain_query),
+  `net/` (novacrypto, napi, npwire, novaworld, netsim, npruntime). Consumed via the
+  flat C ABI by Python and the DCC plugins, by direct static link everywhere else.
+  See `engine/CLAUDE.md`.
 - `godot/` — the Godot 4.6.1 project: `adapter/` (the shell adapter, ADR 0028:
   GDExtension C++ glue, `Nova*` classes, plus the shared shell-neutral GDScript layer —
   see `godot/adapter/CLAUDE.md`), `modtools/` (the OpenNova Editor "ONED" — thirteen
@@ -82,9 +85,10 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
 
 ## Conventions
 
-- `engine/` libraries: CMake target `opennova_<domain>`, C++ namespace `opennova`, flat
-  domain-prefixed C ABI (consumed by `apps/importer/` and `godot/adapter/`). The shared FFI
-  target is `opennova_shared` (`opennova.dll` / `libopennova.so`).
+- `engine/` libraries: built as the five group targets (ADR 0029 — no per-lib CMake
+  targets), C++ namespace `opennova`, flat domain-prefixed C ABI (consumed by
+  `apps/importer/` and `godot/adapter/`). The shared FFI target is `opennova_shared`
+  (`opennova.dll` / `libopennova.so`).
 - This is a faithful reimplementation — parity, not reinterpretation ([GOALS.md](GOALS.md)).
   Implementing "our own version" of engine behavior is never allowed: port the witnessed
   original as a structural translation and cite it inline (`[orig: Name @ 0xADDR]`) unless a

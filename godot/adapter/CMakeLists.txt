@@ -3,71 +3,13 @@ cmake_minimum_required(VERSION 3.20)
 project(opennova_godot LANGUAGES C CXX)
 
 add_subdirectory(../../third_party/godot-cpp godot-cpp)
-add_subdirectory(../../engine/base/io opennova_io)
-add_subdirectory(../../engine/formats/pcx opennova_pcx)
-add_subdirectory(../../engine/formats/fnt opennova_fnt)
-add_subdirectory(../../engine/formats/foliage opennova_foliage)
-add_subdirectory(../../engine/formats/til opennova_til)
-add_subdirectory(../../engine/formats/tpj opennova_tpj)
-add_subdirectory(../../engine/formats/trn opennova_trn)
-add_subdirectory(../../engine/formats/cpt opennova_cpt)
-add_subdirectory(../../engine/formats/env opennova_env)
-add_subdirectory(../../engine/formats/threedi opennova_threedi)
-add_subdirectory(../../engine/formats/bad opennova_bad)
-add_subdirectory(../../engine/runtime/anim opennova_anim)
-add_subdirectory(../../engine/formats/pff opennova_pff)
-add_subdirectory(../../engine/base/gameprofile opennova_gameprofile)
-add_subdirectory(../../engine/formats/scr opennova_scr)
-add_subdirectory(../../engine/formats/bfc1 opennova_bfc1)
-add_subdirectory(../../engine/base/vfs opennova_vfs)
-add_subdirectory(../../engine/formats/rtxt opennova_rtxt)
-add_subdirectory(../../engine/formats/ase opennova_ase)
-add_subdirectory(../../engine/formats/tdp opennova_tdp)
-add_subdirectory(../../engine/formats/oed opennova_oed)
-add_subdirectory(../../engine/runtime/renderer opennova_renderer)
-add_subdirectory(../../engine/runtime/particle opennova_particle)
-add_subdirectory(../../engine/formats/cbin opennova_cbin)
-add_subdirectory(../../engine/runtime/terrain_query opennova_terrain_query)
-add_subdirectory(../../engine/runtime/terrain opennova_terrain)
-add_subdirectory(../../engine/base/resource_index opennova_resource_index)
-add_subdirectory(../../engine/formats/sbf opennova_sbf)
-add_subdirectory(../../engine/formats/mus opennova_mus)
-add_subdirectory(../../engine/formats/mnu opennova_mnu)
-add_subdirectory(../../engine/formats/mns opennova_mns)
-add_subdirectory(../../engine/formats/def opennova_def)
-add_subdirectory(../../engine/formats/avatars opennova_avatars)
-add_subdirectory(../../engine/base/refs opennova_refs)
-add_subdirectory(../../engine/runtime/world opennova_world)
-add_subdirectory(../../engine/runtime/simassets opennova_simassets)
-add_subdirectory(../../engine/runtime/wac opennova_wac)
-add_subdirectory(../../engine/runtime/mission opennova_mission)
-add_subdirectory(../../engine/formats/lwf opennova_lwf)
-add_subdirectory(../../engine/formats/dbf opennova_dbf)
-add_subdirectory(../../engine/runtime/audio opennova_audio)
-add_subdirectory(../../engine/runtime/hud opennova_hud)
-add_subdirectory(../../engine/base/oned_edit opennova_oned_edit)
-add_subdirectory(../../engine/runtime/controls opennova_controls)
-add_subdirectory(../../engine/formats/playersav opennova_playersav)
-add_subdirectory(../../engine/net/novacrypto opennova_novacrypto)
-add_subdirectory(../../engine/net/napi opennova_napi)
-# sqlite is only needed to DEFINE the novaworld service-leg target; the
-# extension links the game wire lib (npwire) plus the client legs
-# (session/gate), so no sqlite
-# or service code ends up in the binary.
+# sqlite is only needed to DEFINE the novaworld service target inside engine/;
+# the extension links opennova_net (wire codec + session/gate legs + netsim +
+# npruntime), NEVER opennova_novaworld_service, so no sqlite or service code
+# ends up in the binary.
 add_subdirectory(../../third_party/sqlite opennova_sqlite)
-add_subdirectory(../../engine/net/npwire opennova_npwire)
-add_subdirectory(../../engine/net/novaworld opennova_novaworld)
-# netsim: the in-match net seam (NetSystem + World<->wire bridge + loopback).
-add_subdirectory(../../engine/net/netsim opennova_netsim)
-# npruntime: the IDA-faithful in-match NAPI NP runtime (host owner loop + headless client).
-# PUBLIC-links netsim/novaworld/world/mission (all already linked below). The Godot binding
-# (nova_simulation) drives it as a thin adapter; protocol/crypto stay in libs (ADR 0009-0012).
-add_subdirectory(../../engine/net/npruntime opennova_npruntime)
-
-# Family link-interface groups (LIBS-2, ADR 0024): this root is the canonical
-# whole-family consumer — the extension links the family targets below instead
-# of naming every terrain/audio member.
-include(${CMAKE_CURRENT_SOURCE_DIR}/../../engine/families.cmake)
+# The engine (Shape A group targets — see engine/CMakeLists.txt).
+add_subdirectory(../../engine opennova_engine)
 
 set(TARGET_NAME "opennova")
 
@@ -206,48 +148,15 @@ target_include_directories(${TARGET_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
+# opennova_net PUBLIC-pulls the whole sim chain (runtime -> base -> formats ->
+# io); opennova_runtime is named for the direct sim/format consumption in the
+# bindings. The service target is deliberately absent (see the sqlite note
+# above); scripts/lint/link_graph_check.py enforces it.
 target_link_libraries(${TARGET_NAME} PRIVATE
     godot-cpp
-    opennova_pcx
-    opennova_refs
-    opennova_fnt
-    opennova_terrain_family
-    opennova_cbin
-    opennova_env
-    opennova_threedi
-    opennova_bad
-    opennova_anim
-    opennova_pff
-    opennova_gameprofile
-    opennova_rtxt
-    opennova_ase
-    opennova_tdp
-    opennova_oed
-    opennova_renderer
-    opennova_particle
-    opennova_vfs
-    opennova_resource_index
-    opennova_scr
-    opennova_mnu
-    opennova_mns
-    opennova_def
-    opennova_avatars
-    opennova_world
-    opennova_simassets
-    opennova_wac
-    opennova_mission
-    opennova_audio_family
-    opennova_hud
+    opennova_runtime
+    opennova_net
     opennova_oned_edit
-    opennova_controls
-    opennova_playersav
-    opennova_novacrypto
-    opennova_napi
-    opennova_npwire
-    opennova_novaworld_session
-    opennova_novaworld_gate
-    opennova_netsim
-    opennova_npruntime
 )
 
 if(WIN32)

@@ -102,6 +102,7 @@ first grill.
 | [divergence-ledger.md](divergence-ledger.md) + `scripts/lint/ledger_check.py` | a divergence being known but untracked, or the scoreboard drifting from its own tables | CI, hard-fail; `--write` regenerates |
 | `scripts/lint/ratchet_counts.py` | new uncited `engine/` source files; new tests poking privates | CI, fail-on-increase against a committed baseline |
 | `scripts/lint/link_graph_check.py` | forbidden lib edges (ADR 0019/0020 seams) | CI, hard-fail |
+| `scripts/lint/include_graph_check.py` | the ADR 0020 terrain seam dissolving with the ADR 0029 target collapse — net/wac/mission may include only terrain_query's four `terrain/` headers, never the terrain-format stack | CI, hard-fail |
 | `scripts/lint/host_lint.py` | "host" regressing to any non-game-host sense (the terminology campaign's teeth) | CI, hard-fail on code suffixes; Markdown gets a non-failing advisory |
 | `scripts/lint/maturity_lint.py` | dict-contract drift and new magic numbers in changed `.gd` ranges | CI, hard-fail (advisory legs stay advisory) |
 | `abi_export_identity` ctest | an accidental change to the flat C ABI | default ctest; a baseline bump is same-commit and logged in [maturity-program.md](maturity-program.md) |

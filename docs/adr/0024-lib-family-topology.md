@@ -5,6 +5,12 @@
 - **Supersedes/updates**: executes LIBS-2/LIBS-3 of the maturity umbrella
   (docs/maturity-program.md); records the LIBS-2 clause reversal already
   decided in ADR 0023.
+- **Superseded in part by [ADR 0029](0029-engine-group-targets.md)**
+  (2026-08-08, targets only — the directory layout stands): decision 1's
+  per-format CMake target clause and decisions 2–4 (the family link groups).
+  The one-directory-per-format layout with its headers, namespace, fixtures,
+  and tests, decision 5's renderer reversal, and decision 6's Model A/B
+  consumption models remain in force.
 
 ## Context
 

@@ -18,15 +18,12 @@ endif()
 
 add_executable(opennova_novaworld_server ${NOVAWORLD_SERVER_SOURCES})
 
+# The service target (the one sqlite consumer) plus the net group (gate/session
+# legs, npwire, npruntime, napi, novacrypto — all inside opennova_net).
 target_link_libraries(opennova_novaworld_server
     PRIVATE
-        opennova_novaworld_gate
         opennova_novaworld_service
-        opennova_novaworld_session
-        opennova_npwire
-        opennova_npruntime
-        opennova_napi
-        opennova_novacrypto
+        opennova_net
         opennova_app_common
         opennova_bcrypt
 )
