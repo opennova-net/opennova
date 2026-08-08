@@ -211,11 +211,6 @@ def _wire_bump(rt, mat, desc) -> None:
         _set_user_prop(rt, mat, "opennova_bump_map_mode", "metadata_only")
 
 
-def create_diffuse_material(mat_ir, resolver=None) -> Any:
-    """Backward-compatible wrapper used by older smoke tests."""
-    return create_material(mat_ir, resolver=resolver)
-
-
 def create_marker_material(name: str, color_rgb: tuple[float, float, float], alpha: float = 1.0) -> Any:
     """Create or return a simple colored Max material."""
     rt = _rt()

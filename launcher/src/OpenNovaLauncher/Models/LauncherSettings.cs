@@ -1,15 +1,11 @@
 using System;
 using System.Collections.Generic;
-using System.Text.Json.Serialization;
 
 namespace OpenNova.Launcher.Models;
 
 public sealed class LauncherSettings
 {
     public Dictionary<string, string> GameDirectories { get; set; } = new(StringComparer.OrdinalIgnoreCase);
-
-    [JsonPropertyName("gameDirectory")]
-    public string? LegacyGameDirectory { get; set; }
 
     public Dictionary<string, Dictionary<string, InstalledExpansion>> InstalledExpansions { get; set; } =
         new(StringComparer.OrdinalIgnoreCase);
