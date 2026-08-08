@@ -232,6 +232,23 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
                           bool allow_same_weapon_rebake,
                           WeaponInventory *inventory, PlayerViewState &view);
 void local_weapon_clear(LocalPlayerWeapon &w, PlayerViewState &view);
+
+// The LOCAL branch of retail's held-weapon draw gate: the weapon model is
+// drawn iff the soldier may FIRE it — one predicate serves both, which is why
+// a dead, seated or dry-magazine player simply has no gun in his hands.
+// Seat rule, LOCAL flavour: control/driver always hide; the gunner seat hides
+// only while the third-person camera is up (the remote flavour hides all
+// three — seat_type_blocks_weapon_channel). A weapon with no FIRST-person
+// model hides on your OWN body even though every observer still sees it —
+// retail asymmetry, not a bug.
+// [orig: Entity_CanFireWeapon @ 0x4dcb10 — the local branch
+//  @ 0x4dcbcf..0x4dcc5d; dead @0x4dcb22; no EquippedSlot @0x4dcbcf; no Def
+//  @0x4dcbda; the ammo leg @0x4dcbea -> Entity_GetScoreValueBySlotType
+//  @0x5406E0 (weapon_pool_get); no-1P-model @0x4dcc32; the mount split
+//  @0x4dcc42..0x4dcc5d]
+bool local_held_weapon_visible(const World &world, const Entity &entity,
+		const LocalPlayerWeapon &weapon, const WeaponInventory &inventory,
+		bool third_person);
 void local_weapon_set_input(LocalPlayerWeapon &w, const PlayerViewState &view,
                             bool fire_held, bool fire_pressed,
                             bool reload_pressed);
