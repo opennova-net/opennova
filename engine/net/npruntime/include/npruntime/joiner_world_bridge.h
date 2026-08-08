@@ -32,14 +32,16 @@
 // sequences and consumes them, it reduces nothing itself.
 //
 // The embedding shell keeps what a portable bridge cannot own: the socket
-// (deposit/send), device input application, render-coupled asset resolution
-// (collision/occlusion model caches, adm registration, item traits), the
-// loadout profile/dictionary seams (S7b disposition: the adapter keeps dict
-// conversion + playersav profile seeding + the joiner 0x2F pushes), the view/
-// weapon pumps it shares with the host path, and the F3 profiling clocks.
-// Those legs are injected per pump as PumpHooks — the same shape as
-// host_session_pump's resolve-adm callback, the joiner's wider because retail
-// runs the local-player legs INSIDE this frame, not around it.
+// (deposit/send), device input application, the dict-conversion seams, the
+// view/weapon pumps it shares with the host path, and the F3 profiling
+// clocks. (The S7b disposition originally also kept asset resolution and the
+// joiner 0x2F loadout pushes shell-side; ADR 0031 re-opened both — the
+// collision/seat sweep lives in simassets/collision_resolve +
+// seat_spec_extract, the profile-seed/0x2F composition in
+// npruntime/loadout_submit; the shell keeps only the role gates and the
+// hook wiring.) Those legs are injected per pump as PumpHooks — the same
+// shape as host_session_pump's resolve-adm callback, the joiner's wider
+// because retail runs the local-player legs INSIDE this frame, not around it.
 namespace opennova::np {
 
 // The decoded ClientState row for a wire handle, or null. Linear: ClientState

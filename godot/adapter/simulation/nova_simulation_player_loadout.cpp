@@ -3,6 +3,8 @@
 // profile, and the weapon/ammo table feeds.
 #include "simulation/nova_simulation_internal.h"
 
+#include <npruntime/loadout_submit.h> // the 0x2F submission composition (ADR 0031 PR E)
+
 #include <cstdlib> // the chunk tuples' atol-truncation parse [orig: @ 0x42cf7c]
 
 #include <def/def.h> // DEF_WEAPON_FLAG_* / DEF_WEAPON_FLAG2_*
@@ -349,107 +351,39 @@ void NovaSimulation::rebuild_local_player_loadout(bool p_select_spawn_default) {
 }
 
 bool NovaSimulation::seed_session_kit_from_profile() {
-	// The Game_StartMission copy: in a live session the assigned side's profile page
-	// becomes the resident kit buffer [orig: @0x525813
-	// Buffer_CopyUntilDoubleNull(restrictionData, page, 0x800)], which is BOTH what the
-	// local slot pool is built from [orig: Player_InitPlayer @0x4e15f0 ->
-	// AvatarDef_BuildDisplayList(.., restrictionData)] and what the C2S 0x2F serializes
-	// [orig: NetPacket_SendLoadoutSubmit @0x42cdc0]. Retail keeps one buffer; keeping
-	// two is how the local view and the wire drift apart.
-	//
-	// Gated on a live session exactly as retail is (`is_in_session` covers a LISTEN HOST
-	// as well as a joiner), so single player and the editor keep the mission's .bms kit.
-	// The S2C 0x50 team assign re-runs this for the NEW side [orig:
-	// NapiNPClientMsg_TeamAssign @0x431a9a re-copies the page into restrictionData].
-	if (!world_ || world_->weapons.empty()) return false;
+	// The composition is engine code now (np::seed_session_kit_from_profile,
+	// ADR 0031 PR E — the Game_StartMission copy semantics live there). This
+	// binding keeps the ROLE gate: a live session covers a LISTEN HOST as
+	// well as a joiner, so single player and the editor keep the mission's
+	// .bms kit.
+	if (!world_) return false;
 	if (!host_listen_ && !joiner_) return false;
-	uint8_t team = (joiner_ && runtime_) ? runtime_->assigned_team() : 0;
-	if (team == 0) {
-		const opennova::world::Entity *local =
-				world_->registry.get(world_->cached.local_player);
-		if (local != nullptr) team = local->team;
-	}
-	// An UNLATCHED team must not commit a page. The side selector is the S2C 0x04 tail
-	// byte [orig: byte_A85B48 @0x425499], and retail cannot reach this copy before it is
-	// latched — admission delivers 0x04 long before Game_StartMission runs, so
-	// @0x525798's `team == 1 || team == 3` always sees a real value. Our catalog can land
-	// first, and since anything-not-1-or-3 selects the RED block, seeding at team 0 would
-	// commit the wrong side's page and then have to flip it. Wait instead; the pump
-	// re-seeds the moment the latch (or a later 0x50 reassignment) changes the side.
-	if (team == 0) return false;
-	const opennova::playersav::Side &side =
-			weapon_profile_.side(opennova::playersav::side_for_team(team));
-	uint8_t player_class = side.player_class;
-	if (player_class < 5 || player_class > 9) player_class = 8;
-	const opennova::playersav::KitPage *page = side.page_for_class(player_class);
-	if (page == nullptr || page->entries.empty()) return false;
-	std::vector<opennova::world::WeaponKitEntry> kit;
-	kit.reserve(page->entries.size());
-	for (const opennova::playersav::KitEntry &e : page->entries)
-		kit.push_back(opennova::world::WeaponKitEntry{e.name, e.ammo_primary,
-		                                             e.ammo_secondary, e.flags});
-	local_loadout_.spawn_kit = std::move(kit);
-	local_loadout_.spawn_kit_set = true;
-	weapon_profile_seeded_side_ =
-			static_cast<int>(opennova::playersav::side_for_team(team));
-	return true;
+	const uint8_t assigned =
+			(joiner_ && runtime_) ? runtime_->assigned_team() : 0;
+	return opennova::np::seed_session_kit_from_profile(*world_,
+			weapon_profile_, assigned, local_loadout_,
+			weapon_profile_seeded_side_);
 }
 
 bool NovaSimulation::reseed_session_kit_on_side_change() {
-	// The team latch can arrive AFTER the catalog — the S2C 0x04 tail byte on the way in
-	// [orig: byte_A85B48 @0x425499], or a later S2C 0x50 reassignment moving us across
-	// the line [orig: NapiNPClientMsg_TeamAssign @0x4319db]. Retail re-reads the profile
-	// for the new side on the 0x50 leg and re-copies its page into restrictionData
-	// @0x431a9a; the 0x04 case it simply never has, because the latch precedes
-	// Game_StartMission's copy. Both collapse to the same rule here: whenever the SIDE
-	// the selector names stops matching the side the resident buffer was copied from,
-	// re-copy. Keyed on the side rather than the raw team so a 1<->3 (or 2<->4)
-	// reassignment inside one side does not needlessly rebuild — those read the same
-	// block @0x525798 — and so an in-session armory ACCEPT, which changes the buffer but
-	// never the side, is not undone.
 	if (!joiner_ && !host_listen_) return false;
-	uint8_t team = (joiner_ && runtime_) ? runtime_->assigned_team() : 0;
-	if (team == 0) {
-		const opennova::world::Entity *local =
-				world_ ? world_->registry.get(world_->cached.local_player) : nullptr;
-		if (local != nullptr) team = local->team;
-	}
-	if (team == 0) return false;
-	if (static_cast<int>(opennova::playersav::side_for_team(team)) ==
-	    weapon_profile_seeded_side_)
+	if (!world_) return false;
+	const uint8_t assigned =
+			(joiner_ && runtime_) ? runtime_->assigned_team() : 0;
+	if (!opennova::np::reseed_session_kit_on_side_change(*world_,
+			weapon_profile_, assigned, local_loadout_,
+			weapon_profile_seeded_side_))
 		return false;
-	if (!seed_session_kit_from_profile()) return false;
 	rebuild_local_player_loadout(/*p_select_spawn_default=*/true);
 	return true;
 }
 
 void NovaSimulation::push_joiner_loadout_kit() {
-	// The joiner's C2S 0x2F submission content — the wire seam D-NET-168 tracked.
-	//
-	// It does NOT come from the mission. Mission_LoadBMSFile SKIPS both the loadout
-	// chunk and the availability chunk whenever a session is live — for a listen host
-	// as well as a joiner [orig: @0x40f694 `cmp is_in_session, 0` -> the fseek pair
-	// @0x40f6b2 / @0x40f6e1; only the non-session branch reads, availability-filters
-	// @0x40f834, knife-falls-back @0x40f899 and writes restrictionData @0x40f961].
-	//
-	// The MP source is the player profile, indexed BY the class. Game_StartMission
-	// picks the assigned side's block, reads ONE integer out of it — the class byte —
-	// and that single integer selects BOTH the wire class and which of the five
-	// 2048-byte kit pages is copied into restrictionData [orig: @0x525767..@0x525836:
-	// esi = (team==1||team==3) ? blue block : red block, eax = *(u8*)esi,
-	// switch(class-5) -> page = esi + {6,0x806,0x1006,0x1806,0x2006},
-	// Buffer_CopyUntilDoubleNull -> NetPacket_SendLoadoutSubmit(team, eax, page, 195)].
-	// Because one integer drives both, retail can never submit a class-illegal kit;
-	// pairing the mission's .bms kit with a hardcoded class is what made a live retail
-	// host drop our WPN_SR25 (charfilter sniper, mask 2, against class 8).
-	//
-	// Row resolution mirrors the original builder: names that miss the catalog are
-	// skipped whole, and the ammo/flags values are the atol result truncated to the
-	// low byte (-1 -> 0xFF) [orig: NetPacket_SendLoadoutSubmit @0x42cdc0 —
-	// AvatarDef_FindByName skip @0x42cf0b, truncation @0x42cf7c/@0x42cfbc/@0x42cff7].
-	// Deliberately NO charfilter/teamfilter test runs here: retail's CLIENT submits
-	// unfiltered (@0x42cdc0 tests neither adm+124 nor adm+128) and prevention lives in
-	// the PLAYER_INFO kit editor [orig: populate_weapon_slot_lists @0x560430].
+	// The C2S 0x2F submission content builder is engine code now
+	// (np::build_joiner_loadout_kit, ADR 0031 PR E — the one-class-integer
+	// rule, the resident-buffer rows, and both side blocks live there, with
+	// their witnesses). This binding keeps the seam wiring: the role gate,
+	// the empty-catalog arm delay, the re-entry latch, and the pump handoff.
 	if (!joiner_ || !runtime_ || !world_) return;
 	// finish_load runs before the shell loads weapon.def (MissionRuntime orders
 	// load_from_mission_data ahead of load_weapon_table), and a kit resolved against an
@@ -461,93 +395,11 @@ void NovaSimulation::push_joiner_loadout_kit() {
 	// latch keeps that one-way (a push must never drive a rebuild back into itself).
 	if (pushing_joiner_loadout_kit_) return;
 	pushing_joiner_loadout_kit_ = true;
-
 	opennova::np::JoinerConnection::LoadoutKit wire_kit;
-	// The side selector. The host's S2C 0x04 tail byte is retail's byte_A85B48, and
-	// teams 1/3 read the BLUE block, 2/4 the RED one [orig: @0x525788]. Before that
-	// latch lands (assigned_team() == 0) fall back to the local entity's own team when
-	// L already exists. With neither, side_for_team(0) resolves to RED — anything that
-	// is not 1 or 3 reads the red block @0x525798 — which is why the resident buffer is
-	// NOT copied at team 0 (see seed_session_kit_from_profile) and why the pump re-seeds
-	// once the latch lands. The seam itself still arms so the runtime has content.
-	uint8_t team = runtime_->assigned_team();
-	if (team == 0) {
-		const opennova::world::Entity *local =
-				world_->registry.get(world_->cached.local_player);
-		if (local != nullptr) team = local->team;
-	}
-	const opennova::playersav::Side &side =
-			weapon_profile_.side(opennova::playersav::side_for_team(team));
-	// ONE integer: the wire class byte AND the page index [orig: eax = *(u8*)esi, the
-	// switch(class-5) page map]. The [5,9] clamp is retail's own per-side session-start
-	// clamp [orig: apply_session_settings_to_globals @0x5516ab..@0x5516ec]; 8
-	// (rifleman) is the shipped profile default [orig: PlayerProfile_InitDefaults
-	// @0x54bbe0/@0x54bbe3] and also what the host's 0x2F envelope requires — it aborts
-	// on a nonzero class outside [5,9] [orig: @0x5158b1 -> @0x515fa5].
-	uint8_t player_class = side.player_class;
-	if (player_class < 5 || player_class > 9) player_class = 8;
-	wire_kit.player_class = player_class;
-	// The pair's SECOND submit carries the live equipped slot instead of the fixed 195
-	// [orig: Game_StartMission @0x525c2e passes g_currentWeaponSlot].
-	wire_kit.equipped_combo =
-			local_inventory_valid_ ? local_inventory_.equipped_combo : -1;
-	// One side block -> (clamped class, ADM-resolved rows). Retail re-reads the profile
-	// block the wire team byte names on EVERY profile-sourced submission, so the row
-	// resolve is shared by the applied kit below and by both resident side blocks.
-	auto resolve_side = [this](const opennova::playersav::Side &s, uint8_t klass) {
-		std::vector<opennova::LoadoutSubmitEntry> rows;
-		const opennova::playersav::KitPage *p = s.page_for_class(klass);
-		if (p == nullptr) return rows;
-		for (const opennova::playersav::KitEntry &entry : p->entries) {
-			const int adm = world_->weapons.index_of(entry.name.c_str());
-			if (adm < 0) continue; // [orig: the AvatarDef_FindByName gate @0x42cf0b]
-			rows.push_back(opennova::LoadoutSubmitEntry{
-					static_cast<uint8_t>(adm),
-					static_cast<uint8_t>(entry.ammo_primary),
-					static_cast<uint8_t>(entry.ammo_secondary),
-					static_cast<uint8_t>(entry.flags)});
-		}
-		return rows;
-	};
-	// The RESIDENT rows are the resident kit buffer, not a fresh read of the profile
-	// page. Retail has exactly ONE buffer: Game_StartMission copies the profile page
-	// into restrictionData, Player_InitPlayer builds the local display list from that
-	// same restrictionData, and NetPacket_SendLoadoutSubmit serializes it — so what we
-	// hold locally and what we tell the host are the same bytes by construction. An
-	// in-session armory ACCEPT overwrites restrictionData and its re-send therefore
-	// carries the ACCEPTED kit [orig: WeaponLoadout_ApplyFromBuffer @0x565cd0 ->
-	// @0x565d94], which reading the profile back here would silently undo.
-	// `local_loadout_.spawn_kit` is our restrictionData; `seed_session_kit_from_profile` is the
-	// Game_StartMission copy that fills it.
-	{
-		const std::vector<opennova::world::WeaponKitEntry> &resident =
-				local_loadout_.spawn_kit_set ? local_loadout_.spawn_kit : opennova::world::weapon_kit_default();
-		for (const opennova::world::WeaponKitEntry &entry : resident) {
-			const int adm = world_->weapons.index_of(entry.name.c_str());
-			if (adm < 0) continue; // [orig: the AvatarDef_FindByName gate @0x42cf0b]
-			wire_kit.rows.push_back(opennova::LoadoutSubmitEntry{
-					static_cast<uint8_t>(adm),
-					static_cast<uint8_t>(entry.ammo_primary),
-					static_cast<uint8_t>(entry.ammo_secondary),
-					static_cast<uint8_t>(entry.flags)});
-		}
-	}
-	// BOTH side blocks stay resident on the seam. Retail keeps the whole profile in
-	// memory and re-selects the side the NEW team byte names when the S2C 0x50 team
-	// assign moves us across the line — class AND page together [orig:
-	// NapiNPClientMsg_TeamAssign @0x431a35..@0x431a9a]. Without these the resubmit
-	// would ship whatever side was resident when the seam was last pushed, i.e. the
-	// OLD side's page against the NEW side's team byte.
-	auto fill_side = [&](opennova::np::JoinerConnection::LoadoutKit::SideKit &out,
-	                     const opennova::playersav::Side &s) {
-		uint8_t k = s.player_class;
-		if (k < 5 || k > 9) k = 8; // [orig: the per-side clamp @0x5516ab..@0x5516ec]
-		out.set = true;
-		out.player_class = k;
-		out.rows = resolve_side(s, k);
-	};
-	fill_side(wire_kit.blue, weapon_profile_.blue);
-	fill_side(wire_kit.red, weapon_profile_.red);
+	opennova::np::build_joiner_loadout_kit(*world_, weapon_profile_,
+			runtime_->assigned_team(), local_loadout_,
+			local_inventory_valid_ ? local_inventory_.equipped_combo : -1,
+			wire_kit);
 	runtime_->set_loadout_kit(std::move(wire_kit));
 	pushing_joiner_loadout_kit_ = false;
 }
