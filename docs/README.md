@@ -40,7 +40,7 @@ behavior is summarized and cited.
 | [0001](adr/0001-mnu-action-command-boundary.md) | MNU: Actions live in the file, Commands come from the shell by control name |
 | [0002](adr/0002-mnu-round-trip-preserves-superset.md) | MNU: round-trip preserves the format superset |
 | [0003](adr/0003-no-raw-passthrough-create-from-scratch.md) | MNU: no raw byte passthrough; documents are created from scratch |
-| [0004](adr/0004-audio-selection-pushdown.md) | Audio: member selection pushed down into portable `libs/audio` |
+| [0004](adr/0004-audio-selection-pushdown.md) | Audio: member selection pushed down into the portable audio lib (now `engine/runtime/audio`) |
 | [0005](adr/0005-mnu-var-expansion-policy.md) | MNU: `%VAR%` expansion policy |
 | [0006](adr/0006-unified-mission-runtime-present-pass.md) | Unified mission present pass and entity index; its former embedded editor preview is superseded by ADR 0025 |
 | [0007](adr/0007-skeletal-runtime-and-entity-visual.md) | Skeletal `.bad`/`.adm` runtime and the `NovaEntityVisual` contract |
@@ -55,8 +55,8 @@ behavior is summarized and cited.
 | [0016](adr/0016-engine-editor-boundary.md) | The editor is a detachable layer over public engine APIs; engine behavior does not live in GDScript |
 | [0017](adr/0017-typed-records-named-constants.md) | Contracts are typed records, not dictionaries; constants are named, not magic |
 | [0018](adr/0018-public-api-testability.md) | Tests exercise public seams; a test that needs a private is an API bug report |
-| [0019](adr/0019-npwire-game-wire-lib.md) | libs/npwire is the game wire protocol lib; matchmaking (novaworld) sits on it, direction npwire → napi/novacrypto |
-| [0020](adr/0020-world-terrain-query-seam.md) | libs/terrain_query is the world→terrain seam: world links the height-query leaf, never the terrain-format stack; the forbidden-edge check is permanent |
+| [0019](adr/0019-npwire-game-wire-lib.md) | `engine/net/npwire` is the game wire protocol lib; matchmaking (novaworld) sits on it, direction npwire → napi/novacrypto |
+| [0020](adr/0020-world-terrain-query-seam.md) | `engine/runtime/terrain_query` is the world→terrain seam: world links the height-query leaf, never the terrain-format stack; the forbidden-edge check is permanent |
 | [0021](adr/0021-avatars-writer-policy.md) | Avatars.def writer: from-scratch canonical output; lossless + idempotent round-trip, not byte-exact vs the hand-authored file |
 | [0022](adr/0022-divergence-burn-down.md) | Divergence burn-down: zero-OPEN target, the canonical disposition vocabulary, the PAR freeze exemption, and the permanent register of ratified deliberate divergences |
 | [0023](adr/0023-render-visual-parity.md) | Render visual parity (REN): the fixed-function look is the target (no PBR), the D3D device layer is witness-source only, REN runs freeze-exempt on the PAR model, and the three-tier parity instrument's tolerances never widen |

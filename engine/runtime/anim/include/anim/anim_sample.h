@@ -27,8 +27,9 @@
 // 2026-07-08 misreading. The composed builders (@0x40c400/@0x40c770) then treat the result
 // as the bone's rotation with a PURE-TRANSLATION bind: the skinning bind-inverse is
 // T(-pivot), no rotation. `model_bind` below enables that faithful interpretation; the
-// default (absolute channel rotations + bind-matrix rest) is the legacy body pipeline,
-// byte-identical for healthy exports where channel-at-reset == bind.
+// default (absolute channel rotations + bind-matrix rest) is the witnessed BODY pipeline
+// (both modes are retail), byte-identical for healthy exports where
+// channel-at-reset == bind.
 
 #ifndef OPENNOVA_ANIM_SAMPLE_H
 #define OPENNOVA_ANIM_SAMPLE_H

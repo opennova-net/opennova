@@ -99,9 +99,10 @@ private:
 	// zeroed/stale renders exactly like a healthy one, and a healthy one renders bit-for-bit
 	// like the .bad-driven path (the proven-equivalent factorization of the witnessed composed
 	// builders; sample_clip's model_bind mode remains the direct reference implementation,
-	// exercised by ctest). Legacy (no parents): p_model_origins sized like the .bad's bone
-	// count OVERRIDES the reset .bad's bone positions as the shared rest origins; otherwise
-	// the reset .bad positions are used (menu-preview semantics). Caller clears state first
+	// exercised by ctest). No-parents mode (retail's menu-preview semantics):
+	// p_model_origins sized like the .bad's bone count OVERRIDES the reset .bad's bone
+	// positions as the shared rest origins; otherwise
+	// the reset .bad positions are used. Caller clears state first
 	// and sets adm_name_. Returns false (with last_error_) on an unusable reset .bad or when
 	// no clip survives. Shared by load_from_resource_root and load_from_bad_files.
 	bool build_from_bad_bytes(const PackedByteArray &p_reset_bytes,

@@ -1380,9 +1380,12 @@ void watercraft_seed_platform_latch(World &world, Entity &veh,
                               : (veh.flags & ~0x8000u);
 }
 
-// Some headless embedders do not resolve model boxes, so the platform solver
-// cannot produce its afloat latch. Preserve the old water-plane stand-in only
-// for that explicit fallback; resolved hulls always consume the prior solve.
+// The npruntime headless host boots World without the shell's model-box
+// resolution (VehicleTraits.box_z_* is stamped only by the adapter's
+// nova_simulation_assets resolve), so its watercraft have no platform
+// geometry and the solver cannot produce an afloat latch. This water-plane
+// stand-in covers exactly that path; resolved hulls always consume the
+// prior platform solve.
 void watercraft_refresh_fallback_afloat(World &world, Entity &veh) {
     Entity::VehicleMotorState &m = veh.veh;
     bool afloat = false;

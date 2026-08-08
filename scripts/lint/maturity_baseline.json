@@ -21,9 +21,9 @@
     "test_private_pokes": 1284
   },
   "dict_contract_allowlist": [
-    "to_drag_data",
-    "from_drag_data",
-    "selected_weapon",
+    "link_payload.gd|func to_drag_data()",
+    "link_payload.gd|func from_drag_data(",
+    "armory_menu_companion.gd|func selected_weapon(",
     "nova_weather.gd|func get_network_environment_snapshot()",
     "document_tab_row.gd|func to_dict()",
     "mcp_tool_def.gd|var input_schema",
