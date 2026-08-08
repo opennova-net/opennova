@@ -174,6 +174,11 @@ public:
 	// chosen zero row weighs nothing (engine/formats/def def_extra_ammo_weight
 	// [orig: @ 0x5655c9..0x56561c; the @ 0x55f1f0 family terms]).
 	double extra_ammo_weight(int p_index, int p_count) const;
+	// The sub-weapon behind a parent slot's *_AMMO2: the absolute index of the
+	// first differing-round_type entry in the parent's loadout_subclasses
+	// window, or -1 (engine/formats/def def_subclass_weapon_index
+	// [orig: @ 0x55def0 / @ 0x55e8b0 / @ 0x55f1f0]).
+	int subclass_weapon_index(int p_parent_index) const;
 	// The encumbrance band for a weight (ENCUMBRANCE_*)
 	// [orig: update_player_info_weight_and_weapon_icons @ 0x55f480].
 	int encumbrance_class(double weight) const;

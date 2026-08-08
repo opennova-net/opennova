@@ -7,6 +7,10 @@
 #include <def/def.h>
 #include <world/player_loadout.h> // armory class policy (ADR 0016: one impl)
 
+#include <algorithm>
+#include <cstdio>
+#include <vector>
+
 using namespace godot;
 
 static_assert(NovaWeaponDatabase::FLAG_EMPLACED == DEF_WEAPON_FLAG_EMPLACED,
@@ -35,6 +39,8 @@ void NovaWeaponDatabase::_bind_methods() {
 			&NovaWeaponDatabase::loadout_weight);
 	ClassDB::bind_method(D_METHOD("extra_ammo_weight", "index", "count"),
 			&NovaWeaponDatabase::extra_ammo_weight);
+	ClassDB::bind_method(D_METHOD("subclass_weapon_index", "parent_index"),
+			&NovaWeaponDatabase::subclass_weapon_index);
 	ClassDB::bind_method(D_METHOD("encumbrance_class", "weight"),
 			&NovaWeaponDatabase::encumbrance_class);
 	ClassDB::bind_static_method("NovaWeaponDatabase",
@@ -360,6 +366,27 @@ double NovaWeaponDatabase::extra_ammo_weight(int p_index, int p_count) const {
 	d.maxclips = w.maxclips;
 	d.clipweight = w.clip_weight;
 	return def_extra_ammo_weight(&d, p_count);
+}
+
+int NovaWeaponDatabase::subclass_weapon_index(int p_parent_index) const {
+	// def_subclass_weapon_index reads only round_type/loadout_subclasses, so a
+	// temp slice of the parent's window forwards the stored rows faithfully.
+	if (p_parent_index < 0 || p_parent_index >= static_cast<int>(weapons.size())) {
+		return -1;
+	}
+	const size_t parent = static_cast<size_t>(p_parent_index);
+	const int subclasses = std::max(weapons[parent].loadout_subclasses, 0);
+	const size_t end = std::min(weapons.size(), parent + static_cast<size_t>(subclasses) + 1);
+	std::vector<DefWeaponDef> defs(end - parent);
+	for (size_t i = 0; i < defs.size(); ++i) {
+		const Weapon &w = weapons[parent + i];
+		defs[i].loadout_subclasses = w.loadout_subclasses;
+		const CharString round_type = w.round_type.utf8();
+		std::snprintf(defs[i].round_type, sizeof defs[i].round_type, "%s",
+				round_type.get_data());
+	}
+	const int found = def_subclass_weapon_index(defs.data(), defs.size(), 0);
+	return found < 0 ? -1 : p_parent_index + found;
 }
 
 int NovaWeaponDatabase::player_info_team_mask(int p_team) {

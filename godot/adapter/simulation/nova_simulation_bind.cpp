@@ -242,6 +242,7 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_static_method("NovaSimulation", D_METHOD("ai_state_name", "state"), &NovaSimulation::ai_state_name);
 	ClassDB::bind_static_method("NovaSimulation", D_METHOD("infantry_anim_key", "state"), &NovaSimulation::infantry_anim_key);
 	ClassDB::bind_static_method("NovaSimulation", D_METHOD("infantry_anim_flags", "state"), &NovaSimulation::infantry_anim_flags);
+	ClassDB::bind_static_method("NovaSimulation", D_METHOD("remote_body_state_defers", "current_flags", "next_flags"), &NovaSimulation::remote_body_state_defers);
 	ClassDB::bind_method(D_METHOD("get_entity_count"), &NovaSimulation::get_entity_count);
 	ClassDB::bind_method(D_METHOD("get_entity_kind", "index"), &NovaSimulation::get_entity_kind);
 	ClassDB::bind_method(D_METHOD("get_entity_index", "index"), &NovaSimulation::get_entity_index);

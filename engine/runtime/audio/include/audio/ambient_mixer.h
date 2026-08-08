@@ -47,6 +47,18 @@ int32_t calc_distance_volume(int64_t dist_q16, int64_t radius_q16, int32_t vol25
 int32_t emitter_layer_volume(int64_t dist_q16, int32_t falloff_u, int32_t min_u,
                              int32_t vol_byte, int32_t member_vol, int32_t clamp_vol);
 
+// Layer volume for the ONE-SHOT fire-time snapshot [orig:
+// SoundBank_PlayTriggerEntries @ 0x75cf14..0x75cf8b]: the proximity stage
+// ((d/min)^2, only under min_distance) feeds the falloff stage
+// ((1 - d/falloff)^2, NOT rebased — the one-shot path differs from the emitter
+// path here); distances and radii all Q16.16. A layer with NO falloff radius
+// plays at the RAW emitter volume (255) — member volume is not consulted, and
+// a min-only layer's proximity result is discarded with it [orig: @ 0x75cf88
+// the no-falloff branch stores emitter_info[2]].
+int32_t oneshot_layer_volume(int64_t dist_q16, int64_t min_q16,
+                             int64_t falloff_q16, int32_t member_vol,
+                             int32_t clamp_vol);
+
 // The emitter volume byte for a region crossfade blend: the rounded register word's
 // high byte, with 0xFFFF as the full-blend sentinel — net (0xFFFF * blend_q16 +
 // 0x8000) >> 24 [orig: Entity_UpdateEnvSoundEmitter @ 0x4a81c6; the mix reads slot

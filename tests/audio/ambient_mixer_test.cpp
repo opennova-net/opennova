@@ -18,6 +18,7 @@ using opennova::audio::AmbientMixer;
 using opennova::audio::calc_distance_volume;
 using opennova::audio::crossfade_volume_byte;
 using opennova::audio::emitter_layer_volume;
+using opennova::audio::oneshot_layer_volume;
 using opennova::audio::time_of_day_region;
 
 namespace {
@@ -68,6 +69,22 @@ int main() {
         TEST_EXPECT(emitter_layer_volume(25LL * 65536 + 32768, 200, 50, 255, 255, 255) == 68);
         TEST_EXPECT(emitter_layer_volume(0, 200, 0, 128, 255, 255) == 125);
         TEST_EXPECT(emitter_layer_volume(0, 0, 0, 255, 255, 255) == 0);
+
+        // The one-shot fire-time composition [orig: SoundBank_PlayTriggerEntries
+        // @ 0x75cf14..0x75cf8b]: no-falloff -> raw 255; proximity feeds the
+        // falloff stage; the falloff stage is NOT rebased past min.
+        TEST_EXPECT(oneshot_layer_volume(50LL << 16, 100LL << 16, 0, 40, 255) == 255);
+        TEST_EXPECT(oneshot_layer_volume(100LL << 16, 0, 200LL << 16, 255, 255) ==
+                calc_distance_volume(100LL << 16, 200LL << 16, 255, 255));
+        {
+            const int32_t prox =
+                    calc_distance_volume(60LL << 16, 100LL << 16, 200, 255);
+            TEST_EXPECT(oneshot_layer_volume(40LL << 16, 100LL << 16, 400LL << 16, 200, 255) ==
+                    calc_distance_volume(40LL << 16, 400LL << 16, prox, 255));
+        }
+        TEST_EXPECT(oneshot_layer_volume(100LL << 16, 100LL << 16, 400LL << 16, 200, 255) ==
+                calc_distance_volume(100LL << 16, 400LL << 16, 200, 255));
+        TEST_EXPECT(oneshot_layer_volume(400LL << 16, 0, 400LL << 16, 255, 255) == 0);
 
         TEST_EXPECT(crossfade_volume_byte(1.0f) == 255);
         TEST_EXPECT(crossfade_volume_byte(0.5f) == 128);

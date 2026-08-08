@@ -39,12 +39,9 @@ void apply_record_body_arbitration(ClientEntityState &es, uint8_t decoded,
 		// [orig: @0x4c115f / @0x4c0606].
 		return;
 	}
-	const uint32_t cur_flags =
-			world::infantry_anim_flags(static_cast<int>(es.net_anim_current));
-	if ((cur_flags & 0x4u) != 0u ||
-			((cur_flags & 0x20u) != 0u &&
-					(world::infantry_anim_flags(static_cast<int>(decoded)) &
-							0x1u) == 0u)) {
+	if (world::remote_body_state_defers(
+			world::infantry_anim_flags(static_cast<int>(es.net_anim_current)),
+			world::infantry_anim_flags(static_cast<int>(decoded)))) {
 		// The queue classes: the current state plays out; the arrival defers
 		// until the channel's completion boundary [orig: @0x4c1169..0x4c1190 /
 		// @0x4c060a..0x4c0633]. A REPLACED pending keeps the already-armed

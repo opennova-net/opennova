@@ -1715,6 +1715,24 @@ void test_death_during_blend_finishes_old_tuple_then_retargets() {
     CHECK(e->inf.anim_blend_weight == 0.1f);
 }
 
+void test_remote_body_state_queue_gate() {
+    // The shared remote body-state queue predicate [orig: the queue classes
+    // @0x4c1169..0x4c1190 / @0x4c060a..0x4c0633] — both netsim's record fold
+    // and the presenter FSM apply exactly this rule.
+    CHECK(remote_body_state_defers(0x4u, 0x0u));   // hold current defers everything
+    CHECK(remote_body_state_defers(0x4u, 0x1u));   // even a 0x1 replacement
+    CHECK(remote_body_state_defers(0x24u, 0x1u));  // hold bit wins over the 0x20 leg
+    CHECK(remote_body_state_defers(0x20u, 0x0u));  // 0x20 current defers a non-0x1 arrival
+    CHECK(!remote_body_state_defers(0x20u, 0x1u)); // ...but yields to the 0x1 bit
+    CHECK(!remote_body_state_defers(0x0u, 0x0u));  // plain current commits directly
+    CHECK(!remote_body_state_defers(0x2u, 0x1u));
+    // The real table rows the netsim fold feeds through infantry_anim_flags:
+    // burn 111 carries 0x004 (locked; queues), emote_1 115 carries 0x020.
+    CHECK(remote_body_state_defers(infantry_anim_flags(111), 0x0u));
+    CHECK(remote_body_state_defers(infantry_anim_flags(115),
+            infantry_anim_flags(111) & ~0x1u));
+}
+
 int main() {
     test_slope_standing_camera_stays_level();
     test_slope_prone_body_conforms_org2();
@@ -2742,6 +2760,7 @@ int main() {
     test_primary_body_blend_windows_keep_independent_playheads();
     test_primary_body_mid_blend_retarget_keeps_original_primary();
     test_death_during_blend_finishes_old_tuple_then_retargets();
+    test_remote_body_state_queue_gate();
 
     if (failures == 0) std::printf("infantry_test: OK\n");
     else std::printf("infantry_test: %d FAILED\n", failures);

@@ -922,6 +922,16 @@ DEF_EXPORT double def_extra_ammo_weight(const DefWeaponDef *w, int count);
    >= 33.3 NORMAL, else LIGHT (the witnessed thresholds, exact). */
 DEF_EXPORT DefEncumbrance def_encumbrance_class(double weight);
 
+/* The sub-weapon behind a PLAYER_INFO parent slot [orig: the round-type walk
+   over the parent's following table entries @ 0x55def0 / @ 0x55e8b0 /
+   @ 0x55f1f0]: candidates are the parent's next loadout_subclasses entries in
+   table order; an entry sharing the parent's round_type (ASCII
+   case-insensitive) is an ammo expansion and is skipped; the FIRST differing
+   entry is the sub-weapon (satchel -> detonator). Returns its absolute index,
+   or -1 when no candidate differs or the table ends. */
+DEF_EXPORT int def_subclass_weapon_index(const DefWeaponDef *weapons, size_t n,
+                                         size_t parent_index);
+
 #ifdef __cplusplus
 }
 #endif

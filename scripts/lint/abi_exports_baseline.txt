@@ -43,6 +43,7 @@ def_parse_items
 def_parse_items_memory
 def_parse_weapons
 def_parse_weapons_memory
+def_subclass_weapon_index
 gameprofile_at
 gameprofile_by_code
 gameprofile_by_id

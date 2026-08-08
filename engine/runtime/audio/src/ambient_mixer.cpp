@@ -59,6 +59,23 @@ int32_t emitter_layer_volume(int64_t dist_q16, int32_t falloff_u, int32_t min_u,
     return 0;
 }
 
+int32_t oneshot_layer_volume(int64_t dist_q16, int64_t min_q16, int64_t falloff_q16,
+                             int32_t member_vol, int32_t clamp_vol) {
+    // No falloff radius: the RAW emitter volume — member volume is not
+    // consulted [orig: @ 0x75cf88 the no-falloff branch].
+    if (falloff_q16 <= 0) {
+        return 255;
+    }
+    int32_t vol = member_vol;
+    if (min_q16 > 0 && dist_q16 < min_q16) {
+        // The proximity stage feeds the falloff stage; unlike the emitter
+        // path, the arguments stay Q16 [orig: @ 0x75cf14..0x75cf8b].
+        vol = calc_distance_volume(min_q16 - dist_q16, min_q16, vol, clamp_vol);
+    }
+    // The falloff stage is NOT rebased past min — the one-shot/emitter split.
+    return calc_distance_volume(dist_q16, falloff_q16, vol, clamp_vol);
+}
+
 int32_t crossfade_volume_byte(float blend) {
     // Rounded register word, 0xFFFF full-blend sentinel; the mix reads the word's
     // HIGH byte [orig: @ 0x4a81c6; slot byte +25 read @ 0x52865e].

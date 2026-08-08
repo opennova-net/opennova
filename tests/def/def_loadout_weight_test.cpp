@@ -67,6 +67,27 @@ int main() {
 		CHECK(near(def_extra_ammo_weight(nullptr, 3), 0.0), "null def weighs nothing");
 	}
 
+	// The sub-weapon walk [orig: the round-type walk @ 0x55def0 / @ 0x55e8b0 /
+	// @ 0x55f1f0]: same-round entries inside the loadout_subclasses window are
+	// ammo expansions; the first differing round_type is the sub-weapon.
+	{
+		DefWeaponDef t[4] = {};
+		snprintf(t[0].round_type, sizeof t[0].round_type, "satchel");
+		t[0].loadout_subclasses = 2;
+		snprintf(t[1].round_type, sizeof t[1].round_type, "SATCHEL"); // case-folds: expansion
+		snprintf(t[2].round_type, sizeof t[2].round_type, "detonator");
+		snprintf(t[3].round_type, sizeof t[3].round_type, "flare");
+		CHECK(def_subclass_weapon_index(t, 4, 0) == 2, "first differing round_type wins");
+		CHECK(def_subclass_weapon_index(t, 4, 3) == -1, "zero subclasses walks nothing");
+		t[0].loadout_subclasses = 1;
+		CHECK(def_subclass_weapon_index(t, 4, 0) == -1, "window of expansions only finds none");
+		t[2].loadout_subclasses = 5;
+		CHECK(def_subclass_weapon_index(t, 4, 2) == 3, "walk stops inside the table");
+		CHECK(def_subclass_weapon_index(t, 3, 2) == -1, "table end before a differing entry");
+		CHECK(def_subclass_weapon_index(nullptr, 0, 0) == -1, "empty table");
+		CHECK(def_subclass_weapon_index(t, 4, 9) == -1, "parent out of range");
+	}
+
 	// Encumbrance thresholds — exact boundaries [orig: @ 0x55f480].
 	CHECK(def_encumbrance_class(0.0) == DEF_ENCUMBRANCE_LIGHT, "0 is LIGHT");
 	CHECK(def_encumbrance_class(33.29) == DEF_ENCUMBRANCE_LIGHT, "just under 33.3 is LIGHT");
