@@ -596,6 +596,44 @@ void local_weapon_clear(LocalPlayerWeapon &w, PlayerViewState &view) {
 	w.anim_map.clear();
 }
 
+// [orig: Entity_CanFireWeapon @ 0x4dcb10 — the local branch
+//  @ 0x4dcbcf..0x4dcc5d]
+bool local_held_weapon_visible(const World &world, const Entity &entity,
+		const LocalPlayerWeapon &weapon, const WeaponInventory &inventory,
+		bool third_person) {
+	if ((entity.flags & 2u) != 0) return false;   // dead [orig: @0x4dcb22]
+	if (!weapon.active) return false;             // no EquippedSlot [orig: @0x4dcbcf]
+	const WeaponInventorySlot *slot = inventory.slot(inventory.equipped_combo);
+	if (slot == nullptr || slot->adm_index < 0) return false;
+	const WeaponTableEntry *def =
+			world.weapons.by_index(static_cast<uint8_t>(slot->adm_index));
+	if (def == nullptr) return false;             // no Def [orig: @0x4dcbda]
+	// The ammo leg, for defs that carry the flag: an empty pool hides the
+	// weapon. [orig: @0x4dcbea -> Entity_GetScoreValueBySlotType @0x5406E0,
+	// ported as weapon_pool_get]
+	if ((def->flags & weapon_flag::kNoClipsNoDraw) != 0 &&
+			weapon_pool_get(inventory, def->ammo_class_id) == 0 &&
+			slot->clip <= 0)
+		return false;
+	// A weapon with no FIRST-person model is hidden on your OWN body even
+	// though every observer still sees it — retail asymmetry, not a bug.
+	// [orig: @0x4dcc32]
+	if (!def->has_first_person_model_reference) return false;
+	if (!entity.mounted) return true;             // [orig: @0x4dcc42]
+	// Seat rule, LOCAL flavour: control and driver always hide; the gunner
+	// seat hides only while the third-person camera is up. [orig:
+	// @0x4dcc44..0x4dcc5d]
+	switch (entity.mount_type) {
+		case SeatType::Controller:
+		case SeatType::Driver:
+			return false;
+		case SeatType::Gunner:
+			return !third_person;
+		default:
+			return true; // passenger keeps its weapon
+	}
+}
+
 void local_weapon_set_input(LocalPlayerWeapon &w, const PlayerViewState &view,
 		bool fire_held, bool fire_pressed, bool reload_pressed) {
 	if (view.binoculars_view_active) {

@@ -130,46 +130,15 @@ Dictionary NovaSimulation::get_local_player_aim_overlay() const {
 	return out;
 }
 
-// The local-player branch of retail's held-weapon draw gate: the weapon model is drawn
-// iff the soldier may FIRE it. One predicate serves both, which is why a dead, seated or
-// dry-magazine player simply has no gun in his hands.
-// [orig: Entity_CanFireWeapon @ 0x4dcb10 — the `entityPtr == g_local_player_entity`
-//  branch @ 0x4dcbcf..0x4dcc5d]
+// The local-player branch of retail's held-weapon draw gate — the policy is
+// world::local_held_weapon_visible [orig: Entity_CanFireWeapon @ 0x4dcb10,
+// the `entityPtr == g_local_player_entity` branch @ 0x4dcbcf..0x4dcc5d];
+// this wrapper supplies the sim's own state aggregates.
 bool NovaSimulation::local_held_weapon_visible(
 		const opennova::world::Entity &p_entity) const {
-	if ((p_entity.flags & 2u) != 0) return false;          // dead [orig: @0x4dcb22]
-	if (!local_weapon_.active) return false;               // no EquippedSlot [orig: @0x4dcbcf]
-	const opennova::world::WeaponInventorySlot *slot =
-			local_inventory_.slot(local_inventory_.equipped_combo);
-	if (slot == nullptr || slot->adm_index < 0) return false;
-	const opennova::world::WeaponTableEntry *def =
-			world_ ? world_->weapons.by_index(
-							 static_cast<uint8_t>(slot->adm_index))
-			       : nullptr;
-	if (def == nullptr) return false;                      // no Def [orig: @0x4dcbda]
-	// The ammo leg, for defs that carry the flag: an empty pool hides the weapon.
-	// [orig: @0x4dcbea -> Entity_GetScoreValueBySlotType @0x5406E0, ported as
-	//  weapon_pool_get]
-	if ((def->flags & opennova::world::weapon_flag::kNoClipsNoDraw) != 0 &&
-			opennova::world::weapon_pool_get(local_inventory_, def->ammo_class_id) == 0 &&
-			slot->clip <= 0)
-		return false;
-	// A weapon with no FIRST-person model is hidden on your OWN body even though every
-	// observer still sees it — retail asymmetry, not a bug. [orig: @0x4dcc32]
-	if (!def->has_first_person_model_reference) return false;
-	if (!p_entity.mounted) return true;                    // [orig: @0x4dcc42]
-	// Seat rule, LOCAL flavour: control and driver always hide; the gunner seat hides
-	// only while the third-person camera is up. (The remote flavour hides all three —
-	// that is what seat_type_blocks_weapon_channel models.) [orig: @0x4dcc44..0x4dcc5d]
-	switch (p_entity.mount_type) {
-		case opennova::world::SeatType::Controller:
-		case opennova::world::SeatType::Driver:
-			return false;
-		case opennova::world::SeatType::Gunner:
-			return !player_view_.third_person;
-		default:
-			return true; // passenger keeps its weapon
-	}
+	if (!world_) return false;
+	return opennova::world::local_held_weapon_visible(*world_, p_entity,
+			local_weapon_, local_inventory_, player_view_.third_person);
 }
 
 // --- the local player's equipped-weapon FSM (net-re §5.62) --------------------------

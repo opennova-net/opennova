@@ -7,7 +7,9 @@
 #include <cstdio>
 #include <cstring>
 
+#include "world/player_weapon.h"
 #include "world/weapon_inventory.h"
+#include "world/world.h"
 
 using namespace opennova::world;
 
@@ -415,8 +417,60 @@ static int test_knife_is_selectable() {
 	return 0;
 }
 
+// The local held-weapon draw gate [orig: Entity_CanFireWeapon @ 0x4dcb10, the
+// local branch @ 0x4dcbcf..0x4dcc5d]: drawn iff the soldier may FIRE it.
+static int test_local_held_weapon_visible() {
+	Fixture f;
+	World world;
+	world.weapons = f.t;
+	// The m4 row draws in first person.
+	world.weapons.entries[static_cast<size_t>(f.m4)]
+			.has_first_person_model_reference = true;
+
+	LocalPlayerWeapon weapon;
+	weapon.active = true;
+	WeaponInventory inv;
+	inv.reset(world.weapons);
+	weapon_inventory_load_from_display(world.weapons, {"WPN_M4AUTO"}, inv);
+	weapon_inventory_seed_pools(world.weapons, inv, 8);
+	weapon_inventory_recalc_clips(world.weapons, inv);
+	inv.equipped_combo = 3 * 65;
+
+	Entity player;
+	player.alive = true;
+
+	CHECK(local_held_weapon_visible(world, player, weapon, inv, false));
+	// Dead hides [orig: @0x4dcb22].
+	player.flags |= 2u;
+	CHECK(!local_held_weapon_visible(world, player, weapon, inv, false));
+	player.flags &= ~2u;
+	// No EquippedSlot hides [orig: @0x4dcbcf].
+	weapon.active = false;
+	CHECK(!local_held_weapon_visible(world, player, weapon, inv, false));
+	weapon.active = true;
+	// No first-person model hides on your OWN body [orig: @0x4dcc32].
+	world.weapons.entries[static_cast<size_t>(f.m4)]
+			.has_first_person_model_reference = false;
+	CHECK(!local_held_weapon_visible(world, player, weapon, inv, false));
+	world.weapons.entries[static_cast<size_t>(f.m4)]
+			.has_first_person_model_reference = true;
+	// Seat rule, LOCAL flavour [orig: @0x4dcc44..0x4dcc5d]: driver hides,
+	// gunner hides only in third person, passenger keeps its weapon.
+	player.mounted = true;
+	player.mount_type = SeatType::Driver;
+	CHECK(!local_held_weapon_visible(world, player, weapon, inv, false));
+	player.mount_type = SeatType::Gunner;
+	CHECK(local_held_weapon_visible(world, player, weapon, inv, false));
+	CHECK(!local_held_weapon_visible(world, player, weapon, inv, true));
+	player.mount_type = SeatType::Passenger;
+	CHECK(local_held_weapon_visible(world, player, weapon, inv, true));
+	std::printf("PASS local held-weapon draw gate\n");
+	return 0;
+}
+
 int main() {
     test_knife_is_selectable();
+    test_local_held_weapon_visible();
     test_availability_pairs();
     test_kit_filter();
     test_display_expand_and_fill();
