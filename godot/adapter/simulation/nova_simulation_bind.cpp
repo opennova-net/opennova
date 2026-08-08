@@ -358,6 +358,13 @@ void NovaSimulation::_bind_methods() {
 	                     &NovaSimulation::set_local_player_class);
 	ClassDB::bind_method(D_METHOD("load_weapon_profile", "path"),
 	                     &NovaSimulation::load_weapon_profile);
+	ClassDB::bind_static_method("NovaSimulation",
+			D_METHOD("weapon_profile_relpath", "expansion_name"),
+			&NovaSimulation::weapon_profile_relpath);
+	ClassDB::bind_static_method("NovaSimulation",
+			D_METHOD("fp_viewmodel_spec", "has_def", "gfx1", "gfx1a", "animadm",
+					"flags"),
+			&NovaSimulation::fp_viewmodel_spec);
 	ClassDB::bind_method(D_METHOD("get_weapon_profile_summary"),
 	                     &NovaSimulation::get_weapon_profile_summary);
 	ClassDB::bind_method(D_METHOD("request_local_player_weapon_category", "category"),

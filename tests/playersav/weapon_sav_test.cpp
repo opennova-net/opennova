@@ -325,6 +325,17 @@ int test_side_for_team()
     return 0;
 }
 
+// --- 5b. weapon_sav_relpath -------------------------------------------------
+
+int test_weapon_sav_relpath()
+{
+    // [orig: PlayerProfile_LoadAllFromDisk path build @0x54f68c-@0x54f6b7 —
+    // an active expansion looks ONLY under its own directory].
+    TEST_EXPECT(weapon_sav_relpath("") == "weapon.sav");
+    TEST_EXPECT(weapon_sav_relpath("jox01") == "expansion/jox01/weapon.sav");
+    return 0;
+}
+
 // --- 6. clamp_classes -------------------------------------------------------
 
 int test_clamp_classes()
@@ -461,6 +472,7 @@ int main()
         {"header_rejection", test_header_rejection},
         {"decode_kit_page", test_decode_kit_page},
         {"side_for_team", test_side_for_team},
+        {"weapon_sav_relpath", test_weapon_sav_relpath},
         {"clamp_classes", test_clamp_classes},
         {"page_codec_roundtrip", test_page_codec_roundtrip},
         {"retail_file", test_retail_file},

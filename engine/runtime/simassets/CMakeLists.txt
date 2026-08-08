@@ -7,6 +7,7 @@ add_library(opennova_simassets STATIC
     src/adm_clip_index.cpp
     src/adm_root_motion.cpp
     src/adm_skeletal_clips.cpp
+    src/fp_viewmodel_spec.cpp
     src/item_traits.cpp
     src/model_builders.cpp
     src/mounted_pose.cpp

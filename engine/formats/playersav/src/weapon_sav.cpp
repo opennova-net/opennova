@@ -101,6 +101,15 @@ SideId side_for_team(uint8_t team)
     return (team == 1 || team == 3) ? SideId::Blue : SideId::Red;
 }
 
+std::string weapon_sav_relpath(const std::string &expansion_name)
+{
+    // [orig: PlayerProfile_LoadAllFromDisk path build @0x54f68c-@0x54f6b7 —
+    // g_ExpansionName[0] ? "expansion\<name>\weapon.sav" : "weapon.sav"; the
+    // expansion leg has NO base-game fallback].
+    if (expansion_name.empty()) return "weapon.sav";
+    return "expansion/" + expansion_name + "/weapon.sav";
+}
+
 const KitPage *Side::page_for_class(uint8_t klass) const
 {
     if (klass < kMinPlayerClass || klass > kMaxPlayerClass)

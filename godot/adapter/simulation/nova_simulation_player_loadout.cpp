@@ -7,6 +7,7 @@
 
 #include <def/def.h> // DEF_WEAPON_FLAG_* / DEF_WEAPON_FLAG2_*
 #include <npwire/ingame_message_id.h>
+#include <simassets/fp_viewmodel_spec.h> // the FP viewmodel submit rule
 
 #include <godot_cpp/classes/file_access.hpp> // weapon.sav lives on the filesystem, not a mount
 
@@ -549,6 +550,28 @@ void NovaSimulation::push_joiner_loadout_kit() {
 	fill_side(wire_kit.red, weapon_profile_.red);
 	runtime_->set_loadout_kit(std::move(wire_kit));
 	pushing_joiner_loadout_kit_ = false;
+}
+
+String NovaSimulation::weapon_profile_relpath(const String &p_expansion_name) {
+	return String(opennova::playersav::weapon_sav_relpath(
+			std::string(p_expansion_name.utf8().get_data()))
+					.c_str());
+}
+
+Dictionary NovaSimulation::fp_viewmodel_spec(bool p_has_def, const String &p_gfx1,
+		const String &p_gfx1a, const String &p_animadm, int p_flags) {
+	const opennova::simassets::FpViewmodelSpec spec =
+			opennova::simassets::fp_viewmodel_spec(p_has_def,
+					std::string(p_gfx1.utf8().get_data()),
+					std::string(p_gfx1a.utf8().get_data()),
+					std::string(p_animadm.utf8().get_data()),
+					static_cast<uint32_t>(p_flags));
+	Dictionary out;
+	out["gun"] = String(spec.gun.c_str());
+	out["arms"] = String(spec.arms.c_str());
+	out["adm"] = String(spec.adm.c_str());
+	out["show_arms"] = spec.show_arms;
+	return out;
 }
 
 Error NovaSimulation::load_weapon_profile(const String &p_path) {

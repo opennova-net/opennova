@@ -48,6 +48,15 @@ enum class SideId : uint8_t { Blue = 0, Red = 1 };
 // test at NapiNPClientMsg_TeamAssign @0x431a35].
 SideId side_for_team(uint8_t team);
 
+// The on-disk profile path RULE, relative to the game root: with an active
+// expansion retail looks ONLY under that expansion's directory (no base-game
+// fallback leg), otherwise the root's copy
+// [orig: PlayerProfile_LoadAllFromDisk @0x54f4d0, path build
+// @0x54f68c-@0x54f6b7 — g_ExpansionName[0] ? "expansion\<name>\weapon.sav"
+// : "weapon.sav"]. Forward-slash separators; the embedder joins onto its
+// mount root.
+std::string weapon_sav_relpath(const std::string &expansion_name);
+
 // One kit row. A page is consumed four tokens at a time as
 // (name, ammo_primary, ammo_secondary, flags); the three numbers are decimal
 // TEXT on disk and are truncated to their low byte on the wire, so -1 submits

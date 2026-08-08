@@ -1658,14 +1658,19 @@ func build_local_player_viewmodel() -> Node3D:
 	# (retail draws the FP model through the same lighting constants
 	# [orig: Player_RenderFirstPersonViewModel @ 0x4ded60 -> the ctx block]).
 	var def := local_player_viewmodel_def()
-	# The AK is only the no-definition bring-up fallback. A resolved retail Def
-	# with no fpModel intentionally submits no first-person gun.
-	var gun_name := def.gfx1 if def != null else "ak47_1st"
-	var arms_name := def.gfx1a if def != null and not def.gfx1a.is_empty() else "armsG"
-	var adm_name := def.animadm if def != null and not def.animadm.is_empty() else "ak47_1st"
-	# Emplaced (Flags 0x80) mounts render their own FP gun but omit the carried
-	# character-arms model. [orig: Player_RenderFirstPersonViewModel @0x4dedc7]
-	var show_arms := def == null or (def.flags & NovaWeaponDatabase.FLAG_EMPLACED) == 0
+	# The submit spec (gun/arms/clip-adm + the emplaced arms omission) resolves
+	# natively in simassets; the AK set is only the no-definition bring-up
+	# fallback and a resolved def with no fpModel intentionally submits no gun.
+	# [orig: Player_RenderFirstPersonViewModel @0x4ded60; @0x4dedc7]
+	var spec: Dictionary = NovaSimulation.fp_viewmodel_spec(def != null,
+			def.gfx1 if def != null else "",
+			def.gfx1a if def != null else "",
+			def.animadm if def != null else "",
+			def.flags if def != null else 0)
+	var gun_name := String(spec.get("gun", ""))
+	var arms_name := String(spec.get("arms", ""))
+	var adm_name := String(spec.get("adm", ""))
+	var show_arms := bool(spec.get("show_arms", true))
 	# Both submits reuse the equipped GUN's model table, while `adm_name` supplies the clips.
 	# Some valid retail sets differ (M21B_1st: 42 parts, M21_1st: 40); sizing from the ADM
 	# basename truncates late animated parts such as the M14 magazine. [orig: @0x4ded60]
@@ -2074,10 +2079,8 @@ func _weapon_profile_path(resource_root: NovaResourceRoot) -> String:
 	var dir := String(resource_root.get_root_dir())
 	if dir.is_empty():
 		return ""
-	var expansion := String(resource_root.get_expansion())
-	if expansion.is_empty():
-		return dir.path_join("weapon.sav")
-	return dir.path_join("expansion").path_join(expansion).path_join("weapon.sav")
+	return dir.path_join(NovaSimulation.weapon_profile_relpath(
+			String(resource_root.get_expansion())))
 
 
 # Load weapon.sav onto the sim: five profile-slot records, each carrying a per-side
@@ -2089,12 +2092,8 @@ func _weapon_profile_path(resource_root: NovaResourceRoot) -> String:
 # own miss leaves PlayerProfile_InitDefaults' shipped defaults in place (BLUE/RED
 # class 8, one weapon name per class page) [orig: @ 0x54bb40].
 func _load_player_weapon_profile() -> void:
-	# Probed rather than called straight through, like the other optional sim seams
-	# in this file: the profile reader is a native method, so a build whose
-	# GDExtension predates it must degrade to the defaults instead of failing to
-	# parse this script.
-	var sim: Variant = get_sim()
-	if sim == null or not sim.has_method("load_weapon_profile"):
+	var sim := get_sim()
+	if sim == null:
 		return
 	var path := _weapon_profile_path(_resource_root)
 	if path.is_empty():

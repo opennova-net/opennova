@@ -1297,6 +1297,17 @@ public:
 	// "expansion\\<g_ExpansionName>\\weapon.sav" path build @0x54f68c..@0x54f6b7);
 	// the session-start clamp apply_session_settings_to_globals @0x5516ab]
 	Error load_weapon_profile(const String &p_path);
+	// The profile file's path RULE relative to the mount root (playersav
+	// weapon_sav_relpath): with an active expansion retail looks ONLY under
+	// "expansion/<name>/", never the root [orig: the path build
+	// @0x54f68c..@0x54f6b7]. Static so shell path assembly stays a join.
+	static String weapon_profile_relpath(const String &p_expansion_name);
+	// The FP viewmodel submit spec {gun, arms, adm, show_arms} (simassets
+	// fp_viewmodel_spec [orig: Player_RenderFirstPersonViewModel @0x4ded60;
+	// the emplaced arms omission @0x4dedc7]). has_def=false is the bring-up
+	// path; an empty gun on a resolved def means submit no FP gun.
+	static Dictionary fp_viewmodel_spec(bool p_has_def, const String &p_gfx1,
+			const String &p_gfx1a, const String &p_animadm, int p_flags);
 	// Read-only view of the active profile record for the shell's status copy:
 	// {loaded, blue: {player_class, avatar_a, avatar_b, avatar_packed, kit: [names]},
 	//  red: {...}}. The kit array is the SELECTED page — the one the class byte picks.
