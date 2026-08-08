@@ -611,38 +611,20 @@ func _draw_attach_labels() -> void:
 func _draw_crosshair(surface: Vector2) -> void:
 	if bool(_info.get("binoculars_view_active", false)):
 		return
-	var scoped := bool(_info.get("scope_engaged", false))
-	# The sim supplies Player_CanFireWeapon's settled/mode/mount verdict. Retain
-	# the old scope-derived fallback for test producers that predate the field.
+	# The sim supplies Player_CanFireWeapon's settled/mode/mount verdict.
 	# [orig: !Player_CanFireWeapon @0x5cf780 via @0x592afa]
-	var aimed := bool(_info.get("aimed_shot_available",
-			scoped and float(_info.get("scope_fraction", 1.0)) >= 1.0))
+	var aimed := bool(_info.get("aimed_shot_available", false))
 	if not HudCrosshair.should_draw(aimed,
 			bool(_info.get("keep_crosshair_while_aimed", false))):
 		return
 	if _crosshair_tex == null:
 		return
-	var stance_icon := int(_info.get("stance", 0))
-	# The icon index (0=stand 1=crouch 2=prone) remaps to the ERROR row order
-	# (0=prone 1=crouch 2=stand). [orig: @0x592b37 — entity+300 0x100=prone 0x200=crouch]
-	var err_stance := 2
-	if stance_icon == 2:
-		err_stance = 0
-	elif stance_icon == 1:
-		err_stance = 1
-	# Hip rows are the ordinary on-foot visible case; vehicle/gunner override paths
-	# can keep the crosshair visible with the +3 aimed-shot triplet selected.
-	# [orig: @0x592b87]
+	# The stance -> ERROR-row remap and the +3 aimed-shot triplet select live
+	# sim-side in the hud_spread_fp16 producer (HudCrosshair.error_row carries
+	# the witness map). [orig: @0x592b37..0x592b87]
 	# The bridge keeps the authored ERROR row and both signed SAR terms in exact
-	# fixed point. The static-row fallback supports old/test producers only.
-	# [orig: HUD_DrawCrosshair @0x592b07..0x592bf5]
-	var spread_fp16: int
-	if _info.has("hud_spread_fp16"):
-		spread_fp16 = int(_info["hud_spread_fp16"])
-	else:
-		var err_deg := _weapon.error_row_deg(
-				HudCrosshair.error_row(err_stance, false))
-		spread_fp16 = int(err_deg * 65536.0)
+	# fixed point. [orig: HUD_DrawCrosshair @0x592b07..0x592bf5]
+	var spread_fp16 := int(_info.get("hud_spread_fp16", 0))
 	var spread := HudCrosshair.spread_px_fp16(
 			spread_fp16, float(_info.get("fov_deg", 80.0)), surface.x)
 	HudCrosshair.draw(self, _crosshair_tex, _crosshair_center(surface), surface, spread)

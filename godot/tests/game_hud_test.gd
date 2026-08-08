@@ -232,11 +232,12 @@ func test_weapon_cluster_artless_safe() -> void:
 		"scope_engaged": false, "fov_deg": 80.0, "ticks": 100,
 	})
 	await get_tree().process_frame
-	# Scoped-in hides the crosshair; empty weapon clears the cluster.
+	# A settled aimed shot hides the crosshair; empty weapon clears the cluster.
 	hud.update_info({
 		"health_fraction": 0.8, "stance": 0, "team": 1, "objective": "",
 		"weapon_active": true, "clip": 12, "reserve": 90,
-		"scope_engaged": true, "fov_deg": 40.0, "ticks": 160,
+		"scope_engaged": true, "aimed_shot_available": true,
+		"fov_deg": 40.0, "ticks": 160,
 	})
 	await get_tree().process_frame
 	hud.set_weapon(null, "")
