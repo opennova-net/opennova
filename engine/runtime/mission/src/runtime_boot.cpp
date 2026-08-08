@@ -38,9 +38,10 @@ MissionTextSource resolve_mission_text(const BootFileSource &files,
 		const std::string &mission_file_basename, std::vector<uint8_t> &out) {
 	out.clear();
 	if (!files.valid()) return MissionTextSource::kNone;
-	// Preserve the original fallback: medmssn.bin is used only when
-	// <mission>.bin does not exist; a present but malformed table is passed
-	// through and rejected downstream without fallback.
+	// Preserve the original fallback [orig: TextResource_LoadMissionTextBin
+	// @ 0x51ed90]: medmssn.bin is used only when <mission>.bin does not
+	// exist; a present but malformed table is passed through and rejected
+	// downstream without fallback.
 	if (!mission_file_basename.empty()) {
 		const std::string mission_bin = mission_file_basename + ".bin";
 		if (files.has_file(mission_bin)) {
