@@ -2,7 +2,7 @@
 
 #include "build_quadtree.h"
 #include "lod.h"
-#include "terrain/mesh_data.h"
+#include <tpm/mesh_data.h>
 #include <cstdint>
 #include <vector>
 

@@ -1,6 +1,7 @@
 #include "cpt_export.h"
 
-#include "terrain/mesh_data.h"
+#include <dep/dep.h>
+#include <tpm/mesh_data.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -22,16 +23,6 @@ int count_depth_levels(int tile_size, int min_tile_size) {
 		current_size >>= 1;
 	}
 	return levels;
-}
-
-std::vector<uint16_t> load_depth_buffer(const std::string &path) {
-	std::vector<uint16_t> depth_buffer(1024u * 1024u);
-	std::ifstream file(path, std::ios::binary);
-	if (file.is_open()) {
-		file.read(reinterpret_cast<char *>(depth_buffer.data()),
-		          static_cast<std::streamsize>(depth_buffer.size() * sizeof(uint16_t)));
-	}
-	return depth_buffer;
 }
 
 void set_header_text(char *buffer, size_t size, const std::string &value) {
@@ -81,7 +72,7 @@ void export_terrain_cpt(const std::string &output_prefix,
 	set_header_text(cpt.header.terrain_name, sizeof(cpt.header.terrain_name), terrain_name);
 	set_header_text(cpt.header.creator, sizeof(cpt.header.creator), creator);
 	set_header_text(cpt.header.version, sizeof(cpt.header.version), "taylor");
-	cpt.depth_buffer = load_depth_buffer(output_prefix + "Output.dep");
+	cpt.depth_buffer = opennova::dep::read(output_prefix + "Output.dep");
 
 	const int depth_count = count_depth_levels(tile_size, min_tile_size);
 	int total_tiles = 0;

@@ -26,8 +26,12 @@ SKIP_PARTS = {"third_party", "build"}
 # Include prefixes that live behind the seam. terrain/ is the subtle one:
 # the terrain and terrain_query libs expose DISJOINT header sets under the
 # SAME terrain/ include prefix, so the allowlist is by exact header — the
-# terrain_query seam surface — never by directory.
-FORBIDDEN_PREFIXES = ("cpt/", "til/", "trn/", "tpj/", "foliage/", "terrain/")
+# terrain_query seam surface — never by directory. tpm/ (the TPM1 tile mesh)
+# and dep/ (the depth-buffer intermediate) were blanket-forbidden under
+# terrain/ before their formats extraction (ADR 0030) and stay forbidden by
+# their new prefixes.
+FORBIDDEN_PREFIXES = ("cpt/", "til/", "trn/", "tpj/", "foliage/", "terrain/",
+                      "tpm/", "dep/")
 TERRAIN_QUERY_HEADERS = {
     "terrain/coords.h",
     "terrain/height_field.h",

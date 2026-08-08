@@ -4,7 +4,7 @@
 // against the fixture allows up to 4 bytes × 8 sections = 32 bytes of
 // drift (matches the scratch reference's tolerance).
 
-#include "terrain/mesh_data.h"
+#include <tpm/mesh_data.h>
 #include "common/test_paths.h"
 
 #include <cstdint>

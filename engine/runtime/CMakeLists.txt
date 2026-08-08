@@ -62,9 +62,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/src/foliage_detail_collector.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/src/lod.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/src/lighting.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/src/mesh_data.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/src/mesh_simp.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/src/packing.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/src/quadtree.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/src/terrain_mesh.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/src/texture_preprocess.cpp
@@ -164,9 +162,7 @@ set(_opennova_terrain_fp_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/src/foliage_detail_collector.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/src/lod.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/src/lighting.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/src/mesh_data.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/src/mesh_simp.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/src/packing.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/src/quadtree.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/src/terrain_mesh.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/src/texture_preprocess.cpp

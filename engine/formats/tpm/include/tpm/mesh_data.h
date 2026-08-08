@@ -32,11 +32,10 @@ struct MeshData {
 
     static MeshData read(const std::string& path);
     void write(const std::string& path) const;
-
-    // Ported from sub_404480 (via thunk sub_404610).
-    // Converts face lists to triangle strips and reorders vertices for cache coherency.
-    void remap_vertex_ordering();
 };
+// The strip-conversion + cache reorder pass over a MeshData
+// (remap_vertex_ordering) is bake machinery, not format knowledge — it lives
+// with the tristripper in engine/runtime/terrain (tristrip.h).
 
 } // namespace opennova
 
