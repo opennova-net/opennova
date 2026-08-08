@@ -138,6 +138,22 @@ int32_t power_throw_progress_fp16(int held_ticks);
 int power_fill_span(int32_t progress_fp16, int extent_px);
 
 // ---------------------------------------------------------------------------
+// The loading bar [orig: LoadingScreen_UpdateAndPresent @ 0x586c3f — displayed
+// climbs +1 per draw up to the min(reported + 10, 100) liveness lead; the fill
+// arithmetic @ 0x5d4c40 — right edge = displayed * (w + 2) / 100 + x + 4
+// clamped to the track, then the final 1px inset]. Our coarser draw cadence
+// first catches displayed up to reported (the D-LOADSCR-1 adaptation: retail
+// reaches catch-up for free at window-message pump frequency).
+
+int loading_bar_step(int displayed, int reported);
+
+struct LoadingBarSpan {
+	int left = 0;
+	int right = 0; // right <= left draws an empty fill
+};
+LoadingBarSpan loading_bar_fill_span(int x, int w, int displayed);
+
+// ---------------------------------------------------------------------------
 // The crosshair spread projection [orig: HUD_DrawCrosshair
 // @0x592b07..0x592bf5]: pixel = (spread_16.16 * screen_w / int(fov_deg)) >> 16
 // (the 2^31/180 degree factors cancel); the instability sum wraps int32 with

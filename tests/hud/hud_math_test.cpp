@@ -150,6 +150,21 @@ int main() {
 	expect(hud::power_fill_span(0x10000, 80) == 80, "full fill spans the bar");
 	expect(hud::power_fill_span(0x8000, 80) == 40, "half fill rounds the span");
 
+	// The loading bar [orig: @ 0x586c3f step; @ 0x5d4c40 fill].
+	expect(hud::loading_bar_step(6, 26) == 26, "a reported jump catches the bar up");
+	expect(hud::loading_bar_step(50, 100) == 100, "a jump to 100 fills the bar");
+	expect(hud::loading_bar_step(0, 0) == 1, "creep ahead of a stalled 0");
+	expect(hud::loading_bar_step(26, 26) == 27, "creep one point ahead");
+	expect(hud::loading_bar_step(10, 0) == 10, "cap at reported + 10");
+	expect(hud::loading_bar_step(100, 100) == 100, "cap at 100");
+	{
+		const hud::LoadingBarSpan full = hud::loading_bar_fill_span(10, 100, 100);
+		expect(full.left == 13 && full.right == 113,
+				"full fill clamps to the track minus the 1px inset");
+		const hud::LoadingBarSpan empty = hud::loading_bar_fill_span(10, 100, 0);
+		expect(empty.right <= empty.left, "0%% draws an empty fill");
+	}
+
 	if (failures) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
 		return 1;

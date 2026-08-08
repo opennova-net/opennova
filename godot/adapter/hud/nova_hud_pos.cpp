@@ -96,6 +96,8 @@ void NovaHudPos::_bind_methods() {
 	ClassDB::bind_static_method("NovaHudPos", D_METHOD("heat_bar_is_horizontal", "bar_size"), &NovaHudPos::heat_bar_is_horizontal);
 	ClassDB::bind_static_method("NovaHudPos", D_METHOD("power_throw_progress_fp16", "held_ticks"), &NovaHudPos::power_throw_progress_fp16);
 	ClassDB::bind_static_method("NovaHudPos", D_METHOD("power_fill_span", "progress_fp16", "extent_px"), &NovaHudPos::power_fill_span);
+	ClassDB::bind_static_method("NovaHudPos", D_METHOD("loading_bar_step", "displayed", "reported"), &NovaHudPos::loading_bar_step);
+	ClassDB::bind_static_method("NovaHudPos", D_METHOD("loading_bar_fill_span", "x", "w", "displayed"), &NovaHudPos::loading_bar_fill_span);
 	ClassDB::bind_static_method("NovaHudPos", D_METHOD("crosshair_spread_px_fp16", "spread_fp16", "fov_deg", "screen_w"), &NovaHudPos::crosshair_spread_px_fp16);
 	ClassDB::bind_static_method("NovaHudPos", D_METHOD("crosshair_total_spread_fp16", "error_fp16", "recoil_pitch_bam", "weight_spread_bam"), &NovaHudPos::crosshair_total_spread_fp16);
 	ClassDB::bind_static_method("NovaHudPos", D_METHOD("crosshair_error_row", "stance", "scoped"), &NovaHudPos::crosshair_error_row);
@@ -483,6 +485,16 @@ int NovaHudPos::power_throw_progress_fp16(int p_held_ticks) {
 
 int NovaHudPos::power_fill_span(int p_progress_fp16, int p_extent_px) {
 	return opennova::hud::power_fill_span(p_progress_fp16, p_extent_px);
+}
+
+int NovaHudPos::loading_bar_step(int p_displayed, int p_reported) {
+	return opennova::hud::loading_bar_step(p_displayed, p_reported);
+}
+
+Vector2i NovaHudPos::loading_bar_fill_span(int p_x, int p_w, int p_displayed) {
+	const opennova::hud::LoadingBarSpan span =
+			opennova::hud::loading_bar_fill_span(p_x, p_w, p_displayed);
+	return Vector2i(span.left, span.right);
 }
 
 double NovaHudPos::crosshair_spread_px_fp16(int p_spread_fp16, double p_fov_deg,

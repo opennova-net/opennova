@@ -89,6 +89,8 @@ public:
 	static bool heat_bar_is_horizontal(const Vector2 &p_bar_size);
 	static int power_throw_progress_fp16(int p_held_ticks);
 	static int power_fill_span(int p_progress_fp16, int p_extent_px);
+	static int loading_bar_step(int p_displayed, int p_reported);
+	static Vector2i loading_bar_fill_span(int p_x, int p_w, int p_displayed);
 	static double crosshair_spread_px_fp16(int p_spread_fp16, double p_fov_deg,
 			double p_screen_w);
 	static int crosshair_total_spread_fp16(int p_error_fp16,

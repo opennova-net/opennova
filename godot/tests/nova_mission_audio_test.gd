@@ -25,12 +25,12 @@ class OcclusionProviderStub:
 
 
 func _marker(pos: Vector3, slot_sets: PackedStringArray,
-		layers_by_set: Dictionary, stagger := 0.0, source_bms_id := 0) -> Dictionary:
+		layers_by_set: Dictionary, stagger_slot := 0, source_bms_id := 0) -> Dictionary:
 	return {
 		"pos": pos,
 		"source_bms_id": source_bms_id,
 		"slot_sets": slot_sets,
-		"stagger_h": stagger,
+		"stagger_slot": stagger_slot,
 		"layers_by_set": layers_by_set,
 	}
 

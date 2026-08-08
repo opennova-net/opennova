@@ -74,6 +74,9 @@ void EnvFile::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_fog_start", "overcast"), &EnvFile::get_fog_start, DEFVAL(0.0f));
 	ClassDB::bind_method(D_METHOD("get_fog_density"), &EnvFile::get_fog_density);
 	ClassDB::bind_method(D_METHOD("get_fog_end_distance", "overcast"), &EnvFile::get_fog_end_distance, DEFVAL(0.0f));
+	ClassDB::bind_static_method("EnvFile",
+			D_METHOD("fog_end_above_water", "fog_distance", "overcast"),
+			&EnvFile::fog_end_above_water);
 	ClassDB::bind_method(D_METHOD("get_fog_end_underwater"), &EnvFile::get_fog_end_underwater);
 	ClassDB::bind_method(D_METHOD("get_day_phase", "time"), &EnvFile::get_day_phase);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("double_saturate_color", "color"), &EnvFile::double_saturate_color);
@@ -541,6 +544,13 @@ float EnvFile::get_fog_density() const {
 
 float EnvFile::get_fog_end_distance(float p_overcast) const {
 	return opennova::env::fog_end_above_water(fog_level, p_overcast);
+}
+
+float EnvFile::fog_end_above_water(float p_fog_distance, float p_overcast) {
+	// Static leg for callers holding a LIVE smoothed distance rather than this
+	// file's authored fog_level (the water pass) — same witnessed curve
+	// [orig: Environment_GetFogEndDistance @ 0x57e426].
+	return opennova::env::fog_end_above_water(p_fog_distance, p_overcast);
 }
 
 float EnvFile::get_fog_end_underwater() const {

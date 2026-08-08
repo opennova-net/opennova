@@ -1237,7 +1237,17 @@ NovaParticleRenderer::NovaParticleRenderer() : impl_(std::make_unique<Impl>()) {
 
 NovaParticleRenderer::~NovaParticleRenderer() = default;
 
+String NovaParticleRenderer::retail_frame_name(const String &p_authored,
+		int p_frame_count, int p_frame) {
+	return String(renderer::retail_particle_frame_name(
+			std::string(p_authored.utf8().get_data()), p_frame_count, p_frame)
+					.c_str());
+}
+
 void NovaParticleRenderer::_bind_methods() {
+	ClassDB::bind_static_method("NovaParticleRenderer",
+			D_METHOD("retail_frame_name", "authored", "frame_count", "frame"),
+			&NovaParticleRenderer::retail_frame_name);
 	ClassDB::bind_method(D_METHOD("warm_pipelines", "position"),
 			&NovaParticleRenderer::warm_pipelines);
 	ClassDB::bind_method(D_METHOD("clear_warm_pipelines"),

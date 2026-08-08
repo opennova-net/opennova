@@ -162,6 +162,9 @@ public:
 	float get_fog_start(float p_overcast = 0.0f) const;
 	float get_fog_density() const;
 	float get_fog_end_distance(float p_overcast = 0.0f) const;
+	// The above-water overcast attenuation on a caller-supplied LIVE distance
+	// (env fog_end_above_water [orig: Environment_GetFogEndDistance @ 0x57e426]).
+	static float fog_end_above_water(float p_fog_distance, float p_overcast);
 	float get_fog_end_underwater() const;
 
 	// Hardcoded sunrise/sunset windows; {"is_night": bool, "blend": float}

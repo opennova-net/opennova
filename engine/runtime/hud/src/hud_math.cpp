@@ -143,6 +143,20 @@ int power_fill_span(int32_t progress_fp16, int extent_px) {
 			(static_cast<int64_t>(progress_fp16) * extent_px + 0x8000) >> 16);
 }
 
+// [orig: LoadingScreen_UpdateAndPresent @ 0x586c3f; the catch-up max is the
+// D-LOADSCR-1 cadence adaptation]
+int loading_bar_step(int displayed, int reported) {
+	const int lead_cap = std::min(reported + 10, 100);
+	return std::clamp(std::max(displayed + 1, reported), 0, lead_cap);
+}
+
+// [orig: the fill arithmetic @ 0x5d4c40 — the original's integer divide]
+LoadingBarSpan loading_bar_fill_span(int x, int w, int displayed) {
+	int fill_right = x + 4 + displayed * (w + 2) / 100;
+	fill_right = std::min(fill_right, x + w + 4) - 1;
+	return {x + 3, fill_right};
+}
+
 // [orig: HUD_DrawCrosshair @0x592b07..0x592bf5 — the HIWORD fov truncation and
 // the >>16 both survive; the 2^31/180 factors cancel between spread and fov]
 double crosshair_spread_px_fp16(int32_t spread_fp16, double fov_deg,
