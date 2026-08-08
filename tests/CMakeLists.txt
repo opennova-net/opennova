@@ -773,7 +773,7 @@ add_test(NAME env_jo_install COMMAND jo_env_sweep_test)
 #   tpm1_roundtrip     — .tml MeshData read/write
 #   cdep_read          — CDEP header parity against a known Dvxi5.cpt capture
 #   cdep_roundtrip     — CDEP encode/decode round-trip independent of the bake
-foreach(name parametric_parity depthmap_smooth tpm1_roundtrip)
+foreach(name parametric_parity depthmap_smooth)
     add_executable(${name}_test terrain/${name}_test.cpp)
     target_link_libraries(${name}_test PRIVATE opennova_runtime)
     target_include_directories(${name}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -804,7 +804,7 @@ add_test(NAME terrain_foliage_detail_collector COMMAND terrain_foliage_detail_co
 # disabled until its CI stability/performance cost is addressed.
 set_tests_properties(parametric_parity PROPERTIES DISABLED TRUE)
 
-foreach(name crypto_roundtrip cdep_read cdep_roundtrip)
+foreach(name crypto_roundtrip cdep_read cdep_roundtrip tpm1_roundtrip)
     add_executable(${name}_test terrain/${name}_test.cpp)
     target_link_libraries(${name}_test PRIVATE opennova_formats)
     target_include_directories(${name}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

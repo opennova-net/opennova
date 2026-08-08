@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <vector>
 
+#include <tpm/mesh_data.h>
+
 namespace opennova {
 
 // Ported from triangle strip optimization functions at 0x405A20-0x406E00.
@@ -26,6 +28,13 @@ struct TriStripResult {
 // structural mirror of sub_4068E0's parameter list
 TriStripResult build_triangle_strips(
     const uint16_t* face_indices, int face_count, int vertex_count);
+
+// The bake pass over a parsed TPM1 tile mesh: converts face lists to triangle
+// strips and reorders vertices for cache coherency. Ported from sub_404480
+// (via thunk sub_404610); called by the builder before writing .tms files.
+// Lives with the tristripper (not the tpm format lib) — bake machinery over
+// the parsed model, ADR 0030 decision 1.
+void remap_vertex_ordering(MeshData &mesh);
 
 } // namespace opennova
 

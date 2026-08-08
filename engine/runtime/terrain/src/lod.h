@@ -1,6 +1,6 @@
 #pragma once
 
-#include "terrain/mesh_data.h"
+#include <tpm/mesh_data.h>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>

@@ -1,6 +1,7 @@
 {
   "citation_allowlist_engine": [
     "bfc1",
+    "dep",
     "gameprofile",
     "io",
     "oned_edit",

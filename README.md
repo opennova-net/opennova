@@ -135,6 +135,8 @@ Modular libraries for the NovaLogic formats and runtime systems. The format pars
 | **til** | `.til` | Tile-overlay placement list. |
 | **cpt** | `.cpt` | Compiled terrain mesh, collision and render (DPTH and CDEP flavors). |
 | **tpj** | `.tpj` | Editable terrain project: a terrain config plus editor lock coordinates and project metadata. |
+| **tpm** | `.tml` `.tms` | TPM1 terrain tile meshes: packed vertices plus eight LOD index sections in three codec tiers, rotate-crypted. |
+| **dep** | `.dep` | The terrain bake's raw 1024×1024 depth-buffer intermediate. |
 | **cbin** | `.kda` | Rolling credits: obfuscated text compiled to a CBIN blob. |
 | **ptl** | `.ptl` | Particle effects: the effect/emitter definition model, parser, writer, and enum/field tables. |
 | **mnu** | `.mnu` | Menu screens: window tree, widgets, and Actions, with a round-trip writer that preserves the format superset. Includes the NovaLogic-flavored XML reader. |

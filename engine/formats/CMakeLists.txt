@@ -36,6 +36,8 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/def/src/def_items.cpp    # ITEMS.DEF
     ${CMAKE_CURRENT_SOURCE_DIR}/def/src/def_scan.cpp     # the shared .def text scanner
     ${CMAKE_CURRENT_SOURCE_DIR}/def/src/def_weapons.cpp  # WEAPONS.DEF
+    # dep — the raw 1024x1024 u16 depth-buffer bake intermediate (Output.dep)
+    ${CMAKE_CURRENT_SOURCE_DIR}/dep/src/dep.cpp
     # env — environment/time-of-day
     ${CMAKE_CURRENT_SOURCE_DIR}/env/src/env.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/env/src/env_render.cpp
@@ -108,6 +110,10 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/til/src/til_overlay_bake.cpp
     # tpj — terrain project
     ${CMAKE_CURRENT_SOURCE_DIR}/tpj/src/tpj_io.cpp
+    # tpm — TPM1 terrain tile mesh (.tml/.tms; magic-shaped name, precedent
+    # bfc1). packing.{h,cpp} are the on-disk index codecs, src-private.
+    ${CMAKE_CURRENT_SOURCE_DIR}/tpm/src/mesh_data.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/tpm/src/packing.cpp
     # trn — terrain config
     ${CMAKE_CURRENT_SOURCE_DIR}/trn/src/trn_io.cpp
     # mission_format (engine/runtime/mission, format half — see GUARDRAIL above):
@@ -137,6 +143,7 @@ target_include_directories(opennova_formats
         ${CMAKE_CURRENT_SOURCE_DIR}/cpt/include
         ${CMAKE_CURRENT_SOURCE_DIR}/dbf/include
         ${CMAKE_CURRENT_SOURCE_DIR}/def/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/dep/include
         ${CMAKE_CURRENT_SOURCE_DIR}/env/include
         ${CMAKE_CURRENT_SOURCE_DIR}/fnt/include
         ${CMAKE_CURRENT_SOURCE_DIR}/foliage/include
@@ -157,6 +164,7 @@ target_include_directories(opennova_formats
         ${CMAKE_CURRENT_SOURCE_DIR}/threedi/include
         ${CMAKE_CURRENT_SOURCE_DIR}/til/include
         ${CMAKE_CURRENT_SOURCE_DIR}/tpj/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/tpm/include
         ${CMAKE_CURRENT_SOURCE_DIR}/trn/include
         # mission_format's public headers (and the runtime mission half's — one
         # include/ per directory; the runtime group reuses this propagated dir).

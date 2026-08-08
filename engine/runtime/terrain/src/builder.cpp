@@ -4,6 +4,9 @@
 #include "depthmap.h"
 #include "terrain_mesh.h"
 #include "trace.h"
+#include "tristrip.h"
+
+#include <dep/dep.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -218,11 +221,7 @@ void build_terrain(const TpjProject& project,
         opennova::io::logf(opennova::io::LogLevel::kInfo,
 		"Writing %s...%s", dep_path.c_str(),
                     should_rasterize_depth ? "" : " (passthrough, no rasterize)");
-        FILE* f = std::fopen(dep_path.c_str(), "wb");
-        if (f) {
-            std::fwrite(dep_out.data(), 2, dep_out.size(), f);
-            std::fclose(f);
-        }
+        opennova::dep::write(dep_path, dep_out.data(), dep_out.size());
         progress.finish_phase("write_depth", "Wrote Output.dep.", kWriteDepthUnits);
     }
 
@@ -280,7 +279,7 @@ void build_terrain(const TpjProject& project,
                         MeshData mesh;
                         if (depth != 0) {
                             mesh = MeshData::read(tml_name);
-                            mesh.remap_vertex_ordering();
+                            remap_vertex_ordering(mesh);
                         }
                         mesh.write(tms_name);
                     } catch (...) {

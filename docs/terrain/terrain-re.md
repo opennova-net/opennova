@@ -36,8 +36,10 @@ partial; it converts terrain from `UNAUDITED` to *tracked (partial)*.
 | `lighting` | terrain lighting colors + per-position modulation | **retail** `Terrain_SetLightingColors @ 0x5C4B10`, `Terrain_GetModulatedColorAtPos @ 0x5C5FE0`; fog via `Render_SetFogState @ 0x58a950` → `CD3DDevice_SetFogParameters @ 0x677960` |
 | `texture_preprocess` | byte-faithful detail coefficient map, DBlend normalization, and paired near/far mip chains | **retail** `Texture_GenerateNormalMap @ 0x58c070`, `PolyTrn_InitTextures @ 0x60aaa0`, `GTexture_Downsample2x2_RGBA8 @ 0x687000`, `GTexture_CreateFromPixelDataWithAlphaBlend @ 0x687270` |
 | `mesh_simp` | mesh simplification (edge-collapse) | **BYTE-IDENTICAL — verified**: `dvd4_parity` (canonical `.cpt`) + `parametric_parity` (Sample/Gradient/Checker64/Perlin, 4.6–6.8 MB CPTs each) all produce byte-identical output. The in-code "divergence point / vertex 1223" logging is leftover debug scaffolding from when parity was being achieved, now inert. `parametric_parity` is ctest-`DISABLED` only for CI runtime cost (~5 min), not for any correctness gap |
-| `packing` | word→byte packing | **retail** `pack_words_to_bytes @ 0x403CD0` (low byte of each u16, 3 bytes/group) |
-| `depthmap` | depth/height map storage | in-code |
+| `tpm` (`engine/formats/tpm`, ex `mesh_data` here) | the TPM1 tile-mesh container (.tml/.tms) read/write | **retail** `MeshData_LoadFromFile @ 0x404100`, `MeshData_WriteToFile @ 0x403FE0`; §The TPM1 tile-mesh format below |
+| `packing` (`engine/formats/tpm/src`, ex here) | the TPM1 on-disk index codecs | **retail** `pack_words_to_bytes @ 0x403CD0` (low byte of each u16, 3 bytes/group) + the unpack/10-bit pair `@ 0x403DD0/0x403E70/0x403EF0` |
+| `tristrip` (incl. the ex-`mesh_data` remap pass) | strip conversion + the cache-order vertex remap the bake runs before writing .tms | **retail** `sub_4068E0` (strips), `sub_404480` via thunk `sub_404610` (remap) |
+| `depthmap` | depth/height map storage (the raw `.dep` intermediate's read/write lives in `engine/formats/dep`) | in-code |
 | `terrain_query` raycast (ENG-3 B1, ported with #209) | world-space height samplers + the segment raycast the editor/celestial hosts adopt | **retail** §Runtime terrain queries below (`Terrain_SampleHeightBilinear @ 0x6067b0`, `Terrain_RaycastHeightmapLoRes @ 0x60cb80`, `Terrain_RaycastHeightmapHiRes_0 @ 0x60e710`) |
 
 The tile overlay and foliage that render over the terrain surface have their own
@@ -46,6 +48,39 @@ now-landed records: [tiles/til-re.md](../tiles/til-re.md) (PAR-R3),
 `terrain_rgb` is confined to the dead far-colormap bake described below; the
 live top-tier terrain shader has no terrain-tint multiplier
 ([env/env-tod-re.md](../env/env-tod-re.md) #19).
+
+## The TPM1 tile-mesh format (.tml/.tms — retail Jointops.exe witness map)
+
+The tile-mesh container the bake writes and the CPT export re-reads. Reimpl:
+`engine/formats/tpm` (read/write + the index codecs; magic-shaped lib name,
+precedent bfc1, since the two extensions share one format), with the
+strip/remap bake pass staying in `engine/runtime/terrain` (`tristrip`).
+Fixture: `fixtures/terrain/sample/S0_00_00.tml`; byte gate: ctest
+`tpm1_roundtrip`.
+
+- **Header (12 bytes)** [orig: `MeshData_LoadFromFile @ 0x404100`]: magic
+  `TPM1` (0x314D5054), `tile_x u16`, `tile_y u16`, `vertex_count u16`,
+  `reserved u16`. Vertex data follows: 4 bytes per vertex (packed x,y
+  offsets), rotate-crypted.
+- **LOD sections**: the in-memory MeshData carries 16 12-byte LOD entries;
+  the FILE carries 8 — every OTHER entry (indices 0,2,…,14). Per-section
+  12-byte header: a pointer placeholder u32 (written as 0; the reader's
+  32-byte roundtrip tolerance in `tpm1_roundtrip` covers stale writer
+  pointers in retail files), `face_count u32`, `max_index u16`, `flags u16`
+  (bit 1 = triangle strip).
+- **Three index-codec tiers by `max_index`** [orig: the pack/unpack family
+  `@ 0x403CD0/0x403DD0/0x403E70/0x403EF0`]: ≤256 → byte-packed (3 bytes per
+  3-index group), ≤1024 → 10-bit packed (4 bytes per group), else raw u16.
+  Every payload (vertices + indices) goes through the cpt `rotate_crypt`.
+- **Pipeline roles**: `.tml` is written by the quadtree bake
+  (`build_quadtree`), `.tms` by the builder's remap pass — the same
+  container, post `remap_vertex_ordering` (`sub_404480`: strip conversion,
+  first-seen vertex sort with the exact quicksort/insertion-sort hybrid,
+  forward/inverse remap, `max_index = max + 1`). Retail treats existing tile
+  files as a cache (the cache-trust semantics tracked in TODO.md).
+- The raw `Output.dep` depth intermediate the bake hands to the CPT export is
+  its own minimal lib (`engine/formats/dep`): headerless 1024×1024 u16,
+  short/missing file reads zero-filled.
 
 ## Runtime surface shading (REN-4, retail Jointops.exe — witness map)
 
@@ -675,7 +710,8 @@ editor preview. D-TERRAIN-1 remains the deliberate editor/runtime split.
 
 ## Cross-references
 
-- Reimpl: `engine/runtime/terrain`, `engine/runtime/terrain_query` (ADR 0020, the world→height seam).
+- Reimpl: `engine/runtime/terrain`, `engine/runtime/terrain_query` (ADR 0020, the world→height seam),
+  `engine/formats/tpm` (the TPM1 tile mesh) + `engine/formats/dep` (the depth intermediate) — ADR 0030.
 - The reference data path: the TrnGen byte-identical terrain generator (canonical).
 - Surface consumers with their own records: tiles (R3), foliage (R2), env
   far-colormap bake (#19).
