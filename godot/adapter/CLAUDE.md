@@ -6,7 +6,10 @@ authoring/preview surfaces (`godot/modtools/`):
 
 - **Native bindings (C++)**: `Nova*`-prefixed GDExtension classes binding `engine/` to
   Godot. Thin wrappers only — format/runtime logic belongs in `engine/`. Register new
-  classes in `register_types.cpp`.
+  classes in `register_types.cpp`. What "thin" means is ADR 0031's five bands (binding
+  glue, ONED document surface, presentation, res:// loaders, documented seam bridges);
+  the `adapter_cpp_orig_cites` ratchet enforces it — a new `[orig:]` cite here is
+  either a documented seam contract or code that belongs engine-side.
 - **The shared shell-neutral GDScript layer** (~38.5k LOC across ~150 scripts) both shells run on:
   - `world/` — THE runtime, and by far the largest slice (~16.4k LOC): `game_world.gd` (the
     GameWorld scene), `mission_runtime.gd`, `mission_present_pass.gd`,
