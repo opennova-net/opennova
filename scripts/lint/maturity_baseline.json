@@ -12,6 +12,7 @@
     "vfs"
   ],
   "counters": {
+    "adapter_cpp_orig_cites": 630,
     "cpp_binding_console_writes": 0,
     "engine_stdout_prints": 0,
     "engine_uncited_src_files": 50,

@@ -11,6 +11,11 @@ in maturity_baseline.json:
                         "[orig" citations, excluding the allowlisted infra libs
                         (citation is inapplicable there) -- the faithful-port
                         rule's coverage floor.
+  adapter_cpp_orig_cites  "[orig:" citations across godot/adapter C++ (ADR
+                        0031): witnessed engine behavior belongs in engine/,
+                        so an adapter cite is either a documented seam
+                        contract or a push-down candidate. New ones need a
+                        deliberate bump; push-downs bank the decrease.
 
 Modes:
   (default)         report counts vs baseline; exit 0 regardless (soft mode)
@@ -73,6 +78,24 @@ def count_engine_uncited_src_files(allowlist: set[str]) -> int:
                 continue
             if "[orig:" not in text:
                 count += 1
+    return count
+
+
+def count_adapter_cpp_orig_cites() -> int:
+    count = 0
+    adapter = REPO / "godot" / "adapter"
+    # build/ is the generated CMake tree (godot-cpp bindings) — not source.
+    build_dir = adapter / "build"
+    for path in adapter.rglob("*"):
+        if path.suffix.lower() not in (".c", ".cc", ".cpp", ".h", ".hpp"):
+            continue
+        if build_dir in path.parents:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        count += text.count("[orig:")
     return count
 
 
@@ -243,6 +266,7 @@ def main() -> int:
     current = {
         "test_private_pokes": count_test_private_pokes(),
         "engine_uncited_src_files": count_engine_uncited_src_files(allowlist),
+        "adapter_cpp_orig_cites": count_adapter_cpp_orig_cites(),
         "engine_stdout_prints": count_engine_stdout_prints(),
         "gd_prints_outside_debug": count_gd_prints_outside_debug(),
         "cpp_binding_console_writes": count_cpp_binding_console_writes(),
