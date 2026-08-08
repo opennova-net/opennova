@@ -73,6 +73,12 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/pff/src/pff_writer.cpp
     # playersav — weapon.sav player profile
     ${CMAKE_CURRENT_SOURCE_DIR}/playersav/src/weapon_sav.cpp
+    # ptl — particle effects (.ptl): model + parser + writer + enum/field tables;
+    # historical include prefix particle/ (the emitter/effect-scene sim stays in
+    # engine/runtime/particle — disjoint header sets, ADR 0030 decision 2)
+    ${CMAKE_CURRENT_SOURCE_DIR}/ptl/src/parser.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ptl/src/particle.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ptl/src/writer.cpp
     # rtxt — localized string tables
     ${CMAKE_CURRENT_SOURCE_DIR}/rtxt/src/rtxt.cpp
     # sbf — sound banks
@@ -139,6 +145,7 @@ target_include_directories(opennova_formats
         ${CMAKE_CURRENT_SOURCE_DIR}/pcx/include
         ${CMAKE_CURRENT_SOURCE_DIR}/pff/include
         ${CMAKE_CURRENT_SOURCE_DIR}/playersav/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/ptl/include
         ${CMAKE_CURRENT_SOURCE_DIR}/rtxt/include
         ${CMAKE_CURRENT_SOURCE_DIR}/sbf/include
         ${CMAKE_CURRENT_SOURCE_DIR}/scr/include

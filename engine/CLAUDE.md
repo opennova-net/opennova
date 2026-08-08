@@ -10,7 +10,7 @@
   - `formats/` — one library per NovaLogic format (ADR 0024; what earns a lib vs stays
     runtime-fused: ADR 0030): adm, pff, scr, bfc1, pcx, fnt, rtxt, cbin, threedi, tdp,
     ase, bad, def, avatars, trn, tpj, cpt, til, foliage, env, mnu, mns, sbf, lwf, dbf,
-    mus, playersav, oed.
+    mus, playersav, ptl, oed.
   - `runtime/` — the in-match systems: world, wac, mission, anim, audio, particle,
     renderer, controls, terrain, terrain_query.
   - `net/` — the wire/protocol stack (ADRs 0009–0012, 0019; Model-B-only): novacrypto,

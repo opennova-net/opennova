@@ -895,12 +895,21 @@ if(MSVC)
 endif()
 add_test(NAME dvxi5_repro COMMAND dvxi5_repro_test)
 
-# Particle (.ptl) text-format parser/simulator tests. See engine/runtime/particle and the
-# witness matrix in docs/particles/ptl-format-re.md
-# (CParticleDef_ParseFromConfigMap @ 0x5ed210, Jointops.exe IDB).
+# Particle (.ptl) tests. Format half (engine/formats/ptl: model/parser/writer/
+# tables) links opennova_formats; sim half (engine/runtime/particle: emitter +
+# effect scene) links opennova_runtime. Witness matrix:
+# docs/particles/ptl-format-re.md (CParticleDef_ParseFromConfigMap @ 0x5ed210,
+# Jointops.exe IDB).
 foreach(name smallest minimal_effect multi_section multi_layer table_handles
-        smoke_all_fixtures enum_parse writer_roundtrip emitter curve_lut
-        emit_shape translate atlas lenient_lines effect_scene_contract)
+        smoke_all_fixtures enum_parse writer_roundtrip curve_lut atlas
+        lenient_lines)
+    add_executable(particle_${name}_test particle/particle_${name}_test.cpp)
+    target_link_libraries(particle_${name}_test PRIVATE opennova_formats)
+    target_include_directories(particle_${name}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(particle_${name}_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    add_test(NAME particle_${name} COMMAND particle_${name}_test)
+endforeach()
+foreach(name emitter emit_shape translate effect_scene_contract)
     add_executable(particle_${name}_test particle/particle_${name}_test.cpp)
     target_link_libraries(particle_${name}_test PRIVATE opennova_runtime)
     target_include_directories(particle_${name}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
