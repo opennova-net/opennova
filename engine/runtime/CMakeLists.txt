@@ -71,11 +71,9 @@ add_library(opennova_runtime STATIC
     # the retail segment raycast; zero format dependencies
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/src/height_field.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/src/terrain_raycast.cpp
-    # wac — the WAC scripting VM
-    ${CMAKE_CURRENT_SOURCE_DIR}/wac/src/command_table.gen.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/wac/src/command_table.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/wac/src/lexer.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/wac/src/parser.cpp
+    # wac — the WAC compiler (binds names/vars against the live world) + the VM;
+    # the language front end (lexer, parser/AST, command table, Program model)
+    # is engine/formats/wac
     ${CMAKE_CURRENT_SOURCE_DIR}/wac/src/compiler.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wac/src/vm.cpp
     # world — the ONE runtime World: entities, AI, collision, players, vehicles,

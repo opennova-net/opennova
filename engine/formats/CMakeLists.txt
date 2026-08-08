@@ -134,6 +134,13 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/tpm/src/packing.cpp
     # trn — terrain config
     ${CMAKE_CURRENT_SOURCE_DIR}/trn/src/trn_io.cpp
+    # wac — the WAC scripting language front end: lexer, parser/AST, the command
+    # table (names + param types), and the compiled Program model. The compiler
+    # (binds names/vars against the live world) and the VM are engine/runtime/wac.
+    ${CMAKE_CURRENT_SOURCE_DIR}/wac/src/command_table.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/wac/src/command_table.gen.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/wac/src/lexer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/wac/src/parser.cpp
 )
 
 # Every format's public include/ keeps its historical <domain>/... include shape.
@@ -173,6 +180,9 @@ target_include_directories(opennova_formats
         ${CMAKE_CURRENT_SOURCE_DIR}/tpj/include
         ${CMAKE_CURRENT_SOURCE_DIR}/tpm/include
         ${CMAKE_CURRENT_SOURCE_DIR}/trn/include
+        # wac's front-end headers; the compiler/VM headers stay in
+        # engine/runtime/wac's include/wac/ (disjoint header sets, one prefix).
+        ${CMAKE_CURRENT_SOURCE_DIR}/wac/include
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/bfc1/src   # miniz.h (vendored, private)
         ${CMAKE_CURRENT_SOURCE_DIR}/oed/src    # threedi_model.h (private)
