@@ -508,8 +508,6 @@ void NovaEffectScene::_bind_methods() {
 			&NovaEffectScene::detach_slot);
 	ClassDB::bind_method(D_METHOD("reset_runtime_state"),
 			&NovaEffectScene::reset_runtime_state);
-	ClassDB::bind_method(D_METHOD("advance", "delta_seconds"),
-			&NovaEffectScene::advance);
 	ClassDB::bind_method(D_METHOD("advance_in_place", "delta_seconds"),
 			&NovaEffectScene::advance_in_place);
 	ClassDB::bind_method(D_METHOD("get_frame_snapshot"),
@@ -703,12 +701,6 @@ void NovaEffectScene::advance_in_place(double p_delta_seconds) {
 	request.delta_seconds = static_cast<float>(p_delta_seconds);
 	scene_.advance_simulation(request);
 	snapshot_dirty_ = true;
-}
-
-Dictionary NovaEffectScene::advance(double p_delta_seconds) {
-	advance_in_place(p_delta_seconds);
-	_materialize_snapshot();
-	return frame_dictionary(last_frame_);
 }
 
 Dictionary NovaEffectScene::get_frame_snapshot() const {

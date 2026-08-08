@@ -1327,7 +1327,8 @@ static int append_transform(BufferBuilder *buf, const ThreediTransform *t)
 
 static int build_panm_chunk(const ThreediLod *lod, const Threedi3di3 *model, ChunkBuilder *out)
 {
-    // Use per-LOD PANM data if available, otherwise fall back to global (for backwards compat).
+    // Per-LOD PANM data wins when present; otherwise the file-level table is
+    // written (the retail reader accepts the chunk at either home).
     const ThreediPartAnimation *panm_data = lod->part_animations ? lod->part_animations : model->part_animations;
     const size_t panm_count = lod->part_animations ? lod->part_animation_count : model->part_animation_count;
     const uint32_t panm_rec_size = lod->part_animations

@@ -542,11 +542,6 @@ func advance_fixed_tick(delta: float) -> void:
 	_scene.advance_in_place(maxf(delta, 0.0))
 
 
-## Compatibility alias used by deterministic tests/tools.
-func sweep(delta: float) -> void:
-	advance_fixed_tick(delta)
-
-
 ## Render-frame work may update attachment poses, but never advances particles.
 func _process(_delta: float) -> void:
 	_sync_owner_poses()

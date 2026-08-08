@@ -217,15 +217,10 @@ const ParticleDrawPacket &ParticleFrameCompiler::compile(
 		++debug.selected_emitters;
 		selected_particles += emitter.particles.size();
 
-		ParticleAabb sort_bounds = emitter.bounds;
-		if (!sort_bounds.valid) {
-			// Transitional fallback for producers that do not carry manager
-			// bounds yet. Exact emitted-vertex bounds are still reported.
-			for (const ParticleQuadSnapshot &particle : emitter.particles) {
-				if (particle.visible)
-					include(sort_bounds, rendered_center(particle, view));
-			}
-		}
+		// Invalid manager bounds mean an emitter with no particles this frame;
+		// it sorts farthest-first. Exact emitted-vertex bounds are still
+		// reported per packet below.
+		const ParticleAabb &sort_bounds = emitter.bounds;
 		const float depth = sort_bounds.valid
 				? view_depth(aabb_center(sort_bounds), view)
 				: -std::numeric_limits<float>::infinity();

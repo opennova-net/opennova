@@ -755,10 +755,6 @@ func _log_typed(type: int, text: String) -> void:
 	_transport_ops._log_typed(type, text)
 
 
-func _log(text: String) -> void:
-	_transport_ops._log(text)
-
-
 func _timestamp() -> String:
 	return _transport_ops._timestamp()
 

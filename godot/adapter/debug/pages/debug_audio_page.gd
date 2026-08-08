@@ -7,14 +7,12 @@ extends NovaDebugPage
 ## exactly like runtime MCP.
 
 ## Bus names per godot/default_bus_layout.tres.
-const MUTE_BUSES := ["SFX", "Music", "Ambient", "Voice"]
 
 var _music_label: Label
 var _mission_label: Label
 var _driver_label: Label
 var _bus_rows: VBoxContainer
 var _bus_names: PackedStringArray
-var _mute_checks: Dictionary = {}  # bus name -> CheckBox
 var _bus_controls: Dictionary = {}  # bus name -> control record
 
 
@@ -40,22 +38,6 @@ func _build() -> void:
 	_mission_label.text = "No mission audio."
 	_mission_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	add_child(_mission_label)
-
-	var mute_header := Label.new()
-	mute_header.name = "MuteHeader"
-	mute_header.text = "Mute"
-	add_child(mute_header)
-	for bus_name in MUTE_BUSES:
-		var check := CheckBox.new()
-		check.name = "Mute%s" % bus_name
-		check.text = bus_name
-		check.tooltip_text = "Silence the %s bus — flip it to isolate what you are hearing." % bus_name
-		check.toggled.connect(_on_mute_toggled.bind(String(bus_name)))
-		add_child(check)
-		_mute_checks[bus_name] = check
-		# Retain these stable nodes for compatibility probes; the dynamic bus
-		# rows below are the visible controls and cover every configured bus.
-		check.visible = false
 
 	_driver_label = Label.new()
 	_driver_label.name = "AudioDriver"
@@ -188,13 +170,6 @@ func refresh() -> void:
 			int(stats.get("banks_loaded", 0)), int(stats.get("ambient_candidates", 0)),
 			int(perf.get("active_channels", 0)), int(stats.get("channel_budget", 0)),
 			float(perf.get("tick_us", 0)) / 1000.0]
-
-	for bus_name in MUTE_BUSES:
-		var bus := AudioServer.get_bus_index(String(bus_name))
-		var check := _mute_checks[bus_name] as CheckBox
-		check.disabled = bus < 0
-		if bus >= 0:
-			check.set_pressed_no_signal(AudioServer.is_bus_mute(bus))
 
 	for bus_name in _bus_names:
 		var bus := AudioServer.get_bus_index(String(bus_name))

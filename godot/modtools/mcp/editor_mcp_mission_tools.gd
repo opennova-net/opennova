@@ -454,13 +454,13 @@ func _tool_waypoints(args: Dictionary, ctx: McpToolContext) -> Variant:
 	var controller: Variant = gate["controller"]
 	match op:
 		"new_path":
-			controller.set_waypoint_mode(true)
+			controller.set_mode(controller.Mode.WAYPOINTS)
 			var index := int(controller.select_new_waypoint_path())
 			if index < 0:
 				return McpToolResult.error("All 128 waypoint paths are in use.")
 			return { "ok": true, "path": index, "active": controller.get_active_waypoint_path() }
 		"select_path":
-			controller.set_waypoint_mode(true)
+			controller.set_mode(controller.Mode.WAYPOINTS)
 			controller.select_waypoint_path(int(args.get("path", -1)))
 			var active: Dictionary = controller.get_active_waypoint_path()
 			if active.is_empty():

@@ -6,10 +6,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from apps.importer.cli import build_parser, options_from_args
-from apps.importer.import_runner import (
-    scan_directory,
-    scan_directory_result,
-)
+from apps.importer.import_runner import scan_directory_result
 from opennova_jobs import (
     JOB_ERROR,
     JOB_PENDING,
@@ -471,10 +468,9 @@ class TestImportRunner:
     def test_scan_failure_is_not_empty_success(self) -> None:
         missing = str(ROOT / ".scratch" / "__missing_scan_dir__")
         result = scan_directory_result(missing)
-        items = scan_directory(missing)
         assert not result.ok
         assert result.error == "Game directory does not exist."
-        assert items == []
+        assert result.items == []
 
 
 class TestImportDispatcher:

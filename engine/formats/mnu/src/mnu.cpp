@@ -1070,14 +1070,12 @@ const Screen *Document::first_screen() const {
   return screens.empty() ? nullptr : &screens[0];
 }
 
-bool parse(const std::string &content, Document &out, std::string &error,
-           const ParseOptions &options) {
+bool parse(const std::string &content, Document &out, std::string &error) {
   return parse(reinterpret_cast<const uint8_t *>(content.data()),
-               content.size(), out, error, options);
+               content.size(), out, error);
 }
 
-bool parse(const uint8_t *data, size_t size, Document &out, std::string &error,
-           const ParseOptions &options) {
+bool parse(const uint8_t *data, size_t size, Document &out, std::string &error) {
   out = Document{};
   if (!data && size != 0) {
     error = "MNU input buffer is null";
@@ -1122,8 +1120,7 @@ bool parse(const uint8_t *data, size_t size, Document &out, std::string &error,
   return true;
 }
 
-bool parse_file(const std::string &path, Document &out, std::string &error,
-                const ParseOptions &options) {
+bool parse_file(const std::string &path, Document &out, std::string &error) {
   std::ifstream file(path, std::ios::binary);
   if (!file) {
     error = "Failed to open file: " + path;
@@ -1134,14 +1131,7 @@ bool parse_file(const std::string &path, Document &out, std::string &error,
   buffer << file.rdbuf();
   std::string content = buffer.str();
 
-  return parse(content, out, error, options);
-}
-
-std::string fix_malformed_xml(const std::string &content) {
-  // The mnu_xml parser already handles most malformed cases (unquoted
-  // attributes, bare booleans). This function is provided for compatibility
-  // but may not need to do anything.
-  return content;
+  return parse(content, out, error);
 }
 
 std::string strip_hotkey_marker(const std::string &text,

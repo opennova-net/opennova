@@ -274,7 +274,7 @@ class SpawnObserver:
 		})
 
 
-func test_present_snapshot_rejects_a_legacy_short_stride() -> void:
+func test_present_snapshot_rejects_a_short_stride() -> void:
 	var sim := FakeSim.new()
 	sim.local_player_present = false
 	var placer := FakePlacer.new()
@@ -282,11 +282,11 @@ func test_present_snapshot_rejects_a_legacy_short_stride() -> void:
 	add_child_autofree(container)
 	var presenter := WirePresentPass.new()
 	presenter.setup(sim, placer, container, null, EmptyIndex.new())
-	var legacy_stride := NovaSimulation.PF_STRIDE - 1
+	var short_stride := NovaSimulation.PF_STRIDE - 1
 	var snapshot := PackedFloat32Array()
-	snapshot.resize(legacy_stride)
+	snapshot.resize(short_stride)
 
-	presenter.present_snapshot(snapshot, legacy_stride)
+	presenter.present_snapshot(snapshot, short_stride, sim.layout_revision)
 
 	assert_true(placer.built.is_empty(),
 			"a row that predates the blend tuple cannot be cross-read")

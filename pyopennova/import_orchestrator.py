@@ -160,7 +160,6 @@ def execute_definition_import(
 
     with AssetResolver(base_dir, game=game) as resolver:
         plan = resolve_definition_import(
-            base_dir=base_dir,
             item_name=item_name,
             item_type=item_type,
             resolver=resolver,

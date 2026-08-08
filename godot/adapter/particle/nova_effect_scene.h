@@ -97,7 +97,6 @@ public:
 	// or serializing one into a throwaway Dictionary. The renderer lazily builds
 	// one retained snapshot after a fixed-tick catch-up batch.
 	void advance_in_place(double p_delta_seconds);
-	Dictionary advance(double p_delta_seconds);
 	Dictionary get_frame_snapshot() const;
 	Dictionary get_live_counts() const;
 	Dictionary inspect(bool p_include_bounds = true) const;

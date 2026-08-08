@@ -70,8 +70,6 @@ func rebuild() -> void:
 			else 0)
 	var submeshes: Array = _m.object_data.build_lod_submeshes(
 			_m._active_lod, skeletal_mode, bone_count, _m.native_frame)
-	if submeshes.is_empty():
-		submeshes = _legacy_submeshes_from_surfaces(_m._active_lod)
 	for entry in submeshes:
 		var submesh: Dictionary = entry
 		var mesh := submesh.get("mesh") as ArrayMesh
@@ -165,33 +163,6 @@ func _build_skeleton() -> void:
 	for i in range(_m._skeleton.get_bone_count()):
 		_m._skeleton.reset_bone_pose(i)
 	_m._skeleton_skin = _m._skeleton.create_skin_from_rest_transforms()
-
-
-func _legacy_submeshes_from_surfaces(lod_index: int) -> Array:
-	var result := []
-	if _m.object_data == null:
-		return result
-	for surface in _m.object_data.get_lod_surfaces(lod_index):
-		var mesh := ArrayMesh.new()
-		var arrays := []
-		arrays.resize(Mesh.ARRAY_MAX)
-		arrays[Mesh.ARRAY_VERTEX] = surface.get("vertices", PackedVector3Array())
-		arrays[Mesh.ARRAY_NORMAL] = surface.get("normals", PackedVector3Array())
-		arrays[Mesh.ARRAY_TEX_UV] = surface.get("uvs", PackedVector2Array())
-		arrays[Mesh.ARRAY_TEX_UV2] = surface.get("uvs2", PackedVector2Array())
-		var tangents: PackedFloat32Array = surface.get("tangents", PackedFloat32Array())
-		if tangents.size() == arrays[Mesh.ARRAY_VERTEX].size() * 4:
-			arrays[Mesh.ARRAY_TANGENT] = tangents
-		arrays[Mesh.ARRAY_INDEX] = surface.get("indices", PackedInt32Array())
-		if arrays[Mesh.ARRAY_VERTEX].is_empty():
-			continue
-		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-		result.append({
-			"robj_index": int(surface.get("part_index", 0)),
-			"material_index": int(surface.get("material_array_index", surface.get("material_index", 0))),
-			"mesh": mesh,
-		})
-	return result
 
 
 # Keep the submission notifier matching the model's current mesh bounds. An

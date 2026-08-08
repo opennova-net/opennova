@@ -172,7 +172,7 @@ func test_spawn_by_name_creates_emitters_and_sweep_expires() -> void:
 			"a production-tick spawn emits during that same fixed particle pass")
 	# Let the one-shot emit and die through the one authoritative scene clock.
 	for _i in 30:
-		world.sweep(0.1)
+		world.advance_fixed_tick(0.1)
 	assert_eq(world.live_group_count(), 0, "finished finite group is swept")
 
 
@@ -201,7 +201,7 @@ func test_pending_delayed_emitter_outlives_the_heuristic_window() -> void:
 	world.load_particle_file(file)
 	assert_gt(world.spawn_effect("puff", Vector3.ZERO), 0)
 
-	world.sweep(31.0)
+	world.advance_fixed_tick(31.0)
 	assert_eq(world.live_group_count(), 1,
 			"a finite group remains live while its emitter still has pending delay/emission")
 
@@ -215,7 +215,7 @@ func test_unless_alive_owner_mapping_clears_when_group_finishes() -> void:
 	assert_eq(world.live_group_count(), 1,
 			"the slot token suppresses a second live group without a private-map assertion")
 	for _i in 30:
-		world.sweep(0.1)
+		world.advance_fixed_tick(0.1)
 	assert_eq(world.live_group_count(), 0)
 	assert_gt(world.spawn_effect_unless_alive(owner, "puff", Vector3.ZERO), 0)
 	assert_eq(world.live_group_count(), 1,
@@ -273,7 +273,7 @@ func test_owned_effect_follows_entity_and_detaches_when_owner_disappears() -> vo
 	assert_true(bool(_single_group(world).forever),
 			"the FOREVEREMIT group begins attached and infinite")
 	positions.state = Vector3(9, 8, 7)
-	world.sweep(0.0)
+	world.advance_fixed_tick(0.0)
 	var moved_emitter := _single_emitter(world)
 	assert_almost_eq(moved_emitter.position, positions.state, Vector3(0.001, 0.001, 0.001),
 			"CEffect_UpdateEmitterTransform-style follow updates the emitter each sweep")
@@ -282,7 +282,7 @@ func test_owned_effect_follows_entity_and_detaches_when_owner_disappears() -> vo
 
 	var attached_transform := Transform3D(Basis(Vector3.UP, PI * 0.5), Vector3(6, 5, 4))
 	positions.state = attached_transform
-	world.sweep(0.0)
+	world.advance_fixed_tick(0.0)
 	var rotated_emitter := _single_emitter(world)
 	assert_almost_eq(rotated_emitter.position, attached_transform.origin,
 			Vector3(0.001, 0.001, 0.001))
@@ -291,7 +291,7 @@ func test_owned_effect_follows_entity_and_detaches_when_owner_disappears() -> vo
 			"the attached entity's live forward reaches the simulator frame")
 
 	positions.alive = false
-	world.sweep(0.0)
+	world.advance_fixed_tick(0.0)
 	var detached_group := _single_group(world)
 	assert_true(bool(detached_group.detached), "owner removal detaches the group")
 	assert_false(bool(detached_group.forever), "detachment stops FOREVEREMIT emission")
@@ -326,7 +326,7 @@ func test_attached_effect_composes_the_local_userpoint_offset() -> void:
 	# Drive the owner: the offset rides the basis, the direction re-orients with it.
 	var moved := Transform3D(Basis(Vector3.UP, PI * 0.5), Vector3(20, 3, 5))
 	positions.state = moved
-	world.sweep(0.0)
+	world.advance_fixed_tick(0.0)
 	var moved_emitter := _single_emitter(world)
 	assert_almost_eq(moved_emitter.position, moved * local_pos, Vector3(0.001, 0.001, 0.001),
 			"the follow composes the local offset, not the owner origin")
@@ -335,7 +335,7 @@ func test_attached_effect_composes_the_local_userpoint_offset() -> void:
 			"the userpoint direction re-orients with the owner basis")
 	# Owner gone (vehicle freed) -> detach: emission stops and the group drains.
 	positions.alive = false
-	world.sweep(0.0)
+	world.advance_fixed_tick(0.0)
 	assert_true(bool(_single_group(world).detached),
 			"owner removal detaches the attached group")
 
@@ -359,7 +359,7 @@ func test_replacing_an_owned_group_detaches_the_old_group_transform() -> void:
 			"the replacement remains attached")
 
 	positions.state = Transform3D(Basis(Vector3.UP, PI * 0.25), Vector3(9, 8, 7))
-	world.sweep(0.0)
+	world.advance_fixed_tick(0.0)
 	groups = world.get_debug_group_report()
 	var old_emitter := ((groups[0] as Dictionary).emitters as Array)[0] as Dictionary
 	var new_emitter := ((groups[1] as Dictionary).emitters as Array)[0] as Dictionary

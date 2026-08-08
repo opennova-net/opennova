@@ -32,7 +32,6 @@ class DefinitionImportPlan:
 
 
 def resolve_definition_import(
-    base_dir: str,
     item_name: str,
     item_type: str,
     resolver,
@@ -53,8 +52,6 @@ def resolve_definition_import(
         process_def_files,
         resolve_reset_bad_path,
     )
-
-    del base_dir  # kept for call-site symmetry with older runner code
 
     weapons, items = process_def_files(resolver=resolver)
 

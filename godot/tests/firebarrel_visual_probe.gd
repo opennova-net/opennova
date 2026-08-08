@@ -75,7 +75,7 @@ func _process(delta: float) -> bool:
 	while _accum >= TICK_DT:
 		_accum -= TICK_DT
 		_effect_world.advance_fixed_tick(TICK_DT)
-		_effect_world.sweep(TICK_DT)
+		_effect_world.advance_fixed_tick(TICK_DT)
 	if _captured < CAPTURE_TIMES.size() and _elapsed >= float(CAPTURE_TIMES[_captured]):
 		var image := root.get_viewport().get_texture().get_image()
 		var path := "%s/flame_t%d.png" % [_out_dir, _captured + 1]

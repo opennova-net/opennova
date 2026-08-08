@@ -815,7 +815,7 @@ func test_added_waypoint_marker_is_a_waypoint_type_not_a_copied_player_start() -
 	assert_eq(int(mission.get_entity(NovaMissionData.KIND_MARKER, ps_index)["type_id"]), 1,
 		"precondition: the placed marker is the non-waypoint fixture type (1)")
 	# Author a waypoint path and add a marker to it via the tool.
-	controller.set_waypoint_mode(true)
+	controller.set_mode(controller.Mode.WAYPOINTS)
 	controller.select_waypoint_path(_first_empty_path(mission))
 	assert_true(controller.add_marker_to_active_path_at_world(Vector3(60, 5, -60)),
 		"a waypoint marker is added to the path")
@@ -831,7 +831,7 @@ func test_waypoint_marker_reuses_the_active_paths_existing_type() -> void:
 	# specific waypoint type stays consistent), never the scene's first marker.
 	var controller := _loaded_with_item_db()
 	var mission := controller.get_mission()
-	controller.set_waypoint_mode(true)
+	controller.set_mode(controller.Mode.WAYPOINTS)
 	var path := _first_empty_path(mission)
 	controller.select_waypoint_path(path)
 	# Seed the path with a specific waypoint variant (106026 = "waypoint, mp, alpha", BMS type 6026).
@@ -1830,21 +1830,21 @@ func _marker_item_id(mission) -> int:
 	return int(markers[0]["item_id"]) if not markers.is_empty() else 100001
 
 
-func test_set_waypoint_mode_enters_and_clears_object_selection() -> void:
+func test_entering_waypoint_mode_clears_object_selection() -> void:
 	var controller := _loaded_with_selection()  # an object is selected
 	assert_false(controller.get_selection_summary().is_empty(), "precondition: an object is selected")
-	controller.set_waypoint_mode(true)
+	controller.set_mode(controller.Mode.WAYPOINTS)
 	assert_true(controller.is_waypoint_mode(), "the controller enters waypoint mode")
 	assert_eq(controller.get_selection_summary(), {}, "entering waypoint mode clears the object selection")
-	controller.set_waypoint_mode(false)
+	controller.set_mode(controller.Mode.OBJECTS)
 	assert_false(controller.is_waypoint_mode(), "and exits back to objects mode")
 
 
-func test_set_waypoint_mode_focuses_a_populated_path() -> void:
+func test_entering_waypoint_mode_focuses_a_populated_path() -> void:
 	var controller := _loaded_with_selection()
 	var mission := controller.get_mission()
 	mission.add_waypoint_marker(_first_empty_path(mission), _marker_item_id(mission), Vector3(1, 0, -1), Vector3.ZERO, -1)
-	controller.set_waypoint_mode(true)
+	controller.set_mode(controller.Mode.WAYPOINTS)
 	var active := controller.get_active_waypoint_path()
 	assert_false(active.is_empty(), "entering waypoint mode focuses a path")
 	assert_gt(int(active["marker_count"]), 0, "and the focused path has markers")
@@ -1853,7 +1853,7 @@ func test_set_waypoint_mode_focuses_a_populated_path() -> void:
 func test_select_waypoint_path_updates_active() -> void:
 	var controller := _loaded_with_selection()
 	var mission := controller.get_mission()
-	controller.set_waypoint_mode(true)
+	controller.set_mode(controller.Mode.WAYPOINTS)
 	var path := _first_empty_path(mission)
 	mission.add_waypoint_marker(path, _marker_item_id(mission), Vector3(3, 0, -3), Vector3.ZERO, -1)
 	controller.select_waypoint_path(path)
@@ -1870,7 +1870,7 @@ func test_get_waypoint_summaries_passthrough() -> void:
 func test_waypoint_overlay_harvests_a_pickable_per_active_marker() -> void:
 	var controller := _loaded_with_selection()
 	var mission := controller.get_mission()
-	controller.set_waypoint_mode(true)
+	controller.set_mode(controller.Mode.WAYPOINTS)
 	var path := _first_empty_path(mission)
 	mission.add_waypoint_marker(path, _marker_item_id(mission), Vector3(2, 0, -2), Vector3.ZERO, -1)
 	mission.add_waypoint_marker(path, _marker_item_id(mission), Vector3(4, 0, -4), Vector3.ZERO, -1)
@@ -1883,7 +1883,7 @@ func test_waypoint_overlay_harvests_a_pickable_per_active_marker() -> void:
 func test_select_marker_reports_position_and_deselect_clears() -> void:
 	var controller := _loaded_with_selection()
 	var mission := controller.get_mission()
-	controller.set_waypoint_mode(true)
+	controller.set_mode(controller.Mode.WAYPOINTS)
 	var path := _first_empty_path(mission)
 	var r := mission.add_waypoint_marker(path, _marker_item_id(mission), Vector3(7, 1, -7), Vector3.ZERO, -1)
 	controller.select_waypoint_path(path)
@@ -1901,7 +1901,7 @@ func test_left_press_in_waypoint_mode_does_not_select_objects() -> void:
 	# The headless stub has no camera, so the marker pick misses; the key assertion is that
 	# the object-selection path did not run.
 	var controller := _loaded_with_item_db()
-	controller.set_waypoint_mode(true)
+	controller.set_mode(controller.Mode.WAYPOINTS)
 	var press := InputEventMouseButton.new()
 	press.button_index = MOUSE_BUTTON_LEFT
 	press.pressed = true
@@ -1915,7 +1915,7 @@ func test_left_press_in_waypoint_mode_does_not_select_objects() -> void:
 func test_set_waypoint_flags_sets_and_is_undoable() -> void:
 	var controller := _loaded_with_selection()
 	var mission := controller.get_mission()
-	controller.set_waypoint_mode(true)
+	controller.set_mode(controller.Mode.WAYPOINTS)
 	var path := _first_empty_path(mission)
 	mission.add_waypoint_marker(path, _marker_item_id(mission), Vector3(1, 0, -1), Vector3.ZERO, -1)
 	controller.select_waypoint_path(path)
@@ -1938,7 +1938,7 @@ func test_set_waypoint_flags_sets_and_is_undoable() -> void:
 func test_select_waypoint_marker_selects_on_the_active_path() -> void:
 	var controller := _loaded_with_selection()
 	var mission := controller.get_mission()
-	controller.set_waypoint_mode(true)
+	controller.set_mode(controller.Mode.WAYPOINTS)
 	var path := _first_empty_path(mission)
 	var r := mission.add_waypoint_marker(path, _marker_item_id(mission), Vector3(2, 0, -2), Vector3.ZERO, -1)
 	controller.select_waypoint_path(path)
@@ -1953,7 +1953,7 @@ func test_select_waypoint_marker_selects_on_the_active_path() -> void:
 func _wp_ready() -> MissionController:
 	# A controller in waypoint mode focused on an empty path, ready to author into.
 	var controller := _loaded_with_selection()
-	controller.set_waypoint_mode(true)
+	controller.set_mode(controller.Mode.WAYPOINTS)
 	controller.select_waypoint_path(_first_empty_path(controller.get_mission()))
 	return controller
 
@@ -2134,7 +2134,7 @@ func test_select_new_waypoint_path_enables_from_scratch_authoring() -> void:
 	# Review fix: the path list only shows populated paths, so an all-empty mission needs an
 	# entry point to make an empty path active; otherwise Add marker is permanently disabled.
 	var controller := _loaded_with_selection()
-	controller.set_waypoint_mode(true)
+	controller.set_mode(controller.Mode.WAYPOINTS)
 	var idx := controller.select_new_waypoint_path()
 	# A new route must be authored at a FOLLOWABLE index: waypoint_id 0 == "no path" in the engine, so
 	# record 0 is reserved and never offered in the Behavior picker. Authoring into it would create a

@@ -94,17 +94,12 @@ func present() -> void:
 	if stride <= 0:
 		return
 	var snap: PackedFloat32Array = _sim.get_present_snapshot()
-	var layout_revision := -1
-	if _sim.has_method("get_present_layout_revision"):
-		layout_revision = int(_sim.get_present_layout_revision())
-	present_snapshot(snap, stride, layout_revision)
+	present_snapshot(snap, stride, int(_sim.get_present_layout_revision()))
 
 
-## Apply a snapshot already fetched by MissionRuntime. Compatible callers may
-## keep using present(); a source without a layout revision simply rebuilds the
-## routing plan every call.
+## Apply a snapshot already fetched by MissionRuntime.
 func present_snapshot(
-		snap: PackedFloat32Array, stride: int, layout_revision: int = -1) -> void:
+		snap: PackedFloat32Array, stride: int, layout_revision: int) -> void:
 	if _index == null or stride <= 0 or _applier == null:
 		return
 	_applier.present_snapshot(snap, stride, layout_revision)

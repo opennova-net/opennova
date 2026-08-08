@@ -93,13 +93,5 @@ BatchPageResult slice_batch_pages(std::size_t n_records, BatchPageLimit limit,
 	return out;
 }
 
-// Compatibility shorthand for callers with a conventional pre-write hard cap.
-template <typename EncodePage>
-BatchPageResult slice_batch_pages(std::size_t n_records, std::size_t max_page_bytes,
-                                  EncodePage encode_page, std::size_t start_cursor,
-                                  std::size_t max_pages) {
-	return slice_batch_pages(n_records, BatchPageLimit::pre_write(max_page_bytes),
-	                         std::move(encode_page), start_cursor, max_pages);
-}
 
 } // namespace opennova::np

@@ -77,7 +77,7 @@ func test_new_mission_end_to_end_on_a_real_terrain() -> void:
 
 	# Add a WAYPOINT marker via the Waypoints tool: it must be the engine waypoint type (6005), NOT a
 	# copy of the player-start-style marker placed above (the headline marker-type bug).
-	controller.set_waypoint_mode(true)
+	controller.set_mode(controller.Mode.WAYPOINTS)
 	controller.select_new_waypoint_path()
 	assert_true(controller.add_marker_to_active_path_at_world(Vector3(80.0, 10.0, -80.0)),
 		"adding a waypoint marker to a path works")

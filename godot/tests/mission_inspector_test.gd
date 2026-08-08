@@ -261,9 +261,6 @@ class FakeController:
 		mode = m
 		changed.emit()
 
-	func set_waypoint_mode(enabled: bool) -> void:
-		set_mode(1 if enabled else 0)
-
 	func get_selected_waypoint_path_index() -> int:
 		return selected_path
 
@@ -1351,7 +1348,7 @@ func test_real_controller_provides_every_method_the_inspector_calls() -> void:
 		"get_waypoint_path_options", "get_group_options",
 		"get_placeable_items", "get_placement_item_id", "arm_placement", "disarm_placement",
 		# P7 waypoints surface.
-		"is_waypoint_mode", "set_waypoint_mode", "select_waypoint_path", "select_new_waypoint_path",
+		"is_waypoint_mode", "select_waypoint_path", "select_new_waypoint_path",
 		"get_selected_waypoint_path_index", "get_waypoint_summaries", "get_selected_marker",
 		"get_active_waypoint_path", "set_waypoint_flags", "select_waypoint_marker",
 		"is_marker_placement_armed", "arm_marker_placement", "disarm_marker_placement",

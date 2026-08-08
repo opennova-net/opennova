@@ -155,8 +155,11 @@ struct ItemAvailabilityEntry {
 	int status = 1;
 };
 
-// Typed view of a 32-byte group record. ABI field names are retained for compatibility:
-// field0 = 2-bit flags, field8 = value, field12 = writer-confirmed constant 10.
+// Typed view of a 32-byte group record. The field WIDTHS are witnessed
+// ([orig: Med_WriteBmsFile @ 0x44f920]) but their in-engine MEANING is still
+// ungrilled (TODO.md "Group record semantics"), so the names stay offset
+// placeholders: field0 = 2-bit flags, field8 = the one free int,
+// field12 = writer-confirmed constant 10.
 struct GroupFields {
 	size_t index = 0;
 	int field0 = 0;

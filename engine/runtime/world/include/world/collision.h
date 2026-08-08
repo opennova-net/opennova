@@ -402,7 +402,7 @@ struct CollisionRay {
 };
 
 // Metadata for the solid volume that most recently clipped `ray` to its nearest
-// entry point. The legacy callers only need the bool and leave this null; the
+// entry point. Callers that only need the bool leave this null; the
 // projectile query retains section identity for downstream impact policy.
 struct CollisionModelHit {
     int32_t section_index = -1;
@@ -952,9 +952,6 @@ public:
     // The collision model attached to this exact live registry identity
     // (nullptr for an absent or recycled packed slot).
     const CollisionModel *model_for(const World &world, EntityHandle h) const;
-    // Handle-only compatibility lookup for callers without a World identity
-    // source. Prefer the overload above when registry slot reuse matters.
-    const CollisionModel *model_for(EntityHandle h) const;
 
     // Read-only world-space geometry snapshot for a host collision debug view.
     // Each instance's volumes are transformed through the SAME target_view /

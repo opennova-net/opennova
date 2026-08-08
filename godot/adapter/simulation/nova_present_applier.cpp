@@ -667,10 +667,7 @@ int64_t NovaPresentApplier::current_index_generation() {
 
 bool NovaPresentApplier::row_plan_is_current(int64_t size, int stride,
 		int64_t layout_revision) {
-	// No revision means a compatible fake/custom source: preserve the original
-	// full-resolution behavior rather than trusting an unverifiable row order.
-	if (plan_dirty_ || layout_revision < 0 ||
-			plan_revision_ != layout_revision ||
+	if (plan_dirty_ || plan_revision_ != layout_revision ||
 			plan_stride_ != stride || plan_snapshot_size_ != size ||
 			plan_index_generation_ != current_index_generation()) {
 		return false;

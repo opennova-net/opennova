@@ -949,13 +949,6 @@ void EffectScene::write_snapshot(ParticleFrameSnapshot &snapshot) const {
 	}
 }
 
-ParticleFrameSnapshot EffectScene::advance(const EffectAdvanceRequest &request) {
-	advance_simulation(request);
-	ParticleFrameSnapshot snapshot;
-	write_snapshot(snapshot);
-	return snapshot;
-}
-
 EffectLiveCounts EffectScene::live_counts() const noexcept {
 	EffectLiveCounts counts;
 	counts.group_count = impl_->active_group_slots.size();

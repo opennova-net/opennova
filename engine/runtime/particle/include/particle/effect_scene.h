@@ -338,8 +338,6 @@ public:
 	// Rewrites a retained snapshot in deterministic spawn order, reusing its
 	// vector capacities across frames.
 	void write_snapshot(ParticleFrameSnapshot &snapshot) const;
-	// Compatibility wrapper for callers that consume every requested frame.
-	ParticleFrameSnapshot advance(const EffectAdvanceRequest &request);
 	// Scalar counts never materialize render values or walk individual particles.
 	EffectLiveCounts live_counts() const noexcept;
 	// include_bounds=false is the UI/debug hot path: it retains topology and

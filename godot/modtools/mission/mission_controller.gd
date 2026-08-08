@@ -753,11 +753,6 @@ func get_mode() -> int:
 	return _mode
 
 
-# Backward-compatible wrapper: waypoints mode is Mode.WAYPOINTS, otherwise Mode.OBJECTS.
-func set_waypoint_mode(enabled: bool) -> void:
-	set_mode(Mode.WAYPOINTS if enabled else Mode.OBJECTS)
-
-
 func is_waypoint_mode() -> bool:
 	return _mode == Mode.WAYPOINTS
 

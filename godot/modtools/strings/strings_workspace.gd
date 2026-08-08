@@ -88,7 +88,7 @@ func deactivate() -> void:
 func _restore_state() -> void:
 	# Reopen the last session's tabs once per session, and only while the
 	# workspace is still pristine (one tab, no path, no edits) so it never
-	# clobbers user work. Falls back to the pre-tabs `last_path` key.
+	# clobbers user work.
 	if _state_restored:
 		return
 	_state_restored = true
@@ -99,10 +99,6 @@ func _restore_state() -> void:
 	if cfg.load(STATE_PATH) != OK:
 		return
 	var paths: PackedStringArray = cfg.get_value("session", "open_paths", PackedStringArray())
-	if paths.is_empty():
-		var last: String = cfg.get_value("session", "last_path", "")
-		if not last.is_empty():
-			paths.append(last)
 	for path in paths:
 		if not path.is_empty() and FileAccess.file_exists(path):
 			open_file(path)
@@ -116,8 +112,6 @@ func _save_state() -> void:
 		return
 	var cfg := ConfigFile.new()
 	cfg.load(STATE_PATH)  # keep unrelated values if the file exists
-	# last_path stays for back-compat with pre-tab session files.
-	cfg.set_value("session", "last_path", strings_editor.current_path)
 	var open := _tabs.open_paths()
 	cfg.set_value("session", "open_paths", open)
 	# active_index is stored in open_paths space: pathless (Untitled) tabs are
