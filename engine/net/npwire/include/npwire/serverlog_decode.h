@@ -13,7 +13,9 @@
 // docs/net/novaworld-net-re.md §5.22; the field tables there are authoritative.
 //
 // On-disk chunk = [char[4] tag][u16 length][u16 pad][payload]; `length` is the
-// TOTAL chunk size incl. the 8-byte header. Tags are the reversed mnemonic
+// TOTAL chunk size incl. the 8-byte header (the container walk itself lives in
+// engine/formats/sph; this decoder owns the payload records). Tags are the
+// reversed mnemonic
 // (the engine writes a u32 multichar constant little-endian, or strcpy's the
 // already-reversed literal):
 //   on-disk  mnemonic  writer [orig]

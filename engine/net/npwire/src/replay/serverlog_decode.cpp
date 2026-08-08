@@ -2,6 +2,8 @@
 
 #include "../wire_cursor.h"
 
+#include <sph/sph.h>
+
 #include <cstring>
 
 // `/PROFILE` .sph server-log decoder — see docs/net/novaworld-net-re.md §5.22.
@@ -29,20 +31,18 @@ bool decode_server_log(const uint8_t *data, size_t len, ServerLogDocument &out) 
 	if (!data) { return false; }
 
 	size_t off = 0;
-	while (off + 8 <= len) {
-		const uint8_t *tag = data + off;
-		// Length is the u16 at +4 (the high two header bytes are always zero —
-		// the byte-trick writers strcpy only the low byte, the rest stays from
-		// the zero-initialised buffer). It is the TOTAL chunk size incl header.
-		uint16_t clen = uint16_t(data[off + 4]) | uint16_t(data[off + 5]) << 8;
-		if (clen < 8 || off + clen > len) {
+	for (;;) {
+		// The container walk is format knowledge (engine/formats/sph); this
+		// decoder owns only the per-record payload interpretation.
+		sph::Chunk chunk;
+		const sph::WalkResult walked = sph::next_chunk(data, len, off, chunk);
+		if (walked == sph::WalkResult::kEndOfData) break;
+		if (walked == sph::WalkResult::kMalformed) {
 			out.leftover_bytes = len - off;
 			return false;
 		}
-
-		const uint8_t *pl = data + off + 8;
-		size_t pllen = size_t(clen) - 8;
-		Cursor c{pl, pl + pllen, true};
+		const uint8_t *tag = chunk.tag;
+		Cursor c{chunk.payload, chunk.payload + chunk.payload_len, true};
 
 		if (tag_is(tag, "NGEB")) {                 // BEGN — header
 			out.version = c.u32();
@@ -95,12 +95,12 @@ bool decode_server_log(const uint8_t *data, size_t len, ServerLogDocument &out) 
 			++out.cdat_count;                      // body not modelled yet
 		} else if (tag_is(tag, "DNE.")) {          // .END
 			out.ended_clean = true;
-			off += clen;
+			off += chunk.total_len;
 			break;
 		}
 		// Unknown tags are skipped by their length (forward-compatible).
 
-		off += clen;
+		off += chunk.total_len;
 	}
 
 	out.leftover_bytes = len - off;

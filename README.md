@@ -144,6 +144,7 @@ Modular libraries for the NovaLogic formats and runtime systems. The format pars
 | **sbf** | `.sbf` | Sound-buffer banks: the sample banks behind interactive music. |
 | **mus** | `.bin` | Interactive-music scripts (SCR0/MU01): parser, compiler, and VM. |
 | **scr** | | SCR decryption (multiple keys for different game editions). |
+| **sph** | `.sph` | The `/PROFILE` server-log FOURCC chunk container (payload records decode in the net stack). |
 | **bfc1** | | BFC1 decompression (zlib-based). |
 
 ### Engine runtime
