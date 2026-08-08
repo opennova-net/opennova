@@ -49,6 +49,10 @@ void NovaAmbientMixer::_bind_methods() {
 					"vol_byte", "member_vol", "clamp_vol"),
 			&NovaAmbientMixer::emitter_layer_volume);
 	ClassDB::bind_static_method("NovaAmbientMixer",
+			D_METHOD("oneshot_layer_volume", "dist_q16", "min_q16",
+					"falloff_q16", "member_vol", "clamp_vol"),
+			&NovaAmbientMixer::oneshot_layer_volume);
+	ClassDB::bind_static_method("NovaAmbientMixer",
 			D_METHOD("crossfade_volume_byte", "blend"),
 			&NovaAmbientMixer::crossfade_volume_byte);
 	ClassDB::bind_static_method("NovaAmbientMixer",
@@ -217,6 +221,12 @@ int NovaAmbientMixer::calc_distance_volume(int64_t dist_q16, int64_t radius_q16,
 int NovaAmbientMixer::emitter_layer_volume(int64_t dist_q16, int falloff_u,
 		int min_u, int vol_byte, int member_vol, int clamp_vol) {
 	return opennova::audio::emitter_layer_volume(dist_q16, falloff_u, min_u, vol_byte,
+			member_vol, clamp_vol);
+}
+
+int NovaAmbientMixer::oneshot_layer_volume(int64_t dist_q16, int64_t min_q16,
+		int64_t falloff_q16, int member_vol, int clamp_vol) {
+	return opennova::audio::oneshot_layer_volume(dist_q16, min_q16, falloff_q16,
 			member_vol, clamp_vol);
 }
 

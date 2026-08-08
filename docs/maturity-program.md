@@ -82,6 +82,7 @@ Landed slices (hash per slice, newest first):
 
 | Slice | Commit | Note |
 |---|---|---|
+| Push-down residue: the sub-weapon walk | (this PR) | **`abi_export_identity` baseline 107 → 108:** `def_subclass_weapon_index` joins the PLAYER_INFO family (the round-type walk behind `*_AMMO2` `[orig: @ 0x55def0 / @ 0x55e8b0 / @ 0x55f1f0]`), exported under the def lib's flat-C convention |
 | Loadout-menu policy push-down (S19) | (this PR) | **`abi_export_identity` baseline 106 → 107:** `def_extra_ammo_weight` joins the PLAYER_INFO/armory weight family beside `def_loadout_weight` (the category-3 extra-ammo term `[orig: @ 0x5655c9..0x56561c]`), exported under the def lib's flat-C convention |
 | Local-player TU split (S6a, ADR 0028 trunk) | (trunk PR) | **Banked `oversize_cpp_files` 2 → 1**: `nova_simulation_player.cpp` (3,150) split into the core + `_view`/`_weapon`/`_loadout` TUs (max 1,322 lines) — a pure move; the residual floor member is `http_listener.cpp` |
 | engine/ directory move (ADR 0028) | (trunk PR) | **Ratchet keys renamed, values carried verbatim:** `libs_uncited_src_files` → `engine_uncited_src_files` (50), `libs_stdout_prints` → `engine_stdout_prints` (0), `citation_allowlist_libs` → `citation_allowlist_engine` in `maturity_baseline.json`; `ratchet_counts.py` walkers re-rooted from `libs/` to the grouped `engine/<group>/<lib>` layout. No counter values changed |

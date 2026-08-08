@@ -1562,6 +1562,9 @@ public:
 	static String infantry_anim_key(int p_state);
 	// The adjacent retail transition-arbitration flags table (off_8139E8).
 	static int64_t infantry_anim_flags(int p_state);
+	// The queue gate over two of those flag words (world/infantry.h) — the one
+	// rule the netsim record fold and the presenter body FSM both apply.
+	static bool remote_body_state_defers(int64_t p_current_flags, int64_t p_next_flags);
 
 	// Entity query. The (kind, index) pair lets the shell map a sim entity back to
 	// its promoted mission record and already-rendered node.

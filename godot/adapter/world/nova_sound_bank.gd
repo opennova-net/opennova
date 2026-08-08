@@ -371,25 +371,18 @@ static func emitter_layer_volume(dist_q16: int, falloff_u: int, min_u: int, vol_
 			dist_q16, falloff_u, min_u, vol_byte, member_vol, clamp_vol)
 
 
-## One-shot volume at fire time [orig: SoundBank_PlayTriggerEntries @ 0x75cf14..
-## 0x75cf8b]: the proximity stage ((d/min)^2, only under min_distance) feeds the
-## falloff stage ((1 - d/falloff)^2, NOT rebased — the one-shot path differs
-## from the emitter path here). A layer with NO falloff radius plays at the RAW
-## emitter volume — member volume is not consulted, and a min-only layer's
-## proximity result is discarded with it [orig: @ 0x75cf88 the no-falloff branch
-## stores emitter_info[2]]. Reimpl emitter volume is full (255): the engine's
-## fire-time (vol * g_SoundVolumeOption) >> 8 folds the options slider we map to
-## bus volume (docs/audio/lwf-dbf-sound-re.md D-SND-8).
+## One-shot volume at fire time — the native two-stage composition
+## (engine/runtime/audio oneshot_layer_volume [orig: SoundBank_PlayTriggerEntries
+## @ 0x75cf14..0x75cf8b]: proximity feeds falloff un-rebased; a layer with no
+## falloff radius plays at the raw emitter volume). Reimpl emitter volume is
+## full (255): the engine's fire-time (vol * g_SoundVolumeOption) >> 8 folds the
+## options slider we map to bus volume (docs/audio/lwf-dbf-sound-re.md D-SND-8).
 func oneshot_distance_volume(dist_q16: int, layer_d: Dictionary, member: Dictionary) -> int:
-	var vol := int(member.get("volume", 255))
-	var clamp_vol := int(member.get("clamp_volume", 255))
-	var min_q16 := int(layer_d.get("min_distance", 0)) << 16
-	var falloff_q16 := int(layer_d.get("falloff_radius", 0)) << 16
-	if falloff_q16 <= 0:
-		return 255
-	if min_q16 > 0 and dist_q16 < min_q16:
-		vol = calc_distance_volume(min_q16 - dist_q16, min_q16, vol, clamp_vol)
-	return calc_distance_volume(dist_q16, falloff_q16, vol, clamp_vol)
+	return NovaAmbientMixer.oneshot_layer_volume(dist_q16,
+			int(layer_d.get("min_distance", 0)) << 16,
+			int(layer_d.get("falloff_radius", 0)) << 16,
+			int(member.get("volume", 255)),
+			int(member.get("clamp_volume", 255)))
 
 
 # Frame count of a decoded stream, exact from the byte size (get_length() *

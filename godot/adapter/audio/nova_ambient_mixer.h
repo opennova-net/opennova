@@ -76,6 +76,8 @@ public:
 	// map); statics so nova_sound_bank.gd's pinned seams delegate here.
 	static int calc_distance_volume(int64_t dist_q16, int64_t radius_q16, int vol255,
 			int clamp_vol);
+	static int oneshot_layer_volume(int64_t dist_q16, int64_t min_q16,
+			int64_t falloff_q16, int member_vol, int clamp_vol);
 	static int emitter_layer_volume(int64_t dist_q16, int falloff_u, int min_u,
 			int vol_byte, int member_vol, int clamp_vol);
 	static int crossfade_volume_byte(float blend);

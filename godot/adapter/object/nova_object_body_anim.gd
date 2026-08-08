@@ -279,8 +279,10 @@ func apply_remote_body_state(state_id: int, key: String, flags: int,
 	if state_id == _m._remote_state:
 		_clear_remote_body_pending()
 		return remote_body_needs_fixed_tick()
-	if ((_m._remote_flags & 0x4) != 0
-			or ((_m._remote_flags & 0x20) != 0 and (flags & 0x1) == 0)):
+	# The queue gate is the shared native rule (world/infantry.h
+	# remote_body_state_defers, [orig: @0x4c1169..0x4c1190 / @0x4c060a..
+	# 0x4c0633]) — the same predicate the netsim record fold applies.
+	if NovaSimulation.remote_body_state_defers(_m._remote_flags, flags):
 		_queue_remote_body_state(state_id, key, flags)
 		return remote_body_needs_fixed_tick()
 	_accept_remote_body_state(state_id, key, flags, phase_ticks)
@@ -312,13 +314,17 @@ func _queue_remote_body_state(state_id: int, key: String, flags: int) -> void:
 	_m._remote_pending_state = state_id
 	_m._remote_pending_key = key
 	_m._remote_pending_flags = flags
+	# Completion-boundary arming: the seconds-domain sibling of netsim's
+	# tick-domain arm (client_replica_pipeline.cpp pending-boundary leg) —
+	# same three cases, units differ because this FSM owns clip TIME.
 	var length: float = _m._skeletal.get_clip_length(_m._anim_key, _m._anim_variant)
 	if length <= 0.0:
 		# A hold clip whose length cannot resolve completes IMMEDIATELY — an INF
 		# deadline here wedged the remote body-state machine forever (every later
 		# stance/anim request queued behind it), freezing the remote player's pose
 		# for the rest of the session. Retail's hold ends with the animation; a
-		# zero-length animation is already over.
+		# zero-length animation is already over (the netsim sibling records this
+		# as the D-NET-209 hold-wedge safety).
 		_m._remote_pending_end_time = 0.0
 	elif _m._skeletal.is_clip_looping(_m._anim_key, _m._anim_variant):
 		_m._remote_pending_end_time = (floorf(_m._anim_time / length) + 1.0) * length

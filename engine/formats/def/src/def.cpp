@@ -160,3 +160,28 @@ DEF_EXPORT DefEncumbrance def_encumbrance_class(double weight) {
     if (weight >= 33.3) return DEF_ENCUMBRANCE_NORMAL;
     return DEF_ENCUMBRANCE_LIGHT;
 }
+
+static int round_type_ieq(const char *a, const char *b) {
+    while (*a && *b) {
+        if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) return 0;
+        ++a; ++b;
+    }
+    return *a == *b;
+}
+
+DEF_EXPORT int def_subclass_weapon_index(const DefWeaponDef *weapons, size_t n,
+                                         size_t parent_index) {
+    /* [orig: the stricmp walk over entry+192.. @ 0x55def0 / @ 0x55e8b0 /
+       @ 0x55f1f0]: same-round entries expand the parent's ammo rows; the
+       first DIFFERING round_type inside the loadout_subclasses window is the
+       sub-weapon. */
+    if (!weapons || parent_index >= n) return -1;
+    const DefWeaponDef *parent = &weapons[parent_index];
+    for (int k = 1; k <= parent->loadout_subclasses; ++k) {
+        const size_t cand = parent_index + (size_t)k;
+        if (cand >= n) return -1;
+        if (round_type_ieq(weapons[cand].round_type, parent->round_type)) continue;
+        return (int)cand;
+    }
+    return -1;
+}

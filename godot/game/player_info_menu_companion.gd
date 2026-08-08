@@ -304,23 +304,14 @@ func _populate_slot_ammo(control: String) -> void:
 			ammo2.select_silent(NovaWeaponDatabase.default_clip_row(saved2, sub_max) - 1)
 
 
-# The sub-weapon behind *_AMMO2: walk the parent's following table entries, bounded
-# by loadout_subclasses, skipping entries whose round_type equals the parent's; the
-# first DIFFERING entry is the sub-weapon (satchel -> detonator)
-# [orig: the stricmp walk over entry+192.. in @ 0x55def0 / @ 0x55e8b0 / @ 0x55f1f0].
+# The sub-weapon behind *_AMMO2 — the native def-table walk
+# (engine/formats/def def_subclass_weapon_index
+# [orig: the stricmp walk over entry+192.. in @ 0x55def0 / @ 0x55e8b0 / @ 0x55f1f0]).
 func _subclass_weapon(parent: Dictionary) -> Dictionary:
 	if parent.is_empty() or _weapons == null:
 		return {}
-	var parent_index := int(parent.get("index", -1))
-	var parent_round := String(parent.get("round_type", ""))
-	var subclasses := int(parent.get("loadout_subclasses", 0))
-	for k in range(1, subclasses + 1):
-		var cand := _weapons.get_weapon(parent_index + k)
-		if cand.is_empty():
-			return {}
-		if String(cand.get("round_type", "")).nocasecmp_to(parent_round) != 0:
-			return cand
-	return {}
+	var index := int(_weapons.subclass_weapon_index(int(parent.get("index", -1))))
+	return _weapons.get_weapon(index) if index >= 0 else {}
 
 
 # The first three selectable class-3 defs passing the class+team masks own
