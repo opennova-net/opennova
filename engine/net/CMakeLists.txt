@@ -80,6 +80,7 @@ add_library(opennova_net STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/src/server_initial_state.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/src/server_tick.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/src/client_runtime.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/src/client_replica_present_projection.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/src/joiner_world_bridge.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/src/host_session.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/src/lan_discovery.cpp
