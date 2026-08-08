@@ -12,15 +12,15 @@ extends RefCounted
 ## SoundEmitter_UpdateAndMixTop8 @ 0x5284a0]. Also exposes the PlayWavList
 ## action seam and the music/reverb bed.
 ##
-## Bank chain vs the original: Game_StartMission loads six global slots in order
-## [<exp>L.lwf, <exp>.lwf, gamelocl.lwf, game.lwf, game3.lwf, game2.lwf] (name
-## table @ 0x82A5B0, loop @ 0x525448; expansion names filled by
+## Bank chain vs the original: Game_StartMission walks six global name slots in
+## order [<exp>L.lwf, <exp>.lwf, gamelocl.lwf, game.lwf, game3.lwf, game2.lwf]
+## (name table @ 0x82A5B0, walk @ 0x525443; expansion slots filled by
 ## Expansion_LoadAssets @ 0x4a495e), and the mission co-named .lwf is loaded
 ## separately as the DIALOG bank (DialogManager_LoadFromFile @ 0x44e7d4, only
 ## when the .dbf exists, with a .pwf fallback). We load one merged chain with
-## the co-named bank first (it carries the dialog voices) then the globals in
-## the engine's slot order; expansion banks are not loaded yet (no expansion
-## name is plumbed into the world — reimpl follow-up).
+## the co-named bank first (it carries the dialog voices) then the global
+## slots in the engine's order — the slot table lives in engine/runtime/audio
+## (audio/bank_chain.h, via NovaAmbientMixer.global_bank_chain).
 
 const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
 
@@ -39,11 +39,6 @@ class TimeOfDayRegion extends RefCounted:
 const AMBIENT_BUS := &"Ambient"
 const SFX_BUS := &"SFX"
 const VOICE_BUS := &"Voice"
-# Global banks in the engine's slot/search order [orig: @ 0x82A5B0 table]:
-# gamelocl.LWF (localized voice) before game.lwf (ambient loops / SFX, LPNV_*),
-# then the optional game3/game2 overflow banks (absent in JO base assets).
-const GLOBAL_LWFS: PackedStringArray = ["gamelocl.LWF", "game.lwf", "game3.lwf", "game2.lwf"]
-
 # Marker -> sound set resolution strategy. The faithful default is the marker
 # item's items.def soundloop_1..7 set names (e.g. id 106178 "snd: Lp Flourescent
 # Light" -> soundloop_1 LPNV_LIGHT) [orig: ItemDef_ParseProperty @ 0x49fec4];
@@ -167,16 +162,16 @@ func setup(mission, mission_name: String, container: Node3D) -> Dictionary:
 	_bank = NovaSoundBank.new(_resource_root)
 	_bank.occlusion_provider = _simulation
 	_load_bank(mission_name.get_file().get_basename() + ".LWF")
-	# Expansion bank slots 0/1 ahead of the static banks, engine slot order
-	# [orig: Expansion_LoadAssets @ 0x4a4989 (<exp>L.lwf) / @ 0x4a495e
-	# (<exp>.lwf); slot table @ 0x82A5B0]. Missing files skip like retail's
+	# The global slots in the engine's order — expansion pair (when one is
+	# mounted) ahead of the statics [orig: slot table @ 0x82A5B0, walk
+	# @ 0x525443; expansion fill @ 0x4a4989 / @ 0x4a495e]. The witnessed table
+	# lives native (audio/bank_chain.h); missing files skip like retail's
 	# SoundBank_LoadIfExists (D-SND-2 closed).
+	var exp_name := ""
 	if _resource_root.has_method("get_expansion"):
-		var exp_name: String = _resource_root.get_expansion()
-		if exp_name != "":
-			_load_bank(exp_name + "L.lwf")
-			_load_bank(exp_name + ".lwf")
-	for global_name in GLOBAL_LWFS:
+		exp_name = String(_resource_root.get_expansion())
+	var global_chain: PackedStringArray = NovaAmbientMixer.global_bank_chain(exp_name)
+	for global_name in global_chain:
 		_load_bank(global_name)
 
 	# The mission's co-named .DBF maps a PlayWavList dialog id (dlg001) to the LWF
@@ -265,8 +260,8 @@ func setup(mission, mission_name: String, container: Node3D) -> Dictionary:
 	# Silence here has historically gone unnoticed (a bare stats print) — warn on
 	# the two states that mean "no ambience will play" so they surface in logs.
 	if int(_stats.banks_loaded) == 0:
-		push_warning("NovaMissionAudio: no sound banks loaded (probed %s.LWF, expansion, %s) — mission ambience will be silent" % [
-			mission_name.get_file().get_basename(), ", ".join(GLOBAL_LWFS)])
+		push_warning("NovaMissionAudio: no sound banks loaded (probed %s.LWF, %s) — mission ambience will be silent" % [
+			mission_name.get_file().get_basename(), ", ".join(global_chain)])
 	elif int(_stats.markers_total) > 0 and int(_stats.markers_resolved) == 0:
 		push_warning("NovaMissionAudio: 0/%d sound markers resolved (item db %s) — mission ambience will be silent" % [
 			int(_stats.markers_total),

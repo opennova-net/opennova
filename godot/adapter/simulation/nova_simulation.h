@@ -895,7 +895,7 @@ public:
 	// ERR_CANT_OPEN (mission missing / load failed; the sequence aborted).
 	int64_t boot_mission(const Ref<NovaMissionData> &p_mission,
 			const Ref<NovaResourceRoot> &p_resource_root,
-			const Ref<NovaItemDatabase> &p_item_db, Object *p_placer,
+			const Ref<NovaItemDatabase> &p_item_db,
 			const Ref<NovaTerrainData> &p_terrain,
 			const PackedByteArray &p_terrain_til, const String &p_wac_basename,
 			const String &p_infantry_adm, const String &p_mission_file_basename,
@@ -1667,17 +1667,12 @@ public:
 	// hurt/CA/BB triggers, and CL contact-frame extraction (climb locomotion remains
 	// unported) [orig: collision resolver @0x4b2bd0 + the query set;
 	// docs/world/world-wac-ai-re.md §15; D-INF-3].
-	// p_placer duck-types MissionObjectPlacer (object_data_for(graphic)). Returns the
-	// instance count. Also attaches the render-occlusion portal models (buildings
-	// whose graphic carries OVRT/OPLN/OFAC/OOBJ records) with their def bits.
-	// Idempotent per load.
-	// With an asset root installed (set_asset_root — the production path), model
-	// extraction reads the sim's own SimModelCache (ADR 0028); the placer then
-	// supplies only the render-side pose sources (live-PANM data + skeletal
-	// sets — the S3 push-down target). Without one, the legacy placer
-	// extraction runs (the GUT stub seam, deleted with S3).
-	int resolve_collision_instances(const Ref<class NovaItemDatabase> &p_item_db,
-	                                Object *p_placer);
+	// Returns the instance count. Also attaches the render-occlusion portal
+	// models (buildings whose graphic carries OVRT/OPLN/OFAC/OOBJ records)
+	// with their def bits. Idempotent per load. Model extraction reads the
+	// sim's own SimModelCache through the installed asset root
+	// (set_asset_root; ADR 0028) — a rootless sim attaches nothing.
+	int resolve_collision_instances(const Ref<class NovaItemDatabase> &p_item_db);
 	// Install the mounted root the SIMULATION resolves assets through — the
 	// engine-side mirror of the render mount. Pins the root's index for the
 	// sim-model cache (ADR 0028).

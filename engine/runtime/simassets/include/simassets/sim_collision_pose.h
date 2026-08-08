@@ -108,22 +108,6 @@ public:
 			const world::CollisionModel &model,
 			std::vector<world::CollisionMatrix> &out) override;
 
-	// The posed held-weapon muzzle for a registered skeletal PERSON — the
-	// sim-parse twin of the shell's rigid-weapon-draw anchor: the R-hand
-	// attach frame (bone 16 pose + the witnessed calibrations above) composed
-	// on the overlay body placement, then `weapon_model`'s named userpoint
-	// carried by it, in mission units. Applies the same draw gates as the
-	// held-weapon snapshot writer (dead / non-OnFoot / adm 0 report no
-	// weapon); false means unresolvable — the presenting shell keeps its own
-	// anchor chain (retail's deepest fallback is the entity origin).
-	// [orig: the receive-arm effect anchor Entity_ComputeActionTransform
-	//  @ 0x401310 (entity-origin fallback @ 0x401877..0x401887) over the
-	//  weapon draw frame @ 0x4b2180..0x4b22f8]
-	bool resolve_held_weapon_muzzle(world::World &world,
-			world::EntityHandle entity, uint8_t equipped_adm_index,
-			const Threedi3di3 &weapon_model, const char *userpoint_name,
-			world::Vec3 &out_mission) const;
-
 private:
 	struct SkeletalSource {
 		int32_t model_id = -1;
@@ -131,9 +115,9 @@ private:
 		std::shared_ptr<const AdmSkeletalClips> rig;
 	};
 
-	// The shared clip/blend/overlay/weapon-channel pose evaluation both the
-	// collision build and the muzzle resolution run (the @0x4b1290 chain up to
-	// the per-section composition). r_pose holds parent-relative locals.
+	// The shared clip/blend/overlay/weapon-channel pose evaluation the
+	// collision build runs (the @0x4b1290 chain up to the per-section
+	// composition). r_pose holds parent-relative locals.
 	bool eval_entity_pose(world::World &world, const SkeletalSource &source,
 			world::EntityHandle entity, std::vector<anim::PoseBone> &r_pose,
 			anim::AimOverlayAngles *r_angles, anim::AimOverlayInputs &r_inputs,

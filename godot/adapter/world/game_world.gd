@@ -1389,6 +1389,7 @@ func get_runtime_perf_counters() -> Dictionary:
 		"runtime": _runtime.get_perf_counters() if _runtime != null and _runtime.has_method("get_perf_counters") else {},
 		"foliage": _dispatcher.get_frame_stats() if _dispatcher != null else {},
 		"audio": _mission_audio.get_perf_counters() if _mission_audio != null else {},
+		"fire": get_fire_present_stats(),
 	}
 
 
@@ -1492,7 +1493,7 @@ func _prewarm_loaded_model_challenge_definitions() -> void:
 				challenge_sim.install_seat_specs_for_type_ids(
 						item_db, wire_type_ids)
 				challenge_sim.resolve_item_traits(item_db)
-				challenge_sim.resolve_collision_instances(item_db, _placer)
+				challenge_sim.resolve_collision_instances(item_db)
 				challenge_sim.occlusion_init_mission()
 	var player_visual_item_id := int(_placer.resolve_player_visual_item_id(0x14B9))
 	var avatar_graphic := String(_placer.graphic_for(player_visual_item_id))

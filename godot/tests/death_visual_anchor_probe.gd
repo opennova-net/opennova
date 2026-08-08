@@ -205,10 +205,9 @@ func _run() -> void:
 	sim.resolve_infantry_adm_ids(res_root, item_db)
 	sim.resolve_item_traits(item_db)
 	# S3b native-only: collision extraction and the posed hitbox sections read
-	# the sim's own asset root; a rootless sim attaches nothing (the placer
-	# argument is accepted but no longer a model source).
+	# the sim's own asset root; a rootless sim attaches nothing.
 	sim.set_asset_root(res_root)
-	sim.resolve_collision_instances(item_db, placer)
+	sim.resolve_collision_instances(item_db)
 	if sim.load_ammo_table(res_root, "ammo.def") != OK:
 		_fail("ammo.def did not load")
 		return

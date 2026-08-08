@@ -3,8 +3,10 @@
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
+#include "audio/bank_chain.h"
 #include "simulation/nova_simulation.h"
 
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -53,6 +55,18 @@ void NovaAmbientMixer::_bind_methods() {
 	ClassDB::bind_static_method("NovaAmbientMixer",
 			D_METHOD("time_of_day_region", "hours"),
 			&NovaAmbientMixer::time_of_day_region);
+	ClassDB::bind_static_method("NovaAmbientMixer",
+			D_METHOD("global_bank_chain", "expansion_name"),
+			&NovaAmbientMixer::global_bank_chain);
+}
+
+PackedStringArray NovaAmbientMixer::global_bank_chain(
+		const String &expansion_name) {
+	PackedStringArray out;
+	for (const std::string &name : opennova::audio::global_bank_chain(
+			std::string(expansion_name.utf8().get_data())))
+		out.append(String(name.c_str()));
+	return out;
 }
 
 void NovaAmbientMixer::clear() {

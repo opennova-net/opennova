@@ -1,5 +1,6 @@
 add_library(opennova_audio STATIC
     src/ambient_mixer.cpp
+    src/bank_chain.cpp
     src/envs_markers.cpp
     src/sound_selector.cpp
     src/sound_profile.cpp

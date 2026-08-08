@@ -5,6 +5,7 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
+#include <godot_cpp/variant/packed_string_array.hpp>
 
 #include "audio/ambient_mixer.h"
 
@@ -84,6 +85,11 @@ public:
 	static int crossfade_volume_byte(float blend);
 	// { "region": int, "adjacent": int, "blend": float }
 	static Dictionary time_of_day_region(float hours);
+	// The global sound-bank load chain in the engine's slot order
+	// (audio/bank_chain.h): the expansion pair when one is active, then the
+	// four static banks. The shell iterates this instead of re-minting the
+	// witnessed table.
+	static PackedStringArray global_bank_chain(const String &expansion_name);
 
 private:
 	PackedFloat32Array mix_rows(const Vector3 &listener, bool include_pitch);

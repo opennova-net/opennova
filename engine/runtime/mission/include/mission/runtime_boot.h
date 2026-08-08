@@ -70,7 +70,6 @@ struct BootParams {
 	bool playable = false; // spawn the host's own player after load
 	bool has_resource_root = false;
 	bool has_item_db = false;
-	bool has_placer = false;
 	bool has_terrain = false;
 	bool has_terrain_til = false;
 	bool has_wac = false; // a wac basename was authored
@@ -115,14 +114,14 @@ struct BootSteps {
 	// table (D-NET-97; §5.10b).
 	std::function<void()> resolve_item_traits; // item_db
 	// The sim's own .3di source (ADR 0028) for the collision resolve below.
-	std::function<void()> install_asset_root; // item_db && placer && root
+	std::function<void()> install_asset_root; // item_db && root
 	// World-object collision instances (BVOL/BPLN) [orig: the movement
 	// collision resolver @0x4b2bd0 + the query set; §15].
-	std::function<void()> resolve_collision; // item_db && placer
+	std::function<void()> resolve_collision; // item_db
 	// Mission-start portal init over the occlusion models just attached.
 	// [orig: Terrain_InitBuildingPortals @ 0x5c7480 from Game_StartMission
 	//  @ 0x525e11]
-	std::function<void()> occlusion_init; // item_db && placer
+	std::function<void()> occlusion_init; // item_db
 	// Armory table (weapon.def) — the 0x5A ammo resolve + 0x2F filter source;
 	// the stashed mission loadout/availability chunks promote INSIDE it
 	// through the witnessed SP-vs-net gate (S7b) [orig: Mission_LoadBMSFile
