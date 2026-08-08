@@ -2,7 +2,7 @@
 // pose cache, the packed present snapshots (AI pool + client replicas), HUD views,
 // and the drains (effects, fire, destruction, round impacts, tracers).
 #include "simulation/nova_simulation_internal.h"
-#include "simulation/client_replica_present_projection.h"
+#include <npruntime/client_replica_present_projection.h> // the canonical decoded-client projection (ADR 0031)
 
 #include <cstring>
 #include <vector>
@@ -1144,14 +1144,14 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_replicas() const
 			local_player->mounted &&
 			local_player->mount_type == opennova::world::SeatType::Gunner;
 	const int count = static_cast<int>(cs.entities.size());
-	const ClientReplicaPresentContext replica_present_context{
+	const opennova::np::ClientReplicaPresentContext replica_present_context{
 			&item_seat_specs_, &world_->weapons, joiner_};
 	out.resize(static_cast<int64_t>(count) * PF_STRIDE);
 	float *w = out.ptrw();
 	for (int i = 0; i < count; ++i) {
 		float *r = w + static_cast<int64_t>(i) * PF_STRIDE;
 		const opennova::netsim::ClientEntityState &es = cs.entities[i];
-		initialize_client_replica_present_row(r);
+		opennova::np::initialize_client_replica_present_row(r);
 
 		// Self-filter (joiner): the host SNAPs our own entity (wire handle H) and streams
 		// it back in 0x0A; we draw our local player L via LocalPlayerPresenter, so drop the wire
@@ -1164,7 +1164,7 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_replicas() const
 		// The canonical decoded-client projection owns wire identity, pose,
 		// lifecycle, and remote Person appearance for every role. The remainder
 		// of this method is role/world enrichment only.
-		project_client_replica_present_row(
+		opennova::np::project_client_replica_present_row(
 				r, es, cs, replica_present_context);
 
 		// On the HOST listen server, kind/index/bms_id/net_id resolve from the authored

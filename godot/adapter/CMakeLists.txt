@@ -73,7 +73,6 @@ add_library(${TARGET_NAME} SHARED
     object/nova_skeletal_anim.cpp
     hud/nova_hud_pos.cpp
     mission/nova_mission_data.cpp
-    simulation/client_replica_present_projection.cpp
     simulation/nova_present_applier.cpp
     simulation/nova_present_applier_wire.cpp
     simulation/nova_simulation.cpp
