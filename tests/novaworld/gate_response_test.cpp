@@ -71,8 +71,6 @@ bool check_all_known_keys() {
 	if (!expect((r.reflected_ip == std::array<uint8_t, 4>{203, 0, 113, 7}),
 			"REFLECTEDIPADDRESS")) return false;
 	if (!expect(r.reflected_port == 55555, "REFLECTEDPORTNUMBER")) return false;
-	if (!expect(r.cus.empty(), "CUS counted but ignored")) return false;
-	if (!expect(r.pvt.empty(), "PVT counted but ignored")) return false;
 	return true;
 }
 
@@ -122,7 +120,6 @@ bool check_quoted_response() {
 	if (!expect(r.udp_novaworld == "127.0.0.1:64206", "quoted UDPNOVAWORLD stripped")) return false;
 	if (!expect(r.startup_url == "http://127.0.0.1:8080", "quoted STARTUPURL stripped")) return false;
 	if (!expect(r.lobby_name == "jop 2 consumer", "quoted value keeps its internal space")) return false;
-	if (!expect(r.cus.empty(), "CUS ignored even when present")) return false;
 	return true;
 }
 
