@@ -27,6 +27,8 @@
 #include "cbin/nova_credits_player.h"
 #include "fnt/nova_fnt_resource.h"
 #include "mns_stylesheet.h"
+
+#include <mnu/mnu_layout.h> // the witnessed widget-geometry solves
 #include "resource_index/nova_resource_root.h"
 #include "rtxt/rtxt_string_file.h"
 
@@ -396,10 +398,11 @@ bool has_frame(const mnu::Frame &frame) {
 // its modulate-2x fixed-function path - which maps to no tint here.
 
 Ref<Texture2D> frame_tile(const Ref<Texture2D> &stencil, int size, int col, int row) {
+	const mnu::FrameTileRect rect = mnu::frame_tile_rect(size, col, row);
 	Ref<AtlasTexture> tile;
 	tile.instantiate();
 	tile->set_atlas(stencil);
-	tile->set_region(Rect2(col * size, row * size, size, size));
+	tile->set_region(Rect2(rect.x, rect.y, rect.size, rect.size));
 	return tile;
 }
 
@@ -414,18 +417,17 @@ TextureRect *frame_piece(Control *parent, const String &name, const Ref<Texture2
 	return r;
 }
 
-// Anchor one border piece: the anchors pick which window edges it follows and
-// the offsets carry the element-local geometry from the original drawer.
-void frame_anchor(TextureRect *r, float ax0, float ax1, float ay0, float ay1,
-		float p_left, float p_top, float p_right, float p_bottom) {
-	r->set_anchor(SIDE_LEFT, ax0);
-	r->set_anchor(SIDE_RIGHT, ax1);
-	r->set_anchor(SIDE_TOP, ay0);
-	r->set_anchor(SIDE_BOTTOM, ay1);
-	r->set_offset(SIDE_LEFT, p_left);
-	r->set_offset(SIDE_TOP, p_top);
-	r->set_offset(SIDE_RIGHT, p_right);
-	r->set_offset(SIDE_BOTTOM, p_bottom);
+// Anchor one border piece from its native layout row (the anchors pick which
+// window edges it follows; the offsets carry the element-local geometry).
+void frame_anchor(TextureRect *r, const mnu::FrameBorderPiece &p) {
+	r->set_anchor(SIDE_LEFT, p.anchor_left);
+	r->set_anchor(SIDE_RIGHT, p.anchor_right);
+	r->set_anchor(SIDE_TOP, p.anchor_top);
+	r->set_anchor(SIDE_BOTTOM, p.anchor_bottom);
+	r->set_offset(SIDE_LEFT, p.off_left);
+	r->set_offset(SIDE_TOP, p.off_top);
+	r->set_offset(SIDE_RIGHT, p.off_right);
+	r->set_offset(SIDE_BOTTOM, p.off_bottom);
 }
 
 // Render a frame onto a container: the tiling brush fill + the 8-piece stencil
@@ -476,37 +478,21 @@ void add_frame(MnuBuildContext &ctx, Control *parent, const mnu::Frame &frame) {
 	}
 
 	if (stencil.is_valid()) {
-		// SIZE is the authored STENCIL attr; a canonical stencil is a 4x4 tile
-		// grid, so width/4 recovers the tile size when it is not authored.
-		int size = frame.has_stencil_size ? frame.stencil_size : 0;
-		if (size <= 0) {
-			size = (int)stencil->get_width() / 4;
-		}
+		// The tile size and the 8-piece placement solve natively
+		// (mnu_layout [orig: CUIElement_DrawFrame @ 0x64a210]); this pass only
+		// mints the AtlasTexture pieces and anchors the TextureRects.
+		const int size = mnu::frame_stencil_tile_size(
+				frame.has_stencil_size ? frame.stencil_size : 0,
+				(int)stencil->get_width());
 		if (size > 0) {
-			const float ix = (float)(frame.has_insetx ? frame.insetx : 0);
-			const float iy = (float)(frame.has_insety ? frame.insety : 0);
-			const float x0 = -(float)size + ix; // border overhangs the rect
-			const float y0 = -(float)size + iy; // [orig: left - SIZE + INSETX]
-			const float xr = -ix - 1.0f; // against the right edge (anchor 1)
-			const float yb = -iy - 1.0f; // against the bottom edge (anchor 1)
-
-			TextureRect *p = nullptr;
-			p = frame_piece(parent, "FrameTL", frame_tile(stencil, size, 0, 0));
-			frame_anchor(p, 0, 0, 0, 0, x0, y0, x0 + size, y0 + size);
-			p = frame_piece(parent, "FrameTop", frame_tile(stencil, size, 1, 0));
-			frame_anchor(p, 0, 1, 0, 0, x0 + size, y0, xr, y0 + size);
-			p = frame_piece(parent, "FrameTR", frame_tile(stencil, size, 2, 0));
-			frame_anchor(p, 1, 1, 0, 0, xr, y0, xr + size, y0 + size);
-			p = frame_piece(parent, "FrameLeft", frame_tile(stencil, size, 0, 1));
-			frame_anchor(p, 0, 0, 0, 1, x0, y0 + size, x0 + size, yb);
-			p = frame_piece(parent, "FrameRight", frame_tile(stencil, size, 2, 1));
-			frame_anchor(p, 1, 1, 0, 1, xr, y0 + size, xr + size, yb);
-			p = frame_piece(parent, "FrameBL", frame_tile(stencil, size, 0, 2));
-			frame_anchor(p, 0, 0, 1, 1, x0, yb, x0 + size, yb + size);
-			p = frame_piece(parent, "FrameBottom", frame_tile(stencil, size, 1, 2));
-			frame_anchor(p, 0, 1, 1, 1, x0 + size, yb, xr, yb + size);
-			p = frame_piece(parent, "FrameBR", frame_tile(stencil, size, 2, 2));
-			frame_anchor(p, 1, 1, 1, 1, xr, yb, xr + size, yb + size);
+			const auto layout = mnu::frame_border_layout(size,
+					frame.has_insetx ? frame.insetx : 0,
+					frame.has_insety ? frame.insety : 0);
+			for (const mnu::FrameBorderPiece &pc : layout) {
+				TextureRect *p = frame_piece(parent, pc.name,
+						frame_tile(stencil, size, pc.tile_col, pc.tile_row));
+				frame_anchor(p, pc);
+			}
 		}
 	}
 
@@ -597,27 +583,16 @@ void measure_appearance_extents(MnuBuildContext &ctx, const std::vector<mnu::App
 			continue;
 		}
 		r_max_w = MAX(r_max_w, (int)tex->get_width());
-		const int h = app.has_height && app.height > 0
-				? app.height
-				: (int)tex->get_height();
-		r_max_h = MAX(r_max_h, h);
+		r_max_h = MAX(r_max_h, mnu::appearance_extent_height(app.has_height,
+				app.height, (int)tex->get_height()));
 	}
 }
 
-// Widget families whose original parse ends in the text-extent rect adjustment
-// [orig: adjust_rect_to_text_size @ 0x6575f0, reached from the shared static/
-//  button text-widget parse @ 0x657c30 (a vtable init slot) and the edit
-//  override @ 0x661d10].
-bool is_text_sized(mnu::WindowType t) {
-	return t == mnu::WindowType::Static || t == mnu::WindowType::Label ||
-			t == mnu::WindowType::Button || t == mnu::WindowType::Radio ||
-			t == mnu::WindowType::CheckBox || t == mnu::WindowType::Edit ||
-			t == mnu::WindowType::Marquee;
-}
-
-// Faithful three-stage layout. The original has NO per-type default sizes and
-// no texture-derived sizing outside these fallbacks; the texture is stretched
-// INTO whatever rect results (UV 0..1) [orig: sub_647D40 @ 0x647d40].
+// Faithful three-stage layout — the solves live in mnu_layout (the original
+// has NO per-type default sizes and no texture-derived sizing outside these
+// fallbacks; the texture is stretched INTO whatever rect results, UV 0..1
+// [orig: sub_647D40 @ 0x647d40]). This pass measures (textures, fonts) and
+// writes the node rect.
 void apply_position(MnuBuildContext &ctx, Control *node, const mnu::Window &w,
 		const mnu::Font &font) {
 	node->set_anchor(SIDE_LEFT, 0);
@@ -625,35 +600,28 @@ void apply_position(MnuBuildContext &ctx, Control *node, const mnu::Window &w,
 	node->set_anchor(SIDE_RIGHT, 0);
 	node->set_anchor(SIDE_BOTTOM, 0);
 
-	// Stage 1: the authored POSITION rect. LEFT/TOP/RIGHT/BOTTOM are absolute
-	// parent-relative edges (ULX/ULY/WIDTH/HEIGHT aliases fold into the same
-	// fields at parse); missing edges read 0, like the original's zeroed
-	// element fields [orig: POSITION branch @ 0x648120].
-	int left = w.position.has_left ? w.position.left : 0;
-	int top = w.position.has_top ? w.position.top : 0;
-	int right = w.position.has_right ? w.position.right : 0;
-	int bottom = w.position.has_bottom ? w.position.bottom : 0;
-
-	// Stage 2: a degenerate axis (right<=left / bottom<=top) falls back to the
-	// largest appearance image [orig: parse tail right<=left -> left+max_w,
-	// bottom<=top -> top+max_h].
-	if (right <= left || bottom <= top) {
-		int max_w = 0;
-		int max_h = 0;
+	// Stages 1+2 [orig: the POSITION branch @ 0x648120 + the parse tail's
+	// degenerate-axis fallback to the largest appearance image]. Extents are
+	// measured only when an axis needs them (texture loads are the cost),
+	// on the same folded edges the solve reads.
+	const int l0 = w.position.has_left ? w.position.left : 0;
+	const int t0 = w.position.has_top ? w.position.top : 0;
+	const int r0 = w.position.has_right ? w.position.right : 0;
+	const int b0 = w.position.has_bottom ? w.position.bottom : 0;
+	int max_w = 0;
+	int max_h = 0;
+	if (r0 <= l0 || b0 <= t0) {
 		measure_appearance_extents(ctx, w.appearances, max_w, max_h);
-		if (right <= left) {
-			right = left + max_w;
-		}
-		if (bottom <= top) {
-			bottom = top + max_h;
-		}
 	}
+	mnu::RectEdges rect = mnu::position_rect(
+			w.position.has_left, w.position.left, w.position.has_top,
+			w.position.top, w.position.has_right, w.position.right,
+			w.position.has_bottom, w.position.bottom, max_w, max_h);
 
 	// Stage 3: text widgets size a still-degenerate axis from the measured
-	// string, with the authored point as the anchor the JUSTIFY/VJUSTIFY flags
-	// align to (left edge / centre / right edge; top / centre / bottom)
-	// [orig: adjust_rect_to_text_size @ 0x6575f0].
-	if ((right <= left || bottom <= top) && is_text_sized(w.type) &&
+	// string [orig: adjust_rect_to_text_size @ 0x6575f0].
+	if ((rect.right <= rect.left || rect.bottom <= rect.top) &&
+			mnu::window_type_is_text_sized(w.type) &&
 			w.string_data.present && !w.string_data.value.empty()) {
 		const String text = resolve_text(ctx, w.string_data);
 		if (!text.is_empty()) {
@@ -668,35 +636,15 @@ void apply_position(MnuBuildContext &ctx, Control *node, const mnu::Window &w,
 				// glyph box keeps text widgets visible and hittable.
 				ts = Vector2(8.0f * (float)text.length(), 16.0f);
 			}
-			const int tw = (int)(ts.x + 0.5f);
-			const int th = (int)(ts.y + 0.5f);
-			if (right <= left) {
-				const int anchor = left; // right==left after stage 2
-				if (iequals(w.string_data.justify, "center")) {
-					left = anchor - tw / 2;
-					right = left + tw;
-				} else if (iequals(w.string_data.justify, "right")) {
-					left = anchor - tw; // the right edge stays at the anchor
-				} else {
-					right = anchor + tw;
-				}
-			}
-			if (bottom <= top) {
-				const int anchor = top;
-				if (iequals(w.string_data.vjustify, "center")) {
-					top = anchor - th / 2;
-					bottom = top + th;
-				} else if (iequals(w.string_data.vjustify, "bottom")) {
-					top = anchor - th; // the bottom edge stays at the anchor
-				} else {
-					bottom = anchor + th;
-				}
-			}
+			rect = mnu::adjust_rect_to_text_size(rect, (int)(ts.x + 0.5f),
+					(int)(ts.y + 0.5f), w.string_data.justify,
+					w.string_data.vjustify);
 		}
 	}
 
-	node->set_position(Vector2(left, top));
-	node->set_size(Vector2(MAX(right - left, 0), MAX(bottom - top, 0)));
+	node->set_position(Vector2(rect.left, rect.top));
+	node->set_size(Vector2(MAX(rect.right - rect.left, 0),
+			MAX(rect.bottom - rect.top, 0)));
 }
 
 // 1px outline border drawn with four ColorRects, added after children so it
@@ -1293,8 +1241,12 @@ MnuItemVisual resolve_item(MnuBuildContext &ctx, const mnu::Item &item) {
 		const std::string hex = resolve_color(ctx, item.text);
 		if (!hex.empty()) {
 			v.kind = MnuItemVisual::COLOR;
-			v.color = parse_color(to_gd(hex));
-			v.color.a = 1.0f; // the original forces full alpha (| 0xFF000000)
+			// [orig: wcstoul base 16 @ 0x64bd10, forced opaque @ 0x64b220]
+			const uint32_t argb = mnu::item_color_argb(hex);
+			v.color = Color(
+					((argb >> 16) & 0xFF) / 255.0f,
+					((argb >> 8) & 0xFF) / 255.0f,
+					(argb & 0xFF) / 255.0f, 1.0f);
 		}
 	}
 	return v;
@@ -1487,17 +1439,15 @@ void add_spin_button(MnuBuildContext &ctx, Control *spin, const mnu::Window &w,
 		btn->set_disabled(true);
 	}
 	if (sb.position.has_left || sb.position.has_top) {
-		const int x = sb.position.has_left ? sb.position.left : 0;
-		const int y = sb.position.has_top ? sb.position.top : 0;
 		int ext_w = 0;
 		int ext_h = 0;
 		measure_appearance_extents(ctx, sb.appearances, ext_w, ext_h);
-		int rw = sb.position.has_right ? (sb.position.right - sb.position.left)
-									   : (ext_w > 0 ? ext_w : 16);
-		int rh = sb.position.has_bottom ? (sb.position.bottom - sb.position.top)
-										: (ext_h > 0 ? ext_h : 12);
-		btn->set_position(Vector2(x, y));
-		btn->set_size(Vector2(MAX(rw, 0), MAX(rh, 0)));
+		const mnu::RectEdges r = mnu::spin_button_rect(
+				sb.position.has_left, sb.position.left, sb.position.has_top,
+				sb.position.top, sb.position.has_right, sb.position.right,
+				sb.position.has_bottom, sb.position.bottom, ext_w, ext_h);
+		btn->set_position(Vector2(r.left, r.top));
+		btn->set_size(Vector2(r.right - r.left, r.bottom - r.top));
 	}
 	spin->add_child(btn);
 }
