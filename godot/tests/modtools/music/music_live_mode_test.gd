@@ -258,19 +258,19 @@ func test_entry_var_shows_true_value_not_clamped_min():
 	assert_true(ctrl.allow_lesser, "spinbox can represent values below the nominal min")
 
 
-# Polish B3: events log uses incremental update and caps at 50 rows. _log()
-# is the system-event shim and is always shown.
+# Polish B3: events log uses incremental update and caps at 50 rows. SYSTEM
+# lines are always shown regardless of the per-type filters.
 func test_events_log_appends_and_caps():
 	var lm: Control = LiveModeScene.instantiate()
 	add_child_autofree(lm)
 	await get_tree().process_frame
 	var events: ItemList = lm.get_node("%Events")
 	assert_eq(events.item_count, 0, "events list starts empty")
-	lm._log("test entry 1")
-	lm._log("test entry 2")
+	lm._log_typed(lm.EvType.SYSTEM, "test entry 1")
+	lm._log_typed(lm.EvType.SYSTEM, "test entry 2")
 	assert_eq(events.item_count, 2, "two entries appended")
 	for i in range(60):
-		lm._log("flood %d" % i)
+		lm._log_typed(lm.EvType.SYSTEM, "flood %d" % i)
 	assert_eq(events.item_count, 50, "events list capped at 50")
 	assert_eq(events.get_selected_items().size(), 1, "tail row selected for auto-scroll")
 
@@ -480,14 +480,14 @@ func test_log_typed_coalesces_identical_then_breaks():
 	add_child_autofree(lm)
 	await get_tree().process_frame
 	var events: ItemList = lm.get_node("%Events")
-	lm._log("same")
-	lm._log("same")
-	lm._log("same")
+	lm._log_typed(lm.EvType.SYSTEM, "same")
+	lm._log_typed(lm.EvType.SYSTEM, "same")
+	lm._log_typed(lm.EvType.SYSTEM, "same")
 	assert_eq(events.item_count, 1, "identical lines coalesce")
 	assert_true(events.get_item_text(0).ends_with("x3"), "counted x3")
-	lm._log("different")
+	lm._log_typed(lm.EvType.SYSTEM, "different")
 	assert_eq(events.item_count, 2, "a distinct line starts a new row")
-	lm._log("different")
+	lm._log_typed(lm.EvType.SYSTEM, "different")
 	assert_eq(events.item_count, 2, "the new line then coalesces")
 	assert_true(events.get_item_text(1).ends_with("x2"), "second run counted x2")
 
@@ -498,7 +498,7 @@ func test_distinct_lines_do_not_coalesce():
 	await get_tree().process_frame
 	var events: ItemList = lm.get_node("%Events")
 	for i in range(5):
-		lm._log("line %d" % i)
+		lm._log_typed(lm.EvType.SYSTEM, "line %d" % i)
 	assert_eq(events.item_count, 5, "distinct lines never fold together")
 
 
@@ -522,12 +522,12 @@ func test_clear_resets_coalesce_run():
 	add_child_autofree(lm)
 	await get_tree().process_frame
 	var events: ItemList = lm.get_node("%Events")
-	lm._log("x")
-	lm._log("x")
+	lm._log_typed(lm.EvType.SYSTEM, "x")
+	lm._log_typed(lm.EvType.SYSTEM, "x")
 	assert_eq(events.item_count, 1, "coalesced before clear")
 	lm.get_node("%ClearButton").pressed.emit()
 	assert_eq(events.item_count, 0, "list cleared")
-	lm._log("x")
+	lm._log_typed(lm.EvType.SYSTEM, "x")
 	assert_eq(events.item_count, 1, "fresh row after clear")
 	assert_false(events.get_item_text(0).contains("  x"), "no leftover x-count on the fresh row")
 
