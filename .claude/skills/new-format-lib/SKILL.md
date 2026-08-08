@@ -1,15 +1,28 @@
 ---
 name: new-format-lib
-description: Scaffolds a new NovaLogic format library under engine/ end to end — CMake target, opennova namespace, parser/writer, fixtures with LFS and asset-gating policy, roundtrip ctest, and optional GDExtension binding. Use when adding support for a new game file format, or when extracting a subsystem into a new portable library.
+description: Scaffolds a new NovaLogic format library under engine/formats/ end to end — group-CMake registration, opennova namespace, parser/writer, fixtures with LFS and asset-gating policy, roundtrip ctest, and optional GDExtension binding — or extracts an existing parser out of a runtime lib into its formats/ home. Use when adding support for a new game file format, or when moving a format parser to engine/formats/.
 ---
 
-# Add a format library under engine/
+# Add (or extract) a format library under engine/formats/
 
 Done dozens of times; the conventions are strict. Copy a living exemplar, don't
-invent: `engine/formats/dbf` (small binary format), `engine/formats/lwf` + `tests/lwf/` (byte-exact
-roundtrip), `engine/base/refs` (most recent conventions).
+invent: `engine/formats/dbf` (small binary format), `engine/formats/lwf` +
+`tests/lwf/` (byte-exact roundtrip), `engine/formats/bad` (reader + writer +
+flat C ABI), `engine/formats/adm` (a text format extracted from runtime).
 
-## 0. Decide before writing code
+## 0. The placement gate (ADR 0030)
+
+Before creating anything, apply the placement rule
+(docs/adr/0030-formats-placement-criterion.md): ALL file knowledge — the
+parsed model, read, and write — lives in `engine/formats/<lib>`, depending
+only on `base/io` and other formats libs; what stays in `runtime/` (or
+`net/`) is execution and simulation over the parsed model (a VM, an emitter,
+promotion — never the parser). There is no "runtime-fused format": if a
+format's parse code sits outside formats/, that is a gap to extract with the
+recipe in step 6. Partial ports move too, with the coverage gap documented in
+the lib header (the aip precedent).
+
+Then decide, before writing code:
 
 - Parse-only or writer? The project norm is a byte-exact parse→write roundtrip.
   If write policy diverges from the original bytes (it must never be raw
@@ -22,23 +35,44 @@ roundtrip), `engine/base/refs` (most recent conventions).
   port, verify with `grill-ida` — the port is a faithful translation, never our
   own version (CLAUDE.md conventions).
 
-## 1. Library skeleton
+## 1. Library skeleton (post-ADR-0029: no per-lib CMake target)
 
-`engine/<group>/<name>/CMakeLists.txt` + `include/<name>/<name>.h` + `src/<name>.cpp`.
-A new format lib goes in `engine/formats/`; a runtime-system extraction goes in
-`engine/runtime/` (group placement rules: ADR 0028; groups are directories only — the
-target name and namespace never carry the group).
-Copy `engine/formats/dbf/CMakeLists.txt` and rename: STATIC lib `opennova_<name>`,
-PUBLIC `include/`, C++17, POSITION_INDEPENDENT_CODE. Namespace
-`opennova::<name>` (C ABI exports flat and domain-prefixed). If Python/Godot
-need it over FFI, bundle the static into `opennova_shared` (grep the root
-CMakeLists for `opennova_shared`).
+Files: `engine/formats/<name>/{include/<prefix>/<name>.h, src/<name>.cpp}`.
+There is NO per-lib CMakeLists.txt — the lib builds inside the
+`opennova_formats` group. Registration is exactly two edits in
+`engine/formats/CMakeLists.txt`:
 
-## 2. Register in BOTH build graphs — the classic miss
+1. the source block, alphabetical by domain, with a one-line format comment:
+   `# <name> — <what the format holds>` + one
+   `${CMAKE_CURRENT_SOURCE_DIR}/<name>/src/<file>.cpp` line per TU;
+2. `${CMAKE_CURRENT_SOURCE_DIR}/<name>/include` in the PUBLIC include list,
+   same alphabetical slot.
 
-- Root `CMakeLists.txt`: `add_subdirectory(engine/<group>/<name>)` alongside the others.
-- `godot/adapter/CMakeLists.txt`: the parallel, hand-maintained list — required
-  the moment an engine binding links the new lib.
+The group already carries C++17, C99, POSITION_INDEPENDENT_CODE, and a PUBLIC
+link to `opennova_io` — add nothing else. Private headers under `src/` that
+another TU includes go in the group's PRIVATE include list (see bfc1/oed).
+
+Include prefix: keep the format's historical prefix (usually `<name>/...`).
+When a domain is split across formats/ and runtime/, the two libs may expose
+ONE prefix with disjoint header sets (ADR 0030 decision 2; precedents:
+terrain/terrain_query, particle/, mission/). Namespace `opennova::<name>` for
+C++ surfaces; flat domain-prefixed C ABI for FFI surfaces (`<NAME>_EXPORT`
+aliasing `OPENNOVA_API` from `io/export.h` — see `engine/CLAUDE.md` for the
+export conventions and the two-Python-mirror rule).
+
+## 2. Nothing to register twice — but the ABI ritual still applies
+
+Both CMake roots share `engine/CMakeLists.txt`; the group target is already
+linked by the DLL, the adapter, and the tests. Two things still matter:
+
+- A new C ABI export is a deliberate Model-A decision: annotate it AND bump
+  `scripts/lint/abi_exports_baseline.txt` in the same commit, logged in
+  docs/maturity-program.md. (A lib with no annotations adds nothing to the
+  DLL surface — `opennova_formats` is whole-archived but only annotated
+  symbols export.)
+- If the format is terrain-family (or otherwise seam-relevant), check whether
+  `scripts/lint/include_graph_check.py` needs the new include prefix in its
+  forbidden list — same commit.
 
 ## 3. Fixtures (`fixtures/<name>/`)
 
@@ -57,7 +91,7 @@ No test framework: plain `main()` with `TEST_EXPECT` from
 `tests/common/test_expect.h`; locate the repo via `tests/common/test_paths.h`
 (see `tests/dbf/dbf_roundtrip_test.cpp`). Minimum: parse test + byte-exact
 roundtrip against the committed fixture. Wire into `tests/CMakeLists.txt`
-following the dbf block — one executable per test, link `opennova_<name>`,
+following the dbf block — one executable per test, link `opennova_formats`,
 `add_test(NAME <name>_roundtrip ...)`.
 
 Run loop:
@@ -68,18 +102,47 @@ Run loop:
 ## 5. Optional: engine binding and editor surface
 
 - Binding: `godot/adapter/<name>/nova_<name>*.{h,cpp}`, `GDREGISTER_CLASS` in
-  `godot/adapter/register_types.cpp`, link in the engine CMake, then
-  `bash scripts/build_godot.sh` and fully restart any open editor (no
-  hot-reload). Add a GDScript smoke test `godot/tests/<name>_data_test.gd`
-  using the fixture-skip pattern; run it via the `gut` skill.
+  `godot/adapter/register_types.cpp` (the adapter already links the group —
+  no CMake link edit), then `bash scripts/build_godot.sh` and fully restart
+  any open editor (no hot-reload). Add a GDScript smoke test
+  `godot/tests/<name>_data_test.gd` using the fixture-skip pattern; run it via
+  the `gut` skill.
 - ONED workspace/inspector: follow "Add a workspace" in
   `godot/modtools/README.md`.
 
-## 6. Done
+## 6. Extracting an existing parser out of runtime/ (the ADR 0030 recipe)
+
+When a format already exists inside a runtime lib and passes the step-0 gate:
+
+1. `git mv` the format's headers and TUs into
+   `engine/formats/<name>/{include/<prefix>/, src/}`. Decide the prefix per
+   step 1's rule — keeping a shared prefix with disjoint sets means ZERO
+   consumer include churn; renaming is right only when the includer count is
+   trivial.
+2. Two source-list edits: add the block + include dir in
+   `engine/formats/CMakeLists.txt`; remove the lines (and any per-source
+   property entries, e.g. the terrain FP-flag list) from
+   `engine/runtime/CMakeLists.txt`, rewording the runtime comment.
+3. Flip the format-level tests' link word to `opennova_formats` in
+   `tests/CMakeLists.txt`; consumer-level tests stay on `opennova_runtime`
+   (it PUBLIC-chains formats).
+4. Instruments: the citation ratchet is move-invariant (`engine/*/*/src`);
+   pure moves never touch `abi_exports_baseline.txt`; update
+   `include_graph_check.py` prefixes if the format was previously covered by
+   a blanket-forbidden directory prefix.
+5. Sweep the stragglers: FFI mirror docstrings (`pyopennova/` AND
+   `blender/opennova/` — both copies), doc path pointers (targeted per-file
+   edits, never repo-wide sed — RE records mix moved and staying paths),
+   README tables, `engine/CLAUDE.md` group lists.
+6. Verify like step 4 plus: the format's full roundtrip suite green with ZERO
+   `fixtures/**` drift, all lint gates, and any touched GUT surface in
+   single-file isolation after `scripts/build_godot.sh` + full editor restart
+   (the `gut` skill's silent-drop check).
+
+## 7. Done
 
 - `ctest --test-dir build -C Release` fully green including the new tests;
   roundtrip byte-exact on the fixture.
-- Both CMake graphs build (`bash scripts/build.sh` exercises both).
-- README updated: the "C/C++ Libraries" table AND the library count in the
-  Repo Layout row (it drifts).
+- Both CMake roots build (`bash scripts/build.sh` exercises both).
+- README updated: the "C/C++ Libraries" table row.
 - New domain vocabulary added to `CONTEXT.md` only if a term needed pinning.
