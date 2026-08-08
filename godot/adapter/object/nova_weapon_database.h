@@ -136,6 +136,13 @@ public:
 		ENCUMBRANCE_HEAVY = 2,
 	};
 
+	// The untouched-ammo sentinel: retail serializes -1 until the user picks a
+	// clip row, and every default-select/weight leg keys on it
+	// [orig: @0x565cd0/0x566166; the -1 arms in @0x55def0/@0x55f1f0].
+	enum {
+		CLIP_COUNT_DEF_DEFAULT = -1,
+	};
+
 	Error load(const String &path);
 	// Load weapon.def by flat name through the mounted resource root (VFS / PFF).
 	Error load_from_resource_root(const Ref<NovaResourceRoot> &p_resource_root, const String &p_name);
@@ -162,9 +169,23 @@ public:
 	// indices contribute nothing; a short counts array reads as -1 (default).
 	double loadout_weight(const PackedInt32Array &weapon_indices,
 			const PackedInt32Array &ammo_counts) const;
+	// One extra-ammo (category-3) term for the indexed weapon: count *
+	// clipweight only, CLIP_COUNT_DEF_DEFAULT -> the maxclips default, a
+	// chosen zero row weighs nothing (engine/formats/def def_extra_ammo_weight
+	// [orig: @ 0x5655c9..0x56561c; the @ 0x55f1f0 family terms]).
+	double extra_ammo_weight(int p_index, int p_count) const;
 	// The encumbrance band for a weight (ENCUMBRANCE_*)
 	// [orig: update_player_info_weight_and_weapon_icons @ 0x55f480].
 	int encumbrance_class(double weight) const;
+	// The PLAYER_INFO screen policies (one impl in engine/runtime/world
+	// player_loadout.h [orig: PlayerInfo_SetTeamAndClassMask @0x55de60;
+	// populate_ammo_combo_boxes @0x55def0]): the team mask (team 0 -> 2, else
+	// 1), the class mask (5..9 -> its bit, else nothing), and the ammo combo's
+	// default-select clip count (saved > 0 clamped into 1..maxclips, the
+	// CLIP_COUNT_DEF_DEFAULT sentinel -> the full maxclips row).
+	static int player_info_team_mask(int p_team);
+	static int player_info_class_mask(int p_playerclass_value);
+	static int default_clip_row(int p_saved, int p_maxclips);
 	// The armory screen's open-time class policy (one impl in
 	// engine/runtime/world player_loadout.h [orig: Armory_ResolveSelectedClass
 	// @0x5642f0]): the current class when the S2C 0x76 allow mask permits it,

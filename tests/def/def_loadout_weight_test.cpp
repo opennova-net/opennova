@@ -53,6 +53,20 @@ int main() {
 	// Empty loadout weighs 0.
 	CHECK(near(def_loadout_weight(nullptr, nullptr, 0), 0.0), "empty loadout is 0");
 
+	// The category-3 extra-ammo term [orig: @ 0x5655c9..0x56561c; the
+	// @ 0x55f1f0 family]: count * clipweight only — no weaponweight; -1 takes
+	// the maxclips default, a chosen zero row weighs nothing.
+	{
+		DefWeaponDef g = {};
+		g.weaponweight = 99.0f; // must NOT contribute
+		g.clipweight = 0.5f;
+		g.maxclips = 4;
+		CHECK(near(def_extra_ammo_weight(&g, 3), 1.5), "count * clipweight only");
+		CHECK(near(def_extra_ammo_weight(&g, -1), 2.0), "-1 defaults to maxclips");
+		CHECK(near(def_extra_ammo_weight(&g, 0), 0.0), "a chosen zero row weighs nothing");
+		CHECK(near(def_extra_ammo_weight(nullptr, 3), 0.0), "null def weighs nothing");
+	}
+
 	// Encumbrance thresholds — exact boundaries [orig: @ 0x55f480].
 	CHECK(def_encumbrance_class(0.0) == DEF_ENCUMBRANCE_LIGHT, "0 is LIGHT");
 	CHECK(def_encumbrance_class(33.29) == DEF_ENCUMBRANCE_LIGHT, "just under 33.3 is LIGHT");

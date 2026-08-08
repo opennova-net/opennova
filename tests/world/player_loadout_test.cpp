@@ -158,12 +158,33 @@ static void test_armory_class_policy() {
     CHECK(armory_class_filter_mask(10) == -1);
 }
 
+// The PLAYER_INFO screen policies [orig: PlayerInfo_SetTeamAndClassMask
+// @0x55de60; populate_ammo_combo_boxes @0x55def0]: team 0 masks 2, every
+// other team masks 1; classes 5..9 mask their bit and anything else masks
+// NOTHING (unlike the armory's all-weapons default); the ammo combo's
+// default select takes the saved count (clamped 1..maxclips) or the full
+// maxclips row on the -1 sentinel.
+static void test_player_info_menu_policy() {
+    CHECK(player_info_team_mask(0) == 2);
+    CHECK(player_info_team_mask(1) == 1);
+    CHECK(player_info_team_mask(7) == 1);
+    CHECK(player_info_class_mask(5) == 1);
+    CHECK(player_info_class_mask(9) == (1 << 4));
+    CHECK(player_info_class_mask(0) == 0);   // this screen filters nothing in
+    CHECK(player_info_class_mask(10) == 0);
+    CHECK(player_info_default_clip_row(-1, 6) == 6);  // untouched -> full row
+    CHECK(player_info_default_clip_row(3, 6) == 3);
+    CHECK(player_info_default_clip_row(9, 6) == 6);   // clamps into the table
+    CHECK(player_info_default_clip_row(-1, 0) == 0);  // degenerate maxclips
+}
+
 int main() {
     test_promotion_gate_skips_in_session();
     test_promotion_applies_availability_then_filters_kit();
     test_accept_requested_ammo_and_banned_validation();
     test_class_latch_survives_kit_reset();
     test_armory_class_policy();
+    test_player_info_menu_policy();
     if (failures == 0) std::printf("player_loadout_test: all passed\n");
     return failures == 0 ? 0 : 1;
 }

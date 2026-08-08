@@ -403,10 +403,11 @@ func _populate_ammo(control: String) -> void:
 			"SECONDARY": current_name = _current_secondary
 			"ACCESSORY": current_name = _current_accessory
 		if (current_name.is_empty()
-				or String(w.get("name", "")).nocasecmp_to(current_name) != 0
-				or clips < 0):
-			clips = maxclips
-		combo.select_silent(clampi(clips, 1, maxclips) - 1)
+				or String(w.get("name", "")).nocasecmp_to(current_name) != 0):
+			clips = NovaWeaponDatabase.CLIP_COUNT_DEF_DEFAULT
+		# The shared default-select rule: a saved count picks its row, the -1
+		# sentinel picks the full maxclips row [orig: the fill @0x565cd0].
+		combo.select_silent(NovaWeaponDatabase.default_clip_row(clips, maxclips) - 1)
 	_update_weight()
 
 
@@ -470,8 +471,9 @@ func _update_weight() -> void:
 			continue
 		var grenade := _grenade_rows[i] as Dictionary
 		# The category-3 controls are extra-ammo legs, not parent weapon slots:
-		# retail adds selected_row * adm[84] only [orig: @0x5655c9..0x56561c].
-		total += clips * float(grenade.get("clip_weight", 0.0))
+		# retail adds selected_row * adm[84] only [orig: @0x5655c9..0x56561c —
+		# the def_extra_ammo_weight term].
+		total += _weapons.extra_ammo_weight(int(grenade.get("index", -1)), clips)
 	var band := _weapons.encumbrance_class(total)
 	var encumbrance := _menu_text("LIGHT_ENCUMBRANCE", "Light")
 	if band == NovaWeaponDatabase.ENCUMBRANCE_HEAVY:

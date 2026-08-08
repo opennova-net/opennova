@@ -175,7 +175,8 @@ func _populate_loadout() -> void:
 	if _weapons == null:
 		return
 	var class_mask := _selected_class_mask()
-	var team_mask := 2 if _team == 0 else 1  # [orig: g_playerInfoTeamMask = 2 - (team != 0)]
+	# [orig: g_playerInfoTeamMask = 2 - (team != 0) @0x55de60 — native policy]
+	var team_mask := NovaWeaponDatabase.player_info_team_mask(_team)
 	_fill_weapon_slot("PRIMARY", NovaWeaponDatabase.SLOT_PRIMARY, class_mask, team_mask)
 	_fill_weapon_slot("SECONDARY", NovaWeaponDatabase.SLOT_SECONDARY, class_mask, team_mask)
 	_fill_weapon_slot("ACCESSORY", NovaWeaponDatabase.SLOT_ACCESSORY, class_mask, team_mask)
@@ -226,14 +227,15 @@ func _weapon_label(w: Dictionary) -> String:
 
 
 # PLAYERCLASS carries values 5..9 (Medic..Engineer); the class mask is the matching
-# power-of-two bit [orig: PlayerInfo_SetTeamAndClassMask @ 0x55de60: 5->1,6->2,7->4,8->8,9->16].
+# power-of-two bit — native policy [orig: PlayerInfo_SetTeamAndClassMask
+# @ 0x55de60: 5->1,6->2,7->4,8->8,9->16].
 func _selected_class_mask() -> int:
 	var combo := _combo("PLAYERCLASS")
 	if combo == null:
 		return 0x1F  # no class control -> show every class's weapons (defensive)
 	var val := combo.get_selected_value()
 	var cls := int(val) if val.is_valid_int() else 0
-	return (1 << (cls - 5)) if cls >= 5 and cls <= 9 else 0
+	return NovaWeaponDatabase.player_info_class_mask(cls)
 
 
 func _on_class_selected(_row: int, _value: String) -> void:
@@ -267,9 +269,9 @@ func _populate_slot_ammo(control: String) -> void:
 			_set_combo_items(ammo1, rows)
 			# Saved count selects its row; -1/absent = the maxclips row (full
 			# default) [orig: the `saved == i || (saved == -1 && i == maxclips)`
-			# select in both fills].
-			var saved := int(_ammo_pri.get(index, -1))
-			ammo1.select_silent((clampi(saved, 1, maxclips) if saved > 0 else maxclips) - 1)
+			# select in both fills — native default_clip_row].
+			var saved := int(_ammo_pri.get(index, NovaWeaponDatabase.CLIP_COUNT_DEF_DEFAULT))
+			ammo1.select_silent(NovaWeaponDatabase.default_clip_row(saved, maxclips) - 1)
 	if type_combo != null:
 		# The TYPE combo keeps its authored FMJ/AP/SP statics; shown with AMMO1,
 		# selection = the saved per-team type byte (-1 -> 0). flags2 NOAMMOTYPES
@@ -298,8 +300,8 @@ func _populate_slot_ammo(control: String) -> void:
 			for clips in range(1, sub_max + 1):
 				rows2.append(_ammo_row_label(sub, clips))
 			_set_combo_items(ammo2, rows2)
-			var saved2 := int(_ammo_sec.get(index, -1))
-			ammo2.select_silent((clampi(saved2, 1, sub_max) if saved2 > 0 else sub_max) - 1)
+			var saved2 := int(_ammo_sec.get(index, NovaWeaponDatabase.CLIP_COUNT_DEF_DEFAULT))
+			ammo2.select_silent(NovaWeaponDatabase.default_clip_row(saved2, sub_max) - 1)
 
 
 # The sub-weapon behind *_AMMO2: walk the parent's following table entries, bounded
@@ -457,9 +459,9 @@ func _update_weight() -> void:
 		var sub := _subclass_weapon(w)
 		if _combo(control + "_AMMO2") != null \
 				and not sub.is_empty() and int(sub.get("clipsize", 0)) > 0:
-			var saved2 := int(_ammo_sec.get(index, -1))
-			var eff2 := int(sub.get("maxclips", 0)) if saved2 <= 0 else saved2
-			total += eff2 * float(sub.get("clip_weight", 0.0))
+			var saved2 := int(_ammo_sec.get(index, NovaWeaponDatabase.CLIP_COUNT_DEF_DEFAULT))
+			total += _weapons.extra_ammo_weight(int(sub.get("index", -1)),
+					NovaWeaponDatabase.CLIP_COUNT_DEF_DEFAULT if saved2 <= 0 else saved2)
 	total += _weapons.loadout_weight(indices, counts)
 	for i in _grenade_rows.size():
 		# The witnessed grenade term is gated on the control existing AND shown.
@@ -467,9 +469,9 @@ func _update_weight() -> void:
 		if combo == null or not combo.visible:
 			continue
 		var g := _grenade_rows[i]
-		var saved := int(_ammo_pri.get(int(g.get("index", -1)), -1))
-		var clips := int(g.get("maxclips", 0)) if saved == -1 else saved
-		total += clips * float(g.get("clip_weight", 0.0))
+		var saved := int(_ammo_pri.get(int(g.get("index", -1)),
+				NovaWeaponDatabase.CLIP_COUNT_DEF_DEFAULT))
+		total += _weapons.extra_ammo_weight(int(g.get("index", -1)), saved)
 	var band := _weapons.encumbrance_class(total)
 	var encumbrance := _menu_ui_text("LIGHT_ENCUMBRANCE", "Light")
 	if band == NovaWeaponDatabase.ENCUMBRANCE_HEAVY:

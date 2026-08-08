@@ -122,4 +122,20 @@ int armory_resolve_selected_class(int player_class, uint32_t class_allow_mask);
 // default is ALL weapons. [orig: @0x5642f0 switch default mask = -1]
 int32_t armory_class_filter_mask(int selected_class);
 
+// The PLAYER_INFO screen's team/class masks [orig:
+// PlayerInfo_SetTeamAndClassMask @0x55de60]. Team: 2 - (team != 0) — team 0
+// reads mask 2, every other team mask 1. Class: PLAYERCLASS carries values
+// 5..9 (Medic..Engineer) and masks to the matching power-of-two bit; anything
+// else masks NOTHING on this screen (unlike the armory's all-weapons default).
+int32_t player_info_team_mask(int team);
+int32_t player_info_class_mask(int playerclass_value);
+
+// The ammo combo's default-select row [orig: the
+// `saved == i || (saved == -1 && i == maxclips)` select in
+// populate_ammo_combo_boxes @0x55def0 and the armory fill @0x565cd0]: a saved
+// count picks its own row (clamped into 1..maxclips), the -1/absent sentinel
+// picks the full maxclips row. Returns the selected CLIP COUNT (1..maxclips;
+// 0 on a degenerate maxclips).
+int player_info_default_clip_row(int saved, int maxclips);
+
 } // namespace opennova::world
