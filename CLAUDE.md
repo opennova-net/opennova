@@ -8,19 +8,24 @@ easier to relay than to rediscover.
 
 ## Map
 
-- `libs/` — portable C++ core (format/runtime libraries: terrain, terrain_query,
-  threedi, mission, wac, world, novaworld, npwire, audio, pff, vfs, ...).
-  Godot-agnostic — no Godot types ever.
-  Consumed via flat C ABI by Python and Godot. See `libs/CLAUDE.md`.
-- `godot/` — the Godot 4.6.1 project: `engine/` (GDExtension C++ glue, `Nova*` classes,
-  plus the shared shell-neutral GDScript engine layer — see `godot/engine/CLAUDE.md`),
-  `modtools/` (the OpenNova Editor "ONED" — thirteen authoring workspaces), `game/` (the
-  game shell), `tests/` (GUT suite).
+- `engine/` — the engine: the portable, Godot-free C++ core (ADR 0028; CMake targets
+  `opennova_<domain>`, namespace `opennova` — names unchanged by the 2026-08 move).
+  Four groups, directories only — never link groups or namespaces:
+  `base/` (io, vfs, resource_index, gameprofile, pcapio, oned_edit, refs),
+  `formats/` (one lib per NovaLogic format — pff, threedi, def, mnu, env, oed, ...;
+  ADR 0024), `runtime/` (world, wac, mission, anim, audio, particle, renderer,
+  controls, terrain, terrain_query), `net/` (novacrypto, napi, npwire, novaworld,
+  netsim, npruntime). Consumed via the flat C ABI by Python and the DCC plugins,
+  by direct static link everywhere else. See `engine/CLAUDE.md`.
+- `godot/` — the Godot 4.6.1 project: `adapter/` (the shell adapter, ADR 0028:
+  GDExtension C++ glue, `Nova*` classes, plus the shared shell-neutral GDScript layer —
+  see `godot/adapter/CLAUDE.md`), `modtools/` (the OpenNova Editor "ONED" — thirteen
+  authoring workspaces), `game/` (the game shell), `tests/` (GUT suite).
 - `apps/` — `importer/` (Python + native FFI importer behind `onimport.exe`),
   `novaworld_server/` (the NovaWorld service), `nw_server/` (dev/golden-harness
   in-match host; never shipped), `nw_lan_probe/` (LAN readiness probe),
   `nw_pp/` (packet pretty-printer), `common/` (shared
-  socket helpers, deliberately app-layer; pcap I/O lives in `libs/pcapio`),
+  socket helpers, deliberately app-layer; pcap I/O lives in `engine/base/pcapio`),
   `modsuperoed.py` (the OED automation smoke driver). Top-level `blender/` and
   `opennova_max/` are the DCC export plugins, `pyopennova/` the Python ctypes FFI
   layer, `opennova_blender/` the standalone Blender importer backend.
@@ -77,8 +82,8 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
 
 ## Conventions
 
-- `libs/` libraries: CMake target `opennova_<domain>`, C++ namespace `opennova`, flat
-  domain-prefixed C ABI (consumed by `apps/importer/` and `godot/engine/`). The shared FFI
+- `engine/` libraries: CMake target `opennova_<domain>`, C++ namespace `opennova`, flat
+  domain-prefixed C ABI (consumed by `apps/importer/` and `godot/adapter/`). The shared FFI
   target is `opennova_shared` (`opennova.dll` / `libopennova.so`).
 - This is a faithful reimplementation — parity, not reinterpretation ([GOALS.md](GOALS.md)).
   Implementing "our own version" of engine behavior is never allowed: port the witnessed
@@ -90,6 +95,9 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
   primitives (strcpy/sprintf, D3D, file I/O) — use standard or platform equivalents. Engine-wide
   conventions (binaries/IDBs, fixed-point, coordinates, the 62 Hz tick) are in
   [docs/engine-primer.md](docs/engine-primer.md); RE-doc conventions in [docs/README.md](docs/README.md).
+- New engine logic starts in `engine/` (ADR 0028): gameplay rules, witnessed math, and
+  sim-consumed asset resolution are portable C++; GDScript wires and presents. The shell
+  keeps node writes, device sampling, and scene lifetime.
 - Never carry raw original bytes through a writer to make a parity test pass — writers
   produce output from scratch (docs/adr/0003-no-raw-passthrough-create-from-scratch.md).
 - Pre-1.0, no internal backwards compatibility: refactors update every caller of our own
@@ -155,7 +163,7 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
   `NovaSimulation`.
 - [godot/modtools/README.md](godot/modtools/README.md) — the ONED workspace framework,
   with one README per workspace.
-- Directory-scoped agent rules: `libs/CLAUDE.md`, `godot/engine/CLAUDE.md`,
+- Directory-scoped agent rules: `engine/CLAUDE.md`, `godot/adapter/CLAUDE.md`,
   `godot/modtools/CLAUDE.md`, `godot/tests/CLAUDE.md`.
 - Project skills in `.claude/skills/`: `gut`, `oned-run`, `new-format-lib`, `re-doc`,
   `extract-pr`, `grill-ida`, `engine-research`, `blender-object`, `diagnosing-bugs`.

@@ -16,7 +16,7 @@ extends Node
 #      NOVA_MISSION_BMS (default 00TRe.bms), NOVA_SHOT_PREFIX (default = bms
 #      base name), NOVA_WALK_FRAMES (optional W-hold frames before the sweep).
 
-const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
 const StandaloneProbe := preload("res://tests/standalone_game_probe.gd")
 const OUT_DIR := "res://../.scratch/rendercmp"
 

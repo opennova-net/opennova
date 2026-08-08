@@ -3,7 +3,7 @@ extends GutTest
 # Regression for "Avatars.def does not show in the resource browser / quick open".
 # The browser/quick-open list a kind via NovaResourceIndex.get_resource_files(kind),
 # and the Avatars workspace declares the "avatar" open-resource kind. The C++
-# classifier (libs/resource_index) tags Avatars.def by NAME -> "avatar" (the .def
+# classifier (engine/base/resource_index) tags Avatars.def by NAME -> "avatar" (the .def
 # extension is shared with weapon/items/ammo/hudpos.def, which stay unbrowsable).
 const AVATARS_FIXTURE_DIR := "res://../fixtures/avatars"
 

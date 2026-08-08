@@ -6,7 +6,7 @@ extends GutTest
 # that aborted enrichment in the first field dump (a mistyped assumption must
 # degrade, never lose the pick). Plus the _jsonable conversion rules.
 
-const Writer := preload("res://engine/debug/debug_snapshot_writer.gd")
+const Writer := preload("res://adapter/debug/debug_snapshot_writer.gd")
 
 
 class RichCardSim:

@@ -19,7 +19,7 @@ extends Control
 # for those names and connects them. The control-name sets are exported so a
 # different game's menu set can be pointed at the same shell.
 
-const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
 
 # Var index the director sets to the current screen's MUSICVAR. The menumus MUS
 # script reads its section discriminator at var INDEX 2 (golden test
@@ -110,7 +110,7 @@ const EXPANSION_DISPLAY_NAMES := {"jox01": "Kendari"}
 	"MOD_DESC", "MOD_DESCRIPTION",
 ])
 # The Options -> Controls key-binding table, and the device radios that switch it
-# (Keyboard/Mouse/Joystick). The shell fills the table from the libs/controls catalog.
+# (Keyboard/Mouse/Joystick). The shell fills the table from the engine/runtime/controls catalog.
 @export var control_table_names := PackedStringArray([
 	"CONTROL_MAPPING",
 ])
@@ -157,7 +157,7 @@ var _ready_done := false
 # player_info_menu_companion.gd). Empty for a plain shell. The first whose owns_menu()
 # claims a loaded menu drives it; otherwise the shell's generic wiring runs.
 var _companions: Array = []
-# Lazily-built Options -> Controls key-binding catalog (libs/controls).
+# Lazily-built Options -> Controls key-binding catalog (engine/runtime/controls).
 var _controls_model: NovaControlsModel = null
 
 

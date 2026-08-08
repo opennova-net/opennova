@@ -3,7 +3,7 @@
 [ext_resource type="Script" path="res://modtools/editor/editor_app.gd" id="0_app"]
 [ext_resource type="Script" uid="uid://cukqjoxh8rrk0" path="res://modtools/terrain/terrain_editor.gd" id="1"]
 [ext_resource type="Script" uid="uid://doq1c2dc8nak" path="res://modtools/terrain/editor_terrain_mesh.gd" id="2"]
-[ext_resource type="Script" uid="uid://bh7gceflcrkfx" path="res://engine/fly_camera.gd" id="3"]
+[ext_resource type="Script" uid="uid://bh7gceflcrkfx" path="res://adapter/fly_camera.gd" id="3"]
 [ext_resource type="PackedScene" path="res://modtools/editor/editor_workstation.tscn" id="5_workstation"]
 
 [node name="EditorMain" type="Node" unique_id=1000621177]

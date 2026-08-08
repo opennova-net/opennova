@@ -1,6 +1,6 @@
 extends GutTest
 
-# Exercises the NovaHudPos GDExtension binding over libs/def hudpos.def parsing.
+# Exercises the NovaHudPos GDExtension binding over engine/formats/def hudpos.def parsing.
 # Values mirror tests/def/def_parse_hudpos_test.cpp against fixtures/def/hudpos.def.
 
 const HUDPOS_PATH := "res://../fixtures/def/hudpos.def"

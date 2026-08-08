@@ -6,7 +6,7 @@ extends GutTest
 # hull boxes + the player capsule draw, the ground-gap label reports, rotation
 # refreshes cached hulls, and a vanished sim clears everything instead of erroring.
 
-const ViewScript := preload("res://engine/debug/collision_debug_view.gd")
+const ViewScript := preload("res://adapter/debug/collision_debug_view.gd")
 
 
 # Node-based doubles: the view's setup takes the owner's world NODE (a GameWorld

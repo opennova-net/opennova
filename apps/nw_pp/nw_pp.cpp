@@ -15,7 +15,7 @@
 // 65535 so we don't see it in practice; fragments are dropped with a
 // stderr warning). Anything else is read as hexcap text.
 //
-// Tag-specific decoders live in `libs/npwire/include/npwire/ingame_decode.h`
+// Tag-specific decoders live in `engine/net/npwire/include/npwire/ingame_decode.h`
 // (shared with `nw_ingame_pool_records_test` and the future real handlers).
 // As new tags get field maps in docs/net/novaworld-net-re.md, their decoders
 // land there and a printer for them lands here.
@@ -307,7 +307,7 @@ void print_parity_event(const InGameMessage &message, uint64_t ts_nanos) {
 
 // pcap/pcapng reading is shared with the test suite: apps/common/pcap_reader.h
 // The outer-decode pipeline (envelope -> NWU -> SCRK -> 0x43/0x83 -> reassembly)
-// is shared too: libs/npwire/wire_capture.h decode_capture_to_messages.
+// is shared too: engine/net/npwire/wire_capture.h decode_capture_to_messages.
 
 std::string to_hex_sample(const uint8_t *p, size_t n, size_t cap = 48) {
 	// NW_PP_HEXCAP_MAX overrides the per-dump byte cap (witness sessions need whole payloads).
@@ -351,7 +351,7 @@ std::string handle_str(uint16_t h) {
 }
 
 // Tag labels come from the shared in-game message catalog
-// (libs/npwire/.../ingame_message_catalog.h) — the single source of truth
+// (engine/net/npwire/.../ingame_message_catalog.h) — the single source of truth
 // shared with the nw_message_coverage CI gate, so names can't drift between the
 // printer and the coverage test. nullptr (uncatalogued) renders as a bare hex tag.
 const char *tag_label(char dir, int tag) {
@@ -365,7 +365,7 @@ std::unordered_map<int, std::string> g_item_names;
 
 // Per-item §5.10b dispatch class — selects which compact decoder runs on a
 // tag==1 record inside S2C 0x0A's trailing event loop. The EntityClass enum and
-// class_from_tag() now live in libs/npwire/ingame_decode.h (shared with the
+// class_from_tag() now live in engine/net/npwire/ingame_decode.h (shared with the
 // decode_frame_update walker). This map is the wire_id → class table, populated
 // from items.def in load_items_def; an unmapped id leaves the walker unable to
 // size a record (fail closed). Keyed by wire_id (items.def id − 100000).
@@ -404,7 +404,7 @@ std::string type_str(uint16_t type) {
 }
 
 // Load items.def into g_item_names. Accepts plaintext or SCR-encrypted
-// input — the libs/scr decryptor expects the SCR magic in the first 3
+// input — the engine/formats/scr decryptor expects the SCR magic in the first 3
 // bytes, otherwise we treat the file as plaintext .def. Returns count
 // of items loaded, 0 on any failure.
 size_t load_items_def(const char *path) {

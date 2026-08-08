@@ -8,7 +8,7 @@ extends Node
 #   GODOT_BIN --path godot res://tests/fp_impact_probe.tscn  (or -s wrapper)
 # Output: res://../.scratch/fp_impact/
 
-const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
 const StandaloneProbe := preload("res://tests/standalone_game_probe.gd")
 const OUT_DIR := "res://../.scratch/fp_impact"
 

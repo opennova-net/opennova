@@ -63,7 +63,7 @@ struct Field {
 
 // The host's model->runtime collision conversion, replicated (the canonical
 // copy is collision_model_from_3di in
-// godot/engine/simulation/nova_simulation_internal.h — libs/world stays
+// godot/adapter/simulation/nova_simulation_internal.h — engine/runtime/world stays
 // format-free by design, so the leaf test carries its own).
 bool collision_from_3di(const ThreediCollisionModel *col, CollisionModel &out) {
     if (col == nullptr || col->volume_count == 0 || !threedi_3di3_collision_is_runtime_safe(col))

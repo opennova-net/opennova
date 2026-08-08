@@ -2,7 +2,7 @@ class_name CreditsEditorBlockList
 extends VBoxContainer
 
 const BlockCardScene = preload("res://modtools/credits/credits_editor_block_card.tscn")
-const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
 
 signal entries_reordered
 signal selection_changed(entry)

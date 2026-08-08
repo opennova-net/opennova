@@ -26,7 +26,7 @@ the game normally and F6 launches the current saved mission.
 
 | Format | Backing library | Notes |
 |---|---|---|
-| `.bms` | [`libs/mission`](../../../libs/mission) | mission records and schema; events run on the BMS event runtime; the simulation lives in [`libs/world`](../../../libs/world) + [`libs/wac`](../../../libs/wac) |
+| `.bms` | [`engine/runtime/mission`](../../../engine/runtime/mission) | mission records and schema; events run on the BMS event runtime; the simulation lives in [`engine/runtime/world`](../../../engine/runtime/world) + [`engine/runtime/wac`](../../../engine/runtime/wac) |
 
 ## How it is built
 

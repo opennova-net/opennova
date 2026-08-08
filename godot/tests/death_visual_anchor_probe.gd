@@ -10,9 +10,9 @@ extends SceneTree
 # OPENNOVA_JO_DIR=<retail JO install> "$GODOT_BIN" --headless \
 #   --path godot -s res://tests/death_visual_anchor_probe.gd
 
-const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
-const MissionEntityRegistry := preload("res://engine/world/mission_entity_registry.gd")
-const MissionPresentPass := preload("res://engine/world/mission_present_pass.gd")
+const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
+const MissionEntityRegistry := preload("res://adapter/world/mission_entity_registry.gd")
+const MissionPresentPass := preload("res://adapter/world/mission_present_pass.gd")
 
 const DEATH_STATE_MIN := 173
 # The entity itself may legitimately settle/move on the kill tick. The bug is
@@ -204,6 +204,10 @@ func _run() -> void:
 		return
 	sim.resolve_infantry_adm_ids(res_root, item_db)
 	sim.resolve_item_traits(item_db)
+	# S3b native-only: collision extraction and the posed hitbox sections read
+	# the sim's own asset root; a rootless sim attaches nothing (the placer
+	# argument is accepted but no longer a model source).
+	sim.set_asset_root(res_root)
 	sim.resolve_collision_instances(item_db, placer)
 	if sim.load_ammo_table(res_root, "ammo.def") != OK:
 		_fail("ammo.def did not load")

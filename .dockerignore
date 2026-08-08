@@ -1,5 +1,5 @@
 # Keep the server image build context lean. The Dockerfile only needs
-# libs/, backend/, third_party/, apps/, and the root CMakeLists.
+# engine/, backend/, third_party/, apps/, and the root CMakeLists.
 .git
 build/
 build-*/

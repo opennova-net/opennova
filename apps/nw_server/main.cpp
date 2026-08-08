@@ -1,4 +1,4 @@
-// nw-server — the headless in-match game HOST (libs/npruntime P6). A pure C++ dedicated server: it
+// nw-server — the headless in-match game HOST (engine/net/npruntime P6). A pure C++ dedicated server: it
 // loads a mission, stands up the npruntime runtime as a NovaWorld HostOnly session, opens a real UDP
 // socket, and drives the in-match host loop at the
 // original 62 Hz cadence so retail-wire-compatible clients (opennova or, as a follow-up, stock retail)
@@ -9,7 +9,7 @@
 // the matchmaking apps/novaworld_server (gate/lobby/HTTP) — this is the authoritative game server.
 
 #include <npwire/net_ports.h>
-#include <npruntime/host_session.h> // the host owner loop, promoted to libs/npruntime (P7/A3)
+#include <npruntime/host_session.h> // the host owner loop, promoted to engine/net/npruntime (P7/A3)
 
 #include "net_datagram_socket.h" // net::Socket-backed netsim::IDatagramSocket adapter
 #include "net_sockets.h"         // net::startup / udp_bind / ScopedSocket
@@ -53,7 +53,7 @@ uint16_t env_port(const char *name, uint16_t fallback) {
 
 
 namespace {
-// The libs/ diagnostic channel (io/log.h): libraries are silent until the host
+// The engine/ diagnostic channel (io/log.h): libraries are silent until the host
 // installs a sink. Reproduce the historical stream split — lifecycle to stdout,
 // warnings and errors to stderr; per-tick kDebug tracing opts in via NW_LOG_DEBUG.
 bool g_log_debug_enabled = false;

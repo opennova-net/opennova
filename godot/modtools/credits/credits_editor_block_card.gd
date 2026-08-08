@@ -1,7 +1,7 @@
 class_name CreditsEditorBlockCard
 extends PanelContainer
 
-const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
 
 # Per-type accent palette. The selection highlight (A1) reuses the same hues as the
 # type chips so a selected card reads as its type at a glance. TEXT rides the

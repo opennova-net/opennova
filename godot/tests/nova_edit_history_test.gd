@@ -1,7 +1,7 @@
 extends GutTest
 
 # NovaEditHistory: the GDExtension boxing of the shared C++ undo/redo core
-# (libs/oned_edit). Covers the two flavors the GDScript editors use — the
+# (engine/base/oned_edit). Covers the two flavors the GDScript editors use — the
 # whole-document begin/commit bracket with undo_swap/redo_swap adoption, and
 # the caller-applied push_step/pop_undo/pop_redo delta stacks — plus the
 # NIL-as-empty sentinel contract and the dirty-vs-baseline query.

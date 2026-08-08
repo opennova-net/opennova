@@ -3,8 +3,8 @@
 Reverse-engineering record for NovaLogic's RTXT string-table format and the
 TextResource runtime that consumes it, grilled against retail
 `Jointops.exe` (Joint Operations: Combined Arms, kong IDB) on 2026-06-09.
-Reimplementation: `libs/rtxt` (format), `godot/engine/rtxt` (RtxtStringFile
-resource), `godot/engine/strings/nova_strings.gd` (runtime model),
+Reimplementation: `engine/formats/rtxt` (format), `godot/adapter/rtxt` (RtxtStringFile
+resource), `godot/adapter/strings/nova_strings.gd` (runtime model),
 `godot/modtools/strings` (ONED workspace).
 
 Ground truth: all 98 RTXT-magic `.bin` files in the retail install
@@ -109,7 +109,7 @@ matches this exactly.
 ## Text encoding
 
 Retail tables are cp1252 (67/98 files contain bytes ≥ 0x80 — curly quotes,
-accents). `libs/rtxt` treats text as raw bytes (no transcoding);
+accents). `engine/formats/rtxt` treats text as raw bytes (no transcoding);
 `RtxtStringFile` decodes UTF-8 when the bytes are valid UTF-8, cp1252
 otherwise, and re-encodes edited strings to cp1252 whenever every character
 fits — pinned losslessly on retail data by

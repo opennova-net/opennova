@@ -18,7 +18,7 @@ using opennova::Vfs;
 using opennova::VfsLookupPolicy;
 using opennova::VfsSource;
 
-// SCR keys (mirror libs/scr/include/scr/scr.h; vfs_test doesn't link opennova_scr).
+// SCR keys (mirror engine/formats/scr/include/scr/scr.h; vfs_test doesn't link opennova_scr).
 static const uint32_t SCR_KEY_DEFAULT_C = 0xABEEFACEu; // JO Demo
 static const uint32_t SCR_KEY_JO_DFX2_C = 0x2A5A8EADu; // retail JO/DFX2
 

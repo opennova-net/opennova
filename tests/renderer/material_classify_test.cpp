@@ -1,5 +1,5 @@
 // Unit tests for renderer::classify_object_material + the GLSL composer in
-// libs/renderer.  Verifies the static shader_tag -> family/blend table without
+// engine/runtime/renderer.  Verifies the static shader_tag -> family/blend table without
 // `.fx` parsing matches the canonical's runtime classifications for every
 // shader_tag in the original OED's gMaterialInfoTable.
 

@@ -1,9 +1,9 @@
 # BMS event runtime — equivalence record (vs Jointops.exe)
 
 Grill session 2026-06-10, IDB `Jointops.exe.kong.i64` (imagebase 0x400000).
-Scope: the BMS event evaluator (`libs/mission/event_runtime.{h,cpp}`), mission→world
-promotion (`libs/mission/promote.{h,cpp}`), and the system tick order/cadence
-(`libs/mission/mission_systems.h`, `libs/wac/wac_system.h`, `libs/world/world.{h,cpp}`).
+Scope: the BMS event evaluator (`engine/runtime/mission/event_runtime.{h,cpp}`), mission→world
+promotion (`engine/runtime/mission/promote.{h,cpp}`), and the system tick order/cadence
+(`engine/runtime/mission/mission_systems.h`, `engine/runtime/wac/wac_system.h`, `engine/runtime/world/world.{h,cpp}`).
 
 **Verdict: MATCHING**, with the tracked deviations D-EVT-1..4 below. Every behavioral
 claim in this record was read from the decompilation this session; addresses cited inline.
@@ -178,7 +178,7 @@ F3/MCP Step, tests, and isolated tooling previews. `MainGame` → `GameWorld` is
 live real-time runtime. When this accumulator landed, the old ONED mission preview also threaded
 real `delta` through `MissionRuntime._process` self-tick; [ADR 0025](../adr/0025-standalone-game-is-the-only-live-mission-runtime.md)
 later retired that embedded preview. F5/F6 now launch the standalone game from saved loose assets, where
-`game_world.tick` → `tick_realtime` drives the cadence. The portable `libs/world` per-tick
+`game_world.tick` → `tick_realtime` drives the cadence. The portable `engine/runtime/world` per-tick
 motors are unchanged — they were already correct per tick; only the driving tick **cadence** was
 wrong. Pinned by `mission_runtime_test.gd`
 (`test_tick_realtime_*`, `test_distance_per_real_second_is_frame_rate_independent`).
@@ -226,7 +226,7 @@ Dispositions after the 2026-07-05 grill (§3a carries the witnesses):
   current selection off blocked entries. Authoring: entity+0x210 ← BMS record
   u16 @+68 (type 6005 only, @0x40f0b7); the chain flag +0x217 ←
   bmsi_attributes bit 0x400000 (@0x40f129). Port rides the deploy/POI
-  subsystem (not yet in libs/world).
+  subsystem (not yet in engine/runtime/world).
 - **D-EVT-2 — quarter-pass piggyback: FIXED 2026-07-05.** The earlier
   "unrelated entity bookkeeping" dismissal was wrong: when the quarter cursor
   is 0 (once per 64 ticks) the pass calls `Entity_UpdateStuckCounter @0x439dc0`
@@ -372,8 +372,8 @@ Comment fixes:
 - 0x454c30: struct comment — +12/+14 = repeat cooldown live/reload, +16/+18 = activation
   delay live/reload, +21 = trigger_count; flags bit1/bit2 = pre/post PASS selectors.
 - Reverse links: on 0x454c30/0x454050/0x453620/0x4542e0/0x454d50 → opennova
-  `libs/mission/src/event_runtime.cpp`; on 0x4f81a0 → `libs/wac/include/wac/wac_system.h`;
-  on 0x40f4e0/0x40e9f0 → `libs/mission/src/promote.cpp`.
+  `engine/runtime/mission/src/event_runtime.cpp`; on 0x4f81a0 → `engine/runtime/wac/include/wac/wac_system.h`;
+  on 0x40f4e0/0x40e9f0 → `engine/runtime/mission/src/promote.cpp`.
 
 ---
 
@@ -848,12 +848,12 @@ correspondence made explicit.
 
 | orig | reimpl |
 |---|---|
-| `EventTrigger_UpdateEntry @0x454c30` | `libs/mission/src/event_runtime.cpp` |
-| `@0x454050` (chain eval) | `libs/mission/src/event_runtime.cpp` |
-| `EventTrigger_EvaluateCondition @0x453620` | `libs/mission/src/event_runtime.cpp` |
-| `EventAction_Dispatch @0x4542e0` | `libs/mission/src/event_runtime.cpp` |
-| `@0x454d50` (quarter pass) | `libs/mission/src/event_runtime.cpp` |
-| `WacScript_AdvanceTick @0x4f81a0` | `libs/wac/include/wac/wac_system.h` |
-| `Mission_LoadBMSFile @0x40f4e0` | `libs/mission/src/promote.cpp` |
-| `Entity_SpawnFromBMSRecord @0x40e9f0` | `libs/mission/src/promote.cpp` |
-| `EntityPool_FindByNetId @0x4f0a20` | libs/world entity registry (`EntityRegistry::find_by_net_id`) |
+| `EventTrigger_UpdateEntry @0x454c30` | `engine/runtime/mission/src/event_runtime.cpp` |
+| `@0x454050` (chain eval) | `engine/runtime/mission/src/event_runtime.cpp` |
+| `EventTrigger_EvaluateCondition @0x453620` | `engine/runtime/mission/src/event_runtime.cpp` |
+| `EventAction_Dispatch @0x4542e0` | `engine/runtime/mission/src/event_runtime.cpp` |
+| `@0x454d50` (quarter pass) | `engine/runtime/mission/src/event_runtime.cpp` |
+| `WacScript_AdvanceTick @0x4f81a0` | `engine/runtime/wac/include/wac/wac_system.h` |
+| `Mission_LoadBMSFile @0x40f4e0` | `engine/runtime/mission/src/promote.cpp` |
+| `Entity_SpawnFromBMSRecord @0x40e9f0` | `engine/runtime/mission/src/promote.cpp` |
+| `EntityPool_FindByNetId @0x4f0a20` | engine/runtime/world entity registry (`EntityRegistry::find_by_net_id`) |

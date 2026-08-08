@@ -140,7 +140,7 @@ four ship together:
 
 Already practiced by the terrain, 3di, lwf, mnu, and mission writers; recorded
 here it is the stated gate for the new writers (hudpos in HUD-1, avatars in
-AVT-1) and every W phase after them. `libs/CLAUDE.md` points here from its
+AVT-1) and every W phase after them. `engine/CLAUDE.md` points here from its
 parity-writer rule.
 
 ### F5 — MissionController decomposition — DONE (#204 + #373)
@@ -549,7 +549,7 @@ along seams that already exist as signal boundaries in the code.
   saved file). Gate:
   environment suite. **DONE 2026-07-12.** Audit: R ✓ (loose opens plus
   VFS/PFF entries via `open_env_from_resource_root`); W ✓ (from-scratch save
-  through libs/env `EnvFile.save_to_path`, roundtrip-pinned by
+  through engine/formats/env `EnvFile.save_to_path`, roundtrip-pinned by
   env_file_test); E ✓ re-verified — the exemplar (editor edits drive the SAME
   `NovaEnvironment`/`NovaSky`/`NovaWater` runtime nodes;
   editor-runtime-parity.md: water parameterized, not forked); G ✓ (after an
@@ -637,7 +637,7 @@ along seams that already exist as signal boundaries in the code.
 ### Sound
 
 - SND-1: audition completeness audit — every LWF field the runtime consumes
-  (`libs/lwf` + audio RE docs) is editable and audible in the workspace;
+  (`engine/formats/lwf` + audio RE docs) is editable and audible in the workspace;
   close gaps found. Gate: sound suites (12 files).
 - SND-2: **at-distance audition** — RE-gated on R7 if the attenuation model
   lacks witness; then an F1-hosted emitter auditioned from a movable listener

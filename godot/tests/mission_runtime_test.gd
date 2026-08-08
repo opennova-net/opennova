@@ -5,19 +5,27 @@ extends GutTest
 # These focused tests instantiate it directly over fixture nodes to prove the
 # engine path without introducing a second editor gameplay runtime.
 
-const MissionRuntime := preload("res://engine/world/mission_runtime.gd")
-const ItemSeatSpecs := preload("res://engine/world/item_seat_specs.gd")
+const MissionRuntime := preload("res://adapter/world/mission_runtime.gd")
+const ItemSeatSpecs := preload("res://adapter/world/item_seat_specs.gd")
 
 
-func test_kit_from_loadout_rows_reads_the_mission_tuple_keys() -> void:
-	# The stringly-typed seam between NovaMissionData's loadout dictionaries and the sim
-	# spawn kit: feed a REAL mission document (not hand-built rows) so a key drift on either
-	# side breaks here instead of silently degrading the kit to all -1 defaults at promote.
+func test_mission_loadout_chunk_promotes_through_the_native_gate() -> void:
+	# The mission loadout chunk -> the sim spawn kit, end to end through the
+	# engine's SP-vs-net promotion (world/player_loadout.h, S7b): a REAL mission
+	# document's chunk strings stash at load and promote as ints once the weapon
+	# catalog can resolve names — offline only, the witnessed gate
+	# [orig: Mission_LoadBMSFile @0x40F4E0 — gate @0x40f694; the tuple parse].
 	var m := NovaMissionData.new()
 	assert_eq(m.create_default(), OK)
 	assert_true(m.set_weapon_loadout([
 		{ "name": "WPN_KNIFE", "ammo_primary": "3", "ammo_secondary": "0", "flags": "2" }]))
-	var kit := MissionRuntime.kit_from_loadout_rows(m.get_weapon_loadout())
+	var sim := NovaSimulation.new()
+	assert_true(sim.load_from_mission_data(m))
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
+			"res://../fixtures/def")), OK)
+	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
+	var kit: Array = sim.get_local_player_loadout()
 	assert_eq(kit.size(), 1, "one mission row promotes to one kit row")
 	assert_eq(String(kit[0]["name"]), "WPN_KNIFE")
 	assert_eq(int(kit[0]["ammo_primary"]), 3, "the chunk string reaches the kit as an int")
@@ -25,44 +33,12 @@ func test_kit_from_loadout_rows_reads_the_mission_tuple_keys() -> void:
 	assert_eq(int(kit[0]["flags"]), 2, "the damage class rides the flags field")
 
 
-func test_seat_userpoint_prefixes_match_original_seat_names() -> void:
-	var rt := MissionRuntime.new()
-	add_child_autofree(rt)
-	assert_eq(rt._seat_type_for_user_point("sitex00"), 1, "sitex -> passenger")
-	assert_eq(rt._seat_type_for_user_point("ctrlx"), 2, "ctrlx -> controller")
-	assert_eq(rt._seat_type_for_user_point("UseGun01"), 3, "UseGun -> gunner")
-	assert_eq(rt._seat_type_for_user_point("drvrx"), 5, "drvrx -> driver")
-	assert_eq(rt._seat_type_for_user_point("ground"), 0, "non-seat userpoints are ignored")
-	assert_eq(ItemSeatSpecs.seat_type_for_user_point("fooUseGun"), 0,
-			"retail classifies a prefix, not an embedded seat token")
-	assert_eq(ItemSeatSpecs.seat_type_for_user_point("xctrlx"), 0,
-			"embedded controller text is not a model seat row")
-
-
-func test_numbered_seat_userpoints_select_sit_pose_index() -> void:
-	var rt := MissionRuntime.new()
-	add_child_autofree(rt)
-	assert_eq(rt._seat_pose_index_for_user_point("sitex00"), 0)
-	assert_eq(rt._seat_pose_index_for_user_point("ctrlx03"), 3)
-	assert_eq(rt._seat_pose_index_for_user_point("drvrx24"), 24)
-	assert_eq(rt._seat_pose_index_for_user_point("UseGun01"), 0,
-		"UseGun uses emplaced variants from the target, not sit_N userpoint digits")
-	assert_eq(rt._seat_pose_index_for_user_point("sitex99"), 30,
-		"sit_N is clamped to the known sit_0..sit_30 table")
-	assert_eq(rt._seat_pose_index_for_user_point("ground"), 0)
-
-
-func test_seat_userpoints_are_converted_through_vehicle_yaw_zero_basis() -> void:
-	var rt := MissionRuntime.new()
-	add_child_autofree(rt)
-	assert_true(rt._seat_local_from_user_point_position(Vector3(1, 2, 3)).is_equal_approx(Vector3(-1, 3, 2)),
-		"seat offsets use the same yaw-zero model-forward correction as object placement")
-	assert_eq(rt._seat_yaw_offset_from_user_point_rotation(Vector3.BACK), 0,
-		"model forward maps to vehicle yaw")
-	assert_eq(rt._seat_yaw_offset_from_user_point_rotation(Vector3.RIGHT), -90,
-		"model right maps to a left-facing seat offset")
-	assert_eq(rt._seat_yaw_offset_from_user_point_rotation(Vector3.LEFT), 90,
-		"model left maps to a right-facing seat offset")
+# Seat-spec EXTRACTION rules (name-prefix typing incl. embedded-token
+# rejection, sitexNN pose digits + the 0..30 clamp, the yaw-zero local/yaw
+# conversions, addeweap anchor resolution + the parent-root fallback) are
+# native (simassets::extract_item_seat_specs) and pinned by
+# tests/simassets/seat_spec_extract_test.cpp; ItemSeatSpecs keeps only the
+# MCP command-walk mirror exercised below.
 
 
 func test_shared_seat_rules_predict_original_command_rules() -> void:
@@ -92,8 +68,7 @@ func test_production_seat_specs_extract_target_phrase_set_config() -> void:
 	var root := NovaResourceRoot.new()
 	root.set_root_dir(ProjectSettings.globalize_path(
 			"res://../fixtures/3dp/B50Cal"))
-	var spec := ItemSeatSpecs.seat_specs_for_item(
-			root, item_db, 101419, 101419)
+	var spec := item_db.extract_seat_specs_for_item(root, 101419)
 	assert_eq(String(spec.get("error", "")), "")
 	var seats: Array = spec.get("seats", []) as Array
 	assert_eq(seats.size(), 1,
@@ -111,19 +86,27 @@ func test_production_seat_specs_extract_target_phrase_set_config() -> void:
 			"target itemDef+0x86c phrase_set reaches the production seat spec")
 
 
-func test_wire_type_ids_build_the_same_late_vehicle_metadata() -> void:
+func test_wire_type_ids_install_the_same_late_vehicle_metadata() -> void:
 	var item_db := NovaItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
 			"res://../fixtures/def/items.def")), OK)
 	var root := NovaResourceRoot.new()
 	root.set_root_dir(ProjectSettings.globalize_path(
 			"res://../fixtures/3dp/B50Cal"))
-	var specs := ItemSeatSpecs.build_item_seat_specs_for_type_ids(
-			[1419, 1419, 0], root, item_db)
-	assert_eq(specs.size(), 1, "streamed type ids are deduplicated")
-	if specs.size() != 1:
-		return
-	var spec: Dictionary = specs[0]
+	var sim := NovaSimulation.new()
+	autofree(sim)
+	assert_false(sim.install_seat_specs_for_type_ids(
+			item_db, PackedInt32Array([1419])),
+			"the native install has no model source before set_asset_root")
+	sim.set_asset_root(root)
+	assert_true(sim.install_seat_specs_for_type_ids(
+			item_db, PackedInt32Array([1419, 1419, 0])),
+			"the joiner prewarm installs from streamed wire type ids")
+	assert_eq(int(sim.debug_native_pose_stats()["mounted_graphic_sources"]), 1,
+			"duplicate/zero type ids collapse to the one resolved model source")
+	# The metadata the install extracted, via the tooling card over the same
+	# native extractor (NovaItemDatabase.extract_seat_specs_for_item).
+	var spec := item_db.extract_seat_specs_for_item(root, 101419)
 	assert_eq(int(spec.get("item_id", 0)), 101419,
 			"the wire type maps back into the items.def id space")
 	assert_eq(int(spec.get("type_id", 0)), 1419)
@@ -131,33 +114,6 @@ func test_wire_type_ids_build_the_same_late_vehicle_metadata() -> void:
 			"the late join path resolves the model's UseGun seat")
 	assert_true(bool(spec.get("mount_config_valid", false)))
 	assert_eq(int(spec.get("mount_config", -1)), 4)
-
-
-func test_emplacement_specs_resolve_userpoints_and_keep_missing_anchor_fallback() -> void:
-	var data := NovaObjectData.new()
-	assert_eq(data.open_file(ProjectSettings.globalize_path(
-			"res://../fixtures/3dp/B50Cal/B50Cal.3di")), OK)
-	var rows := [
-		{"kind": 0, "key": "addeweap", "userpoint": "Usegun", "item_id": 710101},
-		{"kind": 1, "key": "addeweapG", "userpoint": "missing", "item_id": 710102},
-	]
-	var resolved := ItemSeatSpecs.emplacement_specs_from_model(
-			data, rows, true)
-	assert_eq(resolved.size(), 2, "a missing retail anchor still spawns at parent root")
-	assert_true(resolved[0]["anchor_found"])
-	assert_eq(resolved[0]["bone_index"], 6,
-			"attachment bone is the 1-based source USRP row")
-	assert_eq(resolved[0]["subobject"],
-			int(data.get_user_point_info(5)["subobject"]))
-	assert_eq(resolved[0]["local"],
-			ItemSeatSpecs.seat_local_from_user_point_position(
-					data.get_user_point_info(5)["position"]))
-	assert_false(resolved[1]["anchor_found"])
-	assert_eq(resolved[1]["bone_index"], 0)
-	assert_eq(resolved[1]["local"], Vector3.ZERO,
-			"retail's unresolved-anchor fallback copies the parent root")
-	assert_eq(resolved[1]["key"], "addeweapG",
-			"variant metadata survives model resolution")
 
 
 # An animatable placed entity: play_part_anim marks it for the registry, set_part_phase + Node3D
@@ -395,8 +351,10 @@ func test_joiner_runtime_owns_fire_and_throwable_presenters() -> void:
 		assert_true(rt.get_sim().drain_fire_presentation_events().is_empty(),
 				"the runtime drained the complete fire queue this frame")
 
-	assert_eq(audio.calls.size(), 64,
-			"each remote-style round reaches the joiner's fire presenter once")
+	# Each remote-style round reaches the joiner's fire presenter once. The
+	# SOUND leg is the sim's now (world/fire_sound.h; the fire_sound ctest pins
+	# the gate, and fire_present_pass_test pins the drain-to-audio play) — the
+	# fixture ammo authors no ai_launch set, so no audio call is expected here.
 	assert_eq(int(rt.get_fire_present_stats()["fires"]), 64)
 
 
@@ -537,8 +495,9 @@ func test_tick_realtime_clamps_catchup() -> void:
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container)
 	rt.play()
-	# 1.0 s would be ~62 ticks; the spiral-of-death clamp caps a single frame's catch-up.
-	assert_eq(rt.tick_realtime(1.0), MissionRuntime.MAX_CATCHUP_TICKS, "a long stall is clamped to the catch-up cap")
+	# 1.0 s would be ~62 ticks; the spiral-of-death clamp caps a single frame's
+	# catch-up at the native world::TickAccumulator::kMaxCatchupTicks (S14).
+	assert_eq(rt.tick_realtime(1.0), 31, "a long stall is clamped to the catch-up cap")
 	# The clamp DROPS the backlog (no banked spiral): a tiny delta afterward fires nothing.
 	assert_eq(rt.tick_realtime(0.001), 0, "the backlog was dropped, not carried into the next frames")
 

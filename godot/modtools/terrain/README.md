@@ -28,11 +28,11 @@ config plus its binary assets; Export bakes the runtime terrain.
 
 | Format | Backing library | Notes |
 |---|---|---|
-| `.trn` | [`libs/trn`](../../../libs/trn) | terrain text config: name, sector grid, origin, wrap, asset paths, water |
-| `.cpt` | [`libs/cpt`](../../../libs/cpt) | baked terrain mesh (collision and render) for the runtime |
-| `.til` | [`libs/til`](../../../libs/til) | tile-overlay placement list |
-| heightmap, colormap, detail maps | [`libs/terrain`](../../../libs/terrain) | the raster sources the map is built from |
-| foliage map | [`libs/foliage`](../../../libs/foliage) | per-cell foliage placement |
+| `.trn` | [`engine/formats/trn`](../../../engine/formats/trn) | terrain text config: name, sector grid, origin, wrap, asset paths, water |
+| `.cpt` | [`engine/formats/cpt`](../../../engine/formats/cpt) | baked terrain mesh (collision and render) for the runtime |
+| `.til` | [`engine/formats/til`](../../../engine/formats/til) | tile-overlay placement list |
+| heightmap, colormap, detail maps | [`engine/runtime/terrain`](../../../engine/runtime/terrain) | the raster sources the map is built from |
+| foliage map | [`engine/formats/foliage`](../../../engine/formats/foliage) | per-cell foliage placement |
 
 ## How it is built
 

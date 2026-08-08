@@ -3,8 +3,8 @@
 The original engine's file-resolution pipeline: the boot PFF mount, the
 loose-vs-archive precedence and its `/d` gate, the search-path walk, the PFF
 container/entry formats, and the read disciplines. Reimplementation surface:
-`libs/vfs` (`vfs.cpp` — the engine-faithful mount stack), `libs/pff`
-(container codec), `godot/engine/resource_index/nova_resource_root.cpp`
+`engine/base/vfs` (`vfs.cpp` — the engine-faithful mount stack), `engine/formats/pff`
+(container codec), `godot/adapter/resource_index/nova_resource_root.cpp`
 (`mount_runtime`) and `nova_launch_flags.gd` (`/d`). Binary: retail
 **Jointops.exe** (IDB `Jointops.exe.kong.i64`); produced by the PAR-R7 audit
 (2026-07-05) that converted this system's `UNAUDITED` ledger row into the
@@ -126,7 +126,7 @@ unreferenced) · `0x334180C` `g_FS_SearchLooseFirst` (default 0) ·
 paths (16×16 B) · `0x33428C0` /FRISK gate · `0x829F90` name table[6][260] ·
 `0xB49A54` handles[6] · `0xB4C4D4` /D flag · `0xB4C584` expansion name.
 
-## D-VFS divergence catalog (ours: libs/vfs, libs/pff, NovaResourceRoot)
+## D-VFS divergence catalog (ours: engine/base/vfs, engine/formats/pff, NovaResourceRoot)
 
 | ID | Class | Disposition | One-liner |
 |---|---|---|---|

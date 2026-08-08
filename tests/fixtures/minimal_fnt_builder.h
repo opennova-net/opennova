@@ -1,5 +1,5 @@
 // The minimal set's from-scratch bitmap font — a self-authored 5x7 stroke font
-// rendered 2x into one 256x256 RGBA page and emitted through libs/fnt fnt_write.
+// rendered 2x into one 256x256 RGBA page and emitted through engine/formats/fnt fnt_write.
 // The menu boot loads a HARDCODED font set (Arial12b/14n/14b/16n/16b,
 // Impac22b, Impac38b) [orig: HUD_InitAllFonts @ 0x51ee20]; the stylesheet's
 // DEF_FONTNAME_* keys name fonts too (menu_style.mns). All of them are served

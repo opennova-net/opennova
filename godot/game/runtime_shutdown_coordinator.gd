@@ -5,7 +5,7 @@ extends RefCounted
 ## cancel every frame-awaited load leg, allow those stacks to resume, then drop
 ## renderer resources while the GDExtension and RenderingServer are still alive.
 
-const VegAssetsScript := preload("res://engine/terrain/veg_assets.gd")
+const VegAssetsScript := preload("res://adapter/terrain/veg_assets.gd")
 const DRAIN_FRAMES := 4
 
 var _shell: Node = null

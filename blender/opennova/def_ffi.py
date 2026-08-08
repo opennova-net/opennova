@@ -1,7 +1,7 @@
 """
 ctypes bindings for the DEF file C API (libopennova.so / opennova.dll).
 
-Mirrors structs from libs/def/include/def/def.h.
+Mirrors structs from engine/formats/def/include/def/def.h.
 Only wraps weapons and items parsing (what definitions.py actually consumes).
 """
 
@@ -78,7 +78,7 @@ class DefWeaponDef(ctypes.Structure):
         ("sights_count", ctypes.c_size_t),
         ("raw_lines", ctypes.c_void_p),
         ("raw_lines_count", ctypes.c_size_t),
-        # PLAYER_INFO loadout fields (appended; mirror libs/def/include/def/def.h).
+        # PLAYER_INFO loadout fields (appended; mirror engine/formats/def/include/def/def.h).
         # loadout_selectable/loadout_subclasses/maxclips live above with the armory keys.
         ("loadout_menu_textid", ctypes.c_char * 64),
         ("loadout_menu_ttdesc", ctypes.c_char * 128),

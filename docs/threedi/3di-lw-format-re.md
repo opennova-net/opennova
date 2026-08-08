@@ -140,7 +140,7 @@ per-surface int16; exact unit labels for `>>8` / `×0.62` are still open (§3.3)
 
 The 80-byte face record is a **triangle**; its first 40 bytes follow the v8 `ModelFace`. Fields
 empirically validated across **578,424 triangles in 1,942 LODs**
-(`libs/threedi/src/threedi_lw.cpp`, `tests/threedi/lw_parse_test.cpp`):
+(`engine/formats/threedi/src/threedi_lw.cpp`, `tests/threedi/lw_parse_test.cpp`):
 
 | Off | Type | Field | Validation |
 |---|---|---|---|
@@ -328,7 +328,7 @@ Float math is fine; only axis order, angle unit, and absolute-vs-local rotation 
 
 ### 3.2 Implementation state (at PR #45 close)
 
-- `libs/threedi`: `threedi_lw.h/.cpp` parser (v10) + IR conversion with skeleton/one-weight
+- `engine/formats/threedi`: `threedi_lw.h/.cpp` parser (v10) + IR conversion with skeleton/one-weight
   skinning for flag-1 LODs; parse tests as above. v8 branch and textures deferred.
 - `pyopennova.lw_animation` parses decoded `ANM`, `ACA`, `SAF1`, `KSA`;
   `build_animation_context()` returns `LwAnimationContext` when an ANM exists and ADM/BAD does
@@ -366,7 +366,7 @@ these rows ride whenever an LW import is revived.
 | ID | Divergence | Disposition |
 |---|---|---|
 | D-3DILW-1 | v8 branch deferred: the `threedi_lw` parser handles v10 only; the NovalogicTools v8 layout is unvalidated against the 3 local v8 files (§3.2, §3.3 item 7) | **NEEDS-RE** — validate before adding the v8 branch. |
-| D-3DILW-2 | Textures deferred: v10 geometry + one-weight skinning land in `libs/threedi`, but material textures are not ported (§3.2) | **WITNESSED-READY-DEFERRED** — material parity (§3.3 item 2) is the prerequisite grill. |
+| D-3DILW-2 | Textures deferred: v10 geometry + one-weight skinning land in `engine/formats/threedi`, but material textures are not ported (§3.2) | **WITNESSED-READY-DEFERRED** — material parity (§3.3 item 2) is the prerequisite grill. |
 | D-3DILW-3 | SAF/KSA playback intentionally not applied (`lw_animation_status=parsed_not_applied_pending_re`); the §2 pose recipe is pinned but end-to-end validation against in-game playback is pending (§3.2, §3.3 item 1) | **NEEDS-RE** — prove the recipe against rendered playback. |
 
 The remaining §3.3 items (collision blobs, UV/render-state semantics, geometry-scale labels, the

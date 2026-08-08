@@ -1,4 +1,4 @@
-// libs/playersav — weapon.sav player-profile parse/serialize tests.
+// engine/formats/playersav — weapon.sav player-profile parse/serialize tests.
 //
 // Every fixture is built in code: no retail file is committed. The optional
 // last leg reads the maintainer's real weapon.sav when OPENNOVA_WEAPON_SAV

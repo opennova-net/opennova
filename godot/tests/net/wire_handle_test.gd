@@ -1,8 +1,8 @@
 extends GutTest
 
 # Pins the GDScript wire-handle constants to the witnessed layout. The native
-# twin (libs/npwire/include/npwire/wire_handle.h) static_asserts the same
-# values, and libs/netsim pins both against world::EntityHandle — this is the
+# twin (engine/net/npwire/include/npwire/wire_handle.h) static_asserts the same
+# values, and engine/net/netsim pins both against world::EntityHandle — this is the
 # GDScript leg of that agreement. [orig: EntityPool_FindByNetId @ 0x4f0a20]
 
 

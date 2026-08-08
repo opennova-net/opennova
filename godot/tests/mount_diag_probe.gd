@@ -1,6 +1,6 @@
 extends SceneTree
 
-const ItemSeatSpecs := preload("res://engine/world/item_seat_specs.gd")
+const ItemSeatSpecs := preload("res://adapter/world/item_seat_specs.gd")
 
 
 func _init() -> void:
@@ -58,15 +58,18 @@ func _init() -> void:
 		if not target.is_empty():
 			var type_id := int(target.get("type_id", 0))
 			if not seat_cache.has(type_id):
-				seat_cache[type_id] = ItemSeatSpecs.seat_specs_for_item(
-						root, item_db, int(target.get("item_id", 0)), type_id, true)
+				# S16: extraction is native; the tooling card carries the same
+				# seat rows the sim's boot install extracts.
+				seat_cache[type_id] = item_db.extract_seat_specs_for_item(
+						root, int(target.get("item_id", 0)))
 			spec = seat_cache[type_id]
 			seats = spec.get("seats", [])
 			target_summary.merge(_entity_summary(target, item_db), true)
 			target_summary["seat_count"] = seats.size()
 			target_summary["seat_error"] = String(spec.get("error", ""))
 			target_summary["model"] = String(spec.get("model", ""))
-			target_summary["model_seat_points"] = _model_seat_points(root, String(spec.get("model", "")))
+			target_summary["model_seat_points"] = _model_seat_points(
+					root, String(spec.get("model", "")), seats)
 		var prediction := ItemSeatSpecs.predict_best_seat(seats, command_id)
 		rows.append({
 			"organic": _entity_summary(organic, item_db),
@@ -80,8 +83,20 @@ func _init() -> void:
 		})
 
 	var sim := NovaSimulation.new()
-	sim.set_item_seat_specs(ItemSeatSpecs.build_item_seat_specs(mission, root, item_db, true))
+	# S16: the sim extracts seat specs natively from its own asset root; seeds
+	# are the mission entities' type ids (the Dictionary install seam is gone).
+	sim.set_asset_root(root)
+	var seed_type_ids := PackedInt32Array()
+	var seeded := {}
+	for raw in entities:
+		var entity: Dictionary = raw
+		var seed_type := int(entity.get("type_id", 0))
+		if seed_type > 0 and not seeded.has(seed_type):
+			seeded[seed_type] = true
+			seed_type_ids.append(seed_type)
 	if sim.load_from_mission_data(mission):
+		if not sim.install_seat_specs_for_type_ids(item_db, seed_type_ids):
+			print("MOUNT_LIVE_ERROR install_seat_specs_for_type_ids failed")
 		for i in range(int(sim.get_entity_count())):
 			var card: Dictionary = sim.get_entity_debug(i)
 			var command_id := int(card.get("waypoint_id", 0))
@@ -122,7 +137,11 @@ func _entity_summary(entity: Dictionary, item_db: NovaItemDatabase) -> Dictionar
 	return out
 
 
-func _model_seat_points(root: NovaResourceRoot, model_name: String) -> Array:
+# The native card's seat rows joined back onto the model's USRP table
+# (bone_index is the 1-based row), with the part-PANM transform delta the
+# card does not carry.
+func _model_seat_points(root: NovaResourceRoot, model_name: String,
+		native_seats: Array) -> Array:
 	var out: Array = []
 	if model_name.is_empty():
 		return out
@@ -130,14 +149,14 @@ func _model_seat_points(root: NovaResourceRoot, model_name: String) -> Array:
 	if data.open_from_resource_root(root, model_name) != OK:
 		return out
 	var part_xforms: Dictionary = data.evaluate_panm(0, 0, {})
-	for i in range(data.get_user_point_count()):
-		var up: Dictionary = data.get_user_point_info(i)
-		var source_name := String(up.get("name", ""))
-		var seat_type := ItemSeatSpecs.seat_type_for_user_point(source_name)
-		if seat_type == ItemSeatSpecs.SEAT_NONE:
+	for raw in native_seats:
+		var seat: Dictionary = raw
+		var userpoint_index := int(seat.get("bone_index", 0)) - 1
+		if userpoint_index < 0 or userpoint_index >= data.get_user_point_count():
 			continue
+		var up: Dictionary = data.get_user_point_info(userpoint_index)
 		var raw_position: Vector3 = up.get("position", Vector3.ZERO)
-		var raw_bms := ItemSeatSpecs.seat_local_from_user_point_position(raw_position)
+		var raw_bms := _display_mission_local(raw_position)
 		var subobject := int(up.get("subobject", -1))
 		var transformed_position := raw_position
 		var xform_found := false
@@ -145,16 +164,17 @@ func _model_seat_points(root: NovaResourceRoot, model_name: String) -> Array:
 			var xf: Transform3D = part_xforms[subobject]
 			transformed_position = xf * raw_position
 			xform_found = true
-		var transformed_bms := ItemSeatSpecs.seat_local_from_user_point_position(transformed_position)
+		var transformed_bms := _display_mission_local(transformed_position)
 		out.append({
-			"userpoint_index": i,
-			"source_name": source_name,
-			"seat_type": seat_type,
-			"pose_index": ItemSeatSpecs.seat_pose_index_for_user_point(source_name),
+			"userpoint_index": userpoint_index,
+			"source_name": String(seat.get("source_name", up.get("name", ""))),
+			"seat_type": int(seat.get("type", 0)),
+			"pose_index": int(seat.get("pose_index", 0)),
 			"subobject": subobject,
 			"point_type": int(up.get("point_type", 0)),
 			"raw_godot": raw_position,
 			"raw_bms": raw_bms,
+			"native_local": seat.get("local", Vector3.ZERO),
 			"part_transform_found": xform_found,
 			"part_transform_origin": (part_xforms[subobject] as Transform3D).origin if xform_found else Vector3.ZERO,
 			"transformed_godot": transformed_position,
@@ -162,6 +182,14 @@ func _model_seat_points(root: NovaResourceRoot, model_name: String) -> Array:
 			"delta_bms": transformed_bms - raw_bms,
 		})
 	return out
+
+
+# Display-only Godot->mission axis flip for the diag rows above; the
+# production conversion is native (simassets::seat_local_from_user_point,
+# pinned by tests/simassets/seat_spec_extract_test.cpp) and surfaces here as
+# each row's "native_local".
+func _display_mission_local(p: Vector3) -> Vector3:
+	return Vector3(-p.x, p.z, p.y)
 
 
 func _body_anchor_diag(root: NovaResourceRoot, item_db: NovaItemDatabase, card: Dictionary, by_ssn: Dictionary) -> Dictionary:
@@ -235,7 +263,8 @@ func _body_visual_anchor_diag(root: NovaResourceRoot, item_db: NovaItemDatabase,
 		return out
 	if not adm_name.to_lower().ends_with(".adm"):
 		adm_name += ".adm"
-	var model_name := ItemSeatSpecs.model_name_for_graphic(graphic)
+	# SimModelCache's graphic -> model-file rule (basename + ".3di").
+	var model_name := graphic.get_file().get_basename() + ".3di"
 	var data := NovaObjectData.new()
 	if data.open_from_resource_root(root, model_name) != OK:
 		out["error"] = "model_load_failed"

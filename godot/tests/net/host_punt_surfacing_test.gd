@@ -8,7 +8,7 @@ extends GutTest
 #  Server_LogCRCMismatchPunt @0x517ed0 -> CNapiNPConnection_SendChatMessage @0x4c7ef0 ->
 #  NapiNPDataTransfer_SendDescription @0x628c80].
 #
-# libs/npruntime decodes the record and raises a session loss from it (the wire and
+# engine/net/npruntime decodes the record and raises a session loss from it (the wire and
 # runtime halves are pinned by tests/npruntime/host_punt_test). This file covers what the
 # PLAYER gets: retail's presentation is the ordinary mission exit, not a dialog — the
 # disconnect handler routes DPC 33 to Input_QueueEvent(3) @0x4c67a4, whose action sets
@@ -18,7 +18,7 @@ extends GutTest
 # @0x5684a8 -> @0x568654]. So the bar is: the deploy screen goes away, the world is torn
 # down, and the shell is back in its menu with the reason reported.
 
-const DeployHost := preload("res://engine/world/deploy_screen_presenter.gd")
+const DeployHost := preload("res://adapter/world/deploy_screen_presenter.gd")
 const MAIN_GAME_SCENE := preload("res://game/main_game.tscn")
 const FIXTURE_DIR := "res://../fixtures/minimal/resources"
 const TMP_DIR := "res://.godot/host_punt_surfacing_test"

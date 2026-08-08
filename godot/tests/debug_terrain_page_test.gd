@@ -4,7 +4,7 @@ extends GutTest
 # dictionaries from duck-typed stub worlds, keeps its knobs mirroring the live
 # terrain node, and degrades to empty states without a world.
 
-const PageScript := preload("res://engine/debug/pages/debug_terrain_page.gd")
+const PageScript := preload("res://adapter/debug/pages/debug_terrain_page.gd")
 
 
 class StubTerrain:

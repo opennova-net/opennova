@@ -7,7 +7,7 @@ extends GutTest
 # label-free, per-frame visible flips reuse the cached geometry, geometry
 # changes rebuild, and a vanished sim clears everything instead of erroring.
 
-const ViewScript := preload("res://engine/debug/occlusion_debug_view.gd")
+const ViewScript := preload("res://adapter/debug/occlusion_debug_view.gd")
 
 
 # Node-based doubles: the view's setup takes the owner's world NODE (a GameWorld

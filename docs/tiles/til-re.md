@@ -3,14 +3,14 @@
 Structure-mapping record for the original engine's **terrain tile overlays**
 (the `.til` water/decal tile placements painted over the terrain surface) — the
 12-byte overlay entry, the atlas UV mapping, and the flip/rotate transform. The
-reimplementation surface is `libs/til` (`til.h` / `til_io.cpp` /
+reimplementation surface is `engine/formats/til` (`til.h` / `til_io.cpp` /
 `til_overlay_bake.cpp`) and the Godot layer. Binary: retail **Jointops.exe** (IDB
 `Jointops.exe.kong.i64`). All addresses below are that binary's. This file is
 the committed home for the `D-TIL-…` divergence catalog. Produced by a read-only
 IDA audit (PAR-R3, 2026-07-05); no IDB renames were made. It converts the
 **Tiles** system from `UNAUDITED` to tracked (divergence-ledger.md).
 
-Note on binaries: `libs/til` was originally RE'd from `jodemo.exe`
+Note on binaries: `engine/formats/til` was originally RE'd from `jodemo.exe`
 (`Terrain_DrawTileOverlays2D @ 0x5C79C0`, `sub_5C42B0`); this audit re-confirms
 the format and transforms against the **retail** render path
 `PolyTrn_RenderTile @ 0x60df0d → render_water_quad @ 0x604700`.
@@ -89,7 +89,7 @@ the 128-LRU cache, and foliage AABB scan) is byte/behaviour-exact against retail
 
 ## Cross-references
 
-- Reimpl: `libs/til` (`til.h`/`til_io.cpp`/`til_foliage_blocker.cpp`/`til_overlay_bake.cpp`), consumed by
+- Reimpl: `engine/formats/til` (`til.h`/`til_io.cpp`/`til_foliage_blocker.cpp`/`til_overlay_bake.cpp`), consumed by
   the Godot terrain layer.
 - Wire form of the same array: [net/novaworld-net-re.md](../net/novaworld-net-re.md)
   §5.37 / D-NET-83 (`serialize_terrain_tiles @ 0x6080F0`).

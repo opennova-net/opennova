@@ -5,7 +5,7 @@
 //     bytes, with no opennova::rtxt code in the loop. It documents the format as
 //     witnessed in IDA (TextResource_FixupPointers @ 0x75D050) and guards against
 //     a self-consistent-but-wrong reimpl coercing parity green.
-//   * check_parity() runs parse -> write -> byte-compare through libs/rtxt.
+//   * check_parity() runs parse -> write -> byte-compare through engine/formats/rtxt.
 #pragma once
 
 #include <rtxt/rtxt.h>

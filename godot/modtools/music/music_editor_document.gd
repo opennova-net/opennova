@@ -721,7 +721,7 @@ func _section_window_end(lines: PackedStringArray, header_idx: int) -> int:
 # compound if/on blocks that a brace scanner mishandles. The C++ twin of these
 # transforms is proven byte-stable in tests/mus/mus_structured_section_edit_test.cpp.
 
-# MusAstStmtKind mirror (libs/mus/include/mus/ast.h). The annotated rows carry the
+# MusAstStmtKind mirror (engine/formats/mus/include/mus/ast.h). The annotated rows carry the
 # kind so the anchor logic can find a section's terminator.
 const _K_PLAY := 0
 const _K_TRANSITION := 1

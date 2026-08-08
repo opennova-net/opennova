@@ -1,6 +1,6 @@
 extends GutTest
 
-# Phase 1 bindings: NovaMissionData (libs/mission) + NovaItemDatabase (libs/def),
+# Phase 1 bindings: NovaMissionData (engine/runtime/mission) + NovaItemDatabase (engine/formats/def),
 # and the entity item_id -> items.def graphic resolution chain that "populate the
 # world" depends on. Uses committed fixtures (the items.def fixture is a small
 # 12-item subset, so resolution is partial by design).
@@ -521,7 +521,7 @@ func test_set_entity_property_int_supports_behavior_fields() -> void:
 func test_behavior_spin_table_matches_engine_setter() -> void:
 	# Drift guard: every numeric field the inspector's Behavior panel renders (MissionEntityFields,
 	# the single UI table) must be accepted by the engine's set_entity_property_int (whose name->member
-	# map lives in libs/mission). A typo'd or stale property in the table would otherwise bind a row
+	# map lives in engine/runtime/mission). A typo'd or stale property in the table would otherwise bind a row
 	# whose edits are silently rejected. Section markers carry no property and are skipped.
 	var m := NovaMissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)

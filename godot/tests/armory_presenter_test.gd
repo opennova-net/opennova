@@ -1,6 +1,6 @@
 extends GutTest
 
-const ArmoryPresenter := preload("res://engine/world/armory_presenter.gd")
+const ArmoryPresenter := preload("res://adapter/world/armory_presenter.gd")
 const TMP_DIR := "res://.godot/armory_presenter_test"
 
 

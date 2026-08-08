@@ -3,9 +3,61 @@ extends GutTest
 # The SP-as-listen-server present path (ADR 0009/0011). With the listen server on,
 # NovaSimulation.get_present_snapshot() returns the state the LOCAL CLIENT decoded off
 # the in-process loopback — real entity state serialized through the wire codec
-# (libs/netsim NetSystem) and decoded back (libs/novaworld ingame_decode) — instead of
+# (engine/net/netsim NetSystem) and decoded back (engine/net/novaworld ingame_decode) — instead of
 # reading the authoritative AI pool directly. This is the in-Godot end of the Phase 1
 # loopback identity guard (tests/netsim/loopback_identity_test).
+
+# Native seat/mount fixtures (S16): the Dictionary seat seam is gone — the sim
+# extracts seats/attachments from items.def rows + model userpoints through its
+# own asset root. NovaResourceRoot rejects user:// paths, so the composed loose
+# roots live under OS.get_cache_dir().
+
+var _native_fixture_dirs: Array[String] = []
+
+
+func after_each() -> void:
+	for dir in _native_fixture_dirs:
+		for file_name in DirAccess.get_files_at(dir):
+			DirAccess.remove_absolute(dir.path_join(file_name))
+		DirAccess.remove_absolute(dir)
+	_native_fixture_dirs.clear()
+
+
+func _native_fixture_dir() -> String:
+	var dir := OS.get_cache_dir().path_join("nova_listen_native_%d_%d" % [
+			Time.get_ticks_usec(), _native_fixture_dirs.size()])
+	assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
+	_native_fixture_dirs.append(dir)
+	return dir
+
+
+func _write_fixture_text(dir: String, name: String, text: String) -> void:
+	var file := FileAccess.open(dir.path_join(name), FileAccess.WRITE)
+	assert_not_null(file)
+	if file == null:
+		return
+	file.store_string(text)
+	file.close()
+
+
+func _fixture_items_text() -> String:
+	return FileAccess.get_file_as_bytes(
+			"res://../fixtures/def/items.def").get_string_from_ascii()
+
+
+# Compose <dir>/items.def from the fixture superset text, load it, wire the dir
+# as the sim's asset root, and run the native seat-spec install for type_ids.
+func _install_native_seats(sim: NovaSimulation, dir: String, items_text: String,
+		type_ids: PackedInt32Array) -> NovaItemDatabase:
+	_write_fixture_text(dir, "items.def", items_text)
+	var item_db := NovaItemDatabase.new()
+	assert_eq(item_db.load(dir.path_join("items.def")), OK)
+	var seat_root := NovaResourceRoot.new()
+	assert_eq(seat_root.set_root_dir(dir), OK)
+	sim.set_asset_root(seat_root)
+	assert_true(sim.install_seat_specs_for_type_ids(item_db, type_ids),
+			"native seat-spec install over the composed fixture root")
+	return item_db
 
 
 func _present_row_base_for_handle(
@@ -43,18 +95,20 @@ func test_mounted_local_overlay_matches_packed_present_for_valid_zero_and_six() 
 
 		var sim := NovaSimulation.new()
 		sim.enable_listen_server(true)
-		sim.set_item_seat_specs([{
-			"type_id": 1294,
-			"mount_config_valid": true,
-			"mount_config": config_value,
-			"seats": [{
-				"type": 3,
-				"bone_index": 6,
-				"position": Vector3.ZERO,
-				"source_name": "UseGun",
-			}],
-			"primary_weapon": "WPN_AVENGER",
-		}])
+		# B50cal's authored Usegun row (bone 6) + the fixture def's WPN_AVENGER
+		# primary; phrase_set is authored per config — an explicit 0 must
+		# survive the def parser as a real value, not become unknown.
+		var dir := _native_fixture_dir()
+		var model_file := FileAccess.open(
+				dir.path_join("B50cal.3di"), FileAccess.WRITE)
+		assert_not_null(model_file)
+		model_file.store_buffer(FileAccess.get_file_as_bytes(
+				"res://../fixtures/3dp/B50Cal/B50Cal.3di"))
+		model_file.close()
+		_install_native_seats(sim, dir, _fixture_items_text().replace(
+				"id 101294",
+				"id 101294\n  graphic B50cal\n  phrase_set %d" % config_value),
+				PackedInt32Array([1294]))
 		assert_true(sim.load_from_mission_data(md))
 		assert_true(sim.has_local_player())
 		# NAPI authority bypasses the offline player's null-EquippedSlot reject
@@ -212,22 +266,14 @@ func test_items_attachment_follows_through_listen_client() -> void:
 	assert_false(vehicle.is_empty())
 	var sim := NovaSimulation.new()
 	sim.enable_listen_server(true)
-	sim.set_item_seat_specs([{
-		"type_id": 1291,
-		"emplacement_attachments": [{
-			"item_id": 101419,
-			"kind": 0,
-			"stored_slot": 1,
-			"anchor_found": false,
-			"local": Vector3(2, 0, 0),
-		}],
-	}])
+	# The authored addeweap row names a userpoint its (unresolved Dbuggy1)
+	# graphic cannot anchor: the child keeps the parent-root fallback frame and
+	# the first authored row's stored slot — the old missing-anchor spec.
+	var dir := _native_fixture_dir()
+	var items := _install_native_seats(sim, dir, _fixture_items_text().replace(
+			"id 101291", "id 101291\n  addeweap gunanchor 101419"),
+			PackedInt32Array([1291]))
 	assert_true(sim.load_from_mission_data(md))
-	var root := NovaResourceRoot.new()
-	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
-			"res://../fixtures/def")), OK)
-	var items := NovaItemDatabase.new()
-	assert_eq(items.load_from_resource_root(root, "items.def"), OK)
 	sim.resolve_item_traits(items)
 
 	# Fold the initial 0x0D pool stream and capture the child's spawn pose.

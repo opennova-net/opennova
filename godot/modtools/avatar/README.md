@@ -7,7 +7,7 @@ Format and behavior are witnessed in
 [docs/playerinfo/avatars-re.md](../../../docs/playerinfo/avatars-re.md)
 (`[orig: CAvatarDefs_Init @ 0x57b180]`,
 `[orig: CAvatarDefs_ParseConfigLine @ 0x57a3f0]`); the parser, writer, and
-authoring model live in `libs/avatars` behind the `NovaAvatarDatabase`
+authoring model live in `engine/formats/avatars` behind the `NovaAvatarDatabase`
 GDExtension class.
 
 ## Document
@@ -44,7 +44,7 @@ and calling the workspace's `apply_model()`.
 
 ## Preview
 
-`engine/avatar/avatar_preview.gd` (`AvatarPreview extends Control`, in the
+`adapter/avatar/avatar_preview.gd` (`AvatarPreview extends Control`, in the
 shared engine layer because the game's PLAYER_INFO menu host mounts the same
 preview) composes the resolved combo's third-person head / body `.3di` models
 into one `SubViewport` scene under a shared environment, framed by a fly

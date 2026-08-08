@@ -1,8 +1,8 @@
-// Terrain world->source coordinate transform kernel (libs/terrain_query/coords).
+// Terrain world->source coordinate transform kernel (engine/runtime/terrain_query/coords).
 //
 // Characterizes two things the A2 refactor must preserve byte-for-byte:
 //   1. The RUNTIME formula currently inlined as resolve_world_sample() in
-//      godot/engine/terrain/nova_terrain_data.cpp (float, & 0xF grid wrap, no
+//      godot/adapter/terrain/nova_terrain_data.cpp (float, & 0xF grid wrap, no
 //      id clamp, no local clamp). ref_resolve_world_sample() below is a verbatim
 //      copy of that formula and is the oracle for the runtime-mode kernel.
 //   2. The EDITOR guard divergences ported from

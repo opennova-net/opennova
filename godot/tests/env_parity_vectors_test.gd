@@ -5,9 +5,9 @@ extends GutTest
 #
 # Pins the GDScript-visible outputs of the environment stack —
 # NovaEnvironment / NovaWeather / NovaSky / NovaWater (+ the reachable
-# NovaCelestial math via EnvFile statics), godot/engine/environment/*.gd —
+# NovaCelestial math via EnvFile statics), godot/adapter/environment/*.gd —
 # against committed vectors over a deterministic in-code corpus, so ENG-2 can
-# port the math into libs/env and delete the GDScript with these staying green
+# port the math into engine/formats/env and delete the GDScript with these staying green
 # pre/post. Structure mirrors tests/novaworld/nw_codec_identity_test.cpp (the
 # NET-0 identity gate): deterministic corpus, committed inline table, dump
 # mode, and the same update discipline.
@@ -53,7 +53,7 @@ extends GutTest
 #   #25 CLOSED 2026-07-06 (the ENG-2 sky-leg re-grill): the PRNG seed is
 #   0x12333333 [orig: the mov imm32 @ 0x57d2ff in Environment_SnapStateToTargets
 #   @ 0x57d1e0] - 0x12345633 was a transcription error shared with the WAC RNG
-#   (same constant @ 0x4f966b, libs/wac fixed in the same commit). The
+#   (same constant @ 0x4f966b, engine/runtime/wac fixed in the same commit). The
 #   sway-bearing keys re-dumped under that witness: wa/k004..k256, wb/k016..k096,
 #   wc/long_k01/k09/k12, we/k008..k064 (the sway token only; wa/k001 is
 #   seed-invariant - both seeds share low-12 bits at tick 1). Every level-only
@@ -66,7 +66,7 @@ extends GutTest
 #   [orig: render_skybox @ 0x5791de..0x579260] (the old float port added it
 #   positively on both axes and skipped the ramp). Key shape is now the four
 #   pushed offsets. sky/verts re-dumped: the mesh comes from
-#   libs/env build_sky_dome_mesh (float32-stored, v22.z last-digit shift);
+#   engine/formats/env build_sky_dome_mesh (float32-stored, v22.z last-digit shift);
 #   sky/mesh (counts + witnessed winding) byte-identical.
 #   Water leg 2026-07-06 (env #28 fixed / #31 minted-and-closed / #29-#30
 #   minted): NEW water/noise (the per-frame noise color + DuDv texture heads
@@ -148,11 +148,11 @@ extends GutTest
 # loudly so a dump run is never mistaken for a green run.
 # =============================================================================
 
-const NovaEnvironmentScript = preload("res://engine/environment/nova_environment.gd")
-const NovaWeatherScript = preload("res://engine/environment/nova_weather.gd")
-const NovaSkyScript = preload("res://engine/environment/nova_sky.gd")
-const NovaWaterScript = preload("res://engine/environment/nova_water.gd")
-const NovaCelestialScript = preload("res://engine/environment/nova_celestial.gd")
+const NovaEnvironmentScript = preload("res://adapter/environment/nova_environment.gd")
+const NovaWeatherScript = preload("res://adapter/environment/nova_weather.gd")
+const NovaSkyScript = preload("res://adapter/environment/nova_sky.gd")
+const NovaWaterScript = preload("res://adapter/environment/nova_water.gd")
+const NovaCelestialScript = preload("res://adapter/environment/nova_celestial.gd")
 
 # The engine tick [docs/engine-primer.md: 62 Hz].
 const TICK := 1.0 / 62.0

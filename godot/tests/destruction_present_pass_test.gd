@@ -1,7 +1,7 @@
 extends GutTest
 
-const DestructionPresentPass := preload('res://engine/world/destruction_present_pass.gd')
-const MissionObjectPlacer := preload('res://engine/mission/mission_object_placer.gd')
+const DestructionPresentPass := preload('res://adapter/world/destruction_present_pass.gd')
+const MissionObjectPlacer := preload('res://adapter/mission/mission_object_placer.gd')
 
 
 class SimStub:
@@ -148,10 +148,15 @@ class PlacerStub:
 
 func _piece(slot: int, generation: int, type_index: int, pos: Vector3,
 		settled: bool = false) -> Dictionary:
+	# The drain rows carry the type's trail from the ONE native table
+	# (world/destruction death_piece_trail_effect, S12b) — mirror the rows
+	# these tests use [orig: g_death_piece_types @ 0x8404f0 +0x2C].
+	var trail_by_type := {0: "", 1: "Effect_VexpM", 2: "Effect_VexpS"}
 	return {
 		'slot': slot,
 		'generation': generation,
 		'type_index': type_index,
+		'trail': String(trail_by_type.get(type_index, "")),
 		'pos': pos,
 		'settled': settled,
 	}

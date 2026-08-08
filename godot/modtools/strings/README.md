@@ -35,7 +35,7 @@ workspace reopens your last table when you return. This is a pure data editor: n
 
 | Format | Backing library | Notes |
 |---|---|---|
-| RTXT (`.bin`) | [`libs/rtxt`](../../../libs/rtxt) | localized string table: a text blob, a per-entry table (text offset, X/Y position, section), and trailing section and key metadata. Binary, little-endian |
+| RTXT (`.bin`) | [`engine/formats/rtxt`](../../../engine/formats/rtxt) | localized string table: a text blob, a per-entry table (text offset, X/Y position, section), and trailing section and key metadata. Binary, little-endian |
 
 ## How it is built
 

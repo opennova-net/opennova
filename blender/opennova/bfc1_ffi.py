@@ -1,7 +1,7 @@
 """
 ctypes bindings for the BFC1 decompression C API (libopennova.so / opennova.dll).
 
-Mirrors libs/bfc1/include/bfc1/bfc1.h.
+Mirrors engine/formats/bfc1/include/bfc1/bfc1.h.
 """
 
 import ctypes

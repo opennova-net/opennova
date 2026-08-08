@@ -9,7 +9,7 @@ namespace opennova::server::github {
 // git tag onto an expansion's repository. Ported from onnet's
 // onnw/admin.py:_github_request (:40-67) and _create_git_tag (:70-111),
 // which used Python urllib; here it's libcurl (the server has no other
-// outbound HTTP client). Lives at apps/novaworld_server/ — never in libs/ —
+// outbound HTTP client). Lives at apps/novaworld_server/ — never in engine/ —
 // so libcurl stays out of the portable core and only links when
 // BUILD_NOVAWORLD_HTTP is ON.
 //

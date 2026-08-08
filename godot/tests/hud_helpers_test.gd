@@ -1,6 +1,6 @@
 extends GutTest
 
-# Pure-logic coverage for the shell-neutral HUD view helpers (godot/engine/ui/hud_*.gd).
+# Pure-logic coverage for the shell-neutral HUD view helpers (godot/adapter/ui/hud_*.gd).
 # Rendering is validated visually in the ONED preview / runtime; here we lock the math.
 
 
@@ -41,19 +41,26 @@ func test_scale_rect_identity() -> void:
 
 
 func test_half_bright() -> void:
-	assert_eq(HudText.half_bright(Color(1, 1, 1, 1)), Color(0.5, 0.5, 0.5, 1.0))
+	# The native op is the BYTE-EXACT witnessed form ((color >> 1) & 0x7F7F7F):
+	# a 255 channel halves to 127, not the float 0.5 the old shell approximation
+	# produced.
+	assert_eq(HudText.half_bright(Color(1, 1, 1, 1)),
+			Color(127 / 255.0, 127 / 255.0, 127 / 255.0, 1.0))
 	# Alpha is forced opaque regardless of input.
 	var hb := HudText.half_bright(Color(0.8, 0.4, 0.2, 0.25))
-	assert_almost_eq(hb.r, 0.4, 0.001)
-	assert_almost_eq(hb.g, 0.2, 0.001)
-	assert_almost_eq(hb.b, 0.1, 0.001)
+	assert_almost_eq(hb.r, 102 / 255.0, 0.001)  # u8(204) >> 1
+	assert_almost_eq(hb.g, 51 / 255.0, 0.001)   # u8(102) >> 1
+	assert_almost_eq(hb.b, 25 / 255.0, 0.001)   # u8(51) >> 1
 	assert_eq(hb.a, 1.0, "Half-bright forces opaque alpha.")
 
 
 func test_health_thresholds() -> void:
-	# Witnessed thresholds: 0xC000 good, 0x6FFF mid.
-	assert_almost_eq(HudHealthBar.GOOD_THRESHOLD, 0.75, 0.0001)
-	assert_almost_eq(HudHealthBar.MID_THRESHOLD, 0.4374, 0.001)
+	# Witnessed 16.16 thresholds, now native (hud/hud_math.h): 0xC000 good,
+	# 0x6FFF mid — 0 good / 1 mid / 2 bad through the bound band.
+	assert_eq(NovaHudPos.health_color_band(0.7501), 0)
+	assert_eq(NovaHudPos.health_color_band(0.75), 1)
+	assert_eq(NovaHudPos.health_color_band(0.4375), 1)
+	assert_eq(NovaHudPos.health_color_band(0.4374), 2)
 
 
 func test_attach_label_dim() -> void:
@@ -139,6 +146,13 @@ func test_fade_alphas() -> void:
 	# ALPHAFADE 30 50 3 -> base 76, max 127, ramp 186 ticks.
 	assert_eq(int(30 * HudFade.PERCENT_TO_ALPHA), 76)
 	assert_eq(int(50 * HudFade.PERCENT_TO_ALPHA), 127)
+	# The witnessed literals pin the BINDING (the single native source) — a
+	# re-witness that changes hud_math.h must show up here, not drift silently.
+	assert_almost_eq(float(NovaHudPos.percent_to_alpha()), 2.55, 0.0001)
+	assert_eq(NovaHudPos.MESSAGE_LIFE_TICKS, 930)
+	assert_eq(NovaHudPos.MESSAGE_EXPIRY_STAGGER, 186)
+	assert_eq(NovaHudPos.MESSAGE_TEXT_MAX, 119)
+	assert_eq(NovaHudPos.MESSAGE_SLOT_COUNT, 40)
 	assert_eq(int(3 * HudFade.SECONDS_TO_TICKS), 186)
 	# Fractional file fields survive: the original converts through atof
 	# [orig: @0x5a0882..0x5a08c2] — 1.5 s is a 93-tick ramp, not 62.

@@ -118,7 +118,7 @@ func test_runtime_and_oned_share_tile_overlay_composition() -> void:
 	var shared := _compact(_source("res://shaders/terrain_lighting.gdshaderinc"))
 	var runtime := _compact(_source("res://shaders/terrain.gdshader"))
 	var editor := _compact(_source("res://shaders/terrain_editor.gdshader"))
-	var environment := _compact(_source("res://engine/environment/nova_environment.gd"))
+	var environment := _compact(_source("res://adapter/environment/nova_environment.gd"))
 
 	assert_true(shared.contains("uniformsampler2Du_tile_overlay"),
 		"The tile composite input must live in the surface shader shared by runtime and ONED.")

@@ -2,7 +2,7 @@ class_name SnapshotEditSession
 extends RefCounted
 
 ## Whole-document undo/redo over the engine's shared core (NovaEditHistory
-## boxing libs/oned_edit), shared by the Node documents (EditorDocument) and
+## boxing engine/base/oned_edit), shared by the Node documents (EditorDocument) and
 ## the RefCounted resource documents (EditorResourceDocument). The document
 ## provides `_snapshot()` (null = not opted in / nothing loaded; every method
 ## is then inert), `_apply_snapshot(snap)`, `_history_applied(kind)` and

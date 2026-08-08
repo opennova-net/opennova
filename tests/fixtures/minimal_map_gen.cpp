@@ -1,6 +1,6 @@
 // Generator + guard for the minimal set's custom map — the .env (time-of-day)
 // and .bms (mission: header + team spawn markers) legs. Authored from scratch
-// by libs/env + libs/mission (no retail asset); the .trn terrain leg rides its
+// by engine/formats/env + engine/runtime/mission (no retail asset); the .trn terrain leg rides its
 // own slice. Emits with OPENNOVA_WRITE_MINIMAL_FIXTURES=1; otherwise guards
 // each file round-trips (env: save->load; bms: write->parse) and carries the
 // minimal content a host+join needs (a named mission on the minimal terrain,

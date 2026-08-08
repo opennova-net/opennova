@@ -1,4 +1,4 @@
-// build_player_uplink (libs/netsim) is the JOINER-side inverse of apply_player_intent: it
+// build_player_uplink (engine/net/netsim) is the JOINER-side inverse of apply_player_intent: it
 // synthesizes the C2S 0x0C extended (type-10) uplink BODY from the joiner's own live
 // local-player state. This proves the full joiner->host round-trip — build the uplink from a
 // source pose, encode it (+ the 5-B sub-header), decode it, and read-apply it to the joiner's

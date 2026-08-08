@@ -4,7 +4,7 @@ extends GutTest
 # payload pins the visual language for live, masked, and unresolved person
 # sections without needing a mission or NovaSimulation instance.
 
-const ViewScript := preload("res://engine/debug/hitbox_debug_view.gd")
+const ViewScript := preload("res://adapter/debug/hitbox_debug_view.gd")
 
 
 class FakeSim:

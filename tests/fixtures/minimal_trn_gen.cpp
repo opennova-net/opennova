@@ -2,7 +2,7 @@
 // config ties the terrain set together: it names the .cpt polydata (produced by
 // the packaging step's build_terrain run) plus the source art the packaging
 // step authors (colormap/detailmaps/tilestrip TGAs, charmap/foliagemap PCX).
-// Authored from scratch by libs/trn save_trn (no retail asset), modeled on
+// Authored from scratch by engine/formats/trn save_trn (no retail asset), modeled on
 // fixtures/godot/dvxi5/Dvxi5.trn for a small flat map. The heavy .cpt/tiles are
 // generate-at-package (not committed); this config IS committed + round-trip
 // guarded. See fixtures/minimal/README.md.

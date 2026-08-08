@@ -73,7 +73,7 @@ func _run() -> void:
 	# the app's own settings seam; the expansion resets to base alongside it.
 	var res_dir := OS.get_environment("NW_RESOURCE_DIR")
 	if not res_dir.is_empty():
-		var settings := load("res://engine/resource_index/resource_dir_settings.gd")
+		var settings := load("res://adapter/resource_index/resource_dir_settings.gd")
 		settings.set_resource_dir(res_dir)
 		settings.set_expansion("")
 	Engine.time_scale = TIME_SCALE
@@ -184,8 +184,7 @@ func _run() -> void:
 			# the ai_launcheffect muzzle spawned, tracer rounds drawn (rate-gated).
 			var stats: Dictionary = world.get_fire_present_stats()
 			print("PROBE fire-present stats: %s" % str(stats))
-			if int(stats.get("fires", 0)) <= 0 or \
-					int(stats.get("sounds", 0)) + int(stats.get("delayed_sounds", 0)) <= 0:
+			if int(stats.get("fires", 0)) <= 0 or int(stats.get("sounds", 0)) <= 0:
 				print("PROBE FAIL: NPC fire presented no sound (stats above)")
 				quit(1)
 				return

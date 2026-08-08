@@ -10,10 +10,10 @@ extends SceneTree
 # install. The persisted dir/expansion are snapshotted and restored on exit.
 
 const LOAD_TIMEOUT_WALL_SECONDS := 240.0
-const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
 const MountGuard := preload("res://tests/perf_probe_mount_guard.gd")
 const PropertyGuard := preload("res://tests/perf_probe_property_guard.gd")
-const MissionPresentPass := preload("res://engine/world/mission_present_pass.gd")
+const MissionPresentPass := preload("res://adapter/world/mission_present_pass.gd")
 
 var _mount_guard = MountGuard.new()
 var _property_guard = PropertyGuard.new()

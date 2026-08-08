@@ -1,9 +1,9 @@
 extends GutTest
 
 const NovaObjectModelScript := preload(
-		"res://engine/object/nova_object_model.gd")
+		"res://adapter/object/nova_object_model.gd")
 const PresentEmplacedWeapon := preload(
-		"res://engine/world/emplaced_weapon_present_pass.gd")
+		"res://adapter/world/emplaced_weapon_present_pass.gd")
 
 # Co-op LAN bidirectional bring-up (D.2) at the NovaSimulation layer: a HOST listen server
 # (enable_host_listen) and a JOINER (enable_join) run in the same headless process, each on a
@@ -36,6 +36,142 @@ const AI_TYPE := 0x14BF       # Generic Soldier (items.def id 105311, org1 Perso
 const BUILDING_TYPE := 0x0123 # a static structure
 const MARKER_TYPE := 0x1773   # a start marker
 const SPAWN_ZONE_TYPE := 1359 # pool-1 fixture; ItemDef supplies SpawnPoint (0x40000)
+
+# S16 native seat tables: the Dictionary install seam is gone. Tests compose a
+# flat asset dir under the gitignored res://.godot (NovaResourceRoot rejects
+# user:// roots), wire it with sim.set_asset_root FIRST, then
+# install_seat_specs_for_type_ids(item_db, ...) runs the ONE engine extractor
+# (simassets::extract_item_seat_specs) over items.def rows + .3di userpoints.
+# dsuvzero.3di is the committed dsuv1 with its ctrlx13 seat local zeroed and
+# the sitex rows retired: the corpus authors no zero-offset control seat, and
+# the same-frame carrier-follow pin below compares L against the carrier root.
+const NATIVE_MODEL_DIR := "res://.godot/native_3dp_coop_two_sim"
+
+
+static func _repo_file_bytes(res_path: String) -> PackedByteArray:
+	var file := FileAccess.open(
+			ProjectSettings.globalize_path(res_path), FileAccess.READ)
+	if file == null:
+		return PackedByteArray()
+	var bytes := file.get_buffer(file.get_length())
+	file.close()
+	return bytes
+
+
+static func _pattern_offset(data: PackedByteArray, pattern: String) -> int:
+	var wanted := pattern.to_ascii_buffer()
+	if wanted.is_empty() or data.size() < wanted.size():
+		return -1
+	var at := data.find(wanted[0], 0)
+	while at >= 0 and at + wanted.size() <= data.size():
+		if data.slice(at, at + wanted.size()) == wanted:
+			return at
+		at = data.find(wanted[0], at + 1)
+	return -1
+
+
+# Rewrite one USRP record's 16-byte name field in place (threedi parse_usrp:
+# 48-byte records, the name at record offset +32). Empty result = no match.
+static func _with_renamed_user_point(data: PackedByteArray, old_name: String,
+		new_name: String) -> PackedByteArray:
+	var offset := _pattern_offset(data, old_name)
+	var replacement := new_name.to_ascii_buffer()
+	if offset < 0 or replacement.size() > 16:
+		return PackedByteArray()
+	for i in range(16):
+		data[offset + i] = replacement[i] if i < replacement.size() else 0
+	return data
+
+
+# Overwrite one USRP record's authored 16.16 position ints (record base sits
+# 32 bytes before the name field).
+static func _with_user_point_position(data: PackedByteArray, name: String,
+		raw_x: int, raw_y: int, raw_z: int) -> PackedByteArray:
+	var offset := _pattern_offset(data, name)
+	if offset < 32:
+		return PackedByteArray()
+	data.encode_s32(offset - 32, raw_x)
+	data.encode_s32(offset - 28, raw_y)
+	data.encode_s32(offset - 24, raw_z)
+	return data
+
+
+static func _write_native_model(name: String, bytes: PackedByteArray) -> bool:
+	if bytes.is_empty():
+		return false
+	var file := FileAccess.open(
+			NATIVE_MODEL_DIR.path_join(name), FileAccess.WRITE)
+	if file == null:
+		return false
+	file.store_buffer(bytes)
+	file.close()
+	return true
+
+
+func before_all() -> void:
+	DirAccess.make_dir_recursive_absolute(
+			ProjectSettings.globalize_path(NATIVE_MODEL_DIR))
+	assert_true(DirAccess.dir_exists_absolute(
+			ProjectSettings.globalize_path(NATIVE_MODEL_DIR)),
+			"created the flat native asset dir")
+	assert_true(_write_native_model("B50Cal.3di",
+			_repo_file_bytes("res://../fixtures/3dp/B50Cal/B50Cal.3di")),
+			"composed the B50Cal native model fixture")
+	var carrier := _with_user_point_position(
+			_repo_file_bytes("res://../fixtures/3dp/dsuv1/dsuv1.3di"),
+			"ctrlx13", 0, 0, 0)
+	for site in ["sitex00d", "sitex08c", "sitex06b", "sitex12a"]:
+		carrier = _with_renamed_user_point(carrier, site, "x" + site.substr(1))
+	assert_true(_write_native_model("dsuvzero.3di", carrier),
+			"composed the zero-offset control-seat carrier fixture")
+
+
+func _native_asset_root() -> NovaResourceRoot:
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path(NATIVE_MODEL_DIR)), OK)
+	assert_true(root.has_file("B50Cal.3di"),
+			"the composed flat asset dir indexes the fixture models")
+	return root
+
+
+func _fixture_items_db() -> NovaItemDatabase:
+	var def_root := NovaResourceRoot.new()
+	assert_eq(def_root.set_root_dir(ProjectSettings.globalize_path(
+			"res://../fixtures/def")), OK)
+	var db := NovaItemDatabase.new()
+	assert_eq(db.load_from_resource_root(def_root, "items.def"), OK)
+	return db
+
+
+func _attachment_items_db(anchor_name: String, ambiguous: bool) -> NovaItemDatabase:
+	# The synthetic 5004 carrier, authored the native way: an items.def row
+	# whose addeweap child anchors at the DISCOVERED articulated userpoint.
+	# The ambiguous variant repeats the child type on a second missing-anchor
+	# row (stored slot 2), the exact shape the old hand dictionary pinned.
+	# Deliberately NO 101419 row: the child rides the parent's attachment
+	# metadata only, so it lands no spec/seat of its own and the mount scan
+	# can only take the carrier's Usegun — the old table's exact shape.
+	var path := ProjectSettings.globalize_path(
+			"res://.godot/coop_attachment_items_ambiguous.def" if ambiguous
+			else "res://.godot/coop_attachment_items.def")
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	assert_not_null(file)
+	if file == null:
+		return null
+	file.store_string("""begin "Attachment Fixture Carrier"
+  id 105004
+  graphic B50cal
+  primary_weapon WPN_EMPLCD50NA
+  addeweap %s 101419
+""" % anchor_name)
+	if ambiguous:
+		file.store_string("  addeweap missing 101419\n")
+	file.store_string("end\n")
+	file.close()
+	var db := NovaItemDatabase.new()
+	assert_eq(db.load(path), OK)
+	return db
 
 
 func _combat_mission() -> NovaMissionData:
@@ -119,6 +255,11 @@ func _net_watercraft_item_db() -> NovaItemDatabase:
 			"  deceleration 70\n  player_speed 94\n  physics 1\n  torque 3\n"
 	assert_true(base_items.contains(DBUGGY_CALLBACK_BLOCK))
 	base_items = base_items.replace(DBUGGY_CALLBACK_BLOCK, DBUGGY_PHYSICS_BLOCK)
+	# Native seat extraction reads the graphic's .3di userpoints: both drivable
+	# rows ride the composed dsuvzero model (one zero-offset ctrlx seat).
+	assert_true(base_items.contains("  graphic Dbuggy1\n"))
+	base_items = base_items.replace(
+			"  graphic Dbuggy1\n", "  graphic dsuvzero\n")
 	var path := ProjectSettings.globalize_path(
 			"res://.godot/net_watercraft_items.def")
 	var file := FileAccess.open(path, FileAccess.WRITE)
@@ -131,7 +272,7 @@ func _net_watercraft_item_db() -> NovaItemDatabase:
 	file.store_string("""begin "Net Watercraft Fixture"
   id 105008
   type vehicle
-  graphic StaticCrate1
+  graphic dsuvzero
   sid netwatercraft
   ai_function cbot
   render_function cbot
@@ -861,28 +1002,22 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 			"B50Cal exposes a userpoint carried by EWEAP_GUNYAW")
 	if moving_anchor.is_empty():
 		return
-	var anchor_index := int(moving_anchor["index"])
 	var anchor: Dictionary = moving_anchor["info"]
-	var seat_specs := ItemSeatSpecs.seat_specs_from_model(model)
-	assert_eq(seat_specs.size(), 1, "B50Cal exposes its authored Usegun seat")
-	var specs := [{
-		# This attachment-specific fixture deliberately keeps the parent and its
-		# synthetic child on distinct wire types. The following UDP/presentation
-		# test uses the real B50 item/type end to end.
-		"type_id": 5004,
-		"model_data": model,
-		"seats": seat_specs,
-		"primary_weapon": "WPN_EMPLCD50NA",
-		"emplacement_attachments": [{
-			"item_id": 101419,
-			"stored_slot": 1,
-			"anchor_found": true,
-			"bone_index": anchor_index + 1,
-			"source_name": String(anchor.get("name", "")),
-			"local": ItemSeatSpecs.seat_local_from_user_point_position(
-					anchor.get("position", Vector3.ZERO)),
-		}],
-	}]
+	var anchor_name := String(anchor.get("name", ""))
+	# This attachment-specific fixture deliberately keeps the parent and its
+	# synthetic child on distinct wire types (the following UDP/presentation
+	# test uses the real B50 item/type end to end). The authored addeweap row
+	# anchors the child at the DISCOVERED articulated userpoint; the native
+	# extractor derives the carrier's Usegun seat from the same B50cal graphic.
+	var root := _native_asset_root()
+	var attach_db := _attachment_items_db(anchor_name, false)
+	assert_not_null(attach_db)
+	if attach_db == null:
+		return
+	var carrier_card: Dictionary = attach_db.extract_seat_specs_for_item(
+			root, 105004)
+	assert_eq((carrier_card.get("seats", []) as Array).size(), 1,
+			"B50Cal exposes its authored Usegun seat")
 	var mission := NovaMissionData.new()
 	assert_eq(mission.create_default(), OK)
 	assert_false(mission.add_entity(
@@ -891,7 +1026,12 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 
 	var host := NovaSimulation.new()
 	assert_true(host.enable_host_listen(0))
-	host.set_item_seat_specs(specs)
+	host.set_asset_root(root)
+	assert_true(host.install_seat_specs_for_type_ids(
+			attach_db, PackedInt32Array([5004])))
+	assert_gt(int(host.debug_native_pose_stats().get(
+			"mounted_graphic_sources", 0)), 0,
+			"the native install resolved the carrier model source")
 	assert_true(host.load_from_mission_data(mission))
 	var def_root := NovaResourceRoot.new()
 	assert_eq(def_root.set_root_dir(ProjectSettings.globalize_path(
@@ -920,7 +1060,9 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 	var joiner := NovaSimulation.new()
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "AttachmentJoiner"))
-	joiner.set_item_seat_specs(specs)
+	joiner.set_asset_root(root)
+	assert_true(joiner.install_seat_specs_for_type_ids(
+			attach_db, PackedInt32Array([5004])))
 	assert_true(joiner.load_from_mission_data(mission))
 	var reached := false
 	for _tick in range(800):
@@ -971,17 +1113,8 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 	# row. If that type occurs more than once, even when only one row resolved a
 	# userpoint, a remote client must keep the spawn-derived rigid pose rather than
 	# guess which sibling owns the decoded child.
-	var ambiguous_specs: Array = specs.duplicate(true)
-	var ambiguous_rows: Array = ambiguous_specs[0]["emplacement_attachments"]
-	ambiguous_rows.append({
-		"item_id": 101419,
-		"stored_slot": 2,
-		"anchor_found": false,
-		"bone_index": 0,
-		"source_name": "missing",
-		"local": Vector3.ZERO,
-	})
-	joiner.set_item_seat_specs(ambiguous_specs)
+	assert_true(joiner.install_seat_specs_for_type_ids(
+			_attachment_items_db(anchor_name, true), PackedInt32Array([5004])))
 	var ambiguous_position := _present_position_for_type(joiner, 1419)
 	assert_lt(ambiguous_position.distance_to(joiner_before), 0.01,
 			"ambiguous same-type children retain the rigid decoded fallback")
@@ -1004,14 +1137,14 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 		return
 	var yaw_part := int((moving_anchor["info"] as Dictionary).get(
 			"subobject", -1))
-	var seat_specs := ItemSeatSpecs.seat_specs_from_model(model)
-	assert_eq(seat_specs.size(), 1, "B50Cal exposes its authored Usegun seat")
-	var specs := [{
-		"type_id": 1419,
-		"model_data": model,
-		"seats": seat_specs,
-		"primary_weapon": "WPN_EMPLCD50NA",
-	}]
+	# The real B50 item end to end: items.def row 101419 (graphic B50cal,
+	# primary WPN_EMPLCD50NA) plus the model's authored Usegun userpoint,
+	# through the ONE native extractor on both peers.
+	var root := _native_asset_root()
+	var seat_db := _fixture_items_db()
+	var b50_card: Dictionary = seat_db.extract_seat_specs_for_item(root, 101419)
+	assert_eq((b50_card.get("seats", []) as Array).size(), 1,
+			"B50Cal exposes its authored Usegun seat")
 	var mission := NovaMissionData.new()
 	assert_eq(mission.create_default(), OK)
 	var mounted_item := mission.add_entity(
@@ -1027,14 +1160,21 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 		"gametype": 0x30020,
 	})
 	assert_true(host.enable_host_listen(0))
-	host.set_item_seat_specs(specs)
+	host.set_asset_root(root)
+	assert_true(host.install_seat_specs_for_type_ids(
+			seat_db, PackedInt32Array([1419])))
+	assert_gt(int(host.debug_native_pose_stats().get(
+			"mounted_graphic_sources", 0)), 0,
+			"the native install resolved the B50 model source")
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
 
 	var joiner := NovaSimulation.new()
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "MountedJoiner"))
-	joiner.set_item_seat_specs(specs)
+	joiner.set_asset_root(root)
+	assert_true(joiner.install_seat_specs_for_type_ids(
+			seat_db, PackedInt32Array([1419])))
 	assert_true(joiner.load_from_mission_data(mission))
 	_install_combat_tables(joiner)
 	assert_true(_drive_pair_to_match(host, joiner),
@@ -1331,40 +1471,34 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 	var mission := _vehicle_peer_mission()
 	var watercraft_db := _net_watercraft_item_db()
 	assert_not_null(watercraft_db)
-	var vehicle_seats := [{
-		"type_id": 1291,
-		"seats": [{
-			"type": 2,
-			"bone_index": 1,
-			"position": Vector3.ZERO,
-			"source_name": "ctrlx00",
-		}],
-	}, {
-		"type_id": 5008,
-		"seats": [{
-			"type": 2,
-			"bone_index": 1,
-			"position": Vector3.ZERO,
-			"source_name": "ctrlx00",
-		}],
-	}]
+	if watercraft_db == null:
+		return
+	# Both drivable rows (the placed Dune Buggy and the synthetic watercraft)
+	# resolve their control seat natively from the dsuvzero graphic: one
+	# zero-offset ctrlx userpoint, the exact shape the old hand table carried.
+	var root := _native_asset_root()
 	var host := NovaSimulation.new()
 	host.configure_host_session({"gametype": 0x30020})
 	assert_true(host.enable_host_listen(0))
-	host.set_item_seat_specs(vehicle_seats)
+	host.set_asset_root(root)
+	assert_true(host.install_seat_specs_for_type_ids(
+			watercraft_db, PackedInt32Array([1291, 5008])))
+	assert_gt(int(host.debug_native_pose_stats().get(
+			"mounted_graphic_sources", 0)), 0,
+			"the native install resolved the drivable model sources")
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
-	if watercraft_db != null:
-		host.resolve_item_traits(watercraft_db)
+	host.resolve_item_traits(watercraft_db)
 
 	var joiner := NovaSimulation.new()
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "VehicleObserver"))
-	joiner.set_item_seat_specs(vehicle_seats)
+	joiner.set_asset_root(root)
+	assert_true(joiner.install_seat_specs_for_type_ids(
+			watercraft_db, PackedInt32Array([1291, 5008])))
 	assert_true(joiner.load_from_mission_data(mission))
 	_install_combat_tables(joiner)
-	if watercraft_db != null:
-		joiner.resolve_item_traits(watercraft_db)
+	joiner.resolve_item_traits(watercraft_db)
 	assert_true(_drive_pair_to_match(host, joiner),
 			"vehicle observer reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():
@@ -2506,17 +2640,7 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 	# path — the host runs the real event runtime; the joiner is retail-faithful
 	# (world from the wire, no local .bms body) — and pins the joiner's presented
 	# gunner row to the host's, frame over frame.
-	var model := NovaObjectData.new()
-	assert_eq(model.open_file(ProjectSettings.globalize_path(
-			"res://../fixtures/3dp/B50Cal/B50Cal.3di")), OK)
-	var seat_specs := ItemSeatSpecs.seat_specs_from_model(model)
-	assert_eq(seat_specs.size(), 1, "B50Cal exposes its authored Usegun seat")
-	var specs := [{
-		"type_id": 1419,
-		"model_data": model,
-		"seats": seat_specs,
-		"primary_weapon": "WPN_EMPLCD50NA",
-	}]
+	var root := _native_asset_root()
 	var mission := NovaMissionData.new()
 	assert_eq(mission.create_default(), OK)
 	# The 00TRg emplacements are authored at non-cardinal yaws; a zero-yaw gun
@@ -2545,10 +2669,16 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 	var fixture_item_db := NovaItemDatabase.new()
 	assert_eq(fixture_item_db.load_from_resource_root(
 			fixture_def_root, "items.def"), OK)
+	var b50_card: Dictionary = fixture_item_db.extract_seat_specs_for_item(
+			root, 101419)
+	assert_eq((b50_card.get("seats", []) as Array).size(), 1,
+			"B50Cal exposes its authored Usegun seat")
 
 	var host := NovaSimulation.new()
 	assert_true(host.enable_host_listen(0))
-	host.set_item_seat_specs(specs)
+	host.set_asset_root(root)
+	assert_true(host.install_seat_specs_for_type_ids(
+			fixture_item_db, PackedInt32Array([1419])))
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
 	# The live game shell always installs the infantry anim registry; without it
@@ -2585,10 +2715,11 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 	var joiner_anim_root := _anim_root()
 	assert_gt(joiner.set_infantry_anim_map(joiner_anim_root, "soldier.adm"), 0)
 	joiner.resolve_infantry_adm_ids(joiner_anim_root, fixture_item_db)
-	# NOTE deliberately NO joiner.set_item_seat_specs here: the live header-only
-	# joiner only gains seat specs when GameWorld's admission-boundary prewarm
-	# resolves the streamed types (game_world.gd) — this test pins what the
-	# present must do for a carrier whose spec has not been installed.
+	# NOTE deliberately NO joiner seat-spec install (and no asset root): the
+	# live header-only joiner only gains seat specs when GameWorld's
+	# admission-boundary prewarm runs install_seat_specs_for_type_ids over the
+	# streamed types (game_world.gd) — this test pins what the present must do
+	# for a carrier whose spec has not been installed.
 	assert_true(_drive_pair_to_match(host, joiner),
 			"joiner reached the real-UDP in-match seam")
 	if not joiner.is_joined_in_match():

@@ -1,4 +1,4 @@
-// P7 Part 2 — the lobby HTTP flow (libs/novaworld/http_flow): the EPASK login chain, the GSB fetch,
+// P7 Part 2 — the lobby HTTP flow (engine/net/novaworld/http_flow): the EPASK login chain, the GSB fetch,
 // and the NWJoin handshake driven bytes-in/bytes-out (no Godot). Exercises the URL builders, the
 // LoginStep/JoinStep machines, and the cookie glue against synthetic server responses.
 

@@ -23,7 +23,7 @@ target_include_directories(threedi_ctrl_catalog_test PRIVATE ${CMAKE_CURRENT_SOU
 add_test(NAME threedi_ctrl_catalog COMMAND threedi_ctrl_catalog_test)
 
 # PANM unit tests
-foreach(test ctrl decode runtime wave)
+foreach(test ctrl decode pose runtime wave)
     add_executable(threedi_panm_${test}_test threedi/panm_${test}_test.cpp)
     target_link_libraries(threedi_panm_${test}_test PRIVATE opennova_threedi)
     target_include_directories(threedi_panm_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -65,7 +65,7 @@ target_link_libraries(bad_roundtrip_test PRIVATE opennova_bad)
 target_include_directories(bad_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME bad_roundtrip COMMAND bad_roundtrip_test)
 
-# ANIM skeletal sampler (libs/anim): coordinate conventions, quaternion helpers, and
+# ANIM skeletal sampler (engine/runtime/anim): coordinate conventions, quaternion helpers, and
 # world<->local self-consistency on the real BINOC.bad fixture.
 add_executable(anim_sample_test anim/anim_sample_test.cpp)
 target_link_libraries(anim_sample_test PRIVATE opennova_anim opennova_bad)
@@ -80,6 +80,15 @@ target_link_libraries(aim_overlay_test PRIVATE opennova_anim)
 target_include_directories(aim_overlay_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(aim_overlay_test PRIVATE cxx_std_17)
 add_test(NAME aim_overlay COMMAND aim_overlay_test)
+
+# ANIM skeletal pose (S3, ADR 0028): the time-domain window walk, blend
+# endpoints, BN## tag parse, and the .bad bind-rest transpose the collision
+# pose provider composes with.
+add_executable(anim_skeletal_pose_test anim/skeletal_pose_test.cpp)
+target_link_libraries(anim_skeletal_pose_test PRIVATE opennova_anim)
+target_include_directories(anim_skeletal_pose_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(anim_skeletal_pose_test PRIVATE cxx_std_17)
+add_test(NAME anim_skeletal_pose COMMAND anim_skeletal_pose_test)
 
 # DEF tests
 add_executable(def_comment_strip_test def/def_comment_strip_test.cpp)
@@ -177,7 +186,7 @@ target_include_directories(dbf_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 add_test(NAME dbf_roundtrip COMMAND dbf_roundtrip_test)
 
 # Audio sound-set member selection state machine (FIRST/RANDOM/SEQUENTIAL/RANDOM_SEQ),
-# pushed down from nova_sound_bank.gd into libs/audio.
+# pushed down from nova_sound_bank.gd into engine/runtime/audio.
 add_executable(sound_selector_test audio/sound_selector_test.cpp)
 target_link_libraries(sound_selector_test PRIVATE opennova_audio)
 target_include_directories(sound_selector_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -189,6 +198,13 @@ add_test(NAME sound_selector COMMAND sound_selector_test)
 # nova_mission_audio.gd (docs/audio/lwf-dbf-sound-re.md §driver cadence, D-SND-16).
 add_executable(ambient_mixer_test audio/ambient_mixer_test.cpp)
 target_link_libraries(ambient_mixer_test PRIVATE opennova_audio)
+
+# S13 (ADR 0028): the envs-marker resolution — the items.def dispatch-tag gate across
+# entity pools, the authored soundloop slots passed through unfiltered, walk order,
+# and the BMS type-id -> items.def id offset. [orig: @0x82ABD4 -> @0x4a8080]
+add_executable(envs_markers_test audio/envs_markers_test.cpp)
+target_link_libraries(envs_markers_test PRIVATE opennova_audio)
+add_test(NAME audio_envs_markers COMMAND envs_markers_test)
 target_include_directories(ambient_mixer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(ambient_mixer_test PRIVATE cxx_std_17)
 add_test(NAME ambient_mixer COMMAND ambient_mixer_test)
@@ -504,7 +520,7 @@ target_link_libraries(minimal_fnt_gen_test PRIVATE opennova_fnt)
 add_test(NAME minimal_fnt_gen COMMAND minimal_fnt_gen_test)
 
 # Minimal mission's dialog companions (mnml.dbf + mnml.lwf): empty-but-valid
-# via the libs/dbf + libs/lwf writers, byte-stable vs the committed files.
+# via the engine/formats/dbf + engine/formats/lwf writers, byte-stable vs the committed files.
 add_executable(minimal_companion_gen_test fixtures/minimal_companion_gen.cpp)
 target_link_libraries(minimal_companion_gen_test PRIVATE opennova_dbf opennova_lwf)
 target_compile_definitions(minimal_companion_gen_test PRIVATE
@@ -553,6 +569,32 @@ target_link_libraries(resource_index_mus_test PRIVATE opennova_resource_index)
 target_include_directories(resource_index_mus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME resource_index_mus COMMAND resource_index_mus_test)
 
+# simassets: the sim-side .3di derivations (ADR 0028)
+add_executable(simassets_model_builders_test simassets/model_builders_test.cpp)
+target_link_libraries(simassets_model_builders_test PRIVATE opennova_simassets)
+target_include_directories(simassets_model_builders_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME simassets_model_builders COMMAND simassets_model_builders_test)
+
+add_executable(simassets_adm_root_motion_test simassets/adm_root_motion_test.cpp)
+target_link_libraries(simassets_adm_root_motion_test PRIVATE opennova_simassets)
+target_include_directories(simassets_adm_root_motion_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME simassets_adm_root_motion COMMAND simassets_adm_root_motion_test)
+
+add_executable(simassets_adm_clip_index_test simassets/adm_clip_index_test.cpp)
+target_link_libraries(simassets_adm_clip_index_test PRIVATE opennova_simassets)
+target_include_directories(simassets_adm_clip_index_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME simassets_adm_clip_index COMMAND simassets_adm_clip_index_test)
+
+add_executable(simassets_item_traits_test simassets/item_traits_test.cpp)
+target_link_libraries(simassets_item_traits_test PRIVATE opennova_simassets)
+target_include_directories(simassets_item_traits_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME simassets_item_traits COMMAND simassets_item_traits_test)
+
+add_executable(simassets_seat_spec_extract_test simassets/seat_spec_extract_test.cpp)
+target_link_libraries(simassets_seat_spec_extract_test PRIVATE opennova_simassets)
+target_include_directories(simassets_seat_spec_extract_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME simassets_seat_spec_extract COMMAND simassets_seat_spec_extract_test)
+
 # OED object workspace/export tests
 add_executable(oed_build_model_test oed/build_model_test.cpp)
 target_link_libraries(oed_build_model_test PRIVATE opennova_oed opennova_threedi opennova_tdp opennova_ase)
@@ -576,7 +618,7 @@ foreach(test light_runtime material_classify material_eval
     target_link_libraries(renderer_${test}_test PRIVATE opennova_renderer opennova_threedi)
     target_include_directories(renderer_${test}_test PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
-        ${CMAKE_SOURCE_DIR}/libs/oed/include)
+        ${CMAKE_SOURCE_DIR}/engine/formats/oed/include)
     target_compile_features(renderer_${test}_test PRIVATE cxx_std_17)
     add_test(NAME renderer_${test} COMMAND renderer_${test}_test)
 endforeach()
@@ -702,6 +744,14 @@ target_link_libraries(env_render_unit_test PRIVATE opennova_env)
 target_include_directories(env_render_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME env_render_unit COMMAND env_render_unit_test)
 
+# The HUD view-helper math cluster (engine/runtime/hud, S15): design-space
+# scaling, ALPHAFADE decay + quirk, stance Q16 scale/centering, health bands,
+# message tick policy, half-bright, ammo fold + nudge, round icons, crosshair
+# spread projection/sum/row/gate.
+add_executable(hud_math_test hud/hud_math_test.cpp)
+target_link_libraries(hud_math_test PRIVATE opennova_hud)
+add_test(NAME hud_math COMMAND hud_math_test)
+
 add_executable(jo_env_sweep_test env/jo_env_sweep_test.cpp)
 target_link_libraries(jo_env_sweep_test PRIVATE opennova_env opennova_vfs)
 target_include_directories(jo_env_sweep_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -756,7 +806,7 @@ add_executable(trn_config_roundtrip_test terrain/trn_config_roundtrip_test.cpp)
 target_link_libraries(trn_config_roundtrip_test PRIVATE opennova_trn)
 target_include_directories(trn_config_roundtrip_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_SOURCE_DIR}/libs/terrain/include
+    ${CMAKE_SOURCE_DIR}/engine/runtime/terrain/include
 )
 add_test(NAME trn_config_roundtrip COMMAND trn_config_roundtrip_test)
 
@@ -776,13 +826,13 @@ target_include_directories(cdep_overflow_guard_test PRIVATE ${CMAKE_CURRENT_SOUR
 add_test(NAME cdep_overflow_guard COMMAND cdep_overflow_guard_test)
 
 # CDEP per-block range constraint: the editor-side raw16 clamp/count kernel,
-# ported from terrain_editor_cdep_constraint.gd into libs/terrain.
+# ported from terrain_editor_cdep_constraint.gd into engine/runtime/terrain.
 add_executable(cdep_constraint_test terrain/cdep_constraint_test.cpp)
 target_link_libraries(cdep_constraint_test PRIVATE opennova_terrain)
 target_include_directories(cdep_constraint_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME cdep_constraint COMMAND cdep_constraint_test)
 
-# Terrain world->source coordinate transform kernel (libs/terrain/coords).
+# Terrain world->source coordinate transform kernel (engine/runtime/terrain/coords).
 # Characterizes the runtime resolve_world_sample formula plus the editor-mode
 # guard divergences (bounds-reject, id-clamp, local-clamp) ported from
 # EditorTerrainMesh.world_to_source_coords / world_to_cell_source_coords.
@@ -800,7 +850,7 @@ target_link_libraries(quadrant_lock_test PRIVATE opennova_terrain_query)
 target_include_directories(quadrant_lock_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME quadrant_lock COMMAND quadrant_lock_test)
 
-# The retail terrain segment raycast (libs/terrain_query/terrain_raycast):
+# The retail terrain segment raycast (engine/runtime/terrain_query/terrain_raycast):
 # the Terrain_RaycastHeightmapLoRes march + HiRes_0 refine structural
 # translation over a synthetic sampler — step normalization/budget, ray-z hit
 # semantics, the column-shortcut crossing asymmetry, the empty-cell height-0
@@ -810,14 +860,14 @@ target_link_libraries(terrain_raycast_test PRIVATE opennova_terrain_query)
 target_include_directories(terrain_raycast_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME terrain_raycast COMMAND terrain_raycast_test)
 
-# Height brush kernels (libs/terrain/brush): raise/lower, smooth (two-pass),
+# Height brush kernels (engine/runtime/terrain/brush): raise/lower, smooth (two-pass),
 # flatten + the shared smoothstep falloff, ported from terrain_editor_brushes.gd.
 add_executable(brush_height_test terrain/brush_height_test.cpp)
 target_link_libraries(brush_height_test PRIVATE opennova_terrain)
 target_include_directories(brush_height_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME brush_height COMMAND brush_height_test)
 
-# Colour/blend brush kernels (libs/terrain/brush) on RGBA8 buffers. Byte-parity
+# Colour/blend brush kernels (engine/runtime/terrain/brush) on RGBA8 buffers. Byte-parity
 # critical: pins Godot's FORMAT_RGBA8 quantization + the blend/lerp/clone math.
 add_executable(brush_color_test terrain/brush_color_test.cpp)
 target_link_libraries(brush_color_test PRIVATE opennova_terrain)
@@ -836,7 +886,7 @@ if(MSVC)
 endif()
 add_test(NAME dvxi5_repro COMMAND dvxi5_repro_test)
 
-# Particle (.ptl) text-format parser/simulator tests. See libs/particle and the
+# Particle (.ptl) text-format parser/simulator tests. See engine/runtime/particle and the
 # witness matrix in docs/particles/ptl-format-re.md
 # (CParticleDef_ParseFromConfigMap @ 0x5ed210, Jointops.exe IDB).
 foreach(name smallest minimal_effect multi_section multi_layer table_handles
@@ -927,6 +977,12 @@ target_include_directories(world_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(world_test PRIVATE cxx_std_17)
 add_test(NAME world COMMAND world_test)
 
+add_executable(tick_accumulator_test world/tick_accumulator_test.cpp)
+target_link_libraries(tick_accumulator_test PRIVATE opennova_world)
+target_include_directories(tick_accumulator_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(tick_accumulator_test PRIVATE cxx_std_17)
+add_test(NAME tick_accumulator COMMAND tick_accumulator_test)
+
 # The player waypoint track (HUD waypoint label backing state).
 add_executable(waypoint_track_test world/waypoint_track_test.cpp)
 target_link_libraries(waypoint_track_test PRIVATE opennova_world)
@@ -1012,6 +1068,18 @@ target_link_libraries(projectile_combat_test PRIVATE opennova_world)
 target_include_directories(projectile_combat_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(projectile_combat_test PRIVATE cxx_std_17)
 add_test(NAME projectile_combat COMMAND projectile_combat_test)
+
+add_executable(fire_sound_test world/fire_sound_test.cpp)
+target_link_libraries(fire_sound_test PRIVATE opennova_world)
+target_include_directories(fire_sound_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(fire_sound_test PRIVATE cxx_std_17)
+add_test(NAME fire_sound COMMAND fire_sound_test)
+
+add_executable(player_loadout_test world/player_loadout_test.cpp)
+target_link_libraries(player_loadout_test PRIVATE opennova_world)
+target_include_directories(player_loadout_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(player_loadout_test PRIVATE cxx_std_17)
+add_test(NAME player_loadout COMMAND player_loadout_test)
 
 # Rendering occlusion (Terrain_InitBuildingPortals @0x5c7480 register/weld/flags,
 # build_sector_visibility_masks @0x5c8610 + render_visibility_portal_traversal
@@ -1183,7 +1251,7 @@ target_include_directories(wac_environment_wire_test PRIVATE ${CMAKE_CURRENT_SOU
 target_compile_features(wac_environment_wire_test PRIVATE cxx_std_17)
 add_test(NAME wac_environment_wire COMMAND wac_environment_wire_test)
 
-# Cross-system: BMS event runtime + WAC share one world/var store (libs/mission
+# Cross-system: BMS event runtime + WAC share one world/var store (engine/runtime/mission
 # event_runtime + opennova_wac). MisvarChange(V#) and WAC eq(V#) see the same var.
 add_executable(event_runtime_test mission/event_runtime_test.cpp)
 target_link_libraries(event_runtime_test PRIVATE opennova_mission opennova_wac opennova_world)
@@ -1206,6 +1274,13 @@ if(MSVC)
     target_link_options(promote_test PRIVATE "/STACK:4194304")
 endif()
 add_test(NAME mission_promote COMMAND promote_test)
+
+# S9 (ADR 0028): the mission boot policy — the first ctest lock on the boot ORDER:
+# run_mission_boot's exact step sequence + gates (role, missing inputs, the load abort,
+# the ammo-gated AI-weapon seed), the mission-text fallback, and the .aip speed resolve.
+add_executable(mission_runtime_boot_test mission/runtime_boot_test.cpp)
+target_link_libraries(mission_runtime_boot_test PRIVATE opennova_mission)
+add_test(NAME mission_runtime_boot COMMAND mission_runtime_boot_test)
 
 # Emplacement mount: the seat model + EntityCommands mount/dismount/find_best_seat
 # primitives + the BMS AttachToEmplaced path (event -> proximity mount) + the
@@ -1822,6 +1897,17 @@ target_link_libraries(netsim_client_replica_pipeline_anim_pulse_test PRIVATE ope
 add_test(NAME netsim_client_replica_pipeline_anim_pulse
     COMMAND netsim_client_replica_pipeline_anim_pulse_test)
 
+# D-NET-209: the per-record receive-side body-state arbitration (@0x4c1153 /
+# @0x4c0600) + the channel's deferred promotion and gait->stance transition
+# insert (@0x40b5f0) — the tapped-roll lock+queue, same-state pending survival,
+# the dead park / respawn edges, and the clip-end promotion cadence.
+add_executable(netsim_client_replica_pipeline_body_arbitration_test
+    netsim/client_replica_pipeline_body_arbitration_test.cpp)
+target_link_libraries(netsim_client_replica_pipeline_body_arbitration_test
+    PRIVATE opennova_netsim opennova_world)
+add_test(NAME netsim_client_replica_pipeline_body_arbitration
+    COMMAND netsim_client_replica_pipeline_body_arbitration_test)
+
 add_executable(netsim_world_stream_extractors_test netsim/world_stream_extractors_test.cpp)
 target_link_libraries(netsim_world_stream_extractors_test PRIVATE opennova_netsim)
 add_test(NAME netsim_world_stream_extractors COMMAND netsim_world_stream_extractors_test)
@@ -1862,6 +1948,21 @@ add_executable(npruntime_initial_state_burst_test npruntime/initial_state_burst_
 target_link_libraries(npruntime_initial_state_burst_test
     PRIVATE opennova_npruntime opennova_netsim opennova_world opennova_novaworld opennova_mission)
 add_test(NAME npruntime_initial_state_burst COMMAND npruntime_initial_state_burst_test)
+
+# S10a (ADR 0028): the joiner world<->net bridge — the witnessed client-frame hook order
+# [orig: Game_ProcessMainFrame @0x5263f0; Client_ProcessNetworkFrame @0x42c180], the ClientHello
+# one-shot, the in-match spawn edge for L + the weapon-pump L-gate, and the per-session resets.
+add_executable(npruntime_joiner_world_bridge_test npruntime/joiner_world_bridge_test.cpp)
+target_link_libraries(npruntime_joiner_world_bridge_test
+    PRIVATE opennova_npruntime opennova_netsim opennova_world)
+add_test(NAME npruntime_joiner_world_bridge COMMAND npruntime_joiner_world_bridge_test)
+
+# The joiner session-drive policy (S10b): the two 0xEA60 reachable-analog windows, the S2C 0x7B
+# promote validation, the admission/deploy/loss edge machine (frame ORDERING locked: loss > abort >
+# settle > window > edges), and the D-NET-178 expansion reconcile decision.
+add_executable(npruntime_join_session_policy_test npruntime/join_session_policy_test.cpp)
+target_link_libraries(npruntime_join_session_policy_test PRIVATE opennova_npruntime)
+add_test(NAME npruntime_join_session_policy COMMAND npruntime_join_session_policy_test)
 
 # ADR 0013: the shared byte-budget spawn/world-stream chunker (np::slice_batch_pages) the §5.2a burst
 # pages every world pool through — retail pool margins, exact tile pages, oversized record, cursor resume.
@@ -2063,5 +2164,5 @@ if(BUILD_SHARED_LIB)
     endif()
 endif()
 
-# weapon.sav player-profile format tests (libs/playersav).
+# weapon.sav player-profile format tests (engine/formats/playersav).
 add_subdirectory(playersav)

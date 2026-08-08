@@ -1,7 +1,7 @@
 """
 ctypes bindings for the PFF archive C API (libopennova.so / opennova.dll).
 
-Mirrors structs from libs/pff/include/pff/pff.h.
+Mirrors structs from engine/formats/pff/include/pff/pff.h.
 Wraps open/close/find/extract for reading PFF3/PFF4 archives.
 """
 

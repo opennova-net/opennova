@@ -3,8 +3,8 @@
 Structure-mapping record for the original engine's **terrain** pipeline — the
 heightmap/mesh build, the quadtree LOD, CDEP, lighting/modulation, mesh
 simplification, byte packing, and (REN-4) the runtime surface-shading resource
-set. The reimplementation surface is `libs/terrain`
-(+ `libs/terrain_query`, the world→height seam, ADR 0020) and the Godot terrain
+set. The reimplementation surface is `engine/runtime/terrain`
+(+ `engine/runtime/terrain_query`, the world→height seam, ADR 0020) and the Godot terrain
 layer. Binaries: **both** `jodemo.exe` (the accessible LOD/quadtree/mip renderer)
 and retail **Jointops.exe** (lighting/modulation/fog/shading). This file is the
 committed home for the `D-TERRAIN-…` catalog. Produced 2026-07-05 (PAR-R1);
@@ -26,7 +26,7 @@ underwater water-noise modulation, plus CDEP/traversal documentation depth.
 Like [mission/mis-format-re.md](../mission/mis-format-re.md), this remains a
 partial; it converts terrain from `UNAUDITED` to *tracked (partial)*.
 
-## Module map (`libs/terrain`) and witness basis
+## Module map (`engine/runtime/terrain`) and witness basis
 
 | Module | Role | Witness |
 |---|---|---|
@@ -130,7 +130,7 @@ gradients back onto the 4×4 terminal so the synthetic Godot tail is never
 selected. Which config bit drives `device+600` at runtime on the reference
 machine remains an open follow-up.
 
-Implemented in `libs/terrain/include/terrain/texture_preprocess.h` and
+Implemented in `engine/runtime/terrain/include/terrain/texture_preprocess.h` and
 `NovaTerrain::_load_textures`;
 `terrain_texture_preprocess_test` pins recovered byte vectors, while
 `terrain_lod_family_test` pins all 16 sublevels against the eight-family
@@ -494,7 +494,7 @@ overlay scope, not a REN port target), one in `Lighting_InitTextures
 
 The engine's world-space terrain query family — the height samplers and the
 segment raycast chain — witnessed 2026-07-07 for the ENG-3 B1 port (the
-`libs/terrain_query` raycast; [ADR 0020](../adr/0020-world-terrain-query-seam.md)
+`engine/runtime/terrain_query` raycast; [ADR 0020](../adr/0020-world-terrain-query-seam.md)
 §5 growth). All coordinates 16.16 fixed-point world units; the heightmap V axis
 runs opposite world y (samplers negate y internally).
 
@@ -602,7 +602,7 @@ runs opposite world y (samplers negate y internally).
 ### B1 port (landed 2026-07-07)
 
 The B1a/B1b slices landed the LoRes march + HiRes_0 refine as
-`libs/terrain_query/terrain_raycast.{h,cpp}` (`terrain_raycast_march` /
+`engine/runtime/terrain_query/terrain_raycast.{h,cpp}` (`terrain_raycast_march` /
 `terrain_raycast_refined`, 16.16 structural translations with a
 point+bilinear sampler seam; ~60 pinned checks in the `terrain_raycast`
 ctest incl. the step-math exactness, the crossing-rule asymmetry, the
@@ -675,7 +675,7 @@ editor preview. D-TERRAIN-1 remains the deliberate editor/runtime split.
 
 ## Cross-references
 
-- Reimpl: `libs/terrain`, `libs/terrain_query` (ADR 0020, the world→height seam).
+- Reimpl: `engine/runtime/terrain`, `engine/runtime/terrain_query` (ADR 0020, the world→height seam).
 - The reference data path: the TrnGen byte-identical terrain generator (canonical).
 - Surface consumers with their own records: tiles (R3), foliage (R2), env
   far-colormap bake (#19).

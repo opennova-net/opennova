@@ -3,7 +3,7 @@
 A read-only ONED workspace that previews the in-game HUD layout authored in
 `hudpos.def`. It is the editor-side companion to the runtime HUD overlay; both
 read the same data (`NovaHudPos`) and draw with the same shell-neutral helpers
-(`godot/engine/ui/hud_*.gd`), so the preview and the live HUD cannot drift.
+(`godot/adapter/ui/hud_*.gd`), so the preview and the live HUD cannot drift.
 
 ## Files
 

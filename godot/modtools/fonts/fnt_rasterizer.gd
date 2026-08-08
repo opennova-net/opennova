@@ -4,10 +4,10 @@ extends RefCounted
 # Rasterizes a TTF/OTF or system Font into a NovaFntResource (FntMaker-style).
 # Editor-only: uses the TextServer glyph cache, which renders glyph bitmaps when a
 # real text server is active (i.e. in the running editor, not headless dummy mode).
-# The deterministic shelf packing lives in libs/fnt (fnt_pack_shelf) behind
+# The deterministic shelf packing lives in engine/formats/fnt (fnt_pack_shelf) behind
 # NovaFntResource.pack_shelf; this script only rasterizes and blits.
 
-# Format facts are aliases of the NovaFntResource binding (libs/fnt) — ENG-4.
+# Format facts are aliases of the NovaFntResource binding (engine/formats/fnt) — ENG-4.
 const FIRST_CHAR := NovaFntResource.FIRST_CHAR
 const GLYPH_COUNT := NovaFntResource.GLYPH_COUNT
 const TEX := NovaFntResource.TEXTURE_WIDTH  # pages are square (== TEXTURE_HEIGHT)

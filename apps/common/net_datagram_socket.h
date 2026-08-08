@@ -11,7 +11,7 @@
 namespace opennova::net {
 
 // net::Socket-backed netsim::IDatagramSocket — the real-UDP adapter the headless host
-// (apps/nw_server) and the two-endpoint socket test plug into the libs/npruntime owner loop.
+// (apps/nw_server) and the two-endpoint socket test plug into the engine/net/npruntime owner loop.
 //
 // net::Endpoint.ip is MSO-first (ip[0] = a in a.b.c.d); PeerAddr.ip is LE octet packing (a in the
 // low byte). The conversion is a straight pack/unpack, NOT a byte swap — verified: 127.0.0.1 ->

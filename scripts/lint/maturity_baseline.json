@@ -1,5 +1,5 @@
 {
-  "citation_allowlist_libs": [
+  "citation_allowlist_engine": [
     "bfc1",
     "gameprofile",
     "io",
@@ -12,13 +12,13 @@
   ],
   "counters": {
     "cpp_binding_console_writes": 0,
+    "engine_stdout_prints": 0,
+    "engine_uncited_src_files": 50,
     "gd_prints_outside_debug": 0,
-    "has_method_guards": 566,
-    "libs_stdout_prints": 0,
-    "libs_uncited_src_files": 50,
-    "oversize_cpp_files": 2,
+    "has_method_guards": 557,
+    "oversize_cpp_files": 1,
     "oversize_gd_files": 7,
-    "test_private_pokes": 1313
+    "test_private_pokes": 1284
   },
   "dict_contract_allowlist": [
     "to_drag_data",
@@ -38,10 +38,11 @@
     "selection_ops.gd|func get_group(",
     "scripting_ops.gd|func get_selected_event_chain()",
     "scripting_ops.gd|func get_logic_summary()",
+    "item_seat_specs.gd|static func command_rule(",
+    "item_seat_specs.gd|static func predict_best_seat(",
     "debug_snapshot_writer.gd|static func capture(",
     "debug_snapshot_writer.gd|static func write(",
     "nova_debug_options.gd|static func find(",
-    "debug_entity_picker.gd|static func pick_at_crosshair(",
-    "ai_profile_speeds.gd|static func build(mission, resource_root) -> Dictionary:"
+    "debug_entity_picker.gd|static func pick_at_crosshair("
   ]
 }

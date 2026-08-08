@@ -12,7 +12,7 @@ namespace opennova::server {
 // Read-only DB queries against the content-management tables (games,
 // expansions, expansion files, release history). Lives at
 // apps/novaworld_server/ because it's purely HTTP-side state — the UDP
-// path doesn't read these — and that keeps libs/novaworld focused on
+// path doesn't read these — and that keeps engine/net/novaworld focused on
 // protocol + connection concerns.
 //
 // Handlers in http_listener.cpp call into these and never write SQL

@@ -112,7 +112,7 @@ fi
 build_gdextension() {
   local target="$1" build_dir="$2" build_type="$3" expected="$4"; shift 4
   echo "=== Building $target GDExtension ($build_type) ==="
-  cmake -S godot/engine -B "$build_dir" \
+  cmake -S godot/adapter -B "$build_dir" \
     "-DGODOTCPP_TARGET=$target" \
     "-DCMAKE_BUILD_TYPE=$build_type" \
     "$@"

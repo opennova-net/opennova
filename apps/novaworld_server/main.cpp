@@ -85,7 +85,7 @@ void apply_seed(opennova::db::Database &db,
 
 
 namespace {
-// The libs/ diagnostic channel (io/log.h): libraries are silent until the host
+// The engine/ diagnostic channel (io/log.h): libraries are silent until the host
 // installs a sink. Reproduce the historical stream split — lifecycle to stdout,
 // warnings and errors to stderr; per-tick kDebug tracing opts in via NW_LOG_DEBUG.
 bool g_log_debug_enabled = false;

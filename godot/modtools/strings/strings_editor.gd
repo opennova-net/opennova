@@ -6,7 +6,7 @@ extends "res://modtools/editor/editor_document.gd"
 ## Holds a single RtxtStringFile for its whole lifetime and always mutates it in
 ## place (open/new/undo reload the same object) so observers can connect once.
 ## Undo/redo uses byte snapshots of the table (reusing the byte-exact serializer in
-## libs/rtxt).
+## engine/formats/rtxt).
 ##
 ## Two change channels keep the editor snappy:
 ##   - structure_changed: the set of entries/sections changed (add/remove/section/
@@ -188,7 +188,7 @@ func normalize_grouping() -> void:
 
 
 # --- Editing session + undo/redo: the shared EditorDocument snapshot history
-# (NovaEditHistory over libs/oned_edit). The hooks below give it this domain's
+# (NovaEditHistory over engine/base/oned_edit). The hooks below give it this domain's
 # snapshot shape and signals; the bracket/undo/redo mechanics live in the base.
 
 func _snapshot() -> Variant:

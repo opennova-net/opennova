@@ -2044,7 +2044,7 @@ void HttpListener::register_legacy_host_join_routes(
 	// ----- Phase E.2: GSB (Game Server Browser) ---------------------------
 	// Build a GSB binary blob from the in-memory hosted-server list (every
 	// connection that issued ClientHostRequest in the lobby session). Wire
-	// format from libs/novaworld/include/novaworld/gsb.h is byte-exact with
+	// format from engine/net/novaworld/include/novaworld/gsb.h is byte-exact with
 	// onnet's onnw/gsb.py, so retail's IB3 browser parser accepts it.
 	auto handle_gsb = [this](const std::string &game_slug) {
 		// Phase I.2: backed by active_hosts, filtered to the requested game

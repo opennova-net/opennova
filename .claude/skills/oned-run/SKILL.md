@@ -27,7 +27,7 @@ exists, ask the user — do not download one.
   empty), then `bash scripts/build_godot.sh` — `godot/bin/` contains only
   `opennova.gdextension` until you build, and nothing Godot-side works without
   the DLL. The editor and any `--path godot` run load `template_debug`.
-- Stale code: if behavior doesn't reflect new `godot/engine/` C++, compare the
+- Stale code: if behavior doesn't reflect new `godot/adapter/` C++, compare the
   timestamp of `godot/bin/libopennova.windows.template_debug.x86_64.dll`
   against the source change, rebuild, and FULLY restart Godot — GDExtension
   registration does not hot-reload, and a running editor holds the DLL lock.
@@ -43,7 +43,7 @@ exists, ask the user — do not download one.
 
 ONED and the runtime share one external "resource root" persisted in
 `user://terrain_editor_state.cfg` (see
-`godot/engine/resource_index/resource_dir_settings.gd`) — an interactive launch
+`godot/adapter/resource_index/resource_dir_settings.gd`) — an interactive launch
 on a machine that has used ONED before usually just works. Env vars are for
 automation only:
 

@@ -10,10 +10,10 @@ on:
     branches: [master]
     paths:
       - 'apps/novaworld_server/**'
-      - 'libs/novacrypto/**'
-      - 'libs/napi/**'
-      - 'libs/novaworld/**'
-      - 'libs/npwire/**'
+      - 'engine/net/novacrypto/**'
+      - 'engine/net/napi/**'
+      - 'engine/net/novaworld/**'
+      - 'engine/net/npwire/**'
       - 'apps/common/**'
       - 'backend/**'
       - 'third_party/sqlite/**'
@@ -28,10 +28,10 @@ on:
     branches: [master]
     paths:
       - 'apps/novaworld_server/**'
-      - 'libs/novaworld/**'
-      - 'libs/npwire/**'
-      - 'libs/napi/**'
-      - 'libs/novacrypto/**'
+      - 'engine/net/novaworld/**'
+      - 'engine/net/npwire/**'
+      - 'engine/net/napi/**'
+      - 'engine/net/novacrypto/**'
       - 'backend/**'
       - 'web/**'
       - '.github/workflows/novaworld-images.yml'

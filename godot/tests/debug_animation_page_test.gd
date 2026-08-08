@@ -4,7 +4,7 @@ extends GutTest
 # player's animation scalars and one row per registry animatable, and
 # degrades to empty states when the world/registry are gone.
 
-const PageScript := preload("res://engine/debug/pages/debug_animation_page.gd")
+const PageScript := preload("res://adapter/debug/pages/debug_animation_page.gd")
 
 
 class StubModel:

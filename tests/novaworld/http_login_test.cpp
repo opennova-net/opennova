@@ -1,6 +1,6 @@
 // ADR 0010 Phase 3 — NovaWorld HTTP account login wire format.
 //
-// Proves the Godot-free login helpers (libs/novaworld/http_login) produce a
+// Proves the Godot-free login helpers (engine/net/novaworld/http_login) produce a
 // POST /NWLogin.dll body the server's own EPASK path decodes, and that the
 // cookie jar carries the post-login identity (NWHANDLE/PCID) onto every later
 // request — including the GSB browse fetch (grill NW-S5/B3).

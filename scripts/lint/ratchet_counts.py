@@ -7,8 +7,8 @@ in maturity_baseline.json:
   test_private_pokes    lines in godot/tests/**/*.gd that access an
                         _underscore member of ANOTHER object (self._ excluded)
                         -- ADR 0018: each is a missing public seam.
-  libs_uncited_src_files  files under libs/<lib>/src with zero "[orig"
-                        citations, excluding the allowlisted infra libs
+  engine_uncited_src_files  files under engine/<group>/<lib>/src with zero
+                        "[orig" citations, excluding the allowlisted infra libs
                         (citation is inapplicable there) -- the faithful-port
                         rule's coverage floor.
 
@@ -54,10 +54,11 @@ def count_test_private_pokes() -> int:
     return count
 
 
-def count_libs_uncited_src_files(allowlist: set[str]) -> int:
+def count_engine_uncited_src_files(allowlist: set[str]) -> int:
     count = 0
-    libs = REPO / "libs"
-    for lib_dir in sorted(p for p in libs.iterdir() if p.is_dir()):
+    engine = REPO / "engine"
+    # engine/<group>/<lib>: the libs are one level below the four group dirs.
+    for lib_dir in sorted(p for p in engine.glob("*/*") if p.is_dir()):
         if lib_dir.name in allowlist:
             continue
         src = lib_dir / "src"
@@ -82,14 +83,15 @@ LIBS_PRINT = re.compile(
     r"|(?<![\w:.])puts\s*\(")
 
 
-def count_libs_stdout_prints() -> int:
-    """Console writes inside libs/ (W1-3): libraries route diagnostics through
+def count_engine_stdout_prints() -> int:
+    """Console writes inside engine/ (W1-3): libraries route diagnostics through
     the io/log.h sink and stay silent by default — the embedder installs the sink.
     FILE*-parameter writers (fprintf(fp, ...)) are deliberately not matched."""
     count = 0
-    libs = REPO / "libs"
+    engine = REPO / "engine"
     for sub in ("src", "include"):
-        for path in libs.glob(f"*/{sub}/**/*"):
+        # engine/<group>/<lib>/<sub>/**: one extra level for the group dirs.
+        for path in engine.glob(f"*/*/{sub}/**/*"):
             if path.suffix.lower() not in (".c", ".cc", ".cpp", ".h", ".hpp"):
                 continue
             if path.name == "log.h" and path.parent.name == "io":
@@ -120,7 +122,7 @@ def count_gd_prints_outside_debug() -> int:
     channels are push_error/push_warning, print_verbose, and the F3 overlay.
     godot/tests and the GUT addon are out of scope (probes print by design)."""
     count = 0
-    for sub in ("engine", "game", "modtools"):
+    for sub in ("adapter", "game", "modtools"):
         for path in (REPO / "godot" / sub).rglob("*.gd"):
             rel = path.relative_to(REPO).as_posix()
             if rel in GD_PRINT_ALLOWLIST:
@@ -146,7 +148,7 @@ def count_has_method_guards() -> int:
     documented kept set (harness seams, workspace capability hooks, dynamic
     dispatch) - not zero. class_has_method is excluded by the word boundary."""
     count = 0
-    for sub in ("engine", "game", "modtools"):
+    for sub in ("adapter", "game", "modtools"):
         for path in (REPO / "godot" / sub).rglob("*.gd"):
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
@@ -162,10 +164,10 @@ OVERSIZE_CPP_LINE_LIMIT = 2500
 
 def count_oversize_cpp_files() -> int:
     """Oversized translation units (W3-7, the W3 closer): the god-file splits
-    leave two residual offenders; no .cpp under libs/, apps/, or godot/engine
+    leave two residual offenders; no .cpp under engine/, apps/, or godot/adapter
     may grow past 2500 lines without splitting first."""
     count = 0
-    for root in ("libs", "apps", "godot/engine"):
+    for root in ("engine", "apps", "godot/adapter"):
         for path in (REPO / root).rglob("*.cpp"):
             parts = path.relative_to(REPO).parts
             if "build" in parts:  # local CMake/godot-cpp build output, not source
@@ -184,12 +186,12 @@ OVERSIZE_GD_LINE_LIMIT = 1200
 
 def count_oversize_gd_files() -> int:
     """Oversized GDScript files (W4-6, the W4 closer): the W4 god-file splits
-    leave seven residual offenders; no .gd under godot/engine, godot/game, or
+    leave seven residual offenders; no .gd under godot/adapter, godot/game, or
     godot/modtools may grow past 1200 lines without splitting first.
     godot/tests is deliberately out of scope: eleven test files already exceed
     the limit and the test refit is ONED-TST's concern, not this ratchet's."""
     count = 0
-    for root in ("godot/engine", "godot/game", "godot/modtools"):
+    for root in ("godot/adapter", "godot/game", "godot/modtools"):
         for path in (REPO / root).rglob("*.gd"):
             parts = path.relative_to(REPO).parts
             if "addons" in parts or "build" in parts:  # vendored addons / build output, not source
@@ -209,7 +211,7 @@ def count_cpp_binding_console_writes() -> int:
     print_verbose. Raw print/printerr/print_line and the WARN/ERR_PRINT
     macros are ratcheted at zero."""
     count = 0
-    for path in (REPO / "godot" / "engine").rglob("*"):
+    for path in (REPO / "godot" / "adapter").rglob("*"):
         if path.suffix.lower() not in (".cpp", ".h", ".hpp"):
             continue
         parts = path.relative_to(REPO).parts
@@ -235,13 +237,13 @@ def main() -> int:
     args = parser.parse_args()
 
     config = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
-    allowlist = set(config.get("citation_allowlist_libs", []))
+    allowlist = set(config.get("citation_allowlist_engine", []))
     baseline = config.get("counters", {})
 
     current = {
         "test_private_pokes": count_test_private_pokes(),
-        "libs_uncited_src_files": count_libs_uncited_src_files(allowlist),
-        "libs_stdout_prints": count_libs_stdout_prints(),
+        "engine_uncited_src_files": count_engine_uncited_src_files(allowlist),
+        "engine_stdout_prints": count_engine_stdout_prints(),
         "gd_prints_outside_debug": count_gd_prints_outside_debug(),
         "cpp_binding_console_writes": count_cpp_binding_console_writes(),
         "oversize_cpp_files": count_oversize_cpp_files(),

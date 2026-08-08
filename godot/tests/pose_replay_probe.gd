@@ -17,9 +17,9 @@ extends Node
 # Also lists the mission entities within 80 u of the camera as context for
 # what SHOULD be along the ray.
 
-const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
 const StandaloneProbe := preload("res://tests/standalone_game_probe.gd")
-const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
+const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
 const OUT_DIR := "res://../.scratch/pose_replay"
 
 # Yaw/pitch offsets (degrees) around the dumped forward — the "sometimes" net.

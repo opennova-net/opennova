@@ -57,7 +57,7 @@ func test_blank_fnt_saves_and_reloads_alpha_and_glyph_rect() -> void:
 
 
 func test_pack_shelf_binding_packs_deterministically() -> void:
-	# The shelf packer is native (libs/fnt fnt_pack_shelf, ENG-4); this pins
+	# The shelf packer is native (engine/formats/fnt fnt_pack_shelf, ENG-4); this pins
 	# the binding contract — (w,h) pairs in, (page,x,y,w,h) quintuples out —
 	# and the format constants the fonts rasterizer aliases.
 	assert_eq(NovaFntResource.FIRST_CHAR, 32)

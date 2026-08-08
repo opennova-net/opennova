@@ -9,8 +9,8 @@ extends RefCounted
 ## Holding the API wrong (the raw-script era's floating objects) is impossible
 ## by construction.
 
-const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
-const ItemSeatSpecs := preload("res://engine/world/item_seat_specs.gd")
+const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
+const ItemSeatSpecs := preload("res://adapter/world/item_seat_specs.gd")
 
 ## Watchdog budget for tools that (re)load the mission's terrain and place
 ## its objects — that path can take seconds on large maps.
@@ -746,8 +746,9 @@ func _mount_analysis_row(organic: Dictionary, target: Dictionary, command_id: in
 		target_card["found"] = true
 		var type_id := int(target.get("type_id", 0))
 		if not seat_cache.has(type_id):
-			seat_cache[type_id] = ItemSeatSpecs.seat_specs_for_item(
-					root, item_db, int(target.get("item_id", 0)), type_id, true)
+			# S16: the native extractor card (the GDScript extraction is gone).
+			seat_cache[type_id] = item_db.extract_seat_specs_for_item(
+					root, int(target.get("item_id", 0)))
 		var spec: Dictionary = seat_cache[type_id]
 		seats = spec.get("seats", [])
 		target_card["display_name"] = spec.get("display_name", target_card.get("display_name", ""))

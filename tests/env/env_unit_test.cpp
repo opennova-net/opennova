@@ -1,4 +1,5 @@
 #include <env/env.h>
+#include <env/tod_clock.h>
 
 #include <cmath>
 #include <cstdio>
@@ -31,6 +32,34 @@ std::string fixture_path() {
 } // namespace
 
 int main() {
+	// The mission TOD clock (env/tod_clock.h): the witnessed exact-integer
+	// rate 0x18000000/(3720*minutes) [orig: @0x57d108], the 60-minute day
+	// floor [orig: @0x57d170], and the Q8.8 -> day-wrapped 8.24 widening
+	// [orig: @0x525371].
+	bool clock_ok = true;
+	clock_ok &= expect(opennova::env::kTodDayFixed24 == 0x18000000,
+			"the 8.24 day span is the witnessed 0x18000000 dividend");
+	clock_ok &= expect(opennova::env::tod_advance_per_tick(1440) ==
+					0x18000000 / (3720 * 1440),
+			"the default 1440-minute day uses the exact integer rate");
+	clock_ok &= expect(opennova::env::tod_advance_per_tick(10) ==
+					opennova::env::tod_advance_per_tick(60),
+			"day lengths below 60 minutes clamp to the retail floor");
+	// Q8.8 12.00 -> 12h in 8.24; 25.5h wraps to 1.5h.
+	clock_ok &= expect(opennova::env::tod_start_fixed24(12 << 8) == 12 << 24,
+			"the Q8.8 start hour widens by 16 bits");
+	clock_ok &= expect(opennova::env::tod_start_fixed24((25 << 8) | 0x80) ==
+					(1 << 24) + (1 << 23),
+			"a start hour past 24 wraps into the day");
+	// Midnight wraps day-modulo (the floor-divided rate drifts a few 8.24
+	// units per authored day — retail's own exact-integer behavior, kept).
+	const int32_t rate = opennova::env::tod_advance_per_tick(60);
+	const int32_t before_midnight = opennova::env::kTodDayFixed24 - rate;
+	clock_ok &= expect(
+			opennova::env::tod_advance(before_midnight, 2, rate) == rate,
+			"the accumulator wraps across midnight, never overflows");
+	if (!clock_ok) return 1;
+
 	std::ifstream fixture(fixture_path(), std::ios::binary);
 	if (!fixture) {
 		std::fprintf(stderr, "FAIL: cannot open %s\n", fixture_path().c_str());

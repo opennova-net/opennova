@@ -16,7 +16,7 @@ enum Workflow { PREVIEW, MATERIALS, PARTS, LIGHTS, LODS, ANIMS }
 
 # Workflow inspectors are declared as typed InspectorDef rows in _build_inspector_defs().
 
-# Aliases of the NovaObjectData binding, single-sourced from libs/oed
+# Aliases of the NovaObjectData binding, single-sourced from engine/formats/oed
 # (OED_UPDATE_*) — ENG-4.
 const OED_UPDATE_NONE := NovaObjectData.UPDATE_NONE
 const OED_UPDATE_MTRL := NovaObjectData.UPDATE_MTRL

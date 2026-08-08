@@ -12,7 +12,7 @@ const ParticleEditorScript = preload("res://modtools/particle/particle_editor.gd
 const ParticleEffectInspectorScript = preload("res://modtools/particle/inspectors/effect_inspector.gd")
 const ParticleDefInspectorScript = preload("res://modtools/particle/inspectors/particle_inspector.gd")
 const ParticleTableInspectorScript = preload("res://modtools/particle/inspectors/table_inspector.gd")
-const FlyCameraScript = preload("res://engine/fly_camera.gd")
+const FlyCameraScript = preload("res://adapter/fly_camera.gd")
 
 const OUTPUT_DIR_NAME := "particle_editor_workstation_test"
 const PARTICLE_FLAG_FOREVER_EMIT := NovaParticleDef.FLAG_FOREVER_EMIT  # particle_flag::ForeverEmit = 0x40000 (engine flag-table idx 18, post-HAZE)

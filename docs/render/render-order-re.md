@@ -4,10 +4,10 @@ The runtime path from `Render_SubmitEntity` to sorted, ordered draws: the four
 batch queues, the sort keys, the render-state stack, the technique-class
 selection, and the frame's pass sequence, witnessed in retail `Jointops.exe`
 (imagebase `0x400000`, IDB `Jointops.exe.kong.i64`). Implementing code:
-`libs/renderer` (`render_order`, this slice's port; `material_classify` /
-`object_shader_template` from REN-2), `godot/engine/object/nova_object_model.gd`
+`engine/runtime/renderer` (`render_order`, this slice's port; `material_classify` /
+`object_shader_template` from REN-2), `godot/adapter/object/nova_object_model.gd`
 + `nova_object_shader_cache.cpp` (ladder application),
-`godot/engine/environment/{nova_celestial,nova_water}.gd` (the generalized
+`godot/adapter/environment/{nova_celestial,nova_water}.gd` (the generalized
 priority ladder). Landed by maturity REN-3
 ([maturity-program.md](../maturity-program.md); standing rules
 [ADR 0023](../adr/0023-render-visual-parity.md) — the queue machinery is
@@ -227,7 +227,7 @@ driver; camera above water shown — the sides mirror when underwater):
 ## The ported ordering semantics (this slice)
 
 The reimpl keeps its own queues (ADR 0023); what ports is the ORDER as data +
-pure functions in `libs/renderer/render_order.{h,cpp}`:
+pure functions in `engine/runtime/renderer/render_order.{h,cpp}`:
 
 - the transparent priority ladder (sky dome < celestial bodies < glare <
   far-water-side world alpha < water surface < camera-side world alpha <
@@ -244,7 +244,7 @@ pure functions in `libs/renderer/render_order.{h,cpp}`:
 
 | ID | Ours | Original | Disposition |
 |---|---|---|---|
-| D-RORD-1 | No global transparent ordering: water, world alpha, and weather all at priority 0 (one depth-sorted queue); the celestial ladder local to `nova_celestial.gd` | fixed pass bracket: sky → far-water-side alpha → water → camera-side alpha → overlays → glow (`[orig: @ 0x5c93a0]`) | FIXED (this slice: the ladder in `libs/renderer/render_order`, applied at celestial/water/object-model sites) |
+| D-RORD-1 | No global transparent ordering: water, world alpha, and weather all at priority 0 (one depth-sorted queue); the celestial ladder local to `nova_celestial.gd` | fixed pass bracket: sky → far-water-side alpha → water → camera-side alpha → overlays → glow (`[orig: @ 0x5c93a0]`) | FIXED (this slice: the ladder in `engine/runtime/renderer/render_order`, applied at celestial/water/object-model sites) |
 | D-RORD-2 | Reimpl-internal opaque ordering (Godot front-to-back + its own state batching) | per-frame CPU quicksort by the composite key (alpha-test bit → 256-unit depth slabs → effect index → fine depth) (`[orig: @ 0x5d8b40; @ 0x5d928e]`) | PERMANENT-candidate (class C): same intent, device-era mechanism; key semantics preserved as T1-pinned functions |
 | D-RORD-3 | Water-side rung assigned per OBJECT (model origin vs water height, at rebuild / `refresh_render_order()`) | per STRIP, per frame (strip center height `[orig: @ 0x5d932e..0x5d9354]`) | OPEN (partial) — straddling or water-crossing models can mis-bin strips; revisit if a T2/T3 scene shows it |
 | D-RORD-4 | Viewmodel is a camera-tracked node with no depth treatment (clips into near walls) | drawn FIRST with near-Z 0.05 + viewport depth range [0, 0.1], own mode-0 flush (`[orig: @ 0x4ded60; @ 0x58a7b0]`) | RESOLVED — ported 2026-07-09: dedicated shared-world SubViewport composite at the weapon `renderfov` (h→v via aspect, near 0.05) over the finished frame, the depth window's visible equivalent; per-weapon def plumbing landed same day (net-re §5.40 fifth pass) |

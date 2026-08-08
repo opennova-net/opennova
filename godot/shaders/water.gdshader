@@ -15,7 +15,7 @@ render_mode unshaded, blend_premul_alpha, cull_disabled, depth_draw_always;
 // [orig: @ 0x5c32c0, docs/env/env-tod-re.md "Water surface"]. The look is the
 // HIGH-DETAIL strip model [orig: render_water_strip_detailed @ 0x5c27d0]:
 // flat geometry, the animated 128x128 noise ridge texture + its DuDv map
-// (regenerated per frame in libs/env - Water_GenerateNoiseTextures
+// (regenerated per frame in engine/formats/env - Water_GenerateNoiseTextures
 // @ 0x5c0360), per-vertex diffuse/alpha from the row color chain, and the
 // shared scene fog. The screen-marched strip tessellation is LIVE (env #29):
 // NovaWater rebuilds the mesh per frame from NovaWaterCore.strip_build, so
@@ -104,7 +104,7 @@ varying vec3 v_specular;
 // witnessed rhw scales) and CUSTOM0.zw (screen U / V):
 // u-row = (t1.x, t1.y, source-screen U),
 // v-row = (t2.x, t2.y, source-screen V)
-// [orig: rows @ 0x5c2f83..0x5c3067; libs/env WaterStripRows]. The underwater
+// [orig: rows @ 0x5c2f83..0x5c3067; engine/formats/env WaterStripRows]. The underwater
 // V-flip rides the rows themselves [orig: @ 0x5c306f..0x5c3085].
 varying vec3 v_refl_row_u;
 varying vec3 v_refl_row_v;
@@ -163,7 +163,7 @@ void fragment() {
 	// v = dot(t2row, t0_bx2), _bx2 = c*2 - 1 [orig: tex t0 / texm3x2pad t1,
 	// t0_bx2 / texm3x2tex t2, t0_bx2 — Water_InitSurfaceShaders @ 0x5c19b0;
 	// the mirror scene RTT render_main_scene @ 0x5c1240]. The DuDv map's
-	// blue byte is the constant 0xFF (libs/env water_noise_normal_pixels),
+	// blue byte is the constant 0xFF (engine/formats/env water_noise_normal_pixels),
 	// so _bx2 passes the rows' screen component through at weight 1 while
 	// R/G perturb it. The dots remain the witnessed lookup verbatim. Their
 	// result is then mapped from the main viewport's normalized projection to
@@ -196,7 +196,7 @@ void fragment() {
 	// alpha = t3.a x v0.a x2, saturated [orig: +mul_x2 r0.a, t3.a, v0.a —
 	// Water_InitSurfaceShaders @ 0x5c19b0 ps.1.1]. COLOR.a carries the
 	// angle-weighted murk term and the 255 - a^2/255 distance falloff,
-	// computed per row in libs/env [orig: alpha chain @ 0x5c2e22..0x5c2e9d;
+	// computed per row in engine/formats/env [orig: alpha chain @ 0x5c2e22..0x5c2e9d;
 	// written @ 0x5c2f0a..0x5c2f2b] — the shader's former dist^2 stand-in
 	// and flat (1 - u_water_murk) knob both retired to it.
 	float alpha_dist = clamp(noise.a * COLOR.a * 2.0, 0.0, 1.0);

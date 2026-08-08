@@ -491,7 +491,7 @@ func _build_behavior_section() -> void:
 		func(): return _cached_waypoint_options,
 		func(v: int) -> String: return ("Path %d (no markers)" % v) if (v >= 1 and v <= 127) else ("Value %d" % v))
 	# The plain numeric rows + their section headings come from one ordered table (the field set +
-	# ranges live in MissionEntityFields, matching the libs/mission name->member map). The picker /
+	# ranges live in MissionEntityFields, matching the engine/runtime/mission name->member map). The picker /
 	# text / flag rows below are not plain spins, so they stay explicit.
 	for entry in MissionEntityFields.SPIN_FIELDS:
 		if entry.has("section"):

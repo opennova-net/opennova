@@ -1,7 +1,7 @@
 # Mission loading screen — reverse-engineering record
 
-Validation record for the mission loading screen (`godot/engine/ui/nova_loading_screen.gd`,
-progress wiring in `godot/engine/world/game_world.gd` + `godot/engine/mission/mission_object_placer.gd`,
+Validation record for the mission loading screen (`godot/adapter/ui/nova_loading_screen.gd`,
+progress wiring in `godot/adapter/world/game_world.gd` + `godot/adapter/mission/mission_object_placer.gd`,
 shell lifecycle in `godot/game/main_game.gd`) against the original engine as witnessed in IDA
 Pro. Binary: retail **Jointops.exe** (IDB `Jointops.exe.kong.i64`). All addresses below are
 that binary's. This file is the committed home for the divergence catalog that code comments
@@ -223,7 +223,7 @@ key (`Input_HandleSpecialKeys @ 0x49c5c0`, key `dword_B3B744`, @ 0x49c887).
 
 ## Port notes (the structural translation)
 
-- `NovaLoadingScreen` (godot/engine/ui/nova_loading_screen.gd) draws the texture stretched
+- `NovaLoadingScreen` (godot/adapter/ui/nova_loading_screen.gd) draws the texture stretched
   over the display and the MP text in image space under the image's scale transform — the
   same net composite the original gets by rendering glyphs into the texture then
   stretching. The bar arithmetic, colors, throttle and creep are ported integer-exact.
@@ -248,7 +248,7 @@ key (`Input_HandleSpecialKeys @ 0x49c5c0`, key `dword_B3B744`, @ 0x49c887).
 | D-LOADSCR-4 | SP start-mission splash not ported | `show_start_mission_splash @ 0x520820` (arrow + START_MISSION + LT_Continue) | follow-up; the loading screen itself is unaffected |
 | D-LOADSCR-5 | seven-segment numeric percentage not ported | drawn only under the `g_ShowLoadBarCommandLineArg` command-line flag | debug-only surface; revisit if the launch-flag work wants it |
 | D-LOADSCR-6 | background drawn unmodulated | effect draw modulate `0xFF7F7F7F` = MODULATE2X neutral | net-identical color; documented so nobody "fixes" a half-bright that isn't there |
-| D-LOADSCR-7 | ESC / disconnect during the SP/host **map load** cannot abort it — that load is a single synchronous `operation.call()` the SceneTree cannot interrupt; ESC is swallowed for its duration | `Client_CheckDisconnectOrEscDuringLoad @ 0x520270` polls at four asset points and aborts to `Post Menu` (`reason = 1`, `g_loading_cancel_flag = 1`) on ESC/disconnect | no reachable interruption window on a synchronous host load — the original's blocking `.bms`/model load is likewise uninterruptible except at its network-wait points. Scope corrected 2026-07-25: this row covers ONLY the synchronous map load. Both joiner waits are coroutines that await `process_frame` every iteration, so both are interruptible and both now honour ESC — the pre-load connect/session wait via `GameWorld.cancel_join_preload()` and the post-load admission tail via `GameWorld.cancel_join_admission()` (previously ESC was consumed and did nothing there for up to `JOIN_CONNECT_TIMEOUT_MS`). Revisit if the map load is ever chunked across frames. |
+| D-LOADSCR-7 | ESC / disconnect during the SP/host **map load** cannot abort it — that load is a single synchronous `operation.call()` the SceneTree cannot interrupt; ESC is swallowed for its duration | `Client_CheckDisconnectOrEscDuringLoad @ 0x520270` polls at four asset points and aborts to `Post Menu` (`reason = 1`, `g_loading_cancel_flag = 1`) on ESC/disconnect | no reachable interruption window on a synchronous host load — the original's blocking `.bms`/model load is likewise uninterruptible except at its network-wait points. Scope corrected 2026-07-25: this row covers ONLY the synchronous map load. Both joiner waits are frame-polled state machines (one step per frame/tick), so both are interruptible and both honour ESC — the pre-load connect/session wait via `GameWorld.cancel_join_preload()` and the post-load admission tail via `GameWorld.cancel_join_admission()` (previously ESC was consumed and did nothing there for up to the 60 s ConnectOrHost window). Since S10b (2026-08-07) both windows, the abort legs, and their reason texts live in `np::JoinSessionPolicy` (`engine/net/npruntime`); the drive node executes the returned edges. Revisit if the map load is ever chunked across frames. |
 
 ## Follow-ups / unknowns
 

@@ -6,16 +6,16 @@ portal traversal, the occluder culling pass, the frame-level indoor gates, and
 the occlusion model data they all consume. Binary: retail **Jointops.exe**
 (IDB `Jointops.exe.kong.i64`, imagebase 0x400000). All addresses below are
 that binary's. The consumer engine is **PORTED** (2026-07-17):
-`libs/world/occlusion.{h,cpp}` (`OcclusionWorld` + the render-float math),
+`engine/runtime/world/occlusion.{h,cpp}` (`OcclusionWorld` + the render-float math),
 the `CollisionWorld` camera blink query, and the reimpl wiring
-(`NovaSimulation::run_occlusion_frame`, `OcclusionFramePass.apply_frame (godot/engine/world/occlusion_frame_pass.gd)`,
+(`NovaSimulation::run_occlusion_frame`, `OcclusionFramePass.apply_frame (godot/adapter/world/occlusion_frame_pass.gd)`,
 the placer de-batch + `NovaObjectModel.set_section_visibility_mask`); ctest
 `occlusion` + GUT `game_world_test` / `nova_object_model_section_mask_test`
 cover it. The *producer* side (blink volume queries, the indoors bit,
 per-entity blink hits) is §15 of
 [world-wac-ai-re.md](../world/world-wac-ai-re.md); this record is the
 *consumer* side that §15 deferred as "REN-scope follow-ups". Sound occlusion is
-witnessed here too (its port target is `godot/engine/world` audio; the catalog
+witnessed here too (its port target is `godot/adapter/world` audio; the catalog
 entry stays [lwf-dbf-sound-re.md](../audio/lwf-dbf-sound-re.md) D-SND-7).
 
 ## Verdict table
@@ -50,7 +50,7 @@ loaded by `[orig: load_occlusion_model_data @ 0x5b4a00]` (sole caller
 The tags were pinned from the push immediates `@ 0x5b4a0c/0x5b4a27/0x5b4a46/0x5b4a60`
 (`0x5452564F`/`0x4E4C504F`/`0x4341464F`/`0x4A424F4F`); the decompiler's
 auto-comment names (OVRP/ONRM/OCIT) are wrong. This is the same chunk family
-`libs/threedi`'s 3DI3 reader already parses as
+`engine/formats/threedi`'s 3DI3 reader already parses as
 `occlusion_vertices/planes/faces/objects` — the 3DI3-side loader in Jointops
 was not located this session (open item D-OCC-7). Copy-loop details re-derived
 from the disasm (port pass): OVRT/OPLN copy verbatim; OFAC keeps the disk field
@@ -58,7 +58,7 @@ order (`u8 v0,v1,v2, u8 planeIdx, u16 edge[3]`, bytes 10-11 uninitialized pad);
 OOBJ 36 B disk (`type/secA/secB/pad, pos f3 @+4, radius @+16, GLOW SCALE f32
 @+20, vert/plane/face counts @+24/+28/+32`) → the 60 B runtime shape below with
 per-object slice pointers advancing sequentially. The disk +20 float is the
-window-glow scale (runtime +0x2C) — `libs/threedi`'s former `unk1` field,
+window-glow scale (runtime +0x2C) — `engine/formats/threedi`'s former `unk1` field,
 renamed `glow_scale` (zero across the JO 3DI3 corpus). The loader stores
 count/array through a `this` alias 4 bytes below the model consumers read
 (loader writes +0xE0/+0xE4; every consumer reads model +0xDC/+0xE0).
@@ -362,7 +362,7 @@ The .mis/BMS record bytes 84–87 (`blink_parent_a/b`, `blink_group_a/b`) are
 164–165) but never 84–87, and no other reader was found (bounded search;
 matches the parsed-but-unconsumed note in
 [novaworld-net-re.md](../net/novaworld-net-re.md) D-NET-151's investigation).
-Editor-authored data with no runtime effect in JO — our `libs/mission` parse
+Editor-authored data with no runtime effect in JO — our `engine/runtime/mission` parse
 keeps the fields for .mis round-trip fidelity only.
 
 ## 8. Divergence / open-item catalog (D-OCC)

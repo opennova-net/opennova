@@ -2,7 +2,7 @@
 ctypes bindings for the ASE C API (libopennova.so / opennova.dll).
 
 Every ctypes Structure here mirrors the corresponding C struct in
-libs/ase/include/ase/types.h.  Keep them in sync!
+engine/formats/ase/include/ase/types.h.  Keep them in sync!
 """
 
 import ctypes

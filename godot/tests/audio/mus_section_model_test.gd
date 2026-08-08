@@ -1,7 +1,7 @@
 extends GutTest
 
 # Covers NovaMusicScript.get_section_model: the read-only structural model that
-# drives the editor's section map. The model reads opcodes (libs/mus
+# drives the editor's section map. The model reads opcodes (engine/formats/mus
 # mus_build_section_model), so the topology is exact -- setstate transitions are
 # distinguished from frame-setup `enter`, and tablexec switch fan-out is captured
 # (the old string-parsed graph saw none of this).

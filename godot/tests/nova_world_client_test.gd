@@ -1,7 +1,7 @@
 extends GutTest
 
 # Smoke coverage for the NovaWorldClient GDExtension binding (the Godot-side
-# novaworld client over libs/novacrypto + libs/napi + libs/novaworld).
+# novaworld client over engine/net/novacrypto + engine/net/napi + engine/net/novaworld).
 # No live server: this pins registration, defaults, property round-trips,
 # and that start()/stop() drive the state machine without crashing. The
 # wire behavior itself is covered by the C++ net ctests and, end to end,

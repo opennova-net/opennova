@@ -154,8 +154,8 @@ paging rather than assuming either "all statics" or "no statics."
   `LobbySession` mirror — "lobby verify" is that exchange's protocol name), not
   in-match replication.
 - `UdpSessionTransport` is an internal identity-frame conduit. NWU session
-  framing, SCRK, and ProtocolMessage live in `libs/npwire` (ADR 0019); the PN
-  classifier (`classify_session_protocol`) stays in `libs/novaworld`.
+  framing, SCRK, and ProtocolMessage live in `engine/net/npwire` (ADR 0019); the PN
+  classifier (`classify_session_protocol`) stays in `engine/net/novaworld`.
 
 
 ## Known RETAIL-side defects — do NOT chase these as ours

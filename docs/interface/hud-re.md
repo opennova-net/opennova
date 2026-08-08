@@ -4,10 +4,10 @@ Witness record for the Joint Operations in-game **HUD overlay** render pipeline.
 Binary: retail **Jointops.exe** (IDB `Jointops.exe.kong.i64`, imagebase
 `0x400000`). All addresses below are that binary's.
 
-Implementing code: `libs/def` (`hudpos.def` / `weapon.def` parsing), the
-`NovaHudPos` GDExtension binding (`godot/engine/hud/`), the shell-neutral view
-helpers under `godot/engine/ui/hud_*.gd`, the ONED preview workspace
-(`godot/modtools/hud/`), and the runtime overlay `godot/engine/world/game_hud.gd` fed
+Implementing code: `engine/formats/def` (`hudpos.def` / `weapon.def` parsing), the
+`NovaHudPos` GDExtension binding (`godot/adapter/hud/`), the shell-neutral view
+helpers under `godot/adapter/ui/hud_*.gd`, the ONED preview workspace
+(`godot/modtools/hud/`), and the runtime overlay `godot/adapter/world/game_hud.gd` fed
 per-frame by `godot/game/main_game.gd`. The 2026-06-22 session witnessed the
 core pipeline read-only; the 2026-07-09 session witnessed the weapon-coupled
 elements and ported them (the weapon FSM of net-re §5.62 supplies the live
@@ -48,12 +48,12 @@ projectile-versus-HUD shifts are now witnessed and ported (D-HUD-7).
 | Attach labels (seat/armory floats) | **ported** (`world::collect_attach_labels` + `hud_attach_labels.gd` + `game_hud_presenter.gd`, D-HUD-11/12/13) | `[orig: draw_vehicle_seat_and_armory_labels @0x5a3290]` full witness; label strings `[orig: HUD_InitOverlaySystem @0x5a479c..0x5a481e]`; `attachtextid` parse `[orig: @0x544d6c]`; ctest `vehicle_mount` + `def_parse_weapons`/`def_parse_items`; GUT `nova_simulation_test.gd`/`hud_helpers_test.gd` |
 | Armory/vehicle-bay/FARP bottom prompts | witnessed — deferred with their systems (D-HUD-14) | `[orig: HUD_DrawGameplayOverlays @0x5bde60]` — preround/0x0A armory prompt, Flags 0x800 bay prompt, FARP wait/reload |
 | Mission triggered text (WAC/BMS `text`) | **ported** (`hud_messages.gd` + `main_game.gd`, D-HUD-6) | `[orig: HUD_DisplayTriggeredText @0x51f190]` → `[orig: Chat_AddDebugMessage @0x4987f0]`; `hud_helpers_test.gd` expiry |
-| `hudpos.def` parser token map + 4-field positions | ported (`libs/def`) | `[orig: loc_59F370; AMMOCOUNTPOS @0x59fc3d]`; ctest `def_parse_hudpos` |
+| `hudpos.def` parser token map + 4-field positions | ported (`engine/formats/def`) | `[orig: loc_59F370; AMMOCOUNTPOS @0x59fc3d]`; ctest `def_parse_hudpos` |
 | Parachute / armor status icons | witnessed — port pending (entity+44 flag writer unwalked) | `[orig: HUD_DrawParachuteAndArmorIcons @0x5925c0]` — entity+44 `&0x10` parachute / `&0x8` armor through the info struct's entity ptr; `ParachuteIcon`/`ArmorIcon` tokens |
 | MP objective status text + team tile | confirm-only — MP HUD phase | `[orig: draw_objective_status_text @0x59aa30]` client/strcli* strings witnessed |
 | Weapon heat bar (HUDHEAT) | **ported** (`game_hud.gd` `_draw_heat_bar`, D-HUD-15) | `[orig: HUD_DrawWeaponHeatBar @0x599700]` (ex kong "draw_minimap_overlay" — a misnomer; there is no radar here) full witness: border + proportional fill in the HUDHEAT rect |
 | Waypoint HUD label (HUDWPDINFO) | **ported** (`game_hud.gd` `_draw_waypoint_info` + `game_hud_presenter.gd`, D-HUD-16/17) | `[orig: HUD_DrawWaypointNameAndDistance @0x5947a0]` + `[orig: get_waypoint_name @0x594630]` full witness; gates `[orig: @0x5a7daf]` |
-| Waypoint track (list/current/advance/mission gate) | **ported** (`libs/world` waypoint track + `NovaSimulation`, D-HUD-16/17) | list `[orig: NetPacket_WriteWorldStateLoad0x0F @0x502d10 @0x502e41]` (nav channel `flags&2`); BMS marker fields `[orig: Entity_SpawnFromBMSRecord @0x40f0aa]`; advance `[orig: Player_UpdatePerFrame @0x4de5f7]`; done-mark `[orig: EventTrigger_MarkLinkedSpawnPoints @0x452ce0]`; cycle `[orig: Spectator_CycleTarget @0x4dc1d0]` + input case 23 `[orig: @0x49b3de]`; `ShowWaypoints` `[orig: Game_SetShowWaypoints @0x58fb50]` |
+| Waypoint track (list/current/advance/mission gate) | **ported** (`engine/runtime/world` waypoint track + `NovaSimulation`, D-HUD-16/17) | list `[orig: NetPacket_WriteWorldStateLoad0x0F @0x502d10 @0x502e41]` (nav channel `flags&2`); BMS marker fields `[orig: Entity_SpawnFromBMSRecord @0x40f0aa]`; advance `[orig: Player_UpdatePerFrame @0x4de5f7]`; done-mark `[orig: EventTrigger_MarkLinkedSpawnPoints @0x452ce0]`; cycle `[orig: Spectator_CycleTarget @0x4dc1d0]` + input case 23 `[orig: @0x49b3de]`; `ShowWaypoints` `[orig: Game_SetShowWaypoints @0x58fb50]` |
 | Map overlay (fullscreen map: terrain, grid, blips, waypoints) | confirm-only — located + structured, follow-up | `[orig: HUD_DrawMapOverlay @0x5a5f40]` (7278 B): grid coords, `minimap_draw_ring_blip`, `update_radar_contacts`, `draw_compass_indicator`, WPNames labels, `%01.2fk` distances |
 | Objectives panel + subgoal state (MISSION OBJECTIVES) | **ported** (`World::SubgoalState` + `game_hud.gd` `_draw_objectives_panel` + `game_hud_presenter.gd`, D-HUD-18) | `[orig: HUD_DrawWinConditions @0x5ba940]` full witness; actions 14/15/35/36 `[orig: EventAction_Dispatch @0x454500/@0x4545e0/@0x4546af/@0x454724]`; toggle `[orig: @0x49b68b]`; ctest `event_runtime_bms` subgoal block |
 
@@ -111,6 +111,21 @@ out_y = (design_y * screen_h + 384) / 768
 before drawing. The inverse (`[orig: Viewport_ScreenToVirtual @0x5d2c70]`,
 ×1024/width) maps screen points (e.g. the crosshair's screen center) back into
 the design space. (Matches the 1024×768 design space the oscarmike reference used.)
+
+**Port home (S15, 2026-08-07):** the whole HUD view-helper MATH cluster —
+this scaling, the ALPHAFADE decay (quirk included), the stance Q16
+scale/centering, the health color bands, the message tick policy,
+half-bright, the ammo text fold + narrow-surface nudge, the round-icon
+count, and the crosshair spread projection/sum/ERROR-row/gate — is native
+`engine/runtime/hud` (`hud/hud_math.h`, bound as `NovaHudPos` statics; the
+`hud_math` ctest pins each). The GDScript `Hud*` helpers keep only the
+CanvasItem draw work and delegate every decision here. DISPOSITION, avatar
+menu-portrait presentation math (`avatar_preview.gd` — the BAM/frame idle
+rotation, the 2^28 sway amplitude, the `(rand()%180)*0xB60B60` initial yaw
+`[orig: update_player_preview_animation @0x55dba0; PlayerInfo_InitPreviewModel
+@0x5600d0]`): granted the shell exception reviewed with this slice — pure
+menu-preview presentation, already `[orig]`-cited named constants at the
+node, no sim consumer; a lib hop adds nothing observable.
 
 ## Per-frame info struct — `HUD_BuildEntityInfo @0x4b8440`
 
@@ -268,7 +283,7 @@ either component nonzero enables), gated on the ALPHAFADE ramp and the ammo
   `FileSystem_FileExists(texture)` FIRST and skip the whole token (offsets
   included) with a parse warning when the art is missing
   `[orig: @0x544295 / @0x544316]` — behaviorally equal to the port's
-  null-texture draw gates (`libs/def` has no VFS; the load-time miss lands in
+  null-texture draw gates (`engine/formats/def` has no VFS; the load-time miss lands in
   `game_hud._load_texture`). Retail JO sample: `hudrndgfx 9 0 18 0 1 H_round.tga`.
 - **Flash restamp**: the stamp tick (`dword_2723D48`) resets when the ammo
   class (`weapondef+220`), the reserve count, or the pool id byte
@@ -342,7 +357,7 @@ Port: `hud_clip_indicator.gd` (restamp key proxy: D-HUD-5).
   `weapon+0xB0..0xC4` via `Math_ParseFixedPoint16 @0x6131f0` (a digit parser,
   not atof) `[orig: WeaponDefs_ParseLineCallback @ 0x543b21]` — rows hip
   prone/crouch/stand then scoped prone/crouch/stand (retail sample `error
-  0.05 0.2 0.25 0.05 0.1 0.15`). `libs/def` and the runtime weapon table now
+  0.05 0.2 0.25 0.05 0.1 0.15`). `engine/formats/def` and the runtime weapon table now
   retain those exact integers; no float round-trip sits on the parity path.
   The two live terms are likewise carried as signed BAM/fixed-point integers
   through the sim and HUD. The port's below-water row gate compares body
@@ -537,7 +552,7 @@ nearby entities. Called **unconditionally** by `HUD_RenderOverlays`
 | `g_hudLabelFmtArmoryDelay @0x2723870` | `STROVER_USEARMORYD` | "Armory in %d Seconds" | `!ArmoryDelay %d` |
 
 **Selection** (the ported half — `world::collect_attach_labels`,
-`libs/world/src/vehicle_attach.cpp`):
+`engine/runtime/world/src/vehicle_attach.cpp`):
 
 - Bracket gate: no `Entity_FindNearestSeatOrArmory` hit → no labels at all
   `[orig: @0x5a32e2]`. The searchMode is the player's **armory-zone flag**
@@ -633,7 +648,7 @@ FARP rearm) — recorded as D-HUD-14 and deferred with them.
 
 A `_stricmp` token-dispatch; each token reads decimal fields via `atof → ftol`
 (1024×768 ints) or copies a texture-name string. Cross-checked against
-`DefHudPosDef` in `libs/def/include/def/def.h`.
+`DefHudPosDef` in `engine/formats/def/include/def/def.h`.
 
 | Token | Writes |
 |---|---|
@@ -645,7 +660,7 @@ A `_stricmp` token-dispatch; each token reads decimal fields via `atof → ftol`
 | `ParachuteIcon` | name `byte_2723C34`, pos `0x272383C/0x2723840` |
 | `ArmorIcon` | name `byte_2723C44`, pos `dword_2723844/0x2723848` |
 | `AMMOCOUNTPOS <x> <y> <hidden> <align>` | `dword_27235FC/2600/2604/2608` — the **4-field positioned-text layout**, read strictly positionally: fields 1-3 `atof→ftol` (a word in field 3 reads 0), field 4 via `HUD_ParseTextAlignment @0x59d6b0` (full-string stricmp: "right"=1, "center"=2, anything else — including a missing field — 0=left) `[orig: @0x59fc3d]`. Retail 2-field lines (`GAMEINFO`, `HUDCHATTEXT`) render visible/left in retail JO, pinning missing fields to 0. `HUDWEAPONNAME` → `dword_27235EC/F0/F4/F8`, `GAMEINFO` → `dword_272382C/30/34/38`; the other positioned tokens follow the same shape |
-| `ALPHAFADE <base%> <max%> <seconds>` | `dword_2723614` = base×**2.55**, `dword_2723618` = max×**2.55**, `dword_272361C` = seconds×**62** (ticks) `[orig: @0x5a0882..0x5a08c2; dbl_7D9A20 = 2.55, dbl_7C88C0 = 62.0]`. Each field goes through **atof**, so fractional file values (`1.5` s → 93 ticks) survive into the converts — `libs/def` stores the raw fields as floats and the consumers apply ×2.55/×62 with the same truncation (fixed 2026-07-11; `def_parse_hudpos` pins the fractional case) |
+| `ALPHAFADE <base%> <max%> <seconds>` | `dword_2723614` = base×**2.55**, `dword_2723618` = max×**2.55**, `dword_272361C` = seconds×**62** (ticks) `[orig: @0x5a0882..0x5a08c2; dbl_7D9A20 = 2.55, dbl_7C88C0 = 62.0]`. Each field goes through **atof**, so fractional file values (`1.5` s → 93 ticks) survive into the converts — `engine/formats/def` stores the raw fields as floats and the consumers apply ×2.55/×62 with the same truncation (fixed 2026-07-11; `def_parse_hudpos` pins the fractional case) |
 | `STANCEICON_COLOR <a> <r> <g> <b>` | `dword_2723AE8` packed ARGB `[orig: @0x5a0ec0]` — the stance/clip-indicator tint |
 | `HUDCLIP` | `dword_27237B8/BC` — the clip-indicator anchor |
 | `HUDWPDINFO <x> <y> <hideBox> <align>` | `g_hudWpdInfoX/Y/HideBox/Align @0x2723694/98/9C/A0` — the waypoint label anchor; field 3 hides the box only `[orig: @0x5a02c3]` |

@@ -13,7 +13,7 @@ extends "res://modtools/music/ui/live_mode_section.gd"
 
 func _on_section(section_name: StringName) -> void:
 	# A self-loop section (e.g. the gamescript's `Missionnull { enter Missionnull }`)
-	# re-fires section_entered ~60/sec. libs/mus + the director stay byte-faithful;
+	# re-fires section_entered ~60/sec. engine/formats/mus + the director stay byte-faithful;
 	# we collapse the repeats here. Same section as last time = an idle tick: bump
 	# the counter and refresh the now-playing suffix only. No new log row, no graph
 	# rebuild (which would otherwise thrash 60/sec).

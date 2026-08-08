@@ -85,10 +85,10 @@ const STMT := {
 	},
 }
 
-# The 11 intrinsic functions (kIntrinsicNames in libs/mus mus_compile.cpp),
+# The 11 intrinsic functions (kIntrinsicNames in engine/formats/mus mus_compile.cpp),
 # keyed by stored name. `label` is what the user reads; the stored/surface
 # mnemonic goes in the tooltip. Behaviour notes match the VM handlers
-# (libs/mus/src/mus_vm.cpp init_intrinsics).
+# (engine/formats/mus/src/mus_vm.cpp init_intrinsics).
 const INTRINSICS := {
 	"GSV": {"label": "Set volume", "tip": "Set the music volume for both speakers. (engine name: GSV, surface: SV)"},
 	"GSDV": {"label": "Set right-speaker volume", "tip": "Set the music volume for the right speaker only. (engine name: GSDV, surface: SDV)"},

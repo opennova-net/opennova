@@ -2,7 +2,7 @@ extends SceneTree
 ## Manual probe: reads NOVA_PTL_LIST (semicolon-separated .ptl names) through the
 ## runtime mount and writes each to NOVA_PROBE_OUT for offline inspection.
 
-const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
 
 
 func _init() -> void:

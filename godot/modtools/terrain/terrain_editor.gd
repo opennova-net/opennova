@@ -6,7 +6,7 @@ signal ui_state_changed(version: int)
 enum Tool { RAISE, LOWER, SMOOTH, FLATTEN, PAINT_DETAIL, EDIT_SECTORS, PAINT_COLORMAP, CLONE_COLOR, TILE_STAMP, FOLIAGE_PAINT, SURFACE_PAINT }
 enum TileInteractionMode { PLACE, EDIT_SELECTED }
 
-# Maps to opennova::DepthFormat in libs/cpt/include/cpt/cpt.h.
+# Maps to opennova::DepthFormat in engine/formats/cpt/include/cpt/cpt.h.
 # BHD-era terrains (DVD4, original DPTH golden) use DPTH; JO/DFX-era use CDEP.
 enum ExportFlavor { BHD = 0, DFX_JO = 1 }
 

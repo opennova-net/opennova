@@ -2,6 +2,36 @@
 
 Glossary of the project's domain language. Definitions only: what a term *is*, not how it's implemented. Pick one canonical word per concept; alternatives go under _Avoid_. The runtime architecture map lives in [docs/runtime-architecture.md](docs/runtime-architecture.md); the documentation index is [docs/README.md](docs/README.md).
 
+## Layers
+
+The vocabulary for the codebase's own layering (ADR 0016/0028). Dependencies point one
+way: shells → adapter → engine.
+
+**Engine**:
+The portable, Godot-free C++ core under `engine/` (`base/`, `formats/`, `runtime/`,
+`net/`) — the reimplemented NovaLogic engine: format codecs, the world simulation, the
+net stack. "The original engine" always means NovaLogic's binary; our engine contrasted
+with retail is *the reimpl*. Godot is never "the engine".
+_Avoid_: libs (the pre-2026-08 path), core, framework
+
+**Adapter (shell adapter)**:
+`godot/adapter/` — the GDExtension bindings (`Nova*` classes) plus the shell-neutral
+GDScript layer that wires Godot nodes to engine facts. Both shells consume it; it
+depends on neither.
+_Avoid_: godot/engine (the pre-2026-08 path), engine layer (that word is the
+engine's), glue, bindings (only half of it)
+
+**Shell**:
+An application front-end over the adapter: the game shell (`godot/game/`) and ONED
+(`godot/modtools/`). Shells own UI and application flow, never engine behavior.
+_Avoid_: frontend, app (in project prose), host (reserved for the game host)
+
+**Simulation**:
+The deterministic in-match world state advanced at the 62 Hz tick by the engine's world
+systems (WAC VM, BMS events, AI). `NovaSimulation` is the adapter binding that owns it
+shell-side; present passes project it onto scene nodes and never mutate it.
+_Avoid_: game logic, GameWorld (that is the scene, below)
+
 ## Menu UI (MNU)
 
 The vocabulary for NovaLogic's `.mnu` menu system and OpenNova's runtime + editor support for it.
@@ -66,14 +96,14 @@ The vocabulary separating the in-game world from the online service. The names c
 historically; they are now distinct.
 
 **GameWorld**:
-The runtime world-sim scene (`godot/engine/world/game_world.tscn`): terrain,
+The runtime world-sim scene (`godot/adapter/world/game_world.tscn`): terrain,
 environment, mission runtime, and audio under one embeddable root. The standalone
 game is the sole live mission runtime; ONED authoring previews do not run gameplay
 (ADR 0025). Formerly named `NovaWorld`.
 _Avoid_: NovaWorld (that name now belongs to the service), world scene
 
 **NovaWorld**:
-NovaLogic's online matchmaking and account service, and our reimplementation of it (`apps/novaworld_server`, `libs/novaworld`). Always the service, never the in-game world. It is our NovaWorld server, not an emulator.
+NovaLogic's online matchmaking and account service, and our reimplementation of it (`apps/novaworld_server`, `engine/net/novaworld`). Always the service, never the in-game world. It is our NovaWorld server, not an emulator.
 _Avoid_: emulator, lobby server
 
 **Gate**:
@@ -118,10 +148,10 @@ service's domain. Code and libs are named by their domain, never bare "net".
 _Avoid_: unqualified "net code", lobby (for either)
 
 **Wire codec / Net runtime / Net seam**:
-The three in-match layers: the **wire codec** (`libs/npwire`, ADR 0019) encodes/decodes the
+The three in-match layers: the **wire codec** (`engine/net/npwire`, ADR 0019) encodes/decodes the
 byte stream (the message catalog is its single source of truth, ADR 0013); the **net
-runtime** (`libs/npruntime`)
-runs the 62 Hz host/client session over it; the **net seam** (`libs/netsim`) is where the
+runtime** (`engine/net/npruntime`)
+runs the 62 Hz host/client session over it; the **net seam** (`engine/net/netsim`) is where the
 world sim and the wire meet (`INetCommandSink`, the replication fan, ADR 0009).
 _Avoid_: "the netcode" (say which layer)
 

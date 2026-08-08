@@ -2,7 +2,7 @@
 // references: the color/detail/tilestrip TGAs and the charmap/foliagemap PCX
 // surface maps. Authored small from scratch (no retail asset) — solid fills for
 // the flat map. TGA is hand-rolled (uncompressed type-2 BGR, an 18-byte header);
-// the PCX maps go through libs/pcx encode_pcx_indexed. Dimensions are a modest
+// the PCX maps go through engine/formats/pcx encode_pcx_indexed. Dimensions are a modest
 // minimal guess; which retail requires vs tolerates is validated at the retail
 // launch (see fixtures/minimal/README.md). Emit with
 // OPENNOVA_WRITE_MINIMAL_FIXTURES=1; else guard each decodes/round-trips.

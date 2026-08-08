@@ -4,7 +4,7 @@ extends GutTest
 # retail code-page behavior end to end, table bytes -> glyphs.
 #
 # The pipeline under audit:
-#   .bin table bytes (cp1252, raw in libs/rtxt — no transcoding)
+#   .bin table bytes (cp1252, raw in engine/formats/rtxt — no transcoding)
 #     -> RtxtStringFile decode (cp1252-aware, D-RTXT-8 in
 #        docs/interface/rtxt-strings-re.md; the strings editor's read path)
 #     -> Godot String (Unicode)
@@ -24,7 +24,7 @@ extends GutTest
 #
 # Intentional exclusions (format facts, not gaps):
 #   - bytes < 0x20 never map to glyphs: the .fnt format carries 224 glyphs for
-#     chars 32..255 only (libs/fnt fnt.h, FNT_FIRST_CHAR/FNT_GLYPH_COUNT).
+#     chars 32..255 only (engine/formats/fnt fnt.h, FNT_FIRST_CHAR/FNT_GLYPH_COUNT).
 #   - byte 0x20 (space) is advance-only in the FontFile view (no drawn rect).
 #   - retail's text drawer and measurer skip bytes 0x7F, 0x80, and 0x81 as
 #     non-printing controls; the FontFile omits those slots and disables system-font

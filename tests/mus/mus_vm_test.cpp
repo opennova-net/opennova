@@ -484,7 +484,7 @@ static int test_vm_done_resets_to_entry(void) {
                          table on out-of-range index)
 
    Ported from dfvas!VmOp_TableExec @ 0x558420. Compiler emission for
-   `on (expr) ACTION T0..Tn` in libs/mus/src/mus_compile.cpp. */
+   `on (expr) ACTION T0..Tn` in engine/formats/mus/src/mus_compile.cpp. */
 
 static int test_vm_tablexec_in_range(void) {
     /* `on (1) enter Sec0 Sec1 Sec2` builds a 3-slot setstate (0x3B) table.

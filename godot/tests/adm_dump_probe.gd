@@ -2,7 +2,7 @@ extends SceneTree
 ## Manual probe: dumps NOVA_ADM (default M82_1st.adm) from the runtime mount and
 ## checks each referenced .bad exists on the mount.
 
-const ResourceDirSettings := preload("res://engine/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
 
 
 func _init() -> void:

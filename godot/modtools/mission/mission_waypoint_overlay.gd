@@ -10,8 +10,8 @@ extends Node3D
 #
 # Referenced via preload (no class_name), the same convention as the controller / placer.
 
-const MissionObjectPlacer := preload("res://engine/mission/mission_object_placer.gd")
-const Overlay := preload("res://engine/mission/mission_overlay_util.gd")
+const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
+const Overlay := preload("res://adapter/mission/mission_overlay_util.gd")
 
 # Half-extent (world units) of a marker gizmo cube; also its pick-target half-size.
 const MARKER_HALF := Overlay.MARKER_HALF

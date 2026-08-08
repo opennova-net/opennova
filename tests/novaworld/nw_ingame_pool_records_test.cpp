@@ -5,7 +5,7 @@
 // envelope CRC -> outer NWU -> per-session SCRK -> 0x43/0x83 -> protocol
 // dispatch / reassembly — then hands each completed S2C 0x0D / 0x20 payload
 // to the shared `decode_pool_spawn_batch` / `decode_pool3_sync_batch`
-// decoders in `libs/npwire/include/npwire/ingame_decode.h`. Asserts:
+// decoders in `engine/net/npwire/include/npwire/ingame_decode.h`. Asserts:
 //
 //   - 37 × S2C 0x0D payloads + 29 × S2C 0x20 payloads in the capture (matches
 //     the 2026-06-16b loopback; user-confirmed counts driving Stage C).

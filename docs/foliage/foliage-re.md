@@ -494,7 +494,7 @@ resets the runtime when the same `NovaTerrainData` resource mutates in place.
 
 The fresh implementation deliberately has three layers:
 
-1. `libs/foliage/runtime.{h,cpp}` — Godot-neutral placement, gates, fades,
+1. `engine/formats/foliage/runtime.{h,cpp}` — Godot-neutral placement, gates, fades,
    alpha refs, corners/fold, and `:fd` preprocessing.
 2. `NovaTerrain` — exact runtime 16-unit detail-cell collection from terrain
    height bounds.

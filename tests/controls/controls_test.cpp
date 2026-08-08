@@ -1,4 +1,4 @@
-// Unit tests for libs/controls: the JO input-binding catalog + Controls table model.
+// Unit tests for engine/runtime/controls: the JO input-binding catalog + Controls table model.
 // Validates the byte-witnessed catalog (names/tokens/class), the VK key-name decoder,
 // the binding format rules, and the per-device row build against the canonical JO
 // defaults. [orig: aAbsoluteTurnLe @ 0x8159cb; KeyBinding_* @ 0x494c60/0x559a10;

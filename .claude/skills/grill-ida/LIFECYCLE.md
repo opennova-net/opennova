@@ -25,7 +25,7 @@ IDB annotations), so resumption is a read problem, not a recovery problem:
    imagebase `0x400000`, IDB `Jointops.exe.kong.i64`) against `survey_binary`. A mismatch means a
    rebuilt IDB or the wrong instance: stop and resolve (§3) before trusting any address.
 3. Resume from: any row with `status ≠ matching`, plus any row whose `[orig: … @ 0xADDR]` marker is
-   missing from the source (`grep -rn "\[orig:" libs/ godot/ apps/`, join by address).
+   missing from the source (`grep -rn "\[orig:" engine/ godot/ apps/`, join by address).
 4. Rows that are `unknown` because the pairing was only **guessed** get re-anchored first
    (IDA-WORKFLOW.md §2) — new evidence may have appeared since.
 5. Don't re-grill `matching` rows — but spot-check one or two: the anchoring evidence still holds
@@ -73,7 +73,7 @@ resolving in the live IDB (resume step 2 catches both).
 Markers, correspondence rows, and IDA comments go stale independently (refactors move files; rows
 get edited by hand). Periodically — before a release, or when resuming after a long gap:
 
-1. `grep -rn "\[orig:" libs/ godot/ apps/` — extract address + name from each marker.
+1. `grep -rn "\[orig:" engine/ godot/ apps/` — extract address + name from each marker.
 2. Join against the `docs/correspondence.md` rows by address.
 3. Report, diff-style, for review before fixing: markers without a row, rows without a marker, and
    name mismatches (names drift legitimately — the address decides who's right).

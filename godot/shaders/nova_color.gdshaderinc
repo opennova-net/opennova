@@ -18,7 +18,7 @@
 // byte (divergence D-RMAT-7, docs/render/render-material-re.md). Framebuffer
 // BLENDING still happens on the encoded values - that bounded residual is
 // D-RMAT-8. The object-model composer embeds this same function body
-// (libs/renderer/src/object_shader_template.cpp - keep them identical).
+// (engine/runtime/renderer/src/object_shader_template.cpp - keep them identical).
 vec3 nova_gamma_to_linear(vec3 gamma_rgb) {
 	vec3 c = clamp(gamma_rgb, vec3(0.0), vec3(1.0));
 	return mix(pow((c + vec3(0.055)) * (1.0 / 1.055), vec3(2.4)),

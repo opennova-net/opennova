@@ -4,7 +4,7 @@ extends GutTest
 # model nodes the placer tagged with "entity_ref" meta. Asset-free: fake animatable nodes (exposing
 # play_part_anim, the marker the registry filters on) + a fake mission supplying area-trigger rects.
 
-const Registry := preload("res://engine/world/mission_entity_registry.gd")
+const Registry := preload("res://adapter/world/mission_entity_registry.gd")
 
 
 class FakeAnimNode:

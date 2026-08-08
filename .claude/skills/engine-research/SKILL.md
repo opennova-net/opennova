@@ -20,7 +20,7 @@ IDB. Engine-wide conventions and the full toolbox: `docs/engine-primer.md`.
 State the question in one sentence, plus what would count as an answer.
 Then check, in order: `docs/correspondence.md` (the anchor index — named
 originals with addresses); the domain's `docs/<domain>/*-re.md`; `[orig:`
-markers near the relevant reimpl code (grep `libs/ godot/ apps/`); and
+markers near the relevant reimpl code (grep `engine/ godot/ apps/`); and
 `CONTEXT.md` for vocabulary. If the answer is already recorded, cite it and
 stop. Partial hits become the anchors for step 3.
 

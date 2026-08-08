@@ -10,7 +10,7 @@ extends GutTest
 ## here as a red with a per-file visibility report, not just as an in-game
 ## mystery. Skips when the install is absent (CI never has it).
 
-const NovaMissionAudioScript = preload("res://engine/world/nova_mission_audio.gd")
+const NovaMissionAudioScript = preload("res://adapter/world/nova_mission_audio.gd")
 
 const MISSION_CANDIDATES: PackedStringArray = ["00TRa.bms", "00TRg.bms"]
 

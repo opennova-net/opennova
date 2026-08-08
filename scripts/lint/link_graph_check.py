@@ -40,11 +40,11 @@ SPEC_PATH = Path(__file__).resolve().parent / "forbidden_edges.json"
 # excluded except the two the net stack actually builds (sqlite/bcrypt).
 SCAN_ROOTS = (
     "CMakeLists.txt",
-    "libs",
+    "engine",
     "apps",
     "tests",
     "tools",
-    "godot/engine",
+    "godot/adapter",
     "third_party/sqlite",
     "third_party/bcrypt",
 )

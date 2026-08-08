@@ -5,7 +5,7 @@ extends GutTest
 # hit == false — this pins the binding registration (a stale DLL fails to
 # parse here instead of silently greening) and the stable card shape the
 # pick UI and snapshot writer rely on. Live-world hits are exercised by the
-# game lifecycle test; geometry correctness is libs/world ctest territory.
+# game lifecycle test; geometry correctness is engine/runtime/world ctest territory.
 
 const EXPECTED_TYPES := {
 	"hit": TYPE_BOOL,

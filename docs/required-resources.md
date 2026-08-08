@@ -4,7 +4,7 @@ The original engine's **boot-required, hardcoded-by-name resource set**: every
 file `Jointops.exe` demands by literal name to boot to the main menu and to
 start a mission, with the witnessed failure behavior for each. This defines
 "what a person starts with to make a new game" — the source of truth for the
-ENG-6 engine-side manifest (Wave 2: a table in `libs/` near gameprofile that
+ENG-6 engine-side manifest (Wave 2: a table in `engine/` near gameprofile that
 BOTH the game's boot validation and ONED's diagnostics consume) and for the
 ONED REQ conveniences (missing-required diagnostics, the "new game" scaffold).
 
@@ -165,7 +165,7 @@ Write-side / debug outputs (not boot inputs): `SS%0.5d.tga`, `_errlog.txt`,
 - `menutxt.bin`'s first load-from-archive site was not individually traced
   (witnessed only as lazy lookups).
 - ~~Wave-2 deliverable: the engine-side manifest table~~ **LANDED (ENG-6,
-  Wave-2 trunk)**: `libs/gameprofile/required_resources.h` instantiates this
+  Wave-2 trunk)**: `engine/base/gameprofile/required_resources.h` instantiates this
   record (phase-major witnessed order, severity classes, per-row failure text
   + citation; `required_resources` ctest pins the fatal set and completeness).
   `NovaResourceRoot.list_missing_boot_resources()` /

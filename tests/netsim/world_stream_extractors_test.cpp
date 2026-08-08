@@ -1,4 +1,4 @@
-// The per-pool LOAD-TIME spawn-batch extractors (libs/netsim entity_wire_bridge) build the
+// The per-pool LOAD-TIME spawn-batch extractors (engine/net/netsim entity_wire_bridge) build the
 // full world a host streams to a joiner during world-load [orig: Server_SendInitialGameStateToPlayer
 // @0x51bba0, phases 0x10 -> 0x0D -> 0x0C -> 0x20]. Routing is by handle.pool() (pool_for_kind:
 // Organic->0, Item->1, Building->2, Marker->3). This proves each extractor reads the right pool

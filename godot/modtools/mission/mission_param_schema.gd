@@ -2,7 +2,7 @@ class_name MissionParamSchema
 extends RefCounted
 
 ## Designer-facing meaning of trigger/action param1..4. The semantic table lives
-## in libs/mission so runtime and editor consume the same reverse-engineered core
+## in engine/runtime/mission so runtime and editor consume the same reverse-engineered core
 ## data; this wrapper preserves the old editor-facing GDScript API.
 
 enum Kind { RAW, GROUP, ENTITY, ZONE, EVENT, WAYPOINT, BOOL, ENUM, FIXED_SECONDS }

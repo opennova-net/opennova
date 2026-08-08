@@ -24,7 +24,7 @@ The Credits workspace can jump straight here for a referenced font through the
 
 | Format | Backing library | Notes |
 |---|---|---|
-| `.fnt` | [`libs/fnt`](../../../libs/fnt) | bitmap font (FNT0, version 800): glyphs 32-255, 256x256 RGBA pages, per-glyph metrics, shadow offset |
+| `.fnt` | [`engine/formats/fnt`](../../../engine/formats/fnt) | bitmap font (FNT0, version 800): glyphs 32-255, 256x256 RGBA pages, per-glyph metrics, shadow offset |
 
 ## How it is built
 

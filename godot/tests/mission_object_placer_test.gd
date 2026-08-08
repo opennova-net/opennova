@@ -6,7 +6,7 @@ extends GutTest
 # .3di, so nothing resolves to a model and the placer must place zero without
 # error). Full render-placement is validated against real assets out-of-band.
 
-const Placer := preload("res://engine/mission/mission_object_placer.gd")
+const Placer := preload("res://adapter/mission/mission_object_placer.gd")
 
 const BMS_PATH := "res://../fixtures/bms/ash_i5b.reference.bms"
 const ITEMS_PATH := "res://../fixtures/def/items.def"
@@ -582,7 +582,7 @@ func test_place_single_is_a_noop_on_null_inputs() -> void:
 
 
 # --- Engine-facade bake parity --------------------------------------------------
-# The authoring facade (libs/mission authoring.h) bakes the Ground anchor in mission
+# The authoring facade (engine/runtime/mission authoring.h) bakes the Ground anchor in mission
 # space with the conjugated engine matrix [orig: sub_401A90, dfx2med.exe;
 # Math_BuildFixedPointMatrixFromEulerAngles @ 0x613F40 + the .3di import's
 # model-forward correction]; the editor's live drag bakes in Godot space with

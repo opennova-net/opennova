@@ -1,6 +1,6 @@
 extends GutTest
 
-const DeployPresenter := preload("res://engine/world/deploy_screen_presenter.gd")
+const DeployPresenter := preload("res://adapter/world/deploy_screen_presenter.gd")
 const TMP_DIR := "res://.godot/deploy_screen_presenter_test"
 
 

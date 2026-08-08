@@ -3,7 +3,7 @@ extends GutTest
 # Structured play-edit parity at the document level: insert/remove adjust the
 # model by exactly one play, undo/redo round-trip, and a no-op insert+remove is
 # byte-identical. The C++ mus_structured_play_edit_test proves the same at the
-# libs/mus level; this guards the GDScript transform + the can_edit_plays gate.
+# engine/formats/mus level; this guards the GDScript transform + the can_edit_plays gate.
 
 const MusicEditorDocument = preload("res://modtools/music/music_editor_document.gd")
 const BANK_FIXTURE := "res://../fixtures/sbf/jo_gamemus.sbf"

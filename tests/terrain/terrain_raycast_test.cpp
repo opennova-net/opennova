@@ -1,4 +1,4 @@
-// The retail terrain segment raycast port (libs/terrain_query/terrain_raycast):
+// The retail terrain segment raycast port (engine/runtime/terrain_query/terrain_raycast):
 // pins the Terrain_RaycastHeightmapLoRes march [orig: @ 0x60cb80] and the
 // Terrain_RaycastHeightmapHiRes_0 refine [orig: @ 0x60e710] structural
 // translations against hand-computed fixed-point values over synthetic
