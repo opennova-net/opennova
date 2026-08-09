@@ -247,6 +247,7 @@ private:
 	Callable frame_fixed_done_cb_;
 	Callable frame_present_rows_cb_;
 	Callable frame_present_frame_cb_;
+	Callable frame_terrain_cb_;
 	Callable frame_foliage_cb_;
 	Callable frame_net_drive_cb_;
 	Callable frame_weather_cb_;
@@ -948,10 +949,13 @@ public:
 			const Callable &p_begin_effect_tick, const Callable &p_sync_fixed,
 			const Callable &p_effects_drained, const Callable &p_fixed_done,
 			const Callable &p_present_rows, const Callable &p_present_frame);
-	// The world-host legs, in their fixed frame order: foliage dispatch,
-	// session drive, world-driven weather, occlusion blink gates, the
-	// render-occlusion frame, iris samples, the audio pass (int ticks_run).
-	void set_frame_world_hooks(const Callable &p_foliage,
+	// The world-host legs, in their fixed frame order: the terrain frame
+	// (packet compile + apply — its detail-cell handoff feeds foliage),
+	// foliage dispatch, session drive, world-driven weather, occlusion blink
+	// gates, the render-occlusion frame, iris samples, the audio pass (int
+	// ticks_run).
+	void set_frame_world_hooks(const Callable &p_terrain,
+			const Callable &p_foliage,
 			const Callable &p_net_drive, const Callable &p_weather,
 			const Callable &p_blink_gates, const Callable &p_occlusion,
 			const Callable &p_iris, const Callable &p_audio);

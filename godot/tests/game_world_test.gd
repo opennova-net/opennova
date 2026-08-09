@@ -904,6 +904,10 @@ func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear
 	assert_eq(world.load_mission_data(mission, "mnml.bms"), OK)
 	await get_tree().process_frame
 	await get_tree().process_frame
+	# Since ADR 0033 R2 terrain presents from its frame leg, not a self-driven
+	# _process — drive one world frame (the paused/legacy sequence runs the
+	# terrain leg for a non-playing world).
+	world.tick(camera.global_position, camera.get_global_transform())
 
 	var terrain := world.get_node("NovaTerrain") as NovaTerrain
 	assert_gt(terrain.get_visible_patch_count(), 0,
@@ -945,6 +949,7 @@ func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear
 
 	world.visible = true
 	await get_tree().process_frame
+	world.tick(camera.global_position, camera.get_global_transform())
 	assert_gt(terrain.get_visible_patch_count(), 0,
 		"showing the retained world lets terrain traversal present patches again")
 	assert_eq(world.get_current_frame_clear_color(), mission_clear,

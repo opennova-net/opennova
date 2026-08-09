@@ -25,6 +25,7 @@ struct Trace {
 
 	opennova::frame::FrameHooks hooks() {
 		opennova::frame::FrameHooks h;
+		h.terrain = [this] { calls.push_back("terrain"); };
 		h.foliage = [this] { calls.push_back("foliage"); };
 		h.stamp_listener = [this] { calls.push_back("listener"); };
 		h.step = [this] {
@@ -80,7 +81,7 @@ int main() {
 		const int32_t ran = driver.run_frame(TickAccumulator::kTickDt, t.hooks());
 		if (!expect(ran == 1, "one quantum runs one tick")) return 1;
 		const std::string want =
-				"foliage listener step effect_tick:101 sync_fixed drain "
+				"terrain foliage listener step effect_tick:101 sync_fixed drain "
 				"fixed_done:101 present_frame net_drive weather blink "
 				"occlusion iris audio:1";
 		if (!expect(joined(t.calls) == want, "the frame order is fixed")) {
@@ -98,7 +99,7 @@ int main() {
 		const int32_t ran = driver.run_frame(TickAccumulator::kTickDt / 2.0, t.hooks());
 		if (!expect(ran == 0, "half a quantum runs nothing")) return 1;
 		const std::string want =
-				"foliage listener present_rows net_drive weather occlusion "
+				"terrain foliage listener present_rows net_drive weather occlusion "
 				"iris audio:0";
 		if (!expect(joined(t.calls) == want,
 				"the zero-tick frame presents rows only and skips blink")) {
@@ -154,7 +155,7 @@ int main() {
 		const int32_t ran = driver.run_frame(TickAccumulator::kTickDt, t.hooks());
 		if (!expect(ran == 0, "a declined step counts zero ticks")) return 1;
 		const std::string want =
-				"foliage listener step present_frame net_drive weather "
+				"terrain foliage listener step present_frame net_drive weather "
 				"occlusion iris audio:0";
 		if (!expect(joined(t.calls) == want,
 				"declined step: no per-tick legs, no blink")) {

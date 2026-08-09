@@ -1188,13 +1188,13 @@ func set_perf_probe_enabled(enabled: bool) -> void:
 	_sync_runtime_profiling()
 
 
-# --- The engine frame (ADR 0033 R1) -----------------------------------------
+# --- The engine frame (ADR 0033 R1/R2) ---------------------------------------
 # The frame legs below are the world-host device hooks the engine FrameDriver
-# invokes in its fixed order (foliage before the batch; net-drive, weather,
-# blink, occlusion, iris, audio after it). tick() stashes the per-frame camera
-# state these legs read, then drives ONE engine frame through the runtime; the
-# legacy explicit sequence survives only for paused frames and the duck-typed
-# test runtimes that implement tick() alone.
+# invokes in its fixed order (terrain then foliage before the batch; net-drive,
+# weather, blink, occlusion, iris, audio after it). tick() stashes the
+# per-frame camera state these legs read, then drives ONE engine frame through
+# the runtime; the legacy explicit sequence survives only for paused frames and
+# the duck-typed test runtimes that implement tick() alone.
 
 var _frame_camera_pos := Vector3()
 # Untyped on purpose: a Transform3D-typed member on this class crashes the
@@ -1209,6 +1209,15 @@ var _frame_skip_occlusion := false
 # A failed join-wire asset apply aborts the frame mid-legs (the old early
 # return); later legs see this and no-op.
 var _frame_aborted := false
+
+
+func _frame_terrain_leg() -> void:
+	# The engine compiles the terrain patch packet for this frame's camera and
+	# NovaTerrain applies it (ADR 0033 R2). Runs before the foliage leg, whose
+	# dispatcher consumes the packet's fresh detail-cell handoff — the old
+	# self-driven _process walk left foliage reading a stale cell list.
+	if _loaded and _terrain != null:
+		_terrain.render_frame()
 
 
 func _frame_foliage_leg() -> void:
@@ -1397,6 +1406,7 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 	else:
 		# Paused, unloaded, or a duck-typed test runtime (tick() only): the
 		# legacy explicit sequence in the same leg order.
+		_frame_terrain_leg()
 		_frame_foliage_leg()
 		if _loaded and _runtime != null and _runtime.is_playing():
 			var runtime_start := Time.get_ticks_usec()
@@ -2133,10 +2143,12 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> int:
 		else:
 			load_failed.emit("failed to start mission runtime")
 		return setup_error if setup_error != OK else ERR_CANT_CREATE
-	# ADR 0033 R1: install this world host's device legs on the engine frame.
+	# ADR 0033 R1/R2: install this world host's device legs on the engine frame.
 	# The FrameDriver runs them in its fixed order around the tick batch
-	# (foliage before; net-drive, weather, blink, occlusion, iris, audio after).
+	# (terrain then foliage before; net-drive, weather, blink, occlusion, iris,
+	# audio after).
 	_runtime.get_sim().set_frame_world_hooks(
+			Callable(self, "_frame_terrain_leg"),
 			Callable(self, "_frame_foliage_leg"),
 			Callable(self, "_frame_net_drive_leg"),
 			Callable(self, "_frame_weather_leg"),

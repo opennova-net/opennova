@@ -40,7 +40,8 @@ main_game.gd
        MissionRuntime.tick_realtime(delta)          gates on the transport, then drives
          NovaSimulation.frame_realtime(delta)       ONE engine frame:
            frame::FrameDriver.run_frame             [orig: Game_MainLoop @0x52b630]
-             foliage leg                              (GameWorld hook: dispatcher render)
+             terrain leg                              (engine TerrainFrameCompiler packet -> NovaTerrain applies; ADR 0033 R2)
+             foliage leg                              (GameWorld hook: dispatcher render, consumes the packet's detail cells)
              listener stamp                           (fire-sound gate, before the batch)
              bank delta; for each banked 16 ms quantum:
                NovaSimulation.step()                  one engine tick  [Game_ProcessMainFrame @0x5263f0]
@@ -96,10 +97,16 @@ The render FRAME has no engine counterpart yet — that is ADR 0033's spike-gate
 stage R3 (the witnessed seven-pass order lives in
 [render/render-order-re.md](render/render-order-re.md); the portable ordering
 math in `engine/runtime/renderer` currently has no caller for its sort keys
-because Godot's scene renderer owns the sort). Two per-frame render loops remain
-deliberately SELF-DRIVEN outside the engine frame until their outputs become
-packets (stage R2): `NovaTerrain`'s `_process` (LOD walk + patch-pool submission)
-and `NovaParticleRenderer`'s `_process` (frame compile + compositor dispatch);
+because Godot's scene renderer owns the sort). Terrain is the first R2 domain
+cut over: `opennova::TerrainFrameCompiler` (`engine/runtime/terrain/terrain_frame.h`)
+owns the per-frame walk — the 512-unit sector window, quadtree traversal,
+foliage detail-cell handoff, front-to-back order, patch budget, and LOD-family
+resolve — and `NovaTerrain.render_frame()` applies the typed patch packet onto
+its RenderingServer instance pool from the frame's terrain leg (ordered before
+foliage, whose dispatcher consumes the packet's detail cells the same frame).
+One per-frame render loop remains deliberately SELF-DRIVEN outside the engine
+frame until its output becomes a packet (stage R2):
+`NovaParticleRenderer`'s `_process` (frame compile + compositor dispatch);
 per-model material eval self-parks in `nova_object_model.gd`. The occlusion leg
 runs AFTER the present in the frame order above — the scene-graph-ownership
 inverse of retail's collect-then-submit — and stays that way until R2/R3 make

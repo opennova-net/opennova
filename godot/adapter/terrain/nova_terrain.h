@@ -12,8 +12,7 @@
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 
 #include "nova_terrain_data.h"
-#include <terrain/foliage_detail_collector.h>
-#include <terrain/quadtree.h>
+#include <terrain/terrain_frame.h>
 
 #include <cstdint>
 #include <vector>
@@ -39,25 +38,26 @@ private:
 	// Per-tile: one single-surface ArrayMesh per LOD level
 	struct TileInfo {
 		Ref<ArrayMesh> lod_meshes[8];
-		int lod_index_counts[8] = {};
 	};
 	std::vector<TileInfo> tile_infos;
 
-	// Quadtree
-	std::vector<opennova::QuadNode> quad_nodes;
-	std::vector<opennova::TileMesh> tile_mesh_meta;
-	opennova::Mipchain mipchain;
-	int root_node = -1;
-	int l1_children[4] = {-1, -1, -1, -1};
+	// The engine-owned terrain frame (ADR 0033 R2): the scene snapshot built
+	// once per load and the per-frame compiler whose packet this node applies.
+	opennova::TerrainSceneSnapshot scene_snapshot;
+	opennova::TerrainFrameCompiler frame_compiler;
+	// False until a compile ran for the current frame's camera; the foliage
+	// handoff getter returns no cells while it is down (mission teardown, no
+	// active camera) rather than a stale packet's.
+	bool frame_packet_live = false;
 
-	// Lightweight RenderingServer instance pool for visible patches
-	static constexpr int PATCH_POOL_SIZE = 256;
+	// Lightweight RenderingServer instance pool for visible patches. The pool
+	// size is the engine compiler's packet budget; packet index == pool slot.
+	static constexpr int PATCH_POOL_SIZE = opennova::TerrainFrameCompiler::kPatchBudget;
 	RID patch_instances[PATCH_POOL_SIZE];
 	RID last_mesh_rid[PATCH_POOL_SIZE];
 	Transform3D last_transform[PATCH_POOL_SIZE];
 	bool patch_visible[PATCH_POOL_SIZE] = {};
 	int patches_active = 0;
-	std::vector<FoliageDetailPatch> foliage_detail_patches;
 
 	// Shader
 	Ref<Shader> terrain_shader;
@@ -76,14 +76,11 @@ private:
 
 	void _cache_env_weather_nodes();
 
-	// Debug state
+	// Debug state (the toggles feed the compiler's TraversalConfig input)
 	opennova::TraversalConfig traversal_config;
-	opennova::TraversalStats last_stats;
-	int lod_distribution[8] = {};
 	int debug_mode = 0; // 0=normal, 1=LOD colors, 2=normals
 
 	bool _build_terrain();
-	void _build_quadtree();
 	void _load_textures();
 	void _clear_derived_textures();
 	void _rebuild_tile_overlay_texture();
@@ -133,6 +130,11 @@ public:
 
 	void build();
 
+	// The terrain frame leg (ADR 0033 R2): compile the engine patch packet for
+	// this node's viewport camera and apply it onto the instance pool. Driven
+	// by the engine FrameDriver through the shell's terrain hook — this node
+	// no longer self-processes.
+	void render_frame();
 
 	// Debug API
 	Dictionary get_traversal_stats() const;

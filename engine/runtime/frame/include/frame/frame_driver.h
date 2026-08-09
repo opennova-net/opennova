@@ -23,6 +23,12 @@ namespace opennova::frame {
 // session has no listener, ONED previews no foliage). The legs are sampled by reference per
 // call; the shell installs them once at mission setup.
 struct FrameHooks {
+	// The terrain frame compile+apply for this camera — first, before the tick
+	// batch: its packet's detail-cell handoff is the foliage leg's input, so
+	// the two run in producer order against the same pre-tick camera (ADR 0033
+	// R2; the self-driven _process walk this replaces ran at arbitrary Godot
+	// scheduling relative to the foliage leg).
+	std::function<void()> terrain;
 	// Foliage dispatch for this camera — before the tick batch (the shell's
 	// witnessed order: the dispatcher renders against the pre-tick camera).
 	std::function<void()> foliage;

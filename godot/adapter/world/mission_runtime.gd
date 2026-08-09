@@ -856,7 +856,7 @@ func _exit_tree() -> void:
 		_sim.set_frame_shell_hooks(Callable(), Callable(), Callable(),
 				Callable(), Callable(), Callable(), Callable())
 		_sim.set_frame_world_hooks(Callable(), Callable(), Callable(),
-				Callable(), Callable(), Callable(), Callable())
+				Callable(), Callable(), Callable(), Callable(), Callable())
 	_clear_present_effect_poses()
 	if _fire_present != null:
 		_fire_present.teardown()  # frees the tracer mesh instance under the container
