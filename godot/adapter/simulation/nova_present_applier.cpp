@@ -1004,7 +1004,7 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 			row.body_stamp_valid = false;
 		}
 		if (net_id > 0 && row.has_muzzle) {
-			// The D-AI-6 muzzle seam: feed the posed gun-flash userpoint back to
+			// The D-AI-6 muzzle seam: feed the posed bullet fire-origin userpoint back to
 			// the sim so AI rounds leave the GUN (one-frame staleness, ledgered)
 			// [orig: Entity_GetAttachmentWorldPosition @ 0x4b2670 — our sim has
 			// no skeletal pose, so the present layer pushes it back].

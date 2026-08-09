@@ -31,15 +31,15 @@ extends RefCounted
 
 const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
 
-var _sim                   # NovaSimulation (snapshot source)
-var _placer                # MissionObjectPlacer (build_player_animated_model -> NovaObjectModel)
+var _sim: NovaSimulation = null       # snapshot source
+var _placer: MissionObjectPlacer = null
 var _container: Node3D     # parent for spawned wire avatars
-var _defer_index           # MissionEntityRegistry (host only): rows resolving to a PLACED node are
+var _defer_index: NovaEntityIndex = null  # host only: rows resolving to a PLACED node are
                            # left to MissionPresentPass; null on the joiner (render every wire row)
 var _synthetic_origin_only := false
 var _camera: Camera3D
 var _camera_framed := false
-var _nodes := {}           # wire_handle -> Node3D
+var _nodes := {}           # wire_handle -> NovaObjectModel
 var _unresolved := {}      # wire_handle -> runtime type_id (don't retry same failed type each tick)
 var _stats: Dictionary = { "spawned": 0, "unresolved": 0, "live": 0, "pending": 0 }
 var _node_spawned_callback := Callable()
@@ -73,7 +73,7 @@ var _last_present_logic_tick := -1
 # children, so a child weapon would vanish on any body rebuild. The applier detects the
 # ADM edge and calls _rebuild_held_weapon; these maps stay here for muzzle_world_for
 # and test consumers.
-var _weapon_nodes := {}
+var _weapon_nodes := {}    # wire_handle -> NovaObjectModel
 var _weapon_graphics := {}
 
 
@@ -99,8 +99,8 @@ static func _mission_kind_for_wire_handle(handle: int) -> int:
 # node is rendered by MissionPresentPass instead. On the HOST that leaves admitted joiners.
 # A production header-only JOINER passes no defer index and draws every remote row; an
 # explicit complete-BMS/debug join can still defer its authored nodes.
-func setup(sim, placer, container: Node3D, defer_index = null,
-		options: Dictionary = {}) -> void:
+func setup(sim: NovaSimulation, placer: MissionObjectPlacer, container: Node3D,
+		defer_index: NovaEntityIndex = null, options: Dictionary = {}) -> void:
 	_sim = sim
 	_placer = placer
 	_container = container
@@ -134,21 +134,21 @@ func get_stats_record() -> WirePresentStats:
 			int(_stats.get("unresolved", 0)))
 
 
-## Resolve the live node owned by this wire presenter. Runtime-only entities
+## Resolve the live model owned by this wire presenter. Runtime-only entities
 ## have no authored BMS identity, so consumers such as destruction must use the
-## same packed pool/slot handle that keys this pass.
-func resolve_wire_handle(wire_handle: int) -> Node3D:
+## same packed pool/slot handle that keys this pass. The map holds only
+## NovaObjectModels; is_instance_valid guards LIVENESS (the world teardown frees
+## the container's children before this pass tears down, so freed entries here
+## are an ordinary case, not a bug).
+func resolve_wire_handle(wire_handle: int) -> NovaObjectModel:
 	var node_v: Variant = _nodes.get(wire_handle)
-	# is_instance_valid FIRST: an `is` type check on an already-freed instance is a
-	# script error (the world teardown frees the container's children before this
-	# pass tears down, so freed entries here are an ordinary case, not a bug).
-	return node_v as Node3D if is_instance_valid(node_v) and node_v is Node3D else null
+	return node_v if is_instance_valid(node_v) else null
 
 
 func _free_wire_node(wire_handle: int) -> void:
 	var node_v: Variant = _nodes.get(wire_handle)
-	if is_instance_valid(node_v) and node_v is Node3D:
-		(node_v as Node3D).queue_free()
+	if is_instance_valid(node_v):
+		(node_v as Node).queue_free()
 	_nodes.erase(wire_handle)
 	_free_held_weapon(wire_handle)
 	_applier.release_wire_handle(wire_handle)
@@ -156,8 +156,8 @@ func _free_wire_node(wire_handle: int) -> void:
 
 func _free_held_weapon(wire_handle: int) -> void:
 	var weapon_v: Variant = _weapon_nodes.get(wire_handle)
-	if is_instance_valid(weapon_v) and weapon_v is Node3D:
-		(weapon_v as Node3D).queue_free()
+	if is_instance_valid(weapon_v):
+		(weapon_v as Node).queue_free()
 	_weapon_nodes.erase(wire_handle)
 	_weapon_graphics.erase(wire_handle)
 
@@ -254,9 +254,7 @@ func present_snapshot(
 				and int(snap[base + NovaSimulation.PF_INDEX]) == 0xFFFFFF):
 			continue
 		var runtime_kind := _mission_kind_for_wire_handle(handle)
-		var visual_item_id := type_id
-		if _placer.has_method("resolve_player_visual_item_id"):
-			visual_item_id = int(_placer.resolve_player_visual_item_id(type_id))
+		var visual_item_id := _placer.resolve_player_visual_item_id(type_id)
 		# Defer any row that carries a PLACED .bms identity: the placed representation —
 		# an individual node (animated entities, driven by MissionPresentPass) or a
 		# static MultiMesh batch instance (which deliberately has NO per-entity node) —
@@ -268,9 +266,9 @@ func present_snapshot(
 			var d_kind := int(snap[base + NovaSimulation.PF_KIND])
 			var d_index := int(snap[base + NovaSimulation.PF_INDEX])
 			if d_kind >= 0 and d_kind <= 3 and d_index >= 0 and d_index != 0xFFFFFF:
-				var placed = _defer_index.resolve(
+				var placed := _defer_index.resolve(
 					int(snap[base + NovaSimulation.PF_BMS_ID]), d_kind, d_index)
-				if placed != null and is_instance_valid(placed):
+				if placed != null:
 					_applier.append_wire_deferred(placed)
 				continue
 		live[handle] = true
@@ -278,12 +276,13 @@ func present_snapshot(
 			if int(_unresolved[handle]) == type_id:
 				continue
 			_unresolved.erase(handle)
-		var node = _nodes.get(handle)
+		var node: NovaObjectModel = _nodes.get(handle) \
+				if is_instance_valid(_nodes.get(handle)) else null
 		if node != null and not _wire_node_matches_row(node, snap, base, type_id):
 			_free_wire_node(handle)
 			node = null
 		var spawned_now := false
-		if node == null or not is_instance_valid(node):
+		if node == null:
 			# Continue the cheap scan after exhausting the budget: later live nodes
 			# still need this frame's transform, and mismatched/retired nodes still
 			# need prompt teardown. The omitted rows force another cold plan below.
@@ -374,11 +373,6 @@ func _frame_spectator_camera() -> void:
 
 
 func _consume_present_logic_tick_delta() -> int:
-	# Lightweight test/compatibility sources predate the clock seam. They retain
-	# the historical one-fixed-tick-per-call contract; production NovaSimulation
-	# always exposes its monotonic logic tick.
-	if _sim == null or not _sim.has_method("get_logic_tick"):
-		return 1
 	var now := int(_sim.get_logic_tick())
 	if _last_present_logic_tick < 0:
 		_last_present_logic_tick = now
@@ -394,18 +388,14 @@ func _consume_present_logic_tick_delta() -> int:
 
 
 func _current_index_generation() -> int:
-	if _defer_index != null and _defer_index.has_method("get_generation"):
-		return int(_defer_index.get_generation())
-	return 0
+	return int(_defer_index.get_generation()) if _defer_index != null else 0
 
 
 func _wire_node_matches_row(
-		node: Variant,
+		node: NovaObjectModel,
 		snap: PackedFloat32Array,
 		base: int,
 		type_id: int) -> bool:
-	if node == null or not is_instance_valid(node):
-		return false
 	var existing_ref: Dictionary = node.get_meta("entity_ref", {})
 	return (
 			int(existing_ref.get("runtime_type_id", 0)) == type_id
@@ -428,22 +418,20 @@ func _wire_node_matches_row(
 ## would defeat the point of anchoring at all.
 ## [orig: the rigid weapon draw @0x4e3d71; the userpoint fallback @0x401867..0x401887]
 func muzzle_world_for(handle: int, userpoint: String) -> Vector3:
-	var node_v: Variant = _nodes.get(handle)
-	var body_origin := Vector3.INF
-	if is_instance_valid(node_v) and node_v is Node3D:
-		body_origin = (node_v as Node3D).global_transform.origin
+	var body := resolve_wire_handle(handle)
+	var body_origin := body.global_transform.origin if body != null else Vector3.INF
 	if userpoint.is_empty():
 		return body_origin
 	var weapon_v: Variant = _weapon_nodes.get(handle)
-	if not is_instance_valid(weapon_v) or not (weapon_v is Node3D):
+	if not is_instance_valid(weapon_v):
 		return body_origin
-	var weapon := weapon_v as Node3D
-	if not weapon.visible or not weapon.has_method("get_object_data"):
+	var weapon: NovaObjectModel = weapon_v
+	if not weapon.visible:
 		return body_origin
-	var data = weapon.get_object_data()
-	if data == null or not data.has_method("get_user_point_count"):
+	var data: NovaObjectData = weapon.get_object_data()
+	if data == null:
 		return body_origin
-	for i in range(int(data.get_user_point_count())):
+	for i in range(data.get_user_point_count()):
 		var info: Dictionary = data.get_user_point_info(i)
 		if String(info.get("name", "")).nocasecmp_to(userpoint) == 0:
 			return weapon.global_transform * Vector3(info.get("position", Vector3.ZERO))
@@ -462,19 +450,18 @@ func entity_count() -> int:
 ##  draw gate in: a hidden or unarmed body reports ADM 0]
 func _rebuild_held_weapon(handle: int, adm: int) -> Node3D:
 	var graphic := ""
-	if adm > 0 and _sim != null and _sim.has_method("get_weapon_third_person_model"):
+	if adm > 0 and _sim != null:
 		graphic = String(_sim.get_weapon_third_person_model(adm))
 	if graphic == String(_weapon_graphics.get(handle, "")):
 		var existing: Variant = _weapon_nodes.get(handle)
-		return existing as Node3D if is_instance_valid(existing) else null
+		return existing if is_instance_valid(existing) else null
 	_free_held_weapon(handle)
 	if not graphic.is_empty() and _placer != null:
-		var built: Node3D = _placer.build_model_from_graphic(
-				graphic, "", _container, "")
+		var built := _placer.build_model_from_graphic(graphic, "", _container, "")
 		if built != null:
 			built.name = "WireWeapon_%04x" % handle
 			built.set_shadow_caster_enabled(true)
 			_weapon_nodes[handle] = built
 	_weapon_graphics[handle] = graphic
 	var v: Variant = _weapon_nodes.get(handle)
-	return v as Node3D if is_instance_valid(v) else null
+	return v if is_instance_valid(v) else null

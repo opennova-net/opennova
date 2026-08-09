@@ -51,7 +51,7 @@ const PICK_TOAST_SECONDS := 1.6
 enum State { MENU, WORLD, PAUSED, ARMORY, DEPLOY }
 
 @onready var _world: GameWorld = $World
-@onready var _camera: Camera3D = $Camera3D
+@onready var _camera: NovaFlyCamera = $Camera3D
 @onready var _hud: CanvasLayer = $HUD
 @onready var _menu_shell = $MenuLayer/MenuShell
 
@@ -147,12 +147,12 @@ func _ready() -> void:
 	debug_adapter.start_runtime_endpoint()
 	# Esc toggles pause/resume in a world (the fly camera reports the key; the
 	# owner decides what it means).
-	if _camera.has_signal("escape_pressed") and not _camera.is_connected("escape_pressed", _on_camera_escape):
-		_camera.connect("escape_pressed", _on_camera_escape)
+	if not _camera.escape_pressed.is_connected(_on_camera_escape):
+		_camera.escape_pressed.connect(_on_camera_escape)
 	_player_presenter = LocalPlayerPresenterScript.new()
 	_player_presenter.name = "LocalPlayerPresenter"
 	add_child(_player_presenter)
-	_player_presenter.setup(_world, _camera)
+	_player_presenter.setup(_world, _camera, _camera)
 	# The in-world armory + HUD ride their shared engine presenters. Created here,
 	# not in _wire_shell, so menu-less entries (the env launch hooks) still get
 	# them; the HUD presenter's
@@ -1040,7 +1040,7 @@ func _teardown_world_to_menu() -> void:
 		# HUD visibility toggle would re-show a surviving DEATH shroud next mission
 	_world.unload()
 	if _player_presenter != null:
-		_player_presenter.setup(_world, _camera)
+		_player_presenter.setup(_world, _camera, _camera)
 	if _hud_presenter != null:
 		_hud_presenter.teardown()
 	if _root != null and _enter_menu(_root.get_root_dir()):

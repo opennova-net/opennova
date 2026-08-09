@@ -233,6 +233,9 @@ private:
 	Ref<Skin> skeleton_skin_;
 	int muzzle_bone_ = -1;
 	Vector3 muzzle_model_pos_;
+	// The def-AUTHORED launch userpoint name (items.def launchups_closeattack,
+	// pushed by the placer); empty = this model has no AI muzzle.
+	String muzzle_point_name_;
 	String anim_key_;
 	int anim_variant_ = 0;
 	double anim_time_ = 0.0;
@@ -409,6 +412,10 @@ public:
 	Skeleton3D *get_skeleton() const { return skeleton_; }
 	bool has_skeleton() const { return skeleton_ != nullptr; }
 	bool has_muzzle() const;
+	// The def-authored launch userpoint name; rebuild resolves it against the
+	// model's userpoint table (case-insensitive, retail's by-name lookup).
+	void set_muzzle_point_name(const String &p_name);
+	String get_muzzle_point_name() const { return muzzle_point_name_; }
 	Vector3 get_muzzle_world_position() const;
 	void play_body_clip(const String &p_key);
 	void play_body_clip_variant(const String &p_key, int p_variant);
@@ -437,8 +444,17 @@ public:
 	void clear_part_anims();
 	Dictionary get_active_part_anims() const;
 	void set_weapon_channel(const String &p_key, int p_phase_ticks);
+	// The applied weapon-channel pose ({key, phase_ticks}; empty when no
+	// channel is held) — presentation-state read-back.
+	Dictionary get_weapon_channel() const;
 	void set_aim_overlay(const Array &p_deltas);
+	Array get_aim_overlay() const { return aim_overlay_deltas_; }
+
 	void set_right_hand_collapsed(bool p_collapsed);
+	bool is_right_hand_collapsed() const { return collapse_right_hand_; }
+	// The active two-channel blend ({source_key, source_time, weight}; empty
+	// when a single channel poses the body) — presentation-state read-back.
+	Dictionary get_body_blend() const;
 	void advance_body_animation(double p_delta, bool p_write_pose = true);
 	// Diagnostics: whether a body-pose input changed since the last pose write
 	// (the aim-overlay/weapon-channel dedup fast path pins against this).

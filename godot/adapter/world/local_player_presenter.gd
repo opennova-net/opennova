@@ -35,7 +35,8 @@ const PLAYER_HEAD_BONE_INDEX := 14
 # @0x437cc0 are tracked deferrals (net-re section 5.39).
 
 
-var _world
+var _world: GameWorld = null
+var _fly_camera: NovaFlyCamera = null
 var _camera: Camera3D
 var _third_person := false
 var _avatar: NovaObjectModel = null
@@ -94,9 +95,14 @@ func is_debug_body_in_first_person() -> bool:
 	return debug_body_in_first_person
 
 
-func setup(world, camera: Camera3D) -> void:
+## `fly_camera`: the shell's gameplay-lock seam — the game passes its
+## NovaFlyCamera (the same node as `camera`); previews that fly no camera
+## pass null and the lock is a no-op.
+func setup(world: GameWorld, camera: Camera3D,
+		fly_camera: NovaFlyCamera = null) -> void:
 	_world = world
 	_camera = camera
+	_fly_camera = fly_camera
 	# The weapon-event presentation lives beside the presenter for the same setup ->
 	# teardown span; it resolves userpoints against this presenter's live nodes.
 	_weapon_effects = PlayerWeaponEffects.new()
@@ -322,8 +328,8 @@ func clear_models() -> void:
 
 
 func set_fly_camera_locked(locked: bool) -> void:
-	if _camera != null and _camera.has_method("set_gameplay_locked"):
-		_camera.set_gameplay_locked(locked)
+	if _fly_camera != null:
+		_fly_camera.set_gameplay_locked(locked)
 
 
 # The crosshair's witnessed anchor. First person PINS the exact screen center — the
@@ -374,9 +380,9 @@ func aim_range_units() -> int:
 	# ever hit in the runtime -- object pick bodies are editor-only -- so this
 	# measures the same surface, and it is now the SAME sampler the round the
 	# player fires traces, so the readout and the bullet agree by construction.
-	var terrain = _world.get_terrain_data()
-	if terrain != null and terrain.has_method("raycast_terrain"):
-		var hit: Vector3 = terrain.raycast_terrain(eye, endpoint)
+	var terrain := _world.get_terrain_data()
+	if terrain != null:
+		var hit := terrain.raycast_terrain(eye, endpoint)
 		# A miss reports all-NAN.
 		if not (is_nan(hit.x) or is_nan(hit.y) or is_nan(hit.z)):
 			endpoint = hit

@@ -196,6 +196,11 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out) 
         } else if (lower_match_key(lower, ll, "ammo_closeattack", 16)) {
             consume_value_str(trimmed, tlen, 16, current.ammo_closeattack, sizeof(current.ammo_closeattack));
             parsed = 1;
+        /* The closeattack launch USERPOINT name (the AI muzzle; see def.h)
+           [orig: ItemDef_ParseProperty launchups_* -> def+0x5EB/+0x5FB] */
+        } else if (lower_match_key(lower, ll, "launchups_closeattack", 21)) {
+            consume_value_str(trimmed, tlen, 21, current.launchups_closeattack, sizeof(current.launchups_closeattack));
+            parsed = 1;
         } else if (lower_match_key(lower, ll, "primary_weapon", 14)) {
             /* The ewep emplacement's mounted weapon.def entry (the gun entity's slot-0
                weapon; the attach label's text source) [orig: -> def+0x54B primaryWeapon,

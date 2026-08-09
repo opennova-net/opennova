@@ -66,6 +66,7 @@ void NovaItemDatabase::_bind_methods() {
 			D_METHOD("extract_seat_specs_for_item", "resource_root", "item_id"),
 			&NovaItemDatabase::extract_seat_specs_for_item);
 	ClassDB::bind_method(D_METHOD("get_ammo_closeattack", "id"), &NovaItemDatabase::get_ammo_closeattack);
+	ClassDB::bind_method(D_METHOD("get_launchups_closeattack", "id"), &NovaItemDatabase::get_launchups_closeattack);
 	ClassDB::bind_method(D_METHOD("get_clipsize", "id"), &NovaItemDatabase::get_clipsize);
 	ClassDB::bind_method(D_METHOD("get_deathtime_ticks", "id"), &NovaItemDatabase::get_deathtime_ticks);
 	ClassDB::bind_method(D_METHOD("get_primary_weapon", "id"), &NovaItemDatabase::get_primary_weapon);
@@ -209,6 +210,7 @@ NovaItemDatabase::Item NovaItemDatabase::item_from_entry(const ::DefItemDef &ent
 	item.particlefinale = String(entry.particlefinale);
 	// The person-item anim-fire weapon family (world-wac-ai-re §17.4, D-AI-5).
 	item.ammo_closeattack = String(entry.ammo_closeattack);
+	item.launchups_closeattack = String(entry.launchups_closeattack);
 	item.clipsize = entry.clipsize;
 	item.deathtime_ticks = entry.deathtime_ticks;
 	item.primary_weapon = String(entry.primary_weapon);
@@ -450,6 +452,14 @@ String NovaItemDatabase::get_display_name(int id) const {
 String NovaItemDatabase::get_ammo_closeattack(int id) const {
 	const auto it = items.find(id);
 	return it == items.end() ? String() : it->second.ammo_closeattack;
+}
+
+// The def-authored closeattack launch userpoint name — the AI muzzle point the
+// placer pushes onto the placed model (world-wac-ai-re §21.2). [orig:
+// ItemDef_ParseProperty launchups_* -> def+0x5EB/+0x5FB]
+String NovaItemDatabase::get_launchups_closeattack(int id) const {
+	const auto it = items.find(id);
+	return it == items.end() ? String() : it->second.launchups_closeattack;
 }
 
 // items.def clipsize — the respawn magazine reseed (word entity+0x35C = def+0x894).

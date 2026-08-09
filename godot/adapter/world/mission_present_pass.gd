@@ -25,7 +25,7 @@ extends RefCounted
 # Targets resolve through ONE shared index (NovaEntityIndex.resolve: bms_id primary, (kind,index)
 # fallback). Shell-agnostic, RefCounted, preload-referenced (same convention as MissionObjectPlacer).
 # The per-leg behavioral semantics and their [orig] witnesses are documented at the native walk
-# (nova_present_applier.cpp) — this facade owns wiring, options, and the duck-typed sim queries.
+# (nova_present_applier.cpp) — this facade owns wiring and options.
 
 const OUTPUT_TRANSFORM := 1
 const OUTPUT_PART_ANIM := 2
@@ -34,7 +34,7 @@ const OUTPUT_BODY_ANIM := 8
 const OUTPUT_ALL := OUTPUT_TRANSFORM | OUTPUT_PART_ANIM \
 		| OUTPUT_VISIBILITY | OUTPUT_BODY_ANIM
 
-var _sim                    # NovaSimulation (or a compatible snapshot source)
+var _sim: NovaSimulation = null
 var _index: NovaEntityIndex = null
 var _applier: NovaPresentApplier = null
 
@@ -44,7 +44,8 @@ var _applier: NovaPresentApplier = null
 ## occlusion_hidden_ids and present_visibility maps (shared BY REFERENCE:
 ## GameWorld mutates the hidden set in place; the release lands on the sim's
 ## current intent so neither visibility writer fights the other).
-func setup(sim, index, options: Dictionary = {}) -> void:
+func setup(sim: NovaSimulation, index: NovaEntityIndex,
+		options: Dictionary = {}) -> void:
 	_sim = sim
 	_index = index
 	_applier = NovaPresentApplier.new()
@@ -59,11 +60,9 @@ func setup(sim, index, options: Dictionary = {}) -> void:
 	if not bool(options.get("drive_body_anim", true)):
 		channels &= ~OUTPUT_BODY_ANIM
 	_applier.set_output_channels(channels)
-	var occlusion_ids: Variant = options.get("occlusion_hidden_ids")
-	var present_visibility: Variant = options.get("present_visibility")
-	_applier.set_shared_visibility_maps(
-			occlusion_ids if occlusion_ids is Dictionary else {},
-			present_visibility if present_visibility is Dictionary else {})
+	var occlusion_ids: Dictionary = options.get("occlusion_hidden_ids", {})
+	var present_visibility: Dictionary = options.get("present_visibility", {})
+	_applier.set_shared_visibility_maps(occlusion_ids, present_visibility)
 
 
 ## Public A/B surface used by performance probes; one mask update changes a

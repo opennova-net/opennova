@@ -502,6 +502,11 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 		# Rigid weapon parts fake-skin; no anim_def -> stays static.
 		_apply_skeletal_anim(model, int(a.get("item_id", 0)),
 				data.get_bone_origins(), data.get_bone_parents())
+		# The def names the AI muzzle: items.def launchups_closeattack is the
+		# launch userpoint on this item's graphic (world-wac-ai-re §21.2); the
+		# rebuild below resolves it against the model's userpoint table.
+		model.set_muzzle_point_name(
+				item_db.get_launchups_closeattack(int(a.get("item_id", 0))))
 		# Drive the build explicitly (not via _ready) so it is independent of when
 		# place() runs relative to the main loop; matches the static template path.
 		model.set_object_data(data)
@@ -553,7 +558,7 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 ## first/third-person). The caller positions/orients it and toggles visibility; it is NOT
 ## tagged or registered for the present pass. Returns null when the item type has no
 ## resolvable graphic (the same resolution path the animated entities in place() use).
-func build_animated_model(item_id: int, parent: Node3D) -> Node3D:
+func build_animated_model(item_id: int, parent: Node3D) -> NovaObjectModel:
 	var graphic := _graphic_for(item_id)
 	if graphic.is_empty():
 		return null
@@ -571,6 +576,8 @@ func build_animated_model(item_id: int, parent: Node3D) -> Node3D:
 		model.set_environment_state(_env_state)
 	_configure_item_shadow(model, item_id)
 	_apply_skeletal_anim(model, item_id, data.get_bone_origins(), data.get_bone_parents())
+	model.set_muzzle_point_name(item_db.get_launchups_closeattack(item_id)
+			if item_db != null else "")
 	model.set_object_data(data)
 	return model
 
@@ -591,7 +598,7 @@ func resolve_player_visual_item_id(runtime_type_id: int) -> int:
 	return runtime_type_id
 
 
-func build_player_animated_model(runtime_type_id: int, parent: Node3D) -> Node3D:
+func build_player_animated_model(runtime_type_id: int, parent: Node3D) -> NovaObjectModel:
 	return build_animated_model(resolve_player_visual_item_id(runtime_type_id), parent)
 
 
@@ -599,7 +606,7 @@ func build_player_animated_model(runtime_type_id: int, parent: Node3D) -> Node3D
 ## name, in rest pose, parented under `parent`. For owner-managed viewmodels that resolve their
 ## model + animation directly from weapon.def (gfx1/gfx1a + animadm) rather than from an items.def
 ## item id — the first-person weapon viewmodel. Returns null when the graphic doesn't resolve.
-func build_model_from_graphic(graphic: String, adm_name: String, parent: Node3D, clip_key: String = "", rig_graphic: String = "") -> Node3D:
+func build_model_from_graphic(graphic: String, adm_name: String, parent: Node3D, clip_key: String = "", rig_graphic: String = "") -> NovaObjectModel:
 	if graphic.is_empty() or parent == null:
 		return null
 	var data := _load_object_data(graphic)

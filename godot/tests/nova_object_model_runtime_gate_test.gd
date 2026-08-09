@@ -15,30 +15,29 @@ const SHED_3DI := "res://../fixtures/threedi/3di3/Shed.3di"
 const ANIM_FIXTURES := "res://../fixtures/anim"
 
 
-class GateSpyModel:
-	extends NovaObjectModel
-	var regs: Array = ["VEHICLE_SPECIAL1"]
-	var env_applies := 0
-	var light_applies := 0
-	var robj_applies := 0
+# The render-work gates are pinned through OBSERVABLES on real native models:
+# the environment stamp lands on surface-material uniforms, and PANM transform
+# derivation lands on the Robj part nodes — never through instrumentation
+# overrides.
+func _fresh_env_state(dir_color: Vector3) -> NovaEnvLightState:
+	var state := NovaEnvLightState.new()
+	var values := NovaEnvLightValues.retail_noon_defaults()
+	values.dir_color = dir_color
+	state.publish(values)
+	return state
 
-	func reset_observations() -> void:
-		env_applies = 0
-		light_applies = 0
-		robj_applies = 0
 
-	func _resolve_anim_channel_register(slot: int) -> String:
-		return String(regs[slot]) if slot >= 0 and slot < regs.size() else ""
+func _first_material(model: NovaObjectModel) -> ShaderMaterial:
+	var materials: Array = model.get_surface_materials()
+	assert(materials.size() > 0)
+	return materials[0] as ShaderMaterial
 
-	func _apply_environment_to_materials() -> void:
-		env_applies += 1
 
-	func _apply_lights() -> void:
-		light_applies += 1
-
-	func _apply_robj_transforms() -> bool:
-		robj_applies += 1
-		return false
+func _animated_part_node(model: NovaObjectModel) -> Node3D:
+	# Part 0 is the fixture's static root; the PANM channels drive parts 1+.
+	var parts: Dictionary = model.get_render_part_nodes()
+	assert(parts.has(1))
+	return parts[1] as Node3D
 
 
 func _object_data(path: String) -> NovaObjectData:
@@ -51,12 +50,11 @@ func _object_data(path: String) -> NovaObjectData:
 # Spy model with a real document installed through the production mutator.
 # Rebuild itself exercises the observed methods, so reset those setup calls
 # before measuring an explicit runtime frame.
-func _spy_model(path := HOUSE_3DI) -> GateSpyModel:
-	var model := GateSpyModel.new()
+func _spy_model(path := HOUSE_3DI) -> NovaObjectModel:
+	var model := NovaObjectModel.new()
 	add_child_autofree(model)
 	model.set_process(false)
 	model.set_object_data(_object_data(path))
-	model.reset_observations()
 	return model
 
 
@@ -72,19 +70,23 @@ func _loaded_skeletal() -> NovaSkeletalAnim:
 
 func test_hidden_model_skips_render_work_but_advances_part_anims() -> void:
 	var model := _spy_model()
+	var material := _first_material(model)
 	model.play_part_anim(1, 1, 1.0)
 	model.visible = false
 
+	var hidden_color := Vector3(0.9, 0.1, 0.1)
+	model.set_environment_state(_fresh_env_state(hidden_color))
+	var before: Vector3 = material.get_shader_parameter("u_dir_light_color")
 	model.advance_runtime_frame(0.5)
-	assert_eq(model.light_applies, 0, "a hidden model pushes no light state")
-	assert_eq(model.env_applies, 0, "a hidden model pushes no environment state")
+	assert_eq(material.get_shader_parameter("u_dir_light_color"), before,
+			"a hidden model pushes no environment state")
 	assert_eq(int(model.get_ctrl_values().get("VEHICLE_SPECIAL1", -1)), 31 * 1048,
 			"the commanded part anim still advanced while hidden")
 
 	model.visible = true
 	model.advance_runtime_frame(0.5)
-	assert_eq(model.light_applies, 1, "render work resumes on the visible frame")
-	assert_eq(model.env_applies, 1)
+	assert_eq(material.get_shader_parameter("u_dir_light_color"), hidden_color,
+			"render work resumes on the visible frame")
 	assert_eq(int(model.get_ctrl_values().get("VEHICLE_SPECIAL1", -1)), 62 * 1048,
 			"two half-second render frames preserve retail's fixed 16 ms tick count")
 	model.advance_runtime_frame(0.008)
@@ -93,24 +95,39 @@ func test_hidden_model_skips_render_work_but_advances_part_anims() -> void:
 
 
 func test_hidden_fast_path_skips_the_env_push() -> void:
-	var model := _spy_model()  # no lights/panm/materials -> the fast path
+	var model := _spy_model()  # static house -> the fast path
+	var material := _first_material(model)
 	model.visible = false
+	var fast_color := Vector3(0.2, 0.8, 0.3)
+	model.set_environment_state(_fresh_env_state(fast_color))
+	var before: Vector3 = material.get_shader_parameter("u_dir_light_color")
 	model.advance_runtime_frame(0.016)
-	assert_eq(model.env_applies, 0, "hidden fast-path frames do nothing")
+	assert_eq(material.get_shader_parameter("u_dir_light_color"), before,
+			"hidden fast-path frames do nothing")
 	model.visible = true
 	model.advance_runtime_frame(0.016)
-	assert_eq(model.env_applies, 1, "a visible fast-path frame keeps the env gate")
+	assert_eq(material.get_shader_parameter("u_dir_light_color"), fast_color,
+			"a visible fast-path frame keeps the env gate")
 
 
 func test_live_panm_transforms_rederive_on_the_visible_frame() -> void:
 	var model := _spy_model(PMP_3DI)
+	var clock := NovaPanmClock.new()
+	clock.set_time_ms_for_test(0)
+	model.set_panm_clock(clock)
+	var part := _animated_part_node(model)
+	var poison := Transform3D(Basis(), Vector3(123.0, 456.0, 789.0))
 	model.visible = false
+	part.transform = poison
+	clock.set_time_ms_for_test(400)
 	model.advance_runtime_frame(0.016)
+	clock.set_time_ms_for_test(800)
 	model.advance_runtime_frame(0.016)
-	assert_eq(model.robj_applies, 0, "no PANM evaluation while hidden")
+	assert_eq(part.transform, poison, "no PANM evaluation while hidden")
 	model.visible = true
+	clock.set_time_ms_for_test(1200)
 	model.advance_runtime_frame(0.016)
-	assert_eq(model.robj_applies, 1,
+	assert_ne(part.transform, poison,
 			"the visible frame re-derives transforms from the absolute clock")
 
 
@@ -295,10 +312,11 @@ func test_hidden_skeletal_clock_advances_without_writing_bones() -> void:
 # wake is live-verified (it depends on the wall frame counter); these tests
 # pin the park/re-arm contract itself.
 
-func _clocked_spy_model() -> GateSpyModel:
+func _clocked_spy_model() -> NovaObjectModel:
 	var model := _spy_model()
-	model.set_panm_clock({"time_ms": 0})
-	model.reset_observations()
+	var clock := NovaPanmClock.new()
+	clock.set_time_ms_for_test(0)
+	model.set_panm_clock(clock)
 	return model
 
 
@@ -384,7 +402,7 @@ func test_mirror_eligibility_selects_the_base_visual_layer() -> void:
 		assert_eq((vi as MeshInstance3D).layers & NovaWater.VISUAL_LAYER_WORLD, 0,
 				"a non-vehicle model leaves the mirror-visible layer")
 
-	var vehicle := GateSpyModel.new()
+	var vehicle := NovaObjectModel.new()
 	add_child_autofree(vehicle)
 	vehicle.set_process(false)
 	vehicle.mirror_reflected = true
@@ -426,21 +444,32 @@ func test_submission_registry_tracks_offscreen_edges_and_frees_cleanly() -> void
 
 func test_off_screen_model_advances_clocks_but_skips_render_derives() -> void:
 	var model := _spy_model(PMP_3DI)  # live PANM: always has runtime work
-	model.set_panm_clock({"time_ms": 0})
-	model.reset_observations()
+	var clock := NovaPanmClock.new()
+	clock.set_time_ms_for_test(0)
+	model.set_panm_clock(clock)
+	var part := _animated_part_node(model)
+	var material := _first_material(model)
+	var offscreen_color := Vector3(0.1, 0.2, 0.9)
+	model.set_environment_state(_fresh_env_state(offscreen_color))
 	model.set_on_screen(false)
+	var poison := Transform3D(Basis(), Vector3(123.0, 456.0, 789.0))
+	part.transform = poison
+	var before: Vector3 = material.get_shader_parameter("u_dir_light_color")
 	model.play_part_anim(1, 1, 1.0)
 
 	model.advance_runtime_frame(0.5)
-	assert_eq(model.env_applies, 0, "an off-camera model pushes no environment state")
-	assert_eq(model.robj_applies, 0, "no PANM evaluation while off camera")
+	assert_eq(material.get_shader_parameter("u_dir_light_color"), before,
+			"an off-camera model pushes no environment state")
+	assert_eq(part.transform, poison, "no PANM evaluation while off camera")
 	assert_eq(int(model.get_ctrl_values().get("VEHICLE_SPECIAL1", -1)), 31 * 1048,
 			"the commanded part anim still advanced while off camera")
 
 	model.set_on_screen(true)
 	assert_true(model.is_processing(),
 			"re-entering the screen wakes the model for the catch-up frame")
+	clock.set_time_ms_for_test(1200)
 	model.advance_runtime_frame(0.5)
-	assert_eq(model.robj_applies, 1,
+	assert_ne(part.transform, poison,
 			"the submitted frame re-derives transforms from the absolute clock")
-	assert_eq(model.env_applies, 1, "and catches up the environment restamp")
+	assert_eq(material.get_shader_parameter("u_dir_light_color"), offscreen_color,
+			"and catches up the environment restamp")

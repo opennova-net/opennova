@@ -45,8 +45,8 @@ void NovaObjectModel::set_skeletal_anim(const Ref<NovaSkeletalAnim> &p_skeletal)
 	rebuild();
 }
 
-// Whether this model resolved a gun-flash muzzle userpoint onto its skeleton
-// (the D-AI-6 fire-origin seam; infantry body models author one).
+// Whether this model resolved a bullet fire-origin userpoint onto its
+// skeleton (the D-AI-6 fire-origin seam; infantry body models author one).
 bool NovaObjectModel::has_muzzle() const {
 	return muzzle_bone_ >= 0 && skeleton_ != nullptr;
 }
@@ -61,29 +61,34 @@ Vector3 NovaObjectModel::get_muzzle_world_position() const {
 	return model_to_world.xform(muzzle_model_pos_);
 }
 
-// Resolve the muzzle userpoint against the built skeleton. Name preference:
-// a "*flash*" userpoint (the gun-flash convention) over "bullet"/"*muzzle*".
-// The rig is index-driven, so the userpoint's subobject row IS the bone index.
-void NovaObjectModel::resolve_muzzle_userpoint() {
-	muzzle_bone_ = -1;
-	if (skeleton_ == nullptr || object_data_.is_null()) {
+// The def names the muzzle: items.def launchups_closeattack authors the launch
+// userpoint (JO NPC riflemen: mflash01), pushed here by the placer. Resolve it
+// case-insensitively against the model's userpoint table — retail's by-name
+// lookup [orig: modelgpm_FindUserpointByName @ 0x5b2170 via sub_545940]. The
+// rig is index-driven, so the userpoint's subobject row IS the bone index; no
+// authored name (or no match) means no AI muzzle.
+void NovaObjectModel::set_muzzle_point_name(const String &p_name) {
+	if (muzzle_point_name_ == p_name) {
 		return;
 	}
-	int best = -1;
-	int best_rank = 99;
+	muzzle_point_name_ = p_name;
+	resolve_muzzle_userpoint();
+}
+
+void NovaObjectModel::resolve_muzzle_userpoint() {
+	muzzle_bone_ = -1;
+	if (skeleton_ == nullptr || object_data_.is_null() ||
+			muzzle_point_name_.is_empty()) {
+		return;
+	}
+	const String wanted = muzzle_point_name_.to_lower();
 	const int count = object_data_->get_user_point_count();
+	int best = -1;
 	for (int i = 0; i < count; ++i) {
 		const Dictionary info = object_data_->get_user_point_info(i);
-		const String n = String(info.get("name", "")).to_lower();
-		int rank = 99;
-		if (n.contains("flash")) {
-			rank = 0;
-		} else if (n == "bullet" || n.contains("muzzle")) {
-			rank = 1;
-		}
-		if (rank < best_rank) {
-			best_rank = rank;
+		if (String(info.get("name", "")).to_lower() == wanted) {
 			best = i;
+			break;
 		}
 	}
 	if (best < 0) {
@@ -767,6 +772,16 @@ void NovaObjectModel::set_weapon_channel(const String &p_key, int p_phase_ticks)
 	body_pose_dirty_ = true;
 }
 
+Dictionary NovaObjectModel::get_weapon_channel() const {
+	Dictionary out;
+	if (wpn_key_.is_empty() && wpn_phase_ticks_ < 0) {
+		return out;
+	}
+	out["key"] = wpn_key_;
+	out["phase_ticks"] = wpn_phase_ticks_;
+	return out;
+}
+
 void NovaObjectModel::set_aim_overlay(const Array &p_deltas) {
 	wake_runtime_frame();
 	const bool overlay_changed = p_deltas != aim_overlay_deltas_;
@@ -781,6 +796,17 @@ void NovaObjectModel::set_aim_overlay(const Array &p_deltas) {
 	}
 	aim_overlay_deltas_ = p_deltas;
 	body_pose_dirty_ = true;
+}
+
+Dictionary NovaObjectModel::get_body_blend() const {
+	Dictionary out;
+	if (body_blend_source_key_.is_empty() && body_blend_weight_ >= 1.0f) {
+		return out;
+	}
+	out["source_key"] = body_blend_source_key_;
+	out["source_time"] = body_blend_source_time_;
+	out["weight"] = body_blend_weight_;
+	return out;
 }
 
 void NovaObjectModel::set_right_hand_collapsed(bool p_collapsed) {

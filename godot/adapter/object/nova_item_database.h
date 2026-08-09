@@ -119,6 +119,11 @@ private:
 		// AI weapon seed (D-AI-5). [orig: ItemDef_ParseProperty @ 0x4a1823 ->
 		// def+0x56B / @ 0x49fa1c -> def+0x894]
 		String ammo_closeattack;
+		// The def-AUTHORED closeattack launch userpoint NAME (the AI muzzle on
+		// the entity's model; JO NPC riflemen author mflash01). Empty when the
+		// item never AI-fires. [orig: ItemDef_ParseProperty launchups_* ->
+		// def+0x5EB/+0x5FB; resolve modelgpm_FindUserpointByName @ 0x5b2170]
+		String launchups_closeattack;
 		int clipsize = 0;
 		// items.def deathtime in TICKS ((62*seconds or 496) + 62, scaled at parse);
 		// 0 = none authored. The corpse timer's seed (entity+0x148 at the infantry
@@ -286,6 +291,7 @@ public:
 	// empty if none authored. [orig: ItemDef_ParseProperty @ 0x4a1823 -> def+0x56B;
 	// world-wac-ai-re §17.4]
 	String get_ammo_closeattack(int id) const;
+	String get_launchups_closeattack(int id) const;
 	// items.def clipsize — the respawn magazine reseed (word entity+0x35C); 0 if
 	// none authored. [orig: @ 0x49fa1c -> def+0x894; Entity_ResetToSpawnState
 	// @ 0x4b97a9]

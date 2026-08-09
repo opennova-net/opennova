@@ -855,6 +855,10 @@ void NovaObjectModel::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_skeleton"), &NovaObjectModel::get_skeleton);
 	ClassDB::bind_method(D_METHOD("has_skeleton"), &NovaObjectModel::has_skeleton);
 	ClassDB::bind_method(D_METHOD("has_muzzle"), &NovaObjectModel::has_muzzle);
+	ClassDB::bind_method(D_METHOD("set_muzzle_point_name", "name"),
+			&NovaObjectModel::set_muzzle_point_name);
+	ClassDB::bind_method(D_METHOD("get_muzzle_point_name"),
+			&NovaObjectModel::get_muzzle_point_name);
 	ClassDB::bind_method(D_METHOD("get_muzzle_world_position"),
 			&NovaObjectModel::get_muzzle_world_position);
 	ClassDB::bind_method(D_METHOD("play_body_clip", "key"), &NovaObjectModel::play_body_clip);
@@ -904,10 +908,18 @@ void NovaObjectModel::_bind_methods() {
 			&NovaObjectModel::get_active_part_anims);
 	ClassDB::bind_method(D_METHOD("set_weapon_channel", "key", "phase_ticks"),
 			&NovaObjectModel::set_weapon_channel);
+	ClassDB::bind_method(D_METHOD("get_weapon_channel"),
+			&NovaObjectModel::get_weapon_channel);
 	ClassDB::bind_method(D_METHOD("set_aim_overlay", "deltas"),
 			&NovaObjectModel::set_aim_overlay);
+	ClassDB::bind_method(D_METHOD("get_aim_overlay"),
+			&NovaObjectModel::get_aim_overlay);
 	ClassDB::bind_method(D_METHOD("set_right_hand_collapsed", "collapsed"),
 			&NovaObjectModel::set_right_hand_collapsed);
+	ClassDB::bind_method(D_METHOD("is_right_hand_collapsed"),
+			&NovaObjectModel::is_right_hand_collapsed);
+	ClassDB::bind_method(D_METHOD("get_body_blend"),
+			&NovaObjectModel::get_body_blend);
 	ClassDB::bind_method(D_METHOD("advance_body_animation", "delta", "write_pose"),
 			&NovaObjectModel::advance_body_animation, DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("is_body_pose_dirty"),

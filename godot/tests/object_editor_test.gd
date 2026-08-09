@@ -240,7 +240,7 @@ func test_oed_update_mask_binding_matches_modsuperoed_bit_layout() -> void:
 	assert_eq(NovaObjectData.UPDATE_LGHT, OED_UPDATE_LGHT)
 	assert_eq(NovaObjectData.UPDATE_PANM, OED_UPDATE_PANM)
 	assert_eq(NovaObjectData.UPDATE_ALL, OED_UPDATE_ALL)
-	assert_eq(NovaObjectModel.OED_UPDATE_ALL, OED_UPDATE_ALL,
+	assert_eq(NovaObjectData.UPDATE_ALL, OED_UPDATE_ALL,
 		"The engine object model aliases must resolve to the bound constants.")
 
 

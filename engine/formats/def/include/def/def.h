@@ -608,6 +608,14 @@ typedef struct DefItemDef {
        @ 0x4a1823 -> def+0x56B (marker3 +0x58B, easyrocket +0x5AB, advancedrocket
        +0x5CB, launchups_* +0x5EB/+0x5FB)] */
     char ammo_closeattack[32];
+    /* items.def 'launchups_closeattack' — the def-AUTHORED launch userpoint
+       NAME for the closeattack fire family: the AI muzzle is this named point
+       on the entity's model, resolved case-insensitively at spawn (JO NPC
+       riflemen author mflash01). Only the closeattack slot is surfaced, like
+       ammo_closeattack above; the rocket/marker3 siblings share the block.
+       [orig: ItemDef_ParseProperty launchups_* stores @ def+0x5EB/+0x5FB;
+       resolve sub_545940 -> modelgpm_FindUserpointByName @ 0x5b2170] */
+    char launchups_closeattack[32];
     /* items.def 'clipsize', plain atol — the respawn magazine reseed source (word
        entity+0x35C = itemDef+0x894). [orig: ItemDef_ParseProperty @ 0x49fa1c ->
        def+0x894; consumer Entity_ResetToSpawnState @ 0x4b97a9/0x4b97b5] */

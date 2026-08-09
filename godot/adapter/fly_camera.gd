@@ -1,3 +1,4 @@
+class_name NovaFlyCamera
 extends Camera3D
 ## Editor-style free camera for runtime. RDP-compatible (no mouse capture).
 ## Middle mouse: orbit. Scroll: zoom. Shift+middle: pan.

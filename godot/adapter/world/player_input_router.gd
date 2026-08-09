@@ -1,5 +1,6 @@
 class_name PlayerInputRouter
 extends RefCounted
+const LocalPlayerPresenter := preload("res://adapter/world/local_player_presenter.gd")
 
 # The local player's input sampling/routing, split out of LocalPlayerPresenter
 # (W4-4): the movement-state sampling into the sim, the weapon trigger/switch
@@ -13,8 +14,8 @@ extends RefCounted
 # router drives around the sample (fly-camera lock, model lifetime, the
 # head-bone eye). Untyped for the same reason as the presenter's _world: GUT
 # harness worlds serve value-only doubles.
-var _world
-var _presenter
+var _world: GameWorld = null
+var _presenter: LocalPlayerPresenter = null
 var _input_source := Callable()
 var _fire_was_held := false
 var _reload_was_down := false
@@ -33,7 +34,7 @@ var _cycle_prev_was_down := false
 var _cycle_next_was_down := false
 
 
-func setup(world, presenter) -> void:
+func setup(world: GameWorld, presenter: LocalPlayerPresenter) -> void:
 	_world = world
 	_presenter = presenter
 

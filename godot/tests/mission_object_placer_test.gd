@@ -650,18 +650,6 @@ class PanmDataPlacer:
 		return expose_occlusion and panm_data != null and panm_data.has_occlusion()
 
 
-class PanmRuntimeModel:
-	extends NovaObjectModel
-	var robj_eval_count := 0
-
-	func _apply_robj_transforms() -> bool:
-		robj_eval_count += 1
-		return false
-
-	func run_runtime_frame(delta: float = 0.016) -> void:
-		_process(delta)
-
-
 const ARMRY_3DI := "res://../fixtures/3dp/armry01/Armry01.3di"
 
 
@@ -670,11 +658,12 @@ func _armry_data(with_live_rotation: bool) -> NovaObjectData:
 	if data.open_file(_abs(ARMRY_3DI)) != OK:
 		return null
 	if with_live_rotation:
-		# Author one live track the way the object workspace does. Armry01 ships all
-		# PANM controls idle; "slide" maps to an active control function.
+		# Author one live track the way the object workspace does. Armry01 ships
+		# all PANM controls idle; a sine wave is both active AND time-varying
+		# (retail's "slide" samples to a constant until a state machine drives it).
 		if not data.set_part_anim_channel_enabled(0, 0, "rotation", true):
 			return null
-		if not data.set_part_anim_channel_mode(0, 0, "rotation", "x", "slide", -1):
+		if not data.set_part_anim_channel_mode(0, 0, "rotation", "x", "sine_wave", -1):
 			return null
 		if not data.set_part_anim_channel_values(0, 0, "rotation", "x", 0.0, 90.0, 1.0):
 			return null
@@ -799,29 +788,37 @@ func test_place_single_routes_live_panm_graphic_to_a_live_model() -> void:
 	assert_eq(int(delta.get("batched", -1)), 0, "not to a single-instance batch")
 
 
-func test_inert_panm_model_applies_robj_base_once_not_every_frame() -> void:
+func test_inert_panm_model_retains_robj_base_instead_of_rederiving() -> void:
 	var data := _armry_data(false)
 	assert_not_null(data, "inert PANM fixture loads")
 	if data == null:
 		return
 	assert_false(data.has_live_panm_for_lod(0), "fixture PANM is exactly inert")
-	var model := PanmRuntimeModel.new()
+	var model := NovaObjectModel.new()
 	add_child_autofree(model)
 	model.set_object_data(data)
-	var build_evals := model.robj_eval_count
-	assert_eq(build_evals, 1, "rebuild applies the authored ROBJ base pose exactly once")
+	var parts: Dictionary = model.get_render_part_nodes()
+	assert_gt(parts.size(), 0, "rebuild applies the authored ROBJ base pose")
 
-	model.run_runtime_frame()
-	model.run_runtime_frame()
+	# Poison every part node: an inert model must RETAIN the base pose the
+	# rebuild wrote — nothing may re-derive (and so rewrite) it per frame.
+	var poison := Transform3D(Basis(), Vector3(123.0, 456.0, 789.0))
+	for key in parts.keys():
+		(parts[key] as Node3D).transform = poison
+	model.advance_runtime_frame(0.016)
+	model.advance_runtime_frame(0.016)
+	for key in parts.keys():
+		assert_eq((parts[key] as Node3D).transform, poison,
+				"inert ROBJ transforms are retained instead of re-derived per frame")
 
-	assert_eq(model.robj_eval_count, build_evals,
-			"inert ROBJ transforms are retained instead of re-evaluated per frame")
+	# An exact runtime mutator forces one defensive refresh, but an inert
+	# pose does not depend on registers — the derived pose is unchanged, so
+	# the write gate stays shut and no per-frame churn restarts.
 	model.set_ctrl_value("VEHICLE_SPECIAL1", 123)
-	assert_eq(model.robj_eval_count, build_evals + 1,
-			"an exact runtime mutator still forces one defensive ROBJ refresh")
-	model.run_runtime_frame()
-	assert_eq(model.robj_eval_count, build_evals + 1,
-			"the mutation refresh does not turn back into continuous work")
+	model.advance_runtime_frame(0.016)
+	for key in parts.keys():
+		assert_eq((parts[key] as Node3D).transform, poison,
+				"the mutation refresh does not turn back into continuous work")
 
 
 func test_live_panm_model_keeps_evaluating_robj_each_frame() -> void:
@@ -830,13 +827,28 @@ func test_live_panm_model_keeps_evaluating_robj_each_frame() -> void:
 	if data == null:
 		return
 	assert_true(data.has_live_panm_for_lod(0), "fixture carries a live PANM track")
-	var model := PanmRuntimeModel.new()
+	var model := NovaObjectModel.new()
 	add_child_autofree(model)
 	model.set_object_data(data)
-	var build_evals := model.robj_eval_count
+	var clock := NovaPanmClock.new()
+	clock.set_time_ms_for_test(0)
+	model.set_panm_clock(clock)
+	var parts: Dictionary = model.get_render_part_nodes()
+	assert_true(parts.has(0), "the authored live rotation drives robj part 0")
+	var part := parts[0] as Node3D
 
-	model.run_runtime_frame()
-	model.run_runtime_frame()
-
-	assert_eq(model.robj_eval_count, build_evals + 2,
-			"live time/register PANM retains one ROBJ evaluation per frame")
+	# The authored slide sweeps rotation over time: each visible frame must
+	# re-derive part transforms from the absolute clock.
+	var poison := Transform3D(Basis(), Vector3(123.0, 456.0, 789.0))
+	part.transform = poison
+	clock.set_time_ms_for_test(400)
+	model.advance_runtime_frame(0.016)
+	assert_ne(part.transform, poison,
+			"live time/register PANM re-derives ROBJ transforms on the frame")
+	var first := part.transform
+	part.transform = poison
+	clock.set_time_ms_for_test(800)
+	model.advance_runtime_frame(0.016)
+	assert_ne(part.transform, poison, "and again on the next frame")
+	assert_ne(part.transform, first,
+			"the sweep advances with the clock, not a retained pose")

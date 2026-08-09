@@ -226,7 +226,7 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	# MissionSimDriver). This MissionRuntime node itself IS in the tree — its host adds it and
 	# drives tick_realtime() explicitly (ADR 0025: the game shell is the only live host).
 	_index = NovaEntityIndex.new()
-	var registry_placer = options.get("placer")
+	var registry_placer: MissionObjectPlacer = options.get("placer")
 	_index.build(registry_placer.placed_entity_records if registry_placer != null else [],
 			mission.get_area_triggers() if mission != null else [])
 	# The registry present drives whichever authored mission nodes actually exist. A

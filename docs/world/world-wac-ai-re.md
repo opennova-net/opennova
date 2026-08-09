@@ -3663,11 +3663,15 @@ Ground truth (retail JOX models): US01 = `GFlash01`@part15 + `Look`; EIndo01-08 
 engine/runtime/world carries no skeletal pose, so the posed-muzzle transform runs where the
 pose lives and feeds back (the binding-fed input pattern, like the terrain sampler):
 
-- `NovaObjectModel` resolves the gun-flash userpoint at rebuild (name preference
-  `*flash*` > `bullet`/`*muzzle*`; the rig is index-driven so the userpoint's
-  subobject row IS the skeleton bone) and exposes `get_muzzle_world_position()` =
-  `skeleton.global * bone_pose * bone_rest⁻¹ * model_pos` — the same attachment
-  transform the userpoint debug overlay uses.
+- The DEF names the muzzle: `items.def launchups_closeattack` authors the launch
+  userpoint name (JO NPC riflemen: `mflash01`); the placer pushes it onto the
+  placed model (`set_muzzle_point_name`) and `NovaObjectModel` resolves it at
+  rebuild case-insensitively against the model userpoint table — retail's
+  by-name lookup (`modelgpm_FindUserpointByName @ 0x5b2170` via `sub_545940`;
+  the rig is index-driven so the userpoint's subobject row IS the skeleton
+  bone). No authored name = no AI muzzle (civilians). The model exposes
+  `get_muzzle_world_position()` = `skeleton.global * bone_pose * bone_rest⁻¹ *
+  model_pos` — the same attachment transform the userpoint debug overlay uses.
 - `mission_present_pass._push_muzzle` pushes it per presented row, keyed by
   **PF_NET_ID** (the authored SSN — the wire handle is 0-ambiguous for pool-0 slot 0,
   and the present rows render the client WIRE VIEW, whose row order is not the AI
@@ -3687,8 +3691,11 @@ PASS: a posed EIndo muzzle at +0.51 u up / 0.93 u out from the entity origin
 D-AI-6 (ledger) updated: the FIRE-ORIGIN clause is LANDED via the binding seam.
 Residuals: (a) the LOS endpoints and the aim-solution eye point still use the
 chest-lift stand-in (the originals are the muzzle/person-leg vectors above);
-(b) the def-authored userpoint NAMES (def+0x61B..0x6CB) are unplumbed — the
-flash-name preference covers every shipped JO infantry body; (c) the stamp rides
+(b) the def-authored userpoint NAME is plumbed for the closeattack family
+(2026-08-09: `launchups_closeattack` parse → NovaItemDatabase → placer →
+`set_muzzle_point_name`; the old flash-name preference is deleted) — the
+rocket/marker3 siblings and the full twelve-name clusters (def+0x61B..0x6CB)
+remain unsurfaced; (c) the stamp rides
 the RENDER skeleton one frame stale, and out-of-replication-range NPCs fall back
 (the original computes in-sim); (d) entity+0x6C (the person aim vector) and the
 +0x358..0x367 block writer are unwalked; (e) the vehicle userpoint path @ 0x545c60

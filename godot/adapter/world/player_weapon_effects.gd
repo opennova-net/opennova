@@ -1,5 +1,6 @@
 class_name PlayerWeaponEffects
 extends RefCounted
+const LocalPlayerPresenter := preload("res://adapter/world/local_player_presenter.gd")
 
 const MissionRuntime := preload("res://adapter/world/mission_runtime.gd")
 
@@ -17,11 +18,11 @@ const WEAPON_TICK_DT := MissionRuntime.TICK_DT  # the weapon FSM runs on the eng
 # The world serves the presentation seams: the event drain, mission audio, the
 # effect world, and the effect-anchor registry. Untyped for the same reason as
 # the presenter's _world: GUT harness worlds serve value-only doubles.
-var _world
+var _world: GameWorld = null
 # The owning LocalPlayerPresenter. Untyped: the class reads presenter presentation state
 # (viewmodel parts, held weapon, camera, 1P/3P mode) through the presenter's public
 # accessors, and GUT harnesses serve minimal presenter doubles in its place.
-var _presenter
+var _presenter: LocalPlayerPresenter = null
 var _viewmodel_generation := 0      # action-slot owner identity across weapon re-mounts
 # Live owner-bound effect anchors registered on the world (slot_key -> true);
 # dropped whenever the viewmodel generation turns over.
@@ -30,7 +31,7 @@ var _weapon_play_serial := -1
 var _weapon_view: PlayerWeaponView = null  # this tick's FSM view (body channel rides it)
 
 
-func setup(world, presenter) -> void:
+func setup(world: GameWorld, presenter: LocalPlayerPresenter) -> void:
 	_world = world
 	_presenter = presenter
 

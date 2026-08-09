@@ -1528,7 +1528,7 @@ public:
 	// ERR_UNAVAILABLE until the complete local-player subject exists.
 	Error debug_teleport_local_player(const Vector3 &p_mission_pos, float p_yaw_deg,
 			float p_pitch_deg);
-	// The D-AI-6 muzzle seam: per-frame posed gun-flash userpoint push from the
+	// The D-AI-6 muzzle seam: per-frame posed bullet fire-origin userpoint push from the
 	// present layer, keyed by the row's PF_NET_ID / authored SSN (Godot-space
 	// position; converted + stamped with the logic tick).
 	void set_ai_muzzle_world(int p_net_id, const Vector3 &p_godot_pos);
