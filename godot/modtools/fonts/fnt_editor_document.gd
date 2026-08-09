@@ -20,6 +20,19 @@ func _file_extension() -> String:
 	return "fnt"
 
 
+# NovaFntResource writes itself (byte serializer), not ResourceSaver.
+func _save_resource(path: String) -> Error:
+	var bytes: PackedByteArray = resource.to_bytes()
+	if bytes.is_empty():
+		return ERR_CANT_CREATE
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	if file == null:
+		return FileAccess.get_open_error()
+	file.store_buffer(bytes)
+	file.close()
+	return OK
+
+
 func open_fnt(path: String) -> Error:
 	if not FileAccess.file_exists(path):
 		return ERR_FILE_NOT_FOUND

@@ -141,7 +141,10 @@ func test_text_entry_font_does_not_carry_to_next_default_font_entry() -> void:
 	var res := CbinCreditsResource.new()
 	var explicit := CbinTextEntry.new()
 	explicit.set_text("Explicit font")
-	var font := ResourceLoader.load(FNT_PATH, "NovaFntResource", ResourceLoader.CACHE_MODE_IGNORE) as NovaFntResource
+	var font_bytes := FileAccess.get_file_as_bytes(FNT_PATH)
+	var font: NovaFntResource = NovaFntResource.new()
+	if font_bytes.is_empty() or font.load_from_bytes(font_bytes) != OK:
+		font = null
 	assert_not_null(font, "Serpen24.fnt fixture should be loadable for font override regression.")
 	if font == null:
 		return

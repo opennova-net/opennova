@@ -36,7 +36,6 @@ add_library(${TARGET_NAME} SHARED
     terrain/nova_terrain_tile_info.cpp
     terrain/nova_terrain_tile_overlay.cpp
     terrain/trn_resource_format.cpp
-    terrain/cpt_resource_format.cpp
     terrain/til_resource_format.cpp
     cbin/cbin_credits_resource.cpp
     cbin/kda_resource_format.cpp
@@ -58,7 +57,6 @@ add_library(${TARGET_NAME} SHARED
     particle/nova_effect_scene.cpp
     particle/nova_particle_compositor.cpp
     particle/nova_particle_renderer.cpp
-    particle/ptl_resource_format.cpp
     object/nova_object_data.cpp
     object/nova_object_data_bind.cpp
     object/nova_object_data_state.cpp
@@ -92,7 +90,6 @@ add_library(${TARGET_NAME} SHARED
     audio/nova_sound_selector.cpp
     dbf/nova_dbf_data.cpp
     rtxt/rtxt_string_file.cpp
-    rtxt/rtxt_resource_format.cpp
     util/engine_caches.cpp
     util/nova_data_format.cpp
     util/nova_paths.cpp
@@ -103,11 +100,8 @@ add_library(${TARGET_NAME} SHARED
     refs/nova_reference_index.cpp
     resource_index/nova_resource_root.cpp
     pff/nova_pff_archive.cpp
-    editor/opennova_editor_plugin.cpp
     editor/nova_edit_history.cpp
     fnt/nova_fnt_resource.cpp
-    fnt/fnt_resource_format.cpp
-    fnt/fnt_import_plugin.cpp
     audio/nova_sbf_bank.cpp
     audio/nova_sbf_audio_stream.cpp
     audio/nova_sbf_audio_stream_playback.cpp
@@ -118,8 +112,6 @@ add_library(${TARGET_NAME} SHARED
     mnu/nova_mnu_document.cpp
     mnu/nova_mnu_document_state.cpp
     mnu/mns_stylesheet.cpp
-    mnu/mnu_resource_format.cpp
-    mnu/mns_resource_format.cpp
     mnu/nova_mnu_screen.cpp
     mnu/nova_mnu_label.cpp
     mnu/nova_mnu_button.cpp

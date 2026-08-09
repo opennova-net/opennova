@@ -12,8 +12,6 @@ const ParticleTableInspectorScene = preload("res://modtools/particle/inspectors/
 
 const OUTPUT_DIR_NAME := "particle_authoring_test"
 const PARTICLE_FLAG_FOREVER_EMIT := NovaParticleDef.FLAG_FOREVER_EMIT
-const RESOURCE_FIXTURE := "res://tests/particle_resource_smoke.ptl"
-const USER_RESOURCE_PATH := "user://particle_authoring_test/resource_saver_roundtrip.ptl"
 
 
 func before_each() -> void:
@@ -63,46 +61,6 @@ func test_flag_bitfield_survives_save_and_reload() -> void:
 	assert_not_null(rp, "Saved particle should reload.")
 	assert_eq(int(rp.flags) & PARTICLE_FLAG_FOREVER_EMIT, PARTICLE_FLAG_FOREVER_EMIT,
 			"A flag toggled via the bitfield must persist through the writer (which serializes flags, not flags_raw).")
-
-
-# --- ResourceLoader / ResourceSaver virtual-path smoke -----------------------
-
-func test_resource_loader_reads_res_path_and_sets_logical_paths() -> void:
-	var loaded := ResourceLoader.load(
-			RESOURCE_FIXTURE, "NovaParticleFile", ResourceLoader.CACHE_MODE_IGNORE) as NovaParticleFile
-	assert_not_null(loaded, "ResourceLoader should open PTL files through res:// FileAccess.")
-	if loaded == null:
-		return
-	assert_not_null(loaded.find_particle("ResourceLoaderSmoke"), "The packed-compatible fixture should parse.")
-	assert_eq(String(loaded.source_path), RESOURCE_FIXTURE,
-			"The document source path should retain the logical resource path.")
-	assert_eq(String(loaded.resource_path), RESOURCE_FIXTURE,
-			"The Godot Resource path should match the logical resource path.")
-
-
-func test_resource_saver_round_trips_user_path() -> void:
-	var file := NovaParticleFile.new()
-	var particle := NovaParticleDef.new()
-	particle.id = "UserRoundTrip"
-	particle.emit_burst = 1
-	_append(file, "particles", particle)
-
-	var save_error := ResourceSaver.save(file, USER_RESOURCE_PATH)
-	assert_eq(save_error, OK,
-			"ResourceSaver should write PTL files through user:// FileAccess.")
-	if save_error != OK:
-		return
-	assert_eq(String(file.source_path), USER_RESOURCE_PATH,
-			"Saving should adopt the logical user:// source path.")
-
-	var reloaded := ResourceLoader.load(
-			USER_RESOURCE_PATH, "NovaParticleFile", ResourceLoader.CACHE_MODE_IGNORE) as NovaParticleFile
-	assert_not_null(reloaded, "ResourceLoader should reopen the user:// PTL file.")
-	if reloaded == null:
-		return
-	assert_not_null(reloaded.find_particle("UserRoundTrip"), "Saved particle data should round-trip.")
-	assert_eq(String(reloaded.source_path), USER_RESOURCE_PATH)
-	assert_eq(String(reloaded.resource_path), USER_RESOURCE_PATH)
 
 
 func test_unknown_particle_keys_survive_godot_load_save_in_order() -> void:

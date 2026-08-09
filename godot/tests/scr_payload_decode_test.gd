@@ -1,7 +1,6 @@
 extends GutTest
 
 const ITEMS_PATH := "res://../fixtures/def/items.def"
-const FNT_PATH := "res://../fixtures/fnt/Serpen24.fnt"
 const SCR_KEY_DEFAULT := 0xabee_face
 
 var _temp_paths: Array[String] = []
@@ -69,16 +68,3 @@ func test_scr_wrapped_loose_items_def_loads_invisibly() -> void:
 	assert_eq(db.load(path), OK, "NovaItemDatabase.load should auto-decode SCR-wrapped loose items.def")
 	assert_true(db.is_loaded(), "decoded item database should report loaded")
 	assert_gt(db.get_count(), 0, "decoded item database should expose entries")
-
-
-func test_scr_wrapped_loose_fnt_resource_loads_invisibly() -> void:
-	var path := _write_scr_wrapped_fixture(FNT_PATH, "scr_font", "fnt")
-	assert_false(path.is_empty(), "encrypted loose FNT path should be available")
-	if path.is_empty():
-		return
-
-	var font := ResourceLoader.load(path, "NovaFntResource", ResourceLoader.CACHE_MODE_IGNORE) as NovaFntResource
-	assert_not_null(font, "ResourceLoader should auto-decode SCR-wrapped loose .fnt")
-	if font == null:
-		return
-	assert_eq(font.get_glyph_count(), 224, "decoded FNT should parse normally")

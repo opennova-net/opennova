@@ -30,7 +30,10 @@ func _make_preview() -> Control:
 
 
 func _load_fixture_fnt() -> NovaFntResource:
-	var res := ResourceLoader.load(FNT_PATH, "NovaFntResource", ResourceLoader.CACHE_MODE_IGNORE) as NovaFntResource
+	var bytes := FileAccess.get_file_as_bytes(FNT_PATH)
+	var res: NovaFntResource = NovaFntResource.new()
+	if bytes.is_empty() or res.load_from_bytes(bytes) != OK:
+		res = null
 	assert_not_null(res, "Serpen24.fnt fixture should load as NovaFntResource.")
 	return res
 
