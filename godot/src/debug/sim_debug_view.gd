@@ -4,9 +4,8 @@ extends Node3D
 # Shared scaffolding for the world-space debug views that read one
 # Simulation debug accessor through GameWorld: host/sim resolution, the
 # per-frame refresh template, and the common wireframe/label drawing recipes.
-# Each view names
-# its accessor (_sim_debug_method), builds its meshes (_build_view), refreshes
-# from a live sim (_refresh_from_sim), and drops its artifacts (_clear_all).
+# Each view builds its meshes (_build_view), refreshes from a live sim
+# (_refresh_from_sim), and drops its artifacts (_clear_all).
 #
 # The sim is re-resolved through the host every refresh so mission reloads
 # never leave a view pointing at a freed Simulation. Views are built /
@@ -15,11 +14,11 @@ extends Node3D
 
 const MissionOverlayUtil := preload("res://src/mission/mission_overlay_util.gd")
 
-var _world: Node  # duck-typed host (get_sim()); re-resolved every refresh
+var _world: GameWorld = null  # re-resolved for its sim every refresh
 
 
-## `world` is the node owning the running sim (the GameWorld).
-func setup(world: Node) -> void:
+## `world` is the host owning the running sim.
+func setup(world: GameWorld) -> void:
 	_world = world
 	_build_view()
 
@@ -39,30 +38,24 @@ func refresh_now() -> void:
 	_refresh_from_sim(sim)
 
 
-func _resolve_sim() -> Object:
-	if _world == null or not is_instance_valid(_world) or not _world.has_method("get_sim"):
+func _resolve_sim() -> Simulation:
+	if _world == null or not is_instance_valid(_world):
 		return null
-	var sim: Variant = _world.get_sim()
-	if sim == null or not is_instance_valid(sim) \
-			or not (sim as Object).has_method(_sim_debug_method()):
+	var sim := _world.get_sim()
+	if sim == null or not is_instance_valid(sim):
 		return null
 	return sim
 
 
 # --- Per-view hooks -------------------------------------------------------------
 
-## The Simulation debug accessor this view depends on (e.g. "get_round_debug").
-func _sim_debug_method() -> String:
-	return ""
-
-
 ## Build the view's meshes/labels once, from setup().
 func _build_view() -> void:
 	pass
 
 
-## Refresh from a resolved, live sim (guaranteed to expose _sim_debug_method()).
-func _refresh_from_sim(_sim: Object) -> void:
+## Refresh from a resolved, live sim.
+func _refresh_from_sim(_sim: Simulation) -> void:
 	pass
 
 

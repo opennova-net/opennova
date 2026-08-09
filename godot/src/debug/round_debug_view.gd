@@ -40,10 +40,6 @@ var _signature := 0
 var _drawable_count := 0
 
 
-func _sim_debug_method() -> String:
-	return "get_round_debug"
-
-
 func _build_view() -> void:
 	_mesh = ImmediateMesh.new()
 	add_child(_make_lines_node("RoundDebugLines", _mesh))
@@ -53,7 +49,7 @@ func _build_view() -> void:
 		_labels.append(lb)
 
 
-func _refresh_from_sim(sim: Object) -> void:
+func _refresh_from_sim(sim: Simulation) -> void:
 	var debug: Dictionary = sim.get_round_debug()
 	var events: Array = debug.get("events", [])
 	_update(events)

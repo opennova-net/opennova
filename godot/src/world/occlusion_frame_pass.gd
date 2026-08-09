@@ -314,16 +314,16 @@ func _entity_present_visible(sim: Simulation, bms_id: int) -> bool:
 func release_overrides(_reset_semantics: bool) -> void:
 	var sim := _occlusion_sim()
 	for bms_id in _occlusion_hidden_ids:
-		var node: Variant = _occlusion_hidden_release_node(int(bms_id))
+		var node := _occlusion_hidden_release_node(int(bms_id))
 		if node != null:
 			var present_visible := _entity_present_visible(sim, int(bms_id))
 			if present_visible:
-				(node as ObjectModel).visible = true
+				node.visible = true
 	_occlusion_hidden_ids.clear()
 	for bms_id in _occlusion_node_cache:
-		var node: Variant = _occlusion_node_cache[bms_id]
-		if node != null and is_instance_valid(node):
-			(node as ObjectModel).set_section_visibility_mask(-1)
+		var node := _occlusion_hidden_release_node(int(bms_id))
+		if node != null:
+			node.set_section_visibility_mask(-1)
 	_occlusion_node_cache.clear()
 	_reset_apply_baseline()
 

@@ -64,10 +64,6 @@ var _hull_has_surface := false
 var _drawable_count := 0        # valid volumes plus the local-player capsule
 
 
-func _sim_debug_method() -> String:
-	return "get_collision_debug"
-
-
 func _build_view() -> void:
 	_hull_mesh = ImmediateMesh.new()
 	add_child(_make_lines_node("CollisionHullLines", _hull_mesh))
@@ -78,7 +74,7 @@ func _build_view() -> void:
 	add_child(_gap_label)
 
 
-func _refresh_from_sim(sim: Object) -> void:
+func _refresh_from_sim(sim: Simulation) -> void:
 	var debug: Dictionary = sim.get_collision_debug()
 	var instances: Array = debug.get("instances", [])
 	var player: Dictionary = debug.get("player", {})

@@ -1,8 +1,9 @@
 class_name DebugOverlay
 extends CanvasLayer
 ## The mission debug overlay: the real game's F3 cockpit over its live
-## MissionRuntime. It stays engine/UI-only and duck-types public runtime
-## surfaces so the debug catalog is also usable by runtime automation.
+## MissionRuntime. It stays engine/UI-only and reads the typed runtime
+## surfaces through DebugContext so the debug catalog is also usable by
+## runtime automation.
 ##
 ## The overlay is the shell: a right-docked, drag-resizable panel with a
 ## categorized page list on the left and one active DebugPage on the
@@ -35,6 +36,7 @@ const DEFAULT_CONFIG_PATH := "user://debug_overlay.cfg"
 const CONFIG_SECTION := "overlay"
 const RenderingPageScript := preload(
 		"res://src/debug/pages/debug_rendering_page.gd")
+const MissionRuntime := preload("res://src/world/mission_runtime.gd")
 
 ## Sidebar section order; register_page categories outside this list append
 ## after, in first-seen order.
@@ -135,7 +137,7 @@ func set_view_context_source(source: Callable) -> void:
 
 
 ## Convenience for owners holding one runtime instance directly.
-func set_runtime(runtime) -> void:
+func set_runtime(runtime: MissionRuntime) -> void:
 	var ref: WeakRef = weakref(runtime)
 	set_runtime_source(func(): return ref.get_ref())
 
@@ -764,10 +766,10 @@ func _bind_builtin_targets() -> void:
 
 func _resolve_terrain_target() -> Object:
 	var world := _ctx.world()
-	if world == null or not world.has_method("get_terrain_node"):
+	if world == null:
 		return null
-	var terrain: Variant = world.get_terrain_node()
-	return terrain if terrain is Object and is_instance_valid(terrain) else null
+	var terrain := world.get_terrain_node()
+	return terrain if terrain != null and is_instance_valid(terrain) else null
 
 
 func _resolve_viewport_target() -> Object:
@@ -782,7 +784,7 @@ func _has_runtime_authority() -> bool:
 	var sim := _ctx.sim()
 	if sim == null:
 		return false
-	return not bool(sim.is_joiner()) if sim.has_method("is_joiner") else true
+	return not bool(sim.is_joiner())
 
 
 func _runtime_status() -> Dictionary:
@@ -793,19 +795,17 @@ func _runtime_status() -> Dictionary:
 			"label": "No mission",
 			"detail": "F3 remains available for process-wide diagnostics.",
 		}
-	var mission_name := ""
-	if runtime.has_method("get_mission_name"):
-		mission_name = String(runtime.get_mission_name())
-	if mission_name.is_empty() and runtime.has_method("get_mission_file"):
+	var mission_name := String(runtime.get_mission_name())
+	if mission_name.is_empty():
 		mission_name = String(runtime.get_mission_file()).get_basename().get_file()
 	if mission_name.is_empty():
 		mission_name = "Mission"
 	var role := "local"
-	if sim.has_method("is_joiner") and bool(sim.is_joiner()):
+	if bool(sim.is_joiner()):
 		role = "joiner"
-	elif sim.has_method("is_host_listening") and bool(sim.is_host_listening()):
+	elif bool(sim.is_host_listening()):
 		role = "host"
-	var playing := not runtime.has_method("is_playing") or bool(runtime.is_playing())
+	var playing := bool(runtime.is_playing())
 	return {
 		"label": "%s | %s%s" % [
 			mission_name, role, "" if playing else " | paused"],

@@ -7,10 +7,10 @@ extends SimDebugView
 # picks section). Built / freed by the host like every SimDebugView.
 #
 # One deliberate deviation from the base contract: the row DATA comes from
-# the injected host-owned DebugPickList, not a sim accessor — the sim
-# accessor this view names (get_world_entity_debug) is only used to re-resolve
-# mover positions each refresh, so a picked vehicle keeps its highlight while
-# driving. Statics (net_id 0) keep their pick-time position; they cannot move.
+# the injected host-owned DebugPickList, not a sim accessor — the sim's
+# get_world_entity_debug is only used to re-resolve mover positions each
+# refresh, so a picked vehicle keeps its highlight while driving. Statics
+# (net_id 0) keep their pick-time position; they cannot move.
 
 const LABEL_LIFT := 0.6
 
@@ -23,10 +23,6 @@ func set_pick_list(pick_list: DebugPickList) -> void:
 	_pick_list = pick_list
 
 
-func _sim_debug_method() -> String:
-	return "get_world_entity_debug"
-
-
 func _build_view() -> void:
 	_mesh = ImmediateMesh.new()
 	add_child(_make_lines_node("PickDebugLines", _mesh))
@@ -36,7 +32,7 @@ func _build_view() -> void:
 		_labels.append(lb)
 
 
-func _refresh_from_sim(sim: Object) -> void:
+func _refresh_from_sim(sim: Simulation) -> void:
 	_mesh.clear_surfaces()
 	for lb in _labels:
 		lb.visible = false

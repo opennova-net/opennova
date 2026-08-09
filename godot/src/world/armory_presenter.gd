@@ -32,9 +32,13 @@ const ACCEPT_HOTKEY := KEY_SHIFT
 signal opened
 signal closed
 
-var _world = null          # GameWorld
-var _player_presenter = null    # LocalPlayerPresenter (viewmodel rebuild on ACCEPT)
+var _world: GameWorld = null
+var _player_presenter: LocalPlayerPresenter = null  # viewmodel rebuild on ACCEPT
 var _ui_parent: Node = null
+# The layout source, converted ONCE at setup: a Control parent (test overlays)
+# drives the fit from its own size/resized; a CanvasLayer parent (the game HUD)
+# has no size, so the fit follows the viewport instead.
+var _layout_control: Control = null
 var _team := 0
 # The local player's class (5..9; 0 = unclassed SP spawn); the screen opens on it
 # [orig: entity playerClass feeds Armory_ResolveSelectedClass @0x5642f0]. Stamped
@@ -51,12 +55,14 @@ func _init() -> void:
 	_armory.armory_closed.connect(close)
 
 
-## Wire the presenter to a world + player presenter and the control the menu overlays
-## (the HUD layer in the game shell; tests pass their own parent).
-func setup(world, player_presenter_in, ui_parent: Node) -> void:
+## Wire the presenter to a world + player presenter and the node the menu overlays
+## (the HUD layer in the game shell; tests pass their own Control parent).
+func setup(world: GameWorld, player_presenter_in: LocalPlayerPresenter,
+		ui_parent: Node) -> void:
 	_world = world
 	_player_presenter = player_presenter_in
 	_ui_parent = ui_parent
+	_layout_control = ui_parent as Control
 	_connect_layout_source()
 
 
@@ -73,13 +79,23 @@ func is_open() -> bool:
 ## stands in an armory zone. Returns false when out of zone or the menu cannot
 ## build (the key is then ignored, matching the original's silent gate).
 func try_open() -> bool:
+	if _world == null:
+		return false
+	var sim: Simulation = _world.get_sim()
+	if sim == null or not sim.local_player_in_armory_zone():
+		return false  # [orig: Flags & 0x400000 gate @0x4e0b4d]
+	return open()
+
+
+## The post-zone-gate open leg: build + populate the WEAPON screen over live
+## play. The shells arrive through try_open()'s zone gate; tests that stage the
+## world without a type-6 volume drive this directly.
+func open() -> bool:
 	if is_open() or _world == null or _ui_parent == null:
 		return false
-	var sim = _world.get_sim() if _world.has_method("get_sim") else null
-	if sim == null or not sim.has_method("local_player_in_armory_zone"):
+	var sim: Simulation = _world.get_sim()
+	if sim == null:
 		return false
-	if not sim.local_player_in_armory_zone():
-		return false  # [orig: Flags & 0x400000 gate @0x4e0b4d]
 	# MP is live: a joiner's ACCEPT re-submits C2S 0x2F from the applied kit (the
 	# sim queues it — apply_local_player_loadout's in-match leg), the listen host's
 	# apply is server-authoritative in-process. The client-side S2C 0x5A grant IS
@@ -100,8 +116,7 @@ func try_open() -> bool:
 		_team = 0
 	elif entity_team == 2 or entity_team == 4:
 		_team = 1
-	if sim.has_method("get_local_player_class"):
-		_player_class = int(sim.get_local_player_class())
+	_player_class = int(sim.get_local_player_class())
 	_armory.set_player_team(_team)
 	_armory.set_class_allow_mask(int(sim.get_class_allow_mask()))
 	_armory.set_player_class(_player_class)
@@ -112,11 +127,7 @@ func try_open() -> bool:
 	# and retail SP pins the class]. Our runtime is a listen session even offline
 	# (ADR 0009), and the SP loadout flow wants the choice.
 	_armory.set_class_selection_enabled(true)
-	var vmdef: PlayerViewmodelDef = _world.local_player_viewmodel_def() \
-			if _world.has_method("local_player_viewmodel_def") else null
-	var fallback_primary := vmdef.weapon_name if vmdef != null else ""
-	if sim.has_method("get_local_player_weapon_name"):
-		fallback_primary = String(sim.get_local_player_weapon_name())
+	var fallback_primary := String(sim.get_local_player_weapon_name())
 	# Retail resolves each visible parent tuple from the selected class's canonical
 	# buffer and routes it by that parent's weapon_class. It never scans the expanded
 	# runtime slot pool, whose hidden subclasses can occupy a different class.
@@ -131,15 +142,13 @@ func try_open() -> bool:
 		"SECONDARY": -1,
 		"ACCESSORY": -1,
 	}
-	if sim.has_method("get_local_player_loadout") \
-			and _world.has_method("get_weapon_database"):
-		var weapon_db: WeaponDatabase = _world.get_weapon_database()
+	var weapon_db: WeaponDatabase = _world.get_weapon_database()
+	if weapon_db != null and weapon_db.is_loaded():
 		current_primary = ""
 		for value in sim.get_local_player_loadout():
 			var row := value as Dictionary
 			var weapon_name := String(row.get("name", ""))
-			var index: int = weapon_db.find_weapon(weapon_name) \
-					if weapon_db != null and weapon_db.is_loaded() else -1
+			var index: int = weapon_db.find_weapon(weapon_name)
 			if index < 0:
 				continue
 			match int(weapon_db.get_weapon(index).get("slot", -1)):
@@ -163,10 +172,9 @@ func try_open() -> bool:
 	_armory.set_current_loadout(
 			current_primary, current_secondary, current_accessory, current_grenades,
 			current_parent_clips)
-	if sim.has_method("get_weapon_availability"):
-		_armory.set_availability_lookup(
-				func(weapon_name: String) -> int:
-					return int(sim.get_weapon_availability(weapon_name)))
+	_armory.set_availability_lookup(
+			func(weapon_name: String) -> int:
+				return int(sim.get_weapon_availability(weapon_name)))
 	_armory.on_menu_built(_menu, MENU_FILE, MENU_SCREEN, _menu_root)
 	# The menu draws over every HUD element (the lazily built GameHud may have been
 	# added after us) [orig: the UI scene renders after HUD_DrawGameplayOverlays in
@@ -212,8 +220,7 @@ func teardown() -> void:
 func _ensure_menu() -> bool:
 	if _menu != null and is_instance_valid(_menu):
 		return true
-	var root: ResourceRoot = _world.get_resource_root() \
-			if _world.has_method("get_resource_root") else null
+	var root: ResourceRoot = _world.get_resource_root()
 	if root == null:
 		return false
 	var bytes := root.read_file(MENU_FILE)
@@ -249,8 +256,7 @@ func _ensure_menu() -> bool:
 	_menu.menu = doc
 	_menu.show_screen(MENU_SCREEN)
 	_menu_root = root
-	_armory.set_weapon_database(_world.get_weapon_database()
-			if _world.has_method("get_weapon_database") else null)
+	_armory.set_weapon_database(_world.get_weapon_database())
 	return true
 
 
@@ -265,7 +271,7 @@ func _on_loadout_accepted(loadout: Dictionary) -> void:
 	var primary := String(loadout.get("primary", ""))
 	_player_class = int(loadout.get("player_class", _player_class))
 	if _world != null:
-		var sim = _world.get_sim() if _world.has_method("get_sim") else null
+		var sim: Simulation = _world.get_sim()
 		var kit: Array[Dictionary] = []
 		for slot_key in ["primary", "secondary", "accessory"]:
 			var weapon_name := String(loadout.get(slot_key, ""))
@@ -289,7 +295,7 @@ func _on_loadout_accepted(loadout: Dictionary) -> void:
 				"flags": int(grenade.get("flags", -1)),
 			})
 		var applied := false
-		if sim != null and sim.has_method("apply_local_player_loadout"):
+		if sim != null:
 			applied = bool(sim.apply_local_player_loadout(
 					kit, int(loadout.get("player_class", 0))))
 		if not applied:
@@ -299,22 +305,20 @@ func _on_loadout_accepted(loadout: Dictionary) -> void:
 			# The all-NONE kit: no slots, nothing equipped [orig: an empty buffer
 			# leaves the table bare; the knife fallback is the MISSION loader's rule,
 			# not the armory's].
-			if _world.has_method("clear_local_player_weapon"):
-				_world.clear_local_player_weapon()
-				if _player_presenter != null:
-					_player_presenter.refresh_viewmodel()
+			_world.clear_local_player_weapon()
+			if _player_presenter != null:
+				_player_presenter.refresh_viewmodel()
 			close()
 			return
 		# The sim re-selected + committed the equipped slot during the apply; install
 		# the viewmodel for it now (the commit event would also catch up next tick).
 		var equipped := primary
-		if sim != null and sim.has_method("get_local_player_inventory"):
+		if sim != null:
 			var inv: Dictionary = sim.get_local_player_inventory()
 			var equipped_name := String(inv.get("equipped_name", ""))
 			if not equipped_name.is_empty():
 				equipped = equipped_name
 		if not equipped.is_empty() \
-				and _world.has_method("set_local_player_weapon_by_name") \
 				and _world.set_local_player_weapon_by_name(equipped) \
 				and _player_presenter != null:
 			_player_presenter.refresh_viewmodel()
@@ -347,10 +351,9 @@ func _load_style(root: ResourceRoot) -> MnsStyleSheet:
 
 
 func _connect_layout_source() -> void:
-	if _ui_parent is Control:
-		var control := _ui_parent as Control
-		if not control.resized.is_connected(_recompute_fit):
-			control.resized.connect(_recompute_fit)
+	if _layout_control != null:
+		if not _layout_control.resized.is_connected(_recompute_fit):
+			_layout_control.resized.connect(_recompute_fit)
 		return
 	var viewport := _ui_parent.get_viewport() if _ui_parent != null else null
 	if viewport != null and not viewport.size_changed.is_connected(_recompute_fit):
@@ -361,8 +364,8 @@ func _recompute_fit() -> void:
 	if _menu == null or not is_instance_valid(_menu):
 		return
 	var target_size := Vector2.ZERO
-	if _ui_parent is Control:
-		target_size = (_ui_parent as Control).size
+	if _layout_control != null:
+		target_size = _layout_control.size
 	elif _ui_parent != null and _ui_parent.get_viewport() != null:
 		target_size = _ui_parent.get_viewport().get_visible_rect().size
 	if target_size.x <= 1.0 or target_size.y <= 1.0:

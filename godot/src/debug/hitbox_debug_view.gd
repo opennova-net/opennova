@@ -105,10 +105,6 @@ func _make_unit_wire_sphere_mesh() -> ArrayMesh:
 	return mesh
 
 
-func _sim_debug_method() -> String:
-	return "get_hitbox_debug"
-
-
 func _build_view() -> void:
 	_mesh = ImmediateMesh.new()
 	# Depth-tested: the static wireframe should hug the visual model.
@@ -157,7 +153,7 @@ func advance_refresh(delta: float) -> void:
 		refresh_now()
 
 
-func _refresh_from_sim(sim: Object) -> void:
+func _refresh_from_sim(sim: Simulation) -> void:
 	var debug: Dictionary = sim.get_hitbox_debug()
 	_update(debug.get("entities", []), debug.get("organics", []))
 

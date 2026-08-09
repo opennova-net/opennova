@@ -1,0 +1,713 @@
+// The HUD frame compiler — the witnessed element walk over the hudpos layout,
+// structural translation of the ported shell draws (game_hud.gd + hud_*.gd
+// helpers, themselves cited ports) onto the typed draw list.
+// [orig: HUD_RenderAllOverlays @ 0x5a8070 -> HUD_RenderOverlays @ 0x5a7bb0]
+
+#include "hud/hud_frame.h"
+
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+
+namespace opennova::hud {
+
+namespace {
+
+constexpr float kDesignW = 1024.0f;
+constexpr float kDesignH = 768.0f;
+constexpr int kStanceFrames = 6;
+constexpr int kMaxCarriedMessages = 40; // [orig: Chat_RebuildDisplayBuffers @ 0x498bd0]
+
+uint32_t with_alpha(uint32_t argb, int alpha) {
+	return (static_cast<uint32_t>(std::clamp(alpha, 0, 255)) << 24) |
+			(argb & 0xFFFFFFu);
+}
+
+} // namespace
+
+float HudFrameCompiler::sx(float design_x, float surface_w) const {
+	return static_cast<float>(scale_axis(design_x, surface_w, kDesignW));
+}
+
+float HudFrameCompiler::sy(float design_y, float surface_h) const {
+	return static_cast<float>(scale_axis(design_y, surface_h, kDesignH));
+}
+
+void HudFrameCompiler::configure(const HudLayout &layout,
+		const fnt_font_t *font) {
+	layout_ = layout;
+	font_.set_font(font);
+	reset_runtime_state();
+}
+
+void HudFrameCompiler::reset_runtime_state() {
+	stance_ = StanceFade{};
+	flash_prev_rounds_ = -1;
+	flash_stamp_ = 0;
+	messages_.clear();
+	draw_list_ = HudDrawList{};
+}
+
+void HudFrameCompiler::push_message(const std::string &text, int now_ticks) {
+	// [orig: HUD_DisplayTriggeredText @ 0x51f190 -> Chat_AddDebugMessage
+	// @ 0x4987f0 — 930-tick life, >= 186-tick stagger vs the previous line]
+	if (text.empty()) {
+		return;
+	}
+	const bool has_prev = !messages_.empty();
+	const int prev_expire = has_prev ? messages_.back().expire_tick : 0;
+	HudMessageLine line;
+	line.text = text.substr(0, static_cast<size_t>(kMessageTextMax));
+	line.expire_tick = message_expire_tick(now_ticks, prev_expire, has_prev);
+	messages_.push_back(line);
+	while (messages_.size() > static_cast<size_t>(kMaxCarriedMessages)) {
+		messages_.erase(messages_.begin());
+	}
+}
+
+void HudFrameCompiler::emit_rect(float x0, float y0, float x1, float y1,
+		uint32_t color, bool filled, int32_t texture, bool additive) {
+	HudQuad quad;
+	quad.x0 = x0;
+	quad.y0 = y0;
+	quad.x1 = x1;
+	quad.y1 = y1;
+	quad.color = color;
+	quad.texture = texture;
+	quad.filled = filled;
+	quad.additive = additive;
+	draw_list_.quads.push_back(quad);
+}
+
+void HudFrameCompiler::emit_wire_rect(float x0, float y0, float x1, float y1,
+		uint32_t color) {
+	emit_rect(x0, y0, x1, y1, color, false);
+}
+
+float HudFrameCompiler::measure_text_w(const char *text) const {
+	int w = 0;
+	int h = 0;
+	font_.measure(text, 1.0f, 1.0f, &w, &h);
+	return static_cast<float>(w);
+}
+
+float HudFrameCompiler::text_line_h() const {
+	return font_.line_height(1.0f);
+}
+
+void HudFrameCompiler::emit_text(const char *text, float design_x,
+		float design_y, float surface_w, float surface_h, uint32_t argb,
+		uint32_t flags) {
+	if (text == nullptr || text[0] == 0 || font_.font() == nullptr) {
+		return;
+	}
+	const GameFontRun run = font_.layout(text, sx(design_x, surface_w),
+			sy(design_y, surface_h), 1.0f, 1.0f, flags, argb);
+	draw_list_.glyphs.insert(draw_list_.glyphs.end(), run.quads.begin(),
+			run.quads.end());
+	draw_list_.underlines.insert(draw_list_.underlines.end(),
+			run.underlines.begin(), run.underlines.end());
+}
+
+const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
+		float surface_w, float surface_h) {
+	draw_list_.quads.clear();
+	draw_list_.tris.clear();
+	draw_list_.lines.clear();
+	draw_list_.glyphs.clear();
+	draw_list_.underlines.clear();
+	draw_list_.elements_drawn = 0;
+
+	// The stance cross-fade restamp [orig: @ 0x599f8a].
+	if (state.stance != stance_.cur) {
+		stance_.prev = stance_.cur;
+		stance_.cur = state.stance;
+		stance_.stamp = state.ticks;
+	}
+
+	// The SIGHTS card draws first — the HUD overlays land on top of it
+	// [orig: draw_weapon_sight_overlays @ 0x4dce00 runs at scene end;
+	//  HUD_RenderAllOverlays later in the frame].
+	element_sights_card(state, surface_w, surface_h);
+	element_frame(state, surface_w, surface_h);
+	element_health(state, surface_w, surface_h);
+	element_stance(state, surface_w, surface_h);
+	element_weapon_cluster(state, surface_w, surface_h);
+	element_heat(state, surface_w, surface_h);
+	element_power(state, surface_w, surface_h);
+	element_waypoint(state, surface_w, surface_h);
+	element_objectives(state, surface_w, surface_h);
+	element_attach_labels(state, surface_w, surface_h);
+	element_objective_line(state, surface_w, surface_h);
+	element_messages(state, surface_w, surface_h);
+	return draw_list_;
+}
+
+void HudFrameCompiler::element_sights_card(const HudFrameState &state,
+		float w, float h) {
+	if (!state.weapon.sights_card_up || state.binoculars_view_active) {
+		return;
+	}
+	for (size_t row = 0; row < layout_.sights.size(); ++row) {
+		const HudSightsRow &r = layout_.sights[row];
+		if (!r.texture_valid) {
+			continue;
+		}
+		// Row rects live in the 1024x768 design space and scale per draw
+		// [orig: Viewport_ScaleToVirtualCoords @ 0x5d2b20].
+		emit_rect(r.x0 * w / kDesignW, r.y0 * h / kDesignH,
+				r.x1 * w / kDesignW, r.y1 * h / kDesignH, 0xFFFFFFFFu, true,
+				kHudTexSightsBase + static_cast<int32_t>(row), r.additive);
+	}
+	++draw_list_.elements_drawn;
+}
+
+void HudFrameCompiler::element_frame(const HudFrameState &state, float w,
+		float h) {
+	(void)state;
+	if (!layout_.frame_texture_valid) {
+		return;
+	}
+	const float x = static_cast<float>(layout_.frame_pos.x);
+	const float y = static_cast<float>(layout_.frame_pos.y);
+	emit_rect(sx(x, w), sy(y, h),
+			sx(x + static_cast<float>(layout_.frame_tex_w), w),
+			sy(y + static_cast<float>(layout_.frame_tex_h), h), 0xFFFFFFFFu,
+			true, kHudTexFrame);
+	++draw_list_.elements_drawn;
+}
+
+void HudFrameCompiler::element_health(const HudFrameState &state, float w,
+		float h) {
+	// [orig: HUD_DrawHealthBar @ 0x5a2e50 — fill (x1+1, y1+1)..(x1+fill, y2),
+	// wireframe border on top, threshold colors]
+	const HudRectRecord &r = layout_.health_rect;
+	if (!r.present || (r.x == 0.0f && r.y == 0.0f && r.w == 0.0f && r.h == 0.0f)) {
+		return;
+	}
+	const float x0 = sx(r.x, w);
+	const float y0 = sy(r.y, h);
+	const float x1 = sx(r.x + r.w, w);
+	const float y1 = sy(r.y + r.h, h);
+	const float fraction = std::clamp(state.health_fraction, 0.0f, 1.0f);
+	const int32_t ratio_fp16 =
+			static_cast<int32_t>(fraction * 65536.0f);
+	const int band = health_color_band_fp16(ratio_fp16);
+	const uint32_t fill = band == 0 ? layout_.tag_good
+			: band == 1              ? layout_.tag_middle
+									 : layout_.tag_bad;
+	const float fill_w = (x1 - x0) * fraction;
+	if (fill_w > 1.0f) {
+		emit_rect(x0 + 1.0f, y0 + 1.0f, x0 + fill_w,
+				std::max(y1, y0 + 1.0f), fill, true);
+	}
+	emit_wire_rect(x0, y0, x1, y1, layout_.health_border);
+	++draw_list_.elements_drawn;
+}
+
+void HudFrameCompiler::element_stance(const HudFrameState &state, float w,
+		float h) {
+	// [orig: HUD_DrawStanceIndicator @ 0x599f10 — ramp+texture gates, the
+	// shared frame-0 scale, the cross-fade pair]
+	if (layout_.stance_pos.x == 0 && layout_.stance_pos.y == 0) {
+		return;
+	}
+	const int ramp = static_cast<int>(layout_.alpha_fade_seconds *
+			static_cast<float>(kSecondsToTicks));
+	if (ramp <= 0) {
+		return;
+	}
+	for (int i = 0; i < kStanceFrames; ++i) {
+		if (!layout_.stance_texture_valid[static_cast<size_t>(i)]) {
+			return;
+		}
+	}
+	const int32_t q16 =
+			stance_scale_q16(layout_.stance_frame0_w, layout_.stance_frame0_h);
+	if (q16 <= 0) {
+		return;
+	}
+	const int base_alpha = static_cast<int>(layout_.alpha_fade_base *
+			static_cast<float>(kPercentToAlpha));
+	const int elapsed = state.ticks - stance_.stamp;
+	const int cur_a = stance_current_alpha(elapsed, ramp, base_alpha);
+	const int prev_a = stance_prev_alpha(elapsed, ramp);
+
+	const int scaled_w = stance_scaled_dim(layout_.stance_frame0_w, q16);
+	const int scaled_h = stance_scaled_dim(layout_.stance_frame0_h, q16);
+	const int center_x = stance_center_axis(scaled_w);
+	const int center_y = stance_center_axis(scaled_h);
+
+	auto emit_frame = [&](int idx, int alpha) {
+		const float dx = static_cast<float>(layout_.stance_pos.x +
+				layout_.stance_offset_x[static_cast<size_t>(idx)] + center_x);
+		const float dy = static_cast<float>(layout_.stance_pos.y +
+				layout_.stance_offset_y[static_cast<size_t>(idx)] + center_y);
+		emit_rect(sx(dx, w), sy(dy, h),
+				sx(dx + static_cast<float>(scaled_w), w),
+				sy(dy + static_cast<float>(scaled_h), h),
+				with_alpha(layout_.stance_tint, alpha), true,
+				kHudTexStance0 + idx);
+	};
+	if (stance_.cur >= 0 && stance_.cur < kStanceFrames) {
+		emit_frame(stance_.cur, cur_a);
+	}
+	if (prev_a > 0 && stance_.prev != stance_.cur && stance_.prev >= 0 &&
+			stance_.prev < kStanceFrames) {
+		emit_frame(stance_.prev, prev_a);
+	}
+	++draw_list_.elements_drawn;
+}
+
+void HudFrameCompiler::element_weapon_cluster(const HudFrameState &state,
+		float w, float h) {
+	// Nothing draws without an installed weapon [orig: @ 0x5939f3 / @ 0x599a67].
+	if (!state.weapon.active) {
+		return;
+	}
+	const uint32_t wc = half_bright_argb(layout_.weapon_text);
+	char ammo[64];
+	const std::string ammo_text = format_ammo(state.weapon.clip,
+			state.weapon.reserve, state.weapon.capacity);
+	(void)ammo;
+	if (!ammo_text.empty() && layout_.ammo_count.hidden == 0) {
+		const uint32_t align_flags = layout_.ammo_count.align == 1
+				? kFontAlignRight
+				: (layout_.ammo_count.align == 2 ? kFontAlignCenter : 0u);
+		emit_text(ammo_text.c_str(),
+				static_cast<float>(layout_.ammo_count.x),
+				static_cast<float>(layout_.ammo_count.y), w, h, wc,
+				align_flags);
+	}
+	if (!state.weapon.display_name.empty() && layout_.weapon_name.hidden == 0) {
+		// [orig: @ 0x593b36..0x593bf5 — the 640-wide x nudge]
+		const int nudge =
+				weapon_name_x_nudge(w <= 640.0f, layout_.weapon_name.align);
+		const uint32_t align_flags = layout_.weapon_name.align == 1
+				? kFontAlignRight
+				: (layout_.weapon_name.align == 2 ? kFontAlignCenter : 0u);
+		emit_text(state.weapon.display_name.c_str(),
+				static_cast<float>(layout_.weapon_name.x + nudge),
+				static_cast<float>(layout_.weapon_name.y), w, h, wc,
+				align_flags);
+	}
+	element_clip_indicator(state, w, h);
+	element_crosshair(state, w, h);
+	++draw_list_.elements_drawn;
+}
+
+void HudFrameCompiler::element_clip_indicator(const HudFrameState &state,
+		float w, float h) {
+	// [orig: draw_hud_ammo_indicator @ 0x599a30 — anchor/ramp/-1 gates, the
+	// flash restamp, HUDCLIPGFX background at base alpha, one HUDRNDGFX icon
+	// per round stepped along the authored vector at flash alpha]
+	const HudWeaponState &wep = state.weapon;
+	if (layout_.clip_pos.x == 0 && layout_.clip_pos.y == 0) {
+		return;
+	}
+	const int ramp = static_cast<int>(layout_.alpha_fade_seconds *
+			static_cast<float>(kSecondsToTicks));
+	if (ramp <= 0 || wep.reserve == -1 || wep.clip == -1) {
+		return;
+	}
+	// The restamp key at the reimpl's single-pool altitude (D-HUD-5): the
+	// (round_type, reserve) pair; the compiler keys on the folded count.
+	const int folded = folded_reserve(wep.clip, wep.reserve, wep.capacity);
+	if (folded != flash_prev_rounds_) {
+		flash_prev_rounds_ = folded;
+		flash_stamp_ = state.ticks;
+	}
+	const int base_alpha = static_cast<int>(layout_.alpha_fade_base *
+			static_cast<float>(kPercentToAlpha));
+	const int max_alpha = static_cast<int>(layout_.alpha_fade_max *
+			static_cast<float>(kPercentToAlpha));
+	const int flash = fade_flash_alpha(state.ticks - flash_stamp_, ramp,
+			base_alpha, max_alpha);
+
+	const float ax = static_cast<float>(layout_.clip_pos.x);
+	const float ay = static_cast<float>(layout_.clip_pos.y);
+	if (wep.clip_texture_valid) {
+		const float bx = ax + static_cast<float>(wep.clipgfx_offset_x);
+		const float by = ay + static_cast<float>(wep.clipgfx_offset_y);
+		emit_rect(sx(bx, w), sy(by, h),
+				sx(bx + static_cast<float>(wep.clip_tex_w), w),
+				sy(by + static_cast<float>(wep.clip_tex_h), h),
+				with_alpha(layout_.stance_tint, base_alpha), true,
+				kHudTexClipGfx);
+	}
+	if (wep.round_texture_valid) {
+		const int count = round_icon_count(wep.clip, wep.reserve, wep.capacity,
+				wep.rounds_per_icon);
+		float px = ax + static_cast<float>(wep.rndgfx_offset_x);
+		float py = ay + static_cast<float>(wep.rndgfx_offset_y);
+		for (int i = 0; i < count; ++i) {
+			emit_rect(sx(px, w), sy(py, h),
+					sx(px + static_cast<float>(wep.round_tex_w), w),
+					sy(py + static_cast<float>(wep.round_tex_h), h),
+					with_alpha(layout_.stance_tint, flash), true,
+					kHudTexRoundGfx);
+			px += static_cast<float>(wep.rndgfx_step_x);
+			py += static_cast<float>(wep.rndgfx_step_y);
+		}
+	}
+}
+
+void HudFrameCompiler::element_crosshair(const HudFrameState &state, float w,
+		float h) {
+	// [orig: HUD_DrawCrosshair @ 0x592640 — the !CanFire gate, the spread
+	// projection, the five tapered regions via @ 0x590f50]
+	if (state.binoculars_view_active) {
+		return;
+	}
+	if (!crosshair_should_draw(state.aimed_shot_available,
+				state.keep_crosshair_while_aimed)) {
+		return;
+	}
+	if (!layout_.crosshair_texture_valid) {
+		return;
+	}
+	// The projected aim point in design units; 1P pins the exact center
+	// [orig: @ 0x5928a0 / the projected branch @ 0x592910].
+	float cx = kDesignW * 0.5f;
+	float cy = kDesignH * 0.5f;
+	if (state.aim_valid && w > 0.0f && h > 0.0f) {
+		cx = state.aim_screen_x * kDesignW / w;
+		cy = state.aim_screen_y * kDesignH / h;
+	}
+	const float spread = static_cast<float>(crosshair_spread_px_fp16(
+			state.hud_spread_fp16, state.fov_deg, w));
+
+	const float half_w = static_cast<float>(layout_.crosshair_tex_w) * 0.5f;
+	const float half_h = static_cast<float>(layout_.crosshair_tex_h) * 0.5f;
+	const float offsets[5][2] = {
+		{0.0f, -spread}, {0.0f, spread}, {-spread, 0.0f}, {spread, 0.0f},
+		{0.0f, 0.0f},
+	};
+	for (int corner = 0; corner < 5; ++corner) {
+		const float ox = cx + offsets[corner][0];
+		const float oy = cy + offsets[corner][1];
+		const float l = ox - half_w;
+		const float t = oy - half_h;
+		const float r = ox + half_w;
+		const float b = oy + half_h;
+		const float mx = (l + r) * 0.5f;
+		const float my = (t + b) * 0.5f;
+		const float tx = static_cast<float>(kCrosshairTaper) * half_w;
+		const float ty = static_cast<float>(kCrosshairTaper) * half_h;
+		float strip[5][2];
+		int verts = 5;
+		switch (corner) {
+			case 0:
+				strip[0][0] = l; strip[0][1] = t;
+				strip[1][0] = mx - tx; strip[1][1] = my - ty;
+				strip[2][0] = mx; strip[2][1] = t;
+				strip[3][0] = mx + tx; strip[3][1] = my - ty;
+				strip[4][0] = r; strip[4][1] = t;
+				break;
+			case 1:
+				strip[0][0] = l; strip[0][1] = b;
+				strip[1][0] = mx - tx; strip[1][1] = my + ty;
+				strip[2][0] = mx; strip[2][1] = b;
+				strip[3][0] = mx + tx; strip[3][1] = my + ty;
+				strip[4][0] = r; strip[4][1] = b;
+				break;
+			case 2:
+				strip[0][0] = l; strip[0][1] = t;
+				strip[1][0] = mx - tx; strip[1][1] = my - ty;
+				strip[2][0] = l; strip[2][1] = my;
+				strip[3][0] = mx - tx; strip[3][1] = my + ty;
+				strip[4][0] = l; strip[4][1] = b;
+				break;
+			case 3:
+				strip[0][0] = r; strip[0][1] = t;
+				strip[1][0] = mx + tx; strip[1][1] = my - ty;
+				strip[2][0] = r; strip[2][1] = my;
+				strip[3][0] = mx + tx; strip[3][1] = my + ty;
+				strip[4][0] = r; strip[4][1] = b;
+				break;
+			default:
+				strip[0][0] = mx + tx; strip[0][1] = my - ty;
+				strip[1][0] = mx - tx; strip[1][1] = my - ty;
+				strip[2][0] = mx + tx; strip[2][1] = my + ty;
+				strip[3][0] = mx - tx; strip[3][1] = my + ty;
+				verts = 4;
+				break;
+		}
+		const float qw = r - l;
+		const float qh = b - t;
+		if (qw <= 0.0f || qh <= 0.0f) {
+			continue;
+		}
+		for (int i = 0; i + 2 < verts; ++i) {
+			HudTri tri;
+			HudTriVertex *out[3] = {&tri.a, &tri.b, &tri.c};
+			const int idx[3] = {i, i + 1, i + 2};
+			for (int k = 0; k < 3; ++k) {
+				out[k]->x = sx(strip[idx[k]][0], w);
+				out[k]->y = sy(strip[idx[k]][1], h);
+				out[k]->u = (strip[idx[k]][0] - l) / qw;
+				out[k]->v = (strip[idx[k]][1] - t) / qh;
+			}
+			tri.color = 0xFFFFFFFFu;
+			tri.texture = kHudTexCrosshair;
+			draw_list_.tris.push_back(tri);
+		}
+	}
+}
+
+void HudFrameCompiler::element_heat(const HudFrameState &state, float w,
+		float h) {
+	// [orig: HUD_DrawWeaponHeatBar @ 0x599700 — gate, border, proportional
+	// fill, axis by rect shape]
+	if (state.weapon.heat <= 0) {
+		return;
+	}
+	const HudRectRecord &r = layout_.heat_rect;
+	if (!r.present || (r.w <= 0.0f && r.h <= 0.0f)) {
+		return;
+	}
+	const float x0 = sx(r.x, w);
+	const float y0 = sy(r.y, h);
+	const float x1 = sx(r.x + r.w, w);
+	const float y1 = sy(r.y + r.h, h);
+	emit_wire_rect(x0, y0, x1, y1, layout_.heat_border);
+	if (heat_bar_is_horizontal(x1 - x0, y1 - y0)) {
+		const int span =
+				heat_fill_span(static_cast<int>(x1 - x0), state.weapon.heat);
+		emit_rect(x0 + 1.0f, y0 + 1.0f,
+				x0 + 1.0f + std::max(static_cast<float>(span) - 2.0f, 0.0f),
+				y1 - 1.0f, layout_.stance_bad, true);
+	} else {
+		const int span =
+				heat_fill_span(static_cast<int>(y1 - y0), state.weapon.heat);
+		const float top = y1 - static_cast<float>(span) + 1.0f;
+		emit_rect(x0 + 1.0f, top, x1 - 1.0f,
+				std::max(y1 - 1.0f, top), layout_.stance_bad, true);
+	}
+	++draw_list_.elements_drawn;
+}
+
+void HudFrameCompiler::element_power(const HudFrameState &state, float w,
+		float h) {
+	// [orig: HUD_DrawPowerThrowChargeBar @ 0x599830 — outline + inset fill +
+	// "%d%" 15 output pixels above, all in the flat 0xFF800000 half-red]
+	if (!state.windup_active) {
+		return;
+	}
+	const HudRectRecord &r = layout_.power_rect;
+	if (!r.present || r.w <= 0.0f || r.h <= 0.0f) {
+		return;
+	}
+	const uint32_t color = 0xFF800000u; // [orig: the constant @ 0x840b1c]
+	const int32_t progress = power_throw_progress_fp16(state.windup_held_ticks);
+	const float x0 = sx(r.x, w);
+	const float y0 = sy(r.y, h);
+	const float x1 = sx(r.x + r.w, w);
+	const float y1 = sy(r.y + r.h, h);
+	emit_wire_rect(x0, y0, x1, y1, color);
+	const int span = power_fill_span(progress, static_cast<int>(x1 - x0));
+	if (span > 1) {
+		emit_rect(x0 + 1.0f, y0 + 1.0f,
+				x0 + 1.0f + std::min(static_cast<float>(span - 1),
+									 x1 - x0 - 2.0f),
+				y1 - 1.0f, color, true);
+	}
+	char label[16];
+	std::snprintf(label, sizeof(label), "%d%%",
+			static_cast<int>((static_cast<int64_t>(progress) * 100) >> 16));
+	// 15 OUTPUT pixels above the bar: convert back to design so the offset
+	// commutes with the rounding [orig: y-15 @ 0x5999ef].
+	const float dy = static_cast<float>(
+			pixel_delta_to_design(-15.0, h, kDesignH));
+	emit_text(label, r.x, r.y + dy, w, h, half_bright_argb(color), 0u);
+	++draw_list_.elements_drawn;
+}
+
+void HudFrameCompiler::element_waypoint(const HudFrameState &state, float w,
+		float h) {
+	// [orig: HUD_DrawWaypointNameAndDistance @ 0x5947a0 — align routing, the
+	// wireframe distance box (field 3 hides only the box)]
+	if (!state.waypoint.present || font_.font() == nullptr) {
+		return;
+	}
+	const HudPosRecord &gp = layout_.wpd_info;
+	if (!gp.present || (gp.x == 0 && gp.y == 0 && gp.hidden == 0 && gp.align == 0)) {
+		return;
+	}
+	char dist[16];
+	std::snprintf(dist, sizeof(dist), "%d", state.waypoint.distance_m);
+	const uint32_t color = layout_.hud_text;
+	const float ax = static_cast<float>(gp.x);
+	const float ay = static_cast<float>(gp.y);
+	// Measures in font pixels, folded to design via the surface ratio — the
+	// same conversion the ported shell used.
+	const float dist_w = measure_text_w(dist) * kDesignW / std::max(w, 1.0f);
+	const float text_h = text_line_h() * kDesignH / std::max(h, 1.0f);
+	float dist_x = ax;
+	float box_left = ax;
+	float box_right = ax + dist_w + 4.0f;
+	if (!state.waypoint.name.empty()) {
+		switch (gp.align) {
+			case 1: {
+				emit_text(state.waypoint.name.c_str(), ax, ay, w, h, color,
+						kFontAlignRight);
+				const float name_w = measure_text_w(
+						state.waypoint.name.c_str()) * kDesignW /
+						std::max(w, 1.0f);
+				dist_x = ax - 4.0f - name_w;
+				box_left = dist_x - dist_w;
+				box_right = dist_x + 4.0f;
+				break;
+			}
+			case 2:
+				emit_text(state.waypoint.name.c_str(), ax, ay, w, h, color, 0u);
+				dist_x = ax - 4.0f;
+				box_left = dist_x - dist_w;
+				box_right = dist_x + 4.0f;
+				break;
+			default:
+				emit_text(state.waypoint.name.c_str(), ax + dist_w + 4.0f, ay,
+						w, h, color, 0u);
+				break;
+		}
+	}
+	if (gp.hidden == 0) {
+		emit_wire_rect(sx(box_left, w), sy(ay - 2.0f, h), sx(box_right, w),
+				sy(ay + text_h - 1.0f, h), color);
+	}
+	emit_text(dist, dist_x, ay, w, h, color, kFontAlignRight);
+	++draw_list_.elements_drawn;
+}
+
+void HudFrameCompiler::element_objectives(const HudFrameState &state, float w,
+		float h) {
+	// [orig: HUD_DrawWinConditions @ 0x5ba940 — anchor (15, 240), the header,
+	// checkbox rows, the gray done fold]
+	if (state.objectives.empty() || font_.font() == nullptr) {
+		return;
+	}
+	const char *header = "MISSION OBJECTIVES";
+	const float row_h = text_line_h() * kDesignH / std::max(h, 1.0f);
+	const float x = 15.0f;
+	const float y = 240.0f;
+	float max_w = measure_text_w(header) * kDesignW / std::max(w, 1.0f);
+	for (const HudObjectiveRow &row : state.objectives) {
+		max_w = std::max(max_w, measure_text_w(row.text.c_str()) * kDesignW /
+				std::max(w, 1.0f));
+	}
+	const float panel_x1 = x + max_w + 72.0f;
+	const float panel_y1 = y - 6.0f +
+			static_cast<float>(state.objectives.size() + 1) * (row_h + 4.0f) +
+			48.0f;
+	emit_rect(sx(x, w), sy(y - 6.0f, h), sx(panel_x1, w), sy(panel_y1, h),
+			0x80000000u, true);
+	emit_wire_rect(sx(x, w), sy(y - 6.0f, h), sx(panel_x1, w), sy(panel_y1, h),
+			0xFFFFFFFFu);
+	emit_text(header, x + 24.0f, y, w, h, 0xFFFFFFFFu, 0u);
+	float row_y = y + row_h + 10.0f;
+	for (const HudObjectiveRow &row : state.objectives) {
+		emit_wire_rect(sx(x + 26.0f, w), sy(row_y + 2.0f, h),
+				sx(x + 38.0f, w), sy(row_y + 14.0f, h), 0xFFFFFFFFu);
+		if (row.done) {
+			HudLine seg;
+			seg.color = 0xFFFFFFFFu;
+			seg.width = 2.0f;
+			seg.x0 = sx(x + 28.0f, w);
+			seg.y0 = sy(row_y + 8.0f, h);
+			seg.x1 = sx(x + 31.0f, w);
+			seg.y1 = sy(row_y + 12.0f, h);
+			draw_list_.lines.push_back(seg);
+			seg.x0 = seg.x1;
+			seg.y0 = seg.y1;
+			seg.x1 = sx(x + 40.0f, w);
+			seg.y1 = sy(row_y + 2.0f, h);
+			draw_list_.lines.push_back(seg);
+		}
+		// The witnessed +0xFF808081 fold collapses white -> gray on done
+		// [orig: @ 0x5bac86].
+		const uint32_t color = row.done ? 0xFF808080u : 0xFFFFFFFFu;
+		emit_text(row.text.c_str(), x + 48.0f, row_y - 2.0f, w, h, color, 0u);
+		row_y += row_h + 4.0f;
+	}
+	++draw_list_.elements_drawn;
+}
+
+void HudFrameCompiler::element_attach_labels(const HudFrameState &state,
+		float w, float h) {
+	// [orig: draw_vehicle_seat_and_armory_labels @ 0x5a3290 — nearest at the
+	// full color, others ((rgb & 0xFEFEFE) | 0xFE000001) >> 1]
+	(void)w;
+	(void)h;
+	if (state.attach_labels.empty() || font_.font() == nullptr) {
+		return;
+	}
+	for (const HudAttachLabel &label : state.attach_labels) {
+		uint32_t color = layout_.hud_text;
+		if (!label.nearest) {
+			color = ((color & 0xFEFEFEu) | 0xFE000001u) >> 1;
+		}
+		// Screen-pixel anchors, already projected by the presenter — no
+		// design scaling (the original projects then draws).
+		const GameFontRun run = font_.layout(label.text.c_str(),
+				label.screen_x, label.screen_y, 1.0f, 1.0f, kFontAlignCenter,
+				color);
+		draw_list_.glyphs.insert(draw_list_.glyphs.end(), run.quads.begin(),
+				run.quads.end());
+	}
+	++draw_list_.elements_drawn;
+}
+
+void HudFrameCompiler::element_objective_line(const HudFrameState &state,
+		float w, float h) {
+	// [orig: draw_objective_status_text @ 0x59aa30 — the game_info anchor]
+	if (state.objective_text.empty() || font_.font() == nullptr) {
+		return;
+	}
+	const HudPosRecord &gp = layout_.game_info;
+	const int gx = gp.present ? gp.x : 512;
+	const int gy = gp.present ? gp.y : 40;
+	if (gp.present && gp.hidden != 0) {
+		return;
+	}
+	const uint32_t align_flags = gp.align == 1
+			? kFontAlignRight
+			: (gp.align == 2 ? kFontAlignCenter : 0u);
+	emit_text(state.objective_text.c_str(), static_cast<float>(gx),
+			static_cast<float>(gy), w, h, layout_.hud_text, align_flags);
+	++draw_list_.elements_drawn;
+}
+
+void HudFrameCompiler::element_messages(const HudFrameState &state, float w,
+		float h) {
+	// [orig: Chat_AddDebugMessage @ 0x4987f0 display — newest at the anchor,
+	// scrolling upward, the HUDCHLINE cap]
+	if (font_.font() == nullptr) {
+		return;
+	}
+	const float ax = static_cast<float>(
+			layout_.chat_text.present ? layout_.chat_text.x : 142);
+	const float ay = static_cast<float>(
+			layout_.chat_text.present ? layout_.chat_text.y : 711);
+	std::vector<const HudMessageLine *> live;
+	for (const HudMessageLine &line : messages_) {
+		if (line.expire_tick > state.ticks) {
+			live.push_back(&line);
+		}
+	}
+	if (live.empty()) {
+		return;
+	}
+	const int max_lines = std::max(layout_.chat_lines, 1);
+	const int start = std::max(0,
+			static_cast<int>(live.size()) - max_lines);
+	const float row_h = text_line_h() * kDesignH / std::max(h, 1.0f);
+	float row_y = ay;
+	for (int i = static_cast<int>(live.size()) - 1; i >= start; --i) {
+		emit_text(live[static_cast<size_t>(i)]->text.c_str(), ax, row_y, w, h,
+				layout_.hud_text, 0u);
+		row_y -= row_h;
+	}
+	++draw_list_.elements_drawn;
+}
+
+} // namespace opennova::hud

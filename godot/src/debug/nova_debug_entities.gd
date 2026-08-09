@@ -9,35 +9,29 @@ class_name DebugEntities
 ## their non-authoritative tooling pool into the decoded view.
 
 
-static func list(sim: Object) -> Array[Dictionary]:
+static func list(sim: Simulation) -> Array[Dictionary]:
 	var output: Array[Dictionary] = []
 	if sim == null or not is_instance_valid(sim):
 		return output
 
-	var joiner := sim.has_method("is_joiner") and bool(sim.is_joiner())
+	var joiner := bool(sim.is_joiner())
 	var ai_cards: Array[Dictionary] = []
 	var ai_by_wire := {}
 	var ai_by_net := {}
-	if sim.has_method("get_entity_count") and sim.has_method("get_entity_debug"):
-		for ai_index in range(maxi(0, int(sim.get_entity_count()))):
-			var card_value: Variant = sim.get_entity_debug(ai_index)
-			var card: Dictionary = card_value if card_value is Dictionary else {}
-			ai_cards.append(card)
-			if card.is_empty():
-				continue
-			if card.has("wire_handle"):
-				ai_by_wire[int(card.get("wire_handle", 0))] = ai_index
-			var net_id := int(card.get("net_id", 0))
-			if net_id > 0:
-				ai_by_net[net_id] = ai_index
+	for ai_index in range(maxi(0, int(sim.get_entity_count()))):
+		var card: Dictionary = sim.get_entity_debug(ai_index)
+		ai_cards.append(card)
+		if card.is_empty():
+			continue
+		if card.has("wire_handle"):
+			ai_by_wire[int(card.get("wire_handle", 0))] = ai_index
+		var net_id := int(card.get("net_id", 0))
+		if net_id > 0:
+			ai_by_net[net_id] = ai_index
 
 	var seen_ai := {}
-	var snapshot := PackedFloat32Array()
-	var stride := 0
-	if sim.has_method("get_present_snapshot") \
-			and sim.has_method("get_present_stride"):
-		snapshot = sim.get_present_snapshot()
-		stride = int(sim.get_present_stride())
+	var snapshot: PackedFloat32Array = sim.get_present_snapshot()
+	var stride := int(sim.get_present_stride())
 	if stride > 0 and snapshot.size() % stride == 0:
 		for view_index in range(snapshot.size() / stride):
 			var base := view_index * stride
@@ -57,20 +51,16 @@ static func list(sim: Object) -> Array[Dictionary]:
 					ai_index = int(ai_by_net[net_id])
 			var detail: Dictionary = ai_cards[ai_index].duplicate(true) \
 					if ai_index >= 0 and ai_index < ai_cards.size() else {}
-			if detail.is_empty() and not joiner and net_id > 0 \
-					and sim.has_method("get_world_entity_debug"):
-				var world_value: Variant = sim.get_world_entity_debug(net_id)
-				if world_value is Dictionary:
-					detail = world_value
+			if detail.is_empty() and not joiner and net_id > 0:
+				detail = sim.get_world_entity_debug(net_id)
 			# A joiner's rows have no AI/registry card; surface the decoded wire
 			# row instead (carrier/bone/heading/compact_revision) — the remote
 			# complement of the F6 snapshot's client_entity_debug card.
 			if joiner:
-				var client_value: Variant = sim.get_client_entity_debug(
+				var client_card: Dictionary = sim.get_client_entity_debug(
 						wire_handle)
-				if client_value is Dictionary \
-						and not (client_value as Dictionary).is_empty():
-					detail["client_entity_debug"] = client_value
+				if not client_card.is_empty():
+					detail["client_entity_debug"] = client_card
 			var position := Vector3(
 					snapshot[base + Simulation.PF_POS_X],
 					snapshot[base + Simulation.PF_POS_Y],

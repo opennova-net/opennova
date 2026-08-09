@@ -4,6 +4,8 @@ class_name DebugCatalog
 ## Definitions name only public owner methods/properties. Target adapters bind
 ## the corresponding target sources on DebugSession.
 
+const MissionRuntime := preload("res://src/world/mission_runtime.gd")
+
 const TARGET_WORLD := &"world"
 const TARGET_PLAYER := &"player"
 const TARGET_RUNTIME := &"runtime"
@@ -81,21 +83,14 @@ static func bind_runtime_targets(
 	session.set_target_source(TARGET_RUNTIME, runtime_source,
 			"No mission runtime is active.")
 	session.set_target_source(TARGET_SIM, func():
-		var runtime: Variant = runtime_source.call() \
-				if runtime_source.is_valid() else null
-		if runtime is Object and is_instance_valid(runtime) \
-				and (runtime as Object).has_method("get_sim"):
-			return runtime.get_sim()
-		return null,
+		var runtime := _resolve_runtime(runtime_source)
+		return runtime.get_sim() if runtime != null else null,
 		"No simulation is active.")
 	session.set_target_source(TARGET_WORLD, world_source,
 			"No game world is loaded.")
 	session.set_target_source(TARGET_TERRAIN, func():
-		var world: Variant = world_source.call() if world_source.is_valid() else null
-		if world is Object and is_instance_valid(world) \
-				and (world as Object).has_method("get_terrain_node"):
-			return world.get_terrain_node()
-		return null,
+		var world := _resolve_world(world_source)
+		return world.get_terrain_node() if world != null else null,
 		"The current world has no terrain.")
 	session.set_target_source(TARGET_PLAYER, player_source,
 			"No local player presenter is active.")
@@ -103,18 +98,14 @@ static func bind_runtime_targets(
 			"No render viewport is available.")
 	session.set_target_source(TARGET_SCENE_TREE, scene_tree_source,
 			"No scene tree is available.")
+	# The world owns the mission-clock knobs, so the environment target IS the
+	# resolved GameWorld.
 	session.set_target_source(TARGET_ENVIRONMENT, func():
-		var world: Variant = world_source.call() if world_source.is_valid() else null
-		if world is Object and is_instance_valid(world) \
-				and (world as Object).has_method(
-						"get_debug_mission_minute_of_day") \
-				and (world as Object).has_method(
-						"debug_set_mission_minute_of_day"):
-			return world
-		return null,
+		return _resolve_world(world_source),
 		"The current world has no environment.")
 	session.set_target_source(TARGET_WEATHER, func():
-		return _world_child(world_source, &"get_weather_node"),
+		var world := _resolve_world(world_source)
+		return world.get_weather_node() if world != null else null,
 		"The current world has no weather controller.")
 	# The overlay rebinds its live world targets when it is constructed. Do
 	# not erase MainGame's process-level target when that adapter has no backing
@@ -324,15 +315,24 @@ static func _authoritative(definition: DebugControlDef) -> void:
 	definition.authority = DebugControlDef.Authority.HOST_ONLY
 
 
-static func _world_child(source: Callable, getter: StringName) -> Object:
+## Convert a target-source result once at this boundary (ADR 0034): the
+## Callable seam is untyped, everything downstream is the concrete class.
+static func _resolve_world(source: Callable) -> GameWorld:
 	if not source.is_valid():
 		return null
 	var world: Variant = source.call()
-	if not (world is Object) or not is_instance_valid(world) \
-			or not (world as Object).has_method(getter):
+	if world is GameWorld and is_instance_valid(world):
+		return world
+	return null
+
+
+static func _resolve_runtime(source: Callable) -> MissionRuntime:
+	if not source.is_valid():
 		return null
-	var child: Variant = (world as Object).call(getter)
-	return child if child is Object and is_instance_valid(child) else null
+	var runtime: Variant = source.call()
+	if runtime is MissionRuntime and is_instance_valid(runtime):
+		return runtime
+	return null
 
 
 static func _valid_transport_args(args: Array) -> bool:

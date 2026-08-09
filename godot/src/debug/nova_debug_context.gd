@@ -1,13 +1,17 @@
 class_name DebugContext
 extends RefCounted
 ## Shared data access for the F3 overlay's pages: the host-supplied source
-## Callables plus validated resolver helpers. One instance is created by the
+## Callables plus typed resolver helpers. One instance is created by the
 ## overlay and handed to every page at setup().
 ##
 ## Every source is re-resolved on EVERY call — mission reloads free and
 ## recreate the runtime/effect world, so a held reference would go stale.
-## All helpers return null when the source is unset, invalid, or resolves to
-## a freed instance; pages render their own empty states off that.
+## The source Callables are the untyped host seam; each helper converts the
+## resolved value ONCE to its concrete class (ADR 0034) and returns null when
+## the source is unset, invalid, freed, or the wrong type; pages render their
+## own empty states off that.
+
+const MissionRuntime := preload("res://src/world/mission_runtime.gd")
 
 var runtime_source := Callable()
 var view_context_source := Callable()
@@ -39,45 +43,45 @@ var pick_list: DebugPickList = null
 var dump_snapshot := Callable()
 
 
-## The current MissionRuntime, or null. Duck-typed: anything with get_sim().
-func runtime() -> Object:
+## The current MissionRuntime, or null.
+func runtime() -> MissionRuntime:
 	if not runtime_source.is_valid():
 		return null
 	var value: Variant = runtime_source.call()
-	if not (value is Object) or not is_instance_valid(value):
-		return null
-	var live_runtime := value as Object
-	if not live_runtime.has_method("get_sim"):
-		return null
-	return live_runtime
+	if value is MissionRuntime and is_instance_valid(value):
+		return value
+	return null
 
 
 ## The runtime's live Simulation, or null.
-func sim() -> Object:
+func sim() -> Simulation:
 	var live_runtime := runtime()
 	if live_runtime == null:
 		return null
-	var value: Variant = live_runtime.get_sim()
+	var value := live_runtime.get_sim()
 	if value == null or not is_instance_valid(value):
 		return null
 	return value
 
 
-## The concrete engine simulation, for pages that consume its mandatory
-## public API rather than the generic harness seam exposed by sim().
-func nova_simulation() -> Simulation:
-	var value := sim()
-	return value as Simulation if value is Simulation else null
-
-
-## The world host (GameWorld or a duck-typed stand-in), or null.
-func world() -> Object:
-	return _resolve_object(world_source)
+## The world host (GameWorld), or null.
+func world() -> GameWorld:
+	if not world_source.is_valid():
+		return null
+	var value: Variant = world_source.call()
+	if value is GameWorld and is_instance_valid(value):
+		return value
+	return null
 
 
 ## The live EffectWorld, or null.
-func effect_world() -> Object:
-	return _resolve_object(effect_world_source)
+func effect_world() -> EffectWorld:
+	if not effect_world_source.is_valid():
+		return null
+	var value: Variant = effect_world_source.call()
+	if value is EffectWorld and is_instance_valid(value):
+		return value
+	return null
 
 
 ## The host's typed camera record, or null when the source is unset or
@@ -87,14 +91,5 @@ func view_context() -> DebugViewContext:
 		return null
 	var value: Variant = view_context_source.call()
 	if value is DebugViewContext:
-		return value
-	return null
-
-
-func _resolve_object(source: Callable) -> Object:
-	if not source.is_valid():
-		return null
-	var value: Variant = source.call()
-	if value is Object and is_instance_valid(value):
 		return value
 	return null

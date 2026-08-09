@@ -37,6 +37,7 @@ add_library(opennova_runtime STATIC
     # renderer — fixed-function material/light/order math
     # hud — the retail game-font text engine + element frame math
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/src/game_font.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/src/hud_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/src/hud_math.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/src/light_runtime.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/src/material_eval.cpp

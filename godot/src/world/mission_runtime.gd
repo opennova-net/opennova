@@ -46,13 +46,13 @@ const ThrowablePresentPass := preload("res://src/world/throwable_present_pass.gd
 const TICK_DT := 1.0 / 62.5
 
 var _sim: Simulation
-var _present                          # MissionPresentPass: placed nodes on every role or tooling/test preview
-var _wire_present                     # WirePresentPass: un-placed network entities or SP attachment children
-var _fire_present                     # FirePresentPass: non-local fire sound + muzzle + tracers; else null
+var _present: MissionPresentPass      # placed nodes on every role or tooling/test preview
+var _wire_present: WirePresentPass    # un-placed network entities or SP attachment children
+var _fire_present: FirePresentPass    # non-local fire sound + muzzle + tracers; else null
 var _fire_listener := Callable()      # -> Vector3 camera listener, stamped into the sim per frame (world/fire_sound.h)
-var _destruction_present              # DestructionPresentPass: husk swap + debris + wreck effects (every viewing peer); null without fire_audio
-var _throwable_present                # ThrowablePresentPass: flying/placed throwable models
-var _index
+var _destruction_present: DestructionPresentPass  # husk swap + debris + wreck effects (every viewing peer); null without fire_audio
+var _throwable_present: ThrowablePresentPass      # flying/placed throwable models
+var _index: EntityIndex
 var _playing := false
 var _orig_transforms: Dictionary = {} # node -> Transform3D captured at setup, for restore-on-stop
 var _perf_tick_us: int = 0
@@ -85,7 +85,7 @@ var _effect_pose_snapshot_tick := -1
 ## (JoinTarget) }. Returns the AI entity count, or 0 on load failure (the orphan sim is
 ## freed). Inspect get_setup_error() to distinguish a valid empty mission from a setup
 ## failure. The sim is held off-tree by this driver.
-func setup(mission, container: Node, options: Dictionary = {}) -> int:
+func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> int:
 	_clear_present_effect_poses()
 	_setup_error = OK
 	# A remote join may already own the live socket + NP session while it waits
@@ -102,8 +102,7 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	_mission_file = mission_path.replace("\\", "/").get_file()
 	_mission_name = String(options.get(
 			"debug_mission_name", options.get("mission_name", "")))
-	if _mission_name.is_empty() and mission != null \
-			and mission.has_method("get_mission_name"):
+	if _mission_name.is_empty() and mission != null:
 		_mission_name = String(mission.get_mission_name()).strip_edges()
 	if _mission_name.is_empty() and not _mission_file.is_empty():
 		_mission_name = _mission_file.get_file().get_basename()
@@ -153,12 +152,11 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 		var session_options := host_session.to_session_options()
 		if host_session.game_type_auto:
 			var mission_mode := 0
-			var mission_data := mission as MissionData
-			if mission_data != null:
-				mission_mode = int(mission_data.get_game_mode())
+			if mission != null:
+				mission_mode = int(mission.get_game_mode())
 			session_options["gametype"] = HostSessionConfig.game_type_for_mission_mode(mission_mode)
 		var mission_name := String(options.get("mission_name", "")).strip_edges()
-		if mission_name.is_empty() and mission != null and mission.has_method("get_mission_name"):
+		if mission_name.is_empty() and mission != null:
 			mission_name = String(mission.get_mission_name()).strip_edges()
 		var mission_file := String(options.get("mission_file", ""))
 		if mission_name.is_empty() and not mission_file.is_empty():
@@ -250,9 +248,8 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 		# but presentation remains wire-direct because there are no authored nodes to
 		# drive. Passing the empty index here would incorrectly hide valid decoded
 		# buildings/items. Complete/debug missions retain placed-node defer.
-		var wire_defer_index = _index
-		var mission_data := mission as MissionData
-		if mission_data != null and mission_data.is_wire_header_only():
+		var wire_defer_index: EntityIndex = _index
+		if mission != null and mission.is_wire_header_only():
 			wire_defer_index = null
 		_wire_present.setup(_sim, options.get("placer"), container,
 			wire_defer_index, {
@@ -502,7 +499,7 @@ func join_wire_present_pending() -> int:
 ## Load-time warm hook: compile the fire-presentation pipelines (the tracer
 ## ribbon materials) behind the loading screen; see GameWorld's effect warm.
 func warm_present_pipelines(at_position: Vector3) -> void:
-	if _fire_present != null and _fire_present.has_method("warm_pipelines"):
+	if _fire_present != null:
 		_fire_present.warm_pipelines(at_position)
 
 
@@ -529,7 +526,7 @@ func set_presentation_time_ms(value_ms: int) -> void:
 
 ## The placed-node registry (bms_id/kind/group -> live node). The render-occlusion
 ## frame resolves building masks and entity render gates through it.
-func get_registry():
+func get_registry() -> EntityIndex:
 	return _index
 
 
@@ -542,7 +539,7 @@ func set_wire_node_spawned_callback(callback: Callable) -> void:
 
 ## The active wire-direct presenter, exposed for lifecycle integrations and
 ## diagnostics. Null when this mission has no replicated/synthetic rows.
-func get_wire_presenter() -> RefCounted:
+func get_wire_presenter() -> WirePresentPass:
 	return _wire_present
 
 

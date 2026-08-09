@@ -12,7 +12,7 @@ const EDITOR_MIN_WINDOW_SIZE := Vector2i(1366, 768)
 const EnvironmentEditorScript = preload("res://modtools/environment/environment_editor.gd")
 
 @onready var terrain_editor: TerrainEditor = $TerrainEditor
-@onready var workstation: Control = $CanvasLayer/EditorWorkstation
+@onready var workstation: EditorWorkstation = $CanvasLayer/EditorWorkstation
 
 var environment_editor
 var mcp_service: Node = null
@@ -32,8 +32,7 @@ func _ready() -> void:
 	add_child(environment_editor)
 	terrain_editor.set_environment_editor(environment_editor)
 	terrain_editor.set_workstation(workstation)
-	if workstation.has_method("set_editor"):
-		workstation.set_editor(self)
+	workstation.set_editor(self)
 	_init_mcp_service()
 	terrain_editor.new_terrain()
 

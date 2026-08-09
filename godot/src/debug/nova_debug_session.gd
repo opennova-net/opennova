@@ -206,7 +206,7 @@ func invoke_control(
 	var target := _resolve_target(control.target_id)
 	if target == null:
 		return _invoke_result(ERR_UNAVAILABLE, null, id, allow_authority)
-	if control.action == &"" or not target.has_method(control.action):
+	if control.action == &"":
 		return _invoke_result(ERR_UNAVAILABLE, null, id, allow_authority)
 	var call_args: Array = []
 	if args is Array:
@@ -425,12 +425,16 @@ func _target_reason(id: StringName) -> String:
 	return "The %s target is not available." % String(id).replace("_", " ")
 
 
+## A registered definition IS the contract (ADR 0034): the operation exists
+## when the definition declares one. A definition naming a method its target
+## does not expose is a construction-time bug and fails loudly at the call,
+## never a soft "unavailable" state.
 func _operation_exists(control: DebugControlDef, target: Object) -> bool:
 	if control.kind == DebugControlDef.Kind.ACTION:
-		return control.action != &"" and target.has_method(control.action)
+		return control.action != &""
 	if control.property_name != &"":
 		return _has_property(target, control.property_name)
-	return control.setter != &"" and target.has_method(control.setter)
+	return control.setter != &""
 
 
 func _missing_operation_reason(
@@ -444,7 +448,7 @@ func _missing_operation_reason(
 func _read_value(control: DebugControlDef, target: Object) -> Dictionary:
 	if control.property_name != &"" and _has_property(target, control.property_name):
 		return {"ok": true, "value": target.get(control.property_name), "reason": ""}
-	if control.getter != &"" and target.has_method(control.getter):
+	if control.getter != &"":
 		return {"ok": true, "value": target.call(control.getter), "reason": ""}
 	return {
 		"ok": false,
@@ -462,7 +466,7 @@ func _apply(control: DebugControlDef, value: Variant) -> Error:
 			return ERR_UNAVAILABLE
 		target.set(control.property_name, value)
 		return OK
-	if control.setter == &"" or not target.has_method(control.setter):
+	if control.setter == &"":
 		return OK if control.allow_unresolved_intent else ERR_UNAVAILABLE
 	var result: Variant = target.call(control.setter, value)
 	if control.setter_returns_error and typeof(result) == TYPE_INT \

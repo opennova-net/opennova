@@ -16,6 +16,7 @@ const SNAPSHOT_DIR := "user://debug/snapshots"
 const DEFAULT_PLAYER_FOV_H_DEG := 80.0
 const MICROSECONDS_PER_SECOND := 1_000_000.0
 const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
+const MissionRuntime := preload("res://src/world/mission_runtime.gd")
 
 ## The no-overwrite sequence for default paths (rapid consecutive snapshots
 ## never collide even within one microsecond stamp).
@@ -88,22 +89,16 @@ static func default_path(snapshot: Dictionary) -> String:
 
 # --- Pose capture (the opennova.player_pose.v1 shape, kept verbatim) ---------
 
-static func _capture_local_player_pose(runtime: Object, sim: Object,
+static func _capture_local_player_pose(runtime: MissionRuntime, sim: Simulation,
 		ctx: DebugContext) -> Dictionary:
-	if runtime == null or sim == null or not sim.has_method("has_local_player") \
-			or not bool(sim.has_local_player()):
-		return {}
-	if not sim.has_method("get_local_player_position") \
-			or not sim.has_method("get_local_player_yaw_deg") \
-			or not sim.has_method("get_local_player_pitch_deg"):
+	if runtime == null or sim == null or not bool(sim.has_local_player()):
 		return {}
 
 	var position_godot: Vector3 = sim.get_local_player_position()
 	var position_bms: Vector3 = MissionObjectPlacer.godot_to_bms_position(position_godot)
 	var yaw_deg := float(sim.get_local_player_yaw_deg())
 	var pitch_deg := float(sim.get_local_player_pitch_deg())
-	var view: Dictionary = sim.get_local_player_view() \
-			if sim.has_method("get_local_player_view") else {}
+	var view: Dictionary = sim.get_local_player_view()
 	var view_roll_deg := float(view.get("fp_roll_deg", 0.0))
 	var yaw_rad := deg_to_rad(yaw_deg)
 	var pitch_rad := deg_to_rad(pitch_deg)
@@ -111,15 +106,13 @@ static func _capture_local_player_pose(runtime: Object, sim: Object,
 			sin(yaw_rad) * cos(pitch_rad),
 			sin(pitch_rad),
 			-cos(yaw_rad) * cos(pitch_rad))
-	var mission_file := String(runtime.get_mission_file()) \
-			if runtime.has_method("get_mission_file") else ""
-	var mission_name := String(runtime.get_mission_name()) \
-			if runtime.has_method("get_mission_name") else ""
+	var mission_file := String(runtime.get_mission_file())
+	var mission_name := String(runtime.get_mission_name())
 
 	return {
 		"schema": SCHEMA,
 		"captured_at_utc": Time.get_datetime_string_from_system(true, false) + "Z",
-		"logic_tick": int(sim.get_logic_tick()) if sim.has_method("get_logic_tick") else -1,
+		"logic_tick": int(sim.get_logic_tick()),
 		"mission": {
 			"file": mission_file,
 			"name": mission_name,
@@ -250,13 +243,11 @@ static func _enrich_pick(pick: Dictionary, ctx: DebugContext) -> Dictionary:
 	}
 
 	var world := ctx.world()
-	if world != null and world.has_method("get_item_db"):
-		var db: Variant = world.get_item_db()
-		if db != null and is_instance_valid(db) and item_id > 0:
-			if (db as Object).has_method("get_display_name"):
-				entry["identity"]["display_name"] = String(db.get_display_name(item_id))
-			if (db as Object).has_method("get_graphic"):
-				entry["identity"]["graphic"] = String(db.get_graphic(item_id))
+	if world != null and item_id > 0:
+		var db := world.get_item_db()
+		if db != null and is_instance_valid(db):
+			entry["identity"]["display_name"] = String(db.get_display_name(item_id))
+			entry["identity"]["graphic"] = String(db.get_graphic(item_id))
 
 	var sim := ctx.sim()
 	if sim == null:
@@ -265,18 +256,17 @@ static func _enrich_pick(pick: Dictionary, ctx: DebugContext) -> Dictionary:
 	# The AI card is keyed by pool index, not identity: scan and match on
 	# kind/index (+ bms_id when the pick carries one) — the MCP live-card
 	# pattern.
-	if sim.has_method("get_entity_count") and sim.has_method("get_entity_debug"):
-		for i in range(int(sim.get_entity_count())):
-			var card: Dictionary = sim.get_entity_debug(i)
-			if card.is_empty():
-				continue
-			if int(card.get("kind", -2)) != kind or int(card.get("index", -2)) != index:
-				continue
-			if bms_id != 0 and int(card.get("bms_id", 0)) != bms_id:
-				continue
-			entry["entity_debug"] = _jsonable(card)
-			break
-	if net_id > 0 and sim.has_method("get_world_entity_debug"):
+	for i in range(int(sim.get_entity_count())):
+		var card: Dictionary = sim.get_entity_debug(i)
+		if card.is_empty():
+			continue
+		if int(card.get("kind", -2)) != kind or int(card.get("index", -2)) != index:
+			continue
+		if bms_id != 0 and int(card.get("bms_id", 0)) != bms_id:
+			continue
+		entry["entity_debug"] = _jsonable(card)
+		break
+	if net_id > 0:
 		_store_card(entry, "world_entity_debug", sim.get_world_entity_debug(net_id))
 	# The joiner-side decoded wire row (carrier/bone/heading/compact_revision):
 	# what the wire actually carried for this entity, before presentation. Keyed
@@ -285,9 +275,8 @@ static func _enrich_pick(pick: Dictionary, ctx: DebugContext) -> Dictionary:
 	if wire_handle >= 0:
 		_store_card(entry, "client_entity_debug",
 				sim.get_client_entity_debug(wire_handle))
-	if bms_id != 0 and sim.has_method("get_destruction_debug"):
+	if bms_id != 0:
 		_store_card(entry, "destruction", sim.get_destruction_debug(bms_id))
-	if bms_id != 0 and sim.has_method("get_present_effect_state_for_bms_id"):
 		# NOT a Dictionary: this accessor returns the present-pass effect
 		# transform vectors as a PackedVector3Array (empty when the entity
 		# drives no effect). _store_card takes any shape.
@@ -305,8 +294,8 @@ static func _enrich_pick(pick: Dictionary, ctx: DebugContext) -> Dictionary:
 
 ## Store one live debug card, whatever container the accessor returns
 ## (Dictionary cards, PackedVector3Array effect state, ...): empties keep the
-## entry's typed default, everything else lands JSON-converted. Duck-typed on
-## purpose — a mistyped assumption here must degrade, never abort the dump.
+## entry's typed default, everything else lands JSON-converted. Variant-shaped
+## on purpose — a mistyped card container must degrade, never abort the dump.
 static func _store_card(entry: Dictionary, key: String, card: Variant) -> void:
 	if _card_is_empty(card):
 		return

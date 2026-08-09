@@ -65,12 +65,13 @@ func get_static_overlay_count() -> int:
 
 
 ## Number of named user-point markers currently contributed by live and static
-## model overlays.
+## model overlays. Every child of this view is an overlay it spawned.
 func get_debug_drawable_count() -> int:
 	var count := 0
 	for child in get_children():
-		if child.has_method("get_user_point_count"):
-			count += int(child.call("get_user_point_count"))
+		var overlay := child as ObjectUserPointOverlay
+		if overlay != null:
+			count += overlay.get_user_point_count()
 	return count
 
 
@@ -101,9 +102,11 @@ func _collect_live_sources(node: Node, out: Array) -> void:
 	for child in node.get_children():
 		if child == self:
 			continue
-		var source := child as Node3D
-		if source != null and source.has_method("get_object_data"):
-			var data := source.call("get_object_data") as ObjectData
+		# Scene-tree discovery over a heterogeneous world subtree: the one
+		# source type is ObjectModel, converted once here.
+		var source := child as ObjectModel
+		if source != null:
+			var data := source.get_object_data()
 			if data != null and data.get_user_point_count() > 0:
 				out.append({ "node": source, "object_data": data })
 		if child.get_child_count() > 0:

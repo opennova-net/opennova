@@ -67,10 +67,6 @@ var _has_surface := false
 var _drawable_count := 0        # portal/occluder records with outline segments
 
 
-func _sim_debug_method() -> String:
-	return "get_occlusion_portal_debug"
-
-
 func _build_view() -> void:
 	_mesh = ImmediateMesh.new()
 	add_child(_make_lines_node("OcclusionPortalLines", _mesh))
@@ -79,7 +75,7 @@ func _build_view() -> void:
 	add_child(_labels)
 
 
-func _refresh_from_sim(sim: Object) -> void:
+func _refresh_from_sim(sim: Simulation) -> void:
 	var anchor := Vector3.ZERO
 	if is_inside_tree():
 		var camera := get_viewport().get_camera_3d()

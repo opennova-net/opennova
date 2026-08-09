@@ -29,12 +29,13 @@ extends Node
 # step is available before load_as_joiner runs.
 
 const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
+const MissionRuntime := preload("res://src/world/mission_runtime.gd")
 
 # The GameWorld this drive loads through — its PUBLIC surface only
 # (load_mission / mission_file / get_runtime) plus the session signals emitted
 # through it; the world's private internals arrive as the setup() Callables
-# below. Untyped: the world script owns (preloads) this one.
-var _world
+# below.
+var _world: GameWorld
 var _load_mission_internal_cb := Callable()  # (mission, bms_name, resource_root) -> int
 var _resolve_root_cb := Callable()  # (dir) -> ResourceRoot (or null after load_failed)
 var _spawn_loadout_cb := Callable()  # () -> Dictionary (the staged PLAYER_INFO snapshot)
@@ -46,7 +47,7 @@ var _policy := NetSessionPolicy.new()
 # retail client can browse + join it (F1). Only created when a gate was supplied
 # (via _host_config["nw_gate_host"]); absent for pure-LAN play. Fed the live
 # player count from observe_tick(), torn down in reset().
-var _nw_host
+var _nw_host: NovaWorldHost = null
 var _host_config: Dictionary = {}  # internal staging derived from the typed request; consumed once by stage_runtime_options
 # The typed session request at the shell seam (ADR 0017): exactly one is non-null
 # during a net load — the host screen's HostSessionConfig or the joiner's dial
@@ -64,7 +65,7 @@ var _join_preload_root: ResourceRoot
 ## calls + signal emissions go through, and the three private internals it
 ## lends as Callables (its _load_mission_internal, its _resolve_root, and a
 ## reader for its staged _local_player_spawn_loadout).
-func setup(world, internal_load: Callable, resolve_root: Callable,
+func setup(world: GameWorld, internal_load: Callable, resolve_root: Callable,
 		spawn_loadout: Callable) -> void:
 	_world = world
 	_load_mission_internal_cb = internal_load
@@ -448,32 +449,23 @@ func _reconcile_join_expansion() -> bool:
 # clears; admission-ready is once per join and holds for the cold wire drain
 # behind the loading hold [orig: the reap @ 0x4ca4a0 -> @ 0x4c63d0]).
 func _update_joiner_admission_signals() -> void:
-	# Render/occlusion tests install deliberately narrow runtime doubles. This
-	# observer is optional outside a real MissionRuntime, so keep the seam
-	# duck-typed instead of forcing every render-only double to model networking.
-	var runtime: Variant = _world.get_runtime()
-	if runtime == null or not runtime.has_method("get_sim"):
+	var runtime: MissionRuntime = _world.get_runtime()
+	if runtime == null:
 		_policy.disarm_admission_watch()
 		return
-	var sim: Variant = runtime.get_sim()
-	if sim == null or not sim.has_method("is_joiner") or not bool(sim.is_joiner()):
+	var sim: Simulation = runtime.get_sim()
+	if sim == null or not bool(sim.is_joiner()):
 		_policy.disarm_admission_watch()
 		return
-	var loss_reason := ""
-	if sim.has_method("get_session_loss_reason"):
-		loss_reason = String(sim.get_session_loss_reason())
-	var deploy_pending: bool = sim.has_method("is_join_deploy_pick_pending") \
-			and bool(sim.is_join_deploy_pick_pending())
+	var loss_reason := String(sim.get_session_loss_reason())
+	var deploy_pending := bool(sim.is_join_deploy_pick_pending())
 	# The first valid S2C 0x5A opens retail's independent gameplay gate and can
 	# make is_joined_in_match true BEFORE 0x0F supplies the deployment policy or
 	# the second initial grant makes a required DEATH pick ready. Only the native
 	# initial-admission boundary distinguishes that split ordering from a complete
 	# no-pick join; later redeploys leave the predicate monotonically true.
-	var initial_admission_complete: bool = \
-			sim.has_method("is_join_initial_admission_complete") \
-			and bool(sim.is_join_initial_admission_complete())
-	# The join error + admission stage only matter to the armed watchdog, and
-	# the observer runs against narrow doubles that do not model them — read
+	var initial_admission_complete := bool(sim.is_join_initial_admission_complete())
+	# The join error + admission stage only matter to the armed watchdog — read
 	# them exactly when the old inline machine did.
 	var join_error := ""
 	var admission_stage := ""
@@ -611,13 +603,13 @@ func on_runtime_started(opts: Dictionary, bms_name: String) -> void:
 
 ## Per-frame observer, called from the world's tick after the runtime ticked:
 ## the admission/deploy/session-loss edges plus the gate's advertised occupancy.
-func observe_tick(runtime) -> void:
+func observe_tick(runtime: MissionRuntime) -> void:
 	_update_joiner_admission_signals()
 	# Keep the gate's advertised occupancy current (host + admitted joiners).
 	# set_player_count self-dedupes, so this is a no-op until the count changes.
-	if _nw_host != null and runtime.has_method("get_sim"):
-		var sim = runtime.get_sim()
-		if sim != null and sim.has_method("get_host_peer_count"):
+	if _nw_host != null and runtime != null:
+		var sim: Simulation = runtime.get_sim()
+		if sim != null:
 			_nw_host.set_player_count(1 + sim.get_host_peer_count())
 
 
@@ -653,14 +645,11 @@ func _maybe_start_nw_host(opts: Dictionary, bms_name: String) -> void:
 		if channel == "NovaWorld":
 			push_warning("NetSessionDrive: NovaWorld host requested but no gate address (nw_gate_host) — gate registration skipped; host is LAN-reachable only")
 		return  # no gate configured -> pure LAN, nothing to register with
-	if not ClassDB.class_exists("NovaWorldHost"):
-		push_warning("NetSessionDrive: NovaWorldHost unavailable; host is LAN-only (not browsable)")
-		return
-	var runtime: Variant = _world.get_runtime()
-	var sim = runtime.get_sim() if runtime != null and runtime.has_method("get_sim") else null
-	if sim == null or not sim.has_method("is_host_listening") or not sim.is_host_listening():
+	var runtime: MissionRuntime = _world.get_runtime()
+	var sim: Simulation = runtime.get_sim() if runtime != null else null
+	if sim == null or not sim.is_host_listening():
 		return  # the listen socket never came up; nothing reachable to advertise
-	_nw_host = ClassDB.instantiate("NovaWorldHost")
+	_nw_host = NovaWorldHost.new()
 	add_child(_nw_host)
 	_nw_host.host = gate_host
 	_nw_host.gate_port = int(opts.get("nw_gate_port", HostSessionConfig.DEFAULT_GATE_PORT))
@@ -668,16 +657,14 @@ func _maybe_start_nw_host(opts: Dictionary, bms_name: String) -> void:
 	_nw_host.mission_name = bms_name.get_basename()
 	_nw_host.max_players = int(opts.get("max_players", 32))
 	# The actually-bound game port the joiner will dial (not the requested bind_port).
-	_nw_host.game_port = sim.get_host_listen_port() if sim.has_method("get_host_listen_port") else int(opts.get("bind_port", HostSessionConfig.DEFAULT_LAN_PORT))
+	_nw_host.game_port = sim.get_host_listen_port()
 	_nw_host.region = String(opts.get("region", "us"))
 	_nw_host.player_name = String(opts.get("player_name", "Host"))
 	var adv := String(opts.get("advertise", ""))
 	if not adv.is_empty():
 		_nw_host.advertise_ip = adv
-	if _nw_host.has_signal("registered"):
-		_nw_host.registered.connect(_on_nw_host_registered)
-	if _nw_host.has_signal("error_occurred"):
-		_nw_host.error_occurred.connect(_on_nw_host_error)
+	_nw_host.registered.connect(_on_nw_host_registered)
+	_nw_host.error_occurred.connect(_on_nw_host_error)
 	_nw_host.start()
 
 
