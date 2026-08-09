@@ -12,12 +12,12 @@
     "vfs"
   ],
   "counters": {
-    "adapter_cpp_orig_cites": 580,
+    "adapter_cpp_orig_cites": 578,
     "cpp_binding_console_writes": 0,
     "engine_stdout_prints": 0,
     "engine_uncited_src_files": 50,
     "gd_prints_outside_debug": 0,
-    "has_method_guards": 556,
+    "has_method_guards": 552,
     "oversize_cpp_files": 1,
     "oversize_gd_files": 7,
     "test_private_pokes": 1284
