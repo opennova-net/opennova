@@ -1,0 +1,209 @@
+#pragma once
+
+#include <godot_cpp/classes/node.hpp>
+#include <godot_cpp/classes/shader_material.hpp>
+#include <godot_cpp/classes/texture2d.hpp>
+#include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/vector3.hpp>
+
+#include <environment/environment_state.h>
+
+#include "env/env_file.h"
+#include "object/nova_object_model.h"
+
+namespace godot {
+
+// The runtime/editor TOD environment owner — the ADR 0033 device leg over the
+// engine's env::EnvironmentState (engine/runtime/environment), which owns the
+// witnessed state: the mission TOD clock, the keyframe-TARGET vs smoothed-
+// CURRENT split, network phase-2 overrides, the NVG rewrite, and the
+// change-gated env generation. This node keeps only device work: the .env
+// document property + reload signal, the ten opennova_* global shader
+// parameter pushes, the terrain ShaderMaterial uniform pushes, the sky-map
+// texture handles, the EnvLightState publication + env_generation_changed
+// signal, and the day_speed authoring scrub knob (OpenNova preview plumbing,
+// not the witnessed day advance). Ported from nova_environment.gd (2026-08-09
+// de-scripting); RE record: docs/env/env-tod-re.md.
+class MissionEnvironment : public Node {
+	GDCLASS(MissionEnvironment, Node)
+
+public:
+	MissionEnvironment();
+
+	void set_environment_data(const Ref<EnvFile> &p_value);
+	Ref<EnvFile> get_environment_data() const { return environment_data_; }
+
+	void set_time_of_day(double p_value);
+	double get_time_of_day() const { return state_.time_of_day(); }
+	void set_day_speed(float p_value) { day_speed_ = p_value; }
+	float get_day_speed() const { return day_speed_; }
+
+	bool is_loaded() const;
+
+	// The typed light channel every lit consumer holds (models, the placer's
+	// static batches, the ONED world previews): every generation bump
+	// publishes the current world values into it. Consumers hold THIS record
+	// — never this node — and its `changed` signal is what wakes a parked
+	// model for exactly one restamp frame.
+	Ref<EnvLightState> get_light_state() const { return light_state_; }
+
+	// --- mission clock -----------------------------------------------------
+	void configure_mission_clock(int p_start_time_q8_8, int p_minutes_per_day);
+	int get_mission_advance_per_tick() const;
+	static double mission_start_time_hhmm(int p_start_time_q8_8);
+	void advance_mission_clock(int p_ticks);
+	Error debug_set_mission_minute_of_day(double p_minute_of_day);
+	double get_mission_minute_of_day() const;
+	int get_mission_time_fixed24() const;
+
+	static double minute_of_day_to_hhmm(double p_minute_of_day);
+	static double hhmm_to_minute_of_day(double p_hhmm);
+
+	// --- network phase-2 ---------------------------------------------------
+	// The dictionary is deliberately the wire view: reconstructing native
+	// units happens in the engine state exactly once, and a later replacement
+	// .env clears every remote override.
+	void apply_network_environment_sample(const Dictionary &p_sample);
+	int get_network_quake_ticks() const;
+	float get_network_rain_current() const;
+	float get_overcast_blend() const;
+	int get_network_precipitation_kind() const;
+
+	// --- the weather-driven split -------------------------------------------
+	void set_weather_driven(bool p_driven);
+	bool is_weather_driven() const;
+
+	// --- NVG ----------------------------------------------------------------
+	void set_nvg_view(bool p_active, int p_gain);
+
+	// --- current render colors ----------------------------------------------
+	Vector3 get_sun_light() const;
+	Vector3 get_fill_light() const;
+	Vector3 get_sky_ambient() const;
+	Vector3 get_fog_color() const;
+	Vector3 get_skyfog_color() const;
+	Vector3 get_frame_clear_color() const;
+	Vector3 get_ceiling_color() const;
+	Vector3 get_cloud_tint() const;
+	Vector3 get_floor_color() const;
+	Vector3 get_sky_base() const;
+	Vector3 get_sky_bright() const;
+	Vector3 get_sky_highlight() const;
+	Vector3 get_cloud_base() const;
+	Vector3 get_cloud_highlight() const;
+	Vector3 get_cloud_edge() const;
+	Vector3 get_color_src_gain() const;
+
+	// --- keyframe targets ---------------------------------------------------
+	Vector3 get_fill_light_target() const;
+	Vector3 get_sun_light_target() const;
+	Vector3 get_fog_color_target() const;
+	Vector3 get_fog_color_base_target() const;
+	Vector3 get_sky_ambient_target() const;
+	Vector3 get_skyfog_color_target() const;
+	Vector3 get_ceiling_color_target() const;
+	Vector3 get_cloud_tint_target() const;
+	Vector3 get_floor_color_target() const;
+	Vector3 get_lightning_color_target() const;
+	Vector3 get_sky_base_target() const;
+	Vector3 get_sky_bright_target() const;
+	Vector3 get_sky_highlight_target() const;
+	Vector3 get_cloud_base_target() const;
+	Vector3 get_cloud_highlight_target() const;
+	Vector3 get_cloud_edge_target() const;
+
+	// --- terrain / water / directions ---------------------------------------
+	Vector3 get_terrain_tint() const;
+	Vector3 get_terrain_lighting_attenuation() const;
+	Vector3 get_tile_overlay_tint() const;
+	// Push the env-derived terrain lighting + fog uniforms onto a terrain
+	// ShaderMaterial. terrain.gdshader (runtime) and terrain_editor.gdshader
+	// (editor preview) share these uniforms via terrain_lighting.gdshaderinc.
+	// Callers may override individual values afterwards (the runtime layers
+	// weather-smoothed colors + the tile-overlay tint on top).
+	void apply_terrain_uniforms(const Ref<ShaderMaterial> &p_material);
+	Vector3 get_water_color() const;
+	bool has_water_height() const;
+	float get_water_height() const;
+	Vector3 get_sun_direction() const;
+	Vector3 get_moon_direction() const;
+	Vector3 get_light_direction() const;
+	bool is_night_phase() const;
+	float get_day_phase_blend() const;
+	Vector3 get_sun_color() const;
+	Vector3 get_moon_color() const;
+
+	// --- the weather writeback seam ----------------------------------------
+	void set_fill_light(const Vector3 &p_value);
+	void set_sun_light(const Vector3 &p_value);
+	void set_fog_color_rt(const Vector3 &p_value);
+	void set_sky_ambient_rt(const Vector3 &p_value);
+	void set_static_colors_rt(const Vector3 &p_ceiling, const Vector3 &p_cloud,
+			const Vector3 &p_floor_color);
+	void set_sky_colors_rt(const Vector3 &p_skyfog, const Vector3 &p_sky_base,
+			const Vector3 &p_sky_bright, const Vector3 &p_sky_highlight,
+			const Vector3 &p_cloud_base, const Vector3 &p_cloud_highlight,
+			const Vector3 &p_cloud_edge);
+	void set_color_src_gain(const Vector3 &p_value);
+	int64_t get_env_generation() const;
+
+	// --- env #27 smoothed scalars -------------------------------------------
+	float get_fog_distance() const;
+	float get_fog_level() const;
+	float get_fog_level_target() const;
+	float get_fog_start() const;
+	float get_fog_end_distance() const;
+	int get_fog_type() const;
+	float get_sky_speed() const;
+	float get_sky_height() const;
+	float get_sky_height_target() const;
+	void set_smoothed_scalars(float p_fog_distance, float p_sky_height,
+			float p_sun_dim_pct = 0.0f, float p_rain_current = 0.0f,
+			float p_overcast_blend = 0.0f);
+	float get_sun_dim_pct() const;
+
+	Ref<Texture2D> get_sky_map1_tex() const;
+	Ref<Texture2D> get_sky_map2_tex() const;
+
+	// C++-only seams for the sibling native appliers (the weather node, the
+	// terrain uniform pusher): the engine state and the publish flush the
+	// engine-side writeback path cannot perform itself.
+	opennova::env::EnvironmentState &state() { return state_; }
+	const opennova::env::EnvironmentState &state() const { return state_; }
+	// Publish the typed light record + emit env_generation_changed when the
+	// engine generation moved since the last publish.
+	void flush_publication();
+	// The standalone-owner full global refresh (the weather node owns the
+	// per-frame write while present).
+	void write_shader_globals();
+
+	// One render-frame advance (the _process body: the day_speed preview
+	// scrub) — the externally-callable drive the test harness uses; the
+	// engine's virtual delegates here.
+	void advance_frame(double p_delta);
+
+	void _ready() override;
+	void _process(double p_delta) override;
+
+protected:
+	static void _bind_methods();
+
+private:
+	void _ensure_loaded();
+	void _attach_config();
+	void _on_environment_changed();
+	// The post-TOD device tail: publish if the generation moved, then the
+	// standalone-owner shader-global refresh (weather-driven frames leave the
+	// globals to the weather writeback).
+	void _after_tod_update();
+	Ref<EnvLightValues> _build_light_values() const;
+
+	Ref<EnvFile> environment_data_;
+	opennova::env::EnvironmentState state_;
+	Ref<EnvLightState> light_state_;
+	int64_t last_published_generation_ = 0;
+	float day_speed_ = 0.0f;
+};
+
+} // namespace godot

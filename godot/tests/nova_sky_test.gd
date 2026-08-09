@@ -102,7 +102,7 @@ func test_weather_writes_all_dome_colors_back_to_environment() -> void:
 	var weather := Weather.new()
 	weather.environment_path = ctx.env_node.get_path()
 	add_child_autofree(weather)
-	simulate(weather, 1, TICK)
+	weather.advance_frame(TICK)
 
 	assert_eq(ctx.env_node.get_skyfog_color(), weather.get_smooth_skyfog())
 	assert_eq(ctx.env_node.get_ceiling_color(), weather.get_smooth_ceiling())
@@ -247,7 +247,8 @@ func test_scroll_offsets_come_from_the_weather_core() -> void:
 	weather.environment_path = ctx.env_node.get_path()
 	add_child_autofree(weather)
 	ctx.sky.weather_path = weather.get_path()
-	simulate(weather, 8, 0.016)
+	for _i in 8:
+		weather.advance_frame(0.016)
 	simulate(ctx.sky, 1, 0.016)
 	var off1: Vector2 = ctx.sky.sky_material.get_shader_parameter("u_scroll_offset1")
 	var off2: Vector2 = ctx.sky.sky_material.get_shader_parameter("u_scroll_offset2")

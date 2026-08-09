@@ -17,7 +17,14 @@ func _loaded_env() -> EnvFile:
 
 
 func _advance_one_second(node: Node, hz: int) -> void:
-	simulate(node, hz, 1.0 / float(hz))
+	var delta := 1.0 / float(hz)
+	# Native weather nodes expose advance_frame (a GDExtension _process
+	# virtual is not externally callable); script nodes keep simulate().
+	if node is Weather:
+		for _i in hz:
+			(node as Weather).advance_frame(delta)
+	else:
+		simulate(node, hz, delta)
 
 
 func _weather_state_after_one_second(hz: int) -> Array:

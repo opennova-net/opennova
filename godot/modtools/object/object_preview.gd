@@ -2,7 +2,6 @@ class_name ObjectPreview
 extends Control
 
 const FlyCameraScript = preload("res://game/fly_camera.gd")
-const NovaEnvironmentScript = preload("res://game/environment/nova_environment.gd")
 const CollisionHull = preload("res://game/object/collision_hull.gd")
 const ObjectUserPointOverlayScript = preload("res://game/object/object_user_point_overlay.gd")
 
@@ -90,7 +89,7 @@ func _build_viewport() -> void:
 	_root = Node3D.new()
 	_viewport.add_child(_root)
 
-	_environment = NovaEnvironmentScript.new()
+	_environment = MissionEnvironment.new()
 	_environment.name = "ObjectPreviewEnvironment"
 	_root.add_child(_environment)
 
@@ -279,7 +278,7 @@ func load_arms(arms_name: String, resource_root) -> bool:
 		_arms_model.name = "NovaArmsModel"
 		_arms_model.set_model_light_preview_enabled(true)
 		_root.add_child(_arms_model)
-		_arms_model.set_environment_state(_environment.light_state)
+		_arms_model.set_environment_state(_environment.get_light_state())
 	_arms_model.set_object_data(data)
 	_arms_model.set_skeletal_anim(_skeletal)  # share the main model's .adm skeleton (may be null)
 	_arms_model.set_playing(_model.is_playing() if _model != null else true)
@@ -477,7 +476,7 @@ func _apply_environment_to_model() -> void:
 		_environment.environment_data = _environment_file
 		_environment.time_of_day = _environment_time
 	if _model != null:
-		_model.set_environment_state(_environment.light_state)
+		_model.set_environment_state(_environment.get_light_state())
 
 
 func _on_model_bounds_changed(bounds: AABB) -> void:

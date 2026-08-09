@@ -20,6 +20,12 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/src/sound_profile.cpp
     # controls — the JO input-binding catalog + CONTROL_MAPPING model
     ${CMAKE_CURRENT_SOURCE_DIR}/controls/src/controls.cpp
+    # environment — the TOD environment state owner + the weather runtime
+    # embedding (the 62 Hz tick credit, reset epoch, prewarm, per-tick
+    # target-feed/writeback order); the witnessed math cores stay in
+    # engine/formats/env
+    ${CMAKE_CURRENT_SOURCE_DIR}/environment/src/environment_state.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/environment/src/weather_runtime.cpp
     # frame — the game frame: the main-loop shape (bank/catch-up/present-once)
     # and the fixed per-frame leg order, over shell-supplied device hooks
     # (ADR 0033 R1)
@@ -138,6 +144,7 @@ target_include_directories(opennova_runtime
         ${CMAKE_CURRENT_SOURCE_DIR}/anim/include
         ${CMAKE_CURRENT_SOURCE_DIR}/audio/include
         ${CMAKE_CURRENT_SOURCE_DIR}/controls/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/environment/include
         ${CMAKE_CURRENT_SOURCE_DIR}/frame/include
         ${CMAKE_CURRENT_SOURCE_DIR}/hud/include
         ${CMAKE_CURRENT_SOURCE_DIR}/menu/include

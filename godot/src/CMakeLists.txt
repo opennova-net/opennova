@@ -40,6 +40,8 @@ add_library(${TARGET_NAME} SHARED
     env/nova_env_keyframe.cpp
     env/env_file.cpp
     env/nova_color_smoother.cpp
+    env/nova_mission_environment.cpp
+    env/nova_weather.cpp
     env/nova_weather_core.cpp
     env/nova_water_core.cpp
     env/nova_star_field.cpp

@@ -145,6 +145,11 @@ public:
 	void set_tod_keyframes(const TypedArray<EnvKeyframe> &p_keyframes);
 	TypedArray<EnvKeyframe> get_tod_keyframes() const;
 
+	// C++-only: the live (mission-override-layered) engine config this
+	// resource wraps — the environment state owner holds this pointer for the
+	// resource's lifetime (the member's identity is stable across reloads).
+	const opennova::env::Config &native_config() const { return env; }
+
 	Error load();
 	Error load_from_resource_root(const Ref<ResourceRoot> &p_resource_root, const String &p_name);
 	Error save_to_path(const String &p_path);

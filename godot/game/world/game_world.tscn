@@ -1,9 +1,7 @@
-[gd_scene load_steps=8 format=3]
+[gd_scene load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://game/world/game_world.gd" id="1_world"]
-[ext_resource type="Script" uid="uid://dnr7qwrpuk7j1" path="res://game/environment/nova_environment.gd" id="2_env"]
 [ext_resource type="Script" uid="uid://casqbhajylbpc" path="res://game/environment/nova_sky.gd" id="3_sky"]
-[ext_resource type="Script" uid="uid://ba4ar1y0eklyp" path="res://game/environment/nova_weather.gd" id="4_weather"]
 [ext_resource type="Script" uid="uid://dabwlp4s5mh65" path="res://game/environment/nova_water.gd" id="5_water"]
 [ext_resource type="Script" path="res://game/environment/nova_celestial.gd" id="6_celestial"]
 
@@ -25,18 +23,16 @@ weather_path = NodePath("../Weather")
 
 [node name="TileOverlay" type="TerrainTileOverlay" parent="Terrain"]
 
-[node name="MissionEnvironment" type="Node" parent="."]
+[node name="MissionEnvironment" type="MissionEnvironment" parent="."]
 process_priority = -20
-script = ExtResource("2_env")
 
 [node name="SkyDome" type="Node3D" parent="."]
 script = ExtResource("3_sky")
 environment_path = NodePath("../MissionEnvironment")
 weather_path = NodePath("../Weather")
 
-[node name="Weather" type="Node3D" parent="."]
+[node name="Weather" type="Weather" parent="."]
 process_priority = -10
-script = ExtResource("4_weather")
 environment_path = NodePath("../MissionEnvironment")
 
 [node name="Water" type="Node3D" parent="."]

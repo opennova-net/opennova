@@ -148,8 +148,6 @@ extends GutTest
 # loudly so a dump run is never mistaken for a green run.
 # =============================================================================
 
-const NovaEnvironmentScript = preload("res://game/environment/nova_environment.gd")
-const NovaWeatherScript = preload("res://game/environment/nova_weather.gd")
 const NovaSkyScript = preload("res://game/environment/nova_sky.gd")
 const NovaWaterScript = preload("res://game/environment/nova_water.gd")
 const NovaCelestialScript = preload("res://game/environment/nova_celestial.gd")
@@ -361,7 +359,7 @@ func _make_cfg(index: int) -> EnvFile:
 
 
 func _add_env_node(cfg: EnvFile, node_name: String) -> Node:
-	var env_node: Node = NovaEnvironmentScript.new()
+	var env_node := MissionEnvironment.new()
 	env_node.name = node_name
 	env_node.environment_data = cfg
 	add_child_autofree(env_node)
@@ -369,7 +367,7 @@ func _add_env_node(cfg: EnvFile, node_name: String) -> Node:
 
 
 func _add_weather_node(env_name: String, node_name: String) -> Node:
-	var weather: Node = NovaWeatherScript.new()
+	var weather := Weather.new()
 	weather.name = node_name
 	weather.environment_path = NodePath("../" + env_name)
 	add_child_autofree(weather)
@@ -551,7 +549,8 @@ func _collect_weather(bytes: Dictionary, floats: Dictionary) -> void:
 	var weather_a := _add_weather_node("EnvWA", "WeatherA")
 	var ticks_done := 0
 	for checkpoint in [1, 4, 16, 64, 256]:
-		simulate(weather_a, checkpoint - ticks_done, TICK)
+		for _s in checkpoint - ticks_done:
+			weather_a.advance_frame(TICK)
 		ticks_done = checkpoint
 		bytes["wa/k%03d" % checkpoint] = _weather_checkpoint(weather_a, env_a)
 
@@ -565,7 +564,8 @@ func _collect_weather(bytes: Dictionary, floats: Dictionary) -> void:
 	weather_b.set_wind_duration(10)
 	ticks_done = 0
 	for checkpoint in [1, 16, 64, 96]:
-		simulate(weather_b, checkpoint - ticks_done, TICK)
+		for _s in checkpoint - ticks_done:
+			weather_b.advance_frame(TICK)
 		ticks_done = checkpoint
 		bytes["wb/k%03d" % checkpoint] = _weather_checkpoint(weather_b, env_b)
 
@@ -574,22 +574,22 @@ func _collect_weather(bytes: Dictionary, floats: Dictionary) -> void:
 	var env_c := _add_env_node(_make_cfg(0), "EnvWC")
 	env_c.time_of_day = 2200.0
 	var weather_c := _add_weather_node("EnvWC", "WeatherC")
-	simulate(weather_c, 1, TICK) # snap tick before triggering
+	weather_c.advance_frame(TICK) # snap tick before triggering
 	weather_c.trigger_lightning_short()
 	var short_seq := PackedStringArray()
 	for _i in 16:
-		simulate(weather_c, 1, TICK)
+		weather_c.advance_frame(TICK)
 		short_seq.append(_hex_byte(_byte_of(weather_c.get_lightning_intensity())))
 	bytes["wc/short_seq"] = " ".join(short_seq)
 
 	var env_d := _add_env_node(_make_cfg(0), "EnvWD")
 	env_d.time_of_day = 2200.0
 	var weather_d := _add_weather_node("EnvWD", "WeatherD")
-	simulate(weather_d, 1, TICK)
+	weather_d.advance_frame(TICK)
 	weather_d.trigger_lightning_long()
 	var long_seq := PackedStringArray()
 	for i in 32:
-		simulate(weather_d, 1, TICK)
+		weather_d.advance_frame(TICK)
 		long_seq.append(_hex_byte(_byte_of(weather_d.get_lightning_intensity())))
 		var after := i + 1
 		if after == 1 or after == 9 or after == 12:
@@ -607,8 +607,8 @@ func _collect_weather(bytes: Dictionary, floats: Dictionary) -> void:
 	ticks_done = 0
 	for checkpoint in [8, 16, 32, 64]:
 		for _i in checkpoint - ticks_done:
-			simulate(env_e, 1, TICK)
-			simulate(weather_e, 1, TICK)
+			env_e.advance_frame(TICK)
+			weather_e.advance_frame(TICK)
 		ticks_done = checkpoint
 		bytes["we/k%03d" % checkpoint] = _weather_checkpoint(weather_e, env_e)
 		floats["we/k%03d" % checkpoint] = [env_e.time_of_day]
@@ -975,7 +975,8 @@ func test_sky_ambient_serves_smoothed_writeback() -> void:
 	assert_eq(env.get_sky_ambient(), env.get_sky_ambient_target(),
 		"pre-weather sky ambient should be the raw keyframe")
 	var weather := _add_weather_node("EnvSkyWB", "WeatherSkyWB")
-	simulate(weather, 64, TICK)
+	for _s in 64:
+		weather.advance_frame(TICK)
 	assert_eq(env.get_sky_ambient(), weather.get_smooth_sky(),
 		"driven sky ambient should be the weather writeback")
 	# The writer split [orig: Environment_ComputeTimeOfDayColors @ 0x57de40]:
@@ -989,7 +990,8 @@ func test_sky_ambient_serves_smoothed_writeback() -> void:
 	assert_true(env.get_sky_ambient_target() != env.get_sky_ambient(),
 		"the scrub moved the TARGET for the smoothers to chase")
 	weather.resync_colors()
-	simulate(weather, 4, TICK)
+	for _s in 4:
+		weather.advance_frame(TICK)
 	assert_eq(env.get_sky_ambient(), weather.get_smooth_sky(),
 		"post-resync ticks serve the writeback")
 	# The writeback is the smoothed block WITH the iris modulation applied, so
@@ -1000,7 +1002,7 @@ func test_sky_ambient_serves_smoothed_writeback() -> void:
 
 
 func test_nvg_view_applies_retail_hemisphere_gain() -> void:
-	var env := NovaEnvironmentScript.new()
+	var env := MissionEnvironment.new()
 	add_child_autofree(env)
 	var fill := Vector3(0.8, 0.4, 0.2)
 	var sky := Vector3(0.2, 0.6, 1.0)

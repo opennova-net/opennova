@@ -22,10 +22,8 @@ extends RefCounted
 # Reference via preload(), not class_name, so it resolves without an editor
 # re-import (same convention as mission_object_placer.gd).
 
-const NovaEnvironmentScript = preload("res://game/environment/nova_environment.gd")
 const NovaSkyScript = preload("res://game/environment/nova_sky.gd")
 const NovaWaterScript = preload("res://game/environment/nova_water.gd")
-const NovaWeatherScript = preload("res://game/environment/nova_weather.gd")
 const HHMM_DAY := MissionEnvironment.HHMM_DAY
 
 # The bound app-owned environment DOCUMENT; null until
@@ -70,7 +68,7 @@ func _init(world_root: Node3D, get_material: Callable, get_water_height: Callabl
 func init_environment_preview() -> void:
 	if _environment_node != null:
 		return
-	_environment_node = NovaEnvironmentScript.new()
+	_environment_node = MissionEnvironment.new()
 	_environment_node.name = "EditorEnvironment"
 	_world_root.add_child(_environment_node)
 	_clear_color_node = WorldEnvironment.new()
@@ -94,7 +92,7 @@ func init_environment_preview() -> void:
 	# Runtime parity: the same weather smoothing that runs in-game also runs in
 	# the preview, so scrubbing/playing TOD matches play. The tick is O(1) so it
 	# does not affect brush perf; discrete scrubs call resync_colors() to snap.
-	_weather_node = NovaWeatherScript.new()
+	_weather_node = Weather.new()
 	_weather_node.name = "EditorWeather"
 	_weather_node.environment_path = NodePath("../EditorEnvironment")
 	_world_root.add_child(_weather_node)

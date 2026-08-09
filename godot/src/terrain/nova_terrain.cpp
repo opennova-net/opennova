@@ -341,29 +341,28 @@ void Terrain::render_frame() {
 		terrain_material->set_shader_parameter("u_debug_mode", debug_mode);
 	}
 
-	// Update lighting from MissionEnvironment, prefer smoothed colors from Weather
-	// Uses dynamic call() so environment/weather can be GDScript or C++.
+	// Update lighting from MissionEnvironment, prefer smoothed colors from
+	// Weather — both native now, direct typed calls (ADR 0034 d6).
 	if (terrain_material.is_valid()) {
 		if (!terrain_node_cache_valid)
 			_cache_env_weather_nodes();
 
-		if (cached_env_node && (bool)cached_env_node->call("is_loaded")) {
+		if (cached_env_node && cached_env_node->is_loaded()) {
 			// Base env -> terrain-uniform push, shared with the editor preview
 			// (MissionEnvironment.apply_terrain_uniforms drives both shaders' uniforms).
-			cached_env_node->call("apply_terrain_uniforms", terrain_material);
+			cached_env_node->apply_terrain_uniforms(terrain_material);
 			// Runtime-only: prefer Weather-smoothed colors when a weather node
 			// is present (overriding the ones it smooths). The terrain surface
 			// consumes only c1 = light + c0 = sky [orig: @ 0x604420].
 			if (cached_weather_node) {
-				terrain_material->set_shader_parameter("u_sun_light", cached_weather_node->call("get_smooth_sun"));
-				terrain_material->set_shader_parameter("u_sky_ambient", cached_weather_node->call("get_smooth_sky"));
-				terrain_material->set_shader_parameter("u_fog_color", cached_weather_node->call("get_smooth_fog"));
+				terrain_material->set_shader_parameter("u_sun_light", cached_weather_node->get_smooth_sun());
+				terrain_material->set_shader_parameter("u_sky_ambient", cached_weather_node->get_smooth_sky());
+				terrain_material->set_shader_parameter("u_fog_color", cached_weather_node->get_smooth_fog());
 			}
 			// Tile overlay tint: HALF(terrain_rgb) under MODULATE2X folded to
 			// one multiply; the shared runtime/ONED tile path consumes this uniform.
 			// [orig: PolyTrn_RenderTile @ 0x60df0d].
-			tile_overlay_tint =
-				cached_env_node->call("get_tile_overlay_tint");
+			tile_overlay_tint = cached_env_node->get_tile_overlay_tint();
 			terrain_material->set_shader_parameter(
 				"u_tile_overlay_tint", tile_overlay_tint);
 		}
@@ -376,15 +375,11 @@ void Terrain::_cache_env_weather_nodes() {
 	cached_weather_node = nullptr;
 
 	if (!environment_path.is_empty())
-		cached_env_node = get_node_or_null(environment_path);
-	if (cached_env_node && cached_env_node->has_method("is_loaded")) {
-		if (!weather_path.is_empty())
-			cached_weather_node = get_node_or_null(weather_path);
-		if (cached_weather_node && !cached_weather_node->has_method("get_smooth_sun"))
-			cached_weather_node = nullptr;
-	} else {
-		cached_env_node = nullptr;
-	}
+		cached_env_node = Object::cast_to<MissionEnvironment>(
+				get_node_or_null(environment_path));
+	if (cached_env_node && !weather_path.is_empty())
+		cached_weather_node =
+				Object::cast_to<Weather>(get_node_or_null(weather_path));
 }
 
 // ---------------------------------------------------------------------------

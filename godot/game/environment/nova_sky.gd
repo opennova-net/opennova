@@ -133,14 +133,19 @@ func _process(delta: float) -> void:
 	# four integer accumulators; the UV translation is U = +cam/4096 - acc*2^-28,
 	# V = +cam/4096 + acc*2^-28 (layer 2: /8192 and 2^-29) - the accumulator
 	# rides U NEGATIVELY (env #26).
-	var scroll_core := _scroll_core(sky_speed, delta)
 	var cam_x := 0.0
 	var cam_z := 0.0
 	if _cached_cam:
 		cam_x = _cached_cam.global_position.x
 		cam_z = _cached_cam.global_position.z
-	sky_material.set_shader_parameter("u_scroll_offset1", scroll_core.get_cloud_uv_offset1(cam_x, cam_z))
-	sky_material.set_shader_parameter("u_scroll_offset2", scroll_core.get_cloud_uv_offset2(cam_x, cam_z))
+	var weather := _resolve_weather()
+	if weather:
+		sky_material.set_shader_parameter("u_scroll_offset1", weather.get_cloud_uv_offset1(cam_x, cam_z))
+		sky_material.set_shader_parameter("u_scroll_offset2", weather.get_cloud_uv_offset2(cam_x, cam_z))
+	else:
+		var scroll_core := _fallback_scroll_core(sky_speed, delta)
+		sky_material.set_shader_parameter("u_scroll_offset1", scroll_core.get_cloud_uv_offset1(cam_x, cam_z))
+		sky_material.set_shader_parameter("u_scroll_offset2", scroll_core.get_cloud_uv_offset2(cam_x, cam_z))
 
 static func _sky_constant(value: Vector3) -> Vector3:
 	return value * 2.0
@@ -178,15 +183,18 @@ func sync_frame_clear_color() -> void:
 	frame_clear_environment.background_color = Color(rgb.x, rgb.y, rgb.z)
 
 
-# The weather node's shared core when wired (Weather ticks it at process
-# priority -10, before us), else a private fallback core advanced at the same
-# fixed 62 Hz cadence. Rendering may run at any refresh rate.
-func _scroll_core(sky_speed: float, delta: float) -> WeatherCore:
+# The weather node's shared accumulators when wired (Weather ticks them at
+# process priority -10, before us; read through its typed offset getters).
+func _resolve_weather() -> Weather:
 	if not _cached_weather or not _cached_weather.is_inside_tree():
 		_cached_weather = (get_node_or_null(weather_path)
 				if not weather_path.is_empty() else null) as Weather
-	if _cached_weather:
-		return _cached_weather.scroll_core()
+	return _cached_weather
+
+
+# Standalone owners (no weather node) tick a private fallback core at the same
+# fixed 62 Hz cadence. Rendering may run at any refresh rate.
+func _fallback_scroll_core(sky_speed: float, delta: float) -> WeatherCore:
 	if _fallback_scroll == null:
 		_fallback_scroll = WeatherCore.new()
 	_fallback_tick_credit += maxf(delta, 0.0) * Weather.WEATHER_TICK_HZ

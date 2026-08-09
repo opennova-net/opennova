@@ -1,69 +1,21 @@
 extends GutTest
 
 # DebugEnvironmentPage: env/weather/water readouts through the typed
-# GameWorld -> MissionEnvironment/Weather/Water seams (harness subclasses
-# override the readouts under test and count the pokes), the shared-session
-# scrub knobs and authority gates, and empty states without a world.
+# GameWorld -> MissionEnvironment/Weather/Water seams (REAL native nodes —
+# GDScript cannot intercept native methods, so the pins observe real state),
+# the shared-session scrub knobs and authority gates, and empty states
+# without a world.
 
 const PageScript := preload("res://game/debug/pages/debug_environment_page.gd")
-
-
-class EnvHarness:
-	extends MissionEnvironment
-
-	func get_mission_minute_of_day() -> float:
-		return MissionEnvironment.hhmm_to_minute_of_day(time_of_day)
-
-	func debug_set_mission_minute_of_day(value: float) -> Error:
-		time_of_day = MissionEnvironment.minute_of_day_to_hhmm(value)
-		return OK
-
-	func is_night_phase() -> bool:
-		return true
-
-	func get_day_phase_blend() -> float:
-		return 0.25
-
-	func is_weather_driven() -> bool:
-		return true
-
-	func get_fog_start() -> float:
-		return 40.0
-
-	func get_fog_distance() -> float:
-		return 320.0
-
-	func get_fog_type() -> int:
-		return 2
-
-	func get_fog_level() -> float:
-		return 0.6
-
-	func get_sun_direction() -> Vector3:
-		return Vector3(0.1, -0.9, 0.2)
-
-
-class WeatherHarness:
-	extends Weather
-	var short_strikes := 0
-	var long_strikes := 0
-	var color_resyncs := 0
-
-	func resync_colors_now() -> void:
-		color_resyncs += 1
-
-	func trigger_lightning_short() -> void:
-		short_strikes += 1
-
-	func trigger_lightning_long() -> void:
-		long_strikes += 1
+const FULL_00_ENV_FIXTURE := "res://../fixtures/env/full_00.env"
 
 
 class WorldHarness:
 	extends GameWorld
-	var env: EnvHarness = null
-	var weather: WeatherHarness = null
+	var env: MissionEnvironment = null
+	var weather: Weather = null
 	var water: Water = null
+	var clock_resyncs := 0
 
 	func get_environment_node() -> MissionEnvironment:
 		return env
@@ -83,15 +35,21 @@ class WorldHarness:
 			return ERR_UNAVAILABLE
 		var err: Error = env.debug_set_mission_minute_of_day(value)
 		if err == OK and weather != null:
+			clock_resyncs += 1
 			weather.resync_colors_now()
 		return err
 
 
 func _make_world() -> WorldHarness:
 	var world := WorldHarness.new()
-	world.env = EnvHarness.new()
-	world.env.time_of_day = 1830.0
-	world.weather = WeatherHarness.new()
+	world.env = MissionEnvironment.new()
+	world.env.name = "DebugEnv"
+	var data := EnvFile.new()
+	data.set_source_path(ProjectSettings.globalize_path(FULL_00_ENV_FIXTURE))
+	data.load()
+	world.env.environment_data = data
+	world.env.time_of_day = 2200.0  # a real night phase
+	world.weather = Weather.new()
 	world.weather.wind_strength = 50.0  # 128/256: exact through the Env_WindScale units
 	world.water = Water.new()
 	world.water.water_height = 12.5
@@ -99,7 +57,10 @@ func _make_world() -> WorldHarness:
 	world.add_child(world.weather)
 	world.add_child(world.water)
 	# Off-tree: the GameWorld script class alone has no scene children, and
-	# the harness getters hand out direct refs.
+	# the harness getters hand out direct refs. Sibling wiring resolves the
+	# relative path without a tree; one real tick claims weather-driven.
+	world.weather.environment_path = NodePath("../DebugEnv")
+	world.weather.tick_fixed()
 	autofree(world)
 	return world
 
@@ -138,16 +99,16 @@ func test_formats_the_environment_and_mirrors_knobs() -> void:
 	page.refresh()
 
 	var env_text := (page.find_child("EnvState", true, false) as Label).text
-	assert_string_contains(env_text, "Time 1830")
+	assert_string_contains(env_text, "Time 2200")
 	assert_string_contains(env_text, "night")
 	assert_string_contains(env_text, "weather-driven")
-	assert_string_contains(env_text, "distance 320")
+	assert_string_contains(env_text, "distance 1000")
 	var water_text := (page.find_child("WaterState", true, false) as Label).text
 	assert_string_contains(water_text, "height 12.50")
 	assert_string_contains(water_text, "rendering")
 
 	var time_slider := page.find_child("TimeOfDay", true, false) as HSlider
-	assert_almost_eq(float(time_slider.value), 18.0 * 60.0 + 30.0, 0.001,
+	assert_almost_eq(float(time_slider.value), 22.0 * 60.0, 0.001,
 			"the clock knob mirrors the live env")
 	assert_eq(int(time_slider.max_value), 1439,
 			"every slider value is a valid minute of day")
@@ -161,33 +122,48 @@ func test_knobs_and_lightning_poke_the_live_nodes() -> void:
 	var page := _make_page(world)
 	page.refresh()
 
-	(page.find_child("TimeOfDay", true, false) as HSlider).value = 22 * 60
-	assert_almost_eq(float(world.env.time_of_day), 2200.0, 0.001,
+	(page.find_child("TimeOfDay", true, false) as HSlider).value = 10 * 60
+	assert_almost_eq(float(world.env.time_of_day), 1000.0, 0.001,
 			"scrubbing the clock uses the shared public control")
-	assert_eq(world.weather.color_resyncs, 1,
+	assert_eq(world.clock_resyncs, 1,
 			"the world immediately resyncs rendered weather for paused scrubs")
 	(page.find_child("WindStrength", true, false) as HSlider).value = 25
 	assert_almost_eq(float(world.weather.wind_strength), 25.0, 0.001)
 
+	# Real sequencers: the short trigger's first witnessed epoch lands within
+	# six ticks, the long trigger flashes on its first tick.
 	(page.find_child("LightningShort", true, false) as Button).pressed.emit()
-	(page.find_child("LightningLong", true, false) as Button).pressed.emit()
-	assert_eq(world.weather.short_strikes, 1)
-	assert_eq(world.weather.long_strikes, 1)
+	for _i in 6:
+		world.weather.tick_fixed()
+	assert_gt(world.weather.get_lightning_intensity(), 0.0,
+			"the short-strike button reaches the live sequencer")
+	var world_b := _make_world()
+	var page_b := _make_page(world_b)
+	page_b.refresh()
+	(page_b.find_child("LightningLong", true, false) as Button).pressed.emit()
+	for _i in 6:
+		world_b.weather.tick_fixed()
+	assert_gt(world_b.weather.get_lightning_intensity(), 0.0,
+			"the long-strike button reaches the live sequencer")
 
 
 func test_joiner_or_locked_overlay_cannot_mutate_environment() -> void:
 	var world := _make_world()
 	var joiner_page := _make_page(world, false, true)
-	(joiner_page.find_child("TimeOfDay", true, false) as HSlider).value = 22 * 60
+	(joiner_page.find_child("TimeOfDay", true, false) as HSlider).value = 10 * 60
 	(joiner_page.find_child("LightningShort", true, false) as Button).pressed.emit()
-	assert_almost_eq(float(world.env.time_of_day), 1830.0, 0.001)
-	assert_eq(world.weather.short_strikes, 0)
+	assert_almost_eq(float(world.env.time_of_day), 2200.0, 0.001)
 
 	var locked_page := _make_page(world, true, false)
 	(locked_page.find_child("WindStrength", true, false) as HSlider).value = 25
 	(locked_page.find_child("LightningLong", true, false) as Button).pressed.emit()
 	assert_almost_eq(float(world.weather.wind_strength), 50.0, 0.001)
-	assert_eq(world.weather.long_strikes, 0)
+	# Neither blocked trigger reaches the live sequencer.
+	for _i in 6:
+		world.weather.tick_fixed()
+	assert_eq(world.weather.get_lightning_intensity(), 0.0,
+			"blocked strike buttons never reach the sequencer")
+	assert_eq(world.clock_resyncs, 0, "blocked scrubs never resync weather")
 
 
 func test_public_clock_scrub_reseeds_the_fixed_point_mission_clock() -> void:

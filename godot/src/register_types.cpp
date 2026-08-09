@@ -20,6 +20,8 @@
 #include "env/nova_env_keyframe.h"
 #include "env/env_file.h"
 #include "env/nova_color_smoother.h"
+#include "env/nova_mission_environment.h"
+#include "env/nova_weather.h"
 #include "env/nova_weather_core.h"
 #include "env/nova_glare_occlusion.h"
 #include "env/nova_star_field.h"
@@ -117,6 +119,8 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(EnvKeyframe);
 	GDREGISTER_CLASS(EnvFile);
 	GDREGISTER_CLASS(ColorSmoother);
+	GDREGISTER_CLASS(MissionEnvironment);
+	GDREGISTER_CLASS(Weather);
 	GDREGISTER_CLASS(WeatherCore);
 	GDREGISTER_CLASS(WaterCore);
 	GDREGISTER_CLASS(StarField);

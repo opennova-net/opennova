@@ -1,5 +1,7 @@
 #include "nova_particle_renderer.h"
 
+#include "env/nova_mission_environment.h"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -526,18 +528,15 @@ public:
 	}
 
 	void refresh_environment(Node *source) {
-		const ObjectID source_id = source != nullptr ?
-				ObjectID(source->get_instance_id()) : ObjectID();
+		MissionEnvironment *env = Object::cast_to<MissionEnvironment>(source);
+		const ObjectID source_id = env != nullptr ?
+				ObjectID(env->get_instance_id()) : ObjectID();
 		std::int64_t generation =
 				std::numeric_limits<std::int64_t>::min();
 		bool has_generation = false;
-		if (source != nullptr &&
-				source->has_method(StringName("get_env_generation"))) {
-			const Variant value = source->call("get_env_generation");
-			if (value.get_type() == Variant::INT) {
-				generation = static_cast<std::int64_t>(value);
-				has_generation = true;
-			}
+		if (env != nullptr) {
+			generation = env->get_env_generation();
+			has_generation = true;
 		}
 		if (has_generation && source_id == cached_environment_source &&
 				generation == cached_environment_generation) {
@@ -551,41 +550,18 @@ public:
 		fog_start = 30000.0f;
 		fog_end = 100000.0f;
 		fog_type = 1;
-		if (source != nullptr) {
-			if (source->has_method(StringName("get_fog_color"))) {
-				const Variant value = source->call("get_fog_color");
-				if (value.get_type() == Variant::VECTOR3) {
-					const Vector3 color = static_cast<Vector3>(value);
-					if (std::isfinite(color.x) && std::isfinite(color.y) &&
-							std::isfinite(color.z)) {
-						fog_color = {color.x, color.y, color.z};
-					}
-				}
+		if (env != nullptr) {
+			const Vector3 color = env->get_fog_color();
+			if (std::isfinite(color.x) && std::isfinite(color.y) &&
+					std::isfinite(color.z)) {
+				fog_color = {color.x, color.y, color.z};
 			}
-			auto read_finite_float = [source](const char *method,
-					float fallback) {
-				if (!source->has_method(StringName(method)))
-					return fallback;
-				const Variant value = source->call(method);
-				if (value.get_type() != Variant::FLOAT &&
-						value.get_type() != Variant::INT) {
-					return fallback;
-				}
-				const float converted = static_cast<float>(
-						static_cast<double>(value));
-				return std::isfinite(converted) ? converted : fallback;
+			auto finite_or = [](float value, float fallback) {
+				return std::isfinite(value) ? value : fallback;
 			};
-			fog_start = read_finite_float("get_fog_start", fog_start);
-			fog_end = read_finite_float("get_fog_level", fog_end);
-			if (source->has_method(StringName("get_fog_type"))) {
-				const Variant value = source->call("get_fog_type");
-				if (value.get_type() == Variant::INT) {
-					fog_type = std::clamp<std::int32_t>(
-							static_cast<std::int32_t>(
-									static_cast<std::int64_t>(value)),
-							0, 3);
-				}
-			}
+			fog_start = finite_or(env->get_fog_start(), fog_start);
+			fog_end = finite_or(env->get_fog_level(), fog_end);
+			fog_type = std::clamp<std::int32_t>(env->get_fog_type(), 0, 3);
 		}
 		cached_environment_source = source_id;
 		cached_environment_generation = has_generation ? generation :

@@ -5,7 +5,6 @@ extends GutTest
 # terrain editor relies on so the bespoke hardcoded water plane cannot return.
 
 const NovaWaterScript = preload("res://game/environment/nova_water.gd")
-const NovaWeatherScript = preload("res://game/environment/nova_weather.gd")
 
 
 func test_water_height_override_drives_height() -> void:
@@ -20,7 +19,7 @@ func test_water_height_override_drives_height() -> void:
 
 
 func test_weather_exposes_resync_for_discrete_scrubs() -> void:
-	var weather = add_child_autofree(NovaWeatherScript.new())
+	var weather = add_child_autofree(Weather.new())
 	assert_true(weather.has_method("resync_colors"), "Weather must expose resync_colors for TOD scrubs.")
 	# Calling it before any env is bound must be safe (editor calls it on every edit).
 	weather.resync_colors()

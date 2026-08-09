@@ -568,7 +568,7 @@ func _place_mission_objects(mission: MissionData, timeline: PerfTimeline = null)
 	_placer = MissionObjectPlacer.new(_resource_root)
 	_panm_clock.sample_frame()
 	_placer.set_panm_clock(_panm_clock)
-	_placer.set_environment_state(_env.light_state)
+	_placer.set_environment_state(_env.get_light_state())
 	var options := {}
 	# A wire-header join deliberately has no authored body records. The load stream
 	# creates native pools 2/1/3 from S2C 0x10/0x0D/0x20 at exact handles; remote
@@ -2557,7 +2557,7 @@ func _update_frame_clear_color() -> void:
 		# Camera3D h/v offsets move the rendered eye without changing the node
 		# transform. Classify the same adjusted eye Water marches from.
 		above = cam.get_camera_transform().origin.y > float(_water.water_height)
-	var gen := int(_env.light_state.get_generation())
+	var gen := int(_env.get_light_state().get_generation())
 	if gen == _clear_env_generation and above == _clear_above_water:
 		return
 	_clear_env_generation = gen

@@ -1048,10 +1048,10 @@ func _wire_placer_environment() -> void:
 		return
 	if _placer_restamp_state != null and _placer_restamp.is_valid() 			and _placer_restamp_state.changed.is_connected(_placer_restamp):
 		_placer_restamp_state.changed.disconnect(_placer_restamp)
-	_placer.set_environment_state(env.light_state)
+	_placer.set_environment_state(env.get_light_state())
 	_placer_restamp = Callable(_placer, "update_environment")
-	_placer_restamp_state = env.light_state
-	env.light_state.changed.connect(_placer_restamp)
+	_placer_restamp_state = env.get_light_state()
+	env.get_light_state().changed.connect(_placer_restamp)
 
 
 func _objects_container() -> Node3D:

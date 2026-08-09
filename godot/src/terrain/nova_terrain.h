@@ -11,6 +11,8 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 
+#include "env/nova_mission_environment.h"
+#include "env/nova_weather.h"
 #include "nova_terrain_data.h"
 #include <terrain/terrain_frame.h>
 
@@ -69,9 +71,9 @@ private:
 	bool built = false;
 
 
-	// Cached node pointers — avoids per-frame get_node_or_null()
-	Node *cached_env_node = nullptr;
-	Node *cached_weather_node = nullptr;
+	// Cached typed node pointers — avoids per-frame get_node_or_null()
+	MissionEnvironment *cached_env_node = nullptr;
+	Weather *cached_weather_node = nullptr;
 	bool terrain_node_cache_valid = false;
 
 	void _cache_env_weather_nodes();

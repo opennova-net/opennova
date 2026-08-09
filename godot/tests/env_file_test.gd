@@ -5,13 +5,6 @@ extends GutTest
 const FULL_00_ENV_FIXTURE := "res://../fixtures/env/full_00.env"
 
 
-class DirectionCaptureWeather extends Weather:
-	var published_direction := Vector3.ZERO
-
-	func _publish_light_direction(direction: Vector3) -> void:
-		published_direction = direction
-
-
 func _load_full_00() -> EnvFile:
 	var env := EnvFile.new()
 	env.set_source_path(ProjectSettings.globalize_path(FULL_00_ENV_FIXTURE))
@@ -239,7 +232,7 @@ func test_object_lighting_uses_the_active_moon_direction_at_night() -> void:
 	env_node.environment_data = _load_full_00()
 	env_node.time_of_day = 2200.0
 
-	var values: EnvLightValues = env_node.light_state.get_values()
+	var values: EnvLightValues = env_node.get_light_state().get_values()
 	var expected := -env_node.get_light_direction().normalized()
 	assert_true(values.dir.is_equal_approx(expected),
 			"object directional light follows Environment_GetLightDirectionFloat")
@@ -252,7 +245,7 @@ func test_entity_lighting_applies_sun_visibility_and_interior_light_transfer() -
 	add_child_autofree(env_node)
 	env_node.environment_data = _load_full_00()
 	env_node.time_of_day = 1500.0
-	var world_values: EnvLightValues = env_node.light_state.get_values()
+	var world_values: EnvLightValues = env_node.get_light_state().get_values()
 
 	assert_true(world_values.floor_color.is_equal_approx(env_node.get_floor_color()))
 	assert_true(world_values.ceiling.is_equal_approx(env_node.get_ceiling_color()))
@@ -281,13 +274,20 @@ func test_weather_publishes_the_active_moon_direction_at_night() -> void:
 	env_node.environment_data = _load_full_00()
 	env_node.time_of_day = 2200.0
 
-	var weather := DirectionCaptureWeather.new()
+	var weather := Weather.new()
 	weather.environment_path = env_node.get_path()
 	add_child_autofree(weather)
-	simulate(weather, 1, 0.016)
-	assert_true(weather.published_direction.is_equal_approx(env_node.get_light_direction()),
+	weather.advance_frame(0.016)
+	# The weather writeback publishes the ACTIVE light direction (the engine
+	# build_weather_shader_globals pins sun_direction <- light_direction; the
+	# environment_state ctest covers that seam): at night that is the moon,
+	# never the solar highlight vector.
+	assert_true(env_node.is_night_phase(), "22:00 reads as night")
+	assert_true(env_node.get_light_direction().is_equal_approx(
+			env_node.get_moon_direction()),
 			"terrain and foliage globals follow Environment_GetLightDirectionFloat")
-	assert_false(weather.published_direction.is_equal_approx(env_node.get_sun_direction()),
+	assert_false(env_node.get_light_direction().is_equal_approx(
+			env_node.get_sun_direction()),
 			"night shader globals must not stay pinned to the solar highlight vector")
 
 

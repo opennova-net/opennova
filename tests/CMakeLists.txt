@@ -761,6 +761,13 @@ target_link_libraries(env_render_unit_test PRIVATE opennova_formats)
 target_include_directories(env_render_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME env_render_unit COMMAND env_render_unit_test)
 
+# The environment runtime (engine/runtime/environment): the TOD state owner +
+# weather embedding ported from the shell scripts (ADR 0034 d6 de-scripting).
+add_executable(environment_state_test environment/environment_state_test.cpp)
+target_link_libraries(environment_state_test PRIVATE opennova_runtime)
+target_include_directories(environment_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME environment_state COMMAND environment_state_test)
+
 # The HUD view-helper math cluster (engine/runtime/hud, S15): design-space
 # scaling, ALPHAFADE decay + quirk, stance Q16 scale/centering, health bands,
 # message tick policy, half-bright, ammo fold + nudge, round icons, crosshair

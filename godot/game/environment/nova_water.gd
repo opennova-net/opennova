@@ -425,7 +425,7 @@ func _process(delta: float) -> void:
 			_cached_weather = (get_node_or_null(weather_path)
 					if not weather_path.is_empty() else null) as Weather
 		if _cached_weather:
-			uv_state = _cached_weather.scroll_core().get_water_uv_state(
+			uv_state = _cached_weather.get_water_uv_state(
 					cam_pos.x, cam_pos.z, fog_end)
 		else:
 			if _fallback_scroll == null:
