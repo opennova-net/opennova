@@ -81,6 +81,19 @@ struct NearestSeatHit {
 bool find_nearest_free_seat(World &world, const Entity &player, NearestSeatHit &out,
                             bool armory_mode);
 
+// The USE-ITEM mount toggle's weapon-busy gate [orig: Entity_ToggleVehicleMount
+// @0x436958-0x436977 — no EquippedSlot passes; currentAction < 2
+// (idle/emptyidle) or == 5 (the dry click) passes, as does a pending
+// OVERHEATED (nextAction == 11); an in-flight fire/reload/switch swallows the
+// toggle].
+bool weapon_state_allows_mount_toggle(int32_t current_action, int32_t next_action);
+
+// The toggle's seat candidate, in the witnessed search order: an unmounted
+// player standing on a seat-bearing ground target takes that carrier's best
+// seat first; otherwise the nearest-free-seat scan above (seats mode).
+bool find_mount_toggle_candidate(World &world, const Entity &player,
+                                 NearestSeatHit &r_hit);
+
 // One floating attach label [orig: draw_vehicle_seat_and_armory_labels @0x5a3290 — the
 // selection half; projection and drawing stay host-side]. world_pos carries the witnessed
 // +0.1875 u label lift [orig: point.z = boneZ + 12288 @0x5a3585].

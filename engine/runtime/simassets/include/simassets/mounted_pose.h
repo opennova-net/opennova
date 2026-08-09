@@ -8,11 +8,35 @@
 #define OPENNOVA_SIMASSETS_MOUNTED_POSE_H
 
 #include <threedi/threedi_3di3.h>
+#include <threedi/threedi_ctrl_catalog.h>
 #include <world/vehicle_mount.h>
 
 #include <cstdint>
 
 namespace opennova::simassets {
+
+// The CTRL register-bus composition feeding resolve_model_mounted_pose: the
+// same three sources the retail resolver publishes, written by ordinal onto
+// the 96-slot bus — the part-anim phase pair (VEHICLE_SPECIAL1 gated OFF by
+// the carrier's ItemDefAttrib 0x1000 bit, SPECIAL2 always), the heat glow,
+// and the emplaced gun yaw/pitch.
+struct MountedPoseControlSources {
+    int32_t part_anim_phase0 = 0;
+    int32_t part_anim_phase1 = 0;
+    bool has_heat_glow = false;
+    int32_t heat_glow = 0;
+    bool has_emplaced = false;
+    float emplaced_gun_yaw = 0.0f;
+    float emplaced_gun_pitch = 0.0f;
+};
+
+void compose_mounted_pose_controls(
+        uint32_t carrier_item_attrib, const MountedPoseControlSources &sources,
+        int32_t (&r_ctrl)[THREEDI_CTRL_REGISTER_COUNT]);
+
+// The resolver's PANM clock: retail's 16 ms logic-tick time, unless a debug
+// override (>= 0) pins it.
+uint32_t mounted_pose_time_ms(uint32_t logic_tick, int64_t override_ms);
 
 // Resolve the seat's live world pose from the carrier's parsed model:
 // the userpoint (seat.bone_index is the 1-based USRP row) is re-anchored into

@@ -38,10 +38,15 @@
 // joiner 0x2F loadout pushes shell-side; ADR 0031 re-opened both — the
 // collision/seat sweep lives in simassets/collision_resolve +
 // seat_spec_extract, the profile-seed/0x2F composition in
-// npruntime/loadout_submit; the shell keeps only the role gates and the
-// hook wiring.) Those legs are injected per pump as PumpHooks — the same
-// shape as host_session_pump's resolve-adm callback, the joiner's wider
-// because retail runs the local-player legs INSIDE this frame, not around it.
+// npruntime/loadout_submit; the shape-C2 round then moved the last live
+// residue beside those: the mount-toggle gate/candidate into
+// world/vehicle_attach, the mission chunk-tuple stash into mission/promote,
+// the 0x5A grant->kit conversion into npruntime/loadout_submit, and the
+// CTRL-bus composition + PANM clock into simassets/mounted_pose. The shell
+// keeps only the role gates, its own state latches, and the hook wiring.)
+// Those legs are injected per pump as PumpHooks — the same shape as
+// host_session_pump's resolve-adm callback, the joiner's wider because
+// retail runs the local-player legs INSIDE this frame, not around it.
 namespace opennova::np {
 
 // The decoded ClientState row for a wire handle, or null. Linear: ClientState

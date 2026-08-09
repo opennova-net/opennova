@@ -3,11 +3,10 @@
 // profile, and the weapon/ammo table feeds.
 #include "simulation/nova_simulation_internal.h"
 
-#include <npruntime/loadout_submit.h> // the 0x2F submission composition (ADR 0031 PR E)
-
-#include <cstdlib> // the chunk tuples' atol-truncation parse [orig: @ 0x42cf7c]
+#include <npruntime/loadout_submit.h> // the 0x2F submission + 0x5A grant conversions
 
 #include <def/def.h> // DEF_WEAPON_FLAG_* / DEF_WEAPON_FLAG2_*
+#include <mission/promote.h> // stash_mission_loadout_rules (the chunk-tuple conversion)
 #include <npwire/ingame_message_id.h>
 #include <simassets/fp_viewmodel_spec.h> // the FP viewmodel submit rule
 
@@ -49,37 +48,14 @@ bool NovaSimulation::local_player_toggle_mount() {
 			toggle_player->health <= 0)
 		return false;
 	sync_local_usegun_weapon_transition();
-	// The weapon-busy gate [orig: @0x436958-0x436977 — no EquippedSlot passes;
-	// currentAction < 2 (idle/emptyidle) or == 5 (the dry click) passes, as does a
-	// pending OVERHEATED (nextAction == 11); an in-flight fire/reload/switch swallows
-	// the toggle].
+	// The weapon-busy gate + candidate search live engine-side
+	// (world/vehicle_attach.h). A missing EquippedSlot passes the retail gate;
+	// active_local_weapon_slot supplies the inert slot state.
 	const opennova::world::WeaponSlotState *active_slot =
 			active_local_weapon_slot();
-	const int32_t cur = active_slot->current;
-	const int32_t next = active_slot->next;
-	if (!(cur < 2 || cur == opennova::world::weapon_action::kEmpty ||
-	      next == opennova::world::weapon_action::kOverheated))
+	if (!opennova::world::weapon_state_allows_mount_toggle(
+				active_slot->current, active_slot->next))
 		return false;
-	const auto find_toggle_candidate =
-			[&](opennova::world::NearestSeatHit &r_hit) {
-				if (!toggle_player->mounted) {
-					opennova::world::Entity *ground =
-							world_->registry.get(toggle_player->ground_target);
-					if (ground != nullptr && !ground->seats.empty()) {
-						const int seat_index = world_->commands.find_best_seat(
-								*ground, toggle_player->handle);
-						if (seat_index >= 0) {
-							r_hit.vehicle = ground->handle;
-							r_hit.seat_index = seat_index;
-							r_hit.type = ground->seats[
-									static_cast<size_t>(seat_index)].type;
-							return true;
-						}
-					}
-				}
-				return opennova::world::find_nearest_free_seat(
-						*world_, *toggle_player, r_hit, false);
-			};
 	if (joiner_) {
 		// The non-authority client chooses the same local nearest-seat candidate,
 		// but sends only its packed carrier and authored 1-based model bone. L is
@@ -93,7 +69,9 @@ bool NovaSimulation::local_player_toggle_mount() {
 			return runtime_->queue_vehicle_detach(
 					toggle_player->mount_target.packed);
 		opennova::world::NearestSeatHit hit;
-		if (!find_toggle_candidate(hit)) return false;
+		if (!opennova::world::find_mount_toggle_candidate(
+					*world_, *toggle_player, hit))
+			return false;
 		opennova::world::Entity *vehicle = world_->registry.get(hit.vehicle);
 		if (vehicle == nullptr || hit.seat_index < 0 ||
 				hit.seat_index >= static_cast<int>(vehicle->seats.size()))
@@ -110,7 +88,8 @@ bool NovaSimulation::local_player_toggle_mount() {
 	//  !is_in_session && Flags&0x100 && !EquippedSlot @0x546c07]
 	if (!listen_server_ && !local_weapon_.active) {
 		opennova::world::NearestSeatHit hit;
-		if (find_toggle_candidate(hit) &&
+		if (opennova::world::find_mount_toggle_candidate(
+					*world_, *toggle_player, hit) &&
 				hit.type == opennova::world::SeatType::Gunner)
 			return false;
 	}
@@ -257,30 +236,11 @@ bool NovaSimulation::set_local_player_class(int p_player_class) {
 // runs at load_weapon_table time through the witnessed SP-vs-net gate, when
 // the catalog can resolve names (retail's own order: Game_StartMission parses
 // weapon.def @ 0x5254b3 before Mission_LoadBMSFile reads the chunks). The
-// string tuples convert with retail's own atol truncation semantics.
-// [orig: Mission_LoadBMSFile @ 0x40F4E0; the tuple parse over restrictionData]
+// tuple conversion (retail's atol truncation) is mission::stash_mission_loadout_rules's.
 void NovaSimulation::stash_mission_loadout_rules(
 		const opennova::bms::File &p_file) {
-	mission_availability_rows_.clear();
-	mission_kit_rows_.clear();
-	for (const opennova::bms::ItemAvailabilityEntry &row :
-			p_file.item_availability) {
-		if (row.name.empty()) continue;
-		mission_availability_rows_.emplace_back(row.name,
-				static_cast<int32_t>(row.status));
-	}
-	for (const opennova::bms::WeaponLoadoutRecord &row : p_file.loadout.entries) {
-		if (row.name.empty()) continue;
-		opennova::world::WeaponKitEntry entry;
-		entry.name = row.name;
-		entry.ammo_primary = static_cast<int32_t>(
-				std::strtol(row.ammo_primary.c_str(), nullptr, 10));
-		entry.ammo_secondary = static_cast<int32_t>(
-				std::strtol(row.ammo_secondary.c_str(), nullptr, 10));
-		entry.flags = static_cast<int32_t>(
-				std::strtol(row.flags.c_str(), nullptr, 10));
-		mission_kit_rows_.push_back(std::move(entry));
-	}
+	opennova::mission::stash_mission_loadout_rules(p_file,
+			mission_availability_rows_, mission_kit_rows_);
 }
 
 bool NovaSimulation::apply_local_player_loadout(const TypedArray<Dictionary> &p_kit,
@@ -305,8 +265,16 @@ bool NovaSimulation::apply_local_player_loadout_impl(
 		opennova::world::WeaponKitEntry entry = kit_entry_from_dict(p_kit[i]);
 		if (!entry.name.empty()) kit.push_back(std::move(entry));
 	}
+	return apply_local_player_loadout_rows(std::move(kit), p_player_class,
+			p_submit_joiner_request);
+}
+
+bool NovaSimulation::apply_local_player_loadout_rows(
+		std::vector<opennova::world::WeaponKitEntry> p_kit, int p_player_class,
+		bool p_submit_joiner_request) {
+	if (!world_) return false;
 	if (!opennova::world::local_loadout_apply_accept(*world_, local_loadout_,
-				local_weapon_, local_inventory_, local_inventory_valid_, kit,
+				local_weapon_, local_inventory_, local_inventory_valid_, p_kit,
 				p_player_class, /*validate_banned=*/p_submit_joiner_request))
 		return false;
 	// Always re-arm the 0x2F seam after a rebuild settles the equipped combo —
@@ -511,31 +479,18 @@ void NovaSimulation::apply_joiner_authoritative_loadout() {
 	const uint64_t revision = runtime_->authoritative_loadout_revision();
 	if (revision == 0 || revision <= joiner_applied_loadout_revision_) return;
 
+	// The grant -> kit-row conversion (name resolve + SIGNED clip reinterpret)
+	// is np::kit_from_authoritative_grant's.
 	const opennova::WeaponLoadout &grant = runtime_->authoritative_loadout();
-	TypedArray<Dictionary> kit;
-	for (const opennova::WeaponLoadoutSlot &slot : grant.slots) {
-		const opennova::world::WeaponTableEntry *def =
-				world_->weapons.by_index(slot.type_id);
-		if (def == nullptr) continue; // retail drops failed AdmDef lookups
-		Dictionary row;
-		row["name"] = String::utf8(def->name.c_str());
-		// The wire bytes are signed clip counts. 0xFF is the authored/default
-		// sentinel, not 255 clips [orig: 0x4295c4..0x429613].
-		row["ammo_primary"] = static_cast<int>(
-				static_cast<int8_t>(slot.ammo_primary));
-		row["ammo_secondary"] = static_cast<int>(
-				static_cast<int8_t>(slot.ammo_secondary));
-		row["flags"] = static_cast<int>(
-				static_cast<int8_t>(slot.ammo_alt));
-		kit.push_back(row);
-	}
+	std::vector<opennova::world::WeaponKitEntry> kit;
+	opennova::np::kit_from_authoritative_grant(world_->weapons, grant, kit);
 	// Do not echo an authoritative grant back as a new C2S 0x2F request. The
 	// S2C handler rebuilds the slots directly at recv-before-actions. The rebuild
 	// inside still re-arms the seam, but its ROWS come from the profile page, never
 	// from the grant — only the live equipped slot refreshes, which is exactly what
 	// retail's second submit carries [orig: Game_StartMission @0x525c2e].
-	if (apply_local_player_loadout_impl(
-				kit, grant.avatar_class, /*p_submit_joiner_request=*/false))
+	if (apply_local_player_loadout_rows(
+				std::move(kit), grant.avatar_class, /*p_submit_joiner_request=*/false))
 		joiner_applied_loadout_revision_ = revision;
 }
 
