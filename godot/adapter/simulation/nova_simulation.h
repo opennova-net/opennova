@@ -39,6 +39,7 @@
 #include <simassets/collision_resolve.h> // the collision/occlusion resolution sweep (ADR 0031)
 #include <simassets/sim_collision_pose.h> // the engine-side pose provider (S3, ADR 0028)
 #include <simassets/sim_model_cache.h> // the sim's own .3di source (ADR 0028)
+#include <frame/frame_driver.h> // the engine-owned game frame (ADR 0033 R1)
 #include <world/ai.h>
 #include <world/tick_accumulator.h>
 #include <world/collision.h>
@@ -234,8 +235,29 @@ private:
 	// attachment models through it (one mounted matrix path, S4b).
 	Ref<NovaResourceRoot> asset_root_;
 	mutable opennova::simassets::SimModelCache sim_models_;
-	// The 62.5 Hz real-time bank (S14, [orig: Game_MainLoop @ 0x52b630]).
-	opennova::world::TickAccumulator tick_accum_;
+	// The engine-owned game frame (ADR 0033 R1): the loop shape, the per-tick
+	// leg order, the post-batch frame-leg order, and the 62.5 Hz bank all live
+	// in frame::FrameDriver (frame/frame_driver.h carries the witness); this
+	// binding installs the shell's device legs and reads perf back.
+	opennova::frame::FrameDriver frame_driver_;
+	Callable frame_listener_cb_;
+	Callable frame_begin_effect_cb_;
+	Callable frame_sync_fixed_cb_;
+	Callable frame_effects_cb_;
+	Callable frame_fixed_done_cb_;
+	Callable frame_present_rows_cb_;
+	Callable frame_present_frame_cb_;
+	Callable frame_foliage_cb_;
+	Callable frame_net_drive_cb_;
+	Callable frame_weather_cb_;
+	Callable frame_blink_cb_;
+	Callable frame_occlusion_cb_;
+	Callable frame_iris_cb_;
+	Callable frame_audio_cb_;
+	int64_t frame_net_us_ = 0;
+	// Box the installed Callables + the native step/tick/drain legs into the
+	// driver's hook set (nova_simulation_frame.cpp).
+	opennova::frame::FrameHooks build_frame_hooks();
 	// The mission-lifetime collision graphic caches + the negative demand
 	// cache, engine-owned (simassets::CollisionResolveState, ADR 0031); the
 	// registry sweep and the joiner's wire ghosts share one implementation.
@@ -905,11 +927,43 @@ public:
 	// read this predicate.
 	bool is_transport_locked() const { return joiner_ || host_listen_; }
 	// The fixed-62.5 Hz wall-clock bank [orig: Game_MainLoop @ 0x52b630]:
-	// returns the logic ticks due for `delta` banked seconds (0..31). The
-	// shell runs that many step() calls and presents once after the batch.
-	int bank_realtime(double p_delta) { return tick_accum_.bank(p_delta); }
+	// returns the logic ticks due for `delta` banked seconds (0..31). Exposed
+	// for probes; the live host runs frame_realtime, which banks internally.
+	int bank_realtime(double p_delta) { return frame_driver_.accumulator().bank(p_delta); }
 	// Discard banked wall-clock (Play/Step/Stop transitions).
-	void reset_tick_bank() { tick_accum_.reset(); }
+	void reset_tick_bank() { frame_driver_.reset_bank(); }
+
+	// --- The engine-owned game frame (ADR 0033 R1; frame/frame_driver.h) ---
+	// The host installs its device legs ONCE per mission, then drives one call
+	// per render frame. Empty Callables mark legs the role lacks. The loop
+	// shape, the per-tick leg order, and the post-batch frame-leg order are
+	// frame::FrameDriver's; the sim supplies step/logic-tick/effects natively
+	// and boxes the shell's Callables in as hooks.
+	//
+	// The runtime-driver legs: the camera listener source (-> Vector3), the
+	// effect-pose snapshot rebind, the throwable fixed-tick reconcile, the
+	// drained-effects delivery (Array), the fixed-tick broadcast (int), the
+	// rows-only present, and the full present ladder.
+	void set_frame_shell_hooks(const Callable &p_listener,
+			const Callable &p_begin_effect_tick, const Callable &p_sync_fixed,
+			const Callable &p_effects_drained, const Callable &p_fixed_done,
+			const Callable &p_present_rows, const Callable &p_present_frame);
+	// The world-host legs, in their fixed frame order: foliage dispatch,
+	// session drive, world-driven weather, occlusion blink gates, the
+	// render-occlusion frame, iris samples, the audio pass (int ticks_run).
+	void set_frame_world_hooks(const Callable &p_foliage,
+			const Callable &p_net_drive, const Callable &p_weather,
+			const Callable &p_blink_gates, const Callable &p_occlusion,
+			const Callable &p_iris, const Callable &p_audio);
+	// One realtime host frame (the FrameDriver's run_frame; the main-loop
+	// witness lives on the engine header); returns the logic ticks run. One
+	// deterministic single step (debug Step / tests); returns whether the
+	// tick ran.
+	int frame_realtime(double p_delta);
+	bool frame_single();
+	// Last frame's spans: {tick_us, sim_us, present_us, effects_us, net_us,
+	// did_tick, ticks} — the probe/F3 accounting seam.
+	Dictionary get_frame_perf() const;
 	// Set the per-side character ids/classes/avatar bytes carried by ClientAuth.
 	// Must be called before enable_join; later runtime rebuilds retain the values.
 	void set_join_character_profile(const Dictionary &p_profile);

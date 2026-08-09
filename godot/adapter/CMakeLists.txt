@@ -73,6 +73,7 @@ add_library(${TARGET_NAME} SHARED
     simulation/nova_simulation.cpp
     simulation/nova_simulation_assets.cpp
     simulation/nova_simulation_bind.cpp
+    simulation/nova_simulation_frame.cpp
     simulation/nova_simulation_net.cpp
     simulation/nova_simulation_occlusion.cpp
     simulation/nova_simulation_player.cpp

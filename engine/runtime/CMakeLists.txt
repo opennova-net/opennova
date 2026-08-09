@@ -20,6 +20,10 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/src/sound_profile.cpp
     # controls — the JO input-binding catalog + CONTROL_MAPPING model
     ${CMAKE_CURRENT_SOURCE_DIR}/controls/src/controls.cpp
+    # frame — the game frame: the main-loop shape (bank/catch-up/present-once)
+    # and the fixed per-frame leg order, over shell-supplied device hooks
+    # (ADR 0033 R1)
+    ${CMAKE_CURRENT_SOURCE_DIR}/frame/src/frame_driver.cpp
     # hud — pure witnessed HUD math (the shell owns every draw/Font blit)
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/src/hud_math.cpp
     # mission (runtime half) — the BMS event runtime + mission->world promotion,
@@ -125,6 +129,7 @@ target_include_directories(opennova_runtime
         ${CMAKE_CURRENT_SOURCE_DIR}/anim/include
         ${CMAKE_CURRENT_SOURCE_DIR}/audio/include
         ${CMAKE_CURRENT_SOURCE_DIR}/controls/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/frame/include
         ${CMAKE_CURRENT_SOURCE_DIR}/hud/include
         # The runtime mission half's headers (the format half's <mission/...>
         # headers propagate from opennova_formats — disjoint sets, one prefix).

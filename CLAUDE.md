@@ -15,8 +15,9 @@ easier to relay than to rediscover.
   header-only `opennova_io`/`opennova_oned_edit`; no per-lib targets):
   `base/` (io, vfs, resource_index, gameprofile, pcapio, oned_edit, refs),
   `formats/` (one directory per NovaLogic format — pff, threedi, def, mnu, env, oed, ...;
-  ADR 0024 layout; the target also builds mission's format half), `runtime/` (world,
-  wac, mission, anim, audio, particle, renderer, controls, terrain, terrain_query),
+  ADR 0024 layout; the target also builds mission's format half), `runtime/` (frame,
+  world, wac, mission, anim, audio, particle, renderer, controls, terrain,
+  terrain_query),
   `net/` (novacrypto, napi, npwire, novaworld, netsim, npruntime). Consumed via the
   flat C ABI by Python and the DCC plugins, by direct static link everywhere else.
   See `engine/CLAUDE.md`.
@@ -99,9 +100,14 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
   primitives (strcpy/sprintf, D3D, file I/O) — use standard or platform equivalents. Engine-wide
   conventions (binaries/IDBs, fixed-point, coordinates, the 62 Hz tick) are in
   [docs/engine-primer.md](docs/engine-primer.md); RE-doc conventions in [docs/README.md](docs/README.md).
-- New engine logic starts in `engine/` (ADR 0028): gameplay rules, witnessed math, and
-  sim-consumed asset resolution are portable C++; GDScript wires and presents. The shell
-  keeps node writes, device sampling, and scene lifetime.
+- The engine owns the loops; shells are devices (ADR 0033, the ONE standing
+  architecture contract — it replaced the ADR 0031/0032 band regime): gameplay rules,
+  witnessed math, orchestration, and the frame/tick sequencing are portable C++
+  (`engine/runtime/frame` owns the main-loop shape and leg order). A `godot/` line
+  earns its place only as a device leg (node writes, GPU dispatch, input sampling,
+  audio players — installed as frame hooks) or as ONED authoring surface. Nova
+  formats never touch Godot's resource system: documents read/write themselves
+  (`load_from_path`/`save_to_path`).
 - Never carry raw original bytes through a writer to make a parity test pass — writers
   produce output from scratch (docs/adr/0003-no-raw-passthrough-create-from-scratch.md).
 - Pre-1.0, no internal backwards compatibility: refactors update every caller of our own

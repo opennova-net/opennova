@@ -2080,7 +2080,9 @@ func test_set_foliage_hidden_is_safe_without_a_dispatcher() -> void:
 
 func test_effect_warm_temporarily_lifts_and_restores_the_particle_switch() -> void:
 	var world := WarmGameWorldHarness.new()
+	autofree(world)
 	var effects := WarmEffectWorldStub.new()
+	autofree(effects)
 	world.configure_warm_effects(effects)
 	world.set_particles_hidden(true)
 

@@ -312,6 +312,22 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 		options.get("fire_fx", Callable()), options.get("game_world"))
 	simulation_restarted.connect(
 		Callable(_throwable_present, 'reset_runtime_state'))
+	# ADR 0033 R1: the loop shape, the per-tick leg order, and the post-batch
+	# frame legs live in the engine FrameDriver (frame/frame_driver.h). This
+	# host installs its presentation/effect device legs ONCE; an invalid
+	# Callable marks a leg this role lacks (a dedicated host has no listener).
+	# Every hook binds a NODE (this host / GameWorld), never a RefCounted
+	# presenter: a Node-bound Callable carries an ObjectID and stays safe to
+	# destroy in any leaked-object teardown order, while a RefCounted-bound one
+	# would make the sim a hidden owner of the presenter.
+	_sim.set_frame_shell_hooks(
+			_fire_listener,
+			Callable(self, "_begin_present_effect_tick"),
+			Callable(self, "_frame_sync_fixed_leg"),
+			Callable(self, "_frame_effects_drained"),
+			Callable(self, "_frame_fixed_tick_completed"),
+			Callable(self, "_frame_present_rows_leg"),
+			Callable(self, "_frame_present_frame_leg"))
 	# Capture the authored node transforms now (pre-tick) so Stop restores them whether the host
 	# played or only stepped. Cheap; the game never Stops but holding the map costs nothing.
 	_capture_transforms()
@@ -603,6 +619,8 @@ func _present_frame(stats_on: bool) -> void:
 ## were drained). The deterministic single-tick primitive: standalone F3/MCP Step and isolated
 ## tests/tooling previews use this. GameWorld is the sole live real-time host and calls
 ## tick_realtime(), which accumulates wall-clock; ONED has no self-ticking mission host.
+## The step order (listener stamp, one step, the per-tick legs, one present)
+## is the engine FrameDriver's run_single.
 func tick() -> bool:
 	if _sim == null:
 		_perf_tick_us = 0
@@ -612,66 +630,58 @@ func tick() -> bool:
 		_perf_did_tick = false
 		_ticks_last_frame = 0
 		return false
-	var stats_on := _frame_stats != null and _frame_stats.is_capture_active()
-	var tick_start := Time.get_ticks_usec()
-	_stamp_sound_listener()
-	var did_tick := _advance_one_tick_no_present()
-	_perf_present_us = 0
-	if did_tick:
-		if stats_on:
-			_frame_stats.add(FrameStatsBoard.SIM_STEP, _perf_sim_us)
-			_frame_stats.add(FrameStatsBoard.SIM_NET, int(_sim.get_last_net_tick_us()))
-			_frame_stats.add(FrameStatsBoard.EFFECTS_DRAIN, _perf_effects_us)
-			_frame_stats.add(FrameStatsBoard.SIM_TICKS, 1)
-		_present_frame(stats_on)
-	_perf_tick_us = Time.get_ticks_usec() - tick_start
-	_perf_did_tick = did_tick
-	_ticks_last_frame = 1 if did_tick else 0
+	var did_tick := bool(_sim.frame_single())
+	_read_frame_perf()
 	return did_tick
 
 
-# Stamp the camera listener before a tick batch: fires this batch gate their
-# propagation delay against the current camera, the retail frame order (the
-# listener global updates before the entity/fire processing). Invalid or
-# non-finite listeners leave the sim unstamped — a host with no fire
-# presentation (dedicated) runs no sound leg, the witnessed peer gate.
-# [orig: listener_pos @ 0x24D6630, the @ 0x528e57 gate; world/fire_sound.h]
-func _stamp_sound_listener() -> void:
-	if not _fire_listener.is_valid():
-		return
-	var listener_v: Variant = _fire_listener.call()
-	if listener_v is Vector3 and (listener_v as Vector3).is_finite():
-		_sim.set_sound_listener(listener_v)
+# --- The engine-frame device legs (ADR 0033 R1). The FrameDriver invokes
+# these in its fixed order; each is a thin shell leg over state this host
+# owns. The listener stamp and the effects drain run adapter-side.
 
 
-# One logic tick + drain/emit effects, WITHOUT presenting. Shared by tick() (which presents once
-# after) and tick_realtime() (which presents once after the whole catch-up batch). Updates the
-# sim/effects perf counters. Returns true when a logic tick fired.
-func _advance_one_tick_no_present() -> bool:
-	var sim_start := Time.get_ticks_usec()
-	var did_tick := _sim.step()  # one 62 Hz logic tick (the WAC VM self-gates inside)
-	_perf_sim_us = Time.get_ticks_usec() - sim_start
-	_perf_effects_us = 0
-	if did_tick:
-		_feed_projectile_trace_stats()
-		var logic_tick := int(_sim.get_logic_tick())
-		# Invalidate before delivering effects: any owned spawn seeded during
-		# this tick and the fixed-tick particle advance both observe this exact
-		# client-view pose, even inside a multi-tick catch-up batch.
-		_begin_present_effect_tick(logic_tick)
-		# Round-bound ammo move groups are particle-simulation state, even though
-		# their item-model Nodes stay render-batched. Reconcile them before the
-		# fixed_tick_completed consumer advances EffectWorld so birth, motion,
-		# and release all happen on the exact owning round tick.
-		if _throwable_present != null:
-			_throwable_present.sync_fixed_tick_effects()
-		var effects_start := Time.get_ticks_usec()
-		var effects := _sim.drain_effects()
-		_perf_effects_us = Time.get_ticks_usec() - effects_start
-		if not effects.is_empty():
-			effects_drained.emit(effects)
-		fixed_tick_completed.emit(logic_tick)
-	return did_tick
+func _frame_sync_fixed_leg() -> void:
+	if _throwable_present != null:
+		_throwable_present.sync_fixed_tick_effects()
+
+
+func _frame_effects_drained(effects: Array) -> void:
+	effects_drained.emit(effects)
+
+
+func _frame_fixed_tick_completed(logic_tick: int) -> void:
+	_feed_projectile_trace_stats()
+	fixed_tick_completed.emit(logic_tick)
+
+
+func _stats_capture_on() -> bool:
+	return _frame_stats != null and _frame_stats.is_capture_active()
+
+
+func _frame_present_rows_leg() -> void:
+	_present_entity_rows(_stats_capture_on())
+
+
+func _frame_present_frame_leg() -> void:
+	_present_frame(_stats_capture_on())
+
+
+# Pull the engine driver's spans into the probe counters and land the batch
+# accounting on the stats board (the per-pass present spans land inside the
+# present legs themselves).
+func _read_frame_perf() -> void:
+	var perf: Dictionary = _sim.get_frame_perf()
+	_perf_tick_us = int(perf.get("tick_us", 0))
+	_perf_sim_us = int(perf.get("sim_us", 0))
+	_perf_present_us = int(perf.get("present_us", 0))
+	_perf_effects_us = int(perf.get("effects_us", 0))
+	_perf_did_tick = bool(perf.get("did_tick", false))
+	_ticks_last_frame = int(perf.get("ticks", 0))
+	if _ticks_last_frame > 0 and _stats_capture_on():
+		_frame_stats.add(FrameStatsBoard.SIM_STEP, _perf_sim_us)
+		_frame_stats.add(FrameStatsBoard.SIM_NET, int(perf.get("net_us", 0)))
+		_frame_stats.add(FrameStatsBoard.EFFECTS_DRAIN, _perf_effects_us)
+		_frame_stats.add(FrameStatsBoard.SIM_TICKS, _ticks_last_frame)
 
 
 func _feed_projectile_trace_stats() -> void:
@@ -708,57 +718,18 @@ func _feed_projectile_trace_stats() -> void:
 
 
 ## Real-time host entry: bank `delta`, drain it in fixed TICK_DT quanta, run that many single logic
-## ticks (clamped to the native kMaxCatchupTicks), and present ONCE after the batch. This is the faithful
-## fixed-62.5 Hz accumulator — the sim runs at a constant rate while rendering stays decoupled at the
-## host frame rate, with no inter-tick interpolation (present reads current sim state). A long frame
-## runs several ticks; a short frame runs none but still presents current render-only state (camera,
-## local UseGun suppression, and node ownership). Effects drain per tick (the original's per-tick
-## emission). Returns the number of logic ticks run this call. [orig: Game_MainLoop @ 0x52b630]
+## ticks (clamped to the native kMaxCatchupTicks), and present ONCE after the batch — the faithful
+## fixed-62.5 Hz accumulator, with a zero-tick frame still presenting current render-only entity
+## rows (camera and local attach/detach change between fixed ticks). The whole loop — bank/clamp,
+## the per-tick leg order, present-once, and the post-batch world legs GameWorld installs — runs
+## in the engine FrameDriver [orig: Game_MainLoop @ 0x52b630]; this host reads the spans back.
+## Returns the number of logic ticks run this call.
 func tick_realtime(delta: float) -> int:
 	if _sim == null or not _playing:
 		_ticks_last_frame = 0
 		return 0
-	var stats_on := _frame_stats != null and _frame_stats.is_capture_active()
-	var tick_start := Time.get_ticks_usec()
-	# The bank/clamp arithmetic is the native world::TickAccumulator (S14,
-	# [orig: Game_MainLoop @ 0x52b630]); the loop + present-once-after-batch
-	# orchestration stays here in the shell.
-	_stamp_sound_listener()
-	var n := int(_sim.bank_realtime(delta))
-	if n <= 0:
-		# Retail evaluates entity submission every render frame. Camera mode and
-		# local attach/detach can change between fixed ticks, so the scene passes
-		# must not wait for the next 62.5 Hz quantum. Fire and destruction
-		# presentation remain tick-driven because no gameplay state advanced here.
-		_perf_present_us = 0
-		if _present != null or _wire_present != null:
-			var present_start := Time.get_ticks_usec()
-			_present_entity_rows(stats_on)
-			_perf_present_us = Time.get_ticks_usec() - present_start
-		_ticks_last_frame = 0
-		_perf_tick_us = Time.get_ticks_usec() - tick_start
-		_perf_did_tick = false
-		return 0
-	var sim_us := 0
-	var effects_us := 0
-	var net_us := 0
-	for _i in range(n):
-		_advance_one_tick_no_present()
-		sim_us += _perf_sim_us
-		effects_us += _perf_effects_us
-		if stats_on:
-			net_us += int(_sim.get_last_net_tick_us())
-	_perf_sim_us = sim_us
-	_perf_effects_us = effects_us
-	if stats_on:
-		_frame_stats.add(FrameStatsBoard.SIM_STEP, sim_us)
-		_frame_stats.add(FrameStatsBoard.SIM_NET, net_us)
-		_frame_stats.add(FrameStatsBoard.EFFECTS_DRAIN, effects_us)
-		_frame_stats.add(FrameStatsBoard.SIM_TICKS, n)
-	_present_frame(stats_on)
-	_perf_tick_us = Time.get_ticks_usec() - tick_start
-	_perf_did_tick = true
-	_ticks_last_frame = n
+	var n := int(_sim.frame_realtime(delta))
+	_read_frame_perf()
 	return n
 
 
@@ -880,6 +851,12 @@ func _exit_tree() -> void:
 	_has_trace_stats_sampling = false
 	if _sim != null:
 		_sim.set_runtime_profiling_enabled(false)
+		# Release the frame device legs before the presenters tear down: the
+		# sim must not hold Callables into objects this exit is about to free.
+		_sim.set_frame_shell_hooks(Callable(), Callable(), Callable(),
+				Callable(), Callable(), Callable(), Callable())
+		_sim.set_frame_world_hooks(Callable(), Callable(), Callable(),
+				Callable(), Callable(), Callable(), Callable())
 	_clear_present_effect_poses()
 	if _fire_present != null:
 		_fire_present.teardown()  # frees the tracer mesh instance under the container

@@ -11,8 +11,13 @@ authoring/preview surfaces (`godot/modtools/`):
   the `adapter_cpp_orig_cites` ratchet enforces it — a new `[orig:]` cite here is
   either a documented seam contract or code that belongs engine-side.
 - **The shared shell-neutral GDScript layer** (~38.5k LOC across ~150 scripts) both shells run on:
-  - `world/` — THE runtime, and by far the largest slice (~16.4k LOC): `game_world.gd` (the
-    GameWorld scene), `mission_runtime.gd`, `mission_present_pass.gd`,
+  - `world/` — the runtime's DEVICE-HOST layer (~16.4k LOC). Since ADR 0033 R1 the
+    loop itself is engine code (`engine/runtime/frame` FrameDriver): `game_world.gd`
+    (the GameWorld scene) and `mission_runtime.gd` compose the sim + presenters,
+    install their legs as frame hooks (`set_frame_shell_hooks` /
+    `set_frame_world_hooks` — every hook binds a NODE, never a RefCounted
+    presenter), and delegate `tick_realtime`/`tick` to
+    `NovaSimulation.frame_realtime`/`frame_single`. Also here: `mission_present_pass.gd`,
     `local_player_presenter.gd`, the per-system present passes (fire, throwable, destruction,
     aim overlay, emplaced weapon, player-view effects), the net views, mission audio.
     ADR 0006/0011/0012 territory — read `docs/runtime-architecture.md` and the ADRs first.

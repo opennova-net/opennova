@@ -29,23 +29,32 @@ AI/entity motor runs every tick — witnessed in
 
 ## How OpenNova maps onto it
 
+Since [ADR 0033](adr/0033-engine-owned-loops-device-shells.md) (R1, 2026-08-09) the loop
+itself is engine code: `engine/runtime/frame` `FrameDriver` owns the bank/catch-up/
+present-once shape AND the fixed per-frame leg order; the shells install device legs
+(node writes, GPU dispatch, audio players) as hooks and read perf spans back.
+
 ```
 main_game.gd
-  -> GameWorld.tick(camera, delta)                  sole live runtime frame
-       foliage dispatch                             client render pass
-       MissionRuntime.tick_realtime(delta)          == the fixed-timestep server tick + entity render:
-         bank delta; for each banked 16 ms quantum:   [Game_MainLoop @0x52b630 accumulator, 62.5 Hz]
-           NovaSimulation.step()                        one engine tick; per-system dividers  [Game_ProcessMainFrame @0x5263f0]
-             World.run_logic_tick()                       WAC -> BMS -> AI over one world
-             NetSystem drain/emit                         the in-match seam (ADR 0009/0011/0012)
-           drain effects -> effects_drained             presentation side effects (per tick)
-         present passes, in this fixed order:          draw once after the batch, never per sim tick
-           MissionPresentPass.present()                  placed .bms entities: transform/PANM/visibility
-           WirePresentPass.present()                     wire-spawned entities with no .bms placement
-           FirePresentPass.present(n)                    fire sound + muzzle + tracer ribbons
-           DestructionPresentPass.present()              husk swaps, death pieces, wreck effects
-           ThrowablePresentPass.present()                thrown and placed device models
-       NovaMissionAudio.tick(camera)                 audio render pass
+  -> GameWorld.tick(camera, delta)                  the device host: stashes camera state,
+       MissionRuntime.tick_realtime(delta)          gates on the transport, then drives
+         NovaSimulation.frame_realtime(delta)       ONE engine frame:
+           frame::FrameDriver.run_frame             [orig: Game_MainLoop @0x52b630]
+             foliage leg                              (GameWorld hook: dispatcher render)
+             listener stamp                           (fire-sound gate, before the batch)
+             bank delta; for each banked 16 ms quantum:
+               NovaSimulation.step()                  one engine tick  [Game_ProcessMainFrame @0x5263f0]
+                 host_pump/joiner pump                 net drain -> Server_TickUpdate owns the tick
+                   World.run_logic_tick()              WAC -> BMS -> AI over one world
+               begin effect tick / throwable sync / drain effects / fixed_tick_completed
+             present ONCE after the batch             (rows-only on a zero-tick frame)
+               MissionPresentPass / WirePresentPass / Fire / Destruction / Throwable
+             net-drive leg                            (session edges, join-wire gate)
+             weather leg                              (the distinct 62 Hz TOD clock)
+             blink-gates leg                          (only after a batch that ran)
+             occlusion-frame leg                      (camera-driven, every render frame)
+             iris leg                                 (marched exposure samples)
+             audio leg                                (mission audio + music var pump)
 ```
 
 `GameWorld`, entered through `MainGame`, is the sole live owner of
@@ -54,6 +63,12 @@ normal standalone game, F6 launches the current saved top-level loose `.bms`,
 and F8 stops the one managed child. Launch reads saved loose assets from the
 mounted resource directory and never saves, exports, copies, or stages editor
 state. See [ADR 0025](adr/0025-standalone-game-is-the-only-live-mission-runtime.md).
+
+The per-tick and per-frame ORDER is pinned by `tests/frame/frame_driver_test.cpp`
+(engine, hook-trace) — changing the sequence is now an engine change with a failing
+test, not a GDScript edit. A paused runtime and the duck-typed test runtimes
+(implementing `tick()` alone) take a legacy explicit sequence in `game_world.gd`
+with the same leg order.
 
 Inside that one live runtime there is one entity index and one present *step* —
 the surviving core of
@@ -71,8 +86,24 @@ and explicit complete-BMS/debug joins. The decoded fire/throwable passes follow 
 same sequence. Adding a system means adding a pass to that sequence, not a second
 present loop.
 The single-tick `MissionRuntime.tick()` survives as the deterministic primitive
-for runtime debug/MCP controls and tests; it runs the identical pass sequence
-with `n = 1`.
+for runtime debug/MCP controls and tests; it delegates to the driver's
+`run_single` (listener, one step, the per-tick legs, one present — no frame legs,
+no accumulator).
+
+## The render half (transition state)
+
+The render FRAME has no engine counterpart yet — that is ADR 0033's spike-gated
+stage R3 (the witnessed seven-pass order lives in
+[render/render-order-re.md](render/render-order-re.md); the portable ordering
+math in `engine/runtime/renderer` currently has no caller for its sort keys
+because Godot's scene renderer owns the sort). Two per-frame render loops remain
+deliberately SELF-DRIVEN outside the engine frame until their outputs become
+packets (stage R2): `NovaTerrain`'s `_process` (LOD walk + patch-pool submission)
+and `NovaParticleRenderer`'s `_process` (frame compile + compositor dispatch);
+per-model material eval self-parks in `nova_object_model.gd`. The occlusion leg
+runs AFTER the present in the frame order above — the scene-graph-ownership
+inverse of retail's collect-then-submit — and stays that way until R2/R3 make
+the retail order expressible.
 
 ## Single-player is a listen server
 
@@ -80,7 +111,9 @@ There is no no-net path. Single-player constructs the same in-process host the L
 paths use, and the local player is a host-side server entity driven by a wire-shaped intent
 ([ADR 0011](adr/0011-single-player-in-process-listen-server.md),
 [ADR 0012](adr/0012-player-is-host-side-server-entity.md)). The consequence for this map: the net
-seam (`NetSystem`) is inside the 62.5 Hz tick for *every* session, `local_player_presenter.gd` feeds
+pump is inside the 62.5 Hz tick for *every* session — `NovaSimulation.step` routes the authority
+roles through `np::host_session_pump`, whose `Server_TickUpdate` owns the logic tick (the
+former NetSystem-as-ISystem seam retired at P8; D-NET-123/125) — `local_player_presenter.gd` feeds
 intent rather than writing entity state, and the wire encoders run in single-player exactly as they
 do for a joined client. The in-match runtime behind that seam is `engine/net/npruntime`
 ([ADR 0013](adr/0013-consolidated-net-core.md)); the wire record is
@@ -106,12 +139,19 @@ matchmaking/handoff client and does not own a second gameplay entity model.
   (`step` = exactly one 62 Hz logic tick, `restart`), `drain_effects`, and **one batched present snapshot**
   (`get_present_snapshot()` → a flat `PackedFloat32Array`, `PF_*` field layout) so the per-tick
   present loop makes one call, not ~10 Variant-boxed scalar getters per entity.
-- **Runtime driver (GDScript)** — `mission_runtime.gd` owns `{sim, present pass, index}` and
-  single-sources the per-tick order (advance → drain → present). `tick_realtime(delta)` is the
-  fixed-timestep accumulator (banks `delta`, runs 0..N 62.5 Hz ticks, presents once); `tick()` is
-  the deterministic single-tick primitive (runtime debug / MCP / tests).
-  `game_world.gd` is its only live owner; ONED authoring previews do not drive a
-  mission runtime.
+- **Frame (portable C++)** — `engine/runtime/frame` `FrameDriver` owns the loop: the
+  62.5 Hz bank/catch-up/present-once batch, the per-tick leg order (effect rebind,
+  throwable sync, drain, fixed-tick broadcast), and the post-batch frame-leg order
+  (net-drive, weather, blink, occlusion, iris, audio) — pinned by
+  `tests/frame/frame_driver_test.cpp` (ADR 0033 R1).
+- **Host composition (GDScript)** — `mission_runtime.gd` composes `{sim, present
+  passes, index}`, installs the shell device legs on the sim
+  (`set_frame_shell_hooks`), and exposes the transport (`play`/`pause`/`step_once`,
+  the lockout predicate); its `tick_realtime`/`tick` are thin delegates over
+  `NovaSimulation.frame_realtime`/`frame_single`. `game_world.gd` is its only live
+  owner and installs the world legs (`set_frame_world_hooks`); every hook binds a
+  NODE (never a RefCounted presenter) so a leaked instance cannot crash teardown.
+  ONED authoring previews do not drive a mission runtime.
 - **Present passes** — `mission_present_pass.gd` applies each entity's transform + PANM part
   channels + visibility onto its placed node. Hybrid: the engine decides the state (snapshot), the
   shell writes the `Node3D`. Its per-row hot loop (row plan, snapshot reads, change-gated dispatch)
@@ -183,7 +223,8 @@ owner/exclusion setup are intentionally outside those native timing buckets.
 - Present transform carries full pitch/yaw/roll: `PF_PITCH_DEG`/`PF_ROLL_DEG` are live in the
   snapshot (from `Entity.pitch`/`Entity.roll`, or the client attachment pose for a mounted entity)
   and consumed by all three entity present passes. The former yaw-only restriction is closed.
-- The fixed-62.5 Hz accumulator is **implemented** (`MissionRuntime.tick_realtime`): the sim runs
+- The fixed-62.5 Hz accumulator is **implemented** (`frame::FrameDriver`, driven through
+  `MissionRuntime.tick_realtime`): the sim runs
   at a constant rate decoupled from the render frame rate, faithful to `Game_MainLoop @0x52b630`
   ([bms-event-runtime-re.md](mission/bms-event-runtime-re.md) §1.6 / §2a). There is no inter-tick
   render interpolation — entities step at 62.5 Hz and the present pass writes current state once per
