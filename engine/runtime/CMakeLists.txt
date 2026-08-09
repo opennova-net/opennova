@@ -39,6 +39,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/src/material_eval.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/src/material_classify.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/src/object_shader_template.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/src/foliage_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/src/particle_atlas.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/src/particle_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/src/render_order.cpp
