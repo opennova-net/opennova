@@ -36,7 +36,7 @@ present-once shape AND the fixed per-frame leg order; the shells install device 
 
 ```
 main_game.gd
-  -> GameWorld.tick(camera, delta)                  the device host: stashes camera state,
+  -> GameWorld.tick(camera, delta)                  the device shell: stashes camera state,
        MissionRuntime.tick_realtime(delta)          gates on the transport, then drives
          NovaSimulation.frame_realtime(delta)       ONE engine frame:
            frame::FrameDriver.run_frame             [orig: Game_MainLoop @0x52b630]
@@ -144,7 +144,7 @@ matchmaking/handoff client and does not own a second gameplay entity model.
   throwable sync, drain, fixed-tick broadcast), and the post-batch frame-leg order
   (net-drive, weather, blink, occlusion, iris, audio) — pinned by
   `tests/frame/frame_driver_test.cpp` (ADR 0033 R1).
-- **Host composition (GDScript)** — `mission_runtime.gd` composes `{sim, present
+- **Shell composition (GDScript)** — `mission_runtime.gd` composes `{sim, present
   passes, index}`, installs the shell device legs on the sim
   (`set_frame_shell_hooks`), and exposes the transport (`play`/`pause`/`step_once`,
   the lockout predicate); its `tick_realtime`/`tick` are thin delegates over

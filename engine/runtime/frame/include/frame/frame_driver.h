@@ -1,4 +1,4 @@
-// The game frame: the host-side loop the shell used to hand-mirror in
+// The game frame: the embedder-side loop the shell used to hand-mirror in
 // GDScript, owned by the engine per ADR 0033 (R1). One driver runs the
 // original main loop's shape — bank wall-clock, drain it in fixed 62.5 Hz
 // quanta (the catch-up batch), present ONCE after the batch — and then the
@@ -19,8 +19,8 @@
 namespace opennova::frame {
 
 // The per-frame device legs, in the exact slot order run_frame invokes them.
-// Any leg may be empty (a role that lacks it — dedicated hosts have no
-// listener, ONED previews no foliage). The legs are sampled by reference per
+// Any leg may be empty (a role that lacks it — a dedicated serve-mode
+// session has no listener, ONED previews no foliage). The legs are sampled by reference per
 // call; the shell installs them once at mission setup.
 struct FrameHooks {
 	// Foliage dispatch for this camera — before the tick batch (the shell's
@@ -78,7 +78,7 @@ struct FramePerf {
 
 class FrameDriver {
 public:
-	// The realtime host entry [orig: Game_MainLoop @ 0x52b630]: bank `dt`
+	// The realtime embedder entry [orig: Game_MainLoop @ 0x52b630]: bank `dt`
 	// through the accumulator, run 0..kMaxCatchupTicks steps, then present —
 	// the full ladder after a batch that ran, the rows alone on a zero-tick
 	// frame — and then the post-batch legs in slot order. Returns the number
@@ -89,7 +89,7 @@ public:
 	// listener stamp, exactly one step attempt, the per-tick legs when it ran,
 	// then the full present ladder. No accumulator interaction. Returns
 	// whether the tick ran. The post-batch frame legs do NOT run here — the
-	// realtime host owns them.
+	// realtime entry owns them.
 	bool run_single(const FrameHooks &hooks);
 
 	// Discard banked wall-clock (Play after pause/load must not burst).
