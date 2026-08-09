@@ -4,7 +4,6 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/defs.hpp>
 #include <godot_cpp/godot.hpp>
-#include <godot_cpp/classes/editor_plugin_registration.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/classes/resource_saver.hpp>
 
@@ -21,7 +20,6 @@
 #include "terrain/nova_terrain_tile_info.h"
 #include "terrain/nova_terrain_tile_overlay.h"
 #include "terrain/trn_resource_format.h"
-#include "terrain/cpt_resource_format.h"
 #include "terrain/til_resource_format.h"
 #include "env/nova_env_keyframe.h"
 #include "env/env_file.h"
@@ -40,7 +38,6 @@
 #include "particle/nova_effect_scene.h"
 #include "particle/nova_particle_compositor.h"
 #include "particle/nova_particle_renderer.h"
-#include "particle/ptl_resource_format.h"
 #include "object/nova_object_data.h"
 #include "object/nova_object_shader_cache.h"
 #include "object/nova_item_database.h"
@@ -61,18 +58,13 @@
 #include "cbin/kda_resource_format.h"
 #include "cbin/nova_credits_player.h"
 #include "fnt/nova_fnt_resource.h"
-#include "fnt/fnt_resource_format.h"
-#include "fnt/fnt_import_plugin.h"
-#include "editor/opennova_editor_plugin.h"
 #include "editor/nova_edit_history.h"
 #include "rtxt/rtxt_string_file.h"
-#include "rtxt/rtxt_resource_format.h"
 #include "network/nova_world_client.h"
 #include "network/nova_world_host.h"
 #include "network/nova_udp_pump.h"
 #include "network/nova_lan_session.h"
 #include "network/nova_net_session_policy.h"
-#include "util/nova_data_format.h"
 #include "util/nova_paths.h"
 #include "util/nova_texture_format.h"
 #include "resource_index/nova_resource_index.h"
@@ -88,8 +80,6 @@
 #include "pff/nova_pff_archive.h"
 #include "mnu/nova_mnu_document.h"
 #include "mnu/mns_stylesheet.h"
-#include "mnu/mnu_resource_format.h"
-#include "mnu/mns_resource_format.h"
 #include "mnu/nova_mnu_screen.h"
 #include "mnu/nova_mnu_label.h"
 #include "mnu/nova_mnu_button.h"
@@ -113,37 +103,17 @@ using namespace godot;
 
 static Ref<ResourceFormatLoaderTRN> trn_loader;
 static Ref<ResourceFormatSaverTRN> trn_saver;
-static Ref<ResourceFormatLoaderCPT> cpt_loader;
 static Ref<ResourceFormatLoaderTIL> til_loader;
 static Ref<ResourceFormatSaverTIL> til_saver;
-static Ref<EnvFileLoader> env_loader;
-static Ref<EnvFileSaver> env_saver;
 static Ref<KdaResourceFormatLoader> kda_loader;
 static Ref<KdaResourceFormatSaver> kda_saver;
-static Ref<ResourceFormatLoaderFNT> fnt_loader;
-static Ref<ResourceFormatSaverFNT> fnt_saver;
 static Ref<ResourceFormatLoaderNovaTexture> nova_tex_loader;
-static Ref<ResourceFormatLoaderPTL> ptl_loader;
-static Ref<ResourceFormatSaverPTL> ptl_saver;
-static Ref<ResourceFormatLoaderRTXT> rtxt_loader;
-static Ref<ResourceFormatSaverRTXT> rtxt_saver;
 static Ref<SbfResourceFormatLoader> sbf_loader;
 static Ref<SbfResourceFormatSaver> sbf_saver;
 static Ref<MusResourceFormatLoader> mus_loader;
 static Ref<MusResourceFormatSaver> mus_saver;
-static Ref<ResourceFormatLoaderMNU> mnu_loader;
-static Ref<ResourceFormatSaverMNU> mnu_saver;
-static Ref<ResourceFormatLoaderMNS> mns_loader;
-static Ref<ResourceFormatSaverMNS> mns_saver;
 
 void initialize_opennova_module(ModuleInitializationLevel p_level) {
-	if (p_level == MODULE_INITIALIZATION_LEVEL_EDITOR) {
-		GDREGISTER_CLASS(NovaFntImportPlugin);
-		GDREGISTER_CLASS(OpenNovaEditorPlugin);
-		EditorPlugins::add_by_type<OpenNovaEditorPlugin>();
-		return;
-	}
-
 	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
 		return;
 	}
@@ -162,13 +132,10 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NovaTerrainTileOverlay);
 	GDREGISTER_CLASS(ResourceFormatLoaderTRN);
 	GDREGISTER_CLASS(ResourceFormatSaverTRN);
-	GDREGISTER_CLASS(ResourceFormatLoaderCPT);
 	GDREGISTER_CLASS(ResourceFormatLoaderTIL);
 	GDREGISTER_CLASS(ResourceFormatSaverTIL);
 	GDREGISTER_CLASS(NovaEnvKeyframe);
 	GDREGISTER_CLASS(EnvFile);
-	GDREGISTER_CLASS(EnvFileLoader);
-	GDREGISTER_CLASS(EnvFileSaver);
 	GDREGISTER_CLASS(NovaColorSmoother);
 	GDREGISTER_CLASS(NovaWeatherCore);
 	GDREGISTER_CLASS(NovaWaterCore);
@@ -200,12 +167,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(KdaResourceFormatSaver);
 	GDREGISTER_CLASS(NovaCreditsPlayer);
 	GDREGISTER_CLASS(NovaFntResource);
-	GDREGISTER_CLASS(ResourceFormatLoaderFNT);
-	GDREGISTER_CLASS(ResourceFormatSaverFNT);
 	GDREGISTER_CLASS(RtxtStringFile);
-	GDREGISTER_CLASS(ResourceFormatLoaderRTXT);
-	GDREGISTER_CLASS(ResourceFormatSaverRTXT);
-	GDREGISTER_CLASS(NovaDataFile);
 	GDREGISTER_CLASS(NovaPaths);
 	GDREGISTER_CLASS(ResourceFormatLoaderNovaTexture);
 	GDREGISTER_CLASS(NovaParticleCurveRef);
@@ -218,8 +180,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NovaEffectScene);
 	GDREGISTER_CLASS(NovaParticleCompositorEffect);
 	GDREGISTER_CLASS(NovaParticleRenderer);
-	GDREGISTER_CLASS(ResourceFormatLoaderPTL);
-	GDREGISTER_CLASS(ResourceFormatSaverPTL);
 	GDREGISTER_CLASS(NovaResourceIndex);
 	GDREGISTER_CLASS(NovaReferenceIndex);
 	GDREGISTER_CLASS(NovaResourceRoot);
@@ -235,10 +195,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NovaPffArchive);
 	GDREGISTER_CLASS(NovaMnuDocument);
 	GDREGISTER_CLASS(MnsStyleSheet);
-	GDREGISTER_CLASS(ResourceFormatLoaderMNU);
-	GDREGISTER_CLASS(ResourceFormatSaverMNU);
-	GDREGISTER_CLASS(ResourceFormatLoaderMNS);
-	GDREGISTER_CLASS(ResourceFormatSaverMNS);
 	GDREGISTER_CLASS(NovaMnuScreen);
 	GDREGISTER_CLASS(NovaMnuLabel);
 	GDREGISTER_CLASS(NovaMnuButton);
@@ -269,20 +225,11 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	trn_saver.instantiate();
 	ResourceSaver::get_singleton()->add_resource_format_saver(trn_saver);
 
-	cpt_loader.instantiate();
-	ResourceLoader::get_singleton()->add_resource_format_loader(cpt_loader);
-
 	til_loader.instantiate();
 	ResourceLoader::get_singleton()->add_resource_format_loader(til_loader);
 
 	til_saver.instantiate();
 	ResourceSaver::get_singleton()->add_resource_format_saver(til_saver);
-
-	env_loader.instantiate();
-	ResourceLoader::get_singleton()->add_resource_format_loader(env_loader);
-
-	env_saver.instantiate();
-	ResourceSaver::get_singleton()->add_resource_format_saver(env_saver);
 
 	kda_loader.instantiate();
 	ResourceLoader::get_singleton()->add_resource_format_loader(kda_loader);
@@ -290,26 +237,8 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	kda_saver.instantiate();
 	ResourceSaver::get_singleton()->add_resource_format_saver(kda_saver);
 
-	fnt_loader.instantiate();
-	ResourceLoader::get_singleton()->add_resource_format_loader(fnt_loader);
-
-	fnt_saver.instantiate();
-	ResourceSaver::get_singleton()->add_resource_format_saver(fnt_saver);
-
 	nova_tex_loader.instantiate();
 	ResourceLoader::get_singleton()->add_resource_format_loader(nova_tex_loader, true);
-
-	ptl_loader.instantiate();
-	ResourceLoader::get_singleton()->add_resource_format_loader(ptl_loader);
-
-	ptl_saver.instantiate();
-	ResourceSaver::get_singleton()->add_resource_format_saver(ptl_saver);
-
-	rtxt_loader.instantiate();
-	ResourceLoader::get_singleton()->add_resource_format_loader(rtxt_loader);
-
-	rtxt_saver.instantiate();
-	ResourceSaver::get_singleton()->add_resource_format_saver(rtxt_saver);
 
 	sbf_loader.instantiate();
 	ResourceLoader::get_singleton()->add_resource_format_loader(sbf_loader);
@@ -322,26 +251,9 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 
 	mus_saver.instantiate();
 	ResourceSaver::get_singleton()->add_resource_format_saver(mus_saver);
-
-	mnu_loader.instantiate();
-	ResourceLoader::get_singleton()->add_resource_format_loader(mnu_loader);
-
-	mnu_saver.instantiate();
-	ResourceSaver::get_singleton()->add_resource_format_saver(mnu_saver);
-
-	mns_loader.instantiate();
-	ResourceLoader::get_singleton()->add_resource_format_loader(mns_loader);
-
-	mns_saver.instantiate();
-	ResourceSaver::get_singleton()->add_resource_format_saver(mns_saver);
 }
 
 void uninitialize_opennova_module(ModuleInitializationLevel p_level) {
-	if (p_level == MODULE_INITIALIZATION_LEVEL_EDITOR) {
-		EditorPlugins::remove_by_type<OpenNovaEditorPlugin>();
-		return;
-	}
-
 	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
 		return;
 	}
@@ -352,20 +264,11 @@ void uninitialize_opennova_module(ModuleInitializationLevel p_level) {
 	ResourceSaver::get_singleton()->remove_resource_format_saver(trn_saver);
 	trn_saver.unref();
 
-	ResourceLoader::get_singleton()->remove_resource_format_loader(cpt_loader);
-	cpt_loader.unref();
-
 	ResourceLoader::get_singleton()->remove_resource_format_loader(til_loader);
 	til_loader.unref();
 
 	ResourceSaver::get_singleton()->remove_resource_format_saver(til_saver);
 	til_saver.unref();
-
-	ResourceLoader::get_singleton()->remove_resource_format_loader(env_loader);
-	env_loader.unref();
-
-	ResourceSaver::get_singleton()->remove_resource_format_saver(env_saver);
-	env_saver.unref();
 
 	ResourceLoader::get_singleton()->remove_resource_format_loader(kda_loader);
 	kda_loader.unref();
@@ -373,26 +276,8 @@ void uninitialize_opennova_module(ModuleInitializationLevel p_level) {
 	ResourceSaver::get_singleton()->remove_resource_format_saver(kda_saver);
 	kda_saver.unref();
 
-	ResourceLoader::get_singleton()->remove_resource_format_loader(fnt_loader);
-	fnt_loader.unref();
-
-	ResourceSaver::get_singleton()->remove_resource_format_saver(fnt_saver);
-	fnt_saver.unref();
-
 	ResourceLoader::get_singleton()->remove_resource_format_loader(nova_tex_loader);
 	nova_tex_loader.unref();
-
-	ResourceLoader::get_singleton()->remove_resource_format_loader(ptl_loader);
-	ptl_loader.unref();
-
-	ResourceSaver::get_singleton()->remove_resource_format_saver(ptl_saver);
-	ptl_saver.unref();
-
-	ResourceLoader::get_singleton()->remove_resource_format_loader(rtxt_loader);
-	rtxt_loader.unref();
-
-	ResourceSaver::get_singleton()->remove_resource_format_saver(rtxt_saver);
-	rtxt_saver.unref();
 
 	ResourceLoader::get_singleton()->remove_resource_format_loader(sbf_loader);
 	sbf_loader.unref();
@@ -405,18 +290,6 @@ void uninitialize_opennova_module(ModuleInitializationLevel p_level) {
 
 	ResourceSaver::get_singleton()->remove_resource_format_saver(mus_saver);
 	mus_saver.unref();
-
-	ResourceLoader::get_singleton()->remove_resource_format_loader(mnu_loader);
-	mnu_loader.unref();
-
-	ResourceSaver::get_singleton()->remove_resource_format_saver(mnu_saver);
-	mnu_saver.unref();
-
-	ResourceLoader::get_singleton()->remove_resource_format_loader(mns_loader);
-	mns_loader.unref();
-
-	ResourceSaver::get_singleton()->remove_resource_format_saver(mns_saver);
-	mns_saver.unref();
 
 	NovaObjectShaderCache::destroy_singleton();
 }

@@ -9,12 +9,11 @@ const StringsEditorScript = preload("res://modtools/strings/strings_editor.gd")
 const TMP_A := "user://rtxt_test_a.bin"
 const TMP_B := "user://rtxt_test_b.bin"
 const TMP_CSV := "user://rtxt_test.csv"
-const TMP_LOADER := "user://rtxt_loader_test.bin"
 const TMP_NS := "user://rtxt_ns_test.bin"
 
 
 func after_all() -> void:
-	for path in [TMP_A, TMP_B, TMP_CSV, TMP_LOADER, TMP_NS]:
+	for path in [TMP_A, TMP_B, TMP_CSV, TMP_NS]:
 		if FileAccess.file_exists(path):
 			DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 
@@ -213,15 +212,6 @@ func test_strip_hotkey_statics() -> void:
 	assert_eq(int(d["index"]), 5)
 	var none := RtxtStringFile.strip_hotkey_with_index("Plain")
 	assert_eq(int(none["index"]), -1)
-
-
-func test_resource_loader_recognizes_rtxt_bin() -> void:
-	var t := _sample_table()
-	assert_eq(t.save_to_path(TMP_LOADER), OK)
-	var loaded = ResourceLoader.load(TMP_LOADER, "", ResourceLoader.CACHE_MODE_IGNORE)
-	assert_not_null(loaded, "the .bin loader should produce a resource")
-	assert_true(loaded is RtxtStringFile, "loaded resource should be an RtxtStringFile")
-	assert_eq(loaded.get_string("BTN_QUIT"), "Quit")
 
 
 func test_committed_fixture_loads_and_reserializes_byte_exact() -> void:

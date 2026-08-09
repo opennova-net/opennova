@@ -35,12 +35,6 @@ func test_menu_size_derived_from_content() -> void:
 		"real JO menu derives its 800x600 canvas, not the 640x480 default")
 
 
-func test_resource_loader_returns_document() -> void:
-	var res := load(FIXTURE)
-	assert_not_null(res, "loader returns non-null for " + FIXTURE)
-	assert_true(res is NovaMnuDocument, "loader returns NovaMnuDocument")
-
-
 func test_screen_structure() -> void:
 	var doc := _load_doc()
 	assert_eq(doc.get_screen_count(), 2, "two screens")

@@ -11,9 +11,12 @@ func after_each() -> void:
 
 
 func test_fnt_loads_as_native_resource_and_font_file_view() -> void:
-	var res := ResourceLoader.load(FNT_PATH, "NovaFntResource", ResourceLoader.CACHE_MODE_IGNORE) as NovaFntResource
-	assert_not_null(res, "Serpen24.fnt should load as NovaFntResource.")
-	if res == null:
+	var bytes := FileAccess.get_file_as_bytes(FNT_PATH)
+	assert_gt(bytes.size(), 0, "Serpen24.fnt fixture bytes should be readable.")
+	var res := NovaFntResource.new()
+	var err := res.load_from_bytes(bytes)
+	assert_eq(err, OK, "Serpen24.fnt should load as NovaFntResource.")
+	if err != OK:
 		return
 
 	assert_eq(res.get_page_count(), 1, "Serpen24 should be a one-page Nova FNT fixture.")
@@ -40,14 +43,20 @@ func test_blank_fnt_saves_and_reloads_alpha_and_glyph_rect() -> void:
 	res.set_glyph_rect(32, 0, Rect2i(0, 0, 4, 3))
 	res.set_pixel_alpha(0, 0, 0, 200)
 
-	var save_err := ResourceSaver.save(res, TEMP_FNT_PATH)
-	assert_eq(save_err, OK, "NovaFntResource should save as raw .fnt.")
-	if save_err != OK:
+	var out_bytes := res.to_bytes()
+	assert_gt(out_bytes.size(), 0, "NovaFntResource should serialize to raw .fnt bytes.")
+	var file := FileAccess.open(TEMP_FNT_PATH, FileAccess.WRITE)
+	assert_not_null(file, "Temp .fnt path should be writable.")
+	if file == null:
 		return
+	file.store_buffer(out_bytes)
+	file.close()
 
-	var reloaded := ResourceLoader.load(TEMP_FNT_PATH, "NovaFntResource", ResourceLoader.CACHE_MODE_IGNORE) as NovaFntResource
-	assert_not_null(reloaded, "Saved raw .fnt should reload.")
-	if reloaded == null:
+	var reload_bytes := FileAccess.get_file_as_bytes(TEMP_FNT_PATH)
+	var reloaded := NovaFntResource.new()
+	var reload_err := reloaded.load_from_bytes(reload_bytes)
+	assert_eq(reload_err, OK, "Saved raw .fnt should reload.")
+	if reload_err != OK:
 		return
 
 	assert_eq(reloaded.get_page_count(), 1, "Reloaded blank font keeps page count.")

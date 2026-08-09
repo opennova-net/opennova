@@ -1,5 +1,0 @@
-[particledef]
-{
-	id = ResourceLoaderSmoke;
-	emit_burst = 1;
-}

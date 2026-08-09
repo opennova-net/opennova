@@ -95,7 +95,10 @@ func test_cp1252_bytes_decode_to_the_code_pages_unicode() -> void:
 
 
 func _fixture_font() -> FontFile:
-	var res := ResourceLoader.load(FNT_PATH, "NovaFntResource", ResourceLoader.CACHE_MODE_IGNORE) as NovaFntResource
+	var fnt_bytes := FileAccess.get_file_as_bytes(FNT_PATH)
+	var res: NovaFntResource = NovaFntResource.new()
+	if fnt_bytes.is_empty() or res.load_from_bytes(fnt_bytes) != OK:
+		res = null
 	assert_not_null(res, "Serpen24.fnt fixture should load as NovaFntResource.")
 	if res == null:
 		return null
