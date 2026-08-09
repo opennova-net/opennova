@@ -21,6 +21,7 @@
 #include "env/env_file.h"
 #include "env/nova_color_smoother.h"
 #include "env/nova_mission_environment.h"
+#include "env/nova_sky_dome.h"
 #include "env/nova_weather.h"
 #include "env/nova_weather_core.h"
 #include "env/nova_glare_occlusion.h"
@@ -120,6 +121,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(EnvFile);
 	GDREGISTER_CLASS(ColorSmoother);
 	GDREGISTER_CLASS(MissionEnvironment);
+	GDREGISTER_CLASS(SkyDome);
 	GDREGISTER_CLASS(Weather);
 	GDREGISTER_CLASS(WeatherCore);
 	GDREGISTER_CLASS(WaterCore);

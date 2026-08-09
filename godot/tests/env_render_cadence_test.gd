@@ -23,6 +23,9 @@ func _advance_one_second(node: Node, hz: int) -> void:
 	if node is Weather:
 		for _i in hz:
 			(node as Weather).advance_frame(delta)
+	elif node is SkyDome:
+		for _i in hz:
+			(node as SkyDome).advance_frame(delta)
 	else:
 		simulate(node, hz, delta)
 
@@ -205,8 +208,8 @@ func _sky_fallback_state_after_one_second(hz: int) -> Array:
 	mount.add_child(sky)
 	_advance_one_second(sky, hz)
 	return [
-		sky.sky_material.get_shader_parameter("u_scroll_offset1"),
-		sky.sky_material.get_shader_parameter("u_scroll_offset2"),
+		sky.get_sky_material().get_shader_parameter("u_scroll_offset1"),
+		sky.get_sky_material().get_shader_parameter("u_scroll_offset2"),
 	]
 
 

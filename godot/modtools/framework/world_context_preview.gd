@@ -22,7 +22,6 @@ extends RefCounted
 # Reference via preload(), not class_name, so it resolves without an editor
 # re-import (same convention as mission_object_placer.gd).
 
-const NovaSkyScript = preload("res://game/environment/nova_sky.gd")
 const NovaWaterScript = preload("res://game/environment/nova_water.gd")
 const HHMM_DAY := MissionEnvironment.HHMM_DAY
 
@@ -80,7 +79,7 @@ func init_environment_preview() -> void:
 	_world_root.add_child(_clear_color_node)
 
 
-	_sky_node = NovaSkyScript.new()
+	_sky_node = SkyDome.new()
 	_sky_node.name = "EditorSky"
 	_sky_node.environment_path = NodePath("../EditorEnvironment")
 	_sky_node.frame_clear_environment = _clear_color_node.environment

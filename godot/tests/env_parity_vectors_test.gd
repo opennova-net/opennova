@@ -148,7 +148,6 @@ extends GutTest
 # loudly so a dump run is never mistaken for a green run.
 # =============================================================================
 
-const NovaSkyScript = preload("res://game/environment/nova_sky.gd")
 const NovaWaterScript = preload("res://game/environment/nova_water.gd")
 const NovaCelestialScript = preload("res://game/environment/nova_celestial.gd")
 
@@ -619,14 +618,14 @@ func _collect_sky(bytes: Dictionary, floats: Dictionary) -> void:
 	var env_node := _add_env_node(_make_cfg(0), "EnvSky0")
 	env_node.time_of_day = 1200.0
 
-	var sky: Node = NovaSkyScript.new()
+	var sky: Node = SkyDome.new()
 	sky.name = "Sky0"
 	sky.environment_path = NodePath("../EnvSky0")
 	add_child_autofree(sky)
 
 	# Dome mesh invariants [orig: build_sky_dome_mesh @ 0x578db0]: 21x21 =
 	# 441 vertices, 20*20*2 = 800 triangles (2400 indices).
-	var mesh: ArrayMesh = sky.mesh_instance.mesh
+	var mesh: ArrayMesh = sky.get_mesh_instance().mesh
 	var arrays := mesh.surface_get_arrays(0)
 	var positions: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
 	var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
@@ -651,29 +650,30 @@ func _collect_sky(bytes: Dictionary, floats: Dictionary) -> void:
 	#  consumption @ 0x5791de..0x579260].
 	var ticks_done := 0
 	for checkpoint in [1, 64]:
-		simulate(sky, checkpoint - ticks_done, TICK)
+		for _s in checkpoint - ticks_done:
+			sky.advance_frame(TICK)
 		ticks_done = checkpoint
-		var off1: Vector2 = sky.sky_material.get_shader_parameter("u_scroll_offset1")
-		var off2: Vector2 = sky.sky_material.get_shader_parameter("u_scroll_offset2")
+		var off1: Vector2 = sky.get_sky_material().get_shader_parameter("u_scroll_offset1")
+		var off2: Vector2 = sky.get_sky_material().get_shader_parameter("u_scroll_offset2")
 		floats["sky/k%03d" % checkpoint] = [off1.x, off1.y, off2.x, off2.y]
 	# Dome anchor rides at half camera height [orig: render_skybox @ 0x5790d0].
-	var dome_pos: Vector3 = sky.mesh_instance.global_position
-	var sky_height: float = sky.sky_material.get_shader_parameter("u_sky_height")
+	var dome_pos: Vector3 = sky.get_mesh_instance().global_position
+	var sky_height: float = sky.get_sky_material().get_shader_parameter("u_sky_height")
 	floats["sky/anchor"] = [dome_pos.x, dome_pos.y, dome_pos.z, sky_height, cam.global_position.y]
 
 	# advanced_clouds 0 flat pass [orig: render_skybox @ 0x579b42]: the dome
 	# flat-shades with cloud_tint (cfg1).
 	var env_flat := _add_env_node(_make_cfg(1), "EnvSkyFlat")
 	env_flat.time_of_day = 1200.0
-	var sky_flat: Node = NovaSkyScript.new()
+	var sky_flat: Node = SkyDome.new()
 	sky_flat.name = "SkyFlat"
 	sky_flat.environment_path = NodePath("../EnvSkyFlat")
 	add_child_autofree(sky_flat)
-	simulate(sky_flat, 1, TICK)
-	var flat_pass: bool = sky_flat.sky_material.get_shader_parameter("u_flat_pass")
-	var flat_color: Vector3 = sky_flat.sky_material.get_shader_parameter("u_flat_color")
+	sky_flat.advance_frame(TICK)
+	var flat_pass: bool = sky_flat.get_sky_material().get_shader_parameter("u_flat_pass")
+	var flat_color: Vector3 = sky_flat.get_sky_material().get_shader_parameter("u_flat_color")
 	bytes["sky/flat"] = "%s %s" % ["01" if flat_pass else "00", _hex_color(flat_color)]
-	var flat_height: float = sky_flat.sky_material.get_shader_parameter("u_sky_height")
+	var flat_height: float = sky_flat.get_sky_material().get_shader_parameter("u_sky_height")
 	floats["sky/flat"] = [flat_height]
 
 
