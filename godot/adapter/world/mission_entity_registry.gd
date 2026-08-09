@@ -25,19 +25,16 @@ static func _origin_key(kind: int, index: int) -> int:
 	return (kind << 32) | (index & 0xffffffff)
 
 
-## (Re)build the indexes from the animatable entity nodes under `container`, reading each node's
-## "entity_ref" meta. `mission` supplies the area-trigger rects for zone resolution.
-func build(container: Node, mission) -> void:
+## (Re)build the indexes from the placer's typed registrations
+## ({model, ref} records — construction-time registration, never a child
+## scan). `mission` supplies the area-trigger rects for zone resolution.
+func build(entries: Array, mission) -> void:
 	clear()
 	if mission != null and mission.has_method("get_area_triggers"):
 		_area_triggers = mission.get_area_triggers()
-	if container == null:
-		return
-	for child in container.get_children():
-		# Only animatable models are valid targets; this skips editor pick colliders + static batches.
-		if not (child is NovaEntityVisual) or not child.has_meta("entity_ref"):
-			continue
-		var ref: Dictionary = child.get_meta("entity_ref")
+	for entry in entries:
+		var child: NovaObjectModel = entry["model"]
+		var ref: Dictionary = entry["ref"]
 		var bms_id := int(ref.get("bms_id", 0))
 		if bms_id != 0:
 			_by_bms_id[bms_id] = child

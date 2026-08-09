@@ -9,7 +9,7 @@ extends RefCounted
 # Hybrid split (the engine decides, the shell draws): it pulls ONE batched snapshot from the sim
 # (NovaSimulation.get_present_snapshot -- a flat PackedFloat32Array) and the NATIVE row walk
 # (NovaPresentApplier, godot/adapter/simulation) owns the plan + per-row reads + change-gated
-# dispatch; each resolved node's duck-typed NovaEntityVisual surface (ADR 0007) keeps its GDScript
+# dispatch; each resolved node is a native NovaObjectModel (ADR 0007's surface, typed) and keeps its
 # implementation:
 #   transform (Node3D), set_part_phase(channel, phase),
 #   clear_part_phase(channel), visible (Node3D),

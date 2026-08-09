@@ -1,7 +1,5 @@
 extends GutTest
 
-const NovaObjectModelScript := preload(
-		"res://adapter/object/nova_object_model.gd")
 const PresentEmplacedWeapon := preload(
 		"res://adapter/world/emplaced_weapon_present_pass.gd")
 
@@ -1267,7 +1265,7 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 			host_joiner_index).get("yaw_deg", 0.0))
 	var yaw_before := _present_field_for_type(
 			joiner, 1419, NovaSimulation.PF_EWEAP_GUNYAW)
-	var visual: Node3D = add_child_autofree(NovaObjectModelScript.new())
+	var visual: Node3D = add_child_autofree(NovaObjectModel.new())
 	visual.set_object_data(model)
 	var visual_parts: Dictionary = visual.get_render_part_nodes()
 	assert_has(visual_parts, yaw_part,

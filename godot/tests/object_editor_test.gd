@@ -4,7 +4,7 @@ const ObjectEditorScript = preload("res://modtools/object/object_editor.gd")
 const ObjectPreviewScript = preload("res://modtools/object/object_preview.gd")
 const ObjectWorkspaceScript = preload("res://modtools/object/object_workspace.gd")
 const FlyCameraScript = preload("res://adapter/fly_camera.gd")
-const NovaObjectModelScript = preload("res://adapter/object/nova_object_model.gd")
+const NovaObjectModel = preload("res://adapter/object/nova_object_model.gd")
 
 const BIRD_FIXTURE := "res://../fixtures/3dp/Bird1/Bird1.3di"
 const BIRD_PROJECT_FIXTURE := "res://../fixtures/3dp/Bird1/Bird1.3dp"
@@ -468,7 +468,7 @@ func test_object_data_export_failure_includes_native_oed_detail() -> void:
 func test_nova_object_model_builds_runtime_scene_without_editor_viewport() -> void:
 	var data := NovaObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
-	var model = add_child_autofree(NovaObjectModelScript.new())
+	var model = add_child_autofree(NovaObjectModel.new())
 	model.set_object_data(data)
 	await get_tree().process_frame
 

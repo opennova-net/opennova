@@ -1,7 +1,6 @@
 extends GutTest
 
 const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
-const NovaObjectModelScript := preload("res://adapter/object/nova_object_model.gd")
 const PresentAimOverlay := preload("res://adapter/world/aim_overlay_present_pass.gd")
 const NATIVE_RUNTIME_TIMING_KEYS := [
 	"sim_tick_us",
@@ -1705,7 +1704,7 @@ func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot(
 	assert_gt(packed_head.distance_to(packed_body), 10.0,
 			"the config-6 witness really drives head aim away from the mounted body")
 
-	var model = NovaObjectModelScript.new()
+	var model = NovaObjectModel.new()
 	add_child_autofree(model)
 	model.set_skeletal_anim(skeletal)
 	model.set_object_data(data)

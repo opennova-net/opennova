@@ -48,7 +48,6 @@ var _index                        # MissionEntityRegistry
 var _placer                       # MissionObjectPlacer (husk model builds)
 var _item_db                      # NovaItemDatabase (husk graphic names)
 var _game_world                   # GameWorld (effect anchors) or null
-var _env_node: Node = null        # live mission environment for model materials
 var _dynamic_node_resolver        # WirePresentPass (runtime-only packed handles)
 var _audio_provider := Callable() # -> NovaMissionAudio (or null)
 var _fx_provider := Callable()    # -> NovaEffectWorld (or null)
@@ -93,7 +92,7 @@ func has_active_wreck_fire(owner_key: String) -> bool:
 
 
 func setup(sim, container: Node3D, index, placer, item_db, game_world,
-		audio_provider: Callable, fx_provider: Callable, env_node: Node = null,
+		audio_provider: Callable, fx_provider: Callable,
 		dynamic_node_resolver = null) -> void:
 	_sim = sim
 	_container = container
@@ -101,7 +100,6 @@ func setup(sim, container: Node3D, index, placer, item_db, game_world,
 	_placer = placer
 	_item_db = item_db
 	_game_world = game_world
-	_env_node = env_node
 	_dynamic_node_resolver = dynamic_node_resolver
 	_audio_provider = audio_provider
 	_fx_provider = fx_provider
@@ -277,7 +275,7 @@ func _apply_husk_swap(husk: Dictionary) -> void:
 		var individual_casts_static_shadow := \
 				_node_has_static_shadow_caster(node)
 		var model: Node3D = _placer.build_model_from_graphic(
-				husk_graphic, "", node, "", _env_node)
+				husk_graphic, "", node, "")
 		if model == null:
 			_husked[husk_key] = null
 			_stats.no_husk += 1
@@ -318,7 +316,7 @@ func _apply_husk_swap(husk: Dictionary) -> void:
 	var batched_casts_static_shadow: bool = \
 			bool(_placer.static_instance_casts_terrain_shadow(bms_id))
 	var graft: Node3D = _placer.build_model_from_graphic(
-			husk_graphic, "", _container, "", _env_node)
+			husk_graphic, "", _container, "")
 	if graft == null:
 		_husked[husk_key] = null
 		_stats.no_husk += 1

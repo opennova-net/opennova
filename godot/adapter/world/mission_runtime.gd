@@ -227,7 +227,9 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	# MissionSimDriver). This MissionRuntime node itself IS in the tree — its host adds it and
 	# drives tick_realtime() explicitly (ADR 0025: the game shell is the only live host).
 	_index = MissionEntityRegistry.new()
-	_index.build(container, mission)
+	var registry_placer = options.get("placer")
+	_index.build(registry_placer.placed_entity_records if registry_placer != null else [],
+			mission)
 	# The registry present drives whichever authored mission nodes actually exist. A
 	# production joiner owns only the 616-byte wire header, so its index is empty: the
 	# native sim separately materializes streamed pools 1-3 at exact packed handles for
@@ -253,7 +255,7 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 		var mission_data := mission as NovaMissionData
 		if mission_data != null and mission_data.is_wire_header_only():
 			wire_defer_index = null
-		_wire_present.setup(_sim, options.get("placer"), container, options.get("env_node"),
+		_wire_present.setup(_sim, options.get("placer"), container,
 			wire_defer_index, {
 				"synthetic_origin_only": sp_attachment_present,
 			})
@@ -296,7 +298,7 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 		_destruction_present.setup(_sim, container, _index, options.get("placer"),
 			options.get("item_db"), options.get("game_world"),
 			options.get("fire_audio", Callable()),
-			options.get("fire_fx", Callable()), options.get("env_node"),
+			options.get("fire_fx", Callable()),
 			_wire_present)
 		simulation_restarted.connect(
 				Callable(_destruction_present, 'reset_runtime_state'))
@@ -308,7 +310,7 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	# (world-wac-ai-re §27; the sim stays render-free).
 	_throwable_present = ThrowablePresentPass.new()
 	_throwable_present.setup(_sim, container, options.get("placer"),
-		options.get("item_db"), options.get("env_node"),
+		options.get("item_db"),
 		options.get("fire_fx", Callable()), options.get("game_world"))
 	simulation_restarted.connect(
 		Callable(_throwable_present, 'reset_runtime_state'))

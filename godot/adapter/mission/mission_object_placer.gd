@@ -35,12 +35,10 @@ extends RefCounted
 # can share it. Reference via preload(), not class_name, so it resolves without an
 # editor re-import (same convention as veg_assets.gd).
 
-const NovaObjectModelScript := preload("res://adapter/object/nova_object_model.gd")
 const ITEM_ATTRIB_NO_SHADOW := 0x04000000
 const ITEM_ATTRIB2_DYNAMIC_SHADOW := 0x10
 const ITEM_ATTRIB2_STATIC_SHADOW := 0x20
 const ENTITY_ATTRIB_NO_SHADOW := 0x01000000
-const EnvStamperScript := preload("res://adapter/mission/mission_batch_env_stamper.gd")
 const CollisionHull := preload("res://adapter/object/collision_hull.gd")
 
 const CONTAINER_NAME := "MissionObjects"
@@ -50,7 +48,12 @@ const PLAYER_VISUAL_ITEM_ID := 105310
 
 var resource_root: NovaResourceRoot
 var item_db: NovaItemDatabase
-var _panm_clock
+var _panm_clock: NovaPanmClock = null
+var _env_state: NovaEnvLightState = null
+## The typed entity registrations from the last place()/place_single() —
+## {model: NovaObjectModel, ref: Dictionary} per animatable entity. The
+## MissionEntityRegistry indexes THIS list; nothing scans scene children.
+var placed_entity_records: Array = []
 
 # When true, place() also records a per-entity pickable index in pickable_records
 # (used by the editor Mission workspace to select / move entities). Off for the
@@ -92,7 +95,7 @@ var _graphic_panm_cache: Dictionary = {}
 # re-stamps these from the live env so static objects relight with TOD.
 var _batch_materials: Array = []
 var _last_batch_env_gen: int = -1
-var _last_batch_env_values: NovaObjectModelScript.EnvLightValues = null
+var _last_batch_env_values: NovaEnvLightValues = null
 # graphic -> Vector3 ground anchor (model-space point that sits at the entity
 # position). Computed once per graphic; see _ground_anchor_for.
 var _anchor_cache: Dictionary = {}
@@ -114,8 +117,15 @@ func _init(p_resource_root: NovaResourceRoot = null, p_item_db: NovaItemDatabase
 	item_db = p_item_db
 
 
-func set_panm_clock(value) -> void:
+func set_panm_clock(value: NovaPanmClock) -> void:
 	_panm_clock = value
+
+
+## The typed environment light channel (published by NovaEnvironment). Set
+## once by the owner; every model built here holds the same record, and
+## update_environment() restamps the harvested static-batch materials from it.
+func set_environment_state(state: NovaEnvLightState) -> void:
+	_env_state = state
 
 
 # Drop every derived cache when the resource-root epoch has moved since they were
@@ -154,22 +164,25 @@ func _item_is_mirror_reflected(item_id: int) -> bool:
 # each frame [orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0].
 # Cheap when nothing changed: the env generation (or value-equality) gates the
 # push exactly like NovaObjectModel's per-model stamp.
-func update_environment(env_node: Node) -> void:
+func update_environment() -> void:
 	if _batch_materials.is_empty():
 		return
 	var gen := -1
-	if env_node != null and env_node.has_method("get_env_generation"):
-		gen = int(env_node.get_env_generation())
+	var values: NovaEnvLightValues = null
+	if _env_state != null:
+		gen = int(_env_state.get_generation())
 		if gen == _last_batch_env_gen and _last_batch_env_values != null:
 			return
-	var values: NovaObjectModelScript.EnvLightValues = NovaObjectModelScript.environment_values_from(env_node)
+		values = _env_state.get_values()
+	if values == null:
+		values = NovaEnvLightValues.retail_noon_defaults()
 	if values.equals(_last_batch_env_values):
 		_last_batch_env_gen = gen
 		return
 	_last_batch_env_values = values
 	_last_batch_env_gen = gen
 	for material in _batch_materials:
-		NovaObjectModelScript.apply_environment_values(material, values)
+		NovaObjectModel.apply_environment_values(material, values)
 
 
 # --- Coordinate conversion (BMS is Z-up; Godot is Y-up) -----------------------
@@ -240,11 +253,11 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 	_hidden_destruction_instances = {}
 	_static_user_point_sources = []
 	_static_item_effect_sources = []
+	placed_entity_records = []
 	if mission == null or parent == null or resource_root == null:
 		return stats
 	_ensure_item_db()
 
-	var env_node: Node = options.get("environment_node", null)
 	# Optional load-stage attribution (the editor's mission open passes one).
 	var timeline: PerfTimeline = options.get("timeline", null) as PerfTimeline
 	# Optional per-model load-progress pulse (the game shell's loading screen);
@@ -353,7 +366,7 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 				if (not sources.is_empty() and _item_is_mirror_reflected(
 						int((sources[0] as Dictionary).get("item_id", 0)))) \
 				else NovaWater.VISUAL_LAYER_WORLD_NO_MIRROR
-		var batches := _get_static_batches(graphic, env_node, container)
+		var batches := _get_static_batches(graphic, container)
 		if batches.is_empty():
 			stats.unresolved += xforms.size()
 			continue
@@ -440,8 +453,7 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 	# before its first iris tick) — and drop the per-frame stamper into the
 	# container so the batches keep tracking TOD/weather/iris afterwards.
 	_last_batch_env_values = null
-	update_environment(env_node)
-	_ensure_env_stamper(container, env_node)
+	update_environment()
 
 	# One pick collider per static entity (not per submesh): collision is
 	# whole-model. A separate pass (rather than inline with each graphic's
@@ -466,7 +478,7 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 		if data == null:
 			stats.unresolved += 1
 			continue
-		var model: Node3D = NovaObjectModelScript.new()
+		var model := NovaObjectModel.new()
 		model.set_panm_clock(_panm_clock)
 		model.name = "Anim_%s_%d" % [a["graphic"], stats.animated]
 		model.mirror_reflected = _item_is_mirror_reflected(int(a.get("item_id", 0)))
@@ -475,8 +487,8 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 		# at render -- so a loaded .bms renders at its stored coords verbatim. [orig: sub_401A90, dfx2med.exe]
 		model.transform = a["xform"] as Transform3D
 		container.add_child(model)
-		if env_node != null and model is NovaEntityVisual:
-			model.set_environment_node(env_node)
+		if _env_state != null:
+			model.set_environment_state(_env_state)
 		_configure_item_shadow(
 				model,
 				int(a.get("item_id", 0)),
@@ -502,7 +514,6 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 					model,
 					String(a.get("graphic", "")),
 					Transform3D.IDENTITY,
-					env_node,
 					"live%d" % stats.animated)
 		# Tag identity on the node in BOTH runtime + editor so MissionEntityRegistry can resolve
 		# SSN/group/zone event-action targets (e.g. PLAYPARTANIM) back to this live model. Picking +
@@ -519,6 +530,7 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 			"item_id": int(a.get("item_id", 0)),
 		}
 		model.set_meta("entity_ref", ref)
+		placed_entity_records.append({ "model": model, "ref": ref })
 		if edit_mode:
 			pickable_records.append({
 				"kind": ref["kind"],
@@ -541,22 +553,22 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 ## first/third-person). The caller positions/orients it and toggles visibility; it is NOT
 ## tagged or registered for the present pass. Returns null when the item type has no
 ## resolvable graphic (the same resolution path the animated entities in place() use).
-func build_animated_model(item_id: int, parent: Node3D, env_node: Node = null) -> Node3D:
+func build_animated_model(item_id: int, parent: Node3D) -> Node3D:
 	var graphic := _graphic_for(item_id)
 	if graphic.is_empty():
 		return null
 	var data := _load_object_data(graphic)
 	if data == null:
 		return null
-	var model: Node3D = NovaObjectModelScript.new()
+	var model := NovaObjectModel.new()
 	model.set_panm_clock(_panm_clock)
 	model.name = "PlayerAvatar_%s" % graphic
 	# Wire-streamed and avatar builds share this chain: vehicles reflect in
 	# the water mirror, persons and everything else never do (env #30).
 	model.mirror_reflected = _item_is_mirror_reflected(item_id)
 	parent.add_child(model)
-	if env_node != null and model is NovaEntityVisual:
-		model.set_environment_node(env_node)
+	if _env_state != null:
+		model.set_environment_state(_env_state)
 	_configure_item_shadow(model, item_id)
 	_apply_skeletal_anim(model, item_id, data.get_bone_origins(), data.get_bone_parents())
 	model.set_object_data(data)
@@ -579,26 +591,26 @@ func resolve_player_visual_item_id(runtime_type_id: int) -> int:
 	return runtime_type_id
 
 
-func build_player_animated_model(runtime_type_id: int, parent: Node3D, env_node: Node = null) -> Node3D:
-	return build_animated_model(resolve_player_visual_item_id(runtime_type_id), parent, env_node)
+func build_player_animated_model(runtime_type_id: int, parent: Node3D) -> Node3D:
+	return build_animated_model(resolve_player_visual_item_id(runtime_type_id), parent)
 
 
 ## Build ONE animated NovaObjectModel from an EXPLICIT graphic (.3di basename) + an explicit .adm
 ## name, in rest pose, parented under `parent`. For owner-managed viewmodels that resolve their
 ## model + animation directly from weapon.def (gfx1/gfx1a + animadm) rather than from an items.def
 ## item id — the first-person weapon viewmodel. Returns null when the graphic doesn't resolve.
-func build_model_from_graphic(graphic: String, adm_name: String, parent: Node3D, clip_key: String = "", env_node: Node = null, rig_graphic: String = "") -> Node3D:
+func build_model_from_graphic(graphic: String, adm_name: String, parent: Node3D, clip_key: String = "", rig_graphic: String = "") -> Node3D:
 	if graphic.is_empty() or parent == null:
 		return null
 	var data := _load_object_data(graphic)
 	if data == null:
 		return null
-	var model: Node3D = NovaObjectModelScript.new()
+	var model := NovaObjectModel.new()
 	model.set_panm_clock(_panm_clock)
 	model.name = "Viewmodel_%s" % graphic
 	parent.add_child(model)
-	if env_node != null and model is NovaEntityVisual:
-		model.set_environment_node(env_node)
+	if _env_state != null:
+		model.set_environment_state(_env_state)
 	if not adm_name.is_empty():
 		# The ADM names the CLIP SET; the rig table belongs to the equipped FP gun. The arms
 		# (armsG) and gun both use `rig_graphic`, so their indexed parts ride one shared table --
@@ -619,7 +631,7 @@ func build_model_from_graphic(graphic: String, adm_name: String, parent: Node3D,
 	model.set_object_data(data)
 	# Pose into a starting clip (e.g. the FP weapon idle "anim_wpn_idle" -> mp5_1i) so the model
 	# holds that pose rather than its bind/T-pose; the model self-ticks the clip via _process.
-	if not clip_key.is_empty() and model is NovaEntityVisual:
+	if not clip_key.is_empty():
 		model.play_body_clip(clip_key)
 	return model
 
@@ -645,7 +657,7 @@ func _apply_skeletal_anim_by_name(model: Node3D, adm_name_in: String, model_bone
 ## batch; a later save+reopen re-batches everything normally. Records the pickable
 ## index for the new entity (this path is editor-only and always picks).
 ## Returns a small delta stats dict: { placed, batched, animated, batches, unresolved }.
-func place_single(mission: NovaMissionData, container: Node3D, kind: int, index: int, env_node: Node = null) -> Dictionary:
+func place_single(mission: NovaMissionData, container: Node3D, kind: int, index: int) -> Dictionary:
 	_check_epoch()
 	var delta := { "placed": 0, "batched": 0, "animated": 0, "batches": 0, "unresolved": 0 }
 	if mission == null or container == null or resource_root == null:
@@ -668,14 +680,14 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 		if data == null:
 			delta.unresolved = 1
 			return delta
-		var model: Node3D = NovaObjectModelScript.new()
+		var model := NovaObjectModel.new()
 		model.set_panm_clock(_panm_clock)
 		model.name = "Anim_%s_k%d_i%d" % [graphic, kind, index]
 		model.mirror_reflected = _item_is_mirror_reflected(item_id)
 		model.transform = xform
 		container.add_child(model)
-		if env_node != null and model is NovaEntityVisual:
-			model.set_environment_node(env_node)
+		if _env_state != null:
+			model.set_environment_state(_env_state)
 		_configure_item_shadow(
 				model, item_id, kind, int(entity.get("ai_flags", 0)))
 		_configure_item_lighting(model, item_id)
@@ -690,7 +702,7 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 				item_db.get_attrib(item_id),
 				item_db.get_attrib2(item_id)):
 			_add_individual_static_shadow_siblings(
-					model, graphic, Transform3D.IDENTITY, env_node,
+					model, graphic, Transform3D.IDENTITY,
 					"k%d_i%d" % [kind, index])
 		var ref := {
 			"kind": kind,
@@ -704,6 +716,7 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 			"item_id": item_id,
 		}
 		model.set_meta("entity_ref", ref)
+		placed_entity_records.append({ "model": model, "ref": ref })
 		pickable_records.append({
 			"kind": kind,
 			"index": index,
@@ -717,7 +730,7 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 		delta.animated = 1
 		return delta
 
-	var batches := _get_static_batches(graphic, env_node, container)
+	var batches := _get_static_batches(graphic, container)
 	if batches.is_empty():
 		delta.unresolved = 1
 		return delta
@@ -725,8 +738,7 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 	# with the live env like place() does, and make sure the container carries
 	# the per-frame stamper (a place_single onto a fresh container).
 	_last_batch_env_values = null
-	update_environment(env_node)
-	_ensure_env_stamper(container, env_node)
+	update_environment()
 	var refs := [{ "kind": kind, "index": index }]
 	var casts_static_shadow := item_casts_static_terrain_shadow(
 			kind,
@@ -773,12 +785,12 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 
 func _add_individual_static_shadow_siblings(
 		model: Node3D, graphic: String, local_xform: Transform3D,
-		env_node: Node, suffix: String) -> void:
+		suffix: String) -> void:
 	# Visible portal/PANM models live below camera-masked ROBJ nodes. Retail's
 	# terrain-tile collector ignores those masks and submits every selected-LOD
 	# ROBJ, so harvest one independent all-section shadow-only sibling per
 	# submesh. The reimpl's static light reaches only the terrain receiver.
-	var batches := _get_static_batches(graphic, env_node, model)
+	var batches := _get_static_batches(graphic, model)
 	for batch in batches:
 		var mm := MultiMesh.new()
 		mm.transform_format = MultiMesh.TRANSFORM_3D
@@ -1064,7 +1076,7 @@ func _apply_skeletal_anim(model: Node3D, item_id: int,
 		return
 	var adm_name := anim_def if anim_def.to_lower().ends_with(".adm") else anim_def + ".adm"
 	var skeletal = _skeletal_from_adm(adm_name, model_bone_origins, model_bone_parents)
-	if skeletal != null and model is NovaEntityVisual:
+	if skeletal != null:
 		model.set_skeletal_anim(skeletal)
 
 
@@ -1077,7 +1089,7 @@ func _apply_skeletal_anim(model: Node3D, item_id: int,
 # ak47_1st.adm) yet carry different .3di pivots, so they must not alias. See NovaSkeletalAnim.
 func _apply_skeletal_from_adm(model: Node3D, adm_name: String, model_bone_origins: PackedVector3Array, model_bone_parents := PackedInt32Array()) -> void:
 	var skeletal = _skeletal_from_adm(adm_name, model_bone_origins, model_bone_parents)
-	if skeletal != null and model is NovaEntityVisual:
+	if skeletal != null:
 		model.set_skeletal_anim(skeletal)
 
 
@@ -1341,21 +1353,21 @@ func _visual_model_aabb(data: NovaObjectData) -> AABB:
 # silent) only for the duration of the harvest, then freed; the harvested
 # Mesh/Material refs survive in the returned dictionaries. `tree_parent` must be a
 # node already inside the SceneTree.
-func _get_static_batches(graphic: String, env_node: Node, tree_parent: Node) -> Array:
+func _get_static_batches(graphic: String, tree_parent: Node) -> Array:
 	if _static_batch_cache.has(graphic):
 		return _static_batch_cache[graphic]
 	var batches: Array = []
 	var data := _load_object_data(graphic)
 	if data != null and tree_parent != null:
-		var model: Node3D = NovaObjectModelScript.new()
+		var model := NovaObjectModel.new()
 		# Enter the tree first (so global_transform/bounds math is valid and quiet),
 		# then drive rebuild() explicitly: relying on _ready() is unreliable when
 		# place() runs before the main loop flushes _ready callbacks. No frame ticks
 		# between add_child and free, so _process()/animation never runs.
 		tree_parent.add_child(model)
 		model.object_data = data
-		if env_node != null and model is NovaEntityVisual:
-			model.set_environment_node(env_node)
+		if _env_state != null:
+			model.set_environment_state(_env_state)
 		model.rebuild()
 		# Each batch's "offset" is the submesh's model-local rest transform (part * mesh) relative to
 		# the entity origin -- NO ground-anchor offset. The engine bakes the Ground userpoint into the
@@ -1387,21 +1399,6 @@ func _get_static_batches(graphic: String, env_node: Node, tree_parent: Node) -> 
 # Keep exactly one per-frame batch-relight driver alive inside the container
 # (see mission_batch_env_stamper.gd; the container is rebuilt on re-bake, so
 # the stamper's lifetime follows the placed set). No-op without an env node.
-func _ensure_env_stamper(container: Node3D, env_node: Node) -> void:
-	if container == null or env_node == null:
-		return
-	var existing := container.get_node_or_null(NodePath("EnvRestamp"))
-	if existing != null:
-		existing.set("placer", self)
-		existing.set("environment_node", env_node)
-		return
-	var stamper: Node = EnvStamperScript.new()
-	stamper.name = "EnvRestamp"
-	stamper.placer = self
-	stamper.environment_node = env_node
-	container.add_child(stamper)
-
-
 func _ensure_container(parent: Node3D) -> Node3D:
 	var existing := parent.get_node_or_null(NodePath(CONTAINER_NAME))
 	if existing != null:

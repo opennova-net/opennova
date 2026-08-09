@@ -15,7 +15,6 @@ var _sim  # NovaSimulation
 var _container: Node3D
 var _placer
 var _item_db
-var _env_node
 var _fx_provider: Callable
 var _game_world
 
@@ -38,13 +37,12 @@ class Stats:
 	var move_effect_transforms: int = 0
 
 
-func setup(sim, container: Node3D, placer, item_db, env_node,
+func setup(sim, container: Node3D, placer, item_db,
 		fx_provider: Callable = Callable(), game_world = null) -> void:
 	_sim = sim
 	_container = container
 	_placer = placer
 	_item_db = item_db
-	_env_node = env_node
 	_fx_provider = fx_provider
 	_game_world = game_world
 
@@ -212,7 +210,7 @@ func _build_model(_key: int, item_id: int) -> Dictionary:
 	if graphic.is_empty():
 		return {}
 	var model: Node3D = _placer.build_model_from_graphic(
-			graphic, "", _container, "", _env_node)
+			graphic, "", _container, "")
 	if model == null:
 		return {}
 	model.name = "Throwable_%d" % item_id

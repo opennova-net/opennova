@@ -10,7 +10,7 @@ const CHARMODEL := "res://../fixtures/threedi/3di3/CharModel.3di"
 const SHED := "res://../fixtures/threedi/3di3/Shed.3di"
 const VIEWMODEL_RIG_TMP := "res://.godot/viewmodel_rig_test"
 const MissionObjectPlacerScript = preload("res://adapter/mission/mission_object_placer.gd")
-const NovaObjectModelScript = preload("res://adapter/object/nova_object_model.gd")
+const NovaObjectModel = preload("res://adapter/object/nova_object_model.gd")
 
 
 func _open(path: String) -> NovaObjectData:
@@ -205,7 +205,7 @@ func test_load_from_bad_files_fails_gracefully() -> void:
 
 
 func test_model_skeletal_methods_no_op_without_set() -> void:
-	var model = NovaObjectModelScript.new()
+	var model = NovaObjectModel.new()
 	add_child_autofree(model)
 	model.set_skeletal_anim(null)  # exercises the rebuild() skeletal branch with no skeletal
 	assert_false(model.has_skeleton(), "No Skeleton3D without a skeletal set.")
@@ -275,7 +275,7 @@ func test_emplaced_pose_collapses_right_hand_bone_and_restores_off_mount() -> vo
 
 func _char_model_at(data: NovaObjectData, skeletal: NovaSkeletalAnim,
 		world_transform: Transform3D, collapse_right_hand: bool):
-	var model = NovaObjectModelScript.new()
+	var model = NovaObjectModel.new()
 	add_child_autofree(model)
 	model.set_skeletal_anim(skeletal)
 	model.set_object_data(data)
@@ -398,7 +398,7 @@ func test_model_collapses_right_hand_at_joint_without_aim_overlay() -> void:
 	var sk := NovaSkeletalAnim.new()
 	assert_true(sk.load_from_resource_root(root, "soldier.adm",
 			data.get_bone_origins(), data.get_bone_parents()))
-	var model = NovaObjectModelScript.new()
+	var model = NovaObjectModel.new()
 	add_child_autofree(model)
 	model.set_skeletal_anim(sk)
 	model.set_object_data(data)
@@ -492,7 +492,7 @@ func test_body_clip_change_blends_primary_pose_over_retail_window() -> void:
 		{"flags": 0, "ticks": 10, "name": "normal"},
 		{"flags": 0x400, "ticks": 15, "name": "slow"},
 	]:
-		var model = NovaObjectModelScript.new()
+		var model = NovaObjectModel.new()
 		add_child_autofree(model)
 		model.set_skeletal_anim(skeletal)
 		model.set_object_data(_open(SHED))
@@ -566,7 +566,7 @@ func test_body_blend_missing_channels_fall_back_without_stale_pose() -> void:
 					same_key_source, same_key_target, same_key_weight),
 			"two channels sharing one BAD still blend independent playheads")
 
-	var model = NovaObjectModelScript.new()
+	var model = NovaObjectModel.new()
 	add_child_autofree(model)
 	model.set_skeletal_anim(skeletal)
 	model.set_object_data(_open(SHED))
@@ -602,7 +602,7 @@ func test_primary_blend_composes_weapon_channel_then_aim_overlay_once() -> void:
 			data.get_bone_origins(), data.get_bone_parents()))
 	assert_gt(skeletal.get_bone_count(), 16,
 			"the composition fixture exercises the upper-body weapon mask")
-	var model = NovaObjectModelScript.new()
+	var model = NovaObjectModel.new()
 	add_child_autofree(model)
 	model.set_skeletal_anim(skeletal)
 	model.set_object_data(data)
@@ -643,7 +643,7 @@ func test_scrub_while_paused_moves_playhead_and_pose() -> void:
 	# The ANIMS workflow's scrub seam: set_animation_time poses the skeleton
 	# IMMEDIATELY even while paused. SHED is rigid, so it fake-skins into a real
 	# Skeleton3D headless (no render needed for bone poses).
-	var model = NovaObjectModelScript.new()
+	var model = NovaObjectModel.new()
 	add_child_autofree(model)
 	model.set_skeletal_anim(_loaded_skeletal())
 	model.set_object_data(_open(SHED))
@@ -671,7 +671,7 @@ func test_set_animation_time_wraps_or_clamps_per_clip() -> void:
 	# Mirrors eval_pose's own branch (loop: fmod over the clip; one-shot: clamp)
 	# so the stored playhead and the rendered pose can never disagree. Branch on
 	# the fixture clip's REAL loop flag rather than assuming it.
-	var model = NovaObjectModelScript.new()
+	var model = NovaObjectModel.new()
 	add_child_autofree(model)
 	model.set_skeletal_anim(_loaded_skeletal())
 	model.set_object_data(_open(SHED))
@@ -696,7 +696,7 @@ func test_set_animation_time_wraps_or_clamps_per_clip() -> void:
 
 
 func test_play_body_clip_is_idempotent_for_same_key() -> void:
-	var model = NovaObjectModelScript.new()
+	var model = NovaObjectModel.new()
 	add_child_autofree(model)
 	model.set_skeletal_anim(_loaded_skeletal())
 	model.set_object_data(_open(SHED))
@@ -717,8 +717,8 @@ func test_models_sharing_one_anim_definition_keep_entity_local_poses() -> void:
 	#  AnimMap_RegisterEntity @0x40BB60]
 	var shared_skeletal := _loaded_skeletal()
 	var shared_model_data := _open(SHED)
-	var host_model = NovaObjectModelScript.new()
-	var joiner_model = NovaObjectModelScript.new()
+	var host_model = NovaObjectModel.new()
+	var joiner_model = NovaObjectModel.new()
 	add_child_autofree(host_model)
 	add_child_autofree(joiner_model)
 	for model in [host_model, joiner_model]:
@@ -742,7 +742,7 @@ func test_models_sharing_one_anim_definition_keep_entity_local_poses() -> void:
 
 
 func test_play_body_clip_at_pins_ida_phase_ticks() -> void:
-	var model = NovaObjectModelScript.new()
+	var model = NovaObjectModel.new()
 	add_child_autofree(model)
 	model.set_skeletal_anim(_loaded_skeletal())
 	model.set_object_data(_open(SHED))
@@ -770,7 +770,7 @@ func test_play_body_clip_at_pins_ida_phase_ticks() -> void:
 
 
 func test_play_body_clip_seeded_consumes_ticks_then_free_runs() -> void:
-	var model = NovaObjectModelScript.new()
+	var model = NovaObjectModel.new()
 	add_child_autofree(model)
 	model.set_skeletal_anim(_loaded_skeletal())
 	model.set_object_data(_open(SHED))
@@ -786,7 +786,7 @@ func test_play_body_clip_seeded_consumes_ticks_then_free_runs() -> void:
 
 
 func test_remote_body_same_state_does_not_rescrub_player_phase() -> void:
-	var model = NovaObjectModelScript.new()
+	var model = NovaObjectModel.new()
 	add_child_autofree(model)
 	model.set_skeletal_anim(_loaded_skeletal())
 	model.set_object_data(_open(SHED))
@@ -801,7 +801,7 @@ func test_remote_body_same_state_does_not_rescrub_player_phase() -> void:
 
 
 func test_remote_death_receipt_retains_old_pose_then_advances_fixed_tick() -> void:
-	var model = NovaObjectModelScript.new()
+	var model = NovaObjectModel.new()
 	add_child_autofree(model)
 	var skeletal := _loaded_remote_transition_skeletal()
 	model.set_skeletal_anim(skeletal)
@@ -836,7 +836,7 @@ func test_remote_death_receipt_retains_old_pose_then_advances_fixed_tick() -> vo
 
 
 func test_remote_mid_blend_retarget_keeps_original_source() -> void:
-	var model = NovaObjectModelScript.new()
+	var model = NovaObjectModel.new()
 	add_child_autofree(model)
 	var skeletal := _loaded_skeletal()
 	model.set_skeletal_anim(skeletal)
@@ -858,7 +858,7 @@ func test_remote_mid_blend_retarget_keeps_original_source() -> void:
 
 
 func test_remote_target_flag_400_uses_fifteen_fixed_ticks() -> void:
-	var model = NovaObjectModelScript.new()
+	var model = NovaObjectModel.new()
 	add_child_autofree(model)
 	model.set_skeletal_anim(_loaded_skeletal())
 	model.set_object_data(_open(SHED))
@@ -872,7 +872,7 @@ func test_remote_target_flag_400_uses_fifteen_fixed_ticks() -> void:
 
 
 func test_remote_pulse_final_queues_behind_blending_locked_target_and_respawn_clears() -> void:
-	var model = NovaObjectModelScript.new()
+	var model = NovaObjectModel.new()
 	add_child_autofree(model)
 	model.set_skeletal_anim(_loaded_remote_transition_skeletal())
 	model.set_object_data(_open(SHED))
@@ -896,7 +896,7 @@ func test_remote_pulse_final_queues_behind_blending_locked_target_and_respawn_cl
 
 
 func test_remote_body_locked_state_promotes_pending_at_tick_zero() -> void:
-	var model = NovaObjectModelScript.new()
+	var model = NovaObjectModel.new()
 	add_child_autofree(model)
 	model.set_skeletal_anim(_loaded_skeletal())
 	model.set_object_data(_open(SHED))
@@ -918,7 +918,7 @@ func test_remote_body_locked_state_promotes_pending_at_tick_zero() -> void:
 
 
 func test_remote_body_exit_gate_accepts_only_incoming_flag_one() -> void:
-	var model = NovaObjectModelScript.new()
+	var model = NovaObjectModel.new()
 	add_child_autofree(model)
 	model.set_skeletal_anim(_loaded_skeletal())
 	model.set_object_data(_open(SHED))
@@ -946,7 +946,7 @@ func test_skinned_model_reports_nonzero_bounds() -> void:
 	# Skinned (and rigid-fake-skinned) submeshes hang under the Skeleton3D, not the Robj part
 	# nodes. get_model_bounds() must still report real bounds for a fully-skinned model, or any
 	# bounds consumer (e.g. the avatar menu-portrait framing) sees an empty AABB and never frames.
-	var model = NovaObjectModelScript.new()
+	var model = NovaObjectModel.new()
 	add_child_autofree(model)
 	model.set_skeletal_anim(_loaded_skeletal())
 	model.set_object_data(_open(SHED))
@@ -957,7 +957,7 @@ func test_skinned_model_reports_nonzero_bounds() -> void:
 
 
 func test_scrub_no_ops_without_skeletal_or_clip() -> void:
-	var model = NovaObjectModelScript.new()
+	var model = NovaObjectModel.new()
 	add_child_autofree(model)
 	model.set_animation_time(1.0)  # no skeletal set: must not crash
 	assert_eq(model.get_animation_time(), 0.0, "no skeletal -> playhead reads 0")
@@ -1031,7 +1031,7 @@ anim_reset				\"idle.bad\"
 
 	# The model's variant latch: play_body_clip_variant re-poses on a variant change
 	# and resumes on the same key+variant (mirrors play_body_clip's same-key resume).
-	var model = NovaObjectModelScript.new()
+	var model = NovaObjectModel.new()
 	add_child_autofree(model)
 	model.set_skeletal_anim(sk)
 	model.play_body_clip_variant("anim_wpn_reload", 2)

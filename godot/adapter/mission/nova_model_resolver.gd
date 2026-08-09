@@ -11,7 +11,6 @@ extends RefCounted
 # _needs_individual_node / _apply_skeletal_anim onto this resolver so the .bms
 # and net paths share one copy.)
 
-const NovaObjectModelScript := preload("res://adapter/object/nova_object_model.gd")
 const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
 
 var _root: NovaResourceRoot
@@ -33,7 +32,7 @@ func has_item_db() -> bool:
 # `parent`, or null if the item has no graphic / the .3di can't resolve. The model
 # is added to the tree BEFORE set_object_data so the mesh/skeleton build can touch
 # global transforms (the placer's order); .adm is attached first (no double build).
-func make_model(item_id: int, parent: Node, env_node: Node = null) -> Node3D:
+func make_model(item_id: int, parent: Node, env_state: NovaEnvLightState = null) -> Node3D:
 	if _item_db == null or parent == null:
 		return null
 	var graphic := _item_db.get_graphic(item_id)
@@ -42,10 +41,10 @@ func make_model(item_id: int, parent: Node, env_node: Node = null) -> Node3D:
 	var data := _load_object_data(graphic)
 	if data == null:
 		return null
-	var model: Node3D = NovaObjectModelScript.new()
+	var model := NovaObjectModel.new()
 	parent.add_child(model)
-	if env_node != null and model.has_method("set_environment_node"):
-		model.set_environment_node(env_node)
+	if env_state != null:
+		model.set_environment_state(env_state)
 	model.set_shadow_caster_enabled(MissionObjectPlacer.item_casts_dynamic_shadow(
 			_item_db.get_item_type(item_id),
 			_item_db.get_attrib(item_id),

@@ -19,7 +19,7 @@ const MissionRuntime := preload("res://adapter/world/mission_runtime.gd")
 # D-PLAYERINFO-1 is the in-world (spawned-player) combo binding, not this preview idle.
 
 const FlyCameraScript = preload("res://adapter/fly_camera.gd")
-const NovaObjectModelScript = preload("res://adapter/object/nova_object_model.gd")
+const NovaObjectModel = preload("res://adapter/object/nova_object_model.gd")
 const NovaEnvironmentScript = preload("res://adapter/environment/nova_environment.gd")
 
 # The standing character uses only the compatible third-person slots. `resolve_combo()`
@@ -301,10 +301,10 @@ func _load_part(slot: String, graphic: String) -> void:
 	if data.open_from_resource_root(_resource_root, graphic) != OK:
 		_missing_parts.append("%s: %s not found" % [slot, graphic])
 		return
-	var model = NovaObjectModelScript.new()
+	var model = NovaObjectModel.new()
 	model.name = "AvatarPart_%s" % slot
 	_model_root.add_child(model)
-	model.set_environment_node(_environment)
+	model.set_environment_state(_environment.light_state)
 	model.set_object_data(data)
 	model.set_active_lod(0)  # always the finest LOD in the portrait (defensive; 0 is the default)
 	# Bind the shared skeletal idle so the skinned part plays PI_Idle.BAD on the Dt1rst skeleton,

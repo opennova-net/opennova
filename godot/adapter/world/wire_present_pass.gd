@@ -34,7 +34,6 @@ const MissionObjectPlacer := preload("res://adapter/mission/mission_object_place
 var _sim                   # NovaSimulation (snapshot source)
 var _placer                # MissionObjectPlacer (build_player_animated_model -> NovaObjectModel)
 var _container: Node3D     # parent for spawned wire avatars
-var _env_node              # optional NovaEnvironment node for model lighting globals
 var _defer_index           # MissionEntityRegistry (host only): rows resolving to a PLACED node are
                            # left to MissionPresentPass; null on the joiner (render every wire row)
 var _synthetic_origin_only := false
@@ -100,12 +99,11 @@ static func _mission_kind_for_wire_handle(handle: int) -> int:
 # node is rendered by MissionPresentPass instead. On the HOST that leaves admitted joiners.
 # A production header-only JOINER passes no defer index and draws every remote row; an
 # explicit complete-BMS/debug join can still defer its authored nodes.
-func setup(sim, placer, container: Node3D, env_node = null, defer_index = null,
+func setup(sim, placer, container: Node3D, defer_index = null,
 		options: Dictionary = {}) -> void:
 	_sim = sim
 	_placer = placer
 	_container = container
-	_env_node = env_node
 	_defer_index = defer_index
 	_synthetic_origin_only = bool(options.get("synthetic_origin_only", false))
 	_cold_spawn_budget = maxi(1, int(options.get(
@@ -297,7 +295,7 @@ func present_snapshot(
 			# build_player_animated_model maps the player runtime type (0x14B9) to its visual
 			# item and passes other organics through to build_animated_model — the SAME chain
 			# the host uses for the local avatar and placed NPCs.
-			node = _placer.build_player_animated_model(type_id, _container, _env_node)
+			node = _placer.build_player_animated_model(type_id, _container)
 			_trace_cold_build("end", handle, type_id, visual_item_id)
 			if node == null:
 				_unresolved[handle] = type_id
@@ -472,7 +470,7 @@ func _rebuild_held_weapon(handle: int, adm: int) -> Node3D:
 	_free_held_weapon(handle)
 	if not graphic.is_empty() and _placer != null:
 		var built: Node3D = _placer.build_model_from_graphic(
-				graphic, "", _container, "", _env_node)
+				graphic, "", _container, "")
 		if built != null:
 			built.name = "WireWeapon_%04x" % handle
 			built.set_shadow_caster_enabled(true)

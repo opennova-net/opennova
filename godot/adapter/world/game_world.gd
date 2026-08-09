@@ -23,7 +23,6 @@ const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_
 const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
 const NovaSunShadowScript := preload("res://adapter/environment/nova_sun_shadow.gd")
 const MissionRuntime := preload("res://adapter/world/mission_runtime.gd")
-const PanmClockScript := preload("res://adapter/world/panm_clock.gd")
 const NovaDebugViewStatus := preload(
 		"res://adapter/debug/nova_debug_view_status.gd")
 const TICK_DT := MissionRuntime.TICK_DT  # one source; default for tick()'s delta param
@@ -102,7 +101,7 @@ var _loaded_mission: NovaMissionData
 # state, deliberately separate from mission_file (the exported boot option).
 var _loaded_mission_file: String = ""
 var _runtime  # MissionRuntime: the one mission runtime driver (sim + present pass + index), DIVIDED cadence
-var _panm_clock = PanmClockScript.new()
+var _panm_clock := NovaPanmClock.new()
 var _mission_stats: Dictionary = {}
 var _placer  # MissionObjectPlacer (kept so mission audio reuses its item database)
 var _weapon_db: NovaWeaponDatabase = null  # weapon.def, lazy per mounted root (FP viewmodel)
@@ -565,7 +564,8 @@ func _place_mission_objects(mission: NovaMissionData, timeline: PerfTimeline = n
 	_placer = MissionObjectPlacer.new(_resource_root)
 	_panm_clock.sample_frame()
 	_placer.set_panm_clock(_panm_clock)
-	var options := { "environment_node": _env }
+	_placer.set_environment_state(_env.light_state)
+	var options := {}
 	# A wire-header join deliberately has no authored body records. The load stream
 	# creates native pools 2/1/3 from S2C 0x10/0x0D/0x20 at exact handles; remote
 	# pool-0 organics arrive in 0x0C and every live pose advances through 0x0A.
@@ -1263,6 +1263,8 @@ func _frame_weather_leg() -> void:
 	if (_loaded and _runtime != null and _runtime.is_playing()
 			and _env != null):
 		_advance_world_driven_weather(_frame_delta)
+	if _placer != null:
+		_placer.update_environment()
 	if _frame_timing:
 		var weather_us := Time.get_ticks_usec() - probe_phase_start
 		if _frame_probe_enabled:
@@ -1532,8 +1534,8 @@ func get_destruction_present_stats() -> RefCounted:
 func build_local_player_held_weapon(graphic: String) -> Node3D:
 	if _placer == null or graphic.is_empty():
 		return null
-	var model: Node3D = _placer.build_model_from_graphic(
-			graphic, "", self, "", _env)
+	var model: NovaObjectModel = _placer.build_model_from_graphic(
+			graphic, "", self, "")
 	if model != null:
 		model.set_shadow_caster_enabled(true)
 	return model
@@ -1545,7 +1547,7 @@ func build_local_player_avatar() -> Node3D:
 	# _env wires the TOD-reactive lighting/fog stamp — without it the avatar
 	# freezes at the noon preview defaults (retail relights every entity per
 	# frame [orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0]).
-	return _placer.build_player_animated_model(0x14B9, self, _env)
+	return _placer.build_player_animated_model(0x14B9, self)
 
 
 # Resolve the .3DI definitions that LocalPlayerPresenter would otherwise load only on
@@ -1777,10 +1779,15 @@ func build_local_player_viewmodel() -> Node3D:
 	# Both submits reuse the equipped GUN's model table, while `adm_name` supplies the clips.
 	# Some valid retail sets differ (M21B_1st: 42 parts, M21_1st: 40); sizing from the ADM
 	# basename truncates late animated parts such as the M14 magazine. [orig: @0x4ded60]
-	var arms = _placer.build_model_from_graphic(arms_name, adm_name, container,
-			"anim_wpn_idle", _env, gun_name) if show_arms else null  # _placer untyped -> no :=
-	var gun = _placer.build_model_from_graphic(gun_name, adm_name, container,
-			"anim_wpn_idle", _env, gun_name) if not gun_name.is_empty() else null
+	var arms: NovaObjectModel = _placer.build_model_from_graphic(arms_name,
+			adm_name, container, "anim_wpn_idle", gun_name) if show_arms else null
+	var gun: NovaObjectModel = _placer.build_model_from_graphic(gun_name,
+			adm_name, container, "anim_wpn_idle", gun_name) 			if not gun_name.is_empty() else null
+	_local_viewmodel_parts.clear()
+	if arms != null:
+		_local_viewmodel_parts.append(arms)
+	if gun != null:
+		_local_viewmodel_parts.append(gun)
 	_set_local_player_first_person_model_available(gun != null)
 	if show_arms and arms == null:
 		push_warning("GameWorld: FP arms model '%s' failed to load from the resource root" % arms_name)
@@ -1798,6 +1805,15 @@ func build_local_player_viewmodel() -> Node3D:
 	# model resolve is purely presentational now, as in retail [orig: the FP
 	# model resolve @0x4ded60 is a render consumer, not a mount].
 	return container
+
+
+## The FP viewmodel's typed model parts (arms/gun), rebuilt with the
+## container — the rig consumes this instead of scanning children.
+var _local_viewmodel_parts: Array[NovaObjectModel] = []
+
+
+func local_player_viewmodel_parts() -> Array[NovaObjectModel]:
+	return _local_viewmodel_parts
 
 
 ## The installed FP weapon dict's name (empty when none) — the switch-event guard
@@ -2109,7 +2125,6 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> int:
 	# remote-entity avatars (build_player_animated_model): every remote row on a
 	# joiner, and the admitted players' synthetic-origin rows on the host.
 	opts["placer"] = _placer
-	opts["env_node"] = _env
 	# The occlusion-claim set the present pass consults (two-bit visibility
 	# ownership; see OcclusionFramePass._set_occlusion_hidden). Shared by
 	# reference: the pass created these dictionaries once and mutates them in
@@ -2568,7 +2583,7 @@ func _update_frame_clear_color() -> void:
 		# Camera3D h/v offsets move the rendered eye without changing the node
 		# transform. Classify the same adjusted eye NovaWater marches from.
 		above = cam.get_camera_transform().origin.y > float(_water.water_height)
-	var gen := int(_env.get_env_generation())
+	var gen := int(_env.light_state.get_generation())
 	if gen == _clear_env_generation and above == _clear_above_water:
 		return
 	_clear_env_generation = gen

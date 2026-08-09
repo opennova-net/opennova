@@ -15,7 +15,7 @@ extends Node3D
 #   glow alpha = dot_view^4/2 x brightness x folds (env #14, closed).
 # The 3DI diffuse stays; bodies are tinted and dimmed by the TOD sun/moon color.
 
-const NovaObjectModelScript = preload("res://adapter/object/nova_object_model.gd")
+const NovaObjectModel = preload("res://adapter/object/nova_object_model.gd")
 const CelestialShader = preload("res://shaders/celestial.gdshader")
 const CelestialAdditiveShader = preload("res://shaders/celestial_additive.gdshader")
 
@@ -97,7 +97,7 @@ func _rebuild_if_needed() -> void:
 		var data := _load_object_data(model_name)
 		if data == null:
 			continue
-		var model: Node3D = NovaObjectModelScript.new()
+		var model := NovaObjectModel.new()
 		model.name = "Celestial_" + key
 		add_child(model)
 		# Celestial bodies + the sun glow render INTO the water mirror

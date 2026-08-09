@@ -105,6 +105,13 @@ var _weather_driven := false
 # generation it applied and skips its per-material environment push while this is unchanged.
 var _env_generation: int = 0
 
+## The typed light channel every lit consumer holds (NovaObjectModel, the
+## placer's static batches, the ONED world previews): every generation bump
+## publishes the current world values into it. Consumers hold THIS record —
+## never this node — and its `changed` signal is what wakes a parked model
+## for exactly one restamp frame.
+var light_state := NovaEnvLightState.new()
+
 
 ## Fired on every environment-generation bump. NovaObjectModel sleeps its
 ## per-frame runtime scheduling while idle; this signal is what wakes every
@@ -115,7 +122,36 @@ signal env_generation_changed
 
 func _bump_env_generation() -> void:
 	_env_generation += 1
+	light_state.publish(_build_light_values())
 	env_generation_changed.emit()
+
+
+## The current world lighting/fog record — the witnessed block mapping:
+## dir_color <- the light block (sun/moon), hemi_sky <- the sky block,
+## hemi_ground <- the ground block, gain <- the modulator /64
+## [orig: CTerrainRenderer_BuildLightingShaderConstants @ 0x5c8090;
+##  ColorSrcGlobalGain bind @ 0x58e05d;
+##  sun/moon select Environment_GetLightDirectionFloat @ 0x57d870].
+func _build_light_values() -> NovaEnvLightValues:
+	if not is_loaded():
+		return NovaEnvLightValues.retail_noon_defaults()
+	var v := NovaEnvLightValues.new()
+	var defaults := NovaEnvLightValues.retail_noon_defaults()
+	var light_dir := get_light_direction()
+	v.dir = defaults.dir if light_dir.length() <= 0.001 \
+			else -light_dir.normalized()
+	v.hemi_sky = get_sky_ambient()
+	v.dir_color = get_sun_light()
+	v.hemi_ground = get_fill_light()
+	v.ceiling = get_ceiling_color()
+	v.floor_color = get_floor_color()
+	v.gain = get_color_src_gain()
+	v.fog_enabled = true
+	v.fog_color = get_fog_color()
+	v.fog_start = get_fog_start()
+	v.fog_end = get_fog_level()
+	v.fog_type = get_fog_type()
+	return v
 
 
 func _ready() -> void:

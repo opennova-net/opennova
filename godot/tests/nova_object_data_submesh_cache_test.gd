@@ -9,7 +9,7 @@ extends GutTest
 
 const SHED := "res://../fixtures/threedi/3di3/Shed.3di"
 const CHARMODEL := "res://../fixtures/threedi/3di3/CharModel.3di"
-const NovaObjectModelScript = preload("res://adapter/object/nova_object_model.gd")
+const NovaObjectModel = preload("res://adapter/object/nova_object_model.gd")
 
 
 func _open(path: String) -> NovaObjectData:
@@ -49,8 +49,8 @@ func test_repeat_builds_share_the_same_meshes() -> void:
 
 func test_two_models_from_one_data_share_meshes_but_not_materials() -> void:
 	var data := _open(SHED)
-	var a: Node3D = add_child_autofree(NovaObjectModelScript.new())
-	var b: Node3D = add_child_autofree(NovaObjectModelScript.new())
+	var a: Node3D = add_child_autofree(NovaObjectModel.new())
+	var b: Node3D = add_child_autofree(NovaObjectModel.new())
 	a.set_object_data(data)
 	b.set_object_data(data)
 
@@ -126,8 +126,8 @@ func test_lod_round_trip_returns_the_cached_meshes() -> void:
 
 func test_material_edit_on_a_shared_data_does_not_leak_across_models() -> void:
 	var data := _open(SHED)
-	var a: Node3D = add_child_autofree(NovaObjectModelScript.new())
-	var b: Node3D = add_child_autofree(NovaObjectModelScript.new())
+	var a: Node3D = add_child_autofree(NovaObjectModel.new())
+	var b: Node3D = add_child_autofree(NovaObjectModel.new())
 	a.set_object_data(data)
 	b.set_object_data(data)
 	# Snapshot the pre-edit meshes: the post-edit assertions below would all hold

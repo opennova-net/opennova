@@ -74,7 +74,7 @@ var _viewmodel: Node3D = null
 var _vm_pass_layer: CanvasLayer = null
 var _vm_viewport: SubViewport = null
 var _vm_camera: Camera3D = null
-var _vm_parts: Array = []           # NovaEntityVisual parts under the viewmodel container
+var _vm_parts: Array[NovaObjectModel] = []  # the builder's typed viewmodel models
 
 
 func setup(world, presenter, camera: Camera3D) -> void:
@@ -118,10 +118,7 @@ func ensure_viewmodel() -> void:
 		_viewmodel = _world.build_local_player_viewmodel()
 		if _viewmodel != null:
 			_apply_viewmodel_def()
-			_vm_parts.clear()
-			for child in _viewmodel.get_children():
-				if child is NovaEntityVisual:
-					_vm_parts.append(child)
+			_vm_parts = _world.local_player_viewmodel_parts().duplicate()
 			# re-sync the clip serial: fresh parts replay the active clip
 			_presenter.weapon_effects().reset_play_serial()
 
@@ -272,9 +269,8 @@ func _apply_viewmodel_control_registers(submit_viewmodel: bool,
 	# setup()'s world contract already includes get_sim; LocalPlayerPresenter and its
 	# value-only harness doubles both use that same explicit seam.
 	var sim = _world.get_sim() if _world != null else null
-	for part in _vm_parts:
-		var visual := part as NovaEntityVisual
-		if visual == null or not is_instance_valid(visual):
+	for visual in _vm_parts:
+		if not is_instance_valid(visual):
 			continue
 		visual.begin_ctrl_update()
 		# TEX_TEAM is a signed-byte store immediately before the FP lighting,

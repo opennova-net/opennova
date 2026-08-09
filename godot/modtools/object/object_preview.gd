@@ -2,7 +2,7 @@ class_name ObjectPreview
 extends Control
 
 const FlyCameraScript = preload("res://adapter/fly_camera.gd")
-const NovaObjectModelScript = preload("res://adapter/object/nova_object_model.gd")
+const NovaObjectModel = preload("res://adapter/object/nova_object_model.gd")
 const NovaEnvironmentScript = preload("res://adapter/environment/nova_environment.gd")
 const CollisionHull = preload("res://adapter/object/collision_hull.gd")
 const ObjectUserPointOverlayScript = preload("res://adapter/object/object_user_point_overlay.gd")
@@ -99,7 +99,7 @@ func _build_viewport() -> void:
 	_guide_root.name = "ObjectPreviewGuides"
 	_root.add_child(_guide_root)
 
-	_model = NovaObjectModelScript.new()
+	_model = NovaObjectModel.new()
 	_model.name = "NovaObjectModel"
 	_model.set_model_light_preview_enabled(true)
 	_root.add_child(_model)
@@ -276,11 +276,11 @@ func load_arms(arms_name: String, resource_root) -> bool:
 		return false
 	_arms_data = data
 	if _arms_model == null:
-		_arms_model = NovaObjectModelScript.new()
+		_arms_model = NovaObjectModel.new()
 		_arms_model.name = "NovaArmsModel"
 		_arms_model.set_model_light_preview_enabled(true)
 		_root.add_child(_arms_model)
-		_arms_model.set_environment_node(_environment)
+		_arms_model.set_environment_state(_environment.light_state)
 	_arms_model.set_object_data(data)
 	_arms_model.set_skeletal_anim(_skeletal)  # share the main model's .adm skeleton (may be null)
 	_arms_model.set_playing(_model.is_playing() if _model != null else true)
@@ -478,7 +478,7 @@ func _apply_environment_to_model() -> void:
 		_environment.environment_data = _environment_file
 		_environment.time_of_day = _environment_time
 	if _model != null:
-		_model.set_environment_node(_environment)
+		_model.set_environment_state(_environment.light_state)
 
 
 func _on_model_bounds_changed(bounds: AABB) -> void:

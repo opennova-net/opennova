@@ -447,9 +447,8 @@ func _play_viewmodel_clip(key: String, variant: int = 0, age_ticks: int = 0,
 	if key.is_empty():
 		return
 	var seconds := float(maxi(age_ticks, 0)) * WEAPON_TICK_DT
-	for part in _presenter.vm_parts():
-		var visual := part as NovaEntityVisual
-		if visual == null or not is_instance_valid(visual):
+	for visual in _presenter.vm_parts():
+		if not is_instance_valid(visual):
 			continue
 		if authoritative_phase:
 			visual.play_body_clip_variant_at_time(key, variant, seconds)

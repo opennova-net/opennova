@@ -33,7 +33,7 @@ const HHMM_DAY := NovaEnvironment.HHMM_DAY
 var environment_editor
 
 var _world_root: Node3D
-var _environment_node: Node
+var _environment_node: NovaEnvironment
 var _clear_color_node: WorldEnvironment
 var _sky_node: Node3D
 var _weather_node: Node3D
@@ -70,9 +70,8 @@ func _init(world_root: Node3D, get_material: Callable, get_water_height: Callabl
 func init_environment_preview() -> void:
 	if _environment_node != null:
 		return
-	_environment_node = Node.new()
+	_environment_node = NovaEnvironmentScript.new()
 	_environment_node.name = "EditorEnvironment"
-	_environment_node.set_script(NovaEnvironmentScript)
 	_world_root.add_child(_environment_node)
 	_clear_color_node = WorldEnvironment.new()
 	_clear_color_node.name = "EditorClearColor"
@@ -189,7 +188,7 @@ func apply_environment_to_preview() -> void:
 ## the owner replaces its surface material. The generation comparison keeps the
 ## normal per-frame editor poll O(1) after the weather smoother settles.
 func sync_environment_to_preview(force: bool = false) -> void:
-	if _environment_node == null or not _environment_node.has_method("is_loaded") or not _environment_node.is_loaded():
+	if _environment_node == null or not _environment_node.is_loaded():
 		return
 	var material: ShaderMaterial = _get_material.call()
 	var material_id := material.get_instance_id() if material != null else 0
