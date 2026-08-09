@@ -79,8 +79,8 @@ signal mission_effects(effects: Array)
 @export var env_file: String = "full_00.env"
 
 @onready var _terrain: NovaTerrain = $NovaTerrain
-@onready var _env: Node = get_node_or_null("NovaEnvironment")
-@onready var _water: Node = get_node_or_null("NovaWater")
+@onready var _env: NovaEnvironment = get_node_or_null("NovaEnvironment")
+@onready var _water: NovaWater = get_node_or_null("NovaWater")
 @onready var _clear_color: WorldEnvironment = get_node_or_null("ClearColor")
 
 var _dispatcher: NovaFoliageDispatcher
@@ -100,7 +100,7 @@ var _loaded_mission: NovaMissionData
 # The BMS argument that completed the active mission load. This is runtime
 # state, deliberately separate from mission_file (the exported boot option).
 var _loaded_mission_file: String = ""
-var _runtime  # MissionRuntime: the one mission runtime driver (sim + present pass + index), DIVIDED cadence
+var _runtime: MissionRuntime = null  # the one mission runtime driver (sim + present pass + index), DIVIDED cadence
 var _panm_clock := NovaPanmClock.new()
 var _mission_stats: Dictionary = {}
 var _placer  # MissionObjectPlacer (kept so mission audio reuses its item database)
@@ -249,7 +249,11 @@ func _ready() -> void:
 	if _clear_color != null and _clear_color.environment != null:
 		_idle_frame_clear_color = _clear_color.environment.background_color
 	if _terrain != null:
-		_dispatcher = _terrain.get_node_or_null("FoliageDispatcher") as NovaFoliageDispatcher
+		_dispatcher = _terrain.get_node_or_null("FoliageDispatcher")
+		if _dispatcher != null:
+			# The applier reads the native detail-cell handoff and the composed
+			# surface textures through this wired owner (never a parent probe).
+			_dispatcher.set_terrain(_terrain)
 		_tile_overlay = _terrain.get_node_or_null("TileOverlay") as NovaTerrainTileOverlay
 	_sun_shadow = NovaSunShadowScript.new()
 	_sun_shadow.name = "NovaSunShadow"
@@ -598,14 +602,8 @@ func get_loaded_mission_file() -> String:
 	return _loaded_mission_file
 
 
-func get_sim() -> Object:
-	# Runtime test/tool seams stay duck typed on _runtime (harness stubs install
-	# doubles through game_world_test's _install_runtime seam); every stub honors
-	# the runtime contract's get_sim(). Production MissionRuntime returns the
-	# native NovaSimulation child.
-	if _runtime == null:
-		return null
-	return _runtime.get_sim()
+func get_sim() -> NovaSimulation:
+	return _runtime.get_sim() if _runtime != null else null
 
 
 ## The mounted world's shared weapon.def database. ArmoryPresenter consumes this on
@@ -623,7 +621,7 @@ func get_weapon_database() -> NovaWeaponDatabase:
 	return _weapon_db if _weapon_db.is_loaded() else null
 
 
-func get_runtime():
+func get_runtime() -> MissionRuntime:
 	return _runtime
 
 
@@ -718,11 +716,11 @@ func _load_environment(env_path: String) -> bool:
 	# GameWorld retains one NovaWeather node across loads. A replacement ENV is
 	# a discrete state change: retail snaps every color block to the new mission
 	# targets instead of easing over from the previous mission's currents.
-	var weather := get_node_or_null("NovaWeather")
-	if weather != null and weather.has_method("resync_colors"):
+	var weather: NovaWeather = get_node_or_null("NovaWeather")
+	if weather != null:
 		weather.resync_colors()
-	var celestial := get_node_or_null("NovaCelestial")
-	if celestial != null and celestial.has_method("set_resource_root"):
+	var celestial: NovaCelestial = get_node_or_null("NovaCelestial")
+	if celestial != null:
 		celestial.set_resource_root(_resource_root)
 	return true
 
@@ -751,37 +749,33 @@ func _apply_mission_environment_overrides(mission: NovaMissionData) -> void:
 
 
 func _set_mission_water_height_override(world_height: float) -> void:
-	if _water != null and _water.has_method("set_mission_water_height_override"):
+	if _water != null:
 		_water.set_mission_water_height_override(world_height)
 
 
 func _set_water_world_rendering_enabled(enabled: bool) -> void:
-	if _water != null and _water.has_method("set_world_rendering_enabled"):
+	if _water != null:
 		_water.set_world_rendering_enabled(enabled)
 
 
 # Runtime water exposes a render-aware predicate so its retained authored
 # height cannot leak into frame clear/occlusion while a load is absent or in
-# progress. Keep the height-only fallback for compatible test/host doubles.
+# progress.
 func is_water_render_active() -> bool:
-	if _water == null:
-		return false
-	if _water.has_method("is_water_render_active"):
-		return bool(_water.is_water_render_active())
-	return not _water.has_method("is_water_active") or bool(_water.is_water_active())
+	return _water != null and _water.is_water_render_active()
 
 
 func _set_weather_world_tick_driven(enabled: bool) -> void:
 	_weather_tick_credit = 0.0
-	var weather := get_node_or_null("NovaWeather")
-	if weather != null and weather.has_method("set_world_tick_driven"):
+	var weather: NovaWeather = get_node_or_null("NovaWeather")
+	if weather != null:
 		weather.set_world_tick_driven(enabled)
 
 
 func _prepare_world_driven_weather() -> void:
 	_weather_tick_credit = 0.0
-	var weather := get_node_or_null("NovaWeather")
-	if weather != null and weather.has_method("prepare_world_driven"):
+	var weather: NovaWeather = get_node_or_null("NovaWeather")
+	if weather != null:
 		weather.prepare_world_driven()
 	else:
 		_set_weather_world_tick_driven(true)
@@ -789,8 +783,8 @@ func _prepare_world_driven_weather() -> void:
 
 func _prepare_autonomous_weather() -> void:
 	_weather_tick_credit = 0.0
-	var weather := get_node_or_null('NovaWeather')
-	if weather != null and weather.has_method('prepare_autonomous'):
+	var weather: NovaWeather = get_node_or_null("NovaWeather")
+	if weather != null:
 		weather.prepare_autonomous()
 	else:
 		_set_weather_world_tick_driven(false)
@@ -875,10 +869,10 @@ func _advance_world_driven_weather(delta: float) -> void:
 		tick_count = MAX_WEATHER_CATCHUP_TICKS
 		_weather_tick_credit = 0.0
 	var weather := get_node_or_null("NovaWeather")
-	var sim := get_sim() as NovaSimulation
+	var sim := get_sim()
 	for _tick in range(tick_count):
 		_env.advance_mission_clock(1)
-		if weather != null and weather.has_method("tick_fixed"):
+		if weather != null:
 			weather.tick_fixed()
 		if sim != null and not sim.is_joiner():
 			sim.advance_network_environment_tick()
@@ -1120,7 +1114,7 @@ func get_current_frame_clear_color() -> Color:
 
 func _sample_panm_clock() -> void:
 	_panm_clock.sample_frame()
-	if _runtime != null and _runtime.has_method("set_presentation_time_ms"):
+	if _runtime != null:
 		_runtime.set_presentation_time_ms(_panm_clock.time_ms)
 
 
@@ -1159,7 +1153,7 @@ func set_frame_stats_board(board: FrameStatsBoard) -> void:
 		if not _frame_stats.capture_changed.is_connected(capture_changed):
 			_frame_stats.capture_changed.connect(capture_changed)
 	_occlusion.set_frame_stats_board(board)
-	if _runtime != null and _runtime.has_method("set_frame_stats_board"):
+	if _runtime != null:
 		_runtime.set_frame_stats_board(board)
 
 
@@ -1230,9 +1224,9 @@ func _frame_foliage_leg() -> void:
 		# [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7dc2/0x5c7ded
 		# (MoveOrder & 0x300), groundEntity gate @ 0x5c7dd5..0x5c7df7].
 		var silhouette_anchors := PackedVector3Array()
-		if _runtime != null and _runtime.has_method("get_sim"):
-			var anchor_sim = _runtime.get_sim()
-			if anchor_sim != null and anchor_sim.has_method("get_foliage_mask_anchor_positions"):
+		if _runtime != null:
+			var anchor_sim := _runtime.get_sim()
+			if anchor_sim != null:
 				silhouette_anchors = anchor_sim.get_foliage_mask_anchor_positions()
 		_dispatcher.silhouette_anchors = silhouette_anchors
 		_dispatcher.render_frame(_frame_camera_xform)
@@ -1341,9 +1335,9 @@ func _frame_audio_leg(ticks_run: int) -> void:
 		# call below is only the live-slot mix + voice binds [orig:
 		# SoundEmitter_UpdateAndMixTop8 @ 0x521341]. A host with no ticking runtime
 		# (editor idle) free-runs the eval clock off render delta instead.
-		if ticks_run > 0 and _runtime != null and _runtime.has_method("get_sim"):
-			var audio_sim = _runtime.get_sim()
-			if audio_sim != null and audio_sim.has_method("get_logic_tick"):
+		if ticks_run > 0 and _runtime != null:
+			var audio_sim := _runtime.get_sim()
+			if audio_sim != null:
 				_mission_audio.advance_ticks(int(audio_sim.get_logic_tick()))
 		_mission_audio.tick(_frame_camera_pos, _frame_delta)
 		_music_var_pump()
@@ -1388,8 +1382,7 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 	# Gate on the runtime transport so MissionRuntime._playing is THE play flag
 	# for the real game: F3 and runtime MCP Pause/Step share this public flag.
 	# _start_runtime calls play(), so normal missions run exactly as before.
-	if _loaded and _runtime != null and _runtime.is_playing() \
-			and _runtime.has_method("tick_realtime"):
+	if _loaded and _runtime != null and _runtime.is_playing():
 		# The live path: ONE engine frame. The FrameDriver banks wall-clock,
 		# runs the 62.5 Hz batch, presents once, and invokes every world leg
 		# above in its fixed order [orig: Game_MainLoop @ 0x52b630].
@@ -1480,8 +1473,7 @@ func _stop_water_render_stats() -> void:
 
 
 func _sync_runtime_profiling() -> void:
-	if _runtime != null and _runtime.has_method(
-			"set_runtime_profiling_enabled"):
+	if _runtime != null:
 		_runtime.set_runtime_profiling_enabled(_perf_probe_enabled)
 
 
@@ -1491,7 +1483,7 @@ func get_runtime_perf_counters() -> Dictionary:
 		"foliage_us": _perf_foliage_us,
 		"runtime_us": _perf_runtime_us,
 		"audio_us": _perf_audio_us,
-		"runtime": _runtime.get_perf_counters() if _runtime != null and _runtime.has_method("get_perf_counters") else {},
+		"runtime": _runtime.get_perf_counters() if _runtime != null else {},
 		"foliage": _dispatcher.get_frame_stats() if _dispatcher != null else {},
 		"audio": _mission_audio.get_perf_counters() if _mission_audio != null else {},
 		"fire": get_fire_present_stats(),
@@ -1509,13 +1501,13 @@ func _fire_listener_position() -> Vector3:
 
 # Fire-presentation counters (probe/diagnostic seam; empty until a mission runs).
 func get_fire_present_stats() -> Dictionary:
-	return _runtime.get_fire_present_stats() if _runtime != null and _runtime.has_method("get_fire_present_stats") else {}
+	return _runtime.get_fire_present_stats() if _runtime != null else {}
 
 
 # Destruction-presentation counters (DestructionPresentPass.Stats, typed per
 # ADR 0017; null until a host mission runs with the pass).
 func get_destruction_present_stats() -> RefCounted:
-	return _runtime.get_destruction_present_stats() if _runtime != null and _runtime.has_method("get_destruction_present_stats") else null
+	return _runtime.get_destruction_present_stats() if _runtime != null else null
 
 
 ## Build a host-managed avatar model for the local player (which has no BMS placement of its
@@ -1825,7 +1817,7 @@ func local_player_weapon_name() -> String:
 ## Feed only the first-person-visible NVG state into world lighting. The raw
 ## active state deliberately survives third person in the simulation.
 func set_local_player_nvg_view(active: bool, gain: int) -> void:
-	if _env != null and _env.has_method("set_nvg_view"):
+	if _env != null:
 		_env.set_nvg_view(active, gain)
 
 
@@ -1859,11 +1851,7 @@ func local_player_weapon_view() -> PlayerWeaponView:
 ## C++ transport Dictionaries at this one adapter edge (ADR 0017).
 func drain_local_player_weapon_events() -> Array[PlayerWeaponEvent]:
 	var out: Array[PlayerWeaponEvent] = []
-	# Keep this transport adapter duck-typed like _route_round_impacts so host
-	# harnesses can supply value-only drains without weakening get_sim()'s
-	# public NovaSimulation contract.
-	var sim = (_runtime.get_sim()
-			if _runtime != null and _runtime.has_method("get_sim") else null)
+	var sim := get_sim()
 	if sim == null:
 		return out
 	for row in sim.drain_local_player_weapon_events():
@@ -2052,10 +2040,8 @@ func _route_mission_effects(effects: Array) -> void:
 # [orig: Projectile_UpdatePhysics @ 0x4e9d70 -> the type-specific impact
 #  handler -> Projectile_SpawnImpactEffect @ 0x4e9b80]
 func _route_round_impacts() -> void:
-	if _runtime == null or not _runtime.has_method("get_sim"):
-		return
-	var sim = _runtime.get_sim()
-	if sim == null or not sim.has_method("drain_round_impacts"):
+	var sim := get_sim()
+	if sim == null:
 		return
 	for row_v in sim.drain_round_impacts():
 		var row: Dictionary = row_v
@@ -2353,7 +2339,7 @@ func _warm_effect_world_catalog() -> int:
 			_effect_world.set_particles_hidden(true)
 		return 0
 	# The tracer ribbon pipelines compile in the same forced frames.
-	if _runtime != null and _runtime.has_method("warm_present_pipelines"):
+	if _runtime != null:
 		_runtime.warm_present_pipelines(warm_pos)
 	_effect_world.advance_fixed_tick(MissionRuntime.TICK_DT)
 	_effect_world.render_now()
@@ -2435,11 +2421,11 @@ func get_item_db() -> NovaItemDatabase:
 
 ## The live environment / weather / water nodes, for the F3 Environment
 ## page's readouts and scrub knobs.
-func get_environment_node() -> Node:
+func get_environment_node() -> NovaEnvironment:
 	return _env
 
 
-func get_weather_node() -> Node:
+func get_weather_node() -> NovaWeather:
 	return get_node_or_null("NovaWeather")
 
 
@@ -2460,16 +2446,14 @@ func debug_set_mission_minute_of_day(minute_of_day: float) -> Error:
 	if err != OK:
 		return err
 	var weather := get_weather_node()
-	if weather != null and weather.has_method("resync_colors_now"):
+	if weather != null:
 		weather.resync_colors_now()
-	elif weather != null and weather.has_method("resync_colors"):
-		weather.resync_colors()
 	if _mission_audio != null:
 		_mission_audio.set_time_of_day_hhmm(_env.time_of_day)
 	return OK
 
 
-func get_water_node() -> Node:
+func get_water_node() -> NovaWater:
 	return _water
 
 
@@ -2523,14 +2507,12 @@ func _music_var_pump() -> void:
 # lives in occlusion_frame_pass.gd; the iris march stays here as the weather
 # feed.
 func _stamp_iris_samples(camera_xform: Transform3D) -> void:
-	var weather := get_node_or_null("NovaWeather")
-	if weather == null or _runtime == null or not _runtime.has_method("get_sim"):
-		return
-	var sim = _runtime.get_sim()
-	if sim == null or not sim.has_method("compute_iris_samples"):
+	var weather: NovaWeather = get_node_or_null("NovaWeather")
+	var sim := get_sim()
+	if weather == null or sim == null:
 		return
 	var light_dir := Vector3.UP
-	if _env != null and _env.has_method("get_light_direction"):
+	if _env != null:
 		light_dir = _env.get_light_direction()
 	weather.iris_samples = sim.compute_iris_samples(
 			camera_xform.origin, -camera_xform.basis.z, light_dir)
@@ -2566,8 +2548,6 @@ func _restore_idle_frame_clear_color() -> void:
 # (GUT-pinned).
 func _update_frame_clear_color() -> void:
 	if _clear_color == null or _clear_color.environment == null or _env == null:
-		return
-	if not _env.has_method("get_frame_clear_color"):
 		return
 	# Indoors the frame clears BLACK, not skyfog [orig: render_main_scene
 	# @ 0x5c1597 — the Env_SkyfogBlock clear runs only when the blink indoors

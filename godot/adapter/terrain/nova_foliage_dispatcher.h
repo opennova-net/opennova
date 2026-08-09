@@ -17,6 +17,7 @@
 #include <godot_cpp/variant/vector3.hpp>
 
 #include <foliage/runtime.h>
+#include <renderer/foliage_frame.h>
 
 #include <array>
 #include <cstdint>
@@ -26,15 +27,18 @@
 namespace godot {
 
 class Image;
+class NovaTerrain;
 class NovaTerrainData;
 class NovaTerrainTileInfo;
 
-// Godot render adapter for the portable foliage runtime.
+// Godot render applier for the portable foliage frame (ADR 0033 R2).
 //
-// The portable module owns both retail placement algorithms. This adapter owns
-// only Godot-facing concerns: source Mesh extraction, terrain/editor sampler
-// bindings, visible-frame input, CPU vertex expansion, and ArrayMesh uploads.
-// [orig: generate_foliage_instances_0 @ 0x5ffdd0;
+// renderer::FoliageFrameCompiler owns the whole frame compilation: the anchor
+// gate, both retail placement algorithms, per-identity vertex expansion, the
+// per-submission uniform state, and both wind clocks. This node applies the
+// typed FoliageDrawPacket: source Mesh extraction at configure time, sampler
+// bindings, ArrayMesh uploads for the packet's mesh builds, draw-node pooling,
+// and material binding. [orig: generate_foliage_instances_0 @ 0x5ffdd0;
 // Foliage_GenerateModelTileInstances @ 0x600980]
 class NovaFoliageDispatcher : public Node3D {
   GDCLASS(NovaFoliageDispatcher, Node3D)
@@ -48,6 +52,11 @@ public:
   // slot. No placeholder geometry is manufactured.
   void configure_slots(const Array &p_defs, const Array &p_meshes,
                        const Array &p_fd_textures);
+
+  // The owning NovaTerrain (the game runtime wires it at world load;
+  // ONED's preview never has one). Supplies the native detail-cell handoff
+  // and the composed surface textures.
+  void set_terrain(NovaTerrain *p_terrain);
 
   // Runtime fast path. Height, authored foliage-map, and terrain-atlas
   // projection all come directly from this resource.
@@ -90,7 +99,7 @@ public:
       const Ref<Texture2D> &p_tile_overlay, const Vector3 &p_tile_overlay_tint);
   void clear_surface_input_overrides();
 
-  // Runtime frame. Reads exact detail patch keys/distances from the parent
+  // Runtime frame. Reads exact detail patch keys/distances from the wired
   // NovaTerrain::get_foliage_detail_patches_native().
   void render_frame(const Transform3D &p_camera_xform);
 
@@ -113,20 +122,6 @@ protected:
   static void _bind_methods();
 
 private:
-  struct SourceVertex {
-    Vector3 position;
-    Vector2 uv;
-  };
-
-  struct SourceGeometry {
-    std::vector<SourceVertex> vertices;
-    std::vector<int32_t> indices;
-    float center_x = 0.0f;
-    float center_z = 0.0f;
-    float radius = 0.0f;
-    bool valid = false;
-  };
-
   struct FrameStats {
     int64_t frame_calls = 0;
     int64_t detail_cells = 0;
@@ -162,8 +157,6 @@ private:
     bool path_blocker_available = false;
   };
 
-  struct BatchBuilder;
-
   struct MeshCacheKey {
     uint8_t slot = 0;
     uint32_t key = 0;
@@ -194,10 +187,11 @@ private:
     int64_t vertices = 0;
   };
 
-  opennova::foliage::Runtime runtime_;
+  renderer::FoliageFrameCompiler compiler_;
   std::array<opennova::foliage::RuntimeSlot, opennova::FOLIAGE_MAX_DEFS>
       runtime_slots_{};
-  std::array<SourceGeometry, opennova::FOLIAGE_MAX_DEFS> source_geometry_{};
+  std::array<renderer::FoliageSlotGeometry, opennova::FOLIAGE_MAX_DEFS>
+      source_geometry_{};
   std::array<Ref<Texture2D>, opennova::FOLIAGE_MAX_DEFS> fd_textures_{};
   std::unordered_map<int, uint32_t> palette_masks_;
   Array slot_diagnostics_;
@@ -205,6 +199,7 @@ private:
   int enabled_slot_count_ = 0;
   int disabled_slot_count_ = 0;
 
+  NovaTerrain *terrain_ = nullptr;
   Ref<NovaTerrainData> terrain_data_;
   Ref<NovaTerrainTileInfo> tile_info_;
   Ref<NovaTerrainData> colormap_source_;
@@ -236,9 +231,9 @@ private:
 
   FrameStats frame_stats_{};
   int64_t total_frame_calls_ = 0;
-  int64_t model_wind_counter_ = 0;
 
-  SourceGeometry _extract_source_geometry(const Ref<Mesh> &p_mesh) const;
+  renderer::FoliageSlotGeometry
+  _extract_source_geometry(const Ref<Mesh> &p_mesh) const;
   void _ensure_visuals();
   void _update_materials();
   MeshInstance3D *_ensure_draw_node(std::vector<MeshInstance3D *> &r_pool,
@@ -249,16 +244,14 @@ private:
   void _on_tile_info_changed();
   void _on_colormap_source_changed();
 
-  opennova::foliage::FrameRequest
-  _runtime_request(const Transform3D &p_camera_xform);
-  opennova::foliage::FrameRequest
-  _preview_request(const Transform3D &p_camera_xform);
-  void _append_visible_anchors(opennova::foliage::FrameRequest &r_request,
-                               const Transform3D &p_camera_xform);
+  renderer::FoliageViewInput
+  _view_input(const Transform3D &p_camera_xform) const;
   std::vector<opennova::foliage::DetailCell>
   _preview_cells(const Vector3 &p_camera_position) const;
-  void _render_request(opennova::foliage::FrameRequest p_request,
-                       const Transform3D &p_camera_xform);
+  void _compile_and_apply(const renderer::FoliageViewInput &p_view);
+  void _apply_packet(const renderer::FoliageDrawPacket &p_packet);
+  Ref<ArrayMesh> _upload_mesh_build(const renderer::FoliageDrawPacket &p_packet,
+                                    const renderer::FoliageMeshBuild &p_build) const;
 
   opennova::foliage::WorldSamplers _world_samplers();
   float _sample_height(float p_world_x, float p_world_z) const;
@@ -268,15 +261,6 @@ private:
                                   int32_t p_world_z_fixed) const;
   uint32_t _mask_for_palette_index(int p_index) const;
   Vector2 _terrain_uv(float p_world_x, float p_world_z) const;
-
-  bool
-  _append_detail_instance(const opennova::foliage::DetailInstance &p_instance,
-                          BatchBuilder &r_batch);
-  bool _append_silhouette_instance(
-      const opennova::foliage::SilhouetteInstance &p_instance,
-      BatchBuilder &r_batch);
-  CachedMesh _build_mesh(const BatchBuilder &p_batch,
-                         int64_t p_instance_count) const;
   void _erase_cache_identities(
       const std::vector<opennova::foliage::CacheIdentity> &p_identities,
       std::unordered_map<MeshCacheKey, CachedMesh, MeshCacheKeyHash> &r_cache);

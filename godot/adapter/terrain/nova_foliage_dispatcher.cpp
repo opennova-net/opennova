@@ -9,11 +9,11 @@
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/classes/image.hpp>
+#include <godot_cpp/variant/projection.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/core/math.hpp>
 #include <godot_cpp/core/object.hpp>
-#include <godot_cpp/variant/basis.hpp>
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_color_array.hpp>
@@ -37,12 +37,9 @@ namespace {
 
 constexpr float INVALID_HEIGHT_THRESHOLD = -1.0e6f;
 constexpr float DETAIL_DISTANCE_LIMIT = 42.0f;
-constexpr float SILHOUETTE_DEPTH_GATE = 38.0f;
-constexpr float DETAIL_HEIGHT_SCALE = 0.5f;
 constexpr float PREVIEW_CELL_SIZE = 16.0f;
 constexpr int PREVIEW_CELL_RADIUS = 4;
 constexpr int PREVIEW_CELL_LIMIT = 128;
-constexpr float PI_F = 3.14159265358979323846f;
 
 bool valid_height(float p_height) {
   return std::isfinite(p_height) && p_height > INVALID_HEIGHT_THRESHOLD;
@@ -64,25 +61,6 @@ uint32_t pack_preview_detail_key(int p_cell_min_x, int p_cell_min_z) {
 }
 
 } // namespace
-
-struct NovaFoliageDispatcher::BatchBuilder {
-  std::vector<Vector3> positions;
-  std::vector<Vector3> normals;
-  std::vector<Vector2> uvs;
-  std::vector<Vector2> uv2s;
-  std::vector<Color> colors;
-  std::vector<int32_t> indices;
-
-  void rollback_vertices(size_t p_size) {
-    positions.resize(p_size);
-    if (!normals.empty()) {
-      normals.resize(p_size);
-    }
-    uvs.resize(p_size);
-    uv2s.resize(p_size);
-    colors.resize(p_size);
-  }
-};
 
 NovaFoliageDispatcher::NovaFoliageDispatcher() = default;
 NovaFoliageDispatcher::~NovaFoliageDispatcher() {
@@ -110,6 +88,8 @@ void NovaFoliageDispatcher::_bind_methods() {
   ClassDB::bind_method(
       D_METHOD("configure_slots", "defs", "meshes", "fd_textures"),
       &NovaFoliageDispatcher::configure_slots);
+  ClassDB::bind_method(D_METHOD("set_terrain", "terrain"),
+                       &NovaFoliageDispatcher::set_terrain);
   ClassDB::bind_method(D_METHOD("set_terrain_data", "data"),
                        &NovaFoliageDispatcher::set_terrain_data);
   ClassDB::bind_method(D_METHOD("get_terrain_data"),
@@ -190,7 +170,7 @@ void NovaFoliageDispatcher::configure_slots(const Array &p_defs,
 
   for (int slot = 0; slot < opennova::FOLIAGE_MAX_DEFS; ++slot) {
     runtime_slots_[slot] = opennova::foliage::RuntimeSlot{};
-    source_geometry_[slot] = SourceGeometry{};
+    source_geometry_[slot] = renderer::FoliageSlotGeometry{};
     fd_textures_[slot].unref();
 
     Ref<NovaTerrainFoliageDef> def;
@@ -254,7 +234,12 @@ void NovaFoliageDispatcher::configure_slots(const Array &p_defs,
     palette_masks_[def->get_match()] |= static_cast<uint32_t>(1u << slot);
   }
 
+  compiler_.configure_slots(runtime_slots_, source_geometry_);
   reset();
+}
+
+void NovaFoliageDispatcher::set_terrain(NovaTerrain *p_terrain) {
+  terrain_ = p_terrain;
 }
 
 void NovaFoliageDispatcher::set_terrain_data(
@@ -428,9 +413,9 @@ bool NovaFoliageDispatcher::bake_fd_image(const Ref<Image> &p_image) {
   return true;
 }
 
-NovaFoliageDispatcher::SourceGeometry
+renderer::FoliageSlotGeometry
 NovaFoliageDispatcher::_extract_source_geometry(const Ref<Mesh> &p_mesh) const {
-  SourceGeometry result;
+  renderer::FoliageSlotGeometry result;
   if (p_mesh.is_null()) {
     return result;
   }
@@ -480,11 +465,16 @@ NovaFoliageDispatcher::_extract_source_geometry(const Ref<Mesh> &p_mesh) const {
     for (int vertex = 0; vertex < positions.size(); ++vertex) {
       const Vector3 position = positions[vertex];
       if (!finite_vector(position)) {
-        return SourceGeometry{};
+        return renderer::FoliageSlotGeometry{};
       }
-      SourceVertex source_vertex;
-      source_vertex.position = position;
-      source_vertex.uv = vertex < uvs.size() ? uvs[vertex] : Vector2();
+      renderer::FoliageSourceVertex source_vertex;
+      source_vertex.x = static_cast<float>(position.x);
+      source_vertex.y = static_cast<float>(position.y);
+      source_vertex.z = static_cast<float>(position.z);
+      if (vertex < uvs.size()) {
+        source_vertex.u = static_cast<float>(uvs[vertex].x);
+        source_vertex.v = static_cast<float>(uvs[vertex].y);
+      }
       result.vertices.push_back(source_vertex);
       minimum.x = std::min(minimum.x, position.x);
       minimum.y = std::min(minimum.y, position.y);
@@ -518,7 +508,7 @@ NovaFoliageDispatcher::_extract_source_geometry(const Ref<Mesh> &p_mesh) const {
   }
 
   if (result.vertices.empty() || result.indices.empty()) {
-    return SourceGeometry{};
+    return renderer::FoliageSlotGeometry{};
   }
 
   result.center_x = static_cast<float>((minimum.x + maximum.x) * 0.5);
@@ -575,13 +565,10 @@ void NovaFoliageDispatcher::_update_materials() {
     heightfield_normal = override_heightfield_normal_;
     tile_overlay = override_tile_overlay_;
     tile_overlay_tint = override_tile_overlay_tint_;
-  } else {
-    NovaTerrain *terrain = Object::cast_to<NovaTerrain>(get_parent());
-    if (terrain != nullptr) {
-      heightfield_normal = terrain->get_heightfield_normal_texture();
-      tile_overlay = terrain->get_tile_overlay_texture();
-      tile_overlay_tint = terrain->get_tile_overlay_tint();
-    }
+  } else if (terrain_ != nullptr) {
+    heightfield_normal = terrain_->get_heightfield_normal_texture();
+    tile_overlay = terrain_->get_tile_overlay_texture();
+    tile_overlay_tint = terrain_->get_tile_overlay_tint();
   }
   const bool has_heightfield_normal = heightfield_normal.is_valid();
   const bool has_tile_overlay = tile_overlay.is_valid();
@@ -652,8 +639,8 @@ void NovaFoliageDispatcher::_hide_draw_pools() {
   for (MeshInstance3D *instance : detail_draw_pool_) {
     if (instance != nullptr) {
       instance->set_visible(false);
-      // Drop the prior frame's draw ownership before runtime eviction events
-      // are applied. Resident meshes remain owned by detail_mesh_cache_.
+      // Drop the prior frame's draw ownership before this packet's eviction
+      // events are applied. Resident meshes remain owned by the caches.
       instance->set_mesh(Ref<Mesh>());
     }
   }
@@ -680,10 +667,9 @@ void NovaFoliageDispatcher::_clear_meshes() {
 }
 
 void NovaFoliageDispatcher::reset() {
-  runtime_.reset();
+  compiler_.reset();
   frame_stats_ = FrameStats{};
   total_frame_calls_ = 0;
-  model_wind_counter_ = 0;
   detail_mesh_cache_.clear();
   model_mesh_cache_.clear();
   _clear_meshes();
@@ -754,52 +740,48 @@ Array NovaFoliageDispatcher::get_slot_diagnostics() const {
 void NovaFoliageDispatcher::render_frame(const Transform3D &p_camera_xform) {
   frame_stats_ = FrameStats{};
   frame_stats_.frame_calls = ++total_frame_calls_;
-  _render_request(_runtime_request(p_camera_xform), p_camera_xform);
+  frame_stats_.native_detail_source = terrain_ != nullptr;
+
+  renderer::FoliageViewInput view = _view_input(p_camera_xform);
+  if (terrain_ != nullptr) {
+    const auto &patches = terrain_->get_foliage_detail_patches_native();
+    view.detail_cells.reserve(patches.size());
+    for (const auto &patch : patches) {
+      view.detail_cells.push_back(opennova::foliage::DetailCell{
+          patch.key,
+          patch.distance,
+      });
+    }
+  }
+  _compile_and_apply(view);
 }
 
 void NovaFoliageDispatcher::render_preview(const Transform3D &p_camera_xform) {
   frame_stats_ = FrameStats{};
   frame_stats_.frame_calls = ++total_frame_calls_;
   frame_stats_.preview_detail_source = true;
-  _render_request(_preview_request(p_camera_xform), p_camera_xform);
+
+  renderer::FoliageViewInput view = _view_input(p_camera_xform);
+  view.detail_cells = _preview_cells(p_camera_xform.origin);
+  _compile_and_apply(view);
 }
 
-opennova::foliage::FrameRequest
-NovaFoliageDispatcher::_runtime_request(const Transform3D &p_camera_xform) {
-  opennova::foliage::FrameRequest request;
-  request.slots = runtime_slots_;
+renderer::FoliageViewInput
+NovaFoliageDispatcher::_view_input(const Transform3D &p_camera_xform) const {
+  renderer::FoliageViewInput input;
+  input.cam_x = static_cast<float>(p_camera_xform.origin.x);
+  input.cam_y = static_cast<float>(p_camera_xform.origin.y);
+  input.cam_z = static_cast<float>(p_camera_xform.origin.z);
 
-  NovaTerrain *terrain = Object::cast_to<NovaTerrain>(get_parent());
-  frame_stats_.native_detail_source = terrain != nullptr;
-  if (terrain != nullptr) {
-    const auto &patches = terrain->get_foliage_detail_patches_native();
-    request.detail_cells.reserve(patches.size());
-    for (const auto &patch : patches) {
-      request.detail_cells.push_back(opennova::foliage::DetailCell{
-          patch.key,
-          patch.distance,
-      });
-    }
-  }
-  frame_stats_.detail_cells = static_cast<int64_t>(request.detail_cells.size());
-  _append_visible_anchors(request, p_camera_xform);
-  return request;
-}
-
-opennova::foliage::FrameRequest
-NovaFoliageDispatcher::_preview_request(const Transform3D &p_camera_xform) {
-  opennova::foliage::FrameRequest request;
-  request.slots = runtime_slots_;
-  request.detail_cells = _preview_cells(p_camera_xform.origin);
-  frame_stats_.detail_cells = static_cast<int64_t>(request.detail_cells.size());
-  _append_visible_anchors(request, p_camera_xform);
-  return request;
-}
-
-void NovaFoliageDispatcher::_append_visible_anchors(
-    opennova::foliage::FrameRequest &r_request,
-    const Transform3D &p_camera_xform) {
-  frame_stats_.silhouette_anchors_input = silhouette_anchors_.size();
+  // Column-major view matrix from the camera's inverse transform (the same
+  // construction NovaTerrain feeds TerrainFrameCompiler).
+  const Transform3D view = p_camera_xform.affine_inverse();
+  const Basis &b = view.basis;
+  const Vector3 &o = view.origin;
+  input.view[0] = b[0][0]; input.view[1] = b[1][0]; input.view[2] = b[2][0]; input.view[3] = 0;
+  input.view[4] = b[0][1]; input.view[5] = b[1][1]; input.view[6] = b[2][1]; input.view[7] = 0;
+  input.view[8] = b[0][2]; input.view[9] = b[1][2]; input.view[10] = b[2][2]; input.view[11] = 0;
+  input.view[12] = o.x; input.view[13] = o.y; input.view[14] = o.z; input.view[15] = 1;
 
   Camera3D *active_camera = nullptr;
   if (is_inside_tree()) {
@@ -808,42 +790,29 @@ void NovaFoliageDispatcher::_append_visible_anchors(
       active_camera = viewport->get_camera_3d();
     }
   }
-
-  const Transform3D view = p_camera_xform.affine_inverse();
-  const Vector3 camera_position = p_camera_xform.origin;
-  r_request.silhouette_anchors.reserve(silhouette_anchors_.size());
-
-  for (int index = 0; index < silhouette_anchors_.size(); ++index) {
-    const Vector3 anchor = silhouette_anchors_[index];
-    if (!finite_vector(anchor)) {
-      continue;
+  if (active_camera != nullptr) {
+    const Projection proj = active_camera->get_camera_projection();
+    for (int col = 0; col < 4; ++col) {
+      input.proj[col * 4 + 0] = proj.columns[col][0];
+      input.proj[col * 4 + 1] = proj.columns[col][1];
+      input.proj[col * 4 + 2] = proj.columns[col][2];
+      input.proj[col * 4 + 3] = proj.columns[col][3];
     }
-    const float view_depth = static_cast<float>(-view.xform(anchor).z);
-    if (!std::isfinite(view_depth) ||
-        view_depth < SILHOUETTE_DEPTH_GATE) {
-      continue;
-    }
-    if (active_camera != nullptr &&
-        !active_camera->is_position_in_frustum(anchor)) {
-      continue;
-    }
-
-    opennova::foliage::SilhouetteAnchor runtime_anchor;
-    runtime_anchor.position = {
-        static_cast<float>(anchor.x),
-        static_cast<float>(anchor.z),
-    };
-    runtime_anchor.view_depth = view_depth;
-    runtime_anchor.camera_distance =
-        static_cast<float>(anchor.distance_to(camera_position));
-    if (!std::isfinite(runtime_anchor.camera_distance)) {
-      continue;
-    }
-    r_request.silhouette_anchors.push_back(runtime_anchor);
+  } else {
+    // A preview without a live camera gates anchors on view depth alone.
+    input.no_frustum = true;
   }
 
-  frame_stats_.silhouette_anchors_visible =
-      static_cast<int64_t>(r_request.silhouette_anchors.size());
+  input.silhouette_anchors.reserve(silhouette_anchors_.size());
+  for (int index = 0; index < silhouette_anchors_.size(); ++index) {
+    const Vector3 anchor = silhouette_anchors_[index];
+    input.silhouette_anchors.push_back({
+        static_cast<float>(anchor.x),
+        static_cast<float>(anchor.y),
+        static_cast<float>(anchor.z),
+    });
+  }
+  return input;
 }
 
 std::vector<opennova::foliage::DetailCell>
@@ -1033,163 +1002,38 @@ Vector2 NovaFoliageDispatcher::_terrain_uv(float p_world_x,
                  atlas.y / static_cast<float>(colormap->get_height()));
 }
 
-bool NovaFoliageDispatcher::_append_detail_instance(
-    const opennova::foliage::DetailInstance &p_instance,
-    BatchBuilder &r_batch) {
-  const int slot = p_instance.slot;
-  if (slot < 0 || slot >= opennova::FOLIAGE_MAX_DEFS ||
-      !source_geometry_[slot].valid) {
-    return false;
-  }
-  const SourceGeometry &source = source_geometry_[slot];
-  if (r_batch.positions.size() >
-      static_cast<size_t>(std::numeric_limits<int32_t>::max()) -
-          source.vertices.size()) {
-    return false;
-  }
+void NovaFoliageDispatcher::_compile_and_apply(
+    const renderer::FoliageViewInput &p_view) {
+  _ensure_visuals();
+  _update_materials();
+  _hide_draw_pools();
 
-  const size_t vertex_base = r_batch.positions.size();
-  const Basis rotation(Vector3(0.0f, 1.0f, 0.0f),
-                       p_instance.yaw_radians + PI_F);
+  renderer::FoliageExpansionSamplers expansion;
+  expansion.terrain_uv_at = [this](float p_world_x, float p_world_z,
+                                   float &r_u, float &r_v) {
+    const Vector2 uv = _terrain_uv(p_world_x, p_world_z);
+    r_u = static_cast<float>(uv.x);
+    r_v = static_cast<float>(uv.y);
+    return uv != Vector2();
+  };
 
-  for (const SourceVertex &vertex : source.vertices) {
-    const Vector3 planar =
-        rotation.xform(Vector3(vertex.position.x, 0.0f, vertex.position.z));
-    const float world_x = p_instance.center.x + static_cast<float>(planar.x);
-    const float world_z = p_instance.center.z + static_cast<float>(planar.z);
-    const float ground = _sample_height(world_x, world_z);
-    const float height_left = _sample_height(world_x - 1.0f, world_z);
-    const float height_right = _sample_height(world_x + 1.0f, world_z);
-    const float height_previous = _sample_height(world_x, world_z - 1.0f);
-    const float height_next = _sample_height(world_x, world_z + 1.0f);
-    if (!valid_height(ground) || !valid_height(height_left) ||
-        !valid_height(height_right) || !valid_height(height_previous) ||
-        !valid_height(height_next)) {
-      r_batch.rollback_vertices(vertex_base);
-      return false;
-    }
-
-    const Vector3 world_position(
-        world_x,
-        ground + static_cast<float>(vertex.position.y) * DETAIL_HEIGHT_SCALE,
-        world_z);
-    if (!finite_vector(world_position)) {
-      r_batch.rollback_vertices(vertex_base);
-      return false;
-    }
-
-    const int bend_byte = std::clamp(
-        static_cast<int>(static_cast<float>(vertex.position.y) * 128.0f), 0,
-        255);
-    r_batch.positions.push_back(world_position);
-    r_batch.normals.push_back(
-        Vector3(height_left - height_right, 2.0f,
-                height_previous - height_next)
-            .normalized());
-    r_batch.uvs.push_back(vertex.uv);
-    r_batch.uv2s.push_back(_terrain_uv(world_x, world_z));
-    // Only the source-height bend byte is resident geometry. Fade, alpha
-    // reference, and pass are per-submission state on the draw node.
-    r_batch.colors.push_back(
-        Color(static_cast<float>(bend_byte) / 255.0f, 0.0f, 0.0f, 1.0f));
-  }
-
-  const int32_t index_base = static_cast<int32_t>(vertex_base);
-  for (const int32_t index : source.indices) {
-    r_batch.indices.push_back(index_base + index);
-  }
-  return true;
+  const renderer::FoliageDrawPacket &packet =
+      compiler_.compile(p_view, _world_samplers(), expansion);
+  _apply_packet(packet);
 }
 
-bool NovaFoliageDispatcher::_append_silhouette_instance(
-    const opennova::foliage::SilhouetteInstance &p_instance,
-    BatchBuilder &r_batch) {
-  const int slot = p_instance.slot;
-  if (slot < 0 || slot >= opennova::FOLIAGE_MAX_DEFS ||
-      !source_geometry_[slot].valid) {
-    return false;
-  }
-  for (const opennova::foliage::GroundCorner &corner : p_instance.corners) {
-    if (!valid_height(corner.height)) {
-      return false;
-    }
+Ref<ArrayMesh> NovaFoliageDispatcher::_upload_mesh_build(
+    const renderer::FoliageDrawPacket &p_packet,
+    const renderer::FoliageMeshBuild &p_build) const {
+  Ref<ArrayMesh> mesh;
+  if (p_build.vertex_count == 0 || p_build.index_count == 0) {
+    return mesh;
   }
 
-  const SourceGeometry &source = source_geometry_[slot];
-  if (source.radius <= 1.0e-6f ||
-      r_batch.positions.size() >
-          static_cast<size_t>(std::numeric_limits<int32_t>::max()) -
-              source.vertices.size()) {
-    return false;
-  }
+  const int64_t vertex_count = static_cast<int64_t>(p_build.vertex_count);
+  const int64_t index_count = static_cast<int64_t>(p_build.index_count);
+  const bool detail = p_build.tier == renderer::FoliageTier::Detail;
 
-  const float inverse_span = 1.0f / (2.0f * source.radius);
-  const size_t vertex_base = r_batch.positions.size();
-
-  for (const SourceVertex &vertex : source.vertices) {
-    // The 3DI import negates source X. Convert back to retail local A
-    // while local B remains Godot Z.
-    const float x_normalized =
-        0.5f - (static_cast<float>(vertex.position.x) - source.center_x) *
-                   inverse_span;
-    const float z_normalized =
-        0.5f + (static_cast<float>(vertex.position.z) - source.center_z) *
-                   inverse_span;
-    const float one_minus_x = 1.0f - x_normalized;
-    const float one_minus_z = 1.0f - z_normalized;
-    const float weights[4] = {
-        one_minus_x * one_minus_z,
-        x_normalized * one_minus_z,
-        one_minus_x * z_normalized,
-        x_normalized * z_normalized,
-    };
-
-    float world_x = 0.0f;
-    float world_z = 0.0f;
-    float ground = 0.0f;
-    for (int corner = 0; corner < 4; ++corner) {
-      world_x += weights[corner] * p_instance.corners[corner].x;
-      world_z += weights[corner] * p_instance.corners[corner].z;
-      ground += weights[corner] * p_instance.corners[corner].height;
-    }
-
-    const float u = 2.0f * x_normalized - 1.0f;
-    const float v = 2.0f * z_normalized - 1.0f;
-    ground += (1.0f - v * v) * (p_instance.fold[0] + u * p_instance.fold[1]) +
-              (1.0f - u * u) * (p_instance.fold[2] + v * p_instance.fold[3]);
-
-    const float half_height =
-        static_cast<float>(vertex.position.y) * DETAIL_HEIGHT_SCALE;
-    const Vector3 world_position(world_x, ground + half_height, world_z);
-    if (!finite_vector(world_position)) {
-      r_batch.rollback_vertices(vertex_base);
-      return false;
-    }
-
-    r_batch.positions.push_back(world_position);
-    r_batch.uvs.push_back(vertex.uv);
-    r_batch.uv2s.push_back(Vector2(half_height, 0.0f));
-    r_batch.colors.push_back(Color(0.0f, 0.0f, 0.0f, 1.0f));
-  }
-
-  const int32_t index_base = static_cast<int32_t>(vertex_base);
-  for (const int32_t index : source.indices) {
-    r_batch.indices.push_back(index_base + index);
-  }
-  return true;
-}
-
-NovaFoliageDispatcher::CachedMesh NovaFoliageDispatcher::_build_mesh(
-    const BatchBuilder &p_batch, int64_t p_instance_count) const {
-  CachedMesh result;
-  result.instances = p_instance_count;
-  result.vertices = static_cast<int64_t>(p_batch.positions.size());
-  if (p_batch.positions.empty() || p_batch.indices.empty()) {
-    return result;
-  }
-
-  const int64_t vertex_count = static_cast<int64_t>(p_batch.positions.size());
-  const int64_t index_count = static_cast<int64_t>(p_batch.indices.size());
   PackedVector3Array positions;
   PackedVector3Array normals;
   PackedVector2Array uvs;
@@ -1201,27 +1045,33 @@ NovaFoliageDispatcher::CachedMesh NovaFoliageDispatcher::_build_mesh(
   uv2s.resize(vertex_count);
   colors.resize(vertex_count);
   indices.resize(index_count);
-  if (p_batch.normals.size() == p_batch.positions.size()) {
+  if (detail) {
     normals.resize(vertex_count);
   }
 
-  for (int64_t vertex = 0; vertex < vertex_count; ++vertex) {
-    positions.set(vertex, p_batch.positions[static_cast<size_t>(vertex)]);
-    uvs.set(vertex, p_batch.uvs[static_cast<size_t>(vertex)]);
-    uv2s.set(vertex, p_batch.uv2s[static_cast<size_t>(vertex)]);
-    colors.set(vertex, p_batch.colors[static_cast<size_t>(vertex)]);
-    if (!normals.is_empty()) {
-      normals.set(vertex, p_batch.normals[static_cast<size_t>(vertex)]);
+  for (int64_t i = 0; i < vertex_count; ++i) {
+    const renderer::FoliageVertex &v =
+        p_packet.vertices[p_build.first_vertex + static_cast<size_t>(i)];
+    positions.set(i, Vector3(v.x, v.y, v.z));
+    uvs.set(i, Vector2(v.u, v.v));
+    uv2s.set(i, Vector2(v.u2, v.v2));
+    // Only the source-height bend byte is resident geometry. Fade, alpha
+    // reference, and pass are per-submission state on the draw node.
+    colors.set(i, Color(v.bend, 0.0f, 0.0f, 1.0f));
+    if (detail) {
+      normals.set(i, Vector3(v.nx, v.ny, v.nz));
     }
   }
-  for (int64_t index = 0; index < index_count; ++index) {
-    indices.set(index, p_batch.indices[static_cast<size_t>(index)]);
+  for (int64_t i = 0; i < index_count; ++i) {
+    indices.set(i, static_cast<int32_t>(
+                       p_packet.indices[p_build.first_index +
+                                        static_cast<size_t>(i)]));
   }
 
   Array arrays;
   arrays.resize(Mesh::ARRAY_MAX);
   arrays[Mesh::ARRAY_VERTEX] = positions;
-  if (!normals.is_empty()) {
+  if (detail) {
     arrays[Mesh::ARRAY_NORMAL] = normals;
   }
   arrays[Mesh::ARRAY_COLOR] = colors;
@@ -1229,38 +1079,99 @@ NovaFoliageDispatcher::CachedMesh NovaFoliageDispatcher::_build_mesh(
   arrays[Mesh::ARRAY_TEX_UV2] = uv2s;
   arrays[Mesh::ARRAY_INDEX] = indices;
 
-  result.mesh.instantiate();
-  result.mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
-  return result;
+  mesh.instantiate();
+  mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+  return mesh;
 }
 
-void NovaFoliageDispatcher::_erase_cache_identities(
-    const std::vector<opennova::foliage::CacheIdentity> &p_identities,
-    std::unordered_map<MeshCacheKey, CachedMesh, MeshCacheKeyHash> &r_cache) {
-  for (const opennova::foliage::CacheIdentity &identity : p_identities) {
-    r_cache.erase(MeshCacheKey{
-        identity.slot,
-        identity.key,
-        identity.revision,
-    });
+void NovaFoliageDispatcher::_apply_packet(
+    const renderer::FoliageDrawPacket &p_packet) {
+  // 1) Upload every mesh the compiler built this frame (empty builds cache an
+  // empty entry so repeated submissions of a barren identity stay cheap).
+  for (const renderer::FoliageMeshBuild &build : p_packet.mesh_builds) {
+    CachedMesh entry;
+    entry.mesh = _upload_mesh_build(p_packet, build);
+    entry.instances = build.instance_count;
+    entry.vertices = static_cast<int64_t>(build.vertex_count);
+    const MeshCacheKey key{build.slot, build.cell_key, build.revision};
+    if (build.tier == renderer::FoliageTier::Detail) {
+      detail_mesh_cache_[key] = std::move(entry);
+    } else {
+      model_mesh_cache_[key] = std::move(entry);
+    }
   }
-}
 
-void NovaFoliageDispatcher::_render_request(
-    opennova::foliage::FrameRequest p_request,
-    const Transform3D &p_camera_xform) {
-  (void)p_camera_xform;
-  _ensure_visuals();
-  _update_materials();
-  _hide_draw_pools();
+  // 2) Bind the packet's draw commands onto the pools, in packet order.
+  size_t detail_draw_index = 0;
+  size_t model_draw_index = 0;
+  for (const renderer::FoliageDrawCommand &command : p_packet.commands) {
+    const int slot = command.slot;
+    if (slot < 0 || slot >= opennova::FOLIAGE_MAX_DEFS) {
+      continue;
+    }
+    const MeshCacheKey key{command.slot, command.cell_key, command.revision};
+    const bool detail = command.tier == renderer::FoliageTier::Detail;
+    auto &cache = detail ? detail_mesh_cache_ : model_mesh_cache_;
+    const auto found = cache.find(key);
+    if (found == cache.end() || found->second.mesh.is_null()) {
+      // The compiler only commands identities it built or knows resident; a
+      // miss means the applier's cache went out of sync with the packet.
+      continue;
+    }
 
-  const opennova::foliage::FrameOutput output =
-      runtime_.render_frame(p_request, _world_samplers());
-  const opennova::foliage::RuntimeStats &runtime_stats = runtime_.get_stats();
-  frame_stats_.runtime_detail_intents =
-      static_cast<int64_t>(output.detail.size());
-  frame_stats_.runtime_silhouette_intents =
-      static_cast<int64_t>(output.silhouettes.size());
+    MeshInstance3D *draw =
+        detail ? _ensure_draw_node(detail_draw_pool_, detail_draw_index++,
+                                   String("FoliageDetailDraw"))
+               : _ensure_draw_node(model_draw_pool_, model_draw_index++,
+                                   String("FoliageModelDraw"));
+    draw->set_mesh(found->second.mesh);
+    if (detail) {
+      const bool high =
+          command.pass == opennova::foliage::DetailPass::HighAlphaTest;
+      draw->set_material_override(high ? detail_high_materials_[slot]
+                                       : detail_low_materials_[slot]);
+      draw->set_instance_shader_parameter(StringName("u_fade"), command.fade);
+    } else {
+      draw->set_material_override(silhouette_materials_[slot]);
+    }
+    draw->set_instance_shader_parameter(StringName("u_alpha_ref"),
+                                        command.alpha_reference);
+    if (detail) {
+      // The near secondary LOW draw runs under strict D3DCMP_LESS in retail;
+      // the cutoff discard keeps it off every texel the HIGH pass accepted.
+      // [orig: Foliage_SetupFarSlotDraw @ 0x6008fc..0x600912]
+      draw->set_instance_shader_parameter(StringName("u_high_pass_cutoff"),
+                                          command.high_pass_cutoff);
+    }
+    draw->set_instance_shader_parameter(StringName("u_wind_phase"),
+                                        command.wind_phase);
+    draw->set_visible(true);
+  }
+
+  // 3) A regenerated identity may still have been submitted earlier in this
+  // same packet. Draw nodes retain its Ref<ArrayMesh>; remove cache ownership
+  // only after every command has consumed the frame.
+  _erase_cache_identities(p_packet.detail_evicted, detail_mesh_cache_);
+  _erase_cache_identities(p_packet.model_evicted, model_mesh_cache_);
+
+  // 4) Mirror the packet's debug counters into the stable stats surface.
+  const renderer::FoliageFrameDebugCounters &debug = p_packet.debug;
+  frame_stats_.detail_cells = debug.detail_cells;
+  frame_stats_.silhouette_anchors_input = debug.silhouette_anchors_input;
+  frame_stats_.silhouette_anchors_visible = debug.silhouette_anchors_visible;
+  frame_stats_.runtime_detail_intents = debug.runtime_detail_intents;
+  frame_stats_.runtime_silhouette_intents = debug.runtime_silhouette_intents;
+  frame_stats_.detail_high_instances = debug.detail_high_instances;
+  frame_stats_.detail_low_instances = debug.detail_low_instances;
+  frame_stats_.silhouette_instances = debug.silhouette_instances;
+  frame_stats_.detail_vertices = debug.detail_vertices;
+  frame_stats_.silhouette_vertices = debug.silhouette_vertices;
+  frame_stats_.render_batches = debug.render_batches;
+  frame_stats_.detail_mesh_hits = debug.detail_mesh_hits;
+  frame_stats_.detail_mesh_uploads = debug.detail_mesh_uploads;
+  frame_stats_.model_mesh_hits = debug.model_mesh_hits;
+  frame_stats_.model_mesh_uploads = debug.model_mesh_uploads;
+  const opennova::foliage::RuntimeStats &runtime_stats = debug.runtime;
   frame_stats_.detail_cache_hits =
       static_cast<int64_t>(runtime_stats.detail.hits);
   frame_stats_.detail_cache_misses =
@@ -1287,150 +1198,18 @@ void NovaFoliageDispatcher::_render_request(
       static_cast<int64_t>(runtime_stats.model.submissions);
   frame_stats_.terrain_scene_counter =
       static_cast<int64_t>(runtime_stats.terrain_scene_counter);
+}
 
-  const float detail_wind_phase =
-      static_cast<float>(runtime_stats.terrain_scene_counter) * 0.001f;
-  size_t detail_draw_index = 0;
-  for (size_t begin = 0; begin < output.detail.size();) {
-    const opennova::foliage::DetailInstance &first = output.detail[begin];
-    size_t end = begin + 1;
-    while (end < output.detail.size() &&
-           output.detail[end].submission_id == first.submission_id) {
-      ++end;
-    }
-
-    const int slot = first.slot;
-    if (slot < 0 || slot >= opennova::FOLIAGE_MAX_DEFS) {
-      begin = end;
-      continue;
-    }
-    const MeshCacheKey cache_key{
-        first.slot,
-        first.cell_key,
-        first.cache_revision,
-    };
-    auto cached = detail_mesh_cache_.find(cache_key);
-    if (cached == detail_mesh_cache_.end()) {
-      BatchBuilder batch;
-      int64_t instance_count = 0;
-      for (size_t index = begin; index < end; ++index) {
-        if (_append_detail_instance(output.detail[index], batch)) {
-          ++instance_count;
-        }
-      }
-      CachedMesh built = _build_mesh(batch, instance_count);
-      if (built.mesh.is_valid()) {
-        ++frame_stats_.detail_mesh_uploads;
-      }
-      cached =
-          detail_mesh_cache_.emplace(cache_key, std::move(built)).first;
-    } else {
-      ++frame_stats_.detail_mesh_hits;
-    }
-
-    const CachedMesh &resident = cached->second;
-    if (resident.mesh.is_valid()) {
-      const bool high =
-          first.pass == opennova::foliage::DetailPass::HighAlphaTest;
-      MeshInstance3D *draw =
-          _ensure_draw_node(detail_draw_pool_, detail_draw_index++,
-                            String("FoliageDetailDraw"));
-      draw->set_mesh(resident.mesh);
-      draw->set_material_override(
-          high ? detail_high_materials_[slot] : detail_low_materials_[slot]);
-      draw->set_instance_shader_parameter(StringName("u_fade"), first.alpha);
-      draw->set_instance_shader_parameter(
-          StringName("u_alpha_ref"),
-          static_cast<float>(first.alpha_reference) / 255.0f);
-      // The near secondary LOW draw runs under strict D3DCMP_LESS in retail;
-      // the cutoff discard keeps it off every texel the HIGH pass accepted.
-      // [orig: Foliage_SetupFarSlotDraw @ 0x6008fc..0x600912]
-      draw->set_instance_shader_parameter(
-          StringName("u_high_pass_cutoff"),
-          first.near_secondary ? 180.0f / 255.0f : 0.0f);
-      draw->set_instance_shader_parameter(StringName("u_wind_phase"),
-                                          detail_wind_phase);
-      draw->set_visible(true);
-
-      if (high) {
-        frame_stats_.detail_high_instances += resident.instances;
-      } else {
-        frame_stats_.detail_low_instances += resident.instances;
-      }
-      frame_stats_.detail_vertices += resident.vertices;
-      ++frame_stats_.render_batches;
-    }
-    begin = end;
+void NovaFoliageDispatcher::_erase_cache_identities(
+    const std::vector<opennova::foliage::CacheIdentity> &p_identities,
+    std::unordered_map<MeshCacheKey, CachedMesh, MeshCacheKeyHash> &r_cache) {
+  for (const opennova::foliage::CacheIdentity &identity : p_identities) {
+    r_cache.erase(MeshCacheKey{
+        identity.slot,
+        identity.key,
+        identity.revision,
+    });
   }
-
-  size_t model_draw_index = 0;
-  for (size_t begin = 0; begin < output.silhouettes.size();) {
-    const opennova::foliage::SilhouetteInstance &first =
-        output.silhouettes[begin];
-    size_t end = begin + 1;
-    while (end < output.silhouettes.size() &&
-           output.silhouettes[end].submission_id == first.submission_id) {
-      ++end;
-    }
-
-    const int slot = first.slot;
-    if (slot < 0 || slot >= opennova::FOLIAGE_MAX_DEFS) {
-      begin = end;
-      continue;
-    }
-    const MeshCacheKey cache_key{
-        first.slot,
-        first.cell_key,
-        first.cache_revision,
-    };
-    auto cached = model_mesh_cache_.find(cache_key);
-    if (cached == model_mesh_cache_.end()) {
-      BatchBuilder batch;
-      int64_t instance_count = 0;
-      for (size_t index = begin; index < end; ++index) {
-        if (_append_silhouette_instance(output.silhouettes[index], batch)) {
-          ++instance_count;
-        }
-      }
-      CachedMesh built = _build_mesh(batch, instance_count);
-      if (built.mesh.is_valid()) {
-        ++frame_stats_.model_mesh_uploads;
-      }
-      cached = model_mesh_cache_.emplace(cache_key, std::move(built)).first;
-    } else {
-      ++frame_stats_.model_mesh_hits;
-    }
-
-    const CachedMesh &resident = cached->second;
-    if (resident.mesh.is_valid()) {
-      MeshInstance3D *draw =
-          _ensure_draw_node(model_draw_pool_, model_draw_index++,
-                            String("FoliageModelDraw"));
-      draw->set_mesh(resident.mesh);
-      draw->set_material_override(silhouette_materials_[slot]);
-      draw->set_instance_shader_parameter(
-          StringName("u_alpha_ref"),
-          static_cast<float>(first.alpha_reference) / 255.0f);
-      // Retail pre-increments the wind counter once per actual nonempty model
-      // draw, including repeated submissions of one resident cache entry.
-      const float wind_phase =
-          static_cast<float>(++model_wind_counter_) * 0.001f;
-      draw->set_instance_shader_parameter(StringName("u_wind_phase"),
-                                          wind_phase);
-      draw->set_visible(true);
-
-      frame_stats_.silhouette_instances += resident.instances;
-      frame_stats_.silhouette_vertices += resident.vertices;
-      ++frame_stats_.render_batches;
-    }
-    begin = end;
-  }
-
-  // A regenerated identity may still have been submitted earlier in this
-  // same output. Draw nodes retain its Ref<ArrayMesh>; remove cache ownership
-  // only after every submission has consumed the frame.
-  _erase_cache_identities(output.detail_evicted, detail_mesh_cache_);
-  _erase_cache_identities(output.model_evicted, model_mesh_cache_);
 }
 
 } // namespace godot
