@@ -228,33 +228,33 @@ bool NovaSimulation::resolve_mounted_pose_native(
 		++mounted_native_declines_;
 		return false;
 	}
-	// The same three CTRL sources the legacy resolver publishes, written by
-	// ordinal onto the retail bus.
-	int32_t ctrl_values[THREEDI_CTRL_REGISTER_COUNT] = {};
+	// Gather the three CTRL sources; the ordinal writes onto the retail bus
+	// and the PANM clock are simassets' (compose_mounted_pose_controls /
+	// mounted_pose_time_ms).
+	opennova::simassets::MountedPoseControlSources sources;
 	AiEntity *carrier_ai = ai_ ? ai_->for_handle(p_carrier.handle) : nullptr;
-	const auto phase_for = [carrier_ai](int channel) -> int32_t {
-		return carrier_ai != nullptr
-				? carrier_ai->brain.f[AiBrain::kPartAnimPhase0 + channel]
-				: 0;
-	};
-	if ((p_carrier.item_attrib & 0x1000u) == 0)
-		ctrl_values[THREEDI_CTRL_VEHICLE_SPECIAL1] = phase_for(0);
-	ctrl_values[THREEDI_CTRL_VEHICLE_SPECIAL2] = phase_for(1);
-	int32_t heat_glow = 0;
-	if (opennova::world::world_model_heat_glow_for(p_world, p_carrier, heat_glow))
-		ctrl_values[THREEDI_CTRL_HEAT_GLOW] = heat_glow;
+	if (carrier_ai != nullptr) {
+		sources.part_anim_phase0 =
+				carrier_ai->brain.f[AiBrain::kPartAnimPhase0];
+		sources.part_anim_phase1 =
+				carrier_ai->brain.f[AiBrain::kPartAnimPhase0 + 1];
+	}
+	sources.has_heat_glow = opennova::world::world_model_heat_glow_for(
+			p_world, p_carrier, sources.heat_glow);
 	EmplacedWeaponControls emplaced;
 	if (emplaced_weapon_controls_for(p_world, ai_.get(), p_carrier, emplaced)) {
-		ctrl_values[THREEDI_CTRL_EWEAP_GUNYAW] =
-				static_cast<int32_t>(emplaced.gun_yaw);
-		ctrl_values[THREEDI_CTRL_EWEAP_GUNPITCH] =
-				static_cast<int32_t>(emplaced.gun_pitch);
+		sources.has_emplaced = true;
+		sources.emplaced_gun_yaw = emplaced.gun_yaw;
+		sources.emplaced_gun_pitch = emplaced.gun_pitch;
 	}
-	const uint32_t time_ms = panm_time_override_ms_ >= 0
-			? static_cast<uint32_t>(panm_time_override_ms_)
-			: p_world.logic_tick * 16u;
+	int32_t ctrl_values[THREEDI_CTRL_REGISTER_COUNT] = {};
+	opennova::simassets::compose_mounted_pose_controls(
+			p_carrier.item_attrib, sources, ctrl_values);
 	const bool resolved = opennova::simassets::resolve_model_mounted_pose(
-			model, p_carrier, p_seat, ctrl_values, time_ms, r_out);
+			model, p_carrier, p_seat, ctrl_values,
+			opennova::simassets::mounted_pose_time_ms(
+					p_world.logic_tick, panm_time_override_ms_),
+			r_out);
 	if (!resolved) ++mounted_native_declines_;
 	return resolved;
 }

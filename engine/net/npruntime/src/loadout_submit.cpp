@@ -146,4 +146,23 @@ void build_joiner_loadout_kit(const world::World &world,
 	fill_side(out.red, profile.red);
 }
 
+void kit_from_authoritative_grant(const world::WeaponTable &weapons,
+		const WeaponLoadout &grant,
+		std::vector<world::WeaponKitEntry> &r_kit) {
+	r_kit.clear();
+	for (const WeaponLoadoutSlot &slot : grant.slots) {
+		const world::WeaponTableEntry *def = weapons.by_index(slot.type_id);
+		if (def == nullptr) continue; // retail drops failed AdmDef lookups
+		world::WeaponKitEntry entry;
+		entry.name = def->name;
+		entry.ammo_primary = static_cast<int32_t>(
+				static_cast<int8_t>(slot.ammo_primary));
+		entry.ammo_secondary = static_cast<int32_t>(
+				static_cast<int8_t>(slot.ammo_secondary));
+		entry.flags = static_cast<int32_t>(
+				static_cast<int8_t>(slot.ammo_alt));
+		r_kit.push_back(std::move(entry));
+	}
+}
+
 } // namespace opennova::np

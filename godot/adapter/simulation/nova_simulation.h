@@ -630,6 +630,11 @@ private:
 	bool apply_local_player_loadout_impl(
 			const TypedArray<Dictionary> &p_kit, int p_player_class,
 			bool p_submit_joiner_request);
+	// The typed-rows core of the apply (the dict overload converts, the 0x5A
+	// grant path feeds np::kit_from_authoritative_grant's rows directly).
+	bool apply_local_player_loadout_rows(
+			std::vector<opennova::world::WeaponKitEntry> p_kit,
+			int p_player_class, bool p_submit_joiner_request);
 	// Fold the latest authoritative S2C 0x5A grant into the local slot pool at
 	// the same recv-before-actions boundary as the retail handler.
 	void apply_joiner_authoritative_loadout();

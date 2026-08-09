@@ -6,6 +6,7 @@
 
 #include "world/ai.h"
 #include "world/collision.h"
+#include "world/weapon_fsm.h"
 #include "world/world.h"
 
 namespace opennova::world {
@@ -454,6 +455,37 @@ bool player_toggle_vehicle_mount(World &world, EntityHandle player) {
     if (find_nearest_free_seat(world, *p, hit, false))
         return attach_to_seat_index(world, player, hit.vehicle, hit.seat_index);
     return entity_detach_from_vehicle(world, player);
+}
+
+bool weapon_state_allows_mount_toggle(int32_t current_action, int32_t next_action) {
+    return current_action < 2 || current_action == weapon_action::kEmpty ||
+            next_action == weapon_action::kOverheated;
+}
+
+bool find_mount_toggle_candidate(World &world, const Entity &player,
+                                 NearestSeatHit &r_hit) {
+    // The candidate-PREVIEW form of player_toggle_vehicle_mount's unmounted
+    // search (a joiner picks its request target without mutating L): the same
+    // ground-carrier preference [orig: the Flags 0x200 deck branch @0x4368cf
+    // -> Entity_FindBestSeatSlot @0x4351f0], then the nearest scan. The
+    // authority toggle keeps its inline form because a failed ground-seat
+    // ATTACH falls through to the nearest scan there; the preview reports the
+    // ground candidate outright.
+    if (!player.mounted) {
+        Entity *ground = world.registry.get(player.ground_target);
+        if (ground != nullptr && !ground->seats.empty()) {
+            const int seat_index =
+                    world.commands.find_best_seat(*ground, player.handle);
+            if (seat_index >= 0) {
+                r_hit.vehicle = ground->handle;
+                r_hit.seat_index = seat_index;
+                r_hit.type =
+                        ground->seats[static_cast<size_t>(seat_index)].type;
+                return true;
+            }
+        }
+    }
+    return find_nearest_free_seat(world, player, r_hit, false);
 }
 
 } // namespace opennova::world

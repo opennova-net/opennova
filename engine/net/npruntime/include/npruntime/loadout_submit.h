@@ -9,6 +9,7 @@
 #pragma once
 
 #include <npruntime/joiner_connection.h>
+#include <npwire/ingame_decode.h>
 
 #include <playersav/weapon_sav.h>
 #include <world/player_loadout.h>
@@ -61,6 +62,14 @@ bool reseed_session_kit_on_side_change(world::World &world,
 // side blocks for the S2C 0x50 resubmission path. `equipped_combo` is the
 // live equipped slot for the pair's SECOND submit (-1 = none)
 // [orig: Game_StartMission @0x525c2e passes g_currentWeaponSlot].
+// The S2C 0x5A authoritative grant -> spawn-kit rows: names resolve through
+// the weapon table (retail drops failed AdmDef lookups); the wire bytes are
+// SIGNED clip counts — 0xFF is the authored/default sentinel, not 255 clips
+// [orig: the grant apply @ 0x4295c4..0x429613].
+void kit_from_authoritative_grant(const world::WeaponTable &weapons,
+		const WeaponLoadout &grant,
+		std::vector<world::WeaponKitEntry> &r_kit);
+
 void build_joiner_loadout_kit(const world::World &world,
 		const playersav::Record &profile, uint8_t assigned_team,
 		const world::LocalPlayerLoadout &loadout, int equipped_combo,

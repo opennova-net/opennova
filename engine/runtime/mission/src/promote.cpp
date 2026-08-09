@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <vector>
 
 namespace opennova::mission {
@@ -590,6 +591,31 @@ PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
     apply_command_mounts(command_mounts, world, ai, opts);
 
     return r;
+}
+
+void stash_mission_loadout_rules(
+        const bms::File &mission,
+        std::vector<std::pair<std::string, int32_t>> &r_availability_rows,
+        std::vector<world::WeaponKitEntry> &r_kit_rows) {
+    r_availability_rows.clear();
+    r_kit_rows.clear();
+    for (const bms::ItemAvailabilityEntry &row : mission.item_availability) {
+        if (row.name.empty()) continue;
+        r_availability_rows.emplace_back(row.name,
+                                         static_cast<int32_t>(row.status));
+    }
+    for (const bms::WeaponLoadoutRecord &row : mission.loadout.entries) {
+        if (row.name.empty()) continue;
+        world::WeaponKitEntry entry;
+        entry.name = row.name;
+        entry.ammo_primary = static_cast<int32_t>(
+                std::strtol(row.ammo_primary.c_str(), nullptr, 10));
+        entry.ammo_secondary = static_cast<int32_t>(
+                std::strtol(row.ammo_secondary.c_str(), nullptr, 10));
+        entry.flags = static_cast<int32_t>(
+                std::strtol(row.flags.c_str(), nullptr, 10));
+        r_kit_rows.push_back(std::move(entry));
+    }
 }
 
 } // namespace opennova::mission

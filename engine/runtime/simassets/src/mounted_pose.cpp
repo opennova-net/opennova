@@ -359,4 +359,25 @@ bool resolve_model_mounted_pose(const Threedi3di3 &model,
 	return true;
 }
 
+void compose_mounted_pose_controls(
+        uint32_t carrier_item_attrib, const MountedPoseControlSources &sources,
+        int32_t (&r_ctrl)[THREEDI_CTRL_REGISTER_COUNT]) {
+    if ((carrier_item_attrib & 0x1000u) == 0)
+        r_ctrl[THREEDI_CTRL_VEHICLE_SPECIAL1] = sources.part_anim_phase0;
+    r_ctrl[THREEDI_CTRL_VEHICLE_SPECIAL2] = sources.part_anim_phase1;
+    if (sources.has_heat_glow)
+        r_ctrl[THREEDI_CTRL_HEAT_GLOW] = sources.heat_glow;
+    if (sources.has_emplaced) {
+        r_ctrl[THREEDI_CTRL_EWEAP_GUNYAW] =
+                static_cast<int32_t>(sources.emplaced_gun_yaw);
+        r_ctrl[THREEDI_CTRL_EWEAP_GUNPITCH] =
+                static_cast<int32_t>(sources.emplaced_gun_pitch);
+    }
+}
+
+uint32_t mounted_pose_time_ms(uint32_t logic_tick, int64_t override_ms) {
+    return override_ms >= 0 ? static_cast<uint32_t>(override_ms)
+                            : logic_tick * 16u;
+}
+
 } // namespace opennova::simassets
