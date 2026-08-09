@@ -147,6 +147,7 @@
     "godot/game/net_session_controller.gd",
     "godot/game/novaworld_panel.gd",
     "godot/game/novaworld_settings.gd",
+    "engine/runtime/environment/*",
     "engine/runtime/world/*",
     "engine/runtime/mission/*",
     "engine/formats/mission/*",

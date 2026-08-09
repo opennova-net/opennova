@@ -26,6 +26,7 @@ add_library(opennova_runtime STATIC
     # engine/formats/env
     ${CMAKE_CURRENT_SOURCE_DIR}/environment/src/environment_state.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/environment/src/sky_frame.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/environment/src/water_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/environment/src/weather_runtime.cpp
     # frame — the game frame: the main-loop shape (bank/catch-up/present-once)
     # and the fixed per-frame leg order, over shell-supplied device hooks

@@ -295,7 +295,7 @@ func test_shell_exit_releases_runtime_texture_caches_before_renderer_shutdown() 
 	var weak_cursor: WeakRef = weakref(cursor_texture)
 	cursor_texture = null
 	var water: Water = _shell.get_node("World/Water")
-	var water_material: ShaderMaterial = water.water_material
+	var water_material: ShaderMaterial = water.get_water_material()
 	var water_color_texture: Texture2D = water_material.get_shader_parameter(
 			"u_noise_color")
 	var water_normal_texture: Texture2D = water_material.get_shader_parameter(

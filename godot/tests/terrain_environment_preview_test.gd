@@ -4,11 +4,10 @@ extends GutTest
 # same Water + Weather stack as the runtime. These lock the API the
 # terrain editor relies on so the bespoke hardcoded water plane cannot return.
 
-const NovaWaterScript = preload("res://game/environment/nova_water.gd")
 
 
 func test_water_height_override_drives_height() -> void:
-	var water = add_child_autofree(NovaWaterScript.new())
+	var water = add_child_autofree(Water.new())
 	water.set_height_override(42.5)
 	assert_almost_eq(water.water_height, 42.5, 0.001, "Height override should drive the water height directly.")
 

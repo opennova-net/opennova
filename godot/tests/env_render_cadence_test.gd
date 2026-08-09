@@ -26,6 +26,9 @@ func _advance_one_second(node: Node, hz: int) -> void:
 	elif node is SkyDome:
 		for _i in hz:
 			(node as SkyDome).advance_frame(delta)
+	elif node is Water:
+		for _i in hz:
+			(node as Water).advance_frame(delta)
 	else:
 		simulate(node, hz, delta)
 
@@ -237,7 +240,7 @@ func _water_fallback_state_after_one_second(hz: int) -> Vector4:
 	viewport.add_child(camera)
 	camera.make_current()
 	_advance_one_second(water, hz)
-	return water.water_material.get_shader_parameter("u_water_uv")
+	return water.get_water_material().get_shader_parameter("u_water_uv")
 
 
 func test_standalone_water_scroll_is_invariant_across_render_refresh_rates() -> void:

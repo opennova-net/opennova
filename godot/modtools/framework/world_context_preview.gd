@@ -22,7 +22,6 @@ extends RefCounted
 # Reference via preload(), not class_name, so it resolves without an editor
 # re-import (same convention as mission_object_placer.gd).
 
-const NovaWaterScript = preload("res://game/environment/nova_water.gd")
 const HHMM_DAY := MissionEnvironment.HHMM_DAY
 
 # The bound app-owned environment DOCUMENT; null until
@@ -104,9 +103,8 @@ func init_water_plane() -> void:
 	# Water (water.gdshader, env-derived lit color) the runtime uses, instead
 	# of a bespoke plane with a hardcoded color. Height stays document-driven via
 	# the override hook.
-	_water_node = Node3D.new()
+	_water_node = Water.new()
 	_water_node.name = "WaterPlane"
-	_water_node.set_script(NovaWaterScript)
 	_water_node.environment_path = NodePath("../EditorEnvironment")
 	_water_node.weather_path = NodePath("../EditorWeather")
 	_world_root.add_child(_water_node)

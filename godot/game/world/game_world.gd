@@ -1431,7 +1431,7 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 func _sample_water_render_stats(stats_on: bool) -> void:
 	var viewport: SubViewport = null
 	if stats_on and _water != null:
-		var viewport_v: Variant = _water.get("reflection_viewport")
+		var viewport_v: Variant = _water.get_reflection_viewport()
 		if viewport_v is SubViewport and is_instance_valid(viewport_v):
 			viewport = viewport_v
 	var previous: Object = _stats_water_vp_ref.get_ref() if _stats_water_vp_ref != null else null

@@ -148,7 +148,6 @@ extends GutTest
 # loudly so a dump run is never mistaken for a green run.
 # =============================================================================
 
-const NovaWaterScript = preload("res://game/environment/nova_water.gd")
 const NovaCelestialScript = preload("res://game/environment/nova_celestial.gd")
 
 # The engine tick [docs/engine-primer.md: 62 Hz].
@@ -473,7 +472,7 @@ func _collect_env_grid(bytes: Dictionary, floats: Dictionary) -> void:
 		var env_name := "EnvC%d" % cfg_index
 		var env_node := _add_env_node(cfg, env_name)
 
-		var water: Node = NovaWaterScript.new()
+		var water: Node = Water.new()
 		water.name = "WaterC%d" % cfg_index
 		water.environment_path = NodePath("../" + env_name)
 		add_child_autofree(water)
@@ -512,17 +511,17 @@ func _collect_env_grid(bytes: Dictionary, floats: Dictionary) -> void:
 			]
 			# Node-level lit water color for the cell (delegates the EnvFile
 			# statics; pinned at the Water output).
-			simulate(water, 1, TICK)
-			var lit: Vector3 = water.water_material.get_shader_parameter("u_water_color")
+			water.advance_frame(TICK)
+			var lit: Vector3 = water.get_water_material().get_shader_parameter("u_water_color")
 			# u_water_murk (REN-4 rename from u_water_alpha; the same env murk
 			# value flows through, so the pinned byte is unchanged).
-			var alpha: float = water.water_material.get_shader_parameter("u_water_murk")
+			var alpha: float = water.get_water_material().get_shader_parameter("u_water_murk")
 			bytes[cell + "/water"] = "%s %s" % [_hex_color(lit), _hex_byte(_byte_of(alpha))]
 
 		# u_water_uv = (scale, bias, offset_u, offset_v) [orig:
 		# render_water_surface @ 0x5c3348..0x5c33db] — the standalone node's
 		# fallback core after the cell loop's fixed tick count.
-		var water_uv: Vector4 = water.water_material.get_shader_parameter("u_water_uv")
+		var water_uv: Vector4 = water.get_water_material().get_shader_parameter("u_water_uv")
 		# Restore the environment-resolved height before recording that
 		# separate precedence vector (cfg0 returns to the zero sentinel).
 		water.set_height_override(NAN)
@@ -696,15 +695,15 @@ func _collect_water_mesh(bytes: Dictionary, floats: Dictionary) -> void:
 	var strip_vp := SubViewport.new()
 	strip_vp.size = Vector2i(1024, 600)
 	add_child_autofree(strip_vp)
-	var water: Node = NovaWaterScript.new()
+	var water: Node = Water.new()
 	strip_vp.add_child(water)
 	water.water_height = 7.0
-	simulate(water, 1, TICK)
+	water.advance_frame(TICK)
 	# No camera in strip_vp -> no strip surface: the march needs the projected
 	# screen block, and retail only runs it inside the camera pass
 	# [orig: render_water_strip_detailed @ 0x5c27d0 projects via
 	#  terrain_project_sector_to_screen @ 0x5c0bf0 before emitting rows].
-	var pre_surfaces: int = (water.mesh_instance.mesh as ArrayMesh).get_surface_count()
+	var pre_surfaces: int = (water.get_mesh_instance().mesh as ArrayMesh).get_surface_count()
 
 	# Height ladder, override rung: world-driven height wins; clearing (NAN)
 	# hands control back (terrain_environment_preview_test.gd precedent).
@@ -727,9 +726,9 @@ func _collect_water_mesh(bytes: Dictionary, floats: Dictionary) -> void:
 	cam.global_position = Vector3(100.3, 27.0, -33.7)
 	cam.make_current()
 	assert_not_null(cam, "headless camera injection must succeed")
-	simulate(water, 1, TICK)
+	water.advance_frame(TICK)
 
-	var mesh: ArrayMesh = water.mesh_instance.mesh
+	var mesh: ArrayMesh = water.get_mesh_instance().mesh
 	var arrays := mesh.surface_get_arrays(0)
 	var positions: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
 	var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]

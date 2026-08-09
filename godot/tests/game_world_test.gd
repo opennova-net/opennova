@@ -767,7 +767,7 @@ func test_packaged_scene_instantiates_with_intact_wiring() -> void:
 	assert_eq(water.water_height, 0.0,
 		"the retained scene must not invent water before ENV/TRN/BMS author it")
 	assert_false(water.is_water_active())
-	assert_eq(water.reflection_viewport.render_target_update_mode,
+	assert_eq(water.get_reflection_viewport().render_target_update_mode,
 		SubViewport.UPDATE_DISABLED)
 	water.water_height = 10.0
 	assert_true(water.is_water_active(), "the authored height remains retained")
@@ -813,7 +813,7 @@ func test_explicit_bms_zero_water_beats_nonzero_terrain() -> void:
 	assert_eq(water.water_height, 0.0,
 		"flagged BMS zero disables water and still beats TRN")
 	assert_false(water.is_water_active())
-	assert_eq(water.reflection_viewport.render_target_update_mode,
+	assert_eq(water.get_reflection_viewport().render_target_update_mode,
 		SubViewport.UPDATE_DISABLED)
 
 
@@ -1043,7 +1043,7 @@ func test_water_mirror_camera_draws_vehicles_only_and_never_the_body() -> void:
 	assert_not_null(water, "the packaged scene ships the water node")
 	if water == null:
 		return
-	var mirror: Camera3D = water.reflection_camera
+	var mirror: Camera3D = water.get_reflection_camera()
 	assert_not_null(mirror, "the water builds its mirror camera on ready")
 	if mirror == null:
 		return
@@ -1059,7 +1059,7 @@ func test_water_mirror_camera_draws_vehicles_only_and_never_the_body() -> void:
 		"non-vehicle world entities stay out of the above-water mirror")
 	assert_ne(mirror.cull_mask & Water.VISUAL_LAYER_WORLD, 0,
 		"the mirrored scene renders the reflectable world")
-	assert_eq(water.mesh_instance.layers, Water.VISUAL_LAYER_WATER,
+	assert_eq(water.get_mesh_instance().layers, Water.VISUAL_LAYER_WATER,
 		"the water strip rides the water-only layer the mirror excludes")
 
 

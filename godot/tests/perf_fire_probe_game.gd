@@ -218,9 +218,7 @@ func _run() -> void:
 	var stack: Array = [root]
 	while not stack.is_empty():
 		var n: Node = stack.pop_back()
-		var scr = n.get_script()
-		if scr != null and scr is Resource \
-				and (scr as Resource).resource_path.ends_with("nova_water.gd"):
+		if n is Water:
 			water = n
 			break
 		for ch in n.get_children():
