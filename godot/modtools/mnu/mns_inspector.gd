@@ -213,7 +213,7 @@ func _build_image_value(value: String) -> void:
 	ref.set_value_from_path(func(path: String) -> String:
 		return path.get_file())
 	ref.configure("texture", "Picture",
-		ResourceRefWidget.services_from_shell(_shell) if _shell != null else {})
+		LinkServices.from_shell(_shell) if _shell != null else LinkServices.new())
 	ref.set_value(value)
 	ref.value_changed.connect(func(next: String) -> void:
 		if _authoring_enabled and next != value:

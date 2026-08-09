@@ -457,7 +457,7 @@ func build_inspector(mount: Control) -> void:
 	# into the dock with no reparent.
 	_inspector.setup(_controller, _detail_mount)
 	if editor_shell != null:
-		_inspector.set_reference_services(ResourceRefWidget.services_from_shell(editor_shell))
+		_inspector.set_reference_services(LinkServices.from_shell(editor_shell))
 
 
 # --- Asset dock (the right pane) ----------------------------------------------

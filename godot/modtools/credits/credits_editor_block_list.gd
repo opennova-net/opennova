@@ -17,7 +17,7 @@ var _reconcile_pending: bool = false
 var _selected_entry: CbinEntry
 var _selection_emit_pending: bool = false
 var _resource_root: ResourceRoot
-var _ref_services: Dictionary = {}
+var _ref_services := LinkServices.new()
 
 func _ready() -> void:
 	_vbox = self
@@ -33,7 +33,7 @@ func set_resource_root(value: ResourceRoot) -> void:
 	_reconcile()
 
 ## The shell's resolve/pick/jump trio for the cards' font link rows.
-func set_reference_services(services: Dictionary) -> void:
+func set_reference_services(services: LinkServices) -> void:
 	_ref_services = services
 	for entry in _entry_to_card.keys():
 		var card: CreditsEditorBlockCard = _entry_to_card[entry]

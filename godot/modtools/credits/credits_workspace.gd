@@ -65,7 +65,7 @@ func mount_viewport(mount: Control) -> void:
 	# A shell without a reference index (headless doubles) gets no services
 	# rather than a jump button whose press dereferences a null index.
 	if editor_shell != null and editor_shell.get_reference_index() != null:
-		_editor.set_reference_services(ResourceRefWidget.services_from_shell(editor_shell))
+		_editor.set_reference_services(LinkServices.from_shell(editor_shell))
 	_editor.set_document(_document)
 
 

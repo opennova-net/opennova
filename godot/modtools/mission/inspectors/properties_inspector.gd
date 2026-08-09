@@ -12,7 +12,7 @@ var _props_binder: FieldBinder
 # Link-widget services (resolve/pick/jump Callables from the shell). They arrive
 # AFTER setup() builds the forms (the workspace injects them post-build), so the
 # setter re-configures the already-built widgets.
-var _ref_services: Dictionary = {}
+var _ref_services := LinkServices.new()
 var _terrain_ref_widget: ResourceRefWidget
 var _env_ref_widget: ResourceRefWidget
 # Mission-tab bulk re-ground (B8): the manual twin of the workspace's activate-time
@@ -134,7 +134,7 @@ func _add_props_ref(field: String, kind: String, label: String, tooltip: String 
 ## Wires the link widgets' resolve/pick/jump Callables (see
 ## ResourceRefWidget.services_from_shell). Idempotent; safe before or after
 ## the form is built.
-func set_reference_services(services: Dictionary) -> void:
+func set_reference_services(services: LinkServices) -> void:
 	_ref_services = services
 	_inspector._configure_selected_graphic_ref()
 	if _terrain_ref_widget != null and is_instance_valid(_terrain_ref_widget):

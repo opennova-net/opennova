@@ -168,4 +168,4 @@ func build_inspector(mount: Control) -> void:
 	mount.add_child(inspector)
 	inspector.set_environment_editor(environment_editor)
 	if editor_shell != null:
-		inspector.set_reference_services(ResourceRefWidget.services_from_shell(editor_shell))
+		inspector.set_reference_services(LinkServices.from_shell(editor_shell))

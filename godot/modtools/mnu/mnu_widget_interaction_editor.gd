@@ -21,12 +21,12 @@ var _id := -1
 var _wtype := MnuDocument.TYPE_UNKNOWN
 var _authoring: Dictionary = {}
 var _sound_sets: PackedStringArray = PackedStringArray()
-var _ref_services: Dictionary = {}
+var _ref_services := LinkServices.new()
 
 
 func configure(document: MnuDocument, id: int, wtype: int,
 		authoring: Dictionary, sound_sets: PackedStringArray,
-		reference_services: Dictionary) -> void:
+		reference_services: LinkServices) -> void:
 	_document = document
 	_id = id
 	_wtype = wtype

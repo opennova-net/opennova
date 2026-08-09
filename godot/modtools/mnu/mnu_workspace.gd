@@ -399,7 +399,7 @@ func build_inspector(mount: Control) -> void:
 	# Shell link-widget services for FILE references (the screen's text_rsrc);
 	# string KEYS resolve through the loaded table instead.
 	if editor_shell != null and editor_shell.get_reference_index() != null:
-		_inspector.set_reference_services(ResourceRefWidget.services_from_shell(editor_shell))
+		_inspector.set_reference_services(LinkServices.from_shell(editor_shell))
 	_properties_page.add_child(_inspector)
 
 	# --- Styles page --------------------------------------------------------

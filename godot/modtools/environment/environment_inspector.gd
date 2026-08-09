@@ -42,7 +42,7 @@ var _iris_percent: SpinBox
 var _iris_center: SpinBox
 # Link-widget services (resolve/pick/jump from the shell); they arrive after
 # the workspace builds this inspector, so the setter re-configures live widgets.
-var _ref_services: Dictionary = {}
+var _ref_services := LinkServices.new()
 var _keyframe_list: ItemList
 var _selected_time: SpinBox
 var _color_buttons: Dictionary = {}
@@ -350,7 +350,7 @@ func _add_sky_map(parent: Control, label_text: String, commit: Callable) -> Text
 ## Wires the link widgets' resolve/pick/jump Callables (see
 ## ResourceRefWidget.services_from_shell). Idempotent; safe before or after
 ## the form is built.
-func set_reference_services(services: Dictionary) -> void:
+func set_reference_services(services: LinkServices) -> void:
 	_ref_services = services
 	if _sun_model != null and is_instance_valid(_sun_model):
 		_sun_model.configure("object_model", "Sun", services)

@@ -33,7 +33,7 @@ var _sync_suppress := false
 var _preview_resource: CbinCreditsResource
 var _preview_paused := false
 var _resource_root: ResourceRoot
-var _ref_services: Dictionary = {}
+var _ref_services := LinkServices.new()
 
 func set_document(value: CreditsEditorDocument) -> void:
 	if _document == value:
@@ -64,7 +64,7 @@ func set_resource_root(value: ResourceRoot) -> void:
 
 ## The shell's resolve/pick/jump trio for the cards' font link rows. Safe to
 ## call before _ready (mount order); _ready re-applies the stored services.
-func set_reference_services(services: Dictionary) -> void:
+func set_reference_services(services: LinkServices) -> void:
 	_ref_services = services
 	if _block_list != null:
 		_block_list.set_reference_services(services)
@@ -135,8 +135,7 @@ func _ready() -> void:
 	for env_spin: SpinBox in [_scroll_rate_spin, _vertical_space_spin, _center_x_spin]:
 		env_spin.get_line_edit().focus_exited.connect(_flush_document_edit)
 	_block_list.set_resource_root(_resource_root)
-	if not _ref_services.is_empty():
-		_block_list.set_reference_services(_ref_services)
+	_block_list.set_reference_services(_ref_services)
 	_source_view_mount.pending_edits_changed.connect(_on_source_pending_edits_changed)
 	_player.mouse_filter = Control.MOUSE_FILTER_STOP
 	_visual_button.tooltip_text = "Edit credits as cards"

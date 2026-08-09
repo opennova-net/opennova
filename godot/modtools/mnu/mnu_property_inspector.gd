@@ -41,7 +41,7 @@ var _text_resource: RtxtStringFile
 var _text_resource_path := ""
 # Shell link-widget services (resolve/pick/jump) for FILE references like the
 # screen's text_rsrc; string KEYS resolve through the table above instead.
-var _ref_services: Dictionary = {}
+var _ref_services := LinkServices.new()
 var _picker: PopupPanel
 # The pending pick consumer (a StringRefWidget's on_pick); picker results
 # route through it so the widget commits exactly one edit.
@@ -74,7 +74,7 @@ func show_widget(doc: MnuDocument, id: int, text_res: RtxtStringFile = null, tex
 
 ## Wires the shell link-widget services (see ResourceRefWidget.services_from_shell).
 ## Idempotent; safe before or after the form is built.
-func set_reference_services(services: Dictionary) -> void:
+func set_reference_services(services: LinkServices) -> void:
 	_ref_services = services
 	if is_node_ready():
 		_rebuild()
@@ -443,14 +443,14 @@ func _build_string_ref_row(id: int) -> void:
 
 # String-KEY services over the loaded table (context-local - never the shell's
 # file services). Empty when no table is loaded, which hides every affordance.
-func _string_key_services() -> Dictionary:
+func _string_key_services() -> LinkServices:
+	var out := LinkServices.new()
 	if _text_resource == null:
-		return {}
-	return {
-		"resolve": _resolve_string_key,
-		"pick": _pick_string_key,
-		"jump": _jump_string_key,
-	}
+		return out
+	out.resolve = _resolve_string_key
+	out.pick = _pick_string_key
+	out.jump = _jump_string_key
+	return out
 
 
 func _resolve_string_key(key: String) -> Dictionary:

@@ -287,7 +287,7 @@ func set_detail_mount(detail_mount: Control) -> void:
 
 # Public API: the workspace injects the shell's resolve/pick/jump services after
 # the form is built; the Mission-properties section owns the widgets.
-func set_reference_services(services: Dictionary) -> void:
+func set_reference_services(services: LinkServices) -> void:
 	_properties.set_reference_services(services)
 
 

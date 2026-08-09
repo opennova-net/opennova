@@ -356,10 +356,10 @@ func test_expr_serialize():
 # An authored expression validates through the native compiler.
 func test_expr_validate_via_compiler():
 	var doc := _doc()
-	var ok: Dictionary = MusExpr.validate_expr("(Var01 == 2)", doc.mus_script)
-	assert_true(bool(ok.get("ok", false)), "a well-formed condition validates")
-	var bad: Dictionary = MusExpr.validate_expr("(Var01 ==", doc.mus_script)
-	assert_false(bool(bad.get("ok", true)), "a malformed condition is caught by the compiler")
+	var ok := MusExpr.validate_expr("(Var01 == 2)", doc.mus_script)
+	assert_true(ok.ok, "a well-formed condition validates")
+	var bad := MusExpr.validate_expr("(Var01 ==", doc.mus_script)
+	assert_false(bad.ok, "a malformed condition is caught by the compiler")
 
 
 func _copy(src_path: String, dst_path: String) -> void:

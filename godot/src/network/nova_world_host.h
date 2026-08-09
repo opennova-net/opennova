@@ -5,6 +5,8 @@
 #include <godot_cpp/variant/string.hpp>
 
 #include <novaworld/client_session.h>
+#include <novaworld/gate_probe.h>
+#include <npwire/net_ports.h>
 #include <novaworld/lobby_vars.h>   // opennova::HostRegistration
 
 #include "network/nwu_lobby_session.h"
@@ -121,13 +123,13 @@ private:
 
 	// Config.
 	String host_ = "127.0.0.1";
-	int gate_port_ = 7597;
+	int gate_port_ = opennova::GATE_DEFAULT_PORT;
 	String server_name_ = "OpenNova Host";
 	String mission_name_;
 	int max_players_ = 32;
 	String region_ = "us";
 	String player_name_ = "Host";
-	int game_port_ = 32768;
+	int game_port_ = opennova::kRetailLanPortMin;
 	String advertise_ip_;
 	String app_id_ = "28";              // JO (pfid 28); HostSetup.AppId
 	String lobby_name_ = "jop_2_consumer";

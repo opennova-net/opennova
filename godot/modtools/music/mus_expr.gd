@@ -145,13 +145,23 @@ const INTRINSICS := [
 ]
 
 
+## The typed expression-check record (ADR 0017).
+class ExprCheck:
+	extends RefCounted
+	var ok := true
+	var err := ""
+
+
 # Validate an expression string by compiling a throwaway probe script that uses it
 # as a condition. Reuses the native compiler (the single grammar authority) so the
 # builder never re-implements parsing. mus may be null (then always ok, for tests
-# that have no script handy). Returns { ok: bool, err: String }.
-static func validate_expr(text: String, mus: MusicScript) -> Dictionary:
+# that have no script handy).
+static func validate_expr(text: String, mus: MusicScript) -> ExprCheck:
+	var out := ExprCheck.new()
 	if mus == null:
-		return {"ok": true, "err": ""}
+		return out
 	var probe := "script _probe\nsection _s\n{\nif (%s)\n{\nreturn\n}\n}\n" % text
 	var r: Dictionary = mus.compile_text(probe)
-	return {"ok": int(r.get("rc", -1)) == 0, "err": String(r.get("err_msg", ""))}
+	out.ok = int(r.get("rc", -1)) == 0
+	out.err = String(r.get("err_msg", ""))
+	return out

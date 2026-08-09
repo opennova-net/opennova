@@ -54,9 +54,9 @@ var _selected_stylebox: StyleBoxFlat
 var _spacer_stylebox: StyleBoxFlat
 var _resource_root: ResourceRoot
 var _font_ref: ResourceRefWidget
-var _ref_services: Dictionary = {}
+var _ref_services := LinkServices.new()
 
-func bind(entry: CbinEntry, resource_root: Variant = null, services: Dictionary = {}) -> void:
+func bind(entry: CbinEntry, resource_root: Variant = null, services: LinkServices = null) -> void:
 	if _entry and _entry.changed.is_connected(_refresh):
 		_entry.changed.disconnect(_refresh)
 	_entry = entry
@@ -69,7 +69,7 @@ func bind(entry: CbinEntry, resource_root: Variant = null, services: Dictionary 
 
 ## The shell's resolve/pick/jump trio for the font link row; arrives through
 ## the workspace -> editor -> block list chain (re-binds are idempotent).
-func set_reference_services(services: Dictionary) -> void:
+func set_reference_services(services: LinkServices) -> void:
 	_ref_services = services
 	_configure_font_ref()
 

@@ -2134,7 +2134,7 @@ func _start_runtime(mission: MissionData, bms_name: String) -> int:
 	if _runtime.get_sim() == null:
 		var setup_error := int(_runtime.get_setup_error())
 		var lan_bind_failure := String(opts.get("net_transport", "")) == "lan"
-		var bind_port := int(opts.get("bind_port", 32768))
+		var bind_port := int(opts.get("bind_port", HostSessionConfig.DEFAULT_LAN_PORT))
 		# Free before emitting: a load_failed handler may synchronously tear
 		# the world down (the game shell returns to the menu via unload()),
 		# and unload() frees _runtime — emitting first turned this leg into a
