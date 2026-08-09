@@ -16,3 +16,8 @@
 - If a test needs a new `Nova*` class, rebuild the GDExtension first
   (`scripts/build_godot.sh`) — see `godot/adapter/CLAUDE.md`.
 - C++ tests live in `/tests` (ctest). Keep the two suites separate.
+- Always `autofree`/`add_child_autofree` harness objects — never leak a
+  `GameWorld`-extending harness. A leaked instance segfaults the whole run at
+  process exit when the class carries a `Transform3D`-typed member (Godot 4.6
+  teardown quirk, bisected 2026-08-09) and GUT still reports green totals, so
+  the crash only shows as a nonzero exit code.

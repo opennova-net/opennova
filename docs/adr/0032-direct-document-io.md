@@ -1,6 +1,11 @@
 # ADR 0032: direct document I/O — godot/ adds nothing but Godot
 
-- **Status**: accepted (2026-08-08; the adapter-shape round, maintainer-directed)
+- **Status**: accepted (2026-08-08; the adapter-shape round,
+  maintainer-directed). **Replaced by
+  [ADR 0033](0033-engine-owned-loops-device-shells.md) (2026-08-09)**, which
+  restates this ADR's operative rules verbatim in its decision 3 so the
+  architecture has ONE standing contract; this file stays as the record of
+  the resource-system deletion itself.
 - **Owners**: shell adapter layout
 - **Supersedes/updates**: deletes ADR 0031 §1's band 4 ("res:// loaders/savers")
   as a permitted band — the layer it named no longer exists. Everything else in

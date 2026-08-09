@@ -119,7 +119,9 @@ engine-side flag spaces (`nova_object_model.gd` ↔ `threedi` ↔ `oed`/`rendere
   visual-parity claim.
 - **Draw-order semantics get a portable home.** The ordering port is data + rules
   in `libs/renderer` applied as Godot priorities/passes in the engine layer — the
-  queue itself (a device-era artifact) is not reproduced.
+  queue itself (a device-era artifact) is not reproduced. *(Reversed at ADR 0033
+  stage R3: the queues carry the pass ORDER, and the order is the parity — the
+  engine emits the ordered command stream itself once the R3 spike passes.)*
 - **Misnomer risk is priced in.** ENG-2 hit ~14 IDB misnomers and 5 dead render
   variants in adjacent regions; REN verifies every IDB name against decompiled
   behavior before citing it, and each record carries its IDB-edits table.

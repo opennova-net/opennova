@@ -1,7 +1,11 @@
 # ADR 0031: the adapter composition contract — what earns C++ in godot/adapter/
 
 - **Status**: accepted (2026-08-08; the adapter-composition round,
-  maintainer-approved)
+  maintainer-approved). **Superseded as the standing contract by
+  [ADR 0033](0033-engine-owned-loops-device-shells.md) (2026-08-09)** — one
+  seam, the device boundary. The census, the §3 dispositions, and the
+  push-down record remain valid history; the five bands are no longer a live
+  rule, and the citation ratchet survives only as ADR 0033's transition gauge.
 - **Owners**: shell adapter layout
 - **Supersedes/updates**: nothing becomes false. Extends ADR 0028 decision 5
   (whose standing rule is scoped to *GDScript* in the adapter) to the

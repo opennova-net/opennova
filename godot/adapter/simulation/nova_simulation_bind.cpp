@@ -38,6 +38,16 @@ void NovaSimulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("step"), &NovaSimulation::step);
 	ClassDB::bind_method(D_METHOD("bank_realtime", "delta"), &NovaSimulation::bank_realtime);
 	ClassDB::bind_method(D_METHOD("reset_tick_bank"), &NovaSimulation::reset_tick_bank);
+	ClassDB::bind_method(D_METHOD("set_frame_shell_hooks", "listener", "begin_effect_tick",
+								  "sync_fixed", "effects_drained", "fixed_done",
+								  "present_rows", "present_frame"),
+			&NovaSimulation::set_frame_shell_hooks);
+	ClassDB::bind_method(D_METHOD("set_frame_world_hooks", "foliage", "net_drive", "weather",
+								  "blink_gates", "occlusion", "iris", "audio"),
+			&NovaSimulation::set_frame_world_hooks);
+	ClassDB::bind_method(D_METHOD("frame_realtime", "delta"), &NovaSimulation::frame_realtime);
+	ClassDB::bind_method(D_METHOD("frame_single"), &NovaSimulation::frame_single);
+	ClassDB::bind_method(D_METHOD("get_frame_perf"), &NovaSimulation::get_frame_perf);
 	ClassDB::bind_method(D_METHOD("is_transport_locked"), &NovaSimulation::is_transport_locked);
 	ClassDB::bind_method(D_METHOD("restart"), &NovaSimulation::restart);
 	ClassDB::bind_method(D_METHOD("enable_listen_server", "enable"), &NovaSimulation::enable_listen_server);

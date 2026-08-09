@@ -1188,22 +1188,32 @@ func set_perf_probe_enabled(enabled: bool) -> void:
 	_sync_runtime_profiling()
 
 
-func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta: float = TICK_DT) -> void:
-	_sample_panm_clock()
-	var probe_enabled := _perf_probe_enabled
-	var stats_on := _frame_stats != null and _frame_stats.is_capture_active()
-	# One shared gate for the per-leg clock reads: the manual A/B probe and the
-	# F3 Stats capture consume the same measurements.
-	var timing := probe_enabled or stats_on
-	var skip_occlusion := probe_enabled and _perf_probe_skip_occl
-	if probe_enabled:
-		_perf_probe_spans.clear()
-	var tick_start := Time.get_ticks_usec()
-	_last_tick_camera_pos = camera_pos  # the fire present pass's listener (audio-tick source)
-	var foliage_start := tick_start
+# --- The engine frame (ADR 0033 R1) -----------------------------------------
+# The frame legs below are the world-host device hooks the engine FrameDriver
+# invokes in its fixed order (foliage before the batch; net-drive, weather,
+# blink, occlusion, iris, audio after it). tick() stashes the per-frame camera
+# state these legs read, then drives ONE engine frame through the runtime; the
+# legacy explicit sequence survives only for paused frames and the duck-typed
+# test runtimes that implement tick() alone.
+
+var _frame_camera_pos := Vector3()
+# Untyped on purpose: a Transform3D-typed member on this class crashes the
+# engine's exit teardown when a test leaks a GameWorld instance (Godot 4.6
+# quirk, bisected 2026-08-09); the Variant carries the camera transform.
+var _frame_camera_xform = Transform3D()
+var _frame_delta := 0.0
+var _frame_probe_enabled := false
+var _frame_stats_on := false
+var _frame_timing := false
+var _frame_skip_occlusion := false
+# A failed join-wire asset apply aborts the frame mid-legs (the old early
+# return); later legs see this and no-op.
+var _frame_aborted := false
+
+
+func _frame_foliage_leg() -> void:
+	var foliage_start := Time.get_ticks_usec()
 	_perf_foliage_us = 0
-	_perf_runtime_us = 0
-	_perf_audio_us = 0
 	if _loaded and _dispatcher != null:
 		# The silhouette tier is the hide-in-grass mechanic: retail's sector-entity
 		# walk generates model foliage only around CROUCHED/PRONE infantry standing
@@ -1216,90 +1226,99 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 			if anchor_sim != null and anchor_sim.has_method("get_foliage_mask_anchor_positions"):
 				silhouette_anchors = anchor_sim.get_foliage_mask_anchor_positions()
 		_dispatcher.silhouette_anchors = silhouette_anchors
-		_dispatcher.render_frame(camera_xform)
+		_dispatcher.render_frame(_frame_camera_xform)
 		_perf_foliage_us = Time.get_ticks_usec() - foliage_start
-	var runtime_start := Time.get_ticks_usec()
-	var runtime_ticks := 0
-	# Occlusion no longer restores-then-rehides per frame: the apply below is
-	# diff-based and the present pass consults the shared occlusion-hidden set,
-	# so steady verdicts leave nodes untouched. Only the A/B seam edges do bulk
-	# work: entering the skip releases every occlusion override (mission
-	# blink/indoors semantics remain authoritative; iris keeps sampling below),
-	# leaving it re-arms a full re-emit from the sim's delta baseline.
-	if probe_enabled and _loaded:
-		if skip_occlusion != _perf_probe_occlusion_skipped:
-			if skip_occlusion:
-				_occlusion.enter_probe_skip()
-			else:
-				_occlusion.leave_probe_skip()
-		_perf_probe_occlusion_skipped = skip_occlusion
-	elif probe_enabled:
-		_perf_probe_occlusion_skipped = false
-	var probe_phase_start := 0
-	# Gate on the runtime transport so MissionRuntime._playing is THE play flag
-	# for the real game: F3 and runtime MCP Pause/Step share this public flag.
-	# _start_runtime calls play(), so normal missions run exactly as before.
-	if _loaded and _runtime != null and _runtime.is_playing():
-		# Fixed-timestep accumulator: the sim runs at a constant 62.5 Hz regardless of render rate.
-		# Guard keeps the duck-typed test stubs (game_world_test.gd) that only implement tick() green.
-		if _runtime.has_method("tick_realtime"):
-			runtime_ticks = int(_runtime.tick_realtime(delta))
-		else:
-			runtime_ticks = 1 if bool(_runtime.tick()) else 0
-		_perf_runtime_us = Time.get_ticks_usec() - runtime_start
-		if _join_wire_assets_pending and not _apply_join_wire_til_if_ready():
-			report_join_wire_asset_failure(
-					"join: host sent an incomplete or invalid S2C 0x45 terrain stream")
-			return
-		# Net-session edges (admission/deploy/loss) + the gate's occupancy report.
-		_net_drive.observe_tick(_runtime)
-		_apply_join_network_environment_update()
-	# Weather/TOD is a distinct 62 Hz fixed clock; the mission simulation above
+
+
+func _frame_net_drive_leg() -> void:
+	if _frame_aborted or not (_loaded and _runtime != null and _runtime.is_playing()):
+		return
+	if _join_wire_assets_pending and not _apply_join_wire_til_if_ready():
+		report_join_wire_asset_failure(
+				"join: host sent an incomplete or invalid S2C 0x45 terrain stream")
+		_frame_aborted = true
+		return
+	# Net-session edges (admission/deploy/loss) + the gate's occupancy report.
+	_net_drive.observe_tick(_runtime)
+	_apply_join_network_environment_update()
+
+
+func _frame_weather_leg() -> void:
+	if _frame_aborted:
+		return
+	# Weather/TOD is a distinct 62 Hz fixed clock; the mission simulation
 	# remains 62.5 Hz. Each weather quantum advances integer fixed24 time, which
 	# recomputes TOD targets, then ticks every weather block exactly once
 	# [orig: Environment_UpdateWeatherTick @ 0x57e9b0].
-	probe_phase_start = Time.get_ticks_usec() if timing else 0
+	var probe_phase_start := Time.get_ticks_usec() if _frame_timing else 0
 	if (_loaded and _runtime != null and _runtime.is_playing()
 			and _env != null):
-		_advance_world_driven_weather(delta)
-	if timing:
+		_advance_world_driven_weather(_frame_delta)
+	if _frame_timing:
 		var weather_us := Time.get_ticks_usec() - probe_phase_start
-		if probe_enabled:
+		if _frame_probe_enabled:
 			_perf_probe_spans["weather"] = weather_us
-		if stats_on:
+		if _frame_stats_on:
 			_frame_stats.add(FrameStatsBoard.WORLD_WEATHER, weather_us)
-	# Blink flags only change on sim ticks; re-apply the frame gates then.
-	probe_phase_start = Time.get_ticks_usec() if timing else 0
-	if _loaded and runtime_ticks > 0:
+
+
+func _frame_blink_leg() -> void:
+	if _frame_aborted:
+		return
+	# Blink flags only change on sim ticks; the driver invokes this leg only
+	# after a batch that ran at least one.
+	var probe_phase_start := Time.get_ticks_usec() if _frame_timing else 0
+	if _loaded:
 		_occlusion.apply_blink_gates(_mission_forces_indoors)
-	if timing:
+	if _frame_timing:
 		var blink_us := Time.get_ticks_usec() - probe_phase_start
-		if probe_enabled:
+		if _frame_probe_enabled:
 			_perf_probe_spans["blink"] = blink_us
-		if stats_on:
+		if _frame_stats_on:
 			_frame_stats.add(FrameStatsBoard.WORLD_BLINK, blink_us)
+
+
+func _frame_occlusion_leg() -> void:
 	# The render-occlusion frame is camera-driven: it runs every render frame
 	# (retail collects visible entities per scene render, not per sim tick).
 	# [orig: Terrain_CollectVisibleEntities @ 0x5c9160 from
 	# Terrain_RenderSceneWithReflection @ 0x5c94f0]
+	if _frame_aborted:
+		if _frame_probe_enabled:
+			_perf_probe_spans["occl_frame"] = 0
+		return
 	if _loaded:
-		probe_phase_start = Time.get_ticks_usec() if timing else 0
-		if not skip_occlusion:
-			_occlusion.apply_frame(camera_xform, _mission_forces_indoors)
-		if probe_enabled:
-			_perf_probe_spans["occl_frame"] = (0 if skip_occlusion
+		var probe_phase_start := Time.get_ticks_usec() if _frame_timing else 0
+		if not _frame_skip_occlusion:
+			_occlusion.apply_frame(_frame_camera_xform, _mission_forces_indoors)
+		if _frame_probe_enabled:
+			_perf_probe_spans["occl_frame"] = (0 if _frame_skip_occlusion
 					else Time.get_ticks_usec() - probe_phase_start)
-		probe_phase_start = Time.get_ticks_usec() if timing else 0
-		_stamp_iris_samples(camera_xform)
-		if timing:
-			var iris_us := Time.get_ticks_usec() - probe_phase_start
-			if probe_enabled:
-				_perf_probe_spans["iris"] = iris_us
-			if stats_on:
-				_frame_stats.add(FrameStatsBoard.WORLD_IRIS, iris_us)
-	elif probe_enabled:
+	elif _frame_probe_enabled:
 		_perf_probe_spans["occl_frame"] = 0
+
+
+func _frame_iris_leg() -> void:
+	if _frame_aborted:
+		if _frame_probe_enabled:
+			_perf_probe_spans["iris"] = 0
+		return
+	if _loaded:
+		var probe_phase_start := Time.get_ticks_usec() if _frame_timing else 0
+		_stamp_iris_samples(_frame_camera_xform)
+		if _frame_timing:
+			var iris_us := Time.get_ticks_usec() - probe_phase_start
+			if _frame_probe_enabled:
+				_perf_probe_spans["iris"] = iris_us
+			if _frame_stats_on:
+				_frame_stats.add(FrameStatsBoard.WORLD_IRIS, iris_us)
+	elif _frame_probe_enabled:
 		_perf_probe_spans["iris"] = 0
+
+
+func _frame_audio_leg(ticks_run: int) -> void:
+	if _frame_aborted:
+		return
 	var audio_start := Time.get_ticks_usec()
 	if _loaded and _mission_audio != null:
 		# Ambient soundloop regions read that same clock [orig:
@@ -1311,19 +1330,93 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 		# call below is only the live-slot mix + voice binds [orig:
 		# SoundEmitter_UpdateAndMixTop8 @ 0x521341]. A host with no ticking runtime
 		# (editor idle) free-runs the eval clock off render delta instead.
-		if runtime_ticks > 0 and _runtime != null and _runtime.has_method("get_sim"):
+		if ticks_run > 0 and _runtime != null and _runtime.has_method("get_sim"):
 			var audio_sim = _runtime.get_sim()
 			if audio_sim != null and audio_sim.has_method("get_logic_tick"):
 				_mission_audio.advance_ticks(int(audio_sim.get_logic_tick()))
-		_mission_audio.tick(camera_pos, delta)
+		_mission_audio.tick(_frame_camera_pos, _frame_delta)
 		_music_var_pump()
 		_perf_audio_us = Time.get_ticks_usec() - audio_start
+
+
+func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta: float = TICK_DT) -> void:
+	_sample_panm_clock()
+	_frame_camera_pos = camera_pos
+	_frame_camera_xform = camera_xform
+	_frame_delta = delta
+	_frame_probe_enabled = _perf_probe_enabled
+	_frame_stats_on = _frame_stats != null and _frame_stats.is_capture_active()
+	# One shared gate for the per-leg clock reads: the manual A/B probe and the
+	# F3 Stats capture consume the same measurements.
+	_frame_timing = _frame_probe_enabled or _frame_stats_on
+	_frame_skip_occlusion = _frame_probe_enabled and _perf_probe_skip_occl
+	_frame_aborted = false
+	if _frame_probe_enabled:
+		_perf_probe_spans.clear()
+	var tick_start := Time.get_ticks_usec()
+	_last_tick_camera_pos = camera_pos  # the fire present pass's listener (audio-tick source)
+	_perf_foliage_us = 0
+	_perf_runtime_us = 0
+	_perf_audio_us = 0
+	# Occlusion no longer restores-then-rehides per frame: the apply leg is
+	# diff-based and the present pass consults the shared occlusion-hidden set,
+	# so steady verdicts leave nodes untouched. Only the A/B seam edges do bulk
+	# work: entering the skip releases every occlusion override (mission
+	# blink/indoors semantics remain authoritative; iris keeps sampling),
+	# leaving it re-arms a full re-emit from the sim's delta baseline.
+	if _frame_probe_enabled and _loaded:
+		if _frame_skip_occlusion != _perf_probe_occlusion_skipped:
+			if _frame_skip_occlusion:
+				_occlusion.enter_probe_skip()
+			else:
+				_occlusion.leave_probe_skip()
+		_perf_probe_occlusion_skipped = _frame_skip_occlusion
+	elif _frame_probe_enabled:
+		_perf_probe_occlusion_skipped = false
+	var runtime_ticks := 0
+	# Gate on the runtime transport so MissionRuntime._playing is THE play flag
+	# for the real game: F3 and runtime MCP Pause/Step share this public flag.
+	# _start_runtime calls play(), so normal missions run exactly as before.
+	if _loaded and _runtime != null and _runtime.is_playing() \
+			and _runtime.has_method("tick_realtime"):
+		# The live path: ONE engine frame. The FrameDriver banks wall-clock,
+		# runs the 62.5 Hz batch, presents once, and invokes every world leg
+		# above in its fixed order [orig: Game_MainLoop @ 0x52b630].
+		runtime_ticks = int(_runtime.tick_realtime(delta))
+		# A join-wire failure aborts inside the net-drive leg and can tear the
+		# world down synchronously (unload frees _runtime) — bail before
+		# touching it again.
+		if _frame_aborted or _runtime == null:
+			return
+		# The runtime span for the stats board: the sim batch + present cost
+		# (the world legs land their own WORLD_* spans from inside the frame).
+		var runtime_perf: Dictionary = _runtime.get_perf_counters()
+		_perf_runtime_us = int(runtime_perf.get("sim_us", 0)) \
+				+ int(runtime_perf.get("present_us", 0)) \
+				+ int(runtime_perf.get("effects_us", 0))
+	else:
+		# Paused, unloaded, or a duck-typed test runtime (tick() only): the
+		# legacy explicit sequence in the same leg order.
+		_frame_foliage_leg()
+		if _loaded and _runtime != null and _runtime.is_playing():
+			var runtime_start := Time.get_ticks_usec()
+			runtime_ticks = 1 if bool(_runtime.tick()) else 0
+			_perf_runtime_us = Time.get_ticks_usec() - runtime_start
+			_frame_net_drive_leg()
+		_frame_weather_leg()
+		if runtime_ticks > 0:
+			_frame_blink_leg()
+		_frame_occlusion_leg()
+		_frame_iris_leg()
+		_frame_audio_leg(runtime_ticks)
+	if _frame_aborted:
+		return
 	_perf_tick_us = Time.get_ticks_usec() - tick_start
-	if stats_on:
+	if _frame_stats_on:
 		_frame_stats.add(FrameStatsBoard.WORLD_FOLIAGE, _perf_foliage_us)
 		_frame_stats.add(FrameStatsBoard.WORLD_RUNTIME, _perf_runtime_us)
 		_frame_stats.add(FrameStatsBoard.WORLD_AUDIO, _perf_audio_us)
-	_sample_water_render_stats(stats_on)
+	_sample_water_render_stats(_frame_stats_on)
 
 
 # Water-reflection RTT sampling for the Stats tab: flip measured render time on
@@ -2040,6 +2133,17 @@ func _start_runtime(mission: NovaMissionData, bms_name: String) -> int:
 		else:
 			load_failed.emit("failed to start mission runtime")
 		return setup_error if setup_error != OK else ERR_CANT_CREATE
+	# ADR 0033 R1: install this world host's device legs on the engine frame.
+	# The FrameDriver runs them in its fixed order around the tick batch
+	# (foliage before; net-drive, weather, blink, occlusion, iris, audio after).
+	_runtime.get_sim().set_frame_world_hooks(
+			Callable(self, "_frame_foliage_leg"),
+			Callable(self, "_frame_net_drive_leg"),
+			Callable(self, "_frame_weather_leg"),
+			Callable(self, "_frame_blink_leg"),
+			Callable(self, "_frame_occlusion_leg"),
+			Callable(self, "_frame_iris_leg"),
+			Callable(self, "_frame_audio_leg"))
 	_run_mission_start_environment_boundary()
 	_sync_runtime_profiling()
 	# The player profile's saved weapon kits, loaded before ANY kit is applied or

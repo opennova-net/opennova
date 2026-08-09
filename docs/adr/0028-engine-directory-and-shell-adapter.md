@@ -3,8 +3,12 @@
 Status: accepted 2026-08-06. §3's target-name clause (per-lib
 `opennova_<domain>` targets, families as the only link conveniences) was
 superseded by [ADR 0029](0029-engine-group-targets.md) on 2026-08-08: the
-groups are now also the CMake build targets. Directories, the `opennova`
-namespace, and include paths stand as written.
+groups are now also the CMake build targets. Decision 5's standing rule
+("GDScript in `godot/adapter/` wires, adapts, and presents") is superseded
+for the GAME runtime by [ADR 0033](0033-engine-owned-loops-device-shells.md)
+(2026-08-09): the engine owns the frame; GDScript remains ONED's authoring
+language. Directories, the `opennova` namespace, and include paths stand as
+written.
 
 ## Context
 

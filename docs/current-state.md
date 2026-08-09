@@ -17,15 +17,17 @@ structural (move code, draw boundaries, add gates) and had a schedule. The
 current phase is behavioral (make it act like retail) and is driven by the
 ledger's open rows rather than by a wave calendar.
 
-One structural workstream runs in parallel with the fidelity slices: the
-**2026-07 quality campaign** (approved 2026-07-28) — small independent PRs
-straight to master for dead-code removal, duplication collapse, and god-file
-splits. Waves 1–3 landed as #310–#356 (Wave 3 closed with the #355/#356
-header-width pass, which landed the `oversize_cpp_files` ratchet); Wave 4
-landed as #357–#375 (closed by #375's W4-6 modtools splits and the
-`oversize_gd_files` ratchet at its residual floor of 7 — `game_world.gd`
-stays whole by design as the load path); the remaining W5 slices are
-tracked in [`TODO.md`](../TODO.md) § "Cleanup & verification backlog".
+THE structural program is the **rearchitecture**
+([ADR 0033](adr/0033-engine-owned-loops-device-shells.md), approved
+2026-08-09, replacing the ADR 0031/0032 adapter-seam regime in full): the
+engine takes ownership of the main/tick/render loops behind a device
+boundary — R1 (the frame port) and R2 (packet presentation) are committed;
+R3 (the render frame) is spike-gated; R4 (a second backend) indefinitely
+optional. It subsumes the structural slot earlier programs held: the
+**2026-07 quality campaign** closed at W4 (#310–#375; its W5 residue stays
+tracked in [`TODO.md`](../TODO.md) § "Cleanup & verification backlog"), and
+the 2026-08-08 adapter-shape round (#451–#456) was this program's census
+and ground-clearing.
 
 ## The standing loop for a fidelity slice
 

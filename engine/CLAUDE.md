@@ -12,7 +12,9 @@
     threedi, tdp, ase, bad, def, dep, avatars, mission, trn, tpj, tpm, cpt, til,
     foliage, env, mnu, mns, sbf, lwf, dbf, mus, playersav, ptl,
     wac (front end; compiler/VM stay runtime), oed.
-  - `runtime/` — the in-match systems: world, wac (compiler/VM), mission (the runtime
+  - `runtime/` — the in-match systems: frame (the game frame: the main-loop
+    bank/catch-up/present-once shape + the fixed per-frame leg order over
+    shell-installed device hooks, ADR 0033 R1), world, wac (compiler/VM), mission (the runtime
     half — event runtime, promotion, boot; the document model is `formats/mission`),
     anim, audio, particle, renderer, controls, terrain, terrain_query.
   - `net/` — the wire/protocol stack (ADRs 0009–0012, 0019; Model-B-only): novacrypto,
