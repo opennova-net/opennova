@@ -60,7 +60,7 @@ func test_world_particles_use_the_uncapped_rd_compositor_contract() -> void:
 	var renderer := add_child_autofree(ParticleRenderer.new()) as ParticleRenderer
 	await get_tree().process_frame
 
-	var report := renderer.get_debug_packet_report()
+	var report := renderer.get_debug_draw_list_report()
 	var backend: Dictionary = report.get("world_backend", {})
 	assert_eq(String(backend.get("backend", "")), "rendering_device_compositor")
 	assert_eq(int(backend.get("callback_type", -1)), 4,
@@ -134,7 +134,7 @@ func test_world_backend_executes_a_live_gpu_submission() -> void:
 	for _frame in 5:
 		await get_tree().process_frame
 
-	var report := renderer.get_debug_packet_report()
+	var report := renderer.get_debug_draw_list_report()
 	var world: Dictionary = report.get("world", {})
 	var backend: Dictionary = report.get("world_backend", {})
 	assert_gt(int(world.get("rendered_quad_count", 0)), 0,
@@ -183,7 +183,7 @@ func test_pipeline_warm_is_serviced_by_the_real_rd_compositor() -> void:
 	RenderingServer.force_draw(true)
 	RenderingServer.force_sync()
 
-	var report := renderer.get_debug_packet_report()
+	var report := renderer.get_debug_draw_list_report()
 	var backend: Dictionary = report.get("world_backend", {})
 	if not bool(backend.get("rd_available", false)):
 		pending("RenderingDevice unavailable under this Godot renderer")

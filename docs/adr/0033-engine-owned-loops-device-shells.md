@@ -60,8 +60,8 @@ drew it.
 
 The engine owns the three loops. A shell implements devices:
 
-- **RenderBackend** — executes an ordered command stream / uploads packet
-  buffers. Until stage R3 it is "apply typed packets to Godot"; at R3 it is
+- **RenderBackend** — executes an ordered command stream / uploads draw list
+  buffers. Until stage R3 it is "apply typed draw lists to Godot"; at R3 it is
   "execute the engine's ordered draw stream".
 - **InputSource** — sampled device state in (one InputPacket per frame).
 - **AudioSink** — bank/PCM playback out.
@@ -78,14 +78,14 @@ earns its keep — consuming engine documents exactly as today.
   sequencing (listener, net drive, weather — ONE clock, occlusion in its
   retail position, iris, audio), and the input leg as an InputPacket. The
   three self-driven `_process` loops become frame phases whose outputs are
-  packets; only GPU uploads remain outside. The bound surface trends toward
+  draw lists; only GPU uploads remain outside. The bound surface trends toward
   `frame(input, camera, dt) → present handle`. Deletes `mission_runtime.gd`,
   most of `game_world.gd`, and the per-system present-pass GDScript.
   `docs/runtime-architecture.md` is rewritten to match (it currently inverts
   the retired NetSystem ownership and omits the render half).
-- **R2 — presentation is packets, everywhere.** Generalize the two proven
+- **R2 — presentation is draw lists, everywhere.** Generalize the two proven
   seams (`world/present_rows.h`, `renderer::ParticleFrameCompiler` — snapshot
-  + camera in, typed packets out) to terrain patches, foliage batches, HUD
+  + camera in, typed draw lists out) to terrain patches, foliage batches, HUD
   elements, and GAME menu draws (retail `CUIElement` semantics over fnt text
   + quads; the mnu Control tree stays for ONED authoring/preview). One
   applier per domain; no Dictionary/TypedArray in any hot path; the
@@ -120,18 +120,18 @@ earns its keep — consuming engine documents exactly as today.
 held), `engine/base/*`, the flat C ABI + Python/DCC pipeline, ONED's
 thirteen workspaces and documents, the GUT suite for authoring surfaces. The
 ctest suite GROWS: the frame becomes headless-testable end to end (golden
-input scripts in → golden packet/command streams out — the pcap-golden method
+input scripts in → golden draw list/command streams out — the pcap-golden method
 extended to the whole frame).
 
 ## Consequences
 
 - R1 and R2 are committed and staffed as the next slices; R3 waits on its
   spike; R4 waits on R3's parity results.
-- During transition a domain not yet cut over keeps its node path; the packet
+- During transition a domain not yet cut over keeps its node path; the draw list
   applier makes old-vs-new diffable, which is itself the parity harness.
 - Verification per stage: R1 — full ctest + frame-golden traces + the
   retail-LAN join recipes re-run to prove wire behavior unchanged; R2 —
-  per-domain packet-diff + .mnu byte goldens + screenshot diffs; R3 — the
+  per-domain draw list-diff + .mnu byte goldens + screenshot diffs; R3 — the
   spike's screenshot parity + a pass-order trace matched against
   docs/render/render-order-re.md before commitment.
 - There are not two regimes. The band contract is retired NOW as a standing

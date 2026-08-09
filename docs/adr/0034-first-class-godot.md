@@ -29,7 +29,7 @@ indirection bought nothing for them and cost the Godot side real
 awkwardness: bundle-of-Callables registration, "adapter" naming that
 describes no adaptation, and duck-typed seams excused as shell neutrality.
 
-The 2026-08-09 trunk round (the ADR 0033 R2 packet cutover + the native
+The 2026-08-09 trunk round (the ADR 0033 R2 draw list cutover + the native
 ObjectModel port + the no-duck-typing sweep) made the cost visible:
 once every runtime seam is a typed class, the "neutral" indirection is the
 only untyped thing left.

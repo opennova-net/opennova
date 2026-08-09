@@ -1,7 +1,7 @@
 #pragma once
 
 // Portable particle frame compilation. This is the seam between an immutable
-// simulation snapshot and an embedding renderer. It owns ordering and packet
+// simulation snapshot and an embedding renderer. It owns ordering and draw list
 // formation; there are no Godot or particle-simulator dependencies.
 
 #include <cstddef>
@@ -149,7 +149,7 @@ struct ParticleEmitterDrawBounds {
 	std::uint64_t emitter_id = 0;
 	ParticleAabb bounds{};
 	// Quads from overlapping emitters can interleave. first_quad is this
-	// emitter's first occurrence in the packet; quad_count is its total.
+	// emitter's first occurrence in the draw list; quad_count is its total.
 	// An emitter with no emitted quads leaves both fields at zero.
 	std::uint32_t first_quad = 0;
 	std::uint32_t quad_count = 0;
@@ -177,7 +177,7 @@ struct ParticleFrameDebugCounters {
 	std::size_t particle_sort_capacity = 0;
 };
 
-struct ParticleDrawPacket {
+struct ParticleDrawList {
 	std::uint64_t frame_id = 0;
 	ParticleRenderDomain domain = ParticleRenderDomain::World;
 	std::vector<ParticleVertex> vertices;
@@ -190,7 +190,7 @@ struct ParticleDrawPacket {
 // particles by depth, builds quads, forms adjacent state runs, calculates
 // bounds, and accounts for retained allocations.
 //
-// The returned packet remains valid until the next compile call. Reusing one
+// The returned draw list remains valid until the next compile call. Reusing one
 // compiler per render domain makes no-allocation-after-warmup observable.
 class ParticleFrameCompiler {
 public:
@@ -202,7 +202,7 @@ public:
 	ParticleFrameCompiler(const ParticleFrameCompiler &) = delete;
 	ParticleFrameCompiler &operator=(const ParticleFrameCompiler &) = delete;
 
-	const ParticleDrawPacket &compile(const ParticleFrameSnapshot &snapshot,
+	const ParticleDrawList &compile(const ParticleFrameSnapshot &snapshot,
 			const ParticleViewInput &view);
 
 private:

@@ -36,8 +36,8 @@ class TerrainTileInfo;
 // renderer::FoliageFrameCompiler owns the whole frame compilation: the anchor
 // gate, both retail placement algorithms, per-identity vertex expansion, the
 // per-submission uniform state, and both wind clocks. This node applies the
-// typed FoliageDrawPacket: source Mesh extraction at configure time, sampler
-// bindings, ArrayMesh uploads for the packet's mesh builds, draw-node pooling,
+// typed FoliageDrawList: source Mesh extraction at configure time, sampler
+// bindings, ArrayMesh uploads for the draw list's mesh builds, draw-node pooling,
 // and material binding. [orig: generate_foliage_instances_0 @ 0x5ffdd0;
 // Foliage_GenerateModelTileInstances @ 0x600980]
 class FoliageDispatcher : public Node3D {
@@ -249,8 +249,8 @@ private:
   std::vector<opennova::foliage::DetailCell>
   _preview_cells(const Vector3 &p_camera_position) const;
   void _compile_and_apply(const renderer::FoliageViewInput &p_view);
-  void _apply_packet(const renderer::FoliageDrawPacket &p_packet);
-  Ref<ArrayMesh> _upload_mesh_build(const renderer::FoliageDrawPacket &p_packet,
+  void _apply_draw_list(const renderer::FoliageDrawList &p_draw_list);
+  Ref<ArrayMesh> _upload_mesh_build(const renderer::FoliageDrawList &p_draw_list,
                                     const renderer::FoliageMeshBuild &p_build) const;
 
   opennova::foliage::WorldSamplers _world_samplers();

@@ -275,21 +275,21 @@ struct PacketDiagnostics {
 	std::vector<renderer::ParticleEmitterDrawBounds> emitter_bounds;
 };
 
-void capture_packet_diagnostics(PacketDiagnostics &destination,
-		const renderer::ParticleDrawPacket &packet) {
+void capture_draw_list_diagnostics(PacketDiagnostics &destination,
+		const renderer::ParticleDrawList &draw_list) {
 	destination.present = true;
-	destination.frame_id = packet.frame_id;
-	destination.debug = packet.debug;
-	destination.commands = packet.commands;
-	destination.emitter_bounds = packet.emitter_bounds;
+	destination.frame_id = draw_list.frame_id;
+	destination.debug = draw_list.debug;
+	destination.commands = draw_list.commands;
+	destination.emitter_bounds = draw_list.emitter_bounds;
 }
 
-Dictionary packet_report(const PacketDiagnostics &packet) {
+Dictionary draw_list_report(const PacketDiagnostics &draw_list) {
 	Dictionary result;
-	if (!packet.present)
+	if (!draw_list.present)
 		return result;
-	const renderer::ParticleFrameDebugCounters &debug = packet.debug;
-	result["frame_id"] = godot_token(packet.frame_id);
+	const renderer::ParticleFrameDebugCounters &debug = draw_list.debug;
+	result["frame_id"] = godot_token(draw_list.frame_id);
 	result["compile_index"] = godot_token(debug.compile_index);
 	result["input_emitters"] = static_cast<int64_t>(debug.input_emitters);
 	result["selected_emitters"] = static_cast<int64_t>(debug.selected_emitters);
@@ -311,9 +311,9 @@ Dictionary packet_report(const PacketDiagnostics &packet) {
 	result["emitter_bounds_capacity"] =
 			static_cast<int64_t>(debug.emitter_bounds_capacity);
 	Array commands;
-	commands.resize(static_cast<int64_t>(packet.commands.size()));
-	for (std::size_t i = 0; i < packet.commands.size(); ++i) {
-		const renderer::ParticleDrawCommand &command = packet.commands[i];
+	commands.resize(static_cast<int64_t>(draw_list.commands.size()));
+	for (std::size_t i = 0; i < draw_list.commands.size(); ++i) {
+		const renderer::ParticleDrawCommand &command = draw_list.commands[i];
 		Dictionary value;
 		value["render_domain"] = static_cast<int>(command.domain);
 		value["render_pass"] = static_cast<int>(command.pass);
@@ -483,7 +483,7 @@ public:
 	MeshInstance3D *first_person_instance = nullptr;
 	Ref<ArrayMesh> first_person_mesh;
 	std::array<renderer::ParticleFrameCompiler, 2> compilers;
-	std::array<PacketDiagnostics, 2> packets;
+	std::array<PacketDiagnostics, 2> draw_lists;
 	renderer::ParticleFrameSnapshot render_snapshot;
 	std::shared_ptr<const std::vector<opennova::particle::ParticleDef>> catalog_definitions;
 	std::vector<DefinitionVisual> definition_visuals;
@@ -676,7 +676,7 @@ public:
 		if (first_person_instance != nullptr)
 			return;
 		first_person_instance = memnew(MeshInstance3D);
-		first_person_instance->set_name("ParticleFirstPersonPacket");
+		first_person_instance->set_name("ParticleFirstPersonBatch");
 		first_person_instance->set_cast_shadows_setting(
 				GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
 		first_person_instance->set_extra_cull_margin(200.0f);
@@ -690,7 +690,7 @@ public:
 	void clear_draws() {
 		world_effect->clear_submission();
 		first_person_mesh.unref();
-		packets = {};
+		draw_lists = {};
 		if (first_person_instance != nullptr) {
 			first_person_instance->set_mesh(Ref<Mesh>());
 			first_person_instance->set_visible(false);
@@ -923,7 +923,7 @@ public:
 				const Particle &particle = frame.particles[first + particle_index];
 				// EffectScene::inspect uses the simulator's base half-size for
 				// manager/emitter bounds. Keep that authoritative sort box even
-				// when render LOD omits this particle; packet output bounds below
+				// when render LOD omits this particle; draw list output bounds below
 				// remain exact expanded quad bounds.
 				include_point(emitter.bounds, particle_vec(particle.position),
 						particle.size * 0.5f);
@@ -1083,11 +1083,11 @@ public:
 		}
 	}
 
-	void publish_world_packet(const renderer::ParticleDrawPacket &packet,
+	void publish_world_draw_list(const renderer::ParticleDrawList &draw_list,
 			const Vector3 &camera_position, const Vector3 &camera_forward) {
 		auto submission = std::make_shared<NovaParticleWorldSubmission>();
-		submission->frame_id = packet.frame_id;
-		submission->commands = packet.commands;
+		submission->frame_id = draw_list.frame_id;
+		submission->commands = draw_list.commands;
 		submission->atlas = atlas_snapshot;
 		for (std::size_t component = 0; component < 3; ++component) {
 			submission->camera_position[component] =
@@ -1099,16 +1099,16 @@ public:
 		submission->fog_start = fog_start;
 		submission->fog_end = fog_end;
 		submission->fog_type = fog_type;
-		if (packet.domain != renderer::ParticleRenderDomain::World) {
+		if (draw_list.domain != renderer::ParticleRenderDomain::World) {
 			submission->valid = false;
 			submission->validation_error =
-					"World backend received a non-World compiler packet";
-		} else if (packet.vertices.size() % 4u != 0) {
+					"World backend received a non-World compiler draw_list";
+		} else if (draw_list.vertices.size() % 4u != 0) {
 			submission->valid = false;
 			submission->validation_error =
-					"Compiler packet does not contain complete particle quads";
+					"Compiler draw_list does not contain complete particle quads";
 		} else {
-			const std::size_t quad_count = packet.vertices.size() / 4u;
+			const std::size_t quad_count = draw_list.vertices.size() / 4u;
 			constexpr std::size_t expanded_bytes_per_quad =
 					6u * sizeof(renderer::ParticleVertex);
 			if (quad_count > static_cast<std::size_t>(
@@ -1116,7 +1116,7 @@ public:
 					expanded_bytes_per_quad) {
 				submission->valid = false;
 				submission->validation_error =
-						"Expanded World packet exceeds PackedByteArray limits";
+						"Expanded World draw_list exceeds PackedByteArray limits";
 			} else {
 				submission->triangle_vertices.resize(static_cast<int64_t>(
 						quad_count * expanded_bytes_per_quad));
@@ -1129,7 +1129,7 @@ public:
 							triangle_vertex < triangle_order.size();
 							++triangle_vertex) {
 						const renderer::ParticleVertex &source =
-								packet.vertices[quad * 4u +
+								draw_list.vertices[quad * 4u +
 										triangle_order[triangle_vertex]];
 						const std::size_t offset =
 								(quad * 6u + triangle_vertex) *
@@ -1145,11 +1145,11 @@ public:
 						std::move(submission)));
 	}
 
-	void upload_first_person_packet(
-			const renderer::ParticleDrawPacket &packet, bool hidden) {
+	void upload_first_person_draw_list(
+			const renderer::ParticleDrawList &draw_list, bool hidden) {
 		if (first_person_instance == nullptr)
 			return;
-		if (packet.commands.empty() || packet.vertices.empty()) {
+		if (draw_list.commands.empty() || draw_list.vertices.empty()) {
 			first_person_mesh.unref();
 			first_person_instance->set_mesh(Ref<Mesh>());
 			first_person_instance->set_visible(false);
@@ -1158,13 +1158,13 @@ public:
 
 		Ref<ArrayMesh> mesh;
 		mesh.instantiate();
-		for (const renderer::ParticleDrawCommand &command : packet.commands) {
+		for (const renderer::ParticleDrawCommand &command : draw_list.commands) {
 			const std::size_t first_vertex =
 					static_cast<std::size_t>(command.first_quad) * 4u;
 			const std::size_t vertex_count =
 					static_cast<std::size_t>(command.quad_count) * 4u;
-			if (first_vertex > packet.vertices.size() ||
-					vertex_count > packet.vertices.size() - first_vertex)
+			if (first_vertex > draw_list.vertices.size() ||
+					vertex_count > draw_list.vertices.size() - first_vertex)
 				continue;
 
 			PackedVector3Array vertices;
@@ -1182,7 +1182,7 @@ public:
 			for (std::size_t vertex_index = 0; vertex_index < vertex_count;
 					++vertex_index) {
 				const renderer::ParticleVertex &source =
-						packet.vertices[first_vertex + vertex_index];
+						draw_list.vertices[first_vertex + vertex_index];
 				vertices[static_cast<int64_t>(vertex_index)] =
 						Vector3(source.x, source.y, source.z);
 				uvs[static_cast<int64_t>(vertex_index)] = Vector2(source.u, source.v);
@@ -1282,8 +1282,8 @@ void ParticleRenderer::_bind_methods() {
 			&ParticleRenderer::get_rendered_quad_count);
 	ClassDB::bind_method(D_METHOD("get_draw_command_count"),
 			&ParticleRenderer::get_draw_command_count);
-	ClassDB::bind_method(D_METHOD("get_debug_packet_report"),
-			&ParticleRenderer::get_debug_packet_report);
+	ClassDB::bind_method(D_METHOD("get_debug_draw_list_report"),
+			&ParticleRenderer::get_debug_draw_list_report);
 	ClassDB::bind_method(D_METHOD("get_debug_emitter_bounds"),
 			&ParticleRenderer::get_debug_emitter_bounds);
 	ClassDB::bind_method(D_METHOD("get_unresolved_texture_names"),
@@ -1503,13 +1503,13 @@ void ParticleRenderer::render_now() {
 		view.right = particle_vec(camera_right);
 		view.up = particle_vec(camera_up);
 		view.forward = particle_vec(camera_forward);
-		const renderer::ParticleDrawPacket &packet =
+		const renderer::ParticleDrawList &draw_list =
 				impl_->compilers[domain].compile(impl_->render_snapshot, view);
-		capture_packet_diagnostics(impl_->packets[domain], packet);
+		capture_draw_list_diagnostics(impl_->draw_lists[domain], draw_list);
 		if (domain == 0)
-			impl_->publish_world_packet(packet, camera_position, camera_forward);
+			impl_->publish_world_draw_list(draw_list, camera_position, camera_forward);
 		else
-			impl_->upload_first_person_packet(packet, hidden_);
+			impl_->upload_first_person_draw_list(draw_list, hidden_);
 	}
 }
 
@@ -1517,9 +1517,9 @@ int64_t ParticleRenderer::get_rendered_quad_count() const {
 	if (!impl_)
 		return 0;
 	std::size_t total = 0;
-	for (const PacketDiagnostics &packet : impl_->packets) {
-		if (packet.present)
-			total += packet.debug.emitted_quads;
+	for (const PacketDiagnostics &draw_list : impl_->draw_lists) {
+		if (draw_list.present)
+			total += draw_list.debug.emitted_quads;
 	}
 	return static_cast<int64_t>(total);
 }
@@ -1528,19 +1528,19 @@ int64_t ParticleRenderer::get_draw_command_count() const {
 	if (!impl_)
 		return 0;
 	std::size_t total = 0;
-	for (const PacketDiagnostics &packet : impl_->packets) {
-		if (packet.present)
-			total += packet.debug.draw_commands;
+	for (const PacketDiagnostics &draw_list : impl_->draw_lists) {
+		if (draw_list.present)
+			total += draw_list.debug.draw_commands;
 	}
 	return static_cast<int64_t>(total);
 }
 
-Dictionary ParticleRenderer::get_debug_packet_report() const {
+Dictionary ParticleRenderer::get_debug_draw_list_report() const {
 	Dictionary result;
 	if (!impl_)
 		return result;
-	result["world"] = packet_report(impl_->packets[0]);
-	result["first_person"] = packet_report(impl_->packets[1]);
+	result["world"] = draw_list_report(impl_->draw_lists[0]);
+	result["first_person"] = draw_list_report(impl_->draw_lists[1]);
 	result["world_backend"] = impl_->world_effect->get_backend_report();
 	result["first_person_backend"] = "array_mesh_fallback_tool_only";
 	result["world_compositor_attached"] = impl_->attached_camera.is_valid();
@@ -1602,12 +1602,12 @@ Array ParticleRenderer::get_debug_emitter_bounds() const {
 	Array result;
 	if (!impl_)
 		return result;
-	for (std::size_t domain = 0; domain < impl_->packets.size(); ++domain) {
-		const PacketDiagnostics &packet = impl_->packets[domain];
-		if (!packet.present)
+	for (std::size_t domain = 0; domain < impl_->draw_lists.size(); ++domain) {
+		const PacketDiagnostics &draw_list = impl_->draw_lists[domain];
+		if (!draw_list.present)
 			continue;
 		for (const renderer::ParticleEmitterDrawBounds &bounds :
-				packet.emitter_bounds) {
+				draw_list.emitter_bounds) {
 			Dictionary value;
 			value["emitter_id"] = godot_token(bounds.emitter_id);
 			value["render_domain"] = static_cast<int>(domain);

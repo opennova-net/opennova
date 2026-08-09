@@ -219,7 +219,7 @@ bool geometry_bounds_and_reuse_contract() {
 			100.0f, {visible, hidden}));
 	r::ParticleFrameCompiler compiler;
 	r::ParticleViewInput view;
-	const r::ParticleDrawPacket first = compiler.compile(snapshot, view);
+	const r::ParticleDrawList first = compiler.compile(snapshot, view);
 	if (!check(first.vertices.size() == 4 &&
 			sizeof(first.vertices[0]) == 28,
 			"one visible quad emits four 28-byte vertices")) return false;

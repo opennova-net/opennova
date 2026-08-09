@@ -219,18 +219,18 @@ TerrainSceneSnapshot build_terrain_scene_snapshot(const CptFile &cpt,
 	return scene;
 }
 
-const TerrainDrawPacket &TerrainFrameCompiler::compile(
+const TerrainDrawList &TerrainFrameCompiler::compile(
 		const TerrainSceneSnapshot &scene, const TerrainViewInput &view) {
 	++compile_index_;
-	packet_.frame_id = compile_index_;
-	packet_.patches.clear();
-	packet_.detail_cells.clear();
-	packet_.debug = TerrainFrameDebugCounters{};
-	packet_.debug.compile_index = compile_index_;
+	draw_list_.frame_id = compile_index_;
+	draw_list_.patches.clear();
+	draw_list_.detail_cells.clear();
+	draw_list_.debug = TerrainFrameDebugCounters{};
+	draw_list_.debug.compile_index = compile_index_;
 	visible_.clear();
 
 	if (!scene.valid()) {
-		return packet_;
+		return draw_list_;
 	}
 
 	// MVP = proj * view, column-major, then Gribb/Hartmann plane extraction.
@@ -289,7 +289,7 @@ const TerrainDrawPacket &TerrainFrameCompiler::compile(
 					scene.l1_children[child], frustum,
 					view.cam_x, view.cam_y, view.cam_z,
 					sector_ox, sector_oz, view.config, visible_, stats);
-			++packet_.debug.sectors_walked;
+			++draw_list_.debug.sectors_walked;
 
 			// Detail foliage collection is NOT a radial walk: retail's
 			// frustum-culled traversal hands each frustum-surviving emitted
@@ -317,7 +317,7 @@ const TerrainDrawPacket &TerrainFrameCompiler::compile(
 				collect_foliage_detail_patches(scene.mipchain, sector_id,
 						sx * 512, sz * 512, local_x, local_z, node_size,
 						view.cam_x, view.cam_y, view.cam_z,
-						packet_.detail_cells);
+						draw_list_.detail_cells);
 			}
 		}
 	}
@@ -327,17 +327,17 @@ const TerrainDrawPacket &TerrainFrameCompiler::compile(
 				return a.distance < b.distance;
 			});
 
-	packet_.debug.visible_patches = static_cast<int>(visible_.size());
+	draw_list_.debug.visible_patches = static_cast<int>(visible_.size());
 	const int count = std::min(static_cast<int>(visible_.size()), kPatchBudget);
-	if (packet_.patches.capacity() < static_cast<size_t>(count)) {
-		packet_.patches.reserve(kPatchBudget);
+	if (draw_list_.patches.capacity() < static_cast<size_t>(count)) {
+		draw_list_.patches.reserve(kPatchBudget);
 	}
 
 	for (int i = 0; i < count; ++i) {
 		const VisiblePatch &vp = visible_[i];
 		if (vp.tile_index < 0 ||
 				vp.tile_index >= static_cast<int>(scene.tile_meshes.size())) {
-			++packet_.debug.empty_mesh_drops;
+			++draw_list_.debug.empty_mesh_drops;
 			continue;
 		}
 		const TileMesh &tm = scene.tile_meshes[vp.tile_index];
@@ -350,7 +350,7 @@ const TerrainDrawPacket &TerrainFrameCompiler::compile(
 			++stats.lod_fallbacks;
 		}
 		if (tm.lods[lod].index_count < 3) {
-			++packet_.debug.empty_mesh_drops;
+			++draw_list_.debug.empty_mesh_drops;
 			continue;
 		}
 
@@ -362,13 +362,13 @@ const TerrainDrawPacket &TerrainFrameCompiler::compile(
 		draw.distance = vp.distance;
 		draw.quadrant_x = scene.tile_attributes[vp.tile_index].quadrant_x;
 		draw.quadrant_z = scene.tile_attributes[vp.tile_index].quadrant_z;
-		packet_.patches.push_back(draw);
-		++packet_.debug.lod_distribution[lod];
+		draw_list_.patches.push_back(draw);
+		++draw_list_.debug.lod_distribution[lod];
 	}
 
-	packet_.debug.emitted_patches = static_cast<int>(packet_.patches.size());
-	packet_.debug.traversal = stats;
-	return packet_;
+	draw_list_.debug.emitted_patches = static_cast<int>(draw_list_.patches.size());
+	draw_list_.debug.traversal = stats;
+	return draw_list_;
 }
 
 } // namespace opennova

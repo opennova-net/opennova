@@ -62,7 +62,13 @@ typedef struct {
 typedef struct {
 	uint32_t design_width; /* header +4; glyph render scale = 800/design_width */
 	uint32_t num_pages;
-	int32_t shadow_offset;
+	/* Header +12: the inter-glyph SPACING term — both the measurer and the
+	 * drawer advance by glyph_width + (glyph_spacing - 1) * scale, and the
+	 * measured width strips the final (glyph_spacing - 1) pad. Long misnamed
+	 * "shadow_offset"; the drawer's shadow/underline uses fixed offsets, not
+	 * this field. [orig: CGameFont_MeasureText @ 0x674e70 this+356;
+	 * CGameFont_DrawText @ 0x6752c0 spacing - 1 advance] */
+	int32_t glyph_spacing;
 	fnt_glyph_t glyphs[FNT_GLYPH_COUNT];
 	uint8_t *pages; /* Contiguous num_pages * FNT_TEXTURE_SIZE RGBA bytes. */
 } fnt_font_t;
@@ -78,9 +84,9 @@ static inline size_t fnt_calculate_file_size(uint32_t num_pages) {
 }
 
 fnt_error_t fnt_parse_header(const uint8_t *data, size_t size,
-                             uint32_t *num_pages, int32_t *shadow_offset);
+                             uint32_t *num_pages, int32_t *glyph_spacing);
 fnt_error_t fnt_parse(const uint8_t *data, size_t size, fnt_font_t *font);
-fnt_error_t fnt_init_blank(fnt_font_t *font, uint32_t num_pages, int32_t shadow_offset);
+fnt_error_t fnt_init_blank(fnt_font_t *font, uint32_t num_pages, int32_t glyph_spacing);
 void fnt_free(fnt_font_t *font);
 fnt_error_t fnt_validate(const fnt_font_t *font);
 fnt_error_t fnt_write(const fnt_font_t *font, uint8_t *out, size_t out_size, size_t *written_size);

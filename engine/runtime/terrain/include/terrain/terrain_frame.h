@@ -1,14 +1,14 @@
 #pragma once
 
 // The terrain render frame as engine data (ADR 0033 R2). One compile turns the
-// built terrain scene plus a camera into the ordered patch-draw packet an
-// embedding renderer uploads — the snapshot-and-view-in, typed-packet-out seam
+// built terrain scene plus a camera into the ordered patch-draw list an
+// embedding renderer uploads — the snapshot-and-view-in, typed-draw list-out seam
 // renderer::ParticleFrameCompiler proved. The compiler owns every per-frame
 // DECISION the shell adapter used to make in its self-driven walk: the
 // 512-unit sector window over the .trn sector grid, the quadtree traversal,
 // the foliage detail-cell handoff, the front-to-back order, the patch budget,
 // and the LOD-family resolve. The embedder keeps only device work: building
-// GPU meshes from the same CPT tiles at load time and writing the packet onto
+// GPU meshes from the same CPT tiles at load time and writing the draw list onto
 // its instance pool.
 // [orig: Terrain_CollectVisibleSectors @ 0x5C9120 — the 512-unit sector
 //  window feeding Terrain_TraverseQuadTreeNode @ 0x5C89C0;
@@ -73,8 +73,8 @@ struct TerrainViewInput {
 };
 
 // One patch submission: which tile, which resolved mesh family, where. The
-// packet order is the draw order (front-to-back by node distance) and the
-// packet index is the embedder's pool slot.
+// draw-list order is the draw order (front-to-back by node distance) and the
+// draw-list index is the embedder's pool slot.
 struct TerrainPatchDraw {
 	int32_t tile_index = -1;
 	int32_t lod_family = 0;
@@ -98,7 +98,7 @@ struct TerrainFrameDebugCounters {
 	int empty_mesh_drops = 0;
 };
 
-struct TerrainDrawPacket {
+struct TerrainDrawList {
 	uint64_t frame_id = 0;
 	std::vector<TerrainPatchDraw> patches;
 	// The frustum-surviving 16-unit foliage detail cells handed off by the
@@ -110,23 +110,23 @@ struct TerrainDrawPacket {
 // Deep in-process module: one call windows the sector grid, traverses each
 // routed sector's quadtree, collects the foliage handoff, orders the visible
 // patches front-to-back, applies the pool budget, and resolves the mesh
-// family per patch. The returned packet remains valid until the next compile
+// family per patch. The returned draw list remains valid until the next compile
 // call; retained vectors make no-allocation-after-warmup observable.
 class TerrainFrameCompiler {
 public:
-	// The embedder-side instance-pool budget the packet is truncated to (the
+	// The embedder-side instance-pool budget the draw list is truncated to (the
 	// traversal's own per-walk emission cap sits below it in quadtree.cpp).
 	static constexpr int kPatchBudget = 256;
 
-	const TerrainDrawPacket &compile(const TerrainSceneSnapshot &scene,
+	const TerrainDrawList &compile(const TerrainSceneSnapshot &scene,
 	                                 const TerrainViewInput &view);
 
-	// The last compiled packet (empty before the first compile) — the cold
+	// The last compiled draw list (empty before the first compile) — the cold
 	// read for stats surfaces that outlive a frame.
-	const TerrainDrawPacket &last_packet() const { return packet_; }
+	const TerrainDrawList &last_draw_list() const { return draw_list_; }
 
 private:
-	TerrainDrawPacket packet_;
+	TerrainDrawList draw_list_;
 	std::vector<VisiblePatch> visible_;
 	uint64_t compile_index_ = 0;
 };

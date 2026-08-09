@@ -639,7 +639,7 @@ void FoliageDispatcher::_hide_draw_pools() {
   for (MeshInstance3D *instance : detail_draw_pool_) {
     if (instance != nullptr) {
       instance->set_visible(false);
-      // Drop the prior frame's draw ownership before this packet's eviction
+      // Drop the prior frame's draw ownership before this draw list's eviction
       // events are applied. Resident meshes remain owned by the caches.
       instance->set_mesh(Ref<Mesh>());
     }
@@ -1017,13 +1017,13 @@ void FoliageDispatcher::_compile_and_apply(
     return uv != Vector2();
   };
 
-  const renderer::FoliageDrawPacket &packet =
+  const renderer::FoliageDrawList &draw_list =
       compiler_.compile(p_view, _world_samplers(), expansion);
-  _apply_packet(packet);
+  _apply_draw_list(draw_list);
 }
 
 Ref<ArrayMesh> FoliageDispatcher::_upload_mesh_build(
-    const renderer::FoliageDrawPacket &p_packet,
+    const renderer::FoliageDrawList &p_draw_list,
     const renderer::FoliageMeshBuild &p_build) const {
   Ref<ArrayMesh> mesh;
   if (p_build.vertex_count == 0 || p_build.index_count == 0) {
@@ -1051,7 +1051,7 @@ Ref<ArrayMesh> FoliageDispatcher::_upload_mesh_build(
 
   for (int64_t i = 0; i < vertex_count; ++i) {
     const renderer::FoliageVertex &v =
-        p_packet.vertices[p_build.first_vertex + static_cast<size_t>(i)];
+        p_draw_list.vertices[p_build.first_vertex + static_cast<size_t>(i)];
     positions.set(i, Vector3(v.x, v.y, v.z));
     uvs.set(i, Vector2(v.u, v.v));
     uv2s.set(i, Vector2(v.u2, v.v2));
@@ -1064,7 +1064,7 @@ Ref<ArrayMesh> FoliageDispatcher::_upload_mesh_build(
   }
   for (int64_t i = 0; i < index_count; ++i) {
     indices.set(i, static_cast<int32_t>(
-                       p_packet.indices[p_build.first_index +
+                       p_draw_list.indices[p_build.first_index +
                                         static_cast<size_t>(i)]));
   }
 
@@ -1084,13 +1084,13 @@ Ref<ArrayMesh> FoliageDispatcher::_upload_mesh_build(
   return mesh;
 }
 
-void FoliageDispatcher::_apply_packet(
-    const renderer::FoliageDrawPacket &p_packet) {
+void FoliageDispatcher::_apply_draw_list(
+    const renderer::FoliageDrawList &p_draw_list) {
   // 1) Upload every mesh the compiler built this frame (empty builds cache an
   // empty entry so repeated submissions of a barren identity stay cheap).
-  for (const renderer::FoliageMeshBuild &build : p_packet.mesh_builds) {
+  for (const renderer::FoliageMeshBuild &build : p_draw_list.mesh_builds) {
     CachedMesh entry;
-    entry.mesh = _upload_mesh_build(p_packet, build);
+    entry.mesh = _upload_mesh_build(p_draw_list, build);
     entry.instances = build.instance_count;
     entry.vertices = static_cast<int64_t>(build.vertex_count);
     const MeshCacheKey key{build.slot, build.cell_key, build.revision};
@@ -1101,10 +1101,10 @@ void FoliageDispatcher::_apply_packet(
     }
   }
 
-  // 2) Bind the packet's draw commands onto the pools, in packet order.
+  // 2) Bind the draw list's draw commands onto the pools, in draw-list order.
   size_t detail_draw_index = 0;
   size_t model_draw_index = 0;
-  for (const renderer::FoliageDrawCommand &command : p_packet.commands) {
+  for (const renderer::FoliageDrawCommand &command : p_draw_list.commands) {
     const int slot = command.slot;
     if (slot < 0 || slot >= opennova::FOLIAGE_MAX_DEFS) {
       continue;
@@ -1115,7 +1115,7 @@ void FoliageDispatcher::_apply_packet(
     const auto found = cache.find(key);
     if (found == cache.end() || found->second.mesh.is_null()) {
       // The compiler only commands identities it built or knows resident; a
-      // miss means the applier's cache went out of sync with the packet.
+      // miss means the applier's cache went out of sync with the draw_list.
       continue;
     }
 
@@ -1149,13 +1149,13 @@ void FoliageDispatcher::_apply_packet(
   }
 
   // 3) A regenerated identity may still have been submitted earlier in this
-  // same packet. Draw nodes retain its Ref<ArrayMesh>; remove cache ownership
+  // same draw_list. Draw nodes retain its Ref<ArrayMesh>; remove cache ownership
   // only after every command has consumed the frame.
-  _erase_cache_identities(p_packet.detail_evicted, detail_mesh_cache_);
-  _erase_cache_identities(p_packet.model_evicted, model_mesh_cache_);
+  _erase_cache_identities(p_draw_list.detail_evicted, detail_mesh_cache_);
+  _erase_cache_identities(p_draw_list.model_evicted, model_mesh_cache_);
 
-  // 4) Mirror the packet's debug counters into the stable stats surface.
-  const renderer::FoliageFrameDebugCounters &debug = p_packet.debug;
+  // 4) Mirror the draw list's debug counters into the stable stats surface.
+  const renderer::FoliageFrameDebugCounters &debug = p_draw_list.debug;
   frame_stats_.detail_cells = debug.detail_cells;
   frame_stats_.silhouette_anchors_input = debug.silhouette_anchors_input;
   frame_stats_.silhouette_anchors_visible = debug.silhouette_anchors_visible;

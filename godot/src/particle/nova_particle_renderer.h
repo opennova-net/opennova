@@ -86,7 +86,7 @@ public:
 	// references escape through the F3/debug seam.
 	int64_t get_rendered_quad_count() const;
 	int64_t get_draw_command_count() const;
-	Dictionary get_debug_packet_report() const;
+	Dictionary get_debug_draw_list_report() const;
 	Array get_debug_emitter_bounds() const;
 	PackedStringArray get_unresolved_texture_names() const;
 };

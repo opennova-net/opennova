@@ -24,7 +24,7 @@ namespace opennova::frame {
 // call; the shell installs them once at mission setup.
 struct FrameHooks {
 	// The terrain frame compile+apply for this camera — first, before the tick
-	// batch: its packet's detail-cell handoff is the foliage leg's input, so
+	// batch: its draw list's detail-cell handoff is the foliage leg's input, so
 	// the two run in producer order against the same pre-tick camera (ADR 0033
 	// R2; the self-driven _process walk this replaces ran at arbitrary Godot
 	// scheduling relative to the foliage leg).

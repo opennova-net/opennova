@@ -42,16 +42,16 @@ private:
 	std::vector<TileInfo> tile_infos;
 
 	// The engine-owned terrain frame (ADR 0033 R2): the scene snapshot built
-	// once per load and the per-frame compiler whose packet this node applies.
+	// once per load and the per-frame compiler whose draw list this node applies.
 	opennova::TerrainSceneSnapshot scene_snapshot;
 	opennova::TerrainFrameCompiler frame_compiler;
 	// False until a compile ran for the current frame's camera; the foliage
 	// handoff getter returns no cells while it is down (mission teardown, no
-	// active camera) rather than a stale packet's.
-	bool frame_packet_live = false;
+	// active camera) rather than a stale draw list's.
+	bool frame_draw_list_live = false;
 
 	// Lightweight RenderingServer instance pool for visible patches. The pool
-	// size is the engine compiler's packet budget; packet index == pool slot.
+	// size is the engine compiler's draw list budget; draw-list index == pool slot.
 	static constexpr int PATCH_POOL_SIZE = opennova::TerrainFrameCompiler::kPatchBudget;
 	RID patch_instances[PATCH_POOL_SIZE];
 	RID last_mesh_rid[PATCH_POOL_SIZE];
@@ -130,7 +130,7 @@ public:
 
 	void build();
 
-	// The terrain frame leg (ADR 0033 R2): compile the engine patch packet for
+	// The terrain frame leg (ADR 0033 R2): compile the engine patch draw list for
 	// this node's viewport camera and apply it onto the instance pool. Driven
 	// by the engine FrameDriver through the shell's terrain hook — this node
 	// no longer self-processes.

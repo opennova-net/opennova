@@ -173,7 +173,7 @@ public:
 		++lifetime_capacity_growths;
 	}
 
-	ParticleDrawPacket packet;
+	ParticleDrawList draw_list;
 	std::vector<DepthIndex> emitter_order;
 	std::vector<ParticleDepthIndex> particle_order;
 	std::uint64_t compile_count = 0;
@@ -186,18 +186,18 @@ ParticleFrameCompiler::ParticleFrameCompiler(ParticleFrameCompiler &&) noexcept 
 ParticleFrameCompiler &ParticleFrameCompiler::operator=(
 		ParticleFrameCompiler &&) noexcept = default;
 
-const ParticleDrawPacket &ParticleFrameCompiler::compile(
+const ParticleDrawList &ParticleFrameCompiler::compile(
 		const ParticleFrameSnapshot &snapshot,
 		const ParticleViewInput &view) {
 	Impl &impl = *impl_;
-	ParticleDrawPacket &packet = impl.packet;
-	packet.frame_id = snapshot.frame_id;
-	packet.domain = view.domain;
-	packet.vertices.clear();
-	packet.commands.clear();
-	packet.emitter_bounds.clear();
-	packet.debug = {};
-	ParticleFrameDebugCounters &debug = packet.debug;
+	ParticleDrawList &draw_list = impl.draw_list;
+	draw_list.frame_id = snapshot.frame_id;
+	draw_list.domain = view.domain;
+	draw_list.vertices.clear();
+	draw_list.commands.clear();
+	draw_list.emitter_bounds.clear();
+	draw_list.debug = {};
+	ParticleFrameDebugCounters &debug = draw_list.debug;
 	debug.compile_index = ++impl.compile_count;
 	debug.input_emitters = snapshot.emitters.size();
 
@@ -219,7 +219,7 @@ const ParticleDrawPacket &ParticleFrameCompiler::compile(
 
 		// Invalid manager bounds mean an emitter with no particles this frame;
 		// it sorts farthest-first. Exact emitted-vertex bounds are still
-		// reported per packet below.
+		// reported per draw list below.
 		const ParticleAabb &sort_bounds = emitter.bounds;
 		const float depth = sort_bounds.valid
 				? view_depth(aabb_center(sort_bounds), view)
@@ -240,9 +240,9 @@ const ParticleDrawPacket &ParticleFrameCompiler::compile(
 			static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max()),
 			std::numeric_limits<std::size_t>::max() / 4u);
 	const std::size_t retained_quads = std::min(selected_particles, max_quads);
-	impl.reserve(packet.vertices, retained_quads * 4u, debug);
-	impl.reserve(packet.commands, retained_quads, debug);
-	impl.reserve(packet.emitter_bounds, impl.emitter_order.size(), debug);
+	impl.reserve(draw_list.vertices, retained_quads * 4u, debug);
+	impl.reserve(draw_list.commands, retained_quads, debug);
+	impl.reserve(draw_list.emitter_bounds, impl.emitter_order.size(), debug);
 	impl.particle_order.clear();
 	impl.reserve(impl.particle_order, retained_quads, debug);
 
@@ -251,8 +251,8 @@ const ParticleDrawPacket &ParticleFrameCompiler::compile(
 				snapshot.emitters[emitter_entry.index];
 		ParticleEmitterDrawBounds output_bounds;
 		output_bounds.emitter_id = emitter.emitter_id;
-		const std::size_t bounds_index = packet.emitter_bounds.size();
-		packet.emitter_bounds.push_back(output_bounds);
+		const std::size_t bounds_index = draw_list.emitter_bounds.size();
+		draw_list.emitter_bounds.push_back(output_bounds);
 
 		for (std::size_t particle_index = 0;
 				particle_index < emitter.particles.size(); ++particle_index) {
@@ -290,7 +290,7 @@ const ParticleDrawPacket &ParticleFrameCompiler::compile(
 		const ParticleQuadSnapshot &particle =
 				emitter.particles[particle_entry.particle_index];
 		ParticleEmitterDrawBounds &output_bounds =
-				packet.emitter_bounds[particle_entry.bounds_index];
+				draw_list.emitter_bounds[particle_entry.bounds_index];
 		if (output_bounds.quad_count == 0) {
 			output_bounds.first_quad =
 					static_cast<std::uint32_t>(debug.emitted_quads);
@@ -298,15 +298,15 @@ const ParticleDrawPacket &ParticleFrameCompiler::compile(
 		ParticleVertex quad[4];
 		build_quad(particle, view, quad);
 		for (const ParticleVertex &vertex : quad) {
-			packet.vertices.push_back(vertex);
+			draw_list.vertices.push_back(vertex);
 			include(output_bounds.bounds, {vertex.x, vertex.y, vertex.z});
 		}
 
 		const std::uint32_t quad_index =
 				static_cast<std::uint32_t>(debug.emitted_quads);
-		if (!packet.commands.empty() &&
-				same_state(packet.commands.back(), particle.state, view.domain)) {
-			++packet.commands.back().quad_count;
+		if (!draw_list.commands.empty() &&
+				same_state(draw_list.commands.back(), particle.state, view.domain)) {
+			++draw_list.commands.back().quad_count;
 			++debug.adjacent_state_merges;
 		} else {
 			ParticleDrawCommand command;
@@ -318,22 +318,22 @@ const ParticleDrawPacket &ParticleFrameCompiler::compile(
 			command.variant = particle.state.variant;
 			command.first_quad = quad_index;
 			command.quad_count = 1;
-			packet.commands.push_back(command);
+			draw_list.commands.push_back(command);
 		}
 		++debug.emitted_quads;
 		++output_bounds.quad_count;
 	}
 
-	debug.draw_commands = packet.commands.size();
+	debug.draw_commands = draw_list.commands.size();
 	debug.truncated_particles =
 			selected_particles - debug.invisible_particles - debug.emitted_quads;
 	debug.lifetime_capacity_growths = impl.lifetime_capacity_growths;
-	debug.vertex_capacity = packet.vertices.capacity();
-	debug.command_capacity = packet.commands.capacity();
-	debug.emitter_bounds_capacity = packet.emitter_bounds.capacity();
+	debug.vertex_capacity = draw_list.vertices.capacity();
+	debug.command_capacity = draw_list.commands.capacity();
+	debug.emitter_bounds_capacity = draw_list.emitter_bounds.capacity();
 	debug.emitter_sort_capacity = impl.emitter_order.capacity();
 	debug.particle_sort_capacity = impl.particle_order.capacity();
-	return packet;
+	return draw_list;
 }
 
 } // namespace renderer

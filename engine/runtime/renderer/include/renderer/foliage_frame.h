@@ -3,7 +3,7 @@
 // Portable foliage frame compilation (ADR 0033 R2). This is the seam between
 // the foliage placement runtime (engine/formats/foliage — deterministic
 // candidate generation, gates, LRU caches) and an embedding renderer. One
-// compile turns the frame request into a typed draw packet: the silhouette
+// compile turns the frame request into a typed draw list: the silhouette
 // anchor gate, submission grouping, per-identity vertex builds (only for
 // identities that became resident this frame), per-submission uniform state,
 // and both retail wind clocks live here; the embedder keeps GPU uploads,
@@ -72,9 +72,9 @@ enum class FoliageTier : uint8_t {
 	Silhouette = 1,
 };
 
-// One resident mesh to (re)build this frame: a slice of the packet's vertex/
+// One resident mesh to (re)build this frame: a slice of the draw list's vertex/
 // index arrays. Identities not listed are already resident with the embedder
-// from earlier packets. Index values are relative to first_vertex.
+// from earlier draw lists. Index values are relative to first_vertex.
 struct FoliageMeshBuild {
 	FoliageTier tier = FoliageTier::Detail;
 	uint8_t slot = 0;
@@ -106,9 +106,9 @@ struct FoliageVertex {
 	float bend = 0.0f; // source-height bend byte / 255
 };
 
-// One draw submission, in packet order (the runtime's stable submission
+// One draw submission, in draw-list order (the runtime's stable submission
 // order). The referenced identity is either built this frame (mesh_builds)
-// or resident with the embedder from an earlier packet.
+// or resident with the embedder from an earlier draw_list.
 struct FoliageDrawCommand {
 	FoliageTier tier = FoliageTier::Detail;
 	uint8_t slot = 0;
@@ -145,14 +145,14 @@ struct FoliageFrameDebugCounters {
 	opennova::foliage::RuntimeStats runtime{};
 };
 
-struct FoliageDrawPacket {
+struct FoliageDrawList {
 	uint64_t frame_id = 0;
 	std::vector<FoliageVertex> vertices;
 	std::vector<uint32_t> indices;
 	std::vector<FoliageMeshBuild> mesh_builds;
 	std::vector<FoliageDrawCommand> commands;
 	// Identities whose meshes the embedder must release AFTER consuming every
-	// command in this packet (a regenerated identity may have been submitted
+	// command in this draw list (a regenerated identity may have been submitted
 	// earlier in the same frame).
 	std::vector<opennova::foliage::CacheIdentity> detail_evicted;
 	std::vector<opennova::foliage::CacheIdentity> model_evicted;
@@ -163,7 +163,7 @@ struct FoliageDrawPacket {
 // runs the placement runtime, expands vertices for identities that became
 // resident this frame, forms per-submission commands with their uniform
 // state, advances both wind clocks, and mirrors the runtime's eviction
-// lifecycle. The returned packet remains valid until the next compile call.
+// lifecycle. The returned draw list remains valid until the next compile call.
 class FoliageFrameCompiler {
 public:
 	// The MODEL-tier view-depth floor for silhouette anchors — the near bound
@@ -177,7 +177,7 @@ public:
 			const std::array<FoliageSlotGeometry,
 					opennova::FOLIAGE_MAX_DEFS> &geometry);
 
-	const FoliageDrawPacket &compile(const FoliageViewInput &view,
+	const FoliageDrawList &compile(const FoliageViewInput &view,
 			const opennova::foliage::WorldSamplers &world,
 			const FoliageExpansionSamplers &expansion);
 
@@ -185,7 +185,7 @@ public:
 	// wind clocks (the embedder clears its mesh cache alongside).
 	void reset();
 
-	const FoliageDrawPacket &last_packet() const { return packet_; }
+	const FoliageDrawList &last_draw_list() const { return draw_list_; }
 
 private:
 	struct MeshKey {
@@ -230,7 +230,7 @@ private:
 			slots_{};
 	std::array<FoliageSlotGeometry, opennova::FOLIAGE_MAX_DEFS> geometry_{};
 	std::unordered_map<MeshKey, ResidentMesh, MeshKeyHash> resident_;
-	FoliageDrawPacket packet_;
+	FoliageDrawList draw_list_;
 	uint64_t compile_index_ = 0;
 	int64_t model_wind_counter_ = 0;
 };

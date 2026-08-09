@@ -40,8 +40,8 @@ main_game.gd
        MissionRuntime.tick_realtime(delta)          gates on the transport, then drives
          Simulation.frame_realtime(delta)       ONE engine frame:
            frame::FrameDriver.run_frame             [orig: Game_MainLoop @0x52b630]
-             terrain leg                              (engine TerrainFrameCompiler packet -> Terrain applies; ADR 0033 R2)
-             foliage leg                              (engine FoliageFrameCompiler packet -> dispatcher applies; ADR 0033 R2)
+             terrain leg                              (engine TerrainFrameCompiler draw list -> Terrain applies; ADR 0033 R2)
+             foliage leg                              (engine FoliageFrameCompiler draw list -> dispatcher applies; ADR 0033 R2)
              listener stamp                           (fire-sound gate, before the batch)
              bank delta; for each banked 16 ms quantum:
                Simulation.step()                  one engine tick  [Game_ProcessMainFrame @0x5263f0]
@@ -103,18 +103,18 @@ because Godot's scene renderer owns the sort). Two R2 domains are cut over:
   owns the per-frame walk — the 512-unit sector window, quadtree traversal,
   foliage detail-cell handoff, front-to-back order, patch budget, and
   LOD-family resolve — and `Terrain.render_frame()` applies the typed
-  patch packet onto its RenderingServer instance pool from the frame's terrain
-  leg (ordered before foliage, whose applier consumes the packet's detail
+  patch draw list onto its RenderingServer instance pool from the frame's terrain
+  leg (ordered before foliage, whose applier consumes the draw list's detail
   cells the same frame).
 - Foliage: `renderer::FoliageFrameCompiler` (`engine/runtime/renderer/foliage_frame.h`)
   owns the silhouette anchor gate, both retail placement algorithms,
   per-identity vertex expansion, per-submission uniform state, and both retail
-  wind clocks; `FoliageDispatcher` applies the typed `FoliageDrawPacket`
-  (ArrayMesh uploads for the packet's mesh builds, draw-node pooling, material
+  wind clocks; `FoliageDispatcher` applies the typed `FoliageDrawList`
+  (ArrayMesh uploads for the draw list's mesh builds, draw-node pooling, material
   binding, the eviction lifecycle).
 
 One per-frame render loop remains deliberately SELF-DRIVEN outside the engine
-frame until its output becomes a packet (stage R2):
+frame until its output becomes a draw list (stage R2):
 `ParticleRenderer`'s `_process` (frame compile + compositor dispatch);
 per-model material eval self-parks on the native `ObjectModel`
 (`godot/src/object`), whose event-driven runtime frame wakes only when it

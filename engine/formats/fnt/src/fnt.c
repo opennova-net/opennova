@@ -39,7 +39,7 @@ static void write_f32_le(uint8_t *p, float value) {
 }
 
 fnt_error_t fnt_parse_header(const uint8_t *data, size_t size,
-                             uint32_t *num_pages, int32_t *shadow_offset) {
+                             uint32_t *num_pages, int32_t *glyph_spacing) {
 	if (!data) {
 		return FNT_ERR_NULL_POINTER;
 	}
@@ -61,8 +61,8 @@ fnt_error_t fnt_parse_header(const uint8_t *data, size_t size,
 	if (num_pages) {
 		*num_pages = pages;
 	}
-	if (shadow_offset) {
-		*shadow_offset = read_i32_le(data + 12);
+	if (glyph_spacing) {
+		*glyph_spacing = read_i32_le(data + 12);
 	}
 	return FNT_OK;
 }
@@ -75,7 +75,7 @@ void fnt_free(fnt_font_t *font) {
 	memset(font, 0, sizeof(*font));
 }
 
-fnt_error_t fnt_init_blank(fnt_font_t *font, uint32_t num_pages, int32_t shadow_offset) {
+fnt_error_t fnt_init_blank(fnt_font_t *font, uint32_t num_pages, int32_t glyph_spacing) {
 	if (!font) {
 		return FNT_ERR_NULL_POINTER;
 	}
@@ -86,7 +86,7 @@ fnt_error_t fnt_init_blank(fnt_font_t *font, uint32_t num_pages, int32_t shadow_
 	memset(font, 0, sizeof(*font));
 	font->design_width = FNT_DEFAULT_DESIGN_WIDTH; /* fnt_parse overrides from the file */
 	font->num_pages = num_pages;
-	font->shadow_offset = shadow_offset;
+	font->glyph_spacing = glyph_spacing;
 
 	size_t page_bytes = (size_t)num_pages * FNT_TEXTURE_SIZE;
 	font->pages = (uint8_t *)malloc(page_bytes);
@@ -131,8 +131,8 @@ fnt_error_t fnt_parse(const uint8_t *data, size_t size, fnt_font_t *font) {
 	}
 
 	uint32_t num_pages = 0;
-	int32_t shadow_offset = 0;
-	fnt_error_t err = fnt_parse_header(data, size, &num_pages, &shadow_offset);
+	int32_t glyph_spacing = 0;
+	fnt_error_t err = fnt_parse_header(data, size, &num_pages, &glyph_spacing);
 	if (err != FNT_OK) {
 		return err;
 	}
@@ -142,7 +142,7 @@ fnt_error_t fnt_parse(const uint8_t *data, size_t size, fnt_font_t *font) {
 		return FNT_ERR_BUFFER_TOO_SMALL;
 	}
 
-	err = fnt_init_blank(font, num_pages, shadow_offset);
+	err = fnt_init_blank(font, num_pages, glyph_spacing);
 	if (err != FNT_OK) {
 		return err;
 	}
@@ -187,7 +187,7 @@ fnt_error_t fnt_write(const fnt_font_t *font, uint8_t *out, size_t out_size, siz
 	write_u32_le(out, FNT_MAGIC);
 	write_u32_le(out + 4, font->design_width); /* emit the font's design width, not a fixed version */
 	write_u32_le(out + 8, font->num_pages);
-	write_i32_le(out + 12, font->shadow_offset);
+	write_i32_le(out + 12, font->glyph_spacing);
 
 	uint8_t *glyph_data = out + FNT_HEADER_SIZE;
 	for (uint32_t i = 0; i < FNT_GLYPH_COUNT; ++i) {

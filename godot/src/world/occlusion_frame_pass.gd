@@ -1,6 +1,8 @@
 class_name OcclusionFramePass
 extends RefCounted
 
+const MissionRuntime := preload("res://src/world/mission_runtime.gd")
+
 # The render-occlusion frame (docs/render/render-occlusion-re.md §3/§4/§5),
 # extracted from GameWorld: the blink letter gates, the per-render-frame
 # section-mask/portal apply, the probe A/B seam edges, and the unload reset.
@@ -26,9 +28,8 @@ extends RefCounted
 
 # The GameWorld whose render nodes this pass drives — a direct reference,
 # stored once in setup(); per-frame reads go through its public getters as
-# direct calls. Untyped: the world script owns this object (the DebugViewSet
-# convention), and harness runtimes ride the world's _runtime seam.
-var _world
+# direct calls (harnesses subclass GameWorld, ADR 0034).
+var _world: GameWorld
 
 # The local player's applied blink letter gates (render-occlusion-re.md §4):
 # accum bit 0x2 hides the terrain render (near detail + far foliage ride the
@@ -44,8 +45,9 @@ var _occlusion_hidden_ids: Dictionary = {}
 # Occlusion only layers hides on top of this value and never reconstructs the
 # present predicate independently.
 var _present_visibility: Dictionary = {}
-# bms_id -> resolved node, so steady frames skip registry lookups. Entries
-# revalidate with is_instance_valid on use; reset on unload/A-B seams.
+# bms_id -> resolved ObjectModel, so steady frames skip registry lookups.
+# Entries revalidate with is_instance_valid on use (LIVENESS, not typing);
+# reset on unload/A-B seams.
 var _occlusion_node_cache: Dictionary = {}
 
 # The shared F3 frame-stats board (null outside the game shell), re-handed by
@@ -64,7 +66,7 @@ var _perf_occl_apply_us := 0
 
 ## One-time wiring from the owning GameWorld (constructed in the world's
 ## _init, before any load).
-func setup(world) -> void:
+func setup(world: GameWorld) -> void:
 	_world = world
 
 
@@ -94,14 +96,11 @@ func present_visibility() -> Dictionary:
 ## GameWorld._mission_forces_indoors, passed per call — the mission attribute
 ## is mission state and stays (test-pinned) on the world.
 func apply_blink_gates(forces_indoors: bool) -> void:
-	# Duck-typed like the world's silhouette-anchor pull: harness runtimes
-	# supply value-only sims without weakening get_sim()'s Simulation
-	# contract.
-	var runtime = _world.get_runtime()
-	if runtime == null or not runtime.has_method("get_sim"):
+	var runtime: MissionRuntime = _world.get_runtime()
+	if runtime == null:
 		return
-	var sim = runtime.get_sim()
-	if sim == null or not sim.has_method("local_player_blink_flags"):
+	var sim: Simulation = runtime.get_sim()
+	if sim == null:
 		return
 	# The mission force-indoors attribute ORs the indoors letter into the frame
 	# view for BOTH consumers, matching run_occlusion_frame's camera input
@@ -121,10 +120,10 @@ func apply_blink_gates(forces_indoors: bool) -> void:
 		var terrain: Terrain = _world.get_terrain_node()
 		if terrain != null:
 			terrain.visible = not indoors
-		var sky: Node = _world.get_node_or_null("SkyDome")
+		var sky: SkyDome = _world.get_node_or_null("SkyDome")
 		if sky != null:
 			sky.visible = not indoors
-		var celestial: Node = _world.get_node_or_null("Celestial")
+		var celestial: Celestial = _world.get_node_or_null("Celestial")
 		if celestial != null:
 			celestial.visible = not indoors
 	# Accum bit 0x8 (the authored water letter): both water passes skipped.
@@ -136,7 +135,7 @@ func apply_blink_gates(forces_indoors: bool) -> void:
 	var water_off := (flags & Simulation.BLINK_WATER_OFF) != 0
 	if water_off != _blink_water_suppressed:
 		_blink_water_suppressed = water_off
-		var water: Node = _world.get_water_node()
+		var water: Water = _world.get_water_node()
 		if water != null:
 			water.visible = not water_off
 
@@ -150,13 +149,13 @@ func apply_blink_gates(forces_indoors: bool) -> void:
 # (The marched iris-exposure weather feed that renders alongside stays on
 # GameWorld — _stamp_iris_samples.)
 func apply_frame(camera_xform: Transform3D, forces_indoors: bool) -> void:
-	var runtime = _world.get_runtime()
-	if runtime == null or not runtime.has_method("get_sim"):
+	var runtime: MissionRuntime = _world.get_runtime()
+	if runtime == null:
 		return
-	var sim = runtime.get_sim()
-	if sim == null or not sim.has_method("run_occlusion_frame"):
+	var sim: Simulation = runtime.get_sim()
+	if sim == null:
 		return
-	var registry = runtime.get_registry() if runtime.has_method("get_registry") else null
+	var registry: EntityIndex = runtime.get_registry()
 	if registry == null:
 		return
 	var fov_y := 70.0
@@ -171,15 +170,13 @@ func apply_frame(camera_xform: Transform3D, forces_indoors: bool) -> void:
 		if vs.y > 0.0:
 			aspect = vs.x / vs.y
 	var fog := 1000.0
-	var env: Node = _world.get_environment_node()
-	if env != null and env.has_method("get_fog_distance"):
-		fog = float(env.get_fog_distance())
-	var water: Node = _world.get_water_node()
+	var env: MissionEnvironment = _world.get_environment_node()
+	if env != null:
+		fog = env.get_fog_distance()
+	var water: Water = _world.get_water_node()
 	var water_z := -100000.0
-	if _world.is_water_render_active():
-		var wh = water.get("water_height")
-		if wh != null:
-			water_z = float(wh)
+	if water != null and _world.is_water_render_active():
+		water_z = water.water_height
 	var stats_on := _frame_stats != null and _frame_stats.is_capture_active()
 	var timing := probe_timing or stats_on
 	var native_start := Time.get_ticks_usec() if timing else 0
@@ -200,8 +197,7 @@ func apply_frame(camera_xform: Transform3D, forces_indoors: bool) -> void:
 		if node == null:
 			continue
 		var packed := int(changes[i + 1])
-		if node.has_method("set_section_visibility_mask"):
-			node.set_section_visibility_mask(packed & 0xFFFFFFFF)
+		node.set_section_visibility_mask(packed & 0xFFFFFFFF)
 		_set_occlusion_hidden(sim, node, bms_id, ((packed >> 32) & 1) == 0)
 
 	# Entity render gates (the blink-hits gate + the outdoors three-ray latch),
@@ -223,7 +219,7 @@ func apply_frame(camera_xform: Transform3D, forces_indoors: bool) -> void:
 	# when the frame latched the exterior or a camera building straddles the
 	# water plane. [orig: @ 0x5c93cb / @ 0x5c95d2 + g_BlinkWaterVisible
 	# @ 0x29ACE40]
-	if water != null and sim.has_method("occlusion_water_visible"):
+	if water != null:
 		water.visible = not _blink_water_suppressed or bool(sim.occlusion_water_visible())
 
 	if timing:
@@ -234,15 +230,12 @@ func apply_frame(camera_xform: Transform3D, forces_indoors: bool) -> void:
 		# The native call's internal split; the remainder of the bound call
 		# (marshalling + the handle collection) lands in the glue slot so the
 		# pane's Occlusion group still sums to the whole frame cost.
-		if sim.has_method("get_last_occlusion_build_us"):
-			var build_us := int(sim.get_last_occlusion_build_us())
-			var probe_us := int(sim.get_last_occlusion_probe_us())
-			_frame_stats.add(FrameStatsBoard.OCCL_BUILD, build_us)
-			_frame_stats.add(FrameStatsBoard.OCCL_PROBE, probe_us)
-			_frame_stats.add(FrameStatsBoard.OCCL_GLUE,
-					maxi(_perf_occl_native_us - build_us - probe_us, 0))
-		else:
-			_frame_stats.add(FrameStatsBoard.OCCL_GLUE, _perf_occl_native_us)
+		var build_us := int(sim.get_last_occlusion_build_us())
+		var probe_us := int(sim.get_last_occlusion_probe_us())
+		_frame_stats.add(FrameStatsBoard.OCCL_BUILD, build_us)
+		_frame_stats.add(FrameStatsBoard.OCCL_PROBE, probe_us)
+		_frame_stats.add(FrameStatsBoard.OCCL_GLUE,
+				maxi(_perf_occl_native_us - build_us - probe_us, 0))
 
 
 ## The probe A/B seam, entering the occlusion skip: restore the water to the
@@ -250,7 +243,7 @@ func apply_frame(camera_xform: Transform3D, forces_indoors: bool) -> void:
 ## blink/indoors semantics remain authoritative (release keeps them; iris
 ## keeps sampling on the world).
 func enter_probe_skip() -> void:
-	var water: Node = _world.get_water_node()
+	var water: Water = _world.get_water_node()
 	if water != null:
 		water.visible = not _blink_water_suppressed
 	release_overrides(false)
@@ -261,15 +254,15 @@ func leave_probe_skip() -> void:
 	_reset_apply_baseline()
 
 
-# Resolve (and cache) the node a bms_id drives. Cache entries revalidate with
-# is_instance_valid; a freed node re-resolves through the registry (reloads
-# recreate nodes under the same ids).
-func _occlusion_node(registry, bms_id: int) -> Node3D:
+# Resolve (and cache) the ObjectModel a bms_id drives. Cache entries revalidate
+# with is_instance_valid (LIVENESS); a freed node re-resolves through the
+# registry (reloads recreate nodes under the same ids).
+func _occlusion_node(registry: EntityIndex, bms_id: int) -> ObjectModel:
 	var cached: Variant = _occlusion_node_cache.get(bms_id)
 	if cached != null and is_instance_valid(cached):
 		return cached
-	var node: Node = registry.resolve_single(bms_id)
-	if node == null or not (node is Node3D):
+	var node: ObjectModel = registry.resolve_single(bms_id)
+	if node == null:
 		_occlusion_node_cache.erase(bms_id)
 		return null
 	_occlusion_node_cache[bms_id] = node
@@ -280,7 +273,8 @@ func _occlusion_node(registry, bms_id: int) -> Node3D:
 # consults the shared set and never fights it); a release clears the claim and
 # lands the node on the sim's CURRENT present intent, so a WAC/sim-hidden
 # entity never flashes for a frame.
-func _set_occlusion_hidden(sim, node: Node3D, bms_id: int, hidden: bool) -> void:
+func _set_occlusion_hidden(sim: Simulation, node: ObjectModel, bms_id: int,
+		hidden: bool) -> void:
 	if hidden:
 		if not _occlusion_hidden_ids.has(bms_id):
 			_occlusion_hidden_ids[bms_id] = true
@@ -292,23 +286,20 @@ func _set_occlusion_hidden(sim, node: Node3D, bms_id: int, hidden: bool) -> void
 			node.visible = true
 
 
-# Duck-typed sim resolution for the occlusion apply paths: harness runtimes
-# serve stub sims that the typed get_sim() accessor cannot return.
-func _occlusion_sim() -> Object:
-	var runtime = _world.get_runtime()
-	if runtime == null or not runtime.has_method("get_sim"):
-		return null
-	var sim: Variant = runtime.get_sim()
-	return sim if sim is Object else null
+# The live sim for the occlusion apply paths (null before a mission runtime
+# exists — a real state on the unload/A-B seams).
+func _occlusion_sim() -> Simulation:
+	var runtime: MissionRuntime = _world.get_runtime()
+	return runtime.get_sim() if runtime != null else null
 
 
-func _entity_present_visible(sim: Object, bms_id: int) -> bool:
+func _entity_present_visible(sim: Simulation, bms_id: int) -> bool:
 	if _present_visibility.has(bms_id):
 		return bool(_present_visibility[bms_id])
-	# Compatibility/test sources without MissionPresentPass retain the native
-	# base predicate. Production placed nodes always publish the exact combined
-	# hidden + local-view-suppressed intent above.
-	if sim != null and sim.has_method("entity_present_visible"):
+	# Sources without MissionPresentPass retain the native base predicate.
+	# Production placed nodes always publish the exact combined hidden +
+	# local-view-suppressed intent above.
+	if sim != null:
 		return bool(sim.entity_present_visible(bms_id))
 	return true
 
@@ -323,26 +314,31 @@ func _entity_present_visible(sim: Object, bms_id: int) -> bool:
 func release_overrides(_reset_semantics: bool) -> void:
 	var sim := _occlusion_sim()
 	for bms_id in _occlusion_hidden_ids:
-		var node: Variant = _occlusion_node_cache.get(bms_id)
-		if node != null and is_instance_valid(node):
+		var node: Variant = _occlusion_hidden_release_node(int(bms_id))
+		if node != null:
 			var present_visible := _entity_present_visible(sim, int(bms_id))
 			if present_visible:
-				(node as Node3D).visible = true
+				(node as ObjectModel).visible = true
 	_occlusion_hidden_ids.clear()
 	for bms_id in _occlusion_node_cache:
 		var node: Variant = _occlusion_node_cache[bms_id]
-		if node != null and is_instance_valid(node) \
-				and (node as Node).has_method("set_section_visibility_mask"):
-			(node as Node).set_section_visibility_mask(-1)
+		if node != null and is_instance_valid(node):
+			(node as ObjectModel).set_section_visibility_mask(-1)
 	_occlusion_node_cache.clear()
 	_reset_apply_baseline()
+
+
+# The cache holds only ObjectModels; entries revalidate for LIVENESS on use.
+func _occlusion_hidden_release_node(bms_id: int) -> ObjectModel:
+	var cached: Variant = _occlusion_node_cache.get(bms_id)
+	return cached if cached != null and is_instance_valid(cached) else null
 
 
 # Forget the sim's applied-state baseline so the next occlusion frame re-emits
 # everything (the shell caches were dropped or the A/B skip ended).
 func _reset_apply_baseline() -> void:
 	var sim := _occlusion_sim()
-	if sim != null and sim.has_method("reset_occlusion_apply_baseline"):
+	if sim != null:
 		sim.reset_occlusion_apply_baseline()
 
 
@@ -366,14 +362,14 @@ func _reset_blink_frame_gates() -> void:
 		var terrain: Terrain = _world.get_terrain_node()
 		if terrain != null:
 			terrain.visible = true
-		var sky: Node = _world.get_node_or_null("SkyDome")
+		var sky: SkyDome = _world.get_node_or_null("SkyDome")
 		if sky != null:
 			sky.visible = true
-		var celestial: Node = _world.get_node_or_null("Celestial")
+		var celestial: Celestial = _world.get_node_or_null("Celestial")
 		if celestial != null:
 			celestial.visible = true
 	if _blink_water_suppressed:
-		var water: Node = _world.get_water_node()
+		var water: Water = _world.get_water_node()
 		if water != null:
 			water.visible = true
 	blink_indoors = false

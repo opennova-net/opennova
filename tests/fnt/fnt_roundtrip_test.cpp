@@ -32,8 +32,8 @@ bool parse_fixture(const char *name, uint32_t expected_pages) {
 	if (!expect(!bytes.empty(), "fixture should be readable")) return false;
 
 	uint32_t page_count = 0;
-	int32_t shadow_offset = 123;
-	fnt_error_t err = fnt_parse_header(bytes.data(), bytes.size(), &page_count, &shadow_offset);
+	int32_t glyph_spacing = 123;
+	fnt_error_t err = fnt_parse_header(bytes.data(), bytes.size(), &page_count, &glyph_spacing);
 	if (!expect(err == FNT_OK, "header should parse")) return false;
 	if (!expect(page_count == expected_pages, "page count should match fixture size")) return false;
 	if (!expect(bytes.size() == fnt_calculate_file_size(page_count), "fixture size should match declared page count")) return false;
@@ -114,7 +114,7 @@ int main() {
 	fnt_font_t reparsed;
 	err = fnt_parse(written.data(), written.size(), &reparsed);
 	if (!expect(err == FNT_OK, "written font should reparse")) return 1;
-	if (!expect(reparsed.shadow_offset == -3, "shadow offset should round-trip")) return 1;
+	if (!expect(reparsed.glyph_spacing == -3, "shadow offset should round-trip")) return 1;
 	int width = 0;
 	int height = 0;
 	fnt_get_glyph_size(&reparsed.glyphs[0], &width, &height);

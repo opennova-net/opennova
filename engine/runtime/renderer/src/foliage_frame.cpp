@@ -84,13 +84,13 @@ bool FoliageFrameCompiler::expand_detail_instance(
 		if (!valid_height(ground) || !valid_height(height_left) ||
 				!valid_height(height_right) || !valid_height(height_previous) ||
 				!valid_height(height_next)) {
-			packet_.vertices.resize(vertex_base);
+			draw_list_.vertices.resize(vertex_base);
 			return false;
 		}
 
 		const float world_y = ground + vertex.y * kDetailHeightScale;
 		if (!finite3(world_x, world_y, world_z)) {
-			packet_.vertices.resize(vertex_base);
+			draw_list_.vertices.resize(vertex_base);
 			return false;
 		}
 
@@ -115,7 +115,7 @@ bool FoliageFrameCompiler::expand_detail_instance(
 			out.v2 = 0.0f;
 		}
 		out.bend = static_cast<float>(bend_byte) / 255.0f;
-		packet_.vertices.push_back(out);
+		draw_list_.vertices.push_back(out);
 	}
 	return true;
 }
@@ -173,7 +173,7 @@ bool FoliageFrameCompiler::expand_silhouette_instance(
 		const float half_height = vertex.y * kDetailHeightScale;
 		const float world_y = ground + half_height;
 		if (!finite3(world_x, world_y, world_z)) {
-			packet_.vertices.resize(vertex_base);
+			draw_list_.vertices.resize(vertex_base);
 			return false;
 		}
 
@@ -185,33 +185,33 @@ bool FoliageFrameCompiler::expand_silhouette_instance(
 		out.v = vertex.v;
 		out.u2 = half_height;
 		out.v2 = 0.0f;
-		packet_.vertices.push_back(out);
+		draw_list_.vertices.push_back(out);
 	}
 	return true;
 }
 
-const FoliageDrawPacket &FoliageFrameCompiler::compile(
+const FoliageDrawList &FoliageFrameCompiler::compile(
 		const FoliageViewInput &view,
 		const opennova::foliage::WorldSamplers &world,
 		const FoliageExpansionSamplers &expansion) {
 	++compile_index_;
-	packet_.frame_id = compile_index_;
-	packet_.vertices.clear();
-	packet_.indices.clear();
-	packet_.mesh_builds.clear();
-	packet_.commands.clear();
-	packet_.detail_evicted.clear();
-	packet_.model_evicted.clear();
-	packet_.debug = FoliageFrameDebugCounters{};
-	packet_.debug.compile_index = compile_index_;
+	draw_list_.frame_id = compile_index_;
+	draw_list_.vertices.clear();
+	draw_list_.indices.clear();
+	draw_list_.mesh_builds.clear();
+	draw_list_.commands.clear();
+	draw_list_.detail_evicted.clear();
+	draw_list_.model_evicted.clear();
+	draw_list_.debug = FoliageFrameDebugCounters{};
+	draw_list_.debug.compile_index = compile_index_;
 
 	// --- The frame request: cells straight through, anchors gated ----------
 	opennova::foliage::FrameRequest request;
 	request.slots = slots_;
 	request.detail_cells = view.detail_cells;
-	packet_.debug.detail_cells =
+	draw_list_.debug.detail_cells =
 			static_cast<int64_t>(request.detail_cells.size());
-	packet_.debug.silhouette_anchors_input =
+	draw_list_.debug.silhouette_anchors_input =
 			static_cast<int64_t>(view.silhouette_anchors.size());
 
 	// The MODEL-tier anchor gate: view depth >= the schedule floor, then
@@ -255,17 +255,17 @@ const FoliageDrawPacket &FoliageFrameCompiler::compile(
 		runtime_anchor.camera_distance = camera_distance;
 		request.silhouette_anchors.push_back(runtime_anchor);
 	}
-	packet_.debug.silhouette_anchors_visible =
+	draw_list_.debug.silhouette_anchors_visible =
 			static_cast<int64_t>(request.silhouette_anchors.size());
 
 	// --- The placement runtime -------------------------------------------
 	const opennova::foliage::FrameOutput output =
 			runtime_.render_frame(request, world);
 	const opennova::foliage::RuntimeStats &runtime_stats = runtime_.get_stats();
-	packet_.debug.runtime = runtime_stats;
-	packet_.debug.runtime_detail_intents =
+	draw_list_.debug.runtime = runtime_stats;
+	draw_list_.debug.runtime_detail_intents =
 			static_cast<int64_t>(output.detail.size());
-	packet_.debug.runtime_silhouette_intents =
+	draw_list_.debug.runtime_silhouette_intents =
 			static_cast<int64_t>(output.silhouettes.size());
 
 	const float detail_wind_phase =
@@ -289,18 +289,18 @@ const FoliageDrawPacket &FoliageFrameCompiler::compile(
 		auto found = resident_.find(key);
 		if (found == resident_.end()) {
 			const uint32_t first_vertex =
-					static_cast<uint32_t>(packet_.vertices.size());
+					static_cast<uint32_t>(draw_list_.vertices.size());
 			const uint32_t first_index =
-					static_cast<uint32_t>(packet_.indices.size());
+					static_cast<uint32_t>(draw_list_.indices.size());
 			int64_t instance_count = 0;
 			for (size_t i = begin; i < end; ++i) {
-				const size_t base = packet_.vertices.size();
+				const size_t base = draw_list_.vertices.size();
 				if (expand_detail_instance(output.detail[i], world, expansion,
 							base)) {
 					const uint32_t local =
 							static_cast<uint32_t>(base) - first_vertex;
 					for (const int32_t idx : geometry_[slot].indices) {
-						packet_.indices.push_back(local +
+						draw_list_.indices.push_back(local +
 								static_cast<uint32_t>(idx));
 					}
 					++instance_count;
@@ -313,14 +313,14 @@ const FoliageDrawPacket &FoliageFrameCompiler::compile(
 			build.revision = first.cache_revision;
 			build.first_vertex = first_vertex;
 			build.vertex_count =
-					static_cast<uint32_t>(packet_.vertices.size()) - first_vertex;
+					static_cast<uint32_t>(draw_list_.vertices.size()) - first_vertex;
 			build.first_index = first_index;
 			build.index_count =
-					static_cast<uint32_t>(packet_.indices.size()) - first_index;
+					static_cast<uint32_t>(draw_list_.indices.size()) - first_index;
 			build.instance_count = static_cast<int32_t>(instance_count);
-			packet_.mesh_builds.push_back(build);
+			draw_list_.mesh_builds.push_back(build);
 			if (build.vertex_count > 0 && build.index_count > 0) {
-				++packet_.debug.detail_mesh_uploads;
+				++draw_list_.debug.detail_mesh_uploads;
 			}
 			ResidentMesh entry;
 			entry.empty = build.vertex_count == 0 || build.index_count == 0;
@@ -328,7 +328,7 @@ const FoliageDrawPacket &FoliageFrameCompiler::compile(
 			entry.vertices = static_cast<int64_t>(build.vertex_count);
 			found = resident_.emplace(key, entry).first;
 		} else {
-			++packet_.debug.detail_mesh_hits;
+			++draw_list_.debug.detail_mesh_hits;
 		}
 
 		const ResidentMesh &resident = found->second;
@@ -352,15 +352,15 @@ const FoliageDrawPacket &FoliageFrameCompiler::compile(
 			command.high_pass_cutoff =
 					first.near_secondary ? 180.0f / 255.0f : 0.0f;
 			command.wind_phase = detail_wind_phase;
-			packet_.commands.push_back(command);
+			draw_list_.commands.push_back(command);
 
 			if (high) {
-				packet_.debug.detail_high_instances += resident.instances;
+				draw_list_.debug.detail_high_instances += resident.instances;
 			} else {
-				packet_.debug.detail_low_instances += resident.instances;
+				draw_list_.debug.detail_low_instances += resident.instances;
 			}
-			packet_.debug.detail_vertices += resident.vertices;
-			++packet_.debug.render_batches;
+			draw_list_.debug.detail_vertices += resident.vertices;
+			++draw_list_.debug.render_batches;
 		}
 		begin = end;
 	}
@@ -384,17 +384,17 @@ const FoliageDrawPacket &FoliageFrameCompiler::compile(
 		auto found = resident_.find(key);
 		if (found == resident_.end()) {
 			const uint32_t first_vertex =
-					static_cast<uint32_t>(packet_.vertices.size());
+					static_cast<uint32_t>(draw_list_.vertices.size());
 			const uint32_t first_index =
-					static_cast<uint32_t>(packet_.indices.size());
+					static_cast<uint32_t>(draw_list_.indices.size());
 			int64_t instance_count = 0;
 			for (size_t i = begin; i < end; ++i) {
-				const size_t base = packet_.vertices.size();
+				const size_t base = draw_list_.vertices.size();
 				if (expand_silhouette_instance(output.silhouettes[i], base)) {
 					const uint32_t local =
 							static_cast<uint32_t>(base) - first_vertex;
 					for (const int32_t idx : geometry_[slot].indices) {
-						packet_.indices.push_back(local +
+						draw_list_.indices.push_back(local +
 								static_cast<uint32_t>(idx));
 					}
 					++instance_count;
@@ -407,14 +407,14 @@ const FoliageDrawPacket &FoliageFrameCompiler::compile(
 			build.revision = first.cache_revision;
 			build.first_vertex = first_vertex;
 			build.vertex_count =
-					static_cast<uint32_t>(packet_.vertices.size()) - first_vertex;
+					static_cast<uint32_t>(draw_list_.vertices.size()) - first_vertex;
 			build.first_index = first_index;
 			build.index_count =
-					static_cast<uint32_t>(packet_.indices.size()) - first_index;
+					static_cast<uint32_t>(draw_list_.indices.size()) - first_index;
 			build.instance_count = static_cast<int32_t>(instance_count);
-			packet_.mesh_builds.push_back(build);
+			draw_list_.mesh_builds.push_back(build);
 			if (build.vertex_count > 0 && build.index_count > 0) {
-				++packet_.debug.model_mesh_uploads;
+				++draw_list_.debug.model_mesh_uploads;
 			}
 			ResidentMesh entry;
 			entry.empty = build.vertex_count == 0 || build.index_count == 0;
@@ -422,7 +422,7 @@ const FoliageDrawPacket &FoliageFrameCompiler::compile(
 			entry.vertices = static_cast<int64_t>(build.vertex_count);
 			found = resident_.emplace(key, entry).first;
 		} else {
-			++packet_.debug.model_mesh_hits;
+			++draw_list_.debug.model_mesh_hits;
 		}
 
 		const ResidentMesh &resident = found->second;
@@ -440,18 +440,18 @@ const FoliageDrawPacket &FoliageFrameCompiler::compile(
 			// cache entry.
 			command.wind_phase =
 					static_cast<float>(++model_wind_counter_) * 0.001f;
-			packet_.commands.push_back(command);
+			draw_list_.commands.push_back(command);
 
-			packet_.debug.silhouette_instances += resident.instances;
-			packet_.debug.silhouette_vertices += resident.vertices;
-			++packet_.debug.render_batches;
+			draw_list_.debug.silhouette_instances += resident.instances;
+			draw_list_.debug.silhouette_vertices += resident.vertices;
+			++draw_list_.debug.render_batches;
 		}
 		begin = end;
 	}
 
 	// --- Eviction lifecycle -----------------------------------------------
-	packet_.detail_evicted = output.detail_evicted;
-	packet_.model_evicted = output.model_evicted;
+	draw_list_.detail_evicted = output.detail_evicted;
+	draw_list_.model_evicted = output.model_evicted;
 	for (const opennova::foliage::CacheIdentity &identity :
 			output.detail_evicted) {
 		resident_.erase(MeshKey{static_cast<uint8_t>(FoliageTier::Detail),
@@ -463,7 +463,7 @@ const FoliageDrawPacket &FoliageFrameCompiler::compile(
 				identity.slot, identity.key, identity.revision});
 	}
 
-	return packet_;
+	return draw_list_;
 }
 
 } // namespace renderer

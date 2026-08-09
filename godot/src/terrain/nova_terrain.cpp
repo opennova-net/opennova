@@ -217,7 +217,7 @@ void Terrain::_notification(int p_what) {
 }
 
 // ---------------------------------------------------------------------------
-// The terrain frame leg (ADR 0033 R2): the engine compiles the packet, this
+// The terrain frame leg (ADR 0033 R2): the engine compiles the draw list, this
 // node applies it. Every per-frame decision — sector window, traversal,
 // foliage handoff, order, budget, family resolve — is TerrainFrameCompiler's;
 // what remains here is device work (camera sampling, instance-pool writes,
@@ -232,7 +232,7 @@ void Terrain::render_frame() {
 	if (!built) {
 		return;
 	}
-	frame_packet_live = false;
+	frame_draw_list_live = false;
 
 	// Sample the scene camera — the one device input the compiler needs.
 	Camera3D* cam = nullptr;
@@ -270,16 +270,16 @@ void Terrain::render_frame() {
 	traversal_config.quality = lod_quality;
 	view_input.config = traversal_config;
 
-	const opennova::TerrainDrawPacket &packet =
+	const opennova::TerrainDrawList &draw_list =
 			frame_compiler.compile(scene_snapshot, view_input);
-	frame_packet_live = true;
+	frame_draw_list_live = true;
 
-	// Apply the packet onto the instance pool: packet index == pool slot.
+	// Apply the draw list onto the instance pool: draw-list index == pool slot.
 	RenderingServer* rs = RenderingServer::get_singleton();
-	const int count = static_cast<int>(packet.patches.size());
+	const int count = static_cast<int>(draw_list.patches.size());
 
 	for (int i = 0; i < count; i++) {
-		const opennova::TerrainPatchDraw &draw = packet.patches[i];
+		const opennova::TerrainPatchDraw &draw = draw_list.patches[i];
 		const auto& ti = tile_infos[draw.tile_index];
 		const Ref<ArrayMesh> &mesh = ti.lod_meshes[draw.lod_family];
 		if (mesh.is_null()) {
@@ -497,7 +497,7 @@ void Terrain::_hide_visible_patches() {
 }
 
 void Terrain::_clear_patch_pool() {
-	frame_packet_live = false;
+	frame_draw_list_live = false;
 	RenderingServer* rs = RenderingServer::get_singleton();
 	if (!rs) {
 		return;
@@ -698,12 +698,12 @@ bool Terrain::_build_terrain() {
 }
 
 // ---------------------------------------------------------------------------
-// Debug API — cold reads over the compiler's last packet
+// Debug API — cold reads over the compiler's last draw list
 // ---------------------------------------------------------------------------
 
 Dictionary Terrain::get_traversal_stats() const {
 	const opennova::TraversalStats &stats =
-			frame_compiler.last_packet().debug.traversal;
+			frame_compiler.last_draw_list().debug.traversal;
 	Dictionary d;
 	d["nodes_visited"] = stats.nodes_visited;
 	d["rej_nearfar"] = stats.rej_nearfar;
@@ -723,7 +723,7 @@ Dictionary Terrain::get_traversal_stats() const {
 
 PackedInt32Array Terrain::get_lod_distribution() const {
 	const opennova::TerrainFrameDebugCounters &debug =
-			frame_compiler.last_packet().debug;
+			frame_compiler.last_draw_list().debug;
 	PackedInt32Array arr;
 	arr.resize(8);
 	for (int i = 0; i < 8; i++)
@@ -747,12 +747,12 @@ int Terrain::get_visible_patch_count() const {
 
 const std::vector<FoliageDetailPatch> &Terrain::get_foliage_detail_patches_native() const {
 	// No compile ran for the current frame (torn down, hidden, no camera):
-	// report no cells rather than a stale packet's.
+	// report no cells rather than a stale draw list's.
 	static const std::vector<FoliageDetailPatch> empty;
-	if (!frame_packet_live) {
+	if (!frame_draw_list_live) {
 		return empty;
 	}
-	return frame_compiler.last_packet().detail_cells;
+	return frame_compiler.last_draw_list().detail_cells;
 }
 
 void Terrain::set_debug_no_frustum(bool v) { traversal_config.no_frustum = v; }

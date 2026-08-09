@@ -151,14 +151,14 @@ int main() {
 	view.config.quality = 1.0f;
 
 	{
-		const opennova::TerrainDrawPacket &pkt = compiler.compile(scene, view);
+		const opennova::TerrainDrawList &pkt = compiler.compile(scene, view);
 		if (!expect(pkt.frame_id == 1, "frame id counts compiles")) return 1;
 		if (!expect(pkt.debug.sectors_walked == 1, "one routed sector walked")) return 1;
 		if (!expect(pkt.debug.visible_patches == 3,
 				"three tile leaves emitted pre-budget")) return 1;
 		if (!expect(static_cast<int>(pkt.patches.size()) == 2 &&
 						pkt.debug.emitted_patches == 2,
-				"the empty-LOD tile is dropped from the packet")) return 1;
+				"the empty-LOD tile is dropped from the draw_list")) return 1;
 		if (!expect(pkt.debug.empty_mesh_drops == 1, "the drop is counted")) return 1;
 		if (!expect(pkt.patches[0].tile_index == 0 && pkt.patches[1].tile_index == 1,
 				"patches are ordered front-to-back")) return 1;
@@ -172,7 +172,7 @@ int main() {
 				"leaf emissions hand off detail cells near the camera")) return 1;
 
 		const size_t cells = pkt.detail_cells.size();
-		const opennova::TerrainDrawPacket &pkt2 = compiler.compile(scene, view);
+		const opennova::TerrainDrawList &pkt2 = compiler.compile(scene, view);
 		if (!expect(pkt2.frame_id == 2 && pkt2.patches.size() == 2 &&
 						pkt2.detail_cells.size() == cells,
 				"recompile is deterministic")) return 1;
@@ -188,7 +188,7 @@ int main() {
 		look_at(fv.view, {32.0f, 40.0f, -20.0f}, {32.0f, 8.0f, 32.0f},
 				{0.0f, 1.0f, 0.0f});
 		fv.config.quality = 1.0f;
-		const opennova::TerrainDrawPacket &pkt = compiler.compile(scene, fv);
+		const opennova::TerrainDrawList &pkt = compiler.compile(scene, fv);
 		bool saw_a = false;
 		for (const opennova::TerrainPatchDraw &p : pkt.patches) {
 			if (p.tile_index == 0) saw_a = true;
@@ -197,7 +197,7 @@ int main() {
 
 		look_at(fv.view, {32.0f, 40.0f, -20.0f}, {32.0f, 120.0f, -200.0f},
 				{0.0f, 1.0f, 0.0f});
-		const opennova::TerrainDrawPacket &away = compiler.compile(scene, fv);
+		const opennova::TerrainDrawList &away = compiler.compile(scene, fv);
 		if (!expect(away.patches.empty() && away.detail_cells.empty(),
 				"a camera facing away culls everything")) return 1;
 	}
@@ -233,7 +233,7 @@ int main() {
 		dv.config.no_frustum = true;
 		dv.config.force_leaves = true;
 		dv.config.quality = 1.0f;
-		const opennova::TerrainDrawPacket &pkt = compiler.compile(dense, dv);
+		const opennova::TerrainDrawList &pkt = compiler.compile(dense, dv);
 		if (!expect(pkt.debug.sectors_walked == 4, "four routed sectors walked")) return 1;
 		if (!expect(pkt.debug.visible_patches == 224,
 				"the traversal emission budget is shared across sectors")) return 1;
@@ -241,10 +241,10 @@ int main() {
 				"over-budget emissions are counted, not kept")) return 1;
 		if (!expect(static_cast<int>(pkt.patches.size()) == 224 &&
 						pkt.patches.size() <= TerrainFrameCompiler::kPatchBudget,
-				"the packet stays within the pool budget")) return 1;
+				"the draw_list stays within the pool budget")) return 1;
 		for (size_t i = 1; i < pkt.patches.size(); ++i) {
 			if (!expect(pkt.patches[i - 1].distance <= pkt.patches[i].distance,
-					"dense packet stays front-to-back")) return 1;
+					"dense draw_list stays front-to-back")) return 1;
 		}
 	}
 

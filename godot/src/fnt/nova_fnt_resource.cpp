@@ -12,7 +12,7 @@
 namespace godot {
 
 void FntResource::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("create_blank", "page_count", "shadow_offset"), &FntResource::create_blank);
+	ClassDB::bind_method(D_METHOD("create_blank", "page_count", "glyph_spacing"), &FntResource::create_blank);
 	ClassDB::bind_method(D_METHOD("load_from_bytes", "bytes"), &FntResource::load_from_bytes);
 	ClassDB::bind_method(D_METHOD("to_bytes"), &FntResource::to_bytes);
 
@@ -20,7 +20,7 @@ void FntResource::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_glyph_count"), &FntResource::get_glyph_count);
 	ClassDB::bind_method(D_METHOD("get_first_char"), &FntResource::get_first_char);
 	ClassDB::bind_method(D_METHOD("get_shadow_offset"), &FntResource::get_shadow_offset);
-	ClassDB::bind_method(D_METHOD("set_shadow_offset", "shadow_offset"), &FntResource::set_shadow_offset);
+	ClassDB::bind_method(D_METHOD("set_shadow_offset", "glyph_spacing"), &FntResource::set_shadow_offset);
 
 	ClassDB::bind_method(D_METHOD("get_page_image", "page"), &FntResource::get_page_image);
 	ClassDB::bind_method(D_METHOD("set_page_image", "page", "image"), &FntResource::set_page_image);
@@ -168,14 +168,14 @@ int FntResource::get_first_char() const {
 }
 
 int FntResource::get_shadow_offset() const {
-	return _has_valid_font() ? font_.shadow_offset : 0;
+	return _has_valid_font() ? font_.glyph_spacing : 0;
 }
 
 void FntResource::set_shadow_offset(int p_shadow_offset) {
-	if (!_has_valid_font() || font_.shadow_offset == p_shadow_offset) {
+	if (!_has_valid_font() || font_.glyph_spacing == p_shadow_offset) {
 		return;
 	}
-	font_.shadow_offset = p_shadow_offset;
+	font_.glyph_spacing = p_shadow_offset;
 	emit_changed();
 }
 
@@ -328,7 +328,7 @@ Ref<FontFile> FntResource::to_font_file() const {
 		}
 	}
 
-	int32_t advance_adjust = font_.shadow_offset - 1;
+	int32_t advance_adjust = font_.glyph_spacing - 1;
 	for (uint32_t i = 0; i < FNT_GLYPH_COUNT; ++i) {
 		const std::uint8_t retail_byte = static_cast<std::uint8_t>(FNT_FIRST_CHAR + i);
 		// Retail measures and draws text from unsigned bytes. Bytes 0x7F..0x81
