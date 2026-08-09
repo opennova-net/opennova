@@ -667,9 +667,14 @@ func test_fixed_tick_orders_weapon_and_impact_before_particle_advance() -> void:
 			func(_events: Array[PlayerWeaponEvent]) -> void:
 				effects.timeline.append("weapon"))
 
+	var tick0 := int(world.get_sim().get_logic_tick())
 	assert_gte(int(world.get_sim().debug_spawn_round(
 			Vector3(16, 40, -16), Vector3.DOWN, "AM_556MM")), 0)
 	_tick_until_impact(world, effects, audio)
+	print("DBG ticks_ran=", int(world.get_sim().get_logic_tick()) - tick0,
+			" playing=", world.get_runtime().is_playing(),
+			" timeline=", effects.timeline.size(),
+			" round_dbg=", world.get_sim().get_round_debug())
 
 	assert_true(effects.timeline.has("impact"), "the real round impacted")
 	assert_eq(effects.timeline.slice(effects.timeline.size() - 3),

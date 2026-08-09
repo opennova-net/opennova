@@ -25,6 +25,11 @@ extends GutTest
 # - the fixed-tick catch-up phase math (age-two resumes, double-advance guards):
 #   needs authored multi-tick batches; the real 62.5 Hz drive here consumes one
 #   tick per frame, and the phase math is ctest-pinned engine state.
+# - the router's capture-gated trigger sampling (LMB only while captured): a
+#   headless display cannot hold real mouse buttons; the fire test injects on
+#   the same sim seam the router drives.
+# - aim_range on a world with NO terrain object: unreachable on a loaded real
+#   world; the raycast-miss -> 1000 fallback covers the same readout behavior.
 
 const MissionRuntime := preload("res://adapter/world/mission_runtime.gd")
 
