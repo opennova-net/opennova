@@ -36,8 +36,8 @@ class Skeleton3D;
 // and the original engine use -- so poses map directly to Godot Transform3Ds (no change of
 // basis). The mesh carries the (-x,y,z) handedness flip; the Skin's global-rest-inverse
 // bind keeps mesh and bones consistent. (Matches the proven oscarmike Godot port.)
-// [orig: AnimMap_PlayAnimBySlot @0x40bda0 selects a clip; the .bad pose chain is
-//  BoneAnim_TransformBones @0x410360 / build_world_bone_matrices @0x40c770.]
+// [orig: AnimMap_PlayAnimBySlot @0x40bda0 selects a clip]; the .bad pose math
+// (frame-window walk, blend, bind rest) is anim/skeletal_pose.h's.
 class NovaSkeletalAnim : public RefCounted {
 	GDCLASS(NovaSkeletalAnim, RefCounted)
 

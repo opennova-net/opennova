@@ -13,9 +13,9 @@
 
 #include <adm/adm.h>
 #include <anim/aim_overlay.h> // the torso-bend overlay [orig: @0x4b1290]
+#include <anim/skeletal_pose.h>
 #include <world/body_anim.h>
 
-#include <cmath>
 #include <utility>
 #include <godot_cpp/variant/utility_functions.hpp>
 
@@ -47,83 +47,43 @@ Transform3D bone_local_to_godot(const opennova::anim::Quat &q, const opennova::a
 	return Transform3D(Basis(Quaternion(q.x, q.y, q.z, q.w)), Vector3(p.x, p.y, p.z));
 }
 
-// --- Skeleton BIND pose from the .bad BadBone bind matrix (parent-local) ----------------
-// Exact port of the proven oscarmike adm_import_plugin.cpp (build_bone_data_from_bad):
-// rest.origin = bone.position (raw); rest.basis = row-major-Basis(bone_mat * parent_mat^-1),
-// orthonormalized. The .3di mesh is skinned to THIS bind, so the Skeleton3D rest must match it
-// (not a sampled clip frame) -- otherwise the skin deforms ~identity at idle but collapses under
-// large motion. [orig: build_world_bone_matrices @0x40c770 bind layer.]
-struct Mat3 {
-	float m[3][3] = {};
-};
-
-Mat3 bad_to_mat3(const float rot[9]) {
-	Mat3 o{};
-	o.m[0][0] = rot[0]; o.m[0][1] = rot[1]; o.m[0][2] = rot[2];
-	o.m[1][0] = rot[3]; o.m[1][1] = rot[4]; o.m[1][2] = rot[5];
-	o.m[2][0] = rot[6]; o.m[2][1] = rot[7]; o.m[2][2] = rot[8];
-	return o;
+Array pose_to_array(const std::vector<opennova::anim::PoseBone> &p_pose) {
+	Array out;
+	for (const opennova::anim::PoseBone &pb : p_pose) {
+		out.push_back(bone_local_to_godot(pb.rotation, pb.origin));
+	}
+	return out;
 }
 
-bool mat3_invert(const Mat3 &m, Mat3 &out) {
-	const float a00 = m.m[0][0], a01 = m.m[0][1], a02 = m.m[0][2];
-	const float a10 = m.m[1][0], a11 = m.m[1][1], a12 = m.m[1][2];
-	const float a20 = m.m[2][0], a21 = m.m[2][1], a22 = m.m[2][2];
-	const float b01 = a22 * a11 - a12 * a21;
-	const float b11 = -a22 * a10 + a12 * a20;
-	const float b21 = a21 * a10 - a11 * a20;
-	const float det = a00 * b01 + a01 * b11 + a02 * b21;
-	if (std::fabs(det) < 1e-9f) {
-		return false;
+std::vector<opennova::anim::PoseBone> array_to_pose(const Array &p_pose) {
+	std::vector<opennova::anim::PoseBone> out(static_cast<size_t>(p_pose.size()));
+	for (int i = 0; i < p_pose.size(); ++i) {
+		const Transform3D t = p_pose[i];
+		const Quaternion q = t.basis.get_rotation_quaternion();
+		out[static_cast<size_t>(i)].rotation = { static_cast<float>(q.w), static_cast<float>(q.x),
+			static_cast<float>(q.y), static_cast<float>(q.z) };
+		out[static_cast<size_t>(i)].origin = { static_cast<float>(t.origin.x),
+			static_cast<float>(t.origin.y), static_cast<float>(t.origin.z) };
 	}
-	const float inv_det = 1.0f / det;
-	out.m[0][0] = b01 * inv_det;
-	out.m[0][1] = (-a22 * a01 + a02 * a21) * inv_det;
-	out.m[0][2] = (a12 * a01 - a02 * a11) * inv_det;
-	out.m[1][0] = b11 * inv_det;
-	out.m[1][1] = (a22 * a00 - a02 * a20) * inv_det;
-	out.m[1][2] = (-a12 * a00 + a02 * a10) * inv_det;
-	out.m[2][0] = b21 * inv_det;
-	out.m[2][1] = (-a21 * a00 + a01 * a20) * inv_det;
-	out.m[2][2] = (a11 * a00 - a01 * a10) * inv_det;
-	return true;
+	return out;
 }
 
-Mat3 mat3_mul(const Mat3 &a, const Mat3 &b) {
-	Mat3 o{};
-	for (int r = 0; r < 3; ++r) {
-		for (int c = 0; c < 3; ++c) {
-			o.m[r][c] = a.m[r][0] * b.m[0][c] + a.m[r][1] * b.m[1][c] + a.m[r][2] * b.m[2][c];
-		}
-	}
-	return o;
-}
-
-Basis mat3_to_basis(const Mat3 &m) {
-	return Basis(
-			Vector3(m.m[0][0], m.m[0][1], m.m[0][2]),
-			Vector3(m.m[1][0], m.m[1][1], m.m[1][2]),
-			Vector3(m.m[2][0], m.m[2][1], m.m[2][2]));
-}
-
-Transform3D bind_rest_from_bad(const opennova::anim::ClipBone &bone, const opennova::anim::ClipBone *parent) {
-	Transform3D rest;
-	rest.origin = Vector3(bone.rest_position[0], bone.rest_position[1], bone.rest_position[2]);
-	const Mat3 bone_mat = bad_to_mat3(bone.rest_rotation);
-	if (parent == nullptr) {
-		rest.basis = mat3_to_basis(bone_mat);
-	} else {
-		const Mat3 parent_mat = bad_to_mat3(parent->rest_rotation);
-		Mat3 parent_inv{};
-		mat3_invert(parent_mat, parent_inv);
-		rest.basis = mat3_to_basis(mat3_mul(bone_mat, parent_inv));
-	}
-	if (rest.basis.determinant() == 0.0f) {
-		rest.basis = Basis();
-	} else {
-		rest.basis = rest.basis.orthonormalized();
-	}
-	return rest;
+// Skeleton BIND pose from the .bad BadBone bind matrix (parent-local): the
+// witnessed transpose/guard/orthonormalize is anim::bind_rest_local
+// (engine/runtime/anim); this boxes its row-major result into the Transform3D
+// the Skeleton3D rest consumes. The .3di mesh is skinned to THIS bind, so the
+// rest must match it (not a sampled clip frame) -- otherwise the skin deforms
+// ~identity at idle but collapses under large motion.
+Transform3D bind_rest_to_godot(const opennova::anim::ClipBone &bone,
+		const opennova::anim::ClipBone *parent) {
+	float rows[9];
+	opennova::anim::Vec3 origin;
+	opennova::anim::bind_rest_local(bone, parent, rows, origin);
+	Basis basis;
+	basis.rows[0] = Vector3(rows[0], rows[1], rows[2]);
+	basis.rows[1] = Vector3(rows[3], rows[4], rows[5]);
+	basis.rows[2] = Vector3(rows[6], rows[7], rows[8]);
+	return Transform3D(basis, Vector3(origin.x, origin.y, origin.z));
 }
 
 std::vector<opennova::anim::Vec3> to_model_origins(const PackedVector3Array &p_origins) {
@@ -405,7 +365,7 @@ bool NovaSkeletalAnim::build_from_bad_bytes(const PackedByteArray &p_reset_bytes
 			const int parent = bones_[i].parent_index;
 			const opennova::anim::ClipBone *p =
 					(parent >= 0 && static_cast<size_t>(parent) < bones_.size()) ? &bones_[parent] : nullptr;
-			bind_local_[i] = bind_rest_from_bad(bones_[i], p);
+			bind_local_[i] = bind_rest_to_godot(bones_[i], p);
 		}
 	}
 
@@ -524,64 +484,20 @@ bool NovaSkeletalAnim::is_clip_looping(const String &p_key, int p_variant) const
 
 Array NovaSkeletalAnim::eval_pose(const String &p_key, double p_playhead_seconds,
 		int p_variant) const {
-	Array out;
 	const LoadedClip *lc = find_clip_variant(p_key, p_variant);
 	if (lc == nullptr || lc->clip.frame_count == 0) {
 		// Unknown / empty clip: fall back to the bind pose.
+		Array out;
 		for (const Transform3D &t : bind_local_) {
 			out.push_back(t);
 		}
 		return out;
 	}
-
-	const opennova::anim::Clip &clip = lc->clip;
-	const int frame_count = static_cast<int>(clip.frame_count);
-	const double fps = clip.fps > 0 ? static_cast<double>(clip.fps) : 30.0;
-	double frame_time = p_playhead_seconds * fps;
-
-	int a = 0;
-	int b = 0;
-	double frac = 0.0;
-	// The pose table holds frame_count + 1 keys (the header counts INTERVALS; the
-	// sampler bakes every channel key). Loops cycle the frame_count interval windows
-	// (the seam key ~= key 0; the original's loop-wrap window is unwalked); one-shots
-	// play every window and HOLD the true final key — a one-frame clip is one full
-	// window of motion, not a static pose. [orig: BoneAnim_FindKeyframeAtTime
-	// @0x410220 — hold-last past the summed durations]
-	const int last_pose = static_cast<int>(clip.frames.size()) - 1;
-	if (clip.loops() && frame_count > 1) {
-		double m = std::fmod(frame_time, static_cast<double>(frame_count));
-		if (m < 0.0) {
-			m += static_cast<double>(frame_count);
-		}
-		a = static_cast<int>(std::floor(m));
-		frac = m - a;
-		b = (a + 1) % frame_count;
-	} else if (frame_time <= 0.0) {
-		a = b = 0;
-	} else if (frame_time >= last_pose) {
-		a = b = last_pose;
-	} else {
-		a = static_cast<int>(std::floor(frame_time));
-		frac = frame_time - a;
-		b = a + 1;
-	}
-
-	const std::vector<opennova::anim::BoneSample> &fa = clip.frames[a];
-	const std::vector<opennova::anim::BoneSample> &fb = clip.frames[b];
-	const size_t bone_count = clip.bones.size();
-	for (size_t i = 0; i < bone_count; ++i) {
-		const opennova::anim::BoneSample &sa = fa[i];
-		const opennova::anim::BoneSample &sb = fb[i];
-		const Quaternion qa(sa.local_rotation.x, sa.local_rotation.y, sa.local_rotation.z, sa.local_rotation.w);
-		const Quaternion qb(sb.local_rotation.x, sb.local_rotation.y, sb.local_rotation.z, sb.local_rotation.w);
-		const Quaternion q = qa.slerp(qb, static_cast<real_t>(frac));
-		const Vector3 pa(sa.local_position.x, sa.local_position.y, sa.local_position.z);
-		const Vector3 pb(sb.local_position.x, sb.local_position.y, sb.local_position.z);
-		const Vector3 p = pa.lerp(pb, static_cast<real_t>(frac));
-		out.push_back(Transform3D(Basis(q), p));
-	}
-	return out;
+	// The frame-window walk, loop wrap, and hold-last rule are
+	// anim::eval_clip_pose's (engine/runtime/anim); this boxes the pose.
+	std::vector<opennova::anim::PoseBone> pose;
+	opennova::anim::eval_clip_pose(lc->clip, p_playhead_seconds, pose);
+	return pose_to_array(pose);
 }
 
 Array NovaSkeletalAnim::eval_pose_blended(const String &p_source_key,
@@ -615,44 +531,28 @@ Array NovaSkeletalAnim::eval_pose_blended(const String &p_source_key,
 
 	// Semantic states can map to the same BAD (including missing states that both
 	// bind RESET) while retaining independent channel playheads. They must still
-	// blend; key equality alone is not a valid single-sample shortcut.
+	// blend; key equality alone is not a valid single-sample shortcut. The mix
+	// itself (rotation slerp + origin lerp) is anim::blend_poses's.
 	const Array source = eval_pose(source_key, p_source_playhead_seconds);
 	const Array target = eval_pose(target_key, p_target_playhead_seconds);
 	if (source.size() != target.size()) {
 		return target;
 	}
-	Array out;
-	out.resize(target.size());
-	for (int i = 0; i < target.size(); ++i) {
-		const Transform3D a = source[i];
-		const Transform3D b = target[i];
-		const Quaternion rotation =
-				a.basis.get_rotation_quaternion().slerp(
-						b.basis.get_rotation_quaternion(), weight);
-		const Vector3 scale =
-				a.basis.get_scale().lerp(b.basis.get_scale(), weight);
-		out[i] = Transform3D(Basis(rotation).scaled(scale),
-				a.origin.lerp(b.origin, weight));
-	}
-	return out;
+	std::vector<opennova::anim::PoseBone> mixed;
+	opennova::anim::blend_poses(array_to_pose(source), array_to_pose(target), weight, mixed);
+	return pose_to_array(mixed);
 }
 
 PackedInt32Array NovaSkeletalAnim::get_overlay_classes() const {
+	// The BN## parse and the 19-entry class table live engine-side
+	// (anim::overlay_class_for_bone_name); the model bone order IS the BN order
+	// (§14.2), but parsing the tag keeps husk/accessory variants correct
+	// without positional trust.
 	PackedInt32Array out;
 	out.resize(static_cast<int64_t>(bones_.size()));
 	for (size_t i = 0; i < bones_.size(); ++i) {
-		int cls = opennova::anim::kOverlayBody;
-		// "BN01 Hips" -> bone index 0. The model bone order IS the BN order (§14.2), but
-		// parsing the tag keeps husk/accessory variants correct without positional trust.
-		const std::string &n = bones_[i].name;
-		if (n.size() >= 4 && (n[0] == 'B' || n[0] == 'b') && (n[1] == 'N' || n[1] == 'n') &&
-				n[2] >= '0' && n[2] <= '9' && n[3] >= '0' && n[3] <= '9') {
-			const int bn = (n[2] - '0') * 10 + (n[3] - '0');
-			if (bn >= 1 && bn <= 19) {
-				cls = opennova::anim::kOverlayClassByBoneIndex[bn - 1];
-			}
-		}
-		out[static_cast<int64_t>(i)] = cls;
+		out[static_cast<int64_t>(i)] =
+				opennova::anim::overlay_class_for_bone_name(bones_[i].name);
 	}
 	return out;
 }
@@ -691,14 +591,11 @@ void NovaSkeletalAnim::splice_weapon_channel(Array &p_pose, const String &p_wpn_
 			static_cast<float>(wq.w), static_cast<float>(wq.x),
 			static_cast<float>(wq.y), static_cast<float>(wq.z)
 		};
-		// BN## tag -> model bone index, the same parse get_overlay_classes trusts.
-		const std::string &bn = bones_[static_cast<size_t>(i)].name;
-		if (bn.size() < 4 || (bn[0] != 'B' && bn[0] != 'b') || (bn[1] != 'N' && bn[1] != 'n') ||
-				bn[2] < '0' || bn[2] > '9' || bn[3] < '0' || bn[3] > '9') {
-			continue;
-		}
-		const int model_index = (bn[2] - '0') * 10 + (bn[3] - '0') - 1;
-		if (opennova::anim::weapon_channel_masks_bone(model_index)) {
+		// BN## tag -> model bone index, the same parse get_overlay_classes trusts
+		// (anim::model_bone_index_from_name).
+		const int model_index = opennova::anim::model_bone_index_from_name(
+				bones_[static_cast<size_t>(i)].name);
+		if (model_index >= 0 && opennova::anim::weapon_channel_masks_bone(model_index)) {
 			mask[static_cast<size_t>(i)] = 1;
 			any_masked = true;
 		}
