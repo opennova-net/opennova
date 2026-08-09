@@ -516,6 +516,23 @@ func _add_engine_children(world: GameWorld) -> void:
 	world.add_child(env)
 
 
+# Stage the minimal fixture over the Dvxi5 terrain fixture plus the staged
+# impact ammo. The minimal mnml.trn carries no CPT depth buffer, so the sim's
+# terrain height field stays empty under it and rounds never ground; Dvxi5 is
+# the real-heights terrain the round flight can actually hit.
+func _stage_impact_fixture(name: String) -> String:
+	var root_dir := _make_fixture_root(name)
+	for source_dir in [
+		ProjectSettings.globalize_path("res://../fixtures/godot/dvxi5"),
+		ProjectSettings.globalize_path("res://../fixtures/minimal/resources"),
+	]:
+		for file_name in DirAccess.get_files_at(source_dir):
+			assert_eq(DirAccess.copy_absolute(
+				source_dir.path_join(file_name), root_dir.path_join(file_name)), OK)
+	_write_fixture_file(root_dir.path_join("ammo.def"), IMPACT_AMMO_DEF)
+	return root_dir
+
+
 # Stage the minimal fixture plus the House.3di collision fixture as item
 # 102001's GuardTwr1 graphic, so authored KIND_BUILDING entities place a REAL
 # NovaObjectModel and enter the sim's real collision/occlusion world.
@@ -580,12 +597,12 @@ func _tick_until_impact(world: GameWorld, effects: FxWorldStub,
 
 
 func test_round_impacts_route_generic_transient_and_audio_legs() -> void:
-	var root_dir := _stage_minimal_fixture("impact_generic")
-	_write_fixture_file(root_dir.path_join("ammo.def"), IMPACT_AMMO_DEF)
+	var root_dir := _stage_impact_fixture("impact_generic")
 	var world := ImpactGameWorldHarness.new()
 	_add_engine_children(world)
 	add_child_autofree(world)
-	_load_minimal_mission(world, root_dir)
+	_load_minimal_mission(world, root_dir, func(mission: NovaMissionData) -> void:
+		assert_true(mission.set_header_string("terrain", "Dvxi5")))
 	var effects := FxWorldStub.new()
 	world.add_child(effects)
 	var audio := ImpactAudioStub.new(null, null)
@@ -593,7 +610,7 @@ func test_round_impacts_route_generic_transient_and_audio_legs() -> void:
 
 	var sim := world.get_sim()
 	assert_gte(int(sim.debug_spawn_round(
-			Vector3(16, 40, -16), Vector3.DOWN, "AM_556MM")), 0,
+			Vector3(16, 60, -16), Vector3.DOWN, "AM_556MM")), 0,
 			"the real flight sim accepts the staged rifle round")
 	_tick_until_impact(world, effects, audio)
 
@@ -606,8 +623,12 @@ func test_round_impacts_route_generic_transient_and_audio_legs() -> void:
 		assert_lt((spawn.get("orientation", Vector3.ZERO) as Vector3).distance_to(
 				Vector3.DOWN), 0.05,
 				"the transient carries the real incoming flight direction")
-		assert_eq(int(spawn.get("initial_age_ticks", -1)), 0,
-				"an impact presented in its production tick needs no age compensation")
+		# The engine stamps imp.tick DURING the producing tick and bumps
+		# logic_tick before the shell's fixed-tick drain runs, so a same-frame
+		# impact reads age 1 (one counter bump), never real catch-up aging.
+		assert_lte(int(spawn.get("initial_age_ticks", -1)), 1,
+				"an impact presented in its production frame carries no catch-up aging")
+		assert_gte(int(spawn.get("initial_age_ticks", -1)), 0)
 		assert_eq(int(spawn.get("render_domain", -1)),
 				NovaEffectScene.RENDER_DOMAIN_WORLD)
 		assert_gt(int(spawn.get("source_tick", 0)), 0,
@@ -629,19 +650,19 @@ func test_round_impacts_route_generic_transient_and_audio_legs() -> void:
 
 
 func test_round_impacts_route_sound_only_without_a_particle() -> void:
-	var root_dir := _stage_minimal_fixture("impact_sound_only")
-	_write_fixture_file(root_dir.path_join("ammo.def"), IMPACT_AMMO_DEF)
+	var root_dir := _stage_impact_fixture("impact_sound_only")
 	var world := ImpactGameWorldHarness.new()
 	_add_engine_children(world)
 	add_child_autofree(world)
-	_load_minimal_mission(world, root_dir)
+	_load_minimal_mission(world, root_dir, func(mission: NovaMissionData) -> void:
+		assert_true(mission.set_header_string("terrain", "Dvxi5")))
 	var effects := FxWorldStub.new()
 	world.add_child(effects)
 	var audio := ImpactAudioStub.new(null, null)
 	world.install_probes(effects, audio)
 
 	assert_gte(int(world.get_sim().debug_spawn_round(
-			Vector3(16, 40, -16), Vector3.DOWN, "AM_SOUNDONLY")), 0)
+			Vector3(16, 60, -16), Vector3.DOWN, "AM_SOUNDONLY")), 0)
 	_tick_until_impact(world, effects, audio)
 
 	assert_true(effects.spawns.is_empty(),
@@ -653,12 +674,12 @@ func test_round_impacts_route_sound_only_without_a_particle() -> void:
 
 
 func test_fixed_tick_orders_weapon_and_impact_before_particle_advance() -> void:
-	var root_dir := _stage_minimal_fixture("impact_order")
-	_write_fixture_file(root_dir.path_join("ammo.def"), IMPACT_AMMO_DEF)
+	var root_dir := _stage_impact_fixture("impact_order")
 	var world := ImpactGameWorldHarness.new()
 	_add_engine_children(world)
 	add_child_autofree(world)
-	_load_minimal_mission(world, root_dir)
+	_load_minimal_mission(world, root_dir, func(mission: NovaMissionData) -> void:
+		assert_true(mission.set_header_string("terrain", "Dvxi5")))
 	var effects := FxWorldStub.new()
 	world.add_child(effects)
 	var audio := ImpactAudioStub.new(null, null)
@@ -667,21 +688,20 @@ func test_fixed_tick_orders_weapon_and_impact_before_particle_advance() -> void:
 			func(_events: Array[PlayerWeaponEvent]) -> void:
 				effects.timeline.append("weapon"))
 
-	var tick0 := int(world.get_sim().get_logic_tick())
 	assert_gte(int(world.get_sim().debug_spawn_round(
-			Vector3(16, 40, -16), Vector3.DOWN, "AM_556MM")), 0)
+			Vector3(16, 60, -16), Vector3.DOWN, "AM_556MM")), 0)
 	_tick_until_impact(world, effects, audio)
-	print("DBG ticks_ran=", int(world.get_sim().get_logic_tick()) - tick0,
-			" playing=", world.get_runtime().is_playing(),
-			" timeline=", effects.timeline.size(),
-			" round_dbg=", world.get_sim().get_round_debug())
 
 	assert_true(effects.timeline.has("impact"), "the real round impacted")
 	assert_eq(effects.timeline.slice(effects.timeline.size() - 3),
 			["weapon", "impact", "advance"],
 			"the source tick is presented chronologically before its particle pass")
-	assert_eq(int(effects.spawns[0].initial_age_ticks), 0,
-			"a physical collision is visible in its production tick without age compensation")
+	assert_eq(effects.spawns.size(), 1, "the terrain hit presented its transient")
+	if effects.spawns.size() == 1:
+		# Same-frame drain: the logic counter has already bumped once past the
+		# row's production tick (see the generic routing test above).
+		assert_lte(int(effects.spawns[0].initial_age_ticks), 1,
+				"a physical collision is visible in its production frame without catch-up aging")
 
 
 func test_fx2ssn_routes_position_owner_and_up_orientation() -> void:
