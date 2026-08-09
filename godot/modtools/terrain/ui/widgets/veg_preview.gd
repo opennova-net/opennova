@@ -5,7 +5,7 @@ extends Control
 ## Instantiate programmatically (`VegPreview.new()`), add as a child, then call
 ## `set_graphic(basename)` or `set_mesh(mesh)`.
 
-const VegAssets := preload("res://src/terrain/veg_assets.gd")
+const VegAssets := preload("res://game/terrain/veg_assets.gd")
 
 const _PREVIEW_PIXELS := Vector2i(192, 192)
 const _BG_COLOR := Color(0.12, 0.13, 0.15, 1.0)

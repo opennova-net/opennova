@@ -8,9 +8,9 @@ extends GutTest
 # clock, a minimal-mission boot for logic-tick stepping). Snapshots are built
 # as pure data and fed through the public present_snapshot API.
 
-const WirePresentPass := preload("res://src/world/wire_present_pass.gd")
-const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
-const PresentHeldWeapon := preload("res://src/world/present_held_weapon.gd")
+const WirePresentPass := preload("res://game/world/wire_present_pass.gd")
+const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
+const PresentHeldWeapon := preload("res://game/world/present_held_weapon.gd")
 
 # Fixture items.def wire-test ids (graphic -> committed model fixture).
 const TYPE_PUMP := 6100      # -> item 106100, Pmpjk01 (static, PANM channels)

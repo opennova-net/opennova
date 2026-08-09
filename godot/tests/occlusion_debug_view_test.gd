@@ -7,7 +7,7 @@ extends GutTest
 # the cached geometry, geometry changes rebuild, and a vanished sim clears
 # everything instead of erroring.
 
-const ViewScript := preload("res://src/debug/occlusion_debug_view.gd")
+const ViewScript := preload("res://game/debug/occlusion_debug_view.gd")
 
 
 static func _quad_segments(origin: Vector3) -> PackedVector3Array:

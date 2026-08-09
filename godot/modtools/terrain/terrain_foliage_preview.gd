@@ -10,7 +10,7 @@ extends Node3D
 # Terrain_RenderSectorEntitiesBySide @ 0x5c7dc2/0x5c7ded (MoveOrder & 0x300)].
 
 const INVALID_HEIGHT := -1000000.0
-const VegAssets := preload("res://src/terrain/veg_assets.gd")
+const VegAssets := preload("res://game/terrain/veg_assets.gd")
 
 ## Narrow mount snapshot of the editor-only surface inputs injected into the
 ## native foliage dispatcher. The dispatcher's wider frame telemetry remains

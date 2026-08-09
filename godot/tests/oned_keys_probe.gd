@@ -6,7 +6,7 @@ extends Node
 # user's keyboard feeds — and reports which gestures actually land. Reproduces (or
 # refutes) dead runtime-key reports at the routing layer the GUT unit tests bypass.
 
-const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 const StandaloneProbe := preload("res://tests/standalone_game_probe.gd")
 
 var _fails := 0

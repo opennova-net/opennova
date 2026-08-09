@@ -7,7 +7,7 @@ extends GutTest
 # staged tests drive the post-gate open() directly (no armory volume is
 # authored in the in-memory mission).
 
-const ArmoryPresenter := preload("res://src/world/armory_presenter.gd")
+const ArmoryPresenter := preload("res://game/world/armory_presenter.gd")
 const TMP_DIR := "res://.godot/armory_presenter_test"
 
 

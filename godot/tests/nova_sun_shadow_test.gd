@@ -1,7 +1,7 @@
 extends GutTest
 
 const NovaSunShadowScript := preload(
-		"res://src/environment/nova_sun_shadow.gd")
+		"res://game/environment/nova_sun_shadow.gd")
 
 
 func test_dynamic_projection_separates_live_casters_from_world_receivers() -> void:

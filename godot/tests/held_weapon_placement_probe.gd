@@ -19,9 +19,9 @@ extends SceneTree
 #   "$GODOT_BIN" --headless --path godot -s res://tests/held_weapon_placement_probe.gd
 # Not collected by GUT (*_probe.gd).
 
-const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
-const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
-const PresentHeldWeapon := preload("res://src/world/present_held_weapon.gd")
+const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
+const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
+const PresentHeldWeapon := preload("res://game/world/present_held_weapon.gd")
 
 # The cases worth reading. A level soldier is the one whose answer we already know.
 const CASES := [

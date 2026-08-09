@@ -7,9 +7,9 @@ extends GutTest
 # overriding _list_rows(); mutations record on a session-registered sim
 # target, the same registered-contract seam runtime MCP drives.
 
-const PageScript := preload("res://src/debug/pages/debug_entities_page.gd")
-const MissionRuntime := preload("res://src/world/mission_runtime.gd")
-const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
+const PageScript := preload("res://game/debug/pages/debug_entities_page.gd")
+const MissionRuntime := preload("res://game/world/mission_runtime.gd")
+const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 
 
 ## The scenario model: the two AI cards plus the presented-row order knobs the

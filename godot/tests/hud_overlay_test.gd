@@ -8,8 +8,8 @@ extends GutTest
 const HUDPOS_PATH := "res://../fixtures/def/hudpos.def"
 const WEAPON_PATH := "res://../fixtures/def/weapon.def"
 const FONT_FIXTURE := "res://../fixtures/fnt/Gunpl22b.fnt"
-const PlayerViewEffectsScript := preload("res://src/world/player_view_effects.gd")
-const HudSightsCardScript := preload("res://src/world/hud_sights_card.gd")
+const PlayerViewEffectsScript := preload("res://game/world/player_view_effects.gd")
+const HudSightsCardScript := preload("res://game/world/hud_sights_card.gd")
 
 var _temp_dirs: Array[String] = []
 

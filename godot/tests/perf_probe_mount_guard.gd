@@ -6,7 +6,7 @@ extends RefCounted
 # config byte-for-byte so an empty/unset mount and every incidental setting are
 # restored on normal completion and MainLoop/scene teardown alike.
 
-const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
 
 var _captured := false

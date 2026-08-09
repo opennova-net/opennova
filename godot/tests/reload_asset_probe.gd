@@ -17,8 +17,8 @@ extends SceneTree
 #   "$GODOT_BIN" --headless --path godot -s res://tests/reload_asset_probe.gd
 # Not collected by GUT (*_probe.gd).
 
-const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
-const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
+const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
+const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 
 const PLAYER_RUNTIME_TYPE_ID := 0x14B9
 

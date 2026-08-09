@@ -7,7 +7,7 @@ extends GutTest
 # flow (real discovery + a second client spawning) is the manual smoke; this is the unit.
 
 const MenuShell := preload("res://game/nova_menu_shell.gd")
-const MissionRuntime := preload("res://src/world/mission_runtime.gd")
+const MissionRuntime := preload("res://game/world/mission_runtime.gd")
 
 
 # A REAL LanSession (typed seam) whose discovery feed is driven by hand:

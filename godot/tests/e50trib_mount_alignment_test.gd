@@ -1,6 +1,6 @@
 extends GutTest
 
-const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
+const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 
 const MISSION := "00TRc.bms"
 const GUN_BMS_ID := 88

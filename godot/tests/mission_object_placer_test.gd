@@ -6,7 +6,7 @@ extends GutTest
 # .3di, so nothing resolves to a model and the placer must place zero without
 # error). Full render-placement is validated against real assets out-of-band.
 
-const Placer := preload("res://src/mission/mission_object_placer.gd")
+const Placer := preload("res://game/mission/mission_object_placer.gd")
 
 const BMS_PATH := "res://../fixtures/bms/ash_i5b.reference.bms"
 const ITEMS_PATH := "res://../fixtures/def/items.def"

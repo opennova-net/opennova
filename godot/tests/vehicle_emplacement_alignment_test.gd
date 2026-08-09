@@ -1,6 +1,6 @@
 extends GutTest
 
-const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
+const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 
 const MISSION := "03TR.bms"
 const CARRIER_ITEM_ID := 102010
@@ -385,7 +385,7 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 	if mission_objects == null:
 		return
 
-	var rt = preload("res://src/world/mission_runtime.gd").new()
+	var rt = preload("res://game/world/mission_runtime.gd").new()
 	add_child_autofree(rt)
 	assert_gt(int(rt.setup(mission, mission_objects, {
 		"resource_root": root,

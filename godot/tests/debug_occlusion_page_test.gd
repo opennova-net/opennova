@@ -6,7 +6,7 @@ extends GutTest
 # data drives the pane through its public render seam (the context is typed,
 # ADR 0034 — the live path feeds the same seam from Simulation).
 
-const PageScript := preload("res://src/debug/pages/debug_occlusion_page.gd")
+const PageScript := preload("res://game/debug/pages/debug_occlusion_page.gd")
 
 
 class Pane:

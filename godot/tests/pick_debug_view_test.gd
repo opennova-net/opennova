@@ -5,7 +5,7 @@ extends GutTest
 # positions arrive as the net_id -> live position map the sim fetch builds),
 # and clears cleanly when the list empties.
 
-const ViewScript := preload("res://src/debug/pick/pick_debug_view.gd")
+const ViewScript := preload("res://game/debug/pick/pick_debug_view.gd")
 
 
 func _static_pick() -> Dictionary:

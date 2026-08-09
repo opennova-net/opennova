@@ -5,7 +5,7 @@ extends GutTest
 ## sets the loaded banks contain, and reports how many PlayDialog commands fire on
 ## sim-ungated ticks (pins the sim-trigger-gating follow-up). Skips without the data.
 
-const NovaMissionAudioScript = preload("res://src/world/nova_mission_audio.gd")
+const NovaMissionAudioScript = preload("res://game/world/nova_mission_audio.gd")
 
 const JO_DIR := "C:/Users/taylor/Desktop/JOX"
 

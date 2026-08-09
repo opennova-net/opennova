@@ -21,10 +21,11 @@ easier to relay than to rediscover.
   `net/` (novacrypto, napi, npwire, novaworld, netsim, npruntime). Consumed via the
   flat C ABI by Python and the DCC plugins, by direct static link everywhere else.
   See `engine/CLAUDE.md`.
-- `godot/` — the Godot 4.6.1 project: `src/` (the first-class Godot layer, ADR
-  0028/0034: GDExtension bindings plus the shared GDScript runtime both
-  front-ends compose — see `godot/src/CLAUDE.md`), `modtools/` (the OpenNova
-  Editor "ONED" — thirteen authoring workspaces), `game/` (the game shell),
+- `godot/` — the Godot 4.6.1 project: `src/` (pure C++ GDExtension bindings —
+  part of the core engine, ADR 0034 d6; see `godot/src/CLAUDE.md`),
+  `game/` (the game shell PLUS the game-level GDScript runtime both
+  front-ends compose — world, debug, environment, mission, ui, ...),
+  `modtools/` (the OpenNova Editor "ONED" — thirteen authoring workspaces),
   `tests/` (GUT suite).
 - `apps/` — `importer/` (Python + native FFI importer behind `onimport.exe`),
   `novaworld_server/` (the NovaWorld service), `nw_server/` (dev/golden-harness

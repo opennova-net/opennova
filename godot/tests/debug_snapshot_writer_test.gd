@@ -8,9 +8,9 @@ extends GutTest
 # instead of aborting the dump, and a cardless pick degrades to stale with
 # its identity and replayable ray intact. Plus the write/default-path rules.
 
-const Writer := preload("res://src/debug/debug_snapshot_writer.gd")
-const MissionRuntime := preload("res://src/world/mission_runtime.gd")
-const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
+const Writer := preload("res://game/debug/debug_snapshot_writer.gd")
+const MissionRuntime := preload("res://game/world/mission_runtime.gd")
+const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 
 
 func _runtime() -> MissionRuntime:

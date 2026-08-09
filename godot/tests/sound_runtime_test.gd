@@ -4,7 +4,7 @@ extends GutTest
 ## the grilled name-keyed model) and WavLoader RIFF decode incl. the 8-bit
 ## unsigned -> signed conversion. Self-contained (no real game data required).
 
-const NovaSoundBankScript = preload("res://src/world/nova_sound_bank.gd")
+const NovaSoundBankScript = preload("res://game/world/nova_sound_bank.gd")
 
 
 # A REAL ResourceRoot over a per-test temp dir (ADR 0034 typed seam): the
@@ -272,7 +272,7 @@ func test_oneshot_occlusion_distance_rechecks_set_cull_range() -> void:
 
 
 func test_crossfade_volume_byte_rounding() -> void:
-	var A := preload("res://src/world/nova_mission_audio.gd")
+	var A := preload("res://game/world/nova_mission_audio.gd")
 	# The register volume word is (0xFFFF * blend + 0x8000) >> 16, ROUNDED, and
 	# the mixer reads its high byte [orig: Entity_UpdateEnvSoundEmitter
 	# @ 0x4a81c6]. Full blend (the 0xFFFF sentinel) -> 255; half -> 128 (the
@@ -283,7 +283,7 @@ func test_crossfade_volume_byte_rounding() -> void:
 
 
 func test_time_of_day_regions_and_blend() -> void:
-	var A := preload("res://src/world/nova_mission_audio.gd")
+	var A := preload("res://game/world/nova_mission_audio.gd")
 	# Region cuts [orig: Entity_CalcTimeOfDayRegion @ 0x408110]:
 	# [4,10) morning, [10,17) day, [17,21) evening, else night.
 	assert_eq(int(A.time_of_day_region(6.0).region), 0)

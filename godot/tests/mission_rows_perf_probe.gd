@@ -26,7 +26,7 @@ const DEFAULT_WINDOW_SECONDS := 10.0
 const DEFAULT_WINDOW_COUNT := 5
 
 const ResourceDirSettings := preload(
-		"res://src/resource_index/resource_dir_settings.gd")
+		"res://game/resource_index/resource_dir_settings.gd")
 const MountGuard := preload("res://tests/perf_probe_mount_guard.gd")
 
 const PRESENT_SLOTS := [

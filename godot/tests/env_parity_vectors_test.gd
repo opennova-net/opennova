@@ -148,11 +148,11 @@ extends GutTest
 # loudly so a dump run is never mistaken for a green run.
 # =============================================================================
 
-const NovaEnvironmentScript = preload("res://src/environment/nova_environment.gd")
-const NovaWeatherScript = preload("res://src/environment/nova_weather.gd")
-const NovaSkyScript = preload("res://src/environment/nova_sky.gd")
-const NovaWaterScript = preload("res://src/environment/nova_water.gd")
-const NovaCelestialScript = preload("res://src/environment/nova_celestial.gd")
+const NovaEnvironmentScript = preload("res://game/environment/nova_environment.gd")
+const NovaWeatherScript = preload("res://game/environment/nova_weather.gd")
+const NovaSkyScript = preload("res://game/environment/nova_sky.gd")
+const NovaWaterScript = preload("res://game/environment/nova_water.gd")
+const NovaCelestialScript = preload("res://game/environment/nova_celestial.gd")
 
 # The engine tick [docs/engine-primer.md: 62 Hz].
 const TICK := 1.0 / 62.0

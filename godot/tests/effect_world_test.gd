@@ -6,8 +6,8 @@ extends GutTest
 # names to stable 1-based handles (case-insensitive); SpawnEmitterAtPosition
 # @ 0x5f6df0 spawns by handle or name.
 
-const EffectWorldScript = preload("res://src/world/effect_world.gd")
-const MissionRuntime := preload("res://src/world/mission_runtime.gd")
+const EffectWorldScript = preload("res://game/world/effect_world.gd")
+const MissionRuntime := preload("res://game/world/mission_runtime.gd")
 
 var _root_dir := ""
 

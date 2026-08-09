@@ -12,7 +12,7 @@ extends GutTest
 # capture orchestration; the param-keyed selection survival across the periodic
 # rebuild is pinned below on unchanged zones.)
 
-const DeployPresenter := preload("res://src/world/deploy_screen_presenter.gd")
+const DeployPresenter := preload("res://game/world/deploy_screen_presenter.gd")
 const TMP_DIR := "res://.godot/deploy_screen_presenter_test"
 
 const AI_TYPE := 0x14BF        # Generic Soldier (items.def id 105311)

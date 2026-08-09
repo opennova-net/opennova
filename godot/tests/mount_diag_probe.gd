@@ -1,6 +1,6 @@
 extends SceneTree
 
-const ItemSeatSpecs := preload("res://src/world/item_seat_specs.gd")
+const ItemSeatSpecs := preload("res://game/world/item_seat_specs.gd")
 
 
 func _init() -> void:

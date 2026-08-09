@@ -4,7 +4,7 @@ extends GutTest
 # payload pins the visual language for live, masked, and unresolved person
 # sections without needing a mission or Simulation instance.
 
-const ViewScript := preload("res://src/debug/hitbox_debug_view.gd")
+const ViewScript := preload("res://game/debug/hitbox_debug_view.gd")
 
 
 ## Typed view harness (ADR 0034): IS the view, refreshing from a carried

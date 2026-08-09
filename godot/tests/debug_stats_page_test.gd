@@ -4,9 +4,9 @@ extends GutTest
 # public value interface. The focused layout case observes the rendered Tree at
 # the overlay's narrow content floor so clipped diagnostics stay usable.
 
-const PaneScript := preload("res://src/debug/pages/debug_stats_page.gd")
-const OverlayScript := preload("res://src/debug/nova_debug_overlay.gd")
-const MissionRuntime := preload("res://src/world/mission_runtime.gd")
+const PaneScript := preload("res://game/debug/pages/debug_stats_page.gd")
+const OverlayScript := preload("res://game/debug/nova_debug_overlay.gd")
+const MissionRuntime := preload("res://game/world/mission_runtime.gd")
 
 
 class DestructionInfoStub:

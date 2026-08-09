@@ -7,8 +7,8 @@ extends GutTest
 # typed calls, and the item database is the real fixture items.def
 # (id 101883 = the 3rd-person HE grenade).
 
-const ThrowablePresentPass := preload("res://src/world/throwable_present_pass.gd")
-const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
+const ThrowablePresentPass := preload("res://game/world/throwable_present_pass.gd")
+const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 
 static var _item_db: ItemDatabase = null
 

@@ -23,7 +23,7 @@ extends GutTest
 # present_fires data leg; the fx/audio sinks are real EffectWorld/MissionAudio
 # subclasses capturing the typed calls.
 
-const FirePresentPass := preload("res://src/world/fire_present_pass.gd")
+const FirePresentPass := preload("res://game/world/fire_present_pass.gd")
 
 const WIRE_EYE := Vector3(10.0, 1.8, -4.0)
 const MUZZLE := Vector3(10.6, 1.55, -4.7)

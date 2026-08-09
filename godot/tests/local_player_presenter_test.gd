@@ -31,7 +31,7 @@ extends GutTest
 # - aim_range on a world with NO terrain object: unreachable on a loaded real
 #   world; the raycast-miss -> 1000 fallback covers the same readout behavior.
 
-const MissionRuntime := preload("res://src/world/mission_runtime.gd")
+const MissionRuntime := preload("res://game/world/mission_runtime.gd")
 
 const TEST_ROOT := "local_player_presenter_test"
 const TICK := MissionRuntime.TICK_DT
@@ -139,7 +139,7 @@ anim_wpn_switchrank\t"idle.bad"
 ## swaps the mission onto the Dvxi5 CPT heightfield so the ported terrain raycast
 ## has a real surface to measure.
 func _load_player_world(baked_terrain: bool = false) -> GameWorld:
-	var packed := load("res://src/world/game_world.tscn") as PackedScene
+	var packed := load("res://game/world/game_world.tscn") as PackedScene
 	assert_not_null(packed, "the packaged world scene loads")
 	var world := packed.instantiate() as GameWorld
 	add_child_autofree(world)

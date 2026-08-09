@@ -5,8 +5,8 @@ extends GutTest
 # integrity-checked against the REAL target scripts (setter must exist), and
 # the state object's single-write-path contract is pinned.
 
-const GameWorldScript := preload("res://src/world/game_world.gd")
-const LocalPlayerPresenterScript := preload("res://src/world/local_player_presenter.gd")
+const GameWorldScript := preload("res://game/world/game_world.gd")
+const LocalPlayerPresenterScript := preload("res://game/world/local_player_presenter.gd")
 
 
 func _script_method_names(script: Script) -> PackedStringArray:

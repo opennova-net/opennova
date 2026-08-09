@@ -7,8 +7,8 @@ extends GutTest
 # hull to the AABB fallback). Uses the real 3di fixtures; the def fixtures ship no
 # .3di, so the placer's asset-free tests live elsewhere.
 
-const CollisionHull := preload("res://src/object/collision_hull.gd")
-const Placer := preload("res://src/mission/mission_object_placer.gd")
+const CollisionHull := preload("res://game/object/collision_hull.gd")
+const Placer := preload("res://game/mission/mission_object_placer.gd")
 
 const FIXTURE_DIR := "res://../fixtures/threedi/3di3"
 

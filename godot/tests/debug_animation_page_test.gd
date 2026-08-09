@@ -7,9 +7,9 @@ extends GutTest
 # GameWorld subtree, a MissionRuntime harness carrying the registry, and the
 # real minimal-mission sim for the live-scalar leg.
 
-const PageScript := preload("res://src/debug/pages/debug_animation_page.gd")
-const MissionRuntime := preload("res://src/world/mission_runtime.gd")
-const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
+const PageScript := preload("res://game/debug/pages/debug_animation_page.gd")
+const MissionRuntime := preload("res://game/world/mission_runtime.gd")
+const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 
 
 # Real native models: state is DRIVEN through the public surface (committed
@@ -50,7 +50,7 @@ class RuntimeHarness:
 
 func _world() -> GameWorld:
 	# The full packaged scene: rigged models must rebuild INSIDE the tree.
-	var world := (load("res://src/world/game_world.tscn") as PackedScene) 			.instantiate() as GameWorld
+	var world := (load("res://game/world/game_world.tscn") as PackedScene) 			.instantiate() as GameWorld
 	add_child_autofree(world)
 	return world
 

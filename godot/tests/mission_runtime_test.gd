@@ -5,9 +5,9 @@ extends GutTest
 # These focused tests instantiate it directly over fixture nodes to prove the
 # engine path without introducing a second editor gameplay runtime.
 
-const MissionRuntime := preload("res://src/world/mission_runtime.gd")
-const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
-const ItemSeatSpecs := preload("res://src/world/item_seat_specs.gd")
+const MissionRuntime := preload("res://game/world/mission_runtime.gd")
+const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
+const ItemSeatSpecs := preload("res://game/world/item_seat_specs.gd")
 
 
 func test_mission_loadout_chunk_promotes_through_the_native_gate() -> void:

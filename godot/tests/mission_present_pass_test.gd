@@ -14,8 +14,8 @@ extends GutTest
 # can never alias EWEAP registers; the register-independence case pins the
 # real layout.
 
-const PresentPass := preload("res://src/world/mission_present_pass.gd")
-const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
+const PresentPass := preload("res://game/world/mission_present_pass.gd")
+const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 
 const RIGGED_3DI := "res://../fixtures/threedi/3di3/Shed.3di"
 const MUZZLE_3DI := "res://../fixtures/3dp/dapche2/dapche2.3di"

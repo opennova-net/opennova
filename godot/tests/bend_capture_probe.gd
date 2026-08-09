@@ -12,7 +12,7 @@ extends Node
 ## shows the body/legs lagging a fast aim flick, 06 settled.
 ## [orig: Entity_BuildBoneTransformMatrices @0x4b1290; world-wac-ai-re.md §14]
 
-const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 const StandaloneProbe := preload("res://tests/standalone_game_probe.gd")
 
 const OUT_DIR := "res://../.scratch/bend"

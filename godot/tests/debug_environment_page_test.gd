@@ -5,7 +5,7 @@ extends GutTest
 # override the readouts under test and count the pokes), the shared-session
 # scrub knobs and authority gates, and empty states without a world.
 
-const PageScript := preload("res://src/debug/pages/debug_environment_page.gd")
+const PageScript := preload("res://game/debug/pages/debug_environment_page.gd")
 
 
 class EnvHarness:

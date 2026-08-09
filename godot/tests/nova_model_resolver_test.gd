@@ -1,6 +1,6 @@
 extends GutTest
 
-const NovaModelResolver := preload("res://src/mission/nova_model_resolver.gd")
+const NovaModelResolver := preload("res://game/mission/nova_model_resolver.gd")
 const MODEL_FIXTURE := "res://../fixtures/3dp/CmpFireN/CmpFireN.3di"
 const PERSON_ID := 105310
 const DYNAMIC_SHADOW_ID := 101291

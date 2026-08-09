@@ -19,7 +19,7 @@ extends Control
 # for those names and connects them. The control-name sets are exported so a
 # different game's menu set can be pointed at the same shell.
 
-const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 
 # Var index the director sets to the current screen's MUSICVAR. The menumus MUS
 # script reads its section discriminator at var INDEX 2 (golden test

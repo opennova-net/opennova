@@ -1,6 +1,6 @@
 extends GutTest
 
-const FieldBinderScript = preload("res://src/ui/field_binder.gd")
+const FieldBinderScript = preload("res://game/ui/field_binder.gd")
 
 
 func test_spin_sync_pushes_value_and_guards_echo() -> void:

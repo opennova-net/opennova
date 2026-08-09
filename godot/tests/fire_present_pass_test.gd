@@ -6,7 +6,7 @@ extends GutTest
 # same rows), and the audio sink is a real MissionAudio subclass capturing the
 # typed calls.
 
-const FirePresentPass := preload("res://src/world/fire_present_pass.gd")
+const FirePresentPass := preload("res://game/world/fire_present_pass.gd")
 
 
 class CaptureAudio:

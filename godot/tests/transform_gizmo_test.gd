@@ -13,7 +13,7 @@ extends GutTest
 # The default (plain euler) builder has its own cases at the bottom.
 
 const MissionGizmo = preload("res://modtools/framework/transform_gizmo_3d.gd")
-const MissionObjectPlacer = preload("res://src/mission/mission_object_placer.gd")
+const MissionObjectPlacer = preload("res://game/mission/mission_object_placer.gd")
 
 var _sub: SubViewport
 var _cam: Camera3D

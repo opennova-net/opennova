@@ -1,6 +1,6 @@
 extends SceneTree
 
-const VegAssets := preload("res://src/terrain/veg_assets.gd")
+const VegAssets := preload("res://game/terrain/veg_assets.gd")
 
 # Visual driver for the fresh foliage two-tier port: loads the
 # runtime world from a resource dir, finds a dense foliage-painted cell,

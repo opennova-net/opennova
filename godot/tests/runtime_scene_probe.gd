@@ -1,6 +1,6 @@
 extends Node
 
-const VegAssets := preload("res://src/terrain/veg_assets.gd")
+const VegAssets := preload("res://game/terrain/veg_assets.gd")
 
 # Headless validation of the main_game.tscn runtime pipeline. Loads the scene,
 # points the shared GameWorld at an explicit resource dir (a synthesized one-root

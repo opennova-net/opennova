@@ -12,7 +12,7 @@ extends SceneTree
 #   NOVA_RESOURCE_DIR=<loose JOX> godot --headless --path godot \
 #     -s res://tests/wave1_native_assets_probe.gd
 
-const MissionRuntime := preload("res://src/world/mission_runtime.gd")
+const MissionRuntime := preload("res://game/world/mission_runtime.gd")
 
 const MISSION := "00TRg.bms"
 

@@ -6,7 +6,7 @@ extends GutTest
 # the ground-gap label reports, rotation refreshes cached hulls, and a
 # vanished sim clears everything instead of erroring.
 
-const ViewScript := preload("res://src/debug/collision_debug_view.gd")
+const ViewScript := preload("res://game/debug/collision_debug_view.gd")
 
 
 static func _unit_box_corners() -> PackedVector3Array:

@@ -23,8 +23,8 @@ extends SceneTree
 #   "$GODOT_BIN" --headless --path godot -s res://tests/held_weapon_frame_probe.gd
 # Not collected by GUT (*_probe.gd).
 
-const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
-const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
+const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
+const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 
 const TARGETS: Array[String] = ["COLT_3RD", "M4_3RD", "M16_3RD", "M60_3RD", "M9K_3rd"]
 const BINS := 12

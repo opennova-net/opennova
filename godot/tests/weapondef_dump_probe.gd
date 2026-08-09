@@ -2,7 +2,7 @@ extends SceneTree
 ## Manual probe: dumps the EFFECTIVE weapon.def the runtime mount serves
 ## (base + expansion override) to NOVA_PROBE_OUT/weapon_def_mounted.txt.
 
-const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 
 
 func _init() -> void:

@@ -6,8 +6,8 @@ extends GutTest
 # across the whole GUT run, so tests use UNIQUE labels and never assert ring
 # totals or ordering beyond their own entries.
 
-const PaneScript := preload("res://src/debug/pages/debug_perf_page.gd")
-const OverlayScript := preload("res://src/debug/nova_debug_overlay.gd")
+const PaneScript := preload("res://game/debug/pages/debug_perf_page.gd")
+const OverlayScript := preload("res://game/debug/nova_debug_overlay.gd")
 
 
 func _make_pane() -> DebugPerfPage:

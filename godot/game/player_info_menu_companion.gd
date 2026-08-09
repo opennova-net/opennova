@@ -37,7 +37,7 @@ const VOICE_PREVIEW_TRIGGER_FORMAT := "VOICE_%d"
 # The 3D character preview (compatible head/body .3di composited), reused from the
 # ONED Avatars workspace. Mounted into the PLAYER_PREVIEW widget rect and fed the
 # resolved combo; it plays the witnessed raw-.bad idle when those assets resolve.
-const AvatarPreviewScript := preload("res://src/avatar/avatar_preview.gd")
+const AvatarPreviewScript := preload("res://game/avatar/avatar_preview.gd")
 
 const PARENT_SLOTS := {
 	"PRIMARY": WeaponDatabase.SLOT_PRIMARY,

@@ -1,53 +1,23 @@
-# godot/src/ — the first-class Godot layer (GDExtension bindings + shared GDScript)
+# godot/src/ — pure C++ GDExtension bindings (part of the core engine)
 
-The Godot layer (ADR 0016/0028/0034) wires Godot to the engine — first-class
-Godot code, no shell-neutral pretense. Two things live here, consumed by BOTH
-front-ends (the game shell `godot/game/` and ONED's authoring/preview surfaces
-`godot/modtools/`):
+The Godot layer's native half (ADR 0016/0028/0034 d6): C++ only — the
+GDExtension classes binding `engine/` to Godot. Register new classes in
+`register_types.cpp`. The standing rule is ADR 0033's one-line test: a line
+here earns its place only as a device leg (marshalling, nodes, servers,
+input, audio, draw-list appliers), a Resource-shaped ONED document surface,
+or a documented seam bridge — format/runtime logic and every witnessed
+behavior belong in `engine/`. Nova formats never touch Godot's resource
+system (documents self-read/write via `load_from_path`/`save_to_path`). The
+`adapter_cpp_orig_cites` ratchet is the transition gauge: a new `[orig:]`
+cite here is either a documented seam contract or code that belongs
+engine-side.
 
-- **Native bindings (C++)**: `Nova*`-prefixed GDExtension classes binding `engine/` to
-  Godot. Register new classes in `register_types.cpp`. The standing rule is ADR 0033's
-  one-line test: a line here earns its place only as a device leg (marshalling, nodes,
-  servers, input, audio), a Resource-shaped ONED document surface, or a documented seam
-  bridge — format/runtime logic and every witnessed behavior belong in `engine/`. Nova
-  formats never touch Godot's resource system (documents self-read/write via
-  `load_from_path`/`save_to_path`). The `adapter_cpp_orig_cites` ratchet survives as the
-  transition gauge: a new `[orig:]` cite here is either a documented seam contract or
-  code that belongs engine-side.
-- **The shared shell-neutral GDScript layer** (~38.5k LOC across ~150 scripts) both shells run on:
-  - `world/` — the runtime's device-shell layer (~16.4k LOC). Since ADR 0033 R1 the
-    loop itself is engine code (`engine/runtime/frame` FrameDriver): `game_world.gd`
-    (the GameWorld scene) and `mission_runtime.gd` compose the sim + presenters,
-    install their legs as frame hooks (`set_frame_shell_hooks` /
-    `set_frame_world_hooks` — every hook binds a NODE, never a RefCounted
-    presenter), and delegate `tick_realtime`/`tick` to
-    `Simulation.frame_realtime`/`frame_single`. Also here: `mission_present_pass.gd`,
-    `local_player_presenter.gd`, the per-system present passes (fire, throwable, destruction,
-    aim overlay, emplaced weapon, player-view effects), the net views, mission audio.
-    ADR 0006/0011/0012 territory — read `docs/runtime-architecture.md` and the ADRs first.
-  - `debug/` (the F3 overlay — a DebugPage-per-system framework: sidebar shell,
-    DebugOptions registry, the pick/snapshot stack; add pages per
-    `debug/pages/README.md` — plus the UI-free session layer under it:
-    `DebugSession` + `DebugCatalog`, the one control catalog both F3 and
-    the runtime `game_debug` MCP tool consume), `environment/` (time-of-day /
-    water / sky / weather — heavily `[orig]`-cited, shared by the game and the
-    Terrain/Object editors),
-    `mission/` (object placer + model resolver; the editor-only authoring overlays
-    live in `modtools/mission/`), `object/` (collision
-    hulls), `mcp/` (shell-agnostic MCP server core: booted by ONED's
-    `modtools/mcp/` on the stable editor port, and by the game's
-    `game/game_mcp_service.gd` as the arg-gated ephemeral runtime endpoint),
-    `ui/` (HUD view helpers), `avatar/` (avatar composition), `terrain/`,
-    `resource_index/`, `util/`, `strings/` (the `Strings` autoload, wired in
-    `project.godot`), `fly_camera.gd`.
-  - The remaining subdirectories here (`audio/`, `cbin/`, `dbf/`, `env/`, `fnt/`, `hud/`,
-    `lwf/`, `mnu/`, `network/`, `particle/`, `pff/`, `refs/`, `rtxt/`, `simulation/`,
-    `wac/`, `editor/`, `build/`) are native C++ binding code, not GDScript.
-    `simulation/` (`nova_simulation.cpp`) is the biggest of them: the World binding,
-    the present snapshot, and the shell-side asset resolution the portable systems consume.
+The game-level GDScript runtime (world, debug, environment, mission, ui,
+avatar, mcp, strings, util) lives in `godot/game/` (ADR 0034 d6) — anything
+there that is really engine behavior is the C++ rewrite queue.
 
-Placement rule: GDScript lands here only when it is engine-level and shell-neutral.
-Game-shell-only code goes in `godot/game/`; editor-only code goes in `godot/modtools/`.
+Placement rule: no GDScript here, ever. Scripts go to `godot/game/` (game
+level) or `godot/modtools/` (editor-only).
 
 Error/diagnostic channels (ratcheted at zero — `gd_prints_outside_debug`,
 `cpp_binding_console_writes`): a failure the caller already receives through the

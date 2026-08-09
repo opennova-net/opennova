@@ -15,8 +15,8 @@ extends SceneTree
 #     -s res://tests/s3_s4_soak_probe.gd
 # Optional: SOAK_ROUNDS (default 300; one round = 62 ticks + one sweep).
 
-const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
-const MissionRuntime := preload("res://src/world/mission_runtime.gd")
+const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
+const MissionRuntime := preload("res://game/world/mission_runtime.gd")
 
 const MISSION := "00TRg.bms"
 

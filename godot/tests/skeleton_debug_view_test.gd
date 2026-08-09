@@ -4,7 +4,7 @@ extends GutTest
 # a world subtree for Skeleton3D nodes and emits line geometry for the bones it finds (and
 # emits NOTHING — no invalid empty surface — when there are none).
 
-const SkeletonDebugView := preload("res://src/debug/skeleton_debug_view.gd")
+const SkeletonDebugView := preload("res://game/debug/skeleton_debug_view.gd")
 
 
 func _make_skeleton() -> Skeleton3D:

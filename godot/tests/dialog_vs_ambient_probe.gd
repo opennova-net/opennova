@@ -14,7 +14,7 @@ extends SceneTree
 # Use: godot --headless --path godot -s res://tests/dialog_vs_ambient_probe.gd \
 #        -- <dir> <expansion> <mission.bms> [--no-ambient] [--lines N]
 
-const NovaMissionAudioScript = preload("res://src/world/nova_mission_audio.gd")
+const NovaMissionAudioScript = preload("res://game/world/nova_mission_audio.gd")
 
 const SILENCE_FLOOR_DB := -50.0
 const LINE_TIMEOUT_SLACK_S := 3.0

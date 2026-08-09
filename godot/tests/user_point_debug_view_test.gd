@@ -1,7 +1,7 @@
 extends GutTest
 
-const UserPointDebugView := preload("res://src/debug/user_point_debug_view.gd")
-const UserPointOverlay := preload("res://src/object/object_user_point_overlay.gd")
+const UserPointDebugView := preload("res://game/debug/user_point_debug_view.gd")
+const UserPointOverlay := preload("res://game/object/object_user_point_overlay.gd")
 const MP5_FIXTURE := "res://../fixtures/threedi/3di3/MP5.3di"
 
 

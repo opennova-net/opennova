@@ -1,8 +1,8 @@
 extends GutTest
 
 const WORLD_TEST_ROOT := "game_world_test"
-const ArmoryPresenter := preload("res://src/world/armory_presenter.gd")
-const MissionRuntime := preload("res://src/world/mission_runtime.gd")
+const ArmoryPresenter := preload("res://game/world/armory_presenter.gd")
+const MissionRuntime := preload("res://game/world/mission_runtime.gd")
 
 
 func after_each() -> void:
@@ -751,7 +751,7 @@ func test_packaged_scene_instantiates_with_intact_wiring() -> void:
 	# game_world.tscn is the game shell's embeddable world. Pin the extraction:
 	# every engine node is present and the intra-scene NodePaths survived the
 	# move out of main_game.tscn.
-	var packed := load("res://src/world/game_world.tscn") as PackedScene
+	var packed := load("res://game/world/game_world.tscn") as PackedScene
 	assert_not_null(packed, "the packaged world scene loads")
 	var world := packed.instantiate()
 	add_child_autofree(world)
@@ -794,7 +794,7 @@ func test_explicit_bms_zero_water_beats_nonzero_terrain() -> void:
 
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(root_dir), OK)
-	var packed := load("res://src/world/game_world.tscn") as PackedScene
+	var packed := load("res://game/world/game_world.tscn") as PackedScene
 	var world := packed.instantiate() as GameWorld
 	add_child_autofree(world)
 	world.set_resource_root(root)
@@ -913,7 +913,7 @@ func test_clear_color_environment_renders_the_witnessed_frame_clear() -> void:
 	# background_mode = 2 (BG_SKY) with no Sky resource, which renders BLACK and
 	# silently swallows the env-#21 clear consumer: a 1px black dome-rim seam in
 	# ground views, a black band in aerial views. Pin the mode so it can't drift.
-	var packed := load("res://src/world/game_world.tscn") as PackedScene
+	var packed := load("res://game/world/game_world.tscn") as PackedScene
 	assert_not_null(packed, "the packaged world scene loads")
 	var world := packed.instantiate()
 	add_child_autofree(world)
@@ -931,7 +931,7 @@ func test_clear_color_environment_renders_the_witnessed_frame_clear() -> void:
 
 
 func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear() -> void:
-	var packed := load("res://src/world/game_world.tscn") as PackedScene
+	var packed := load("res://game/world/game_world.tscn") as PackedScene
 	var world := packed.instantiate() as GameWorld
 	var clear := world.get_node("ClearColor") as WorldEnvironment
 	clear.environment = clear.environment.duplicate()
@@ -1035,7 +1035,7 @@ func test_water_mirror_camera_draws_vehicles_only_and_never_the_body() -> void:
 	# @ 0x5c90a0 filterMask 0x400; Entity_InitFromModel @ 0x40e20a;
 	# Water_ReflectionPrerender @ 0x5c2780 -> render_main_scene @ 0x5c1240;
 	# Player_RenderFirstPersonViewModel @ 0x4ded60].
-	var packed := load("res://src/world/game_world.tscn") as PackedScene
+	var packed := load("res://game/world/game_world.tscn") as PackedScene
 	assert_not_null(packed, "the packaged world scene loads")
 	var world := packed.instantiate()
 	add_child_autofree(world)
@@ -1086,7 +1086,7 @@ func test_load_mission_data_rejects_an_empty_document() -> void:
 
 
 func test_loaded_mission_drives_the_shared_time_of_day_clock() -> void:
-	var packed := load("res://src/world/game_world.tscn") as PackedScene
+	var packed := load("res://game/world/game_world.tscn") as PackedScene
 	var world := packed.instantiate() as GameWorld
 	add_child_autofree(world)
 	await get_tree().process_frame
@@ -1143,7 +1143,7 @@ func test_loaded_mission_drives_the_shared_time_of_day_clock() -> void:
 
 
 func _world_driven_weather_state_after(deltas: Array) -> Array:
-	var packed := load("res://src/world/game_world.tscn") as PackedScene
+	var packed := load("res://game/world/game_world.tscn") as PackedScene
 	var world := packed.instantiate() as GameWorld
 	add_child_autofree(world)
 	await get_tree().process_frame
@@ -1536,7 +1536,7 @@ func test_environment_load_failure_finishes_its_perf_timeline() -> void:
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(root_dir), OK)
 
-	var packed := load("res://src/world/game_world.tscn") as PackedScene
+	var packed := load("res://game/world/game_world.tscn") as PackedScene
 	var world := packed.instantiate() as GameWorld
 	add_child_autofree(world)
 	await get_tree().process_frame
@@ -1734,7 +1734,7 @@ func test_mission_til_is_shared_by_terrain_foliage_and_cleared_without_file() ->
 
 	var resource_root := ResourceRoot.new()
 	assert_eq(resource_root.set_root_dir(root_dir), OK)
-	var packed := load("res://src/world/game_world.tscn") as PackedScene
+	var packed := load("res://game/world/game_world.tscn") as PackedScene
 	var world := packed.instantiate() as GameWorld
 	add_child_autofree(world)
 	await get_tree().process_frame
@@ -2813,7 +2813,7 @@ func test_stats_board_captures_world_tick_legs_only_while_enabled() -> void:
 # weather prewarm), so focused tests instance game_world.tscn like the shells
 # do instead of hand-building partial worlds.
 func _make_world() -> GameWorld:
-	var packed := load("res://src/world/game_world.tscn") as PackedScene
+	var packed := load("res://game/world/game_world.tscn") as PackedScene
 	return packed.instantiate() as GameWorld
 
 

@@ -19,7 +19,7 @@ extends GutTest
 # A synthetic skeleton is used deliberately: the rig's real bone 16 rest basis is a large
 # rotation, and a test that only exercised an identity rest would pass either way.
 
-const PresentHeldWeapon := preload("res://src/world/present_held_weapon.gd")
+const PresentHeldWeapon := preload("res://game/world/present_held_weapon.gd")
 
 const BONE := PresentHeldWeapon.BONE_INDEX
 
@@ -169,7 +169,7 @@ static func _row_vec_mul(v: Vector3, m: PackedFloat32Array) -> Vector3:
 
 
 func test_bms_basis_matches_the_original_placement_matrix() -> void:
-	var placer := preload("res://src/mission/mission_object_placer.gd")
+	var placer := preload("res://game/mission/mission_object_placer.gd")
 	# The render frame is mission relabelled (renderX=-missionY, renderY=missionZ,
 	# renderZ=missionX); Godot is (mX, mZ, -mY). So godot = (render.z, render.y, render.x):
 	# the two differ by an X<->Z swap, which is its own inverse.

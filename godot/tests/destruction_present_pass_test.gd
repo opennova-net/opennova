@@ -14,10 +14,10 @@ extends GutTest
 # equivalent without native pose injection and is covered there by the sim's
 # authoritative initial pose plus the yaw-only tilt-retention leg.
 
-const DestructionPresentPass := preload('res://src/world/destruction_present_pass.gd')
-const MissionObjectPlacer := preload('res://src/mission/mission_object_placer.gd')
-const MissionRuntime := preload('res://src/world/mission_runtime.gd')
-const WirePresentPass := preload('res://src/world/wire_present_pass.gd')
+const DestructionPresentPass := preload('res://game/world/destruction_present_pass.gd')
+const MissionObjectPlacer := preload('res://game/mission/mission_object_placer.gd')
+const MissionRuntime := preload('res://game/world/mission_runtime.gd')
+const WirePresentPass := preload('res://game/world/wire_present_pass.gd')
 
 const BUGGY_ITEM_ID := 1291  # fixture items.def 101291, husk Dbuggy1X
 

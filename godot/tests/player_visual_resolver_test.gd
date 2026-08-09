@@ -1,6 +1,6 @@
 extends GutTest
 
-const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
+const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 
 
 func test_runtime_player_type_resolves_to_us01_visual_item() -> void:

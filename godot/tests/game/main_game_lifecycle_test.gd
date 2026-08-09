@@ -7,8 +7,8 @@ const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
 const FIXTURE_DIR := "res://../fixtures/minimal/resources"
 const BAKED_TERRAIN_DIR := "res://../fixtures/godot/dvxi5"
 const MAIN_GAME_SCENE := preload("res://game/main_game.tscn")
-const MissionRuntime := preload("res://src/world/mission_runtime.gd")
-const VegAssetsScript := preload("res://src/terrain/veg_assets.gd")
+const MissionRuntime := preload("res://game/world/mission_runtime.gd")
+const VegAssetsScript := preload("res://game/terrain/veg_assets.gd")
 # Witnessed retail placement (fixtures/minimal/README.md): strings plus the
 # mission .bin/.pcx/.lwf family live in language; menus/defs/.bms/.dbf in
 # localres; environment, terrain, and terrain art in resource.

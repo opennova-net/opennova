@@ -5,7 +5,7 @@ extends Node
 # Boots the standalone game on open ground and prints the sim view (lean_deg etc.),
 # the camera basis roll, the head-bone eye, and the aim projections at each stage.
 
-const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 const StandaloneProbe := preload("res://tests/standalone_game_probe.gd")
 const OUT_DIR := "res://../.scratch/leantp"
 

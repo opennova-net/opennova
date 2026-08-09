@@ -1,9 +1,9 @@
 extends GutTest
 
 const PageScript := preload(
-		"res://src/debug/pages/debug_rendering_page.gd")
+		"res://game/debug/pages/debug_rendering_page.gd")
 const NovaDebugViewStatus := preload(
-		"res://src/debug/nova_debug_view_status.gd")
+		"res://game/debug/nova_debug_view_status.gd")
 
 
 class StubViewport:

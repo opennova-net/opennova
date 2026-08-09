@@ -15,7 +15,7 @@ extends Node
 #
 # Writes .scratch/terrain_seam/<tag>_{eye,side}.png (tag = NOVA_SEAM_TAG or "run").
 
-const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 const StandaloneProbe := preload("res://tests/standalone_game_probe.gd")
 const OUT_DIR := "res://../.scratch/terrain_seam"
 

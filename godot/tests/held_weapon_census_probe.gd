@@ -13,8 +13,8 @@ extends SceneTree
 #   "$GODOT_BIN" --headless --path godot -s res://tests/held_weapon_census_probe.gd
 # Not collected by GUT (*_probe.gd).
 
-const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
-const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
+const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
+const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 
 
 func _init() -> void:

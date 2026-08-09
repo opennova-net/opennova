@@ -4,7 +4,7 @@ extends GutTest
 # Dvxi5 terrain plus real 3DI geometry under both authored vegetation names,
 # then drives GameWorld exactly through its public load/tick surface.
 
-const VegAssets := preload("res://src/terrain/veg_assets.gd")
+const VegAssets := preload("res://game/terrain/veg_assets.gd")
 const DVXI5_FIXTURE := "res://../fixtures/godot/dvxi5"
 const ENV_FIXTURE := "res://../fixtures/env/full_00.env"
 const MODEL_FIXTURE := "res://../fixtures/3dp/CmpFireN/CmpFireN.3di"
@@ -34,7 +34,7 @@ func test_game_world_resolves_both_dvxi5_models_and_emits_foliage() -> void:
 	var resource_root := ResourceRoot.new()
 	assert_eq(resource_root.set_root_dir(_fixture_root()), OK)
 
-	var packed := load("res://src/world/game_world.tscn") as PackedScene
+	var packed := load("res://game/world/game_world.tscn") as PackedScene
 	assert_not_null(packed)
 	if packed == null:
 		return

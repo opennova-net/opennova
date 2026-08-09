@@ -77,6 +77,18 @@ only untyped thing left.
    `nova_` prefix for now — directories already namespace them, and the
    directive is about the concepts, not the files.
 
+6. **`godot/src/` is pure C++ — GDScript is game-level.** The bindings
+   directory is part of the core engine; every `.gd` moved to `godot/game/`
+   (subpaths preserved; ONED preloads from `res://game/...`). GDScript's
+   place is quick-changing game-level code. The standing TRIAGE rule: any
+   script now under `game/` that is really engine behavior is the C++
+   rewrite queue — current queue, in priority order: the environment/
+   weather cluster (witnessed math → `engine/runtime` + thin bindings),
+   `mission_object_placer`, the `game_world`/`mission_runtime` composition,
+   the present-pass facades + the wire cold path, avatar composition.
+   Genuinely game-level scripts (F3 debug pages, MCP tooling, the fly
+   camera, ONED previews, shell UI) stay GDScript.
+
 ## Consequences
 
 - The no-duck-typing doctrine loses its last excuse: with no hypothetical

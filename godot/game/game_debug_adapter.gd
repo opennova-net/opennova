@@ -8,7 +8,7 @@ extends GameMcpAdapter
 ## public APIs. It owns no duplicate simulation state and receives no editor
 ## document state.
 
-const DebugEntities := preload("res://src/debug/nova_debug_entities.gd")
+const DebugEntities := preload("res://game/debug/nova_debug_entities.gd")
 
 const MCP_ENTITY_LIMIT_MAX := 128
 

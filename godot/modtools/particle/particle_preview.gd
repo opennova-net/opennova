@@ -6,7 +6,7 @@ extends Control
 ## deterministic fixed-tick timeline) plus a live stats readout. Edits in the
 ## inspector ask for a debounced live refresh.
 
-const FlyCameraScript = preload("res://src/fly_camera.gd")
+const FlyCameraScript = preload("res://game/fly_camera.gd")
 
 const STEP_SECONDS := 1.0 / 62.5
 const PARTICLE_FLAG_FOREVER_EMIT := ParticleDef.FLAG_FOREVER_EMIT

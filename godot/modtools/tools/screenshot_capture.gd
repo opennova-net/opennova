@@ -24,7 +24,7 @@ extends Node
 ## Must run with a real rendering window: --headless does not render, so the
 ## captured viewport texture would be blank.
 
-const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 const EditorScene := preload("res://modtools/editor/editor_main.tscn")
 
 # Generous settle budget: lets Control layout, the deferred split layout, and the

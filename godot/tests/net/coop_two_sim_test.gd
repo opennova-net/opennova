@@ -1,7 +1,7 @@
 extends GutTest
 
 const PresentEmplacedWeapon := preload(
-		"res://src/world/emplaced_weapon_present_pass.gd")
+		"res://game/world/emplaced_weapon_present_pass.gd")
 
 # Co-op LAN bidirectional bring-up (D.2) at the Simulation layer: a HOST listen server
 # (enable_host_listen) and a JOINER (enable_join) run in the same headless process, each on a

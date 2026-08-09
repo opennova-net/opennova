@@ -20,7 +20,7 @@ extends SceneTree
 # [orig: selection @0x4b731b-0x4b7354; remote apply arbitration @0x4c1153;
 #  clip names g_animStateNameTable @0x8135F0 rows 41/42 = roll_left/roll_right]
 
-const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
+const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 
 var _fails := 0
 

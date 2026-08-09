@@ -10,7 +10,7 @@ extends RefCounted
 
 const MainGameScene := preload("res://game/main_game.tscn")
 const ResourceDirSettings := preload(
-		"res://src/resource_index/resource_dir_settings.gd")
+		"res://game/resource_index/resource_dir_settings.gd")
 const LOAD_TIMEOUT_MSEC := 240_000
 
 

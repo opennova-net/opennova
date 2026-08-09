@@ -11,7 +11,7 @@ extends Node
 # All completion waits are BY STATE, never frame counts. Screenshots -> .scratch/body.
 # [orig: the kind ladder @0x4b5dc0..0x4b5e6f; the fire stamp @0x542bcb/0x542be0]
 
-const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 const StandaloneProbe := preload("res://tests/standalone_game_probe.gd")
 const OUT_DIR := "res://../.scratch/body"
 

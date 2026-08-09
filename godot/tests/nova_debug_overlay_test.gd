@@ -7,10 +7,10 @@ extends GutTest
 # drives the pages through their public render seams.
 # MissionRuntime metadata and game/ONED shell wiring are covered separately.
 
-const OverlayScript := preload("res://src/debug/nova_debug_overlay.gd")
-const MissionRuntime := preload("res://src/world/mission_runtime.gd")
-const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
-const DebugViewContext := preload("res://src/debug/nova_debug_view_context.gd")
+const OverlayScript := preload("res://game/debug/nova_debug_overlay.gd")
+const MissionRuntime := preload("res://game/world/mission_runtime.gd")
+const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
+const DebugViewContext := preload("res://game/debug/nova_debug_view_context.gd")
 # Pages mount under the sidebar shell's page mount; option checkboxes are
 # named after their registry id.
 const PAGES := "DebugPanel/DebugFrame/DebugContent/DebugBody/PageMount"
@@ -1024,7 +1024,7 @@ func test_player_tab_displays_and_dumps_a_fresh_authoritative_pose() -> void:
 	assert_false(dump_status.text.contains(dumped_path))
 
 
-const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 var _saved_resource_dir := ""
 var _dumped_paths: Array[String] = []
 
