@@ -310,6 +310,10 @@ class ItemFxGameWorldHarness:
 	# tests drive the extracted code through the world's own wiring.
 	var fx: ItemFxDirectorProbe
 	func _init() -> void:
+		# GameWorld._init first: defining _init here otherwise SKIPS the
+		# world's internal child construction (_net_drive / _debug_views /
+		# _occlusion / the real director), which the mission load path needs.
+		super()
 		fx = ItemFxDirectorProbe.new()
 		fx.setup(self,
 				func() -> Array:
@@ -346,18 +350,13 @@ class ItemFxGameWorldHarness:
 
 
 # Impact-routing harness: the runtime/sim stack is REAL (loaded through the
-# public mission path — the terrain + environment children make a code-built
-# GameWorld mission-loadable). Only the two presentation SINKS swap for
-# recording SUBCLASSES of their real classes, through implicit-self privates.
+# public mission path — _add_engine_children makes a code-built GameWorld
+# mission-loadable). Only the two presentation SINKS swap for recording
+# SUBCLASSES of their real classes, through implicit-self privates. No _init
+# here: defining one would shadow GameWorld._init and skip the internal
+# child construction (_net_drive / _debug_views / _occlusion / _item_fx).
 class ImpactGameWorldHarness:
 	extends GameWorld
-	func _init() -> void:
-		var terrain := NovaTerrain.new()
-		terrain.name = "NovaTerrain"
-		add_child(terrain)
-		var env := NovaEnvironment.new()
-		env.name = "NovaEnvironment"
-		add_child(env)
 	func install_probes(effects: NovaEffectWorld, audio: NovaMissionAudio) -> void:
 		_effect_world = effects
 		_mission_audio = audio
@@ -505,6 +504,18 @@ func _load_minimal_mission(world: GameWorld, root_dir: String = "",
 	assert_eq(world.load_mission_data(mission, "mnml.bms"), OK)
 
 
+# The engine children a code-built GameWorld needs before entering the tree:
+# the typed mission path drives $NovaTerrain directly and stamps
+# _env.light_state onto every placed batch.
+func _add_engine_children(world: GameWorld) -> void:
+	var terrain := NovaTerrain.new()
+	terrain.name = "NovaTerrain"
+	world.add_child(terrain)
+	var env := NovaEnvironment.new()
+	env.name = "NovaEnvironment"
+	world.add_child(env)
+
+
 # Stage the minimal fixture plus the House.3di collision fixture as item
 # 102001's GuardTwr1 graphic, so authored KIND_BUILDING entities place a REAL
 # NovaObjectModel and enter the sim's real collision/occlusion world.
@@ -572,6 +583,7 @@ func test_round_impacts_route_generic_transient_and_audio_legs() -> void:
 	var root_dir := _stage_minimal_fixture("impact_generic")
 	_write_fixture_file(root_dir.path_join("ammo.def"), IMPACT_AMMO_DEF)
 	var world := ImpactGameWorldHarness.new()
+	_add_engine_children(world)
 	add_child_autofree(world)
 	_load_minimal_mission(world, root_dir)
 	var effects := FxWorldStub.new()
@@ -620,6 +632,7 @@ func test_round_impacts_route_sound_only_without_a_particle() -> void:
 	var root_dir := _stage_minimal_fixture("impact_sound_only")
 	_write_fixture_file(root_dir.path_join("ammo.def"), IMPACT_AMMO_DEF)
 	var world := ImpactGameWorldHarness.new()
+	_add_engine_children(world)
 	add_child_autofree(world)
 	_load_minimal_mission(world, root_dir)
 	var effects := FxWorldStub.new()
@@ -643,6 +656,7 @@ func test_fixed_tick_orders_weapon_and_impact_before_particle_advance() -> void:
 	var root_dir := _stage_minimal_fixture("impact_order")
 	_write_fixture_file(root_dir.path_join("ammo.def"), IMPACT_AMMO_DEF)
 	var world := ImpactGameWorldHarness.new()
+	_add_engine_children(world)
 	add_child_autofree(world)
 	_load_minimal_mission(world, root_dir)
 	var effects := FxWorldStub.new()
@@ -668,11 +682,12 @@ func test_fixed_tick_orders_weapon_and_impact_before_particle_advance() -> void:
 func test_fx2ssn_routes_position_owner_and_up_orientation() -> void:
 	var root_dir := _stage_building_fixture("fx2ssn")
 	var world := ImpactGameWorldHarness.new()
+	_add_engine_children(world)
 	add_child_autofree(world)
-	var placed := {}
+	var placed := {}  # mutated (merge), never reassigned: lambda captures copy locals
 	_load_minimal_mission(world, root_dir, func(mission: NovaMissionData) -> void:
-		placed = mission.add_entity(
-				NovaMissionData.KIND_BUILDING, 102001, Vector3(6, 4, 5), Vector3.ZERO))
+		placed.merge(mission.add_entity(
+				NovaMissionData.KIND_BUILDING, 102001, Vector3(6, 4, 5), Vector3.ZERO)))
 	var ssn := int(placed.get("bms_id", 0))
 	assert_gt(ssn, 0, "the authored building carries a WAC/BMS-addressable SSN")
 	var effects := FxWorldStub.new()
@@ -2020,6 +2035,9 @@ func test_tick_feeds_dispatcher_silhouette_anchors_from_the_sim() -> void:
 		"a STANDING infantry entity never anchors the silhouette tier")
 
 	assert_true(sim.request_local_player_stance(1))  # crouch (SELECT 169)
+	# The SELECT latch crosses the input pump one frame after the request, so
+	# the world loop needs two frames where the bare sim.step() needed one.
+	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
 	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
 	assert_eq(disp.silhouette_anchors.size(), 1,
 		"tick feeds the sim's anchor positions into the dispatcher's silhouette tier")
@@ -2030,6 +2048,7 @@ func test_tick_feeds_dispatcher_silhouette_anchors_from_the_sim() -> void:
 			"the anchor is the crouched player's own Godot-space ground position")
 
 	assert_true(sim.request_local_player_stance(0))  # stand (SELECT 172)
+	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
 	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
 	assert_eq(disp.silhouette_anchors, PackedVector3Array(),
 		"standing back up empties the anchor feed on the next tick")
@@ -2498,10 +2517,10 @@ func test_live_item_effect_owner_uses_each_fixed_ticks_value_pose() -> void:
 	var root_dir := _stage_building_fixture("item_owner_pose")
 	var world := _make_item_fx_world()
 	add_child_autofree(world)
-	var placed := {}
+	var placed := {}  # mutated (merge), never reassigned: lambda captures copy locals
 	_load_minimal_mission(world, root_dir, func(mission: NovaMissionData) -> void:
-		placed = mission.add_entity(
-				NovaMissionData.KIND_BUILDING, 102001, Vector3(6, 4, 5), Vector3.ZERO))
+		placed.merge(mission.add_entity(
+				NovaMissionData.KIND_BUILDING, 102001, Vector3(6, 4, 5), Vector3.ZERO)))
 	var bms_id := int(placed.get("bms_id", 0))
 	assert_gt(bms_id, 0)
 	var node := ItemFxModelStub.new()
@@ -2632,10 +2651,10 @@ func test_occlusion_frame_drives_building_visibility_from_the_sim() -> void:
 	var root_dir := _stage_building_fixture("occl_frame")
 	var world := _make_world()
 	add_child_autofree(world)
-	var placed := {}
+	var placed := {}  # mutated (merge), never reassigned: lambda captures copy locals
 	_load_minimal_mission(world, root_dir, func(mission: NovaMissionData) -> void:
-		placed = mission.add_entity(
-				NovaMissionData.KIND_BUILDING, 102001, Vector3(16, 24, 4), Vector3.ZERO))
+		placed.merge(mission.add_entity(
+				NovaMissionData.KIND_BUILDING, 102001, Vector3(16, 24, 4), Vector3.ZERO)))
 	var bms_id := int(placed.get("bms_id", 0))
 	assert_gt(bms_id, 0)
 	var building := world.get_runtime().get_registry().resolve_single(bms_id) as Node3D
@@ -2685,10 +2704,10 @@ func test_probe_occlusion_skip_restores_frame_state_and_keeps_iris_live() -> voi
 	var root_dir := _stage_building_fixture("occl_probe_skip")
 	var world := _make_world()
 	add_child_autofree(world)
-	var placed := {}
+	var placed := {}  # mutated (merge), never reassigned: lambda captures copy locals
 	_load_minimal_mission(world, root_dir, func(mission: NovaMissionData) -> void:
-		placed = mission.add_entity(
-				NovaMissionData.KIND_BUILDING, 102001, Vector3(16, 24, 4), Vector3.ZERO))
+		placed.merge(mission.add_entity(
+				NovaMissionData.KIND_BUILDING, 102001, Vector3(16, 24, 4), Vector3.ZERO)))
 	var building := world.get_runtime().get_registry().resolve_single(
 			int(placed.get("bms_id", 0))) as Node3D
 	assert_not_null(building)

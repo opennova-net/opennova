@@ -3,23 +3,28 @@ extends GutTest
 # LocalPlayerPresenter over a REAL GameWorld + NovaSimulation (the ADR 0033 typed
 # boundary: setup(world: GameWorld, camera: Camera3D, fly_camera: NovaFlyCamera)).
 # Every test stages the minimal mission fixture, loads mnml.bms through the packaged
-# world scene, and observes behavior through the sim's own getters, the
-# PlayerLocalView snapshot, real NovaObjectModel observables, and the real terrain.
+# world scene (playable auto-spawn: the ADR 0011 listen-server host player), and
+# observes behavior through the sim's own getters, the PlayerLocalView snapshot,
+# real NovaObjectModel observables, and the real terrain raycast.
 #
 # Old fake-driven contracts that could not be honestly observed on real components
 # were dropped (not faked) — the fixture root has no .ptl effect catalog, no
 # retail soundsets, and no emplacement/interior geometry:
-# - muzzle/casing particle routing + effect anchors (FIRE scope gates, transients,
-#   catch-up ages, owner keys): the spawn side needs a .ptl catalog; the FSM event
-#   production is pinned by the ctest weapon suite.
-# - action begin/end sound legs: soundset resolution needs retail .LWF banks.
-# - interior blink lighting transfer: needs portal-carrying buildings; the model
-#   lighting context has no read-back observable (set_entity_lighting_context only).
+# - muzzle/casing particle routing + owner-bound effect anchors (FIRE scope gates,
+#   Always transients, catch-up ages, slot keys, REVX02 recoil-authored muzzle):
+#   the spawn side needs a .ptl catalog; the FSM event production is ctest-pinned.
+# - action begin/end sound legs + catch-up audio ordering: soundset resolution
+#   needs retail .LWF banks.
+# - interior blink lighting transfer: needs portal-carrying buildings, and the
+#   model lighting context has no read-back observable (set-only surface).
 # - emplaced EWEAP_GUNYAW/GUNPITCH ctrl pair + UseGun switch/clear events: need a
 #   real emplacement mount; TEX_TEAM sign-extension (team 0xFE) needs a wire team.
-# - the sim-composed camera pose VALUES (recoil doubling, roll sign vs a chosen
-#   pose): the pose is composed by the engine now; this file pins the presenter's
-#   1:1 stamp of the real composed pose, the ctest player_view suite pins the math.
+# - the composed camera pose VALUES (recoil doubling, march back-off, blend
+#   tuples): composed in the engine now — this file pins the presenter's 1:1
+#   stamp of the real composed pose; the ctest player_view suite pins the math.
+# - the fixed-tick catch-up phase math (age-two resumes, double-advance guards):
+#   needs authored multi-tick batches; the real 62.5 Hz drive here consumes one
+#   tick per frame, and the phase math is ctest-pinned engine state.
 
 const MissionRuntime := preload("res://adapter/world/mission_runtime.gd")
 
@@ -33,7 +38,6 @@ const CHARMODEL_FIXTURE := "res://../fixtures/threedi/3di3/CharModel.3di"
 const SOLDIER_ADM_FIXTURE := "res://../fixtures/anim/soldier.adm"
 const IDLE_BAD_FIXTURE := "res://../fixtures/anim/idle.bad"
 const WALK_BAD_FIXTURE := "res://../fixtures/anim/walk.bad"
-
 
 var _shared_root := ""
 
@@ -51,11 +55,12 @@ func after_each() -> void:
 
 
 # --- real-world staging -------------------------------------------------------
-# The minimal fixture plus the committed model/anim fixtures arranged as the
+# The minimal fixture plus the committed model/anim fixtures arranged under the
 # names the production resolvers ask for: the full weapon.def (WPN_M4AUTO with
 # its gfx/animadm/pos rows), a person items.def row for the player visual item
-# (105310 -> CharModel + soldier.adm), and the 19-bone CharModel staged as the
-# M4's FP gun/arms rig with a wpn-key clip set over the committed .bads.
+# (105310 -> CharModel + soldier.adm), the infantry clip set (E_STAND.adm) so
+# the motor's body selection runs, and the 19-bone CharModel staged as the M4's
+# FP gun/arms rig with a wpn-key clip set over the committed .bads.
 
 func _stage_root() -> String:
 	var root_dir := OS.get_cache_dir().path_join(TEST_ROOT).path_join(
@@ -127,7 +132,7 @@ anim_wpn_switchrank\t"idle.bad"
 ## The production load: packaged world scene + injected root + playable auto-spawn
 ## with the M4/satchel kit (the armory-proven canonical profile). `baked_terrain`
 ## swaps the mission onto the Dvxi5 CPT heightfield so the ported terrain raycast
-## and the infantry motor have a real surface.
+## has a real surface to measure.
 func _load_player_world(baked_terrain: bool = false) -> GameWorld:
 	var packed := load("res://adapter/world/game_world.tscn") as PackedScene
 	assert_not_null(packed, "the packaged world scene loads")
@@ -179,10 +184,38 @@ func _frame(world: GameWorld, presenter: LocalPlayerPresenter, camera: Camera3D,
 		presenter.after_world_tick()
 
 
+# Frames until `predicate` (no arguments -> bool) holds; false when `max_frames`
+# elapse first.
+func _frame_until(world: GameWorld, presenter: LocalPlayerPresenter, camera: Camera3D,
+		predicate: Callable, max_frames: int = 64) -> bool:
+	for i in max_frames:
+		_frame(world, presenter, camera, 1)
+		if bool(predicate.call()):
+			return true
+	return false
+
+
+func _key(keycode: Key, physical: bool = false) -> InputEventKey:
+	var key := InputEventKey.new()
+	if physical:
+		key.physical_keycode = keycode
+	else:
+		key.keycode = keycode
+	key.pressed = true
+	return key
+
+
+func _look(presenter: LocalPlayerPresenter, relative: Vector2, active: bool = true) -> bool:
+	var motion := InputEventMouseMotion.new()
+	motion.relative = relative
+	return presenter.handle_input(motion, active)
+
+
 # Mission yaw -> the Godot forward the presenter documents: (sin yaw, 0, -cos yaw).
-func _forward_for_yaw(yaw_deg: float) -> Vector3:
+func _forward_for(yaw_deg: float, pitch_deg: float = 0.0) -> Vector3:
 	var yr := deg_to_rad(yaw_deg)
-	return Vector3(sin(yr), 0.0, -cos(yr))
+	var pr := deg_to_rad(pitch_deg)
+	return Vector3(sin(yr) * cos(pr), sin(pr), -cos(yr) * cos(pr))
 
 
 # Every VisualInstance3D under `root`, inclusive (mirrors the presenter's stamping walk).
@@ -193,6 +226,10 @@ func _visual_instances(root: Node) -> Array:
 	for child in root.get_children():
 		out.append_array(_visual_instances(child))
 	return out
+
+
+func _local_avatar(world: GameWorld) -> NovaObjectModel:
+	return world.get_node_or_null("PlayerAvatar_CharModel") as NovaObjectModel
 
 
 func _remove_dir_recursive(path: String) -> void:
@@ -212,87 +249,358 @@ func _remove_dir_recursive(path: String) -> void:
 	DirAccess.remove_absolute(path)
 
 
-# --- discovery (temporary) ---------------------------------------------------
+# --- input routing into the sim ----------------------------------------------
 
 
-func test_discovery_a_motion() -> void:
+func test_input_source_movement_reaches_the_motor_and_neutralizes_when_inactive() -> void:
 	var world := _load_player_world()
 	var camera := Camera3D.new()
 	add_child_autofree(camera)
 	var presenter := _attach_presenter(world, camera)
 	await get_tree().process_frame
 	var sim := world.get_sim()
-	# Fresh-world movement, before any other state.
+	_frame(world, presenter, camera, 2)
+	assert_eq(String(sim.get_local_player_anim_key()), "anim_idle",
+			"the freshly spawned player idles")
+
+	# Held forward reaches the motor's body selection: the walk/run promotion
+	# leaves idle [orig: Player_PackInputStateToEntity @0x4df450; promotion @0x4b729d].
 	presenter.set_input_source(func() -> Dictionary:
 		return {"forward": true})
-	var p0: Vector3 = sim.get_local_player_position()
-	_frame(world, presenter, camera, 30)
-	var p1: Vector3 = sim.get_local_player_position()
-	print("mnml move=", p1 - p0, " dist=", (p1 - p0).length(),
-			" anim=", sim.get_local_player_anim_key())
-	# lean
+	assert_true(_frame_until(world, presenter, camera, func() -> bool:
+		return String(sim.get_local_player_anim_key()) != "anim_idle"),
+			"held forward promotes the body selection off idle")
+
+	# Releasing the source settles the motor back to idle.
+	presenter.set_input_source(func() -> Dictionary:
+		return {})
+	assert_true(_frame_until(world, presenter, camera, func() -> bool:
+		return String(sim.get_local_player_anim_key()) == "anim_idle"),
+			"releasing input settles the motor back to idle")
+
+	# A live UI overlay keeps the world ticking but submits a NEUTRAL movement
+	# frame: the same held source no longer reaches the motor.
+	presenter.set_input_source(func() -> Dictionary:
+		return {"forward": true})
+	var tick_before := int(sim.get_logic_tick())
+	for i in 30:
+		presenter.before_world_tick(TICK, false, false)
+		world.tick(camera.global_position, camera.global_transform, TICK)
+		presenter.after_world_tick()
+	assert_eq(String(sim.get_local_player_anim_key()), "anim_idle",
+			"the armory overlay's neutral submit keeps the player standing")
+	assert_gt(int(sim.get_logic_tick()), tick_before,
+			"the world keeps ticking under the inactive overlay")
+
+	# Q/E lean is entity state the sim composes into the camera roll (lean/4
+	# rides fp_roll). Sign: positive roll tilts right, so lean LEFT is negative
+	# [orig: roll = entity+0x2DC + (entity+0xB0)/4 @0x437fe6].
 	presenter.set_input_source(func() -> Dictionary:
 		return {"lean_left": true})
 	_frame(world, presenter, camera, 30)
 	var view := world.local_player_view()
-	print("lean_left roll=", view.camera_roll_deg, " fp_roll=", view.fp_roll_deg)
+	assert_lt(view.camera_roll_deg, -5.0, "held lean-left composes a leftward camera roll")
+	assert_lt(camera.global_basis.y.x, -0.01,
+			"negative composed roll tilts the stamped view left")
 	presenter.set_input_source(func() -> Dictionary:
 		return {})
 	_frame(world, presenter, camera, 60)
-	view = world.local_player_view()
-	print("neutral roll=", view.camera_roll_deg)
-	# look immediacy: no frame between input and read
-	var yaw0 := float(sim.get_local_player_yaw_deg())
-	var motion := InputEventMouseMotion.new()
-	motion.relative = Vector2(300.0, 0.0)
-	presenter.handle_input(motion, true)
-	print("yaw before frame=", float(sim.get_local_player_yaw_deg()) - yaw0)
+	assert_almost_eq(world.local_player_view().camera_roll_deg, 0.0, 1.0,
+			"releasing the lean eases the composed roll back out")
+
+
+func test_mouse_motion_forwards_raw_pixels_to_the_sim_pipeline() -> void:
+	# The presenter no longer scales or accumulates look: raw pixel deltas go to
+	# NovaSimulation.add_local_player_look and the witnessed integer pipeline —
+	# sens<<11, scoped zoom reduction, the pitch clamps — folds them in at the
+	# tick [orig: Input_ProcessMouseAxisBindings @0x499680].
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var presenter := _attach_presenter(world, camera)
+	await get_tree().process_frame
+	var sim := world.get_sim()
 	_frame(world, presenter, camera, 1)
-	print("yaw after frame=", float(sim.get_local_player_yaw_deg()) - yaw0)
-	# F4 third person
-	var head_fp: Vector3 = presenter.avatar_head_world()
-	var eye_fp: Vector3 = camera.global_position
-	var f4 := InputEventKey.new()
-	f4.keycode = KEY_F4
-	f4.pressed = true
-	presenter.handle_key_input(f4, true)
-	_frame(world, presenter, camera, 30)
-	view = world.local_player_view()
-	print("3P: is_tp=", presenter.is_third_person(), " pose_valid=", view.camera_pose_valid,
-			" eye=", view.camera_eye, " cam=", camera.global_position,
-			" dist_from_player=", (camera.global_position - sim.get_local_player_position()).length(),
-			" fp_dist=", (eye_fp - sim.get_local_player_position()).length())
-	print("3P: viewmodel visible=", presenter.viewmodel().visible)
-	var avatar := world.get_node("PlayerAvatar_CharModel") as Node3D
-	var layers_3p: Array = []
-	for vi in _visual_instances(avatar):
-		if not layers_3p.has(vi.layers):
-			layers_3p.append(vi.layers)
-	print("3P avatar layers=", layers_3p, " count=", _visual_instances(avatar).size(),
-			" ctrl=", presenter.vm_parts()[0].get_ctrl_values())
-	presenter.handle_key_input(f4, true)
+	var yaw0 := float(sim.get_local_player_yaw_deg())
+
+	assert_true(_look(presenter, Vector2(300.0, 0.0)), "active mouse motion is consumed")
+	_frame(world, presenter, camera, 1)
+	# The default-sensitivity pipeline is exact: 300 px through the fresh sim's
+	# sens<<11 scale lands 6.591796875 degrees of yaw (mouse right = yaw right).
+	assert_almost_eq(float(sim.get_local_player_yaw_deg()) - yaw0, 6.591796875, 0.001,
+			"raw pixels reach the sim's witnessed integer look pipeline")
+
+	var pitch0 := float(sim.get_local_player_pitch_deg())
+	assert_true(_look(presenter, Vector2(0.0, 600.0)))
+	_frame(world, presenter, camera, 1)
+	assert_lt(float(sim.get_local_player_pitch_deg()), pitch0 - 5.0,
+			"mouse down pitches the aim down (retail non-inverted default)")
+
+	var yaw_now := float(sim.get_local_player_yaw_deg())
+	assert_false(_look(presenter, Vector2(500.0, 0.0), false),
+			"inactive input is not forwarded")
+	_frame(world, presenter, camera, 1)
+	assert_almost_eq(float(sim.get_local_player_yaw_deg()), yaw_now, 0.001,
+			"inactive motion leaves the sim's look state untouched")
+
+
+func test_stance_keys_are_three_key_select_requests() -> void:
+	# The witnessed 3-key SELECT (Z prone, X crouch, C stand — catalog ids 9/10/11):
+	# each key REQUESTS its stance; the sim owns mutual exclusion + the ForceCrouch
+	# refusal. [orig: input cases 170/169/172 -> C2S 0x1D @0x501c60]
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var presenter := _attach_presenter(world, camera)
+	await get_tree().process_frame
+	var sim := world.get_sim()
 	_frame(world, presenter, camera, 2)
-	var layers_fp: Array = []
-	for vi in _visual_instances(avatar):
-		if not layers_fp.has(vi.layers):
-			layers_fp.append(vi.layers)
-	print("FP avatar layers=", layers_fp, " vm visible=", presenter.viewmodel().visible)
-	var vm_layers: Array = []
-	for vi in _visual_instances(presenter.viewmodel()):
-		if not vm_layers.has(vi.layers):
-			vm_layers.append(vi.layers)
-	print("FP vm layers=", vm_layers, " head=", head_fp)
-	# pass camera
+	assert_eq(int(sim.get_local_player_stance()), 0, "the spawned player stands")
+
+	for pair in [[KEY_Z, 2], [KEY_X, 1], [KEY_C, 0]]:
+		assert_true(presenter.handle_key_input(_key(pair[0]), true),
+				"stance key is consumed")
+		_frame(world, presenter, camera, 3)
+		assert_eq(int(sim.get_local_player_stance()), int(pair[1]),
+				"the sim grants the requested stance for key %d" % pair[0])
+
+
+func test_binoculars_nvg_and_gain_keys_route_retail_actions() -> void:
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var presenter := _attach_presenter(world, camera)
+	await get_tree().process_frame
+
+	assert_true(presenter.handle_key_input(_key(KEY_B, true), true))
+	assert_true(_frame_until(world, presenter, camera, func() -> bool:
+		return world.local_player_view().binoculars_view_active),
+			"B raises the binocular view through the sim's own ease")
+	assert_true(presenter.handle_key_input(_key(KEY_B, true), true))
+	assert_true(_frame_until(world, presenter, camera, func() -> bool:
+		return not world.local_player_view().binoculars_view_active),
+			"a second B lowers the binoculars again")
+
+	assert_true(presenter.handle_key_input(_key(KEY_N, true), true))
+	_frame(world, presenter, camera, 2)
+	var view := world.local_player_view()
+	assert_true(view.nvg_active, "N toggles the sim's NVG state")
+	assert_eq(view.nvg_gain, 0, "NVG starts at the base gain step")
+	assert_true(presenter.handle_key_input(_key(KEY_EQUAL, true), true))
+	_frame(world, presenter, camera, 2)
+	assert_eq(world.local_player_view().nvg_gain, 1, "'+' steps the gain up")
+	assert_true(presenter.handle_key_input(_key(KEY_MINUS, true), true))
+	assert_true(presenter.handle_key_input(_key(KEY_MINUS, true), true))
+	_frame(world, presenter, camera, 2)
+	assert_eq(world.local_player_view().nvg_gain, 0,
+			"'-' steps the gain down and the sim clamps at the floor")
+
+
+# --- the camera cluster -------------------------------------------------------
+
+
+func test_camera_stamps_the_sim_composed_pose_and_policy_fov() -> void:
+	# ADR 0016 + world/player_view.h (S8): the ADS ease, the fov policy, and the
+	# whole FP/TP camera composition are SIM state at the world cadence; this
+	# presenter converts the mission-euler pose to the Godot frame and stamps the
+	# node 1:1 [orig: Camera_ComputeThirdPersonView @0x437d10 — the on-foot person
+	# leg @0x437f9c..0x438031].
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var saved_fov := camera.fov
+	var presenter := _attach_presenter(world, camera)
+	await get_tree().process_frame
+	var sim := world.get_sim()
+	_frame(world, presenter, camera, 3)
+
+	var view := world.local_player_view()
+	assert_true(view.camera_pose_valid, "a live local player composes a camera pose")
+	assert_almost_eq((camera.global_position - view.camera_eye).length(), 0.0, 0.001,
+			"the camera sits exactly at the sim-composed eye")
+	# The eye is the POSED HEAD BONE pulled back 0.1875 u along the view forward
+	# [orig: CameraOffset = head - Position @0x4b6bb3; kFpEyePullback]. The head
+	# sample comes from the avatar's real render skeleton (D-INF-18).
+	var head: Vector3 = presenter.avatar_head_world()
+	assert_ne(head, Vector3.INF, "the avatar serves a posed head bone")
+	var yaw := float(sim.get_local_player_yaw_deg())
+	assert_almost_eq(view.camera_eye, head - _forward_for(yaw) * 0.1875,
+			Vector3(0.01, 0.01, 0.01),
+			"the composed eye is the posed head bone plus the FP pull-back")
+
+	# The policy fov (80 unscoped) through the ONE shared h->v conversion
+	# [orig: @0x58d900] against the live viewport aspect.
+	assert_almost_eq(view.fov_h_deg, 80.0, 0.001, "the unscoped policy fov is 80")
+	var size := camera.get_viewport().get_visible_rect().size
+	assert_almost_eq(camera.fov,
+			NovaSimulation.fov_vertical_from_horizontal(view.fov_h_deg, size.x / size.y),
+			0.001, "the camera fov is the sim's policy value through the shared conversion")
+
+	# Pitch rides the pose 1:1: look down, then compare the stamped forward.
+	assert_true(_look(presenter, Vector2(0.0, 800.0)))
+	_frame(world, presenter, camera, 1)
+	view = world.local_player_view()
+	assert_lt(view.camera_pitch_deg, -10.0, "the composed pose follows the look pitch")
+	var fp_forward := -camera.global_basis.z
+	assert_almost_eq(rad_to_deg(asin(fp_forward.y)), view.camera_pitch_deg, 0.01,
+			"the camera pitches to the composed pitch exactly")
+
+	# F4 flips the mode INTO the sim [orig: g_camera_mode @0xA890C8]: the
+	# third-person composition pulls the eye away from the player.
+	var player_pos: Vector3 = sim.get_local_player_position()
+	var fp_distance := (camera.global_position - player_pos).length()
+	assert_true(presenter.handle_key_input(_key(KEY_F4), true))
+	assert_true(presenter.is_third_person(), "F4 enters third person")
+	_frame(world, presenter, camera, 20)
+	var tp_distance := (camera.global_position - sim.get_local_player_position()).length()
+	assert_gt(tp_distance, fp_distance + 0.1,
+			"the sim's third-person composition chases the eye back from the player")
+	assert_true(presenter.handle_key_input(_key(KEY_F4), true))
+	assert_false(presenter.is_third_person(), "F4 toggles back")
+
+	presenter.teardown()
+	assert_almost_eq(camera.fov, saved_fov, 0.001,
+			"teardown restores the camera's original fov")
+
+
+func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:
+	# The water-reflection player-model pin: retail's mirror re-renders the
+	# world scene, which CONTAINS the local player's body; the first-person
+	# arms/weapon are a separate near-Z overlay that never enters it
+	# [orig: Water_ReflectionPrerender @ 0x5c2780 -> render_main_scene
+	# @ 0x5c1240; Player_RenderFirstPersonViewModel @ 0x4ded60]. World-driven,
+	# that is LAYER plumbing: in first person the body stays visible on the
+	# reflection-only layer (masked off the player camera, kept as a shadow
+	# source) and the viewmodel rides its own mirror-excluded layer.
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var saved_mask := camera.cull_mask
+	var presenter := _attach_presenter(world, camera)
+	await get_tree().process_frame  # setup() mounts the FP pass deferred
+	_frame(world, presenter, camera, 2)
+
+	assert_eq(camera.cull_mask & NovaWater.VISUAL_LAYER_FP_BODY_SHADOW_ONLY, 0,
+			"setup() masks the FP body layer off the player camera")
+	# The FP viewmodel renders through the dedicated renderfov pass, never the
+	# player camera [orig: Player_RenderFirstPersonViewModel @0x4ded60 — own
+	# projection + flush].
+	assert_eq(camera.cull_mask & NovaWater.VISUAL_LAYER_VIEWMODEL, 0,
+			"setup() masks the viewmodel layer off the player camera (the FP pass draws it)")
+	assert_eq(camera.cull_mask & NovaWater.VISUAL_LAYER_SHADOW_CASTER_MASK, 0,
+			"caster marker layers cannot make the hidden FP body visible to the player")
 	var rig: PlayerViewmodelRig = presenter.viewmodel_rig()
 	var pass_cam: Camera3D = rig.get("_vm_camera")
+	assert_not_null(pass_cam, "setup() builds the FP render pass camera")
+	if pass_cam != null:
+		assert_eq(pass_cam.cull_mask, NovaWater.VISUAL_LAYER_VIEWMODEL,
+				"the pass camera draws ONLY the viewmodel layer")
+		assert_almost_eq(pass_cam.near, 0.05, 0.0001,
+				"the pass near plane is the witnessed 0.05 swap [orig: @0x4dee29]")
 	var pass_layer: CanvasLayer = rig.get("_vm_pass_layer")
-	print("pass cam=", pass_cam, " mask=", pass_cam.cull_mask if pass_cam != null else -1,
-			" near=", pass_cam.near if pass_cam != null else -1,
-			" layer parent=", pass_layer.get_parent() if pass_layer != null else null)
-	print("player cam mask=", camera.cull_mask, " default=", (1 << 20) - 1)
+	assert_not_null(pass_layer, "setup() mounts the FP pass")
+	if pass_layer != null:
+		assert_eq(pass_layer.get_parent(), camera.get_viewport(),
+				"the pass composites into the camera's viewport")
+
+	var avatar := _local_avatar(world)
+	assert_not_null(avatar, "the shared presenter built the real 3P avatar")
+	var viewmodel: Node3D = presenter.viewmodel()
+	assert_not_null(viewmodel, "the shared presenter built the real FP viewmodel")
+	assert_true(avatar.visible,
+			"the body stays VISIBLE in first person - it remains a live shadow source")
+	assert_true(viewmodel.visible, "the FP overlay shows in first person")
+	var body_instances := _visual_instances(avatar)
+	var vm_instances := _visual_instances(viewmodel)
+	assert_gt(body_instances.size(), 0, "the real body carries visual instances")
+	assert_gt(vm_instances.size(), 0, "the real viewmodel carries visual instances")
+	for vi in body_instances:
+		assert_eq(vi.layers & ~NovaWater.VISUAL_LAYER_SHADOW_CASTER_MASK,
+				NovaWater.VISUAL_LAYER_FP_BODY_SHADOW_ONLY,
+				"first person: the body's visual instances ride the shadow-only FP layer")
+	for vi in vm_instances:
+		assert_eq(vi.layers & ~NovaWater.VISUAL_LAYER_SHADOW_CASTER_MASK,
+				NovaWater.VISUAL_LAYER_VIEWMODEL,
+				"the viewmodel's visual instances ride the mirror-excluded viewmodel layer")
+
+	presenter.set_third_person(true)
+	_frame(world, presenter, camera, 1)
+	for vi in _visual_instances(avatar):
+		assert_eq(vi.layers & ~NovaWater.VISUAL_LAYER_SHADOW_CASTER_MASK,
+				NovaWater.VISUAL_LAYER_WORLD,
+				"third person: the body returns to the normal world layer")
+	assert_true(avatar.visible, "the body shows in third person")
+	assert_false(presenter.viewmodel().visible,
+			"the FP overlay hides entirely in third person")
+
+	presenter.teardown()
+	assert_eq(camera.cull_mask, saved_mask,
+			"teardown() restores the player camera's cull mask exactly")
 
 
-func test_discovery_b_baked_terrain() -> void:
+# The game shell calls setup() from its own _ready — while the player camera's
+# viewport is still making its children ready, so it rejects add_child ("parent
+# busy": _propagate_ready blocks the parent for the whole walk). A direct FP-pass
+# mount fails then, leaving the viewmodel layer masked off the player camera with
+# nothing drawing it: an invisible FP viewmodel in the runtime. The pass mount
+# is deferred for exactly this boot shape; this pins it.
+class BootTrigger:
+	extends Node
+	var presenter: LocalPlayerPresenter
+	var world: GameWorld
+	var camera: Camera3D
+
+	func _ready() -> void:
+		presenter.setup(world, camera)
+
+
+func test_setup_during_scene_ready_still_mounts_the_fp_pass() -> void:
+	var vp := SubViewport.new()  # the play viewport the pass composites into
+	var trigger := BootTrigger.new()
+	trigger.world = _bare_world()
+	trigger.camera = Camera3D.new()
+	trigger.presenter = LocalPlayerPresenter.new()
+	vp.add_child(trigger.world)
+	vp.add_child(trigger.camera)
+	vp.add_child(trigger.presenter)
+	vp.add_child(trigger)  # last: world/camera/presenter are in-tree when _ready fires
+	# Entering the tree makes vp's children ready — vp is "busy" exactly while
+	# BootTrigger's _ready runs setup(), the game shell's boot shape.
+	add_child_autofree(vp)
+	await get_tree().process_frame
+
+	var pass_layer: CanvasLayer = trigger.presenter.viewmodel_rig().get("_vm_pass_layer")
+	assert_not_null(pass_layer, "the FP pass survives a setup() issued during scene _ready")
+	if pass_layer != null:
+		assert_true(pass_layer.is_inside_tree(),
+				"the FP pass mounted despite the busy boot (a failed add_child leaves it orphaned)")
+		assert_eq(pass_layer.get_parent(), vp,
+				"the pass composites into the camera's viewport, not this presenter's ancestor")
+
+
+func test_shared_presenter_teardown_releases_captured_mouse() -> void:
+	var world := _bare_world()
+	var camera := Camera3D.new()
+	var presenter := LocalPlayerPresenter.new()
+	add_child_autofree(world)
+	add_child_autofree(camera)
+	add_child_autofree(presenter)
+	presenter.setup(world, camera)
+
+	Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
+	presenter.teardown()
+
+	assert_eq(Input.get_mouse_mode(), Input.MOUSE_MODE_VISIBLE)
+
+
+# --- binocular rangefinder ----------------------------------------------------
+# The range readout traces the ported retail terrain raycast
+# (NovaTerrainData.raycast_terrain -> engine/runtime/terrain_query
+# [orig: Terrain_RaycastHeightmapHiRes_0 @0x60e710]), measured from entity
+# Position to the collision/far endpoint and clamped to the 1..1000 display.
+
+
+func test_aim_range_measures_the_real_terrain_and_clamps_to_the_projection() -> void:
 	var world := _load_player_world(true)
 	var camera := Camera3D.new()
 	add_child_autofree(camera)
@@ -300,161 +608,241 @@ func test_discovery_b_baked_terrain() -> void:
 	await get_tree().process_frame
 	var sim := world.get_sim()
 	var terrain := world.get_terrain_data()
-	# scan for a grounded spot
-	var spot := Vector3.INF
-	for zi in range(4, 28):
-		for xi in range(4, 28):
-			var p := Vector3(xi * 32.0, 0.0, -zi * 32.0)
-			var h := float(terrain.get_height(p))
-			if h > 2.0:
-				spot = Vector3(p.x, h, p.z)
-				break
-		if spot != Vector3.INF:
-			break
-	print("spot=", spot)
-	if spot == Vector3.INF:
-		for zi in range(4, 28):
-			for xi in range(4, 28):
-				var p := Vector3(xi * 32.0, 0.0, zi * 32.0)
-				var h := float(terrain.get_height(p))
-				if h > 2.0:
-					spot = Vector3(p.x, h, p.z)
-					break
-			if spot != Vector3.INF:
-				break
-		print("spot(+z)=", spot)
-	# godot (x, up, z) -> mission (x, -z, up)
-	sim.debug_teleport_local_player(Vector3(spot.x, -spot.z, spot.y + 0.5), 0.0, 0.0)
-	_frame(world, presenter, camera, 30)
+	_frame(world, presenter, camera, 2)
+	# Hold the player above open terrain so the ray has a real surface below.
+	var h := float(terrain.get_height(Vector3(256.0, 0.0, -256.0)))
+	sim.debug_teleport_local_player(Vector3(256.0, 256.0, h + 40.0), 0.0, 0.0)
+	_frame(world, presenter, camera, 1)
+
+	# Aim well below the horizon.
+	assert_true(_look(presenter, Vector2(0.0, 2500.0)))
+	_frame(world, presenter, camera, 1)
+	assert_lt(float(sim.get_local_player_pitch_deg()), -40.0)
+	var range_down := presenter.aim_range_units()
+	assert_between(range_down, 5, 400, "the downward readout measures a real hit")
+	# The readout equals the same measure taken through the public sampler: the
+	# eye is the posed head (floored), the endpoint the 1000-unit projection.
 	var pos: Vector3 = sim.get_local_player_position()
-	print("settled pos=", pos, " terrain h=", terrain.get_height(pos))
-	presenter.set_input_source(func() -> Dictionary:
-		return {"forward": true})
-	var p0: Vector3 = sim.get_local_player_position()
-	_frame(world, presenter, camera, 40)
-	var p1: Vector3 = sim.get_local_player_position()
-	print("baked move=", p1 - p0, " dist=", (p1 - p0).length(),
-			" anim=", sim.get_local_player_anim_key(),
-			" yaw=", sim.get_local_player_yaw_deg())
-	var avatar := world.get_node("PlayerAvatar_CharModel") as Node3D
-	print("avatar clip while moving=", avatar.get_active_body_clip())
-	presenter.set_input_source(func() -> Dictionary:
-		return {})
-	_frame(world, presenter, camera, 40)
-	print("avatar clip after stop=", avatar.get_active_body_clip(),
-			" settled y=", sim.get_local_player_position().y,
-			" h=", terrain.get_height(sim.get_local_player_position()))
-	# aim down
-	var motion := InputEventMouseMotion.new()
-	motion.relative = Vector2(0.0, 1500.0)
-	presenter.handle_input(motion, true)
-	_frame(world, presenter, camera, 2)
-	print("down pitch=", sim.get_local_player_pitch_deg(), " range=", presenter.aim_range_units())
-	# cross-check the raycast through the public sampler
 	var eye: Vector3 = presenter.avatar_head_world()
-	var yr := deg_to_rad(float(sim.get_local_player_yaw_deg()))
-	var pr := deg_to_rad(float(sim.get_local_player_pitch_deg()))
-	var fwd := Vector3(sin(yr) * cos(pr), sin(pr), -cos(yr) * cos(pr))
-	var hit: Vector3 = terrain.raycast_terrain(eye, eye + fwd * 1000.0)
-	print("hit=", hit, " expected range=", int(sim.get_local_player_position().distance_to(hit)))
-	# aim up to the sky
-	motion = InputEventMouseMotion.new()
-	motion.relative = Vector2(0.0, -4000.0)
-	presenter.handle_input(motion, true)
+	eye.y = maxf(eye.y, pos.y + presenter.PLAYER_EYE_MIN)
+	var forward := _forward_for(float(sim.get_local_player_yaw_deg()),
+			float(sim.get_local_player_pitch_deg()))
+	var hit: Vector3 = terrain.raycast_terrain(
+			eye, eye + forward * presenter.AIM_PROJECT_RANGE)
+	assert_false(is_nan(hit.x), "the downward ray hits the real heightfield")
+	var expected := clampi(int(pos.distance_to(hit)), 1, 1000)
+	assert_between(range_down, expected - 1, expected + 1,
+			"the readout is the terrain-raycast distance from entity Position")
+
+	# Aim at the sky: the raycast misses and the readout clamps to the retail
+	# 1000-unit projection endpoint.
+	assert_true(_look(presenter, Vector2(0.0, -8000.0)))
+	_frame(world, presenter, camera, 1)
+	assert_gt(float(sim.get_local_player_pitch_deg()), 45.0)
+	assert_eq(presenter.aim_range_units(), 1000,
+			"a terrain miss falls back to the far endpoint of the projection")
+
+
+# --- the real FP viewmodel ----------------------------------------------------
+
+
+func test_viewmodel_ctrl_registers_follow_visibility_and_team() -> void:
+	# The FP CTRL writers execute only on a visible FP submit: TEX_TEAM is the
+	# store immediately before the FP lighting/heat/model-submit path, and heat
+	# publishes per submit [orig: Player_RenderFirstPersonViewModel
+	# @0x4DEE96..0x4DEE9F, @0x4DEEC2..0x4DEEF5]. Hidden, carded, binocular and
+	# third-person frames never execute those writers.
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var presenter := _attach_presenter(world, camera)
+	await get_tree().process_frame
+	var sim := world.get_sim()
 	_frame(world, presenter, camera, 2)
-	print("up pitch=", sim.get_local_player_pitch_deg(), " range=", presenter.aim_range_units())
-	# fov reality
-	var size: Vector2 = camera.get_viewport().get_visible_rect().size
-	print("viewport size=", size, " camera.fov=", camera.fov, " expected=",
-			NovaSimulation.fov_vertical_from_horizontal(80.0, size.x / size.y))
-	# firing: real FSM fire on the real vm parts
-	var part0 = presenter.vm_parts()[0]
-	print("pre-fire clip=", part0.get_active_body_clip(), " heat=",
-			part0.get_ctrl_values().get("HEAT_GLOW"))
+
+	assert_eq(presenter.vm_parts().size(), 2,
+			"the real M4 viewmodel builds both parts (arms + gun)")
+	var weapon_view: PlayerWeaponView = world.local_player_weapon_view()
+	assert_not_null(weapon_view, "the installed M4 serves a live FSM view")
+	for part_v in presenter.vm_parts():
+		var part := part_v as NovaObjectModel
+		var ctrl: Dictionary = part.get_ctrl_values()
+		assert_eq(int(ctrl.get("TEX_TEAM", -999)), int(sim.get_local_player_team()),
+				"the visible FP submit stores the sim's team byte")
+		assert_eq(int(ctrl.get("HEAT_GLOW", -999)), int(weapon_view.heat_glow),
+				"the FP writer publishes the FSM's literal heat value (cold zero)")
+
+	presenter.set_third_person(true)
+	_frame(world, presenter, camera, 1)
+	for part_v in presenter.vm_parts():
+		assert_true((part_v as NovaObjectModel).get_ctrl_values().is_empty(),
+				"a third-person frame does not execute any FP CTRL writer")
+
+	presenter.set_third_person(false)
+	_frame(world, presenter, camera, 1)
+	var part0 := presenter.vm_parts()[0] as NovaObjectModel
+	assert_eq(int(part0.get_ctrl_values().get("TEX_TEAM", -999)),
+			int(sim.get_local_player_team()),
+			"returning to first person re-runs the CTRL writers")
+
+	# The binocular card path suppresses the FP model submit entirely.
+	assert_true(presenter.handle_key_input(_key(KEY_B, true), true))
+	assert_true(_frame_until(world, presenter, camera, func() -> bool:
+		return world.local_player_view().binoculars_view_active))
+	_frame(world, presenter, camera, 1)
+	assert_false(presenter.viewmodel().visible,
+			"the binocular view replaces the FP viewmodel for the frame")
+	assert_true(part0.get_ctrl_values().is_empty(),
+			"the binocular card path suppresses the FP CTRL writers too")
+
+
+func test_fire_event_plays_the_fsm_clip_on_both_real_viewmodel_parts() -> void:
+	# The equipped FSM's FIRE begin lands its clip on BOTH viewmodel parts (arms
+	# + gun share the animadm) at the production-tick phase, and the fire ->
+	# recoil action chain follows [orig: ActionSlot_BeginActivePhase @0x53f830
+	# plays the action clip on the owner's animadm channel].
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var presenter := _attach_presenter(world, camera)
+	await get_tree().process_frame
+	var sim := world.get_sim()
+	_frame(world, presenter, camera, 2)
+	assert_eq(presenter.vm_parts().size(), 2)
+	for part_v in presenter.vm_parts():
+		assert_eq(String((part_v as NovaObjectModel).get_active_body_clip()),
+				"anim_wpn_idle", "the mounted weapon idles in its FP holding pose")
+	var serial_before := int(world.local_player_weapon_view().play_serial)
+
+	# One trigger pull, injected on the same seam the input router drives (the
+	# router's own sample overwrites earlier in this frame; last write wins).
 	presenter.before_world_tick(TICK, false, true)
 	sim.set_local_player_weapon_input(true, true, false)
 	world.tick(camera.global_position, camera.global_transform, TICK)
 	presenter.after_world_tick()
-	print("post-fire-tick1 clip=", part0.get_active_body_clip(),
-			" time=", part0.get_animation_time(),
-			" view anim=", world.local_player_weapon_view().anim_key,
-			" heat=", part0.get_ctrl_values().get("HEAT_GLOW"))
-	for i in 3:
+
+	assert_eq(String(world.local_player_weapon_view().anim_key), "anim_wpn_fire",
+			"the real FSM entered its fire action")
+	for part_v in presenter.vm_parts():
+		var part := part_v as NovaObjectModel
+		assert_eq(String(part.get_active_body_clip()), "anim_wpn_fire",
+				"the fire event's clip starts on both real parts")
+		assert_almost_eq(part.get_animation_time(), 0.0, 0.00001,
+				"a current-tick event starts at its production-tick pose")
+
+	# Hold the trigger: the fire action finishes and chains into recoil.
+	var part0 := presenter.vm_parts()[0] as NovaObjectModel
+	var reached_recoil := false
+	for i in 30:
 		presenter.before_world_tick(TICK, false, true)
 		sim.set_local_player_weapon_input(true, false, false)
 		world.tick(camera.global_position, camera.global_transform, TICK)
 		presenter.after_world_tick()
-	print("post-fire-tick4 clip=", part0.get_active_body_clip(),
-			" heat=", part0.get_ctrl_values().get("HEAT_GLOW"),
-			" ammo... weapon_view serial=", world.local_player_weapon_view().play_serial)
+		if String(part0.get_active_body_clip()) == "anim_wpn_recoil":
+			reached_recoil = true
+			break
+	assert_true(reached_recoil, "the held trigger chains fire -> recoil on the parts")
+	assert_gt(int(world.local_player_weapon_view().play_serial), serial_before,
+			"the FSM's play serial advances with the served clips")
 
 
-func test_discovery_c_events_and_binoc() -> void:
+func test_weapon_switch_events_are_owned_by_the_presenter_from_setup_to_teardown() -> void:
+	# The sim answers category REQUESTS through the event drain
+	# (switch_to_weapon); the presenter is the ONE registered fixed-tick
+	# consumer from setup to teardown. Attachment is the adoption boundary:
+	# pre-setup history is discarded, never replayed; live events reinstall the
+	# FP presentation [orig: the ACCEPT re-mount WeaponLoadout_ApplyFromBuffer
+	# @0x565cd0 tail -> Player_MountWeaponSlot @0x4dfa40]; teardown releases the
+	# world-to-presenter callback.
 	var world := _load_player_world()
 	var camera := Camera3D.new()
 	add_child_autofree(camera)
 	await get_tree().process_frame
 	var sim := world.get_sim()
-	# Backlog with NO presenter: category request events accumulate in the sim.
+
+	# Backlog with no consumer: the FSM switches (sim truth), the presentation
+	# events accumulate undrained, and the render-side weapon stays put.
 	sim.request_local_player_weapon_category(7)
 	for i in 45:
 		world.tick(camera.global_position, camera.global_transform, TICK)
-	print("no-consumer sim weapon=", sim.get_local_player_weapon_name(),
-			" world weapon=", world.local_player_weapon_name())
-	# Attach: setup drains the backlog.
+	assert_eq(String(sim.get_local_player_weapon_name()), "WPN_SATCHEL_CHARGE",
+			"the sim's switch walk runs without any presenter")
+	assert_eq(String(world.local_player_weapon_name()), "WPN_M4AUTO",
+			"the presentation weapon waits for a consumer")
+
+	# setup() discards exactly the pre-attachment history.
 	var presenter := _attach_presenter(world, camera)
 	await get_tree().process_frame
-	var leftover := world.drain_local_player_weapon_events()
-	print("post-setup manual drain=", leftover.size(),
-			" world weapon still=", world.local_player_weapon_name())
-	# Live: presenter consumes each batch; the switch presentation applies.
+	assert_eq(world.drain_local_player_weapon_events().size(), 0,
+			"setup drained the stale backlog")
+	assert_eq(String(world.local_player_weapon_name()), "WPN_M4AUTO",
+			"discarded history is never replayed into the presentation")
+
+	# Live: switch back to the primary, then to the satchel again — the second
+	# leg changes the installed def, so the FP viewmodel is reinstalled.
 	sim.request_local_player_weapon_category(3)
-	for i in 60:
-		_frame(world, presenter, camera, 1)
-	print("live switch: sim=", sim.get_local_player_weapon_name(),
-			" world=", world.local_player_weapon_name(),
-			" drain=", world.drain_local_player_weapon_events().size())
-	# binoculars: ctrl suppression + viewmodel visibility
-	var b := InputEventKey.new()
-	b.physical_keycode = KEY_B
-	b.pressed = true
-	presenter.handle_key_input(b, true)
-	_frame(world, presenter, camera, 30)
-	var view := world.local_player_view()
-	print("binoc active=", view.binoculars_view_active,
-			" vm visible=", presenter.viewmodel().visible,
-			" ctrl=", presenter.vm_parts()[0].get_ctrl_values() if presenter.vm_parts().size() > 0 else null,
-			" yaw_off=", view.binocular_yaw_offset_deg)
-	print("aim range while binoc=", presenter.aim_range_units())
-	# drop binoculars again (a raised binocular gates weapon switches)
-	presenter.handle_key_input(b, true)
-	_frame(world, presenter, camera, 30)
-	print("binoc off=", world.local_player_view().binoculars_view_active)
-	# nvg gain sequence
-	var n := InputEventKey.new()
-	n.physical_keycode = KEY_N
-	n.pressed = true
-	presenter.handle_key_input(n, true)
+	assert_true(_frame_until(world, presenter, camera, func() -> bool:
+		return String(sim.get_local_player_weapon_name()) == "WPN_M4AUTO"),
+			"the live switch back to the primary completes")
 	_frame(world, presenter, camera, 2)
-	print("nvg on gain=", world.local_player_view().nvg_gain,
-			" active=", world.local_player_view().nvg_active)
-	var plus := InputEventKey.new()
-	plus.physical_keycode = KEY_EQUAL
-	plus.pressed = true
-	presenter.handle_key_input(plus, true)
-	_frame(world, presenter, camera, 2)
-	print("after + gain=", world.local_player_view().nvg_gain)
-	var minus := InputEventKey.new()
-	minus.physical_keycode = KEY_MINUS
-	minus.pressed = true
-	presenter.handle_key_input(minus, true)
-	presenter.handle_key_input(minus, true)
-	_frame(world, presenter, camera, 2)
-	print("after -- gain=", world.local_player_view().nvg_gain)
-	# teardown releases the consumer
-	presenter.teardown()
+	var vm_before: Node3D = presenter.viewmodel()
+	assert_not_null(vm_before)
 	sim.request_local_player_weapon_category(7)
+	assert_true(_frame_until(world, presenter, camera, func() -> bool:
+		return String(world.local_player_weapon_name()) == "WPN_SATCHEL_CHARGE"),
+			"the live switch event reinstalls the parent weapon definition")
+	_frame(world, presenter, camera, 2)
+	assert_not_null(presenter.viewmodel(), "the satchel viewmodel rebuilt")
+	assert_ne(presenter.viewmodel(), vm_before,
+			"the stale M4 viewmodel is replaced through refresh_viewmodel")
+	assert_eq(world.drain_local_player_weapon_events().size(), 0,
+			"the live presenter drains every fixed-tick batch")
+
+	# teardown() releases the callback: later events accumulate again and the
+	# presentation freezes at its last owned state.
+	presenter.teardown()
+	sim.request_local_player_weapon_category(3)
 	for i in 45:
 		world.tick(camera.global_position, camera.global_transform, TICK)
-	print("post-teardown drain=", world.drain_local_player_weapon_events().size(),
-			" sim weapon=", sim.get_local_player_weapon_name())
+	assert_gt(world.drain_local_player_weapon_events().size(), 0,
+			"teardown releases the world-to-presenter callback")
+	assert_eq(String(world.local_player_weapon_name()), "WPN_SATCHEL_CHARGE",
+			"no presenter, no presentation change")
+
+
+# --- the real 3P avatar -------------------------------------------------------
+
+
+func test_local_avatar_body_channel_follows_the_sim_tuple() -> void:
+	# The avatar consumes the sim's authoritative body tuple each presentation
+	# frame; at spawn that is the idle key at the motor's own playhead. (The
+	# death-switch BLEND tuple of the old harness needs a lethal event and is
+	# ctest-pinned engine state now.)
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var presenter := _attach_presenter(world, camera)
+	await get_tree().process_frame
+	var sim := world.get_sim()
+	_frame(world, presenter, camera, 2)
+
+	var avatar := _local_avatar(world)
+	assert_not_null(avatar, "the shared presenter owns the real 3P avatar build")
+	assert_eq(String(sim.get_local_player_anim_key()), "anim_idle")
+	assert_eq(String(avatar.get_active_body_clip()), "anim_idle",
+			"the avatar plays the sim's served body key")
+	assert_true(avatar.get_body_blend().is_empty(),
+			"a single-key tuple presents with no blend channel")
+	assert_almost_eq((avatar.global_position - sim.get_local_player_position()).length(),
+			0.0, 0.001, "the avatar node is stamped at the sim position")
+
+	# The posed head bone the eye/aim legs sample [orig: the local bone path
+	# @0x4b6bb3] comes from this avatar's real skeleton.
+	var head: Vector3 = presenter.avatar_head_world()
+	assert_ne(head, Vector3.INF, "the 19-bone rig serves the head-bone sample")
+	assert_between(head.y - sim.get_local_player_position().y, 0.3, 1.2,
+			"the posed head sits at standing height above the entity position")
+
+	presenter.teardown()
+	assert_true(_local_avatar(world) == null or _local_avatar(world).is_queued_for_deletion(),
+			"teardown releases the presenter-owned avatar")

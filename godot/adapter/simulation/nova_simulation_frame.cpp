@@ -28,32 +28,94 @@ std::function<void(int32_t)> leg_int(const Callable &p_cb) {
 
 } // namespace
 
-void NovaSimulation::set_frame_shell_hooks(const Callable &p_listener,
-		const Callable &p_begin_effect_tick, const Callable &p_sync_fixed,
-		const Callable &p_effects_drained, const Callable &p_fixed_done,
-		const Callable &p_present_rows, const Callable &p_present_frame) {
-	frame_listener_cb_ = p_listener;
-	frame_begin_effect_cb_ = p_begin_effect_tick;
-	frame_sync_fixed_cb_ = p_sync_fixed;
-	frame_effects_cb_ = p_effects_drained;
-	frame_fixed_done_cb_ = p_fixed_done;
-	frame_present_rows_cb_ = p_present_rows;
-	frame_present_frame_cb_ = p_present_frame;
+namespace {
+
+// Install-time leg-contract wiring: every named leg must exist on the host —
+// a missing one rejects the whole install (fail loudly; no fallback path).
+bool wire_leg_contract(Object *p_host, const char *const *p_names, int p_count,
+		Callable *const *p_slots) {
+	for (int i = 0; i < p_count; ++i) {
+		if (!p_host->has_method(StringName(p_names[i]))) {
+			ERR_PRINT(String("frame host ") + p_host->get_class() +
+					" is missing leg " + p_names[i] + "; install rejected");
+			return false;
+		}
+	}
+	for (int i = 0; i < p_count; ++i) {
+		*p_slots[i] = Callable(p_host, StringName(p_names[i]));
+	}
+	return true;
 }
 
-void NovaSimulation::set_frame_world_hooks(const Callable &p_terrain,
-		const Callable &p_foliage,
-		const Callable &p_net_drive, const Callable &p_weather,
-		const Callable &p_blink_gates, const Callable &p_occlusion,
-		const Callable &p_iris, const Callable &p_audio) {
-	frame_terrain_cb_ = p_terrain;
-	frame_foliage_cb_ = p_foliage;
-	frame_net_drive_cb_ = p_net_drive;
-	frame_weather_cb_ = p_weather;
-	frame_blink_cb_ = p_blink_gates;
-	frame_occlusion_cb_ = p_occlusion;
-	frame_iris_cb_ = p_iris;
-	frame_audio_cb_ = p_audio;
+} // namespace
+
+void NovaSimulation::set_frame_shell_host(Object *p_host,
+		const Callable &p_listener) {
+	if (p_host == nullptr) {
+		frame_listener_cb_ = Callable();
+		frame_begin_effect_cb_ = Callable();
+		frame_sync_fixed_cb_ = Callable();
+		frame_effects_cb_ = Callable();
+		frame_fixed_done_cb_ = Callable();
+		frame_present_rows_cb_ = Callable();
+		frame_present_frame_cb_ = Callable();
+		return;
+	}
+	static const char *const kNames[] = {
+		"_begin_present_effect_tick",
+		"_frame_sync_fixed_leg",
+		"_frame_effects_drained",
+		"_frame_fixed_tick_completed",
+		"_frame_present_rows_leg",
+		"_frame_present_frame_leg",
+	};
+	Callable *const slots[] = {
+		&frame_begin_effect_cb_,
+		&frame_sync_fixed_cb_,
+		&frame_effects_cb_,
+		&frame_fixed_done_cb_,
+		&frame_present_rows_cb_,
+		&frame_present_frame_cb_,
+	};
+	if (!wire_leg_contract(p_host, kNames, 6, slots)) {
+		return;
+	}
+	frame_listener_cb_ = p_listener;
+}
+
+void NovaSimulation::set_frame_world_host(Object *p_host) {
+	if (p_host == nullptr) {
+		frame_terrain_cb_ = Callable();
+		frame_foliage_cb_ = Callable();
+		frame_net_drive_cb_ = Callable();
+		frame_weather_cb_ = Callable();
+		frame_blink_cb_ = Callable();
+		frame_occlusion_cb_ = Callable();
+		frame_iris_cb_ = Callable();
+		frame_audio_cb_ = Callable();
+		return;
+	}
+	static const char *const kNames[] = {
+		"_frame_terrain_leg",
+		"_frame_foliage_leg",
+		"_frame_net_drive_leg",
+		"_frame_weather_leg",
+		"_frame_blink_leg",
+		"_frame_occlusion_leg",
+		"_frame_iris_leg",
+		"_frame_audio_leg",
+	};
+	Callable *const slots[] = {
+		&frame_terrain_cb_,
+		&frame_foliage_cb_,
+		&frame_net_drive_cb_,
+		&frame_weather_cb_,
+		&frame_blink_cb_,
+		&frame_occlusion_cb_,
+		&frame_iris_cb_,
+		&frame_audio_cb_,
+	};
+	wire_leg_contract(p_host, kNames, 8, slots);
 }
 
 opennova::frame::FrameHooks NovaSimulation::build_frame_hooks() {

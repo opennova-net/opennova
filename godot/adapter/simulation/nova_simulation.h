@@ -935,30 +935,26 @@ public:
 	void reset_tick_bank() { frame_driver_.reset_bank(); }
 
 	// --- The engine-owned game frame (ADR 0033 R1; frame/frame_driver.h) ---
-	// The host installs its device legs ONCE per mission, then drives one call
-	// per render frame. Empty Callables mark legs the role lacks. The loop
-	// shape, the per-tick leg order, and the post-batch frame-leg order are
-	// frame::FrameDriver's; the sim supplies step/logic-tick/effects natively
-	// and boxes the shell's Callables in as hooks.
+	// The host registers ITSELF once per mission and the binding wires the
+	// whole leg contract (documented method names below) — no Callable
+	// bundles. A registered host missing any leg is rejected loudly at
+	// install. Null releases the legs. The loop shape, the per-tick leg
+	// order, and the post-batch frame-leg order are frame::FrameDriver's;
+	// the sim supplies step/logic-tick/effects natively.
 	//
-	// The runtime-driver legs: the camera listener source (-> Vector3), the
-	// effect-pose snapshot rebind, the throwable fixed-tick reconcile, the
-	// drained-effects delivery (Array), the fixed-tick broadcast (int), the
-	// rows-only present, and the full present ladder.
-	void set_frame_shell_hooks(const Callable &p_listener,
-			const Callable &p_begin_effect_tick, const Callable &p_sync_fixed,
-			const Callable &p_effects_drained, const Callable &p_fixed_done,
-			const Callable &p_present_rows, const Callable &p_present_frame);
-	// The world-host legs, in their fixed frame order: the terrain frame
-	// (packet compile + apply — its detail-cell handoff feeds foliage),
-	// foliage dispatch, session drive, world-driven weather, occlusion blink
-	// gates, the render-occlusion frame, iris samples, the audio pass (int
-	// ticks_run).
-	void set_frame_world_hooks(const Callable &p_terrain,
-			const Callable &p_foliage,
-			const Callable &p_net_drive, const Callable &p_weather,
-			const Callable &p_blink_gates, const Callable &p_occlusion,
-			const Callable &p_iris, const Callable &p_audio);
+	// The runtime-driver contract (MissionRuntime): _begin_present_effect_tick,
+	// _frame_sync_fixed_leg, _frame_effects_drained(Array),
+	// _frame_fixed_tick_completed(int), _frame_present_rows_leg,
+	// _frame_present_frame_leg. The camera listener source (-> Vector3) stays
+	// an explicit Callable: it is a distinct device owned by whoever holds the
+	// camera, and a dedicated host has none.
+	void set_frame_shell_host(Object *p_host, const Callable &p_listener);
+	// The world-host contract (GameWorld), in the fixed frame order:
+	// _frame_terrain_leg (packet compile + apply — its detail-cell handoff
+	// feeds foliage), _frame_foliage_leg, _frame_net_drive_leg,
+	// _frame_weather_leg, _frame_blink_leg, _frame_occlusion_leg,
+	// _frame_iris_leg, _frame_audio_leg(int ticks_run).
+	void set_frame_world_host(Object *p_host);
 	// One realtime host frame (the FrameDriver's run_frame; the main-loop
 	// witness lives on the engine header); returns the logic ticks run. One
 	// deterministic single step (debug Step / tests); returns whether the

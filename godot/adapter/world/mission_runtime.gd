@@ -315,20 +315,13 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 		Callable(_throwable_present, 'reset_runtime_state'))
 	# ADR 0033 R1: the loop shape, the per-tick leg order, and the post-batch
 	# frame legs live in the engine FrameDriver (frame/frame_driver.h). This
-	# host installs its presentation/effect device legs ONCE; an invalid
-	# Callable marks a leg this role lacks (a dedicated host has no listener).
-	# Every hook binds a NODE (this host / GameWorld), never a RefCounted
-	# presenter: a Node-bound Callable carries an ObjectID and stays safe to
-	# destroy in any leaked-object teardown order, while a RefCounted-bound one
-	# would make the sim a hidden owner of the presenter.
-	_sim.set_frame_shell_hooks(
-			_fire_listener,
-			Callable(self, "_begin_present_effect_tick"),
-			Callable(self, "_frame_sync_fixed_leg"),
-			Callable(self, "_frame_effects_drained"),
-			Callable(self, "_frame_fixed_tick_completed"),
-			Callable(self, "_frame_present_rows_leg"),
-			Callable(self, "_frame_present_frame_leg"))
+	# host registers itself ONCE and the binding wires the leg contract; the
+	# camera listener stays an explicit device Callable (a dedicated host has
+	# none). The host is a NODE, never a RefCounted presenter: a Node-bound
+	# leg carries an ObjectID and stays safe to destroy in any leaked-object
+	# teardown order, while a RefCounted-bound one would make the sim a hidden
+	# owner of the presenter.
+	_sim.set_frame_shell_host(self, _fire_listener)
 	# Capture the authored node transforms now (pre-tick) so Stop restores them whether the host
 	# played or only stepped. Cheap; the game never Stops but holding the map costs nothing.
 	_capture_transforms()
@@ -854,10 +847,8 @@ func _exit_tree() -> void:
 		_sim.set_runtime_profiling_enabled(false)
 		# Release the frame device legs before the presenters tear down: the
 		# sim must not hold Callables into objects this exit is about to free.
-		_sim.set_frame_shell_hooks(Callable(), Callable(), Callable(),
-				Callable(), Callable(), Callable(), Callable())
-		_sim.set_frame_world_hooks(Callable(), Callable(), Callable(),
-				Callable(), Callable(), Callable(), Callable(), Callable())
+		_sim.set_frame_shell_host(null, Callable())
+		_sim.set_frame_world_host(null)
 	_clear_present_effect_poses()
 	if _fire_present != null:
 		_fire_present.teardown()  # frees the tracer mesh instance under the container
