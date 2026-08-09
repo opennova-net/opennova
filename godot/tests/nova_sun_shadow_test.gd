@@ -1,11 +1,9 @@
 extends GutTest
 
-const NovaSunShadowScript := preload(
-		"res://game/environment/nova_sun_shadow.gd")
 
 
 func test_dynamic_projection_separates_live_casters_from_world_receivers() -> void:
-	var light: SunShadow = NovaSunShadowScript.new()
+	var light: SunShadow = SunShadow.new()
 	light.projection_mode = SunShadow.PROJECTION_DYNAMIC
 	add_child_autofree(light)
 
@@ -19,7 +17,7 @@ func test_dynamic_projection_separates_live_casters_from_world_receivers() -> vo
 
 
 func test_static_projection_only_reaches_the_reimpl_terrain_receiver() -> void:
-	var light: SunShadow = NovaSunShadowScript.new()
+	var light: SunShadow = SunShadow.new()
 	light.projection_mode = SunShadow.PROJECTION_STATIC_TERRAIN
 	add_child_autofree(light)
 

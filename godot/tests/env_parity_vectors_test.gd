@@ -148,7 +148,6 @@ extends GutTest
 # loudly so a dump run is never mistaken for a green run.
 # =============================================================================
 
-const NovaCelestialScript = preload("res://game/environment/nova_celestial.gd")
 
 # The engine tick [docs/engine-primer.md: 62 Hz].
 const TICK := 1.0 / 62.0

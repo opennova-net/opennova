@@ -21,7 +21,6 @@ extends Node3D
 const VegAssets := preload("res://game/terrain/veg_assets.gd")
 const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
-const NovaSunShadowScript := preload("res://game/environment/nova_sun_shadow.gd")
 const MissionRuntime := preload("res://game/world/mission_runtime.gd")
 const NovaDebugViewStatus := preload(
 		"res://game/debug/nova_debug_view_status.gd")
@@ -255,12 +254,12 @@ func _ready() -> void:
 			# surface textures through this wired owner (never a parent probe).
 			_dispatcher.set_terrain(_terrain)
 		_tile_overlay = _terrain.get_node_or_null("TileOverlay") as TerrainTileOverlay
-	_sun_shadow = NovaSunShadowScript.new()
+	_sun_shadow = SunShadow.new()
 	_sun_shadow.name = "SunShadow"
 	_sun_shadow.projection_mode = SunShadow.PROJECTION_DYNAMIC
 	add_child(_sun_shadow)
 	_sun_shadow.set_environment_node(_env)
-	_static_sun_shadow = NovaSunShadowScript.new()
+	_static_sun_shadow = SunShadow.new()
 	_static_sun_shadow.name = "NovaStaticSunShadow"
 	_static_sun_shadow.projection_mode = SunShadow.PROJECTION_STATIC_TERRAIN
 	add_child(_static_sun_shadow)

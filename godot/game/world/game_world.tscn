@@ -1,7 +1,6 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://game/world/game_world.gd" id="1_world"]
-[ext_resource type="Script" path="res://game/environment/nova_celestial.gd" id="6_celestial"]
 
 [sub_resource type="Environment" id="Environment_clear"]
 background_mode = 1
@@ -36,6 +35,5 @@ environment_path = NodePath("../MissionEnvironment")
 environment_path = NodePath("../MissionEnvironment")
 weather_path = NodePath("../Weather")
 
-[node name="Celestial" type="Node3D" parent="."]
-script = ExtResource("6_celestial")
+[node name="Celestial" type="Celestial" parent="."]
 environment_path = NodePath("../MissionEnvironment")

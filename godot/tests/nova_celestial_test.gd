@@ -40,7 +40,7 @@ func _make_fixture() -> Dictionary:
 	celestial.environment_path = NodePath("../CelestialTestEnv")
 	add_child_autofree(celestial)
 	celestial.set_resource_root(resource_root)
-	simulate(celestial, 1, TICK)
+	celestial.advance_frame(TICK)
 	return {
 		"celestial": celestial,
 		"camera": camera,
