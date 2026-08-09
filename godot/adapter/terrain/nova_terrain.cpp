@@ -8,19 +8,13 @@
 // Terrain_TraverseQuadTreeNode@0x5C89C0, Terrain_CollectVisibleSectors@0x5C9120
 // docs/engine_spec_terrain.md 7.1-7.2
 
-#include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
-#include <godot_cpp/classes/editor_interface.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
-#include <godot_cpp/classes/sub_viewport.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/variant/projection.hpp>
 
-#include <algorithm>
 #include <cmath>
-#include <cstring>
-#include <map>
 #include <utility>
 
 using namespace godot;
@@ -59,6 +53,7 @@ void NovaTerrain::_bind_methods() {
 		"set_weather_path", "get_weather_path");
 
 	ClassDB::bind_method(D_METHOD("build"), &NovaTerrain::build);
+	ClassDB::bind_method(D_METHOD("render_frame"), &NovaTerrain::render_frame);
 
 	// Debug API
 	ClassDB::bind_method(D_METHOD("get_traversal_stats"), &NovaTerrain::get_traversal_stats);
@@ -192,7 +187,7 @@ NodePath NovaTerrain::get_weather_path() const {
 
 
 // ---------------------------------------------------------------------------
-// Notifications (_process)
+// Notifications
 // ---------------------------------------------------------------------------
 
 void NovaTerrain::_notification(int p_what) {
@@ -200,278 +195,6 @@ void NovaTerrain::_notification(int p_what) {
 		if (!is_visible_in_tree()) {
 			_hide_visible_patches();
 		}
-	} else if (p_what == NOTIFICATION_PROCESS) {
-		if (!is_visible_in_tree()) {
-			_hide_visible_patches();
-			return;
-		}
-		if (!built) return;
-		foliage_detail_patches.clear();
-
-		const auto& trn = terrain_data->get_trn();
-
-		// Find the active camera — editor viewport or scene camera
-		Camera3D* cam = nullptr;
-		if (Engine::get_singleton()->is_editor_hint()) {
-			EditorInterface* ei = EditorInterface::get_singleton();
-			if (ei) {
-				SubViewport* svp = ei->get_editor_viewport_3d(0);
-				if (svp) cam = svp->get_camera_3d();
-			}
-		} else {
-			Viewport* vp = get_viewport();
-			if (vp) cam = vp->get_camera_3d();
-		}
-		if (!cam) {
-			foliage_detail_patches.clear();
-			return;
-		}
-
-		if (!cam->is_inside_tree()) {
-			foliage_detail_patches.clear();
-			return;
-		}
-
-		Vector3 cam_pos = cam->get_global_position();
-
-		// Build MVP from camera for frustum extraction
-		Transform3D cam_xform = cam->get_global_transform();
-		Projection proj = cam->get_camera_projection();
-
-		// Godot Projection is row-major internally. We need column-major for
-		// Gribb/Hartmann extraction. Projection::columns[] stores columns.
-		Transform3D view = cam_xform.affine_inverse();
-
-		// Build view matrix as float[16] column-major
-		float view_m[16];
-		const Basis& b = view.basis;
-		const Vector3& o = view.origin;
-		view_m[0]  = b[0][0]; view_m[1]  = b[1][0]; view_m[2]  = b[2][0]; view_m[3]  = 0;
-		view_m[4]  = b[0][1]; view_m[5]  = b[1][1]; view_m[6]  = b[2][1]; view_m[7]  = 0;
-		view_m[8]  = b[0][2]; view_m[9]  = b[1][2]; view_m[10] = b[2][2]; view_m[11] = 0;
-		view_m[12] = o.x;     view_m[13] = o.y;     view_m[14] = o.z;     view_m[15] = 1;
-
-		// Projection columns to float[16] column-major
-		float proj_m[16];
-		for (int col = 0; col < 4; col++) {
-			proj_m[col * 4 + 0] = proj.columns[col][0];
-			proj_m[col * 4 + 1] = proj.columns[col][1];
-			proj_m[col * 4 + 2] = proj.columns[col][2];
-			proj_m[col * 4 + 3] = proj.columns[col][3];
-		}
-
-		// MVP = proj * view (column-major multiply)
-		float mvp[16] = {};
-		for (int row = 0; row < 4; row++) {
-			for (int col = 0; col < 4; col++) {
-				for (int k = 0; k < 4; k++) {
-					mvp[col * 4 + row] += proj_m[k * 4 + row] * view_m[col * 4 + k];
-				}
-			}
-		}
-
-		opennova::Frustum frustum = opennova::extract_frustum(mvp);
-		traversal_config.quality = lod_quality;
-
-		// Collect visible patches across sectors
-		std::vector<opennova::VisiblePatch> visible;
-		visible.reserve(256);
-		opennova::TraversalStats tstats;
-
-		// Engine: sector iteration uses 512-world-unit sectors before the shared
-		// quadtree walk (Terrain_CollectVisibleSectors@0x5C9120).
-		int cam_sx = (int)cam_pos.x >> 9;
-		int cam_sz = (int)cam_pos.z >> 9;
-		int mask_x = trn.wrap_x ? 0 : -16;
-		int mask_z = trn.wrap_y ? 0 : -16;
-
-		for (int dz = -5; dz <= 5; dz++) {
-			for (int dx = 0; dx < 11; dx++) {
-				int sx = (cam_sx - 5) + dx;
-				int sz = dz + cam_sz;
-				int gx = sx - trn.origin_x;
-				int gz = sz - trn.origin_y;
-
-				if ((gx & mask_x) != 0) gx = (gx < 0) ? 0 : 0xFF;
-				if ((gz & mask_z) != 0) gz = (gz < 0) ? 0 : 0xFF;
-
-				int sector_id = trn.sector_grid[gz & 0xF][gx & 0xF];
-				if (sector_id <= 0) continue;
-
-				int child = -1;
-				if (sector_id == 1) child = 0;
-				else if (sector_id == 3) child = 1;
-				else if (sector_id == 2) child = 2;
-				else if (sector_id == 4) child = 3;
-				if (child < 0 || child >= 4 || l1_children[child] < 0) continue;
-
-				float sector_ox = static_cast<float>(sx * 512);
-				float sector_oz = static_cast<float>(sz * 512);
-
-				const size_t sector_patch_begin = visible.size();
-				opennova::traverse_quadtree(
-					quad_nodes, tile_mesh_meta,
-					l1_children[child],
-					frustum, cam_pos.x, cam_pos.y, cam_pos.z,
-					sector_ox, sector_oz,
-					traversal_config, visible, tstats);
-
-				// Detail foliage collection is NOT a radial walk: retail's
-				// frustum-culled traversal hands each frustum-surviving emitted
-				// node of LOD level >= 3 to the 16u cell collector, so cells
-				// behind the camera never enter the visible-key list and the
-				// far-slot pool's working set stays below its 16-bit-index
-				// capacity (over-collection thrashed the witnessed LRU into
-				// per-frame cell blink; D-FOLIAGE-13)
-				// [orig: Terrain_TraverseQuadtreeNode handoff
-				// @ 0x60905c..0x60907c -> Terrain_CollectNearFoliagePatches
-				// @ 0x603e60]. The collector re-tests every cell's clamped
-				// AABB against the 42u limit, so the handoff is a broad phase.
-				for (size_t pi = sector_patch_begin; pi < visible.size(); ++pi) {
-					const opennova::VisiblePatch &vp = visible[pi];
-					if (vp.lod_level < 3 || vp.tile_index < 0 ||
-							vp.tile_index >= (int)tile_mesh_meta.size()) {
-						continue;
-					}
-					const int node_size = 1024 >> vp.lod_level;
-					const auto &tm = tile_mesh_meta[vp.tile_index];
-					const int local_x = (int)std::lround(
-						tm.center[0] - node_size * 0.5f);
-					const int local_z = (int)std::lround(
-						tm.center[2] - node_size * 0.5f);
-					opennova::collect_foliage_detail_patches(
-						mipchain, sector_id, sx * 512, sz * 512,
-						local_x, local_z, node_size,
-						static_cast<float>(cam_pos.x),
-						static_cast<float>(cam_pos.y),
-						static_cast<float>(cam_pos.z),
-						foliage_detail_patches);
-				}
-			}
-		}
-
-		// Sort front-to-back
-		std::sort(visible.begin(), visible.end(),
-			[](const opennova::VisiblePatch& a, const opennova::VisiblePatch& b) {
-				return a.distance < b.distance;
-			});
-
-		// Assign visible patches to pool via RenderingServer
-		RenderingServer* rs = RenderingServer::get_singleton();
-		int count = std::min(static_cast<int>(visible.size()), PATCH_POOL_SIZE);
-
-		for (int i = 0; i < count; i++) {
-			const auto& vp = visible[i];
-
-			if (vp.tile_index < 0 || vp.tile_index >= static_cast<int>(tile_infos.size())) {
-				if (patch_visible[i]) {
-					rs->instance_set_visible(patch_instances[i], false);
-					patch_visible[i] = false;
-				}
-				continue;
-			}
-
-			const auto& ti = tile_infos[vp.tile_index];
-
-			// Select LOD level
-			int lod = opennova::terrain_lod_family(vp.lod_sub);
-			if (ti.lod_meshes[lod].is_null() && lod != 0) lod = 0;
-			if (ti.lod_meshes[lod].is_null()) {
-				if (patch_visible[i]) {
-					rs->instance_set_visible(patch_instances[i], false);
-					patch_visible[i] = false;
-				}
-				continue;
-			}
-
-			const auto& source_tile =
-				terrain_data->get_cpt().tiles[vp.tile_index];
-
-			// Only update mesh if changed
-			RID mesh_rid = ti.lod_meshes[lod]->get_rid();
-			if (mesh_rid != last_mesh_rid[i]) {
-				rs->instance_set_base(patch_instances[i], mesh_rid);
-				last_mesh_rid[i] = mesh_rid;
-			}
-
-			// Only update transform if changed
-			Transform3D xform(Basis(), Vector3(vp.sector_ox, 0.0f, vp.sector_oz));
-			if (xform != last_transform[i]) {
-				rs->instance_set_transform(patch_instances[i], xform);
-				last_transform[i] = xform;
-			}
-
-			rs->instance_geometry_set_shader_parameter(
-				patch_instances[i], "u_instance_source_quadrant",
-				Vector2(static_cast<float>((source_tile.tile_x >> 9) & 1),
-					static_cast<float>((source_tile.tile_y >> 9) & 1)));
-
-			// Per-instance debug data (only set when a debug mode is active)
-			if (debug_mode > 0) {
-				rs->instance_geometry_set_shader_parameter(patch_instances[i],
-					"u_instance_lod", static_cast<float>(lod));
-				rs->instance_geometry_set_shader_parameter(patch_instances[i],
-					"u_instance_sector_x", vp.sector_ox / 512.0f);
-				rs->instance_geometry_set_shader_parameter(patch_instances[i],
-					"u_instance_sector_z", vp.sector_oz / 512.0f);
-			}
-
-			if (!patch_visible[i]) {
-				rs->instance_set_visible(patch_instances[i], true);
-				patch_visible[i] = true;
-			}
-		}
-
-		// Hide unused pool entries
-		for (int i = count; i < patches_active; i++) {
-			if (patch_visible[i]) {
-				rs->instance_set_visible(patch_instances[i], false);
-				patch_visible[i] = false;
-			}
-		}
-		patches_active = count;
-
-		// Capture debug stats
-		last_stats = tstats;
-		std::memset(lod_distribution, 0, sizeof(lod_distribution));
-		for (int i = 0; i < count; i++) {
-			int lod = opennova::terrain_lod_family(visible[i].lod_sub);
-			lod_distribution[lod]++;
-		}
-
-		// Update shader parameters on the single shared material
-		if (terrain_material.is_valid()) {
-			terrain_material->set_shader_parameter("u_debug_mode", debug_mode);
-		}
-
-		// Update lighting from NovaEnvironment, prefer smoothed colors from NovaWeather
-		// Uses dynamic call() so environment/weather can be GDScript or C++.
-		if (terrain_material.is_valid()) {
-			if (!terrain_node_cache_valid)
-				_cache_env_weather_nodes();
-
-			if (cached_env_node && (bool)cached_env_node->call("is_loaded")) {
-				// Base env -> terrain-uniform push, shared with the editor preview
-				// (NovaEnvironment.apply_terrain_uniforms drives both shaders' uniforms).
-				cached_env_node->call("apply_terrain_uniforms", terrain_material);
-				// Runtime-only: prefer NovaWeather-smoothed colors when a weather node
-				// is present (overriding the ones it smooths). The terrain surface
-				// consumes only c1 = light + c0 = sky [orig: @ 0x604420].
-				if (cached_weather_node) {
-					terrain_material->set_shader_parameter("u_sun_light", cached_weather_node->call("get_smooth_sun"));
-					terrain_material->set_shader_parameter("u_sky_ambient", cached_weather_node->call("get_smooth_sky"));
-					terrain_material->set_shader_parameter("u_fog_color", cached_weather_node->call("get_smooth_fog"));
-				}
-				// Tile overlay tint: HALF(terrain_rgb) under MODULATE2X folded to
-				// one multiply; the shared runtime/ONED tile path consumes this uniform.
-				// [orig: PolyTrn_RenderTile @ 0x60df0d].
-				tile_overlay_tint =
-					cached_env_node->call("get_tile_overlay_tint");
-				terrain_material->set_shader_parameter(
-					"u_tile_overlay_tint", tile_overlay_tint);
-			}
-		}
-
 	} else if (p_what == NOTIFICATION_READY) {
 		// Auto-load and auto-build if terrain_data is configured
 		if (terrain_data.is_valid() && !terrain_data->is_loaded()) {
@@ -485,12 +208,165 @@ void NovaTerrain::_notification(int p_what) {
 			build();
 		}
 		terrain_node_cache_valid = false;
-		set_process(true);
 	} else if (p_what == NOTIFICATION_EXIT_TREE) {
 		_clear_patch_pool();
 		cached_env_node = nullptr;
 		cached_weather_node = nullptr;
 		terrain_node_cache_valid = false;
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The terrain frame leg (ADR 0033 R2): the engine compiles the packet, this
+// node applies it. Every per-frame decision — sector window, traversal,
+// foliage handoff, order, budget, family resolve — is TerrainFrameCompiler's;
+// what remains here is device work (camera sampling, instance-pool writes,
+// material pushes).
+// ---------------------------------------------------------------------------
+
+void NovaTerrain::render_frame() {
+	if (!is_visible_in_tree()) {
+		_hide_visible_patches();
+		return;
+	}
+	if (!built) {
+		return;
+	}
+	frame_packet_live = false;
+
+	// Sample the scene camera — the one device input the compiler needs.
+	Camera3D* cam = nullptr;
+	Viewport* vp = get_viewport();
+	if (vp) cam = vp->get_camera_3d();
+	if (!cam || !cam->is_inside_tree()) {
+		return;
+	}
+
+	const Vector3 cam_pos = cam->get_global_position();
+	const Transform3D view = cam->get_global_transform().affine_inverse();
+	const Projection proj = cam->get_camera_projection();
+
+	opennova::TerrainViewInput view_input;
+	view_input.cam_x = static_cast<float>(cam_pos.x);
+	view_input.cam_y = static_cast<float>(cam_pos.y);
+	view_input.cam_z = static_cast<float>(cam_pos.z);
+
+	// Column-major view matrix from the camera's inverse transform.
+	const Basis& b = view.basis;
+	const Vector3& o = view.origin;
+	view_input.view[0]  = b[0][0]; view_input.view[1]  = b[1][0]; view_input.view[2]  = b[2][0]; view_input.view[3]  = 0;
+	view_input.view[4]  = b[0][1]; view_input.view[5]  = b[1][1]; view_input.view[6]  = b[2][1]; view_input.view[7]  = 0;
+	view_input.view[8]  = b[0][2]; view_input.view[9]  = b[1][2]; view_input.view[10] = b[2][2]; view_input.view[11] = 0;
+	view_input.view[12] = o.x;     view_input.view[13] = o.y;     view_input.view[14] = o.z;     view_input.view[15] = 1;
+
+	// Godot Projection stores columns; the compiler wants column-major floats.
+	for (int col = 0; col < 4; col++) {
+		view_input.proj[col * 4 + 0] = proj.columns[col][0];
+		view_input.proj[col * 4 + 1] = proj.columns[col][1];
+		view_input.proj[col * 4 + 2] = proj.columns[col][2];
+		view_input.proj[col * 4 + 3] = proj.columns[col][3];
+	}
+
+	traversal_config.quality = lod_quality;
+	view_input.config = traversal_config;
+
+	const opennova::TerrainDrawPacket &packet =
+			frame_compiler.compile(scene_snapshot, view_input);
+	frame_packet_live = true;
+
+	// Apply the packet onto the instance pool: packet index == pool slot.
+	RenderingServer* rs = RenderingServer::get_singleton();
+	const int count = static_cast<int>(packet.patches.size());
+
+	for (int i = 0; i < count; i++) {
+		const opennova::TerrainPatchDraw &draw = packet.patches[i];
+		const auto& ti = tile_infos[draw.tile_index];
+		const Ref<ArrayMesh> &mesh = ti.lod_meshes[draw.lod_family];
+		if (mesh.is_null()) {
+			// The compiler resolved the family against the same index counts
+			// the mesh build used; a null here means the two went out of sync.
+			if (patch_visible[i]) {
+				rs->instance_set_visible(patch_instances[i], false);
+				patch_visible[i] = false;
+			}
+			continue;
+		}
+
+		// Only update mesh if changed
+		RID mesh_rid = mesh->get_rid();
+		if (mesh_rid != last_mesh_rid[i]) {
+			rs->instance_set_base(patch_instances[i], mesh_rid);
+			last_mesh_rid[i] = mesh_rid;
+		}
+
+		// Only update transform if changed
+		Transform3D xform(Basis(), Vector3(draw.sector_ox, 0.0f, draw.sector_oz));
+		if (xform != last_transform[i]) {
+			rs->instance_set_transform(patch_instances[i], xform);
+			last_transform[i] = xform;
+		}
+
+		rs->instance_geometry_set_shader_parameter(
+			patch_instances[i], "u_instance_source_quadrant",
+			Vector2(static_cast<float>(draw.quadrant_x),
+				static_cast<float>(draw.quadrant_z)));
+
+		// Per-instance debug data (only set when a debug mode is active)
+		if (debug_mode > 0) {
+			rs->instance_geometry_set_shader_parameter(patch_instances[i],
+				"u_instance_lod", static_cast<float>(draw.lod_family));
+			rs->instance_geometry_set_shader_parameter(patch_instances[i],
+				"u_instance_sector_x", draw.sector_ox / 512.0f);
+			rs->instance_geometry_set_shader_parameter(patch_instances[i],
+				"u_instance_sector_z", draw.sector_oz / 512.0f);
+		}
+
+		if (!patch_visible[i]) {
+			rs->instance_set_visible(patch_instances[i], true);
+			patch_visible[i] = true;
+		}
+	}
+
+	// Hide unused pool entries
+	for (int i = count; i < patches_active; i++) {
+		if (patch_visible[i]) {
+			rs->instance_set_visible(patch_instances[i], false);
+			patch_visible[i] = false;
+		}
+	}
+	patches_active = count;
+
+	// Update shader parameters on the single shared material
+	if (terrain_material.is_valid()) {
+		terrain_material->set_shader_parameter("u_debug_mode", debug_mode);
+	}
+
+	// Update lighting from NovaEnvironment, prefer smoothed colors from NovaWeather
+	// Uses dynamic call() so environment/weather can be GDScript or C++.
+	if (terrain_material.is_valid()) {
+		if (!terrain_node_cache_valid)
+			_cache_env_weather_nodes();
+
+		if (cached_env_node && (bool)cached_env_node->call("is_loaded")) {
+			// Base env -> terrain-uniform push, shared with the editor preview
+			// (NovaEnvironment.apply_terrain_uniforms drives both shaders' uniforms).
+			cached_env_node->call("apply_terrain_uniforms", terrain_material);
+			// Runtime-only: prefer NovaWeather-smoothed colors when a weather node
+			// is present (overriding the ones it smooths). The terrain surface
+			// consumes only c1 = light + c0 = sky [orig: @ 0x604420].
+			if (cached_weather_node) {
+				terrain_material->set_shader_parameter("u_sun_light", cached_weather_node->call("get_smooth_sun"));
+				terrain_material->set_shader_parameter("u_sky_ambient", cached_weather_node->call("get_smooth_sky"));
+				terrain_material->set_shader_parameter("u_fog_color", cached_weather_node->call("get_smooth_fog"));
+			}
+			// Tile overlay tint: HALF(terrain_rgb) under MODULATE2X folded to
+			// one multiply; the shared runtime/ONED tile path consumes this uniform.
+			// [orig: PolyTrn_RenderTile @ 0x60df0d].
+			tile_overlay_tint =
+				cached_env_node->call("get_tile_overlay_tint");
+			terrain_material->set_shader_parameter(
+				"u_tile_overlay_tint", tile_overlay_tint);
+		}
 	}
 }
 
@@ -621,7 +497,7 @@ void NovaTerrain::_hide_visible_patches() {
 }
 
 void NovaTerrain::_clear_patch_pool() {
-	foliage_detail_patches.clear();
+	frame_packet_live = false;
 	RenderingServer* rs = RenderingServer::get_singleton();
 	if (!rs) {
 		return;
@@ -642,14 +518,9 @@ void NovaTerrain::_clear_terrain() {
 	_clear_patch_pool();
 	_clear_tile_overlay_texture();
 	_clear_derived_textures();
-	foliage_detail_patches.clear();
 
 	tile_infos.clear();
-	quad_nodes.clear();
-	tile_mesh_meta.clear();
-	mipchain = {};
-	root_node = -1;
-	for (int i = 0; i < 4; i++) l1_children[i] = -1;
+	scene_snapshot = opennova::TerrainSceneSnapshot();
 	built = false;
 }
 
@@ -661,11 +532,19 @@ void NovaTerrain::build() {
 		return;
 	}
 
+	// The engine owns the scene: quadtree, tile metadata, mipchain, sector
+	// routing (ADR 0033 R2). The mesh build below uploads the same CPT tiles
+	// the snapshot's index counts describe.
+	scene_snapshot = opennova::build_terrain_scene_snapshot(
+			terrain_data->get_cpt(), terrain_data->get_trn());
+	if (!scene_snapshot.valid()) {
+		UtilityFunctions::push_warning("NovaTerrain: no valid baked CPT data; skipping native mesh build");
+		return;
+	}
 	if (!_build_terrain()) {
 		UtilityFunctions::push_warning("NovaTerrain: no valid baked CPT data; skipping native mesh build");
 		return;
 	}
-	_build_quadtree();
 
 	// Create lightweight RenderingServer instances for the patch pool
 	RenderingServer* rs = RenderingServer::get_singleton();
@@ -689,7 +568,8 @@ void NovaTerrain::build() {
 	built = true;
 
 	UtilityFunctions::print_verbose("NovaTerrain: Built ", static_cast<int>(tile_infos.size()),
-		" tiles, ", static_cast<int>(quad_nodes.size()), " quad nodes, pool=", PATCH_POOL_SIZE);
+		" tiles, ", static_cast<int>(scene_snapshot.quad_nodes.size()),
+		" quad nodes, pool=", PATCH_POOL_SIZE);
 }
 
 bool NovaTerrain::_build_terrain() {
@@ -726,7 +606,6 @@ bool NovaTerrain::_build_terrain() {
 	}
 
 	tile_infos.resize(cpt.tiles.size());
-	tile_mesh_meta.resize(cpt.tiles.size());
 
 	int total_verts = 0;
 	int total_indices = 0;
@@ -734,12 +613,6 @@ bool NovaTerrain::_build_terrain() {
 	for (size_t ti = 0; ti < cpt.tiles.size(); ti++) {
 		const auto& tile = cpt.tiles[ti];
 		auto& info = tile_infos[ti];
-		auto& meta = tile_mesh_meta[ti];
-
-		meta.vertex_count = tile.vertex_count;
-		meta.tile_size = tile.tile_size;
-		meta.aabb_min[0] = meta.aabb_min[1] = meta.aabb_min[2] = 1e9f;
-		meta.aabb_max[0] = meta.aabb_max[1] = meta.aabb_max[2] = -1e9f;
 
 		// Build vertex data
 		PackedVector3Array positions;
@@ -777,23 +650,7 @@ bool NovaTerrain::_build_terrain() {
 			normals.set(vi, _heightmap_normal(cpt.depth_buffer, hx, hz, taps));
 			uvs.set(vi, Vector2(static_cast<float>(wx) / 1024.0f,
 			                    static_cast<float>(wz) / 1024.0f));
-
-			// Update AABB
-			if (lx < meta.aabb_min[0]) meta.aabb_min[0] = lx;
-			if (hy < meta.aabb_min[1]) meta.aabb_min[1] = hy;
-			if (lz < meta.aabb_min[2]) meta.aabb_min[2] = lz;
-			if (lx > meta.aabb_max[0]) meta.aabb_max[0] = lx;
-			if (hy > meta.aabb_max[1]) meta.aabb_max[1] = hy;
-			if (lz > meta.aabb_max[2]) meta.aabb_max[2] = lz;
 		}
-
-		// Compute center + radius
-		for (int i = 0; i < 3; i++)
-			meta.center[i] = (meta.aabb_min[i] + meta.aabb_max[i]) * 0.5f;
-		float dx = meta.aabb_max[0] - meta.center[0];
-		float dy = meta.aabb_max[1] - meta.center[1];
-		float dz = meta.aabb_max[2] - meta.center[2];
-		meta.radius = std::sqrt(dx * dx + dy * dy + dz * dz);
 
 		total_verts += tile.vertex_count;
 
@@ -813,9 +670,9 @@ bool NovaTerrain::_build_terrain() {
 				}
 			}
 
-			info.lod_index_counts[lod] = indices.size();
-			meta.lods[lod].index_count = indices.size();
-
+			// The <3 gate matches the snapshot's per-LOD index counts, so the
+			// compiler's family fallback and this mesh set agree by
+			// construction (both derive from the same converted counts).
 			if (indices.size() < 3) continue;
 
 			total_indices += indices.size();
@@ -840,131 +697,37 @@ bool NovaTerrain::_build_terrain() {
 	return true;
 }
 
-void NovaTerrain::_build_quadtree() {
-	const auto& cpt = terrain_data->get_cpt();
-
-	if (cpt.tiles.empty()) return;
-
-	// Build tile lookup by (x, z, size)
-	struct TileKey {
-		uint16_t x, z, size;
-		bool operator<(const TileKey& o) const {
-			if (size != o.size) return size < o.size;
-			if (x != o.x) return x < o.x;
-			return z < o.z;
-		}
-	};
-	std::map<TileKey, int> tile_lookup;
-	for (size_t i = 0; i < cpt.tiles.size(); i++) {
-		const auto& t = cpt.tiles[i];
-		tile_lookup[{t.tile_x, t.tile_y, t.tile_size}] = static_cast<int>(i);
-	}
-
-	// Determine leaf size
-	uint16_t leaf_size = 1024;
-	for (const auto& t : cpt.tiles)
-		if (t.tile_size < leaf_size) leaf_size = t.tile_size;
-
-	// Build mipchain
-	mipchain = opennova::build_mipchain(cpt.depth_buffer, 1024);
-
-	// Shared quadtree builder feeding the same 1024 -> leaf subdivision the
-	// engine traverses in Terrain_TraverseQuadTreeNode@0x5C89C0.
-	struct Builder {
-		std::vector<opennova::QuadNode>& nodes;
-		const std::map<TileKey, int>& lut;
-		opennova::Mipchain& mc;
-		uint16_t leaf_sz;
-		int atlas_dim;
-
-		int build(int size, int lx, int lz, int lod_level) {
-			opennova::QuadNode node;
-			node.lod_level = lod_level;
-			node.size = size;
-
-			node.aabb_min[0] = static_cast<float>(lx & 0x1FF);
-			node.aabb_min[2] = static_cast<float>(lz & 0x1FF);
-			node.aabb_max[0] = static_cast<float>((lx & 0x1FF) + size);
-			node.aabb_max[2] = static_cast<float>((lz & 0x1FF) + size);
-
-			// Height bounds from mipchain
-			if (lod_level < mc.level_count) {
-				int cells_per_side = atlas_dim / size;
-				int mip_idx = (lx / size) + (lz / size) * cells_per_side;
-				uint8_t* entry = mc.levels[lod_level] + 2 * mip_idx;
-				node.aabb_min[1] = static_cast<float>(entry[0]) * 0.5f;
-				node.aabb_max[1] = static_cast<float>(entry[1]) * 0.5f;
-			} else {
-				node.aabb_min[1] = 0;
-				node.aabb_max[1] = 128.0f;
-			}
-
-			for (int i = 0; i < 3; i++)
-				node.center[i] = (node.aabb_min[i] + node.aabb_max[i]) * 0.5f;
-			float dx = node.aabb_max[0] - node.center[0];
-			float dy = node.aabb_max[1] - node.center[1];
-			float dz = node.aabb_max[2] - node.center[2];
-			node.radius = std::sqrt(dx * dx + dy * dy + dz * dz);
-
-			auto it = lut.find({static_cast<uint16_t>(lx), static_cast<uint16_t>(lz),
-			                    static_cast<uint16_t>(size)});
-			node.tile_index = (it != lut.end()) ? it->second : -1;
-			node.is_leaf = (size <= static_cast<int>(leaf_sz));
-
-			int this_idx = static_cast<int>(nodes.size());
-			nodes.push_back(node);
-
-			if (size > static_cast<int>(leaf_sz)) {
-				int half = size / 2;
-				nodes[this_idx].children[0] = build(half, lx,        lz,        lod_level + 1);
-				nodes[this_idx].children[1] = build(half, lx + half, lz,        lod_level + 1);
-				nodes[this_idx].children[2] = build(half, lx,        lz + half, lod_level + 1);
-				nodes[this_idx].children[3] = build(half, lx + half, lz + half, lod_level + 1);
-			}
-			return this_idx;
-		}
-	};
-
-	quad_nodes.reserve(512);
-	Builder builder{quad_nodes, tile_lookup, mipchain, leaf_size, 1024};
-	root_node = builder.build(1024, 0, 0, 0);
-
-	if (root_node >= 0) {
-		for (int i = 0; i < 4; i++)
-			l1_children[i] = quad_nodes[root_node].children[i];
-	}
-
-	UtilityFunctions::print_verbose("NovaTerrain: Quadtree built — ", static_cast<int>(quad_nodes.size()),
-		" nodes, leaf_size=", leaf_size, ", mipchain levels=", mipchain.level_count);
-}
-
 // ---------------------------------------------------------------------------
-// Debug API
+// Debug API — cold reads over the compiler's last packet
 // ---------------------------------------------------------------------------
 
 Dictionary NovaTerrain::get_traversal_stats() const {
+	const opennova::TraversalStats &stats =
+			frame_compiler.last_packet().debug.traversal;
 	Dictionary d;
-	d["nodes_visited"] = last_stats.nodes_visited;
-	d["rej_nearfar"] = last_stats.rej_nearfar;
-	d["rej_left"] = last_stats.rej_left;
-	d["rej_right"] = last_stats.rej_right;
-	d["rej_bottom"] = last_stats.rej_bottom;
-	d["rej_top"] = last_stats.rej_top;
-	d["partial_subdiv"] = last_stats.partial_subdiv_count;
-	d["budget_drops"] = last_stats.budget_drops;
-	d["leaf_emits"] = last_stats.leaf_emits;
-	d["nonleaf_emits"] = last_stats.nonleaf_emits;
-	d["dist_min"] = last_stats.dist_min;
-	d["dist_max"] = last_stats.dist_max;
-	d["lod_fallbacks"] = last_stats.lod_fallbacks;
+	d["nodes_visited"] = stats.nodes_visited;
+	d["rej_nearfar"] = stats.rej_nearfar;
+	d["rej_left"] = stats.rej_left;
+	d["rej_right"] = stats.rej_right;
+	d["rej_bottom"] = stats.rej_bottom;
+	d["rej_top"] = stats.rej_top;
+	d["partial_subdiv"] = stats.partial_subdiv_count;
+	d["budget_drops"] = stats.budget_drops;
+	d["leaf_emits"] = stats.leaf_emits;
+	d["nonleaf_emits"] = stats.nonleaf_emits;
+	d["dist_min"] = stats.dist_min;
+	d["dist_max"] = stats.dist_max;
+	d["lod_fallbacks"] = stats.lod_fallbacks;
 	return d;
 }
 
 PackedInt32Array NovaTerrain::get_lod_distribution() const {
+	const opennova::TerrainFrameDebugCounters &debug =
+			frame_compiler.last_packet().debug;
 	PackedInt32Array arr;
 	arr.resize(8);
 	for (int i = 0; i < 8; i++)
-		arr.set(i, lod_distribution[i]);
+		arr.set(i, debug.lod_distribution[i]);
 	return arr;
 }
 
@@ -983,7 +746,13 @@ int NovaTerrain::get_visible_patch_count() const {
 }
 
 const std::vector<FoliageDetailPatch> &NovaTerrain::get_foliage_detail_patches_native() const {
-	return foliage_detail_patches;
+	// No compile ran for the current frame (torn down, hidden, no camera):
+	// report no cells rather than a stale packet's.
+	static const std::vector<FoliageDetailPatch> empty;
+	if (!frame_packet_live) {
+		return empty;
+	}
+	return frame_compiler.last_packet().detail_cells;
 }
 
 void NovaTerrain::set_debug_no_frustum(bool v) { traversal_config.no_frustum = v; }

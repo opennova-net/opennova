@@ -42,8 +42,8 @@ void NovaSimulation::_bind_methods() {
 								  "sync_fixed", "effects_drained", "fixed_done",
 								  "present_rows", "present_frame"),
 			&NovaSimulation::set_frame_shell_hooks);
-	ClassDB::bind_method(D_METHOD("set_frame_world_hooks", "foliage", "net_drive", "weather",
-								  "blink_gates", "occlusion", "iris", "audio"),
+	ClassDB::bind_method(D_METHOD("set_frame_world_hooks", "terrain", "foliage", "net_drive",
+								  "weather", "blink_gates", "occlusion", "iris", "audio"),
 			&NovaSimulation::set_frame_world_hooks);
 	ClassDB::bind_method(D_METHOD("frame_realtime", "delta"), &NovaSimulation::frame_realtime);
 	ClassDB::bind_method(D_METHOD("frame_single"), &NovaSimulation::frame_single);

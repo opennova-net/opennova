@@ -41,10 +41,12 @@ void NovaSimulation::set_frame_shell_hooks(const Callable &p_listener,
 	frame_present_frame_cb_ = p_present_frame;
 }
 
-void NovaSimulation::set_frame_world_hooks(const Callable &p_foliage,
+void NovaSimulation::set_frame_world_hooks(const Callable &p_terrain,
+		const Callable &p_foliage,
 		const Callable &p_net_drive, const Callable &p_weather,
 		const Callable &p_blink_gates, const Callable &p_occlusion,
 		const Callable &p_iris, const Callable &p_audio) {
+	frame_terrain_cb_ = p_terrain;
 	frame_foliage_cb_ = p_foliage;
 	frame_net_drive_cb_ = p_net_drive;
 	frame_weather_cb_ = p_weather;
@@ -56,6 +58,7 @@ void NovaSimulation::set_frame_world_hooks(const Callable &p_foliage,
 
 opennova::frame::FrameHooks NovaSimulation::build_frame_hooks() {
 	opennova::frame::FrameHooks hooks;
+	hooks.terrain = leg(frame_terrain_cb_);
 	hooks.foliage = leg(frame_foliage_cb_);
 	// The listener stamp: read the shell's camera listener and stamp the
 	// sim's fire-sound gate; a role with no listener (dedicated) never stamps

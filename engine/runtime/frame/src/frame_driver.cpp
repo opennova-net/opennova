@@ -36,10 +36,14 @@ bool FrameDriver::advance_one(const FrameHooks &hooks, int32_t &r_logic_tick) {
 int32_t FrameDriver::run_frame(double dt, const FrameHooks &hooks) {
 	const int64_t frame_start = now_us();
 	perf_ = FramePerf{};
-	// Foliage dispatches against the pre-tick camera, then the listener stamps
-	// before the batch so this batch's fires gate their propagation delay
-	// against the current camera [orig: the listener global updates before the
-	// entity/fire processing; @ 0x528e57].
+	// Terrain compiles its patch packet first (the foliage leg consumes its
+	// detail-cell handoff), foliage dispatches against the same pre-tick
+	// camera, then the listener stamps before the batch so this batch's fires
+	// gate their propagation delay against the current camera [orig: the
+	// listener global updates before the entity/fire processing; @ 0x528e57].
+	if (hooks.terrain) {
+		hooks.terrain();
+	}
 	if (hooks.foliage) {
 		hooks.foliage();
 	}

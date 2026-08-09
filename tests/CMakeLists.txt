@@ -808,6 +808,11 @@ target_link_libraries(terrain_foliage_detail_collector_test PRIVATE opennova_run
 target_include_directories(terrain_foliage_detail_collector_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME terrain_foliage_detail_collector COMMAND terrain_foliage_detail_collector_test)
 
+add_executable(terrain_frame_compiler_test terrain/terrain_frame_compiler_test.cpp)
+target_link_libraries(terrain_frame_compiler_test PRIVATE opennova_runtime)
+target_include_directories(terrain_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME terrain_frame_compiler COMMAND terrain_frame_compiler_test)
+
 # parametric_parity is a long byte-identical fixture parity run and remains
 # disabled until its CI stability/performance cost is addressed.
 set_tests_properties(parametric_parity PROPERTIES DISABLED TRUE)
