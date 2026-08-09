@@ -9,7 +9,8 @@ const FIXTURE := "res://../fixtures/mus/jo_gamemus.bin"
 
 
 func _ast() -> Array:
-	var ms := load(FIXTURE) as NovaMusicScript
+	var ms := NovaMusicScript.new()
+	ms.load_from_path(FIXTURE)
 	assert_not_null(ms, "fixture loads as NovaMusicScript")
 	if ms == null:
 		return []
@@ -131,7 +132,8 @@ func test_statements_ascend_by_offset() -> void:
 
 
 func test_unknown_script_is_empty() -> void:
-	var ms := load(FIXTURE) as NovaMusicScript
+	var ms := NovaMusicScript.new()
+	ms.load_from_path(FIXTURE)
 	if ms == null:
 		return
 	assert_eq(ms.get_program_ast(StringName("nope")).size(), 0, "unknown script -> empty AST")

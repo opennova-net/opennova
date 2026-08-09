@@ -7,8 +7,8 @@ extends SceneTree
 # Now that CPT is optional and the editor saves .trn-only projects, this
 # probe confirms the whole round-trip:
 #   1. NovaTerrainData.load(Dvxi5.trn) — import from res://
-#   2. ResourceSaver.save(.trn) into a fresh dir (polydata empty)
-#   3. ResourceLoader.load(.trn) back from that dir
+#   2. save_to_path(.trn) into a fresh dir (polydata empty)
+#   3. NovaTerrainData load back from that dir
 #   4. Assert texture filenames round-trip and each file exists on disk.
 #
 # Run: godot --headless --path godot -s res://tests/trn_project_roundtrip_probe.gd
@@ -82,9 +82,9 @@ func _run() -> void:
 	imported.set_terrain_name(terrain_name)
 
 	var trn_path := output_dir + "/" + terrain_name + ".trn"
-	var save_err := ResourceSaver.save(imported, trn_path)
+	var save_err := imported.save_to_path(trn_path)
 	if save_err != OK:
-		push_error("ResourceSaver.save(.trn) err=" + str(save_err))
+		push_error("save_to_path(.trn) err=" + str(save_err))
 		quit(1); return
 
 	# There must be no .tpj file written.
@@ -93,9 +93,10 @@ func _run() -> void:
 		quit(1); return
 
 	print("\n[step 3] reopen .trn (CPT absent — must not block)")
-	var reopened := ResourceLoader.load(trn_path, "NovaTerrainData", ResourceLoader.CACHE_MODE_IGNORE) as NovaTerrainData
-	if reopened == null:
-		push_error("probe FAIL: ResourceLoader.load(.trn) returned null — NovaTerrainData::load() should tolerate missing CPT")
+	var reopened := NovaTerrainData.new()
+	reopened.set_trn_path(trn_path)
+	if reopened.load() != OK:
+		push_error("probe FAIL: reopening the .trn failed — NovaTerrainData::load() should tolerate missing CPT")
 		quit(1); return
 	if not reopened.is_loaded():
 		push_error("probe FAIL: reopened data reports loaded=false")
@@ -170,17 +171,18 @@ func _run() -> void:
 	renamed.set_trn_texture_filename("tilestrip", new_name + "_t.tga")
 
 	var renamed_trn_path := rename_dir + "/" + new_name + ".trn"
-	if ResourceSaver.save(renamed, renamed_trn_path) != OK:
-		push_error("renamed ResourceSaver.save(.trn) failed")
+	if renamed.save_to_path(renamed_trn_path) != OK:
+		push_error("renamed save_to_path(.trn) failed")
 		quit(1); return
 
 	for expected_file in [new_name + ".trn", new_name + "_m.pcx", new_name + "_f.pcx", new_name + "_t.tga", new_name + "_c.tga", new_name + "_d1.tga"]:
 		if not FileAccess.file_exists(rename_dir + "/" + expected_file):
 			failures.append("after rename-save, expected file '" + expected_file + "' is missing")
 
-	var reopened_renamed := ResourceLoader.load(renamed_trn_path, "NovaTerrainData", ResourceLoader.CACHE_MODE_IGNORE) as NovaTerrainData
-	if reopened_renamed == null:
-		push_error("renamed ResourceLoader.load(.trn) returned null")
+	var reopened_renamed := NovaTerrainData.new()
+	reopened_renamed.set_trn_path(renamed_trn_path)
+	if reopened_renamed.load() != OK:
+		push_error("renamed .trn reopen failed")
 		quit(1); return
 	if String(reopened_renamed.get_terrain_name()) != new_name:
 		failures.append("reopened terrain_name=%s expected %s" % [reopened_renamed.get_terrain_name(), new_name])

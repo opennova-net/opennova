@@ -46,7 +46,7 @@ GDScript:
 | **Binding glue** — ClassDB registration, type marshalling, class declarations | 22–26% | The GDExtension tax: every engine API surfaced to scripts needs a C++ wrapper. This band GROWS with each push-down — thinning GDScript mints binding C++. That is the intended direction, not a failure. |
 | **ONED document surface** — `NovaMnuDocument`, `NovaTerrainData`, `NovaMissionData`, the object-data family | 22–26% | Godot-Resource-shaped edit/undo surfaces the editor drives. Godot-typed by design (ADR 0016-era decisions); their *format semantics* still belong engine-side (ADR 0030 — the kda push-down #440 is the model). |
 | **Presentation** — particle renderer/compositor, foliage dispatcher, terrain mesh build, the present appliers, the mnu builder | 18–22% | RenderingServer / RenderingDevice / MultiMesh / Skeleton3D bulk paths: must be Godot-typed AND fast. Only possible home. |
-| **res:// loaders/savers** — 24 registered format objects | 3–4% | Godot resource-system integration over engine parsers. |
+| **res:// loaders/savers** — 24 registered format objects | 3–4% | Godot resource-system integration over engine parsers. *(Band deleted by ADR 0032 — the census found the resource system structurally unused; the layer is gone and Nova formats use direct document I/O.)* |
 | **Documented seam bridges** — the simulation pump/bridge legs | (within simulation/) | What a portable bridge cannot own (the S7b shape): sockets (deposit/send), device input application, the dict/profile conversion seams, the F3 clocks. Each leg carries its disposition in a header note; its `[orig:]` cites document *sequencing contracts* at the seam, not live math. |
 
 What no band covers — engine-grade logic (witnessed math, gameplay rules,

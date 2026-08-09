@@ -204,7 +204,7 @@ func save_project(dir_path: String) -> Error:
 	# bake artifact, not an authoring one. NovaTerrainData::load() tolerates
 	# missing CPT since the "make CPT optional" change.
 	_te._document.prepare_data_for_trn_save(name, "")
-	err = ResourceSaver.save(_te._data, dir_path + "/" + name + ".trn")
+	err = _te._data.save_to_path(dir_path + "/" + name + ".trn")
 	if err != OK:
 		return err
 
@@ -334,7 +334,7 @@ func export_terrain(output_dir: String, flavor: int) -> Error:
 		return err
 
 	_te._document.prepare_data_for_trn_save(name, name + ".cpt")
-	err = ResourceSaver.save(_te._data, output_dir + "/" + name + ".trn")
+	err = _te._data.save_to_path(output_dir + "/" + name + ".trn")
 	if err != OK:
 		return err
 
@@ -368,7 +368,7 @@ func _finish_export_job() -> void:
 			err = _te._document.save_tileinfo(output_dir, name)
 		if err == OK:
 			_te._document.prepare_data_for_trn_save(name, name + ".cpt")
-			err = ResourceSaver.save(_te._data, output_dir + "/" + name + ".trn")
+			err = _te._data.save_to_path(output_dir + "/" + name + ".trn")
 		if err == OK:
 			message = "Exported to: %s" % output_dir
 		elif message.is_empty():

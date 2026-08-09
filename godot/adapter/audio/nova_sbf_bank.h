@@ -74,6 +74,11 @@ public:
 	// chunks (lossy round-trip; precision-of-int8). Used by the saver when
 	// is_dirty() is true.
 	Error build_encoded_bytes(PackedByteArray &out) const;
+	// The .sbf write (ADR 0032 direct document I/O, replacing the deleted
+	// ResourceFormat pair): clean banks pass the retained source bytes through
+	// losslessly; dirty banks re-encode from the entry table + PCM overrides
+	// and clear the dirty bit.
+	Error save_to_path(const String &p_path);
 
 protected:
 	static void _bind_methods();

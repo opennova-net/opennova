@@ -188,6 +188,15 @@ public:
 	// Returns null when the bytes are not a valid CBIN file.
 	static Ref<CbinCreditsResource> from_cbin_bytes(const PackedByteArray &p_data);
 
+	// Full-fidelity disk I/O (the credits editor path; ADR 0032 direct document
+	// I/O, replacing the deleted .kda ResourceFormat pair): load_from_path runs
+	// the payload decode, collapses control codes via cbin's display-item fold,
+	// and resolves fonts/textures relative to the file's directory
+	// (cbin_asset_lookup); save_to_path quantizes at the Godot-type edge and
+	// re-emits control codes by diff (cbin's credits_entries_from_display).
+	Error load_from_path(const String &p_path);
+	Error save_to_path(const String &p_path) const;
+
 private:
 	float scroll_rate_ = 0.5f;
 	int vertical_space_ = 14;

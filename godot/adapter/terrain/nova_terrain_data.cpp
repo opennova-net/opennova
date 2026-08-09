@@ -491,6 +491,7 @@ void NovaTerrainData::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("import_pcx_slot", "slot_id", "path"), &NovaTerrainData::import_pcx_slot);
 	ClassDB::bind_method(D_METHOD("save_pcx_slot", "slot_id", "path"), &NovaTerrainData::save_pcx_slot);
+	ClassDB::bind_method(D_METHOD("save_to_path", "path"), &NovaTerrainData::save_to_path);
 	ClassDB::bind_method(D_METHOD("reset_pcx_slot_default", "slot_id", "width", "height"), &NovaTerrainData::reset_pcx_slot_default);
 	ClassDB::bind_method(D_METHOD("get_pcx_slot_state", "slot_id"), &NovaTerrainData::get_pcx_slot_state);
 	ClassDB::bind_method(D_METHOD("set_pcx_slot_state", "slot_id", "state"), &NovaTerrainData::set_pcx_slot_state);
@@ -1960,4 +1961,20 @@ Ref<NovaTerrainTileInfo> NovaTerrainData::get_tileinfo_resource() const {
 	tileinfo_resource_cache = resource;
 	tileinfo_resource_cache_path = lookup;
 	return resource;
+}
+
+Error NovaTerrainData::save_to_path(const String &p_path) const {
+	opennova::TrnConfig trn_copy = get_trn();
+	std::ostringstream oss;
+	std::string error;
+	if (!opennova::save_trn(oss, trn_copy, error)) {
+		UtilityFunctions::push_warning("NovaTerrainData.save_to_path: ", error.c_str());
+		return ERR_FILE_CANT_WRITE;
+	}
+	Ref<FileAccess> f = FileAccess::open(p_path, FileAccess::WRITE);
+	if (f.is_null()) return ERR_FILE_CANT_WRITE;
+	std::string content = oss.str();
+	f->store_string(String::utf8(content.c_str(), content.size()));
+	f->close();
+	return OK;
 }

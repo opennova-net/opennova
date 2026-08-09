@@ -443,23 +443,6 @@ func test_object_data_resolves_compound_dds_tga_texture_variant_from_object_fold
 
 	assert_eq(resolved_path.get_file(), "KArm1.dds.tga", "Texture resolver should accept compound DDS TGA loose texture names.")
 	assert_true(data.load_material_texture(0, 0) is Texture2D, "Compound DDS TGA files should decode through the Nova texture path.")
-
-
-func test_nova_texture_resource_loader_handles_real_dds_and_renamed_tga() -> void:
-	var fixture_dir := _output_dir().path_join("resource_loader_textures")
-	assert_eq(DirAccess.make_dir_recursive_absolute(fixture_dir), OK)
-	var real_dds_path := fixture_dir.path_join("real.dds")
-	var renamed_tga_path := fixture_dir.path_join("renamed.dds")
-	_write_test_dds(real_dds_path)
-	_copy_file(ProjectSettings.globalize_path(ARMRY_TEXTURE_FIXTURE), renamed_tga_path)
-
-	var real_dds := ResourceLoader.load(real_dds_path, "ImageTexture", ResourceLoader.CACHE_MODE_IGNORE)
-	var renamed_tga := ResourceLoader.load(renamed_tga_path, "ImageTexture", ResourceLoader.CACHE_MODE_IGNORE)
-
-	assert_true(real_dds is Texture2D, "ResourceLoader should decode true DDS files.")
-	assert_true(renamed_tga is Texture2D, "ResourceLoader should still decode Nova renamed-TGA DDS files.")
-
-
 func test_object_editor_exports_open_3di() -> void:
 	var editor = add_child_autofree(ObjectEditorScript.new())
 	var err: Error = editor.open_object(ProjectSettings.globalize_path(BIRD_FIXTURE))

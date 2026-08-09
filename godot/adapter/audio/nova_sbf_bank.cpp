@@ -7,6 +7,7 @@
 #include "nova_sbf_audio_stream.h"
 #include "util/nova_data_format.h"
 
+#include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -40,6 +41,7 @@ void NovaSbfBank::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_entry_pcm", "index", "samples"), &NovaSbfBank::set_entry_pcm);
 	ClassDB::bind_method(D_METHOD("is_dirty"), &NovaSbfBank::is_dirty);
 	ClassDB::bind_method(D_METHOD("clear_dirty"), &NovaSbfBank::clear_dirty);
+	ClassDB::bind_method(D_METHOD("save_to_path", "path"), &NovaSbfBank::save_to_path);
 	ClassDB::bind_method(D_METHOD("reorder_entry", "from", "to"), &NovaSbfBank::reorder_entry);
 	ClassDB::bind_method(D_METHOD("rename_entry", "index", "name"), &NovaSbfBank::rename_entry);
 	ClassDB::bind_method(D_METHOD("add_entry", "name", "samples"), &NovaSbfBank::add_entry);
@@ -486,5 +488,27 @@ Error NovaSbfBank::delete_entry(int p_index) {
 	}
 	_entry_pcm_overrides = remapped;
 	_dirty = true;
+	return OK;
+}
+
+Error NovaSbfBank::save_to_path(const String &p_path) {
+	if (!is_dirty()) {
+		// Lossless passthrough: copy original source bytes through.
+		PackedByteArray bytes = get_raw_file_bytes();
+		if (bytes.is_empty()) return ERR_FILE_CANT_OPEN;
+		Ref<FileAccess> fa = FileAccess::open(p_path, FileAccess::WRITE);
+		if (fa.is_null()) return ERR_CANT_OPEN;
+		fa->store_buffer(bytes);
+		return OK;
+	}
+	// Re-encode path (Phase D / SBF F2): walk current entry table + override
+	// PCM map, rebuild the byte stream from scratch.
+	PackedByteArray out_bytes;
+	Error err = build_encoded_bytes(out_bytes);
+	if (err != OK) return err;
+	Ref<FileAccess> fa = FileAccess::open(p_path, FileAccess::WRITE);
+	if (fa.is_null()) return ERR_CANT_OPEN;
+	fa->store_buffer(out_bytes);
+	clear_dirty();
 	return OK;
 }

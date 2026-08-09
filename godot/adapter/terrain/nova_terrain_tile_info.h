@@ -33,6 +33,11 @@ public:
 	};
 
 	Error load_from_bytes(const PackedByteArray &p_bytes);
+	// The .til disk pair (ADR 0032 direct document I/O, replacing the deleted
+	// ResourceFormat pair): load_from_path runs the generic payload decode
+	// before the parse; save_to_path writes engine save_til over to_native().
+	Error load_from_path(const String &p_path);
+	Error save_to_path(const String &p_path) const;
 	// Coordinates are on the decoded terrain/Godot X,Z plane. The format helper
 	// has already applied the stored-negated z_fixed decode; never mirror Z again.
 	bool blocks_foliage(float world_x, float world_z, float radius) const;

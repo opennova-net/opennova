@@ -1,16 +1,9 @@
 extends GutTest
 
 const FIXTURE := "res://../fixtures/sbf/bhd_menumus.sbf"
-
-
-func test_load_returns_bank() -> void:
-	var res := load(FIXTURE)
-	assert_not_null(res, "loader returns non-null for " + FIXTURE)
-	assert_true(res is NovaSbfBank, "loader returns NovaSbfBank")
-
-
 func test_entry_count_matches() -> void:
-	var bank := load(FIXTURE) as NovaSbfBank
+	var bank := NovaSbfBank.new()
+	bank.load_from_path(FIXTURE)
 	assert_not_null(bank, "fixture loads as NovaSbfBank")
 	if bank == null:
 		return
@@ -18,7 +11,8 @@ func test_entry_count_matches() -> void:
 
 
 func test_has_entry_case_insensitive() -> void:
-	var bank := load(FIXTURE) as NovaSbfBank
+	var bank := NovaSbfBank.new()
+	bank.load_from_path(FIXTURE)
 	assert_not_null(bank, "fixture loads as NovaSbfBank")
 	if bank == null:
 		return

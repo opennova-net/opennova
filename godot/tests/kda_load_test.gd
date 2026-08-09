@@ -15,14 +15,9 @@ func after_each() -> void:
 
 
 func test_kda_loads_as_cbin_credits_resource() -> void:
-	var res = ResourceLoader.load(KDA_PATH)
-
-	assert_not_null(res, "nlist.kda should load through the registered KdaResourceFormatLoader.")
-	if res == null:
-		return
-
-	assert_true(res.get_class() == "CbinCreditsResource",
-		"Loaded resource should be a CbinCreditsResource, got: %s" % res.get_class())
+	var res := CbinCreditsResource.new()
+	assert_eq(res.load_from_path(KDA_PATH), OK,
+		"nlist.kda should load through CbinCreditsResource.load_from_path.")
 
 	assert_true(res.get_entry_count() > 0,
 		"nlist.kda should contain at least one credits entry.")
@@ -36,26 +31,20 @@ func test_kda_loads_as_cbin_credits_resource() -> void:
 
 
 func test_kda_load_save_preserves_unresolved_font_names() -> void:
-	var res := ResourceLoader.load(KDA_PATH, "CbinCreditsResource",
-		ResourceLoader.CACHE_MODE_IGNORE) as CbinCreditsResource
-	assert_not_null(res, "Fixture should load before font preservation test.")
-	if res == null:
-		return
+	var res := CbinCreditsResource.new()
+	assert_eq(res.load_from_path(KDA_PATH), OK, "Fixture should load before font preservation test.")
 
 	var original_font_count := _text_entries_with_font_names(res)
 	assert_eq(original_font_count, 231,
 		"Stock nlist.kda should expose all text-entry font names even without .fnt assets.")
 
-	var err := ResourceSaver.save(res, FONT_SAVE_PATH)
+	var err := res.save_to_path(FONT_SAVE_PATH)
 	assert_eq(err, OK, "Saving loaded KDA should succeed.")
 	if err != OK:
 		return
 
-	var reloaded := ResourceLoader.load(FONT_SAVE_PATH, "CbinCreditsResource",
-		ResourceLoader.CACHE_MODE_IGNORE) as CbinCreditsResource
-	assert_not_null(reloaded, "Saved KDA should reload.")
-	if reloaded == null:
-		return
+	var reloaded := CbinCreditsResource.new()
+	assert_eq(reloaded.load_from_path(FONT_SAVE_PATH), OK, "Saved KDA should reload.")
 
 	assert_eq(_text_entries_with_font_names(reloaded), original_font_count,
 		"Saving must not drop unresolved KDA font names.")
@@ -73,11 +62,9 @@ func test_kda_resolves_fonts_and_images_from_same_filesystem_root() -> void:
 	_copy_fixture(CREDITS_IMAGE_FIXTURE, root.path_join("cr1.png"))
 	_copy_fixture(FONT_FIXTURE, root.path_join("Serpen24.fnt"))
 
-	var res := ResourceLoader.load(root.path_join("nlist.kda"), "CbinCreditsResource",
-		ResourceLoader.CACHE_MODE_IGNORE) as CbinCreditsResource
-	assert_not_null(res, "KDA should load from a filesystem resource root.")
-	if res == null:
-		return
+	var res := CbinCreditsResource.new()
+	assert_eq(res.load_from_path(root.path_join("nlist.kda")), OK,
+		"KDA should load from a filesystem resource root.")
 
 	var resolved_image := false
 	var resolved_font := false

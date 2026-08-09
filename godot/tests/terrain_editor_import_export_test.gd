@@ -100,12 +100,11 @@ func test_cptless_project_data_does_not_build_render_terrain() -> void:
 	imported.set_polydata_filename("")
 
 	var project_path := _output_dir().path_join("Cptless.trn")
-	assert_eq(ResourceSaver.save(imported, project_path), OK, "Project-only TRN should save without CPT polydata.")
+	assert_eq(imported.save_to_path(project_path), OK, "Project-only TRN should save without CPT polydata.")
 
-	var reopened := ResourceLoader.load(project_path, "NovaTerrainData", ResourceLoader.CACHE_MODE_IGNORE) as NovaTerrainData
-	assert_not_null(reopened, "Project-only TRN should reopen as NovaTerrainData.")
-	if reopened == null:
-		return
+	var reopened := NovaTerrainData.new()
+	reopened.set_trn_path(project_path)
+	assert_eq(reopened.load(), OK, "Project-only TRN should reopen as NovaTerrainData.")
 	assert_true(reopened.is_loaded(), "Project-only TRN should report loaded even without CPT.")
 	assert_eq(reopened.get_tile_count(), 0, "Project-only TRN should not expose baked CPT tiles.")
 
@@ -124,7 +123,7 @@ func test_extensionless_tileinfo_filename_resolves_til_sidecar() -> void:
 	entry.set_cell(2, 3)
 	entry.set_tile_index(7)
 	source_tileinfo.add_entry(entry)
-	assert_eq(ResourceSaver.save(source_tileinfo, _output_dir().path_join("Overlay.til")), OK, "Fixture .til should save before sidecar lookup.")
+	assert_eq(source_tileinfo.save_to_path(_output_dir().path_join("Overlay.til")), OK, "Fixture .til should save before sidecar lookup.")
 
 	var data := NovaTerrainData.new()
 	data.set_trn_path(_output_dir().path_join("OverlayMap.trn"))
@@ -137,7 +136,7 @@ func test_extensionless_tileinfo_filename_resolves_til_sidecar() -> void:
 	assert_eq(loaded.get_entry_count(), 1, "Resolved tileinfo should load saved entries.")
 	assert_eq(loaded.get_entry(0).get_tile_index(), 7, "Resolved tileinfo should preserve entry data.")
 
-	assert_eq(ResourceSaver.save(source_tileinfo, _output_dir().path_join("Overlay.V1.til")), OK, "Dotted sidecar fixture should save.")
+	assert_eq(source_tileinfo.save_to_path(_output_dir().path_join("Overlay.V1.til")), OK, "Dotted sidecar fixture should save.")
 	data.set_tileinfo_filename("Overlay.V1")
 	loaded = data.get_tileinfo_resource()
 	assert_not_null(loaded, "Dotted tileinfo references should append .til without stripping the dotted stem.")

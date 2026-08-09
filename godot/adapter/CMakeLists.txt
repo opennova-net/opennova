@@ -35,10 +35,7 @@ add_library(${TARGET_NAME} SHARED
     terrain/nova_terrain_tile_entry.cpp
     terrain/nova_terrain_tile_info.cpp
     terrain/nova_terrain_tile_overlay.cpp
-    terrain/trn_resource_format.cpp
-    terrain/til_resource_format.cpp
     cbin/cbin_credits_resource.cpp
-    cbin/kda_resource_format.cpp
     cbin/nova_credits_player.cpp
     env/nova_env_keyframe.cpp
     env/env_file.cpp
@@ -93,7 +90,6 @@ add_library(${TARGET_NAME} SHARED
     util/engine_caches.cpp
     util/nova_data_format.cpp
     util/nova_paths.cpp
-    util/nova_texture_format.cpp
     util/pcx_texture_bridge.cpp
     util/texture_path_resolver.cpp
     resource_index/nova_resource_index.cpp
@@ -105,10 +101,8 @@ add_library(${TARGET_NAME} SHARED
     audio/nova_sbf_bank.cpp
     audio/nova_sbf_audio_stream.cpp
     audio/nova_sbf_audio_stream_playback.cpp
-    audio/sbf_resource_format.cpp
     audio/nova_music_script.cpp
     audio/nova_music_director.cpp
-    audio/mus_resource_format.cpp
     mnu/nova_mnu_document.cpp
     mnu/nova_mnu_document_state.cpp
     mnu/mns_stylesheet.cpp

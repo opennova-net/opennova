@@ -194,15 +194,16 @@ func _load_bank(path: String) -> NovaSbfBank:
 # archives [orig: AudioVM_LoadScriptFile @ 0x672d20]. root.read_file already
 # applies the shared SCR/BFC1 payload decode, so the bytes arrive in the
 # decrypted SCR0 form load_from_decrypted_bytes expects. An explicit override
-# keeps the loose-path ResourceLoader route (the registered loader strips the
-# SCR layer).
+# takes the loose-path route (load_from_path runs the payload decode itself).
 func _load_music_script(root, explicit: String, name: String) -> NovaMusicScript:
 	if not explicit.is_empty() and root != null:
 		var path := String(root.resolve_file(explicit))
 		if path.is_empty():
 			return null
-		var res = ResourceLoader.load(path, "NovaMusicScript")
-		return res as NovaMusicScript
+		var res := NovaMusicScript.new()
+		if res.load_from_path(path) != OK:
+			return null
+		return res
 	if root == null or name.is_empty():
 		return null
 	var bytes: PackedByteArray = root.read_file(name)

@@ -1,16 +1,9 @@
 extends GutTest
 
 const FIXTURE := "res://../fixtures/mus/jo_gamemus.bin"
-
-
-func test_load_returns_music_script() -> void:
-	var res := load(FIXTURE)
-	assert_not_null(res, "loader returns non-null for " + FIXTURE)
-	assert_true(res is NovaMusicScript, "loader returns NovaMusicScript")
-
-
 func test_script_count_at_least_one() -> void:
-	var ms := load(FIXTURE) as NovaMusicScript
+	var ms := NovaMusicScript.new()
+	ms.load_from_path(FIXTURE)
 	assert_not_null(ms, "fixture loads as NovaMusicScript")
 	if ms == null:
 		return
@@ -18,7 +11,8 @@ func test_script_count_at_least_one() -> void:
 
 
 func test_decompile_yields_text() -> void:
-	var ms := load(FIXTURE) as NovaMusicScript
+	var ms := NovaMusicScript.new()
+	ms.load_from_path(FIXTURE)
 	assert_not_null(ms, "fixture loads as NovaMusicScript")
 	if ms == null:
 		return

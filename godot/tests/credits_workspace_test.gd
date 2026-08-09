@@ -187,11 +187,8 @@ func test_save_current_flushes_pending_source_edits() -> void:
 	if err != OK:
 		return
 
-	var reloaded := ResourceLoader.load(_kda_path, "CbinCreditsResource",
-		ResourceLoader.CACHE_MODE_REPLACE) as CbinCreditsResource
-	assert_not_null(reloaded, "saved KDA should reload.")
-	if reloaded == null:
-		return
+	var reloaded := CbinCreditsResource.new()
+	assert_eq(reloaded.load_from_path(_kda_path), OK, "saved KDA should reload.")
 	assert_eq(reloaded.get_entry_count(), 1, "pending source text should be saved.")
 	assert_eq((reloaded.get_entry(0) as CbinTextEntry).get_text(), "Saved source edit",
 		"saved file should contain pending source text.")
@@ -245,11 +242,8 @@ func test_visual_save_ignores_hidden_stale_source_text_and_preserves_entries() -
 	if err != OK:
 		return
 
-	var reloaded := ResourceLoader.load(_kda_path, "CbinCreditsResource",
-		ResourceLoader.CACHE_MODE_REPLACE) as CbinCreditsResource
-	assert_not_null(reloaded, "saved KDA should reload.")
-	if reloaded == null:
-		return
+	var reloaded := CbinCreditsResource.new()
+	assert_eq(reloaded.load_from_path(_kda_path), OK, "saved KDA should reload.")
 	assert_eq(reloaded.get_entry_count(), original_count,
 		"visual-mode save should preserve unedited entries from the original KDA.")
 	if reloaded.get_entry_count() != original_count:
