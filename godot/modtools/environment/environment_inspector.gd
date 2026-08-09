@@ -348,7 +348,7 @@ func _add_sky_map(parent: Control, label_text: String, commit: Callable) -> Text
 
 
 ## Wires the link widgets' resolve/pick/jump Callables (see
-## ResourceRefWidget.services_from_shell). Idempotent; safe before or after
+## LinkServices.from_shell). Idempotent; safe before or after
 ## the form is built.
 func set_reference_services(services: LinkServices) -> void:
 	_ref_services = services

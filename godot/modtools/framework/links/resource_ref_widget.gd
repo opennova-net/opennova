@@ -8,7 +8,7 @@ extends HBoxContainer
 ##
 ## Services arrive as Callables so the widget works anywhere: with no services
 ## (headless tests, runtime owners) it degrades to a plain name field — badge,
-## browse, and jump simply hide. services_from_shell builds the editor trio.
+## browse, and jump simply hide. LinkServices.from_shell builds the editor trio.
 
 signal value_changed(value: String)
 

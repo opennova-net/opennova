@@ -72,7 +72,7 @@ func show_widget(doc: MnuDocument, id: int, text_res: RtxtStringFile = null, tex
 		_rebuild()
 
 
-## Wires the shell link-widget services (see ResourceRefWidget.services_from_shell).
+## Wires the shell link-widget services (see LinkServices.from_shell).
 ## Idempotent; safe before or after the form is built.
 func set_reference_services(services: LinkServices) -> void:
 	_ref_services = services

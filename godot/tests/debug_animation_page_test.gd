@@ -146,8 +146,14 @@ func test_steady_refresh_does_not_reset_model_list_browsing_position() -> void:
 		entries.append({ "model": model, "ref": { "bms_id": 1000 + index } })
 	runtime.registry.build(entries, [])
 	var page := _make_page(null, runtime)
-	page.size = Vector2(300, 190)
 	page.refresh()
+	# The fresh ItemList reports its content height as minimum until its first
+	# layout pass settles; sizing before that clamps the page to ~36 rows tall
+	# and no scrollbar ever engages. Settle first, then assign the constrained
+	# overlay-shaped rect (taller than the page chrome, far shorter than 36
+	# rows) so the list gets a real scrolling viewport.
+	await wait_process_frames(1)
+	page.size = Vector2(300, 420)
 	await wait_process_frames(2)
 
 	var list := page.find_child("AnimModels", true, false) as ItemList

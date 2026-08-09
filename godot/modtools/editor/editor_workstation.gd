@@ -1436,7 +1436,7 @@ func open_file_picker(title: String, files: PackedStringArray, on_pick: Callable
 
 
 ## Open the indexed resource picker over every resource of `kind`. The browse
-## affordance behind link widgets (ResourceRefWidget.services_from_shell);
+## affordance behind link widgets (LinkServices.from_shell);
 ## `on_pick` receives the chosen resource's path.
 func open_kind_picker(kind: String, title: String, on_pick: Callable) -> void:
 	_resource_browser.open_kind(kind, title, on_pick)

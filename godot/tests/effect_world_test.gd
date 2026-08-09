@@ -111,7 +111,7 @@ func _make_renderable_effect_file() -> ParticleFile:
 func _warm_helper_count(world: EffectWorld) -> int:
 	var count := 0
 	for child in world.find_children("*", "MeshInstance3D", true, false):
-		if String(child.name) != "ParticleFirstPersonPacket":
+		if String(child.name) != "ParticleFirstPersonBatch":
 			count += 1
 	return count
 
