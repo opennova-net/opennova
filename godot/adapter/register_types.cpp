@@ -34,6 +34,7 @@
 #include "particle/nova_effect_scene.h"
 #include "particle/nova_particle_compositor.h"
 #include "particle/nova_particle_renderer.h"
+#include "object/nova_entity_visual.h"
 #include "object/nova_object_data.h"
 #include "object/nova_object_shader_cache.h"
 #include "object/nova_item_database.h"
@@ -117,6 +118,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NovaWaterCore);
 	GDREGISTER_CLASS(NovaStarField);
 	GDREGISTER_CLASS(NovaGlareOcclusion);
+	GDREGISTER_CLASS(NovaEntityVisual);
 	GDREGISTER_CLASS(NovaObjectData);
 	GDREGISTER_CLASS(NovaObjectShaderCache);
 	GDREGISTER_CLASS(NovaItemDatabase);

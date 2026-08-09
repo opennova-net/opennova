@@ -5,33 +5,33 @@ const MissionRuntime := preload("res://adapter/world/mission_runtime.gd")
 
 
 class FakeWeaponPart:
-	extends Node3D
+	extends NovaEntityVisual
 	var plays: Array = []
 	var times: Array[float] = []
 	var ctrl_values: Dictionary = {}
 	var lighting_contexts: Array = []
 
-	func play_body_clip(key: String) -> void:
+	func _play_body_clip(key: String) -> void:
 		plays.append({"key": key, "variant": 0})
 
-	func play_body_clip_variant(key: String, variant: int) -> void:
+	func _play_body_clip_variant(key: String, variant: int) -> void:
 		plays.append({"key": key, "variant": variant})
 
-	func play_body_clip_variant_at_time(key: String, variant: int,
+	func _play_body_clip_variant_at_time(key: String, variant: int,
 			seconds: float) -> void:
 		plays.append({"key": key, "variant": variant})
 		times.append(seconds)
 
-	func set_animation_time(seconds: float) -> void:
+	func _set_animation_time(seconds: float) -> void:
 		times.append(seconds)
 
 	func get_object_data():
 		return null
 
-	func set_ctrl_value(name: String, value: int) -> void:
+	func _set_ctrl_value(name: String, value: int) -> void:
 		ctrl_values[name] = value
 
-	func clear_ctrl_value(name: String) -> void:
+	func _clear_ctrl_value(name: String) -> void:
 		ctrl_values.erase(name)
 
 	func set_entity_lighting_context(effect_scale: float, interior_lerp: bool,
@@ -65,7 +65,7 @@ class FakeUserPointData:
 
 
 class FakePosedWeaponPart:
-	extends Node3D
+	extends NovaEntityVisual
 	var data := FakeUserPointData.new()
 	var skeleton: Skeleton3D
 
@@ -253,10 +253,10 @@ class FakeAvatar:
 	extends FakeWeaponPart
 	var body_calls: Array = []
 
-	func play_body_clip_at(key: String, phase_ticks: int) -> void:
+	func _play_body_clip_at(key: String, phase_ticks: int) -> void:
 		body_calls.append(["at", key, phase_ticks])
 
-	func play_body_blend_at(source_key: String, source_phase_ticks: int,
+	func _play_body_blend_at(source_key: String, source_phase_ticks: int,
 			target_key: String, target_phase_ticks: int, weight: float) -> void:
 		body_calls.append([
 			"blend", source_key, source_phase_ticks,
@@ -264,7 +264,7 @@ class FakeAvatar:
 
 
 class FakeWorld:
-	extends Node3D
+	extends NovaEntityVisual
 	var terrain_data: FakeTerrainData = null
 	var avatar_count := 0
 	var viewmodel_count := 0

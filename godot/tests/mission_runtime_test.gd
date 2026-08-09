@@ -119,11 +119,11 @@ func test_wire_type_ids_install_the_same_late_vehicle_metadata() -> void:
 # An animatable placed entity: play_part_anim marks it for the registry, set_part_phase + Node3D
 # transform/visible let the present pass drive it.
 class FakeModel:
-	extends Node3D
+	extends NovaEntityVisual
 	var phases: Array = []
-	func play_part_anim(_channel: int, _play_type: int, _time_s: float) -> void:
+	func _play_part_anim(_channel: int, _play_type: int, _time_s: float) -> void:
 		pass
-	func set_part_phase(channel: int, phase: int) -> void:
+	func _set_part_phase(channel: int, phase: int) -> void:
 		phases.append([channel, phase])
 
 

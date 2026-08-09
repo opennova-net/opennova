@@ -35,7 +35,7 @@ func build(container: Node, mission) -> void:
 		return
 	for child in container.get_children():
 		# Only animatable models are valid targets; this skips editor pick colliders + static batches.
-		if not child.has_method("play_part_anim") or not child.has_meta("entity_ref"):
+		if not (child is NovaEntityVisual) or not child.has_meta("entity_ref"):
 			continue
 		var ref: Dictionary = child.get_meta("entity_ref")
 		var bms_id := int(ref.get("bms_id", 0))

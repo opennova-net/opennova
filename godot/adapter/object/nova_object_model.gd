@@ -1,5 +1,5 @@
 class_name NovaObjectModel
-extends Node3D
+extends NovaEntityVisual
 
 signal bounds_changed(bounds: AABB)
 
@@ -317,7 +317,7 @@ func _apply_shadow_casting_below(root: Node) -> void:
 		_apply_shadow_casting_below(child)
 
 
-func set_environment_node(value: Node) -> void:
+func _set_environment_node(value: Object) -> void:
 	if _environment_node != null 			and _environment_node.has_signal("env_generation_changed") 			and _environment_node.is_connected(
 					"env_generation_changed", _on_env_generation_changed):
 		_environment_node.disconnect(
@@ -447,7 +447,7 @@ func reset_animation_time() -> void:
 # on this owner; the delegates below preserve the external surface and
 # test-subclass override dispatch.
 
-func set_skeletal_anim(skeletal) -> void:
+func _set_skeletal_anim(skeletal) -> void:
 	_wake_runtime_frame()
 	_body_anim.set_skeletal_anim(skeletal)
 
@@ -460,15 +460,19 @@ func get_skeleton() -> Skeleton3D:
 	return _body_anim.get_skeleton()
 
 
+func _get_skeleton() -> Object:
+	return get_skeleton()
+
+
 func has_skeleton() -> bool:
 	return _body_anim.has_skeleton()
 
 
-func has_muzzle() -> bool:
+func _has_muzzle() -> bool:
 	return _body_anim.has_muzzle()
 
 
-func get_muzzle_world_position() -> Vector3:
+func _get_muzzle_world_position() -> Vector3:
 	return _body_anim.get_muzzle_world_position()
 
 
@@ -476,27 +480,27 @@ func _resolve_muzzle_userpoint() -> void:
 	_body_anim._resolve_muzzle_userpoint()
 
 
-func play_body_clip(key: String) -> void:
+func _play_body_clip(key: String) -> void:
 	_wake_runtime_frame()
 	_body_anim.play_body_clip(key)
 
 
-func play_body_clip_variant(key: String, variant: int) -> void:
+func _play_body_clip_variant(key: String, variant: int) -> void:
 	_wake_runtime_frame()
 	_body_anim.play_body_clip_variant(key, variant)
 
 
-func play_body_clip_variant_at_time(key: String, variant: int, seconds: float) -> void:
+func _play_body_clip_variant_at_time(key: String, variant: int, seconds: float) -> void:
 	_wake_runtime_frame()
 	_body_anim.play_body_clip_variant_at_time(key, variant, seconds)
 
 
-func play_body_clip_at(key: String, phase_ticks: int) -> void:
+func _play_body_clip_at(key: String, phase_ticks: int) -> void:
 	_wake_runtime_frame()
 	_body_anim.play_body_clip_at(key, phase_ticks)
 
 
-func play_body_blend_at(source_key: String, source_phase_ticks: int,
+func _play_body_blend_at(source_key: String, source_phase_ticks: int,
 		target_key: String, target_phase_ticks: int,
 		weight: float) -> void:
 	_wake_runtime_frame()
@@ -513,13 +517,13 @@ func _select_body_clip_seeded(key: String, phase_ticks: int) -> bool:
 	return _body_anim._select_body_clip_seeded(key, phase_ticks)
 
 
-func apply_remote_body_state(state_id: int, key: String, flags: int,
+func _apply_remote_body_state(state_id: int, key: String, flags: int,
 		phase_ticks: int = -1) -> bool:
 	_wake_runtime_frame()
 	return _body_anim.apply_remote_body_state(state_id, key, flags, phase_ticks)
 
 
-func reset_remote_body_state() -> void:
+func _reset_remote_body_state() -> void:
 	_wake_runtime_frame()
 	_body_anim.reset_remote_body_state()
 
@@ -537,7 +541,7 @@ func _clear_remote_body_pending() -> void:
 	_body_anim._clear_remote_body_pending()
 
 
-func advance_remote_body_blend_tick(state_id: int) -> bool:
+func _advance_remote_body_blend_tick(state_id: int) -> bool:
 	_wake_runtime_frame()
 	return _body_anim.advance_remote_body_blend_tick(state_id)
 
@@ -559,12 +563,12 @@ func get_active_body_clip() -> String:
 	return _body_anim.get_active_body_clip()
 
 
-func play_body_anim(slot: int) -> void:
+func _play_body_anim(slot: int) -> void:
 	_wake_runtime_frame()
 	_body_anim.play_body_anim(slot)
 
 
-func play_body_anim_at(slot: int, phase_ticks: int) -> void:
+func _play_body_anim_at(slot: int, phase_ticks: int) -> void:
 	_wake_runtime_frame()
 	_body_anim.play_body_anim_at(slot, phase_ticks)
 
@@ -573,7 +577,7 @@ func get_animation_time_ms() -> int:
 	return _anim_time_ms
 
 
-func set_animation_time(seconds: float) -> void:
+func _set_animation_time(seconds: float) -> void:
 	_wake_runtime_frame()
 	_body_anim.set_animation_time(seconds)
 
@@ -621,11 +625,11 @@ func _finish_ctrl_change(_register: String, apply_now: bool) -> void:
 ## Retail writes every relevant global slot and then consumes the model once;
 ## this avoids advancing shared waveform/random consumers once per individual
 ## store. Nested callers are supported.
-func begin_ctrl_update() -> void:
+func _begin_ctrl_update() -> void:
 	_ctrl_batch_depth += 1
 
 
-func end_ctrl_update() -> void:
+func _end_ctrl_update() -> void:
 	if _ctrl_batch_depth <= 0:
 		return
 	_ctrl_batch_depth -= 1
@@ -634,7 +638,7 @@ func end_ctrl_update() -> void:
 		_apply_runtime_state(0.0)
 
 
-func set_ctrl_value(name: String, value: int) -> void:
+func _set_ctrl_value(name: String, value: int) -> void:
 	var register := NovaObjectData.canonical_control_register_name(name)
 	if register.is_empty():
 		return
@@ -648,7 +652,7 @@ func set_ctrl_value(name: String, value: int) -> void:
 	_finish_ctrl_change(register, true)
 
 
-func clear_ctrl_value(name: String) -> void:
+func _clear_ctrl_value(name: String) -> void:
 	var register := NovaObjectData.canonical_control_register_name(name)
 	if register.is_empty() or not _ctrl_values.has(register):
 		return
@@ -661,7 +665,7 @@ func clear_ctrl_value(name: String) -> void:
 ## value. The owner tag is lifecycle bookkeeping only: a stale teardown cannot
 ## clear a later writer's store, and overwritten values are never stacked or
 ## restored. [orig: global CTRL value slots @0x83FCE8, stride 8]
-func set_ctrl_override(owner: String, name: String, value: int) -> void:
+func _set_ctrl_override(owner: String, name: String, value: int) -> void:
 	var register := NovaObjectData.canonical_control_register_name(name)
 	if owner.is_empty() or register.is_empty():
 		return
@@ -675,7 +679,7 @@ func set_ctrl_override(owner: String, name: String, value: int) -> void:
 	_finish_ctrl_change(register, true)
 
 
-func clear_ctrl_override(owner: String, name: String) -> void:
+func _clear_ctrl_override(owner: String, name: String) -> void:
 	var register := NovaObjectData.canonical_control_register_name(name)
 	if (owner.is_empty() or register.is_empty()
 			or String(_ctrl_value_owners.get(register, "")) != owner):
@@ -699,22 +703,22 @@ func get_ctrl_values() -> Dictionary:
 
 # PLAYPARTANIM and its fixed VEHICLE_SPECIAL1/2 CTRL publication live in the
 # body-animation helper. These delegates retain the NovaEntityVisual surface.
-func play_part_anim(channel: int, play_type: int, time_s: float) -> void:
+func _play_part_anim(channel: int, play_type: int, time_s: float) -> void:
 	_wake_runtime_frame()
 	_body_anim.play_part_anim(channel, play_type, time_s)
 
 
-func restart_part_anim(channel: int, play_type: int, time_s: float) -> void:
+func _restart_part_anim(channel: int, play_type: int, time_s: float) -> void:
 	_wake_runtime_frame()
 	_body_anim.restart_part_anim(channel, play_type, time_s)
 
 
-func set_part_phase(channel: int, phase: int) -> void:
+func _set_part_phase(channel: int, phase: int) -> void:
 	_wake_runtime_frame()
 	_body_anim.set_part_phase(channel, phase)
 
 
-func clear_part_phase(channel: int) -> void:
+func _clear_part_phase(channel: int) -> void:
 	_wake_runtime_frame()
 	_body_anim.clear_part_phase(channel)
 
@@ -762,17 +766,17 @@ var _wpn_key := ""
 var _wpn_phase_ticks := 0
 
 
-func set_weapon_channel(key: String, phase_ticks: int) -> void:
+func _set_weapon_channel(key: String, phase_ticks: int) -> void:
 	_wake_runtime_frame()
 	_body_anim.set_weapon_channel(key, phase_ticks)
 
 
-func set_aim_overlay(deltas: Array) -> void:
+func _set_aim_overlay(deltas: Array) -> void:
 	_wake_runtime_frame()
 	_body_anim.set_aim_overlay(deltas)
 
 
-func set_right_hand_collapsed(collapsed: bool) -> void:
+func _set_right_hand_collapsed(collapsed: bool) -> void:
 	_wake_runtime_frame()
 	_body_anim.set_right_hand_collapsed(collapsed)
 
@@ -1164,7 +1168,7 @@ func set_on_screen(value: bool) -> void:
 ## submitted model [orig: Terrain_RenderSectorModels @ 0x5c5d30]. Injected
 ## on every plan rebuild; owners without the walk (previews, tests) simply
 ## never bind and the model stays always-submitted.
-func set_submission_registry(registry: Dictionary) -> void:
+func _set_submission_registry(registry: Dictionary) -> void:
 	if _submission_registry_bound and is_same(registry, _submission_registry):
 		return
 	if _submission_registry_bound:

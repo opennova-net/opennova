@@ -74,8 +74,7 @@ var _viewmodel: Node3D = null
 var _vm_pass_layer: CanvasLayer = null
 var _vm_viewport: SubViewport = null
 var _vm_camera: Camera3D = null
-var _vm_parts: Array = []           # NovaObjectModel parts under the viewmodel container
-var _vm_ctrl_caps := {}             # instance id -> caps, resolved once per build
+var _vm_parts: Array = []           # NovaEntityVisual parts under the viewmodel container
 
 
 func setup(world, presenter, camera: Camera3D) -> void:
@@ -120,13 +119,9 @@ func ensure_viewmodel() -> void:
 		if _viewmodel != null:
 			_apply_viewmodel_def()
 			_vm_parts.clear()
-			_vm_ctrl_caps.clear()
 			for child in _viewmodel.get_children():
-				if child.has_method("play_body_clip"):
+				if child is NovaEntityVisual:
 					_vm_parts.append(child)
-					_vm_ctrl_caps[child.get_instance_id()] = (
-							NovaPresentApplier.get_visual_control_capabilities(
-									child))
 			# re-sync the clip serial: fresh parts replay the active clip
 			_presenter.weapon_effects().reset_play_serial()
 
@@ -148,7 +143,6 @@ func clear_viewmodel() -> void:
 		_viewmodel.queue_free()
 	_viewmodel = null
 	_vm_parts.clear()
-	_vm_ctrl_caps.clear()
 
 
 # Build the dedicated FP render pass (see PLAYER_VIEWMODEL_RENDERFOV_H_DEG): a SubViewport
@@ -279,17 +273,10 @@ func _apply_viewmodel_control_registers(submit_viewmodel: bool,
 	# value-only harness doubles both use that same explicit seam.
 	var sim = _world.get_sim() if _world != null else null
 	for part in _vm_parts:
-		if part == null or not is_instance_valid(part):
+		var visual := part as NovaEntityVisual
+		if visual == null or not is_instance_valid(visual):
 			continue
-		var caps := int(_vm_ctrl_caps.get(part.get_instance_id(), 0))
-		if (caps & (
-						NovaPresentApplier.VISUAL_CTRL_OWNED
-						| NovaPresentApplier.VISUAL_CTRL_LEGACY)) == 0:
-			continue
-		var batch := (
-				caps & NovaPresentApplier.VISUAL_CTRL_BATCH) != 0
-		if batch:
-			part.begin_ctrl_update()
+		visual.begin_ctrl_update()
 		# TEX_TEAM is a signed-byte store immediately before the FP lighting,
 		# heat and model-submit path. Hidden/carded/binocular/third-person frames
 		# never execute that retail writer.
@@ -298,45 +285,29 @@ func _apply_viewmodel_control_registers(submit_viewmodel: bool,
 			var team := int(sim.get_local_player_team()) & 0xFF
 			if team >= 0x80:
 				team -= 0x100
-			_set_viewmodel_ctrl(
-					part, caps, CTRL_OWNER_FP_TEAM, "TEX_TEAM", team)
+			visual.set_ctrl_override(CTRL_OWNER_FP_TEAM, "TEX_TEAM", team)
 		else:
-			_clear_viewmodel_ctrl(
-					part, caps, CTRL_OWNER_FP_TEAM, "TEX_TEAM")
+			visual.clear_ctrl_override(CTRL_OWNER_FP_TEAM, "TEX_TEAM")
 		# Retail publishes accumulated heat independently for every FP model
 		# submit, clamped through the exact 0x10000 endpoint.
 		# [orig: Player_RenderFirstPersonViewModel @0x4DEEC2..0x4DEEF5]
 		if submit_viewmodel and weapon_view != null:
-			_set_viewmodel_ctrl(part, caps, CTRL_OWNER_FP_HEAT,
+			visual.set_ctrl_override(CTRL_OWNER_FP_HEAT,
 					"HEAT_GLOW", weapon_view.heat_glow)
 		else:
-			_clear_viewmodel_ctrl(
-					part, caps, CTRL_OWNER_FP_HEAT, "HEAT_GLOW")
+			visual.clear_ctrl_override(CTRL_OWNER_FP_HEAT, "HEAT_GLOW")
 		if submit_viewmodel and weapon_view != null \
 				and weapon_view.emplaced_controls_valid:
-			_set_viewmodel_ctrl(part, caps, CTRL_OWNER_FP_EMPLACED,
+			visual.set_ctrl_override(CTRL_OWNER_FP_EMPLACED,
 					"EWEAP_GUNYAW", weapon_view.emplaced_gun_yaw)
-			_set_viewmodel_ctrl(part, caps, CTRL_OWNER_FP_EMPLACED,
+			visual.set_ctrl_override(CTRL_OWNER_FP_EMPLACED,
 					"EWEAP_GUNPITCH", weapon_view.emplaced_gun_pitch)
 		else:
-			_clear_viewmodel_ctrl(part, caps, CTRL_OWNER_FP_EMPLACED,
+			visual.clear_ctrl_override(CTRL_OWNER_FP_EMPLACED,
 					"EWEAP_GUNYAW")
-			_clear_viewmodel_ctrl(part, caps, CTRL_OWNER_FP_EMPLACED,
+			visual.clear_ctrl_override(CTRL_OWNER_FP_EMPLACED,
 					"EWEAP_GUNPITCH")
-		if batch:
-			part.end_ctrl_update()
-
-
-func _set_viewmodel_ctrl(
-		part, caps: int, owner: String, register: String, value: int) -> void:
-	NovaPresentApplier.ctrl_set_with_capabilities(
-			part, caps, owner, register, value)
-
-
-func _clear_viewmodel_ctrl(
-		part, caps: int, owner: String, register: String) -> void:
-	NovaPresentApplier.ctrl_clear_with_capabilities(
-			part, caps, owner, register)
+		visual.end_ctrl_update()
 
 
 # Stamp `layer_mask` onto every VisualInstance3D under `root` (inclusive).

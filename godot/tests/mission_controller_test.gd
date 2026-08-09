@@ -2594,15 +2594,15 @@ func test_move_selected_event_action_reorders_the_chain() -> void:
 # MissionObjects container (no .3di / real mission needed for routing).
 
 class FakeModel:
-	extends Node3D
+	extends NovaEntityVisual
 	var play_calls: Array = []
 	var restart_calls: Array = []
 	var playing: bool = false
 	var reset_calls: int = 0
 	var cleared: int = 0
-	func play_part_anim(channel: int, play_type: int, time_s: float) -> void:
+	func _play_part_anim(channel: int, play_type: int, time_s: float) -> void:
 		play_calls.append([channel, play_type, time_s])
-	func restart_part_anim(channel: int, play_type: int, time_s: float) -> void:
+	func _restart_part_anim(channel: int, play_type: int, time_s: float) -> void:
 		restart_calls.append([channel, play_type, time_s])
 	func set_playing(v: bool) -> void:
 		playing = v

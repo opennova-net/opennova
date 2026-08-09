@@ -570,18 +570,20 @@ func _update_avatar(pos: Vector3) -> void:
 	if overlay != null:
 		var body_basis := MissionObjectPlacer.bms_to_godot_basis(overlay.body_angles)
 		_avatar.global_basis = body_basis
-		if _avatar.has_method("set_aim_overlay"):
+		var avatar_visual := _avatar as NovaEntityVisual
+		if avatar_visual != null:
 			var inv := body_basis.inverse()
 			var deltas: Array = []
 			for a in overlay.segment_angles:
 				deltas.append(inv * MissionObjectPlacer.bms_to_godot_basis(a))
-			_avatar.set_aim_overlay(deltas)
+			avatar_visual.set_aim_overlay(deltas)
 	else:
 		var sim_yaw = _sim()
 		_avatar.global_basis = MissionObjectPlacer.bms_to_godot_basis(
 			Vector3(0.0, sim_yaw.get_local_player_yaw_deg() if sim_yaw != null else 0.0, 0.0))
-		if _avatar.has_method("set_aim_overlay"):
-			_avatar.set_aim_overlay([])
+		var cleared_visual := _avatar as NovaEntityVisual
+		if cleared_visual != null:
+			cleared_visual.set_aim_overlay([])
 	# The body renders only in third person; first person hides it from every
 	# camera by LAYER, not by visible = false, so it stays a live shadow
 	# source. The 2026-08-05 witness corrected the earlier mirror-visible
@@ -613,26 +615,20 @@ func _update_avatar(pos: Vector3) -> void:
 	# at its own playhead onto the mask bones, composed under the aim overlay. Equal
 	# state ids still carry the secondary playhead; an empty key means the gate is off.
 	# [orig: producer @0x4b5dad, override @0x4b14db; world-wac-ai-re.md §14.8]
-	if _avatar.has_method("set_weapon_channel"):
-		var weapon_view: PlayerWeaponView = \
-				_weapon_effects.weapon_view() if _weapon_effects != null else null
+	var body_visual := _avatar as NovaEntityVisual
+	if body_visual != null:
+		var weapon_view: PlayerWeaponView = 				_weapon_effects.weapon_view() if _weapon_effects != null else null
 		if weapon_view != null:
-			_avatar.set_weapon_channel(weapon_view.body_anim_key, weapon_view.body_anim_phase)
+			body_visual.set_weapon_channel(weapon_view.body_anim_key, weapon_view.body_anim_phase)
 		else:
-			_avatar.set_weapon_channel("", 0)
-	if (not anim_source_key.is_empty() and not anim_key.is_empty()
-			and anim_blend_weight < 1.0
-			and _avatar.has_method("play_body_blend_at")):
-		_avatar.play_body_blend_at(
-				anim_source_key, anim_source_phase,
-				anim_key, anim_phase, anim_blend_weight)
-	elif not anim_key.is_empty() and _avatar.has_method("play_body_clip_at"):
-		_avatar.play_body_clip_at(anim_key, anim_phase)
-	elif not anim_key.is_empty() and _avatar.has_method("play_body_clip"):
-		_avatar.play_body_clip(anim_key)
-	elif _avatar.has_method("play_body_anim_at"):
-		_avatar.play_body_anim_at(
-				sim.get_local_player_body_anim_slot() if sim != null else -1, anim_phase)
-	elif _avatar.has_method("play_body_anim"):
-		_avatar.play_body_anim(
-				sim.get_local_player_body_anim_slot() if sim != null else -1)
+			body_visual.set_weapon_channel("", 0)
+		if (not anim_source_key.is_empty() and not anim_key.is_empty()
+				and anim_blend_weight < 1.0):
+			body_visual.play_body_blend_at(
+					anim_source_key, anim_source_phase,
+					anim_key, anim_phase, anim_blend_weight)
+		elif not anim_key.is_empty():
+			body_visual.play_body_clip_at(anim_key, anim_phase)
+		else:
+			body_visual.play_body_anim_at(
+					sim.get_local_player_body_anim_slot() if sim != null else -1, anim_phase)

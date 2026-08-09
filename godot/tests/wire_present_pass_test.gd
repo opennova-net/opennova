@@ -6,7 +6,7 @@ const PresentHeldWeapon := preload("res://adapter/world/present_held_weapon.gd")
 
 
 class FakeModel:
-	extends Node3D
+	extends NovaEntityVisual
 	var overlay_calls: Array = []
 	var right_hand_collapse_calls: Array[bool] = []
 	var weapon_channel_calls: Array = []
@@ -22,48 +22,48 @@ class FakeModel:
 	var ctrl_values: Dictionary = {}
 	var cleared_controls: Array[String] = []
 	var shadow_caster_enabled := false
-	func play_body_clip_at(key: String, phase_ticks: int) -> void:
+	func _play_body_clip_at(key: String, phase_ticks: int) -> void:
 		body_calls.append(["at", key, phase_ticks])
 		pose_call_order.append("body")
-	func play_body_blend_at(source_key: String, source_phase_ticks: int,
+	func _play_body_blend_at(source_key: String, source_phase_ticks: int,
 			target_key: String, target_phase_ticks: int, weight: float) -> void:
 		body_calls.append([
 			"blend", source_key, source_phase_ticks,
 			target_key, target_phase_ticks, weight])
 		pose_call_order.append("body")
-	func play_body_clip(key: String) -> void:
+	func _play_body_clip(key: String) -> void:
 		body_calls.append(["free", key])
 		pose_call_order.append("body")
-	func apply_remote_body_state(state_id: int, key: String, flags: int,
+	func _apply_remote_body_state(state_id: int, key: String, flags: int,
 			phase_ticks: int = -1) -> bool:
 		remote_body_calls.append([state_id, key, flags, phase_ticks])
 		pose_call_order.append("body")
 		return remote_apply_results.pop_front() \
 				if not remote_apply_results.is_empty() else false
-	func reset_remote_body_state() -> void:
+	func _reset_remote_body_state() -> void:
 		reset_remote_body_calls += 1
 		pose_call_order.append("reset")
-	func advance_remote_body_blend_tick(state_id: int) -> bool:
+	func _advance_remote_body_blend_tick(state_id: int) -> bool:
 		remote_tick_calls.append(state_id)
 		return remote_tick_results.pop_front() \
 				if not remote_tick_results.is_empty() else false
-	func set_part_phase(channel: int, phase: int) -> void:
+	func _set_part_phase(channel: int, phase: int) -> void:
 		part_calls.append([channel, phase])
 		ctrl_values["VEHICLE_SPECIAL%d" % channel] = phase
-	func clear_part_phase(channel: int) -> void:
+	func _clear_part_phase(channel: int) -> void:
 		cleared_part_channels.append(channel)
 		ctrl_values.erase("VEHICLE_SPECIAL%d" % channel)
-	func set_aim_overlay(deltas: Array) -> void:
+	func _set_aim_overlay(deltas: Array) -> void:
 		overlay_calls.append(deltas)
 		pose_call_order.append("overlay")
-	func set_right_hand_collapsed(collapsed: bool) -> void:
+	func _set_right_hand_collapsed(collapsed: bool) -> void:
 		right_hand_collapse_calls.append(collapsed)
 		pose_call_order.append("right_hand")
-	func set_weapon_channel(key: String, phase_ticks: int) -> void:
+	func _set_weapon_channel(key: String, phase_ticks: int) -> void:
 		weapon_channel_calls.append([key, phase_ticks])
-	func set_ctrl_value(name: String, value: int) -> void:
+	func _set_ctrl_value(name: String, value: int) -> void:
 		ctrl_values[name] = value
-	func clear_ctrl_value(name: String) -> void:
+	func _clear_ctrl_value(name: String) -> void:
 		ctrl_values.erase(name)
 		cleared_controls.append(name)
 	func set_shadow_caster_enabled(enabled: bool) -> void:

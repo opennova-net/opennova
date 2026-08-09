@@ -11,7 +11,7 @@ const MissionObjectPlacer := preload("res://adapter/mission/mission_object_place
 
 
 class FakeModel:
-	extends Node3D
+	extends NovaEntityVisual
 	var phases: Array = []        # [channel, phase]
 	var body_calls: Array = []    # [key_or_slot, phase]
 	var overlay_calls: Array = []
@@ -25,14 +25,14 @@ class FakeModel:
 	# keying this node's instance id into the captured registry.
 	var submission_registry: Dictionary = {}
 	var registry_binds := 0
-	func set_submission_registry(registry: Dictionary) -> void:
+	func _set_submission_registry(registry: Dictionary) -> void:
 		submission_registry = registry
 		registry_binds += 1
 	var part_control_names: Dictionary = {
 		1: "VEHICLE_SPECIAL1",
 		2: "VEHICLE_SPECIAL2",
 	}
-	func set_part_phase(channel: int, phase: int) -> void:
+	func _set_part_phase(channel: int, phase: int) -> void:
 		var control_name := String(part_control_names.get(channel, ""))
 		if not control_name.is_empty() and ctrl_values.has(control_name) and \
 				int(ctrl_values[control_name]) == phase:
@@ -40,33 +40,33 @@ class FakeModel:
 		phases.append([channel, phase])
 		if not control_name.is_empty():
 			ctrl_values[control_name] = phase
-	func clear_part_phase(channel: int) -> void:
+	func _clear_part_phase(channel: int) -> void:
 		var control_name := String(part_control_names.get(channel, ""))
 		if control_name.is_empty() or not ctrl_values.has(control_name):
 			return
 		cleared_part_channels.append(channel)
 		ctrl_values.erase(control_name)
-	func play_body_clip_at(key: String, phase_ticks: int) -> void:
+	func _play_body_clip_at(key: String, phase_ticks: int) -> void:
 		body_calls.append([key, phase_ticks])
-	func play_body_blend_at(source_key: String, source_phase_ticks: int,
+	func _play_body_blend_at(source_key: String, source_phase_ticks: int,
 			target_key: String, target_phase_ticks: int, weight: float) -> void:
 		body_calls.append([
 			"blend", source_key, source_phase_ticks,
 			target_key, target_phase_ticks, weight])
-	func play_body_anim_at(slot: int, phase_ticks: int) -> void:
+	func _play_body_anim_at(slot: int, phase_ticks: int) -> void:
 		body_calls.append([slot, phase_ticks])
-	func play_body_anim(slot: int) -> void:
+	func _play_body_anim(slot: int) -> void:
 		body_calls.append([slot, -1])
-	func set_aim_overlay(deltas: Array) -> void:
+	func _set_aim_overlay(deltas: Array) -> void:
 		overlay_calls.append(deltas)
-	func set_right_hand_collapsed(collapsed: bool) -> void:
+	func _set_right_hand_collapsed(collapsed: bool) -> void:
 		right_hand_collapse_calls.append(collapsed)
-	func set_ctrl_value(name: String, value: int) -> void:
+	func _set_ctrl_value(name: String, value: int) -> void:
 		if ctrl_values.has(name) and int(ctrl_values[name]) == value:
 			return
 		ctrl_values[name] = value
 		set_controls.append([name, value])
-	func clear_ctrl_value(name: String) -> void:
+	func _clear_ctrl_value(name: String) -> void:
 		if not ctrl_values.has(name):
 			return
 		ctrl_values.erase(name)
@@ -78,21 +78,21 @@ class OwnedBatchModel:
 	var ctrl_owners: Dictionary = {}
 	var begin_batch_calls := 0
 	var end_batch_calls := 0
-	func set_ctrl_override(owner: String, name: String, value: int) -> void:
+	func _set_ctrl_override(owner: String, name: String, value: int) -> void:
 		if String(ctrl_owners.get(name, "")) == owner and \
 				ctrl_values.has(name) and int(ctrl_values[name]) == value:
 			return
 		ctrl_values[name] = value
 		ctrl_owners[name] = owner
-	func clear_ctrl_override(owner: String, name: String) -> void:
+	func _clear_ctrl_override(owner: String, name: String) -> void:
 		if String(ctrl_owners.get(name, "")) != owner:
 			return
 		ctrl_owners.erase(name)
 		ctrl_values.erase(name)
 		cleared_controls.append(name)
-	func begin_ctrl_update() -> void:
+	func _begin_ctrl_update() -> void:
 		begin_batch_calls += 1
-	func end_ctrl_update() -> void:
+	func _end_ctrl_update() -> void:
 		end_batch_calls += 1
 
 
@@ -100,9 +100,9 @@ class MuzzleFakeModel:
 	extends FakeModel
 	var muzzle_queries := 0
 	var muzzle_position := Vector3(4.0, 5.0, 6.0)
-	func has_muzzle() -> bool:
+	func _has_muzzle() -> bool:
 		return true
-	func get_muzzle_world_position() -> Vector3:
+	func _get_muzzle_world_position() -> Vector3:
 		muzzle_queries += 1
 		return muzzle_position
 

@@ -1,15 +1,16 @@
 extends GutTest
 
 # MissionEntityRegistry resolves an event action's target (SSN / group / zone) back to the live animatable
-# model nodes the placer tagged with "entity_ref" meta. Asset-free: fake animatable nodes (exposing
-# play_part_anim, the marker the registry filters on) + a fake mission supplying area-trigger rects.
+# model nodes the placer tagged with "entity_ref" meta. Asset-free: fake animatable nodes (the typed
+# NovaEntityVisual contract is the marker the registry filters on) + a fake mission supplying
+# area-trigger rects.
 
 const Registry := preload("res://adapter/world/mission_entity_registry.gd")
 
 
 class FakeAnimNode:
-	extends Node
-	func play_part_anim(_channel: int, _play_type: int, _time_s: float) -> void:
+	extends NovaEntityVisual
+	func _play_part_anim(_channel: int, _play_type: int, _time_s: float) -> void:
 		pass
 
 

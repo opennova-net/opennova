@@ -475,7 +475,7 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 		# at render -- so a loaded .bms renders at its stored coords verbatim. [orig: sub_401A90, dfx2med.exe]
 		model.transform = a["xform"] as Transform3D
 		container.add_child(model)
-		if env_node != null and model.has_method("set_environment_node"):
+		if env_node != null and model is NovaEntityVisual:
 			model.set_environment_node(env_node)
 		_configure_item_shadow(
 				model,
@@ -555,7 +555,7 @@ func build_animated_model(item_id: int, parent: Node3D, env_node: Node = null) -
 	# the water mirror, persons and everything else never do (env #30).
 	model.mirror_reflected = _item_is_mirror_reflected(item_id)
 	parent.add_child(model)
-	if env_node != null and model.has_method("set_environment_node"):
+	if env_node != null and model is NovaEntityVisual:
 		model.set_environment_node(env_node)
 	_configure_item_shadow(model, item_id)
 	_apply_skeletal_anim(model, item_id, data.get_bone_origins(), data.get_bone_parents())
@@ -597,7 +597,7 @@ func build_model_from_graphic(graphic: String, adm_name: String, parent: Node3D,
 	model.set_panm_clock(_panm_clock)
 	model.name = "Viewmodel_%s" % graphic
 	parent.add_child(model)
-	if env_node != null and model.has_method("set_environment_node"):
+	if env_node != null and model is NovaEntityVisual:
 		model.set_environment_node(env_node)
 	if not adm_name.is_empty():
 		# The ADM names the CLIP SET; the rig table belongs to the equipped FP gun. The arms
@@ -619,7 +619,7 @@ func build_model_from_graphic(graphic: String, adm_name: String, parent: Node3D,
 	model.set_object_data(data)
 	# Pose into a starting clip (e.g. the FP weapon idle "anim_wpn_idle" -> mp5_1i) so the model
 	# holds that pose rather than its bind/T-pose; the model self-ticks the clip via _process.
-	if not clip_key.is_empty() and model.has_method("play_body_clip"):
+	if not clip_key.is_empty() and model is NovaEntityVisual:
 		model.play_body_clip(clip_key)
 	return model
 
@@ -674,7 +674,7 @@ func place_single(mission: NovaMissionData, container: Node3D, kind: int, index:
 		model.mirror_reflected = _item_is_mirror_reflected(item_id)
 		model.transform = xform
 		container.add_child(model)
-		if env_node != null and model.has_method("set_environment_node"):
+		if env_node != null and model is NovaEntityVisual:
 			model.set_environment_node(env_node)
 		_configure_item_shadow(
 				model, item_id, kind, int(entity.get("ai_flags", 0)))
@@ -1064,7 +1064,7 @@ func _apply_skeletal_anim(model: Node3D, item_id: int,
 		return
 	var adm_name := anim_def if anim_def.to_lower().ends_with(".adm") else anim_def + ".adm"
 	var skeletal = _skeletal_from_adm(adm_name, model_bone_origins, model_bone_parents)
-	if skeletal != null and model.has_method("set_skeletal_anim"):
+	if skeletal != null and model is NovaEntityVisual:
 		model.set_skeletal_anim(skeletal)
 
 
@@ -1077,7 +1077,7 @@ func _apply_skeletal_anim(model: Node3D, item_id: int,
 # ak47_1st.adm) yet carry different .3di pivots, so they must not alias. See NovaSkeletalAnim.
 func _apply_skeletal_from_adm(model: Node3D, adm_name: String, model_bone_origins: PackedVector3Array, model_bone_parents := PackedInt32Array()) -> void:
 	var skeletal = _skeletal_from_adm(adm_name, model_bone_origins, model_bone_parents)
-	if skeletal != null and model.has_method("set_skeletal_anim"):
+	if skeletal != null and model is NovaEntityVisual:
 		model.set_skeletal_anim(skeletal)
 
 
@@ -1354,7 +1354,7 @@ func _get_static_batches(graphic: String, env_node: Node, tree_parent: Node) -> 
 		# between add_child and free, so _process()/animation never runs.
 		tree_parent.add_child(model)
 		model.object_data = data
-		if env_node != null and model.has_method("set_environment_node"):
+		if env_node != null and model is NovaEntityVisual:
 			model.set_environment_node(env_node)
 		model.rebuild()
 		# Each batch's "offset" is the submesh's model-local rest transform (part * mesh) relative to
