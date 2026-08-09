@@ -31,29 +31,30 @@ std::function<void(int32_t)> leg_int(const Callable &p_cb) {
 
 namespace {
 
-// Install-time leg-contract wiring: every named leg must exist on the host —
-// a missing one rejects the whole install (fail loudly; no fallback path).
-bool wire_leg_contract(Object *p_host, const char *const *p_names, int p_count,
+// Install-time leg-contract wiring: every named leg must exist on the
+// registrant — a missing one rejects the whole install (fail loudly; no
+// fallback path).
+bool wire_leg_contract(Object *p_owner, const char *const *p_names, int p_count,
 		Callable *const *p_slots) {
 	for (int i = 0; i < p_count; ++i) {
-		if (!p_host->has_method(StringName(p_names[i]))) {
-			UtilityFunctions::push_error(String("frame host ") +
-					p_host->get_class() + " is missing leg " + p_names[i] +
+		if (!p_owner->has_method(StringName(p_names[i]))) {
+			UtilityFunctions::push_error(String("frame leg owner ") +
+					p_owner->get_class() + " is missing leg " + p_names[i] +
 					"; install rejected");
 			return false;
 		}
 	}
 	for (int i = 0; i < p_count; ++i) {
-		*p_slots[i] = Callable(p_host, StringName(p_names[i]));
+		*p_slots[i] = Callable(p_owner, StringName(p_names[i]));
 	}
 	return true;
 }
 
 } // namespace
 
-void Simulation::set_frame_shell_host(Object *p_host,
+void Simulation::set_frame_shell(Object *p_shell,
 		const Callable &p_listener) {
-	if (p_host == nullptr) {
+	if (p_shell == nullptr) {
 		frame_listener_cb_ = Callable();
 		frame_begin_effect_cb_ = Callable();
 		frame_sync_fixed_cb_ = Callable();
@@ -79,14 +80,14 @@ void Simulation::set_frame_shell_host(Object *p_host,
 		&frame_present_rows_cb_,
 		&frame_present_frame_cb_,
 	};
-	if (!wire_leg_contract(p_host, kNames, 6, slots)) {
+	if (!wire_leg_contract(p_shell, kNames, 6, slots)) {
 		return;
 	}
 	frame_listener_cb_ = p_listener;
 }
 
-void Simulation::set_frame_world_host(Object *p_host) {
-	if (p_host == nullptr) {
+void Simulation::set_frame_world(Object *p_world) {
+	if (p_world == nullptr) {
 		frame_terrain_cb_ = Callable();
 		frame_foliage_cb_ = Callable();
 		frame_net_drive_cb_ = Callable();
@@ -117,7 +118,7 @@ void Simulation::set_frame_world_host(Object *p_host) {
 		&frame_iris_cb_,
 		&frame_audio_cb_,
 	};
-	wire_leg_contract(p_host, kNames, 8, slots);
+	wire_leg_contract(p_world, kNames, 8, slots);
 }
 
 opennova::frame::FrameHooks Simulation::build_frame_hooks() {

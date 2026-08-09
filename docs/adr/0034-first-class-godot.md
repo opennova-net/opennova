@@ -53,12 +53,12 @@ only untyped thing left.
 
 3. **Registration replaces hook bundles.** Where the engine frame needs
    Godot-side legs, the owning NODE registers itself once
-   (`set_frame_world_host(self)` / `set_frame_shell_host(self, listener)`)
+   (`set_frame_world(self)` / `set_frame_shell(self, listener)`)
    and the binding wires the documented leg contract, rejecting the install
    loudly if a leg is missing. Bundles of loose Callables at call sites are
    retired everywhere a typed owner exists.
 
-4. **The directory is renamed to match reality.** `godot/src/` becomes
+4. **The directory is renamed to match reality.** `godot/adapter/` becomes
    `godot/src/` — the Godot project's source (GDExtension C++ bindings +
    the shared GDScript runtime), named like what it is. `res://src/...`
    paths, the build scripts, lints, and docs follow mechanically. The

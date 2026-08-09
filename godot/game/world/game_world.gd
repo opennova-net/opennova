@@ -2146,11 +2146,11 @@ func _start_runtime(mission: MissionData, bms_name: String) -> int:
 		else:
 			load_failed.emit("failed to start mission runtime")
 		return setup_error if setup_error != OK else ERR_CANT_CREATE
-	# ADR 0033 R1/R2: register this world host on the engine frame. The binding
+	# ADR 0033 R1/R2: register this world on the engine frame. The binding
 	# wires the whole leg contract (_frame_*_leg methods) and the FrameDriver
 	# runs them in its fixed order around the tick batch (terrain then foliage
 	# before; net-drive, weather, blink, occlusion, iris, audio after).
-	_runtime.get_sim().set_frame_world_host(self)
+	_runtime.get_sim().set_frame_world(self)
 	_run_mission_start_environment_boundary()
 	_sync_runtime_profiling()
 	# The player profile's saved weapon kits, loaded before ANY kit is applied or

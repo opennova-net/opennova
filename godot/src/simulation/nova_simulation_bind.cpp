@@ -38,10 +38,10 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("step"), &Simulation::step);
 	ClassDB::bind_method(D_METHOD("bank_realtime", "delta"), &Simulation::bank_realtime);
 	ClassDB::bind_method(D_METHOD("reset_tick_bank"), &Simulation::reset_tick_bank);
-	ClassDB::bind_method(D_METHOD("set_frame_shell_host", "host", "listener"),
-			&Simulation::set_frame_shell_host);
-	ClassDB::bind_method(D_METHOD("set_frame_world_host", "host"),
-			&Simulation::set_frame_world_host);
+	ClassDB::bind_method(D_METHOD("set_frame_shell", "shell", "listener"),
+			&Simulation::set_frame_shell);
+	ClassDB::bind_method(D_METHOD("set_frame_world", "world"),
+			&Simulation::set_frame_world);
 	ClassDB::bind_method(D_METHOD("frame_realtime", "delta"), &Simulation::frame_realtime);
 	ClassDB::bind_method(D_METHOD("frame_single"), &Simulation::frame_single);
 	ClassDB::bind_method(D_METHOD("get_frame_perf"), &Simulation::get_frame_perf);

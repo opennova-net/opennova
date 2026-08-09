@@ -312,13 +312,13 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 		Callable(_throwable_present, 'reset_runtime_state'))
 	# ADR 0033 R1: the loop shape, the per-tick leg order, and the post-batch
 	# frame legs live in the engine FrameDriver (frame/frame_driver.h). This
-	# host registers itself ONCE and the binding wires the leg contract; the
+	# runtime registers itself ONCE and the binding wires the leg contract; the
 	# camera listener stays an explicit device Callable (a dedicated host has
-	# none). The host is a NODE, never a RefCounted presenter: a Node-bound
-	# leg carries an ObjectID and stays safe to destroy in any leaked-object
-	# teardown order, while a RefCounted-bound one would make the sim a hidden
-	# owner of the presenter.
-	_sim.set_frame_shell_host(self, _fire_listener)
+	# none). The registrant is a NODE, never a RefCounted presenter: a
+	# Node-bound leg carries an ObjectID and stays safe to destroy in any
+	# leaked-object teardown order, while a RefCounted-bound one would make the
+	# sim a hidden owner of the presenter.
+	_sim.set_frame_shell(self, _fire_listener)
 	# Capture the authored node transforms now (pre-tick) so Stop restores them whether the host
 	# played or only stepped. Cheap; the game never Stops but holding the map costs nothing.
 	_capture_transforms()
@@ -844,8 +844,8 @@ func _exit_tree() -> void:
 		_sim.set_runtime_profiling_enabled(false)
 		# Release the frame device legs before the presenters tear down: the
 		# sim must not hold Callables into objects this exit is about to free.
-		_sim.set_frame_shell_host(null, Callable())
-		_sim.set_frame_world_host(null)
+		_sim.set_frame_shell(null, Callable())
+		_sim.set_frame_world(null)
 	_clear_present_effect_poses()
 	if _fire_present != null:
 		_fire_present.teardown()  # frees the tracer mesh instance under the container

@@ -697,15 +697,15 @@ func test_identity_graphic_jump_opens_resolved_object_model() -> void:
 	var ctx := _make(_sample_entity())
 	ctx.fake.graphic_name = "SpecOps"
 	var log := {}
-	ctx.inspector.set_reference_services({
-		"resolve": func(kind: String, name: String) -> Dictionary:
-			log["resolve"] = [kind, name]
-			return {"status": "found", "path": "C:/res/SpecOps.3di"},
-		"pick": func(kind: String, title: String, _on_pick: Callable) -> void:
-			log["pick"] = [kind, title],
-		"jump": func(kind: String, path: String) -> void:
-			log["jump"] = [kind, path],
-	})
+	var services := LinkServices.new()
+	services.resolve = func(kind: String, name: String) -> Dictionary:
+		log["resolve"] = [kind, name]
+		return {"status": "found", "path": "C:/res/SpecOps.3di"}
+	services.pick = func(kind: String, title: String, _on_pick: Callable) -> void:
+		log["pick"] = [kind, title]
+	services.jump = func(kind: String, path: String) -> void:
+		log["jump"] = [kind, path]
+	ctx.inspector.set_reference_services(services)
 	ctx.inspector._refresh()
 	assert_eq(log["resolve"], ["object_model", "SpecOps"], "the selected graphic resolves as an object model")
 	assert_true(ctx.inspector._identity_graphic.jump_button.visible, "resolved graphics expose the jump button")
@@ -1479,12 +1479,12 @@ func test_reference_services_enable_browse_on_world_widgets() -> void:
 	assert_false(terrain.browse_button.visible, "no services yet: browse hidden")
 	# Services arrive after the form is built (the workspace injects them
 	# post-build); the setter must re-configure the live widgets.
-	ctx.inspector.set_reference_services({
-		"resolve": func(_kind: String, _name: String) -> Dictionary:
-			return {"status": "found", "path": "C:/res/x.trn"},
-		"pick": func(_kind: String, _title: String, _on_pick: Callable) -> void:
-			pass,
-	})
+	var services := LinkServices.new()
+	services.resolve = func(_kind: String, _name: String) -> Dictionary:
+		return {"status": "found", "path": "C:/res/x.trn"}
+	services.pick = func(_kind: String, _title: String, _on_pick: Callable) -> void:
+		pass
+	ctx.inspector.set_reference_services(services)
 	assert_true(terrain.browse_button.visible, "services injected: browse shows")
 	assert_true(terrain.badge.visible, "services injected: badge resolves")
 	assert_eq(terrain.badge.text, "●", "fake resolve reports found")

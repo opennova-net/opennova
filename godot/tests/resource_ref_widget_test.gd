@@ -15,18 +15,18 @@ func _make_widget() -> ResourceRefWidget:
 	return w
 
 
-func _services(resolve_map: Dictionary, log: Dictionary = {}) -> Dictionary:
+func _services(resolve_map: Dictionary, log: Dictionary = {}) -> LinkServices:
 	# resolve_map: name -> {status, path}; log records pick/jump invocations.
-	return {
-		"resolve": func(kind: String, name: String) -> Dictionary:
-			log["resolved"] = [kind, name]
-			return resolve_map.get(name, {"status": "missing", "path": ""}),
-		"pick": func(kind: String, title: String, on_pick: Callable) -> void:
-			log["pick"] = [kind, title]
-			on_pick.call(String(log.get("pick_result", ""))),
-		"jump": func(kind: String, path: String) -> void:
-			log["jump"] = [kind, path],
-	}
+	var services := LinkServices.new()
+	services.resolve = func(kind: String, name: String) -> Dictionary:
+		log["resolved"] = [kind, name]
+		return resolve_map.get(name, {"status": "missing", "path": ""})
+	services.pick = func(kind: String, title: String, on_pick: Callable) -> void:
+		log["pick"] = [kind, title]
+		on_pick.call(String(log.get("pick_result", "")))
+	services.jump = func(kind: String, path: String) -> void:
+		log["jump"] = [kind, path]
+	return services
 
 
 func test_without_services_degrades_to_plain_name_field() -> void:

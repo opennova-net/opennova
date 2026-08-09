@@ -935,9 +935,9 @@ public:
 	void reset_tick_bank() { frame_driver_.reset_bank(); }
 
 	// --- The engine-owned game frame (ADR 0033 R1; frame/frame_driver.h) ---
-	// The host registers ITSELF once per mission and the binding wires the
-	// whole leg contract (documented method names below) — no Callable
-	// bundles. A registered host missing any leg is rejected loudly at
+	// The shell/world NODE registers ITSELF once per mission and the binding
+	// wires the whole leg contract (documented method names below) — no
+	// Callable bundles. A registrant missing any leg is rejected loudly at
 	// install. Null releases the legs. The loop shape, the per-tick leg
 	// order, and the post-batch frame-leg order are frame::FrameDriver's;
 	// the sim supplies step/logic-tick/effects natively.
@@ -948,14 +948,14 @@ public:
 	// _frame_present_frame_leg. The camera listener source (-> Vector3) stays
 	// an explicit Callable: it is a distinct device owned by whoever holds the
 	// camera, and a dedicated host has none.
-	void set_frame_shell_host(Object *p_host, const Callable &p_listener);
-	// The world-host contract (GameWorld), in the fixed frame order:
+	void set_frame_shell(Object *p_shell, const Callable &p_listener);
+	// The world leg contract (GameWorld), in the fixed frame order:
 	// _frame_terrain_leg (packet compile + apply — its detail-cell handoff
 	// feeds foliage), _frame_foliage_leg, _frame_net_drive_leg,
 	// _frame_weather_leg, _frame_blink_leg, _frame_occlusion_leg,
 	// _frame_iris_leg, _frame_audio_leg(int ticks_run).
-	void set_frame_world_host(Object *p_host);
-	// One realtime host frame (the FrameDriver's run_frame; the main-loop
+	void set_frame_world(Object *p_world);
+	// One realtime frame (the FrameDriver's run_frame; the main-loop
 	// witness lives on the engine header); returns the logic ticks run. One
 	// deterministic single step (debug Step / tests); returns whether the
 	// tick ran.

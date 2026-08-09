@@ -11,29 +11,29 @@ const StringRefWidgetScript = preload("res://modtools/framework/links/string_ref
 var _log: Array = []
 
 
-func _make_widget(services: Dictionary = {}) -> StringRefWidget:
+func _make_widget(services: LinkServices = null) -> StringRefWidget:
 	var widget: StringRefWidget = StringRefWidgetScript.new()
 	add_child_autofree(widget)
 	widget.configure("string", services)
 	return widget
 
 
-func _table_services() -> Dictionary:
+func _table_services() -> LinkServices:
 	# A two-entry fake table: ALPHA -> "Alpha", BRAVO -> "Bravo".
-	return {
-		"resolve": func(key: String) -> Dictionary:
-			_log.append(["resolve", key])
-			if key.is_empty():
-				return {}
-			if key == "ALPHA" or key == "BRAVO":
-				return {"status": "found", "path": "/root/menutxt.BIN", "text": key.capitalize()}
-			return {"status": "missing", "path": "/root/menutxt.BIN", "text": ""},
-		"pick": func(current_key: String, on_pick: Callable) -> void:
-			_log.append(["pick", current_key])
-			on_pick.call("BRAVO"),
-		"jump": func(key: String, table_path: String) -> void:
-			_log.append(["jump", key, table_path]),
-	}
+	var services := LinkServices.new()
+	services.resolve = func(key: String) -> Dictionary:
+		_log.append(["resolve", key])
+		if key.is_empty():
+			return {}
+		if key == "ALPHA" or key == "BRAVO":
+			return {"status": "found", "path": "/root/menutxt.BIN", "text": key.capitalize()}
+		return {"status": "missing", "path": "/root/menutxt.BIN", "text": ""}
+	services.pick = func(current_key: String, on_pick: Callable) -> void:
+		_log.append(["pick", current_key])
+		on_pick.call("BRAVO")
+	services.jump = func(key: String, table_path: String) -> void:
+		_log.append(["jump", key, table_path])
+	return services
 
 
 func before_each() -> void:
