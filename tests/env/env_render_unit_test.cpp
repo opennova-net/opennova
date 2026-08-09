@@ -3,6 +3,7 @@
 #include <env/env_celestial.h>
 #include <env/env_water_render.h>
 #include <env/env_weather.h>
+#include <env/env_weather_core.h>
 
 #include <cmath>
 #include <cstdio>
@@ -1271,8 +1272,84 @@ int main() {
 		            "witnessed strip index tail")) return 1;
 	}
 
+	// --- WeatherCore aggregate (env_weather_core.h) --------------------------
+	{
+		// The armed-gust decay extension: only an ARMED, expired timer decays
+		// the oscillator intensity (x31 >> 5 per tick); unarmed wind holds.
+		WeatherCore held;
+		held.set_wind_intensity(256);
+		for (int i = 0; i < 4; ++i) {
+			held.tick(0, 0, 0, 0, 0, 0.0f);
+		}
+		if (!expect(held.oscillator.intensity == 256,
+		            "unarmed wind intensity never decays")) return 1;
+
+		WeatherCore gust;
+		gust.set_wind_intensity(256);
+		gust.set_wind_duration_ticks(2);
+		gust.tick(0, 0, 0, 0, 0, 0.0f);
+		if (!expect(gust.oscillator.intensity == 256,
+		            "armed wind holds while the timer runs")) return 1;
+		gust.tick(0, 0, 0, 0, 0, 0.0f);
+		if (!expect(gust.oscillator.intensity == (256 * 31) >> 5,
+		            "the expiry tick decays x31 >> 5")) return 1;
+		gust.tick(0, 0, 0, 0, 0, 0.0f);
+		if (!expect(gust.oscillator.intensity == (((256 * 31) >> 5) * 31) >> 5,
+		            "decay repeats per tick until zero")) return 1;
+
+		// The marched-exposure fold: three no-interior-data samples each serve
+		// the 255 clamp [orig: @ 0x5c7652]; the /3 average lands 255 and the
+		// modulator target is 0x10101 * gain [orig: @ 0x57e512..0x57e538].
+		WeatherCore fold;
+		const int32_t no_data[3] = {
+			WeatherCore::kIrisSampleIndoorNoData,
+			WeatherCore::kIrisSampleIndoorNoData,
+			WeatherCore::kIrisSampleIndoorNoData,
+		};
+		const Rgb ambient{0.25f, 0.25f, 0.25f};
+		fold.set_exposure_from_iris_samples(no_data, 3, ambient, ambient,
+		                                    0.0f, -1.0f, 0.0f, 50.0f, 1.0f);
+		if (!expect(fold.modulator_chain.modulator.target == 0x10101u * 255u,
+		            "three no-interior-data samples average to the 255 clamp")) return 1;
+
+		// A mixed indoor set averages the per-sample iris gains truncating /3
+		// [orig: (s0+s1+s2)/3 @ 0x5c7b45] — cross-checked against the public
+		// iris_gain the indoor samples classify into (directional zeroed,
+		// ceiling/floor ambient [orig: @ 0x5c7660..0x5c76fe]).
+		WeatherCore mixed;
+		const int32_t two_indoor[3] = {
+			WeatherCore::kIrisSampleIndoor,
+			WeatherCore::kIrisSampleIndoor,
+			WeatherCore::kIrisSampleIndoorNoData,
+		};
+		const Rgb zero{};
+		mixed.set_exposure_from_iris_samples(two_indoor, 3, ambient, ambient,
+		                                     0.0f, -1.0f, 0.0f,
+		                                     /*iris_percent=*/50.0f,
+		                                     /*iris_center=*/1.0f);
+		const int indoor_gain = iris_gain(zero, ambient, ambient,
+		                                  0.0f, -1.0f, 0.0f,
+		                                  /*iris_center=*/1.0f,
+		                                  /*iris_percent=*/50.0f);
+		const uint32_t want_gain =
+		    static_cast<uint32_t>((indoor_gain + indoor_gain + 255) / 3);
+		if (!expect(mixed.modulator_chain.modulator.target == 0x10101u * want_gain,
+		            "mixed samples average their iris gains truncating /3")) return 1;
+
+		// No samples falls back to the outdoor form: same target as
+		// set_exposure_from_outdoor_iris at the same inputs.
+		WeatherCore empty_form;
+		WeatherCore outdoor_form;
+		empty_form.set_exposure_from_iris_samples(nullptr, 0, ambient, ambient,
+		                                          0.2f, -0.9f, 0.1f, 40.0f, 1.5f);
+		outdoor_form.set_exposure_from_outdoor_iris(0.2f, -0.9f, 0.1f, 40.0f, 1.5f);
+		if (!expect(empty_form.modulator_chain.modulator.target ==
+		                    outdoor_form.modulator_chain.modulator.target,
+		            "no samples serves the outdoor iris form")) return 1;
+	}
+
 	std::printf(
 	    "OK: env_render fog/day-phase/smoothing/lightning/glare/overrides/horizon/tint/iris"
-	    "/oscillator/sequencers/blocks/scroll/dome/waternoise/celestial/waterstrip\n");
+	    "/oscillator/sequencers/blocks/scroll/dome/waternoise/celestial/waterstrip/weathercore\n");
 	return 0;
 }

@@ -44,6 +44,7 @@ add_library(opennova_formats STATIC
     # env — environment/time-of-day
     ${CMAKE_CURRENT_SOURCE_DIR}/env/src/env.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/env/src/env_render.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/env/src/env_weather_core.cpp
     # fnt — bitmap fonts
     ${CMAKE_CURRENT_SOURCE_DIR}/fnt/src/fnt.c
     # foliage — foliage defs + placement map
