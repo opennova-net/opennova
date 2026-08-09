@@ -69,9 +69,7 @@ func _rebake_objects() -> void:
 	# bump; see _apply_reground_world_update.)
 	_c._membership_rev += 1
 	var options: Dictionary = {}
-	var env_node: Node = _c._environment_node()
-	if env_node != null:
-		options["environment_node"] = env_node
+	_c._wire_placer_environment()
 	_c._stats = _c._placer.place(_c._mission, world_root, options)
 	_c._pickable = _c._placer.pickable_records
 	# The placer (re)created the pick colliders with the world; just refresh the debug overlay.

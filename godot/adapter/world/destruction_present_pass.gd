@@ -237,7 +237,7 @@ func _resolve_entity_node(bms_id: int, spawn_origin_v: Variant = null,
 	if _index.has_method('resolve'):
 		var origin := _spawn_origin_parts(spawn_origin_v)
 		node_v = _index.resolve(bms_id, origin.x, origin.y)
-	elif _index.has_method('resolve_single'):
+	elif _index != null:
 		node_v = _index.resolve_single(bms_id)
 	return node_v as Node3D if node_v is Node3D and is_instance_valid(node_v) else null
 

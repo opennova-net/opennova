@@ -13,20 +13,20 @@
 #include <unordered_map>
 #include <vector>
 
+#include "object/nova_entity_index.h"
+#include "object/nova_object_model.h"
+
 namespace godot {
 
-class Node;
-class Node3D;
+class NovaSimulation;
 
 // The native mission present-pass row walk. MissionPresentPass (GDScript,
 // godot/adapter/world/mission_present_pass.gd) stays the shell-facing component —
-// this class owns its hot loop: the revision-bound row plan (resolved node,
-// capability bitmask, applied-state caches) and the per-frame walk over the
-// sim's flat PackedFloat32Array snapshot, dispatching to each resolved node's
-// duck-typed NovaEntityVisual surface (ADR 0007) only on change. Per-row work
-// that was ~10+ Variant-boxed reads plus a full plan revalidation in GDScript
-// becomes raw pointer arithmetic; the dispatched node calls (set_part_phase,
-// play_body_clip_at, ...) keep their GDScript implementations.
+// this class owns its hot loop: the revision-bound row plan (resolved typed
+// NovaObjectModel, applied-state caches) and the per-frame walk over the
+// sim's flat PackedFloat32Array snapshot, dispatching direct C++ calls only
+// on change. There is no name-based dispatch and no capability probing:
+// the model class IS the contract.
 //
 // The walk itself is shell presentation glue over the witnessed per-frame
 // cadence (entity submission is evaluated every render frame [orig:
@@ -46,22 +46,9 @@ public:
 				OUTPUT_BODY_ANIM,
 	};
 
-	// The one compatibility adapter for the visual CTRL/PANM surface. Production
-	// NovaObjectModel exposes owner-aware CTRL writes; older third-party nodes and
-	// test doubles expose the original set_ctrl_value pair. Presenters resolve
-	// this bitset once when they build their node plan, then dispatch without
-	// repeating string-based capability probes in their hot loops.
-	enum VisualControlCapabilities {
-		VISUAL_CTRL_OWNED = 1,
-		VISUAL_CTRL_LEGACY = 2,
-		VISUAL_CTRL_BATCH = 4,
-		VISUAL_PART_PHASE = 8,
-		VISUAL_PART_CLEAR = 16,
-	};
-
-	// `sim` is duck-typed (NovaSimulation or a test fake): consulted only for the
-	// muzzle feedback push. `index` resolves rows to nodes (MissionEntityRegistry
-	// or a fake); called only on plan rebuilds plus one get_generation per frame.
+	// `sim` feeds the muzzle-origin push back (typed NovaSimulation; converted
+	// once at this boundary). `index` resolves rows to typed models — a real
+	// NovaEntityIndex, in tests too.
 	void setup(Object *sim, Object *index);
 	void set_output_channels(int channels);
 	int get_output_channels() const { return output_channels_; }
@@ -97,25 +84,7 @@ public:
 
 	// --- The WIRE (joiner/MP) walk: plan + per-row hot path (the facade
 	// wire_present_pass.gd keeps the cold spawn/defer/prune path and pushes the
-	// finished plan here; nova_present_applier_wire.cpp holds the bodies). The
-	// wire pass's capability superset, resolved once per append.
-	enum WireRowCaps {
-		WIRE_CAP_AIM = 1,
-		WIRE_CAP_CTRL = 2,
-		WIRE_CAP_PART = 4,
-		WIRE_CAP_REMOTE_BODY = 8,
-		WIRE_CAP_BODY_CLIP = 16,
-		WIRE_CAP_BODY_CLIP_AT = 32,
-		WIRE_CAP_BODY_SLOT_AT = 64,
-		WIRE_CAP_BODY_SLOT = 128,
-		WIRE_CAP_RHC = 256,
-		WIRE_CAP_WPN = 512,
-		WIRE_CAP_BODY_BLEND_AT = 1024,
-		WIRE_CAP_REMOTE_BLEND_TICK = 2048,
-		WIRE_CAP_PART_CLEAR = 4096,
-		WIRE_CAP_CTRL_BATCH = 8192,
-		WIRE_CAP_RESET_REMOTE = 16384,
-	};
+	// finished plan here; nova_present_applier_wire.cpp holds the bodies).
 
 	// `rebuild_held_weapon(handle, adm) -> Node3D|null` stays on the facade,
 	// which owns the sim graphic resolve and the weapon-node maps its consumers
@@ -132,7 +101,6 @@ public:
 	// A freed/swapped wire node invalidates the plan and its per-handle caches.
 	void release_wire_handle(int handle);
 	void reset_wire_runtime_state();
-	static int wire_node_caps(Object *node, int visual_ctrl_caps);
 
 	// Third-person held-weapon placement — the native twin of
 	// PresentHeldWeapon.attach_transform/hand_frame_basis (present_held_weapon.gd
@@ -145,16 +113,6 @@ public:
 	static Variant held_weapon_attach_transform(Object *skeleton,
 			const Vector3 &attach_angles_bms, bool hand_frame);
 	static Basis held_weapon_hand_frame_basis(const Basis &bone_model_to_world);
-
-	static int get_visual_control_capabilities(Object *node);
-	// Capability-aware dispatch for presenters that already resolved the visual
-	// surface at model/row-plan construction. These never probe the node.
-	static void ctrl_set_with_capabilities(Object *node, int capabilities,
-			const String &owner, const String &reg, int value);
-	static void ctrl_clear_with_capabilities(Object *node, int capabilities,
-			const String &owner, const String &reg);
-	static int wire_controls_apply_with_capabilities(Object *node,
-			const PackedFloat32Array &snap, int base, int capabilities);
 
 	// Emplaced-weapon CTRL registers (emplaced_weapon_present_pass.gd delegates
 	// here): EWEAP_GUNYAW/EWEAP_GUNPITCH only — clear_ctrl_values() would also
@@ -206,8 +164,9 @@ private:
 	struct Row {
 		int base = 0;
 		ObjectID node_id;
-		int caps = 0;
-		int visual_ctrl_caps = 0;
+		// Plan-time muzzle presence (the D-AI-6 fire-origin seam); re-checked
+		// live before each posed read.
+		bool has_muzzle = false;
 		int32_t bms_id = 0;
 		// Last-applied edge state (-1 = unknown, first frame always applies).
 		int32_t aim_valid = -1;
@@ -236,8 +195,6 @@ private:
 		int base = 0;
 		int handle = 0;
 		ObjectID node_id;
-		int caps = 0;
-		int visual_ctrl_caps = 0;
 		bool spawned_now = false;
 		// Last-applied edge state (-1 = unknown, first hot frame applies).
 		int32_t aim_valid = -1;
@@ -269,6 +226,11 @@ private:
 		int32_t latch = 0;
 	};
 
+	// All four semantic CTRL writers over one typed model (the wire walk's
+	// per-row bundle).
+	static int wire_controls_apply(NovaObjectModel *model,
+			const PackedFloat32Array &snap, int base);
+
 	bool row_plan_is_current(int64_t size, int stride,
 			int64_t layout_revision);
 	void rebuild_row_plan(const float *p, int64_t size, int stride,
@@ -277,11 +239,11 @@ private:
 	int64_t current_index_generation();
 	const String &infantry_key(int state);
 
-	void present_one_wire_row(WireRow &row, Node3D *node,
+	void present_one_wire_row(WireRow &row, NovaObjectModel *model,
 			const PackedFloat32Array &snap, int tick_delta);
-	void apply_wire_procedural_part(const WireRow &row, Node3D *node,
+	void apply_wire_procedural_part(const WireRow &row, NovaObjectModel *model,
 			const PackedFloat32Array &snap);
-	void apply_wire_body_anim(WireRow &row, Node3D *node,
+	void apply_wire_body_anim(WireRow &row, NovaObjectModel *model,
 			const PackedFloat32Array &snap, int tick_delta);
 	void store_wire_remote_body_cache(const WireRow &row);
 	void update_wire_held_weapon(WireRow &row, Node3D *node,
@@ -303,8 +265,7 @@ private:
 	bool wire_plan_dirty_ = true;
 
 	ObjectID sim_id_;
-	ObjectID index_id_;
-	bool index_has_generation_ = false;
+	Ref<NovaEntityIndex> index_;
 	int output_channels_ = OUTPUT_ALL;
 	Dictionary occlusion_hidden_ids_;
 	Dictionary present_visibility_;
@@ -348,4 +309,3 @@ private:
 } // namespace godot
 
 VARIANT_ENUM_CAST(godot::NovaPresentApplier::OutputChannels);
-VARIANT_ENUM_CAST(godot::NovaPresentApplier::VisualControlCapabilities);

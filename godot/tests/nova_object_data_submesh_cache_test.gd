@@ -9,7 +9,6 @@ extends GutTest
 
 const SHED := "res://../fixtures/threedi/3di3/Shed.3di"
 const CHARMODEL := "res://../fixtures/threedi/3di3/CharModel.3di"
-const NovaObjectModel = preload("res://adapter/object/nova_object_model.gd")
 
 
 func _open(path: String) -> NovaObjectData:

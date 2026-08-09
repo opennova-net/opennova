@@ -204,7 +204,7 @@ func sync_environment_to_preview(force: bool = false) -> void:
 	_terrain_env_generation = generation
 
 
-func get_environment_node() -> Node:
+func get_environment_node() -> NovaEnvironment:
 	return _environment_node
 
 

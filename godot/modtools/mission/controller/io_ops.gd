@@ -398,9 +398,7 @@ func _place_objects(mission: NovaMissionData, resource_root: NovaResourceRoot, t
 	_c._placer = _c.MissionObjectPlacer.new(resource_root)
 	_c._placer.edit_mode = true
 	var options: Dictionary = {}
-	var env_node = _c._environment_node()
-	if env_node != null:
-		options["environment_node"] = env_node
+	_c._wire_placer_environment()
 	if timeline != null:
 		options["timeline"] = timeline
 	_c._stats = _c._placer.place(mission, world_root, options)

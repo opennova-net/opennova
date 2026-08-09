@@ -910,6 +910,8 @@ void NovaObjectModel::_bind_methods() {
 			&NovaObjectModel::set_right_hand_collapsed);
 	ClassDB::bind_method(D_METHOD("advance_body_animation", "delta", "write_pose"),
 			&NovaObjectModel::advance_body_animation, DEFVAL(true));
+	ClassDB::bind_method(D_METHOD("is_body_pose_dirty"),
+			&NovaObjectModel::is_body_pose_dirty);
 
 	ClassDB::bind_static_method("NovaObjectModel",
 			D_METHOD("entity_lighting_values", "world_values", "effect_scale",

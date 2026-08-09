@@ -24,31 +24,6 @@ using namespace godot;
 
 namespace {
 
-// Wire-walk dispatch StringNames (function-local static: safe after Godot init).
-struct WireDispatchNames {
-	StringName set_right_hand_collapsed = StringName("set_right_hand_collapsed");
-	StringName set_aim_overlay = StringName("set_aim_overlay");
-	StringName begin_ctrl_update = StringName("begin_ctrl_update");
-	StringName end_ctrl_update = StringName("end_ctrl_update");
-	StringName set_part_phase = StringName("set_part_phase");
-	StringName clear_part_phase = StringName("clear_part_phase");
-	StringName reset_remote_body_state = StringName("reset_remote_body_state");
-	StringName apply_remote_body_state = StringName("apply_remote_body_state");
-	StringName advance_remote_body_blend_tick =
-			StringName("advance_remote_body_blend_tick");
-	StringName play_body_clip = StringName("play_body_clip");
-	StringName play_body_clip_at = StringName("play_body_clip_at");
-	StringName play_body_blend_at = StringName("play_body_blend_at");
-	StringName play_body_anim = StringName("play_body_anim");
-	StringName play_body_anim_at = StringName("play_body_anim_at");
-	StringName set_weapon_channel = StringName("set_weapon_channel");
-};
-
-const WireDispatchNames &wnames() {
-	static WireDispatchNames n;
-	return n;
-}
-
 inline int32_t wfield_i(const float *p, int base, int field) {
 	return static_cast<int32_t>(p[base + field]);
 }
@@ -149,60 +124,6 @@ bool leg_inputs_unchanged(const float *p, int base, const int *fields,
 
 } // namespace
 
-int NovaPresentApplier::wire_node_caps(Object *node, int visual_ctrl_caps) {
-	// The wire pass's capability superset, resolved once per plan append —
-	// the per-frame has_method probes this replaces were a measured hot cost.
-	const WireDispatchNames &n = wnames();
-	int caps = 0;
-	if (node->has_method(n.set_aim_overlay)) {
-		caps |= WIRE_CAP_AIM;
-	}
-	if ((visual_ctrl_caps & (VISUAL_CTRL_OWNED | VISUAL_CTRL_LEGACY)) != 0) {
-		caps |= WIRE_CAP_CTRL;
-	}
-	if ((visual_ctrl_caps & VISUAL_PART_PHASE) != 0) {
-		caps |= WIRE_CAP_PART;
-	}
-	if ((visual_ctrl_caps & VISUAL_PART_CLEAR) != 0) {
-		caps |= WIRE_CAP_PART_CLEAR;
-	}
-	if ((visual_ctrl_caps & VISUAL_CTRL_BATCH) != 0 &&
-			(caps & (WIRE_CAP_CTRL | WIRE_CAP_PART)) != 0) {
-		caps |= WIRE_CAP_CTRL_BATCH;
-	}
-	if (node->has_method(n.apply_remote_body_state)) {
-		caps |= WIRE_CAP_REMOTE_BODY;
-	}
-	if (node->has_method(n.play_body_clip)) {
-		caps |= WIRE_CAP_BODY_CLIP;
-	}
-	if (node->has_method(n.play_body_clip_at)) {
-		caps |= WIRE_CAP_BODY_CLIP_AT;
-	}
-	if (node->has_method(n.play_body_anim_at)) {
-		caps |= WIRE_CAP_BODY_SLOT_AT;
-	}
-	if (node->has_method(n.play_body_anim)) {
-		caps |= WIRE_CAP_BODY_SLOT;
-	}
-	if (node->has_method(n.set_right_hand_collapsed)) {
-		caps |= WIRE_CAP_RHC;
-	}
-	if (node->has_method(n.set_weapon_channel)) {
-		caps |= WIRE_CAP_WPN;
-	}
-	if (node->has_method(n.play_body_blend_at)) {
-		caps |= WIRE_CAP_BODY_BLEND_AT;
-	}
-	if (node->has_method(n.advance_remote_body_blend_tick)) {
-		caps |= WIRE_CAP_REMOTE_BLEND_TICK;
-	}
-	if (node->has_method(n.reset_remote_body_state)) {
-		caps |= WIRE_CAP_RESET_REMOTE;
-	}
-	return caps;
-}
-
 void NovaPresentApplier::setup_wire(const Callable &rebuild_held_weapon) {
 	wire_rebuild_held_weapon_ = rebuild_held_weapon;
 	wire_plan_dirty_ = true;
@@ -228,8 +149,6 @@ void NovaPresentApplier::append_wire_row(Object *node, int base, int handle,
 	row.base = base;
 	row.handle = handle;
 	row.node_id = node != nullptr ? ObjectID(node->get_instance_id()) : ObjectID();
-	row.visual_ctrl_caps = get_visual_control_capabilities(node);
-	row.caps = node != nullptr ? wire_node_caps(node, row.visual_ctrl_caps) : 0;
 	row.spawned_now = spawned_now;
 	// Last-applied edge state (-1 = unknown, first hot frame always applies);
 	// the body-transition scalars re-seed from the stable per-handle cache so a
@@ -309,23 +228,22 @@ void NovaPresentApplier::present_wire_rows(const PackedFloat32Array &snap,
 		if (row.base < 0 || row.base + stride > size) {
 			continue;
 		}
-		Object *node_obj = ObjectDB::get_instance(row.node_id);
-		Node3D *node = Object::cast_to<Node3D>(node_obj);
-		if (node == nullptr) {
+		NovaObjectModel *model =
+				Object::cast_to<NovaObjectModel>(ObjectDB::get_instance(row.node_id));
+		if (model == nullptr) {
 			continue;
 		}
-		present_one_wire_row(row, node, snap, tick_delta);
+		present_one_wire_row(row, model, snap, tick_delta);
 		row.spawned_now = false;
 	}
 }
 
-void NovaPresentApplier::present_one_wire_row(WireRow &row, Node3D *node,
+void NovaPresentApplier::present_one_wire_row(WireRow &row, NovaObjectModel *model,
 		const PackedFloat32Array &snap, int tick_delta) {
 	static_assert(kCtrlLegFieldCount == WireRow::kCtrlCacheCount,
 			"ctrl leg field table must match the row cache size");
 	static_assert(kAimLegFieldCount == WireRow::kAimCacheCount,
 			"aim leg field table must match the row cache size");
-	const WireDispatchNames &n = wnames();
 	const float *p = snap.ptr();
 	const int base = row.base;
 	const int32_t respawn_revision =
@@ -340,20 +258,20 @@ void NovaPresentApplier::present_one_wire_row(WireRow &row, Node3D *node,
 			p[base + NovaSimulation::PF_YAW_DEG],
 			p[base + NovaSimulation::PF_ROLL_DEG]);
 	const Basis entity_basis = bms_to_godot_basis(rot);
-	const Basis root_basis = (row.caps & WIRE_CAP_AIM) != 0
-			? aim_root_basis(snap, base, entity_basis)
-			: entity_basis;
+	// aim_root_basis is data-gated internally (PF_AIM_OVERLAY_VALID falls back
+	// to the entity rotation).
+	const Basis root_basis = aim_root_basis(snap, base, entity_basis);
 	const Transform3D next_transform(root_basis, pos);
-	if (node->get_transform() != next_transform) {
-		node->set_transform(next_transform);
+	if (model->get_transform() != next_transform) {
+		model->set_transform(next_transform);
 	}
 	// The mounted right-hand collapse rides its own packed field; edge-gated to
 	// the value change like MissionPresentPass.
-	if ((row.caps & WIRE_CAP_RHC) != 0) {
+	{
 		const int32_t rhc =
 				wfield_i(p, base, NovaSimulation::PF_RIGHT_HAND_COLLAPSED);
 		if (rhc != row.rhc) {
-			node->call(n.set_right_hand_collapsed, rhc != 0);
+			model->set_right_hand_collapsed(rhc != 0);
 		}
 		row.rhc = rhc;
 	}
@@ -361,17 +279,17 @@ void NovaPresentApplier::present_one_wire_row(WireRow &row, Node3D *node,
 	// The apply itself is input-gated: identical overlay angles re-dispatch
 	// the identical delta set, so only changed inputs build the 9-basis Array.
 	// The clear edge invalidates the cache so a later re-valid always applies.
-	if ((row.caps & WIRE_CAP_AIM) != 0) {
+	{
 		const int32_t aim_valid =
 				wfield_i(p, base, NovaSimulation::PF_AIM_OVERLAY_VALID);
 		if (aim_valid != 0) {
 			if (!leg_inputs_unchanged(p, base, aim_leg_fields(),
 					kAimLegFieldCount, row.aim_cache,
 					row.aim_cache_valid)) {
-				aim_apply_valid(node, snap, base, false);
+				aim_apply_valid(model, snap, base, false);
 			}
 		} else if (row.aim_valid != 0) {
-			node->call(n.set_aim_overlay, Array());
+			model->set_aim_overlay(Array());
 			row.aim_cache_valid = false;
 		}
 		row.aim_valid = aim_valid;
@@ -381,34 +299,21 @@ void NovaPresentApplier::present_one_wire_row(WireRow &row, Node3D *node,
 	// kCtrlLegFields, so an unchanged set means the node's presenter-owned
 	// controls and part phases are already exactly this state (the release
 	// legs included — one release is as absent as a re-released one).
-	const bool ctrl_legs = (row.caps & (WIRE_CAP_CTRL | WIRE_CAP_PART)) != 0;
-	if (ctrl_legs && !leg_inputs_unchanged(p, base, kCtrlLegFields,
+	if (!leg_inputs_unchanged(p, base, kCtrlLegFields,
 			kCtrlLegFieldCount, row.ctrl_cache, row.ctrl_cache_valid)) {
-		const bool ctrl_batch = (row.caps & WIRE_CAP_CTRL_BATCH) != 0;
-		if (ctrl_batch) {
-			node->call(n.begin_ctrl_update);
-		}
-		if ((row.caps & WIRE_CAP_CTRL) != 0) {
-			if ((row.caps & WIRE_CAP_PART) != 0) {
-				apply_wire_procedural_part(row, node, snap);
-			}
-			// All four semantic CTRL writers through the cached dispatch mode:
-			// compact joiner rows release absent authoritative fields, while direct
-			// host/synthetic rows publish vehicle, zone and attachment heat values.
-			// [orig: Entity_CacheVehicleHUDStats @ 0x4929B0;
-			//  BoneCallback_gnrc_World @ 0x4E288B..0x4E28FB;
-			//  parent UseGun attachment @ 0x546518 -> cache @ 0x440930]
-			wire_controls_apply_with_capabilities(node, snap, base,
-					row.visual_ctrl_caps);
-		} else if ((row.caps & WIRE_CAP_PART) != 0) {
-			apply_wire_procedural_part(row, node, snap);
-		}
-		if (ctrl_batch) {
-			node->call(n.end_ctrl_update);
-		}
+		model->begin_ctrl_update();
+		apply_wire_procedural_part(row, model, snap);
+		// All four semantic CTRL writers: compact joiner rows release absent
+		// authoritative fields, while direct host/synthetic rows publish
+		// vehicle, zone and attachment heat values.
+		// [orig: Entity_CacheVehicleHUDStats @ 0x4929B0;
+		//  BoneCallback_gnrc_World @ 0x4E288B..0x4E28FB;
+		//  parent UseGun attachment @ 0x546518 -> cache @ 0x440930]
+		wire_controls_apply(model, snap, base);
+		model->end_ctrl_update();
 	}
-	if (respawned_since_present && (row.caps & WIRE_CAP_RESET_REMOTE) != 0) {
-		node->call(n.reset_remote_body_state);
+	if (respawned_since_present) {
+		model->reset_remote_body_state();
 		row.anim_state = -2; // force the next body-anim dispatch through
 		row.remote_body_tick = 0;
 		// The reset wipes model-side state the gated legs may have applied;
@@ -418,7 +323,7 @@ void NovaPresentApplier::present_one_wire_row(WireRow &row, Node3D *node,
 		row.wpn_state = INT32_MIN;
 		row.wpn_phase = INT32_MIN;
 	}
-	apply_wire_body_anim(row, node, snap, tick_delta);
+	apply_wire_body_anim(row, model, snap, tick_delta);
 	// The upper-body weapon channel: the hold pose this player's held weapon and
 	// scope state select. -1 means no channel this frame, which clears any pose
 	// left over from the weapon it was holding before. Dispatch is gated on the
@@ -426,13 +331,13 @@ void NovaPresentApplier::present_one_wire_row(WireRow &row, Node3D *node,
 	// still dispatches per tick; idle -1 rows and render-only frames skip.
 	// [orig: the selection Entity_UpdateInfantryPlayerBody @ 0x4b5dad, which
 	//  retail runs for every player body it draws, not just the local one]
-	if ((row.caps & WIRE_CAP_WPN) != 0) {
+	{
 		const int32_t wpn_state =
 				wfield_i(p, base, NovaSimulation::PF_WPN_ANIM_STATE);
 		const int32_t wpn_phase =
 				wfield_i(p, base, NovaSimulation::PF_WPN_PHASE_TICKS);
 		if (wpn_state != row.wpn_state || wpn_phase != row.wpn_phase) {
-			node->call(n.set_weapon_channel,
+			model->set_weapon_channel(
 					wpn_state >= 0 ? infantry_key_cached(wpn_state) : String(),
 					wpn_phase);
 			row.wpn_state = wpn_state;
@@ -442,10 +347,10 @@ void NovaPresentApplier::present_one_wire_row(WireRow &row, Node3D *node,
 	const bool next_visible =
 			wfield_i(p, base, NovaSimulation::PF_HIDDEN) == 0 &&
 			wfield_i(p, base, NovaSimulation::PF_LOCAL_VIEW_SUPPRESSED) == 0;
-	update_wire_held_weapon(row, node, snap, next_visible);
+	update_wire_held_weapon(row, model, snap, next_visible);
 	wire_respawn_revisions_.insert(row.handle, respawn_revision);
-	if (node->is_visible() != next_visible) {
-		node->set_visible(next_visible);
+	if (model->is_visible() != next_visible) {
+		model->set_visible(next_visible);
 	}
 }
 
@@ -453,21 +358,20 @@ void NovaPresentApplier::present_one_wire_row(WireRow &row, Node3D *node,
 // objects. The ACTIVE fields are publication ownership, so an owned zero phase
 // must still be written and a suppressed channel must release its prior value.
 void NovaPresentApplier::apply_wire_procedural_part(const WireRow &row,
-		Node3D *node, const PackedFloat32Array &snap) {
-	const WireDispatchNames &n = wnames();
+		NovaObjectModel *model, const PackedFloat32Array &snap) {
 	const float *p = snap.ptr();
 	const int base = row.base;
 	if (wfield_i(p, base, NovaSimulation::PF_ACTIVE1) > 0) {
-		node->call(n.set_part_phase, 1,
+		model->set_part_phase(1,
 				NovaSimulation::decode_present_part_anim_phase(snap, base, 1));
-	} else if ((row.caps & WIRE_CAP_PART_CLEAR) != 0) {
-		node->call(n.clear_part_phase, 1);
+	} else {
+		model->clear_part_phase(1);
 	}
 	if (wfield_i(p, base, NovaSimulation::PF_ACTIVE2) > 0) {
-		node->call(n.set_part_phase, 2,
+		model->set_part_phase(2,
 				NovaSimulation::decode_present_part_anim_phase(snap, base, 2));
-	} else if ((row.caps & WIRE_CAP_PART_CLEAR) != 0) {
-		node->call(n.clear_part_phase, 2);
+	} else {
+		model->clear_part_phase(2);
 	}
 }
 
@@ -475,9 +379,8 @@ void NovaPresentApplier::apply_wire_procedural_part(const WireRow &row,
 // mission walk. REMOTE-request rows skip re-dispatch entirely while the wire
 // state is unchanged; host-loopback rows (remote_request 0) keep per-tick
 // dispatch — their playhead rides play_body_clip_at's phase.
-void NovaPresentApplier::apply_wire_body_anim(WireRow &row, Node3D *node,
+void NovaPresentApplier::apply_wire_body_anim(WireRow &row, NovaObjectModel *model,
 		const PackedFloat32Array &snap, int tick_delta) {
-	const WireDispatchNames &n = wnames();
 	const float *p = snap.ptr();
 	const int base = row.base;
 	const int32_t anim_state = wfield_i(p, base, NovaSimulation::PF_ANIM_STATE);
@@ -489,14 +392,11 @@ void NovaPresentApplier::apply_wire_body_anim(WireRow &row, Node3D *node,
 	// tick. The row latch is set only when the model reports live transition
 	// work, so steady-state rows never dispatch.
 	if (row.remote_body_tick != 0 && remote_request_i != 0 && anim_pulse < 0 &&
-			anim_state == row.anim_state && remote_request_i == row.anim_request &&
-			(row.caps & WIRE_CAP_REMOTE_BLEND_TICK) != 0) {
+			anim_state == row.anim_state && remote_request_i == row.anim_request) {
 		int ticks_left = tick_delta;
 		while (ticks_left > 0 && row.remote_body_tick != 0) {
 			row.remote_body_tick =
-					bool(node->call(n.advance_remote_body_blend_tick, anim_state))
-					? 1
-					: 0;
+					model->advance_remote_body_blend_tick(anim_state) ? 1 : 0;
 			--ticks_left;
 		}
 		row.anim_state = anim_state;
@@ -518,14 +418,13 @@ void NovaPresentApplier::apply_wire_body_anim(WireRow &row, Node3D *node,
 	// A transition state that arrived and was overwritten within one decode fold
 	// dispatches FIRST so the model's arbitration sees retail's per-record
 	// order. [orig: per-record remote anim apply @ 0x4c1153]
-	if (remote_request && anim_pulse >= 0 &&
-			(row.caps & WIRE_CAP_REMOTE_BODY) != 0) {
+	if (remote_request && anim_pulse >= 0) {
 		const String &pulse_key = infantry_key_cached(anim_pulse);
 		if (!pulse_key.is_empty()) {
-			remote_needs_tick = bool(node->call(n.apply_remote_body_state,
+			remote_needs_tick = model->apply_remote_body_state(
 					anim_pulse, pulse_key,
 					NovaSimulation::infantry_anim_flags(anim_pulse),
-					wfield_i(p, base, NovaSimulation::PF_ANIM_PULSE_TICKS)));
+					wfield_i(p, base, NovaSimulation::PF_ANIM_PULSE_TICKS));
 		}
 	}
 	if (anim_state >= 0) {
@@ -534,23 +433,18 @@ void NovaPresentApplier::apply_wire_body_anim(WireRow &row, Node3D *node,
 			// NovaObjectModel owns current/pending acceptance because it also
 			// owns clip time and completion. Forward every raw wire request.
 			// [orig: @ 0x4c0859 / @ 0x4c11a6]
-			if (remote_request && (row.caps & WIRE_CAP_REMOTE_BODY) != 0) {
-				remote_needs_tick = bool(node->call(n.apply_remote_body_state,
+			if (remote_request) {
+				remote_needs_tick = model->apply_remote_body_state(
 						anim_state, key,
 						NovaSimulation::infantry_anim_flags(anim_state),
-						anim_phase));
+						anim_phase);
 				row.remote_body_tick = remote_needs_tick ? 1 : 0;
 				store_wire_remote_body_cache(row);
 				return;
 			}
-			if (remote_request && (row.caps & WIRE_CAP_BODY_CLIP) != 0) {
-				node->call(n.play_body_clip, key);
-				return;
-			}
 			// Host-loopback rows expose the authority's already-accepted
 			// CURRENT state and playhead: pose it directly.
-			if (!remote_request && anim_phase >= 0 &&
-					(row.caps & WIRE_CAP_BODY_CLIP_AT) != 0) {
+			if (anim_phase >= 0) {
 				const int32_t source_state =
 						wfield_i(p, base, NovaSimulation::PF_ANIM_SOURCE_STATE);
 				const String source_key = source_state >= 0
@@ -558,30 +452,27 @@ void NovaPresentApplier::apply_wire_body_anim(WireRow &row, Node3D *node,
 						: String();
 				const float blend_weight =
 						p[base + NovaSimulation::PF_ANIM_BLEND_WEIGHT];
-				if (!source_key.is_empty() && blend_weight < 1.0f &&
-						(row.caps & WIRE_CAP_BODY_BLEND_AT) != 0) {
-					node->call(n.play_body_blend_at, source_key,
+				if (!source_key.is_empty() && blend_weight < 1.0f) {
+					model->play_body_blend_at(source_key,
 							wfield_i(p, base,
 									NovaSimulation::PF_ANIM_SOURCE_PHASE_TICKS),
 							key, anim_phase, blend_weight);
 				} else {
-					node->call(n.play_body_clip_at, key, anim_phase);
+					model->play_body_clip_at(key, anim_phase);
 				}
 				return;
 			}
-			if (!remote_request && (row.caps & WIRE_CAP_BODY_CLIP) != 0) {
-				node->call(n.play_body_clip, key);
-				return;
-			}
+			model->play_body_clip(key);
+			return;
 		}
 	}
-	if (!remote_request && (row.caps & WIRE_CAP_BODY_CLIP_AT) != 0) {
+	if (!remote_request) {
 		const int32_t source_state =
 				wfield_i(p, base, NovaSimulation::PF_ANIM_SOURCE_STATE);
 		if (source_state >= 0) {
 			const String &source_key = infantry_key_cached(source_state);
 			if (!source_key.is_empty()) {
-				node->call(n.play_body_clip_at, source_key,
+				model->play_body_clip_at(source_key,
 						wfield_i(p, base,
 								NovaSimulation::PF_ANIM_SOURCE_PHASE_TICKS));
 				return;
@@ -593,13 +484,11 @@ void NovaPresentApplier::apply_wire_body_anim(WireRow &row, Node3D *node,
 	if (body_anim_slot < 0) {
 		return;
 	}
-	if (anim_phase >= 0 && (row.caps & WIRE_CAP_BODY_SLOT_AT) != 0) {
-		node->call(n.play_body_anim_at, body_anim_slot, anim_phase);
+	if (anim_phase >= 0) {
+		model->play_body_anim_at(body_anim_slot, anim_phase);
 		return;
 	}
-	if ((row.caps & WIRE_CAP_BODY_SLOT) != 0) {
-		node->call(n.play_body_anim, body_anim_slot);
-	}
+	model->play_body_anim(body_anim_slot);
 }
 
 void NovaPresentApplier::store_wire_remote_body_cache(const WireRow &row) {

@@ -348,7 +348,7 @@ func _animatable_nodes() -> Array:
 	if runtime != null and runtime.has_method("get_registry"):
 		var registry: Variant = runtime.get_registry()
 		if registry != null and is_instance_valid(registry) \
-				and (registry as Object).has_method("get_animatable_nodes"):
+				and registry is NovaEntityIndex:
 			for candidate in registry.get_animatable_nodes():
 				_append_animatable(candidate, output, seen)
 

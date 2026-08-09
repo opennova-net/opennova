@@ -15,7 +15,6 @@ extends Node3D
 #   glow alpha = dot_view^4/2 x brightness x folds (env #14, closed).
 # The 3DI diffuse stays; bodies are tinted and dimmed by the TOD sun/moon color.
 
-const NovaObjectModel = preload("res://adapter/object/nova_object_model.gd")
 const CelestialShader = preload("res://shaders/celestial.gdshader")
 const CelestialAdditiveShader = preload("res://shaders/celestial_additive.gdshader")
 

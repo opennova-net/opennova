@@ -19,7 +19,6 @@ const MissionRuntime := preload("res://adapter/world/mission_runtime.gd")
 # D-PLAYERINFO-1 is the in-world (spawned-player) combo binding, not this preview idle.
 
 const FlyCameraScript = preload("res://adapter/fly_camera.gd")
-const NovaObjectModel = preload("res://adapter/object/nova_object_model.gd")
 const NovaEnvironmentScript = preload("res://adapter/environment/nova_environment.gd")
 
 # The standing character uses only the compatible third-person slots. `resolve_combo()`

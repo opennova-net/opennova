@@ -10,7 +10,6 @@ const CHARMODEL := "res://../fixtures/threedi/3di3/CharModel.3di"
 const SHED := "res://../fixtures/threedi/3di3/Shed.3di"
 const VIEWMODEL_RIG_TMP := "res://.godot/viewmodel_rig_test"
 const MissionObjectPlacerScript = preload("res://adapter/mission/mission_object_placer.gd")
-const NovaObjectModel = preload("res://adapter/object/nova_object_model.gd")
 
 
 func _open(path: String) -> NovaObjectData:
@@ -130,7 +129,7 @@ func test_viewmodel_graphic_bones_are_covered_when_adm_model_is_shorter() -> voi
 	var placer := MissionObjectPlacerScript.new(root, null)
 	var parent := Node3D.new()
 	add_child_autofree(parent)
-	var model = placer.build_model_from_graphic("CharModel", "soldier", parent, "anim_idle", null)
+	var model = placer.build_model_from_graphic("CharModel", "soldier", parent, "anim_idle")
 	assert_not_null(model, "the synthetic viewmodel resolves")
 	if model != null:
 		var bone_count: int = model.get_skeletal_anim().get_bone_count()

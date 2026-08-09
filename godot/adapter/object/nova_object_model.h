@@ -440,6 +440,9 @@ public:
 	void set_aim_overlay(const Array &p_deltas);
 	void set_right_hand_collapsed(bool p_collapsed);
 	void advance_body_animation(double p_delta, bool p_write_pose = true);
+	// Diagnostics: whether a body-pose input changed since the last pose write
+	// (the aim-overlay/weapon-channel dedup fast path pins against this).
+	bool is_body_pose_dirty() const { return body_pose_dirty_; }
 
 	// --- environment-value derivation (static; the placer's static batches
 	// consume the same values/skip logic as live models) ---

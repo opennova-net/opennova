@@ -28,7 +28,6 @@ const MissionAreaTriggerOverlay := preload("res://modtools/mission/mission_area_
 const MissionMarkerOverlay := preload("res://modtools/mission/mission_marker_overlay.gd")
 const ObjectUserPointOverlayScript := preload("res://adapter/object/object_user_point_overlay.gd")
 const MissionGizmo := preload("res://modtools/framework/transform_gizmo_3d.gd")
-const MissionEntityRegistry := preload("res://adapter/world/mission_entity_registry.gd")
 # Must match MissionObjectPlacer.CONTAINER_NAME — that is where placed objects land.
 const OBJECTS_CONTAINER := "MissionObjects"
 
@@ -1021,10 +1020,33 @@ func reload_environment() -> String:
 	return _io.reload_environment()
 
 
-func _environment_node() -> Node:
-	if terrain_editor != null and terrain_editor.has_method("get_environment_node"):
+func _environment_node() -> NovaEnvironment:
+	if terrain_editor != null:
 		return terrain_editor.get_environment_node()
 	return null
+
+
+## Wire the placer to the editor environment's typed light channel: models
+## and static batches relight from the published values, and the channel's
+## changed signal drives the batch restamp on every TOD scrub. The previous
+## placer's restamp is disconnected first — a connected Callable keeps its
+## RefCounted target alive, and mission reloads replace the placer.
+var _placer_restamp := Callable()
+var _placer_restamp_state: NovaEnvLightState = null
+
+
+func _wire_placer_environment() -> void:
+	if _placer == null:
+		return
+	var env := _environment_node()
+	if env == null:
+		return
+	if _placer_restamp_state != null and _placer_restamp.is_valid() 			and _placer_restamp_state.changed.is_connected(_placer_restamp):
+		_placer_restamp_state.changed.disconnect(_placer_restamp)
+	_placer.set_environment_state(env.light_state)
+	_placer_restamp = Callable(_placer, "update_environment")
+	_placer_restamp_state = env.light_state
+	env.light_state.changed.connect(_placer_restamp)
 
 
 func _objects_container() -> Node3D:

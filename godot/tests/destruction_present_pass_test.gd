@@ -116,7 +116,6 @@ class ShadowModelStub:
 class PlacerStub:
 	extends RefCounted
 	var built: Array = []
-	var built_env_nodes: Array = []
 	var hidden: Array = []
 	var shown: Array = []
 	var batched_transforms: Dictionary = {}
@@ -124,9 +123,8 @@ class PlacerStub:
 	var build_success := true
 
 	func build_model_from_graphic(_graphic: String, _anim: String,
-			parent: Node3D, _clip_key: String = '', env_node: Node = null,
+			parent: Node3D, _clip_key: String = '',
 			_rig_graphic: String = '') -> Node3D:
-		built_env_nodes.append(env_node)
 		if not build_success:
 			return null
 		var model := ShadowModelStub.new()
@@ -242,8 +240,6 @@ func test_reset_runtime_state_restores_individual_visuals_and_retires_anchors() 
 	var item_db := ItemDbStub.new()
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var env_node := Node.new()
-	add_child_autofree(env_node)
 	var intact := Node3D.new()
 	container.add_child(intact)
 	var originally_visible := Node3D.new()
@@ -271,7 +267,7 @@ func test_reset_runtime_state_restores_individual_visuals_and_retires_anchors() 
 	sim.pieces = [_piece(5, 70, 1, Vector3(6, 7, 8))]
 	var presenter = DestructionPresentPass.new()
 	presenter.setup(sim, container, index, placer, item_db, world, Callable(),
-			func(): return fx, env_node)
+			func(): return fx)
 
 	presenter.present()
 
@@ -280,8 +276,6 @@ func test_reset_runtime_state_restores_individual_visuals_and_retires_anchors() 
 	assert_false(static_caster.visible,
 			"the intact individual caster follows the visible model into the husk swap")
 	assert_eq(placer.built.size(), 1)
-	assert_eq(placer.built_env_nodes, [env_node],
-			'husk materials receive the live mission environment')
 	assert_true(world.anchors.has('wreck:91:2'))
 	assert_true(world.anchors.has('piece:5'))
 	var graft: Node3D = placer.built[0]
@@ -529,7 +523,7 @@ func test_missing_synthetic_husk_node_never_falls_back_to_static_zero_id() -> vo
 	}
 	var presenter = DestructionPresentPass.new()
 	presenter.setup(sim, container, index, placer, ItemDbStub.new(), WorldStub.new(),
-			Callable(), Callable(), null, index)
+			Callable(), Callable(), index)
 
 	presenter.present()
 
@@ -584,7 +578,7 @@ func test_synthetic_wreck_families_use_distinct_moving_wire_anchors() -> void:
 	sim.events = {'effects': effects}
 	var presenter = DestructionPresentPass.new()
 	presenter.setup(sim, container, index, PlacerStub.new(), ItemDbStub.new(), world,
-			Callable(), func(): return fx, null, index)
+			Callable(), func(): return fx, index)
 
 	presenter.present()
 

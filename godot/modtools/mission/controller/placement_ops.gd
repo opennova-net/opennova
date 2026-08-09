@@ -136,7 +136,7 @@ func _render_placed_entity(kind: int, index: int) -> void:
 	if container == null:
 		return
 	# place_single already added this entity's pick collider node under the container.
-	var delta: Dictionary = _c._placer.place_single(_c._mission, container, kind, index, _c._environment_node())
+	var delta: Dictionary = _c._placer.place_single(_c._mission, container, kind, index)
 	_c._pickable = _c._placer.pickable_records
 	for key in delta:
 		_c._stats[key] = int(_c._stats.get(key, 0)) + int(delta[key])

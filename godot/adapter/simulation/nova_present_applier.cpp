@@ -17,30 +17,10 @@ using namespace godot;
 
 namespace {
 
-// Dispatch-surface StringNames built once (function-local statics: safe after
-// Godot init, shared across appliers).
-struct DispatchNames {
-	StringName resolve = StringName("resolve");
-	StringName get_generation = StringName("get_generation");
-	StringName set_part_phase = StringName("set_part_phase");
-	StringName clear_part_phase = StringName("clear_part_phase");
-	StringName play_body_clip_at = StringName("play_body_clip_at");
-	StringName play_body_blend_at = StringName("play_body_blend_at");
-	StringName play_body_anim_at = StringName("play_body_anim_at");
-	StringName play_body_anim = StringName("play_body_anim");
-	StringName set_aim_overlay = StringName("set_aim_overlay");
-	StringName set_right_hand_collapsed = StringName("set_right_hand_collapsed");
-	StringName set_ctrl_value = StringName("set_ctrl_value");
-	StringName clear_ctrl_value = StringName("clear_ctrl_value");
-	StringName set_ctrl_override = StringName("set_ctrl_override");
-	StringName clear_ctrl_override = StringName("clear_ctrl_override");
-	StringName begin_ctrl_update = StringName("begin_ctrl_update");
-	StringName end_ctrl_update = StringName("end_ctrl_update");
-	StringName has_muzzle = StringName("has_muzzle");
-	StringName get_muzzle_world_position = StringName("get_muzzle_world_position");
-	StringName set_ai_muzzle_world = StringName("set_ai_muzzle_world");
-	StringName set_submission_registry = StringName("set_submission_registry");
-	StringName basis = StringName("basis");
+// CTRL register names + presentation-owner tags (String VALUES handed to the
+// model's owner-aware CTRL store — not dispatch names; the dispatch itself is
+// direct C++ calls on NovaObjectModel).
+struct CtrlNames {
 	String eweap_gunyaw = String("EWEAP_GUNYAW");
 	String eweap_gunpitch = String("EWEAP_GUNPITCH");
 	String vehicle_steering = String("VEHICLE_STEERING");
@@ -56,93 +36,23 @@ struct DispatchNames {
 	String owner_world_heat = String("present:world_heat");
 };
 
-const DispatchNames &names() {
-	static DispatchNames n;
+const CtrlNames &names() {
+	static CtrlNames n;
 	return n;
 }
-
-// Per-row node capabilities, resolved once at plan rebuild (has_method is a
-// per-frame string lookup otherwise).
-enum RowCaps {
-	CAP_BODY_CLIP = 1,
-	CAP_BODY_SLOT = 2,
-	CAP_BODY_PLAY = 4,
-	CAP_AIM = 8,
-	CAP_RHC = 16,
-	CAP_CTRL = 32,
-	CAP_MUZZLE = 64,
-	CAP_PART = 128,
-	CAP_BODY_BLEND = 256,
-	CAP_PART_CLEAR = 512,
-	CAP_CTRL_BATCH = 1024,
-};
-static_assert((CAP_PART | CAP_BODY_BLEND | CAP_PART_CLEAR | CAP_CTRL_BATCH) ==
-				(128 | 256 | 512 | 1024),
-		"presentation capabilities need distinct bits");
 
 inline int32_t field_i(const float *p, int base, int field) {
 	return static_cast<int32_t>(p[base + field]);
 }
 
-int ctrl_dispatch_capabilities(Object *node) {
-	if (node == nullptr) return 0;
-	const DispatchNames &n = names();
-	int caps = 0;
-	if (node->has_method(n.set_ctrl_override) &&
-			node->has_method(n.clear_ctrl_override)) {
-		caps |= NovaPresentApplier::VISUAL_CTRL_OWNED;
-	} else if (node->has_method(n.set_ctrl_value) &&
-			node->has_method(n.clear_ctrl_value)) {
-		caps |= NovaPresentApplier::VISUAL_CTRL_LEGACY;
-	}
-	return caps;
-}
-
-int visual_control_capabilities(Object *node) {
-	if (node == nullptr) return 0;
-	const DispatchNames &n = names();
-	int caps = ctrl_dispatch_capabilities(node);
-	if (node->has_method(n.begin_ctrl_update) &&
-			node->has_method(n.end_ctrl_update)) {
-		caps |= NovaPresentApplier::VISUAL_CTRL_BATCH;
-	}
-	if (node->has_method(n.set_part_phase)) {
-		caps |= NovaPresentApplier::VISUAL_PART_PHASE;
-	}
-	if (node->has_method(n.clear_part_phase)) {
-		caps |= NovaPresentApplier::VISUAL_PART_CLEAR;
-	}
-	return caps;
-}
-
-bool has_ctrl_surface(int capabilities) {
-	return (capabilities & (NovaPresentApplier::VISUAL_CTRL_OWNED |
-								  NovaPresentApplier::VISUAL_CTRL_LEGACY)) != 0;
-}
-
-void set_owned_ctrl(Object *node, int capabilities, const String &owner,
+void set_owned_ctrl(NovaObjectModel *model, const String &owner,
 		const String &reg, int32_t value) {
-	if (node == nullptr) return;
-	const DispatchNames &n = names();
-	if ((capabilities & NovaPresentApplier::VISUAL_CTRL_OWNED) != 0) {
-		node->call(n.set_ctrl_override, owner, reg, value);
-	} else if ((capabilities &
-					   NovaPresentApplier::VISUAL_CTRL_LEGACY) != 0) {
-		// Compatibility surface for test doubles and third-party visual nodes.
-		node->call(n.set_ctrl_value, reg, value);
-	}
+	model->set_ctrl_override(owner, reg, value);
 }
 
-void clear_owned_ctrl(Object *node, int capabilities, const String &owner,
+void clear_owned_ctrl(NovaObjectModel *model, const String &owner,
 		const String &reg) {
-	if (node == nullptr) return;
-	const DispatchNames &n = names();
-	if ((capabilities & NovaPresentApplier::VISUAL_CTRL_OWNED) != 0) {
-		node->call(n.clear_ctrl_override, owner, reg);
-	} else if ((capabilities &
-					   NovaPresentApplier::VISUAL_CTRL_LEGACY) != 0) {
-		node->call(n.clear_ctrl_value, reg);
-	}
+	model->clear_ctrl_override(owner, reg);
 }
 
 constexpr int AIM_PAYLOAD_FLOATS =
@@ -210,21 +120,6 @@ void NovaPresentApplier::_bind_methods() {
 			D_METHOD("aim_apply_valid", "node", "snap", "base", "drive_root_basis"),
 			&NovaPresentApplier::aim_apply_valid);
 	ClassDB::bind_static_method("NovaPresentApplier",
-			D_METHOD("get_visual_control_capabilities", "node"),
-			&NovaPresentApplier::get_visual_control_capabilities);
-	ClassDB::bind_static_method("NovaPresentApplier",
-			D_METHOD("ctrl_set_with_capabilities", "node", "capabilities",
-					"owner", "register", "value"),
-			&NovaPresentApplier::ctrl_set_with_capabilities);
-	ClassDB::bind_static_method("NovaPresentApplier",
-			D_METHOD("ctrl_clear_with_capabilities", "node", "capabilities",
-					"owner", "register"),
-			&NovaPresentApplier::ctrl_clear_with_capabilities);
-	ClassDB::bind_static_method("NovaPresentApplier",
-			D_METHOD("wire_controls_apply_with_capabilities", "node", "snap",
-					"base", "capabilities"),
-			&NovaPresentApplier::wire_controls_apply_with_capabilities);
-	ClassDB::bind_static_method("NovaPresentApplier",
 			D_METHOD("emplaced_apply", "node", "snap", "base", "clear_when_invalid"),
 			&NovaPresentApplier::emplaced_apply);
 	ClassDB::bind_static_method("NovaPresentApplier",
@@ -252,21 +147,15 @@ void NovaPresentApplier::_bind_methods() {
 	BIND_ENUM_CONSTANT(OUTPUT_VISIBILITY);
 	BIND_ENUM_CONSTANT(OUTPUT_BODY_ANIM);
 	BIND_ENUM_CONSTANT(OUTPUT_ALL);
-	BIND_ENUM_CONSTANT(VISUAL_CTRL_OWNED);
-	BIND_ENUM_CONSTANT(VISUAL_CTRL_LEGACY);
-	BIND_ENUM_CONSTANT(VISUAL_CTRL_BATCH);
-	BIND_ENUM_CONSTANT(VISUAL_PART_PHASE);
-	BIND_ENUM_CONSTANT(VISUAL_PART_CLEAR);
 }
 
 void NovaPresentApplier::setup(Object *sim, Object *index) {
 	if ((output_channels_ & OUTPUT_PART_ANIM) != 0) {
 		release_part_anim_outputs();
 	}
-	sim_id_ = sim != nullptr ? sim->get_instance_id() : ObjectID();
-	index_id_ = index != nullptr ? index->get_instance_id() : ObjectID();
-	index_has_generation_ =
-			index != nullptr && index->has_method(names().get_generation);
+	NovaSimulation *native_sim = Object::cast_to<NovaSimulation>(sim);
+	sim_id_ = native_sim != nullptr ? native_sim->get_instance_id() : ObjectID();
+	index_ = Ref<NovaEntityIndex>(Object::cast_to<NovaEntityIndex>(index));
 	plan_revision_ = -1; // force a rebuild against the new wiring
 	plan_dirty_ = true;
 	rows_.clear();
@@ -393,42 +282,32 @@ Basis NovaPresentApplier::aim_root_basis(const PackedFloat32Array &snap, int bas
 
 void NovaPresentApplier::aim_apply(Object *node, const PackedFloat32Array &snap,
 		int base, bool drive_root_basis) {
-	if (node == nullptr) {
+	NovaObjectModel *model = Object::cast_to<NovaObjectModel>(node);
+	if (model == nullptr) {
 		return;
 	}
 	const float *p = snap.ptr();
 	// The mounted-seat selector's final skeletal verdict applies to placed and
 	// wire models alike [orig: BN17 special row @ 0x4b1290].
-	if (node->has_method(names().set_right_hand_collapsed)) {
-		node->call(names().set_right_hand_collapsed,
-				field_i(p, base, NovaSimulation::PF_RIGHT_HAND_COLLAPSED) != 0);
-	}
-	if (!node->has_method(names().set_aim_overlay)) {
-		return;
-	}
+	model->set_right_hand_collapsed(
+			field_i(p, base, NovaSimulation::PF_RIGHT_HAND_COLLAPSED) != 0);
 	if (field_i(p, base, NovaSimulation::PF_AIM_OVERLAY_VALID) == 0) {
-		node->call(names().set_aim_overlay, Array());
+		model->set_aim_overlay(Array());
 		return;
 	}
-	aim_apply_valid(node, snap, base, drive_root_basis);
+	aim_apply_valid(model, snap, base, drive_root_basis);
 }
 
 void NovaPresentApplier::aim_apply_valid(Object *node,
 		const PackedFloat32Array &snap, int base, bool drive_root_basis) {
-	if (node == nullptr) {
+	NovaObjectModel *model = Object::cast_to<NovaObjectModel>(node);
+	if (model == nullptr) {
 		return;
 	}
-	Node3D *n3 = Object::cast_to<Node3D>(node);
-	const Basis current_basis = n3 != nullptr
-			? n3->get_basis()
-			: static_cast<Basis>(node->get(names().basis));
+	const Basis current_basis = model->get_basis();
 	const Basis body_basis = aim_root_basis(snap, base, current_basis);
 	if (drive_root_basis && current_basis != body_basis) {
-		if (n3 != nullptr) {
-			n3->set_basis(body_basis);
-		} else {
-			node->set(names().basis, body_basis);
-		}
+		model->set_basis(body_basis);
 	}
 	const Basis inverse_body = body_basis.inverse();
 	const float *p = snap.ptr();
@@ -441,228 +320,196 @@ void NovaPresentApplier::aim_apply_valid(Object *node,
 				bms_to_godot_basis(
 						Vector3(p[offset], p[offset + 1], p[offset + 2]));
 	}
-	node->call(names().set_aim_overlay, deltas);
-}
-
-int NovaPresentApplier::get_visual_control_capabilities(Object *node) {
-	return visual_control_capabilities(node);
+	model->set_aim_overlay(deltas);
 }
 
 namespace {
 
-void emplaced_clear_capable(Object *node, int capabilities);
-void vehicle_motion_clear_capable(Object *node, int capabilities);
-void zone_team_clear_capable(Object *node, int capabilities);
-void world_heat_clear_capable(Object *node, int capabilities);
+void emplaced_clear_typed(NovaObjectModel *model);
+void vehicle_motion_clear_typed(NovaObjectModel *model);
+void zone_team_clear_typed(NovaObjectModel *model);
+void world_heat_clear_typed(NovaObjectModel *model);
 
-int emplaced_apply_capable(Object *node, const PackedFloat32Array &snap,
-		int base, bool clear_when_invalid, int capabilities) {
-	if (!has_ctrl_surface(capabilities)) {
-		return 0;
-	}
-	const DispatchNames &n = names();
+int emplaced_apply_typed(NovaObjectModel *model, const PackedFloat32Array &snap,
+		int base, bool clear_when_invalid) {
+	const CtrlNames &n = names();
 	const float *p = snap.ptr();
 	if (field_i(p, base, NovaSimulation::PF_EMPLACED_CONTROLS_VALID) == 1) {
-		set_owned_ctrl(node, capabilities, n.owner_emplaced, n.eweap_gunyaw,
+		set_owned_ctrl(model, n.owner_emplaced, n.eweap_gunyaw,
 				field_i(p, base, NovaSimulation::PF_EWEAP_GUNYAW));
-		set_owned_ctrl(node, capabilities, n.owner_emplaced, n.eweap_gunpitch,
+		set_owned_ctrl(model, n.owner_emplaced, n.eweap_gunpitch,
 				field_i(p, base, NovaSimulation::PF_EWEAP_GUNPITCH));
 		return 2;
 	}
 	// Nodes persist across dismount/death: remove only the two controls this
 	// presenter owns — clear_ctrl_values() would also erase live WAC channels.
 	if (clear_when_invalid) {
-		emplaced_clear_capable(node, capabilities);
+		emplaced_clear_typed(model);
 	}
 	return 0;
 }
 
-void emplaced_clear_capable(Object *node, int capabilities) {
-	const DispatchNames &n = names();
-	clear_owned_ctrl(
-			node, capabilities, n.owner_emplaced, n.eweap_gunyaw);
-	clear_owned_ctrl(
-			node, capabilities, n.owner_emplaced, n.eweap_gunpitch);
+void emplaced_clear_typed(NovaObjectModel *model) {
+	const CtrlNames &n = names();
+	clear_owned_ctrl(model, n.owner_emplaced, n.eweap_gunyaw);
+	clear_owned_ctrl(model, n.owner_emplaced, n.eweap_gunpitch);
 }
 
-int vehicle_motion_apply_capable(Object *node,
-		const PackedFloat32Array &snap, int base, int capabilities) {
-	if (!has_ctrl_surface(capabilities)) return 0;
-	const DispatchNames &n = names();
+int vehicle_motion_apply_typed(NovaObjectModel *model,
+		const PackedFloat32Array &snap, int base) {
+	const CtrlNames &n = names();
 	const float *p = snap.ptr();
 	if (field_i(p, base, NovaSimulation::PF_VEHICLE_MOTION_VALID) == 1) {
 		// Both fields are owned even at rest (literal zero), exactly as the
 		// cveh callback stores them immediately before model submission.
 		// [orig: Entity_CacheVehicleHUDStats @0x4929B0;
 		//  stores @0x4929D7 / @0x4929F1]
-		set_owned_ctrl(node, capabilities, n.owner_vehicle_motion,
-				n.vehicle_steering,
+		set_owned_ctrl(model, n.owner_vehicle_motion, n.vehicle_steering,
 				field_i(p, base, NovaSimulation::PF_VEHICLE_STEERING));
-		set_owned_ctrl(node, capabilities, n.owner_vehicle_motion,
-				n.vehicle_speed,
+		set_owned_ctrl(model, n.owner_vehicle_motion, n.vehicle_speed,
 				field_i(p, base, NovaSimulation::PF_VEHICLE_SPEED));
 		return 2;
 	}
-	vehicle_motion_clear_capable(node, capabilities);
+	vehicle_motion_clear_typed(model);
 	return 0;
 }
 
-void vehicle_motion_clear_capable(Object *node, int capabilities) {
-	const DispatchNames &n = names();
-	clear_owned_ctrl(node, capabilities, n.owner_vehicle_motion,
-			n.vehicle_steering);
-	clear_owned_ctrl(
-			node, capabilities, n.owner_vehicle_motion, n.vehicle_speed);
+void vehicle_motion_clear_typed(NovaObjectModel *model) {
+	const CtrlNames &n = names();
+	clear_owned_ctrl(model, n.owner_vehicle_motion, n.vehicle_steering);
+	clear_owned_ctrl(model, n.owner_vehicle_motion, n.vehicle_speed);
 }
 
-int zone_team_apply_capable(Object *node, const PackedFloat32Array &snap,
-		int base, int capabilities) {
-	if (!has_ctrl_surface(capabilities)) return 0;
-	const DispatchNames &n = names();
+int zone_team_apply_typed(NovaObjectModel *model, const PackedFloat32Array &snap,
+		int base) {
+	const CtrlNames &n = names();
 	const float *p = snap.ptr();
 	int writes = 0;
 	if (field_i(p, base, NovaSimulation::PF_TEX_TEAM_VALID) == 1) {
-		set_owned_ctrl(node, capabilities, n.owner_sector_team, n.tex_team,
+		set_owned_ctrl(model, n.owner_sector_team, n.tex_team,
 				field_i(p, base, NovaSimulation::PF_TEX_TEAM));
 		++writes;
 	} else {
-		clear_owned_ctrl(
-				node, capabilities, n.owner_sector_team, n.tex_team);
+		clear_owned_ctrl(model, n.owner_sector_team, n.tex_team);
 	}
 	if (field_i(p, base, NovaSimulation::PF_ZONE_CTRL_VALID) == 1) {
 		// TEAMSWING is an unconditional store inside the packed-zone-byte
 		// branch, including literal zero for team 1.
-		set_owned_ctrl(node, capabilities, n.owner_zone, n.team_swing,
+		set_owned_ctrl(model, n.owner_zone, n.team_swing,
 				field_i(p, base, NovaSimulation::PF_TEAMSWING));
 		++writes;
 	} else {
-		clear_owned_ctrl(node, capabilities, n.owner_zone, n.team_swing);
+		clear_owned_ctrl(model, n.owner_zone, n.team_swing);
 	}
 	if (field_i(p, base, NovaSimulation::PF_LFP_CAMPPERCENT_VALID) == 1) {
-		set_owned_ctrl(node, capabilities, n.owner_zone, n.lfp_camp_percent,
+		set_owned_ctrl(model, n.owner_zone, n.lfp_camp_percent,
 				field_i(p, base, NovaSimulation::PF_LFP_CAMPPERCENT));
 		++writes;
 	} else {
 		// A numbered zone without a timer-list entry does not write LFP at all.
 		// Releasing our bounded per-model writer represents that omission; it is
 		// deliberately not a fabricated zero store.
-		clear_owned_ctrl(
-				node, capabilities, n.owner_zone, n.lfp_camp_percent);
+		clear_owned_ctrl(model, n.owner_zone, n.lfp_camp_percent);
 	}
 	return writes;
 }
 
-void zone_team_clear_capable(Object *node, int capabilities) {
-	const DispatchNames &n = names();
-	clear_owned_ctrl(
-			node, capabilities, n.owner_sector_team, n.tex_team);
-	clear_owned_ctrl(node, capabilities, n.owner_zone, n.team_swing);
-	clear_owned_ctrl(
-			node, capabilities, n.owner_zone, n.lfp_camp_percent);
+void zone_team_clear_typed(NovaObjectModel *model) {
+	const CtrlNames &n = names();
+	clear_owned_ctrl(model, n.owner_sector_team, n.tex_team);
+	clear_owned_ctrl(model, n.owner_zone, n.team_swing);
+	clear_owned_ctrl(model, n.owner_zone, n.lfp_camp_percent);
 }
 
-int world_heat_apply_capable(Object *node, const PackedFloat32Array &snap,
-		int base, int capabilities) {
-	if (!has_ctrl_surface(capabilities)) return 0;
-	const DispatchNames &n = names();
+int world_heat_apply_typed(NovaObjectModel *model, const PackedFloat32Array &snap,
+		int base) {
+	const CtrlNames &n = names();
 	const float *p = snap.ptr();
 	if (field_i(p, base, NovaSimulation::PF_WORLD_HEAT_GLOW_VALID) == 1) {
 		// The valid carrier-attachment scope owns cold zero too.
 		// [orig: HUD_CacheWeaponSlotInfo @ 0x440969 / @ 0x440991,
 		//  sole caller @ 0x546518]
-		set_owned_ctrl(node, capabilities, n.owner_world_heat, n.heat_glow,
+		set_owned_ctrl(model, n.owner_world_heat, n.heat_glow,
 				field_i(p, base, NovaSimulation::PF_WORLD_HEAT_GLOW));
 		return 1;
 	}
-	world_heat_clear_capable(node, capabilities);
+	world_heat_clear_typed(model);
 	return 0;
 }
 
-void world_heat_clear_capable(Object *node, int capabilities) {
-	const DispatchNames &n = names();
-	clear_owned_ctrl(node, capabilities, n.owner_world_heat, n.heat_glow);
+void world_heat_clear_typed(NovaObjectModel *model) {
+	const CtrlNames &n = names();
+	clear_owned_ctrl(model, n.owner_world_heat, n.heat_glow);
 }
 
 } // namespace
 
-void NovaPresentApplier::ctrl_set_with_capabilities(Object *node,
-		int capabilities, const String &owner, const String &reg, int value) {
-	set_owned_ctrl(node, capabilities, owner, reg, value);
-}
-
-void NovaPresentApplier::ctrl_clear_with_capabilities(Object *node,
-		int capabilities, const String &owner, const String &reg) {
-	clear_owned_ctrl(node, capabilities, owner, reg);
-}
-
-int NovaPresentApplier::wire_controls_apply_with_capabilities(Object *node,
-		const PackedFloat32Array &snap, int base, int capabilities) {
+int NovaPresentApplier::wire_controls_apply(NovaObjectModel *model,
+		const PackedFloat32Array &snap, int base) {
 	int writes = 0;
-	writes += emplaced_apply_capable(
-			node, snap, base, true, capabilities);
-	writes += vehicle_motion_apply_capable(
-			node, snap, base, capabilities);
-	writes += zone_team_apply_capable(
-			node, snap, base, capabilities);
-	writes += world_heat_apply_capable(
-			node, snap, base, capabilities);
+	writes += emplaced_apply_typed(model, snap, base, true);
+	writes += vehicle_motion_apply_typed(model, snap, base);
+	writes += zone_team_apply_typed(model, snap, base);
+	writes += world_heat_apply_typed(model, snap, base);
 	return writes;
 }
 
 int NovaPresentApplier::emplaced_apply(Object *node,
 		const PackedFloat32Array &snap, int base, bool clear_when_invalid) {
-	const int capabilities = ctrl_dispatch_capabilities(node);
-	return emplaced_apply_capable(
-			node, snap, base, clear_when_invalid, capabilities);
+	NovaObjectModel *model = Object::cast_to<NovaObjectModel>(node);
+	return model != nullptr
+			? emplaced_apply_typed(model, snap, base, clear_when_invalid)
+			: 0;
 }
 
 void NovaPresentApplier::emplaced_clear(Object *node) {
-	const int capabilities = ctrl_dispatch_capabilities(node);
-	emplaced_clear_capable(node, capabilities);
+	NovaObjectModel *model = Object::cast_to<NovaObjectModel>(node);
+	if (model != nullptr) {
+		emplaced_clear_typed(model);
+	}
 }
 
 int NovaPresentApplier::vehicle_motion_apply(Object *node,
 		const PackedFloat32Array &snap, int base) {
-	const int capabilities = ctrl_dispatch_capabilities(node);
-	return vehicle_motion_apply_capable(node, snap, base, capabilities);
+	NovaObjectModel *model = Object::cast_to<NovaObjectModel>(node);
+	return model != nullptr ? vehicle_motion_apply_typed(model, snap, base) : 0;
 }
 
 void NovaPresentApplier::vehicle_motion_clear(Object *node) {
-	const int capabilities = ctrl_dispatch_capabilities(node);
-	vehicle_motion_clear_capable(node, capabilities);
+	NovaObjectModel *model = Object::cast_to<NovaObjectModel>(node);
+	if (model != nullptr) {
+		vehicle_motion_clear_typed(model);
+	}
 }
 
 int NovaPresentApplier::zone_team_apply(Object *node,
 		const PackedFloat32Array &snap, int base) {
-	const int capabilities = ctrl_dispatch_capabilities(node);
-	return zone_team_apply_capable(node, snap, base, capabilities);
+	NovaObjectModel *model = Object::cast_to<NovaObjectModel>(node);
+	return model != nullptr ? zone_team_apply_typed(model, snap, base) : 0;
 }
 
 void NovaPresentApplier::zone_team_clear(Object *node) {
-	const int capabilities = ctrl_dispatch_capabilities(node);
-	zone_team_clear_capable(node, capabilities);
+	NovaObjectModel *model = Object::cast_to<NovaObjectModel>(node);
+	if (model != nullptr) {
+		zone_team_clear_typed(model);
+	}
 }
 
 int NovaPresentApplier::world_heat_apply(Object *node,
 		const PackedFloat32Array &snap, int base) {
-	const int capabilities = ctrl_dispatch_capabilities(node);
-	return world_heat_apply_capable(node, snap, base, capabilities);
+	NovaObjectModel *model = Object::cast_to<NovaObjectModel>(node);
+	return model != nullptr ? world_heat_apply_typed(model, snap, base) : 0;
 }
 
 void NovaPresentApplier::world_heat_clear(Object *node) {
-	const int capabilities = ctrl_dispatch_capabilities(node);
-	world_heat_clear_capable(node, capabilities);
+	NovaObjectModel *model = Object::cast_to<NovaObjectModel>(node);
+	if (model != nullptr) {
+		world_heat_clear_typed(model);
+	}
 }
 
 int64_t NovaPresentApplier::current_index_generation() {
-	if (!index_has_generation_) {
-		return 0;
-	}
-	Object *index = ObjectDB::get_instance(index_id_);
-	if (index == nullptr) {
-		return 0;
-	}
-	return static_cast<int64_t>(index->call(names().get_generation));
+	return index_.is_valid() ? index_->get_generation() : 0;
 }
 
 bool NovaPresentApplier::row_plan_is_current(int64_t size, int stride,
@@ -688,8 +535,7 @@ void NovaPresentApplier::rebuild_row_plan(const float *p, int64_t size, int stri
 	plan_snapshot_size_ = size;
 	plan_index_generation_ = current_index_generation();
 	plan_dirty_ = false;
-	Object *index = ObjectDB::get_instance(index_id_);
-	if (index == nullptr) {
+	if (index_.is_null()) {
 		plan_dirty_ = true;
 		return;
 	}
@@ -700,84 +546,36 @@ void NovaPresentApplier::rebuild_row_plan(const float *p, int64_t size, int stri
 		const int32_t bms_id = field_i(p, base, NovaSimulation::PF_BMS_ID);
 		const int32_t kind = field_i(p, base, NovaSimulation::PF_KIND);
 		const int32_t idx = field_i(p, base, NovaSimulation::PF_INDEX);
-		Object *node = index->call(names().resolve, bms_id, kind, idx);
-		if (node == nullptr) {
+		NovaObjectModel *model = index_->resolve(bms_id, kind, idx);
+		if (model == nullptr) {
 			continue;
 		}
 		Row row;
 		row.base = base;
-		row.node_id = node->get_instance_id();
+		row.node_id = model->get_instance_id();
 		row.bms_id = bms_id;
-		// Capability lookups are stable per node script: resolve them once per
-		// topology change so the per-frame loop never pays has_method() again.
-		int caps = 0;
-		if (node->has_method(names().play_body_clip_at)) {
-			caps |= CAP_BODY_CLIP;
-		}
-		if (node->has_method(names().play_body_blend_at)) {
-			caps |= CAP_BODY_BLEND;
-		}
-		if (node->has_method(names().play_body_anim_at)) {
-			caps |= CAP_BODY_SLOT;
-		}
-		if (node->has_method(names().play_body_anim)) {
-			caps |= CAP_BODY_PLAY;
-		}
-		if (node->has_method(names().set_aim_overlay)) {
-			caps |= CAP_AIM;
-		}
-		if (node->has_method(names().set_right_hand_collapsed)) {
-			caps |= CAP_RHC;
-		}
-		const int visual_ctrl_caps = visual_control_capabilities(node);
-		if ((visual_ctrl_caps &
-					(VISUAL_CTRL_OWNED | VISUAL_CTRL_LEGACY)) != 0) {
-			caps |= CAP_CTRL;
-		}
-		if ((visual_ctrl_caps & VISUAL_CTRL_BATCH) != 0) {
-			caps |= CAP_CTRL_BATCH;
-		}
-		if (node->has_method(names().has_muzzle) &&
-				node->has_method(names().get_muzzle_world_position) &&
-				static_cast<bool>(node->call(names().has_muzzle))) {
-			caps |= CAP_MUZZLE;
-		}
-		if ((visual_ctrl_caps & VISUAL_PART_PHASE) != 0) {
-			caps |= CAP_PART;
-		}
-		if ((visual_ctrl_caps & VISUAL_PART_CLEAR) != 0) {
-			caps |= CAP_PART_CLEAR;
-		}
-		// Camera-submission seam: a capable node publishes its off-screen
-		// edges into the shared registry so the hot walk gates on one native
-		// Dictionary lookup instead of a per-row script query. Idempotent per
-		// plan rebuild; nodes without the seam stay always-submitted.
-		if (node->has_method(names().set_submission_registry)) {
-			node->call(names().set_submission_registry,
-					submission_offscreen_ids_);
-		}
-		row.caps = caps;
-		row.visual_ctrl_caps = visual_ctrl_caps;
+		row.has_muzzle = model->has_muzzle();
+		// Camera-submission seam: the model publishes its off-screen edges into
+		// the shared registry so the hot walk gates on one native Dictionary
+		// lookup. Idempotent per plan rebuild.
+		model->set_submission_registry(submission_offscreen_ids_);
 		rows_.push_back(row);
 	}
 }
 
 void NovaPresentApplier::release_part_anim_outputs() {
-	const DispatchNames &n = names();
 	for (const Row &row : rows_) {
-		Object *node = ObjectDB::get_instance(row.node_id);
-		if (node == nullptr) continue;
-		const bool batch = (row.caps & CAP_CTRL_BATCH) != 0;
-		if (batch) node->call(n.begin_ctrl_update);
-		if ((row.caps & CAP_PART_CLEAR) != 0) {
-			node->call(n.clear_part_phase, 1);
-			node->call(n.clear_part_phase, 2);
-		}
-		emplaced_clear_capable(node, row.visual_ctrl_caps);
-		vehicle_motion_clear_capable(node, row.visual_ctrl_caps);
-		zone_team_clear_capable(node, row.visual_ctrl_caps);
-		world_heat_clear_capable(node, row.visual_ctrl_caps);
-		if (batch) node->call(n.end_ctrl_update);
+		NovaObjectModel *model =
+				Object::cast_to<NovaObjectModel>(ObjectDB::get_instance(row.node_id));
+		if (model == nullptr) continue;
+		model->begin_ctrl_update();
+		model->clear_part_phase(1);
+		model->clear_part_phase(2);
+		emplaced_clear_typed(model);
+		vehicle_motion_clear_typed(model);
+		zone_team_clear_typed(model);
+		world_heat_clear_typed(model);
+		model->end_ctrl_update();
 	}
 }
 
@@ -792,7 +590,7 @@ const String &NovaPresentApplier::infantry_key(int state) {
 
 void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 		int stride, int64_t layout_revision) {
-	if (stride < NovaSimulation::PF_STRIDE || index_id_ == ObjectID()) {
+	if (stride < NovaSimulation::PF_STRIDE || index_.is_null()) {
 		return;
 	}
 	const float *p = snap.ptr();
@@ -800,12 +598,12 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 	if (!row_plan_is_current(size, stride, layout_revision)) {
 		rebuild_row_plan(p, size, stride, layout_revision);
 	}
-	Object *sim = ObjectDB::get_instance(sim_id_);
-	NovaSimulation *native_sim = Object::cast_to<NovaSimulation>(sim);
-	const DispatchNames &n = names();
+	NovaSimulation *native_sim =
+			Object::cast_to<NovaSimulation>(ObjectDB::get_instance(sim_id_));
 	for (Row &row : rows_) {
-		Object *node = ObjectDB::get_instance(row.node_id);
-		if (node == nullptr) {
+		NovaObjectModel *model =
+				Object::cast_to<NovaObjectModel>(ObjectDB::get_instance(row.node_id));
+		if (model == nullptr) {
 			// Revisioned snapshots trust their topology stamp instead of
 			// pre-scanning every ObjectID. Rebind on the next frame and release
 			// this row's visibility intent immediately.
@@ -814,16 +612,14 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 			plan_dirty_ = true;
 			continue;
 		}
-		Node3D *n3 = Object::cast_to<Node3D>(node);
 		const int base = row.base;
-		const int caps = row.caps;
-		if ((output_channels_ & OUTPUT_TRANSFORM) != 0 && n3 != nullptr) {
+		if ((output_channels_ & OUTPUT_TRANSFORM) != 0) {
 			// Compare the six packed source floats before constructing either
 			// the placement Basis or Transform3D.
 			// Position is already Godot-space (x, z, -y); rotation is
 			// mission-space degrees, built through the ONE placement convention
 			// so a sim-driven entity sits exactly where placement would put it.
-			const bool aim_owns_root = (caps & CAP_AIM) != 0 &&
+			const bool aim_owns_root =
 					field_i(p, base,
 							NovaSimulation::PF_AIM_OVERLAY_VALID) != 0;
 			const int rotation_field = aim_owns_root
@@ -853,8 +649,8 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 						Vector3(next_stamp[0], next_stamp[1], next_stamp[2]));
 				++stat_transform_builds_;
 				if (row.transform_stamp_valid ||
-						n3->get_transform() != next) {
-					n3->set_transform(next);
+						model->get_transform() != next) {
+					model->set_transform(next);
 					++stat_moved_;
 				}
 				row.transform_stamp = next_stamp;
@@ -882,17 +678,17 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 		// the no-overlay clear gated to the valid->invalid edge (the node-side
 		// setters no-op on repeats; these gates skip the dispatch itself).
 		bool body_dependency_changed = false;
-		if (submitted && (caps & CAP_RHC) != 0) {
+		if (submitted) {
 			const int32_t rhc =
 					field_i(p, base, NovaSimulation::PF_RIGHT_HAND_COLLAPSED);
 			if (rhc != row.rhc) {
-				node->call(n.set_right_hand_collapsed, rhc != 0);
+				model->set_right_hand_collapsed(rhc != 0);
 				++stat_rhc_dispatches_;
 				row.rhc = rhc;
 				body_dependency_changed = true;
 			}
 		}
-		if (submitted && (caps & CAP_AIM) != 0) {
+		if (submitted) {
 			const int32_t aim_valid =
 					field_i(p, base, NovaSimulation::PF_AIM_OVERLAY_VALID);
 			if (aim_valid != 0) {
@@ -910,7 +706,7 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 					}
 				}
 				if (payload_changed) {
-					aim_apply_valid(node, snap, base, false);
+					aim_apply_valid(model, snap, base, false);
 					++stat_aim_dispatches_;
 					std::copy_n(
 							p + base +
@@ -921,7 +717,7 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 				}
 				row.aim_valid = 1;
 			} else if (row.aim_valid != 0) {
-				node->call(n.set_aim_overlay, Array());
+				model->set_aim_overlay(Array());
 				++stat_aim_dispatches_;
 				row.aim_valid = 0;
 				row.aim_payload_valid = false;
@@ -930,8 +726,7 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 				row.aim_valid = 0;
 			}
 		}
-		if (submitted && (output_channels_ & OUTPUT_PART_ANIM) != 0 &&
-				(caps & (CAP_PART | CAP_PART_CLEAR | CAP_CTRL)) != 0) {
+		if (submitted && (output_channels_ & OUTPUT_PART_ANIM) != 0) {
 			const int32_t active1_code =
 					field_i(p, base, NovaSimulation::PF_ACTIVE1);
 			const int32_t active2_code =
@@ -992,40 +787,32 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 				return row.ctrl_publish_state[
 							   static_cast<size_t>(field)] != 0;
 			};
-			const bool set_part1 =
-					active1 != 0 && (caps & CAP_PART) != 0;
-			const bool set_part2 =
-					active2 != 0 && (caps & CAP_PART) != 0;
-			const bool clear_part1 =
-					active1 == 0 && (caps & CAP_PART_CLEAR) != 0 &&
+			const bool set_part1 = active1 != 0;
+			const bool set_part2 = active2 != 0;
+			const bool clear_part1 = active1 == 0 &&
 					(cold || was_published(CTRL_PUBLISH_PART1));
-			const bool clear_part2 =
-					active2 == 0 && (caps & CAP_PART_CLEAR) != 0 &&
+			const bool clear_part2 = active2 == 0 &&
 					(cold || was_published(CTRL_PUBLISH_PART2));
 			// A valid writer executes for every retail model submission. This
 			// reasserts ownership after any intervening producer, while the
 			// model-side setter makes an unchanged owner/value a true no-op.
 			// Omitted writers clear only on a cold/falling edge.
-			const bool emplaced_work = (caps & CAP_CTRL) != 0 &&
-					(controls_valid != 0 || cold ||
-							was_published(CTRL_PUBLISH_EMPLACED));
-			const bool vehicle_work = (caps & CAP_CTRL) != 0 &&
-					(vehicle_valid != 0 || cold ||
-							was_published(CTRL_PUBLISH_VEHICLE));
-			const bool zone_work = (caps & CAP_CTRL) != 0 &&
-					(tex_team_valid != 0 || zone_valid != 0 ||
-							lfp_valid != 0 || cold ||
-							was_published(CTRL_PUBLISH_TEX_TEAM) ||
-							was_published(CTRL_PUBLISH_ZONE) ||
-							was_published(CTRL_PUBLISH_LFP));
-			const bool heat_work = (caps & CAP_CTRL) != 0 &&
-					(heat_valid != 0 || cold ||
-							was_published(CTRL_PUBLISH_HEAT));
+			const bool emplaced_work = controls_valid != 0 || cold ||
+					was_published(CTRL_PUBLISH_EMPLACED);
+			const bool vehicle_work = vehicle_valid != 0 || cold ||
+					was_published(CTRL_PUBLISH_VEHICLE);
+			const bool zone_work = tex_team_valid != 0 || zone_valid != 0 ||
+					lfp_valid != 0 || cold ||
+					was_published(CTRL_PUBLISH_TEX_TEAM) ||
+					was_published(CTRL_PUBLISH_ZONE) ||
+					was_published(CTRL_PUBLISH_LFP);
+			const bool heat_work = heat_valid != 0 || cold ||
+					was_published(CTRL_PUBLISH_HEAT);
 			const bool any_work = set_part1 || set_part2 ||
 					clear_part1 || clear_part2 || emplaced_work ||
 					vehicle_work || zone_work || heat_work;
-			if (any_work && (caps & CAP_CTRL_BATCH) != 0) {
-				node->call(n.begin_ctrl_update);
+			if (any_work) {
+				model->begin_ctrl_update();
 			}
 			// A falling/cold EWEAP release precedes generic phase replay. This
 			// preserves the master compatibility surface for a third-party node
@@ -1033,54 +820,50 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 			// unconditional clear/re-add on every valid frame. Production
 			// NovaObjectModel uses fixed VEHICLE_SPECIAL1/2 and cannot alias it.
 			if (emplaced_work && controls_valid == 0) {
-				emplaced_clear_capable(node, row.visual_ctrl_caps);
+				emplaced_clear_typed(model);
 				stat_control_dispatches_ += 2;
 			}
 			// PANM phases are integrated by the engine [orig:
 			// Entity_ApplyCommand @ 0x43ab60 case 0x22]. ACTIVE is the
 			// publication bit: inactive releases this presenter's slot.
 			if (set_part1) {
-				node->call(n.set_part_phase, 1, phase1);
+				model->set_part_phase(1, phase1);
 				++stat_posed_;
 				++stat_part_dispatches_;
 			} else if (clear_part1) {
-				node->call(n.clear_part_phase, 1);
+				model->clear_part_phase(1);
 				++stat_part_dispatches_;
 			}
 			if (set_part2) {
-				node->call(n.set_part_phase, 2, phase2);
+				model->set_part_phase(2, phase2);
 				++stat_posed_;
 				++stat_part_dispatches_;
 			} else if (clear_part2) {
-				node->call(n.clear_part_phase, 2);
+				model->clear_part_phase(2);
 				++stat_part_dispatches_;
 			}
 			if (emplaced_work && controls_valid != 0) {
-				const int applied = emplaced_apply_capable(
-						node, snap, base, false, row.visual_ctrl_caps);
+				const int applied = emplaced_apply_typed(model, snap, base, false);
 				stat_posed_ += applied;
 				stat_control_dispatches_ += applied;
 			}
 			if (vehicle_work) {
-				const int applied = vehicle_motion_apply_capable(
-						node, snap, base, row.visual_ctrl_caps);
+				const int applied = vehicle_motion_apply_typed(model, snap, base);
 				stat_posed_ += applied;
 				stat_control_dispatches_ += 2;
 			}
 			if (zone_work) {
-				const int applied = zone_team_apply_capable(
-						node, snap, base, row.visual_ctrl_caps);
+				const int applied = zone_team_apply_typed(model, snap, base);
 				stat_posed_ += applied;
 				stat_control_dispatches_ += 3;
 			}
 			if (heat_work) {
-				const int applied = world_heat_apply_capable(
-						node, snap, base, row.visual_ctrl_caps);
+				const int applied = world_heat_apply_typed(model, snap, base);
 				stat_posed_ += applied;
 				++stat_control_dispatches_;
 			}
-			if (any_work && (caps & CAP_CTRL_BATCH) != 0) {
-				node->call(n.end_ctrl_update);
+			if (any_work) {
+				model->end_ctrl_update();
 			}
 			row.ctrl_publish_state = next_ctrl_publish_state;
 			row.ctrl_publish_state_valid = true;
@@ -1090,20 +873,20 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 			present_visibility_[row.bms_id] = present_visible;
 			row.present_visible = present_visible_int;
 		}
-		if ((output_channels_ & OUTPUT_VISIBILITY) != 0 && n3 != nullptr) {
+		if ((output_channels_ & OUTPUT_VISIBILITY) != 0) {
 			// Death is not disappearance (corpses and husks keep rendering until
 			// the sim despawns via PF_HIDDEN); the local first-person UseGun
 			// parent's own world model is presentation-suppressed. Semantics and
 			// witnesses recorded at the GDScript origin (mission_present_pass.gd)
 			// [orig: Entity_RenderVehicleModel @ 0x4407d0 cull/submit;
 			// Flags&4 husk pick @ 0x413086].
-			if (n3->is_visible() != present_visible) {
+			if (model->is_visible() != present_visible) {
 				// Two-bit visibility ownership: while the render-occlusion frame
 				// claims this node (the shared hidden set), a sim-wants-visible
 				// node stays hidden — occlusion releases through the same set.
 				if (!(present_visible &&
 							occlusion_hidden_ids_.has(row.bms_id))) {
-					n3->set_visible(present_visible);
+					model->set_visible(present_visible);
 				}
 			}
 			if (!present_visible) {
@@ -1115,9 +898,7 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 		// writes unless they own the authoritative posed-muzzle feedback seam
 		// (AI fire origins survive regardless of the camera; hidden non-weapon
 		// actors take the cheap path).
-		const bool body_eligible =
-				submitted ||
-				(net_id > 0 && (caps & CAP_MUZZLE) != 0);
+		const bool body_eligible = submitted || (net_id > 0 && row.has_muzzle);
 		if ((output_channels_ & OUTPUT_BODY_ANIM) != 0 && body_eligible) {
 			// Main-body skeletal clip: infantry poses to the exact anim-state
 			// phase that produced root motion; PF_BODY_ANIM_SLOT is the coarse
@@ -1132,7 +913,7 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 			float body_blend_weight = 1.0f;
 			String body_clip_key;
 			String body_source_clip_key;
-			if ((caps & CAP_BODY_CLIP) != 0) {
+			{
 				const String key =
 						anim_state >= 0 ? infantry_key(anim_state) : String();
 				const int32_t source_state = field_i(
@@ -1147,8 +928,7 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 					const float target_weight =
 							p[base + NovaSimulation::PF_ANIM_BLEND_WEIGHT];
 					if (source_state >= 0 && !source_key.is_empty() &&
-							target_weight < 1.0f &&
-							(caps & CAP_BODY_BLEND) != 0) {
+							target_weight < 1.0f) {
 						body_mode = BODY_BLEND_AT;
 						body_source_selector = source_state;
 						body_source_phase = field_i(
@@ -1172,16 +952,10 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 				const int32_t body_anim_slot =
 						field_i(p, base, NovaSimulation::PF_BODY_ANIM_SLOT);
 				if (body_anim_slot >= 0) {
-					if ((caps & CAP_BODY_SLOT) != 0) {
-						body_mode = BODY_SLOT_AT;
-						body_selector = body_anim_slot;
-						body_phase = field_i(
-								p, base,
-								NovaSimulation::PF_ANIM_PHASE_TICKS);
-					} else if ((caps & CAP_BODY_PLAY) != 0) {
-						body_mode = BODY_SLOT_PLAY;
-						body_selector = body_anim_slot;
-					}
+					body_mode = BODY_SLOT_AT;
+					body_selector = body_anim_slot;
+					body_phase = field_i(
+							p, base, NovaSimulation::PF_ANIM_PHASE_TICKS);
 				}
 			}
 			const bool body_stamp_changed =
@@ -1199,26 +973,20 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 			if (body_stamp_changed || force_external_pose) {
 				switch (body_mode) {
 					case BODY_CLIP_AT:
-						node->call(n.play_body_clip_at, body_clip_key,
-								body_phase);
+						model->play_body_clip_at(body_clip_key, body_phase);
 						++stat_body_dispatches_;
 						break;
 					case BODY_BLEND_AT:
-						node->call(n.play_body_blend_at,
-								body_source_clip_key, body_source_phase,
-								body_clip_key, body_phase,
+						model->play_body_blend_at(body_source_clip_key,
+								body_source_phase, body_clip_key, body_phase,
 								body_blend_weight);
 						++stat_body_dispatches_;
 						break;
 					case BODY_SLOT_AT:
-						node->call(n.play_body_anim_at, body_selector,
-								body_phase);
+						model->play_body_anim_at(body_selector, body_phase);
 						++stat_body_dispatches_;
 						break;
 					case BODY_SLOT_PLAY:
-						node->call(n.play_body_anim, body_selector);
-						++stat_body_dispatches_;
-						break;
 					case BODY_NONE:
 						break;
 				}
@@ -1235,20 +1003,16 @@ void NovaPresentApplier::present_snapshot(const PackedFloat32Array &snap,
 			// ineligible. Keep the applied stamp dirty so visibility catches up.
 			row.body_stamp_valid = false;
 		}
-		if (net_id > 0 && (caps & CAP_MUZZLE) != 0) {
+		if (net_id > 0 && row.has_muzzle) {
 			// The D-AI-6 muzzle seam: feed the posed gun-flash userpoint back to
 			// the sim so AI rounds leave the GUN (one-frame staleness, ledgered)
 			// [orig: Entity_GetAttachmentWorldPosition @ 0x4b2670 — our sim has
 			// no skeletal pose, so the present layer pushes it back].
 			++stat_muzzle_queries_;
-			if (static_cast<bool>(node->call(n.has_muzzle))) {
-				const Vector3 muzzle = node->call(n.get_muzzle_world_position);
+			if (model->has_muzzle()) {
+				const Vector3 muzzle = model->get_muzzle_world_position();
 				if (native_sim != nullptr) {
 					native_sim->set_ai_muzzle_world(net_id, muzzle);
-					++stat_muzzles_;
-				} else if (sim != nullptr &&
-						sim->has_method(n.set_ai_muzzle_world)) {
-					sim->call(n.set_ai_muzzle_world, net_id, muzzle);
 					++stat_muzzles_;
 				}
 			}

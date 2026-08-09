@@ -34,6 +34,7 @@
 #include "particle/nova_effect_scene.h"
 #include "particle/nova_particle_compositor.h"
 #include "particle/nova_particle_renderer.h"
+#include "object/nova_entity_index.h"
 #include "object/nova_object_data.h"
 #include "object/nova_object_model.h"
 #include "object/nova_object_shader_cache.h"
@@ -123,6 +124,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NovaEnvLightState);
 	GDREGISTER_CLASS(NovaPanmClock);
 	GDREGISTER_CLASS(NovaObjectModel);
+	GDREGISTER_CLASS(NovaEntityIndex);
 	GDREGISTER_CLASS(NovaObjectShaderCache);
 	GDREGISTER_CLASS(NovaItemDatabase);
 	GDREGISTER_CLASS(NovaWeaponDatabase);

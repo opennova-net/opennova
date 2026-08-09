@@ -686,7 +686,7 @@ func get_environment_editor():
 # The shared NovaEnvironment node (EditorEnvironment under the world root). The
 # mission workspace hands it to placed objects so their lighting matches the
 # terrain preview, the same way the runtime passes its NovaEnvironment node.
-func get_environment_node() -> Node:
+func get_environment_node() -> NovaEnvironment:
 	return _world_preview.get_environment_node() if _world_preview != null else null
 
 

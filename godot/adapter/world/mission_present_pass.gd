@@ -22,7 +22,7 @@ extends RefCounted
 #    state; the pass poses the model to the same .bad phase that produced root motion.
 #    PF_BODY_ANIM_SLOT remains the coarse fallback for non-infantry/compat nodes.
 #
-# Targets resolve through ONE shared index (MissionEntityRegistry.resolve: bms_id primary, (kind,index)
+# Targets resolve through ONE shared index (NovaEntityIndex.resolve: bms_id primary, (kind,index)
 # fallback). Shell-agnostic, RefCounted, preload-referenced (same convention as MissionObjectPlacer).
 # The per-leg behavioral semantics and their [orig] witnesses are documented at the native walk
 # (nova_present_applier.cpp) — this facade owns wiring, options, and the duck-typed sim queries.
@@ -35,7 +35,7 @@ const OUTPUT_ALL := OUTPUT_TRANSFORM | OUTPUT_PART_ANIM \
 		| OUTPUT_VISIBILITY | OUTPUT_BODY_ANIM
 
 var _sim                    # NovaSimulation (or a compatible snapshot source)
-var _index                  # MissionEntityRegistry: resolve(bms_id, kind, index) -> Node
+var _index: NovaEntityIndex = null
 var _applier: NovaPresentApplier = null
 
 

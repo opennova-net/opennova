@@ -81,7 +81,7 @@ func test_present_uses_the_canonical_bms_basis_and_godot_position() -> void:
 	add_child_autofree(container)
 	var placer := PlacerStub.new()
 	var presenter = ThrowablePresentPass.new()
-	presenter.setup(sim, container, placer, ItemDbStub.new(), null)
+	presenter.setup(sim, container, placer, ItemDbStub.new())
 
 	var position := Vector3(12.5, -4.0, 33.25)
 	for rotation in [Vector3.ZERO, Vector3(0, 90, 0), Vector3(20, 35, -15)]:
@@ -113,7 +113,7 @@ func test_move_effect_spawns_once_follows_full_round_pose_and_stops_with_round()
 	var fx := EffectWorldStub.new()
 	var world := GameWorldStub.new()
 	var presenter = ThrowablePresentPass.new()
-	presenter.setup(sim, container, placer, ItemDbStub.new(), null,
+	presenter.setup(sim, container, placer, ItemDbStub.new(),
 			func() -> Variant: return fx, world)
 	var first_pos := Vector3(2, 3, 4)
 	var first_rot := Vector3(15, 35, -12)
@@ -165,7 +165,7 @@ func test_two_move_effect_closures_track_and_retire_their_own_rounds() -> void:
 	var fx := EffectWorldStub.new()
 	var world := GameWorldStub.new()
 	var presenter = ThrowablePresentPass.new()
-	presenter.setup(sim, container, PlacerStub.new(), ItemDbStub.new(), null,
+	presenter.setup(sim, container, PlacerStub.new(), ItemDbStub.new(),
 			func() -> Variant: return fx, world)
 	var pos_a := Vector3(1, 2, 3)
 	var pos_b := Vector3(10, 20, 30)
@@ -236,7 +236,7 @@ func test_same_slot_new_generation_replaces_the_owned_effect_group() -> void:
 	var fx := EffectWorldStub.new()
 	var world := GameWorldStub.new()
 	var presenter = ThrowablePresentPass.new()
-	presenter.setup(sim, container, PlacerStub.new(), ItemDbStub.new(), null,
+	presenter.setup(sim, container, PlacerStub.new(), ItemDbStub.new(),
 			func() -> Variant: return fx, world)
 	sim.visuals = [{
 		"key": 1024, # generation 1, slot 0
@@ -285,7 +285,7 @@ func test_rejected_move_effect_spawn_leaves_no_transform_or_anchor_state() -> vo
 
 	# A missing provider is a normal startup/teardown ordering case. It must not
 	# leave an unowned transform that retirement can never discover.
-	presenter.setup(sim, container, PlacerStub.new(), ItemDbStub.new(), null,
+	presenter.setup(sim, container, PlacerStub.new(), ItemDbStub.new(),
 			Callable(), world)
 	presenter.present()
 	assert_eq(presenter.get_stats().move_effects, 0)
@@ -294,7 +294,7 @@ func test_rejected_move_effect_spawn_leaves_no_transform_or_anchor_state() -> vo
 
 	var fx := EffectWorldStub.new()
 	fx.allow_spawn = false
-	presenter.setup(sim, container, PlacerStub.new(), ItemDbStub.new(), null,
+	presenter.setup(sim, container, PlacerStub.new(), ItemDbStub.new(),
 			func() -> Variant: return fx, world)
 	presenter.present()
 	assert_eq(fx.spawns.size(), 1, "the provider rejected one real request")
@@ -318,7 +318,7 @@ func test_remote_flying_round_snapshot_builds_and_retires_its_model() -> void:
 	add_child_autofree(container)
 	var placer := PlacerStub.new()
 	var presenter = ThrowablePresentPass.new()
-	presenter.setup(sim, container, placer, ItemDbStub.new(), null)
+	presenter.setup(sim, container, placer, ItemDbStub.new())
 	sim.visuals = [{
 		"key": 19,
 		"item_id": 1883,

@@ -10,28 +10,17 @@ extends GutTest
 const RUNTIME_3DI := "res://../fixtures/threedi/3di3/Shed.3di"
 
 
-class PartAnimModel:
-	extends NovaObjectModel
-	var regs: Array = ["VEHICLE_SPECIAL1", "VEHICLE_SPECIAL2"]
-	func _resolve_anim_channel_register(slot: int) -> String:
-		return String(regs[slot]) if slot >= 0 and slot < regs.size() else ""
-	func mark_body_pose_clean() -> void:
-		_body_pose_dirty = false
-	func is_body_pose_dirty() -> bool:
-		return _body_pose_dirty
-
-
-func _model() -> PartAnimModel:
-	var m := PartAnimModel.new()
+func _model() -> NovaObjectModel:
+	var m := NovaObjectModel.new()
 	autofree(m)
 	return m
 
 
-func _runtime_model() -> PartAnimModel:
+func _runtime_model() -> NovaObjectModel:
 	var data := NovaObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(RUNTIME_3DI)), OK,
 			"the committed runtime fixture opens")
-	var m := PartAnimModel.new()
+	var m := NovaObjectModel.new()
 	add_child_autofree(m)
 	m.set_process(false)
 	m.set_object_data(data)
@@ -158,10 +147,11 @@ func test_invalid_play_type_does_not_seed_or_start_a_channel() -> void:
 			"retail ignores play types outside {-1,0,1}")
 
 
-func test_unknown_register_is_a_noop() -> void:
+func test_out_of_range_channel_is_a_noop() -> void:
+	# Retail validates the PLAYPARTANIM channel in {1,2}; anything else never
+	# resolves a register [orig: Entity_ApplyCommand @0x43ab60 case 0x22].
 	var m := _model()
-	m.regs = []                       # model exposes no control registers
-	m.play_part_anim(1, 1, 1.0)
+	m.play_part_anim(3, 1, 1.0)
 	assert_true(m.get_active_part_anims().is_empty(), "no register -> no sweep")
 
 
@@ -219,8 +209,19 @@ func test_restart_reverse_seeds_max() -> void:
 
 
 func test_unchanged_aim_overlay_does_not_redirty_body_pose() -> void:
-	var m := _model()
-	m.mark_body_pose_clean()
+	# A real skeletal set + a posed clip clear the flag through the production
+	# path; the dedup is then observable on the bound diagnostic.
+	var m := _runtime_model()
+	var root := NovaResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path("res://../fixtures/anim")), OK)
+	var sk := NovaSkeletalAnim.new()
+	assert_true(sk.load_from_resource_root(root, "soldier.adm"),
+			"the committed rig fixture loads")
+	m.set_skeletal_anim(sk)
+	m.play_body_clip("anim_idle")
+	m.advance_body_animation(0.0)
+	assert_false(m.is_body_pose_dirty(), "a written pose settles the flag")
 	m.set_aim_overlay([])
 	assert_false(m.is_body_pose_dirty(),
 			"repeated disabled overlays preserve the body-pose fast path")
@@ -228,7 +229,8 @@ func test_unchanged_aim_overlay_does_not_redirty_body_pose() -> void:
 	var deltas: Array = [Basis.from_euler(Vector3(0.1, -0.2, 0.3))]
 	m.set_aim_overlay(deltas)
 	assert_true(m.is_body_pose_dirty(), "a new overlay invalidates the pose")
-	m.mark_body_pose_clean()
+	m.advance_body_animation(0.0)
+	assert_false(m.is_body_pose_dirty(), "the overlay pose writes and settles")
 	m.set_aim_overlay(deltas.duplicate())
 	assert_false(m.is_body_pose_dirty(),
 			"an identical active overlay cannot re-evaluate and upload the skeleton")

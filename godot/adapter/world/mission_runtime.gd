@@ -29,7 +29,6 @@ signal fixed_tick_completed(logic_tick: int)
 ## presentation systems use this boundary to discard transient runtime state.
 signal simulation_restarted()
 
-const MissionEntityRegistry := preload("res://adapter/world/mission_entity_registry.gd")
 const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
 const MissionPresentPass := preload("res://adapter/world/mission_present_pass.gd")
 const WirePresentPass := preload("res://adapter/world/wire_present_pass.gd")
@@ -226,10 +225,10 @@ func setup(mission, container: Node, options: Dictionary = {}) -> int:
 	# node never self-ticks via _process; it is freed explicitly in _exit_tree (mirrors the old
 	# MissionSimDriver). This MissionRuntime node itself IS in the tree — its host adds it and
 	# drives tick_realtime() explicitly (ADR 0025: the game shell is the only live host).
-	_index = MissionEntityRegistry.new()
+	_index = NovaEntityIndex.new()
 	var registry_placer = options.get("placer")
 	_index.build(registry_placer.placed_entity_records if registry_placer != null else [],
-			mission)
+			mission.get_area_triggers() if mission != null else [])
 	# The registry present drives whichever authored mission nodes actually exist. A
 	# production joiner owns only the 616-byte wire header, so its index is empty: the
 	# native sim separately materializes streamed pools 1-3 at exact packed handles for

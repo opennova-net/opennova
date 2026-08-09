@@ -54,6 +54,7 @@ add_library(${TARGET_NAME} SHARED
     particle/nova_effect_scene.cpp
     particle/nova_particle_compositor.cpp
     particle/nova_particle_renderer.cpp
+    object/nova_entity_index.cpp
     object/nova_object_model.cpp
     object/nova_object_model_anim.cpp
     object/nova_object_model_materials.cpp
