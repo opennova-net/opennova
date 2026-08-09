@@ -1,12 +1,73 @@
 #include "cbin_credits_resource.h"
 
 #include <cstdio>
+#include <cstring>
 #include <string>
+#include <unordered_map>
+#include <vector>
+
+#include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
+
+#include "cbin_asset_lookup.h"
+#include "util/nova_data_format.h"
 
 #include "cbin/cbin.h"
 
 namespace godot {
+
+namespace {
+
+// Replace underscores with spaces (game does this at display time).
+String underscore_to_space(const std::string &s) {
+	String result(s.c_str());
+	return result.replace("_", " ");
+}
+
+// Replace spaces with underscores for CBIN format.
+std::string space_to_underscore(const String &s) {
+	String result = s.replace(" ", "_");
+	return result.utf8().get_data();
+}
+
+String normalized_base_dir(const String &path) {
+	return path.replace("\\", "/").get_base_dir();
+}
+
+// Convert Godot Color to CBIN color (RGB 24-bit) — the Godot-type edge; the
+// display-state semantics live in cbin (credits_display_items and friends).
+uint32_t color_to_cbin(const Color &c) {
+	uint32_t r = static_cast<uint32_t>(c.r * 255) & 0xFF;
+	uint32_t g = static_cast<uint32_t>(c.g * 255) & 0xFF;
+	uint32_t b = static_cast<uint32_t>(c.b * 255) & 0xFF;
+	return (r << 16) | (g << 8) | b;
+}
+
+// Convert CBIN RGB24 to Godot Color.
+Color cbin_to_color(uint32_t rgb) {
+	return Color(((rgb >> 16) & 0xFF) / 255.0f, ((rgb >> 8) & 0xFF) / 255.0f,
+			(rgb & 0xFF) / 255.0f);
+}
+
+CbinJustify to_godot_justify(cbin::Justify j) {
+	switch (j) {
+		case cbin::Justify::Left: return CBIN_JUSTIFY_LEFT;
+		case cbin::Justify::Right: return CBIN_JUSTIFY_RIGHT;
+		case cbin::Justify::Center: break;
+	}
+	return CBIN_JUSTIFY_CENTER;
+}
+
+cbin::Justify to_cbin_justify(CbinJustify j) {
+	switch (j) {
+		case CBIN_JUSTIFY_LEFT: return cbin::Justify::Left;
+		case CBIN_JUSTIFY_RIGHT: return cbin::Justify::Right;
+		default: return cbin::Justify::Center;
+	}
+}
+
+}  // namespace
 
 // Build a credits resource from raw CBIN bytes. Mirrors the ENV + entry conversion in
 // KdaResourceFormatLoader::_load (collapsing Color/Justify control codes into per-text
@@ -351,6 +412,8 @@ void CbinCreditsResource::_bind_methods() {
 	// Text serialization.
 	ClassDB::bind_method(D_METHOD("to_text"), &CbinCreditsResource::to_text);
 	ClassDB::bind_method(D_METHOD("from_text", "text"), &CbinCreditsResource::from_text);
+	ClassDB::bind_method(D_METHOD("load_from_path", "path"), &CbinCreditsResource::load_from_path);
+	ClassDB::bind_method(D_METHOD("save_to_path", "path"), &CbinCreditsResource::save_to_path);
 
 	ClassDB::bind_method(D_METHOD("_on_entry_changed"), &CbinCreditsResource::_on_entry_changed);
 
@@ -808,6 +871,194 @@ bool CbinCreditsResource::_contains_entry_ref(const Ref<CbinEntry> &p_entry) con
 		}
 	}
 	return false;
+}
+
+Error CbinCreditsResource::load_from_path(const String &p_path) {
+	PackedByteArray data;
+	if (!read_nova_payload_file(p_path, data)) {
+		UtilityFunctions::push_warning("CbinCreditsResource: cannot open file: ", p_path);
+		return ERR_FILE_CANT_OPEN;
+	}
+	if (!cbin::is_cbin(data.ptr(), static_cast<size_t>(data.size()))) {
+		UtilityFunctions::push_warning("CbinCreditsResource: not a valid CBIN file: ", p_path);
+		return ERR_FILE_UNRECOGNIZED;
+	}
+	cbin::Credits credits;
+	std::string error;
+	if (!cbin::decode_credits(data.ptr(), static_cast<size_t>(data.size()), credits, error)) {
+		UtilityFunctions::push_warning("CbinCreditsResource: failed to parse ", p_path,
+				" - ", String(error.c_str()));
+		return ERR_PARSE_ERROR;
+	}
+
+	const String resource_dir = normalized_base_dir(p_path);
+	std::unordered_map<std::string, Ref<Resource>> font_cache;
+	std::unordered_map<std::string, Ref<Resource>> texture_cache;
+	auto find_font = [&](const String &font_name) -> Ref<Resource> {
+		std::string key(font_name.to_lower().utf8().get_data());
+		auto it = font_cache.find(key);
+		if (it != font_cache.end()) {
+			return it->second;
+		}
+		Ref<Resource> font = cbin_internal::find_font_by_name(font_name, resource_dir);
+		font_cache.emplace(key, font);
+		return font;
+	};
+	auto find_texture = [&](const String &texture_name) -> Ref<Resource> {
+		std::string key(texture_name.to_lower().utf8().get_data());
+		auto it = texture_cache.find(key);
+		if (it != texture_cache.end()) {
+			return it->second;
+		}
+		Ref<Resource> texture = cbin_internal::find_texture_by_name(texture_name, resource_dir);
+		texture_cache.emplace(key, texture);
+		return texture;
+	};
+
+	clear_entries();
+	set_scroll_rate(credits.scroll_rate);
+	set_vertical_space(credits.vertical_space);
+	set_center_x(credits.center_x);
+	set_has_top_y(credits.has_top_y);
+	if (credits.has_top_y) {
+		set_top_y(credits.top_y);
+	}
+	set_has_bottom_y(credits.has_bottom_y);
+	if (credits.has_bottom_y) {
+		set_bottom_y(credits.bottom_y);
+	}
+
+	// The Color/Justify control-code collapse lives in cbin
+	// (credits_display_items — seeded white/center); this loop only mints the
+	// Godot Resource per stamped item and resolves fonts/textures.
+	for (const auto &item : cbin::credits_display_items(credits)) {
+		switch (item.type) {
+			case cbin::EntryType::Text: {
+				Ref<CbinTextEntry> text_entry;
+				text_entry.instantiate();
+				text_entry->set_text(underscore_to_space(item.text));
+				text_entry->set_color(cbin_to_color(item.color));
+				text_entry->set_justify(to_godot_justify(item.justify));
+				if (!item.font.empty()) {
+					String font_name(item.font.c_str());
+					text_entry->set_font_name(font_name);
+					Ref<Resource> font = find_font(font_name);
+					if (font.is_valid()) {
+						text_entry->set_font(font);
+					}
+				}
+				add_entry(text_entry);
+				break;
+			}
+			case cbin::EntryType::Newline: {
+				Ref<CbinNewlineEntry> newline_entry;
+				newline_entry.instantiate();
+				add_entry(newline_entry);
+				break;
+			}
+			case cbin::EntryType::Image: {
+				Ref<CbinImageEntry> image_entry;
+				image_entry.instantiate();
+				if (!item.image_path.empty()) {
+					String texture_name = String(item.image_path.c_str());
+					// Always record the original name so placeholders can display it.
+					image_entry->set_texture_name(texture_name);
+					Ref<Resource> texture = find_texture(texture_name);
+					if (texture.is_valid()) {
+						image_entry->set_texture(texture);
+					}
+				}
+				// ~F format: display offsets from viewport
+				image_entry->set_display_x(item.image_display_x);
+				image_entry->set_display_y(item.image_display_y);
+				// ~I images (simple format) scroll with content, ~F images are fixed overlays.
+				image_entry->set_advances_y(item.use_simple_image_format);
+				add_entry(image_entry);
+				break;
+			}
+			default:
+				break;  // display items never carry control types
+		}
+	}
+	return OK;
+}
+
+Error CbinCreditsResource::save_to_path(const String &p_path) const {
+	cbin::Credits credits;
+	credits.scroll_rate = get_scroll_rate();
+	credits.vertical_space = get_vertical_space();
+	credits.center_x = get_center_x();
+	if (has_top_y()) {
+		credits.has_top_y = true;
+		credits.top_y = get_top_y();
+	}
+	if (has_bottom_y()) {
+		credits.has_bottom_y = true;
+		credits.bottom_y = get_bottom_y();
+	}
+
+	// Build display items at the Godot-type edge (Color quantized to RGB24,
+	// spaces back to underscores); the control-code re-emission by diff lives
+	// in cbin (credits_entries_from_display — controls only before Text,
+	// color before justify, seeded white/center).
+	std::vector<cbin::CreditsDisplayItem> items;
+	const int entry_count = get_entry_count();
+	items.reserve(entry_count);
+	for (int i = 0; i < entry_count; ++i) {
+		Ref<CbinEntry> src = get_entry(i);
+		if (!src.is_valid()) continue;
+		if (Ref<CbinTextEntry> text_entry = Object::cast_to<CbinTextEntry>(src.ptr()); text_entry.is_valid()) {
+			cbin::CreditsDisplayItem item;
+			item.type = cbin::EntryType::Text;
+			item.text = space_to_underscore(text_entry->get_text());
+			String font_name = text_entry->get_font_name();
+			if (!font_name.is_empty()) {
+				item.font = font_name.utf8().get_data();
+			}
+			item.color = color_to_cbin(text_entry->get_color());
+			item.justify = to_cbin_justify(text_entry->get_justify());
+			items.push_back(std::move(item));
+		} else if (Ref<CbinNewlineEntry> newline_entry = Object::cast_to<CbinNewlineEntry>(src.ptr()); newline_entry.is_valid()) {
+			cbin::CreditsDisplayItem item;
+			item.type = cbin::EntryType::Newline;
+			items.push_back(std::move(item));
+		} else if (Ref<CbinImageEntry> image_entry = Object::cast_to<CbinImageEntry>(src.ptr()); image_entry.is_valid()) {
+			cbin::CreditsDisplayItem item;
+			item.type = cbin::EntryType::Image;
+			String texture_path = image_entry->get_texture_path();
+			if (!texture_path.is_empty()) {
+				item.image_path = texture_path.utf8().get_data();
+			}
+			item.image_display_x = image_entry->get_display_x();
+			item.image_display_y = image_entry->get_display_y();
+			// advances_y true = ~I format (scrolling), false = ~F format (fixed overlay)
+			item.use_simple_image_format = image_entry->get_advances_y();
+			items.push_back(std::move(item));
+		} else {
+			continue;  // unknown entry type
+		}
+	}
+	credits.entries = cbin::credits_entries_from_display(items);
+
+	std::vector<uint8_t> data;
+	std::string error;
+	if (!cbin::encode(credits, data, error)) {
+		UtilityFunctions::push_warning("CbinCreditsResource: failed to encode: ", String(error.c_str()));
+		return ERR_CANT_CREATE;
+	}
+	Ref<FileAccess> file = FileAccess::open(p_path, FileAccess::WRITE);
+	if (!file.is_valid()) {
+		UtilityFunctions::push_warning("CbinCreditsResource: cannot open for writing: ", p_path);
+		return ERR_CANT_OPEN;
+	}
+	PackedByteArray byte_array;
+	byte_array.resize(static_cast<int64_t>(data.size()));
+	if (!data.empty()) {
+		std::memcpy(byte_array.ptrw(), data.data(), data.size());
+	}
+	file->store_buffer(byte_array);
+	file->close();
+	return OK;
 }
 
 }  // namespace godot

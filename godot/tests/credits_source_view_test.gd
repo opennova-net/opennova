@@ -15,11 +15,8 @@ const MINIMAL_KDA := "[ENV]\nscroll_rate=1.0\n[TEXT]\nHello\nWorld\n"
 
 
 func test_to_text_contains_required_headers() -> void:
-	var res := ResourceLoader.load(KDA_PATH, "CbinCreditsResource",
-		ResourceLoader.CACHE_MODE_IGNORE) as CbinCreditsResource
-	assert_not_null(res, "Fixture should load before header-check test.")
-	if res == null:
-		return
+	var res := CbinCreditsResource.new()
+	assert_eq(res.load_from_path(KDA_PATH), OK, "Fixture should load before header-check test.")
 
 	var text := res.to_text()
 	assert_true(text.contains("[ENV]"),

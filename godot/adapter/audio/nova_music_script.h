@@ -31,6 +31,13 @@ public:
 	// for tests / fixtures that bypass the loader. The bytes must already be
 	// in their decrypted SCR0 form (the loader strips the SCR layer first).
 	void load_from_decrypted_bytes(const PackedByteArray &bytes, const String &p_source);
+	// The .bin read/write pair (ADR 0032 direct document I/O, replacing the
+	// deleted ResourceFormat pair): load_from_path runs the generic payload
+	// decode and the SCR0 + mus_validate sniff (the .bin extension is shared
+	// with arbitrary config blobs); save_to_path writes the retained source
+	// bytes through losslessly.
+	Error load_from_path(const String &p_path);
+	Error save_to_path(const String &p_path) const;
 
 	int get_script_count() const;
 	String get_source_path() const { return source_path; }

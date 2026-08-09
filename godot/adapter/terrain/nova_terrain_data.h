@@ -324,6 +324,9 @@ public:
 	// Each call rebuilds the corresponding Texture2D preview cache.
 	Error import_pcx_slot(const String &slot_id, const String &path);
 	Error save_pcx_slot(const String &slot_id, const String &path) const;
+	// The .trn text write (ADR 0032 direct document I/O): engine save_trn
+	// emits the config from scratch; replaces the deleted ResourceFormat pair.
+	Error save_to_path(const String &p_path) const;
 	void reset_pcx_slot_default(const String &slot_id, int width, int height);
 	Dictionary get_pcx_slot_state(const String &slot_id) const;
 	void set_pcx_slot_state(const String &slot_id, const Dictionary &state);

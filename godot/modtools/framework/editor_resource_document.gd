@@ -44,10 +44,12 @@ func _file_extension() -> String:
 	return "res"
 
 
-# The writer. ResourceSaver covers the registered formats (fnt/kda); a document
-# whose resource writes itself (mnu's save_to_path) overrides this.
+# The writer. Every document's resource writes itself (ADR 0032 direct
+# document I/O) — each subclass overrides this with its save_to_path call;
+# reaching the base is a wiring bug.
 func _save_resource(path: String) -> Error:
-	return ResourceSaver.save(resource, path)
+	push_warning("EditorResourceDocument: no _save_resource override for ", path)
+	return ERR_UNCONFIGURED
 
 
 # --- Lifecycle ----------------------------------------------------------------

@@ -5,8 +5,10 @@ const BANK_FIXTURE := "res://../fixtures/sbf/jo_gamemus.sbf"
 
 
 func test_director_starts_and_stops() -> void:
-	var bank := load(BANK_FIXTURE) as NovaSbfBank
-	var script := load(SCRIPT_FIXTURE) as NovaMusicScript
+	var bank := NovaSbfBank.new()
+	bank.load_from_path(BANK_FIXTURE)
+	var script := NovaMusicScript.new()
+	script.load_from_path(SCRIPT_FIXTURE)
 	assert_not_null(script, "music script fixture loads")
 	if script == null:
 		return
@@ -22,7 +24,8 @@ func test_director_starts_and_stops() -> void:
 
 
 func test_director_emits_section_entered_on_jump() -> void:
-	var script := load(SCRIPT_FIXTURE) as NovaMusicScript
+	var script := NovaMusicScript.new()
+	script.load_from_path(SCRIPT_FIXTURE)
 	assert_not_null(script, "music script fixture loads")
 	if script == null:
 		return

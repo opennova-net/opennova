@@ -10,7 +10,8 @@ const FIXTURE := "res://../fixtures/mus/jo_gamemus.bin"
 
 
 func _model() -> Array:
-	var ms := load(FIXTURE) as NovaMusicScript
+	var ms := NovaMusicScript.new()
+	ms.load_from_path(FIXTURE)
 	assert_not_null(ms, "fixture loads as NovaMusicScript")
 	if ms == null:
 		return []

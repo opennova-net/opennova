@@ -4,6 +4,10 @@
 
 #include <til/til_io.h>
 
+#include "util/nova_data_format.h"
+
+#include <godot_cpp/classes/file_access.hpp>
+
 // Engine: jodemo.exe Terrain_LoadTileInfoFile@0x5CA730
 // docs/engine_spec_tiles.md 4.1
 
@@ -50,6 +54,8 @@ static bool tile_entry_from_variant(const Variant &value, opennova::TilOverlayEn
 
 void NovaTerrainTileInfo::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("load_from_bytes", "bytes"), &NovaTerrainTileInfo::load_from_bytes);
+	ClassDB::bind_method(D_METHOD("load_from_path", "path"), &NovaTerrainTileInfo::load_from_path);
+	ClassDB::bind_method(D_METHOD("save_to_path", "path"), &NovaTerrainTileInfo::save_to_path);
 	ClassDB::bind_method(D_METHOD("blocks_foliage", "world_x", "world_z", "radius"), &NovaTerrainTileInfo::blocks_foliage);
 	ClassDB::bind_method(D_METHOD("get_entry_count"), &NovaTerrainTileInfo::get_entry_count);
 	ClassDB::bind_method(D_METHOD("get_entries"), &NovaTerrainTileInfo::get_entries);
@@ -198,4 +204,33 @@ void NovaTerrainTileInfo::copy_from_native(const opennova::TilFile &file) {
 
 opennova::TilFile NovaTerrainTileInfo::to_native() const {
 	return opennova::til_normalize_file(til);
+}
+
+Error NovaTerrainTileInfo::load_from_path(const String &p_path) {
+	PackedByteArray packed;
+	if (!read_nova_payload_file(p_path, packed)) {
+		return ERR_FILE_CANT_OPEN;
+	}
+	return load_from_bytes(packed);
+}
+
+Error NovaTerrainTileInfo::save_to_path(const String &p_path) const {
+	std::vector<uint8_t> bytes;
+	std::string error;
+	if (!opennova::save_til(to_native(), bytes, error)) {
+		UtilityFunctions::push_warning("NovaTerrainTileInfo.save_to_path: ", error.c_str());
+		return ERR_FILE_CANT_WRITE;
+	}
+	Ref<FileAccess> file = FileAccess::open(p_path, FileAccess::WRITE);
+	if (file.is_null()) {
+		return ERR_FILE_CANT_WRITE;
+	}
+	PackedByteArray packed;
+	packed.resize(static_cast<int64_t>(bytes.size()));
+	if (!bytes.empty()) {
+		std::memcpy(packed.ptrw(), bytes.data(), bytes.size());
+	}
+	file->store_buffer(packed);
+	file->close();
+	return OK;
 }

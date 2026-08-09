@@ -4,8 +4,6 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/defs.hpp>
 #include <godot_cpp/godot.hpp>
-#include <godot_cpp/classes/resource_loader.hpp>
-#include <godot_cpp/classes/resource_saver.hpp>
 
 #include "terrain/nova_terrain_data.h"
 #include "terrain/nova_terrain.h"
@@ -19,8 +17,6 @@
 #include "terrain/nova_terrain_tile_entry.h"
 #include "terrain/nova_terrain_tile_info.h"
 #include "terrain/nova_terrain_tile_overlay.h"
-#include "terrain/trn_resource_format.h"
-#include "terrain/til_resource_format.h"
 #include "env/nova_env_keyframe.h"
 #include "env/env_file.h"
 #include "env/nova_color_smoother.h"
@@ -55,7 +51,6 @@
 #include "audio/nova_sound_selector.h"
 #include "dbf/nova_dbf_data.h"
 #include "cbin/cbin_credits_resource.h"
-#include "cbin/kda_resource_format.h"
 #include "cbin/nova_credits_player.h"
 #include "fnt/nova_fnt_resource.h"
 #include "editor/nova_edit_history.h"
@@ -66,17 +61,14 @@
 #include "network/nova_lan_session.h"
 #include "network/nova_net_session_policy.h"
 #include "util/nova_paths.h"
-#include "util/nova_texture_format.h"
 #include "resource_index/nova_resource_index.h"
 #include "refs/nova_reference_index.h"
 #include "resource_index/nova_resource_root.h"
 #include "audio/nova_sbf_bank.h"
 #include "audio/nova_sbf_audio_stream.h"
 #include "audio/nova_sbf_audio_stream_playback.h"
-#include "audio/sbf_resource_format.h"
 #include "audio/nova_music_script.h"
 #include "audio/nova_music_director.h"
-#include "audio/mus_resource_format.h"
 #include "pff/nova_pff_archive.h"
 #include "mnu/nova_mnu_document.h"
 #include "mnu/mns_stylesheet.h"
@@ -101,18 +93,6 @@
 
 using namespace godot;
 
-static Ref<ResourceFormatLoaderTRN> trn_loader;
-static Ref<ResourceFormatSaverTRN> trn_saver;
-static Ref<ResourceFormatLoaderTIL> til_loader;
-static Ref<ResourceFormatSaverTIL> til_saver;
-static Ref<KdaResourceFormatLoader> kda_loader;
-static Ref<KdaResourceFormatSaver> kda_saver;
-static Ref<ResourceFormatLoaderNovaTexture> nova_tex_loader;
-static Ref<SbfResourceFormatLoader> sbf_loader;
-static Ref<SbfResourceFormatSaver> sbf_saver;
-static Ref<MusResourceFormatLoader> mus_loader;
-static Ref<MusResourceFormatSaver> mus_saver;
-
 void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
 		return;
@@ -130,10 +110,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NovaTerrainTileEntry);
 	GDREGISTER_CLASS(NovaTerrainTileInfo);
 	GDREGISTER_CLASS(NovaTerrainTileOverlay);
-	GDREGISTER_CLASS(ResourceFormatLoaderTRN);
-	GDREGISTER_CLASS(ResourceFormatSaverTRN);
-	GDREGISTER_CLASS(ResourceFormatLoaderTIL);
-	GDREGISTER_CLASS(ResourceFormatSaverTIL);
 	GDREGISTER_CLASS(NovaEnvKeyframe);
 	GDREGISTER_CLASS(EnvFile);
 	GDREGISTER_CLASS(NovaColorSmoother);
@@ -163,13 +139,10 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(CbinNewlineEntry);
 	GDREGISTER_CLASS(CbinImageEntry);
 	GDREGISTER_CLASS(CbinCreditsResource);
-	GDREGISTER_CLASS(KdaResourceFormatLoader);
-	GDREGISTER_CLASS(KdaResourceFormatSaver);
 	GDREGISTER_CLASS(NovaCreditsPlayer);
 	GDREGISTER_CLASS(NovaFntResource);
 	GDREGISTER_CLASS(RtxtStringFile);
 	GDREGISTER_CLASS(NovaPaths);
-	GDREGISTER_CLASS(ResourceFormatLoaderNovaTexture);
 	GDREGISTER_CLASS(NovaParticleCurveRef);
 	GDREGISTER_CLASS(NovaParticleEffect);
 	GDREGISTER_CLASS(NovaParticleTableHandles);
@@ -186,12 +159,8 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NovaSbfAudioStream);
 	GDREGISTER_CLASS(NovaSbfAudioStreamPlayback);
 	GDREGISTER_CLASS(NovaSbfBank);
-	GDREGISTER_CLASS(SbfResourceFormatLoader);
-	GDREGISTER_CLASS(SbfResourceFormatSaver);
 	GDREGISTER_CLASS(NovaMusicScript);
 	GDREGISTER_CLASS(NovaMusicDirector);
-	GDREGISTER_CLASS(MusResourceFormatLoader);
-	GDREGISTER_CLASS(MusResourceFormatSaver);
 	GDREGISTER_CLASS(NovaPffArchive);
 	GDREGISTER_CLASS(NovaMnuDocument);
 	GDREGISTER_CLASS(MnsStyleSheet);
@@ -218,78 +187,12 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NovaUdpPump);
 	GDREGISTER_CLASS(NovaLanSession);
 	GDREGISTER_CLASS(NovaNetSessionPolicy);
-
-	trn_loader.instantiate();
-	ResourceLoader::get_singleton()->add_resource_format_loader(trn_loader);
-
-	trn_saver.instantiate();
-	ResourceSaver::get_singleton()->add_resource_format_saver(trn_saver);
-
-	til_loader.instantiate();
-	ResourceLoader::get_singleton()->add_resource_format_loader(til_loader);
-
-	til_saver.instantiate();
-	ResourceSaver::get_singleton()->add_resource_format_saver(til_saver);
-
-	kda_loader.instantiate();
-	ResourceLoader::get_singleton()->add_resource_format_loader(kda_loader);
-
-	kda_saver.instantiate();
-	ResourceSaver::get_singleton()->add_resource_format_saver(kda_saver);
-
-	nova_tex_loader.instantiate();
-	ResourceLoader::get_singleton()->add_resource_format_loader(nova_tex_loader, true);
-
-	sbf_loader.instantiate();
-	ResourceLoader::get_singleton()->add_resource_format_loader(sbf_loader);
-
-	sbf_saver.instantiate();
-	ResourceSaver::get_singleton()->add_resource_format_saver(sbf_saver);
-
-	mus_loader.instantiate();
-	ResourceLoader::get_singleton()->add_resource_format_loader(mus_loader);
-
-	mus_saver.instantiate();
-	ResourceSaver::get_singleton()->add_resource_format_saver(mus_saver);
 }
 
 void uninitialize_opennova_module(ModuleInitializationLevel p_level) {
 	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
 		return;
 	}
-
-	ResourceLoader::get_singleton()->remove_resource_format_loader(trn_loader);
-	trn_loader.unref();
-
-	ResourceSaver::get_singleton()->remove_resource_format_saver(trn_saver);
-	trn_saver.unref();
-
-	ResourceLoader::get_singleton()->remove_resource_format_loader(til_loader);
-	til_loader.unref();
-
-	ResourceSaver::get_singleton()->remove_resource_format_saver(til_saver);
-	til_saver.unref();
-
-	ResourceLoader::get_singleton()->remove_resource_format_loader(kda_loader);
-	kda_loader.unref();
-
-	ResourceSaver::get_singleton()->remove_resource_format_saver(kda_saver);
-	kda_saver.unref();
-
-	ResourceLoader::get_singleton()->remove_resource_format_loader(nova_tex_loader);
-	nova_tex_loader.unref();
-
-	ResourceLoader::get_singleton()->remove_resource_format_loader(sbf_loader);
-	sbf_loader.unref();
-
-	ResourceSaver::get_singleton()->remove_resource_format_saver(sbf_saver);
-	sbf_saver.unref();
-
-	ResourceLoader::get_singleton()->remove_resource_format_loader(mus_loader);
-	mus_loader.unref();
-
-	ResourceSaver::get_singleton()->remove_resource_format_saver(mus_saver);
-	mus_saver.unref();
 
 	NovaObjectShaderCache::destroy_singleton();
 }

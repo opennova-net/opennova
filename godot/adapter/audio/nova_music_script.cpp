@@ -4,8 +4,12 @@
 #include "nova_music_script.h"
 
 #include "nova_sbf_bank.h"
+#include "util/nova_data_format.h"
 
 #include "mus/ast.h"
+#include "mus/mus.h"
+
+#include <godot_cpp/classes/file_access.hpp>
 
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
@@ -48,6 +52,8 @@ void NovaMusicScript::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_compiled_file_bytes", "file_bytes"), &NovaMusicScript::set_compiled_file_bytes);
 	ClassDB::bind_method(D_METHOD("load_from_decrypted_bytes", "bytes", "source"),
 			&NovaMusicScript::load_from_decrypted_bytes);
+	ClassDB::bind_method(D_METHOD("load_from_path", "path"), &NovaMusicScript::load_from_path);
+	ClassDB::bind_method(D_METHOD("save_to_path", "path"), &NovaMusicScript::save_to_path);
 	ClassDB::bind_method(D_METHOD("get_raw_file_bytes"), &NovaMusicScript::get_raw_file_bytes);
 
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "source_path",
@@ -688,4 +694,37 @@ Dictionary NovaMusicScript::get_annotated_decompile(const StringName &p_script_n
 	mus_free(spans);
 	mus_program_free(prog);
 	return out;
+}
+
+Error NovaMusicScript::load_from_path(const String &p_path) {
+	// The .bin clash hazard (cc.bin and other config blobs share the
+	// extension): after the generic payload decode, only an SCR0 magic that
+	// mus_validate accepts is a music script.
+	PackedByteArray bytes;
+	if (!read_nova_payload_file(p_path, bytes)) {
+		UtilityFunctions::push_warning("NovaMusicScript: cannot open ", p_path);
+		return ERR_FILE_CANT_OPEN;
+	}
+	if (bytes.size() < 4 || bytes[0] != 'S' || bytes[1] != 'C' ||
+			bytes[2] != 'R' || bytes[3] != '0' ||
+			mus_validate(bytes.ptr(), static_cast<size_t>(bytes.size())) != 0) {
+		UtilityFunctions::push_warning("NovaMusicScript: ", p_path,
+				" is not a valid SCR0 MUS file after generic payload decode");
+		return ERR_FILE_UNRECOGNIZED;
+	}
+	load_from_decrypted_bytes(bytes, p_path);
+	return OK;
+}
+
+Error NovaMusicScript::save_to_path(const String &p_path) const {
+	PackedByteArray bytes = get_raw_file_bytes();
+	if (bytes.is_empty()) {
+		return ERR_FILE_CANT_OPEN;
+	}
+	Ref<FileAccess> fa = FileAccess::open(p_path, FileAccess::WRITE);
+	if (fa.is_null()) {
+		return ERR_CANT_OPEN;
+	}
+	fa->store_buffer(bytes);
+	return OK;
 }

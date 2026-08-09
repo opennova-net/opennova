@@ -5,11 +5,12 @@ const DST := "user://test_sbf_save_out.sbf"
 
 
 func test_save_passthrough_byte_identical() -> void:
-	var bank: NovaSbfBank = load(SRC)
+	var bank := NovaSbfBank.new()
+	bank.load_from_path(SRC)
 	assert_not_null(bank, "fixture loads")
 	if bank == null:
 		return
-	var err := ResourceSaver.save(bank, DST)
+	var err := bank.save_to_path(DST)
 	assert_eq(err, OK, "save returns OK")
 	var src_b := FileAccess.get_file_as_bytes(SRC)
 	var dst_b := FileAccess.get_file_as_bytes(DST)

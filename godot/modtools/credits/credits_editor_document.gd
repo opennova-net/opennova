@@ -18,11 +18,14 @@ func _file_extension() -> String:
 	return "kda"
 
 
+# CbinCreditsResource reads/writes itself (ADR 0032 direct document I/O).
+func _save_resource(path: String) -> Error:
+	return (resource as CbinCreditsResource).save_to_path(path)
+
+
 func open_kda(path: String) -> Error:
-	# CACHE_MODE_REPLACE: re-opening the same path must reload from disk, not
-	# serve Godot's cached resource instance.
-	var loaded := ResourceLoader.load(path, "CbinCreditsResource", ResourceLoader.CACHE_MODE_REPLACE) as CbinCreditsResource
-	if loaded == null:
+	var loaded := CbinCreditsResource.new()
+	if loaded.load_from_path(path) != OK:
 		return ERR_CANT_OPEN
 	adopt_loaded(loaded, path)
 	return OK

@@ -11,7 +11,8 @@ const BANK_FIXTURE := "res://../fixtures/sbf/jo_gamemus.sbf"
 # The names-less path is unchanged. It must still emit the placeholder so the
 # decompile golden test in engine/formats/mus continues to match byte-for-byte.
 func test_names_less_decompile_uses_sound_n_placeholder():
-	var script := load(SCRIPT_FIXTURE) as NovaMusicScript
+	var script := NovaMusicScript.new()
+	script.load_from_path(SCRIPT_FIXTURE)
 	assert_not_null(script, "fixture loads")
 	if script == null:
 		return
@@ -29,8 +30,10 @@ func test_names_less_decompile_uses_sound_n_placeholder():
 # data); instead we assert (a) at least one bind line carries a non-placeholder
 # quoted string and (b) the placeholder for slot 1 is gone.
 func test_names_aware_decompile_substitutes_real_names():
-	var script := load(SCRIPT_FIXTURE) as NovaMusicScript
-	var bank := load(BANK_FIXTURE) as NovaSbfBank
+	var script := NovaMusicScript.new()
+	script.load_from_path(SCRIPT_FIXTURE)
+	var bank := NovaSbfBank.new()
+	bank.load_from_path(BANK_FIXTURE)
 	assert_not_null(script, "script fixture loads")
 	assert_not_null(bank, "bank fixture loads")
 	if script == null or bank == null:
@@ -60,8 +63,10 @@ func test_names_aware_decompile_substitutes_real_names():
 # motivated the entire change. If a future fixture rotates the order, swap the
 # slot index here.
 func test_jo_gamemus_slot_1_resolves_to_gamint():
-	var script := load(SCRIPT_FIXTURE) as NovaMusicScript
-	var bank := load(BANK_FIXTURE) as NovaSbfBank
+	var script := NovaMusicScript.new()
+	script.load_from_path(SCRIPT_FIXTURE)
+	var bank := NovaSbfBank.new()
+	bank.load_from_path(BANK_FIXTURE)
 	if script == null or bank == null:
 		pass_test("fixture missing; skipped")
 		return
@@ -84,8 +89,10 @@ func test_jo_gamemus_slot_1_resolves_to_gamint():
 # broke Compile / Compile&Run / Save whenever a bank was loaded. It must compile
 # clean AND to the same bytecode as the names-less form.
 func test_names_aware_decompile_recompiles_to_identical_bytecode():
-	var script := load(SCRIPT_FIXTURE) as NovaMusicScript
-	var bank := load(BANK_FIXTURE) as NovaSbfBank
+	var script := NovaMusicScript.new()
+	script.load_from_path(SCRIPT_FIXTURE)
+	var bank := NovaSbfBank.new()
+	bank.load_from_path(BANK_FIXTURE)
 	if script == null or bank == null:
 		pass_test("fixture missing; skipped")
 		return

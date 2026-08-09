@@ -134,8 +134,9 @@ func prepare_script_for_run() -> Array:
 func open_bank(path: String) -> int:
 	if not _path_exists(path):
 		return ERR_FILE_NOT_FOUND
-	var res = load(path)
-	if res == null or not (res is NovaSbfBank):
+	var res := NovaSbfBank.new()
+	res.load_from_path(path)
+	if res.get_raw_file_bytes().is_empty():
 		return ERR_CANT_OPEN
 	bank = res
 	bank_path = path
@@ -147,8 +148,8 @@ func open_bank(path: String) -> int:
 func open_script(path: String) -> int:
 	if not _path_exists(path):
 		return ERR_FILE_NOT_FOUND
-	var res = load(path)
-	if res == null or not (res is NovaMusicScript):
+	var res := NovaMusicScript.new()
+	if res.load_from_path(path) != OK:
 		return ERR_CANT_OPEN
 	mus_script = res
 	script_path = path
@@ -272,10 +273,8 @@ func open_pair(any_path: String) -> int:
 	return OK
 
 
-# Check existence for both res:// (virtual) and user:// / absolute paths.
+# FileAccess covers res:// (PCK/virtual) and user:// / absolute paths alike.
 func _path_exists(path: String) -> bool:
-	if path.begins_with("res://"):
-		return ResourceLoader.exists(path)
 	return FileAccess.file_exists(path)
 
 
@@ -301,9 +300,9 @@ func _save_resources() -> int:
 	var bank_err: int = OK
 	var script_err: int = OK
 	if bank_loaded() and bank_path != "":
-		bank_err = ResourceSaver.save(bank, bank_path)
+		bank_err = bank.save_to_path(bank_path)
 	if script_loaded() and script_path != "":
-		script_err = ResourceSaver.save(mus_script, script_path)
+		script_err = mus_script.save_to_path(script_path)
 	if bank_err != OK:
 		return bank_err
 	if script_err != OK:

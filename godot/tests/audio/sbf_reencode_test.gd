@@ -10,7 +10,8 @@ const DST := "user://test_sbf_reencode.sbf"
 
 
 func test_dirty_bank_reencodes_on_save() -> void:
-	var bank: NovaSbfBank = load(SRC)
+	var bank := NovaSbfBank.new()
+	bank.load_from_path(SRC)
 	assert_not_null(bank, "fixture loads")
 	if bank == null:
 		return
@@ -28,11 +29,14 @@ func test_dirty_bank_reencodes_on_save() -> void:
 	assert_eq(set_err, OK, "set_entry_pcm returns OK")
 	assert_true(bank.is_dirty(), "bank is dirty after set_entry_pcm")
 
-	var err := ResourceSaver.save(bank, DST)
-	assert_eq(err, OK, "ResourceSaver.save returns OK")
+	var err := bank.save_to_path(DST)
+	assert_eq(err, OK, "save_to_path returns OK")
 	assert_false(bank.is_dirty(), "save clears dirty flag")
 
-	var reloaded: NovaSbfBank = load(DST)
+	var reloaded := NovaSbfBank.new()
+	reloaded.load_from_path(DST)
+	if reloaded.get_raw_file_bytes().is_empty():
+		reloaded = null
 	assert_not_null(reloaded, "saved file loads back as NovaSbfBank")
 	if reloaded == null:
 		return

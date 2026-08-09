@@ -125,8 +125,8 @@ func load_tileinfo_from_dir(base_dir: String) -> void:
 	for candidate in _tileinfo_load_candidates(base_dir):
 		if not FileAccess.file_exists(candidate):
 			continue
-		var loaded := ResourceLoader.load(candidate, "NovaTerrainTileInfo", ResourceLoader.CACHE_MODE_IGNORE) as NovaTerrainTileInfo
-		if loaded == null:
+		var loaded := NovaTerrainTileInfo.new()
+		if loaded.load_from_path(candidate) != OK:
 			continue
 		tileinfo_resource = loaded
 		tileinfo_source_path = candidate
@@ -142,8 +142,8 @@ func load_tileinfo_from_dir(base_dir: String) -> void:
 func load_tileinfo(path: String) -> bool:
 	if path.is_empty():
 		return false
-	var loaded := ResourceLoader.load(path, "NovaTerrainTileInfo", ResourceLoader.CACHE_MODE_IGNORE) as NovaTerrainTileInfo
-	if loaded == null:
+	var loaded := NovaTerrainTileInfo.new()
+	if loaded.load_from_path(path) != OK:
 		return false
 	tileinfo_resource = loaded
 	tileinfo_source_path = path
@@ -183,7 +183,7 @@ func save_tileinfo(output_dir: String, terrain_name: String) -> Error:
 		basename = "untitled"
 
 	var save_path := output_dir.path_join(basename + ".til")
-	var err := ResourceSaver.save(tileinfo_resource, save_path)
+	var err := tileinfo_resource.save_to_path(save_path)
 	if err != OK:
 		return err
 
