@@ -171,6 +171,10 @@ target_link_libraries(lwf_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(lwf_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME lwf_roundtrip COMMAND lwf_roundtrip_test)
 
+add_executable(wav_pcm_test lwf/wav_pcm_test.cpp)
+target_link_libraries(wav_pcm_test PRIVATE opennova_formats)
+add_test(NAME wav_pcm COMMAND wav_pcm_test)
+
 # The menu sound profile (fixtures/menu_sound/menu.LWF): trigger sets resolve to
 # loose .wav members (drives MNU hover/click via NovaMnuMenu).
 add_executable(menu_lwf_test lwf/menu_lwf_test.cpp)

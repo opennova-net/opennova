@@ -50,8 +50,9 @@ add_library(opennova_formats STATIC
     # foliage — foliage defs + placement map
     ${CMAKE_CURRENT_SOURCE_DIR}/foliage/src/foliage.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/foliage/src/runtime.cpp
-    # lwf — sound profiles
+    # lwf — sound profiles (+ the .wav payload decode the profiles reference)
     ${CMAKE_CURRENT_SOURCE_DIR}/lwf/src/lwf.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/lwf/src/wav_pcm.cpp
     # mission — .bms/.mis missions: document model, schema reflection,
     # authoring edits, and the flat C ABI. Standalone (no world/runtime
     # dependency); the runtime half — event runtime, promotion, boot — lives
