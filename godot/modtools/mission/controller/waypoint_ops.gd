@@ -204,7 +204,7 @@ func _on_marker_left_press(mouse_pos: Vector2) -> void:
 # Pick the nearest active-path marker under the cursor (ray-vs-AABB over the overlay's
 # gizmo AABBs), or {} on a miss. Mirrors _pick_entity but over _marker_pickable.
 func _pick_marker(mouse_pos: Vector2) -> Dictionary:
-	if _c.terrain_editor == null or not _c.terrain_editor.has_method("get_editor_camera"):
+	if _c.terrain_editor == null:
 		return {}
 	var camera: Camera3D = _c.terrain_editor.get_editor_camera()
 	if camera == null:
@@ -250,7 +250,7 @@ func _deselect_marker() -> void:
 # Re-ground the dragged marker on the terrain each motion: preview the gizmo only (the
 # record is written once, on release), so a drag is one undo step.
 func _on_marker_drag(mouse_pos: Vector2) -> void:
-	if _c._selected_marker.is_empty() or _c.terrain_editor == null or not _c.terrain_editor.has_method("raycast_terrain_at"):
+	if _c._selected_marker.is_empty() or _c.terrain_editor == null:
 		return
 	var hit: Vector3 = _c.terrain_editor.raycast_terrain_at(mouse_pos)
 	if not _c.terrain_editor.is_valid_terrain_hit(hit):
@@ -354,7 +354,7 @@ func add_marker_to_active_path_at_world(global_hit: Vector3) -> bool:
 # Raycast the terrain under the cursor and add a marker there; a miss (off the terrain) is
 # ignored. Stays armed so several can be placed.
 func _place_marker_armed_at(mouse_pos: Vector2) -> void:
-	if _c.terrain_editor == null or not _c.terrain_editor.has_method("raycast_terrain_at"):
+	if _c.terrain_editor == null:
 		return
 	var hit: Vector3 = _c.terrain_editor.raycast_terrain_at(mouse_pos)
 	if not _c.terrain_editor.is_valid_terrain_hit(hit):

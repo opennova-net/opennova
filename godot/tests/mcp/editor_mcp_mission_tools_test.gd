@@ -46,6 +46,12 @@ class ShellStub:
 	func _get_active_workspace() -> Variant:
 		return _workspaces.values()[0] if not _workspaces.is_empty() else null
 
+	func _workspace_id_for_resource_kind(_kind: String) -> int:
+		return -1
+
+	func set_active_workspace(_workspace_id: int) -> void:
+		pass
+
 
 func _abs(p: String) -> String:
 	return ProjectSettings.globalize_path(p)

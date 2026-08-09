@@ -43,7 +43,7 @@ func _on_tabs_changed() -> void:
 	documents_changed.emit()
 
 
-func set_editor_shell(value: Node) -> void:
+func set_editor_shell(value: WorkspaceShell) -> void:
 	super.set_editor_shell(value)
 	_ensure_editor()
 
@@ -350,6 +350,28 @@ func _on_doc_edited(doc: StringsEditor) -> void:
 # The domain document the EditorWorkspace base derives undo/redo + dirty from.
 func get_editor_document() -> Object:
 	return strings_editor
+
+
+func has_unsaved_changes() -> bool:
+	return (strings_editor != null and strings_editor.is_dirty) or super.has_unsaved_changes()
+
+
+func can_undo() -> bool:
+	return strings_editor != null and not is_busy() and strings_editor.can_undo()
+
+
+func can_redo() -> bool:
+	return strings_editor != null and not is_busy() and strings_editor.can_redo()
+
+
+func undo() -> void:
+	if strings_editor != null:
+		strings_editor.undo()
+
+
+func redo() -> void:
+	if strings_editor != null:
+		strings_editor.redo()
 
 
 func can_new() -> bool:

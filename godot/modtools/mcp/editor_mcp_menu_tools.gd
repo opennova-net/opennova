@@ -1732,7 +1732,7 @@ func _tool_save(args: Dictionary, ctx: McpToolContext) -> Variant:
 		if path.get_extension().to_lower() != "mnu":
 			return McpToolResult.error("path must end in .mnu.")
 		if path.is_relative_path():
-			var root_dir := String(ctx.shell.get_resource_root_dir()) if ctx.shell != null and ctx.shell.has_method("get_resource_root_dir") else ""
+			var root_dir := String(ctx.shell.get_resource_root_dir()) if ctx.shell != null else ""
 			if root_dir.is_empty():
 				return McpToolResult.error("No resource root mounted to resolve a relative filename — pass an absolute path.")
 			path = root_dir.path_join(path)

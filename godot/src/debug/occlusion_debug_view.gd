@@ -81,7 +81,13 @@ func _refresh_from_sim(sim: Simulation) -> void:
 		var camera := get_viewport().get_camera_3d()
 		if camera != null:
 			anchor = camera.global_position
-	var debug: Dictionary = sim.get_occlusion_portal_debug(anchor, RANGE_UNITS)
+	render_report(sim.get_occlusion_portal_debug(anchor, RANGE_UNITS))
+
+
+## Render one portal snapshot (Simulation.get_occlusion_portal_debug's
+## shape). Split from the sim fetch so tests and probes can drive the view
+## with report data directly.
+func render_report(debug: Dictionary) -> void:
 	_update_geometry(debug.get("buildings", []))
 
 

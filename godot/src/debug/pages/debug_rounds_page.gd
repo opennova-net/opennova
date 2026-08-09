@@ -76,10 +76,16 @@ static func _round_bone_pair(ev: Dictionary) -> String:
 
 func refresh() -> void:
 	var sim := _ctx.sim()
-	if sim == null or not sim.has_method("get_round_debug"):
+	if sim == null:
 		_clear_pane("No round data.")
 		return
-	var debug: Dictionary = sim.get_round_debug()
+	render_report(sim.get_round_debug())
+
+
+## Render one round-outcome snapshot (Simulation.get_round_debug's shape).
+## Split from refresh() so tests and probes can drive the pane with report
+## data directly.
+func render_report(debug: Dictionary) -> void:
 	var events: Array = debug.get("events", [])
 	if events.is_empty():
 		_clear_pane("No rounds resolved yet.")

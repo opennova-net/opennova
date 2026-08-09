@@ -7,8 +7,8 @@ extends RefCounted
 ## stats plus an honest pointer at read_file / describe_api instead of
 ## pretending.
 ##
-## Loads are defensive (has_method guards, get_last_error surfaced) — a bad
-## file should produce a useful error string, never a script error.
+## Loads are defensive (errors surfaced via get_last_error) — a bad file
+## should produce a useful error string, never a script error.
 
 const TEXT_CLIP := 120
 
@@ -74,7 +74,7 @@ static func open_data(loader: Object, ctx: McpToolContext, raw_path: String) -> 
 		return resolved
 	var err := _open_via(loader, ctx, resolved)
 	if err != OK:
-		var detail := String(loader.get_last_error()) if loader.has_method("get_last_error") else ""
+		var detail := String(loader.get_last_error())
 		return { "ok": false, "error": "Failed to open %s (%s). %s" % [resolved["name"], error_string(err), detail] }
 	return resolved
 
@@ -344,13 +344,14 @@ static func _describe_stats(out: Dictionary, resolved: Dictionary, kind: String)
 	out["summary"] = "%s — no structured describe yet for this kind; read_file returns the raw bytes (describe_api documents the matching Nova* class)." % kind
 
 
-# open_file for loose paths, open_from_resource_root for archived names —
-# the shared pattern for classes that expose both.
+# open_file for loose paths, open_from_resource_root for archived names.
+# Both loader classes routed here (MissionData, ObjectData) expose the full
+# open_file / open_from_resource_root / get_last_error trio.
 static func _open_via(loader: Object, ctx: McpToolContext, resolved: Dictionary) -> Error:
-	if resolved.get("loose", false) and loader.has_method("open_file"):
+	if resolved.get("loose", false):
 		return loader.open_file(String(resolved["path"]))
 	var root: Variant = ctx.root()
-	if root != null and loader.has_method("open_from_resource_root"):
+	if root != null:
 		return loader.open_from_resource_root(root, String(resolved["name"]))
 	return ERR_CANT_OPEN
 

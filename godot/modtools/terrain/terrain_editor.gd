@@ -1,19 +1,16 @@
 class_name TerrainEditor
-extends Node3D
+extends TerrainEditorBase
+
+# Tool / ExportFlavor enums and the INVALID_HEIGHT / INVALID_HIT sentinels live
+# on TerrainEditorBase (the typed surface the rest of ONED consumes) and are
+# inherited here.
 
 signal ui_state_changed(version: int)
 
-enum Tool { RAISE, LOWER, SMOOTH, FLATTEN, PAINT_DETAIL, EDIT_SECTORS, PAINT_COLORMAP, CLONE_COLOR, TILE_STAMP, FOLIAGE_PAINT, SURFACE_PAINT }
 enum TileInteractionMode { PLACE, EDIT_SELECTED }
-
-# Maps to opennova::DepthFormat in engine/formats/cpt/include/cpt/cpt.h.
-# BHD-era terrains (DVD4, original DPTH golden) use DPTH; JO/DFX-era use CDEP.
-enum ExportFlavor { BHD = 0, DFX_JO = 1 }
 
 const HM_SIZE := TerrainData.ATLAS_SIZE
 const DEFAULT_HEIGHT := 20.0
-const INVALID_HEIGHT := -1000000.0
-const INVALID_HIT := Vector3(INF, INF, INF)
 const TerrainEditorSlots = preload("res://modtools/terrain/terrain_editor_slots.gd")
 const TerrainEditorSurfacePaint = preload("res://modtools/terrain/terrain_editor_surface_paint.gd")
 const TerrainEditHistory = preload("res://modtools/terrain/terrain_edit_history.gd")
@@ -48,11 +45,11 @@ class TileOverlayPreviewDiagnostics:
 
 @onready var terrain_world_root: Node3D = $TerrainWorldRoot
 @onready var terrain_mesh: EditorTerrainMesh = $TerrainWorldRoot/EditorTerrainMesh
-@onready var camera: Camera3D = $TerrainWorldRoot/FlyCamera
+@onready var camera: FlyCamera = $TerrainWorldRoot/FlyCamera
 
 # The shell, injected by the app root (EditorApp) before set_editor; null in
-# headless tests, so every use guards.
-var workstation: Node = null
+# headless tests, so every use null-guards.
+var workstation: WorkspaceShell = null
 
 var _document: TerrainEditorDocument = TerrainEditorDocument.new()
 var _brush_session: TerrainEditorBrushSession = TerrainEditorBrushSession.new()
@@ -78,29 +75,38 @@ var _data: TerrainData:
 	set(value):
 		_document.data = value
 
-var current_tool: Tool:
-	get:
-		return _brush_session.current_tool
-	set(value):
-		_brush_session.current_tool = value
+# current_tool / brush_* are declared on TerrainEditorBase; these routing
+# overrides back them with the brush session.
+func _get_current_tool() -> Tool:
+	return _brush_session.current_tool
 
-var brush_radius: float:
-	get:
-		return _brush_session.brush_radius
-	set(value):
-		_brush_session.brush_radius = value
 
-var brush_strength: float:
-	get:
-		return _brush_session.brush_strength
-	set(value):
-		_brush_session.brush_strength = value
+func _set_current_tool(value: Tool) -> void:
+	_brush_session.current_tool = value
 
-var brush_hardness: float:
-	get:
-		return _brush_session.brush_hardness
-	set(value):
-		_brush_session.brush_hardness = value
+
+func _get_brush_radius() -> float:
+	return _brush_session.brush_radius
+
+
+func _set_brush_radius(value: float) -> void:
+	_brush_session.brush_radius = value
+
+
+func _get_brush_strength() -> float:
+	return _brush_session.brush_strength
+
+
+func _set_brush_strength(value: float) -> void:
+	_brush_session.brush_strength = value
+
+
+func _get_brush_hardness() -> float:
+	return _brush_session.brush_hardness
+
+
+func _set_brush_hardness(value: float) -> void:
+	_brush_session.brush_hardness = value
 
 var brush_active: bool:
 	get:
@@ -198,7 +204,7 @@ var grid_guide_visible: bool = false
 # The app-owned environment DOCUMENT handle. Mount-owned on purpose — the shell,
 # boot probe, and tests read or assign it directly; set_environment_editor
 # routes the world-preview binding through _world_preview.
-var environment_editor
+var environment_editor: EnvironmentEditor
 
 var _foliage_preview: TerrainFoliagePreview
 var _tile_overlay_preview: TerrainTileOverlayPreview
@@ -217,14 +223,16 @@ var _surface_map_stroke_changed: bool = false
 var _foliage_map_stroke_before: Dictionary = {}
 var _foliage_map_stroke_changed: bool = false
 
-var is_dirty: bool:
-	get:
-		return _document.is_dirty
-	set(value):
-		if _document.is_dirty == value:
-			return
-		_document.is_dirty = value
-		_mark_ui_state_changed()
+# is_dirty is declared on TerrainEditorBase; the document backs it here.
+func _get_is_dirty() -> bool:
+	return _document.is_dirty
+
+
+func _set_is_dirty(value: bool) -> void:
+	if _document.is_dirty == value:
+		return
+	_document.is_dirty = value
+	_mark_ui_state_changed()
 
 # Monotonic count of terrain HEIGHT changes — strokes, undo/redo of height
 # snapshots, and every full heightmap replacement (new/open/import). Blendmap/
@@ -269,20 +277,19 @@ func _ready() -> void:
 	_init_tile_overlay_preview()
 	_init_clone_marker()
 	_init_axes_gizmo()
-	if camera.has_signal("escape_pressed"):
-		camera.connect("escape_pressed", Callable(self, "_on_camera_escape"))
+	camera.escape_pressed.connect(_on_camera_escape)
 	# One document for the editor's life (field-initialized, never reassigned).
 	_document.error_reported.connect(_on_document_error)
 	_load_editor_state()
 
 
-func set_workstation(value: Node) -> void:
+func set_workstation(value: WorkspaceShell) -> void:
 	workstation = value
 
 
 ## Forward a short status message to the workstation UI.
 func _notify_status(message: String, severity: StringName = &"info") -> void:
-	if workstation and workstation.has_method("show_status_message"):
+	if workstation != null:
 		workstation.show_status_message(message, 0.0, severity)
 
 
@@ -367,14 +374,14 @@ func _init_foliage_preview() -> void:
 ## Wire the app-owned environment document into the world preview. The document
 ## var stays on the mount (duck-typed consumers and tests assign it directly);
 ## the service owns the signal binding and the node fan-out.
-func set_environment_editor(value) -> void:
+func set_environment_editor(value: EnvironmentEditor) -> void:
 	environment_editor = value
 	if _world_preview != null:
 		_world_preview.bind_environment_editor(value)
 
 
 func _on_environment_state_changed() -> void:
-	if workstation and workstation.has_method("sync_from_editor_state"):
+	if workstation != null:
 		workstation.sync_from_editor_state()
 
 
@@ -679,7 +686,7 @@ func sample_heights_world(points: PackedVector2Array) -> PackedFloat32Array:
 	return terrain_mesh.sample_world_heights(points)
 
 
-func get_environment_editor():
+func get_environment_editor() -> EnvironmentEditor:
 	return environment_editor
 
 
@@ -953,14 +960,12 @@ func get_export_progress_phase() -> String:
 	return _export_job.get_progress_phase()
 
 
-func get_editor_camera() -> Camera3D:
+func get_editor_camera() -> FlyCamera:
 	return camera
 
 
 func get_resource_root() -> ResourceRoot:
-	if workstation != null and workstation.has_method("get_resource_root"):
-		return workstation.get_resource_root()
-	return null
+	return workstation.get_resource_root() if workstation != null else null
 
 
 func set_sector_cell(row: int, col: int, value: int) -> bool:
@@ -1244,7 +1249,7 @@ func _apply_history_snapshot(snapshot: Dictionary, is_undo: bool) -> void:
 func _mark_ui_state_changed() -> void:
 	_ui_state_version += 1
 	ui_state_changed.emit(_ui_state_version)
-	if workstation and workstation.has_method("sync_from_editor_state"):
+	if workstation != null:
 		workstation.sync_from_editor_state()
 
 
@@ -1276,7 +1281,7 @@ func get_last_export_dir() -> String:
 # dirty workspace). The dirty-replace guard for New/Open lives on the terrain
 # workspace adapter, through the shell's shared unsaved-changes dialog.
 func _on_camera_escape() -> void:
-	if workstation != null and workstation.has_method("request_close"):
+	if workstation != null:
 		workstation.request_close()
 
 
@@ -1393,7 +1398,7 @@ func _frame_camera_to_terrain() -> void:
 	else:
 		center = bounds.position + bounds.size * 0.5
 		extent = maxf(bounds.size.x, bounds.size.z)
-	if camera and camera.has_method("frame_bounds"):
+	if camera != null:
 		camera.frame_bounds(center, extent)
 
 

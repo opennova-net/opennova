@@ -16,13 +16,13 @@ var _preview: ObjectPreview:
 		return _ws._preview
 
 
-func _object_data():
+func _object_data() -> ObjectData:
 	return object_editor.object_data if object_editor != null else null
 
 
 func _control_registers() -> Array:
-	var data = _object_data()
-	if data != null and data.has_method("get_control_registers"):
+	var data := _object_data()
+	if data != null:
 		return data.get_control_registers()
 	return []
 

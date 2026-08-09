@@ -149,8 +149,8 @@ const INTRINSICS := [
 # as a condition. Reuses the native compiler (the single grammar authority) so the
 # builder never re-implements parsing. mus may be null (then always ok, for tests
 # that have no script handy). Returns { ok: bool, err: String }.
-static func validate_expr(text: String, mus) -> Dictionary:
-	if mus == null or not mus.has_method("compile_text"):
+static func validate_expr(text: String, mus: MusicScript) -> Dictionary:
+	if mus == null:
 		return {"ok": true, "err": ""}
 	var probe := "script _probe\nsection _s\n{\nif (%s)\n{\nreturn\n}\n}\n" % text
 	var r: Dictionary = mus.compile_text(probe)

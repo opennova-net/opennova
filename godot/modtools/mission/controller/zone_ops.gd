@@ -135,7 +135,7 @@ func _on_zone_left_press(mouse_pos: Vector2) -> void:
 # Pick the nearest zone under the cursor (ray-vs-AABB over the overlay's body AABBs), or -1 on
 # a miss. Mirrors _pick_marker.
 func _pick_zone(mouse_pos: Vector2) -> int:
-	if _c.terrain_editor == null or not _c.terrain_editor.has_method("get_editor_camera"):
+	if _c.terrain_editor == null:
 		return -1
 	var camera: Camera3D = _c.terrain_editor.get_editor_camera()
 	if camera == null:
@@ -158,7 +158,7 @@ func _pick_zone(mouse_pos: Vector2) -> int:
 # Translate the selected box horizontally to follow the terrain hit (the vertical extent is
 # left unchanged). Previews the overlay box only; the record commits once on release.
 func _on_zone_drag(mouse_pos: Vector2) -> void:
-	if _c._selected_zone_index < 0 or _c.terrain_editor == null or not _c.terrain_editor.has_method("raycast_terrain_at"):
+	if _c._selected_zone_index < 0 or _c.terrain_editor == null:
 		return
 	var hit: Vector3 = _c.terrain_editor.raycast_terrain_at(mouse_pos)
 	if not _c.terrain_editor.is_valid_terrain_hit(hit):

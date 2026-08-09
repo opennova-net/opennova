@@ -157,9 +157,7 @@ func _refresh_transport_policy() -> void:
 	_play_button.disabled = disabled
 	_play_button.tooltip_text = reason
 	var world := _ctx.world()
-	var is_network_session := world != null \
-			and world.has_method("is_net_session") \
-			and bool(world.call("is_net_session"))
+	var is_network_session := world != null and bool(world.is_net_session())
 	var pause_disabled := disabled or is_network_session
 	var pause_reason := reason
 	if not disabled and is_network_session:

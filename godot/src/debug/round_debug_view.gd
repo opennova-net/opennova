@@ -50,9 +50,14 @@ func _build_view() -> void:
 
 
 func _refresh_from_sim(sim: Simulation) -> void:
-	var debug: Dictionary = sim.get_round_debug()
-	var events: Array = debug.get("events", [])
-	_update(events)
+	render_report(sim.get_round_debug())
+
+
+## Render one round snapshot (Simulation.get_round_debug's shape). Split from
+## the sim fetch so tests and probes can drive the view with report data
+## directly.
+func render_report(debug: Dictionary) -> void:
+	_update(debug.get("events", []))
 
 
 func _clear_all() -> void:

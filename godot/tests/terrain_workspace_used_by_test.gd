@@ -13,7 +13,7 @@ const TerrainWorkspaceScript = preload("res://modtools/terrain/terrain_workspace
 
 
 class UsedByShell:
-	extends Node
+	extends WorkspaceShell
 
 	class IndexStub:
 		extends RefCounted
@@ -31,7 +31,7 @@ class UsedByShell:
 	var root: ResourceRoot
 	var opened: Array = []
 
-	func get_reference_index() -> IndexStub:
+	func get_reference_index() -> RefCounted:
 		return index
 
 	func get_resource_root() -> ResourceRoot:

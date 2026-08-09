@@ -12,6 +12,8 @@ extends DebugPage
 ## in place. Every read/format runs at the (divided) overlay refresh cadence,
 ## never per frame.
 
+const MissionRuntime := preload("res://src/world/mission_runtime.gd")
+
 const _KIND_SPAN := 0    # one board slot: avg + max ms
 const _KIND_GROUP := 1   # sum of several slots: avg ms only (maxes don't add)
 const _KIND_HEADER := 2  # label + info only (no time)
@@ -259,8 +261,8 @@ func refresh() -> void:
 	if window.frames <= 0:
 		return
 	status_label.text = "Captured %d render frames; overlay cost is included." % window.frames
-	var runtime: Object = _ctx.runtime() if _ctx != null else null
-	var sim: Object = _ctx.sim() if _ctx != null else null
+	var runtime := _ctx.runtime() if _ctx != null else null
+	var sim := _ctx.sim() if _ctx != null else null
 	render_window(window.frames, window.sums, window.peaks,
 			window.sample_frames, runtime, sim)
 
@@ -280,7 +282,7 @@ func get_display_snapshot() -> Array[DebugStatsDisplayRow]:
 ## Format one drained window into the rows. Split from refresh() so tests can
 ## drive the pane with fabricated windows.
 func render_window(frames: int, sums: PackedInt64Array, maxes: PackedInt64Array,
-		counts: PackedInt32Array, runtime: Object, sim: Object) -> void:
+		counts: PackedInt32Array, runtime: MissionRuntime, sim: Simulation) -> void:
 	for row_v in _ROWS:
 		var row: Dictionary = row_v
 		var item: TreeItem = _items[row["id"]]
@@ -366,10 +368,10 @@ func _set_info(id: String, text: String) -> void:
 
 
 # The counter pulls: live Dictionaries/typed stats read at refresh cadence
-# only, every source duck-typed and optional so SP, listen-host, joiner and
-# harness stubs all render what they have.
+# only, every source optional (null when its mission-scoped owner is gone) so
+# SP, listen-host and joiner sessions all render what they have.
 func _refresh_info(sums: PackedInt64Array, counts: PackedInt32Array, frames: int,
-		runtime: Object, sim: Object) -> void:
+		runtime: MissionRuntime, sim: Simulation) -> void:
 	# Sources are mission-scoped and can disappear between divided refreshes.
 	# Clear every conditional cell first so reload/menu transitions cannot retain
 	# counters from the previous world.
@@ -392,20 +394,20 @@ func _refresh_info(sums: PackedInt64Array, counts: PackedInt32Array, frames: int
 	_set_pass_counts("render_water", sums, counts, frames,
 			FrameStatsBoard.RENDER_WATER_OBJECTS, FrameStatsBoard.RENDER_WATER_DRAWS)
 
-	var world: Object = _ctx.world() if _ctx != null else null
+	var world := _ctx.world() if _ctx != null else null
 
 	# Sim row: ticks/frame from the value slot + entity/role counters.
 	var sim_info := ""
 	if counts[FrameStatsBoard.SIM_TICKS] > 0:
 		sim_info = "%.1f t/f" % (float(sums[FrameStatsBoard.SIM_TICKS]) / frames)
-	if world != null and world.has_method("get_runtime_perf_counters"):
+	if world != null:
 		var wc: Dictionary = world.get_runtime_perf_counters()
 		var simc: Dictionary = (wc.get("runtime", {}) as Dictionary).get("sim", {})
 		if not simc.is_empty():
 			var role := "local"
 			if bool(simc.get("listen_server", false)):
 				role = "listen"
-			elif sim != null and sim.has_method("is_joiner") and bool(sim.is_joiner()):
+			elif sim != null and bool(sim.is_joiner()):
 				role = "joiner"
 			sim_info += "%s%d ents · %s" % [
 				"" if sim_info.is_empty() else " · ",
@@ -413,7 +415,7 @@ func _refresh_info(sums: PackedInt64Array, counts: PackedInt32Array, frames: int
 	_set_info("sim", sim_info)
 
 	var net_info := ""
-	if sim != null and sim.has_method("get_host_peer_count"):
+	if sim != null:
 		var peers := int(sim.get_host_peer_count())
 		if peers > 0:
 			net_info = "%d peer(s)" % peers
@@ -430,37 +432,37 @@ func _refresh_info(sums: PackedInt64Array, counts: PackedInt32Array, frames: int
 					float(sums[FrameStatsBoard.TRACE_DYNAMIC_FACES]) / frames,
 				])
 
-	if world != null and world.has_method("get_effect_world"):
-		var fx = world.get_effect_world()
-		if fx != null and is_instance_valid(fx) and fx.has_method("active_entry_count"):
+	if world != null:
+		var fx := world.get_effect_world()
+		if fx != null and is_instance_valid(fx):
 			var drain_ms := float(sums[FrameStatsBoard.EFFECTS_DRAIN]) / 1000.0 / frames
 			_set_info("effects", "%d live · drain %.2f ms/f" % [
 					int(fx.active_entry_count()), drain_ms])
 
-	if world != null and world.has_method("get_fire_present_stats"):
+	if world != null:
 		var fire: Dictionary = world.get_fire_present_stats()
 		if not fire.is_empty():
 			_set_info("fire", "%d fires · %d snd" % [
 					int(fire.get("fires", 0)), int(fire.get("sounds", 0))])
 
-	if world != null and world.has_method("get_destruction_present_stats"):
+	if world != null:
 		var destruction = world.get_destruction_present_stats()
 		if destruction != null:
 			_set_info("destruction", "%d husks · %d bursts" % [
 					int(destruction.husk_swaps), int(destruction.bursts)])
 
-	if runtime != null and runtime.has_method("get_throwable_present_stats"):
+	if runtime != null:
 		var throwable = runtime.get_throwable_present_stats()
 		if throwable != null:
 			_set_info("throwable", "%d live" % int(throwable.live))
 
-	if runtime != null and runtime.has_method("get_wire_present_stats"):
+	if runtime != null:
 		var wire: WirePresentStats = runtime.get_wire_present_stats()
 		if wire != null and (wire.live > 0 or wire.unresolved > 0):
 			_set_info("wire_rows", "%d live · %d unresolved" % [
 					wire.live, wire.unresolved])
 
-	if sim != null and sim.has_method("get_occlusion_debug"):
+	if sim != null:
 		var occ: Dictionary = sim.get_occlusion_debug()
 		if bool(occ.get("active", false)):
 			var occ_counts: Dictionary = occ.get("counts", {})

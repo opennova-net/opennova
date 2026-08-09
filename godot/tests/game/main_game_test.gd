@@ -110,7 +110,9 @@ func test_main_frame_probe_spans_are_default_off() -> void:
 	terrain.name = "Terrain"
 	world.add_child(terrain)
 	add_child_autofree(world)
-	var camera := Camera3D.new()
+	# The shell's camera member is typed FlyCamera (the scene's camera
+	# class); a plain Camera3D would be rejected by the typed member set.
+	var camera := FlyCamera.new()
 	add_child_autofree(camera)
 	world.set("_loaded", true)
 	game.set("_world", world)
@@ -141,7 +143,9 @@ func test_main_frame_stats_feeds_gate_on_the_board() -> void:
 	terrain.name = "Terrain"
 	world.add_child(terrain)
 	add_child_autofree(world)
-	var camera := Camera3D.new()
+	# The shell's camera member is typed FlyCamera (the scene's camera
+	# class); a plain Camera3D would be rejected by the typed member set.
+	var camera := FlyCamera.new()
 	add_child_autofree(camera)
 	world.set("_loaded", true)
 	game.set("_world", world)
@@ -322,6 +326,11 @@ func test_hud_loads_text_for_the_mission_that_actually_started() -> void:
 	var terrain := Terrain.new()
 	terrain.name = "Terrain"
 	world.add_child(terrain)
+	# The environment child makes the code-built world mission-loadable: the
+	# typed placement path stamps _env.light_state onto every placed batch.
+	var env := MissionEnvironment.new()
+	env.name = "MissionEnvironment"
+	world.add_child(env)
 	add_child_autofree(world)
 	await get_tree().process_frame
 	world.set_resource_root(root)

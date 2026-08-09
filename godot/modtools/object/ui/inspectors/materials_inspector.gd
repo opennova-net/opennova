@@ -843,8 +843,8 @@ func _set_controls_enabled(node: Node, enabled: bool) -> void:
 		_set_controls_enabled(child, enabled)
 
 
-func _reg_value(picker) -> int:
-	if picker != null and picker.has_method("get_selected_register"):
+func _reg_value(picker: CtrlRegPicker) -> int:
+	if picker != null:
 		return int(picker.get_selected_register())
 	return -1
 

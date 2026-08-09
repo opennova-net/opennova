@@ -101,7 +101,7 @@ func teardown() -> void:
 # userpoints against the FP viewmodel parts, and the presenter stamps lighting
 # context onto them — both read through the presenter's vm_parts()/viewmodel()
 # delegates, which land here (the rig OWNS the array and the node).
-func vm_parts() -> Array:
+func vm_parts() -> Array[ObjectModel]:
 	return _vm_parts
 
 

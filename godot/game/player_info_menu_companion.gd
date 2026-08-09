@@ -75,7 +75,7 @@ signal avatar_chosen(profile: Dictionary)
 
 # True when this is the JO PLAYER_INFO screen, so the shell delegates to us. Keyed on
 # the NATIONALITY + COMBO_LIST controls unique to player.mnu's AVATARS block.
-func owns_menu(menu: Node) -> bool:
+func owns_menu(menu: MnuMenu) -> bool:
 	if menu == null:
 		return false
 	return menu.find_child("NATIONALITY", true, false) != null \
@@ -606,11 +606,11 @@ func _selected_combo_head_voice() -> int:
 
 func _preview_voice() -> void:
 	var voice := _selected_combo_head_voice()
-	if voice < 0 or _menu == null or not _menu.has_method("play_widget_sound"):
+	if voice < 0 or _menu == null:
 		return
 	# The persisted profile override is owned by D-PLAYERINFO-9; until that profile
 	# field exists, retail's selected-avatar fallback is the authoritative voice.
-	_menu.call("play_widget_sound", VOICE_PREVIEW_TRIGGER_FORMAT % voice, VOICE_PREVIEW_BANK)
+	_menu.play_widget_sound(VOICE_PREVIEW_TRIGGER_FORMAT % voice, VOICE_PREVIEW_BANK)
 
 
 # --- 3D character preview (PLAYER_PREVIEW) ------------------------------------
@@ -619,8 +619,10 @@ func _preview_voice() -> void:
 # button surface in player.mnu) and feed it the current combo. Null-guarded: a menu
 # without the widget, or without an avatar db / resource root, simply shows no preview.
 func _wire_preview() -> void:
-	var rect := _find("PLAYER_PREVIEW")
-	if rect == null or not (rect is Control):
+	# Boundary conversion: the authored PLAYER_PREVIEW window is a Control;
+	# null means this screen simply does not author the widget.
+	var rect := _find("PLAYER_PREVIEW") as Control
+	if rect == null:
 		return
 	_preview = AvatarPreviewScript.new()
 	_preview.name = "PlayerInfoAvatarPreview"

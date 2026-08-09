@@ -13,10 +13,9 @@ const PICK_RANGE_UNITS := 1000.0
 ## `source` names the input for the card ("crosshair" / "mouse_click").
 ## Returns the sim's stable-shape pick card (hit=false on any miss), or {}
 ## when there is no sim/camera to ask.
-static func pick_with_camera(sim: Object, camera: Camera3D, screen_pos: Vector2,
+static func pick_with_camera(sim: Simulation, camera: Camera3D, screen_pos: Vector2,
 		source: String) -> Dictionary:
-	if sim == null or not is_instance_valid(sim) \
-			or not sim.has_method("debug_pick_entity"):
+	if sim == null or not is_instance_valid(sim):
 		return {}
 	if camera == null or not is_instance_valid(camera):
 		return {}
@@ -31,7 +30,7 @@ static func pick_with_camera(sim: Object, camera: Camera3D, screen_pos: Vector2,
 
 ## The crosshair variant: both camera modes pin the aim reticle to screen
 ## center, so the center ray IS the aim ray.
-static func pick_at_crosshair(sim: Object, camera: Camera3D) -> Dictionary:
+static func pick_at_crosshair(sim: Simulation, camera: Camera3D) -> Dictionary:
 	if camera == null or not is_instance_valid(camera):
 		return {}
 	var viewport := camera.get_viewport()

@@ -1,15 +1,15 @@
 extends GutTest
 
-# DebugEnvironmentPage: env/weather/water readouts from duck-typed stubs, the
-# shared-session scrub knobs and authority gates, and empty states without a
-# world.
+# DebugEnvironmentPage: env/weather/water readouts through the typed
+# GameWorld -> MissionEnvironment/Weather/Water seams (harness subclasses
+# override the readouts under test and count the pokes), the shared-session
+# scrub knobs and authority gates, and empty states without a world.
 
 const PageScript := preload("res://src/debug/pages/debug_environment_page.gd")
 
 
-class StubEnv:
-	extends Node
-	var time_of_day := 1830.0
+class EnvHarness:
+	extends MissionEnvironment
 
 	func get_mission_minute_of_day() -> float:
 		return MissionEnvironment.hhmm_to_minute_of_day(time_of_day)
@@ -43,9 +43,8 @@ class StubEnv:
 		return Vector3(0.1, -0.9, 0.2)
 
 
-class StubWeather:
-	extends Node
-	var wind_strength := 55.0
+class WeatherHarness:
+	extends Weather
 	var short_strikes := 0
 	var long_strikes := 0
 	var color_resyncs := 0
@@ -60,30 +59,19 @@ class StubWeather:
 		long_strikes += 1
 
 
-class StubWater:
-	extends Node
-	var water_height := 12.5
+class WorldHarness:
+	extends GameWorld
+	var env: EnvHarness = null
+	var weather: WeatherHarness = null
+	var water: Water = null
 
-	func is_water_active() -> bool:
-		return true
-
-	func is_water_render_active() -> bool:
-		return true
-
-
-class StubWorld:
-	extends Node
-	var env: Node = null
-	var weather: Node = null
-	var water: Node = null
-
-	func get_environment_node() -> Node:
+	func get_environment_node() -> MissionEnvironment:
 		return env
 
-	func get_weather_node() -> Node:
+	func get_weather_node() -> Weather:
 		return weather
 
-	func get_water_node() -> Node:
+	func get_water_node() -> Water:
 		return water
 
 	func get_debug_mission_minute_of_day() -> float:
@@ -99,20 +87,25 @@ class StubWorld:
 		return err
 
 
-func _make_world() -> StubWorld:
-	var world := StubWorld.new()
-	world.env = StubEnv.new()
-	world.weather = StubWeather.new()
-	world.water = StubWater.new()
+func _make_world() -> WorldHarness:
+	var world := WorldHarness.new()
+	world.env = EnvHarness.new()
+	world.env.time_of_day = 1830.0
+	world.weather = WeatherHarness.new()
+	world.weather.wind_strength = 50.0  # 128/256: exact through the Env_WindScale units
+	world.water = Water.new()
+	world.water.water_height = 12.5
 	world.add_child(world.env)
 	world.add_child(world.weather)
 	world.add_child(world.water)
-	add_child_autofree(world)
+	# Off-tree: the GameWorld script class alone has no scene children, and
+	# the harness getters hand out direct refs.
+	autofree(world)
 	return world
 
 
 func _make_page(
-		world: Node = null,
+		world: GameWorld = null,
 		has_authority: bool = true,
 		edit_unlocked: bool = true) -> DebugEnvironmentPage:
 	var ctx := DebugContext.new()
@@ -159,7 +152,7 @@ func test_formats_the_environment_and_mirrors_knobs() -> void:
 	assert_eq(int(time_slider.max_value), 1439,
 			"every slider value is a valid minute of day")
 	var wind_slider := page.find_child("WindStrength", true, false) as HSlider
-	assert_almost_eq(float(wind_slider.value), 55.0, 0.001,
+	assert_almost_eq(float(wind_slider.value), 50.0, 0.001,
 			"the wind knob mirrors the live weather")
 
 
@@ -169,17 +162,17 @@ func test_knobs_and_lightning_poke_the_live_nodes() -> void:
 	page.refresh()
 
 	(page.find_child("TimeOfDay", true, false) as HSlider).value = 22 * 60
-	assert_almost_eq(float((world.env as StubEnv).time_of_day), 2200.0, 0.001,
+	assert_almost_eq(float(world.env.time_of_day), 2200.0, 0.001,
 			"scrubbing the clock uses the shared public control")
-	assert_eq((world.weather as StubWeather).color_resyncs, 1,
+	assert_eq(world.weather.color_resyncs, 1,
 			"the world immediately resyncs rendered weather for paused scrubs")
-	(page.find_child("WindStrength", true, false) as HSlider).value = 10
-	assert_almost_eq(float((world.weather as StubWeather).wind_strength), 10.0, 0.001)
+	(page.find_child("WindStrength", true, false) as HSlider).value = 25
+	assert_almost_eq(float(world.weather.wind_strength), 25.0, 0.001)
 
 	(page.find_child("LightningShort", true, false) as Button).pressed.emit()
 	(page.find_child("LightningLong", true, false) as Button).pressed.emit()
-	assert_eq((world.weather as StubWeather).short_strikes, 1)
-	assert_eq((world.weather as StubWeather).long_strikes, 1)
+	assert_eq(world.weather.short_strikes, 1)
+	assert_eq(world.weather.long_strikes, 1)
 
 
 func test_joiner_or_locked_overlay_cannot_mutate_environment() -> void:
@@ -187,14 +180,14 @@ func test_joiner_or_locked_overlay_cannot_mutate_environment() -> void:
 	var joiner_page := _make_page(world, false, true)
 	(joiner_page.find_child("TimeOfDay", true, false) as HSlider).value = 22 * 60
 	(joiner_page.find_child("LightningShort", true, false) as Button).pressed.emit()
-	assert_almost_eq(float((world.env as StubEnv).time_of_day), 1830.0, 0.001)
-	assert_eq((world.weather as StubWeather).short_strikes, 0)
+	assert_almost_eq(float(world.env.time_of_day), 1830.0, 0.001)
+	assert_eq(world.weather.short_strikes, 0)
 
 	var locked_page := _make_page(world, true, false)
-	(locked_page.find_child("WindStrength", true, false) as HSlider).value = 10
+	(locked_page.find_child("WindStrength", true, false) as HSlider).value = 25
 	(locked_page.find_child("LightningLong", true, false) as Button).pressed.emit()
-	assert_almost_eq(float((world.weather as StubWeather).wind_strength), 55.0, 0.001)
-	assert_eq((world.weather as StubWeather).long_strikes, 0)
+	assert_almost_eq(float(world.weather.wind_strength), 50.0, 0.001)
+	assert_eq(world.weather.long_strikes, 0)
 
 
 func test_public_clock_scrub_reseeds_the_fixed_point_mission_clock() -> void:

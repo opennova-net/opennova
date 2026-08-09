@@ -1319,14 +1319,14 @@ func _unhandled_input(event: InputEvent) -> void:
 # The active workspace's camera via its capability hook; null in workspaces
 # without a 3D view (the camera popup then reports no camera instead of
 # silently editing a hidden terrain camera).
-func get_editor_camera() -> Camera3D:
+func get_editor_camera() -> FlyCamera:
 	var workspace := _get_active_workspace()
 	if workspace != null:
 		return workspace.get_viewport_camera()
 	return null
 
 
-func _get_editor_camera() -> Camera3D:
+func _get_editor_camera() -> FlyCamera:
 	return get_editor_camera()
 
 

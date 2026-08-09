@@ -21,7 +21,7 @@ const T_MEMBER := 0  # effect output  <-> particle input
 const T_SPAWN := 1   # particle output <-> child-particle input
 
 var _editor: ParticleEditor
-var _workspace
+var _workspace: ParticleEditorWorkspace
 var _graph: GraphEdit
 var _preview: ParticlePreview
 
@@ -64,11 +64,11 @@ func get_preview() -> ParticlePreview:
 	return _preview
 
 
-func get_viewport_camera() -> Camera3D:
+func get_viewport_camera() -> FlyCamera:
 	return _preview.get_preview_camera() if _preview != null else null
 
 
-func set_workspace(value) -> void:
+func set_workspace(value: ParticleEditorWorkspace) -> void:
 	_workspace = value
 
 
@@ -344,7 +344,7 @@ func _highlight_selected() -> void:
 		return
 	_syncing = true
 	var selected_obj: Object = _editor.current_particle
-	if _workspace != null and _workspace.has_method("get_active_workflow_id"):
+	if _workspace != null:
 		match int(_workspace.get_active_workflow_id()):
 			ParticleEditorWorkspace.Workflow.EFFECTS:
 				selected_obj = _editor.current_effect

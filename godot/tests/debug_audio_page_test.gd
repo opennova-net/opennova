@@ -1,8 +1,9 @@
 extends GutTest
 
-# DebugAudioPage: mission-audio counters from a duck-typed stub, the per-bus
-# knobs routed through the shared debug catalog into a public shell surface,
-# and the empty states.
+# DebugAudioPage: mission-audio counters through the typed GameWorld ->
+# MissionAudio seam (harness subclasses override the counter getters), the
+# per-bus knobs routed through the shared debug catalog into a public shell
+# surface, and the empty states.
 
 const PageScript := preload("res://src/debug/pages/debug_audio_page.gd")
 
@@ -32,8 +33,8 @@ func after_each() -> void:
 			AudioServer.set_bus_bypass_effects(bus, bool(state["bypass"]))
 
 
-class StubMissionAudio:
-	extends Node
+class MissionAudioHarness:
+	extends MissionAudio
 
 	func get_stats() -> Dictionary:
 		return {"markers_total": 6, "markers_resolved": 5, "banks_loaded": 2,
@@ -43,14 +44,11 @@ class StubMissionAudio:
 		return {"tick_us": 210, "active_channels": 3}
 
 
-class StubWorld:
-	extends Node
-	var audio := StubMissionAudio.new()
+class AudioWorldHarness:
+	extends GameWorld
+	var audio := MissionAudioHarness.new(null, null)
 
-	func _init() -> void:
-		add_child(audio)
-
-	func get_mission_audio() -> StubMissionAudio:
+	func get_mission_audio() -> MissionAudio:
 		return audio
 
 
@@ -93,7 +91,7 @@ class AudioShellStub:
 
 
 func _make_page(
-		world: Node = null,
+		world: GameWorld = null,
 		audio_shell: AudioShellStub = null) -> DebugAudioPage:
 	var ctx := DebugContext.new()
 	ctx.options = DebugOptionState.new()
@@ -118,8 +116,9 @@ func test_renders_empty_states_without_sources() -> void:
 
 
 func test_formats_the_mission_audio_counters() -> void:
-	var world := StubWorld.new()
-	add_child_autofree(world)
+	# Off-tree: the GameWorld script class alone has no scene children.
+	var world := AudioWorldHarness.new()
+	autofree(world)
 	var page := _make_page(world)
 	page.refresh()
 	var text := (page.find_child("MissionAudioState", true, false) as Label).text

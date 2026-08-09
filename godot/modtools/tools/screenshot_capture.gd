@@ -298,8 +298,7 @@ func _frame_object(ws: EditorWorkspace) -> void:
 	if b.size == Vector3.ZERO:
 		return
 	# Prefer the highest-detail LOD for the hero shot.
-	if preview.has_method("set_active_lod"):
-		preview.set_active_lod(0)
+	preview.set_active_lod(0)
 	# Hide the editor-only guides (reference grid + origin axes) for a clean hero
 	# shot, via the workspace's first-class toggle interface (the same one the
 	# editor's View settings drive). This doesn't persist the user's preference.

@@ -28,7 +28,7 @@ signal lan_join_requested(target: JoinTarget)
 # START_GAME on the host screen, with the co-op-minimal host request (see _read_host_config).
 signal lan_host_start_requested(config: HostSessionConfig)
 
-var _lan_session = null        # LanSession; injected by MainGame
+var _lan_session: LanSession = null  # injected by MainGame
 var _servers: Array = []       # last LAN browse result; rows for LAN_GAME_LIST
 var _selected_server := -1
 var _browse_error := ""        # last LAN search failure, shown in the empty list
@@ -37,7 +37,7 @@ var _browse_error := ""        # last LAN search failure, shown in the empty lis
 # True when this menu is the JO multiplayer menu (so the shell delegates to us). Keyed on
 # control names unique to mp.mnu's LAN/host screens rather than a screen name, since the
 # whole document (all screens) is built at once.
-func owns_menu(menu: Node) -> bool:
+func owns_menu(menu: MnuMenu) -> bool:
 	if menu == null:
 		return false
 	return menu.find_child("LAN_GAME_LIST", true, false) != null \
@@ -45,18 +45,18 @@ func owns_menu(menu: Node) -> bool:
 
 
 # Provide the LAN discovery session. Kept injectable for menu and socket seam tests.
-func set_lan_session(session) -> void:
-	if _lan_session != null and _lan_session.has_signal("servers_changed") \
+func set_lan_session(session: LanSession) -> void:
+	if _lan_session != null \
 			and _lan_session.servers_changed.is_connected(_on_servers_changed):
 		_lan_session.servers_changed.disconnect(_on_servers_changed)
-	if _lan_session != null and _lan_session.has_signal("error_occurred") \
+	if _lan_session != null \
 			and _lan_session.error_occurred.is_connected(_on_lan_browse_error):
 		_lan_session.error_occurred.disconnect(_on_lan_browse_error)
 	_lan_session = session
-	if _lan_session != null and _lan_session.has_signal("servers_changed") \
+	if _lan_session != null \
 			and not _lan_session.servers_changed.is_connected(_on_servers_changed):
 		_lan_session.servers_changed.connect(_on_servers_changed)
-	if _lan_session != null and _lan_session.has_signal("error_occurred") \
+	if _lan_session != null \
 			and not _lan_session.error_occurred.is_connected(_on_lan_browse_error):
 		_lan_session.error_occurred.connect(_on_lan_browse_error)
 
@@ -66,10 +66,8 @@ func set_lan_session(session) -> void:
 # shell wires.
 func _wire(_file: String, _screen: String) -> void:
 	# Single-click selection in the LAN list relays through the menu's aggregate signal.
-	# Connected by name so the companion stays decoupled from the concrete menu class.
-	if _menu.has_signal("widget_value_changed") \
-			and not _menu.is_connected("widget_value_changed", _on_widget_value_changed):
-		_menu.connect("widget_value_changed", _on_widget_value_changed)
+	if not _menu.widget_value_changed.is_connected(_on_widget_value_changed):
+		_menu.widget_value_changed.connect(_on_widget_value_changed)
 	_wire_lan_browser()
 	_wire_host_settings()
 
@@ -90,7 +88,7 @@ func _on_lan_search() -> void:
 	# Begin LAN session discovery. A missing binding remains a safe no-op so the retail
 	# menu can still render in parser-only/test builds.
 	_browse_error = ""
-	if _lan_session != null and _lan_session.has_method("start_browsing"):
+	if _lan_session != null:
 		# Returns a Godot Error; the session also emits error_occurred with the
 		# specific reason, which lands in _browse_error first.
 		if int(_lan_session.start_browsing()) != OK and _browse_error.is_empty():
@@ -258,7 +256,7 @@ func _table_has_mission(table: MnuTable, name: String) -> bool:
 # Returns the selected spin-list item's `value=` attribute (the semantic value the
 # original reads), not its localized display label. Used to map SERVERTYPE/GAME_TYPE to behavior.
 func _spin_attr(name: String, default_value: String) -> String:
-	var node := _find(name)
-	if node != null and node.has_method("get_value_attr"):  # MnuSpinList
-		return String(node.get_value_attr())
+	var spin := _find(name) as MnuSpinList
+	if spin != null:
+		return String(spin.get_value_attr())
 	return default_value

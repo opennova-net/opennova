@@ -28,15 +28,15 @@ const NovaWaterScript = preload("res://src/environment/nova_water.gd")
 const NovaWeatherScript = preload("res://src/environment/nova_weather.gd")
 const HHMM_DAY := MissionEnvironment.HHMM_DAY
 
-# The bound app-owned environment DOCUMENT (EnvironmentEditor); null until
+# The bound app-owned environment DOCUMENT; null until
 # bind_environment_editor. The owner keeps its own handle for shell consumers.
-var environment_editor
+var environment_editor: EnvironmentEditor
 
 var _world_root: Node3D
 var _environment_node: MissionEnvironment
 var _clear_color_node: WorldEnvironment
-var _sky_node: Node3D
-var _weather_node: Node3D
+var _sky_node: SkyDome
+var _weather_node: Weather
 var _water_node: Node3D
 var _time_of_day_override_active := false
 var _time_of_day_override := 0.0
@@ -82,9 +82,8 @@ func init_environment_preview() -> void:
 	_world_root.add_child(_clear_color_node)
 
 
-	_sky_node = Node3D.new()
+	_sky_node = NovaSkyScript.new()
 	_sky_node.name = "EditorSky"
-	_sky_node.set_script(NovaSkyScript)
 	_sky_node.environment_path = NodePath("../EditorEnvironment")
 	_sky_node.frame_clear_environment = _clear_color_node.environment
 	# The weather node owns the cloud-scroll core; created just below —
@@ -95,9 +94,8 @@ func init_environment_preview() -> void:
 	# Runtime parity: the same weather smoothing that runs in-game also runs in
 	# the preview, so scrubbing/playing TOD matches play. The tick is O(1) so it
 	# does not affect brush perf; discrete scrubs call resync_colors() to snap.
-	_weather_node = Node3D.new()
+	_weather_node = NovaWeatherScript.new()
 	_weather_node.name = "EditorWeather"
-	_weather_node.set_script(NovaWeatherScript)
 	_weather_node.environment_path = NodePath("../EditorEnvironment")
 	_world_root.add_child(_weather_node)
 
@@ -119,7 +117,7 @@ func init_water_plane() -> void:
 
 
 ## Wire the app-owned environment document into the world preview.
-func bind_environment_editor(value) -> void:
+func bind_environment_editor(value: EnvironmentEditor) -> void:
 	environment_editor = value
 	if environment_editor == null:
 		return
@@ -140,7 +138,7 @@ func _on_environment_editor_changed(env_file: EnvFile, preview_time: float) -> v
 		_environment_node.time_of_day = _time_of_day_override if _time_of_day_override_active else preview_time
 	# A discrete TOD scrub or document edit must snap the weather smoother,
 	# otherwise the preview lags behind the slider.
-	if _weather_node and _weather_node.has_method("resync_colors"):
+	if _weather_node != null:
 		_weather_node.resync_colors()
 	apply_environment_to_preview()
 	_on_state_changed.call()
@@ -171,15 +169,15 @@ func _apply_time_of_day_override() -> void:
 		_environment_node.time_of_day = _time_of_day_override
 	elif environment_editor != null:
 		_environment_node.time_of_day = float(environment_editor.time_of_day)
-	if _weather_node and _weather_node.has_method("resync_colors"):
+	if _weather_node != null:
 		_weather_node.resync_colors()
 	apply_environment_to_preview()
 
 
 func apply_environment_to_preview() -> void:
 	sync_environment_to_preview(true)
-	if _sky_node and _sky_node.has_method("sync_frame_clear_color"):
-		_sky_node.call(&"sync_frame_clear_color")
+	if _sky_node != null:
+		_sky_node.sync_frame_clear_color()
 	# Water color/height/murk now come from the Water node (env-driven),
 	# matching the runtime; nothing hardcoded here.
 
@@ -192,8 +190,7 @@ func sync_environment_to_preview(force: bool = false) -> void:
 		return
 	var material: ShaderMaterial = _get_material.call()
 	var material_id := material.get_instance_id() if material != null else 0
-	var generation := int(_environment_node.get_env_generation()) \
-		if _environment_node.has_method("get_env_generation") else -1
+	var generation := int(_environment_node.get_env_generation())
 	if not force and material_id == _terrain_material_instance_id \
 			and generation == _terrain_env_generation:
 		return

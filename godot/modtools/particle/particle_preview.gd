@@ -15,7 +15,7 @@ const PREVIEW_EFFECT_ID := "__oned_particle_preview__"
 var _viewport_container: SubViewportContainer
 var _viewport: SubViewport
 var _root: Node3D
-var _camera: Camera3D
+var _camera: FlyCamera
 var _scene: EffectScene
 var _renderer: ParticleRenderer
 var _particle_file: ParticleFile
@@ -551,10 +551,8 @@ func restart() -> void:
 
 
 func reset_view() -> void:
-	if _camera != null and _camera.has_method("frame_bounds_custom"):
+	if _camera != null:
 		_camera.frame_bounds_custom(Vector3.ZERO, 9.0, 1.4, 80.0, 0.0, -0.3)
-	elif _camera != null:
-		_camera.look_at_from_position(Vector3(0.0, 4.0, 12.0), Vector3.ZERO)
 
 
 func set_grid_visible(value: bool) -> void:
@@ -821,7 +819,7 @@ func get_texture_dir() -> String:
 	return _renderer.get_texture_dir() if _renderer != null else _texture_dir()
 
 
-func get_preview_camera() -> Camera3D:
+func get_preview_camera() -> FlyCamera:
 	return _camera
 
 

@@ -79,7 +79,7 @@ func _build_reground_button() -> void:
 	_reground_button.visible = false
 	_inspector._mission_content.add_child(_reground_button)
 	_reground_button.pressed.connect(func() -> void:
-		if _inspector._controller != null and _inspector._controller.has_method("reground_drifted"):
+		if _inspector._controller != null:
 			_inspector._controller.reground_drifted())
 
 
@@ -87,7 +87,7 @@ func _refresh_reground_button() -> void:
 	if _reground_button == null:
 		return
 	var mission: MissionData = _inspector._controller.get_mission() if _inspector._controller != null else null
-	_reground_button.visible = mission != null and _inspector._controller.has_method("reground_drifted")
+	_reground_button.visible = mission != null
 
 
 func _add_props_line(field: String, label: String, tooltip: String = "") -> LineEdit:

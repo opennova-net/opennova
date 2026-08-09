@@ -27,16 +27,22 @@ func _abs(res_path: String) -> String:
 # (kept out of these terrain-focused tests); get_environment_node is part of the
 # typed seam surface and returns null, which skips the placer's env wiring.
 class StubTerrainEditor:
-	extends Node
+	extends TerrainEditorBase
 
 	var resource_root: ResourceRoot
 	var world_root: Node3D
 	var opened_trn: String = ""
 	var open_trn_result: Error = OK
 	var current_trn_path: String = ""
-	# Mirrors the real TerrainEditor's dirty flag (the same-clean-terrain remount
-	# skip reads it duck-typed).
-	var is_dirty := false
+	# Backs the base's is_dirty routing property (the same-clean-terrain remount
+	# skip reads it).
+	var _dirty := false
+
+	func _get_is_dirty() -> bool:
+		return _dirty
+
+	func _set_is_dirty(value: bool) -> void:
+		_dirty = value
 	# Placement raycast seam (Phase 3): the controller grounds a placed object via these.
 	var terrain_hit: Vector3 = Vector3(64.0, 10.0, -64.0)
 	var terrain_hit_valid: bool = true
@@ -2804,12 +2810,16 @@ func test_move_selected_grounded_rejected_without_selection_then_edits_selected(
 # overrides onto the preview (open_env emits before overrides exist, so the
 # controller re-fans-out afterwards).
 class StubEnvEditor:
-	extends Node
+	extends EnvironmentEditor
 
-	var env_file: EnvFile
 	var opened := ""
 	var defaults := 0
 	var emits := 0
+
+	# Keep the fixture inert: the real _ready seeds a default document, which
+	# would skew the defaults call count this stub asserts on.
+	func _ready() -> void:
+		pass
 
 	func open_env(path: String) -> Error:
 		var next := EnvFile.new()
@@ -2835,7 +2845,7 @@ class StubEnvTerrainEditor:
 
 	var env_editor := StubEnvEditor.new()
 
-	func get_environment_editor() -> StubEnvEditor:
+	func get_environment_editor() -> EnvironmentEditor:
 		return env_editor
 
 

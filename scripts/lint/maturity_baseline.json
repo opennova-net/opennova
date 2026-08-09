@@ -12,15 +12,15 @@
     "vfs"
   ],
   "counters": {
-    "adapter_cpp_orig_cites": 579,
+    "adapter_cpp_orig_cites": 582,
     "cpp_binding_console_writes": 0,
     "engine_stdout_prints": 0,
     "engine_uncited_src_files": 51,
     "gd_prints_outside_debug": 0,
-    "has_method_guards": 464,
+    "has_method_guards": 1,
     "oversize_cpp_files": 1,
     "oversize_gd_files": 7,
-    "test_private_pokes": 1285
+    "test_private_pokes": 1284
   },
   "dict_contract_allowlist": [
     "link_payload.gd|func to_drag_data()",

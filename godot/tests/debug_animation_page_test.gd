@@ -1,10 +1,15 @@
 extends GutTest
 
 # DebugAnimationPage: the Animation & models debug page. Formats the local
-# player's animation scalars and one row per registry animatable, and
-# degrades to empty states when the world/registry are gone.
+# player's animation scalars (the pure format seam + the live typed sim) and
+# one row per registry animatable, and degrades to empty states when the
+# world/registry are gone. Sources are the typed classes (ADR 0034): a real
+# GameWorld subtree, a MissionRuntime harness carrying the registry, and the
+# real minimal-mission sim for the live-scalar leg.
 
 const PageScript := preload("res://src/debug/pages/debug_animation_page.gd")
+const MissionRuntime := preload("res://src/world/mission_runtime.gd")
+const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
 
 
 # Real native models: state is DRIVEN through the public surface (committed
@@ -33,47 +38,24 @@ static func _rigged_model(parent: Node, clip: String) -> ObjectModel:
 	return m
 
 
-# The value-only sim double the page reads through _ctx.sim(): the local
-# player's animation scalars under Simulation's native getter names.
-class StubSim:
-	extends RefCounted
-
-	func get_local_player_anim_key() -> String:
-		return "prone_crawl"
-
-	func get_local_player_body_anim_slot() -> int:
-		return 17
-
-	func get_local_player_anim_phase_ticks() -> int:
-		return 42
-
-	func get_local_player_anim_source_key() -> String:
-		return "stand_idle"
-
-	func get_local_player_anim_source_phase_ticks() -> int:
-		return 12
-
-	func get_local_player_anim_blend_weight() -> float:
-		return 0.25
-
-
-class StubRuntime:
-	extends Node
+## The typed runtime double: IS a MissionRuntime, carrying a test-built
+## registry (no live sim — model discovery is sim-independent).
+class RuntimeHarness:
+	extends MissionRuntime
 	var registry := EntityIndex.new()
-	var sim := StubSim.new()
-
-	func get_sim() -> Object:
-		return sim
 
 	func get_registry() -> EntityIndex:
 		return registry
 
 
-class StubWorld:
-	extends Node
+func _world() -> GameWorld:
+	# The full packaged scene: rigged models must rebuild INSIDE the tree.
+	var world := (load("res://src/world/game_world.tscn") as PackedScene) 			.instantiate() as GameWorld
+	add_child_autofree(world)
+	return world
 
 
-func _make_page(world: Node = null, runtime: Node = null) -> DebugAnimationPage:
+func _make_page(world: GameWorld = null, runtime: MissionRuntime = null) -> DebugAnimationPage:
 	var ctx := DebugContext.new()
 	ctx.options = DebugOptionState.new()
 	if world != null:
@@ -95,10 +77,9 @@ func test_renders_empty_states_without_sources() -> void:
 			"No live models")
 
 
-func test_formats_player_scalars_and_model_rows() -> void:
-	var world := StubWorld.new()
-	add_child_autofree(world)
-	var runtime := StubRuntime.new()
+func test_formats_model_rows() -> void:
+	var world := _world()
+	var runtime := RuntimeHarness.new()
 	add_child_autofree(runtime)
 	var idle := ObjectModel.new()
 	idle.name = "Crate01"
@@ -111,11 +92,6 @@ func test_formats_player_scalars_and_model_rows() -> void:
 	], [])
 	var page := _make_page(world, runtime)
 	page.refresh()
-
-	var player := (page.find_child("AnimPlayer", true, false) as Label).text
-	assert_string_contains(player, "prone_crawl")
-	assert_string_contains(player, "slot 17")
-	assert_string_contains(player, "42 ticks")
 
 	var header := (page.find_child("AnimModelsHeader", true, false) as Label).text
 	assert_string_contains(header, "2 animatable")
@@ -139,9 +115,8 @@ func test_formats_player_scalars_and_model_rows() -> void:
 
 
 func test_discovers_dynamic_world_models_outside_the_placed_registry() -> void:
-	var world := StubWorld.new()
-	add_child_autofree(world)
-	var runtime := StubRuntime.new()
+	var world := _world()
+	var runtime := RuntimeHarness.new()
 	add_child_autofree(runtime)
 	var remote := _rigged_model(world, "anim_walk")
 	remote.name = "RemotePlayerAvatar"
@@ -161,9 +136,7 @@ func test_discovers_dynamic_world_models_outside_the_placed_registry() -> void:
 
 
 func test_steady_refresh_does_not_reset_model_list_browsing_position() -> void:
-	var world := StubWorld.new()
-	add_child_autofree(world)
-	var runtime := StubRuntime.new()
+	var runtime := RuntimeHarness.new()
 	add_child_autofree(runtime)
 	var entries: Array = []
 	for index in range(36):
@@ -172,7 +145,7 @@ func test_steady_refresh_does_not_reset_model_list_browsing_position() -> void:
 		runtime.add_child(model)
 		entries.append({ "model": model, "ref": { "bms_id": 1000 + index } })
 	runtime.registry.build(entries, [])
-	var page := _make_page(world, runtime)
+	var page := _make_page(null, runtime)
 	page.size = Vector2(300, 190)
 	page.refresh()
 	await wait_process_frames(2)
@@ -192,12 +165,9 @@ func test_steady_refresh_does_not_reset_model_list_browsing_position() -> void:
 
 
 func test_explains_the_local_player_transition_and_blend() -> void:
-	var runtime := StubRuntime.new()
-	add_child_autofree(runtime)
-	var page := _make_page(null, runtime)
-	page.refresh()
-
-	var player := (page.find_child("AnimPlayer", true, false) as Label).text
+	# The value branch drives the pure format seam directly.
+	var player := DebugAnimationPage.format_player_status(
+			"prone_crawl", 17, 42, "stand_idle", 12, 0.25)
 	assert_string_contains(player, "stand_idle")
 	assert_string_contains(player, "12 ticks")
 	assert_string_contains(player, "prone_crawl")
@@ -205,10 +175,41 @@ func test_explains_the_local_player_transition_and_blend() -> void:
 	assert_string_contains(player, "25%")
 	assert_string_contains(player, "source")
 	assert_string_contains(player, "target")
+	var settled := DebugAnimationPage.format_player_status(
+			"prone_crawl", 17, 42, "prone_crawl", 42, 1.0)
+	assert_string_contains(settled, "settled")
+	assert_string_contains(settled, "slot 17")
+
+
+func test_player_scalars_render_from_the_live_sim() -> void:
+	# The wiring leg: a REAL minimal-mission runtime (auto-spawned host
+	# player) feeds the same format seam through _ctx.sim().
+	var mission := MissionData.new()
+	assert_eq(mission.create_default(), OK)
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var runtime := MissionRuntime.new()
+	add_child_autofree(runtime)
+	assert_gt(runtime.setup(mission, container,
+			{"placer": MissionObjectPlacer.new(null, null)}), 0)
+	var page := _make_page(null, runtime)
+	page.refresh()
+
+	var sim := runtime.get_sim()
+	var label := (page.find_child("AnimPlayer", true, false) as Label).text
+	assert_ne(label, "No local player.")
+	assert_eq(label, DebugAnimationPage.format_player_status(
+			String(sim.get_local_player_anim_key()),
+			int(sim.get_local_player_body_anim_slot()),
+			int(sim.get_local_player_anim_phase_ticks()),
+			String(sim.get_local_player_anim_source_key()),
+			int(sim.get_local_player_anim_source_phase_ticks()),
+			float(sim.get_local_player_anim_blend_weight())),
+			"the label renders the live sim scalars through the format seam")
 
 
 func test_selected_model_detail_survives_registry_reorder_by_stable_identity() -> void:
-	var runtime := StubRuntime.new()
+	var runtime := RuntimeHarness.new()
 	add_child_autofree(runtime)
 	var crate := ObjectModel.new()
 	crate.name = "Crate01"

@@ -25,8 +25,7 @@ const CURVE_FIELDS := [
 ]
 
 var _editor: ParticleEditor
-var _workspace
-
+var _workspace: ParticleEditorWorkspace
 var _list: ItemList
 var _empty_label: Label
 var _dup_button: Button
@@ -59,7 +58,7 @@ func set_particle_editor(value: ParticleEditor) -> void:
 		_refresh()
 
 
-func set_workspace(value) -> void:
+func set_workspace(value: ParticleEditorWorkspace) -> void:
 	_workspace = value
 
 
@@ -552,43 +551,43 @@ func _on_id_focus_exited(p: ParticleDef) -> void:
 func _on_item_selected(idx: int) -> void:
 	if idx < 0 or idx >= _particles.size():
 		return
-	if _workspace != null and _workspace.has_method("select_particle"):
+	if _workspace != null:
 		_workspace.select_particle(_particles[idx])
 
 
 func _on_add_pressed() -> void:
-	if _workspace != null and _workspace.has_method("add_particle"):
+	if _workspace != null:
 		_workspace.add_particle()
 
 
 func _on_duplicate_pressed() -> void:
 	if _editor == null or _editor.current_particle == null:
 		return
-	if _workspace != null and _workspace.has_method("duplicate_particle"):
+	if _workspace != null:
 		_workspace.duplicate_particle(_editor.current_particle)
 
 
 func _on_delete_pressed() -> void:
 	if _editor == null or _editor.current_particle == null:
 		return
-	if _workspace != null and _workspace.has_method("remove_particle"):
+	if _workspace != null:
 		_workspace.remove_particle(_editor.current_particle)
 
 
 func _on_add_layer(p: ParticleDef) -> void:
-	if _workspace != null and _workspace.has_method("add_graphic_layer"):
+	if _workspace != null:
 		_workspace.add_graphic_layer(p)
 	_refresh_selection()
 
 
 func _on_remove_layer(p: ParticleDef, slot: int) -> void:
-	if _workspace != null and _workspace.has_method("remove_graphic_layer"):
+	if _workspace != null:
 		_workspace.remove_graphic_layer(p, slot)
 	_refresh_selection()
 
 
 func _on_curve_assigned(p: ParticleDef, field: String, table_id: String) -> void:
-	if _workspace != null and _workspace.has_method("assign_curve"):
+	if _workspace != null:
 		_workspace.assign_curve(p, field, table_id)
 
 

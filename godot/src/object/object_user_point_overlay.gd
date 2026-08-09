@@ -15,7 +15,7 @@ const LABEL_PIXEL_SIZE := 0.025
 const MARKER_COLOR := Color(0.2, 0.9, 1.0, 0.95)
 
 var _object_data: ObjectData
-var _source_model: Node3D
+var _source_model: ObjectModel
 var _entity_transform := Transform3D.IDENTITY
 var _markers: Array = []
 var _marker_mesh: SphereMesh
@@ -33,7 +33,7 @@ func set_object_data(data: ObjectData) -> void:
 	_rebuild()
 
 
-func set_source_model(model: Node3D) -> void:
+func set_source_model(model: ObjectModel) -> void:
 	if _source_model == model:
 		return
 	_source_model = model
@@ -162,8 +162,8 @@ func _part_local_position(model_position: Vector3, subobject: int) -> Vector3:
 
 func _rest_part_transform(subobject: int):
 	var lod := 0
-	if _source_model != null and _source_model.has_method("get_active_lod"):
-		lod = int(_source_model.get_active_lod())
+	if _source_model != null:
+		lod = _source_model.get_active_lod()
 	var transforms: Dictionary = _object_data.evaluate_panm(lod, 0, {})
 	if transforms.has(subobject):
 		return transforms[subobject]
@@ -175,12 +175,8 @@ func _rest_part_transform(subobject: int):
 func _update_live_marker_positions() -> void:
 	if _source_model == null or not is_instance_valid(_source_model) or _markers.is_empty():
 		return
-	var part_nodes: Dictionary = {}
-	if _source_model.has_method("get_render_part_nodes"):
-		part_nodes = _source_model.get_render_part_nodes()
-	var skeleton: Skeleton3D = null
-	if _source_model.has_method("get_skeleton"):
-		skeleton = _source_model.call("get_skeleton") as Skeleton3D
+	var part_nodes: Dictionary = _source_model.get_render_part_nodes()
+	var skeleton: Skeleton3D = _source_model.get_skeleton()
 	var visual_layers := _source_visual_layers()
 	for entry in _markers:
 		var marker := entry.get("node") as Node3D

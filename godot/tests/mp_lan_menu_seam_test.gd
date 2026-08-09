@@ -10,22 +10,21 @@ const MenuShell := preload("res://game/nova_menu_shell.gd")
 const MissionRuntime := preload("res://src/world/mission_runtime.gd")
 
 
-class _LanSessionStub extends RefCounted:
-	signal servers_changed(servers: Array)
-
+# A REAL LanSession (typed seam) whose discovery feed is driven by hand:
+# publish() emits the native servers_changed signal without touching sockets.
+class _LanSessionFeed extends LanSession:
 	func publish(servers: Array) -> void:
-		servers_changed.emit(servers)
+		emit_signal("servers_changed", servers)
 
 
-class _LanMenuStub extends Node:
-	signal widget_value_changed(widget_name: String, kind: String, index: int, value: String)
 
 
 # A stand-in for the built mp.mnu host-settings screen: a plain Node (the companion only
 # needs find_child + the optional widget_value_changed signal) with the named NovaMnu*
 # controls as children, exactly as the menu builder would name them from the .mnu.
-func _make_host_menu() -> Node:
-	var menu := Node.new()
+func _make_host_menu() -> MnuMenu:
+	var menu := MnuMenu.new()
+	menu.build_on_ready = false
 	menu.name = "Menu"
 	add_child_autofree(menu)
 	for n in ["GAME_NAME", "MAX_PLAYERS"]:
@@ -48,8 +47,9 @@ func _make_host_menu() -> Node:
 	return menu
 
 
-func _make_lan_menu() -> Node:
-	var menu := _LanMenuStub.new()
+func _make_lan_menu() -> MnuMenu:
+	var menu := MnuMenu.new()
+	menu.build_on_ready = false
 	menu.name = "Menu"
 	add_child_autofree(menu)
 	var server_list := MnuList.new()
@@ -89,7 +89,8 @@ func test_owns_menu_detects_mp_menu() -> void:
 	var mp := MpMenuCompanion.new()
 	var menu := _make_host_menu()
 	assert_true(mp.owns_menu(menu), "a menu carrying SELECTED_MISSIONS is the JO mp menu")
-	var plain := Node.new()
+	var plain := MnuMenu.new()
+	plain.build_on_ready = false
 	add_child_autofree(plain)
 	assert_false(mp.owns_menu(plain), "a plain menu is left to the shell")
 
@@ -285,7 +286,8 @@ func test_refreshed_lan_rows_require_a_fresh_selection() -> void:
 	watch_signals(mp)
 	var menu := _make_lan_menu()
 	mp.on_menu_built(menu, "jo_mp.mnu", "LAN_MULTI_PLAYER", null)
-	var session := _LanSessionStub.new()
+	var session := _LanSessionFeed.new()
+	autofree(session)
 	mp.set_lan_session(session)
 	session.publish([{"name": "old", "host_ip": "192.168.1.10", "port": 32768}])
 	menu.emit_signal("widget_value_changed", "LAN_GAME_LIST", "list", 0, "old")
@@ -304,8 +306,10 @@ func test_swapping_lan_sessions_disconnects_the_previous_discovery_source() -> v
 	var mp := MpMenuCompanion.new()
 	var menu := _make_lan_menu()
 	mp.on_menu_built(menu, "jo_mp.mnu", "LAN_MULTI_PLAYER", null)
-	var previous := _LanSessionStub.new()
-	var current := _LanSessionStub.new()
+	var previous := _LanSessionFeed.new()
+	autofree(previous)
+	var current := _LanSessionFeed.new()
+	autofree(current)
 	mp.set_lan_session(previous)
 	mp.set_lan_session(current)
 	current.publish([{"name": "current", "players": 1, "max_players": 4, "mission": "new.bms"}])

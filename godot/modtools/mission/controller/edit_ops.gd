@@ -56,7 +56,7 @@ func delete_selected() -> bool:
 func _rebake_objects() -> void:
 	if _c._placer == null or _c._mission == null:
 		return
-	if _c.terrain_editor == null or not _c.terrain_editor.has_method("get_terrain_world_root"):
+	if _c.terrain_editor == null:
 		return
 	var world_root: Node3D = _c.terrain_editor.get_terrain_world_root()
 	if world_root == null:

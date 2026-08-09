@@ -12,7 +12,7 @@ extends Control
 @onready var _curve_caption: Label = %CurveCaption
 
 var _editor: ParticleEditor
-var _workspace
+var _workspace: ParticleEditorWorkspace
 var _tables: Array = []
 var _dup_button: Button
 var _del_button: Button
@@ -74,21 +74,21 @@ func _build_toolbar() -> void:
 
 
 func _on_add_pressed() -> void:
-	if _workspace != null and _workspace.has_method("add_table"):
+	if _workspace != null:
 		_workspace.add_table()
 
 
 func _on_duplicate_pressed() -> void:
 	if _editor == null or _editor.current_table == null:
 		return
-	if _workspace != null and _workspace.has_method("duplicate_table"):
+	if _workspace != null:
 		_workspace.duplicate_table(_editor.current_table)
 
 
 func _on_delete_pressed() -> void:
 	if _editor == null or _editor.current_table == null:
 		return
-	if _workspace != null and _workspace.has_method("remove_table"):
+	if _workspace != null:
 		_workspace.remove_table(_editor.current_table)
 
 
@@ -105,7 +105,7 @@ func set_particle_editor(value: ParticleEditor) -> void:
 	_refresh()
 
 
-func set_workspace(value) -> void:
+func set_workspace(value: ParticleEditorWorkspace) -> void:
 	_workspace = value
 
 
@@ -165,7 +165,7 @@ func _update_caption() -> void:
 func _on_item_selected(idx: int) -> void:
 	if idx < 0 or idx >= _tables.size():
 		return
-	if _workspace != null and _workspace.has_method("select_table"):
+	if _workspace != null:
 		_workspace.select_table(_tables[idx])
 
 

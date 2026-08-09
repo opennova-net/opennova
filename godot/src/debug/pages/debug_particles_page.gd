@@ -74,8 +74,7 @@ func refresh() -> void:
 	if world == null:
 		_clear_live_data()
 		return
-	var unresolved: PackedStringArray = (world.get_unresolved_texture_names()
-			if world.has_method("get_unresolved_texture_names") else PackedStringArray())
+	var unresolved: PackedStringArray = world.get_unresolved_texture_names()
 	if _particles_hidden():
 		_show_hidden_report(world.effect_count(), unresolved)
 		return

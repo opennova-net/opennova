@@ -299,9 +299,7 @@ func focus_part(kind: int, name: String) -> Error:
 
 
 func _resource_ref_services() -> Dictionary:
-	var shell: Variant = _ws.editor_shell if _ws != null else null
-	if shell != null and shell.has_method("get_reference_index") \
-			and shell.has_method("open_kind_picker") \
-			and shell.has_method("open_in_workspace"):
+	var shell: WorkspaceShell = _ws.editor_shell if _ws != null else null
+	if shell != null and shell.get_reference_index() != null:
 		return ResourceRefWidget.services_from_shell(shell)
 	return {}

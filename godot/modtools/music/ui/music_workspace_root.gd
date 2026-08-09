@@ -16,7 +16,7 @@ signal workflow_requested(workflow_id: int)
 ## into shell toasts. Standalone scene owners (tests) can just ignore it.
 signal error_reported(message: String)
 
-var _document: RefCounted   # MusicEditorDocument
+var _document: MusicEditorDocument
 
 
 func _ready() -> void:
@@ -31,12 +31,14 @@ func _on_bank_error(message: String) -> void:
 	error_reported.emit(message)
 
 
-func bind_document(document: RefCounted) -> void:
+func bind_document(document: MusicEditorDocument) -> void:
 	_document = document
-	for n in ["Bank", "Live"]:
-		var node := get_panel(n)
-		if node != null and node.has_method("bind_document"):
-			node.bind_document(document)
+	var bank: MusicBankMode = get_panel("Bank")
+	if bank != null:
+		bank.bind_document(document)
+	var live: MusicLiveMode = get_panel("Live")
+	if live != null:
+		live.bind_document(document)
 
 
 # Recursive, owner-agnostic lookup. Bank is nested inside the embedded Live screen,

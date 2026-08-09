@@ -1,28 +1,12 @@
 extends GutTest
 
 # CollisionDebugView: the F3 "Show collision" 3D overlay. Drives it with a
-# duck-typed world/sim pair feeding a crafted get_collision_debug() dictionary
-# (the same shape Simulation emits) through the public refresh seam to pin:
-# hull boxes + the player capsule draw, the ground-gap label reports, rotation
-# refreshes cached hulls, and a vanished sim clears everything instead of erroring.
+# crafted get_collision_debug() dictionary (the same shape Simulation emits)
+# through the public render seam to pin: hull boxes + the player capsule draw,
+# the ground-gap label reports, rotation refreshes cached hulls, and a
+# vanished sim clears everything instead of erroring.
 
 const ViewScript := preload("res://src/debug/collision_debug_view.gd")
-
-
-# Node-based doubles: the view's setup takes the owner's world NODE (a GameWorld
-# in production) and duck-types get_sim()/get_collision_debug() off it.
-class FakeSim:
-	extends Node
-	var debug: Dictionary = {}
-	func get_collision_debug() -> Dictionary:
-		return debug
-
-
-class FakeWorld:
-	extends Node
-	var sim: Node = null
-	func get_sim():
-		return sim
 
 
 static func _unit_box_corners() -> PackedVector3Array:
@@ -73,25 +57,16 @@ func _debug_payload() -> Dictionary:
 	}
 
 
-func _make_world(payload: Dictionary) -> Node:
-	var world: FakeWorld = autofree(FakeWorld.new())
-	var sim: FakeSim = autofree(FakeSim.new())
-	sim.debug = payload
-	world.sim = sim
-	return world
-
-
-func _make_view(world: Node) -> Node3D:
+func _make_view() -> Node3D:
 	var view: Node3D = ViewScript.new()
 	add_child_autofree(view)
-	view.setup(world)
+	view.setup(null)
 	return view
 
 
 func test_draws_hulls_capsule_and_gap_label() -> void:
-	var world := _make_world(_debug_payload())
-	var view := _make_view(world)
-	view.refresh_now()
+	var view := _make_view()
+	view.render_report(_debug_payload())
 
 	var hull := view.get_node("CollisionHullLines") as MeshInstance3D
 	assert_gt((hull.mesh as ImmediateMesh).get_surface_count(), 0, "hull wireframe drawn")
@@ -103,12 +78,11 @@ func test_draws_hulls_capsule_and_gap_label() -> void:
 
 
 func test_missing_sim_clears_instead_of_erroring() -> void:
-	var world := _make_world(_debug_payload())
-	var view := _make_view(world)
-	view.refresh_now()
+	var view := _make_view()
+	view.render_report(_debug_payload())
 
-	# The sim goes away (mission unloaded): the next frame clears every surface.
-	world.sim = null
+	# The sim goes away (mission unloaded): the next frame's real refresh
+	# resolves no world/sim and clears every surface.
 	view.refresh_now()
 	var hull := view.get_node("CollisionHullLines") as MeshInstance3D
 	assert_eq((hull.mesh as ImmediateMesh).get_surface_count(), 0, "hulls cleared")
@@ -118,9 +92,8 @@ func test_missing_sim_clears_instead_of_erroring() -> void:
 
 
 func test_empty_world_draws_nothing() -> void:
-	var world := _make_world({ "instances": [], "player": { "valid": false } })
-	var view := _make_view(world)
-	view.refresh_now()
+	var view := _make_view()
+	view.render_report({ "instances": [], "player": { "valid": false } })
 	var hull := view.get_node("CollisionHullLines") as MeshInstance3D
 	assert_eq((hull.mesh as ImmediateMesh).get_surface_count(), 0)
 	assert_false((view.get_node("CollisionGapLabel") as Label3D).visible)
@@ -128,9 +101,8 @@ func test_empty_world_draws_nothing() -> void:
 
 func test_rotation_only_refreshes_hull_geometry() -> void:
 	var payload := _debug_payload()
-	var world := _make_world(payload)
-	var view := _make_view(world)
-	view.refresh_now()
+	var view := _make_view()
+	view.render_report(payload)
 	var hull := view.get_node("CollisionHullLines") as MeshInstance3D
 	var initial_bounds := (hull.mesh as ImmediateMesh).get_aabb()
 
@@ -139,7 +111,7 @@ func test_rotation_only_refreshes_hull_geometry() -> void:
 	var instance: Dictionary = payload["instances"][0]
 	instance["heading"] = 90.0
 	(instance["volumes"][0] as Dictionary)["corners"] = _quarter_turn_box_corners()
-	view.refresh_now()
+	view.render_report(payload)
 
 	var rotated_bounds := (hull.mesh as ImmediateMesh).get_aabb()
 	assert_ne(rotated_bounds, initial_bounds,
@@ -150,9 +122,8 @@ func test_rotation_only_refreshes_hull_geometry() -> void:
 
 func test_same_pose_replacement_refreshes_hull_geometry() -> void:
 	var payload := _debug_payload()
-	var world := _make_world(payload)
-	var view := _make_view(world)
-	view.refresh_now()
+	var view := _make_view()
+	view.render_report(payload)
 	var hull := view.get_node("CollisionHullLines") as MeshInstance3D
 	var initial_bounds := (hull.mesh as ImmediateMesh).get_aabb()
 
@@ -160,7 +131,7 @@ func test_same_pose_replacement_refreshes_hull_geometry() -> void:
 	# replacing its collision model. Geometry itself must participate in the key.
 	var instance: Dictionary = payload["instances"][0]
 	(instance["volumes"][0] as Dictionary)["corners"] = _shifted_box_corners()
-	view.refresh_now()
+	view.render_report(payload)
 
 	var replacement_bounds := (hull.mesh as ImmediateMesh).get_aabb()
 	assert_ne(replacement_bounds, initial_bounds,

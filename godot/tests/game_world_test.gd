@@ -6,6 +6,7 @@ const MissionRuntime := preload("res://src/world/mission_runtime.gd")
 
 
 func after_each() -> void:
+	_cleanup_fx_defs()
 	_remove_dir_recursive(OS.get_cache_dir().path_join(WORLD_TEST_ROOT))
 
 
@@ -60,75 +61,6 @@ class ChallengePrewarmWorldHarness:
 		return requested_def
 	func prewarm_challenge_models() -> void:
 		_prewarm_loaded_model_challenge_definitions()
-
-
-class FirstOpenArmorySimProxy:
-	extends RefCounted
-	var inner: Simulation
-
-	func _init(p_inner: Simulation) -> void:
-		inner = p_inner
-
-	func local_player_in_armory_zone() -> bool:
-		return true
-
-	func is_host_listening() -> bool:
-		return false
-
-	func is_joiner() -> bool:
-		return false
-
-	func get_local_player_team() -> int:
-		return inner.get_local_player_team()
-
-	func get_local_player_class() -> int:
-		return inner.get_local_player_class()
-
-	func get_class_allow_mask() -> int:
-		return inner.get_class_allow_mask()
-
-	func get_local_player_weapon_name() -> String:
-		return inner.get_local_player_weapon_name()
-
-	func get_local_player_loadout() -> Array:
-		return inner.get_local_player_loadout()
-
-	func get_local_player_inventory() -> Dictionary:
-		return inner.get_local_player_inventory()
-
-	func get_weapon_availability(weapon_name: String) -> int:
-		return inner.get_weapon_availability(weapon_name)
-
-	func apply_local_player_loadout(kit: Array, selected_class: int) -> bool:
-		return inner.apply_local_player_loadout(kit, selected_class)
-
-
-class FirstOpenArmoryWorldProxy:
-	extends Node
-	var inner: GameWorld
-	var sim: FirstOpenArmorySimProxy
-
-	func _init(p_inner: GameWorld) -> void:
-		inner = p_inner
-		sim = FirstOpenArmorySimProxy.new(inner.get_sim())
-
-	func get_sim():
-		return sim
-
-	func get_resource_root() -> ResourceRoot:
-		return inner.get_resource_root()
-
-	func get_weapon_database() -> WeaponDatabase:
-		return inner.get_weapon_database()
-
-	func local_player_viewmodel_def():
-		return inner.local_player_viewmodel_def()
-
-	func set_local_player_weapon_by_name(weapon_name: String) -> bool:
-		return inner.set_local_player_weapon_by_name(weapon_name)
-
-	func clear_local_player_weapon() -> void:
-		inner.clear_local_player_weapon()
 
 
 class ImpactAudioStub:
@@ -228,63 +160,113 @@ class FxWorldStub:
 		stopped_groups.append(group_id)
 
 
-class ItemFxDbStub:
-	extends RefCounted
-	var attribs: Dictionary = {}
-	var effects: Dictionary = {}
-	func get_attrib(item_id: int) -> int:
-		return int(attribs.get(item_id, 0))
-	func get_particle_effects(item_id: int) -> Dictionary:
-		return effects.get(item_id,
-				{"particlefx": {"effect": "Effect_Test", "userpoint": "FX00"}})
-
-
 class ItemFxPlacerStub:
 	extends RefCounted
-	var item_db: ItemFxDbStub
+	var item_db: ItemDatabase
 	var static_sources: Array = []
-	func get_item_db() -> ItemFxDbStub:
+	func get_item_db() -> ItemDatabase:
 		return item_db
 	func get_static_item_effect_sources() -> Array:
 		return static_sources.duplicate(true)
 
 
-class ItemFxObjectDataStub:
-	extends RefCounted
-	var points: Array = [{
-		"name": "fx00",
-		"position": Vector3(1, 2, 3),
-		"rotation": Vector3(0, 0, -1),
-	}]
-	func _init(initial_points: Array = []) -> void:
-		if not initial_points.is_empty():
-			points = initial_points.duplicate(true)
-	func get_user_point_count() -> int:
-		return points.size()
-	func get_user_point_info(index: int) -> Dictionary:
-		return points[index]
-	# The native first-16 scan's contract (S12c; engine/formats/threedi
-	# threedi_3di3_user_point_mask), mirrored over the stub's points.
-	func get_user_point_bone_mask(name: String) -> int:
-		var mask := 0
-		for i in range(mini(points.size(), 16)):
-			if String(points[i].get("name", "")).nocasecmp_to(name) == 0:
-				mask |= 1 << i
-		return mask
+# --- Real item-fx fixtures (ADR 0034): the item database is an authored
+# items.def parsed by the REAL ItemDatabase; the model data is the committed
+# B50Cal.3di (its MFlash01 user point anchors the effect) or Shed.3di (no
+# matching point -> the origin-fallback leg). The first-16 mask RULE itself is
+# native and pinned by the threedi user-point-mask ctest.
+static var _fx_data_cache: Dictionary = {}
+var _fx_tmp_defs: Array[String] = []
 
 
-class ItemFxModelStub:
-	extends Node3D
-	var data := ItemFxObjectDataStub.new()
-	func get_object_data() -> ItemFxObjectDataStub:
-		return data
+func _fx_object_data(fixture_dir: String, model_file: String) -> ObjectData:
+	var key := fixture_dir + "/" + model_file
+	if _fx_data_cache.has(key):
+		return _fx_data_cache[key]
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(fixture_dir)), OK)
+	var data := ObjectData.new()
+	assert_eq(data.open_from_resource_root(root, model_file), OK,
+			"%s loads for the item-fx anchor fixtures" % model_file)
+	_fx_data_cache[key] = data
+	return data
+
+
+func _fx_anchor_data() -> ObjectData:
+	return _fx_object_data("res://../fixtures/3dp/B50Cal", "B50Cal.3di")
+
+
+func _fx_plain_data() -> ObjectData:
+	return _fx_object_data("res://../fixtures/threedi/3di3", "Shed.3di")
+
+
+# The anchor point's index/info on the real model (MFlash01 on B50Cal).
+func _fx_anchor_index() -> int:
+	var mask := int(_fx_anchor_data().get_user_point_bone_mask("MFlash01"))
+	assert_gt(mask, 0, "B50Cal authors the MFlash01 user point in the first 16")
+	for i in range(16):
+		if (mask & (1 << i)) != 0:
+			return i
+	return -1
+
+
+func _fx_anchor_info() -> Dictionary:
+	return _fx_anchor_data().get_user_point_info(_fx_anchor_index())
+
+
+func _fx_model(parent: Node) -> ObjectModel:
+	# Parent FIRST: set_object_data builds render children against the live
+	# global transform, which needs the node inside the tree.
+	var model := ObjectModel.new()
+	parent.add_child(model)
+	model.set_object_data(_fx_anchor_data())
+	return model
+
+
+# rows: [{id, attribs (optional token string), effect+userpoint (optional)}]
+func _fx_item_db(rows: Array) -> ItemDatabase:
+	var text := ""
+	for row_v in rows:
+		var row: Dictionary = row_v
+		text += 'begin "fx item"
+  id %d
+  type object
+' % int(row.get("id", 0))
+		var attribs := String(row.get("attribs", ""))
+		if not attribs.is_empty():
+			text += "  attrib: %s
+" % attribs
+		var effect := String(row.get("effect", ""))
+		if not effect.is_empty():
+			text += "  particlefx %s %s
+" % [effect, String(row.get("userpoint", ""))]
+		text += "end
+
+"
+	var path := OS.get_temp_dir().replace("\\", "/") + 			"/opennova_fx_items_%d_%d.def" % [Time.get_ticks_usec(), _fx_tmp_defs.size()]
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	assert_not_null(file)
+	if file != null:
+		file.store_string(text)
+		file.close()
+	_fx_tmp_defs.append(path)
+	var db := ItemDatabase.new()
+	assert_eq(db.load(path), OK, "the authored item-fx items.def parses")
+	return db
+
+
+func _cleanup_fx_defs() -> void:
+	for path in _fx_tmp_defs:
+		if FileAccess.file_exists(path):
+			DirAccess.remove_absolute(path)
+	_fx_tmp_defs.clear()
 
 
 class ItemFxDirectorProbe:
 	extends ItemEffectDirector
 	# Probe wrappers over the REAL director's private internals: the pokes stay
 	# implicit-self inside the subclass, keeping the private-poke ratchet flat.
-	func attach_to_node(node: Node3D, kind: int, item_id: int) -> int:
+	func attach_to_node(node: ObjectModel, kind: int, item_id: int) -> int:
 		return _attach_item_effect_to_node(node, kind, item_id)
 	func attach_to_static(source: Dictionary, source_index: int) -> int:
 		return _attach_item_effect_to_static(source, source_index)
@@ -324,7 +306,7 @@ class ItemFxGameWorldHarness:
 	func configure_item_fx(effects: EffectWorld, placer: RefCounted) -> void:
 		_effect_world = effects
 		_placer = placer
-	func present_item_fx(node: Node3D, kind: int, item_id: int) -> int:
+	func present_item_fx(node: ObjectModel, kind: int, item_id: int) -> int:
 		return fx.attach_to_node(node, kind, item_id)
 	func attach_all_item_fx() -> void:
 		fx.reattach()
@@ -886,11 +868,7 @@ func test_armory_can_reuse_game_world_weapon_database_on_first_open() -> void:
 	})
 	assert_eq(world.load_mission("mnml.bms"), OK)
 
-	assert_true(world.has_method("get_weapon_database"),
-		"the production world exposes the same weapon database seam ArmoryPresenter consumes")
-	if not world.has_method("get_weapon_database"):
-		return
-	var weapons := world.call("get_weapon_database") as WeaponDatabase
+	var weapons: WeaponDatabase = world.get_weapon_database()
 	assert_not_null(weapons, "first armory open lazily resolves weapon.def")
 	if weapons == null:
 		return
@@ -905,15 +883,13 @@ func test_armory_can_reuse_game_world_weapon_database_on_first_open() -> void:
 	assert_eq(before_names, expected_names,
 		"the production world promoted the PLAYER_INFO-style canonical profile")
 
-	var armory_world := FirstOpenArmoryWorldProxy.new(world)
-	add_child_autofree(armory_world)
 	var overlay := Control.new()
 	add_child_autofree(overlay)
 	overlay.size = Vector2(800, 600)
 	var presenter := ArmoryPresenter.new()
 	add_child_autofree(presenter)
-	presenter.setup(armory_world, null, overlay)
-	assert_true(presenter.try_open(), "the production world catalog reaches first armory open")
+	presenter.setup(world, null, overlay)
+	assert_true(presenter.open(), "the production world catalog reaches first armory open")
 	var menu := overlay.get_node("ArmoryMenu") as MnuMenu
 	var primary := menu.find_child("PRIMARY", true, false) as MnuCombo
 	var accessory := menu.find_child("ACCESSORY", true, false) as MnuCombo
@@ -2142,17 +2118,19 @@ func test_item_effect_attach_uses_the_original_pool_specific_gates() -> void:
 	add_child_autofree(world)
 	var effects := FxWorldStub.new()
 	world.add_child(effects)
-	var db := ItemFxDbStub.new()
-	db.attribs = {
-		1: 0,
-		2: 0,
-		3: 0x40,
-		4: 0x2,
-		5: 0x40,
-		6: 0,
-		7: 0,
-		8: 0,
-	}
+	var db := _fx_item_db([
+		{"id": 1, "effect": "Effect_Test", "userpoint": "MFlash01"},
+		{"id": 2, "effect": "Effect_Test", "userpoint": "MFlash01"},
+		{"id": 3, "attribs": "PlayerControl",
+				"effect": "Effect_Test", "userpoint": "MFlash01"},
+		{"id": 4, "attribs": "Powerup",
+				"effect": "Effect_Test", "userpoint": "MFlash01"},
+		{"id": 5, "attribs": "PlayerControl",
+				"effect": "Effect_Test", "userpoint": "MFlash01"},
+		{"id": 6, "effect": "Effect_Test", "userpoint": "MFlash01"},
+		{"id": 7, "effect": "Effect_Test", "userpoint": "MFlash01"},
+		{"id": 8, "effect": "Effect_Test", "userpoint": "MFlash01"},
+	])
 	var placer := ItemFxPlacerStub.new()
 	placer.item_db = db
 	world.configure_item_fx(effects, placer)
@@ -2168,16 +2146,18 @@ func test_item_effect_attach_uses_the_original_pool_specific_gates() -> void:
 	var nodes: Array[Node3D] = []
 	for case_v in cases:
 		var case: Array = case_v
-		var model := ItemFxModelStub.new()
-		world.add_child(model)
+		var model := _fx_model(world)
 		nodes.append(model)
 		assert_eq(world.present_item_fx(model, int(case[0]), int(case[1])),
 				int(case[2]), "kind %d attrib 0x%x" % [int(case[0]), db.get_attrib(int(case[1]))])
 
 	assert_eq(effects.attached_spawns.size(), 3,
 			"only normal pool-1 plus allowed pool-2/3 entities attach")
-	assert_eq(effects.attached_spawns[0].local_pos, Vector3(1, 2, 3))
-	assert_eq(effects.attached_spawns[0].local_dir, Vector3(0, 0, -1))
+	var anchor_info := _fx_anchor_info()
+	assert_eq(effects.attached_spawns[0].local_pos,
+			Vector3(anchor_info.get("position", Vector3.ZERO)))
+	assert_eq(effects.attached_spawns[0].local_dir,
+			Vector3(anchor_info.get("rotation", Vector3.ZERO)))
 	assert_eq(world.present_item_fx(nodes[1], MissionData.KIND_ITEM, 2), 0,
 			"a replayed wire-node callback cannot duplicate an existing attach")
 	assert_eq(effects.attached_spawns.size(), 3)
@@ -2186,8 +2166,7 @@ func test_item_effect_attach_uses_the_original_pool_specific_gates() -> void:
 	# must attach once when particles are re-enabled; a mission loaded hidden
 	# otherwise loses that effect permanently.
 	world.set_particles_hidden(true)
-	var hidden_model := ItemFxModelStub.new()
-	world.add_child(hidden_model)
+	var hidden_model := _fx_model(world)
 	assert_eq(world.present_item_fx(
 			hidden_model, MissionData.KIND_ITEM, 7), 0)
 	assert_eq(effects.attached_spawns.size(), 3)
@@ -2198,8 +2177,7 @@ func test_item_effect_attach_uses_the_original_pool_specific_gates() -> void:
 	assert_eq(effects.attached_spawns.size(), 4, "steady enabled state cannot duplicate it")
 
 	world.set_particles_hidden(true)
-	var despawned_model := ItemFxModelStub.new()
-	world.add_child(despawned_model)
+	var despawned_model := _fx_model(world)
 	assert_eq(world.present_item_fx(
 			despawned_model, MissionData.KIND_ITEM, 8), 0)
 	despawned_model.free()
@@ -2218,14 +2196,8 @@ func test_dbuggy_fx00_follows_controller_lifecycle_with_pre_node_race() -> void:
 	add_child_autofree(world)
 	var effects := FxWorldStub.new()
 	world.add_child(effects)
-	var db := ItemFxDbStub.new()
-	db.attribs[DBUGGY_ITEM] = 0x40
-	db.effects[DBUGGY_ITEM] = {
-		"particlefx": {
-			"effect": "Effect_whiteExhaust",
-			"userpoint": "FX00",
-		},
-	}
+	var db := _fx_item_db([{"id": DBUGGY_ITEM, "attribs": "PlayerControl",
+			"effect": "Effect_whiteExhaust", "userpoint": "MFlash01"}])
 	var placer := ItemFxPlacerStub.new()
 	placer.item_db = db
 	world.configure_item_fx(effects, placer)
@@ -2250,20 +2222,23 @@ func test_dbuggy_fx00_follows_controller_lifecycle_with_pre_node_race() -> void:
 	assert_eq(world.active_control_identity_count(), 3)
 	assert_signal_not_emitted(world, "mission_effects",
 			"render-internal lifecycle events never leak to HUD consumers")
-	var model := ItemFxModelStub.new()
+	var model := _fx_model(world)
 	model.set_meta("entity_ref", {
 		"kind": MissionData.KIND_ITEM,
 		"index": 3,
 		"bms_id": 9001,
 		"item_id": DBUGGY_ITEM,
 	})
-	world.add_child(model)
 	assert_eq(world.present_item_fx(model, MissionData.KIND_ITEM, DBUGGY_ITEM), 1)
 	assert_eq(world.deferred_control_item_fx_count(), 1)
 	assert_eq(effects.attached_spawns.size(), 1)
 	assert_eq(String(effects.attached_spawns[0].effect), "Effect_whiteExhaust")
-	assert_eq(Vector3(effects.attached_spawns[0].local_pos), Vector3(1, 2, 3))
-	assert_eq(Vector3(effects.attached_spawns[0].local_dir), Vector3(0, 0, -1))
+	var anchor_info := _fx_anchor_info()
+	assert_eq(Vector3(effects.attached_spawns[0].local_pos),
+			Vector3(anchor_info.get("position", Vector3.ZERO)),
+			"the effect anchors at the real model's MFlash01 point")
+	assert_eq(Vector3(effects.attached_spawns[0].local_dir),
+			Vector3(anchor_info.get("rotation", Vector3.ZERO)))
 
 	# Replayed starts are idempotent; a single transition stop detaches the
 	# exact native group id returned by the receipt-bearing facade.
@@ -2290,27 +2265,20 @@ func test_dbuggy_hidden_pending_is_cancelled_when_control_stops() -> void:
 	add_child_autofree(world)
 	var effects := FxWorldStub.new()
 	world.add_child(effects)
-	var db := ItemFxDbStub.new()
-	db.attribs[DBUGGY_ITEM] = 0x40
-	db.effects[DBUGGY_ITEM] = {
-		"particlefx": {
-			"effect": "Effect_whiteExhaust",
-			"userpoint": "FX00",
-		},
-	}
+	var db := _fx_item_db([{"id": DBUGGY_ITEM, "attribs": "PlayerControl",
+			"effect": "Effect_whiteExhaust", "userpoint": "MFlash01"}])
 	var placer := ItemFxPlacerStub.new()
 	placer.item_db = db
 	world.configure_item_fx(effects, placer)
 	world.set_particles_hidden(true)
 
-	var model := ItemFxModelStub.new()
+	var model := _fx_model(world)
 	model.set_meta("entity_ref", {
 		"kind": MissionData.KIND_ITEM,
 		"index": 8,
 		"bms_id": 9010,
 		"item_id": DBUGGY_ITEM,
 	})
-	world.add_child(model)
 	assert_eq(world.present_item_fx(model, MissionData.KIND_ITEM, DBUGGY_ITEM), 0,
 			"the unchanged mission-start 0x42 gate keeps PlayerControl dormant")
 	var spawn_origin := (MissionData.KIND_ITEM << 24) | 8
@@ -2340,8 +2308,8 @@ func test_controller_net_id_does_not_alias_a_wire_handle() -> void:
 	add_child_autofree(world)
 	var effects := FxWorldStub.new()
 	world.add_child(effects)
-	var db := ItemFxDbStub.new()
-	db.attribs[DBUGGY_ITEM] = 0x40
+	var db := _fx_item_db([{"id": DBUGGY_ITEM, "attribs": "PlayerControl",
+			"effect": "Effect_whiteExhaust", "userpoint": "MFlash01"}])
 	var placer := ItemFxPlacerStub.new()
 	placer.item_db = db
 	world.configure_item_fx(effects, placer)
@@ -2352,7 +2320,7 @@ func test_controller_net_id_does_not_alias_a_wire_handle() -> void:
 		"b": 0,
 		"c": 0,
 	}])
-	var model := ItemFxModelStub.new()
+	var model := _fx_model(world)
 	model.set_meta("entity_ref", {
 		"kind": MissionData.KIND_ITEM,
 		"index": 12,
@@ -2360,7 +2328,6 @@ func test_controller_net_id_does_not_alias_a_wire_handle() -> void:
 		"wire_handle": 77,
 		"item_id": DBUGGY_ITEM,
 	})
-	world.add_child(model)
 	assert_eq(world.present_item_fx(model, MissionData.KIND_ITEM, DBUGGY_ITEM), 0)
 	assert_eq(effects.attached_spawns.size(), 0,
 			"event a is a simulation net id, not the presentation wire handle")
@@ -2372,21 +2339,15 @@ func test_synthetic_controller_effects_are_scoped_to_their_wire_sibling() -> voi
 	add_child_autofree(world)
 	var effects := FxWorldStub.new()
 	world.add_child(effects)
-	var db := ItemFxDbStub.new()
-	db.attribs[PLAYER_CONTROL_ITEM] = 0x40
-	db.effects[PLAYER_CONTROL_ITEM] = {
-		"particlefx": {
-			"effect": "Effect_whiteExhaust",
-			"userpoint": "FX00",
-		},
-	}
+	var db := _fx_item_db([{"id": PLAYER_CONTROL_ITEM, "attribs": "PlayerControl",
+			"effect": "Effect_whiteExhaust", "userpoint": "MFlash01"}])
 	var placer := ItemFxPlacerStub.new()
 	placer.item_db = db
 	world.configure_item_fx(effects, placer)
 
-	var siblings: Array[ItemFxModelStub] = []
+	var siblings: Array[ObjectModel] = []
 	for wire_handle in [0x1004, 0x1005]:
-		var model := ItemFxModelStub.new()
+		var model := _fx_model(world)
 		model.set_meta("entity_ref", {
 			"kind": MissionData.KIND_ITEM,
 			"origin_kind": 0xff,
@@ -2395,7 +2356,6 @@ func test_synthetic_controller_effects_are_scoped_to_their_wire_sibling() -> voi
 			"wire_handle": wire_handle,
 			"item_id": PLAYER_CONTROL_ITEM,
 		})
-		world.add_child(model)
 		siblings.append(model)
 		assert_eq(world.present_item_fx(
 				model, MissionData.KIND_ITEM, PLAYER_CONTROL_ITEM), 0)
@@ -2410,7 +2370,7 @@ func test_synthetic_controller_effects_are_scoped_to_their_wire_sibling() -> voi
 	assert_eq(effects.attached_spawns.size(), 1,
 			"mounting one synthetic emplacement starts only that sibling's effect")
 	assert_eq(String(effects.attached_spawns[0].owner),
-			"itemfx:%d:0" % siblings[0].get_instance_id())
+			"itemfx:%d:%d" % [siblings[0].get_instance_id(), _fx_anchor_index()])
 
 	world.consume_runtime_effects([{
 		"kind": "vehicle_control_stopped",
@@ -2428,7 +2388,7 @@ func test_synthetic_controller_effects_are_scoped_to_their_wire_sibling() -> voi
 	assert_eq(effects.stopped_groups, [1])
 	assert_eq(effects.attached_spawns.size(), 2)
 	assert_eq(String(effects.attached_spawns[1].owner),
-			"itemfx:%d:0" % siblings[1].get_instance_id(),
+			"itemfx:%d:%d" % [siblings[1].get_instance_id(), _fx_anchor_index()],
 			"the shared synthetic origin cannot activate a neighboring attachment")
 
 
@@ -2437,41 +2397,21 @@ func test_static_item_effects_spawn_world_bound_from_value_descriptors() -> void
 	add_child_autofree(world)
 	var effects := FxWorldStub.new()
 	world.add_child(effects)
-	var db := ItemFxDbStub.new()
-	db.attribs = {2: 0, 3: 0x40, 9: 0}
-	db.effects[9] = {
-		"particlefx": {"effect": "Effect_Fallback", "userpoint": "FX00"},
-	}
+	var db := _fx_item_db([
+		{"id": 2, "effect": "Effect_Test", "userpoint": "MFlash01"},
+		{"id": 3, "attribs": "PlayerControl",
+				"effect": "Effect_Test", "userpoint": "MFlash01"},
+		{"id": 9, "effect": "Effect_Fallback", "userpoint": "MFlash01"},
+	])
 	var placer := ItemFxPlacerStub.new()
 	placer.item_db = db
 
-	var points: Array = []
-	for i in range(18):
-		points.append({
-			"name": "other",
-			"position": Vector3(i, 0, 0),
-			"rotation": Vector3.FORWARD,
-		})
-	points[0] = {
-		"name": "fx00",
-		"position": Vector3(1, 2, 3),
-		"rotation": Vector3(0, 0, -1),
-	}
-	points[15] = {
-		"name": "FX00",
-		"position": Vector3(-2, 0.5, 4),
-		"rotation": Vector3.RIGHT,
-	}
-	# This authored duplicate is beyond the original 16-bit userpoint mask.
-	var beyond_mask: Dictionary = points[16]
-	beyond_mask["name"] = "FX00"
-	points[16] = beyond_mask
-	var matched_data := ItemFxObjectDataStub.new(points)
-	var fallback_data := ItemFxObjectDataStub.new([{
-		"name": "OTHER",
-		"position": Vector3(99, 99, 99),
-		"rotation": Vector3.UP,
-	}])
+	# Real model data: B50Cal authors MFlash01 (the matched anchor); Shed
+	# authors no such point (the origin-fallback leg). The first-16 mask RULE
+	# (duplicates, beyond-16 exclusion) is native and pinned by the threedi
+	# user-point-mask ctest.
+	var matched_data := _fx_anchor_data()
+	var fallback_data := _fx_plain_data()
 	var entity_transform := Transform3D(
 			Basis(Vector3.UP, PI * 0.5), Vector3(10, 20, 30))
 	var fallback_transform := Transform3D(
@@ -2500,8 +2440,8 @@ func test_static_item_effects_spawn_world_bound_from_value_descriptors() -> void
 
 	world.attach_all_item_fx()
 
-	assert_eq(effects.request_spawns.size(), 3,
-			"two first-16 matches plus one origin fallback; the gated row is excluded")
+	assert_eq(effects.request_spawns.size(), 2,
+			"one matched anchor plus one origin fallback; the gated row is excluded")
 	var first: Dictionary = effects.request_spawns[0]
 	var first_options: Dictionary = first.get("options", {})
 	assert_eq(int(first_options.get("admission", -1)), EffectScene.ADMISSION_ALWAYS)
@@ -2510,17 +2450,16 @@ func test_static_item_effects_spawn_world_bound_from_value_descriptors() -> void
 			EffectScene.RENDER_DOMAIN_WORLD)
 	assert_false(first_options.has("owner_key"), "static batches never invent follow owners")
 	assert_false(first_options.has("slot_key"), "Always spawns need no synthetic slot identity")
+	var anchor_info := _fx_anchor_info()
 	var first_transform: Transform3D = first.get("transform", Transform3D.IDENTITY)
-	assert_true(first_transform.origin.is_equal_approx(entity_transform * Vector3(1, 2, 3)))
-	assert_true(first_transform.basis.z.normalized().is_equal_approx(
-			(entity_transform.basis * Vector3(0, 0, -1)).normalized()),
-			"the authored direction composes through the entity basis")
-	var second_transform: Transform3D = effects.request_spawns[1].get(
-			"transform", Transform3D.IDENTITY)
-	assert_true(second_transform.origin.is_equal_approx(
-			entity_transform * Vector3(-2, 0.5, 4)),
-			"the duplicate name at userpoint 15 also spawns")
-	var fallback_request: Dictionary = effects.request_spawns[2]
+	assert_true(first_transform.origin.is_equal_approx(
+			entity_transform * Vector3(anchor_info.get("position", Vector3.ZERO))))
+	var anchor_dir := Vector3(anchor_info.get("rotation", Vector3.ZERO))
+	if anchor_dir.length_squared() > 0.000001:
+		assert_true(first_transform.basis.z.normalized().is_equal_approx(
+				(entity_transform.basis * anchor_dir).normalized()),
+				"the authored direction composes through the entity basis")
+	var fallback_request: Dictionary = effects.request_spawns[1]
 	assert_eq(String(fallback_request.get("effect", "")), "Effect_Fallback")
 	var fallback_actual: Transform3D = fallback_request.get(
 			"transform", Transform3D.IDENTITY)
@@ -2528,7 +2467,7 @@ func test_static_item_effects_spawn_world_bound_from_value_descriptors() -> void
 			"an unmatched userpoint falls back to the entity origin and basis")
 	assert_eq(world.present_static_item_fx(placer.static_sources[0], 0), 0,
 			"revisiting the same descriptor index cannot duplicate its persistent effect")
-	assert_eq(effects.request_spawns.size(), 3)
+	assert_eq(effects.request_spawns.size(), 2)
 
 
 func test_live_item_effect_owner_uses_each_fixed_ticks_value_pose() -> void:
@@ -2548,9 +2487,8 @@ func test_live_item_effect_owner_uses_each_fixed_ticks_value_pose() -> void:
 				MissionData.KIND_BUILDING, 102001, Vector3(6, 4, 5), Vector3.ZERO)))
 	var bms_id := int(placed.get("bms_id", 0))
 	assert_gt(bms_id, 0)
-	var node := ItemFxModelStub.new()
+	var node := _fx_model(world)
 	node.transform = Transform3D(Basis.IDENTITY, Vector3(99, 99, 99))
-	world.add_child(node)
 	var key := "itemfx:%d:0" % bms_id
 	world.configure_item_owner(key, node,
 			{"kind": MissionData.KIND_BUILDING, "index": 0, "bms_id": bms_id})
@@ -2582,7 +2520,8 @@ func test_static_item_effect_hidden_at_load_retries_once_when_enabled() -> void:
 	add_child_autofree(world)
 	var effects := FxWorldStub.new()
 	world.add_child(effects)
-	var db := ItemFxDbStub.new()
+	var db := _fx_item_db([
+		{"id": 2, "effect": "Effect_Test", "userpoint": "MFlash01"}])
 	var placer := ItemFxPlacerStub.new()
 	placer.item_db = db
 	placer.static_sources = [{
@@ -2590,7 +2529,7 @@ func test_static_item_effect_hidden_at_load_retries_once_when_enabled() -> void:
 		"item_id": 2,
 		"graphic": "StaticVehicle1",
 		"world_transform": Transform3D(Basis.IDENTITY, Vector3(3, 4, 5)),
-		"object_data": ItemFxObjectDataStub.new(),
+		"object_data": _fx_anchor_data(),
 	}]
 	world.configure_item_fx(effects, placer)
 

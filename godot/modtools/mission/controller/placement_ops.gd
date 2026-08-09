@@ -119,8 +119,6 @@ func _item_db() -> ItemDatabase:
 # Raycast the terrain under the cursor and place the armed item there. A miss (off the
 # terrain) is ignored so a stray click into the sky does nothing.
 func _place_armed_at(mouse_pos: Vector2) -> void:
-	if not _c.terrain_editor.has_method("raycast_terrain_at"):
-		return
 	var hit: Vector3 = _c.terrain_editor.raycast_terrain_at(mouse_pos)
 	if not _c.terrain_editor.is_valid_terrain_hit(hit):
 		return

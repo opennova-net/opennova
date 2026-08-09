@@ -101,7 +101,7 @@ func test_inspector_offers_used_by_for_the_open_table_without_index_build() -> v
 
 
 class UsedByShell:
-	extends Node
+	extends WorkspaceShell
 
 	class IndexStub:
 		extends RefCounted
@@ -114,7 +114,7 @@ class UsedByShell:
 
 	var index := IndexStub.new()
 
-	func get_reference_index() -> IndexStub:
+	func get_reference_index() -> RefCounted:
 		return index
 
 	func open_in_workspace(_kind: String, _path: String, _focus: FocusPayload = null) -> Error:
@@ -167,7 +167,7 @@ func test_used_by_queries_table_spellings_and_retargets_on_tab_switch() -> void:
 
 
 class FontRootShell:
-	extends Node
+	extends WorkspaceShell
 
 	var root: ResourceRoot
 

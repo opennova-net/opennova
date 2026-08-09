@@ -1,4 +1,4 @@
-extends RefCounted
+extends ViewportInputSink
 
 # Editor-side controller for the Mission workspace (the Phase 2 adapter).
 #
@@ -49,7 +49,7 @@ const _AI_SUB_PLAYPARTANIM := 34
 # 2); SCRIPTING (Phase 4) is panel-driven (the viewport is inert in that mode).
 enum Mode { OBJECTS, WAYPOINTS, AREA_TRIGGERS, SCRIPTING }
 
-var terrain_editor: Node
+var terrain_editor: TerrainEditorBase
 
 var _mission: MissionData
 # Parsed co-named <mission>.til. This is the editor mount's copy of GameWorld's
@@ -321,7 +321,7 @@ func _init(p_terrain_editor: Node = null) -> void:
 	_edit = ControllerEdit.new(self)
 
 
-func set_terrain_editor(value: Node) -> void:
+func set_terrain_editor(value: TerrainEditorBase) -> void:
 	terrain_editor = value
 
 
@@ -1055,7 +1055,7 @@ func _wire_placer_environment() -> void:
 
 
 func _objects_container() -> Node3D:
-	if terrain_editor == null or not terrain_editor.has_method("get_terrain_world_root"):
+	if terrain_editor == null:
 		return null
 	var world_root: Node3D = terrain_editor.get_terrain_world_root()
 	if world_root == null:

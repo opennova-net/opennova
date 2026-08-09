@@ -741,8 +741,8 @@ func _sync_user_points_check(has_selection: bool) -> void:
 	var has_points := false
 	var visible := false
 	if has_selection and _controller != null:
-		has_points = _controller.selected_has_user_points() if _controller.has_method("selected_has_user_points") else false
-		visible = _controller.is_selected_user_points_visible() if _controller.has_method("is_selected_user_points_visible") else false
+		has_points = _controller.selected_has_user_points()
+		visible = _controller.is_selected_user_points_visible()
 	_user_points_check.disabled = not has_points
 	_user_points_check.button_pressed = has_points and visible
 
@@ -750,8 +750,7 @@ func _sync_user_points_check(has_selection: bool) -> void:
 func _on_user_points_toggled(pressed: bool) -> void:
 	if _loading or _controller == null:
 		return
-	if _controller.has_method("set_selected_user_points_visible"):
-		_controller.set_selected_user_points_visible(pressed)
+	_controller.set_selected_user_points_visible(pressed)
 
 
 func _on_position_axis(value: float, axis: int) -> void:

@@ -28,7 +28,8 @@ extends RefCounted
 #
 #   Viewport (only if the workspace shows a 3D view):
 #     mount_viewport / unmount_viewport / release_viewport,
-#     get_viewport_camera, shows_camera_status
+#     get_viewport_camera (FlyCamera — every ONED 3D view flies the shared
+#     rig), shows_camera_status
 #     (use framework/viewport_mount.gd for the create/reparent/free mechanics)
 #
 #   Document actions (implement the cluster you support; each is gated by a
@@ -143,7 +144,7 @@ func release_viewport() -> void:
 	pass
 
 
-func get_viewport_camera() -> Camera3D:
+func get_viewport_camera() -> FlyCamera:
 	return null
 
 
@@ -217,12 +218,12 @@ func _def_for(workflow_id: int) -> InspectorDef:
 var _workflow_inspectors: Dictionary = {}
 
 
-func _instantiate_inspector(def: InspectorDef) -> Object:
+func _instantiate_inspector(def: InspectorDef) -> WorkflowInspector:
 	return def.inspector_script.new()
 
 
-func get_workflow_inspector(workflow_id: int) -> Object:
-	var cached: Object = _workflow_inspectors.get(workflow_id)
+func get_workflow_inspector(workflow_id: int) -> WorkflowInspector:
+	var cached: WorkflowInspector = _workflow_inspectors.get(workflow_id)
 	if cached != null:
 		return cached
 	var def := _def_for(workflow_id)

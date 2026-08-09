@@ -14,7 +14,7 @@ const EnvironmentEditorScript = preload("res://modtools/environment/environment_
 @onready var terrain_editor: TerrainEditor = $TerrainEditor
 @onready var workstation: EditorWorkstation = $CanvasLayer/EditorWorkstation
 
-var environment_editor
+var environment_editor: EnvironmentEditor
 var mcp_service: Node = null
 
 var _previous_window_min_size: Vector2i = Vector2i.ZERO
@@ -55,7 +55,7 @@ func get_terrain_editor() -> TerrainEditor:
 	return terrain_editor
 
 
-func get_environment_editor():
+func get_environment_editor() -> EnvironmentEditor:
 	return environment_editor
 
 

@@ -69,8 +69,9 @@ func _load_weapons_with_weight(weapon_name: String, weight: float) -> WeaponData
 
 # A stand-in for the built WEAPON screen: the named NovaMnu* controls as the menu
 # builder would create them from weapon.mnu.
-func _make_menu() -> Node:
-	var menu := Node.new()
+func _make_menu() -> MnuMenu:
+	var menu := MnuMenu.new()
+	menu.build_on_ready = false
 	menu.name = "Menu"
 	add_child_autofree(menu)
 	var spin := MnuSpinList.new()
@@ -130,7 +131,8 @@ func test_owns_menu_detects_weapon_screen() -> void:
 	var menu := _make_menu()
 	assert_true(companion.owns_menu(menu), "PLAYER_CLASS + PRIMARY_AMMO1 mark the WEAPON screen")
 	# player.mnu's screen (PLAYERCLASS combo, no ammo combos) is NOT claimed.
-	var player_info := Node.new()
+	var player_info := MnuMenu.new()
+	player_info.build_on_ready = false
 	add_child_autofree(player_info)
 	var cls := MnuCombo.new()
 	cls.name = "PLAYERCLASS"

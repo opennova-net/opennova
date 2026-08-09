@@ -6,12 +6,7 @@ extends GutTest
 
 const PaneScript := preload("res://src/debug/pages/debug_stats_page.gd")
 const OverlayScript := preload("res://src/debug/nova_debug_overlay.gd")
-
-
-class EffectInfoStub:
-	extends RefCounted
-	func active_entry_count() -> int:
-		return 3
+const MissionRuntime := preload("res://src/world/mission_runtime.gd")
 
 
 class DestructionInfoStub:
@@ -25,38 +20,29 @@ class ThrowableInfoStub:
 	var live := 5
 
 
-class WorldInfoStub:
-	extends RefCounted
-	var effect := EffectInfoStub.new()
+# Typed test doubles (ADR 0034): the page reads the GameWorld/MissionRuntime
+# classes, so the doubles ARE those classes with the counter getters
+# overridden. The effect world is a real (empty) EffectWorld — 0 live still
+# renders a non-empty info cell.
+class WorldInfoHarness:
+	extends GameWorld
+	var effect := EffectWorld.new()
 	func get_runtime_perf_counters() -> Dictionary:
 		return {"runtime": {"sim": {"present_entity_count": 7}}}
-	func get_effect_world():
+	func get_effect_world() -> EffectWorld:
 		return effect
 	func get_fire_present_stats() -> Dictionary:
 		return {"fires": 2, "sounds": 1}
-	func get_destruction_present_stats():
+	func get_destruction_present_stats() -> RefCounted:
 		return DestructionInfoStub.new()
 
 
-class RuntimeInfoStub:
-	extends RefCounted
-	func get_throwable_present_stats():
+class RuntimeInfoHarness:
+	extends MissionRuntime
+	func get_throwable_present_stats() -> RefCounted:
 		return ThrowableInfoStub.new()
 	func get_wire_present_stats() -> WirePresentStats:
 		return WirePresentStats.new(4, 0, 1)
-
-
-class SimInfoStub:
-	extends RefCounted
-	func get_host_peer_count() -> int:
-		return 0
-	func is_joiner() -> bool:
-		return false
-	func get_occlusion_debug() -> Dictionary:
-		return {
-			"active": true,
-			"counts": {"instances": 6, "visible": 5, "culled_entities": 1},
-		}
 
 
 func _make_pane(ctx: DebugContext = DebugContext.new()) -> DebugStatsPage:
@@ -298,17 +284,25 @@ func test_refresh_drains_the_board_window() -> void:
 func test_mission_scoped_info_clears_when_sources_disappear() -> void:
 	var ctx := DebugContext.new()
 	var pane := _make_pane(ctx)
-	var world := WorldInfoStub.new()
+	# Off-tree: the GameWorld script class alone has no scene children, and
+	# the counter overrides need no tree presence.
+	var world := WorldInfoHarness.new()
+	autofree(world)
+	autofree(world.effect)
+	var runtime := RuntimeInfoHarness.new()
+	add_child_autofree(runtime)
 	ctx.world_source = func(): return world
 	var window := _blank_window()
 	var sums: PackedInt64Array = window[0]
 	var counts: PackedInt32Array = window[2]
 	sums[FrameStatsBoard.EFFECTS_DRAIN] = 2_000
 	counts[FrameStatsBoard.EFFECTS_DRAIN] = 1
-	pane.render_window(1, sums, window[1], counts,
-			RuntimeInfoStub.new(), SimInfoStub.new())
+	# occl is sim-owned and needs a live occlusion mission, so this fixture
+	# exercises the world/runtime-fed rows; occl still participates in the
+	# clear pass below.
+	pane.render_window(1, sums, window[1], counts, runtime, null)
 	for id in [&"effects", &"fire", &"destruction", &"throwable",
-			&"wire_rows", &"occl"]:
+			&"wire_rows"]:
 		assert_ne(_row(pane, id).info, "", "%s received live mission info" % id)
 
 	ctx.world_source = Callable()

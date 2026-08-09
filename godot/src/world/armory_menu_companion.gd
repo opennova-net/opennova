@@ -79,7 +79,7 @@ signal armory_closed
 
 # weapon.mnu's WEAPON screen: PLAYER_CLASS (spinlist) + PRIMARY_AMMO1 are unique to it
 # (player.mnu uses PLAYERCLASS, no ammo combos).
-func owns_menu(menu: Node) -> bool:
+func owns_menu(menu: MnuMenu) -> bool:
 	if menu == null:
 		return false
 	return menu.find_child("PLAYER_CLASS", true, false) != null \
@@ -142,7 +142,7 @@ func set_weapon_database(weapons: WeaponDatabase) -> void:
 	_weapons = weapons
 
 
-func on_menu_built(menu: Node, _file: String, _screen: String, root: ResourceRoot) -> void:
+func on_menu_built(menu: MnuMenu, _file: String, _screen: String, root: ResourceRoot) -> void:
 	_menu = menu
 	_root = root
 	_ensure_weapons()

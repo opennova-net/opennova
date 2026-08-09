@@ -48,7 +48,7 @@ extends RefCounted
 # unconditionally (the MP NoTracers rules bit, dword_24D1E34 & 1, is a net seam
 # wired via RoundSim.no_tracers_rule).
 
-var _sim                        # Simulation (drain + trail source)
+var _sim: Simulation                  # drain + trail source (null in data-driven tests)
 var _audio_provider := Callable()     # -> MissionAudio (or null)
 var _fx_provider := Callable()        # -> EffectWorld (or null)
 var _listener_provider := Callable()  # -> Vector3 listener position (camera)
@@ -92,8 +92,9 @@ func warm_pipelines(position: Vector3) -> void:
 		_mesh.surface_end()
 
 
-func setup(sim, container: Node3D, audio_provider: Callable, fx_provider: Callable,
-		listener_provider: Callable, muzzle_provider := Callable()) -> void:
+func setup(sim: Simulation, container: Node3D, audio_provider: Callable,
+		fx_provider: Callable, listener_provider: Callable,
+		muzzle_provider := Callable()) -> void:
 	_sim = sim
 	_audio_provider = audio_provider
 	_fx_provider = fx_provider
@@ -137,15 +138,17 @@ func teardown() -> void:
 
 ## Once per present (beside the other passes), after the sim advanced. The
 ## pending-sound countdown consumes logic ticks inside the sim now
-## (world/fire_sound.h) — this pass only drains and plays.
+## (world/fire_sound.h) — this pass only drains and plays. Each drain forwards
+## into a public data leg (the present_snapshot precedent): tests feed the same
+## rows without a live sim.
 func present() -> void:
 	if _sim == null:
 		return
-	_drain_fires()
-	_drain_fire_sounds()
-	_drain_slot_sounds()
-	_drain_sound_emitters()
-	_draw_tracers()
+	present_fires(_sim.drain_fire_presentation_events())
+	present_fire_sounds(_sim.drain_fire_sounds())
+	present_slot_sounds(_sim.drain_slot_sounds())
+	present_sound_emitters(_sim.drain_sound_emitters())
+	draw_tracer_rows(_sim.get_tracer_trails())
 
 
 # The body slot-sound drain (footsteps/foley/landing thumps/death screams): the
@@ -157,14 +160,12 @@ func present() -> void:
 # plays your own steps; only fire has an action-slot presentation to defer to).
 # Slots 43/44 (chute flap / freefall) refire every body tick by design; the
 # exclusive key folds the refires into one continuous voice (D-SND-10).
-func _drain_slot_sounds() -> void:
-	if not _sim.has_method("drain_slot_sounds"):
-		return  # stale native DLL — presentation degrades silently, sim unaffected
-	var events: Array = _sim.drain_slot_sounds()
+func present_slot_sounds(events: Array) -> void:
 	if events.is_empty():
 		return
-	var audio = _audio_provider.call() if _audio_provider.is_valid() else null
-	if audio == null or not audio.has_method("slot_soundset"):
+	var audio: MissionAudio = _audio_provider.call() \
+			if _audio_provider.is_valid() else null
+	if audio == null:
 		return
 	for ev_v in events:
 		var ev: Dictionary = ev_v
@@ -185,23 +186,20 @@ func _drain_slot_sounds() -> void:
 # advancing to the end of a catch-up frame, preserving the 30-tick keep-alive.
 # [orig: SoundEmitter_RegisterSetLayers @0x528340;
 # SoundEmitter_UpdateAndMixTop8 @0x5284a0]
-func _drain_sound_emitters() -> void:
-	var events: Array = _sim.drain_sound_emitters()
+func present_sound_emitters(events: Array) -> void:
 	if events.is_empty():
 		return
-	var audio = _audio_provider.call() if _audio_provider.is_valid() else null
+	var audio: MissionAudio = _audio_provider.call() \
+			if _audio_provider.is_valid() else null
 	if audio == null:
 		return
 	audio.apply_sound_emitters(events)
 
 
-func _drain_fires() -> void:
-	if not _sim.has_method("drain_fire_presentation_events"):
-		return  # stale native DLL — presentation degrades silently, sim unaffected
-	var events: Array = _sim.drain_fire_presentation_events()
+func present_fires(events: Array) -> void:
 	if events.is_empty():
 		return
-	var fx = _fx_provider.call() if _fx_provider.is_valid() else null
+	var fx: EffectWorld = _fx_provider.call() if _fx_provider.is_valid() else null
 	for ev_v in events:
 		var ev: Dictionary = ev_v
 		# The local player's own fire is presented by the action-slot legs
@@ -256,11 +254,11 @@ func _drain_fires() -> void:
 # max-range cull runs in the audio bank (D-AI-8).
 # [orig: Entity_PlaySound3D_FullVolume @ 0x528e20 / Sound_TickPendingSlots
 #  @ 0x529310]
-func _drain_fire_sounds() -> void:
-	var sounds: Array = _sim.drain_fire_sounds()
+func present_fire_sounds(sounds: Array) -> void:
 	if sounds.is_empty():
 		return
-	var audio = _audio_provider.call() if _audio_provider.is_valid() else null
+	var audio: MissionAudio = _audio_provider.call() \
+			if _audio_provider.is_valid() else null
 	if audio == null:
 		return
 	for row_v in sounds:
@@ -275,11 +273,10 @@ func _drain_fire_sounds() -> void:
 # engine/runtime/renderer/tracer_frame.cpp]. This pass drains the sim's trail
 # rows, hands them with the camera to the native compile, and uploads each
 # family's vertex run verbatim.
-func _draw_tracers() -> void:
-	if _mesh == null or not _sim.has_method("get_tracer_trails"):
+func draw_tracer_rows(rows: PackedFloat32Array) -> void:
+	if _mesh == null:
 		return
 	_mesh.clear_surfaces()
-	var rows: PackedFloat32Array = _sim.get_tracer_trails()
 	if rows.is_empty():
 		return
 	var cam := _listener_pos()
@@ -305,7 +302,6 @@ func _emit_strip(family: Dictionary, mat: StandardMaterial3D) -> void:
 
 func _listener_pos() -> Vector3:
 	if _listener_provider.is_valid():
-		var v = _listener_provider.call()
-		if v is Vector3:
-			return v
+		var v: Vector3 = _listener_provider.call()
+		return v
 	return Vector3.INF

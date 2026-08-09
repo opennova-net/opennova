@@ -11,8 +11,10 @@ class StubViewport:
 	var debug_draw := 0
 
 
+# Typed world double (ADR 0034): IS a GameWorld, with the overlay knobs and
+# the status report overridden to a dictionary-backed model.
 class StubWorld:
-	extends RefCounted
+	extends GameWorld
 
 	var enabled := {
 		&"show_skeletons": false,
@@ -86,6 +88,7 @@ class StubWorld:
 func _make_page() -> Dictionary:
 	var viewport := StubViewport.new()
 	var world := StubWorld.new()
+	autofree(world)
 	var session := DebugSession.new()
 	DebugCatalog.install(session)
 	DebugCatalog.bind_runtime_targets(

@@ -292,7 +292,7 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 	if options.has("fire_audio"):
 		_destruction_present = DestructionPresentPass.new()
 		_destruction_present.setup(_sim, container, _index, options.get("placer"),
-			options.get("item_db"), options.get("game_world"),
+			options.get("item_db"), options.get("effect_anchors"),
 			options.get("fire_audio", Callable()),
 			options.get("fire_fx", Callable()),
 			_wire_present)
@@ -307,7 +307,7 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 	_throwable_present = ThrowablePresentPass.new()
 	_throwable_present.setup(_sim, container, options.get("placer"),
 		options.get("item_db"),
-		options.get("fire_fx", Callable()), options.get("game_world"))
+		options.get("fire_fx", Callable()), options.get("effect_anchors"))
 	simulation_restarted.connect(
 		Callable(_throwable_present, 'reset_runtime_state'))
 	# ADR 0033 R1: the loop shape, the per-tick leg order, and the post-batch

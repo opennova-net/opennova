@@ -32,7 +32,7 @@ const AXES_VISIBLE_KEY := "axes_visible"
 # "<id>_rect"). Ids in use: "camera", "environment"; "assets" reserved.
 const PANELS_STATE_SECTION := "panels"
 
-var _index: RefCounted
+var _index: ResourceIndex
 var _resource_root: ResourceRoot = ResourceRoot.new()
 var _root_dir: String = ""
 var _reference_index: ReferenceIndex
@@ -118,9 +118,7 @@ func scan_root() -> Dictionary:
 	var err: Error = _index.scan(_root_dir)
 	if err == OK:
 		return {"err": OK, "status": "Resource directory indexed."}
-	var detail := ""
-	if _index.has_method("get_last_error"):
-		detail = String(_index.get_last_error())
+	var detail := String(_index.get_last_error())
 	return {"err": err, "status": "Resource scan failed." if detail.is_empty() else detail}
 
 

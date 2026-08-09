@@ -70,7 +70,7 @@ func _load_object_data(graphic: String) -> ObjectData:
 # The model's bone origins override the .bad's lossy BadBone.position (the placer's
 # body path does the same) — the .3di carries the real pivots. The cache key folds the
 # table so two graphics sharing one .adm with different pivots don't alias.
-func _apply_skeletal_anim(model: Node3D, item_id: int, model_bone_origins := PackedVector3Array()) -> void:
+func _apply_skeletal_anim(model: ObjectModel, item_id: int, model_bone_origins := PackedVector3Array()) -> void:
 	if model == null or _root == null or _item_db == null:
 		return
 	var anim_def := _item_db.get_anim_def(item_id)
@@ -78,7 +78,7 @@ func _apply_skeletal_anim(model: Node3D, item_id: int, model_bone_origins := Pac
 		return
 	var adm_name := anim_def if anim_def.to_lower().ends_with(".adm") else anim_def + ".adm"
 	var cache_key := adm_name + "#" + str(hash(model_bone_origins))
-	var skeletal
+	var skeletal: SkeletalAnim
 	if _adm_cache.has(cache_key):
 		skeletal = _adm_cache[cache_key]
 	else:
@@ -86,5 +86,5 @@ func _apply_skeletal_anim(model: Node3D, item_id: int, model_bone_origins := Pac
 		if not skeletal.load_from_resource_root(_root, adm_name, model_bone_origins):
 			skeletal = null
 		_adm_cache[cache_key] = skeletal
-	if skeletal != null and model.has_method("set_skeletal_anim"):
+	if skeletal != null:
 		model.set_skeletal_anim(skeletal)

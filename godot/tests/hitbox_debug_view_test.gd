@@ -7,32 +7,27 @@ extends GutTest
 const ViewScript := preload("res://src/debug/hitbox_debug_view.gd")
 
 
-class FakeSim:
-	extends Node
-	var debug: Dictionary = {}
+## Typed view harness (ADR 0034): IS the view, refreshing from a carried
+## payload through the public render seam instead of a live sim, counting
+## refreshes so the cadence tests observe the fetch schedule.
+class PayloadView:
+	extends ViewScript
+	var payload: Dictionary = {}
 	var copy_payload_each_read := false
 	var read_count := 0
-	func get_hitbox_debug() -> Dictionary:
+
+	func refresh_now() -> void:
 		read_count += 1
-		return debug.duplicate(true) if copy_payload_each_read else debug
+		render_report(payload.duplicate(true)
+				if copy_payload_each_read else payload)
 
 
-class FakeWorld:
-	extends Node
-	var sim: Node = null
-	func get_sim():
-		return sim
-
-
-func _make_view(payload: Dictionary, copy_payload_each_read := false) -> Node3D:
-	var world: FakeWorld = autofree(FakeWorld.new())
-	var sim: FakeSim = autofree(FakeSim.new())
-	sim.debug = payload
-	sim.copy_payload_each_read = copy_payload_each_read
-	world.sim = sim
-	var view: Node3D = ViewScript.new()
+func _make_view(payload: Dictionary, copy_payload_each_read := false) -> PayloadView:
+	var view := PayloadView.new()
+	view.payload = payload
+	view.copy_payload_each_read = copy_payload_each_read
 	add_child_autofree(view)
-	view.setup(world)
+	view.setup(null)
 	return view
 
 
@@ -239,60 +234,42 @@ func test_actor_budget_uses_one_packed_colored_organic_multimesh() -> void:
 
 func test_refresh_cadence_is_six_hz_at_common_frame_rates() -> void:
 	for fps in [60, 144, 240]:
-		var world: FakeWorld = autofree(FakeWorld.new())
-		var sim: FakeSim = autofree(FakeSim.new())
-		sim.debug = { "entities": [], "organics": [] }
-		world.sim = sim
-		var view: Node3D = ViewScript.new()
-		add_child_autofree(view)
-		view.setup(world)
+		var view := _make_view({ "entities": [], "organics": [] })
 		view.set_process(false)
-		assert_eq(sim.read_count, 0,
+		assert_eq(view.read_count, 0,
 				"setup does not fetch before the first scheduled cadence at %d FPS" % fps)
 		for frame_index in range(fps):
 			view.advance_refresh(1.0 / float(fps))
-		assert_eq(sim.read_count, 6,
+		assert_eq(view.read_count, 6,
 				"one simulated second performs six native reads at %d FPS" % fps)
 
 
 func test_refresh_cadence_discards_missed_intervals_without_frame_bursts() -> void:
-	var world: FakeWorld = autofree(FakeWorld.new())
-	var sim: FakeSim = autofree(FakeSim.new())
-	sim.debug = { "entities": [], "organics": [] }
-	world.sim = sim
-	var view: Node3D = ViewScript.new()
-	add_child_autofree(view)
-	view.setup(world)
+	var view := _make_view({ "entities": [], "organics": [] })
 	view.set_process(false)
 
 	view.advance_refresh(2.0)
-	assert_eq(sim.read_count, 1, "a two-second hitch performs at most one native read")
+	assert_eq(view.read_count, 1, "a two-second hitch performs at most one native read")
 	for zero_frame in range(4):
 		view.advance_refresh(0.0)
-	assert_eq(sim.read_count, 1, "zero-delta frames do not replay missed intervals")
+	assert_eq(view.read_count, 1, "zero-delta frames do not replay missed intervals")
 	for frame_index in range(9):
 		view.advance_refresh(1.0 / 60.0)
-	assert_eq(sim.read_count, 1,
+	assert_eq(view.read_count, 1,
 			"nine fresh 60 FPS frames remain below the next cadence boundary")
 	view.advance_refresh(1.0 / 60.0)
-	assert_eq(sim.read_count, 2,
+	assert_eq(view.read_count, 2,
 			"the tenth fresh 60 FPS frame reaches exactly one new cadence boundary")
 
 	for fps in [4, 2]:
-		var low_world: FakeWorld = autofree(FakeWorld.new())
-		var low_sim: FakeSim = autofree(FakeSim.new())
-		low_sim.debug = { "entities": [], "organics": [] }
-		low_world.sim = low_sim
-		var low_view: Node3D = ViewScript.new()
-		add_child_autofree(low_view)
-		low_view.setup(low_world)
+		var low_view := _make_view({ "entities": [], "organics": [] })
 		low_view.set_process(false)
 		for frame_index in range(fps):
-			var before_frame_reads := low_sim.read_count
+			var before_frame_reads := low_view.read_count
 			low_view.advance_refresh(1.0 / float(fps))
-			assert_lte(low_sim.read_count - before_frame_reads, 1,
+			assert_lte(low_view.read_count - before_frame_reads, 1,
 					"%d FPS never bursts more than one native read in a frame" % fps)
-		assert_eq(low_sim.read_count, fps,
+		assert_eq(low_view.read_count, fps,
 				"%d FPS performs one bounded read per available frame" % fps)
 
 

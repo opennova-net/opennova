@@ -13,27 +13,14 @@ const PAIR_BANK := "user://music_map_pair.sbf"
 const PAIR_SCRIPT := "user://music_map_pair.bin"
 
 
-class ReadOnlyMusicScript:
-	extends RefCounted
-
-	func get_default_script_name() -> StringName:
-		return &"readonly"
-
-	func get_program_ast(_script_name: StringName) -> Array:
-		return [{
-			"name": "Begin",
-			"index": 0,
-			"statements": [{"kind": "done", "text": "done"}],
-		}]
-
-	func get_section_names(_script_name: StringName) -> PackedStringArray:
-		return PackedStringArray(["Begin"])
-
-
+# A real document over the real script fixture (Begin exists in jo_gamemus),
+# pinned read-only: authoring is blocked with the fixed reason regardless of
+# compile state. Rides the typed MusicEditorDocument seam (ADR 0034).
 class ReadOnlyDocument:
-	extends RefCounted
-	signal changed
-	var mus_script := ReadOnlyMusicScript.new()
+	extends MusicEditorDocument
+
+	func _init() -> void:
+		open_script(ProjectSettings.globalize_path(SCRIPT_FIXTURE))
 
 	func script_loaded() -> bool:
 		return true

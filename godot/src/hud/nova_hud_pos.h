@@ -6,11 +6,14 @@
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
+#include <godot_cpp/variant/rect2.hpp>
 #include <godot_cpp/variant/rect2i.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
+#include <godot_cpp/variant/vector3.hpp>
 #include <godot_cpp/variant/vector3i.hpp>
+#include <godot_cpp/variant/vector4i.hpp>
 
 #include <def/def.h>
 
@@ -67,6 +70,9 @@ public:
 	// the GDScript Hud* helpers delegate here and keep only the CanvasItem
 	// work). Each carries its witness at the engine impl.
 	static Vector2 scale_point(const Vector2 &p_design, const Vector2 &p_surface);
+	// Both corners through scale_point (the original scales x1,y1 and x2,y2
+	// independently and differences them for the size).
+	static Rect2 scale_rect(const Rect2 &p_design, const Vector2 &p_surface);
 	static Vector2 pixel_delta_to_design(const Vector2 &p_delta, const Vector2 &p_surface);
 	static int fade_decay(int p_elapsed_ticks, int p_ramp_ticks);
 	static int fade_flash_alpha(int p_elapsed_ticks, int p_ramp_ticks,
@@ -110,8 +116,23 @@ public:
 	String get_font_hi() const;
 	String get_font_lo() const;
 	Rect2i get_health_rect() const;
+	Rect2i get_heat_rect() const;
+	// HUDPOWERBAR is authored x,y,w,h (not corners) — see rect_from_xywh below.
+	Rect2i get_powerbar_rect() const;
 	Vector2i get_stance_pos() const;
 	Vector2i get_veh_stance_pos() const;
+	// The 4-field positioned-text records (x, y, hidden, align) — the parse
+	// and hidden-gate witnesses live at the pos4 helper in the .cpp.
+	Vector4i get_ammo_count_pos() const;
+	Vector4i get_weapon_name_pos() const;
+	Vector4i get_game_info_pos() const;
+	Vector4i get_wpd_info_pos() const;
+	Vector2i get_chat_text_pos() const;
+	Vector2i get_clip_pos() const;
+	// ALPHAFADE raw file fields (base %, max %, seconds); the parse witness is
+	// on the to_dictionary misc block.
+	Vector3 get_alpha_fade() const;
+	int get_hud_chline() const;
 	// [{ id:int, offset:Vector2i, texture:String, name:String }] — the HUDSTANCE frames.
 	Array get_stances() const;
 	// [{ texture:String, pos:Vector2i }]

@@ -50,10 +50,16 @@ func _build() -> void:
 
 func refresh() -> void:
 	var sim := _ctx.sim()
-	if sim == null or not sim.has_method("get_occlusion_debug"):
+	if sim == null:
 		_clear_pane("No occlusion data.")
 		return
-	var occ: Dictionary = sim.get_occlusion_debug()
+	render_report(sim.get_occlusion_debug())
+
+
+## Render one occlusion snapshot (Simulation.get_occlusion_debug's shape).
+## Split from refresh() so tests and probes can drive the pane with report
+## data directly.
+func render_report(occ: Dictionary) -> void:
 	if not bool(occ.get("active", false)):
 		_clear_pane("No portal-carrying buildings in this mission.")
 		return

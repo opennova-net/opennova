@@ -68,7 +68,7 @@ var _viewport: SubViewport
 var _root: Node3D
 var _guide_root: Node3D
 var _environment: MissionEnvironment
-var _camera: Camera3D
+var _camera: FlyCamera
 var _grid_material: StandardMaterial3D
 var _axis_material: StandardMaterial3D
 var _grid_visible := true
@@ -130,7 +130,7 @@ func set_menu_preview(enabled: bool) -> void:
 		return
 	set_grid_visible(false)
 	set_axes_visible(false)
-	if _camera != null and _camera.has_method("set_gameplay_locked"):
+	if _camera != null:
 		_camera.set_gameplay_locked(true)
 	if _viewport_container != null:
 		_viewport_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -549,10 +549,10 @@ func _frame_menu_pose(bounds: AABB) -> void:
 # Position the menu camera front-on at the current zoom. The model's rotation lives on
 # _model_root (see _process), so the camera stays put and only its distance changes.
 func _apply_menu_camera() -> void:
-	if _camera == null or not _menu_framed or not _camera.has_method("frame_bounds_custom"):
+	if _camera == null or not _menu_framed:
 		return
 	var dist_scale: float = MENU_DISTANCE_SCALE * lerpf(1.0, MENU_ZOOM_IN, _zoom_blend)
-	_camera.call("frame_bounds_custom", _menu_center, _menu_radius, dist_scale,
+	_camera.frame_bounds_custom(_menu_center, _menu_radius, dist_scale,
 		maxf(_menu_radius * 8.0, 6.0), 0.0, MENU_PITCH)
 
 

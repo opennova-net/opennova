@@ -6,11 +6,11 @@ extends Node
 ## viewport routes game clicks here while overlay-panel clicks (consumed by
 ## Controls before the unhandled phase) never leak through.
 
-var _world: Node = null  # duck-typed get_sim(); re-resolved every click
+var _world: GameWorld = null  # re-resolved for its sim every click
 var _pick_list: DebugPickList = null
 
 
-func setup(world: Node, pick_list: DebugPickList) -> void:
+func setup(world: GameWorld, pick_list: DebugPickList) -> void:
 	_world = world
 	_pick_list = pick_list
 
@@ -19,8 +19,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	var button := event as InputEventMouseButton
 	if button == null or not button.pressed or button.button_index != MOUSE_BUTTON_LEFT:
 		return
-	if _pick_list == null or _world == null or not is_instance_valid(_world) \
-			or not _world.has_method("get_sim"):
+	if _pick_list == null or _world == null or not is_instance_valid(_world):
 		return
 	var viewport := get_viewport()
 	if viewport == null:

@@ -53,7 +53,7 @@ func _play_member(member: Dictionary, resource_root) -> void:
 		push_warning("SoundPreviewPlayer: member has no .wav reference")
 		return
 	var name := wav_path.get_file()
-	if resource_root == null or not resource_root.has_method("read_file"):
+	if resource_root == null:
 		push_warning("SoundPreviewPlayer: no resource root to resolve %s" % name)
 		return
 	var bytes: PackedByteArray = resource_root.read_file(name)

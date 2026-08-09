@@ -95,8 +95,8 @@ func _add_line(column: VBoxContainer, text: String, value: String, size: int) ->
 # force loose-first for this lookup; a missing/unparsable image degrades to the
 # plain dim, never a load failure.
 # [orig: CUIImage_LoadTextureFromFile @ 0x6541ba]
-func _add_backdrop(root, image_name: String) -> void:
-	if root == null or not root.has_method("read_file"):
+func _add_backdrop(root: ResourceRoot, image_name: String) -> void:
+	if root == null:
 		return
 	var bytes: PackedByteArray = root.read_file(
 			image_name, ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST)

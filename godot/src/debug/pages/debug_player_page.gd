@@ -265,7 +265,7 @@ func _apply_player_pose_to_ui(snapshot: Dictionary) -> void:
 
 
 func _refresh_player_details() -> void:
-	var sim := _ctx.nova_simulation()
+	var sim := _ctx.sim()
 	if sim == null:
 		_set_optional_text(_player_combat_label, "")
 		_set_inventory_text("", "Inventory", "")

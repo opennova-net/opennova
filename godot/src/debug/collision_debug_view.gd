@@ -75,7 +75,13 @@ func _build_view() -> void:
 
 
 func _refresh_from_sim(sim: Simulation) -> void:
-	var debug: Dictionary = sim.get_collision_debug()
+	render_report(sim.get_collision_debug())
+
+
+## Render one collision snapshot (Simulation.get_collision_debug's shape).
+## Split from the sim fetch so tests and probes can drive the view with
+## report data directly.
+func render_report(debug: Dictionary) -> void:
 	var instances: Array = debug.get("instances", [])
 	var player: Dictionary = debug.get("player", {})
 	_drawable_count = _count_drawables(instances, player)

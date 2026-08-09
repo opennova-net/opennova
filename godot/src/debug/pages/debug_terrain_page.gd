@@ -151,24 +151,20 @@ func refresh() -> void:
 		int(f.get("detail_cache_residents", 0)), int(f.get("detail_cache_evictions", 0))]
 
 
-func _terrain() -> Object:
+func _terrain() -> Terrain:
 	var world := _ctx.world()
-	if world == null or not world.has_method("get_terrain_node"):
+	if world == null:
 		return null
-	var terrain: Variant = world.get_terrain_node()
-	if terrain is Object and is_instance_valid(terrain):
-		return terrain
-	return null
+	var terrain := world.get_terrain_node()
+	return terrain if terrain != null and is_instance_valid(terrain) else null
 
 
-func _dispatcher() -> Object:
+func _dispatcher() -> FoliageDispatcher:
 	var world := _ctx.world()
-	if world == null or not world.has_method("get_foliage_dispatcher"):
+	if world == null:
 		return null
-	var dispatcher: Variant = world.get_foliage_dispatcher()
-	if dispatcher is Object and is_instance_valid(dispatcher):
-		return dispatcher
-	return null
+	var dispatcher := world.get_foliage_dispatcher()
+	return dispatcher if dispatcher != null and is_instance_valid(dispatcher) else null
 
 
 func _on_mode_selected(index: int) -> void:

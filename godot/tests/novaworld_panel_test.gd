@@ -8,27 +8,68 @@ extends GutTest
 const NovaWorldPanel := preload("res://game/novaworld_panel.gd")
 
 
-# A stand-in resource root: the panel only calls has_method("list_files") + list_files(".bms").
-class StubRoot:
-	extends RefCounted
-	var _files: PackedStringArray
-	func _init(files: PackedStringArray) -> void:
-		_files = files
-	func list_files(_ext: String) -> PackedStringArray:
-		return _files
+# A REAL ResourceRoot (ADR 0034 typed seam) over a per-test temp dir: the
+# mission set is whatever .bms files the dir carries, including subdirectory
+# entries (list_files returns paths; MissionCatalog reduces to basenames).
+var _root_dirs: Array[String] = []
+
+
+func after_each() -> void:
+	for dir in _root_dirs:
+		_remove_dir_recursive(dir)
+	_root_dirs.clear()
+
+
+func _remove_dir_recursive(path: String) -> void:
+	var dir := DirAccess.open(path)
+	if dir == null:
+		return
+	dir.list_dir_begin()
+	var entry := dir.get_next()
+	while not entry.is_empty():
+		if entry != "." and entry != "..":
+			var child := path.path_join(entry)
+			if dir.current_is_dir():
+				_remove_dir_recursive(child)
+			else:
+				DirAccess.remove_absolute(child)
+		entry = dir.get_next()
+	dir.list_dir_end()
+	DirAccess.remove_absolute(path)
+
+
+func _real_root(missions: PackedStringArray) -> ResourceRoot:
+	var dir := OS.get_temp_dir().replace("\\", "/") + \
+			"/opennova_nw_panel_%d_%d" % [Time.get_ticks_usec(), _root_dirs.size()]
+	assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
+	_root_dirs.append(dir)
+	for mission in missions:
+		var path := dir.path_join(mission)
+		DirAccess.make_dir_recursive_absolute(path.get_base_dir())
+		var file := FileAccess.open(path, FileAccess.WRITE)
+		assert_not_null(file, "mission fixture %s opens for write" % mission)
+		if file != null:
+			file.store_string("bms")
+			file.close()
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(dir), OK)
+	return root
 
 
 func _make_panel(missions: PackedStringArray) -> NovaWorldPanel:
 	var panel = NovaWorldPanel.new()
 	autofree(panel)  # freed at teardown WITHOUT entering the tree, so _ready/_create_client never run
 	panel._target = NovaWorldSettings.Target.OPENNOVA
-	panel.resource_root = StubRoot.new(missions)
+	panel.resource_root = _real_root(missions)
 	panel._build_ui()  # builds the UI + populates the Map picker off-tree
 	return panel
 
 
 func test_map_picker_populates_from_root() -> void:
-	var panel := _make_panel(PackedStringArray(["coop/alpha.bms", "coop/bravo.bms"]))
+	# The loose index is flat (memory: ResourceRoot indexes flat filenames);
+	# list_files still returns path-bearing entries, so MissionCatalog's
+	# basename reduction is what the picker text asserts below.
+	var panel := _make_panel(PackedStringArray(["alpha.bms", "bravo.bms"]))
 	assert_eq(panel._mission_option.item_count, 2, "Map picker lists the root's .bms missions")
 	assert_eq(panel._mission_option.get_item_text(0), "alpha.bms", "items are basenames")
 	assert_eq(panel._selected_mission(), "alpha.bms", "first mission selected by default")

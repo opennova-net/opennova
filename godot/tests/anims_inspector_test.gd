@@ -22,7 +22,7 @@ func _anim_root() -> ResourceRoot:
 # loaded, and the ANIMS workflow built (main into `mount`, detail into `dock`).
 func _anims_workspace() -> Dictionary:
 	var ws = ObjectWorkspaceScript.new()
-	ws.set_editor_shell(self)
+	ws.set_editor_shell(add_child_autofree(WorkspaceShell.new()))
 	assert_eq(int(ws.open_file(ProjectSettings.globalize_path(SHED))), OK, "Shed fixture opens")
 	var viewport_mount: Control = add_child_autofree(Control.new())
 	ws.mount_viewport(viewport_mount)
@@ -43,7 +43,7 @@ func test_anims_workflow_appended_with_stable_ids() -> void:
 	assert_eq(int(ObjectWorkspaceScript.Workflow.LODS), 4, "LODS stays raw id 4")
 	assert_eq(int(ObjectWorkspaceScript.Workflow.ANIMS), 5, "ANIMS appended after LODS")
 	var ws = ObjectWorkspaceScript.new()
-	ws.set_editor_shell(self)
+	ws.set_editor_shell(add_child_autofree(WorkspaceShell.new()))
 	var labels: Array = []
 	for def in ws.get_workflows():
 		labels.append(String(def.label))
@@ -197,7 +197,7 @@ func test_arms_overlay_scrubs_in_lockstep() -> void:
 
 func test_preview_workflow_no_longer_carries_the_adm_block() -> void:
 	var ws = ObjectWorkspaceScript.new()
-	ws.set_editor_shell(self)
+	ws.set_editor_shell(add_child_autofree(WorkspaceShell.new()))
 	assert_eq(int(ws.open_file(ProjectSettings.globalize_path(SHED))), OK)
 	var viewport_mount: Control = add_child_autofree(Control.new())
 	ws.mount_viewport(viewport_mount)

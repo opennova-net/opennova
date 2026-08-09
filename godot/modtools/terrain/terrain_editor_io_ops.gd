@@ -228,7 +228,7 @@ func _check_loaded_cdep_violations() -> void:
 	var count: int = _te._data.cdep_count_violations()
 	if count == 0:
 		return
-	if _te.workstation and _te.workstation.has_method("prompt_cdep_violations"):
+	if _te.workstation != null:
 		_te.workstation.prompt_cdep_violations(count, Callable(self, "_auto_fix_cdep_violations"))
 	else:
 		_te._notify_status("Heightmap has %d area%s too steep for Joint Operations / DFX export." % [count, "" if count == 1 else "s"])
@@ -299,7 +299,7 @@ func begin_export_terrain(output_dir: String, flavor: int) -> Error:
 	_te._brush_session.reset_stroke_tracking()
 	_te._remember_export_dir(output_dir)
 
-	if _te.workstation and _te.workstation.has_method("on_export_started"):
+	if _te.workstation != null:
 		_te.workstation.on_export_started(output_dir)
 
 	return OK
@@ -379,7 +379,7 @@ func _finish_export_job() -> void:
 	_te._export_job = null
 	_te._export_output_dir = ""
 
-	if _te.workstation and _te.workstation.has_method("on_export_completed"):
+	if _te.workstation != null:
 		_te.workstation.on_export_completed(err, message)
 	_te._mark_ui_state_changed()
 

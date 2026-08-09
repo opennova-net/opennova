@@ -48,20 +48,19 @@ var _grid_visible := true
 var _axes_visible := true
 
 
-func set_editor_shell(value: Node) -> void:
+func set_editor_shell(value: WorkspaceShell) -> void:
 	super.set_editor_shell(value)
 	_ensure_object_editor()
 
 
-func set_environment_editor(value) -> void:
+func set_environment_editor(value: EnvironmentEditor) -> void:
 	SignalRebind.rebind(environment_editor, value, &"environment_changed", _on_environment_editor_changed)
 	environment_editor = value
 	_apply_environment_to_preview()
 
 
-func bind_to_editor(value: Node) -> void:
-	var env = value.get_environment_editor() if value != null and value.has_method("get_environment_editor") else null
-	set_environment_editor(env)
+func bind_to_editor(value: EditorApp) -> void:
+	set_environment_editor(value.get_environment_editor() if value != null else null)
 
 
 func get_workspace_tooltip() -> String:
@@ -161,7 +160,7 @@ func release_viewport() -> void:
 	_preview = null
 
 
-func get_viewport_camera() -> Camera3D:
+func get_viewport_camera() -> FlyCamera:
 	if _preview != null:
 		return _preview.get_editor_camera()
 	return null
@@ -265,9 +264,31 @@ func build_workflow_inspector(workflow_id: int, mount: Control) -> void:
 	_ensure_detail_dock().sync_mount()
 
 
-# The domain document the EditorWorkspace base derives undo/redo + dirty from.
+# Untyped accessor for tests/MCP; the edit hooks below carry the typed calls.
 func get_editor_document() -> Object:
 	return object_editor
+
+
+func has_unsaved_changes() -> bool:
+	return object_editor != null and object_editor.is_dirty
+
+
+func can_undo() -> bool:
+	return object_editor != null and not is_busy() and object_editor.can_undo()
+
+
+func can_redo() -> bool:
+	return object_editor != null and not is_busy() and object_editor.can_redo()
+
+
+func undo() -> void:
+	if object_editor != null:
+		object_editor.undo()
+
+
+func redo() -> void:
+	if object_editor != null:
+		object_editor.redo()
 
 
 func can_new() -> bool:
@@ -339,7 +360,7 @@ func get_resource_root() -> ResourceRoot:
 ## inspectors' .adm / arms-.3di pickers ask the workspace, not the shell).
 ## No-op without a shell (headless / tests).
 func open_file_picker(title: String, files: PackedStringArray, on_pick: Callable) -> void:
-	if editor_shell != null and editor_shell.has_method("open_file_picker"):
+	if editor_shell != null:
 		editor_shell.open_file_picker(title, files, on_pick)
 
 
@@ -429,7 +450,7 @@ func _build_inspector_defs() -> Array:
 
 
 # Object inspectors take the workspace in their constructor.
-func _instantiate_inspector(def: InspectorDef) -> Object:
+func _instantiate_inspector(def: InspectorDef) -> WorkflowInspector:
 	return def.inspector_script.new(self)
 
 

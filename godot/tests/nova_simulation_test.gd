@@ -1297,7 +1297,7 @@ func test_weapon_event_batch_snapshots_the_scope_settle_tick() -> void:
 func test_nocardswitch_controls_settled_sights_card_for_sighted_weapon() -> void:
 	# Retail-derived flag vectors: M4 EOTech is Sighted and has no NoCardSwitch;
 	# Remington is Sighted plus NoCardSwitch. The original's suppression predicate
-	# exempts ForceScoped. Parser-to-HUD coverage lives in game_hud_test.gd.
+	# exempts ForceScoped. Parser-to-HUD coverage lives in hud_overlay_test.gd.
 	for case in [
 		{"name": "WPN_M4AUTO_EOTECH", "flags": 0x01000902, "expected_card": true},
 		{"name": "WPN_RemmingtonSG", "flags": 0x02000002, "expected_card": false},

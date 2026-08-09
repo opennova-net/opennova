@@ -1438,29 +1438,27 @@ func test_adapter_routes_multi_selection_to_inspector() -> void:
 # --- Phase 5: strings integration + cross-workspace jumps ------------------------
 
 # Stub shell capturing the cross-workspace jump calls the adapter makes.
-class _StubShell extends Node:
+class _StubShell extends WorkspaceShell:
 	var strings_calls: Array = []
 	var font_calls: Array = []
 	var menu_calls: Array = []
-	func open_strings_workspace(path: String, key: String) -> int:
+	func open_strings_workspace(path: String, key: String) -> Error:
 		strings_calls.append([path, key])
 		return OK
-	func open_font_workspace(font: String) -> int:
+	func open_font_workspace(font: String) -> Error:
 		font_calls.append(font)
 		return OK
-	func open_menu_workspace(file: String, screen: String) -> int:
+	func open_menu_workspace(file: String, screen: String = "") -> Error:
 		menu_calls.append([file, screen])
 		return OK
-	func show_status_message(_text: String, _duration := 4.0, _severity: StringName = &"info") -> void:
-		pass
 
 
 # Stub editor exposing only the resolved-table path the adapter reads for the jump.
-class _StubEditor extends Control:
+class _StubEditor extends MnuEditor:
 	var path: String = ""
 	func get_text_resource_path() -> String:
 		return path
-	func get_text_resource():
+	func get_text_resource() -> RtxtStringFile:
 		return null
 
 

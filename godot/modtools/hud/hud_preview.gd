@@ -4,11 +4,13 @@ extends Control
 ## Read-only visual preview of a hudpos.def layout for the ONED HUD workspace.
 ##
 ## Draws each HUD element at its hudpos design-space position (scaled to this
-## control's rect via the shared HudLayout) using the shell-neutral HUD helpers and
-## stubbed live values. Real element art (HUD frame, stance frame) is loaded
-## best-effort from the mounted VFS; missing art degrades to labeled placeholder
-## boxes so the layout is always legible. The model is the witnessed original —
-## see docs/interface/hud-re.md.
+## control's rect via the native HudPos scaling statics) with stubbed live
+## values; the witnessed policy math (scaling, health bands, stance Q16 scale)
+## comes from the same engine hud_math the runtime overlay compiles with. Real
+## element art (HUD frame, stance frame) is loaded best-effort from the mounted
+## VFS; missing art degrades to labeled placeholder boxes so the layout is
+## always legible. The model is the witnessed original — see
+## docs/interface/hud-re.md.
 
 var _hudpos: HudPos
 var _root: ResourceRoot
@@ -85,7 +87,7 @@ func _draw() -> void:
 		var frames := _hudpos.get_static_frames()
 		if frames.size() > 0:
 			var fpos: Vector2i = (frames[0] as Dictionary).get("pos", Vector2i.ZERO)
-			var fdst := HudLayout.scale_rect(Rect2(fpos, _frame_tex.get_size()), surface)
+			var fdst := HudPos.scale_rect(Rect2(fpos, _frame_tex.get_size()), surface)
 			draw_texture_rect(_frame_tex, fdst, false, Color(1, 1, 1, 0.85))
 
 	# Health bar (witnessed thresholds + border).
@@ -93,20 +95,21 @@ func _draw() -> void:
 	var good: Color = colors.get("tagcolor_good", Color(0.02, 0.98, 0.05))
 	var mid: Color = colors.get("tagcolor_middle", Color(0.98, 0.65, 0.03))
 	var bad: Color = colors.get("tagcolor_bad", Color(0.69, 0.04, 0.04))
-	HudHealthBar.draw(self, Rect2(_hudpos.get_health_rect()), PREVIEW_HEALTH, border, good, mid, bad, surface)
+	_draw_health_bar(Rect2(_hudpos.get_health_rect()), PREVIEW_HEALTH,
+		border, good, mid, bad, surface)
 
 	# Stance indicator (the witnessed widget at HUDSTANCEPOS — not a compass).
 	var stance_anchor := Vector2(_hudpos.get_stance_pos())
 	if stance_anchor != Vector2.ZERO:
 		if _stance_tex != null:
-			HudStance.draw(self, _stance_tex, stance_anchor, surface)
+			_draw_stance_frame(_stance_tex, stance_anchor, surface)
 		else:
 			_draw_placeholder(stance_anchor, Vector2(44, 44), surface, "STANCE")
 
 	# Radar / spinmap bounds (the heading map area; draw its frame).
 	var spin := _hudpos.get_spinmap_bounds()
 	if spin.size != Vector2i.ZERO:
-		var sd := HudLayout.scale_rect(Rect2(spin), surface)
+		var sd := HudPos.scale_rect(Rect2(spin), surface)
 		draw_rect(sd, Color(0.3, 0.7, 0.3, 0.5), false, 1.0)
 		_draw_label(sd.position + Vector2(3, 13), "RADAR", Color(0.3, 0.7, 0.3, 0.8))
 
@@ -148,12 +151,44 @@ func _draw_text_element(positions: Dictionary, key: String, sample: String, colo
 	if _font != null:
 		HudText.draw_text(self, _font, p, surface, sample, color, align)
 	else:
-		var sp := HudLayout.scale_point(p, surface)
+		var sp := HudPos.scale_point(p, surface)
 		_draw_label(sp, sample, color, align)
 
 
+# The health bar preview: border + threshold-colored fill via the engine's
+# witnessed band math (hud_math health_color_band, the runtime overlay's
+# single source). [orig: HUD_DrawHealthBar @0x5a2e50]
+func _draw_health_bar(design_rect: Rect2, fraction: float, border: Color,
+		good: Color, mid: Color, bad: Color, surface: Vector2) -> void:
+	if design_rect.position == Vector2.ZERO and design_rect.size == Vector2.ZERO:
+		return # all-zero => element disabled
+	var r := HudPos.scale_rect(design_rect, surface)
+	var f := clampf(fraction, 0.0, 1.0)
+	var fill_color: Color = [good, mid, bad][HudPos.health_color_band(f)]
+	var fill_w := r.size.x * f
+	if fill_w > 1.0:
+		draw_rect(Rect2(r.position + Vector2(1, 1),
+			Vector2(fill_w - 1.0, maxf(r.size.y - 1.0, 0.0))), fill_color, true)
+	draw_rect(r, border, false)
+
+
+# One stance frame at the anchor through the engine's shared frame-0 Q16 scale
+# and 128-box centering (a single-frame preview is its own frame 0).
+# [orig: HUD_DrawStanceIndicator @0x599f10 shared scale @0x599fed..0x59a00a]
+func _draw_stance_frame(frame: Texture2D, anchor_design: Vector2, surface: Vector2) -> void:
+	var tex := Vector2i(frame.get_size())
+	var q16 := HudPos.stance_scale_q16(tex)
+	if q16 <= 0:
+		return
+	var scaled := Vector2(HudPos.stance_scaled_dim(tex.x, q16),
+			HudPos.stance_scaled_dim(tex.y, q16))
+	var offset := Vector2(HudPos.stance_center_offset(tex, q16))
+	draw_texture_rect(frame,
+		HudPos.scale_rect(Rect2(anchor_design + offset, scaled), surface), false)
+
+
 func _draw_placeholder(anchor_design: Vector2, design_size: Vector2, surface: Vector2, label: String) -> void:
-	var r := HudLayout.scale_rect(Rect2(anchor_design, design_size), surface)
+	var r := HudPos.scale_rect(Rect2(anchor_design, design_size), surface)
 	draw_rect(r, Color(0.5, 0.5, 0.55, 0.25), true)
 	draw_rect(r, Color(0.6, 0.6, 0.65, 0.6), false, 1.0)
 	_draw_label(r.position + Vector2(2, 12), label, Color(0.75, 0.75, 0.8))

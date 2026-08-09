@@ -5,10 +5,12 @@ extends RefCounted
 ## use the editor/shell refs directly; shared engine handlers can use the
 ## narrow accessor methods without importing modtools.
 ##
-## Everything editor-side is duck-typed Node/Object access — this class lives
-## in engine/ and must not import modtools (the game runtime export excludes
-## modtools/* but ships engine/*). Accessors return null when the surface is
-## missing instead of erroring, so handlers can probe.
+## The shell seam stays a plain Node reference: this class ships in the game
+## export, which excludes modtools/*, so it cannot name EditorWorkstation /
+## EditorWorkspace as types. The accessor methods below ARE the shell
+## contract (a wired shell exposes every one of them — ONED's
+## EditorWorkstation does); calls are direct, with null meaning "no shell
+## wired" (the game runtime's MCP contexts carry no shell).
 
 var editor: Node = null
 var shell: Node = null
@@ -29,15 +31,15 @@ func log(value: Variant) -> void:
 		log_sink.call(text)
 
 
-## Attach an Image (or anything with get_image(), e.g. a Texture2D) to the
-## result as an MCP image content block.
+## Attach an Image or a Texture2D to the result as an MCP image content
+## block.
 func image(value: Variant) -> void:
 	images.append(value)
 
 
 ## Show a transient message in the editor's status bar (visible to the human).
 func status(message: String) -> void:
-	if shell != null and shell.has_method("show_status_message"):
+	if shell != null:
 		shell.show_status_message(message)
 
 
@@ -53,40 +55,42 @@ func frames(count: int) -> void:
 
 ## The mounted ResourceRoot, or null when no resource directory is set.
 func root() -> Variant:
-	return _shell_call("get_resource_root")
+	return shell.get_resource_root() if shell != null else null
 
 
 ## The shell's ResourceIndex (asset listing), or null.
 func index() -> Variant:
-	return _shell_call("get_resource_index")
+	return shell.get_resource_index() if shell != null else null
 
 
 ## A workspace (EditorWorkspace) by string id ("terrain", "mission", ...), or
 ## the active workspace when id is empty. Null when the shell is absent or the
-## id is unknown. Workspaces are RefCounted adapters, not nodes.
+## id is unknown. Workspaces are RefCounted adapters, not nodes; every
+## registered workspace exposes get_workspace_id (EditorWorkspace base).
 func workspace(id := "") -> Variant:
 	if shell == null:
 		return null
 	if id.is_empty():
-		return _shell_call("_get_active_workspace")
+		return shell._get_active_workspace()
 	var table: Variant = shell.get("_workspaces")
 	if table is Dictionary:
 		for candidate in table.values():
-			if candidate != null and candidate.has_method("get_workspace_id") and String(candidate.get_workspace_id()) == id:
+			if candidate != null and String(candidate.get_workspace_id()) == id:
 				return candidate
 	var popups: Variant = shell.get("_popup_workspaces")
 	if popups is Dictionary:
 		for candidate in popups.values():
-			if candidate != null and candidate.has_method("get_workspace_id") and String(candidate.get_workspace_id()) == id:
+			if candidate != null and String(candidate.get_workspace_id()) == id:
 				return candidate
 	return null
 
 
 ## The mission workspace's MissionController (its editor document), or null
-## when no mission workspace exists.
+## when no mission workspace exists (get_editor_document is EditorWorkspace
+## base surface).
 func mission() -> Variant:
 	var mission_workspace: Variant = workspace("mission")
-	if mission_workspace != null and mission_workspace.has_method("get_editor_document"):
+	if mission_workspace != null:
 		return mission_workspace.get_editor_document()
 	return null
 
@@ -94,7 +98,9 @@ func mission() -> Variant:
 ## The active workspace's 3D camera (terrain/mission/object views), or null in
 ## 2D workspaces.
 func camera() -> Camera3D:
-	var value: Variant = _shell_call("get_editor_camera")
+	if shell == null:
+		return null
+	var value: Variant = shell.get_editor_camera()
 	return value if value is Camera3D else null
 
 
@@ -105,9 +111,3 @@ func main_tree() -> SceneTree:
 		return tree
 	var loop := Engine.get_main_loop()
 	return loop if loop is SceneTree else null
-
-
-func _shell_call(method: String) -> Variant:
-	if shell != null and shell.has_method(method):
-		return shell.call(method)
-	return null

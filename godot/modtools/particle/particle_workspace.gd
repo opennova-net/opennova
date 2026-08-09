@@ -125,7 +125,7 @@ func shows_view_guides() -> bool:
 	return true
 
 
-func get_viewport_camera() -> Camera3D:
+func get_viewport_camera() -> FlyCamera:
 	return _screen.get_viewport_camera() if _screen != null else null
 
 
@@ -154,6 +154,10 @@ func get_status_context() -> String:
 # stay unavailable).
 func get_editor_document() -> Object:
 	return particle_editor
+
+
+func has_unsaved_changes() -> bool:
+	return particle_editor != null and particle_editor.is_dirty
 
 
 func _build_inspector_defs() -> Array:
@@ -186,22 +190,25 @@ func select_workflow(workflow_id: int) -> void:
 func build_workflow_inspector(workflow_id: int, mount: Control) -> void:
 	if particle_editor == null:
 		return
-	var inspector: Control
 	match workflow_id:
 		Workflow.EFFECTS:
-			inspector = EffectInspectorScene.instantiate()
+			var effects: ParticleEffectInspector = EffectInspectorScene.instantiate()
+			mount.add_child(effects)
+			effects.set_particle_editor(particle_editor)
+			effects.set_workspace(self)
 		Workflow.PARTICLES:
 			# Code-first inspector (no companion .tscn); see particle_inspector.gd.
-			inspector = ParticleInspectorScript.new()
+			var defs := ParticleInspectorScript.new()
+			mount.add_child(defs)
+			defs.set_particle_editor(particle_editor)
+			defs.set_workspace(self)
 		Workflow.TABLES:
-			inspector = TableInspectorScene.instantiate()
+			var tables: ParticleTableInspector = TableInspectorScene.instantiate()
+			mount.add_child(tables)
+			tables.set_particle_editor(particle_editor)
+			tables.set_workspace(self)
 		_:
 			return
-	mount.add_child(inspector)
-	if inspector.has_method("set_particle_editor"):
-		inspector.set_particle_editor(particle_editor)
-	if inspector.has_method("set_workspace"):
-		inspector.set_workspace(self)
 	# Refresh preview after inspector mounts (selection may change immediately).
 	_apply_current_selection_to_preview()
 
@@ -284,9 +291,9 @@ func _open_file_unchecked(path: String) -> Error:
 func _prompt_dirty_guard(run: Callable) -> bool:
 	if particle_editor == null or not particle_editor.is_dirty:
 		return false
-	if editor_shell == null or not editor_shell.has_method("prompt_unsaved_for"):
+	if editor_shell == null:
 		return false
-	var shell: Object = editor_shell
+	var shell: WorkspaceShell = editor_shell
 	var workspace: EditorWorkspace = self
 	shell.prompt_unsaved_for(
 		func() -> void: shell.save_then(workspace, run),

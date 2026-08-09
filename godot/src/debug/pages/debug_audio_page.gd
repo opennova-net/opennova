@@ -8,6 +8,8 @@ extends DebugPage
 
 ## Bus names per godot/default_bus_layout.tres.
 
+const MusicService := preload("res://src/world/nova_music_service.gd")
+
 var _music_label: Label
 var _mission_label: Label
 var _driver_label: Label
@@ -132,29 +134,25 @@ func refresh() -> void:
 			if _bus_names[bus] != AudioServer.get_bus_name(bus):
 				_rebuild_bus_rows()
 				break
-	var driver := String(AudioServer.get_driver_name()) \
-			if AudioServer.has_method("get_driver_name") else "unknown"
-	var latency_ms := float(AudioServer.get_output_latency()) * 1000.0 \
-			if AudioServer.has_method("get_output_latency") else 0.0
+	var driver := String(AudioServer.get_driver_name())
+	var latency_ms := float(AudioServer.get_output_latency()) * 1000.0
 	_driver_label.text = "Driver: %s | output latency %.1f ms" % [driver, latency_ms]
 
-	var music := get_node_or_null("/root/NovaMusicService")
-	if music == null or not music.has_method("current_context"):
+	var music := get_node_or_null("/root/NovaMusicService") as MusicService
+	if music == null:
 		_music_label.text = "No music service."
 	else:
 		var line := "Music context: %s" % [
-			String(music.current_context()) if not String(music.current_context()).is_empty()
+			music.current_context() if not music.current_context().is_empty()
 			else "-"]
-		if music.has_method("director"):
-			var director: Variant = music.director()
-			if director != null and is_instance_valid(director) \
-					and (director as Object).has_method("current_section"):
-				line += "\nSection %s   vm %s   pc %s   players %d" % [
-					String(director.current_section()), str(director.vm_state()),
-					str(director.current_pc()), int(director.get_player_pool_size())]
-				var last_error := String(director.last_error())
-				if not last_error.is_empty():
-					line += "\nScript error: %s" % last_error
+		var director := music.director()
+		if director != null and is_instance_valid(director):
+			line += "\nSection %s   vm %s   pc %s   players %d" % [
+				String(director.current_section()), str(director.vm_state()),
+				str(director.current_pc()), int(director.get_player_pool_size())]
+			var last_error := String(director.last_error())
+			if not last_error.is_empty():
+				line += "\nScript error: %s" % last_error
 		_music_label.text = line
 
 	var mission_audio := _mission_audio()
@@ -190,16 +188,9 @@ func refresh() -> void:
 		(controls["peak"] as Label).text = "L %.0f  R %.0f dB" % [left, right]
 
 
-func _mission_audio() -> Object:
+func _mission_audio() -> MissionAudio:
 	var world := _ctx.world()
-	if world == null or not world.has_method("get_mission_audio"):
-		return null
-	var audio: Variant = world.get_mission_audio()
-	if audio is Object and is_instance_valid(audio) \
-			and (audio as Object).has_method("get_stats") \
-			and (audio as Object).has_method("get_perf_counters"):
-		return audio
-	return null
+	return world.get_mission_audio() if world != null else null
 
 
 func _on_mute_toggled(muted: bool, bus_name: String) -> void:

@@ -40,14 +40,14 @@ var _tabs := DocumentTabSet.new()
 # stacks and clears them on set_document, so tab switches stash/restore here.
 var _histories: Dictionary = {}
 var _state_restored: bool = false
-var _editor: Control
-var _inspector: Control
+var _editor: MnuEditor
+var _inspector: MnuPropertyInspector
 var _selected_id := -1
 # Single shared stylesheet document — canonically menu_style.mns. Auto-opened
 # once per session, like the old Menu Styles workspace did.
 var _mns_document   # MnsEditorDocument
-var _mns_editor: Control
-var _mns_inspector: Control
+var _mns_editor: MnsEditor
+var _mns_inspector: MnsInspector
 var _mns_auto_opened: bool = false
 # Right-dock tab strip + current selection. Style jumps switch this to STYLES.
 var _dock_tab: int = DockTab.PROPERTIES
@@ -398,7 +398,7 @@ func build_inspector(mount: Control) -> void:
 		_inspector.set_authoring_enabled(not _editor.is_interactive())
 	# Shell link-widget services for FILE references (the screen's text_rsrc);
 	# string KEYS resolve through the loaded table instead.
-	if editor_shell != null and _inspector.has_method("set_reference_services"):
+	if editor_shell != null and editor_shell.get_reference_index() != null:
 		_inspector.set_reference_services(ResourceRefWidget.services_from_shell(editor_shell))
 	_properties_page.add_child(_inspector)
 
@@ -534,21 +534,21 @@ func _on_string_jump(key: String) -> void:
 	if path.is_empty():
 		_notify_status("No string table is loaded for this menu.", &"warn")
 		return
-	if editor_shell != null and editor_shell.has_method("open_strings_workspace"):
+	if editor_shell != null:
 		editor_shell.open_strings_workspace(path, key)
 
 
 # Jump to the Fonts workspace for this widget's font (reuses the shell's existing
 # open_font_workspace cross-jump).
 func _on_font_jump(font: String) -> void:
-	if editor_shell != null and editor_shell.has_method("open_font_workspace"):
+	if editor_shell != null:
 		editor_shell.open_font_workspace(font)
 
 
 # Jump to the Menus workspace for a cross-file screen action. The shell resolves
 # the file against the configured resource root, then opens/focuses the target menu.
 func _on_menu_jump(file: String, screen: String) -> void:
-	if editor_shell != null and editor_shell.has_method("open_menu_workspace"):
+	if editor_shell != null:
 		editor_shell.open_menu_workspace(file, screen)
 
 
@@ -713,8 +713,7 @@ func _after_mns_save(err: Error) -> Error:
 	var root := _resource_root_or_settings()
 	if root != null and not _mns_document.current_path.is_empty():
 		var name := String(_mns_document.current_path).get_file()
-		if not root.has_file(name) and editor_shell != null \
-				and editor_shell.has_method("rescan_resource_root"):
+		if not root.has_file(name) and editor_shell != null:
 			editor_shell.rescan_resource_root()
 	return err
 
@@ -952,6 +951,42 @@ func get_editor_document() -> Object:
 	if _dock_tab == DockTab.STYLES and _mns_editor != null and is_instance_valid(_mns_editor):
 		return _mns_editor
 	return _editor
+
+
+# The typed edit hooks mirror get_editor_document's tab routing: STYLES edits
+# run through MnsEditor, everything else through the canvas MnuEditor.
+func _styles_editor_active() -> bool:
+	return _dock_tab == DockTab.STYLES and _mns_editor != null and is_instance_valid(_mns_editor)
+
+
+func can_undo() -> bool:
+	if is_busy():
+		return false
+	if _styles_editor_active():
+		return _mns_editor.can_undo()
+	return _editor != null and _editor.can_undo()
+
+
+func can_redo() -> bool:
+	if is_busy():
+		return false
+	if _styles_editor_active():
+		return _mns_editor.can_redo()
+	return _editor != null and _editor.can_redo()
+
+
+func undo() -> void:
+	if _styles_editor_active():
+		_mns_editor.undo()
+	elif _editor != null:
+		_editor.undo()
+
+
+func redo() -> void:
+	if _styles_editor_active():
+		_mns_editor.redo()
+	elif _editor != null:
+		_editor.redo()
 
 
 ## The menu tool surface always targets the canvas editor, independent of which

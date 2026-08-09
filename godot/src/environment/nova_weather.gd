@@ -23,7 +23,7 @@ const MISSION_START_PREWARM_TICKS := 255
 # setter during init, which needs the core.
 var _core := WeatherCore.new()
 var _configured_wind_intensity := 256
-var _cached_env: Node = null
+var _cached_env: MissionEnvironment = null
 var _colors_synced := false
 var _tick_credit := 0.0
 var _world_tick_driven := false
@@ -51,7 +51,8 @@ var iris_samples := PackedInt32Array()
 
 func _ready() -> void:
 	set_process_priority(-10)
-	_cached_env = get_node_or_null(environment_path) if not environment_path.is_empty() else null
+	_cached_env = (get_node_or_null(environment_path)
+			if not environment_path.is_empty() else null) as MissionEnvironment
 
 
 func _process(delta: float) -> void:
@@ -170,7 +171,7 @@ func apply_network_environment_sample(sample: Dictionary) -> void:
 
 
 func _tick_weather(tick_count: int) -> void:
-	if not _cached_env or not _cached_env.has_method("is_loaded") or not _cached_env.is_loaded():
+	if not _cached_env or not _cached_env.is_loaded():
 		return
 	var env := _cached_env
 	# Claim the current render colors + shader globals: from here on the env's
@@ -178,7 +179,7 @@ func _tick_weather(tick_count: int) -> void:
 	# currents — the witnessed split [orig: Environment_ComputeTimeOfDayColors
 	# @ 0x57de40], and the fix for the raw-vs-modulated strobe the per-tick
 	# mission clock exposed.
-	if env.has_method("set_weather_driven") and not env.is_weather_driven():
+	if not env.is_weather_driven():
 		env.set_weather_driven(true)
 	if not _colors_synced:
 		# Snap TO THE TARGETS — the witnessed snap form [orig:
@@ -211,12 +212,8 @@ func _tick_weather(tick_count: int) -> void:
 	var lightning := Color.WHITE
 	if env_data:
 		# lightning_rgb is a global parser color, so it takes the same envscale
-		# engine view as the world-driven static blocks and water. Keep a raw fallback
-		# for duck-typed legacy environment owners.
-		if env.has_method("get_lightning_color_target"):
-			lightning = _vec3_color(env.get_lightning_color_target())
-		else:
-			lightning = env_data.get_lightning_color()
+		# engine view as the world-driven static blocks and water.
+		lightning = _vec3_color(env.get_lightning_color_target())
 		# The iris auto-exposure target (env #17): the marched in-world gain
 		# when the shell stamps samples, else the outdoor fallback — chased by
 		# the modulator over 62 ticks; retail re-targets every render pass,
@@ -239,8 +236,7 @@ func _tick_weather(tick_count: int) -> void:
 	# env #27: refresh the scalar spring targets from the PARSED values before
 	# the tick (retail refreshes targets ahead of the smoothers; the snap
 	# touches targets only — currents always ramp [orig: @ 0x57d1e0]).
-	if env.has_method("get_fog_level_target"):
-		_core.set_scalar_targets(env.get_fog_level_target(), env.get_sky_height_target())
+	_core.set_scalar_targets(env.get_fog_level_target(), env.get_sky_height_target())
 	_core.set_sky_color_targets(
 		_vec3_color(env.get_skyfog_color_target()),
 		_vec3_color(env.get_ceiling_color_target()),
@@ -263,39 +259,34 @@ func _tick_weather(tick_count: int) -> void:
 	_write_weather_state(env)
 
 
-func _write_weather_state(env: Node) -> void:
+func _write_weather_state(env: MissionEnvironment) -> void:
 	env.set_fill_light(get_smooth_fill())
 	env.set_sun_light(get_smooth_sun())
 	env.set_fog_color_rt(get_smooth_fog())
 	# The sky block joins the writeback set — entity hemi_sky serves the
 	# smoothed+modulated block like fill/sun/fog [orig: Env_SkyBlock[0]
 	# consumed by the entity-constants writer @ 0x5c8090].
-	if env.has_method("set_sky_ambient_rt"):
-		env.set_sky_ambient_rt(get_smooth_sky())
-	if env.has_method("set_static_colors_rt"):
-		env.set_static_colors_rt(
-			get_smooth_ceiling(),
-			get_smooth_cloud(),
-			get_smooth_floor())
-	if env.has_method("set_sky_colors_rt"):
-		env.set_sky_colors_rt(
-			get_smooth_skyfog(),
-			get_smooth_sky_base(),
-			get_smooth_sky_bright(),
-			get_smooth_sky_highlight(),
-			get_smooth_cloud_base(),
-			get_smooth_cloud_highlight(),
-			get_smooth_cloud_edge())
-	if env.has_method("set_color_src_gain"):
-		env.set_color_src_gain(_core.get_color_src_gain())
+	env.set_sky_ambient_rt(get_smooth_sky())
+	env.set_static_colors_rt(
+		get_smooth_ceiling(),
+		get_smooth_cloud(),
+		get_smooth_floor())
+	env.set_sky_colors_rt(
+		get_smooth_skyfog(),
+		get_smooth_sky_base(),
+		get_smooth_sky_bright(),
+		get_smooth_sky_highlight(),
+		get_smooth_cloud_base(),
+		get_smooth_cloud_highlight(),
+		get_smooth_cloud_edge())
+	env.set_color_src_gain(_core.get_color_src_gain())
 	# env #27 writeback: the smoothed scalar currents flow back through the
 	# env seam so every consumer (dome, water, object/terrain fog, the frame
 	# clear) serves the ramp.
-	if env.has_method("set_smoothed_scalars"):
-		env.set_smoothed_scalars(
-				_core.get_fog_distance(), _core.get_sky_height(),
-				_core.get_sun_dim_pct(), _core.get_rain_pct(),
-				float(_core.get_overcast_blend_fixed()) / 65536.0)
+	env.set_smoothed_scalars(
+			_core.get_fog_distance(), _core.get_sky_height(),
+			_core.get_sun_dim_pct(), _core.get_rain_pct(),
+			float(_core.get_overcast_blend_fixed()) / 65536.0)
 	_write_shader_globals(env)
 
 
@@ -432,7 +423,15 @@ func get_water_uv_state(cam_x: float, cam_z: float, fog_distance: float) -> Vect
 	return _core.get_water_uv_state(cam_x, cam_z, fog_distance)
 
 
-func _write_shader_globals(env: Node) -> void:
+## The shared cloud-scroll/water-UV core this node ticks at 62 Hz — the typed
+## seam SkyDome and Water read their UV accumulators through when a weather
+## node is wired (standalone owners tick a private WeatherCore instead).
+## Read-only for consumers: only this node advances it.
+func scroll_core() -> WeatherCore:
+	return _core
+
+
+func _write_shader_globals(env: MissionEnvironment) -> void:
 	# MissionEnvironment's public hemisphere getters include the camera-gated NVG
 	# gain rewrite; publishing the smoother directly would bypass it each tick.
 	RenderingServer.global_shader_parameter_set(&"opennova_fill_light", env.get_fill_light())
@@ -444,7 +443,7 @@ func _write_shader_globals(env: Node) -> void:
 	# [orig: Environment_GetLightDirectionFloat @ 0x57d870]
 	_publish_light_direction(env.get_light_direction())
 	var fog_end: float = float(env.get_fog_end_distance())
-	var fog_start: float = float(env.get_fog_start()) if env.has_method("get_fog_start") else 0.5
+	var fog_start: float = float(env.get_fog_start())
 	RenderingServer.global_shader_parameter_set(&"opennova_fog_end", fog_end)
 	RenderingServer.global_shader_parameter_set(&"opennova_fog_start", fog_start)
 	RenderingServer.global_shader_parameter_set(&"opennova_fog_type", env.get_fog_type())

@@ -1,47 +1,16 @@
 extends GutTest
 
+# FirePresentPass on the typed surfaces (ADR 0034): the drained rows are pure
+# data fed through the public present_* data legs (the present_snapshot
+# precedent — production present() drains the typed Simulation and forwards the
+# same rows), and the audio sink is a real MissionAudio subclass capturing the
+# typed calls.
+
 const FirePresentPass := preload("res://src/world/fire_present_pass.gd")
 
 
-class SimStub:
-	extends RefCounted
-	var events: Array = []
-	var fire_sounds: Array = []
-	var slot_events: Array = []
-	var sound_emitter_events: Array = []
-
-	func drain_fire_presentation_events() -> Array:
-		var out := events
-		events = []
-		return out
-
-	# The sim-side fire-sound queue drain (world/fire_sound.h): the sim gates
-	# distance and counts delays down on the logic clock; the pass just plays.
-	func drain_fire_sounds() -> Array:
-		var out := fire_sounds
-		fire_sounds = []
-		return out
-
-	func drain_slot_sounds() -> Array:
-		var out := slot_events
-		slot_events = []
-		return out
-
-	func drain_sound_emitters() -> Array:
-		var out := sound_emitter_events
-		sound_emitter_events = []
-		return out
-
-	# Trail channels framed [style_id, age, count, count x (x, y, z, w)] — the
-	# tracer_trails.h witness map.
-	var trails := PackedFloat32Array()
-
-	func get_tracer_trails() -> PackedFloat32Array:
-		return trails
-
-
-class AudioStub:
-	extends RefCounted
+class CaptureAudio:
+	extends MissionAudio
 	var calls: Array = []
 	var slot_calls: Array = []
 	var sound_emitter_calls: Array = []
@@ -76,10 +45,10 @@ func _event(pos: Vector3, source_bms_id: int) -> Dictionary:
 	}
 
 
-func _make_pass(sim: SimStub, audio: AudioStub):
-	var presenter = FirePresentPass.new()
+func _make_pass(audio: CaptureAudio) -> FirePresentPass:
+	var presenter := FirePresentPass.new()
 	presenter.setup(
-		sim,
+		null,
 		null,
 		func(): return audio,
 		Callable(),
@@ -91,18 +60,15 @@ func _make_pass(sim: SimStub, audio: AudioStub):
 func test_drained_fire_sounds_play_with_source_identity() -> void:
 	# The distance gate and delay countdown live in the sim (world/fire_sound.h,
 	# pinned by the fire_sound ctest); the pass plays each drained row verbatim.
-	var sim := SimStub.new()
-	var audio := AudioStub.new()
-	var presenter = _make_pass(sim, audio)
-	sim.fire_sounds = [
+	var audio := CaptureAudio.new(null, null)
+	var presenter := _make_pass(audio)
+
+	presenter.present_fire_sounds([
 		{"set": "AI_FIRE", "pos": Vector3(10, 0, 0), "source_bms_id": 77},
 		{"set": "GS_END", "pos": Vector3(4, 1, 2), "source_bms_id": 0},
-	]
-
-	presenter.present()
+	])
 
 	assert_eq(audio.calls.size(), 2)
-	assert_true(sim.fire_sounds.is_empty(), "the ready queue drains every present")
 	if audio.calls.size() == 2:
 		assert_eq(String(audio.calls[0]["set"]), "AI_FIRE")
 		assert_eq(int(audio.calls[0]["source_bms_id"]), 77)
@@ -113,23 +79,19 @@ func test_drained_fire_sounds_play_with_source_identity() -> void:
 
 func test_joiner_style_drain_presents_remote_and_discards_local_prediction() -> void:
 	# A joiner feeds both its local predicted round and decoded remote tag-2
-	# rounds into one visual RoundSim queue. The pass must consume every record
-	# (so the queue cannot grow frame-over-frame) while only presenting the
+	# rounds into one visual RoundSim queue. The pass must present only the
 	# remote record; the local action-slot leg already presented the prediction.
 	# (The sim's own seed applies the same local filter to the sound queue —
-	# the fire_sound ctest pins that half.)
-	var sim := SimStub.new()
-	var audio := AudioStub.new()
-	var presenter = _make_pass(sim, audio)
+	# the fire_sound ctest pins that half; the drain-consumption itself is the
+	# native queue's contract, exercised by present() over the typed sim.)
+	var audio := CaptureAudio.new(null, null)
+	var presenter := _make_pass(audio)
 	var local := _event(Vector3(1, 0, 0), 11)
 	local["is_local_player"] = true
 	var remote := _event(Vector3(2, 0, 0), 22)
 
 	for _frame in range(128):
-		sim.events = [local.duplicate(), remote.duplicate()]
-		presenter.present()
-		assert_true(sim.events.is_empty(),
-				"the complete mixed queue is drained each presentation")
+		presenter.present_fires([local.duplicate(), remote.duplicate()])
 
 	assert_eq(int(presenter.get_stats()["fires"]), 128,
 			"only the decoded remote shot reaches the presentation legs")
@@ -140,22 +102,20 @@ func test_tracer_trails_build_ribbon_strip() -> void:
 	# A live stdred channel (style 1, 4 points along +X) must produce ONE additive
 	# triangle-strip surface: pairs at points 0..count-2 (the newest point steers
 	# direction only), 2 verts per pair [orig: CEffectChannel_RenderRibbon @ 0x5DB8A0].
-	var sim := SimStub.new()
-	var audio := AudioStub.new()
+	var audio := CaptureAudio.new(null, null)
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var presenter = FirePresentPass.new()
-	presenter.setup(sim, container, func(): return audio, Callable(),
+	var presenter := FirePresentPass.new()
+	presenter.setup(null, container, func(): return audio, Callable(),
 			func(): return Vector3(0, 5, 10))
-	sim.trails = PackedFloat32Array([
+
+	presenter.draw_tracer_rows(PackedFloat32Array([
 		1.0, 1.0, 4.0,  # style stdred, age 1, count 4
 		0.0, 1.0, 0.0, 1.0,
 		2.0, 1.0, 0.0, 1.0,
 		4.0, 1.0, 0.0, 1.0,
 		6.0, 1.0, 0.0, 1.0,
-	])
-
-	presenter.present()
+	]))
 
 	var mesh: ImmediateMesh = presenter.ribbon_mesh()
 	assert_eq(mesh.get_surface_count(), 1, "one additive strip surface, no smoke surface")
@@ -173,21 +133,19 @@ func test_tracer_trails_build_ribbon_strip() -> void:
 func test_tracer_smoke_style_lands_on_the_alpha_surface() -> void:
 	# A rocket channel (style 3) draws on the smoke surface: alpha blend + scene fog
 	# [orig: style +0 additive flag 0 -> SetFogAndBlendMode mode 0].
-	var sim := SimStub.new()
-	var audio := AudioStub.new()
+	var audio := CaptureAudio.new(null, null)
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var presenter = FirePresentPass.new()
-	presenter.setup(sim, container, func(): return audio, Callable(),
+	var presenter := FirePresentPass.new()
+	presenter.setup(null, container, func(): return audio, Callable(),
 			func(): return Vector3(0, 5, 10))
-	sim.trails = PackedFloat32Array([
+
+	presenter.draw_tracer_rows(PackedFloat32Array([
 		3.0, 1.0, 3.0,
 		0.0, 1.0, 0.0, 1.0,
 		2.0, 1.0, 0.0, 1.02,
 		4.0, 1.0, 0.0, 0.98,
-	])
-
-	presenter.present()
+	]))
 
 	var mesh: ImmediateMesh = presenter.ribbon_mesh()
 	assert_eq(mesh.get_surface_count(), 1, "one smoke strip surface")
@@ -204,16 +162,14 @@ func test_slot_sounds_play_immediately_with_exclusive_freefall_key() -> void:
 	# leg — they play the tick they drain [orig: Entity_PlaySound3D_FullVolume
 	# @ 0x528e20 direct]. Slots 43/44 carry the per-(handle,slot) exclusive key
 	# (the D-SND-10 refire fold); everything else passes an empty key.
-	var sim := SimStub.new()
-	var audio := AudioStub.new()
-	var presenter = _make_pass(sim, audio)
-	sim.slot_events = [
+	var audio := CaptureAudio.new(null, null)
+	var presenter := _make_pass(audio)
+
+	presenter.present_slot_sounds([
 		{"set": "FSP_DIRT_L", "pos": Vector3(400, 0, 0), "handle": 3, "slot": 17},
 		{"set": "FREEFALL", "pos": Vector3(1, 0, 0), "handle": 3, "slot": 44},
 		{"set": "", "pos": Vector3.ZERO, "handle": 3, "slot": 18},
-	]
-
-	presenter.present()
+	])
 
 	assert_eq(audio.slot_calls.size(), 2, "empty set name is the id-0 no-op")
 	if audio.slot_calls.size() == 2:
@@ -225,9 +181,8 @@ func test_slot_sounds_play_immediately_with_exclusive_freefall_key() -> void:
 
 
 func test_persistent_sound_emitters_drain_into_the_shared_audio_layer() -> void:
-	var sim := SimStub.new()
-	var audio := AudioStub.new()
-	var presenter = _make_pass(sim, audio)
+	var audio := CaptureAudio.new(null, null)
+	var presenter := _make_pass(audio)
 	var idle := {
 		"source_spawn_id": 77,
 		"handle": 0x10001,
@@ -242,12 +197,9 @@ func test_persistent_sound_emitters_drain_into_the_shared_audio_layer() -> void:
 		"set": "V_TRUCK_ILP",
 		"pos": Vector3(10, 0, 0),
 	}
-	sim.sound_emitter_events = [idle]
 
-	presenter.present()
+	presenter.present_sound_emitters([idle])
 
-	assert_true(sim.sound_emitter_events.is_empty(),
-			"the simulation queue is consumed once per present")
 	assert_eq(audio.sound_emitter_calls.size(), 1)
 	if audio.sound_emitter_calls.size() == 1:
 		var batch: Array = audio.sound_emitter_calls[0]

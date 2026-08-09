@@ -9,7 +9,7 @@ const CREDITS_EDITOR_SCENE_PATH := "res://modtools/credits/credits_editor.tscn"
 const CreditsEditorDocument = preload("res://modtools/credits/credits_editor_document.gd")
 
 var _document: CreditsEditorDocument
-var _editor: Control
+var _editor: CreditsEditor
 var _inspector_root: Control
 
 
@@ -61,15 +61,10 @@ func mount_viewport(mount: Control) -> void:
 	if _editor.get_parent() == null:
 		mount.add_child(_editor)
 		_editor.set_anchors_preset(Control.PRESET_FULL_RECT)
-	if _editor.has_method("set_resource_root"):
-		_editor.set_resource_root(_resource_root())
-	# Guard all three methods services_from_shell wires (resolve/pick/jump):
-	# a partial shell must get no services rather than a jump button whose
-	# press is a missing-method error.
-	if _editor.has_method("set_reference_services") and editor_shell != null \
-			and editor_shell.has_method("get_reference_index") \
-			and editor_shell.has_method("open_kind_picker") \
-			and editor_shell.has_method("open_in_workspace"):
+	_editor.set_resource_root(_resource_root())
+	# A shell without a reference index (headless doubles) gets no services
+	# rather than a jump button whose press dereferences a null index.
+	if editor_shell != null and editor_shell.get_reference_index() != null:
 		_editor.set_reference_services(ResourceRefWidget.services_from_shell(editor_shell))
 	_editor.set_document(_document)
 
@@ -200,6 +195,28 @@ func get_editor_document() -> Object:
 	return _document
 
 
+func has_unsaved_changes() -> bool:
+	return _document != null and _document.is_dirty
+
+
+func can_undo() -> bool:
+	return _document != null and not is_busy() and _document.can_undo()
+
+
+func can_redo() -> bool:
+	return _document != null and not is_busy() and _document.can_redo()
+
+
+func undo() -> void:
+	if _document != null:
+		_document.undo()
+
+
+func redo() -> void:
+	if _document != null:
+		_document.redo()
+
+
 func can_new() -> bool:
 	return true
 
@@ -245,7 +262,7 @@ func open_file(path: String) -> Error:
 
 
 func flush_pending_edits() -> Error:
-	if _editor != null and _editor.has_method("flush_pending_edits"):
+	if _editor != null:
 		return _editor.flush_pending_edits()
 	return OK
 

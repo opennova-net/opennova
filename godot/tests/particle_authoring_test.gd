@@ -304,13 +304,14 @@ func test_blueprint_builds_nodes_from_model() -> void:
 
 
 func test_blueprint_child_connection_targets_a_particle_not_an_effect() -> void:
-	var editor = ParticleEditorScript.new()
+	var workspace := ParticleEditorWorkspace.new()
+	var editor: ParticleEditor = workspace.particle_editor
 	var parent = editor.add_particle()
 	var child = editor.add_particle()
 	var effect = editor.add_effect()
 	var screen = add_child_autofree(ParticleBlueprintScreenScript.new())
 	await get_tree().process_frame
-	screen.set_workspace(editor)
+	screen.set_workspace(workspace)
 	screen.set_particle_editor(editor)
 	await get_tree().process_frame
 
@@ -336,7 +337,9 @@ func test_effect_membership_edit_rebuilds_graph_and_live_preview() -> void:
 	var preview := ParticlePreview.new()
 	add_child_autofree(preview)
 	await get_tree().process_frame
-	screen.set_workspace(editor)
+	# No workspace bound in these scenes (the blueprint reads only the editor);
+	# the old untyped seam accepted the editor here and ignored it.
+	screen.set_workspace(null)
 	screen.set_particle_editor(editor)
 	preview.set_particle_file(editor.particle_file)
 	preview.set_effect(effect)
@@ -459,13 +462,14 @@ func test_table_inspector_rename_keeps_assignments_and_graph_title() -> void:
 
 
 func test_blueprint_multi_delete_removes_the_original_selected_objects() -> void:
-	var editor = ParticleEditorScript.new()
+	var workspace := ParticleEditorWorkspace.new()
+	var editor: ParticleEditor = workspace.particle_editor
 	var particle = editor.add_particle()
 	var first = editor.add_effect()
 	var second = editor.add_effect()
 	var screen = add_child_autofree(ParticleBlueprintScreenScript.new())
 	await get_tree().process_frame
-	screen.set_workspace(editor)
+	screen.set_workspace(workspace)
 	screen.set_particle_editor(editor)
 	var graph := _find_graphedit(screen)
 	var first_name := _graph_node_name_with_title(graph, first.id)

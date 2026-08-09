@@ -79,15 +79,9 @@ func _build() -> void:
 
 
 func refresh() -> void:
-	var adapter := ""
-	var vendor := ""
-	var api := ""
-	if RenderingServer.has_method("get_video_adapter_name"):
-		adapter = String(RenderingServer.get_video_adapter_name())
-	if RenderingServer.has_method("get_video_adapter_vendor"):
-		vendor = String(RenderingServer.get_video_adapter_vendor())
-	if RenderingServer.has_method("get_video_adapter_api_version"):
-		api = String(RenderingServer.get_video_adapter_api_version())
+	var adapter := String(RenderingServer.get_video_adapter_name())
+	var vendor := String(RenderingServer.get_video_adapter_vendor())
+	var api := String(RenderingServer.get_video_adapter_api_version())
 	var renderer := String(ProjectSettings.get_setting(
 			"rendering/renderer/rendering_method", "unknown"))
 	_renderer_label.text = "Renderer: %s\nGPU: %s%s%s" % [
@@ -132,13 +126,9 @@ func _refresh_diagnostic_state() -> void:
 
 	var world := _ctx.world() if _ctx != null else null
 	var report := {}
-	if world != null and world.has_method("get_debug_view_statuses"):
-		var value: Variant = world.get_debug_view_statuses()
-		if value is Array:
-			for entry_v in value:
-				if entry_v is NovaDebugViewStatus:
-					var entry := entry_v as NovaDebugViewStatus
-					report[entry.id] = entry
+	if world != null:
+		for entry in world.get_debug_view_statuses():
+			report[entry.id] = entry
 	var active_lines := PackedStringArray()
 	for id in WORLD_OVERLAYS:
 		var state := _ctx.session.get_control_state(id) \

@@ -386,7 +386,7 @@ func _lookup_loading_text(key: String, fallback: String) -> String:
 func _load_font(root: ResourceRoot, name: String) -> FontFile:
 	if root == null:
 		return null
-	var res := root.load_font(name)
-	if res == null or not res.has_method("to_font_file"):
+	var res: FntResource = root.load_font(name)
+	if res == null:
 		return null
 	return res.to_font_file()

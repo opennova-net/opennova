@@ -12,7 +12,7 @@ extends Node
 
 var _shell  # MainGame: start_world_load / current_resource_root
 var _world: GameWorld
-var _menu_shell  # MenuShell (nova_menu_shell.gd)
+var _menu_shell: MenuShell
 var _panel_layer: Node  # where the NovaWorld panel mounts (the menu layer)
 var _novaworld_panel: NovaWorldPanel
 
@@ -250,7 +250,7 @@ func _on_novaworld_join_requested(target: JoinTarget) -> void:
 # A default mission for a panel-initiated host: the mission highlighted in the menu if any, else the
 # first .bms the resource root exposes. Empty when no mission is reachable.
 func _resolve_default_mission() -> String:
-	if _menu_shell != null and _menu_shell.has_method("get_selected_mission"):
+	if _menu_shell != null:
 		var sel := String(_menu_shell.get_selected_mission())
 		if not sel.is_empty():
 			return sel

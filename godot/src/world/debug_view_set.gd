@@ -11,9 +11,11 @@ extends Node
 # tests pin them as world-relative lookups (main_game_lifecycle_test resolves
 # SkeletonDebug/PickDebug/PickClickCatcher under the world) and they draw
 # world-space geometry over the world's subtree. Each view receives the WORLD
-# in its setup — the sim-driven views duck-type world.get_sim() per frame, and
-# harness stubs ride the world's _runtime seam — so this set is a lifecycle
-# owner, never a render parent.
+# in its setup and re-resolves world.get_sim() per frame, so this set is a
+# lifecycle owner, never a render parent. This set also keeps ONE typed member
+# per view it constructs (construction-time registration, ADR 0034) — the
+# status readback calls each view's typed counter directly instead of
+# re-scanning the world by node name.
 
 const SkeletonDebugView := preload("res://src/debug/skeleton_debug_view.gd")
 const UserPointDebugView := preload("res://src/debug/user_point_debug_view.gd")
@@ -35,12 +37,21 @@ const PICK_DEBUG_NAME := "PickDebug"
 const PICK_CATCHER_NAME := "PickClickCatcher"
 
 # The GameWorld the views attach under and re-resolve their sim through — its
-# PUBLIC surface only (add_child/get_node_or_null/get_sim duck-typing); the
-# world's private internals arrive as the setup() Callables below. Untyped:
-# the world script owns this node.
-var _world
+# PUBLIC surface only; the world's private internals arrive as the setup()
+# Callables below.
+var _world: GameWorld
 var _user_point_sources := Callable()  # () -> Array (the placer's static grouped sources)
 var _effect_world_getter := Callable()  # () -> EffectWorld (weakref-guarded by the world)
+
+# The constructed views (typed, one per kind; null while not installed —
+# entries revalidate for LIVENESS since unload frees the world-parented nodes).
+var _skeleton_view: SkeletonDebugView = null
+var _user_point_view: UserPointDebugView = null
+var _collision_view: CollisionDebugView = null
+var _particle_view: ParticleDebugView = null
+var _occlusion_view: OcclusionDebugView = null
+var _round_view: RoundDebugView = null
+var _hitbox_view: HitboxDebugView = null
 
 # Debug: draw character bones over the world (F3 overlay's "Show skeletons"). Off by default.
 var _skeleton_debug := false
@@ -58,10 +69,17 @@ var _hitbox_debug := false
 ## One-time wiring from the owning GameWorld: the world node the views attach
 ## under, and the two private seams it lends as Callables (its placer's
 ## get_static_user_point_sources and its get_effect_world, weakref-guarded).
-func setup(world, user_point_sources: Callable, effect_world_getter: Callable) -> void:
+func setup(world: GameWorld, user_point_sources: Callable,
+		effect_world_getter: Callable) -> void:
 	_world = world
 	_user_point_sources = user_point_sources
 	_effect_world_getter = effect_world_getter
+
+
+# LIVENESS check on a typed view member: unload frees the world-parented view
+# nodes while the members retain their last reference.
+func _view_live(view: Node) -> bool:
+	return view != null and is_instance_valid(view) 			and not view.is_queued_for_deletion()
 
 
 ## Readback for the F3 pages: toggle intent, installed view, and whether that
@@ -71,44 +89,49 @@ func setup(world, user_point_sources: Callable, effect_world_getter: Callable) -
 func get_debug_view_statuses() -> Array[NovaDebugViewStatus]:
 	var statuses: Array[NovaDebugViewStatus] = []
 	statuses.append(_view_status(
-			&"show_skeletons", _skeleton_debug, SKELETON_DEBUG_NAME,
+			&"show_skeletons", _skeleton_debug, _view_live(_skeleton_view),
+			_skeleton_view.get_debug_drawable_count() \
+					if _view_live(_skeleton_view) else 0,
 			"No skeletons to draw", "skeleton", "skeletons"))
 	statuses.append(_view_status(
-			&"show_user_points", _user_point_debug, USER_POINT_DEBUG_NAME,
+			&"show_user_points", _user_point_debug, _view_live(_user_point_view),
+			_user_point_view.get_debug_drawable_count() \
+					if _view_live(_user_point_view) else 0,
 			"No user points to draw", "user point", "user points"))
 	statuses.append(_view_status(
-			&"show_collision", _collision_debug, COLLISION_DEBUG_NAME,
+			&"show_collision", _collision_debug, _view_live(_collision_view),
+			_collision_view.get_debug_drawable_count() \
+					if _view_live(_collision_view) else 0,
 			"No collision shapes to draw", "collision shape", "collision shapes"))
 	statuses.append(_view_status(
-			&"show_effect_boxes", _particle_debug, PARTICLE_DEBUG_NAME,
+			&"show_effect_boxes", _particle_debug, _view_live(_particle_view),
+			_particle_view.get_debug_drawable_count() \
+					if _view_live(_particle_view) else 0,
 			"No live effect bounds to draw", "effect box", "effect boxes"))
 	statuses.append(_view_status(
-			&"show_portal_faces", _occlusion_debug, OCCLUSION_DEBUG_NAME,
+			&"show_portal_faces", _occlusion_debug, _view_live(_occlusion_view),
+			_occlusion_view.get_debug_drawable_count() \
+					if _view_live(_occlusion_view) else 0,
 			"No portal faces in range", "portal face", "portal faces"))
 	statuses.append(_view_status(
-			&"show_round_trails", _round_debug, ROUND_DEBUG_NAME,
+			&"show_round_trails", _round_debug, _view_live(_round_view),
+			_round_view.get_debug_drawable_count() \
+					if _view_live(_round_view) else 0,
 			"No recent rounds to draw", "round trail", "round trails"))
 	statuses.append(_view_status(
-			&"show_hit_meshes", _hitbox_debug, HITBOX_DEBUG_NAME,
+			&"show_hit_meshes", _hitbox_debug, _view_live(_hitbox_view),
+			_hitbox_view.get_debug_drawable_count() \
+					if _view_live(_hitbox_view) else 0,
 			"No hit meshes in range", "hit mesh", "hit meshes"))
 	return statuses
 
 
-func _view_status(id: StringName, enabled: bool, view_name: StringName,
-		empty_reason: String, singular: String, plural: String) -> NovaDebugViewStatus:
-	var view: Node = null
-	if _world != null and is_instance_valid(_world):
-		view = _world.get_node_or_null(NodePath(view_name))
-	var installed := view != null and is_instance_valid(view)
-	var drawable_count := 0
-	if installed:
-		drawable_count = int(view.call("get_debug_drawable_count")) \
-				if view.has_method("get_debug_drawable_count") else -1
+func _view_status(id: StringName, enabled: bool, installed: bool,
+		drawable_count: int, empty_reason: String, singular: String,
+		plural: String) -> NovaDebugViewStatus:
 	var reason := "Disabled"
 	if enabled and not installed:
 		reason = "Waiting for a loaded world"
-	elif enabled and drawable_count < 0:
-		reason = "Enabled"
 	elif enabled and drawable_count == 0:
 		reason = empty_reason
 	elif enabled:
@@ -180,6 +203,7 @@ func _refresh_skeleton_debug() -> void:
 	if not _skeleton_debug:
 		return
 	var view := SkeletonDebugView.new()
+	_skeleton_view = view
 	view.name = SKELETON_DEBUG_NAME
 	_world.add_child(view)
 	view.setup(_world)  # walks the world's subtree for Skeleton3D nodes each frame
@@ -205,6 +229,7 @@ func _refresh_user_point_debug() -> void:
 	if not _user_point_debug:
 		return
 	var view := UserPointDebugView.new()
+	_user_point_view = view
 	view.name = USER_POINT_DEBUG_NAME
 	_world.add_child(view)
 	var static_sources: Array = _user_point_sources.call()
@@ -240,6 +265,7 @@ func set_particle_debug(enabled: bool) -> void:
 	if not enabled:
 		return
 	var view := ParticleDebugView.new()
+	_particle_view = view
 	view.name = PARTICLE_DEBUG_NAME
 	_world.add_child(view)
 	view.setup(_effect_world_getter)
@@ -254,6 +280,7 @@ func _refresh_collision_debug() -> void:
 	if not _collision_debug:
 		return
 	var view := CollisionDebugView.new()
+	_collision_view = view
 	view.name = COLLISION_DEBUG_NAME
 	_world.add_child(view)
 	view.setup(_world)  # duck-typed get_sim(), re-resolved per frame
@@ -271,6 +298,7 @@ func set_round_debug(enabled: bool) -> void:
 	if not enabled:
 		return
 	var view := RoundDebugView.new()
+	_round_view = view
 	view.name = ROUND_DEBUG_NAME
 	_world.add_child(view)
 	view.setup(_world)  # duck-typed get_sim(), re-resolved per frame
@@ -289,6 +317,7 @@ func set_hitbox_debug(enabled: bool) -> void:
 	if not enabled:
 		return
 	var view := HitboxDebugView.new()
+	_hitbox_view = view
 	view.name = HITBOX_DEBUG_NAME
 	_world.add_child(view)
 	view.setup(_world)  # duck-typed get_sim(), re-resolved per frame
@@ -346,6 +375,7 @@ func set_occlusion_debug(enabled: bool) -> void:
 	if not enabled:
 		return
 	var view := OcclusionDebugView.new()
+	_occlusion_view = view
 	view.name = OCCLUSION_DEBUG_NAME
 	_world.add_child(view)
 	view.setup(_world)  # duck-typed get_sim(), re-resolved per frame

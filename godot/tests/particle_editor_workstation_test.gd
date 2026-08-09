@@ -19,12 +19,12 @@ const PARTICLE_FLAG_FOREVER_EMIT := ParticleDef.FLAG_FOREVER_EMIT  # particle_fl
 
 
 class DirtyGuardShell:
-	extends Node
+	extends WorkspaceShell
 	var save_action := Callable()
 	var discard_action := Callable()
 	var status_messages: Array[String] = []
 
-	func prompt_unsaved_for(on_save: Callable, on_discard: Callable) -> void:
+	func prompt_unsaved_for(on_save: Callable, on_discard: Callable, _on_cancel := Callable()) -> void:
 		save_action = on_save
 		discard_action = on_discard
 

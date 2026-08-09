@@ -40,6 +40,12 @@ void HudFrameCompiler::configure(const HudLayout &layout,
 	reset_runtime_state();
 }
 
+void HudFrameCompiler::update_layout(const HudLayout &layout) {
+	// Texture-table refresh only — the fade/flash/message state survives
+	// [orig: HUD_LoadAllTextures @ 0x59e3d6 reloads art without a HUD reset].
+	layout_ = layout;
+}
+
 void HudFrameCompiler::reset_runtime_state() {
 	stance_ = StanceFade{};
 	flash_prev_rounds_ = -1;
@@ -586,7 +592,12 @@ void HudFrameCompiler::element_objectives(const HudFrameState &state, float w,
 	if (state.objectives.empty() || font_.font() == nullptr) {
 		return;
 	}
-	const char *header = "MISSION OBJECTIVES";
+	// The header string is the gametext Overlays/STROVER_MISSIONOBJECTIVES
+	// line, resolved by the embedder; the literal is the miss fallback
+	// [orig: header @ 0x5ba986].
+	const char *header = state.objectives_header.empty()
+			? "MISSION OBJECTIVES"
+			: state.objectives_header.c_str();
 	const float row_h = text_line_h() * kDesignH / std::max(h, 1.0f);
 	const float x = 15.0f;
 	const float y = 240.0f;
@@ -635,7 +646,7 @@ void HudFrameCompiler::element_objectives(const HudFrameState &state, float w,
 void HudFrameCompiler::element_attach_labels(const HudFrameState &state,
 		float w, float h) {
 	// [orig: draw_vehicle_seat_and_armory_labels @ 0x5a3290 — nearest at the
-	// full color, others ((rgb & 0xFEFEFE) | 0xFE000001) >> 1]
+	// full color, others ((rgb & 0xFEFEFE) | 0xFE000001) >> 1 @ 0x5a364e]
 	(void)w;
 	(void)h;
 	if (state.attach_labels.empty() || font_.font() == nullptr) {
@@ -647,10 +658,23 @@ void HudFrameCompiler::element_attach_labels(const HudFrameState &state,
 			color = ((color & 0xFEFEFEu) | 0xFE000001u) >> 1;
 		}
 		// Screen-pixel anchors, already projected by the presenter — no
-		// design scaling (the original projects then draws).
+		// design scaling (the original projects then draws). The wireframe box
+		// frames the measured label at the raw (dim-transformed) color:
+		// (x - w/2, y - 2) .. (x + w/2 + 5, y + h + 1)
+		// [orig: measure HUD_MeasureTextWH @ 0x5a3680, box
+		//  Render_DrawWireframeRect @ 0x5a36ad].
+		int text_w = 0;
+		int text_h = 0;
+		font_.measure(label.text.c_str(), 1.0f, 1.0f, &text_w, &text_h);
+		const float half_w = static_cast<float>(text_w) * 0.5f;
+		emit_wire_rect(label.screen_x - half_w, label.screen_y - 2.0f,
+				label.screen_x + half_w + 5.0f,
+				label.screen_y + static_cast<float>(text_h) + 1.0f, color);
+		// The text rides the half-bright color mode like every HUD text draw
+		// [orig: HUD_DrawTextCentered_HalfBright @ 0x5a36c1].
 		const GameFontRun run = font_.layout(label.text.c_str(),
 				label.screen_x, label.screen_y, 1.0f, 1.0f, kFontAlignCenter,
-				color);
+				half_bright_argb(color));
 		draw_list_.glyphs.insert(draw_list_.glyphs.end(), run.quads.begin(),
 				run.quads.end());
 	}

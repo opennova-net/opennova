@@ -98,10 +98,10 @@ func select_object(kind: int, index: int) -> void:
 # authored origin when the selection has no baked mesh). Keeps the current heading so the
 # view does not spin. Returns false with no camera / nothing selected (e.g. headless tests).
 func focus_selection_in_view() -> bool:
-	if _c._selected_ref.is_empty() or _c.terrain_editor == null or not _c.terrain_editor.has_method("get_editor_camera"):
+	if _c._selected_ref.is_empty() or _c.terrain_editor == null:
 		return false
-	var camera: Camera3D = _c.terrain_editor.get_editor_camera()
-	if camera == null or not camera.has_method("frame_bounds_custom"):
+	var camera: FlyCamera = _c.terrain_editor.get_editor_camera()
+	if camera == null:
 		return false
 	var aabb = _c._viewport._selected_world_aabb()
 	var center: Vector3
@@ -131,11 +131,9 @@ func get_mission_title() -> String:
 
 ## The mounted resource root, via the bound terrain editor — the controller's one
 ## VFS seam. The controller runs headless in tests (no shell), so this reads the
-## editor, not the workspace; the duck-type guard for bare doubles lives here.
+## editor, not the workspace.
 func _resource_root() -> ResourceRoot:
-	if _c.terrain_editor != null and _c.terrain_editor.has_method("get_resource_root"):
-		return _c.terrain_editor.get_resource_root()
-	return null
+	return _c.terrain_editor.get_resource_root() if _c.terrain_editor != null else null
 
 
 # Retail loads <mission>.til into one shared terrain tile array used by both

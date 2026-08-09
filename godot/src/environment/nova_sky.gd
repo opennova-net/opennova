@@ -8,8 +8,8 @@ extends Node3D
 # interpolated TOD colors; see docs/env/env-tod-re.md.
 
 @export var environment_path: NodePath
-# The weather node owning the cloud-scroll rate + accumulators (duck-typed
-# like Terrain's weather_path; resolved lazily in _process).
+# The weather node owning the cloud-scroll rate + accumulators (resolved
+# lazily in _process and converted once to Weather).
 @export var weather_path: NodePath
 
 # Optional owner-supplied BG_COLOR resource. WorldContextPreview supplies this so
@@ -21,8 +21,8 @@ var sky_material: ShaderMaterial
 var built: bool = false
 var _bound_cloud_tex1: Texture2D = null
 var _bound_cloud_tex2: Texture2D = null
-var _cached_env: Node = null
-var _cached_weather: Node = null
+var _cached_env: MissionEnvironment = null
+var _cached_weather: Weather = null
 var _cached_cam: Camera3D = null
 # Standalone fallback (owners with no weather node): a private core ticked for
 # its cloud scroll only — the integer math has ONE home either way.
@@ -31,7 +31,8 @@ var _fallback_tick_credit := 0.0
 
 
 func _ready() -> void:
-	_cached_env = get_node_or_null(environment_path) if not environment_path.is_empty() else null
+	_cached_env = (get_node_or_null(environment_path)
+			if not environment_path.is_empty() else null) as MissionEnvironment
 	build()
 
 
@@ -88,7 +89,7 @@ func _process(delta: float) -> void:
 	var sky_height := 175.0
 	sync_frame_clear_color()
 	var env := _cached_env
-	if env and env.has_method("is_loaded") and env.is_loaded():
+	if env and env.is_loaded():
 		var env_data: EnvFile = env.get_environment_data()
 		if env_data and env_data.get_advanced_clouds() == 0:
 			# Flat cloud-color dome: the original applies the pass-1 NULL-texture
@@ -132,23 +133,23 @@ func _process(delta: float) -> void:
 	# four integer accumulators; the UV translation is U = +cam/4096 - acc*2^-28,
 	# V = +cam/4096 + acc*2^-28 (layer 2: /8192 and 2^-29) - the accumulator
 	# rides U NEGATIVELY (env #26).
-	var scroll_source: Object = _scroll_source(sky_speed, delta)
+	var scroll_core := _scroll_core(sky_speed, delta)
 	var cam_x := 0.0
 	var cam_z := 0.0
 	if _cached_cam:
 		cam_x = _cached_cam.global_position.x
 		cam_z = _cached_cam.global_position.z
-	sky_material.set_shader_parameter("u_scroll_offset1", scroll_source.get_cloud_uv_offset1(cam_x, cam_z))
-	sky_material.set_shader_parameter("u_scroll_offset2", scroll_source.get_cloud_uv_offset2(cam_x, cam_z))
+	sky_material.set_shader_parameter("u_scroll_offset1", scroll_core.get_cloud_uv_offset1(cam_x, cam_z))
+	sky_material.set_shader_parameter("u_scroll_offset2", scroll_core.get_cloud_uv_offset2(cam_x, cam_z))
 
 static func _sky_constant(value: Vector3) -> Vector3:
 	return value * 2.0
 
 
-func _update_cloud_textures(env: Node) -> void:
+func _update_cloud_textures(env: MissionEnvironment) -> void:
 	var tex1: Texture2D = null
 	var tex2: Texture2D = null
-	if env and env.has_method("is_loaded") and env.is_loaded():
+	if env and env.is_loaded():
 		tex1 = env.get_sky_map1_tex()
 		tex2 = env.get_sky_map2_tex()
 	if tex1 == _bound_cloud_tex1 and tex2 == _bound_cloud_tex2:
@@ -168,22 +169,24 @@ func sync_frame_clear_color() -> void:
 	if frame_clear_environment == null:
 		return
 	if not _cached_env or not _cached_env.is_inside_tree():
-		_cached_env = get_node_or_null(environment_path) if not environment_path.is_empty() else null
+		_cached_env = (get_node_or_null(environment_path)
+				if not environment_path.is_empty() else null) as MissionEnvironment
 	var env := _cached_env
-	if env == null or not env.has_method("is_loaded") or not env.is_loaded() or not env.has_method("get_frame_clear_color"):
+	if env == null or not env.is_loaded():
 		return
 	var rgb: Vector3 = env.get_frame_clear_color()
 	frame_clear_environment.background_color = Color(rgb.x, rgb.y, rgb.z)
 
 
-# The weather node when wired (it ticks the shared core at process priority
-# -10, before us), else a private fallback core advanced at the same fixed
-# 62 Hz cadence. Rendering may run at any refresh rate.
-func _scroll_source(sky_speed: float, delta: float) -> Object:
+# The weather node's shared core when wired (Weather ticks it at process
+# priority -10, before us), else a private fallback core advanced at the same
+# fixed 62 Hz cadence. Rendering may run at any refresh rate.
+func _scroll_core(sky_speed: float, delta: float) -> WeatherCore:
 	if not _cached_weather or not _cached_weather.is_inside_tree():
-		_cached_weather = get_node_or_null(weather_path) if not weather_path.is_empty() else null
-	if _cached_weather and _cached_weather.has_method("get_cloud_uv_offset1"):
-		return _cached_weather
+		_cached_weather = (get_node_or_null(weather_path)
+				if not weather_path.is_empty() else null) as Weather
+	if _cached_weather:
+		return _cached_weather.scroll_core()
 	if _fallback_scroll == null:
 		_fallback_scroll = WeatherCore.new()
 	_fallback_tick_credit += maxf(delta, 0.0) * Weather.WEATHER_TICK_HZ

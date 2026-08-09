@@ -11,7 +11,7 @@ extends ScrollContainer
 const BADGE_PARTIAL := "◐"
 const BADGE_UNCONSUMED := "○"
 
-var _editor
+var _editor: EnvironmentEditor
 var _syncing := false
 var _selected_keyframe := 0
 var _consumption: Dictionary = {}
@@ -407,12 +407,12 @@ func _mark_env_changed() -> void:
 # Open the editing burst before mutating env_file; the commit triggers wired in
 # _build_ui (focus-out / picker-close / slider drag-end) close it as one step.
 func _begin_edit() -> void:
-	if _editor and _editor.has_method("begin_edit"):
+	if _editor != null:
 		_editor.begin_edit()
 
 
 func _commit_edit() -> void:
-	if _editor and _editor.has_method("commit_edit"):
+	if _editor != null:
 		_editor.commit_edit()
 
 

@@ -76,6 +76,7 @@ Dictionary graphic_to_dict(const DefHudGraphic &g) {
 
 void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("scale_point", "design", "surface"), &HudPos::scale_point);
+	ClassDB::bind_static_method("HudPos", D_METHOD("scale_rect", "design", "surface"), &HudPos::scale_rect);
 	ClassDB::bind_static_method("HudPos", D_METHOD("pixel_delta_to_design", "delta", "surface"), &HudPos::pixel_delta_to_design);
 	ClassDB::bind_static_method("HudPos", D_METHOD("fade_decay", "elapsed_ticks", "ramp_ticks"), &HudPos::fade_decay);
 	ClassDB::bind_static_method("HudPos", D_METHOD("fade_flash_alpha", "elapsed_ticks", "ramp_ticks", "base_alpha", "max_alpha"), &HudPos::fade_flash_alpha);
@@ -110,6 +111,16 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_font_hi"), &HudPos::get_font_hi);
 	ClassDB::bind_method(D_METHOD("get_font_lo"), &HudPos::get_font_lo);
 	ClassDB::bind_method(D_METHOD("get_health_rect"), &HudPos::get_health_rect);
+	ClassDB::bind_method(D_METHOD("get_heat_rect"), &HudPos::get_heat_rect);
+	ClassDB::bind_method(D_METHOD("get_powerbar_rect"), &HudPos::get_powerbar_rect);
+	ClassDB::bind_method(D_METHOD("get_ammo_count_pos"), &HudPos::get_ammo_count_pos);
+	ClassDB::bind_method(D_METHOD("get_weapon_name_pos"), &HudPos::get_weapon_name_pos);
+	ClassDB::bind_method(D_METHOD("get_game_info_pos"), &HudPos::get_game_info_pos);
+	ClassDB::bind_method(D_METHOD("get_wpd_info_pos"), &HudPos::get_wpd_info_pos);
+	ClassDB::bind_method(D_METHOD("get_chat_text_pos"), &HudPos::get_chat_text_pos);
+	ClassDB::bind_method(D_METHOD("get_clip_pos"), &HudPos::get_clip_pos);
+	ClassDB::bind_method(D_METHOD("get_alpha_fade"), &HudPos::get_alpha_fade);
+	ClassDB::bind_method(D_METHOD("get_hud_chline"), &HudPos::get_hud_chline);
 	ClassDB::bind_method(D_METHOD("get_stance_pos"), &HudPos::get_stance_pos);
 	ClassDB::bind_method(D_METHOD("get_veh_stance_pos"), &HudPos::get_veh_stance_pos);
 	ClassDB::bind_method(D_METHOD("get_stances"), &HudPos::get_stances);
@@ -214,6 +225,48 @@ String HudPos::get_font_lo() const {
 
 Rect2i HudPos::get_health_rect() const {
 	return loaded_ ? rect_from_corners(file_.hud.health) : Rect2i();
+}
+
+Rect2i HudPos::get_heat_rect() const {
+	return loaded_ ? rect_from_corners(file_.hud.heat) : Rect2i();
+}
+
+Rect2i HudPos::get_powerbar_rect() const {
+	return loaded_ ? rect_from_xywh(file_.hud.powerbar) : Rect2i();
+}
+
+Vector4i HudPos::get_ammo_count_pos() const {
+	return loaded_ ? pos4(file_.hud.ammo_count_pos) : Vector4i();
+}
+
+Vector4i HudPos::get_weapon_name_pos() const {
+	return loaded_ ? pos4(file_.hud.weapon_name_pos) : Vector4i();
+}
+
+Vector4i HudPos::get_game_info_pos() const {
+	return loaded_ ? pos4(file_.hud.game_info) : Vector4i();
+}
+
+Vector4i HudPos::get_wpd_info_pos() const {
+	return loaded_ ? pos4(file_.hud.wpd_info) : Vector4i();
+}
+
+Vector2i HudPos::get_chat_text_pos() const {
+	return loaded_ ? pos2(file_.hud.chat_text) : Vector2i();
+}
+
+Vector2i HudPos::get_clip_pos() const {
+	return loaded_ ? pos2(file_.hud.clip_pos) : Vector2i();
+}
+
+Vector3 HudPos::get_alpha_fade() const {
+	return loaded_ ? Vector3(file_.hud.alpha_fade[0], file_.hud.alpha_fade[1],
+							 file_.hud.alpha_fade[2])
+				   : Vector3();
+}
+
+int HudPos::get_hud_chline() const {
+	return loaded_ ? file_.hud.hud_chline : 0;
 }
 
 Vector2i HudPos::get_stance_pos() const {
@@ -381,6 +434,12 @@ Vector2 HudPos::scale_point(const Vector2 &p_design, const Vector2 &p_surface) {
 					p_design.x, p_surface.x, opennova::hud::kDesignWidth)),
 			static_cast<float>(opennova::hud::scale_axis(
 					p_design.y, p_surface.y, opennova::hud::kDesignHeight)));
+}
+
+Rect2 HudPos::scale_rect(const Rect2 &p_design, const Vector2 &p_surface) {
+	const Vector2 p0 = scale_point(p_design.position, p_surface);
+	const Vector2 p1 = scale_point(p_design.position + p_design.size, p_surface);
+	return Rect2(p0, p1 - p0);
 }
 
 Vector2 HudPos::pixel_delta_to_design(const Vector2 &p_delta, const Vector2 &p_surface) {

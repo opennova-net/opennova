@@ -15,11 +15,10 @@ func _on_start() -> void:
 		# already looking after pressing Start.
 		_flash_start_warning("Load a project first")
 		return
-	if _lm._document.has_method("prepare_script_for_run"):
-		var errs: Array = _lm._document.prepare_script_for_run()
-		if errs.size() > 0:
-			_flash_start_warning("Fix script errors first")
-			return
+	var errs: Array = _lm._document.prepare_script_for_run()
+	if errs.size() > 0:
+		_flash_start_warning("Fix script errors first")
+		return
 	_lm._director.bank = _lm._document.bank
 	_lm._director.load_mus_script(_lm._document.mus_script)
 	_lm._refresh_var_labels()

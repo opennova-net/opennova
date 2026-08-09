@@ -16,21 +16,20 @@ extends RefCounted
 # get_effect_world() / get_runtime() / get_node_or_null — with TWO lent
 # private seams arriving as setup() Callables, null-guarded by the world (the
 # DebugViewSet two-Callable precedent): the placer's static item-effect
-# sources, and the placer's item database. The db is deliberately NOT read
-# through the world's public get_item_db(): that getter's ItemDatabase
-# return type is a kept contract, while harness worlds serve value-only db
-# doubles through this seam (the drain_local_player_weapon_events pattern).
+# sources, and the placer's ItemDatabase (typed at the resolve boundary,
+# ADR 0034 — harnesses hand real fixture databases).
 
 const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
+const MissionRuntime := preload("res://src/world/mission_runtime.gd")
 
 # [orig: ItemDef_GetBoneMaskByName @ 0x49ea40 scans the first 16 points.]
 const ITEM_EFFECT_USER_POINT_SCAN_LIMIT := 16
 
 # The GameWorld whose entities carry the effects (public surface only; see
-# above). Untyped: the world script owns this object.
-var _world
+# above).
+var _world: GameWorld
 var _static_sources := Callable()  # () -> Array (the placer's static item-effect sources)
-var _item_db_source := Callable()  # () -> item database or null (duck-typed; see header)
+var _item_db_source := Callable()  # () -> ItemDatabase or null (the placer's db, lent by the world)
 
 # Debug: hide every particle effect (F3 overlay's "Hide particles" — the retail
 # master particle switch, mimicked). Off by default; survives mission reloads.
@@ -62,15 +61,16 @@ var _item_fx_control_instances: Dictionary = {}
 ## One-time wiring from the owning GameWorld: the world whose public surface
 ## the director resolves through, and the two lent private seams (the placer's
 ## get_static_item_effect_sources and get_item_db, null-guarded by the world).
-func setup(world, static_sources: Callable, item_db_source: Callable) -> void:
+func setup(world: GameWorld, static_sources: Callable,
+		item_db_source: Callable) -> void:
 	_world = world
 	_static_sources = static_sources
 	_item_db_source = item_db_source
 
 
 # The placer's item database through the lent seam (null before a mission /
-# with no placer). Untyped on purpose — see the header.
-func _resolve_item_db() -> Variant:
+# with no placer).
+func _resolve_item_db() -> ItemDatabase:
 	return _item_db_source.call() if _item_db_source.is_valid() else null
 
 
@@ -117,8 +117,8 @@ func on_effect_world_started() -> void:
 	# (resolved to the placed node's live transform).
 	effect_world.set_owner_position_provider(Callable(self, "_effect_owner_transform"))
 	reattach()
-	var runtime = _world.get_runtime()
-	if runtime != null and runtime.has_method("set_wire_node_spawned_callback"):
+	var runtime: MissionRuntime = _world.get_runtime()
+	if runtime != null:
 		runtime.set_wire_node_spawned_callback(Callable(self, "_on_wire_node_spawned"))
 
 
@@ -163,11 +163,9 @@ func _effect_owner_transform(owner_key: Variant) -> Variant:
 		var node: Variant = _item_fx_nodes.get(owner_key)
 		if node is Node3D and is_instance_valid(node) and node.is_inside_tree():
 			var entity_ref: Dictionary = _item_fx_owner_refs.get(owner_key, {})
-			var pose_runtime = _world.get_runtime()
+			var pose_runtime: MissionRuntime = _world.get_runtime()
 			if not entity_ref.is_empty() and pose_runtime != null \
-					and pose_runtime.has_method("has_current_present_effect_snapshot") \
-					and pose_runtime.has_current_present_effect_snapshot() \
-					and pose_runtime.has_method("presented_entity_effect_transform"):
+					and pose_runtime.has_current_present_effect_snapshot():
 				# Null here means the identity left THIS tick's replica set. Do
 				# not fall back to the one-frame-old Node or the group would emit
 				# once more from stale state before the batched present frees it.
@@ -176,8 +174,8 @@ func _effect_owner_transform(owner_key: Variant) -> Variant:
 		_item_fx_nodes.erase(owner_key)
 		_item_fx_owner_refs.erase(owner_key)
 		return null
-	var ssn_runtime = _world.get_runtime()
-	if ssn_runtime != null and ssn_runtime.has_method("entity_effect_transform_for_ssn"):
+	var ssn_runtime: MissionRuntime = _world.get_runtime()
+	if ssn_runtime != null:
 		return ssn_runtime.entity_effect_transform_for_ssn(owner_key)
 	return null
 
@@ -220,7 +218,9 @@ func reattach() -> void:
 	var container: Node = _world.get_node_or_null(NodePath(MissionObjectPlacer.CONTAINER_NAME))
 	if container != null:
 		for child in container.get_children():
-			var node := child as Node3D
+			# Boundary filter: only placed ObjectModels carry the per-item
+			# effect contract (husk grafts and helper nodes skip here).
+			var node := child as ObjectModel
 			if node == null or not node.has_meta("entity_ref"):
 				continue
 			var ref: Dictionary = node.get_meta("entity_ref")
@@ -234,7 +234,7 @@ func reattach() -> void:
 		print_verbose("GameWorld: item effects — %d emitter(s)" % attached)
 
 
-func _on_wire_node_spawned(node: Node3D, kind: int, item_id: int) -> void:
+func _on_wire_node_spawned(node: ObjectModel, kind: int, item_id: int) -> void:
 	_attach_item_effect_to_node(node, kind, item_id)
 
 
@@ -314,7 +314,7 @@ func _item_fx_control_node_is_active(entry: Dictionary) -> bool:
 	return false
 
 
-func _register_item_fx_control_node(node: Node3D, kind: int,
+func _register_item_fx_control_node(node: ObjectModel, kind: int,
 		item_id: int) -> Dictionary:
 	var aliases := _item_fx_control_node_aliases(node)
 	if aliases.is_empty():
@@ -371,14 +371,14 @@ func _activate_item_fx_control_nodes(event_aliases: Array) -> void:
 		if not _item_fx_aliases_intersect(entry.get("aliases", []), event_aliases):
 			continue
 		var node_v: Variant = entry.get("node")
-		if not is_instance_valid(node_v) or not (node_v is Node3D):
+		if not is_instance_valid(node_v) or not (node_v is ObjectModel):
 			_stop_item_fx_control_node(node_id)
 			_item_fx_control_nodes.erase(node_id)
 			continue
 		if not _item_fx_control_node_is_active(entry):
 			continue
 		_attach_item_effect_to_node(
-				node_v as Node3D,
+				node_v as ObjectModel,
 				int(entry.get("kind", -1)),
 				int(entry.get("item_id", 0)),
 				null,
@@ -414,19 +414,17 @@ func consume_control_effect(effect: Dictionary) -> bool:
 	return true
 
 
-func _attach_item_effect_to_node(node: Node3D, kind: int, item_id: int,
-		item_db_override: Variant = null,
+func _attach_item_effect_to_node(node: ObjectModel, kind: int, item_id: int,
+		item_db_override: ItemDatabase = null,
 		controller_active: bool = false) -> int:
 	var effect_world: EffectWorld = _world.get_effect_world()
 	if effect_world == null or node == null or item_id <= 0:
-		return 0
-	if not node.has_method("get_object_data"):
 		return 0
 	var node_id := node.get_instance_id()
 	var registered: Variant = _item_fx_registered_nodes.get(node_id)
 	if registered is Node and is_instance_valid(registered):
 		return 0
-	var item_db: Variant = item_db_override
+	var item_db: ItemDatabase = item_db_override
 	if item_db == null:
 		item_db = _resolve_item_db()
 	if item_db == null:
@@ -448,7 +446,7 @@ func _attach_item_effect_to_node(node: Node3D, kind: int, item_id: int,
 	var userpoint := String(fx.get("userpoint", ""))
 	if effect.is_empty():
 		return 0
-	var data = node.get_object_data()
+	var data: ObjectData = node.get_object_data()
 	if data == null:
 		return 0
 	if effect_world.are_particles_hidden():
@@ -532,7 +530,7 @@ func _spawn_static_item_effect(effect: String, transform: Transform3D) -> bool:
 
 
 func _attach_item_effect_to_static(source: Dictionary, source_index: int,
-		item_db_override: Variant = null) -> int:
+		item_db_override: ItemDatabase = null) -> int:
 	var effect_world: EffectWorld = _world.get_effect_world()
 	if effect_world == null or source_index < 0:
 		return 0
@@ -542,7 +540,7 @@ func _attach_item_effect_to_static(source: Dictionary, source_index: int,
 	var kind := int(source.get("kind", -1))
 	if item_id <= 0:
 		return 0
-	var item_db: Variant = item_db_override
+	var item_db: ItemDatabase = item_db_override
 	if item_db == null:
 		item_db = _resolve_item_db()
 	if item_db == null or not _item_effect_pool_allows(kind, item_db.get_attrib(item_id)):
@@ -550,7 +548,7 @@ func _attach_item_effect_to_static(source: Dictionary, source_index: int,
 	var fx: Dictionary = item_db.get_particle_effects(item_id).get("particlefx", {})
 	var effect := String(fx.get("effect", ""))
 	var userpoint := String(fx.get("userpoint", ""))
-	var data: Variant = source.get("object_data")
+	var data: ObjectData = source.get("object_data")
 	if effect.is_empty() or data == null:
 		return 0
 	if effect_world.are_particles_hidden():
@@ -597,10 +595,10 @@ func _retry_pending_item_effects() -> void:
 		# freed-object Variant untyped until after the validity guard; a typed cast
 		# can raise before is_instance_valid gets a chance to reject it.
 		var node_v: Variant = entry.get("node")
-		if not is_instance_valid(node_v) or not (node_v is Node3D):
+		if not is_instance_valid(node_v) or not (node_v is ObjectModel):
 			_item_fx_pending_nodes.erase(node_id)
 			continue
-		var node := node_v as Node3D
+		var node := node_v as ObjectModel
 		var controller_active := bool(entry.get("controller_active", false))
 		if controller_active:
 			var control_entry: Dictionary = _item_fx_control_nodes.get(node_id, {})

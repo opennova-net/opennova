@@ -11,12 +11,14 @@ extends RefCounted
 
 const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
 
-var _sim  # Simulation
+var _sim: Simulation                  # null in data-driven tests
 var _container: Node3D
-var _placer
-var _item_db
+var _placer: MissionObjectPlacer
+var _item_db: ItemDatabase
 var _fx_provider: Callable
-var _game_world
+# The owner-anchor registry (GameWorld's ItemEffectDirector); null when the
+# owner runs without an effect world.
+var _anchors: ItemEffectDirector
 
 # key (int64) -> {node: Node3D, item_id: int}; flying-round keys combine
 # the pool slot with its monotonic lifetime generation, while placed devices
@@ -37,14 +39,15 @@ class Stats:
 	var move_effect_transforms: int = 0
 
 
-func setup(sim, container: Node3D, placer, item_db,
-		fx_provider: Callable = Callable(), game_world = null) -> void:
+func setup(sim: Simulation, container: Node3D, placer: MissionObjectPlacer,
+		item_db: ItemDatabase, fx_provider: Callable = Callable(),
+		anchors: ItemEffectDirector = null) -> void:
 	_sim = sim
 	_container = container
 	_placer = placer
 	_item_db = item_db
 	_fx_provider = fx_provider
-	_game_world = game_world
+	_anchors = anchors
 
 
 func get_stats() -> Stats:
@@ -58,9 +61,12 @@ func get_stats() -> Stats:
 func present() -> void:
 	if _sim == null:
 		return
-	if not _sim.has_method("get_throwable_visuals"):
-		return
-	var visuals: Array = _sim.get_throwable_visuals()
+	present_visuals(_sim.get_throwable_visuals())
+
+
+## The pure-data presentation leg (the present_snapshot precedent): production
+## present() feeds the typed sim's rows; tests feed the same rows directly.
+func present_visuals(visuals: Array) -> void:
 	_sync_move_effects(visuals)
 	if _container == null or not is_instance_valid(_container):
 		return
@@ -107,7 +113,7 @@ func present() -> void:
 ## seam. Scene nodes remain batched in present(), but particles must see every
 ## simulated pose and a release before the same tick's EffectWorld advance.
 func sync_fixed_tick_effects() -> void:
-	if _sim == null or not _sim.has_method("get_throwable_visuals"):
+	if _sim == null:
 		return
 	_sync_move_effects(_sim.get_throwable_visuals())
 
@@ -150,27 +156,19 @@ func _present_move_effect(key: int, effect: String,
 	_move_effect_transforms[key] = transform
 	if not rec.is_empty():
 		return
-	var fx = _fx_provider.call() if _fx_provider.is_valid() else null
-	if fx == null or _game_world == null \
-			or not _game_world.has_method("register_effect_anchor"):
+	var fx: EffectWorld = _fx_provider.call() if _fx_provider.is_valid() else null
+	if fx == null or _anchors == null:
 		_move_effect_transforms.erase(key)
 		return
 	var owner_key := _move_effect_owner_key(key)
-	_game_world.register_effect_anchor(owner_key, func() -> Variant:
+	_anchors.register_effect_anchor(owner_key, func() -> Variant:
 		return _move_effect_transforms.get(key) if _move_effects.has(key) else null)
-	var receipt: Dictionary
-	if fx.has_method("spawn_effect_owned_request"):
-		receipt = fx.spawn_effect_owned_request(
-				owner_key, effect, transform.origin, transform.basis.z)
-	else:
-		var handle := int(fx.spawn_effect_owned(
-				owner_key, effect, transform.origin, transform.basis.z))
-		receipt = {"spawned": handle > 0, "effect_handle": handle, "group_id": 0}
+	var receipt: Dictionary = fx.spawn_effect_owned_request(
+			owner_key, effect, transform.origin, transform.basis.z)
 	if not bool(receipt.get("spawned", false)):
-		_game_world.unregister_effect_anchor(owner_key)
+		_anchors.unregister_effect_anchor(owner_key)
 		_move_effect_transforms.erase(key)
-		if fx.has_method("release_effect_binding"):
-			fx.release_effect_binding(owner_key)
+		fx.release_effect_binding(owner_key)
 		return
 	_move_effects[key] = {
 		"effect": effect,
@@ -186,24 +184,22 @@ func _retire_move_effect(key: int) -> void:
 	if rec.is_empty():
 		return
 	var owner_key: Variant = rec.get("owner_key")
-	if _game_world != null and is_instance_valid(_game_world) \
-			and _game_world.has_method("unregister_effect_anchor"):
-		_game_world.unregister_effect_anchor(owner_key)
+	if _anchors != null:
+		_anchors.unregister_effect_anchor(owner_key)
 	var group_id := int(rec.get("group_id", 0))
-	var fx = _fx_provider.call() if _fx_provider.is_valid() else null
-	if group_id > 0 and fx != null and fx.has_method("stop_group"):
+	var fx: EffectWorld = _fx_provider.call() if _fx_provider.is_valid() else null
+	if fx == null:
+		return
+	if group_id > 0:
 		# Stop emission in the same presenter pass that observes round removal;
 		# already-live particles drain naturally. [orig:
 		# Projectile_ReleaseEffects @0x4e8280 -> @0x5f75d0.]
 		fx.stop_group(group_id)
-	if fx != null and fx.has_method("release_effect_binding"):
-		fx.release_effect_binding(owner_key)
+	fx.release_effect_binding(owner_key)
 
 
 func _build_model(_key: int, item_id: int) -> Dictionary:
 	if _placer == null or _item_db == null:
-		return {}
-	if not _placer.has_method("build_model_from_graphic"):
 		return {}
 	var def_id := item_id + 100000  # mission::kItemIdOffset
 	var graphic := String(_item_db.get_graphic(def_id))

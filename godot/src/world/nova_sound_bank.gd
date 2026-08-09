@@ -28,7 +28,7 @@ const SELECTION_RANDOM := 1
 const SELECTION_SEQUENTIAL := 2
 const SELECTION_RANDOM_SEQ := 3
 
-var _resource_root  # ResourceRoot
+var _resource_root: ResourceRoot  # null = menu/isolated-bank use (no VFS reads)
 # Occlusion provider (the Simulation, or null): one-shot fire distances
 # inflate through the witnessed two-ray LOS so occluded sources fire quieter /
 # cull farther [orig: Sound_ApplyOcclusionDistance @ 0x529970, applied in
@@ -46,7 +46,7 @@ var _wav_cache: Dictionary = {}
 var _exclusive: Dictionary = {}
 
 
-func _init(resource_root) -> void:
+func _init(resource_root: ResourceRoot) -> void:
 	_resource_root = resource_root
 
 
@@ -101,9 +101,7 @@ func describe_ambient(name: String) -> Array:
 		# Match _resolve_stream's basename lookup without paying its read/decode
 		# cost during mission setup. Corrupt data is rejected lazily and cached
 		# if the candidate first reaches the physical channel budget.
-		if _resource_root == null or not _resource_root.has_method("read_file"):
-			continue
-		if _resource_root.has_method("has_file") and not _resource_root.has_file(wav_path.get_file()):
+		if _resource_root == null or not _resource_root.has_file(wav_path.get_file()):
 			continue
 		out.append({
 			"wav_path": wav_path,
@@ -417,7 +415,7 @@ func _resolve_stream(member: Dictionary) -> AudioStreamWAV:
 	if _wav_cache.has(name):
 		return _wav_cache[name]
 	var stream: AudioStreamWAV = null
-	if _resource_root != null and _resource_root.has_method("read_file"):
+	if _resource_root != null:
 		var bytes: PackedByteArray = _resource_root.read_file(wav_path.get_file())
 		if not bytes.is_empty():
 			stream = WavLoader.from_bytes(bytes)

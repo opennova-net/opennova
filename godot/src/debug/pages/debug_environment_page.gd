@@ -108,7 +108,7 @@ func refresh() -> void:
 	if env == null:
 		_env_label.text = "No environment."
 	else:
-		var time_hhmm := float(env.get("time_of_day"))
+		var time_hhmm := float(env.time_of_day)
 		var sun: Vector3 = env.get_sun_direction()
 		_env_label.text = (
 				"Time %04d   %s (day blend %.2f)%s\n"
@@ -126,8 +126,8 @@ func refresh() -> void:
 
 	var weather := _weather()
 	if weather != null:
-		_wind_slider.set_value_no_signal(float(weather.get("wind_strength")))
-		_wind_value.text = "%d" % int(float(weather.get("wind_strength")))
+		_wind_slider.set_value_no_signal(float(weather.wind_strength))
+		_wind_value.text = "%d" % int(float(weather.wind_strength))
 
 	var water := _water()
 	if water == null:
@@ -136,30 +136,32 @@ func refresh() -> void:
 		_water_label.text = "Water: none in this mission."
 	else:
 		_water_label.text = "Water: height %.2f   %s" % [
-			float(water.get("water_height")),
+			float(water.water_height),
 			"rendering" if bool(water.is_water_render_active()) else "not rendering"]
 
 
-func _world_node(getter: StringName) -> Object:
+func _env() -> MissionEnvironment:
 	var world := _ctx.world()
-	if world == null or not world.has_method(getter):
+	if world == null:
 		return null
-	var node: Variant = world.call(getter)
-	if node is Object and is_instance_valid(node):
-		return node
-	return null
+	var env := world.get_environment_node()
+	return env if env != null and is_instance_valid(env) else null
 
 
-func _env() -> Object:
-	return _world_node(&"get_environment_node")
+func _weather() -> Weather:
+	var world := _ctx.world()
+	if world == null:
+		return null
+	var weather := world.get_weather_node()
+	return weather if weather != null and is_instance_valid(weather) else null
 
 
-func _weather() -> Object:
-	return _world_node(&"get_weather_node")
-
-
-func _water() -> Object:
-	return _world_node(&"get_water_node")
+func _water() -> Water:
+	var world := _ctx.world()
+	if world == null:
+		return null
+	var water := world.get_water_node()
+	return water if water != null and is_instance_valid(water) else null
 
 
 func _on_time_changed(value: float) -> void:

@@ -72,24 +72,31 @@ func _refresh_player() -> void:
 	if sim == null:
 		_player_label.text = "No local player."
 		return
-	var key := String(sim.get_local_player_anim_key())
-	var slot := int(sim.get_local_player_body_anim_slot())
-	var phase := int(sim.get_local_player_anim_phase_ticks())
-	var source_key := String(sim.get_local_player_anim_source_key())
-	var source_phase := int(sim.get_local_player_anim_source_phase_ticks())
-	var blend := clampf(float(sim.get_local_player_anim_blend_weight()), 0.0, 1.0)
+	_player_label.text = format_player_status(
+			String(sim.get_local_player_anim_key()),
+			int(sim.get_local_player_body_anim_slot()),
+			int(sim.get_local_player_anim_phase_ticks()),
+			String(sim.get_local_player_anim_source_key()),
+			int(sim.get_local_player_anim_source_phase_ticks()),
+			float(sim.get_local_player_anim_blend_weight()))
+
+
+## Pure formatting of the local player's animation scalars — the value seam
+## tests drive directly; _refresh_player feeds it the live Simulation reads.
+static func format_player_status(key: String, slot: int, phase: int,
+		source_key: String, source_phase: int, blend_weight: float) -> String:
+	var blend := clampf(blend_weight, 0.0, 1.0)
 	if not source_key.is_empty() and source_key != key and blend < 0.999:
-		_player_label.text = (
+		return (
 				"Player transition\n"
 				+ "source  %s @ %d ticks\n" % [source_key, source_phase]
 				+ "→ target  %s @ %d ticks   ·   blend %d%%   ·   body slot %d"
 				% [key if not key.is_empty() else "-", phase,
 						int(roundf(blend * 100.0)), slot])
-	else:
-		_player_label.text = (
-				"Player animation\n"
-				+ "%s @ %d ticks   ·   body slot %d   ·   settled"
-				% [key if not key.is_empty() else "-", phase, slot])
+	return (
+			"Player animation\n"
+			+ "%s @ %d ticks   ·   body slot %d   ·   settled"
+			% [key if not key.is_empty() else "-", phase, slot])
 
 
 func _refresh_models() -> void:
@@ -345,10 +352,9 @@ func _animatable_nodes() -> Array:
 	var output: Array = []
 	var seen := {}
 	var runtime := _ctx.runtime()
-	if runtime != null and runtime.has_method("get_registry"):
-		var registry: Variant = runtime.get_registry()
-		if registry != null and is_instance_valid(registry) \
-				and registry is EntityIndex:
+	if runtime != null:
+		var registry := runtime.get_registry() as EntityIndex
+		if registry != null and is_instance_valid(registry):
 			for candidate in registry.get_animatable_nodes():
 				_append_animatable(candidate, output, seen)
 
@@ -357,8 +363,8 @@ func _animatable_nodes() -> Array:
 	# this debug page is visible. Instance-id dedupe keeps registry members from
 	# appearing twice.
 	var world := _ctx.world()
-	if world is Node:
-		_collect_world_animatables(world as Node, output, seen)
+	if world != null:
+		_collect_world_animatables(world, output, seen)
 	return output
 
 

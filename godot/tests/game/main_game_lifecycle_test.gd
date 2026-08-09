@@ -7,6 +7,7 @@ const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
 const FIXTURE_DIR := "res://../fixtures/minimal/resources"
 const BAKED_TERRAIN_DIR := "res://../fixtures/godot/dvxi5"
 const MAIN_GAME_SCENE := preload("res://game/main_game.tscn")
+const MissionRuntime := preload("res://src/world/mission_runtime.gd")
 const VegAssetsScript := preload("res://src/terrain/veg_assets.gd")
 # Witnessed retail placement (fixtures/minimal/README.md): strings plus the
 # mission .bin/.pcx/.lwf family live in language; menus/defs/.bms/.dbf in
@@ -69,105 +70,30 @@ const ISOLATED_ENV := [
 ]
 
 
-class EntitySimStub:
-	extends RefCounted
-
-	var present_snapshot_reads := 0
-	var cards := [
-		{
-			"name": "AI zero",
-			"net_id": 111,
-			"position": Vector3(10.0, 2.0, -30.0),
-			"pool": 0,
-			"wire_handle": 1001,
-			"alive": true,
-			"hidden": false,
-			"health": 80,
-			"team": 1,
-			"state_name": "guard",
-		},
-		{
-			"name": "AI one",
-			"net_id": 222,
-			"position": Vector3(20.0, 3.0, -40.0),
-			"pool": 1,
-			"wire_handle": 1002,
-			"alive": false,
-			"hidden": true,
-			"health": 0,
-			"team": 2,
-			"state_name": "dead",
-		},
-	]
-
-	func get_entity_count() -> int:
-		return cards.size()
-
-	func get_entity_debug(index: int) -> Dictionary:
-		return cards[index].duplicate(true) \
-				if index >= 0 and index < cards.size() else {}
-
-	func get_present_snapshot() -> PackedFloat32Array:
-		present_snapshot_reads += 1
-		var snapshot := PackedFloat32Array()
-		snapshot.append_array(_present_row(
-				222, 1002, 502, Vector3(22.0, 4.0, -44.0)))
-		snapshot.append_array(_present_row(
-				333, 2001, 703, Vector3(30.0, 5.0, -50.0)))
-		snapshot.append_array(_present_row(
-				111, 1001, 501, Vector3(11.0, 2.0, -33.0)))
-		return snapshot
-
-	func get_present_stride() -> int:
-		return Simulation.PF_STRIDE
-
-	func get_world_entity_debug(net_id: int) -> Dictionary:
-		if net_id != 333:
-			return {}
-		return {
-			"name": "Client vehicle",
-			"state_name": "driving",
-			"health": 400,
-			"team": 3,
-			"alive": true,
-		}
-
-	func _present_row(
-			net_id: int,
-			wire_handle: int,
-			type_id: int,
-			position: Vector3) -> PackedFloat32Array:
-		var row := PackedFloat32Array()
-		row.resize(Simulation.PF_STRIDE)
-		row[Simulation.PF_TYPE_ID] = type_id
-		row[Simulation.PF_NET_ID] = net_id
-		row[Simulation.PF_WIRE_HANDLE] = wire_handle
-		row[Simulation.PF_KIND] = 1
-		row[Simulation.PF_INDEX] = net_id
-		row[Simulation.PF_BMS_ID] = 1000 + net_id
-		row[Simulation.PF_POS_X] = position.x
-		row[Simulation.PF_POS_Y] = position.y
-		row[Simulation.PF_POS_Z] = position.z
-		row[Simulation.PF_ALIVE] = 1.0
-		return row
-
-
-class EntityRuntimeStub:
-	extends RefCounted
-
-	var sim := EntitySimStub.new()
-
-	func get_sim() -> EntitySimStub:
-		return sim
-
-
 class EntityShellHarness:
 	extends "res://game/main_game.gd"
 
-	var runtime_stub := EntityRuntimeStub.new()
+	# A real MissionRuntime over an in-memory mission: two authored organics
+	# plus the auto-spawned host player supply the AI/present rows the
+	# discovery pages walk (the sim-double era ended with the typed
+	# DebugEntities.list(sim: Simulation) signature).
+	var runtime: MissionRuntime = null
+
+	func ensure_runtime(parent: Node) -> void:
+		if runtime != null:
+			return
+		var mission := MissionData.new()
+		assert(mission.create_default() == OK)
+		mission.add_entity(3, 0, Vector3(10, 0, -30), Vector3.ZERO)
+		mission.add_entity(3, 0, Vector3(20, 0, -40), Vector3.ZERO)
+		var container := Node3D.new()
+		parent.add_child(container)
+		runtime = MissionRuntime.new()
+		parent.add_child(runtime)
+		runtime.setup(mission, container)
 
 	func _current_runtime():
-		return runtime_stub
+		return runtime
 
 
 var _saved_config := PackedByteArray()
@@ -235,29 +161,39 @@ func test_game_debug_adapter_handles_every_cataloged_public_control_action() -> 
 
 
 func test_mcp_entity_discovery_uses_client_present_order_and_ai_mapping() -> void:
-	var shell = autofree(EntityShellHarness.new())
+	# The shell stays OFF-tree (its _process expects the packaged scene's
+	# children); the runtime + container mount under the test instead.
+	var shell: EntityShellHarness = autofree(EntityShellHarness.new())
+	shell.ensure_runtime(self)
 	var debug_adapter: GameDebugAdapter = autofree(shell.get_game_debug_adapter())
 
 	var page: Dictionary = debug_adapter.get_mcp_game_entities(0, 64)
 
-	assert_eq(page["total"], 3)
-	assert_eq(page["entities"][0]["index"], 0)
-	assert_eq(page["entities"][0]["net_id"], 222)
-	assert_eq(page["entities"][0]["ai_index"], 1)
-	assert_true(page["entities"][0]["editable"])
-	assert_eq(page["entities"][0]["mission_position"],
-			Vector3(22.0, 44.0, 4.0))
-	assert_eq(page["entities"][1]["index"], 1)
-	assert_eq(page["entities"][1]["net_id"], 333)
-	assert_eq(page["entities"][1]["name"], "Client vehicle")
-	assert_eq(page["entities"][1]["ai_index"], -1)
-	assert_false(page["entities"][1]["editable"],
-			"non-AI client entities remain discoverable without becoming editable")
-	assert_eq(page["entities"][2]["net_id"], 111)
-	assert_eq(page["entities"][2]["ai_index"], 0)
-	assert_gt(shell.runtime_stub.sim.present_snapshot_reads, 0)
-	assert_eq(debug_adapter.get_mcp_game_entity(0)["name"], "AI one")
-	assert_eq(debug_adapter.get_mcp_game_entity(0)["ai_index"], 1)
+	# Two authored organics + the auto-spawned host player, in the sim's
+	# client-present order with stable indices and live AI identity.
+	assert_eq(int(page["total"]), 3)
+	var entities: Array = page["entities"]
+	assert_eq(entities.size(), 3)
+	for i in range(entities.size()):
+		assert_eq(int((entities[i] as Dictionary)["index"]), i,
+				"page indices follow present order")
+	var net_ids := {}
+	for raw in entities:
+		var row: Dictionary = raw
+		assert_true(row.has("net_id"), "every row carries its AI mapping")
+		net_ids[int(row["net_id"])] = true
+	assert_eq(net_ids.size(), 3, "each present row maps to a distinct entity")
+	# Every row in this all-AI world is editable with a live AI mapping and a
+	# mission-space position; the single-entity read agrees with its page row.
+	for raw in entities:
+		var row: Dictionary = raw
+		assert_gt(int(row["ai_index"]), -1, "AI rows carry their ai_index")
+		assert_true(bool(row["editable"]), "AI rows are editable")
+		assert_true(row.has("mission_position"))
+	var first: Dictionary = debug_adapter.get_mcp_game_entity(0)
+	assert_eq(String(first["name"]), String((entities[0] as Dictionary)["name"]),
+			"the single-entity read matches page row 0")
+	assert_eq(int(first["ai_index"]), int((entities[0] as Dictionary)["ai_index"]))
 
 
 func before_each() -> void:

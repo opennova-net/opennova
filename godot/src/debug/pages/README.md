@@ -36,15 +36,18 @@ func refresh() -> void:              # 0.25 s cadence, ONLY while active
    line). Hosts and tests can also `overlay.register_page(page)` at runtime —
    a custom category grows its own sidebar section.
 3. Add `godot/tests/debug_<system>_page_test.gd`: drive the page with a
-   fabricated `DebugContext` + duck-typed stubs (empty states, canned
-   formatting, knob pokes + mirror-back).
+   fabricated `DebugContext` over real typed sources (a minimal in-memory
+   `MissionRuntime`/`Simulation`, `extends GameWorld` harnesses) — empty
+   states, canned formatting, knob pokes + mirror-back. Value-shape stubs
+   don't resolve: the context is typed (ADR 0034).
 
 ## Data and knobs
 
 - All live data comes through `DebugContext` (`_ctx.runtime()/sim()/
-  world()/effect_world()/view_context()`), re-resolved on every call and
-  `has_method`-guarded — mission reloads must never leave a stale reference,
-  and harness stubs must degrade to empty states.
+  world()/effect_world()/view_context()`): typed resolvers (MissionRuntime /
+  Simulation / GameWorld / EffectWorld), re-resolved on every call — mission
+  reloads must never leave a stale reference, and pages render their empty
+  state when a resolver returns null.
 - **Every mutation goes through the shared `DebugSession`.** This includes
   transport, vars, terrain draw modes, environment values, and dynamic
   AudioServer bus controls. Register a typed control with a re-resolving

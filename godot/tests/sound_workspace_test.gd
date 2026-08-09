@@ -17,7 +17,7 @@ func test_identity_and_open_hooks() -> void:
 
 
 func test_document_save_and_inspector() -> void:
-	var shell := Node.new()
+	var shell := WorkspaceShell.new()
 	add_child_autofree(shell)
 	var ws = SoundWorkspaceAdapter.new()
 	ws.set_editor_shell(shell)

@@ -108,7 +108,7 @@ func test_alignment_moves_the_design_space_anchor() -> void:
 	var fs := float(preview.font_pixel_size())
 	var expected_y := 768.0 * (preview.size.y - fs) / (2.0 * preview.size.y)
 	assert_almost_eq(preview.draw_anchor_design().y, expected_y, 0.001,
-		"The vertical anchor keeps the glyph cell mid-panel after HudLayout scaling.")
+		"The vertical anchor keeps the glyph cell mid-panel after HudPos scaling.")
 
 
 func test_draws_without_error_in_tree() -> void:

@@ -255,9 +255,7 @@ func _commit_graphic(text: String) -> void:
 
 
 func _resource_root() -> ResourceRoot:
-	if terrain_editor != null and terrain_editor.has_method("get_resource_root"):
-		return terrain_editor.get_resource_root()
-	return null
+	return terrain_editor.get_resource_root() if terrain_editor != null else null
 
 
 func _on_color_lower_selected(idx: int) -> void:

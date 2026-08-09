@@ -52,12 +52,11 @@ func test_defaults_without_an_editor() -> void:
 
 
 class PreviewContextStubEditor:
-	extends Node
+	extends TerrainEditorBase
 
 	var resource_root: ResourceRoot
 	var world_root: Node3D
 	var current_trn_path := ""
-	var is_dirty := false
 	var set_context_calls := 0
 	var clear_context_calls := 0
 	var context_active := false
@@ -78,9 +77,6 @@ class PreviewContextStubEditor:
 		context_active = false
 		tile_info = null
 		time_of_day = NAN
-
-	func set_viewport_active(_active: bool, _grab_focus: bool) -> void:
-		pass
 
 	func get_resource_root() -> ResourceRoot:
 		return resource_root
@@ -241,12 +237,11 @@ func test_asset_dock_before_build_mounts_the_editor() -> void:
 # The terrain-editor seams the mission controller duck-types, plus the B8
 # height-revision/sampling pair (see mission_controller_test.gd's stub).
 class RegroundStubEditor:
-	extends Node
+	extends TerrainEditorBase
 
 	var resource_root: ResourceRoot
 	var world_root: Node3D
 	var current_trn_path: String = ""
-	var is_dirty := false
 	var height_revision := 0
 	var sample_height := 10.0
 
@@ -277,9 +272,6 @@ class RegroundStubEditor:
 			out[i] = sample_height_world(points[i].x, points[i].y)
 		return out
 
-	func set_viewport_active(_active: bool, _grab_focus: bool) -> void:
-		pass  # deactivate() pokes the viewport; nothing to do headless
-
 
 # A workspace with the fixture mission loaded on the stub terrain, its shell a
 # themed Control, and a height edit already made underneath (revision bumped +
@@ -292,7 +284,7 @@ func _drifted_workspace() -> MissionWorkspace:
 	stub.world_root = Node3D.new()
 	add_child_autofree(stub.world_root)
 	add_child_autofree(stub)
-	var shell := Control.new()
+	var shell := WorkspaceShell.new()
 	shell.theme = Theme.new()
 	add_child_autofree(shell)
 	var ws = MissionWorkspace.new(stub)
@@ -363,7 +355,7 @@ func test_workspace_switch_dismisses_the_prompt_without_answering() -> void:
 
 func _shelled_workspace() -> MissionWorkspace:
 	var ws = MissionWorkspace.new()
-	var shell := Control.new()
+	var shell := WorkspaceShell.new()
 	add_child_autofree(shell)
 	ws.editor_shell = shell
 	return ws

@@ -19,7 +19,9 @@ extends GutTest
 # (world/fire_sound.h, pinned by the fire_sound ctest) and reach the audio bank
 # through drain_fire_sounds — this pass presents effects only.
 #
-# Asset-free: the sim, audio, fx and muzzle anchor are all stubs.
+# Typed surfaces (ADR 0034): the event rows are pure data through the public
+# present_fires data leg; the fx/audio sinks are real EffectWorld/MissionAudio
+# subclasses capturing the typed calls.
 
 const FirePresentPass := preload("res://src/world/fire_present_pass.gd")
 
@@ -27,50 +29,39 @@ const WIRE_EYE := Vector3(10.0, 1.8, -4.0)
 const MUZZLE := Vector3(10.6, 1.55, -4.7)
 
 
-class StubSim:
-	extends RefCounted
-	var events: Array = []
-	func drain_fire_presentation_events() -> Array:
-		var out := events
-		events = []
-		return out
-	func drain_fire_sounds() -> Array:
-		return []
-	func drain_tracer_trails() -> Array:
-		return []
-
-	func drain_sound_emitters() -> Array:
-		return []
-
-
-class StubFx:
-	extends RefCounted
+class CaptureFx:
+	extends EffectWorld
 	var spawns: Array = []
-	func spawn_effect(name: String, pos: Vector3, forward: Vector3) -> void:
-		spawns.append({"name": name, "pos": pos, "forward": forward})
+
+	func spawn_effect(name: String, position: Vector3,
+			orientation: Vector3 = Vector3.ZERO) -> int:
+		spawns.append({"name": name, "pos": position, "forward": orientation})
+		return spawns.size()
 
 
-class StubAudio:
-	extends RefCounted
+class CaptureAudio:
+	extends MissionAudio
 	var played: Array = []
-	func fire_soundset(name: String, pos: Vector3, source_bms_id: int) -> void:
-		played.append({"name": name, "pos": pos})
+
+	func fire_soundset(set_name: String, world_pos: Vector3,
+			source_bms_id: int = 0) -> bool:
+		played.append({"name": set_name, "pos": world_pos})
+		return true
 
 
-var _sim: StubSim
-var _fx: StubFx
-var _audio: StubAudio
-var _fire
+var _fx: CaptureFx
+var _audio: CaptureAudio
+var _fire: FirePresentPass
 
 
 func before_each() -> void:
-	_sim = StubSim.new()
-	_fx = StubFx.new()
-	_audio = StubAudio.new()
+	_fx = CaptureFx.new()
+	add_child_autofree(_fx)
+	_audio = CaptureAudio.new(null, null)
 	var container := Node3D.new()
 	add_child_autofree(container)
 	_fire = FirePresentPass.new()
-	_fire.setup(_sim, container,
+	_fire.setup(null, container,
 			func(): return _audio,
 			func(): return _fx,
 			func(): return Vector3.ZERO,
@@ -95,8 +86,7 @@ func _event(adm_arm: bool) -> Dictionary:
 
 
 func test_ammo_arm_keeps_the_ammo_def_effect_at_the_wire_position() -> void:
-	_sim.events = [_event(false)]
-	_fire.present()
+	_fire.present_fires([_event(false)])
 	assert_eq(_fx.spawns.size(), 1, "the ammo arm spawns exactly one effect")
 	assert_eq(String(_fx.spawns[0]["name"]), "AMMO_EFFECT",
 			"the ammo arm uses the AMMO def's effect")
@@ -105,8 +95,7 @@ func test_ammo_arm_keeps_the_ammo_def_effect_at_the_wire_position() -> void:
 
 
 func test_adm_arm_uses_the_fire_row_at_the_weapon_anchor() -> void:
-	_sim.events = [_event(true)]
-	_fire.present()
+	_fire.present_fires([_event(true)])
 	assert_eq(_fx.spawns.size(), 1, "the adm arm still spawns exactly one effect")
 	assert_eq(String(_fx.spawns[0]["name"]), "EFFECT_M16MF",
 			"the adm arm uses the FIRE action row's effect, not the ammo def's")
@@ -121,13 +110,12 @@ func test_adm_arm_falls_back_to_the_anchor_provider_not_the_eye() -> void:
 	# provider at all.
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var bare = FirePresentPass.new()
-	bare.setup(_sim, container,
+	var bare := FirePresentPass.new()
+	bare.setup(null, container,
 			func(): return _audio,
 			func(): return _fx,
 			func(): return Vector3.ZERO)
-	_sim.events = [_event(true)]
-	bare.present()
+	bare.present_fires([_event(true)])
 	assert_eq(_fx.spawns.size(), 1)
 	assert_eq(String(_fx.spawns[0]["name"]), "EFFECT_M16MF",
 			"the row choice does not depend on the anchor provider")
@@ -136,7 +124,6 @@ func test_adm_arm_falls_back_to_the_anchor_provider_not_the_eye() -> void:
 func test_a_row_with_no_authored_effect_spawns_nothing() -> void:
 	var ev := _event(true)
 	ev["action_effect"] = ""
-	_sim.events = [ev]
-	_fire.present()
+	_fire.present_fires([ev])
 	assert_eq(_fx.spawns.size(), 0, "an unauthored fire row spawns no effect")
 	assert_eq(_audio.played.size(), 0, "and this pass plays no sound of its own")

@@ -170,12 +170,29 @@ func _build() -> void:
 func refresh() -> void:
 	_bind_pick_list(_ctx.pick_list)
 	_refresh_picks()
-	var sim := _ctx.sim()
-	if sim == null:
+	var rows := _list_rows()
+	if rows.is_empty() and _ctx.sim() == null:
 		_clear_live()
 		return
+	render_rows(rows)
+
+
+## The one row source: the live sim's discovered rows. A typed test harness
+## (extends this page) overrides it to drive the pane with fabricated row
+## data in the DebugEntities.list shape.
+func _list_rows() -> Array[Dictionary]:
+	var sim := _ctx.sim()
+	if sim == null:
+		return []
+	return DebugEntities.list(sim)
+
+
+## Render one discovered row set: list text, retained selection, pending-pick
+## takeover. Split from refresh() so row-shaped data can drive the pane
+## directly.
+func render_rows(rows: Array[Dictionary]) -> void:
 	var retained_identity := _selected_identity
-	_entity_rows = DebugEntities.list(sim)
+	_entity_rows = rows
 	var count := _entity_rows.size()
 	# Rebuild only on count change; steady-state refreshes update text in place.
 	if _entity_list.item_count != count:
@@ -431,10 +448,7 @@ static func _entity_identity(row: Dictionary) -> String:
 func _resolve_selected_ai_index() -> int:
 	if _selected_identity.is_empty():
 		return -1
-	var sim := _ctx.sim()
-	if sim == null:
-		return -1
-	for row in DebugEntities.list(sim):
+	for row in _list_rows():
 		if _entity_identity(row) == _selected_identity \
 				and bool(row.get("editable", false)):
 			return int(row.get("ai_index", -1))

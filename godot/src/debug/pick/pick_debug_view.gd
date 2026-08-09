@@ -33,6 +33,23 @@ func _build_view() -> void:
 
 
 func _refresh_from_sim(sim: Simulation) -> void:
+	var live_positions := {}
+	if _pick_list != null:
+		for pick_v in _pick_list.get_picks():
+			var net_id := int((pick_v as Dictionary).get("net_id", 0))
+			if net_id <= 0 or live_positions.has(net_id):
+				continue
+			# Movers re-resolve so the highlight follows the live entity.
+			var card: Dictionary = sim.get_world_entity_debug(net_id)
+			if card.has("position"):
+				live_positions[net_id] = card["position"]
+	render_picks(live_positions)
+
+
+## Draw the pick list; live_positions maps net_id -> live Vector3 for movers
+## whose entity still resolves. Split from the sim fetch so tests and probes
+## can drive the view with position data directly.
+func render_picks(live_positions: Dictionary) -> void:
 	_mesh.clear_surfaces()
 	for lb in _labels:
 		lb.visible = false
@@ -45,11 +62,8 @@ func _refresh_from_sim(sim: Simulation) -> void:
 		var color := Color.from_hsv(IndexHue.hue_for_index(i), 0.75, 1.0)
 		var origin: Vector3 = pick.get("position_godot", Vector3.ZERO)
 		var net_id := int(pick.get("net_id", 0))
-		if net_id > 0:
-			# Movers re-resolve so the highlight follows the live entity.
-			var card: Dictionary = sim.get_world_entity_debug(net_id)
-			if card.has("position"):
-				origin = card["position"]
+		if net_id > 0 and live_positions.has(net_id):
+			origin = live_positions[net_id]
 		var radius := maxf(float(pick.get("bound_radius", 0.0)), 0.75)
 		_diamond(segments, origin, radius, color)
 		_cross(segments, origin, 0.3, color)

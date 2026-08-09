@@ -214,10 +214,7 @@ func new_script(script_name: String = "gamescript") -> int:
 
 func new_bank() -> int:
 	# create_empty is a static factory on the SbfBank GDExtension class (the
-	# default constructor leaves a bank unconfigured). Guard so an older binary
-	# without the factory degrades to a script-only project instead of crashing.
-	if not ClassDB.class_has_method("SbfBank", "create_empty", true):
-		return ERR_UNAVAILABLE
+	# default constructor leaves a bank unconfigured).
 	var b = SbfBank.create_empty()
 	if b == null:
 		return ERR_CANT_CREATE

@@ -7,7 +7,7 @@ extends EditorWorkspace
 
 const EnvironmentInspector = preload("res://modtools/environment/environment_inspector.gd")
 
-var environment_editor
+var environment_editor: EnvironmentEditor
 
 
 func _init(value = null) -> void:
@@ -18,9 +18,8 @@ func set_environment_editor(value) -> void:
 	environment_editor = value
 
 
-func bind_to_editor(value: Node) -> void:
-	var env = value.get_environment_editor() if value != null and value.has_method("get_environment_editor") else null
-	set_environment_editor(env)
+func bind_to_editor(value: EditorApp) -> void:
+	set_environment_editor(value.get_environment_editor() if value != null else null)
 
 
 func get_workspace_tooltip() -> String:
@@ -104,6 +103,28 @@ func open_file(path: String) -> Error:
 # The domain document the EditorWorkspace base derives undo/redo + dirty from.
 func get_editor_document() -> Object:
 	return environment_editor
+
+
+func has_unsaved_changes() -> bool:
+	return environment_editor != null and environment_editor.is_dirty
+
+
+func can_undo() -> bool:
+	return environment_editor != null and not is_busy() and environment_editor.can_undo()
+
+
+func can_redo() -> bool:
+	return environment_editor != null and not is_busy() and environment_editor.can_redo()
+
+
+func undo() -> void:
+	if environment_editor != null:
+		environment_editor.undo()
+
+
+func redo() -> void:
+	if environment_editor != null:
+		environment_editor.redo()
 
 
 func can_save() -> bool:

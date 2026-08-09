@@ -1,14 +1,16 @@
 class_name HudText
 extends RefCounted
 
-## Faithful HUD text: the original draws text with NovaLogic .fnt bitmap fonts and a
-## "half-bright" color mode. We load the fonts named in hudpos.def (font_hi/font_lo)
-## through the existing FntResource (.fnt parser + Godot FontFile view).
+## .fnt text helpers for ONED's preview surfaces (HUD layout preview, engine
+## text preview, strings workspace): load a font named in hudpos.def
+## (font_hi/font_lo) through FntResource's Godot FontFile view and draw it with
+## design-space scaling and the half-bright color mode.
 ## [orig: HUD_DrawTextRightAligned_HalfBright @0x580850 -> CGameFont_DrawText @0x6752c0]
 ##
-## Shell-neutral static helpers. Callers should load fonts once (not per frame).
-## NOTE: exact glyph spacing inside CGameFont_DrawText is a follow-up (see
-## docs/interface/hud-re.md); this uses the FntResource FontFile + Godot layout.
+## The RUNTIME HUD no longer draws through this: the engine GameFont
+## (engine/runtime/hud) lays out glyph quads exactly and HudOverlay rasterizes
+## them — this FontFile approximation stays only where an editor preview wants
+## a Godot Font object. Callers should load fonts once (not per frame).
 
 enum Align { LEFT = 0, RIGHT = 1, CENTER = 2 }
 
@@ -43,7 +45,7 @@ static func draw_text(ci: CanvasItem, font: Font, design_pos: Vector2, surface: 
 		fs = 16
 		if font is FontFile:
 			fs = (font as FontFile).get_fixed_size()
-	var pos := HudLayout.scale_point(design_pos, surface)
+	var pos := HudPos.scale_point(design_pos, surface)
 	var width := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 	if align == Align.RIGHT:
 		pos.x -= width

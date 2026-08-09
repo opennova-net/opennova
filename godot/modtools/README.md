@@ -90,9 +90,18 @@ inspectors are declared as typed registry rows:
   `EditorWorkspace` base class. It documents the full contract (identity,
   lifecycle, inspector, viewport, document actions, edit, asset dock) and gives
   every hook a safe default, so a workspace overrides only the tiers it needs.
-  A workspace returns its domain document/controller from
-  `get_editor_document()` and the base derives undo/redo and dirty state from
-  it; the base also owns the shared resource-root and VFS-open helpers.
+  Every hook is a typed virtual method — the shell never probes with
+  `has_method` (ADR 0034). A workspace overrides the edit hooks (`can_undo` /
+  `can_redo` / `undo` / `redo` / `has_unsaved_changes`) with typed calls into
+  its own document; `get_editor_document()` stays as the untyped accessor tests
+  and MCP tools read. The base also owns the shared resource-root and VFS-open
+  helpers.
+- [`framework/workspace_shell.gd`](framework/workspace_shell.gd): the
+  `WorkspaceShell` base class — the typed contract a workspace may call on its
+  owning shell (status toasts, state sync, resource root, reference index,
+  pickers, cross-workspace jumps, save/unsaved prompts, export lifecycle).
+  `EditorWorkstation` is the production shell; headless tests bind lightweight
+  `WorkspaceShell` subclasses or leave `editor_shell` null.
 - [`framework/workspace_def.gd`](framework/workspace_def.gd): `WorkspaceDef`, one
   registry row per workspace (id, adapter script, popup flag, nav category).
 - [`framework/inspector_def.gd`](framework/inspector_def.gd): `InspectorDef`, one

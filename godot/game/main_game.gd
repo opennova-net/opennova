@@ -53,7 +53,7 @@ enum State { MENU, WORLD, PAUSED, ARMORY, DEPLOY }
 @onready var _world: GameWorld = $World
 @onready var _camera: FlyCamera = $Camera3D
 @onready var _hud: CanvasLayer = $HUD
-@onready var _menu_shell = $MenuLayer/MenuShell
+@onready var _menu_shell: MenuShell = $MenuLayer/MenuShell
 
 var _picker: FileDialog
 var _root: ResourceRoot
@@ -80,7 +80,7 @@ var _frame_stats := FrameStatsBoard.new()
 # RenderingServer measurement edge latch and the wall-frame clock.
 var _render_stats := RootRenderStatsSampler.new()
 var _mp_companion  # MpMenuCompanion: drives the multiplayer (mp.mnu) menu by control name
-var _lan_session  # LanSession: retail-style 0x41/0x81 LAN enumeration browser
+var _lan_session: LanSession  # retail-style 0x41/0x81 LAN enumeration browser
 var _player_info_companion  # PlayerInfoMenuCompanion: drives the PLAYER_INFO (player.mnu) character screen
 var _armory_presenter: ArmoryPresenter  # the SHARED in-world armory surface (weapon.mnu WEAPON)
 var _deploy_presenter: DeployScreenPresenter  # the joiner's deploy-map screen (death.mnu DEATH)
@@ -559,21 +559,16 @@ func _wire_shell() -> void:
 	_menu_shell.exit_to_desktop_requested.connect(_on_exit_to_desktop)
 	_menu_shell.return_to_menu_requested.connect(_on_return_to_menu)
 	_menu_shell.resume_requested.connect(_on_resume)
-	if _menu_shell.has_signal("novaworld_requested"):
-		_menu_shell.novaworld_requested.connect(_net.open_novaworld_panel)
-	if _menu_shell.has_signal("crosshair_style_changed"):
-		_menu_shell.crosshair_style_changed.connect(_on_crosshair_style_changed)
+	_menu_shell.novaworld_requested.connect(_net.open_novaworld_panel)
+	_menu_shell.crosshair_style_changed.connect(_on_crosshair_style_changed)
 	# The multiplayer menu (mp.mnu) and the PLAYER_INFO character screen (player.mnu) are
 	# each driven by a companion the shell delegates to (whichever owns the loaded menu).
 	_mp_companion = MpMenuCompanion.new()
 	_player_info_companion = PlayerInfoMenuCompanion.new()
-	if ClassDB.class_exists("LanSession"):
-		_lan_session = ClassDB.instantiate("LanSession")
-		_lan_session.name = "LanSession"
-		add_child(_lan_session)
-		_mp_companion.set_lan_session(_lan_session)
-	else:
-		push_warning("MainGame: LanSession is unavailable; LAN browsing is disabled")
+	_lan_session = LanSession.new()
+	_lan_session.name = "LanSession"
+	add_child(_lan_session)
+	_mp_companion.set_lan_session(_lan_session)
 	_menu_shell.add_companion(_mp_companion)
 	_menu_shell.add_companion(_player_info_companion)
 	_net.wire_menu_companions(_mp_companion)
@@ -772,7 +767,7 @@ func join_lan_server(target: JoinTarget) -> void:
 func start_world_load(load_info: Dictionary, operation: Callable) -> void:
 	if _world_load_pending:
 		return
-	if _lan_session != null and _lan_session.has_method("stop"):
+	if _lan_session != null:
 		_lan_session.stop()
 	_world_load_pending = true
 	_world_load_request_id += 1

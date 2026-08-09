@@ -60,7 +60,8 @@ const REFLECTION_CULL_MASK := 0xFFFFF & ~(
 
 @export var environment_path: NodePath
 # The weather node owning the cloud-scroll core: the water scroll speed rides
-# the same RAMPING rate the sky layers consume (duck-typed, lazy resolve).
+# the same RAMPING rate the sky layers consume (lazy resolve, converted once
+# to Weather).
 @export var weather_path: NodePath
 @export var terrain_data: TerrainData:
 	set(value):
@@ -225,8 +226,8 @@ var water_material: ShaderMaterial
 var reflection_viewport: SubViewport = null
 var reflection_camera: Camera3D = null
 var built: bool = false
-var _cached_env: Node = null
-var _cached_weather: Node = null
+var _cached_env: MissionEnvironment = null
+var _cached_weather: Weather = null
 var _cached_cam: Camera3D = null
 var _terrain_water_height: float = 0.0
 # The witnessed per-frame water core: the noise texture pair
@@ -247,7 +248,8 @@ var _fallback_tick_credit := 0.0
 
 
 func _ready() -> void:
-	_cached_env = get_node_or_null(environment_path) if not environment_path.is_empty() else null
+	_cached_env = (get_node_or_null(environment_path)
+			if not environment_path.is_empty() else null) as MissionEnvironment
 	_recompute_terrain_water_fallback()
 	_apply_environment_water_height()
 	build()
@@ -354,10 +356,11 @@ func _process(delta: float) -> void:
 	if not built or water_material == null:
 		return
 	if not _cached_env or not _cached_env.is_inside_tree():
-		_cached_env = get_node_or_null(environment_path) if not environment_path.is_empty() else null
+		_cached_env = (get_node_or_null(environment_path)
+				if not environment_path.is_empty() else null) as MissionEnvironment
 	# Live environment edits can change the fallback height. A standalone
 	# water node with no authoritative env/terrain keeps its direct property.
-	if _cached_env and _cached_env.has_method("is_loaded") and _cached_env.is_loaded():
+	if _cached_env and _cached_env.is_loaded():
 		_apply_environment_water_height()
 	# The murk uniform feed stays for world/probe compatibility even though the
 	# shader's murk role moved to the per-vertex COLOR.a (env #29).
@@ -403,7 +406,7 @@ func _process(delta: float) -> void:
 	var env_data: EnvFile = null
 
 	var env := _cached_env
-	if env and env.has_method("is_loaded") and env.is_loaded():
+	if env and env.is_loaded():
 		# Water renders lit: water_rgb x (light*0.707 + sky) x 2, saturating
 		# [orig: Environment_UpdateWeatherTick @ 0x57f16b].
 		var water: Vector3 = env.get_water_color()
@@ -419,9 +422,11 @@ func _process(delta: float) -> void:
 		# [orig: render_water_surface @ 0x5c3348..0x5c33db]. The weather node
 		# owns the shared accumulators; standalone owners tick a private core.
 		if not _cached_weather or not _cached_weather.is_inside_tree():
-			_cached_weather = get_node_or_null(weather_path) if not weather_path.is_empty() else null
-		if _cached_weather and _cached_weather.has_method("get_water_uv_state"):
-			uv_state = _cached_weather.get_water_uv_state(cam_pos.x, cam_pos.z, fog_end)
+			_cached_weather = (get_node_or_null(weather_path)
+					if not weather_path.is_empty() else null) as Weather
+		if _cached_weather:
+			uv_state = _cached_weather.scroll_core().get_water_uv_state(
+					cam_pos.x, cam_pos.z, fog_end)
 		else:
 			if _fallback_scroll == null:
 				_fallback_scroll = WeatherCore.new()
@@ -656,7 +661,7 @@ func _apply_environment_water_height() -> void:
 		water_height = _terrain_water_height
 		return
 	var env := _cached_env
-	if env and env.has_method("has_water_height") and env.has_water_height():
+	if env and env.has_water_height():
 		# .env water_height is stored <<15 by the engine — half world units,
 		# same convention as the terrain value above
 		# [orig: TimeOfDay_ParseProperty @ 0x57cb4e].
@@ -667,7 +672,6 @@ func _apply_environment_water_height() -> void:
 	# phantom water; standalone nodes with no source retain direct properties.
 	var has_loaded_terrain: bool = (
 			terrain_data != null and bool(terrain_data.is_loaded()))
-	var has_loaded_env: bool = bool(
-			env != null and env.has_method("is_loaded") and env.is_loaded())
+	var has_loaded_env: bool = bool(env != null and env.is_loaded())
 	if has_loaded_terrain or has_loaded_env:
 		water_height = 0.0

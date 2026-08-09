@@ -10,7 +10,7 @@ extends "res://modtools/music/ui/live_mode_section.gd"
 # --- Phase 2 authoring intent handlers (route to the document, keep pinned) ---
 
 func _on_inspector_add_statement(section_index: int, lines: PackedStringArray) -> void:
-	if _lm._document == null or not _lm._document.has_method("insert_statement"):
+	if _lm._document == null:
 		return
 	_lm._follow_live = false
 	if not _lm._document.insert_statement(section_index, lines):
@@ -18,7 +18,7 @@ func _on_inspector_add_statement(section_index: int, lines: PackedStringArray) -
 
 
 func _on_inspector_replace_statement(section_index: int, ordinal: int, lines: PackedStringArray) -> void:
-	if _lm._document == null or not _lm._document.has_method("replace_statement"):
+	if _lm._document == null:
 		return
 	_lm._follow_live = false
 	if not _lm._document.replace_statement(section_index, ordinal, lines):
@@ -26,7 +26,7 @@ func _on_inspector_replace_statement(section_index: int, ordinal: int, lines: Pa
 
 
 func _on_inspector_delete_statement(section_index: int, ordinal: int) -> void:
-	if _lm._document == null or not _lm._document.has_method("delete_statement"):
+	if _lm._document == null:
 		return
 	_lm._follow_live = false
 	if not _lm._document.delete_statement(section_index, ordinal):
@@ -34,7 +34,7 @@ func _on_inspector_delete_statement(section_index: int, ordinal: int) -> void:
 
 
 func _on_inspector_reorder_statement(section_index: int, ordinal: int, direction: int) -> void:
-	if _lm._document == null or not _lm._document.has_method("reorder_statement"):
+	if _lm._document == null:
 		return
 	_lm._follow_live = false
 	if not _lm._document.reorder_statement(section_index, ordinal, direction):
@@ -42,7 +42,7 @@ func _on_inspector_reorder_statement(section_index: int, ordinal: int, direction
 
 
 func _on_program_insert_at(section_index: int, before_ordinal: int, lines: PackedStringArray) -> void:
-	if _lm._document == null or not _lm._document.has_method("insert_statement_at"):
+	if _lm._document == null:
 		return
 	_lm._follow_live = false
 	if not _lm._document.insert_statement_at(section_index, before_ordinal, lines):
@@ -50,7 +50,7 @@ func _on_program_insert_at(section_index: int, before_ordinal: int, lines: Packe
 
 
 func _on_program_move(section_index: int, ordinal: int, before_ordinal: int) -> void:
-	if _lm._document == null or not _lm._document.has_method("move_statement"):
+	if _lm._document == null:
 		return
 	_lm._follow_live = false
 	if not _lm._document.move_statement(section_index, ordinal, before_ordinal):
@@ -58,7 +58,7 @@ func _on_program_move(section_index: int, ordinal: int, before_ordinal: int) -> 
 
 
 func _on_program_run_count(section_index: int, start_ordinal: int, old_count: int, new_count: int) -> void:
-	if _lm._document == null or not _lm._document.has_method("set_run_count"):
+	if _lm._document == null:
 		return
 	_lm._follow_live = false
 	if not _lm._document.set_run_count(section_index, start_ordinal, old_count, new_count):
@@ -71,9 +71,7 @@ func _on_program_run_count(section_index: int, start_ordinal: int, old_count: in
 func _on_input_renamed(section_name: String, input_index: int, label: String) -> void:
 	if _lm._document == null or not _lm._document.script_loaded():
 		return
-	var profile_path := ""
-	if _lm._document.has_method("get_var_profile_path"):
-		profile_path = _lm._document.get_var_profile_path()
+	var profile_path: String = _lm._document.get_var_profile_path()
 	if profile_path == "":
 		return
 	var sname := String(_lm._document.mus_script.get_default_script_name())
@@ -90,7 +88,7 @@ func _update_live_highlight(state: int) -> void:
 	if _lm._program_view != null and _lm._program_view.visible:
 		if state == _lm.VM_RUNNING and _lm._logic_section_name == String(_lm._current_section):
 			_lm._program_view.set_active_offset(_lm._director.current_pc())
-			if _lm._follow_live and _lm._program_view.has_method("scroll_to_active"):
+			if _lm._follow_live:
 				_lm._program_view.scroll_to_active()
 		else:
 			_lm._program_view.set_active_offset(-1)
@@ -191,7 +189,7 @@ func _refresh_empty_state() -> void:
 
 
 func _on_new_project_pressed() -> void:
-	if _lm._document == null or not _lm._document.has_method("new_project"):
+	if _lm._document == null:
 		return
 	# Emits `changed` -> _on_document_changed -> _refresh_map, which hides this
 	# prompt and renders the new start state; then open that start state's
@@ -210,11 +208,7 @@ func _on_new_project_pressed() -> void:
 func _authoring_blocked_reason() -> String:
 	if _lm._document == null or not _lm._document.script_loaded():
 		return "Open a project first"
-	if _lm._document.has_method("authoring_blocked_reason"):
-		return String(_lm._document.authoring_blocked_reason())
-	if not (_lm._document.has_method("can_author") and _lm._document.can_author()):
-		return "Script must compile first"
-	return ""
+	return String(_lm._document.authoring_blocked_reason())
 
 
 func _on_add_state() -> void:
@@ -224,8 +218,6 @@ func _on_add_state() -> void:
 	var reason: String = _authoring_blocked_reason()
 	if reason != "":
 		_lm._flash_start_warning(reason)
-		return
-	if not _lm._document.has_method("add_section"):
 		return
 	var new_name := _unique_state_name()
 	if not _lm._document.add_section(StringName(new_name)):
@@ -378,7 +370,7 @@ func _show_state_context_menu(section_name: String, global_pos: Vector2) -> void
 	pop.add_item("Open program", 0)
 	pop.add_item("Rename state…", 1)
 	pop.add_item("Delete state", 2)
-	var can: bool = _lm._document != null and _lm._document.has_method("can_author") and _lm._document.can_author()
+	var can: bool = _lm._document != null and _lm._document.can_author()
 	pop.set_item_disabled(1, not can)
 	pop.set_item_disabled(2, not can)
 	if not can:
@@ -442,7 +434,7 @@ func _open_rename_dialog(section_name: String) -> void:
 
 func _section_name_validation_reason(candidate: String, current_name: String = "") -> String:
 	var name := candidate.strip_edges()
-	if _lm._document != null and _lm._document.has_method("validate_section_name"):
+	if _lm._document != null:
 		return String(_lm._document.validate_section_name(StringName(name), StringName(current_name)))
 	if current_name != "" and name == current_name:
 		return "Type a different state name."
@@ -454,7 +446,7 @@ func _section_name_validation_reason(candidate: String, current_name: String = "
 func _do_rename_section(old_name: String, new_name: String) -> void:
 	if new_name == "" or new_name == old_name:
 		return
-	if _lm._document == null or not _lm._document.has_method("rename_section"):
+	if _lm._document == null:
 		return
 	_lm._follow_live = false
 	# If we're drilled into this state, re-point the shown-section name BEFORE the
@@ -470,11 +462,10 @@ func _do_rename_section(old_name: String, new_name: String) -> void:
 		_lm._nav.rename_section(old_name, new_name)
 		# Caller-input labels are keyed by section name in the profile sidecar;
 		# carry them across the rename.
-		if _lm._document.has_method("get_var_profile_path"):
-			var profile_path: String = _lm._document.get_var_profile_path()
-			if profile_path != "":
-				_lm.MusInputNames.rename_section(profile_path,
-					String(_lm._document.mus_script.get_default_script_name()), old_name, new_name)
+		var profile_path: String = _lm._document.get_var_profile_path()
+		if profile_path != "":
+			_lm.MusInputNames.rename_section(profile_path,
+				String(_lm._document.mus_script.get_default_script_name()), old_name, new_name)
 		_lm._rebuild_breadcrumb()
 		_lm._refresh_states_list()
 		_lm._log_typed(_lm.EvType.SYSTEM, "renamed %s -> %s" % [old_name, new_name])
@@ -498,7 +489,7 @@ func _open_delete_section_dialog(section_name: String) -> void:
 
 
 func _do_delete_section(section_name: String) -> void:
-	if _lm._document == null or not _lm._document.has_method("delete_section"):
+	if _lm._document == null:
 		return
 	_lm._follow_live = false
 	# If we're deleting the drilled-in state, drop back to the map first so the

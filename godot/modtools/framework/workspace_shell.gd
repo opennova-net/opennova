@@ -37,9 +37,11 @@ func get_resource_root() -> ResourceRoot:
 	return null
 
 
-## The shared reference index over the resource root; null when the shell has
-## none (reference strips are then skipped).
-func get_reference_index() -> ReferenceIndex:
+## The shared reference index over the resource root (the native
+## ReferenceIndex in production; tests may serve a RefCounted fake with the
+## same referrers_of/is_built/resolve surface). Null when the shell has none —
+## reference strips are then skipped.
+func get_reference_index() -> RefCounted:
 	return null
 
 

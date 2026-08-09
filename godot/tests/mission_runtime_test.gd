@@ -135,19 +135,23 @@ class FireAudioStub:
 		return true
 
 
+# The typed owner-anchor registry (ItemEffectDirector) with the registrations
+# captured for the pose-follow assertions below.
 class CatchupEffectAnchorMount:
-	extends RefCounted
+	extends ItemEffectDirector
 	var anchors: Dictionary = {}
 
 	func register_effect_anchor(owner_key: Variant, resolver: Callable) -> void:
 		anchors[owner_key] = resolver
+		super.register_effect_anchor(owner_key, resolver)
 
 	func unregister_effect_anchor(owner_key: Variant) -> void:
 		anchors.erase(owner_key)
+		super.unregister_effect_anchor(owner_key)
 
 
 class CatchupEffectWorld:
-	extends RefCounted
+	extends EffectWorld
 	var anchor_mount: CatchupEffectAnchorMount
 	var owner_key: Variant
 	var group_live := false
@@ -161,7 +165,7 @@ class CatchupEffectWorld:
 		anchor_mount = mount
 
 	func spawn_effect_owned_request(key: Variant, _name: String,
-			_position: Vector3, _orientation: Vector3) -> Dictionary:
+			_position: Vector3, _orientation: Vector3 = Vector3.ZERO) -> Dictionary:
 		owner_key = key
 		group_live = true
 		spawn_count += 1
@@ -582,11 +586,12 @@ func test_catchup_advances_round_move_effect_at_each_live_pose_and_stops_before_
 	var w := _make_world(Transform3D.IDENTITY)
 	var anchor_mount := CatchupEffectAnchorMount.new()
 	var effect_world := CatchupEffectWorld.new(anchor_mount)
+	add_child_autofree(effect_world)
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container, {
 		"fire_fx": func() -> Variant: return effect_world,
-		"game_world": anchor_mount,
+		"effect_anchors": anchor_mount,
 		"placer": w.placer,
 	})
 	var def_root := ResourceRoot.new()

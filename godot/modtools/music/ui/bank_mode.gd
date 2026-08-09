@@ -83,11 +83,10 @@ func _ready() -> void:
 func bind_document(document: RefCounted) -> void:
 	if _document == document:
 		return
-	if _document != null and _document.has_signal("changed"):
-		if _document.changed.is_connected(_refresh_table):
-			_document.changed.disconnect(_refresh_table)
+	if _document != null and _document.changed.is_connected(_refresh_table):
+		_document.changed.disconnect(_refresh_table)
 	_document = document
-	if _document != null and _document.has_signal("changed"):
+	if _document != null:
 		_document.changed.connect(_refresh_table)
 	if is_node_ready():
 		_refresh_table()

@@ -13,13 +13,43 @@ var _had_state_config := false
 var service: EditorMcpService
 
 
+# The McpToolContext accessor contract (root/index/camera/active-workspace) is
+# called directly on the shell now, so the stub carries the surface with empty
+# answers instead of relying on probe fallbacks.
+class ShellContractStub:
+	extends Node
+
+	func get_resource_root() -> ResourceRoot:
+		return null
+
+	func get_resource_index() -> Variant:
+		return null
+
+	func get_resource_root_dir() -> String:
+		return ""
+
+	func get_editor_camera() -> FlyCamera:
+		return null
+
+	func get_game_run_session() -> Variant:
+		return null
+
+	func _get_active_workspace() -> Variant:
+		return null
+
+	func _ensure_resource_index() -> void:
+		pass
+
+
 func before_each() -> void:
 	_had_state_config = FileAccess.file_exists(STATE_CONFIG_PATH)
 	_saved_state_config = FileAccess.get_file_as_bytes(STATE_CONFIG_PATH) if _had_state_config else PackedByteArray()
 	service = add_child_autofree(EditorMcpService.new())
-	var editor_stub: Node = add_child_autofree(Node.new())
+	# A bare TerrainEditorBase serves the editor seam: every sampling default
+	# answers "no terrain loaded".
+	var editor_stub: TerrainEditorBase = add_child_autofree(TerrainEditorBase.new())
 	editor_stub.name = "EditorStub"
-	var shell_stub: Node = add_child_autofree(Node.new())
+	var shell_stub: ShellContractStub = add_child_autofree(ShellContractStub.new())
 	shell_stub.name = "ShellStub"
 	service.setup(editor_stub, shell_stub)
 

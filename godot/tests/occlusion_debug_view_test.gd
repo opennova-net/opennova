@@ -1,29 +1,13 @@
 extends GutTest
 
 # OcclusionDebugView: the F3 "Show portal faces" 3D overlay. Drives it with a
-# duck-typed world/sim pair feeding a crafted get_occlusion_portal_debug()
-# dictionary (the same shape Simulation emits) through the public refresh
-# seam to pin: outlines + section labels draw, plain occluder records stay
-# label-free, per-frame visible flips reuse the cached geometry, geometry
-# changes rebuild, and a vanished sim clears everything instead of erroring.
+# crafted get_occlusion_portal_debug() dictionary (the same shape Simulation
+# emits) through the public render seam to pin: outlines + section labels
+# draw, plain occluder records stay label-free, per-frame visible flips reuse
+# the cached geometry, geometry changes rebuild, and a vanished sim clears
+# everything instead of erroring.
 
 const ViewScript := preload("res://src/debug/occlusion_debug_view.gd")
-
-
-# Node-based doubles: the view's setup takes the owner's world NODE (a GameWorld
-# in production) and duck-types get_sim()/get_occlusion_portal_debug() off it.
-class FakeSim:
-	extends Node
-	var debug: Dictionary = {}
-	func get_occlusion_portal_debug(_anchor: Vector3, _range_units: float) -> Dictionary:
-		return debug
-
-
-class FakeWorld:
-	extends Node
-	var sim: Node = null
-	func get_sim():
-		return sim
 
 
 static func _quad_segments(origin: Vector3) -> PackedVector3Array:
@@ -55,25 +39,16 @@ func _payload(visible := true, origin := Vector3.ZERO) -> Dictionary:
 	}
 
 
-func _make_world(payload: Dictionary) -> Node:
-	var world: FakeWorld = autofree(FakeWorld.new())
-	var sim: FakeSim = autofree(FakeSim.new())
-	sim.debug = payload
-	world.sim = sim
-	return world
-
-
-func _make_view(world: Node) -> Node3D:
+func _make_view() -> Node3D:
 	var view: Node3D = ViewScript.new()
 	add_child_autofree(view)
-	view.setup(world)
+	view.setup(null)
 	return view
 
 
 func test_draws_outlines_and_portal_labels() -> void:
-	var world := _make_world(_payload())
-	var view := _make_view(world)
-	view.refresh_now()
+	var view := _make_view()
+	view.render_report(_payload())
 
 	var lines := view.get_node("OcclusionPortalLines") as MeshInstance3D
 	assert_gt((lines.mesh as ImmediateMesh).get_surface_count(), 0, "portal outlines drawn")
@@ -87,40 +62,35 @@ func test_draws_outlines_and_portal_labels() -> void:
 
 
 func test_visible_flip_reuses_cached_geometry() -> void:
-	var world := _make_world(_payload(true))
-	var view := _make_view(world)
-	view.refresh_now()
+	var view := _make_view()
+	view.render_report(_payload(true))
 	var label_before := (view.get_node("OcclusionPortalLabels")).get_child(0)
 
 	# The batch flicking a building's per-frame visible flag must NOT rebuild
 	# the static geometry (the rebuild key excludes it).
-	world.sim.debug = _payload(false)
-	view.refresh_now()
+	view.render_report(_payload(false))
 	var label_after := (view.get_node("OcclusionPortalLabels")).get_child(0)
 	assert_eq(label_before.get_instance_id(), label_after.get_instance_id(),
 		"a visible-only change keeps the cached labels (no rebuild)")
 
 
 func test_geometry_change_rebuilds() -> void:
-	var world := _make_world(_payload())
-	var view := _make_view(world)
-	view.refresh_now()
+	var view := _make_view()
+	view.render_report(_payload())
 	var lines := view.get_node("OcclusionPortalLines") as MeshInstance3D
 	var initial_bounds := (lines.mesh as ImmediateMesh).get_aabb()
 
-	world.sim.debug = _payload(true, Vector3(5.0, 0.0, 0.0))
-	view.refresh_now()
+	view.render_report(_payload(true, Vector3(5.0, 0.0, 0.0)))
 	var moved_bounds := (lines.mesh as ImmediateMesh).get_aabb()
 	assert_ne(moved_bounds, initial_bounds, "record geometry changes redraw the outlines")
 
 
 func test_missing_sim_clears_instead_of_erroring() -> void:
-	var world := _make_world(_payload())
-	var view := _make_view(world)
-	view.refresh_now()
+	var view := _make_view()
+	view.render_report(_payload())
 
-	# The sim goes away (mission unloaded): the next frame clears everything.
-	world.sim = null
+	# The sim goes away (mission unloaded): the next frame's real refresh
+	# resolves no world/sim and clears everything.
 	view.refresh_now()
 	var lines := view.get_node("OcclusionPortalLines") as MeshInstance3D
 	assert_eq((lines.mesh as ImmediateMesh).get_surface_count(), 0, "outlines cleared")

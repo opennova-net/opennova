@@ -16,7 +16,7 @@ extends "res://modtools/mission/controller/controller_section.gd"
 # ground points no longer sit on the surface — the workspace prompts to re-ground
 # on a non-zero count. Returns 0 on the swap/clear and no-drift paths.
 func reconcile_with_terrain() -> int:
-	if _c._mission == null or _c.terrain_editor == null or not _c.terrain_editor.has_method("get_current_trn_path"):
+	if _c._mission == null or _c.terrain_editor == null:
 		return 0
 	if String(_c.terrain_editor.get_current_trn_path()) != _c._loaded_trn_path:
 		_c._io.clear()
@@ -24,7 +24,7 @@ func reconcile_with_terrain() -> int:
 	# Same terrain file: detect height edits made under the loaded mission. The
 	# revision gate keeps the common no-edit activate at zero cost (no request
 	# build, no sampling).
-	if _c._loaded_height_revision < 0 or not _c.terrain_editor.has_method("get_height_revision"):
+	if _c._loaded_height_revision < 0:
 		return 0
 	if int(_c.terrain_editor.get_height_revision()) == _c._loaded_height_revision:
 		return 0
@@ -43,7 +43,7 @@ func reconcile_with_terrain() -> int:
 
 
 func _record_height_revision() -> void:
-	if _c.terrain_editor != null and _c.terrain_editor.has_method("get_height_revision"):
+	if _c.terrain_editor != null:
 		_c._loaded_height_revision = int(_c.terrain_editor.get_height_revision())
 	else:
 		_c._loaded_height_revision = -1
@@ -53,9 +53,7 @@ func _record_height_revision() -> void:
 # declaration). Empty when a build precondition is missing — never cached, every
 # call rebuilds, exactly the pre-cache behavior.
 func _reground_token() -> Array:
-	if _c._mission == null or _c._placer == null or _c.terrain_editor == null \
-			or not _c.terrain_editor.has_method("sample_height_world") \
-			or not _c.terrain_editor.has_method("get_height_revision"):
+	if _c._mission == null or _c._placer == null or _c.terrain_editor == null:
 		return []
 	return [
 		_c._mission.get_instance_id(),
@@ -292,7 +290,7 @@ func _build_reground_requests() -> Array:
 	var requests: Array = []
 	if _c._mission == null or _c._placer == null:
 		return requests
-	if _c.terrain_editor == null or not _c.terrain_editor.has_method("sample_height_world"):
+	if _c.terrain_editor == null:
 		return requests
 	# Pass 1: walk the entities, resolving each one's rotated ground point (and
 	# skipping unresolved graphics); the sample points land in a parallel packed
@@ -320,16 +318,9 @@ func _build_reground_requests() -> Array:
 			"rotation_deg": entity.get("rotation_deg", Vector3.ZERO),
 		})
 		points.append(Vector2(ground_godot.x, ground_godot.z))
-	# Pass 2: sample — batched when the editor offers it, else the scalar loop so
-	# any duck-typed mount (a headless stub faking the surface) keeps working.
-	var heights: PackedFloat32Array
-	if _c.terrain_editor.has_method("sample_heights_world"):
-		heights = _c.terrain_editor.sample_heights_world(points)
-	else:
-		heights = PackedFloat32Array()
-		heights.resize(points.size())
-		for i in points.size():
-			heights[i] = _c.terrain_editor.sample_height_world(points[i].x, points[i].y)
+	# Pass 2: sample. TerrainEditorBase's default batch loops the scalar
+	# sampler, so a stub overriding either form works.
+	var heights: PackedFloat32Array = _c.terrain_editor.sample_heights_world(points)
 	# Pass 3: assemble, dropping off-terrain rows (NAN) exactly as the per-point
 	# builder did.
 	for i in rows.size():

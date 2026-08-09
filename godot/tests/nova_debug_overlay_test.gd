@@ -1,11 +1,15 @@
 extends GutTest
 
-# DebugOverlay: the shared F3 mission inspector. Most legacy tests drive
-# its runtime-free panes; the player tests use a small public-contract fake so
-# no listen-server auto-spawn can make the pose/no-player cases nondeterministic.
+# DebugOverlay: the shared F3 mission inspector. The context is typed
+# (ADR 0034), so every runtime-fed test drives a REAL MissionRuntime over the
+# in-memory minimal mission (the host player auto-spawns; poses are set
+# through the public debug teleport). Canned report data (rounds, occlusion)
+# drives the pages through their public render seams.
 # MissionRuntime metadata and game/ONED shell wiring are covered separately.
 
 const OverlayScript := preload("res://src/debug/nova_debug_overlay.gd")
+const MissionRuntime := preload("res://src/world/mission_runtime.gd")
+const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
 const DebugViewContext := preload("res://src/debug/nova_debug_view_context.gd")
 # Pages mount under the sidebar shell's page mount; option checkboxes are
 # named after their registry id.
@@ -30,305 +34,6 @@ const ENTITY_HEALTH_PATH := NodePath(PAGES + "/Entities/EntityEditHealth/EntityH
 const ENTITY_SET_HEALTH_PATH := NodePath(PAGES + "/Entities/EntityEditHealth/SetEntityHealth")
 
 
-class FakePoseSim:
-	extends Node
-
-	var _has_player := false
-	var _position := Vector3.ZERO
-	var _yaw_deg := 0.0
-	var _pitch_deg := 0.0
-	var _view_roll_deg := 0.0
-	var joiner := false
-	var teleported_to := {}
-	var round_debug := { "events": [] }
-
-	func set_player_pose(
-			position: Vector3, yaw_deg: float, pitch_deg: float, view_roll_deg: float) -> void:
-		_has_player = true
-		_position = position
-		_yaw_deg = yaw_deg
-		_pitch_deg = pitch_deg
-		_view_roll_deg = view_roll_deg
-
-	func set_yaw_deg(value: float) -> void:
-		_yaw_deg = value
-
-	func has_local_player() -> bool:
-		return _has_player
-
-	func get_client_entity_debug(_wire_handle: int) -> Dictionary:
-		return {}
-
-	func get_local_player_position() -> Vector3:
-		return _position
-
-	func get_local_player_yaw_deg() -> float:
-		return _yaw_deg
-
-	func get_local_player_pitch_deg() -> float:
-		return _pitch_deg
-
-	func get_local_player_view() -> Dictionary:
-		return {
-			"fov_h_deg": 82.0,
-			"scope_engaged": false,
-			"mounted": false,
-			"fp_roll_deg": _view_roll_deg,
-		}
-
-	func get_logic_tick() -> int:
-		return 4242
-
-	func is_joiner() -> bool:
-		return joiner
-
-	func get_round_debug() -> Dictionary:
-		return round_debug
-
-	func get_present_snapshot() -> PackedFloat32Array:
-		return PackedFloat32Array()
-
-	func get_present_stride() -> int:
-		return 1
-
-	func get_entity_count() -> int:
-		return 0
-
-	func get_fired_events_snapshot() -> PackedByteArray:
-		return PackedByteArray()
-
-	func get_wac_state() -> Dictionary:
-		return {}
-
-	func get_mission_variables_snapshot() -> PackedInt32Array:
-		return PackedInt32Array()
-
-	func get_global_variables_snapshot() -> PackedInt32Array:
-		return PackedInt32Array()
-
-	func get_music_variables_snapshot() -> PackedInt32Array:
-		return PackedInt32Array()
-
-	func debug_teleport_local_player(
-			position: Vector3, yaw_deg: float, pitch_deg: float) -> Error:
-		teleported_to = {
-			"position": position,
-			"yaw": yaw_deg,
-			"pitch": pitch_deg,
-		}
-		return OK
-
-
-class FakePoseRuntime:
-	extends Node
-
-	var _sim := FakePoseSim.new()
-	var _mission_file := "00TRe.bms"
-	var _mission_name := "Training Grounds"
-
-	func _init() -> void:
-		add_child(_sim)
-
-	func set_mission_identity(mission_file: String, mission_name: String) -> void:
-		_mission_file = mission_file
-		_mission_name = mission_name
-
-	func get_sim() -> FakePoseSim:
-		return _sim
-
-	func is_playing() -> bool:
-		return true
-
-	func get_mission_file() -> String:
-		return _mission_file
-
-	func get_mission_name() -> String:
-		return _mission_name
-
-
-class RealPlayerRuntime:
-	extends Node
-
-	var sim := Simulation.new()
-
-	func _init() -> void:
-		add_child(sim)
-
-	func prepare_populated_player() -> Error:
-		var mission := MissionData.new()
-		var err := mission.create_default()
-		if err != OK:
-			return err
-		if not sim.load_from_mission_data(mission):
-			return ERR_CANT_CREATE
-		if not sim.spawn_local_player(Vector3.ZERO, 0.0, 2):
-			return ERR_CANT_CREATE
-		var root := ResourceRoot.new()
-		err = root.set_root_dir(ProjectSettings.globalize_path(
-				"res://../fixtures/def"))
-		if err != OK:
-			return err
-		return sim.load_weapon_table(root, "weapon.def")
-
-	func get_sim() -> Simulation:
-		return sim
-
-	func is_playing() -> bool:
-		return true
-
-	func get_mission_file() -> String:
-		return "player_loadout.bms"
-
-	func get_mission_name() -> String:
-		return "Player loadout"
-
-
-class FakeEntitySim:
-	extends FakePoseSim
-
-	var cards := [
-		{
-			"name": "AI zero",
-			"net_id": 111,
-			"position": Vector3(10.0, 2.0, -30.0),
-			"pool": 0,
-			"wire_handle": 1001,
-			"alive": true,
-			"hidden": false,
-			"health": 80,
-			"ai_health": 80,
-			"team": 1,
-			"state_name": "guard",
-		},
-		{
-			"name": "AI one",
-			"net_id": 222,
-			"position": Vector3(20.0, 3.0, -40.0),
-			"pool": 1,
-			"wire_handle": 1002,
-			"alive": true,
-			"hidden": false,
-			"health": 60,
-			"ai_health": 60,
-			"team": 2,
-			"state_name": "patrol",
-		},
-	]
-	var present_snapshot_reads := 0
-	var edited_health := {}
-
-	func get_entity_count() -> int:
-		return cards.size()
-
-	func get_entity_debug(index: int) -> Dictionary:
-		return cards[index].duplicate(true) \
-				if index >= 0 and index < cards.size() else {}
-
-	func get_present_stride() -> int:
-		return Simulation.PF_STRIDE
-
-	func get_present_snapshot() -> PackedFloat32Array:
-		present_snapshot_reads += 1
-		var snapshot := PackedFloat32Array()
-		# Deliberately reverse client-view order relative to the AI pool and
-		# include one visible entity that has no AI edit record.
-		snapshot.append_array(_present_row(
-				222, 1002, 502, Vector3(22.0, 4.0, -44.0)))
-		snapshot.append_array(_present_row(
-				333, 2001, 703, Vector3(30.0, 5.0, -50.0)))
-		snapshot.append_array(_present_row(
-				111, 1001, 501, Vector3(11.0, 2.0, -33.0)))
-		return snapshot
-
-	func get_client_entity_debug(_wire_handle: int) -> Dictionary:
-		return {}
-
-	func get_world_entity_debug(net_id: int) -> Dictionary:
-		if net_id != 333:
-			return {}
-		return {
-			"name": "Client vehicle",
-			"state_name": "driving",
-			"health": 400,
-			"team": 3,
-			"alive": true,
-		}
-
-	func debug_set_entity_health(index: int, health: int) -> Error:
-		if index < 0 or index >= cards.size():
-			return ERR_INVALID_PARAMETER
-		edited_health = {"index": index, "health": health}
-		cards[index]["health"] = health
-		return OK
-
-	func debug_set_entity_position(_index: int, _position: Vector3) -> Error:
-		return OK
-
-	func _present_row(
-			net_id: int,
-			wire_handle: int,
-			type_id: int,
-			position: Vector3) -> PackedFloat32Array:
-		var row := PackedFloat32Array()
-		row.resize(Simulation.PF_STRIDE)
-		row[Simulation.PF_TYPE_ID] = type_id
-		row[Simulation.PF_NET_ID] = net_id
-		row[Simulation.PF_WIRE_HANDLE] = wire_handle
-		row[Simulation.PF_KIND] = 1
-		row[Simulation.PF_INDEX] = net_id
-		row[Simulation.PF_BMS_ID] = 1000 + net_id
-		row[Simulation.PF_POS_X] = position.x
-		row[Simulation.PF_POS_Y] = position.y
-		row[Simulation.PF_POS_Z] = position.z
-		row[Simulation.PF_ALIVE] = 1.0
-		return row
-
-
-class FakeEntityRuntime:
-	extends Node
-
-	var sim := FakeEntitySim.new()
-
-	func _init() -> void:
-		add_child(sim)
-
-	func get_sim() -> FakeEntitySim:
-		return sim
-
-	func is_playing() -> bool:
-		return true
-
-	func get_mission_file() -> String:
-		return "entities.bms"
-
-	func get_mission_name() -> String:
-		return "Entity Identity"
-
-
-# A pose sim that also carries the occlusion debug surface, so the Occlusion
-# tab has state to render while every other pane keeps its pose-fake behavior.
-class FakeOcclusionSim:
-	extends FakePoseSim
-	var occlusion: Dictionary = {}
-	func get_occlusion_debug() -> Dictionary:
-		return occlusion
-
-
-class FakeOcclusionRuntime:
-	extends Node
-	var sim := FakeOcclusionSim.new()
-	func _init() -> void:
-		add_child(sim)
-	func get_sim() -> FakeOcclusionSim:
-		return sim
-	func is_playing() -> bool:
-		return true
-	func get_mission_file() -> String:
-		return "00TRe.bms"
-	func get_mission_name() -> String:
-		return "Training Grounds"
-
-
 class AuthorityTarget:
 	extends RefCounted
 	var calls := 0
@@ -349,16 +54,30 @@ class FakeTransportAdapter:
 
 
 class FakeTransportWorld:
-	extends Node
+	extends GameWorld
 	var networked := false
 
 	func is_net_session() -> bool:
 		return networked
 
 
-func _make_pose_runtime() -> FakePoseRuntime:
-	var runtime := FakePoseRuntime.new()
+## One REAL minimal-mission runtime: in-memory mission, real Simulation, the
+## auto-spawned host player. Pose tests drive the pose through the public
+## debug teleport (mission coordinates); identity rides the setup options.
+func _make_pose_runtime(mission_file := "00TRe.bms",
+		mission_name := "Training Grounds") -> MissionRuntime:
+	var mission := MissionData.new()
+	assert_eq(mission.create_default(), OK)
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var runtime := MissionRuntime.new()
 	add_child_autofree(runtime)
+	assert_gt(runtime.setup(mission, container, {
+		"placer": MissionObjectPlacer.new(null, null),
+		"mission_file": mission_file,
+		"mission_name": mission_name,
+	}), 0)
+	runtime.play()  # a live shell plays its mission; the F3 label shows role only
 	return runtime
 
 
@@ -381,8 +100,11 @@ func _dictionary_vector3(value: Variant) -> Vector3:
 
 
 func test_rounds_tab_exposes_both_person_bone_sections() -> void:
-	var runtime := _make_pose_runtime()
-	runtime.get_sim().round_debug = {
+	var overlay := _make_overlay()
+	overlay.set_runtime(_make_pose_runtime())
+	overlay.toggle()
+	overlay.select_page(&"Rounds")
+	(overlay.find_child("Rounds", true, false) as DebugRoundsPage).render_report({
 		"events": [{
 			"tick": 42,
 			"kind": 0,
@@ -395,11 +117,7 @@ func test_rounds_tab_exposes_both_person_bone_sections() -> void:
 			"material": 19,
 			"effect_tag_name": "flesh",
 		}],
-	}
-	var overlay := _make_overlay()
-	overlay.set_runtime(runtime)
-	overlay.toggle()
-	overlay.select_page(&"Rounds")
+	})
 
 	var status := overlay.get_node(ROUNDS_STATUS_PATH) as Label
 	assert_string_contains(status.text, "1 person bone hits")
@@ -412,8 +130,11 @@ func test_rounds_tab_exposes_both_person_bone_sections() -> void:
 
 
 func test_rounds_tab_names_unresolved_person_fallback() -> void:
-	var runtime := _make_pose_runtime()
-	runtime.get_sim().round_debug = {
+	var overlay := _make_overlay()
+	overlay.set_runtime(_make_pose_runtime())
+	overlay.toggle()
+	overlay.select_page(&"Rounds")
+	(overlay.find_child("Rounds", true, false) as DebugRoundsPage).render_report({
 		"events": [{
 			"tick": 43,
 			"kind": 0,
@@ -425,11 +146,7 @@ func test_rounds_tab_names_unresolved_person_fallback() -> void:
 			"material": 19,
 			"effect_tag_name": "player",
 		}],
-	}
-	var overlay := _make_overlay()
-	overlay.set_runtime(runtime)
-	overlay.toggle()
-	overlay.select_page(&"Rounds")
+	})
 
 	var status := overlay.get_node(ROUNDS_STATUS_PATH) as Label
 	assert_string_contains(status.text, "0 person bone hits")
@@ -467,35 +184,36 @@ func test_runtime_context_rejects_non_object_sources() -> void:
 			"a malformed supplier degrades to no runtime instead of validating a scalar instance")
 
 
-func test_entity_rows_follow_client_present_order_and_edits_use_ai_index() -> void:
-	var runtime := FakeEntityRuntime.new()
-	add_child_autofree(runtime)
+func test_entity_rows_render_live_sim_and_edits_reach_the_ai_pool() -> void:
+	# End-to-end over the REAL sim: the client-present rows discover the live
+	# entities, and a health edit lands on the authoritative AI pool entry.
+	# (Row ORDER and read-only vehicle policy are pinned value-by-value in
+	# debug_entities_page_test over fabricated row data.)
+	var runtime := _make_pose_runtime()
+	runtime.tick()  # one presented tick fills the client snapshot
+	var sim := runtime.get_sim()
 	var overlay := _make_overlay()
 	overlay.set_runtime(runtime)
 	overlay.toggle()
 	overlay.select_page(&"Entities")
 
+	var rows := DebugEntities.list(sim)
 	var entity_list := overlay.get_node(ENTITY_LIST_PATH) as ItemList
-	assert_eq(entity_list.item_count, 3)
-	assert_string_contains(entity_list.get_item_text(0), "ssn 222")
-	assert_string_contains(entity_list.get_item_text(1), "ssn 333")
-	assert_string_contains(entity_list.get_item_text(2), "ssn 111")
-	assert_gt(runtime.sim.present_snapshot_reads, 0,
+	assert_eq(entity_list.item_count, rows.size(),
 			"the visible list is the client-present view")
+	assert_gt(entity_list.item_count, 0)
 
 	overlay.set_edit_unlocked(true)
-	entity_list.item_selected.emit(1)
-	var set_health := overlay.get_node(ENTITY_SET_HEALTH_PATH) as Button
-	assert_true(set_health.disabled,
-			"a presented vehicle without an AI record is visible but read-only")
-
 	entity_list.item_selected.emit(0)
+	var set_health := overlay.get_node(ENTITY_SET_HEALTH_PATH) as Button
 	var health := overlay.get_node(ENTITY_HEALTH_PATH) as SpinBox
 	health.value = 37
 	assert_false(set_health.disabled)
 	set_health.pressed.emit()
-	assert_eq(runtime.sim.edited_health, {"index": 1, "health": 37},
-			"client row zero maps its edit to AI pool entry one")
+	var edited_ai_index := int(rows[0].get("ai_index", -1))
+	assert_gte(edited_ai_index, 0)
+	assert_eq(int(sim.get_entity_debug(edited_ai_index).get("health", -1)), 37,
+			"row zero edits its mapped AI pool entry through the live sim")
 
 
 func test_shared_session_keeps_host_status_and_authority_sources() -> void:
@@ -563,9 +281,10 @@ func test_listen_host_can_resume_but_cannot_pause_or_step() -> void:
 	var overlay: CanvasLayer = OverlayScript.new(config_path, session)
 	add_child_autofree(overlay)
 	var runtime := _make_pose_runtime()
+	# Off-tree: the GameWorld script class alone has no scene children.
 	var world := FakeTransportWorld.new()
 	world.networked = true
-	add_child_autofree(world)
+	autofree(world)
 	overlay.set_runtime(runtime)
 	overlay.set_world_source(func(): return world)
 	overlay.toggle()
@@ -682,9 +401,11 @@ func test_occlusion_tab_reports_frame_state() -> void:
 	# The Occlusion tab turns the sim's snapshot into decisions: exceptional
 	# buildings lead, rows are selectable, and welds explain only the selected
 	# building instead of masquerading as more table rows.
-	var runtime := FakeOcclusionRuntime.new()
-	add_child_autofree(runtime)
-	runtime.sim.occlusion = {
+	var overlay := _make_overlay()
+	overlay.set_runtime(_make_pose_runtime())
+	overlay.toggle()
+	overlay.select_page(&"Occlusion")
+	(overlay.find_child("Occlusion", true, false) as DebugOcclusionPage).render_report({
 		"active": true,
 		"camera_indoors": true,
 		"exterior_visible": false,
@@ -706,11 +427,7 @@ func test_occlusion_tab_reports_frame_state() -> void:
 		"welds": [
 			{ "own_bms": 42, "own_section": 1, "other_bms": 43, "other_section": 2 },
 		],
-	}
-	var overlay := _make_overlay()
-	overlay.set_runtime(runtime)
-	overlay.toggle()
-	overlay.select_page(&"Occlusion")
+	})
 
 	var status := overlay.get_node(OCCLUSION_STATUS_PATH) as Label
 	assert_string_contains(status.text, "Camera: INDOORS",
@@ -730,16 +447,16 @@ func test_occlusion_tab_reports_frame_state() -> void:
 	assert_string_contains(detail.text, "building #42 section 1")
 
 
-func test_occlusion_tab_without_debug_surface_shows_empty_state() -> void:
-	# Harness sims without get_occlusion_debug (every pose fake) leave the tab
-	# in its empty state instead of erroring.
+func test_occlusion_tab_without_portal_buildings_shows_empty_state() -> void:
+	# A live sim whose mission carries no portal buildings leaves the tab in
+	# its inactive empty state instead of erroring.
 	var runtime := _make_pose_runtime()
 	var overlay := _make_overlay()
 	overlay.set_runtime(runtime)
 	overlay.toggle()
 	overlay.select_page(&"Occlusion")
 	var status := overlay.get_node(OCCLUSION_STATUS_PATH) as Label
-	assert_string_contains(status.text, "No occlusion data")
+	assert_string_contains(status.text, "No portal-carrying buildings")
 	assert_eq((overlay.get_node(OCCLUSION_LIST_PATH) as ItemList).item_count, 0)
 
 
@@ -762,8 +479,10 @@ func test_hide_foliage_toggle_lives_on_the_terrain_page() -> void:
 
 
 func test_player_tab_disables_dump_without_a_local_player() -> void:
+	# No runtime = no sim = no local player (a live MissionRuntime always
+	# auto-spawns its host player, so the no-player state IS the no-source
+	# state).
 	var overlay := _make_overlay()
-	overlay.set_runtime(_make_pose_runtime())
 	overlay.toggle()
 	overlay.select_page(&"Player")
 
@@ -887,10 +606,12 @@ func test_player_tab_stays_docked_and_sidebar_remains_clickable() -> void:
 
 
 func test_populated_player_loadout_cannot_expand_dock_or_hide_tabs() -> void:
-	var runtime := RealPlayerRuntime.new()
-	add_child_autofree(runtime)
-	assert_eq(runtime.prepare_populated_player(), OK)
-	var inventory: Dictionary = runtime.sim.get_local_player_inventory()
+	var runtime := _make_pose_runtime("player_loadout.bms", "Player loadout")
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
+			"res://../fixtures/def")), OK)
+	assert_eq(runtime.get_sim().load_weapon_table(root, "weapon.def"), OK)
+	var inventory: Dictionary = runtime.get_sim().get_local_player_inventory()
 	assert_gt((inventory.get("pools", {}) as Dictionary).size(), 20,
 			"the regression uses the wide production ammo-pool inventory")
 
@@ -1035,7 +756,8 @@ func test_redesigned_diagnostic_pages_fit_the_compact_dock() -> void:
 
 func test_player_teleport_has_separate_policy_and_result_feedback() -> void:
 	var runtime := _make_pose_runtime()
-	runtime.get_sim().set_player_pose(Vector3(1, 2, 3), 15.0, -4.0, 0.0)
+	assert_eq(runtime.get_sim().debug_teleport_local_player(
+			Vector3(1, 3, 2), 15.0, -4.0), OK)
 	var overlay := _make_overlay()
 	overlay.set_runtime(runtime)
 	overlay.toggle()
@@ -1058,7 +780,10 @@ func test_player_teleport_has_separate_policy_and_result_feedback() -> void:
 			as SpinBox).value = 60.0
 	teleport.pressed.emit()
 
-	assert_eq(runtime.get_sim().teleported_to.get("position"), Vector3(40, 50, 60))
+	# Mission (40, 50, 60) is Godot (40, 60, -50): the live sim really moved.
+	assert_true(runtime.get_sim().get_local_player_position().is_equal_approx(
+			Vector3(40, 60, -50)),
+			"the page's mission-space teleport reaches the live player")
 	assert_eq(teleport_status.text, "Player moved.")
 	assert_string_contains(dump_status.text, "No snapshot saved",
 			"teleport feedback does not overwrite snapshot feedback")
@@ -1068,9 +793,8 @@ func test_shell_keeps_long_runtime_identity_and_actions_inside_the_dock() -> voi
 	var viewport := SubViewport.new()
 	viewport.size = Vector2i(520, 900)
 	add_child_autofree(viewport)
-	var runtime := _make_pose_runtime()
 	var long_name := "Very Long Training Mission ".repeat(12)
-	runtime.set_mission_identity("00TRe.bms", long_name)
+	var runtime := _make_pose_runtime("00TRe.bms", long_name)
 	var config_path := "user://test_debug_overlay_%d.cfg" % Time.get_ticks_usec()
 	_dumped_paths.append(ProjectSettings.globalize_path(config_path))
 	var overlay: CanvasLayer = OverlayScript.new(config_path)
@@ -1108,38 +832,26 @@ func test_shell_keeps_long_runtime_identity_and_actions_inside_the_dock() -> voi
 	assert_string_contains(edit_status.text, "LIVE EDITS")
 	assert_string_contains(edit_status.text, "immediately")
 
-	runtime.get_sim().joiner = true
-	overlay.refresh_now()
+	# Authority loss (a joiner's sim answers is_joiner() true; here driven
+	# through the same authority-source seam) revokes the session unlock.
+	var custom_authority := {"allowed": false}
+	overlay.set_authority_source(func(): return custom_authority["allowed"])
 	assert_true(live_edits.disabled)
 	assert_false(live_edits.button_pressed)
 	assert_false(overlay.get_debug_session().is_edit_unlocked(),
 			"losing host authority revokes the session unlock, not just its visual state")
 	assert_string_contains(edit_status.text, "host-only",
 			"joiners see why authoritative controls remain read-only")
-
-	runtime.get_sim().joiner = false
-	overlay.refresh_now()
-	assert_false(live_edits.disabled)
-	assert_false(live_edits.button_pressed,
-			"returning to host authority never silently restores live edits")
-	assert_string_contains(edit_status.text, "READ ONLY")
-
-	overlay.set_edit_unlocked(true)
-	var custom_authority := {"allowed": false}
-	overlay.set_authority_source(func(): return custom_authority["allowed"])
-	assert_true(live_edits.disabled)
-	assert_false(overlay.get_debug_session().is_edit_unlocked(),
-			"the UI and write path share a custom authority source")
 	custom_authority["allowed"] = true
 	overlay.refresh_now()
 	assert_false(live_edits.disabled)
 	assert_false(live_edits.button_pressed,
-			"restored custom authority still requires an explicit unlock")
+			"restored authority never silently restores live edits")
+	assert_string_contains(edit_status.text, "READ ONLY")
 
 
 func test_player_dump_reports_an_unwritable_target_without_success_signal() -> void:
 	var runtime := _make_pose_runtime()
-	runtime.get_sim().set_player_pose(Vector3.ZERO, 0.0, 0.0, 0.0)
 	var overlay := _make_overlay()
 	overlay.set_runtime(runtime)
 	overlay.toggle()
@@ -1168,7 +880,10 @@ func test_player_tab_displays_and_dumps_a_fresh_authoritative_pose() -> void:
 	var runtime := _make_pose_runtime()
 	var sim := runtime.get_sim()
 	var position_godot := Vector3(123.25, 4.5, -67.75)
-	sim.set_player_pose(position_godot, 270.0, -8.75, 1.25)
+	# Mission (x, y, z) = (gx, -gz, gy): the public teleport pins the exact
+	# authoritative pose on the live sim.
+	assert_eq(sim.debug_teleport_local_player(
+			Vector3(123.25, 67.75, 4.5), 270.0, -8.75), OK)
 	var camera_rig := Node3D.new()
 	camera_rig.rotation_degrees = Vector3(0.0, 31.0, 0.0)
 	add_child_autofree(camera_rig)
@@ -1202,12 +917,14 @@ func test_player_tab_displays_and_dumps_a_fresh_authoritative_pose() -> void:
 			"BMS z is Godot's up axis")
 	assert_string_contains(orientation_label.text, "270.000")
 	assert_string_contains(orientation_label.text, "-8.750")
-	assert_string_contains(orientation_label.text, "1.250")
+	assert_string_contains(orientation_label.text, "roll 0.000",
+			"the live view roll rides the label (0 at rest)")
 	assert_string_contains(orientation_label.text, "third person")
 
 	# The click must resample NOW rather than serialize the 0.25-Hz label cache.
 	var displayed_yaw := sim.get_local_player_yaw_deg()
-	sim.set_yaw_deg(278.5)
+	assert_eq(sim.debug_teleport_local_player(
+			Vector3(123.25, 67.75, 4.5), 278.5, -8.75), OK)
 	var sampled_yaw := sim.get_local_player_yaw_deg()
 	var camera_godot := Vector3(124.0, 6.0, -70.0)
 	camera.global_position = camera_godot
@@ -1231,7 +948,8 @@ func test_player_tab_displays_and_dumps_a_fresh_authoritative_pose() -> void:
 	var payload: Dictionary = payload_variant if payload_variant is Dictionary else {}
 	assert_eq(String(payload.get("schema", "")), "opennova.debug_snapshot.v1")
 	assert_true(String(payload.get("captured_at_utc", "")).ends_with("Z"))
-	assert_eq(int(payload.get("logic_tick", -1)), 4242)
+	assert_eq(int(payload.get("logic_tick", -1)), int(sim.get_logic_tick()),
+			"the dump carries the live logic tick")
 	assert_eq(payload.get("picks", null), [], "no pick list injected -> an empty picks array")
 	assert_eq(int(payload.get("pick_count", -1)), 0)
 	var mission: Dictionary = payload.get("mission", {})
@@ -1250,12 +968,14 @@ func test_player_tab_displays_and_dumps_a_fresh_authoritative_pose() -> void:
 	assert_almost_eq(float(orientation.get("yaw", 0.0)), sampled_yaw, 0.0001,
 			"the disk snapshot uses the click-time yaw")
 	assert_almost_eq(float(orientation.get("pitch", 0.0)), -8.75, 0.0001)
-	assert_almost_eq(float(orientation.get("view_roll", 0.0)), 1.25, 0.0001)
+	assert_almost_eq(float(orientation.get("view_roll", 0.0)), 0.0, 0.0001)
 	var player_forward := _dictionary_vector3(player.get("forward_godot", {}))
 	assert_almost_eq(player_forward.length(), 1.0, 0.0001)
 
 	var view: Dictionary = payload.get("view", {})
-	assert_almost_eq(float(view.get("fov_horizontal_deg", 0.0)), 82.0, 0.0001)
+	assert_almost_eq(float(view.get("fov_horizontal_deg", 0.0)),
+			float(sim.get_local_player_view().get("fov_h_deg", 0.0)), 0.0001,
+			"the dump carries the live horizontal FOV")
 	assert_false(bool(view.get("scope_engaged", true)))
 	assert_false(bool(view.get("mounted", true)))
 	var camera_snapshot: Dictionary = view.get("camera", {})
@@ -1297,9 +1017,7 @@ func test_player_tab_displays_and_dumps_a_fresh_authoritative_pose() -> void:
 	assert_true(FileAccess.file_exists(second_path))
 	_dumped_paths.append(second_path)
 
-	var next_runtime := _make_pose_runtime()
-	next_runtime.set_mission_identity("00TRa.bms", "Second Training Area")
-	next_runtime.get_sim().set_player_pose(Vector3.ZERO, 0.0, 0.0, 0.0)
+	var next_runtime := _make_pose_runtime("00TRa.bms", "Second Training Area")
 	overlay.set_runtime(next_runtime)
 	assert_string_contains(dump_status.text, "No snapshot saved",
 			"a live mission swap clears the previous mission's Saved path")
@@ -1516,7 +1234,7 @@ func test_particles_tab_explains_when_hide_toggle_suppresses_live_diagnostics() 
 	assert_string_contains(detail.text, "diagnostics are suppressed")
 
 
-class _StubEffectWorld extends Node3D:
+class _StubEffectWorld extends EffectWorld:
 	var alive := 0
 	var groups: Array = []
 
@@ -1754,7 +1472,6 @@ func _fabricated_pick(handle: int, pick_name: String) -> Dictionary:
 
 func test_snapshot_embeds_the_pick_list() -> void:
 	var runtime := _make_pose_runtime()
-	runtime.get_sim().set_player_pose(Vector3(1, 2, 3), 90.0, 0.0, 0.0)
 	var overlay := _make_overlay()
 	overlay.set_runtime(runtime)
 	var picks := DebugPickList.new()
@@ -1783,7 +1500,7 @@ func test_snapshot_embeds_the_pick_list() -> void:
 	assert_almost_eq(float(hit_bms.get("y", 0.0)), 30.0, 0.001,
 			"the hit point converts to BMS space (y = -Godot z)")
 	assert_true(bool(entry.get("stale", false)),
-			"the pose fake exposes no live cards, so the pick reports stale")
+			"a pick matching no live entity reports stale")
 
 
 func test_entities_page_renders_and_curates_the_pick_list() -> void:

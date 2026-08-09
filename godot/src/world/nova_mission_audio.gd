@@ -56,8 +56,8 @@ const SILENT_DB := -80.0  # hard-silent floor for out-of-mix voices
 # live with the eval in engine/runtime/audio (ambient_mixer.cpp time_of_day_region)
 # [orig: Entity_CalcTimeOfDayRegion @ 0x408110; margin @ 0x408203].
 
-var _resource_root  # ResourceRoot
-var _item_db  # ItemDatabase
+var _resource_root: ResourceRoot
+var _item_db: ItemDatabase
 var _simulation: Object = null  # Simulation (occlusion LOS); optional
 var _bank: SoundBank
 var _dbf  # DbfData (mission co-named dialog bank; null if absent)
@@ -119,7 +119,7 @@ var _perf_markers: int = 0
 var _perf_voice_writes: int = 0
 
 
-func _init(resource_root, item_db) -> void:
+func _init(resource_root: ResourceRoot, item_db: ItemDatabase) -> void:
 	_resource_root = resource_root
 	_item_db = item_db
 
@@ -167,9 +167,7 @@ func setup(mission, mission_name: String, container: Node3D) -> Dictionary:
 	# @ 0x525443; expansion fill @ 0x4a4989 / @ 0x4a495e]. The witnessed table
 	# lives native (audio/bank_chain.h); missing files skip like retail's
 	# SoundBank_LoadIfExists (D-SND-2 closed).
-	var exp_name := ""
-	if _resource_root.has_method("get_expansion"):
-		exp_name = String(_resource_root.get_expansion())
+	var exp_name := String(_resource_root.get_expansion())
 	var global_chain: PackedStringArray = AmbientMixer.global_bank_chain(exp_name)
 	for global_name in global_chain:
 		_load_bank(global_name)

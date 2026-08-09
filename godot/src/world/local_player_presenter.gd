@@ -40,7 +40,7 @@ var _fly_camera: FlyCamera = null
 var _camera: Camera3D
 var _third_person := false
 var _avatar: ObjectModel = null
-var _held_weapon: Node3D = null      # the 3P gun; a SIBLING of _avatar (see GameWorld)
+var _held_weapon: ObjectModel = null  # the 3P gun; a SIBLING of _avatar (see GameWorld)
 var _held_weapon_graphic := ""      # the gfx3 the live node was built from
 # --- the equipped-weapon FSM view + the sim-owned view state (net-re §5.62/§5.41) --
 # The FSM and the VIEW STATE both tick in the sim at 62.5 Hz (engine/runtime/world
@@ -190,7 +190,7 @@ func is_third_person() -> bool:
 # and effect anchors against the presentation nodes (the FP viewmodel parts —
 # rig-owned, delegated here — the 3P gun, the camera). These expose exactly the
 # state it reads, so no cross-object _private access crosses the seam.
-func vm_parts() -> Array:
+func vm_parts() -> Array[ObjectModel]:
 	return _viewmodel_rig.vm_parts()
 
 
@@ -198,7 +198,7 @@ func viewmodel() -> Node3D:
 	return _viewmodel_rig.viewmodel()
 
 
-func held_weapon() -> Node3D:
+func held_weapon() -> ObjectModel:
 	return _held_weapon
 
 

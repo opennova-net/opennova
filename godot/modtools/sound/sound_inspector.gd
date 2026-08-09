@@ -242,8 +242,8 @@ func _on_browse_wav() -> void:
 	if _files == null:
 		_files = FileDialogHelper.new(self)
 	var dir := ""
-	var root = _ws.get_resource_root() if _ws != null else null
-	if root != null and root.has_method("get_root_dir"):
+	var root: ResourceRoot = _ws.get_resource_root() if _ws != null else null
+	if root != null:
 		dir = String(root.get_root_dir())
 	_files.open("Choose a wave file", PackedStringArray(["*.wav,*.WAV ; Wave files"]), _on_wav_selected, dir)
 

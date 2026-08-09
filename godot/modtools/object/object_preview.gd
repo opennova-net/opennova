@@ -14,7 +14,7 @@ var _root: Node3D
 var _guide_root: Node3D
 var _model
 var _environment: MissionEnvironment
-var _camera: Camera3D
+var _camera: FlyCamera
 var _grid_material: StandardMaterial3D
 var _axis_material: StandardMaterial3D
 var _collision_materials: Dictionary = {}
@@ -322,7 +322,7 @@ func get_active_lod() -> int:
 	return _model.get_active_lod() if _model != null else 0
 
 
-func get_editor_camera() -> Camera3D:
+func get_editor_camera() -> FlyCamera:
 	return _camera
 
 

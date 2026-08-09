@@ -9,21 +9,21 @@ extends RefCounted
 # launch/mission wiring. Subclasses override owns_menu + _wire and share the
 # by-NAME control helpers below.
 
-var _menu: Node  # the built MnuMenu; typed Node so we depend only on its tree + signals
+var _menu: MnuMenu  # the built menu (its tree + typed signals)
 var _root: ResourceRoot
 
 
 ## True when this companion drives `menu`. Keyed on control names unique to the
 ## owned screens rather than a screen name, since a document's screens are all
 ## built at once.
-func owns_menu(_menu_node: Node) -> bool:
+func owns_menu(_menu_node: MnuMenu) -> bool:
 	return false
 
 
 ## Called by MenuShell after each open_menu (re)build of a menu this
 ## companion owns. The screen nodes are freshly built children, so prior
 ## connections died with the old tree; _wire rescans by name.
-func on_menu_built(menu: Node, file: String, screen: String, root: ResourceRoot) -> void:
+func on_menu_built(menu: MnuMenu, file: String, screen: String, root: ResourceRoot) -> void:
 	_menu = menu
 	_root = root
 	if menu == null:

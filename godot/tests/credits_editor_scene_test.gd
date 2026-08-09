@@ -20,13 +20,13 @@ class RefIndexStub:
 
 
 class RefShell:
-	extends Node
+	extends WorkspaceShell
 
 	var index := RefIndexStub.new()
 	var picked_kind := ""
 	var jumped: Array = []
 
-	func get_reference_index() -> RefIndexStub:
+	func get_reference_index() -> RefCounted:
 		return index
 
 	func open_kind_picker(kind: String, _title: String, on_pick: Callable) -> void:

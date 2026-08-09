@@ -34,16 +34,21 @@ const REFRESH_INTERVAL_S := 0.25  # [orig: every 16 ticks of the 62 Hz loop @0x5
 signal opened
 signal closed
 
-var _world = null          # GameWorld
+var _world: GameWorld = null
 var _ui_parent: Node = null
+# The layout source, converted ONCE at setup: a Control parent (test overlays)
+# drives the fit from its own size/resized; a CanvasLayer parent (the game HUD)
+# has no size, so the fit follows the viewport instead.
+var _layout_control: Control = null
 var _menu: MnuMenu = null
 var _menu_root: ResourceRoot = null
 var _refresh_accum := 0.0
 
 
-func setup(world, ui_parent: Node) -> void:
+func setup(world: GameWorld, ui_parent: Node) -> void:
 	_world = world
 	_ui_parent = ui_parent
+	_layout_control = ui_parent as Control
 	_connect_layout_source()
 
 
@@ -55,10 +60,8 @@ func is_open() -> bool:
 func open() -> bool:
 	if is_open() or _world == null or _ui_parent == null:
 		return false
-	var sim = _world.get_sim() if _world.has_method("get_sim") else null
-	if sim == null or not sim.has_method("is_join_deploy_pick_pending"):
-		return false
-	if not bool(sim.is_join_deploy_pick_pending()):
+	var sim: Simulation = _world.get_sim()
+	if sim == null or not bool(sim.is_join_deploy_pick_pending()):
 		return false
 	if not _ensure_menu():
 		return false
@@ -92,7 +95,7 @@ func _process(delta: float) -> void:
 	if not is_open():
 		set_process(false)
 		return
-	var sim = _world.get_sim() if _world != null and _world.has_method("get_sim") else null
+	var sim: Simulation = _world.get_sim() if _world != null else null
 	if sim == null:
 		close()
 		return
@@ -104,7 +107,7 @@ func _process(delta: float) -> void:
 	# [orig: CNapiNetwork_OnDisconnectedFromServer @0x4c63d0 -> Input_QueueEvent(3)
 	#  @0x4c67a4 -> g_mission_exit_reason = 1 (Input_HandleActionBinding case 3 @0x49af2c),
 	#  the nav-push "MainMenu" teardown every abort leg takes @0x568654]
-	if sim.has_method("is_session_lost") and bool(sim.is_session_lost()):
+	if bool(sim.is_session_lost()):
 		teardown()
 		return
 	# The screen's lifetime is the server-driven deployment-pending bit, independent
@@ -127,15 +130,15 @@ func _on_spawn_row_selected(index: int) -> void:
 	var list := _spawn_list()
 	if list == null or index < 0 or index >= list.item_count:
 		return
-	var sim = _world.get_sim() if _world != null and _world.has_method("get_sim") else null
-	if sim == null or not sim.has_method("send_deployment_pick"):
+	var sim: Simulation = _world.get_sim() if _world != null else null
+	if sim == null:
 		return
 	# [orig: the SPAWNPOINTS_LIST select callback -> Input_QueueEvent(12, node)
 	#  @0x55364d; node 0 = the Default Spawn -> the parameter-0 pick]
 	sim.send_deployment_pick(int(list.get_item_metadata(index)))
 
 
-func _populate_spawn_list(sim) -> void:
+func _populate_spawn_list(sim: Simulation) -> void:
 	var list := _spawn_list()
 	if list == null:
 		return
@@ -147,9 +150,7 @@ func _populate_spawn_list(sim) -> void:
 	# Team text color rides the row [orig: the "<c4040FF>" tag, or "<cFF2020>" only
 	# when Team == 2, in the list text @0x5536a0; our list styles the row directly].
 	# The pre-spawn joiner's team is the S2C 0x04 latch the sim surfaces.
-	var team := 0
-	if sim.has_method("get_join_assigned_team"):
-		team = int(sim.get_join_assigned_team())
+	var team := int(sim.get_join_assigned_team())
 	var row_color := Color("ff2020") if team == 2 else Color("4040ff")
 	# Row 0: the default spawn [orig: "'<DEFAULT_SPAWN_KEY>' <HOME>", node 0].
 	var default_text := "'%s' %s" % [
@@ -183,9 +184,11 @@ func _populate_spawn_list(sim) -> void:
 func _apply_static_visibility() -> void:
 	for control_name in ["STATIC_MEDIC_MSG1", "STATIC_CALLMEDIC_MSG",
 			"STATIC_PSPRESPAWN_MSG1", "SWAP_TEAMS", "BUTTON_TEAMLIST"]:
-		var node := _find(control_name)
-		if node is CanvasItem:
-			(node as CanvasItem).visible = false
+		# Boundary conversion: authored .mnu controls are CanvasItems; null
+		# means this screen simply does not author the control.
+		var item := _find(control_name) as CanvasItem
+		if item != null:
+			item.visible = false
 
 
 func _spawn_list() -> ItemList:
@@ -203,8 +206,7 @@ func _find(control_name: String) -> Node:
 func _ensure_menu() -> bool:
 	if _menu != null and is_instance_valid(_menu):
 		return true
-	var root: ResourceRoot = _world.get_resource_root() \
-			if _world.has_method("get_resource_root") else null
+	var root: ResourceRoot = _world.get_resource_root()
 	if root == null:
 		return false
 	var bytes := root.read_file(MENU_FILE)
@@ -295,10 +297,9 @@ func _load_style(root: ResourceRoot) -> MnsStyleSheet:
 
 
 func _connect_layout_source() -> void:
-	if _ui_parent is Control:
-		var control := _ui_parent as Control
-		if not control.resized.is_connected(_recompute_fit):
-			control.resized.connect(_recompute_fit)
+	if _layout_control != null:
+		if not _layout_control.resized.is_connected(_recompute_fit):
+			_layout_control.resized.connect(_recompute_fit)
 		return
 	var viewport := _ui_parent.get_viewport() if _ui_parent != null else null
 	if viewport != null and not viewport.size_changed.is_connected(_recompute_fit):
@@ -309,8 +310,8 @@ func _recompute_fit() -> void:
 	if _menu == null or not is_instance_valid(_menu):
 		return
 	var target_size := Vector2.ZERO
-	if _ui_parent is Control:
-		target_size = (_ui_parent as Control).size
+	if _layout_control != null:
+		target_size = _layout_control.size
 	elif _ui_parent != null and _ui_parent.get_viewport() != null:
 		target_size = _ui_parent.get_viewport().get_visible_rect().size
 	if target_size.x <= 1.0 or target_size.y <= 1.0:

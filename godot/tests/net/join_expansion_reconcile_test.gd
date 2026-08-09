@@ -263,6 +263,12 @@ func _make_world() -> GameWorld:
 	var terrain := Terrain.new()
 	terrain.name = "Terrain"
 	world.add_child(terrain)
+	# The environment child makes the code-built world mission-loadable: the
+	# typed placement path stamps _env.light_state onto every placed batch
+	# (the game_world_test harness precedent).
+	var env := MissionEnvironment.new()
+	env.name = "MissionEnvironment"
+	world.add_child(env)
 	add_child_autofree(world)
 	world.set_playable(false)
 	return world

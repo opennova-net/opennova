@@ -164,7 +164,7 @@ func _on_left_press(mouse_pos: Vector2) -> void:
 
 
 func _on_drag(mouse_pos: Vector2) -> void:
-	if _c._selected_ref.is_empty() or _c.terrain_editor == null or not _c.terrain_editor.has_method("raycast_terrain_at"):
+	if _c._selected_ref.is_empty() or _c.terrain_editor == null:
 		return
 	var hit: Vector3 = _c.terrain_editor.raycast_terrain_at(mouse_pos)
 	if not _c.terrain_editor.is_valid_terrain_hit(hit):
@@ -210,9 +210,7 @@ func set_gizmo_enabled(value: bool) -> void:
 
 # The editor camera, or null (headless tests / no terrain editor bound).
 func _editor_camera() -> Camera3D:
-	if _c.terrain_editor == null or not _c.terrain_editor.has_method("get_editor_camera"):
-		return null
-	return _c.terrain_editor.get_editor_camera()
+	return _c.terrain_editor.get_editor_camera() if _c.terrain_editor != null else null
 
 
 # Try to start a gizmo handle drag at `mouse_pos`. Returns true (and arms the drag) when the cursor
@@ -426,8 +424,6 @@ func _refresh_pick_debug() -> void:
 
 
 func _pick_entity(mouse_pos: Vector2) -> Dictionary:
-	if not _c.terrain_editor.has_method("get_editor_camera"):
-		return {}
 	var camera: Camera3D = _c.terrain_editor.get_editor_camera()
 	if camera == null:
 		return {}

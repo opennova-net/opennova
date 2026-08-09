@@ -49,7 +49,7 @@ func teardown() -> void:
 
 # The sim, re-resolved per use: mission reloads free the runtime and its sim,
 # so a cached reference would go stale (the presenter follows the same rule).
-func _sim():
+func _sim() -> Simulation:
 	return _world.get_sim() if _world != null else null
 
 
@@ -319,9 +319,9 @@ func _weapon_effect_anchor_transform(userpoint: String) -> Variant:
 # frame, then back through its current global pose — the ported equivalent of the
 # original action-bone transform.
 # [orig: Entity_ComputeActionTransform @0x401310 -> ActionSlot_SpawnEffect @0x401f20]
-func _action_particle_model_to_world(part: Node3D, info: Dictionary) -> Transform3D:
-	if part != null and part.has_method("get_skeleton"):
-		var skeleton := part.call("get_skeleton") as Skeleton3D
+func _action_particle_model_to_world(part: ObjectModel, info: Dictionary) -> Transform3D:
+	if part != null:
+		var skeleton: Skeleton3D = part.get_skeleton()
 		var subobject := int(info.get("subobject", -1))
 		if skeleton != null and subobject >= 0 and subobject < skeleton.get_bone_count():
 			return (skeleton.global_transform
@@ -350,12 +350,12 @@ func _action_particle_model_to_world(part: Node3D, info: Dictionary) -> Transfor
 func _third_person_action_particle(userpoint: String) -> Dictionary:
 	if not _presenter.is_third_person() or userpoint.is_empty():
 		return {}
-	var held_weapon: Node3D = _presenter.held_weapon()
+	var held_weapon: ObjectModel = _presenter.held_weapon()
 	if held_weapon == null or not is_instance_valid(held_weapon) \
-			or not held_weapon.visible or not held_weapon.has_method("get_object_data"):
+			or not held_weapon.visible:
 		return {}
-	var data = held_weapon.get_object_data()
-	if data == null or not data.has_method("get_user_point_count"):
+	var data: ObjectData = held_weapon.get_object_data()
+	if data == null:
 		return {}
 	var xform: Transform3D = held_weapon.global_transform
 	for i in range(int(data.get_user_point_count())):
@@ -376,27 +376,27 @@ func _action_particle_world_position(userpoint: String) -> Vector3:
 	if not tp.is_empty():
 		return tp["pos"]
 	var fallback := Vector3.INF
-	for part in _presenter.vm_parts():
-		if part == null or not is_instance_valid(part) or not part.has_method("get_object_data"):
+	for part: ObjectModel in _presenter.vm_parts():
+		if part == null or not is_instance_valid(part):
 			continue
 		if fallback == Vector3.INF:
 			fallback = part.global_transform.origin
 		if userpoint.is_empty():
 			continue
-		var data = part.get_object_data()
+		var data: ObjectData = part.get_object_data()
 		if data == null:
 			continue
 		for i in range(data.get_user_point_count()):
 			var info: Dictionary = data.get_user_point_info(i)
 			if String(info.get("name", "")).nocasecmp_to(userpoint) == 0:
-				var model_to_world := _action_particle_model_to_world(part as Node3D, info)
+				var model_to_world := _action_particle_model_to_world(part, info)
 				return model_to_world * Vector3(info.get("position", Vector3.ZERO))
 	if fallback != Vector3.INF:
 		return fallback
 	# Retail's deepest fallback is the ENTITY ORIGIN [orig: loc_401867 @0x401867..0x401887
 	# copies entity+4/+8/+0xC]. The eye was our own invention and put the flash on the
 	# player's face whenever a userpoint failed to resolve.
-	var sim = _sim()
+	var sim := _sim()
 	return sim.get_local_player_position() if sim != null else Vector3.ZERO
 
 
@@ -404,10 +404,10 @@ func _action_particle_world_forward(userpoint: String) -> Vector3:
 	var tp := _third_person_action_particle(userpoint)
 	if not tp.is_empty():
 		return tp["dir"]
-	for part in _presenter.vm_parts():
-		if part == null or not is_instance_valid(part) or not part.has_method("get_object_data"):
+	for part: ObjectModel in _presenter.vm_parts():
+		if part == null or not is_instance_valid(part):
 			continue
-		var data = part.get_object_data()
+		var data: ObjectData = part.get_object_data()
 		if data == null:
 			continue
 		for i in range(data.get_user_point_count()):
@@ -415,7 +415,7 @@ func _action_particle_world_forward(userpoint: String) -> Vector3:
 			if String(info.get("name", "")).nocasecmp_to(userpoint) != 0:
 				continue
 			var direction := Vector3(info.get("rotation", Vector3(0, 0, 1)))
-			var model_to_world := _action_particle_model_to_world(part as Node3D, info)
+			var model_to_world := _action_particle_model_to_world(part, info)
 			var world_direction: Vector3 = model_to_world.basis * direction
 			if world_direction.length_squared() > 0.000001:
 				return world_direction.normalized()

@@ -221,6 +221,10 @@ struct HudFrameState {
 	bool windup_active = false;
 	int windup_held_ticks = 0;
 	std::string objective_text;
+	// The objectives-panel header line, resolved by the embedder from gametext
+	// (Overlays/STROVER_MISSIONOBJECTIVES); empty falls back to the literal
+	// [orig: header STROVER_MISSIONOBJECTIVES @ 0x5ba986].
+	std::string objectives_header;
 	HudWeaponState weapon;
 	HudWaypointState waypoint;
 	std::vector<HudObjectiveRow> objectives;
@@ -242,6 +246,12 @@ struct HudDrawList {
 class HudFrameCompiler {
 public:
 	void configure(const HudLayout &layout, const fnt_font_t *font);
+
+	// Swap the layout WITHOUT resetting runtime state (stance fade, clip
+	// flash, the message ring) — the texture-table refresh path, e.g. the
+	// options crosshair-style reload [orig: HUD_LoadAllTextures @ 0x59e3d6
+	// re-registers textures without touching the live HUD state].
+	void update_layout(const HudLayout &layout);
 
 	// The stance cross-fade restamp [orig: @ 0x599f8a] and the message ring
 	// [orig: Chat_AddDebugMessage @ 0x4987f0] are compiler state.

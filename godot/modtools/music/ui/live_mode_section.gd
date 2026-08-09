@@ -13,7 +13,7 @@ extends RefCounted
 # Control -- a Node, manually managed -- so a plain back-reference cannot
 # cycle: the mount owns the sections; the sections point back at the Node.
 
-var _lm
+var _lm: MusicLiveMode
 
 
 func _init(live_mode) -> void:

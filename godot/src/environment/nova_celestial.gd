@@ -35,7 +35,7 @@ var terrain_data: TerrainData = null
 
 var _glare_occlusion := GlareOcclusion.new()
 var _resource_root: ResourceRoot
-var _cached_env: Node = null
+var _cached_env: MissionEnvironment = null
 var _cached_cam: Camera3D = null
 var _bodies: Dictionary = {} # name -> { model, materials, tint }
 var _loaded_names: Dictionary = {}
@@ -47,7 +47,8 @@ var _star_mmi: MultiMeshInstance3D = null
 
 
 func _ready() -> void:
-	_cached_env = get_node_or_null(environment_path) if not environment_path.is_empty() else null
+	_cached_env = (get_node_or_null(environment_path)
+			if not environment_path.is_empty() else null) as MissionEnvironment
 	_rebuild_if_needed()
 
 
@@ -58,7 +59,7 @@ func set_resource_root(value: ResourceRoot) -> void:
 
 
 func _env_data() -> EnvFile:
-	if _cached_env and _cached_env.has_method("get_environment_data"):
+	if _cached_env:
 		return _cached_env.get_environment_data()
 	return null
 
@@ -203,7 +204,7 @@ func _process(_delta: float) -> void:
 		if _bodies.is_empty():
 			return
 	var env := _cached_env
-	if env == null or not env.has_method("is_loaded") or not env.is_loaded():
+	if env == null or not env.is_loaded():
 		return
 
 	if not _cached_cam or not _cached_cam.is_inside_tree() or not _cached_cam.current:
@@ -224,7 +225,7 @@ func _process(_delta: float) -> void:
 		_star_mmi.global_position = cam_pos
 	# The active light (sun by day, moon at night) drives the near-light cull
 	# [orig: Environment_GetLightDirectionFixed @ 0x57d8e0 at the field loop].
-	var light_dir: Vector3 = env.get_light_direction() if env.has_method("get_light_direction") else sun_dir
+	var light_dir: Vector3 = env.get_light_direction()
 	_update_star_field(light_dir)
 
 	for key in _bodies:
@@ -242,7 +243,7 @@ func _process(_delta: float) -> void:
 		if key == "sun":
 			# Overcast and SunDim are live end-to-end (env #27 — spring-smoothed in
 			# the weather core; target 0 in stock data).
-			var sun_dim: float = env.get_sun_dim_pct() if env.has_method("get_sun_dim_pct") else 0.0
+			var sun_dim: float = env.get_sun_dim_pct()
 			_set_body_shader_parameter(body, "u_opacity", EnvFile.celestial_sun_alpha(overcast, sun_dim))
 		elif key == "moon":
 			# The moon fades with the fog distance [orig: @ 0x5acc40].
@@ -257,7 +258,7 @@ func _process(_delta: float) -> void:
 			var visible_a := _glare_ray_clear(cam_pos, sun_dir, ray_length, _glare_occlusion.get_ray_jitter_a())
 			var visible_b := _glare_ray_clear(cam_pos, sun_dir, ray_length, _glare_occlusion.get_ray_jitter_b())
 			_glare_occlusion.tick(visible_a, visible_b, env.get_fog_level())
-			var sun_dim_glow: float = env.get_sun_dim_pct() if env.has_method("get_sun_dim_pct") else 0.0
+			var sun_dim_glow: float = env.get_sun_dim_pct()
 			# Preserve the recovered fixed-point occlusion/brightness/dimming fold
 			# at dot=1. The shader applies the remaining positive dot^4 factor from
 			# EACH pass camera, so the mirror view no longer inherits the main
@@ -340,7 +341,7 @@ func _update_star_field(light_dir: Vector3) -> void:
 		mm.set_instance_color(i, Color(brightness, brightness, brightness))
 
 
-func _tint_for(env: Node, tint_key: String) -> Vector3:
+func _tint_for(env: MissionEnvironment, tint_key: String) -> Vector3:
 	match tint_key:
 		"sun":
 			return env.get_sun_color()

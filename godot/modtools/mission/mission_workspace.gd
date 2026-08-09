@@ -14,14 +14,14 @@ const TerrainViewportScript = preload("res://modtools/terrain/terrain_viewport.g
 const MissionControllerScript = preload("res://modtools/mission/mission_controller.gd")
 const MissionInspectorScript = preload("res://modtools/mission/mission_inspector.gd")
 
-var terrain_editor: Node
-var _controller  # MissionController
+var terrain_editor: TerrainEditorBase
+var _controller: MissionControllerScript
 var _mount: ViewportMount
 # The live inspector + the shell's right dock (%AssetDock). The inspector splits its UI across the
 # left pane (browser) and the dock (per-selection editor + Mission form). The shell forwards the
 # dock via set_asset_dock BEFORE build_inspector on activation, so we cache it and hand it over when
 # the inspector is built (or push it into an already-built inspector on a re-sync / teardown).
-var _inspector  # MissionInspector (preloaded, no class_name)
+var _inspector: MissionInspectorScript
 var _detail_mount: Control
 # The live "Terrain changed under N objects" confirm (see _prompt_reground), so a
 # re-activate while it is open cannot stack a second one.
@@ -32,7 +32,7 @@ var _reground_dialog: ConfirmationDialog
 var _mission_preview_context_active := false
 
 
-func _init(value: Node = null) -> void:
+func _init(value: TerrainEditorBase = null) -> void:
 	terrain_editor = value
 	_controller = MissionControllerScript.new(value)
 	# The controller fires `changed` on load / clear / select / dirty / save; refresh
@@ -52,8 +52,7 @@ func _ensure_mount() -> ViewportMount:
 
 func set_terrain_editor(value: Node) -> void:
 	var previous := terrain_editor
-	if _mission_preview_context_active and previous != null and previous != value \
-			and previous.has_method("clear_mission_preview_context"):
+	if _mission_preview_context_active and previous != null and previous != value:
 		previous.clear_mission_preview_context()
 	terrain_editor = value
 	if _controller != null:
@@ -65,31 +64,27 @@ func set_terrain_editor(value: Node) -> void:
 			viewport.set_terrain_editor(terrain_editor)
 
 
-func bind_to_editor(value: Node) -> void:
+func bind_to_editor(value: EditorApp) -> void:
 	# The shell binds the app root; unwrap to the terrain domain editor (the
-	# mission edit world lives under it). Bare TerrainEditor binds pass through.
-	if value != null and value.has_method("get_terrain_editor"):
-		value = value.get_terrain_editor()
-	set_terrain_editor(value)
+	# mission edit world lives under it). Tests bind through set_terrain_editor.
+	set_terrain_editor(value.get_terrain_editor() if value != null else null)
 
 
 ## Install the active mission's external terrain tile array (and preview
 ## time-of-day) onto the shared terrain preview.
 func _sync_mission_preview_context() -> void:
-	if not _mission_preview_context_active or terrain_editor == null \
-			or not terrain_editor.has_method("set_mission_preview_context"):
+	if not _mission_preview_context_active or terrain_editor == null:
 		return
 	var tile_info: TerrainTileInfo = null
-	if _controller != null and _controller.has_method("get_mission_tile_info"):
-		tile_info = _controller.get_mission_tile_info()
 	var preview_time_of_day := NAN
-	if _controller != null and _controller.has_method("get_mission_preview_time_of_day"):
+	if _controller != null:
+		tile_info = _controller.get_mission_tile_info()
 		preview_time_of_day = _controller.get_mission_preview_time_of_day()
 	terrain_editor.set_mission_preview_context(tile_info, preview_time_of_day)
 
 
 func _clear_mission_preview_context() -> void:
-	if terrain_editor != null and terrain_editor.has_method("clear_mission_preview_context"):
+	if terrain_editor != null:
 		terrain_editor.clear_mission_preview_context()
 
 
@@ -167,8 +162,8 @@ func _prompt_reground(count: int) -> void:
 	dialog.title = "Terrain changed"
 	dialog.dialog_text = "Terrain changed under %d object%s.\nRe-ground them to the new surface?" % [count, "" if count == 1 else "s"]
 	dialog.exclusive = true
-	if editor_shell is Control and (editor_shell as Control).theme != null:
-		dialog.theme = (editor_shell as Control).theme
+	if editor_shell.theme != null:
+		dialog.theme = editor_shell.theme
 	dialog.get_ok_button().text = "Re-ground"
 	dialog.get_cancel_button().text = "Leave as-is"
 	dialog.confirmed.connect(func() -> void:
@@ -212,7 +207,7 @@ func mount_viewport(mount: Control) -> void:
 	if mount == null or terrain_editor == null:
 		return
 	_sync_mission_preview_context()
-	var viewport := _ensure_mount().mount(mount)
+	var viewport: TerrainViewport = _ensure_mount().mount(mount)
 	if viewport != null:
 		viewport.set_terrain_editor(terrain_editor)
 		# Terrain brush stays dormant; the controller handles picking / dragging via the
@@ -245,15 +240,13 @@ func _detach_input_target() -> void:
 		_controller.disarm_placement()
 	if _mount == null:
 		return
-	var viewport := _mount.get_viewport_node()
-	if viewport != null and viewport.has_method("set_input_target"):
+	var viewport: TerrainViewport = _mount.get_viewport_node()
+	if viewport != null:
 		viewport.set_input_target(null)
 
 
-func get_viewport_camera() -> Camera3D:
-	if terrain_editor != null and terrain_editor.has_method("get_editor_camera"):
-		return terrain_editor.get_editor_camera()
-	return null
+func get_viewport_camera() -> FlyCamera:
+	return terrain_editor.get_editor_camera() if terrain_editor != null else null
 
 
 # --- New (create a mission from scratch) --------------------------------------
@@ -321,9 +314,31 @@ func open_file(path: String) -> Error:
 	return err as Error
 
 
-# The domain document the EditorWorkspace base derives undo/redo + dirty from.
+# Untyped accessor for tests/MCP; the edit hooks below carry the typed calls.
 func get_editor_document() -> Object:
 	return _controller
+
+
+func has_unsaved_changes() -> bool:
+	return _controller != null and _controller.is_dirty()
+
+
+func can_undo() -> bool:
+	return _controller != null and not is_busy() and _controller.can_undo()
+
+
+func can_redo() -> bool:
+	return _controller != null and not is_busy() and _controller.can_redo()
+
+
+func undo() -> void:
+	if _controller != null:
+		_controller.undo()
+
+
+func redo() -> void:
+	if _controller != null:
+		_controller.redo()
 
 
 # --- Save ---------------------------------------------------------------------
@@ -441,7 +456,7 @@ func build_inspector(mount: Control) -> void:
 	# at 592), so it is already cached: the fresh inspector builds its editor + Mission form straight
 	# into the dock with no reparent.
 	_inspector.setup(_controller, _detail_mount)
-	if editor_shell != null and _inspector.has_method("set_reference_services"):
+	if editor_shell != null:
 		_inspector.set_reference_services(ResourceRefWidget.services_from_shell(editor_shell))
 
 

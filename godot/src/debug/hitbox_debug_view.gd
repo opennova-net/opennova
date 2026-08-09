@@ -154,7 +154,13 @@ func advance_refresh(delta: float) -> void:
 
 
 func _refresh_from_sim(sim: Simulation) -> void:
-	var debug: Dictionary = sim.get_hitbox_debug()
+	render_report(sim.get_hitbox_debug())
+
+
+## Render one hit-geometry snapshot (Simulation.get_hitbox_debug's shape).
+## Split from the sim fetch so tests and probes can drive the view with
+## report data directly.
+func render_report(debug: Dictionary) -> void:
 	_update(debug.get("entities", []), debug.get("organics", []))
 
 

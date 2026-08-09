@@ -99,14 +99,14 @@ func _invoke(handler: Callable, args: Dictionary, ctx: McpToolContext, state: Di
 	state["done"] = true
 
 
-# Encode a ctx.image() attachment (Image, or anything with get_image()) as a
-# PNG content block; non-images are ignored with a note in the result.
+# Encode a ctx.image() attachment (an Image or a Texture2D) as a PNG content
+# block; non-images are ignored with a note in the result.
 func _attach_image(result: McpToolResult, attachment: Variant) -> void:
 	var img: Image = null
 	if attachment is Image:
 		img = attachment
-	elif attachment != null and is_instance_valid(attachment) and attachment.has_method("get_image"):
-		img = attachment.get_image()
+	elif attachment is Texture2D and is_instance_valid(attachment):
+		img = (attachment as Texture2D).get_image()
 	if img == null or img.is_empty():
 		result.add_text("(ctx.image attachment was not a usable Image — pass an Image or Texture2D)")
 		return

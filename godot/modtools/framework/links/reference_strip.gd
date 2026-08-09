@@ -195,10 +195,10 @@ func _on_row_pressed(kind: String, path: String) -> void:
 ## index's logical listing, never absolute paths) — but several workspaces
 ## open from disk only. Adopters route their jump service through this to
 ## translate when the shell can; the name passes through untouched otherwise.
-static func resolve_source_path(shell: Object, path: String) -> String:
-	if shell == null or not shell.has_method("get_resource_root"):
+static func resolve_source_path(shell: WorkspaceShell, path: String) -> String:
+	if shell == null:
 		return path
-	var resources: Variant = shell.get_resource_root()
+	var resources: ResourceRoot = shell.get_resource_root()
 	if resources == null:
 		return path
 	var resolved := String(resources.resolve_file(path))

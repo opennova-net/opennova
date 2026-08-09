@@ -10,12 +10,9 @@ extends "res://modtools/mission/controller/controller_section.gd"
 # True when `trn_path` already IS the mounted terrain (case-insensitive,
 # slash-normalized — resolve_file and a user's own open can disagree on form)
 # and that terrain has no unsaved edits. Dirty never matches, so the reload
-# there preserves today's semantics; the dirty read is duck-typed because the
-# headless test stub carries no is_dirty.
+# there preserves today's semantics.
 func _is_same_clean_terrain(trn_path: String) -> bool:
-	if not _c.terrain_editor.has_method("get_current_trn_path"):
-		return false
-	if bool(_c.terrain_editor.get("is_dirty")):
+	if _c.terrain_editor.is_dirty:
 		return false
 	var current := String(_c.terrain_editor.get_current_trn_path())
 	if current.is_empty():
@@ -125,8 +122,8 @@ func new_mission() -> Error:
 	if resource_root == null:
 		_c._last_status = "Set a resource directory before creating a mission."
 		return ERR_UNCONFIGURED
-	var trn_path := String(_c.terrain_editor.get_current_trn_path()) if _c.terrain_editor.has_method("get_current_trn_path") else ""
-	var world_root: Node3D = _c.terrain_editor.get_terrain_world_root() if _c.terrain_editor.has_method("get_terrain_world_root") else null
+	var trn_path := String(_c.terrain_editor.get_current_trn_path())
+	var world_root: Node3D = _c.terrain_editor.get_terrain_world_root()
 	if trn_path.is_empty() or world_root == null:
 		_c._last_status = "Open or create a terrain first, then start a new mission on it."
 		return ERR_UNCONFIGURED
@@ -296,12 +293,9 @@ func save_as_path(path: String) -> Error:
 # (x, z, -y)): the godot-world sample point for mission (x, y) is (x, -y), and the sampled godot
 # Y IS the mission z-units height. Off-terrain samples (NAN) bake 0; with no terrain surface at
 # all nothing is staged (extra_bheight stays 0 — positions remain absolute-declared either way,
-# only the baked base is absent). Duck-typed like _build_reground_requests so headless stubs work.
+# only the baked base is absent).
 func _stage_mis_base_heights() -> void:
 	if _c._mission == null or _c.terrain_editor == null:
-		return
-	var batched: bool = _c.terrain_editor.has_method("sample_heights_world")
-	if not batched and not _c.terrain_editor.has_method("sample_height_world"):
 		return
 	var points := PackedVector2Array()
 	for kind in [MissionData.KIND_ITEM, MissionData.KIND_BUILDING, MissionData.KIND_MARKER, MissionData.KIND_ORGANIC]:
@@ -310,14 +304,7 @@ func _stage_mis_base_heights() -> void:
 			points.append(Vector2(pos.x, -pos.y))
 	if points.is_empty():
 		return
-	var heights: PackedFloat32Array
-	if batched:
-		heights = _c.terrain_editor.sample_heights_world(points)
-	else:
-		heights = PackedFloat32Array()
-		heights.resize(points.size())
-		for i in points.size():
-			heights[i] = _c.terrain_editor.sample_height_world(points[i].x, points[i].y)
+	var heights: PackedFloat32Array = _c.terrain_editor.sample_heights_world(points)
 	if heights.size() != points.size():
 		return
 	var fixed := PackedInt32Array()
@@ -335,9 +322,7 @@ func _stage_mis_base_heights() -> void:
 # match the mission rather than carrying over the previously-open mission's
 # environment — when the mission brings no usable env, reset to a neutral default.
 func _load_environment(mission: MissionData, resource_root: ResourceRoot) -> String:
-	if not _c.terrain_editor.has_method("get_environment_editor"):
-		return ""
-	var env_editor = _c.terrain_editor.get_environment_editor()
+	var env_editor: EnvironmentEditor = _c.terrain_editor.get_environment_editor()
 	if env_editor == null:
 		return ""
 
@@ -347,25 +332,23 @@ func _load_environment(mission: MissionData, resource_root: ResourceRoot) -> Str
 		var env_path := resource_root.resolve_file(env_ref + ".env")
 		if env_path.is_empty():
 			note = "environment %s was not found" % env_ref
-		elif env_editor.has_method("open_env") and int(env_editor.open_env(env_path)) == OK:
+		elif env_editor.open_env(env_path) == OK:
 			# Game parity: the runtime layers the mission's attrib-gated fog/water
 			# overrides on top of the .env (get_environment_overrides builds exactly
 			# the apply_mission_overrides payload). Apply them to the preview too,
 			# then re-fan-out — open_env already emitted with the bare .env values.
-			var env_file: Variant = env_editor.get("env_file")
+			var env_file: EnvFile = env_editor.env_file
 			var overrides: Dictionary = mission.get_environment_overrides()
-			if env_file != null and not overrides.is_empty() and env_file.has_method("apply_mission_overrides"):
+			if env_file != null and not overrides.is_empty():
 				env_file.apply_mission_overrides(overrides)
-				if env_editor.has_method("_emit_all_changed"):
-					env_editor._emit_all_changed()
+				env_editor._emit_all_changed()
 			return ""  # loaded the mission's own environment; nothing to reset or note
 		else:
 			note = "environment %s could not be loaded" % env_ref
 
 	# Blank, unresolved, or unreadable reference: reset to a neutral default so the
 	# atmosphere matches the inspector instead of lingering from a prior mission.
-	if env_editor.has_method("create_default_environment"):
-		env_editor.create_default_environment(false)
+	env_editor.create_default_environment(false)
 	return note
 
 
@@ -390,8 +373,6 @@ func _place_objects(mission: MissionData, resource_root: ResourceRoot, timeline:
 	_c._pickable = []
 	_c._place_item_id = 0
 	_c._placer = null
-	if not _c.terrain_editor.has_method("get_terrain_world_root"):
-		return
 	var world_root: Node3D = _c.terrain_editor.get_terrain_world_root()
 	if world_root == null:
 		return

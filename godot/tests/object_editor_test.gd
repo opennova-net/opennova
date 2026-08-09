@@ -29,7 +29,7 @@ const OED_UPDATE_ALL := OED_UPDATE_MTRL | OED_UPDATE_LGHT | OED_UPDATE_PANM
 
 
 class ObjectWorkspaceShellDouble:
-	extends Node
+	extends WorkspaceShell
 
 	var environment_dialog_requested := false
 
@@ -799,7 +799,7 @@ func test_object_preview_runtime_controls_update_state() -> void:
 
 func test_object_workspace_preview_inspector_exposes_runtime_controls() -> void:
 	var workspace = ObjectWorkspaceScript.new()
-	workspace.set_editor_shell(self)
+	workspace.set_editor_shell(add_child_autofree(ObjectWorkspaceShellDouble.new()))
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	var viewport_mount = add_child_autofree(Control.new())
 	workspace.mount_viewport(viewport_mount)
@@ -832,7 +832,7 @@ func test_object_workspace_preview_inspector_exposes_runtime_controls() -> void:
 
 func test_object_preview_inspector_aliases_unknown_and_empty_ctrl_names_like_retail() -> void:
 	var workspace = ObjectWorkspaceScript.new()
-	workspace.set_editor_shell(self)
+	workspace.set_editor_shell(add_child_autofree(ObjectWorkspaceShellDouble.new()))
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	assert_true(workspace.object_editor.object_data.set_control_register_name(
 			0, "NOT_A_RETAIL_REGISTER"))
@@ -906,7 +906,7 @@ func test_object_preview_shows_labeled_userpoints_by_default() -> void:
 
 func test_object_workspace_preview_userpoint_toggle_controls_overlay() -> void:
 	var workspace = ObjectWorkspaceScript.new()
-	workspace.set_editor_shell(self)
+	workspace.set_editor_shell(add_child_autofree(ObjectWorkspaceShellDouble.new()))
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(HOUSE_3DI3_FIXTURE)), OK)
 	var viewport_mount = add_child_autofree(Control.new())
 	workspace.mount_viewport(viewport_mount)
@@ -930,7 +930,7 @@ func test_object_workspace_preview_userpoint_toggle_controls_overlay() -> void:
 
 func test_object_workspace_preview_userpoint_toggle_disables_without_points() -> void:
 	var workspace = ObjectWorkspaceScript.new()
-	workspace.set_editor_shell(self)
+	workspace.set_editor_shell(add_child_autofree(ObjectWorkspaceShellDouble.new()))
 	assert_eq(workspace.new_current(), OK)
 	var viewport_mount = add_child_autofree(Control.new())
 	workspace.mount_viewport(viewport_mount)
@@ -950,7 +950,7 @@ func test_object_workspace_preview_userpoint_toggle_disables_without_points() ->
 
 func test_object_workspace_preview_and_lods_do_not_mount_empty_detail_dock() -> void:
 	var workspace = ObjectWorkspaceScript.new()
-	workspace.set_editor_shell(self)
+	workspace.set_editor_shell(add_child_autofree(ObjectWorkspaceShellDouble.new()))
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	var detail_mount = add_child_autofree(Control.new())
 	workspace.set_asset_dock(detail_mount)
@@ -969,7 +969,7 @@ func test_object_workspace_preview_and_lods_do_not_mount_empty_detail_dock() -> 
 
 func test_object_workspace_new_creates_empty_saveable_project() -> void:
 	var workspace = ObjectWorkspaceScript.new()
-	workspace.set_editor_shell(self)
+	workspace.set_editor_shell(add_child_autofree(ObjectWorkspaceShellDouble.new()))
 
 	assert_eq(workspace.new_current(), OK)
 
@@ -985,7 +985,7 @@ func test_object_workspace_new_creates_empty_saveable_project() -> void:
 
 func test_object_workspace_open_ase_saves_reopenable_project() -> void:
 	var workspace = ObjectWorkspaceScript.new()
-	workspace.set_editor_shell(self)
+	workspace.set_editor_shell(add_child_autofree(ObjectWorkspaceShellDouble.new()))
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(BIRD_ASE_FIXTURE)), OK)
 	assert_true(workspace.can_export(), "Opening an ASE should create an exportable project-backed object.")
 
@@ -1005,7 +1005,7 @@ func test_object_workspace_open_ase_saves_reopenable_project() -> void:
 
 func test_object_workspace_new_adds_lod_scene_and_exports_project() -> void:
 	var workspace = ObjectWorkspaceScript.new()
-	workspace.set_editor_shell(self)
+	workspace.set_editor_shell(add_child_autofree(ObjectWorkspaceShellDouble.new()))
 	assert_eq(workspace.new_current(), OK)
 	assert_true(workspace.has_method("add_lod_scene"), "Object workspace should expose an add LOD scene action.")
 	if not workspace.has_method("add_lod_scene"):
@@ -1032,7 +1032,7 @@ func test_object_workspace_new_adds_lod_scene_and_exports_project() -> void:
 
 func test_object_workspace_export_mask_controls_follow_oed_dirty_mask() -> void:
 	var workspace = ObjectWorkspaceScript.new()
-	workspace.set_editor_shell(self)
+	workspace.set_editor_shell(add_child_autofree(ObjectWorkspaceShellDouble.new()))
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(US01_PROJECT_FIXTURE)), OK)
 	var data: ObjectData = workspace.object_editor.object_data
 	assert_eq(data.set_material_shader(0, "FF_ST_OP"), OK)
@@ -1060,7 +1060,7 @@ func test_object_workspace_export_mask_controls_follow_oed_dirty_mask() -> void:
 
 func test_object_lods_inspector_exposes_scene_and_project_settings() -> void:
 	var workspace = ObjectWorkspaceScript.new()
-	workspace.set_editor_shell(self)
+	workspace.set_editor_shell(add_child_autofree(ObjectWorkspaceShellDouble.new()))
 	var mount = add_child_autofree(Control.new())
 
 	workspace.build_workflow_inspector(4, mount)
@@ -1076,7 +1076,7 @@ func test_object_lods_inspector_exposes_scene_and_project_settings() -> void:
 
 func test_object_lods_inspector_edits_scene_and_project_settings() -> void:
 	var workspace = ObjectWorkspaceScript.new()
-	workspace.set_editor_shell(self)
+	workspace.set_editor_shell(add_child_autofree(ObjectWorkspaceShellDouble.new()))
 	assert_eq(workspace.new_current(), OK)
 	assert_eq(workspace.add_lod_scene(ProjectSettings.globalize_path(BIRD_ASE_FIXTURE)), OK)
 	var data: ObjectData = workspace.object_editor.object_data
@@ -1117,7 +1117,7 @@ func test_object_lods_inspector_edits_scene_and_project_settings() -> void:
 
 func test_object_part_anims_use_left_list_and_right_detail_dock() -> void:
 	var workspace = ObjectWorkspaceScript.new()
-	workspace.set_editor_shell(self)
+	workspace.set_editor_shell(add_child_autofree(ObjectWorkspaceShellDouble.new()))
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	var data: ObjectData = workspace.object_editor.object_data
 	assert_gt(data.get_part_anim_count(0), 0, "Fixture should expose part animations.")
@@ -1192,7 +1192,7 @@ func test_object_part_anims_use_left_list_and_right_detail_dock() -> void:
 
 func test_object_part_anims_left_actions_add_duplicate_and_delete_entries() -> void:
 	var workspace = ObjectWorkspaceScript.new()
-	workspace.set_editor_shell(self)
+	workspace.set_editor_shell(add_child_autofree(ObjectWorkspaceShellDouble.new()))
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	var data: ObjectData = workspace.object_editor.object_data
 	assert_gt(data.get_part_anim_count(0), 0, "Fixture should expose part animations.")
@@ -1236,7 +1236,7 @@ func test_object_part_anims_left_actions_add_duplicate_and_delete_entries() -> v
 
 func test_object_part_anim_detail_dock_reflows_within_right_pane() -> void:
 	var workspace = ObjectWorkspaceScript.new()
-	workspace.set_editor_shell(self)
+	workspace.set_editor_shell(add_child_autofree(ObjectWorkspaceShellDouble.new()))
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	assert_gt(workspace.object_editor.object_data.get_part_anim_count(0), 0, "Fixture should expose part animations.")
 	var list_mount = add_child_autofree(Control.new())
@@ -1285,7 +1285,7 @@ func test_object_part_anim_detail_dock_reflows_within_right_pane() -> void:
 
 func test_object_part_anim_value_edits_keep_preview_signal_safe() -> void:
 	var workspace = ObjectWorkspaceScript.new()
-	workspace.set_editor_shell(self)
+	workspace.set_editor_shell(add_child_autofree(ObjectWorkspaceShellDouble.new()))
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	assert_gt(workspace.object_editor.object_data.get_part_anim_count(0), 0, "Fixture should expose part animations.")
 	var viewport_mount = add_child_autofree(Control.new())
@@ -1327,7 +1327,7 @@ func test_object_part_anim_value_edits_keep_preview_signal_safe() -> void:
 
 func test_object_part_anim_sine_translation_end_edit_does_not_rebuild_preview_nodes() -> void:
 	var workspace = ObjectWorkspaceScript.new()
-	workspace.set_editor_shell(self)
+	workspace.set_editor_shell(add_child_autofree(ObjectWorkspaceShellDouble.new()))
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	assert_gt(workspace.object_editor.object_data.get_part_anim_count(0), 0, "Fixture should expose part animations.")
 	var viewport_mount = add_child_autofree(Control.new())
@@ -1390,7 +1390,7 @@ func test_object_part_anim_sine_translation_end_edit_does_not_rebuild_preview_no
 
 func test_object_part_anim_target_dropdown_preserves_preview_binding() -> void:
 	var workspace = ObjectWorkspaceScript.new()
-	workspace.set_editor_shell(self)
+	workspace.set_editor_shell(add_child_autofree(ObjectWorkspaceShellDouble.new()))
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	var data: ObjectData = workspace.object_editor.object_data
 	assert_gt(data.get_part_anim_count(0), 0, "Fixture should expose part animations.")
@@ -1447,7 +1447,7 @@ func test_object_part_anim_target_dropdown_preserves_preview_binding() -> void:
 
 func test_object_lights_inspector_populates_edits_and_exports() -> void:
 	var workspace = ObjectWorkspaceScript.new()
-	workspace.set_editor_shell(self)
+	workspace.set_editor_shell(add_child_autofree(ObjectWorkspaceShellDouble.new()))
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	var data: ObjectData = workspace.object_editor.object_data
 	assert_gt(data.get_light_count(), 0, "Fixture should expose object lights.")
@@ -1524,7 +1524,7 @@ func test_object_light_style_dropdown_names_every_style() -> void:
 	# Every light's colorgen_style must resolve to a real name in the Style dropdown,
 	# never the "Custom N" fallback (Armry01 uses style 55 = Set wave: smooth random).
 	var workspace = ObjectWorkspaceScript.new()
-	workspace.set_editor_shell(self)
+	workspace.set_editor_shell(add_child_autofree(ObjectWorkspaceShellDouble.new()))
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	var data: ObjectData = workspace.object_editor.object_data
 	var light_count := data.get_light_count()
@@ -1577,7 +1577,7 @@ func test_object_light_style_dropdown_names_every_style() -> void:
 
 func test_object_lights_editor_uses_left_list_and_right_detail_dock() -> void:
 	var workspace = ObjectWorkspaceScript.new()
-	workspace.set_editor_shell(self)
+	workspace.set_editor_shell(add_child_autofree(ObjectWorkspaceShellDouble.new()))
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	assert_gt(workspace.object_editor.object_data.get_light_count(), 0, "Fixture should expose object lights.")
 	var list_mount = add_child_autofree(Control.new())
@@ -1598,7 +1598,7 @@ func test_object_lights_editor_uses_left_list_and_right_detail_dock() -> void:
 
 func test_object_lights_inspector_uses_positive_oed_toggles() -> void:
 	var workspace = ObjectWorkspaceScript.new()
-	workspace.set_editor_shell(self)
+	workspace.set_editor_shell(add_child_autofree(ObjectWorkspaceShellDouble.new()))
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	var data: ObjectData = workspace.object_editor.object_data
 	workspace.object_editor.mark_clean()
@@ -1653,7 +1653,7 @@ func test_object_lights_inspector_uses_positive_oed_toggles() -> void:
 
 func test_object_materials_inspector_populates_material_slots() -> void:
 	var workspace = ObjectWorkspaceScript.new()
-	workspace.set_editor_shell(self)
+	workspace.set_editor_shell(add_child_autofree(ObjectWorkspaceShellDouble.new()))
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	var list_mount = add_child_autofree(Control.new())
 	var detail_mount = add_child_autofree(Control.new())
@@ -1681,7 +1681,7 @@ func test_object_materials_inspector_populates_material_slots() -> void:
 
 func test_object_materials_editor_uses_left_list_and_right_detail_dock() -> void:
 	var workspace = ObjectWorkspaceScript.new()
-	workspace.set_editor_shell(self)
+	workspace.set_editor_shell(add_child_autofree(ObjectWorkspaceShellDouble.new()))
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	var list_mount = add_child_autofree(Control.new())
 	var detail_mount = add_child_autofree(Control.new())
@@ -1705,7 +1705,7 @@ func test_object_materials_editor_uses_left_list_and_right_detail_dock() -> void
 
 func test_object_materials_inspector_edits_texture_slot_and_marks_dirty() -> void:
 	var workspace = ObjectWorkspaceScript.new()
-	workspace.set_editor_shell(self)
+	workspace.set_editor_shell(add_child_autofree(ObjectWorkspaceShellDouble.new()))
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	var list_mount = add_child_autofree(Control.new())
 	var detail_mount = add_child_autofree(Control.new())
@@ -1729,7 +1729,7 @@ func test_object_materials_inspector_edits_texture_slot_and_marks_dirty() -> voi
 
 func test_object_materials_inspector_gates_slots_from_shader_flags() -> void:
 	var workspace = ObjectWorkspaceScript.new()
-	workspace.set_editor_shell(self)
+	workspace.set_editor_shell(add_child_autofree(ObjectWorkspaceShellDouble.new()))
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	assert_eq(workspace.object_editor.object_data.set_material_shader(0, "FF_ST_OP"), OK)
 	var list_mount = add_child_autofree(Control.new())
@@ -1748,7 +1748,7 @@ func test_object_materials_inspector_gates_slots_from_shader_flags() -> void:
 
 func test_object_materials_inspector_generator_rows_follow_style() -> void:
 	var workspace = ObjectWorkspaceScript.new()
-	workspace.set_editor_shell(self)
+	workspace.set_editor_shell(add_child_autofree(ObjectWorkspaceShellDouble.new()))
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	assert_eq(workspace.object_editor.object_data.set_material_shader(0, "FF_ST_OP#UV"), OK)
 	var list_mount = add_child_autofree(Control.new())
@@ -1854,7 +1854,7 @@ func test_object_materials_inspector_generator_rows_follow_style() -> void:
 
 func test_object_materials_inspector_uses_compact_layout_and_named_generator_controls() -> void:
 	var workspace = ObjectWorkspaceScript.new()
-	workspace.set_editor_shell(self)
+	workspace.set_editor_shell(add_child_autofree(ObjectWorkspaceShellDouble.new()))
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	assert_eq(workspace.object_editor.object_data.set_material_shader(0, "FF_ST_OP#UV"), OK)
 	workspace.object_editor.mark_clean()
@@ -1903,7 +1903,7 @@ func test_object_materials_dock_survives_editor_state_sync_without_rebuild() -> 
 	# asset dock. That transient sync must not tear down and rebuild the heavy
 	# Materials detail dock (the source of the TOD lag).
 	var workspace = ObjectWorkspaceScript.new()
-	workspace.set_editor_shell(self)
+	workspace.set_editor_shell(add_child_autofree(ObjectWorkspaceShellDouble.new()))
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	var list_mount = add_child_autofree(Control.new())
 	var detail_mount = add_child_autofree(Control.new())
@@ -1935,7 +1935,7 @@ func test_object_materials_detail_rebuilds_when_object_changes() -> void:
 	# showing the previous object's data (the re-mount no-rebuild guard must key on
 	# the object identity, not blindly skip).
 	var workspace = ObjectWorkspaceScript.new()
-	workspace.set_editor_shell(self)
+	workspace.set_editor_shell(add_child_autofree(ObjectWorkspaceShellDouble.new()))
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	var list_mount = add_child_autofree(Control.new())
 	var detail_mount = add_child_autofree(Control.new())
@@ -1962,7 +1962,7 @@ func test_object_materials_selection_resyncs_without_rebuilding_detail_nodes() -
 	# Selecting a different material must re-sync the existing detail controls in
 	# place, not free and rebuild the whole dock (the source of the selection lag).
 	var workspace = ObjectWorkspaceScript.new()
-	workspace.set_editor_shell(self)
+	workspace.set_editor_shell(add_child_autofree(ObjectWorkspaceShellDouble.new()))
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	assert_gt(workspace.object_editor.object_data.get_material_count(), 1, "Selection test needs at least two materials.")
 	var list_mount = add_child_autofree(Control.new())
@@ -1991,7 +1991,7 @@ func test_object_material_rgb_gen_colors_are_opaque_rgb_only() -> void:
 	# pickers must force opaque display (like lights) and disable alpha editing, else the
 	# swatches render transparent/checkerboarded and look wrong.
 	var workspace = ObjectWorkspaceScript.new()
-	workspace.set_editor_shell(self)
+	workspace.set_editor_shell(add_child_autofree(ObjectWorkspaceShellDouble.new()))
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	assert_gt(workspace.object_editor.object_data.get_material_count(), 0, "Fixture should expose materials.")
 	var list_mount = add_child_autofree(Control.new())
@@ -2013,7 +2013,7 @@ func test_object_material_rgb_gen_colors_are_opaque_rgb_only() -> void:
 
 func test_object_materials_inspector_copies_and_pastes_settings() -> void:
 	var workspace = ObjectWorkspaceScript.new()
-	workspace.set_editor_shell(self)
+	workspace.set_editor_shell(add_child_autofree(ObjectWorkspaceShellDouble.new()))
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	assert_gt(workspace.object_editor.object_data.get_material_count(), 1, "Copy/paste test needs at least two materials.")
 	var list_mount = add_child_autofree(Control.new())
@@ -2047,7 +2047,7 @@ func test_object_materials_inspector_copies_and_pastes_settings() -> void:
 
 func test_object_part_anim_detail_dock_edits_semantic_channels() -> void:
 	var workspace = ObjectWorkspaceScript.new()
-	workspace.set_editor_shell(self)
+	workspace.set_editor_shell(add_child_autofree(ObjectWorkspaceShellDouble.new()))
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	var data: ObjectData = workspace.object_editor.object_data
 	assert_gt(data.get_part_anim_count(0), 0, "Fixture should expose part animations.")
@@ -2484,7 +2484,7 @@ func _cleanup_workspace_children() -> void:
 
 func test_object_lists_use_compact_list_floor() -> void:
 	var workspace = ObjectWorkspaceScript.new()
-	workspace.set_editor_shell(self)
+	workspace.set_editor_shell(add_child_autofree(ObjectWorkspaceShellDouble.new()))
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	var list_mount = add_child_autofree(Control.new())
 	var detail_mount = add_child_autofree(Control.new())

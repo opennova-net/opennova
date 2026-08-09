@@ -125,7 +125,7 @@ func focus_selected_tileinfo_entry() -> bool:
 		return false
 	var center := TerrainTileOverlayPreview.entry_center_world(entry, _te.terrain_mesh)
 	center.y += 4.0
-	if _te.camera and _te.camera.has_method("frame_bounds"):
+	if _te.camera != null:
 		_te.camera.frame_bounds(center, maxf(float(TerrainTileInfo.CELL_WORLD_SIZE) * 8.0, 96.0))
 		return true
 	return false

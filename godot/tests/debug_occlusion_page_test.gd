@@ -2,35 +2,31 @@ extends GutTest
 
 # DebugOcclusionPage is a decision inspector: the frame summary answers what
 # the occlusion pass did, while the selectable building list puts exceptional
-# states first and explains the selected building in plain language.
+# states first and explains the selected building in plain language. Report
+# data drives the pane through its public render seam (the context is typed,
+# ADR 0034 — the live path feeds the same seam from Simulation).
 
 const PageScript := preload("res://src/debug/pages/debug_occlusion_page.gd")
 
 
-class StubSim:
+class Pane:
 	extends RefCounted
-	var occlusion: Dictionary = {}
+	var page: DebugOcclusionPage = null
+	var report: Dictionary = {}
 
-	func get_occlusion_debug() -> Dictionary:
-		return occlusion.duplicate(true)
-
-
-class StubRuntime:
-	extends Node
-	var sim := StubSim.new()
-
-	func get_sim() -> Object:
-		return sim
+	func refresh() -> void:
+		page.render_report(report.duplicate(true))
 
 
-func _make_page(runtime: StubRuntime) -> DebugOcclusionPage:
+func _make_pane() -> Pane:
 	var ctx := DebugContext.new()
 	ctx.options = DebugOptionState.new()
-	ctx.runtime_source = func(): return runtime
 	var page: DebugOcclusionPage = PageScript.new()
 	page.setup(ctx)
 	add_child_autofree(page)
-	return page
+	var pane := Pane.new()
+	pane.page = page
+	return pane
 
 
 func _snapshot(buildings: Array, welds: Array = []) -> Dictionary:
@@ -99,16 +95,15 @@ func _building(
 
 
 func test_attention_order_is_selectable_and_explains_the_selected_building() -> void:
-	var runtime := StubRuntime.new()
-	add_child_autofree(runtime)
-	runtime.sim.occlusion = _snapshot([
+	var pane := _make_pane()
+	pane.report = _snapshot([
 		_building(10, true, true, false, 0xB, Vector3(1, 2, 3), 6, 2, 1, 0),
 		_building(20, false, false, false, 0xFFFFFFFF, Vector3(20, 0, 0)),
 		_building(30, true, true, true, 0x7, Vector3(30, 0, 0), 3, 0, 1, 0),
 		_building(40, true, false, false, 0, Vector3(40, 2, -5), 4, 1, 2, 1),
 	])
-	var page := _make_page(runtime)
-	page.refresh()
+	var page := pane.page
+	pane.refresh()
 
 	var list := page.find_child("OcclusionBuildings", true, false) as ItemList
 	assert_eq(list.item_count, 4)
@@ -152,15 +147,14 @@ func test_attention_order_is_selectable_and_explains_the_selected_building() -> 
 
 
 func test_selection_follows_bms_identity_across_reorder_and_state_change() -> void:
-	var runtime := StubRuntime.new()
-	add_child_autofree(runtime)
-	runtime.sim.occlusion = _snapshot([
+	var pane := _make_pane()
+	pane.report = _snapshot([
 		_building(10, true, true, false, 0x3),
 		_building(20, true, false, false, 0),
 		_building(30, true, true, true, 0x7),
 	])
-	var page := _make_page(runtime)
-	page.refresh()
+	var page := pane.page
+	pane.refresh()
 	var list := page.find_child("OcclusionBuildings", true, false) as ItemList
 	var selected_index := -1
 	for index in range(list.item_count):
@@ -175,12 +169,12 @@ func test_selection_follows_bms_identity_across_reorder_and_state_change() -> vo
 
 	# The same BMS building changes from DRAWN to CULLED, moving in the
 	# attention sort while the sim also changes enumeration order.
-	runtime.sim.occlusion = _snapshot([
+	pane.report = _snapshot([
 		_building(30, true, true, true, 0x7),
 		_building(20, true, true, false, 0x1),
 		_building(10, true, false, false, 0x4),
 	])
-	page.refresh()
+	pane.refresh()
 
 	var retained_items := list.get_selected_items()
 	assert_eq(retained_items.size(), 1)
@@ -197,9 +191,8 @@ func test_selection_follows_bms_identity_across_reorder_and_state_change() -> vo
 
 
 func test_selected_detail_shows_only_welds_related_to_that_building() -> void:
-	var runtime := StubRuntime.new()
-	add_child_autofree(runtime)
-	runtime.sim.occlusion = _snapshot([
+	var pane := _make_pane()
+	pane.report = _snapshot([
 		_building(10, true, false, false, 0, Vector3.ZERO, 3, 0, 1, 2),
 		_building(20, true, true, false, 0x1),
 		_building(30, true, true, false, 0x1),
@@ -208,8 +201,8 @@ func test_selected_detail_shows_only_welds_related_to_that_building() -> void:
 		{"own_bms": 30, "own_section": 3, "other_bms": 10, "other_section": 4},
 		{"own_bms": 20, "own_section": 5, "other_bms": 30, "other_section": 6},
 	])
-	var page := _make_page(runtime)
-	page.refresh()
+	var page := pane.page
+	pane.refresh()
 	var list := page.find_child("OcclusionBuildings", true, false) as ItemList
 	assert_eq(list.item_count, 3, "welds no longer masquerade as building rows")
 	var building_index := -1
@@ -234,16 +227,15 @@ func test_selected_detail_shows_only_welds_related_to_that_building() -> void:
 
 
 func test_zero_id_buildings_keep_distinct_details_and_do_not_merge_welds() -> void:
-	var runtime := StubRuntime.new()
-	add_child_autofree(runtime)
-	runtime.sim.occlusion = _snapshot([
+	var pane := _make_pane()
+	pane.report = _snapshot([
 		_building(0, true, false, false, 0, Vector3(10, 0, 0), 2, 1, 0, 1),
 		_building(0, true, true, false, 0x4, Vector3(20, 0, 0), 5, 0, 2, 1),
 	], [
 		{"own_bms": 0, "own_section": 1, "other_bms": 0, "other_section": 2},
 	])
-	var page := _make_page(runtime)
-	page.refresh()
+	var page := pane.page
+	pane.refresh()
 	var list := page.find_child("OcclusionBuildings", true, false) as ItemList
 	var detail := page.find_child("OcclusionBuildingDetail", true, false) as Label
 	assert_eq(list.item_count, 2)
@@ -260,10 +252,10 @@ func test_zero_id_buildings_keep_distinct_details_and_do_not_merge_welds() -> vo
 	assert_string_contains(detail.text, "unavailable",
 			"the snapshot cannot safely attribute BMS-only welds to one zero-ID building")
 
-	runtime.sim.occlusion = _snapshot([
+	pane.report = _snapshot([
 		_building(0, true, true, false, 0x4, Vector3(20, 0, 0), 5, 0, 2, 1),
 		_building(0, false, false, false, 0, Vector3(10, 0, 0), 2, 1, 0, 1),
 	])
-	page.refresh()
+	pane.refresh()
 	assert_string_contains(detail.text, "Position: 20.0, 0.0, 0.0",
 			"selection follows a zero-ID building across source and attention reorder")

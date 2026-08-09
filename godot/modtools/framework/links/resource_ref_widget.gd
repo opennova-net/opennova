@@ -159,7 +159,7 @@ func set_status_copy(browse_tooltip: String, missing_tooltip: String) -> void:
 	_missing_copy = missing_tooltip
 
 
-static func services_from_shell(shell: Object) -> Dictionary:
+static func services_from_shell(shell: WorkspaceShell) -> Dictionary:
 	return {
 		"resolve": func(kind: String, name: String) -> Dictionary:
 			return shell.get_reference_index().resolve(kind, name),

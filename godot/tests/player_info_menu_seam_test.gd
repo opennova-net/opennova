@@ -30,8 +30,9 @@ func _load_db() -> AvatarDatabase:
 
 # A stand-in for the built PLAYER_INFO screen: a plain Node with the named NovaMnu*
 # controls as children, exactly as the menu builder would name them from player.mnu.
-func _make_menu() -> Node:
-	var menu := Node.new()
+func _make_menu() -> MnuMenu:
+	var menu := MnuMenu.new()
+	menu.build_on_ready = false
 	menu.name = "Menu"
 	add_child_autofree(menu)
 	for n in ["NATIONALITY", "DIVISION", "COMBO_LIST", "PLAYERVOICE"]:
@@ -102,7 +103,8 @@ func test_owns_menu_detects_player_info() -> void:
 	var companion := PlayerInfoMenuCompanion.new()
 	var menu := _make_menu()
 	assert_true(companion.owns_menu(menu), "a menu carrying NATIONALITY + COMBO_LIST is the PLAYER_INFO screen")
-	var plain := Node.new()
+	var plain := MnuMenu.new()
+	plain.build_on_ready = false
 	add_child_autofree(plain)
 	assert_false(companion.owns_menu(plain), "a plain menu is left to the shell / other companions")
 
@@ -303,8 +305,9 @@ func _load_weapons() -> WeaponDatabase:
 # PLAYERCLASS carrying the CHARTYPE values 5..9 (as the .mnu's static items do), the
 # ammo/type/grenade combos, the STATIC_TOTAL_WEIGHT label shape the builder makes
 # (Control + child "Label"), and the bare *_ICON windows.
-func _make_loadout_menu() -> Node:
-	var menu := Node.new()
+func _make_loadout_menu() -> MnuMenu:
+	var menu := MnuMenu.new()
+	menu.build_on_ready = false
 	menu.name = "Menu"
 	add_child_autofree(menu)
 	for n in ["PRIMARY", "SECONDARY", "ACCESSORY"]:

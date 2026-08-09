@@ -166,7 +166,7 @@ func _build_adm_row(box: VBoxContainer) -> void:
 func _do_load_adm(adm_name: String) -> void:
 	if _preview == null:
 		return
-	var root: Variant = _ws.get_resource_root() if _ws != null and _ws.has_method("get_resource_root") else null
+	var root: ResourceRoot = _ws.get_resource_root() if _ws != null else null
 	var keys: PackedStringArray = _preview.load_animation_set(adm_name, root)
 	if keys.is_empty():
 		_adm_status.text = "No animations loaded: %s" % _preview.get_animation_error()
@@ -324,7 +324,7 @@ func _build_arms_rows(detail_box: VBoxContainer) -> void:
 		_open_picker("Open arms .3di", _scan_resource_files(".3di"), func(picked: String) -> void:
 			if _preview == null:
 				return
-			var root: Variant = _ws.get_resource_root() if _ws != null and _ws.has_method("get_resource_root") else null
+			var root: ResourceRoot = _ws.get_resource_root() if _ws != null else null
 			if _preview.load_arms(picked.get_file(), root):
 				_arms_status.text = "Arms: %s" % picked.get_file()
 			else:
@@ -353,7 +353,7 @@ func _open_picker(title: String, files: PackedStringArray, on_pick: Callable) ->
 # directly; the loaders read by basename.
 func _scan_resource_files(suffix: String) -> PackedStringArray:
 	var out := PackedStringArray()
-	var root: Variant = _ws.get_resource_root() if _ws != null and _ws.has_method("get_resource_root") else null
+	var root: ResourceRoot = _ws.get_resource_root() if _ws != null else null
 	if root == null:
 		return out
 	var dir := String(root.get_root_dir())

@@ -188,7 +188,7 @@ func test_duplicate_keys_query_once() -> void:
 
 
 class RootShell:
-	extends RefCounted
+	extends WorkspaceShell
 	var root: ResourceRoot
 	func get_resource_root() -> ResourceRoot:
 		return root
@@ -213,7 +213,7 @@ func test_resolve_source_path_translates_logical_names() -> void:
 
 	assert_eq(ReferenceStripScript.resolve_source_path(shell, "ghost.mnu"), "ghost.mnu",
 		"unknown names pass through untouched")
-	assert_eq(ReferenceStripScript.resolve_source_path(RefCounted.new(), "main.mnu"), "main.mnu",
+	assert_eq(ReferenceStripScript.resolve_source_path(RootShell.new(), "main.mnu"), "main.mnu",
 		"a shell without a resource root passes through")
 	_remove_dir_recursive(ROOT_DIR)
 

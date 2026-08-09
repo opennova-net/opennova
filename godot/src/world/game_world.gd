@@ -1523,7 +1523,7 @@ func get_destruction_present_stats() -> RefCounted:
 ## it is drawn rigid, posed entirely by its attach basis.
 ## [orig: BoneCallback_org0_World draw 5 @0x4e3c87..0x4e3d99; model = WeaponDef.tpModel
 ##  (+0x170, weapon.def gfx3) @0x4e3cd3]
-func build_local_player_held_weapon(graphic: String) -> Node3D:
+func build_local_player_held_weapon(graphic: String) -> ObjectModel:
 	if _placer == null or graphic.is_empty():
 		return null
 	var model: ObjectModel = _placer.build_model_from_graphic(
@@ -2125,9 +2125,11 @@ func _start_runtime(mission: MissionData, bms_name: String) -> int:
 	opts["fire_audio"] = Callable(self, "get_mission_audio")
 	opts["fire_fx"] = Callable(self, "get_effect_world")
 	opts["fire_listener"] = Callable(self, "_fire_listener_position")
-	# The destruction present pass anchors its wreck/piece effect groups through
-	# register_effect_anchor and swaps husk models via the placer.
-	opts["game_world"] = self
+	# The destruction/throwable present passes anchor their wreck/piece/move
+	# effect groups through the ItemEffectDirector's owner-anchor registry
+	# (the typed seam; GameWorld's register_effect_anchor delegates to the
+	# same instance).
+	opts["effect_anchors"] = _item_fx
 	_runtime.setup(mission, container, opts)
 	if _runtime.get_sim() == null:
 		var setup_error := int(_runtime.get_setup_error())

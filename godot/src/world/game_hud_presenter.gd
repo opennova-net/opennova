@@ -1,15 +1,18 @@
 class_name GameHudPresenter
 extends Node
 
-## Owns the in-game HUD (GameHud) over a live GameWorld for the game shell.
-## Owns the lazy build (hudpos.def layout + string tables),
-## the per-frame info rebuild from the authoritative local player, and the mission
-## text feed. The shells only say when the player is in-world (they gate tick()).
+## Owns the in-game HUD (the native HudOverlay over the engine HudFrameCompiler)
+## for a live GameWorld in the game shell. Owns the lazy build (hudpos.def layout
+## + string tables), the per-frame typed state rebuild from the authoritative
+## local player, and the mission text feed — the shell-side mirror of the
+## original's per-frame HUD info struct. The shells only say when the player is
+## in-world (they gate tick()).
 ## [orig: HUD_RenderAllOverlays @0x5a8070; HUD_BuildEntityInfo @0x4b8440;
 ##  gametext Game_InitSubsystems @0x4a6cd0; mission .bin
 ##  TextResource_LoadMissionTextBin @0x51ed90]
 
-const GameHudScript := preload("res://src/world/game_hud.gd")
+const HudSightsCardScript := preload("res://src/world/hud_sights_card.gd")
+const PlayerViewEffectsScript := preload("res://src/world/player_view_effects.gd")
 const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
 const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
 
@@ -21,7 +24,9 @@ var _ui_parent: Node = null
 # than it can ever present (net spectators may never acquire a local-player HUD).
 const MAX_PENDING_HUD_MESSAGES := 40
 
-var _game_hud = null        # GameHud, built on the first frame a mission has a local player
+var _game_hud = null        # HudOverlay, built on the first frame a mission has a local player
+var _sights_card = null     # HudSightsCard child of the overlay (per-row blend controls)
+var _view_effects = null    # PlayerViewEffects child of the overlay (binocular/NVG stack)
 var _warned_no_player := false
 var _hud_weapon_name := ""  # equipped-weapon cache (re-resolves WepDes on change)
 # Latest player-facing mission text. Presentation rides the message feed; this is
@@ -50,12 +55,15 @@ func setup(world, player_presenter_in, ui_parent: Node) -> void:
 		_world.mission_effects.connect(apply_mission_effects)
 
 
-## Undo everything a mission built: the HUD node, its caches, the per-mission string
-## table, and the mission-effects tap (the built menu-era teardown main_game carried).
+## Undo everything a mission built: the HUD node (its card/effects children go
+## with it), its caches, the per-mission string table, and the mission-effects
+## tap (the built menu-era teardown main_game carried).
 func teardown() -> void:
 	if _game_hud != null:
 		_game_hud.queue_free()
 		_game_hud = null
+	_sights_card = null
+	_view_effects = null
 	_hud_weapon_name = ""
 	_hud_objective = ""
 	_endround_banner = ""
@@ -78,11 +86,14 @@ func set_crosshair_style(style: int) -> void:
 
 # The in-game HUD over the live runtime: built lazily the first frame a mission has a
 # local player (so net spectators, which have none, never get it). Reads the witnessed
-# hudpos.def layout from the world's mounted VFS. [orig: HUD_RenderAllOverlays @0x5a8070]
+# hudpos.def layout from the world's mounted VFS. The SIGHTS card and the
+# PlayerViewEffects post stack mount as behind-parent children of the overlay,
+# exactly the child-control stack the ported shell HUD carried.
+# [orig: HUD_RenderAllOverlays @0x5a8070]
 func _ensure_game_hud() -> void:
 	if _game_hud != null:
 		return
-	_game_hud = GameHudScript.new()
+	_game_hud = HudOverlay.new()
 	_game_hud.name = "GameHud"
 	_game_hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var mount: Node = _ui_parent if _ui_parent != null else self
@@ -91,6 +102,21 @@ func _ensure_game_hud() -> void:
 	# zero rect, and a clipping UI parent can then clip every HUD element to
 	# nothing.
 	_game_hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# Internal children stay out of scene ownership; INTERNAL_MODE_BACK plus
+	# show_behind_parent keeps the post-process/masks a stable layer below the
+	# card rows and the overlay's own draw list.
+	_view_effects = PlayerViewEffectsScript.new()
+	_view_effects.name = "PlayerViewEffects"
+	_view_effects.show_behind_parent = true
+	_view_effects.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_game_hud.add_child(_view_effects, false, Node.INTERNAL_MODE_BACK)
+	_view_effects.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_sights_card = HudSightsCardScript.new()
+	_sights_card.name = "SightsCard"
+	_sights_card.show_behind_parent = true
+	_sights_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_game_hud.add_child(_sights_card)
+	_sights_card.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var hudpos := HudPos.new()
 	var root: ResourceRoot = _world.get_resource_root() \
 			if _world != null else null
@@ -99,8 +125,15 @@ func _ensure_game_hud() -> void:
 	elif hudpos.load_from_resource_root(root, "hudpos.def") != OK:
 		push_warning("GameHud: hudpos.def did not load: %s" % hudpos.get_last_error())
 	_game_hud.set_crosshair_style(ResourceDirSettings.get_crosshair_style())
-	_game_hud.set_layout(hudpos, root)
+	_game_hud.configure(hudpos, root)
+	_view_effects.set_resource_root(root)
 	_load_hud_text_tables(root)
+	# The objectives-panel header, resolved once against the freshly registered
+	# gametext table. [orig: STROVER_MISSIONOBJECTIVES @0x5ba986]
+	var t: RtxtStringFile = Strings.get_table("gametext")
+	if t != null and t.has_string_in_section("Overlays", "STROVER_MISSIONOBJECTIVES"):
+		_game_hud.set_objectives_header(
+				t.get_string_in_section("Overlays", "STROVER_MISSIONOBJECTIVES"))
 
 
 # The string tables the HUD resolves against: the current root's gametext table
@@ -191,12 +224,25 @@ func tick() -> void:
 	# flags 0x200=crouch->1, 0x100=prone->2]
 	var stance: int = sim.get_local_player_stance()
 
-	# The equipped weapon's HUD slice: re-resolve on weapon change only.
+	# The equipped weapon's HUD slice: re-resolve on weapon change only. The
+	# overlay takes the record's fields typed; the card takes the authored
+	# SIGHTS rows. [orig: HUD_BuildEntityInfo @0x4b8561 weapon-def pointer;
+	# textures HUD_LoadAllTextures @0x59e246]
 	var weapon: PlayerHudWeaponDef = _world.local_player_hud_weapon_def()
 	var weapon_name := weapon.weapon_name if weapon != null else ""
 	if weapon_name != _hud_weapon_name:
 		_hud_weapon_name = weapon_name
-		_game_hud.set_weapon(weapon, _resolve_weapon_display_name(weapon_name))
+		if weapon != null:
+			_game_hud.set_weapon(weapon.weapon_name,
+					_resolve_weapon_display_name(weapon_name), weapon.round_type,
+					weapon.clipsize, weapon.rounds_per_icon,
+					weapon.clipgfx_texture, weapon.clipgfx_offset,
+					weapon.rndgfx_texture, weapon.rndgfx_offset, weapon.rndgfx_step)
+		else:
+			_game_hud.clear_weapon()
+		if _sights_card != null:
+			_sights_card.set_weapon_sights(weapon.sights if weapon != null else [],
+					_world.get_resource_root() if _world != null else null)
 
 	# Live weapon/view state (the FSM clip/reserve + ADS + fov), mirroring the info
 	# struct's ammo fields; an infinite-capacity weapon reads clip -1.
@@ -214,8 +260,6 @@ func tick() -> void:
 		reserve = HudPos.folded_reserve(clip, wv.reserve,
 				weapon.clipsize if weapon != null else -1)
 	var probe_t0 := Time.get_ticks_usec() if timing else 0
-	var scope_engaged := false
-	var scope_fraction := 0.0
 	var scope_card := false
 	var fov_deg := 80.0
 	var binoculars_view_active := false
@@ -225,8 +269,6 @@ func tick() -> void:
 	var vehicle_attack_context := false
 	var lv: PlayerLocalView = _world.local_player_view()
 	if lv != null:
-		scope_engaged = lv.scope_engaged
-		scope_fraction = lv.scope_fraction
 		scope_card = lv.scope_card_active
 		fov_deg = lv.fov_h_deg
 		binoculars_view_active = lv.binoculars_view_active
@@ -237,61 +279,55 @@ func tick() -> void:
 		binocular_range = clampi(int(_player_presenter.aim_range_units()), 1, 1000)
 
 	var probe_t1 := Time.get_ticks_usec() if timing else 0
-	var attach_labels := _build_attach_labels()
+	_apply_attach_labels()
 	var probe_t2 := Time.get_ticks_usec() if timing else 0
-	var waypoint := _waypoint_info_dict()
+	var waypoint := _build_waypoint_entry()
 	var probe_t3 := Time.get_ticks_usec() if timing else 0
-	_game_hud.update_info({
-		"health_fraction": clampf(frac, 0.0, 1.0),
-		"stance": stance,
-		"team": sim.get_local_player_team(),
-		"objective": "",
-		"weapon_active": weapon_active,
-		"clip": clip,
-		"reserve": reserve,
-		"scope_engaged": scope_engaged,
-		# The ease progress remains a compatibility input; the exact crosshair gate
-		# below uses the sim's promoted aimed-shot verdict.
-		# [orig: the @0x4de4f7 promoter; Player_CanFireWeapon @0x5cf780].
-		"scope_fraction": scope_fraction,
-		# The SIGHTS card switch [orig: Player_IsEquippedWeaponScoped @0x4dcc80].
-		"scope_card": scope_card,
-		"binoculars_view_active": binoculars_view_active,
-		"binocular_range": binocular_range,
-		"nvg_visible": nvg_visible,
-		"nvg_gain": nvg_gain,
-		# The crosshair's witnessed anchor: Vector2.INF in first person (the HUD pins
-		# the design center @0x5928a0), the projected aim in 3P/spectate (@0x592910).
-		"aim_screen": _player_presenter.aim_screen_point() \
-				if _player_presenter != null else Vector2.INF,
-		"fov_deg": fov_deg,
-		"ticks": _hud_ticks(),
-		"attach_labels": attach_labels,
-		# Weapon heat 0..0xFFFF; the drawer self-hides at 0. Only the emplaced and
-		# vehicle heavy guns author heat_values, so this stays 0 on foot.
-		# [orig: hudInfo+60 = WeaponSlot_CalcAccumulatedHeat @0x53f780, @0x4b8533]
-		"heat": wv.heat if wv != null and wv.active else 0,
-		# Exact crosshair dispersion, including both live body accumulators. The
-		# simulation owns the stance/aimed-shot row because those are body-state
-		# predicates, while the HUD owns only projection. [orig: @0x592b07..0x592bf5]
-		"hud_spread_fp16": wv.hud_spread_fp16 \
-				if wv != null and wv.active else 0,
-		"hud_spread_row": wv.hud_spread_row \
-				if wv != null and wv.active else 0,
-		"aimed_shot_available": wv.aimed_shot_available \
-				if wv != null and wv.active else false,
-		# The witnessed gunner/vehicle keep-up leg may draw while the same aimed
-		# verdict selects ERROR's second triplet. The current modeled vehicle attack
-		# context is the host's structural proxy for that override.
-		"keep_crosshair_while_aimed": vehicle_attack_context,
-		# The PowerThrow windup driving the charge bar; the drawer derives the
-		# witnessed fill curve from held ticks. [orig: g_fireChargeStartTick
-		# @0xB76800 read by HUD_DrawPowerThrowChargeBar @0x599830]
-		"windup_active": wv != null and wv.active and wv.windup_active,
-		"windup_held_ticks": wv.windup_held_ticks if wv != null and wv.active else 0,
-		"waypoint": waypoint,
-		"objectives": _build_objectives() if _objectives_visible else [],
-	})
+	# The typed per-frame state feed — the shell's mirror of the original
+	# rebuilding its 576-byte HUD info struct each frame.
+	# [orig: HUD_BuildEntityInfo @0x4b8440]
+	_game_hud.set_player_state(_hud_ticks(), clampf(frac, 0.0, 1.0), stance, fov_deg)
+	# Weapon-cluster state: clip/reserve as the info struct carried them, heat
+	# 0..0xFFFF (only emplaced/vehicle heavy guns author heat_values, so 0 on
+	# foot [orig: hudInfo+60 = WeaponSlot_CalcAccumulatedHeat @0x53f780,
+	# @0x4b8533]); the exact crosshair dispersion including both live body
+	# accumulators — the simulation owns the stance/aimed-shot row (body-state
+	# predicates), the HUD owns only projection [orig: @0x592b07..0x592bf5];
+	# the sim's promoted aimed-shot verdict gates the reticle [orig: the
+	# @0x4de4f7 promoter; Player_CanFireWeapon @0x5cf780], with the modeled
+	# vehicle attack context as the witnessed gunner/vehicle keep-up proxy; and
+	# the PowerThrow windup driving the charge bar [orig: g_fireChargeStartTick
+	# @0xB76800 read by HUD_DrawPowerThrowChargeBar @0x599830].
+	var live := wv != null and wv.active
+	_game_hud.set_weapon_state(weapon_active and weapon != null, clip, reserve,
+			wv.heat if live else 0,
+			wv.hud_spread_fp16 if live else 0,
+			wv.aimed_shot_available if live else false,
+			vehicle_attack_context,
+			live and wv.windup_active,
+			wv.windup_held_ticks if live else 0)
+	# The crosshair's witnessed anchor: Vector2.INF in first person (the overlay
+	# pins the design center @0x5928a0), the projected aim in 3P/spectate
+	# (@0x592910).
+	_game_hud.set_view_state(binoculars_view_active,
+			_player_presenter.aim_screen_point() \
+					if _player_presenter != null else Vector2.INF)
+	if waypoint != null:
+		_game_hud.set_waypoint(waypoint.text_name, waypoint.distance_m)
+	else:
+		_game_hud.clear_waypoint()
+	_apply_objectives()
+	# The SIGHTS card switch [orig: Player_IsEquippedWeaponScoped @0x4dcc80],
+	# suppressed by the binocular view like the ported shell HUD folded it.
+	if _sights_card != null:
+		_sights_card.set_card_up(scope_card and not binoculars_view_active)
+	if _view_effects != null:
+		_view_effects.update_info({
+			"binoculars_view_active": binoculars_view_active,
+			"binocular_range": binocular_range,
+			"nvg_visible": nvg_visible,
+			"nvg_gain": nvg_gain,
+		})
 	var probe_t4 := Time.get_ticks_usec() if timing else 0
 	# Effects drain synchronously during _world.tick(), before this HUD update.
 	# Flush afterward so GameHud.push_message stamps the current 62 Hz tick.
@@ -320,17 +356,11 @@ func _hud_ticks() -> int:
 
 # The waypoint label's entry: the sim's current track entry with its display
 # name resolved and the 2D ground distance in meters. Null = the label hides
-# (no track, ShowWaypoints off, or no current selection) — the drawer treats
+# (no track, ShowWaypoints off, or no current selection) — the compiler treats
 # absence as the original's null-current / flag-off gates.
 # [orig: HUD_DrawWaypointNameAndDistance @0x5947a0 gates @0x5a7daf (g_showWaypoints
 #  + a current present in the list); distance @0x5947e5..0x594836 = 2D fixed sqrt
 #  >> 16; name get_waypoint_name @0x594630]
-# The record's transport form at the per-frame update_info edge.
-func _waypoint_info_dict() -> Dictionary:
-	var entry := _build_waypoint_entry()
-	return entry.to_info_dict() if entry != null else {}
-
-
 func _build_waypoint_entry() -> WaypointHudEntry:
 	if _world == null:
 		return null
@@ -374,35 +404,33 @@ func _resolve_waypoint_name(name_id: int) -> String:
 
 # The floating attach labels: the sim's selection (distance/LOS/occupancy/nearest,
 # armory-zone mode) projected through the play camera to screen pixels, each with its
-# resolved label text. Behind-camera points drop at projection, mirroring the frustum
-# clip. [orig: draw_vehicle_seat_and_armory_labels @0x5a3290 — the projection
+# resolved label text, fed to the overlay as parallel typed arrays. Behind-camera
+# points drop at projection, mirroring the frustum clip.
+# [orig: draw_vehicle_seat_and_armory_labels @0x5a3290 — the projection
 #  Math_FixedPointTransformPoint22 + clip_point_to_frustum_and_project @0x5a3655]
-func _build_attach_labels() -> Array:
-	var out: Array = []
-	if _game_hud == null or _world == null:
-		return out
-	var sim := _world.get_sim()
-	if sim == null:
-		return out
-	var labels: Array = sim.get_attach_labels()
-	if labels.is_empty():
-		return out
-	var camera: Camera3D = _game_hud.get_viewport().get_camera_3d()
-	if camera == null:
-		return out
-	for raw in labels:
-		var l: Dictionary = raw
-		var world_pos := MissionObjectPlacer.bms_to_godot_position(
-				Vector3(l.get("position", Vector3.ZERO)))
-		if camera.is_position_behind(world_pos):
-			continue # [orig: clip_point_to_frustum_and_project nonzero = clipped @0x5a3655]
-		out.append({
-			"screen": camera.unproject_position(world_pos),
-			"text": _attach_label_text(int(l.get("seat_type", 0)),
-					String(l.get("attach_text_key", ""))),
-			"nearest": bool(l.get("nearest", false)),
-		})
-	return out
+func _apply_attach_labels() -> void:
+	if _game_hud == null:
+		return
+	var screens := PackedVector2Array()
+	var texts := PackedStringArray()
+	var nearest := PackedByteArray()
+	var sim = _world.get_sim() if _world != null else null
+	if sim != null:
+		var labels: Array = sim.get_attach_labels()
+		var camera: Camera3D = _game_hud.get_viewport().get_camera_3d() \
+				if not labels.is_empty() else null
+		if camera != null:
+			for raw in labels:
+				var l: Dictionary = raw
+				var world_pos := MissionObjectPlacer.bms_to_godot_position(
+						Vector3(l.get("position", Vector3.ZERO)))
+				if camera.is_position_behind(world_pos):
+					continue # [orig: clip_point_to_frustum_and_project nonzero = clipped @0x5a3655]
+				screens.append(camera.unproject_position(world_pos))
+				texts.append(_attach_label_text(int(l.get("seat_type", 0)),
+						String(l.get("attach_text_key", ""))))
+				nearest.append(1 if bool(l.get("nearest", false)) else 0)
+	_game_hud.set_attach_labels(screens, texts, nearest)
 
 
 # The label text per seat type, resolved in the gametext table's Overlays section with
@@ -526,26 +554,28 @@ func toggle_objectives() -> void:
 
 
 # The panel's resolved rows: shown win-condition slots with mission-text lines
-# and their completed state. [orig: HUD_DrawWinConditions @0x5ba940 — rows from
+# and their completed state, fed typed (an empty pair hides the panel — the
+# retail toggle's off state). [orig: HUD_DrawWinConditions @0x5ba940 — rows from
 # the header table walk, text = mission WinConditions/STRWINCOND%03i]
-func _build_objectives() -> Array:
-	var out: Array = []
-	if _world == null:
-		return out
-	var sim := _world.get_sim()
-	if sim == null:
-		return out
-	var table: RtxtStringFile = Strings.get_table("mission")
-	for raw in sim.get_objectives_view():
-		var row: Dictionary = raw
-		if not bool(row.get("shown", false)):
-			continue
-		var key := "STRWINCOND%03d" % int(row.get("text_id", 0))
-		var text := ""
-		if table != null and table.has_string_in_section("WinConditions", key):
-			text = table.get_string_in_section("WinConditions", key)
-		out.append({"text": text, "done": bool(row.get("done", false))})
-	return out
+func _apply_objectives() -> void:
+	if _game_hud == null:
+		return
+	var texts := PackedStringArray()
+	var done := PackedByteArray()
+	var sim = _world.get_sim() if _world != null else null
+	if _objectives_visible and sim != null:
+		var table: RtxtStringFile = Strings.get_table("mission")
+		for raw in sim.get_objectives_view():
+			var row: Dictionary = raw
+			if not bool(row.get("shown", false)):
+				continue
+			var key := "STRWINCOND%03d" % int(row.get("text_id", 0))
+			var text := ""
+			if table != null and table.has_string_in_section("WinConditions", key):
+				text = table.get_string_in_section("WinConditions", key)
+			texts.append(text)
+			done.append(1 if bool(row.get("done", false)) else 0)
+	_game_hud.set_objectives(texts, done)
 
 
 ## Number of player-facing messages waiting for the lazy HUD to mount.

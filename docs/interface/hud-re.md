@@ -4,11 +4,18 @@ Witness record for the Joint Operations in-game **HUD overlay** render pipeline.
 Binary: retail **Jointops.exe** (IDB `Jointops.exe.kong.i64`, imagebase
 `0x400000`). All addresses below are that binary's.
 
-Implementing code: `engine/formats/def` (`hudpos.def` / `weapon.def` parsing), the
-`HudPos` GDExtension binding (`godot/src/hud/`), the shell-neutral view
-helpers under `godot/src/ui/hud_*.gd`, the ONED preview workspace
-(`godot/modtools/hud/`), and the runtime overlay `godot/src/world/game_hud.gd` fed
-per-frame by `godot/game/main_game.gd`. The 2026-06-22 session witnessed the
+Implementing code: `engine/formats/def` (`hudpos.def` / `weapon.def` parsing);
+`engine/runtime/hud` — `hud_math.h` (the policy math), `game_font.h` (the
+CGameFont text engine), and `hud_frame.h` (`HudFrameCompiler`: the whole
+witnessed element walk, fade/flash/message state, and per-frame draw-list
+compile — the ADR 0033 R2 home of every element previously ported in
+`game_hud.gd` + the `hud_*.gd` helpers, which the 2026-08-09 cutover deleted);
+the `HudPos`/`HudOverlay` GDExtension bindings (`godot/src/hud/` — the overlay
+keeps texture upload and draw-list rasterization only); the shell-side
+`godot/src/world/hud_sights_card.gd` (per-row blend child controls) fed with
+the overlay by `godot/src/world/game_hud_presenter.gd`; and the ONED preview
+workspace (`godot/modtools/hud/`, over the same `HudPos` statics plus the kept
+`godot/src/ui/hud_text.gd` FontFile preview helper). The 2026-06-22 session witnessed the
 core pipeline read-only; the 2026-07-09 session witnessed the weapon-coupled
 elements and ported them (the weapon FSM of net-re §5.62 supplies the live
 clip/reserve/ADS state); the 2026-07-11 re-grill (the extraction-train slice

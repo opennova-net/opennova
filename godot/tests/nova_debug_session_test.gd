@@ -46,10 +46,13 @@ class FakeTarget:
 		return OK if value == 1 else ERR_UNAVAILABLE
 
 
+## Carries the COMPLETE sim-target control surface DebugCatalog declares —
+## the session reads every registered control back from its target.
 class ValidationSim:
 	extends RefCounted
 	var calls: Array = []
 	var action_error: Error = OK
+	var wac_paused := false
 	func debug_teleport_local_player(
 			position: Vector3, yaw: float, pitch: float) -> Error:
 		calls.append(["teleport", position, yaw, pitch])
@@ -62,6 +65,10 @@ class ValidationSim:
 		return action_error
 	func set_mission_variable(index: int, value: int) -> void:
 		calls.append(["variable", index, value])
+	func is_wac_paused() -> bool:
+		return wac_paused
+	func set_wac_paused(value: bool) -> void:
+		wac_paused = value
 
 
 func _catalog(target_box: Array) -> DebugSession:

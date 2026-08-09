@@ -117,16 +117,16 @@ func font_pixel_size() -> int:
 
 ## The design-space (1024x768) anchor the sample is drawn at: x from the
 ## alignment (left margin / center / right margin), y chosen so the glyph cell
-## sits mid-panel after HudLayout scaling.
+## sits mid-panel after the HudPos design-space scaling.
 func draw_anchor_design() -> Vector2:
 	var x := LEFT_MARGIN_X
 	if _align == int(HudText.Align.CENTER):
-		x = HudLayout.DESIGN_WIDTH * 0.5
+		x = HudPos.DESIGN_WIDTH * 0.5
 	elif _align == int(HudText.Align.RIGHT):
 		x = RIGHT_MARGIN_X
-	var y := HudLayout.DESIGN_HEIGHT * 0.5
+	var y := HudPos.DESIGN_HEIGHT * 0.5
 	if size.y > 0.0:
-		y = HudLayout.DESIGN_HEIGHT * (size.y - float(font_pixel_size())) / (2.0 * size.y)
+		y = HudPos.DESIGN_HEIGHT * (size.y - float(font_pixel_size())) / (2.0 * size.y)
 	return Vector2(x, y)
 
 
