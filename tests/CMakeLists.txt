@@ -818,6 +818,15 @@ target_link_libraries(hud_frame_compiler_test PRIVATE opennova_runtime)
 target_include_directories(hud_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME hud_frame_compiler COMMAND hud_frame_compiler_test)
 
+# The menu draw-list compiler (engine/runtime/menu, ADR 0033 R2): the
+# witnessed .mnu widget draw walk — order, state-driven appearance/color
+# selection, text placement/truncation, the edit caret, frame pieces, and the
+# per-element int truncation (docs/mnu/menu-re.md "Widget render dispatch").
+add_executable(menu_frame_compiler_test menu/menu_frame_compiler_test.cpp)
+target_link_libraries(menu_frame_compiler_test PRIVATE opennova_runtime)
+target_include_directories(menu_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME menu_frame_compiler COMMAND menu_frame_compiler_test)
+
 
 # parametric_parity is a long byte-identical fixture parity run and remains
 # disabled until its CI stability/performance cost is addressed.

@@ -71,6 +71,7 @@ add_library(${TARGET_NAME} SHARED
     object/nova_weapon_database.cpp
     object/nova_avatar_database.cpp
     object/nova_skeletal_anim.cpp
+    hud/hud_overlay.cpp
     hud/nova_hud_pos.cpp
     mission/nova_mission_data.cpp
     simulation/nova_present_applier.cpp
@@ -132,6 +133,7 @@ add_library(${TARGET_NAME} SHARED
     mnu/mnu_item_cell.cpp
     mnu/nova_mnu_builder.cpp
     mnu/nova_mnu_menu.cpp
+    mnu/nova_menu_frame.cpp
     mnu/nova_controls_model.cpp
 )
 

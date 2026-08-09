@@ -10,7 +10,10 @@ This is the menu-slice grill (2026-06-09), closing the render/sound divergences 
 2026-06-01 format pass deferred. The 2026-06-23 render grill added the coordinate system,
 per-item image/color rendering, spinlist arrows, the combo dropdown, the marquee CBIN
 credits, the monogram (parsed-but-not-drawn), and the `DRAW_FRAME` frame-draw gate — see
-the sections below.
+the sections below. The 2026-08-09 draw-walk grill witnessed the complete render
+dispatch (the scene walk, the per-widget Draw vtable, the per-state appearance records,
+the visual-state vocabulary and pump, the text/edit/caret path, and the cursor draw) for
+the ADR 0033 R2 menu compiler — see "Widget render dispatch".
 
 ---
 
@@ -150,6 +153,146 @@ used a hardcoded 640x480 board with uniform letterbox + centering, which overhun
 mis-centered the 800x600 `jo_game.mnu` (the badly-placed ESC menu) and letterboxed every
 menu. `D-MNU-4`: the original truncates each scaled quad to int per element; the reimpl
 applies one float CanvasItem scale, a sub-pixel divergence (accepted).
+
+## Widget render dispatch (2026-08-09 draw-walk grill)
+
+The complete per-frame menu draw, witnessed end to end for the ADR 0033 R2 menu
+compiler (`engine/runtime/menu` `MenuFrameCompiler` — the reimpl for everything
+in this section).
+
+**Frame entry.** The menu is a game MODE (struct `@ 0x83b404`): init =
+`Menu_InitShellResources @ 0x552500`, update = `Menu_UpdateFrame @ 0x5528a0`
+(nav push, message pump, `scene_end_frame` on `g_GameMenu @ 0x2551100`, LAN/
+preview/admin pumps), render = `Menu_RenderFrame @ 0x54b7c0`: device-lost
+handling, gate on `g_GameMenu` + `g_menu_render_dirty @ 0x2551114`, clear,
+BeginScene, Bink update, `CUIScene_DrawScreensAndCursor @ 0x63bf60`, Present.
+
+**Scene walk** `[orig: CUIScene_DrawScreensAndCursor @ 0x63bf60]`: every screen
+in the scene container (`scene+20`: `{+4 array, +8 count}`) draws via vtable+24
+in FORWARD index order (each screen gates on its own shown flag; the input pump
+`scene_end_frame @ 0x63e600` walks the same array in REVERSE, so front-most =
+last drawn = first picked). Then the MOUSE CURSOR: texture = the override
+`@ 0x31C16E4`, else `g_ui_frame_cursor_texture @ 0x31C16E0` (stamped per frame
+by `widget_process_mouse_event` from the hovered widget's inherited `+276`
+cursor, else the screen default), drawn at the raw mouse position at native
+texture size with **scale 1.0 — the cursor never scales with the menu** —
+white, or `0xFF7F7F7F` under `g_ui_half_bright_mode @ 0x31C3760`.
+
+**Draw vtable (+24) per widget type** (vtables via
+`CUIScene_CreateWidgetByType @ 0x64f630` ctors):
+
+| Type(s) | Draw | Order |
+| --- | --- | --- |
+| generic CWnd, GLB_TABLE, GOPHER | `CUIElement_Draw @ 0x64a8a0` | appearance -> frame -> children (note: appearance BEFORE frame) |
+| STATIC, BUTTON | `CStaticWnd_Render @ 0x657b10` | frame -> appearance -> text -> children |
+| RADIO | `CRadioWnd_Render @ 0x656e20` | checked (+772) forces state 3 around the WHOLE static render — appearance AND label colors |
+| CHECKBOX | `CCheckWnd_Render @ 0x64ae20` | frame -> appearance (checked forces slot 3 DIRECTLY, no fallback — an unauthored selected slot has zero flags and draws nothing) -> label (raw state colors) -> children |
+| EDIT | `CEditWnd_Render @ 0x6619e0` | see the edit paragraph |
+| MULTILINE_EDIT | `CMEditWnd_Render @ 0x6608e0` | multiline variant of the edit render |
+| LIST, LAN_LIST | `CListWnd_DrawItems @ 0x643f30` | frame -> appearance -> rows -> children (scrollbar) |
+| SPINLIST | `CSpinListWnd_Render @ 0x64b220` | item cell (below); arrows are child windows |
+| COMBOBOX | `CComboWnd_Render @ 0x65bfd0` | closed cell, then children in array order |
+| TABLE | `@ 0x6410d0` | interior not yet walked (D-MNU-13) |
+| SCROLL | `@ 0x64c5c0` | interior not yet walked (D-MNU-13) |
+| MARQUEE | `@ 0x65cf90`, RADIOEDIT `@ 0x65d310` | interiors not yet walked (D-MNU-13) |
+
+**Per-state appearance records.** Four 28-byte state records interleaved from
+`elem+8` (state index picks `elem + 28*state`): flags at `+8` (bit0 COLOR,
+bit1 IMAGE, bit2 CURSOR/custom, bit3 OUTLINE — the parse tokens `@ 0x648382..`),
+COLOR fill color at `+12`, OUTLINE color at `+16`, IMAGE texture at `+20`,
+image draw flags at `+24`. Pass order per state: COLOR fill (stretched quad,
+`CUIElement_DrawStretchedTexture @ 0x647d40` with the entry color), IMAGE
+(`CUIElement_DrawTextureNative @ 0x647e40` -> `CTextureManager_DrawScaledRect
+@ 0x654e60` — STRETCHED into the scaled element rect; "native" size applies
+only when a caller passes a texture-sized rect, e.g. the spinlist image cell;
+white or half-bright gray), OUTLINE (`CUIElement_DrawOutlineRect @ 0x647fc0` —
+four 1px lines, top edge to right-1, gated on height), CUSTOM
+(`CUIElement_DispatchCustomDrawEvent @ 0x647f10` — event 1 with the scaled
+rect through the vtable+28 sink; shell-owned, the compiler emits nothing).
+
+**Visual state vocabulary** — the same indices everywhere: **0 = DEFAULT,
+1 = DISABLED, 2 = MOUSEOVER, 3 = SELECTED/pressed**. Witnessed three ways:
+the APPEARANCE STATE attribute parse (`@ 0x6483d4..0x64845e`), the runtime
+setter `CWnd_SetVisualState @ 0x646340` (writes `+232`/`+236`; availability
+mask at `+4` — a state with no authored appearance falls back to 0, and with
+no default appearance to −1 = no appearance pass at all, text keeps default
+colors), and the FONT color-pair switch in `draw_text_with_cursor @ 0x6533b0`
+(case 1 -> pair [6,7] disabled, 2 -> [2,3] mouseover, 3 -> [4,5] selected,
+else [0,1] default — pairs in FONT parse order). The per-frame writer is
+`widget_process_mouse_event @ 0x647a00` (vtable+20): disabled (`+228 == 0`)
+-> 1; hit + button down -> 3; hit + button up -> 2; else 0; front-most sibling
+wins via the reverse child walk + the per-frame claim `scene+16`; the hovered
+widget lands in `g_ui_mouseover_wnd @ 0x31C16DC`. (The transient sound states
+MOUSEIN=1/MOUSEOUT=2/SELECTED=3 at `+240` are a separate vocabulary.)
+
+**Text pass** `[orig: CStaticWnd_DrawLabel @ 0x656fb0]` (static family; button
+and radio inherit it): the effective font + 8 colors resolve at DRAW time via
+`CWnd_GetFontAndColors @ 0x646a70` (vtable+64) — self-then-parent walk to the
+first widget with a nonzero font handle (`+120`), colors at `+124..+152` in
+parse order. Layout in DESIGN space at scale 1: avail = rect width − 2×EDGE
+(`+756`), < 1 draws nothing; a too-wide string truncates to the largest prefix
+below the span (the prefix-measure loop `@ 0x657199`); justify word `+744`
+(low nibble 1=center/2=right else left, high 0x10=vcenter/0x20=vbottom else
+top) anchors from the (truncated) width; x += EDGE + xoff(`+748`), y +=
+yoff(`+752`); the wrap flag `+760` routes to the wrapped drawer (`sub_653D60`,
+interior unwalked — D-MNU-13). The sink `font_cache_draw_text_scaled
+@ 0x653170` forces alpha 0xFF (unless flags&0x10000), halves the color under
+`g_ui_half_bright_mode`, scales the ANCHOR by the element scale pair, and
+forwards scaleX/scaleY into `CGameFont_DrawText @ 0x6752c0` (via the cdecl
+trampoline `@ 0x676290`) — **menu glyphs scale with the anamorphic 800x600
+pair**, so text stretches with the screen like every quad. Only the
+foreground color of the selected pair is consumed (BG preservation-only, as
+already recorded).
+
+**Edit widgets** `[orig: CEditWnd_Render @ 0x6619e0]`: keyboard focus is
+`g_ui_focus_wnd @ 0x31C16D4` (set `UI_SetFocusWnd @ 0x646420`, cleared
+`@ 0x646430`, keyboard events route to it in
+`dispatch_keyboard_event_to_children @ 0x63ad10`, cleared on screen switch
+`@ 0x63b7be` — this closes the 2026-07-16 open item: `0x31C16D4` is the FOCUS
+widget, `0x31C16DC` the mouseover widget, per the debug formatter
+`@ 0x6394f0`). A focused, non-readonly (`+776`) edit FORCES visual state 2 —
+mouseover appearance and colors are the retail "active field" look. PASSWORD
+(`+780`) swaps in a cached all-`'*'` mask buffer (`+788`). The caret: char
+index `+764`, kept visible by the scroll window (`update_edit_scroll_range
+@ 0x661790` over start `+792`/end `+796`, fitting via
+`EditWnd_CountCharsFitting @ 0x6616b0`); blinks on a 1024 ms `GetTickCount`
+cycle — drawn only while `(tick & 0x3FF) > 0x200`; drawn by
+`draw_text_with_cursor @ 0x6533b0` as an UNDERSCORE at the caret char's x
+(left-run width + `spacing+1` gap terms), x-stretched to that char's width
+(`charW / underscoreW`); the caret at end-of-text measures as `'_'` itself.
+
+**List rows** `[orig: CListWnd_DrawItems @ 0x643f30]` (extends the earlier
+combo-grill row model): 32-byte item records (text `+0`, STYLE INDEX `+12` —
+a 0..3 state slot, −1 none, set by selection/hover logic; visible flag bit 1
+at `+16`; per-row justify `+20`; x/y text offsets `+24`/`+28`; image `+48`).
+Each visible row first draws the ITEMS per-state appearance record for its
+style index (28-byte stride at `+828`) into the row rect (inflated −1
+horizontally, minus the shown scrollbar's width `+4088`) — that appearance IS
+the selection/hover highlight — then the row text with colorIndex = the same
+style index (a selected row renders the selected FONT pair). Rows run from
+scroll start `+796` for `+800` visible rows; height = font "W" else
+MIN_ITEM_HEIGHT (`+804 >= 0`); truncation against rect − 2×EDGE − scrollbar.
+
+Reimpl: `engine/runtime/menu` (`MenuFrameCompiler`) compiles a parsed
+`mnu::Screen` + a typed per-widget state snapshot (hover/press/disabled/
+checked/focus/caret/value/selection — `MenuWidgetState`, keyed by pre-order
+index) into a `MenuDrawList` (quads + outline lines + GameFont glyph runs) in
+exactly this walk order, with the witnessed per-element int truncation of
+scaled coordinates (the original quantization — the compiled path closes
+D-MNU-4's divergence; the Control-tree path keeps its float scale). The Godot
+applier (`MenuFrame`, `godot/src/mnu/nova_menu_frame.cpp`) uploads textures/
+fonts and rasterizes the list. Pinned by `tests/menu/menu_frame_compiler_test`.
+
+- **D-MNU-13 (draw-walk residue — deferred interiors):** the TABLE
+  (`@ 0x6410d0`), SCROLL (`@ 0x64c5c0`), MARQUEE (`@ 0x65cf90`), and
+  RADIOEDIT (`@ 0x65d310`) render interiors and the wrapped-text drawer
+  (`sub_653D60`, the `+760` wrap path) are not yet walked; the compiler emits
+  their authored appearance/frame passes and defers the specialised interiors
+  (the Control-tree path still renders them). Spin arrows compile with their
+  default-state art (their independent hover states are separate child-widget
+  state the compiled path does not yet model). Follow-up work, not shipped
+  divergences: the shell cutover keeps the witnessed Control-tree renderers
+  for these widgets.
 
 ## Widget item rendering `[orig: CSpinListWnd_Render @ 0x64b220; CUISpinList_ParseXMLDefinition @ 0x64bd10]`
 
@@ -552,6 +695,19 @@ column format (key-name decode + `Ctrl-`/`Shift-`/`OR`), and the three table-ren
 `type="id"` lookup, body justify, authored scrollbar position) — the table now renders a populated,
 scrollable, correctly-aligned grid instead of floating headers over a blank body.
 
+**matching** (2026-08-09 draw-walk grill): the full render dispatch — the menu mode
+callbacks (`Menu_RenderFrame @ 0x54b7c0` -> `CUIScene_DrawScreensAndCursor @ 0x63bf60`),
+the forward screen/child draw order against the reverse input walk, the per-state
+appearance records (COLOR/IMAGE/OUTLINE/custom passes) with the DEFAULT/DISABLED/
+MOUSEOVER/SELECTED state vocabulary and its availability fallback, the per-frame state
+pump, the draw-time font/color inheritance and state color pairs, glyph scaling by the
+anamorphic pair, the edit focus-forces-state-2 + blinking stretched-underscore caret +
+password mask + scroll window, the checkbox/radio checked-state forcing rules, the list
+row style-index model, and the unscaled native-size cursor draw — ported as the
+`engine/runtime/menu` `MenuFrameCompiler` (ADR 0033 R2) with the per-element int
+truncation restored. TABLE/SCROLL/MARQUEE/RADIOEDIT render interiors and the wrapped
+text path stay deferred (D-MNU-13).
+
 **matching** (2026-07-30 menu parity pass): the typed format retains source
 encoding/BOM, optional-field presence, ordered HOTKEY/APPEARANCE/ITEM data, the
 complete sixteen-type Action payload, and nested list/table/scroll structures
@@ -676,6 +832,13 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | Original | OpenNova |
 |---|---|
 | `UIScene_LoadAndParseContent @ 0x63c830` | menu load path: `MnuDocument` + `godot/game/nova_menu_shell.gd` |
+| `Menu_RenderFrame @ 0x54b7c0` -> `CUIScene_DrawScreensAndCursor @ 0x63bf60` | the scene draw walk -> `MenuFrameCompiler::compile` — `engine/runtime/menu/src/menu_frame.cpp` (2026-08-09) |
+| `CUIElement_Draw @ 0x64a8a0` / `CStaticWnd_Render @ 0x657b10` (the Draw vtable family) | the per-widget walk order — `MenuFrameCompiler::walk_widget` |
+| `CWnd_SetVisualState @ 0x646340` + `widget_process_mouse_event @ 0x647a00` (state write +236) | `MenuFrameCompiler::visual_state_for` + `MenuWidgetState` |
+| `CWnd_GetFontAndColors @ 0x646a70` (vtable+64 draw-time font/color inheritance) | `MenuFrameCompiler` `WidgetNode::font/colors` |
+| `CStaticWnd_DrawLabel @ 0x656fb0` + `draw_text_with_cursor @ 0x6533b0` + `font_cache_draw_text_scaled @ 0x653170` | `MenuFrameCompiler::emit_widget_text` / `emit_caret` over `opennova::hud::GameFont` |
+| `CEditWnd_Render @ 0x6619e0` (focus state-2, blink, password, scroll window `update_edit_scroll_range @ 0x661790`) | the compiler's edit leg + `MenuWidgetState.focused/caret` |
+| `CRadioWnd_Render @ 0x656e20` / `CCheckWnd_Render @ 0x64ae20` + `CCheckWnd_DrawLabel @ 0x64aa20` | checked-state forcing + label placement in the compiler |
 | `Menu_InitShellResources @ 0x552500` → `NapiConfigMap_LoadIncludeFile @ 0x63b970` → `parse_key_value_buffer @ 0x639870` | `mns::Document::evaluate` — `engine/formats/mns/src/mns_document.cpp` (witnessed runtime evaluator) plus the separate lossless editor model (ADR 0014) |
 | `XML_ParseWithBOMDetection @ 0x76a690` | `mnu_xml::parse` + `skip_bom` — `engine/formats/mnu/src/mnu_xml.cpp` |
 | `XML_ParseCharEntity @ 0x769cc0` | `mnu_xml::decode_entity` — `engine/formats/mnu/src/mnu_xml.cpp` (faithful to the engine's non-standard policy: no `&apos;`, decimal-only `&#`, Latin-1 named set) |
@@ -743,6 +906,26 @@ Comments added and `idb_save` done: `0x644070` (row height = `this+201` / font-W
 the embedded `CListWnd` `this+384`). `CListWnd_DrawItems @ 0x643f30` and `CListWnd_Construct
 @ 0x643bb0` were already curated-named and left as-is.
 
+IDB state note (2026-08-09 draw-walk grill): renamed, all anchored —
+`sub_656FB0 -> CStaticWnd_DrawLabel`, `sub_646340 -> CWnd_SetVisualState`,
+`sub_646A70 -> CWnd_GetFontAndColors`, `sub_6472A0 -> CWnd_ApplyClipViewport`,
+`sub_647190 -> CWnd_FindInheritedFrameBlock`, `sub_647FC0 -> CUIElement_DrawOutlineRect`,
+`sub_647F10 -> CUIElement_DispatchCustomDrawEvent`, `sub_656E20 -> CRadioWnd_Render`,
+the misnamed `CWnd_SetEnabled -> CWnd_SetChecked` (`0x656e80`, writes +772),
+`CEditWnd_Render_0 -> CEditWnd_Render` (`0x6619e0`, the single-line EDIT) and the old
+`CEditWnd_Render -> CMEditWnd_Render` (`0x6608e0`, the MULTILINE_EDIT), the FLIRT-misnamed
+`CHLSLParser_AllocToken -> EditWnd_CountCharsFitting` (`0x6616b0`),
+`sub_63BF60 -> CUIScene_DrawScreensAndCursor`, `sub_54B7C0 -> Menu_RenderFrame`,
+`0x5528a0` newly defined as `Menu_UpdateFrame`, `sub_676290 -> CGameFont_DrawText_Cdecl`,
+`sub_6461F0 -> UI_EmitEventToFocusWnd`, `sub_646420 -> UI_SetFocusWnd`,
+`sub_646430 -> UI_ClearFocusWnd`, `sub_653680 -> font_cache_measure_text_default`;
+data `dword_31C16D4 -> g_ui_focus_wnd`, `dword_31C16DC -> g_ui_mouseover_wnd`,
+`dword_31C16E0 -> g_ui_frame_cursor_texture`, `dword_2551100 -> g_GameMenu`,
+`dword_2551114 -> g_menu_render_dirty`, `dword_31C3760 -> g_ui_half_bright_mode`.
+Witness comments at `0x64a8a0`, `0x646340`, `0x647a00`, `0x6533b0`, `0x653170`,
+`0x656fb0`, `0x6619e0`, `0x64ae20`, `0x64aa20`, `0x656e20`, `0x63bf60`, `0x54b7c0`,
+`0x647e40`, `0x6483d4`, `0x646a70`, `0x643f30`; `idb_save` done.
+
 IDB state note (2026-07-16 dropdown-input grill): renamed, all anchored —
 `sub_6463C0 -> UI_SetMouseCaptureWnd`, `sub_6463D0 -> UI_ClearMouseCaptureWnd`,
 `sub_6463E0 -> UI_SetActiveComboWnd`, `sub_646400 -> UI_ClearActiveComboWnd`,
@@ -755,8 +938,12 @@ CWnd_EmitEventToNamedHandlerAndCallbacks`, `sub_6471C0 -> CWnd_MarkDirtyWithChil
 data `dword_31C16CC -> g_ui_mouse_capture_wnd`, `dword_31C16D0 -> g_ui_active_combo_wnd`,
 `dword_31C16D8 -> g_ui_open_popup_wnd`. Witness comments at `0x65c190`, `0x63ab00`,
 `0x63e691`, `0x646299`, `0x647917`, `0x647932`, `0x63b6b0`, `0x6480e0`; `idb_save` done.
-Open: `dword_31C16D4` / `dword_31C16DC` (cleared alongside capture by scripted actions
-`@ 0x6498c8/0x6498d4`) remain unnamed — likely the focus/edit pair, unwitnessed.
+~~Open: `dword_31C16D4` / `dword_31C16DC` (cleared alongside capture by scripted actions
+`@ 0x6498c8/0x6498d4`) remain unnamed — likely the focus/edit pair, unwitnessed.~~
+CLOSED by the 2026-08-09 draw-walk grill: `0x31C16D4` = `g_ui_focus_wnd` (keyboard
+focus — the caret gate), `0x31C16DC` = `g_ui_mouseover_wnd` (the per-frame hovered
+widget); both witnessed via the debug formatter `@ 0x6394f0` ("mouseover / capture /
+focus") and the keyboard dispatch `@ 0x63ad10`. See "Widget render dispatch".
 
 ### Element struct fields (witnessed offsets)
 

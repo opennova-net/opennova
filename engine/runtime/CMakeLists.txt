@@ -26,6 +26,9 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/frame/src/frame_driver.cpp
     # hud — pure witnessed HUD math (the shell owns every draw/Font blit)
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/src/hud_math.cpp
+    # menu — the .mnu screen draw-list compiler (ADR 0033 R2; witness:
+    # docs/mnu/menu-re.md "Widget render dispatch")
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/src/menu_frame.cpp
     # mission (runtime half) — the BMS event runtime + mission->world promotion,
     # evaluated against the shared runtime world
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/src/event_runtime.cpp
@@ -137,6 +140,7 @@ target_include_directories(opennova_runtime
         ${CMAKE_CURRENT_SOURCE_DIR}/controls/include
         ${CMAKE_CURRENT_SOURCE_DIR}/frame/include
         ${CMAKE_CURRENT_SOURCE_DIR}/hud/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/menu/include
         # The runtime mission half's headers (the format half's <mission/...>
         # headers propagate from opennova_formats — disjoint sets, one prefix).
         ${CMAKE_CURRENT_SOURCE_DIR}/mission/include

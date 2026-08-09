@@ -1,0 +1,1364 @@
+// The menu frame compiler — the witnessed CWnd Draw walk over a parsed .mnu
+// screen, structural translation onto the typed draw list.
+// [orig: Menu_RenderFrame @ 0x54b7c0 -> CUIScene_DrawScreensAndCursor
+//  @ 0x63bf60 -> the Draw vtable family, cited per pass below]
+// Witness record: docs/mnu/menu-re.md ("Widget render dispatch").
+
+#include "menu/menu_frame.h"
+
+#include <io/strutil.h>
+
+#include <algorithm>
+#include <cstring>
+
+namespace opennova::menu {
+
+namespace {
+
+bool iequals(const std::string &a, const char *b) {
+	return opennova::strutil::iequals(a, b);
+}
+
+// The visual-state slot an APPEARANCE STATE attribute parses to
+// [orig: CUIElement_ParseXMLDefinition @ 0x6483d4..0x64845e —
+//  DEFAULT=0, DISABLED=1, MOUSEOVER=2, SELECTED=3].
+int appearance_state_slot(const std::string &state) {
+	if (iequals(state, "disabled")) {
+		return kStateDisabled;
+	}
+	if (iequals(state, "mouseover")) {
+		return kStateMouseover;
+	}
+	if (iequals(state, "selected")) {
+		return kStateSelected;
+	}
+	return kStateDefault; // DEFAULT and unknown tokens keep the parse default
+}
+
+uint32_t argb_from_rgba(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+	return (static_cast<uint32_t>(a) << 24) | (static_cast<uint32_t>(r) << 16) |
+			(static_cast<uint32_t>(g) << 8) | static_cast<uint32_t>(b);
+}
+
+mnu::RectEdges offset_rect(const mnu::RectEdges &rect, int dx, int dy) {
+	return {rect.left + dx, rect.top + dy, rect.right + dx, rect.bottom + dy};
+}
+
+} // namespace
+
+// Per-widget resolved build info. Rects stay in the 800x600 design space
+// (ints); scaling + the per-element int truncation happen at emit
+// [orig: CUIElement_DrawStretchedTexture @ 0x647d40].
+struct MenuFrameCompiler::WidgetNode {
+	const mnu::Window *window = nullptr;
+	int parent = -1;
+	// The per-visual-state appearance records [orig: the 28-byte state
+	// records at elem+8; flags bit0 COLOR / bit1 IMAGE / bit3 OUTLINE].
+	StatePass states[4];
+	// The ITEMS per-state appearance records (list-row highlight)
+	// [orig: CListWnd_DrawItems @ 0x643f30 — the row style records at +828].
+	StatePass items_states[4];
+	// The effective FONT + per-state fg colors, resolved like the draw-time
+	// walk [orig: CWnd_GetFontAndColors @ 0x646a70 — self-then-parent to the
+	// first widget with a font; colors in parse order, only fg is drawn].
+	int32_t font = 0;
+	uint32_t colors[4] = {0, 0, 0, 0};
+	// The effective FRAME block [orig: CWnd_FindInheritedFrameBlock
+	// @ 0x647190 — nearest ancestor carrying a frame; the draw gate stays the
+	// widget's own DRAW_FRAME].
+	int frame_owner = -1;
+	int32_t frame_stencil = kMenuTexNone;
+	int32_t frame_brush = kMenuTexNone;
+	// The inherited CURSOR texture [orig: widget_process_mouse_event
+	// @ 0x647a00 walks parents for +276 into g_ui_frame_cursor_texture].
+	int32_t cursor = kMenuTexNone;
+	// Spin arrows: default-state art (their independent hover states are
+	// child-widget state the compiled path defers — D-MNU-13).
+	int32_t spin_up_tex = kMenuTexNone;
+	int32_t spin_down_tex = kMenuTexNone;
+	// Item rows [orig: CUISpinList_ParseXMLDefinition @ 0x64bd10].
+	struct ItemVisual {
+		enum Kind { kText, kImage, kColor } kind = kText;
+		std::string text;
+		int32_t texture = kMenuTexNone;
+		uint32_t color = 0;
+	};
+	std::vector<ItemVisual> items;
+	std::vector<ItemVisual> popup_items; // combo LIST_BOX rows when authored
+	StatePass popup_states[4];           // LIST_BOX background appearances
+	StatePass popup_items_states[4];     // LIST_BOX ITEMS row appearances
+};
+
+MenuFrameCompiler::MenuFrameCompiler() = default;
+MenuFrameCompiler::~MenuFrameCompiler() = default;
+
+void MenuFrameCompiler::set_style_vars(
+		const std::map<std::string, std::string> &vars) {
+	style_vars_.clear();
+	for (const auto &kv : vars) {
+		style_vars_[opennova::strutil::to_lower(kv.first)] = kv.second;
+	}
+}
+
+void MenuFrameCompiler::set_text_lookup(
+		const std::map<std::string, std::string> &table) {
+	text_lookup_.clear();
+	for (const auto &kv : table) {
+		text_lookup_[opennova::strutil::to_lower(kv.first)] = kv.second;
+	}
+}
+
+void MenuFrameCompiler::register_font(const std::string &name,
+		const fnt_font_t *font) {
+	registered_fonts_[opennova::strutil::to_lower(name)] = font;
+}
+
+void MenuFrameCompiler::clear_registered_fonts() {
+	registered_fonts_.clear();
+}
+
+// Whole-value %VAR% resolution, case-insensitive, unresolved stays literal
+// [orig: NapiXML_ExpandVariablesInText @ 0x63a000; ADR 0005 per-field form].
+std::string MenuFrameCompiler::resolve_var(const std::string &value) const {
+	if (value.size() < 2 || value.front() != '%' || value.back() != '%') {
+		return value;
+	}
+	const std::string key =
+			opennova::strutil::to_lower(value.substr(1, value.size() - 2));
+	const auto it = style_vars_.find(key);
+	return it == style_vars_.end() ? value : it->second;
+}
+
+// A FONT color string -> 0xAARRGGBB with alpha forced opaque (the text sink
+// forces 0xFF alpha; menus never pass the 0x10000 keep-alpha flag)
+// [orig: font_cache_draw_text_scaled @ 0x653170]. An unparsed value keeps the
+// zeroed ctor field: opaque black.
+uint32_t MenuFrameCompiler::resolve_text_color(const std::string &value) const {
+	uint8_t r = 0;
+	uint8_t g = 0;
+	uint8_t b = 0;
+	uint8_t a = 0;
+	if (!mnu::parse_hex_color(resolve_var(value), r, g, b, a)) {
+		return 0xFF000000u;
+	}
+	return argb_from_rgba(r, g, b, 0xFF);
+}
+
+// String content resolution: type=="id" looks the value up in the registered
+// text table [orig: CUIStringTable_LookupString @ 0x6527c0]; a miss or a
+// literal type keeps the raw text. The {hot} marker never draws.
+std::string MenuFrameCompiler::resolve_text_value(const std::string &type,
+		const std::string &raw) const {
+	std::string value = resolve_var(raw);
+	if (iequals(type, "id")) {
+		const auto it = text_lookup_.find(opennova::strutil::to_lower(value));
+		if (it != text_lookup_.end()) {
+			value = it->second;
+		}
+	}
+	return mnu::strip_hotkey_marker(value);
+}
+
+int32_t MenuFrameCompiler::intern_texture(const std::string &name) {
+	if (name.empty()) {
+		return kMenuTexNone;
+	}
+	const std::string resolved = resolve_var(name);
+	if (resolved.empty()) {
+		return kMenuTexNone;
+	}
+	const std::string key = opennova::strutil::to_lower(resolved);
+	for (size_t i = 0; i < texture_names_.size(); ++i) {
+		if (opennova::strutil::to_lower(texture_names_[i]) == key) {
+			return static_cast<int32_t>(i);
+		}
+	}
+	texture_names_.push_back(resolved);
+	texture_sizes_.emplace_back(0, 0);
+	return static_cast<int32_t>(texture_names_.size()) - 1;
+}
+
+int32_t MenuFrameCompiler::intern_font(const std::string &name) {
+	const std::string resolved = resolve_var(name);
+	const std::string key = opennova::strutil::to_lower(resolved);
+	for (size_t i = 0; i < font_names_.size(); ++i) {
+		if (opennova::strutil::to_lower(font_names_[i]) == key) {
+			return static_cast<int32_t>(i);
+		}
+	}
+	font_names_.push_back(resolved);
+	const auto it = registered_fonts_.find(key);
+	fonts_.push_back(it == registered_fonts_.end() ? default_font_
+												   : it->second);
+	return static_cast<int32_t>(font_names_.size()) - 1;
+}
+
+void MenuFrameCompiler::set_texture_size(int32_t slot, int width, int height) {
+	if (slot >= 0 && slot < static_cast<int32_t>(texture_sizes_.size())) {
+		texture_sizes_[static_cast<size_t>(slot)] = {width, height};
+	}
+}
+
+// --- configure ---------------------------------------------------------------
+
+void MenuFrameCompiler::build_state_passes(
+		const std::vector<mnu::Appearance> &rows, StatePass (&states)[4]) {
+	for (const mnu::Appearance &ap : rows) {
+		const int slot = appearance_state_slot(ap.state);
+		StatePass &pass = states[slot];
+		pass.present = true;
+		if (iequals(ap.type, "color")) {
+			// [orig: COLOR=1 -> the stretched fill with the entry color]
+			uint8_t r = 0;
+			uint8_t g = 0;
+			uint8_t b = 0;
+			uint8_t a = 0;
+			if (mnu::parse_hex_color(resolve_var(ap.value), r, g, b, a)) {
+				pass.has_color = true;
+				pass.color = argb_from_rgba(r, g, b, a);
+			}
+		} else if (iequals(ap.type, "outline")) {
+			// [orig: OUTLINE=8 -> CUIElement_DrawOutlineRect @ 0x647fc0]
+			uint8_t r = 0;
+			uint8_t g = 0;
+			uint8_t b = 0;
+			uint8_t a = 0;
+			if (mnu::parse_hex_color(resolve_var(ap.value), r, g, b, a)) {
+				pass.has_outline = true;
+				pass.outline = argb_from_rgba(r, g, b, a);
+			}
+		} else if (iequals(ap.type, "image") || ap.type.empty()) {
+			// [orig: IMAGE=2 -> stretched into the element rect @ 0x647e40]
+			pass.texture = intern_texture(ap.value);
+		}
+		// type="cursor" is the shell-owned custom hook (the CURSOR=4 bit ->
+		// the vtable+28 event); the compiler emits nothing for it.
+	}
+}
+
+void MenuFrameCompiler::configure(const mnu::Screen *screen,
+		const fnt_font_t *default_font) {
+	screen_ = screen;
+	default_font_ = default_font;
+	texture_names_.clear();
+	texture_sizes_.clear();
+	font_names_.clear();
+	fonts_.clear();
+	nodes_.clear();
+	edit_scroll_.clear();
+	screen_cursor_ = kMenuTexNone;
+	// Slot 0 = the default font (an unnamed <FONT> resolves here).
+	font_names_.push_back(std::string());
+	fonts_.push_back(default_font_);
+	if (screen_ != nullptr) {
+		screen_cursor_ = intern_texture(screen_->cursor_file);
+		build_node(screen_->root_window, -1);
+	}
+}
+
+int MenuFrameCompiler::build_node(const mnu::Window &w, int parent) {
+	const int index = static_cast<int>(nodes_.size());
+	nodes_.push_back(WidgetNode{});
+	{
+		WidgetNode node;
+		node.window = &w;
+		node.parent = parent;
+		build_state_passes(w.appearances, node.states);
+		build_state_passes(w.items.appearances, node.items_states);
+		build_state_passes(w.list_box.appearances, node.popup_states);
+		build_state_passes(w.list_box.items.appearances,
+				node.popup_items_states);
+		// FONT: the draw-time walk takes the first self-or-ancestor widget
+		// with a font; its 8 colors ride along in parse order
+		// [orig: CWnd_GetFontAndColors @ 0x646a70].
+		if (!w.font.empty()) {
+			node.font = w.font.name.empty() ? 0 : intern_font(w.font.name);
+			node.colors[kStateDefault] = resolve_text_color(w.font.default_fg);
+			node.colors[kStateDisabled] =
+					resolve_text_color(w.font.disabled_fg);
+			node.colors[kStateMouseover] =
+					resolve_text_color(w.font.mouseover_fg);
+			node.colors[kStateSelected] =
+					resolve_text_color(w.font.selected_fg);
+		} else if (parent >= 0) {
+			node.font = nodes_[static_cast<size_t>(parent)].font;
+			std::memcpy(node.colors, nodes_[static_cast<size_t>(parent)].colors,
+					sizeof(node.colors));
+		} else {
+			node.font = 0;
+			for (uint32_t &c : node.colors) {
+				c = 0xFF000000u; // zeroed ctor fields draw opaque black
+			}
+		}
+		// FRAME inheritance [orig: CWnd_FindInheritedFrameBlock @ 0x647190].
+		const bool has_frame =
+				!w.frame.stencil.empty() || !w.frame.brush.empty();
+		if (has_frame) {
+			node.frame_owner = index;
+			node.frame_stencil = intern_texture(w.frame.stencil);
+			node.frame_brush = intern_texture(w.frame.brush);
+		} else if (parent >= 0) {
+			const WidgetNode &p = nodes_[static_cast<size_t>(parent)];
+			node.frame_owner = p.frame_owner;
+			node.frame_stencil = p.frame_stencil;
+			node.frame_brush = p.frame_brush;
+		}
+		// CURSOR inheritance [orig: the +276 parent walk @ 0x647a00].
+		if (!w.cursor.file.empty()) {
+			node.cursor = intern_texture(w.cursor.file);
+		} else if (parent >= 0) {
+			node.cursor = nodes_[static_cast<size_t>(parent)].cursor;
+		}
+		// Spin arrows: default-state art (see WidgetNode note).
+		auto arrow_texture = [&](const mnu::SpinButton &btn) {
+			for (const mnu::Appearance &ap : btn.appearances) {
+				if ((iequals(ap.type, "image") || ap.type.empty()) &&
+						appearance_state_slot(ap.state) == kStateDefault) {
+					return intern_texture(ap.value);
+				}
+			}
+			for (const mnu::Appearance &ap : btn.appearances) {
+				if (iequals(ap.type, "image") || ap.type.empty()) {
+					return intern_texture(ap.value);
+				}
+			}
+			return kMenuTexNone;
+		};
+		node.spin_up_tex = arrow_texture(w.spinup);
+		node.spin_down_tex = arrow_texture(w.spindown);
+		// Item rows [orig: id -> text via the string table, image filename
+		// loaded, color wcstoul base 16 @ 0x64bd10].
+		auto build_items = [&](const std::vector<mnu::Item> &rows,
+									std::vector<WidgetNode::ItemVisual> &out) {
+			for (const mnu::Item &item : rows) {
+				WidgetNode::ItemVisual visual;
+				if (iequals(item.type, "image")) {
+					visual.kind = WidgetNode::ItemVisual::kImage;
+					visual.texture = intern_texture(item.text);
+				} else if (iequals(item.type, "color")) {
+					visual.kind = WidgetNode::ItemVisual::kColor;
+					// [orig: CSpinListWnd_Render @ 0x64b220 — forced opaque]
+					visual.color = mnu::item_color_argb(resolve_var(item.text));
+				} else {
+					visual.kind = WidgetNode::ItemVisual::kText;
+					visual.text = resolve_text_value(item.type, item.text);
+				}
+				out.push_back(visual);
+			}
+		};
+		build_items(w.items.items, node.items);
+		build_items(w.list_box.items.items, node.popup_items);
+		nodes_[static_cast<size_t>(index)] = std::move(node);
+	}
+	for (const mnu::Window &child : w.children) {
+		build_node(child, index);
+	}
+	return index;
+}
+
+// --- compile helpers ---------------------------------------------------------
+
+const MenuWidgetState *MenuFrameCompiler::state_for(
+		const MenuFrameState &state, int index) const {
+	for (const MenuWidgetState &ws : state.widgets) {
+		if (ws.index == index) {
+			return &ws;
+		}
+	}
+	return nullptr;
+}
+
+// The pump verdict [orig: widget_process_mouse_event @ 0x647a00 — disabled
+// -> 1; hit + button down -> 3; hit + button up -> 2; else 0].
+int MenuFrameCompiler::pump_visual_state(const mnu::Window &w,
+		const MenuWidgetState *ws) const {
+	if (w.disabled || (ws != nullptr && ws->disabled)) {
+		return kStateDisabled;
+	}
+	if (ws != nullptr && ws->pressed) {
+		return kStateSelected;
+	}
+	if (ws != nullptr && ws->hovered) {
+		return kStateMouseover;
+	}
+	return kStateDefault;
+}
+
+// The availability fallback [orig: CWnd_SetVisualState @ 0x646340 — a state
+// with no authored appearance falls to 0; no default -> -1 = no appearance
+// pass at all (text keeps the default color pair)].
+int MenuFrameCompiler::appearance_state_with_fallback(const WidgetNode &node,
+		int state) const {
+	if (state >= 0 && state < 4 && node.states[state].present) {
+		return state;
+	}
+	if (node.states[kStateDefault].present) {
+		return kStateDefault;
+	}
+	return -1;
+}
+
+// The element rect: the three-stage POSITION solve in design space
+// [orig: the parse tail @ 0x648120 -> adjust_rect_to_text_size @ 0x6575f0].
+mnu::RectEdges MenuFrameCompiler::solve_rect(const WidgetNode &node,
+		const MenuWidgetState *ws) const {
+	const mnu::Window &w = *node.window;
+	int max_w = 0;
+	int max_h = 0;
+	for (int slot_state = 0; slot_state < 4; ++slot_state) {
+		const StatePass &pass = node.states[slot_state];
+		if (pass.texture < 0) {
+			continue;
+		}
+		const auto &size = texture_sizes_[static_cast<size_t>(pass.texture)];
+		max_w = std::max(max_w, size.first);
+		// The HEIGHT sprite-frame attr participates through the parse-time
+		// appearance rows; the interned per-state pass keeps texture extents.
+		int height_attr = 0;
+		bool has_height_attr = false;
+		for (const mnu::Appearance &ap : w.appearances) {
+			if (appearance_state_slot(ap.state) == slot_state &&
+					(iequals(ap.type, "image") || ap.type.empty())) {
+				has_height_attr = ap.has_height;
+				height_attr = ap.height;
+				break;
+			}
+		}
+		max_h = std::max(max_h, mnu::appearance_extent_height(has_height_attr,
+								  height_attr, size.second));
+	}
+	mnu::RectEdges rect = mnu::position_rect(w.position.has_left,
+			w.position.left, w.position.has_top, w.position.top,
+			w.position.has_right, w.position.right, w.position.has_bottom,
+			w.position.bottom, max_w, max_h);
+	if (mnu::window_type_is_text_sized(w.type)) {
+		const std::string text = widget_text(node, ws);
+		if (!text.empty() &&
+				(rect.right <= rect.left || rect.bottom <= rect.top)) {
+			int tw = 0;
+			int th = 0;
+			measure_text(node, text, &tw, &th);
+			rect = mnu::adjust_rect_to_text_size(rect, tw, th,
+					w.string_data.justify, w.string_data.vjustify);
+		}
+	}
+	return rect;
+}
+
+std::string MenuFrameCompiler::widget_text(const WidgetNode &node,
+		const MenuWidgetState *ws) const {
+	if (ws != nullptr && ws->has_text) {
+		return ws->text;
+	}
+	const mnu::Window &w = *node.window;
+	if (w.string_data.present) {
+		return resolve_text_value(w.string_data.type, w.string_data.value);
+	}
+	return std::string();
+}
+
+const fnt_font_t *MenuFrameCompiler::font_for(const WidgetNode &node) const {
+	const fnt_font_t *font = fonts_[static_cast<size_t>(node.font)];
+	return font != nullptr ? font : default_font_;
+}
+
+void MenuFrameCompiler::measure_text(const WidgetNode &node,
+		const std::string &text, int *out_w, int *out_h) const {
+	*out_w = 0;
+	*out_h = 0;
+	const fnt_font_t *font = font_for(node);
+	if (font == nullptr) {
+		return;
+	}
+	hud::GameFont gf;
+	gf.set_font(font);
+	// Menu measurement runs at scale 1 in design space
+	// [orig: CStaticWnd_DrawLabel @ 0x656fb0 fld1 before the measure].
+	gf.measure(text.c_str(), 1.0f, 1.0f, out_w, out_h);
+}
+
+// --- emitters ----------------------------------------------------------------
+
+// Per-element int truncation of the scaled coordinate
+// [orig: CUIElement_DrawStretchedTexture @ 0x647d40 — (int)(edge * scale)].
+float MenuFrameCompiler::emit_x(int design, float scale) {
+	return static_cast<float>(
+			static_cast<int>(static_cast<double>(design) * scale));
+}
+
+void MenuFrameCompiler::emit_rect_quad(const mnu::RectEdges &design,
+		const WalkScale &s, uint32_t color, int32_t texture, bool tiled,
+		float tile_u, float tile_v) {
+	MenuQuad quad;
+	quad.x0 = emit_x(design.left, s.x);
+	quad.y0 = emit_x(design.top, s.y);
+	quad.x1 = emit_x(design.right, s.x);
+	quad.y1 = emit_x(design.bottom, s.y);
+	quad.color = color;
+	quad.texture = texture;
+	quad.tiled = tiled;
+	if (tiled) {
+		quad.u1 = tile_u;
+		quad.v1 = tile_v;
+	}
+	draw_list_.quads.push_back(quad);
+}
+
+// [orig: CUIElement_DrawOutlineRect @ 0x647fc0 — top edge to right-1, then
+//  down, back, and up only when the rect has height]
+void MenuFrameCompiler::emit_outline(const mnu::RectEdges &design,
+		const WalkScale &s, uint32_t color) {
+	const float x0 = emit_x(design.left, s.x);
+	const float y0 = emit_x(design.top, s.y);
+	const float x1 = emit_x(design.right, s.x) - 1.0f;
+	const float y1 = emit_x(design.bottom, s.y) - 1.0f;
+	draw_list_.lines.push_back({x0, y0, x1, y0, color});
+	if (y1 > y0) {
+		draw_list_.lines.push_back({x1, y0, x1, y1, color});
+		draw_list_.lines.push_back({x1, y1, x0, y1, color});
+		draw_list_.lines.push_back({x0, y1, x0, y0, color});
+	}
+}
+
+// The per-state appearance passes in the witnessed pass order: COLOR fill,
+// IMAGE, OUTLINE (the CURSOR/custom hook stays shell-side)
+// [orig: CUIElement_Draw @ 0x64a8a0 / CStaticWnd_Render @ 0x657b10].
+// `appearance_slot` is the FINAL slot (fallback or force already applied);
+// -1 skips every pass.
+void MenuFrameCompiler::emit_appearance(const WidgetNode &node,
+		const mnu::RectEdges &rect, const WalkScale &s, int appearance_slot) {
+	if (appearance_slot < 0 || appearance_slot > 3) {
+		return;
+	}
+	const StatePass &pass = node.states[appearance_slot];
+	if (pass.has_color) {
+		emit_rect_quad(rect, s, pass.color, kMenuTexNone, false, 1.0f, 1.0f);
+	}
+	if (pass.texture >= 0) {
+		emit_rect_quad(rect, s, 0xFFFFFFFFu, pass.texture, false, 1.0f, 1.0f);
+	}
+	if (pass.has_outline) {
+		emit_outline(rect, s, pass.outline);
+	}
+}
+
+// The 8-piece frame + tiled brush fill, every quad modulated 0x7F7F7F
+// (neutral in the modulate-2x path); nothing draws when neither texture
+// resolves [orig: CUIElement_DrawFrame @ 0x64a210 over init_border_materials
+// @ 0x646f70].
+void MenuFrameCompiler::emit_frame(const WidgetNode &node,
+		const mnu::RectEdges &rect, const WalkScale &s) {
+	if (node.frame_owner < 0) {
+		return;
+	}
+	const mnu::Frame &frame =
+			nodes_[static_cast<size_t>(node.frame_owner)].window->frame;
+	const bool has_stencil = node.frame_stencil >= 0;
+	const bool has_brush = node.frame_brush >= 0;
+	if (!has_stencil && !has_brush) {
+		return;
+	}
+	const int w = rect.right - rect.left;
+	const int h = rect.bottom - rect.top;
+	if (has_brush) {
+		const auto &size =
+				texture_sizes_[static_cast<size_t>(node.frame_brush)];
+		const float tiles_u = size.first > 0
+				? static_cast<float>(w) / static_cast<float>(size.first)
+				: 1.0f;
+		const float tiles_v = size.second > 0
+				? static_cast<float>(h) / static_cast<float>(size.second)
+				: 1.0f;
+		emit_rect_quad(rect, s, 0xFF7F7F7Fu, node.frame_brush, true, tiles_u,
+				tiles_v);
+	}
+	if (!has_stencil) {
+		return;
+	}
+	const auto &stencil_size =
+			texture_sizes_[static_cast<size_t>(node.frame_stencil)];
+	if (stencil_size.first <= 0) {
+		return;
+	}
+	const int tile = mnu::frame_stencil_tile_size(
+			frame.has_stencil_size ? frame.stencil_size : 0,
+			stencil_size.first);
+	if (tile <= 0) {
+		return;
+	}
+	const int insetx = frame.has_insetx ? frame.insetx : 0;
+	const int insety = frame.has_insety ? frame.insety : 0;
+	const auto pieces = mnu::frame_border_layout(tile, insetx, insety);
+	const float tex_w = static_cast<float>(stencil_size.first);
+	const float tex_h = static_cast<float>(stencil_size.second);
+	for (const mnu::FrameBorderPiece &piece : pieces) {
+		const mnu::FrameTileRect uv =
+				mnu::frame_tile_rect(tile, piece.tile_col, piece.tile_row);
+		mnu::RectEdges dest;
+		dest.left = rect.left +
+				static_cast<int>(
+						piece.anchor_left * static_cast<float>(w) +
+						piece.off_left);
+		dest.top = rect.top +
+				static_cast<int>(piece.anchor_top * static_cast<float>(h) +
+						piece.off_top);
+		dest.right = rect.left +
+				static_cast<int>(
+						piece.anchor_right * static_cast<float>(w) +
+						piece.off_right);
+		dest.bottom = rect.top +
+				static_cast<int>(
+						piece.anchor_bottom * static_cast<float>(h) +
+						piece.off_bottom);
+		MenuQuad quad;
+		quad.x0 = emit_x(dest.left, s.x);
+		quad.y0 = emit_x(dest.top, s.y);
+		quad.x1 = emit_x(dest.right, s.x);
+		quad.y1 = emit_x(dest.bottom, s.y);
+		quad.color = 0xFF7F7F7Fu;
+		quad.texture = node.frame_stencil;
+		if (tex_w > 0.0f && tex_h > 0.0f) {
+			quad.u0 = static_cast<float>(uv.x) / tex_w;
+			quad.v0 = static_cast<float>(uv.y) / tex_h;
+			quad.u1 = static_cast<float>(uv.x + uv.size) / tex_w;
+			quad.v1 = static_cast<float>(uv.y + uv.size) / tex_h;
+		}
+		draw_list_.quads.push_back(quad);
+	}
+}
+
+// Glyph runs: layout in design space at the anamorphic pair — the anchor is
+// scaled with the per-element truncation, and the glyphs scale by the same
+// pair [orig: font_cache_draw_text_scaled @ 0x653170 scales the anchor and
+// forwards scaleX/scaleY into CGameFont_DrawText @ 0x6752c0].
+void MenuFrameCompiler::emit_glyph_run(const WidgetNode &node,
+		const std::string &text, int design_x, int design_y,
+		const WalkScale &s, uint32_t color, int caret) {
+	const fnt_font_t *font = font_for(node);
+	if (font == nullptr || text.empty()) {
+		return;
+	}
+	hud::GameFont gf;
+	gf.set_font(font);
+	const size_t first = draw_list_.glyphs.size();
+	const float x = emit_x(design_x, s.x);
+	const float y = emit_x(design_y, s.y);
+	const hud::GameFontRun run =
+			gf.layout(text.c_str(), x, y, s.x, s.y, 0u, color);
+	draw_list_.glyphs.insert(draw_list_.glyphs.end(), run.quads.begin(),
+			run.quads.end());
+	draw_list_.underlines.insert(draw_list_.underlines.end(),
+			run.underlines.begin(), run.underlines.end());
+	if (caret >= 0) {
+		emit_caret(gf, text, x, y, s, color, caret);
+	}
+	const size_t count = draw_list_.glyphs.size() - first;
+	if (count > 0) {
+		MenuDrawList::FontRun fr;
+		fr.font = node.font;
+		fr.first = static_cast<int32_t>(first);
+		fr.count = static_cast<int32_t>(count);
+		draw_list_.font_runs.push_back(fr);
+	}
+}
+
+// The caret: an underscore drawn at the caret character's x, x-stretched to
+// that character's width; the char at end-of-text measures as '_' itself
+// [orig: draw_text_with_cursor @ 0x6533b0 — the left-run measure, the
+//  (spacing-1)*design_scale + 1 gap terms (CGameFont_GetSpacingPad
+//  @ 0x6741e0), then the stretched '_' strike].
+void MenuFrameCompiler::emit_caret(hud::GameFont &gf, const std::string &text,
+		float x, float y, const WalkScale &s, uint32_t color, int caret) {
+	const fnt_font_t *font = gf.font();
+	const int len = static_cast<int>(text.size());
+	const int at = std::clamp(caret, 0, len);
+	int left_w = 0;
+	int left_h = 0;
+	if (at > 0) {
+		gf.measure(text.substr(0, static_cast<size_t>(at)).c_str(), 1.0f,
+				1.0f, &left_w, &left_h);
+	}
+	const float pad = static_cast<float>(font->glyph_spacing - 1) *
+					fnt_design_scale(font->design_width) +
+			1.0f;
+	float cursor_design_x = static_cast<float>(left_w);
+	if (left_w > 0) {
+		cursor_design_x += pad;
+	}
+	if (at > 0 && at < len) {
+		cursor_design_x += pad;
+	}
+	const char under = at < len ? text[static_cast<size_t>(at)] : '_';
+	const char under_str[2] = {under == '\0' ? '_' : under, '\0'};
+	int under_w = 0;
+	int under_h = 0;
+	gf.measure(under_str, 1.0f, 1.0f, &under_w, &under_h);
+	int bar_w = 0;
+	gf.measure("_", 1.0f, 1.0f, &bar_w, &under_h);
+	const float stretch = bar_w > 0
+			? static_cast<float>(under_w) / static_cast<float>(bar_w)
+			: 1.0f;
+	const hud::GameFontRun run = gf.layout("_",
+			x + cursor_design_x * s.x, y, s.x * stretch, s.y, 0u, color);
+	draw_list_.glyphs.insert(draw_list_.glyphs.end(), run.quads.begin(),
+			run.quads.end());
+}
+
+// The single-line text pass shared by the static family
+// [orig: CStaticWnd_DrawLabel @ 0x656fb0 — edge-inset available width,
+//  truncate-to-fit, justify from the truncated width, then the state-colored
+//  draw; the wrap path (+760 -> sub_653D60) is deferred (D-MNU-13)].
+void MenuFrameCompiler::emit_widget_text(const WidgetNode &node,
+		const mnu::RectEdges &rect, const WalkScale &s, int color_state,
+		const MenuWidgetState *ws, int caret) {
+	const mnu::Window &w = *node.window;
+	const std::string text = widget_text(node, ws);
+	if (text.empty()) {
+		return;
+	}
+	const int edge = w.string_data.has_edge ? w.string_data.edge : 0;
+	const int avail = (rect.right - rect.left) - 2 * edge;
+	if (avail < 1) {
+		return; // [orig: the < 1 early-out]
+	}
+	int full_w = 0;
+	int line_h = 0;
+	measure_text(node, text, &full_w, &line_h);
+	// Truncate to the largest prefix strictly below the span
+	// [orig: the prefix-measure loop @ 0x657199..0x6571e4].
+	std::string drawn = text;
+	int drawn_w = full_w;
+	if (full_w > avail) {
+		int fit = static_cast<int>(text.size());
+		for (int n = 1; n <= static_cast<int>(text.size()); ++n) {
+			int wpx = 0;
+			int hpx = 0;
+			measure_text(node, text.substr(0, static_cast<size_t>(n)), &wpx,
+					&hpx);
+			drawn_w = wpx;
+			if (wpx >= avail) {
+				fit = n - 1;
+				break;
+			}
+		}
+		drawn = text.substr(0, static_cast<size_t>(std::max(fit, 0)));
+	}
+	// Justify [orig: the +744 word — low nibble 1=center/2=right else left;
+	// high 0x10=vcenter/0x20=vbottom else top].
+	int x = rect.left;
+	if (iequals(w.string_data.justify, "center")) {
+		x = ((rect.right - rect.left) >> 1) - (drawn_w >> 1) + rect.left;
+	} else if (iequals(w.string_data.justify, "right")) {
+		x = rect.right - drawn_w;
+	}
+	int y = rect.top;
+	if (iequals(w.string_data.vjustify, "center")) {
+		y = ((rect.bottom - rect.top) >> 1) - (line_h >> 1) + rect.top;
+	} else if (iequals(w.string_data.vjustify, "bottom")) {
+		y = rect.bottom - line_h;
+	}
+	x += edge; // [orig: the edge term added into the draw x]
+	const int state = color_state >= 0 && color_state < 4 ? color_state : 0;
+	emit_glyph_run(node, drawn, x, y, s, node.colors[state], caret);
+}
+
+// The edit render [orig: CEditWnd_Render @ 0x6619e0]: focus forces visual
+// state 2; PASSWORD masks with '*'; the scroll window keeps the caret
+// visible; the caret blinks while (time & 0x3FF) > 0x200 and is drawn
+// relative to the scrolled text.
+void MenuFrameCompiler::emit_edit(int index, const WidgetNode &node,
+		const mnu::RectEdges &rect, const WalkScale &s, int visual,
+		const MenuFrameState &frame, const MenuWidgetState *ws) {
+	const mnu::Window &w = *node.window;
+	const bool focused = ws != nullptr && ws->focused && !w.readonly;
+	std::string text = widget_text(node, ws);
+	if (w.password) {
+		text.assign(text.size(), '*');
+	}
+	const bool blink_on = (frame.time_ms & 0x3FFu) > 0x200u;
+	if (text.empty()) {
+		// An empty focused edit still blinks its caret at the text anchor
+		// [orig: the cursor leg of draw_text_with_cursor @ 0x6533b0 runs for
+		//  the empty string — the char at the caret is the NUL -> '_'].
+		if (focused && blink_on) {
+			const fnt_font_t *font = font_for(node);
+			if (font != nullptr) {
+				hud::GameFont gf;
+				gf.set_font(font);
+				const int edge =
+						w.string_data.has_edge ? w.string_data.edge : 0;
+				int line_h = 0;
+				int tw = 0;
+				measure_text(node, "_", &tw, &line_h);
+				int y = rect.top;
+				if (iequals(w.string_data.vjustify, "center")) {
+					y = ((rect.bottom - rect.top) >> 1) - (line_h >> 1) +
+							rect.top;
+				} else if (iequals(w.string_data.vjustify, "bottom")) {
+					y = rect.bottom - line_h;
+				}
+				const size_t first = draw_list_.glyphs.size();
+				emit_caret(gf, std::string(), emit_x(rect.left + edge, s.x),
+						emit_x(y, s.y), s, node.colors[visual >= 0 && visual < 4
+													? visual
+													: 0],
+						0);
+				const size_t count = draw_list_.glyphs.size() - first;
+				if (count > 0) {
+					MenuDrawList::FontRun fr;
+					fr.font = node.font;
+					fr.first = static_cast<int32_t>(first);
+					fr.count = static_cast<int32_t>(count);
+					draw_list_.font_runs.push_back(fr);
+				}
+			}
+		}
+		return;
+	}
+	// The scroll window [orig: update_edit_scroll_range @ 0x661790 over
+	// start +792 / end +796, fitting via EditWnd_CountCharsFitting
+	// @ 0x6616b0]: caret before the window scrolls back; past the window
+	// scrolls forward so the caret is the last visible char.
+	EditScroll &scroll = edit_scroll_[index];
+	const int len = static_cast<int>(text.size());
+	const int caret =
+			ws != nullptr ? std::clamp(ws->caret, 0, len) : 0;
+	const int edge = w.string_data.has_edge ? w.string_data.edge : 0;
+	const int avail = (rect.right - rect.left) - 2 * edge;
+	auto fit_from = [&](int start) {
+		int n = 0;
+		while (start + n < len) {
+			int wpx = 0;
+			int hpx = 0;
+			measure_text(node,
+					text.substr(static_cast<size_t>(start),
+							static_cast<size_t>(n + 1)),
+					&wpx, &hpx);
+			if (wpx >= avail) {
+				break;
+			}
+			++n;
+		}
+		return n;
+	};
+	scroll.start = std::clamp(scroll.start, 0, len);
+	if (caret < scroll.start) {
+		scroll.start = caret;
+		scroll.end = scroll.start + fit_from(scroll.start);
+	} else if (caret > scroll.end || scroll.end > len) {
+		scroll.end = caret;
+		const int fit = fit_from(std::max(scroll.end - avail, 0));
+		scroll.start = std::max(scroll.end - std::max(fit, 1), 0);
+	} else if (scroll.end == 0 && len > 0) {
+		scroll.end = fit_from(scroll.start);
+	}
+	const std::string visible = text.substr(
+			static_cast<size_t>(scroll.start));
+	// The caret blink gate [orig: (GetTickCount() & 0x3FF) > 0x200
+	// @ 0x661c63]; -1 draws no caret.
+	int caret_draw = -1;
+	if (focused && blink_on) {
+		caret_draw = caret - scroll.start;
+	}
+	MenuWidgetState local;
+	if (ws != nullptr) {
+		local = *ws;
+	}
+	local.has_text = true;
+	local.text = visible;
+	emit_widget_text(node, rect, s, visual, &local, caret_draw);
+}
+
+// The checkbox label [orig: CCheckWnd_DrawLabel @ 0x64aa20]: non-AS_BUTTON
+// pins the label at rect.right + 2 with the h-justify ignored (v-justify
+// honored); AS_BUTTON honors both justifies inside the full rect. Colors
+// follow the RAW pump state, not the checked-forced slot.
+void MenuFrameCompiler::emit_checkbox_label(const WidgetNode &node,
+		const mnu::RectEdges &rect, const WalkScale &s, int color_state,
+		const MenuWidgetState *ws) {
+	const mnu::Window &w = *node.window;
+	const std::string text = widget_text(node, ws);
+	if (text.empty()) {
+		return;
+	}
+	int tw = 0;
+	int th = 0;
+	measure_text(node, text, &tw, &th);
+	int y = rect.top;
+	if (iequals(w.string_data.vjustify, "center")) {
+		y = ((rect.bottom - rect.top) >> 1) - (th >> 1) + rect.top;
+	} else if (iequals(w.string_data.vjustify, "bottom")) {
+		y = rect.bottom - th;
+	}
+	int x;
+	if (w.as_button) {
+		x = rect.left;
+		if (iequals(w.string_data.justify, "center")) {
+			x = ((rect.right - rect.left) >> 1) - (tw >> 1) + rect.left;
+		} else if (iequals(w.string_data.justify, "right")) {
+			x = rect.right - tw;
+		}
+	} else {
+		x = rect.right + 2; // [orig: label_rect.left = right + 2]
+	}
+	const int state = color_state >= 0 && color_state < 4 ? color_state : 0;
+	emit_glyph_run(node, text, x, y, s, node.colors[state], -1);
+}
+
+// The selected-item cell (spinlist; the combo closed cell shares it)
+// [orig: CSpinListWnd_Render @ 0x64b220 — text / native-size image aligned
+// per the ITEMS justify (spinlist default centre/centre) / full-rect opaque
+// color swatch].
+void MenuFrameCompiler::emit_item_cell(const WidgetNode &node,
+		const mnu::RectEdges &rect, const WalkScale &s, int color_state,
+		const MenuWidgetState *ws) {
+	const int selected = ws != nullptr ? ws->selected_item : 0;
+	if (selected < 0 || selected >= static_cast<int>(node.items.size())) {
+		return;
+	}
+	const WidgetNode::ItemVisual &item =
+			node.items[static_cast<size_t>(selected)];
+	const mnu::Window &w = *node.window;
+	const std::string &jh = w.items.justify;
+	const std::string &jv = w.items.vjustify;
+	switch (item.kind) {
+		case WidgetNode::ItemVisual::kColor: {
+			emit_rect_quad(rect, s, item.color, kMenuTexNone, false, 1.0f,
+					1.0f);
+			break;
+		}
+		case WidgetNode::ItemVisual::kImage: {
+			if (item.texture < 0) {
+				break;
+			}
+			const auto &size =
+					texture_sizes_[static_cast<size_t>(item.texture)];
+			const int iw = size.first;
+			const int ih = size.second;
+			int x = rect.left;
+			int y = rect.top;
+			if (jh.empty() || iequals(jh, "center")) {
+				x = rect.left + ((rect.right - rect.left) - iw) / 2;
+			} else if (iequals(jh, "right")) {
+				x = rect.right - iw;
+			}
+			if (jv.empty() || iequals(jv, "center")) {
+				y = rect.top + ((rect.bottom - rect.top) - ih) / 2;
+			} else if (iequals(jv, "bottom")) {
+				y = rect.bottom - ih;
+			}
+			emit_rect_quad({x, y, x + iw, y + ih}, s, 0xFFFFFFFFu,
+					item.texture, false, 1.0f, 1.0f);
+			break;
+		}
+		case WidgetNode::ItemVisual::kText: {
+			int tw = 0;
+			int th = 0;
+			measure_text(node, item.text, &tw, &th);
+			int x = rect.left;
+			int y = rect.top;
+			if (iequals(jh, "center")) {
+				x = rect.left + ((rect.right - rect.left) - tw) / 2;
+			} else if (iequals(jh, "right")) {
+				x = rect.right - tw;
+			}
+			if (iequals(jv, "center")) {
+				y = rect.top + ((rect.bottom - rect.top) - th) / 2;
+			} else if (iequals(jv, "bottom")) {
+				y = rect.bottom - th;
+			}
+			const int state =
+					color_state >= 0 && color_state < 4 ? color_state : 0;
+			emit_glyph_run(node, item.text, x, y, s, node.colors[state], -1);
+			break;
+		}
+	}
+}
+
+// List rows [orig: CListWnd_DrawItems @ 0x643f30]: each visible row first
+// draws the ITEMS per-state appearance for its style index (selection/hover
+// highlight) into the row rect, then the row text with the SAME style index
+// selecting the FONT color pair. Height = font "W" else MIN_ITEM_HEIGHT;
+// rows run from the scroll row and clip to the widget rect.
+void MenuFrameCompiler::emit_list_rows(const WidgetNode &node,
+		const mnu::RectEdges &rect, const WalkScale &s,
+		const MenuWidgetState *ws) {
+	const mnu::Window &w = *node.window;
+	int row_h = 0;
+	if (w.list_box.has_min_item_height && w.list_box.min_item_height >= 0) {
+		row_h = w.list_box.min_item_height;
+	} else {
+		int tw = 0;
+		measure_text(node, "W", &tw, &row_h);
+	}
+	if (row_h <= 0 || node.items.empty()) {
+		return;
+	}
+	const int selected = ws != nullptr ? ws->selected_item : -1;
+	const int hovered = ws != nullptr ? ws->hover_item : -1;
+	const int first = ws != nullptr ? std::max(ws->scroll_row, 0) : 0;
+	const int edge = w.string_data.has_edge ? w.string_data.edge : 0;
+	int y = rect.top;
+	for (int i = first; i < static_cast<int>(node.items.size()); ++i) {
+		if (y + row_h > rect.bottom) {
+			break;
+		}
+		const mnu::RectEdges row{rect.left, y, rect.right, y + row_h};
+		// The row style index: selection wins over hover
+		// [orig: the per-item style dword +12, data set by the widget].
+		int style = -1;
+		if (i == selected) {
+			style = kStateSelected;
+		} else if (i == hovered) {
+			style = kStateMouseover;
+		}
+		if (style >= 0 && node.items_states[style].present) {
+			const StatePass &pass = node.items_states[style];
+			// The row rect inflates -1 horizontally [orig: InflateRect -1,0].
+			const mnu::RectEdges hi{row.left + 1, row.top, row.right - 1,
+					row.bottom};
+			if (pass.has_color) {
+				emit_rect_quad(hi, s, pass.color, kMenuTexNone, false, 1.0f,
+						1.0f);
+			}
+			if (pass.texture >= 0) {
+				emit_rect_quad(hi, s, 0xFFFFFFFFu, pass.texture, false, 1.0f,
+						1.0f);
+			}
+			if (pass.has_outline) {
+				emit_outline(hi, s, pass.outline);
+			}
+		}
+		const WidgetNode::ItemVisual &item =
+				node.items[static_cast<size_t>(i)];
+		if (item.kind == WidgetNode::ItemVisual::kText && !item.text.empty()) {
+			const int color_state = style >= 0 ? style : kStateDefault;
+			emit_glyph_run(node, item.text, row.left + edge, row.top, s,
+					node.colors[color_state], -1);
+		}
+		y += row_h;
+	}
+}
+
+// The combo LIST_BOX popup at its authored combo-relative rect
+// [orig: CComboWnd_Render @ 0x65bfd0 — the embedded CListWnd child draws at
+// its own rect (D-MNU-7); rows per CListWnd_DrawItems @ 0x643f30].
+void MenuFrameCompiler::emit_combo_popup(const WidgetNode &node,
+		const mnu::RectEdges &rect, const WalkScale &s,
+		const MenuWidgetState *ws) {
+	const mnu::Window &w = *node.window;
+	if (!w.list_box.present) {
+		return;
+	}
+	const mnu::RectEdges local = mnu::position_rect(
+			w.list_box.position.has_left, w.list_box.position.left,
+			w.list_box.position.has_top, w.list_box.position.top,
+			w.list_box.position.has_right, w.list_box.position.right,
+			w.list_box.position.has_bottom, w.list_box.position.bottom, 0, 0);
+	const mnu::RectEdges popup = offset_rect(local, rect.left, rect.top);
+	// Popup background appearances (default state).
+	const StatePass &bg = node.popup_states[kStateDefault];
+	if (bg.has_color) {
+		emit_rect_quad(popup, s, bg.color, kMenuTexNone, false, 1.0f, 1.0f);
+	}
+	if (bg.texture >= 0) {
+		emit_rect_quad(popup, s, 0xFFFFFFFFu, bg.texture, false, 1.0f, 1.0f);
+	}
+	if (bg.has_outline) {
+		emit_outline(popup, s, bg.outline);
+	}
+	// Rows: authored nested collection wins even when empty, else the
+	// top-level items (the documented D-MNU-7/8 model).
+	const std::vector<WidgetNode::ItemVisual> &rows =
+			w.list_box.items.present ? node.popup_items : node.items;
+	int row_h = 0;
+	if (w.list_box.has_min_item_height && w.list_box.min_item_height >= 0) {
+		row_h = w.list_box.min_item_height;
+	} else {
+		int tw = 0;
+		measure_text(node, "W", &tw, &row_h);
+	}
+	if (row_h <= 0) {
+		return;
+	}
+	const int selected = ws != nullptr ? ws->selected_item : -1;
+	const int hovered = ws != nullptr ? ws->hover_item : -1;
+	const int edge = w.list_box.string_data.has_edge
+			? w.list_box.string_data.edge
+			: 0;
+	int y = popup.top;
+	for (int i = 0; i < static_cast<int>(rows.size()); ++i) {
+		if (y + row_h > popup.bottom) {
+			break;
+		}
+		const mnu::RectEdges row{popup.left, y, popup.right, y + row_h};
+		int style = -1;
+		if (i == selected) {
+			style = kStateSelected;
+		} else if (i == hovered) {
+			style = kStateMouseover;
+		}
+		const StatePass(&row_states)[4] = w.list_box.items.present
+				? node.popup_items_states
+				: node.items_states;
+		if (style >= 0 && row_states[style].present) {
+			const StatePass &pass = row_states[style];
+			const mnu::RectEdges hi{row.left + 1, row.top, row.right - 1,
+					row.bottom};
+			if (pass.has_color) {
+				emit_rect_quad(hi, s, pass.color, kMenuTexNone, false, 1.0f,
+						1.0f);
+			}
+			if (pass.texture >= 0) {
+				emit_rect_quad(hi, s, 0xFFFFFFFFu, pass.texture, false, 1.0f,
+						1.0f);
+			}
+		}
+		const WidgetNode::ItemVisual &item = rows[static_cast<size_t>(i)];
+		if (item.kind == WidgetNode::ItemVisual::kText && !item.text.empty()) {
+			const int color_state = style >= 0 ? style : kStateDefault;
+			emit_glyph_run(node, item.text, row.left + edge, row.top, s,
+					node.colors[color_state], -1);
+		}
+		y += row_h;
+	}
+}
+
+// Spin up/down arrows: parent-relative child windows sized by the
+// three-stage fallback over their appearance art
+// [orig: CSpinListWnd_CreateUpDownChildren @ 0x64b8b0].
+void MenuFrameCompiler::emit_spin_arrows(const WidgetNode &node,
+		const mnu::RectEdges &rect, const WalkScale &s) {
+	const mnu::Window &w = *node.window;
+	const auto emit_arrow = [&](const mnu::SpinButton &btn, int32_t slot) {
+		if (!btn.present || slot < 0) {
+			return;
+		}
+		const auto &size = texture_sizes_[static_cast<size_t>(slot)];
+		const mnu::RectEdges local = mnu::spin_button_rect(
+				btn.position.has_left, btn.position.left,
+				btn.position.has_top, btn.position.top,
+				btn.position.has_right, btn.position.right,
+				btn.position.has_bottom, btn.position.bottom, size.first,
+				size.second);
+		emit_rect_quad(offset_rect(local, rect.left, rect.top), s,
+				0xFFFFFFFFu, slot, false, 1.0f, 1.0f);
+	};
+	emit_arrow(w.spinup, node.spin_up_tex);
+	emit_arrow(w.spindown, node.spin_down_tex);
+}
+
+// The cursor pass [orig: CUIScene_DrawScreensAndCursor @ 0x63bf60]: the
+// hovered widget's inherited CURSOR texture, else the screen default, drawn
+// LAST at the raw mouse position at native texture size, UNSCALED (the
+// cursor never scales with the menu).
+void MenuFrameCompiler::emit_cursor(const MenuFrameState &state) {
+	if (!state.cursor_visible) {
+		return;
+	}
+	int32_t slot = kMenuTexNone;
+	for (const MenuWidgetState &ws : state.widgets) {
+		if (ws.hovered && ws.index >= 0 &&
+				ws.index < static_cast<int32_t>(nodes_.size())) {
+			slot = nodes_[static_cast<size_t>(ws.index)].cursor;
+			break;
+		}
+	}
+	if (slot < 0) {
+		slot = screen_cursor_;
+	}
+	if (slot < 0) {
+		return;
+	}
+	const auto &size = texture_sizes_[static_cast<size_t>(slot)];
+	if (size.first <= 0 || size.second <= 0) {
+		return;
+	}
+	MenuQuad quad;
+	quad.x0 = state.cursor_x;
+	quad.y0 = state.cursor_y;
+	quad.x1 = state.cursor_x + static_cast<float>(size.first);
+	quad.y1 = state.cursor_y + static_cast<float>(size.second);
+	quad.texture = slot;
+	draw_list_.quads.push_back(quad);
+}
+
+// --- the walk ----------------------------------------------------------------
+
+int MenuFrameCompiler::skip_widget(int index) const {
+	const WidgetNode &node = nodes_[static_cast<size_t>(index)];
+	int next = index + 1;
+	for (size_t c = 0; c < node.window->children.size(); ++c) {
+		next = skip_widget(next);
+	}
+	return next;
+}
+
+int MenuFrameCompiler::walk_widget(int index, int origin_x, int origin_y,
+		const MenuFrameState &state, const WalkScale &s) {
+	const WidgetNode &node = nodes_[static_cast<size_t>(index)];
+	const mnu::Window &w = *node.window;
+	const MenuWidgetState *ws = state_for(state, index);
+	int next = index + 1;
+	// The shown gate [orig: every Draw impl early-outs on the shown flag
+	// +224]. A hidden widget's subtree still consumes its indices.
+	bool shown = !w.hidden;
+	if (ws != nullptr) {
+		if (ws->hide) {
+			shown = false;
+		}
+		if (ws->show) {
+			shown = true;
+		}
+	}
+	if (!shown) {
+		for (size_t c = 0; c < w.children.size(); ++c) {
+			next = skip_widget(next);
+		}
+		return next;
+	}
+	const mnu::RectEdges local = solve_rect(node, ws);
+	const mnu::RectEdges rect = offset_rect(local, origin_x, origin_y);
+	const int pump = pump_visual_state(w, ws);
+	const bool checked =
+			ws != nullptr && ws->has_checked ? ws->checked : w.checked;
+	++draw_list_.widgets_drawn;
+	switch (w.type) {
+		case mnu::WindowType::Static:
+		case mnu::WindowType::Label:
+		case mnu::WindowType::Button:
+		case mnu::WindowType::Goto:
+		case mnu::WindowType::Marquee: {
+			// [orig: CStaticWnd_Render @ 0x657b10 — frame -> appearance ->
+			//  text -> children]
+			if (w.draw_frame) {
+				emit_frame(node, rect, s);
+			}
+			emit_appearance(node, rect, s,
+					appearance_state_with_fallback(node, pump));
+			emit_widget_text(node, rect, s, pump, ws, -1);
+			break;
+		}
+		case mnu::WindowType::Radio: {
+			// [orig: CRadioWnd_Render @ 0x656e20 — checked forces state 3
+			//  around the WHOLE static render: appearance AND label colors]
+			const int visual = checked ? kStateSelected : pump;
+			if (w.draw_frame) {
+				emit_frame(node, rect, s);
+			}
+			emit_appearance(node, rect, s,
+					appearance_state_with_fallback(node, visual));
+			emit_widget_text(node, rect, s, visual, ws, -1);
+			break;
+		}
+		case mnu::WindowType::CheckBox: {
+			// [orig: CCheckWnd_Render @ 0x64ae20 — checked forces slot 3
+			//  DIRECTLY (no availability fallback: an unauthored selected
+			//  slot draws nothing); the label uses the RAW pump state]
+			if (w.draw_frame) {
+				emit_frame(node, rect, s);
+			}
+			const int slot = checked
+					? kStateSelected
+					: appearance_state_with_fallback(node, pump);
+			emit_appearance(node, rect, s, slot);
+			emit_checkbox_label(node, rect, s, pump, ws);
+			break;
+		}
+		case mnu::WindowType::Edit:
+		case mnu::WindowType::MultilineEdit: {
+			// [orig: CEditWnd_Render @ 0x6619e0 — focus (non-readonly)
+			//  forces state 2 for appearance AND colors]
+			const bool focused = ws != nullptr && ws->focused && !w.readonly;
+			const int visual = focused ? kStateMouseover : pump;
+			if (w.draw_frame) {
+				emit_frame(node, rect, s);
+			}
+			emit_appearance(node, rect, s,
+					appearance_state_with_fallback(node, visual));
+			emit_edit(index, node, rect, s, visual, state, ws);
+			break;
+		}
+		case mnu::WindowType::SpinList: {
+			// [orig: CSpinListWnd_Render @ 0x64b220 + the arrow child
+			//  windows @ 0x64b8b0]
+			if (w.draw_frame) {
+				emit_frame(node, rect, s);
+			}
+			emit_appearance(node, rect, s,
+					appearance_state_with_fallback(node, pump));
+			emit_item_cell(node, rect, s, pump, ws);
+			emit_spin_arrows(node, rect, s);
+			break;
+		}
+		case mnu::WindowType::List:
+		case mnu::WindowType::Multi:
+		case mnu::WindowType::LanList: {
+			// [orig: CListWnd_DrawItems @ 0x643f30 — frame -> appearance ->
+			//  rows -> children]
+			if (w.draw_frame) {
+				emit_frame(node, rect, s);
+			}
+			emit_appearance(node, rect, s,
+					appearance_state_with_fallback(node, pump));
+			emit_list_rows(node, rect, s, ws);
+			break;
+		}
+		case mnu::WindowType::Combo: {
+			// [orig: CComboWnd_Render @ 0x65bfd0 — the closed cell, then the
+			//  embedded list child at its authored rect when open]
+			if (w.draw_frame) {
+				emit_frame(node, rect, s);
+			}
+			emit_appearance(node, rect, s,
+					appearance_state_with_fallback(node, pump));
+			if (!node.items.empty()) {
+				emit_item_cell(node, rect, s, pump, ws);
+			} else {
+				emit_widget_text(node, rect, s, pump, ws, -1);
+			}
+			if (ws != nullptr && ws->popup_open) {
+				emit_combo_popup(node, rect, s, ws);
+			}
+			break;
+		}
+		default: {
+			// [orig: CUIElement_Draw @ 0x64a8a0 — appearance BEFORE frame
+			//  for generic containers; TABLE/SCROLL/... interiors deferred
+			//  (D-MNU-13)]
+			emit_appearance(node, rect, s,
+					appearance_state_with_fallback(node, pump));
+			if (w.draw_frame) {
+				emit_frame(node, rect, s);
+			}
+			break;
+		}
+	}
+	// Children in authored array order [orig: the forward child walk — later
+	// siblings paint over earlier ones].
+	for (size_t c = 0; c < w.children.size(); ++c) {
+		next = walk_widget(next, rect.left, rect.top, state, s);
+	}
+	return next;
+}
+
+const MenuDrawList &MenuFrameCompiler::compile(const MenuFrameState &state,
+		float scale_x, float scale_y) {
+	draw_list_.quads.clear();
+	draw_list_.lines.clear();
+	draw_list_.glyphs.clear();
+	draw_list_.underlines.clear();
+	draw_list_.font_runs.clear();
+	draw_list_.widgets_drawn = 0;
+	if (screen_ == nullptr || nodes_.empty()) {
+		return draw_list_;
+	}
+	WalkScale s;
+	s.x = scale_x;
+	s.y = scale_y;
+	walk_widget(0, 0, 0, state, s);
+	emit_cursor(state);
+	return draw_list_;
+}
+
+} // namespace opennova::menu
