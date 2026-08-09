@@ -66,6 +66,17 @@ only untyped thing left.
    same meaning: a `[orig:]` cite in Godot-side C++ is either a documented
    seam contract or code that belongs engine-side.
 
+5. **The `Nova` class prefix retires.** Registered classes and GDScript
+   `class_name`s are the engine's first-class concepts — `Simulation`,
+   `ObjectModel`, `Terrain`, `EntityIndex` — not branded wrappers.
+   Exceptions, each for a reason: `NovaWorld*` keeps its name because
+   NovaWorld is the SERVICE's proper noun (the matchmaking system we speak
+   the wire protocol of), and three classes whose bare names Godot's global
+   ClassDB already owns take honest specific names instead
+   (`MissionEnvironment`, `SkyDome`, `WindowState`). File names keep their
+   `nova_` prefix for now — directories already namespace them, and the
+   directive is about the concepts, not the files.
+
 ## Consequences
 
 - The no-duck-typing doctrine loses its last excuse: with no hypothetical
