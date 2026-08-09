@@ -98,7 +98,7 @@ var _last_status: String = ""
 var _dirty_cache: int = -1
 # The placer that built the current world, retained so place-new can render one entity
 # incrementally (reusing its model + batch caches) instead of rebuilding everything.
-var _placer  # MissionObjectPlacer (preloaded, no class_name)
+var _placer: MissionObjectPlacer = null
 
 # --- Authoring (Phase 1) state ------------------------------------------------
 # Pickable index harvested from the placer (edit_mode): one record per (entity,
@@ -155,6 +155,10 @@ var _selected_ref: Dictionary = {}
 # node, plus its tracked container-local transform and authored rotation (degrees).
 var _selected_records: Array = []
 var _selected_node: Node3D
+# Typed twin of _selected_node for the animated case: the placer's NovaObjectModel when the
+# selection is an animated record's node, else null. Assigned/cleared in lockstep with
+# _selected_node; the PLAYPARTANIM preview's selection fallback reads it directly.
+var _selected_model: NovaObjectModel = null
 var _selected_graphic := ""
 # For an animated selection, the model's ground-anchor offset (Transform3D applied
 # as node.transform = entity_xform * offset). Static entities bake the same offset
@@ -165,11 +169,12 @@ var _selected_xform: Transform3D = Transform3D.IDENTITY
 var _selected_rotation_deg: Vector3 = Vector3.ZERO
 var _selected_user_point_overlay: ObjectUserPointOverlay
 var _selected_user_points_visible := false
-# In-editor PLAYPARTANIM preview: the model node currently being previewed (or null), plus a registry
+# In-editor PLAYPARTANIM preview: the model currently being previewed (or null), plus an index
 # (cached, rebuilt when the entity set changes via _membership_rev) to resolve a scripting action's
-# target SSN/group/zone to its live model -- the same MissionEntityRegistry the runtime mount uses.
-var _preview_node: Node3D
-var _preview_registry
+# target SSN/group/zone to its live model -- the same NovaEntityIndex the runtime owner builds,
+# over the same construction-time placer registrations.
+var _preview_node: NovaObjectModel = null
+var _preview_registry: NovaEntityIndex = null
 var _preview_registry_rev: int = -1
 # Drag session: _drag_active spans press..release; _drag_moved gates the commit so a
 # plain click only selects.

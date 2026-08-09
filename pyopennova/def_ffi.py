@@ -228,6 +228,9 @@ class DefItemDef(ctypes.Structure):
         # Person-item firing and lifetime fields appended C-side after the raw
         # source lines; keep them here so entries[] retains the native stride.
         ("ammo_closeattack", ctypes.c_char * 32),
+        # items.def launchups_closeattack: the def-authored AI muzzle
+        # userpoint name (world-wac-ai-re §21.2).
+        ("launchups_closeattack", ctypes.c_char * 32),
         ("clipsize", ctypes.c_int),
         ("deathtime_ticks", ctypes.c_int),
         # Emplacement weapon link ('primary_weapon'; empty = key absent; mirror def.h).

@@ -478,6 +478,7 @@ func _select(kind: int, index: int) -> void:
 	_c._selected_ref = { "kind": kind, "index": index }
 	_c._selected_records = []
 	_c._selected_node = null
+	_c._selected_model = null
 	_c._selected_graphic = ""
 	_c._selected_node_offset = Transform3D.IDENTITY
 	var graphic := ""
@@ -489,9 +490,12 @@ func _select(kind: int, index: int) -> void:
 			# ref would dangle through _apply_selected_xform. A dropped record just means no
 			# box / no drag handle for that slot, not a crash.
 			if bool(rec.get("animated", false)):
-				var node = rec.get("node")
+				# An animated record's node IS the placer's NovaObjectModel (its {model, ref}
+				# registration), so the typed twin binds alongside the Node3D handle.
+				var node: NovaObjectModel = rec.get("node")
 				if node != null and is_instance_valid(node):
 					_c._selected_node = node
+					_c._selected_model = node
 					_c._selected_node_offset = rec.get("offset", Transform3D.IDENTITY)
 			else:
 				var mmi = rec.get("mmi")
@@ -527,6 +531,7 @@ func _deselect() -> void:
 	_c._selected_ref = {}
 	_c._selected_records = []
 	_c._selected_node = null
+	_c._selected_model = null
 	_c._selected_graphic = ""
 	_c._selected_node_offset = Transform3D.IDENTITY
 	_c._selected_collider = null
@@ -580,9 +585,10 @@ func _free_selected_user_points_overlay() -> void:
 # --- In-editor PLAYPARTANIM preview -------------------------------------------
 # Play a scripting PLAYPARTANIM action's part animation on its target model in the editor viewport so an
 # author can see the motion without launching the game. Reuses the runtime path: it resolves the action's
-# target (SSN / group / zone) through the same MissionEntityRegistry the mount uses, then drives
-# NovaObjectModel.restart_part_anim (a clean-from-rest variant of the runtime play_part_anim). The placed
-# model already _process-ticks in the viewport, so the sweep animates live.
+# target (SSN / group / zone) through the same NovaEntityIndex the runtime owner builds (over the placer's
+# construction-time {model, ref} registrations), then drives NovaObjectModel.restart_part_anim (a
+# clean-from-rest variant of the runtime play_part_anim). The placed model already _process-ticks in the
+# viewport, so the sweep animates live.
 
 # Move the selected entity so its origin sits at a world-space ground point: keep the
 # current rotation, only the origin tracks the cursor.
@@ -916,6 +922,7 @@ func _reset_selection_state() -> void:
 	_c._selected_ref = {}
 	_c._selected_records = []
 	_c._selected_node = null
+	_c._selected_model = null
 	_c._selected_graphic = ""
 	_c._selected_node_offset = Transform3D.IDENTITY
 	_c._selected_xform = Transform3D.IDENTITY

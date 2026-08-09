@@ -52,7 +52,7 @@ var _panm_clock: NovaPanmClock = null
 var _env_state: NovaEnvLightState = null
 ## The typed entity registrations from the last place()/place_single() —
 ## {model: NovaObjectModel, ref: Dictionary} per animatable entity. The
-## MissionEntityRegistry indexes THIS list; nothing scans scene children.
+## NovaEntityIndex indexes THIS list; nothing scans scene children.
 var placed_entity_records: Array = []
 
 # When true, place() also records a per-entity pickable index in pickable_records
@@ -308,7 +308,7 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 			entity.get("rotation_deg", Vector3.ZERO))
 		if _needs_individual_node(item_id) or _graphic_needs_live_panm(graphic):
 			# Always capture identity (not just edit_mode): the runtime needs it to tag the node so
-			# MissionEntityRegistry can resolve SSN/group/zone event-action targets to this live model.
+			# NovaEntityIndex can resolve SSN/group/zone event-action targets to this live model.
 			animated.append({
 				"graphic": graphic,
 				"item_id": item_id,
@@ -520,7 +520,7 @@ func place(mission: NovaMissionData, parent: Node3D, options: Dictionary = {}) -
 					String(a.get("graphic", "")),
 					Transform3D.IDENTITY,
 					"live%d" % stats.animated)
-		# Tag identity on the node in BOTH runtime + editor so MissionEntityRegistry can resolve
+		# Tag identity on the node in BOTH runtime + editor so NovaEntityIndex can resolve
 		# SSN/group/zone event-action targets (e.g. PLAYPARTANIM) back to this live model. Picking +
 		# colliders stay editor-only.
 		var ref := {

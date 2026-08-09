@@ -32,7 +32,7 @@ authoring/preview surfaces (`godot/modtools/`):
     water / sky / weather — heavily `[orig]`-cited, shared by the game and the
     Terrain/Object editors),
     `mission/` (object placer + model resolver; the editor-only authoring overlays
-    live in `modtools/mission/`), `object/` (`nova_object_model.gd`, collision
+    live in `modtools/mission/`), `object/` (collision
     hulls), `mcp/` (shell-agnostic MCP server core: booted by ONED's
     `modtools/mcp/` on the stable editor port, and by the game's
     `game/game_mcp_service.gd` as the arg-gated ephemeral runtime endpoint),

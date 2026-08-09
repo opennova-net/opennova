@@ -23,8 +23,9 @@ func _abs(res_path: String) -> String:
 
 
 # A minimal terrain-editor stand-in exposing only the seams the controller calls.
-# Intentionally omits get_environment_editor/get_environment_node so the env step
-# is skipped (kept out of these terrain-focused tests).
+# Intentionally omits get_environment_editor so the env-load step is skipped
+# (kept out of these terrain-focused tests); get_environment_node is part of the
+# typed seam surface and returns null, which skips the placer's env wiring.
 class StubTerrainEditor:
 	extends Node
 
@@ -53,6 +54,10 @@ class StubTerrainEditor:
 
 	func get_resource_root() -> NovaResourceRoot:
 		return resource_root
+
+	# No live environment in the headless fixture: null skips _wire_placer_environment.
+	func get_environment_node() -> NovaEnvironment:
+		return null
 
 	func get_height_revision() -> int:
 		return height_revision
@@ -88,21 +93,6 @@ class StubTerrainEditor:
 
 	func is_valid_terrain_hit(_hit: Vector3) -> bool:
 		return terrain_hit_valid
-
-
-class FakeUserPointPlacer:
-	extends RefCounted
-
-	var data: NovaObjectData
-
-	func _init(p_data: NovaObjectData) -> void:
-		data = p_data
-
-	func object_data_for(_graphic: String) -> NovaObjectData:
-		return data
-
-	func ground_anchor_godot(_graphic: String) -> Vector3:
-		return Vector3.ZERO
 
 
 # A resource root over the repo's real dvxi5 terrain fixture (the terrain the test
@@ -328,7 +318,12 @@ func test_selected_userpoint_overlay_uses_shared_script_and_tracks_transform() -
 	add_child_autofree(world_root)
 	add_child_autofree(stub)
 	var controller := MissionController.new(stub)
-	controller._placer = FakeUserPointPlacer.new(data)
+	# A REAL placer with the parsed House registered through its documented asset-free
+	# construction seam, so object_data_for("House") resolves without a resource root.
+	var placer := Placer.new(null, null)
+	assert_true(placer.register_resolved_static_graphic("House", data, [{ "mesh": BoxMesh.new() }]),
+		"the placer accepts the pre-parsed House registration")
+	controller._placer = placer
 	controller._selected_ref = { "kind": NovaMissionData.KIND_BUILDING, "index": 0 }
 	controller._selected_graphic = "House"
 	controller._selected_xform = Transform3D(Basis(), Vector3(1.0, 2.0, 3.0))
@@ -2589,33 +2584,15 @@ func test_move_selected_event_action_reorders_the_chain() -> void:
 
 
 # --- Phase 4: PLAYPARTANIM in-editor preview ----------------------------------
-# The preview resolves a scripting action's target to its live model (the same MissionEntityRegistry the
-# runtime owner uses) and drives it. Asset-free: a fake model tagged with entity_ref under a synthetic
-# MissionObjects container (no .3di / real mission needed for routing).
+# The preview resolves a scripting action's target to its live model (the same NovaEntityIndex the
+# runtime owner builds, over the placer's construction-time {model, ref} registrations) and drives
+# it. Asset-free: a REAL NovaObjectModel with no object data — the part-anim channel state
+# (get_active_part_anims / get_ctrl_values / is_playing / get_animation_time_ms) is the observable.
 
-class FakeModel:
-	extends NovaEntityVisual
-	var play_calls: Array = []
-	var restart_calls: Array = []
-	var playing: bool = false
-	var reset_calls: int = 0
-	var cleared: int = 0
-	func _play_part_anim(channel: int, play_type: int, time_s: float) -> void:
-		play_calls.append([channel, play_type, time_s])
-	func _restart_part_anim(channel: int, play_type: int, time_s: float) -> void:
-		restart_calls.append([channel, play_type, time_s])
-	func set_playing(v: bool) -> void:
-		playing = v
-	func reset_animation_time() -> void:
-		reset_calls += 1
-	func clear_part_anims() -> void:
-		cleared += 1
-	func clear_ctrl_values() -> void:
-		pass
-
-
-# A controller whose world has a MissionObjects container holding one animatable model tagged with the
-# given bms_id, so the preview resolver can find it. Returns { controller, model }.
+# A controller whose placer registers one real animatable model under the given bms_id — the same
+# construction-time channel MissionObjectPlacer.place() records and the preview index reads. The
+# harness assigns the retained placer directly, mirroring what a load retains. Returns
+# { controller, model }.
 func _controller_with_model(bms_id: int) -> Dictionary:
 	var stub := StubTerrainEditor.new()
 	add_child_autofree(stub)
@@ -2625,10 +2602,16 @@ func _controller_with_model(bms_id: int) -> Dictionary:
 	var container := Node3D.new()
 	container.name = "MissionObjects"
 	world_root.add_child(container)
-	var model := FakeModel.new()
-	model.set_meta("entity_ref", { "kind": 1, "index": 0, "bms_id": bms_id, "group": 4, "team": 0, "position": Vector3.ZERO })
+	var model := NovaObjectModel.new()
 	container.add_child(model)
-	return { "controller": MissionController.new(stub), "model": model }
+	model.set_process(false)
+	var ref := { "kind": 1, "index": 0, "bms_id": bms_id, "group": 4, "team": 0, "position": Vector3.ZERO }
+	model.set_meta("entity_ref", ref)
+	var placer := Placer.new(null, null)
+	placer.placed_entity_records.append({ "model": model, "ref": ref })
+	var controller := MissionController.new(stub)
+	controller._placer = placer
+	return { "controller": controller, "model": model }
 
 
 func _ppa_action(action_type: int, target: int, channel: int, play_type: int, time_raw: int) -> Dictionary:
@@ -2640,15 +2623,21 @@ func _ppa_action(action_type: int, target: int, channel: int, play_type: int, ti
 
 func test_preview_part_anim_routes_to_target_model() -> void:
 	var ctx := _controller_with_model(1001)
-	var model: FakeModel = ctx.model
+	var model: NovaObjectModel = ctx.model
+	model.set_playing(false)  # so the preview's set_playing(true) leg is observable
 	var ok: bool = ctx.controller.preview_part_anim(_ppa_action(21, 1001, 2, 1, 131072))  # ChangeSingleAI, 2.0s
 	assert_true(ok, "preview resolves the target and returns true")
-	assert_eq(model.restart_calls.size(), 1, "the model is restarted for a clean preview")
-	var call: Array = model.restart_calls[0]
-	assert_eq(int(call[0]), 2, "channel forwarded")
-	assert_eq(int(call[1]), 1, "play type forwarded")
-	assert_almost_eq(float(call[2]), 2.0, 0.0001, "time (raw 16.16) -> seconds")
-	assert_true(model.playing, "the model is set playing for the preview")
+	# The restart lands as one live part-anim channel: channel 2 -> slot 1 ->
+	# the VEHICLE_SPECIAL2 register (nova_object_model_anim.cpp kPartAnimCtrlNames).
+	var anims: Dictionary = model.get_active_part_anims()
+	assert_eq(anims.size(), 1, "the model is restarted for a clean preview")
+	assert_true(anims.has("VEHICLE_SPECIAL2"), "channel 2 drives the VEHICLE_SPECIAL2 register")
+	var entry: Dictionary = anims.get("VEHICLE_SPECIAL2", {})
+	assert_eq(int(entry.get("dir", 0)), 1, "play type forwarded as the sweep direction")
+	assert_eq(int(entry.get("rate", -1)), NovaObjectData.part_anim_rate_for_seconds(2.0),
+		"time (raw 16.16) -> seconds reaches the witnessed rate")
+	assert_eq(int(entry.get("value", -1)), 0, "a forward restart seeds the sweep from rest (phase 0)")
+	assert_true(model.is_playing(), "the model is set playing for the preview")
 
 
 func test_can_preview_part_anim_reflects_target_resolution() -> void:
@@ -2660,30 +2649,33 @@ func test_can_preview_part_anim_reflects_target_resolution() -> void:
 
 func test_preview_no_target_returns_false() -> void:
 	var ctx := _controller_with_model(1001)
-	var model: FakeModel = ctx.model
+	var model: NovaObjectModel = ctx.model
 	var ok: bool = ctx.controller.preview_part_anim(_ppa_action(21, 9999, 1, 1, 65536))
 	assert_false(ok, "no resolvable target -> false")
-	assert_eq(model.restart_calls.size(), 0, "and nothing is played")
+	assert_true(model.get_active_part_anims().is_empty(), "and nothing is played")
 
 
 func test_stop_preview_returns_model_to_rest() -> void:
 	var ctx := _controller_with_model(1001)
-	var model: FakeModel = ctx.model
+	var model: NovaObjectModel = ctx.model
 	ctx.controller.preview_part_anim(_ppa_action(21, 1001, 1, 1, 65536))
-	var cleared_before := model.cleared
+	assert_false(model.get_active_part_anims().is_empty(), "the preview registered a live channel")
+	assert_false(model.get_ctrl_values().is_empty(), "the restart seeded the channel's control register")
 	ctx.controller.stop_preview()
-	assert_gt(model.cleared, cleared_before, "stop clears the running part anims")
+	assert_true(model.get_active_part_anims().is_empty(), "stop clears the running part anims")
+	assert_true(model.get_ctrl_values().is_empty(), "stop clears the preview's control registers")
+	assert_eq(int(model.get_animation_time_ms()), 0, "stop rewinds the animation clock to rest")
 	ctx.controller.stop_preview()  # idempotent: safe to call again
 	pass_test("stop_preview is safe to call twice")
 
 
 func test_deselect_stops_preview() -> void:
 	var ctx := _controller_with_model(1001)
-	var model: FakeModel = ctx.model
+	var model: NovaObjectModel = ctx.model
 	ctx.controller.preview_part_anim(_ppa_action(21, 1001, 1, 1, 65536))
-	var cleared_before := model.cleared
+	assert_false(model.get_active_part_anims().is_empty(), "the preview registered a live channel")
 	ctx.controller._viewport._deselect()
-	assert_gt(model.cleared, cleared_before, "a selection change stops any running preview")
+	assert_true(model.get_active_part_anims().is_empty(), "a selection change stops any running preview")
 
 
 # The mission controller owns authoring only. Game execution is launched by the

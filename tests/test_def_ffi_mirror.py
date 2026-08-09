@@ -178,6 +178,14 @@ def test_pyopennova_items_stride_reads_every_entry():
         fx = ifl.entries[0].particlefx
         assert fx.effect.decode() == "Effect_whiteExhaust"
         assert fx.userpoint.decode() == "FX00"
+        # The appended launchups_closeattack field rides the far end of the
+        # stride: the wire rifleman's authored AI muzzle name is the canary.
+        launchups = {
+            ifl.entries[i].display_name.decode(): (
+                ifl.entries[i].launchups_closeattack.decode())
+            for i in range(ifl.count)
+        }
+        assert launchups["Wire Test Rifleman"] == "mflash01"
     finally:
         py_def.free_items_def(ifl)
     assert names == ITEMS_HEAD

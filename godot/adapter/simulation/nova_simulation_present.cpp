@@ -1168,7 +1168,7 @@ PackedFloat32Array NovaSimulation::present_snapshot_from_client_replicas() const
 				r, es, cs, replica_present_context);
 
 		// On the HOST listen server, kind/index/bms_id/net_id resolve from the authored
-		// registry entity behind the decoded handle, so MissionEntityRegistry can defer
+		// registry entity behind the decoded handle, so NovaEntityIndex can defer
 		// that row to MissionPresentPass. A production header-only joiner instead presents
 		// every streamed row wire-direct: pools 1-3 have exact-handle native gameplay rows,
 		// but those rows carry the spawn-origin sentinel and therefore no authored-node

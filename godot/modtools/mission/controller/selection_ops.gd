@@ -62,9 +62,7 @@ func get_selection_summary() -> Dictionary:
 
 func selected_has_user_points() -> bool:
 	var data := _selected_object_data()
-	return data != null \
-		and data.has_method("get_user_point_count") \
-		and data.get_user_point_count() > 0
+	return data != null and data.get_user_point_count() > 0
 
 
 func is_selected_user_points_visible() -> bool:
@@ -81,8 +79,6 @@ func _selected_object_data() -> NovaObjectData:
 	if _c._selected_ref.is_empty() or _c._selected_graphic.is_empty() or _c._placer == null:
 		return null
 	if int(_c._selected_ref.get("kind", -1)) == NovaMissionData.KIND_MARKER:
-		return null
-	if not _c._placer.has_method("object_data_for"):
 		return null
 	return _c._placer.object_data_for(_c._selected_graphic)
 

@@ -6,6 +6,7 @@ extends GutTest
 # engine path without introducing a second editor gameplay runtime.
 
 const MissionRuntime := preload("res://adapter/world/mission_runtime.gd")
+const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
 const ItemSeatSpecs := preload("res://adapter/world/item_seat_specs.gd")
 
 
@@ -116,17 +117,6 @@ func test_wire_type_ids_install_the_same_late_vehicle_metadata() -> void:
 	assert_eq(int(spec.get("mount_config", -1)), 4)
 
 
-# An animatable placed entity: play_part_anim marks it for the registry, set_part_phase + Node3D
-# transform/visible let the present pass drive it.
-class FakeModel:
-	extends NovaEntityVisual
-	var phases: Array = []
-	func _play_part_anim(_channel: int, _play_type: int, _time_s: float) -> void:
-		pass
-	func _set_part_phase(channel: int, phase: int) -> void:
-		phases.append([channel, phase])
-
-
 class FireAudioStub:
 	extends RefCounted
 	var calls: Array = []
@@ -195,8 +185,12 @@ class CatchupEffectWorld:
 			active_poses.append(pose)
 
 
-# Build a one-organic mission + a container holding one fake node tagged to match it by (kind,index)
-# (the in-memory mission has bms_id 0, so the present index resolves by the fallback key).
+# Build a one-organic mission + a real placer registering one real NovaObjectModel for it by
+# (kind,index) — the in-memory mission has bms_id 0, so the present index resolves by the fallback
+# key. The runtime builds its NovaEntityIndex from options.placer's construction-time
+# placed_entity_records ({model, ref} — the channel MissionObjectPlacer.place() records; never a
+# container scan), so the harness registers through that same channel and every setup below passes
+# {"placer": w.placer}. The tests assert only Node3D position/visible on the model.
 func _make_world(authored: Transform3D) -> Dictionary:
 	var md := NovaMissionData.new()
 	assert_eq(md.create_default(), OK)
@@ -204,18 +198,22 @@ func _make_world(authored: Transform3D) -> Dictionary:
 
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var model := FakeModel.new()
-	model.transform = authored
-	model.set_meta("entity_ref", { "kind": 3, "index": 0, "bms_id": 0, "group": -1 })
+	var model := NovaObjectModel.new()
 	container.add_child(model)
-	return { "mission": md, "container": container, "model": model }
+	model.set_process(false)
+	model.transform = authored
+	var ref := { "kind": 3, "index": 0, "bms_id": 0, "group": -1, "team": -1, "position": Vector3.ZERO }
+	model.set_meta("entity_ref", ref)
+	var placer := MissionObjectPlacer.new(null, null)
+	placer.placed_entity_records.append({ "model": model, "ref": ref })
+	return { "mission": md, "container": container, "model": model, "placer": placer }
 
 
 func test_setup_promotes_and_counts() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
-	var count := int(rt.setup(w.mission, w.container))
+	var count := int(rt.setup(w.mission, w.container, {"placer": w.placer}))
 	# P7: every preview is the in-process listen server, so the host player auto-spawns at bring-up —
 	# the world is the one authored organic + the host player.
 	assert_eq(count, 2, "one organic + the auto-spawned host player")
@@ -229,7 +227,7 @@ func test_stats_and_manual_probe_share_one_native_profiling_owner_gate() -> void
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
 	rt.set_frame_stats_board(board)
-	rt.setup(w.mission, w.container)
+	rt.setup(w.mission, w.container, {"placer": w.placer})
 	var sim := rt.get_sim()
 	assert_false(sim.is_runtime_profiling_enabled(),
 			"an attached but closed Stats board leaves native profiling off")
@@ -282,6 +280,7 @@ func test_transport_is_locked_out_of_a_live_net_session() -> void:
 	assert_gt(int(rt.setup(w.mission, w.container, {
 		"simulation": joiner,
 		"net_transport": "lan-join",
+		"placer": w.placer,
 	})), 0)
 
 	assert_true(rt.is_transport_locked(), "a joiner runtime reports a locked transport")
@@ -299,7 +298,7 @@ func test_transport_still_works_for_a_local_runtime() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
-	assert_gt(int(rt.setup(w.mission, w.container)), 0)
+	assert_gt(int(rt.setup(w.mission, w.container, {"placer": w.placer})), 0)
 	# A directly instantiated runtime has no bound socket or peers, so it is not
 	# a live net session and keeps its transport.
 	assert_false(rt.is_transport_locked(),
@@ -329,6 +328,7 @@ func test_joiner_runtime_owns_fire_and_throwable_presenters() -> void:
 		"simulation": joiner,
 		"join_target": target,
 		"fire_audio": func(): return audio,
+		"placer": w.placer,
 	})), 0)
 
 	var fire_stats := rt.get_fire_present_stats()
@@ -377,8 +377,7 @@ func test_wire_presenter_resets_with_runtime_stop() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
-	var placer := RefCounted.new()
-	rt.setup(w.mission, w.container, {"placer": placer})
+	rt.setup(w.mission, w.container, {"placer": w.placer})
 	var wire_present := rt.get_wire_presenter()
 	assert_not_null(wire_present)
 	var reset_wire := Callable(wire_present, "reset_runtime_state")
@@ -392,7 +391,7 @@ func test_presentation_clock_survives_setup_and_forwards_immediately() -> void:
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
 	rt.set_presentation_time_ms(0x1ffffffff)
-	rt.setup(w.mission, w.container)
+	rt.setup(w.mission, w.container, {"placer": w.placer})
 	assert_eq(rt.get_sim().get_panm_time_ms(), 0xffffffff,
 		"preconfigured clock is injected after mission-load reset")
 	rt.set_presentation_time_ms(1234)
@@ -407,6 +406,7 @@ func test_setup_exposes_normalized_diagnostic_mission_identity() -> void:
 	rt.setup(w.mission, w.container, {
 		"debug_mission_file": "C:\\missions\\00TRe.bms",
 		"debug_mission_name": "Training Grounds",
+		"placer": w.placer,
 	})
 	assert_eq(rt.get_mission_file(), "00TRe.bms",
 			"diagnostics expose a portable basename, never the editor's local path")
@@ -419,7 +419,7 @@ func test_tick_presents_sim_position_onto_node() -> void:
 	var w := _make_world(Transform3D(Basis(), Vector3(99, 99, 99)))
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container)
+	rt.setup(w.mission, w.container, {"placer": w.placer})
 	rt.step_once()
 	var sim_pos: Vector3 = rt.get_sim().get_entity_position(0)
 	assert_true((w.model as Node3D).position.is_equal_approx(sim_pos),
@@ -441,7 +441,7 @@ func test_tick_and_step_advance_and_present_like_the_game() -> void:
 	var w := _make_world(Transform3D(Basis(), Vector3(99, 99, 99)))
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container)
+	rt.setup(w.mission, w.container, {"placer": w.placer})
 	assert_true(rt.tick(), "tick() advances one logic tick")
 	rt.step_once()
 	var sim_pos: Vector3 = rt.get_sim().get_entity_position(0)
@@ -480,7 +480,7 @@ func test_tick_realtime_accumulates_fixed_quanta() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container)
+	rt.setup(w.mission, w.container, {"placer": w.placer})
 	rt.play()
 	# 0.1 s of wall-clock at 62.5 Hz = floor(0.1 / 0.016) = 6 ticks.
 	assert_eq(rt.tick_realtime(0.1), 6, "0.1 s banks 6 fixed-step ticks")
@@ -493,7 +493,7 @@ func test_tick_realtime_clamps_catchup() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container)
+	rt.setup(w.mission, w.container, {"placer": w.placer})
 	rt.play()
 	# 1.0 s would be ~62 ticks; the spiral-of-death clamp caps a single frame's
 	# catch-up at the native world::TickAccumulator::kMaxCatchupTicks (S14).
@@ -506,7 +506,7 @@ func test_tick_realtime_ignored_when_not_playing() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container)
+	rt.setup(w.mission, w.container, {"placer": w.placer})
 	# Not played -> paused -> banks nothing regardless of elapsed wall-clock (no burst on Play).
 	assert_eq(rt.tick_realtime(1.0), 0, "a paused runtime banks nothing")
 	rt.play()
@@ -517,7 +517,7 @@ func test_tick_realtime_still_presents_a_zero_tick_render_frame() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container)
+	rt.setup(w.mission, w.container, {"placer": w.placer})
 	rt.play()
 	assert_eq(rt.tick_realtime(MissionRuntime.TICK_DT), 1,
 			"seed one decoded presentation snapshot")
@@ -533,7 +533,7 @@ func test_tick_realtime_presents_latest_state_once() -> void:
 	var w := _make_world(Transform3D(Basis(), Vector3(99, 99, 99)))
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container)
+	rt.setup(w.mission, w.container, {"placer": w.placer})
 	rt.play()
 	assert_gt(rt.tick_realtime(0.1), 0, "the batch ran at least one tick")
 	var sim_pos: Vector3 = rt.get_sim().get_entity_position(0)
@@ -548,7 +548,7 @@ func test_catchup_exposes_each_fixed_ticks_pose_before_batched_presentation() ->
 	var w := _make_world(authored)
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container)
+	rt.setup(w.mission, w.container, {"placer": w.placer})
 	var entity_ref := {"kind": 3, "index": 0, "bms_id": 0}
 	var observed: Array = []
 	rt.fixed_tick_completed.connect(func(_logic_tick: int) -> void:
@@ -587,6 +587,7 @@ func test_catchup_advances_round_move_effect_at_each_live_pose_and_stops_before_
 	rt.setup(w.mission, w.container, {
 		"fire_fx": func() -> Variant: return effect_world,
 		"game_world": anchor_mount,
+		"placer": w.placer,
 	})
 	var def_root := NovaResourceRoot.new()
 	def_root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/def"))
@@ -675,7 +676,7 @@ func _run_realtime(step: float, count: int) -> Dictionary:
 	var w := _make_world(Transform3D.IDENTITY)
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container)
+	rt.setup(w.mission, w.container, {"placer": w.placer})
 	rt.play()
 	var ticks := 0
 	for _i in range(count):

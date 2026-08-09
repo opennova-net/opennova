@@ -95,7 +95,7 @@ static func _mission_kind_for_wire_handle(handle: int) -> int:
 			return -1
 
 
-# defer_index: the MissionEntityRegistry — any wire row that resolves to an authored placed
+# defer_index: the NovaEntityIndex — any wire row that resolves to an authored placed
 # node is rendered by MissionPresentPass instead. On the HOST that leaves admitted joiners.
 # A production header-only JOINER passes no defer index and draws every remote row; an
 # explicit complete-BMS/debug join can still defer its authored nodes.

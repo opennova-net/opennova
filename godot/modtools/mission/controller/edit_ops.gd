@@ -107,6 +107,7 @@ func set_mode(mode: int) -> void:
 	_c._selected_ref = {}
 	_c._selected_records = []
 	_c._selected_node = null
+	_c._selected_model = null
 	_c._selected_graphic = ""
 	_c._selected_node_offset = Transform3D.IDENTITY
 	_c._selected_collider = null

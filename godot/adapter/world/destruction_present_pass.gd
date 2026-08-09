@@ -44,7 +44,7 @@ const SYNTHETIC_SPAWN_ORIGIN := 0xffffffff
 
 var _sim                          # NovaSimulation
 var _container: Node3D = null     # mission container (node-less husk grafts land here)
-var _index                        # MissionEntityRegistry
+var _index: NovaEntityIndex = null
 var _placer                       # MissionObjectPlacer (husk model builds)
 var _item_db                      # NovaItemDatabase (husk graphic names)
 var _game_world                   # GameWorld (effect anchors) or null
