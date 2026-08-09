@@ -321,7 +321,7 @@ bool occlusion_model_from_3di(const Threedi3di3 &model,
 
 // LOD skinning stamp: the header mesh type, or any strip carrying a bone
 // table. Mirrors retail's per-LOD skinned check the render path applies; the
-// adapter's NovaObjectData::is_skinned delegates here (ADR 0016).
+// adapter's ObjectData::is_skinned delegates here (ADR 0016).
 bool model_is_skinned(const Threedi3di3 &model, int lod_index) {
 	if (lod_index < 0 || static_cast<size_t>(lod_index) >= model.lod_count ||
 			model.lods == nullptr)

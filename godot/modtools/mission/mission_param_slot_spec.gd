@@ -3,7 +3,7 @@ extends RefCounted
 ## One trigger/action parameter slot of the RE-derived schema: the designer
 ## label/tooltip, the MissionParamSchema.Kind that picks the editor widget,
 ## whether the type uses the slot at all, and the fixed picker rows for ENUM
-## kinds. Typed record per ADR 0017 — the native NovaMissionData returns slot
+## kinds. Typed record per ADR 0017 — the native MissionData returns slot
 ## Dictionaries at the GDExtension transport edge; from_dict converts them in
 ## MissionParamSchema.
 

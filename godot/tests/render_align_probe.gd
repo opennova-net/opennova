@@ -16,7 +16,7 @@ extends Node
 #      NOVA_MISSION_BMS (default 00TRe.bms), NOVA_SHOT_PREFIX (default = bms
 #      base name), NOVA_WALK_FRAMES (optional W-hold frames before the sweep).
 
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
 const StandaloneProbe := preload("res://tests/standalone_game_probe.gd")
 const OUT_DIR := "res://../.scratch/rendercmp"
 
@@ -43,7 +43,7 @@ func _ready() -> void:
 	get_window().mode = Window.MODE_WINDOWED
 	get_window().size = Vector2i(1920, 1080)
 
-	var path := NovaPaths.resolve_file(root_dir, bms)
+	var path := Paths.resolve_file(root_dir, bms)
 	print("[rendercmp] mission=%s path=%s out=%s" % [bms, path, _out_abs])
 	var session: Dictionary = await StandaloneProbe.boot(
 		self, root_dir, bms, ResourceDirSettings.get_expansion())

@@ -3,7 +3,7 @@ extends RefCounted
 ## One edge of the reference graph: `source_path` (of `source_kind`) names
 ## `target_name` (of `target_kind`) at `site`, annotated with the index's
 ## resolution probe (status/target_path). Typed record per ADR 0017 — the
-## native NovaReferenceIndex returns edge Dictionaries at the GDExtension
+## native ReferenceIndex returns edge Dictionaries at the GDExtension
 ## transport edge; from_dict converts them the moment they enter editor code
 ## (ReferenceServices.from_shell), so consumers never touch the dict shape.
 

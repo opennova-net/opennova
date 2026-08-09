@@ -5,12 +5,12 @@ extends GutTest
 ## writes. Asserts on volume_db — the headless dummy audio driver ignores
 ## stream_paused (always reads back false), so volume is the observable.
 
-const NovaMissionAudioScript = preload("res://adapter/world/nova_mission_audio.gd")
+const NovaMissionAudioScript = preload("res://src/world/nova_mission_audio.gd")
 
 const SILENT_DB := -80.0
 
 
-# Public NovaMissionAudio dependency seam implemented by NovaSimulation.
+# Public MissionAudio dependency seam implemented by Simulation.
 class OcclusionProviderStub:
 	extends RefCounted
 	var calls := 0
@@ -83,7 +83,7 @@ func _player_at_position(container: Node, pos: Vector3) -> AudioStreamPlayer3D:
 
 
 func test_native_mixer_rows_carry_pitch() -> void:
-	var mixer := NovaAmbientMixer.new()
+	var mixer := AmbientMixer.new()
 	var layer := PackedInt32Array([7, 2000, 0, 255, 255])
 	mixer.add_marker(Vector3(10, 2, 3), 0, 0, 30,
 		PackedInt32Array([0, 0, 0, 0]), [layer])
@@ -306,14 +306,14 @@ func test_dynamic_vehicle_emitter_joins_pool_refreshes_and_clears_by_key() -> vo
 		FileAccess.get_file_as_bytes(
 			ProjectSettings.globalize_path(
 				"res://../fixtures/menu_sound/selecta1.wav")))
-	var lwf := NovaLwfData.new()
+	var lwf := LwfData.new()
 	lwf.create_empty()
 	_add_lwf_set(lwf, "V_TRUCK_ILP", "tone.wav", 2000)
 	assert_eq(lwf.save_file(fixture_dir.path_join("game.LWF")), OK)
 
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(fixture_dir), OK)
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	var container := Node3D.new()
 	add_child_autofree(container)
@@ -401,14 +401,14 @@ func test_dynamic_emitter_catchup_uses_producer_tick_and_recycles_identity() -> 
 		FileAccess.get_file_as_bytes(
 			ProjectSettings.globalize_path(
 				"res://../fixtures/menu_sound/selecta1.wav")))
-	var lwf := NovaLwfData.new()
+	var lwf := LwfData.new()
 	lwf.create_empty()
 	_add_lwf_set(lwf, "V_TRUCK_ILP", "tone.wav", 2000)
 	assert_eq(lwf.save_file(fixture_dir.path_join("game.LWF")), OK)
 
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(fixture_dir), OK)
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	var container := Node3D.new()
 	add_child_autofree(container)
@@ -480,7 +480,7 @@ end
 	_write_text(fixture_dir.path_join("items.def"), items)
 	_write_bytes(fixture_dir.path_join("tone.wav"),
 		FileAccess.get_file_as_bytes(ProjectSettings.globalize_path("res://../fixtures/menu_sound/selecta1.wav")))
-	var lwf := NovaLwfData.new()
+	var lwf := LwfData.new()
 	lwf.create_empty()
 	var si := lwf.add_set()
 	lwf.set_set_field(si, "name", "BUILD_AMB")
@@ -490,15 +490,15 @@ end
 	lwf.set_member_field(si, li, mi, "wav_path", "tone.wav")
 	assert_eq(lwf.save_file(fixture_dir.path_join("probe.LWF")), OK)
 
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(fixture_dir), OK)
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	mission.create_default()
 	var env_building := mission.add_entity(
-		NovaMissionData.KIND_BUILDING, 100001, Vector3(10, 0, 0), Vector3.ZERO)
-	mission.add_entity(NovaMissionData.KIND_MARKER, 100002, Vector3(20, 0, 0), Vector3.ZERO)
+		MissionData.KIND_BUILDING, 100001, Vector3(10, 0, 0), Vector3.ZERO)
+	mission.add_entity(MissionData.KIND_MARKER, 100002, Vector3(20, 0, 0), Vector3.ZERO)
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var audio = NovaMissionAudioScript.new(root, item_db)
@@ -552,22 +552,22 @@ end
 	_write_bytes(fixture_dir.path_join("good.wav"),
 		FileAccess.get_file_as_bytes(
 			ProjectSettings.globalize_path("res://../fixtures/menu_sound/selecta1.wav")))
-	var lwf := NovaLwfData.new()
+	var lwf := LwfData.new()
 	lwf.create_empty()
 	_add_lwf_set(lwf, "BAD_AMB", "bad.wav", 2000)
 	_add_lwf_set(lwf, "GOOD_AMB", "good.wav", 2000)
 	assert_eq(lwf.save_file(fixture_dir.path_join("probe.LWF")), OK)
 
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(fixture_dir), OK)
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	mission.create_default()
 	mission.add_entity(
-		NovaMissionData.KIND_BUILDING, 100001, Vector3(1, 0, 0), Vector3.ZERO)
+		MissionData.KIND_BUILDING, 100001, Vector3(1, 0, 0), Vector3.ZERO)
 	mission.add_entity(
-		NovaMissionData.KIND_BUILDING, 100002, Vector3(10, 0, 0), Vector3.ZERO)
+		MissionData.KIND_BUILDING, 100002, Vector3(10, 0, 0), Vector3.ZERO)
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var audio = NovaMissionAudioScript.new(root, item_db)
@@ -597,14 +597,14 @@ func test_repeated_setup_clears_dialog_dbf_queue_and_wac_voice() -> void:
 	_write_bytes(fixture_dir.path_join("tone.wav"),
 		FileAccess.get_file_as_bytes(
 			ProjectSettings.globalize_path("res://../fixtures/menu_sound/selecta1.wav")))
-	var lwf := NovaLwfData.new()
+	var lwf := LwfData.new()
 	lwf.create_empty()
 	_add_lwf_set(lwf, "Z00gR100", "tone.wav", 200)
 	assert_eq(lwf.save_file(fixture_dir.path_join("game.LWF")), OK)
 
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(fixture_dir), OK)
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	mission.create_default()
 	var container := Node3D.new()
 	add_child_autofree(container)
@@ -642,9 +642,9 @@ func test_repeated_setup_clears_dialog_dbf_queue_and_wac_voice() -> void:
 func test_teardown_removes_the_mission_reverb_from_the_ambient_bus() -> void:
 	var fixture_dir := OS.get_cache_dir().path_join("mission_audio_reverb_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(fixture_dir)
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(fixture_dir), OK)
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	mission.create_default()
 	mission.set_header_int("reverb", 1)
 	var container := Node3D.new()
@@ -676,7 +676,7 @@ func _write_bytes(path: String, value: PackedByteArray) -> void:
 
 
 func _add_lwf_set(
-		lwf: NovaLwfData, set_name: String, wav_path: String,
+		lwf: LwfData, set_name: String, wav_path: String,
 		falloff_radius: int) -> void:
 	var set_i := lwf.add_set()
 	lwf.set_set_field(set_i, "name", set_name)

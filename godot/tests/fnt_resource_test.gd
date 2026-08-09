@@ -13,9 +13,9 @@ func after_each() -> void:
 func test_fnt_loads_as_native_resource_and_font_file_view() -> void:
 	var bytes := FileAccess.get_file_as_bytes(FNT_PATH)
 	assert_gt(bytes.size(), 0, "Serpen24.fnt fixture bytes should be readable.")
-	var res := NovaFntResource.new()
+	var res := FntResource.new()
 	var err := res.load_from_bytes(bytes)
-	assert_eq(err, OK, "Serpen24.fnt should load as NovaFntResource.")
+	assert_eq(err, OK, "Serpen24.fnt should load as FntResource.")
 	if err != OK:
 		return
 
@@ -36,7 +36,7 @@ func test_fnt_loads_as_native_resource_and_font_file_view() -> void:
 
 
 func test_blank_fnt_saves_and_reloads_alpha_and_glyph_rect() -> void:
-	var res := NovaFntResource.new()
+	var res := FntResource.new()
 	var err := res.create_blank(1, -3)
 	assert_eq(err, OK, "Blank Nova FNT resource should initialize.")
 
@@ -44,7 +44,7 @@ func test_blank_fnt_saves_and_reloads_alpha_and_glyph_rect() -> void:
 	res.set_pixel_alpha(0, 0, 0, 200)
 
 	var out_bytes := res.to_bytes()
-	assert_gt(out_bytes.size(), 0, "NovaFntResource should serialize to raw .fnt bytes.")
+	assert_gt(out_bytes.size(), 0, "FntResource should serialize to raw .fnt bytes.")
 	var file := FileAccess.open(TEMP_FNT_PATH, FileAccess.WRITE)
 	assert_not_null(file, "Temp .fnt path should be writable.")
 	if file == null:
@@ -53,7 +53,7 @@ func test_blank_fnt_saves_and_reloads_alpha_and_glyph_rect() -> void:
 	file.close()
 
 	var reload_bytes := FileAccess.get_file_as_bytes(TEMP_FNT_PATH)
-	var reloaded := NovaFntResource.new()
+	var reloaded := FntResource.new()
 	var reload_err := reloaded.load_from_bytes(reload_bytes)
 	assert_eq(reload_err, OK, "Saved raw .fnt should reload.")
 	if reload_err != OK:
@@ -69,15 +69,15 @@ func test_pack_shelf_binding_packs_deterministically() -> void:
 	# The shelf packer is native (engine/formats/fnt fnt_pack_shelf, ENG-4); this pins
 	# the binding contract — (w,h) pairs in, (page,x,y,w,h) quintuples out —
 	# and the format constants the fonts rasterizer aliases.
-	assert_eq(NovaFntResource.FIRST_CHAR, 32)
-	assert_eq(NovaFntResource.GLYPH_COUNT, 224)
-	assert_eq(NovaFntResource.TEXTURE_WIDTH, 256)
-	assert_eq(NovaFntResource.TEXTURE_HEIGHT, 256)
-	assert_eq(NovaFntResource.MAX_PAGES, 16)
-	assert_eq(NovaFntResource.PACK_PAD, 1)
+	assert_eq(FntResource.FIRST_CHAR, 32)
+	assert_eq(FntResource.GLYPH_COUNT, 224)
+	assert_eq(FntResource.TEXTURE_WIDTH, 256)
+	assert_eq(FntResource.TEXTURE_HEIGHT, 256)
+	assert_eq(FntResource.MAX_PAGES, 16)
+	assert_eq(FntResource.PACK_PAD, 1)
 
 	var sizes := PackedInt32Array([100, 20, 100, 30, 60, 10, 200, 40, 0, 0, 30, 50])
-	var rects := NovaFntResource.pack_shelf(sizes)
+	var rects := FntResource.pack_shelf(sizes)
 	assert_eq(rects.size(), 6 * 5, "One quintuple per input pair.")
 	if rects.size() != 6 * 5:
 		return
@@ -92,7 +92,7 @@ func test_pack_shelf_binding_packs_deterministically() -> void:
 		assert_eq(rects[i * 5], 0, "This layout stays on page 0.")
 
 	var overflow := PackedInt32Array()
-	for i in range(NovaFntResource.MAX_PAGES + 1):
+	for i in range(FntResource.MAX_PAGES + 1):
 		overflow.append(254)
 		overflow.append(254)
-	assert_eq(NovaFntResource.pack_shelf(overflow).size(), 0, "Page overflow returns empty.")
+	assert_eq(FntResource.pack_shelf(overflow).size(), 0, "Page overflow returns empty.")

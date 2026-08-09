@@ -52,7 +52,7 @@ class World;
 // the original loader [orig: ItemDef_ParsePhysicsProperty @0x49d870]:
 // player_speed km/h*293 (16.16 u/tick), turn rates deg/s*192426 (BAM/tick),
 // accel/decel token*4. The host's item-traits sweep fills the table from the item db
-// (NovaSimulation::resolve_item_traits); tests stamp it directly.
+// (Simulation::resolve_item_traits); tests stamp it directly.
 // The items.def move_function family tag, the per-class mover selector (the
 // update-callback table keys on it [orig: the [tag,flags,callback] rows
 // @0x82ABC0; net-re §5.38e]). Ground covers cveh/ctan/ctrn/catv;

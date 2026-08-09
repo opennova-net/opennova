@@ -4,7 +4,7 @@ extends GutTest
 # uses the primary section for reactions/death and the final overlapping
 # secondary section for the normal-infantry damage multiplier.
 
-const ViewScript := preload("res://adapter/debug/round_debug_view.gd")
+const ViewScript := preload("res://src/debug/round_debug_view.gd")
 
 
 func test_organic_label_names_primary_and_secondary_bones() -> void:

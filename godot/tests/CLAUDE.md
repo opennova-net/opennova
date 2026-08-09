@@ -14,7 +14,7 @@
   (Flag reference: `godot/addons/gut/cli/gut_cli.gd` after bootstrap — `-gselect`
   filename substring, `-gunit_test_name` test-name substring.)
 - If a test needs a new `Nova*` class, rebuild the GDExtension first
-  (`scripts/build_godot.sh`) — see `godot/adapter/CLAUDE.md`.
+  (`scripts/build_godot.sh`) — see `godot/src/CLAUDE.md`.
 - C++ tests live in `/tests` (ctest). Keep the two suites separate.
 - Always `autofree`/`add_child_autofree` harness objects — never leak a
   `GameWorld`-extending harness. A leaked instance segfaults the whole run at

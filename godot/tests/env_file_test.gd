@@ -5,7 +5,7 @@ extends GutTest
 const FULL_00_ENV_FIXTURE := "res://../fixtures/env/full_00.env"
 
 
-class DirectionCaptureWeather extends NovaWeather:
+class DirectionCaptureWeather extends Weather:
 	var published_direction := Vector3.ZERO
 
 	func _publish_light_direction(direction: Vector3) -> void:
@@ -146,7 +146,7 @@ func test_mission_overrides_apply_as_live_view_only() -> void:
 
 
 func test_environment_owns_the_authored_mission_clock() -> void:
-	var env_node := NovaEnvironment.new()
+	var env_node := MissionEnvironment.new()
 	add_child_autofree(env_node)
 	var env := _load_full_00()
 	env.set_curtime(900)
@@ -173,7 +173,7 @@ func test_weather_driven_clock_advance_never_clobbers_smoothed_currents() -> voi
 	# the per-tick mission clock re-stamped raw keyframe colors between weather
 	# writebacks and the whole scene strobed at the tick/frame beat (the
 	# 2026-07-13 black-flicker regression).
-	var env_node := NovaEnvironment.new()
+	var env_node := MissionEnvironment.new()
 	add_child_autofree(env_node)
 	env_node.environment_data = _load_full_00()
 	env_node.set_weather_driven(true)
@@ -208,7 +208,7 @@ func test_fog_start_follows_engine_policy() -> void:
 	assert_almost_eq(env.get_fog_start(), 250.0, 0.5, "fog_type 3 starts at quarter the end distance.")
 
 func test_smoothed_fog_start_tracks_current_end_and_invalidates_consumers() -> void:
-	var env_node := NovaEnvironment.new()
+	var env_node := MissionEnvironment.new()
 	add_child_autofree(env_node)
 	env_node.environment_data = _load_full_00()
 	env_node.set_weather_driven(true)
@@ -234,12 +234,12 @@ func test_smoothed_fog_start_tracks_current_end_and_invalidates_consumers() -> v
 
 
 func test_object_lighting_uses_the_active_moon_direction_at_night() -> void:
-	var env_node := NovaEnvironment.new()
+	var env_node := MissionEnvironment.new()
 	add_child_autofree(env_node)
 	env_node.environment_data = _load_full_00()
 	env_node.time_of_day = 2200.0
 
-	var values: NovaEnvLightValues = env_node.light_state.get_values()
+	var values: EnvLightValues = env_node.light_state.get_values()
 	var expected := -env_node.get_light_direction().normalized()
 	assert_true(values.dir.is_equal_approx(expected),
 			"object directional light follows Environment_GetLightDirectionFloat")
@@ -248,16 +248,16 @@ func test_object_lighting_uses_the_active_moon_direction_at_night() -> void:
 
 
 func test_entity_lighting_applies_sun_visibility_and_interior_light_transfer() -> void:
-	var env_node := NovaEnvironment.new()
+	var env_node := MissionEnvironment.new()
 	add_child_autofree(env_node)
 	env_node.environment_data = _load_full_00()
 	env_node.time_of_day = 1500.0
-	var world_values: NovaEnvLightValues = env_node.light_state.get_values()
+	var world_values: EnvLightValues = env_node.light_state.get_values()
 
 	assert_true(world_values.floor_color.is_equal_approx(env_node.get_floor_color()))
 	assert_true(world_values.ceiling.is_equal_approx(env_node.get_ceiling_color()))
 
-	var covered = NovaObjectModel.entity_lighting_values(
+	var covered = ObjectModel.entity_lighting_values(
 			world_values, 0.25, false, 0.0)
 	assert_true(covered.dir_color.is_equal_approx(world_values.dir_color * 0.25),
 			"three blocked retail rays leave one quarter directional light")
@@ -265,7 +265,7 @@ func test_entity_lighting_applies_sun_visibility_and_interior_light_transfer() -
 			"sun visibility does not dim the outdoor hemisphere")
 	assert_true(covered.hemi_sky.is_equal_approx(world_values.hemi_sky))
 
-	var interior = NovaObjectModel.entity_lighting_values(
+	var interior = ObjectModel.entity_lighting_values(
 			world_values, 1.0, true, 0.2)
 	assert_true(interior.dir_color.is_equal_approx(world_values.dir_color * 0.2),
 			"Ihq01 light_transfer 20 leaves twenty percent directional light")
@@ -276,7 +276,7 @@ func test_entity_lighting_applies_sun_visibility_and_interior_light_transfer() -
 
 
 func test_weather_publishes_the_active_moon_direction_at_night() -> void:
-	var env_node := NovaEnvironment.new()
+	var env_node := MissionEnvironment.new()
 	add_child_autofree(env_node)
 	env_node.environment_data = _load_full_00()
 	env_node.time_of_day = 2200.0

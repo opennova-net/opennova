@@ -4,7 +4,7 @@ extends RefCounted
 ## description template ({p1}..{p4} placeholders), whether the type is a known
 ## (RE-mapped) row, whether its slot usage varies by sub-type, and always four
 ## MissionParamSlotSpec slots. Typed record per ADR 0017 over the semantic
-## table in engine/runtime/mission (NovaMissionData returns its Dictionary encoding at
+## table in engine/runtime/mission (MissionData returns its Dictionary encoding at
 ## the GDExtension transport edge; from_dict converts it here).
 
 var desc := ""

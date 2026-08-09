@@ -8,7 +8,7 @@
 //
 // Godot-agnostic: raw float* heightmap buffer (row-major, width*height, units =
 // raw16/256 exactly like FORMAT_RF) + a plain BrushRect clip. The GDExtension
-// wrapper (NovaTerrainData) does the Image get_data()/set_data() round-trip.
+// wrapper (TerrainData) does the Image get_data()/set_data() round-trip.
 //
 // All math runs in double (GDScript float is 64-bit) and stores back as float32,
 // matching the original set_pixel(Color(...)) behaviour. These definitions live

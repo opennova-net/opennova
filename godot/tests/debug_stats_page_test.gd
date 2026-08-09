@@ -4,8 +4,8 @@ extends GutTest
 # public value interface. The focused layout case observes the rendered Tree at
 # the overlay's narrow content floor so clipped diagnostics stay usable.
 
-const PaneScript := preload("res://adapter/debug/pages/debug_stats_page.gd")
-const OverlayScript := preload("res://adapter/debug/nova_debug_overlay.gd")
+const PaneScript := preload("res://src/debug/pages/debug_stats_page.gd")
+const OverlayScript := preload("res://src/debug/nova_debug_overlay.gd")
 
 
 class EffectInfoStub:
@@ -59,7 +59,7 @@ class SimInfoStub:
 		}
 
 
-func _make_pane(ctx: NovaDebugContext = NovaDebugContext.new()) -> DebugStatsPage:
+func _make_pane(ctx: DebugContext = DebugContext.new()) -> DebugStatsPage:
 	var pane: DebugStatsPage = PaneScript.new()
 	pane.setup(ctx)
 	add_child_autofree(pane)
@@ -121,7 +121,7 @@ func test_narrow_tree_stays_inside_the_page_and_tooltips_keep_full_text() -> voi
 	mount.size = Vector2(252, 480)
 	add_child_autofree(mount)
 	var pane: DebugStatsPage = PaneScript.new()
-	pane.setup(NovaDebugContext.new())
+	pane.setup(DebugContext.new())
 	mount.add_child(pane)
 	pane.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	await get_tree().process_frame
@@ -248,7 +248,7 @@ func test_capture_follows_visibility_and_board_replacement() -> void:
 
 func test_exit_tree_closes_capture() -> void:
 	var pane: DebugStatsPage = PaneScript.new()
-	pane.setup(NovaDebugContext.new())
+	pane.setup(DebugContext.new())
 	add_child(pane)
 	var board := FrameStatsBoard.new()
 	pane.set_frame_stats_board(board)
@@ -296,7 +296,7 @@ func test_refresh_drains_the_board_window() -> void:
 
 
 func test_mission_scoped_info_clears_when_sources_disappear() -> void:
-	var ctx := NovaDebugContext.new()
+	var ctx := DebugContext.new()
 	var pane := _make_pane(ctx)
 	var world := WorldInfoStub.new()
 	ctx.world_source = func(): return world

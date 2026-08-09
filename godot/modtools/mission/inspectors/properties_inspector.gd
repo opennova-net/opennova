@@ -59,9 +59,9 @@ func _build_props_panel() -> void:
 	InspectorForms.add_section_heading(_props_box, "Game mode")
 	_add_props_game_mode()
 	InspectorForms.add_section_heading(_props_box, "Options")
-	_add_props_flag(NovaMissionData.ATTRIB_ENABLE_NVG, "Night vision")
-	_add_props_flag(NovaMissionData.ATTRIB_START_WITH_NVG_ON, "Start with night vision on")
-	_add_props_flag(NovaMissionData.ATTRIB_ROTATE_MAP_180, "Rotate map 180")
+	_add_props_flag(MissionData.ATTRIB_ENABLE_NVG, "Night vision")
+	_add_props_flag(MissionData.ATTRIB_START_WITH_NVG_ON, "Start with night vision on")
+	_add_props_flag(MissionData.ATTRIB_ROTATE_MAP_180, "Rotate map 180")
 	InspectorForms.add_section_heading(_props_box, "Audio")
 	_add_props_spin("music", "Music track", 0.0, 1000000.0)
 	_add_props_spin("reverb", "Reverb", 0.0, 1000000.0)
@@ -86,7 +86,7 @@ func _build_reground_button() -> void:
 func _refresh_reground_button() -> void:
 	if _reground_button == null:
 		return
-	var mission: NovaMissionData = _inspector._controller.get_mission() if _inspector._controller != null else null
+	var mission: MissionData = _inspector._controller.get_mission() if _inspector._controller != null else null
 	_reground_button.visible = mission != null and _inspector._controller.has_method("reground_drifted")
 
 
@@ -258,7 +258,7 @@ func _set_header_flag(bit: int, on: bool) -> void:
 func _refresh_props_panel() -> void:
 	if _props_toggle == null:
 		return
-	var mission: NovaMissionData = _inspector._controller.get_mission() if _inspector._controller != null else null
+	var mission: MissionData = _inspector._controller.get_mission() if _inspector._controller != null else null
 	if mission == null:
 		_props_toggle.visible = false
 		_props_box.visible = false

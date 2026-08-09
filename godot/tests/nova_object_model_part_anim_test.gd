@@ -1,6 +1,6 @@
 extends GutTest
 
-# NovaObjectModel.play_part_anim drives a per-channel phase sweep onto the retail
+# ObjectModel.play_part_anim drives a per-channel phase sweep onto the retail
 # VEHICLE_SPECIAL1/2 CTRL bus. The resolver is overridden for the missing-register
 # case; time advancement uses the same public deterministic-frame seam as runtime
 # owners, backed by the smallest committed object fixture.
@@ -10,17 +10,17 @@ extends GutTest
 const RUNTIME_3DI := "res://../fixtures/threedi/3di3/Shed.3di"
 
 
-func _model() -> NovaObjectModel:
-	var m := NovaObjectModel.new()
+func _model() -> ObjectModel:
+	var m := ObjectModel.new()
 	autofree(m)
 	return m
 
 
-func _runtime_model() -> NovaObjectModel:
-	var data := NovaObjectData.new()
+func _runtime_model() -> ObjectModel:
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(RUNTIME_3DI)), OK,
 			"the committed runtime fixture opens")
-	var m := NovaObjectModel.new()
+	var m := ObjectModel.new()
 	add_child_autofree(m)
 	m.set_process(false)
 	m.set_object_data(data)
@@ -59,7 +59,7 @@ func test_channel_2_uses_the_second_register() -> void:
 
 
 func test_production_channels_use_retail_semantic_registers() -> void:
-	var m := NovaObjectModel.new()
+	var m := ObjectModel.new()
 	autofree(m)
 	m.set_part_phase(1, 0x1111)
 	m.set_part_phase(2, 0x2222)
@@ -212,10 +212,10 @@ func test_unchanged_aim_overlay_does_not_redirty_body_pose() -> void:
 	# A real skeletal set + a posed clip clear the flag through the production
 	# path; the dedup is then observable on the bound diagnostic.
 	var m := _runtime_model()
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
 			ProjectSettings.globalize_path("res://../fixtures/anim")), OK)
-	var sk := NovaSkeletalAnim.new()
+	var sk := SkeletalAnim.new()
 	assert_true(sk.load_from_resource_root(root, "soldier.adm"),
 			"the committed rig fixture loads")
 	m.set_skeletal_anim(sk)

@@ -61,7 +61,7 @@ func _reground_token() -> Array:
 		_c._mission.get_instance_id(),
 		_c._mission.object_records_revision(),
 		int(_c.terrain_editor.get_height_revision()),
-		NovaResourceRoot.cache_epoch(),
+		ResourceRoot.cache_epoch(),
 	]
 
 
@@ -216,7 +216,7 @@ func _apply_reground_world_update(requests: Array, moved_rows: PackedInt32Array,
 	for n in moved_rows.size():
 		var request: Dictionary = requests[moved_rows[n]]
 		var kind := int(request.get("kind", -1))
-		if kind == NovaMissionData.KIND_MARKER:
+		if kind == MissionData.KIND_MARKER:
 			any_marker = true
 		moved["%d:%d" % [kind, int(request.get("index", -1))]] = _c.MissionObjectPlacer.entity_transform(
 				new_positions_bms[n], request.get("rotation_deg", Vector3.ZERO))
@@ -244,7 +244,7 @@ func _apply_reground_world_update(requests: Array, moved_rows: PackedInt32Array,
 		for n in moved_rows.size():
 			var request: Dictionary = requests[moved_rows[n]]
 			var kind := int(request.get("kind", -1))
-			if kind == NovaMissionData.KIND_MARKER:
+			if kind == MissionData.KIND_MARKER:
 				continue
 			var index := int(request.get("index", -1))
 			var body := container.get_node_or_null(NodePath("Pick_%d_%d" % [kind, index])) as Node3D
@@ -305,7 +305,7 @@ func _build_reground_requests() -> Array:
 		var kind := int(entity.get("kind", -1))
 		var ground_godot: Vector3 = _c.MissionObjectPlacer.bms_to_godot_position(entity.get("position", Vector3.ZERO))
 		var anchor_bms := Vector3.ZERO
-		if kind != NovaMissionData.KIND_MARKER:
+		if kind != MissionData.KIND_MARKER:
 			var graphic: String = _c._placer.graphic_for(int(entity.get("item_id", 0)))
 			if graphic.is_empty():
 				continue

@@ -70,9 +70,9 @@ func _run() -> void:
 		await _finish(1,
 			"loading_screen_render_probe: minimal fixture is missing: " + fixture_dir)
 		return
-	NovaResourceDirSettings.set_resource_dir(fixture_dir)
-	NovaResourceDirSettings.set_expansion("")
-	NovaResourceDirSettings.set_game("jo")
+	ResourceDirSettings.set_resource_dir(fixture_dir)
+	ResourceDirSettings.set_expansion("")
+	ResourceDirSettings.set_game("jo")
 
 	DisplayServer.window_set_size(WINDOW_SIZE)
 	var packed := load("res://game/main_game.tscn") as PackedScene
@@ -213,7 +213,7 @@ func _finish(code: int, failure: String) -> void:
 	var music_service := root.get_node_or_null("NovaMusicService")
 	if music_service != null and music_service.has_method("stop_context"):
 		music_service.stop_context()
-	var strings := root.get_node_or_null("NovaStrings")
+	var strings := root.get_node_or_null("Strings")
 	if strings != null and strings.has_method("clear"):
 		strings.clear()
 	_restore_settings()

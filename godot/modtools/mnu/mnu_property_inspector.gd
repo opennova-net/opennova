@@ -28,7 +28,7 @@ const POS_MIN := -4096
 const POS_MAX := 4096
 const SIZE_MAX := 4096
 
-var _document: NovaMnuDocument
+var _document: MnuDocument
 var _selected_id := -1
 # When >1, the inspector shows a compact batch editor for common font, text
 # layout, and color properties plus a member summary.
@@ -62,7 +62,7 @@ func _ready() -> void:
 	_rebuild()
 
 
-func show_widget(doc: NovaMnuDocument, id: int, text_res: RtxtStringFile = null, text_res_path: String = "") -> void:
+func show_widget(doc: MnuDocument, id: int, text_res: RtxtStringFile = null, text_res_path: String = "") -> void:
 	_document = doc
 	_selected_id = id
 	_multi_ids = PackedInt32Array()
@@ -123,7 +123,7 @@ func _apply_authoring_lock() -> void:
 
 # Show a summary for a multi-selection (>1 widget). Zero or one id delegates to the
 # normal single-node view. The workspace routes the editor's selection_changed here.
-func show_selection(doc: NovaMnuDocument, ids: PackedInt32Array, text_res: RtxtStringFile = null, text_res_path: String = "") -> void:
+func show_selection(doc: MnuDocument, ids: PackedInt32Array, text_res: RtxtStringFile = null, text_res_path: String = "") -> void:
 	if ids.size() <= 1:
 		show_widget(doc, ids[0] if ids.size() == 1 else -1, text_res, text_res_path)
 		return
@@ -199,14 +199,14 @@ func _build_multi_rows() -> void:
 
 	MnuUiHelpersScript.add_heading(_box, "Common colors")
 	var slots := [
-		["Text", NovaMnuDocument.COLOR_DEFAULT_FG],
-		["Background", NovaMnuDocument.COLOR_DEFAULT_BG],
-		["Hover text", NovaMnuDocument.COLOR_MOUSEOVER_FG],
-		["Hover bg", NovaMnuDocument.COLOR_MOUSEOVER_BG],
-		["Selected text", NovaMnuDocument.COLOR_SELECTED_FG],
-		["Selected bg", NovaMnuDocument.COLOR_SELECTED_BG],
-		["Disabled text", NovaMnuDocument.COLOR_DISABLED_FG],
-		["Disabled bg", NovaMnuDocument.COLOR_DISABLED_BG],
+		["Text", MnuDocument.COLOR_DEFAULT_FG],
+		["Background", MnuDocument.COLOR_DEFAULT_BG],
+		["Hover text", MnuDocument.COLOR_MOUSEOVER_FG],
+		["Hover bg", MnuDocument.COLOR_MOUSEOVER_BG],
+		["Selected text", MnuDocument.COLOR_SELECTED_FG],
+		["Selected bg", MnuDocument.COLOR_SELECTED_BG],
+		["Disabled text", MnuDocument.COLOR_DISABLED_FG],
+		["Disabled bg", MnuDocument.COLOR_DISABLED_BG],
 	]
 	for slot in slots:
 		var slot_index := int(slot[1])
@@ -332,9 +332,9 @@ func _build_widget_rows(id: int) -> void:
 	var sz = MnuUiHelpersScript.add_spin_pair_row(_box, "Size", int(rect.size.x), int(rect.size.y), 0, SIZE_MAX)
 	var rect_flags := _document.get_window_rect_flags(id)
 	var auto_width := MnuUiHelpersScript.add_check_row(_box, "Auto width",
-		(rect_flags & NovaMnuDocument.RECT_HAS_RIGHT) == 0)
+		(rect_flags & MnuDocument.RECT_HAS_RIGHT) == 0)
 	var auto_height := MnuUiHelpersScript.add_check_row(_box, "Auto height",
-		(rect_flags & NovaMnuDocument.RECT_HAS_BOTTOM) == 0)
+		(rect_flags & MnuDocument.RECT_HAS_BOTTOM) == 0)
 	(sz[0] as SpinBox).editable = not auto_width.button_pressed
 	(sz[1] as SpinBox).editable = not auto_height.button_pressed
 	auto_width.toggled.connect(func(on: bool) -> void: (sz[0] as SpinBox).editable = not on)
@@ -394,7 +394,7 @@ func _build_widget_rows(id: int) -> void:
 	_build_color_section(id)
 	_build_texture_section(id)
 	_build_appearance_section(id, authoring)
-	if wtype == NovaMnuDocument.TYPE_SCROLL:
+	if wtype == MnuDocument.TYPE_SCROLL:
 		_build_scroll_parts_section(id, authoring)
 	interaction_editor.append_command_sections(_box)
 
@@ -402,25 +402,25 @@ func _build_widget_rows(id: int) -> void:
 	# header/body definitions for tables. These emit op-tagged edits that the
 	# editor routes through the snapshot-undo path (the row set is a collection,
 	# not a single scalar, so the whole-list state is the natural undo unit).
-	if wtype == NovaMnuDocument.TYPE_LIST or wtype == NovaMnuDocument.TYPE_MULTI \
-			or wtype == NovaMnuDocument.TYPE_LAN_LIST \
-			or wtype == NovaMnuDocument.TYPE_SPINLIST:
+	if wtype == MnuDocument.TYPE_LIST or wtype == MnuDocument.TYPE_MULTI \
+			or wtype == MnuDocument.TYPE_LAN_LIST \
+			or wtype == MnuDocument.TYPE_SPINLIST:
 		_build_item_section(id, authoring)
-		if wtype == NovaMnuDocument.TYPE_LIST or wtype == NovaMnuDocument.TYPE_MULTI \
-				or wtype == NovaMnuDocument.TYPE_LAN_LIST:
+		if wtype == MnuDocument.TYPE_LIST or wtype == MnuDocument.TYPE_MULTI \
+				or wtype == MnuDocument.TYPE_LAN_LIST:
 			_build_direct_scrollbar_section(id, authoring)
-		if wtype == NovaMnuDocument.TYPE_SPINLIST:
+		if wtype == MnuDocument.TYPE_SPINLIST:
 			_build_spin_section(id, authoring)
-	elif wtype == NovaMnuDocument.TYPE_COMBO:
+	elif wtype == MnuDocument.TYPE_COMBO:
 		# COMBO may author two deliberately independent collections. The
 		# top-level ITEMS is the closed/fallback presentation; LIST_BOX/ITEMS is
 		# the popup collection. Never mirror one into the other.
 		_build_items_block(id, "Closed / fallback items", ["items"],
 			authoring.get("items", {}))
 		_build_list_box_section(id, authoring)
-	elif wtype == NovaMnuDocument.TYPE_MULTILINE_EDIT:
+	elif wtype == MnuDocument.TYPE_MULTILINE_EDIT:
 		_build_direct_scrollbar_section(id, authoring)
-	elif wtype == NovaMnuDocument.TYPE_TABLE or wtype == NovaMnuDocument.TYPE_GLB_TABLE:
+	elif wtype == MnuDocument.TYPE_TABLE or wtype == MnuDocument.TYPE_GLB_TABLE:
 		_build_item_section(id, authoring)
 		_build_table_section(id, authoring)
 
@@ -682,14 +682,14 @@ func _build_scroll_parts_section(id: int, authoring: Dictionary) -> void:
 # editor records one undo step (undo clears the slot, dropping the row on rebuild).
 func _build_color_section(id: int) -> void:
 	var slots := [
-		["Text", NovaMnuDocument.COLOR_DEFAULT_FG],
-		["Background", NovaMnuDocument.COLOR_DEFAULT_BG],
-		["Hover text", NovaMnuDocument.COLOR_MOUSEOVER_FG],
-		["Hover bg", NovaMnuDocument.COLOR_MOUSEOVER_BG],
-		["Selected text", NovaMnuDocument.COLOR_SELECTED_FG],
-		["Selected bg", NovaMnuDocument.COLOR_SELECTED_BG],
-		["Disabled text", NovaMnuDocument.COLOR_DISABLED_FG],
-		["Disabled bg", NovaMnuDocument.COLOR_DISABLED_BG],
+		["Text", MnuDocument.COLOR_DEFAULT_FG],
+		["Background", MnuDocument.COLOR_DEFAULT_BG],
+		["Hover text", MnuDocument.COLOR_MOUSEOVER_FG],
+		["Hover bg", MnuDocument.COLOR_MOUSEOVER_BG],
+		["Selected text", MnuDocument.COLOR_SELECTED_FG],
+		["Selected bg", MnuDocument.COLOR_SELECTED_BG],
+		["Disabled text", MnuDocument.COLOR_DISABLED_FG],
+		["Disabled bg", MnuDocument.COLOR_DISABLED_BG],
 	]
 	MnuUiHelpersScript.add_heading(_box, "Colors")
 	var empty: Array = []
@@ -782,10 +782,10 @@ func _build_patch_color_row(id: int, label: String, raw: String, path: Array) ->
 
 func _build_texture_section(id: int) -> void:
 	var slots := [
-		["Normal", NovaMnuDocument.TEX_DEFAULT],
-		["Hover", NovaMnuDocument.TEX_MOUSEOVER],
-		["Selected", NovaMnuDocument.TEX_SELECTED],
-		["Disabled", NovaMnuDocument.TEX_DISABLED],
+		["Normal", MnuDocument.TEX_DEFAULT],
+		["Hover", MnuDocument.TEX_MOUSEOVER],
+		["Selected", MnuDocument.TEX_SELECTED],
+		["Disabled", MnuDocument.TEX_DISABLED],
 	]
 	MnuUiHelpersScript.add_heading(_box, "Textures")
 	var empty: Array = []
@@ -832,9 +832,9 @@ func _build_add_slot(id: int, label: String, empty: Array, prop: String, default
 # {text, value, type}; the type column is a small enum (the MNU item type tag).
 func _build_item_section(id: int, authoring: Dictionary) -> void:
 	var items: Dictionary = authoring.get("items", {})
-	var type := int(authoring.get("type", NovaMnuDocument.TYPE_UNKNOWN))
+	var type := int(authoring.get("type", MnuDocument.TYPE_UNKNOWN))
 	_build_items_block(id, "Items", ["items"], items,
-		type != NovaMnuDocument.TYPE_TABLE and type != NovaMnuDocument.TYPE_GLB_TABLE)
+		type != MnuDocument.TYPE_TABLE and type != MnuDocument.TYPE_GLB_TABLE)
 
 
 func _build_items_block(id: int, heading: String, path: Array,

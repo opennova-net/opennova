@@ -9,7 +9,7 @@ extends RefCounted
 #
 # No class_name (preload as a const), matching mus_stmt_text.gd / mus_expr.gd.
 
-# Statement kinds (NovaMusicScript.get_program_ast `kind` strings) -> how they
+# Statement kinds (MusicScript.get_program_ast `kind` strings) -> how they
 # read on a program row. Glyphs stay: they make the canvas scannable and the
 # map badges use the same family.
 const STMT := {
@@ -148,7 +148,7 @@ static func intrinsic_tooltip(stored: String) -> String:
 # --- caller inputs (l_N locals at/above the frame base) ---------------------
 
 # The default `enter` frame base (byte offset where 0x38 banks the caller's
-# arguments); every stock script uses 0x20. NovaMusicScript.get_locals_frame_offset
+# arguments); every stock script uses 0x20. MusicScript.get_locals_frame_offset
 # supplies the per-script value.
 const DEFAULT_LOCALS_BASE := 32
 

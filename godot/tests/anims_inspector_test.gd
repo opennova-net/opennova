@@ -12,8 +12,8 @@ const MODEL_FIXTURES := "res://../fixtures/threedi/3di3"
 const ANIM_FIXTURES := "res://../fixtures/anim"
 
 
-func _anim_root() -> NovaResourceRoot:
-	var root := NovaResourceRoot.new()
+func _anim_root() -> ResourceRoot:
+	var root := ResourceRoot.new()
 	root.set_root_dir(ProjectSettings.globalize_path(ANIM_FIXTURES))
 	return root
 
@@ -178,7 +178,7 @@ func test_play_pause_reset_wiring() -> void:
 func test_arms_overlay_scrubs_in_lockstep() -> void:
 	var parts := _anims_workspace()
 	var preview: ObjectPreview = parts.preview
-	var model_root := NovaResourceRoot.new()
+	var model_root := ResourceRoot.new()
 	model_root.set_root_dir(ProjectSettings.globalize_path(MODEL_FIXTURES))
 	assert_true(preview.load_arms("CharModel.3di", model_root), "arms fixture loads")
 	assert_not_null((parts.dock as Control).find_child("ArmsLoadButton", true, false),

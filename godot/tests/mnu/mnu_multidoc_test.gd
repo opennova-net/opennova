@@ -29,7 +29,7 @@ func after_all() -> void:
 			DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 
 
-func _first_root_child(doc: NovaMnuDocument, index: int) -> int:
+func _first_root_child(doc: MnuDocument, index: int) -> int:
 	var root := doc.get_screen_root_id(doc.get_screen_ids()[0])
 	return doc.get_child_ids(root)[index]
 

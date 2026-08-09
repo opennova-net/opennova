@@ -8,7 +8,7 @@
 // metadata (labels, value kinds, enum option lists) the ONED inspector renders for
 // each trigger/action; it carries no runtime state and ticks nothing. Mirrors the
 // original dfx2med editor's per-widget param tables (Med_*Param* @0x449xxx /
-// Med_AiSubTypeParams @0x44A920). Consumed via NovaMissionData.get_*_param_schema ->
+// Med_AiSubTypeParams @0x44A920). Consumed via MissionData.get_*_param_schema ->
 // MissionParamSchema.gd -> mission_inspector.gd. Distinct from the runtime evaluators
 // (event_runtime.h / wac), which mutate the shared world.
 

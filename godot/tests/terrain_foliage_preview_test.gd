@@ -19,7 +19,7 @@ func test_preview_accepts_and_clears_injected_tile_context_without_anchors() -> 
 	if not preview.has_method("get_tile_info"):
 		return
 
-	var tile_info := NovaTerrainTileInfo.new()
+	var tile_info := TerrainTileInfo.new()
 	preview.call("set_preview_state", null, null, null, [], null, null, tile_info)
 	assert_same(preview.call("get_tile_info"), tile_info)
 
@@ -39,7 +39,7 @@ func test_terrain_editor_uses_mission_tile_override_without_leaking_authoring_ov
 	var workstation: EditorWorkstation = app.workstation
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.TERRAIN)
 	await get_tree().process_frame
-	var surface_inputs: NovaTerrainSurfaceInputs = editor.terrain_mesh.get_surface_inputs()
+	var surface_inputs: TerrainSurfaceInputs = editor.terrain_mesh.get_surface_inputs()
 	assert_same(surface_inputs.get_terrain_data(), editor.get_data(),
 		"Default terrain mounting must fully rebuild the shared surface inputs.")
 	assert_true(surface_inputs.has_normalized_blend())
@@ -63,7 +63,7 @@ func test_terrain_editor_uses_mission_tile_override_without_leaking_authoring_ov
 	var authored_tile_info = editor.call("get_effective_tile_info")
 	assert_not_null(authored_tile_info)
 	editor.set_tile_stamp_tile_index(0)
-	editor.set_tile_stamp_flags(NovaTerrainTileInfo.FLAG_OUTLINE)
+	editor.set_tile_stamp_flags(TerrainTileInfo.FLAG_OUTLINE)
 	assert_true(editor.stamp_tileinfo_cell(0, 0))
 	editor.select_tileinfo_entry(0)
 	await get_tree().process_frame
@@ -97,11 +97,11 @@ func test_terrain_editor_uses_mission_tile_override_without_leaking_authoring_ov
 	assert_false(layers.outline_visible,
 		"Mission hides Terrain-only FLAG_OUTLINE authoring feedback.")
 
-	var mission_tile_info := NovaTerrainTileInfo.new()
-	var mission_entry := NovaTerrainTileEntry.new()
+	var mission_tile_info := TerrainTileInfo.new()
+	var mission_entry := TerrainTileEntry.new()
 	mission_entry.set_cell(1, 1)
 	mission_entry.set_tile_index(0)
-	mission_entry.set_flags(NovaTerrainTileInfo.FLAG_OUTLINE)
+	mission_entry.set_flags(TerrainTileInfo.FLAG_OUTLINE)
 	mission_tile_info.add_entry(mission_entry)
 	editor.call("set_mission_preview_context", mission_tile_info)
 	await get_tree().process_frame

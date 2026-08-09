@@ -15,7 +15,7 @@
 //
 // Returned in model space (threedi_user_point_position's axis order) so callers
 // apply their own coordinate convention exactly once (see
-// NovaObjectData::get_ground_anchor, which feeds the result through godot_vec3).
+// ObjectData::get_ground_anchor, which feeds the result through godot_vec3).
 
 #include "threedi/threedi_3di3.h"
 

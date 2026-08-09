@@ -8,14 +8,14 @@ extends GutTest
 const FIXTURE := "res://../fixtures/mnu/all_widgets.mnu"
 
 
-func _load_doc() -> NovaMnuDocument:
-	var doc := NovaMnuDocument.new()
+func _load_doc() -> MnuDocument:
+	var doc := MnuDocument.new()
 	doc.load_from_bytes(FileAccess.get_file_as_bytes(FIXTURE))
 	return doc
 
 
-func _build_menu(edit_mode: bool = false) -> NovaMnuMenu:
-	var menu := NovaMnuMenu.new()
+func _build_menu(edit_mode: bool = false) -> MnuMenu:
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
 	menu.set_edit_mode(edit_mode)
@@ -34,7 +34,7 @@ func _tex(c: Color = Color.WHITE) -> Texture2D:
 func test_map_builds_and_data_binding() -> void:
 	var menu := _build_menu()
 	var map := menu.find_child("TacMap", true, false)
-	assert_true(map is NovaMnuMap, "map becomes a NovaMnuMap")
+	assert_true(map is MnuMap, "map becomes a MnuMap")
 	assert_not_null(map.find_child("MapImage", true, false), "runtime map image layer")
 	var tex := _tex()
 	map.set_map_texture(tex)
@@ -60,7 +60,7 @@ func test_map_placeholder_in_edit_mode() -> void:
 func test_globe_data_and_rotation() -> void:
 	var menu := _build_menu()
 	var globe := menu.find_child("CampaignGlobe", true, false)
-	assert_true(globe is NovaMnuGlobe, "globe becomes a NovaMnuGlobe")
+	assert_true(globe is MnuGlobe, "globe becomes a MnuGlobe")
 	assert_not_null(globe.find_child("GlobeImage", true, false), "globe image layer")
 	globe.set_globe_texture(_tex())
 	globe.set_angle(45.0)
@@ -83,7 +83,7 @@ func test_globe_static_in_edit_mode() -> void:
 func test_marquee_falls_back_to_string_and_scrolls() -> void:
 	var menu := _build_menu()
 	var m := menu.find_child("Credits", true, false)
-	assert_true(m is NovaMnuMarquee, "marquee becomes a NovaMnuMarquee")
+	assert_true(m is MnuMarquee, "marquee becomes a MnuMarquee")
 	# No resource root -> DATASOURCE unresolved -> STRING fallback.
 	assert_eq(m.get_content(), "Rolling credits", "STRING fallback content")
 	assert_true(m.is_processing(), "scrolls at runtime")
@@ -96,12 +96,12 @@ func test_marquee_static_in_edit_mode() -> void:
 
 
 func test_marquee_datasource_resolves_with_root() -> void:
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	var dir := ProjectSettings.globalize_path("res://../fixtures/mnu")
 	if root.set_root_dir(dir) != OK:
 		pass_test("resource root unavailable: %s" % root.get_last_error())
 		return
-	var menu := NovaMnuMenu.new()
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
 	menu.set_resource_root(root)
@@ -137,14 +137,14 @@ const LAYOUT_MENU := """<MENU>
 </MENU>"""
 
 
-func _layout_widget(menu: NovaMnuMenu, wname: String) -> Control:
+func _layout_widget(menu: MnuMenu, wname: String) -> Control:
 	return menu.find_child(wname, true, false) as Control
 
 
-func _build_layout_menu() -> NovaMnuMenu:
-	var doc := NovaMnuDocument.new()
+func _build_layout_menu() -> MnuMenu:
+	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(LAYOUT_MENU.to_utf8_buffer()), OK, "layout menu parses")
-	var menu := NovaMnuMenu.new()
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
 	menu.set_edit_mode(true)

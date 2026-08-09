@@ -7,13 +7,13 @@ Format and behavior are witnessed in
 [docs/playerinfo/avatars-re.md](../../../docs/playerinfo/avatars-re.md)
 (`[orig: CAvatarDefs_Init @ 0x57b180]`,
 `[orig: CAvatarDefs_ParseConfigLine @ 0x57a3f0]`); the parser, writer, and
-authoring model live in `engine/formats/avatars` behind the `NovaAvatarDatabase`
+authoring model live in `engine/formats/avatars` behind the `AvatarDatabase`
 GDExtension class.
 
 ## Document
 
 `avatars_document.gd` (`AvatarsDocument extends EditorResourceDocument`) wraps a
-`NovaAvatarDatabase` and owns the open / save / dirty lifecycle. Every edit flows
+`AvatarDatabase` and owns the open / save / dirty lifecycle. Every edit flows
 through `set_model()` on the database, whose `changed` signal the base turns into
 the dirty flag and `state_changed` — so the shell derives Save / undo state from
 one document. New documents start as an empty database; save writes the `.def`

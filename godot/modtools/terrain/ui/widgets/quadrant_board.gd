@@ -45,10 +45,10 @@ func set_grid_state(new_cols: int, new_rows: int, values: PackedInt32Array) -> v
 	grid.resize(rows * cols)
 	for row in rows:
 		for col in cols:
-			var src_idx := row * NovaTerrainData.SECTOR_GRID_DIM + col
+			var src_idx := row * TerrainData.SECTOR_GRID_DIM + col
 			var value := 0
 			if src_idx >= 0 and src_idx < values.size():
-				value = clampi(values[src_idx], 0, NovaTerrainData.SECTOR_ID_MAX)
+				value = clampi(values[src_idx], 0, TerrainData.SECTOR_ID_MAX)
 			grid[row * cols + col] = value
 	queue_redraw()
 
@@ -71,7 +71,7 @@ func _draw() -> void:
 		for col in cols:
 			var idx := row * cols + col
 			var value: int = grid[idx] if idx < grid.size() else 0
-			var color: Color = SECTOR_COLORS[clampi(value, 0, NovaTerrainData.SECTOR_ID_MAX)]
+			var color: Color = SECTOR_COLORS[clampi(value, 0, TerrainData.SECTOR_ID_MAX)]
 			var pos := rect.position + Vector2(col * cell_w, row * cell_h)
 			var cell_rect := Rect2(pos, Vector2(cell_w, cell_h))
 			draw_rect(cell_rect, color, true)

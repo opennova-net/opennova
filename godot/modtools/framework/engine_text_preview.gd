@@ -1,7 +1,7 @@
 extends Control
 
 # EngineTextPreview (maturity slice F2): one widget that renders a sample line
-# through the SAME seams the game runtime draws text with — NovaFntResource ->
+# through the SAME seams the game runtime draws text with — FntResource ->
 # FontFile (the .fnt parser view menus/credits text rides) and HudText.draw_text
 # (design-space anchor scaling [orig: Viewport_ScaleToVirtualCoords @0x5d2b20],
 # baseline/ascent placement, alignment, half-bright
@@ -55,7 +55,7 @@ func set_font_file(font: FontFile) -> void:
 
 ## Adopt the edited document's font (the Fonts workspace case). A null or
 ## unloadable resource clears the panel and reports false.
-func set_font_from_fnt(fnt: NovaFntResource) -> bool:
+func set_font_from_fnt(fnt: FntResource) -> bool:
 	if fnt == null:
 		set_font_file(null)
 		return false
@@ -65,9 +65,9 @@ func set_font_from_fnt(fnt: NovaFntResource) -> bool:
 
 
 ## Resolve a font by name from the mounted resource root, the way the runtime
-## does (HudText.load_font -> VFS read -> NovaFntResource). A failed load keeps
+## does (HudText.load_font -> VFS read -> FntResource). A failed load keeps
 ## the current font (a typo must not blank the panel) and reports false.
-func set_font_from_root(root: NovaResourceRoot, font_name: String) -> bool:
+func set_font_from_root(root: ResourceRoot, font_name: String) -> bool:
 	var font := HudText.load_font(root, font_name)
 	if font == null:
 		return false

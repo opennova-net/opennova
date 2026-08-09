@@ -2,7 +2,7 @@ extends SceneTree
 ## Manual probe: reads NOVA_PTL_LIST (semicolon-separated .ptl names) through the
 ## runtime mount and writes each to NOVA_PROBE_OUT for offline inspection.
 
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
 
 
 func _init() -> void:
@@ -11,10 +11,10 @@ func _init() -> void:
 		out_dir = "user://"
 	var names := OS.get_environment("NOVA_PTL_LIST").split(";", false)
 	var dir := ResourceDirSettings.get_resource_dir()
-	var root := NovaResourceRoot.new()
-	var expansion := NovaLaunchFlags.expansion(ResourceDirSettings.get_expansion())
-	var game := NovaLaunchFlags.game(ResourceDirSettings.get_game())
-	if root.mount_runtime(dir, expansion, NovaLaunchFlags.loose_override_enabled(), game) != OK:
+	var root := ResourceRoot.new()
+	var expansion := LaunchFlags.expansion(ResourceDirSettings.get_expansion())
+	var game := LaunchFlags.game(ResourceDirSettings.get_game())
+	if root.mount_runtime(dir, expansion, LaunchFlags.loose_override_enabled(), game) != OK:
 		print("probe: mount FAILED")
 		quit(1)
 		return

@@ -1,20 +1,20 @@
 extends GutTest
 
-# M9.3 gate: NovaMnuScroll builds a themed scrollbar/slider from the SHUTTLE /
+# M9.3 gate: MnuScroll builds a themed scrollbar/slider from the SHUTTLE /
 # SCROLLUP / SCROLLDOWN art with Range-like value semantics, drives a linked
 # scroll target, and stays inert in edit_mode.
 
 const FIXTURE := "res://../fixtures/mnu/all_widgets.mnu"
 
 
-func _load_doc() -> NovaMnuDocument:
-	var doc := NovaMnuDocument.new()
+func _load_doc() -> MnuDocument:
+	var doc := MnuDocument.new()
 	doc.load_from_bytes(FileAccess.get_file_as_bytes(FIXTURE))
 	return doc
 
 
-func _build_menu(edit_mode: bool = false) -> NovaMnuMenu:
-	var menu := NovaMnuMenu.new()
+func _build_menu(edit_mode: bool = false) -> MnuMenu:
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
 	menu.set_edit_mode(edit_mode)
@@ -22,15 +22,15 @@ func _build_menu(edit_mode: bool = false) -> NovaMnuMenu:
 	return menu
 
 
-func _scroll(menu: NovaMnuMenu) -> NovaMnuScroll:
-	return menu.find_child("VolumeBar", true, false) as NovaMnuScroll
+func _scroll(menu: MnuMenu) -> MnuScroll:
+	return menu.find_child("VolumeBar", true, false) as MnuScroll
 
 
 func test_scroll_builds_with_parts() -> void:
 	var menu := _build_menu()
 	var scroll := _scroll(menu)
 	assert_not_null(scroll, "VolumeBar built")
-	assert_true(scroll is Control, "NovaMnuScroll is a Control")
+	assert_true(scroll is Control, "MnuScroll is a Control")
 	assert_true(scroll.is_vertical(), "ORIENTATION VERTICAL parsed")
 	assert_not_null(scroll.find_child("Track", true, false), "track built")
 	assert_not_null(scroll.find_child("ArrowUp", true, false), "up arrow built")
@@ -93,28 +93,28 @@ func test_range_target_syncs_both_directions() -> void:
 
 
 func test_shipped_list_and_multiline_use_authored_scrollbar_geometry() -> void:
-	var vehicle_doc := NovaMnuDocument.new()
+	var vehicle_doc := MnuDocument.new()
 	assert_eq(vehicle_doc.load_from_bytes(FileAccess.get_file_as_bytes(
 		"res://../fixtures/mnu/jo_vehicle.mnu")), OK)
-	var vehicle_menu := NovaMnuMenu.new()
+	var vehicle_menu := MnuMenu.new()
 	vehicle_menu.build_on_ready = false
 	add_child_autofree(vehicle_menu)
 	vehicle_menu.menu = vehicle_doc
-	var item_list := vehicle_menu.find_child("ITEM_LIST", true, false) as NovaMnuList
-	var list_scroll := item_list.find_child("Scrollbar", false, false) as NovaMnuScroll
+	var item_list := vehicle_menu.find_child("ITEM_LIST", true, false) as MnuList
+	var list_scroll := item_list.find_child("Scrollbar", false, false) as MnuScroll
 	assert_not_null(list_scroll, "shipped list owns the shared authored scrollbar")
 	assert_eq(list_scroll.position, Vector2(300, 0), "list scrollbar authored origin")
 	assert_eq(list_scroll.size, Vector2(16, 200), "list scrollbar authored size")
 
-	var sp_doc := NovaMnuDocument.new()
+	var sp_doc := MnuDocument.new()
 	assert_eq(sp_doc.load_from_bytes(FileAccess.get_file_as_bytes(
 		"res://../fixtures/mnu/jo_sp.mnu")), OK)
-	var sp_menu := NovaMnuMenu.new()
+	var sp_menu := MnuMenu.new()
 	sp_menu.build_on_ready = false
 	add_child_autofree(sp_menu)
 	sp_menu.menu = sp_doc
-	var briefing := sp_menu.find_child("BRIEFING", true, false) as NovaMnuMultilineEdit
-	var brief_scroll := briefing.find_child("Scrollbar", false, false) as NovaMnuScroll
+	var briefing := sp_menu.find_child("BRIEFING", true, false) as MnuMultilineEdit
+	var brief_scroll := briefing.find_child("Scrollbar", false, false) as MnuScroll
 	assert_not_null(brief_scroll, "shipped multiline owns the shared authored scrollbar")
 	assert_eq(brief_scroll.position, Vector2(321, 0), "multiline scrollbar authored origin")
 	assert_eq(brief_scroll.size, Vector2(20, 318), "multiline scrollbar authored size")

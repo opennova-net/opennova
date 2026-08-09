@@ -10,7 +10,7 @@ extends GutTest
 ## here as a red with a per-file visibility report, not just as an in-game
 ## mystery. Skips when the install is absent (CI never has it).
 
-const NovaMissionAudioScript = preload("res://adapter/world/nova_mission_audio.gd")
+const NovaMissionAudioScript = preload("res://src/world/nova_mission_audio.gd")
 
 const MISSION_CANDIDATES: PackedStringArray = ["00TRa.bms", "00TRg.bms"]
 
@@ -26,7 +26,7 @@ func test_pff_install_mission_audio() -> void:
 	if not DirAccess.dir_exists_absolute(install_dir):
 		return
 
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	var err: int = root.mount_runtime(install_dir, expansion, false, "jo")
 	assert_eq(err, OK, "mount_runtime(%s, exp=%s) mounts" % [install_dir, expansion])
 	if err != OK:
@@ -73,11 +73,11 @@ func test_pff_install_mission_audio() -> void:
 	gut.p("PFF install: probing mission %s (co-named .LWF has_file=%s)"
 		% [mission_name, str(root.has_file(mission_name.get_basename() + ".LWF"))])
 
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.open_from_resource_root(root, mission_name), OK,
 		"%s parses from the mount" % mission_name)
 
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK,
 		"items.def loads from the mount")
 

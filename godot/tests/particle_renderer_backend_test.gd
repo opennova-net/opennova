@@ -20,8 +20,8 @@ class FogSource:
 		return 1
 
 
-func _live_world_scene() -> NovaEffectScene:
-	var particle := NovaParticleDef.new()
+func _live_world_scene() -> EffectScene:
+	var particle := ParticleDef.new()
 	particle.id = "GPU particle"
 	particle.emit_dur = 0.1
 	particle.emit_rate = 20.0
@@ -30,7 +30,7 @@ func _live_world_scene() -> NovaEffectScene:
 	particle.alpha = 1.0
 	particle.scale_value = 1.0
 	var graphics: Array = particle.graphics
-	var layer := graphics[0] as NovaParticleGraphicLayer
+	var layer := graphics[0] as ParticleGraphicLayer
 	layer.present = true
 	layer.texture = "gpu_contract_fallback.tga"
 	layer.blend_mode = 0
@@ -38,26 +38,26 @@ func _live_world_scene() -> NovaEffectScene:
 	layer.scale_value = 1.0
 	particle.graphics = graphics
 
-	var effect := NovaParticleEffect.new()
+	var effect := ParticleEffect.new()
 	effect.id = "GPU effect"
 	effect.pdefs = PackedStringArray([particle.id])
-	var file := NovaParticleFile.new()
+	var file := ParticleFile.new()
 	file.particles = [particle]
 	file.effects = [effect]
 
-	var scene := NovaEffectScene.new()
+	var scene := EffectScene.new()
 	scene.open([file])
 	var receipt := scene.spawn({
 		"effect_handle": scene.intern(effect.id),
 		"transform": Transform3D.IDENTITY,
 	})
-	assert_eq(int(receipt.get("status", -1)), NovaEffectScene.SPAWN_STATUS_SPAWNED)
+	assert_eq(int(receipt.get("status", -1)), EffectScene.SPAWN_STATUS_SPAWNED)
 	scene.advance_in_place(0.1)
 	return scene
 
 
 func test_world_particles_use_the_uncapped_rd_compositor_contract() -> void:
-	var renderer := add_child_autofree(NovaParticleRenderer.new()) as NovaParticleRenderer
+	var renderer := add_child_autofree(ParticleRenderer.new()) as ParticleRenderer
 	await get_tree().process_frame
 
 	var report := renderer.get_debug_packet_report()
@@ -120,7 +120,7 @@ func test_world_backend_executes_a_live_gpu_submission() -> void:
 	camera.position = Vector3(0, 0, 5)
 	camera.current = true
 	viewport.add_child(camera)
-	var renderer := NovaParticleRenderer.new()
+	var renderer := ParticleRenderer.new()
 	renderer.scene = _live_world_scene()
 	renderer.procedural_fallback_enabled = true
 	var fog_source := FogSource.new()
@@ -172,7 +172,7 @@ func test_pipeline_warm_is_serviced_by_the_real_rd_compositor() -> void:
 	camera.position = Vector3(0, 0, 5)
 	camera.current = true
 	viewport.add_child(camera)
-	var renderer := NovaParticleRenderer.new()
+	var renderer := ParticleRenderer.new()
 	viewport.add_child(renderer)
 	await get_tree().process_frame
 
@@ -207,8 +207,8 @@ func test_camera_compositor_coordinates_multiple_particle_renderers() -> void:
 	var camera := Camera3D.new()
 	viewport.add_child(camera)
 	camera.current = true
-	var first := NovaParticleRenderer.new()
-	var second := NovaParticleRenderer.new()
+	var first := ParticleRenderer.new()
+	var second := ParticleRenderer.new()
 	viewport.add_child(first)
 	viewport.add_child(second)
 

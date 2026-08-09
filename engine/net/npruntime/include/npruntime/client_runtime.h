@@ -253,7 +253,7 @@ public:
 	// row filter and color source [orig: byte_A85B48].
 	uint8_t assigned_team() const { return joiner_ ? joiner_->assigned_team() : 0; }
 	// Host policy learned from S2C 0x76. HostClient/offline views use the stock
-	// all-ten-classes default; NovaSimulation exposes its configured host value.
+	// all-ten-classes default; Simulation exposes its configured host value.
 	uint16_t class_allow_mask() const {
 		return joiner_ ? joiner_->class_allow_mask() : 0x03FFu;
 	}

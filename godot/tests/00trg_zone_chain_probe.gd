@@ -29,25 +29,25 @@ func _run() -> void:
 		_fail("set NOVA_RESOURCE_DIR to the retail JO directory")
 		return
 
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	var mount_err := int(root.mount_runtime(resource_dir, EXPANSION, false, "jo"))
 	if mount_err != OK:
 		_fail("resource mount failed (%d): %s" % [mount_err, root.get_last_error()])
 		return
 
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	if mission.open_from_resource_root(root, MISSION) != OK:
 		_fail("cannot open %s from the %s mount" % [MISSION, EXPANSION])
 		return
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	if item_db.load_from_resource_root(root, "items.def") != OK:
 		_fail("cannot load items.def: %s" % item_db.get_last_error())
 		return
 
-	var sim := NovaSimulation.new()
+	var sim := Simulation.new()
 	if not sim.load_from_mission_data(mission):
 		sim.free()
-		_fail("NovaSimulation rejected %s" % MISSION)
+		_fail("Simulation rejected %s" % MISSION)
 		return
 	sim.resolve_item_traits(item_db)
 	# S3b native-only: collision extraction reads the sim's own asset root; a
@@ -61,11 +61,11 @@ func _run() -> void:
 	# The retail 00TRg oracle's first persistent 0x40 walk covers pool-2 slots
 	# 2..25; later resumable visits cover pool-1 slots 8..12. Print the authored
 	# rows and definition-side classifier inputs beside the zone-chain summary.
-	for kind in [NovaMissionData.KIND_ITEM, NovaMissionData.KIND_BUILDING]:
+	for kind in [MissionData.KIND_ITEM, MissionData.KIND_BUILDING]:
 		var records: Array = mission.get_entities(kind)
 		var limit := mini(records.size(), 30)
 		for index in limit:
-			if kind == NovaMissionData.KIND_ITEM and (index < 6 or index > 14):
+			if kind == MissionData.KIND_ITEM and (index < 6 or index > 14):
 				continue
 			var authored: Dictionary = records[index]
 			var def_id := int(authored.get("item_id", 0))
@@ -107,7 +107,7 @@ func _run() -> void:
 			print(("[zone] bms=%d pool=%d item=%d def=%d attrib=0x%08x team=%d " +
 					"number=%d radius=%d trigger=%s spawn=%s chain=%d") % [
 				bms_id, int(state.get("pool", -1)), int(state.get("item_id", 0)),
-				int(state.get("item_id", 0)) + NovaMissionData.ITEM_ID_OFFSET,
+				int(state.get("item_id", 0)) + MissionData.ITEM_ID_OFFSET,
 				int(state.get("item_attrib", 0)), int(state.get("team", 0)),
 				zone_number, int(state.get("zone_radius", 0)), str(is_trigger),
 				str(bool(state.get("is_spawn_point", false))), chain_index])
@@ -147,13 +147,13 @@ func _classifies_for_minimap(state: Dictionary) -> bool:
 		return true
 	if int(state.get("item_unit_type", 0)) == 11:
 		return true
-	if int(state.get("item_type", 0)) == NovaItemDatabase.TYPE_BUILDING:
+	if int(state.get("item_type", 0)) == ItemDatabase.TYPE_BUILDING:
 		return bool(state.get("has_minimap_model_marker", false))
-	if int(state.get("item_type", 0)) == NovaItemDatabase.TYPE_VEHICLE:
+	if int(state.get("item_type", 0)) == ItemDatabase.TYPE_VEHICLE:
 		return true
 	if (attrib & (0x8000 | EWEAP_ATTRIB | SPAWN_POINT_ATTRIB)) != 0:
 		return true
-	return int(state.get("item_type", 0)) == NovaItemDatabase.TYPE_PERSON
+	return int(state.get("item_type", 0)) == ItemDatabase.TYPE_PERSON
 
 
 func _fail(message: String) -> void:

@@ -83,7 +83,7 @@ func refresh() -> void:
 	_wrap_x_toggle.set_pressed_no_signal(terrain_editor.get_wrap_x_enabled())
 	_wrap_y_toggle.set_pressed_no_signal(terrain_editor.get_wrap_y_enabled())
 	_board.set_active_cell(terrain_editor.get_active_sector_cell())
-	var data: NovaTerrainData = terrain_editor.get_data()
+	var data: TerrainData = terrain_editor.get_data()
 	if data:
 		_board.set_grid_state(terrain_editor.get_sector_count(), terrain_editor.get_sector_rows(), data.get_sector_grid())
 	_syncing = false

@@ -1,15 +1,15 @@
 class_name TerrainTileOverlayPreview
 extends Node3D
 
-const CELL_WORLD_SIZE := float(NovaTerrainTileInfo.CELL_WORLD_SIZE)
-const TILE_PIXELS := float(NovaTerrainTileInfo.ATLAS_TILE_PIXELS)
+const CELL_WORLD_SIZE := float(TerrainTileInfo.CELL_WORLD_SIZE)
+const TILE_PIXELS := float(TerrainTileInfo.ATLAS_TILE_PIXELS)
 const SURFACE_OFFSET := 0.08
 const GHOST_OFFSET := 0.12
 const HOVER_OFFSET := 0.16
 const SELECTION_OFFSET := 0.18
 
 var _terrain_mesh: EditorTerrainMesh
-var _tileinfo: NovaTerrainTileInfo
+var _tileinfo: TerrainTileInfo
 var _tilestrip: Texture2D
 var _selected_index: int = -1
 var _hover_index: int = -1
@@ -26,7 +26,7 @@ var _authoring_outlines_visible := true
 # stay as GDScript MeshInstance3D children below. Ghost tile UVs also route
 # through the same native helper so FLIP_X -> FLIP_Y -> ROTATE_90 ordering only
 # exists in one place.
-var _tile_overlay: NovaTerrainTileOverlay
+var _tile_overlay: TerrainTileOverlay
 
 var _ghost_instance: MeshInstance3D
 var _hover_instance: MeshInstance3D
@@ -39,7 +39,7 @@ var _selection_outline_material: StandardMaterial3D
 
 
 func _ready() -> void:
-	_tile_overlay = NovaTerrainTileOverlay.new()
+	_tile_overlay = TerrainTileOverlay.new()
 	_tile_overlay.name = "TileOverlay"
 	_tile_overlay.surface_offset = SURFACE_OFFSET
 	# Editor shows the FLAG_OUTLINE perimeter as authoring feedback. The engine's
@@ -107,7 +107,7 @@ func _ready() -> void:
 
 func set_preview_state(
 	terrain_mesh: EditorTerrainMesh,
-	tileinfo: NovaTerrainTileInfo,
+	tileinfo: TerrainTileInfo,
 	tilestrip: Texture2D,
 	selected_index: int,
 	hover_index: int,
@@ -212,7 +212,7 @@ func _rebuild_tile_overlay_node() -> void:
 	_tile_overlay.tilestrip = _tilestrip
 	_tile_overlay.height_sampler = Callable(_terrain_mesh, "sample_world_height")
 	_tile_overlay.rebuild()
-	# NovaTerrainTileOverlay owns both native children. Material composition
+	# TerrainTileOverlay owns both native children. Material composition
 	# replaces only OverlayMesh; FLAG_OUTLINE remains a separate authoring layer.
 	var base_instance := _tile_overlay.get_node_or_null("OverlayMesh") as MeshInstance3D
 	if base_instance != null:
@@ -222,7 +222,7 @@ func _rebuild_tile_overlay_node() -> void:
 		outline_instance.visible = _authoring_outlines_visible and outline_instance.mesh != null
 
 
-static func entry_center_world(entry: NovaTerrainTileEntry, terrain_mesh: EditorTerrainMesh) -> Vector3:
+static func entry_center_world(entry: TerrainTileEntry, terrain_mesh: EditorTerrainMesh) -> Vector3:
 	if entry == null or terrain_mesh == null:
 		return Vector3.ZERO
 	var center_x := float(entry.get_x_fixed()) / 65536.0 + CELL_WORLD_SIZE * 0.5
@@ -327,7 +327,7 @@ func _rebuild_ghost_mesh() -> void:
 	if tiles_x <= 0 or tiles_y <= 0:
 		return
 
-	var ghost_entry := NovaTerrainTileEntry.new()
+	var ghost_entry := TerrainTileEntry.new()
 	ghost_entry.set_cell(_ghost_cell.x, _ghost_cell.y)
 	ghost_entry.set_tile_index(_ghost_tile_index)
 	ghost_entry.set_flags(_ghost_flags)
@@ -354,7 +354,7 @@ func _rebuild_ghost_mesh() -> void:
 	_ghost_instance.visible = true
 
 
-func _build_entry_quad(entry: NovaTerrainTileEntry, y_offset: float) -> Array:
+func _build_entry_quad(entry: TerrainTileEntry, y_offset: float) -> Array:
 	var origin_x := float(entry.get_x_fixed()) / 65536.0
 	var origin_z := -float(entry.get_z_fixed()) / 65536.0
 	var x1 := origin_x + CELL_WORLD_SIZE
@@ -375,7 +375,7 @@ func _sample_height(world_x: float, world_z: float, y_offset: float) -> float:
 	return height + y_offset
 
 
-func _build_entry_uvs(entry: NovaTerrainTileEntry, tiles_x: int, tiles_y: int) -> Array:
+func _build_entry_uvs(entry: TerrainTileEntry, tiles_x: int, tiles_y: int) -> Array:
 	if _tile_overlay == null:
 		return []
 	var atlas_width := tiles_x * int(TILE_PIXELS)

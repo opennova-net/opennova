@@ -4,7 +4,7 @@ extends GutTest
 # player's animation scalars and one row per registry animatable, and
 # degrades to empty states when the world/registry are gone.
 
-const PageScript := preload("res://adapter/debug/pages/debug_animation_page.gd")
+const PageScript := preload("res://src/debug/pages/debug_animation_page.gd")
 
 
 # Real native models: state is DRIVEN through the public surface (committed
@@ -13,17 +13,17 @@ const PageScript := preload("res://adapter/debug/pages/debug_animation_page.gd")
 const RIGGED_3DI := "res://../fixtures/threedi/3di3/Shed.3di"
 
 
-static func _rigged_model(parent: Node, clip: String) -> NovaObjectModel:
+static func _rigged_model(parent: Node, clip: String) -> ObjectModel:
 	# Enter the tree FIRST (global_transform/bounds math must be valid before
 	# rebuild), the production placer order.
-	var m := NovaObjectModel.new()
+	var m := ObjectModel.new()
 	parent.add_child(m)
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert(data.open_file(ProjectSettings.globalize_path(RIGGED_3DI)) == OK)
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert(root.set_root_dir(
 			ProjectSettings.globalize_path("res://../fixtures/anim")) == OK)
-	var sk := NovaSkeletalAnim.new()
+	var sk := SkeletalAnim.new()
 	assert(sk.load_from_bad_files(root, "idle.bad",
 			{ "anim_idle": "idle.bad", "anim_walk": "walk.bad" }))
 	m.set_object_data(data)
@@ -34,7 +34,7 @@ static func _rigged_model(parent: Node, clip: String) -> NovaObjectModel:
 
 
 # The value-only sim double the page reads through _ctx.sim(): the local
-# player's animation scalars under NovaSimulation's native getter names.
+# player's animation scalars under Simulation's native getter names.
 class StubSim:
 	extends RefCounted
 
@@ -59,13 +59,13 @@ class StubSim:
 
 class StubRuntime:
 	extends Node
-	var registry := NovaEntityIndex.new()
+	var registry := EntityIndex.new()
 	var sim := StubSim.new()
 
 	func get_sim() -> Object:
 		return sim
 
-	func get_registry() -> NovaEntityIndex:
+	func get_registry() -> EntityIndex:
 		return registry
 
 
@@ -74,8 +74,8 @@ class StubWorld:
 
 
 func _make_page(world: Node = null, runtime: Node = null) -> DebugAnimationPage:
-	var ctx := NovaDebugContext.new()
-	ctx.options = NovaDebugOptionState.new()
+	var ctx := DebugContext.new()
+	ctx.options = DebugOptionState.new()
 	if world != null:
 		ctx.world_source = func(): return world
 	if runtime != null:
@@ -100,7 +100,7 @@ func test_formats_player_scalars_and_model_rows() -> void:
 	add_child_autofree(world)
 	var runtime := StubRuntime.new()
 	add_child_autofree(runtime)
-	var idle := NovaObjectModel.new()
+	var idle := ObjectModel.new()
 	idle.name = "Crate01"
 	runtime.add_child(idle)
 	var soldier := _rigged_model(runtime, "anim_walk")
@@ -167,7 +167,7 @@ func test_steady_refresh_does_not_reset_model_list_browsing_position() -> void:
 	add_child_autofree(runtime)
 	var entries: Array = []
 	for index in range(36):
-		var model := NovaObjectModel.new()
+		var model := ObjectModel.new()
 		model.name = "Model_%02d" % index
 		runtime.add_child(model)
 		entries.append({ "model": model, "ref": { "bms_id": 1000 + index } })
@@ -210,7 +210,7 @@ func test_explains_the_local_player_transition_and_blend() -> void:
 func test_selected_model_detail_survives_registry_reorder_by_stable_identity() -> void:
 	var runtime := StubRuntime.new()
 	add_child_autofree(runtime)
-	var crate := NovaObjectModel.new()
+	var crate := ObjectModel.new()
 	crate.name = "Crate01"
 	crate.set_meta("entity_ref", {"bms_id": 101, "kind": 3, "index": 0})
 	var soldier := _rigged_model(runtime, "anim_walk")
@@ -260,10 +260,10 @@ func test_selected_model_detail_survives_registry_reorder_by_stable_identity() -
 	# Change which model is actively playing as well as registry order, so the
 	# useful-model sort moves the selected row. Selection must follow BMS 220,
 	# not whichever model inherits the old row index.
-	var crate_root := NovaResourceRoot.new()
+	var crate_root := ResourceRoot.new()
 	assert_eq(crate_root.set_root_dir(
 			ProjectSettings.globalize_path("res://../fixtures/anim")), OK)
-	var crate_sk := NovaSkeletalAnim.new()
+	var crate_sk := SkeletalAnim.new()
 	assert_true(crate_sk.load_from_bad_files(crate_root, "idle.bad",
 			{ "anim_idle": "idle.bad" }))
 	crate.set_skeletal_anim(crate_sk)

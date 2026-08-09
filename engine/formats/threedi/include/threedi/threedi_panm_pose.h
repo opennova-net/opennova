@@ -3,7 +3,7 @@
 // LOD-effective node selection, per-track file-local -> global CTRL register
 // resolution, liveness classification, and the part-indexed pose array with
 // its base-transform fallback. Ported from the shell adapter's
-// NovaObjectData PANM evaluation so the simulation can pose collision
+// ObjectData PANM evaluation so the simulation can pose collision
 // sections without the render binding (ADR 0028).
 // [orig: model CTRL loader @ 0x5B4640; CtrlName_ToOrdinal @ 0x57B290;
 //  PANM_SampleTrack @ 0x5B2270; the node-matrix builder is

@@ -54,18 +54,18 @@ func test_defaults_without_an_editor() -> void:
 class PreviewContextStubEditor:
 	extends Node
 
-	var resource_root: NovaResourceRoot
+	var resource_root: ResourceRoot
 	var world_root: Node3D
 	var current_trn_path := ""
 	var is_dirty := false
 	var set_context_calls := 0
 	var clear_context_calls := 0
 	var context_active := false
-	var tile_info: NovaTerrainTileInfo
+	var tile_info: TerrainTileInfo
 	var time_of_day := NAN
 
 	func set_mission_preview_context(
-		value: NovaTerrainTileInfo,
+		value: TerrainTileInfo,
 		preview_time_of_day: float = NAN
 	) -> void:
 		set_context_calls += 1
@@ -82,7 +82,7 @@ class PreviewContextStubEditor:
 	func set_viewport_active(_active: bool, _grab_focus: bool) -> void:
 		pass
 
-	func get_resource_root() -> NovaResourceRoot:
+	func get_resource_root() -> ResourceRoot:
 		return resource_root
 
 	func get_terrain_world_root() -> Node3D:
@@ -141,7 +141,7 @@ func test_release_viewport_ends_mission_preview_context_before_rebind() -> void:
 func test_active_mission_context_uses_bms_clock_and_clear_drops_only_the_override() -> void:
 	var editor := PreviewContextStubEditor.new()
 	add_child_autofree(editor)
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/godot/dvxi5"))
 	editor.resource_root = root
 	editor.world_root = Node3D.new()
@@ -150,7 +150,7 @@ func test_active_mission_context_uses_bms_clock_and_clear_drops_only_the_overrid
 	var bms := ProjectSettings.globalize_path("res://../fixtures/bms/ash_i5b.reference.bms")
 	assert_eq(ws.open_file(bms), OK)
 	var controller = ws.get_editor_document()
-	var mission: NovaMissionData = controller.get_mission()
+	var mission: MissionData = controller.get_mission()
 	mission.set_header_int("start_time", 0x0540) # unsigned Q8.8 = 05:15
 
 	ws.activate()
@@ -192,10 +192,10 @@ func test_undo_redo_hooks_delegate_to_the_controller() -> void:
 	# The history lives on the document; seed it on a from-scratch mission and hand it to the
 	# controller. can_undo/can_redo then reflect it -- proving the hooks delegate through the
 	# controller without standing up a full terrain + world load.
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	mission.create_default()
 	mission.begin_edit()
-	mission.add_entity(NovaMissionData.KIND_ITEM, 101291, Vector3.ZERO, Vector3.ZERO)
+	mission.add_entity(MissionData.KIND_ITEM, 101291, Vector3.ZERO, Vector3.ZERO)
 	mission.commit_edit()
 	ws._controller._mission = mission
 	assert_true(ws.can_undo(), "can_undo reflects the document's undo history")
@@ -243,14 +243,14 @@ func test_asset_dock_before_build_mounts_the_editor() -> void:
 class RegroundStubEditor:
 	extends Node
 
-	var resource_root: NovaResourceRoot
+	var resource_root: ResourceRoot
 	var world_root: Node3D
 	var current_trn_path: String = ""
 	var is_dirty := false
 	var height_revision := 0
 	var sample_height := 10.0
 
-	func get_resource_root() -> NovaResourceRoot:
+	func get_resource_root() -> ResourceRoot:
 		return resource_root
 
 	func get_terrain_world_root() -> Node3D:
@@ -286,7 +286,7 @@ class RegroundStubEditor:
 # the fake surface moved) so the next activate() reports drift.
 func _drifted_workspace() -> MissionWorkspace:
 	var stub := RegroundStubEditor.new()
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/godot/dvxi5"))
 	stub.resource_root = root
 	stub.world_root = Node3D.new()
@@ -325,7 +325,7 @@ func test_activate_prompts_reground_and_confirm_applies() -> void:
 func test_reground_prompt_cancel_acknowledges_without_moving() -> void:
 	var ws := _drifted_workspace()
 	var shell: Control = ws.editor_shell
-	var before: Vector3 = ws._controller.get_mission().get_entities(NovaMissionData.KIND_MARKER)[0]["position"]
+	var before: Vector3 = ws._controller.get_mission().get_entities(MissionData.KIND_MARKER)[0]["position"]
 
 	ws.activate()
 	var dialog := shell.find_child("MissionRegroundDialog", true, false) as ConfirmationDialog
@@ -333,7 +333,7 @@ func test_reground_prompt_cancel_acknowledges_without_moving() -> void:
 	dialog.canceled.emit()
 	await get_tree().process_frame  # let the dismissed dialog's queue_free land
 
-	var after: Vector3 = ws._controller.get_mission().get_entities(NovaMissionData.KIND_MARKER)[0]["position"]
+	var after: Vector3 = ws._controller.get_mission().get_entities(MissionData.KIND_MARKER)[0]["position"]
 	assert_eq(after, before, "declining moves nothing")
 	assert_eq(ws._controller.undo_depth(), 0, "and pushes no undo step")
 	assert_eq(ws._controller.reconcile_with_terrain(), 0, "the drift is acknowledged")

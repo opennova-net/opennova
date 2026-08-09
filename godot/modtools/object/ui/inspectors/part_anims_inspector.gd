@@ -90,7 +90,7 @@ func _axis_id_for_name(axis_name: String) -> int:
 
 
 func _part_options_for_lod(lod_index: int) -> Array:
-	var data: NovaObjectData = object_editor.object_data if object_editor else null
+	var data: ObjectData = object_editor.object_data if object_editor else null
 	var options := []
 	var lod_info: Dictionary = data.get_render_lod_info(lod_index) if data != null else {}
 	var part_count := maxi(1, int(lod_info.get("part_count", lod_info.get("render_object_count", 1))))
@@ -100,14 +100,14 @@ func _part_options_for_lod(lod_index: int) -> Array:
 
 
 func _part_anim_entries() -> Array:
-	var data: NovaObjectData = object_editor.object_data if object_editor else null
+	var data: ObjectData = object_editor.object_data if object_editor else null
 	if data == null:
 		return []
 	return data.get_part_anim_editor_entries(_part_anim_lod_index)
 
 
 func _refresh_part_anim_list(preferred_index: int = -1, rebuild_detail: bool = true) -> void:
-	var data: NovaObjectData = object_editor.object_data if object_editor else null
+	var data: ObjectData = object_editor.object_data if object_editor else null
 	if data == null:
 		return
 	var summary: Dictionary = data.get_summary()
@@ -145,7 +145,7 @@ func _refresh_part_anim_list(preferred_index: int = -1, rebuild_detail: bool = t
 func _build_part_anims_inspector(mount: Control) -> void:
 	var box := _make_inspector_box(mount)
 	box.name = "PartAnimListPane"
-	var data: NovaObjectData = object_editor.object_data if object_editor else null
+	var data: ObjectData = object_editor.object_data if object_editor else null
 	var summary: Dictionary = data.get_summary() if data != null else {}
 	var lod_count := maxi(1, int(summary.get("lod_count", 1)))
 	_part_anim_lod_index = clampi(_part_anim_lod_index, 0, lod_count - 1)
@@ -229,7 +229,7 @@ func _build_part_anims_inspector(mount: Control) -> void:
 
 
 func _build_part_anim_detail_dock(box: VBoxContainer) -> void:
-	var data: NovaObjectData = object_editor.object_data if object_editor else null
+	var data: ObjectData = object_editor.object_data if object_editor else null
 	_add_section_heading(box, "Part animation")
 
 	var entries := _part_anim_entries()

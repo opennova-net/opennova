@@ -26,7 +26,7 @@ struct ClientWorldSyncResult {
 
 // Materialize the decoded mission pools a retail client normally allocates
 // while consuming S2C 0x10/0x0D/0x20. This deliberately excludes pool 0:
-// NovaSimulation owns a separate local-player entity and remote organics stay
+// Simulation owns a separate local-player entity and remote organics stay
 // in ClientState/presentation.
 class ClientWorldMaterializer {
 public:

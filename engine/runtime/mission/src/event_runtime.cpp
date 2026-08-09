@@ -552,7 +552,7 @@ void BmsEventSystem::tick(World &w, const opennova::world::TickContext &ctx) {
     if (ctx.pre_mission) {
         // Pre-mission pass: every PreMission-flag entry, one whole-list sweep.
         // The embedder contract is ONE pre_mission tick per mission start, before
-        // the clock runs (NovaSimulation delivers exactly one) — retail's pre
+        // the clock runs (Simulation delivers exactly one) — retail's pre
         // pass is a single call, never periodic (D-EVT-4).
         // [orig: EventTrigger_UpdateAllWithFlag2 @0x454dc0; sole caller
         //  Game_StartMission @0x525b86, before current_tick = 0 @0x525b9f]

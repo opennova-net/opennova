@@ -385,7 +385,7 @@ public:
 	std::vector<MissionEnumEntry> event_flag_bits() const;
 	// Bitmask of every editor-exposed event flag (OR of the event_flag_bits values). The editor rebuilds
 	// an event's flags from these checkboxes only, so set_event must preserve the complementary (unmodeled
-	// / engine-internal) bits rather than clobber them. See NovaMissionData::set_event.
+	// / engine-internal) bits rather than clobber them. See MissionData::set_event.
 	int event_flag_mask() const;
 	// Per-entity AI attribute flags (bmsi_attributes), surfaced as inspector checkboxes. Lists only labeled
 	// author-facing bits; confirmed-but-unlabeled bits such as Attribute17 remain valid through the raw flag

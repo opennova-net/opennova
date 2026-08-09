@@ -1,8 +1,8 @@
 extends GutTest
 
-# M3 gate: NovaMnuMenu builds a live Control tree (one NovaMnuScreen per screen)
-# from a NovaMnuDocument, positions widgets, and toggles screen visibility.
-# M4 gate: assets resolve through NovaResourceRoot / MnsStyleSheet / RtxtStringFile
+# M3 gate: MnuMenu builds a live Control tree (one MnuScreen per screen)
+# from a MnuDocument, positions widgets, and toggles screen visibility.
+# M4 gate: assets resolve through ResourceRoot / MnsStyleSheet / RtxtStringFile
 # (textures, fonts, %VAR% colors, string-id text), degrading gracefully and
 # reporting unresolved asset names.
 
@@ -10,14 +10,14 @@ const FIXTURE := "res://../fixtures/mnu/widgets.mnu"
 const STYLE_FIXTURE := "res://../fixtures/mns/menu_style.mns"
 
 
-func _load_doc() -> NovaMnuDocument:
-	var doc := NovaMnuDocument.new()
+func _load_doc() -> MnuDocument:
+	var doc := MnuDocument.new()
 	doc.load_from_bytes(FileAccess.get_file_as_bytes(FIXTURE))
 	return doc
 
 
-func _build_menu(edit_mode: bool = false, document: NovaMnuDocument = null) -> NovaMnuMenu:
-	var menu := NovaMnuMenu.new()
+func _build_menu(edit_mode: bool = false, document: MnuDocument = null) -> MnuMenu:
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)  # in-tree so built widgets are not orphans
 	menu.set_edit_mode(edit_mode)
@@ -37,7 +37,7 @@ func test_builds_one_node_per_screen() -> void:
 	var menu := _build_menu()
 	assert_eq(menu.get_child_count(), 2, "two screen nodes built")
 	var s0 := menu.get_child(0)
-	assert_true(s0 is NovaMnuScreen, "screen node is NovaMnuScreen")
+	assert_true(s0 is MnuScreen, "screen node is MnuScreen")
 	assert_eq(s0.get_screen_name(), "MAIN", "first screen name")
 	assert_eq(s0.get_music_var(), 3, "screen music_var carried onto node")
 
@@ -50,7 +50,7 @@ func test_absent_screen_music_var_ignores_its_latent_value() -> void:
 	assert_false(doc.get_screen_has_music_var(screen))
 
 	var menu := _build_menu(false, doc)
-	var s0 := menu.get_child(0) as NovaMnuScreen
+	var s0 := menu.get_child(0) as MnuScreen
 	assert_eq(s0.get_music_var(), 0,
 			"presence bit is authoritative even while the parsed value remains latent")
 
@@ -62,16 +62,16 @@ func test_widget_tree_and_types() -> void:
 	assert_not_null(title, "Title node built")
 	assert_eq(_widget_text(title), "MM_Title", "static text (raw id; RTXT resolved separately)")
 
-	# Button -> NovaMnuButton (a TextureButton subclass); text in child Label.
+	# Button -> MnuButton (a TextureButton subclass); text in child Label.
 	var start := menu.find_child("StartBtn", true, false)
 	assert_not_null(start, "StartBtn node built")
-	assert_true(start is NovaMnuButton, "button becomes a NovaMnuButton")
-	assert_true(start is TextureButton, "NovaMnuButton is a TextureButton")
+	assert_true(start is MnuButton, "button becomes a MnuButton")
+	assert_true(start is TextureButton, "MnuButton is a TextureButton")
 	assert_eq(_widget_text(start), "MM_Start", "button text is the raw string (no text resource set)")
 
-	# Checkbox -> NovaMnuCheckBox (a toggled TextureButton subclass).
+	# Checkbox -> MnuCheckBox (a toggled TextureButton subclass).
 	var chk := menu.find_child("SoundChk", true, false)
-	assert_true(chk is NovaMnuCheckBox, "checkbox becomes a NovaMnuCheckBox")
+	assert_true(chk is MnuCheckBox, "checkbox becomes a MnuCheckBox")
 	assert_true((chk as TextureButton).button_pressed, "checked flag carried")
 
 
@@ -126,7 +126,7 @@ func test_real_style_var_color_resolves_onto_label() -> void:
 	assert_eq(String(ss.get_variable("DEF_TEXT_FG")), "FFFFFFFF",
 		"the shipped-style fixture authors opaque white in MNU AARRGGBB order")
 
-	var menu := NovaMnuMenu.new()
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
 	menu.stylesheet = ss
@@ -154,7 +154,7 @@ func test_var_in_literal_text_resolves_through_stylesheet() -> void:
 </WINDOW>
 </SCREEN>
 </MENU>"""
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(xml.to_utf8_buffer()), OK, "var-text menu parses")
 	# The document keeps the raw token (round-trip), proving we did not pre-expand.
 	assert_true(doc.to_byte_array().get_string_from_utf8().contains("%BUILD_LABEL%"),
@@ -162,7 +162,7 @@ func test_var_in_literal_text_resolves_through_stylesheet() -> void:
 
 	var ss := MnsStyleSheet.new()
 	ss.set_variable("BUILD_LABEL", "Build 1337")
-	var menu := NovaMnuMenu.new()
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
 	menu.stylesheet = ss
@@ -179,7 +179,7 @@ func test_string_id_resolves_from_text_resource() -> void:
 	var sec := rt.add_section("MENU")
 	rt.add_entry("MM_START", "Start Game", sec, Vector2i(0, 0))
 
-	var menu := NovaMnuMenu.new()
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
 	menu.text_resource = rt
@@ -201,7 +201,7 @@ func test_each_screen_resolves_its_own_text_resource() -> void:
 		var section := table.add_section("MENU")
 		table.add_entry("SHARED", spec[1], section, Vector2i())
 		assert_eq(table.save_to_path(dir.path_join(spec[0])), OK, "temporary RTXT saves")
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(dir), OK, "temporary resource root opens")
 	var bytes := ('<SCREEN><NAME>ONE</NAME><TEXT_RSRC>one.BIN</TEXT_RSRC>' +
 		'<WINDOW type="window" name="ROOT"><WINDOW type="static" name="TEXT_ONE">' +
@@ -209,9 +209,9 @@ func test_each_screen_resolves_its_own_text_resource() -> void:
 		'<SCREEN><NAME>TWO</NAME><TEXT_RSRC>two.BIN</TEXT_RSRC>' +
 		'<WINDOW type="window" name="ROOT"><WINDOW type="static" name="TEXT_TWO">' +
 		'<STRING type="id">SHARED</STRING></WINDOW></WINDOW></SCREEN>').to_utf8_buffer()
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(bytes), OK)
-	var menu := NovaMnuMenu.new()
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
 	menu.set_resource_root(root)
@@ -253,12 +253,12 @@ func test_real_assets_resolve_and_frame_bakes() -> void:
 	_write_png(dir.path_join("btn_over.png"), 100, 30, Color(0.3, 0.6, 0.9, 1.0))
 	_write_png(dir.path_join("newarow1.png"), 16, 16, Color(1, 1, 1, 1))         # cursor
 
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	if root.set_root_dir(dir) != OK:
 		pass_test("temp resource root unavailable in this environment: %s" % root.get_last_error())
 		return
 
-	var menu := NovaMnuMenu.new()
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
 	menu.set_resource_root(root)
@@ -285,7 +285,7 @@ func test_real_assets_resolve_and_frame_bakes() -> void:
 	assert_eq(fill.stretch_mode, TextureRect.STRETCH_TILE, "brush is tiled, not stretched")
 
 	# The MAIN screen's cursor (newarow1.tga) resolved onto the screen node.
-	var main_screen := menu.get_child(0) as NovaMnuScreen
+	var main_screen := menu.get_child(0) as MnuScreen
 	assert_not_null(main_screen.get_cursor_texture(), "cursor texture resolved onto the screen")
 
 	# Every concrete texture resolved, so nothing is reported unresolved.
@@ -307,7 +307,7 @@ func test_frame_honors_authored_stencil_insets() -> void:
 	var img := Image.create(64, 64, false, Image.FORMAT_RGBA8)
 	img.fill(Color(0.5, 0.5, 0.5, 1.0))
 	img.save_png(dir.path_join("border2.png"))
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	if root.set_root_dir(dir) != OK:
 		pass_test("temp resource root unavailable in this environment")
 		return
@@ -318,9 +318,9 @@ func test_frame_honors_authored_stencil_insets() -> void:
 </WINDOW>
 </SCREEN>
 </MENU>"""
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(xml.to_utf8_buffer()), OK, "inset menu parses")
-	var menu := NovaMnuMenu.new()
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
 	menu.set_resource_root(root)
@@ -340,10 +340,10 @@ func test_frame_honors_authored_stencil_insets() -> void:
 
 func test_button_screen_action_navigates() -> void:
 	# StartBtn carries <ACTION type="screen" target="OPTIONS">. Pressing it routes
-	# through the NovaMnuButton -> NovaMnuMenu navigation controller.
+	# through the MnuButton -> MnuMenu navigation controller.
 	var menu := _build_menu()
-	var start := menu.find_child("StartBtn", true, false) as NovaMnuButton
-	assert_not_null(start, "StartBtn is a NovaMnuButton")
+	var start := menu.find_child("StartBtn", true, false) as MnuButton
+	assert_not_null(start, "StartBtn is a MnuButton")
 	assert_eq(start.get_action_count(), 1, "one screen action parsed onto the button")
 
 	start.emit_signal("pressed")
@@ -355,17 +355,17 @@ func test_button_screen_action_navigates() -> void:
 func test_pop_screen_action_returns_to_previous() -> void:
 	var menu := _build_menu()
 	# Forward: MAIN -> OPTIONS (pushes MAIN onto the stack).
-	(menu.find_child("StartBtn", true, false) as NovaMnuButton).emit_signal("pressed")
+	(menu.find_child("StartBtn", true, false) as MnuButton).emit_signal("pressed")
 	assert_eq(menu.current_screen, "OPTIONS", "navigated to OPTIONS")
 	# BackBtn carries <ACTION type="POP_SCREEN">: pop back to MAIN.
-	(menu.find_child("BackBtn", true, false) as NovaMnuButton).emit_signal("pressed")
+	(menu.find_child("BackBtn", true, false) as MnuButton).emit_signal("pressed")
 	assert_eq(menu.current_screen, "MAIN", "pop_screen returned to MAIN")
 
 
 func test_action_dispatched_signal_fires() -> void:
 	var menu := _build_menu()
 	watch_signals(menu)
-	(menu.find_child("StartBtn", true, false) as NovaMnuButton).emit_signal("pressed")
+	(menu.find_child("StartBtn", true, false) as MnuButton).emit_signal("pressed")
 	assert_signal_emitted_with_parameters(menu, "action_dispatched", ["screen", "OPTIONS"])
 
 
@@ -374,7 +374,7 @@ func test_hover_emits_sound_requested() -> void:
 	# Hover always emits sound_requested(file, trigger) even with no sound bank.
 	var menu := _build_menu()
 	watch_signals(menu)
-	(menu.find_child("StartBtn", true, false) as NovaMnuButton).emit_signal("mouse_entered")
+	(menu.find_child("StartBtn", true, false) as MnuButton).emit_signal("mouse_entered")
 	assert_signal_emitted_with_parameters(menu, "sound_requested", ["menu.lwf", "MOUSE_OVER"])
 
 
@@ -383,7 +383,7 @@ func test_sound_slots_route_by_state_not_trigger() -> void:
 	# string [orig: CUIElement_ParseXMLDefinition @ 0x648120 - MOUSEIN=1,
 	# MOUSEOUT=2, SELECTED=3]. A trigger named "MOUSE_OVER" authored under
 	# state="selected" must fire on press, not on hover.
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	var xml := """<MENU>
 <SCREEN name=\"MAIN\">
 <WINDOW type=\"WINDOW\" name=\"Root\"><POSITION left=\"0\" top=\"0\" right=\"640\" bottom=\"480\"></POSITION>
@@ -395,12 +395,12 @@ func test_sound_slots_route_by_state_not_trigger() -> void:
 </SCREEN>
 </MENU>"""
 	assert_eq(doc.load_from_bytes(xml.to_utf8_buffer()), OK, "test menu parses")
-	var menu := NovaMnuMenu.new()
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
 	menu.menu = doc
 	watch_signals(menu)
-	var btn := menu.find_child("OddBtn", true, false) as NovaMnuButton
+	var btn := menu.find_child("OddBtn", true, false) as MnuButton
 	assert_not_null(btn, "button built")
 
 	# Hover: no mousein slot authored -> no sound at all.
@@ -419,7 +419,7 @@ func test_sound_slots_route_by_state_not_trigger() -> void:
 
 func test_master_volume_property_defaults_and_clamps() -> void:
 	# [orig: CGameMenu+92 master volume, ctor default 0xFF @ 0x63e060]
-	var menu := NovaMnuMenu.new()
+	var menu := MnuMenu.new()
 	add_child_autofree(menu)
 	assert_eq(menu.master_volume, 255, "default master volume is 255")
 	menu.master_volume = 300
@@ -433,7 +433,7 @@ func test_music_changed_fires_on_screen_show() -> void:
 	# OPTIONS declares no MUSICVAR, whose parsed default 0 is still written. Every
 	# screen event repeats the write [orig: UI_DispatchScreenEvent @ 0x54e6a0,
 	# AudioVM_SetVariable(2, value) @ 0x54eff4].
-	var menu := NovaMnuMenu.new()
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
 	watch_signals(menu)
@@ -511,7 +511,7 @@ func test_monogram_parsed_but_not_drawn() -> void:
 	_write_png(dir.path_join("border2.png"), 64, 64, Color(0.7, 0.7, 0.7, 1.0))
 	_write_png(dir.path_join("mono.png"), 16, 16, Color(1, 1, 1, 1))
 
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	if root.set_root_dir(dir) != OK:
 		pass_test("temp resource root unavailable: %s" % root.get_last_error())
 		return
@@ -523,10 +523,10 @@ func test_monogram_parsed_but_not_drawn() -> void:
 		"<FRAME><STENCIL size=\"64\">border2.tga</STENCIL><MONOGRAM>mono.tga</MONOGRAM></FRAME>" + \
 		"<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>200</RIGHT><BOTTOM>200</BOTTOM></POSITION>" + \
 		"</WINDOW></SCREEN>"
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(mnu_text.to_utf8_buffer()), OK, "synthetic menu parses")
 
-	var menu := NovaMnuMenu.new()
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
 	menu.set_resource_root(root)
@@ -554,10 +554,10 @@ func test_hotkey_routes_escape_to_pop_button() -> void:
 		"<SCREEN><NAME>SUB</NAME><WINDOW type=\"window\" name=\"ROOT\">" + \
 		"<WINDOW type=\"button\" name=\"BACK\"><HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>" + \
 		"<ACTION type=\"pop_screen\"></ACTION></WINDOW></WINDOW></SCREEN>"
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(mnu_text.to_utf8_buffer()), OK, "two-screen menu parses")
 
-	var menu := NovaMnuMenu.new()
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
 	menu.menu = doc
@@ -573,9 +573,9 @@ func test_hotkey_router_inert_in_edit_mode() -> void:
 	var mnu_text := "<SCREEN><NAME>MAIN</NAME><WINDOW type=\"window\" name=\"ROOT\">" + \
 		"<WINDOW type=\"button\" name=\"BACK\"><HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>" + \
 		"<ACTION type=\"pop_screen\"></ACTION></WINDOW></WINDOW></SCREEN>"
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	doc.load_from_bytes(mnu_text.to_utf8_buffer())
-	var menu := NovaMnuMenu.new()
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
 	menu.set_edit_mode(true)
@@ -587,17 +587,17 @@ func test_real_shipped_button_dispatches_its_action() -> void:
 	# Press the real jo_options BACK button (<ACTION type="pop_screen">) and assert
 	# the navigation verb dispatches - proving the verbs work on shipped content,
 	# not just the synthetic widgets.mnu.
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	doc.load_from_bytes(FileAccess.get_file_as_bytes("res://../fixtures/mnu/jo_options.mnu"))
-	var menu := NovaMnuMenu.new()
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
 	menu.menu = doc
 	watch_signals(menu)
 	var back := menu.find_child("BACK", true, false)
 	assert_not_null(back, "real BACK button built")
-	assert_true(back is NovaMnuButton, "BACK is a NovaMnuButton")
-	(back as NovaMnuButton).emit_signal("pressed")
+	assert_true(back is MnuButton, "BACK is a MnuButton")
+	(back as MnuButton).emit_signal("pressed")
 	assert_signal_emitted_with_parameters(menu, "action_dispatched", ["pop_screen", ""])
 
 
@@ -612,10 +612,10 @@ func _key(keycode: int, pressed := true, echo := false) -> InputEventKey:
 	return k
 
 
-func _menu_from(bytes: PackedByteArray, edit_mode := false) -> NovaMnuMenu:
-	var doc := NovaMnuDocument.new()
+func _menu_from(bytes: PackedByteArray, edit_mode := false) -> MnuMenu:
+	var doc := MnuDocument.new()
 	doc.load_from_bytes(bytes)
-	var menu := NovaMnuMenu.new()
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
 	menu.set_edit_mode(edit_mode)
@@ -734,7 +734,7 @@ func test_hotkey_toggles_checkbox() -> void:
 
 func test_checkbox_toggle_drives_underline() -> void:
 	var menu := _build_menu()
-	var chk := menu.find_child("SoundChk", true, false) as NovaMnuCheckBox
+	var chk := menu.find_child("SoundChk", true, false) as MnuCheckBox
 	var underline := chk.find_child("Underline", true, false) as ColorRect
 	assert_not_null(underline, "checkbox builds an Underline child at runtime")
 	assert_true(chk.button_pressed, "SoundChk starts checked (CHECKED flag)")
@@ -787,7 +787,7 @@ func test_edit_mode_widgets_are_inert() -> void:
 	# In edit_mode the widgets connect nothing and stay disabled, so a synthetic
 	# press never navigates (the ONED preview must not drive the menu).
 	var menu := _build_menu(true)
-	var start := menu.find_child("StartBtn", true, false) as NovaMnuButton
+	var start := menu.find_child("StartBtn", true, false) as MnuButton
 	start.emit_signal("pressed")
 	assert_eq(menu.current_screen, "MAIN", "edit-mode press does not navigate")
 
@@ -853,7 +853,7 @@ func test_edit_constraints_filter_clamp_password_and_notify_committed_value() ->
 		'<POSITION left="0" top="0" right="120" bottom="24"></POSITION>' +
 		'</WINDOW></WINDOW></SCREEN>').to_utf8_buffer()
 	var menu := _menu_from(bytes)
-	var edit := menu.find_child("PIN", true, false) as NovaMnuEdit
+	var edit := menu.find_child("PIN", true, false) as MnuEdit
 	assert_not_null(edit, "constrained edit built")
 	assert_true(edit.is_numeric_only(), "NUMBER enables numeric filtering")
 	assert_true(edit.secret, "PASSWORD uses LineEdit secret display")
@@ -875,7 +875,7 @@ func test_radioedit_select_then_edit_then_copy_back_on_focus_loss() -> void:
 		'<POSITION left="0" top="0" right="160" bottom="24"></POSITION>' +
 		'<STRING>Alpha</STRING></WINDOW></WINDOW></SCREEN>').to_utf8_buffer()
 	var menu := _menu_from(bytes)
-	var edit := menu.find_child("CALLSIGN", true, false) as NovaMnuEdit
+	var edit := menu.find_child("CALLSIGN", true, false) as MnuEdit
 	var radio := edit.find_child("Radio", false, false) as BaseButton
 	var label := radio.find_child("Label", false, false) as Label
 	assert_not_null(radio, "RADIOEDIT owns its radio presentation")
@@ -946,9 +946,9 @@ func test_interactive_collapses_to_single_screen() -> void:
 	assert_false(_screen_visible(menu, "B"), "other screen hidden in interactive")
 
 
-func _screen_visible(menu: NovaMnuMenu, name: String) -> bool:
+func _screen_visible(menu: MnuMenu, name: String) -> bool:
 	for c in menu.get_children():
-		if c is NovaMnuScreen and c.get_screen_name() == name:
+		if c is MnuScreen and c.get_screen_name() == name:
 			return c.visible
 	return false
 
@@ -979,9 +979,9 @@ func test_quit_paths_emit_quit_requested() -> void:
 
 func test_music_director_receives_set_var() -> void:
 	# When a director is wired, a screen's MUSICVAR is pushed into its VM var.
-	var dir := NovaMusicDirector.new()
+	var dir := MusicDirector.new()
 	add_child_autofree(dir)
-	var menu := NovaMnuMenu.new()
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
 	menu.set_music_director(dir)
@@ -993,9 +993,9 @@ func test_music_director_receives_set_var() -> void:
 
 
 func test_edit_mode_does_not_drive_director() -> void:
-	var dir := NovaMusicDirector.new()
+	var dir := MusicDirector.new()
 	add_child_autofree(dir)
-	var menu := NovaMnuMenu.new()
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
 	menu.set_edit_mode(true)
@@ -1019,14 +1019,14 @@ const MENU_SOUND_DIR := "res://../fixtures/menu_sound"  # menu.LWF + its loose .
 
 # Build a menu wired to the real menu.lwf profile over the menu_sound fixtures
 # dir. Returns null when the fixtures/resource root are unavailable (caller skips).
-func _menu_with_profile() -> NovaMnuMenu:
-	var root := NovaResourceRoot.new()
+func _menu_with_profile() -> MnuMenu:
+	var root := ResourceRoot.new()
 	if root.set_root_dir(ProjectSettings.globalize_path(MENU_SOUND_DIR)) != OK:
 		return null
-	var profile := NovaLwfData.new()
+	var profile := LwfData.new()
 	if profile.open_from_resource_root(root, "menu.LWF") != OK or profile.get_set_count() == 0:
 		return null
-	var menu := NovaMnuMenu.new()
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	menu.set_edit_mode(false)
 	menu.set_resource_root(root)
@@ -1035,7 +1035,7 @@ func _menu_with_profile() -> NovaMnuMenu:
 	return menu
 
 
-func _has_playing_stream(menu: NovaMnuMenu) -> bool:
+func _has_playing_stream(menu: MnuMenu) -> bool:
 	for child in menu.get_children():
 		if child is AudioStreamPlayer and (child as AudioStreamPlayer).stream != null:
 			return true
@@ -1079,11 +1079,11 @@ func test_lwf_profile_inert_in_edit_mode() -> void:
 
 # Bare menu over the menu_sound fixtures with NO profile/SBF set, or null when
 # the fixtures are unavailable (caller skips).
-func _menu_with_root_only() -> NovaMnuMenu:
-	var root := NovaResourceRoot.new()
+func _menu_with_root_only() -> MnuMenu:
+	var root := ResourceRoot.new()
 	if root.set_root_dir(ProjectSettings.globalize_path(MENU_SOUND_DIR)) != OK:
 		return null
-	var menu := NovaMnuMenu.new()
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	menu.set_edit_mode(false)
 	menu.set_resource_root(root)

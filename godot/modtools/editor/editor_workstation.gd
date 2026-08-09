@@ -215,8 +215,8 @@ func _ready() -> void:
 	_game_launch.setup(
 		_play_in_game_button,
 		func() -> String: return _resource_library.get_root_dir(),
-		func() -> String: return NovaResourceDirSettings.get_expansion(),
-		func() -> String: return NovaResourceDirSettings.get_game(),
+		func() -> String: return ResourceDirSettings.get_expansion(),
+		func() -> String: return ResourceDirSettings.get_game(),
 		func(path: String, args: PackedStringArray) -> int: return OS.create_process(path, args),
 		func(path: String) -> bool: return FileAccess.file_exists(path),
 		get_unsaved_workspace_labels,
@@ -1361,7 +1361,7 @@ func get_resource_root_dir() -> String:
 	return _resource_library.get_root_dir()
 
 
-func get_resource_root() -> NovaResourceRoot:
+func get_resource_root() -> ResourceRoot:
 	return _resource_library.get_resource_root()
 
 
@@ -1447,7 +1447,7 @@ func open_kind_picker(kind: String, title: String, on_pick: Callable) -> void:
 
 ## The shared reference index over the resource root — link widgets resolve
 ## their validity badges through this.
-func get_reference_index() -> NovaReferenceIndex:
+func get_reference_index() -> ReferenceIndex:
 	return _resource_library.get_reference_index()
 
 

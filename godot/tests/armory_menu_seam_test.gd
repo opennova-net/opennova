@@ -1,7 +1,7 @@
 extends GutTest
 
 # The in-game armory seam: weapon.mnu's WEAPON screen driven by the ArmoryMenuCompanion
-# companion (godot/adapter/world/armory_menu_companion.gd). Pins the witnessed wiring [orig:
+# companion (godot/src/world/armory_menu_companion.gd). Pins the witnessed wiring [orig:
 # WeaponDef_RegisterUICallbacks @0x567020 registers PLAYER_CLASS / PRIMARY / SECONDARY /
 # ACCESSORY / *_AMMO / ACCEPT / CANCEL on the "WEAPON" screen; population
 # populate_three_category_lists @0x566db0 (sorted rows, NONE at 0); class resolution
@@ -14,21 +14,21 @@ const WEAPON_FIXTURE := "res://../fixtures/def/weapon.def"
 
 
 func before_each() -> void:
-	NovaStrings.clear()
+	Strings.clear()
 
 
 func after_all() -> void:
-	NovaStrings.clear()
+	Strings.clear()
 
 
-func _load_weapons() -> NovaWeaponDatabase:
-	var wdb := NovaWeaponDatabase.new()
+func _load_weapons() -> WeaponDatabase:
+	var wdb := WeaponDatabase.new()
 	var path := ProjectSettings.globalize_path(WEAPON_FIXTURE)
 	assert_eq(wdb.load(path), OK, "weapon.def fixture loads")
 	return wdb
 
 
-func _load_weapons_with_weight(weapon_name: String, weight: float) -> NovaWeaponDatabase:
+func _load_weapons_with_weight(weapon_name: String, weight: float) -> WeaponDatabase:
 	# Exercise the public parser/database seam with an authored sentinel instead of
 	# reaching into ArmoryMenuCompanion's private row cache. Restrict the substitution to
 	# the named weapon's top-level block so identically named properties elsewhere
@@ -47,7 +47,7 @@ func _load_weapons_with_weight(weapon_name: String, weight: float) -> NovaWeapon
 	if block_start < 0 or block_end <= block_start \
 			or weight_start < block_start or weight_start >= block_end \
 			or weight_end <= weight_start or weight_end > block_end:
-		return NovaWeaponDatabase.new()
+		return WeaponDatabase.new()
 	source = (source.substr(0, weight_start)
 			+ "\tweaponweight\t%.1f" % weight
 			+ source.substr(weight_end))
@@ -57,13 +57,13 @@ func _load_weapons_with_weight(weapon_name: String, weight: float) -> NovaWeapon
 	var output := FileAccess.open(temp_path, FileAccess.WRITE)
 	assert_not_null(output, "temporary weapon.def variant opens for writing")
 	if output == null:
-		return NovaWeaponDatabase.new()
+		return WeaponDatabase.new()
 	output.store_string(source)
 	output.close()
-	var wdb := NovaWeaponDatabase.new()
+	var wdb := WeaponDatabase.new()
 	var err := wdb.load(temp_path)
 	DirAccess.remove_absolute(temp_path)
-	assert_eq(err, OK, "temporary weapon.def variant loads through NovaWeaponDatabase")
+	assert_eq(err, OK, "temporary weapon.def variant loads through WeaponDatabase")
 	return wdb
 
 
@@ -73,13 +73,13 @@ func _make_menu() -> Node:
 	var menu := Node.new()
 	menu.name = "Menu"
 	add_child_autofree(menu)
-	var spin := NovaMnuSpinList.new()
+	var spin := MnuSpinList.new()
 	spin.name = "PLAYER_CLASS"
 	menu.add_child(spin)
 	for n in ["PRIMARY", "SECONDARY", "ACCESSORY",
 			"PRIMARY_AMMO1", "SECONDARY_AMMO1", "ACCESSORY_AMMO1",
 			"GRENADE_AMMO1", "GRENADE_AMMO2", "GRENADE_AMMO3"]:
-		var c := NovaMnuCombo.new()
+		var c := MnuCombo.new()
 		c.name = n
 		menu.add_child(c)
 	for n in ["ACCEPT", "CANCEL"]:
@@ -92,11 +92,11 @@ func _make_menu() -> Node:
 	return menu
 
 
-func _combo(menu: Node, name: String) -> NovaMnuCombo:
-	return menu.find_child(name, true, false) as NovaMnuCombo
+func _combo(menu: Node, name: String) -> MnuCombo:
+	return menu.find_child(name, true, false) as MnuCombo
 
 
-func _combo_texts(c: NovaMnuCombo) -> Array:
+func _combo_texts(c: MnuCombo) -> Array:
 	var out: Array = []
 	for i in c.get_item_count():
 		out.append(c.get_item_text(i))
@@ -112,7 +112,7 @@ func test_weapon_labels_resolve_from_gametext_wepdes() -> void:
 	assert_eq(t.load_from_byte_array(
 			FileAccess.get_file_as_bytes("res://../fixtures/rtxt/gametext.bin")), OK,
 			"gametext.bin fixture loads")
-	NovaStrings.register_table("gametext", t)
+	Strings.register_table("gametext", t)
 	var expected := t.get_string_in_section("WepDes", "WEAP_SHORT_M4")
 	assert_true(not expected.is_empty(), "the fixture carries WepDes/WEAP_SHORT_M4")
 	var companion := ArmoryMenuCompanion.new()
@@ -132,7 +132,7 @@ func test_owns_menu_detects_weapon_screen() -> void:
 	# player.mnu's screen (PLAYERCLASS combo, no ammo combos) is NOT claimed.
 	var player_info := Node.new()
 	add_child_autofree(player_info)
-	var cls := NovaMnuCombo.new()
+	var cls := MnuCombo.new()
 	cls.name = "PLAYERCLASS"
 	player_info.add_child(cls)
 	assert_false(companion.owns_menu(player_info), "the PLAYER_INFO screen stays with its own companion")
@@ -149,12 +149,12 @@ func test_unclassed_default_shows_all_weapons() -> void:
 	var menu := _make_menu()
 	companion.on_menu_built(menu, "weapon.mnu", "WEAPON", null)
 
-	var spin := menu.find_child("PLAYER_CLASS", true, false) as NovaMnuSpinList
+	var spin := menu.find_child("PLAYER_CLASS", true, false) as MnuSpinList
 	assert_eq(spin.get_value_count(), 5, "the five soldier classes 5..9 fill PLAYER_CLASS")
 	assert_eq(spin.get_value_index(), 0, "an unclassed resolve shows row 0")
 
 	var primary := _combo(menu, "PRIMARY")
-	var expected: Array = wdb.get_slot_weapons(NovaWeaponDatabase.SLOT_PRIMARY, -1, 2)
+	var expected: Array = wdb.get_slot_weapons(WeaponDatabase.SLOT_PRIMARY, -1, 2)
 	assert_gt(expected.size(), 0, "the fixture has blue primaries")
 	assert_eq(primary.get_item_count(), expected.size() + 1, "PRIMARY = NONE + ALL blue primaries")
 	assert_eq(primary.get_selected(), 0, "no equipped weapon known -> NONE stays selected")
@@ -171,13 +171,13 @@ func test_populates_classes_slots_and_ammo() -> void:
 	var menu := _make_menu()
 	companion.on_menu_built(menu, "weapon.mnu", "WEAPON", null)
 
-	var spin := menu.find_child("PLAYER_CLASS", true, false) as NovaMnuSpinList
+	var spin := menu.find_child("PLAYER_CLASS", true, false) as MnuSpinList
 	assert_eq(spin.get_value_index(), 3, "the spin selects the resolved class by value (8 = row 3)")
 
 	# Rifleman (mask 8), blue (mask 2): NONE + the filtered primaries, sorted
 	# case-insensitively [orig: cmp @0x6448a0 mode (string, asc)].
 	var primary := _combo(menu, "PRIMARY")
-	var expected: Array = wdb.get_slot_weapons(NovaWeaponDatabase.SLOT_PRIMARY, 8, 2)
+	var expected: Array = wdb.get_slot_weapons(WeaponDatabase.SLOT_PRIMARY, 8, 2)
 	assert_gt(expected.size(), 0, "the fixture has rifleman/blue primaries")
 	assert_eq(primary.get_item_count(), expected.size() + 1, "PRIMARY = NONE + filtered weapons")
 	var texts := _combo_texts(primary)
@@ -210,7 +210,7 @@ func test_ammo_rows_resolve_the_shipped_wepdes_labels() -> void:
 	assert_eq(gametext.load_from_byte_array(
 			FileAccess.get_file_as_bytes("res://../fixtures/rtxt/gametext.bin")), OK,
 			"the shipped GameText fixture loads")
-	NovaStrings.register_table("gametext", gametext)
+	Strings.register_table("gametext", gametext)
 
 	var companion := ArmoryMenuCompanion.new()
 	companion.set_weapon_database(_load_weapons())
@@ -240,7 +240,7 @@ func test_class_change_refilters_slots() -> void:
 
 	# Sniper (index 1, value 6): the class mask re-filters it out.
 	# [orig: handle_team_class_selection @0x566f60 -> populate_three_category_lists @0x566db0]
-	var spin := menu.find_child("PLAYER_CLASS", true, false) as NovaMnuSpinList
+	var spin := menu.find_child("PLAYER_CLASS", true, false) as MnuSpinList
 	spin.set_value_index(1)
 	spin.value_changed.emit(1, spin.get_value())
 	assert_false(_combo_texts(primary).has("WPN_M4AUTO"), "M4 is hidden for Sniper")
@@ -275,7 +275,7 @@ func test_weight_updates_from_selection() -> void:
 func test_banned_grenade_keeps_its_table_order_control_as_zero_only() -> void:
 	var wdb := _load_weapons()
 	var grenades: Array = wdb.get_slot_weapons(
-			NovaWeaponDatabase.SLOT_GRENADE, 8, 2)
+			WeaponDatabase.SLOT_GRENADE, 8, 2)
 	assert_eq(grenades.size(), 3, "the JO fixture has three blue rifleman grenade defs")
 	if grenades.size() < 3:
 		return
@@ -316,7 +316,7 @@ func test_banned_grenade_keeps_its_table_order_control_as_zero_only() -> void:
 func test_grenade_rows_and_weight_follow_the_retail_extra_ammo_leg() -> void:
 	var fixture_db := _load_weapons()
 	var fixture_grenades: Array = fixture_db.get_slot_weapons(
-			NovaWeaponDatabase.SLOT_GRENADE, 8, 2)
+			WeaponDatabase.SLOT_GRENADE, 8, 2)
 	assert_gt(fixture_grenades.size(), 0,
 			"the JO fixture supplies a blue rifleman grenade")
 	if fixture_grenades.is_empty():
@@ -326,7 +326,7 @@ func test_grenade_rows_and_weight_follow_the_retail_extra_ammo_leg() -> void:
 	var wdb := _load_weapons_with_weight(
 			grenade_name, GRENADE_WEAPON_WEIGHT_SENTINEL)
 	var grenades: Array = wdb.get_slot_weapons(
-			NovaWeaponDatabase.SLOT_GRENADE, 8, 2)
+			WeaponDatabase.SLOT_GRENADE, 8, 2)
 	assert_gt(grenades.size(), 0,
 			"the temporary weapon.def retains the blue rifleman grenade")
 	if grenades.is_empty():
@@ -392,7 +392,7 @@ func test_accept_emits_loadout_and_cancel_closes() -> void:
 # g_useItemBindingKey0/1 to control "ACCEPT" via CUIWidget_AddScreenHotkey
 # @0x5674a8/@0x5674c0; the open stamps g_weaponScreenOpenDebounce @0x4e0b21,
 # cleared only by the row's KEYUP — Input_HandleMenuKeyRelease @0x4de2d0].
-# on_menu_built = the on-show: it stamps the debounce; NovaArmoryPresenter routes the
+# on_menu_built = the on-show: it stamps the debounce; ArmoryPresenter routes the
 # key edges here while its overlay is open.
 func test_armory_accept_hotkey_debounces_until_release() -> void:
 	var companion := ArmoryMenuCompanion.new()
@@ -429,9 +429,9 @@ func test_degrades_without_weapon_def() -> void:
 # through the same control tree the runtime builds [orig: the WEAPON screen of
 # weapon.mnu, a boot resource @0x49b3b1 family].
 func test_real_weapon_mnu_populates() -> void:
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	doc.load_from_bytes(FileAccess.get_file_as_bytes("res://../fixtures/mnu/jo_weapon.mnu"))
-	var menu := NovaMnuMenu.new()
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
 	menu.set_edit_mode(false)
@@ -442,10 +442,10 @@ func test_real_weapon_mnu_populates() -> void:
 	companion.set_weapon_database(_load_weapons())
 	companion.on_menu_built(menu, "weapon.mnu", "WEAPON", null)
 
-	var primary := menu.find_child("PRIMARY", true, false) as NovaMnuCombo
+	var primary := menu.find_child("PRIMARY", true, false) as MnuCombo
 	assert_not_null(primary, "the real weapon.mnu builds a PRIMARY combobox")
 	assert_gt(primary.get_item_count(), 1, "PRIMARY populates (NONE + weapons)")
-	var spin := menu.find_child("PLAYER_CLASS", true, false) as NovaMnuSpinList
+	var spin := menu.find_child("PLAYER_CLASS", true, false) as MnuSpinList
 	assert_not_null(spin, "the real weapon.mnu builds the PLAYER_CLASS spinlist")
 	assert_eq(spin.get_value_count(), 5, "the companion fills the authored-empty class spinlist")
 
@@ -454,10 +454,10 @@ func test_real_weapon_mnu_populates() -> void:
 # M4 (5.5 + 10 * 1.5) plus two satchels (2 * 17.6) is 55.7 lbs / Normal.
 # Selecting row zero means one satchel and must re-render 38.1 lbs / Normal.
 func test_real_weapon_mnu_weight_tracks_ammo_and_encumbrance_on_first_open() -> void:
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(
 			FileAccess.get_file_as_bytes("res://../fixtures/mnu/jo_weapon.mnu")), OK)
-	var menu := NovaMnuMenu.new()
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
 	menu.set_edit_mode(false)
@@ -480,7 +480,7 @@ func test_real_weapon_mnu_weight_tracks_ammo_and_encumbrance_on_first_open() -> 
 	assert_eq(weight.text, "Total Weight 55.7 lbs (Normal)",
 			"first open weighs the selected M4 plus two satchels")
 
-	var satchel_ammo := menu.find_child("ACCESSORY_AMMO1", true, false) as NovaMnuCombo
+	var satchel_ammo := menu.find_child("ACCESSORY_AMMO1", true, false) as MnuCombo
 	assert_not_null(satchel_ammo, "the real weapon.mnu builds the satchel ammo combo")
 	assert_eq(satchel_ammo.get_selected(), 1,
 			"two satchels preselect the last zero-based row")

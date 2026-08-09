@@ -1,7 +1,7 @@
 class_name MusicBankMode
 extends Control
 
-# View of the current document's NovaSbfBank. The track Tree lists every
+# View of the current document's SbfBank. The track Tree lists every
 # entry (#, name, preview button column); the toolbar above carries the
 # reorder / rename / replace / add / delete affordances. The Replace WAV
 # and Add Track flows arrive in Phase E3.
@@ -103,7 +103,7 @@ func _refresh_table() -> void:
 		_add_hint_row(root, NO_BANK_ROW_TEXT)
 		_refresh_toolbar_state()
 		return
-	var bank: NovaSbfBank = _document.bank
+	var bank: SbfBank = _document.bank
 	var entries: Array = bank.get_entries()
 	if entries.is_empty():
 		# A freshly-created (or emptied) bank: point at the import affordance so
@@ -219,7 +219,7 @@ func _preview_index(index: int) -> void:
 		return
 	if _document == null or not _document.bank_loaded():
 		return
-	var stream: NovaSbfAudioStream = _document.bank.get_stream_at(index)
+	var stream: SbfAudioStream = _document.bank.get_stream_at(index)
 	if stream != null:
 		_preview.play_stream(stream)
 

@@ -1,7 +1,7 @@
 // The ammo.def table — the fired-round ballistics + damage knowledge the authoritative
 // round sim consumes. POD and def-parser-free: engine/net/npruntime builds it from a parsed
 // DefAmmoFile (npruntime/ammo_table_build.h); the engine feeds it beside the weapon table
-// (NovaSimulation::load_ammo_table). [orig: g_ammoDefTable @ 0xA2ECE8 — 276-B records,
+// (Simulation::load_ammo_table). [orig: g_ammoDefTable @ 0xA2ECE8 — 276-B records,
 // loaded per mission from literally "ammo.def" by AmmoDef_LoadAll @ 0x40B0B0 (same
 // encrypted-ASCII parse as weapon.def), token map AmmoDef_ParseProperty @ 0x40A2D0;
 // docs/net/novaworld-net-re.md §5.60]

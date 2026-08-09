@@ -107,13 +107,13 @@ live in this doc's git history; the outcome per phase:
   `layout_persistence.gd`; the test reach-in sites updated with the seams
   kept intact.
 - **B1 — SnapshotEditSession**: `framework/snapshot_edit_session.gd` over
-  native `NovaEditHistory`; `EditorDocument` delegates unchanged, and
+  native `EditHistory`; `EditorDocument` delegates unchanged, and
   `framework/editor_resource_document.gd` gained the identical opt-in tier.
 - **B2 — Credits undo**: credits documents opt in via the
   `CbinCreditsResource` `to_text()`/`from_text()` snapshot pair
   (`credits_editor_undo_test.gd`).
-- **B3 — native object snapshots**: `NovaObjectData.snapshot_edit_state()` /
-  `apply_edit_state()` in `godot/adapter/object/nova_object_data.h` +
+- **B3 — native object snapshots**: `ObjectData.snapshot_edit_state()` /
+  `apply_edit_state()` in `godot/src/object/nova_object_data.h` +
   `nova_object_data_state.cpp`.
 - **B4/B5 — Object undo**: equal-gated shadow steps recorded at the
   `object_changed` funnel against a cached baseline, with focus-bracketed
@@ -128,7 +128,7 @@ live in this doc's git history; the outcome per phase:
   `framework/inspector_forms.gd` (`InspectorForms`); `WorkflowInspector`
   de-coupled from object; terrain's inspector fork retired. Row builders
   stay per-domain — the UiBox decision, recorded in
-  `godot/adapter/ui/ui_box.gd`.
+  `godot/src/ui/ui_box.gd`.
 - **B8 — SearchField**: `framework/search_field.gd`, adopted at the six
   bespoke search-bar sites (`search_field_test.gd`).
 - **B9 — shell services**: protected `EditorWorkspace` helpers

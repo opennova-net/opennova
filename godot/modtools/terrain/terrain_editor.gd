@@ -10,7 +10,7 @@ enum TileInteractionMode { PLACE, EDIT_SELECTED }
 # BHD-era terrains (DVD4, original DPTH golden) use DPTH; JO/DFX-era use CDEP.
 enum ExportFlavor { BHD = 0, DFX_JO = 1 }
 
-const HM_SIZE := NovaTerrainData.ATLAS_SIZE
+const HM_SIZE := TerrainData.ATLAS_SIZE
 const DEFAULT_HEIGHT := 20.0
 const INVALID_HEIGHT := -1000000.0
 const INVALID_HIT := Vector3(INF, INF, INF)
@@ -72,7 +72,7 @@ func _init() -> void:
 	_brush_ops = TerrainEditorBrushOps.new(self)
 
 
-var _data: NovaTerrainData:
+var _data: TerrainData:
 	get:
 		return _document.data
 	set(value):
@@ -174,7 +174,7 @@ var _hover_hit := Vector3(-1.0, -1.0, -1.0)
 var _hover_hit_valid: bool = false
 var _active_sector_cell := Vector2i(-1, -1)
 
-var _export_job: NovaTerrainBuildJob
+var _export_job: TerrainBuildJob
 var _export_output_dir: String = ""
 
 var _clone_source_marker: MeshInstance3D
@@ -206,11 +206,11 @@ var _tile_overlay_preview: TerrainTileOverlayPreview
 # untouched; these values only override what the shared preview presents while
 # Mission is active, then clear atomically on workspace exit.
 var _mission_preview_context_active := false
-var _mission_preview_tile_info: NovaTerrainTileInfo
+var _mission_preview_tile_info: TerrainTileInfo
 var _mission_preview_time_of_day := NAN
 # Identity guard: allocation-heavy full preprocessing runs once per terrain
 # mount; edit transactions call the narrow refresh family below.
-var _surface_inputs_data: NovaTerrainData
+var _surface_inputs_data: TerrainData
 var _tile_interaction_mode: int = TileInteractionMode.PLACE
 var _surface_map_stroke_before: Dictionary = {}
 var _surface_map_stroke_changed: bool = false
@@ -391,7 +391,7 @@ func _update_water_plane() -> void:
 	if terrain_mesh:
 		var bounds: AABB = terrain_mesh.get_world_bounds()
 		has_bounds = bounds.size.x > 0.0 and bounds.size.z > 0.0
-	# Document drives height; NovaWater follows the camera and renders the
+	# Document drives height; Water follows the camera and renders the
 	# env-derived lit water color + murk alpha.
 	water.set_height_override(float(get_water_height()))
 	water.visible = water_visible and has_bounds
@@ -642,14 +642,14 @@ func set_wrap_y_enabled(enabled: bool) -> void:
 	is_dirty = true
 	_mark_ui_state_changed()
 
-func get_data() -> NovaTerrainData:
+func get_data() -> TerrainData:
 	return _data
 
 
 # World-space height of the LIVE editable surface under (world_x, world_z) — the
 # same live substrate + bilinear core the placement/drag raycasts hit
-# (raycast_terrain_at, via NovaTerrainData's shared sampler). NOT the baked
-# CPT sampler (NovaTerrainData.get_height_world*): height brushes mutate only the
+# (raycast_terrain_at, via TerrainData's shared sampler). NOT the baked
+# CPT sampler (TerrainData.get_height_world*): height brushes mutate only the
 # editable image, so the baked buffer is stale the moment _height_revision moves
 # (and absent entirely on never-exported project terrains). Returns NAN when no
 # terrain is live or the point is off the mesh; the Mission workspace's re-ground
@@ -667,7 +667,7 @@ func sample_height_world(world_x: float, world_z: float) -> float:
 # Batch variant of sample_height_world: the live-surface height under each
 # (world_x, world_z) point, NAN per off-mesh / no-terrain point — one C++ call
 # for the whole set instead of one per point (the mission re-ground builds one
-# request per entity). Scalar and batch run the same NovaTerrainData live
+# request per entity). Scalar and batch run the same TerrainData live
 # sampler core; duck-typed so the mission tests' headless stubs can fake the
 # surface (they implement this by looping their scalar fake).
 func sample_heights_world(points: PackedVector2Array) -> PackedFloat32Array:
@@ -683,10 +683,10 @@ func get_environment_editor():
 	return environment_editor
 
 
-# The shared NovaEnvironment node (EditorEnvironment under the world root). The
+# The shared MissionEnvironment node (EditorEnvironment under the world root). The
 # mission workspace hands it to placed objects so their lighting matches the
-# terrain preview, the same way the runtime passes its NovaEnvironment node.
-func get_environment_node() -> NovaEnvironment:
+# terrain preview, the same way the runtime passes its MissionEnvironment node.
+func get_environment_node() -> MissionEnvironment:
 	return _world_preview.get_environment_node() if _world_preview != null else null
 
 
@@ -957,7 +957,7 @@ func get_editor_camera() -> Camera3D:
 	return camera
 
 
-func get_resource_root() -> NovaResourceRoot:
+func get_resource_root() -> ResourceRoot:
 	if workstation != null and workstation.has_method("get_resource_root"):
 		return workstation.get_resource_root()
 	return null
@@ -966,11 +966,11 @@ func get_resource_root() -> NovaResourceRoot:
 func set_sector_cell(row: int, col: int, value: int) -> bool:
 	if is_export_running() or not _data:
 		return false
-	var idx := row * NovaTerrainData.SECTOR_GRID_DIM + col
+	var idx := row * TerrainData.SECTOR_GRID_DIM + col
 	var grid: PackedInt32Array = _data.get_sector_grid()
 	if idx < 0 or idx >= grid.size():
 		return false
-	var next := clampi(value, 0, NovaTerrainData.SECTOR_ID_MAX)
+	var next := clampi(value, 0, TerrainData.SECTOR_ID_MAX)
 	_active_sector_cell = Vector2i(row, col)
 	if grid[idx] == next:
 		_mark_ui_state_changed()
@@ -1000,11 +1000,11 @@ func get_tileinfo_summary() -> Dictionary:
 	return _document.get_tileinfo_summary()
 
 
-func get_foliage_defs() -> Array[NovaTerrainFoliageDef]:
+func get_foliage_defs() -> Array[TerrainFoliageDef]:
 	return _document.foliage_defs
 
 
-func get_foliage_map() -> NovaTerrainFoliageMap:
+func get_foliage_map() -> TerrainFoliageMap:
 	return _document.foliage_map
 
 
@@ -1021,7 +1021,7 @@ func set_selected_foliage_def_index(index: int) -> void:
 	_mark_ui_state_changed()
 
 
-func get_selected_foliage_def() -> NovaTerrainFoliageDef:
+func get_selected_foliage_def() -> TerrainFoliageDef:
 	return _document.get_selected_foliage_def()
 
 
@@ -1029,7 +1029,7 @@ func has_tileinfo_resource() -> bool:
 	return _document.has_tileinfo_resource()
 
 
-func get_tileinfo_entry(index: int) -> NovaTerrainTileEntry:
+func get_tileinfo_entry(index: int) -> TerrainTileEntry:
 	return _document.get_tileinfo_entry(index)
 
 
@@ -1041,7 +1041,7 @@ func has_selected_tileinfo_entry() -> bool:
 	return get_selected_tileinfo_entry() != null
 
 
-func get_selected_tileinfo_entry() -> NovaTerrainTileEntry:
+func get_selected_tileinfo_entry() -> TerrainTileEntry:
 	return _document.get_tileinfo_entry(_document.get_tileinfo_selected_index())
 
 
@@ -1130,7 +1130,7 @@ func reset_tileinfo() -> void:
 ## mission anchors: retail generates them only around crouched/prone infantry
 ## [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7dc2/0x5c7ded].)
 func set_mission_preview_context(
-	tile_info: NovaTerrainTileInfo,
+	tile_info: TerrainTileInfo,
 	preview_time_of_day: float = NAN
 ) -> void:
 	var time_changed := is_nan(_mission_preview_time_of_day) != is_nan(preview_time_of_day) \
@@ -1177,7 +1177,7 @@ func is_mission_preview_context_active() -> bool:
 
 ## GameWorld uses the co-named mission .til when present and otherwise falls
 ## back to the terrain-authored tile array. Keep that exact precedence in ONED.
-func get_effective_tile_info() -> NovaTerrainTileInfo:
+func get_effective_tile_info() -> TerrainTileInfo:
 	if _mission_preview_context_active and _mission_preview_tile_info != null:
 		return _mission_preview_tile_info
 	return _document.tileinfo_resource
@@ -1349,7 +1349,7 @@ func _sync_material_from_data() -> void:
 func _sync_sector_layout(reframe_camera: bool) -> void:
 	if not _data:
 		return
-	# The mesh forwards world->atlas coordinate queries to NovaTerrainData's C++
+	# The mesh forwards world->atlas coordinate queries to TerrainData's C++
 	# kernel, so hand it the live data alongside the layout it draws.
 	terrain_mesh.set_terrain_data(_data)
 	terrain_mesh.set_sector_layout(
@@ -1429,10 +1429,10 @@ func _authored_sector_world_rect() -> Rect2:
 
 func _build_default_sector_grid() -> PackedInt32Array:
 	var grid := PackedInt32Array()
-	grid.resize(NovaTerrainData.SECTOR_GRID_DIM * NovaTerrainData.SECTOR_GRID_DIM)
+	grid.resize(TerrainData.SECTOR_GRID_DIM * TerrainData.SECTOR_GRID_DIM)
 	for row in 8:
 		for col in 8:
-			grid[row * NovaTerrainData.SECTOR_GRID_DIM + col] = DEFAULT_SECTOR_PATTERN[row * 8 + col]
+			grid[row * TerrainData.SECTOR_GRID_DIM + col] = DEFAULT_SECTOR_PATTERN[row * 8 + col]
 	return grid
 
 

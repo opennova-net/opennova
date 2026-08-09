@@ -212,7 +212,7 @@ Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origin
         }
         clip.bones[b].parent_index = parent;
         // Engine-native: bone bind position used as-is (parent-local origin). When the caller
-        // supplies shared origins (the .3di model's bone pivots -- see NovaSkeletalAnim), they win
+        // supplies shared origins (the .3di model's bone pivots -- see SkeletalAnim), they win
         // over the BadBone.position field, which is a lossy export (roughly half the .bad corpus
         // triplicates X into all three slots, destroying Y/Z). The original engine likewise sources
         // bone pivots from the model, not the .bad. [orig: BoneAnim_BuildWorldMatrices @0x40c400 /

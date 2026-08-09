@@ -31,7 +31,7 @@ func delete_selected() -> bool:
 		_c._report("Could not delete the selected object.", true)
 		return false
 	_c._mission.commit_edit()
-	if kind == NovaMissionData.KIND_MARKER:
+	if kind == MissionData.KIND_MARKER:
 		# Objects are untouched by a marker delete; drop the selection and rebuild only the marker
 		# overlay against the post-delete list (cheaper than re-placing every object). The marker is
 		# still part of the entity set the inspector's cached pickers marshal, so bump the membership

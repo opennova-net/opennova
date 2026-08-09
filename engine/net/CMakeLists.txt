@@ -4,7 +4,7 @@
 #   opennova_net — everything a game endpoint needs: novacrypto, napi, the
 #     npwire game wire codec, the novaworld SESSION and GATE legs (client-side
 #     matchmaking), the netsim world<->wire seam, and the npruntime in-match
-#     runtime. The godot/adapter links THIS target — never the service.
+#     runtime. The godot/src links THIS target — never the service.
 #
 #   opennova_novaworld_service — the server-side lobby/persistence leg of
 #     novaworld. GUARDRAIL (non-negotiable): sqlite containment is

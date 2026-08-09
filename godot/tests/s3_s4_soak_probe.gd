@@ -15,8 +15,8 @@ extends SceneTree
 #     -s res://tests/s3_s4_soak_probe.gd
 # Optional: SOAK_ROUNDS (default 300; one round = 62 ticks + one sweep).
 
-const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
-const MissionRuntime := preload("res://adapter/world/mission_runtime.gd")
+const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
+const MissionRuntime := preload("res://src/world/mission_runtime.gd")
 
 const MISSION := "00TRg.bms"
 
@@ -40,17 +40,17 @@ func _run() -> void:
 	if not rounds_env.is_empty():
 		rounds = maxi(int(rounds_env), 1)
 
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	if int(root.mount_runtime(resource_dir, "", false, "jo")) != OK:
 		root.set_root_dir(resource_dir)
 		if not root.has_file(MISSION):
 			_fail("resource root failed: %s" % root.get_last_error())
 			return
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	if mission.open_from_resource_root(root, MISSION) != OK:
 		_fail("cannot open %s" % MISSION)
 		return
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	if item_db.load_from_resource_root(root, "items.def") != OK:
 		_fail("cannot load items.def: %s" % item_db.get_last_error())
 		return
@@ -75,7 +75,7 @@ func _run() -> void:
 		_fail("runtime boot failed (count=%d err=%d)" % [
 				boot_count, int(runtime.get_setup_error())])
 		return
-	var sim: NovaSimulation = runtime.get_sim()
+	var sim: Simulation = runtime.get_sim()
 	if sim == null:
 		_fail("runtime has no sim")
 		return

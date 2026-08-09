@@ -9,7 +9,7 @@ func get_selected_zone_index() -> int:
 	return _c._selected_zone_index
 
 
-# The selected zone dict (NovaMissionData shape), or {} when none is selected / no mission.
+# The selected zone dict (MissionData shape), or {} when none is selected / no mission.
 func get_selected_zone() -> Dictionary:
 	if _c._mission == null or _c._selected_zone_index < 0:
 		return {}

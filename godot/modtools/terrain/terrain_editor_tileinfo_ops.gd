@@ -50,10 +50,10 @@ func set_tile_stamp_flags(value: int) -> void:
 	if _te.is_export_running():
 		return
 	var normalized := value & (
-		NovaTerrainTileInfo.FLAG_FLIP_X |
-		NovaTerrainTileInfo.FLAG_FLIP_Y |
-		NovaTerrainTileInfo.FLAG_ROTATE_90 |
-		NovaTerrainTileInfo.FLAG_OUTLINE
+		TerrainTileInfo.FLAG_FLIP_X |
+		TerrainTileInfo.FLAG_FLIP_Y |
+		TerrainTileInfo.FLAG_ROTATE_90 |
+		TerrainTileInfo.FLAG_OUTLINE
 	)
 	if _te._document.get_tile_stamp_flags() == normalized:
 		return
@@ -120,13 +120,13 @@ func flip_selected_tileinfo_y() -> bool:
 
 
 func focus_selected_tileinfo_entry() -> bool:
-	var entry: NovaTerrainTileEntry = _te._document.get_tileinfo_entry(_te._document.get_tileinfo_selected_index())
+	var entry: TerrainTileEntry = _te._document.get_tileinfo_entry(_te._document.get_tileinfo_selected_index())
 	if entry == null:
 		return false
 	var center := TerrainTileOverlayPreview.entry_center_world(entry, _te.terrain_mesh)
 	center.y += 4.0
 	if _te.camera and _te.camera.has_method("frame_bounds"):
-		_te.camera.frame_bounds(center, maxf(float(NovaTerrainTileInfo.CELL_WORLD_SIZE) * 8.0, 96.0))
+		_te.camera.frame_bounds(center, maxf(float(TerrainTileInfo.CELL_WORLD_SIZE) * 8.0, 96.0))
 		return true
 	return false
 
@@ -167,8 +167,8 @@ func reset_tileinfo() -> void:
 
 func _tile_cell_from_world(world_x: float, world_z: float) -> Vector2i:
 	return Vector2i(
-		int(floor(world_x / float(NovaTerrainTileInfo.CELL_WORLD_SIZE))),
-		int(floor(world_z / float(NovaTerrainTileInfo.CELL_WORLD_SIZE)))
+		int(floor(world_x / float(TerrainTileInfo.CELL_WORLD_SIZE))),
+		int(floor(world_z / float(TerrainTileInfo.CELL_WORLD_SIZE)))
 	)
 
 
@@ -250,7 +250,7 @@ func _sync_tile_overlay_preview() -> void:
 		and _te.terrain_mesh.has_tile_overlay_texture()
 	_te._tile_overlay_preview.set_base_overlay_visible(not has_composited_base)
 	_te._tile_overlay_preview.set_authoring_outlines_visible(not _te._mission_preview_context_active)
-	var preview_tile_info: NovaTerrainTileInfo = _te.get_effective_tile_info()
+	var preview_tile_info: TerrainTileInfo = _te.get_effective_tile_info()
 	var ghost_state: Dictionary = {"enabled": false} if _te._mission_preview_context_active \
 		else _tileinfo_ghost_state()
 	var hover_index := -1

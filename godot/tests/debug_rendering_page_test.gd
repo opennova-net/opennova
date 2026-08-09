@@ -1,9 +1,9 @@
 extends GutTest
 
 const PageScript := preload(
-		"res://adapter/debug/pages/debug_rendering_page.gd")
+		"res://src/debug/pages/debug_rendering_page.gd")
 const NovaDebugViewStatus := preload(
-		"res://adapter/debug/nova_debug_view_status.gd")
+		"res://src/debug/nova_debug_view_status.gd")
 
 
 class StubViewport:
@@ -86,18 +86,18 @@ class StubWorld:
 func _make_page() -> Dictionary:
 	var viewport := StubViewport.new()
 	var world := StubWorld.new()
-	var session := NovaDebugSession.new()
-	NovaDebugCatalog.install(session)
-	NovaDebugCatalog.bind_runtime_targets(
+	var session := DebugSession.new()
+	DebugCatalog.install(session)
+	DebugCatalog.bind_runtime_targets(
 			session,
 			Callable(),
 			func(): return world,
 			Callable(),
 			func(): return viewport)
 	session.set_presented(true)
-	var ctx := NovaDebugContext.new()
+	var ctx := DebugContext.new()
 	ctx.session = session
-	ctx.options = NovaDebugOptionState.new()
+	ctx.options = DebugOptionState.new()
 	ctx.world_source = func(): return world
 	var page: DebugRenderingPage = PageScript.new()
 	page.setup(ctx)
@@ -139,7 +139,7 @@ func test_rendering_uses_real_runtime_overlays_instead_of_dead_godot_hints() -> 
 func test_rendering_reports_viewport_mode_and_active_overlay_artifacts() -> void:
 	var fixture := _make_page()
 	var page: DebugRenderingPage = fixture.page
-	var session: NovaDebugSession = fixture.session
+	var session: DebugSession = fixture.session
 
 	assert_eq(session.set_control_value(&"viewport_debug_draw", 3), OK)
 	assert_eq(session.set_control_value(&"show_collision", true), OK)

@@ -1,7 +1,7 @@
 class_name CreditsEditorBlockCard
 extends PanelContainer
 
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
 
 # Per-type accent palette. The selection highlight (A1) reuses the same hues as the
 # type chips so a selected card reads as its type at a glance. TEXT rides the
@@ -52,7 +52,7 @@ var _suppress := false
 var _selected := false
 var _selected_stylebox: StyleBoxFlat
 var _spacer_stylebox: StyleBoxFlat
-var _resource_root: NovaResourceRoot
+var _resource_root: ResourceRoot
 var _font_ref: ResourceRefWidget
 var _ref_services: Dictionary = {}
 
@@ -311,15 +311,15 @@ func _resolve_font(font_name: String) -> Resource:
 		return null
 	return _resource_root.load_font(font_name)
 
-func _coerce_resource_root(value: Variant) -> NovaResourceRoot:
-	if value is NovaResourceRoot:
+func _coerce_resource_root(value: Variant) -> ResourceRoot:
+	if value is ResourceRoot:
 		return value
 	var dir := String(value).strip_edges() if value != null else ""
 	if dir.is_empty():
 		dir = ResourceDirSettings.get_resource_dir()
 	if dir.is_empty():
 		return null
-	var resources := NovaResourceRoot.new()
+	var resources := ResourceRoot.new()
 	return resources if resources.set_root_dir(dir) == OK else null
 
 func _on_image_mode(advances_y: bool) -> void:

@@ -2,7 +2,7 @@ extends RefCounted
 
 # Editor-side controller for the Mission workspace (the Phase 2 adapter).
 #
-# Holds the open mission (NovaMissionData) plus its document state (path /
+# Holds the open mission (MissionData) plus its document state (path /
 # loaded / dirty) and drives the load: parse the mission file, resolve its referenced
 # terrain + environment from the shared resource root, load them through the
 # terrain editor (read-only viewport), then run the shell-agnostic
@@ -22,11 +22,11 @@ signal changed  # Mission loaded or cleared; the inspector rebuilds on this.
 # that fire outside a workspace hook (e.g. the viewport Ctrl+Z / Delete path).
 signal status_reported(message: String, is_error: bool)
 
-const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
+const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
 const MissionWaypointOverlay := preload("res://modtools/mission/mission_waypoint_overlay.gd")
 const MissionAreaTriggerOverlay := preload("res://modtools/mission/mission_area_trigger_overlay.gd")
 const MissionMarkerOverlay := preload("res://modtools/mission/mission_marker_overlay.gd")
-const ObjectUserPointOverlayScript := preload("res://adapter/object/object_user_point_overlay.gd")
+const ObjectUserPointOverlayScript := preload("res://src/object/object_user_point_overlay.gd")
 const MissionGizmo := preload("res://modtools/framework/transform_gizmo_3d.gd")
 # Must match MissionObjectPlacer.CONTAINER_NAME — that is where placed objects land.
 const OBJECTS_CONTAINER := "MissionObjects"
@@ -51,11 +51,11 @@ enum Mode { OBJECTS, WAYPOINTS, AREA_TRIGGERS, SCRIPTING }
 
 var terrain_editor: Node
 
-var _mission: NovaMissionData
+var _mission: MissionData
 # Parsed co-named <mission>.til. This is the editor mount's copy of GameWorld's
 # mission-scoped terrain override: the same resource drives tile composition
 # and foliage exclusion while the Mission workspace is active.
-var _mission_tile_info: NovaTerrainTileInfo
+var _mission_tile_info: TerrainTileInfo
 var _current_path: String = ""
 # The resolved .trn path the loaded mission mounted, so a later terrain swap in the
 # Terrain workspace can be detected (see reconcile_with_terrain()).
@@ -82,7 +82,7 @@ var _ground_baseline: Dictionary = {}
 # walks + samples the world ONCE instead of three times. Validity is a token
 # compare, not mutation hooks: any object edit moves object_records_revision
 # (positions are record bytes), any height edit moves the terrain height
-# revision, any resource rescan moves NovaResourceRoot.cache_epoch (the anchors),
+# revision, any resource rescan moves ResourceRoot.cache_epoch (the anchors),
 # and a mission swap changes the instance id. An empty token never matches, so
 # nothing is cached while a build precondition is missing. The rows are
 # UNFILTERED — the _ground_baseline filter stays per-call, so the
@@ -155,10 +155,10 @@ var _selected_ref: Dictionary = {}
 # node, plus its tracked container-local transform and authored rotation (degrees).
 var _selected_records: Array = []
 var _selected_node: Node3D
-# Typed twin of _selected_node for the animated case: the placer's NovaObjectModel when the
+# Typed twin of _selected_node for the animated case: the placer's ObjectModel when the
 # selection is an animated record's node, else null. Assigned/cleared in lockstep with
 # _selected_node; the PLAYPARTANIM preview's selection fallback reads it directly.
-var _selected_model: NovaObjectModel = null
+var _selected_model: ObjectModel = null
 var _selected_graphic := ""
 # For an animated selection, the model's ground-anchor offset (Transform3D applied
 # as node.transform = entity_xform * offset). Static entities bake the same offset
@@ -171,10 +171,10 @@ var _selected_user_point_overlay: ObjectUserPointOverlay
 var _selected_user_points_visible := false
 # In-editor PLAYPARTANIM preview: the model currently being previewed (or null), plus an index
 # (cached, rebuilt when the entity set changes via _membership_rev) to resolve a scripting action's
-# target SSN/group/zone to its live model -- the same NovaEntityIndex the runtime owner builds,
+# target SSN/group/zone to its live model -- the same EntityIndex the runtime owner builds,
 # over the same construction-time placer registrations.
-var _preview_node: NovaObjectModel = null
-var _preview_registry: NovaEntityIndex = null
+var _preview_node: ObjectModel = null
+var _preview_registry: EntityIndex = null
 var _preview_registry_rev: int = -1
 # Drag session: _drag_active spans press..release; _drag_moved gates the commit so a
 # plain click only selects.
@@ -192,7 +192,7 @@ var _place_item_id: int = 0
 var _selection_box: MeshInstance3D
 
 # --- Authoring (Phase 5): undo / redo -----------------------------------------
-# The undo history + dirty flag live on the NovaMissionData document (in-memory bms::File
+# The undo history + dirty flag live on the MissionData document (in-memory bms::File
 # snapshots, never serialized bytes); the controller is a thin driver. A continuous gesture (a
 # terrain drag, a run of inspector SpinBox edits) is bracketed by begin_edit/commit_edit and
 # becomes one step; one-shot mutations bracket the same way. undo/redo swap the document in
@@ -236,7 +236,7 @@ var _marker_place_armed: bool = false
 # whatever marker happened to be placed first (a player start) was the "waypoints become player
 # starts" bug. The id policy now lives in the engine's authoring facade
 # (engine/runtime/mission authoring.h: marker_item_id_for_path / kWaypointMarkerItemId),
-# exposed as NovaMissionData.marker_item_id_for_path / add_path_marker_grounded.
+# exposed as MissionData.marker_item_id_for_path / add_path_marker_grounded.
 # The live (container-local) position of a marker being dragged, written to the record on
 # release (the drag previews the gizmo only; the record is committed once, as one step).
 var _marker_drag_local: Vector3 = Vector3.ZERO
@@ -327,14 +327,14 @@ func set_terrain_editor(value: Node) -> void:
 
 # --- State accessors ----------------------------------------------------------
 
-func get_mission() -> NovaMissionData:
+func get_mission() -> MissionData:
 	return _mission
 
 
 ## The co-named mission tile array, or null when this mission has no .til.
 ## MissionWorkspace passes this public fact into TerrainEditor's preview
 ## context; callers never need to reach into controller load state.
-func get_mission_tile_info() -> NovaTerrainTileInfo:
+func get_mission_tile_info() -> TerrainTileInfo:
 	return _mission_tile_info
 
 
@@ -344,7 +344,7 @@ func get_mission_preview_time_of_day() -> float:
 	if _mission == null:
 		return NAN
 	var info: Dictionary = _mission.get_info()
-	return NovaEnvironment.mission_start_time_hhmm(
+	return MissionEnvironment.mission_start_time_hhmm(
 		int(info.get("start_time", 0)))
 
 
@@ -416,7 +416,7 @@ func set_selected_user_points_visible(value: bool) -> void:
 	_selection.set_selected_user_points_visible(value)
 
 
-func _selected_object_data() -> NovaObjectData:
+func _selected_object_data() -> ObjectData:
 	return _selection._selected_object_data()
 
 
@@ -432,11 +432,11 @@ func get_mission_title() -> String:
 	return _selection.get_mission_title()
 
 
-func _resource_root() -> NovaResourceRoot:
+func _resource_root() -> ResourceRoot:
 	return _selection._resource_root()
 
 
-func _load_mission_tile_info(bms_name: String, resource_root: NovaResourceRoot) -> void:
+func _load_mission_tile_info(bms_name: String, resource_root: ResourceRoot) -> void:
 	_selection._load_mission_tile_info(bms_name, resource_root)
 
 
@@ -997,7 +997,7 @@ func move_selected_event_action(local_index: int, delta: int) -> void:
 func _world_center_mission() -> Vector3:
 	if _mission == null:
 		return Vector3.ZERO
-	var items: Array = _mission.get_entities(NovaMissionData.KIND_ITEM)
+	var items: Array = _mission.get_entities(MissionData.KIND_ITEM)
 	if items.is_empty():
 		return Vector3.ZERO
 	var sum := Vector3.ZERO
@@ -1025,7 +1025,7 @@ func reload_environment() -> String:
 	return _io.reload_environment()
 
 
-func _environment_node() -> NovaEnvironment:
+func _environment_node() -> MissionEnvironment:
 	if terrain_editor != null:
 		return terrain_editor.get_environment_node()
 	return null
@@ -1037,7 +1037,7 @@ func _environment_node() -> NovaEnvironment:
 ## placer's restamp is disconnected first — a connected Callable keeps its
 ## RefCounted target alive, and mission reloads replace the placer.
 var _placer_restamp := Callable()
-var _placer_restamp_state: NovaEnvLightState = null
+var _placer_restamp_state: EnvLightState = null
 
 
 func _wire_placer_environment() -> void:

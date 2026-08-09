@@ -15,7 +15,7 @@ extends Node
 #
 # Writes .scratch/terrain_seam/<tag>_{eye,side}.png (tag = NOVA_SEAM_TAG or "run").
 
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
 const StandaloneProbe := preload("res://tests/standalone_game_probe.gd")
 const OUT_DIR := "res://../.scratch/terrain_seam"
 
@@ -56,7 +56,7 @@ func _ready() -> void:
 	var root := OS.get_environment("NOVA_RESOURCE_DIR").strip_edges()
 	if root.is_empty():
 		root = ResourceDirSettings.get_resource_dir()
-	NovaWindow.set_fullscreen(get_window(), true)
+	WindowState.set_fullscreen(get_window(), true)
 	await _settle(6)
 
 	var session: Dictionary = await StandaloneProbe.boot(
@@ -67,9 +67,9 @@ func _ready() -> void:
 		get_tree().quit(1)
 		return
 
-	var terrain_data: NovaTerrainData = _find_terrain_data()
+	var terrain_data: TerrainData = _find_terrain_data()
 	if terrain_data == null:
-		push_error("[seam] no NovaTerrainData in the scene (stale DLL?)")
+		push_error("[seam] no TerrainData in the scene (stale DLL?)")
 		get_tree().quit(1)
 		return
 	print("[seam] terrain=%s locks=%s water=%d" % [
@@ -111,7 +111,7 @@ func _ready() -> void:
 			% [along_worst, along_worst_x])
 
 	# End-to-end grounding. The height the PLAYER stands on comes from
-	# NovaSimulation's OWN TerrainHeightField, not NovaTerrainData's — a second
+	# Simulation's OWN TerrainHeightField, not TerrainData's — a second
 	# construction of the same struct, and the one that decides whether you fall
 	# through. Teleport across the boundary and read back where the motor settles.
 	var runtime := _find_by_method(get_tree().root, "get_sim")
@@ -153,17 +153,17 @@ func _ready() -> void:
 
 
 func _shoot(name: String, from_g: Vector3, look_at: Vector3) -> void:
-	# Shoot through the viewport NovaTerrain itself renders into: NovaTerrain
+	# Shoot through the viewport Terrain itself renders into: Terrain
 	# collects visible patches against `get_viewport()->get_camera_3d()`, so a
 	# camera in any other viewport (the water reflection one, say) would frame a
 	# scene whose terrain patches were never gathered for it.
-	var terrain := _find_by_class(get_tree().root, "NovaTerrain")
+	var terrain := _find_by_class(get_tree().root, "Terrain")
 	if terrain == null:
-		print("[seam] no NovaTerrain; skipping %s" % name)
+		print("[seam] no Terrain; skipping %s" % name)
 		return
 	var vp3d: Viewport = (terrain as Node3D).get_viewport()
 	if vp3d == null:
-		print("[seam] NovaTerrain has no viewport; skipping %s" % name)
+		print("[seam] Terrain has no viewport; skipping %s" % name)
 		return
 	if name == "eye":
 		print("[seam] terrain viewport=%s  current camera=%s" % [
@@ -188,11 +188,11 @@ func _shoot(name: String, from_g: Vector3, look_at: Vector3) -> void:
 	shot_cam.queue_free()
 
 
-func _find_terrain_data() -> NovaTerrainData:
-	var terrain := _find_by_class(get_tree().root, "NovaTerrain")
+func _find_terrain_data() -> TerrainData:
+	var terrain := _find_by_class(get_tree().root, "Terrain")
 	if terrain == null:
 		return null
-	return terrain.get_terrain_data() as NovaTerrainData
+	return terrain.get_terrain_data() as TerrainData
 
 
 func _find_by_class(node: Node, klass: String) -> Node:

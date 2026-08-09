@@ -11,18 +11,18 @@ extends GutTest
 const AVATARS_FIXTURE := "res://../fixtures/avatars/Avatars.def"
 
 
-# NovaStrings is a shared autoload; keep the registry clean so the raw-key tests below see
+# Strings is a shared autoload; keep the registry clean so the raw-key tests below see
 # no gametext table and the resolved-names test starts from a known state.
 func before_each() -> void:
-	NovaStrings.clear()
+	Strings.clear()
 
 
 func after_all() -> void:
-	NovaStrings.clear()
+	Strings.clear()
 
 
-func _load_db() -> NovaAvatarDatabase:
-	var db := NovaAvatarDatabase.new()
+func _load_db() -> AvatarDatabase:
+	var db := AvatarDatabase.new()
 	var path := ProjectSettings.globalize_path(AVATARS_FIXTURE)
 	assert_eq(db.load(path), OK, "Avatars.def fixture loads")
 	return db
@@ -35,7 +35,7 @@ func _make_menu() -> Node:
 	menu.name = "Menu"
 	add_child_autofree(menu)
 	for n in ["NATIONALITY", "DIVISION", "COMBO_LIST", "PLAYERVOICE"]:
-		var c := NovaMnuCombo.new()
+		var c := MnuCombo.new()
 		c.name = n
 		menu.add_child(c)
 	for n in ["SIDE_BLUE", "SIDE_RED"]:
@@ -43,7 +43,7 @@ func _make_menu() -> Node:
 		b.toggle_mode = true
 		b.name = n
 		menu.add_child(b)
-	var name_edit := NovaMnuEdit.new()
+	var name_edit := MnuEdit.new()
 	name_edit.name = "PLAYERNAME"
 	menu.add_child(name_edit)
 	var accept := Button.new()
@@ -52,8 +52,8 @@ func _make_menu() -> Node:
 	return menu
 
 
-func _combo(menu: Node, name: String) -> NovaMnuCombo:
-	return menu.find_child(name, true, false) as NovaMnuCombo
+func _combo(menu: Node, name: String) -> MnuCombo:
+	return menu.find_child(name, true, false) as MnuCombo
 
 
 func test_join_auth_profile_uses_retail_avatar_packing_and_defaults() -> void:
@@ -122,7 +122,7 @@ func test_populates_avatar_lists_and_combo_label() -> void:
 	assert_eq(combos.get_item_count(), 4, "the SEAL division has 4 combos")
 
 	# Each combo row is "<head display> - <body display>". With no gametext table registered
-	# (before_each cleared NovaStrings) the names fall back to their raw keys.
+	# (before_each cleared Strings) the names fall back to their raw keys.
 	var c0: Dictionary = db.get_combo(0, 0, 0)
 	var head: Dictionary = c0.get("head", {})
 	var body: Dictionary = c0.get("body", {})
@@ -149,7 +149,7 @@ func test_resolves_friendly_names_from_gametext_avatars_section() -> void:
 	t.add_entry(head_key, "Boonie Hat", 0, Vector2i())
 	if body_key != head_key:
 		t.add_entry(body_key, "Camo BDU", 0, Vector2i())
-	NovaStrings.register_table("gameui", t)
+	Strings.register_table("gameui", t)
 
 	var menu := _make_menu()
 	companion.on_menu_built(menu, "player.mnu", "PLAYER_INFO", null)
@@ -187,13 +187,13 @@ func test_team_filter_partitions_nationalities_by_alignment() -> void:
 	var good_rows: Array = companion._nat_db_index.duplicate()
 	assert_gt(good_rows.size(), 0, "at least one good nationality")
 	for i in good_rows:
-		assert_eq(int(db.get_nationality(i).get("alignment", -1)), NovaAvatarDatabase.ALIGN_GOOD,
+		assert_eq(int(db.get_nationality(i).get("alignment", -1)), AvatarDatabase.ALIGN_GOOD,
 			"team 0 shows only good-aligned nationalities")
 
 	# Switching to SIDE_RED (team 1) re-filters to evil-aligned nationalities.
 	menu.find_child("SIDE_RED", true, false).emit_signal("pressed")
 	for i in companion._nat_db_index:
-		assert_eq(int(db.get_nationality(i).get("alignment", -1)), NovaAvatarDatabase.ALIGN_EVIL,
+		assert_eq(int(db.get_nationality(i).get("alignment", -1)), AvatarDatabase.ALIGN_EVIL,
 			"team 1 shows only evil-aligned nationalities")
 
 	# The two teams partition every nationality (good->blue, evil->red; D-PLAYERINFO-5).
@@ -259,15 +259,15 @@ func test_accept_emits_avatar_chosen() -> void:
 
 
 func test_voice_preview_requests_selected_avatar_voice() -> void:
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/avatars")), OK,
 		"the avatar fixture directory mounts as a retail resource root")
 
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(
 			FileAccess.get_file_as_bytes("res://../fixtures/mnu/jo_player.mnu")), OK,
 		"the retail player menu fixture loads")
-	var menu := NovaMnuMenu.new()
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
 	menu.set_edit_mode(false)
@@ -292,8 +292,8 @@ func test_voice_preview_requests_selected_avatar_voice() -> void:
 const WEAPON_FIXTURE := "res://../fixtures/def/weapon.def"
 
 
-func _load_weapons() -> NovaWeaponDatabase:
-	var wdb := NovaWeaponDatabase.new()
+func _load_weapons() -> WeaponDatabase:
+	var wdb := WeaponDatabase.new()
 	var path := ProjectSettings.globalize_path(WEAPON_FIXTURE)
 	assert_eq(wdb.load(path), OK, "weapon.def fixture loads")
 	return wdb
@@ -308,11 +308,11 @@ func _make_loadout_menu() -> Node:
 	menu.name = "Menu"
 	add_child_autofree(menu)
 	for n in ["PRIMARY", "SECONDARY", "ACCESSORY"]:
-		var c := NovaMnuCombo.new()
+		var c := MnuCombo.new()
 		c.name = n
 		menu.add_child(c)
 		for suffix in ["_AMMO1", "_AMMO2"]:
-			var ammo := NovaMnuCombo.new()
+			var ammo := MnuCombo.new()
 			ammo.name = n + suffix
 			menu.add_child(ammo)
 		var icon := Control.new()
@@ -321,7 +321,7 @@ func _make_loadout_menu() -> Node:
 	for n in ["PRIMARY", "SECONDARY"]:
 		# The .mnu authors the TYPE statics (FMJ/AP/SP, values 0/1/2); the companion
 		# selects/locks them but never refills.
-		var t := NovaMnuCombo.new()
+		var t := MnuCombo.new()
 		t.name = n + "_AMMO1_TYPE"
 		t.add_item("FMJ", "0")
 		t.add_item("AP", "1")
@@ -329,7 +329,7 @@ func _make_loadout_menu() -> Node:
 		t.select_silent(0)
 		menu.add_child(t)
 	for n in ["GRENADE_AMMO1", "GRENADE_AMMO2", "GRENADE_AMMO3"]:
-		var g := NovaMnuCombo.new()
+		var g := MnuCombo.new()
 		g.name = n
 		menu.add_child(g)
 	var weight := Control.new()
@@ -338,7 +338,7 @@ func _make_loadout_menu() -> Node:
 	weight_label.name = "Label"
 	weight.add_child(weight_label)
 	menu.add_child(weight)
-	var cls := NovaMnuCombo.new()
+	var cls := MnuCombo.new()
 	cls.name = "PLAYERCLASS"
 	for v in range(5, 10):  # Medic..Engineer = values 5..9
 		cls.add_item("class %d" % v, str(v))
@@ -352,7 +352,7 @@ var _ammo_menu: Node = null  # the stand-in menu behind the current _make_ammo_c
 
 # A wired companion over the stand-in loadout menu (medic/blue), for the ammo cases —
 # built through the public seams only (set_weapon_database + on_menu_built).
-func _make_ammo_companion(wdb: NovaWeaponDatabase = null) -> PlayerInfoMenuCompanion:
+func _make_ammo_companion(wdb: WeaponDatabase = null) -> PlayerInfoMenuCompanion:
 	var companion := PlayerInfoMenuCompanion.new()
 	companion.set_weapon_database(wdb if wdb != null else _load_weapons())
 	_ammo_menu = _make_loadout_menu()
@@ -360,14 +360,14 @@ func _make_ammo_companion(wdb: NovaWeaponDatabase = null) -> PlayerInfoMenuCompa
 	return companion
 
 
-func _ammo_control(name: String) -> NovaMnuCombo:
-	return _ammo_menu.find_child(name, true, false) as NovaMnuCombo
+func _ammo_control(name: String) -> MnuCombo:
+	return _ammo_menu.find_child(name, true, false) as MnuCombo
 
 
 # Select the named weapon in a parent slot combo and fire the selection handler the
 # way a user pick would. The row model is public: row = position in the filtered
 # slot list + 1 (row 0 is NONE) [orig: populate_weapon_slot_lists @ 0x560430].
-func _select_weapon(wdb: NovaWeaponDatabase, control: String, slot: int,
+func _select_weapon(wdb: WeaponDatabase, control: String, slot: int,
 		class_mask: int, weapon_name: String) -> Dictionary:
 	var combo := _ammo_control(control)
 	var defs: Array = wdb.get_slot_weapons(slot, class_mask, 2)  # blue
@@ -382,7 +382,7 @@ func _select_weapon(wdb: NovaWeaponDatabase, control: String, slot: int,
 
 # The expected *_AMMO2 sub-weapon, computed from the public table walk the companion
 # mirrors [orig: the stricmp walk in populate_ammo_combo_boxes @ 0x55def0].
-func _expected_sub(wdb: NovaWeaponDatabase, parent: Dictionary) -> Dictionary:
+func _expected_sub(wdb: WeaponDatabase, parent: Dictionary) -> Dictionary:
 	var parent_round := String(parent.get("round_type", ""))
 	for k in range(1, int(parent.get("loadout_subclasses", 0)) + 1):
 		var cand := wdb.get_weapon(int(parent.get("index", -1)) + k)
@@ -393,7 +393,7 @@ func _expected_sub(wdb: NovaWeaponDatabase, parent: Dictionary) -> Dictionary:
 	return {}
 
 
-func _combo_texts(c: NovaMnuCombo) -> Array:
+func _combo_texts(c: MnuCombo) -> Array:
 	var out: Array = []
 	for i in c.get_item_count():
 		out.append(c.get_item_text(i))
@@ -408,9 +408,9 @@ func test_populates_loadout_slots_filtered_by_class_and_team() -> void:
 	companion._team = 0  # blue -> team mask 2
 	companion._populate_loadout()
 
-	var primary := companion._menu.find_child("PRIMARY", true, false) as NovaMnuCombo
+	var primary := companion._menu.find_child("PRIMARY", true, false) as MnuCombo
 	# Medic (class mask 1), blue (team mask 2): the DB's filtered set plus a leading NONE row.
-	var expected := wdb.get_slot_weapons(NovaWeaponDatabase.SLOT_PRIMARY, 1, 2)
+	var expected := wdb.get_slot_weapons(WeaponDatabase.SLOT_PRIMARY, 1, 2)
 	assert_gt(expected.size(), 0, "the fixture has medic/blue primary weapons")
 	assert_eq(primary.get_item_count(), expected.size() + 1, "PRIMARY = NONE + the filtered weapons")
 	assert_eq(primary.get_item_text(0), "None", "NONE leads the slot (fallback with no string table)")
@@ -421,14 +421,14 @@ func test_loadout_class_filter_includes_and_excludes() -> void:
 	companion._weapons = _load_weapons()
 	companion._menu = _make_loadout_menu()
 	companion._team = 0
-	var primary := companion._menu.find_child("PRIMARY", true, false) as NovaMnuCombo
+	var primary := companion._menu.find_child("PRIMARY", true, false) as MnuCombo
 
 	# Medic (value 5): WPN_M4AUTO (charfilter medic|rifleman|engineer, blue) is a primary -> present.
 	companion._populate_loadout()
 	assert_true(_combo_texts(primary).has("WPN_M4AUTO"), "M4 shows for Medic")
 
 	# Sniper (value 6): M4's charfilter excludes sniper -> absent after re-fill.
-	(companion._menu.find_child("PLAYERCLASS", true, false) as NovaMnuCombo).select_silent(1)
+	(companion._menu.find_child("PLAYERCLASS", true, false) as MnuCombo).select_silent(1)
 	companion._populate_loadout()
 	assert_false(_combo_texts(primary).has("WPN_M4AUTO"), "M4 is hidden for Sniper")
 
@@ -441,7 +441,7 @@ func test_snapshot_carries_the_selected_loadout_weapon_ids() -> void:
 	companion.on_menu_built(menu, "player.mnu", "PLAYER_INFO", null)
 
 	var primary_defs := wdb.get_slot_weapons(
-			NovaWeaponDatabase.SLOT_PRIMARY, 1, 2)
+			WeaponDatabase.SLOT_PRIMARY, 1, 2)
 	var selected_primary := ""
 	var selected_row := -1
 	for i in primary_defs.size():
@@ -451,7 +451,7 @@ func test_snapshot_carries_the_selected_loadout_weapon_ids() -> void:
 			selected_row = i + 1 # row 0 is NONE
 			break
 	assert_false(selected_primary.is_empty(), "the fixture offers M4AUTO for medic/blue")
-	var primary := menu.find_child("PRIMARY", true, false) as NovaMnuCombo
+	var primary := menu.find_child("PRIMARY", true, false) as MnuCombo
 	primary.select_silent(selected_row)
 
 	var profile := companion.snapshot()
@@ -475,18 +475,18 @@ func test_snapshot_carries_class_without_a_weapon_database() -> void:
 
 # End-to-end against the REAL player.mnu (built controls + nesting), so the loadout fills
 # through the same control names/tree the runtime uses, not just a stand-in. Runs in GUT so
-# the autoloads (NovaStrings) and the GDExtension are loaded.
+# the autoloads (Strings) and the GDExtension are loaded.
 func test_real_player_mnu_loadout_populates() -> void:
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	doc.load_from_bytes(FileAccess.get_file_as_bytes("res://../fixtures/mnu/jo_player.mnu"))
-	var menu := NovaMnuMenu.new()
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
 	menu.set_edit_mode(false)
 	menu.menu = doc
 
-	var primary := menu.find_child("PRIMARY", true, false) as NovaMnuCombo
-	var pclass := menu.find_child("PLAYERCLASS", true, false) as NovaMnuCombo
+	var primary := menu.find_child("PRIMARY", true, false) as MnuCombo
+	var pclass := menu.find_child("PLAYERCLASS", true, false) as MnuCombo
 	assert_not_null(primary, "the real player.mnu builds a PRIMARY combobox")
 	assert_not_null(pclass, "the real player.mnu builds a PLAYERCLASS combobox")
 	assert_gt(pclass.get_item_count(), 0, "PLAYERCLASS carries its static class items")
@@ -501,7 +501,7 @@ func test_real_player_mnu_loadout_populates() -> void:
 	# The ammo/weight tail fills through the same real control tree: the default
 	# NONE selection hides PRIMARY_AMMO1, and the weight label renders the
 	# witnessed "%s %.1f %s (%s)" shape (fallback strings, no tables registered).
-	var primary_ammo := menu.find_child("PRIMARY_AMMO1", true, false) as NovaMnuCombo
+	var primary_ammo := menu.find_child("PRIMARY_AMMO1", true, false) as MnuCombo
 	assert_not_null(primary_ammo, "the real player.mnu builds PRIMARY_AMMO1")
 	assert_false(primary_ammo.visible, "NONE selected -> the ammo combo hides")
 	var weight := menu.find_child("STATIC_TOTAL_WEIGHT", true, false)
@@ -521,7 +521,7 @@ func test_real_player_mnu_loadout_populates() -> void:
 func test_primary_ammo_rows_follow_selected_weapon() -> void:
 	var wdb := _load_weapons()
 	var _presenter := _make_ammo_companion(wdb)
-	var w := _select_weapon(wdb, "PRIMARY", NovaWeaponDatabase.SLOT_PRIMARY, 1, "WPN_M4AUTO")
+	var w := _select_weapon(wdb, "PRIMARY", WeaponDatabase.SLOT_PRIMARY, 1, "WPN_M4AUTO")
 	var ammo := _ammo_control("PRIMARY_AMMO1")
 	var maxclips := int(w.get("maxclips", 0))
 	assert_true(ammo.visible, "a clip-carrying weapon shows its ammo combo")
@@ -537,7 +537,7 @@ func test_primary_ammo_rows_follow_selected_weapon() -> void:
 func test_none_selection_hides_ammo_and_clears_icon() -> void:
 	var wdb := _load_weapons()
 	var _presenter := _make_ammo_companion(wdb)
-	_select_weapon(wdb, "PRIMARY", NovaWeaponDatabase.SLOT_PRIMARY, 1, "WPN_M4AUTO")
+	_select_weapon(wdb, "PRIMARY", WeaponDatabase.SLOT_PRIMARY, 1, "WPN_M4AUTO")
 	var primary := _ammo_control("PRIMARY")
 	primary.select(0)  # back to NONE
 	assert_false(_ammo_control("PRIMARY_AMMO1").visible, "NONE hides the ammo combo")
@@ -553,7 +553,7 @@ func test_m203_subweapon_fills_ammo2_from_the_differing_round_entry() -> void:
 	# The M203 carbines are rifleman-filtered; switch PLAYERCLASS to Rifleman
 	# (value 8, row 3) so the slot list offers them.
 	_ammo_control("PLAYERCLASS").select(3)
-	var w := _select_weapon(wdb, "PRIMARY", NovaWeaponDatabase.SLOT_PRIMARY, 8, "WPN_M4M203AUTO")
+	var w := _select_weapon(wdb, "PRIMARY", WeaponDatabase.SLOT_PRIMARY, 8, "WPN_M4M203AUTO")
 	# The witnessed walk skips same-round WPN_M4M203 and lands on WPN_M4M203HE
 	# (AMMO_M203_40MM_NADE) within loadout_subclasses = 2.
 	var sub := _expected_sub(wdb, w)
@@ -572,7 +572,7 @@ func test_grenade_combos_fill_in_table_order_with_zero_row() -> void:
 	var wdb := _load_weapons()
 	var _presenter := _make_ammo_companion(wdb)
 	var expected: Array = wdb.get_slot_weapons(
-			NovaWeaponDatabase.SLOT_GRENADE, 1, 2)  # medic/blue
+			WeaponDatabase.SLOT_GRENADE, 1, 2)  # medic/blue
 	assert_gt(expected.size(), 0, "the fixture carries medic/blue grenades")
 	for i in mini(expected.size(), 3):
 		var combo := _ammo_control("GRENADE_AMMO%d" % (i + 1))
@@ -592,7 +592,7 @@ func test_grenade_combos_fill_in_table_order_with_zero_row() -> void:
 func test_weight_label_renders_witnessed_format_and_band() -> void:
 	var wdb := _load_weapons()
 	var _presenter := _make_ammo_companion(wdb)
-	var w := _select_weapon(wdb, "PRIMARY", NovaWeaponDatabase.SLOT_PRIMARY, 1, "WPN_M4AUTO")
+	var w := _select_weapon(wdb, "PRIMARY", WeaponDatabase.SLOT_PRIMARY, 1, "WPN_M4AUTO")
 	# Expected parent term [orig: calculate_loadout_weight @ 0x55f1f0]:
 	# weight + maxclips*clip_weight (untouched default), plus the sub-weapon and
 	# full-grenade clip-only terms the fill selects by default.
@@ -601,7 +601,7 @@ func test_weight_label_renders_witnessed_format_and_band() -> void:
 	var sub := _expected_sub(wdb, w)
 	if not sub.is_empty() and int(sub.get("clipsize", 0)) > 0:
 		expected += int(sub.get("maxclips", 0)) * float(sub.get("clip_weight", 0.0))
-	for g in wdb.get_slot_weapons(NovaWeaponDatabase.SLOT_GRENADE, 1, 2).slice(0, 3):
+	for g in wdb.get_slot_weapons(WeaponDatabase.SLOT_GRENADE, 1, 2).slice(0, 3):
 		expected += int(g.get("maxclips", 0)) * float(g.get("clip_weight", 0.0))
 	var label := _ammo_menu.find_child("STATIC_TOTAL_WEIGHT", true, false) \
 			.find_child("Label", false, false) as Label
@@ -612,15 +612,15 @@ func test_weight_label_renders_witnessed_format_and_band() -> void:
 		band = "Normal"
 	assert_eq(label.text, "Total Weight %.1f lbs (%s)" % [expected, band],
 		"the witnessed \"%s %.1f %s (%s)\" readout over the native weight math")
-	assert_eq(wdb.encumbrance_class(0.0), NovaWeaponDatabase.ENCUMBRANCE_LIGHT)
-	assert_eq(wdb.encumbrance_class(33.3), NovaWeaponDatabase.ENCUMBRANCE_NORMAL)
-	assert_eq(wdb.encumbrance_class(66.6), NovaWeaponDatabase.ENCUMBRANCE_HEAVY)
+	assert_eq(wdb.encumbrance_class(0.0), WeaponDatabase.ENCUMBRANCE_LIGHT)
+	assert_eq(wdb.encumbrance_class(33.3), WeaponDatabase.ENCUMBRANCE_NORMAL)
+	assert_eq(wdb.encumbrance_class(66.6), WeaponDatabase.ENCUMBRANCE_HEAVY)
 
 
 func test_ammo_selection_recomputes_weight_and_snapshot() -> void:
 	var wdb := _load_weapons()
 	var companion := _make_ammo_companion(wdb)
-	var w := _select_weapon(wdb, "PRIMARY", NovaWeaponDatabase.SLOT_PRIMARY, 1, "WPN_M4AUTO")
+	var w := _select_weapon(wdb, "PRIMARY", WeaponDatabase.SLOT_PRIMARY, 1, "WPN_M4AUTO")
 	assert_eq(companion.selected_clips("PRIMARY"), -1,
 		"untouched ammo reports the -1 default [orig: the '-1' kit filler]")
 	var label := _ammo_menu.find_child("STATIC_TOTAL_WEIGHT", true, false) \
@@ -675,16 +675,16 @@ end
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	f.store_string(def_text)
 	f.close()
-	var wdb := NovaWeaponDatabase.new()
+	var wdb := WeaponDatabase.new()
 	assert_eq(wdb.load(path), OK)
 	var companion := _make_ammo_companion(wdb)
 	var type_combo := _ammo_control("PRIMARY_AMMO1_TYPE")
 
-	_select_weapon(wdb, "PRIMARY", NovaWeaponDatabase.SLOT_PRIMARY, 1, "WPN_PLAIN")
+	_select_weapon(wdb, "PRIMARY", WeaponDatabase.SLOT_PRIMARY, 1, "WPN_PLAIN")
 	assert_true(type_combo.visible, "a clip weapon shows the TYPE combo")
 	assert_false(type_combo.disabled, "a normal weapon leaves the TYPE combo live")
 
-	_select_weapon(wdb, "PRIMARY", NovaWeaponDatabase.SLOT_PRIMARY, 1, "WPN_LOCKED")
+	_select_weapon(wdb, "PRIMARY", WeaponDatabase.SLOT_PRIMARY, 1, "WPN_LOCKED")
 	assert_true(type_combo.disabled,
 		"flags2 NOAMMOTYPES locks the TYPE combo [orig: @ 0x55def0 +188 & 0x40]")
 	assert_eq(type_combo.get_selected(), 0, "the lock resets the type to 0 (FMJ)")
@@ -698,7 +698,7 @@ func test_grenade_zero_pick_stays_zero_in_the_weight() -> void:
 	# unlike the parents' <=0 -> maxclips rule.
 	var wdb := _load_weapons()
 	var _presenter := _make_ammo_companion(wdb)
-	var g := wdb.get_slot_weapons(NovaWeaponDatabase.SLOT_GRENADE, 1, 2)[0] as Dictionary
+	var g := wdb.get_slot_weapons(WeaponDatabase.SLOT_GRENADE, 1, 2)[0] as Dictionary
 	assert_gt(float(g.get("clip_weight", 0.0)) * int(g.get("maxclips", 0)), 0.0,
 		"the first grenade def carries weighable clips")
 	var label := _ammo_menu.find_child("STATIC_TOTAL_WEIGHT", true, false) \

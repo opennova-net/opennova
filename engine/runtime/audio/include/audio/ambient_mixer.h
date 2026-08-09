@@ -1,7 +1,7 @@
 // Portable ambient sound-marker emitter system: the placed-marker eval/registration
 // at the witnessed staggered tick cadence, the transient emitter slot table, and the
 // per-frame loudest-N candidate ranking — pushed down out of the Godot layer
-// (godot/adapter/world/nova_mission_audio.gd) so the engine core stays C++ and the
+// (godot/src/world/nova_mission_audio.gd) so the engine core stays C++ and the
 // per-frame cost is the live-slot mix, not an every-marker eval
 // (docs/audio/lwf-dbf-sound-re.md §driver cadence, D-SND-16).
 //

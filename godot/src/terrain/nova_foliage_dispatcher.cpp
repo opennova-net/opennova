@@ -1,0 +1,1215 @@
+#include "nova_foliage_dispatcher.h"
+
+#include "nova_terrain.h"
+#include "nova_terrain_data.h"
+#include "nova_terrain_tile_info.h"
+#include "nova_terrain_foliage_def.h"
+
+#include <godot_cpp/classes/array_mesh.hpp>
+#include <godot_cpp/classes/camera3d.hpp>
+#include <godot_cpp/classes/geometry_instance3d.hpp>
+#include <godot_cpp/classes/image.hpp>
+#include <godot_cpp/variant/projection.hpp>
+#include <godot_cpp/classes/resource_loader.hpp>
+#include <godot_cpp/classes/viewport.hpp>
+#include <godot_cpp/core/math.hpp>
+#include <godot_cpp/core/object.hpp>
+#include <godot_cpp/variant/color.hpp>
+#include <godot_cpp/variant/packed_byte_array.hpp>
+#include <godot_cpp/variant/packed_color_array.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
+#include <godot_cpp/variant/packed_vector2_array.hpp>
+#include <godot_cpp/variant/packed_vector3_array.hpp>
+#include <godot_cpp/variant/string.hpp>
+#include <godot_cpp/variant/variant.hpp>
+
+#include <algorithm>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <limits>
+#include <utility>
+#include <vector>
+
+namespace godot {
+
+namespace {
+
+constexpr float INVALID_HEIGHT_THRESHOLD = -1.0e6f;
+constexpr float DETAIL_DISTANCE_LIMIT = 42.0f;
+constexpr float PREVIEW_CELL_SIZE = 16.0f;
+constexpr int PREVIEW_CELL_RADIUS = 4;
+constexpr int PREVIEW_CELL_LIMIT = 128;
+
+bool valid_height(float p_height) {
+  return std::isfinite(p_height) && p_height > INVALID_HEIGHT_THRESHOLD;
+}
+
+bool finite_vector(const Vector3 &p_value) {
+  return std::isfinite(static_cast<float>(p_value.x)) &&
+         std::isfinite(static_cast<float>(p_value.y)) &&
+         std::isfinite(static_cast<float>(p_value.z));
+}
+
+uint32_t pack_preview_detail_key(int p_cell_min_x, int p_cell_min_z) {
+  // The generator decodes HIGH15 as the X cell origin and LOW15 as the
+  // positive-Z edge. Candidates run lowBase - localB, so a preview cell
+  // [z,z+16] stores z+16 in the low half.
+  const uint32_t x = static_cast<uint32_t>(p_cell_min_x) & 0x7FFFu;
+  const uint32_t z_top = static_cast<uint32_t>(p_cell_min_z + 16) & 0x7FFFu;
+  return (x << 16u) | z_top;
+}
+
+} // namespace
+
+FoliageDispatcher::FoliageDispatcher() = default;
+FoliageDispatcher::~FoliageDispatcher() {
+  const Callable terrain_changed =
+      callable_mp(this, &FoliageDispatcher::_on_terrain_data_changed);
+  if (terrain_data_.is_valid() &&
+      terrain_data_->is_connected("terrain_changed", terrain_changed)) {
+    terrain_data_->disconnect("terrain_changed", terrain_changed);
+  }
+  const Callable tile_info_changed =
+      callable_mp(this, &FoliageDispatcher::_on_tile_info_changed);
+  if (tile_info_.is_valid() &&
+      tile_info_->is_connected("changed", tile_info_changed)) {
+    tile_info_->disconnect("changed", tile_info_changed);
+  }
+  const Callable colormap_changed =
+      callable_mp(this, &FoliageDispatcher::_on_colormap_source_changed);
+  if (colormap_source_.is_valid() &&
+      colormap_source_->is_connected("terrain_changed", colormap_changed)) {
+    colormap_source_->disconnect("terrain_changed", colormap_changed);
+  }
+}
+
+void FoliageDispatcher::_bind_methods() {
+  ClassDB::bind_method(
+      D_METHOD("configure_slots", "defs", "meshes", "fd_textures"),
+      &FoliageDispatcher::configure_slots);
+  ClassDB::bind_method(D_METHOD("set_terrain", "terrain"),
+                       &FoliageDispatcher::set_terrain);
+  ClassDB::bind_method(D_METHOD("set_terrain_data", "data"),
+                       &FoliageDispatcher::set_terrain_data);
+  ClassDB::bind_method(D_METHOD("get_terrain_data"),
+                       &FoliageDispatcher::get_terrain_data);
+  ClassDB::bind_method(D_METHOD("set_tile_info", "tile_info"),
+                       &FoliageDispatcher::set_tile_info);
+  ClassDB::bind_method(D_METHOD("get_tile_info"),
+                       &FoliageDispatcher::get_tile_info);
+  ClassDB::bind_method(D_METHOD("set_colormap_source", "data"),
+                       &FoliageDispatcher::set_colormap_source);
+  ClassDB::bind_method(D_METHOD("get_colormap_source"),
+                       &FoliageDispatcher::get_colormap_source);
+  ClassDB::bind_method(D_METHOD("set_height_sampler", "sampler"),
+                       &FoliageDispatcher::set_height_sampler);
+  ClassDB::bind_method(D_METHOD("get_height_sampler"),
+                       &FoliageDispatcher::get_height_sampler);
+  ClassDB::bind_method(D_METHOD("set_detail_foliage_sampler", "sampler"),
+                       &FoliageDispatcher::set_detail_foliage_sampler);
+  ClassDB::bind_method(D_METHOD("get_detail_foliage_sampler"),
+                       &FoliageDispatcher::get_detail_foliage_sampler);
+  ClassDB::bind_method(D_METHOD("set_foliage_sampler", "sampler"),
+                       &FoliageDispatcher::set_foliage_sampler);
+  ClassDB::bind_method(D_METHOD("get_foliage_sampler"),
+                       &FoliageDispatcher::get_foliage_sampler);
+  ClassDB::bind_method(D_METHOD("set_silhouette_anchors", "anchors"),
+                       &FoliageDispatcher::set_silhouette_anchors);
+  ClassDB::bind_method(D_METHOD("get_silhouette_anchors"),
+                       &FoliageDispatcher::get_silhouette_anchors);
+  ClassDB::bind_method(
+      D_METHOD("set_surface_input_overrides", "heightfield_normal",
+               "tile_overlay", "tile_overlay_tint"),
+      &FoliageDispatcher::set_surface_input_overrides);
+  ClassDB::bind_method(D_METHOD("clear_surface_input_overrides"),
+                       &FoliageDispatcher::clear_surface_input_overrides);
+  ClassDB::bind_method(D_METHOD("render_frame", "camera_xform"),
+                       &FoliageDispatcher::render_frame);
+  ClassDB::bind_method(D_METHOD("render_preview", "camera_xform"),
+                       &FoliageDispatcher::render_preview);
+  ClassDB::bind_method(D_METHOD("reset"), &FoliageDispatcher::reset);
+  ClassDB::bind_method(D_METHOD("get_total_instances"),
+                       &FoliageDispatcher::get_total_instances);
+  ClassDB::bind_method(D_METHOD("get_frame_stats"),
+                       &FoliageDispatcher::get_frame_stats);
+  ClassDB::bind_method(D_METHOD("get_slot_diagnostics"),
+                       &FoliageDispatcher::get_slot_diagnostics);
+  ClassDB::bind_static_method("FoliageDispatcher",
+                              D_METHOD("bake_fd_image", "image"),
+                              &FoliageDispatcher::bake_fd_image);
+
+  ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "terrain_data",
+                            PROPERTY_HINT_RESOURCE_TYPE, "TerrainData"),
+               "set_terrain_data", "get_terrain_data");
+  ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "tile_info",
+                            PROPERTY_HINT_RESOURCE_TYPE, "TerrainTileInfo"),
+               "set_tile_info", "get_tile_info");
+  ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "colormap_source",
+                            PROPERTY_HINT_RESOURCE_TYPE, "TerrainData"),
+               "set_colormap_source", "get_colormap_source");
+  ADD_PROPERTY(PropertyInfo(Variant::CALLABLE, "height_sampler"),
+               "set_height_sampler", "get_height_sampler");
+  ADD_PROPERTY(PropertyInfo(Variant::CALLABLE, "detail_foliage_sampler"),
+               "set_detail_foliage_sampler", "get_detail_foliage_sampler");
+  ADD_PROPERTY(PropertyInfo(Variant::CALLABLE, "foliage_sampler"),
+               "set_foliage_sampler", "get_foliage_sampler");
+  ADD_PROPERTY(
+      PropertyInfo(Variant::PACKED_VECTOR3_ARRAY, "silhouette_anchors"),
+      "set_silhouette_anchors", "get_silhouette_anchors");
+}
+
+void FoliageDispatcher::configure_slots(const Array &p_defs,
+                                            const Array &p_meshes,
+                                            const Array &p_fd_textures) {
+  palette_masks_.clear();
+  slot_diagnostics_.clear();
+  authored_slot_count_ = 0;
+  enabled_slot_count_ = 0;
+  disabled_slot_count_ = 0;
+
+  for (int slot = 0; slot < opennova::FOLIAGE_MAX_DEFS; ++slot) {
+    runtime_slots_[slot] = opennova::foliage::RuntimeSlot{};
+    source_geometry_[slot] = renderer::FoliageSlotGeometry{};
+    fd_textures_[slot].unref();
+
+    Ref<TerrainFoliageDef> def;
+    if (slot < p_defs.size()) {
+      def = p_defs[slot];
+    }
+
+    Ref<Mesh> mesh;
+    if (slot < p_meshes.size()) {
+      mesh = p_meshes[slot];
+    }
+    source_geometry_[slot] = _extract_source_geometry(mesh);
+
+    if (slot < p_fd_textures.size()) {
+      fd_textures_[slot] = p_fd_textures[slot];
+    }
+
+    Dictionary diagnostic;
+    diagnostic["slot"] = slot;
+    diagnostic["mesh_supplied"] = mesh.is_valid();
+    diagnostic["fd_texture_loaded"] = fd_textures_[slot].is_valid();
+    diagnostic["source_vertices"] =
+        static_cast<int64_t>(source_geometry_[slot].vertices.size());
+    diagnostic["source_indices"] =
+        static_cast<int64_t>(source_geometry_[slot].indices.size());
+
+    if (def.is_null()) {
+      diagnostic["graphic"] = String();
+      diagnostic["match"] = -1;
+      diagnostic["status"] = "missing_definition";
+      slot_diagnostics_.append(diagnostic);
+      continue;
+    }
+
+    ++authored_slot_count_;
+    diagnostic["graphic"] = def->get_graphic();
+    diagnostic["match"] = def->get_match();
+    if (mesh.is_null()) {
+      ++disabled_slot_count_;
+      diagnostic["status"] = "missing_mesh";
+      slot_diagnostics_.append(diagnostic);
+      continue;
+    }
+    if (!source_geometry_[slot].valid) {
+      ++disabled_slot_count_;
+      diagnostic["status"] = "invalid_mesh";
+      slot_diagnostics_.append(diagnostic);
+      continue;
+    }
+
+    ++enabled_slot_count_;
+    diagnostic["status"] = "enabled";
+    slot_diagnostics_.append(diagnostic);
+    runtime_slots_[slot].enabled = true;
+    runtime_slots_[slot].attrib_flags =
+        static_cast<uint8_t>(def->get_attrib_flags() & 0xFF);
+    runtime_slots_[slot].model_radius = source_geometry_[slot].radius;
+    runtime_slots_[slot].source_vertex_count = static_cast<uint32_t>(
+        std::min<size_t>(source_geometry_[slot].vertices.size(),
+                         std::numeric_limits<uint32_t>::max()));
+    palette_masks_[def->get_match()] |= static_cast<uint32_t>(1u << slot);
+  }
+
+  compiler_.configure_slots(runtime_slots_, source_geometry_);
+  reset();
+}
+
+void FoliageDispatcher::set_terrain(Terrain *p_terrain) {
+  terrain_ = p_terrain;
+}
+
+void FoliageDispatcher::set_terrain_data(
+    const Ref<TerrainData> &p_data) {
+  if (terrain_data_ == p_data) {
+    return;
+  }
+  const Callable changed =
+      callable_mp(this, &FoliageDispatcher::_on_terrain_data_changed);
+  if (terrain_data_.is_valid() &&
+      terrain_data_->is_connected("terrain_changed", changed)) {
+    terrain_data_->disconnect("terrain_changed", changed);
+  }
+  terrain_data_ = p_data;
+  if (terrain_data_.is_valid()) {
+    terrain_data_->connect("terrain_changed", changed);
+  }
+  reset();
+}
+
+Ref<TerrainData> FoliageDispatcher::get_terrain_data() const {
+  return terrain_data_;
+}
+
+void FoliageDispatcher::set_tile_info(
+    const Ref<TerrainTileInfo> &p_info) {
+  if (tile_info_ == p_info) {
+    return;
+  }
+  const Callable changed =
+      callable_mp(this, &FoliageDispatcher::_on_tile_info_changed);
+  if (tile_info_.is_valid() &&
+      tile_info_->is_connected("changed", changed)) {
+    tile_info_->disconnect("changed", changed);
+  }
+  tile_info_ = p_info;
+  if (tile_info_.is_valid()) {
+    tile_info_->connect("changed", changed);
+  }
+  reset();
+}
+
+Ref<TerrainTileInfo> FoliageDispatcher::get_tile_info() const {
+  return tile_info_;
+}
+
+void FoliageDispatcher::_on_tile_info_changed() {
+  reset();
+}
+
+void FoliageDispatcher::set_colormap_source(
+    const Ref<TerrainData> &p_data) {
+  if (colormap_source_ == p_data) {
+    return;
+  }
+  const Callable changed =
+      callable_mp(this, &FoliageDispatcher::_on_colormap_source_changed);
+  if (colormap_source_.is_valid() &&
+      colormap_source_->is_connected("terrain_changed", changed)) {
+    colormap_source_->disconnect("terrain_changed", changed);
+  }
+  colormap_source_ = p_data;
+  if (colormap_source_.is_valid()) {
+    colormap_source_->connect("terrain_changed", changed);
+  }
+  reset();
+}
+
+Ref<TerrainData> FoliageDispatcher::get_colormap_source() const {
+  return colormap_source_;
+}
+
+void FoliageDispatcher::_on_terrain_data_changed() { reset(); }
+
+void FoliageDispatcher::_on_colormap_source_changed() { reset(); }
+
+void FoliageDispatcher::set_height_sampler(const Callable &p_sampler) {
+  if (height_sampler_ == p_sampler) {
+    return;
+  }
+  height_sampler_ = p_sampler;
+  reset();
+}
+
+Callable FoliageDispatcher::get_height_sampler() const {
+  return height_sampler_;
+}
+
+void FoliageDispatcher::set_detail_foliage_sampler(
+    const Callable &p_sampler) {
+  if (detail_foliage_sampler_ == p_sampler) {
+    return;
+  }
+  detail_foliage_sampler_ = p_sampler;
+  reset();
+}
+
+Callable FoliageDispatcher::get_detail_foliage_sampler() const {
+  return detail_foliage_sampler_;
+}
+
+void FoliageDispatcher::set_foliage_sampler(const Callable &p_sampler) {
+  if (foliage_sampler_ == p_sampler) {
+    return;
+  }
+  foliage_sampler_ = p_sampler;
+  reset();
+}
+
+Callable FoliageDispatcher::get_foliage_sampler() const {
+  return foliage_sampler_;
+}
+
+void FoliageDispatcher::set_silhouette_anchors(
+    const PackedVector3Array &p_anchors) {
+  silhouette_anchors_ = p_anchors;
+}
+
+PackedVector3Array FoliageDispatcher::get_silhouette_anchors() const {
+  return silhouette_anchors_;
+}
+
+void FoliageDispatcher::set_surface_input_overrides(
+    const Ref<Texture2D> &p_heightfield_normal,
+    const Ref<Texture2D> &p_tile_overlay,
+    const Vector3 &p_tile_overlay_tint) {
+  surface_input_overrides_ = true;
+  override_heightfield_normal_ = p_heightfield_normal;
+  override_tile_overlay_ = p_tile_overlay;
+  override_tile_overlay_tint_ =
+      finite_vector(p_tile_overlay_tint)
+          ? p_tile_overlay_tint
+          : Vector3(1.0f, 1.0f, 1.0f);
+  _update_materials();
+}
+
+void FoliageDispatcher::clear_surface_input_overrides() {
+  surface_input_overrides_ = false;
+  override_heightfield_normal_.unref();
+  override_tile_overlay_.unref();
+  override_tile_overlay_tint_ = Vector3(1.0f, 1.0f, 1.0f);
+  _update_materials();
+}
+
+bool FoliageDispatcher::bake_fd_image(const Ref<Image> &p_image) {
+  if (p_image.is_null() || p_image->get_format() != Image::FORMAT_RGBA8) {
+    return false;
+  }
+
+  const int width = p_image->get_width();
+  const int height = p_image->get_height();
+  const int64_t base_byte_count =
+      static_cast<int64_t>(width) * static_cast<int64_t>(height) * 4;
+  PackedByteArray pixels = p_image->get_data();
+  if (base_byte_count <= 0 || pixels.size() < base_byte_count) {
+    return false;
+  }
+
+  opennova::foliage::Runtime runtime;
+  opennova::foliage::FdMipChain chain;
+  if (!runtime.build_fd_rgba_mip_chain(pixels.ptr(), width, height, chain)) {
+    return false;
+  }
+  PackedByteArray packed;
+  packed.resize(static_cast<int64_t>(chain.rgba.size()));
+  for (int64_t index = 0; index < packed.size(); ++index) {
+    packed[index] = chain.rgba[static_cast<size_t>(index)];
+  }
+  const bool has_mipmaps = width > 1 || height > 1;
+  p_image->set_data(width, height, has_mipmaps, Image::FORMAT_RGBA8, packed);
+  return true;
+}
+
+renderer::FoliageSlotGeometry
+FoliageDispatcher::_extract_source_geometry(const Ref<Mesh> &p_mesh) const {
+  renderer::FoliageSlotGeometry result;
+  if (p_mesh.is_null()) {
+    return result;
+  }
+
+  Vector3 minimum(std::numeric_limits<real_t>::max(),
+                  std::numeric_limits<real_t>::max(),
+                  std::numeric_limits<real_t>::max());
+  Vector3 maximum(std::numeric_limits<real_t>::lowest(),
+                  std::numeric_limits<real_t>::lowest(),
+                  std::numeric_limits<real_t>::lowest());
+
+  for (int surface = 0; surface < p_mesh->get_surface_count(); ++surface) {
+    // VegAssets supplies an ArrayMesh aggregate. Validate its public surface
+    // topology before concatenating; PrimitiveMesh inputs (used by previews
+    // and tests) are engine-generated triangle meshes.
+    const ArrayMesh *array_mesh =
+        Object::cast_to<ArrayMesh>(p_mesh.ptr());
+    if (array_mesh != nullptr &&
+        array_mesh->surface_get_primitive_type(surface) !=
+            Mesh::PRIMITIVE_TRIANGLES) {
+      continue;
+    }
+    const Array arrays = p_mesh->surface_get_arrays(surface);
+    if (arrays.size() < Mesh::ARRAY_MAX ||
+        arrays[Mesh::ARRAY_VERTEX].get_type() !=
+            Variant::PACKED_VECTOR3_ARRAY) {
+      continue;
+    }
+
+    const PackedVector3Array positions = arrays[Mesh::ARRAY_VERTEX];
+    if (positions.is_empty()) {
+      continue;
+    }
+
+    PackedVector2Array uvs;
+    if (arrays[Mesh::ARRAY_TEX_UV].get_type() ==
+        Variant::PACKED_VECTOR2_ARRAY) {
+      uvs = arrays[Mesh::ARRAY_TEX_UV];
+    }
+
+    PackedInt32Array source_indices;
+    if (arrays[Mesh::ARRAY_INDEX].get_type() == Variant::PACKED_INT32_ARRAY) {
+      source_indices = arrays[Mesh::ARRAY_INDEX];
+    }
+
+    const int32_t vertex_base = static_cast<int32_t>(result.vertices.size());
+    for (int vertex = 0; vertex < positions.size(); ++vertex) {
+      const Vector3 position = positions[vertex];
+      if (!finite_vector(position)) {
+        return renderer::FoliageSlotGeometry{};
+      }
+      renderer::FoliageSourceVertex source_vertex;
+      source_vertex.x = static_cast<float>(position.x);
+      source_vertex.y = static_cast<float>(position.y);
+      source_vertex.z = static_cast<float>(position.z);
+      if (vertex < uvs.size()) {
+        source_vertex.u = static_cast<float>(uvs[vertex].x);
+        source_vertex.v = static_cast<float>(uvs[vertex].y);
+      }
+      result.vertices.push_back(source_vertex);
+      minimum.x = std::min(minimum.x, position.x);
+      minimum.y = std::min(minimum.y, position.y);
+      minimum.z = std::min(minimum.z, position.z);
+      maximum.x = std::max(maximum.x, position.x);
+      maximum.y = std::max(maximum.y, position.y);
+      maximum.z = std::max(maximum.z, position.z);
+    }
+
+    if (source_indices.is_empty()) {
+      for (int index = 0; index + 2 < positions.size(); index += 3) {
+        result.indices.push_back(vertex_base + index);
+        result.indices.push_back(vertex_base + index + 1);
+        result.indices.push_back(vertex_base + index + 2);
+      }
+      continue;
+    }
+
+    for (int index = 0; index + 2 < source_indices.size(); index += 3) {
+      const int32_t a = source_indices[index];
+      const int32_t b = source_indices[index + 1];
+      const int32_t c = source_indices[index + 2];
+      if (a < 0 || b < 0 || c < 0 || a >= positions.size() ||
+          b >= positions.size() || c >= positions.size()) {
+        continue;
+      }
+      result.indices.push_back(vertex_base + a);
+      result.indices.push_back(vertex_base + b);
+      result.indices.push_back(vertex_base + c);
+    }
+  }
+
+  if (result.vertices.empty() || result.indices.empty()) {
+    return renderer::FoliageSlotGeometry{};
+  }
+
+  result.center_x = static_cast<float>((minimum.x + maximum.x) * 0.5);
+  result.center_z = static_cast<float>((minimum.z + maximum.z) * 0.5);
+  result.radius = std::max(static_cast<float>((maximum.x - minimum.x) * 0.5),
+                           static_cast<float>((maximum.z - minimum.z) * 0.5));
+  result.valid = std::isfinite(result.radius) && result.radius > 1.0e-6f;
+  return result;
+}
+
+void FoliageDispatcher::_ensure_visuals() {
+  ResourceLoader *loader = ResourceLoader::get_singleton();
+  if (detail_high_shader_.is_null() && loader != nullptr) {
+    detail_high_shader_ =
+        loader->load("res://shaders/foliage_detail_high.gdshader", "Shader");
+  }
+  if (detail_low_shader_.is_null() && loader != nullptr) {
+    detail_low_shader_ =
+        loader->load("res://shaders/foliage_detail_low.gdshader", "Shader");
+  }
+  if (silhouette_shader_.is_null() && loader != nullptr) {
+    silhouette_shader_ =
+        loader->load("res://shaders/foliage_silhouette.gdshader", "Shader");
+  }
+  auto ensure_material = [](Ref<ShaderMaterial> &r_material,
+                            const Ref<Shader> &p_shader) {
+    if (r_material.is_null()) {
+      r_material.instantiate();
+    }
+    if (r_material->get_shader() != p_shader) {
+      r_material->set_shader(p_shader);
+    }
+  };
+
+  for (int slot = 0; slot < opennova::FOLIAGE_MAX_DEFS; ++slot) {
+    ensure_material(detail_high_materials_[slot], detail_high_shader_);
+    ensure_material(detail_low_materials_[slot], detail_low_shader_);
+    ensure_material(silhouette_materials_[slot], silhouette_shader_);
+  }
+}
+
+void FoliageDispatcher::_update_materials() {
+  Ref<TerrainData> color_source =
+      terrain_data_.is_valid() ? terrain_data_ : colormap_source_;
+  Ref<Texture2D> colormap;
+  if (color_source.is_valid()) {
+    colormap = color_source->get_colormap();
+  }
+  const bool has_colormap = colormap.is_valid();
+  Ref<Texture2D> heightfield_normal;
+  Ref<Texture2D> tile_overlay;
+  Vector3 tile_overlay_tint(1.0f, 1.0f, 1.0f);
+  if (surface_input_overrides_) {
+    heightfield_normal = override_heightfield_normal_;
+    tile_overlay = override_tile_overlay_;
+    tile_overlay_tint = override_tile_overlay_tint_;
+  } else if (terrain_ != nullptr) {
+    heightfield_normal = terrain_->get_heightfield_normal_texture();
+    tile_overlay = terrain_->get_tile_overlay_texture();
+    tile_overlay_tint = terrain_->get_tile_overlay_tint();
+  }
+  const bool has_heightfield_normal = heightfield_normal.is_valid();
+  const bool has_tile_overlay = tile_overlay.is_valid();
+
+  for (int slot = 0; slot < opennova::FOLIAGE_MAX_DEFS; ++slot) {
+    const Ref<Texture2D> fd_texture = fd_textures_[slot];
+    const bool has_fd_texture = fd_texture.is_valid();
+
+    const Ref<ShaderMaterial> detail_materials[2] = {
+        detail_high_materials_[slot],
+        detail_low_materials_[slot],
+    };
+    for (const Ref<ShaderMaterial> &material : detail_materials) {
+      if (material.is_null()) {
+        continue;
+      }
+      material->set_shader_parameter("u_fd_texture", fd_texture);
+      material->set_shader_parameter("u_has_fd_texture", has_fd_texture);
+      material->set_shader_parameter("u_colormap", colormap);
+      material->set_shader_parameter("u_has_colormap", has_colormap);
+      material->set_shader_parameter("u_heightfield_normal",
+                                     heightfield_normal);
+      material->set_shader_parameter("u_has_heightfield_normal",
+                                     has_heightfield_normal);
+      material->set_shader_parameter("u_tile_overlay", tile_overlay);
+      material->set_shader_parameter("u_has_tile_overlay", has_tile_overlay);
+      material->set_shader_parameter("u_tile_overlay_tint",
+                                     tile_overlay_tint);
+    }
+
+    const Ref<ShaderMaterial> silhouette = silhouette_materials_[slot];
+    if (silhouette.is_valid()) {
+      silhouette->set_shader_parameter("u_fd_texture", fd_texture);
+      silhouette->set_shader_parameter("u_has_fd_texture", has_fd_texture);
+    }
+  }
+}
+
+MeshInstance3D *FoliageDispatcher::_ensure_draw_node(
+    std::vector<MeshInstance3D *> &r_pool, size_t p_index,
+    const String &p_prefix) {
+  while (r_pool.size() <= p_index) {
+    MeshInstance3D *instance = memnew(MeshInstance3D);
+    instance->set_name(p_prefix +
+                       String::num_int64(static_cast<int64_t>(r_pool.size())));
+    add_child(instance);
+    instance->set_as_top_level(true);
+    instance->set_transform(Transform3D());
+    // Fresh audit: attrib shadow (0x02) is parsed but never read, and both
+    // foliage tiers are excluded from retail shadow-caster passes. They still
+    // receive static model projection through retail's composed tile cache.
+    instance->set_cast_shadows_setting(
+        GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
+    // The generic attenuation catcher cannot reproduce foliage-card alpha,
+    // two-sided rasterization, and wind deformation without dark rectangles.
+    // Keep foliage on the ordinary world layer until the retail tile-cache
+    // compositor (which supplies the alpha-lighting term before this pass) is
+    // ported.
+    instance->set_layer_mask(1u << 0);
+    instance->set_extra_cull_margin(8.0f);
+    instance->set_visible(false);
+    r_pool.push_back(instance);
+  }
+  return r_pool[p_index];
+}
+
+void FoliageDispatcher::_hide_draw_pools() {
+  for (MeshInstance3D *instance : detail_draw_pool_) {
+    if (instance != nullptr) {
+      instance->set_visible(false);
+      // Drop the prior frame's draw ownership before this packet's eviction
+      // events are applied. Resident meshes remain owned by the caches.
+      instance->set_mesh(Ref<Mesh>());
+    }
+  }
+  for (MeshInstance3D *instance : model_draw_pool_) {
+    if (instance != nullptr) {
+      instance->set_visible(false);
+      instance->set_mesh(Ref<Mesh>());
+    }
+  }
+}
+
+void FoliageDispatcher::_clear_meshes() {
+  _hide_draw_pools();
+  for (MeshInstance3D *instance : detail_draw_pool_) {
+    if (instance != nullptr) {
+      instance->set_mesh(Ref<Mesh>());
+    }
+  }
+  for (MeshInstance3D *instance : model_draw_pool_) {
+    if (instance != nullptr) {
+      instance->set_mesh(Ref<Mesh>());
+    }
+  }
+}
+
+void FoliageDispatcher::reset() {
+  compiler_.reset();
+  frame_stats_ = FrameStats{};
+  total_frame_calls_ = 0;
+  detail_mesh_cache_.clear();
+  model_mesh_cache_.clear();
+  _clear_meshes();
+}
+
+int FoliageDispatcher::get_total_instances() const {
+  const int64_t total = frame_stats_.detail_high_instances +
+                        frame_stats_.detail_low_instances +
+                        frame_stats_.silhouette_instances;
+  return static_cast<int>(
+      std::min<int64_t>(total, std::numeric_limits<int>::max()));
+}
+
+Dictionary FoliageDispatcher::get_frame_stats() const {
+  Dictionary result;
+  result["frame_calls"] = frame_stats_.frame_calls;
+  result["detail_cells"] = frame_stats_.detail_cells;
+  result["silhouette_anchors_input"] = frame_stats_.silhouette_anchors_input;
+  result["silhouette_anchors_visible"] =
+      frame_stats_.silhouette_anchors_visible;
+  result["runtime_detail_intents"] = frame_stats_.runtime_detail_intents;
+  result["runtime_silhouette_intents"] =
+      frame_stats_.runtime_silhouette_intents;
+  result["detail_high_instances"] = frame_stats_.detail_high_instances;
+  result["detail_low_instances"] = frame_stats_.detail_low_instances;
+  result["silhouette_instances"] = frame_stats_.silhouette_instances;
+  result["detail_vertices"] = frame_stats_.detail_vertices;
+  result["silhouette_vertices"] = frame_stats_.silhouette_vertices;
+  result["render_batches"] = frame_stats_.render_batches;
+  result["detail_cache_hits"] = frame_stats_.detail_cache_hits;
+  result["detail_cache_misses"] = frame_stats_.detail_cache_misses;
+  result["detail_cache_regenerations"] =
+      frame_stats_.detail_cache_regenerations;
+  result["detail_cache_evictions"] = frame_stats_.detail_cache_evictions;
+  result["detail_cache_residents"] = frame_stats_.detail_cache_residents;
+  result["detail_cache_submissions"] = frame_stats_.detail_cache_submissions;
+  result["model_cache_hits"] = frame_stats_.model_cache_hits;
+  result["model_cache_misses"] = frame_stats_.model_cache_misses;
+  result["model_cache_regenerations"] =
+      frame_stats_.model_cache_regenerations;
+  result["model_cache_evictions"] = frame_stats_.model_cache_evictions;
+  result["model_cache_residents"] = frame_stats_.model_cache_residents;
+  result["model_cache_submissions"] = frame_stats_.model_cache_submissions;
+  result["detail_mesh_hits"] = frame_stats_.detail_mesh_hits;
+  result["detail_mesh_uploads"] = frame_stats_.detail_mesh_uploads;
+  result["model_mesh_hits"] = frame_stats_.model_mesh_hits;
+  result["model_mesh_uploads"] = frame_stats_.model_mesh_uploads;
+  result["terrain_scene_counter"] = frame_stats_.terrain_scene_counter;
+  result["native_detail_source"] = frame_stats_.native_detail_source;
+  result["preview_detail_source"] = frame_stats_.preview_detail_source;
+  result["path_blocker_available"] = frame_stats_.path_blocker_available;
+  result["surface_input_overrides"] = surface_input_overrides_;
+  result["surface_override_has_heightfield_normal"] =
+      override_heightfield_normal_.is_valid();
+  result["surface_override_has_tile_overlay"] =
+      override_tile_overlay_.is_valid();
+  result["surface_override_tile_tint"] = override_tile_overlay_tint_;
+  result["authored_slots"] = authored_slot_count_;
+  result["enabled_slots"] = enabled_slot_count_;
+  result["disabled_slots"] = disabled_slot_count_;
+  return result;
+}
+
+Array FoliageDispatcher::get_slot_diagnostics() const {
+  return slot_diagnostics_.duplicate(true);
+}
+
+void FoliageDispatcher::render_frame(const Transform3D &p_camera_xform) {
+  frame_stats_ = FrameStats{};
+  frame_stats_.frame_calls = ++total_frame_calls_;
+  frame_stats_.native_detail_source = terrain_ != nullptr;
+
+  renderer::FoliageViewInput view = _view_input(p_camera_xform);
+  if (terrain_ != nullptr) {
+    const auto &patches = terrain_->get_foliage_detail_patches_native();
+    view.detail_cells.reserve(patches.size());
+    for (const auto &patch : patches) {
+      view.detail_cells.push_back(opennova::foliage::DetailCell{
+          patch.key,
+          patch.distance,
+      });
+    }
+  }
+  _compile_and_apply(view);
+}
+
+void FoliageDispatcher::render_preview(const Transform3D &p_camera_xform) {
+  frame_stats_ = FrameStats{};
+  frame_stats_.frame_calls = ++total_frame_calls_;
+  frame_stats_.preview_detail_source = true;
+
+  renderer::FoliageViewInput view = _view_input(p_camera_xform);
+  view.detail_cells = _preview_cells(p_camera_xform.origin);
+  _compile_and_apply(view);
+}
+
+renderer::FoliageViewInput
+FoliageDispatcher::_view_input(const Transform3D &p_camera_xform) const {
+  renderer::FoliageViewInput input;
+  input.cam_x = static_cast<float>(p_camera_xform.origin.x);
+  input.cam_y = static_cast<float>(p_camera_xform.origin.y);
+  input.cam_z = static_cast<float>(p_camera_xform.origin.z);
+
+  // Column-major view matrix from the camera's inverse transform (the same
+  // construction Terrain feeds TerrainFrameCompiler).
+  const Transform3D view = p_camera_xform.affine_inverse();
+  const Basis &b = view.basis;
+  const Vector3 &o = view.origin;
+  input.view[0] = b[0][0]; input.view[1] = b[1][0]; input.view[2] = b[2][0]; input.view[3] = 0;
+  input.view[4] = b[0][1]; input.view[5] = b[1][1]; input.view[6] = b[2][1]; input.view[7] = 0;
+  input.view[8] = b[0][2]; input.view[9] = b[1][2]; input.view[10] = b[2][2]; input.view[11] = 0;
+  input.view[12] = o.x; input.view[13] = o.y; input.view[14] = o.z; input.view[15] = 1;
+
+  Camera3D *active_camera = nullptr;
+  if (is_inside_tree()) {
+    Viewport *viewport = get_viewport();
+    if (viewport != nullptr) {
+      active_camera = viewport->get_camera_3d();
+    }
+  }
+  if (active_camera != nullptr) {
+    const Projection proj = active_camera->get_camera_projection();
+    for (int col = 0; col < 4; ++col) {
+      input.proj[col * 4 + 0] = proj.columns[col][0];
+      input.proj[col * 4 + 1] = proj.columns[col][1];
+      input.proj[col * 4 + 2] = proj.columns[col][2];
+      input.proj[col * 4 + 3] = proj.columns[col][3];
+    }
+  } else {
+    // A preview without a live camera gates anchors on view depth alone.
+    input.no_frustum = true;
+  }
+
+  input.silhouette_anchors.reserve(silhouette_anchors_.size());
+  for (int index = 0; index < silhouette_anchors_.size(); ++index) {
+    const Vector3 anchor = silhouette_anchors_[index];
+    input.silhouette_anchors.push_back({
+        static_cast<float>(anchor.x),
+        static_cast<float>(anchor.y),
+        static_cast<float>(anchor.z),
+    });
+  }
+  return input;
+}
+
+std::vector<opennova::foliage::DetailCell>
+FoliageDispatcher::_preview_cells(const Vector3 &p_camera_position) const {
+  std::vector<opennova::foliage::DetailCell> cells;
+  const int camera_cell_x = static_cast<int>(
+      std::floor(static_cast<float>(p_camera_position.x) / PREVIEW_CELL_SIZE));
+  const int camera_cell_z = static_cast<int>(
+      std::floor(static_cast<float>(p_camera_position.z) / PREVIEW_CELL_SIZE));
+
+  for (int cell_z = camera_cell_z - PREVIEW_CELL_RADIUS;
+       cell_z <= camera_cell_z + PREVIEW_CELL_RADIUS; ++cell_z) {
+    for (int cell_x = camera_cell_x - PREVIEW_CELL_RADIUS;
+         cell_x <= camera_cell_x + PREVIEW_CELL_RADIUS; ++cell_x) {
+      const float min_x = static_cast<float>(cell_x) * PREVIEW_CELL_SIZE;
+      const float min_z = static_cast<float>(cell_z) * PREVIEW_CELL_SIZE;
+      const float max_x = min_x + PREVIEW_CELL_SIZE;
+      const float max_z = min_z + PREVIEW_CELL_SIZE;
+      const float closest_x =
+          std::clamp(static_cast<float>(p_camera_position.x), min_x, max_x);
+      const float closest_z =
+          std::clamp(static_cast<float>(p_camera_position.z), min_z, max_z);
+      const float dx = static_cast<float>(p_camera_position.x) - closest_x;
+      const float dz = static_cast<float>(p_camera_position.z) - closest_z;
+      const float horizontal_distance_squared = dx * dx + dz * dz;
+      if (horizontal_distance_squared >
+          DETAIL_DISTANCE_LIMIT * DETAIL_DISTANCE_LIMIT) {
+        continue;
+      }
+      // Runtime's Terrain_CollectNearFoliagePatches measures the camera in
+      // three dimensions against each 16-unit patch's representative terrain
+      // height. The editor has no live height mipchain, so use the surface at
+      // the patch center as a live approximation instead of treating every
+      // camera as ground-level. This is especially important for Mission's
+      // default aerial framing: XZ-only distance expanded thousands of cards.
+      const float center_y =
+          _sample_height((min_x + max_x) * 0.5f, (min_z + max_z) * 0.5f);
+      if (!valid_height(center_y)) {
+        continue;
+      }
+      const float dy = static_cast<float>(p_camera_position.y) - center_y;
+      const float distance =
+          std::sqrt(horizontal_distance_squared + dy * dy);
+      if (distance > DETAIL_DISTANCE_LIMIT) {
+        continue;
+      }
+
+      cells.push_back(opennova::foliage::DetailCell{
+          pack_preview_detail_key(static_cast<int>(min_x),
+                                  static_cast<int>(min_z)),
+          distance,
+      });
+    }
+  }
+
+  std::sort(cells.begin(), cells.end(),
+            [](const opennova::foliage::DetailCell &p_left,
+               const opennova::foliage::DetailCell &p_right) {
+              if (p_left.camera_distance != p_right.camera_distance) {
+                return p_left.camera_distance < p_right.camera_distance;
+              }
+              return p_left.key < p_right.key;
+            });
+  if (cells.size() > PREVIEW_CELL_LIMIT) {
+    cells.resize(PREVIEW_CELL_LIMIT);
+  }
+  return cells;
+}
+
+opennova::foliage::WorldSamplers FoliageDispatcher::_world_samplers() {
+  opennova::foliage::WorldSamplers world;
+  world.height_at = [this](float p_world_x, float p_world_z) {
+    return _sample_height(p_world_x, p_world_z);
+  };
+  world.detail_foliage_mask_at = [this](int32_t p_world_x_fixed,
+                                        int32_t p_world_z_fixed) {
+    return _mask_for_palette_index(
+        _sample_detail_foliage_index(p_world_x_fixed, p_world_z_fixed));
+  };
+  world.model_foliage_mask_at = [this](int32_t p_world_x_fixed,
+                                       int32_t p_world_z_fixed) {
+    return _mask_for_palette_index(
+        _sample_model_foliage_index(p_world_x_fixed, p_world_z_fixed));
+  };
+  frame_stats_.path_blocker_available = tile_info_.is_valid();
+  world.path_blocked = [this](float p_world_x, float p_world_z, float p_radius) {
+    // til_world_z_from_fixed already decodes the format's stored-negated
+    // z_fixed into the terrain/Godot plane. Do not mirror the query again.
+    // [orig: Foliage_PathBlockedByPlacedTile @ 0x606490]
+    return tile_info_.is_valid() &&
+           tile_info_->blocks_foliage(p_world_x, p_world_z, p_radius);
+  };
+  return world;
+}
+
+float FoliageDispatcher::_sample_height(float p_world_x,
+                                            float p_world_z) const {
+  if (terrain_data_.is_valid()) {
+    return terrain_data_->get_height_world_bilinear(
+        Vector3(p_world_x, 0.0f, p_world_z));
+  }
+  if (!height_sampler_.is_valid()) {
+    return INVALID_HEIGHT_THRESHOLD;
+  }
+  Array arguments;
+  arguments.push_back(p_world_x);
+  arguments.push_back(p_world_z);
+  const Variant result = height_sampler_.callv(arguments);
+  if (result.get_type() != Variant::FLOAT &&
+      result.get_type() != Variant::INT) {
+    return INVALID_HEIGHT_THRESHOLD;
+  }
+  return static_cast<float>(static_cast<double>(result));
+}
+
+int FoliageDispatcher::_sample_detail_foliage_index(
+    int32_t p_world_x_fixed, int32_t p_world_z_fixed) const {
+  if (terrain_data_.is_valid()) {
+    return terrain_data_->get_detail_foliage_index_fixed(
+        p_world_x_fixed, p_world_z_fixed);
+  }
+  if (detail_foliage_sampler_.is_valid()) {
+    Array arguments;
+    arguments.push_back(static_cast<double>(p_world_x_fixed) / 65536.0);
+    arguments.push_back(static_cast<double>(p_world_z_fixed) / 65536.0);
+    return static_cast<int>(detail_foliage_sampler_.callv(arguments));
+  }
+  if (foliage_sampler_.is_valid()) {
+    Array arguments;
+    arguments.push_back(static_cast<double>(p_world_x_fixed) / 65536.0);
+    arguments.push_back(static_cast<double>(p_world_z_fixed) / 65536.0);
+    return static_cast<int>(foliage_sampler_.callv(arguments));
+  }
+  if (colormap_source_.is_valid()) {
+    return colormap_source_->get_detail_foliage_index_fixed(
+        p_world_x_fixed, p_world_z_fixed);
+  }
+  return 0;
+}
+
+int FoliageDispatcher::_sample_model_foliage_index(
+    int32_t p_world_x_fixed, int32_t p_world_z_fixed) const {
+  const float world_x = static_cast<float>(p_world_x_fixed) / 65536.0f;
+  const float world_z = static_cast<float>(p_world_z_fixed) / 65536.0f;
+  if (terrain_data_.is_valid()) {
+    return terrain_data_->get_foliage_index_world(world_x, world_z);
+  }
+  if (foliage_sampler_.is_valid()) {
+    Array arguments;
+    arguments.push_back(static_cast<double>(p_world_x_fixed) / 65536.0);
+    arguments.push_back(static_cast<double>(p_world_z_fixed) / 65536.0);
+    return static_cast<int>(foliage_sampler_.callv(arguments));
+  }
+  if (colormap_source_.is_valid()) {
+    return colormap_source_->get_foliage_index_world(world_x, world_z);
+  }
+  return 0;
+}
+
+uint32_t FoliageDispatcher::_mask_for_palette_index(int p_index) const {
+  const auto found = palette_masks_.find(p_index);
+  return found == palette_masks_.end() ? 0u : found->second;
+}
+
+Vector2 FoliageDispatcher::_terrain_uv(float p_world_x,
+                                           float p_world_z) const {
+  const bool runtime_mapping = terrain_data_.is_valid();
+  Ref<TerrainData> source =
+      runtime_mapping ? terrain_data_ : colormap_source_;
+  if (source.is_null()) {
+    return Vector2();
+  }
+  const Ref<Texture2D> colormap = source->get_colormap();
+  if (colormap.is_null() || colormap->get_width() <= 0 ||
+      colormap->get_height() <= 0) {
+    return Vector2();
+  }
+  const Vector2 atlas = runtime_mapping
+                            ? source->world_to_runtime_source_coords(p_world_x,
+                                                                      p_world_z)
+                            : source->world_to_source_coords(p_world_x,
+                                                             p_world_z);
+  if (atlas.x < 0.0f || atlas.y < 0.0f) {
+    return Vector2();
+  }
+  return Vector2(atlas.x / static_cast<float>(colormap->get_width()),
+                 atlas.y / static_cast<float>(colormap->get_height()));
+}
+
+void FoliageDispatcher::_compile_and_apply(
+    const renderer::FoliageViewInput &p_view) {
+  _ensure_visuals();
+  _update_materials();
+  _hide_draw_pools();
+
+  renderer::FoliageExpansionSamplers expansion;
+  expansion.terrain_uv_at = [this](float p_world_x, float p_world_z,
+                                   float &r_u, float &r_v) {
+    const Vector2 uv = _terrain_uv(p_world_x, p_world_z);
+    r_u = static_cast<float>(uv.x);
+    r_v = static_cast<float>(uv.y);
+    return uv != Vector2();
+  };
+
+  const renderer::FoliageDrawPacket &packet =
+      compiler_.compile(p_view, _world_samplers(), expansion);
+  _apply_packet(packet);
+}
+
+Ref<ArrayMesh> FoliageDispatcher::_upload_mesh_build(
+    const renderer::FoliageDrawPacket &p_packet,
+    const renderer::FoliageMeshBuild &p_build) const {
+  Ref<ArrayMesh> mesh;
+  if (p_build.vertex_count == 0 || p_build.index_count == 0) {
+    return mesh;
+  }
+
+  const int64_t vertex_count = static_cast<int64_t>(p_build.vertex_count);
+  const int64_t index_count = static_cast<int64_t>(p_build.index_count);
+  const bool detail = p_build.tier == renderer::FoliageTier::Detail;
+
+  PackedVector3Array positions;
+  PackedVector3Array normals;
+  PackedVector2Array uvs;
+  PackedVector2Array uv2s;
+  PackedColorArray colors;
+  PackedInt32Array indices;
+  positions.resize(vertex_count);
+  uvs.resize(vertex_count);
+  uv2s.resize(vertex_count);
+  colors.resize(vertex_count);
+  indices.resize(index_count);
+  if (detail) {
+    normals.resize(vertex_count);
+  }
+
+  for (int64_t i = 0; i < vertex_count; ++i) {
+    const renderer::FoliageVertex &v =
+        p_packet.vertices[p_build.first_vertex + static_cast<size_t>(i)];
+    positions.set(i, Vector3(v.x, v.y, v.z));
+    uvs.set(i, Vector2(v.u, v.v));
+    uv2s.set(i, Vector2(v.u2, v.v2));
+    // Only the source-height bend byte is resident geometry. Fade, alpha
+    // reference, and pass are per-submission state on the draw node.
+    colors.set(i, Color(v.bend, 0.0f, 0.0f, 1.0f));
+    if (detail) {
+      normals.set(i, Vector3(v.nx, v.ny, v.nz));
+    }
+  }
+  for (int64_t i = 0; i < index_count; ++i) {
+    indices.set(i, static_cast<int32_t>(
+                       p_packet.indices[p_build.first_index +
+                                        static_cast<size_t>(i)]));
+  }
+
+  Array arrays;
+  arrays.resize(Mesh::ARRAY_MAX);
+  arrays[Mesh::ARRAY_VERTEX] = positions;
+  if (detail) {
+    arrays[Mesh::ARRAY_NORMAL] = normals;
+  }
+  arrays[Mesh::ARRAY_COLOR] = colors;
+  arrays[Mesh::ARRAY_TEX_UV] = uvs;
+  arrays[Mesh::ARRAY_TEX_UV2] = uv2s;
+  arrays[Mesh::ARRAY_INDEX] = indices;
+
+  mesh.instantiate();
+  mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+  return mesh;
+}
+
+void FoliageDispatcher::_apply_packet(
+    const renderer::FoliageDrawPacket &p_packet) {
+  // 1) Upload every mesh the compiler built this frame (empty builds cache an
+  // empty entry so repeated submissions of a barren identity stay cheap).
+  for (const renderer::FoliageMeshBuild &build : p_packet.mesh_builds) {
+    CachedMesh entry;
+    entry.mesh = _upload_mesh_build(p_packet, build);
+    entry.instances = build.instance_count;
+    entry.vertices = static_cast<int64_t>(build.vertex_count);
+    const MeshCacheKey key{build.slot, build.cell_key, build.revision};
+    if (build.tier == renderer::FoliageTier::Detail) {
+      detail_mesh_cache_[key] = std::move(entry);
+    } else {
+      model_mesh_cache_[key] = std::move(entry);
+    }
+  }
+
+  // 2) Bind the packet's draw commands onto the pools, in packet order.
+  size_t detail_draw_index = 0;
+  size_t model_draw_index = 0;
+  for (const renderer::FoliageDrawCommand &command : p_packet.commands) {
+    const int slot = command.slot;
+    if (slot < 0 || slot >= opennova::FOLIAGE_MAX_DEFS) {
+      continue;
+    }
+    const MeshCacheKey key{command.slot, command.cell_key, command.revision};
+    const bool detail = command.tier == renderer::FoliageTier::Detail;
+    auto &cache = detail ? detail_mesh_cache_ : model_mesh_cache_;
+    const auto found = cache.find(key);
+    if (found == cache.end() || found->second.mesh.is_null()) {
+      // The compiler only commands identities it built or knows resident; a
+      // miss means the applier's cache went out of sync with the packet.
+      continue;
+    }
+
+    MeshInstance3D *draw =
+        detail ? _ensure_draw_node(detail_draw_pool_, detail_draw_index++,
+                                   String("FoliageDetailDraw"))
+               : _ensure_draw_node(model_draw_pool_, model_draw_index++,
+                                   String("FoliageModelDraw"));
+    draw->set_mesh(found->second.mesh);
+    if (detail) {
+      const bool high =
+          command.pass == opennova::foliage::DetailPass::HighAlphaTest;
+      draw->set_material_override(high ? detail_high_materials_[slot]
+                                       : detail_low_materials_[slot]);
+      draw->set_instance_shader_parameter(StringName("u_fade"), command.fade);
+    } else {
+      draw->set_material_override(silhouette_materials_[slot]);
+    }
+    draw->set_instance_shader_parameter(StringName("u_alpha_ref"),
+                                        command.alpha_reference);
+    if (detail) {
+      // The near secondary LOW draw runs under strict D3DCMP_LESS in retail;
+      // the cutoff discard keeps it off every texel the HIGH pass accepted.
+      // [orig: Foliage_SetupFarSlotDraw @ 0x6008fc..0x600912]
+      draw->set_instance_shader_parameter(StringName("u_high_pass_cutoff"),
+                                          command.high_pass_cutoff);
+    }
+    draw->set_instance_shader_parameter(StringName("u_wind_phase"),
+                                        command.wind_phase);
+    draw->set_visible(true);
+  }
+
+  // 3) A regenerated identity may still have been submitted earlier in this
+  // same packet. Draw nodes retain its Ref<ArrayMesh>; remove cache ownership
+  // only after every command has consumed the frame.
+  _erase_cache_identities(p_packet.detail_evicted, detail_mesh_cache_);
+  _erase_cache_identities(p_packet.model_evicted, model_mesh_cache_);
+
+  // 4) Mirror the packet's debug counters into the stable stats surface.
+  const renderer::FoliageFrameDebugCounters &debug = p_packet.debug;
+  frame_stats_.detail_cells = debug.detail_cells;
+  frame_stats_.silhouette_anchors_input = debug.silhouette_anchors_input;
+  frame_stats_.silhouette_anchors_visible = debug.silhouette_anchors_visible;
+  frame_stats_.runtime_detail_intents = debug.runtime_detail_intents;
+  frame_stats_.runtime_silhouette_intents = debug.runtime_silhouette_intents;
+  frame_stats_.detail_high_instances = debug.detail_high_instances;
+  frame_stats_.detail_low_instances = debug.detail_low_instances;
+  frame_stats_.silhouette_instances = debug.silhouette_instances;
+  frame_stats_.detail_vertices = debug.detail_vertices;
+  frame_stats_.silhouette_vertices = debug.silhouette_vertices;
+  frame_stats_.render_batches = debug.render_batches;
+  frame_stats_.detail_mesh_hits = debug.detail_mesh_hits;
+  frame_stats_.detail_mesh_uploads = debug.detail_mesh_uploads;
+  frame_stats_.model_mesh_hits = debug.model_mesh_hits;
+  frame_stats_.model_mesh_uploads = debug.model_mesh_uploads;
+  const opennova::foliage::RuntimeStats &runtime_stats = debug.runtime;
+  frame_stats_.detail_cache_hits =
+      static_cast<int64_t>(runtime_stats.detail.hits);
+  frame_stats_.detail_cache_misses =
+      static_cast<int64_t>(runtime_stats.detail.misses);
+  frame_stats_.detail_cache_regenerations =
+      static_cast<int64_t>(runtime_stats.detail.regenerations);
+  frame_stats_.detail_cache_evictions =
+      static_cast<int64_t>(runtime_stats.detail.evictions);
+  frame_stats_.detail_cache_residents =
+      static_cast<int64_t>(runtime_stats.detail.residents);
+  frame_stats_.detail_cache_submissions =
+      static_cast<int64_t>(runtime_stats.detail.submissions);
+  frame_stats_.model_cache_hits =
+      static_cast<int64_t>(runtime_stats.model.hits);
+  frame_stats_.model_cache_misses =
+      static_cast<int64_t>(runtime_stats.model.misses);
+  frame_stats_.model_cache_regenerations =
+      static_cast<int64_t>(runtime_stats.model.regenerations);
+  frame_stats_.model_cache_evictions =
+      static_cast<int64_t>(runtime_stats.model.evictions);
+  frame_stats_.model_cache_residents =
+      static_cast<int64_t>(runtime_stats.model.residents);
+  frame_stats_.model_cache_submissions =
+      static_cast<int64_t>(runtime_stats.model.submissions);
+  frame_stats_.terrain_scene_counter =
+      static_cast<int64_t>(runtime_stats.terrain_scene_counter);
+}
+
+void FoliageDispatcher::_erase_cache_identities(
+    const std::vector<opennova::foliage::CacheIdentity> &p_identities,
+    std::unordered_map<MeshCacheKey, CachedMesh, MeshCacheKeyHash> &r_cache) {
+  for (const opennova::foliage::CacheIdentity &identity : p_identities) {
+    r_cache.erase(MeshCacheKey{
+        identity.slot,
+        identity.key,
+        identity.revision,
+    });
+  }
+}
+
+} // namespace godot

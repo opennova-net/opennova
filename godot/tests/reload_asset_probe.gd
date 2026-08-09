@@ -7,9 +7,9 @@ extends SceneTree
 #
 # This re-derives the whole chain through the RUNTIME resource stack (PFF mounts), not
 # the loose JOX extraction:
-#   * NovaSimulation.infantry_anim_key(65) / (66)
+#   * Simulation.infantry_anim_key(65) / (66)
 #   * the wire remote-player type id 0x14B9 -> visual item -> graphic + anim_def
-#   * NovaSkeletalAnim built from that anim_def: does it carry the two reload clips,
+#   * SkeletalAnim built from that anim_def: does it carry the two reload clips,
 #     with real frame counts, and do they pose DIFFERENTLY from the hold poses?
 #
 # Run:
@@ -17,8 +17,8 @@ extends SceneTree
 #   "$GODOT_BIN" --headless --path godot -s res://tests/reload_asset_probe.gd
 # Not collected by GUT (*_probe.gd).
 
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
-const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
+const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
+const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
 
 const PLAYER_RUNTIME_TYPE_ID := 0x14B9
 
@@ -59,7 +59,7 @@ func _run() -> void:
 		root_dir = OS.get_environment("OPENNOVA_JO_DIR").strip_edges()
 	if root_dir.is_empty():
 		root_dir = ResourceDirSettings.get_resource_dir()
-	var res := NovaResourceRoot.new()
+	var res := ResourceRoot.new()
 	if res.mount_runtime(root_dir, ResourceDirSettings.get_expansion()) != OK:
 		print("FAIL: cannot mount ", root_dir)
 		quit(1)
@@ -68,14 +68,14 @@ func _run() -> void:
 
 	# ---- 1. the key mapper -------------------------------------------------------
 	print("")
-	print("=== NovaSimulation.infantry_anim_key ===")
+	print("=== Simulation.infantry_anim_key ===")
 	for s in [43, 50, 51, 62, 63, 64, 65, 66]:
 		print("  %3d -> '%s'  flags=0x%X" % [
-				s, NovaSimulation.infantry_anim_key(s),
-				NovaSimulation.infantry_anim_flags(s)])
-	_check(String(NovaSimulation.infantry_anim_key(65)) == "anim_reload",
+				s, Simulation.infantry_anim_key(s),
+				Simulation.infantry_anim_flags(s)])
+	_check(String(Simulation.infantry_anim_key(65)) == "anim_reload",
 			"infantry_anim_key(65) == anim_reload")
-	_check(String(NovaSimulation.infantry_anim_key(66)) == "anim_reload2",
+	_check(String(Simulation.infantry_anim_key(66)) == "anim_reload2",
 			"infantry_anim_key(66) == anim_reload2")
 
 	# ---- 2. the remote-player asset chain ----------------------------------------
@@ -100,14 +100,14 @@ func _run() -> void:
 
 	# ---- 3. the loaded clip set ---------------------------------------------------
 	print("")
-	print("=== NovaSkeletalAnim built from that anim_def ===")
+	print("=== SkeletalAnim built from that anim_def ===")
 	var od: Variant = placer.object_data_for(graphic)
 	if od == null:
 		print("FAIL: object data for '%s' did not load" % graphic)
 		quit(1)
 		return
 	var adm_name := anim_def if anim_def.to_lower().ends_with(".adm") else anim_def + ".adm"
-	var skel := NovaSkeletalAnim.new()
+	var skel := SkeletalAnim.new()
 	var loaded: bool = skel.load_from_resource_root(
 			res, adm_name, od.get_bone_origins(), od.get_bone_parents())
 	print("  load_from_resource_root('%s') = %s   err='%s'"

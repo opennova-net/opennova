@@ -5,7 +5,7 @@ Glossary of the project's domain language. Definitions only: what a term *is*, n
 ## Layers
 
 The vocabulary for the codebase's own layering (ADR 0016/0028). Dependencies point one
-way: shells → adapter → engine.
+way: shells → the Godot layer (godot/src) → engine.
 
 **Engine**:
 The portable, Godot-free C++ core under `engine/` (`base/`, `formats/`, `runtime/`,
@@ -14,9 +14,9 @@ net stack. "The original engine" always means NovaLogic's binary; our engine con
 with retail is *the reimpl*. Godot is never "the engine".
 _Avoid_: libs (the pre-2026-08 path), core, framework
 
-**Adapter (shell adapter)**:
-`godot/adapter/` — the GDExtension bindings (`Nova*` classes) plus the shell-neutral
-GDScript layer that wires Godot nodes to engine facts. Both shells consume it; it
+**The Godot layer (first-class, ADR 0034)**:
+`godot/src/` — the GDExtension bindings plus the shared
+GDScript runtime that wires Godot nodes to engine facts. Both shells consume it; it
 depends on neither.
 _Avoid_: godot/engine (the pre-2026-08 path), engine layer (that word is the
 engine's), glue, bindings (only half of it)
@@ -28,7 +28,7 @@ _Avoid_: frontend, app (in project prose), host (reserved for the game host)
 
 **Simulation**:
 The deterministic in-match world state advanced at the 62 Hz tick by the engine's world
-systems (WAC VM, BMS events, AI). `NovaSimulation` is the adapter binding that owns it
+systems (WAC VM, BMS events, AI). `Simulation` is the adapter binding that owns it
 shell-side; present passes project it onto scene nodes and never mutate it.
 _Avoid_: game logic, GameWorld (that is the scene, below)
 
@@ -96,7 +96,7 @@ The vocabulary separating the in-game world from the online service. The names c
 historically; they are now distinct.
 
 **GameWorld**:
-The runtime world-sim scene (`godot/adapter/world/game_world.tscn`): terrain,
+The runtime world-sim scene (`godot/src/world/game_world.tscn`): terrain,
 environment, mission runtime, and audio under one embeddable root. The standalone
 game is the sole live mission runtime; ONED authoring previews do not run gameplay
 (ADR 0025). Formerly named `NovaWorld`.
@@ -198,8 +198,8 @@ _Avoid_: infer the pool from the entity kind
 **Presenter**:
 A runtime node that owns one presentation surface and projects sim or menu state onto
 it: `LocalPlayerPresenter` (FP camera/input/viewmodel — every peer runs one for its own
-player, joiners included), `NovaGameHudPresenter`, `NovaArmoryPresenter`,
-`NovaDeployScreenPresenter`.
+player, joiners included), `GameHudPresenter`, `ArmoryPresenter`,
+`DeployScreenPresenter`.
 _Avoid_: host, view controller
 
 ## 3DI collision authoring

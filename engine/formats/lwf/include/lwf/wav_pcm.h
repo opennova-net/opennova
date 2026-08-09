@@ -1,7 +1,7 @@
 // NovaLogic .wav payload decode: the RIFF chunk walk and the IMA-ADPCM
 // (audioFormat 0x11) block decode the voice/zone audio ships in, plus the
 // PCM8/PCM16 normalizations — everything emits interleaved signed 16-bit LE
-// PCM. Moved from the shell adapter's NovaWavLoader (ADR 0031: format
+// PCM. Moved from the shell adapter's WavLoader (ADR 0031: format
 // semantics live engine-side; the adapter boxes the result into an
 // AudioStreamWAV).
 #ifndef OPENNOVA_LWF_WAV_PCM_H

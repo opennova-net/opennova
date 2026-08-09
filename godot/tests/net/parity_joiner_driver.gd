@@ -1,7 +1,7 @@
 extends SceneTree
 
 # Tracked parity-capture launcher for an OpenNova joiner. This is deliberately a
-# frame-driven MainLoop rather than a coroutine: NovaSimulation and other
+# frame-driven MainLoop rather than a coroutine: Simulation and other
 # GDExtension objects are acquired only inside one synchronous frame and never
 # survive an await/suspended stack into module teardown.
 

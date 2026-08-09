@@ -1,6 +1,6 @@
 extends GutTest
 
-# Runtime menu shell (NovaMenuShell) gates: it boots the JO menu set, services the
+# Runtime menu shell (MenuShell) gates: it boots the JO menu set, services the
 # shell policy the menu leaves to it (cross-.mnu jumps + a file-level back stack,
 # quit), drives the music director's screen var, launches a selected mission, and
 # degrades gracefully when menu assets are missing - all headless, no blocking.
@@ -59,7 +59,7 @@ func after_each() -> void:
 # stub mission), and a shell pointed at it. Returns null when a real temp root is
 # unavailable in this environment (the caller pass_test-skips, as mnu_menu_test does).
 func _make_shell(dir: String):
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	if root.set_root_dir(dir) != OK:
 		return null
 	var shell = MenuShellScript.new()
@@ -263,26 +263,26 @@ func test_start_without_selection_falls_back_to_first_mission() -> void:
 
 
 func test_crosshair_spinlist_seeds_persists_and_notifies() -> void:
-	var saved := NovaResourceDirSettings.get_crosshair_style()
-	NovaResourceDirSettings.set_crosshair_style(11)
+	var saved := ResourceDirSettings.get_crosshair_style()
+	ResourceDirSettings.set_crosshair_style(11)
 	var dir := _make_runtime_dir()
 	var shell = _make_runtime_shell(dir)
 	if shell == null:
 		pass_test("runtime resource root unavailable in this environment")
-		NovaResourceDirSettings.set_crosshair_style(saved)
+		ResourceDirSettings.set_crosshair_style(saved)
 		_rm_runtime_dir(dir)
 		return
 	var spin = shell.get_menu().find_child("XHAIR_APPEARANCE", true, false)
-	assert_true(spin is NovaMnuSpinList, "Options builds the crosshair spin list.")
-	if spin is NovaMnuSpinList:
-		assert_eq((spin as NovaMnuSpinList).get_value_index(), 11,
+	assert_true(spin is MnuSpinList, "Options builds the crosshair spin list.")
+	if spin is MnuSpinList:
+		assert_eq((spin as MnuSpinList).get_value_index(), 11,
 			"The spin list starts on the persisted crosshair.")
 	watch_signals(shell)
 	shell.get_menu().notify_widget_value("XHAIR_APPEARANCE", "spinlist", 18, "cross19.tga")
-	assert_eq(NovaResourceDirSettings.get_crosshair_style(), 18, "Selection persists.")
+	assert_eq(ResourceDirSettings.get_crosshair_style(), 18, "Selection persists.")
 	assert_signal_emitted_with_parameters(shell, "crosshair_style_changed", [18])
 	shell.get_menu().get_resource_root().clear()
-	NovaResourceDirSettings.set_crosshair_style(saved)
+	ResourceDirSettings.set_crosshair_style(saved)
 	_rm_runtime_dir(dir)
 
 
@@ -291,13 +291,13 @@ func test_crosshair_spinlist_seeds_persists_and_notifies() -> void:
 # (read back by main_game at the next launch), and announces it. Uses a runtime
 # (packed PFF) mount so list_expansions/mount_runtime have real archives to work on.
 func test_mods_tab_lists_mounts_and_persists_expansion() -> void:
-	var saved := NovaResourceDirSettings.get_expansion()
-	NovaResourceDirSettings.set_expansion("")  # clean slate so the activate is not a no-op
+	var saved := ResourceDirSettings.get_expansion()
+	ResourceDirSettings.set_expansion("")  # clean slate so the activate is not a no-op
 	var dir := _make_runtime_dir()
 	var shell = _make_runtime_shell(dir)
 	if shell == null:
 		pass_test("runtime resource root unavailable in this environment")
-		NovaResourceDirSettings.set_expansion(saved)
+		ResourceDirSettings.set_expansion(saved)
 		_rm_runtime_dir(dir)
 		return
 	assert_eq(NovaMusicService.current_context(), "menu", "base MENU music starts with the shell")
@@ -313,7 +313,7 @@ func test_mods_tab_lists_mounts_and_persists_expansion() -> void:
 	# Activation mounts + persists + describes.
 	shell._on_mod_activated(0)
 	assert_eq(shell.get_selected_expansion(), "jox01")
-	assert_eq(NovaResourceDirSettings.get_expansion(), "jox01", "choice persisted to config")
+	assert_eq(ResourceDirSettings.get_expansion(), "jox01", "choice persisted to config")
 	assert_not_null(NovaMusicService.current_script(), "expansion menu context reopens")
 	if NovaMusicService.current_script() != null:
 		assert_eq(NovaMusicService.current_script().get_source_path(), "Mjox01.bin",
@@ -327,7 +327,7 @@ func test_mods_tab_lists_mounts_and_persists_expansion() -> void:
 	assert_eq(shell._root.read_file("expmodel.3di").get_string_from_utf8(), "exp model",
 		"expansion archive mounted over the base game")
 	shell._root.clear()  # release PFF handles before deleting the temp archives
-	NovaResourceDirSettings.set_expansion(saved)
+	ResourceDirSettings.set_expansion(saved)
 	_rm_runtime_dir(dir)
 
 
@@ -336,13 +336,13 @@ func test_mods_tab_lists_mounts_and_persists_expansion() -> void:
 # plain OK on Options); the shell scopes it by screen role, so on a Mods screen (mod
 # list, no mission list) ACCEPT applies. Regression for the "OK loads a mission" bug.
 func test_mods_ok_applies_expansion_without_launching() -> void:
-	var saved := NovaResourceDirSettings.get_expansion()
-	NovaResourceDirSettings.set_expansion("")  # so the apply is not a no-op
+	var saved := ResourceDirSettings.get_expansion()
+	ResourceDirSettings.set_expansion("")  # so the apply is not a no-op
 	var dir := _make_runtime_dir()
 	var shell = _make_runtime_shell(dir)
 	if shell == null:
 		pass_test("runtime resource root unavailable in this environment")
-		NovaResourceDirSettings.set_expansion(saved)
+		ResourceDirSettings.set_expansion(saved)
 		_rm_runtime_dir(dir)
 		return
 	var menu = shell.get_menu()
@@ -355,9 +355,9 @@ func test_mods_ok_applies_expansion_without_launching() -> void:
 	(accept as BaseButton).pressed.emit()  # press OK
 	assert_signal_not_emitted(shell, "start_requested", "OK on the Mods screen must not launch")
 	assert_eq(shell.get_selected_expansion(), "jox01", "OK applied the highlighted mod")
-	assert_eq(NovaResourceDirSettings.get_expansion(), "jox01", "applied choice persisted")
+	assert_eq(ResourceDirSettings.get_expansion(), "jox01", "applied choice persisted")
 	shell._root.clear()
-	NovaResourceDirSettings.set_expansion(saved)
+	ResourceDirSettings.set_expansion(saved)
 	_rm_runtime_dir(dir)
 
 
@@ -366,8 +366,8 @@ func test_mods_ok_applies_expansion_without_launching() -> void:
 # leave the live loose mount untouched, not remount it through mount_runtime into
 # a cleared root (the zero-archives fatal would kill the running play-test).
 func test_mods_apply_refuses_on_a_loose_root_and_keeps_the_mount() -> void:
-	var saved := NovaResourceDirSettings.get_expansion()
-	NovaResourceDirSettings.set_expansion("")
+	var saved := ResourceDirSettings.get_expansion()
+	ResourceDirSettings.set_expansion("")
 	var dir := OS.get_temp_dir().path_join("menu_shell_loose_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(dir.path_join("expansion/jox01"))
 	var file := FileAccess.open(dir.path_join("options.mnu"), FileAccess.WRITE)
@@ -384,7 +384,7 @@ func test_mods_apply_refuses_on_a_loose_root_and_keeps_the_mount() -> void:
 	_write_pff(dir.path_join("expansion/jox01/jox01.pff"), [
 		{"name": "expmodel.3di", "bytes": "exp model"},
 	])
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(dir), OK)
 	var shell = MenuShellScript.new()
 	shell.main_menu_file = "options.mnu"
@@ -400,11 +400,11 @@ func test_mods_apply_refuses_on_a_loose_root_and_keeps_the_mount() -> void:
 	assert_not_null(accept)
 	(accept as BaseButton).pressed.emit()
 	assert_eq(shell.get_selected_expansion(), "", "the loose mount refuses the switch")
-	assert_eq(NovaResourceDirSettings.get_expansion(), "", "nothing persisted")
+	assert_eq(ResourceDirSettings.get_expansion(), "", "nothing persisted")
 	assert_false(root.read_file("options.mnu").is_empty(),
 			"the live loose mount survives untouched (no clear())")
 	root.clear()
-	NovaResourceDirSettings.set_expansion(saved)
+	ResourceDirSettings.set_expansion(saved)
 	for sub in ["options.mnu", "menumus.bin", "menumus.sbf",
 			"expansion/jox01/jox01.pff", "expansion/jox01", "expansion"]:
 		DirAccess.remove_absolute(dir.path_join(sub))
@@ -453,7 +453,7 @@ func test_runtime_loads_pff_archived_stylesheet_by_canonical_name() -> void:
 		{"name": "main.mnu", "bytes": FileAccess.get_file_as_bytes(MAIN_FIXTURE)},
 		{"name": "menu_style.mns", "bytes": mns},
 	])
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	if root.mount_runtime(dir) != OK:
 		pass_test("runtime resource root unavailable in this environment")
 		DirAccess.remove_absolute(dir.path_join("resource.pff"))
@@ -506,7 +506,7 @@ func test_music_contexts_load_pff_archived_by_hardcoded_names() -> void:
 		if f != null:
 			f.store_buffer(sbf)
 			f.close()
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	if root.mount_runtime(dir) != OK:
 		pass_test("runtime resource root unavailable in this environment")
 		_rm_music_ctx_dir(dir)
@@ -575,7 +575,7 @@ func test_music_resolution_keeps_incomplete_expansion_pair() -> void:
 	if stub != null:
 		stub.store_buffer(sbf)
 		stub.close()
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	if root.mount_runtime(dir, "jox01") != OK:
 		pass_test("runtime resource root unavailable in this environment")
 		_rm_music_exp_dir(dir)
@@ -619,7 +619,7 @@ func test_music_incomplete_expansion_bank_only_stays_expansion() -> void:
 		if stub != null:
 			stub.store_buffer(PackedByteArray([0]))
 			stub.close()
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	if root.mount_runtime(dir, "jox01") != OK:
 		pass_test("runtime resource root unavailable in this environment")
 		_rm_music_bank_only_dir(dir)
@@ -661,7 +661,7 @@ func test_musicless_expansion_does_not_reselect_base_pair() -> void:
 	if stub != null:
 		stub.store_buffer(FileAccess.get_file_as_bytes(SBF_FIXTURE))
 		stub.close()
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	if root.mount_runtime(dir, "jox01") != OK:
 		pass_test("runtime resource root unavailable in this environment")
 		_rm_music_base_dir(dir)
@@ -739,7 +739,7 @@ func _make_runtime_dir() -> String:
 
 
 func _make_runtime_shell(dir: String):
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	if root.mount_runtime(dir) != OK:
 		return null
 	var shell = MenuShellScript.new()

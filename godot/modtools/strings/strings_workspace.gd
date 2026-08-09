@@ -267,7 +267,7 @@ func get_preview_font_names() -> PackedStringArray:
 		# plain picker enumeration; the picker then eager-previews only fonts
 		# that can actually load.
 		var bytes := root.read_file(file)
-		if bytes.size() < 4 or bytes.decode_u32(0) != NovaFntResource.MAGIC:
+		if bytes.size() < 4 or bytes.decode_u32(0) != FntResource.MAGIC:
 			continue
 		names.append(file)
 	names.sort()
@@ -275,7 +275,7 @@ func get_preview_font_names() -> PackedStringArray:
 
 
 ## Load one of those fonts the way the runtime does (VFS read ->
-## NovaFntResource -> FontFile). Null when unresolvable.
+## FntResource -> FontFile). Null when unresolvable.
 func load_preview_font(font_name: String) -> FontFile:
 	return HudText.load_font(_resource_root(), font_name)
 

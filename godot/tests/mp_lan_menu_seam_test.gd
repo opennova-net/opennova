@@ -7,7 +7,7 @@ extends GutTest
 # flow (real discovery + a second client spawning) is the manual smoke; this is the unit.
 
 const MenuShell := preload("res://game/nova_menu_shell.gd")
-const MissionRuntime := preload("res://adapter/world/mission_runtime.gd")
+const MissionRuntime := preload("res://src/world/mission_runtime.gd")
 
 
 class _LanSessionStub extends RefCounted:
@@ -29,13 +29,13 @@ func _make_host_menu() -> Node:
 	menu.name = "Menu"
 	add_child_autofree(menu)
 	for n in ["GAME_NAME", "MAX_PLAYERS"]:
-		var e := NovaMnuEdit.new()
+		var e := MnuEdit.new()
 		e.name = n
 		menu.add_child(e)
-	var mission_list := NovaMnuList.new()
+	var mission_list := MnuList.new()
 	mission_list.name = "MISSION_LIST"
 	menu.add_child(mission_list)
-	var selected := NovaMnuTable.new()
+	var selected := MnuTable.new()
 	selected.name = "SELECTED_MISSIONS"
 	selected.add_column(80, 0, false)  # Mission
 	selected.add_column(60, 0, false)  # Type
@@ -52,7 +52,7 @@ func _make_lan_menu() -> Node:
 	var menu := _LanMenuStub.new()
 	menu.name = "Menu"
 	add_child_autofree(menu)
-	var server_list := NovaMnuList.new()
+	var server_list := MnuList.new()
 	server_list.name = "LAN_GAME_LIST"
 	menu.add_child(server_list)
 	for control_name in ["LAN_SEARCH", "LAN_JOINGAME"]:
@@ -71,7 +71,7 @@ func _start_host_config(mission_file: String) -> HostSessionConfig:
 	watch_signals(mp)
 	var menu := _make_host_menu()
 	mp.on_menu_built(menu, "jo_mp.mnu", "MULTI_PLAYER_HOST", null)
-	var mission_list := menu.find_child("MISSION_LIST", true, false) as NovaMnuList
+	var mission_list := menu.find_child("MISSION_LIST", true, false) as MnuList
 	mission_list.set_items(PackedStringArray([mission_file]))
 	mission_list.select(0)
 	_press(menu, "ADD_MISSIONS")
@@ -98,11 +98,11 @@ func test_add_and_remove_missions() -> void:
 	var mp := MpMenuCompanion.new()
 	var menu := _make_host_menu()
 	mp.on_menu_built(menu, "jo_mp.mnu", "MULTI_PLAYER_HOST", null)
-	var mission_list := menu.find_child("MISSION_LIST", true, false) as NovaMnuList
+	var mission_list := menu.find_child("MISSION_LIST", true, false) as MnuList
 	mission_list.set_items(PackedStringArray(["alpha.bms", "bravo.bms"]))
 	mission_list.select(0)
 	_press(menu, "ADD_MISSIONS")
-	var table := menu.find_child("SELECTED_MISSIONS", true, false) as NovaMnuTable
+	var table := menu.find_child("SELECTED_MISSIONS", true, false) as MnuTable
 	assert_eq(table.get_row_count(), 1, "ADD moved the highlighted mission into the rotation")
 	assert_eq(table.get_cell_text(0, 0), "alpha.bms")
 	_press(menu, "ADD_MISSIONS")
@@ -119,7 +119,7 @@ func test_start_game_emits_host_config() -> void:
 	mp.on_menu_built(menu, "jo_mp.mnu", "MULTI_PLAYER_HOST", null)
 	(menu.find_child("GAME_NAME", true, false) as LineEdit).text = "CoopNight"
 	(menu.find_child("MAX_PLAYERS", true, false) as LineEdit).text = "6"
-	var mission_list := menu.find_child("MISSION_LIST", true, false) as NovaMnuList
+	var mission_list := menu.find_child("MISSION_LIST", true, false) as MnuList
 	mission_list.set_items(PackedStringArray(["alpha.bms"]))
 	mission_list.select(0)
 	_press(menu, "ADD_MISSIONS")
@@ -168,22 +168,22 @@ func test_hosted_mission_game_type_reaches_native_session_config() -> void:
 	var cases := [
 		{
 			"mission": "team_deathmatch.bms",
-			"mode": NovaMissionData.ATTRIB_TEAM_DEATHMATCH,
+			"mode": MissionData.ATTRIB_TEAM_DEATHMATCH,
 			"expected": 0x10000,
 		},
 		{
 			"mission": "deathmatch.bms",
-			"mode": NovaMissionData.ATTRIB_DEATHMATCH,
+			"mode": MissionData.ATTRIB_DEATHMATCH,
 			"expected": 0,
 		},
 	]
 	for row in cases:
 		var config := _start_host_config(String(row["mission"]))
 		config.bind_port = 0 # OS-selected port keeps this focused test isolated.
-		var mission := NovaMissionData.new()
+		var mission := MissionData.new()
 		assert_eq(mission.create_default(), OK)
 		assert_true(mission.set_game_mode(int(row["mode"])))
-		var sim := NovaSimulation.new()
+		var sim := Simulation.new()
 		var runtime := MissionRuntime.new()
 		add_child_autofree(runtime)
 		var container := Node3D.new()
@@ -221,17 +221,17 @@ func test_env_lan_max_players_override_is_explicit_and_validated() -> void:
 func test_auto_game_type_matches_retail_mission_mode_table() -> void:
 	var modes := {
 		0: 0x10020,
-		NovaMissionData.ATTRIB_DEATHMATCH: 0x00000,
-		NovaMissionData.ATTRIB_TEAM_DEATHMATCH: 0x10000,
-		NovaMissionData.ATTRIB_COOP: 0x30020,
-		NovaMissionData.ATTRIB_KING_OF_THE_HILL: 0x00001,
-		NovaMissionData.ATTRIB_TEAM_KING_OF_THE_HILL: 0x10001,
-		NovaMissionData.ATTRIB_SEARCH_AND_DESTROY: 0x90002,
-		NovaMissionData.ATTRIB_ATTACK_AND_DEFEND: 0x10002,
-		NovaMissionData.ATTRIB_CAPTURE_THE_FLAG: 0x10004,
-		NovaMissionData.ATTRIB_FLAGBALL: 0x10008,
-		NovaMissionData.ATTRIB_ADVANCE_AND_SECURE: 0x10010,
-		NovaMissionData.ATTRIB_CONQUER_AND_CONTROL: 0x50010,
+		MissionData.ATTRIB_DEATHMATCH: 0x00000,
+		MissionData.ATTRIB_TEAM_DEATHMATCH: 0x10000,
+		MissionData.ATTRIB_COOP: 0x30020,
+		MissionData.ATTRIB_KING_OF_THE_HILL: 0x00001,
+		MissionData.ATTRIB_TEAM_KING_OF_THE_HILL: 0x10001,
+		MissionData.ATTRIB_SEARCH_AND_DESTROY: 0x90002,
+		MissionData.ATTRIB_ATTACK_AND_DEFEND: 0x10002,
+		MissionData.ATTRIB_CAPTURE_THE_FLAG: 0x10004,
+		MissionData.ATTRIB_FLAGBALL: 0x10008,
+		MissionData.ATTRIB_ADVANCE_AND_SECURE: 0x10010,
+		MissionData.ATTRIB_CONQUER_AND_CONTROL: 0x50010,
 	}
 	for mode in modes:
 		assert_eq(HostSessionConfig.game_type_for_mission_mode(int(mode)), int(modes[mode]),
@@ -291,7 +291,7 @@ func test_refreshed_lan_rows_require_a_fresh_selection() -> void:
 	menu.emit_signal("widget_value_changed", "LAN_GAME_LIST", "list", 0, "old")
 
 	session.publish([{"name": "replacement", "host_ip": "192.168.1.11", "port": 32769}])
-	var server_list := menu.find_child("LAN_GAME_LIST", true, false) as NovaMnuList
+	var server_list := menu.find_child("LAN_GAME_LIST", true, false) as MnuList
 	assert_eq(server_list.get_item_count(), 1,
 		"a servers_changed payload replaces the prior full snapshot instead of appending")
 	assert_eq(server_list.get_item_text(0), "replacement (0/0)")
@@ -311,7 +311,7 @@ func test_swapping_lan_sessions_disconnects_the_previous_discovery_source() -> v
 	current.publish([{"name": "current", "players": 1, "max_players": 4, "mission": "new.bms"}])
 	previous.publish([{"name": "stale", "players": 4, "max_players": 4, "mission": "old.bms"}])
 
-	var server_list := menu.find_child("LAN_GAME_LIST", true, false) as NovaMnuList
+	var server_list := menu.find_child("LAN_GAME_LIST", true, false) as MnuList
 	assert_eq(server_list.get_item_count(), 1)
 	assert_eq(server_list.get_item_text(0), "current (1/4)",
 		"the current source wins and pre-auth rows do not invent a mission label")

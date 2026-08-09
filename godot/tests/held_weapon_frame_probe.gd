@@ -23,8 +23,8 @@ extends SceneTree
 #   "$GODOT_BIN" --headless --path godot -s res://tests/held_weapon_frame_probe.gd
 # Not collected by GUT (*_probe.gd).
 
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
-const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
+const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
+const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
 
 const TARGETS: Array[String] = ["COLT_3RD", "M4_3RD", "M16_3RD", "M60_3RD", "M9K_3rd"]
 const BINS := 12
@@ -37,13 +37,13 @@ func _init() -> void:
 	var exp := ResourceDirSettings.get_expansion()
 	print("resource root: %s   expansion: %s" % [root, exp])
 
-	var res := NovaResourceRoot.new()
+	var res := ResourceRoot.new()
 	if res.mount_runtime(root, exp) != OK:
 		print("FAIL: cannot mount ", root)
 		quit(1)
 		return
 
-	var db := NovaWeaponDatabase.new()
+	var db := WeaponDatabase.new()
 	if db.load_from_resource_root(res, "weapon.def") != OK:
 		print("FAIL: weapon.def -> ", db.get_last_error())
 		quit(1)
@@ -120,7 +120,7 @@ func _report_weapon(placer, mount: Node3D, gfx3: String, users: Array) -> void:
 		return
 	var data = model.get_object_data() if model.has_method("get_object_data") else null
 	if data == null:
-		print("  <model has no NovaObjectData>")
+		print("  <model has no ObjectData>")
 		model.queue_free()
 		return
 	_dump_object_data(data, model, 0)
@@ -318,7 +318,7 @@ func _report_character(placer, mount: Node3D) -> void:
 	if data != null:
 		_dump_object_data(data, body, 0)
 	else:
-		print("  <no NovaObjectData>")
+		print("  <no ObjectData>")
 
 	var skel: Skeleton3D = body.get_skeleton() if body.has_method("get_skeleton") else null
 	if skel == null:

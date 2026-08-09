@@ -126,7 +126,7 @@ Environment) skip the workflow rail and override `build_inspector(host)` instead
 | `editor/` | the app root (`editor_app.gd` — boot wiring, window sizing, MCP service), the shell (`editor_workstation.gd`), the resource browser and library, the PFF archive tool, the export dialog |
 | `framework/` | base classes and typed registries (`EditorWorkspace`, `WorkspaceDef`, `InspectorDef`) |
 | `terrain/`, `object/`, `avatar/`, `mission/`, `fonts/`, `credits/`, `strings/`, `mnu/`, `hud/`, `music/`, `particle/`, `sound/`, `environment/` | one workspace module each (adapter, editor model, UI, inspectors) |
-| `mcp/` | the embedded agent server's ONED side: built-in tool catalog, asset describe serializers, and the service that boots `godot/adapter/mcp/` |
+| `mcp/` | the embedded agent server's ONED side: built-in tool catalog, asset describe serializers, and the service that boots `godot/src/mcp/` |
 | `tools/` | `screenshot_capture` automation helper (not a workspace) |
 
 ## Agent server (MCP)
@@ -179,12 +179,12 @@ Settings on shared machines. The Environment workspace's time-of-day remains
 an authoring control; while Mission is active, its preview uses the BMS
 `start_time` without mutating the saveable `.env` document.
 
-Code: transport/protocol core in `godot/adapter/mcp/` (shell-agnostic), ONED
+Code: transport/protocol core in `godot/src/mcp/` (shell-agnostic), ONED
 tool catalog + service in `mcp/` (`editor_mcp_tools.gd` editor-wide,
 `editor_mcp_mission_tools.gd` mission authoring).
 
 The editor binds to the shared C++ core through the GDExtension in
-`godot/adapter/`; on-disk formats are parsed by the libraries under
+`godot/src/`; on-disk formats are parsed by the libraries under
 [`engine/`](../../libs). How the editor and the runtime share rendering and
 simulation code (the `edit_mode` runtime-node pattern, sampler seams, the one
 mission runtime) is documented in

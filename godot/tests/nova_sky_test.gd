@@ -2,7 +2,7 @@ extends GutTest
 
 # C7 driver-contract pins for the recovered two-pass dome spec
 # [orig: render_skybox @ 0x579080]. The per-fragment combine itself is shader
-# code (verified by visual A/B); these pin what NovaSky pushes into it.
+# code (verified by visual A/B); these pin what SkyDome pushes into it.
 
 const FULL_00_ENV_FIXTURE := "res://../fixtures/env/full_00.env"
 const SKY_SHADER := "res://shaders/sky.gdshader"
@@ -10,13 +10,13 @@ const TICK := 1.0 / 62.0
 
 
 func _make() -> Dictionary:
-	var env_node: Node = NovaEnvironment.new()
+	var env_node: Node = MissionEnvironment.new()
 	add_child_autofree(env_node)
 	var env := EnvFile.new()
 	env.set_source_path(ProjectSettings.globalize_path(FULL_00_ENV_FIXTURE))
 	env.load()
 	env_node.environment_data = env
-	var sky: Node3D = NovaSky.new()
+	var sky: Node3D = SkyDome.new()
 	add_child_autofree(sky)
 	sky._cached_env = env_node
 	return {"sky": sky, "env_node": env_node, "env": env}
@@ -65,7 +65,7 @@ func test_keyframed_colors_use_retail_upload_scale_without_redoubling_fog() -> v
 
 
 func test_weather_core_ticks_every_world_driven_sky_block_and_doubles_fog_afterward() -> void:
-	var core := NovaWeatherCore.new()
+	var core := WeatherCore.new()
 	var black := Color8(0, 0, 0)
 	core.snap_colors(black, black, black, black)
 	core.snap_sky_colors(black, black, black, black, black, black, black, black, black, black)
@@ -99,7 +99,7 @@ func test_weather_core_ticks_every_world_driven_sky_block_and_doubles_fog_afterw
 
 func test_weather_writes_all_dome_colors_back_to_environment() -> void:
 	var ctx := _make()
-	var weather := NovaWeather.new()
+	var weather := Weather.new()
 	weather.environment_path = ctx.env_node.get_path()
 	add_child_autofree(weather)
 	simulate(weather, 1, TICK)
@@ -205,7 +205,7 @@ func test_cloud_tint_uniform_is_gone_from_the_shader() -> void:
 	assert_false(shader.code.contains("u_cloud_tint"),
 		"the fabricated keyframed-path cloud tint is deleted (divergence #20 fix)")
 	assert_false(shader.code.contains("u_moon_dir"),
-		"sun/moon glow terms are deleted - celestial bodies are NovaCelestial's job")
+		"sun/moon glow terms are deleted - celestial bodies are Celestial's job")
 
 
 func test_cloud_layers_keep_the_recovered_anisotropic_stage_filter() -> void:
@@ -243,7 +243,7 @@ func test_dome_mesh_comes_from_the_libs_builder() -> void:
 
 func test_scroll_offsets_come_from_the_weather_core() -> void:
 	var ctx := _make()
-	var weather: Node3D = NovaWeather.new()
+	var weather: Node3D = Weather.new()
 	weather.environment_path = ctx.env_node.get_path()
 	add_child_autofree(weather)
 	ctx.sky.weather_path = weather.get_path()

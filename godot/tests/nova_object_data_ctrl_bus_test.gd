@@ -12,13 +12,13 @@ const TRACK_NAMES := [
 ]
 
 
-func _open(path: String) -> NovaObjectData:
-	var data := NovaObjectData.new()
+func _open(path: String) -> ObjectData:
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(path)), OK)
 	return data
 
 
-func _controlled_track(data: NovaObjectData, local_ordinal: int) -> Dictionary:
+func _controlled_track(data: ObjectData, local_ordinal: int) -> Dictionary:
 	for anim_index in range(data.get_part_anim_count(0)):
 		var anim: Dictionary = data.get_part_anim_info(0, anim_index)
 		for track_name in TRACK_NAMES:
@@ -33,7 +33,7 @@ func _controlled_track(data: NovaObjectData, local_ordinal: int) -> Dictionary:
 	return {}
 
 
-func _pose(data: NovaObjectData, part_index: int,
+func _pose(data: ObjectData, part_index: int,
 		controls: Dictionary) -> Transform3D:
 	var poses: Dictionary = data.evaluate_panm(0, 0, controls)
 	assert_true(poses.has(part_index))
@@ -47,7 +47,7 @@ func _transform_delta(a: Transform3D, b: Transform3D) -> float:
 	return delta
 
 
-func _assert_cached_apply_matches(data: NovaObjectData,
+func _assert_cached_apply_matches(data: ObjectData,
 		controls: Dictionary) -> void:
 	var reference: Dictionary = data.evaluate_panm(0, 0, controls)
 	var nodes: Array = []

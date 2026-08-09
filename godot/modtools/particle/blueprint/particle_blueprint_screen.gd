@@ -217,19 +217,19 @@ func _refresh_presentations() -> void:
 			continue
 		match String(info.kind):
 			"effect":
-				var effect := info.obj as NovaParticleEffect
+				var effect := info.obj as ParticleEffect
 				node.title = "▣ %s" % effect.id
 				var label := node.get_child(0) as Label
 				if label != null:
 					label.text = "%d particle(s)" % effect.pdefs.size()
 			"particle":
-				var particle := info.obj as NovaParticleDef
+				var particle := info.obj as ParticleDef
 				node.title = "● %s" % particle.id
 				var label := node.get_child(0) as Label
 				if label != null:
 					label.text = _particle_summary(particle)
 			"table":
-				var table := info.obj as NovaParticleTable
+				var table := info.obj as ParticleTable
 				node.title = "∿ %s" % table.id
 				var spark := node.get_child(0) as Control
 				if spark != null:

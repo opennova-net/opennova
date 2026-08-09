@@ -21,7 +21,7 @@ signal expr_changed(text: String)
 const MAX_DEPTH := 4
 
 var _var_list: Array = []   # [{token:String, label:String}]
-var _mus = null             # NovaMusicScript for validation (may be null)
+var _mus = null             # MusicScript for validation (may be null)
 var _root: ExprCell = null
 var _valid_label: Label
 var _validate_timer: Timer

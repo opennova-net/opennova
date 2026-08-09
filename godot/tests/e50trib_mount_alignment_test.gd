@@ -1,6 +1,6 @@
 extends GutTest
 
-const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
+const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
 
 const MISSION := "00TRc.bms"
 const GUN_BMS_ID := 88
@@ -8,7 +8,7 @@ const GUN_ITEM_ID := 101881
 const GUN_GRAPHIC := "E50triB"
 
 
-func _mission_type_ids(mission: NovaMissionData) -> PackedInt32Array:
+func _mission_type_ids(mission: MissionData) -> PackedInt32Array:
 	# The S16 boot seeding: every mission entity type id, deduplicated. The
 	# native extractor walks authored addeweap children transitively and drops
 	# rows without runtime metadata itself.
@@ -29,11 +29,11 @@ func test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame() -> void:
 		pending("OPENNOVA_JO_DIR / retail JO PFFs are required for the 00TRc E50triB witness")
 		return
 
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.mount_runtime(install_dir, "", false, "jo"), OK)
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.open_from_resource_root(root, MISSION), OK)
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
 
 	var gun: Dictionary = {}
@@ -46,7 +46,7 @@ func test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame() -> void:
 	assert_eq(int(gun.get("item_id", 0)), GUN_ITEM_ID)
 	assert_eq(String(item_db.get_graphic(GUN_ITEM_ID)), GUN_GRAPHIC)
 
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert_eq(data.open_from_resource_root(root, GUN_GRAPHIC + ".3di"), OK)
 	# Build the expected frame from the retail USRP row directly. The production
 	# seat-spec/provider path below is only the system under test, never the oracle.
@@ -73,7 +73,7 @@ func test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame() -> void:
 
 	# S16: the seat/mount table is the native extraction over items.def rows +
 	# .3di userpoints — the asset root must be installed before the seed walk.
-	var sim := NovaSimulation.new()
+	var sim := Simulation.new()
 	sim.set_asset_root(root)
 	assert_true(sim.install_seat_specs_for_type_ids(
 			item_db, _mission_type_ids(mission)))
@@ -84,7 +84,7 @@ func test_00trc_e50trib_mounted_avatar_root_follows_live_usegun_frame() -> void:
 	sim.resolve_item_traits(item_db)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
 	assert_true(sim.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 1))
-	var weapons := NovaWeaponDatabase.new()
+	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load_from_resource_root(root, "weapon.def"), OK)
 	var personal_index := weapons.find_weapon("WPN_M4AUTO")
 	assert_gte(personal_index, 0)

@@ -56,13 +56,13 @@ func test_editor_state_shape_with_stub_shell() -> void:
 func test_describe_api_index() -> void:
 	var result: McpToolResult = await _call("describe_api")
 	var index: Dictionary = result.structured
-	assert_true((index["classes"] as Array).has("NovaMissionData"), "GDExtension classes indexed.")
+	assert_true((index["classes"] as Array).has("MissionData"), "GDExtension classes indexed.")
 	assert_true((index["topics"] as Array).has("coordinates"))
 	assert_false((index["topics"] as Array).has("ctx"), "the scripting topic is gone with the script surface")
 
 
 func test_describe_api_native_class() -> void:
-	var result: McpToolResult = await _call("describe_api", { "name": "NovaMissionData" })
+	var result: McpToolResult = await _call("describe_api", { "name": "MissionData" })
 	var described: Dictionary = result.structured
 	assert_eq(described["kind"], "native_class")
 	var method_names: Array = described["methods"].map(func(m): return m["name"])

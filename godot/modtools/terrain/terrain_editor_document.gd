@@ -6,32 +6,32 @@ extends RefCounted
 ## relays this to the shell toast. Headless holders can ignore it.
 signal error_reported(message: String)
 
-const HM_SIZE := NovaTerrainData.ATLAS_SIZE
+const HM_SIZE := TerrainData.ATLAS_SIZE
 const TerrainEditorSlots = preload("res://modtools/terrain/terrain_editor_slots.gd")
 const TerrainEditorSurfacePaint = preload("res://modtools/terrain/terrain_editor_surface_paint.gd")
 const TILEINFO_STATE_NONE := ""
 const TILEINFO_STATE_EXPLICIT := "explicit"
 const TILEINFO_STATE_NEW := "new"
 const TILEINFO_AUTHORED_FLAG_MASK := (
-	NovaTerrainTileInfo.FLAG_FLIP_X
-	| NovaTerrainTileInfo.FLAG_FLIP_Y
-	| NovaTerrainTileInfo.FLAG_ROTATE_90
-	| NovaTerrainTileInfo.FLAG_OUTLINE
+	TerrainTileInfo.FLAG_FLIP_X
+	| TerrainTileInfo.FLAG_FLIP_Y
+	| TerrainTileInfo.FLAG_ROTATE_90
+	| TerrainTileInfo.FLAG_OUTLINE
 )
 const TILEINFO_TRANSFORM_FLAG_MASK := (
-	NovaTerrainTileInfo.FLAG_FLIP_X
-	| NovaTerrainTileInfo.FLAG_FLIP_Y
-	| NovaTerrainTileInfo.FLAG_ROTATE_90
+	TerrainTileInfo.FLAG_FLIP_X
+	| TerrainTileInfo.FLAG_FLIP_Y
+	| TerrainTileInfo.FLAG_ROTATE_90
 )
 const TILEINFO_COMPOSABLE_FLAG_CANDIDATES := [
 	0,
-	NovaTerrainTileInfo.FLAG_FLIP_X,
-	NovaTerrainTileInfo.FLAG_FLIP_Y,
-	NovaTerrainTileInfo.FLAG_FLIP_X | NovaTerrainTileInfo.FLAG_FLIP_Y,
-	NovaTerrainTileInfo.FLAG_ROTATE_90,
-	NovaTerrainTileInfo.FLAG_FLIP_X | NovaTerrainTileInfo.FLAG_ROTATE_90,
-	NovaTerrainTileInfo.FLAG_FLIP_Y | NovaTerrainTileInfo.FLAG_ROTATE_90,
-	NovaTerrainTileInfo.FLAG_FLIP_X | NovaTerrainTileInfo.FLAG_FLIP_Y | NovaTerrainTileInfo.FLAG_ROTATE_90,
+	TerrainTileInfo.FLAG_FLIP_X,
+	TerrainTileInfo.FLAG_FLIP_Y,
+	TerrainTileInfo.FLAG_FLIP_X | TerrainTileInfo.FLAG_FLIP_Y,
+	TerrainTileInfo.FLAG_ROTATE_90,
+	TerrainTileInfo.FLAG_FLIP_X | TerrainTileInfo.FLAG_ROTATE_90,
+	TerrainTileInfo.FLAG_FLIP_Y | TerrainTileInfo.FLAG_ROTATE_90,
+	TerrainTileInfo.FLAG_FLIP_X | TerrainTileInfo.FLAG_FLIP_Y | TerrainTileInfo.FLAG_ROTATE_90,
 ]
 const TILEINFO_LOCAL_CORNERS := [
 	Vector2(0.0, 0.0),
@@ -41,7 +41,7 @@ const TILEINFO_LOCAL_CORNERS := [
 ]
 const FOLIAGE_CANONICAL_MATCHES := [254, 253, 252, 251]
 
-var data: NovaTerrainData
+var data: TerrainData
 var texture_files: Dictionary = {}
 var heightmap_image: Image
 var colormap_image: Image
@@ -54,15 +54,15 @@ var current_project_dir: String = ""
 var current_trn_path: String = ""
 
 var tileinfo_filename: String = ""
-var tileinfo_resource: NovaTerrainTileInfo
+var tileinfo_resource: TerrainTileInfo
 var tileinfo_source_path: String = ""
 var tileinfo_state: String = TILEINFO_STATE_NONE
 var tileinfo_selected_index: int = -1
 var tile_stamp_tile_index: int = 0
 var tile_stamp_flags: int = 0
-var surface_map: NovaTerrainSurfaceMap = null
-var foliage_defs: Array[NovaTerrainFoliageDef] = []
-var foliage_map: NovaTerrainFoliageMap
+var surface_map: TerrainSurfaceMap = null
+var foliage_defs: Array[TerrainFoliageDef] = []
+var foliage_map: TerrainFoliageMap
 var selected_foliage_def_index: int = -1
 
 
@@ -84,7 +84,7 @@ func reset_trn_metadata() -> void:
 
 
 func create_default_document(terrain_name: String, material: ShaderMaterial, sector_grid: PackedInt32Array) -> void:
-	data = NovaTerrainData.new()
+	data = TerrainData.new()
 	data.set_terrain_name(terrain_name)
 	data.set_sector_count(8)
 	data.set_sector_rows(8)
@@ -125,7 +125,7 @@ func load_tileinfo_from_dir(base_dir: String) -> void:
 	for candidate in _tileinfo_load_candidates(base_dir):
 		if not FileAccess.file_exists(candidate):
 			continue
-		var loaded := NovaTerrainTileInfo.new()
+		var loaded := TerrainTileInfo.new()
 		if loaded.load_from_path(candidate) != OK:
 			continue
 		tileinfo_resource = loaded
@@ -142,7 +142,7 @@ func load_tileinfo_from_dir(base_dir: String) -> void:
 func load_tileinfo(path: String) -> bool:
 	if path.is_empty():
 		return false
-	var loaded := NovaTerrainTileInfo.new()
+	var loaded := TerrainTileInfo.new()
 	if loaded.load_from_path(path) != OK:
 		return false
 	tileinfo_resource = loaded
@@ -155,7 +155,7 @@ func load_tileinfo(path: String) -> bool:
 
 
 func new_tileinfo() -> void:
-	tileinfo_resource = NovaTerrainTileInfo.new()
+	tileinfo_resource = TerrainTileInfo.new()
 	tileinfo_filename = ""
 	tileinfo_source_path = ""
 	tileinfo_state = TILEINFO_STATE_NEW
@@ -227,7 +227,7 @@ func get_tileinfo_entries() -> Array:
 	return tileinfo_resource.get_entries()
 
 
-func get_tileinfo_entry(index: int) -> NovaTerrainTileEntry:
+func get_tileinfo_entry(index: int) -> TerrainTileEntry:
 	if tileinfo_resource == null:
 		return null
 	return tileinfo_resource.get_entry(index)
@@ -313,7 +313,7 @@ func apply_stamp_to_selected_tileinfo_entry() -> bool:
 		return false
 
 	_mark_tileinfo_owned_for_edit()
-	var updated := NovaTerrainTileEntry.new()
+	var updated := TerrainTileEntry.new()
 	updated.set_x_fixed(current.get_x_fixed())
 	updated.set_z_fixed(current.get_z_fixed())
 	updated.set_tile_index(tile_stamp_tile_index)
@@ -385,7 +385,7 @@ func capture_tileinfo_history_state() -> Dictionary:
 	var entries: Array = []
 	if tileinfo_resource != null:
 		for value in tileinfo_resource.get_entries():
-			var entry := value as NovaTerrainTileEntry
+			var entry := value as TerrainTileEntry
 			if entry != null:
 				entries.append(entry.to_dictionary())
 			elif value is Dictionary:
@@ -412,7 +412,7 @@ func restore_tileinfo_history_state(state: Dictionary) -> void:
 
 	if bool(state.get("has_resource", false)):
 		if tileinfo_resource == null:
-			tileinfo_resource = NovaTerrainTileInfo.new()
+			tileinfo_resource = TerrainTileInfo.new()
 		tileinfo_resource.set_entries(state.get("entries", []))
 	else:
 		tileinfo_resource = null
@@ -471,13 +471,13 @@ func get_surface_palette_bytes() -> PackedByteArray:
 	return surface_map.get_palette_bytes()
 
 
-func get_foliage_def(index: int) -> NovaTerrainFoliageDef:
+func get_foliage_def(index: int) -> TerrainFoliageDef:
 	if index < 0 or index >= foliage_defs.size():
 		return null
 	return foliage_defs[index]
 
 
-func get_selected_foliage_def() -> NovaTerrainFoliageDef:
+func get_selected_foliage_def() -> TerrainFoliageDef:
 	return get_foliage_def(selected_foliage_def_index)
 
 
@@ -527,7 +527,7 @@ func restore_foliage_map_history_state(state: Dictionary) -> void:
 		foliage_map = null
 		return
 	if foliage_map == null:
-		foliage_map = NovaTerrainFoliageMap.new()
+		foliage_map = TerrainFoliageMap.new()
 	foliage_map.load_from_dictionary(state)
 
 
@@ -593,9 +593,9 @@ func normalize_foliage_state_for_editor() -> void:
 func add_foliage_def() -> bool:
 	if foliage_defs.size() >= FOLIAGE_CANONICAL_MATCHES.size():
 		return false
-	var def := NovaTerrainFoliageDef.new()
-	def.color_lower = NovaTerrainFoliageDef.COLOR_MATCH_GROUND
-	def.color_upper = NovaTerrainFoliageDef.COLOR_MATCH_GROUND
+	var def := TerrainFoliageDef.new()
+	def.color_lower = TerrainFoliageDef.COLOR_MATCH_GROUND
+	def.color_upper = TerrainFoliageDef.COLOR_MATCH_GROUND
 	foliage_defs.append(def)
 	_assign_canonical_foliage_matches()
 	selected_foliage_def_index = foliage_defs.size() - 1
@@ -628,7 +628,7 @@ func remove_foliage_def(index: int) -> bool:
 	return true
 
 
-func capture_trn_resource(resource: NovaTerrainData) -> void:
+func capture_trn_resource(resource: TerrainData) -> void:
 	if resource == null:
 		return
 	texture_files = {}
@@ -728,7 +728,7 @@ func reset_texture_slot(material: ShaderMaterial, slot_id: String) -> void:
 
 
 func save_texture_assets(material: ShaderMaterial, output_dir: String, terrain_name: String) -> Error:
-	# Source the editable buffers from NovaTerrainData (their owner); fall back to
+	# Source the editable buffers from TerrainData (their owner); fall back to
 	# the local refs if data is absent. They are the same Image objects.
 	var colormap_source := colormap_image
 	var blendmap_source := blendmap_image
@@ -737,10 +737,10 @@ func save_texture_assets(material: ShaderMaterial, output_dir: String, terrain_n
 			colormap_source = data.get_colormap_image()
 		if data.get_blendmap_image() != null:
 			blendmap_source = data.get_blendmap_image()
-	var err := NovaTerrainBuilder.save_image_tga(colormap_source, output_dir + "/" + terrain_name + "_c.tga")
+	var err := TerrainBuilder.save_image_tga(colormap_source, output_dir + "/" + terrain_name + "_c.tga")
 	if err != OK:
 		return err
-	err = NovaTerrainBuilder.save_image_tga(blendmap_source, output_dir + "/" + terrain_name + "_d1.tga")
+	err = TerrainBuilder.save_image_tga(blendmap_source, output_dir + "/" + terrain_name + "_d1.tga")
 	if err != OK:
 		return err
 	normalize_foliage_state_for_editor()
@@ -765,9 +765,9 @@ func save_texture_assets(material: ShaderMaterial, output_dir: String, terrain_n
 					texture_files.erase(String(slot_id))
 					continue
 			if _tga_bpp_for_export(String(slot_id), filename) == 24:
-				err = NovaTerrainBuilder.save_image_tga24(image, output_path)
+				err = TerrainBuilder.save_image_tga24(image, output_path)
 			else:
-				err = NovaTerrainBuilder.save_image_tga(image, output_path)
+				err = TerrainBuilder.save_image_tga(image, output_path)
 		if err != OK:
 			return err
 		texture_files[String(slot_id)] = filename
@@ -817,7 +817,7 @@ func build_heightmap_from_raw16(raw_bytes: PackedByteArray) -> Image:
 func set_heightmap_image(image: Image) -> void:
 	heightmap_image = image
 	if data != null:
-		# NovaTerrainData owns the editable depth: hand it the same Image so brush
+		# TerrainData owns the editable depth: hand it the same Image so brush
 		# edits (which mutate this object in place) keep get_depth_raw16 current.
 		data.set_heightmap_image(image)
 
@@ -827,7 +827,7 @@ func set_colormap_image(material: ShaderMaterial, image: Image, sync_data: bool 
 	colormap_tex = ImageTexture.create_from_image(colormap_image)
 	material.set_shader_parameter("u_colormap", colormap_tex)
 	if sync_data and data:
-		# NovaTerrainData owns the editable buffer (same Image object the brush
+		# TerrainData owns the editable buffer (same Image object the brush
 		# mutates) plus the derived display/runtime Texture2D.
 		data.set_colormap_image(colormap_image)
 		data.set_colormap(colormap_tex)
@@ -852,7 +852,7 @@ func cdep_ranges_valid(image: Image) -> bool:
 	# CDEP's 4-bit bits_per_delta field caps each 256-pixel horizontal block at
 	# a 32767-raw-unit range. The brush enforces this live; this bake-time guard
 	# makes a corrupt CPT impossible regardless of how the heightmap got into
-	# this state. The raw16 range scan lives in C++ (NovaTerrainData ->
+	# this state. The raw16 range scan lives in C++ (TerrainData ->
 	# engine/runtime/terrain/cdep_constraint); this stays GDScript as export policy.
 	if image == null:
 		return false
@@ -901,7 +901,7 @@ func _read_tga_bpp(path: String) -> int:
 
 func _resolve_existing_file(base_dir: String, filename: String) -> String:
 	# Shared case-insensitive resolver — same primitive textures/models use.
-	return NovaPaths.resolve_file(base_dir, filename)
+	return Paths.resolve_file(base_dir, filename)
 
 
 func _clear_tileinfo_resource() -> void:
@@ -940,15 +940,15 @@ func _resolve_tileinfo_replace_index(cell_x: int, cell_z: int, force_new: bool =
 	return int(indices[indices.size() - 1])
 
 
-func _make_tile_stamp_entry(cell_x: int, cell_z: int) -> NovaTerrainTileEntry:
-	var entry := NovaTerrainTileEntry.new()
+func _make_tile_stamp_entry(cell_x: int, cell_z: int) -> TerrainTileEntry:
+	var entry := TerrainTileEntry.new()
 	entry.set_cell(cell_x, cell_z)
 	entry.set_tile_index(tile_stamp_tile_index)
 	entry.set_flags(tile_stamp_flags)
 	return entry
 
 
-func _tile_entries_equal(a: NovaTerrainTileEntry, b: NovaTerrainTileEntry) -> bool:
+func _tile_entries_equal(a: TerrainTileEntry, b: TerrainTileEntry) -> bool:
 	if a == null or b == null:
 		return false
 	return (
@@ -977,7 +977,7 @@ func _update_selected_tileinfo_entry(tile_index: int, flags: int) -> bool:
 		return false
 
 	_mark_tileinfo_owned_for_edit()
-	var updated := NovaTerrainTileEntry.new()
+	var updated := TerrainTileEntry.new()
 	updated.set_x_fixed(current.get_x_fixed())
 	updated.set_z_fixed(current.get_z_fixed())
 	updated.set_tile_index(normalized_tile_index)
@@ -993,7 +993,7 @@ func _compose_tileinfo_flags(flags: int, operation: String) -> int:
 	var base_flags := normalized_flags & TILEINFO_TRANSFORM_FLAG_MASK
 	var target_uvs: Array[Vector2] = []
 	for corner in TILEINFO_LOCAL_CORNERS:
-		target_uvs.append(NovaTerrainTileInfo.transform_local_uv(_apply_tileinfo_local_operation(corner, operation), base_flags))
+		target_uvs.append(TerrainTileInfo.transform_local_uv(_apply_tileinfo_local_operation(corner, operation), base_flags))
 
 	for candidate in TILEINFO_COMPOSABLE_FLAG_CANDIDATES:
 		if _tileinfo_uvs_match(target_uvs, candidate):
@@ -1003,7 +1003,7 @@ func _compose_tileinfo_flags(flags: int, operation: String) -> int:
 
 func _tileinfo_uvs_match(target_uvs: Array[Vector2], candidate_flags: int) -> bool:
 	for i in TILEINFO_LOCAL_CORNERS.size():
-		var candidate_uv: Vector2 = NovaTerrainTileInfo.transform_local_uv(TILEINFO_LOCAL_CORNERS[i], candidate_flags)
+		var candidate_uv: Vector2 = TerrainTileInfo.transform_local_uv(TILEINFO_LOCAL_CORNERS[i], candidate_flags)
 		if candidate_uv.distance_squared_to(target_uvs[i]) > 0.0001:
 			return false
 	return true
@@ -1046,8 +1046,8 @@ func _tileinfo_load_candidates(base_dir: String) -> PackedStringArray:
 	return candidates
 
 
-func _clone_foliage_defs(values: Array) -> Array[NovaTerrainFoliageDef]:
-	var out: Array[NovaTerrainFoliageDef] = []
+func _clone_foliage_defs(values: Array) -> Array[TerrainFoliageDef]:
+	var out: Array[TerrainFoliageDef] = []
 	for value in values:
 		var def := _clone_foliage_def(value)
 		if def != null:
@@ -1055,10 +1055,10 @@ func _clone_foliage_defs(values: Array) -> Array[NovaTerrainFoliageDef]:
 	return out
 
 
-func _clone_foliage_def(value: Variant) -> NovaTerrainFoliageDef:
-	if value is NovaTerrainFoliageDef:
-		var source := value as NovaTerrainFoliageDef
-		var copy := NovaTerrainFoliageDef.new()
+func _clone_foliage_def(value: Variant) -> TerrainFoliageDef:
+	if value is TerrainFoliageDef:
+		var source := value as TerrainFoliageDef
+		var copy := TerrainFoliageDef.new()
 		copy.graphic = source.graphic
 		copy.color_lower = source.color_lower
 		copy.color_upper = source.color_upper
@@ -1067,33 +1067,33 @@ func _clone_foliage_def(value: Variant) -> NovaTerrainFoliageDef:
 		return copy
 	if value is Dictionary:
 		var dict := value as Dictionary
-		var copy := NovaTerrainFoliageDef.new()
+		var copy := TerrainFoliageDef.new()
 		copy.graphic = String(dict.get("graphic", ""))
-		copy.color_lower = int(dict.get("color_lower", NovaTerrainFoliageDef.COLOR_MATCH_GROUND))
-		copy.color_upper = int(dict.get("color_upper", NovaTerrainFoliageDef.COLOR_MATCH_GROUND))
+		copy.color_lower = int(dict.get("color_lower", TerrainFoliageDef.COLOR_MATCH_GROUND))
+		copy.color_upper = int(dict.get("color_upper", TerrainFoliageDef.COLOR_MATCH_GROUND))
 		copy.match = int(dict.get("match", -1))
 		var attrib_flags := int(dict.get("attrib_flags", 0))
 		if bool(dict.get("shadow", false)):
-			attrib_flags |= NovaTerrainFoliageDef.ATTRIB_SHADOW
+			attrib_flags |= TerrainFoliageDef.ATTRIB_SHADOW
 		if bool(dict.get("force_on", false)):
-			attrib_flags |= NovaTerrainFoliageDef.ATTRIB_FORCE_ON
+			attrib_flags |= TerrainFoliageDef.ATTRIB_FORCE_ON
 		copy.attrib_flags = attrib_flags
 		return copy
 	return null
 
 
-func _clone_foliage_map(source: NovaTerrainFoliageMap) -> NovaTerrainFoliageMap:
+func _clone_foliage_map(source: TerrainFoliageMap) -> TerrainFoliageMap:
 	if source == null:
 		return null
-	var copy := NovaTerrainFoliageMap.new()
+	var copy := TerrainFoliageMap.new()
 	copy.load_from_dictionary(source.to_dictionary())
 	return copy
 
 
-func _surface_map_from_slot(state: Dictionary) -> NovaTerrainSurfaceMap:
+func _surface_map_from_slot(state: Dictionary) -> TerrainSurfaceMap:
 	if state.is_empty():
 		return null
-	var map := NovaTerrainSurfaceMap.new()
+	var map := TerrainSurfaceMap.new()
 	map.load_from_dictionary(state)
 	return map
 

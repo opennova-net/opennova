@@ -8,7 +8,7 @@ extends SceneTree
 #   NOVA_RESOURCE_DIR=<loose JOX> godot --headless --path godot \
 #     -s res://tests/00trg_rock_collision_probe.gd
 
-const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
+const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
 
 const MISSION := "00TRg.bms"
 const SPAWN_BMS_ID := 1197
@@ -30,7 +30,7 @@ func _run() -> void:
 		_fail("set NOVA_RESOURCE_DIR to a loose or mounted retail JOX corpus")
 		return
 
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	var mount_err := int(root.mount_runtime(resource_dir, "", false, "jo"))
 	if mount_err != OK:
 		# The extracted JOX corpus is a loose directory, not a retail PFF install.
@@ -39,11 +39,11 @@ func _run() -> void:
 			_fail("resource root failed (%d): %s" % [mount_err, root.get_last_error()])
 			return
 
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	if mission.open_from_resource_root(root, MISSION) != OK:
 		_fail("cannot open %s" % MISSION)
 		return
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	if item_db.load_from_resource_root(root, "items.def") != OK:
 		_fail("cannot load items.def: %s" % item_db.get_last_error())
 		return
@@ -83,10 +83,10 @@ func _run() -> void:
 		print("[rock] diagnostic rotation mode=%s authored=%s probe=%s" % [
 			rotation_mode, str(original_rotation), str(probe_rotation)])
 
-	var sim := NovaSimulation.new()
+	var sim := Simulation.new()
 	if not sim.load_from_mission_data(mission):
 		sim.free()
-		_fail("NovaSimulation rejected %s" % MISSION)
+		_fail("Simulation rejected %s" % MISSION)
 		return
 	var spawn_status := int(sim.spawn_local_player_at_start())
 	if spawn_status != 1:
@@ -204,7 +204,7 @@ func _run() -> void:
 	quit(0)
 
 
-func _fire_one(sim: NovaSimulation, origin: Vector3, direction: Vector3,
+func _fire_one(sim: Simulation, origin: Vector3, direction: Vector3,
 		target_handle: int) -> Dictionary:
 	var before: Array = sim.get_round_debug().get("events", [])
 	var slot := int(sim.debug_spawn_round(origin, direction, AMMO))
@@ -242,7 +242,7 @@ func _target_hitbox(debug: Dictionary, target_origin: Vector3) -> Dictionary:
 	return best if best_dist < 0.05 else {}
 
 
-func _visual_world_aabb(data: NovaObjectData, xform: Transform3D) -> AABB:
+func _visual_world_aabb(data: ObjectData, xform: Transform3D) -> AABB:
 	var local := AABB()
 	var first := true
 	if data != null:
@@ -263,7 +263,7 @@ func _visual_world_aabb(data: NovaObjectData, xform: Transform3D) -> AABB:
 	return _points_aabb(world_points)
 
 
-func _collision_to_render_vertex_error(data: NovaObjectData, xform: Transform3D,
+func _collision_to_render_vertex_error(data: ObjectData, xform: Transform3D,
 		tris: PackedVector3Array) -> Dictionary:
 	var render_points := PackedVector3Array()
 	if data != null:
@@ -308,7 +308,7 @@ func _collision_to_render_vertex_error(data: NovaObjectData, xform: Transform3D,
 # silhouette extremes. Each chosen direction is guaranteed to cross authored
 # visible geometry; a CFAC miss there is a concrete render-vs-bullet hole, not
 # an AABB approximation artifact.
-func _visual_silhouette_rays(data: NovaObjectData, xform: Transform3D,
+func _visual_silhouette_rays(data: ObjectData, xform: Transform3D,
 		eye: Vector3, forward: Vector3) -> Dictionary:
 	var right := forward.cross(Vector3.UP).normalized()
 	var best := {}

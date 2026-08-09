@@ -22,18 +22,18 @@ extends RefCounted
 # Reference via preload(), not class_name, so it resolves without an editor
 # re-import (same convention as mission_object_placer.gd).
 
-const NovaEnvironmentScript = preload("res://adapter/environment/nova_environment.gd")
-const NovaSkyScript = preload("res://adapter/environment/nova_sky.gd")
-const NovaWaterScript = preload("res://adapter/environment/nova_water.gd")
-const NovaWeatherScript = preload("res://adapter/environment/nova_weather.gd")
-const HHMM_DAY := NovaEnvironment.HHMM_DAY
+const NovaEnvironmentScript = preload("res://src/environment/nova_environment.gd")
+const NovaSkyScript = preload("res://src/environment/nova_sky.gd")
+const NovaWaterScript = preload("res://src/environment/nova_water.gd")
+const NovaWeatherScript = preload("res://src/environment/nova_weather.gd")
+const HHMM_DAY := MissionEnvironment.HHMM_DAY
 
 # The bound app-owned environment DOCUMENT (EnvironmentEditor); null until
 # bind_environment_editor. The owner keeps its own handle for shell consumers.
 var environment_editor
 
 var _world_root: Node3D
-var _environment_node: NovaEnvironment
+var _environment_node: MissionEnvironment
 var _clear_color_node: WorldEnvironment
 var _sky_node: Node3D
 var _weather_node: Node3D
@@ -88,7 +88,7 @@ func init_environment_preview() -> void:
 	_sky_node.environment_path = NodePath("../EditorEnvironment")
 	_sky_node.frame_clear_environment = _clear_color_node.environment
 	# The weather node owns the cloud-scroll core; created just below —
-	# NovaSky resolves the path lazily in _process, so order is safe.
+	# SkyDome resolves the path lazily in _process, so order is safe.
 	_sky_node.weather_path = NodePath("../EditorWeather")
 	_world_root.add_child(_sky_node)
 
@@ -106,7 +106,7 @@ func init_water_plane() -> void:
 	if _water_node != null:
 		return
 	# Runtime parity (deferred from PR #24): the editor preview renders the same
-	# NovaWater (water.gdshader, env-derived lit color) the runtime uses, instead
+	# Water (water.gdshader, env-derived lit color) the runtime uses, instead
 	# of a bespoke plane with a hardcoded color. Height stays document-driven via
 	# the override hook.
 	_water_node = Node3D.new()
@@ -180,7 +180,7 @@ func apply_environment_to_preview() -> void:
 	sync_environment_to_preview(true)
 	if _sky_node and _sky_node.has_method("sync_frame_clear_color"):
 		_sky_node.call(&"sync_frame_clear_color")
-	# Water color/height/murk now come from the NovaWater node (env-driven),
+	# Water color/height/murk now come from the Water node (env-driven),
 	# matching the runtime; nothing hardcoded here.
 
 
@@ -198,13 +198,13 @@ func sync_environment_to_preview(force: bool = false) -> void:
 			and generation == _terrain_env_generation:
 		return
 	if material:
-		# Same env -> terrain-uniform push the runtime uses (NovaEnvironment owns it).
+		# Same env -> terrain-uniform push the runtime uses (MissionEnvironment owns it).
 		_environment_node.apply_terrain_uniforms(material)
 	_terrain_material_instance_id = material_id
 	_terrain_env_generation = generation
 
 
-func get_environment_node() -> NovaEnvironment:
+func get_environment_node() -> MissionEnvironment:
 	return _environment_node
 
 

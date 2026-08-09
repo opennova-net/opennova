@@ -1,6 +1,6 @@
 extends GutTest
 
-# M9.5 gate: NovaMnuTable builds the column template (headers, widths, justify,
+# M9.5 gate: MnuTable builds the column template (headers, widths, justify,
 # bitmap columns, value->image SUBST) and the shell populates rows at runtime. Covers
 # row binding, single/multi selection, header-click sort, the SUBST image cell, and
 # edit_mode inertness.
@@ -8,13 +8,13 @@ extends GutTest
 const FIXTURE := "res://../fixtures/mnu/all_widgets.mnu"
 
 
-func _load_doc() -> NovaMnuDocument:
-	var doc := NovaMnuDocument.new()
+func _load_doc() -> MnuDocument:
+	var doc := MnuDocument.new()
 	doc.load_from_bytes(FileAccess.get_file_as_bytes(FIXTURE))
 	return doc
 
 
-func _find_widget(doc: NovaMnuDocument, id: int, wanted: String) -> int:
+func _find_widget(doc: MnuDocument, id: int, wanted: String) -> int:
 	if doc.get_widget_name(id) == wanted:
 		return id
 	for child in doc.get_child_ids(id):
@@ -24,7 +24,7 @@ func _find_widget(doc: NovaMnuDocument, id: int, wanted: String) -> int:
 	return -1
 
 
-func _widget_named(doc: NovaMnuDocument, wanted: String) -> int:
+func _widget_named(doc: MnuDocument, wanted: String) -> int:
 	for screen_id in doc.get_screen_ids():
 		var found := _find_widget(doc, doc.get_screen_root_id(screen_id), wanted)
 		if found >= 0:
@@ -32,8 +32,8 @@ func _widget_named(doc: NovaMnuDocument, wanted: String) -> int:
 	return -1
 
 
-func _build_menu(edit_mode: bool = false, doc: NovaMnuDocument = null) -> NovaMnuMenu:
-	var menu := NovaMnuMenu.new()
+func _build_menu(edit_mode: bool = false, doc: MnuDocument = null) -> MnuMenu:
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
 	menu.set_edit_mode(edit_mode)
@@ -41,8 +41,8 @@ func _build_menu(edit_mode: bool = false, doc: NovaMnuDocument = null) -> NovaMn
 	return menu
 
 
-func _table(menu: NovaMnuMenu) -> NovaMnuTable:
-	return menu.find_child("MissionTable", true, false) as NovaMnuTable
+func _table(menu: MnuMenu) -> MnuTable:
+	return menu.find_child("MissionTable", true, false) as MnuTable
 
 
 func _write_png(path: String, w: int, h: int, c: Color) -> void:
@@ -55,7 +55,7 @@ func test_table_builds_columns_and_headers() -> void:
 	var menu := _build_menu()
 	var table := _table(menu)
 	assert_not_null(table, "MissionTable built")
-	assert_true(table is Control, "NovaMnuTable is a Control")
+	assert_true(table is Control, "MnuTable is a Control")
 	assert_eq(table.get_column_count(), 3, "three columns from COLUMN count")
 	var h0 := table.find_child("Header0", true, false)
 	var h1 := table.find_child("Header1", true, false)
@@ -244,12 +244,12 @@ func test_table_subst_value_to_image() -> void:
 	var dir := OS.get_temp_dir().path_join("mnu_m9_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(dir)
 	_write_png(dir.path_join("ping_lan.png"), 8, 8, Color(0, 1, 0, 1))
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	if root.set_root_dir(dir) != OK:
 		pass_test("temp resource root unavailable: %s" % root.get_last_error())
 		return
 
-	var menu := NovaMnuMenu.new()
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
 	menu.set_resource_root(root)
@@ -282,8 +282,8 @@ func test_table_add_rows_bulk() -> void:
 # class grouping, and the player-facing visibility filter. [orig:
 # UI_PopulateControlMappingList @ 0x55c0c0; aAbsoluteTurnLe @ 0x8159cb]
 func test_controls_model_keyboard_defaults() -> void:
-	var model := NovaControlsModel.new()
-	var rows: Array = model.get_rows(NovaControlsModel.DEVICE_KEYBOARD)
+	var model := ControlsModel.new()
+	var rows: Array = model.get_rows(ControlsModel.DEVICE_KEYBOARD)
 	assert_gt(rows.size(), 40, "keyboard catalog populated")
 	var found_forward := false
 	for r in rows:

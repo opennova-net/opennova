@@ -1,11 +1,11 @@
 extends GutTest
 
-# LocalPlayerPresenter over a REAL GameWorld + NovaSimulation (the ADR 0033 typed
-# boundary: setup(world: GameWorld, camera: Camera3D, fly_camera: NovaFlyCamera)).
+# LocalPlayerPresenter over a REAL GameWorld + Simulation (the ADR 0033 typed
+# boundary: setup(world: GameWorld, camera: Camera3D, fly_camera: FlyCamera)).
 # Every test stages the minimal mission fixture, loads mnml.bms through the packaged
 # world scene (playable auto-spawn: the ADR 0011 listen-server host player), and
 # observes behavior through the sim's own getters, the PlayerLocalView snapshot,
-# real NovaObjectModel observables, and the real terrain raycast.
+# real ObjectModel observables, and the real terrain raycast.
 #
 # Old fake-driven contracts that could not be honestly observed on real components
 # were dropped (not faked) — the fixture root has no .ptl effect catalog, no
@@ -31,7 +31,7 @@ extends GutTest
 # - aim_range on a world with NO terrain object: unreachable on a loaded real
 #   world; the raycast-miss -> 1000 fallback covers the same readout behavior.
 
-const MissionRuntime := preload("res://adapter/world/mission_runtime.gd")
+const MissionRuntime := preload("res://src/world/mission_runtime.gd")
 
 const TEST_ROOT := "local_player_presenter_test"
 const TICK := MissionRuntime.TICK_DT
@@ -139,11 +139,11 @@ anim_wpn_switchrank\t"idle.bad"
 ## swaps the mission onto the Dvxi5 CPT heightfield so the ported terrain raycast
 ## has a real surface to measure.
 func _load_player_world(baked_terrain: bool = false) -> GameWorld:
-	var packed := load("res://adapter/world/game_world.tscn") as PackedScene
+	var packed := load("res://src/world/game_world.tscn") as PackedScene
 	assert_not_null(packed, "the packaged world scene loads")
 	var world := packed.instantiate() as GameWorld
 	add_child_autofree(world)
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(_shared_root), OK)
 	world.set_resource_root(root)
 	world.set_local_player_spawn_loadout({
@@ -151,7 +151,7 @@ func _load_player_world(baked_terrain: bool = false) -> GameWorld:
 		"accessory": "WPN_SATCHEL_CHARGE",
 		"player_class": 8,
 	})
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
 	if baked_terrain:
 		assert_true(mission.set_header_string("terrain", "Dvxi5"))
@@ -164,8 +164,8 @@ func _load_player_world(baked_terrain: bool = false) -> GameWorld:
 
 func _bare_world() -> GameWorld:
 	var world := GameWorld.new()
-	var terrain := NovaTerrain.new()
-	terrain.name = "NovaTerrain"
+	var terrain := Terrain.new()
+	terrain.name = "Terrain"
 	world.add_child(terrain)
 	return world
 
@@ -233,8 +233,8 @@ func _visual_instances(root: Node) -> Array:
 	return out
 
 
-func _local_avatar(world: GameWorld) -> NovaObjectModel:
-	return world.get_node_or_null("PlayerAvatar_CharModel") as NovaObjectModel
+func _local_avatar(world: GameWorld) -> ObjectModel:
+	return world.get_node_or_null("PlayerAvatar_CharModel") as ObjectModel
 
 
 func _remove_dir_recursive(path: String) -> void:
@@ -316,7 +316,7 @@ func test_input_source_movement_reaches_the_motor_and_neutralizes_when_inactive(
 
 func test_mouse_motion_forwards_raw_pixels_to_the_sim_pipeline() -> void:
 	# The presenter no longer scales or accumulates look: raw pixel deltas go to
-	# NovaSimulation.add_local_player_look and the witnessed integer pipeline —
+	# Simulation.add_local_player_look and the witnessed integer pipeline —
 	# sens<<11, scoped zoom reduction, the pitch clamps — folds them in at the
 	# tick [orig: Input_ProcessMouseAxisBindings @0x499680].
 	var world := _load_player_world()
@@ -438,7 +438,7 @@ func test_camera_stamps_the_sim_composed_pose_and_policy_fov() -> void:
 	assert_almost_eq(view.fov_h_deg, 80.0, 0.001, "the unscoped policy fov is 80")
 	var size := camera.get_viewport().get_visible_rect().size
 	assert_almost_eq(camera.fov,
-			NovaSimulation.fov_vertical_from_horizontal(view.fov_h_deg, size.x / size.y),
+			Simulation.fov_vertical_from_horizontal(view.fov_h_deg, size.x / size.y),
 			0.001, "the camera fov is the sim's policy value through the shared conversion")
 
 	# Pitch rides the pose 1:1: look down, then compare the stamped forward.
@@ -485,20 +485,20 @@ func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:
 	await get_tree().process_frame  # setup() mounts the FP pass deferred
 	_frame(world, presenter, camera, 2)
 
-	assert_eq(camera.cull_mask & NovaWater.VISUAL_LAYER_FP_BODY_SHADOW_ONLY, 0,
+	assert_eq(camera.cull_mask & Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY, 0,
 			"setup() masks the FP body layer off the player camera")
 	# The FP viewmodel renders through the dedicated renderfov pass, never the
 	# player camera [orig: Player_RenderFirstPersonViewModel @0x4ded60 — own
 	# projection + flush].
-	assert_eq(camera.cull_mask & NovaWater.VISUAL_LAYER_VIEWMODEL, 0,
+	assert_eq(camera.cull_mask & Water.VISUAL_LAYER_VIEWMODEL, 0,
 			"setup() masks the viewmodel layer off the player camera (the FP pass draws it)")
-	assert_eq(camera.cull_mask & NovaWater.VISUAL_LAYER_SHADOW_CASTER_MASK, 0,
+	assert_eq(camera.cull_mask & Water.VISUAL_LAYER_SHADOW_CASTER_MASK, 0,
 			"caster marker layers cannot make the hidden FP body visible to the player")
 	var rig: PlayerViewmodelRig = presenter.viewmodel_rig()
 	var pass_cam: Camera3D = rig.get("_vm_camera")
 	assert_not_null(pass_cam, "setup() builds the FP render pass camera")
 	if pass_cam != null:
-		assert_eq(pass_cam.cull_mask, NovaWater.VISUAL_LAYER_VIEWMODEL,
+		assert_eq(pass_cam.cull_mask, Water.VISUAL_LAYER_VIEWMODEL,
 				"the pass camera draws ONLY the viewmodel layer")
 		assert_almost_eq(pass_cam.near, 0.05, 0.0001,
 				"the pass near plane is the witnessed 0.05 swap [orig: @0x4dee29]")
@@ -520,19 +520,19 @@ func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:
 	assert_gt(body_instances.size(), 0, "the real body carries visual instances")
 	assert_gt(vm_instances.size(), 0, "the real viewmodel carries visual instances")
 	for vi in body_instances:
-		assert_eq(vi.layers & ~NovaWater.VISUAL_LAYER_SHADOW_CASTER_MASK,
-				NovaWater.VISUAL_LAYER_FP_BODY_SHADOW_ONLY,
+		assert_eq(vi.layers & ~Water.VISUAL_LAYER_SHADOW_CASTER_MASK,
+				Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY,
 				"first person: the body's visual instances ride the shadow-only FP layer")
 	for vi in vm_instances:
-		assert_eq(vi.layers & ~NovaWater.VISUAL_LAYER_SHADOW_CASTER_MASK,
-				NovaWater.VISUAL_LAYER_VIEWMODEL,
+		assert_eq(vi.layers & ~Water.VISUAL_LAYER_SHADOW_CASTER_MASK,
+				Water.VISUAL_LAYER_VIEWMODEL,
 				"the viewmodel's visual instances ride the mirror-excluded viewmodel layer")
 
 	presenter.set_third_person(true)
 	_frame(world, presenter, camera, 1)
 	for vi in _visual_instances(avatar):
-		assert_eq(vi.layers & ~NovaWater.VISUAL_LAYER_SHADOW_CASTER_MASK,
-				NovaWater.VISUAL_LAYER_WORLD,
+		assert_eq(vi.layers & ~Water.VISUAL_LAYER_SHADOW_CASTER_MASK,
+				Water.VISUAL_LAYER_WORLD,
 				"third person: the body returns to the normal world layer")
 	assert_true(avatar.visible, "the body shows in third person")
 	assert_false(presenter.viewmodel().visible,
@@ -600,7 +600,7 @@ func test_shared_presenter_teardown_releases_captured_mouse() -> void:
 
 # --- binocular rangefinder ----------------------------------------------------
 # The range readout traces the ported retail terrain raycast
-# (NovaTerrainData.raycast_terrain -> engine/runtime/terrain_query
+# (TerrainData.raycast_terrain -> engine/runtime/terrain_query
 # [orig: Terrain_RaycastHeightmapHiRes_0 @0x60e710]), measured from entity
 # Position to the collision/far endpoint and clamped to the 1..1000 display.
 
@@ -670,7 +670,7 @@ func test_viewmodel_ctrl_registers_follow_visibility_and_team() -> void:
 	var weapon_view: PlayerWeaponView = world.local_player_weapon_view()
 	assert_not_null(weapon_view, "the installed M4 serves a live FSM view")
 	for part_v in presenter.vm_parts():
-		var part := part_v as NovaObjectModel
+		var part := part_v as ObjectModel
 		var ctrl: Dictionary = part.get_ctrl_values()
 		assert_eq(int(ctrl.get("TEX_TEAM", -999)), int(sim.get_local_player_team()),
 				"the visible FP submit stores the sim's team byte")
@@ -680,12 +680,12 @@ func test_viewmodel_ctrl_registers_follow_visibility_and_team() -> void:
 	presenter.set_third_person(true)
 	_frame(world, presenter, camera, 1)
 	for part_v in presenter.vm_parts():
-		assert_true((part_v as NovaObjectModel).get_ctrl_values().is_empty(),
+		assert_true((part_v as ObjectModel).get_ctrl_values().is_empty(),
 				"a third-person frame does not execute any FP CTRL writer")
 
 	presenter.set_third_person(false)
 	_frame(world, presenter, camera, 1)
-	var part0 := presenter.vm_parts()[0] as NovaObjectModel
+	var part0 := presenter.vm_parts()[0] as ObjectModel
 	assert_eq(int(part0.get_ctrl_values().get("TEX_TEAM", -999)),
 			int(sim.get_local_player_team()),
 			"returning to first person re-runs the CTRL writers")
@@ -715,7 +715,7 @@ func test_fire_event_plays_the_fsm_clip_on_both_real_viewmodel_parts() -> void:
 	_frame(world, presenter, camera, 2)
 	assert_eq(presenter.vm_parts().size(), 2)
 	for part_v in presenter.vm_parts():
-		assert_eq(String((part_v as NovaObjectModel).get_active_body_clip()),
+		assert_eq(String((part_v as ObjectModel).get_active_body_clip()),
 				"anim_wpn_idle", "the mounted weapon idles in its FP holding pose")
 	var serial_before := int(world.local_player_weapon_view().play_serial)
 
@@ -729,14 +729,14 @@ func test_fire_event_plays_the_fsm_clip_on_both_real_viewmodel_parts() -> void:
 	assert_eq(String(world.local_player_weapon_view().anim_key), "anim_wpn_fire",
 			"the real FSM entered its fire action")
 	for part_v in presenter.vm_parts():
-		var part := part_v as NovaObjectModel
+		var part := part_v as ObjectModel
 		assert_eq(String(part.get_active_body_clip()), "anim_wpn_fire",
 				"the fire event's clip starts on both real parts")
 		assert_almost_eq(part.get_animation_time(), 0.0, 0.00001,
 				"a current-tick event starts at its production-tick pose")
 
 	# Hold the trigger: the fire action finishes and chains into recoil.
-	var part0 := presenter.vm_parts()[0] as NovaObjectModel
+	var part0 := presenter.vm_parts()[0] as ObjectModel
 	var reached_recoil := false
 	for i in 30:
 		presenter.before_world_tick(TICK, false, true)

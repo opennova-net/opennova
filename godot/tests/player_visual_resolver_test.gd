@@ -1,10 +1,10 @@
 extends GutTest
 
-const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
+const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
 
 
 func test_runtime_player_type_resolves_to_us01_visual_item() -> void:
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/godot/dvxi5")), OK)
 	var placer := MissionObjectPlacer.new(root)
 	var db := placer.get_item_db()
@@ -27,7 +27,7 @@ func test_raw_runtime_item_type_resolves_to_full_items_def_id() -> void:
 			+ "  graphic M1trret\n"
 			+ "end\n")
 	file.close()
-	var db := NovaItemDatabase.new()
+	var db := ItemDatabase.new()
 	assert_eq(db.load(tmp), OK)
 	var placer := MissionObjectPlacer.new(null, db)
 	assert_eq(placer.resolve_player_visual_item_id(166), 100166)

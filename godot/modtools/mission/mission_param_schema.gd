@@ -7,12 +7,12 @@ extends RefCounted
 
 enum Kind { RAW, GROUP, ENTITY, ZONE, EVENT, WAYPOINT, BOOL, ENUM, FIXED_SECONDS }
 
-static var _mission_schema_source: NovaMissionData
+static var _mission_schema_source: MissionData
 
 
-static func _source() -> NovaMissionData:
+static func _source() -> MissionData:
 	if _mission_schema_source == null:
-		_mission_schema_source = NovaMissionData.new()
+		_mission_schema_source = MissionData.new()
 	return _mission_schema_source
 
 

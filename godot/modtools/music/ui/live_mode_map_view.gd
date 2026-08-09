@@ -402,7 +402,7 @@ func _track_name(names: Array, track: int) -> String:
 func _preview_track(track: int) -> void:
 	if _lm._preview == null or _lm._document == null or not _lm._document.bank_loaded():
 		return
-	var stream: NovaSbfAudioStream = _lm._document.bank.get_stream_at(track)
+	var stream: SbfAudioStream = _lm._document.bank.get_stream_at(track)
 	if stream != null:
 		_lm._preview.play_stream(stream)
 

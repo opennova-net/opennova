@@ -36,9 +36,9 @@ none of it (verified pre-move: zero terrain-family includes outside
    wac/mission/netsim/npruntime/novaworld now reach terrain data only
    through the query leaf, never the format stack.
 4. **The provider stays `godot/engine`** (unchanged by this slice):
-   `NovaTerrainData` builds the POD from its own cpt/trn (the
+   `TerrainData` builds the POD from its own cpt/trn (the
    `height_field_from` helper backing its `get_height*` methods), and
-   `NovaSimulation::set_terrain_height_field` wires it to
+   `Simulation::set_terrain_height_field` wires it to
    `world_->terrain` / `ai_->terrain`. The null path — no terrain wired —
    stays supported, so headless/tests run terrain-free.
 5. **terrain_query is the growth point for ENG-3**: when engine-side

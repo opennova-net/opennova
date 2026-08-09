@@ -2,12 +2,12 @@ class_name FntEditorDocument
 extends EditorResourceDocument
 
 # Font (.fnt) document: the shared EditorResourceDocument lifecycle over a
-# NovaFntResource. The byte loader (VFS opens hand bytes straight in), the
+# FntResource. The byte loader (VFS opens hand bytes straight in), the
 # blank factory, and the rasterizer entry are domain code.
 
 
 func _make_new_resource():
-	var fresh := NovaFntResource.new()
+	var fresh := FntResource.new()
 	fresh.create_blank(1, 0)
 	return fresh
 
@@ -20,7 +20,7 @@ func _file_extension() -> String:
 	return "fnt"
 
 
-# NovaFntResource writes itself (byte serializer), not ResourceSaver.
+# FntResource writes itself (byte serializer), not ResourceSaver.
 func _save_resource(path: String) -> Error:
 	var bytes: PackedByteArray = resource.to_bytes()
 	if bytes.is_empty():
@@ -43,7 +43,7 @@ func open_fnt(path: String) -> Error:
 
 
 func open_fnt_bytes(bytes: PackedByteArray, display_path: String) -> Error:
-	var loaded := NovaFntResource.new()
+	var loaded := FntResource.new()
 	var err := loaded.load_from_bytes(bytes)
 	if err != OK:
 		return err

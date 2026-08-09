@@ -1,7 +1,7 @@
 extends SceneTree
 
 # Headless probe (NOT collected by GUT): runs the runtime mission-audio setup
-# (NovaMissionAudio) for one or more missions against a mounted install and
+# (MissionAudio) for one or more missions against a mounted install and
 # prints the per-mission stats — how many "snd:" markers resolved to candidates and
 # which banks loaded. Used to compare stock vs mod missions when in-game
 # ambience is reported silent.
@@ -9,7 +9,7 @@ extends SceneTree
 # Use: godot --headless --path godot -s res://tests/mission_audio_probe.gd -- <dir> <expansion> [mission.bms ...]
 # With no missions listed, probes every .bms the mount's index lists (cap 12).
 
-const NovaMissionAudioScript = preload("res://adapter/world/nova_mission_audio.gd")
+const NovaMissionAudioScript = preload("res://src/world/nova_mission_audio.gd")
 
 
 func _initialize() -> void:
@@ -28,7 +28,7 @@ func _run() -> void:
 	for i in range(2, args.size()):
 		missions.append(args[i])
 
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	var err: int = root.mount_runtime(dir, expansion, false, "jo")
 	print("[probe] mount %s exp='%s' -> %d" % [dir, expansion, err])
 	if err != OK:
@@ -42,7 +42,7 @@ func _run() -> void:
 				break
 	print("[probe] missions: %s" % str(missions))
 
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	var item_err: int = item_db.load_from_resource_root(root, "items.def")
 	print("[probe] items.def load -> %d (items=%d)" % [item_err, item_db.get_count()])
 
@@ -50,7 +50,7 @@ func _run() -> void:
 		if not root.has_file(m):
 			print("[probe] %-28s NOT FOUND in mount" % m)
 			continue
-		var mission := NovaMissionData.new()
+		var mission := MissionData.new()
 		if mission.open_from_resource_root(root, m) != OK:
 			print("[probe] %-28s PARSE FAILED" % m)
 			continue

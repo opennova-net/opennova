@@ -5,7 +5,7 @@ extends GutTest
 
 const HUDPOS_PATH := "res://../fixtures/def/hudpos.def"
 const WEAPON_PATH := "res://../fixtures/def/weapon.def"
-const PlayerViewEffectsScript := preload("res://adapter/world/player_view_effects.gd")
+const PlayerViewEffectsScript := preload("res://src/world/player_view_effects.gd")
 
 var _temp_dirs: Array[String] = []
 
@@ -59,15 +59,15 @@ func _load_temp_layout(lines: PackedStringArray, textures: PackedStringArray,
 	assert_not_null(def_file)
 	def_file.store_string("\n".join(lines))
 	def_file.close()
-	var layout := NovaHudPos.new()
+	var layout := HudPos.new()
 	assert_eq(layout.load(dir_path.path_join("hudpos.def")), OK)
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(dir_path), OK)
 	return {"layout": layout, "root": root, "dir": dir_path}
 
 
 func _load_weapon(name: String) -> Dictionary:
-	var weapons := NovaWeaponDatabase.new()
+	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load(ProjectSettings.globalize_path(WEAPON_PATH)), OK,
 		"weapon.def fixture loads")
 	var index := weapons.find_weapon(name)
@@ -143,7 +143,7 @@ func test_draws_with_layout() -> void:
 	var hud := GameHud.new()
 	hud.size = Vector2(1024, 768)
 	add_child_autofree(hud)
-	var hp := NovaHudPos.new()
+	var hp := HudPos.new()
 	assert_eq(hp.load(ProjectSettings.globalize_path(HUDPOS_PATH)), OK, "Fixture loads.")
 	hud.set_layout(hp, null) # null root -> no textures, placeholder draw
 	hud.update_info({"health_fraction": 0.5, "stance": 1, "team": 0, "objective": "Defend the FARP"})
@@ -165,7 +165,7 @@ func test_stance_index_bounds_safe() -> void:
 	var hud := GameHud.new()
 	hud.size = Vector2(1024, 768)
 	add_child_autofree(hud)
-	var hp := NovaHudPos.new()
+	var hp := HudPos.new()
 	assert_eq(hp.load(ProjectSettings.globalize_path(HUDPOS_PATH)), OK)
 	hud.set_layout(hp, null)
 	# Out-of-range stance must not crash the draw (including the cross-fade ghost).
@@ -212,7 +212,7 @@ func test_weapon_cluster_artless_safe() -> void:
 	var hud := GameHud.new()
 	hud.size = Vector2(1024, 768)
 	add_child_autofree(hud)
-	var hp := NovaHudPos.new()
+	var hp := HudPos.new()
 	assert_eq(hp.load(ProjectSettings.globalize_path(HUDPOS_PATH)), OK)
 	hud.set_layout(hp, null)
 	hud.set_weapon(PlayerHudWeaponDef.from_weapon_dict({
@@ -399,7 +399,7 @@ func test_message_feed_smoke() -> void:
 	var hud := GameHud.new()
 	hud.size = Vector2(1024, 768)
 	add_child_autofree(hud)
-	var hp := NovaHudPos.new()
+	var hp := HudPos.new()
 	assert_eq(hp.load(ProjectSettings.globalize_path(HUDPOS_PATH)), OK)
 	hud.set_layout(hp, null)
 	hud.update_info({"health_fraction": 1.0, "ticks": 50})
@@ -446,7 +446,7 @@ func test_waypoint_label_draws_each_alignment() -> void:
 		var fnt := FileAccess.open(String(fixture["dir"]).path_join("Gunpl22b.fnt"), FileAccess.WRITE)
 		fnt.store_buffer(fnt_bytes)
 		fnt.close()
-		var root := NovaResourceRoot.new()
+		var root := ResourceRoot.new()
 		assert_eq(root.set_root_dir(fixture["dir"]), OK)
 		var hud := GameHud.new()
 		hud.size = Vector2(1024, 768)

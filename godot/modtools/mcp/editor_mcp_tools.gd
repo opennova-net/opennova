@@ -101,7 +101,7 @@ func register_all(registry: McpToolRegistry) -> void:
 				"duration_s": { "type": "number", "default": 4.0 },
 			}, ["text"]), Callable(self, "_tool_show_status"))
 	registry.register(McpToolDef.make("set_fullscreen",
-			"Put the editor window into (or out of) fullscreen — the core-engine window mode (NovaWindow), the same F11 toggles. Do this before screenshots so the 3D viewport fills the display. Omit `enabled` to toggle. Returns the resulting fullscreen state.",
+			"Put the editor window into (or out of) fullscreen — the core-engine window mode (WindowState), the same F11 toggles. Do this before screenshots so the 3D viewport fills the display. Omit `enabled` to toggle. Returns the resulting fullscreen state.",
 			{
 				"enabled": { "type": "boolean", "description": "true = fullscreen, false = windowed; omit to toggle." },
 			}), Callable(self, "_tool_set_fullscreen"))
@@ -124,7 +124,7 @@ func register_all(registry: McpToolRegistry) -> void:
 				"call": { "type": "array", "items": { "type": "string" }, "description": "Zero-arg query methods to call — get_*/is_*/has_* names only." },
 			}, ["path"]), Callable(self, "_tool_get_node_state"))
 	registry.register(McpToolDef.make("describe_api",
-			"Read-only API reference: with no args, lists topics, engine classes (Nova*), and live editor objects. name: methods/properties/constants of a class (\"NovaMissionData\") or live object (\"shell\", \"editor\", \"mission_controller\", \"game_session\", \"camera\", \"resource_root\", \"workspace:strings\") — useful for understanding result shapes. topic: a guide (\"coordinates\", \"camera\", \"workspaces\", \"menus\").",
+			"Read-only API reference: with no args, lists topics, engine classes (Nova*), and live editor objects. name: methods/properties/constants of a class (\"MissionData\") or live object (\"shell\", \"editor\", \"mission_controller\", \"game_session\", \"camera\", \"resource_root\", \"workspace:strings\") — useful for understanding result shapes. topic: a guide (\"coordinates\", \"camera\", \"workspaces\", \"menus\").",
 			{
 				"name": { "type": "string", "description": "Class or live-object name." },
 				"topic": { "type": "string", "description": "Guide topic." },
@@ -326,8 +326,8 @@ func _tool_editor_state(_args: Dictionary, ctx: McpToolContext) -> Variant:
 		"resource_root": {
 			"dir": shell.get_resource_root_dir() if shell.has_method("get_resource_root_dir") else "",
 			"mounted": ctx.root() != null,
-			"expansion": NovaResourceDirSettings.get_expansion(),
-			"game": NovaResourceDirSettings.get_game(),
+			"expansion": ResourceDirSettings.get_expansion(),
+			"game": ResourceDirSettings.get_game(),
 		},
 		"active_workspace": String(active.get_workspace_id()) if active != null else "",
 		"workspaces": workspaces,
@@ -434,10 +434,10 @@ func _tool_set_fullscreen(args: Dictionary, ctx: McpToolContext) -> Variant:
 		return McpToolResult.error("No window is available.")
 	var fullscreen: bool
 	if args.has("enabled"):
-		NovaWindow.set_fullscreen(window, bool(args["enabled"]))
-		fullscreen = NovaWindow.is_fullscreen(window)
+		WindowState.set_fullscreen(window, bool(args["enabled"]))
+		fullscreen = WindowState.is_fullscreen(window)
 	else:
-		fullscreen = NovaWindow.toggle_fullscreen(window)
+		fullscreen = WindowState.toggle_fullscreen(window)
 	return { "ok": true, "fullscreen": fullscreen }
 
 

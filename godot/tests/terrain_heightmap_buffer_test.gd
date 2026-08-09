@@ -1,6 +1,6 @@
 extends GutTest
 
-# NovaTerrainData owns the editable height buffer (3e). These tests pin the
+# TerrainData owns the editable height buffer (3e). These tests pin the
 # raw16 <-> FORMAT_RF conversion to the canonical formula the editor's
 # save/export rely on, the same one the former GDScript image_to_raw16 used:
 #   raw16 (little-endian uint16) = clamp(int(height * 256), 0, 65535)
@@ -18,7 +18,7 @@ func _make_rf_image(values: Array, side: int) -> Image:
 func test_get_depth_raw16_matches_canonical_formula() -> void:
 	# Representative heights including the clamp ceiling (255.996 * 256 = 65535).
 	var heights := [0.0, 1.0, 255.996, 12.5]
-	var data := NovaTerrainData.new()
+	var data := TerrainData.new()
 	data.set_heightmap_image(_make_rf_image(heights, 2))
 
 	var raw := data.get_depth_raw16()
@@ -30,7 +30,7 @@ func test_get_depth_raw16_matches_canonical_formula() -> void:
 
 
 func test_heightmap_image_from_raw16_roundtrips() -> void:
-	var data := NovaTerrainData.new()
+	var data := TerrainData.new()
 	# u16 per cell, including values that exercise the high byte. Every u16/256
 	# is exactly representable in float32, so the round-trip is byte-exact.
 	var values := [0, 256, 4096, 65535]
@@ -51,7 +51,7 @@ func test_heightmap_image_from_raw16_roundtrips() -> void:
 
 func test_set_heightmap_image_is_authoritative_for_depth() -> void:
 	# get_depth_raw16 must reflect the live image, not a stale CPT/empty buffer.
-	var data := NovaTerrainData.new()
+	var data := TerrainData.new()
 	assert_eq(data.get_depth_raw16().size(), 0, "Unloaded data has no depth.")
 	data.set_heightmap_image(_make_rf_image([2.0, 2.0, 2.0, 2.0], 2))
 	var raw := data.get_depth_raw16()
@@ -60,9 +60,9 @@ func test_set_heightmap_image_is_authoritative_for_depth() -> void:
 
 
 func test_colormap_and_blendmap_images_are_owned_by_data() -> void:
-	# Color/blend mirror the height buffer: NovaTerrainData owns the editable
+	# Color/blend mirror the height buffer: TerrainData owns the editable
 	# Image and shares it by reference, so brush edits stay visible through data.
-	var data := NovaTerrainData.new()
+	var data := TerrainData.new()
 	assert_null(data.get_colormap_image(), "Colormap image should start unset.")
 	assert_null(data.get_blendmap_image(), "Blendmap image should start unset.")
 

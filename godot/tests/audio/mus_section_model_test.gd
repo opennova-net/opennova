@@ -1,6 +1,6 @@
 extends GutTest
 
-# Covers NovaMusicScript.get_section_model: the read-only structural model that
+# Covers MusicScript.get_section_model: the read-only structural model that
 # drives the editor's section map. The model reads opcodes (engine/formats/mus
 # mus_build_section_model), so the topology is exact -- setstate transitions are
 # distinguished from frame-setup `enter`, and tablexec switch fan-out is captured
@@ -10,9 +10,9 @@ const FIXTURE := "res://../fixtures/mus/jo_gamemus.bin"
 
 
 func _model() -> Array:
-	var ms := NovaMusicScript.new()
+	var ms := MusicScript.new()
 	ms.load_from_path(FIXTURE)
-	assert_not_null(ms, "fixture loads as NovaMusicScript")
+	assert_not_null(ms, "fixture loads as MusicScript")
 	if ms == null:
 		return []
 	return ms.get_section_model(StringName(ms.get_default_script_name()))

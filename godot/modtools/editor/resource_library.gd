@@ -14,10 +14,10 @@ extends RefCounted
 # Resource-dir config path/keys are shared with the runtime (game/main_game.gd)
 # via engine/resource_index/resource_dir_settings.gd so a directory picked in
 # either app is the same persisted value.
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
 # Layout state (split offsets) shares the same config file as the resource dir,
 # but lives in its own section; the resource-dir section is owned by
-# NovaResourceDirSettings (load_state/save_state delegate to it).
+# ResourceDirSettings (load_state/save_state delegate to it).
 const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
 const LAYOUT_STATE_SECTION := "layout"
 const LEFT_SPLIT_KEY := "left_split_offset"
@@ -33,14 +33,14 @@ const AXES_VISIBLE_KEY := "axes_visible"
 const PANELS_STATE_SECTION := "panels"
 
 var _index: RefCounted
-var _resource_root: NovaResourceRoot = NovaResourceRoot.new()
+var _resource_root: ResourceRoot = ResourceRoot.new()
 var _root_dir: String = ""
-var _reference_index: NovaReferenceIndex
+var _reference_index: ReferenceIndex
 
 
 func ensure_index() -> void:
 	if _index == null:
-		_index = NovaResourceIndex.new()
+		_index = ResourceIndex.new()
 
 
 func get_index() -> RefCounted:
@@ -52,9 +52,9 @@ func get_index() -> RefCounted:
 # instance per library so every link widget / referrers panel shares the same
 # lazily-built graph. It self-invalidates against the root's cache epoch, so a
 # rescan or directory change never serves stale edges.
-func get_reference_index() -> NovaReferenceIndex:
+func get_reference_index() -> ReferenceIndex:
 	if _reference_index == null:
-		_reference_index = NovaReferenceIndex.new()
+		_reference_index = ReferenceIndex.new()
 		_reference_index.set_resource_root(_resource_root)
 	return _reference_index
 
@@ -63,7 +63,7 @@ func get_root_dir() -> String:
 	return _root_dir
 
 
-func get_resource_root() -> NovaResourceRoot:
+func get_resource_root() -> ResourceRoot:
 	return _resource_root
 
 
@@ -124,13 +124,13 @@ func scan_root() -> Dictionary:
 	return {"err": err, "status": "Resource scan failed." if detail.is_empty() else detail}
 
 
-# Loads the persisted root from the shared NovaResourceDirSettings.
+# Loads the persisted root from the shared ResourceDirSettings.
 # That helper drops a persisted root that no longer points at a real, sane resource
 # directory (moved/deleted dirs, or stale temp/test paths that leaked into the
 # shared state) so the browser shows a clean "no directory" state instead of a dead
 # internal path. Returns {root_dir}.
 func load_state() -> Dictionary:
-	# Resource-dir persistence lives in NovaResourceDirSettings (shared with the
+	# Resource-dir persistence lives in ResourceDirSettings (shared with the
 	# runtime); get_resource_dir() already drops stale/invalid paths.
 	_root_dir = ResourceDirSettings.get_resource_dir()
 	if _root_dir.is_empty():
@@ -145,7 +145,7 @@ func save_state() -> void:
 
 
 # Recently used resource directories (shared with the runtime via
-# NovaResourceDirSettings). The shell reaches this state only through the library,
+# ResourceDirSettings). The shell reaches this state only through the library,
 # so these thin forwarders keep that boundary while the dropdown lives in the shell.
 func get_recent_dirs() -> PackedStringArray:
 	return ResourceDirSettings.get_recent_dirs()

@@ -54,7 +54,7 @@ cost either way.
 ## Verdict: what the next perf slice should be
 
 1. **`animated_models` is the budget.** 86% of CP15's load, 76% of 03TR's.
-   Each animated entity builds its own `NovaObjectModel` — a full `.3di`
+   Each animated entity builds its own `ObjectModel` — a full `.3di`
    decode plus texture decode *per instance*, with no template sharing,
    unlike the static path which builds one template per graphic and
    instances it. The evidence-based slice is **a shared model/texture
@@ -75,19 +75,19 @@ cost either way.
 Same machine, same protocol (second, OS-warm run; Debug GDExtension),
 captured after the perf slice landed three changes:
 
-1. **`NovaResourceRoot.resolve_file` memo** — the dominant cost. Every call
+1. **`ResourceRoot.resolve_file` memo** — the dominant cost. Every call
    walked the *entire* root directory (`DirAccess` listing, ~10k entries for
-   a retail extract), and `NovaObjectData.get_materials()` resolves every
+   a retail extract), and `ObjectData.get_materials()` resolves every
    texture of every material through it on every model rebuild. CP15 spent
    ~23 s of its load in these walks. Now one walk per cache epoch feeds a
    name→path memo (case-variant duplicates poison their key, preserving the
    duplicate-name error). A companion decoded-texture cache backs
    `load_texture`'s packed-PFF fallback, which re-extracted + re-decoded per
    call on runtime mounts.
-2. **`NovaObjectData` submesh cache** — `build_lod_submeshes` results are
+2. **`ObjectData` submesh cache** — `build_lod_submeshes` results are
    memoized per `(lod, skeletal, bone_count)`; cache hits hand out the same
    `ArrayMesh` refs (entry dictionaries deep-copied, so callers can't taint
-   the cache). The mission placer shares one `NovaObjectData` per graphic,
+   the cache). The mission placer shares one `ObjectData` per graphic,
    so N animated soldiers now share meshes instead of paying N mesh builds.
    Materials stay per-instance (runtime shader params are per-entity).
 3. **Placer build-order fix** — `_apply_skeletal_anim` now runs *before*
@@ -107,7 +107,7 @@ acceptance gate; whole-mission opens are 5.6–9.9x faster.
 
 **Where the remaining animated cost lives:** ~3.3 s of CP15's 4.1 s is 15
 distinct `.adm` body-animation sets loading at ~220 ms each
-(`NovaSkeletalAnim.load_from_resource_root`, cached per `.adm` by the
+(`SkeletalAnim.load_from_resource_root`, cached per `.adm` by the
 placer — the cost is intrinsic first-load parsing, once per distinct
 animation set per mission open). If a future slice wants it, the lead is
 sharing parsed clip/skeleton data across `.adm` sets, not more caching at

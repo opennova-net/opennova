@@ -57,7 +57,7 @@ func test_set_label_requires_a_profile_path():
 func test_inspector_rename_updates_row_and_announces():
 	var vi: Control = VarInspectorScene.instantiate()
 	add_child_autofree(vi)
-	var director := NovaMusicDirector.new()
+	var director := MusicDirector.new()
 	add_child_autofree(director)
 	vi.bind_director(director)
 	vi.set_script_name("myscript")
@@ -73,7 +73,7 @@ func test_inspector_rename_updates_row_and_announces():
 func test_inspector_rename_disabled_without_profile_path():
 	var vi: Control = VarInspectorScene.instantiate()
 	add_child_autofree(vi)
-	var director := NovaMusicDirector.new()
+	var director := MusicDirector.new()
 	add_child_autofree(director)
 	vi.bind_director(director)
 	vi.set_script_name("myscript")

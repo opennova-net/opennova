@@ -1,7 +1,7 @@
 extends GutTest
 
 const MountGuard := preload("res://tests/perf_probe_mount_guard.gd")
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
 const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
 
 var _saved_state_config := PackedByteArray()

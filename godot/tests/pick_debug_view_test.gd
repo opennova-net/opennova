@@ -4,7 +4,7 @@ extends GutTest
 # the injected shell-owned model, re-resolves mover positions through the sim
 # accessor it names, and clears cleanly when the list empties.
 
-const ViewScript := preload("res://adapter/debug/pick/pick_debug_view.gd")
+const ViewScript := preload("res://src/debug/pick/pick_debug_view.gd")
 
 
 class StubSim:
@@ -44,7 +44,7 @@ func _mover_pick() -> Dictionary:
 	}
 
 
-func _make_view(world: StubWorld, picks: NovaDebugPickList) -> PickDebugView:
+func _make_view(world: StubWorld, picks: DebugPickList) -> PickDebugView:
 	var view: PickDebugView = ViewScript.new()
 	view.set_pick_list(picks)
 	add_child_autofree(view)
@@ -55,7 +55,7 @@ func _make_view(world: StubWorld, picks: NovaDebugPickList) -> PickDebugView:
 func test_draws_one_labeled_highlight_per_pick() -> void:
 	var world := StubWorld.new()
 	add_child_autofree(world)
-	var picks := NovaDebugPickList.new()
+	var picks := DebugPickList.new()
 	picks.add(_static_pick())
 	picks.add(_mover_pick())
 	var view := _make_view(world, picks)
@@ -78,7 +78,7 @@ func test_draws_one_labeled_highlight_per_pick() -> void:
 func test_movers_follow_the_live_sim_position() -> void:
 	var world := StubWorld.new()
 	add_child_autofree(world)
-	var picks := NovaDebugPickList.new()
+	var picks := DebugPickList.new()
 	picks.add(_mover_pick())
 	var view := _make_view(world, picks)
 	view.refresh_now()
@@ -95,7 +95,7 @@ func test_movers_follow_the_live_sim_position() -> void:
 func test_static_picks_keep_their_pick_time_position() -> void:
 	var world := StubWorld.new()
 	add_child_autofree(world)
-	var picks := NovaDebugPickList.new()
+	var picks := DebugPickList.new()
 	picks.add(_static_pick())
 	var view := _make_view(world, picks)
 	view.refresh_now()
@@ -107,7 +107,7 @@ func test_static_picks_keep_their_pick_time_position() -> void:
 func test_emptying_the_list_clears_everything() -> void:
 	var world := StubWorld.new()
 	add_child_autofree(world)
-	var picks := NovaDebugPickList.new()
+	var picks := DebugPickList.new()
 	picks.add(_static_pick())
 	var view := _make_view(world, picks)
 	view.refresh_now()

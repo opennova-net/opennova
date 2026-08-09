@@ -4,11 +4,11 @@ extends "res://modtools/mission/controller/controller_section.gd"
 # and is reached through `_c`; this is not a game runtime.
 
 # Index over the placer's construction-time registrations ({model, ref} records — the same
-# channel the runtime owner builds its NovaEntityIndex from; never a container scan), rebuilt
+# channel the runtime owner builds its EntityIndex from; never a container scan), rebuilt
 # only when the entity set changes. The mission's area triggers ride along for zone resolution.
-func _get_preview_registry() -> NovaEntityIndex:
+func _get_preview_registry() -> EntityIndex:
 	if _c._preview_registry == null or _c._preview_registry_rev != _c._membership_rev:
-		_c._preview_registry = NovaEntityIndex.new()
+		_c._preview_registry = EntityIndex.new()
 		_c._preview_registry.build(
 				_c._placer.placed_entity_records if _c._placer != null else [],
 				_c.get_area_triggers())
@@ -19,7 +19,7 @@ func _get_preview_registry() -> NovaEntityIndex:
 # Resolve a PLAYPARTANIM action to one live animatable model: its explicit target (param1) by
 # action_type, else an animated current selection, else null. The index resolves only live
 # NovaObjectModels, so the first non-null hit is the target.
-func _resolve_part_anim_node(action: Dictionary) -> NovaObjectModel:
+func _resolve_part_anim_node(action: Dictionary) -> ObjectModel:
 	var registry := _get_preview_registry()
 	var target := int(action.get("param1", 0))
 	var models: Array = []
@@ -32,7 +32,7 @@ func _resolve_part_anim_node(action: Dictionary) -> NovaObjectModel:
 			models = registry.resolve_group(target)
 		_c._ACT_AREA_AI_RED, _c._ACT_AREA_AI_BLUE:
 			models = registry.resolve_zone(target)
-	for model: NovaObjectModel in models:
+	for model: ObjectModel in models:
 		if model != null:
 			return model
 	# Fallback: an animated current selection (e.g. previewing while an object is selected).

@@ -13,7 +13,7 @@ extends Control
 ## / set_workspace surface are preserved for the workstation test.
 
 const UI := preload("res://modtools/framework/inspector_forms.gd")
-const FieldBinderScript := preload("res://adapter/ui/field_binder.gd")
+const FieldBinderScript := preload("res://src/ui/field_binder.gd")
 
 const CURVE_FIELDS := [
 	["scale_func", "Size over life"],
@@ -122,7 +122,7 @@ func _refresh_selection() -> void:
 	if _form == null:
 		return
 	_clear_form()
-	var p: NovaParticleDef = _editor.current_particle if _editor != null else null
+	var p: ParticleDef = _editor.current_particle if _editor != null else null
 	var idx := _particles.find(p) if p != null else -1
 	if idx >= 0:
 		_list.select(idx)
@@ -155,7 +155,7 @@ func _clear_form() -> void:
 
 # --- Form build --------------------------------------------------------------
 
-func _build_form(p: NovaParticleDef) -> void:
+func _build_form(p: ParticleDef) -> void:
 	_binder = FieldBinderScript.new()
 
 	_build_identity(p)
@@ -170,7 +170,7 @@ func _build_form(p: NovaParticleDef) -> void:
 	_binder.sync_from({})
 
 
-func _build_identity(p: NovaParticleDef) -> void:
+func _build_identity(p: ParticleDef) -> void:
 	var box := UI.add_foldable_section(_form, "Identity", true)
 	# Name needs live list-label sync, so it is wired manually (not via binder).
 	var row := HBoxContainer.new()
@@ -194,7 +194,7 @@ func _build_identity(p: NovaParticleDef) -> void:
 		"Distance fade hint. 0 keeps the particle always drawn.")
 
 
-func _build_emission(p: NovaParticleDef) -> void:
+func _build_emission(p: ParticleDef) -> void:
 	var box := UI.add_foldable_section(_form, "Emission", true)
 	_row_float(box, p, "emit_rate", "Emit rate (/s)", 0.0, 10000.0, 0.5,
 		"Particles spawned per second.")
@@ -217,7 +217,7 @@ func _build_emission(p: NovaParticleDef) -> void:
 	_row_vec3(adv, p, "emit_shape_size_skip", "Shape inner size", 0.0, 1000.0, 0.1)
 
 
-func _build_appearance(p: NovaParticleDef) -> void:
+func _build_appearance(p: ParticleDef) -> void:
 	var box := UI.add_foldable_section(_form, "Appearance", true)
 	_row_float(box, p, "scale_value", "Size (units)", 0.0, 1000.0, 0.05,
 		"Particle size in world units.")
@@ -232,7 +232,7 @@ func _build_appearance(p: NovaParticleDef) -> void:
 		"Strength of pseudo-lighting for bump blend modes.")
 
 
-func _build_motion(p: NovaParticleDef) -> void:
+func _build_motion(p: ParticleDef) -> void:
 	var box := UI.add_foldable_section(_form, "Motion", false)
 	_row_float(box, p, "age", "Lifetime (s)", 0.0, 1000.0, 0.05,
 		"How long each particle lives.")
@@ -258,15 +258,15 @@ func _build_motion(p: NovaParticleDef) -> void:
 	_row_float(adv, p, "z_offset", "Spawn offset Z", -1000.0, 1000.0, 0.1)
 
 
-func _build_behavior(p: NovaParticleDef) -> void:
+func _build_behavior(p: ParticleDef) -> void:
 	var box := UI.add_foldable_section(_form, "Behavior flags", false)
 
 	UI.add_muted_label(box, "Movement")
 	var move_grid := GridContainer.new()
 	move_grid.columns = 2
 	box.add_child(move_grid)
-	for move_name in NovaParticleDef.get_move_flag_table():
-		var bit := int(NovaParticleDef.get_move_flag_table()[move_name])
+	for move_name in ParticleDef.get_move_flag_table():
+		var bit := int(ParticleDef.get_move_flag_table()[move_name])
 		var cb := CheckBox.new()
 		cb.text = move_name.capitalize()
 		cb.tooltip_text = move_name
@@ -279,8 +279,8 @@ func _build_behavior(p: NovaParticleDef) -> void:
 	var flag_grid := GridContainer.new()
 	flag_grid.columns = 2
 	box.add_child(flag_grid)
-	for flag_name in NovaParticleDef.get_particle_flag_table():
-		var bit := int(NovaParticleDef.get_particle_flag_table()[flag_name])
+	for flag_name in ParticleDef.get_particle_flag_table():
+		var bit := int(ParticleDef.get_particle_flag_table()[flag_name])
 		var cb := CheckBox.new()
 		cb.text = flag_name.capitalize()
 		cb.tooltip_text = flag_name
@@ -293,9 +293,9 @@ func _build_behavior(p: NovaParticleDef) -> void:
 	_update_flags_label(p)
 
 
-func _build_graphics(p: NovaParticleDef) -> void:
+func _build_graphics(p: ParticleDef) -> void:
 	var box := UI.add_foldable_section(_form, "Graphic layers", true)
-	var blend_names := NovaParticleDef.get_blend_mode_names()
+	var blend_names := ParticleDef.get_blend_mode_names()
 	var blend_options: Array = []
 	for i in range(blend_names.size()):
 		blend_options.append({"id": i, "label": blend_names[i]})
@@ -303,7 +303,7 @@ func _build_graphics(p: NovaParticleDef) -> void:
 	var graphics := p.get_graphics()
 	var present := 0
 	for i in range(graphics.size()):
-		var layer: NovaParticleGraphicLayer = graphics[i]
+		var layer: ParticleGraphicLayer = graphics[i]
 		if layer == null or not layer.present:
 			continue
 		present += 1
@@ -342,7 +342,7 @@ func _build_graphics(p: NovaParticleDef) -> void:
 		add.pressed.connect(func() -> void: _on_add_layer(p))
 
 
-func _build_curves(p: NovaParticleDef) -> void:
+func _build_curves(p: ParticleDef) -> void:
 	var box := UI.add_foldable_section(_form, "Curves (animate over life)", false)
 	var tables: Array = []
 	if _editor != null and _editor.particle_file != null:
@@ -357,9 +357,9 @@ func _build_curves(p: NovaParticleDef) -> void:
 		_build_curve_row(box, p, field, label_text, tables)
 
 
-func _build_curve_row(box: VBoxContainer, p: NovaParticleDef, field: String,
+func _build_curve_row(box: VBoxContainer, p: ParticleDef, field: String,
 		label_text: String, tables: Array) -> void:
-	var curve: NovaParticleCurveRef = _curve_for(p, field)
+	var curve: ParticleCurveRef = _curve_for(p, field)
 	var row := UI.add_detail_field(box, label_text)
 	var controls := HBoxContainer.new()
 	controls.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -398,7 +398,7 @@ func _build_curve_row(box: VBoxContainer, p: NovaParticleDef, field: String,
 	inv.toggled.connect(func(on: bool) -> void: _on_curve_modifier(p, field, "inverse", on))
 
 
-func _build_sounds(p: NovaParticleDef) -> void:
+func _build_sounds(p: ParticleDef) -> void:
 	var box := UI.add_foldable_section(_form, "Collision sounds", false)
 	UI.add_muted_label(box, "One sound file per line (played on impact).")
 	var edit := TextEdit.new()
@@ -504,15 +504,15 @@ func _commit_vec3(target: Object, prop: String, axis: int, value: float) -> void
 	_touch()
 
 
-func _set_bit(p: NovaParticleDef, prop: String, bit: int, on: bool) -> void:
+func _set_bit(p: ParticleDef, prop: String, bit: int, on: bool) -> void:
 	var bits := int(p.get(prop))
 	bits = (bits | bit) if on else (bits & ~bit)
 	p.set(prop, bits)
 	if prop == "flags":
-		p.flags_raw = NovaParticleDef.format_particle_flags(bits)
+		p.flags_raw = ParticleDef.format_particle_flags(bits)
 		_update_flags_label(p)
 	else:
-		p.move_raw = NovaParticleDef.format_move_flags(bits)
+		p.move_raw = ParticleDef.format_move_flags(bits)
 	_touch()
 
 
@@ -521,16 +521,16 @@ func _touch() -> void:
 		_editor.notify_particle_changed()
 
 
-func _update_flags_label(p: NovaParticleDef) -> void:
+func _update_flags_label(p: ParticleDef) -> void:
 	if _flags_label == null:
 		return
-	var raw := NovaParticleDef.format_particle_flags(int(p.flags)).strip_edges()
+	var raw := ParticleDef.format_particle_flags(int(p.flags)).strip_edges()
 	_flags_label.text = "flags = %s" % raw if not raw.is_empty() else "flags = (none)"
 
 
 # --- Event handlers ----------------------------------------------------------
 
-func _on_id_changed(p: NovaParticleDef, text: String) -> void:
+func _on_id_changed(p: ParticleDef, text: String) -> void:
 	if _suppress:
 		return
 	if text.strip_edges().is_empty():
@@ -542,7 +542,7 @@ func _on_id_changed(p: NovaParticleDef, text: String) -> void:
 		_list.set_item_text(idx, text)
 
 
-func _on_id_focus_exited(p: NovaParticleDef) -> void:
+func _on_id_focus_exited(p: ParticleDef) -> void:
 	if _id_edit != null and _id_edit.text.strip_edges().is_empty():
 		_suppress = true
 		_id_edit.text = p.id
@@ -575,25 +575,25 @@ func _on_delete_pressed() -> void:
 		_workspace.remove_particle(_editor.current_particle)
 
 
-func _on_add_layer(p: NovaParticleDef) -> void:
+func _on_add_layer(p: ParticleDef) -> void:
 	if _workspace != null and _workspace.has_method("add_graphic_layer"):
 		_workspace.add_graphic_layer(p)
 	_refresh_selection()
 
 
-func _on_remove_layer(p: NovaParticleDef, slot: int) -> void:
+func _on_remove_layer(p: ParticleDef, slot: int) -> void:
 	if _workspace != null and _workspace.has_method("remove_graphic_layer"):
 		_workspace.remove_graphic_layer(p, slot)
 	_refresh_selection()
 
 
-func _on_curve_assigned(p: NovaParticleDef, field: String, table_id: String) -> void:
+func _on_curve_assigned(p: ParticleDef, field: String, table_id: String) -> void:
 	if _workspace != null and _workspace.has_method("assign_curve"):
 		_workspace.assign_curve(p, field, table_id)
 
 
-func _on_curve_modifier(p: NovaParticleDef, field: String, modifier: String, on: bool) -> void:
-	var curve: NovaParticleCurveRef = _curve_for(p, field)
+func _on_curve_modifier(p: ParticleDef, field: String, modifier: String, on: bool) -> void:
+	var curve: ParticleCurveRef = _curve_for(p, field)
 	if curve == null:
 		return
 	if modifier == "reverse":
@@ -603,7 +603,7 @@ func _on_curve_modifier(p: NovaParticleDef, field: String, modifier: String, on:
 	_touch()
 
 
-func _on_sounds_changed(p: NovaParticleDef, edit: TextEdit) -> void:
+func _on_sounds_changed(p: ParticleDef, edit: TextEdit) -> void:
 	var sounds := PackedStringArray()
 	for raw_line in edit.text.split("\n"):
 		var trimmed := raw_line.strip_edges()
@@ -616,7 +616,7 @@ func _on_sounds_changed(p: NovaParticleDef, edit: TextEdit) -> void:
 
 # --- Helpers -----------------------------------------------------------------
 
-func _curve_for(p: NovaParticleDef, field: String) -> NovaParticleCurveRef:
+func _curve_for(p: ParticleDef, field: String) -> ParticleCurveRef:
 	match field:
 		"scale_func": return p.get_scale_func()
 		"alpha_func": return p.get_alpha_func()

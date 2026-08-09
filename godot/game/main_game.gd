@@ -1,17 +1,17 @@
 extends Node3D
 
-# Runtime shell: boots into the game's menu front-end (NovaMenuShell, driving the
+# Runtime shell: boots into the game's menu front-end (MenuShell, driving the
 # .mnu menu set + audio from the chosen resource dir) and hands off to a GameWorld
 # when the player starts a mission, with pause + return-to-menu on demand. The
 # engine ships no game data; everything (menus, audio, terrain, missions) loads
 # from the chosen resource dir. The first-launch directory picker lives here
 # (runtime-only); headless probes set the dir explicitly and never block on it.
 
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
-const DebugOverlayScript := preload("res://adapter/debug/nova_debug_overlay.gd")
-const DebugViewContext := preload("res://adapter/debug/nova_debug_view_context.gd")
+const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
+const DebugOverlayScript := preload("res://src/debug/nova_debug_overlay.gd")
+const DebugViewContext := preload("res://src/debug/nova_debug_view_context.gd")
 const GameDebugAdapterScript := preload("res://game/game_debug_adapter.gd")
-const LocalPlayerPresenterScript := preload("res://adapter/world/local_player_presenter.gd")
+const LocalPlayerPresenterScript := preload("res://src/world/local_player_presenter.gd")
 const RuntimeShutdownScript := preload("res://game/runtime_shutdown_coordinator.gd")
 # Re-summon the game-folder picker. The original engine has no "change game dir"
 # control (the game *is* its install folder); this is an OpenNova convenience so a
@@ -51,26 +51,26 @@ const PICK_TOAST_SECONDS := 1.6
 enum State { MENU, WORLD, PAUSED, ARMORY, DEPLOY }
 
 @onready var _world: GameWorld = $World
-@onready var _camera: NovaFlyCamera = $Camera3D
+@onready var _camera: FlyCamera = $Camera3D
 @onready var _hud: CanvasLayer = $HUD
 @onready var _menu_shell = $MenuLayer/MenuShell
 
 var _picker: FileDialog
-var _root: NovaResourceRoot
+var _root: ResourceRoot
 var _state: int = State.MENU
 var _shell_wired := false
-var _debug_overlay  # NovaDebugOverlay, lazily built on the first F3
+var _debug_overlay  # DebugOverlay, lazily built on the first F3
 var _debug_adapter: GameDebugAdapter
 # The debug pick list: SHELL-owned so F6 picks work before F3 ever opens and
 # the set survives overlay toggles; cleared on every world load.
-var _pick_list := NovaDebugPickList.new()
+var _pick_list := DebugPickList.new()
 var _pick_toast: Label = null
 var _net: NetSessionController  # every net-session entry (LAN/NovaWorld + env hooks)
-# The in-game HUD rides NovaGameHudPresenter. It owns the lazy GameHud build, the
+# The in-game HUD rides GameHudPresenter. It owns the lazy GameHud build, the
 # per-frame info rebuild, and the
 # mission text feed (queued until the HUD exists); this shell only says when the
 # player is in-world.
-var _hud_presenter: NovaGameHudPresenter
+var _hud_presenter: GameHudPresenter
 var _player_presenter: LocalPlayerPresenter = null
 # The per-system frame-stats board behind F3 -> Stats. Created with the shell
 # and handed to every feeding owner; it costs nothing until the tab opens
@@ -80,16 +80,16 @@ var _frame_stats := FrameStatsBoard.new()
 # RenderingServer measurement edge latch and the wall-frame clock.
 var _render_stats := RootRenderStatsSampler.new()
 var _mp_companion  # MpMenuCompanion: drives the multiplayer (mp.mnu) menu by control name
-var _lan_session  # NovaLanSession: retail-style 0x41/0x81 LAN enumeration browser
+var _lan_session  # LanSession: retail-style 0x41/0x81 LAN enumeration browser
 var _player_info_companion  # PlayerInfoMenuCompanion: drives the PLAYER_INFO (player.mnu) character screen
-var _armory_presenter: NovaArmoryPresenter  # the SHARED in-world armory surface (weapon.mnu WEAPON)
-var _deploy_presenter: NovaDeployScreenPresenter  # the joiner's deploy-map screen (death.mnu DEATH)
+var _armory_presenter: ArmoryPresenter  # the SHARED in-world armory surface (weapon.mnu WEAPON)
+var _deploy_presenter: DeployScreenPresenter  # the joiner's deploy-map screen (death.mnu DEATH)
 var _use_latched := false  # USE-ITEM press latch; the mount toggle runs on RELEASE
 var _chosen_avatar: Dictionary = {}  # last avatar/name picked on PLAYER_INFO (the persistence seam)
 # The mission loading screen (per-mission sidecar image / loadscrn.pcx + the red
 # progress bar), mounted over everything for the duration of a world load
 # [orig: render_loading_screen @ 0x521d10 + LoadingScreen_UpdateAndPresent @ 0x586be0].
-var _loading_screen: NovaLoadingScreen
+var _loading_screen: LoadingScreen
 var _loading_layer: CanvasLayer
 var _world_load_pending := false
 var _world_load_request_id := 0
@@ -126,7 +126,7 @@ func is_world_loading() -> bool:
 
 ## Whether the active loading handoff resolved and decoded its background art.
 ## This keeps lifecycle probes on the shell's public surface instead of reaching
-## into the transient NovaLoadingScreen node.
+## into the transient LoadingScreen node.
 func has_loading_background() -> bool:
 	return _loading_screen != null and _loading_screen.has_background()
 
@@ -134,7 +134,7 @@ func has_loading_background() -> bool:
 ## The mounted menu/runtime resource root (null before the first mount) —
 ## so shell components (NetSessionController) and lifecycle tests resolve
 ## missions/titles through one seam instead of shell internals.
-func current_resource_root() -> NovaResourceRoot:
+func current_resource_root() -> ResourceRoot:
 	return _root
 
 
@@ -159,7 +159,7 @@ func _ready() -> void:
 	# setup connects mission_effects before any world can tick (PreMission/WAC
 	# effects may drain on the first runtime tick, and it queues them until the
 	# lazy HUD exists).
-	_armory_presenter = NovaArmoryPresenter.new()
+	_armory_presenter = ArmoryPresenter.new()
 	_armory_presenter.name = "ArmoryPresenter"
 	add_child(_armory_presenter)
 	_armory_presenter.setup(_world, _player_presenter, _hud if _hud != null else self)
@@ -168,7 +168,7 @@ func _ready() -> void:
 	# The joiner's deploy-map screen (death.mnu DEATH): opened when the join reaches
 	# the player-paced deployment pick, self-closing on the deployment release
 	# [orig: the 0x0A flags1 bit1 hold chain; net-re 5.61].
-	_deploy_presenter = NovaDeployScreenPresenter.new()
+	_deploy_presenter = DeployScreenPresenter.new()
 	_deploy_presenter.name = "DeployScreenPresenter"
 	add_child(_deploy_presenter)
 	_deploy_presenter.setup(_world, _hud if _hud != null else self)
@@ -183,7 +183,7 @@ func _ready() -> void:
 	_world.join_deploy_pick_required.connect(_on_join_deploy_pick_required)
 	_world.join_admission_ready.connect(_on_join_admission_ready)
 	_world.session_lost.connect(_on_session_lost)
-	_hud_presenter = NovaGameHudPresenter.new()
+	_hud_presenter = GameHudPresenter.new()
 	_hud_presenter.name = "GameHudPresenter"
 	add_child(_hud_presenter)
 	_hud_presenter.setup(_world, _player_presenter, _hud if _hud != null else self)
@@ -204,7 +204,7 @@ func _ready() -> void:
 		_world.mission_effects.connect(_on_shell_mission_effects)
 	# Editor-managed runs pass an exact process-local directory. It wins over
 	# persisted settings but is never written back.
-	var dir := NovaLaunchFlags.resource_dir(ResourceDirSettings.get_resource_dir())
+	var dir := LaunchFlags.resource_dir(ResourceDirSettings.get_resource_dir())
 	if dir.is_empty():
 		_request_resource_dir()
 		return
@@ -214,7 +214,7 @@ func _ready() -> void:
 		return
 	# F6 is still the real standalone game and normal loading presentation; it
 	# only selects the exact saved top-level loose BMS instead of an archive row.
-	var loose_mission := NovaLaunchFlags.loose_mission()
+	var loose_mission := LaunchFlags.loose_mission()
 	if not loose_mission.is_empty():
 		start_loose_mission(loose_mission)
 		return
@@ -261,9 +261,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		return
 	if not key.pressed or key.echo:
 		return
-	# F11 fullscreen — the core-engine window concept (NovaWindow), shared with ONED.
-	if NovaWindow.is_toggle_event(event):
-		NovaWindow.toggle_fullscreen(get_window())
+	# F11 fullscreen — the core-engine window concept (WindowState), shared with ONED.
+	if WindowState.is_toggle_event(event):
+		WindowState.toggle_fullscreen(get_window())
 		get_viewport().set_input_as_handled()
 		return
 	if key.keycode == CHANGE_DIR_KEY and _can_summon_dir_picker():
@@ -313,7 +313,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 func toggle_debug_overlay() -> void:
 	if _debug_overlay == null:
 		_debug_overlay = DebugOverlayScript.new(
-				NovaDebugOverlay.DEFAULT_CONFIG_PATH,
+				DebugOverlay.DEFAULT_CONFIG_PATH,
 				get_debug_session())
 		_debug_overlay.name = "DebugOverlay"
 		var mount: Node = _hud if _hud != null else self
@@ -366,7 +366,7 @@ func pick_at_crosshair() -> void:
 	var row := _pick_list.add(pick)
 	if row < 0:
 		_show_pick_toast("Pick list full (%d) — remove one on the F3 Entities page." %
-				NovaDebugPickList.MAX_PICKS)
+				DebugPickList.MAX_PICKS)
 		return
 	var pick_name := String(pick.get("name", ""))
 	if pick_name.is_empty():
@@ -395,10 +395,10 @@ func _show_pick_toast(text: String) -> void:
 	tween.tween_callback(label.queue_free)
 
 
-func get_debug_overlay() -> NovaDebugOverlay:
+func get_debug_overlay() -> DebugOverlay:
 	return _debug_overlay if _debug_overlay != null \
 			and is_instance_valid(_debug_overlay) else null
-func get_debug_session() -> NovaDebugSession:
+func get_debug_session() -> DebugSession:
 	return get_game_debug_adapter().get_debug_session()
 func get_game_debug_adapter() -> GameDebugAdapter:
 	if _debug_adapter == null:
@@ -509,7 +509,7 @@ func _current_effect_world():
 
 
 # Mission-effect passthrough + the last-text read seam: the surface lives on the
-# shared NovaGameHudPresenter (queued until the lazy HUD exists); these stay callable
+# shared GameHudPresenter (queued until the lazy HUD exists); these stay callable
 # on the shell for drains routed here and for the parity tests (ADR 0018).
 func apply_mission_effects(effects: Array) -> void:
 	if _hud_presenter != null:
@@ -533,7 +533,7 @@ func _can_summon_dir_picker() -> bool:
 # the shell holds no root) so boot continuations can gate on it.
 func _enter_menu(dir: String) -> bool:
 	if _root == null or _root.get_root_dir() != dir:
-		var root := mount_boot_root(dir, NovaLaunchFlags.loose_root_allowed())
+		var root := mount_boot_root(dir, LaunchFlags.loose_root_allowed())
 		if root == null:
 			_request_resource_dir()
 			return false
@@ -567,13 +567,13 @@ func _wire_shell() -> void:
 	# each driven by a companion the shell delegates to (whichever owns the loaded menu).
 	_mp_companion = MpMenuCompanion.new()
 	_player_info_companion = PlayerInfoMenuCompanion.new()
-	if ClassDB.class_exists("NovaLanSession"):
-		_lan_session = ClassDB.instantiate("NovaLanSession")
+	if ClassDB.class_exists("LanSession"):
+		_lan_session = ClassDB.instantiate("LanSession")
 		_lan_session.name = "LanSession"
 		add_child(_lan_session)
 		_mp_companion.set_lan_session(_lan_session)
 	else:
-		push_warning("MainGame: NovaLanSession is unavailable; LAN browsing is disabled")
+		push_warning("MainGame: LanSession is unavailable; LAN browsing is disabled")
 	_menu_shell.add_companion(_mp_companion)
 	_menu_shell.add_companion(_player_info_companion)
 	_net.wire_menu_companions(_mp_companion)
@@ -597,7 +597,7 @@ func _on_avatar_chosen(profile: Dictionary) -> void:
 	set_local_player_profile(profile)
 	var typed_name := String(profile.get("name", "")).strip_edges()
 	if not typed_name.is_empty():
-		NovaPlayerProfile.save_callsign(typed_name)
+		PlayerProfile.save_callsign(typed_name)
 
 
 func _on_crosshair_style_changed(style: int) -> void:
@@ -605,7 +605,7 @@ func _on_crosshair_style_changed(style: int) -> void:
 		_hud_presenter.set_crosshair_style(style)
 
 
-# The armory key while in-world: the shared NovaArmoryPresenter opens weapon.mnu's
+# The armory key while in-world: the shared ArmoryPresenter opens weapon.mnu's
 # WEAPON screen over LIVE play when the player stands in an armory zone — the
 # world keeps ticking underneath (State.ARMORY rides the presenter's opened signal)
 # [orig: useitem action 177 -> UI_OpenMenuScreen("weapon.mnu", "WEAPON")
@@ -627,7 +627,7 @@ func _try_toggle_mount() -> bool:
 	var runtime = _current_runtime()
 	if runtime == null:
 		return false
-	var sim: NovaSimulation = runtime.get_sim()
+	var sim: Simulation = runtime.get_sim()
 	if sim == null:
 		return false
 	return sim.local_player_toggle_mount()
@@ -651,7 +651,7 @@ func _request_resource_dir() -> void:
 
 func _on_dir_selected(dir: String) -> void:
 	_cleanup_picker()
-	apply_picked_resource_dir(dir, not NovaLaunchFlags.resource_dir().is_empty())
+	apply_picked_resource_dir(dir, not LaunchFlags.resource_dir().is_empty())
 
 
 ## The picker's accept leg. `editor_managed` is resolved from --resource-dir at
@@ -661,7 +661,7 @@ func _on_dir_selected(dir: String) -> void:
 ## the same ADR-0018 reason as mount_boot_root; returns false when the pick
 ## would not mount (the picker is re-raised).
 func apply_picked_resource_dir(dir: String, editor_managed: bool) -> bool:
-	var root := mount_boot_root(dir, NovaLaunchFlags.loose_root_allowed())
+	var root := mount_boot_root(dir, LaunchFlags.loose_root_allowed())
 	if root == null:
 		_request_resource_dir()
 		return false
@@ -681,12 +681,12 @@ func apply_picked_resource_dir(dir: String, editor_managed: bool) -> bool:
 ## [orig: PFF_OpenAllArchives @ 0x4a4310; Game_InitSubsystems @ 0x4a6f44].
 ## Warns and returns null on failure. Public and parameterized so the fallback
 ## contract is testable without process arguments (ADR 0018).
-func mount_boot_root(dir: String, allow_loose_root: bool) -> NovaResourceRoot:
-	var root := NovaResourceRoot.new()
-	var expansion := NovaLaunchFlags.expansion(ResourceDirSettings.get_expansion())
-	var game := NovaLaunchFlags.game(ResourceDirSettings.get_game())
+func mount_boot_root(dir: String, allow_loose_root: bool) -> ResourceRoot:
+	var root := ResourceRoot.new()
+	var expansion := LaunchFlags.expansion(ResourceDirSettings.get_expansion())
+	var game := LaunchFlags.game(ResourceDirSettings.get_game())
 	var err: int = root.mount_runtime(
-			dir, expansion, NovaLaunchFlags.loose_override_enabled(), game)
+			dir, expansion, LaunchFlags.loose_override_enabled(), game)
 	if err != OK:
 		# ERR_FILE_NOT_FOUND is specifically the zero-archives fatal; other
 		# errors (missing dir, unreadable root) fail the loose mount too.
@@ -707,7 +707,7 @@ func mount_boot_root(dir: String, allow_loose_root: bool) -> NovaResourceRoot:
 # (the picker flow), where retail shows a MessageBox and exits. On the
 # sanctioned loose-root play-test mount an authoring extract is expectedly
 # partial, so the same report warns instead of erroring.
-func _report_missing_boot_resources(root: NovaResourceRoot) -> void:
+func _report_missing_boot_resources(root: ResourceRoot) -> void:
 	for name in root.list_missing_boot_resources():
 		var text := "MainGame: boot-required resource missing: %s — retail: %s" \
 				% [name, root.boot_resource_failure_text(name)]
@@ -830,7 +830,7 @@ func _show_loading_screen(load_info: Dictionary) -> void:
 		_loading_layer.name = "LoadingLayer"
 		_loading_layer.layer = 3  # above MenuLayer (2): nothing overdraws the load
 		add_child(_loading_layer)
-	_loading_screen = NovaLoadingScreen.new()
+	_loading_screen = LoadingScreen.new()
 	_loading_screen.name = "LoadingScreen"
 	_loading_layer.add_child(_loading_screen)
 	_loading_screen.setup(_root, load_info)

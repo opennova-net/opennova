@@ -11,7 +11,7 @@
   0023's "the queue itself (a device-era artifact) is not reproduced" at
   stage R3 (the queues carry the pass ORDER, and the order is the parity);
   supersedes ADR 0028 decision 5's standing rule ("GDScript in
-  `godot/adapter/` wires, adapts, and presents") for the GAME runtime at
+  `godot/src/` wires, adapts, and presents") for the GAME runtime at
   stage R1 — GDScript remains the authoring language of ONED; narrows the
   Control-tree menu presentation (the PR #68 lineage) to authoring-only at
   stage R2. ADR 0016's principle ("engine behavior does not live in

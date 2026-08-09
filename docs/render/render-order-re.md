@@ -5,9 +5,9 @@ batch queues, the sort keys, the render-state stack, the technique-class
 selection, and the frame's pass sequence, witnessed in retail `Jointops.exe`
 (imagebase `0x400000`, IDB `Jointops.exe.kong.i64`). Implementing code:
 `engine/runtime/renderer` (`render_order`, this slice's port; `material_classify` /
-`object_shader_template` from REN-2), `godot/adapter/object/nova_object_model.gd`
+`object_shader_template` from REN-2), `godot/src/object/nova_object_model.gd`
 + `nova_object_shader_cache.cpp` (ladder application),
-`godot/adapter/environment/{nova_celestial,nova_water}.gd` (the generalized
+`godot/src/environment/{nova_celestial,nova_water}.gd` (the generalized
 priority ladder). Landed by maturity REN-3
 ([maturity-program.md](../maturity-program.md); standing rules
 [ADR 0023](../adr/0023-render-visual-parity.md) — the queue machinery is
@@ -26,7 +26,7 @@ pass-class functions in this record.
 | Opaque state-sort (coarse depth slabs → effect index → fine depth, alpha-tested last) | witnessed / reimpl-internal equivalent | `[orig: RenderBatch_QuickSort @ 0x5d8b40]` unsigned-ascending + key layout below; Godot's opaque pass sorts front-to-back with its own state batching — same intent, D-RORD-2 permanent candidate |
 | Frame pass sequence (shadow slots → viewmodel → sky → world → overlays → bloom) | witnessed (confirm-only) | `[orig: Render_ProcessMainSceneFrame @ 0x5ca0f0; Terrain_RenderSceneWithReflection @ 0x5c93a0]`; correspondence row |
 | Viewmodel pass (near-Z 0.05 + viewport depth [0, 0.1], drawn FIRST, own flush) | witnessed / reimpl visible equivalent ported | dedicated shared-world SubViewport at weapon `renderfov`, composited after the finished world so it occludes later global particles like retail's compressed depth band; `[orig: Player_RenderFirstPersonViewModel @ 0x4ded60; Render_SwapProjectionNearZ @ 0x58a8f0; Render_SetViewportDepth01 @ 0x58a7b0]`; D-RORD-4 |
-| EffectWorld particle ordering | BOUNDED deterministic port | `ParticleFrameCompiler` orders emitter AABB centers back-to-front with source-index ties, then particles within each emitter by depth/source index, before adjacent state runs. `NovaParticleCompositorEffect` draws every command sequentially with depth test/no write, so reimpl surface/material sorting cannot reorder packet commands; exact equivalence to retail's recursive alternating-axis/depth-bin order remains open `[orig: CParticleManager_RecursiveSortAndRender @0x5ec980; CParticleManager_RenderBatch @0x5e9890]` |
+| EffectWorld particle ordering | BOUNDED deterministic port | `ParticleFrameCompiler` orders emitter AABB centers back-to-front with source-index ties, then particles within each emitter by depth/source index, before adjacent state runs. `ParticleCompositorEffect` draws every command sequentially with depth test/no write, so reimpl surface/material sorting cannot reorder packet commands; exact equivalence to retail's recursive alternating-axis/depth-bin order remains open `[orig: CParticleManager_RecursiveSortAndRender @0x5ec980; CParticleManager_RenderBatch @0x5e9890]` |
 | EffectWorld pass placement around water | bounded reimpl mapping | retail invokes particle pass A before water and pass B after camera-side transparents; the reimpl currently issues one main-camera POST_TRANSPARENT compositor pass after the world transparents (D-RORD-7) |
 | Glow/envmap duplicate queue (Q3) + bloom flush | witnessed / deferred | `[orig: @ 0x5d93b5..0x5d9447; FrameFX_RenderBloomPass @ 0x582940]`; D-RORD-5 |
 

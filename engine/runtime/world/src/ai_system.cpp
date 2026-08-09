@@ -607,7 +607,7 @@ void AiSystem::pump_mounted_weapon_slots(World &world, uint32_t logic_tick) {
             mount->primary_weapon_owner = EntityHandle{};
             continue;
         }
-        // L's borrowed parent slot is pumped by NovaSimulation with the live
+        // L's borrowed parent slot is pumped by Simulation with the live
         // trigger/reload/scope inputs and first-person event sink. Advancing it
         // here as well would run one slot twice per frame. Remote players and
         // NPC gunners remain owned by this global world pump.

@@ -1,6 +1,6 @@
 extends GutTest
 
-# M9.4 gate: NovaMnuCombo builds a closed TextureButton + selected-text label and an
+# M9.4 gate: MnuCombo builds a closed TextureButton + selected-text label and an
 # in-tree popup styled from LIST_BOX. Options seed from the file or the shell populates
 # them at runtime; selection relays through the menu. The popup never opens in
 # edit_mode.
@@ -20,13 +20,13 @@ const FIXTURE := "res://../fixtures/mnu/all_widgets.mnu"
 const PLAYER_FIXTURE := "res://../fixtures/mnu/jo_player.mnu"
 
 
-func _load_doc(path: String = FIXTURE) -> NovaMnuDocument:
-	var doc := NovaMnuDocument.new()
+func _load_doc(path: String = FIXTURE) -> MnuDocument:
+	var doc := MnuDocument.new()
 	doc.load_from_bytes(FileAccess.get_file_as_bytes(path))
 	return doc
 
 
-func _find_widget(doc: NovaMnuDocument, id: int, wanted: String) -> int:
+func _find_widget(doc: MnuDocument, id: int, wanted: String) -> int:
 	if doc.get_widget_name(id) == wanted:
 		return id
 	for child in doc.get_child_ids(id):
@@ -36,7 +36,7 @@ func _find_widget(doc: NovaMnuDocument, id: int, wanted: String) -> int:
 	return -1
 
 
-func _widget_named(doc: NovaMnuDocument, wanted: String) -> int:
+func _widget_named(doc: MnuDocument, wanted: String) -> int:
 	for screen_id in doc.get_screen_ids():
 		var found := _find_widget(doc, doc.get_screen_root_id(screen_id), wanted)
 		if found >= 0:
@@ -44,8 +44,8 @@ func _widget_named(doc: NovaMnuDocument, wanted: String) -> int:
 	return -1
 
 
-func _build_doc_menu(doc: NovaMnuDocument, edit_mode: bool = false) -> NovaMnuMenu:
-	var menu := NovaMnuMenu.new()
+func _build_doc_menu(doc: MnuDocument, edit_mode: bool = false) -> MnuMenu:
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
 	menu.size = Vector2(800, 600)
@@ -54,15 +54,15 @@ func _build_doc_menu(doc: NovaMnuDocument, edit_mode: bool = false) -> NovaMnuMe
 	return menu
 
 
-func _build_menu(edit_mode: bool = false, path: String = FIXTURE) -> NovaMnuMenu:
+func _build_menu(edit_mode: bool = false, path: String = FIXTURE) -> MnuMenu:
 	return _build_doc_menu(_load_doc(path), edit_mode)
 
 
-func _combo(menu: NovaMnuMenu) -> NovaMnuCombo:
-	return menu.find_child("ServerList", true, false) as NovaMnuCombo
+func _combo(menu: MnuMenu) -> MnuCombo:
+	return menu.find_child("ServerList", true, false) as MnuCombo
 
 
-func _overlay(menu: NovaMnuMenu) -> Control:
+func _overlay(menu: MnuMenu) -> Control:
 	# The popup mount: a transparent full-menu catcher parked on the menu itself.
 	var overlays: Array[Node] = []
 	for child in menu.get_children():
@@ -86,7 +86,7 @@ func test_combo_builds_and_seeds() -> void:
 	var menu := _build_menu()
 	var combo := _combo(menu)
 	assert_not_null(combo, "ServerList built")
-	assert_true(combo is TextureButton, "NovaMnuCombo is a TextureButton")
+	assert_true(combo is TextureButton, "MnuCombo is a TextureButton")
 	assert_eq(combo.get_item_count(), 3, "three LIST_BOX items seeded")
 	assert_eq(combo.get_item_text(0), "Easy Server", "first option text")
 	assert_eq(combo.get_item_value(0), "0", "first option value")
@@ -261,8 +261,8 @@ func test_combo_single_open_per_menu() -> void:
 	# Opening a combo closes the currently open one first
 	# [orig: combobox_handle_event @ 0x65c210 sends the active combo its toggle].
 	var menu := _build_menu(false, PLAYER_FIXTURE)
-	var nat := menu.find_child("NATIONALITY", true, false) as NovaMnuCombo
-	var div := menu.find_child("DIVISION", true, false) as NovaMnuCombo
+	var nat := menu.find_child("NATIONALITY", true, false) as MnuCombo
+	var div := menu.find_child("DIVISION", true, false) as MnuCombo
 	assert_not_null(nat, "NATIONALITY built")
 	assert_not_null(div, "DIVISION built")
 	nat.set_items(["USA", "Indonesia"])
@@ -283,8 +283,8 @@ func test_combo_outside_press_closes_and_nothing_else_opens() -> void:
 	# is the user-visible bug: pre-fix, the press opened the sibling's dropdown
 	# while the first stayed open, stacking translucent lists.
 	var menu := _build_menu(false, PLAYER_FIXTURE)
-	var nat := menu.find_child("NATIONALITY", true, false) as NovaMnuCombo
-	var div := menu.find_child("DIVISION", true, false) as NovaMnuCombo
+	var nat := menu.find_child("NATIONALITY", true, false) as MnuCombo
+	var div := menu.find_child("DIVISION", true, false) as MnuCombo
 	nat.set_items(["USA", "Indonesia"])
 	nat.open_popup()
 	var overlay := _overlay(menu)
@@ -303,7 +303,7 @@ func test_combo_press_on_own_cell_keeps_popup_open() -> void:
 	# swallowed without closing (the original only closes when the point is outside
 	# BOTH the cell and the list) [orig: combobox_handle_event @ 0x65c290].
 	var menu := _build_menu(false, PLAYER_FIXTURE)
-	var nat := menu.find_child("NATIONALITY", true, false) as NovaMnuCombo
+	var nat := menu.find_child("NATIONALITY", true, false) as MnuCombo
 	nat.set_items(["USA", "Indonesia"])
 	nat.open_popup()
 	var overlay := _overlay(menu)
@@ -333,7 +333,7 @@ func test_combo_popup_fallback_when_no_listbox_rect() -> void:
 	# A bare combo with no owning menu (shell/test builds; the original has no such
 	# case) keeps the legacy child-of-combo popup: dropped below, clamped to the
 	# window, scrolling. No overlay exists on this path.
-	var combo := NovaMnuCombo.new()
+	var combo := MnuCombo.new()
 	add_child_autofree(combo)
 	combo.set_size(Vector2(120, 20))
 	var many: Array = []
@@ -373,7 +373,7 @@ func test_combo_popup_clamps_and_scrolls_long_list() -> void:
 	var natural := 200.0 * row0.custom_minimum_size.y
 	assert_lt(popup.size.y, natural, "popup height clamped below the natural list height")
 	assert_gt(popup.size.y, 0.0, "popup keeps a positive height")
-	var scroll := popup.find_child("Scrollbar", true, false) as NovaMnuScroll
+	var scroll := popup.find_child("Scrollbar", true, false) as MnuScroll
 	assert_not_null(scroll, "authored LIST_BOX scrollbar replaces the native fallback")
 	var viewport := popup.find_child("ScrollViewport", true, false) as Control
 	var rows := popup.find_child("Rows", true, false) as Control
@@ -387,7 +387,7 @@ func test_combo_popup_clamps_and_scrolls_long_list() -> void:
 
 func test_shipped_combo_honors_scrollbar_rect_edge_pad_and_sound_bank() -> void:
 	var menu := _build_menu(false, "res://../fixtures/mnu/jo_weapon.mnu")
-	var combo := menu.find_child("PRIMARY", true, false) as NovaMnuCombo
+	var combo := menu.find_child("PRIMARY", true, false) as MnuCombo
 	assert_not_null(combo, "shipped PRIMARY combo built")
 	var items := PackedStringArray()
 	for i in range(12):
@@ -396,7 +396,7 @@ func test_shipped_combo_honors_scrollbar_rect_edge_pad_and_sound_bank() -> void:
 	watch_signals(menu)
 	combo.open_popup()
 	var popup := combo.get_popup()
-	var scroll := popup.find_child("Scrollbar", true, false) as NovaMnuScroll
+	var scroll := popup.find_child("Scrollbar", true, false) as MnuScroll
 	var viewport := popup.find_child("ScrollViewport", true, false) as Control
 	assert_not_null(scroll, "shipped authored scrollbar built")
 	assert_eq(scroll.position, Vector2(180, 1), "SCROLLBAR POSITION origin honored")

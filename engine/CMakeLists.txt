@@ -18,7 +18,7 @@
 # formats deliberately: vfs consumes pff/scr/bfc1 and refs consumes
 # env/cbin/def/avatars/threedi/mission_format/mnu; only io is at the bottom.
 #
-# Both CMake roots (the repo root and godot/adapter) add this directory; the
+# Both CMake roots (the repo root and godot/src) add this directory; the
 # including root must have defined opennova_sqlite (third_party/sqlite) first —
 # the service target links it.
 

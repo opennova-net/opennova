@@ -11,7 +11,7 @@ extends SceneTree
 # The persisted dir/expansion are snapshotted and restored on exit.
 
 const LOAD_TIMEOUT_WALL_SECONDS := 240.0
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
 const MountGuard := preload("res://tests/perf_probe_mount_guard.gd")
 
 const REQUIRED_ROWS := ["world", "sim", "present", "occl_apply", "hud"]
@@ -150,7 +150,7 @@ func _census_models() -> void:
 		var node: Node = stack.pop_back()
 		for child in node.get_children():
 			stack.push_back(child)
-		if not (node is NovaObjectModel):
+		if not (node is ObjectModel):
 			continue
 		total += 1
 		if not (node as Node3D).is_visible_in_tree():

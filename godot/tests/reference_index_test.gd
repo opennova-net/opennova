@@ -1,13 +1,13 @@
 extends GutTest
 
-# NovaReferenceIndex (godot/adapter/refs): engine/base/refs bound over a mounted
-# NovaResourceRoot. Covers on-demand references_of with resolution annotation,
+# ReferenceIndex (godot/src/refs): engine/base/refs bound over a mounted
+# ResourceRoot. Covers on-demand references_of with resolution annotation,
 # the lazy whole-root build behind referrers_of, kind-specific resolve
 # candidates (texture fallbacks vs header-ref extensions vs unprobed name-table
 # kinds), the explicit items.def probe (the index scan skips kindless files),
 # and cache-epoch self-invalidation.
 
-# NovaResourceRoot rejects user:// roots by design, so the fixture root lives
+# ResourceRoot rejects user:// roots by design, so the fixture root lives
 # in the OS cache dir (the same convention as the workstation tests).
 static var ROOT_DIR := OS.get_cache_dir().path_join("opennova_test_reference_index")
 
@@ -49,10 +49,10 @@ func _write_text(name: String, body: String) -> void:
 	f.close()
 
 
-func _make_index() -> NovaReferenceIndex:
-	var root := NovaResourceRoot.new()
+func _make_index() -> ReferenceIndex:
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(ROOT_DIR), OK)
-	var index := NovaReferenceIndex.new()
+	var index := ReferenceIndex.new()
 	index.set_resource_root(root)
 	return index
 
@@ -149,7 +149,7 @@ func test_cache_epoch_invalidates_the_graph() -> void:
 	assert_eq(index.referrers_of("Wcrate5").size(), 1)
 	# Re-point the only item at a different graphic, as an external edit + epoch bump.
 	_write_text("items.def", "begin \"Crate\"\n  id 10\n  type object\n  graphic OtherModel\nend\n")
-	NovaResourceRoot.bump_cache_epoch()
+	ResourceRoot.bump_cache_epoch()
 	assert_false(index.is_built(), "an epoch bump invalidates on the next query")
 	assert_eq(index.referrers_of("Wcrate5").size(), 0, "stale edges are gone after the rebuild")
 	assert_eq(index.referrers_of("OtherModel").size(), 1, "the fresh edge is served")

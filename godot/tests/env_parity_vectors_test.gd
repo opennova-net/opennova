@@ -4,8 +4,8 @@ extends GutTest
 # ENG-1 — environment parity vectors (docs/maturity-program.md, ENG track).
 #
 # Pins the GDScript-visible outputs of the environment stack —
-# NovaEnvironment / NovaWeather / NovaSky / NovaWater (+ the reachable
-# NovaCelestial math via EnvFile statics), godot/adapter/environment/*.gd —
+# MissionEnvironment / Weather / SkyDome / Water (+ the reachable
+# Celestial math via EnvFile statics), godot/src/environment/*.gd —
 # against committed vectors over a deterministic in-code corpus, so ENG-2 can
 # port the math into engine/formats/env and delete the GDScript with these staying green
 # pre/post. Structure mirrors tests/novaworld/nw_codec_identity_test.cpp (the
@@ -70,7 +70,7 @@ extends GutTest
 #   sky/mesh (counts + witnessed winding) byte-identical.
 #   Water leg 2026-07-06 (env #28 fixed / #31 minted-and-closed / #29-#30
 #   minted): NEW water/noise (the per-frame noise color + DuDv texture heads
-#   through NovaWaterCore [orig: Water_GenerateNoiseTextures @ 0x5c0360],
+#   through WaterCore [orig: Water_GenerateNoiseTextures @ 0x5c0360],
 #   cross-pinned byte-equal to the env_render_unit ctest landmarks) and NEW
 #   water/uv_state [orig: render_water_surface @ 0x5c3348..0x5c33db];
 #   c*/water_params re-shaped: the u_scroll_speed magic-factor float died with
@@ -84,7 +84,7 @@ extends GutTest
 #   the invented dir*2000*height_scale model), celestial/body_alpha (the
 #   witnessed sun overcast/SunDim and moon fog-distance folds), celestial/glow
 #   (the dot^4/2 glare chain) and celestial/occlusion (the #14 window +
-#   dead-band hysteresis + jitter pattern through NovaGlareOcclusion,
+#   dead-band hysteresis + jitter pattern through GlareOcclusion,
 #   asset-free [orig: render_skybox_sun_glow @ 0x5acd00]).
 #   celestial/glare_sweep + glare_occlusion (the dot^32 curve @ 0x5ad610,
 #   still live via its sub_5AD8B0 caller) stayed byte-identical.
@@ -102,14 +102,14 @@ extends GutTest
 #   sky/cloud ramps now run through their retail WeatherColorBlock pipelines
 #   and per-tick writeback. Fog and skyfog chase the undoubled authored bytes;
 #   the horizon blend precedes the saturating render-space double
-#   [orig: Environment_UpdateWeatherTick @ 0x57ef97..0x57f1b1], and NovaSky
+#   [orig: Environment_UpdateWeatherTick @ 0x57ef97..0x57f1b1], and SkyDome
 #   consumes that same final skyfog as the frame clear [orig: sub_579CB0
 #   @ 0x579cb0]. The 12 listed weather rows moved only in their fog tokens;
 #   ten low-fog grid rows moved only the skyfog token to the already-pinned
 #   horizon-blended frame-clear value. D-RLIT-1 records the same witness.
 #   docs/render/render-lighting-re.md.
 #   Env divergence #8 closure 2026-07-21: global water/cloud/static/lightning
-#   colors now take envscale through the NovaEnvironment engine view while
+#   colors now take envscale through the MissionEnvironment engine view while
 #   EnvFile keeps raw authored bytes for round-trip. The cfg1 (envscale .5)
 #   grid moves only its water and cloud-tint tokens plus the derived lit-water
 #   rows, and sky/flat moves to the same scaled cloud byte; the focused
@@ -129,17 +129,17 @@ extends GutTest
 #   blends. Encoded as float arrays in EXPECTED_FLOATS.
 #
 # NOT PINNED (honest gaps, no fake greens):
-# - NovaCelestial node-level MODEL application (materials/tints on loaded
-#   3DIs): needs a NovaResourceRoot with retail models (asset-gated; with no
+# - Celestial node-level MODEL application (materials/tints on loaded
+#   3DIs): needs a ResourceRoot with retail models (asset-gated; with no
 #   bodies the process path returns before the pushes). The MATH is fully
-#   vectored through the statics + NovaGlareOcclusion (celestial/body_*,
+#   vectored through the statics + GlareOcclusion (celestial/body_*,
 #   celestial/glow, celestial/occlusion); the terrain ray march itself needs
 #   a loaded terrain (the no-terrain path = unobstructed is the pinned case).
-# - NovaWater terrain-fallback height rung: needs a loaded NovaTerrainData
+# - Water terrain-fallback height rung: needs a loaded TerrainData
 #   (asset). The env-driven and override rungs ARE pinned.
-# - NovaWeather internal state (PRNG word, sway rings, fade timers) is
+# - Weather internal state (PRNG word, sway rings, fade timers) is
 #   private; pinned only through public getters and the colors written back
-#   to NovaEnvironment (ADR 0018 — no private pokes; ratchet stays flat).
+#   to MissionEnvironment (ADR 0018 — no private pokes; ratchet stays flat).
 #
 # REGEN (the dumped-ONCE event, or after a witnessed change):
 #   OPENNOVA_ENV_VECTORS_DUMP=1 "$GODOT_BIN" --headless --path godot \
@@ -148,11 +148,11 @@ extends GutTest
 # loudly so a dump run is never mistaken for a green run.
 # =============================================================================
 
-const NovaEnvironmentScript = preload("res://adapter/environment/nova_environment.gd")
-const NovaWeatherScript = preload("res://adapter/environment/nova_weather.gd")
-const NovaSkyScript = preload("res://adapter/environment/nova_sky.gd")
-const NovaWaterScript = preload("res://adapter/environment/nova_water.gd")
-const NovaCelestialScript = preload("res://adapter/environment/nova_celestial.gd")
+const NovaEnvironmentScript = preload("res://src/environment/nova_environment.gd")
+const NovaWeatherScript = preload("res://src/environment/nova_weather.gd")
+const NovaSkyScript = preload("res://src/environment/nova_sky.gd")
+const NovaWaterScript = preload("res://src/environment/nova_water.gd")
+const NovaCelestialScript = preload("res://src/environment/nova_celestial.gd")
 
 # The engine tick [docs/engine-primer.md: 62 Hz].
 const TICK := 1.0 / 62.0
@@ -468,7 +468,7 @@ static func _env_cell_bytes(env_node: Node) -> String:
 # Collection groups. Each writes stable string keys into the two tables.
 
 func _collect_env_grid(bytes: Dictionary, floats: Dictionary) -> void:
-	# NovaWater's active render path is camera-gated. Keep X/Z at zero so the
+	# Water's active render path is camera-gated. Keep X/Z at zero so the
 	# existing UV vectors retain their asset-free reference frame.
 	_add_camera(Vector3(0.0, 27.0, 0.0))
 	for cfg_index in 3:
@@ -481,7 +481,7 @@ func _collect_env_grid(bytes: Dictionary, floats: Dictionary) -> void:
 		water.environment_path = NodePath("../" + env_name)
 		add_child_autofree(water)
 		# Keep this color-vector fixture independent of cfg0's faithful
-		# no-water sentinel: surface enable/disable has focused NovaWater
+		# no-water sentinel: surface enable/disable has focused Water
 		# coverage, while this grid intentionally samples the lit-water color.
 		if not water.is_water_active():
 			water.set_height_override(7.0)
@@ -514,7 +514,7 @@ func _collect_env_grid(bytes: Dictionary, floats: Dictionary) -> void:
 				env_node.get_fog_level(),
 			]
 			# Node-level lit water color for the cell (delegates the EnvFile
-			# statics; pinned at the NovaWater output).
+			# statics; pinned at the Water output).
 			simulate(water, 1, TICK)
 			var lit: Vector3 = water.water_material.get_shader_parameter("u_water_color")
 			# u_water_murk (REN-4 rename from u_water_alpha; the same env murk
@@ -690,7 +690,7 @@ func _collect_water_mesh(bytes: Dictionary, floats: Dictionary) -> void:
 	# walk screen space), so the fixture lives in a code-fixed SubViewport: a
 	# fresh CI runner and a workstation with a persisted user:// window layout
 	# size the GUT root viewport differently, and the golden must not depend
-	# on that. NovaWater resolves its camera through its OWN viewport
+	# on that. Water resolves its camera through its OWN viewport
 	# (get_viewport().get_camera_3d() and Camera3D.current are per-viewport),
 	# so root-viewport cameras from earlier collections are irrelevant in here.
 	var strip_vp := SubViewport.new()
@@ -745,16 +745,16 @@ func _collect_water_mesh(bytes: Dictionary, floats: Dictionary) -> void:
 		pre_surfaces, positions.size(), indices.size(), " ".join(index_head)]
 	# First and last vertex world positions — pins the Godot<->render basis
 	# mapping (godot == render componentwise) and the march extent end to end
-	# through NovaWaterCore; the y components pin the plane height riding the
+	# through WaterCore; the y components pin the plane height riding the
 	# rows (7.0), not the node transform.
 	var p0 := positions[0]
 	var p_last := positions[positions.size() - 1]
 	floats["water/strip"] = [p0.x, p0.y, p0.z, p_last.x, p_last.y, p_last.z]
 
-	# The witnessed noise texture pair, asset-free through NovaWaterCore
+	# The witnessed noise texture pair, asset-free through WaterCore
 	# [orig: Water_GenerateNoiseTextures @ 0x5c0360; init tables from the boot
 	# PRNG state @ 0x5c01a0]: first 8 RGBA bytes of each at counters 0 and 7.
-	var core := NovaWaterCore.new()
+	var core := WaterCore.new()
 	core.update(0)
 	var color_head := core.get_color_rgba8().slice(0, 8)
 	var normal_head := core.get_normal_rgba8().slice(0, 8)
@@ -766,7 +766,7 @@ func _collect_water_mesh(bytes: Dictionary, floats: Dictionary) -> void:
 	# The witnessed UV transform (scale, bias, offset_u, offset_v) after 8
 	# ticks at sky_speed 15 [orig: render_water_surface @ 0x5c3348..0x5c33db]
 	# via the weather core's shared accumulators.
-	var scroll := NovaWeatherCore.new()
+	var scroll := WeatherCore.new()
 	for _i in 8:
 		scroll.tick_cloud_scroll(15.0)
 	var uv_state: Vector4 = scroll.get_water_uv_state(100.0, 200.0, 1024.0)
@@ -817,7 +817,7 @@ func _collect_celestial(bytes: Dictionary, floats: Dictionary) -> void:
 	# The env #14 occlusion state machine, asset-free: window fill/decay and
 	# the dead-band hysteresis at fog 1000, plus this frame's jitter offsets
 	# [orig: @ 0x5acd9e..0x5acf7f].
-	var occ := NovaGlareOcclusion.new()
+	var occ := GlareOcclusion.new()
 	var jitter_a: Vector3 = occ.get_ray_jitter_a()
 	var jitter_b: Vector3 = occ.get_ray_jitter_b()
 	var occ_floats: Array = [occ.get_ray_length(),
@@ -832,31 +832,31 @@ func _collect_celestial(bytes: Dictionary, floats: Dictionary) -> void:
 
 
 func _collect_statics(bytes: Dictionary, floats: Dictionary) -> void:
-	# NovaColorSmoother snap/step sequences [orig: interpolate_weather_color
+	# ColorSmoother snap/step sequences [orig: interpolate_weather_color
 	# @ 0x57d9e0] — guards the statics' GDScript-visible contract during the
 	# ENG-2 reimpl thinning.
-	var decay := NovaColorSmoother.new()
+	var decay := ColorSmoother.new()
 	decay.snap(Color(1.0, 0.5, 0.25))
 	var decay_seq := PackedStringArray()
 	for _i in 8:
 		decay_seq.append(_hex_color_c(decay.step(Color(0.0, 0.0, 0.0), 255.0)))
 	bytes["smoother/decay"] = " ".join(decay_seq)
 
-	var rise := NovaColorSmoother.new()
+	var rise := ColorSmoother.new()
 	rise.snap(Color(0.0, 0.0, 0.0))
 	var rise_seq := PackedStringArray()
 	for _i in 8:
 		rise_seq.append(_hex_color_c(rise.step(Color(1.0, 0.75, 0.5), 255.0)))
 	bytes["smoother/rise"] = " ".join(rise_seq)
 
-	var clamped := NovaColorSmoother.new()
+	var clamped := ColorSmoother.new()
 	clamped.snap(Color(1.0, 0.0, 0.0))
 	var clamped_seq := PackedStringArray()
 	for _i in 4:
 		clamped_seq.append(_hex_color_c(clamped.step(Color(0.0, 0.0, 0.0), 1.0)))
 	bytes["smoother/clamped"] = " ".join(clamped_seq)
 
-	var snapper := NovaColorSmoother.new()
+	var snapper := ColorSmoother.new()
 	snapper.snap(Color(0.2, 0.4, 0.6))
 	bytes["smoother/snap_get"] = _hex_color_c(snapper.get_current())
 

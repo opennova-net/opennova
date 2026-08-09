@@ -15,8 +15,8 @@
 // Consumers: infantry footsteps (surface 3 = snow picks the SS*FootSnow
 // slots); the ammo impact table reuses the same sampler with a +4 shift.
 //
-// Godot-agnostic: raw pointer + scalars; the embedder (NovaSimulation) points this
-// at NovaTerrainData's decoded charmap and the TRN sector grid.
+// Godot-agnostic: raw pointer + scalars; the embedder (Simulation) points this
+// at TerrainData's decoded charmap and the TRN sector grid.
 
 #include <cstdint>
 

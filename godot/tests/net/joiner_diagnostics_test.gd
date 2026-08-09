@@ -16,7 +16,7 @@ func after_each() -> void:
 
 
 func test_joiner_network_diagnostics_are_explicitly_opt_in() -> void:
-	var sim := NovaSimulation.new()
+	var sim := Simulation.new()
 	OS.set_environment(DIAGNOSTICS_ENV, "")
 	assert_true(sim.has_method("is_joiner_network_diagnostics_enabled"),
 			"the diagnostic gate has a public observation seam")

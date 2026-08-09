@@ -2,7 +2,7 @@ extends GutTest
 
 ## Document tests for the Sound workspace controller: build -> save -> reload
 ## round-trip, undo/redo, the no-op-edit guard, and a guarded byte-exact check
-## against the real JO fixture (repo fixtures/lwf/00TRa.LWF) via the NovaLwfData
+## against the real JO fixture (repo fixtures/lwf/00TRa.LWF) via the LwfData
 ## GDExtension wrapper.
 
 const SoundControllerScript = preload("res://modtools/sound/sound_controller.gd")

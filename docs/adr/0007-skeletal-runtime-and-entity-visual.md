@@ -7,7 +7,7 @@ Status: accepted (branch `unified-edit-history`). Supersedes the "main-body skel
 
 ADR 0006 unified the mission runtime + present pass but left the largest seam open: the main-body
 skeletal runtime did not exist. `libs/bad` + `libs/adm` (parsers now `engine/formats/bad` +
-`engine/formats/adm` — ADR 0030; record: [../anim/adm-bad-format-re.md](../anim/adm-bad-format-re.md)) were parse-only, `NovaObjectData` dropped the
+`engine/formats/adm` — ADR 0030; record: [../anim/adm-bad-format-re.md](../anim/adm-bad-format-re.md)) were parse-only, `ObjectData` dropped the
 `.3di` skin weights, no `Skeleton3D`/`Skin` was ever built, and `mission_present_pass.gd::apply_body_anim`
 was a stub, so skinned organics (infantry) rendered frozen at their `.3di` rest pose. This ADR records
 building that runtime and the IDA fidelity grill against `Jointops.exe`.
@@ -23,10 +23,10 @@ chain is `BoneFile_Load @0x40fff0` → `BoneAnim_FindKeyframeAtTime @0x410220` �
 **Libs-first split.** Portable `libs/anim` (`opennova_anim`, depends on `opennova_bad` + `opennova_io`; the
 separate `opennova_adm` target was folded into `libs/anim` in the 2026-07 restructure, and the
 `.adm` parser moved out to `engine/formats/adm` in the 2026-08 placement round — ADR 0030)
-samples `.bad` clips into per-bone local transforms in engine-native (Y-up) space. `NovaSkeletalAnim`
+samples `.bad` clips into per-bone local transforms in engine-native (Y-up) space. `SkeletalAnim`
 (godot-cpp `Resource`) loads `.adm` + `.bad` over the VFS, builds the bind-pose bones, resolves AI body-anim
-slots to clip keys, and exposes `eval_pose(key, seconds)`. `NovaObjectModel` builds the `Skeleton3D` + a
-rest-derived `Skin` and writes the per-frame bone poses. Skin plumbing lives in `NovaObjectData`: skinned
+slots to clip keys, and exposes `eval_pose(key, seconds)`. `ObjectModel` builds the `Skeleton3D` + a
+rest-derived `Skin` and writes the per-frame bone poses. Skin plumbing lives in `ObjectData`: skinned
 surfaces emit `ARRAY_BONES`/`ARRAY_WEIGHTS` remapped through the strip `bone_table`; rigid first-person
 weapon parts "fake-skin" every vertex to their subobject `part_index`, so one `.adm` drives a skinned-arms +
 rigid-gun view model.
@@ -58,7 +58,7 @@ NPCs select a body anim from AI state: `libs/world` `body_anim.h` maps `Entity.a
 selection / drag / undo (ADR 0006 invariant).
 
 **Authoritative skeletal collision consumer.** Organic bullet collision samples this runtime directly from
-simulation state, not from a presentation-node snapshot. `NovaSimulation` keeps one ADM/rest source per
+simulation state, not from a presentation-node snapshot. `Simulation` keeps one ADM/rest source per
 entity so actors sharing a graphic may occupy different clips/playheads, evaluates the primary pose plus
 aim/body overlay (and the authoritative secondary weapon channel when live), resolves FK/rest deformation,
 and emits FINAL world-space fixed matrices through `ICollisionSectionMatrixProvider`. The entity placement
@@ -90,12 +90,12 @@ unknown, while `{valid=true, value=0}` is the real witnessed counter-lean branch
 the pair to the mount target, attachment copies it to the occupant, snapshot/restore preserves it, and
 dismount clears the occupant's mode-driving copy and validity.
 
-`NovaSimulation` translates seat state to `MountMode` once (retail slots 2/5 = seated, slot 3 = gunner),
+`Simulation` translates seat state to `MountMode` once (retail slots 2/5 = seated, slot 3 = gunner),
 builds the authoritative `AimOverlayInputs`, and calls
 `opennova::anim::compute_aim_overlay_angles`. Local pose export/rendering and organic collision consume
 that same selector result. Entity presentation snapshots carry the final body frame plus all nine selected
 overlay angles; `MissionPresentPass` and `WirePresentPass` only adapt that result to
-`NovaObjectModel.set_aim_overlay`, so placed and remote actors do not carry a second config switch or a
+`ObjectModel.set_aim_overlay`, so placed and remote actors do not carry a second config switch or a
 collision-only heuristic. CXLT remains independent metadata: organic COBJ section `i` consumes final bone
 matrix `i`, with no CXLT selection or post-transform.
 

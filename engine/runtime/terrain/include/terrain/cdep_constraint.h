@@ -26,7 +26,7 @@ namespace opennova::terrain {
 constexpr int CDEP_BLOCK_WIDTH = 256;
 constexpr int CDEP_MAX_BLOCK_RANGE_RAW = 32767;
 
-// raw16 quantization, identical to NovaTerrainData::get_depth_raw16 and the
+// raw16 quantization, identical to TerrainData::get_depth_raw16 and the
 // bake guard: truncate height*256 toward zero, clamp to [0, 65535].
 inline uint16_t cdep_height_to_raw16(double height) {
     int raw = static_cast<int>(height * 256.0);

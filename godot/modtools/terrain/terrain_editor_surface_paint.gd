@@ -2,7 +2,7 @@ extends RefCounted
 
 ## Surface-type (charmap) UI metadata for the legend and color swatches. The
 ## paint/sample kernel and heightmap<->map coordinate mapping now live in the
-## C++ NovaTerrainSurfaceMap (sharing engine/formats/foliage's index-grid kernel); this
+## C++ TerrainSurfaceMap (sharing engine/formats/foliage's index-grid kernel); this
 ## file is only the artist-facing label/color table.
 
 const DEFAULT_SURFACE_INDEX := 1

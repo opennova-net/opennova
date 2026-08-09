@@ -8,8 +8,8 @@ const MnuWidgetTreeScript = preload("res://modtools/mnu/mnu_widget_tree.gd")
 const FIXTURE := "res://../fixtures/mnu/widgets.mnu"
 
 
-func _load_doc() -> NovaMnuDocument:
-	var doc := NovaMnuDocument.new()
+func _load_doc() -> MnuDocument:
+	var doc := MnuDocument.new()
 	doc.load_from_bytes(FileAccess.get_file_as_bytes(FIXTURE))
 	return doc
 
@@ -27,8 +27,8 @@ func _collapse_all(item: TreeItem) -> void:
 func test_select_id_expands_collapsed_ancestors() -> void:
 	var doc := _load_doc()
 	var root := doc.get_screen_root_id(doc.get_screen_ids()[0])
-	var win := doc.add_widget(root, NovaMnuDocument.TYPE_WINDOW, Rect2(100, 100, 200, 200))
-	var child := doc.add_widget(win, NovaMnuDocument.TYPE_STATIC, Rect2(10, 10, 50, 30))
+	var win := doc.add_widget(root, MnuDocument.TYPE_WINDOW, Rect2(100, 100, 200, 200))
+	var child := doc.add_widget(win, MnuDocument.TYPE_STATIC, Rect2(10, 10, 50, 30))
 
 	var tree = MnuWidgetTreeScript.new()
 	add_child_autofree(tree)

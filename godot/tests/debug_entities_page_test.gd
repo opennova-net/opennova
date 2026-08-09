@@ -1,6 +1,6 @@
 extends GutTest
 
-const PageScript := preload("res://adapter/debug/pages/debug_entities_page.gd")
+const PageScript := preload("res://src/debug/pages/debug_entities_page.gd")
 
 
 class StubSim:
@@ -42,7 +42,7 @@ class StubSim:
 				if index >= 0 and index < cards.size() else {}
 
 	func get_present_stride() -> int:
-		return NovaSimulation.PF_STRIDE
+		return Simulation.PF_STRIDE
 
 	func get_present_snapshot() -> PackedFloat32Array:
 		var snapshot := PackedFloat32Array()
@@ -83,17 +83,17 @@ class StubSim:
 			type_id: int,
 			position: Vector3) -> PackedFloat32Array:
 		var row := PackedFloat32Array()
-		row.resize(NovaSimulation.PF_STRIDE)
-		row[NovaSimulation.PF_TYPE_ID] = type_id
-		row[NovaSimulation.PF_NET_ID] = net_id
-		row[NovaSimulation.PF_WIRE_HANDLE] = wire_handle
-		row[NovaSimulation.PF_KIND] = 1
-		row[NovaSimulation.PF_INDEX] = net_id
-		row[NovaSimulation.PF_BMS_ID] = 1000 + net_id
-		row[NovaSimulation.PF_POS_X] = position.x
-		row[NovaSimulation.PF_POS_Y] = position.y
-		row[NovaSimulation.PF_POS_Z] = position.z
-		row[NovaSimulation.PF_ALIVE] = 1.0
+		row.resize(Simulation.PF_STRIDE)
+		row[Simulation.PF_TYPE_ID] = type_id
+		row[Simulation.PF_NET_ID] = net_id
+		row[Simulation.PF_WIRE_HANDLE] = wire_handle
+		row[Simulation.PF_KIND] = 1
+		row[Simulation.PF_INDEX] = net_id
+		row[Simulation.PF_BMS_ID] = 1000 + net_id
+		row[Simulation.PF_POS_X] = position.x
+		row[Simulation.PF_POS_Y] = position.y
+		row[Simulation.PF_POS_Z] = position.z
+		row[Simulation.PF_ALIVE] = 1.0
 		return row
 
 
@@ -111,16 +111,16 @@ class StubRuntime:
 
 func _make_page(
 		runtime: StubRuntime,
-		picks: NovaDebugPickList = null) -> DebugEntitiesPage:
+		picks: DebugPickList = null) -> DebugEntitiesPage:
 	add_child_autofree(runtime)
-	var ctx := NovaDebugContext.new()
+	var ctx := DebugContext.new()
 	ctx.runtime_source = func(): return runtime
 	ctx.world_source = func(): return null
 	ctx.pick_list = picks
-	ctx.options = NovaDebugOptionState.new()
-	ctx.session = NovaDebugSession.new()
-	NovaDebugCatalog.install(ctx.session)
-	NovaDebugCatalog.bind_runtime_targets(
+	ctx.options = DebugOptionState.new()
+	ctx.session = DebugSession.new()
+	DebugCatalog.install(ctx.session)
+	DebugCatalog.bind_runtime_targets(
 			ctx.session, ctx.runtime_source, ctx.world_source)
 	ctx.session.set_authority_source(func(): return true)
 	ctx.session.set_edit_unlocked(true)
@@ -170,7 +170,7 @@ func _vehicle_pick() -> Dictionary:
 func test_client_present_rows_keep_order_and_ai_edit_identity() -> void:
 	var runtime := StubRuntime.new()
 	add_child_autofree(runtime)
-	var rows := NovaDebugEntities.list(runtime.sim)
+	var rows := DebugEntities.list(runtime.sim)
 
 	assert_eq(rows.size(), 3)
 	assert_eq(rows[0]["net_id"], 42)
@@ -244,7 +244,7 @@ func test_mutation_editors_appear_only_after_an_editable_selection() -> void:
 
 func test_successful_world_pick_selects_and_opens_the_matching_inspector() -> void:
 	var runtime := StubRuntime.new()
-	var picks := NovaDebugPickList.new()
+	var picks := DebugPickList.new()
 	var page := _make_page(runtime, picks)
 	var list := page.find_child("EntityList", true, false) as ItemList
 	var health_editor := page.find_child(
@@ -268,7 +268,7 @@ func test_successful_world_pick_selects_and_opens_the_matching_inspector() -> vo
 
 func test_picked_entity_card_can_reselect_its_inspector_row() -> void:
 	var runtime := StubRuntime.new()
-	var picks := NovaDebugPickList.new()
+	var picks := DebugPickList.new()
 	picks.add(_guard_pick())
 	var page := _make_page(runtime, picks)
 	var list := page.find_child("EntityList", true, false) as ItemList
@@ -284,7 +284,7 @@ func test_picked_entity_card_can_reselect_its_inspector_row() -> void:
 
 func test_pick_waits_for_a_new_live_row_instead_of_retaining_an_old_selection() -> void:
 	var runtime := StubRuntime.new()
-	var picks := NovaDebugPickList.new()
+	var picks := DebugPickList.new()
 	var page := _make_page(runtime, picks)
 	var list := page.find_child("EntityList", true, false) as ItemList
 	var saved_cards: Array = runtime.sim.cards.duplicate(true)
@@ -316,7 +316,7 @@ func test_removing_a_pending_pick_cancels_its_future_auto_selection() -> void:
 	var saved_cards: Array = runtime.sim.cards.duplicate(true)
 	runtime.sim.cards = []
 	runtime.sim.guard_present = false
-	var picks := NovaDebugPickList.new()
+	var picks := DebugPickList.new()
 	var page := _make_page(runtime, picks)
 	var list := page.find_child("EntityList", true, false) as ItemList
 
@@ -416,7 +416,7 @@ func test_pick_selection_replaces_staged_values_before_retargeting_edits() -> vo
 		"health": 400,
 		"ai_health": 400,
 	})
-	var picks := NovaDebugPickList.new()
+	var picks := DebugPickList.new()
 	var page := _make_page(runtime, picks)
 	var list := page.find_child("EntityList", true, false) as ItemList
 	var value := page.find_child("EntityHealthValue", true, false) as SpinBox

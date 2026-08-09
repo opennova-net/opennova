@@ -1,6 +1,6 @@
 extends GutTest
 
-const DeployPresenter := preload("res://adapter/world/deploy_screen_presenter.gd")
+const DeployPresenter := preload("res://src/world/deploy_screen_presenter.gd")
 const TMP_DIR := "res://.godot/deploy_screen_presenter_test"
 
 
@@ -30,10 +30,10 @@ class FakeSim:
 
 class FakeWorld:
 	extends Node
-	var root: NovaResourceRoot
+	var root: ResourceRoot
 	var sim: FakeSim
 
-	func get_resource_root() -> NovaResourceRoot:
+	func get_resource_root() -> ResourceRoot:
 		return root
 
 	func get_sim() -> FakeSim:
@@ -41,7 +41,7 @@ class FakeWorld:
 
 
 func before_each() -> void:
-	NovaStrings.clear()
+	Strings.clear()
 	var dir := ProjectSettings.globalize_path(TMP_DIR)
 	if not DirAccess.dir_exists_absolute(dir):
 		assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
@@ -51,7 +51,7 @@ func before_each() -> void:
 
 
 func after_each() -> void:
-	NovaStrings.clear()
+	Strings.clear()
 
 
 func after_all() -> void:
@@ -71,8 +71,8 @@ func _copy_fixture(source: String, target: String) -> void:
 		output.close()
 
 
-func _make_root() -> NovaResourceRoot:
-	var root := NovaResourceRoot.new()
+func _make_root() -> ResourceRoot:
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(TMP_DIR)), OK)
 	return root
 
@@ -161,7 +161,7 @@ func test_refresh_preserves_selected_spawn_identity_across_live_zone_changes() -
 	add_child_autofree(presenter)
 
 	assert_true(presenter.open(), "the player-paced join opens death.mnu")
-	var menu := overlay.get_node_or_null("DeployScreenMenu") as NovaMnuMenu
+	var menu := overlay.get_node_or_null("DeployScreenMenu") as MnuMenu
 	assert_not_null(menu)
 	if menu == null:
 		return
@@ -216,7 +216,7 @@ func test_a_reopened_death_screen_can_still_pick_the_row_it_is_already_on() -> v
 
 	# Join-time deploy: no zones, so the co-op shape — one Home Base row.
 	assert_true(presenter.open(), "the join deploy screen opens")
-	var menu := overlay.get_node_or_null("DeployScreenMenu") as NovaMnuMenu
+	var menu := overlay.get_node_or_null("DeployScreenMenu") as MnuMenu
 	assert_not_null(menu)
 	if menu == null:
 		return

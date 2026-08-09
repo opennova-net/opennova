@@ -16,13 +16,13 @@ enum Workflow { PREVIEW, MATERIALS, PARTS, LIGHTS, LODS, ANIMS }
 
 # Workflow inspectors are declared as typed InspectorDef rows in _build_inspector_defs().
 
-# Aliases of the NovaObjectData binding, single-sourced from engine/formats/oed
+# Aliases of the ObjectData binding, single-sourced from engine/formats/oed
 # (OED_UPDATE_*) — ENG-4.
-const OED_UPDATE_NONE := NovaObjectData.UPDATE_NONE
-const OED_UPDATE_MTRL := NovaObjectData.UPDATE_MTRL
-const OED_UPDATE_LGHT := NovaObjectData.UPDATE_LGHT
-const OED_UPDATE_PANM := NovaObjectData.UPDATE_PANM
-const OED_UPDATE_ALL := NovaObjectData.UPDATE_ALL
+const OED_UPDATE_NONE := ObjectData.UPDATE_NONE
+const OED_UPDATE_MTRL := ObjectData.UPDATE_MTRL
+const OED_UPDATE_LGHT := ObjectData.UPDATE_LGHT
+const OED_UPDATE_PANM := ObjectData.UPDATE_PANM
+const OED_UPDATE_ALL := ObjectData.UPDATE_ALL
 # Maximum value of an authored 16-bit unsigned field (for example, light rate).
 const U16_VALUE_MAX := 65535
 # The retail runtime CTRL bus stores signed dwords. Preview authoring must expose
@@ -331,7 +331,7 @@ func open_file(path: String) -> Error:
 
 ## The mounted game resource root (VFS), if the shell provides one. Used by the preview
 ## to resolve a model's .adm/.bad animation files for the skeletal-animation smoke test.
-func get_resource_root() -> NovaResourceRoot:
+func get_resource_root() -> ResourceRoot:
 	return _resource_root()
 
 

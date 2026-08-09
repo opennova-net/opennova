@@ -79,7 +79,7 @@ func _sync_mission_preview_context() -> void:
 	if not _mission_preview_context_active or terrain_editor == null \
 			or not terrain_editor.has_method("set_mission_preview_context"):
 		return
-	var tile_info: NovaTerrainTileInfo = null
+	var tile_info: TerrainTileInfo = null
 	if _controller != null and _controller.has_method("get_mission_tile_info"):
 		tile_info = _controller.get_mission_tile_info()
 	var preview_time_of_day := NAN

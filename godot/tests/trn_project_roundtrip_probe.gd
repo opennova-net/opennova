@@ -2,13 +2,13 @@ extends SceneTree
 
 # Headless regression check for the "save project → reopen → textures gone"
 # bug that used to happen when the Godot editor wrote a .tpj sidecar and
-# NovaTerrainData::load() hard-required a CPT.
+# TerrainData::load() hard-required a CPT.
 #
 # Now that CPT is optional and the editor saves .trn-only projects, this
 # probe confirms the whole round-trip:
-#   1. NovaTerrainData.load(Dvxi5.trn) — import from res://
+#   1. TerrainData.load(Dvxi5.trn) — import from res://
 #   2. save_to_path(.trn) into a fresh dir (polydata empty)
-#   3. NovaTerrainData load back from that dir
+#   3. TerrainData load back from that dir
 #   4. Assert texture filenames round-trip and each file exists on disk.
 #
 # Run: godot --headless --path godot -s res://tests/trn_project_roundtrip_probe.gd
@@ -26,7 +26,7 @@ func _run() -> void:
 	print("[probe] work dir: ", output_dir)
 
 	print("\n[step 1] import Dvxi5.trn")
-	var imported := NovaTerrainData.new()
+	var imported := TerrainData.new()
 	imported.set_trn_path(source_trn)
 	if imported.load() != OK:
 		push_error("load(Dvxi5.trn) failed")
@@ -93,10 +93,10 @@ func _run() -> void:
 		quit(1); return
 
 	print("\n[step 3] reopen .trn (CPT absent — must not block)")
-	var reopened := NovaTerrainData.new()
+	var reopened := TerrainData.new()
 	reopened.set_trn_path(trn_path)
 	if reopened.load() != OK:
-		push_error("probe FAIL: reopening the .trn failed — NovaTerrainData::load() should tolerate missing CPT")
+		push_error("probe FAIL: reopening the .trn failed — TerrainData::load() should tolerate missing CPT")
 		quit(1); return
 	if not reopened.is_loaded():
 		push_error("probe FAIL: reopened data reports loaded=false")
@@ -134,7 +134,7 @@ func _run() -> void:
 	_cleanup_dir(rename_dir)
 	DirAccess.make_dir_recursive_absolute(rename_dir)
 
-	var renamed := NovaTerrainData.new()
+	var renamed := TerrainData.new()
 	renamed.set_trn_path(source_trn)
 	if renamed.load() != OK:
 		push_error("second load(Dvxi5.trn) failed")
@@ -179,7 +179,7 @@ func _run() -> void:
 		if not FileAccess.file_exists(rename_dir + "/" + expected_file):
 			failures.append("after rename-save, expected file '" + expected_file + "' is missing")
 
-	var reopened_renamed := NovaTerrainData.new()
+	var reopened_renamed := TerrainData.new()
 	reopened_renamed.set_trn_path(renamed_trn_path)
 	if reopened_renamed.load() != OK:
 		push_error("renamed .trn reopen failed")

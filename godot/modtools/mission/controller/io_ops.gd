@@ -30,7 +30,7 @@ func open_mission(bms_path: String) -> Error:
 	if _c.terrain_editor == null:
 		_c._last_status = "No terrain editor is bound."
 		return ERR_UNAVAILABLE
-	var resource_root: NovaResourceRoot = _c._resource_root()
+	var resource_root: ResourceRoot = _c._resource_root()
 	if resource_root == null:
 		_c._last_status = "Set a resource directory before opening a mission."
 		return ERR_UNCONFIGURED
@@ -40,7 +40,7 @@ func open_mission(bms_path: String) -> Error:
 	var timeline := PerfTimeline.begin("Mission load %s" % bms_path.get_file())
 
 	timeline.span("parse")
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	if mission.open_file(bms_path) != OK:
 		_c._last_status = "Could not read %s: %s" % [bms_path.get_file(), mission.get_last_error()]
 		return ERR_CANT_OPEN
@@ -121,7 +121,7 @@ func new_mission() -> Error:
 	if _c.terrain_editor == null:
 		_c._last_status = "No terrain editor is bound."
 		return ERR_UNAVAILABLE
-	var resource_root: NovaResourceRoot = _c._resource_root()
+	var resource_root: ResourceRoot = _c._resource_root()
 	if resource_root == null:
 		_c._last_status = "Set a resource directory before creating a mission."
 		return ERR_UNCONFIGURED
@@ -131,7 +131,7 @@ func new_mission() -> Error:
 		_c._last_status = "Open or create a terrain first, then start a new mission on it."
 		return ERR_UNCONFIGURED
 
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	if mission.create_default() != OK:
 		_c._last_status = "Could not create a new mission: %s" % mission.get_last_error()
 		return FAILED
@@ -180,7 +180,7 @@ func clear() -> void:
 	_c._clear_mission_tile_info()
 	_clear_objects()
 	# Dropping the document drops its undo history + clean baseline with it (they live on the
-	# NovaMissionData), so there is nothing else to reset; is_dirty() reads false once _mission is null.
+	# MissionData), so there is nothing else to reset; is_dirty() reads false once _mission is null.
 	_c._mission = null
 	_c._current_path = ""
 	_c._loaded_trn_path = ""
@@ -276,7 +276,7 @@ func save_as_path(path: String) -> Error:
 
 
 # --- Authoring (Phase 5): undo / redo -----------------------------------------
-# The history + dirty flag live on the document (NovaMissionData): in-memory bms::File snapshots,
+# The history + dirty flag live on the document (MissionData): in-memory bms::File snapshots,
 # never serialized bytes. The controller drives them. A continuous gesture (a drag, a run of
 # inspector edits) is bracketed by begin_edit/commit_edit so it becomes one step; one-shot
 # mutations bracket the same way (commit pushes a step only if the document actually changed, so a
@@ -304,7 +304,7 @@ func _stage_mis_base_heights() -> void:
 	if not batched and not _c.terrain_editor.has_method("sample_height_world"):
 		return
 	var points := PackedVector2Array()
-	for kind in [NovaMissionData.KIND_ITEM, NovaMissionData.KIND_BUILDING, NovaMissionData.KIND_MARKER, NovaMissionData.KIND_ORGANIC]:
+	for kind in [MissionData.KIND_ITEM, MissionData.KIND_BUILDING, MissionData.KIND_MARKER, MissionData.KIND_ORGANIC]:
 		for e in _c._mission.get_entities(kind):
 			var pos: Vector3 = (e as Dictionary).get("position", Vector3.ZERO)
 			points.append(Vector2(pos.x, -pos.y))
@@ -334,7 +334,7 @@ func _stage_mis_base_heights() -> void:
 # just because the atmosphere is missing, but the rendered world is always made to
 # match the mission rather than carrying over the previously-open mission's
 # environment — when the mission brings no usable env, reset to a neutral default.
-func _load_environment(mission: NovaMissionData, resource_root: NovaResourceRoot) -> String:
+func _load_environment(mission: MissionData, resource_root: ResourceRoot) -> String:
 	if not _c.terrain_editor.has_method("get_environment_editor"):
 		return ""
 	var env_editor = _c.terrain_editor.get_environment_editor()
@@ -376,13 +376,13 @@ func _load_environment(mission: NovaMissionData, resource_root: NovaResourceRoot
 func reload_environment() -> String:
 	if _c._mission == null:
 		return "no mission open"
-	var resource_root: NovaResourceRoot = _c._resource_root()
+	var resource_root: ResourceRoot = _c._resource_root()
 	if resource_root == null:
 		return "no resource root mounted"
 	return _load_environment(_c._mission, resource_root)
 
 
-func _place_objects(mission: NovaMissionData, resource_root: NovaResourceRoot, timeline: PerfTimeline = null) -> void:
+func _place_objects(mission: MissionData, resource_root: ResourceRoot, timeline: PerfTimeline = null) -> void:
 	_c._stats = {}
 	# A fresh placement replaces the container (and the old selection box with it), so
 	# drop any stale selection refs before re-harvesting the pickable index.
@@ -414,7 +414,7 @@ func _clear_objects() -> void:
 		container.queue_free()
 
 
-func _describe_load(mission: NovaMissionData, bms_path: String, env_note: String = "") -> String:
+func _describe_load(mission: MissionData, bms_path: String, env_note: String = "") -> String:
 	var mission_name := mission.get_mission_name().strip_edges()
 	if mission_name.is_empty():
 		mission_name = bms_path.get_file()

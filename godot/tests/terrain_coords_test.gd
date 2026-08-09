@@ -4,7 +4,7 @@ extends GutTest
 ## (A2). The golden values are hand-derived from the original GDScript formula in
 ## EditorTerrainMesh. The test asserts THREE things agree on every point:
 ##   1. the live EditorTerrainMesh GDScript path (forwarder after the refactor),
-##   2. the new C++ NovaTerrainData methods (the port),
+##   2. the new C++ TerrainData methods (the port),
 ##   3. the hand-derived goldens.
 ## Run before the mesh refactor it proves the C++ port reproduces the original
 ## GDScript byte-for-byte; run after, it proves the forwarder still matches.
@@ -39,8 +39,8 @@ func _make_mesh() -> EditorTerrainMesh:
 	return mesh
 
 
-func _make_data() -> NovaTerrainData:
-	var data := NovaTerrainData.new()
+func _make_data() -> TerrainData:
+	var data := TerrainData.new()
 	data.origin_x = ORIGIN_X
 	data.origin_y = ORIGIN_Y
 	data.sector_count = SECTOR_COUNT
@@ -178,10 +178,10 @@ func test_get_cell_atlas_rect() -> void:
 func test_layout_constants_and_sector_cell_match_the_engine() -> void:
 	# Contract pin: the GDScript layer consumes these bound constants, so a C++
 	# layout-value change must trip a GDScript-visible test.
-	assert_eq(NovaTerrainData.SECTOR_SIZE, 512, "SECTOR_SIZE")
-	assert_eq(NovaTerrainData.SECTOR_GRID_DIM, 16, "SECTOR_GRID_DIM")
-	assert_eq(NovaTerrainData.ATLAS_SIZE, 1024, "ATLAS_SIZE")
-	assert_eq(NovaTerrainData.SECTOR_ID_MAX, 4, "SECTOR_ID_MAX")
+	assert_eq(TerrainData.SECTOR_SIZE, 512, "SECTOR_SIZE")
+	assert_eq(TerrainData.SECTOR_GRID_DIM, 16, "SECTOR_GRID_DIM")
+	assert_eq(TerrainData.ATLAS_SIZE, 1024, "ATLAS_SIZE")
+	assert_eq(TerrainData.SECTOR_ID_MAX, 4, "SECTOR_ID_MAX")
 
 	var mesh := _make_mesh()
 	var data := _make_data()

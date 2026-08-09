@@ -9,8 +9,8 @@ extends RefCounted
 ## Holding the API wrong (the raw-script era's floating objects) is impossible
 ## by construction.
 
-const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
-const ItemSeatSpecs := preload("res://adapter/world/item_seat_specs.gd")
+const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
+const ItemSeatSpecs := preload("res://src/world/item_seat_specs.gd")
 
 ## Watchdog budget for tools that (re)load the mission's terrain and place
 ## its objects — that path can take seconds on large maps.
@@ -158,13 +158,13 @@ func _sample(ctx: McpToolContext, points: PackedVector2Array) -> Array:
 
 static func _kind_label(kind: int) -> String:
 	match kind:
-		NovaMissionData.KIND_MARKER:
+		MissionData.KIND_MARKER:
 			return "marker"
-		NovaMissionData.KIND_ITEM:
+		MissionData.KIND_ITEM:
 			return "item"
-		NovaMissionData.KIND_BUILDING:
+		MissionData.KIND_BUILDING:
 			return "building"
-		NovaMissionData.KIND_ORGANIC:
+		MissionData.KIND_ORGANIC:
 			return "person"
 	return str(kind)
 
@@ -220,7 +220,7 @@ func _tool_list_items(args: Dictionary, ctx: McpToolContext) -> Variant:
 	var want_kind := int(args.get("kind", -1)) if args.has("kind") else -1
 	var matched: Array = []
 	for item: Dictionary in controller.get_placeable_items():
-		var kind := int(NovaMissionData.kind_for_item_type(int(item["type"])))
+		var kind := int(MissionData.kind_for_item_type(int(item["type"])))
 		if want_kind >= 0 and kind != want_kind:
 			continue
 		if not filter.is_empty() and not String(item["display_name"]).to_lower().contains(filter):
@@ -567,12 +567,12 @@ func _tool_analyze(args: Dictionary, ctx: McpToolContext) -> Variant:
 	var names := {}
 	var source := ""
 	if args.has("path") and not String(args["path"]).is_empty():
-		mission = NovaMissionData.new()
+		mission = MissionData.new()
 		var opened := McpAssetDescribe.open_data(mission, ctx, String(args["path"]))
 		if not opened["ok"]:
 			return McpToolResult.error(String(opened["error"]))
 		source = String(opened["path"])
-		var db := NovaItemDatabase.new()
+		var db := ItemDatabase.new()
 		if ctx.root() != null and db.load_from_resource_root(ctx.root(), "items.def") == OK:
 			for item: Dictionary in db.get_items():
 				names[int(item["id"])] = item["display_name"]
@@ -602,7 +602,7 @@ func _tool_analyze(args: Dictionary, ctx: McpToolContext) -> Variant:
 			var world := MissionObjectPlacer.bms_to_godot_position(entity["position"])
 			var cell := Vector2i(floori(world.x / 64.0), floori(world.z / 64.0))
 			cells[cell] = int(cells.get(cell, 0)) + 1
-		if kind == NovaMissionData.KIND_ORGANIC:
+		if kind == MissionData.KIND_ORGANIC:
 			var team := str(entity.get("team", "?"))
 			teams[team] = int(teams.get(team, 0)) + 1
 			var name1 := String(entity.get("name1", ""))
@@ -650,7 +650,7 @@ func _tool_analyze_mounts(args: Dictionary, ctx: McpToolContext) -> Variant:
 	var rows: Array = []
 	for raw in mission.get_all_entities():
 		var organic: Dictionary = raw
-		if int(organic.get("kind", -1)) != NovaMissionData.KIND_ORGANIC:
+		if int(organic.get("kind", -1)) != MissionData.KIND_ORGANIC:
 			continue
 		var command_id := int(organic.get("waypoint_id", 0))
 		if not command_ids.has(command_id):
@@ -685,7 +685,7 @@ func _tool_analyze_mounts(args: Dictionary, ctx: McpToolContext) -> Variant:
 
 func _mission_for_readonly_analysis(args: Dictionary, ctx: McpToolContext) -> Dictionary:
 	if args.has("path") and not String(args["path"]).is_empty():
-		var mission := NovaMissionData.new()
+		var mission := MissionData.new()
 		var opened := McpAssetDescribe.open_data(mission, ctx, String(args["path"]))
 		if not opened["ok"]:
 			return { "error": String(opened["error"]) }
@@ -703,7 +703,7 @@ func _mission_for_readonly_analysis(args: Dictionary, ctx: McpToolContext) -> Di
 
 func _item_db_for_mount_analysis(ctx: McpToolContext, controller: Variant) -> Variant:
 	if ctx.root() != null:
-		var db := NovaItemDatabase.new()
+		var db := ItemDatabase.new()
 		if db.load_from_resource_root(ctx.root(), "items.def") == OK:
 			return db
 	if controller != null and controller.has_method("_item_db"):

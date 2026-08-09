@@ -29,7 +29,7 @@ Graph source, best available first (override with --source):
   graphviz  `cmake --graphviz` over an existing configured build tree
             (ground truth from CMake itself; default build/, or
             --build-dir). Re-runs configure; needs cmake on PATH. The root
-            build tree does not contain the godot/adapter project, so the
+            build tree does not contain the godot/src project, so the
             adapter rules only bite in files mode.
   files     a transitive walk of target_link_libraries() calls parsed
             from the repo's own CMake files — no build tree needed
@@ -61,7 +61,7 @@ SCAN_ROOTS = (
     "apps",
     "tests",
     "tools",
-    "godot/adapter",
+    "godot/src",
     "third_party/sqlite",
     "third_party/bcrypt",
 )
@@ -76,7 +76,7 @@ SQLITE_RULE_REASON = (
 )
 
 # (reason, from-targets, to-targets, targets allowed to be absent from the
-# graph without a warning — e.g. the adapter target lives in the godot/adapter
+# graph without a warning — e.g. the adapter target lives in the godot/src
 # CMake root, never in the repo-root build tree's graphviz dump).
 FORBIDDEN: list[tuple[str, list[str], list[str], set[str]]] = [
     (
@@ -98,7 +98,7 @@ FORBIDDEN: list[tuple[str, list[str], list[str], set[str]]] = [
         "never the service leg",
         ["opennova"],
         [SERVICE_TARGET],
-        {"opennova"},  # defined only in the godot/adapter CMake root
+        {"opennova"},  # defined only in the godot/src CMake root
     ),
 ]
 

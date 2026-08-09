@@ -2,7 +2,7 @@ class_name TerrainEditorBrushSession
 extends RefCounted
 
 const TerrainEditHistory = preload("res://modtools/terrain/terrain_edit_history.gd")
-const HM_SIZE := NovaTerrainData.ATLAS_SIZE
+const HM_SIZE := TerrainData.ATLAS_SIZE
 const BRUSH_RADIUS_MIN := 1.0
 const BRUSH_RADIUS_MAX := 128.0
 const BRUSH_STRENGTH_MIN := 0.01
@@ -119,7 +119,7 @@ func end_brush_drag(current_image: Image) -> Dictionary:
 	return result
 
 
-# `data` is the NovaTerrainData that owns the editable height/colour/blend buffers;
+# `data` is the TerrainData that owns the editable height/colour/blend buffers;
 # every tool runs its C++ kernel through it. The brush is skipped when data is null
 # (production always passes the loaded data; only some unit tests may omit it).
 func apply_brush_stroke(delta: float, hover_hit: Vector3, hover_hit_valid: bool, terrain_mesh, data = null) -> Dictionary:

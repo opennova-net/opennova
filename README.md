@@ -28,7 +28,7 @@ Three layers:
 
 - **Authoring (`godot/modtools/`).** The OpenNova Editor (ONED): workspaces for terrain, objects, missions, avatars, fonts, credits, strings, menus, HUD preview, music, particles, sound, and environment that write the game's canonical data formats (`.trn`, `.cpt`, `.til`, `.3di`, `.bms`, `.mis`, `Avatars.def`, `.fnt`, `.kda`, `.mnu`, `.sbf`, `.ptl`, `.lwf`, `.env`, …) directly.
 - **Core engine (`engine/`).** Format parsers plus the runtime systems: terrain LOD, foliage scatter, environment sampling, the world substrate with its WAC script VM, BMS event runtime, and AI, skeletal animation, audio selection, and the virtual file system. Also consumed by Python (`opennova_blender/`, `apps/importer/`) and Blender (`blender/`).
-- **Godot (`godot/adapter/` + `godot/game/`).** GDExtension wrappers in `adapter/` bind the engine into Godot; `game/` is the runtime scene.
+- **Godot (`godot/src/` + `godot/game/`).** GDExtension wrappers in `adapter/` bind the engine into Godot; `game/` is the runtime scene.
 
 All of this is pre-1.0 and experimental. Nothing here is production-ready. The asset pipeline (importer, Blender addon, and ONED) is the most exercised surface today. The Godot runtime loads exported scenes, runs the terrain, foliage, and environment systems, and simulates authored missions (WAC scripts, BMS events, AI). On-foot play is coming up: weapons and loadouts, projectile physics and damage, throwables, mounted and emplaced weapons, vehicles, item destruction, optics, and the HUD are ported from the original engine and covered by tests. Multiplayer runs on a wire-compatible in-match protocol with single-player hosted as an in-process listen server, so joins and replication exercise the same path retail clients use. Every one of those systems still carries tracked gaps: the honest per-system status is the [divergence ledger](docs/divergence-ledger.md).
 
@@ -264,7 +264,7 @@ scripts/package_importer_windows.ps1
 ### Build the GDExtension
 
 ```bash
-cmake -S godot/adapter -B build-godot -DCMAKE_BUILD_TYPE=Release
+cmake -S godot/src -B build-godot -DCMAKE_BUILD_TYPE=Release
 cmake --build build-godot --config Release --target opennova
 ```
 

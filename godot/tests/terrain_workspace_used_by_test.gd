@@ -28,13 +28,13 @@ class UsedByShell:
 	var index := IndexStub.new()
 	# A real root (ReferenceStrip.resolve_source_path probes it) over a
 	# cache-dir fixture holding the referrer file the index stub reports.
-	var root: NovaResourceRoot
+	var root: ResourceRoot
 	var opened: Array = []
 
 	func get_reference_index() -> IndexStub:
 		return index
 
-	func get_resource_root() -> NovaResourceRoot:
+	func get_resource_root() -> ResourceRoot:
 		return root
 
 	func open_in_workspace(kind: String, path: String, _focus: FocusPayload = null) -> Error:
@@ -59,7 +59,7 @@ func test_asset_dock_offers_used_by_without_triggering_index_build() -> void:
 
 	var workspace = autofree(TerrainWorkspaceScript.new(editor))
 	var shell: UsedByShell = add_child_autofree(UsedByShell.new())
-	shell.root = NovaResourceRoot.new()
+	shell.root = ResourceRoot.new()
 	assert_eq(shell.root.set_root_dir(root_dir), OK)
 	workspace.set_editor_shell(shell)
 

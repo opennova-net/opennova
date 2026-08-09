@@ -18,16 +18,16 @@ Move the selection state machine into portable C++; keep the shell-bound parts i
 - **`libs/audio` — `opennova::audio::SoundSelector`**: `select(key, member_count, mode) -> index`,
   per-`(bank,set,layer)` state, engine-faithful machine (sequential cursor; random-anchor full
   cycle; random default with the engine's shared ROL-LCG stream and static seed).
-- **`NovaSoundSelector`** (GDExtension shim) exposes `select_member(...)`; `NovaSoundBank` holds one and
+- **`SoundSelector`** (GDExtension shim) exposes `select_member(...)`; `SoundBank` holds one and
   its `_pick_member` now only feeds it the layer's member count + mode and poses the chosen member. The
   bank keeps the `.lwf` data access, the WAV decode/cache, and the `AudioStreamPlayer3D` spawning.
 
 ## What stayed in GDScript, and why
 
 - **Dialog-id → set-name resolution** (`play_dialog`/`resolve_dialog_set`): the meaningful step is the
-  `.DBF` lookup, bound to `NovaDbfData` (a GDExtension resource). Only trivial fallback string forms
+  `.DBF` lookup, bound to `DbfData` (a GDExtension resource). Only trivial fallback string forms
   would move; not worth a shim round-trip.
-- **Voice culling** (`NovaMissionAudio.tick`): runs per-voice per-frame. Routing each voice through a
+- **Voice culling** (`MissionAudio.tick`): runs per-voice per-frame. Routing each voice through a
   C++ shim call each frame would add Variant-boxing overhead for a one-line distance predicate — the
   opposite of the perf intent. The `CULL_RADIUS` value stays a documented host constant.
 - **Frame-loop ordering** (also part of this pass's "push core down") is single-sourced in the

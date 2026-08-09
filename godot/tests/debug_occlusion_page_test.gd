@@ -4,7 +4,7 @@ extends GutTest
 # the occlusion pass did, while the selectable building list puts exceptional
 # states first and explains the selected building in plain language.
 
-const PageScript := preload("res://adapter/debug/pages/debug_occlusion_page.gd")
+const PageScript := preload("res://src/debug/pages/debug_occlusion_page.gd")
 
 
 class StubSim:
@@ -24,8 +24,8 @@ class StubRuntime:
 
 
 func _make_page(runtime: StubRuntime) -> DebugOcclusionPage:
-	var ctx := NovaDebugContext.new()
-	ctx.options = NovaDebugOptionState.new()
+	var ctx := DebugContext.new()
+	ctx.options = DebugOptionState.new()
 	ctx.runtime_source = func(): return runtime
 	var page: DebugOcclusionPage = PageScript.new()
 	page.setup(ctx)

@@ -64,7 +64,7 @@ func test_scr_wrapped_loose_items_def_loads_invisibly() -> void:
 	if path.is_empty():
 		return
 
-	var db := NovaItemDatabase.new()
-	assert_eq(db.load(path), OK, "NovaItemDatabase.load should auto-decode SCR-wrapped loose items.def")
+	var db := ItemDatabase.new()
+	assert_eq(db.load(path), OK, "ItemDatabase.load should auto-decode SCR-wrapped loose items.def")
 	assert_true(db.is_loaded(), "decoded item database should report loaded")
 	assert_gt(db.get_count(), 0, "decoded item database should expose entries")

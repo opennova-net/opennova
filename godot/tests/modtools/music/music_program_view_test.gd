@@ -217,10 +217,10 @@ func test_glow_brackets_to_greatest_offset_at_or_before_pc():
 
 # ---- the engine-events tail (real gamemus Begin) ----
 
-func _load_gamemus() -> NovaMusicScript:
+func _load_gamemus() -> MusicScript:
 	var bytes := FileAccess.get_file_as_bytes(SCRIPT_FIXTURE)
 	assert_gt(bytes.size(), 0, "fixture readable")
-	var ms := NovaMusicScript.new()
+	var ms := MusicScript.new()
 	ms.load_from_decrypted_bytes(bytes, "gamemus")
 	return ms
 

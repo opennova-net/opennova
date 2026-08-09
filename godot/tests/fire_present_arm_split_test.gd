@@ -21,7 +21,7 @@ extends GutTest
 #
 # Asset-free: the sim, audio, fx and muzzle anchor are all stubs.
 
-const FirePresentPass := preload("res://adapter/world/fire_present_pass.gd")
+const FirePresentPass := preload("res://src/world/fire_present_pass.gd")
 
 const WIRE_EYE := Vector3(10.0, 1.8, -4.0)
 const MUZZLE := Vector3(10.6, 1.55, -4.7)
@@ -77,7 +77,7 @@ func before_each() -> void:
 			func(_handle: int, _userpoint: String): return MUZZLE)
 
 
-# One event dict shaped like NovaSimulation::drain_fire_presentation_events emits.
+# One event dict shaped like Simulation::drain_fire_presentation_events emits.
 func _event(adm_arm: bool) -> Dictionary:
 	return {
 		"origin": WIRE_EYE,

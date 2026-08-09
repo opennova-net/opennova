@@ -12,7 +12,7 @@
 // bit gate on the 0x0A sub-block 3 [orig: 0x430361..0x4303D0, §5.9]; the
 // two-part stock-Co-op test [orig: serialize_mission_info_to_datastream
 // @0x523620, §5.32/D-NET-205]. GDScript twin: the mission-attrib table in
-// godot/adapter/world/host_session_config.gd (GUT-pinned).
+// godot/src/world/host_session_config.gd (GUT-pinned).
 
 #include <cstdint>
 

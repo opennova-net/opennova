@@ -190,11 +190,11 @@ func _refresh_detail(defs: Array) -> void:
 func _populate_color_options(option: OptionButton) -> void:
 	option.clear()
 	option.add_item("Match ground")
-	option.set_item_metadata(0, NovaTerrainFoliageDef.COLOR_MATCH_GROUND)
+	option.set_item_metadata(0, TerrainFoliageDef.COLOR_MATCH_GROUND)
 	option.add_item("Blend 50%")
-	option.set_item_metadata(1, NovaTerrainFoliageDef.COLOR_BLEND_50)
+	option.set_item_metadata(1, TerrainFoliageDef.COLOR_BLEND_50)
 	option.add_item("Retain full color")
-	option.set_item_metadata(2, NovaTerrainFoliageDef.COLOR_RETAIN_FULL)
+	option.set_item_metadata(2, TerrainFoliageDef.COLOR_RETAIN_FULL)
 
 
 func _match_color_option(option: OptionButton, value: int) -> void:
@@ -254,7 +254,7 @@ func _commit_graphic(text: String) -> void:
 	terrain_editor.set_foliage_def_field(_selected_index, "graphic", text)
 
 
-func _resource_root() -> NovaResourceRoot:
+func _resource_root() -> ResourceRoot:
 	if terrain_editor != null and terrain_editor.has_method("get_resource_root"):
 		return terrain_editor.get_resource_root()
 	return null

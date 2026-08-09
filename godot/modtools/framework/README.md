@@ -2,7 +2,7 @@
 
 Shared, workspace-agnostic building blocks for the OpenNova Editor's shell and
 inspectors. Everything here is editor-only (lives under `modtools/`); shell-neutral
-UI primitives (FieldBinder, SyncGuard, UiBox) live in `godot/adapter/ui/` instead.
+UI primitives (FieldBinder, SyncGuard, UiBox) live in `godot/src/ui/` instead.
 
 ## Drag-as-link: the LinkPayload contract
 
@@ -20,7 +20,7 @@ Wire shape (`to_drag_data()`):
 Field semantics:
 
 - **kind** — the reference-kind vocabulary the extractors and
-  `NovaReferenceIndex` speak (`terrain`, `texture`, `font`, `object_model`,
+  `ReferenceIndex` speak (`terrain`, `texture`, `font`, `object_model`,
   `strings`, `string_id`, ...). This is NOT the workspace-jump vocabulary;
   jump translation (`object_model` → `object`) happens at jump time via the
   shared `ResourceKinds.jump_kind()` (`resource_kinds.gd`), never inside a

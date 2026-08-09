@@ -218,9 +218,9 @@ func _screen_names(resource: Variant) -> PackedStringArray:
 # Widget type NAME -> enum int, probed from the live enum so the vocabulary
 # can never drift from the format library.
 func _type_table() -> Dictionary:
-	var probe := NovaMnuDocument.new()
+	var probe := MnuDocument.new()
 	var table := {}
-	for t in range(NovaMnuDocument.TYPE_UNKNOWN):
+	for t in range(MnuDocument.TYPE_UNKNOWN):
 		table[String(probe.get_widget_type_name(t)).to_upper()] = t
 	# Friendly aliases for the two surprising canonical tokens.
 	if table.has("COMBOBOX"):
@@ -802,9 +802,9 @@ func _widget_card(resource: Variant, id: int) -> Dictionary:
 	card["textures"] = textures
 	card["appearances"] = resource.get_widget_appearances(id)
 	var rect_flags := int(resource.get_window_rect_flags(id))
-	if (rect_flags & NovaMnuDocument.RECT_HAS_RIGHT) == 0:
+	if (rect_flags & MnuDocument.RECT_HAS_RIGHT) == 0:
 		card["auto_width"] = true
-	if (rect_flags & NovaMnuDocument.RECT_HAS_BOTTOM) == 0:
+	if (rect_flags & MnuDocument.RECT_HAS_BOTTOM) == 0:
 		card["auto_height"] = true
 	var frame: Dictionary = resource.get_window_frame(id)
 	if not String(frame.get("stencil", "")).is_empty() or not String(frame.get("brush", "")).is_empty():
@@ -1454,7 +1454,7 @@ func _preview_state_wire(state: MnuPreviewWidgetState) -> Dictionary:
 
 # Activate a live preview Control exactly as a click would (the hotkey
 # trigger's pattern): toggle-mode buttons flip, plain buttons emit pressed
-# (NovaMnuButton dispatches its authored Actions), Gotos trigger.
+# (MnuButton dispatches its authored Actions), Gotos trigger.
 func _preview_press(args: Dictionary, ctx: McpToolContext, gate: Dictionary) -> Variant:
 	var resource: Variant = gate["resource"]
 	var canvas: Variant = gate["canvas"]
@@ -1485,7 +1485,7 @@ func _preview_press(args: Dictionary, ctx: McpToolContext, gate: Dictionary) -> 
 	var fired: Array = resource.get_widget_actions(id)
 	if before.disabled:
 		# A visible disabled hotkey/click target consumes the match but performs
-		# no activation, matching NovaMnuMenu's dispatch path.
+		# no activation, matching MnuMenu's dispatch path.
 		return {
 			"ok": true,
 			"pressed": resource.get_widget_name(id),
@@ -1556,7 +1556,7 @@ func _tool_analyze(args: Dictionary, ctx: McpToolContext) -> Variant:
 	var resource: Variant = null
 	var source := ""
 	if args.has("path") and not String(args["path"]).is_empty():
-		resource = NovaMnuDocument.new()
+		resource = MnuDocument.new()
 		var resolved := McpAssetDescribe.resolve(ctx, String(args["path"]))
 		if not resolved["ok"]:
 			return McpToolResult.error(String(resolved["error"]))
@@ -1647,8 +1647,8 @@ func _tool_analyze(args: Dictionary, ctx: McpToolContext) -> Variant:
 					action_graph.append({ "from": screen_name, "widget": name, "to": "(pop)" })
 			if actions.is_empty() and not name.is_empty():
 				var w_type := int(resource.get_widget_type(id))
-				if w_type == NovaMnuDocument.TYPE_BUTTON or w_type == NovaMnuDocument.TYPE_CHECKBOX \
-						or w_type == NovaMnuDocument.TYPE_RADIO or w_type == NovaMnuDocument.TYPE_GOTO:
+				if w_type == MnuDocument.TYPE_BUTTON or w_type == MnuDocument.TYPE_CHECKBOX \
+						or w_type == MnuDocument.TYPE_RADIO or w_type == MnuDocument.TYPE_GOTO:
 					command_hooks[name] = int(command_hooks.get(name, 0)) + 1
 			# Widget-shape rules (F4/F5/F8). Each one is calibrated to shipped data:
 			# only flag what shipped menus NEVER do, so analyze stays quiet on the

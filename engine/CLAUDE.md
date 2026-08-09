@@ -1,7 +1,7 @@
 # engine/ — the engine (portable C++ core)
 
 - Godot-agnostic, strictly: no Godot/godot-cpp types or includes anywhere under `engine/`.
-  Godot binding code lives only in `godot/adapter/`. Blender-only scene assembly lives in
+  Godot binding code lives only in `godot/src/`. Blender-only scene assembly lives in
   `apps/importer/scene_builder/` and `blender/`.
 - Four groups (ADR 0028) — the directories and, since ADR 0029, the CMake build targets
   too; still never namespaces or include-path segments:
@@ -43,7 +43,7 @@
   `OPENNOVA_CORE_TARGETS` list — the ADR 0029 group targets now — and exports ONLY
   `OPENNOVA_API`-annotated symbols, the surface pinned by the `abi_export_identity`
   ctest baseline. Consumers: the Python FFI (`pyopennova`, `apps/importer`) and the DCC
-  plugins. **Model B — C++ static link**: `godot/adapter`, the apps, the ctest suite,
+  plugins. **Model B — C++ static link**: `godot/src`, the apps, the ctest suite,
   and the entire net stack link the group targets directly; no export macro involved.
   The net/protocol libs are Model B ONLY — formally outside the C ABI (ADR 0019; NET-4's
   forbidden-family guard). A lib may mix models: only its annotated functions are

@@ -9,14 +9,14 @@ extends EditorWorkspace
 
 const HudLayoutPreviewScript = preload("res://modtools/hud/hud_preview.gd")
 
-var _hudpos: NovaHudPos
+var _hudpos: HudPos
 var _path: String = ""
 var _preview: HudLayoutPreview
 var _inspector_root: Control
 
 
 func _init() -> void:
-	_hudpos = NovaHudPos.new()
+	_hudpos = HudPos.new()
 
 
 # --- Identity ---
@@ -142,7 +142,7 @@ func _populate_inspector() -> void:
 	var health := _hudpos.get_health_rect()
 	var spin := _hudpos.get_spinmap_bounds()
 	var lines := PackedStringArray()
-	lines.append("Design space: %d x %d" % [NovaHudPos.DESIGN_WIDTH, NovaHudPos.DESIGN_HEIGHT])
+	lines.append("Design space: %d x %d" % [HudPos.DESIGN_WIDTH, HudPos.DESIGN_HEIGHT])
 	lines.append("Fonts: %s / %s" % [
 		_or_dash(_hudpos.get_font_hi()), _or_dash(_hudpos.get_font_lo())])
 	lines.append("Health rect: %d,%d %dx%d" % [health.position.x, health.position.y, health.size.x, health.size.y])

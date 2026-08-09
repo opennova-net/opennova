@@ -401,7 +401,7 @@ func test_mission_workspace_exposes_document_actions_and_inspector() -> void:
 
 func test_resource_index_lists_object_resources_without_glb_models() -> void:
 	var root := _make_resource_fixture("resource_index_godot")
-	var index := NovaResourceIndex.new()
+	var index := ResourceIndex.new()
 
 	assert_eq(index.scan(root), OK, "Resource index should scan a filesystem directory.")
 	assert_eq(index.get_resource_files("mission").size(), 1, "BMS files should be indexed as mission resources.")
@@ -816,7 +816,7 @@ func test_startup_applies_persisted_resource_dir_to_shared_resource_root() -> vo
 	assert_eq(w1._set_resource_root_dir(root, true, false), OK, "Persisting the resource dir should succeed.")
 
 	var w2 = add_child_autofree(EditorWorkstationScene.instantiate())
-	var resource_root: NovaResourceRoot = w2.get_resource_root()
+	var resource_root: ResourceRoot = w2.get_resource_root()
 	assert_eq(w2.get_resource_root_dir(), root, "Editor startup should load the persisted resource directory.")
 	assert_eq(_norm_path(resource_root.get_root_dir()), _norm_path(root), "The shared resource root should be the persisted directory.")
 	assert_eq(_norm_path(resource_root.resolve_file("alpha.3di")), _norm_path(root.path_join("alpha.3di")), "The startup resource root should resolve top-level files.")
@@ -829,7 +829,7 @@ func test_resource_root_inside_user_data_is_rejected_on_load() -> void:
 	# internal path.
 	var bogus := OS.get_user_data_dir().path_join("resource_settings_persist_bogus_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(bogus)
-	NovaResourceDirSettings.set_resource_dir(bogus)
+	ResourceDirSettings.set_resource_dir(bogus)
 
 	var w2 = add_child_autofree(EditorWorkstationScene.instantiate())
 	assert_eq(w2.get_resource_root_dir(), "", "A resource root inside the app user-data dir should be rejected on load.")
@@ -1533,7 +1533,7 @@ func test_stamp_inspector_atlas_click_replaces_selected_tile_immediately() -> vo
 	inspector.set_editor(editor)
 	inspector._on_atlas_selected(5)
 
-	var entry: NovaTerrainTileEntry = editor.get_selected_tileinfo_entry()
+	var entry: TerrainTileEntry = editor.get_selected_tileinfo_entry()
 	assert_not_null(entry, "Tile selection should remain valid after replacing from the atlas.")
 	assert_eq(entry.get_tile_index(), 5, "Atlas clicks should replace the selected tile immediately.")
 
@@ -1542,7 +1542,7 @@ func test_stamp_inspector_atlas_focus_follows_selected_tile() -> void:
 	var mount = add_child_autofree(Control.new())
 	var inspector := StampInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
-	editor._document.data = NovaTerrainData.new()
+	editor._document.data = TerrainData.new()
 	editor._document.new_tileinfo()
 	# Seed a dummy tilestrip so the atlas has enough tiles for index 2 to be selectable.
 	var strip_image := Image.create(256, 64, false, Image.FORMAT_RGBA8)
@@ -1566,7 +1566,7 @@ func test_stamp_inspector_reuses_tile_preview_icons_until_atlas_changes() -> voi
 	var mount = add_child_autofree(Control.new())
 	var inspector := StampInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
-	editor._document.data = NovaTerrainData.new()
+	editor._document.data = TerrainData.new()
 	var strip_image := Image.create(256, 64, false, Image.FORMAT_RGBA8)
 	strip_image.fill(Color(0.5, 0.5, 0.5, 1.0))
 	var tilestrip := ImageTexture.create_from_image(strip_image)
@@ -1595,9 +1595,9 @@ func test_stamp_inspector_flag_toggle_updates_selected_tile_immediately() -> voi
 	inspector.set_editor(editor)
 	inspector._on_flip_x(true)
 
-	var entry: NovaTerrainTileEntry = editor.get_selected_tileinfo_entry()
+	var entry: TerrainTileEntry = editor.get_selected_tileinfo_entry()
 	assert_not_null(entry, "Tile selection should remain valid after toggling a transform flag.")
-	assert_true((entry.get_flags() & NovaTerrainTileInfo.FLAG_FLIP_X) != 0, "Tile transform toggles should update the selected tile immediately.")
+	assert_true((entry.get_flags() & TerrainTileInfo.FLAG_FLIP_X) != 0, "Tile transform toggles should update the selected tile immediately.")
 
 
 func test_stamp_inspector_shows_quiet_empty_selection_state() -> void:

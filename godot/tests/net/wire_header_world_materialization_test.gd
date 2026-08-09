@@ -15,7 +15,7 @@ const DESIGNATED_G_PARENT_TYPE := 5005
 const DESIGNATED_G_CHILD_TYPE := 1419
 
 # S16 native seat tables: the Dictionary install seam is gone. The tests
-# compose a flat asset dir under the gitignored res://.godot (NovaResourceRoot
+# compose a flat asset dir under the gitignored res://.godot (ResourceRoot
 # rejects user:// roots), wire it with sim.set_asset_root FIRST, then
 # install_seat_specs_for_type_ids(item_db, ...) runs the ONE engine extractor
 # (simassets::extract_item_seat_specs) over items.def rows + .3di userpoints.
@@ -116,8 +116,8 @@ func before_all() -> void:
 			"composed the seatless designated-G parent fixture")
 
 
-func _native_asset_root() -> NovaResourceRoot:
-	var root := NovaResourceRoot.new()
+func _native_asset_root() -> ResourceRoot:
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
 			ProjectSettings.globalize_path(NATIVE_MODEL_DIR)), OK)
 	assert_true(root.has_file("dm1a1.3di"),
@@ -126,26 +126,26 @@ func _native_asset_root() -> NovaResourceRoot:
 
 
 func _mission_fixture() -> Dictionary:
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	# First row in each independent pool: exact authority handles 0x1000,
 	# 0x2000, and 0x3000. The joiner starts at x=0, deploys to x=12, then is
 	# within the retail four-unit seat scan of the vehicle at x=14.
 	var vehicle: Dictionary = mission.add_entity(
-			NovaMissionData.KIND_ITEM, VEHICLE_DEF_ID,
+			MissionData.KIND_ITEM, VEHICLE_DEF_ID,
 			Vector3(14, 0, 0), Vector3.ZERO)
 	var zone: Dictionary = mission.add_entity(
-			NovaMissionData.KIND_BUILDING, ZONE_DEF_ID,
+			MissionData.KIND_BUILDING, ZONE_DEF_ID,
 			Vector3(12, 0, 0), Vector3.ZERO)
 	var marker: Dictionary = mission.add_entity(
-			NovaMissionData.KIND_MARKER, MARKER_DEF_ID,
+			MissionData.KIND_MARKER, MARKER_DEF_ID,
 			Vector3.ZERO, Vector3.ZERO)
 	assert_false(vehicle.is_empty())
 	assert_false(zone.is_empty())
 	assert_false(marker.is_empty())
 	if not zone.is_empty():
 		assert_true(mission.set_entity_property_int(
-				NovaMissionData.KIND_BUILDING,
+				MissionData.KIND_BUILDING,
 				int(zone.get("index", -1)), "team", 1))
 	return {
 		"mission": mission,
@@ -155,25 +155,25 @@ func _mission_fixture() -> Dictionary:
 
 
 func _designated_g_mission_fixture() -> Dictionary:
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	# The body-empty joiner deploys beside a vehicle-EWeap parent. Promotion
 	# creates its designated-G B50 child at the next exact pool-1 handle.
 	var parent: Dictionary = mission.add_entity(
-			NovaMissionData.KIND_ITEM, DESIGNATED_G_PARENT_DEF_ID,
+			MissionData.KIND_ITEM, DESIGNATED_G_PARENT_DEF_ID,
 			Vector3(14, 0, 0), Vector3.ZERO)
 	var zone: Dictionary = mission.add_entity(
-			NovaMissionData.KIND_BUILDING, ZONE_DEF_ID,
+			MissionData.KIND_BUILDING, ZONE_DEF_ID,
 			Vector3(12, 0, 0), Vector3.ZERO)
 	var marker: Dictionary = mission.add_entity(
-			NovaMissionData.KIND_MARKER, MARKER_DEF_ID,
+			MissionData.KIND_MARKER, MARKER_DEF_ID,
 			Vector3.ZERO, Vector3.ZERO)
 	assert_false(parent.is_empty())
 	assert_false(zone.is_empty())
 	assert_false(marker.is_empty())
 	if not zone.is_empty():
 		assert_true(mission.set_entity_property_int(
-				NovaMissionData.KIND_BUILDING,
+				MissionData.KIND_BUILDING,
 				int(zone.get("index", -1)), "team", 1))
 	return {
 		"mission": mission,
@@ -184,7 +184,7 @@ func _designated_g_mission_fixture() -> Dictionary:
 # variant "" = the authoritative table; "refresh" swaps the vehicle graphic to
 # dsuvswap (the dense-reorder refresh); "ambiguous" authors a second addeweap
 # row of the same child type on the parent (stored slot 2, missing anchor).
-func _item_db(variant := "") -> NovaItemDatabase:
+func _item_db(variant := "") -> ItemDatabase:
 	var base_path := ProjectSettings.globalize_path(
 			"res://../fixtures/def/items.def")
 	var base_file := FileAccess.open(base_path, FileAccess.READ)
@@ -235,13 +235,13 @@ begin "Wire Header Designated-G Parent"
 		file.store_string("  addeweap missing 101419\n")
 	file.store_string("end\n")
 	file.close()
-	var db := NovaItemDatabase.new()
+	var db := ItemDatabase.new()
 	assert_eq(db.load(path), OK)
 	return db
 
 
-func _install_combat_tables(sim: NovaSimulation, db: NovaItemDatabase) -> void:
-	var root := NovaResourceRoot.new()
+func _install_combat_tables(sim: Simulation, db: ItemDatabase) -> void:
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
 			"res://../fixtures/def")), OK)
 	sim.resolve_item_traits(db)
@@ -250,7 +250,7 @@ func _install_combat_tables(sim: NovaSimulation, db: NovaItemDatabase) -> void:
 
 
 func _weapon(name: String) -> Dictionary:
-	var weapons := NovaWeaponDatabase.new()
+	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load(ProjectSettings.globalize_path(
 			"res://../fixtures/def/weapon.def")), OK)
 	var index := weapons.find_weapon(name)
@@ -258,7 +258,7 @@ func _weapon(name: String) -> Dictionary:
 	return weapons.get_weapon(index) if index >= 0 else {}
 
 
-func _apply_weapon_switch_events(sim: NovaSimulation,
+func _apply_weapon_switch_events(sim: Simulation,
 		defs_by_name: Dictionary) -> void:
 	for value in sim.drain_local_player_weapon_events():
 		var name := String((value as Dictionary).get("switch_to_weapon", ""))
@@ -268,47 +268,47 @@ func _apply_weapon_switch_events(sim: NovaSimulation,
 				defs_by_name[name], {}, name == "WPN_EMPLCD50NA")
 
 
-func _present_wire_handle_for_type(sim: NovaSimulation, type_id: int) -> int:
+func _present_wire_handle_for_type(sim: Simulation, type_id: int) -> int:
 	var snapshot := sim.get_present_snapshot()
 	var stride := sim.get_present_stride()
 	for row in range(snapshot.size() / stride):
 		var base := row * stride
-		if int(snapshot[base + NovaSimulation.PF_TYPE_ID]) == type_id:
-			return int(snapshot[base + NovaSimulation.PF_WIRE_HANDLE])
+		if int(snapshot[base + Simulation.PF_TYPE_ID]) == type_id:
+			return int(snapshot[base + Simulation.PF_WIRE_HANDLE])
 	return -1
 
 
-func _present_field_for_type(sim: NovaSimulation, type_id: int, field: int) -> int:
+func _present_field_for_type(sim: Simulation, type_id: int, field: int) -> int:
 	var snapshot := sim.get_present_snapshot()
 	var stride := sim.get_present_stride()
 	for row in range(snapshot.size() / stride):
 		var base := row * stride
-		if int(snapshot[base + NovaSimulation.PF_TYPE_ID]) == type_id:
+		if int(snapshot[base + Simulation.PF_TYPE_ID]) == type_id:
 			return int(snapshot[base + field])
 	return -1
 
 
-func _present_position_for_type(sim: NovaSimulation, type_id: int) -> Vector3:
+func _present_position_for_type(sim: Simulation, type_id: int) -> Vector3:
 	var snapshot := sim.get_present_snapshot()
 	var stride := sim.get_present_stride()
 	for row in range(snapshot.size() / stride):
 		var base := row * stride
-		if int(snapshot[base + NovaSimulation.PF_TYPE_ID]) == type_id:
+		if int(snapshot[base + Simulation.PF_TYPE_ID]) == type_id:
 			return Vector3(
-					snapshot[base + NovaSimulation.PF_POS_X],
-					snapshot[base + NovaSimulation.PF_POS_Y],
-					snapshot[base + NovaSimulation.PF_POS_Z])
+					snapshot[base + Simulation.PF_POS_X],
+					snapshot[base + Simulation.PF_POS_Y],
+					snapshot[base + Simulation.PF_POS_Z])
 	return Vector3.INF
 
 
-func _player_index(sim: NovaSimulation) -> int:
+func _player_index(sim: Simulation) -> int:
 	for index in range(sim.get_entity_count()):
 		if int(sim.get_entity_debug(index).get("item_id", 0)) == 0x14B9:
 			return index
 	return -1
 
 
-func _configure_dedicated_host(host: NovaSimulation) -> void:
+func _configure_dedicated_host(host: Simulation) -> void:
 	host.configure_host_session({
 		"serve_and_play": false,
 		"gametype": 0x30020,
@@ -318,14 +318,14 @@ func _configure_dedicated_host(host: NovaSimulation) -> void:
 
 func test_true_wire_header_materializes_exact_deploy_and_vehicle_rows() -> void:
 	var fixture := _mission_fixture()
-	var mission: NovaMissionData = fixture["mission"]
+	var mission: MissionData = fixture["mission"]
 	var db := _item_db()
 	assert_not_null(db)
 	if db == null:
 		return
 	var root := _native_asset_root()
 
-	var host := NovaSimulation.new()
+	var host := Simulation.new()
 	_configure_dedicated_host(host)
 	assert_true(host.enable_host_listen(0))
 	host.set_asset_root(root)
@@ -343,7 +343,7 @@ func test_true_wire_header_materializes_exact_deploy_and_vehicle_rows() -> void:
 	assert_eq(int(host_vehicle.get("handle", -1)), 0x1000)
 	assert_eq(int(host_zone.get("handle", -1)), 0x2000)
 
-	var joiner := NovaSimulation.new()
+	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "WireHeaderJoiner"))
 	joiner.set_join_world_ready(false)
@@ -362,11 +362,11 @@ func test_true_wire_header_materializes_exact_deploy_and_vehicle_rows() -> void:
 		host.free()
 		return
 
-	var wire_mission := NovaMissionData.new()
+	var wire_mission := MissionData.new()
 	assert_eq(wire_mission.open_wire_header(header), OK)
 	assert_true(wire_mission.is_wire_header_only())
-	for kind in [NovaMissionData.KIND_MARKER, NovaMissionData.KIND_ITEM,
-			NovaMissionData.KIND_BUILDING, NovaMissionData.KIND_ORGANIC]:
+	for kind in [MissionData.KIND_MARKER, MissionData.KIND_ITEM,
+			MissionData.KIND_BUILDING, MissionData.KIND_ORGANIC]:
 		assert_eq(wire_mission.get_entity_count(kind), 0,
 				"the 616-byte mission has no locally authored body rows")
 	assert_true(joiner.load_from_mission_data(wire_mission))
@@ -393,7 +393,7 @@ func test_true_wire_header_materializes_exact_deploy_and_vehicle_rows() -> void:
 		host.free()
 		return
 	assert_eq(joiner.get_join_terrain_til_state(),
-			NovaSimulation.JOIN_TERRAIN_TIL_ABSENT,
+			Simulation.JOIN_TERRAIN_TIL_ABSENT,
 			"a host with no terrain payload proves explicit 0x45 absence")
 	assert_true(joiner.get_join_terrain_til().is_empty(),
 			"Absent terrain never exposes a synthetic byte image")
@@ -488,7 +488,7 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	# derive that capability from the same parent seat-spec table the authority
 	# used, then honor compact seat_type and phase-8 ammo in both directions.
 	var fixture := _designated_g_mission_fixture()
-	var mission: NovaMissionData = fixture["mission"]
+	var mission: MissionData = fixture["mission"]
 	var parent_bms_id := int(fixture["parent_bms_id"])
 	var db := _item_db()
 	assert_not_null(db)
@@ -496,7 +496,7 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 		return
 	var root := _native_asset_root()
 
-	var host := NovaSimulation.new()
+	var host := Simulation.new()
 	_configure_dedicated_host(host)
 	assert_true(host.enable_host_listen(0))
 	host.set_asset_root(root)
@@ -512,7 +512,7 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	var host_parent: Dictionary = host.get_world_entity_debug(parent_bms_id)
 	assert_eq(int(host_parent.get("handle", -1)), 0x1000)
 
-	var joiner := NovaSimulation.new()
+	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "DesignatedGHeaderJoiner"))
 	joiner.set_join_world_ready(false)
@@ -531,7 +531,7 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 		host.free()
 		return
 
-	var wire_mission := NovaMissionData.new()
+	var wire_mission := MissionData.new()
 	assert_eq(wire_mission.open_wire_header(header), OK)
 	assert_true(wire_mission.is_wire_header_only())
 	assert_true(joiner.load_from_mission_data(wire_mission))
@@ -663,7 +663,7 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	assert_lt(int(joiner.get_local_player_weapon_state().get("current", 99)), 2,
 			"personal weapon settled before the mount action")
 	assert_eq(_present_field_for_type(
-			joiner, DESIGNATED_G_CHILD_TYPE, NovaSimulation.PF_ALIVE), 1)
+			joiner, DESIGNATED_G_CHILD_TYPE, Simulation.PF_ALIVE), 1)
 	assert_lt(_present_position_for_type(
 			joiner, DESIGNATED_G_CHILD_TYPE).distance_to(
 					joiner.get_local_player_position()), 4.0,
@@ -673,7 +673,7 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 			"the decoded child contributes one in-range UseGun label")
 	if attach_labels.size() == 1:
 		assert_eq(int((attach_labels[0] as Dictionary).get("seat_type", 0)),
-				NovaSimulation.SEAT_GUNNER)
+				Simulation.SEAT_GUNNER)
 	assert_true(joiner.local_player_toggle_mount(),
 			"the decoded child exposes its authored UseGun seat")
 	var host_player_index := _player_index(host)
@@ -713,19 +713,19 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 	# The joiner path used to skip this entirely (host-only `ent` enrichment) —
 	# the live "two 50cal models while mounted" symptom.
 	assert_eq(_present_field_for_type(joiner, DESIGNATED_G_CHILD_TYPE,
-			NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
+			Simulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
 			"without a resolved FP model the world gun still renders")
 	joiner.set_local_player_first_person_model_available(true)
 	assert_eq(_present_field_for_type(joiner, DESIGNATED_G_CHILD_TYPE,
-			NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 1,
+			Simulation.PF_LOCAL_VIEW_SUPPRESSED), 1,
 			"the mounted joiner suppresses the gun's duplicate world model")
 	joiner.set_local_player_camera_third_person(true)
 	assert_eq(_present_field_for_type(joiner, DESIGNATED_G_CHILD_TYPE,
-			NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
+			Simulation.PF_LOCAL_VIEW_SUPPRESSED), 0,
 			"third person restores the world gun")
 	joiner.set_local_player_camera_third_person(false)
 	assert_eq(_present_field_for_type(joiner, DESIGNATED_G_CHILD_TYPE,
-			NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED), 1)
+			Simulation.PF_LOCAL_VIEW_SUPPRESSED), 1)
 
 	var child_ammo: Dictionary = joiner.get_local_player_weapon_state()
 	var child_clip := int(child_ammo.get("clip", -999))
@@ -783,19 +783,19 @@ func test_true_wire_header_recovers_designated_g_parent_ammo_route() -> void:
 
 func test_complete_bms_joiner_keeps_authored_promotion_identity() -> void:
 	var fixture := _mission_fixture()
-	var mission: NovaMissionData = fixture["mission"]
+	var mission: MissionData = fixture["mission"]
 	assert_false(mission.is_wire_header_only())
 	var db := _item_db()
 	assert_not_null(db)
 	if db == null:
 		return
 
-	var host := NovaSimulation.new()
+	var host := Simulation.new()
 	_configure_dedicated_host(host)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	host.resolve_item_traits(db)
-	var joiner := NovaSimulation.new()
+	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "FullBmsJoiner"))
 	assert_true(joiner.load_from_mission_data(mission))
@@ -804,7 +804,7 @@ func test_complete_bms_joiner_keeps_authored_promotion_identity() -> void:
 	var before: Dictionary = joiner.get_world_entity_debug(
 			int(fixture["vehicle_bms_id"]))
 	assert_eq(int(before.get("handle", -1)), 0x1000)
-	assert_eq(int(before.get("kind", -1)), NovaMissionData.KIND_ITEM)
+	assert_eq(int(before.get("kind", -1)), MissionData.KIND_ITEM)
 	assert_eq(int(before.get("index", -1)), 0)
 	assert_eq(int(before.get("bms_id", 0)), int(fixture["vehicle_bms_id"]))
 	for _tick in range(800):
@@ -817,7 +817,7 @@ func test_complete_bms_joiner_keeps_authored_promotion_identity() -> void:
 	var after: Dictionary = joiner.get_world_entity_debug(
 			int(fixture["vehicle_bms_id"]))
 	assert_eq(int(after.get("handle", -1)), 0x1000)
-	assert_eq(int(after.get("kind", -1)), NovaMissionData.KIND_ITEM,
+	assert_eq(int(after.get("kind", -1)), MissionData.KIND_ITEM,
 			"full-BMS joiners retain authored spawn_origin semantics")
 	assert_eq(int(after.get("index", -1)), 0)
 	assert_eq(int(after.get("bms_id", 0)), int(fixture["vehicle_bms_id"]))

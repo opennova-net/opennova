@@ -160,7 +160,7 @@ func _populate_inspector() -> void:
 	if _document.resource == null:
 		meta_label.text = ""
 	else:
-		var res: NovaFntResource = _document.resource
+		var res: FntResource = _document.resource
 		var first := res.get_first_char()
 		var drawn := 0
 		for i in range(res.get_glyph_count()):

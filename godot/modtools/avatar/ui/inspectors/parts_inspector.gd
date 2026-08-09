@@ -16,7 +16,7 @@ const KINDS := ["head", "body", "arms"]
 var _kind_option: OptionButton
 var _list: ItemList
 var _detail_box: VBoxContainer
-var _selected_kind := 0  # NovaAvatarDatabase.PART_HEAD
+var _selected_kind := 0  # AvatarDatabase.PART_HEAD
 var _selected_index := -1
 
 # Detail fields (rebuilt per selection).
@@ -82,7 +82,7 @@ func _db():
 
 
 func _kind_const() -> int:
-	# Maps the option index to NovaAvatarDatabase.PART_* (head=0, body=1, arms=2),
+	# Maps the option index to AvatarDatabase.PART_* (head=0, body=1, arms=2),
 	# which match KINDS order.
 	return _selected_kind
 

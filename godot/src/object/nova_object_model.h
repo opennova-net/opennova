@@ -1,0 +1,476 @@
+#pragma once
+
+// ObjectModel — the retained visual for one NovaLogic object graphic,
+// NATIVE (the 2026-08-09 de-scripting: the former nova_object_model.gd +
+// nova_object_body_anim.gd + nova_object_materials.gd +
+// nova_object_scene_builder.gd, ported verbatim). One Node3D owns the
+// retained scene (Robj part nodes / Skeleton3D + Skin / materials), the
+// main-body skeletal channels, the PLAYPARTANIM part channels, the CTRL
+// register store, environment lighting application, and the event-driven
+// runtime frame. Presenters drive it through direct typed calls — there is
+// no script bridge, no virtual dispatch layer, and no capability probing.
+//
+// Behavioral witnesses live at each method ([orig:] blocks carried from the
+// GDScript origin); docs/adr/0007 + docs/world/world-wac-ai-re.md §14 for
+// the skeletal semantics, docs/render/render-lighting-re.md for lighting.
+
+#include <godot_cpp/classes/image_texture.hpp>
+#include <godot_cpp/classes/node3d.hpp>
+#include <godot_cpp/classes/ref_counted.hpp>
+#include <godot_cpp/classes/shader.hpp>
+#include <godot_cpp/classes/shader_material.hpp>
+#include <godot_cpp/classes/skeleton3d.hpp>
+#include <godot_cpp/classes/skin.hpp>
+#include <godot_cpp/classes/texture2d.hpp>
+#include <godot_cpp/classes/visible_on_screen_notifier3d.hpp>
+#include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/templates/hash_map.hpp>
+#include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/packed_byte_array.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
+
+#include "object/nova_object_data.h"
+#include "object/nova_skeletal_anim.h"
+
+namespace godot {
+
+// The env-derived lighting/fog values the object shaders consume (ADR 0017's
+// typed record, native). Computed once per env change and stamped onto many
+// materials — live model surfaces AND the mission placer's static batches.
+// [orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0]
+class EnvLightValues : public RefCounted {
+	GDCLASS(EnvLightValues, RefCounted)
+
+protected:
+	static void _bind_methods();
+
+public:
+	Vector3 hemi_sky;
+	Vector3 dir;
+	Vector3 dir_color;
+	Vector3 hemi_ground;
+	Vector3 ceiling;
+	Vector3 floor_color;
+	Vector3 gain;
+	bool fog_enabled = false;
+	Vector3 fog_color;
+	float fog_start = 0.0f;
+	float fog_end = 0.0f;
+	int fog_type = 0;
+
+	// True when `other` carries the same lighting/fog the shaders consume.
+	// A null other (first push after rebuild) is never equal.
+	bool equals(const Ref<EnvLightValues> &p_other) const;
+
+	// The un-enved default: the RETAIL NOON register (shipped full_00.env tod
+	// 1200 block bytes /255), so a preview lights like a JO noon world.
+	static Ref<EnvLightValues> retail_noon_defaults();
+
+	// Property surface so the environment system (GDScript) fills the record.
+	void set_hemi_sky(const Vector3 &v) { hemi_sky = v; }
+	Vector3 get_hemi_sky() const { return hemi_sky; }
+	void set_dir(const Vector3 &v) { dir = v; }
+	Vector3 get_dir() const { return dir; }
+	void set_dir_color(const Vector3 &v) { dir_color = v; }
+	Vector3 get_dir_color() const { return dir_color; }
+	void set_hemi_ground(const Vector3 &v) { hemi_ground = v; }
+	Vector3 get_hemi_ground() const { return hemi_ground; }
+	void set_ceiling(const Vector3 &v) { ceiling = v; }
+	Vector3 get_ceiling() const { return ceiling; }
+	void set_floor_color(const Vector3 &v) { floor_color = v; }
+	Vector3 get_floor_color() const { return floor_color; }
+	void set_gain(const Vector3 &v) { gain = v; }
+	Vector3 get_gain() const { return gain; }
+	void set_fog_enabled(bool v) { fog_enabled = v; }
+	bool get_fog_enabled() const { return fog_enabled; }
+	void set_fog_color(const Vector3 &v) { fog_color = v; }
+	Vector3 get_fog_color() const { return fog_color; }
+	void set_fog_start(float v) { fog_start = v; }
+	float get_fog_start() const { return fog_start; }
+	void set_fog_end(float v) { fog_end = v; }
+	float get_fog_end() const { return fog_end; }
+	void set_fog_type(int v) { fog_type = v; }
+	int get_fog_type() const { return fog_type; }
+};
+
+// The typed channel between the environment system and every lit consumer:
+// the env PUBLISHES its current world light/fog values here; models (and the
+// placer's static batches) hold this ref and read values + generation through
+// typed calls — no consumer ever holds the environment object itself.
+class EnvLightState : public RefCounted {
+	GDCLASS(EnvLightState, RefCounted)
+
+	Ref<EnvLightValues> values_;
+	int64_t generation_ = 0;
+
+protected:
+	static void _bind_methods();
+
+public:
+	void publish(const Ref<EnvLightValues> &p_values);
+	Ref<EnvLightValues> get_values() const { return values_; }
+	int64_t get_generation() const { return generation_; }
+};
+
+// Retail samples GetTickCount once into one global DWORD for a rendered
+// frame; models, material animation, and Generic collision consume that same
+// value. (The former panm_clock.gd, native.)
+class PanmClock : public RefCounted {
+	GDCLASS(PanmClock, RefCounted)
+
+	int64_t time_ms_ = 0;
+	int64_t sampled_frame_ = -1;
+
+protected:
+	static void _bind_methods();
+
+public:
+	bool sample_frame();
+	bool sample(int64_t p_value_ms, int64_t p_frame);
+	int64_t get_time_ms() const { return time_ms_; }
+	void set_time_ms_for_test(int64_t p_value_ms);
+};
+
+class ObjectModel : public Node3D {
+	GDCLASS(ObjectModel, Node3D)
+
+public:
+	// The witnessed lighting uniform surface defaults — the RETAIL NOON
+	// register (shipped full_00.env tod 1200 bytes /255), so an un-enved
+	// preview lights like a JO noon world. Must stay equal to the composer's
+	// uniform defaults (engine/runtime/renderer/src/object_shader_template.cpp).
+	static Vector3 default_hemi_sky_color() { return Vector3(84.0f / 255.0f, 88.0f / 255.0f, 89.0f / 255.0f); }
+	static Vector3 default_dir_light_dir() { return Vector3(-0.4082f, -0.8165f, -0.4082f); }
+	static Vector3 default_dir_light_color() { return Vector3(170.0f / 255.0f, 170.0f / 255.0f, 167.0f / 255.0f); }
+	static Vector3 default_hemi_ground_color() { return Vector3(49.0f / 255.0f, 55.0f / 255.0f, 46.0f / 255.0f); }
+
+	enum LightingContext {
+		LIGHTING_CONTEXT_ENTITY = 0,
+		LIGHTING_CONTEXT_INTERIOR_SECTION = 1,
+	};
+
+	// Visual-layer bits, mirrored from the authoritative GDScript table in
+	// adapter/environment/nova_water.gd (the water/mirror pass owns the layer
+	// scheme; keep the two in lockstep).
+	enum {
+		LAYER_WORLD = 1 << 0,
+		LAYER_VIEWMODEL = 1 << 11,
+		LAYER_FP_BODY_SHADOW_ONLY = 1 << 12,
+		LAYER_STATIC_SHADOW_CASTER = 1 << 13,
+		LAYER_DYNAMIC_SHADOW_CASTER = 1 << 14,
+		LAYER_WORLD_NO_MIRROR = 1 << 16,
+		LAYER_SHADOW_CASTER_MASK =
+				LAYER_STATIC_SHADOW_CASTER | LAYER_DYNAMIC_SHADOW_CASTER,
+	};
+
+	// This model's fixed slot spread for staggered environment restamps.
+	static constexpr int kEnvRestampSpreadFrames = 16;
+
+private:
+	struct PartAnimChannel {
+		int dir = 0;
+		int rate = 0;
+		int64_t value = 0;
+	};
+
+	Ref<ObjectData> object_data_;
+	HashMap<int64_t, Ref<ShaderMaterial>> material_cache_;
+	Vector<Ref<ShaderMaterial>> alpha_materials_;
+	HashMap<int64_t, Dictionary> material_defs_;
+	HashMap<int, Node3D *> robj_nodes_;
+	HashMap<int, Transform3D> robj_rest_transforms_;
+	bool od_has_doc_ = false;
+	bool env_has_generation_ = false;
+	bool last_light_push_valid_ = false;
+	int last_light_count_ = 0;
+	Vector3 last_light_position_;
+	Color last_light_color_ = Color(1, 1, 1, 1);
+	float last_light_intensity_ = 0.0f;
+	float last_light_atten_start_ = 0.0f;
+	float last_light_atten_end_ = 0.0f;
+	// Dense part-index -> Node3D array + the PANM revision this model last
+	// applied (stays a Godot Array: ObjectData::apply_panm_to_nodes takes
+	// it directly).
+	Array robj_dense_;
+	int64_t panm_applied_revision_ = 0;
+	int64_t section_visibility_mask_ = -1;
+	PackedInt32Array surface_material_indices_;
+	Vector<Ref<ShaderMaterial>> surface_materials_;
+	PackedByteArray surface_lighting_contexts_;
+	HashMap<int64_t, Array> anim_frames_by_mat_;
+	// This retained model stores the latest CTRL snapshot applied to it
+	// (Dictionary: ObjectData's PANM/material evaluators consume it).
+	Dictionary ctrl_values_;
+	HashMap<String, String> ctrl_value_owners_;
+	int ctrl_batch_depth_ = 0;
+	bool ctrl_batch_dirty_ = false;
+	HashMap<String, PartAnimChannel> part_anims_;
+	double part_anim_tick_accum_s_ = 0.0;
+	int64_t anim_time_ms_ = 0;
+	Ref<PanmClock> panm_clock_;
+	int active_lod_ = 0;
+	bool is_playing_ = true;
+	AABB model_bounds_;
+	Ref<EnvLightState> env_state_;
+	float lighting_effect_scale_ = 1.0f;
+	bool interior_lerp_ = false;
+	float interior_daylight_ = 0.0f;
+	bool interior_section_lighting_ = false;
+	float interior_section_daylight_ = 0.0f;
+	uint32_t shadow_caster_layers_ = 0;
+	Ref<ShaderMaterial> shadow_receiver_material_;
+	bool mirror_reflected_ = false;
+	int env_stagger_slot_ = 0;
+	Dictionary submission_registry_;
+	bool submission_registry_bound_ = false;
+	bool on_screen_ = true;
+	VisibleOnScreenNotifier3D *screen_notifier_ = nullptr;
+	bool native_frame_ = false;
+
+	// Main-body skeletal animation (.bad/.adm via SkeletalAnim).
+	Ref<SkeletalAnim> skeletal_;
+	Skeleton3D *skeleton_ = nullptr;
+	Ref<Skin> skeleton_skin_;
+	int muzzle_bone_ = -1;
+	Vector3 muzzle_model_pos_;
+	// The def-AUTHORED launch userpoint name (items.def launchups_closeattack,
+	// pushed by the placer); empty = this model has no AI muzzle.
+	String muzzle_point_name_;
+	String anim_key_;
+	int anim_variant_ = 0;
+	double anim_time_ = 0.0;
+	bool anim_playing_ = false;
+	bool anim_external_phase_ = false;
+	// Retail remote-body request channel (current/pending ownership).
+	int remote_state_ = -1;
+	int remote_flags_ = 0;
+	int remote_pending_state_ = -1;
+	String remote_pending_key_;
+	int remote_pending_flags_ = 0;
+	double remote_pending_end_time_ = 0.0;
+	bool remote_pending_end_valid_ = false; // false == the GDScript INF sentinel
+	bool remote_blend_active_ = false;
+	String remote_blend_source_key_;
+	int remote_blend_source_phase_ticks_ = 0;
+	double remote_blend_source_time_ = 0.0;
+	int remote_blend_target_phase_ticks_ = 0;
+	float remote_blend_weight_ = 1.0f;
+	float remote_blend_step_ = 0.0f;
+	bool body_pose_dirty_ = true;
+	bool bounds_dirty_ = true;
+	bool body_phase_stamp_valid_ = false;
+	int body_phase_ticks_applied_ = 0;
+	String body_blend_source_key_;
+	double body_blend_source_time_ = 0.0;
+	float body_blend_weight_ = 1.0f;
+	int last_slot_resolved_ = -1;
+	String last_slot_key_;
+
+	// Third-person aim overlay + the upper-body weapon channel.
+	Array aim_overlay_deltas_;
+	PackedInt32Array aim_overlay_classes_;
+	bool collapse_right_hand_ = false;
+	String wpn_key_;
+	int wpn_phase_ticks_ = 0;
+
+	// Per-frame work skips.
+	bool has_lights_ = false;
+	bool has_live_panm_ = false;
+	Vector<bool> material_needs_eval_;
+	PackedInt32Array dynamic_material_slots_;
+	int64_t last_env_gen_ = -1;
+	Ref<EnvLightValues> last_env_values_;
+	Ref<EnvLightValues> last_section_env_values_;
+	bool model_light_preview_enabled_ = false;
+
+	// --- core (nova_object_model.cpp) ---
+	void set_shadow_caster_layer_enabled(uint32_t p_layer, bool p_enabled);
+	void apply_shadow_casting_below(Node *p_root);
+	int lighting_context_for_robj(int p_robj_index) const;
+	static int64_t ctrl_dword(int64_t p_value);
+	void finish_ctrl_change(bool p_apply_now);
+	Node3D *get_or_create_robj_node(int p_robj_index);
+	void apply_runtime_state(double p_delta, bool p_renderable = true);
+	bool apply_robj_transforms();
+	int64_t last_object_update_mask() const;
+	void on_object_changed();
+	void on_env_generation_changed();
+	void wake_runtime_frame();
+	void sleep_runtime_frame_if_idle();
+	bool needs_runtime_frame_work() const;
+	void refresh_live_panm_classification();
+	int clamp_lod_index(int p_lod_index) const;
+	void publish_submission_state();
+	void set_model_bounds(const AABB &p_bounds);
+	static bool aabb_equal_approx(const AABB &p_a, const AABB &p_b);
+
+	// --- body/part animation (nova_object_model_anim.cpp) ---
+	void resolve_muzzle_userpoint();
+	bool select_body_clip_seeded(const String &p_key, int p_phase_ticks);
+	void accept_remote_body_state(int p_state_id, const String &p_key,
+			int p_flags, int p_phase_ticks);
+	void queue_remote_body_state(int p_state_id, const String &p_key, int p_flags);
+	void clear_remote_body_pending();
+	void clear_remote_body_blend();
+	int body_phase_ticks(const String &p_key, double p_seconds) const;
+	void start_remote_body_blend(const String &p_target_key, int p_target_flags,
+			int p_target_phase_ticks);
+	bool promote_remote_body_pending_if_due();
+	void pose_body_blend_at_times(const String &p_source_key, double p_source_time,
+			const String &p_target_key, double p_target_time, float p_weight);
+	void set_body_playhead(double p_seconds);
+	String resolve_body_clip_key(const String &p_key) const;
+	double clip_phase_seconds(const String &p_key, int p_phase_ticks) const;
+	double clip_half_tick_seconds(const String &p_key) const;
+	void clear_body_blend();
+	void reset_body_pose();
+	String resolve_anim_channel_register(int p_slot) const;
+	String resolve_anim_channel_owner(int p_slot) const;
+	bool advance_part_anims(double p_delta);
+
+	// --- materials/environment (nova_object_model_materials.cpp) ---
+	void build_material_defs();
+	Ref<ShaderMaterial> material_for_index(int p_material_array_index,
+			int p_lighting_context);
+	Ref<ShaderMaterial> create_material(int p_index, const Dictionary &p_material_def);
+	Ref<ShaderMaterial> get_shadow_receiver_material();
+	Ref<Texture2D> load_texture_for_slot(const Dictionary &p_material_def, int p_slot);
+	void collect_anim_frames(int p_material_index);
+	Ref<Texture2D> load_texture_name(const String &p_texture_name);
+	static Color hash_color_for_index(int p_index);
+	static Ref<ImageTexture> solid_colour_texture(const Color &p_color);
+	void apply_default_environment_to_material(const Ref<ShaderMaterial> &p_material);
+	bool material_runtime_is_dynamic(int p_material_index) const;
+	void classify_materials();
+	void apply_environment_to_materials();
+	void apply_lights();
+
+	// --- retained-scene construction (nova_object_model_scene.cpp) ---
+	void rebuild_scene();
+	void build_skeleton();
+	void sync_screen_notifier(const AABB &p_bounds);
+	AABB compute_transformed_mesh_bounds() const;
+
+protected:
+	static void _bind_methods();
+	void _notification(int p_what);
+
+public:
+	ObjectModel();
+
+	void _process(double p_delta) override;
+
+	// --- data / configuration ---
+	void set_object_data(const Ref<ObjectData> &p_data);
+	Ref<ObjectData> get_object_data() const { return object_data_; }
+	void set_mirror_reflected(bool p_reflected) { mirror_reflected_ = p_reflected; }
+	bool get_mirror_reflected() const { return mirror_reflected_; }
+	void set_native_frame(bool p_native) { native_frame_ = p_native; }
+	bool get_native_frame() const { return native_frame_; }
+	void set_model_light_preview_enabled(bool p_enabled);
+	void set_shadow_caster_enabled(bool p_enabled);
+	bool is_shadow_caster_enabled() const;
+	void set_static_shadow_caster_enabled(bool p_enabled);
+	bool is_static_shadow_caster_enabled() const;
+	void set_environment_state(const Ref<EnvLightState> &p_state);
+	Ref<EnvLightState> get_environment_state() const { return env_state_; }
+	void set_entity_lighting_context(float p_effect_scale, bool p_interior_lerp,
+			float p_interior_daylight);
+	void set_interior_section_light_transfer(float p_daylight);
+	AABB get_model_bounds() const { return model_bounds_; }
+	Dictionary get_render_part_nodes() const;
+	void set_section_visibility_mask(int64_t p_mask);
+	PackedInt32Array get_surface_material_indices() const { return surface_material_indices_; }
+	Array get_surface_materials() const;
+	Dictionary get_material_defs() const;
+	bool is_playing() const { return is_playing_; }
+	void set_playing(bool p_value);
+	void set_panm_clock(const Ref<PanmClock> &p_clock);
+	Ref<PanmClock> get_panm_clock() const { return panm_clock_; }
+	void reset_animation_time();
+	void set_active_lod(int p_lod_index);
+	int get_active_lod() const { return active_lod_; }
+	void rebuild();
+	void refresh_render_order();
+	void advance_runtime_frame(double p_delta);
+	void set_on_screen(bool p_value);
+	void set_submission_registry(const Dictionary &p_registry);
+
+	// --- CTRL registers ---
+	void begin_ctrl_update();
+	void end_ctrl_update();
+	void set_ctrl_value(const String &p_name, int64_t p_value);
+	void clear_ctrl_value(const String &p_name);
+	void set_ctrl_override(const String &p_owner, const String &p_name, int64_t p_value);
+	void clear_ctrl_override(const String &p_owner, const String &p_name);
+	void clear_ctrl_values();
+	Dictionary get_ctrl_values() const;
+
+	// --- main-body skeletal + part channels ---
+	void set_skeletal_anim(const Ref<SkeletalAnim> &p_skeletal);
+	Ref<SkeletalAnim> get_skeletal_anim() const { return skeletal_; }
+	Skeleton3D *get_skeleton() const { return skeleton_; }
+	bool has_skeleton() const { return skeleton_ != nullptr; }
+	bool has_muzzle() const;
+	// The def-authored launch userpoint name; rebuild resolves it against the
+	// model's userpoint table (case-insensitive, retail's by-name lookup).
+	void set_muzzle_point_name(const String &p_name);
+	String get_muzzle_point_name() const { return muzzle_point_name_; }
+	Vector3 get_muzzle_world_position() const;
+	void play_body_clip(const String &p_key);
+	void play_body_clip_variant(const String &p_key, int p_variant);
+	void play_body_clip_variant_at_time(const String &p_key, int p_variant,
+			double p_seconds);
+	void play_body_clip_at(const String &p_key, int p_phase_ticks);
+	void play_body_blend_at(const String &p_source_key, int p_source_phase_ticks,
+			const String &p_target_key, int p_target_phase_ticks, double p_weight);
+	void play_body_clip_seeded(const String &p_key, int p_phase_ticks);
+	bool apply_remote_body_state(int p_state_id, const String &p_key, int p_flags,
+			int p_phase_ticks = -1);
+	void reset_remote_body_state();
+	bool advance_remote_body_blend_tick(int p_state_id);
+	bool remote_body_needs_fixed_tick() const;
+	void stop_body_clip();
+	String get_active_body_clip() const { return anim_key_; }
+	void play_body_anim(int p_slot);
+	void play_body_anim_at(int p_slot, int p_phase_ticks);
+	int64_t get_animation_time_ms() const { return anim_time_ms_; }
+	void set_animation_time(double p_seconds);
+	double get_animation_time() const;
+	void play_part_anim(int p_channel, int p_play_type, double p_time_s);
+	void restart_part_anim(int p_channel, int p_play_type, double p_time_s);
+	void set_part_phase(int p_channel, int64_t p_phase);
+	void clear_part_phase(int p_channel);
+	void clear_part_anims();
+	Dictionary get_active_part_anims() const;
+	void set_weapon_channel(const String &p_key, int p_phase_ticks);
+	// The applied weapon-channel pose ({key, phase_ticks}; empty when no
+	// channel is held) — presentation-state read-back.
+	Dictionary get_weapon_channel() const;
+	void set_aim_overlay(const Array &p_deltas);
+	Array get_aim_overlay() const { return aim_overlay_deltas_; }
+
+	void set_right_hand_collapsed(bool p_collapsed);
+	bool is_right_hand_collapsed() const { return collapse_right_hand_; }
+	// The active two-channel blend ({source_key, source_time, weight}; empty
+	// when a single channel poses the body) — presentation-state read-back.
+	Dictionary get_body_blend() const;
+	void advance_body_animation(double p_delta, bool p_write_pose = true);
+	// Diagnostics: whether a body-pose input changed since the last pose write
+	// (the aim-overlay/weapon-channel dedup fast path pins against this).
+	bool is_body_pose_dirty() const { return body_pose_dirty_; }
+
+	// --- environment-value derivation (static; the placer's static batches
+	// consume the same values/skip logic as live models) ---
+	static Ref<EnvLightValues> entity_lighting_values(
+			const Ref<EnvLightValues> &p_world_values, float p_effect_scale,
+			bool p_interior_lerp, float p_interior_daylight);
+	static void apply_environment_values(const Ref<ShaderMaterial> &p_material,
+			const Ref<EnvLightValues> &p_values);
+	static bool material_supports_projected_shadow_receiver(int p_blend_mode,
+			int p_material_flags);
+};
+
+} // namespace godot
+
+VARIANT_ENUM_CAST(godot::ObjectModel::LightingContext);

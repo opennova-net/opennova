@@ -4,7 +4,7 @@ extends RefCounted
 # The one ".bms is the mission set" rule for the game shell: missions are the
 # .bms entries the mounted resource root exposes, listed by basename. Every
 # shell surface that enumerates missions (menu seeding, host screens, the
-# default pick) goes through here. `root` stays duck-typed (NovaResourceRoot
+# default pick) goes through here. `root` stays duck-typed (ResourceRoot
 # at runtime; tests inject stand-ins that only implement list_files).
 
 

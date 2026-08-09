@@ -44,11 +44,11 @@ func _exit_tree() -> void:
 		window.min_size = _previous_window_min_size
 
 
-# F11 fullscreen — the core-engine window concept (NovaWindow), shared with the
+# F11 fullscreen — the core-engine window concept (WindowState), shared with the
 # game shell; the MCP's set_fullscreen tool routes to the same helper.
 func _unhandled_key_input(event: InputEvent) -> void:
-	if NovaWindow.is_toggle_event(event):
-		NovaWindow.toggle_fullscreen(get_window())
+	if WindowState.is_toggle_event(event):
+		WindowState.toggle_fullscreen(get_window())
 		get_viewport().set_input_as_handled()
 
 

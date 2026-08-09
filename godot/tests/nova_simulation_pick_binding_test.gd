@@ -1,6 +1,6 @@
 extends GutTest
 
-# NovaSimulation.debug_pick_entity: the F3 entity picker's native contract.
+# Simulation.debug_pick_entity: the F3 entity picker's native contract.
 # A worldless sim must return the full typed-defaults dictionary with
 # hit == false — this pins the binding registration (a stale DLL fails to
 # parse here instead of silently greening) and the stable card shape the
@@ -35,7 +35,7 @@ const EXPECTED_TYPES := {
 
 
 func test_worldless_pick_returns_the_full_typed_shape() -> void:
-	var sim := NovaSimulation.new()
+	var sim := Simulation.new()
 	add_child_autofree(sim)
 	var pick: Dictionary = sim.debug_pick_entity(Vector3.ZERO, Vector3.FORWARD, 100.0)
 	assert_false(bool(pick.get("hit", true)), "no world - never a hit")
@@ -49,7 +49,7 @@ func test_worldless_pick_returns_the_full_typed_shape() -> void:
 
 
 func test_zero_direction_is_a_clean_miss() -> void:
-	var sim := NovaSimulation.new()
+	var sim := Simulation.new()
 	add_child_autofree(sim)
 	var pick: Dictionary = sim.debug_pick_entity(Vector3(1, 2, 3), Vector3.ZERO, 500.0)
 	assert_false(bool(pick.get("hit", true)))

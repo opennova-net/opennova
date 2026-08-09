@@ -35,11 +35,11 @@ var _dirs: Array[String] = []
 
 
 func before_each() -> void:
-	_saved_expansion = NovaResourceDirSettings.get_expansion()
+	_saved_expansion = ResourceDirSettings.get_expansion()
 
 
 func after_each() -> void:
-	NovaResourceDirSettings.set_expansion(_saved_expansion)
+	ResourceDirSettings.set_expansion(_saved_expansion)
 	for dir in _dirs:
 		_remove_install(dir)
 	_dirs.clear()
@@ -47,11 +47,11 @@ func after_each() -> void:
 
 func test_expansion_host_remounts_a_base_mounted_joiner() -> void:
 	var dir := _make_install()
-	NovaResourceDirSettings.set_expansion("")  # the local (wrong) choice: base game
+	ResourceDirSettings.set_expansion("")  # the local (wrong) choice: base game
 
 	# BEFORE: mounted exactly as the joiner would have mounted it on its own, the host's
 	# mission is unreachable — this is the state the fix has to move off.
-	var local := NovaResourceRoot.new()
+	var local := ResourceRoot.new()
 	assert_eq(local.mount_runtime(dir, ""), OK)
 	assert_eq(local.get_expansion(), "", "the local-only mount is base game")
 	assert_false(local.has_file(HOST_TERRAIN + ".trn"),
@@ -70,11 +70,11 @@ func test_expansion_host_remounts_a_base_mounted_joiner() -> void:
 
 func test_base_host_remounts_an_expansion_mounted_joiner() -> void:
 	var dir := _make_install()
-	NovaResourceDirSettings.set_expansion("jox01")  # the local (wrong) choice: an expansion
+	ResourceDirSettings.set_expansion("jox01")  # the local (wrong) choice: an expansion
 
 	# BEFORE: the local-only mount DOES resolve the host's mission, so a joiner that never
 	# reconciled would sail past the lookup on expansion data while the host runs base JO.
-	var local := NovaResourceRoot.new()
+	var local := ResourceRoot.new()
 	assert_eq(local.mount_runtime(dir, "jox01"), OK)
 	assert_eq(local.get_expansion(), "jox01", "the local-only mount is the expansion")
 	assert_true(local.has_file(HOST_TERRAIN + ".trn"))
@@ -88,7 +88,7 @@ func test_base_host_remounts_an_expansion_mounted_joiner() -> void:
 
 func test_uninstalled_host_expansion_aborts_the_join() -> void:
 	var dir := _make_install()
-	NovaResourceDirSettings.set_expansion("jox01")
+	ResourceDirSettings.set_expansion("jox01")
 
 	var world := _make_world()
 	var failures := _watch_failures(world)
@@ -102,9 +102,9 @@ func test_uninstalled_host_expansion_aborts_the_join() -> void:
 
 func test_matching_expansion_leaves_the_mount_alone() -> void:
 	var dir := _make_install()
-	NovaResourceDirSettings.set_expansion("jox01")
+	ResourceDirSettings.set_expansion("jox01")
 
-	var local := NovaResourceRoot.new()
+	var local := ResourceRoot.new()
 	assert_eq(local.mount_runtime(dir, "jox01"), OK)
 	assert_true(local.has_file(HOST_TERRAIN + ".trn"))
 	local.clear()
@@ -119,11 +119,11 @@ func test_matching_expansion_leaves_the_mount_alone() -> void:
 
 func test_injected_shell_root_is_switched_in_place() -> void:
 	var dir := _make_install()
-	NovaResourceDirSettings.set_expansion("")  # the local (wrong) choice: base game
+	ResourceDirSettings.set_expansion("")  # the local (wrong) choice: base game
 
 	# The mount the shipping game actually joins on: the shell's live runtime root, handed to
 	# GameWorld at menu entry and sitting on the local choice.
-	var shell_root := NovaResourceRoot.new()
+	var shell_root := ResourceRoot.new()
 	assert_eq(shell_root.mount_runtime(dir, ""), OK)
 	assert_eq(shell_root.get_expansion(), "", "the shell mounted base game")
 	assert_false(shell_root.has_file(HOST_TERRAIN + ".trn"),
@@ -137,7 +137,7 @@ func test_injected_shell_root_is_switched_in_place() -> void:
 	assert_eq(shell_root.get_expansion(), "jox01",
 		"and it is the SHELL's own root that moved — the switch is in place, not a swap")
 	assert_true(shell_root.has_file(HOST_TERRAIN + ".trn"))
-	assert_eq(NovaResourceDirSettings.get_expansion(), "",
+	assert_eq(ResourceDirSettings.get_expansion(), "",
 		"the host owns this session's data set, not the persisted menu choice")
 	world.unload()
 	shell_root.clear()  # release the archive handles before after_each deletes the install
@@ -145,9 +145,9 @@ func test_injected_shell_root_is_switched_in_place() -> void:
 
 func test_uninstalled_host_expansion_aborts_an_injected_shell_root_too() -> void:
 	var dir := _make_install()
-	NovaResourceDirSettings.set_expansion("jox01")
+	ResourceDirSettings.set_expansion("jox01")
 
-	var shell_root := NovaResourceRoot.new()
+	var shell_root := ResourceRoot.new()
 	assert_eq(shell_root.mount_runtime(dir, "jox01"), OK)
 	assert_eq(shell_root.get_expansion(), "jox01")
 
@@ -172,9 +172,9 @@ func test_loose_root_stands_down_rather_than_aborting_an_uninstalled_expansion()
 	# precede the abort — the abort belongs to runtime mounts, which are what the shipping game
 	# always joins on.
 	var dir := _make_install()
-	NovaResourceDirSettings.set_expansion("")
+	ResourceDirSettings.set_expansion("")
 
-	var loose_root := NovaResourceRoot.new()
+	var loose_root := ResourceRoot.new()
 	assert_eq(loose_root.set_root_dir(dir), OK)
 	assert_false(loose_root.is_runtime_mount())
 	assert_false(loose_root.list_expansions(dir).has("revx02"),
@@ -193,11 +193,11 @@ func test_loose_root_stands_down_rather_than_aborting_an_uninstalled_expansion()
 
 func test_injected_loose_root_stands_down_instead_of_switching() -> void:
 	var dir := _make_install()
-	NovaResourceDirSettings.set_expansion("")
+	ResourceDirSettings.set_expansion("")
 
 	# Injected-fixture shape: a loose authoring mount layers no expansion
 	# archives, so there is nothing to switch and the authored data set stands.
-	var loose_root := NovaResourceRoot.new()
+	var loose_root := ResourceRoot.new()
 	assert_eq(loose_root.set_root_dir(dir), OK)
 	assert_false(loose_root.is_runtime_mount())
 	assert_true(loose_root.list_expansions(dir).has("jox01"),
@@ -220,7 +220,7 @@ func test_injected_loose_root_stands_down_instead_of_switching() -> void:
 # HOSTMAP.BMS remains deliberately invalid: success proves the client never opened it.
 func _join_against_host(host_expansion: String, dir: String,
 		world = null, failures: Array = []) -> String:
-	var host := NovaSimulation.new()
+	var host := Simulation.new()
 	host.configure_host_session({
 		"server_name": "Expansion Host",
 		"mission_name": "Expansion Probe",
@@ -230,7 +230,7 @@ func _join_against_host(host_expansion: String, dir: String,
 		"max_players": 4,
 	})
 	assert_true(host.enable_host_listen(0), "the in-process listen host bound a loopback port")
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	assert_true(mission.set_header_string("mission_name", "Expansion Probe"))
 	assert_true(mission.set_header_string("terrain", HOST_TERRAIN))
@@ -260,8 +260,8 @@ func _join_against_host(host_expansion: String, dir: String,
 
 func _make_world() -> GameWorld:
 	var world := GameWorld.new()
-	var terrain := NovaTerrain.new()
-	terrain.name = "NovaTerrain"
+	var terrain := Terrain.new()
+	terrain.name = "Terrain"
 	world.add_child(terrain)
 	add_child_autofree(world)
 	world.set_playable(false)

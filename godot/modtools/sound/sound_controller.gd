@@ -3,9 +3,9 @@ extends "res://modtools/editor/editor_document.gd"
 
 ## Authoring controller for a NovaLogic .lwf sound profile.
 ##
-## Holds a single NovaLwfData for its whole lifetime and mutates it in place
+## Holds a single LwfData for its whole lifetime and mutates it in place
 ## (open/new/undo reload the same object) so observers connect once. Undo/redo
-## uses byte snapshots of the profile (NovaLwfData.to_bytes() <-> load_bytes),
+## uses byte snapshots of the profile (LwfData.to_bytes() <-> load_bytes),
 ## reusing the byte-exact-on-unmodified encoder in engine/formats/lwf.
 ##
 ## Change channels mirror the Strings workspace:
@@ -29,7 +29,7 @@ const SEL_SET := 1
 const SEL_LAYER := 2
 const SEL_MEMBER := 3
 
-var data: NovaLwfData
+var data: LwfData
 
 # Current selection: { kind:int, set:int, layer:int, member:int }. kind == SEL_NONE
 # means nothing selected (set/layer/member are -1).
@@ -37,7 +37,7 @@ var selection: Dictionary = {"kind": SEL_NONE, "set": -1, "layer": -1, "member":
 
 
 func _init() -> void:
-	data = NovaLwfData.new()
+	data = LwfData.new()
 	data.create_empty()
 
 
@@ -239,7 +239,7 @@ func move_member(si: int, li: int, from_index: int, to_index: int) -> void:
 # --- Scalar editing session (silent: model + dirty only) ---
 
 # Editing session + undo/redo: the shared EditorDocument snapshot history.
-# The hooks supply this domain's snapshot shape (NovaLwfData bytes) + signals.
+# The hooks supply this domain's snapshot shape (LwfData bytes) + signals.
 
 func _snapshot() -> Variant:
 	return data.to_bytes() if data != null else null
@@ -258,7 +258,7 @@ func _history_applied(kind: String) -> void:
 
 
 func set_set_field_live(si: int, key: String, value: Variant) -> void:
-	# Skip no-op writes: applying an unchanged value would flip NovaLwfData to its
+	# Skip no-op writes: applying an unchanged value would flip LwfData to its
 	# canonical (non-byte-exact) encode path and spuriously dirty the document.
 	var cur := data.get_set(si)
 	if cur.is_empty() or cur.get(key) == value:

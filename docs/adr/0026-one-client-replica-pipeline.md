@@ -19,7 +19,7 @@ are the original decision text, left as written.
 ## Context
 
 Live play and replay/spectate used the same `npwire` decoders but built two
-different client worlds. `NovaSimulation` folded S2C messages into
+different client worlds. `Simulation` folded S2C messages into
 `NetClientView` and presented its flat snapshot through `WirePresentPass`.
 `NovaNetClient` retained every decoded message, periodically rebuilt a
 `ReplayTimeline`, and rendered that model through `NetWorldView`. The two paths
@@ -51,7 +51,7 @@ physical kind of either entity.
    spectators expose the same `PF_*` snapshot contract and use the same spawn,
    model-resolution, transform, animation, visibility, and liveness path.
    `NetWorldView` is removed. Role-specific data may enrich a snapshot:
-   `NovaSimulation` can resolve authoritative/local mission state, while a
+   `Simulation` can resolve authoritative/local mission state, while a
    spectator has no local Person and reports that explicitly.
 4. **`ItemReplicationCatalog` is the single immutable item classification.**
    It is built once from `items.def` and shared by host stamps and client record

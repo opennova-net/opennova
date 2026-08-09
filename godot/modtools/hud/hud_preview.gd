@@ -10,8 +10,8 @@ extends Control
 ## boxes so the layout is always legible. The model is the witnessed original —
 ## see docs/interface/hud-re.md.
 
-var _hudpos: NovaHudPos
-var _root: NovaResourceRoot
+var _hudpos: HudPos
+var _root: ResourceRoot
 var _font: FontFile
 var _stance_tex: Texture2D
 var _frame_tex: Texture2D
@@ -21,7 +21,7 @@ const PREVIEW_HEALTH := 0.6
 const PREVIEW_STANCE := 0 # STAND
 
 
-func set_source(hudpos: NovaHudPos, root: NovaResourceRoot) -> void:
+func set_source(hudpos: HudPos, root: ResourceRoot) -> void:
 	_hudpos = hudpos
 	_root = root
 	_font = null

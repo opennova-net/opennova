@@ -2,26 +2,26 @@ extends GutTest
 
 # The unified MissionPresentPass applies each entity's transform + PANM part
 # channels + visibility onto its placed node every tick, from ONE batched sim
-# snapshot. Real native components end to end: NovaObjectModel nodes (their
+# snapshot. Real native components end to end: ObjectModel nodes (their
 # CTRL store, body clips, and Node3D state are the observables), a real
-# NovaEntityIndex, and PF-layout snapshots built as pure data and fed through
+# EntityIndex, and PF-layout snapshots built as pure data and fed through
 # the public present_snapshot API. Change-gating claims read the applier's
 # stats counters — never instrumentation subclasses.
 #
 # The old aliased-register dismount cases are gone by design: production
-# NovaObjectModel maps PLAYPARTANIM channels 1/2 to fixed VEHICLE_SPECIAL1/2
+# ObjectModel maps PLAYPARTANIM channels 1/2 to fixed VEHICLE_SPECIAL1/2
 # [orig: HUD_CacheEntityDisplayInfo @ 0x4A3E18..0x4A3E38], so a part channel
 # can never alias EWEAP registers; the register-independence case pins the
 # real layout.
 
-const PresentPass := preload("res://adapter/world/mission_present_pass.gd")
-const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
+const PresentPass := preload("res://src/world/mission_present_pass.gd")
+const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
 
 const RIGGED_3DI := "res://../fixtures/threedi/3di3/Shed.3di"
 const MUZZLE_3DI := "res://../fixtures/3dp/dapche2/dapche2.3di"
 
 
-# Builds the flat PF-layout snapshot NovaSimulation.get_present_snapshot()
+# Builds the flat PF-layout snapshot Simulation.get_present_snapshot()
 # emits. Each entity is a Dictionary of overrides; unset fields default sanely
 # (alive, not hidden, identity). Pure data — nothing here is a sim double.
 class Snapshot:
@@ -29,96 +29,96 @@ class Snapshot:
 	var entities: Array = []
 	func _write_phase(out: PackedFloat32Array, base: int,
 			channel: int, phase: int, active: bool) -> void:
-		var phase_field := NovaSimulation.PF_PHASE1 + (channel - 1) * 2
-		var active_field := NovaSimulation.PF_ACTIVE1 + (channel - 1) * 2
+		var phase_field := Simulation.PF_PHASE1 + (channel - 1) * 2
+		var active_field := Simulation.PF_ACTIVE1 + (channel - 1) * 2
 		var bits := phase & 0xFFFFFFFF
 		out[base + phase_field] = float(bits & 0xFFFF)
 		out[base + active_field] = (
 				float(((bits >> 16) & 0xFFFF) + 1) if active else 0.0)
 	func build() -> PackedFloat32Array:
-		var stride: int = NovaSimulation.PF_STRIDE
+		var stride: int = Simulation.PF_STRIDE
 		var out := PackedFloat32Array()
 		out.resize(entities.size() * stride)
 		for i in range(entities.size()):
 			var e: Dictionary = entities[i]
 			var b := i * stride
-			out[b + NovaSimulation.PF_KIND] = float(e.get("kind", -1))
-			out[b + NovaSimulation.PF_INDEX] = float(e.get("index", -1))
-			out[b + NovaSimulation.PF_BMS_ID] = float(e.get("bms_id", 0))
-			out[b + NovaSimulation.PF_TYPE_ID] = float(e.get("type_id", 0))
-			out[b + NovaSimulation.PF_WIRE_HANDLE] = float(e.get("handle", 0))
-			out[b + NovaSimulation.PF_NET_ID] = float(e.get("net_id", 0))
-			out[b + NovaSimulation.PF_POS_X] = float(e.get("pos_x", 0.0))
-			out[b + NovaSimulation.PF_POS_Y] = float(e.get("pos_y", 0.0))
-			out[b + NovaSimulation.PF_POS_Z] = float(e.get("pos_z", 0.0))
-			out[b + NovaSimulation.PF_YAW_DEG] = float(e.get("yaw_deg", 0.0))
+			out[b + Simulation.PF_KIND] = float(e.get("kind", -1))
+			out[b + Simulation.PF_INDEX] = float(e.get("index", -1))
+			out[b + Simulation.PF_BMS_ID] = float(e.get("bms_id", 0))
+			out[b + Simulation.PF_TYPE_ID] = float(e.get("type_id", 0))
+			out[b + Simulation.PF_WIRE_HANDLE] = float(e.get("handle", 0))
+			out[b + Simulation.PF_NET_ID] = float(e.get("net_id", 0))
+			out[b + Simulation.PF_POS_X] = float(e.get("pos_x", 0.0))
+			out[b + Simulation.PF_POS_Y] = float(e.get("pos_y", 0.0))
+			out[b + Simulation.PF_POS_Z] = float(e.get("pos_z", 0.0))
+			out[b + Simulation.PF_YAW_DEG] = float(e.get("yaw_deg", 0.0))
 			_write_phase(out, b, 1, int(e.get("phase1", 0)),
 					int(e.get("active1", 0)) != 0)
 			_write_phase(out, b, 2, int(e.get("phase2", 0)),
 					int(e.get("active2", 0)) != 0)
-			out[b + NovaSimulation.PF_BODY_ANIM_SLOT] = float(e.get("body_anim_slot", -1))
-			out[b + NovaSimulation.PF_ANIM_STATE] = float(e.get("anim_state", -1))
-			out[b + NovaSimulation.PF_ANIM_PHASE_TICKS] = float(e.get("anim_phase", 0))
-			out[b + NovaSimulation.PF_ANIM_SOURCE_STATE] = float(
+			out[b + Simulation.PF_BODY_ANIM_SLOT] = float(e.get("body_anim_slot", -1))
+			out[b + Simulation.PF_ANIM_STATE] = float(e.get("anim_state", -1))
+			out[b + Simulation.PF_ANIM_PHASE_TICKS] = float(e.get("anim_phase", 0))
+			out[b + Simulation.PF_ANIM_SOURCE_STATE] = float(
 					e.get("anim_source_state", -1))
-			out[b + NovaSimulation.PF_ANIM_SOURCE_PHASE_TICKS] = float(
+			out[b + Simulation.PF_ANIM_SOURCE_PHASE_TICKS] = float(
 					e.get("anim_source_phase", -1))
-			out[b + NovaSimulation.PF_ANIM_BLEND_WEIGHT] = float(
+			out[b + Simulation.PF_ANIM_BLEND_WEIGHT] = float(
 					e.get("anim_blend_weight", 1.0))
-			out[b + NovaSimulation.PF_HIDDEN] = float(e.get("hidden", 0))
-			out[b + NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED] = float(
+			out[b + Simulation.PF_HIDDEN] = float(e.get("hidden", 0))
+			out[b + Simulation.PF_LOCAL_VIEW_SUPPRESSED] = float(
 					e.get("local_view_suppressed", 0))
-			out[b + NovaSimulation.PF_ALIVE] = float(e.get("alive", 1))
-			out[b + NovaSimulation.PF_AIM_OVERLAY_VALID] = float(
+			out[b + Simulation.PF_ALIVE] = float(e.get("alive", 1))
+			out[b + Simulation.PF_AIM_OVERLAY_VALID] = float(
 					e.get("aim_overlay_valid", 0))
 			var body: Vector3 = e.get("aim_body", Vector3.ZERO)
-			out[b + NovaSimulation.PF_AIM_BODY_PITCH_DEG] = body.x
-			out[b + NovaSimulation.PF_AIM_BODY_YAW_DEG] = body.y
-			out[b + NovaSimulation.PF_AIM_BODY_ROLL_DEG] = body.z
-			out[b + NovaSimulation.PF_EMPLACED_CONTROLS_VALID] = float(
+			out[b + Simulation.PF_AIM_BODY_PITCH_DEG] = body.x
+			out[b + Simulation.PF_AIM_BODY_YAW_DEG] = body.y
+			out[b + Simulation.PF_AIM_BODY_ROLL_DEG] = body.z
+			out[b + Simulation.PF_EMPLACED_CONTROLS_VALID] = float(
 					e.get("emplaced_controls_valid", 0))
-			out[b + NovaSimulation.PF_EWEAP_GUNYAW] = float(
+			out[b + Simulation.PF_EWEAP_GUNYAW] = float(
 					e.get("emplaced_gun_yaw", 0))
-			out[b + NovaSimulation.PF_EWEAP_GUNPITCH] = float(
+			out[b + Simulation.PF_EWEAP_GUNPITCH] = float(
 					e.get("emplaced_gun_pitch", 0))
-			out[b + NovaSimulation.PF_VEHICLE_MOTION_VALID] = float(
+			out[b + Simulation.PF_VEHICLE_MOTION_VALID] = float(
 					e.get("vehicle_motion_valid", 0))
-			out[b + NovaSimulation.PF_VEHICLE_STEERING] = float(
+			out[b + Simulation.PF_VEHICLE_STEERING] = float(
 					e.get("vehicle_steering", 0))
-			out[b + NovaSimulation.PF_VEHICLE_SPEED] = float(
+			out[b + Simulation.PF_VEHICLE_SPEED] = float(
 					e.get("vehicle_speed", 0))
-			out[b + NovaSimulation.PF_TEX_TEAM_VALID] = float(
+			out[b + Simulation.PF_TEX_TEAM_VALID] = float(
 					e.get("tex_team_valid", 0))
-			out[b + NovaSimulation.PF_TEX_TEAM] = float(
+			out[b + Simulation.PF_TEX_TEAM] = float(
 					e.get("tex_team", 0))
-			out[b + NovaSimulation.PF_ZONE_CTRL_VALID] = float(
+			out[b + Simulation.PF_ZONE_CTRL_VALID] = float(
 					e.get("zone_ctrl_valid", 0))
-			out[b + NovaSimulation.PF_TEAMSWING] = float(
+			out[b + Simulation.PF_TEAMSWING] = float(
 					e.get("team_swing", 0))
-			out[b + NovaSimulation.PF_LFP_CAMPPERCENT_VALID] = float(
+			out[b + Simulation.PF_LFP_CAMPPERCENT_VALID] = float(
 					e.get("lfp_camp_percent_valid", 0))
-			out[b + NovaSimulation.PF_LFP_CAMPPERCENT] = float(
+			out[b + Simulation.PF_LFP_CAMPPERCENT] = float(
 					e.get("lfp_camp_percent", 0))
-			out[b + NovaSimulation.PF_WORLD_HEAT_GLOW_VALID] = float(
+			out[b + Simulation.PF_WORLD_HEAT_GLOW_VALID] = float(
 					e.get("world_heat_glow_valid", 0))
-			out[b + NovaSimulation.PF_WORLD_HEAT_GLOW] = float(
+			out[b + Simulation.PF_WORLD_HEAT_GLOW] = float(
 					e.get("world_heat_glow", 0))
-			out[b + NovaSimulation.PF_RIGHT_HAND_COLLAPSED] = float(
+			out[b + Simulation.PF_RIGHT_HAND_COLLAPSED] = float(
 					e.get("right_hand_collapsed", 0))
 			var angles: PackedVector3Array = e.get(
 					"aim_angles", PackedVector3Array())
 			for cls in range(mini(angles.size(), 9)):
 				var a := angles[cls]
-				var ob := (b + NovaSimulation.PF_AIM_ANGLES
-						+ cls * NovaSimulation.PF_AIM_CLASS_STRIDE)
+				var ob := (b + Simulation.PF_AIM_ANGLES
+						+ cls * Simulation.PF_AIM_CLASS_STRIDE)
 				out[ob] = a.x
 				out[ob + 1] = a.y
 				out[ob + 2] = a.z
 		return out
 
 
-func _model() -> NovaObjectModel:
-	var m := NovaObjectModel.new()
+func _model() -> ObjectModel:
+	var m := ObjectModel.new()
 	add_child_autofree(m)
 	m.set_process(false)
 	return m
@@ -127,16 +127,16 @@ func _model() -> NovaObjectModel:
 # A rigged model whose skeletal set registers the exact semantic keys the
 # applier's infantry map produces (anim_idle = state 43, anim_walk_forward =
 # state 1, anim_reset = state 0).
-func _rigged_model() -> NovaObjectModel:
-	var m := NovaObjectModel.new()
+func _rigged_model() -> ObjectModel:
+	var m := ObjectModel.new()
 	add_child_autofree(m)
 	m.set_process(false)
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(RIGGED_3DI)), OK)
-	var anim_root := NovaResourceRoot.new()
+	var anim_root := ResourceRoot.new()
 	assert_eq(anim_root.set_root_dir(
 			ProjectSettings.globalize_path("res://../fixtures/anim")), OK)
-	var sk := NovaSkeletalAnim.new()
+	var sk := SkeletalAnim.new()
 	assert_true(sk.load_from_bad_files(anim_root, "idle.bad", {
 		"anim_reset": "idle.bad",
 		"anim_idle": "idle.bad",
@@ -151,16 +151,16 @@ func _rigged_model() -> NovaObjectModel:
 # launchups_* name (pushed by the placer in production) resolves against the
 # model's userpoint table case-insensitively — dapche2 authors Bullet01 and the
 # committed rig gives it a skeleton.
-func _muzzle_model() -> NovaObjectModel:
-	var m := NovaObjectModel.new()
+func _muzzle_model() -> ObjectModel:
+	var m := ObjectModel.new()
 	add_child_autofree(m)
 	m.set_process(false)
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(MUZZLE_3DI)), OK)
-	var anim_root := NovaResourceRoot.new()
+	var anim_root := ResourceRoot.new()
 	assert_eq(anim_root.set_root_dir(
 			ProjectSettings.globalize_path("res://../fixtures/anim")), OK)
-	var sk := NovaSkeletalAnim.new()
+	var sk := SkeletalAnim.new()
 	assert_true(sk.load_from_resource_root(anim_root, "soldier.adm"))
 	m.set_muzzle_point_name("bullet01")  # lower-case: pins the stricmp match
 	m.set_object_data(data)
@@ -169,19 +169,19 @@ func _muzzle_model() -> NovaObjectModel:
 	return m
 
 
-func _index_of(by_bms_id: Dictionary) -> NovaEntityIndex:
+func _index_of(by_bms_id: Dictionary) -> EntityIndex:
 	var entries: Array = []
 	for bms_id in by_bms_id.keys():
 		entries.append({ "model": by_bms_id[bms_id], "ref": {
 			"kind": 1, "index": int(bms_id), "bms_id": int(bms_id),
 			"group": -1, "team": -1, "position": Vector3.ZERO,
 		} })
-	var index := NovaEntityIndex.new()
+	var index := EntityIndex.new()
 	index.build(entries, [])
 	return index
 
 
-func _make_pass(index: NovaEntityIndex, sim: NovaSimulation = null,
+func _make_pass(index: EntityIndex, sim: Simulation = null,
 		options: Dictionary = {}) -> Object:
 	var p := PresentPass.new()
 	p.setup(sim, index, options)
@@ -189,10 +189,10 @@ func _make_pass(index: NovaEntityIndex, sim: NovaSimulation = null,
 
 
 func _present(p: Object, snap: Snapshot, revision: int = 1) -> void:
-	p.present_snapshot(snap.build(), NovaSimulation.PF_STRIDE, revision)
+	p.present_snapshot(snap.build(), Simulation.PF_STRIDE, revision)
 
 
-func _ctrl(model: NovaObjectModel, name: String) -> int:
+func _ctrl(model: ObjectModel, name: String) -> int:
 	return int(model.get_ctrl_values().get(name, -1))
 
 
@@ -200,7 +200,7 @@ func _stat(p: Object, key: String) -> int:
 	return int(p.get_stats()[key])
 
 
-func _clip_time(model: NovaObjectModel, key: String, phase_ticks: int) -> float:
+func _clip_time(model: ObjectModel, key: String, phase_ticks: int) -> float:
 	var fps: float = model.get_skeletal_anim().get_clip_fps(key)
 	assert_gt(fps, 0.0, "fixture clip %s carries a frame rate" % key)
 	return float(phase_ticks) / (2.0 * fps)
@@ -322,7 +322,7 @@ func test_offscreen_falling_edge_releases_at_the_next_submission() -> void:
 func test_offscreen_muzzle_row_keeps_fire_origin_feedback_and_pose() -> void:
 	var muzzle_model := _muzzle_model()
 	var plain_model := _rigged_model()
-	var sim := NovaSimulation.new()
+	var sim := Simulation.new()
 	var p := _make_pass(_index_of({ 5: muzzle_model, 6: plain_model }), sim)
 	var snap := Snapshot.new()
 	snap.entities = [
@@ -749,7 +749,7 @@ func test_resolves_by_kind_index_fallback() -> void:
 	# Editor path: the in-memory mission has no stable bms_id (0). The pass
 	# must fall back to (kind,index) through the real index.
 	var model := _model()
-	var index := NovaEntityIndex.new()
+	var index := EntityIndex.new()
 	index.build([{ "model": model, "ref": {
 		"kind": 3, "index": 2, "bms_id": 0, "group": -1, "team": -1,
 		"position": Vector3.ZERO,
@@ -829,7 +829,7 @@ func test_changed_aim_body_updates_root_with_stable_entity_transform() -> void:
 
 func test_stable_revisioned_snapshot_caches_pose_and_reasserts_live_publishers() -> void:
 	var model := _muzzle_model()
-	var sim := NovaSimulation.new()
+	var sim := Simulation.new()
 	var p := _make_pass(_index_of({ 21: model }), sim)
 	var snap := Snapshot.new()
 	snap.entities = [{
@@ -950,7 +950,7 @@ func test_layout_plan_rebinds_after_reorder_removal_and_replacement() -> void:
 
 
 func test_freed_cached_node_marks_revisioned_plan_for_rebind() -> void:
-	var old_model := NovaObjectModel.new()
+	var old_model := ObjectModel.new()
 	add_child(old_model)
 	old_model.set_process(false)
 	var index := _index_of({ 21: old_model })
@@ -1133,7 +1133,7 @@ func test_reenabled_output_channels_catch_up_to_current_state() -> void:
 
 
 func test_unresolved_target_does_not_crash() -> void:
-	var index := NovaEntityIndex.new()
+	var index := EntityIndex.new()
 	index.build([], [])
 	var p := _make_pass(index)
 	var snap := Snapshot.new()
@@ -1237,7 +1237,7 @@ func test_native_basis_matches_the_placement_convention() -> void:
 			for roll in [-60.0, 0.0, 30.0, 180.0]:
 				var rot := Vector3(pitch, yaw, roll)
 				var expected := MissionObjectPlacer.bms_to_godot_basis(rot)
-				var got: Basis = NovaPresentApplier.bms_to_godot_basis(rot)
+				var got: Basis = PresentApplier.bms_to_godot_basis(rot)
 				assert_true(got.is_equal_approx(expected),
 						"basis parity at %s: native %s vs placer %s" % [
 								rot, got, expected])

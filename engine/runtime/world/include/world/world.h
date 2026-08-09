@@ -319,7 +319,7 @@ public:
     float player_damage_reduc_pp = 0.0f;
     float player_damage_reduc_max = 0.0f;
 
-    // The weapon.def armory table (empty until the host feeds it — NovaSimulation::
+    // The weapon.def armory table (empty until the host feeds it — Simulation::
     // load_weapon_table). Read by the 0x2F/0x5A loadout service, the extended-uplink
     // equipped-weapon gate, and the player-spawn WPN_M4AUTO default. (D-NET-141/143)
     WeaponTable weapons;
@@ -330,7 +330,7 @@ public:
     RoundRing rounds;
 
     // The ammo.def ballistics/damage table (empty until the host feeds it —
-    // NovaSimulation::load_ammo_table, beside the weapon table). [orig: g_ammoDefTable
+    // Simulation::load_ammo_table, beside the weapon table). [orig: g_ammoDefTable
     // @0xA2ECE8, AmmoDef_LoadAll @0x40b0b0; §5.60]
     AmmoTable ammo;
 
@@ -405,7 +405,7 @@ public:
     SubgoalState subgoals;
 
     // Per-item vehicle physics traits (empty until the host's item-traits sweep feeds
-    // it — NovaSimulation::resolve_item_traits). The AI tick's vehicle pass runs the
+    // it — Simulation::resolve_item_traits). The AI tick's vehicle pass runs the
     // ground-vehicle motor for pool-1 entities whose traits carry a non-zero `physics`
     // selector. [orig: ItemDef_ParsePhysicsProperty @0x49d870 fields consumed by
     // Entity_UpdateVehiclePhysics @0x48af00; vehicle_motor.h]

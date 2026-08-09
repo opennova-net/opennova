@@ -1,12 +1,12 @@
 extends GutTest
 
-# NovaDebugOverlay: the shared F3 mission inspector. Most legacy tests drive
+# DebugOverlay: the shared F3 mission inspector. Most legacy tests drive
 # its runtime-free panes; the player tests use a small public-contract fake so
 # no listen-server auto-spawn can make the pose/no-player cases nondeterministic.
 # MissionRuntime metadata and game/ONED shell wiring are covered separately.
 
-const OverlayScript := preload("res://adapter/debug/nova_debug_overlay.gd")
-const DebugViewContext := preload("res://adapter/debug/nova_debug_view_context.gd")
+const OverlayScript := preload("res://src/debug/nova_debug_overlay.gd")
+const DebugViewContext := preload("res://src/debug/nova_debug_view_context.gd")
 # Pages mount under the sidebar shell's page mount; option checkboxes are
 # named after their registry id.
 const PAGES := "DebugPanel/DebugFrame/DebugContent/DebugBody/PageMount"
@@ -149,13 +149,13 @@ class FakePoseRuntime:
 class RealPlayerRuntime:
 	extends Node
 
-	var sim := NovaSimulation.new()
+	var sim := Simulation.new()
 
 	func _init() -> void:
 		add_child(sim)
 
 	func prepare_populated_player() -> Error:
-		var mission := NovaMissionData.new()
+		var mission := MissionData.new()
 		var err := mission.create_default()
 		if err != OK:
 			return err
@@ -163,14 +163,14 @@ class RealPlayerRuntime:
 			return ERR_CANT_CREATE
 		if not sim.spawn_local_player(Vector3.ZERO, 0.0, 2):
 			return ERR_CANT_CREATE
-		var root := NovaResourceRoot.new()
+		var root := ResourceRoot.new()
 		err = root.set_root_dir(ProjectSettings.globalize_path(
 				"res://../fixtures/def"))
 		if err != OK:
 			return err
 		return sim.load_weapon_table(root, "weapon.def")
 
-	func get_sim() -> NovaSimulation:
+	func get_sim() -> Simulation:
 		return sim
 
 	func is_playing() -> bool:
@@ -225,7 +225,7 @@ class FakeEntitySim:
 				if index >= 0 and index < cards.size() else {}
 
 	func get_present_stride() -> int:
-		return NovaSimulation.PF_STRIDE
+		return Simulation.PF_STRIDE
 
 	func get_present_snapshot() -> PackedFloat32Array:
 		present_snapshot_reads += 1
@@ -270,17 +270,17 @@ class FakeEntitySim:
 			type_id: int,
 			position: Vector3) -> PackedFloat32Array:
 		var row := PackedFloat32Array()
-		row.resize(NovaSimulation.PF_STRIDE)
-		row[NovaSimulation.PF_TYPE_ID] = type_id
-		row[NovaSimulation.PF_NET_ID] = net_id
-		row[NovaSimulation.PF_WIRE_HANDLE] = wire_handle
-		row[NovaSimulation.PF_KIND] = 1
-		row[NovaSimulation.PF_INDEX] = net_id
-		row[NovaSimulation.PF_BMS_ID] = 1000 + net_id
-		row[NovaSimulation.PF_POS_X] = position.x
-		row[NovaSimulation.PF_POS_Y] = position.y
-		row[NovaSimulation.PF_POS_Z] = position.z
-		row[NovaSimulation.PF_ALIVE] = 1.0
+		row.resize(Simulation.PF_STRIDE)
+		row[Simulation.PF_TYPE_ID] = type_id
+		row[Simulation.PF_NET_ID] = net_id
+		row[Simulation.PF_WIRE_HANDLE] = wire_handle
+		row[Simulation.PF_KIND] = 1
+		row[Simulation.PF_INDEX] = net_id
+		row[Simulation.PF_BMS_ID] = 1000 + net_id
+		row[Simulation.PF_POS_X] = position.x
+		row[Simulation.PF_POS_Y] = position.y
+		row[Simulation.PF_POS_Z] = position.z
+		row[Simulation.PF_ALIVE] = 1.0
 		return row
 
 
@@ -461,7 +461,7 @@ func test_without_runtime_reports_no_mission() -> void:
 
 
 func test_runtime_context_rejects_non_object_sources() -> void:
-	var ctx := NovaDebugContext.new()
+	var ctx := DebugContext.new()
 	ctx.runtime_source = func(): return 42
 	assert_null(ctx.runtime(),
 			"a malformed supplier degrades to no runtime instead of validating a scalar instance")
@@ -499,17 +499,17 @@ func test_entity_rows_follow_client_present_order_and_edits_use_ai_index() -> vo
 
 
 func test_shared_session_keeps_host_status_and_authority_sources() -> void:
-	var session := NovaDebugSession.new()
+	var session := DebugSession.new()
 	session.set_status_source(func():
 		return {"label": "host status", "logic_tick": 77, "authority": false})
 	session.set_authority_source(func(): return false)
 	var target := AuthorityTarget.new()
 	session.set_target_source(&"authority_test", func(): return target)
-	var action := NovaDebugControlDef.action_control(
+	var action := DebugControlDef.action_control(
 			&"authority_test", &"Test", "Mutate", "Host-only test.",
 			&"authority_test", &"mutate")
 	action.requires_unlock = true
-	action.authority = NovaDebugControlDef.Authority.HOST_ONLY
+	action.authority = DebugControlDef.Authority.HOST_ONLY
 	assert_true(session.register_control(action))
 	session.set_edit_unlocked(true)
 
@@ -549,12 +549,12 @@ func test_transport_controls_are_disabled_without_a_runtime() -> void:
 
 
 func test_listen_host_can_resume_but_cannot_pause_or_step() -> void:
-	var session := NovaDebugSession.new()
-	NovaDebugCatalog.install(session)
+	var session := DebugSession.new()
+	DebugCatalog.install(session)
 	var game_adapter := FakeTransportAdapter.new()
 	add_child_autofree(game_adapter)
 	session.set_target_source(
-			NovaDebugCatalog.TARGET_GAME_SHELL, func(): return game_adapter)
+			DebugCatalog.TARGET_GAME_SHELL, func(): return game_adapter)
 	session.set_authority_source(func(): return true)
 	session.set_edit_unlocked(true)
 
@@ -606,7 +606,7 @@ func test_skeleton_toggle_lives_on_the_animation_page() -> void:
 	assert_not_null(skeleton_check, "the skeleton checkbox has a stable public node path")
 	assert_false(skeleton_check.button_pressed, "it defaults off")
 
-	var session: NovaDebugSession = overlay.get_debug_session()
+	var session: DebugSession = overlay.get_debug_session()
 	watch_signals(session)
 	skeleton_check.toggled.emit(true)
 	assert_signal_emitted_with_parameters(session, "control_invoked",
@@ -623,7 +623,7 @@ func test_user_points_toggle_lives_on_the_animation_page() -> void:
 	assert_not_null(user_points_check, "the user-point checkbox has a stable public node path")
 	assert_false(user_points_check.button_pressed, "it defaults off")
 
-	var session: NovaDebugSession = overlay.get_debug_session()
+	var session: DebugSession = overlay.get_debug_session()
 	watch_signals(session)
 	user_points_check.toggled.emit(true)
 	assert_signal_emitted_with_parameters(session, "control_invoked",
@@ -639,7 +639,7 @@ func test_collision_toggle_lives_on_the_rounds_page() -> void:
 	assert_not_null(collision_check, "the collision checkbox has a stable public node path")
 	assert_false(collision_check.button_pressed, "it defaults off")
 
-	var session: NovaDebugSession = overlay.get_debug_session()
+	var session: DebugSession = overlay.get_debug_session()
 	watch_signals(session)
 	collision_check.toggled.emit(true)
 	assert_signal_emitted_with_parameters(session, "control_invoked",
@@ -653,7 +653,7 @@ func test_occlusion_page_portal_toggle_rides_the_option_registry() -> void:
 	assert_not_null(portals_check, "the portal checkbox has a stable public node path")
 	assert_false(portals_check.button_pressed, "it defaults off")
 
-	var session: NovaDebugSession = overlay.get_debug_session()
+	var session: DebugSession = overlay.get_debug_session()
 	watch_signals(session)
 	portals_check.toggled.emit(true)
 	assert_signal_emitted_with_parameters(session, "control_invoked",
@@ -664,7 +664,7 @@ func test_set_option_syncs_the_owning_control_and_emits() -> void:
 	# The programmatic write path is the SAME path a click takes: one emission,
 	# and the page's control re-syncs without re-firing.
 	var overlay := _make_overlay()
-	var session: NovaDebugSession = overlay.get_debug_session()
+	var session: DebugSession = overlay.get_debug_session()
 	watch_signals(session)
 	overlay.set_option(&"hide_foliage", true)
 	assert_signal_emitted_with_parameters(session, "control_invoked",
@@ -750,7 +750,7 @@ func test_hide_foliage_toggle_lives_on_the_terrain_page() -> void:
 	assert_not_null(foliage_check, "the foliage checkbox has a stable public node path")
 	assert_false(foliage_check.button_pressed, "it defaults off (foliage shown)")
 
-	var session: NovaDebugSession = overlay.get_debug_session()
+	var session: DebugSession = overlay.get_debug_session()
 	watch_signals(session)
 	foliage_check.toggled.emit(true)
 	assert_signal_emitted_with_parameters(session, "control_invoked",
@@ -1306,7 +1306,7 @@ func test_player_tab_displays_and_dumps_a_fresh_authoritative_pose() -> void:
 	assert_false(dump_status.text.contains(dumped_path))
 
 
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
 var _saved_resource_dir := ""
 var _dumped_paths: Array[String] = []
 
@@ -1344,7 +1344,7 @@ func test_particles_page_toggles_ride_the_option_registry() -> void:
 	assert_false(hide_check.button_pressed, "hide defaults off")
 	assert_false(boxes_check.button_pressed, "boxes default off")
 
-	var session: NovaDebugSession = overlay.get_debug_session()
+	var session: DebugSession = overlay.get_debug_session()
 	watch_signals(session)
 	hide_check.toggled.emit(true)
 	assert_signal_emitted_with_parameters(session, "control_invoked",
@@ -1708,7 +1708,7 @@ func test_selection_and_width_persist_across_instances() -> void:
 
 
 class TestShellPage:
-	extends NovaDebugPage
+	extends DebugPage
 	var refreshed := 0
 
 	func page_id() -> StringName:
@@ -1757,7 +1757,7 @@ func test_snapshot_embeds_the_pick_list() -> void:
 	runtime.get_sim().set_player_pose(Vector3(1, 2, 3), 90.0, 0.0, 0.0)
 	var overlay := _make_overlay()
 	overlay.set_runtime(runtime)
-	var picks := NovaDebugPickList.new()
+	var picks := DebugPickList.new()
 	picks.add(_fabricated_pick(9, "RckS07"))
 	overlay.set_pick_list(picks)
 
@@ -1788,7 +1788,7 @@ func test_snapshot_embeds_the_pick_list() -> void:
 
 func test_entities_page_renders_and_curates_the_pick_list() -> void:
 	var overlay := _make_overlay()
-	var picks := NovaDebugPickList.new()
+	var picks := DebugPickList.new()
 	picks.add(_fabricated_pick(1, "crate_a"))
 	picks.add(_fabricated_pick(2, "crate_b"))
 	overlay.set_pick_list(picks)
@@ -1811,8 +1811,8 @@ func test_entities_page_renders_and_curates_the_pick_list() -> void:
 
 func test_replacing_pick_list_detaches_entities_even_while_page_is_inactive() -> void:
 	var overlay := _make_overlay()
-	var old_picks := NovaDebugPickList.new()
-	var new_picks := NovaDebugPickList.new()
+	var old_picks := DebugPickList.new()
+	var new_picks := DebugPickList.new()
 	old_picks.add(_fabricated_pick(8, "old_pick"))
 	overlay.set_pick_list(old_picks)
 	overlay.toggle()

@@ -1,11 +1,11 @@
 extends SceneTree
-## Manual probe: spawns NOVA_EFFECT_ID through NovaEffectWorld on the persisted
+## Manual probe: spawns NOVA_EFFECT_ID through EffectWorld on the persisted
 ## runtime mount and dumps each emitter's definition flags / emitting / alive
 ## across a few seconds of ticks — pins effect lifetime semantics (FOREVEREMIT,
 ## emit_dur vs particle age) for the muzzle-flash suppression window.
 ## Run: GODOT_BIN --headless --path godot -s res://tests/ptl_effect_dump_probe.gd
 
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
 const TICK_DT := 1.0 / 62.0
 
 
@@ -14,14 +14,14 @@ func _init() -> void:
 	if target.is_empty():
 		target = "Effect_M82_Muz"
 	var dir := ResourceDirSettings.get_resource_dir()
-	var root := NovaResourceRoot.new()
-	var expansion := NovaLaunchFlags.expansion(ResourceDirSettings.get_expansion())
-	var game := NovaLaunchFlags.game(ResourceDirSettings.get_game())
-	if root.mount_runtime(dir, expansion, NovaLaunchFlags.loose_override_enabled(), game) != OK:
+	var root := ResourceRoot.new()
+	var expansion := LaunchFlags.expansion(ResourceDirSettings.get_expansion())
+	var game := LaunchFlags.game(ResourceDirSettings.get_game())
+	if root.mount_runtime(dir, expansion, LaunchFlags.loose_override_enabled(), game) != OK:
 		print("probe: mount FAILED: ", root.get_last_error())
 		quit(1)
 		return
-	var fx := NovaEffectWorld.new()
+	var fx := EffectWorld.new()
 	get_root().add_child(fx)
 	var loaded: int = fx.load_from_resource_root(root)
 	print("probe: files=%d effects=%d" % [loaded, fx.effect_count()])

@@ -20,7 +20,7 @@ extends SceneTree
 # [orig: selection @0x4b731b-0x4b7354; remote apply arbitration @0x4c1153;
 #  clip names g_animStateNameTable @0x8135F0 rows 41/42 = roll_left/roll_right]
 
-const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
+const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
 
 var _fails := 0
 
@@ -48,7 +48,7 @@ func _run() -> void:
 		_fail_now("set NOVA_RESOURCE_DIR to a loose or mounted retail JOX corpus")
 		return
 
-	var res_root := NovaResourceRoot.new()
+	var res_root := ResourceRoot.new()
 	var mount_err := int(res_root.mount_runtime(resource_dir, "", false, "jo"))
 	if mount_err != OK:
 		res_root.set_root_dir(resource_dir)
@@ -74,9 +74,9 @@ func _run() -> void:
 		_fail_now("avatar has no skeletal anim set (anim_def did not load)")
 		return
 
-	_check(NovaSimulation.infantry_anim_key(41) == "anim_roll_left",
+	_check(Simulation.infantry_anim_key(41) == "anim_roll_left",
 			"state 41 maps to anim_roll_left")
-	_check(NovaSimulation.infantry_anim_key(42) == "anim_roll_right",
+	_check(Simulation.infantry_anim_key(42) == "anim_roll_right",
 			"state 42 maps to anim_roll_right")
 	_check(skeletal.has_clip("anim_idle_prone"), "clip set carries anim_idle_prone")
 	_check(skeletal.has_clip("anim_roll_left"), "clip set carries anim_roll_left")
@@ -93,9 +93,9 @@ func _run() -> void:
 					skeletal.get_clip_length(probe_key)])
 
 	# The remote request sequence the wire produces for a prone roll.
-	var f48 := int(NovaSimulation.infantry_anim_flags(48))
-	var f41 := int(NovaSimulation.infantry_anim_flags(41))
-	var f42 := int(NovaSimulation.infantry_anim_flags(42))
+	var f48 := int(Simulation.infantry_anim_flags(48))
+	var f41 := int(Simulation.infantry_anim_flags(41))
+	var f42 := int(Simulation.infantry_anim_flags(42))
 	model.apply_remote_body_state(48, "anim_idle_prone", f48, 0)
 	_check(String(model.get_active_body_clip()) == "anim_idle_prone",
 			"idle_prone accepted (active=%s)" % model.get_active_body_clip())

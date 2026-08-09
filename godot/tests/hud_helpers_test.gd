@@ -1,6 +1,6 @@
 extends GutTest
 
-# Pure-logic coverage for the shell-neutral HUD view helpers (godot/adapter/ui/hud_*.gd).
+# Pure-logic coverage for the shell-neutral HUD view helpers (godot/src/ui/hud_*.gd).
 # Rendering is validated visually in the ONED preview / runtime; here we lock the math.
 
 
@@ -57,10 +57,10 @@ func test_half_bright() -> void:
 func test_health_thresholds() -> void:
 	# Witnessed 16.16 thresholds, now native (hud/hud_math.h): 0xC000 good,
 	# 0x6FFF mid — 0 good / 1 mid / 2 bad through the bound band.
-	assert_eq(NovaHudPos.health_color_band(0.7501), 0)
-	assert_eq(NovaHudPos.health_color_band(0.75), 1)
-	assert_eq(NovaHudPos.health_color_band(0.4375), 1)
-	assert_eq(NovaHudPos.health_color_band(0.4374), 2)
+	assert_eq(HudPos.health_color_band(0.7501), 0)
+	assert_eq(HudPos.health_color_band(0.75), 1)
+	assert_eq(HudPos.health_color_band(0.4375), 1)
+	assert_eq(HudPos.health_color_band(0.4374), 2)
 
 
 func test_attach_label_dim() -> void:
@@ -148,11 +148,11 @@ func test_fade_alphas() -> void:
 	assert_eq(int(50 * HudFade.PERCENT_TO_ALPHA), 127)
 	# The witnessed literals pin the BINDING (the single native source) — a
 	# re-witness that changes hud_math.h must show up here, not drift silently.
-	assert_almost_eq(float(NovaHudPos.percent_to_alpha()), 2.55, 0.0001)
-	assert_eq(NovaHudPos.MESSAGE_LIFE_TICKS, 930)
-	assert_eq(NovaHudPos.MESSAGE_EXPIRY_STAGGER, 186)
-	assert_eq(NovaHudPos.MESSAGE_TEXT_MAX, 119)
-	assert_eq(NovaHudPos.MESSAGE_SLOT_COUNT, 40)
+	assert_almost_eq(float(HudPos.percent_to_alpha()), 2.55, 0.0001)
+	assert_eq(HudPos.MESSAGE_LIFE_TICKS, 930)
+	assert_eq(HudPos.MESSAGE_EXPIRY_STAGGER, 186)
+	assert_eq(HudPos.MESSAGE_TEXT_MAX, 119)
+	assert_eq(HudPos.MESSAGE_SLOT_COUNT, 40)
 	assert_eq(int(3 * HudFade.SECONDS_TO_TICKS), 186)
 	# Fractional file fields survive: the original converts through atof
 	# [orig: @0x5a0882..0x5a08c2] — 1.5 s is a 93-tick ramp, not 62.
@@ -175,7 +175,7 @@ func test_ammo_text_format() -> void:
 
 
 func test_hud_weapon_def_decode() -> void:
-	# The ADR 0017 record over NovaWeaponDatabase's transport dict.
+	# The ADR 0017 record over WeaponDatabase's transport dict.
 	assert_null(PlayerHudWeaponDef.from_weapon_dict({}), "Empty dict decodes to null.")
 	var def := PlayerHudWeaponDef.from_weapon_dict({
 		"name": "WPN_AK47", "round_type": "AMMO_762", "clipsize": 30,

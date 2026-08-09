@@ -23,11 +23,11 @@ func _advance_one_second(node: Node, hz: int) -> void:
 func _weather_state_after_one_second(hz: int) -> Array:
 	var mount := Node3D.new()
 	add_child_autofree(mount)
-	var env := NovaEnvironment.new()
+	var env := MissionEnvironment.new()
 	env.name = "Env"
 	env.environment_data = _loaded_env()
 	mount.add_child(env)
-	var weather := NovaWeather.new()
+	var weather := Weather.new()
 	weather.environment_path = NodePath("../Env")
 	mount.add_child(weather)
 	_advance_one_second(weather, hz)
@@ -49,18 +49,18 @@ func test_weather_state_is_invariant_across_render_refresh_rates() -> void:
 func _world_driven_weather_fixture() -> Array:
 	var mount := Node3D.new()
 	add_child_autofree(mount)
-	var env := NovaEnvironment.new()
+	var env := MissionEnvironment.new()
 	env.name = 'Env'
 	env.environment_data = _loaded_env()
 	mount.add_child(env)
-	var weather := NovaWeather.new()
+	var weather := Weather.new()
 	weather.environment_path = NodePath('../Env')
 	mount.add_child(weather)
 	weather.prepare_world_driven()
 	return [env, weather]
 
 
-func _world_driven_weather_state(weather: NovaWeather, env: NovaEnvironment) -> Array:
+func _world_driven_weather_state(weather: Weather, env: MissionEnvironment) -> Array:
 	return [
 		weather.get_cloud_uv_offset1(0.0, 0.0),
 		weather.get_cloud_uv_offset2(0.0, 0.0),
@@ -87,8 +87,8 @@ func _world_driven_weather_state(weather: NovaWeather, env: NovaEnvironment) -> 
 
 func test_world_driven_mission_restart_reseeds_complete_weather_state() -> void:
 	var reused_fixture := _world_driven_weather_fixture()
-	var reused_env := reused_fixture[0] as NovaEnvironment
-	var reused := reused_fixture[1] as NovaWeather
+	var reused_env := reused_fixture[0] as MissionEnvironment
+	var reused := reused_fixture[1] as Weather
 	reused.trigger_lightning_long()
 	for _tick in range(47):
 		reused.tick_fixed()
@@ -96,8 +96,8 @@ func test_world_driven_mission_restart_reseeds_complete_weather_state() -> void:
 
 	reused.prepare_world_driven()
 	var fresh_fixture := _world_driven_weather_fixture()
-	var fresh_env := fresh_fixture[0] as NovaEnvironment
-	var fresh := fresh_fixture[1] as NovaWeather
+	var fresh_env := fresh_fixture[0] as MissionEnvironment
+	var fresh := fresh_fixture[1] as Weather
 	assert_eq(_world_driven_weather_state(reused, reused_env),
 			_world_driven_weather_state(fresh, fresh_env))
 
@@ -110,12 +110,12 @@ func test_world_driven_mission_restart_reseeds_complete_weather_state() -> void:
 
 func test_mission_start_prewarm_advances_exactly_255_weather_ticks() -> void:
 	var fixture := _world_driven_weather_fixture()
-	var env := fixture[0] as NovaEnvironment
-	var weather := fixture[1] as NovaWeather
+	var env := fixture[0] as MissionEnvironment
+	var weather := fixture[1] as Weather
 	env.configure_mission_clock(0x0540, 60)
-	var expected := NovaEnvironment.new()
+	var expected := MissionEnvironment.new()
 	expected.configure_mission_clock(0x0540, 60)
-	expected.advance_mission_clock(NovaWeather.MISSION_START_PREWARM_TICKS)
+	expected.advance_mission_clock(Weather.MISSION_START_PREWARM_TICKS)
 
 	weather.prewarm_mission_start()
 
@@ -125,8 +125,8 @@ func test_mission_start_prewarm_advances_exactly_255_weather_ticks() -> void:
 
 func test_network_environment_sample_roundtrips_exact_retail_units_through_live_owner() -> void:
 	var fixture := _world_driven_weather_fixture()
-	var env := fixture[0] as NovaEnvironment
-	var weather := fixture[1] as NovaWeather
+	var env := fixture[0] as MissionEnvironment
+	var weather := fixture[1] as Weather
 	var wire_sample := {
 		"fog_dist": 380,
 		"fog_accel": 0xFF00,
@@ -189,11 +189,11 @@ func test_network_environment_sample_roundtrips_exact_retail_units_through_live_
 func _sky_fallback_state_after_one_second(hz: int) -> Array:
 	var mount := Node3D.new()
 	add_child_autofree(mount)
-	var env := NovaEnvironment.new()
+	var env := MissionEnvironment.new()
 	env.name = "Env"
 	env.environment_data = _loaded_env()
 	mount.add_child(env)
-	var sky := NovaSky.new()
+	var sky := SkyDome.new()
 	sky.environment_path = NodePath("../Env")
 	mount.add_child(sky)
 	_advance_one_second(sky, hz)
@@ -215,11 +215,11 @@ func _water_fallback_state_after_one_second(hz: int) -> Vector4:
 	add_child_autofree(viewport)
 	var env_data := _loaded_env()
 	env_data.set_water_height(14.0)
-	var env := NovaEnvironment.new()
+	var env := MissionEnvironment.new()
 	env.name = "Env"
 	env.environment_data = env_data
 	viewport.add_child(env)
-	var water := NovaWater.new()
+	var water := Water.new()
 	water.environment_path = NodePath("../Env")
 	viewport.add_child(water)
 	var camera := Camera3D.new()

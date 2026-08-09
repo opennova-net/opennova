@@ -13,9 +13,9 @@ live behavior.**
 ### Menus — `edit_mode` runtime-node reuse (the canonical exemplar)
 
 The Menus workspace previews `.mnu` screens by instantiating the *runtime*
-`NovaMnuMenu` node and setting `edit_mode = true`, which makes the live menu
+`MnuMenu` node and setting `edit_mode = true`, which makes the live menu
 inert and click-through so the WYSIWYG canvas can overlay selection and drag
-gestures. The game's `NovaMenuShell` uses the same node with `edit_mode` off.
+gestures. The game's `MenuShell` uses the same node with `edit_mode` off.
 "Interactive preview" re-arms navigation while sandboxing external Commands
 (launch/quit/URL) to no-ops. See CONTEXT.md ("Edit mode", "Interactive
 preview").
@@ -25,8 +25,8 @@ flag, editor gestures supplied from outside the node.
 
 ### Environment — direct runtime-node reuse
 
-The Terrain editor instantiates the runtime `NovaEnvironment` / `NovaSky` /
-`NovaWater` nodes and drives them through the same `environment_data` +
+The Terrain editor instantiates the runtime `MissionEnvironment` / `SkyDome` /
+`Water` nodes and drives them through the same `environment_data` +
 `environment_changed` path `GameWorld` uses at runtime. The Environment
 workspace edits apply to the same nodes the game renders with; water is fully
 unified (parameterized, not forked).
@@ -36,9 +36,9 @@ node outright.
 
 ### Foliage — shared dispatcher, abstracted geometry source
 
-Editor and runtime both configure `NovaFoliageDispatcher` identically
+Editor and runtime both configure `FoliageDispatcher` identically
 (cell-grid algorithm, radius, `VegAssets.resolve_slot_meshes`). They differ
-only in where geometry comes from: the runtime feeds `NovaTerrainData` (the C++
+only in where geometry comes from: the runtime feeds `TerrainData` (the C++
 fast path); the editor binds `Callable` samplers onto the live-sculpt mesh so
 scatter follows unsaved terrain edits.
 
@@ -47,7 +47,7 @@ system shared and abstract only the data source behind a sampler seam.
 
 ### Mission execution — one standalone runtime
 
-`godot/adapter/world/mission_runtime.gd` has one live owner: `GameWorld`, entered
+`godot/src/world/mission_runtime.gd` has one live owner: `GameWorld`, entered
 through `MainGame`. ONED does not self-tick a mission, create a local-player
 presenter, or embed the F3 debug overlay. This removes the editor-specific transport
 and lifecycle state that could make an apparently shared simulation behave
@@ -70,7 +70,7 @@ rather than adding an editor-owned transport around the simulation.
 
 ### Local player and debug UI — game-owned surfaces
 
-`godot/adapter/world/local_player_presenter.gd` is instantiated only by the game
+`godot/src/world/local_player_presenter.gd` is instantiated only by the game
 shell. Gameplay input, mouse ownership, the viewmodel render pass, HUD feeds,
 and F3 therefore have one boot path and one lifecycle. Editor automation may
 control or inspect the managed child through the runtime debug/MCP seam, but

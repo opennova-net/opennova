@@ -12,7 +12,7 @@ extends Node
 ## shows the body/legs lagging a fast aim flick, 06 settled.
 ## [orig: Entity_BuildBoneTransformMatrices @0x4b1290; world-wac-ai-re.md §14]
 
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
 const StandaloneProbe := preload("res://tests/standalone_game_probe.gd")
 
 const OUT_DIR := "res://../.scratch/bend"
@@ -38,7 +38,7 @@ func _ready() -> void:
 	# Fullscreen for the captures (the core-engine window mode; F11 / the MCP
 	# set_fullscreen tool route here too) — the play viewport fills the display.
 	if OS.get_environment("NOVA_FULLSCREEN") != "0":
-		NovaWindow.set_fullscreen(get_window(), true)
+		WindowState.set_fullscreen(get_window(), true)
 		await _settle(6)
 
 	var bms_name := OS.get_environment("NOVA_MISSION_BMS").strip_edges()

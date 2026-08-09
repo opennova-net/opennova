@@ -6,8 +6,8 @@ extends SceneTree
 # Reports, all in the character model's OWN frame (the body node sits at identity):
 #   * every userpoint authored on the player character model (0x14B9 -> its visual item),
 #   * which userpoint the model's muzzle resolver picks, and on which bone,
-#   * NovaObjectModel.get_muzzle_world_position() (what the mission presenter
-#     feeds NovaSimulation.set_ai_muzzle_world),
+#   * ObjectModel.get_muzzle_world_position() (what the mission presenter
+#     feeds Simulation.set_ai_muzzle_world),
 #   * the HEAD bone (LocalPlayerPresenter.PLAYER_HEAD_BONE_INDEX = 14) origin — the local
 #     player's EYE anchor, and the origin we put on the wire for our own shots,
 #   * bone 16 "BN17 R Hand" — the held-weapon joint,
@@ -25,9 +25,9 @@ extends SceneTree
 #   "$GODOT_BIN" --headless --path godot -s res://tests/muzzle_origin_probe.gd
 # Not collected by GUT (*_probe.gd).
 
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
-const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
-const PresentHeldWeapon := preload("res://adapter/world/present_held_weapon.gd")
+const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
+const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
+const PresentHeldWeapon := preload("res://src/world/present_held_weapon.gd")
 
 const PLAYER_RUNTIME_TYPE_ID := 0x14B9
 const HEAD_BONE_INDEX := 14      # LocalPlayerPresenter.PLAYER_HEAD_BONE_INDEX
@@ -57,7 +57,7 @@ func _run() -> void:
 	var root_dir := OS.get_environment("NOVA_RESOURCE_DIR").strip_edges()
 	if root_dir.is_empty():
 		root_dir = ResourceDirSettings.get_resource_dir()
-	var res := NovaResourceRoot.new()
+	var res := ResourceRoot.new()
 	if res.mount_runtime(root_dir, ResourceDirSettings.get_expansion()) != OK:
 		print("FAIL: cannot mount ", root_dir)
 		quit(1)

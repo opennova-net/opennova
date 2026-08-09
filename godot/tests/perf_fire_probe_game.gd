@@ -10,10 +10,10 @@ extends SceneTree
 # install. The persisted dir/expansion are snapshotted and restored on exit.
 
 const LOAD_TIMEOUT_WALL_SECONDS := 240.0
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
 const MountGuard := preload("res://tests/perf_probe_mount_guard.gd")
 const PropertyGuard := preload("res://tests/perf_probe_property_guard.gd")
-const MissionPresentPass := preload("res://adapter/world/mission_present_pass.gd")
+const MissionPresentPass := preload("res://src/world/mission_present_pass.gd")
 
 var _mount_guard = MountGuard.new()
 var _property_guard = PropertyGuard.new()
@@ -346,7 +346,7 @@ func _run() -> void:
 		var walk_node2: Node = model_walk.pop_back()
 		for walk_child2 in walk_node2.get_children():
 			model_walk.push_back(walk_child2)
-		if walk_node2 is NovaObjectModel:
+		if walk_node2 is ObjectModel:
 			models.append(walk_node2)
 	var modelprocoff := {avg = -1.0}
 	for m in models:

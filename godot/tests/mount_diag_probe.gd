@@ -1,6 +1,6 @@
 extends SceneTree
 
-const ItemSeatSpecs := preload("res://adapter/world/item_seat_specs.gd")
+const ItemSeatSpecs := preload("res://src/world/item_seat_specs.gd")
 
 
 func _init() -> void:
@@ -14,20 +14,20 @@ func _init() -> void:
 	if mission_name.is_empty():
 		mission_name = "00TRa.bms"
 
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	var root_err := int(root.mount_runtime(resource_dir, expansion, true))
 	if root_err != OK:
 		push_error("mount_runtime failed: %s" % root.get_last_error())
 		quit(1)
 		return
 
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	if mission.open_from_resource_root(root, mission_name) != OK:
 		push_error("mission open failed: %s" % mission_name)
 		quit(1)
 		return
 
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	if item_db.load_from_resource_root(root, "items.def") != OK:
 		push_error("items.def load failed: %s" % item_db.get_last_error())
 		quit(1)
@@ -45,7 +45,7 @@ func _init() -> void:
 	var seat_cache := {}
 	for raw in entities:
 		var organic: Dictionary = raw
-		if int(organic.get("kind", -1)) != NovaMissionData.KIND_ORGANIC:
+		if int(organic.get("kind", -1)) != MissionData.KIND_ORGANIC:
 			continue
 		var command_id := int(organic.get("waypoint_id", 0))
 		if command_id < 123 or command_id > 125:
@@ -82,7 +82,7 @@ func _init() -> void:
 			"seat_candidates": prediction.get("candidates", []),
 		})
 
-	var sim := NovaSimulation.new()
+	var sim := Simulation.new()
 	# S16: the sim extracts seat specs natively from its own asset root; seeds
 	# are the mission entities' type ids (the Dictionary install seam is gone).
 	sim.set_asset_root(root)
@@ -119,7 +119,7 @@ func _init() -> void:
 	quit(0)
 
 
-func _entity_summary(entity: Dictionary, item_db: NovaItemDatabase) -> Dictionary:
+func _entity_summary(entity: Dictionary, item_db: ItemDatabase) -> Dictionary:
 	var item_id := int(entity.get("item_id", 0))
 	var out := {
 		"kind": int(entity.get("kind", -1)),
@@ -140,12 +140,12 @@ func _entity_summary(entity: Dictionary, item_db: NovaItemDatabase) -> Dictionar
 # The native card's seat rows joined back onto the model's USRP table
 # (bone_index is the 1-based row), with the part-PANM transform delta the
 # card does not carry.
-func _model_seat_points(root: NovaResourceRoot, model_name: String,
+func _model_seat_points(root: ResourceRoot, model_name: String,
 		native_seats: Array) -> Array:
 	var out: Array = []
 	if model_name.is_empty():
 		return out
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	if data.open_from_resource_root(root, model_name) != OK:
 		return out
 	var part_xforms: Dictionary = data.evaluate_panm(0, 0, {})
@@ -192,7 +192,7 @@ func _display_mission_local(p: Vector3) -> Vector3:
 	return Vector3(-p.x, p.z, p.y)
 
 
-func _body_anchor_diag(root: NovaResourceRoot, item_db: NovaItemDatabase, card: Dictionary, by_ssn: Dictionary) -> Dictionary:
+func _body_anchor_diag(root: ResourceRoot, item_db: ItemDatabase, card: Dictionary, by_ssn: Dictionary) -> Dictionary:
 	var bms_id := int(card.get("bms_id", card.get("net_id", 0)))
 	var mission_entity: Dictionary = by_ssn.get(bms_id, {})
 	var item_id := int(mission_entity.get("item_id", card.get("item_id", 0)))
@@ -215,7 +215,7 @@ func _body_anchor_diag(root: NovaResourceRoot, item_db: NovaItemDatabase, card: 
 	if not adm_name.to_lower().ends_with(".adm"):
 		adm_name += ".adm"
 	out["adm_name"] = adm_name
-	var skeletal := NovaSkeletalAnim.new()
+	var skeletal := SkeletalAnim.new()
 	if not skeletal.load_from_resource_root(root, adm_name):
 		out["error"] = skeletal.get_last_error()
 		return out
@@ -239,7 +239,7 @@ func _body_anchor_diag(root: NovaResourceRoot, item_db: NovaItemDatabase, card: 
 	return out
 
 
-func _body_visual_anchor_diag(root: NovaResourceRoot, item_db: NovaItemDatabase, card: Dictionary, by_ssn: Dictionary) -> Dictionary:
+func _body_visual_anchor_diag(root: ResourceRoot, item_db: ItemDatabase, card: Dictionary, by_ssn: Dictionary) -> Dictionary:
 	var bms_id := int(card.get("bms_id", card.get("net_id", 0)))
 	var mission_entity: Dictionary = by_ssn.get(bms_id, {})
 	var item_id := int(mission_entity.get("item_id", card.get("item_id", 0)))
@@ -265,12 +265,12 @@ func _body_visual_anchor_diag(root: NovaResourceRoot, item_db: NovaItemDatabase,
 		adm_name += ".adm"
 	# SimModelCache's graphic -> model-file rule (basename + ".3di").
 	var model_name := graphic.get_file().get_basename() + ".3di"
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	if data.open_from_resource_root(root, model_name) != OK:
 		out["error"] = "model_load_failed"
 		out["model"] = model_name
 		return out
-	var skeletal := NovaSkeletalAnim.new()
+	var skeletal := SkeletalAnim.new()
 	if not skeletal.load_from_resource_root(root, adm_name):
 		out["error"] = skeletal.get_last_error()
 		return out
@@ -318,7 +318,7 @@ func _accumulate_rest_worlds(bones: Array) -> Array:
 	return world
 
 
-func _skinned_mesh_stats(data: NovaObjectData, bone_count: int, rest_world: Array, pose_world: Array) -> Dictionary:
+func _skinned_mesh_stats(data: ObjectData, bone_count: int, rest_world: Array, pose_world: Array) -> Dictionary:
 	var out := {
 		"surface_count": 0,
 		"vertex_count": 0,
@@ -375,7 +375,7 @@ func _skinned_mesh_stats(data: NovaObjectData, bone_count: int, rest_world: Arra
 	return out
 
 
-func _sit_visual_summary(skeletal: NovaSkeletalAnim, data: NovaObjectData, bones: Array, rest_world: Array) -> Array:
+func _sit_visual_summary(skeletal: SkeletalAnim, data: ObjectData, bones: Array, rest_world: Array) -> Array:
 	var out: Array = []
 	var keys: PackedStringArray = skeletal.get_clip_keys()
 	for key in keys:
@@ -429,7 +429,7 @@ func _interesting_bones(bones: Array, world: Array) -> Array:
 	return out
 
 
-func _sit_clip_summary(skeletal: NovaSkeletalAnim, bones: Array) -> Array:
+func _sit_clip_summary(skeletal: SkeletalAnim, bones: Array) -> Array:
 	var out: Array = []
 	var keys: PackedStringArray = skeletal.get_clip_keys()
 	for key in keys:

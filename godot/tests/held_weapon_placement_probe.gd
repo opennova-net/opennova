@@ -19,9 +19,9 @@ extends SceneTree
 #   "$GODOT_BIN" --headless --path godot -s res://tests/held_weapon_placement_probe.gd
 # Not collected by GUT (*_probe.gd).
 
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
-const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
-const PresentHeldWeapon := preload("res://adapter/world/present_held_weapon.gd")
+const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
+const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
+const PresentHeldWeapon := preload("res://src/world/present_held_weapon.gd")
 
 # The cases worth reading. A level soldier is the one whose answer we already know.
 const CASES := [
@@ -37,7 +37,7 @@ func _init() -> void:
 	var root := OS.get_environment("NOVA_RESOURCE_DIR").strip_edges()
 	if root.is_empty():
 		root = ResourceDirSettings.get_resource_dir()
-	var res := NovaResourceRoot.new()
+	var res := ResourceRoot.new()
 	if res.mount_runtime(root, ResourceDirSettings.get_expansion()) != OK:
 		print("FAIL: cannot mount ", root)
 		quit(1)

@@ -243,7 +243,7 @@ func _sync_keyframe_list() -> void:
 	_keyframe_list.clear()
 	var keyframes := _keyframes()
 	for i in keyframes.size():
-		var keyframe: NovaEnvKeyframe = keyframes[i]
+		var keyframe: EnvKeyframe = keyframes[i]
 		_keyframe_list.add_item("%04d" % keyframe.get_time())
 	if keyframes.is_empty():
 		_selected_keyframe = -1
@@ -391,7 +391,7 @@ func _keyframes() -> Array:
 	return _editor.env_file.get_tod_keyframes()
 
 
-func _current_keyframe() -> NovaEnvKeyframe:
+func _current_keyframe() -> EnvKeyframe:
 	var keyframes := _keyframes()
 	if _selected_keyframe < 0 or _selected_keyframe >= keyframes.size():
 		return null
@@ -552,7 +552,7 @@ func _on_add_keyframe() -> void:
 		return
 	_editor.push_undo_step(func():
 		var keyframes := _keyframes()
-		var keyframe := NovaEnvKeyframe.new()
+		var keyframe := EnvKeyframe.new()
 		keyframe.set_time(int(_editor.time_of_day))
 		if not keyframes.is_empty():
 			_copy_keyframe(keyframes[clampi(_selected_keyframe, 0, keyframes.size() - 1)], keyframe)
@@ -569,7 +569,7 @@ func _on_duplicate_keyframe() -> void:
 		return
 	_editor.push_undo_step(func():
 		var keyframes := _keyframes()
-		var duplicate := NovaEnvKeyframe.new()
+		var duplicate := EnvKeyframe.new()
 		_copy_keyframe(source, duplicate)
 		duplicate.set_time(clampi(source.get_time() + 100, 0, 2359))
 		keyframes.append(duplicate)
@@ -578,7 +578,7 @@ func _on_duplicate_keyframe() -> void:
 	sync_from_editor()
 
 
-func _copy_keyframe(source: NovaEnvKeyframe, target: NovaEnvKeyframe) -> void:
+func _copy_keyframe(source: EnvKeyframe, target: EnvKeyframe) -> void:
 	target.set_time(source.get_time())
 	target.set_sun_color(source.get_sun_color())
 	target.set_ground_color(source.get_ground_color())

@@ -1,8 +1,8 @@
 extends GutTest
 
 const WORLD_TEST_ROOT := "game_world_test"
-const ArmoryPresenter := preload("res://adapter/world/armory_presenter.gd")
-const MissionRuntime := preload("res://adapter/world/mission_runtime.gd")
+const ArmoryPresenter := preload("res://src/world/armory_presenter.gd")
+const MissionRuntime := preload("res://src/world/mission_runtime.gd")
 
 
 func after_each() -> void:
@@ -12,7 +12,7 @@ func after_each() -> void:
 # (The Node runtime/sim doubles that used to live here — TransportRuntimeStub,
 # ProfilingRuntimeStub, FxRuntimeStub, ItemPoseRuntimeStub, the anchor/blink/
 # occlusion/joiner stubs — are gone: GameWorld._runtime is typed MissionRuntime
-# and MissionRuntime._sim is typed NovaSimulation, so every runtime-consuming
+# and MissionRuntime._sim is typed Simulation, so every runtime-consuming
 # test now boots the REAL stack through the public load path.)
 
 
@@ -64,9 +64,9 @@ class ChallengePrewarmWorldHarness:
 
 class FirstOpenArmorySimProxy:
 	extends RefCounted
-	var inner: NovaSimulation
+	var inner: Simulation
 
-	func _init(p_inner: NovaSimulation) -> void:
+	func _init(p_inner: Simulation) -> void:
 		inner = p_inner
 
 	func local_player_in_armory_zone() -> bool:
@@ -115,10 +115,10 @@ class FirstOpenArmoryWorldProxy:
 	func get_sim():
 		return sim
 
-	func get_resource_root() -> NovaResourceRoot:
+	func get_resource_root() -> ResourceRoot:
 		return inner.get_resource_root()
 
-	func get_weapon_database() -> NovaWeaponDatabase:
+	func get_weapon_database() -> WeaponDatabase:
 		return inner.get_weapon_database()
 
 	func local_player_viewmodel_def():
@@ -132,7 +132,7 @@ class FirstOpenArmoryWorldProxy:
 
 
 class ImpactAudioStub:
-	extends NovaMissionAudio
+	extends MissionAudio
 	var fires: Array = []
 	func fire_soundset(set_name: String, world_pos: Vector3, _source_bms_id: int = 0) -> bool:
 		fires.append({'name': set_name, 'position': world_pos})
@@ -140,7 +140,7 @@ class ImpactAudioStub:
 
 
 class FxWorldStub:
-	extends NovaEffectWorld
+	extends EffectWorld
 	var spawns: Array = []
 	var attached_spawns: Array = []
 	var request_spawns: Array = []
@@ -321,7 +321,7 @@ class ItemFxGameWorldHarness:
 				func() -> Variant:
 					return _placer.get_item_db() if _placer != null else null)
 		_item_fx = fx
-	func configure_item_fx(effects: NovaEffectWorld, placer: RefCounted) -> void:
+	func configure_item_fx(effects: EffectWorld, placer: RefCounted) -> void:
 		_effect_world = effects
 		_placer = placer
 	func present_item_fx(node: Node3D, kind: int, item_id: int) -> int:
@@ -357,13 +357,13 @@ class ItemFxGameWorldHarness:
 # child construction (_net_drive / _debug_views / _occlusion / _item_fx).
 class ImpactGameWorldHarness:
 	extends GameWorld
-	func install_probes(effects: NovaEffectWorld, audio: NovaMissionAudio) -> void:
+	func install_probes(effects: EffectWorld, audio: MissionAudio) -> void:
 		_effect_world = effects
 		_mission_audio = audio
 
 
 class WarmEffectWorldStub:
-	extends NovaEffectWorld
+	extends EffectWorld
 	var hidden_during_warm := true
 	var calls: Array[String] = []
 	var visibility_changes: Array[bool] = []
@@ -395,7 +395,7 @@ class WarmItemFxStub:
 	var attached_while_hidden := false
 
 	func reattach() -> void:
-		var effect_world: NovaEffectWorld = _world.get_effect_world()
+		var effect_world: EffectWorld = _world.get_effect_world()
 		attached_while_hidden = effect_world.are_particles_hidden()
 
 
@@ -413,7 +413,7 @@ class WarmGameWorldHarness:
 		fx_stub.setup(self, Callable(), Callable())
 		_item_fx = fx_stub
 
-	func configure_warm_effects(effects: NovaEffectWorld) -> void:
+	func configure_warm_effects(effects: EffectWorld) -> void:
 		_effect_world = effects
 
 	func warm_effect_catalog() -> int:
@@ -488,16 +488,16 @@ const ONE_TICK_DELTA := 0.02
 
 
 # Load the minimal fixture mission onto `world` through the PUBLIC path: the
-# REAL MissionRuntime + NovaSimulation stack (no doubles can enter the typed
+# REAL MissionRuntime + Simulation stack (no doubles can enter the typed
 # _runtime seam). `mutator` edits the opened document before the load.
 func _load_minimal_mission(world: GameWorld, root_dir: String = "",
 		mutator: Callable = Callable()) -> void:
 	if root_dir.is_empty():
 		root_dir = ProjectSettings.globalize_path("res://../fixtures/minimal/resources")
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(root_dir), OK)
 	world.set_resource_root(root)
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
 	if mutator.is_valid():
 		mutator.call(mission)
@@ -505,14 +505,14 @@ func _load_minimal_mission(world: GameWorld, root_dir: String = "",
 
 
 # The engine children a code-built GameWorld needs before entering the tree:
-# the typed mission path drives $NovaTerrain directly and stamps
+# the typed mission path drives $Terrain directly and stamps
 # _env.light_state onto every placed batch.
 func _add_engine_children(world: GameWorld) -> void:
-	var terrain := NovaTerrain.new()
-	terrain.name = "NovaTerrain"
+	var terrain := Terrain.new()
+	terrain.name = "Terrain"
 	world.add_child(terrain)
-	var env := NovaEnvironment.new()
-	env.name = "NovaEnvironment"
+	var env := MissionEnvironment.new()
+	env.name = "MissionEnvironment"
 	world.add_child(env)
 
 
@@ -535,7 +535,7 @@ func _stage_impact_fixture(name: String) -> String:
 
 # Stage the minimal fixture plus the House.3di collision fixture as item
 # 102001's GuardTwr1 graphic, so authored KIND_BUILDING entities place a REAL
-# NovaObjectModel and enter the sim's real collision/occlusion world.
+# ObjectModel and enter the sim's real collision/occlusion world.
 func _stage_building_fixture(name: String) -> String:
 	var root_dir := _stage_minimal_fixture(name)
 	assert_eq(DirAccess.copy_absolute(
@@ -601,7 +601,7 @@ func test_round_impacts_route_generic_transient_and_audio_legs() -> void:
 	var world := ImpactGameWorldHarness.new()
 	_add_engine_children(world)
 	add_child_autofree(world)
-	_load_minimal_mission(world, root_dir, func(mission: NovaMissionData) -> void:
+	_load_minimal_mission(world, root_dir, func(mission: MissionData) -> void:
 		assert_true(mission.set_header_string("terrain", "Dvxi5")))
 	var effects := FxWorldStub.new()
 	world.add_child(effects)
@@ -630,7 +630,7 @@ func test_round_impacts_route_generic_transient_and_audio_legs() -> void:
 				"an impact presented in its production frame carries no catch-up aging")
 		assert_gte(int(spawn.get("initial_age_ticks", -1)), 0)
 		assert_eq(int(spawn.get("render_domain", -1)),
-				NovaEffectScene.RENDER_DOMAIN_WORLD)
+				EffectScene.RENDER_DOMAIN_WORLD)
 		assert_gt(int(spawn.get("source_tick", 0)), 0,
 				"the row carries its production tick for catch-up chronology")
 	assert_eq(audio.fires.size(), 1)
@@ -654,7 +654,7 @@ func test_round_impacts_route_sound_only_without_a_particle() -> void:
 	var world := ImpactGameWorldHarness.new()
 	_add_engine_children(world)
 	add_child_autofree(world)
-	_load_minimal_mission(world, root_dir, func(mission: NovaMissionData) -> void:
+	_load_minimal_mission(world, root_dir, func(mission: MissionData) -> void:
 		assert_true(mission.set_header_string("terrain", "Dvxi5")))
 	var effects := FxWorldStub.new()
 	world.add_child(effects)
@@ -678,7 +678,7 @@ func test_fixed_tick_orders_weapon_and_impact_before_particle_advance() -> void:
 	var world := ImpactGameWorldHarness.new()
 	_add_engine_children(world)
 	add_child_autofree(world)
-	_load_minimal_mission(world, root_dir, func(mission: NovaMissionData) -> void:
+	_load_minimal_mission(world, root_dir, func(mission: MissionData) -> void:
 		assert_true(mission.set_header_string("terrain", "Dvxi5")))
 	var effects := FxWorldStub.new()
 	world.add_child(effects)
@@ -710,9 +710,9 @@ func test_fx2ssn_routes_position_owner_and_up_orientation() -> void:
 	_add_engine_children(world)
 	add_child_autofree(world)
 	var placed := {}  # mutated (merge), never reassigned: lambda captures copy locals
-	_load_minimal_mission(world, root_dir, func(mission: NovaMissionData) -> void:
+	_load_minimal_mission(world, root_dir, func(mission: MissionData) -> void:
 		placed.merge(mission.add_entity(
-				NovaMissionData.KIND_BUILDING, 102001, Vector3(6, 4, 5), Vector3.ZERO)))
+				MissionData.KIND_BUILDING, 102001, Vector3(6, 4, 5), Vector3.ZERO)))
 	var ssn := int(placed.get("bms_id", 0))
 	assert_gt(ssn, 0, "the authored building carries a WAC/BMS-addressable SSN")
 	var effects := FxWorldStub.new()
@@ -769,19 +769,19 @@ func test_packaged_scene_instantiates_with_intact_wiring() -> void:
 	# game_world.tscn is the game shell's embeddable world. Pin the extraction:
 	# every engine node is present and the intra-scene NodePaths survived the
 	# move out of main_game.tscn.
-	var packed := load("res://adapter/world/game_world.tscn") as PackedScene
+	var packed := load("res://src/world/game_world.tscn") as PackedScene
 	assert_not_null(packed, "the packaged world scene loads")
 	var world := packed.instantiate()
 	add_child_autofree(world)
 	assert_true(world is GameWorld, "the root carries the GameWorld script")
-	for child_name in ["NovaTerrain", "NovaEnvironment", "NovaSky", "NovaWeather", "NovaWater", "NovaCelestial"]:
+	for child_name in ["Terrain", "MissionEnvironment", "SkyDome", "Weather", "Water", "Celestial"]:
 		assert_not_null(world.get_node_or_null(child_name), "%s is in the packaged scene" % child_name)
-	assert_not_null(world.get_node_or_null("NovaTerrain/FoliageDispatcher"))
-	assert_not_null(world.get_node_or_null("NovaTerrain/TileOverlay"))
-	var terrain: NovaTerrain = world.get_node("NovaTerrain")
-	assert_eq(terrain.environment_path, NodePath("../NovaEnvironment"), "terrain env path survived extraction")
-	assert_eq(terrain.weather_path, NodePath("../NovaWeather"), "terrain weather path survived extraction")
-	var water: NovaWater = world.get_node("NovaWater")
+	assert_not_null(world.get_node_or_null("Terrain/FoliageDispatcher"))
+	assert_not_null(world.get_node_or_null("Terrain/TileOverlay"))
+	var terrain: Terrain = world.get_node("Terrain")
+	assert_eq(terrain.environment_path, NodePath("../MissionEnvironment"), "terrain env path survived extraction")
+	assert_eq(terrain.weather_path, NodePath("../Weather"), "terrain weather path survived extraction")
+	var water: Water = world.get_node("Water")
 	assert_eq(water.water_height, 0.0,
 		"the retained scene must not invent water before ENV/TRN/BMS author it")
 	assert_false(water.is_water_active())
@@ -810,13 +810,13 @@ func test_explicit_bms_zero_water_beats_nonzero_terrain() -> void:
 			assert_eq(DirAccess.copy_absolute(
 				source_dir.path_join(file_name), root_dir.path_join(file_name)), OK)
 
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(root_dir), OK)
-	var packed := load("res://adapter/world/game_world.tscn") as PackedScene
+	var packed := load("res://src/world/game_world.tscn") as PackedScene
 	var world := packed.instantiate() as GameWorld
 	add_child_autofree(world)
 	world.set_resource_root(root)
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
 	assert_true(mission.set_header_string("terrain", "Dvxi5"))
 	assert_true(mission.set_header_string("environment", "mnml"))
@@ -825,7 +825,7 @@ func test_explicit_bms_zero_water_beats_nonzero_terrain() -> void:
 	assert_true(mission.get_environment_overrides().has("water_height"))
 
 	assert_eq(world.load_mission_data(mission, "mnml.bms"), OK)
-	var water := world.get_node("NovaWater") as NovaWater
+	var water := world.get_node("Water") as Water
 	assert_eq(world.get_terrain_data().get_water_height(), 21,
 		"fixture proves the lower-priority TRN has nonzero water")
 	assert_eq(water.water_height, 0.0,
@@ -840,10 +840,10 @@ func test_wire_header_mission_uses_host_metadata_without_a_local_bms_body() -> v
 			"res://../fixtures/minimal/resources/mnml.bms")
 	var full_bytes := FileAccess.get_file_as_bytes(fixture_path)
 	assert_gt(full_bytes.size(), 616)
-	var full_mission := NovaMissionData.new()
+	var full_mission := MissionData.new()
 	assert_eq(full_mission.open_file(fixture_path), OK)
 
-	var wire_mission := NovaMissionData.new()
+	var wire_mission := MissionData.new()
 	assert_eq(wire_mission.open_wire_header(full_bytes.slice(0, 616)), OK)
 	assert_true(wire_mission.is_loaded())
 	assert_true(wire_mission.is_wire_header_only())
@@ -860,7 +860,7 @@ func test_wire_header_mission_uses_host_metadata_without_a_local_bms_body() -> v
 	assert_false(wire_mission.is_wire_header_only())
 
 func test_armory_can_reuse_game_world_weapon_database_on_first_open() -> void:
-	NovaStrings.clear()
+	Strings.clear()
 	var root_dir := _stage_minimal_fixture("first_armory_open")
 	for files in [
 		["res://../fixtures/mnu/jo_weapon.mnu", "weapon.mnu"],
@@ -876,7 +876,7 @@ func test_armory_can_reuse_game_world_weapon_database_on_first_open() -> void:
 
 	var world := _make_world()
 	add_child_autofree(world)
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(root_dir), OK)
 	world.set_resource_root(root)
 	world.set_local_player_spawn_loadout({
@@ -890,7 +890,7 @@ func test_armory_can_reuse_game_world_weapon_database_on_first_open() -> void:
 		"the production world exposes the same weapon database seam ArmoryPresenter consumes")
 	if not world.has_method("get_weapon_database"):
 		return
-	var weapons := world.call("get_weapon_database") as NovaWeaponDatabase
+	var weapons := world.call("get_weapon_database") as WeaponDatabase
 	assert_not_null(weapons, "first armory open lazily resolves weapon.def")
 	if weapons == null:
 		return
@@ -914,9 +914,9 @@ func test_armory_can_reuse_game_world_weapon_database_on_first_open() -> void:
 	add_child_autofree(presenter)
 	presenter.setup(armory_world, null, overlay)
 	assert_true(presenter.try_open(), "the production world catalog reaches first armory open")
-	var menu := overlay.get_node("ArmoryMenu") as NovaMnuMenu
-	var primary := menu.find_child("PRIMARY", true, false) as NovaMnuCombo
-	var accessory := menu.find_child("ACCESSORY", true, false) as NovaMnuCombo
+	var menu := overlay.get_node("ArmoryMenu") as MnuMenu
+	var primary := menu.find_child("PRIMARY", true, false) as MnuCombo
+	var accessory := menu.find_child("ACCESSORY", true, false) as MnuCombo
 	assert_gt(primary.get_selected(), 0, "the current primary is not NONE on first visit")
 	assert_gt(accessory.get_selected(), 0, "the current satchel is not NONE on first visit")
 
@@ -927,7 +927,7 @@ func test_armory_can_reuse_game_world_weapon_database_on_first_open() -> void:
 	assert_eq(after_names, expected_names,
 		"accepting the untouched first-open rows preserves the exact canonical kit")
 	world.unload()
-	NovaStrings.clear()
+	Strings.clear()
 
 
 func test_clear_color_environment_renders_the_witnessed_frame_clear() -> void:
@@ -937,7 +937,7 @@ func test_clear_color_environment_renders_the_witnessed_frame_clear() -> void:
 	# background_mode = 2 (BG_SKY) with no Sky resource, which renders BLACK and
 	# silently swallows the env-#21 clear consumer: a 1px black dome-rim seam in
 	# ground views, a black band in aerial views. Pin the mode so it can't drift.
-	var packed := load("res://adapter/world/game_world.tscn") as PackedScene
+	var packed := load("res://src/world/game_world.tscn") as PackedScene
 	assert_not_null(packed, "the packaged world scene loads")
 	var world := packed.instantiate()
 	add_child_autofree(world)
@@ -955,7 +955,7 @@ func test_clear_color_environment_renders_the_witnessed_frame_clear() -> void:
 
 
 func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear() -> void:
-	var packed := load("res://adapter/world/game_world.tscn") as PackedScene
+	var packed := load("res://src/world/game_world.tscn") as PackedScene
 	var world := packed.instantiate() as GameWorld
 	var clear := world.get_node("ClearColor") as WorldEnvironment
 	clear.environment = clear.environment.duplicate()
@@ -982,10 +982,10 @@ func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear
 			assert_eq(DirAccess.copy_absolute(
 				source_dir.path_join(file_name), root_dir.path_join(file_name)), OK)
 
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(root_dir), OK)
 	world.set_resource_root(root)
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
 	assert_true(mission.set_header_string("terrain", "Dvxi5"))
 	assert_true(mission.set_header_string("environment", "mnml"))
@@ -997,7 +997,7 @@ func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear
 	# terrain leg for a non-playing world).
 	world.tick(camera.global_position, camera.get_global_transform())
 
-	var terrain := world.get_node("NovaTerrain") as NovaTerrain
+	var terrain := world.get_node("Terrain") as Terrain
 	assert_gt(terrain.get_visible_patch_count(), 0,
 		"the loaded fixture presents native RenderingServer terrain patches")
 	var mission_clear := world.get_current_frame_clear_color()
@@ -1006,9 +1006,9 @@ func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear
 
 	# Camera offsets move the rendered eye independently of global_position.
 	# Cross the waterline with v_offset alone and pin the clear-color branch to
-	# the same adjusted eye used by NovaWater strip classification.
-	var water := world.get_node("NovaWater") as NovaWater
-	var env := world.get_node("NovaEnvironment") as NovaEnvironment
+	# the same adjusted eye used by Water strip classification.
+	var water := world.get_node("Water") as Water
+	var env := world.get_node("MissionEnvironment") as MissionEnvironment
 	water.set_height_override(10.0)
 	camera.position.y = 10.25
 	camera.v_offset = -1.0
@@ -1059,11 +1059,11 @@ func test_water_mirror_camera_draws_vehicles_only_and_never_the_body() -> void:
 	# @ 0x5c90a0 filterMask 0x400; Entity_InitFromModel @ 0x40e20a;
 	# Water_ReflectionPrerender @ 0x5c2780 -> render_main_scene @ 0x5c1240;
 	# Player_RenderFirstPersonViewModel @ 0x4ded60].
-	var packed := load("res://adapter/world/game_world.tscn") as PackedScene
+	var packed := load("res://src/world/game_world.tscn") as PackedScene
 	assert_not_null(packed, "the packaged world scene loads")
 	var world := packed.instantiate()
 	add_child_autofree(world)
-	var water: NovaWater = world.get_node_or_null("NovaWater")
+	var water: Water = world.get_node_or_null("Water")
 	assert_not_null(water, "the packaged scene ships the water node")
 	if water == null:
 		return
@@ -1071,19 +1071,19 @@ func test_water_mirror_camera_draws_vehicles_only_and_never_the_body() -> void:
 	assert_not_null(mirror, "the water builds its mirror camera on ready")
 	if mirror == null:
 		return
-	assert_eq(mirror.cull_mask & NovaWater.VISUAL_LAYER_WATER, 0,
+	assert_eq(mirror.cull_mask & Water.VISUAL_LAYER_WATER, 0,
 		"the mirrored scene never draws the water surface itself")
-	assert_eq(mirror.cull_mask & NovaWater.VISUAL_LAYER_VIEWMODEL, 0,
+	assert_eq(mirror.cull_mask & Water.VISUAL_LAYER_VIEWMODEL, 0,
 		"the FP arms/weapon overlay never enters the mirrored scene")
-	assert_eq(mirror.cull_mask & NovaWater.VISUAL_LAYER_SHADOW_CASTER_MASK, 0,
+	assert_eq(mirror.cull_mask & Water.VISUAL_LAYER_SHADOW_CASTER_MASK, 0,
 		"caster-only helper instances never enter the color reflection")
-	assert_eq(mirror.cull_mask & NovaWater.VISUAL_LAYER_FP_BODY_SHADOW_ONLY, 0,
+	assert_eq(mirror.cull_mask & Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY, 0,
 		"no person enters the mirror — the FP body layer stays out")
-	assert_eq(mirror.cull_mask & NovaWater.VISUAL_LAYER_WORLD_NO_MIRROR, 0,
+	assert_eq(mirror.cull_mask & Water.VISUAL_LAYER_WORLD_NO_MIRROR, 0,
 		"non-vehicle world entities stay out of the above-water mirror")
-	assert_ne(mirror.cull_mask & NovaWater.VISUAL_LAYER_WORLD, 0,
+	assert_ne(mirror.cull_mask & Water.VISUAL_LAYER_WORLD, 0,
 		"the mirrored scene renders the reflectable world")
-	assert_eq(water.mesh_instance.layers, NovaWater.VISUAL_LAYER_WATER,
+	assert_eq(water.mesh_instance.layers, Water.VISUAL_LAYER_WATER,
 		"the water strip rides the water-only layer the mirror excludes")
 
 
@@ -1104,23 +1104,23 @@ func test_load_mission_data_rejects_an_empty_document() -> void:
 	var failures: Array = []
 	world.load_failed.connect(func(reason): failures.append(reason))
 	assert_eq(world.load_mission_data(null, "x.bms"), ERR_INVALID_PARAMETER)
-	assert_eq(world.load_mission_data(NovaMissionData.new(), "x.bms"), ERR_INVALID_PARAMETER,
+	assert_eq(world.load_mission_data(MissionData.new(), "x.bms"), ERR_INVALID_PARAMETER,
 		"an unloaded document is rejected before any root resolution")
 	assert_eq(failures.size(), 2, "both rejections explain themselves via load_failed")
 
 
 func test_loaded_mission_drives_the_shared_time_of_day_clock() -> void:
-	var packed := load("res://adapter/world/game_world.tscn") as PackedScene
+	var packed := load("res://src/world/game_world.tscn") as PackedScene
 	var world := packed.instantiate() as GameWorld
 	add_child_autofree(world)
 	await get_tree().process_frame
 	world.set_playable(false)
 
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	var fixture_dir := ProjectSettings.globalize_path("res://../fixtures/minimal/resources")
 	assert_eq(root.set_root_dir(fixture_dir), OK)
 	world.set_resource_root(root)
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
 	mission.set_header_int("start_time", 0x0540)  # unsigned Q8.8 = 05:15
 	mission.set_header_int("minutes_per_day", 60)
@@ -1130,10 +1130,10 @@ func test_loaded_mission_drives_the_shared_time_of_day_clock() -> void:
 	assert_not_null(audio)
 	if audio == null:
 		return
-	var env := world.get_node("NovaEnvironment") as NovaEnvironment
-	var expected_clock := NovaEnvironment.new()
+	var env := world.get_node("MissionEnvironment") as MissionEnvironment
+	var expected_clock := MissionEnvironment.new()
 	expected_clock.configure_mission_clock(0x0540, 60)
-	expected_clock.advance_mission_clock(NovaWeather.MISSION_START_PREWARM_TICKS)
+	expected_clock.advance_mission_clock(Weather.MISSION_START_PREWARM_TICKS)
 	assert_almost_eq(env.time_of_day, expected_clock.time_of_day, 0.000001,
 		"the BMS start time plus retail's 255-tick prewarm initializes the shared clock")
 
@@ -1153,7 +1153,7 @@ func test_loaded_mission_drives_the_shared_time_of_day_clock() -> void:
 	world.get_runtime().pause()
 	assert_eq(world.debug_set_mission_minute_of_day(22.0 * 60.0 + 7.0), OK)
 	assert_almost_eq(env.time_of_day, 2207.0, 0.001)
-	var weather := world.get_weather_node() as NovaWeather
+	var weather := world.get_weather_node() as Weather
 	assert_true(weather.get_smooth_fill().is_equal_approx(
 			env.get_fill_light_target()))
 	assert_true(weather.get_smooth_sun().is_equal_approx(
@@ -1167,17 +1167,17 @@ func test_loaded_mission_drives_the_shared_time_of_day_clock() -> void:
 
 
 func _world_driven_weather_state_after(deltas: Array) -> Array:
-	var packed := load("res://adapter/world/game_world.tscn") as PackedScene
+	var packed := load("res://src/world/game_world.tscn") as PackedScene
 	var world := packed.instantiate() as GameWorld
 	add_child_autofree(world)
 	await get_tree().process_frame
 	world.set_playable(false)
 
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
 			"res://../fixtures/minimal/resources")), OK)
 	world.set_resource_root(root)
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
 	mission.set_header_int("start_time", 0x0540)
 	mission.set_header_int("minutes_per_day", 60)
@@ -1187,8 +1187,8 @@ func _world_driven_weather_state_after(deltas: Array) -> Array:
 	for delta in deltas:
 		world.tick(Vector3.ZERO, Transform3D(), float(delta))
 		sim_ticks += int(world.get_runtime().get_perf_counters().get("ticks", 0))
-	var env := world.get_node("NovaEnvironment") as NovaEnvironment
-	var weather := world.get_node("NovaWeather") as NovaWeather
+	var env := world.get_node("MissionEnvironment") as MissionEnvironment
+	var weather := world.get_node("Weather") as Weather
 	var state := [
 		sim_ticks,
 		env.time_of_day,
@@ -1219,20 +1219,20 @@ func test_world_driven_weather_is_invariant_to_render_batching() -> void:
 			"each 62 Hz clock advance refreshes TOD targets before one weather tick")
 	assert_eq(int(slow[0]), 8, "0.128 seconds still contains eight simulation ticks")
 
-	var expected_seven := NovaEnvironment.new()
+	var expected_seven := MissionEnvironment.new()
 	expected_seven.configure_mission_clock(0x0540, 60)
 	expected_seven.advance_mission_clock(
-			NovaWeather.MISSION_START_PREWARM_TICKS + 7)
+			Weather.MISSION_START_PREWARM_TICKS + 7)
 	assert_almost_eq(float(slow[1]), expected_seven.time_of_day, 0.000001,
 			"0.128 seconds contains seven weather/TOD ticks")
 	expected_seven.free()
 
 	var eighth_delta := 8.0 / GameWorld.WEATHER_TICK_HZ - 0.128 + 0.000001
 	var boundary: Array = await _world_driven_weather_state_after([0.128, eighth_delta])
-	var expected_eight := NovaEnvironment.new()
+	var expected_eight := MissionEnvironment.new()
 	expected_eight.configure_mission_clock(0x0540, 60)
 	expected_eight.advance_mission_clock(
-			NovaWeather.MISSION_START_PREWARM_TICKS + 8)
+			Weather.MISSION_START_PREWARM_TICKS + 8)
 	assert_eq(int(boundary[0]), 8,
 			"the extra weather quantum is shorter than one simulation tick")
 	assert_almost_eq(float(boundary[1]), expected_eight.time_of_day, 0.000001,
@@ -1245,7 +1245,7 @@ func test_injected_root_bypasses_settings_mount() -> void:
 	# (and report ITS directory in errors) instead of mounting from settings.
 	var root_dir := OS.get_cache_dir().path_join(WORLD_TEST_ROOT).path_join("injected_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(root_dir)
-	var injected := NovaResourceRoot.new()
+	var injected := ResourceRoot.new()
 	assert_eq(injected.set_root_dir(root_dir), OK)
 
 	var world := _make_world()
@@ -1285,7 +1285,7 @@ func test_failed_host_load_does_not_arm_the_next_mission_as_a_lan_host() -> void
 	add_child_autofree(world)
 	await get_tree().process_frame
 	world.set_playable(false)
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
 			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
 	world.set_resource_root(root)
@@ -1293,7 +1293,7 @@ func test_failed_host_load_does_not_arm_the_next_mission_as_a_lan_host() -> void
 	assert_eq(world.load_mission_as_host(_lan_host_config("missing.bms", 0)),
 		ERR_FILE_NOT_FOUND)
 	assert_eq(world.load_mission("mnml.bms"), OK)
-	var sim: NovaSimulation = world.get_sim()
+	var sim: Simulation = world.get_sim()
 	assert_not_null(sim)
 	if sim != null:
 		assert_false(sim.is_host_listening(),
@@ -1309,13 +1309,13 @@ func test_lan_host_threads_truthful_base_metadata_into_the_native_session() -> v
 	add_child_autofree(world)
 	await get_tree().process_frame
 	world.set_playable(false)
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
 			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
 	world.set_resource_root(root)
 
 	assert_eq(world.load_mission_as_host(_lan_host_config("mnml.bms", 0)), OK)
-	var sim: NovaSimulation = world.get_sim()
+	var sim: Simulation = world.get_sim()
 	assert_not_null(sim)
 	if sim != null:
 		var config := sim.get_host_session_config()
@@ -1329,7 +1329,7 @@ func test_lan_host_bind_failure_is_reported_instead_of_falling_back_socketless()
 	# Reserve an OS-chosen endpoint, then request that exact port through the
 	# production GameWorld host path. The old behavior silently started an SP
 	# listen session and still emitted world_loaded, leaving joiners no socket.
-	var blocker := NovaUdpPump.new()
+	var blocker := UdpPump.new()
 	assert_eq(blocker.bind_listen(0), OK)
 	var occupied_port := blocker.local_port()
 	assert_gt(occupied_port, 0)
@@ -1338,7 +1338,7 @@ func test_lan_host_bind_failure_is_reported_instead_of_falling_back_socketless()
 	add_child_autofree(world)
 	await get_tree().process_frame
 	world.set_playable(false)
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
 			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
 	world.set_resource_root(root)
@@ -1363,7 +1363,7 @@ func test_lan_host_bind_failure_survives_synchronous_teardown_handler() -> void:
 	# calls unload(), which frees the failed runtime. The bind-failure leg must
 	# free/null its runtime before emitting; emitting first made the handler's
 	# reentry turn the follow-up free into a null-instance error.
-	var blocker := NovaUdpPump.new()
+	var blocker := UdpPump.new()
 	assert_eq(blocker.bind_listen(0), OK)
 	var occupied_port := blocker.local_port()
 	assert_gt(occupied_port, 0)
@@ -1372,7 +1372,7 @@ func test_lan_host_bind_failure_survives_synchronous_teardown_handler() -> void:
 	add_child_autofree(world)
 	await get_tree().process_frame
 	world.set_playable(false)
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
 			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
 	world.set_resource_root(root)
@@ -1394,7 +1394,7 @@ func test_escape_aborts_the_joiner_preload_wait() -> void:
 	# interruptible leg — the reachable analog of the original per-asset abort
 	# poll [orig: Client_CheckDisconnectOrEscDuringLoad @ 0x520270]
 	# (docs/interface/loading-screen-re.md D-LOADSCR-7).
-	var blocker := NovaUdpPump.new()  # a bound but silent "host": never replies
+	var blocker := UdpPump.new()  # a bound but silent "host": never replies
 	assert_eq(blocker.bind_listen(0), OK)
 	var silent_port := blocker.local_port()
 	assert_gt(silent_port, 0)
@@ -1403,7 +1403,7 @@ func test_escape_aborts_the_joiner_preload_wait() -> void:
 	add_child_autofree(world)
 	await get_tree().process_frame
 	world.set_playable(false)
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
 			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
 	world.set_resource_root(root)
@@ -1425,13 +1425,13 @@ func test_escape_aborts_the_joiner_preload_wait() -> void:
 
 
 func test_freeing_world_during_joiner_preload_leaves_no_suspended_owner_method() -> void:
-	var blocker := NovaUdpPump.new()  # bound but silent: keeps the preload pending
+	var blocker := UdpPump.new()  # bound but silent: keeps the preload pending
 	assert_eq(blocker.bind_listen(0), OK)
 	var world := _make_world()
 	add_child_autofree(world)
 	await get_tree().process_frame
 	world.set_playable(false)
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
 			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
 	world.set_resource_root(root)
@@ -1474,13 +1474,13 @@ func test_escape_aborts_the_joiner_admission_wait() -> void:
 	add_child_autofree(world)
 	await get_tree().process_frame
 	world.set_playable(false)
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
 			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
 	world.set_resource_root(root)
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
-	var host := NovaSimulation.new()
+	var host := Simulation.new()
 	host.configure_host_session({
 		"server_name": "Abort Admission Host",
 		"mission_name": mission.get_mission_name(),
@@ -1523,13 +1523,13 @@ func test_escape_aborts_the_joiner_admission_wait() -> void:
 
 
 func test_failed_join_load_does_not_make_the_next_mission_wire_only() -> void:
-	var blocker := NovaUdpPump.new()
+	var blocker := UdpPump.new()
 	assert_eq(blocker.bind_listen(0), OK)
 	var world := _make_world()
 	add_child_autofree(world)
 	await get_tree().process_frame
 	world.set_playable(false)
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
 			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
 	world.set_resource_root(root)
@@ -1557,10 +1557,10 @@ func test_environment_load_failure_finishes_its_perf_timeline() -> void:
 		root_dir.path_join(bms_name)), OK)
 	_write_fixture_file(root_dir.path_join("mnml.env"), "")
 	_write_fixture_file(root_dir.path_join("mnml.trn"), "terrain_name \"mnml\"\n")
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(root_dir), OK)
 
-	var packed := load("res://adapter/world/game_world.tscn") as PackedScene
+	var packed := load("res://src/world/game_world.tscn") as PackedScene
 	var world := packed.instantiate() as GameWorld
 	add_child_autofree(world)
 	await get_tree().process_frame
@@ -1595,7 +1595,7 @@ func test_terrain_load_failure_finishes_its_perf_timeline() -> void:
 		ProjectSettings.globalize_path("res://../fixtures/minimal/resources/mnml.env"),
 		root_dir.path_join("mnml.env")), OK)
 	_write_fixture_file(root_dir.path_join("mnml.trn"), "")
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(root_dir), OK)
 
 	var world := _make_world()
@@ -1624,7 +1624,7 @@ func test_successful_mission_load_exposes_the_loaded_file_until_unload() -> void
 	add_child_autofree(world)
 	await get_tree().process_frame
 
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	var fixture_dir := ProjectSettings.globalize_path("res://../fixtures/minimal/resources")
 	assert_eq(root.set_root_dir(fixture_dir), OK)
 	world.set_resource_root(root)
@@ -1650,7 +1650,7 @@ func test_runtime_dev_mount_still_loads_bms_from_archive() -> void:
 	}])
 	_write_bytes(root_dir.path_join("mnml.bms"), "not a mission".to_utf8_buffer())
 
-	var resource_root := NovaResourceRoot.new()
+	var resource_root := ResourceRoot.new()
 	assert_eq(resource_root.mount_runtime(root_dir, "", true), OK,
 		"the runtime fixture mounts with /d loose overrides enabled")
 	var world := _make_world()
@@ -1672,7 +1672,7 @@ func test_editor_run_loads_the_exact_saved_loose_bms() -> void:
 		"bytes": "not a mission".to_utf8_buffer(),
 	}])
 
-	var resource_root := NovaResourceRoot.new()
+	var resource_root := ResourceRoot.new()
 	assert_eq(resource_root.mount_runtime(root_dir, "", true), OK)
 	var world := _make_world()
 	add_child_autofree(world)
@@ -1711,7 +1711,7 @@ func test_runtime_mission_til_forces_loose_first_in_packed_mode() -> void:
 	_write_pff(root_dir.path_join("resource.pff"), archive_entries)
 	_write_bytes(root_dir.path_join("mnml.til"), _til_bytes_for_cell(4))
 
-	var resource_root := NovaResourceRoot.new()
+	var resource_root := ResourceRoot.new()
 	assert_eq(resource_root.mount_runtime(root_dir), OK,
 		"packed-default mode makes the archive win unless the caller forces loose-first")
 	var world := _make_world()
@@ -1721,8 +1721,8 @@ func test_runtime_mission_til_forces_loose_first_in_packed_mode() -> void:
 	world.set_resource_root(resource_root)
 	assert_eq(world.load_mission("mnml.bms"), OK)
 
-	var terrain := world.get_node("NovaTerrain") as NovaTerrain
-	var tile_info := terrain.tile_info_override as NovaTerrainTileInfo
+	var terrain := world.get_node("Terrain") as Terrain
+	var tile_info := terrain.tile_info_override as TerrainTileInfo
 	assert_not_null(tile_info)
 	if tile_info != null:
 		assert_true(tile_info.blocks_foliage(72.0, 8.0, 2.0),
@@ -1756,9 +1756,9 @@ func test_mission_til_is_shared_by_terrain_foliage_and_cleared_without_file() ->
 	til_file.store_buffer(til_bytes)
 	til_file.close()
 
-	var resource_root := NovaResourceRoot.new()
+	var resource_root := ResourceRoot.new()
 	assert_eq(resource_root.set_root_dir(root_dir), OK)
-	var packed := load("res://adapter/world/game_world.tscn") as PackedScene
+	var packed := load("res://src/world/game_world.tscn") as PackedScene
 	var world := packed.instantiate() as GameWorld
 	add_child_autofree(world)
 	await get_tree().process_frame
@@ -1766,9 +1766,9 @@ func test_mission_til_is_shared_by_terrain_foliage_and_cleared_without_file() ->
 	world.set_resource_root(resource_root)
 	assert_eq(world.load_mission("mnml.bms"), OK)
 
-	var terrain := world.get_node("NovaTerrain") as NovaTerrain
-	var dispatcher := world.get_node("NovaTerrain/FoliageDispatcher") as NovaFoliageDispatcher
-	var tile_info := terrain.tile_info_override as NovaTerrainTileInfo
+	var terrain := world.get_node("Terrain") as Terrain
+	var dispatcher := world.get_node("Terrain/FoliageDispatcher") as FoliageDispatcher
+	var tile_info := terrain.tile_info_override as TerrainTileInfo
 	assert_not_null(tile_info)
 	if tile_info != null:
 		assert_eq(tile_info.get_entry_count(), 1)
@@ -1782,7 +1782,7 @@ func test_mission_til_is_shared_by_terrain_foliage_and_cleared_without_file() ->
 	assert_null(dispatcher.tile_info)
 
 	assert_eq(DirAccess.remove_absolute(root_dir.path_join("mnml.til")), OK)
-	var no_til_root := NovaResourceRoot.new()
+	var no_til_root := ResourceRoot.new()
 	assert_eq(no_til_root.set_root_dir(root_dir), OK)
 	world.set_resource_root(no_til_root)
 	assert_eq(world.load_mission("mnml.bms"), OK)
@@ -1796,7 +1796,7 @@ func test_mission_til_is_shared_by_terrain_foliage_and_cleared_without_file() ->
 func test_unload_drops_the_previous_entitys_armory_viewmodel_state() -> void:
 	var world := _make_world()
 	add_child_autofree(world)
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
 			ProjectSettings.globalize_path("res://../fixtures/minimal/resources")), OK)
 	world.set_resource_root(root)
@@ -1857,13 +1857,13 @@ func test_joiner_accepts_novaworld_advertised_mission_basename() -> void:
 	var world := _make_world()
 	add_child_autofree(world)
 	await get_tree().process_frame
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	var fixture_dir := ProjectSettings.globalize_path("res://../fixtures/minimal/resources")
 	assert_eq(root.set_root_dir(fixture_dir), OK)
 	world.set_resource_root(root)
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
-	var host := NovaSimulation.new()
+	var host := Simulation.new()
 	host.configure_host_session({
 		"server_name": "Basename Host",
 		"mission_name": mission.get_mission_name(),
@@ -1945,7 +1945,7 @@ func test_retained_debug_views_rearm_after_unload_and_reload() -> void:
 	var world := _make_world()
 	add_child_autofree(world)
 	await get_tree().process_frame
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(root_dir), OK)
 	world.set_resource_root(root)
 	assert_eq(world.load_mission("mnml.bms"), OK)
@@ -1990,8 +1990,8 @@ func test_pick_helpers_keep_stable_names_on_same_frame_replacement() -> void:
 	var world := _make_world()
 	add_child_autofree(world)
 	await get_tree().process_frame
-	var first_picks := NovaDebugPickList.new()
-	var replacement_picks := NovaDebugPickList.new()
+	var first_picks := DebugPickList.new()
+	var replacement_picks := DebugPickList.new()
 
 	world.set_pick_debug(first_picks)
 	var first_view := world.get_node_or_null("PickDebug")
@@ -2020,9 +2020,9 @@ func test_hide_foliage_toggles_dispatcher_visibility() -> void:
 	# The F3 overlay's "Hide foliage" toggle routes here: it hides/shows the foliage
 	# dispatcher node (whose ArrayMesh batches render the scattered vegetation).
 	var world := GameWorld.new()
-	var terrain := NovaTerrain.new()
-	terrain.name = "NovaTerrain"
-	var disp := NovaFoliageDispatcher.new()
+	var terrain := Terrain.new()
+	terrain.name = "Terrain"
+	var disp := FoliageDispatcher.new()
 	disp.name = "FoliageDispatcher"
 	terrain.add_child(disp)
 	world.add_child(terrain)
@@ -2051,7 +2051,7 @@ func test_tick_feeds_dispatcher_silhouette_anchors_from_the_sim() -> void:
 	var world := _make_world()
 	add_child_autofree(world)
 	_load_minimal_mission(world)
-	var disp := world.get_node("NovaTerrain/FoliageDispatcher") as NovaFoliageDispatcher
+	var disp := world.get_node("Terrain/FoliageDispatcher") as FoliageDispatcher
 	var sim := world.get_sim()
 	assert_true(bool(sim.has_local_player()), "the playable mission spawned its player")
 
@@ -2083,12 +2083,12 @@ func test_tick_clears_stale_silhouette_anchors_when_no_sim_anchors_remain() -> v
 	# The feed assigns unconditionally: a sim reporting no anchors must wipe
 	# anchors left by an earlier frame, never leave grass clumps orbiting a
 	# despawned player. (The old no-get_sim/null-sim runtime doubles are gone —
-	# the typed _runtime seam always reaches a real NovaSimulation; the
+	# the typed _runtime seam always reaches a real Simulation; the
 	# unconditional-assignment contract is observed on the real stack.)
 	var world := _make_world()
 	add_child_autofree(world)
 	_load_minimal_mission(world)
-	var disp := world.get_node("NovaTerrain/FoliageDispatcher") as NovaFoliageDispatcher
+	var disp := world.get_node("Terrain/FoliageDispatcher") as FoliageDispatcher
 
 	disp.silhouette_anchors = PackedVector3Array([Vector3(1.0, 2.0, 3.0)])  # stale
 	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
@@ -2102,8 +2102,8 @@ func test_set_foliage_hidden_is_safe_without_a_dispatcher() -> void:
 	# the packaged scene always ships a dispatcher, and _dispatcher stays a
 	# get_node_or_null lookup.
 	var world := GameWorld.new()
-	var terrain := NovaTerrain.new()
-	terrain.name = "NovaTerrain"
+	var terrain := Terrain.new()
+	terrain.name = "Terrain"
 	world.add_child(terrain)
 	add_child_autofree(world)
 	await get_tree().process_frame
@@ -2158,12 +2158,12 @@ func test_item_effect_attach_uses_the_original_pool_specific_gates() -> void:
 	world.configure_item_fx(effects, placer)
 
 	var cases := [
-		[NovaMissionData.KIND_ORGANIC, 1, 0],
-		[NovaMissionData.KIND_ITEM, 2, 1],
-		[NovaMissionData.KIND_ITEM, 3, 0],
-		[NovaMissionData.KIND_BUILDING, 4, 0],
-		[NovaMissionData.KIND_BUILDING, 5, 1],
-		[NovaMissionData.KIND_MARKER, 6, 1],
+		[MissionData.KIND_ORGANIC, 1, 0],
+		[MissionData.KIND_ITEM, 2, 1],
+		[MissionData.KIND_ITEM, 3, 0],
+		[MissionData.KIND_BUILDING, 4, 0],
+		[MissionData.KIND_BUILDING, 5, 1],
+		[MissionData.KIND_MARKER, 6, 1],
 	]
 	var nodes: Array[Node3D] = []
 	for case_v in cases:
@@ -2178,7 +2178,7 @@ func test_item_effect_attach_uses_the_original_pool_specific_gates() -> void:
 			"only normal pool-1 plus allowed pool-2/3 entities attach")
 	assert_eq(effects.attached_spawns[0].local_pos, Vector3(1, 2, 3))
 	assert_eq(effects.attached_spawns[0].local_dir, Vector3(0, 0, -1))
-	assert_eq(world.present_item_fx(nodes[1], NovaMissionData.KIND_ITEM, 2), 0,
+	assert_eq(world.present_item_fx(nodes[1], MissionData.KIND_ITEM, 2), 0,
 			"a replayed wire-node callback cannot duplicate an existing attach")
 	assert_eq(effects.attached_spawns.size(), 3)
 
@@ -2189,7 +2189,7 @@ func test_item_effect_attach_uses_the_original_pool_specific_gates() -> void:
 	var hidden_model := ItemFxModelStub.new()
 	world.add_child(hidden_model)
 	assert_eq(world.present_item_fx(
-			hidden_model, NovaMissionData.KIND_ITEM, 7), 0)
+			hidden_model, MissionData.KIND_ITEM, 7), 0)
 	assert_eq(effects.attached_spawns.size(), 3)
 	world.set_particles_hidden(false)
 	assert_eq(effects.attached_spawns.size(), 4,
@@ -2201,7 +2201,7 @@ func test_item_effect_attach_uses_the_original_pool_specific_gates() -> void:
 	var despawned_model := ItemFxModelStub.new()
 	world.add_child(despawned_model)
 	assert_eq(world.present_item_fx(
-			despawned_model, NovaMissionData.KIND_ITEM, 8), 0)
+			despawned_model, MissionData.KIND_ITEM, 8), 0)
 	despawned_model.free()
 	world.set_particles_hidden(false)
 	assert_eq(effects.attached_spawns.size(), 4,
@@ -2231,7 +2231,7 @@ func test_dbuggy_fx00_follows_controller_lifecycle_with_pre_node_race() -> void:
 	world.configure_item_fx(effects, placer)
 	watch_signals(world)
 
-	var spawn_origin := (NovaMissionData.KIND_ITEM << 24) | 3
+	var spawn_origin := (MissionData.KIND_ITEM << 24) | 3
 	var started := {
 		"kind": "vehicle_control_started",
 		"a": 71,
@@ -2252,13 +2252,13 @@ func test_dbuggy_fx00_follows_controller_lifecycle_with_pre_node_race() -> void:
 			"render-internal lifecycle events never leak to HUD consumers")
 	var model := ItemFxModelStub.new()
 	model.set_meta("entity_ref", {
-		"kind": NovaMissionData.KIND_ITEM,
+		"kind": MissionData.KIND_ITEM,
 		"index": 3,
 		"bms_id": 9001,
 		"item_id": DBUGGY_ITEM,
 	})
 	world.add_child(model)
-	assert_eq(world.present_item_fx(model, NovaMissionData.KIND_ITEM, DBUGGY_ITEM), 1)
+	assert_eq(world.present_item_fx(model, MissionData.KIND_ITEM, DBUGGY_ITEM), 1)
 	assert_eq(world.deferred_control_item_fx_count(), 1)
 	assert_eq(effects.attached_spawns.size(), 1)
 	assert_eq(String(effects.attached_spawns[0].effect), "Effect_whiteExhaust")
@@ -2305,15 +2305,15 @@ func test_dbuggy_hidden_pending_is_cancelled_when_control_stops() -> void:
 
 	var model := ItemFxModelStub.new()
 	model.set_meta("entity_ref", {
-		"kind": NovaMissionData.KIND_ITEM,
+		"kind": MissionData.KIND_ITEM,
 		"index": 8,
 		"bms_id": 9010,
 		"item_id": DBUGGY_ITEM,
 	})
 	world.add_child(model)
-	assert_eq(world.present_item_fx(model, NovaMissionData.KIND_ITEM, DBUGGY_ITEM), 0,
+	assert_eq(world.present_item_fx(model, MissionData.KIND_ITEM, DBUGGY_ITEM), 0,
 			"the unchanged mission-start 0x42 gate keeps PlayerControl dormant")
-	var spawn_origin := (NovaMissionData.KIND_ITEM << 24) | 8
+	var spawn_origin := (MissionData.KIND_ITEM << 24) | 8
 	world.consume_runtime_effects([{
 		"kind": "vehicle_control_started",
 		"a": 81,
@@ -2354,14 +2354,14 @@ func test_controller_net_id_does_not_alias_a_wire_handle() -> void:
 	}])
 	var model := ItemFxModelStub.new()
 	model.set_meta("entity_ref", {
-		"kind": NovaMissionData.KIND_ITEM,
+		"kind": MissionData.KIND_ITEM,
 		"index": 12,
 		"bms_id": 0,
 		"wire_handle": 77,
 		"item_id": DBUGGY_ITEM,
 	})
 	world.add_child(model)
-	assert_eq(world.present_item_fx(model, NovaMissionData.KIND_ITEM, DBUGGY_ITEM), 0)
+	assert_eq(world.present_item_fx(model, MissionData.KIND_ITEM, DBUGGY_ITEM), 0)
 	assert_eq(effects.attached_spawns.size(), 0,
 			"event a is a simulation net id, not the presentation wire handle")
 
@@ -2388,7 +2388,7 @@ func test_synthetic_controller_effects_are_scoped_to_their_wire_sibling() -> voi
 	for wire_handle in [0x1004, 0x1005]:
 		var model := ItemFxModelStub.new()
 		model.set_meta("entity_ref", {
-			"kind": NovaMissionData.KIND_ITEM,
+			"kind": MissionData.KIND_ITEM,
 			"origin_kind": 0xff,
 			"index": 0xffffff,
 			"bms_id": 0,
@@ -2398,7 +2398,7 @@ func test_synthetic_controller_effects_are_scoped_to_their_wire_sibling() -> voi
 		world.add_child(model)
 		siblings.append(model)
 		assert_eq(world.present_item_fx(
-				model, NovaMissionData.KIND_ITEM, PLAYER_CONTROL_ITEM), 0)
+				model, MissionData.KIND_ITEM, PLAYER_CONTROL_ITEM), 0)
 
 	world.consume_runtime_effects([{
 		"kind": "vehicle_control_started",
@@ -2477,20 +2477,20 @@ func test_static_item_effects_spawn_world_bound_from_value_descriptors() -> void
 	var fallback_transform := Transform3D(
 			Basis(Vector3.RIGHT, PI * 0.25), Vector3(-5, 6, 7))
 	placer.static_sources = [{
-		"kind": NovaMissionData.KIND_ITEM,
+		"kind": MissionData.KIND_ITEM,
 		"item_id": 2,
 		"graphic": "StaticVehicle1",
 		"world_transform": entity_transform,
 		"object_data": matched_data,
 	}, {
-		"kind": NovaMissionData.KIND_BUILDING,
+		"kind": MissionData.KIND_BUILDING,
 		"item_id": 9,
 		"graphic": "StaticBuilding1",
 		"world_transform": fallback_transform,
 		"object_data": fallback_data,
 	}, {
 		# Pool-1 attrib 0x40 is excluded before any effect request.
-		"kind": NovaMissionData.KIND_ITEM,
+		"kind": MissionData.KIND_ITEM,
 		"item_id": 3,
 		"graphic": "BlockedStatic",
 		"world_transform": Transform3D.IDENTITY,
@@ -2504,10 +2504,10 @@ func test_static_item_effects_spawn_world_bound_from_value_descriptors() -> void
 			"two first-16 matches plus one origin fallback; the gated row is excluded")
 	var first: Dictionary = effects.request_spawns[0]
 	var first_options: Dictionary = first.get("options", {})
-	assert_eq(int(first_options.get("admission", -1)), NovaEffectScene.ADMISSION_ALWAYS)
-	assert_eq(int(first_options.get("binding", -1)), NovaEffectScene.BINDING_WORLD)
+	assert_eq(int(first_options.get("admission", -1)), EffectScene.ADMISSION_ALWAYS)
+	assert_eq(int(first_options.get("binding", -1)), EffectScene.BINDING_WORLD)
 	assert_eq(int(first_options.get("render_domain", -1)),
-			NovaEffectScene.RENDER_DOMAIN_WORLD)
+			EffectScene.RENDER_DOMAIN_WORLD)
 	assert_false(first_options.has("owner_key"), "static batches never invent follow owners")
 	assert_false(first_options.has("slot_key"), "Always spawns need no synthetic slot identity")
 	var first_transform: Transform3D = first.get("transform", Transform3D.IDENTITY)
@@ -2543,9 +2543,9 @@ func test_live_item_effect_owner_uses_each_fixed_ticks_value_pose() -> void:
 	var world := _make_item_fx_world()
 	add_child_autofree(world)
 	var placed := {}  # mutated (merge), never reassigned: lambda captures copy locals
-	_load_minimal_mission(world, root_dir, func(mission: NovaMissionData) -> void:
+	_load_minimal_mission(world, root_dir, func(mission: MissionData) -> void:
 		placed.merge(mission.add_entity(
-				NovaMissionData.KIND_BUILDING, 102001, Vector3(6, 4, 5), Vector3.ZERO)))
+				MissionData.KIND_BUILDING, 102001, Vector3(6, 4, 5), Vector3.ZERO)))
 	var bms_id := int(placed.get("bms_id", 0))
 	assert_gt(bms_id, 0)
 	var node := ItemFxModelStub.new()
@@ -2553,7 +2553,7 @@ func test_live_item_effect_owner_uses_each_fixed_ticks_value_pose() -> void:
 	world.add_child(node)
 	var key := "itemfx:%d:0" % bms_id
 	world.configure_item_owner(key, node,
-			{"kind": NovaMissionData.KIND_BUILDING, "index": 0, "bms_id": bms_id})
+			{"kind": MissionData.KIND_BUILDING, "index": 0, "bms_id": bms_id})
 
 	var resolved: Variant = world.resolve_item_owner(key)
 	assert_true(resolved is Transform3D)
@@ -2572,7 +2572,7 @@ func test_live_item_effect_owner_uses_each_fixed_ticks_value_pose() -> void:
 
 	var absent_key := "itemfx:999999:0"
 	world.configure_item_owner(absent_key, node,
-			{"kind": NovaMissionData.KIND_BUILDING, "index": 999, "bms_id": 999999})
+			{"kind": MissionData.KIND_BUILDING, "index": 999, "bms_id": 999999})
 	assert_null(world.resolve_item_owner(absent_key),
 			"an owner absent from this tick detaches instead of emitting once from stale presentation")
 
@@ -2586,7 +2586,7 @@ func test_static_item_effect_hidden_at_load_retries_once_when_enabled() -> void:
 	var placer := ItemFxPlacerStub.new()
 	placer.item_db = db
 	placer.static_sources = [{
-		"kind": NovaMissionData.KIND_ITEM,
+		"kind": MissionData.KIND_ITEM,
 		"item_id": 2,
 		"graphic": "StaticVehicle1",
 		"world_transform": Transform3D(Basis.IDENTITY, Vector3(3, 4, 5)),
@@ -2609,13 +2609,13 @@ func test_static_item_effect_hidden_at_load_retries_once_when_enabled() -> void:
 
 func _make_item_fx_world() -> ItemFxGameWorldHarness:
 	var world := ItemFxGameWorldHarness.new()
-	var terrain := NovaTerrain.new()
-	terrain.name = "NovaTerrain"
+	var terrain := Terrain.new()
+	terrain.name = "Terrain"
 	world.add_child(terrain)
 	# The environment child makes this harness mission-loadable: the typed
 	# placement path stamps _env.light_state onto every placed batch.
-	var env := NovaEnvironment.new()
-	env.name = "NovaEnvironment"
+	var env := MissionEnvironment.new()
+	env.name = "MissionEnvironment"
 	world.add_child(env)
 	return world
 
@@ -2634,11 +2634,11 @@ func test_blink_frame_gates_toggle_render_passes() -> void:
 	# occlusion_frame_pass.gd.
 	var world := _make_world()
 	add_child_autofree(world)
-	_load_minimal_mission(world, "", func(mission: NovaMissionData) -> void:
-		assert_true(mission.set_header_flag(NovaMissionData.ATTRIB_FORCE_INDOORS, true)))
-	var sky := world.get_node("NovaSky") as Node3D
-	var water := world.get_node("NovaWater") as Node3D
-	var terrain := world.get_node("NovaTerrain") as Node3D
+	_load_minimal_mission(world, "", func(mission: MissionData) -> void:
+		assert_true(mission.set_header_flag(MissionData.ATTRIB_FORCE_INDOORS, true)))
+	var sky := world.get_node("SkyDome") as Node3D
+	var water := world.get_node("Water") as Node3D
+	var terrain := world.get_node("Terrain") as Node3D
 
 	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
 	assert_false(terrain.visible, "indoors hides the terrain render")
@@ -2666,7 +2666,7 @@ func test_occlusion_frame_drives_building_visibility_from_the_sim() -> void:
 	# The render-occlusion frame through the REAL stack (docs/render/
 	# render-occlusion-re.md §3/§5): a mission-authored building enters the
 	# sim's real occlusion world at boot, the per-frame camera drives its batch
-	# verdict, and the pass lands the verdict on the REAL placed NovaObjectModel
+	# verdict, and the pass lands the verdict on the REAL placed ObjectModel
 	# [orig: Terrain_RenderSectorModels @ 0x5c5d30]. (The stub-era legs died
 	# with the sim doubles: the exact section-mask word needs an OOBJ section
 	# map no fixture model carries, the entity render gates need blink boxes,
@@ -2677,13 +2677,13 @@ func test_occlusion_frame_drives_building_visibility_from_the_sim() -> void:
 	var world := _make_world()
 	add_child_autofree(world)
 	var placed := {}  # mutated (merge), never reassigned: lambda captures copy locals
-	_load_minimal_mission(world, root_dir, func(mission: NovaMissionData) -> void:
+	_load_minimal_mission(world, root_dir, func(mission: MissionData) -> void:
 		placed.merge(mission.add_entity(
-				NovaMissionData.KIND_BUILDING, 102001, Vector3(16, 24, 4), Vector3.ZERO)))
+				MissionData.KIND_BUILDING, 102001, Vector3(16, 24, 4), Vector3.ZERO)))
 	var bms_id := int(placed.get("bms_id", 0))
 	assert_gt(bms_id, 0)
 	var building := world.get_runtime().get_registry().resolve_single(bms_id) as Node3D
-	assert_not_null(building, "the authored building placed a real NovaObjectModel")
+	assert_not_null(building, "the authored building placed a real ObjectModel")
 	if building == null:
 		return
 	# Godot-space building position: mission (16, 24, 4) -> (16, 4, -24).
@@ -2730,15 +2730,15 @@ func test_probe_occlusion_skip_restores_frame_state_and_keeps_iris_live() -> voi
 	var world := _make_world()
 	add_child_autofree(world)
 	var placed := {}  # mutated (merge), never reassigned: lambda captures copy locals
-	_load_minimal_mission(world, root_dir, func(mission: NovaMissionData) -> void:
+	_load_minimal_mission(world, root_dir, func(mission: MissionData) -> void:
 		placed.merge(mission.add_entity(
-				NovaMissionData.KIND_BUILDING, 102001, Vector3(16, 24, 4), Vector3.ZERO)))
+				MissionData.KIND_BUILDING, 102001, Vector3(16, 24, 4), Vector3.ZERO)))
 	var building := world.get_runtime().get_registry().resolve_single(
 			int(placed.get("bms_id", 0))) as Node3D
 	assert_not_null(building)
 	if building == null:
 		return
-	var weather := world.get_weather_node() as NovaWeather
+	var weather := world.get_weather_node() as Weather
 	var eye := Vector3(16, 6, 0)
 	var away := Transform3D(Basis(Vector3.UP, PI), eye)
 
@@ -2801,7 +2801,7 @@ func test_occlusion_debug_view_builds_and_frees() -> void:
 # fits a unit frame. The latch/edge machine those tests exercised — loss wins
 # and emits ONCE per session, the deploy pick holds until the policy/grant
 # boundary completes, the ready edge is once per join — is the native
-# NovaNetSessionPolicy, pinned on the real policy by
+# NetSessionPolicy, pinned on the real policy by
 # tests/npruntime/join_session_policy_test.cpp (test_session_loss_latch,
 # test_admission_deploy_edge_and_ready). GameWorld's forwarding of the real
 # sim predicates into that policy is covered by the live joiner tests above
@@ -2874,7 +2874,7 @@ func test_stats_board_captures_world_tick_legs_only_while_enabled() -> void:
 # weather prewarm), so focused tests instance game_world.tscn like the shells
 # do instead of hand-building partial worlds.
 func _make_world() -> GameWorld:
-	var packed := load("res://adapter/world/game_world.tscn") as PackedScene
+	var packed := load("res://src/world/game_world.tscn") as PackedScene
 	return packed.instantiate() as GameWorld
 
 

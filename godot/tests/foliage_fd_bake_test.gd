@@ -54,7 +54,7 @@ func _assert_level(data: PackedByteArray, offset: int,
 
 func test_bake_builds_the_literal_retail_mip_chain() -> void:
 	var image := _make_image()
-	assert_true(NovaFoliageDispatcher.bake_fd_image(image),
+	assert_true(FoliageDispatcher.bake_fd_image(image),
 		"An 8x8 power-of-two RGBA8 image builds.")
 	assert_true(image.has_mipmaps(), "The adapter returns a mipmapped Image.")
 	assert_eq(image.get_mipmap_count(), 3,
@@ -91,15 +91,15 @@ func test_non_pow2_is_rejected_untouched() -> void:
 	var image := Image.create(3, 4, false, Image.FORMAT_RGBA8)
 	image.set_pixel(0, 0, Color8(10, 20, 30, 40))
 	var before := image.get_data()
-	assert_false(NovaFoliageDispatcher.bake_fd_image(image), "Non-pow2 width is rejected.")
+	assert_false(FoliageDispatcher.bake_fd_image(image), "Non-pow2 width is rejected.")
 	assert_eq(image.get_data(), before, "A rejected image is left untouched.")
 
 
 func test_non_rgba8_is_rejected() -> void:
 	var image := Image.create(4, 4, false, Image.FORMAT_RGB8)
-	assert_false(NovaFoliageDispatcher.bake_fd_image(image),
+	assert_false(FoliageDispatcher.bake_fd_image(image),
 		"Only RGBA8 input is accepted (callers convert first).")
 
 
 func test_null_image_is_rejected() -> void:
-	assert_false(NovaFoliageDispatcher.bake_fd_image(null), "Null image is rejected.")
+	assert_false(FoliageDispatcher.bake_fd_image(null), "Null image is rejected.")

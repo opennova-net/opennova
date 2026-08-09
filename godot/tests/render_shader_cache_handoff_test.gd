@@ -3,7 +3,7 @@ extends GutTest
 # REN-1 T1's thin GUT leg (ADR 0023): pins the GDScript -> native handoff of
 # the material classification chain. The exhaustive input-matrix pinning is
 # the renderer_state_vectors ctest (tests/renderer/state_vectors_test.cpp);
-# this leg only proves the NovaObjectShaderCache binding reaches the same
+# this leg only proves the ObjectShaderCache binding reaches the same
 # chain and hands back real shaders.
 #
 # EXPECTED_KEYS was dumped ONCE from the committed golden
@@ -31,7 +31,7 @@ const EXPECTED_KEYS := {
 
 
 func test_classify_binding_matches_golden_keys() -> void:
-	var cache = NovaObjectShaderCache.get_singleton()
+	var cache = ObjectShaderCache.get_singleton()
 	assert_not_null(cache, "shader cache singleton")
 	for label in EXPECTED_KEYS:
 		var row: Array = EXPECTED_KEYS[label]
@@ -41,7 +41,7 @@ func test_classify_binding_matches_golden_keys() -> void:
 
 
 func test_known_shader_tag_table_reaches_gdscript() -> void:
-	var cache = NovaObjectShaderCache.get_singleton()
+	var cache = ObjectShaderCache.get_singleton()
 	var tags: PackedStringArray = cache.get_known_shader_tags()
 	# 46 = OED's 45-entry gMaterialInfoTable + VS_TRACER, matching the runtime
 	# registry retail builds at boot (REN-2; docs/render/render-material-re.md).
@@ -53,7 +53,7 @@ func test_known_shader_tag_table_reaches_gdscript() -> void:
 
 
 func test_shader_for_key_composes_real_shaders() -> void:
-	var cache = NovaObjectShaderCache.get_singleton()
+	var cache = ObjectShaderCache.get_singleton()
 	var ff_key: int = cache.classify("FF_ST_OP", 0, 0, 0, 128)
 	var shader: Shader = cache.get_shader_for_key(ff_key)
 	assert_not_null(shader, "FF shader composes")

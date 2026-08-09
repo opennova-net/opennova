@@ -44,7 +44,7 @@ hardening, and project health. Divergences from the original engine belong in
       gates (both GREEN on the 2026-08-05 suites, 24/24 cells captured cleanly).
       Details: `.agents/retail-lan-parity.md` §9
 - [ ] Terrain native `[orig]` citation pass: sweep the remaining uncited chains —
-      `engine/runtime/terrain` carries 23 anchors across 15 files and `godot/adapter/terrain/` 18
+      `engine/runtime/terrain` carries 23 anchors across 15 files and `godot/src/terrain/` 18
       across 8 of its ~16 source files (the cpt/til/trn resource-format files and the
       remaining builder files carry none); `docs/terrain/terrain-re.md` is still partial
       (PAR-R1); narrow or close this entry after the sweep
@@ -71,7 +71,7 @@ hardening, and project health. Divergences from the original engine belong in
       tile files as a cache. Decide: ledger it as a D-TERRAIN row (cache-trust is the
       witnessed semantic) or record it in `terrain-re.md` as a deliberate tool-side
       divergence
-- [ ] `engine/mcp/` relocation (optional): all 16 files are class_name-referenced with zero `res://adapter/mcp` literals (#376 added the `game_mcp_*` service trio and `mcp_peer_client.gd`), so it can move (e.g. next to `modtools/mcp/`) without path edits if engine/ layering ever needs it
+- [ ] `engine/mcp/` relocation (optional): all 16 files are class_name-referenced with zero `res://src/mcp` literals (#376 added the `game_mcp_*` service trio and `mcp_peer_client.gd`), so it can move (e.g. next to `modtools/mcp/`) without path edits if engine/ layering ever needs it
 - [ ] `opennova::io` adoption continuation: migrate remaining per-lib byte readers on-touch (policy in engine/CLAUDE.md); excluded: mus/wac VM cursors (faithful-port surface)
 - [ ] Mission workspace rail conversion: with the inspector decomposed into section components, moving Mission onto `_build_inspector_defs()` workflow rows is a small step, but it swaps the in-panel mode tabs for the shell's workflow rail (visible layout change) - needs a deliberate UX pass
 - [ ] NovaWorld disconnect-state reset (owner: `godot/game/novaworld_panel.gd`): clear all connection-derived rows, login/join state, pending mission/player data, and disable Host/Join/Login on disconnect or error. Acceptance (`godot/tests/novaworld_panel_test.gd`): a populated, logged-in, pending-join panel returns to a clean disconnected state and cannot submit a stale row. Coordinate with the unlanded novaworld_panel rework held in the `gsb` worktree (WIP commit 0fd58850b on `worktree-gsb`; the branch's earlier commits landed via #300) before landing.
@@ -94,7 +94,7 @@ hardening, and project health. Divergences from the original engine belong in
       validates it — and the skew failure happens pre-descriptor anyway. Verify a
       shared build id (descriptor check plus a boot-time check), or ship one combined
       zip.
-- [ ] Cross-mission debug-intent replay: `NovaDebugSession._explicit_values` is never
+- [ ] Cross-mission debug-intent replay: `DebugSession._explicit_values` is never
       cleared, so `sync()` replays explicit debug writes into a NEW mission's fresh
       sim/terrain targets. Decide the cross-mission scope of debug intent: clear on
       mission unload, or document the replay as intended.
@@ -102,7 +102,7 @@ hardening, and project health. Divergences from the original engine belong in
       unlock even in local SP where the player has host authority; Stop maps to
       return-to-menu rather than a pause-style stop; expensive views are physically
       reset when F3 closes. Review and either ratify the new behavior in
-      `godot/adapter/debug/pages/README.md` or change it.
+      `godot/src/debug/pages/README.md` or change it.
 - [ ] Managed-game shutdown: editor close/F8 always ends in `OS.kill`
       (TerminateProcess) because the graceful-quit path requires the debug identity
       that non-debug runs never get; and `user://oned-run-*.log` files accumulate
@@ -129,7 +129,7 @@ player.mnu is wired end to end (`player_info_menu_companion.gd`; grilled in
 docs/playerinfo/avatars-re.md, D-PLAYERINFO-7..12). Remaining:
 
 - [ ] Persist the avatar/class/loadout selections to the on-disk profile
-      (D-PLAYERINFO-9 — the NAME half is done: `NovaPlayerProfile.save_callsign` writes
+      (D-PLAYERINFO-9 — the NAME half is done: `PlayerProfile.save_callsign` writes
       `user://player_profile.cfg`; the ammo/type picks now ride `snapshot()` as
       `*_clips`/`*_ammo_type`) + render the chosen combo on the spawned soldier
       (D-PLAYERINFO-1, still NEEDS-RE).

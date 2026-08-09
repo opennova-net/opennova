@@ -170,13 +170,13 @@ func _refresh_brush() -> void:
 
 
 func _refresh_atlas() -> void:
-	var data: NovaTerrainData = terrain_editor.get_data()
+	var data: TerrainData = terrain_editor.get_data()
 	var tilestrip: Texture2D = TerrainEditorSlots.get_slot_texture(data, "tilestrip") if data else null
 	var tiles_x := 0
 	var tiles_y := 0
 	if tilestrip:
-		tiles_x = maxi(1, tilestrip.get_width() / NovaTerrainTileInfo.ATLAS_TILE_PIXELS)
-		tiles_y = maxi(1, tilestrip.get_height() / NovaTerrainTileInfo.ATLAS_TILE_PIXELS)
+		tiles_x = maxi(1, tilestrip.get_width() / TerrainTileInfo.ATLAS_TILE_PIXELS)
+		tiles_y = maxi(1, tilestrip.get_height() / TerrainTileInfo.ATLAS_TILE_PIXELS)
 	var tile_count := tiles_x * tiles_y
 	var strip_hash: int = int(tilestrip.get_instance_id()) if tilestrip else 0
 	var needs_rebuild := strip_hash != _cached_tilestrip_hash or tile_count != _atlas_tile_count
@@ -210,9 +210,9 @@ func _refresh_atlas() -> void:
 func _refresh_flags() -> void:
 	var selected := terrain_editor.get_selected_tileinfo_entry()
 	var flags := selected.get_flags() if selected != null else terrain_editor.get_tile_stamp_flags()
-	_flip_x.set_pressed_no_signal((flags & NovaTerrainTileInfo.FLAG_FLIP_X) != 0)
-	_flip_y.set_pressed_no_signal((flags & NovaTerrainTileInfo.FLAG_FLIP_Y) != 0)
-	_rotate.set_pressed_no_signal((flags & NovaTerrainTileInfo.FLAG_ROTATE_90) != 0)
+	_flip_x.set_pressed_no_signal((flags & TerrainTileInfo.FLAG_FLIP_X) != 0)
+	_flip_y.set_pressed_no_signal((flags & TerrainTileInfo.FLAG_FLIP_Y) != 0)
+	_rotate.set_pressed_no_signal((flags & TerrainTileInfo.FLAG_ROTATE_90) != 0)
 	if selected != null:
 		_flags_status.text = "Editing transform. Brush stays unchanged."
 	else:
@@ -240,8 +240,8 @@ func _refresh_selection() -> void:
 func _build_tile_preview(tilestrip: Texture2D, tile_index: int) -> Texture2D:
 	if tilestrip == null:
 		return null
-	var tiles_x := maxi(1, tilestrip.get_width() / NovaTerrainTileInfo.ATLAS_TILE_PIXELS)
-	var tiles_y := maxi(1, tilestrip.get_height() / NovaTerrainTileInfo.ATLAS_TILE_PIXELS)
+	var tiles_x := maxi(1, tilestrip.get_width() / TerrainTileInfo.ATLAS_TILE_PIXELS)
+	var tiles_y := maxi(1, tilestrip.get_height() / TerrainTileInfo.ATLAS_TILE_PIXELS)
 	var tile_count := tiles_x * tiles_y
 	if tile_count <= 0:
 		return null
@@ -255,10 +255,10 @@ func _build_icon(tilestrip: Texture2D, tile_index: int, tiles_x: int) -> Texture
 	var atlas := AtlasTexture.new()
 	atlas.atlas = tilestrip
 	atlas.region = Rect2(
-		(tile_index % tiles_x) * NovaTerrainTileInfo.ATLAS_TILE_PIXELS,
-		(tile_index / tiles_x) * NovaTerrainTileInfo.ATLAS_TILE_PIXELS,
-		NovaTerrainTileInfo.ATLAS_TILE_PIXELS,
-		NovaTerrainTileInfo.ATLAS_TILE_PIXELS
+		(tile_index % tiles_x) * TerrainTileInfo.ATLAS_TILE_PIXELS,
+		(tile_index / tiles_x) * TerrainTileInfo.ATLAS_TILE_PIXELS,
+		TerrainTileInfo.ATLAS_TILE_PIXELS,
+		TerrainTileInfo.ATLAS_TILE_PIXELS
 	)
 	_tile_icon_cache[cache_key] = atlas
 	return atlas
@@ -276,7 +276,7 @@ func _brush_summary_text(tile_index: int, flags: int) -> String:
 	return summary
 
 
-func _selection_summary_text(selected: NovaTerrainTileEntry) -> String:
+func _selection_summary_text(selected: TerrainTileEntry) -> String:
 	var text := "Tile %03d @ %d,%d." % [selected.get_tile_index(), selected.get_cell_x(), selected.get_cell_z()]
 	text += " %s." % _transform_text(selected.get_flags())
 	return text
@@ -284,11 +284,11 @@ func _selection_summary_text(selected: NovaTerrainTileEntry) -> String:
 
 func _transform_text(flags: int) -> String:
 	var parts: Array[String] = []
-	if (flags & NovaTerrainTileInfo.FLAG_FLIP_X) != 0:
+	if (flags & TerrainTileInfo.FLAG_FLIP_X) != 0:
 		parts.append("Flip X")
-	if (flags & NovaTerrainTileInfo.FLAG_FLIP_Y) != 0:
+	if (flags & TerrainTileInfo.FLAG_FLIP_Y) != 0:
 		parts.append("Flip Y")
-	if (flags & NovaTerrainTileInfo.FLAG_ROTATE_90) != 0:
+	if (flags & TerrainTileInfo.FLAG_ROTATE_90) != 0:
 		parts.append("Rotate 90")
 	if parts.is_empty():
 		return "No transforms"
@@ -321,15 +321,15 @@ func _on_atlas_selected(idx: int) -> void:
 
 
 func _on_flip_x(pressed: bool) -> void:
-	_set_flag(NovaTerrainTileInfo.FLAG_FLIP_X, pressed)
+	_set_flag(TerrainTileInfo.FLAG_FLIP_X, pressed)
 
 
 func _on_flip_y(pressed: bool) -> void:
-	_set_flag(NovaTerrainTileInfo.FLAG_FLIP_Y, pressed)
+	_set_flag(TerrainTileInfo.FLAG_FLIP_Y, pressed)
 
 
 func _on_rotate(pressed: bool) -> void:
-	_set_flag(NovaTerrainTileInfo.FLAG_ROTATE_90, pressed)
+	_set_flag(TerrainTileInfo.FLAG_ROTATE_90, pressed)
 
 
 func _set_flag(bit: int, pressed: bool) -> void:

@@ -504,7 +504,7 @@ func _build_ui() -> void:
 	_build_inspector_rows(_glyph_inspector)
 
 	# FNT-1 (maturity program): the type-a-line sample renders through the GAME's
-	# draw path — the F2 EngineTextPreview widget (NovaFntResource.to_font_file +
+	# draw path — the F2 EngineTextPreview widget (FntResource.to_font_file +
 	# HudText.draw_text) — beside the glyph canvas, which stays as the paint
 	# surface. The previous Godot Label was an editor-drawn truth-claim. A .fnt
 	# carries a single face (the hi/lo pairing is hudpos.def naming two separate

@@ -12,7 +12,7 @@ extends SceneTree
 
 const LOAD_TIMEOUT_WALL_SECONDS := 240.0
 const PHASE_MS := 2600
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
 const MountGuard := preload("res://tests/perf_probe_mount_guard.gd")
 const ProcessGuard := preload("res://tests/perf_probe_process_guard.gd")
 

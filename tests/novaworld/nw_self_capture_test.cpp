@@ -82,7 +82,7 @@ constexpr uint16_t kJoinerPort = 30000;
 const PeerAddr kJoinerPeer{0x0100007Fu, kJoinerPort}; // 127.0.0.1:30000
 
 // In-memory netsim::IDatagramSocket — the same adapter seam apps/common's
-// NetDatagramSocket (real socket) and the Godot NovaUdpPump wrapper fill, backed
+// NetDatagramSocket (real socket) and the Godot UdpPump wrapper fill, backed
 // by a deque: the joiner "sends" by pushing onto `inbound`; the host's send_to
 // lands in `outbound` for the test loop to record + deliver. Keeps the tier-1
 // gate free of real sockets (deterministic, port-fixed, no recv timeouts).

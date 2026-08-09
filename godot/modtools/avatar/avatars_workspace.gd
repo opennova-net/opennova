@@ -13,7 +13,7 @@ extends EditorWorkspace
 # ([orig: CAvatarDefs_Init @ 0x57b180], [orig: CAvatarDefs_ParseConfigLine @ 0x57a3f0]).
 
 const AvatarsDocumentScript = preload("res://modtools/avatar/avatars_document.gd")
-const AvatarPreviewScript = preload("res://adapter/avatar/avatar_preview.gd")
+const AvatarPreviewScript = preload("res://src/avatar/avatar_preview.gd")
 const TreeInspectorScript = preload("res://modtools/avatar/ui/inspectors/tree_inspector.gd")
 const PartsInspectorScript = preload("res://modtools/avatar/ui/inspectors/parts_inspector.gd")
 const CombosInspectorScript = preload("res://modtools/avatar/ui/inspectors/combos_inspector.gd")
@@ -101,7 +101,7 @@ func db():
 	return document.resource
 
 
-func get_resource_root() -> NovaResourceRoot:
+func get_resource_root() -> ResourceRoot:
 	return _resource_root()
 
 
@@ -247,7 +247,7 @@ func focus_reference(focus: FocusPayload) -> Error:
 	if database == null or not database.is_loaded() or focus.is_empty():
 		return OK
 	if not focus.part.is_empty():
-		var kind := focus.part_kind if focus.part_kind >= 0 else NovaAvatarDatabase.PART_HEAD
+		var kind := focus.part_kind if focus.part_kind >= 0 else AvatarDatabase.PART_HEAD
 		var name := focus.part
 		if database.get_part(kind, name).is_empty():
 			return ERR_DOES_NOT_EXIST

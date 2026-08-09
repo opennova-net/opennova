@@ -166,7 +166,7 @@ selected. Which config bit drives `device+600` at runtime on the reference
 machine remains an open follow-up.
 
 Implemented in `engine/runtime/terrain/include/terrain/texture_preprocess.h` and
-`NovaTerrain::_load_textures`;
+`Terrain::_load_textures`;
 `terrain_texture_preprocess_test` pins recovered byte vectors, while
 `terrain_lod_family_test` pins all 16 sublevels against the eight-family
 selector. The same preprocessor now builds the separate heightfield-normal
@@ -241,9 +241,9 @@ to literal `trn` at `0x57dbb6`; shipped `DVD4.TRN` contains all four
 pairs. For each quadrant/axis, a nonzero component selects mask 511 plus that
 quadrant's base, while zero selects mask 1023/base zero and crosses the internal
 seam (`0x60327a..0x6032ec`). These values are not `polytrn_wrapx/y`.
-`TrnConfig`, the TPJ build flow, and `NovaTerrainData` preserve all four pairs;
+`TrnConfig`, the TPJ build flow, and `TerrainData` preserve all four pairs;
 at runtime `height_field_apply_trn` stamps them onto every `TerrainHeightField`
-(the `NovaTerrainData` samplers/raycast and `NovaSimulation`'s grounding field),
+(the `TerrainData` samplers/raycast and `Simulation`'s grounding field),
 and `build_heightfield_normal_map` plus the `nova_terrain.cpp` render mesh and
 seam normals tap the same `CoordsTaps` kernel. The former Godot-physics
 heightfield consumer was removed (#330; range-find rides the ported raycast).
@@ -642,7 +642,7 @@ The B1a/B1b slices landed the LoRes march + HiRes_0 refine as
 point+bilinear sampler seam; ~60 pinned checks in the `terrain_raycast`
 ctest incl. the step-math exactness, the crossing-rule asymmetry, the
 height-0 floor, and the odd refine guard's zero-step no-op-walk interplay),
-bound as `NovaTerrainData.raycast_terrain(from, to)` over BOTH reimpl
+bound as `TerrainData.raycast_terrain(from, to)` over BOTH reimpl
 substrates (live editable Image preferred, baked CPT otherwise — the
 existing slice-A sampler cores reused). Adopters: ONED mission picking
 (`terrain_editor.raycast_terrain_at` — the GDScript march/slab/bisection

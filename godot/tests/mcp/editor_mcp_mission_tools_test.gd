@@ -31,13 +31,13 @@ class ShellStub:
 
 	var _workspaces := {}
 	var root_dir := ""
-	var root: NovaResourceRoot = null
+	var root: ResourceRoot = null
 	var editor_node: Node = null
 
 	func get_resource_root_dir() -> String:
 		return root_dir
 
-	func get_resource_root() -> NovaResourceRoot:
+	func get_resource_root() -> ResourceRoot:
 		return root
 
 	func get_editor_camera() -> Camera3D:
@@ -57,7 +57,7 @@ func before_each() -> void:
 	workspace = MissionWorkspace.new(editor)
 	assert_eq(int(workspace.new_current()), OK)
 	controller = workspace._controller
-	var db := NovaItemDatabase.new()
+	var db := ItemDatabase.new()
 	assert_eq(db.load(_abs(ITEMS_PATH)), OK)
 	controller._placer.item_db = db
 	shell = add_child_autofree(ShellStub.new())
@@ -143,7 +143,7 @@ begin "Debug Soldier"
 end
 """)
 	_copy_fixture(DSUV1_MODEL, mount_root_dir.path_join("dsuv1.3di"))
-	var resources := NovaResourceRoot.new()
+	var resources := ResourceRoot.new()
 	assert_eq(resources.set_root_dir(mount_root_dir), OK)
 	shell.root = resources
 
@@ -170,9 +170,9 @@ func test_place_entities_grounds_like_the_editor() -> void:
 	assert_almost_eq(float(out["rows"][0]["grounded_y"]), _ground(64.0, -64.0), 0.001,
 		"the tool grounded at the sampled surface")
 	assert_false(bool(out["rows"][2]["ok"]), "the off-terrain row failed individually")
-	assert_eq(controller.get_mission().get_entity_count(NovaMissionData.KIND_BUILDING), 1)
-	assert_eq(controller.get_mission().get_entity_count(NovaMissionData.KIND_MARKER), 1)
-	var record: Dictionary = controller.get_mission().get_entity(NovaMissionData.KIND_BUILDING, 0)
+	assert_eq(controller.get_mission().get_entity_count(MissionData.KIND_BUILDING), 1)
+	assert_eq(controller.get_mission().get_entity_count(MissionData.KIND_MARKER), 1)
+	var record: Dictionary = controller.get_mission().get_entity(MissionData.KIND_BUILDING, 0)
 	assert_almost_eq((record["rotation_deg"] as Vector3).y, 90.0, 0.5, "yaw persisted in the record")
 
 	# The headline guarantee: a follow-up bulk re-ground finds NOTHING to move —
@@ -183,7 +183,7 @@ func test_place_entities_grounds_like_the_editor() -> void:
 
 
 func test_place_entities_applies_ai_extras() -> void:
-	var organics: McpToolResult = await _call("list_items", { "kind": NovaMissionData.KIND_ORGANIC, "limit": 1 })
+	var organics: McpToolResult = await _call("list_items", { "kind": MissionData.KIND_ORGANIC, "limit": 1 })
 	assert_false(organics.is_error)
 	var items: Array = organics.structured["items"]
 	if items.is_empty():
@@ -199,7 +199,7 @@ func test_place_entities_applies_ai_extras() -> void:
 	assert_eq(int(out["placed"]), 1)
 	assert_true(String(out["rows"][0].get("warning", "")).contains("bogus_field"),
 		"unknown property keys are reported, not silently dropped")
-	var record: Dictionary = controller.get_mission().get_entity(NovaMissionData.KIND_ORGANIC, 0)
+	var record: Dictionary = controller.get_mission().get_entity(MissionData.KIND_ORGANIC, 0)
 	assert_eq(String(record["name1"]), "Eindo06")
 	assert_eq(int(record["team"]), 2)
 	assert_eq(int(record["waypoint_id"]), 3)
@@ -213,12 +213,12 @@ func test_get_mission_entities_lists_filters_and_details() -> void:
 	] })
 	var all: McpToolResult = await _call("get_mission_entities")
 	assert_eq(int(all.structured["total"]), 2)
-	var buildings: McpToolResult = await _call("get_mission_entities", { "kind": NovaMissionData.KIND_BUILDING })
+	var buildings: McpToolResult = await _call("get_mission_entities", { "kind": MissionData.KIND_BUILDING })
 	assert_eq(int(buildings.structured["total"]), 1)
 	assert_eq(String(buildings.structured["entities"][0]["kind_label"]), "building")
 	assert_true(buildings.structured["entities"][0].has("world_position"), "records carry a world echo")
 	var detail: McpToolResult = await _call("get_mission_entities",
-			{ "detail": { "kind": NovaMissionData.KIND_BUILDING, "index": 0 } })
+			{ "detail": { "kind": MissionData.KIND_BUILDING, "index": 0 } })
 	assert_false(detail.is_error)
 	assert_true(detail.structured.has("position"))
 	var missing: McpToolResult = await _call("get_mission_entities", { "detail": { "kind": 2, "index": 99 } })
@@ -228,7 +228,7 @@ func test_get_mission_entities_lists_filters_and_details() -> void:
 func test_edit_mission_entity_move_stays_grounded() -> void:
 	await _call("place_entities", { "rows": [{ "item_id": 102001, "x": 64.0, "z": -64.0 }] })
 	var moved: McpToolResult = await _call("edit_mission_entity",
-			{ "kind": NovaMissionData.KIND_BUILDING, "index": 0, "move": { "x": 96.0, "z": -96.0 } })
+			{ "kind": MissionData.KIND_BUILDING, "index": 0, "move": { "x": 96.0, "z": -96.0 } })
 	assert_false(moved.is_error)
 	var reground: McpToolResult = await _call("reground_mission")
 	assert_eq(int(reground.structured["moved"]), 0, "a tool move is grounded; nothing to repair")
@@ -240,18 +240,18 @@ func test_edit_mission_entity_move_stays_grounded() -> void:
 func test_edit_mission_entity_set_validates_and_applies() -> void:
 	await _call("place_entities", { "rows": [{ "item_id": 102001, "x": 64.0, "z": -64.0 }] })
 	var bogus: McpToolResult = await _call("edit_mission_entity",
-			{ "kind": NovaMissionData.KIND_BUILDING, "index": 0, "set": { "nonsense": 1 } })
+			{ "kind": MissionData.KIND_BUILDING, "index": 0, "set": { "nonsense": 1 } })
 	assert_true(bogus.is_error)
 	assert_true(String(bogus.content[0]["text"]).contains("waypoint_id"), "the error lists the vocabulary")
 	var ok: McpToolResult = await _call("edit_mission_entity",
-			{ "kind": NovaMissionData.KIND_BUILDING, "index": 0, "set": { "team": 2, "group": 4 } })
+			{ "kind": MissionData.KIND_BUILDING, "index": 0, "set": { "team": 2, "group": 4 } })
 	assert_false(ok.is_error)
-	var record: Dictionary = controller.get_mission().get_entity(NovaMissionData.KIND_BUILDING, 0)
+	var record: Dictionary = controller.get_mission().get_entity(MissionData.KIND_BUILDING, 0)
 	assert_eq(int(record["team"]), 2)
 	var deleted: McpToolResult = await _call("edit_mission_entity",
-			{ "kind": NovaMissionData.KIND_BUILDING, "index": 0, "delete": true })
+			{ "kind": MissionData.KIND_BUILDING, "index": 0, "delete": true })
 	assert_false(deleted.is_error)
-	assert_eq(controller.get_mission().get_entity_count(NovaMissionData.KIND_BUILDING), 0)
+	assert_eq(controller.get_mission().get_entity_count(MissionData.KIND_BUILDING), 0)
 
 
 func test_edit_mission_entity_requires_exactly_one_op() -> void:
@@ -274,17 +274,17 @@ func test_waypoint_path_lifecycle() -> void:
 	assert_eq(int(added.structured["active"]["marker_count"]), 3)
 
 	var no_loop: McpToolResult = await _call("edit_waypoint_path", { "op": "set_flags", "loop": false })
-	assert_true(int(no_loop.structured["active"]["flags"]) & NovaMissionData.WP_FLAG_DOES_NOT_LOOP != 0,
+	assert_true(int(no_loop.structured["active"]["flags"]) & MissionData.WP_FLAG_DOES_NOT_LOOP != 0,
 		"loop=false sets the inverted on-disk bit")
 	var loop: McpToolResult = await _call("edit_waypoint_path", { "op": "set_flags", "loop": true })
-	assert_eq(int(loop.structured["active"]["flags"]) & NovaMissionData.WP_FLAG_DOES_NOT_LOOP, 0,
+	assert_eq(int(loop.structured["active"]["flags"]) & MissionData.WP_FLAG_DOES_NOT_LOOP, 0,
 		"loop=true clears it (paths loop by default)")
 
 	await _call("place_entities", { "rows": [{ "item_id": 102001, "x": 100.0, "z": -100.0 }] })
 	var assigned: McpToolResult = await _call("edit_waypoint_path",
-			{ "op": "assign_entity", "kind": NovaMissionData.KIND_BUILDING, "index": 0, "path": path })
+			{ "op": "assign_entity", "kind": MissionData.KIND_BUILDING, "index": 0, "path": path })
 	assert_false(assigned.is_error)
-	assert_eq(int(controller.get_mission().get_entity(NovaMissionData.KIND_BUILDING, 0)["waypoint_id"]), path)
+	assert_eq(int(controller.get_mission().get_entity(MissionData.KIND_BUILDING, 0)["waypoint_id"]), path)
 
 	var removed: McpToolResult = await _call("edit_waypoint_path", { "op": "delete_marker", "marker_index": 1 })
 	assert_false(removed.is_error)
@@ -310,15 +310,15 @@ func test_set_mission_header_validates_and_round_trips() -> void:
 func test_reground_mission_repairs_raw_position_float() -> void:
 	await _call("place_entities", { "rows": [{ "item_id": 102001, "x": 64.0, "z": -64.0 }] })
 	await _call("reground_mission")  # adopt the placement into the baseline
-	var grounded_z := (controller.get_mission().get_entity(NovaMissionData.KIND_BUILDING, 0)["position"] as Vector3).z
+	var grounded_z := (controller.get_mission().get_entity(MissionData.KIND_BUILDING, 0)["position"] as Vector3).z
 	# The recorded failure: a raw position write floats the entity 5m up.
-	controller.select_object(NovaMissionData.KIND_BUILDING, 0)
+	controller.select_object(MissionData.KIND_BUILDING, 0)
 	controller.set_selected_position(
-			(controller.get_mission().get_entity(NovaMissionData.KIND_BUILDING, 0)["position"] as Vector3) + Vector3(0, 0, 5.0))
+			(controller.get_mission().get_entity(MissionData.KIND_BUILDING, 0)["position"] as Vector3) + Vector3(0, 0, 5.0))
 	var repair: McpToolResult = await _call("reground_mission")
 	assert_false(repair.is_error)
 	assert_eq(int(repair.structured["moved"]), 1, "the floated entity is planted")
-	assert_almost_eq((controller.get_mission().get_entity(NovaMissionData.KIND_BUILDING, 0)["position"] as Vector3).z,
+	assert_almost_eq((controller.get_mission().get_entity(MissionData.KIND_BUILDING, 0)["position"] as Vector3).z,
 			grounded_z, 0.01)
 
 
@@ -341,14 +341,14 @@ func test_save_mission_filename_and_current() -> void:
 
 func test_undo_redo_tools_route_to_the_workspace() -> void:
 	await _call("place_entities", { "rows": [{ "item_id": 102001, "x": 64.0, "z": -64.0 }] })
-	assert_eq(controller.get_mission().get_entity_count(NovaMissionData.KIND_BUILDING), 1)
+	assert_eq(controller.get_mission().get_entity_count(MissionData.KIND_BUILDING), 1)
 	var undone: McpToolResult = await _call("undo")
 	assert_false(undone.is_error)
 	assert_eq(int(undone.structured["performed"]), 1)
-	assert_eq(controller.get_mission().get_entity_count(NovaMissionData.KIND_BUILDING), 0)
+	assert_eq(controller.get_mission().get_entity_count(MissionData.KIND_BUILDING), 0)
 	var redone: McpToolResult = await _call("redo")
 	assert_eq(int(redone.structured["performed"]), 1)
-	assert_eq(controller.get_mission().get_entity_count(NovaMissionData.KIND_BUILDING), 1)
+	assert_eq(controller.get_mission().get_entity_count(MissionData.KIND_BUILDING), 1)
 
 
 func test_analyze_mission_open_and_by_path() -> void:
@@ -372,11 +372,11 @@ func test_analyze_mission_open_and_by_path() -> void:
 
 func test_analyze_mounts_reports_static_prediction_from_shared_runtime_rules() -> void:
 	_seed_mount_resource_root()
-	var mission: NovaMissionData = controller.get_mission()
-	var vehicle: Dictionary = mission.add_entity(NovaMissionData.KIND_ITEM, 101294, Vector3(10, 0, 0), Vector3.ZERO)
-	var soldier: Dictionary = mission.add_entity(NovaMissionData.KIND_ORGANIC, 102072, Vector3(11, 0, 0), Vector3.ZERO)
-	assert_true(mission.set_entity_property_int(NovaMissionData.KIND_ORGANIC, int(soldier["index"]), "waypoint_id", 125))
-	assert_true(mission.set_entity_property_int(NovaMissionData.KIND_ORGANIC, int(soldier["index"]), "wp_number", int(vehicle["bms_id"])))
+	var mission: MissionData = controller.get_mission()
+	var vehicle: Dictionary = mission.add_entity(MissionData.KIND_ITEM, 101294, Vector3(10, 0, 0), Vector3.ZERO)
+	var soldier: Dictionary = mission.add_entity(MissionData.KIND_ORGANIC, 102072, Vector3(11, 0, 0), Vector3.ZERO)
+	assert_true(mission.set_entity_property_int(MissionData.KIND_ORGANIC, int(soldier["index"]), "waypoint_id", 125))
+	assert_true(mission.set_entity_property_int(MissionData.KIND_ORGANIC, int(soldier["index"]), "wp_number", int(vehicle["bms_id"])))
 
 	var result: McpToolResult = await _call("analyze_mounts", { "include_live": false })
 	assert_false(result.is_error, str(result.content))
@@ -415,7 +415,7 @@ func test_set_camera_frame_point_and_entity() -> void:
 	assert_false(framed.is_error)
 	assert_true(framed.structured.has("position"))
 	await _call("place_entities", { "rows": [{ "item_id": 102001, "x": 64.0, "z": -64.0 }] })
-	var entity: McpToolResult = await _call("set_camera", { "frame_entity": { "kind": NovaMissionData.KIND_BUILDING, "index": 0 } })
+	var entity: McpToolResult = await _call("set_camera", { "frame_entity": { "kind": MissionData.KIND_BUILDING, "index": 0 } })
 	assert_false(entity.is_error)
 	var modeless: McpToolResult = await _call("set_camera", {})
 	assert_true(modeless.is_error)

@@ -5,7 +5,7 @@ extends SceneTree
 ## Run: GODOT_BIN --headless --path godot -s res://tests/itemfx_probe.gd
 
 
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
 
 
 func _init() -> void:
@@ -13,15 +13,15 @@ func _init() -> void:
 	if dir.is_empty():
 		dir = OS.get_environment("NOVA_RESOURCE_DIR")
 	print("probe: resource dir = ", dir)
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	# The game's own runtime mount: PFF archives + the persisted expansion + SCR key.
-	var expansion := NovaLaunchFlags.expansion(ResourceDirSettings.get_expansion())
-	var game := NovaLaunchFlags.game(ResourceDirSettings.get_game())
-	if root.mount_runtime(dir, expansion, NovaLaunchFlags.loose_override_enabled(), game) != OK:
+	var expansion := LaunchFlags.expansion(ResourceDirSettings.get_expansion())
+	var game := LaunchFlags.game(ResourceDirSettings.get_game())
+	if root.mount_runtime(dir, expansion, LaunchFlags.loose_override_enabled(), game) != OK:
 		print("probe: mount FAILED: ", root.get_last_error())
 		quit(1)
 		return
-	var db := NovaItemDatabase.new()
+	var db := ItemDatabase.new()
 	if db.load_from_resource_root(root, "items.def") != OK:
 		print("probe: items.def load FAILED: ", db.get_last_error())
 		quit(1)

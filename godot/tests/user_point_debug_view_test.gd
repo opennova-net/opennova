@@ -1,16 +1,16 @@
 extends GutTest
 
-const UserPointDebugView := preload("res://adapter/debug/user_point_debug_view.gd")
-const UserPointOverlay := preload("res://adapter/object/object_user_point_overlay.gd")
+const UserPointDebugView := preload("res://src/debug/user_point_debug_view.gd")
+const UserPointOverlay := preload("res://src/object/object_user_point_overlay.gd")
 const MP5_FIXTURE := "res://../fixtures/threedi/3di3/MP5.3di"
 
 
 class FakeLiveModel:
 	extends Node3D
-	var object_data: NovaObjectData
+	var object_data: ObjectData
 	var skeleton: Skeleton3D
 
-	func get_object_data() -> NovaObjectData:
+	func get_object_data() -> ObjectData:
 		return object_data
 
 	func get_skeleton() -> Skeleton3D:
@@ -115,14 +115,14 @@ func test_world_view_tracks_grouped_static_instances_and_live_model_lifecycle() 
 			"live churn leaves retained static sources intact")
 
 
-func _load_mp5() -> NovaObjectData:
-	var data := NovaObjectData.new()
+func _load_mp5() -> ObjectData:
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(MP5_FIXTURE)), OK,
-			"MP5 fixture should open through NovaObjectData")
+			"MP5 fixture should open through ObjectData")
 	return data
 
 
-func _first_bone_user_point(data: NovaObjectData) -> int:
+func _first_bone_user_point(data: ObjectData) -> int:
 	for i in range(data.get_user_point_count()):
 		if int(data.get_user_point_info(i).get("subobject", -1)) >= 0:
 			return i

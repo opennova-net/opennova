@@ -83,7 +83,7 @@ int opennova_vfs_mount_game(OpennovaVfs *vfs, const char *game_root, const char 
     // The C ABI is the authoring/importer entry (Python asset_resolver, extract
     // tooling) — it must see EVERY base-root archive, arbitrary names included,
     // like the editor's browse index. RetailTable is the game runtime's faithful
-    // boot mount only (NovaResourceRoot::mount_runtime); D-VFS-2.
+    // boot mount only (ResourceRoot::mount_runtime); D-VFS-2.
     return vfs->vfs.mount_game(game_root, expansion ? std::string(expansion) : std::string(), m,
                                opennova::VfsArchiveDiscovery::ScanAll)
              ? 1

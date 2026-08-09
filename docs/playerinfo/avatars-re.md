@@ -10,7 +10,7 @@ binary's.
 **Status: implemented and IDA-grilled for the parser/data model/editor bridge
 (2026-06-16); the full `PLAYER_INFO` screen runtime orchestration was grilled
 (read-only) on 2026-06-23 and the runtime `player.mnu` host landed the same
-day.** `engine/formats/avatars`, `NovaAvatarDatabase`, and the ONED Avatars workspace
+day.** `engine/formats/avatars`, `AvatarDatabase`, and the ONED Avatars workspace
 implement the witnessed loader semantics below; the in-game menu population is
 live as `PlayerInfoMenuCompanion` (godot/game/player_info_menu_companion.gd) — the
 nat→div→combo cascade, team filter, RTXT display resolve, and 3D preview
@@ -32,9 +32,9 @@ combo -> spawned-player 3D model binding remains unwitnessed/open as
 | second `AvatarDefs_Init` path (`@ 0x53d281`/`@ 0x53d2b4`) | **unwitnessed** | flagged follow-up; different buffer sizes, also parses `Avatars.def` |
 | `PLAYER_INFO` screen orchestration (init + 28-control registration + nat→div→combo cascade + team) | **matching (ported 2026-06-23)** | `PlayerInfo_InitProfileSelector @ 0x5611b0`, `PlayerInfo_PopulateAllControls @ 0x5606f0`, `PlayerInfo_RegisterAllControls @ 0x561470`, cascade handlers `@ 0x560600`/`@ 0x560690` decompiled; ported as `PlayerInfoMenuCompanion` — cascade + team filter + RTXT resolve wired by control name onto the `.mnu`'s own control tree, pinned by `player_info_menu_seam_test` (D-PLAYERINFO-7 FIXED; the per-(slot, team) selection globals remain D-PLAYERINFO-12) |
 | Voice preview + PLAYERVOICE list | **matching (ported 2026-07-22)** | `PlayerInfoMenuCompanion` binds the real `TESTPLAYERVOICE` control and requests the selected avatar's `VOICE_%d` trigger through `menu.lwf`; `player_info_menu_seam_test` pins the public sound request. Persisted profile overrides remain part of D-PLAYERINFO-9. `[orig: PlayerInfo_PreviewVoice @ 0x55ff70; PlayerInfo_HandleVoiceSelect @ 0x55fe00]` |
-| ACCEPT commit + profile persistence | **partial (seam + callsign ported)** | `save_player_info_from_dialog @ 0x55ee10` decompiled; the host wires ACCEPT → `commit`/`avatar_chosen` and main_game persists the callsign (`NovaPlayerProfile.save_callsign` → `user://player_profile.cfg`); persisting + restoring the avatar/class/loadout selection remains D-PLAYERINFO-9 (selection-state globals D-PLAYERINFO-12) |
-| Loadout weapon lists (PRIMARY/SECONDARY/ACCESSORY) | **matching** | producer `WeaponDef_ParseProperty @ 0x54d730` + consumer `populate_weapon_slot_lists @ 0x560430`; ported in `engine/formats/def` (`DefWeaponDef` loadout fields + `def_parse_weapons_memory`) + `NovaWeaponDatabase` + the host's `_populate_loadout` (class/team filter, NONE-first). Pinned by `def_parse_weapons` ctest + `player_info_menu_seam_test` (D-PLAYERINFO-8/11) |
-| Loadout ammo combos + weight readout + icons | **matching (ported 2026-07-30)** | `populate_weapon_accessory_ammo_ui @ 0x55e8b0`, `populate_ammo_combo_boxes @ 0x55def0`, `update_player_info_weight_and_weapon_icons @ 0x55f480`, `calculate_loadout_weight @ 0x55f1f0` fully decompiled + the handler map off `PlayerInfo_RegisterAllControls @ 0x561470` (see "Ammo combos, weight, and icons" below); ported in `PlayerInfoMenuCompanion` (`_populate_slot_ammo`/`_populate_grenades`/`_update_weight`/`_update_icons`) over the `NovaWeaponDatabase.loadout_weight`/`encumbrance_class` bindings; `player_info_menu_seam_test` pins the row models, labels, defaults, the `flags2 0x40` type lock, the subclass walk, the weight format, and the snapshot clips (D-PLAYERINFO-11 FIXED; saved-kit restore rides D-PLAYERINFO-9) |
+| ACCEPT commit + profile persistence | **partial (seam + callsign ported)** | `save_player_info_from_dialog @ 0x55ee10` decompiled; the host wires ACCEPT → `commit`/`avatar_chosen` and main_game persists the callsign (`PlayerProfile.save_callsign` → `user://player_profile.cfg`); persisting + restoring the avatar/class/loadout selection remains D-PLAYERINFO-9 (selection-state globals D-PLAYERINFO-12) |
+| Loadout weapon lists (PRIMARY/SECONDARY/ACCESSORY) | **matching** | producer `WeaponDef_ParseProperty @ 0x54d730` + consumer `populate_weapon_slot_lists @ 0x560430`; ported in `engine/formats/def` (`DefWeaponDef` loadout fields + `def_parse_weapons_memory`) + `WeaponDatabase` + the host's `_populate_loadout` (class/team filter, NONE-first). Pinned by `def_parse_weapons` ctest + `player_info_menu_seam_test` (D-PLAYERINFO-8/11) |
+| Loadout ammo combos + weight readout + icons | **matching (ported 2026-07-30)** | `populate_weapon_accessory_ammo_ui @ 0x55e8b0`, `populate_ammo_combo_boxes @ 0x55def0`, `update_player_info_weight_and_weapon_icons @ 0x55f480`, `calculate_loadout_weight @ 0x55f1f0` fully decompiled + the handler map off `PlayerInfo_RegisterAllControls @ 0x561470` (see "Ammo combos, weight, and icons" below); ported in `PlayerInfoMenuCompanion` (`_populate_slot_ammo`/`_populate_grenades`/`_update_weight`/`_update_icons`) over the `WeaponDatabase.loadout_weight`/`encumbrance_class` bindings; `player_info_menu_seam_test` pins the row models, labels, defaults, the `flags2 0x40` type lock, the subclass walk, the weight format, and the snapshot clips (D-PLAYERINFO-11 FIXED; saved-kit restore rides D-PLAYERINFO-9) |
 
 ## Load entry — witness map
 
@@ -236,12 +236,12 @@ corrected the earlier conflation of the two). Verified by extraction: the retail
 `Game.bin` has sections `MENU / RemapActions / RemapKeys / WeaponDescriptions /
 Macros / Avatars`, and the `Avatars` keys resolve (`AV_NAT_RUSSIA → "Russia"`,
 `AV_DIV_SEAL → "SEAL"`, `AV_BOONIEHAT → "Boonie Hat"`). Reimpl: `nova_menu_shell.gd`
-registers `Game.bin` into the shared `NovaStrings` registry as **`gameui`**
+registers `Game.bin` into the shared `Strings` registry as **`gameui`**
 (gametext = `gametext.bin`), and `player_info_menu_companion.gd::_display_name`
 resolves the nationality/division/combo keys against `gameui`'s `"Avatars"`
 section (raw-key fallback on a miss). On-disk-miss fallback to the raw key is the witnessed
 `GetStringWithFallback` behavior; the expansion override table (JOX avatars) is a
-follow-up via `NovaStrings.set_override_table`.
+follow-up via `Strings.set_override_table`.
 
 ### Preview animation (PLAYER_PREVIEW)
 
@@ -263,8 +263,8 @@ consumed by the preview render:
 Reimpl `AvatarPreview` ports **both** halves. The **transform** half: a spin node rotates the
 composed model (idle spin + hover sway, seeded with the original's random initial yaw
 `(rand()%180)·0xB60B60`) while the camera only zooms (`_process`, `set_hovered`). The **skeletal
-idle**: it builds one shared `NovaSkeletalAnim` from the raw `Dt1rst.bad` (rest/skeleton) +
-`PI_Idle.BAD` (looping idle clip) via `NovaSkeletalAnim.load_from_bad_files` — the no-`.adm`
+idle**: it builds one shared `SkeletalAnim` from the raw `Dt1rst.bad` (rest/skeleton) +
+`PI_Idle.BAD` (looping idle clip) via `SkeletalAnim.load_from_bad_files` — the no-`.adm`
 raw-`.bad` path that mirrors the original's two `BoneFile_Load` calls — and binds it onto the
 composed skinned head/body parts (`set_skeletal_anim` + `play_body_clip("anim_idle")`). Retail IR
 confirms those third-person graphics use weighted bone references within the 19-bone `Dt1rst`
@@ -349,7 +349,7 @@ params, &g_MenuSoundBank)` (params `[0]=0x10000, [2]=255`). The `menu.lwf` bank 
 loaded by the screen init.
 
 The reimpl port binds `TESTPLAYERVOICE` by control name and routes the selected
-avatar fallback through `NovaMnuMenu.play_widget_sound("VOICE_%d", "menu.lwf")`.
+avatar fallback through `MnuMenu.play_widget_sound("VOICE_%d", "menu.lwf")`.
 The persisted `profile+1532+team` override is intentionally still owned by the
 profile-persistence work in D-PLAYERINFO-9.
 
@@ -417,7 +417,7 @@ WeaponDef_ParseProperty @ 0x54d730 — GameText_GetString("WepDes", textid)]`.
 port's own misload — Game.bin never carries `WepDes`; corrected 2026-07-11.)
 
 Reimpl plan — LANDED (#388/#390, 2026-07-30): `engine/formats/def` `DefWeaponDef` carries the
-loadout fields above with VFS (in-memory) parsers, `NovaWeaponDatabase` binds them,
+loadout fields above with VFS (in-memory) parsers, `WeaponDatabase` binds them,
 and the host combos + ammo + weight are wired (D-PLAYERINFO-11 below). The remaining
 player-info work is TODO.md's persistence row plus D-PLAYERINFO-1.
 
@@ -519,7 +519,7 @@ stable.
 | ID | Original (Jointops.exe) | Why / consequence for the port |
 | --- | --- | --- |
 | D-PLAYERINFO-1 | combo → spawned-player 3D model binding not traced | **partially open**. The preview's **animation path** is witnessed and ported: the transform animation (`update_player_preview_animation @ 0x55dba0`) and skeletal idle (`PlayerInfo_InitPreviewModel @ 0x5600d0` binds `Dt1rst.bad` rest + `PI_Idle.BAD` idle on a `BoneSystem_Init` skeleton) — `AvatarPreview` plays `PI_Idle.BAD` on the compatible 19-bone head/body composition (see "Preview animation" above). Excluding arms is a geometry policy supported by retail asset structure and current-runtime evidence: the 38/40-part arm graphics require a larger rig. Still open: the **in-world** (spawned-player) combo→model binding — how a selected combo drives the in-mission avatar — which remains untraced. |
-| D-PLAYERINFO-2 | `>= 512` parts → `MessageBoxA("ComboObj Parse Error")` + abort | **FIXED 2026-07-05 (verified enforced)**: the parser errors at the cap (`avatars.cpp` guard `[orig: CAvatarDefs_ParseConfigLine @ 0x57a456]`), `NovaAvatarDatabase` propagates, and `avatars_parse_test.cpp` pins the 512-part failure. |
+| D-PLAYERINFO-2 | `>= 512` parts → `MessageBoxA("ComboObj Parse Error")` + abort | **FIXED 2026-07-05 (verified enforced)**: the parser errors at the cap (`avatars.cpp` guard `[orig: CAvatarDefs_ParseConfigLine @ 0x57a456]`), `AvatarDatabase` propagates, and `avatars_parse_test.cpp` pins the 512-part failure. |
 | D-PLAYERINFO-3 | `graphic` and `graphic_d` write the **same** part field (+76) | `graphic_d` aliases/overwrites `graphic`; only `graphic_j` (+92) and `graphic_s` (+108) are distinct slots. A faithful parser stores both keywords into one field (last wins). |
 | D-PLAYERINFO-4 | combo retains only denormalized part data, not the part names/indices | the runtime struct cannot reproduce the `combo <id> <head> <body> <arms>` line. The reimpl's authoring model must *additionally* keep the three reference names to round-trip the writer — a superset; runtime behavior is unchanged. |
 | D-PLAYERINFO-5 | nationality list filtered by `alignment` vs `teamIndex` (good→0, evil→1) | the menu population is team-aware; the reimpl port must reproduce the filter and order. |
@@ -528,14 +528,14 @@ stable.
 | D-PLAYERINFO-8 | PLAYERCLASS byte 5..9 → power-of-two class mask `g_playerInfoClassMask` (1/2/4/8/16); team → `g_playerInfoTeamMask = 2-(team!=0)` (`PlayerInfo_SetTeamAndClassMask @ 0x55de60`) | **implemented**: `player_info_menu_companion._selected_class_mask` (5..9→1/2/4/8/16) + team mask `2-(team!=0)` gate the weapon slot lists; repopulate on class/team change. |
 | D-PLAYERINFO-9 | ACCEPT/commit (`save_player_info_from_dialog @ 0x55ee10`) writes class (both teams), nat/div/combo, autoreload→`profile+1524`, automedic→`profile+1660` (**inverted**), name→`profile+4` (whitespace-rejected), then `serialize_weapon_loadout` | the reimpl commit mirrors this field map, the automedic inversion, and the name validation; selections live in per-slot/per-team globals, not the profile. |
 | D-PLAYERINFO-10 | TESTPLAYERVOICE previews `"VOICE_%d"` from `g_MenuSoundBank` (`menu.lwf`); voice index = profile override `profile+1532+team` else the avatar combo's voice; PLAYERVOICE list = DEFAULT_VOICE + per-character `CHARVOICE_%d` | **implemented**: the named button requests the selected avatar fallback as `VOICE_%d` through `menu.lwf`, and the avatar-derived list remains populated by `PlayerInfoMenuCompanion`; `test_voice_preview_requests_selected_avatar_voice` pins the public request. Persisted profile overrides ride D-PLAYERINFO-9. |
-| D-PLAYERINFO-11 | loadout combos from the weapon table `@ 0x2540D08` (192 B), filtered by class+team mask, slot-routed by `weapon_class +108` (1/2/0 = PRIMARY/SECONDARY/ACCESSORY), `"NONE"` first; ammo `@ 0x55e8b0`; weight `@ 0x55f480`. Producer `WeaponDef_ParseProperty @ 0x54d730` grilled — full `weapon.def` field map (above). | **weapon lists implemented** (`engine/formats/def` loadout fields + `NovaWeaponDatabase` + host `_populate_loadout`: slot routing, class/team filter, NONE-first, names via gametext "WepDes" else raw id). The **weight readout** math is now ported to `engine/formats/def` (`def_loadout_weight`: Σ weaponweight + (ammo>0?ammo:maxclips)*clipweight; `def_encumbrance_class`: ≥66.6 HEAVY / ≥33.3 NORMAL / else LIGHT — witnessed thresholds, unit-tested in `def_loadout_weight_test`). Residual: the **ammo combos** (`@ 0x55e8b0`) + the UI host wiring (weight label + icons), which need the Godot runtime. |
+| D-PLAYERINFO-11 | loadout combos from the weapon table `@ 0x2540D08` (192 B), filtered by class+team mask, slot-routed by `weapon_class +108` (1/2/0 = PRIMARY/SECONDARY/ACCESSORY), `"NONE"` first; ammo `@ 0x55e8b0`; weight `@ 0x55f480`. Producer `WeaponDef_ParseProperty @ 0x54d730` grilled — full `weapon.def` field map (above). | **weapon lists implemented** (`engine/formats/def` loadout fields + `WeaponDatabase` + host `_populate_loadout`: slot routing, class/team filter, NONE-first, names via gametext "WepDes" else raw id). The **weight readout** math is now ported to `engine/formats/def` (`def_loadout_weight`: Σ weaponweight + (ammo>0?ammo:maxclips)*clipweight; `def_encumbrance_class`: ≥66.6 HEAVY / ≥33.3 NORMAL / else LIGHT — witnessed thresholds, unit-tested in `def_loadout_weight_test`). Residual: the **ammo combos** (`@ 0x55e8b0`) + the UI host wiring (weight label + icons), which need the Godot runtime. |
 | D-PLAYERINFO-12 | selection state lives in per-slot/per-team globals keyed `[67596*slot + 32774*team]` (`g_charSelClass/Nationality/Division/Combo @ 0x2551130/1/2/4`), distinct from the 15488-B profile object (`profile @ 0x252de58`: name`+4`, autoreload`+1524`, voice`+1532`, automedic`+1660`) | the reimpl keys avatar/loadout selection by (profile slot, team) and keeps it separate from the profile-level fields; the simplified single-profile reimpl may collapse the slot dimension but must keep the team dimension (D-PLAYERINFO-5/7). |
 
 ## Implementation grill notes (2026-06-16)
 
 `engine/formats/avatars` was re-checked against IDA after PR #162's first implementation.
 The following axes are now pinned by native tests and surfaced through
-`NovaAvatarDatabase` diagnostics:
+`AvatarDatabase` diagnostics:
 
 - `combo` resolution is parse-time, not deferred: head/body must resolve against
   already-defined parts or the combo is skipped; arms is optional and becomes an

@@ -9,7 +9,7 @@ extends Node
 # ~220 ticks of 62.5 Hz — frame counts would race it). Screenshots land in .scratch/body.
 # [orig: producer @0x4b5dad + WeaponSlot_ReloadAmmo @0x54173c; world-wac-ai-re.md §14.8]
 
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
 const StandaloneProbe := preload("res://tests/standalone_game_probe.gd")
 const OUT_DIR := "res://../.scratch/body"
 
@@ -24,7 +24,7 @@ func _ready() -> void:
 	var root := OS.get_environment("NOVA_RESOURCE_DIR").strip_edges()
 	if root.is_empty():
 		root = ResourceDirSettings.get_resource_dir()
-	NovaWindow.set_fullscreen(get_window(), true)
+	WindowState.set_fullscreen(get_window(), true)
 	await _settle(6)
 
 	var bms := OS.get_environment("NOVA_MISSION_BMS").strip_edges()

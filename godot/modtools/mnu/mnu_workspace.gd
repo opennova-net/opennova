@@ -57,7 +57,7 @@ var _styles_page: Control
 # Editor-local sound audition (reused from the Sound workspace) + a cache of loaded
 # .lwf profiles keyed by file name, so the inspector can preview a widget's sound.
 var _preview              # SoundPreviewPlayer
-var _profiles: Dictionary = {}   # lower-case .lwf name -> NovaLwfData (or null if absent)
+var _profiles: Dictionary = {}   # lower-case .lwf name -> LwfData (or null if absent)
 
 
 func _init() -> void:
@@ -591,7 +591,7 @@ func _profile_for(name: String):
 	var profile = null
 	var root := _resource_root_or_settings()
 	if root != null:
-		var d := NovaLwfData.new()
+		var d := LwfData.new()
 		if d.open_from_resource_root(root, name) == OK and d.is_loaded() and d.get_set_count() > 0:
 			profile = d
 	_profiles[key] = profile
@@ -966,7 +966,7 @@ func get_menu_document() -> MnuEditorDocument:
 	return _document
 
 
-func get_menu_resource() -> NovaMnuDocument:
+func get_menu_resource() -> MnuDocument:
 	return _document.resource if _document != null else null
 
 

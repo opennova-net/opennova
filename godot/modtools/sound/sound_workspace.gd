@@ -227,7 +227,7 @@ func open_file(path: String) -> Error:
 	return controller.open_lwf(path)
 
 
-func get_resource_root() -> NovaResourceRoot:
+func get_resource_root() -> ResourceRoot:
 	return _resource_root()
 
 

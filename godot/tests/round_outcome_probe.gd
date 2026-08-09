@@ -106,7 +106,7 @@ func _run() -> void:
 		return
 	var res_dir := OS.get_environment("NW_RESOURCE_DIR")
 	if not res_dir.is_empty():
-		var settings := load("res://adapter/resource_index/resource_dir_settings.gd")
+		var settings := load("res://src/resource_index/resource_dir_settings.gd")
 		settings.set_resource_dir(res_dir)
 		settings.set_expansion("")
 	Engine.time_scale = TIME_SCALE
@@ -331,9 +331,9 @@ func _run() -> void:
 		print("PROBE FAIL: MissionEndScreen never mounted after the round end")
 		quit(1)
 		return
-	var strings := root.get_node_or_null("NovaStrings")
+	var strings := root.get_node_or_null("Strings")
 	if strings == null:
-		print("PROBE FAIL: NovaStrings autoload is unavailable")
+		print("PROBE FAIL: Strings autoload is unavailable")
 		quit(1)
 		return
 	var banner: String = strings.lookup_display("gametext", "Misc", expected_key)

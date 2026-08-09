@@ -1,6 +1,6 @@
 extends GutTest
 
-## NovaDbfData wrapper: parses a mission dialog bank and resolves a dialog id to
+## DbfData wrapper: parses a mission dialog bank and resolves a dialog id to
 ## its LWF set-name(s). Uses the committed repo fixture (one level above res://).
 
 func test_dbf_resolves_dialog_to_def_id() -> void:
@@ -8,7 +8,7 @@ func test_dbf_resolves_dialog_to_def_id() -> void:
 	if not FileAccess.file_exists(path):
 		pass_test("repo fixture fixtures/dbf/00TRg.DBF not present; skipping")
 		return
-	var dbf := NovaDbfData.new()
+	var dbf := DbfData.new()
 	assert_eq(dbf.open_file(path), OK, "DBF parses")
 	assert_eq(dbf.get_dialog_count(), 11, "00TRg has 11 dialog groups")
 	assert_true(dbf.has_dialog("dlg001"))

@@ -41,7 +41,7 @@ class CollisionWorld;
 
 // ----------------------------------------------------------------------------
 // Per-item destruction traits, host-fed from items.def by the item-traits sweep
-// (NovaSimulation::resolve_item_traits) — the def fields the death chain reads.
+// (Simulation::resolve_item_traits) — the def fields the death chain reads.
 // ----------------------------------------------------------------------------
 struct ItemDeathTraits {
     bool static_death = false;  // attrib2 & 0x100; generic death motion freezes

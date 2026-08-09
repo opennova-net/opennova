@@ -47,7 +47,7 @@ var _pending_mission := ""
 var _pending_player := ""
 # The mounted resource root, set by MainGame BEFORE _ready so the host Map picker can list the
 # install's .bms missions (the panel owns no mission list; the world's root is null until a load).
-var resource_root  # NovaResourceRoot
+var resource_root  # ResourceRoot
 var _mission_option: OptionButton
 
 

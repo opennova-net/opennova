@@ -583,7 +583,7 @@ func get_reference_services() -> ReferenceServices:
 # --- Resource root (the shared VFS the shell mounts) -----------------------
 
 # The shell's mounted resource root, or null when no shell is bound (headless tests).
-func _resource_root() -> NovaResourceRoot:
+func _resource_root() -> ResourceRoot:
 	if editor_shell != null and editor_shell.has_method("get_resource_root"):
 		return editor_shell.get_resource_root()
 	return null
@@ -592,14 +592,14 @@ func _resource_root() -> NovaResourceRoot:
 # Shell root, falling back to a fresh mount of the persisted resource directory.
 # Only fonts/mnu carry the fallback (their open-by-name paths must resolve without
 # a shell); the other workspaces stay shell-only on purpose — do not widen.
-func _resource_root_or_settings() -> NovaResourceRoot:
+func _resource_root_or_settings() -> ResourceRoot:
 	var root := _resource_root()
 	if root != null:
 		return root
-	var dir := NovaResourceDirSettings.get_resource_dir()
+	var dir := ResourceDirSettings.get_resource_dir()
 	if dir.is_empty():
 		return null
-	var resources := NovaResourceRoot.new()
+	var resources := ResourceRoot.new()
 	return resources if resources.set_root_dir(dir) == OK else null
 
 
@@ -610,7 +610,7 @@ func _resource_root_or_settings() -> NovaResourceRoot:
 #   if vfs != null:
 #       return editor.open_x_bytes(vfs.read_file(path), _vfs_display_path(vfs, path))
 #   return editor.open_x(path)
-func _vfs_root_for_open(path: String) -> NovaResourceRoot:
+func _vfs_root_for_open(path: String) -> ResourceRoot:
 	var resources := _resource_root()
 	if not FileAccess.file_exists(path) and resources != null and resources.has_file(path):
 		return resources
@@ -618,5 +618,5 @@ func _vfs_root_for_open(path: String) -> NovaResourceRoot:
 
 
 # The display path an editor records for a VFS-opened file (the mounted dir + bare name).
-func _vfs_display_path(root: NovaResourceRoot, path: String) -> String:
+func _vfs_display_path(root: ResourceRoot, path: String) -> String:
 	return root.get_root_dir().path_join(path.get_file())

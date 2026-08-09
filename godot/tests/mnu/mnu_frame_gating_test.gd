@@ -37,15 +37,15 @@ func _has_frame_node(container: Node) -> bool:
 	return false
 
 
-func _build_jo_game_edit() -> NovaMnuMenu:
+func _build_jo_game_edit() -> MnuMenu:
 	var path := "res://../fixtures/mnu/jo_game.mnu"
 	var bytes := FileAccess.get_file_as_bytes(path)
 	assert_gt(bytes.size(), 0, "jo_game.mnu readable")
 
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(bytes), OK, "jo_game.mnu parses")
 
-	var menu := NovaMnuMenu.new()
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
 	menu.set_edit_mode(true)
@@ -90,16 +90,16 @@ func test_runtime_resolved_camo_does_not_fill_window() -> void:
 	_write_png(dir.path_join("border2.png"), 64, 64, Color(0.7, 0.7, 0.7, 1.0))  # stencil
 	_write_png(dir.path_join("boxtile.png"), 8, 8, Color(0.3, 0.4, 0.2, 1.0))    # camo brush
 
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	if root.set_root_dir(dir) != OK:
 		pass_test("temp resource root unavailable: %s" % root.get_last_error())
 		return
 
 	var bytes := FileAccess.get_file_as_bytes("res://../fixtures/mnu/jo_game.mnu")
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(bytes), OK, "jo_game.mnu parses")
 
-	var menu := NovaMnuMenu.new()
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
 	menu.set_resource_root(root)

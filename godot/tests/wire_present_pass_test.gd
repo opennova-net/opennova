@@ -2,15 +2,15 @@ extends GutTest
 
 # The joiner/wire present pass, end to end on REAL components: a real
 # MissionObjectPlacer over a flat fixture root (assembled in before_all from
-# committed fixtures), real NovaObjectModel wire avatars (their CTRL store,
-# body clips, and Node3D state are the observables), a real NovaEntityIndex
-# defer gate, and real NovaSimulation instances (an empty one for the static
+# committed fixtures), real ObjectModel wire avatars (their CTRL store,
+# body clips, and Node3D state are the observables), a real EntityIndex
+# defer gate, and real Simulation instances (an empty one for the static
 # clock, a minimal-mission boot for logic-tick stepping). Snapshots are built
 # as pure data and fed through the public present_snapshot API.
 
-const WirePresentPass := preload("res://adapter/world/wire_present_pass.gd")
-const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
-const PresentHeldWeapon := preload("res://adapter/world/present_held_weapon.gd")
+const WirePresentPass := preload("res://src/world/wire_present_pass.gd")
+const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
+const PresentHeldWeapon := preload("res://src/world/present_held_weapon.gd")
 
 # Fixture items.def wire-test ids (graphic -> committed model fixture).
 const TYPE_PUMP := 6100      # -> item 106100, Pmpjk01 (static, PANM channels)
@@ -23,7 +23,7 @@ static var _flat_dir := ""
 
 
 func before_all() -> void:
-	# One flat resource root per run: NovaResourceRoot indexes flat filenames
+	# One flat resource root per run: ResourceRoot indexes flat filenames
 	# only (and refuses user://), so committed fixtures are copied into the OS
 	# temp dir. M9K_3rd.3di is the held-weapon gfx3 the fixture weapon.def's
 	# first row names (adm index 1).
@@ -54,96 +54,96 @@ class Snapshot:
 	var entities: Array = []
 	func _write_phase(out: PackedFloat32Array, base: int,
 			channel: int, phase: int, active: bool) -> void:
-		var phase_field := NovaSimulation.PF_PHASE1 + (channel - 1) * 2
-		var active_field := NovaSimulation.PF_ACTIVE1 + (channel - 1) * 2
+		var phase_field := Simulation.PF_PHASE1 + (channel - 1) * 2
+		var active_field := Simulation.PF_ACTIVE1 + (channel - 1) * 2
 		var bits := phase & 0xFFFFFFFF
 		out[base + phase_field] = float(bits & 0xFFFF)
 		out[base + active_field] = (
 				float(((bits >> 16) & 0xFFFF) + 1) if active else 0.0)
 	func build() -> PackedFloat32Array:
-		var stride := NovaSimulation.PF_STRIDE
+		var stride := Simulation.PF_STRIDE
 		var out := PackedFloat32Array()
 		out.resize(entities.size() * stride)
 		for i in range(entities.size()):
 			var entity: Dictionary = entities[i]
 			var base := i * stride
-			out[base + NovaSimulation.PF_TYPE_ID] = float(entity.get("type_id", 0))
-			out[base + NovaSimulation.PF_WIRE_HANDLE] = float(entity.get("handle", 0))
-			out[base + NovaSimulation.PF_KIND] = float(entity.get("kind", -1))
-			out[base + NovaSimulation.PF_INDEX] = float(entity.get("index", -1))
-			out[base + NovaSimulation.PF_BMS_ID] = float(entity.get("bms_id", 0))
-			out[base + NovaSimulation.PF_POS_X] = float(entity.get("x", 0.0))
-			out[base + NovaSimulation.PF_POS_Y] = float(entity.get("y", 0.0))
-			out[base + NovaSimulation.PF_POS_Z] = float(entity.get("z", 0.0))
-			out[base + NovaSimulation.PF_YAW_DEG] = float(entity.get("yaw", 0.0))
-			out[base + NovaSimulation.PF_PITCH_DEG] = float(entity.get("pitch", 0.0))
-			out[base + NovaSimulation.PF_ROLL_DEG] = float(entity.get("roll", 0.0))
-			out[base + NovaSimulation.PF_LOCAL_VIEW_SUPPRESSED] = float(
+			out[base + Simulation.PF_TYPE_ID] = float(entity.get("type_id", 0))
+			out[base + Simulation.PF_WIRE_HANDLE] = float(entity.get("handle", 0))
+			out[base + Simulation.PF_KIND] = float(entity.get("kind", -1))
+			out[base + Simulation.PF_INDEX] = float(entity.get("index", -1))
+			out[base + Simulation.PF_BMS_ID] = float(entity.get("bms_id", 0))
+			out[base + Simulation.PF_POS_X] = float(entity.get("x", 0.0))
+			out[base + Simulation.PF_POS_Y] = float(entity.get("y", 0.0))
+			out[base + Simulation.PF_POS_Z] = float(entity.get("z", 0.0))
+			out[base + Simulation.PF_YAW_DEG] = float(entity.get("yaw", 0.0))
+			out[base + Simulation.PF_PITCH_DEG] = float(entity.get("pitch", 0.0))
+			out[base + Simulation.PF_ROLL_DEG] = float(entity.get("roll", 0.0))
+			out[base + Simulation.PF_LOCAL_VIEW_SUPPRESSED] = float(
 					entity.get("local_view_suppressed", 0))
-			out[base + NovaSimulation.PF_HIDDEN] = float(entity.get("hidden", 0))
-			out[base + NovaSimulation.PF_ALIVE] = float(entity.get("alive", 1))
-			out[base + NovaSimulation.PF_RESPAWN_REVISION] = float(
+			out[base + Simulation.PF_HIDDEN] = float(entity.get("hidden", 0))
+			out[base + Simulation.PF_ALIVE] = float(entity.get("alive", 1))
+			out[base + Simulation.PF_RESPAWN_REVISION] = float(
 					entity.get("respawn_revision", 0))
 			_write_phase(out, base, 1, int(entity.get("phase1", 0)),
 					int(entity.get("active1", 0)) != 0)
 			_write_phase(out, base, 2, int(entity.get("phase2", 0)),
 					int(entity.get("active2", 0)) != 0)
-			out[base + NovaSimulation.PF_ANIM_STATE] = float(entity.get("anim_state", -1))
-			out[base + NovaSimulation.PF_ANIM_PHASE_TICKS] = float(
+			out[base + Simulation.PF_ANIM_STATE] = float(entity.get("anim_state", -1))
+			out[base + Simulation.PF_ANIM_PHASE_TICKS] = float(
 					entity.get("anim_phase", -1))
-			out[base + NovaSimulation.PF_ANIM_SOURCE_STATE] = float(
+			out[base + Simulation.PF_ANIM_SOURCE_STATE] = float(
 					entity.get("anim_source_state", -1))
-			out[base + NovaSimulation.PF_ANIM_SOURCE_PHASE_TICKS] = float(
+			out[base + Simulation.PF_ANIM_SOURCE_PHASE_TICKS] = float(
 					entity.get("anim_source_phase", -1))
-			out[base + NovaSimulation.PF_ANIM_BLEND_WEIGHT] = float(
+			out[base + Simulation.PF_ANIM_BLEND_WEIGHT] = float(
 					entity.get("anim_blend_weight", 1.0))
-			out[base + NovaSimulation.PF_ANIM_REMOTE_REQUEST] = float(
+			out[base + Simulation.PF_ANIM_REMOTE_REQUEST] = float(
 					entity.get("anim_remote_request", 1))
-			out[base + NovaSimulation.PF_ANIM_STATE_PULSE] = float(
+			out[base + Simulation.PF_ANIM_STATE_PULSE] = float(
 					entity.get("anim_pulse", -1))
-			out[base + NovaSimulation.PF_ANIM_PULSE_TICKS] = float(
+			out[base + Simulation.PF_ANIM_PULSE_TICKS] = float(
 					entity.get("anim_pulse_ticks", -1))
-			out[base + NovaSimulation.PF_AIM_OVERLAY_VALID] = float(
+			out[base + Simulation.PF_AIM_OVERLAY_VALID] = float(
 					entity.get("aim_overlay_valid", 0))
 			var body: Vector3 = entity.get("aim_body", Vector3.ZERO)
-			out[base + NovaSimulation.PF_AIM_BODY_PITCH_DEG] = body.x
-			out[base + NovaSimulation.PF_AIM_BODY_YAW_DEG] = body.y
-			out[base + NovaSimulation.PF_AIM_BODY_ROLL_DEG] = body.z
-			out[base + NovaSimulation.PF_EMPLACED_CONTROLS_VALID] = float(
+			out[base + Simulation.PF_AIM_BODY_PITCH_DEG] = body.x
+			out[base + Simulation.PF_AIM_BODY_YAW_DEG] = body.y
+			out[base + Simulation.PF_AIM_BODY_ROLL_DEG] = body.z
+			out[base + Simulation.PF_EMPLACED_CONTROLS_VALID] = float(
 					entity.get("emplaced_controls_valid", 0))
-			out[base + NovaSimulation.PF_EWEAP_GUNYAW] = float(
+			out[base + Simulation.PF_EWEAP_GUNYAW] = float(
 					entity.get("emplaced_gun_yaw", 0))
-			out[base + NovaSimulation.PF_EWEAP_GUNPITCH] = float(
+			out[base + Simulation.PF_EWEAP_GUNPITCH] = float(
 					entity.get("emplaced_gun_pitch", 0))
-			out[base + NovaSimulation.PF_TEX_TEAM_VALID] = float(
+			out[base + Simulation.PF_TEX_TEAM_VALID] = float(
 					entity.get("tex_team_valid", 0))
-			out[base + NovaSimulation.PF_TEX_TEAM] = float(
+			out[base + Simulation.PF_TEX_TEAM] = float(
 					entity.get("tex_team", 0))
-			out[base + NovaSimulation.PF_ZONE_CTRL_VALID] = float(
+			out[base + Simulation.PF_ZONE_CTRL_VALID] = float(
 					entity.get("zone_ctrl_valid", 0))
-			out[base + NovaSimulation.PF_TEAMSWING] = float(
+			out[base + Simulation.PF_TEAMSWING] = float(
 					entity.get("team_swing", 0))
-			out[base + NovaSimulation.PF_LFP_CAMPPERCENT_VALID] = float(
+			out[base + Simulation.PF_LFP_CAMPPERCENT_VALID] = float(
 					entity.get("lfp_camp_percent_valid", 0))
-			out[base + NovaSimulation.PF_LFP_CAMPPERCENT] = float(
+			out[base + Simulation.PF_LFP_CAMPPERCENT] = float(
 					entity.get("lfp_camp_percent", 0))
-			out[base + NovaSimulation.PF_WORLD_HEAT_GLOW_VALID] = float(
+			out[base + Simulation.PF_WORLD_HEAT_GLOW_VALID] = float(
 					entity.get("world_heat_glow_valid", 0))
-			out[base + NovaSimulation.PF_WORLD_HEAT_GLOW] = float(
+			out[base + Simulation.PF_WORLD_HEAT_GLOW] = float(
 					entity.get("world_heat_glow", 0))
-			out[base + NovaSimulation.PF_RIGHT_HAND_COLLAPSED] = float(
+			out[base + Simulation.PF_RIGHT_HAND_COLLAPSED] = float(
 					entity.get("right_hand_collapsed", 0))
-			out[base + NovaSimulation.PF_HELD_WEAPON_ADM] = float(
+			out[base + Simulation.PF_HELD_WEAPON_ADM] = float(
 					entity.get("held_weapon_adm", 0))
-			out[base + NovaSimulation.PF_WPN_ANIM_STATE] = float(
+			out[base + Simulation.PF_WPN_ANIM_STATE] = float(
 					entity.get("wpn_anim_state", -1))
-			out[base + NovaSimulation.PF_WPN_PHASE_TICKS] = float(
+			out[base + Simulation.PF_WPN_PHASE_TICKS] = float(
 					entity.get("wpn_phase_ticks", -1))
 			var angles: PackedVector3Array = entity.get(
 					"aim_angles", PackedVector3Array())
 			for cls in range(mini(angles.size(), 9)):
-				var ob := (base + NovaSimulation.PF_AIM_ANGLES
-						+ cls * NovaSimulation.PF_AIM_CLASS_STRIDE)
+				var ob := (base + Simulation.PF_AIM_ANGLES
+						+ cls * Simulation.PF_AIM_CLASS_STRIDE)
 				out[ob] = angles[cls].x
 				out[ob + 1] = angles[cls].y
 				out[ob + 2] = angles[cls].z
@@ -162,34 +162,34 @@ class SpawnObserver:
 		})
 
 
-func _flat_root() -> NovaResourceRoot:
-	var root := NovaResourceRoot.new()
+func _flat_root() -> ResourceRoot:
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(_flat_dir), OK, "the flat fixture root mounts")
 	return root
 
 
 func _placer() -> MissionObjectPlacer:
 	var root := _flat_root()
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(_flat_dir + "/items.def"), OK)
 	return MissionObjectPlacer.new(root, item_db)
 
 
-func _sim() -> NovaSimulation:
-	var sim := NovaSimulation.new()
+func _sim() -> Simulation:
+	var sim := Simulation.new()
 	autofree(sim)
 	return sim
 
 
 # A booted minimal-mission sim: its logic tick steps under step(), which the
 # facade's blend-tick delta consumption reads.
-func _ticking_sim() -> NovaSimulation:
-	var root := NovaResourceRoot.new()
+func _ticking_sim() -> Simulation:
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
 			"res://../fixtures/minimal/resources")), OK)
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.open_from_resource_root(root, "mnml.bms"), OK)
-	var sim := NovaSimulation.new()
+	var sim := Simulation.new()
 	autofree(sim)
 	assert_true(sim.load_from_mission_data(mission))
 	return sim
@@ -201,27 +201,27 @@ func _container() -> Node3D:
 	return container
 
 
-func _wire_pass(sim: NovaSimulation, placer: MissionObjectPlacer, container: Node3D,
-		defer_index: NovaEntityIndex = null, options: Dictionary = {}) -> Object:
+func _wire_pass(sim: Simulation, placer: MissionObjectPlacer, container: Node3D,
+		defer_index: EntityIndex = null, options: Dictionary = {}) -> Object:
 	var presenter := WirePresentPass.new()
 	presenter.setup(sim, placer, container, defer_index, options)
 	return presenter
 
 
 func _present(p: Object, snap: Snapshot, revision: int = 1) -> void:
-	p.present_snapshot(snap.build(), NovaSimulation.PF_STRIDE, revision)
+	p.present_snapshot(snap.build(), Simulation.PF_STRIDE, revision)
 
 
-func _ctrl(model: NovaObjectModel, name: String) -> int:
+func _ctrl(model: ObjectModel, name: String) -> int:
 	return int(model.get_ctrl_values().get(name, -1))
 
 
 func _index_with_placed(bms_id: int) -> Dictionary:
 	# A real defer index whose registered placed node is a real model.
-	var placed := NovaObjectModel.new()
+	var placed := ObjectModel.new()
 	add_child_autofree(placed)
 	placed.set_process(false)
-	var index := NovaEntityIndex.new()
+	var index := EntityIndex.new()
 	index.build([{ "model": placed, "ref": {
 		"kind": 1, "index": 0, "bms_id": bms_id, "group": -1, "team": -1,
 		"position": Vector3.ZERO,
@@ -229,8 +229,8 @@ func _index_with_placed(bms_id: int) -> Dictionary:
 	return { "index": index, "placed": placed }
 
 
-func _empty_index() -> NovaEntityIndex:
-	var index := NovaEntityIndex.new()
+func _empty_index() -> EntityIndex:
+	var index := EntityIndex.new()
 	index.build([], [])
 	return index
 
@@ -238,7 +238,7 @@ func _empty_index() -> NovaEntityIndex:
 func test_present_snapshot_rejects_a_short_stride() -> void:
 	var container := _container()
 	var p := _wire_pass(_sim(), _placer(), container, _empty_index())
-	var short_stride := NovaSimulation.PF_STRIDE - 1
+	var short_stride := Simulation.PF_STRIDE - 1
 	var snapshot := PackedFloat32Array()
 	snapshot.resize(short_stride)
 	p.present_snapshot(snapshot, short_stride, 1)
@@ -261,7 +261,7 @@ func test_sp_synthetic_filter_materializes_only_attachment_origin_rows() -> void
 	_present(p, snap)
 	assert_eq(p.entity_count(), 1,
 			"ordinary SP rows stay with MissionPresentPass; synthetic children materialize")
-	var model: NovaObjectModel = p.resolve_wire_handle(0x1005)
+	var model: ObjectModel = p.resolve_wire_handle(0x1005)
 	assert_not_null(model)
 	var ref: Dictionary = model.get_meta("entity_ref", {})
 	assert_eq(int(ref.get("item_id", 0)), 106102,
@@ -281,8 +281,8 @@ func test_wire_handle_resolver_keeps_synthetic_siblings_distinct() -> void:
 		{ "type_id": TYPE_PUMP, "handle": 0x1005, "kind": 255, "index": 0xFFFFFF },
 	]
 	_present(p, snap)
-	var a: NovaObjectModel = p.resolve_wire_handle(0x1004)
-	var b: NovaObjectModel = p.resolve_wire_handle(0x1005)
+	var a: ObjectModel = p.resolve_wire_handle(0x1004)
+	var b: ObjectModel = p.resolve_wire_handle(0x1005)
 	assert_not_null(a)
 	assert_not_null(b)
 	assert_ne(a, b, "each attachment sibling resolves to its own live node")
@@ -299,7 +299,7 @@ func test_zero_wire_handle_is_a_valid_remote_pool_slot() -> void:
 	snap.entities = [{ "type_id": TYPE_PUMP, "handle": 0, "x": 3.0 }]
 	_present(p, snap)
 	assert_eq(p.entity_count(), 1, "packed handle zero is a real remote pool-0 slot")
-	var model: NovaObjectModel = p.resolve_wire_handle(0)
+	var model: ObjectModel = p.resolve_wire_handle(0)
 	assert_not_null(model)
 	assert_almost_eq(model.position.x, 3.0, 0.001)
 
@@ -364,12 +364,12 @@ func test_live_slot_type_change_rebuilds_the_visual() -> void:
 	var snap := Snapshot.new()
 	snap.entities = [{ "type_id": TYPE_PUMP, "handle": 0x1004 }]
 	_present(p, snap)
-	var first: NovaObjectModel = p.resolve_wire_handle(0x1004)
+	var first: ObjectModel = p.resolve_wire_handle(0x1004)
 	assert_not_null(first)
 
 	snap.entities[0]["type_id"] = TYPE_ARMORY
 	_present(p, snap, 2)
-	var second: NovaObjectModel = p.resolve_wire_handle(0x1004)
+	var second: ObjectModel = p.resolve_wire_handle(0x1004)
 	assert_ne(second, first, "recycled handle cannot keep the prior type model")
 	assert_eq(int(second.get_meta("entity_ref", {}).get("runtime_type_id", 0)),
 			TYPE_ARMORY)
@@ -437,7 +437,7 @@ func test_admitted_player_row_with_synthetic_origin_builds_on_the_host() -> void
 		"x": 7.0,
 	}]
 	_present(p, snap)
-	var avatar: NovaObjectModel = p.resolve_wire_handle(2)
+	var avatar: ObjectModel = p.resolve_wire_handle(2)
 	assert_not_null(avatar, "the admitted player's avatar node exists on the host")
 	assert_almost_eq(avatar.position.x, 7.0, 0.001)
 	var ref: Dictionary = avatar.get_meta("entity_ref", {})
@@ -455,8 +455,8 @@ func test_wire_plan_survives_reorder_then_prunes_and_rebuilds_reused_type() -> v
 		{ "type_id": TYPE_ARMORY, "handle": 0x1005, "x": 5.0 },
 	]
 	_present(p, snap)
-	var first: NovaObjectModel = p.resolve_wire_handle(0x1004)
-	var second: NovaObjectModel = p.resolve_wire_handle(0x1005)
+	var first: ObjectModel = p.resolve_wire_handle(0x1004)
+	var second: ObjectModel = p.resolve_wire_handle(0x1005)
 
 	snap.entities = [
 		{ "type_id": TYPE_ARMORY, "handle": 0x1005, "x": 50.0 },
@@ -478,7 +478,7 @@ func test_wire_plan_survives_reorder_then_prunes_and_rebuilds_reused_type() -> v
 
 	snap.entities[0] = { "type_id": TYPE_RIFLEMAN, "handle": 0x1005, "x": 60.0 }
 	_present(p, snap, 4)
-	var replacement: NovaObjectModel = p.resolve_wire_handle(0x1005)
+	var replacement: ObjectModel = p.resolve_wire_handle(0x1005)
 	assert_ne(replacement, second,
 			"a recycled handle with a new type cannot retain the old visual")
 	assert_almost_eq(replacement.position.x, 60.0, 0.001)
@@ -515,7 +515,7 @@ func test_cold_materialization_is_bounded_and_converges_while_live_rows_update()
 	assert_eq(observer.calls[0].position, Vector3(4, 0, 0),
 			"each callback still runs after its first transform is applied")
 
-	var first: NovaObjectModel = p.resolve_wire_handle(0x1004)
+	var first: ObjectModel = p.resolve_wire_handle(0x1004)
 	snap.entities[0]["x"] = 40.0
 	_present(p, snap)
 	assert_eq(p.entity_count(), 4)
@@ -554,7 +554,7 @@ func test_layout_change_mid_backlog_discards_stale_rows_and_rebudgets_replacemen
 		{ "type_id": TYPE_PUMP, "handle": 0x1006, "x": 6.0 },
 	]
 	_present(p, snap)
-	var retired: NovaObjectModel = p.resolve_wire_handle(0x1004)
+	var retired: ObjectModel = p.resolve_wire_handle(0x1004)
 	assert_not_null(retired)
 
 	# The pending topology changes before it converges: the one materialized
@@ -606,13 +606,13 @@ func test_runtime_reset_rematerializes_the_restored_same_type_slot() -> void:
 	var snap := Snapshot.new()
 	snap.entities = [{ "type_id": TYPE_PUMP, "handle": 0x1004 }]
 	_present(p, snap)
-	var first: NovaObjectModel = p.resolve_wire_handle(0x1004)
+	var first: ObjectModel = p.resolve_wire_handle(0x1004)
 
 	p.reset_runtime_state()
 	assert_eq(p.entity_count(), 0)
 	assert_null(p.resolve_wire_handle(0x1004))
 	_present(p, snap)
-	var restored: NovaObjectModel = p.resolve_wire_handle(0x1004)
+	var restored: ObjectModel = p.resolve_wire_handle(0x1004)
 	assert_not_null(restored)
 	assert_ne(restored, first,
 			"restart builds a fresh restored-incarnation visual")
@@ -636,7 +636,7 @@ func test_synthetic_attachment_uses_panm_and_hidden_visibility_contract() -> voi
 		"phase2": 0x6789,
 	}]
 	_present(p, snap)
-	var model: NovaObjectModel = p.resolve_wire_handle(0x1005)
+	var model: ObjectModel = p.resolve_wire_handle(0x1005)
 	assert_eq(_ctrl(model, "VEHICLE_SPECIAL1"), 0x2345,
 			"attached items consume the same two PANM channels as placed items")
 	assert_eq(_ctrl(model, "VEHICLE_SPECIAL2"), 0x6789)
@@ -678,7 +678,7 @@ func test_wire_model_spawn_registers_after_identity_and_transform_are_ready() ->
 
 	assert_eq(observer.calls.size(), 1, "the new wire model is registered exactly once")
 	var call: Dictionary = observer.calls[0]
-	assert_eq(int(call.kind), NovaMissionData.KIND_ITEM)
+	assert_eq(int(call.kind), MissionData.KIND_ITEM)
 	assert_eq(int(call.item_id), 106100)
 	assert_eq(call.position, Vector3(4, 5, 6),
 			"registration runs after the production transform is applied")
@@ -711,7 +711,7 @@ func test_wire_model_applies_the_same_packed_overlay_result() -> void:
 		"aim_angles": angles,
 	}]
 	_present(p, snap)
-	var model: NovaObjectModel = p.resolve_wire_handle(0x1004)
+	var model: ObjectModel = p.resolve_wire_handle(0x1004)
 	assert_eq(model.get_active_body_clip(), "anim_idle",
 			"presentation forwards the state to the completion-aware remote channel")
 	var deltas: Array = model.get_aim_overlay()
@@ -752,7 +752,7 @@ func test_wire_model_free_runs_compact_infantry_when_phase_is_absent() -> void:
 	_present(p, snap)
 	_present(p, snap)
 
-	var model: NovaObjectModel = p.resolve_wire_handle(0x0004)
+	var model: ObjectModel = p.resolve_wire_handle(0x0004)
 	assert_eq(model.get_active_body_clip(), "anim_idle",
 			"phase-less compact infantry is accepted once")
 	assert_true(model.is_playing(),
@@ -775,7 +775,7 @@ func test_host_current_body_state_is_posed_without_remote_rearbitration() -> voi
 	}]
 	_present(p, snap)
 
-	var model: NovaObjectModel = p.resolve_wire_handle(0x0004)
+	var model: ObjectModel = p.resolve_wire_handle(0x0004)
 	assert_eq(model.get_active_body_clip(), "anim_idle",
 			"host current state keeps the authoritative direct-phase pose path")
 	var fps: float = model.get_skeletal_anim().get_clip_fps("anim_idle")
@@ -801,7 +801,7 @@ func test_host_current_body_state_uses_authoritative_blend_tuple() -> void:
 	}]
 	_present(p, snap)
 
-	var model: NovaObjectModel = p.resolve_wire_handle(0x0004)
+	var model: ObjectModel = p.resolve_wire_handle(0x0004)
 	assert_eq(model.get_active_body_clip(), "anim_walk_forward")
 	var blend: Dictionary = model.get_body_blend()
 	assert_eq(String(blend.get("source_key", "")), "anim_idle",
@@ -823,7 +823,7 @@ func test_remote_blend_uses_logic_tick_delta_not_present_call_count() -> void:
 		"anim_state": 43,
 	}]
 	_present(p, snap)
-	var model: NovaObjectModel = p.resolve_wire_handle(0x0004)
+	var model: ObjectModel = p.resolve_wire_handle(0x0004)
 	assert_eq(model.get_active_body_clip(), "anim_idle")
 
 	# The state edge arrives after one logic tick and stages the incoming
@@ -875,7 +875,7 @@ func test_wire_model_receives_the_transition_pulse_before_the_current_state() ->
 		"anim_pulse_ticks": 6,
 	}]
 	_present(p, snap)
-	var model: NovaObjectModel = p.resolve_wire_handle(0x1004)
+	var model: ObjectModel = p.resolve_wire_handle(0x1004)
 	# The pulse (walk_forward) was accepted first with its own phase; the
 	# current state (idle) then arbitrates behind it at the model.
 	assert_true(model.get_active_body_clip() in ["anim_walk_forward", "anim_idle"],
@@ -905,7 +905,7 @@ func test_state_edge_latch_survives_a_revision_bumped_plan_rebuild() -> void:
 		"anim_state": 43,
 	}]
 	_present(p, snap)
-	var model: NovaObjectModel = p.resolve_wire_handle(0x0004)
+	var model: ObjectModel = p.resolve_wire_handle(0x0004)
 	sim.step()
 	snap.entities[0]["anim_state"] = 1
 	_present(p, snap)
@@ -932,7 +932,7 @@ func test_wire_model_resets_remote_body_channel_on_respawn_revision_change() -> 
 		"respawn_revision": 0,
 	}]
 	_present(p, snap)
-	var model: NovaObjectModel = p.resolve_wire_handle(0x0004)
+	var model: ObjectModel = p.resolve_wire_handle(0x0004)
 	assert_eq(model.get_active_body_clip(), "anim_idle",
 			"the first lifecycle sample initializes rather than resets a new model")
 
@@ -959,7 +959,7 @@ func test_wire_model_applies_and_restores_mounted_right_hand_collapse() -> void:
 		"right_hand_collapsed": 1,
 	}]
 	_present(p, snap)
-	var model: NovaObjectModel = p.resolve_wire_handle(0x1004)
+	var model: ObjectModel = p.resolve_wire_handle(0x1004)
 	assert_true(model.is_right_hand_collapsed(),
 			"the wire pose consumes the same mount verdict")
 	snap.entities[0]["right_hand_collapsed"] = 0
@@ -979,7 +979,7 @@ func test_wire_model_applies_and_clears_named_emplaced_controls() -> void:
 		"emplaced_gun_pitch": 0xE000,
 	}]
 	_present(p, snap)
-	var model: NovaObjectModel = p.resolve_wire_handle(0x1004)
+	var model: ObjectModel = p.resolve_wire_handle(0x1004)
 	assert_eq(model.get_ctrl_values(), {
 		"EWEAP_GUNYAW": 0x2000,
 		"EWEAP_GUNPITCH": 0xE000,
@@ -1001,7 +1001,7 @@ func test_wire_direct_carrier_applies_and_releases_scoped_world_heat() -> void:
 		"world_heat_glow": 0,
 	}]
 	_present(p, snap)
-	var model: NovaObjectModel = p.resolve_wire_handle(0x1004)
+	var model: ObjectModel = p.resolve_wire_handle(0x1004)
 	assert_eq(_ctrl(model, "HEAT_GLOW"), 0,
 			"the live UseGun carrier scope owns retail's cold zero")
 
@@ -1031,7 +1031,7 @@ func test_wire_direct_numbered_zone_applies_and_releases_callback_controls() -> 
 		"lfp_camp_percent": 0x4000,
 	}]
 	_present(p, snap)
-	var model: NovaObjectModel = p.resolve_wire_handle(0x1004)
+	var model: ObjectModel = p.resolve_wire_handle(0x1004)
 	assert_eq(model.get_ctrl_values(), {
 		"TEX_TEAM": 2,
 		"TEAMSWING": 0x10000,
@@ -1062,7 +1062,7 @@ func test_wire_model_honors_local_first_person_parent_cull() -> void:
 		"local_view_suppressed": 1,
 	}]
 	_present(p, snap)
-	var model: NovaObjectModel = p.resolve_wire_handle(0x1004)
+	var model: ObjectModel = p.resolve_wire_handle(0x1004)
 	assert_false(model.visible,
 			"the dynamic local UseGun parent skips its own world model")
 
@@ -1089,7 +1089,7 @@ func test_wire_model_clears_overlay_when_snapshot_selector_is_invalid() -> void:
 		"aim_overlay_valid": 0,
 	}]
 	_present(p, snap)
-	var model: NovaObjectModel = p.resolve_wire_handle(0x1004)
+	var model: ObjectModel = p.resolve_wire_handle(0x1004)
 	model.set_aim_overlay([Basis()])  # retained from an earlier owner
 	_present(p, snap, 2)
 	assert_eq(model.get_aim_overlay(), [],
@@ -1115,9 +1115,9 @@ func test_wire_model_applies_and_clears_the_remote_weapon_channel() -> void:
 		"wpn_phase_ticks": -1,  # the secondary playhead is not replicated
 	}]
 	_present(p, snap)
-	var model: NovaObjectModel = p.resolve_wire_handle(0x1004)
+	var model: ObjectModel = p.resolve_wire_handle(0x1004)
 	var channel: Dictionary = model.get_weapon_channel()
-	assert_eq(String(channel.get("key", "")), NovaSimulation.infantry_anim_key(51),
+	assert_eq(String(channel.get("key", "")), Simulation.infantry_anim_key(51),
 			"the state id resolves to the pistol hold clip key")
 	assert_eq(int(channel.get("phase_ticks", 0)), -1)
 
@@ -1149,9 +1149,9 @@ func test_wire_row_builds_a_held_weapon_only_when_it_is_armed() -> void:
 		"held_weapon_adm": 0,   # unarmed / hidden by the gate
 	}]
 	_present(p, snap)
-	assert_true((p.get("_weapon_nodes") as Dictionary).is_empty(),
+	assert_null(p.held_weapon_node(0x1004),
 			"an ADM of 0 draws nothing — no model is built at all")
-	var body: NovaObjectModel = p.resolve_wire_handle(0x1004)
+	var body: ObjectModel = p.resolve_wire_handle(0x1004)
 	# The static pump has no rig of its own; the hand chain the attach math
 	# walks is scaffolded exactly as the placed body would carry it.
 	var skeleton := Skeleton3D.new()
@@ -1162,7 +1162,7 @@ func test_wire_row_builds_a_held_weapon_only_when_it_is_armed() -> void:
 	# Now the peer is holding something the table can resolve.
 	snap.entities[0]["held_weapon_adm"] = 1
 	_present(p, snap)
-	var weapon := (p.get("_weapon_nodes") as Dictionary).get(0x1004) as NovaObjectModel
+	var weapon: ObjectModel = p.held_weapon_node(0x1004)
 	assert_not_null(weapon, "the model is resolved from the ADM index the wire carries")
 	assert_true(weapon.visible)
 	snap.entities[0]["hidden"] = 1
@@ -1177,7 +1177,7 @@ func test_wire_row_builds_a_held_weapon_only_when_it_is_armed() -> void:
 	# Stowing it again retires the node rather than leaving a gun floating.
 	snap.entities[0]["held_weapon_adm"] = 0
 	_present(p, snap)
-	assert_true((p.get("_weapon_nodes") as Dictionary).is_empty(),
+	assert_null(p.held_weapon_node(0x1004),
 			"going unarmed frees the weapon rather than rebuilding one")
 
 
@@ -1198,7 +1198,7 @@ func test_native_hand_frame_basis_matches_the_gdscript_origin() -> void:
 	]
 	for b in bases:
 		var expected := PresentHeldWeapon.hand_frame_basis(b)
-		var got: Basis = NovaPresentApplier.held_weapon_hand_frame_basis(b)
+		var got: Basis = PresentApplier.held_weapon_hand_frame_basis(b)
 		assert_true(got.is_equal_approx(expected),
 				"hand-frame parity at %s: native %s vs gd %s" % [b, got, expected])
 
@@ -1231,7 +1231,7 @@ func test_native_held_weapon_attach_matches_the_gdscript_origin() -> void:
 		for hand_frame in [false, true]:
 			var expected: Variant = PresentHeldWeapon.attach_transform(
 					body, angles, hand_frame)
-			var got: Variant = NovaPresentApplier.held_weapon_attach_transform(
+			var got: Variant = PresentApplier.held_weapon_attach_transform(
 					skeleton, angles, hand_frame)
 			assert_not_null(expected, "the reference places a transform")
 			assert_true((got as Transform3D).is_equal_approx(expected as Transform3D),
@@ -1241,5 +1241,5 @@ func test_native_held_weapon_attach_matches_the_gdscript_origin() -> void:
 	var short_skel := Skeleton3D.new()
 	add_child_autofree(short_skel)
 	short_skel.add_bone("only")
-	assert_null(NovaPresentApplier.held_weapon_attach_transform(
+	assert_null(PresentApplier.held_weapon_attach_transform(
 			short_skel, Vector3.ZERO, false))

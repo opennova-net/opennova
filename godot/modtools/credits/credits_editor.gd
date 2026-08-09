@@ -18,7 +18,7 @@ enum Mode { VISUAL, SOURCE }
 @onready var _add_image_button: Button = %AddImageButton
 @onready var _add_newline_button: Button = %AddNewlineButton
 @onready var _block_scroll: ScrollContainer = %BlockScroll
-@onready var _player: NovaCreditsPlayer = %Player
+@onready var _player: CreditsPlayer = %Player
 @onready var _play_button: Button = %Play
 @onready var _pause_button: Button = %Pause
 @onready var _stop_button: Button = %Stop
@@ -32,7 +32,7 @@ var _suppress_env_signals := false
 var _sync_suppress := false
 var _preview_resource: CbinCreditsResource
 var _preview_paused := false
-var _resource_root: NovaResourceRoot
+var _resource_root: ResourceRoot
 var _ref_services: Dictionary = {}
 
 func set_document(value: CreditsEditorDocument) -> void:
@@ -52,12 +52,12 @@ func set_document(value: CreditsEditorDocument) -> void:
 		_on_resource_loaded(_document.resource)
 
 func set_resource_root_dir(path: String) -> void:
-	var resources := NovaResourceRoot.new()
+	var resources := ResourceRoot.new()
 	_resource_root = resources if resources.set_root_dir(path) == OK else null
 	if _block_list != null and _block_list.has_method("set_resource_root"):
 		_block_list.set_resource_root(_resource_root)
 
-func set_resource_root(value: NovaResourceRoot) -> void:
+func set_resource_root(value: ResourceRoot) -> void:
 	_resource_root = value
 	if _block_list != null and _block_list.has_method("set_resource_root"):
 		_block_list.set_resource_root(_resource_root)

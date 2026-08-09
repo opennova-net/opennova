@@ -1,9 +1,9 @@
 extends GutTest
 
-# NovaObjectData's memoized submesh builds: build_lod_submeshes hands every
+# ObjectData's memoized submesh builds: build_lod_submeshes hands every
 # caller SHARED ArrayMesh refs (one mesh set per (lod, skeletal, bones) key per
 # data instance), with fresh entry dictionaries so callers can't taint the
-# cache. The mission placer shares one NovaObjectData per graphic, so N
+# cache. The mission placer shares one ObjectData per graphic, so N
 # animated entities stop paying N mesh builds - the recorded baseline's
 # dominant cost (docs/perf/mission-load-baseline.md).
 
@@ -11,8 +11,8 @@ const SHED := "res://../fixtures/threedi/3di3/Shed.3di"
 const CHARMODEL := "res://../fixtures/threedi/3di3/CharModel.3di"
 
 
-func _open(path: String) -> NovaObjectData:
-	var data := NovaObjectData.new()
+func _open(path: String) -> ObjectData:
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(path)), OK,
 		"fixture should open: %s" % path)
 	return data
@@ -48,8 +48,8 @@ func test_repeat_builds_share_the_same_meshes() -> void:
 
 func test_two_models_from_one_data_share_meshes_but_not_materials() -> void:
 	var data := _open(SHED)
-	var a: Node3D = add_child_autofree(NovaObjectModel.new())
-	var b: Node3D = add_child_autofree(NovaObjectModel.new())
+	var a: Node3D = add_child_autofree(ObjectModel.new())
+	var b: Node3D = add_child_autofree(ObjectModel.new())
 	a.set_object_data(data)
 	b.set_object_data(data)
 
@@ -125,8 +125,8 @@ func test_lod_round_trip_returns_the_cached_meshes() -> void:
 
 func test_material_edit_on_a_shared_data_does_not_leak_across_models() -> void:
 	var data := _open(SHED)
-	var a: Node3D = add_child_autofree(NovaObjectModel.new())
-	var b: Node3D = add_child_autofree(NovaObjectModel.new())
+	var a: Node3D = add_child_autofree(ObjectModel.new())
+	var b: Node3D = add_child_autofree(ObjectModel.new())
 	a.set_object_data(data)
 	b.set_object_data(data)
 	# Snapshot the pre-edit meshes: the post-edit assertions below would all hold

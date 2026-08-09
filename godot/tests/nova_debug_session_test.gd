@@ -1,6 +1,6 @@
 extends GutTest
 
-# NovaDebugSession is the shared seam for F3 and runtime MCP. These tests use
+# DebugSession is the shared seam for F3 and runtime MCP. These tests use
 # only public fake target methods and drive the same interface both callers use.
 
 
@@ -64,20 +64,20 @@ class ValidationSim:
 		calls.append(["variable", index, value])
 
 
-func _catalog(target_box: Array) -> NovaDebugSession:
-	var session := NovaDebugSession.new()
+func _catalog(target_box: Array) -> DebugSession:
+	var session := DebugSession.new()
 	session.set_target_source(&"fake", func(): return target_box[0], "Fake is gone.")
 	session.set_status_source(func(): return {"label": "test runtime"})
-	session.register_control(NovaDebugControlDef.check(
+	session.register_control(DebugControlDef.check(
 			&"enabled", &"Test", "Enabled", "A check.", &"fake",
 			&"is_enabled", &"set_enabled"))
-	session.register_control(NovaDebugControlDef.slider(
+	session.register_control(DebugControlDef.slider(
 			&"amount", &"Test", "Amount", "A slider.", &"fake",
 			&"get_amount", &"set_amount", 1.0, 0.0, 4.0, 0.25))
-	session.register_control(NovaDebugControlDef.enum_control(
+	session.register_control(DebugControlDef.enum_control(
 			&"mode", &"Test", "Mode", "An enum.", &"fake",
 			&"get_mode", &"set_mode", 0, ["One", "Two", "Three"]))
-	session.register_control(NovaDebugControlDef.action_control(
+	session.register_control(DebugControlDef.action_control(
 			&"act", &"Test", "Act", "An action.", &"fake", &"act"))
 	return session
 
@@ -160,7 +160,7 @@ func test_authoritative_replay_waits_for_current_authority_and_unlock() -> void:
 	var session := _catalog(target_box)
 	var control := session.definition(&"enabled")
 	control.requires_unlock = true
-	control.authority = NovaDebugControlDef.Authority.HOST_ONLY
+	control.authority = DebugControlDef.Authority.HOST_ONLY
 	var host_authority := [true]
 	session.set_authority_source(func(): return host_authority[0])
 	session.set_edit_unlocked(true)
@@ -262,7 +262,7 @@ func test_edit_confirmation_and_host_authority_are_distinct_gates() -> void:
 	var session := _catalog([target])
 	var action := session.definition(&"act")
 	action.requires_unlock = true
-	action.authority = NovaDebugControlDef.Authority.HOST_ONLY
+	action.authority = DebugControlDef.Authority.HOST_ONLY
 	var host_authority := [false]
 	session.set_authority_source(func(): return host_authority[0])
 
@@ -314,7 +314,7 @@ func test_confirmed_authority_never_overrides_missing_host_authority() -> void:
 	var target := FakeTarget.new()
 	var session := _catalog([target])
 	var control := session.definition(&"enabled")
-	control.authority = NovaDebugControlDef.Authority.HOST_ONLY
+	control.authority = DebugControlDef.Authority.HOST_ONLY
 	session.set_authority_source(func(): return false)
 
 	var state := session.get_control_state(&"enabled", true)
@@ -326,7 +326,7 @@ func test_confirmed_authority_never_overrides_missing_host_authority() -> void:
 func test_action_validation_and_error_returns_stop_false_success() -> void:
 	var target := FakeTarget.new()
 	var session := _catalog([target])
-	var action := NovaDebugControlDef.action_control(
+	var action := DebugControlDef.action_control(
 			&"fallible", &"Test", "Fallible", "Validated action.",
 			&"fake", &"fallible")
 	action.action_validator = func(args: Array):
@@ -347,7 +347,7 @@ func test_action_validation_and_error_returns_stop_false_success() -> void:
 func test_error_returning_setter_propagates_rejected_write() -> void:
 	var target := FakeTarget.new()
 	var session := _catalog([target])
-	var control := NovaDebugControlDef.slider(
+	var control := DebugControlDef.slider(
 			&"fallible_amount", &"Test", "Fallible amount",
 			"An Error-returning setter.", &"fake",
 			&"get_amount", &"set_fallible_amount", 1.0, 0.0, 4.0, 0.25)
@@ -368,9 +368,9 @@ func test_error_returning_setter_propagates_rejected_write() -> void:
 
 func test_builtin_mutations_reject_values_that_overflow_engine_storage() -> void:
 	var sim := ValidationSim.new()
-	var session := NovaDebugSession.new()
-	NovaDebugCatalog.install(session)
-	session.set_target_source(NovaDebugCatalog.TARGET_SIM, func(): return sim)
+	var session := DebugSession.new()
+	DebugCatalog.install(session)
+	session.set_target_source(DebugCatalog.TARGET_SIM, func(): return sim)
 	session.set_authority_source(func(): return true)
 	session.set_edit_unlocked(true)
 

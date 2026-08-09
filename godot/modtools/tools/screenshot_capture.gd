@@ -24,7 +24,7 @@ extends Node
 ## Must run with a real rendering window: --headless does not render, so the
 ## captured viewport texture would be blank.
 
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
 const EditorScene := preload("res://modtools/editor/editor_main.tscn")
 
 # Generous settle budget: lets Control layout, the deferred split layout, and the
@@ -126,7 +126,7 @@ func _ready() -> void:
 	# the sky dome renders, and the object preview (shared environment_editor)
 	# is lit too. Without this the 3D views are flat grey on black.
 	if _app.environment_editor != null:
-		var env_path := NovaPaths.resolve_file(_root, ENV_NAME)
+		var env_path := Paths.resolve_file(_root, ENV_NAME)
 		if env_path.is_empty():
 			_fail("[capture] %s not found in %s" % [ENV_NAME, _root])
 			get_tree().quit(1)
@@ -251,7 +251,7 @@ func _workspace_for_capture(workspace_id: int) -> EditorWorkspace:
 
 
 func _resolve_asset(asset_name: String) -> String:
-	var path := NovaPaths.resolve_file(_root, asset_name)
+	var path := Paths.resolve_file(_root, asset_name)
 	if not path.is_empty():
 		return path
 	var fallback := String(FALLBACK_ASSETS.get(asset_name, ""))

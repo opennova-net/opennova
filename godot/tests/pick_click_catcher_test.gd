@@ -30,7 +30,7 @@ class StubWorld:
 		return sim
 
 
-func _make_catcher(list: NovaDebugPickList) -> Array:
+func _make_catcher(list: DebugPickList) -> Array:
 	var camera := Camera3D.new()
 	add_child_autofree(camera)
 	camera.current = true
@@ -43,7 +43,7 @@ func _make_catcher(list: NovaDebugPickList) -> Array:
 
 
 func test_left_press_picks_into_the_list_with_provenance() -> void:
-	var list := NovaDebugPickList.new()
+	var list := DebugPickList.new()
 	var made := _make_catcher(list)
 	var catcher: PickClickCatcher = made[0]
 	var world: StubWorld = made[1]
@@ -63,7 +63,7 @@ func test_left_press_picks_into_the_list_with_provenance() -> void:
 
 
 func test_other_input_is_ignored() -> void:
-	var list := NovaDebugPickList.new()
+	var list := DebugPickList.new()
 	var made := _make_catcher(list)
 	var catcher: PickClickCatcher = made[0]
 	var world: StubWorld = made[1]

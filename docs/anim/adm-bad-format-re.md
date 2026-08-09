@@ -5,7 +5,7 @@ anim slots to `.bad` clip names) and `.bad` (the binary skeletal clip
 container). Implementing code: `engine/formats/adm` (parser + writer, flat C
 ABI), `engine/formats/bad` (parser + writer, flat C ABI); runtime consumers
 `engine/runtime/anim` (clip sampling), `engine/runtime/simassets` (clip
-index / root motion / skeletal clip resolution), `godot/adapter/object/
+index / root motion / skeletal clip resolution), `godot/src/object/
 nova_skeletal_anim.cpp`; DCC consumers through the ctypes FFI mirrors
 (`pyopennova/` and `blender/opennova/` — mirrors only, no byte knowledge).
 Binary: retail Jointops.exe; all addresses are that binary's.

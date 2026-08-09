@@ -10,7 +10,7 @@ extends Node3D
 # Terrain_RenderSectorEntitiesBySide @ 0x5c7dc2/0x5c7ded (MoveOrder & 0x300)].
 
 const INVALID_HEIGHT := -1000000.0
-const VegAssets := preload("res://adapter/terrain/veg_assets.gd")
+const VegAssets := preload("res://src/terrain/veg_assets.gd")
 
 ## Narrow mount snapshot of the editor-only surface inputs injected into the
 ## native foliage dispatcher. The dispatcher's wider frame telemetry remains
@@ -21,13 +21,13 @@ class SurfaceInputDiagnostics:
 
 var _terrain_mesh: EditorTerrainMesh
 var _camera: Camera3D
-var _terrain_data: NovaTerrainData
-var _resource_root: NovaResourceRoot
-var _foliage_map: NovaTerrainFoliageMap
-var _foliage_defs: Array[NovaTerrainFoliageDef] = []
-var _tile_info: NovaTerrainTileInfo
+var _terrain_data: TerrainData
+var _resource_root: ResourceRoot
+var _foliage_map: TerrainFoliageMap
+var _foliage_defs: Array[TerrainFoliageDef] = []
+var _tile_info: TerrainTileInfo
 var _last_raw_foliage_defs: Array = []
-var _dispatcher: NovaFoliageDispatcher
+var _dispatcher: FoliageDispatcher
 var _pending_reset := true
 var _configuration_dirty := true
 var _surface_override_applied := false
@@ -37,7 +37,7 @@ var _last_tile_overlay_tint := Vector3(INF, INF, INF)
 
 
 func _ready() -> void:
-	_dispatcher = NovaFoliageDispatcher.new()
+	_dispatcher = FoliageDispatcher.new()
 	_dispatcher.name = "Dispatcher"
 	add_child(_dispatcher)
 	_apply_dispatcher_sources()
@@ -55,11 +55,11 @@ func _defs_changed(raw: Array) -> bool:
 func set_preview_state(
 	terrain_mesh: EditorTerrainMesh,
 	camera: Camera3D,
-	foliage_map: NovaTerrainFoliageMap,
+	foliage_map: TerrainFoliageMap,
 	foliage_defs: Array,
-	terrain_data: NovaTerrainData = null,
-	resource_root: NovaResourceRoot = null,
-	tile_info: NovaTerrainTileInfo = null
+	terrain_data: TerrainData = null,
+	resource_root: ResourceRoot = null,
+	tile_info: TerrainTileInfo = null
 ) -> void:
 	var mesh_changed := _terrain_mesh != terrain_mesh
 	var data_changed := _terrain_data != terrain_data
@@ -76,9 +76,9 @@ func set_preview_state(
 	_tile_info = tile_info
 
 	if defs_changed:
-		var typed_defs: Array[NovaTerrainFoliageDef] = []
+		var typed_defs: Array[TerrainFoliageDef] = []
 		for value in foliage_defs:
-			if value is NovaTerrainFoliageDef:
+			if value is TerrainFoliageDef:
 				typed_defs.append(value)
 		_foliage_defs = typed_defs
 		_last_raw_foliage_defs = foliage_defs.duplicate()
@@ -115,7 +115,7 @@ func _editor_tile_overlay_tint() -> Vector3:
 
 
 ## A standalone editor dispatcher is parented by TerrainFoliagePreview rather
-## than NovaTerrain, so it cannot discover runtime-derived surface textures by
+## than Terrain, so it cannot discover runtime-derived surface textures by
 ## parent cast. Inject EditorTerrainMesh's shared surface inputs explicitly.
 func _sync_surface_input_overrides() -> void:
 	if _dispatcher == null:
@@ -221,5 +221,5 @@ func get_surface_input_diagnostics() -> SurfaceInputDiagnostics:
 
 
 ## Effective Mission blocker resource, exposed for mount diagnostics and tests.
-func get_tile_info() -> NovaTerrainTileInfo:
+func get_tile_info() -> TerrainTileInfo:
 	return _tile_info

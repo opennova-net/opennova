@@ -9,10 +9,10 @@ extends GutTest
 # out-of-band (see the placer + game_world paths).
 
 const MissionController := preload("res://modtools/mission/mission_controller.gd")
-const Placer := preload("res://adapter/mission/mission_object_placer.gd")
+const Placer := preload("res://src/mission/mission_object_placer.gd")
 const WaypointOverlay := preload("res://modtools/mission/mission_waypoint_overlay.gd")
-const OverlayUtil := preload("res://adapter/mission/mission_overlay_util.gd")
-const ObjectUserPointOverlay := preload("res://adapter/object/object_user_point_overlay.gd")
+const OverlayUtil := preload("res://src/mission/mission_overlay_util.gd")
+const ObjectUserPointOverlay := preload("res://src/object/object_user_point_overlay.gd")
 
 const BMS_PATH := "res://../fixtures/bms/ash_i5b.reference.bms"
 const HOUSE_3DI3_FIXTURE := "res://../fixtures/threedi/3di3/House.3di"
@@ -29,7 +29,7 @@ func _abs(res_path: String) -> String:
 class StubTerrainEditor:
 	extends Node
 
-	var resource_root: NovaResourceRoot
+	var resource_root: ResourceRoot
 	var world_root: Node3D
 	var opened_trn: String = ""
 	var open_trn_result: Error = OK
@@ -52,11 +52,11 @@ class StubTerrainEditor:
 	# surface (one drift cycle must sample each entity once, not three times).
 	var sample_calls := 0
 
-	func get_resource_root() -> NovaResourceRoot:
+	func get_resource_root() -> ResourceRoot:
 		return resource_root
 
 	# No live environment in the headless fixture: null skips _wire_placer_environment.
-	func get_environment_node() -> NovaEnvironment:
+	func get_environment_node() -> MissionEnvironment:
 		return null
 
 	func get_height_revision() -> int:
@@ -97,8 +97,8 @@ class StubTerrainEditor:
 
 # A resource root over the repo's real dvxi5 terrain fixture (the terrain the test
 # mission references), so open_mission resolves + "loads" its terrain via the stub.
-func _dvxi5_root() -> NovaResourceRoot:
-	var root := NovaResourceRoot.new()
+func _dvxi5_root() -> ResourceRoot:
+	var root := ResourceRoot.new()
 	root.set_root_dir(_abs("res://../fixtures/godot/dvxi5"))
 	return root
 
@@ -131,7 +131,7 @@ func test_open_mission_loads_conamed_tile_blockers_and_clear_drops_context() -> 
 	var til_path := root_dir.path_join("ash_i5b.reference.til")
 	_write_single_blocker_til(til_path)
 
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(root_dir), OK)
 	var stub := StubTerrainEditor.new()
 	stub.resource_root = root
@@ -174,7 +174,7 @@ func test_open_mission_without_resource_root_is_unconfigured() -> void:
 
 func test_open_mission_reports_missing_terrain() -> void:
 	var stub := StubTerrainEditor.new()
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	# fixtures/ has the reference .bms but no matching .trn, so the terrain the
 	# mission references cannot be resolved.
 	root.set_root_dir(_abs("res://../fixtures"))
@@ -234,7 +234,7 @@ func test_save_as_file_mis_bakes_terrain_base_heights() -> void:
 	# terrain-relative offset from the height-locked absolute z
 	# [orig: MisLdr_WriteNileProjectXml @ 0x10004930, misldr.dll]. See D-MIS-4.
 	var controller := _new_with_item_db()
-	controller.get_mission().add_entity(NovaMissionData.KIND_ITEM, 101291, Vector3(5, 6, 40), Vector3.ZERO)
+	controller.get_mission().add_entity(MissionData.KIND_ITEM, 101291, Vector3(5, 6, 40), Vector3.ZERO)
 	var path := ProjectSettings.globalize_path("user://mission_controller_bheight_%d.mis" % Time.get_ticks_usec())
 	assert_eq(controller.save_as_file(path), OK, "Save As writes the .mis")
 	var text := FileAccess.get_file_as_string(path)
@@ -290,9 +290,9 @@ func _loaded_with_selection() -> MissionController:
 	add_child_autofree(stub)
 	var controller := MissionController.new(stub)
 	assert_eq(controller.open_mission(_abs(BMS_PATH)), OK, "the fixture mission opens")
-	var buildings := controller.get_mission().get_entities(NovaMissionData.KIND_BUILDING)
+	var buildings := controller.get_mission().get_entities(MissionData.KIND_BUILDING)
 	assert_gt(buildings.size(), 0, "the fixture places buildings to select")
-	controller._viewport._select(NovaMissionData.KIND_BUILDING, int(buildings[0]["index"]))
+	controller._viewport._select(MissionData.KIND_BUILDING, int(buildings[0]["index"]))
 	return controller
 
 
@@ -306,7 +306,7 @@ func _stub_with_dvxi5() -> StubTerrainEditor:
 
 
 func test_selected_userpoint_overlay_uses_shared_script_and_tracks_transform() -> void:
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert_eq(data.open_file(_abs(HOUSE_3DI3_FIXTURE)), OK)
 	assert_gt(data.get_user_point_count(), 0, "House fixture should carry userpoints.")
 	var stub := StubTerrainEditor.new()
@@ -324,7 +324,7 @@ func test_selected_userpoint_overlay_uses_shared_script_and_tracks_transform() -
 	assert_true(placer.register_resolved_static_graphic("House", data, [{ "mesh": BoxMesh.new() }]),
 		"the placer accepts the pre-parsed House registration")
 	controller._placer = placer
-	controller._selected_ref = { "kind": NovaMissionData.KIND_BUILDING, "index": 0 }
+	controller._selected_ref = { "kind": MissionData.KIND_BUILDING, "index": 0 }
 	controller._selected_graphic = "House"
 	controller._selected_xform = Transform3D(Basis(), Vector3(1.0, 2.0, 3.0))
 
@@ -407,18 +407,18 @@ func test_open_mission_records_a_perf_timeline() -> void:
 func test_set_game_mode_is_single_select_and_undoable() -> void:
 	var controller := _loaded_with_selection()
 	var mission := controller.get_mission()
-	var mask := int(NovaMissionData.ATTRIB_GAME_MODE_MASK)
+	var mask := int(MissionData.ATTRIB_GAME_MODE_MASK)
 
-	controller.set_game_mode(NovaMissionData.ATTRIB_COOP) # known starting mode
-	assert_eq(int(mission.get_game_mode()), int(NovaMissionData.ATTRIB_COOP), "coop set via controller")
+	controller.set_game_mode(MissionData.ATTRIB_COOP) # known starting mode
+	assert_eq(int(mission.get_game_mode()), int(MissionData.ATTRIB_COOP), "coop set via controller")
 
-	controller.set_game_mode(NovaMissionData.ATTRIB_KING_OF_THE_HILL)
-	assert_eq(int(mission.get_game_mode()), int(NovaMissionData.ATTRIB_KING_OF_THE_HILL), "switched to KOTH")
-	assert_eq(int(mission.get_info()["attrib_flags"]) & mask, int(NovaMissionData.ATTRIB_KING_OF_THE_HILL),
+	controller.set_game_mode(MissionData.ATTRIB_KING_OF_THE_HILL)
+	assert_eq(int(mission.get_game_mode()), int(MissionData.ATTRIB_KING_OF_THE_HILL), "switched to KOTH")
+	assert_eq(int(mission.get_info()["attrib_flags"]) & mask, int(MissionData.ATTRIB_KING_OF_THE_HILL),
 		"exactly one mode bit set (the others cleared)")
 
 	controller.undo()
-	assert_eq(int(mission.get_game_mode()), int(NovaMissionData.ATTRIB_COOP), "undo restores the prior mode")
+	assert_eq(int(mission.get_game_mode()), int(MissionData.ATTRIB_COOP), "undo restores the prior mode")
 
 
 func test_selection_edits_without_a_selection_are_inert() -> void:
@@ -513,8 +513,8 @@ func test_set_selected_position_round_trips_under_an_offset_container() -> void:
 	add_child_autofree(stub)
 	var controller := MissionController.new(stub)
 	assert_eq(controller.open_mission(_abs(BMS_PATH)), OK)
-	var buildings := controller.get_mission().get_entities(NovaMissionData.KIND_BUILDING)
-	controller._viewport._select(NovaMissionData.KIND_BUILDING, int(buildings[0]["index"]))
+	var buildings := controller.get_mission().get_entities(MissionData.KIND_BUILDING)
+	controller._viewport._select(MissionData.KIND_BUILDING, int(buildings[0]["index"]))
 
 	var target := Vector3(321.0, 12.0, -654.0)
 	controller.set_selected_position(target)
@@ -536,7 +536,7 @@ const ITEMS_PATH := "res://../fixtures/def/items.def"
 
 # The item database _loaded_with_item_db injected, so palette-cardinality
 # assertions read the fixture db directly instead of the placer's private field.
-var _injected_item_db: NovaItemDatabase = null
+var _injected_item_db: ItemDatabase = null
 
 
 func _loaded_with_item_db() -> MissionController:
@@ -547,7 +547,7 @@ func _loaded_with_item_db() -> MissionController:
 	add_child_autofree(stub)
 	var controller := MissionController.new(stub)
 	assert_eq(controller.open_mission(_abs(BMS_PATH)), OK, "the fixture mission opens")
-	var db := NovaItemDatabase.new()
+	var db := ItemDatabase.new()
 	assert_eq(db.load(_abs(ITEMS_PATH)), OK, "the items.def fixture loads")
 	# The dvxi5 fixture dir carries no items.def, so the open left the placer's db null;
 	# inject the fixture db so the palette + kind mapping have real item types.
@@ -568,7 +568,7 @@ func _new_with_item_db() -> MissionController:
 	add_child_autofree(stub)
 	var controller := MissionController.new(stub)
 	assert_eq(controller.new_mission(), OK, "a new mission is created on the loaded terrain")
-	var db := NovaItemDatabase.new()
+	var db := ItemDatabase.new()
 	assert_eq(db.load(_abs(ITEMS_PATH)), OK, "the items.def fixture loads")
 	controller._placer.item_db = db
 	return controller
@@ -590,9 +590,9 @@ func test_new_mission_creates_a_loaded_empty_clean_document() -> void:
 	assert_true(controller.is_loaded(), "a new mission is loaded")
 	assert_eq(controller.get_current_path(), "", "a new mission has no file path yet")
 	var m := controller.get_mission()
-	assert_eq(m.get_entity_count(NovaMissionData.KIND_ITEM), 0, "no items")
-	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), 0, "no buildings")
-	assert_eq(m.get_entity_count(NovaMissionData.KIND_ORGANIC), 0, "no people")
+	assert_eq(m.get_entity_count(MissionData.KIND_ITEM), 0, "no items")
+	assert_eq(m.get_entity_count(MissionData.KIND_BUILDING), 0, "no buildings")
+	assert_eq(m.get_entity_count(MissionData.KIND_ORGANIC), 0, "no people")
 	assert_false(controller.is_dirty(), "a fresh mission is clean until the first edit")
 	var title := controller.get_mission_title()
 	assert_string_contains(title, "untitled", "an unsaved new mission is titled 'untitled'")
@@ -612,7 +612,7 @@ func test_new_mission_palette_and_placement_work() -> void:
 	var m := controller.get_mission()
 	assert_true(controller.place_entity_at_world(102001, Vector3(50.0, 10.0, -50.0)),
 		"placing into a from-scratch mission succeeds")
-	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), 1, "the placed building lands")
+	assert_eq(m.get_entity_count(MissionData.KIND_BUILDING), 1, "the placed building lands")
 	assert_true(controller.is_dirty(), "the first placement dirties the new mission")
 	assert_true(controller.can_undo(), "and is undoable")
 
@@ -621,14 +621,14 @@ func test_kind_for_item_type_matches_shipping_data() -> void:
 	# The empirically verified 1:1 mapping (185k entities across 114 JO missions). The
 	# non-obvious part is Decoration AND Foliage sharing the Building list with Building.
 	# The table lives in the engine's authoring facade now (engine/runtime/mission authoring.h),
-	# exposed as the NovaMissionData.kind_for_item_type static.
-	assert_eq(NovaMissionData.kind_for_item_type(NovaItemDatabase.TYPE_PERSON), NovaMissionData.KIND_ORGANIC, "person -> organic")
-	assert_eq(NovaMissionData.kind_for_item_type(NovaItemDatabase.TYPE_BUILDING), NovaMissionData.KIND_BUILDING, "building -> building")
-	assert_eq(NovaMissionData.kind_for_item_type(NovaItemDatabase.TYPE_DECORATION), NovaMissionData.KIND_BUILDING, "decoration -> building")
-	assert_eq(NovaMissionData.kind_for_item_type(NovaItemDatabase.TYPE_FOLIAGE), NovaMissionData.KIND_BUILDING, "foliage -> building")
-	assert_eq(NovaMissionData.kind_for_item_type(NovaItemDatabase.TYPE_MARKER), NovaMissionData.KIND_MARKER, "marker -> marker")
-	for t in [NovaItemDatabase.TYPE_VEHICLE, NovaItemDatabase.TYPE_OBJECT, NovaItemDatabase.TYPE_POWERUP, NovaItemDatabase.TYPE_UNKNOWN]:
-		assert_eq(NovaMissionData.kind_for_item_type(t), NovaMissionData.KIND_ITEM, "type %d -> item" % t)
+	# exposed as the MissionData.kind_for_item_type static.
+	assert_eq(MissionData.kind_for_item_type(ItemDatabase.TYPE_PERSON), MissionData.KIND_ORGANIC, "person -> organic")
+	assert_eq(MissionData.kind_for_item_type(ItemDatabase.TYPE_BUILDING), MissionData.KIND_BUILDING, "building -> building")
+	assert_eq(MissionData.kind_for_item_type(ItemDatabase.TYPE_DECORATION), MissionData.KIND_BUILDING, "decoration -> building")
+	assert_eq(MissionData.kind_for_item_type(ItemDatabase.TYPE_FOLIAGE), MissionData.KIND_BUILDING, "foliage -> building")
+	assert_eq(MissionData.kind_for_item_type(ItemDatabase.TYPE_MARKER), MissionData.KIND_MARKER, "marker -> marker")
+	for t in [ItemDatabase.TYPE_VEHICLE, ItemDatabase.TYPE_OBJECT, ItemDatabase.TYPE_POWERUP, ItemDatabase.TYPE_UNKNOWN]:
+		assert_eq(MissionData.kind_for_item_type(t), MissionData.KIND_ITEM, "type %d -> item" % t)
 
 
 func test_get_placeable_items_includes_markers() -> void:
@@ -691,12 +691,12 @@ func test_arm_rejects_unknown_but_allows_markers() -> void:
 func test_place_marker_adds_a_marker_entity_and_selects_it() -> void:
 	var controller := _loaded_with_item_db()
 	var mission := controller.get_mission()
-	var before := mission.get_entity_count(NovaMissionData.KIND_MARKER)
+	var before := mission.get_entity_count(MissionData.KIND_MARKER)
 	assert_true(controller.place_entity_at_world(100001, Vector3(50.0, 10.0, -50.0)),
 		"placing a marker from the palette succeeds")
-	assert_eq(mission.get_entity_count(NovaMissionData.KIND_MARKER), before + 1, "a marker entity was added")
+	assert_eq(mission.get_entity_count(MissionData.KIND_MARKER), before + 1, "a marker entity was added")
 	var sel := controller.get_selection_summary()
-	assert_eq(int(sel.get("kind", -1)), NovaMissionData.KIND_MARKER, "the new marker is selected")
+	assert_eq(int(sel.get("kind", -1)), MissionData.KIND_MARKER, "the new marker is selected")
 	assert_eq(int(sel.get("index", -1)), before, "and it is the just-appended marker")
 	assert_true(controller.is_dirty(), "placing a marker dirties the mission")
 	assert_true(controller.can_undo(), "and is undoable")
@@ -749,9 +749,9 @@ func test_delete_selected_marker_in_objects_mode() -> void:
 	var controller := _loaded_with_item_db()
 	var mission := controller.get_mission()
 	controller.place_entity_at_world(100001, Vector3(40.0, 10.0, -40.0))
-	var after_place := mission.get_entity_count(NovaMissionData.KIND_MARKER)
+	var after_place := mission.get_entity_count(MissionData.KIND_MARKER)
 	assert_true(controller.delete_selected(), "the selected marker deletes")
-	assert_eq(mission.get_entity_count(NovaMissionData.KIND_MARKER), after_place - 1, "the marker entity is removed")
+	assert_eq(mission.get_entity_count(MissionData.KIND_MARKER), after_place - 1, "the marker entity is removed")
 	assert_eq(controller.get_selection_summary(), {}, "and the selection is cleared")
 
 
@@ -766,12 +766,12 @@ func test_get_object_list_covers_every_kind_including_markers() -> void:
 	assert_eq(rows.size(), controller.get_object_count(),
 		"one row per placed object, matching the count the inspector gates its rebuild on")
 	assert_eq(controller.get_object_count(),
-		mission.get_entity_count(NovaMissionData.KIND_ITEM)
-		+ mission.get_entity_count(NovaMissionData.KIND_BUILDING)
-		+ mission.get_entity_count(NovaMissionData.KIND_ORGANIC)
-		+ mission.get_entity_count(NovaMissionData.KIND_MARKER),
+		mission.get_entity_count(MissionData.KIND_ITEM)
+		+ mission.get_entity_count(MissionData.KIND_BUILDING)
+		+ mission.get_entity_count(MissionData.KIND_ORGANIC)
+		+ mission.get_entity_count(MissionData.KIND_MARKER),
 		"the count spans every Objects-mode kind, markers included")
-	var marker_rows := rows.filter(func(r): return int(r.get("kind", -1)) == NovaMissionData.KIND_MARKER)
+	var marker_rows := rows.filter(func(r): return int(r.get("kind", -1)) == MissionData.KIND_MARKER)
 	assert_gt(marker_rows.size(), 0, "markers appear in the placed-objects list")
 	assert_eq(String(marker_rows[0].get("category", "")), "Marker", "and carry the Marker kind label")
 	for r in rows:
@@ -781,16 +781,16 @@ func test_get_object_list_covers_every_kind_including_markers() -> void:
 
 func test_select_object_selects_the_addressed_entity() -> void:
 	var controller := _loaded_with_item_db()
-	var buildings := controller.get_mission().get_entities(NovaMissionData.KIND_BUILDING)
+	var buildings := controller.get_mission().get_entities(MissionData.KIND_BUILDING)
 	assert_gt(buildings.size(), 0, "the fixture has at least one building")
 	var idx := int(buildings[0]["index"])
-	controller.select_object(NovaMissionData.KIND_BUILDING, idx)
+	controller.select_object(MissionData.KIND_BUILDING, idx)
 	var sel := controller.get_selection_summary()
-	assert_eq(int(sel.get("kind", -1)), NovaMissionData.KIND_BUILDING, "select_object selects the addressed kind")
+	assert_eq(int(sel.get("kind", -1)), MissionData.KIND_BUILDING, "select_object selects the addressed kind")
 	assert_eq(int(sel.get("index", -1)), idx, "and index")
 	# An unknown entity is a safe no-op: the prior selection is left intact (the stub editor has no
 	# camera, so the camera-framing half just returns false without affecting selection).
-	controller.select_object(NovaMissionData.KIND_BUILDING, 999999)
+	controller.select_object(MissionData.KIND_BUILDING, 999999)
 	assert_eq(int(controller.get_selection_summary().get("index", -1)), idx,
 		"an out-of-range index is ignored, leaving the prior selection in place")
 
@@ -804,10 +804,10 @@ func test_added_waypoint_marker_is_a_waypoint_type_not_a_copied_player_start() -
 	var controller := _loaded_with_item_db()
 	var mission := controller.get_mission()
 	# Place a non-waypoint marker first (fixture id 100001 = BMS type_id 1), mimicking a player start.
-	var ps_index := mission.get_entity_count(NovaMissionData.KIND_MARKER)
+	var ps_index := mission.get_entity_count(MissionData.KIND_MARKER)
 	assert_true(controller.place_entity_at_world(100001, Vector3(20, 5, -20)),
 		"a non-waypoint marker is placed in Objects mode")
-	assert_eq(int(mission.get_entity(NovaMissionData.KIND_MARKER, ps_index)["type_id"]), 1,
+	assert_eq(int(mission.get_entity(MissionData.KIND_MARKER, ps_index)["type_id"]), 1,
 		"precondition: the placed marker is the non-waypoint fixture type (1)")
 	# Author a waypoint path and add a marker to it via the tool.
 	controller.set_mode(controller.Mode.WAYPOINTS)
@@ -815,9 +815,9 @@ func test_added_waypoint_marker_is_a_waypoint_type_not_a_copied_player_start() -
 	assert_true(controller.add_marker_to_active_path_at_world(Vector3(60, 5, -60)),
 		"a waypoint marker is added to the path")
 	var wp_index := int(controller.get_selected_marker()["marker_index"])
-	assert_eq(int(mission.get_entity(NovaMissionData.KIND_MARKER, wp_index)["type_id"]), 6005,
+	assert_eq(int(mission.get_entity(MissionData.KIND_MARKER, wp_index)["type_id"]), 6005,
 		"the added path marker is the engine waypoint type (6005), not the copied player-start type")
-	assert_eq(int(mission.get_entity(NovaMissionData.KIND_MARKER, ps_index)["type_id"]), 1,
+	assert_eq(int(mission.get_entity(MissionData.KIND_MARKER, ps_index)["type_id"]), 1,
 		"and the pre-existing non-waypoint marker keeps its own type")
 
 
@@ -835,7 +835,7 @@ func test_waypoint_marker_reuses_the_active_paths_existing_type() -> void:
 	assert_true(controller.add_marker_to_active_path_at_world(Vector3(5, 0, -5)),
 		"a second marker is added to the path")
 	var idx := int(controller.get_selected_marker()["marker_index"])
-	assert_eq(int(mission.get_entity(NovaMissionData.KIND_MARKER, idx)["type_id"]), 6026,
+	assert_eq(int(mission.get_entity(MissionData.KIND_MARKER, idx)["type_id"]), 6026,
 		"a new path marker matches the path's existing waypoint variant, not the canonical 6005")
 
 
@@ -888,24 +888,24 @@ func test_place_entity_routes_to_the_kind_its_type_maps_to() -> void:
 	var hit := Vector3(50.0, 10.0, -50.0)
 
 	# Building -> Building list.
-	var buildings := mission.get_entity_count(NovaMissionData.KIND_BUILDING)
+	var buildings := mission.get_entity_count(MissionData.KIND_BUILDING)
 	assert_true(controller.place_entity_at_world(102001, hit), "placing a building succeeds")
-	assert_eq(mission.get_entity_count(NovaMissionData.KIND_BUILDING), buildings + 1, "a building lands in the Building list")
+	assert_eq(mission.get_entity_count(MissionData.KIND_BUILDING), buildings + 1, "a building lands in the Building list")
 
 	# Foliage -> ALSO the Building list (the verified non-obvious case).
-	var b2 := mission.get_entity_count(NovaMissionData.KIND_BUILDING)
+	var b2 := mission.get_entity_count(MissionData.KIND_BUILDING)
 	assert_true(controller.place_entity_at_world(103001, hit), "placing foliage succeeds")
-	assert_eq(mission.get_entity_count(NovaMissionData.KIND_BUILDING), b2 + 1, "foliage lands in the Building list, not Item")
+	assert_eq(mission.get_entity_count(MissionData.KIND_BUILDING), b2 + 1, "foliage lands in the Building list, not Item")
 
 	# Vehicle -> Item list.
-	var items := mission.get_entity_count(NovaMissionData.KIND_ITEM)
+	var items := mission.get_entity_count(MissionData.KIND_ITEM)
 	assert_true(controller.place_entity_at_world(101291, hit), "placing a vehicle succeeds")
-	assert_eq(mission.get_entity_count(NovaMissionData.KIND_ITEM), items + 1, "a vehicle lands in the Item list")
+	assert_eq(mission.get_entity_count(MissionData.KIND_ITEM), items + 1, "a vehicle lands in the Item list")
 
 	# Person -> Organic list.
-	var organics := mission.get_entity_count(NovaMissionData.KIND_ORGANIC)
+	var organics := mission.get_entity_count(MissionData.KIND_ORGANIC)
 	assert_true(controller.place_entity_at_world(105311, hit), "placing a person succeeds")
-	assert_eq(mission.get_entity_count(NovaMissionData.KIND_ORGANIC), organics + 1, "a person lands in the Organic list")
+	assert_eq(mission.get_entity_count(MissionData.KIND_ORGANIC), organics + 1, "a person lands in the Organic list")
 
 	assert_true(controller.is_dirty(), "placement dirties the mission")
 
@@ -913,12 +913,12 @@ func test_place_entity_routes_to_the_kind_its_type_maps_to() -> void:
 func test_place_entity_selects_the_new_entity_at_the_hit_point() -> void:
 	var controller := _loaded_with_item_db()
 	var mission := controller.get_mission()
-	var before := mission.get_entity_count(NovaMissionData.KIND_BUILDING)
+	var before := mission.get_entity_count(MissionData.KIND_BUILDING)
 	var hit := Vector3(120.0, 5.0, -80.0)
 
 	assert_true(controller.place_entity_at_world(102001, hit))
 	var sel := controller.get_selection_summary()
-	assert_eq(int(sel.get("kind", -1)), NovaMissionData.KIND_BUILDING, "the new entity is selected")
+	assert_eq(int(sel.get("kind", -1)), MissionData.KIND_BUILDING, "the new entity is selected")
 	assert_eq(int(sel.get("index", -1)), before, "and it is the just-appended (last) one")
 
 	# The stored mission-space position is the inverse of the world hit through the
@@ -942,7 +942,7 @@ func test_armed_left_click_places_via_the_viewport_path() -> void:
 	var controller := _loaded_with_item_db()
 	var mission := controller.get_mission()
 	controller.arm_placement(102001)
-	var before := mission.get_entity_count(NovaMissionData.KIND_BUILDING)
+	var before := mission.get_entity_count(MissionData.KIND_BUILDING)
 
 	var press := InputEventMouseButton.new()
 	press.button_index = MOUSE_BUTTON_LEFT
@@ -950,7 +950,7 @@ func test_armed_left_click_places_via_the_viewport_path() -> void:
 	press.position = Vector2(64, 64)
 	controller.handle_viewport_input(press)
 
-	assert_eq(mission.get_entity_count(NovaMissionData.KIND_BUILDING), before + 1,
+	assert_eq(mission.get_entity_count(MissionData.KIND_BUILDING), before + 1,
 		"an armed left-click placed a new building")
 	assert_true(controller.is_placement_armed(), "placement stays armed so several can be placed")
 
@@ -982,14 +982,14 @@ func test_armed_click_off_terrain_places_nothing() -> void:
 	var controller := _loaded_with_item_db()
 	var mission := controller.get_mission()
 	controller.arm_placement(102001)
-	var before := mission.get_entity_count(NovaMissionData.KIND_BUILDING)
+	var before := mission.get_entity_count(MissionData.KIND_BUILDING)
 	controller.terrain_editor.terrain_hit_valid = false  # the raycast now reports a miss
 	var press := InputEventMouseButton.new()
 	press.button_index = MOUSE_BUTTON_LEFT
 	press.pressed = true
 	press.position = Vector2(64, 64)
 	controller.handle_viewport_input(press)
-	assert_eq(mission.get_entity_count(NovaMissionData.KIND_BUILDING), before,
+	assert_eq(mission.get_entity_count(MissionData.KIND_BUILDING), before,
 		"an armed click off the terrain places nothing")
 	assert_true(controller.is_placement_armed(), "and the tool stays armed")
 
@@ -1008,7 +1008,7 @@ func test_place_entity_round_trips_under_an_offset_container() -> void:
 	add_child_autofree(stub)
 	var controller := MissionController.new(stub)
 	assert_eq(controller.open_mission(_abs(BMS_PATH)), OK)
-	var db := NovaItemDatabase.new()
+	var db := ItemDatabase.new()
 	assert_eq(db.load(_abs(ITEMS_PATH)), OK)
 	controller._placer.item_db = db
 
@@ -1033,11 +1033,11 @@ func test_place_entity_round_trips_under_an_offset_container() -> void:
 func test_delete_selected_removes_clears_and_dirties() -> void:
 	var controller := _loaded_with_selection()
 	var mission := controller.get_mission()
-	var before := mission.get_entity_count(NovaMissionData.KIND_BUILDING)
+	var before := mission.get_entity_count(MissionData.KIND_BUILDING)
 	assert_false(controller.get_selection_summary().is_empty(), "precondition: a building is selected")
 
 	assert_true(controller.delete_selected(), "deleting the selected entity succeeds")
-	assert_eq(mission.get_entity_count(NovaMissionData.KIND_BUILDING), before - 1, "the building count drops by one")
+	assert_eq(mission.get_entity_count(MissionData.KIND_BUILDING), before - 1, "the building count drops by one")
 	assert_true(controller.is_dirty(), "a delete dirties the mission")
 	assert_eq(controller.get_selection_summary(), {}, "the selection clears after the delete")
 
@@ -1046,9 +1046,9 @@ func test_delete_selected_without_a_selection_is_inert() -> void:
 	var controller := _loaded_with_selection()
 	controller._viewport._deselect()
 	var mission := controller.get_mission()
-	var before := mission.get_entity_count(NovaMissionData.KIND_BUILDING)
+	var before := mission.get_entity_count(MissionData.KIND_BUILDING)
 	assert_false(controller.delete_selected(), "delete with nothing selected is a no-op")
-	assert_eq(mission.get_entity_count(NovaMissionData.KIND_BUILDING), before, "no entity is removed")
+	assert_eq(mission.get_entity_count(MissionData.KIND_BUILDING), before, "no entity is removed")
 
 
 func test_delete_selected_without_a_mission_is_inert() -> void:
@@ -1072,12 +1072,12 @@ func test_delete_key_deletes_via_the_viewport_path() -> void:
 	# remove it -- the same controller path the inspector's Delete button uses.
 	var controller := _loaded_with_selection()
 	var mission := controller.get_mission()
-	var before := mission.get_entity_count(NovaMissionData.KIND_BUILDING)
+	var before := mission.get_entity_count(MissionData.KIND_BUILDING)
 	var key := InputEventKey.new()
 	key.pressed = true
 	key.keycode = KEY_DELETE
 	controller.handle_viewport_input(key)
-	assert_eq(mission.get_entity_count(NovaMissionData.KIND_BUILDING), before - 1, "Delete removed the selected building")
+	assert_eq(mission.get_entity_count(MissionData.KIND_BUILDING), before - 1, "Delete removed the selected building")
 	assert_eq(controller.get_selection_summary(), {}, "and cleared the selection")
 
 
@@ -1085,12 +1085,12 @@ func test_delete_key_with_no_selection_is_inert() -> void:
 	var controller := _loaded_with_selection()
 	controller._viewport._deselect()
 	var mission := controller.get_mission()
-	var before := mission.get_entity_count(NovaMissionData.KIND_BUILDING)
+	var before := mission.get_entity_count(MissionData.KIND_BUILDING)
 	var key := InputEventKey.new()
 	key.pressed = true
 	key.keycode = KEY_DELETE
 	controller.handle_viewport_input(key)
-	assert_eq(mission.get_entity_count(NovaMissionData.KIND_BUILDING), before, "Delete with nothing selected removes nothing")
+	assert_eq(mission.get_entity_count(MissionData.KIND_BUILDING), before, "Delete with nothing selected removes nothing")
 
 
 func test_delete_key_while_armed_is_inert() -> void:
@@ -1100,20 +1100,20 @@ func test_delete_key_while_armed_is_inert() -> void:
 	# let an armed Delete silently delete an entity, and nothing else would fail.
 	var controller := _loaded_with_item_db()
 	var mission := controller.get_mission()
-	var buildings := mission.get_entities(NovaMissionData.KIND_BUILDING)
-	controller._viewport._select(NovaMissionData.KIND_BUILDING, int(buildings[0]["index"]))
+	var buildings := mission.get_entities(MissionData.KIND_BUILDING)
+	controller._viewport._select(MissionData.KIND_BUILDING, int(buildings[0]["index"]))
 	assert_false(controller.get_selection_summary().is_empty(), "precondition: a building is selected")
 
 	controller.arm_placement(102001)  # Guard Tower (building)
 	assert_true(controller.is_placement_armed(), "the placement tool is armed")
 	assert_eq(controller.get_selection_summary(), {}, "arming cleared the selection")
 
-	var before := mission.get_entity_count(NovaMissionData.KIND_BUILDING)
+	var before := mission.get_entity_count(MissionData.KIND_BUILDING)
 	var key := InputEventKey.new()
 	key.pressed = true
 	key.keycode = KEY_DELETE
 	controller.handle_viewport_input(key)
-	assert_eq(mission.get_entity_count(NovaMissionData.KIND_BUILDING), before, "Delete while armed removes nothing")
+	assert_eq(mission.get_entity_count(MissionData.KIND_BUILDING), before, "Delete while armed removes nothing")
 	assert_true(controller.is_placement_armed(), "and the placement tool stays armed")
 
 
@@ -1123,7 +1123,7 @@ func test_delete_key_is_suppressed_while_a_text_field_has_focus() -> void:
 	# Mirrors the focus-owner guard the credits / font editors use on the same router path.
 	var controller := _loaded_with_selection()
 	var mission := controller.get_mission()
-	var before := mission.get_entity_count(NovaMissionData.KIND_BUILDING)
+	var before := mission.get_entity_count(MissionData.KIND_BUILDING)
 
 	var field := LineEdit.new()
 	add_child_autofree(field)
@@ -1136,7 +1136,7 @@ func test_delete_key_is_suppressed_while_a_text_field_has_focus() -> void:
 	key.pressed = true
 	key.keycode = KEY_DELETE
 	controller.handle_viewport_input(key)
-	assert_eq(mission.get_entity_count(NovaMissionData.KIND_BUILDING), before,
+	assert_eq(mission.get_entity_count(MissionData.KIND_BUILDING), before,
 		"Delete is inert while a text field has focus (the field, not the viewport, owns the key)")
 	assert_false(controller.get_selection_summary().is_empty(), "and the selection survives")
 
@@ -1317,7 +1317,7 @@ func test_open_captures_height_revision_and_reconcile_reports_no_drift() -> void
 func test_height_drift_counts_and_reground_grounds_markers() -> void:
 	var controller := _loaded_with_item_db()
 	var mission := controller.get_mission()
-	assert_gt(mission.get_entity_count(NovaMissionData.KIND_MARKER), 0,
+	assert_gt(mission.get_entity_count(MissionData.KIND_MARKER), 0,
 		"precondition: the fixture mission carries markers")
 
 	_stub_drift(controller, 500.0)
@@ -1327,7 +1327,7 @@ func test_height_drift_counts_and_reground_grounds_markers() -> void:
 
 	assert_eq(controller.reground_drifted(), count,
 		"the apply moves exactly what the dry-run counted (one shared policy)")
-	var marker: Vector3 = mission.get_entities(NovaMissionData.KIND_MARKER)[0]["position"]
+	var marker: Vector3 = mission.get_entities(MissionData.KIND_MARKER)[0]["position"]
 	assert_almost_eq(marker.z, 500.0, 0.01, "markers store the sampled hit directly (BMS z = height)")
 	assert_true(controller.is_dirty(), "a re-ground that moved entities dirties the document")
 	assert_string_contains(controller.get_last_status(), "Re-grounded")
@@ -1339,7 +1339,7 @@ func test_reground_is_one_undo_step_and_undo_restores() -> void:
 	var mission := controller.get_mission()
 	assert_true(controller.place_entity_at_world(102001, Vector3(50, 10, -50)))
 	assert_eq(controller.undo_depth(), 1, "precondition: the placement is one step")
-	var kind := NovaMissionData.KIND_BUILDING
+	var kind := MissionData.KIND_BUILDING
 	var index := int(mission.get_entities(kind)[0]["index"])
 
 	_stub_drift(controller, 42.0)
@@ -1363,7 +1363,7 @@ func test_reground_count_matches_engine_bake_for_rotated_anchor() -> void:
 	var controller := _new_with_item_db()
 	var mission := controller.get_mission()
 	assert_true(controller.place_entity_at_world(102001, Vector3(50, 10, -50)))
-	var kind := NovaMissionData.KIND_BUILDING
+	var kind := MissionData.KIND_BUILDING
 	var index := int(mission.get_entities(kind)[0]["index"])
 	controller._viewport._select(kind, index)
 	controller.set_selected_rotation(Vector3(0, 37, 0))
@@ -1429,7 +1429,7 @@ func test_reground_only_touches_entities_whose_ground_moved() -> void:
 	var mission := controller.get_mission()
 	assert_true(controller.place_entity_at_world(102001, Vector3(0.0, 10, -50)))
 	assert_true(controller.place_entity_at_world(102001, Vector3(100.0, 10, -50)))
-	var kind := NovaMissionData.KIND_BUILDING
+	var kind := MissionData.KIND_BUILDING
 	var index_a := int(mission.get_entities(kind)[0]["index"])  # ground x = 0
 	var index_b := int(mission.get_entities(kind)[1]["index"])  # ground x = 100
 
@@ -1484,7 +1484,7 @@ func test_targeted_reground_updates_placed_nodes_in_place() -> void:
 	var controller := _new_with_item_db()
 	var mission := controller.get_mission()
 	assert_true(controller.place_entity_at_world(102001, Vector3(50, 10, -50)))
-	var kind := NovaMissionData.KIND_BUILDING
+	var kind := MissionData.KIND_BUILDING
 	var index := int(mission.get_entities(kind)[0]["index"])
 
 	# Fabricate the placed-world records the placer would have built (headless
@@ -1530,7 +1530,7 @@ func test_targeted_reground_falls_back_when_a_record_is_freed() -> void:
 	var controller := _new_with_item_db()
 	var mission := controller.get_mission()
 	assert_true(controller.place_entity_at_world(102001, Vector3(50, 10, -50)))
-	var kind := NovaMissionData.KIND_BUILDING
+	var kind := MissionData.KIND_BUILDING
 	var index := int(mission.get_entities(kind)[0]["index"])
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
@@ -1590,15 +1590,15 @@ func _stub_drift(controller: MissionController, surface_height: float) -> void:
 func test_undo_reverts_a_placement_and_deselects() -> void:
 	var controller := _loaded_with_item_db()
 	var mission := controller.get_mission()
-	var before := mission.get_entity_count(NovaMissionData.KIND_BUILDING)
+	var before := mission.get_entity_count(MissionData.KIND_BUILDING)
 	assert_false(controller.can_undo(), "a freshly opened mission has no undo history")
 
 	assert_true(controller.place_entity_at_world(102001, Vector3(50, 10, -50)))
-	assert_eq(mission.get_entity_count(NovaMissionData.KIND_BUILDING), before + 1, "the placement landed")
+	assert_eq(mission.get_entity_count(MissionData.KIND_BUILDING), before + 1, "the placement landed")
 	assert_true(controller.can_undo(), "a placement is undoable")
 
 	controller.undo()
-	assert_eq(mission.get_entity_count(NovaMissionData.KIND_BUILDING), before, "undo removes the placed entity")
+	assert_eq(mission.get_entity_count(MissionData.KIND_BUILDING), before, "undo removes the placed entity")
 	assert_eq(controller.get_selection_summary(), {}, "undo drops the selection (indices may have shifted)")
 	assert_false(controller.can_undo(), "the only step was consumed")
 	assert_true(controller.can_redo(), "and is now redoable")
@@ -1607,13 +1607,13 @@ func test_undo_reverts_a_placement_and_deselects() -> void:
 func test_redo_replays_a_placement() -> void:
 	var controller := _loaded_with_item_db()
 	var mission := controller.get_mission()
-	var before := mission.get_entity_count(NovaMissionData.KIND_BUILDING)
+	var before := mission.get_entity_count(MissionData.KIND_BUILDING)
 	controller.place_entity_at_world(102001, Vector3(50, 10, -50))
 	controller.undo()
-	assert_eq(mission.get_entity_count(NovaMissionData.KIND_BUILDING), before, "precondition: undone")
+	assert_eq(mission.get_entity_count(MissionData.KIND_BUILDING), before, "precondition: undone")
 
 	controller.redo()
-	assert_eq(mission.get_entity_count(NovaMissionData.KIND_BUILDING), before + 1, "redo re-applies the placement")
+	assert_eq(mission.get_entity_count(MissionData.KIND_BUILDING), before + 1, "redo re-applies the placement")
 	assert_true(controller.can_undo(), "the redone placement is undoable again")
 	assert_false(controller.can_redo(), "and the redo step is consumed")
 
@@ -1621,18 +1621,18 @@ func test_redo_replays_a_placement() -> void:
 func test_undo_restores_a_deleted_entity() -> void:
 	var controller := _loaded_with_selection()
 	var mission := controller.get_mission()
-	var buildings := mission.get_entities(NovaMissionData.KIND_BUILDING)
+	var buildings := mission.get_entities(MissionData.KIND_BUILDING)
 	var before := buildings.size()
 	var deleted_item := int(buildings[0]["item_id"])
 	var deleted_pos: Vector3 = buildings[0]["position"]
-	controller._viewport._select(NovaMissionData.KIND_BUILDING, int(buildings[0]["index"]))
+	controller._viewport._select(MissionData.KIND_BUILDING, int(buildings[0]["index"]))
 
 	assert_true(controller.delete_selected())
-	assert_eq(mission.get_entity_count(NovaMissionData.KIND_BUILDING), before - 1, "precondition: deleted")
+	assert_eq(mission.get_entity_count(MissionData.KIND_BUILDING), before - 1, "precondition: deleted")
 
 	controller.undo()
-	assert_eq(mission.get_entity_count(NovaMissionData.KIND_BUILDING), before, "undo restores the deleted entity")
-	var restored := mission.get_entity(NovaMissionData.KIND_BUILDING, 0)
+	assert_eq(mission.get_entity_count(MissionData.KIND_BUILDING), before, "undo restores the deleted entity")
+	var restored := mission.get_entity(MissionData.KIND_BUILDING, 0)
 	assert_eq(int(restored["item_id"]), deleted_item, "the restored entity is back at its original index")
 	var rp: Vector3 = restored["position"]
 	assert_almost_eq(rp.x, deleted_pos.x, 0.02, "with its original X")
@@ -1642,7 +1642,7 @@ func test_undo_restores_a_deleted_entity() -> void:
 func test_undo_restores_a_moved_position() -> void:
 	var controller := _loaded_with_selection()
 	var mission := controller.get_mission()
-	var kind := NovaMissionData.KIND_BUILDING
+	var kind := MissionData.KIND_BUILDING
 	var index := int(mission.get_entities(kind)[0]["index"])
 	controller._viewport._select(kind, index)
 	var original: Vector3 = mission.get_entity(kind, index)["position"]
@@ -1661,7 +1661,7 @@ func test_undo_restores_a_moved_position() -> void:
 func test_multi_axis_edit_coalesces_to_one_step() -> void:
 	var controller := _loaded_with_selection()
 	var mission := controller.get_mission()
-	var kind := NovaMissionData.KIND_BUILDING
+	var kind := MissionData.KIND_BUILDING
 	var index := int(mission.get_entities(kind)[0]["index"])
 	controller._viewport._select(kind, index)
 	var p := controller.get_selected_position()
@@ -1709,19 +1709,19 @@ func test_a_new_edit_clears_the_redo_stack() -> void:
 func test_undo_unwinds_edits_in_reverse_order_across_kinds() -> void:
 	var controller := _loaded_with_item_db()
 	var m := controller.get_mission()
-	var b0 := m.get_entity_count(NovaMissionData.KIND_BUILDING)
-	var i0 := m.get_entity_count(NovaMissionData.KIND_ITEM)
+	var b0 := m.get_entity_count(MissionData.KIND_BUILDING)
+	var i0 := m.get_entity_count(MissionData.KIND_ITEM)
 
 	controller.place_entity_at_world(102001, Vector3(10, 0, -10))  # building
 	controller.place_entity_at_world(101291, Vector3(20, 0, -20))  # vehicle -> item
-	assert_eq(m.get_entity_count(NovaMissionData.KIND_ITEM), i0 + 1, "precondition: item placed")
+	assert_eq(m.get_entity_count(MissionData.KIND_ITEM), i0 + 1, "precondition: item placed")
 
 	controller.undo()
-	assert_eq(m.get_entity_count(NovaMissionData.KIND_ITEM), i0, "first undo removes the most recent edit (the item)")
-	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), b0 + 1, "and leaves the earlier building")
+	assert_eq(m.get_entity_count(MissionData.KIND_ITEM), i0, "first undo removes the most recent edit (the item)")
+	assert_eq(m.get_entity_count(MissionData.KIND_BUILDING), b0 + 1, "and leaves the earlier building")
 
 	controller.undo()
-	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), b0, "second undo removes the building")
+	assert_eq(m.get_entity_count(MissionData.KIND_BUILDING), b0, "second undo removes the building")
 
 
 func test_undo_redo_ride_the_document_api_not_the_viewport() -> void:
@@ -1731,17 +1731,17 @@ func test_undo_redo_ride_the_document_api_not_the_viewport() -> void:
 	# claims the keys.
 	var controller := _loaded_with_item_db()
 	var m := controller.get_mission()
-	var before := m.get_entity_count(NovaMissionData.KIND_BUILDING)
+	var before := m.get_entity_count(MissionData.KIND_BUILDING)
 	controller.place_entity_at_world(102001, Vector3(10, 0, -10))
 
 	controller.handle_viewport_input(_ctrl_key(KEY_Z))
-	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), before + 1,
+	assert_eq(m.get_entity_count(MissionData.KIND_BUILDING), before + 1,
 		"a viewport Ctrl+Z no longer undoes (the shell owns the shortcut)")
 
 	controller.undo()
-	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), before, "undo() removes the placement")
+	assert_eq(m.get_entity_count(MissionData.KIND_BUILDING), before, "undo() removes the placement")
 	controller.redo()
-	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), before + 1, "redo() restores the placement")
+	assert_eq(m.get_entity_count(MissionData.KIND_BUILDING), before + 1, "redo() restores the placement")
 
 
 func test_ctrl_z_is_suppressed_while_a_text_field_has_focus() -> void:
@@ -1750,7 +1750,7 @@ func test_ctrl_z_is_suppressed_while_a_text_field_has_focus() -> void:
 	var controller := _loaded_with_item_db()
 	var m := controller.get_mission()
 	controller.place_entity_at_world(102001, Vector3(10, 0, -10))
-	var after_place := m.get_entity_count(NovaMissionData.KIND_BUILDING)
+	var after_place := m.get_entity_count(MissionData.KIND_BUILDING)
 
 	var field := LineEdit.new()
 	add_child_autofree(field)
@@ -1760,7 +1760,7 @@ func test_ctrl_z_is_suppressed_while_a_text_field_has_focus() -> void:
 		return
 
 	controller.handle_viewport_input(_ctrl_key(KEY_Z))
-	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), after_place,
+	assert_eq(m.get_entity_count(MissionData.KIND_BUILDING), after_place,
 		"Ctrl+Z is inert while a text field has focus")
 
 
@@ -1821,7 +1821,7 @@ func _first_empty_path(mission) -> int:
 
 
 func _marker_item_id(mission) -> int:
-	var markers: Array = mission.get_entities(NovaMissionData.KIND_MARKER)
+	var markers: Array = mission.get_entities(MissionData.KIND_MARKER)
 	return int(markers[0]["item_id"]) if not markers.is_empty() else 100001
 
 
@@ -1918,15 +1918,15 @@ func test_set_waypoint_flags_sets_and_is_undoable() -> void:
 	# A fresh path loops (DoesNotLoop clear) with no team. Turn loop off + flag it blue.
 	controller.set_waypoint_flags(false, true, false)
 	var after := controller.get_active_waypoint_path()
-	assert_eq(int(after["flags"]) & NovaMissionData.WP_FLAG_DOES_NOT_LOOP, NovaMissionData.WP_FLAG_DOES_NOT_LOOP,
+	assert_eq(int(after["flags"]) & MissionData.WP_FLAG_DOES_NOT_LOOP, MissionData.WP_FLAG_DOES_NOT_LOOP,
 		"loop off sets the DoesNotLoop bit")
-	assert_eq(int(after["flags"]) & NovaMissionData.WP_FLAG_BLUE_TEAM, NovaMissionData.WP_FLAG_BLUE_TEAM,
+	assert_eq(int(after["flags"]) & MissionData.WP_FLAG_BLUE_TEAM, MissionData.WP_FLAG_BLUE_TEAM,
 		"the blue team flag is set")
 	assert_true(controller.is_dirty(), "a flag edit dirties the mission")
 
 	controller.undo()
 	var reverted := controller.get_active_waypoint_path()
-	assert_eq(int(reverted["flags"]) & NovaMissionData.WP_FLAG_DOES_NOT_LOOP, 0,
+	assert_eq(int(reverted["flags"]) & MissionData.WP_FLAG_DOES_NOT_LOOP, 0,
 		"undo restores the looping flag (and leaves the marker in place)")
 
 
@@ -1965,14 +1965,14 @@ func test_arm_and_disarm_marker_placement() -> void:
 func test_add_marker_to_active_path_adds_selects_and_is_undoable() -> void:
 	var controller := _wp_ready()
 	var mission := controller.get_mission()
-	var before := mission.get_entity_count(NovaMissionData.KIND_MARKER)
+	var before := mission.get_entity_count(MissionData.KIND_MARKER)
 	assert_true(controller.add_marker_to_active_path_at_world(Vector3(50, 10, -50)), "adding a marker succeeds")
-	assert_eq(mission.get_entity_count(NovaMissionData.KIND_MARKER), before + 1, "a marker entity was created")
+	assert_eq(mission.get_entity_count(MissionData.KIND_MARKER), before + 1, "a marker entity was created")
 	assert_eq(int(controller.get_active_waypoint_path()["marker_count"]), 1, "and linked into the active path")
 	assert_false(controller.get_selected_marker().is_empty(), "the new marker is selected")
 	assert_true(controller.is_dirty())
 	controller.undo()
-	assert_eq(mission.get_entity_count(NovaMissionData.KIND_MARKER), before, "undo removes the added marker")
+	assert_eq(mission.get_entity_count(MissionData.KIND_MARKER), before, "undo removes the added marker")
 	assert_eq(int(controller.get_active_waypoint_path()["marker_count"]), 0, "and unlinks it from the path")
 
 
@@ -1980,13 +1980,13 @@ func test_armed_left_click_adds_a_marker_via_the_viewport() -> void:
 	var controller := _wp_ready()
 	var mission := controller.get_mission()
 	controller.arm_marker_placement()
-	var before := mission.get_entity_count(NovaMissionData.KIND_MARKER)
+	var before := mission.get_entity_count(MissionData.KIND_MARKER)
 	var press := InputEventMouseButton.new()
 	press.button_index = MOUSE_BUTTON_LEFT
 	press.pressed = true
 	press.position = Vector2(64, 64)
 	controller.handle_viewport_input(press)
-	assert_eq(mission.get_entity_count(NovaMissionData.KIND_MARKER), before + 1, "an armed click added a marker")
+	assert_eq(mission.get_entity_count(MissionData.KIND_MARKER), before + 1, "an armed click added a marker")
 	assert_true(controller.is_marker_placement_armed(), "and the tool stays armed for more")
 
 
@@ -1995,13 +1995,13 @@ func test_armed_marker_click_off_terrain_adds_nothing() -> void:
 	var mission := controller.get_mission()
 	controller.arm_marker_placement()
 	controller.terrain_editor.terrain_hit_valid = false  # the raycast now misses
-	var before := mission.get_entity_count(NovaMissionData.KIND_MARKER)
+	var before := mission.get_entity_count(MissionData.KIND_MARKER)
 	var press := InputEventMouseButton.new()
 	press.button_index = MOUSE_BUTTON_LEFT
 	press.pressed = true
 	press.position = Vector2(64, 64)
 	controller.handle_viewport_input(press)
-	assert_eq(mission.get_entity_count(NovaMissionData.KIND_MARKER), before, "a click off the terrain adds no marker")
+	assert_eq(mission.get_entity_count(MissionData.KIND_MARKER), before, "a click off the terrain adds no marker")
 
 
 func test_right_click_disarms_marker_placement() -> void:
@@ -2052,14 +2052,14 @@ func test_delete_selected_marker_removes_repairs_and_is_undoable() -> void:
 	var a := mission.add_waypoint_marker(path, _marker_item_id(mission), Vector3(1, 0, -1), Vector3.ZERO, -1)
 	mission.add_waypoint_marker(path, _marker_item_id(mission), Vector3(2, 0, -2), Vector3.ZERO, -1)
 	controller.select_waypoint_path(path)
-	var before := mission.get_entity_count(NovaMissionData.KIND_MARKER)
+	var before := mission.get_entity_count(MissionData.KIND_MARKER)
 	controller.select_waypoint_marker(int((a["marker"] as Dictionary)["index"]))
 	assert_true(controller.delete_selected_marker(), "deleting the selected marker succeeds")
-	assert_eq(mission.get_entity_count(NovaMissionData.KIND_MARKER), before - 1, "the marker entity is removed")
+	assert_eq(mission.get_entity_count(MissionData.KIND_MARKER), before - 1, "the marker entity is removed")
 	assert_eq(int(controller.get_active_waypoint_path()["marker_count"]), 1, "and dropped from the path (repaired)")
 	assert_eq(controller.get_selected_marker(), {}, "the marker selection clears")
 	controller.undo()
-	assert_eq(mission.get_entity_count(NovaMissionData.KIND_MARKER), before, "undo restores the deleted marker")
+	assert_eq(mission.get_entity_count(MissionData.KIND_MARKER), before, "undo restores the deleted marker")
 	assert_eq(int(controller.get_active_waypoint_path()["marker_count"]), 2, "and re-links it into the path")
 
 
@@ -2070,13 +2070,13 @@ func test_clear_active_path_removes_markers_and_is_undoable() -> void:
 	mission.add_waypoint_marker(path, _marker_item_id(mission), Vector3(1, 0, -1), Vector3.ZERO, -1)
 	mission.add_waypoint_marker(path, _marker_item_id(mission), Vector3(2, 0, -2), Vector3.ZERO, -1)
 	controller.select_waypoint_path(path)
-	var before := mission.get_entity_count(NovaMissionData.KIND_MARKER)
+	var before := mission.get_entity_count(MissionData.KIND_MARKER)
 	assert_true(controller.clear_active_path(), "clearing the path succeeds")
 	assert_eq(int(controller.get_active_waypoint_path()["marker_count"]), 0, "the path is now empty")
-	assert_eq(mission.get_entity_count(NovaMissionData.KIND_MARKER), before - 2, "its markers are deleted (no orphans)")
+	assert_eq(mission.get_entity_count(MissionData.KIND_MARKER), before - 2, "its markers are deleted (no orphans)")
 	controller.undo()
 	assert_eq(int(controller.get_active_waypoint_path()["marker_count"]), 2, "undo restores the path's markers")
-	assert_eq(mission.get_entity_count(NovaMissionData.KIND_MARKER), before, "and the marker entities")
+	assert_eq(mission.get_entity_count(MissionData.KIND_MARKER), before, "and the marker entities")
 
 
 func test_delete_key_deletes_marker_in_waypoint_mode() -> void:
@@ -2086,12 +2086,12 @@ func test_delete_key_deletes_marker_in_waypoint_mode() -> void:
 	var r := mission.add_waypoint_marker(path, _marker_item_id(mission), Vector3(1, 0, -1), Vector3.ZERO, -1)
 	controller.select_waypoint_path(path)
 	controller.select_waypoint_marker(int((r["marker"] as Dictionary)["index"]))
-	var before := mission.get_entity_count(NovaMissionData.KIND_MARKER)
+	var before := mission.get_entity_count(MissionData.KIND_MARKER)
 	var key := InputEventKey.new()
 	key.pressed = true
 	key.keycode = KEY_DELETE
 	controller.handle_viewport_input(key)
-	assert_eq(mission.get_entity_count(NovaMissionData.KIND_MARKER), before - 1, "Delete removed the selected marker")
+	assert_eq(mission.get_entity_count(MissionData.KIND_MARKER), before - 1, "Delete removed the selected marker")
 	assert_eq(controller.get_selected_marker(), {}, "and cleared the marker selection")
 
 
@@ -2114,12 +2114,12 @@ func test_marker_drag_commits_the_new_position() -> void:
 	controller._waypoints._on_marker_left_release()
 
 	var expected: Vector3 = Placer.godot_to_bms_position(controller.terrain_editor.terrain_hit)
-	var stored: Vector3 = mission.get_entity(NovaMissionData.KIND_MARKER, marker_index)["position"]
+	var stored: Vector3 = mission.get_entity(MissionData.KIND_MARKER, marker_index)["position"]
 	assert_almost_eq(stored.x, expected.x, 0.05, "the dragged marker's X is written to the record")
 	assert_almost_eq(stored.z, expected.z, 0.05, "and its Z")
 	assert_true(controller.is_dirty(), "a committed marker drag dirties the mission")
 	controller.undo()
-	var reverted: Vector3 = mission.get_entity(NovaMissionData.KIND_MARKER, marker_index)["position"]
+	var reverted: Vector3 = mission.get_entity(MissionData.KIND_MARKER, marker_index)["position"]
 	assert_almost_eq(reverted.x, 1.0, 0.05, "undo restores the marker's original X")
 
 
@@ -2584,9 +2584,9 @@ func test_move_selected_event_action_reorders_the_chain() -> void:
 
 
 # --- Phase 4: PLAYPARTANIM in-editor preview ----------------------------------
-# The preview resolves a scripting action's target to its live model (the same NovaEntityIndex the
+# The preview resolves a scripting action's target to its live model (the same EntityIndex the
 # runtime owner builds, over the placer's construction-time {model, ref} registrations) and drives
-# it. Asset-free: a REAL NovaObjectModel with no object data — the part-anim channel state
+# it. Asset-free: a REAL ObjectModel with no object data — the part-anim channel state
 # (get_active_part_anims / get_ctrl_values / is_playing / get_animation_time_ms) is the observable.
 
 # A controller whose placer registers one real animatable model under the given bms_id — the same
@@ -2602,7 +2602,7 @@ func _controller_with_model(bms_id: int) -> Dictionary:
 	var container := Node3D.new()
 	container.name = "MissionObjects"
 	world_root.add_child(container)
-	var model := NovaObjectModel.new()
+	var model := ObjectModel.new()
 	container.add_child(model)
 	model.set_process(false)
 	var ref := { "kind": 1, "index": 0, "bms_id": bms_id, "group": 4, "team": 0, "position": Vector3.ZERO }
@@ -2623,7 +2623,7 @@ func _ppa_action(action_type: int, target: int, channel: int, play_type: int, ti
 
 func test_preview_part_anim_routes_to_target_model() -> void:
 	var ctx := _controller_with_model(1001)
-	var model: NovaObjectModel = ctx.model
+	var model: ObjectModel = ctx.model
 	model.set_playing(false)  # so the preview's set_playing(true) leg is observable
 	var ok: bool = ctx.controller.preview_part_anim(_ppa_action(21, 1001, 2, 1, 131072))  # ChangeSingleAI, 2.0s
 	assert_true(ok, "preview resolves the target and returns true")
@@ -2634,7 +2634,7 @@ func test_preview_part_anim_routes_to_target_model() -> void:
 	assert_true(anims.has("VEHICLE_SPECIAL2"), "channel 2 drives the VEHICLE_SPECIAL2 register")
 	var entry: Dictionary = anims.get("VEHICLE_SPECIAL2", {})
 	assert_eq(int(entry.get("dir", 0)), 1, "play type forwarded as the sweep direction")
-	assert_eq(int(entry.get("rate", -1)), NovaObjectData.part_anim_rate_for_seconds(2.0),
+	assert_eq(int(entry.get("rate", -1)), ObjectData.part_anim_rate_for_seconds(2.0),
 		"time (raw 16.16) -> seconds reaches the witnessed rate")
 	assert_eq(int(entry.get("value", -1)), 0, "a forward restart seeds the sweep from rest (phase 0)")
 	assert_true(model.is_playing(), "the model is set playing for the preview")
@@ -2649,7 +2649,7 @@ func test_can_preview_part_anim_reflects_target_resolution() -> void:
 
 func test_preview_no_target_returns_false() -> void:
 	var ctx := _controller_with_model(1001)
-	var model: NovaObjectModel = ctx.model
+	var model: ObjectModel = ctx.model
 	var ok: bool = ctx.controller.preview_part_anim(_ppa_action(21, 9999, 1, 1, 65536))
 	assert_false(ok, "no resolvable target -> false")
 	assert_true(model.get_active_part_anims().is_empty(), "and nothing is played")
@@ -2657,7 +2657,7 @@ func test_preview_no_target_returns_false() -> void:
 
 func test_stop_preview_returns_model_to_rest() -> void:
 	var ctx := _controller_with_model(1001)
-	var model: NovaObjectModel = ctx.model
+	var model: ObjectModel = ctx.model
 	ctx.controller.preview_part_anim(_ppa_action(21, 1001, 1, 1, 65536))
 	assert_false(model.get_active_part_anims().is_empty(), "the preview registered a live channel")
 	assert_false(model.get_ctrl_values().is_empty(), "the restart seeded the channel's control register")
@@ -2671,7 +2671,7 @@ func test_stop_preview_returns_model_to_rest() -> void:
 
 func test_deselect_stops_preview() -> void:
 	var ctx := _controller_with_model(1001)
-	var model: NovaObjectModel = ctx.model
+	var model: ObjectModel = ctx.model
 	ctx.controller.preview_part_anim(_ppa_action(21, 1001, 1, 1, 65536))
 	assert_false(model.get_active_part_anims().is_empty(), "the preview registered a live channel")
 	ctx.controller._viewport._deselect()
@@ -2714,7 +2714,7 @@ func test_reground_all_repairs_what_the_drift_filter_protects() -> void:
 	var controller := _new_with_item_db()
 	var mission := controller.get_mission()
 	assert_true(controller.place_entity_at_world(102001, Vector3(50.0, 10.0, -50.0)))
-	var kind := NovaMissionData.KIND_BUILDING
+	var kind := MissionData.KIND_BUILDING
 	var grounded: Vector3 = mission.get_entities(kind)[0]["position"]
 	# Adopt the fresh placement into the ground baseline: load-time memos do not
 	# cover entities placed afterwards, and the drift filter only protects
@@ -2754,7 +2754,7 @@ func test_reground_all_without_mission_is_inert() -> void:
 func test_move_selected_to_world_grounded_matches_direct_placement() -> void:
 	var controller := _new_with_item_db()
 	var mission := controller.get_mission()
-	var kind := NovaMissionData.KIND_BUILDING
+	var kind := MissionData.KIND_BUILDING
 	# Reference: the same item placed directly at the destination hit.
 	assert_true(controller.place_entity_at_world(102001, Vector3(80.0, 10.0, -20.0)))
 	var reference: Vector3 = mission.get_entities(kind)[0]["position"]
@@ -2778,14 +2778,14 @@ func test_move_selected_to_world_grounded_marker_stores_hit() -> void:
 	var mission := controller.get_mission()
 	var marker_id := -1
 	for item in controller.get_placeable_items():
-		if NovaMissionData.kind_for_item_type(int(item["type"])) == NovaMissionData.KIND_MARKER:
+		if MissionData.kind_for_item_type(int(item["type"])) == MissionData.KIND_MARKER:
 			marker_id = int(item["id"])
 			break
 	assert_gt(marker_id, 0, "precondition: the items fixture carries a marker item")
 	assert_true(controller.place_entity_at_world(marker_id, Vector3(50.0, 10.0, -50.0)))
-	controller.select_object(NovaMissionData.KIND_MARKER, 0)
+	controller.select_object(MissionData.KIND_MARKER, 0)
 	assert_true(controller.move_selected_to_world_grounded(Vector3(80.0, 10.0, -20.0)))
-	var pos: Vector3 = mission.get_entities(NovaMissionData.KIND_MARKER)[0]["position"]
+	var pos: Vector3 = mission.get_entities(MissionData.KIND_MARKER)[0]["position"]
 	assert_almost_eq(pos.x, 80.0, 0.001, "markers store the hit directly (BMS x)")
 	assert_almost_eq(pos.y, 20.0, 0.001, "BMS y = -world z")
 	assert_almost_eq(pos.z, 10.0, 0.001, "BMS z = world height")
@@ -2841,7 +2841,7 @@ class StubEnvTerrainEditor:
 
 func test_reload_environment_applies_ref_and_mission_overrides() -> void:
 	var stub := StubEnvTerrainEditor.new()
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	root.set_root_dir(_abs("res://../fixtures/env"))
 	stub.resource_root = root
 	stub.world_root = Node3D.new()

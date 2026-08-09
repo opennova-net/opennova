@@ -4,7 +4,7 @@ extends MenuCompanion
 # Drives the JO PLAYER_INFO screen (player.mnu) by control NAME: fills the
 # NATIONALITY / DIVISION / COMBO_LIST / PLAYERVOICE comboboxes from Avatars.def and
 # runs the nationality -> division -> combo cascade plus the SIDE_BLUE/SIDE_RED team
-# filter. It is a companion the game-agnostic NovaMenuShell (nova_menu_shell.gd) delegates
+# filter. It is a companion the game-agnostic MenuShell (nova_menu_shell.gd) delegates
 # to -- the same pattern as mp_menu_companion.gd -- claimed by the NATIONALITY + COMBO_LIST
 # controls unique to this screen.
 #
@@ -37,20 +37,20 @@ const VOICE_PREVIEW_TRIGGER_FORMAT := "VOICE_%d"
 # The 3D character preview (compatible head/body .3di composited), reused from the
 # ONED Avatars workspace. Mounted into the PLAYER_PREVIEW widget rect and fed the
 # resolved combo; it plays the witnessed raw-.bad idle when those assets resolve.
-const AvatarPreviewScript := preload("res://adapter/avatar/avatar_preview.gd")
+const AvatarPreviewScript := preload("res://src/avatar/avatar_preview.gd")
 
 const PARENT_SLOTS := {
-	"PRIMARY": NovaWeaponDatabase.SLOT_PRIMARY,
-	"SECONDARY": NovaWeaponDatabase.SLOT_SECONDARY,
-	"ACCESSORY": NovaWeaponDatabase.SLOT_ACCESSORY,
+	"PRIMARY": WeaponDatabase.SLOT_PRIMARY,
+	"SECONDARY": WeaponDatabase.SLOT_SECONDARY,
+	"ACCESSORY": WeaponDatabase.SLOT_ACCESSORY,
 }
 # Only PRIMARY/SECONDARY author an ammo-TYPE combo (player.mnu statics FMJ/AP/SP,
 # values 0/1/2); ACCESSORY and the grenades have none.
 const TYPE_SLOTS := ["PRIMARY", "SECONDARY"]
 const GRENADE_CONTROLS := ["GRENADE_AMMO1", "GRENADE_AMMO2", "GRENADE_AMMO3"]
 
-var _db: NovaAvatarDatabase
-var _weapons: NovaWeaponDatabase     # weapon.def loadout table (PRIMARY/SECONDARY/ACCESSORY)
+var _db: AvatarDatabase
+var _weapons: WeaponDatabase     # weapon.def loadout table (PRIMARY/SECONDARY/ACCESSORY)
 var _slot_rows: Dictionary = {}         # control name -> row-aligned weapon transport dicts
 var _team := 0                          # 0 = blue/good, 1 = red/evil (SIDE_BLUE default CHECKED)
 # Per-def picked clip counts, keyed by weapon-table index; -1/absent = the def
@@ -120,7 +120,7 @@ func _wire(_file: String, _screen: String) -> void:
 func _ensure_db() -> void:
 	if _db != null or _root == null:
 		return
-	_db = NovaAvatarDatabase.new()
+	_db = AvatarDatabase.new()
 	if _db.load_from_resource_root(_root, "Avatars.def") != OK or not _db.is_loaded():
 		push_warning("PlayerInfoMenuCompanion: Avatars.def not loaded (%s); avatar combos stay empty"
 			% _db.get_last_error())
@@ -131,12 +131,12 @@ func _ensure_db() -> void:
 # section -- the table the original consults for these names
 # [orig: GameText_GetStringWithFallback @ 0x51eb90 / g_TextGameText @ 0xB4C2AC; "Avatars"
 # section, docs/playerinfo/avatars-re.md]. The shell registers gametext (Game.bin) into the
-# shared NovaStrings registry at boot. A miss falls back to the raw key (the witnessed
-# fallback; not the "??section:key??" debug marker NovaStrings.lookup would return).
+# shared Strings registry at boot. A miss falls back to the raw key (the witnessed
+# fallback; not the "??section:key??" debug marker Strings.lookup would return).
 func _display_name(key: String) -> String:
 	if key.is_empty():
 		return ""
-	var t: RtxtStringFile = NovaStrings.get_table("gameui")
+	var t: RtxtStringFile = Strings.get_table("gameui")
 	if t != null and t.has_string_in_section(ATBL_SECTION, key):
 		return t.get_string_in_section(ATBL_SECTION, key)
 	return key
@@ -148,7 +148,7 @@ func _display_name(key: String) -> String:
 ## this as a public seam lets callers exercise the same menu population path without
 ## reaching into companion internals. The recorded ammo picks are keyed by table index,
 ## so a table swap invalidates them — clear rather than misapply.
-func set_weapon_database(weapons: NovaWeaponDatabase) -> void:
+func set_weapon_database(weapons: WeaponDatabase) -> void:
 	_weapons = weapons
 	_ammo_pri.clear()
 	_ammo_sec.clear()
@@ -160,7 +160,7 @@ func set_weapon_database(weapons: NovaWeaponDatabase) -> void:
 func _ensure_weapons() -> void:
 	if _weapons != null or _root == null:
 		return
-	_weapons = NovaWeaponDatabase.new()
+	_weapons = WeaponDatabase.new()
 	if _weapons.load_from_resource_root(_root, "weapon.def") != OK or not _weapons.is_loaded():
 		push_warning("PlayerInfoMenuCompanion: weapon.def not loaded (%s); loadout combos stay empty"
 			% _weapons.get_last_error())
@@ -176,10 +176,10 @@ func _populate_loadout() -> void:
 		return
 	var class_mask := _selected_class_mask()
 	# [orig: g_playerInfoTeamMask = 2 - (team != 0) @0x55de60 — native policy]
-	var team_mask := NovaWeaponDatabase.player_info_team_mask(_team)
-	_fill_weapon_slot("PRIMARY", NovaWeaponDatabase.SLOT_PRIMARY, class_mask, team_mask)
-	_fill_weapon_slot("SECONDARY", NovaWeaponDatabase.SLOT_SECONDARY, class_mask, team_mask)
-	_fill_weapon_slot("ACCESSORY", NovaWeaponDatabase.SLOT_ACCESSORY, class_mask, team_mask)
+	var team_mask := WeaponDatabase.player_info_team_mask(_team)
+	_fill_weapon_slot("PRIMARY", WeaponDatabase.SLOT_PRIMARY, class_mask, team_mask)
+	_fill_weapon_slot("SECONDARY", WeaponDatabase.SLOT_SECONDARY, class_mask, team_mask)
+	_fill_weapon_slot("ACCESSORY", WeaponDatabase.SLOT_ACCESSORY, class_mask, team_mask)
 	for control in PARENT_SLOTS:
 		_populate_slot_ammo(control)
 	_populate_grenades(class_mask, team_mask)
@@ -220,7 +220,7 @@ func _selected_weapon(control: String) -> Dictionary:
 func _weapon_label(w: Dictionary) -> String:
 	var textid := String(w.get("display_textid", ""))
 	if not textid.is_empty():
-		var t: RtxtStringFile = NovaStrings.get_table("gametext")
+		var t: RtxtStringFile = Strings.get_table("gametext")
 		if t != null and t.has_string_in_section("WepDes", textid):
 			return t.get_string_in_section("WepDes", textid)
 	return String(w.get("name", ""))
@@ -235,7 +235,7 @@ func _selected_class_mask() -> int:
 		return 0x1F  # no class control -> show every class's weapons (defensive)
 	var val := combo.get_selected_value()
 	var cls := int(val) if val.is_valid_int() else 0
-	return NovaWeaponDatabase.player_info_class_mask(cls)
+	return WeaponDatabase.player_info_class_mask(cls)
 
 
 func _on_class_selected(_row: int, _value: String) -> void:
@@ -270,8 +270,8 @@ func _populate_slot_ammo(control: String) -> void:
 			# Saved count selects its row; -1/absent = the maxclips row (full
 			# default) [orig: the `saved == i || (saved == -1 && i == maxclips)`
 			# select in both fills — native default_clip_row].
-			var saved := int(_ammo_pri.get(index, NovaWeaponDatabase.CLIP_COUNT_DEF_DEFAULT))
-			ammo1.select_silent(NovaWeaponDatabase.default_clip_row(saved, maxclips) - 1)
+			var saved := int(_ammo_pri.get(index, WeaponDatabase.CLIP_COUNT_DEF_DEFAULT))
+			ammo1.select_silent(WeaponDatabase.default_clip_row(saved, maxclips) - 1)
 	if type_combo != null:
 		# The TYPE combo keeps its authored FMJ/AP/SP statics; shown with AMMO1,
 		# selection = the saved per-team type byte (-1 -> 0). flags2 NOAMMOTYPES
@@ -279,7 +279,7 @@ func _populate_slot_ammo(control: String) -> void:
 		# [orig: @ 0x55def0 — the +188 & 0x40 gate -> UIWidget_SetInteractiveRecursive].
 		type_combo.visible = has_ammo
 		if has_ammo:
-			var locked := (int(w.get("flags2", 0)) & NovaWeaponDatabase.FLAG2_NOAMMOTYPES) != 0
+			var locked := (int(w.get("flags2", 0)) & WeaponDatabase.FLAG2_NOAMMOTYPES) != 0
 			type_combo.disabled = locked
 			if locked:
 				_slot_type_store(control)[_team] = 0
@@ -300,8 +300,8 @@ func _populate_slot_ammo(control: String) -> void:
 			for clips in range(1, sub_max + 1):
 				rows2.append(_ammo_row_label(sub, clips))
 			_set_combo_items(ammo2, rows2)
-			var saved2 := int(_ammo_sec.get(index, NovaWeaponDatabase.CLIP_COUNT_DEF_DEFAULT))
-			ammo2.select_silent(NovaWeaponDatabase.default_clip_row(saved2, sub_max) - 1)
+			var saved2 := int(_ammo_sec.get(index, WeaponDatabase.CLIP_COUNT_DEF_DEFAULT))
+			ammo2.select_silent(WeaponDatabase.default_clip_row(saved2, sub_max) - 1)
 
 
 # The sub-weapon behind *_AMMO2 — the native def-table walk
@@ -322,7 +322,7 @@ func _populate_grenades(class_mask: int, team_mask: int) -> void:
 	_grenade_rows = []
 	if _weapons != null:
 		var dicts: Array = _weapons.get_slot_weapons(
-				NovaWeaponDatabase.SLOT_GRENADE, class_mask, team_mask)
+				WeaponDatabase.SLOT_GRENADE, class_mask, team_mask)
 		for i in mini(dicts.size(), GRENADE_CONTROLS.size()):
 			_grenade_rows.append(dicts[i] as Dictionary)
 	for i in GRENADE_CONTROLS.size():
@@ -348,7 +348,7 @@ func _populate_grenades(class_mask: int, team_mask: int) -> void:
 func _ammo_row_label(w: Dictionary, clips: int) -> String:
 	var round_label := String(w.get("round_type", ""))
 	if not round_label.is_empty():
-		var gametext: RtxtStringFile = NovaStrings.get_table("gametext")
+		var gametext: RtxtStringFile = Strings.get_table("gametext")
 		if gametext != null and gametext.has_string_in_section("WepDes", round_label):
 			round_label = gametext.get_string_in_section("WepDes", round_label)
 	return "%d - %s" % [clips * int(w.get("clipsize", 0)), round_label]
@@ -450,9 +450,9 @@ func _update_weight() -> void:
 		var sub := _subclass_weapon(w)
 		if _combo(control + "_AMMO2") != null \
 				and not sub.is_empty() and int(sub.get("clipsize", 0)) > 0:
-			var saved2 := int(_ammo_sec.get(index, NovaWeaponDatabase.CLIP_COUNT_DEF_DEFAULT))
+			var saved2 := int(_ammo_sec.get(index, WeaponDatabase.CLIP_COUNT_DEF_DEFAULT))
 			total += _weapons.extra_ammo_weight(int(sub.get("index", -1)),
-					NovaWeaponDatabase.CLIP_COUNT_DEF_DEFAULT if saved2 <= 0 else saved2)
+					WeaponDatabase.CLIP_COUNT_DEF_DEFAULT if saved2 <= 0 else saved2)
 	total += _weapons.loadout_weight(indices, counts)
 	for i in _grenade_rows.size():
 		# The witnessed grenade term is gated on the control existing AND shown.
@@ -461,13 +461,13 @@ func _update_weight() -> void:
 			continue
 		var g := _grenade_rows[i]
 		var saved := int(_ammo_pri.get(int(g.get("index", -1)),
-				NovaWeaponDatabase.CLIP_COUNT_DEF_DEFAULT))
+				WeaponDatabase.CLIP_COUNT_DEF_DEFAULT))
 		total += _weapons.extra_ammo_weight(int(g.get("index", -1)), saved)
 	var band := _weapons.encumbrance_class(total)
 	var encumbrance := _menu_ui_text("LIGHT_ENCUMBRANCE", "Light")
-	if band == NovaWeaponDatabase.ENCUMBRANCE_HEAVY:
+	if band == WeaponDatabase.ENCUMBRANCE_HEAVY:
 		encumbrance = _menu_ui_text("HEAVY_ENCUMBRANCE", "Heavy")
-	elif band == NovaWeaponDatabase.ENCUMBRANCE_NORMAL:
+	elif band == WeaponDatabase.ENCUMBRANCE_NORMAL:
 		encumbrance = _menu_ui_text("NORMAL_ENCUMBRANCE", "Normal")
 	var node := _find("STATIC_TOTAL_WEIGHT")
 	var label := node as Label
@@ -504,14 +504,14 @@ func _update_icons() -> void:
 			icon_rect.texture = null
 		else:
 			icon_rect.texture = _root.load_texture(
-					icon_name, NovaResourceRoot.LOOKUP_FORCE_LOOSE_FIRST)
+					icon_name, ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST)
 
 
 # The weight/encumbrance keys are menu-UI tokens (menutxt "Menu", else gameui
 # "Menu") — a different section set than the Avatars display keys.
 func _menu_ui_text(key: String, fallback: String) -> String:
 	for spec in [["menutxt", "Menu"], ["gameui", "Menu"]]:
-		var t: RtxtStringFile = NovaStrings.get_table(spec[0])
+		var t: RtxtStringFile = Strings.get_table(spec[0])
 		if t != null and t.has_string_in_section(spec[1], key):
 			return t.get_string_in_section(spec[1], key)
 	return fallback
@@ -762,14 +762,14 @@ func commit() -> void:
 
 # --- Helpers ------------------------------------------------------------------
 
-func _combo(name: String) -> NovaMnuCombo:
-	return _find(name) as NovaMnuCombo
+func _combo(name: String) -> MnuCombo:
+	return _find(name) as MnuCombo
 
 
 # Fill a combo and pre-select the first row without firing the cascade (the fill is
 # programmatic; user selections come through item_selected). select_silent suppresses
 # the relay; the _populating guard covers any incidental emit from set_items.
-func _set_combo_items(combo: NovaMnuCombo, rows: PackedStringArray) -> void:
+func _set_combo_items(combo: MnuCombo, rows: PackedStringArray) -> void:
 	_populating = true
 	combo.set_items(rows)
 	if rows.size() > 0:
@@ -793,7 +793,7 @@ func _menu_text(key: String, fallback: String) -> String:
 	# "Avatars" in the shared registry, else the readable fallback. Voice labels are cosmetic,
 	# so a miss never blocks population.
 	for spec in [["menutxt", "Menu"], ["gameui", ATBL_SECTION]]:
-		var t: RtxtStringFile = NovaStrings.get_table(spec[0])
+		var t: RtxtStringFile = Strings.get_table(spec[0])
 		if t != null and t.has_string_in_section(spec[1], key):
 			return t.get_string_in_section(spec[1], key)
 	return fallback

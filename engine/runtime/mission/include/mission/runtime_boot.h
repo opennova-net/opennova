@@ -23,7 +23,7 @@
 namespace opennova::mission {
 
 // The embedder's mounted-resource reader (the Godot binding backs this with
-// NovaResourceRoot's native ResourceIndex; tests use in-memory maps).
+// ResourceRoot's native ResourceIndex; tests use in-memory maps).
 struct BootFileSource {
 	std::function<bool(const std::string &name)> has_file;
 	std::function<bool(const std::string &name, std::vector<uint8_t> &out)>

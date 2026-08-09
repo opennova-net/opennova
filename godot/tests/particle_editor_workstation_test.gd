@@ -12,10 +12,10 @@ const ParticleEditorScript = preload("res://modtools/particle/particle_editor.gd
 const ParticleEffectInspectorScript = preload("res://modtools/particle/inspectors/effect_inspector.gd")
 const ParticleDefInspectorScript = preload("res://modtools/particle/inspectors/particle_inspector.gd")
 const ParticleTableInspectorScript = preload("res://modtools/particle/inspectors/table_inspector.gd")
-const FlyCameraScript = preload("res://adapter/fly_camera.gd")
+const FlyCameraScript = preload("res://src/fly_camera.gd")
 
 const OUTPUT_DIR_NAME := "particle_editor_workstation_test"
-const PARTICLE_FLAG_FOREVER_EMIT := NovaParticleDef.FLAG_FOREVER_EMIT  # particle_flag::ForeverEmit = 0x40000 (engine flag-table idx 18, post-HAZE)
+const PARTICLE_FLAG_FOREVER_EMIT := ParticleDef.FLAG_FOREVER_EMIT  # particle_flag::ForeverEmit = 0x40000 (engine flag-table idx 18, post-HAZE)
 
 
 class DirtyGuardShell:
@@ -103,13 +103,13 @@ func _write_test_texture(path: String) -> void:
 
 func _find_multigraphic_particle(particles: Array) -> Dictionary:
 	for entry in particles:
-		var particle := entry as NovaParticleDef
+		var particle := entry as ParticleDef
 		if particle == null:
 			continue
 		var graphics: Array = particle.get_graphics()
 		var present_layers := 0
 		for layer_entry in graphics:
-			var layer := layer_entry as NovaParticleGraphicLayer
+			var layer := layer_entry as ParticleGraphicLayer
 			if layer != null and layer.get_present():
 				present_layers += 1
 		if present_layers > 1:
@@ -127,8 +127,8 @@ func _make_render_test_particle(
 		yaw_rot: float = 0.0,
 		roll_rot: float = 0.0,
 		texture_name: String = "",
-		forever_emit: bool = false) -> NovaParticleDef:
-	var particle := NovaParticleDef.new()
+		forever_emit: bool = false) -> ParticleDef:
+	var particle := ParticleDef.new()
 	particle.id = "RenderTestParticle"
 	particle.flags = PARTICLE_FLAG_FOREVER_EMIT if forever_emit else 0
 	particle.emit_dur = 1.0
@@ -146,7 +146,7 @@ func _make_render_test_particle(
 	particle.color4 = Color(1.0, 1.0, 1.0, 1.0)
 
 	var graphics: Array = particle.get_graphics()
-	var layer := graphics[0] as NovaParticleGraphicLayer
+	var layer := graphics[0] as ParticleGraphicLayer
 	layer.present = true
 	layer.index = 1
 	layer.texture = texture_name
@@ -445,7 +445,7 @@ func test_short_lived_particle_preview_does_not_auto_repeat_after_selection() ->
 	var adapter = workstation.get_workspace_adapter(EditorWorkstationScript.Workspace.PARTICLE)
 	var err: Error = adapter.open_file(_fixture("30MM.ptl"))
 	assert_eq(err, OK, "30MM.ptl should load via the workspace adapter.")
-	var flash: NovaParticleDef = adapter.particle_editor.particle_file.find_particle("30mmFlash")
+	var flash: ParticleDef = adapter.particle_editor.particle_file.find_particle("30mmFlash")
 	assert_not_null(flash, "Fixture should include the short-lived 30mmFlash particle.")
 	adapter.select_particle(flash)
 	var lane: Control = workstation.get_node("%ViewportMount")
@@ -492,7 +492,7 @@ func test_effect_preview_uses_all_referenced_particle_defs() -> void:
 	assert_eq(err, OK, "30MM.ptl should load via the workspace adapter.")
 	var effects: Array = adapter.particle_editor.particle_file.get_effects()
 	assert_gt(effects.size(), 0, "Fixture should contain at least one effect.")
-	var effect := effects[0] as NovaParticleEffect
+	var effect := effects[0] as ParticleEffect
 	workstation.get_workspace_adapter(EditorWorkstationScript.Workspace.PARTICLE).select_workflow(ParticleWorkspaceScript.Workflow.EFFECTS)
 	await get_tree().process_frame
 	adapter.select_effect(effect)
@@ -515,7 +515,7 @@ func test_particle_preview_reports_present_graphic_layers() -> void:
 	var err: Error = adapter.open_file(_fixture("30MM.ptl"))
 	assert_eq(err, OK, "30MM.ptl should load via the workspace adapter.")
 	var selected_info := _find_multigraphic_particle(adapter.particle_editor.particle_file.get_particles())
-	var selected := selected_info.get("particle", null) as NovaParticleDef
+	var selected := selected_info.get("particle", null) as ParticleDef
 	var expected_layers := int(selected_info.get("present_layers", 0))
 
 	assert_not_null(selected, "Fixture should include a particle with multiple graphic layers.")
@@ -544,7 +544,7 @@ func test_particle_preview_layer_stats_read_the_retained_editor_model() -> void:
 	# values directly instead of serializing the scene's immutable catalog and
 	# every live particle merely to count four graphic slots.
 	var graphics: Array = particle.get_graphics()
-	var second := graphics[1] as NovaParticleGraphicLayer
+	var second := graphics[1] as ParticleGraphicLayer
 	second.present = true
 	second.index = 2
 	second.texture = "second_layer.tga"
@@ -562,7 +562,7 @@ func test_particle_preview_routes_particles_to_selected_graphic_layer() -> void:
 	var err: Error = adapter.open_file(_fixture("30MM.ptl"))
 	assert_eq(err, OK, "30MM.ptl should load via the workspace adapter.")
 	var selected_info := _find_multigraphic_particle(adapter.particle_editor.particle_file.get_particles())
-	var selected := selected_info.get("particle", null) as NovaParticleDef
+	var selected := selected_info.get("particle", null) as ParticleDef
 	assert_not_null(selected, "Fixture should include a particle with multiple graphic layers.")
 	adapter.select_particle(selected)
 
@@ -582,7 +582,7 @@ func test_particle_preview_resolves_graphic_textures_from_particle_file_dir() ->
 	assert_eq(DirAccess.make_dir_recursive_absolute(texture_dir), OK)
 	_write_test_texture(texture_dir.path_join("line.png"))
 
-	var file := NovaParticleFile.new()
+	var file := ParticleFile.new()
 	assert_eq(file.load_from_file(_fixture("buildup.ptl")), OK)
 	file.set_source_path(texture_dir.path_join("buildup.ptl"))
 
@@ -721,7 +721,7 @@ func test_property_edit_marks_document_dirty() -> void:
 	# Touch a field on the selected particle directly + mark dirty (mirrors what
 	# the inspector does on a SpinBox value_changed). After that, save action
 	# should be enabled.
-	var particle: NovaParticleDef = adapter.particle_editor.current_particle
+	var particle: ParticleDef = adapter.particle_editor.current_particle
 	assert_not_null(particle, "Open should pre-select the first particle.")
 	particle.set_emit_dur(particle.get_emit_dur() + 1.0)
 	adapter.particle_editor.mark_dirty()

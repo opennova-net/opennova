@@ -22,18 +22,18 @@ func _sheet() -> MnsStyleSheet:
 	return sheet
 
 
-func _doc() -> NovaMnuDocument:
-	var doc := NovaMnuDocument.new()
+func _doc() -> MnuDocument:
+	var doc := MnuDocument.new()
 	doc.load_from_bytes(FileAccess.get_file_as_bytes(FIXTURE))
 	return doc
 
 
-func _root_window(doc: NovaMnuDocument) -> int:
+func _root_window(doc: MnuDocument) -> int:
 	return doc.get_screen_root_id(doc.get_screen_ids()[0])
 
 
 # An inspector showing the fixture's root window with the stylesheet loaded.
-func _inspector(doc: NovaMnuDocument, id: int, sheet: MnsStyleSheet) -> MnuPropertyInspector:
+func _inspector(doc: MnuDocument, id: int, sheet: MnsStyleSheet) -> MnuPropertyInspector:
 	var inspector = MnuPropertyInspectorScript.new()
 	add_child_autofree(inspector)
 	inspector.set_stylesheet(sheet)

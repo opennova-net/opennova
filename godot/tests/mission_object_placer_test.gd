@@ -6,7 +6,7 @@ extends GutTest
 # .3di, so nothing resolves to a model and the placer must place zero without
 # error). Full render-placement is validated against real assets out-of-band.
 
-const Placer := preload("res://adapter/mission/mission_object_placer.gd")
+const Placer := preload("res://src/mission/mission_object_placer.gd")
 
 const BMS_PATH := "res://../fixtures/bms/ash_i5b.reference.bms"
 const ITEMS_PATH := "res://../fixtures/def/items.def"
@@ -83,13 +83,13 @@ func test_godot_to_bms_position_inverts_bms_to_godot() -> void:
 
 
 func test_place_handles_unresolvable_models_without_error() -> void:
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.open_file(_abs(BMS_PATH)), OK, "fixture BMS parses")
 
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK, "fixture items.def loads")
 
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	# Points at the def fixtures dir: it has items.def but no .3di, so no model
 	# resolves. set_root_dir may reject it; resolve_file then simply returns "".
 	root.set_root_dir(_abs("res://../fixtures/def"))
@@ -124,12 +124,12 @@ func test_place_is_a_noop_on_null_inputs() -> void:
 
 func test_place_single_reports_unresolved_when_no_model_resolves() -> void:
 	# Item 101291 carries an anim_def, so this exercises the ANIMATED branch's unresolved
-	# path (no .3di -> no NovaObjectData). The static branch is covered separately below.
-	var mission := NovaMissionData.new()
+	# path (no .3di -> no ObjectData). The static branch is covered separately below.
+	var mission := MissionData.new()
 	assert_eq(mission.open_file(_abs(BMS_PATH)), OK)
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	root.set_root_dir(_abs("res://../fixtures/def"))  # items.def but no .3di
 
 	var placer := Placer.new(root, item_db)
@@ -141,10 +141,10 @@ func test_place_single_reports_unresolved_when_no_model_resolves() -> void:
 	assert_not_null(container, "the container exists to place into")
 
 	# Add a real entity, then render just that one.
-	var record := mission.add_entity(NovaMissionData.KIND_ITEM, 101291, Vector3(1, 2, 3), Vector3.ZERO)
+	var record := mission.add_entity(MissionData.KIND_ITEM, 101291, Vector3(1, 2, 3), Vector3.ZERO)
 	var index := int(record["index"])
 	var pickable_before := placer.pickable_records.size()
-	var delta: Dictionary = placer.place_single(mission, container, NovaMissionData.KIND_ITEM, index)
+	var delta: Dictionary = placer.place_single(mission, container, MissionData.KIND_ITEM, index)
 
 	assert_eq(int(delta.get("unresolved", 0)), 1, "a graphic with no .3di reports unresolved")
 	assert_eq(int(delta.get("placed", -1)), 0, "and places nothing")
@@ -155,11 +155,11 @@ func test_place_single_static_branch_reports_unresolved_without_a_model() -> voi
 	# Item 105004 "Static Crate" is type object with no anim_def, so it takes the STATIC
 	# branch. With no .3di and no seeded batch cache it resolves no geometry and must
 	# report unresolved without recording a pickable.
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.open_file(_abs(BMS_PATH)), OK)
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	root.set_root_dir(_abs("res://../fixtures/def"))
 	var placer := Placer.new(root, item_db)
 	placer.edit_mode = true
@@ -168,10 +168,10 @@ func test_place_single_static_branch_reports_unresolved_without_a_model() -> voi
 	placer.place(mission, parent)
 	var container: Node3D = parent.get_node_or_null("MissionObjects")
 
-	var record := mission.add_entity(NovaMissionData.KIND_ITEM, 105004, Vector3(1, 2, 3), Vector3.ZERO)
+	var record := mission.add_entity(MissionData.KIND_ITEM, 105004, Vector3(1, 2, 3), Vector3.ZERO)
 	var index := int(record["index"])
 	var pickable_before := placer.pickable_records.size()
-	var delta: Dictionary = placer.place_single(mission, container, NovaMissionData.KIND_ITEM, index)
+	var delta: Dictionary = placer.place_single(mission, container, MissionData.KIND_ITEM, index)
 
 	assert_eq(int(delta.get("unresolved", 0)), 1, "a static graphic with no .3di reports unresolved")
 	assert_eq(int(delta.get("placed", -1)), 0, "and places nothing")
@@ -184,11 +184,11 @@ func test_place_single_static_branch_builds_a_single_instance_batch() -> void:
 	# by pre-seeding the per-graphic batch cache with a dummy mesh, so place_single
 	# renders without a real .3di. Full render fidelity is validated against real assets
 	# out-of-band, like place() itself.
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.open_file(_abs(BMS_PATH)), OK)
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	root.set_root_dir(_abs("res://../fixtures/def"))
 	var placer := Placer.new(root, item_db)
 	placer.edit_mode = true
@@ -201,16 +201,16 @@ func test_place_single_static_branch_builds_a_single_instance_batch() -> void:
 	var mesh := BoxMesh.new()
 	mesh.size = Vector3(2, 2, 2)
 	var offset := Transform3D(Basis(), Vector3(0, 1, 0))
-	var object_data := NovaObjectData.new()
+	var object_data := ObjectData.new()
 	assert_true(placer.register_resolved_static_graphic(
 			"StaticCrate1", object_data, [{
 		"mesh": mesh, "material": null, "offset": offset, "submesh": 0,
 	}]))
 
-	var record := mission.add_entity(NovaMissionData.KIND_ITEM, 105004, Vector3(3, 4, 5), Vector3.ZERO)
+	var record := mission.add_entity(MissionData.KIND_ITEM, 105004, Vector3(3, 4, 5), Vector3.ZERO)
 	var index := int(record["index"])
 	var pickable_before := placer.pickable_records.size()
-	var delta: Dictionary = placer.place_single(mission, container, NovaMissionData.KIND_ITEM, index)
+	var delta: Dictionary = placer.place_single(mission, container, MissionData.KIND_ITEM, index)
 
 	assert_eq(int(delta.get("placed", -1)), 1, "the static entity is placed")
 	assert_eq(int(delta.get("batched", -1)), 1, "via the static-batch branch")
@@ -218,17 +218,17 @@ func test_place_single_static_branch_builds_a_single_instance_batch() -> void:
 	assert_eq(placer.pickable_records.size(), pickable_before + 1, "it appends exactly one pickable record")
 
 	var rec: Dictionary = placer.pickable_records.back()
-	assert_eq(int(rec["kind"]), NovaMissionData.KIND_ITEM)
+	assert_eq(int(rec["kind"]), MissionData.KIND_ITEM)
 	assert_eq(int(rec["index"]), index, "the record points back at the placed entity")
 	assert_eq(int(rec["slot"]), 0, "a single-instance batch uses slot 0")
 	assert_false(bool(rec["animated"]))
 	var mmi := rec["mmi"] as MultiMeshInstance3D
 	assert_eq(mmi.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_OFF,
 			"retail static batches receive dynamic silhouettes but never cast them")
-	assert_ne(mmi.layers & NovaWater.VISUAL_LAYER_WORLD_NO_MIRROR, 0,
+	assert_ne(mmi.layers & Water.VISUAL_LAYER_WORLD_NO_MIRROR, 0,
 			"a type=object entity rides the no-mirror layer (env #30: only "
 			+ "vehicles reflect [orig: Entity_InitFromModel @ 0x40e20a])")
-	assert_eq(mmi.layers & NovaWater.VISUAL_LAYER_WORLD, 0,
+	assert_eq(mmi.layers & Water.VISUAL_LAYER_WORLD, 0,
 			"the non-vehicle batch leaves the mirror-visible world layer")
 	var mm: MultiMesh = rec["mm"]
 	assert_eq(mm.instance_count, 1, "the new static gets its own single-instance MultiMesh")
@@ -248,7 +248,7 @@ func test_place_single_static_branch_builds_a_single_instance_batch() -> void:
 	var effect_sources: Array = placer.get_static_item_effect_sources()
 	assert_eq(effect_sources.size(), 1)
 	var source: Dictionary = effect_sources[0]
-	assert_eq(int(source.get("kind", -1)), NovaMissionData.KIND_ITEM)
+	assert_eq(int(source.get("kind", -1)), MissionData.KIND_ITEM)
 	assert_eq(int(source.get("item_id", 0)), 105004)
 	assert_eq(String(source.get("graphic", "")), "StaticCrate1")
 	assert_eq(source.get("object_data"), object_data)
@@ -267,11 +267,11 @@ func test_place_single_static_vehicle_rides_the_mirror_visible_layer() -> void:
 	# entity+36 |= 0x400; Terrain_CollectVisibleEntitiesForReflection
 	# @ 0x5c90a0 filterMask 0x400]. Fixture 106002 "Static Vehicle" is the
 	# type=vehicle twin of the crate case above.
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.open_file(_abs(BMS_PATH)), OK)
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	root.set_root_dir(_abs("res://../fixtures/def"))
 	var placer := Placer.new(root, item_db)
 	placer.edit_mode = true
@@ -283,36 +283,36 @@ func test_place_single_static_vehicle_rides_the_mirror_visible_layer() -> void:
 	var mesh := BoxMesh.new()
 	mesh.size = Vector3(2, 1, 4)
 	assert_true(placer.register_resolved_static_graphic(
-			"StaticVehicle1", NovaObjectData.new(), [{
+			"StaticVehicle1", ObjectData.new(), [{
 		"mesh": mesh, "material": null,
 		"offset": Transform3D.IDENTITY, "submesh": 0,
 	}]))
 
 	var record := mission.add_entity(
-			NovaMissionData.KIND_ITEM, 106002, Vector3(1, 2, 3), Vector3.ZERO)
+			MissionData.KIND_ITEM, 106002, Vector3(1, 2, 3), Vector3.ZERO)
 	var delta: Dictionary = placer.place_single(
-			mission, container, NovaMissionData.KIND_ITEM, int(record["index"]))
+			mission, container, MissionData.KIND_ITEM, int(record["index"]))
 	assert_eq(int(delta.get("placed", -1)), 1, "the static vehicle places")
 
 	var rec: Dictionary = placer.pickable_records.back()
 	var mmi := rec["mmi"] as MultiMeshInstance3D
-	assert_ne(mmi.layers & NovaWater.VISUAL_LAYER_WORLD, 0,
+	assert_ne(mmi.layers & Water.VISUAL_LAYER_WORLD, 0,
 			"a type=vehicle entity stays on the mirror-visible world layer")
-	assert_eq(mmi.layers & NovaWater.VISUAL_LAYER_WORLD_NO_MIRROR, 0,
+	assert_eq(mmi.layers & Water.VISUAL_LAYER_WORLD_NO_MIRROR, 0,
 			"the vehicle batch never rides the no-mirror layer")
 
 
 func test_place_single_static_caster_reuses_its_visible_instance() -> void:
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	root.set_root_dir(_abs("res://../fixtures/def"))
 	var placer := Placer.new(root, item_db)
 	placer.edit_mode = true
 	assert_true(placer.register_resolved_static_graphic(
-			"StaticCrate1", NovaObjectData.new(), [{
+			"StaticCrate1", ObjectData.new(), [{
 				"mesh": BoxMesh.new(), "material": null,
 				"offset": Transform3D.IDENTITY, "submesh": 0,
 			}]))
@@ -321,59 +321,59 @@ func test_place_single_static_caster_reuses_its_visible_instance() -> void:
 	placer.place(mission, parent)
 	var container: Node3D = parent.get_node_or_null("MissionObjects")
 	var record := mission.add_entity(
-			NovaMissionData.KIND_BUILDING, 105004,
+			MissionData.KIND_BUILDING, 105004,
 			Vector3(3, 4, 5), Vector3.ZERO)
 
 	var delta: Dictionary = placer.place_single(
-			mission, container, NovaMissionData.KIND_BUILDING,
+			mission, container, MissionData.KIND_BUILDING,
 			int(record["index"]))
 
 	assert_eq(int(delta.get("batched", -1)), 1)
 	var visible_batch := placer.pickable_records.back()["mmi"] \
 			as MultiMeshInstance3D
 	assert_eq(visible_batch.layers,
-			NovaWater.VISUAL_LAYER_WORLD_NO_MIRROR \
-			| NovaWater.VISUAL_LAYER_STATIC_SHADOW_CASTER,
+			Water.VISUAL_LAYER_WORLD_NO_MIRROR \
+			| Water.VISUAL_LAYER_STATIC_SHADOW_CASTER,
 			"the one visible draw also enters the isolated static-caster pass "
 			+ "(non-vehicle: the no-mirror world layer, env #30)")
 	assert_eq(visible_batch.cast_shadow,
 			GeometryInstance3D.SHADOW_CASTING_SETTING_ON)
 	assert_null(container.get_node_or_null(
 			"StaticShadow_StaticCrate1_k%d_i%d_s0" % [
-				NovaMissionData.KIND_BUILDING, int(record["index"])]),
+				MissionData.KIND_BUILDING, int(record["index"])]),
 			"place_single avoids a second node referencing the same MultiMesh")
 
 
 func test_dynamic_shadow_caster_policy_matches_retail_entity_slot_admission() -> void:
 	assert_true(Placer.item_casts_dynamic_shadow(
-			NovaItemDatabase.TYPE_PERSON, 0, 0),
+			ItemDatabase.TYPE_PERSON, 0, 0),
 			"people always receive a retail shadow render slot")
 	assert_true(Placer.item_casts_dynamic_shadow(
-			NovaItemDatabase.TYPE_VEHICLE, 0, 0x10),
+			ItemDatabase.TYPE_VEHICLE, 0, 0x10),
 			"DynamicShadow admits a non-person model")
 	assert_false(Placer.item_casts_dynamic_shadow(
-			NovaItemDatabase.TYPE_BUILDING, 0, 0),
+			ItemDatabase.TYPE_BUILDING, 0, 0),
 			"portal/static buildings never become silhouette casters")
 	assert_true(Placer.item_casts_dynamic_shadow(
-			NovaItemDatabase.TYPE_PERSON, 0x04000000, 0x10),
+			ItemDatabase.TYPE_PERSON, 0x04000000, 0x10),
 			"the witnessed dynamic-slot allocator does not consult ItemDef NoShadow")
 
 
 func test_static_shadow_caster_policy_matches_retail_terrain_tile_admission() -> void:
 	assert_true(Placer.item_casts_static_terrain_shadow(
-			NovaMissionData.KIND_BUILDING, 0, 0, 0),
+			MissionData.KIND_BUILDING, 0, 0, 0),
 			"pool-2 buildings enter the terrain-tile caster pass by default")
 	assert_true(Placer.item_casts_static_terrain_shadow(
-			NovaMissionData.KIND_ITEM, 0, 0, 0x20),
+			MissionData.KIND_ITEM, 0, 0, 0x20),
 			"pool-1 items require StaticShadow")
 	assert_false(Placer.item_casts_static_terrain_shadow(
-			NovaMissionData.KIND_ITEM, 0, 0, 0),
+			MissionData.KIND_ITEM, 0, 0, 0),
 			"an ordinary pool-1 item is absent from the static pass")
 	assert_false(Placer.item_casts_static_terrain_shadow(
-			NovaMissionData.KIND_BUILDING, 0x01000000, 0, 0),
+			MissionData.KIND_BUILDING, 0x01000000, 0, 0),
 			"BMS NoShadow suppresses a pool-2 caster")
 	assert_false(Placer.item_casts_static_terrain_shadow(
-			NovaMissionData.KIND_BUILDING, 0, 0x04000000, 0),
+			MissionData.KIND_BUILDING, 0, 0x04000000, 0),
 			"ItemDef NoShadow suppresses a pool-2 caster")
 
 
@@ -382,21 +382,21 @@ func test_all_eligible_static_batch_reuses_its_visible_instance_as_caster() -> v
 	# all-eligible batch can carry both the ordinary world and static-caster
 	# marker without self-shadowing. This avoids one duplicate MultiMesh per
 	# submesh while preserving the visible draw.
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	assert_false(mission.add_entity(
-			NovaMissionData.KIND_BUILDING, 105004,
+			MissionData.KIND_BUILDING, 105004,
 			Vector3(1, 2, 3), Vector3.ZERO).is_empty())
 	assert_false(mission.add_entity(
-			NovaMissionData.KIND_BUILDING, 105004,
+			MissionData.KIND_BUILDING, 105004,
 			Vector3(4, 5, 6), Vector3.ZERO).is_empty())
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	root.set_root_dir(_abs("res://../fixtures/def"))
 	var placer := Placer.new(root, item_db)
 	assert_true(placer.register_resolved_static_graphic(
-			"StaticCrate1", NovaObjectData.new(), [{
+			"StaticCrate1", ObjectData.new(), [{
 				"mesh": BoxMesh.new(), "material": null,
 				"offset": Transform3D.IDENTITY, "submesh": 0,
 			}]))
@@ -412,8 +412,8 @@ func test_all_eligible_static_batch_reuses_its_visible_instance_as_caster() -> v
 	assert_not_null(visible_batch)
 	if visible_batch != null:
 		assert_eq(visible_batch.layers,
-				NovaWater.VISUAL_LAYER_WORLD_NO_MIRROR \
-				| NovaWater.VISUAL_LAYER_STATIC_SHADOW_CASTER,
+				Water.VISUAL_LAYER_WORLD_NO_MIRROR \
+				| Water.VISUAL_LAYER_STATIC_SHADOW_CASTER,
 				"the visible batch joins the isolated static-caster layer "
 				+ "(non-vehicle: the no-mirror world layer, env #30)")
 		assert_eq(visible_batch.cast_shadow,
@@ -428,22 +428,22 @@ func test_mixed_static_batch_keeps_a_filtered_shadow_only_duplicate() -> void:
 	# admitted to retail's terrain-tile shadow pass. A visible batch cannot
 	# express that per-instance difference, so this case still needs a parallel
 	# MultiMesh with the ineligible slot zero-scaled.
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	assert_false(mission.add_entity(
-			NovaMissionData.KIND_BUILDING, 105004,
+			MissionData.KIND_BUILDING, 105004,
 			Vector3(1, 2, 3), Vector3.ZERO).is_empty())
 	assert_false(mission.add_entity(
-			NovaMissionData.KIND_ITEM, 105004,
+			MissionData.KIND_ITEM, 105004,
 			Vector3(4, 5, 6), Vector3.ZERO).is_empty())
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	root.set_root_dir(_abs("res://../fixtures/def"))
 	var placer := Placer.new(root, item_db)
 	placer.edit_mode = true
 	assert_true(placer.register_resolved_static_graphic(
-			"StaticCrate1", NovaObjectData.new(), [{
+			"StaticCrate1", ObjectData.new(), [{
 				"mesh": BoxMesh.new(), "material": null,
 				"offset": Transform3D.IDENTITY, "submesh": 0,
 			}]))
@@ -461,13 +461,13 @@ func test_mixed_static_batch_keeps_a_filtered_shadow_only_duplicate() -> void:
 	assert_not_null(shadow_batch,
 			"mixed admission retains a filtered shadow-only batch")
 	if visible_batch != null:
-		assert_eq(visible_batch.layers, NovaWater.VISUAL_LAYER_WORLD_NO_MIRROR,
+		assert_eq(visible_batch.layers, Water.VISUAL_LAYER_WORLD_NO_MIRROR,
 				"non-vehicle: the no-mirror world layer (env #30)")
 		assert_eq(visible_batch.cast_shadow,
 				GeometryInstance3D.SHADOW_CASTING_SETTING_OFF)
 	if shadow_batch != null:
 		assert_eq(shadow_batch.layers,
-				NovaWater.VISUAL_LAYER_STATIC_SHADOW_CASTER)
+				Water.VISUAL_LAYER_STATIC_SHADOW_CASTER)
 		assert_eq(shadow_batch.cast_shadow,
 				GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY)
 		if visible_batch != null:
@@ -479,9 +479,9 @@ func test_mixed_static_batch_keeps_a_filtered_shadow_only_duplicate() -> void:
 	var item_record: Dictionary = {}
 	for record_v in placer.pickable_records:
 		var record: Dictionary = record_v
-		if int(record.get("kind", -1)) == NovaMissionData.KIND_BUILDING:
+		if int(record.get("kind", -1)) == MissionData.KIND_BUILDING:
 			building_record = record
-		elif int(record.get("kind", -1)) == NovaMissionData.KIND_ITEM:
+		elif int(record.get("kind", -1)) == MissionData.KIND_ITEM:
 			item_record = record
 	var expected_shadow_mm := shadow_batch.multimesh \
 			if shadow_batch != null else null
@@ -495,20 +495,20 @@ func test_mixed_static_batch_keeps_a_filtered_shadow_only_duplicate() -> void:
 
 func test_individual_building_gets_an_unmasked_static_shadow_sibling() -> void:
 	# Portal buildings must keep their camera-driven ROBJ visibility on the
-	# visible NovaObjectModel, while retail's tile pass independently submits
+	# visible ObjectModel, while retail's tile pass independently submits
 	# every ROBJ. Seed one harvested batch so the shadow-only sibling can be
 	# asserted without shipping the retail GuardTwr asset.
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	assert_false(mission.add_entity(
-			NovaMissionData.KIND_BUILDING, 102001,
+			MissionData.KIND_BUILDING, 102001,
 			Vector3(3, 4, 5), Vector3.ZERO).is_empty())
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	root.set_root_dir(_abs("res://../fixtures/def"))
 	var placer := Placer.new(root, item_db)
-	var object_data := NovaObjectData.new()
+	var object_data := ObjectData.new()
 	assert_true(placer.register_resolved_static_graphic(
 			"GuardTwr1", object_data, [{
 				"mesh": BoxMesh.new(), "material": null,
@@ -532,7 +532,7 @@ func test_individual_building_gets_an_unmasked_static_shadow_sibling() -> void:
 		assert_eq(static_shadow.cast_shadow,
 				GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY)
 		assert_eq(static_shadow.layers,
-				NovaWater.VISUAL_LAYER_STATIC_SHADOW_CASTER)
+				Water.VISUAL_LAYER_STATIC_SHADOW_CASTER)
 		assert_same(static_shadow.get_parent(), visible_model,
 				"the unmasked caster follows editor moves and husk visibility lifecycle")
 		var before := static_shadow.global_position
@@ -542,14 +542,14 @@ func test_individual_building_gets_an_unmasked_static_shadow_sibling() -> void:
 
 
 func test_place_single_vehicle_without_anim_def_stays_in_static_batch() -> void:
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.open_file(_abs(BMS_PATH)), OK)
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
-	assert_eq(item_db.get_item_type(106002), NovaItemDatabase.TYPE_VEHICLE)
+	assert_eq(item_db.get_item_type(106002), ItemDatabase.TYPE_VEHICLE)
 	assert_true(item_db.get_anim_def(106002).is_empty(),
 			"the fixture must exercise the no-anim vehicle policy")
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	root.set_root_dir(_abs("res://../fixtures/def"))
 	var placer := Placer.new(root, item_db)
 	placer.edit_mode = true
@@ -560,13 +560,13 @@ func test_place_single_vehicle_without_anim_def_stays_in_static_batch() -> void:
 
 	var mesh := BoxMesh.new()
 	assert_true(placer.register_resolved_static_graphic(
-			"StaticVehicle1", NovaObjectData.new(), [{
+			"StaticVehicle1", ObjectData.new(), [{
 		"mesh": mesh, "material": null, "offset": Transform3D.IDENTITY, "submesh": 0,
 	}]))
 
-	var record := mission.add_entity(NovaMissionData.KIND_ITEM, 106002, Vector3.ZERO, Vector3.ZERO)
+	var record := mission.add_entity(MissionData.KIND_ITEM, 106002, Vector3.ZERO, Vector3.ZERO)
 	var delta: Dictionary = placer.place_single(
-		mission, container, NovaMissionData.KIND_ITEM, int(record["index"]))
+		mission, container, MissionData.KIND_ITEM, int(record["index"]))
 
 	assert_eq(int(delta.get("placed", -1)), 1, "the vehicle is placed")
 	assert_eq(int(delta.get("batched", -1)), 1, "a vehicle without anim_def uses static batching")
@@ -576,7 +576,7 @@ func test_place_single_vehicle_without_anim_def_stays_in_static_batch() -> void:
 
 func test_place_single_is_a_noop_on_null_inputs() -> void:
 	var placer := Placer.new(null, null)
-	var delta: Dictionary = placer.place_single(null, null, NovaMissionData.KIND_ITEM, 0)
+	var delta: Dictionary = placer.place_single(null, null, MissionData.KIND_ITEM, 0)
 	assert_eq(int(delta.get("placed", -1)), 0, "null inputs place nothing")
 	assert_eq(int(delta.get("unresolved", 0)), 0, "and do not falsely count an unresolved")
 
@@ -589,9 +589,9 @@ func test_place_single_is_a_noop_on_null_inputs() -> void:
 # bms_to_godot_basis. The two MUST agree, or an anchored object would shift between
 # the drag preview and the committed record.
 func test_ground_bake_parity_with_engine_facade() -> void:
-	var md := NovaMissionData.new()
+	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
-	var rec: Dictionary = md.add_entity(NovaMissionData.KIND_BUILDING, 102001, Vector3.ZERO, Vector3.ZERO)
+	var rec: Dictionary = md.add_entity(MissionData.KIND_BUILDING, 102001, Vector3.ZERO, Vector3.ZERO)
 	assert_false(rec.is_empty(), "seed entity added")
 	var index := int(rec["index"])
 
@@ -603,10 +603,10 @@ func test_ground_bake_parity_with_engine_facade() -> void:
 	# Integer-degree rotations only (the format stores integer degrees).
 	for rot in [Vector3.ZERO, Vector3(0, 90, 0), Vector3(15, 0, 0), Vector3(0, 0, 30),
 			Vector3(10, 45, -20), Vector3(-35, 220, 75), Vector3(90, 0, 0)]:
-		assert_true(md.set_entity_transform(NovaMissionData.KIND_BUILDING, index, hit_bms, rot))
-		assert_true(md.move_entity_grounded(NovaMissionData.KIND_BUILDING, index, hit_bms, anchor_bms),
+		assert_true(md.set_entity_transform(MissionData.KIND_BUILDING, index, hit_bms, rot))
+		assert_true(md.move_entity_grounded(MissionData.KIND_BUILDING, index, hit_bms, anchor_bms),
 			"facade re-grounds at rot %s" % rot)
-		var moved: Dictionary = md.get_entity(NovaMissionData.KIND_BUILDING, index)
+		var moved: Dictionary = md.get_entity(MissionData.KIND_BUILDING, index)
 		var stored_bms: Vector3 = moved["position"]
 		assert_eq(moved["rotation_deg"], rot, "rotation preserved")
 		# The editor's Godot-space bake of the same gesture:
@@ -624,7 +624,7 @@ func test_ground_anchor_bms_is_the_axis_remap() -> void:
 
 # --- Live-PANM graphics must not freeze into static batches ----------------------
 # A decoration whose .3di carries a live PANM track (free-running wave/spin, SET pose,
-# or a control-register binding) must place as an individual NovaObjectModel even
+# or a control-register binding) must place as an individual ObjectModel even
 # though items.def gives it no anim_def: a MultiMesh batch captures the rest pose once
 # and never evaluates PANM again, while the engine re-poses PANM from the global clock
 # every rendered frame [orig: PANM_SampleTrack (sub_4354B0) idle gate, clock
@@ -638,10 +638,10 @@ class PanmDataPlacer:
 	# Injected object data for one graphic, so PANM classification can be tested
 	# independently of the fixture's separate portal/occlusion classification.
 	var panm_graphic := ""
-	var panm_data: NovaObjectData = null
+	var panm_data: ObjectData = null
 	var expose_occlusion := false
 
-	func _load_object_data(graphic: String) -> NovaObjectData:
+	func _load_object_data(graphic: String) -> ObjectData:
 		if graphic == panm_graphic:
 			return panm_data
 		return super(graphic)
@@ -653,8 +653,8 @@ class PanmDataPlacer:
 const ARMRY_3DI := "res://../fixtures/3dp/armry01/Armry01.3di"
 
 
-func _armry_data(with_live_rotation: bool) -> NovaObjectData:
-	var data := NovaObjectData.new()
+func _armry_data(with_live_rotation: bool) -> ObjectData:
+	var data := ObjectData.new()
 	if data.open_file(_abs(ARMRY_3DI)) != OK:
 		return null
 	if with_live_rotation:
@@ -671,9 +671,9 @@ func _armry_data(with_live_rotation: bool) -> NovaObjectData:
 
 
 func _panm_placer(live: bool) -> PanmDataPlacer:
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	root.set_root_dir(_abs("res://../fixtures/def"))
 	var placer := PanmDataPlacer.new(root, item_db)
 	placer.edit_mode = true
@@ -687,10 +687,10 @@ func test_place_routes_live_panm_graphic_to_a_live_model() -> void:
 	assert_not_null(placer.panm_data, "fixture data authored with one live PANM track")
 	if placer.panm_data == null:
 		return
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	assert_false(mission.add_entity(
-		NovaMissionData.KIND_ITEM, 105004, Vector3(1, 2, 3), Vector3.ZERO).is_empty())
+		MissionData.KIND_ITEM, 105004, Vector3(1, 2, 3), Vector3.ZERO).is_empty())
 	var parent := Node3D.new()
 	add_child_autofree(parent)
 
@@ -719,10 +719,10 @@ func test_place_keeps_inert_panm_graphic_in_static_batches() -> void:
 	assert_not_null(placer.panm_data, "fixture data loads")
 	if placer.panm_data == null:
 		return
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	assert_false(mission.add_entity(
-		NovaMissionData.KIND_ITEM, 105004, Vector3(1, 2, 3), Vector3.ZERO).is_empty())
+		MissionData.KIND_ITEM, 105004, Vector3(1, 2, 3), Vector3.ZERO).is_empty())
 	# Seed batch geometry so the static branch can render without a resource-root .3di.
 	assert_true(placer.register_resolved_static_graphic(
 			"StaticCrate1", placer.panm_data, [{
@@ -748,10 +748,10 @@ func test_occlusion_records_take_precedence_over_inert_panm_batching() -> void:
 	assert_true(placer.panm_data.has_occlusion(),
 		"fixture carries the portal payload that requires per-section visibility")
 	placer.expose_occlusion = true
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	assert_false(mission.add_entity(
-		NovaMissionData.KIND_ITEM, 105004, Vector3(1, 2, 3), Vector3.ZERO).is_empty())
+		MissionData.KIND_ITEM, 105004, Vector3(1, 2, 3), Vector3.ZERO).is_empty())
 	var parent := Node3D.new()
 	add_child_autofree(parent)
 
@@ -768,7 +768,7 @@ func test_place_single_routes_live_panm_graphic_to_a_live_model() -> void:
 	assert_not_null(placer.panm_data, "fixture data authored with one live PANM track")
 	if placer.panm_data == null:
 		return
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	var parent := Node3D.new()
 	add_child_autofree(parent)
@@ -779,9 +779,9 @@ func test_place_single_routes_live_panm_graphic_to_a_live_model() -> void:
 		return
 
 	var record := mission.add_entity(
-		NovaMissionData.KIND_ITEM, 105004, Vector3(3, 4, 5), Vector3.ZERO)
+		MissionData.KIND_ITEM, 105004, Vector3(3, 4, 5), Vector3.ZERO)
 	var delta: Dictionary = placer.place_single(
-		mission, container, NovaMissionData.KIND_ITEM, int(record["index"]))
+		mission, container, MissionData.KIND_ITEM, int(record["index"]))
 
 	assert_eq(int(delta.get("animated", -1)), 1,
 		"place_single routes a live-PANM graphic to a live model")
@@ -794,7 +794,7 @@ func test_inert_panm_model_retains_robj_base_instead_of_rederiving() -> void:
 	if data == null:
 		return
 	assert_false(data.has_live_panm_for_lod(0), "fixture PANM is exactly inert")
-	var model := NovaObjectModel.new()
+	var model := ObjectModel.new()
 	add_child_autofree(model)
 	model.set_object_data(data)
 	var parts: Dictionary = model.get_render_part_nodes()
@@ -827,10 +827,10 @@ func test_live_panm_model_keeps_evaluating_robj_each_frame() -> void:
 	if data == null:
 		return
 	assert_true(data.has_live_panm_for_lod(0), "fixture carries a live PANM track")
-	var model := NovaObjectModel.new()
+	var model := ObjectModel.new()
 	add_child_autofree(model)
 	model.set_object_data(data)
-	var clock := NovaPanmClock.new()
+	var clock := PanmClock.new()
 	clock.set_time_ms_for_test(0)
 	model.set_panm_clock(clock)
 	var parts: Dictionary = model.get_render_part_nodes()

@@ -180,7 +180,7 @@ target_link_libraries(frame_driver_test PRIVATE opennova_runtime)
 add_test(NAME frame_driver COMMAND frame_driver_test)
 
 # The menu sound profile (fixtures/menu_sound/menu.LWF): trigger sets resolve to
-# loose .wav members (drives MNU hover/click via NovaMnuMenu).
+# loose .wav members (drives MNU hover/click via MnuMenu).
 add_executable(menu_lwf_test lwf/menu_lwf_test.cpp)
 target_link_libraries(menu_lwf_test PRIVATE opennova_formats)
 target_include_directories(menu_lwf_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

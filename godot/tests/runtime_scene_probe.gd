@@ -1,11 +1,11 @@
 extends Node
 
-const VegAssets := preload("res://adapter/terrain/veg_assets.gd")
+const VegAssets := preload("res://src/terrain/veg_assets.gd")
 
 # Headless validation of the main_game.tscn runtime pipeline. Loads the scene,
 # points the shared GameWorld at an explicit resource dir (a synthesized one-root
-# fixture by default, or a loose dir passed via `-- <dir>`), waits for NovaTerrainData,
-# moves the camera onto a foliage-painted cell, then verifies that NovaTerrain
+# fixture by default, or a loose dir passed via `-- <dir>`), waits for TerrainData,
+# moves the camera onto a foliage-painted cell, then verifies that Terrain
 # hands exact native 16-unit detail cells through the complete GameWorld ->
 # VegAssets -> dispatcher path and produces resident foliage geometry.
 #
@@ -35,30 +35,30 @@ func _run() -> void:
 	# dir). The probe fixture is a flat authored/extracted root, so inject the
 	# explicit loose-root seam instead of the production PFF-only mount path.
 	var world: GameWorld = scene.get_node_or_null("World")
-	var loose_root: NovaResourceRoot = null
+	var loose_root: ResourceRoot = null
 	var load_result := ERR_UNAVAILABLE
 	if world != null:
-		loose_root = NovaResourceRoot.new()
+		loose_root = ResourceRoot.new()
 		load_result = loose_root.set_root_dir(dir)
 		if load_result == OK:
 			world.set_resource_root(loose_root)
 			load_result = world.load_world()
 		# MainGame remains in its menu state when a probe calls GameWorld
-		# directly. Make the loaded world visible so NovaTerrain runs its native
+		# directly. Make the loaded world visible so Terrain runs its native
 		# detail-cell collection just as it does after the menu handoff.
 		world.visible = true
 
-	var terrain: NovaTerrain = null
-	var dispatcher: NovaFoliageDispatcher = null
-	var overlay: NovaTerrainTileOverlay = null
+	var terrain: Terrain = null
+	var dispatcher: FoliageDispatcher = null
+	var overlay: TerrainTileOverlay = null
 	var camera: Camera3D = null
-	var data: NovaTerrainData = null
+	var data: TerrainData = null
 
 	for _i in range(30):
 		await get_tree().process_frame
-		terrain = scene.get_node_or_null("World/NovaTerrain")
-		dispatcher = scene.get_node_or_null("World/NovaTerrain/FoliageDispatcher")
-		overlay = scene.get_node_or_null("World/NovaTerrain/TileOverlay")
+		terrain = scene.get_node_or_null("World/Terrain")
+		dispatcher = scene.get_node_or_null("World/Terrain/FoliageDispatcher")
+		overlay = scene.get_node_or_null("World/Terrain/TileOverlay")
 		camera = scene.get_node_or_null("Camera3D")
 		data = world.get_terrain_data() if world != null else null
 		if data != null and data.is_loaded():
@@ -116,10 +116,10 @@ func _run() -> void:
 	var failures: Array[String] = []
 
 	if dispatcher == null:
-		failures.append("expected NovaTerrain/FoliageDispatcher to exist")
+		failures.append("expected Terrain/FoliageDispatcher to exist")
 	else:
 		if not bool(foliage_stats.get("native_detail_source", false)):
-			failures.append("expected runtime foliage to consume NovaTerrain's native detail-cell vector")
+			failures.append("expected runtime foliage to consume Terrain's native detail-cell vector")
 		if int(foliage_stats.get("detail_cells", 0)) <= 0:
 			failures.append("expected at least one exact 16-unit detail cell near the camera")
 		if int(foliage_stats.get("runtime_detail_intents", 0)) <= 0:
@@ -131,7 +131,7 @@ func _run() -> void:
 		if dispatcher.get_total_instances() <= 0:
 			failures.append("expected at least one resident foliage instance")
 	if terrain == null:
-		failures.append("expected NovaTerrain to exist")
+		failures.append("expected Terrain to exist")
 
 	if data != null and data.is_loaded():
 		if not colormap_ok:
@@ -140,7 +140,7 @@ func _run() -> void:
 			failures.append("expected terrain detail/blend maps to resolve (null => export-stripped .tga)")
 
 	if data == null or not data.is_loaded():
-		failures.append("expected NovaTerrainData to be loaded")
+		failures.append("expected TerrainData to be loaded")
 	elif not foliage_probe.has("position"):
 		failures.append("expected to find a Dvxi5 foliagemap cell with a matching foliage def")
 
@@ -173,7 +173,7 @@ func _run() -> void:
 
 
 func _default_runtime_resource_root() -> String:
-	# NovaResourceRoot deliberately rejects user:// as an authoring mount. Stage
+	# ResourceRoot deliberately rejects user:// as an authoring mount. Stage
 	# the combined terrain+environment fixture under the OS temp directory.
 	var root := OS.get_temp_dir().path_join("opennova_runtime_scene_probe_resource_root")
 	DirAccess.make_dir_recursive_absolute(root)
@@ -230,7 +230,7 @@ func _cleanup_dir(path: String) -> void:
 	DirAccess.remove_absolute(path)
 
 
-func _find_foliage_world_point(data: NovaTerrainData) -> Dictionary:
+func _find_foliage_world_point(data: TerrainData) -> Dictionary:
 	var defs: Array = data.get_foliage_defs()
 	var grid := data.get_sector_grid()
 	var origin_x := data.get_origin_x()
@@ -295,9 +295,9 @@ func _find_foliage_world_point(data: NovaTerrainData) -> Dictionary:
 
 func _has_matching_foliage_def(defs: Array, painted: int) -> bool:
 	for value in defs:
-		if not (value is NovaTerrainFoliageDef):
+		if not (value is TerrainFoliageDef):
 			continue
-		var def := value as NovaTerrainFoliageDef
+		var def := value as TerrainFoliageDef
 		if int(def.match) == painted:
 			return true
 	return false

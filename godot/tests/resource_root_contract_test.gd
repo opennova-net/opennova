@@ -19,7 +19,7 @@ func test_resource_root_resolves_only_top_level_files() -> void:
 	DirAccess.make_dir_recursive_absolute(root.path_join("terrains"))
 	_write_file(root.path_join("terrains/Dvxi5.trn"), "nested")
 
-	var resources := NovaResourceRoot.new()
+	var resources := ResourceRoot.new()
 	assert_eq(resources.set_root_dir(root), OK)
 
 	assert_eq(_norm(resources.resolve_file("alpha.trn")), _norm(root.path_join("Alpha.TRN")))
@@ -40,7 +40,7 @@ func test_editor_set_root_dir_is_loose_only() -> void:
 		{"name": "Bravo.env", "bytes": "archived env"},
 	])
 
-	var resources := NovaResourceRoot.new()
+	var resources := ResourceRoot.new()
 	# The editor authors loose files; set_root_dir mounts loose only, never the PFFs.
 	assert_eq(resources.set_root_dir(root), OK)
 	assert_true(resources.has_file("alpha.trn"), "Loose files mount in the editor.")
@@ -62,7 +62,7 @@ func test_runtime_mount_is_packed_with_optional_loose_override() -> void:
 		{"name": "Extra.env", "bytes": "never mounts"},
 	])
 
-	var resources := NovaResourceRoot.new()
+	var resources := ResourceRoot.new()
 	# Packed runtime (no /d): the archives are the source; loose files do NOT shadow them.
 	assert_eq(resources.mount_runtime(root), OK)
 	assert_true(resources.has_file("bravo.env"), "PFF entries mount at runtime.")
@@ -85,12 +85,12 @@ func test_runtime_mount_rejects_loose_only_root_even_with_dev_override() -> void
 	var root := _make_flat_root("runtime_requires_archive")
 	_write_file(root.path_join("Alpha.TRN"), "loose trn")
 
-	var resources := NovaResourceRoot.new()
+	var resources := ResourceRoot.new()
 	assert_eq(resources.mount_runtime(root, "", true), ERR_FILE_NOT_FOUND)
 	assert_eq(resources.get_root_dir(), "", "A failed runtime mount must clear the partial loose state.")
 	assert_eq(resources.get_expansion(), "")
 	assert_eq(resources.get_last_error(), "No game data archives could be opened")
-	assert_false(resources.has_file("Alpha.TRN", NovaResourceRoot.LOOKUP_FORCE_LOOSE_FIRST))
+	assert_false(resources.has_file("Alpha.TRN", ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST))
 
 
 func test_packed_runtime_caller_can_force_loose_first() -> void:
@@ -101,17 +101,17 @@ func test_packed_runtime_caller_can_force_loose_first() -> void:
 		{"name": "Shared.dat", "bytes": "archive"},
 	])
 
-	var resources := NovaResourceRoot.new()
+	var resources := ResourceRoot.new()
 	assert_eq(resources.mount_runtime(root), OK)
 	assert_eq(resources.read_file("Shared.dat").get_string_from_utf8(), "archive")
-	assert_true(resources.has_file("LooseOnly.dat", NovaResourceRoot.LOOKUP_FORCE_LOOSE_FIRST))
+	assert_true(resources.has_file("LooseOnly.dat", ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST))
 	assert_eq(
-		resources.read_file("LooseOnly.dat", NovaResourceRoot.LOOKUP_FORCE_LOOSE_FIRST).get_string_from_utf8(),
+		resources.read_file("LooseOnly.dat", ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST).get_string_from_utf8(),
 		"loose only",
 		"Policy-aware has_file and read_file must agree on a loose-only winner."
 	)
 	assert_eq(
-		resources.read_file("Shared.dat", NovaResourceRoot.LOOKUP_FORCE_LOOSE_FIRST).get_string_from_utf8(),
+		resources.read_file("Shared.dat", ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST).get_string_from_utf8(),
 		"loose",
 		"A packed session remains archive-first by default, but a retail caller can force loose-first."
 	)
@@ -125,18 +125,18 @@ func test_dev_runtime_caller_can_force_archive_only() -> void:
 		{"name": "Shared.dat", "bytes": "archive"},
 	])
 
-	var resources := NovaResourceRoot.new()
+	var resources := ResourceRoot.new()
 	assert_eq(resources.mount_runtime(root, "", true), OK)
 	assert_eq(resources.read_file("Shared.dat").get_string_from_utf8(), "loose")
-	assert_true(resources.has_file("Shared.dat", NovaResourceRoot.LOOKUP_FORCE_ARCHIVE_ONLY))
+	assert_true(resources.has_file("Shared.dat", ResourceRoot.LOOKUP_FORCE_ARCHIVE_ONLY))
 	assert_eq(
-		resources.read_file("Shared.dat", NovaResourceRoot.LOOKUP_FORCE_ARCHIVE_ONLY).get_string_from_utf8(),
+		resources.read_file("Shared.dat", ResourceRoot.LOOKUP_FORCE_ARCHIVE_ONLY).get_string_from_utf8(),
 		"archive",
 		"An archive-only retail caller bypasses the /d session loose override."
 	)
-	assert_false(resources.has_file("LooseOnly.dat", NovaResourceRoot.LOOKUP_FORCE_ARCHIVE_ONLY))
+	assert_false(resources.has_file("LooseOnly.dat", ResourceRoot.LOOKUP_FORCE_ARCHIVE_ONLY))
 	assert_true(
-		resources.read_file("LooseOnly.dat", NovaResourceRoot.LOOKUP_FORCE_ARCHIVE_ONLY).is_empty(),
+		resources.read_file("LooseOnly.dat", ResourceRoot.LOOKUP_FORCE_ARCHIVE_ONLY).is_empty(),
 		"Archive-only has_file and read_file must agree that a loose-only file is absent."
 	)
 
@@ -149,7 +149,7 @@ func test_runtime_qualified_query_reaches_loose_file_without_aliasing_flat_archi
 		{"name": "MixedCase.dat", "bytes": "flat archive"},
 	])
 
-	var resources := NovaResourceRoot.new()
+	var resources := ResourceRoot.new()
 	assert_eq(resources.mount_runtime(root), OK)
 	assert_false(resources.has_file("nested/mixedcase.dat"))
 	assert_true(
@@ -158,12 +158,12 @@ func test_runtime_qualified_query_reaches_loose_file_without_aliasing_flat_archi
 	)
 	assert_true(resources.has_file(
 		"NESTED\\MIXEDCASE.DAT",
-		NovaResourceRoot.LOOKUP_FORCE_LOOSE_FIRST
+		ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST
 	))
 	assert_eq(
 		resources.read_file(
 			"nested/mixedcase.dat",
-			NovaResourceRoot.LOOKUP_FORCE_LOOSE_FIRST
+			ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST
 		).get_string_from_utf8(),
 		"nested loose"
 	)
@@ -171,11 +171,11 @@ func test_runtime_qualified_query_reaches_loose_file_without_aliasing_flat_archi
 	assert_eq(resources.set_root_dir(root), OK)
 	assert_false(resources.has_file(
 		"nested/mixedcase.dat",
-		NovaResourceRoot.LOOKUP_FORCE_LOOSE_FIRST
+		ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST
 	), "Editor roots keep the legacy flat-name contract for every policy value.")
 	assert_true(resources.read_file(
 		"nested/mixedcase.dat",
-		NovaResourceRoot.LOOKUP_FORCE_LOOSE_FIRST
+		ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST
 	).is_empty())
 
 
@@ -186,7 +186,7 @@ func test_load_texture_obeys_runtime_vfs_precedence() -> void:
 		{"name": "mission.pcx", "bytes": _solid_test_pcx(Color.RED)},
 	])
 
-	var resources := NovaResourceRoot.new()
+	var resources := ResourceRoot.new()
 	assert_eq(resources.mount_runtime(root), OK)
 	var packed_texture: Texture2D = resources.load_texture("mission.pcx")
 	assert_not_null(packed_texture, "The packed PCX should decode through load_texture().")
@@ -215,16 +215,16 @@ func test_texture_cache_separates_policy_and_full_query() -> void:
 		{"name": "swatch.pcx", "bytes": _solid_test_pcx(Color.RED)},
 	])
 
-	var resources := NovaResourceRoot.new()
+	var resources := ResourceRoot.new()
 	assert_eq(resources.mount_runtime(root), OK)
 	var packed: Texture2D = resources.load_texture("swatch.pcx")
 	var forced_loose: Texture2D = resources.load_texture(
 		"swatch.pcx",
-		NovaResourceRoot.LOOKUP_FORCE_LOOSE_FIRST
+		ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST
 	)
 	var nested_loose: Texture2D = resources.load_texture(
 		"nested/swatch.pcx",
-		NovaResourceRoot.LOOKUP_FORCE_LOOSE_FIRST
+		ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST
 	)
 	assert_not_null(packed)
 	assert_not_null(forced_loose)
@@ -244,7 +244,7 @@ func test_editor_load_texture_retains_loose_png_support() -> void:
 	var root := _make_flat_root("loose_png")
 	_write_bytes(root.path_join("swatch.png"), image.save_png_to_buffer())
 
-	var resources := NovaResourceRoot.new()
+	var resources := ResourceRoot.new()
 	assert_eq(resources.set_root_dir(root), OK)
 	var texture: Texture2D = resources.load_texture("swatch.png")
 	assert_not_null(texture, "A loose editor PNG should still decode through the VFS-backed texture interface.")
@@ -270,7 +270,7 @@ func test_runtime_expansion_override_chain() -> void:
 	])
 	_write_file(root.path_join("expansion/jox01/shared.env"), "loose env")
 
-	var resources := NovaResourceRoot.new()
+	var resources := ResourceRoot.new()
 	# Packed runtime (no /d): archive chain {name}L.pff > {name}.pff > base; loose ignored.
 	assert_eq(resources.mount_runtime(root, "jox01"), OK)
 	assert_eq(resources.get_expansion(), "jox01", "A real expansion mount reports itself.")
@@ -307,7 +307,7 @@ func test_runtime_remount_in_place_switches_expansion() -> void:
 		{"name": "briefing.pcx", "bytes": _solid_test_pcx(Color.BLUE)},
 	])
 
-	var resources := NovaResourceRoot.new()
+	var resources := ResourceRoot.new()
 	assert_eq(resources.mount_runtime(root), OK)
 	assert_true(resources.is_runtime_mount())
 	assert_eq(resources.get_expansion(), "")
@@ -342,7 +342,7 @@ func test_is_runtime_mount_discriminates_runtime_from_editor_mounts() -> void:
 	_write_file(root.path_join("Alpha.TRN"), "loose trn")
 	_write_pff(root.path_join("resource.pff"), [{"name": "Bravo.env", "bytes": "archived env"}])
 
-	var resources := NovaResourceRoot.new()
+	var resources := ResourceRoot.new()
 	assert_false(resources.is_runtime_mount(), "A never-mounted root is not a runtime mount.")
 	assert_eq(resources.set_root_dir(root), OK)
 	assert_false(resources.is_runtime_mount(), "An editor loose mount is not a runtime mount.")
@@ -369,7 +369,7 @@ func test_boot_manifest_reports_missing_fatal_resources() -> void:
 		{"name": "gametext.bin", "bytes": "strings"},
 	])
 
-	var resources := NovaResourceRoot.new()
+	var resources := ResourceRoot.new()
 	assert_eq(resources.mount_runtime(root), OK)
 	var missing := resources.list_missing_boot_resources()
 	assert_false("gametext.bin" in missing, "A mounted fatal-set file is not reported missing.")
@@ -381,7 +381,7 @@ func test_boot_manifest_reports_missing_fatal_resources() -> void:
 	assert_true(resources.boot_resource_failure_text("gametext.bin").contains("Unable to load game strings"),
 		"Failure text quotes the witnessed retail behavior.")
 	assert_eq(resources.boot_resource_failure_text("nonsense.xyz"), "", "Unknown names have no failure text.")
-	assert_eq(NovaResourceRoot.new().list_missing_boot_resources().size(), 0,
+	assert_eq(ResourceRoot.new().list_missing_boot_resources().size(), 0,
 		"An unmounted root probes nothing.")
 
 
@@ -397,7 +397,7 @@ func test_resource_root_list_expansions() -> void:
 	_write_file(root.path_join("expansion/incomplete/readme.txt"), "no pff here")
 
 	# list_expansions does not require the root to be mounted (the UI lists before mounting).
-	var expansions := NovaResourceRoot.new().list_expansions(root)
+	var expansions := ResourceRoot.new().list_expansions(root)
 	assert_eq(expansions.size(), 2, "Only subdirs with a matching <name>.pff are expansions.")
 	assert_true(expansions.has("jox01"))
 	assert_true(expansions.has("jox02"))
@@ -405,7 +405,7 @@ func test_resource_root_list_expansions() -> void:
 
 	# A root with no expansion/ dir yields an empty list (the UI hides the control).
 	var base_only := _make_flat_root("list_expansions_base")
-	assert_eq(NovaResourceRoot.new().list_expansions(base_only).size(), 0)
+	assert_eq(ResourceRoot.new().list_expansions(base_only).size(), 0)
 
 
 func test_resource_root_loads_dds_from_pff() -> void:
@@ -421,7 +421,7 @@ func test_resource_root_loads_dds_from_pff() -> void:
 	# resource.pff: only the witnessed boot-table archives mount at runtime (D-VFS-2).
 	_write_pff(root.path_join("resource.pff"), [{"name": "swatch.dds", "bytes": dds}])
 
-	var resources := NovaResourceRoot.new()
+	var resources := ResourceRoot.new()
 	assert_eq(resources.mount_runtime(root), OK)
 	var tex: Texture2D = resources.load_texture("swatch.dds")
 	assert_not_null(tex, "A DDS resident only inside a .pff should decode to a texture.")
@@ -444,7 +444,7 @@ func test_packed_texture_collapses_compound_authored_extensions() -> void:
 		{"name": "swatch.dds.dds", "bytes": fallback_image.save_dds_to_buffer()},
 	])
 
-	var resources := NovaResourceRoot.new()
+	var resources := ResourceRoot.new()
 	assert_eq(resources.mount_runtime(root), OK)
 	var tex: Texture2D = resources.load_texture("swatch.dds.tga")
 	assert_not_null(
@@ -465,14 +465,14 @@ func test_resolve_file_snapshots_per_cache_epoch() -> void:
 	var root := _make_flat_root("resolve_epoch")
 	_write_file(root.path_join("Alpha.TRN"), "trn")
 
-	var resources := NovaResourceRoot.new()
+	var resources := ResourceRoot.new()
 	assert_eq(resources.set_root_dir(root), OK)
 	assert_eq(_norm(resources.resolve_file("alpha.trn")), _norm(root.path_join("Alpha.TRN")))
 
 	_write_file(root.path_join("Bravo.TRN"), "trn")
 	assert_eq(resources.resolve_file("bravo.trn"), "", "A file added after the mount stays invisible until the epoch moves.")
 
-	NovaResourceRoot.bump_cache_epoch()
+	ResourceRoot.bump_cache_epoch()
 	assert_eq(_norm(resources.resolve_file("bravo.trn")), _norm(root.path_join("Bravo.TRN")), "bump_cache_epoch() re-reads the directory.")
 
 	_write_file(root.path_join("Charlie.TRN"), "trn")
@@ -489,7 +489,7 @@ func test_packed_texture_loads_share_one_decode_per_epoch() -> void:
 	var root := _make_flat_root("dds_pff_cache")
 	_write_pff(root.path_join("resource.pff"), [{"name": "swatch.dds", "bytes": image.save_dds_to_buffer()}])
 
-	var resources := NovaResourceRoot.new()
+	var resources := ResourceRoot.new()
 	assert_eq(resources.mount_runtime(root), OK)
 	var first: Texture2D = resources.load_texture("swatch.dds")
 	var second: Texture2D = resources.load_texture("swatch.dds")
@@ -498,7 +498,7 @@ func test_packed_texture_loads_share_one_decode_per_epoch() -> void:
 	assert_null(resources.load_texture("missing.dds"), "Misses stay misses when cached.")
 	assert_null(resources.load_texture("missing.dds"))
 
-	NovaResourceRoot.bump_cache_epoch()
+	ResourceRoot.bump_cache_epoch()
 	var after_bump: Texture2D = resources.load_texture("swatch.dds")
 	assert_not_null(after_bump, "An epoch bump must not lose the texture, only the cache.")
 
@@ -511,7 +511,7 @@ func test_clear_releases_cached_texture_before_render_server_shutdown() -> void:
 		'name': 'swatch.dds',
 		'bytes': image.save_dds_to_buffer(),
 	}])
-	var resources := NovaResourceRoot.new()
+	var resources := ResourceRoot.new()
 	assert_eq(resources.mount_runtime(root), OK)
 	var texture: Texture2D = resources.load_texture('swatch.dds')
 	assert_not_null(texture)

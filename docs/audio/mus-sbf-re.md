@@ -1,7 +1,7 @@
 # MUS / SBF / SCR — reverse-engineering record
 
 Validation record for the music subsystem (`engine/formats/mus`, `engine/formats/sbf`, `engine/formats/scr`,
-`godot/adapter/audio`) against the original engine as witnessed in IDA Pro.
+`godot/src/audio`) against the original engine as witnessed in IDA Pro.
 Binary: retail **Jointops.exe** (IDB `Jointops.exe.kong.i64`). All addresses
 below are that binary's. This file is the committed home for the divergence
 catalog that code comments cite as `docs/audio/mus-sbf-re.md (D-…)`.
@@ -15,7 +15,7 @@ catalog that code comments cite as `docs/audio/mus-sbf-re.md (D-…)`.
 | SBF bank codec (`engine/formats/sbf`) | **MATCHING** | 12 citations: `Sbf_OpenFile_Gamemus @0x4ED6C0`, `Sbf_StartEntry @0x4ED910`, `Audio_StreamNextChunk @0x4ED7D0`, mix coefficients `@0x7BD4B0`; `sbf_roundtrip` et al. |
 | SCR container codec (`engine/formats/scr`) | **MATCHING** (grilled 2026-06-09) | keystream + reverse pass byte-exact vs `Scr_DecryptBuffer @0x53D090`; two documented policy divergences (D-SCR-1/2 below) |
 | PFF entry encryption | **MATCHING** (pre-existing) | flag bit 0 + rol-7 XOR keystream vs `PFF_LoadFileToMemory @0x768920`, cited in `engine/formats/pff` |
-| `godot/adapter/audio` glue | reimpl code, **not grillable**; pacing now witnessed | hook map cited in `nova_music_director.cpp` (`AudioVM_LoadScriptFile @0x672D20`, `VmOp_Play @0x672CB0`, `VmOp_SetState @0x672C70`, `Intrinsic_GSV @0x6720E0`, `GEcho @0x6720C0`); bus routing is Godot-idiomatic; the VM-advance **pacing** is grilled below (the golden tests prove the opcode stream, not real-time pacing) |
+| `godot/src/audio` glue | reimpl code, **not grillable**; pacing now witnessed | hook map cited in `nova_music_director.cpp` (`AudioVM_LoadScriptFile @0x672D20`, `VmOp_Play @0x672CB0`, `VmOp_SetState @0x672C70`, `Intrinsic_GSV @0x6720E0`, `GEcho @0x6720C0`); bus routing is Godot-idiomatic; the VM-advance **pacing** is grilled below (the golden tests prove the opcode stream, not real-time pacing) |
 
 ## AudioVM playback pacing — the VM advances on track completion (grilled 2026-06-15; re-verified 2026-07-11)
 
@@ -40,16 +40,16 @@ idempotent). A `play` op halts the dispatch loop (STC), so each step runs to exa
 to finish, then steps to the next `play`/`setstate`. Section transitions therefore land on
 track boundaries, not every frame.
 
-**Divergence D-MUS-PACE / fix.** `NovaMusicDirector` previously called `mus_vm_tick` every
+**Divergence D-MUS-PACE / fix.** `MusicDirector` previously called `mus_vm_tick` every
 `_process` frame, so the VM raced through `play`/`setstate` (~20 plays + ~40 section
-changes per second measured) and `_on_play_sound` re-`play()`'d the `NovaSbfAudioStream`
+changes per second measured) and `_on_play_sound` re-`play()`'d the `SbfAudioStream`
 every frame — a constant low buzz. The director now gates VM advance on the active track
 still playing (`_active_play->is_playing()`), reproducing the
 `remaining_bytes <= 0 -> step` rule. We pace on the Godot `AudioStreamPlayer` finishing
 rather than a byte counter (reimpl-idiomatic), and stream one music context at a time as the
 original does.
 
-Related reimpl note (2026-07-09; rate witness corrected 2026-07-11): `NovaSbfAudioStreamPlayback`
+Related reimpl note (2026-07-09; rate witness corrected 2026-07-11): `SbfAudioStreamPlayback`
 extends Godot's `AudioStreamPlaybackResampled` and reports the SBF content rate (22050 Hz), so
 the mixer resamples to the device rate. The original's audio service runs at a **44100 Hz
 device rate** — one-shot wavs carry a device-relative pitch ratio
@@ -193,7 +193,7 @@ Session teardown writes `Var10 = (reason==1 ? 2 : 1)` when not in session
   Our WAC VM accordingly leaves the emitted `music` effect unconsumed.
 - No other code path starts gamemus SBF entries, so the `.bms` header `music`
   field (offset 272) has **no live consumer** in JO — it is vestigial data the
-  mission editor round-trips. `NovaMissionAudio._apply_music` stays a
+  mission editor round-trips. `MissionAudio._apply_music` stays a
   witnessed no-op.
 
 ### Divergence D-MUS-SPGATE

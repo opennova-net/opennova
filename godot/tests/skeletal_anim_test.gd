@@ -3,17 +3,17 @@ extends GutTest
 # Skeletal-animation runtime (.bad/.adm) tests:
 #  - skin plumbing: build_lod_submeshes emits ARRAY_BONES/ARRAY_WEIGHTS for skinned models
 #    and nothing extra for static ones (regression-safe).
-#  - NovaSkeletalAnim resource basics (graceful failure, empty state).
-#  - NovaObjectModel's new skeletal methods parse and no-op safely without a skeletal set.
+#  - SkeletalAnim resource basics (graceful failure, empty state).
+#  - ObjectModel's new skeletal methods parse and no-op safely without a skeletal set.
 
 const CHARMODEL := "res://../fixtures/threedi/3di3/CharModel.3di"
 const SHED := "res://../fixtures/threedi/3di3/Shed.3di"
 const VIEWMODEL_RIG_TMP := "res://.godot/viewmodel_rig_test"
-const MissionObjectPlacerScript = preload("res://adapter/mission/mission_object_placer.gd")
+const MissionObjectPlacerScript = preload("res://src/mission/mission_object_placer.gd")
 
 
-func _open(path: String) -> NovaObjectData:
-	var data := NovaObjectData.new()
+func _open(path: String) -> ObjectData:
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(path)), OK, "fixture should open: %s" % path)
 	return data
 
@@ -124,7 +124,7 @@ func test_viewmodel_graphic_bones_are_covered_when_adm_model_is_shorter() -> voi
 	_stage_viewmodel_rig_file("idle.bad", "res://../fixtures/anim/idle.bad")
 	_stage_viewmodel_rig_file("walk.bad", "res://../fixtures/anim/walk.bad")
 
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(tmp), OK)
 	var placer := MissionObjectPlacerScript.new(root, null)
 	var parent := Node3D.new()
@@ -154,8 +154,8 @@ func test_viewmodel_graphic_bones_are_covered_when_adm_model_is_shorter() -> voi
 
 
 func test_skeletal_anim_resource_basics() -> void:
-	var sk := NovaSkeletalAnim.new()
-	assert_false(sk.is_loaded(), "Fresh NovaSkeletalAnim is not loaded.")
+	var sk := SkeletalAnim.new()
+	assert_false(sk.is_loaded(), "Fresh SkeletalAnim is not loaded.")
 	assert_eq(sk.get_bone_count(), 0)
 	assert_false(sk.load_from_resource_root(null, "missing.adm"), "Null resource root fails gracefully.")
 	assert_false(sk.is_loaded())
@@ -170,11 +170,11 @@ func test_load_from_bad_files_binds_raw_bads() -> void:
 	# The PLAYER_INFO preview path [orig: PlayerInfo_InitPreviewModel @ 0x5600d0]: build a
 	# skeletal set from explicit raw .bad files with no .adm. Uses the committed idle.bad as
 	# both the rest/skeleton source and the clip, registered under the canonical idle key.
-	var sk := NovaSkeletalAnim.new()
+	var sk := SkeletalAnim.new()
 	if not sk.has_method("load_from_bad_files"):
-		fail_test("NovaSkeletalAnim exposes load_from_bad_files(root, skeleton_bad, key_to_bad)")
+		fail_test("SkeletalAnim exposes load_from_bad_files(root, skeleton_bad, key_to_bad)")
 		return
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/anim"))
 	assert_true(sk.load_from_bad_files(root, "idle.bad", {"anim_idle": "idle.bad"}),
 		"raw .bad bind loads: %s" % sk.get_last_error())
@@ -187,11 +187,11 @@ func test_load_from_bad_files_binds_raw_bads() -> void:
 
 
 func test_load_from_bad_files_fails_gracefully() -> void:
-	var sk := NovaSkeletalAnim.new()
+	var sk := SkeletalAnim.new()
 	if not sk.has_method("load_from_bad_files"):
-		fail_test("NovaSkeletalAnim exposes load_from_bad_files")
+		fail_test("SkeletalAnim exposes load_from_bad_files")
 		return
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/anim"))
 	# Missing skeleton .bad -> false + error, not loaded.
 	assert_false(sk.load_from_bad_files(root, "does_not_exist.bad", {"anim_idle": "idle.bad"}),
@@ -204,7 +204,7 @@ func test_load_from_bad_files_fails_gracefully() -> void:
 
 
 func test_model_skeletal_methods_no_op_without_set() -> void:
-	var model = NovaObjectModel.new()
+	var model = ObjectModel.new()
 	add_child_autofree(model)
 	model.set_skeletal_anim(null)  # exercises the rebuild() skeletal branch with no skeletal
 	assert_false(model.has_skeleton(), "No Skeleton3D without a skeletal set.")
@@ -215,18 +215,18 @@ func test_model_skeletal_methods_no_op_without_set() -> void:
 	assert_eq(model.get_active_body_clip(), "", "No active clip without a skeletal set.")
 
 
-func _loaded_skeletal() -> NovaSkeletalAnim:
-	var sk := NovaSkeletalAnim.new()
-	var root := NovaResourceRoot.new()
+func _loaded_skeletal() -> SkeletalAnim:
+	var sk := SkeletalAnim.new()
+	var root := ResourceRoot.new()
 	root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/anim"))
 	assert_true(sk.load_from_resource_root(root, "soldier.adm"),
 		"soldier.adm fixture loads: %s" % sk.get_last_error())
 	return sk
 
 
-func _loaded_remote_transition_skeletal() -> NovaSkeletalAnim:
-	var sk := NovaSkeletalAnim.new()
-	var root := NovaResourceRoot.new()
+func _loaded_remote_transition_skeletal() -> SkeletalAnim:
+	var sk := SkeletalAnim.new()
+	var root := ResourceRoot.new()
 	root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/anim"))
 	assert_true(sk.load_from_bad_files(root, "idle.bad", {
 		"anim_idle": "idle.bad",
@@ -245,9 +245,9 @@ func test_emplaced_pose_collapses_right_hand_bone_and_restores_off_mount() -> vo
 	# character mesh, so this is a skeletal collapse, not a child-node visibility gate.
 	# [orig: Entity_BuildBoneTransformMatrices special rows; world-wac-ai-re.md §14.1]
 	var data := _open(CHARMODEL)
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/anim"))
-	var sk := NovaSkeletalAnim.new()
+	var sk := SkeletalAnim.new()
 	assert_true(sk.load_from_resource_root(root, "soldier.adm",
 			data.get_bone_origins(), data.get_bone_parents()),
 			"the 19-bone character rig loads: %s" % sk.get_last_error())
@@ -272,9 +272,9 @@ func test_emplaced_pose_collapses_right_hand_bone_and_restores_off_mount() -> vo
 			"leaving the emplaced weapon restores BN17's authored pose")
 
 
-func _char_model_at(data: NovaObjectData, skeletal: NovaSkeletalAnim,
+func _char_model_at(data: ObjectData, skeletal: SkeletalAnim,
 		world_transform: Transform3D, collapse_right_hand: bool):
-	var model = NovaObjectModel.new()
+	var model = ObjectModel.new()
 	add_child_autofree(model)
 	model.set_skeletal_anim(skeletal)
 	model.set_object_data(data)
@@ -290,7 +290,7 @@ func _char_model_at(data: NovaObjectData, skeletal: NovaSkeletalAnim,
 # registered SkinReference that headless GUT does not create reliably, so this
 # keeps the regression deterministic while still measuring deformed triangles,
 # rather than inferring fidelity from one bone transform.
-func _skinned_geometry_metrics(data: NovaObjectData, skeleton: Skeleton3D) -> Dictionary:
+func _skinned_geometry_metrics(data: ObjectData, skeleton: Skeleton3D) -> Dictionary:
 	var matrices: Array[Transform3D] = []
 	for bone in range(skeleton.get_bone_count()):
 		matrices.append(skeleton.global_transform
@@ -356,9 +356,9 @@ func _skinned_geometry_metrics(data: NovaObjectData, skeleton: Skeleton3D) -> Di
 
 func test_mounted_hand_collapse_does_not_stretch_skinned_triangles() -> void:
 	var data := _open(CHARMODEL)
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/anim"))
-	var skeletal := NovaSkeletalAnim.new()
+	var skeletal := SkeletalAnim.new()
 	assert_true(skeletal.load_from_resource_root(root, "soldier.adm",
 			data.get_bone_origins(), data.get_bone_parents()))
 	var placement := Transform3D(
@@ -387,17 +387,17 @@ func test_mounted_hand_collapse_does_not_stretch_skinned_triangles() -> void:
 
 func test_model_collapses_right_hand_at_joint_without_aim_overlay() -> void:
 	# The evaluator's zero-scale BN17 pose is a clip marker, not a world-space
-	# destination. Exercise NovaObjectModel's no-overlay fallback at a non-zero
+	# destination. Exercise ObjectModel's no-overlay fallback at a non-zero
 	# placement: the owner must collapse the bone at its current joint. Sending
 	# partially weighted vertices to world origin stretches triangles across the
 	# frame instead of clipping the baked weapon.
 	var data := _open(CHARMODEL)
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/anim"))
-	var sk := NovaSkeletalAnim.new()
+	var sk := SkeletalAnim.new()
 	assert_true(sk.load_from_resource_root(root, "soldier.adm",
 			data.get_bone_origins(), data.get_bone_parents()))
-	var model = NovaObjectModel.new()
+	var model = ObjectModel.new()
 	add_child_autofree(model)
 	model.set_skeletal_anim(sk)
 	model.set_object_data(data)
@@ -491,12 +491,12 @@ func test_body_clip_change_blends_primary_pose_over_retail_window() -> void:
 		{"flags": 0, "ticks": 10, "name": "normal"},
 		{"flags": 0x400, "ticks": 15, "name": "slow"},
 	]:
-		var model = NovaObjectModel.new()
+		var model = ObjectModel.new()
 		add_child_autofree(model)
 		model.set_skeletal_anim(skeletal)
 		model.set_object_data(_open(SHED))
 		if not model.has_method("play_body_blend_at"):
-			fail_test("NovaObjectModel exposes the shared blend-aware body-clip seam")
+			fail_test("ObjectModel exposes the shared blend-aware body-clip seam")
 			return
 		var skeleton: Skeleton3D = model.get_skeleton()
 		var idle_phase := 4
@@ -565,7 +565,7 @@ func test_body_blend_missing_channels_fall_back_without_stale_pose() -> void:
 					same_key_source, same_key_target, same_key_weight),
 			"two channels sharing one BAD still blend independent playheads")
 
-	var model = NovaObjectModel.new()
+	var model = ObjectModel.new()
 	add_child_autofree(model)
 	model.set_skeletal_anim(skeletal)
 	model.set_object_data(_open(SHED))
@@ -593,15 +593,15 @@ func test_body_blend_missing_channels_fall_back_without_stale_pose() -> void:
 
 func test_primary_blend_composes_weapon_channel_then_aim_overlay_once() -> void:
 	var data := _open(CHARMODEL)
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/anim"))
-	var skeletal := NovaSkeletalAnim.new()
+	var skeletal := SkeletalAnim.new()
 	assert_true(skeletal.load_from_resource_root(
 			root, "soldier.adm",
 			data.get_bone_origins(), data.get_bone_parents()))
 	assert_gt(skeletal.get_bone_count(), 16,
 			"the composition fixture exercises the upper-body weapon mask")
-	var model = NovaObjectModel.new()
+	var model = ObjectModel.new()
 	add_child_autofree(model)
 	model.set_skeletal_anim(skeletal)
 	model.set_object_data(data)
@@ -642,7 +642,7 @@ func test_scrub_while_paused_moves_playhead_and_pose() -> void:
 	# The ANIMS workflow's scrub seam: set_animation_time poses the skeleton
 	# IMMEDIATELY even while paused. SHED is rigid, so it fake-skins into a real
 	# Skeleton3D headless (no render needed for bone poses).
-	var model = NovaObjectModel.new()
+	var model = ObjectModel.new()
 	add_child_autofree(model)
 	model.set_skeletal_anim(_loaded_skeletal())
 	model.set_object_data(_open(SHED))
@@ -670,7 +670,7 @@ func test_set_animation_time_wraps_or_clamps_per_clip() -> void:
 	# Mirrors eval_pose's own branch (loop: fmod over the clip; one-shot: clamp)
 	# so the stored playhead and the rendered pose can never disagree. Branch on
 	# the fixture clip's REAL loop flag rather than assuming it.
-	var model = NovaObjectModel.new()
+	var model = ObjectModel.new()
 	add_child_autofree(model)
 	model.set_skeletal_anim(_loaded_skeletal())
 	model.set_object_data(_open(SHED))
@@ -695,7 +695,7 @@ func test_set_animation_time_wraps_or_clamps_per_clip() -> void:
 
 
 func test_play_body_clip_is_idempotent_for_same_key() -> void:
-	var model = NovaObjectModel.new()
+	var model = ObjectModel.new()
 	add_child_autofree(model)
 	model.set_skeletal_anim(_loaded_skeletal())
 	model.set_object_data(_open(SHED))
@@ -716,8 +716,8 @@ func test_models_sharing_one_anim_definition_keep_entity_local_poses() -> void:
 	#  AnimMap_RegisterEntity @0x40BB60]
 	var shared_skeletal := _loaded_skeletal()
 	var shared_model_data := _open(SHED)
-	var host_model = NovaObjectModel.new()
-	var joiner_model = NovaObjectModel.new()
+	var host_model = ObjectModel.new()
+	var joiner_model = ObjectModel.new()
 	add_child_autofree(host_model)
 	add_child_autofree(joiner_model)
 	for model in [host_model, joiner_model]:
@@ -741,12 +741,12 @@ func test_models_sharing_one_anim_definition_keep_entity_local_poses() -> void:
 
 
 func test_play_body_clip_at_pins_ida_phase_ticks() -> void:
-	var model = NovaObjectModel.new()
+	var model = ObjectModel.new()
 	add_child_autofree(model)
 	model.set_skeletal_anim(_loaded_skeletal())
 	model.set_object_data(_open(SHED))
 	if not model.has_method("play_body_clip_at"):
-		fail_test("NovaObjectModel exposes play_body_clip_at(key, phase_ticks)")
+		fail_test("ObjectModel exposes play_body_clip_at(key, phase_ticks)")
 		return
 	var sk = model.get_skeletal_anim()
 	var fps: float = sk.get_clip_fps("anim_walk_forward")
@@ -769,7 +769,7 @@ func test_play_body_clip_at_pins_ida_phase_ticks() -> void:
 
 
 func test_play_body_clip_seeded_consumes_ticks_then_free_runs() -> void:
-	var model = NovaObjectModel.new()
+	var model = ObjectModel.new()
 	add_child_autofree(model)
 	model.set_skeletal_anim(_loaded_skeletal())
 	model.set_object_data(_open(SHED))
@@ -785,11 +785,11 @@ func test_play_body_clip_seeded_consumes_ticks_then_free_runs() -> void:
 
 
 func test_remote_body_same_state_does_not_rescrub_player_phase() -> void:
-	var model = NovaObjectModel.new()
+	var model = ObjectModel.new()
 	add_child_autofree(model)
 	model.set_skeletal_anim(_loaded_skeletal())
 	model.set_object_data(_open(SHED))
-	var flags := int(NovaSimulation.infantry_anim_flags(1))
+	var flags := int(Simulation.infantry_anim_flags(1))
 
 	model.apply_remote_body_state(1, "anim_walk_forward", flags, 10)
 	model.advance_body_animation(0.05)
@@ -800,7 +800,7 @@ func test_remote_body_same_state_does_not_rescrub_player_phase() -> void:
 
 
 func test_remote_death_receipt_retains_old_pose_then_advances_fixed_tick() -> void:
-	var model = NovaObjectModel.new()
+	var model = ObjectModel.new()
 	add_child_autofree(model)
 	var skeletal := _loaded_remote_transition_skeletal()
 	model.set_skeletal_anim(skeletal)
@@ -812,12 +812,12 @@ func test_remote_death_receipt_retains_old_pose_then_advances_fixed_tick() -> vo
 	assert_gt(death_fps, 0.0)
 
 	model.apply_remote_body_state(
-			43, "anim_idle", NovaSimulation.infantry_anim_flags(43), 8)
+			43, "anim_idle", Simulation.infantry_anim_flags(43), 8)
 	model.advance_body_animation(0.005)
 	var outgoing_time := 8.0 / (2.0 * idle_fps) + 0.005
 	model.apply_remote_body_state(
 			191, "anim_death_bullet_head_left",
-			NovaSimulation.infantry_anim_flags(191), 0)
+			Simulation.infantry_anim_flags(191), 0)
 	assert_true(model.remote_body_needs_fixed_tick())
 	_assert_skeleton_pose_matches(
 			model.get_skeleton(),
@@ -835,7 +835,7 @@ func test_remote_death_receipt_retains_old_pose_then_advances_fixed_tick() -> vo
 
 
 func test_remote_mid_blend_retarget_keeps_original_source() -> void:
-	var model = NovaObjectModel.new()
+	var model = ObjectModel.new()
 	add_child_autofree(model)
 	var skeletal := _loaded_skeletal()
 	model.set_skeletal_anim(skeletal)
@@ -843,12 +843,12 @@ func test_remote_mid_blend_retarget_keeps_original_source() -> void:
 	var idle_fps: float = skeletal.get_clip_fps("anim_idle")
 
 	model.apply_remote_body_state(
-			43, "anim_idle", NovaSimulation.infantry_anim_flags(43), 4)
+			43, "anim_idle", Simulation.infantry_anim_flags(43), 4)
 	model.apply_remote_body_state(
-			1, "anim_walk_forward", NovaSimulation.infantry_anim_flags(1), 0)
+			1, "anim_walk_forward", Simulation.infantry_anim_flags(1), 0)
 	model.advance_remote_body_blend_tick(1)
 	model.apply_remote_body_state(
-			2, "anim_run_forward", NovaSimulation.infantry_anim_flags(2), 0)
+			2, "anim_run_forward", Simulation.infantry_anim_flags(2), 0)
 
 	_assert_skeleton_pose_matches(
 			model.get_skeleton(),
@@ -857,7 +857,7 @@ func test_remote_mid_blend_retarget_keeps_original_source() -> void:
 
 
 func test_remote_target_flag_400_uses_fifteen_fixed_ticks() -> void:
-	var model = NovaObjectModel.new()
+	var model = ObjectModel.new()
 	add_child_autofree(model)
 	model.set_skeletal_anim(_loaded_skeletal())
 	model.set_object_data(_open(SHED))
@@ -871,17 +871,17 @@ func test_remote_target_flag_400_uses_fifteen_fixed_ticks() -> void:
 
 
 func test_remote_pulse_final_queues_behind_blending_locked_target_and_respawn_clears() -> void:
-	var model = NovaObjectModel.new()
+	var model = ObjectModel.new()
 	add_child_autofree(model)
 	model.set_skeletal_anim(_loaded_remote_transition_skeletal())
 	model.set_object_data(_open(SHED))
 
 	model.apply_remote_body_state(
-			48, "anim_idle_prone", NovaSimulation.infantry_anim_flags(48), 10)
+			48, "anim_idle_prone", Simulation.infantry_anim_flags(48), 10)
 	model.apply_remote_body_state(
-			41, "anim_roll_left", NovaSimulation.infantry_anim_flags(41), 0)
+			41, "anim_roll_left", Simulation.infantry_anim_flags(41), 0)
 	model.apply_remote_body_state(
-			48, "anim_idle_prone", NovaSimulation.infantry_anim_flags(48), 11)
+			48, "anim_idle_prone", Simulation.infantry_anim_flags(48), 11)
 	assert_eq(model.get_active_body_clip(), "anim_roll_left",
 			"the pulse accepts before the folded final state queues")
 	assert_true(model.remote_body_needs_fixed_tick(),
@@ -895,16 +895,16 @@ func test_remote_pulse_final_queues_behind_blending_locked_target_and_respawn_cl
 
 
 func test_remote_body_locked_state_promotes_pending_at_tick_zero() -> void:
-	var model = NovaObjectModel.new()
+	var model = ObjectModel.new()
 	add_child_autofree(model)
 	model.set_skeletal_anim(_loaded_skeletal())
 	model.set_object_data(_open(SHED))
-	var locked_flags := int(NovaSimulation.infantry_anim_flags(41))
+	var locked_flags := int(Simulation.infantry_anim_flags(41))
 	assert_ne(locked_flags & 0x4, 0, "state 41 is transition-locked in the retail table")
 
 	model.apply_remote_body_state(41, "anim_idle", locked_flags, 0)
 	model.apply_remote_body_state(1, "anim_walk_forward",
-			int(NovaSimulation.infantry_anim_flags(1)), 200)
+			int(Simulation.infantry_anim_flags(1)), 200)
 	assert_eq(model.get_active_body_clip(), "anim_idle",
 		"a locked current clip defers the incoming wire request")
 	var current_length: float = model.get_skeletal_anim().get_clip_length("anim_idle")
@@ -917,13 +917,13 @@ func test_remote_body_locked_state_promotes_pending_at_tick_zero() -> void:
 
 
 func test_remote_body_exit_gate_accepts_only_incoming_flag_one() -> void:
-	var model = NovaObjectModel.new()
+	var model = ObjectModel.new()
 	add_child_autofree(model)
 	model.set_skeletal_anim(_loaded_skeletal())
 	model.set_object_data(_open(SHED))
-	var exit_flags := int(NovaSimulation.infantry_anim_flags(115))
-	var blocked_flags := int(NovaSimulation.infantry_anim_flags(43))
-	var interrupt_flags := int(NovaSimulation.infantry_anim_flags(1))
+	var exit_flags := int(Simulation.infantry_anim_flags(115))
+	var blocked_flags := int(Simulation.infantry_anim_flags(43))
+	var interrupt_flags := int(Simulation.infantry_anim_flags(1))
 	assert_ne(exit_flags & 0x20, 0, "state 115 uses the retail exit gate")
 	assert_eq(blocked_flags & 0x1, 0)
 	assert_ne(interrupt_flags & 0x1, 0)
@@ -945,7 +945,7 @@ func test_skinned_model_reports_nonzero_bounds() -> void:
 	# Skinned (and rigid-fake-skinned) submeshes hang under the Skeleton3D, not the Robj part
 	# nodes. get_model_bounds() must still report real bounds for a fully-skinned model, or any
 	# bounds consumer (e.g. the avatar menu-portrait framing) sees an empty AABB and never frames.
-	var model = NovaObjectModel.new()
+	var model = ObjectModel.new()
 	add_child_autofree(model)
 	model.set_skeletal_anim(_loaded_skeletal())
 	model.set_object_data(_open(SHED))
@@ -956,7 +956,7 @@ func test_skinned_model_reports_nonzero_bounds() -> void:
 
 
 func test_scrub_no_ops_without_skeletal_or_clip() -> void:
-	var model = NovaObjectModel.new()
+	var model = ObjectModel.new()
 	add_child_autofree(model)
 	model.set_animation_time(1.0)  # no skeletal set: must not crash
 	assert_eq(model.get_animation_time(), 0.0, "no skeletal -> playhead reads 0")
@@ -972,7 +972,7 @@ func test_object_preview_arms_overlay() -> void:
 	# CharModel fixture mounted as a resource root.
 	var preview := ObjectPreview.new()
 	add_child_autofree(preview)
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/threedi/3di3"))
 	# Failure path: no resource root -> false + error, no arms model.
 	assert_false(preview.load_arms("CharModel.3di", null), "load_arms with null root fails")
@@ -989,7 +989,7 @@ func test_object_preview_arms_overlay() -> void:
 func test_multi_clip_adm_rows_register_variants() -> void:
 	# Multi-clip .adm rows: every quoted token registers a VARIANT of the same key in
 	# file order — the original's per-slot circular ring; the CURSOR lives with the
-	# FSM owner (NovaSimulation), so this surface is peek-only data.
+	# FSM owner (Simulation), so this surface is peek-only data.
 	# [orig: AnimMap_ParseConfigLine @0x40cb60; AnimMap_RegisterBoneNode @0x40c2d0]
 	var dir := ProjectSettings.globalize_path("res://.godot/skeletal_variants_test")
 	if not DirAccess.dir_exists_absolute(dir):
@@ -1010,8 +1010,8 @@ anim_reset				\"idle.bad\"
 ")
 	adm.close()
 
-	var sk := NovaSkeletalAnim.new()
-	var root := NovaResourceRoot.new()
+	var sk := SkeletalAnim.new()
+	var root := ResourceRoot.new()
 	root.set_root_dir(dir)
 	assert_true(sk.load_from_resource_root(root, "variants.adm"),
 		"variants.adm loads: %s" % sk.get_last_error())
@@ -1030,7 +1030,7 @@ anim_reset				\"idle.bad\"
 
 	# The model's variant latch: play_body_clip_variant re-poses on a variant change
 	# and resumes on the same key+variant (mirrors play_body_clip's same-key resume).
-	var model = NovaObjectModel.new()
+	var model = ObjectModel.new()
 	add_child_autofree(model)
 	model.set_skeletal_anim(sk)
 	model.play_body_clip_variant("anim_wpn_reload", 2)
@@ -1057,9 +1057,9 @@ func test_pose_skeleton_matches_script_bone_loop() -> void:
 	if install_dir.is_empty() or not DirAccess.dir_exists_absolute(install_dir):
 		pending("OPENNOVA_JO_DIR / retail JO PFFs are required for the pose equivalence witness")
 		return
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.mount_runtime(install_dir, "", false, "jo"), OK)
-	var sk := NovaSkeletalAnim.new()
+	var sk := SkeletalAnim.new()
 	assert_true(sk.load_from_resource_root(root, "M82_1st.adm"),
 			"M82_1st.adm loads from the runtime mount")
 	assert_true(sk.has_clip("anim_reset"), "M82_1st carries anim_reset")
@@ -1100,7 +1100,7 @@ func test_pose_skeleton_matches_script_bone_loop() -> void:
 		var qs: Quaternion = script_skel.get_bone_pose_rotation(i)
 		# godot-cpp's Basis->Quaternion conversion differs from core Godot's in
 		# branch selection at component boundaries (the same family as the
-		# Basis(axis, angle) divergence in godot/adapter/CLAUDE.md): the script
+		# Basis(axis, angle) divergence in godot/src/CLAUDE.md): the script
 		# loop ran core's math, pose_skeleton runs godot-cpp's. Observed max
 		# ~0.0007 rad on boundary bones — render-invisible; exactness across the
 		# boundary is unattainable by construction.

@@ -11,7 +11,7 @@ in maturity_baseline.json:
                         "[orig" citations, excluding the allowlisted infra libs
                         (citation is inapplicable there) -- the faithful-port
                         rule's coverage floor.
-  adapter_cpp_orig_cites  "[orig:" citations across godot/adapter C++ (ADR
+  adapter_cpp_orig_cites  "[orig:" citations across godot/src C++ (ADR
                         0031): witnessed engine behavior belongs in engine/,
                         so an adapter cite is either a documented seam
                         contract or a push-down candidate. New ones need a
@@ -83,7 +83,7 @@ def count_engine_uncited_src_files(allowlist: set[str]) -> int:
 
 def count_adapter_cpp_orig_cites() -> int:
     count = 0
-    adapter = REPO / "godot" / "adapter"
+    adapter = REPO / "godot" / "src"
     # build/ is the generated CMake tree (godot-cpp bindings) — not source.
     build_dir = adapter / "build"
     for path in adapter.rglob("*"):
@@ -145,7 +145,7 @@ def count_gd_prints_outside_debug() -> int:
     channels are push_error/push_warning, print_verbose, and the F3 overlay.
     godot/tests and the GUT addon are out of scope (probes print by design)."""
     count = 0
-    for sub in ("adapter", "game", "modtools"):
+    for sub in ("src", "game", "modtools"):
         for path in (REPO / "godot" / sub).rglob("*.gd"):
             rel = path.relative_to(REPO).as_posix()
             if rel in GD_PRINT_ALLOWLIST:
@@ -171,7 +171,7 @@ def count_has_method_guards() -> int:
     documented kept set (harness seams, workspace capability hooks, dynamic
     dispatch) - not zero. class_has_method is excluded by the word boundary."""
     count = 0
-    for sub in ("adapter", "game", "modtools"):
+    for sub in ("src", "game", "modtools"):
         for path in (REPO / "godot" / sub).rglob("*.gd"):
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
@@ -187,10 +187,10 @@ OVERSIZE_CPP_LINE_LIMIT = 2500
 
 def count_oversize_cpp_files() -> int:
     """Oversized translation units (W3-7, the W3 closer): the god-file splits
-    leave two residual offenders; no .cpp under engine/, apps/, or godot/adapter
+    leave two residual offenders; no .cpp under engine/, apps/, or godot/src
     may grow past 2500 lines without splitting first."""
     count = 0
-    for root in ("engine", "apps", "godot/adapter"):
+    for root in ("engine", "apps", "godot/src"):
         for path in (REPO / root).rglob("*.cpp"):
             parts = path.relative_to(REPO).parts
             if "build" in parts:  # local CMake/godot-cpp build output, not source
@@ -209,12 +209,12 @@ OVERSIZE_GD_LINE_LIMIT = 1200
 
 def count_oversize_gd_files() -> int:
     """Oversized GDScript files (W4-6, the W4 closer): the W4 god-file splits
-    leave seven residual offenders; no .gd under godot/adapter, godot/game, or
+    leave seven residual offenders; no .gd under godot/src, godot/game, or
     godot/modtools may grow past 1200 lines without splitting first.
     godot/tests is deliberately out of scope: eleven test files already exceed
     the limit and the test refit is ONED-TST's concern, not this ratchet's."""
     count = 0
-    for root in ("godot/adapter", "godot/game", "godot/modtools"):
+    for root in ("godot/src", "godot/game", "godot/modtools"):
         for path in (REPO / root).rglob("*.gd"):
             parts = path.relative_to(REPO).parts
             if "addons" in parts or "build" in parts:  # vendored addons / build output, not source
@@ -234,7 +234,7 @@ def count_cpp_binding_console_writes() -> int:
     print_verbose. Raw print/printerr/print_line and the WARN/ERR_PRINT
     macros are ratcheted at zero."""
     count = 0
-    for path in (REPO / "godot" / "adapter").rglob("*"):
+    for path in (REPO / "godot" / "src").rglob("*"):
         if path.suffix.lower() not in (".cpp", ".h", ".hpp"):
             continue
         parts = path.relative_to(REPO).parts

@@ -5,8 +5,8 @@ extends GutTest
 # use an online service and intentionally cannot know the mission before join.
 
 
-func _mission() -> NovaMissionData:
-	var mission := NovaMissionData.new()
+func _mission() -> MissionData:
+	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	assert_true(mission.set_header_string("mission_name", "Discovery Island"))
 	mission.add_entity(3, 0, Vector3.ZERO, Vector3.ZERO)
@@ -19,7 +19,7 @@ func test_browse_defaults_pin_the_retail_game_port_range() -> void:
 	# @ 0x6290c0 port walk; docs/net/novaworld-net-re.md 5.0c]. The registered
 	# defaults are the seam every menu browse rides.
 	var found := false
-	for m in ClassDB.class_get_method_list("NovaLanSession"):
+	for m in ClassDB.class_get_method_list("LanSession"):
 		if String(m.get("name", "")) != "start_browsing":
 			continue
 		found = true
@@ -35,7 +35,7 @@ func test_browse_defaults_pin_the_retail_game_port_range() -> void:
 
 
 func test_browser_discovers_live_host_without_pre_auth_mission_metadata() -> void:
-	var host := NovaSimulation.new()
+	var host := Simulation.new()
 	host.configure_host_session({
 		"server_name": "Kitchen LAN",
 		"mission_name": "Discovery Island",
@@ -49,7 +49,7 @@ func test_browser_discovers_live_host_without_pre_auth_mission_metadata() -> voi
 	var port := host.get_host_listen_port()
 	assert_gt(port, 0)
 
-	var browser := NovaLanSession.new()
+	var browser := LanSession.new()
 	add_child_autofree(browser)
 	assert_eq(browser.start_browsing("127.0.0.1", port, port), OK)
 	assert_true(browser.is_browsing())
@@ -82,7 +82,7 @@ func test_browser_discovers_live_host_without_pre_auth_mission_metadata() -> voi
 
 
 func test_duplicate_replies_from_one_endpoint_collapse_to_one_row() -> void:
-	var host := NovaSimulation.new()
+	var host := Simulation.new()
 	host.configure_host_session({
 		"server_name": "Duplicate Reply LAN",
 		"gametype": 0x30020,
@@ -95,14 +95,14 @@ func test_duplicate_replies_from_one_endpoint_collapse_to_one_row() -> void:
 
 	# Relay one browser probe through a live production host to obtain its real
 	# ServerHello, then send that exact 0x81 twice from one controlled endpoint.
-	# This drives NovaLanSession's endpoint de-duplication without depending on
+	# This drives LanSession's endpoint de-duplication without depending on
 	# whether the platform loops global broadcast back to the local machine.
 	var responder := PacketPeerUDP.new()
 	assert_eq(responder.bind(0, "127.0.0.1"), OK)
 	var responder_port := responder.get_local_port()
 	assert_gt(responder_port, 0)
 
-	var browser := NovaLanSession.new()
+	var browser := LanSession.new()
 	add_child_autofree(browser)
 	assert_eq(browser.start_browsing("127.0.0.1", responder_port, responder_port), OK)
 
@@ -170,7 +170,7 @@ func test_duplicate_replies_from_one_endpoint_collapse_to_one_row() -> void:
 
 
 func test_invalid_port_range_fails_without_browsing() -> void:
-	var browser := NovaLanSession.new()
+	var browser := LanSession.new()
 	add_child_autofree(browser)
 	assert_eq(browser.start_browsing("127.0.0.1", 32788, 32768), ERR_INVALID_PARAMETER)
 	assert_false(browser.is_browsing())

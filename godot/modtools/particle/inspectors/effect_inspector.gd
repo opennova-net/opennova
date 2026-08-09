@@ -86,7 +86,7 @@ func _refresh() -> void:
 	if _editor != null and _editor.particle_file != null:
 		var src: Array = _editor.particle_file.effects
 		for entry in src:
-			var effect: NovaParticleEffect = entry
+			var effect: ParticleEffect = entry
 			if effect != null:
 				_effects.append(effect)
 				_list.add_item(effect.id)

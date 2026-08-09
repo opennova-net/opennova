@@ -4,7 +4,7 @@ extends GutTest
 # knobs routed through the shared debug catalog into a public shell surface,
 # and the empty states.
 
-const PageScript := preload("res://adapter/debug/pages/debug_audio_page.gd")
+const PageScript := preload("res://src/debug/pages/debug_audio_page.gd")
 
 var _saved_buses: Dictionary = {}
 
@@ -95,13 +95,13 @@ class AudioShellStub:
 func _make_page(
 		world: Node = null,
 		audio_shell: AudioShellStub = null) -> DebugAudioPage:
-	var ctx := NovaDebugContext.new()
-	ctx.options = NovaDebugOptionState.new()
-	ctx.session = NovaDebugSession.new()
-	NovaDebugCatalog.install(ctx.session)
+	var ctx := DebugContext.new()
+	ctx.options = DebugOptionState.new()
+	ctx.session = DebugSession.new()
+	DebugCatalog.install(ctx.session)
 	var shell := audio_shell if audio_shell != null else AudioShellStub.new()
 	ctx.session.set_target_source(
-			NovaDebugCatalog.TARGET_GAME_SHELL, func(): return shell)
+			DebugCatalog.TARGET_GAME_SHELL, func(): return shell)
 	if world != null:
 		ctx.world_source = func(): return world
 	var page: DebugAudioPage = PageScript.new()

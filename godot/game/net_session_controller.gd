@@ -12,7 +12,7 @@ extends Node
 
 var _shell  # MainGame: start_world_load / current_resource_root
 var _world: GameWorld
-var _menu_shell  # NovaMenuShell (nova_menu_shell.gd)
+var _menu_shell  # MenuShell (nova_menu_shell.gd)
 var _panel_layer: Node  # where the NovaWorld panel mounts (the menu layer)
 var _novaworld_panel: NovaWorldPanel
 
@@ -33,7 +33,7 @@ func wire_menu_companions(mp_companion: MpMenuCompanion) -> void:
 # --- Env launch hooks (dev/demo scaffolding) -----------------------------------
 
 # Co-op LAN demo hooks. These remain useful for deterministic smoke runs even
-# though mp.mnu's LAN_SEARCH now browses live hosts through NovaLanSession.
+# though mp.mnu's LAN_SEARCH now browses live hosts through LanSession.
 # NW_LAN_HOST=<mission.bms> boots straight in as a co-op host;
 # NW_LAN_JOIN=<ip[:port]> boots as a joiner dialing that host. The normal path
 # learns the mission from S2C 0x7B after authentication; NW_LAN_MISSION is only
@@ -165,15 +165,15 @@ func join_lan_server(target: JoinTarget) -> void:
 
 ## The local player's callsign — rides the game ClientAuth.NA (the host echoes it back so we
 ## self-identify by name-match, which makes a duplicate callsign unjoinable — D-NET-169).
-## The persisted profile default is uniquified per machine (NovaPlayerProfile); NW_LAN_NAME
+## The persisted profile default is uniquified per machine (PlayerProfile); NW_LAN_NAME
 ## overrides for the two-instance demo.
 func resolve_player_callsign() -> String:
 	# The override rides the same Name[16] wire echo as the profile value, so it gets
 	# the same 15-character clamp — a longer callsign can never satisfy the name-match
 	# self-ID and the join would die 60 s later with a misleading stall reason.
 	var n := OS.get_environment("NW_LAN_NAME").strip_edges() \
-			.left(NovaPlayerProfile.MAX_CALLSIGN_LENGTH)
-	return n if not n.is_empty() else NovaPlayerProfile.load_callsign()
+			.left(PlayerProfile.MAX_CALLSIGN_LENGTH)
+	return n if not n.is_empty() else PlayerProfile.load_callsign()
 
 
 # --- NovaWorld (online multiplayer) ---------------------------------------------
@@ -261,7 +261,7 @@ func _resolve_default_mission() -> String:
 
 # --- Shared lookups --------------------------------------------------------------
 
-func _resource_root() -> NovaResourceRoot:
+func _resource_root() -> ResourceRoot:
 	return _shell.current_resource_root() if _shell != null else null
 
 

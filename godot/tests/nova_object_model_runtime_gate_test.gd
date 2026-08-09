@@ -19,29 +19,29 @@ const ANIM_FIXTURES := "res://../fixtures/anim"
 # the environment stamp lands on surface-material uniforms, and PANM transform
 # derivation lands on the Robj part nodes — never through instrumentation
 # overrides.
-func _fresh_env_state(dir_color: Vector3) -> NovaEnvLightState:
-	var state := NovaEnvLightState.new()
-	var values := NovaEnvLightValues.retail_noon_defaults()
+func _fresh_env_state(dir_color: Vector3) -> EnvLightState:
+	var state := EnvLightState.new()
+	var values := EnvLightValues.retail_noon_defaults()
 	values.dir_color = dir_color
 	state.publish(values)
 	return state
 
 
-func _first_material(model: NovaObjectModel) -> ShaderMaterial:
+func _first_material(model: ObjectModel) -> ShaderMaterial:
 	var materials: Array = model.get_surface_materials()
 	assert(materials.size() > 0)
 	return materials[0] as ShaderMaterial
 
 
-func _animated_part_node(model: NovaObjectModel) -> Node3D:
+func _animated_part_node(model: ObjectModel) -> Node3D:
 	# Part 0 is the fixture's static root; the PANM channels drive parts 1+.
 	var parts: Dictionary = model.get_render_part_nodes()
 	assert(parts.has(1))
 	return parts[1] as Node3D
 
 
-func _object_data(path: String) -> NovaObjectData:
-	var data := NovaObjectData.new()
+func _object_data(path: String) -> ObjectData:
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(path)), OK,
 			"the committed object fixture opens: %s" % path)
 	return data
@@ -50,19 +50,19 @@ func _object_data(path: String) -> NovaObjectData:
 # Spy model with a real document installed through the production mutator.
 # Rebuild itself exercises the observed methods, so reset those setup calls
 # before measuring an explicit runtime frame.
-func _spy_model(path := HOUSE_3DI) -> NovaObjectModel:
-	var model := NovaObjectModel.new()
+func _spy_model(path := HOUSE_3DI) -> ObjectModel:
+	var model := ObjectModel.new()
 	add_child_autofree(model)
 	model.set_process(false)
 	model.set_object_data(_object_data(path))
 	return model
 
 
-func _loaded_skeletal() -> NovaSkeletalAnim:
-	var root := NovaResourceRoot.new()
+func _loaded_skeletal() -> SkeletalAnim:
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(ANIM_FIXTURES)), OK,
 			"the committed animation fixture root mounts")
-	var skeletal := NovaSkeletalAnim.new()
+	var skeletal := SkeletalAnim.new()
 	assert_true(skeletal.load_from_resource_root(root, "soldier.adm"),
 			"soldier.adm loads: %s" % skeletal.get_last_error())
 	return skeletal
@@ -112,7 +112,7 @@ func test_hidden_fast_path_skips_the_env_push() -> void:
 
 func test_live_panm_transforms_rederive_on_the_visible_frame() -> void:
 	var model := _spy_model(PMP_3DI)
-	var clock := NovaPanmClock.new()
+	var clock := PanmClock.new()
 	clock.set_time_ms_for_test(0)
 	model.set_panm_clock(clock)
 	var part := _animated_part_node(model)
@@ -135,7 +135,7 @@ func test_retail_runtime_does_not_submit_model_authored_lght() -> void:
 	# Jointops loads LGHT into the model resource but has no gameplay read of
 	# that field after load. Runtime models therefore keep the shader's
 	# count-zero defaults even when the source file carries authored lights.
-	var model := NovaObjectModel.new()
+	var model := ObjectModel.new()
 	add_child_autofree(model)
 	model.set_process(false)
 	var data := _object_data(ARMRY_3DI)
@@ -154,7 +154,7 @@ func test_retail_runtime_does_not_submit_model_authored_lght() -> void:
 
 
 func test_explicit_editor_preview_can_show_model_authored_lght() -> void:
-	var model := NovaObjectModel.new()
+	var model := ObjectModel.new()
 	add_child_autofree(model)
 	model.set_process(false)
 	model.position = Vector3(11.0, 13.0, 17.0)
@@ -212,10 +212,10 @@ func _mesh_instances_below(root: Node) -> Array[MeshInstance3D]:
 
 func test_world_model_shadow_casting_is_explicit_and_receiving_stays_enabled() -> void:
 	# Retail's offscreen silhouette pass admits people and DynamicShadow items,
-	# never every loaded model. A NovaObjectModel therefore starts receiver-only;
+	# never every loaded model. A ObjectModel therefore starts receiver-only;
 	# the item-aware placer explicitly opts eligible entities into casting.
 	# [orig: Entity_InitFromModel @0x40E1BC..0x40E1F7]
-	var model := NovaObjectModel.new()
+	var model := ObjectModel.new()
 	add_child_autofree(model)
 	model.set_process(false)
 	model.set_object_data(_object_data(HOUSE_3DI))
@@ -239,42 +239,42 @@ func test_world_model_shadow_casting_is_explicit_and_receiving_stays_enabled() -
 	for mesh in meshes:
 		assert_eq(mesh.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_ON,
 				"an eligible entity explicitly enters the silhouette pass")
-		assert_ne(mesh.layers & NovaWater.VISUAL_LAYER_DYNAMIC_SHADOW_CASTER, 0,
+		assert_ne(mesh.layers & Water.VISUAL_LAYER_DYNAMIC_SHADOW_CASTER, 0,
 				"the dynamic light can select the caster independently of receivers")
-		assert_eq(mesh.layers & NovaWater.VISUAL_LAYER_STATIC_SHADOW_CASTER, 0)
+		assert_eq(mesh.layers & Water.VISUAL_LAYER_STATIC_SHADOW_CASTER, 0)
 	model.set_static_shadow_caster_enabled(true)
 	for mesh in meshes:
-		assert_ne(mesh.layers & NovaWater.VISUAL_LAYER_DYNAMIC_SHADOW_CASTER, 0,
+		assert_ne(mesh.layers & Water.VISUAL_LAYER_DYNAMIC_SHADOW_CASTER, 0,
 				"an item can participate in both witnessed projection systems")
-		assert_ne(mesh.layers & NovaWater.VISUAL_LAYER_STATIC_SHADOW_CASTER, 0,
+		assert_ne(mesh.layers & Water.VISUAL_LAYER_STATIC_SHADOW_CASTER, 0,
 				"static terrain projection uses its own caster layer")
 	model.set_static_shadow_caster_enabled(false)
 	model.set_shadow_caster_enabled(false)
 	for mesh in meshes:
 		assert_eq(mesh.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_OFF,
 				"the policy remains live across an item/presentation change")
-		assert_eq(mesh.layers & NovaWater.VISUAL_LAYER_SHADOW_CASTER_MASK, 0)
+		assert_eq(mesh.layers & Water.VISUAL_LAYER_SHADOW_CASTER_MASK, 0)
 
 
 func test_projected_shadow_receiver_rejects_incomplete_material_coverage() -> void:
-	assert_true(NovaObjectModel.material_supports_projected_shadow_receiver(
-			NovaObjectShaderCache.BLEND_OPAQUE, 0),
+	assert_true(ObjectModel.material_supports_projected_shadow_receiver(
+			ObjectShaderCache.BLEND_OPAQUE, 0),
 			"a one-sided opaque surface can use the simple attenuation catcher")
-	assert_false(NovaObjectModel.material_supports_projected_shadow_receiver(
-			NovaObjectShaderCache.BLEND_ALPHA, 0),
+	assert_false(ObjectModel.material_supports_projected_shadow_receiver(
+			ObjectShaderCache.BLEND_ALPHA, 0),
 			"an alpha-blind next pass must not darken a transparent polygon")
-	assert_false(NovaObjectModel.material_supports_projected_shadow_receiver(
-			NovaObjectShaderCache.BLEND_OPAQUE,
-			NovaObjectShaderCache.MATERIAL_FLAG_ALPHA_TEST),
+	assert_false(ObjectModel.material_supports_projected_shadow_receiver(
+			ObjectShaderCache.BLEND_OPAQUE,
+			ObjectShaderCache.MATERIAL_FLAG_ALPHA_TEST),
 			"alpha-tested holes must not become a solid shadow card")
-	assert_false(NovaObjectModel.material_supports_projected_shadow_receiver(
-			NovaObjectShaderCache.BLEND_OPAQUE,
-			NovaObjectShaderCache.MATERIAL_FLAG_TWO_SIDED),
+	assert_false(ObjectModel.material_supports_projected_shadow_receiver(
+			ObjectShaderCache.BLEND_OPAQUE,
+			ObjectShaderCache.MATERIAL_FLAG_TWO_SIDED),
 			"the one-sided catcher cannot safely cover a two-sided base surface")
 
 
 func test_hidden_skeletal_clock_advances_without_writing_bones() -> void:
-	var model := NovaObjectModel.new()
+	var model := ObjectModel.new()
 	add_child_autofree(model)
 	model.set_process(false)
 	model.set_skeletal_anim(_loaded_skeletal())
@@ -312,9 +312,9 @@ func test_hidden_skeletal_clock_advances_without_writing_bones() -> void:
 # wake is live-verified (it depends on the wall frame counter); these tests
 # pin the park/re-arm contract itself.
 
-func _clocked_spy_model() -> NovaObjectModel:
+func _clocked_spy_model() -> ObjectModel:
 	var model := _spy_model()
-	var clock := NovaPanmClock.new()
+	var clock := PanmClock.new()
 	clock.set_time_ms_for_test(0)
 	model.set_panm_clock(clock)
 	return model
@@ -397,21 +397,21 @@ func test_mirror_eligibility_selects_the_base_visual_layer() -> void:
 	assert_gt(plain_instances.size(), 0, "the fixture model builds mesh instances")
 	for vi in plain_instances:
 		assert_ne((vi as MeshInstance3D).layers
-				& NovaWater.VISUAL_LAYER_WORLD_NO_MIRROR, 0,
+				& Water.VISUAL_LAYER_WORLD_NO_MIRROR, 0,
 				"a non-vehicle model rides the no-mirror world layer")
-		assert_eq((vi as MeshInstance3D).layers & NovaWater.VISUAL_LAYER_WORLD, 0,
+		assert_eq((vi as MeshInstance3D).layers & Water.VISUAL_LAYER_WORLD, 0,
 				"a non-vehicle model leaves the mirror-visible layer")
 
-	var vehicle := NovaObjectModel.new()
+	var vehicle := ObjectModel.new()
 	add_child_autofree(vehicle)
 	vehicle.set_process(false)
 	vehicle.mirror_reflected = true
 	vehicle.set_object_data(_object_data(HOUSE_3DI))
 	for vi in vehicle.find_children("*", "MeshInstance3D", true, false):
-		assert_ne((vi as MeshInstance3D).layers & NovaWater.VISUAL_LAYER_WORLD, 0,
+		assert_ne((vi as MeshInstance3D).layers & Water.VISUAL_LAYER_WORLD, 0,
 				"a vehicle model stays on the mirror-visible world layer")
 		assert_eq((vi as MeshInstance3D).layers
-				& NovaWater.VISUAL_LAYER_WORLD_NO_MIRROR, 0,
+				& Water.VISUAL_LAYER_WORLD_NO_MIRROR, 0,
 				"a vehicle model never rides the no-mirror layer")
 
 
@@ -444,7 +444,7 @@ func test_submission_registry_tracks_offscreen_edges_and_frees_cleanly() -> void
 
 func test_off_screen_model_advances_clocks_but_skips_render_derives() -> void:
 	var model := _spy_model(PMP_3DI)  # live PANM: always has runtime work
-	var clock := NovaPanmClock.new()
+	var clock := PanmClock.new()
 	clock.set_time_ms_for_test(0)
 	model.set_panm_clock(clock)
 	var part := _animated_part_node(model)

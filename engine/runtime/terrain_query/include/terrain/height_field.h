@@ -3,11 +3,11 @@
 // Portable terrain height sampler.
 //
 // The "height at a world position" query was RE'd long ago but lived only inside
-// the Godot binding (NovaTerrainData::get_height / get_height_world /
+// the Godot binding (TerrainData::get_height / get_height_world /
 // get_height_world_bilinear), duplicated three times over the class's own
 // cpt.depth_buffer + trn. That left the portable engine (engine/runtime/world AI grounding,
 // engine/runtime/mission) with NO way to sample terrain height. This is the one shared home:
-// NovaTerrainData becomes a thin wrapper over these functions, and the runtime AI
+// TerrainData becomes a thin wrapper over these functions, and the runtime AI
 // samples the exact same implementation the renderer/editor do.
 //
 // [orig: jodemo.exe Terrain_SampleHeightBilinear @0x5C6770 +
@@ -59,16 +59,16 @@ static_assert(sizeof(TerrainHeightField) == sizeof(detail::TerrainHeightFieldNoL
               "tests/world/infantry_test's stack.");
 
 // Direct bilinear sample of the square buffer with (dim-1) wrap and NO sector remap.
-// [orig: NovaTerrainData::get_height / gobj_trn_sample_height_bilinear 0x100314A1.]
+// [orig: TerrainData::get_height / gobj_trn_sample_height_bilinear 0x100314A1.]
 // Returns height in WORLD UNITS (raw16 / 256).
 float height_field_height_bilinear(const TerrainHeightField &f, float world_x, float world_z);
 
 // world->source sector remap (coords.h runtime options), then NEAREST sample.
-// [orig: NovaTerrainData::get_height_world.] World units.
+// [orig: TerrainData::get_height_world.] World units.
 float height_field_height_world(const TerrainHeightField &f, float world_x, float world_z);
 
 // world->source sector remap, then BILINEAR sample. This is the renderer-accurate
-// column height the AI grounds on. [orig: NovaTerrainData::get_height_world_bilinear /
+// column height the AI grounds on. [orig: TerrainData::get_height_world_bilinear /
 // Terrain_SampleHeightBilinear @0x6067B0.] World units.
 float height_field_height_world_bilinear(const TerrainHeightField &f, float world_x, float world_z);
 

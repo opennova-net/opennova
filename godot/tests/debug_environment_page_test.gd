@@ -4,7 +4,7 @@ extends GutTest
 # shared-session scrub knobs and authority gates, and empty states without a
 # world.
 
-const PageScript := preload("res://adapter/debug/pages/debug_environment_page.gd")
+const PageScript := preload("res://src/debug/pages/debug_environment_page.gd")
 
 
 class StubEnv:
@@ -12,10 +12,10 @@ class StubEnv:
 	var time_of_day := 1830.0
 
 	func get_mission_minute_of_day() -> float:
-		return NovaEnvironment.hhmm_to_minute_of_day(time_of_day)
+		return MissionEnvironment.hhmm_to_minute_of_day(time_of_day)
 
 	func debug_set_mission_minute_of_day(value: float) -> Error:
-		time_of_day = NovaEnvironment.minute_of_day_to_hhmm(value)
+		time_of_day = MissionEnvironment.minute_of_day_to_hhmm(value)
 		return OK
 
 	func is_night_phase() -> bool:
@@ -115,12 +115,12 @@ func _make_page(
 		world: Node = null,
 		has_authority: bool = true,
 		edit_unlocked: bool = true) -> DebugEnvironmentPage:
-	var ctx := NovaDebugContext.new()
-	ctx.options = NovaDebugOptionState.new()
+	var ctx := DebugContext.new()
+	ctx.options = DebugOptionState.new()
 	ctx.world_source = func(): return world
-	ctx.session = NovaDebugSession.new()
-	NovaDebugCatalog.install(ctx.session)
-	NovaDebugCatalog.bind_runtime_targets(
+	ctx.session = DebugSession.new()
+	DebugCatalog.install(ctx.session)
+	DebugCatalog.bind_runtime_targets(
 			ctx.session, func(): return null, ctx.world_source)
 	ctx.session.set_authority_source(func(): return has_authority)
 	ctx.session.set_edit_unlocked(edit_unlocked)
@@ -198,7 +198,7 @@ func test_joiner_or_locked_overlay_cannot_mutate_environment() -> void:
 
 
 func test_public_clock_scrub_reseeds_the_fixed_point_mission_clock() -> void:
-	var env: NovaEnvironment = autofree(NovaEnvironment.new()) as NovaEnvironment
+	var env: MissionEnvironment = autofree(MissionEnvironment.new()) as MissionEnvironment
 	env.configure_mission_clock(0x0540, 60)
 
 	assert_eq(env.debug_set_mission_minute_of_day(12.0 * 60.0 + 34.0), OK)

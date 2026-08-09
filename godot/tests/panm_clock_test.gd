@@ -3,14 +3,14 @@ extends GutTest
 const PMP := "res://../fixtures/3dp/Pmpjk01/Pmpjk01.3di"
 
 
-func _open_pmp() -> NovaObjectData:
-	var data := NovaObjectData.new()
+func _open_pmp() -> ObjectData:
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(PMP)), OK)
 	return data
 
 
 func test_clock_samples_once_per_frame_and_wraps_as_a_dword() -> void:
-	var clock = NovaPanmClock.new()
+	var clock = PanmClock.new()
 	assert_true(clock.sample(0x1ffffffff, 7))
 	assert_eq(clock.time_ms, 0xffffffff)
 	assert_false(clock.sample(123, 7), "a second consumer sees the same frame sample")
@@ -32,9 +32,9 @@ func test_panm_evaluator_accepts_the_full_unsigned_clock_domain() -> void:
 
 func test_late_spawned_models_share_one_panm_epoch() -> void:
 	var data := _open_pmp()
-	var clock = NovaPanmClock.new()
+	var clock = PanmClock.new()
 	clock.set_time_ms_for_test(0)
-	var first: Node3D = add_child_autofree(NovaObjectModel.new())
+	var first: Node3D = add_child_autofree(ObjectModel.new())
 	first.set_panm_clock(clock)
 	first.set_object_data(data)
 
@@ -54,7 +54,7 @@ func test_late_spawned_models_share_one_panm_epoch() -> void:
 
 	clock.set_time_ms_for_test(640)
 	first.set_panm_clock(clock)
-	var second: Node3D = add_child_autofree(NovaObjectModel.new())
+	var second: Node3D = add_child_autofree(ObjectModel.new())
 	second.set_panm_clock(clock)
 	second.set_object_data(data)
 	assert_eq(first.get_animation_time_ms(), 640)

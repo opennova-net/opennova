@@ -57,7 +57,7 @@ func test_dvxi5_import_then_export_matches_fixture_bytes() -> void:
 
 func test_uniformless_authored_slots_export_from_terrain_data() -> void:
 	var document := TerrainEditorDocument.new()
-	document.data = NovaTerrainData.new()
+	document.data = TerrainData.new()
 	document.colormap_image = _solid_image(Color8(1, 2, 3))
 	document.blendmap_image = _solid_image(Color8(4, 5, 6))
 	document.data.reset_pcx_slot_default("charmap", 2, 2)
@@ -93,7 +93,7 @@ func test_uniformless_authored_slots_export_from_terrain_data() -> void:
 
 func test_cptless_project_data_does_not_build_render_terrain() -> void:
 	DirAccess.make_dir_recursive_absolute(_output_dir())
-	var imported := NovaTerrainData.new()
+	var imported := TerrainData.new()
 	imported.set_trn_path(_fixture_path("Dvxi5.trn"))
 
 	assert_eq(imported.load(), OK, "Fixture should load before saving a project-only TRN.")
@@ -102,13 +102,13 @@ func test_cptless_project_data_does_not_build_render_terrain() -> void:
 	var project_path := _output_dir().path_join("Cptless.trn")
 	assert_eq(imported.save_to_path(project_path), OK, "Project-only TRN should save without CPT polydata.")
 
-	var reopened := NovaTerrainData.new()
+	var reopened := TerrainData.new()
 	reopened.set_trn_path(project_path)
-	assert_eq(reopened.load(), OK, "Project-only TRN should reopen as NovaTerrainData.")
+	assert_eq(reopened.load(), OK, "Project-only TRN should reopen as TerrainData.")
 	assert_true(reopened.is_loaded(), "Project-only TRN should report loaded even without CPT.")
 	assert_eq(reopened.get_tile_count(), 0, "Project-only TRN should not expose baked CPT tiles.")
 
-	var terrain: NovaTerrain = add_child_autofree(NovaTerrain.new())
+	var terrain: Terrain = add_child_autofree(Terrain.new())
 	terrain.set_terrain_data(reopened)
 	terrain.build()
 
@@ -118,14 +118,14 @@ func test_cptless_project_data_does_not_build_render_terrain() -> void:
 func test_extensionless_tileinfo_filename_resolves_til_sidecar() -> void:
 	DirAccess.make_dir_recursive_absolute(_output_dir())
 
-	var source_tileinfo := NovaTerrainTileInfo.new()
-	var entry := NovaTerrainTileEntry.new()
+	var source_tileinfo := TerrainTileInfo.new()
+	var entry := TerrainTileEntry.new()
 	entry.set_cell(2, 3)
 	entry.set_tile_index(7)
 	source_tileinfo.add_entry(entry)
 	assert_eq(source_tileinfo.save_to_path(_output_dir().path_join("Overlay.til")), OK, "Fixture .til should save before sidecar lookup.")
 
-	var data := NovaTerrainData.new()
+	var data := TerrainData.new()
 	data.set_trn_path(_output_dir().path_join("OverlayMap.trn"))
 	data.set_tileinfo_filename("Overlay")
 

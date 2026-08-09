@@ -2,9 +2,9 @@ extends GutTest
 
 # HitboxDebugView: the F3 Rounds tab's posed collision view. A crafted native
 # payload pins the visual language for live, masked, and unresolved person
-# sections without needing a mission or NovaSimulation instance.
+# sections without needing a mission or Simulation instance.
 
-const ViewScript := preload("res://adapter/debug/hitbox_debug_view.gd")
+const ViewScript := preload("res://src/debug/hitbox_debug_view.gd")
 
 
 class FakeSim:
@@ -318,7 +318,7 @@ func test_cadence_equivalent_payload_does_not_rebuild_posed_geometry() -> void:
 	first_label.visibility_changed.connect(
 			func() -> void: visibility_change_count[0] += 1)
 
-	# NovaSimulation publishes fresh Dictionary/Array containers at the debug
+	# Simulation publishes fresh Dictionary/Array containers at the debug
 	# cadence even when the posed collision values are unchanged. Equivalent
 	# snapshots must not force the same wire geometry through RenderingServer.
 	for refresh_index in range(8):

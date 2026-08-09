@@ -3,7 +3,7 @@
 // A NovaLogic sound set (.lwf Multi) has one or more layers, each holding a list of member
 // sounds and selection flags that decide which member plays when the set is triggered. This is
 // the faithful port of the engine's per-layer member selection, pulled out of the Godot layer
-// (godot/adapter/world/nova_sound_bank.gd) so the engine core stays C++ and a headless server can
+// (godot/src/world/nova_sound_bank.gd) so the engine core stays C++ and a headless server can
 // resolve the same member without Godot. The embedder keeps the lwf data access and the
 // AudioStreamPlayer spawning; this only decides WHICH member index plays.
 //
@@ -23,7 +23,7 @@
 
 namespace opennova::audio {
 
-// Mirrors the .lwf selection flags (and NovaSoundBank.SELECTION_* / NovaLwfData).
+// Mirrors the .lwf selection flags (and SoundBank.SELECTION_* / LwfData).
 // kFirst has no engine equivalent (the engine default is kRandom); it is kept as a
 // deterministic authoring/preview mode for the editor.
 enum SelectionMode {

@@ -7,7 +7,7 @@ const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
 const FIXTURE_DIR := "res://../fixtures/minimal/resources"
 const BAKED_TERRAIN_DIR := "res://../fixtures/godot/dvxi5"
 const MAIN_GAME_SCENE := preload("res://game/main_game.tscn")
-const VegAssetsScript := preload("res://adapter/terrain/veg_assets.gd")
+const VegAssetsScript := preload("res://src/terrain/veg_assets.gd")
 # Witnessed retail placement (fixtures/minimal/README.md): strings plus the
 # mission .bin/.pcx/.lwf family live in language; menus/defs/.bms/.dbf in
 # localres; environment, terrain, and terrain art in resource.
@@ -119,7 +119,7 @@ class EntitySimStub:
 		return snapshot
 
 	func get_present_stride() -> int:
-		return NovaSimulation.PF_STRIDE
+		return Simulation.PF_STRIDE
 
 	func get_world_entity_debug(net_id: int) -> Dictionary:
 		if net_id != 333:
@@ -138,17 +138,17 @@ class EntitySimStub:
 			type_id: int,
 			position: Vector3) -> PackedFloat32Array:
 		var row := PackedFloat32Array()
-		row.resize(NovaSimulation.PF_STRIDE)
-		row[NovaSimulation.PF_TYPE_ID] = type_id
-		row[NovaSimulation.PF_NET_ID] = net_id
-		row[NovaSimulation.PF_WIRE_HANDLE] = wire_handle
-		row[NovaSimulation.PF_KIND] = 1
-		row[NovaSimulation.PF_INDEX] = net_id
-		row[NovaSimulation.PF_BMS_ID] = 1000 + net_id
-		row[NovaSimulation.PF_POS_X] = position.x
-		row[NovaSimulation.PF_POS_Y] = position.y
-		row[NovaSimulation.PF_POS_Z] = position.z
-		row[NovaSimulation.PF_ALIVE] = 1.0
+		row.resize(Simulation.PF_STRIDE)
+		row[Simulation.PF_TYPE_ID] = type_id
+		row[Simulation.PF_NET_ID] = net_id
+		row[Simulation.PF_WIRE_HANDLE] = wire_handle
+		row[Simulation.PF_KIND] = 1
+		row[Simulation.PF_INDEX] = net_id
+		row[Simulation.PF_BMS_ID] = 1000 + net_id
+		row[Simulation.PF_POS_X] = position.x
+		row[Simulation.PF_POS_Y] = position.y
+		row[Simulation.PF_POS_Z] = position.z
+		row[Simulation.PF_ALIVE] = 1.0
 		return row
 
 
@@ -185,7 +185,7 @@ func test_public_audio_debug_knobs_validate_and_mutate_the_process_mixer() -> vo
 	assert_eq(debug_adapter.debug_set_audio_bus_volume("Master", INF),
 			ERR_INVALID_PARAMETER)
 	assert_eq(debug_adapter.debug_set_audio_bus_volume(
-			"Master", NovaDebugCatalog.AUDIO_BUS_VOLUME_MAX_DB + 0.5),
+			"Master", DebugCatalog.AUDIO_BUS_VOLUME_MAX_DB + 0.5),
 			ERR_INVALID_PARAMETER)
 	var bus := AudioServer.get_bus_index("SFX")
 	if bus < 0:
@@ -273,7 +273,7 @@ func before_each() -> void:
 	# the host advertise an expansion this install cannot mount, which the joiner's preload
 	# correctly refuses (D-NET-178) — a failure about suite order, not about what is under test.
 	# after_each restores the whole config file, so pinning it here leaks nothing.
-	NovaResourceDirSettings.set_expansion("")
+	ResourceDirSettings.set_expansion("")
 
 
 func after_each() -> void:
@@ -320,10 +320,10 @@ func test_boot_gates_env_mission_when_the_resource_dir_cannot_mount() -> void:
 	assert_not_null(loose)
 	loose.store_string("loose trn")
 	loose.close()
-	NovaResourceDirSettings.set_resource_dir(_temp_dir)
-	assert_eq(NovaResourceDirSettings.get_resource_dir(), _temp_dir,
+	ResourceDirSettings.set_resource_dir(_temp_dir)
+	assert_eq(ResourceDirSettings.get_resource_dir(), _temp_dir,
 			"the persisted dir round-trips, so the boot below reads THIS dir")
-	NovaResourceDirSettings.set_game("jo")
+	ResourceDirSettings.set_game("jo")
 	OS.set_environment("NW_SP_MISSION", "mnml.bms")
 	_shell = MAIN_GAME_SCENE.instantiate()
 	assert_not_null(_shell)
@@ -343,14 +343,14 @@ func test_shell_exit_releases_runtime_texture_caches_before_renderer_shutdown() 
 	_shell = await _make_shell()
 	if _shell == null:
 		return
-	var resource_root: NovaResourceRoot = _shell.current_resource_root()
+	var resource_root: ResourceRoot = _shell.current_resource_root()
 	assert_not_null(resource_root)
 	var texture: Texture2D = resource_root.load_texture("mnml_c.tga")
 	assert_not_null(texture, "the packed runtime root owns a decoded ImageTexture")
 	var cursor_texture: Texture2D = null
-	var menu: NovaMnuMenu = _shell.get_node("MenuLayer/MenuShell").get_menu()
-	for node in menu.find_children("*", "NovaMnuScreen", true, false):
-		var screen := node as NovaMnuScreen
+	var menu: MnuMenu = _shell.get_node("MenuLayer/MenuShell").get_menu()
+	for node in menu.find_children("*", "MnuScreen", true, false):
+		var screen := node as MnuScreen
 		if screen.get_cursor_texture() != null:
 			cursor_texture = screen.get_cursor_texture()
 			break
@@ -358,7 +358,7 @@ func test_shell_exit_releases_runtime_texture_caches_before_renderer_shutdown() 
 			"the retail-shaped main menu installs its decoded custom cursor")
 	var weak_cursor: WeakRef = weakref(cursor_texture)
 	cursor_texture = null
-	var water: NovaWater = _shell.get_node("World/NovaWater")
+	var water: Water = _shell.get_node("World/Water")
 	var water_material: ShaderMaterial = water.water_material
 	var water_color_texture: Texture2D = water_material.get_shader_parameter(
 			"u_noise_color")
@@ -403,9 +403,9 @@ func test_shutdown_drain_releases_join_target_awaited_by_loading_barrier() -> vo
 	if _shell == null:
 		return
 	var cursor_texture: Texture2D = null
-	var menu: NovaMnuMenu = _shell.get_node("MenuLayer/MenuShell").get_menu()
-	for node in menu.find_children("*", "NovaMnuScreen", true, false):
-		var screen := node as NovaMnuScreen
+	var menu: MnuMenu = _shell.get_node("MenuLayer/MenuShell").get_menu()
+	for node in menu.find_children("*", "MnuScreen", true, false):
+		var screen := node as MnuScreen
 		if screen.get_cursor_texture() != null:
 			cursor_texture = screen.get_cursor_texture()
 			break
@@ -447,20 +447,20 @@ func test_picker_pick_persists_only_for_unmanaged_runs() -> void:
 	_write_pff(picked_dir.path_join("language.pff"), _fixture_entries(LANGUAGE_FILES))
 	_write_pff(picked_dir.path_join("localres.pff"), _fixture_entries(LOCALRES_FILES))
 	_write_pff(picked_dir.path_join("resource.pff"), _fixture_entries(RESOURCE_FILES))
-	assert_eq(NovaResourceDirSettings.get_resource_dir(), _temp_dir)
+	assert_eq(ResourceDirSettings.get_resource_dir(), _temp_dir)
 
 	assert_true(_shell.apply_picked_resource_dir(picked_dir, true),
 			"an editor-managed pick mounts and enters the menu")
-	assert_eq(NovaResourceDirSettings.get_resource_dir(), _temp_dir,
+	assert_eq(ResourceDirSettings.get_resource_dir(), _temp_dir,
 			"an editor-managed pick never writes the shared editor+game key")
 	assert_false(_shell.apply_picked_resource_dir(
 			_temp_dir.path_join("does-not-exist"), false),
 			"an unmountable pick is refused")
-	assert_eq(NovaResourceDirSettings.get_resource_dir(), _temp_dir,
+	assert_eq(ResourceDirSettings.get_resource_dir(), _temp_dir,
 			"a refused pick changes nothing")
 	assert_true(_shell.apply_picked_resource_dir(picked_dir, false),
 			"an unmanaged pick mounts")
-	assert_eq(NovaResourceDirSettings.get_resource_dir(), picked_dir,
+	assert_eq(ResourceDirSettings.get_resource_dir(), picked_dir,
 			"the unmanaged first-launch pick persists")
 
 
@@ -485,19 +485,19 @@ func test_mount_boot_root_falls_back_to_the_loose_authoring_mount() -> void:
 	_write_pff(packed_dir.path_join("language.pff"), _fixture_entries(LANGUAGE_FILES))
 	_write_pff(packed_dir.path_join("localres.pff"), _fixture_entries(LOCALRES_FILES))
 	_write_pff(packed_dir.path_join("resource.pff"), _fixture_entries(RESOURCE_FILES))
-	NovaResourceDirSettings.set_game("jo")
+	ResourceDirSettings.set_game("jo")
 	var shell = autofree(preload("res://game/main_game.gd").new())
 
 	assert_null(shell.mount_boot_root(loose_dir, false),
 			"without the flag a loose-only dir keeps retail's fatal mount error")
-	var fallback: NovaResourceRoot = shell.mount_boot_root(loose_dir, true)
+	var fallback: ResourceRoot = shell.mount_boot_root(loose_dir, true)
 	assert_not_null(fallback, "--loose-root plays the loose authoring dir")
 	if fallback != null:
 		assert_false(fallback.is_runtime_mount(),
 				"the fallback is the editor's loose mount, not a packed install")
 		assert_eq(fallback.read_file("alpha.trn").get_string_from_utf8(), "loose trn")
 		fallback.clear()
-	var packed: NovaResourceRoot = shell.mount_boot_root(packed_dir, true)
+	var packed: ResourceRoot = shell.mount_boot_root(packed_dir, true)
 	assert_not_null(packed)
 	if packed != null:
 		assert_true(packed.is_runtime_mount(),
@@ -510,7 +510,7 @@ func test_mission_return_restores_menu_frame_and_supports_another_load() -> void
 	if _shell == null:
 		return
 	var world = _shell.get_node("World")
-	var terrain = world.get_node("NovaTerrain")
+	var terrain = world.get_node("Terrain")
 	var menu_shell = _shell.get_node("MenuLayer/MenuShell")
 	var boot_clear: Color = world.get_current_frame_clear_color()
 	_assert_clean_menu(world, terrain, menu_shell, boot_clear)
@@ -518,8 +518,8 @@ func test_mission_return_restores_menu_frame_and_supports_another_load() -> void
 	# cannot redirect one consumer into a separately remounted VFS.
 	var detached_resource_dir := _temp_dir.path_join("detached")
 	assert_eq(DirAccess.make_dir_recursive_absolute(detached_resource_dir), OK)
-	NovaResourceDirSettings.set_resource_dir(detached_resource_dir)
-	assert_eq(NovaResourceDirSettings.get_resource_dir(), detached_resource_dir,
+	ResourceDirSettings.set_resource_dir(detached_resource_dir)
+	assert_eq(ResourceDirSettings.get_resource_dir(), detached_resource_dir,
 			"the persisted directory now points away from the mounted fixture")
 
 	# This is the same public intent emitted by the mission-list ACCEPT command.
@@ -569,11 +569,11 @@ func test_join_loading_stays_raised_until_authoritative_admission() -> void:
 	# The advertised filename is deliberately absent from the client install.
 	# Retail joins from the exact S2C 0x0B header + streamed world/0x45 terrain
 	# overlay; reopening an advertised local .bms is the D-NET-194 regression.
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.open_file(ProjectSettings.globalize_path(
 			FIXTURE_DIR.path_join("mnml.bms"))), OK)
 	var advertised_file := "wire_only_mnml.bms"
-	var client_root: NovaResourceRoot = _shell.current_resource_root()
+	var client_root: ResourceRoot = _shell.current_resource_root()
 	assert_not_null(client_root, "the menu boot mounted the client resource session")
 	if client_root == null:
 		return
@@ -584,7 +584,7 @@ func test_join_loading_stays_raised_until_authoritative_admission() -> void:
 		host_body_records += mission.get_entity_count(kind)
 	assert_gt(host_body_records, 0,
 			"the host fixture includes authored pools that must reach the wire-only join")
-	var host := NovaSimulation.new()
+	var host := Simulation.new()
 	host.configure_host_session({
 		"server_name": "Loading Hold Host",
 		"mission_name": "Minimal",
@@ -630,11 +630,11 @@ func test_join_loading_stays_raised_until_authoritative_admission() -> void:
 	assert_true(world.visible, "the admitted world is revealed")
 	assert_true(world.get_sim() != null and world.get_sim().is_joined_in_match())
 	assert_eq(world.get_sim().get_join_terrain_til_state(),
-			NovaSimulation.JOIN_TERRAIN_TIL_COMPLETE)
+			Simulation.JOIN_TERRAIN_TIL_COMPLETE)
 	assert_eq(world.get_sim().get_join_terrain_til(), streamed_til,
 			"the structurally complete wire image remains byte-exact")
 	assert_eq(world.get_loaded_mission_file(), advertised_file)
-	var tile_info := world.get_node("NovaTerrain").tile_info_override as NovaTerrainTileInfo
+	var tile_info := world.get_node("Terrain").tile_info_override as TerrainTileInfo
 	assert_not_null(tile_info, "the host's paged S2C 0x45 rebuilt the mission TIL")
 	if tile_info != null:
 		assert_true(tile_info.blocks_foliage(72.0, 8.0, 2.0),
@@ -652,15 +652,15 @@ func test_join_rejects_a_truncated_terrain_stream_before_reveal() -> void:
 	if _shell == null:
 		return
 	var world = _shell.get_node("World")
-	var terrain = world.get_node("NovaTerrain")
+	var terrain = world.get_node("Terrain")
 	var menu_shell = _shell.get_node("MenuLayer/MenuShell")
 	var boot_clear: Color = world.get_current_frame_clear_color()
 
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.open_file(ProjectSettings.globalize_path(
 			FIXTURE_DIR.path_join("mnml.bms"))), OK)
 	var advertised_file := "wire_truncated_til.bms"
-	var host := NovaSimulation.new()
+	var host := Simulation.new()
 	host.configure_host_session({
 		"server_name": "Truncated TIL Host",
 		"mission_name": "Minimal",
@@ -693,11 +693,11 @@ func test_join_rejects_a_truncated_terrain_stream_before_reveal() -> void:
 		host.step()
 		await get_tree().process_frame
 		revealed = revealed or world.visible
-		var join_sim: NovaSimulation = world.get_sim()
+		var join_sim: Simulation = world.get_sim()
 		if join_sim != null and join_sim.is_joiner():
 			observed_receiving = observed_receiving or \
 					join_sim.get_join_terrain_til_state() == \
-					NovaSimulation.JOIN_TERRAIN_TIL_RECEIVING
+					Simulation.JOIN_TERRAIN_TIL_RECEIVING
 		if not failures.is_empty() and not _shell.is_world_loading():
 			break
 
@@ -725,7 +725,7 @@ func test_in_match_session_loss_returns_to_the_menu() -> void:
 	if _shell == null:
 		return
 	var world = _shell.get_node("World")
-	var terrain = world.get_node("NovaTerrain")
+	var terrain = world.get_node("Terrain")
 	var menu_shell = _shell.get_node("MenuLayer/MenuShell")
 	var boot_clear: Color = world.get_current_frame_clear_color()
 	assert_true(world.has_signal("session_lost"),
@@ -757,7 +757,7 @@ func test_debug_overlay_suspends_input_without_stopping_the_world() -> void:
 	if _shell == null:
 		return
 	var world = _shell.get_node("World")
-	var terrain = world.get_node("NovaTerrain")
+	var terrain = world.get_node("Terrain")
 	var menu_shell = _shell.get_node("MenuLayer/MenuShell")
 	menu_shell.start_requested.emit("mnml.bms")
 	await _wait_for_world_load(world)
@@ -924,9 +924,9 @@ func _make_shell():
 	_write_pff(_temp_dir.path_join("localres.pff"), localres_entries)
 	_write_pff(_temp_dir.path_join("resource.pff"), resource_entries)
 
-	NovaResourceDirSettings.set_resource_dir(_temp_dir)
-	NovaResourceDirSettings.set_expansion("")
-	NovaResourceDirSettings.set_game("jo")
+	ResourceDirSettings.set_resource_dir(_temp_dir)
+	ResourceDirSettings.set_expansion("")
+	ResourceDirSettings.set_game("jo")
 	var shell = MAIN_GAME_SCENE.instantiate()
 	assert_not_null(shell)
 	if shell == null:

@@ -2,7 +2,7 @@
 
 // The wire entity-handle bit layout: the original entity pool rides the high
 // nibble and the pool slot the low 12 bits — handle = pool << 12 | slot.
-// This is the native home for that decode (godot/adapter/world/wire_handle.gd is
+// This is the native home for that decode (godot/src/world/wire_handle.gd is
 // the GDScript twin). engine/runtime/world's EntityHandle carries the same packing for
 // the sim-side registry — world stays net-agnostic, so the two are pinned
 // against each other where both are visible (engine/net/netsim, entity_wire_bridge.cpp).

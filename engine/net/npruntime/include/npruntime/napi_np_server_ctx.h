@@ -151,7 +151,7 @@ struct NapiNPServerCtx {
 
 	// Non-dedicated S2C 0x68 wraps its 50-row cursor against the live renderer
 	// viewport height. Zero means no renderer seam was installed and suppresses
-	// that request instead of fabricating a screen size. NovaSimulation refreshes
+	// that request instead of fabricating a screen size. Simulation refreshes
 	// this from its root viewport before every host pump (the parity matrix is
 	// explicitly 1920x1080); focused tests set it directly.
 	uint32_t loaded_model_viewport_height = 0;

@@ -1,14 +1,14 @@
 extends GutTest
 
-# NovaWacProgram + the sim's WAC wiring: the binding face of engine/runtime/wac. Until
-# this slice, NovaSimulation created a WacSystem every load but nothing ever
+# WacProgram + the sim's WAC wiring: the binding face of engine/runtime/wac. Until
+# this slice, Simulation created a WacSystem every load but nothing ever
 # installed a program — mission .wac scripts were silently inert. These pin the
 # compile surface, the resource-root layering, and the end-to-end execution
 # through the faithful 62-tick divider.
 
 
 func test_compile_good_source() -> void:
-	var wac := NovaWacProgram.new()
+	var wac := WacProgram.new()
 	assert_eq(wac.compile_source("if never() then set(v1,1) endif\n"), OK)
 	assert_true(wac.is_ok())
 	assert_eq(wac.get_error_count(), 0)
@@ -20,7 +20,7 @@ func test_lenient_compile_surfaces_warnings() -> void:
 	# The compiler is faithfully LENIENT (the original's parser recovers rather
 	# than rejecting): an unknown command still compiles, with a warning
 	# diagnostic, and the program installs. is_ok() reflects hard errors only.
-	var wac := NovaWacProgram.new()
+	var wac := WacProgram.new()
 	assert_eq(wac.compile_source("if never() then bogus_command_xyz(1) endif" + "\n"), OK)
 	assert_true(wac.is_ok())
 	assert_eq(wac.get_error_count(), 0)
@@ -32,7 +32,7 @@ func test_lenient_compile_surfaces_warnings() -> void:
 
 
 func test_compile_sources_numbers_events_across_files() -> void:
-	var wac := NovaWacProgram.new()
+	var wac := WacProgram.new()
 	var sources := PackedStringArray([
 		"if never() then set(v1,1) endif\n",
 		"if never() then set(v2,1) endif\nif never() then set(v3,1) endif\n",
@@ -49,17 +49,17 @@ func test_compile_from_resource_root_layers_and_skips_absent() -> void:
 	var f := FileAccess.open(dir.path_join("m01.wac"), FileAccess.WRITE)
 	f.store_string("if never() then set(v1,1) endif\n")
 	f.close()
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(dir), OK)
 
-	var wac := NovaWacProgram.new()
+	var wac := WacProgram.new()
 	assert_eq(wac.compile_from_resource_root(root, "m01"), OK)
 	assert_eq(wac.get_event_count(), 1)
 
 	# No .wac anywhere: the BMS-only case — callers leave the VM unloaded.
 	var empty_dir := dir.path_join("empty")
 	DirAccess.make_dir_recursive_absolute(empty_dir)
-	var empty_root := NovaResourceRoot.new()
+	var empty_root := ResourceRoot.new()
 	assert_eq(empty_root.set_root_dir(empty_dir), OK)
 	assert_eq(wac.compile_from_resource_root(empty_root, "m01"), ERR_DOES_NOT_EXIST)
 
@@ -69,7 +69,7 @@ func test_compile_from_resource_root_layers_and_skips_absent() -> void:
 
 
 func test_sim_runs_an_installed_program_at_the_62_tick_divider() -> void:
-	var sim := NovaSimulation.new()
+	var sim := Simulation.new()
 	autofree(sim)
 	sim.build_demo_mission()
 	assert_true(sim.is_loaded())
@@ -105,7 +105,7 @@ func test_sim_runs_an_installed_program_at_the_62_tick_divider() -> void:
 
 
 func test_mission_start_wac_is_eager_idempotent_and_restartable() -> void:
-	var sim := NovaSimulation.new()
+	var sim := Simulation.new()
 	autofree(sim)
 	sim.build_demo_mission()
 	assert_true(sim.compile_and_set_wac(PackedStringArray([
@@ -137,9 +137,9 @@ func test_mission_start_wac_is_eager_idempotent_and_restartable() -> void:
 
 
 func test_set_wac_program_survives_a_reload() -> void:
-	var sim := NovaSimulation.new()
+	var sim := Simulation.new()
 	autofree(sim)
-	var wac := NovaWacProgram.new()
+	var wac := WacProgram.new()
 	assert_eq(wac.compile_source("if eq(v1,0) then set(v2,5) endif\n"), OK)
 	sim.set_wac_program(wac)  # installed before any load: applied by finish_load
 	sim.build_demo_mission()

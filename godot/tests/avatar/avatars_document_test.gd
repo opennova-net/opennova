@@ -54,7 +54,7 @@ func test_save_as_persists_edit() -> void:
 	var head_name := ""
 	for entry_v in model.get("parts", []):
 		var entry: Dictionary = entry_v
-		if int(entry.get("kind", -1)) == NovaAvatarDatabase.PART_HEAD:
+		if int(entry.get("kind", -1)) == AvatarDatabase.PART_HEAD:
 			entry["graphic"] = "Persisted.3di"
 			head_name = String(entry.get("name", ""))
 			break
@@ -71,7 +71,7 @@ func test_save_as_persists_edit() -> void:
 	# Reopen and confirm the edit persisted.
 	var doc2 = AvatarsDocumentScript.new()
 	assert_eq(doc2.open_avatars(saved_path), OK, "reopen saved file")
-	var part: Dictionary = doc2.resource.get_part(NovaAvatarDatabase.PART_HEAD, head_name)
+	var part: Dictionary = doc2.resource.get_part(AvatarDatabase.PART_HEAD, head_name)
 	assert_eq(String(part.get("graphic", "")), "Persisted.3di", "edit survived the round-trip")
 
 	DirAccess.remove_absolute(saved_path)

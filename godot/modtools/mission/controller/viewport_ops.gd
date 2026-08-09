@@ -317,7 +317,7 @@ func _refresh_gizmo() -> void:
 	if container == null:
 		return
 	var want = _c._gizmo_enabled and _c._mode == _c.Mode.OBJECTS and not _c._placement.is_placement_armed() \
-		and not _c._selected_ref.is_empty() and int(_c._selected_ref.get("kind", -1)) != NovaMissionData.KIND_MARKER
+		and not _c._selected_ref.is_empty() and int(_c._selected_ref.get("kind", -1)) != MissionData.KIND_MARKER
 	if not want:
 		if _c._gizmo != null and is_instance_valid(_c._gizmo):
 			_c._gizmo.visible = false
@@ -463,7 +463,7 @@ func _pick_entity(mouse_pos: Vector2) -> Dictionary:
 			var mt := _ray_aabb_entry(maabb, from, dir)
 			if mt >= 0.0 and mt < best_t:
 				best_t = mt
-				best = { "kind": NovaMissionData.KIND_MARKER, "index": int(rec["marker_index"]) }
+				best = { "kind": MissionData.KIND_MARKER, "index": int(rec["marker_index"]) }
 	return best
 
 
@@ -490,9 +490,9 @@ func _select(kind: int, index: int) -> void:
 			# ref would dangle through _apply_selected_xform. A dropped record just means no
 			# box / no drag handle for that slot, not a crash.
 			if bool(rec.get("animated", false)):
-				# An animated record's node IS the placer's NovaObjectModel (its {model, ref}
+				# An animated record's node IS the placer's ObjectModel (its {model, ref}
 				# registration), so the typed twin binds alongside the Node3D handle.
-				var node: NovaObjectModel = rec.get("node")
+				var node: ObjectModel = rec.get("node")
 				if node != null and is_instance_valid(node):
 					_c._selected_node = node
 					_c._selected_model = node
@@ -513,7 +513,7 @@ func _select(kind: int, index: int) -> void:
 	_c._selected_xform = _c.MissionObjectPlacer.entity_transform(
 		entity.get("position", Vector3.ZERO), _c._selected_rotation_deg)
 	# A marker has no mesh records, so the selection box stays hidden; highlight its gizmo instead.
-	if kind == NovaMissionData.KIND_MARKER and _c._marker_overlay != null and is_instance_valid(_c._marker_overlay):
+	if kind == MissionData.KIND_MARKER and _c._marker_overlay != null and is_instance_valid(_c._marker_overlay):
 		_c._marker_overlay.set_selected_marker(index)
 	_update_selection_box()
 	# Show the transform gizmo on this selection (hidden for markers / non-objects modes). Reset the
@@ -585,8 +585,8 @@ func _free_selected_user_points_overlay() -> void:
 # --- In-editor PLAYPARTANIM preview -------------------------------------------
 # Play a scripting PLAYPARTANIM action's part animation on its target model in the editor viewport so an
 # author can see the motion without launching the game. Reuses the runtime path: it resolves the action's
-# target (SSN / group / zone) through the same NovaEntityIndex the runtime owner builds (over the placer's
-# construction-time {model, ref} registrations), then drives NovaObjectModel.restart_part_anim (a
+# target (SSN / group / zone) through the same EntityIndex the runtime owner builds (over the placer's
+# construction-time {model, ref} registrations), then drives ObjectModel.restart_part_anim (a
 # clean-from-rest variant of the runtime play_part_anim). The placed model already _process-ticks in the
 # viewport, so the sweep animates live.
 
@@ -609,7 +609,7 @@ func _move_selected_to_world(global_hit: Vector3) -> void:
 # move the in-world object identically.
 func _apply_selected_xform(xform: Transform3D) -> void:
 	_c._selected_xform = xform
-	if not _c._selected_ref.is_empty() and int(_c._selected_ref.get("kind", -1)) == NovaMissionData.KIND_MARKER:
+	if not _c._selected_ref.is_empty() and int(_c._selected_ref.get("kind", -1)) == MissionData.KIND_MARKER:
 		_clear_selected_user_points()
 		# A marker is mesh-less: preview its gizmo (container-local origin) via the overlay. No mesh
 		# records / node to move, and the selection box stays hidden.
@@ -661,7 +661,7 @@ func _commit_selected_transform() -> void:
 	if _c._mission.set_entity_transform(int(_c._selected_ref["kind"]), int(_c._selected_ref["index"]), bms_pos, _c._selected_rotation_deg):
 		# A marker's gizmo was preview-moved; rebuild the overlay so its pickable AABB tracks the
 		# committed position (re-applies the selection highlight).
-		if int(_c._selected_ref.get("kind", -1)) == NovaMissionData.KIND_MARKER:
+		if int(_c._selected_ref.get("kind", -1)) == MissionData.KIND_MARKER:
 			_c._waypoints._refresh_marker_overlay()
 		_c.mark_dirty()
 
@@ -867,7 +867,7 @@ func _on_hover(mouse_pos: Vector2) -> void:
 	var kind := int(ref.get("kind", -1))
 	var index := int(ref.get("index", -1))
 	# Skip empties, markers (their own gizmo highlights), and the current selection.
-	if ref.is_empty() or kind == NovaMissionData.KIND_MARKER \
+	if ref.is_empty() or kind == MissionData.KIND_MARKER \
 			or (not _c._selected_ref.is_empty() \
 				and int(_c._selected_ref.get("kind", -2)) == kind \
 				and int(_c._selected_ref.get("index", -2)) == index):

@@ -6,7 +6,7 @@
 //      the root node merged the 4 depth-1 children (face indices at higher
 //      LOD sections can exceed level.vertex_count; the old remap buffer was
 //      undersized and segfaulted).
-//   2) It exercises the `no_smooth` path used by NovaTerrainBuilder's
+//   2) It exercises the `no_smooth` path used by TerrainBuilder's
 //      build_from_data entry, which the Godot editor relies on.
 //
 // We don't have the original unsmoothed depth map that produced dvd4.cpt, so

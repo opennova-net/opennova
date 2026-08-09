@@ -52,14 +52,14 @@ func set_waypoint_flags(loop: bool, blue: bool, red: bool) -> void:
 	# Preserve any on-disk flag bits beyond the three the UI exposes (the event- and zone-flag paths
 	# mask-merge the same way): seed from the
 	# path's current flags with the known bits cleared, then set only DoesNotLoop / BlueTeam / RedTeam.
-	var known_mask := NovaMissionData.WP_FLAG_DOES_NOT_LOOP | NovaMissionData.WP_FLAG_BLUE_TEAM | NovaMissionData.WP_FLAG_RED_TEAM
+	var known_mask := MissionData.WP_FLAG_DOES_NOT_LOOP | MissionData.WP_FLAG_BLUE_TEAM | MissionData.WP_FLAG_RED_TEAM
 	var flags := int(path.get("flags", 0)) & ~known_mask
 	if not loop:
-		flags |= NovaMissionData.WP_FLAG_DOES_NOT_LOOP
+		flags |= MissionData.WP_FLAG_DOES_NOT_LOOP
 	if blue:
-		flags |= NovaMissionData.WP_FLAG_BLUE_TEAM
+		flags |= MissionData.WP_FLAG_BLUE_TEAM
 	if red:
-		flags |= NovaMissionData.WP_FLAG_RED_TEAM
+		flags |= MissionData.WP_FLAG_RED_TEAM
 	var indices: PackedInt32Array = path.get("marker_indices", PackedInt32Array())
 	_c._edit_step(func(): return _c._mission.set_waypoint_path(_c._selected_path_index, indices, flags),
 		"", _refresh_waypoint_overlay)
@@ -82,7 +82,7 @@ func get_selected_marker() -> Dictionary:
 	if _c._selected_marker.is_empty() or _c._mission == null:
 		return {}
 	var marker_index := int(_c._selected_marker["marker_index"])
-	var entity = _c._mission.get_entity(NovaMissionData.KIND_MARKER, marker_index)
+	var entity = _c._mission.get_entity(MissionData.KIND_MARKER, marker_index)
 	if entity.is_empty():
 		return {}
 	return {
@@ -156,7 +156,7 @@ func _refresh_marker_overlay() -> void:
 		container.add_child(_c._marker_overlay)
 	_c._marker_overlay.rebuild(_c._mission, _marker_labels())
 	# Re-apply the highlight for a selected marker (the object-selection path holds it in _selected_ref).
-	if not _c._selected_ref.is_empty() and int(_c._selected_ref.get("kind", -1)) == NovaMissionData.KIND_MARKER:
+	if not _c._selected_ref.is_empty() and int(_c._selected_ref.get("kind", -1)) == MissionData.KIND_MARKER:
 		_c._marker_overlay.set_selected_marker(int(_c._selected_ref["index"]))
 
 
@@ -167,9 +167,9 @@ func _marker_labels() -> Array:
 	var labels: Array = []
 	if _c._mission == null:
 		return labels
-	var count = _c._mission.get_entity_count(NovaMissionData.KIND_MARKER)
+	var count = _c._mission.get_entity_count(MissionData.KIND_MARKER)
 	for i in count:
-		labels.append(_c.entity_display_name(NovaMissionData.KIND_MARKER, i))
+		labels.append(_c.entity_display_name(MissionData.KIND_MARKER, i))
 	return labels
 
 
@@ -288,9 +288,9 @@ func _commit_marker_drag() -> void:
 		return
 	var marker_index := int(_c._selected_marker["marker_index"])
 	var bms_pos = _c.MissionObjectPlacer.godot_to_bms_position(_c._marker_drag_local)
-	var entity = _c._mission.get_entity(NovaMissionData.KIND_MARKER, marker_index)
+	var entity = _c._mission.get_entity(MissionData.KIND_MARKER, marker_index)
 	var rot: Vector3 = entity.get("rotation_deg", Vector3.ZERO)
-	if _c._mission.set_entity_transform(NovaMissionData.KIND_MARKER, marker_index, bms_pos, rot):
+	if _c._mission.set_entity_transform(MissionData.KIND_MARKER, marker_index, bms_pos, rot):
 		_refresh_waypoint_overlay()
 		_c.mark_dirty()
 
@@ -398,7 +398,7 @@ func delete_selected_marker() -> bool:
 	var marker_index := int(_c._selected_marker["marker_index"])
 	_c._flush_edit()
 	_c._mission.begin_edit()
-	if not _c._mission.remove_entity(NovaMissionData.KIND_MARKER, marker_index):
+	if not _c._mission.remove_entity(MissionData.KIND_MARKER, marker_index):
 		return false
 	_c._mission.commit_edit()
 	_c._rebake_objects()
@@ -432,7 +432,7 @@ func clear_active_path() -> bool:
 	_c._mission.begin_edit()
 	var removed := false
 	for mi in descending:
-		if _c._mission.remove_entity(NovaMissionData.KIND_MARKER, mi):
+		if _c._mission.remove_entity(MissionData.KIND_MARKER, mi):
 			removed = true
 	if not removed:
 		return false
@@ -450,4 +450,4 @@ func clear_active_path() -> bool:
 # begin_edit/commit_edit bracket for one-shot mutations (add / set / flags / delete). Resize is
 # precise through the inspector spins (set_selected_zone_bounds); the in-world drag translates
 # the whole box. The engine does not auto-swap area-trigger bounds, so the binding normalizes
-# min<=max on every write (NovaMissionData.add/set_area_trigger).
+# min<=max on every write (MissionData.add/set_area_trigger).

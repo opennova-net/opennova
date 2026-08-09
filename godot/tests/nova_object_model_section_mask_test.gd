@@ -1,6 +1,6 @@
 extends GutTest
 
-# NovaObjectModel.set_section_visibility_mask drives per-part (COBJ section)
+# ObjectModel.set_section_visibility_mask drives per-part (COBJ section)
 # visibility on the Robj_<N> render nodes — the draw-side consumer of the
 # render-occlusion section masks. Bit N visible = part N draws; -1 restores
 # everything; rebuild-created parts honor the applied mask. Pinned on a real
@@ -11,15 +11,15 @@ extends GutTest
 const PMP_3DI := "res://../fixtures/3dp/Pmpjk01/Pmpjk01.3di"
 
 
-func _object_data() -> NovaObjectData:
-	var data := NovaObjectData.new()
+func _object_data() -> ObjectData:
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(PMP_3DI)), OK,
 			"multi-part fixture loads")
 	return data
 
 
-func _model() -> NovaObjectModel:
-	var model := NovaObjectModel.new()
+func _model() -> ObjectModel:
+	var model := ObjectModel.new()
 	add_child_autofree(model)
 	model.set_process(false)
 	model.set_object_data(_object_data())
@@ -81,14 +81,14 @@ func test_interior_parts_duplicate_shared_material_and_apply_light_transfer() ->
 	# shared across that boundary must split into per-context instances —
 	# otherwise one stamp would overwrite the other — while parts on the same
 	# side keep sharing.
-	var m := NovaObjectModel.new()
+	var m := ObjectModel.new()
 	add_child_autofree(m)
 	m.set_process(false)
 	m.set_interior_section_light_transfer(0.2)
 	m.set_object_data(_object_data())
 
-	var state := NovaEnvLightState.new()
-	var values := NovaEnvLightValues.retail_noon_defaults()
+	var state := EnvLightState.new()
+	var values := EnvLightValues.retail_noon_defaults()
 	values.dir_color = Vector3(1.0, 0.5, 0.25)
 	state.publish(values)
 	m.set_environment_state(state)

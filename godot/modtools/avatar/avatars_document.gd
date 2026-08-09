@@ -2,14 +2,14 @@ class_name AvatarsDocument
 extends EditorResourceDocument
 
 # Avatars.def document: the shared EditorResourceDocument lifecycle over a
-# NovaAvatarDatabase. All format behavior lives in the engine wrapper; only the
+# AvatarDatabase. All format behavior lives in the engine wrapper; only the
 # blank factory, the loaders, and the self-writing save are domain code. The
 # database emits "changed" on set_model()/create_empty(), which the base wires to
 # the dirty/undo state.
 
 
 func _make_new_resource():
-	var fresh := NovaAvatarDatabase.new()
+	var fresh := AvatarDatabase.new()
 	fresh.create_empty()
 	return fresh
 
@@ -22,7 +22,7 @@ func _file_extension() -> String:
 	return "def"
 
 
-# NovaAvatarDatabase writes itself from scratch (docs/adr/0021), not ResourceSaver.
+# AvatarDatabase writes itself from scratch (docs/adr/0021), not ResourceSaver.
 func _save_resource(path: String) -> Error:
 	return resource.save_to_path(path)
 
@@ -31,7 +31,7 @@ func _save_resource(path: String) -> Error:
 func open_avatars(path: String) -> Error:
 	if not FileAccess.file_exists(path):
 		return ERR_FILE_NOT_FOUND
-	var loaded := NovaAvatarDatabase.new()
+	var loaded := AvatarDatabase.new()
 	var err := loaded.load(path)
 	if err != OK:
 		return err
@@ -41,7 +41,7 @@ func open_avatars(path: String) -> Error:
 
 # Open an Avatars.def by flat name through the mounted resource root (VFS/PFF).
 func open_avatars_from_root(resource_root, name: String) -> Error:
-	var loaded := NovaAvatarDatabase.new()
+	var loaded := AvatarDatabase.new()
 	var err := loaded.load_from_resource_root(resource_root, name)
 	if err != OK:
 		return err

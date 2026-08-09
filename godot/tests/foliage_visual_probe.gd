@@ -1,6 +1,6 @@
 extends SceneTree
 
-const VegAssets := preload("res://adapter/terrain/veg_assets.gd")
+const VegAssets := preload("res://src/terrain/veg_assets.gd")
 
 # Visual driver for the fresh foliage two-tier port: loads the
 # runtime world from a resource dir, finds a dense foliage-painted cell,
@@ -54,7 +54,7 @@ func _run() -> void:
 	world.load_failed.connect(func(reason: String) -> void:
 		push_error("foliage_visual_probe: load_failed: " + reason))
 	# Loose extract mounted editor-style (same as env_visual_baseline_probe).
-	var loose_root := NovaResourceRoot.new()
+	var loose_root := ResourceRoot.new()
 	loose_root.set_root_dir(resource_dir)
 	world.set_resource_root(loose_root)
 	var load_err: int = world.load_world(resource_dir)
@@ -70,9 +70,9 @@ func _run() -> void:
 	var dispatcher: Node = null
 	for _i in range(900):
 		await process_frame
-		env = world.get_node_or_null("NovaEnvironment")
+		env = world.get_node_or_null("MissionEnvironment")
 		data = world.get_terrain_data() if world.has_method("get_terrain_data") else null
-		dispatcher = world.get_node_or_null("NovaTerrain/FoliageDispatcher")
+		dispatcher = world.get_node_or_null("Terrain/FoliageDispatcher")
 		if data != null and data.is_loaded() and env != null and env.has_method("is_loaded") and env.is_loaded():
 			break
 	if data == null or not data.is_loaded():
@@ -222,7 +222,7 @@ func _shutdown(scene: Node, world: Node, dispatcher: Node) -> void:
 	await process_frame
 
 
-func _find_foliage_world_point(data: NovaTerrainData) -> Dictionary:
+func _find_foliage_world_point(data: TerrainData) -> Dictionary:
 	var defs: Array = data.get_foliage_defs()
 	var grid := data.get_sector_grid()
 	var origin_x := data.get_origin_x()
@@ -284,6 +284,6 @@ func _find_foliage_world_point(data: NovaTerrainData) -> Dictionary:
 
 func _has_matching_foliage_def(defs: Array, painted: int) -> bool:
 	for value in defs:
-		if value is NovaTerrainFoliageDef and int((value as NovaTerrainFoliageDef).match) == painted:
+		if value is TerrainFoliageDef and int((value as TerrainFoliageDef).match) == painted:
 			return true
 	return false

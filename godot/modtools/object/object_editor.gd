@@ -1,12 +1,12 @@
 class_name ObjectEditor
 extends "res://modtools/editor/editor_document.gd"
 
-signal object_changed(object_data: NovaObjectData)
+signal object_changed(object_data: ObjectData)
 
-var object_data: NovaObjectData
+var object_data: ObjectData
 
 # --- Snapshot undo (B4): the shadow-step funnel --------------------------------
-# Every object mutation already funnels through NovaObjectData's deferred
+# Every object mutation already funnels through ObjectData's deferred
 # object_changed signal, so undo records HERE against a cached pre-mutation
 # baseline and the ~40 inspector call sites need zero changes. The baseline is
 # the native edit-state blob (B3); geometry swaps (add_lod_scene) reset the
@@ -52,7 +52,7 @@ func _ready() -> void:
 
 
 func create_empty_object(mark_dirty_state: bool = true) -> void:
-	_set_object_data(NovaObjectData.new())
+	_set_object_data(ObjectData.new())
 	object_data.reset_empty("untitled")
 	set_current_path("")
 	is_dirty = mark_dirty_state
@@ -61,7 +61,7 @@ func create_empty_object(mark_dirty_state: bool = true) -> void:
 
 
 func open_object(path: String) -> Error:
-	var next_data := NovaObjectData.new()
+	var next_data := ObjectData.new()
 	var err := next_data.open_file(path)
 	if err != OK:
 		return err
@@ -74,10 +74,10 @@ func open_object(path: String) -> Error:
 	return OK
 
 
-func open_object_from_resource_root(resources: NovaResourceRoot, name: String) -> Error:
+func open_object_from_resource_root(resources: ResourceRoot, name: String) -> Error:
 	if resources == null:
 		return ERR_INVALID_PARAMETER
-	var next_data := NovaObjectData.new()
+	var next_data := ObjectData.new()
 	var err := next_data.open_from_resource_root(resources, name)
 	if err != OK:
 		return err
@@ -171,7 +171,7 @@ func _export_basename() -> String:
 	return name.replace(" ", "_").replace("/", "_").replace("\\", "_")
 
 
-func _set_object_data(next_data: NovaObjectData) -> void:
+func _set_object_data(next_data: ObjectData) -> void:
 	SignalRebind.rebind(object_data, next_data, &"object_changed", _on_object_data_changed, CONNECT_DEFERRED)
 	object_data = next_data
 

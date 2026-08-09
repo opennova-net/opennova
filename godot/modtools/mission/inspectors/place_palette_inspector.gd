@@ -12,7 +12,7 @@ var _place_stop: Button
 var _place_row_ids: Array = []
 # The mission the palette rows were built for; the (expensive) list is only repopulated
 # when this changes, not on every `changed` (which fires on each edit / placement).
-var _place_built_for: NovaMissionData
+var _place_built_for: MissionData
 # Placeable items for the current mission, cached so the palette does not re-enumerate
 # the whole items.def (1000+ entries) on every refresh. Rebuilt when the mission changes.
 var _placeable_cache: Array = []
@@ -58,7 +58,7 @@ func _build_place_panel() -> void:
 
 
 func _refresh_place_panel() -> void:
-	var mission: NovaMissionData = _inspector._controller.get_mission() if _inspector._controller != null else null
+	var mission: MissionData = _inspector._controller.get_mission() if _inspector._controller != null else null
 	if mission == null:
 		_place_box.visible = false
 		_place_built_for = null

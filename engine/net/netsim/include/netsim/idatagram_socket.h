@@ -10,7 +10,7 @@ namespace opennova::netsim {
 // The real-socket seam. A minimal datagram-socket abstraction the in-match owner loop (the
 // engine/net/npruntime host/client per-frame loops) pumps, so the loop itself holds NO socket — libs
 // stay socket-free (engine/CLAUDE.md). The socket owners provide the adapter: apps/nw_server wraps
-// net::Socket (apps/common/net_datagram_socket.h), godot/adapter wraps NovaUdpPump. This is the
+// net::Socket (apps/common/net_datagram_socket.h), godot/src wraps UdpPump. This is the
 // ONE owner-loop implementation's only door to the wire — drift between the headless server and
 // the Godot layer (the host_owner_loop.h <-> nova_simulation.cpp copy) is what promoting the loop
 // over this interface eliminates.
@@ -26,7 +26,7 @@ public:
 	// Drain ONE pending datagram into `buf` (capacity `cap`); set `from` to its source. Returns
 	// bytes received (>0), 0 when nothing is pending, <0 on error. NON-BLOCKING "drain what's
 	// available" — the owner loop calls it in a loop until <= 0. Maps onto both
-	// net::udp_recv_from(timeout) and NovaUdpPump.poll()+take_inbound().
+	// net::udp_recv_from(timeout) and UdpPump.poll()+take_inbound().
 	virtual int recv_from(uint8_t *buf, std::size_t cap, PeerAddr &from) = 0;
 
 	// Send `len` bytes to `to`.

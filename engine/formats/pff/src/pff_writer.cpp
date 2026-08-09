@@ -192,7 +192,7 @@ int pff_write_archive_streamed_progress(const char *path, PffFormat format,
        aside first. Rather than remove() it outright (which would lose the original if the process
        died before the rename completed), move it to "<path>.bak" so a crash mid-swap always leaves
        a recoverable copy; the backup is deleted only once the new file is in place. The caller
-       (e.g. NovaPffArchive::save_as) guarantees `path` is not the still-open source. */
+       (e.g. PffArchive::save_as) guarantees `path` is not the still-open source. */
     std::string bak = std::string(path) + ".bak";
     remove(bak.c_str()); /* clear any stale backup from a previous interrupted save */
     const bool had_original = (rename(path, bak.c_str()) == 0);

@@ -12,7 +12,7 @@ extends SceneTree
 #   NOVA_RESOURCE_DIR=<loose JOX> godot --headless --path godot \
 #     -s res://tests/wave1_native_assets_probe.gd
 
-const MissionRuntime := preload("res://adapter/world/mission_runtime.gd")
+const MissionRuntime := preload("res://src/world/mission_runtime.gd")
 
 const MISSION := "00TRg.bms"
 
@@ -62,7 +62,7 @@ func _run() -> void:
 		_fail("set NOVA_RESOURCE_DIR to a loose or mounted retail JOX corpus")
 		return
 
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	var mount_err := int(root.mount_runtime(resource_dir, "", false, "jo"))
 	if mount_err != OK:
 		root.set_root_dir(resource_dir)
@@ -70,11 +70,11 @@ func _run() -> void:
 			_fail("resource root failed (%d): %s" % [mount_err, root.get_last_error()])
 			return
 
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	if mission.open_from_resource_root(root, MISSION) != OK:
 		_fail("cannot open %s" % MISSION)
 		return
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	if item_db.load_from_resource_root(root, "items.def") != OK:
 		_fail("cannot load items.def: %s" % item_db.get_last_error())
 		return
@@ -86,10 +86,10 @@ func _run() -> void:
 	var expect_env := OS.get_environment("WAVE1_EXPECT_ATTACH").strip_edges()
 	if not expect_env.is_empty():
 		expect_attach = int(expect_env)
-	var sim := NovaSimulation.new()
+	var sim := Simulation.new()
 	if not sim.load_from_mission_data(mission):
 		sim.free()
-		_fail("NovaSimulation rejected %s" % MISSION)
+		_fail("Simulation rejected %s" % MISSION)
 		return
 	sim.set_asset_root(root)
 	var attached_native := int(sim.resolve_collision_instances(item_db))
@@ -168,7 +168,7 @@ func _run() -> void:
 	# flow and NOTHING declines — plus the native seat/mount install the boot
 	# ran (the shell extractor is gone; sources > 0 proves the S16 step fed
 	# the mounted resolver).
-	var boot_sim: NovaSimulation = runtime.get_sim()
+	var boot_sim: Simulation = runtime.get_sim()
 	if boot_sim == null:
 		_fail("runtime has no sim")
 		return

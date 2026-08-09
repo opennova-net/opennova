@@ -1,7 +1,7 @@
 extends GutTest
 
-const DestructionPresentPass := preload('res://adapter/world/destruction_present_pass.gd')
-const MissionObjectPlacer := preload('res://adapter/mission/mission_object_placer.gd')
+const DestructionPresentPass := preload('res://src/world/destruction_present_pass.gd')
+const MissionObjectPlacer := preload('res://src/mission/mission_object_placer.gd')
 
 
 class SimStub:
@@ -246,7 +246,7 @@ func test_reset_runtime_state_restores_individual_visuals_and_retires_anchors() 
 	var originally_hidden := Node3D.new()
 	originally_hidden.visible = false
 	var static_caster := MeshInstance3D.new()
-	static_caster.layers = NovaWater.VISUAL_LAYER_STATIC_SHADOW_CASTER
+	static_caster.layers = Water.VISUAL_LAYER_STATIC_SHADOW_CASTER
 	intact.add_child(originally_visible)
 	intact.add_child(originally_hidden)
 	intact.add_child(static_caster)

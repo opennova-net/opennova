@@ -40,7 +40,7 @@ decision (ADR / RE-record entry) saying why not:
   read-only workspaces without a recorded decision.
 - **E — Engine preview.** The preview IS the ported engine path — the same
   nodes/code the game runs, not an editor-drawn approximation (ADR 0016).
-  (The terrain viewport and the credits `NovaCreditsPlayer` are the
+  (The terrain viewport and the credits `CreditsPlayer` are the
   exemplars; the HUD's hand-drawn `_draw()` canvas is the anti-pattern.)
 - **G — Game loop.** The author saves canonical loose assets, then launches
   the real game: F5 runs the normal standalone game and F6 runs the current
@@ -56,19 +56,19 @@ decision (ADR / RE-record entry) saying why not:
 | Environment | ✓ | ✓ | ✓ (runtime nodes shared; water unified) | ✓ (save loose assets, then F5/F6 runs the standalone game) | at bar (ENV-1, 2026-07-12) |
 | Object | ✓ (v8/v9; LW v10 on branch) | ✓ (.3dp + .3di export) | partial (isolated preview; env-lit but no world context, no LOD-by-distance) | — | E |
 | Mission | ✓ | ✓ | ✓ (authoring previews reuse runtime seams) | ✓ (F6 runs the current saved loose `.bms` in the standalone game) | data semantics (heading, ANIMNUM) |
-| Credits | ✓ | ✓ | ✓ (`NovaCreditsPlayer` hosted in the editor; play/pause/scrub transport, CRE-1) | — | G (F3 wiring = CRE-2) |
+| Credits | ✓ | ✓ | ✓ (`CreditsPlayer` hosted in the editor; play/pause/scrub transport, CRE-1) | — | G (F3 wiring = CRE-2) |
 | Fonts | ✓ | ✓ | ✓ (type-a-line sample through the game's draw path beside the glyph paint canvas, FNT-1 2026-07-12) | — | G (F3 wiring = FNT-3) |
 | Strings | ✓ | ✓ | ✓ (selected entry rendered through the engine path with a font picker, STR-1 2026-07-12; encoding pinned by STR-2, D-FNT-4 minted) | — | G (F3 wiring = STR-3) |
 | Sound | ✓ | ✓ (`write_lwf`) | ✓ (audition rides the runtime set→member→wav path) | — | G |
 | Music | ✓ (headerless form excluded by pinned decision, D-SCR-1/2) | ✓ | ✓ (live director runs the VM) | — | G + usability (see MUS-D) |
-| Menus | ✓ (.mnu/.mns) | ✓ | ✓ (canvas hosts live `NovaMnuMenu`, edit_mode on) | partial (no flow run; actions authored blind) | G |
-| HUD | ✓ (`NovaHudPos`, read-only getters) | — | — (hand-drawn `HudLayoutPreview._draw()`) | — | everything but R |
+| Menus | ✓ (.mnu/.mns) | ✓ | ✓ (canvas hosts live `MnuMenu`, edit_mode on) | partial (no flow run; actions authored blind) | G |
+| HUD | ✓ (`HudPos`, read-only getters) | — | — (hand-drawn `HudLayoutPreview._draw()`) | — | everything but R |
 | Avatars | ✓ | ✓ (from-scratch writer, ADR 0021) | ✓ (workspace + 3D preview) | partial (runtime `player.mnu` population; in-world appearance open, D-PLAYERINFO-1) | G |
 
 Two corrections to earlier working assumptions, verified: environment/water
 unification is DONE (editor-runtime-parity.md: "water is fully unified
 (parameterized, not forked)"), and credits' preview already hosts the real
-`NovaCreditsPlayer`. The headerless MUS cipher stays out of scope by the
+`CreditsPlayer`. The headerless MUS cipher stays out of scope by the
 recorded decision in docs/audio/mus-sbf-re.md (`vfs_mus_decode_test` pins
 the pass-through); it is a bar-satisfying exclusion, not a gap.
 
@@ -551,7 +551,7 @@ along seams that already exist as signal boundaries in the code.
   VFS/PFF entries via `open_env_from_resource_root`); W ✓ (from-scratch save
   through engine/formats/env `EnvFile.save_to_path`, roundtrip-pinned by
   env_file_test); E ✓ re-verified — the exemplar (editor edits drive the SAME
-  `NovaEnvironment`/`NovaSky`/`NovaWater` runtime nodes;
+  `MissionEnvironment`/`SkyDome`/`Water` runtime nodes;
   editor-runtime-parity.md: water parameterized, not forked); G ✓ (after an
   explicit save, F5/F6 launch the standalone game against the mounted loose
   root, and the mission resolves `<mission env ref>.env` from that same disk
@@ -594,7 +594,7 @@ along seams that already exist as signal boundaries in the code.
 
 ### Credits
 
-- CRE-1: bar audit — E is already real (`NovaCreditsPlayer`); add a
+- CRE-1: bar audit — E is already real (`CreditsPlayer`); add a
   play/pause/scrub transport over the hosted player so the roll (not just the
   layout) previews in-editor. Verify the player's cadence citations while
   there (R5 only if uncited). Gate: credits suites (20 files).
@@ -605,7 +605,7 @@ along seams that already exist as signal boundaries in the code.
   card-selection seeks. Cadence-citation verdict: **UNCITED — R5 is OPEN.**
   The SCROLL_RATE format side is witnessed
   ([orig: marquee_load_credits_from_ini @ 0x65c5a0]), but
-  `NovaCreditsPlayer::_process_scroll` converts the per-frame rate to
+  `CreditsPlayer::_process_scroll` converts the per-frame rate to
   per-second with an assumed 60 fps cadence (`* 60.0f`) and the ~F overlay
   fade zone is a bare 50 px (`kFadeZonePixels`) — neither carries a witness
   of `CMarqueeWnd`'s update/render cadence (note: the engine tick elsewhere
@@ -652,8 +652,8 @@ override → menu/game music) rides MUS-I's tail.
 
 ### Menus
 
-- MNU-1: **flow run mode** — run the runtime `NovaMenuShell` (nova_menu_shell.gd's
-  node: the same `NovaMnuMenu` with `edit_mode` off, fully interactive) over
+- MNU-1: **flow run mode** — run the runtime `MenuShell` (nova_menu_shell.gd's
+  node: the same `MnuMenu` with `edit_mode` off, fully interactive) over
   the authored document in a sandboxed "Run" tab: navigation, back stack,
   window show/hide, per-screen MUSICVAR all execute for real; the shell-policy
   verbs (cross-file jump, quit, gameplay launch) route to an editor
@@ -666,7 +666,7 @@ override → menu/game music) rides MUS-I's tail.
 
 ### HUD (the flagship: R-only today, full bring-up)
 
-- HUD-1: **format grill + writer** — grill `NovaHudPos`'s read against the
+- HUD-1: **format grill + writer** — grill `HudPos`'s read against the
   retail binary layout (every field accounted for, R4 for consumption
   semantics), then `libs` writer + `set_*`/`write` bindings, byte-parity
   roundtrip vs retail `hudpos.def` (F4 convention; writer from scratch).
@@ -724,7 +724,7 @@ with to make a new game"; the Game workspace itself stays out of scope.
   objective line/GameText (blocks HUD-1 completeness + HUD-3)
 - R5 credits roll cadence citations — CRE-1 verdict 2026-07-12: UNCITED, so
   R5 is OPEN (the 60 fps frame→second conversion in
-  `NovaCreditsPlayer::_process_scroll` and the 50 px ~F fade zone; the
+  `CreditsPlayer::_process_scroll` and the 50 px ~F fade zone; the
   witnessed side stops at the SCROLL_RATE parse @ 0x65c5a0)
 - R6 menu action verbs beyond current witness (only if MNU-2 finds gaps)
 - R7 sound attenuation/falloff model (blocks SND-2 if unwitnessed)

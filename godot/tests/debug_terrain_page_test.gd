@@ -4,7 +4,7 @@ extends GutTest
 # dictionaries from duck-typed stub worlds, keeps its knobs mirroring the live
 # terrain node, and degrades to empty states without a world.
 
-const PageScript := preload("res://adapter/debug/pages/debug_terrain_page.gd")
+const PageScript := preload("res://src/debug/pages/debug_terrain_page.gd")
 
 
 class StubTerrain:
@@ -68,12 +68,12 @@ class StubWorld:
 
 
 func _make_page(world: Node = null) -> DebugTerrainPage:
-	var ctx := NovaDebugContext.new()
-	ctx.options = NovaDebugOptionState.new()
+	var ctx := DebugContext.new()
+	ctx.options = DebugOptionState.new()
 	ctx.world_source = func(): return world
-	ctx.session = NovaDebugSession.new()
-	NovaDebugCatalog.install(ctx.session)
-	NovaDebugCatalog.bind_runtime_targets(
+	ctx.session = DebugSession.new()
+	DebugCatalog.install(ctx.session)
+	DebugCatalog.bind_runtime_targets(
 			ctx.session, func(): return null, ctx.world_source)
 	ctx.session.set_presented(true)
 	var page: DebugTerrainPage = PageScript.new()

@@ -7,7 +7,7 @@ extends RefCounted
 # -- binops always fully parenthesized "(a op b)", unary "!x"/"-x"/"~x" with no
 # space, intrinsics in split G/F/T surface form -- so an expression built here is
 # byte-stable through the compile -> decompile round-trip. There is no GDScript
-# PARSER: per the design, the compiler (NovaMusicScript.compile_text) is the only
+# PARSER: per the design, the compiler (MusicScript.compile_text) is the only
 # grammar authority; validate_expr() probes it. No class_name (preload as a const).
 
 enum { LITERAL, VARREF, ME, BINOP, UNOP, CALL, RAW }

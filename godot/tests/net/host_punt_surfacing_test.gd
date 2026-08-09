@@ -18,7 +18,7 @@ extends GutTest
 # @0x5684a8 -> @0x568654]. So the bar is: the deploy screen goes away, the world is torn
 # down, and the shell is back in its menu with the reason reported.
 
-const DeployHost := preload("res://adapter/world/deploy_screen_presenter.gd")
+const DeployHost := preload("res://src/world/deploy_screen_presenter.gd")
 const MAIN_GAME_SCENE := preload("res://game/main_game.tscn")
 const FIXTURE_DIR := "res://../fixtures/minimal/resources"
 const TMP_DIR := "res://.godot/host_punt_surfacing_test"
@@ -40,7 +40,7 @@ var _shell: Node = null
 
 
 # The joiner state the deploy screen and the world observer read, in the shapes the real
-# NovaSimulation reports them: the host's close is TERMINAL in the connection, so it
+# Simulation reports them: the host's close is TERMINAL in the connection, so it
 # clears the deployment sub-state and in-match with it — a double that only set a reason
 # would not model what these surfaces actually see.
 class PuntedJoinerSim:
@@ -108,10 +108,10 @@ class PuntedJoinerRuntime:
 
 class FakeWorld:
 	extends Node
-	var root: NovaResourceRoot
+	var root: ResourceRoot
 	var sim: PuntedJoinerSim
 
-	func get_resource_root() -> NovaResourceRoot:
+	func get_resource_root() -> ResourceRoot:
 		return root
 
 	func get_sim() -> PuntedJoinerSim:
@@ -119,7 +119,7 @@ class FakeWorld:
 
 
 func before_each() -> void:
-	NovaStrings.clear()
+	Strings.clear()
 	_had_config = FileAccess.file_exists(STATE_CONFIG_PATH)
 	_saved_config = FileAccess.get_file_as_bytes(STATE_CONFIG_PATH) \
 			if _had_config else PackedByteArray()
@@ -152,7 +152,7 @@ func after_each() -> void:
 		_shell = null
 	await get_tree().process_frame
 	NovaMusicService.stop_context()
-	NovaStrings.clear()
+	Strings.clear()
 	if not _temp_dir.is_empty():
 		_remove_dir_recursive(_temp_dir)
 		_temp_dir = ""
@@ -181,8 +181,8 @@ func after_all() -> void:
 # release that would re-arm the deploy-screen edge.
 func test_world_raises_the_hosts_close_once_from_the_deploy_wait() -> void:
 	var world := GameWorld.new()
-	var terrain := NovaTerrain.new()
-	terrain.name = "NovaTerrain"
+	var terrain := Terrain.new()
+	terrain.name = "Terrain"
 	world.add_child(terrain)
 	add_child_autofree(world)
 	var runtime := PuntedJoinerRuntime.new()
@@ -230,7 +230,7 @@ func test_deploy_screen_tears_down_when_the_host_closes_the_session() -> void:
 	var host = _open_host(sim, overlay)
 	watch_signals(host)
 	assert_true(host.open(), "the player-paced join opens death.mnu")
-	var menu := overlay.get_node_or_null("DeployScreenMenu") as NovaMnuMenu
+	var menu := overlay.get_node_or_null("DeployScreenMenu") as MnuMenu
 	assert_not_null(menu, "the DEATH screen is mounted over the world")
 	if menu == null:
 		return
@@ -293,7 +293,7 @@ func test_an_ordinary_deploy_wait_is_untouched() -> void:
 	assert_signal_emit_count(host, "closed", 0, "nothing closed a healthy screen")
 	assert_true(sim.get_session_loss_reason().is_empty(),
 			"a healthy session reports no loss reason")
-	var menu := overlay.get_node_or_null("DeployScreenMenu") as NovaMnuMenu
+	var menu := overlay.get_node_or_null("DeployScreenMenu") as MnuMenu
 	assert_not_null(menu, "the refreshed screen is still mounted")
 	if menu == null:
 		return
@@ -307,13 +307,13 @@ func test_an_ordinary_deploy_wait_is_untouched() -> void:
 
 # The shell leg: an OPEN deploy screen plus a punted session must land the player back in
 # the front end, not in State.DEPLOY over a dead world. The screen's world seam is
-# duck-typed (see NovaDeployScreenPresenter), so this drives the real shell's teardown with the
+# duck-typed (see DeployScreenPresenter), so this drives the real shell's teardown with the
 # same double the screen tests use.
 func test_shell_returns_a_punted_deploy_screen_to_the_menu() -> void:
 	_shell = await _make_menu_shell()
 	if _shell == null:
 		return
-	var deploy_hosts := _shell.find_children("*", "NovaDeployScreenPresenter", true, false)
+	var deploy_hosts := _shell.find_children("*", "DeployScreenPresenter", true, false)
 	assert_eq(deploy_hosts.size(), 1, "the shell owns exactly one joiner deploy screen")
 	if deploy_hosts.is_empty():
 		return
@@ -364,8 +364,8 @@ func _open_host(sim: PuntedJoinerSim, overlay: Control):
 	return host
 
 
-func _make_root() -> NovaResourceRoot:
-	var root := NovaResourceRoot.new()
+func _make_root() -> ResourceRoot:
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(TMP_DIR)), OK)
 	return root
 
@@ -387,9 +387,9 @@ func _make_menu_shell():
 	assert_eq(DirAccess.make_dir_recursive_absolute(_temp_dir), OK)
 	_write_pff(_temp_dir.path_join("language.pff"), _fixture_entries(LANGUAGE_FILES))
 	_write_pff(_temp_dir.path_join("localres.pff"), _fixture_entries(LOCALRES_FILES))
-	NovaResourceDirSettings.set_resource_dir(_temp_dir)
-	NovaResourceDirSettings.set_expansion("")
-	NovaResourceDirSettings.set_game("jo")
+	ResourceDirSettings.set_resource_dir(_temp_dir)
+	ResourceDirSettings.set_expansion("")
+	ResourceDirSettings.set_game("jo")
 	var shell = MAIN_GAME_SCENE.instantiate()
 	assert_not_null(shell)
 	if shell == null:

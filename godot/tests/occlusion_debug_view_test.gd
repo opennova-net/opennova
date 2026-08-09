@@ -2,12 +2,12 @@ extends GutTest
 
 # OcclusionDebugView: the F3 "Show portal faces" 3D overlay. Drives it with a
 # duck-typed world/sim pair feeding a crafted get_occlusion_portal_debug()
-# dictionary (the same shape NovaSimulation emits) through the public refresh
+# dictionary (the same shape Simulation emits) through the public refresh
 # seam to pin: outlines + section labels draw, plain occluder records stay
 # label-free, per-frame visible flips reuse the cached geometry, geometry
 # changes rebuild, and a vanished sim clears everything instead of erroring.
 
-const ViewScript := preload("res://adapter/debug/occlusion_debug_view.gd")
+const ViewScript := preload("res://src/debug/occlusion_debug_view.gd")
 
 
 # Node-based doubles: the view's setup takes the owner's world NODE (a GameWorld

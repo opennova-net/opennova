@@ -27,10 +27,10 @@ func _row() -> Control:
 	return r
 
 
-func _load_script(path: String) -> NovaMusicScript:
+func _load_script(path: String) -> MusicScript:
 	var bytes := FileAccess.get_file_as_bytes(path)
 	assert_gt(bytes.size(), 0, "fixture readable")
-	var ms := NovaMusicScript.new()
+	var ms := MusicScript.new()
 	ms.load_from_decrypted_bytes(bytes, path)
 	return ms
 

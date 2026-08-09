@@ -14,8 +14,8 @@ extends Node3D
 #
 # Referenced via preload (no class_name), the same convention as the controller / placer.
 
-const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
-const Overlay := preload("res://adapter/mission/mission_overlay_util.gd")
+const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
+const Overlay := preload("res://src/mission/mission_overlay_util.gd")
 
 # Half-extent (world units) of a marker gizmo cube; also its pick-target half-size. Sourced from the
 # shared overlay util so gizmos read at a consistent size across modes.
@@ -54,7 +54,7 @@ func rebuild(mission, labels: Array = []) -> void:
 		child.queue_free()
 	if mission == null:
 		return
-	var markers: Array = mission.get_entities(NovaMissionData.KIND_MARKER)
+	var markers: Array = mission.get_entities(MissionData.KIND_MARKER)
 	for marker_index in markers.size():
 		var pos: Vector3 = MissionObjectPlacer.bms_to_godot_position(markers[marker_index]["position"])
 		var label: String = String(labels[marker_index]) if marker_index < labels.size() else ""

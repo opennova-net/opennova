@@ -1,6 +1,6 @@
 extends SceneTree
 ## Manual probe (not collected by GUT): spawns Effect_FireBarrelS through the
-## game's effect layer (NovaEffectWorld -> NovaParticleRenderer) against a dark
+## game's effect layer (EffectWorld -> ParticleRenderer) against a dark
 ## backdrop, runs it a few seconds of 62 Hz ticks, and saves viewport captures.
 ## Verifies the greenish-flame regression fix (case-insensitive curve-table
 ## resolve) renders the barrel flame orange again.
@@ -8,7 +8,7 @@ extends SceneTree
 ##   GODOT_BIN --path godot -s res://tests/firebarrel_visual_probe.gd
 ## Output: NOVA_PROBE_OUT (dir) or user://firebarrel_probe/
 
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
 const TICK_DT := 1.0 / 62.0
 const CAPTURE_TIMES := [1.0, 2.0, 3.0, 4.0]
 
@@ -46,15 +46,15 @@ func _init() -> void:
 	if dir.is_empty():
 		dir = OS.get_environment("NOVA_RESOURCE_DIR")
 	print("probe: resource dir = ", dir)
-	var res_root := NovaResourceRoot.new()
-	var expansion := NovaLaunchFlags.expansion(ResourceDirSettings.get_expansion())
-	var game := NovaLaunchFlags.game(ResourceDirSettings.get_game())
-	if res_root.mount_runtime(dir, expansion, NovaLaunchFlags.loose_override_enabled(), game) != OK:
+	var res_root := ResourceRoot.new()
+	var expansion := LaunchFlags.expansion(ResourceDirSettings.get_expansion())
+	var game := LaunchFlags.game(ResourceDirSettings.get_game())
+	if res_root.mount_runtime(dir, expansion, LaunchFlags.loose_override_enabled(), game) != OK:
 		print("probe: mount FAILED: ", res_root.get_last_error())
 		quit(1)
 		return
 
-	_effect_world = NovaEffectWorld.new()
+	_effect_world = EffectWorld.new()
 	_effect_world.name = "EffectWorld"
 	probe_root.add_child(_effect_world)
 	var loaded: int = _effect_world.load_from_resource_root(res_root)

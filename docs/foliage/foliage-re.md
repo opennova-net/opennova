@@ -330,7 +330,7 @@ Within each cell:
 - the same path blocker / `FORCE_ON` rule applies.
 
 Reimpl anchors are the sim's crouched/prone infantry standing on terrain
-(`NovaSimulation::get_foliage_mask_anchor_positions`, from the replicated
+(`Simulation::get_foliage_mask_anchor_positions`, from the replicated
 `net_stance_bits` + `ground_target`), corrected 2026-07-16 — the earlier
 placed-object anchor feed (D-FOLIAGE-11, FIXED) generated masks retail
 never renders and collapsed frame rate on object-dense vistas (03TR
@@ -488,7 +488,7 @@ revision, and gives every draw a separate submission ID. The adapter builds all
 same-frame submissions before applying evictions, then clears draw-pool mesh
 references before erasing evicted cache entries. This preserves duplicate
 same-frame draws without stale references. A `terrain_changed` signal also
-resets the runtime when the same `NovaTerrainData` resource mutates in place.
+resets the runtime when the same `TerrainData` resource mutates in place.
 
 ## Reimpl architecture
 
@@ -496,9 +496,9 @@ The fresh implementation deliberately has three layers:
 
 1. `engine/formats/foliage/runtime.{h,cpp}` — Godot-neutral placement, gates, fades,
    alpha refs, corners/fold, and `:fd` preprocessing.
-2. `NovaTerrain` — exact runtime 16-unit detail-cell collection from terrain
+2. `Terrain` — exact runtime 16-unit detail-cell collection from terrain
    height bounds.
-3. `NovaFoliageDispatcher` — definition/mesh adaptation, live samplers, model
+3. `FoliageDispatcher` — definition/mesh adaptation, live samplers, model
    expansion, persistent slot/key/revision mesh caches, and dynamic
    per-submission draw pools for detail high, detail low, and silhouette.
 
@@ -506,14 +506,14 @@ The discarded placement, dispatcher, model-dispatcher, and fd-bake clusters
 were deleted. The live foliage-map resource now single-sources DETAIL sampling,
 world-to-map coordinates, and effective resolution for runtime and authoring.
 
-Runtime sampling comes directly from `NovaTerrainData`:
+Runtime sampling comes directly from `TerrainData`:
 
 - detail gate: flat-wrap `get_detail_foliage_index_fixed` on the candidate's
   original Q16 coordinates;
 - MODEL gate: sector-routed `get_foliage_index_world`;
 - ground: bilinear terrain height;
 - terrain projection: the shared world-to-source transform.
-- exclusion: the active mission `NovaTerrainTileInfo` inclusive AABB scan.
+- exclusion: the active mission `TerrainTileInfo` inclusive AABB scan.
 
 The editor uses the same adapter with separate live foliage-map Callables:
 DETAIL reads the flat wrapped map resource, while MODEL keeps the routed
@@ -522,7 +522,7 @@ pixel, including the loader's floor-log2 resolution for brush scale and a
 wrapped footprint at the 1024-world seam. Its detail cells are a deterministic
 preview set; only
 the runtime native collector is claimed as retail-exact. Runtime dispatchers
-also inherit the parent `NovaTerrain` heightfield-normal atlas; the standalone
+also inherit the parent `Terrain` heightfield-normal atlas; the standalone
 editor foliage preview has no such parent and currently falls back to mesh
 normals for bare-tile alpha. That preview-only input is included in
 D-FOLIAGE-7 rather than claimed as tile-light parity.
@@ -569,7 +569,7 @@ D-FOLIAGE-7 rather than claimed as tile-light parity.
   dropout and fade-response controls. LOW-far is explicitly reported as
   skipped when it has no pixels in the exact spawn view.
 - `runtime_scene_probe.gd` and the visual probes: detail camera selection uses
-  the flat gate oracle; the runtime scene consumes NovaTerrain's typed native
+  the flat gate oracle; the runtime scene consumes Terrain's typed native
   detail-cell vector, while its minimal fixture intentionally contains no
   `.3di` models.
 

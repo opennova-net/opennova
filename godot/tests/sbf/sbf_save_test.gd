@@ -5,7 +5,7 @@ const DST := "user://test_sbf_save_out.sbf"
 
 
 func test_save_passthrough_byte_identical() -> void:
-	var bank := NovaSbfBank.new()
+	var bank := SbfBank.new()
 	bank.load_from_path(SRC)
 	assert_not_null(bank, "fixture loads")
 	if bank == null:

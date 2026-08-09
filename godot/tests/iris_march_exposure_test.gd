@@ -1,11 +1,11 @@
 extends GutTest
 
 # The marched iris-exposure combiner (D-RLIT-2's curve half):
-# NovaWeatherCore.set_exposure_from_iris_samples — per-sample classification
+# WeatherCore.set_exposure_from_iris_samples — per-sample classification
 # (indoor vs ceiling/floor, indoor-no-data 255, outdoor sun level x/8), INT /3
 # average, 62-tick modulator chase [orig: compute_ambient_light_along_direction
 # @ 0x5c7a00; terrain_sector_compute_lighting @ 0x5c7550]. The sampling half
-# (NovaSimulation.compute_iris_samples) needs a loaded world and rides the
+# (Simulation.compute_iris_samples) needs a loaded world and rides the
 # asset-gated visual probes.
 #
 # Block/iris fixture = the FULL_01.ENV 0800 keyframes: sun (159,159,141),
@@ -31,7 +31,7 @@ const SETTLE_TICKS := 80
 
 
 func _settled_gain(samples: PackedInt32Array) -> float:
-	var core := NovaWeatherCore.new()
+	var core := WeatherCore.new()
 	core.snap_colors(GROUND, SUN, FOG, SKY)
 	core.set_exposure_from_iris_samples(
 		samples, LIGHT_DIR, CEILING, FLOOR_C, IRIS_PERCENT, IRIS_CENTER)

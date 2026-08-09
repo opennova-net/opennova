@@ -9,7 +9,7 @@ extends Control
 # node-per-statement chain: the state-machine MAP keeps its graph (that
 # metaphor fits BETWEEN states); inside a state, programs are lists.
 #
-# Built purely from NovaMusicScript.get_program_ast(section). The view never
+# Built purely from MusicScript.get_program_ast(section). The view never
 # writes bytecode; it emits add/replace/delete/reorder/move intents the mount
 # (live_mode) hands to the document's parity-gated, undoable write path.
 #
@@ -176,7 +176,7 @@ func _read_only_add_tooltip() -> String:
 	return "Authoring is unavailable for this script."
 
 
-# Render one AST section dict (NovaMusicScript.get_program_ast element).
+# Render one AST section dict (MusicScript.get_program_ast element).
 func show_section(section: Dictionary, bank_names: Array) -> void:
 	var new_index := int(section.get("index", -1))
 	if new_index != _section_index:

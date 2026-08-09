@@ -31,13 +31,13 @@ bool occlusion_model_from_3di(const Threedi3di3 &model,
                               opennova::world::OcclusionModel &out);
 
 // LOD carries skinned geometry: the header mesh-type stamp, or any strip with
-// a bone table. (The render adapter's NovaObjectData::is_skinned delegates
+// a bone table. (The render adapter's ObjectData::is_skinned delegates
 // here — one implementation per engine fact, ADR 0016.)
 bool model_is_skinned(const Threedi3di3 &model, int lod_index);
 
 // The model has a real collision presence: authored volumes, or (skinned
 // models only) a face mesh or person spheres. This is the allow_sphere_only
-// gate the collision build consumes for organics. (NovaObjectData::
+// gate the collision build consumes for organics. (ObjectData::
 // has_collision delegates here.)
 bool model_has_collision(const Threedi3di3 &model);
 

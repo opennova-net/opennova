@@ -70,7 +70,7 @@ func place_entity_at_world(item_id: int, global_hit: Vector3) -> bool:
 		return false
 	var db := _item_db()
 	var item_type := db.get_item_type(item_id) if db != null else -1
-	var kind := NovaMissionData.kind_for_item_type(item_type)
+	var kind := MissionData.kind_for_item_type(item_type)
 	# A readable label for the status line: the model name when resolvable, else the raw id.
 	var item_name: String = db.get_display_name(item_id) if db != null and db.has_item(item_id) else ""
 	if item_name.is_empty():
@@ -79,7 +79,7 @@ func place_entity_at_world(item_id: int, global_hit: Vector3) -> bool:
 	# The list selection + Ground-userpoint bake [orig: sub_401A90, dfx2med.exe] live in the
 	# engine's authoring facade; the editor only converts the hit/anchor to mission space.
 	var anchor_bms := Vector3.ZERO
-	if _c._placer != null and kind != NovaMissionData.KIND_MARKER:
+	if _c._placer != null and kind != MissionData.KIND_MARKER:
 		anchor_bms = _c._placer.ground_anchor_bms(_c._placer.graphic_for(item_id))
 	# Placing is its own undo step: close any open session, then bracket the add with
 	# begin_edit/commit_edit (commit pushes one step iff the add changed the document).
@@ -99,7 +99,7 @@ func place_entity_at_world(item_id: int, global_hit: Vector3) -> bool:
 	_c._membership_rev += 1
 	# Markers are mesh-less: the placer skips them, so render via the marker overlay (rebuild so the
 	# new gizmo + pickable exist before we select it). Mesh entities render incrementally.
-	if kind == NovaMissionData.KIND_MARKER:
+	if kind == MissionData.KIND_MARKER:
 		_c._waypoints._refresh_marker_overlay()
 	else:
 		_render_placed_entity(kind, new_index)
@@ -110,7 +110,7 @@ func place_entity_at_world(item_id: int, global_hit: Vector3) -> bool:
 
 
 
-func _item_db() -> NovaItemDatabase:
+func _item_db() -> ItemDatabase:
 	if _c._placer == null:
 		return null
 	return _c._placer.get_item_db()

@@ -10,8 +10,8 @@ extends GutTest
 const PMP := "res://../fixtures/3dp/Pmpjk01/Pmpjk01.3di"
 
 
-func _data() -> NovaObjectData:
-	var data := NovaObjectData.new()
+func _data() -> ObjectData:
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(PMP)), OK)
 	return data
 

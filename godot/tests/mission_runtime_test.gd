@@ -1,13 +1,13 @@
 extends GutTest
 
 # MissionRuntime is GameWorld's live mission driver: it owns a real
-# NovaSimulation, present pass, and entity index and ticks them in one order.
+# Simulation, present pass, and entity index and ticks them in one order.
 # These focused tests instantiate it directly over fixture nodes to prove the
 # engine path without introducing a second editor gameplay runtime.
 
-const MissionRuntime := preload("res://adapter/world/mission_runtime.gd")
-const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
-const ItemSeatSpecs := preload("res://adapter/world/item_seat_specs.gd")
+const MissionRuntime := preload("res://src/world/mission_runtime.gd")
+const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
+const ItemSeatSpecs := preload("res://src/world/item_seat_specs.gd")
 
 
 func test_mission_loadout_chunk_promotes_through_the_native_gate() -> void:
@@ -16,13 +16,13 @@ func test_mission_loadout_chunk_promotes_through_the_native_gate() -> void:
 	# document's chunk strings stash at load and promote as ints once the weapon
 	# catalog can resolve names — offline only, the witnessed gate
 	# [orig: Mission_LoadBMSFile @0x40F4E0 — gate @0x40f694; the tuple parse].
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.create_default(), OK)
 	assert_true(m.set_weapon_loadout([
 		{ "name": "WPN_KNIFE", "ammo_primary": "3", "ammo_secondary": "0", "flags": "2" }]))
-	var sim := NovaSimulation.new()
+	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(m))
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
 			"res://../fixtures/def")), OK)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
@@ -63,10 +63,10 @@ func test_shared_seat_rules_predict_original_command_rules() -> void:
 
 
 func test_production_seat_specs_extract_target_phrase_set_config() -> void:
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
 			"res://../fixtures/def/items.def")), OK)
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	root.set_root_dir(ProjectSettings.globalize_path(
 			"res://../fixtures/3dp/B50Cal"))
 	var spec := item_db.extract_seat_specs_for_item(root, 101419)
@@ -88,13 +88,13 @@ func test_production_seat_specs_extract_target_phrase_set_config() -> void:
 
 
 func test_wire_type_ids_install_the_same_late_vehicle_metadata() -> void:
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
 			"res://../fixtures/def/items.def")), OK)
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	root.set_root_dir(ProjectSettings.globalize_path(
 			"res://../fixtures/3dp/B50Cal"))
-	var sim := NovaSimulation.new()
+	var sim := Simulation.new()
 	autofree(sim)
 	assert_false(sim.install_seat_specs_for_type_ids(
 			item_db, PackedInt32Array([1419])),
@@ -106,7 +106,7 @@ func test_wire_type_ids_install_the_same_late_vehicle_metadata() -> void:
 	assert_eq(int(sim.debug_native_pose_stats()["mounted_graphic_sources"]), 1,
 			"duplicate/zero type ids collapse to the one resolved model source")
 	# The metadata the install extracted, via the tooling card over the same
-	# native extractor (NovaItemDatabase.extract_seat_specs_for_item).
+	# native extractor (ItemDatabase.extract_seat_specs_for_item).
 	var spec := item_db.extract_seat_specs_for_item(root, 101419)
 	assert_eq(int(spec.get("item_id", 0)), 101419,
 			"the wire type maps back into the items.def id space")
@@ -185,20 +185,20 @@ class CatchupEffectWorld:
 			active_poses.append(pose)
 
 
-# Build a one-organic mission + a real placer registering one real NovaObjectModel for it by
+# Build a one-organic mission + a real placer registering one real ObjectModel for it by
 # (kind,index) — the in-memory mission has bms_id 0, so the present index resolves by the fallback
-# key. The runtime builds its NovaEntityIndex from options.placer's construction-time
+# key. The runtime builds its EntityIndex from options.placer's construction-time
 # placed_entity_records ({model, ref} — the channel MissionObjectPlacer.place() records; never a
 # container scan), so the harness registers through that same channel and every setup below passes
 # {"placer": w.placer}. The tests assert only Node3D position/visible on the model.
 func _make_world(authored: Transform3D) -> Dictionary:
-	var md := NovaMissionData.new()
+	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	md.add_entity(3, 0, Vector3(10, 0, 0), Vector3.ZERO)  # KIND_ORGANIC
 
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var model := NovaObjectModel.new()
+	var model := ObjectModel.new()
 	container.add_child(model)
 	model.set_process(false)
 	model.transform = authored
@@ -273,7 +273,7 @@ func test_stats_and_manual_probe_share_one_native_profiling_owner_gate() -> void
 # controllable for F3 diagnostics and focused fixtures.
 func test_transport_is_locked_out_of_a_live_net_session() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
-	var joiner := NovaSimulation.new()
+	var joiner := Simulation.new()
 	assert_true(joiner.enable_join("127.0.0.1", 9, "TransportLockJoiner"))
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
@@ -315,7 +315,7 @@ func test_joiner_runtime_owns_fire_and_throwable_presenters() -> void:
 	# consumers on the joiner just as it does on the host. A pre-connected sim
 	# pins the real production setup branch without requiring a live peer.
 	var w := _make_world(Transform3D.IDENTITY)
-	var joiner := NovaSimulation.new()
+	var joiner := Simulation.new()
 	assert_true(joiner.enable_join("127.0.0.1", 9, "PresentJoiner"))
 	var target := JoinTarget.new()
 	target.host_ip = "127.0.0.1"
@@ -339,7 +339,7 @@ func test_joiner_runtime_owns_fire_and_throwable_presenters() -> void:
 			"the joiner constructs the flying-throwable snapshot consumer")
 	assert_eq(throwable_stats.live, 0)
 
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
 			"res://../fixtures/def")), OK)
 	assert_eq(rt.get_sim().load_ammo_table(root, "ammo.def"), OK)
@@ -429,7 +429,7 @@ func test_tick_presents_sim_position_onto_node() -> void:
 
 
 # (Historical transform-restore test deleted: MissionRuntime.stop() still
-# rewinds NovaSimulation for teardown/fixtures, but ONED no longer owns a live
+# rewinds Simulation for teardown/fixtures, but ONED no longer owns a live
 # runtime whose Stop must restore authored editor nodes.)
 
 
@@ -452,7 +452,7 @@ func test_tick_and_step_advance_and_present_like_the_game() -> void:
 func test_effects_drained_signal_fires() -> void:
 	# A mission runtime drains side effects each tick; the shell listens on effects_drained. Build an
 	# unconditional OutputText event and confirm the signal carries it.
-	var md := NovaMissionData.new()
+	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	assert_false(md.add_event(0, 0, 0).is_empty())
 	assert_false(md.add_event_action(0, { "action_type": 6, "param1": 42 }).is_empty())
@@ -589,10 +589,10 @@ func test_catchup_advances_round_move_effect_at_each_live_pose_and_stops_before_
 		"game_world": anchor_mount,
 		"placer": w.placer,
 	})
-	var def_root := NovaResourceRoot.new()
+	var def_root := ResourceRoot.new()
 	def_root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/def"))
 	assert_eq(rt.get_sim().load_ammo_table(def_root, "ammo.def"), OK)
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
 			"res://../fixtures/def/items.def")), OK)
 	rt.get_sim().resolve_item_traits(item_db)
@@ -638,7 +638,7 @@ func test_catchup_advances_round_move_effect_at_each_live_pose_and_stops_before_
 func test_tick_realtime_drains_effects_per_tick() -> void:
 	# Effects must drain PER logic tick INSIDE the catch-up batch (not coalesced into one emit at the
 	# end): the BMS quarter-pass one-shot still surfaces when many ticks run in a single real-time frame.
-	var md := NovaMissionData.new()
+	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	assert_false(md.add_event(0, 0, 0).is_empty())
 	assert_false(md.add_event_action(0, { "action_type": 6, "param1": 42 }).is_empty())

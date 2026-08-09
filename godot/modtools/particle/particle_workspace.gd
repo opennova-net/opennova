@@ -392,21 +392,21 @@ func get_save_dialog_dir() -> String:
 
 
 # Selection passthroughs the inspectors call when the user clicks a row.
-func select_effect(effect: NovaParticleEffect) -> void:
+func select_effect(effect: ParticleEffect) -> void:
 	if particle_editor == null:
 		return
 	particle_editor.select_effect(effect)
 	_apply_current_selection_to_preview()
 
 
-func select_particle(particle: NovaParticleDef) -> void:
+func select_particle(particle: ParticleDef) -> void:
 	if particle_editor == null:
 		return
 	particle_editor.select_particle(particle)
 	_apply_current_selection_to_preview()
 
 
-func select_table(table: NovaParticleTable) -> void:
+func select_table(table: ParticleTable) -> void:
 	if particle_editor == null:
 		return
 	particle_editor.select_table(table)
@@ -417,7 +417,7 @@ func select_table(table: NovaParticleTable) -> void:
 # --- CRUD passthroughs the inspectors + blueprint call. Each mutates the model
 # then re-applies the current selection to the preview so edits show live. ---
 
-func add_particle() -> NovaParticleDef:
+func add_particle() -> ParticleDef:
 	if particle_editor == null:
 		return null
 	var p := particle_editor.add_particle()
@@ -425,7 +425,7 @@ func add_particle() -> NovaParticleDef:
 	return p
 
 
-func duplicate_particle(p: NovaParticleDef) -> NovaParticleDef:
+func duplicate_particle(p: ParticleDef) -> ParticleDef:
 	if particle_editor == null:
 		return null
 	var dup := particle_editor.duplicate_particle(p)
@@ -433,14 +433,14 @@ func duplicate_particle(p: NovaParticleDef) -> NovaParticleDef:
 	return dup
 
 
-func remove_particle(p: NovaParticleDef) -> void:
+func remove_particle(p: ParticleDef) -> void:
 	if particle_editor == null:
 		return
 	particle_editor.remove_particle(p)
 	_apply_current_selection_to_preview()
 
 
-func add_effect() -> NovaParticleEffect:
+func add_effect() -> ParticleEffect:
 	if particle_editor == null:
 		return null
 	var e := particle_editor.add_effect()
@@ -448,7 +448,7 @@ func add_effect() -> NovaParticleEffect:
 	return e
 
 
-func duplicate_effect(e: NovaParticleEffect) -> NovaParticleEffect:
+func duplicate_effect(e: ParticleEffect) -> ParticleEffect:
 	if particle_editor == null:
 		return null
 	var dup := particle_editor.duplicate_effect(e)
@@ -456,33 +456,33 @@ func duplicate_effect(e: NovaParticleEffect) -> NovaParticleEffect:
 	return dup
 
 
-func remove_effect(e: NovaParticleEffect) -> void:
+func remove_effect(e: ParticleEffect) -> void:
 	if particle_editor == null:
 		return
 	particle_editor.remove_effect(e)
 	_apply_current_selection_to_preview()
 
 
-func add_table() -> NovaParticleTable:
+func add_table() -> ParticleTable:
 	if particle_editor == null:
 		return null
 	var t := particle_editor.add_table()
 	return t
 
 
-func duplicate_table(t: NovaParticleTable) -> NovaParticleTable:
+func duplicate_table(t: ParticleTable) -> ParticleTable:
 	if particle_editor == null:
 		return null
 	return particle_editor.duplicate_table(t)
 
 
-func remove_table(t: NovaParticleTable) -> void:
+func remove_table(t: ParticleTable) -> void:
 	if particle_editor == null:
 		return
 	particle_editor.remove_table(t)
 
 
-func add_graphic_layer(p: NovaParticleDef) -> int:
+func add_graphic_layer(p: ParticleDef) -> int:
 	if particle_editor == null:
 		return -1
 	var idx := particle_editor.add_graphic_layer(p)
@@ -490,14 +490,14 @@ func add_graphic_layer(p: NovaParticleDef) -> int:
 	return idx
 
 
-func remove_graphic_layer(p: NovaParticleDef, slot: int) -> void:
+func remove_graphic_layer(p: ParticleDef, slot: int) -> void:
 	if particle_editor == null:
 		return
 	particle_editor.remove_graphic_layer(p, slot)
 	_refresh_preview_if_current(p)
 
 
-func effect_add_pdef(effect: NovaParticleEffect, pdef_id: String) -> void:
+func effect_add_pdef(effect: ParticleEffect, pdef_id: String) -> void:
 	if particle_editor == null:
 		return
 	particle_editor.effect_add_pdef(effect, pdef_id)
@@ -505,7 +505,7 @@ func effect_add_pdef(effect: NovaParticleEffect, pdef_id: String) -> void:
 		_apply_current_selection_to_preview()
 
 
-func effect_remove_pdef(effect: NovaParticleEffect, pdef_id: String) -> void:
+func effect_remove_pdef(effect: ParticleEffect, pdef_id: String) -> void:
 	if particle_editor == null:
 		return
 	particle_editor.effect_remove_pdef(effect, pdef_id)
@@ -513,19 +513,19 @@ func effect_remove_pdef(effect: NovaParticleEffect, pdef_id: String) -> void:
 		_apply_current_selection_to_preview()
 
 
-func set_child_id(p: NovaParticleDef, child: String) -> void:
+func set_child_id(p: ParticleDef, child: String) -> void:
 	if particle_editor == null:
 		return
 	particle_editor.set_child_id(p, child)
 
 
-func assign_curve(p: NovaParticleDef, field: String, table_id: String) -> void:
+func assign_curve(p: ParticleDef, field: String, table_id: String) -> void:
 	if particle_editor == null:
 		return
 	particle_editor.assign_curve(p, field, table_id)
 	_refresh_preview_if_current(p)
 
 
-func _refresh_preview_if_current(p: NovaParticleDef) -> void:
+func _refresh_preview_if_current(p: ParticleDef) -> void:
 	if particle_editor != null and particle_editor.current_particle == p:
 		_apply_current_selection_to_preview()

@@ -1,7 +1,7 @@
 extends GutTest
 
 ## Integration coverage for the CDEP raw16 kernel reached THROUGH the
-## NovaTerrainData GDExtension binding (the standalone kernel ctest covers the
+## TerrainData GDExtension binding (the standalone kernel ctest covers the
 ## math; this locks in the Image get_data -> kernel -> set_data round-trip and
 ## that get_depth_raw16() observes the clamp on the shared Image).
 
@@ -29,7 +29,7 @@ func _block0_row0_raw_range(data) -> int:
 
 
 func test_cdep_clamp_blocks_in_rect_mutates_shared_image() -> void:
-	var data := NovaTerrainData.new()
+	var data := TerrainData.new()
 	var image := _heightmap_with_violation()
 	data.set_heightmap_image(image)
 
@@ -47,7 +47,7 @@ func test_cdep_clamp_blocks_in_rect_mutates_shared_image() -> void:
 
 
 func test_cdep_count_and_clamp_all_via_data() -> void:
-	var data := NovaTerrainData.new()
+	var data := TerrainData.new()
 	data.set_heightmap_image(_heightmap_with_violation())
 
 	assert_eq(data.cdep_count_violations(), 1, "One over-range block before clamp_all.")
@@ -56,7 +56,7 @@ func test_cdep_count_and_clamp_all_via_data() -> void:
 
 
 func test_cdep_count_is_zero_on_flat_map() -> void:
-	var data := NovaTerrainData.new()
+	var data := TerrainData.new()
 	var image := Image.create(1024, 1024, false, Image.FORMAT_RF)
 	image.fill(Color(5.0, 0.0, 0.0, 1.0))
 	data.set_heightmap_image(image)

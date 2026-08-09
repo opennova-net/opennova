@@ -30,7 +30,7 @@ func _init() -> void:
 
 # --- Subclass hooks ---------------------------------------------------------
 
-# The blank document create_new() adopts (e.g. NovaFntResource.create_blank).
+# The blank document create_new() adopts (e.g. FntResource.create_blank).
 func _make_new_resource():
 	return null
 

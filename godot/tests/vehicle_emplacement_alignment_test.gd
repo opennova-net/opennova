@@ -1,6 +1,6 @@
 extends GutTest
 
-const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
+const MissionObjectPlacer := preload("res://src/mission/mission_object_placer.gd")
 
 const MISSION := "03TR.bms"
 const CARRIER_ITEM_ID := 102010
@@ -34,7 +34,7 @@ func _retail_attachment_basis(direction: Vector3) -> Basis:
 			Vector3(-right.z, up.z, forward.z))
 
 
-func _blackhawk_carriers(mission: NovaMissionData) -> Array:
+func _blackhawk_carriers(mission: MissionData) -> Array:
 	var carriers: Array = []
 	for raw in mission.get_all_entities():
 		var entity: Dictionary = raw
@@ -43,7 +43,7 @@ func _blackhawk_carriers(mission: NovaMissionData) -> Array:
 	return carriers
 
 
-func _blackhawk_anchors(data: NovaObjectData) -> Array:
+func _blackhawk_anchors(data: ObjectData) -> Array:
 	var anchors: Array = []
 	for wanted in ANCHOR_NAMES:
 		for index in range(data.get_user_point_count()):
@@ -55,7 +55,7 @@ func _blackhawk_anchors(data: NovaObjectData) -> Array:
 
 
 func _authored_attachment_anchors(
-		item_db: NovaItemDatabase, item_id: int, data: NovaObjectData) -> Array:
+		item_db: ItemDatabase, item_id: int, data: ObjectData) -> Array:
 	# Oracle-side rebuild of the authored addeweap anchors: the items.def row
 	# names the child item + userpoint, the .3di USRP row supplies the raw
 	# retail frame. Whole-name case-insensitive resolve, first match — the same
@@ -86,50 +86,50 @@ func _authored_attachment_anchors(
 	return rows
 
 
-func _present_miniguns(sim: NovaSimulation) -> Array:
+func _present_miniguns(sim: Simulation) -> Array:
 	var children: Array = []
 	var snapshot := sim.get_present_snapshot()
 	var stride := sim.get_present_stride()
 	for record in range(snapshot.size() / stride):
 		var base := record * stride
-		if int(snapshot[base + NovaSimulation.PF_TYPE_ID]) != CHILD_TYPE_ID:
+		if int(snapshot[base + Simulation.PF_TYPE_ID]) != CHILD_TYPE_ID:
 			continue
 		children.append({
 			"position": Vector3(
-					snapshot[base + NovaSimulation.PF_POS_X],
-					snapshot[base + NovaSimulation.PF_POS_Y],
-					snapshot[base + NovaSimulation.PF_POS_Z]),
+					snapshot[base + Simulation.PF_POS_X],
+					snapshot[base + Simulation.PF_POS_Y],
+					snapshot[base + Simulation.PF_POS_Z]),
 			"rotation": Vector3(
-					snapshot[base + NovaSimulation.PF_PITCH_DEG],
-					snapshot[base + NovaSimulation.PF_YAW_DEG],
-					snapshot[base + NovaSimulation.PF_ROLL_DEG]),
+					snapshot[base + Simulation.PF_PITCH_DEG],
+					snapshot[base + Simulation.PF_YAW_DEG],
+					snapshot[base + Simulation.PF_ROLL_DEG]),
 		})
 	return children
 
 
 func _synthetic_attachment_rows(
-		sim: NovaSimulation, child_types: Dictionary) -> Dictionary:
+		sim: Simulation, child_types: Dictionary) -> Dictionary:
 	var rows := {}
 	var snapshot := sim.get_present_snapshot()
 	var stride := sim.get_present_stride()
 	for record in range(snapshot.size() / stride):
 		var base := record * stride
-		var type_id := int(snapshot[base + NovaSimulation.PF_TYPE_ID])
+		var type_id := int(snapshot[base + Simulation.PF_TYPE_ID])
 		if not child_types.has(type_id):
 			continue
-		if int(snapshot[base + NovaSimulation.PF_KIND]) != 255 \
-				or int(snapshot[base + NovaSimulation.PF_INDEX]) != 0xFFFFFF:
+		if int(snapshot[base + Simulation.PF_KIND]) != 255 \
+				or int(snapshot[base + Simulation.PF_INDEX]) != 0xFFFFFF:
 			continue
-		rows[int(snapshot[base + NovaSimulation.PF_WIRE_HANDLE])] = {
+		rows[int(snapshot[base + Simulation.PF_WIRE_HANDLE])] = {
 			"type_id": type_id,
 			"position": Vector3(
-					snapshot[base + NovaSimulation.PF_POS_X],
-					snapshot[base + NovaSimulation.PF_POS_Y],
-					snapshot[base + NovaSimulation.PF_POS_Z]),
+					snapshot[base + Simulation.PF_POS_X],
+					snapshot[base + Simulation.PF_POS_Y],
+					snapshot[base + Simulation.PF_POS_Z]),
 			"rotation": Vector3(
-					snapshot[base + NovaSimulation.PF_PITCH_DEG],
-					snapshot[base + NovaSimulation.PF_YAW_DEG],
-					snapshot[base + NovaSimulation.PF_ROLL_DEG]),
+					snapshot[base + Simulation.PF_PITCH_DEG],
+					snapshot[base + Simulation.PF_YAW_DEG],
+					snapshot[base + Simulation.PF_ROLL_DEG]),
 		}
 	return rows
 
@@ -140,17 +140,17 @@ func test_03tr_blackhawk_miniguns_follow_authored_ewep_forward() -> void:
 		pending("OPENNOVA_JO_DIR / retail JO PFFs are required for the 03TR Blackhawk witness")
 		return
 
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.mount_runtime(install_dir, "", false, "jo"), OK)
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.open_from_resource_root(root, MISSION), OK)
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
 	assert_eq(String(item_db.get_graphic(CARRIER_ITEM_ID)), CARRIER_GRAPHIC)
 
 	var carriers := _blackhawk_carriers(mission)
 	assert_eq(carriers.size(), 2, "03TR carries the two base Blackhawks")
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert_eq(data.open_from_resource_root(root, CARRIER_GRAPHIC + ".3di"), OK)
 	var anchors := _blackhawk_anchors(data)
 	assert_eq(anchors.size(), 2, "Dblkhwk1 carries ewep01 and ewep02")
@@ -185,7 +185,7 @@ func test_03tr_blackhawk_miniguns_follow_authored_ewep_forward() -> void:
 	assert_eq((carrier_card.get("emplacement_attachments", []) as Array).size(), 2)
 	# S16: the seat/mount table is the native extraction over items.def rows +
 	# .3di userpoints — the asset root must be installed before the seed walk.
-	var sim := NovaSimulation.new()
+	var sim := Simulation.new()
 	sim.enable_listen_server(true)
 	sim.set_asset_root(root)
 	assert_true(sim.install_seat_specs_for_type_ids(
@@ -231,16 +231,16 @@ func test_mrk5_nonplanar_anchors_use_the_retail_row_matrix_frame() -> void:
 		pending("OPENNOVA_JO_DIR / retail JO PFFs are required for the MRK5 witness")
 		return
 
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.mount_runtime(install_dir, "", false, "jo"), OK)
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
 	assert_eq(String(item_db.get_graphic(MRK5_ITEM_ID)), MRK5_GRAPHIC)
 	var carrier_card: Dictionary = item_db.extract_seat_specs_for_item(
 			root, MRK5_ITEM_ID)
 	assert_eq((carrier_card.get("emplacement_attachments", []) as Array).size(), 4,
 			"the shipped MRK5 has four attachment anchors")
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	var open_err := data.open_from_resource_root(root, MRK5_GRAPHIC + ".3di")
 	assert_eq(open_err, OK)
 	if open_err != OK:
@@ -254,12 +254,12 @@ func test_mrk5_nonplanar_anchors_use_the_retail_row_matrix_frame() -> void:
 
 	var rest_parts := data.evaluate_panm(0, 0, {})
 	var live_parts := data.evaluate_panm(0, 16, {})
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	var carrier_position := Vector3(7.0, -3.0, 2.0)
 	var carrier_rotation := Vector3(0.0, 37.0, 0.0)
 	assert_false(mission.add_entity(
-			NovaMissionData.KIND_ITEM, MRK5_ITEM_ID,
+			MissionData.KIND_ITEM, MRK5_ITEM_ID,
 			carrier_position, carrier_rotation).is_empty())
 	var carrier_xform := MissionObjectPlacer.entity_transform(
 			carrier_position, carrier_rotation)
@@ -293,7 +293,7 @@ func test_mrk5_nonplanar_anchors_use_the_retail_row_matrix_frame() -> void:
 	assert_gt(nonplanar_count, 0,
 			"the MRK5 fixture distinguishes row-matrix conversion from yaw-only data")
 
-	var sim := NovaSimulation.new()
+	var sim := Simulation.new()
 	sim.enable_listen_server(true)
 	sim.set_asset_root(root)
 	assert_true(sim.install_seat_specs_for_type_ids(
@@ -341,16 +341,16 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 		pending("OPENNOVA_JO_DIR / retail JO PFFs are required for the DBuggy witness")
 		return
 
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.mount_runtime(install_dir, "", false, "jo"), OK)
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
 	assert_eq(String(item_db.get_graphic(DBUGGY_ITEM_ID)), DBUGGY_GRAPHIC)
 	var carrier_card: Dictionary = item_db.extract_seat_specs_for_item(
 			root, DBUGGY_ITEM_ID)
 	assert_gt((carrier_card.get("emplacement_attachments", []) as Array).size(), 0,
 			"the shipped DBuggy authors at least one child emplacement")
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	var open_err := data.open_from_resource_root(root, DBUGGY_GRAPHIC + ".3di")
 	assert_eq(open_err, OK)
 	if open_err != OK:
@@ -367,10 +367,10 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 		child_types[child_type] = true
 		attachment_by_type[child_type] = attachment
 
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	var placed := mission.add_entity(
-			NovaMissionData.KIND_ITEM, DBUGGY_ITEM_ID,
+			MissionData.KIND_ITEM, DBUGGY_ITEM_ID,
 			Vector3(2, 0, 0), Vector3.ZERO)
 	assert_false(placed.is_empty())
 	var container := Node3D.new()
@@ -385,7 +385,7 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 	if mission_objects == null:
 		return
 
-	var rt = preload("res://adapter/world/mission_runtime.gd").new()
+	var rt = preload("res://src/world/mission_runtime.gd").new()
 	add_child_autofree(rt)
 	assert_gt(int(rt.setup(mission, mission_objects, {
 		"resource_root": root,
@@ -396,7 +396,7 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 	assert_true(rt.tick())
 	var carrier_node := rt.get_registry().resolve(
 			int(placed.get("bms_id", 0)),
-			NovaMissionData.KIND_ITEM,
+			MissionData.KIND_ITEM,
 			int(placed.get("index", 0))) as Node3D
 	assert_not_null(carrier_node, "the DBuggy model resolves through the placed registry")
 	var before_rows := _synthetic_attachment_rows(rt.get_sim(), child_types)

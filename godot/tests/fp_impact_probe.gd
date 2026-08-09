@@ -8,7 +8,7 @@ extends Node
 #   GODOT_BIN --path godot res://tests/fp_impact_probe.tscn  (or -s wrapper)
 # Output: res://../.scratch/fp_impact/
 
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
 const StandaloneProbe := preload("res://tests/standalone_game_probe.gd")
 const OUT_DIR := "res://../.scratch/fp_impact"
 
@@ -24,7 +24,7 @@ func _ready() -> void:
 	if root.is_empty():
 		root = ResourceDirSettings.get_resource_dir()
 
-	NovaWindow.set_fullscreen(get_window(), true)
+	WindowState.set_fullscreen(get_window(), true)
 	await _settle(6)
 
 	var bms := OS.get_environment("NOVA_MISSION_BMS").strip_edges()

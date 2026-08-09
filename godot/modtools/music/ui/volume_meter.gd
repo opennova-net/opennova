@@ -1,7 +1,7 @@
 class_name MusicVolumeMeter
 extends Control
 
-# Persistent L/R volume bars fed by NovaMusicDirector.volume_changed. The VM
+# Persistent L/R volume bars fed by MusicDirector.volume_changed. The VM
 # reports volume in 16.16 fixed-point (clamp(arg,0,255)<<16) per
 # Jointops.exe!Intrinsic_GSV @ 0x6720E0 / GSDV @ 0x672120; we render the
 # decoded 0..255 value. Holds the last value so the bars don't flicker between

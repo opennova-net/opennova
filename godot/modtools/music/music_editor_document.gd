@@ -4,8 +4,8 @@ extends RefCounted
 const MusicEditHistoryClass = preload("res://modtools/music/music_edit_history.gd")
 
 # Loaded resources (either may be null if not yet opened)
-var bank: NovaSbfBank
-var mus_script: NovaMusicScript  # named mus_script to avoid shadowing Object.script
+var bank: SbfBank
+var mus_script: MusicScript  # named mus_script to avoid shadowing Object.script
 
 # Source paths for save-back
 var bank_path: String = ""
@@ -80,7 +80,7 @@ func set_script_text(_script_name: StringName, text: String) -> void:
 
 # --- Phase F3: compile -------------------------------------------------
 #
-# Compiles the cached text via the C++ NovaMusicScript::compile_text bridge
+# Compiles the cached text via the C++ MusicScript::compile_text bridge
 # (Phase F4). Returns the diagnostics array; empty on success. Always emits
 # compile_finished.
 func compile_script() -> Array:
@@ -98,7 +98,7 @@ func compile_script() -> Array:
 		var no_text: Array = [{"line": 0, "col": 0, "message": "no script text"}]
 		compile_finished.emit(false, no_text)
 		return no_text
-	# NovaMusicScript.compile_text returns a Dictionary (see header). Output
+	# MusicScript.compile_text returns a Dictionary (see header). Output
 	# references aren't viable through GDExtension; the bridge packs everything
 	# into the dict instead.
 	var d: Dictionary = mus_script.compile_text(_compiled_script_text)
@@ -134,7 +134,7 @@ func prepare_script_for_run() -> Array:
 func open_bank(path: String) -> int:
 	if not _path_exists(path):
 		return ERR_FILE_NOT_FOUND
-	var res := NovaSbfBank.new()
+	var res := SbfBank.new()
 	res.load_from_path(path)
 	if res.get_raw_file_bytes().is_empty():
 		return ERR_CANT_OPEN
@@ -148,7 +148,7 @@ func open_bank(path: String) -> int:
 func open_script(path: String) -> int:
 	if not _path_exists(path):
 		return ERR_FILE_NOT_FOUND
-	var res := NovaMusicScript.new()
+	var res := MusicScript.new()
 	if res.load_from_path(path) != OK:
 		return ERR_CANT_OPEN
 	mus_script = res
@@ -184,7 +184,7 @@ func close_pair() -> void:
 # structured edits use: compile_text -> file_bytes -> set_compiled_file_bytes ->
 # load_from_decrypted_bytes. The resulting in-memory state is byte-identical to
 # opening a real .bin (and get_raw_file_bytes() is non-empty, so the saver can
-# write it). The bank is a fresh empty SBF (NovaSbfBank.create_empty); the user
+# write it). The bank is a fresh empty SBF (SbfBank.create_empty); the user
 # imports tracks via the Tracks dock (＋ Add).
 
 # A script with one empty section. The empty body compiles to a single `done`,
@@ -193,7 +193,7 @@ const _NEW_SCRIPT_TEMPLATE := "script %s\nsection Begin\n{\n}\n"
 
 
 func new_script(script_name: String = "gamescript") -> int:
-	var ms := NovaMusicScript.new()
+	var ms := MusicScript.new()
 	var d: Dictionary = ms.compile_text(_NEW_SCRIPT_TEMPLATE % script_name)
 	if int(d.get("rc", -1)) != 0:
 		return ERR_CANT_CREATE
@@ -213,12 +213,12 @@ func new_script(script_name: String = "gamescript") -> int:
 
 
 func new_bank() -> int:
-	# create_empty is a static factory on the NovaSbfBank GDExtension class (the
+	# create_empty is a static factory on the SbfBank GDExtension class (the
 	# default constructor leaves a bank unconfigured). Guard so an older binary
 	# without the factory degrades to a script-only project instead of crashing.
-	if not ClassDB.class_has_method("NovaSbfBank", "create_empty", true):
+	if not ClassDB.class_has_method("SbfBank", "create_empty", true):
 		return ERR_UNAVAILABLE
-	var b = NovaSbfBank.create_empty()
+	var b = SbfBank.create_empty()
 	if b == null:
 		return ERR_CANT_CREATE
 	bank = b
@@ -713,7 +713,7 @@ func _section_window_end(lines: PackedStringArray, header_idx: int) -> int:
 # Generalizes the play-edit write path to every construct. An edit is still a
 # TEXT transform over the names-less decompile of the committed script, recompiled
 # through _apply_script_text (rolls back on failure), pushed onto the one undo
-# timeline. The new precision comes from get_annotated_decompile (NovaMusicScript),
+# timeline. The new precision comes from get_annotated_decompile (MusicScript),
 # which hands back the names-less text PLUS a per-top-level-statement line span
 # (computed by the SAME emitter the AST uses), so a single statement can be
 # spliced/deleted/replaced/reordered by line range -- robust to the brace-leak and

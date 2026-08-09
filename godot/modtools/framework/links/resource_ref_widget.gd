@@ -264,8 +264,8 @@ func _resolve() -> Dictionary:
 	if not resolve.is_valid() or _current.is_empty():
 		return {}
 	var epoch := -1
-	if ClassDB.class_exists("NovaResourceRoot"):
-		epoch = NovaResourceRoot.cache_epoch()
+	if ClassDB.class_exists("ResourceRoot"):
+		epoch = ResourceRoot.cache_epoch()
 	if _current == _memo_value and epoch == _memo_epoch:
 		return _memo_result
 	_memo_value = _current

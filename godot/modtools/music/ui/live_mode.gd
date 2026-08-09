@@ -62,7 +62,7 @@ const _EV_COLOR := {
 }
 
 var _document: RefCounted
-var _director: NovaMusicDirector
+var _director: MusicDirector
 var _preview: Node  # MusicAudioPreview, for track-chip previews on the map
 # Auto-follow the live VM: when on, a section transition drills the program view to the
 # entered state. A manual node click pins a state (turns this off); Start/Stop re-arms.
@@ -221,7 +221,7 @@ func _on_document_changed() -> void:
 
 
 func _ready() -> void:
-	_director = NovaMusicDirector.new()
+	_director = MusicDirector.new()
 	_director.auto_start = false
 	add_child(_director)
 	_preview = MusicAudioPreviewClass.new()

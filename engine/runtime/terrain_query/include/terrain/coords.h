@@ -20,7 +20,7 @@
 // instantiate <double> for the editor, <float> for the runtime.
 //
 // Godot-agnostic: raw int grid pointer + scalars only. The GDExtension wrapper
-// (NovaTerrainData) converts to/from Vector2 / Rect2i at the boundary.
+// (TerrainData) converts to/from Vector2 / Rect2i at the boundary.
 
 #include <cmath>
 #include <cstdint>

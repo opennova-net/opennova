@@ -2,7 +2,7 @@ extends GutTest
 
 ## Document + engine-glue tests for the Strings workspace: byte-exact save,
 ## CRUD, undo/redo, validation, CSV round-trip, the .bin resource loader, and the
-## NovaStrings runtime singleton.
+## Strings runtime singleton.
 
 const StringsEditorScript = preload("res://modtools/strings/strings_editor.gd")
 
@@ -254,9 +254,9 @@ func test_retail_fixture_cp1252_survives_string_roundtrip() -> void:
 func test_nova_strings_singleton() -> void:
 	var t := _sample_table()
 	assert_eq(t.save_to_path(TMP_NS), OK)
-	assert_eq(NovaStrings.load_table(TMP_NS), OK)
-	assert_true(NovaStrings.has_string("btn_new_game"), "lookup should be case-insensitive")
-	assert_eq(NovaStrings.get_string("BTN_NEW_GAME"), "{hot}New Game")
-	assert_eq(NovaStrings.get_display_string("BTN_NEW_GAME"), "New Game", "display should strip the {hot} marker")
-	NovaStrings.clear()
-	assert_false(NovaStrings.is_loaded())
+	assert_eq(Strings.load_table(TMP_NS), OK)
+	assert_true(Strings.has_string("btn_new_game"), "lookup should be case-insensitive")
+	assert_eq(Strings.get_string("BTN_NEW_GAME"), "{hot}New Game")
+	assert_eq(Strings.get_display_string("BTN_NEW_GAME"), "New Game", "display should strip the {hot} marker")
+	Strings.clear()
+	assert_false(Strings.is_loaded())

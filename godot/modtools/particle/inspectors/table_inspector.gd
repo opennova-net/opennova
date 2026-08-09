@@ -115,7 +115,7 @@ func _refresh() -> void:
 	if _editor != null and _editor.particle_file != null:
 		var src: Array = _editor.particle_file.tables
 		for entry in src:
-			var t: NovaParticleTable = entry
+			var t: ParticleTable = entry
 			if t != null:
 				_tables.append(t)
 				_list.add_item(t.id)
@@ -230,7 +230,7 @@ func _on_curve_input(event: InputEvent) -> void:
 
 
 func _paint_at(pos: Vector2) -> void:
-	var table: NovaParticleTable = _editor.current_table
+	var table: ParticleTable = _editor.current_table
 	var data := _ensure_256(table.get_data())
 	var rect := _curve_view.get_rect()
 	var w := maxf(rect.size.x, 1.0)

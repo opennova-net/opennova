@@ -30,12 +30,12 @@ func test_all_shipped_menus_build() -> void:
 		if bytes.is_empty():
 			continue
 
-		var doc := NovaMnuDocument.new()
+		var doc := MnuDocument.new()
 		assert_eq(doc.load_from_bytes(bytes), OK, "%s parses" % menu_name)
 		assert_gt(doc.get_screen_count(), 0, "%s has at least one screen" % menu_name)
 
 		# Runtime build path (the running game), assets degrading gracefully.
-		var menu := NovaMnuMenu.new()
+		var menu := MnuMenu.new()
 		menu.build_on_ready = false
 		add_child_autofree(menu)
 		menu.set_edit_mode(false)

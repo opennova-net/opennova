@@ -3,7 +3,7 @@ extends GutTest
 const ObjectEditorScript = preload("res://modtools/object/object_editor.gd")
 const ObjectPreviewScript = preload("res://modtools/object/object_preview.gd")
 const ObjectWorkspaceScript = preload("res://modtools/object/object_workspace.gd")
-const FlyCameraScript = preload("res://adapter/fly_camera.gd")
+const FlyCameraScript = preload("res://src/fly_camera.gd")
 
 const BIRD_FIXTURE := "res://../fixtures/3dp/Bird1/Bird1.3di"
 const BIRD_PROJECT_FIXTURE := "res://../fixtures/3dp/Bird1/Bird1.3dp"
@@ -19,7 +19,7 @@ const CHARMODEL_3DI3_FIXTURE := "res://../fixtures/threedi/3di3/CharModel.3di"
 const FULL_00_ENV := "res://../fixtures/env/full_00.env"
 const OUTPUT_DIR_NAME := "object_editor_export_test"
 # Deliberate literal pins of the ModSuperOED ReExport3DI bit layout (engine/formats/oed
-# OED_UPDATE_*). Product code aliases NovaObjectData.UPDATE_*; this suite pins
+# OED_UPDATE_*). Product code aliases ObjectData.UPDATE_*; this suite pins
 # the values so binding drift fails here (see test_oed_update_mask_binding).
 const OED_UPDATE_NONE := 0
 const OED_UPDATE_MTRL := 1
@@ -50,11 +50,11 @@ func after_each() -> void:
 
 
 func test_object_data_opens_3di_as_ir_document() -> void:
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 
 	var err: Error = data.open_file(ProjectSettings.globalize_path(BIRD_FIXTURE))
 
-	assert_eq(err, OK, "3DI fixtures should open through NovaObjectData.")
+	assert_eq(err, OK, "3DI fixtures should open through ObjectData.")
 	var summary := data.get_summary()
 	assert_gt(int(summary.get("lod_count", 0)), 0, "Opened 3DI should expose LODs.")
 	assert_gt(int(summary.get("material_count", 0)), 0, "Opened 3DI should expose materials.")
@@ -62,7 +62,7 @@ func test_object_data_opens_3di_as_ir_document() -> void:
 
 
 func test_ground_anchor_prefers_named_ground_userpoint() -> void:
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(HOUSE_3DI3_FIXTURE)), OK,
 		"House.3di fixture should open.")
 	# House.3di ships a lowercase "ground" userpoint. get_ground_anchor must return
@@ -80,7 +80,7 @@ func test_ground_anchor_prefers_named_ground_userpoint() -> void:
 
 
 func test_ground_anchor_falls_back_to_part0_center() -> void:
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(CHARMODEL_3DI3_FIXTURE)), OK,
 		"CharModel.3di fixture should open.")
 	# CharModel has no "ground" userpoint, so the anchor falls back to part 0's center.
@@ -97,10 +97,10 @@ func test_ground_anchor_falls_back_to_part0_center() -> void:
 
 
 func test_object_shader_catalog_exposes_oed_slot_flags() -> void:
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	var catalog := data.get_shader_catalog()
 
-	assert_false(catalog.is_empty(), "NovaObjectData should expose the known OED shader catalog.")
+	assert_false(catalog.is_empty(), "ObjectData should expose the known OED shader catalog.")
 	var single := _shader_catalog_entry(catalog, "FF_ST_OP")
 	var multi := _shader_catalog_entry(catalog, "FF_MT_OP")
 	var normal := _shader_catalog_entry(catalog, "VS_DOT3DIFF2")
@@ -120,7 +120,7 @@ func test_object_shader_catalog_exposes_oed_slot_flags() -> void:
 
 
 func test_object_shader_cache_exposes_renderer_depth_and_cull_modes() -> void:
-	var cache := NovaObjectShaderCache.get_singleton()
+	var cache := ObjectShaderCache.get_singleton()
 	assert_not_null(cache, "Object shader cache should be registered with Godot.")
 
 	var opaque_shader: Shader = cache.get_shader_for_key(cache.classify("FF_ST_OP", 0, 0, 0, 128))
@@ -141,7 +141,7 @@ func test_object_shader_cache_exposes_renderer_depth_and_cull_modes() -> void:
 
 
 func test_object_preview_surfaces_apply_strip_vertex_offsets() -> void:
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(DVAN_FIXTURE)), OK)
 
 	var surfaces := data.get_lod_surfaces(0)
@@ -157,7 +157,7 @@ func test_object_preview_surfaces_apply_strip_vertex_offsets() -> void:
 
 
 func test_object_preview_surfaces_expose_stable_material_array_indices() -> void:
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	var material_count := data.get_materials().size()
 
@@ -168,7 +168,7 @@ func test_object_preview_surfaces_expose_stable_material_array_indices() -> void
 
 
 func test_object_preview_surfaces_expose_secondary_uvs_and_tangents() -> void:
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 
 	var saw_uv2 := false
@@ -188,7 +188,7 @@ func test_object_preview_surfaces_expose_secondary_uvs_and_tangents() -> void:
 
 
 func test_object_preview_surfaces_preserve_decoded_winding_for_culling() -> void:
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(DVAN_FIXTURE)), OK)
 
 	var sampled_triangles := 0
@@ -225,7 +225,7 @@ func test_object_data_open_3dp_render_signature_matches_exported_3di() -> void:
 	assert_eq(DirAccess.make_dir_recursive_absolute(export_dir), OK)
 	assert_eq(live.export_3di_to_dir(export_dir), OK)
 
-	var reopened := NovaObjectData.new()
+	var reopened := ObjectData.new()
 	assert_eq(reopened.open_file(export_dir.path_join("US01.3di")), OK)
 
 	assert_eq(_object_render_signature(live), _object_render_signature(reopened), "Live 3DP preview data should match the exported/reopened 3DI render data.")
@@ -233,19 +233,19 @@ func test_object_data_open_3dp_render_signature_matches_exported_3di() -> void:
 
 func test_oed_update_mask_binding_matches_modsuperoed_bit_layout() -> void:
 	# The single-source contract (ENG-4): product GDScript aliases
-	# NovaObjectData.UPDATE_*; these literals pin the ModSuperOED ReExport3DI
+	# ObjectData.UPDATE_*; these literals pin the ModSuperOED ReExport3DI
 	# bit layout carried by engine/formats/oed's OED_UPDATE_* so drift fails loudly.
-	assert_eq(NovaObjectData.UPDATE_NONE, OED_UPDATE_NONE)
-	assert_eq(NovaObjectData.UPDATE_MTRL, OED_UPDATE_MTRL)
-	assert_eq(NovaObjectData.UPDATE_LGHT, OED_UPDATE_LGHT)
-	assert_eq(NovaObjectData.UPDATE_PANM, OED_UPDATE_PANM)
-	assert_eq(NovaObjectData.UPDATE_ALL, OED_UPDATE_ALL)
-	assert_eq(NovaObjectData.UPDATE_ALL, OED_UPDATE_ALL,
+	assert_eq(ObjectData.UPDATE_NONE, OED_UPDATE_NONE)
+	assert_eq(ObjectData.UPDATE_MTRL, OED_UPDATE_MTRL)
+	assert_eq(ObjectData.UPDATE_LGHT, OED_UPDATE_LGHT)
+	assert_eq(ObjectData.UPDATE_PANM, OED_UPDATE_PANM)
+	assert_eq(ObjectData.UPDATE_ALL, OED_UPDATE_ALL)
+	assert_eq(ObjectData.UPDATE_ALL, OED_UPDATE_ALL,
 		"The engine object model aliases must resolve to the bound constants.")
 
 
 func test_object_data_tracks_oed_dirty_mask_for_component_edits() -> void:
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	assert_eq(_oed_dirty_mask(data), OED_UPDATE_NONE, "Opening an object should not mark any OED update chunks dirty.")
 
@@ -260,7 +260,7 @@ func test_object_data_tracks_oed_dirty_mask_for_component_edits() -> void:
 
 
 func test_object_data_exposes_and_edits_semantic_part_anim_channels() -> void:
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	assert_eq(_oed_dirty_mask(data), OED_UPDATE_NONE)
 	assert_true(data.has_method("get_part_anim_editor_entries"), "Object data should expose semantic PANM editor entries.")
@@ -295,7 +295,7 @@ func test_object_data_exposes_and_edits_semantic_part_anim_channels() -> void:
 
 
 func test_object_data_adds_duplicates_and_deletes_part_anim_entries() -> void:
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	assert_true(data.has_method("add_part_anim"), "Object data should expose PANM entry creation.")
 	assert_true(data.has_method("duplicate_part_anim"), "Object data should expose PANM entry duplication.")
@@ -337,7 +337,7 @@ func test_object_data_adds_duplicates_and_deletes_part_anim_entries() -> void:
 
 
 func test_object_data_part_anim_target_preserves_matrix_binding() -> void:
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	assert_gt(data.get_part_anim_count(0), 0, "Fixture should expose part animations.")
 	var lod_info: Dictionary = data.get_render_lod_info(0)
@@ -374,7 +374,7 @@ func test_object_data_masked_export_clears_exported_oed_dirty_bits() -> void:
 
 
 func test_object_data_loads_material_textures_from_source_dir() -> void:
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 
 	var texture_ref := _first_material_texture(data)
@@ -389,7 +389,7 @@ func test_object_data_loads_material_textures_from_source_dir() -> void:
 
 
 func test_object_data_resolves_direct_3di_oed_object_texture_variant() -> void:
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 
 	var resolved_path := data.resolve_material_texture_path(0, 0)
@@ -400,7 +400,7 @@ func test_object_data_resolves_direct_3di_oed_object_texture_variant() -> void:
 
 func test_object_data_resolves_dds_texture_variant_from_object_folder() -> void:
 	var fixture_dir := _prepare_texture_variant_fixture("KArm1.dds")
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert_eq(data.open_file(fixture_dir.path_join("Armry01.3di")), OK)
 
 	var resolved_path := data.resolve_material_texture_path(0, 0)
@@ -411,7 +411,7 @@ func test_object_data_resolves_dds_texture_variant_from_object_folder() -> void:
 
 func test_object_data_loads_real_dds_texture_variant_from_object_folder() -> void:
 	var fixture_dir := _prepare_real_dds_texture_fixture("KArm1.dds")
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert_eq(data.open_file(fixture_dir.path_join("Armry01.3di")), OK)
 
 	var resolved_path := data.resolve_material_texture_path(0, 0)
@@ -424,7 +424,7 @@ func test_object_data_loads_real_dds_texture_variant_from_object_folder() -> voi
 func test_object_data_skips_unloadable_texture_candidate() -> void:
 	var fixture_dir := _prepare_real_dds_texture_fixture("KArm1.dds")
 	_write_bytes(fixture_dir.path_join("KArm1.TGA"), PackedByteArray([0, 1, 2, 3]))
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert_eq(data.open_file(fixture_dir.path_join("Armry01.3di")), OK)
 
 	var resolved_path := data.resolve_material_texture_path(0, 0)
@@ -435,7 +435,7 @@ func test_object_data_skips_unloadable_texture_candidate() -> void:
 
 func test_object_data_resolves_compound_dds_tga_texture_variant_from_object_folder() -> void:
 	var fixture_dir := _prepare_texture_variant_fixture("KArm1.dds.tga")
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert_eq(data.open_file(fixture_dir.path_join("Armry01.3di")), OK)
 
 	var resolved_path := data.resolve_material_texture_path(0, 0)
@@ -455,7 +455,7 @@ func test_object_editor_exports_open_3di() -> void:
 
 
 func test_object_data_export_failure_includes_native_oed_detail() -> void:
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(BIRD_PROJECT_FIXTURE)), OK)
 
 	var err := data.export_3di_to_dir(_output_dir().path_join("missing").path_join("nested"))
@@ -465,9 +465,9 @@ func test_object_data_export_failure_includes_native_oed_detail() -> void:
 
 
 func test_nova_object_model_builds_runtime_scene_without_editor_viewport() -> void:
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
-	var model = add_child_autofree(NovaObjectModel.new())
+	var model = add_child_autofree(ObjectModel.new())
 	model.set_object_data(data)
 	await get_tree().process_frame
 
@@ -480,7 +480,7 @@ func test_nova_object_model_builds_runtime_scene_without_editor_viewport() -> vo
 
 
 func test_object_preview_uses_internal_viewport_without_godot_lights() -> void:
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(BIRD_FIXTURE)), OK)
 	var preview = add_child_autofree(ObjectPreviewScript.new())
 	preview.set_object_data(data)
@@ -489,7 +489,7 @@ func test_object_preview_uses_internal_viewport_without_godot_lights() -> void:
 	assert_null(_find_node_by_type(preview, "DirectionalLight3D"), "Object preview should not use Godot directional lights.")
 	assert_null(_find_node_by_type(preview, "OmniLight3D"), "Object preview should not use Godot omni lights.")
 	assert_true(_find_node_by_type(preview, "MeshInstance3D") != null, "Object preview should build visible mesh instances.")
-	assert_not_null(preview.get_object_model(), "Object preview should delegate object rendering to NovaObjectModel.")
+	assert_not_null(preview.get_object_model(), "Object preview should delegate object rendering to ObjectModel.")
 	assert_not_null(_find_node_by_name(preview, "ObjectGrid"), "Object preview should include an authoring grid.")
 	assert_not_null(_find_node_by_name(preview, "ObjectAxisGizmo"), "Object preview should include an authoring axis gizmo.")
 	assert_null(_find_node_by_name(preview, "ObjectEnvironmentButton"), "Object preview should not duplicate the global environment button.")
@@ -499,7 +499,7 @@ func test_object_preview_uses_internal_viewport_without_godot_lights() -> void:
 
 
 func test_object_preview_ignores_rebinding_same_object_data() -> void:
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	var preview = add_child_autofree(ObjectPreviewScript.new())
 	preview.set_object_data(data)
@@ -519,7 +519,7 @@ func test_object_preview_ignores_rebinding_same_object_data() -> void:
 
 
 func test_object_preview_bounds_use_transformed_robj_meshes() -> void:
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	var preview = add_child_autofree(ObjectPreviewScript.new())
 	preview.set_object_data(data)
@@ -548,7 +548,7 @@ func test_object_preview_bounds_use_transformed_robj_meshes() -> void:
 
 
 func test_object_preview_applies_diffuse_material_textures() -> void:
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	var preview = add_child_autofree(ObjectPreviewScript.new())
 	preview.set_object_data(data)
@@ -577,7 +577,7 @@ func test_object_preview_applies_diffuse_material_textures() -> void:
 
 
 func test_object_preview_applies_environment_lighting_and_fog_uniforms() -> void:
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	var env := EnvFile.new()
 	env.set_source_path(ProjectSettings.globalize_path(FULL_00_ENV))
@@ -627,7 +627,7 @@ func test_object_workspace_viewport_uses_global_environment_button_only() -> voi
 
 
 func test_object_data_builds_each_lod_with_consistent_mesh_arrays() -> void:
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	var lod_count := int(data.get_summary().get("lod_count", 0))
 	assert_gt(lod_count, 0, "Fixture should expose render LODs.")
@@ -644,7 +644,7 @@ func test_object_data_builds_each_lod_with_consistent_mesh_arrays() -> void:
 
 
 func test_object_data_exposes_renderer_runtime_inputs() -> void:
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 
 	assert_gt(data.get_material_count(), 0, "Renderer runtime APIs need material access.")
@@ -686,15 +686,15 @@ func test_object_data_exposes_renderer_runtime_inputs() -> void:
 
 
 func test_global_control_register_catalog_and_local_rename_surface() -> void:
-	var catalog: Array = NovaObjectData.get_global_control_register_catalog()
+	var catalog: Array = ObjectData.get_global_control_register_catalog()
 	assert_eq(catalog.size(), 96)
 	assert_eq(catalog[0], {"ordinal": 0, "name": "LOD_FRAC"})
 	assert_eq(catalog[95], {"ordinal": 95, "name": "TEX_CAMO3"})
-	assert_eq(NovaObjectData.canonical_control_register_name("eWeAp_GuNyAw"),
+	assert_eq(ObjectData.canonical_control_register_name("eWeAp_GuNyAw"),
 			"EWEAP_GUNYAW")
-	assert_eq(NovaObjectData.canonical_control_register_name("not_retail"), "")
+	assert_eq(ObjectData.canonical_control_register_name("not_retail"), "")
 
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	assert_true(data.set_control_register_name(0, "VEHICLE_SPECIAL1"))
 	var registers: Array = data.get_control_registers()
@@ -726,7 +726,7 @@ func test_global_control_register_catalog_and_local_rename_surface() -> void:
 
 
 func test_object_light_control_register_colors_resolve_local_slot_name() -> void:
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	assert_gt(data.get_light_count(), 0, "Fixture should expose a light for runtime evaluation.")
 	var registers: Array = data.get_control_registers()
@@ -770,7 +770,7 @@ func test_object_light_control_register_colors_resolve_local_slot_name() -> void
 
 
 func test_object_preview_runtime_controls_update_state() -> void:
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 	var preview = add_child_autofree(ObjectPreviewScript.new())
 	preview.set_object_data(data)
@@ -881,7 +881,7 @@ func test_object_preview_inspector_aliases_unknown_and_empty_ctrl_names_like_ret
 
 
 func test_object_preview_shows_labeled_userpoints_by_default() -> void:
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(HOUSE_3DI3_FIXTURE)), OK)
 	assert_gt(data.get_user_point_count(), 0, "House fixture should carry userpoints.")
 	var preview = add_child_autofree(ObjectPreviewScript.new())
@@ -973,7 +973,7 @@ func test_object_workspace_new_creates_empty_saveable_project() -> void:
 
 	assert_eq(workspace.new_current(), OK)
 
-	var object_data: NovaObjectData = workspace.object_editor.object_data
+	var object_data: ObjectData = workspace.object_editor.object_data
 	assert_not_null(object_data)
 	assert_true(object_data.has_document(), "New Object should create a document immediately.")
 	assert_eq(object_data.get_source_kind(), "empty", "A new Object document should start as an empty project.")
@@ -1013,7 +1013,7 @@ func test_object_workspace_new_adds_lod_scene_and_exports_project() -> void:
 
 	assert_eq(workspace.add_lod_scene(ProjectSettings.globalize_path(BIRD_ASE_FIXTURE)), OK)
 
-	var object_data: NovaObjectData = workspace.object_editor.object_data
+	var object_data: ObjectData = workspace.object_editor.object_data
 	assert_eq(object_data.get_source_kind(), "3dp", "Adding a LOD scene should turn an empty object into a project-backed object.")
 	assert_eq(object_data.get_object_name(), "Bird1", "The first added LOD scene should name a new object project.")
 	assert_true(workspace.can_export(), "A new project with a LOD scene should export 3DI.")
@@ -1034,7 +1034,7 @@ func test_object_workspace_export_mask_controls_follow_oed_dirty_mask() -> void:
 	var workspace = ObjectWorkspaceScript.new()
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(US01_PROJECT_FIXTURE)), OK)
-	var data: NovaObjectData = workspace.object_editor.object_data
+	var data: ObjectData = workspace.object_editor.object_data
 	assert_eq(data.set_material_shader(0, "FF_ST_OP"), OK)
 
 	var mount = add_child_autofree(Control.new())
@@ -1079,7 +1079,7 @@ func test_object_lods_inspector_edits_scene_and_project_settings() -> void:
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.new_current(), OK)
 	assert_eq(workspace.add_lod_scene(ProjectSettings.globalize_path(BIRD_ASE_FIXTURE)), OK)
-	var data: NovaObjectData = workspace.object_editor.object_data
+	var data: ObjectData = workspace.object_editor.object_data
 	assert_true(data.set_lod_field(0, "threshold", 12.5))
 	assert_true(data.set_project_field("poly_collision_lod", 3))
 	workspace.object_editor.mark_clean()
@@ -1119,7 +1119,7 @@ func test_object_part_anims_use_left_list_and_right_detail_dock() -> void:
 	var workspace = ObjectWorkspaceScript.new()
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
-	var data: NovaObjectData = workspace.object_editor.object_data
+	var data: ObjectData = workspace.object_editor.object_data
 	assert_gt(data.get_part_anim_count(0), 0, "Fixture should expose part animations.")
 	workspace.object_editor.mark_clean()
 	var list_mount = add_child_autofree(Control.new())
@@ -1183,7 +1183,7 @@ func test_object_part_anims_use_left_list_and_right_detail_dock() -> void:
 
 	var export_dir := _output_dir().path_join("part_anim_export")
 	assert_eq(workspace.begin_export(export_dir, 0), OK)
-	var reopened := NovaObjectData.new()
+	var reopened := ObjectData.new()
 	assert_eq(reopened.open_file(export_dir.path_join("Armry01.3di")), OK)
 	var reopened_info: Dictionary = reopened.get_part_anim_editor_entries(0)[0]
 	assert_eq(int(reopened_info.get("target_part", -1)), target_id)
@@ -1194,7 +1194,7 @@ func test_object_part_anims_left_actions_add_duplicate_and_delete_entries() -> v
 	var workspace = ObjectWorkspaceScript.new()
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
-	var data: NovaObjectData = workspace.object_editor.object_data
+	var data: ObjectData = workspace.object_editor.object_data
 	assert_gt(data.get_part_anim_count(0), 0, "Fixture should expose part animations.")
 	workspace.object_editor.mark_clean()
 	var list_mount = add_child_autofree(Control.new())
@@ -1392,7 +1392,7 @@ func test_object_part_anim_target_dropdown_preserves_preview_binding() -> void:
 	var workspace = ObjectWorkspaceScript.new()
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
-	var data: NovaObjectData = workspace.object_editor.object_data
+	var data: ObjectData = workspace.object_editor.object_data
 	assert_gt(data.get_part_anim_count(0), 0, "Fixture should expose part animations.")
 	var lod_info: Dictionary = data.get_render_lod_info(0)
 	var part_count := int(lod_info.get("part_count", lod_info.get("render_object_count", 0)))
@@ -1449,7 +1449,7 @@ func test_object_lights_inspector_populates_edits_and_exports() -> void:
 	var workspace = ObjectWorkspaceScript.new()
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
-	var data: NovaObjectData = workspace.object_editor.object_data
+	var data: ObjectData = workspace.object_editor.object_data
 	assert_gt(data.get_light_count(), 0, "Fixture should expose object lights.")
 	workspace.object_editor.mark_clean()
 	var list_mount = add_child_autofree(Control.new())
@@ -1509,7 +1509,7 @@ func test_object_lights_inspector_populates_edits_and_exports() -> void:
 
 	var export_dir := _output_dir().path_join("light_export")
 	assert_eq(workspace.begin_export(export_dir, 0), OK)
-	var reopened := NovaObjectData.new()
+	var reopened := ObjectData.new()
 	assert_eq(reopened.open_file(export_dir.path_join("Armry01.3di")), OK)
 	var reopened_info: Dictionary = reopened.get_light_info(0)
 	assert_true((reopened_info.get("color_start", Color.WHITE) as Color).is_equal_approx(next_color))
@@ -1526,7 +1526,7 @@ func test_object_light_style_dropdown_names_every_style() -> void:
 	var workspace = ObjectWorkspaceScript.new()
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
-	var data: NovaObjectData = workspace.object_editor.object_data
+	var data: ObjectData = workspace.object_editor.object_data
 	var light_count := data.get_light_count()
 	assert_gt(light_count, 0, "Fixture should expose object lights.")
 	var list_mount = add_child_autofree(Control.new())
@@ -1600,7 +1600,7 @@ func test_object_lights_inspector_uses_positive_oed_toggles() -> void:
 	var workspace = ObjectWorkspaceScript.new()
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
-	var data: NovaObjectData = workspace.object_editor.object_data
+	var data: ObjectData = workspace.object_editor.object_data
 	workspace.object_editor.mark_clean()
 	var list_mount = add_child_autofree(Control.new())
 	var detail_mount = add_child_autofree(Control.new())
@@ -2049,7 +2049,7 @@ func test_object_part_anim_detail_dock_edits_semantic_channels() -> void:
 	var workspace = ObjectWorkspaceScript.new()
 	workspace.set_editor_shell(self)
 	assert_eq(workspace.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
-	var data: NovaObjectData = workspace.object_editor.object_data
+	var data: ObjectData = workspace.object_editor.object_data
 	assert_gt(data.get_part_anim_count(0), 0, "Fixture should expose part animations.")
 	workspace.object_editor.mark_clean()
 	var list_mount = add_child_autofree(Control.new())
@@ -2290,7 +2290,7 @@ func _normal_alignment_counts(vertices: PackedVector3Array, normals: PackedVecto
 	}
 
 
-func _first_material_texture(data: NovaObjectData) -> Dictionary:
+func _first_material_texture(data: ObjectData) -> Dictionary:
 	for material in data.get_materials():
 		var textures: Array = material.get("textures", [])
 		var material_index := int(material.get("index", -1))
@@ -2318,26 +2318,26 @@ func _texture_name_for_slot(material: Dictionary, slot: int) -> String:
 	return String(texture.get("name", ""))
 
 
-func _open_us01_project_data() -> NovaObjectData:
-	var data := NovaObjectData.new()
+func _open_us01_project_data() -> ObjectData:
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(US01_PROJECT_FIXTURE)), OK)
 	return data
 
 
-func _oed_dirty_mask(data: NovaObjectData) -> int:
+func _oed_dirty_mask(data: ObjectData) -> int:
 	if data == null or not data.has_method("get_oed_dirty_mask"):
 		return -1
 	return int(data.call("get_oed_dirty_mask"))
 
 
-func _object_render_signature(data: NovaObjectData) -> Dictionary:
+func _object_render_signature(data: ObjectData) -> Dictionary:
 	return {
 		"materials": _material_signature(data),
 		"surfaces": _surface_signature(data),
 	}
 
 
-func _material_signature(data: NovaObjectData) -> Array:
+func _material_signature(data: ObjectData) -> Array:
 	var result := []
 	for material in data.get_materials():
 		var entry: Dictionary = material
@@ -2365,7 +2365,7 @@ func _texture_slot_signature(material: Dictionary) -> Array:
 	return result
 
 
-func _surface_signature(data: NovaObjectData) -> Array:
+func _surface_signature(data: ObjectData) -> Array:
 	var result := []
 	for surface in data.get_lod_surfaces(0):
 		var entry: Dictionary = surface
@@ -2516,7 +2516,7 @@ func test_inspector_box_disables_horizontal_scroll() -> void:
 # --- B3: native edit-state snapshots ------------------------------------------
 
 func test_edit_state_snapshot_byte_roundtrip() -> void:
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert_eq(data.open_file(ProjectSettings.globalize_path(BIRD_FIXTURE)), OK)
 	var baseline: PackedByteArray = data.snapshot_edit_state()
 	assert_gt(baseline.size(), 0, "A loaded document snapshots to a non-empty blob.")
@@ -2541,9 +2541,9 @@ func test_edit_state_snapshot_byte_roundtrip() -> void:
 
 
 func test_edit_state_rejects_mismatched_geometry() -> void:
-	var bird := NovaObjectData.new()
+	var bird := ObjectData.new()
 	assert_eq(bird.open_file(ProjectSettings.globalize_path(BIRD_FIXTURE)), OK)
-	var armry := NovaObjectData.new()
+	var armry := ObjectData.new()
 	assert_eq(armry.open_file(ProjectSettings.globalize_path(ARMRY_FIXTURE)), OK)
 
 	var bird_snapshot: PackedByteArray = bird.snapshot_edit_state()
@@ -2557,7 +2557,7 @@ func test_edit_state_rejects_mismatched_geometry() -> void:
 
 
 func test_edit_state_without_document_is_inert() -> void:
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	assert_eq(data.snapshot_edit_state().size(), 0,
 		"No document -> empty snapshot (the undo session stays inert).")
 	assert_eq(data.apply_edit_state(PackedByteArray()), ERR_UNCONFIGURED,

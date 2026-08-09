@@ -47,7 +47,7 @@ func _run() -> void:
 		push_error("env_visual_baseline_probe: load_failed: " + reason))
 	# JOX is a loose extract: mount it editor-style (set_root_dir) and inject,
 	# since the runtime mount path expects the retail PFF name table (D-VFS-2).
-	var loose_root := NovaResourceRoot.new()
+	var loose_root := ResourceRoot.new()
 	loose_root.set_root_dir(resource_dir)
 	world.set_resource_root(loose_root)
 	var load_err: int = world.load_world(resource_dir)
@@ -66,9 +66,9 @@ func _run() -> void:
 	var data = null
 	for _i in range(900):
 		await process_frame
-		env = world.get_node_or_null("NovaEnvironment")
-		water = world.get_node_or_null("NovaWater")
-		weather = world.get_node_or_null("NovaWeather")
+		env = world.get_node_or_null("MissionEnvironment")
+		water = world.get_node_or_null("Water")
+		weather = world.get_node_or_null("Weather")
 		data = world.get_terrain_data() if world.has_method("get_terrain_data") else null
 		if data != null and data.is_loaded() and env != null and env.has_method("is_loaded") and env.is_loaded():
 			break
@@ -90,7 +90,7 @@ func _run() -> void:
 	if water != null:
 		water_height = float(water.get("water_height"))
 
-	var celestial = world.get_node_or_null("NovaCelestial")
+	var celestial = world.get_node_or_null("Celestial")
 	var shots: Array[Dictionary] = []
 
 	for tod in TOD_GRID:

@@ -6,7 +6,7 @@ extends GutTest
 # that aborted enrichment in the first field dump (a mistyped assumption must
 # degrade, never lose the pick). Plus the _jsonable conversion rules.
 
-const Writer := preload("res://adapter/debug/debug_snapshot_writer.gd")
+const Writer := preload("res://src/debug/debug_snapshot_writer.gd")
 
 
 class RichCardSim:
@@ -74,10 +74,10 @@ class RichCardRuntime:
 		return "Training: Grenade Launcher"
 
 
-func _ctx_with_runtime() -> NovaDebugContext:
+func _ctx_with_runtime() -> DebugContext:
 	var runtime := RichCardRuntime.new()
 	add_child_autofree(runtime)
-	var ctx := NovaDebugContext.new()
+	var ctx := DebugContext.new()
 	ctx.runtime_source = func(): return runtime
 	return ctx
 

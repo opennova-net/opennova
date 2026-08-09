@@ -1,7 +1,7 @@
 class_name SnapshotEditSession
 extends RefCounted
 
-## Whole-document undo/redo over the engine's shared core (NovaEditHistory
+## Whole-document undo/redo over the engine's shared core (EditHistory
 ## boxing engine/base/oned_edit), shared by the Node documents (EditorDocument) and
 ## the RefCounted resource documents (EditorResourceDocument). The document
 ## provides `_snapshot()` (null = not opted in / nothing loaded; every method
@@ -15,7 +15,7 @@ extends RefCounted
 
 var _document_ref: WeakRef
 var _limit: int = 100
-var _history: NovaEditHistory = null
+var _history: EditHistory = null
 # Mirrors the native session's begin/commit state so shadow-step recorders
 # (B4's object funnel) can tell "a coalescing burst is open" without a native
 # query.
@@ -31,9 +31,9 @@ func _document() -> Object:
 	return _document_ref.get_ref() if _document_ref != null else null
 
 
-func _ensure_history() -> NovaEditHistory:
+func _ensure_history() -> EditHistory:
 	if _history == null:
-		_history = NovaEditHistory.new()
+		_history = EditHistory.new()
 		_history.set_limit(_limit)
 	return _history
 

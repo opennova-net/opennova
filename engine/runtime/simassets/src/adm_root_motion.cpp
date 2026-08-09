@@ -32,7 +32,7 @@ int AdmRootMotion::parse_adm(const opennova::ResourceIndex *index,
 	}
 	out.adm_name = adm_name;
 
-	// .bad basename resolution, as in NovaSkeletalAnim::load_from_resource_root.
+	// .bad basename resolution, as in SkeletalAnim::load_from_resource_root.
 	auto resolve_bad = [](const std::string &value) -> std::string {
 		if (!strutil::ends_with_icase(value, ".bad")) {
 			return value + ".bad";

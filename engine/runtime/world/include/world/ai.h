@@ -571,7 +571,7 @@ public:
     bool locomotion_enabled = true;
     int32_t loco_scale = 32768; // out_speed (AI units) * loco_scale = 16.16 world-units / tick
 
-    // Terrain grounding. When `terrain` is wired (NovaSimulation::set_terrain_height_field),
+    // Terrain grounding. When `terrain` is wired (Simulation::set_terrain_height_field),
     // apply_ground_clamp drives the entity's vertical (pos[2], engine Z = up) off the real
     // terrain sampler each tick so promoted entities hug the ground instead of floating. Null
     // (the default) leaves Z at the authored spawn value — the headless AI unit tests run

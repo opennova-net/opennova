@@ -1,16 +1,16 @@
 class_name FntRasterizer
 extends RefCounted
 
-# Rasterizes a TTF/OTF or system Font into a NovaFntResource (FntMaker-style).
+# Rasterizes a TTF/OTF or system Font into a FntResource (FntMaker-style).
 # Editor-only: uses the TextServer glyph cache, which renders glyph bitmaps when a
 # real text server is active (i.e. in the running editor, not headless dummy mode).
 # The deterministic shelf packing lives in engine/formats/fnt (fnt_pack_shelf) behind
-# NovaFntResource.pack_shelf; this script only rasterizes and blits.
+# FntResource.pack_shelf; this script only rasterizes and blits.
 
-# Format facts are aliases of the NovaFntResource binding (engine/formats/fnt) — ENG-4.
-const FIRST_CHAR := NovaFntResource.FIRST_CHAR
-const GLYPH_COUNT := NovaFntResource.GLYPH_COUNT
-const TEX := NovaFntResource.TEXTURE_WIDTH  # pages are square (== TEXTURE_HEIGHT)
+# Format facts are aliases of the FntResource binding (engine/formats/fnt) — ENG-4.
+const FIRST_CHAR := FntResource.FIRST_CHAR
+const GLYPH_COUNT := FntResource.GLYPH_COUNT
+const TEX := FntResource.TEXTURE_WIDTH  # pages are square (== TEXTURE_HEIGHT)
 
 const FLAG_BOLD := 1
 const FLAG_ITALIC := 2
@@ -18,8 +18,8 @@ const FLAG_OUTLINE := 4
 const FLAG_SHADOW := 8
 
 
-# Builds a fresh NovaFntResource from a font, or null on failure.
-static func rasterize(font: Font, px_size: int, flags: int) -> NovaFntResource:
+# Builds a fresh FntResource from a font, or null on failure.
+static func rasterize(font: Font, px_size: int, flags: int) -> FntResource:
 	if font == null or px_size <= 0:
 		return null
 	var ts := TextServerManager.get_primary_interface()
@@ -49,7 +49,7 @@ static func rasterize(font: Font, px_size: int, flags: int) -> NovaFntResource:
 		var c: Dictionary = cell
 		sizes.append(0 if c.is_empty() else int(c["w"]))
 		sizes.append(0 if c.is_empty() else int(c["h"]))
-	var rects := NovaFntResource.pack_shelf(sizes)
+	var rects := FntResource.pack_shelf(sizes)
 	if rects.is_empty():
 		return null
 	var page_count := 1
@@ -57,7 +57,7 @@ static func rasterize(font: Font, px_size: int, flags: int) -> NovaFntResource:
 		if rects[i * 5 + 3] > 0:
 			page_count = maxi(page_count, rects[i * 5] + 1)
 
-	var res := NovaFntResource.new()
+	var res := FntResource.new()
 	var shadow := -3 if (flags & FLAG_SHADOW) != 0 else 0
 	if res.create_blank(page_count, shadow) != OK:
 		return null

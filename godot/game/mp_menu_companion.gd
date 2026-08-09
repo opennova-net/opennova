@@ -2,7 +2,7 @@ class_name MpMenuCompanion
 extends MenuCompanion
 
 # Drives the multiplayer menu (mp.mnu) by control NAME for the LAN co-op path. It is a
-# companion the game-agnostic NovaMenuShell (nova_menu_shell.gd) delegates to: when the shell
+# companion the game-agnostic MenuShell (nova_menu_shell.gd) delegates to: when the shell
 # loads a menu the companion owns (the JO mp.mnu LAN browser + host-settings screens),
 # the shell hands the whole menu over here instead of running its generic
 # launch/mission wiring, so START_GAME on the host screen means "host a game" rather
@@ -16,7 +16,7 @@ extends MenuCompanion
 #
 # Scope this pass is CO-OP-MINIMAL: the host reads GAME_NAME, the selected missions, the
 # player cap, and forces COOP; the rest of the host-settings controls render but are not
-# read. LAN search/join call the production NovaLanSession discovery seam.
+# read. LAN search/join call the production LanSession discovery seam.
 
 # The mp.mnu screens this companion owns. The shell skips its generic start/mission
 # wiring on a menu containing these so START_GAME is not double-bound to a SP launch.
@@ -28,7 +28,7 @@ signal lan_join_requested(target: JoinTarget)
 # START_GAME on the host screen, with the co-op-minimal host request (see _read_host_config).
 signal lan_host_start_requested(config: HostSessionConfig)
 
-var _lan_session = null        # NovaLanSession; injected by MainGame
+var _lan_session = null        # LanSession; injected by MainGame
 var _servers: Array = []       # last LAN browse result; rows for LAN_GAME_LIST
 var _selected_server := -1
 var _browse_error := ""        # last LAN search failure, shown in the empty list
@@ -80,9 +80,9 @@ func _wire_lan_browser() -> void:
 	_connect_pressed("LAN_SEARCH", _on_lan_search)
 	_connect_pressed("LAN_JOINGAME", _on_lan_join)
 	var list := _find("LAN_GAME_LIST")
-	if list is NovaMnuList:
-		if not (list as NovaMnuList).item_activated.is_connected(_on_lan_list_activated):
-			(list as NovaMnuList).item_activated.connect(_on_lan_list_activated)
+	if list is MnuList:
+		if not (list as MnuList).item_activated.is_connected(_on_lan_list_activated):
+			(list as MnuList).item_activated.connect(_on_lan_list_activated)
 		_refresh_lan_list()
 
 
@@ -116,7 +116,7 @@ func _on_servers_changed(servers: Array) -> void:
 
 func _refresh_lan_list() -> void:
 	var list := _find("LAN_GAME_LIST")
-	if not (list is NovaMnuList):
+	if not (list is MnuList):
 		return
 	var rows := PackedStringArray()
 	for s in _servers:
@@ -125,7 +125,7 @@ func _refresh_lan_list() -> void:
 	# guard checks against _servers, which stays empty).
 	if rows.is_empty() and not _browse_error.is_empty():
 		rows.append("Search failed - %s" % _browse_error)
-	(list as NovaMnuList).set_items(rows)
+	(list as MnuList).set_items(rows)
 
 
 func _format_server_row(s: Dictionary) -> String:
@@ -158,8 +158,8 @@ func _on_lan_join() -> void:
 
 func _wire_host_settings() -> void:
 	var mission_list := _find("MISSION_LIST")
-	if mission_list is NovaMnuList:
-		_seed_mission_list(mission_list as NovaMnuList)
+	if mission_list is MnuList:
+		_seed_mission_list(mission_list as MnuList)
 	_connect_pressed("ADD_MISSIONS", _on_add_missions)
 	_connect_pressed("REMOVE_MISSIONS", _on_remove_missions)
 	_connect_pressed("START_GAME", _on_host_start)
@@ -167,32 +167,32 @@ func _wire_host_settings() -> void:
 
 # Fill MISSION_LIST with the resource dir's missions (the available pool). The selected
 # rotation is the SELECTED_MISSIONS table, maintained by ADD/REMOVE.
-func _seed_mission_list(list: NovaMnuList) -> void:
+func _seed_mission_list(list: MnuList) -> void:
 	list.set_items(MissionCatalog.mission_names(_root))
 
 
 func _on_add_missions() -> void:
 	var mission_list := _find("MISSION_LIST")
 	var table := _find("SELECTED_MISSIONS")
-	if not (mission_list is NovaMnuList) or not (table is NovaMnuTable):
+	if not (mission_list is MnuList) or not (table is MnuTable):
 		return
-	for idx in (mission_list as NovaMnuList).get_selected_items():
-		var name := (mission_list as NovaMnuList).get_item_text(idx)
-		if not _table_has_mission(table as NovaMnuTable, name):
+	for idx in (mission_list as MnuList).get_selected_items():
+		var name := (mission_list as MnuList).get_item_text(idx)
+		if not _table_has_mission(table as MnuTable, name):
 			# cols: Mission / Type / Switch (the Switch bitmap value, 0 = off).
-			(table as NovaMnuTable).add_row_values(PackedStringArray([name, "COOP", "0"]))
+			(table as MnuTable).add_row_values(PackedStringArray([name, "COOP", "0"]))
 
 
 func _on_remove_missions() -> void:
 	var table := _find("SELECTED_MISSIONS")
-	if not (table is NovaMnuTable):
+	if not (table is MnuTable):
 		return
 	# Remove high index first so lower indices stay valid as rows shift down.
-	var rows := Array((table as NovaMnuTable).get_selected_rows())
+	var rows := Array((table as MnuTable).get_selected_rows())
 	rows.sort()
 	rows.reverse()
 	for r in rows:
-		(table as NovaMnuTable).remove_row(int(r))
+		(table as MnuTable).remove_row(int(r))
 
 
 func _on_host_start() -> void:
@@ -235,9 +235,9 @@ func _is_dedicated() -> bool:
 func _selected_missions() -> Array[String]:
 	var table := _find("SELECTED_MISSIONS")
 	var out: Array[String] = []
-	if table is NovaMnuTable:
-		for r in range((table as NovaMnuTable).get_row_count()):
-			out.append((table as NovaMnuTable).get_cell_text(r, 0))
+	if table is MnuTable:
+		for r in range((table as MnuTable).get_row_count()):
+			out.append((table as MnuTable).get_cell_text(r, 0))
 	return out
 
 
@@ -248,7 +248,7 @@ func _on_widget_value_changed(widget_name: String, kind: String, index: int, _va
 		_selected_server = index
 
 
-func _table_has_mission(table: NovaMnuTable, name: String) -> bool:
+func _table_has_mission(table: MnuTable, name: String) -> bool:
 	for r in range(table.get_row_count()):
 		if table.get_cell_text(r, 0) == name:
 			return true
@@ -259,6 +259,6 @@ func _table_has_mission(table: NovaMnuTable, name: String) -> bool:
 # original reads), not its localized display label. Used to map SERVERTYPE/GAME_TYPE to behavior.
 func _spin_attr(name: String, default_value: String) -> String:
 	var node := _find(name)
-	if node != null and node.has_method("get_value_attr"):  # NovaMnuSpinList
+	if node != null and node.has_method("get_value_attr"):  # MnuSpinList
 		return String(node.get_value_attr())
 	return default_value

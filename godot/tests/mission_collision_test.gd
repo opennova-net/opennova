@@ -7,14 +7,14 @@ extends GutTest
 # hull to the AABB fallback). Uses the real 3di fixtures; the def fixtures ship no
 # .3di, so the placer's asset-free tests live elsewhere.
 
-const CollisionHull := preload("res://adapter/object/collision_hull.gd")
-const Placer := preload("res://adapter/mission/mission_object_placer.gd")
+const CollisionHull := preload("res://src/object/collision_hull.gd")
+const Placer := preload("res://src/mission/mission_object_placer.gd")
 
 const FIXTURE_DIR := "res://../fixtures/threedi/3di3"
 
 
-func _model(name: String) -> NovaObjectData:
-	var data := NovaObjectData.new()
+func _model(name: String) -> ObjectData:
+	var data := ObjectData.new()
 	var path := ProjectSettings.globalize_path("%s/%s.3di" % [FIXTURE_DIR, name])
 	assert_eq(data.open_file(path), OK, "%s.3di loads" % name)
 	return data
@@ -33,7 +33,7 @@ func _hull_union_aabb(volumes: Array) -> AABB:
 	return aabb
 
 
-func _visual_aabb(data: NovaObjectData) -> AABB:
+func _visual_aabb(data: ObjectData) -> AABB:
 	var aabb := AABB()
 	var first := true
 	for s in data.build_lod_submeshes(0):
@@ -123,7 +123,7 @@ func test_skinned_person_reports_face_and_sphere_collision_without_volumes() -> 
 func test_placer_collision_shapes_for_loads_and_caches() -> void:
 	# Integration: the placer resolves a model through a resource root and builds its
 	# pick shapes (the same shapes the controller attaches to bodies), cached per graphic.
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	root.set_root_dir(ProjectSettings.globalize_path(FIXTURE_DIR))
 	var placer := Placer.new(root, null)
 	var shapes: Array = placer.collision_shapes_for("Shed")

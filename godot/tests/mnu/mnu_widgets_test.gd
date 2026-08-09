@@ -3,21 +3,21 @@ extends GutTest
 # M9 gate (text + marker widgets): the formerly-placeholder MNU widget types build
 # as real, runtime-interactive Godot controls. This suite covers M9.1: Edit,
 # MultilineEdit, and the invisible Goto marker, plus the shared edit_mode-inert gate
-# and the aggregate NovaMnuMenu.widget_value_changed relay. List/Multi/SpinList,
+# and the aggregate MnuMenu.widget_value_changed relay. List/Multi/SpinList,
 # Combo/Scroll/Table and the special views are covered in their own files.
 
 const FIXTURE := "res://../fixtures/mnu/all_widgets.mnu"
 const STYLE_FIXTURE := "res://../fixtures/mns/menu_style.mns"
 
 
-func _load_doc() -> NovaMnuDocument:
-	var doc := NovaMnuDocument.new()
+func _load_doc() -> MnuDocument:
+	var doc := MnuDocument.new()
 	doc.load_from_bytes(FileAccess.get_file_as_bytes(FIXTURE))
 	return doc
 
 
-func _build_menu(edit_mode: bool = false) -> NovaMnuMenu:
-	var menu := NovaMnuMenu.new()
+func _build_menu(edit_mode: bool = false) -> MnuMenu:
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)  # in-tree so built widgets _ready (wire/inert) correctly
 	menu.set_edit_mode(edit_mode)
@@ -31,8 +31,8 @@ func test_edit_builds_and_seeds_text() -> void:
 	var menu := _build_menu()
 	var edit := menu.find_child("NameEdit", true, false)
 	assert_not_null(edit, "NameEdit built")
-	assert_true(edit is NovaMnuEdit, "edit becomes a NovaMnuEdit")
-	assert_true(edit is LineEdit, "NovaMnuEdit is a LineEdit")
+	assert_true(edit is MnuEdit, "edit becomes a MnuEdit")
+	assert_true(edit is LineEdit, "MnuEdit is a LineEdit")
 	assert_eq((edit as LineEdit).text, "Player", "STRING text seeded into the field")
 	assert_true((edit as LineEdit).editable, "editable at runtime")
 	assert_eq(edit.get_hotkey(), "", "no hotkey on this field")
@@ -43,8 +43,8 @@ func test_edit_builds_and_seeds_text() -> void:
 func test_multiline_readonly_flag() -> void:
 	var menu := _build_menu()
 	var notes := menu.find_child("Notes", true, false)
-	assert_true(notes is NovaMnuMultilineEdit, "multiline_edit becomes a NovaMnuMultilineEdit")
-	assert_true(notes is TextEdit, "NovaMnuMultilineEdit is a TextEdit")
+	assert_true(notes is MnuMultilineEdit, "multiline_edit becomes a MnuMultilineEdit")
+	assert_true(notes is TextEdit, "MnuMultilineEdit is a TextEdit")
 	assert_eq((notes as TextEdit).text, "First line", "STRING text seeded")
 	assert_true(notes.get_readonly(), "READONLY flag parsed -> not editable")
 	assert_false((notes as TextEdit).editable, "readonly maps to editable=false")
@@ -57,7 +57,7 @@ func test_multiline_readonly_flag() -> void:
 func test_goto_is_invisible_marker() -> void:
 	var menu := _build_menu()
 	var go := menu.find_child("QuickExit", true, false)
-	assert_true(go is NovaMnuGoto, "goto becomes a NovaMnuGoto")
+	assert_true(go is MnuGoto, "goto becomes a MnuGoto")
 	assert_false(go is TextureButton, "goto is not a button")
 	assert_eq(go.get_action_count(), 1, "carries its single ACTION")
 	assert_eq(go.get_hotkey(), "VK_ESCAPE", "hotkey stored")
@@ -118,8 +118,8 @@ func test_aggregate_value_signal_suppressed_in_edit_mode() -> void:
 func test_list_builds_and_seeds() -> void:
 	var menu := _build_menu()
 	var list := menu.find_child("MissionList", true, false)
-	assert_true(list is NovaMnuList, "list becomes a NovaMnuList")
-	assert_true(list is ItemList, "NovaMnuList is an ItemList")
+	assert_true(list is MnuList, "list becomes a MnuList")
+	assert_true(list is ItemList, "MnuList is an ItemList")
 	assert_eq((list as ItemList).select_mode, ItemList.SELECT_SINGLE, "single-select")
 	assert_eq((list as ItemList).item_count, 2, "two template ITEM rows seeded")
 	assert_eq((list as ItemList).get_item_text(0), "MM_Alpha", "first item (raw id, no RTXT set)")
@@ -156,14 +156,14 @@ func test_list_honors_authored_items_alignment() -> void:
 		"<POSITION><LEFT>10</LEFT><TOP>10</TOP><RIGHT>210</RIGHT><BOTTOM>110</BOTTOM></POSITION>" + \
 		"<ITEMS justify=\"RIGHT\" vjustify=\"TOP\"><ITEM>Authored</ITEM></ITEMS>" + \
 		"</WINDOW></WINDOW></SCREEN>"
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(mnu_text.to_utf8_buffer()), OK, "synthetic aligned list parses")
-	var menu := NovaMnuMenu.new()
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
 	menu.menu = doc
 	var list := menu.find_child("ALIGNED_LIST", true, false)
-	assert_true(list is NovaMnuList, "aligned list builds")
+	assert_true(list is MnuList, "aligned list builds")
 	assert_eq(list.get_item_horizontal_alignment(), HORIZONTAL_ALIGNMENT_RIGHT,
 		"ITEMS justify controls authored and runtime row text")
 	assert_eq(list.get_item_vertical_alignment(), VERTICAL_ALIGNMENT_TOP,
@@ -175,7 +175,7 @@ func test_list_honors_authored_items_alignment() -> void:
 func test_multi_builds_and_multiselect() -> void:
 	var menu := _build_menu()
 	var multi := menu.find_child("MapPicker", true, false)
-	assert_true(multi is NovaMnuMulti, "multi becomes a NovaMnuMulti")
+	assert_true(multi is MnuMulti, "multi becomes a MnuMulti")
 	assert_eq((multi as ItemList).select_mode, ItemList.SELECT_MULTI, "multi-select mode")
 	assert_eq((multi as ItemList).item_count, 3, "three items seeded")
 
@@ -197,14 +197,14 @@ func test_multi_honors_authored_items_alignment() -> void:
 		"<POSITION><LEFT>10</LEFT><TOP>10</TOP><RIGHT>210</RIGHT><BOTTOM>110</BOTTOM></POSITION>" + \
 		"<ITEMS justify=\"CENTER\" vjustify=\"BOTTOM\"><ITEM>Authored</ITEM></ITEMS>" + \
 		"</WINDOW></WINDOW></SCREEN>"
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(mnu_text.to_utf8_buffer()), OK, "synthetic aligned multi parses")
-	var menu := NovaMnuMenu.new()
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
 	menu.menu = doc
 	var multi := menu.find_child("ALIGNED_MULTI", true, false)
-	assert_true(multi is NovaMnuMulti, "aligned multi builds")
+	assert_true(multi is MnuMulti, "aligned multi builds")
 	assert_eq(multi.get_item_horizontal_alignment(), HORIZONTAL_ALIGNMENT_CENTER,
 		"ITEMS justify controls all multi-select row text")
 	assert_eq(multi.get_item_vertical_alignment(), VERTICAL_ALIGNMENT_BOTTOM,
@@ -221,7 +221,7 @@ func test_edit_mode_text_families_render_authored_foreground() -> void:
 			FileAccess.get_file_as_bytes(STYLE_FIXTURE)), OK)
 	stylesheet.set_variable("DEF_TEXT_FG", "FFFF00FF") # opaque magenta, AARRGGBB
 
-	var menu := NovaMnuMenu.new()
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
 	menu.set_edit_mode(true)
@@ -230,8 +230,8 @@ func test_edit_mode_text_families_render_authored_foreground() -> void:
 	var expected := Color(1, 0, 1, 1)
 	var edit := menu.find_child("NameEdit", true, false) as LineEdit
 	var notes := menu.find_child("Notes", true, false) as TextEdit
-	var list := menu.find_child("MissionList", true, false) as NovaMnuList
-	var multi := menu.find_child("MapPicker", true, false) as NovaMnuMulti
+	var list := menu.find_child("MissionList", true, false) as MnuList
+	var multi := menu.find_child("MapPicker", true, false) as MnuMulti
 	assert_eq(edit.get_theme_color("font_uneditable_color"), expected,
 			"Edit keeps DEFAULT_FG when authoring makes it uneditable")
 	assert_eq(notes.get_theme_color("font_readonly_color"), expected,
@@ -255,13 +255,13 @@ func test_list_text_colors_honor_authored_font_states() -> void:
 <WINDOW type="multiline_edit" name="NOTES"><POSITION><LEFT>0</LEFT><TOP>140</TOP>
 <RIGHT>200</RIGHT><BOTTOM>200</BOTTOM></POSITION></WINDOW>
 </WINDOW></SCREEN>"""
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(source.to_utf8_buffer()), OK)
-	var menu := NovaMnuMenu.new()
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
 	menu.menu = doc
-	var list := menu.find_child("COLORS", true, false) as NovaMnuList
+	var list := menu.find_child("COLORS", true, false) as MnuList
 	assert_eq(list.get_item_text_color(0), Color8(0, 255, 0),
 			"default row text uses DEFAULT_FG")
 	assert_eq(list.get_item_text_color(0, true), Color8(255, 0, 0),
@@ -290,8 +290,8 @@ func test_list_text_colors_honor_authored_font_states() -> void:
 	assert_eq(list.get_item_text_color(0), Color8(0, 255, 0),
 			"runtime WINDOW ENABLE restores the list's normal foreground")
 
-	var field := menu.find_child("FIELD", true, false) as NovaMnuEdit
-	var notes := menu.find_child("NOTES", true, false) as NovaMnuMultilineEdit
+	var field := menu.find_child("FIELD", true, false) as MnuEdit
+	var notes := menu.find_child("NOTES", true, false) as MnuMultilineEdit
 	assert_true(menu.handle_window_action("FIELD", "DISABLE"))
 	assert_true(menu.handle_window_action("NOTES", "DISABLE"))
 	assert_eq(field.get_theme_color("font_uneditable_color"), Color8(255, 255, 0),
@@ -311,15 +311,15 @@ func test_list_text_colors_honor_authored_font_states() -> void:
 func test_spinlist_structure_and_values() -> void:
 	var menu := _build_menu()
 	var spin := menu.find_child("Difficulty", true, false)
-	assert_true(spin is NovaMnuSpinList, "spinlist becomes a NovaMnuSpinList")
-	assert_true(spin is Control, "NovaMnuSpinList is a Control")
+	assert_true(spin is MnuSpinList, "spinlist becomes a MnuSpinList")
+	assert_true(spin is Control, "MnuSpinList is a Control")
 	assert_eq(spin.get_value_count(), 3, "three values seeded from ITEMS")
 	assert_eq(spin.get_value(), "OPTION_LOW", "starts on first value")
 	assert_not_null(spin.find_child("Value", true, false), "has a Value cell mount")
 	var up := spin.find_child("SpinUp", true, false)
 	var down := spin.find_child("SpinDown", true, false)
-	assert_true(up is NovaMnuButton, "SpinUp built from SPINUP art")
-	assert_true(down is NovaMnuButton, "SpinDown built from SPINDOWN art")
+	assert_true(up is MnuButton, "SpinUp built from SPINUP art")
+	assert_true(down is MnuButton, "SpinDown built from SPINDOWN art")
 
 
 func test_spinlist_cycle_wraps_and_emits() -> void:
@@ -352,14 +352,14 @@ func test_spinlist_color_items_render_swatches() -> void:
 		"<ITEMS><ITEM type=\"color\" value=\"16711680\">FF0000</ITEM>" + \
 		"<ITEM type=\"color\" value=\"65280\">00FF00</ITEM></ITEMS>" + \
 		"</WINDOW></WINDOW></SCREEN>"
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(mnu_text.to_utf8_buffer()), OK, "synthetic color spinlist parses")
-	var menu := NovaMnuMenu.new()
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
 	menu.menu = doc
 	var spin := menu.find_child("COLOR", true, false)
-	assert_true(spin is NovaMnuSpinList, "color spinlist builds")
+	assert_true(spin is MnuSpinList, "color spinlist builds")
 	var swatch := spin.find_child("CellSwatch", true, false) as ColorRect
 	assert_not_null(swatch, "color item renders a CellSwatch")
 	if swatch == null:
@@ -384,14 +384,14 @@ func test_spinlist_get_value_attr_returns_value_not_label() -> void:
 		"<ITEMS><ITEM type=\"id\" value=\"0\">HG_SERVEPLAY</ITEM>" + \
 		"<ITEM type=\"id\" value=\"1\">HG_SERVEONLY</ITEM></ITEMS>" + \
 		"</WINDOW></WINDOW></SCREEN>"
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(mnu_text.to_utf8_buffer()), OK, "synthetic SERVERTYPE spinlist parses")
-	var menu := NovaMnuMenu.new()
+	var menu := MnuMenu.new()
 	menu.build_on_ready = false
 	add_child_autofree(menu)
 	menu.menu = doc
 	var spin := menu.find_child("SERVERTYPE", true, false)
-	assert_true(spin is NovaMnuSpinList, "spinlist builds")
+	assert_true(spin is MnuSpinList, "spinlist builds")
 	# get_value() is the display text; get_value_attr() is the `value=` attribute.
 	assert_eq(spin.get_value(), "HG_SERVEPLAY", "get_value() starts on the first item's display text")
 	assert_eq(spin.get_value_attr(), "0", "get_value_attr() returns the first item's value (serve-and-play)")

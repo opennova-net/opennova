@@ -1,7 +1,7 @@
 class_name MnuCanvas
 extends Control
 
-# WYSIWYG edit surface for the Menus workspace. Owns a live NovaMnuMenu in
+# WYSIWYG edit surface for the Menus workspace. Owns a live MnuMenu in
 # edit_mode (inert: no navigation, audio, or cursor side effects) scaled to the
 # fixed 800x600 design space all Joint Operations (JO) and newer menus are authored
 # in. The fit is anamorphic (independent X/Y factors, no letterbox bars), matching
@@ -59,13 +59,13 @@ signal rect_committed(id: int, local_rect: Rect2)
 signal selection_set(ids: PackedInt32Array)
 signal rect_committed_batch(edits: Array)
 
-var _preview: NovaMnuMenu
-var _document: NovaMnuDocument
-var _resource_root: NovaResourceRoot
+var _preview: MnuMenu
+var _document: MnuDocument
+var _resource_root: ResourceRoot
 var _text_resource: RtxtStringFile
 var _stylesheet: MnsStyleSheet
 # The document's own .mnu basename (shipped self-file screen actions compare
-# against it; see NovaMnuMenu.set_menu_file).
+# against it; see MnuMenu.set_menu_file).
 var _menu_file := ""
 
 # The fixed 800x600 design space all JO+ menus author in (the engine scales it to
@@ -162,7 +162,7 @@ func _ready() -> void:
 # absent the builder degrades to placeholder visuals (M3 behavior). menu_file is
 # the document's own .mnu basename (refreshed on every rebind; a Save As while
 # the preview plays keeps the old name until the next rebind).
-func set_menu(doc: NovaMnuDocument, resource_root: NovaResourceRoot, text_resource: RtxtStringFile, stylesheet: MnsStyleSheet = null, menu_file := "") -> void:
+func set_menu(doc: MnuDocument, resource_root: ResourceRoot, text_resource: RtxtStringFile, stylesheet: MnsStyleSheet = null, menu_file := "") -> void:
 	_document = doc
 	_resource_root = resource_root
 	_text_resource = text_resource
@@ -171,7 +171,7 @@ func set_menu(doc: NovaMnuDocument, resource_root: NovaResourceRoot, text_resour
 	if doc != null:
 		# Re-seed the visible screen when it is empty OR a stale name the new
 		# document lacks, so a document swap never leaves every screen hidden
-		# (mirrors NovaMnuMenu::build resetting current_screen_).
+		# (mirrors MnuMenu::build resetting current_screen_).
 		var ids := doc.get_screen_ids()
 		if not _doc_has_screen(doc, _visible_screen_name):
 			_visible_screen_name = doc.get_screen_name(ids[0]) if ids.size() > 0 else ""
@@ -202,8 +202,8 @@ func get_preview_widget_state(id: int) -> MnuPreviewWidgetState:
 		return state
 	state.exists = true
 	state.visible = control.is_visible_in_tree()
-	state.pressable = control is BaseButton or control is NovaMnuEdit \
-		or control is NovaMnuGoto
+	state.pressable = control is BaseButton or control is MnuEdit \
+		or control is MnuGoto
 	if control is BaseButton:
 		var button := control as BaseButton
 		state.disabled = button.disabled
@@ -226,10 +226,10 @@ func activate_preview_widget(id: int) -> MnuPreviewWidgetState:
 		if button.toggle_mode:
 			button.set_pressed(not button.button_pressed)
 		button.emit_signal(&"pressed")
-	elif control is NovaMnuEdit:
-		(control as NovaMnuEdit).trigger_hotkey()
-	elif control is NovaMnuGoto:
-		(control as NovaMnuGoto).trigger()
+	elif control is MnuEdit:
+		(control as MnuEdit).trigger_hotkey()
+	elif control is MnuGoto:
+		(control as MnuGoto).trigger()
 	state = get_preview_widget_state(id)
 	state.activated = true
 	return state
@@ -271,7 +271,7 @@ func _on_preview_screen_changed(screen_name: String) -> void:
 
 
 # True when the document has a screen with this (non-empty) name.
-func _doc_has_screen(doc: NovaMnuDocument, screen_name: String) -> bool:
+func _doc_has_screen(doc: MnuDocument, screen_name: String) -> bool:
 	if doc == null or screen_name.is_empty():
 		return false
 	for sid in doc.get_screen_ids():
@@ -319,7 +319,7 @@ func set_show_all_bounds(on: bool) -> void:
 func _ensure_preview() -> void:
 	if _preview != null:
 		return
-	_preview = NovaMnuMenu.new()
+	_preview = MnuMenu.new()
 	_preview.name = "Preview"
 	_preview.build_on_ready = false
 	_preview.set_edit_mode(true)
@@ -353,7 +353,7 @@ func _apply_screen_visibility() -> void:
 		if ids.size() > 0:
 			target = _document.get_screen_name(ids[0])
 	for child in _preview.get_children():
-		if child is NovaMnuScreen:
+		if child is MnuScreen:
 			child.visible = child.get_screen_name() == target
 
 
@@ -577,7 +577,7 @@ func _visible_widget_ids() -> PackedInt32Array:
 
 # Pre-order collect of every non-screen widget id under a subtree. Pure/static so it
 # is unit-testable like the snapping helpers.
-static func _walk_ids(doc: NovaMnuDocument, id: int, out: PackedInt32Array) -> void:
+static func _walk_ids(doc: MnuDocument, id: int, out: PackedInt32Array) -> void:
 	if doc == null or id < 0 or not doc.widget_exists(id):
 		return
 	if not doc.is_screen(id):
@@ -651,7 +651,7 @@ func _on_pick_menu_index_pressed(index: int) -> void:
 # Pure/static: one menu row per stacked id (same order as pick_stack_at: topmost
 # first), each with a caption-style label and its nesting depth (ancestor windows
 # below the screen) for an indent. Unit-testable like _walk_ids.
-static func _pick_menu_rows(doc: NovaMnuDocument, stack: PackedInt32Array) -> Array:
+static func _pick_menu_rows(doc: MnuDocument, stack: PackedInt32Array) -> Array:
 	var out := []
 	if doc == null:
 		return out
@@ -666,7 +666,7 @@ static func _pick_menu_rows(doc: NovaMnuDocument, stack: PackedInt32Array) -> Ar
 
 
 # Number of ancestor windows between id and its screen container (a root window = 0).
-static func _depth_below_screen(doc: NovaMnuDocument, id: int) -> int:
+static func _depth_below_screen(doc: MnuDocument, id: int) -> int:
 	var d := 0
 	var p := doc.get_parent_id(id)
 	while p > 0 and doc.widget_exists(p) and not doc.is_screen(p):

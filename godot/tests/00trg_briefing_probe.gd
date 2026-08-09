@@ -24,7 +24,7 @@ func _run() -> void:
 		_fail("set NOVA_RESOURCE_DIR to the retail JO directory")
 		return
 
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	var mount_err := int(root.mount_runtime(resource_dir, EXPANSION, false, "jo"))
 	if mount_err != OK:
 		_fail("resource mount failed (%d): %s" % [mount_err, root.get_last_error()])
@@ -37,7 +37,7 @@ func _run() -> void:
 		return
 	# Exercise the actual engine-facing native boundary as well as the independent
 	# oracle construction below. The portable burst regression pins its output.
-	var sim := NovaSimulation.new()
+	var sim := Simulation.new()
 	sim.set_mission_text_data(mission_text_bytes)
 	sim.free()
 

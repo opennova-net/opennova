@@ -1,7 +1,7 @@
 extends GutTest
 
 # =============================================================================
-# NovaWater surface pins (env #29, docs/env/env-tod-re.md "Water surface"):
+# Water surface pins (env #29, docs/env/env-tod-re.md "Water surface"):
 # the witnessed per-side material swap (camera-above -> the BLEND material,
 # underwater -> the OPAQUE one [orig: selection in render_water_surface
 # @ 0x5c33e6..0x5c34ea; Water_ShaderOpaque @ 0x28ee8c8]) and the retirement of
@@ -11,12 +11,12 @@ extends GutTest
 #
 # Fixture per env_parity_vectors_test.gd _collect_water_mesh: the strip march
 # is a function of VIEWPORT PIXELS, so it lives in a code-fixed SubViewport
-# (1024x600). NovaWater resolves its camera through its OWN viewport —
+# (1024x600). Water resolves its camera through its OWN viewport —
 # Camera3D.current applies per-viewport — so the camera is created inside the
 # SubViewport and made current there.
 # =============================================================================
 
-const NovaWaterScript = preload("res://adapter/environment/nova_water.gd")
+const NovaWaterScript = preload("res://src/environment/nova_water.gd")
 const WATER_SHADER := "res://shaders/water.gdshader"
 
 # The engine tick [docs/engine-primer.md: 62 Hz].
@@ -38,7 +38,7 @@ func _make_water_fixture(height: float = 7.0) -> Dictionary:
 
 
 func test_zero_height_disables_surface_mirror_and_world_split() -> void:
-	var cache := NovaObjectShaderCache.get_singleton()
+	var cache := ObjectShaderCache.get_singleton()
 	cache.clear_water_split_height()
 	var fixture := _make_water_fixture(0.0)
 	var water: Node = fixture["water"]
@@ -81,17 +81,17 @@ func test_zero_height_disables_surface_mirror_and_world_split() -> void:
 
 
 func test_height_precedence_is_direct_then_bms_then_signed_trn_then_env() -> void:
-	var resource_root := NovaResourceRoot.new()
+	var resource_root := ResourceRoot.new()
 	assert_eq(resource_root.set_root_dir(ProjectSettings.globalize_path(
 			"res://../fixtures/minimal/resources")), OK)
-	var terrain := NovaTerrainData.new()
+	var terrain := TerrainData.new()
 	assert_eq(terrain.load_from_resource_root(resource_root, "mnml.trn"), OK)
 	terrain.set_water_height(-20) # engine half-units -> -10 world units
 
 	var env_data := EnvFile.new()
 	env_data.reset_to_default()
 	env_data.set_water_height(12.0) # engine half-units -> 6 world units
-	var env := NovaEnvironment.new()
+	var env := MissionEnvironment.new()
 	env.name = "WaterPrecedenceEnv"
 	env.environment_data = env_data
 	add_child_autofree(env)
@@ -125,7 +125,7 @@ func test_reflection_rtt_is_retail_square_and_preserves_horizontal_fov() -> void
 	var strip_vp: SubViewport = fixture["viewport"]
 	var cam: Camera3D = fixture["camera"]
 
-	cam.fov = NovaSimulation.fov_vertical_from_horizontal(
+	cam.fov = Simulation.fov_vertical_from_horizontal(
 			72.0, float(strip_vp.size.x) / float(strip_vp.size.y))
 	simulate(water, 1, TICK)
 	assert_eq(water.reflection_viewport.size, Vector2i(256, 256),
@@ -254,7 +254,7 @@ func test_reflection_lookup_stays_registered_while_view_rotates() -> void:
 	var water: Node = fixture["water"]
 	var strip_vp: SubViewport = fixture["viewport"]
 	var cam: Camera3D = fixture["camera"]
-	cam.fov = NovaSimulation.fov_vertical_from_horizontal(
+	cam.fov = Simulation.fov_vertical_from_horizontal(
 			72.0, float(strip_vp.size.x) / float(strip_vp.size.y))
 	var real_world_point := Vector3(100.3, 12.0, -133.7)
 

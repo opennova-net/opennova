@@ -1,5 +1,5 @@
 // The sim-side items.def trait fold, moved verbatim from the shell adapter's
-// NovaSimulation::resolve_item_traits / resolve_ai_weapons (ADR 0028). Every
+// Simulation::resolve_item_traits / resolve_ai_weapons (ADR 0028). Every
 // read that went through the item database's getter surface now reads the
 // DefItemDef row directly; the getters were field-for-field projections, so
 // the miss defaults (0 / empty / TYPE unset) are preserved exactly.

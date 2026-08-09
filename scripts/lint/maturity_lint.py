@@ -5,7 +5,7 @@ Checks ONLY lines ADDED in the given diff range — untouched code is never
 flagged (the ratchet in ratchet_counts.py covers the stock):
 
   dict-contract (ADR 0017): new Dictionary-shaped public contracts in
-      godot/modtools/ or godot/adapter/ GDScript — a public `-> Dictionary`
+      godot/modtools/ or godot/src/ GDScript — a public `-> Dictionary`
       return, a public `var x: Dictionary`, or a `const NAME := {` map
       table, all at CLASS level (column 0). Indented declarations are
       function-locals — annotating a local as Dictionary is not a new
@@ -40,7 +40,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 BASELINE_PATH = Path(__file__).resolve().parent / "maturity_baseline.json"
 
-LINT_SCOPES = ("godot/modtools/", "godot/adapter/")
+LINT_SCOPES = ("godot/modtools/", "godot/src/")
 
 # Column 0 only: class-level declarations. GDScript function bodies are
 # indented, so an indented match is a local, not a contract.
@@ -98,11 +98,11 @@ def added_lines(diff_range: str) -> list[tuple[str, int, str]]:
 #   32768/32787 the retail LAN host port range net_ports.h / HostSessionConfig
 #   0x30020     the retail Co-op g_GameType    game_type.h / HostSessionConfig.GAME_TYPE_COOP
 PROMOTED_LITERAL = re.compile(r"(?<![\w.])(?:7597|32768|32787|0x30020)(?![\w.])", re.IGNORECASE)
-PROMOTED_SCOPES = ("godot/adapter/", "godot/game/", "godot/modtools/",
+PROMOTED_SCOPES = ("godot/src/", "godot/game/", "godot/modtools/",
                    "engine/", "apps/")
 PROMOTED_SUFFIXES = (".gd", ".cpp", ".h", ".hpp", ".c")
 PROMOTED_CANONICAL = (
-    "godot/adapter/world/host_session_config.gd",
+    "godot/src/world/host_session_config.gd",
     "engine/net/novaworld/include/novaworld/gate_probe.h",
     "engine/net/npwire/include/npwire/net_ports.h",
     "engine/net/npwire/include/npwire/game_type.h",

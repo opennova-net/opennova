@@ -11,7 +11,7 @@ on 2026-07-29.
 > This ADR records the 2026-06 consolidation as it was made. Its one runtime
 > present pass and entity index remain current inside `GameWorld`. References
 > below to editor Play, self-ticking, rewind-on-Stop, and an editor-owned
-> `NovaSimulation` are historical: ADR 0025 later removed embedded mission
+> `Simulation` are historical: ADR 0025 later removed embedded mission
 > execution from ONED.
 
 ## Context
@@ -25,7 +25,7 @@ A prior change consolidated the mission **logic** onto one faithful tick (`libs/
 - **Editor "Play"**: `mission_sim_driver.gd` `_apply()` applied **only position + yaw**, keyed by
   `(kind, index)` via a `_pickable` array. No part-anim.
 
-Each rendered a different half of the same entity state, through a separate `NovaSimulation`, with its
+Each rendered a different half of the same entity state, through a separate `Simulation`, with its
 own loop and its own entity→node index. There were ~7 parallel entity→node indexing schemes. The two
 single-action/object-preview part-anim integrators added more duplication. `game_world.gd` even
 claimed in a comment to be "the one path both go through" while the editor bypassed it entirely.
@@ -34,13 +34,13 @@ claimed in a comment to be "the one path both go through" while the editor bypas
 
 One runtime, one present pass, one present index — both products go through them.
 
-- **`mission_runtime.gd`** (Node) owns `{ NovaSimulation, MissionPresentPass, MissionEntityRegistry }`
+- **`mission_runtime.gd`** (Node) owns `{ Simulation, MissionPresentPass, MissionEntityRegistry }`
   and single-sources the per-tick order: **advance logic → present → drain effects**. The game drives
   it explicitly from `GameWorld.tick()` (DIVIDED, 62-frame divider); the editor self-ticks it via
   `_process` while playing (EVERY_PROCESS). Stop rewinds the world (`World::restore`) **and** restores
   the authored node transforms captured at setup.
 - **`mission_present_pass.gd`** applies each entity's **transform + PANM channels + visibility** from
-  one batched `NovaSimulation.get_present_snapshot()` (a flat `PackedFloat32Array`, `PF_*` layout —
+  one batched `Simulation.get_present_snapshot()` (a flat `PackedFloat32Array`, `PF_*` layout —
   avoids ~10 Variant-boxed scalar getter calls per entity). Hybrid split: **C++ decides the present
   state, one GDScript presenter writes the `Node3D`.** The basis is built through the single placement
   convention `MissionObjectPlacer.bms_to_godot_basis`.
@@ -72,7 +72,7 @@ in the managed standalone game from saved loose assets.
 ## Deferred seams
 
 - **Main-body skeletal `.bad`/`.adm`** — **superseded by [ADR 0007](0007-skeletal-runtime-and-entity-visual.md)**:
-  the skeletal runtime is now built (`libs/anim` + `NovaSkeletalAnim` + `Skeleton3D`/`Skin`), the present
+  the skeletal runtime is now built (`libs/anim` + `SkeletalAnim` + `Skeleton3D`/`Skin`), the present
   pass drives `play_body_anim(slot)`, and the re-anchored pose chain is `BoneAnim_FindKeyframeAtTime
   @0x410220` → `build_world_bone_matrices @0x40c770` (not `AnimMap_PlayAnimBySlot @0x40bda0`, which is the
   weapon/recoil + player-avatar `off_8135F0` layer).

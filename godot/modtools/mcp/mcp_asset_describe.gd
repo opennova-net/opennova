@@ -144,7 +144,7 @@ static func _sniff_bin(ctx: McpToolContext, name: String, path: String) -> Strin
 
 
 static func _describe_mission(ctx: McpToolContext, out: Dictionary, resolved: Dictionary, full: bool, limit: int) -> void:
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	var err := _open_via(mission, ctx, resolved)
 	if err != OK:
 		out["error"] = "Mission failed to load (%s): %s" % [error_string(err), mission.get_last_error()]
@@ -194,7 +194,7 @@ static func _describe_strings(ctx: McpToolContext, out: Dictionary, resolved: Di
 
 
 static func _describe_menu(ctx: McpToolContext, out: Dictionary, resolved: Dictionary, full: bool, limit: int) -> void:
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	if doc.load_from_bytes(read_bytes(ctx, resolved)) != OK:
 		out["error"] = "Menu document failed to parse."
 		return
@@ -215,7 +215,7 @@ static func _describe_menu(ctx: McpToolContext, out: Dictionary, resolved: Dicti
 	out["summary"] = "Menu — %d screen(s)." % doc.get_screen_count()
 
 
-static func _menu_node(doc: NovaMnuDocument, id: int, budget: Dictionary) -> Variant:
+static func _menu_node(doc: MnuDocument, id: int, budget: Dictionary) -> Variant:
 	if budget["left"] <= 0:
 		return "<truncated>"
 	budget["left"] = int(budget["left"]) - 1
@@ -237,7 +237,7 @@ static func _menu_node(doc: NovaMnuDocument, id: int, budget: Dictionary) -> Var
 
 
 static func _describe_font(ctx: McpToolContext, out: Dictionary, resolved: Dictionary, full: bool, limit: int) -> void:
-	var font := NovaFntResource.new()
+	var font := FntResource.new()
 	if font.load_from_bytes(read_bytes(ctx, resolved)) != OK:
 		out["error"] = "FNT font failed to parse."
 		return
@@ -295,7 +295,7 @@ static func _describe_env(ctx: McpToolContext, out: Dictionary, resolved: Dictio
 
 
 static func _describe_lwf(ctx: McpToolContext, out: Dictionary, resolved: Dictionary, full: bool, limit: int) -> void:
-	var lwf := NovaLwfData.new()
+	var lwf := LwfData.new()
 	if not lwf.load_bytes(read_bytes(ctx, resolved)):
 		out["error"] = "LWF sound profile failed to parse."
 		return
@@ -309,7 +309,7 @@ static func _describe_lwf(ctx: McpToolContext, out: Dictionary, resolved: Dictio
 
 
 static func _describe_3di(ctx: McpToolContext, out: Dictionary, resolved: Dictionary) -> void:
-	var object := NovaObjectData.new()
+	var object := ObjectData.new()
 	var err := _open_via(object, ctx, resolved)
 	if err != OK:
 		out["error"] = "3DI model failed to load (%s): %s" % [error_string(err), object.get_last_error()]
@@ -319,7 +319,7 @@ static func _describe_3di(ctx: McpToolContext, out: Dictionary, resolved: Dictio
 
 
 static func _describe_pff(out: Dictionary, path: String, full: bool, limit: int) -> void:
-	var archive := NovaPffArchive.new()
+	var archive := PffDocument.new()
 	if archive.open(path) != OK:
 		out["error"] = "PFF archive failed to open."
 		return

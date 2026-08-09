@@ -1,7 +1,7 @@
-class_name NovaMenuShell
+class_name MenuShell
 extends Control
 
-# Runtime menu shell: drives a live NovaMnuMenu (the same engine node the ONED
+# Runtime menu shell: drives a live MnuMenu (the same engine node the ONED
 # Menus workspace previews, here with edit_mode off so it is fully interactive),
 # loading the game's .mnu menu set + audio from the user's resource directory.
 # Music streams through the shared NovaMusicService autoload (one context at a
@@ -19,7 +19,7 @@ extends Control
 # for those names and connects them. The control-name sets are exported so a
 # different game's menu set can be pointed at the same shell.
 
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://src/resource_index/resource_dir_settings.gd")
 
 # Var index the director sets to the current screen's MUSICVAR. The menumus MUS
 # script reads its section discriminator at var INDEX 2 (golden test
@@ -139,13 +139,13 @@ signal novaworld_requested()
 # Emitted after the Options spin list changes so an active HUD can reload its art.
 signal crosshair_style_changed(style: int)
 
-var _menu: NovaMnuMenu
-var _root: NovaResourceRoot
+var _menu: MnuMenu
+var _root: ResourceRoot
 var _text: RtxtStringFile
 var _style: MnsStyleSheet
-var _sound_profile: NovaLwfData
+var _sound_profile: LwfData
 
-var _menu_cache: Dictionary = {}            # filename -> NovaMnuDocument
+var _menu_cache: Dictionary = {}            # filename -> MnuDocument
 var _menu_stack: Array[Dictionary] = []     # [{file, screen}] cross-.mnu back stack
 var _current_file := ""
 var _selected_mission := ""
@@ -158,7 +158,7 @@ var _ready_done := false
 # claims a loaded menu drives it; otherwise the shell's generic wiring runs.
 var _companions: Array = []
 # Lazily-built Options -> Controls key-binding catalog (engine/runtime/controls).
-var _controls_model: NovaControlsModel = null
+var _controls_model: ControlsModel = null
 
 
 func _ready() -> void:
@@ -180,7 +180,7 @@ func add_companion(companion) -> void:
 # the asset/menu/director wiring (only assembled once); show_menu() returns to
 # the main menu on later entries. Returns false when the main menu
 # cannot be resolved/loaded (an empty/incomplete resource dir).
-func setup(root: NovaResourceRoot) -> bool:
+func setup(root: ResourceRoot) -> bool:
 	_root = root
 	if _menu == null:
 		_assemble_assets()
@@ -194,24 +194,24 @@ func setup(root: NovaResourceRoot) -> bool:
 
 func _assemble_assets() -> void:
 	_text = _load_text(menu_text_file)
-	# Register the engine text tables into the shared NovaStrings registry, the way the
+	# Register the engine text tables into the shared Strings registry, the way the
 	# original loads its TextResource globals: menutxt (UI/voice labels), gametext =
 	# gametext.bin (g_TextGameText — the "WepDes" weapon names + in-game strings
 	# [orig: Game_InitSubsystems @0x4a6cd0]), and gameui = Game.bin (the menu shell's
 	# own resource: options/menu + "Avatars" sections [orig: the menu boot @0x552510
 	# -> the menu resource @0x25510F8]).
 	if _text != null:
-		NovaStrings.register_table("menutxt", _text)
+		Strings.register_table("menutxt", _text)
 	var gametext := _load_text(game_text_file)
 	if gametext != null:
-		NovaStrings.register_table("gametext", gametext)
+		Strings.register_table("gametext", gametext)
 	var gameui := _load_text(menu_ui_text_file)
 	if gameui != null:
-		NovaStrings.register_table("gameui", gameui)
+		Strings.register_table("gameui", gameui)
 	_style = _load_style(_discover_name(menu_stylesheet_file, ".mns", ""))
 	_sound_profile = _load_sound_profile(_discover_name(menu_sound_profile_file, ".lwf", "menu"))
 
-	_menu = NovaMnuMenu.new()
+	_menu = MnuMenu.new()
 	_menu.name = "Menu"
 	_menu.build_on_ready = false
 	_menu.set_edit_mode(false)
@@ -253,7 +253,7 @@ func _assemble_assets() -> void:
 func open_menu(file: String, target_screen: String) -> bool:
 	var doc := _load_doc(file)
 	if doc == null:
-		push_warning("NovaMenuShell: could not load menu '%s'" % file)
+		push_warning("MenuShell: could not load menu '%s'" % file)
 		return false
 	_current_file = file
 	_selected_mission = ""
@@ -276,15 +276,15 @@ func hide_menu() -> void:
 	visible = false
 
 
-## Process-exit-only release for the retail menu cursor. NovaMnuScreen keeps the
+## Process-exit-only release for the retail menu cursor. MnuScreen keeps the
 ## decoded texture for later screen visits and Input keeps a second process-wide
 ## reference after applying it; both must drop before RenderingServer exits.
 func release_runtime_renderer_resources() -> void:
 	Input.set_custom_mouse_cursor(null, Input.CURSOR_ARROW)
 	if _menu == null:
 		return
-	for node in _menu.find_children("*", "NovaMnuScreen", true, false):
-		(node as NovaMnuScreen).set_cursor_texture(null)
+	for node in _menu.find_children("*", "MnuScreen", true, false):
+		(node as MnuScreen).set_cursor_texture(null)
 
 
 # Marks that the menu is now the in-game/pause overlay (a kept-loaded world sits
@@ -321,19 +321,19 @@ func _wire_named_controls() -> void:
 	var has_mission_list := false
 	for list_name in mission_list_names:
 		var list := _menu.find_child(list_name, true, false)
-		if list is NovaMnuList:
+		if list is MnuList:
 			has_mission_list = true
-			_seed_mission_list(list as NovaMnuList)
+			_seed_mission_list(list as MnuList)
 	var has_mod_list := false
 	for mod_name in mod_list_names:
 		var mod_list := _menu.find_child(mod_name, true, false)
-		if mod_list is NovaMnuList:
+		if mod_list is MnuList:
 			has_mod_list = true
-			_seed_mod_list(mod_list as NovaMnuList)
+			_seed_mod_list(mod_list as MnuList)
 	for table_name in control_table_names:
 		var ctl_table := _menu.find_child(table_name, true, false)
-		if ctl_table is NovaMnuTable:
-			_seed_control_mapping(ctl_table as NovaMnuTable)
+		if ctl_table is MnuTable:
+			_seed_control_mapping(ctl_table as MnuTable)
 	if has_mission_list:
 		_connect_named(start_control_names, _on_start_control)
 	elif has_mod_list:
@@ -348,8 +348,8 @@ func _seed_crosshair_style_controls() -> void:
 	var persisted := ResourceDirSettings.get_crosshair_style()
 	for control_name in crosshair_style_control_names:
 		var spin := _menu.find_child(control_name, true, false)
-		if spin is NovaMnuSpinList:
-			(spin as NovaMnuSpinList).set_value_index(persisted)
+		if spin is MnuSpinList:
+			(spin as MnuSpinList).set_value_index(persisted)
 
 
 func _connect_named(names: PackedStringArray, handler: Callable) -> void:
@@ -359,7 +359,7 @@ func _connect_named(names: PackedStringArray, handler: Callable) -> void:
 			(node as BaseButton).pressed.connect(handler)
 
 
-func _seed_mission_list(list: NovaMnuList) -> void:
+func _seed_mission_list(list: MnuList) -> void:
 	list.set_items(MissionCatalog.mission_names(_root))
 	if not list.item_activated.is_connected(_on_mission_activated):
 		list.item_activated.connect(_on_mission_activated)
@@ -372,19 +372,19 @@ func _seed_mission_list(list: NovaMnuList) -> void:
 # rows show the byte-exact default bindings; double-click rebinding is not wired
 # (see docs/mnu/menu-re.md D-CTRL-*). The radio nodes are rebuilt with the menu, so
 # the connections are re-made fresh each open without duplicating.
-func _seed_control_mapping(table: NovaMnuTable) -> void:
+func _seed_control_mapping(table: MnuTable) -> void:
 	if _controls_model == null:
-		_controls_model = NovaControlsModel.new()
-	_fill_control_mapping(table, NovaControlsModel.DEVICE_KEYBOARD)
+		_controls_model = ControlsModel.new()
+	_fill_control_mapping(table, ControlsModel.DEVICE_KEYBOARD)
 	for i in control_device_names.size():
 		var radio := _menu.find_child(control_device_names[i], true, false)
 		if radio is BaseButton:
-			var device := i  # 0=keyboard, 1=mouse, 2=joystick (NovaControlsModel.Device)
+			var device := i  # 0=keyboard, 1=mouse, 2=joystick (ControlsModel.Device)
 			(radio as BaseButton).pressed.connect(func() -> void:
 				_fill_control_mapping(table, device))
 
 
-func _fill_control_mapping(table: NovaMnuTable, device: int) -> void:
+func _fill_control_mapping(table: MnuTable, device: int) -> void:
 	if _controls_model == null:
 		return
 	table.clear_rows()
@@ -396,7 +396,7 @@ func _fill_control_mapping(table: NovaMnuTable, device: int) -> void:
 # Fill a mod list with the expansions discoverable under the resource root, mirror
 # the persisted current selection, and wire activation. list_expansions scans
 # <root>/expansion/<name>/<name>.pff and is independent of the mounted root.
-func _seed_mod_list(list: NovaMnuList) -> void:
+func _seed_mod_list(list: MnuList) -> void:
 	if _root == null:
 		return
 	var expansions := _root.list_expansions(_root.get_root_dir())
@@ -420,7 +420,7 @@ func _on_mod_activated(index: int) -> void:
 # OK/ACCEPT on a Mods screen: mount + persist the highlighted expansion rather than
 # launching a mission. Wired (instead of the launch handler) by _wire_named_controls
 # when the screen has a mod list but no mission list. Reads the live ItemList
-# selection (NovaMnuList extends ItemList), so it also covers the entry _seed_mod_list
+# selection (MnuList extends ItemList), so it also covers the entry _seed_mod_list
 # pre-selected. A no-op when nothing is highlighted or it is already the current mod.
 func _on_apply_selected_mod() -> void:
 	var list := _find_mod_list()
@@ -446,7 +446,7 @@ func _apply_expansion(name: String) -> void:
 	# with; this guard keeps a hand-driven selection from remounting the loose
 	# root through mount_runtime and clearing it on the inevitable failure.
 	if not _root.is_runtime_mount():
-		push_warning("NovaMenuShell: expansions need a packed game install; the loose mount stands")
+		push_warning("MenuShell: expansions need a packed game install; the loose mount stands")
 		return
 	var dir := _root.get_root_dir()
 	var prev := _current_expansion()
@@ -455,9 +455,9 @@ func _apply_expansion(name: String) -> void:
 	# same menu section [orig: Expansion_ReloadAllAssets @ 0x568370 followed by
 	# UI_DispatchScreenEvent @ 0x54e6a0 -> AudioVM_SetVariable(2, MUSICVAR)].
 	var active_music_var := NovaMusicService.get_var(MUSIC_VAR_INDEX)
-	if _root.mount_runtime(dir, name, NovaLaunchFlags.loose_override_enabled()) != OK:
-		push_warning("NovaMenuShell: could not mount expansion '%s': %s" % [name, _root.get_last_error()])
-		_root.mount_runtime(dir, prev, NovaLaunchFlags.loose_override_enabled())  # rollback
+	if _root.mount_runtime(dir, name, LaunchFlags.loose_override_enabled()) != OK:
+		push_warning("MenuShell: could not mount expansion '%s': %s" % [name, _root.get_last_error()])
+		_root.mount_runtime(dir, prev, LaunchFlags.loose_override_enabled())  # rollback
 		return
 	ResourceDirSettings.set_expansion(name)
 	_selected_expansion = name
@@ -473,8 +473,8 @@ func _refresh_dependent_content() -> void:
 	_selected_mission = ""
 	for list_name in mission_list_names:
 		var list := _menu.find_child(list_name, true, false)
-		if list is NovaMnuList:
-			_seed_mission_list(list as NovaMnuList)
+		if list is MnuList:
+			_seed_mission_list(list as MnuList)
 
 
 func _update_mod_desc(name: String) -> void:
@@ -553,7 +553,7 @@ func _on_start_control() -> void:
 		# without a list (or before a selection) can still start something.
 		mission = MissionCatalog.first_mission_name(_root)
 	if mission.is_empty():
-		push_warning("NovaMenuShell: start pressed with no mission available")
+		push_warning("MenuShell: start pressed with no mission available")
 		return
 	start_requested.emit(mission)
 
@@ -619,7 +619,7 @@ func resolve_music_pair(prefix: String, base_stem: String) -> MusicPair:
 # The visual menu assets (.mnu document, .mns stylesheet, RTXT text) load through
 # the VFS by name so they resolve from PFF archives at runtime; menu textures and
 # fonts resolve through the resource root the menu is given (set_resource_root).
-func _load_doc(file: String) -> NovaMnuDocument:
+func _load_doc(file: String) -> MnuDocument:
 	if _menu_cache.has(file):
 		return _menu_cache[file]
 	if _root == null or file.is_empty():
@@ -627,7 +627,7 @@ func _load_doc(file: String) -> NovaMnuDocument:
 	var bytes := _root.read_file(file)
 	if bytes.is_empty():
 		return null
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	if doc.load_from_bytes(bytes) != OK:
 		return null
 	_menu_cache[file] = doc
@@ -657,10 +657,10 @@ func _load_style(file: String) -> MnsStyleSheet:
 # The menu SFX profile (menu.lwf) loads by name through the VFS so it resolves
 # from PFF archives too; its members point at loose .wav files the menu resolves
 # on demand. Degrades to null (silent menu SFX) when absent.
-func _load_sound_profile(name: String) -> NovaLwfData:
+func _load_sound_profile(name: String) -> LwfData:
 	if _root == null or name.is_empty():
 		return null
-	var d := NovaLwfData.new()
+	var d := LwfData.new()
 	if d.open_from_resource_root(_root, name) != OK:
 		return null
 	return d if d.is_loaded() and d.get_set_count() > 0 else null
@@ -705,15 +705,15 @@ func _is_crosshair_style_control(widget_name: String) -> bool:
 	return false
 
 
-func _find_mod_list() -> NovaMnuList:
+func _find_mod_list() -> MnuList:
 	for n in mod_list_names:
 		var node := _menu.find_child(n, true, false)
-		if node is NovaMnuList:
-			return node as NovaMnuList
+		if node is MnuList:
+			return node as MnuList
 	return null
 
 
-# MOD_DESC builds as NovaMnuMultilineEdit (a TextEdit); set_text works while READONLY.
+# MOD_DESC builds as MnuMultilineEdit (a TextEdit); set_text works while READONLY.
 func _find_mod_desc() -> TextEdit:
 	for n in mod_desc_names:
 		var node := _menu.find_child(n, true, false)
@@ -722,20 +722,20 @@ func _find_mod_desc() -> TextEdit:
 	return null
 
 
-func _find_mission_list() -> NovaMnuList:
+func _find_mission_list() -> MnuList:
 	for n in mission_list_names:
 		var node := _menu.find_child(n, true, false)
-		if node is NovaMnuList:
-			return node as NovaMnuList
+		if node is MnuList:
+			return node as MnuList
 	return null
 
 
 # Accessors for owners / tests.
-func get_menu() -> NovaMnuMenu:
+func get_menu() -> MnuMenu:
 	return _menu
 
 
-func get_music_director() -> NovaMusicDirector:
+func get_music_director() -> MusicDirector:
 	return NovaMusicService.director()
 
 

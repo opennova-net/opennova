@@ -1,13 +1,13 @@
 extends GutTest
 
-# NovaEffectWorld — the runtime .ptl effect world (load + intern + spawn +
+# EffectWorld — the runtime .ptl effect world (load + intern + spawn +
 # expiry). Mirrors the witnessed chain: CEffectSystem_Init @ 0x5f6070 loads
 # every mounted .ptl; CEffect_FindOrCreateMaterial @ 0x5f7310 interns effect
 # names to stable 1-based handles (case-insensitive); SpawnEmitterAtPosition
 # @ 0x5f6df0 spawns by handle or name.
 
-const EffectWorldScript = preload("res://adapter/world/effect_world.gd")
-const MissionRuntime := preload("res://adapter/world/mission_runtime.gd")
+const EffectWorldScript = preload("res://src/world/effect_world.gd")
+const MissionRuntime := preload("res://src/world/mission_runtime.gd")
 
 var _root_dir := ""
 
@@ -23,7 +23,7 @@ class OwnerPositions:
 
 func before_each() -> void:
 	# OS cache dir, not user:// — resource roots inside the app user-data dir are
-	# rejected by NovaResourceRoot.is_valid_root (mirrors the other fixture roots).
+	# rejected by ResourceRoot.is_valid_root (mirrors the other fixture roots).
 	_root_dir = OS.get_cache_dir().path_join("opennova_effect_world_test").path_join("root_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(_root_dir)
 	for fixture in ["buildup.ptl", "stock.ptl", "troytabl.ptl"]:
@@ -43,34 +43,34 @@ func after_each() -> void:
 	DirAccess.remove_absolute(_root_dir)
 
 
-func _make_world() -> NovaEffectWorld:
-	var world: NovaEffectWorld = add_child_autofree(EffectWorldScript.new())
+func _make_world() -> EffectWorld:
+	var world: EffectWorld = add_child_autofree(EffectWorldScript.new())
 	return world
 
 
-func _single_group(world: NovaEffectWorld, index: int = 0) -> Dictionary:
+func _single_group(world: EffectWorld, index: int = 0) -> Dictionary:
 	var groups := world.get_debug_group_report()
 	assert_gt(groups.size(), index, "requested debug group exists")
 	return groups[index] as Dictionary
 
 
-func _single_emitter(world: NovaEffectWorld, group_index: int = 0) -> Dictionary:
+func _single_emitter(world: EffectWorld, group_index: int = 0) -> Dictionary:
 	var group := _single_group(world, group_index)
 	var emitters := group.get("emitters", []) as Array
 	assert_eq(emitters.size(), 1, "synthetic effect has one emitter")
 	return emitters[0] as Dictionary
 
 
-func _make_root() -> NovaResourceRoot:
-	var root := NovaResourceRoot.new()
+func _make_root() -> ResourceRoot:
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(_root_dir), OK, "resource root mounts the fixture dir")
 	return root
 
 
 # One synthetic short-lived effect document (deterministic expiry, no fixture
 # dependence): one burst, sub-second lifetime.
-func _make_short_effect_file() -> NovaParticleFile:
-	var def := NovaParticleDef.new()
+func _make_short_effect_file() -> ParticleFile:
+	var def := ParticleDef.new()
 	def.id = "puff dots"
 	def.emit_dur = 0.1
 	def.emit_rate = 50.0
@@ -78,10 +78,10 @@ func _make_short_effect_file() -> NovaParticleFile:
 	def.age = 0.2
 	def.alpha = 1.0
 	def.scale_value = 1.0
-	var effect := NovaParticleEffect.new()
+	var effect := ParticleEffect.new()
 	effect.id = "puff"
 	effect.pdefs = PackedStringArray(["puff dots"])
-	var file := NovaParticleFile.new()
+	var file := ParticleFile.new()
 	var particles: Array = file.particles
 	particles.append(def)
 	file.particles = particles
@@ -91,11 +91,11 @@ func _make_short_effect_file() -> NovaParticleFile:
 	return file
 
 
-func _make_renderable_effect_file() -> NovaParticleFile:
+func _make_renderable_effect_file() -> ParticleFile:
 	var file := _make_short_effect_file()
 	var particle := file.find_particle("puff dots")
 	var graphics: Array = particle.graphics
-	var layer := graphics[0] as NovaParticleGraphicLayer
+	var layer := graphics[0] as ParticleGraphicLayer
 	layer.present = true
 	layer.texture = "bink.tga"
 	layer.alpha = 1.0
@@ -108,7 +108,7 @@ func _make_renderable_effect_file() -> NovaParticleFile:
 	return file
 
 
-func _warm_helper_count(world: NovaEffectWorld) -> int:
+func _warm_helper_count(world: EffectWorld) -> int:
 	var count := 0
 	for child in world.find_children("*", "MeshInstance3D", true, false):
 		if String(child.name) != "ParticleFirstPersonPacket":
@@ -492,7 +492,7 @@ func test_warm_all_effects_spawns_the_catalog_once_and_resets_clean() -> void:
 	for group_v in warm_groups:
 		var group := group_v as Dictionary
 		assert_eq(int(group.get("render_domain", -1)),
-				NovaEffectWorld.RENDER_DOMAIN_WORLD,
+				EffectWorld.RENDER_DOMAIN_WORLD,
 				"catalog values warm through the uncapped World packet")
 	assert_gt(world.active_entry_count(), 0, "warm spawns occupy live entries")
 	world.advance_fixed_tick(0.016)

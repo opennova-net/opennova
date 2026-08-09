@@ -36,7 +36,7 @@ func test_fnt_document_open_dirty_save_round_trip() -> void:
 	assert_eq(err, OK, "FNT document should open a bundled Nova font.")
 	assert_false(doc.is_dirty, "Opening should leave the document clean.")
 	assert_eq(doc.current_path, FNT_PATH, "Opening should set current_path.")
-	assert_eq(doc.resource.get_page_count(), 1, "Document should expose the loaded NovaFntResource.")
+	assert_eq(doc.resource.get_page_count(), 1, "Document should expose the loaded FntResource.")
 
 	doc.resource.set_pixel_alpha(0, 0, 0, 123)
 	assert_true(doc.is_dirty, "Mutating the font resource should dirty the document.")
@@ -79,7 +79,7 @@ func test_fnt_editor_builds_atlas_authoring_surface_and_edits_alpha() -> void:
 
 func test_engine_preview_panel_renders_the_edited_font_through_the_game_path() -> void:
 	# FNT-1 gate (docs/oned/workspace-maturity-program.md): the type-a-line sample
-	# is the F2 EngineTextPreview — the game's own draw path (NovaFntResource ->
+	# is the F2 EngineTextPreview — the game's own draw path (FntResource ->
 	# FontFile + HudText.draw_text) — not a Godot Label truth-claim. The glyph
 	# canvas stays beside it as the paint surface.
 	var doc = autofree(FntEditorDocument.new())
@@ -164,13 +164,13 @@ class UsedByShell:
 	var index := IndexStub.new()
 	# A real root (the workspace base's _resource_root() is typed to it) over a
 	# cache-dir fixture holding the referrer file the index stub reports.
-	var root: NovaResourceRoot
+	var root: ResourceRoot
 	var opened: Array = []
 
 	func get_reference_index() -> IndexStub:
 		return index
 
-	func get_resource_root() -> NovaResourceRoot:
+	func get_resource_root() -> ResourceRoot:
 		return root
 
 	func open_in_workspace(kind: String, path: String, _focus: FocusPayload = null) -> Error:
@@ -187,7 +187,7 @@ func test_inspector_offers_used_by_without_triggering_index_build() -> void:
 
 	var workspace = autofree(FontsWorkspaceScript.new())
 	var shell: UsedByShell = add_child_autofree(UsedByShell.new())
-	shell.root = NovaResourceRoot.new()
+	shell.root = ResourceRoot.new()
 	assert_eq(shell.root.set_root_dir(root_dir), OK)
 	workspace.set_editor_shell(shell)
 	assert_eq(workspace.open_file(FNT_PATH), OK)

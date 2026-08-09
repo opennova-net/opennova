@@ -2,7 +2,7 @@ extends GutTest
 
 
 class DebugSessionStub:
-	extends NovaDebugSession
+	extends DebugSession
 
 	var invoked_id: StringName
 	var invoked_args: Variant
@@ -25,9 +25,9 @@ class DebugSessionStub:
 
 	func get_control_state(
 			id: StringName,
-			allow_authority: bool = false) -> NovaDebugControlState:
+			allow_authority: bool = false) -> DebugControlState:
 		read_authority = allow_authority
-		var state := NovaDebugControlState.new()
+		var state := DebugControlState.new()
 		state.id = id
 		state.available = true
 		# Writable like a session whose F3 Live-edits latch is open, so the
@@ -35,8 +35,8 @@ class DebugSessionStub:
 		state.writable = true
 		return state
 
-	func definition(id: StringName) -> NovaDebugControlDef:
-		var definition := NovaDebugControlDef.action_control(
+	func definition(id: StringName) -> DebugControlDef:
+		var definition := DebugControlDef.action_control(
 				id, &"Test", String(id), "", &"test", &"test")
 		if id in [
 			&"teleport_local_player",
@@ -46,7 +46,7 @@ class DebugSessionStub:
 			&"set_mission_variable",
 		]:
 			definition.requires_unlock = true
-			definition.authority = NovaDebugControlDef.Authority.HOST_ONLY
+			definition.authority = DebugControlDef.Authority.HOST_ONLY
 		return definition
 
 	func set_control_value(
@@ -99,7 +99,7 @@ class AdapterStub:
 	}
 	var entity_card := {"index": 1, "name": "Guard"}
 
-	func get_debug_session() -> NovaDebugSession:
+	func get_debug_session() -> DebugSession:
 		return debug
 
 	func get_mcp_game_state() -> Variant:

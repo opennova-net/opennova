@@ -8,11 +8,11 @@ extends GameMcpAdapter
 ## public APIs. It owns no duplicate simulation state and receives no editor
 ## document state.
 
-const DebugEntities := preload("res://adapter/debug/nova_debug_entities.gd")
+const DebugEntities := preload("res://src/debug/nova_debug_entities.gd")
 
 const MCP_ENTITY_LIMIT_MAX := 128
 
-var _session := NovaDebugSession.new()
+var _session := DebugSession.new()
 var _service: GameMcpService = null
 var _runtime_source: Callable
 var _world_source: Callable
@@ -44,8 +44,8 @@ func configure(
 	_resume_action = resume_action
 	_return_to_menu_action = return_to_menu_action
 	_quit_action = quit_action
-	NovaDebugCatalog.install(_session)
-	NovaDebugCatalog.bind_runtime_targets(
+	DebugCatalog.install(_session)
+	DebugCatalog.bind_runtime_targets(
 			_session,
 			_runtime_source,
 			_world_source,
@@ -68,7 +68,7 @@ func start_runtime_endpoint() -> void:
 		push_warning("Runtime debug connection unavailable: %s" % error_string(err))
 
 
-func get_debug_session() -> NovaDebugSession:
+func get_debug_session() -> DebugSession:
 	return _session
 
 
@@ -202,8 +202,8 @@ func debug_set_audio_bus_volume(bus_name: String, volume_db: float) -> Error:
 	if bus < 0:
 		return ERR_INVALID_PARAMETER
 	if not is_finite(volume_db) \
-			or volume_db < NovaDebugCatalog.AUDIO_BUS_VOLUME_MIN_DB \
-			or volume_db > NovaDebugCatalog.AUDIO_BUS_VOLUME_MAX_DB:
+			or volume_db < DebugCatalog.AUDIO_BUS_VOLUME_MIN_DB \
+			or volume_db > DebugCatalog.AUDIO_BUS_VOLUME_MAX_DB:
 		return ERR_INVALID_PARAMETER
 	AudioServer.set_bus_volume_db(bus, volume_db)
 	return OK

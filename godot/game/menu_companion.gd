@@ -1,7 +1,7 @@
 class_name MenuCompanion
 extends RefCounted
 
-# Base for the game-specific menu drivers ("companions") NovaMenuShell delegates
+# Base for the game-specific menu drivers ("companions") MenuShell delegates
 # whole menus to (add_companion): the JO multiplayer menu (MpMenuCompanion) and the
 # PLAYER_INFO character screen (PlayerInfoMenuCompanion). When a companion's
 # owns_menu() claims a freshly built menu, the shell hands it the whole
@@ -9,8 +9,8 @@ extends RefCounted
 # launch/mission wiring. Subclasses override owns_menu + _wire and share the
 # by-NAME control helpers below.
 
-var _menu: Node  # the built NovaMnuMenu; typed Node so we depend only on its tree + signals
-var _root: NovaResourceRoot
+var _menu: Node  # the built MnuMenu; typed Node so we depend only on its tree + signals
+var _root: ResourceRoot
 
 
 ## True when this companion drives `menu`. Keyed on control names unique to the
@@ -20,10 +20,10 @@ func owns_menu(_menu_node: Node) -> bool:
 	return false
 
 
-## Called by NovaMenuShell after each open_menu (re)build of a menu this
+## Called by MenuShell after each open_menu (re)build of a menu this
 ## companion owns. The screen nodes are freshly built children, so prior
 ## connections died with the old tree; _wire rescans by name.
-func on_menu_built(menu: Node, file: String, screen: String, root: NovaResourceRoot) -> void:
+func on_menu_built(menu: Node, file: String, screen: String, root: ResourceRoot) -> void:
 	_menu = menu
 	_root = root
 	if menu == null:
@@ -50,6 +50,6 @@ func _connect_pressed(name: String, handler: Callable) -> void:
 
 func _edit_text(name: String, default_value := "") -> String:
 	var node := _find(name)
-	if node is LineEdit:  # NovaMnuEdit extends LineEdit
+	if node is LineEdit:  # MnuEdit extends LineEdit
 		return (node as LineEdit).text
 	return default_value

@@ -11,7 +11,7 @@
 
 ## Context
 
-Every architecture round since ADR 0016 has framed `godot/adapter/` as "the
+Every architecture round since ADR 0016 has framed `godot/src/` as "the
 shell adapter" — glue between the portable engine and a nominally
 replaceable presentation front-end. The vocabulary (CONTEXT.md "Shells"),
 the directory name, and plumbing like the frame-hook Callable bundles
@@ -30,7 +30,7 @@ awkwardness: bundle-of-Callables registration, "adapter" naming that
 describes no adaptation, and duck-typed seams excused as shell neutrality.
 
 The 2026-08-09 trunk round (the ADR 0033 R2 packet cutover + the native
-NovaObjectModel port + the no-duck-typing sweep) made the cost visible:
+ObjectModel port + the no-duck-typing sweep) made the cost visible:
 once every runtime seam is a typed class, the "neutral" indirection is the
 only untyped thing left.
 
@@ -58,9 +58,9 @@ only untyped thing left.
    loudly if a leg is missing. Bundles of loose Callables at call sites are
    retired everywhere a typed owner exists.
 
-4. **The directory is renamed to match reality.** `godot/adapter/` becomes
+4. **The directory is renamed to match reality.** `godot/src/` becomes
    `godot/src/` — the Godot project's source (GDExtension C++ bindings +
-   the shared GDScript runtime), named like what it is. `res://adapter/...`
+   the shared GDScript runtime), named like what it is. `res://src/...`
    paths, the build scripts, lints, and docs follow mechanically. The
    `adapter_cpp_orig_cites` ratchet survives under the new path with the
    same meaning: a `[orig:]` cite in Godot-side C++ is either a documented

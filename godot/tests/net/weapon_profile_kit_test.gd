@@ -42,8 +42,8 @@ func after_each() -> void:
 	_sav_path = ""
 
 
-func _def_root() -> NovaResourceRoot:
-	var root := NovaResourceRoot.new()
+func _def_root() -> ResourceRoot:
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
 			"res://../fixtures/def")), OK)
 	return root
@@ -96,7 +96,7 @@ func _write_weapon_sav() -> String:
 
 
 func test_profile_page_offsets_read_back_through_the_sim() -> void:
-	var sim := NovaSimulation.new()
+	var sim := Simulation.new()
 	assert_eq(sim.load_weapon_profile(_write_weapon_sav()), OK)
 	var summary: Dictionary = sim.get_weapon_profile_summary()
 	assert_true(bool(summary.get("loaded", false)), "the profile should report loaded")
@@ -124,7 +124,7 @@ func test_a_malformed_profile_keeps_the_shipped_defaults() -> void:
 	f.close()
 	_sav_path = path
 
-	var sim := NovaSimulation.new()
+	var sim := Simulation.new()
 	assert_ne(sim.load_weapon_profile(path), OK, "a bad header must be reported")
 	var summary: Dictionary = sim.get_weapon_profile_summary()
 	assert_false(bool(summary.get("loaded", true)), "a rejected file must not latch as loaded")
@@ -145,7 +145,7 @@ func test_an_unlatched_team_commits_no_page() -> void:
 	#
 	# This case caught a live defect: the first revision seeded unconditionally and a
 	# blue-side joiner briefly held the red page.
-	var sim := NovaSimulation.new()
+	var sim := Simulation.new()
 	assert_true(sim.enable_join("127.0.0.1", 32768, "ProfileKitTest"),
 			"enable_join should arm the joiner role")
 	assert_true(sim.is_joiner())
