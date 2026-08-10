@@ -376,13 +376,15 @@ func _place_objects(mission: MissionData, resource_root: ResourceRoot, timeline:
 	var world_root: Node3D = _c.terrain_editor.get_terrain_world_root()
 	if world_root == null:
 		return
-	_c._placer = _c.MissionObjectPlacer.new(resource_root)
+	_c._placer = MissionObjectPlacer.create(resource_root, null)
 	_c._placer.edit_mode = true
-	var options: Dictionary = {}
 	_c._wire_placer_environment()
+	_c._stats = _c._placer.place(mission, world_root)
+	# The native placer times its own stages; fold them into the load timeline.
 	if timeline != null:
-		options["timeline"] = timeline
-	_c._stats = _c._placer.place(mission, world_root, options)
+		var spans: Dictionary = _c._stats.get("spans", {})
+		for span_name in spans:
+			timeline.add_completed_span(String(span_name), int(spans[span_name]))
 	_c._pickable = _c._placer.pickable_records
 	# The placer created the pick colliders with the world; refresh the debug overlay if on.
 	_c._viewport._refresh_pick_debug()

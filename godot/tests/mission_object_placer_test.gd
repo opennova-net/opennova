@@ -1,12 +1,11 @@
 extends GutTest
 
-# Phase 4: Placer. Covers the asset-free pieces that must be exactly
+# Phase 4: MissionObjectPlacer. Covers the asset-free pieces that must be exactly
 # right (BMS -> Godot coordinate conversion, cross-checked against the equivalent
 # Basis) and the graceful resolution-miss path (fixtures ship items.def but no
 # .3di, so nothing resolves to a model and the placer must place zero without
 # error). Full render-placement is validated against real assets out-of-band.
 
-const Placer := preload("res://game/mission/mission_object_placer.gd")
 
 const BMS_PATH := "res://../fixtures/bms/ash_i5b.reference.bms"
 const ITEMS_PATH := "res://../fixtures/def/items.def"
@@ -18,11 +17,11 @@ func _abs(res_path: String) -> String:
 
 func test_position_is_minus_90_about_x() -> void:
 	# (x, y, z) -> (x, z, -y); equivalent to a -90 deg rotation about X.
-	assert_eq(Placer.bms_to_godot_position(Vector3(1, 2, 3)), Vector3(1, 3, -2))
+	assert_eq(MissionObjectPlacer.bms_to_godot_position(Vector3(1, 2, 3)), Vector3(1, 3, -2))
 	var basis := Basis.from_euler(Vector3(deg_to_rad(-90.0), 0.0, 0.0))
 	for v in [Vector3(5, -7, 11), Vector3(-1, 0, 4), Vector3(100, 50, -25)]:
 		assert_true(
-			Placer.bms_to_godot_position(v).is_equal_approx(basis * v),
+			MissionObjectPlacer.bms_to_godot_position(v).is_equal_approx(basis * v),
 			"position conversion matches the -90 deg X basis for %s" % v)
 
 
@@ -32,7 +31,7 @@ func test_position_is_minus_90_about_x() -> void:
 # the no-regression guard for the common (untilted) case. [orig: @0x40eb66 / @0x613f40]
 func test_yaw_only_basis_matches_the_legacy_heading() -> void:
 	for yaw in [0.0, 45.0, 90.0, 180.0, 270.0]:
-		var got := Placer.bms_to_godot_basis(Vector3(0, yaw, 0))
+		var got := MissionObjectPlacer.bms_to_godot_basis(Vector3(0, yaw, 0))
 		var legacy := Basis(Vector3.UP, PI - deg_to_rad(yaw))
 		assert_true(got.is_equal_approx(legacy),
 			"yaw=%s basis is RotY(180 - yaw), unchanged from the legacy heading" % yaw)
@@ -43,7 +42,7 @@ func test_yaw_only_basis_matches_the_legacy_heading() -> void:
 # forward = (0, +sin30, -cos30), matching M * Rz(90) * Ry(-30) * (+X_engine).
 # [orig: @0x40eb86 / @0x613f40]
 func test_pitch_tips_the_nose_up_like_retail() -> void:
-	var basis := Placer.bms_to_godot_basis(Vector3(30, 0, 0))
+	var basis := MissionObjectPlacer.bms_to_godot_basis(Vector3(30, 0, 0))
 	var forward: Vector3 = basis * Vector3.BACK
 	var up: Vector3 = basis * Vector3.UP
 	assert_true(forward.is_equal_approx(Vector3(0.0, sin(deg_to_rad(30.0)), -cos(deg_to_rad(30.0)))),
@@ -56,7 +55,7 @@ func test_pitch_tips_the_nose_up_like_retail() -> void:
 # term is identity), a +30 deg roll tilts the up vector to (0, cos30, sin30), matching
 # M * Rx(30) * (+Z_engine). [orig: @0x40eba6 / @0x613f40]
 func test_roll_banks_like_the_engine() -> void:
-	var basis := Placer.bms_to_godot_basis(Vector3(0, 90, 30))
+	var basis := MissionObjectPlacer.bms_to_godot_basis(Vector3(0, 90, 30))
 	var up: Vector3 = basis * Vector3.UP
 	assert_true(up.is_equal_approx(Vector3(0.0, cos(deg_to_rad(30.0)), sin(deg_to_rad(30.0)))),
 		"roll banks the up vector engine-faithfully")
@@ -65,11 +64,11 @@ func test_roll_banks_like_the_engine() -> void:
 func test_entity_transform_composes_basis_and_origin() -> void:
 	var pos := Vector3(10, 20, 30)
 	var rot_deg := Vector3(15, 180, 25)
-	var xform := Placer.entity_transform(pos, rot_deg)
+	var xform := MissionObjectPlacer.entity_transform(pos, rot_deg)
 	assert_true(
-		xform.origin.is_equal_approx(Placer.bms_to_godot_position(pos)),
+		xform.origin.is_equal_approx(MissionObjectPlacer.bms_to_godot_position(pos)),
 		"origin is the converted position")
-	assert_true(xform.basis.is_equal_approx(Placer.bms_to_godot_basis(rot_deg)),
+	assert_true(xform.basis.is_equal_approx(MissionObjectPlacer.bms_to_godot_basis(rot_deg)),
 		"basis is the converted rotation")
 
 
@@ -78,7 +77,7 @@ func test_godot_to_bms_position_inverts_bms_to_godot() -> void:
 	# it must exactly undo bms_to_godot_position for any mission-space point.
 	for v in [Vector3(5, -7, 11), Vector3(-1, 0, 4), Vector3(100, 50, -25), Vector3.ZERO]:
 		assert_true(
-			Placer.godot_to_bms_position(Placer.bms_to_godot_position(v)).is_equal_approx(v),
+			MissionObjectPlacer.godot_to_bms_position(MissionObjectPlacer.bms_to_godot_position(v)).is_equal_approx(v),
 			"godot_to_bms_position round-trips %s" % v)
 
 
@@ -94,7 +93,7 @@ func test_place_handles_unresolvable_models_without_error() -> void:
 	# resolves. set_root_dir may reject it; resolve_file then simply returns "".
 	root.set_root_dir(_abs("res://../fixtures/def"))
 
-	var placer := Placer.new(root, item_db)
+	var placer := MissionObjectPlacer.create(root, item_db)
 	var parent := Node3D.new()
 	add_child_autofree(parent)
 
@@ -108,7 +107,7 @@ func test_place_handles_unresolvable_models_without_error() -> void:
 
 
 func test_place_is_a_noop_on_null_inputs() -> void:
-	var placer := Placer.new(null, null)
+	var placer := MissionObjectPlacer.new()
 	var parent := Node3D.new()
 	add_child_autofree(parent)
 	var stats: Dictionary = placer.place(null, parent)
@@ -132,7 +131,7 @@ func test_place_single_reports_unresolved_when_no_model_resolves() -> void:
 	var root := ResourceRoot.new()
 	root.set_root_dir(_abs("res://../fixtures/def"))  # items.def but no .3di
 
-	var placer := Placer.new(root, item_db)
+	var placer := MissionObjectPlacer.create(root, item_db)
 	placer.edit_mode = true
 	var parent := Node3D.new()
 	add_child_autofree(parent)
@@ -161,7 +160,7 @@ func test_place_single_static_branch_reports_unresolved_without_a_model() -> voi
 	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
 	var root := ResourceRoot.new()
 	root.set_root_dir(_abs("res://../fixtures/def"))
-	var placer := Placer.new(root, item_db)
+	var placer := MissionObjectPlacer.create(root, item_db)
 	placer.edit_mode = true
 	var parent := Node3D.new()
 	add_child_autofree(parent)
@@ -190,7 +189,7 @@ func test_place_single_static_branch_builds_a_single_instance_batch() -> void:
 	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
 	var root := ResourceRoot.new()
 	root.set_root_dir(_abs("res://../fixtures/def"))
-	var placer := Placer.new(root, item_db)
+	var placer := MissionObjectPlacer.create(root, item_db)
 	placer.edit_mode = true
 	var parent := Node3D.new()
 	add_child_autofree(parent)
@@ -252,7 +251,7 @@ func test_place_single_static_branch_builds_a_single_instance_batch() -> void:
 	assert_eq(int(source.get("item_id", 0)), 105004)
 	assert_eq(String(source.get("graphic", "")), "StaticCrate1")
 	assert_eq(source.get("object_data"), object_data)
-	var expected_transform := Placer.entity_transform(Vector3(3, 4, 5), Vector3.ZERO)
+	var expected_transform := MissionObjectPlacer.entity_transform(Vector3(3, 4, 5), Vector3.ZERO)
 	var actual_transform: Transform3D = source.get("world_transform", Transform3D.IDENTITY)
 	assert_true(actual_transform.is_equal_approx(expected_transform),
 			"the descriptor carries the BASE entity transform, not a submesh offset")
@@ -273,7 +272,7 @@ func test_place_single_static_vehicle_rides_the_mirror_visible_layer() -> void:
 	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
 	var root := ResourceRoot.new()
 	root.set_root_dir(_abs("res://../fixtures/def"))
-	var placer := Placer.new(root, item_db)
+	var placer := MissionObjectPlacer.create(root, item_db)
 	placer.edit_mode = true
 	var parent := Node3D.new()
 	add_child_autofree(parent)
@@ -309,7 +308,7 @@ func test_place_single_static_caster_reuses_its_visible_instance() -> void:
 	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
 	var root := ResourceRoot.new()
 	root.set_root_dir(_abs("res://../fixtures/def"))
-	var placer := Placer.new(root, item_db)
+	var placer := MissionObjectPlacer.create(root, item_db)
 	placer.edit_mode = true
 	assert_true(placer.register_resolved_static_graphic(
 			"StaticCrate1", ObjectData.new(), [{
@@ -345,34 +344,34 @@ func test_place_single_static_caster_reuses_its_visible_instance() -> void:
 
 
 func test_dynamic_shadow_caster_policy_matches_retail_entity_slot_admission() -> void:
-	assert_true(Placer.item_casts_dynamic_shadow(
+	assert_true(MissionObjectPlacer.item_casts_dynamic_shadow(
 			ItemDatabase.TYPE_PERSON, 0, 0),
 			"people always receive a retail shadow render slot")
-	assert_true(Placer.item_casts_dynamic_shadow(
+	assert_true(MissionObjectPlacer.item_casts_dynamic_shadow(
 			ItemDatabase.TYPE_VEHICLE, 0, 0x10),
 			"DynamicShadow admits a non-person model")
-	assert_false(Placer.item_casts_dynamic_shadow(
+	assert_false(MissionObjectPlacer.item_casts_dynamic_shadow(
 			ItemDatabase.TYPE_BUILDING, 0, 0),
 			"portal/static buildings never become silhouette casters")
-	assert_true(Placer.item_casts_dynamic_shadow(
+	assert_true(MissionObjectPlacer.item_casts_dynamic_shadow(
 			ItemDatabase.TYPE_PERSON, 0x04000000, 0x10),
 			"the witnessed dynamic-slot allocator does not consult ItemDef NoShadow")
 
 
 func test_static_shadow_caster_policy_matches_retail_terrain_tile_admission() -> void:
-	assert_true(Placer.item_casts_static_terrain_shadow(
+	assert_true(MissionObjectPlacer.item_casts_static_terrain_shadow(
 			MissionData.KIND_BUILDING, 0, 0, 0),
 			"pool-2 buildings enter the terrain-tile caster pass by default")
-	assert_true(Placer.item_casts_static_terrain_shadow(
+	assert_true(MissionObjectPlacer.item_casts_static_terrain_shadow(
 			MissionData.KIND_ITEM, 0, 0, 0x20),
 			"pool-1 items require StaticShadow")
-	assert_false(Placer.item_casts_static_terrain_shadow(
+	assert_false(MissionObjectPlacer.item_casts_static_terrain_shadow(
 			MissionData.KIND_ITEM, 0, 0, 0),
 			"an ordinary pool-1 item is absent from the static pass")
-	assert_false(Placer.item_casts_static_terrain_shadow(
+	assert_false(MissionObjectPlacer.item_casts_static_terrain_shadow(
 			MissionData.KIND_BUILDING, 0x01000000, 0, 0),
 			"BMS NoShadow suppresses a pool-2 caster")
-	assert_false(Placer.item_casts_static_terrain_shadow(
+	assert_false(MissionObjectPlacer.item_casts_static_terrain_shadow(
 			MissionData.KIND_BUILDING, 0, 0x04000000, 0),
 			"ItemDef NoShadow suppresses a pool-2 caster")
 
@@ -394,7 +393,7 @@ func test_all_eligible_static_batch_reuses_its_visible_instance_as_caster() -> v
 	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
 	var root := ResourceRoot.new()
 	root.set_root_dir(_abs("res://../fixtures/def"))
-	var placer := Placer.new(root, item_db)
+	var placer := MissionObjectPlacer.create(root, item_db)
 	assert_true(placer.register_resolved_static_graphic(
 			"StaticCrate1", ObjectData.new(), [{
 				"mesh": BoxMesh.new(), "material": null,
@@ -440,7 +439,7 @@ func test_mixed_static_batch_keeps_a_filtered_shadow_only_duplicate() -> void:
 	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
 	var root := ResourceRoot.new()
 	root.set_root_dir(_abs("res://../fixtures/def"))
-	var placer := Placer.new(root, item_db)
+	var placer := MissionObjectPlacer.create(root, item_db)
 	placer.edit_mode = true
 	assert_true(placer.register_resolved_static_graphic(
 			"StaticCrate1", ObjectData.new(), [{
@@ -507,7 +506,7 @@ func test_individual_building_gets_an_unmasked_static_shadow_sibling() -> void:
 	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
 	var root := ResourceRoot.new()
 	root.set_root_dir(_abs("res://../fixtures/def"))
-	var placer := Placer.new(root, item_db)
+	var placer := MissionObjectPlacer.create(root, item_db)
 	var object_data := ObjectData.new()
 	assert_true(placer.register_resolved_static_graphic(
 			"GuardTwr1", object_data, [{
@@ -551,7 +550,7 @@ func test_place_single_vehicle_without_anim_def_stays_in_static_batch() -> void:
 			"the fixture must exercise the no-anim vehicle policy")
 	var root := ResourceRoot.new()
 	root.set_root_dir(_abs("res://../fixtures/def"))
-	var placer := Placer.new(root, item_db)
+	var placer := MissionObjectPlacer.create(root, item_db)
 	placer.edit_mode = true
 	var parent := Node3D.new()
 	add_child_autofree(parent)
@@ -575,7 +574,7 @@ func test_place_single_vehicle_without_anim_def_stays_in_static_batch() -> void:
 
 
 func test_place_single_is_a_noop_on_null_inputs() -> void:
-	var placer := Placer.new(null, null)
+	var placer := MissionObjectPlacer.new()
 	var delta: Dictionary = placer.place_single(null, null, MissionData.KIND_ITEM, 0)
 	assert_eq(int(delta.get("placed", -1)), 0, "null inputs place nothing")
 	assert_eq(int(delta.get("unresolved", 0)), 0, "and do not falsely count an unresolved")
@@ -596,9 +595,9 @@ func test_ground_bake_parity_with_engine_facade() -> void:
 	var index := int(rec["index"])
 
 	var anchor_godot := Vector3(0.75, 0.5, -1.25)
-	var anchor_bms := Placer.godot_to_bms_position(anchor_godot)
+	var anchor_bms := MissionObjectPlacer.godot_to_bms_position(anchor_godot)
 	var hit_godot := Vector3(33.0, 8.0, -21.0)
-	var hit_bms := Placer.godot_to_bms_position(hit_godot)
+	var hit_bms := MissionObjectPlacer.godot_to_bms_position(hit_godot)
 
 	# Integer-degree rotations only (the format stores integer degrees).
 	for rot in [Vector3.ZERO, Vector3(0, 90, 0), Vector3(15, 0, 0), Vector3(0, 0, 30),
@@ -610,8 +609,8 @@ func test_ground_bake_parity_with_engine_facade() -> void:
 		var stored_bms: Vector3 = moved["position"]
 		assert_eq(moved["rotation_deg"], rot, "rotation preserved")
 		# The editor's Godot-space bake of the same gesture:
-		var expected_godot := hit_godot - Placer.bms_to_godot_basis(rot) * anchor_godot
-		var expected_bms := Placer.godot_to_bms_position(expected_godot)
+		var expected_godot := hit_godot - MissionObjectPlacer.bms_to_godot_basis(rot) * anchor_godot
+		var expected_bms := MissionObjectPlacer.godot_to_bms_position(expected_godot)
 		assert_true(stored_bms.is_equal_approx(expected_bms),
 			"facade bake == editor bake at rot %s (facade %s vs editor %s)" % [rot, stored_bms, expected_bms])
 
@@ -619,7 +618,7 @@ func test_ground_bake_parity_with_engine_facade() -> void:
 func test_ground_anchor_bms_is_the_axis_remap() -> void:
 	# ground_anchor_bms is godot_to_bms_position applied to the anchor offset — linear,
 	# so valid on offset vectors. Pin the remap so the facade's anchor input stays correct.
-	assert_eq(Placer.godot_to_bms_position(Vector3(1, 2, 3)), Vector3(1, -3, 2))
+	assert_eq(MissionObjectPlacer.godot_to_bms_position(Vector3(1, 2, 3)), Vector3(1, -3, 2))
 
 
 # --- Live-PANM graphics must not freeze into static batches ----------------------
@@ -632,23 +631,6 @@ func test_ground_anchor_bms_is_the_axis_remap() -> void:
 # type decoration, control-0x32 sine tracks) is the witnessed case. Inert PANM
 # blocks (Armry01 as shipped: entries
 # present, every control idle) must keep the perf-tier static batching.
-
-class PanmDataPlacer:
-	extends Placer
-	# Injected object data for one graphic, so PANM classification can be tested
-	# independently of the fixture's separate portal/occlusion classification.
-	var panm_graphic := ""
-	var panm_data: ObjectData = null
-	var expose_occlusion := false
-
-	func _load_object_data(graphic: String) -> ObjectData:
-		if graphic == panm_graphic:
-			return panm_data
-		return super(graphic)
-
-	func _has_occlusion_records(_item_id: int) -> bool:
-		return expose_occlusion and panm_data != null and panm_data.has_occlusion()
-
 
 const ARMRY_3DI := "res://../fixtures/3dp/armry01/Armry01.3di"
 
@@ -670,22 +652,27 @@ func _armry_data(with_live_rotation: bool) -> ObjectData:
 	return data
 
 
-func _panm_placer(live: bool) -> PanmDataPlacer:
+# The classification seams replace the old script-subclass harness (native
+# methods cannot be overridden from GDScript): the authored fixture data is
+# cache-injected for the graphic and the occlusion verdict is pre-filled so
+# the PANM rule is isolated from the fixture's independent portal payload.
+func _panm_placer(live: bool) -> MissionObjectPlacer:
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
 	var root := ResourceRoot.new()
 	root.set_root_dir(_abs("res://../fixtures/def"))
-	var placer := PanmDataPlacer.new(root, item_db)
+	var placer := MissionObjectPlacer.create(root, item_db)
 	placer.edit_mode = true
-	placer.panm_graphic = "StaticCrate1"  # item 105004: type object, no anim_def
-	placer.panm_data = _armry_data(live)
+	# item 105004: type object, no anim_def
+	placer.register_object_data("StaticCrate1", _armry_data(live))
+	placer.register_occlusion_verdict(105004, false)
 	return placer
 
 
 func test_place_routes_live_panm_graphic_to_a_live_model() -> void:
 	var placer := _panm_placer(true)
-	assert_not_null(placer.panm_data, "fixture data authored with one live PANM track")
-	if placer.panm_data == null:
+	assert_not_null(placer.object_data_for("StaticCrate1"), "fixture data authored with one live PANM track")
+	if placer.object_data_for("StaticCrate1") == null:
 		return
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
@@ -716,8 +703,8 @@ func test_place_keeps_inert_panm_graphic_in_static_batches() -> void:
 	# The harness suppresses that second classifier here so this test isolates
 	# the rule that inert PANM alone does not defeat static batching.
 	var placer := _panm_placer(false)
-	assert_not_null(placer.panm_data, "fixture data loads")
-	if placer.panm_data == null:
+	assert_not_null(placer.object_data_for("StaticCrate1"), "fixture data loads")
+	if placer.object_data_for("StaticCrate1") == null:
 		return
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
@@ -725,7 +712,7 @@ func test_place_keeps_inert_panm_graphic_in_static_batches() -> void:
 		MissionData.KIND_ITEM, 105004, Vector3(1, 2, 3), Vector3.ZERO).is_empty())
 	# Seed batch geometry so the static branch can render without a resource-root .3di.
 	assert_true(placer.register_resolved_static_graphic(
-			"StaticCrate1", placer.panm_data, [{
+			"StaticCrate1", placer.object_data_for("StaticCrate1"), [{
 		"mesh": BoxMesh.new(), "material": null,
 		"offset": Transform3D.IDENTITY, "submesh": 0,
 	}]))
@@ -742,12 +729,12 @@ func test_place_keeps_inert_panm_graphic_in_static_batches() -> void:
 
 func test_occlusion_records_take_precedence_over_inert_panm_batching() -> void:
 	var placer := _panm_placer(false)
-	assert_not_null(placer.panm_data, "fixture data loads")
-	if placer.panm_data == null:
+	assert_not_null(placer.object_data_for("StaticCrate1"), "fixture data loads")
+	if placer.object_data_for("StaticCrate1") == null:
 		return
-	assert_true(placer.panm_data.has_occlusion(),
+	assert_true(placer.object_data_for("StaticCrate1").has_occlusion(),
 		"fixture carries the portal payload that requires per-section visibility")
-	placer.expose_occlusion = true
+	placer.register_occlusion_verdict(105004, true)
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	assert_false(mission.add_entity(
@@ -765,8 +752,8 @@ func test_occlusion_records_take_precedence_over_inert_panm_batching() -> void:
 
 func test_place_single_routes_live_panm_graphic_to_a_live_model() -> void:
 	var placer := _panm_placer(true)
-	assert_not_null(placer.panm_data, "fixture data authored with one live PANM track")
-	if placer.panm_data == null:
+	assert_not_null(placer.object_data_for("StaticCrate1"), "fixture data authored with one live PANM track")
+	if placer.object_data_for("StaticCrate1") == null:
 		return
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)

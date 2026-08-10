@@ -13,7 +13,6 @@ extends GutTest
 # The default (plain euler) builder has its own cases at the bottom.
 
 const MissionGizmo = preload("res://modtools/framework/transform_gizmo_3d.gd")
-const MissionObjectPlacer = preload("res://game/mission/mission_object_placer.gd")
 
 var _sub: SubViewport
 var _cam: Camera3D
@@ -33,7 +32,9 @@ func before_each() -> void:
 	_cam.current = true
 	_sub.add_child(_cam)
 	_giz = MissionGizmo.new()
-	_giz.basis_builder = MissionObjectPlacer.bms_to_godot_basis
+	# Lambda wrap: a Callable formed from a native static reports is_valid()=false.
+	_giz.basis_builder = func(rot_deg: Vector3) -> Basis:
+		return MissionObjectPlacer.bms_to_godot_basis(rot_deg)
 	_sub.add_child(_giz)
 	_giz.visible = true
 	_giz.show_for(Vector3.ZERO, Vector3.ZERO)

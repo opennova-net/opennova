@@ -9,7 +9,6 @@ extends GutTest
 # as pure data and fed through the public present_snapshot API.
 
 const WirePresentPass := preload("res://game/world/wire_present_pass.gd")
-const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 const PresentHeldWeapon := preload("res://game/world/present_held_weapon.gd")
 
 # Fixture items.def wire-test ids (graphic -> committed model fixture).
@@ -172,7 +171,7 @@ func _placer() -> MissionObjectPlacer:
 	var root := _flat_root()
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(_flat_dir + "/items.def"), OK)
-	return MissionObjectPlacer.new(root, item_db)
+	return MissionObjectPlacer.create(root, item_db)
 
 
 func _sim() -> Simulation:

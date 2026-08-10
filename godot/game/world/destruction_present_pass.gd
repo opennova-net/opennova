@@ -1,6 +1,5 @@
 extends RefCounted
 
-const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 
 # THE shell destruction-presentation pass: presents the sim's item destruction on
 # the viewing peer — the husk model swap on destroyed items, the death-piece

@@ -9,7 +9,6 @@ extends GutTest
 const CHARMODEL := "res://../fixtures/threedi/3di3/CharModel.3di"
 const SHED := "res://../fixtures/threedi/3di3/Shed.3di"
 const VIEWMODEL_RIG_TMP := "res://.godot/viewmodel_rig_test"
-const MissionObjectPlacerScript = preload("res://game/mission/mission_object_placer.gd")
 
 
 func _open(path: String) -> ObjectData:
@@ -126,7 +125,7 @@ func test_viewmodel_graphic_bones_are_covered_when_adm_model_is_shorter() -> voi
 
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(tmp), OK)
-	var placer := MissionObjectPlacerScript.new(root, null)
+	var placer := MissionObjectPlacer.create(root, null)
 	var parent := Node3D.new()
 	add_child_autofree(parent)
 	var model = placer.build_model_from_graphic("CharModel", "soldier", parent, "anim_idle")

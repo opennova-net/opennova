@@ -216,7 +216,7 @@ func _apply_reground_world_update(requests: Array, moved_rows: PackedInt32Array,
 		var kind := int(request.get("kind", -1))
 		if kind == MissionData.KIND_MARKER:
 			any_marker = true
-		moved["%d:%d" % [kind, int(request.get("index", -1))]] = _c.MissionObjectPlacer.entity_transform(
+		moved["%d:%d" % [kind, int(request.get("index", -1))]] = MissionObjectPlacer.entity_transform(
 				new_positions_bms[n], request.get("rotation_deg", Vector3.ZERO))
 	for r in _c._pickable:
 		var rec: Dictionary = r
@@ -301,15 +301,15 @@ func _build_reground_requests() -> Array:
 	for e in _c._mission.get_all_entities():
 		var entity: Dictionary = e
 		var kind := int(entity.get("kind", -1))
-		var ground_godot: Vector3 = _c.MissionObjectPlacer.bms_to_godot_position(entity.get("position", Vector3.ZERO))
+		var ground_godot: Vector3 = MissionObjectPlacer.bms_to_godot_position(entity.get("position", Vector3.ZERO))
 		var anchor_bms := Vector3.ZERO
 		if kind != MissionData.KIND_MARKER:
 			var graphic: String = _c._placer.graphic_for(int(entity.get("item_id", 0)))
 			if graphic.is_empty():
 				continue
 			var anchor_godot: Vector3 = _c._placer.ground_anchor_godot(graphic)
-			anchor_bms = _c.MissionObjectPlacer.godot_to_bms_position(anchor_godot)
-			ground_godot += _c.MissionObjectPlacer.bms_to_godot_basis(entity.get("rotation_deg", Vector3.ZERO)) * anchor_godot
+			anchor_bms = MissionObjectPlacer.godot_to_bms_position(anchor_godot)
+			ground_godot += MissionObjectPlacer.bms_to_godot_basis(entity.get("rotation_deg", Vector3.ZERO)) * anchor_godot
 		rows.append({
 			"kind": kind,
 			"index": int(entity.get("index", -1)),
@@ -332,7 +332,7 @@ func _build_reground_requests() -> Array:
 		requests.append({
 			"kind": row["kind"],
 			"index": row["index"],
-			"ground_hit_bms": _c.MissionObjectPlacer.godot_to_bms_position(Vector3(ground_godot.x, height, ground_godot.z)),
+			"ground_hit_bms": MissionObjectPlacer.godot_to_bms_position(Vector3(ground_godot.x, height, ground_godot.z)),
 			"ground_anchor_bms": row["anchor_bms"],
 			# Not read by the engine (its parser ignores unknown keys); carried for
 			# the targeted world update, which rebuilds the moved entities'

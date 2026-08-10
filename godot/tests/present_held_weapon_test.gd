@@ -169,7 +169,7 @@ static func _row_vec_mul(v: Vector3, m: PackedFloat32Array) -> Vector3:
 
 
 func test_bms_basis_matches_the_original_placement_matrix() -> void:
-	var placer := preload("res://game/mission/mission_object_placer.gd")
+	var placer := MissionObjectPlacer
 	# The render frame is mission relabelled (renderX=-missionY, renderY=missionZ,
 	# renderZ=missionX); Godot is (mX, mZ, -mY). So godot = (render.z, render.y, render.x):
 	# the two differ by an X<->Z swap, which is its own inverse.

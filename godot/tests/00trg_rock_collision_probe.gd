@@ -8,7 +8,6 @@ extends SceneTree
 #   NOVA_RESOURCE_DIR=<loose JOX> godot --headless --path godot \
 #     -s res://tests/00trg_rock_collision_probe.gd
 
-const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 
 const MISSION := "00TRg.bms"
 const SPAWN_BMS_ID := 1197
@@ -94,7 +93,7 @@ func _run() -> void:
 		_fail("spawn_local_player_at_start returned %d" % spawn_status)
 		return
 	sim.resolve_item_traits(item_db)
-	var placer := MissionObjectPlacer.new(root, item_db)
+	var placer := MissionObjectPlacer.create(root, item_db)
 	# S3b native-only: collision extraction reads the sim's own asset root; a
 	# rootless sim attaches nothing.
 	sim.set_asset_root(root)

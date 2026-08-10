@@ -9,7 +9,6 @@ extends RefCounted
 ## Holding the API wrong (the raw-script era's floating objects) is impossible
 ## by construction.
 
-const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 const MissionControllerScript := preload("res://modtools/mission/mission_controller.gd")
 const ItemSeatSpecs := preload("res://game/world/item_seat_specs.gd")
 

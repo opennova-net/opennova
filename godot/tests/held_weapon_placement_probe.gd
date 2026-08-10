@@ -20,7 +20,6 @@ extends SceneTree
 # Not collected by GUT (*_probe.gd).
 
 const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
-const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 const PresentHeldWeapon := preload("res://game/world/present_held_weapon.gd")
 
 # The cases worth reading. A level soldier is the one whose answer we already know.

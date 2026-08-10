@@ -1,6 +1,5 @@
 extends GutTest
 
-const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 
 const MISSION := "03TR.bms"
 const CARRIER_ITEM_ID := 102010
@@ -375,12 +374,12 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 	assert_false(placed.is_empty())
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var placer := MissionObjectPlacer.new(root, item_db)
+	var placer := MissionObjectPlacer.create(root, item_db)
 	var placement_stats := placer.place(mission, container)
 	assert_eq(int(placement_stats.get("animated", 0)), 1,
 			"the driven DBuggy has an individually presentable model")
 	var mission_objects := container.get_node_or_null(
-			MissionObjectPlacer.CONTAINER_NAME) as Node3D
+			"MissionObjects") as Node3D
 	assert_not_null(mission_objects)
 	if mission_objects == null:
 		return

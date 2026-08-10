@@ -9,7 +9,6 @@ extends GutTest
 
 const PageScript := preload("res://game/debug/pages/debug_animation_page.gd")
 const MissionRuntime := preload("res://game/world/mission_runtime.gd")
-const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 
 
 # Real native models: state is DRIVEN through the public surface (committed
@@ -197,7 +196,7 @@ func test_player_scalars_render_from_the_live_sim() -> void:
 	var runtime := MissionRuntime.new()
 	add_child_autofree(runtime)
 	assert_gt(runtime.setup(mission, container,
-			{"placer": MissionObjectPlacer.new(null, null)}), 0)
+			{"placer": MissionObjectPlacer.new()}), 0)
 	var page := _make_page(null, runtime)
 	page.refresh()
 

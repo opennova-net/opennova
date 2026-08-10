@@ -19,7 +19,6 @@ extends Node
 
 const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 const StandaloneProbe := preload("res://tests/standalone_game_probe.gd")
-const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 const OUT_DIR := "res://../.scratch/pose_replay"
 
 # Yaw/pitch offsets (degrees) around the dumped forward — the "sometimes" net.

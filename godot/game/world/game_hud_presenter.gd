@@ -14,7 +14,6 @@ extends Node
 const HudSightsCardScript := preload("res://game/world/hud_sights_card.gd")
 const PlayerViewEffectsScript := preload("res://game/world/player_view_effects.gd")
 const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
-const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 
 var _world: GameWorld = null
 var _player_presenter = null     # LocalPlayerPresenter (reserved for the weapon-round anchors)

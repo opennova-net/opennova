@@ -10,7 +10,6 @@ extends GutTest
 
 const Writer := preload("res://game/debug/debug_snapshot_writer.gd")
 const MissionRuntime := preload("res://game/world/mission_runtime.gd")
-const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 
 
 func _runtime() -> MissionRuntime:
@@ -21,7 +20,7 @@ func _runtime() -> MissionRuntime:
 	add_child_autofree(container)
 	var runtime := MissionRuntime.new()
 	add_child_autofree(runtime)
-	var placer := MissionObjectPlacer.new(null, null)
+	var placer := MissionObjectPlacer.new()
 	assert_eq(runtime.setup(mission, container, {
 		"placer": placer,
 		"mission_file": "00TRg.bms",

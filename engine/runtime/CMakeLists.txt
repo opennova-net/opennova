@@ -40,6 +40,7 @@ add_library(opennova_runtime STATIC
     # mission (runtime half) — the BMS event runtime + mission->world promotion,
     # evaluated against the shared runtime world
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/src/event_runtime.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mission/src/placement_traits.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/src/promote.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/src/runtime_boot.cpp
     # particle — the emitter/effect-scene sim (.ptl model+parse+write: engine/formats/ptl)

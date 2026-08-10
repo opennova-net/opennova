@@ -9,7 +9,6 @@ extends GutTest
 # out-of-band (see the placer + game_world paths).
 
 const MissionController := preload("res://modtools/mission/mission_controller.gd")
-const Placer := preload("res://game/mission/mission_object_placer.gd")
 const WaypointOverlay := preload("res://modtools/mission/mission_waypoint_overlay.gd")
 const OverlayUtil := preload("res://game/mission/mission_overlay_util.gd")
 const ObjectUserPointOverlay := preload("res://game/object/object_user_point_overlay.gd")
@@ -326,7 +325,7 @@ func test_selected_userpoint_overlay_uses_shared_script_and_tracks_transform() -
 	var controller := MissionController.new(stub)
 	# A REAL placer with the parsed House registered through its documented asset-free
 	# construction seam, so object_data_for("House") resolves without a resource root.
-	var placer := Placer.new(null, null)
+	var placer := MissionObjectPlacer.new()
 	assert_true(placer.register_resolved_static_graphic("House", data, [{ "mesh": BoxMesh.new() }]),
 		"the placer accepts the pre-parsed House registration")
 	controller._placer = placer
@@ -728,10 +727,10 @@ func test_placement_bakes_the_ground_anchor_into_the_stored_position() -> void:
 	var graphic: String = controller._placer.graphic_for(item_id)
 	var anchor: Vector3 = controller._placer.ground_anchor_godot(graphic)
 	# stored == cursor - anchor (in BMS axes): the bake the engine does at placement.
-	var expected := Placer.godot_to_bms_position(hit - anchor)
+	var expected := MissionObjectPlacer.godot_to_bms_position(hit - anchor)
 	assert_lt((stored - expected).length(), 0.02, "the Ground userpoint is baked into the stored position")
 	# Render is direct (origin at stored), so origin + anchor returns the model's ground point to the cursor.
-	var origin := Placer.bms_to_godot_position(stored)
+	var origin := MissionObjectPlacer.bms_to_godot_position(stored)
 	assert_lt(((origin + anchor) - hit).length(), 0.02, "the rendered model's ground point lands at the drop point")
 
 
@@ -929,7 +928,7 @@ func test_place_entity_selects_the_new_entity_at_the_hit_point() -> void:
 
 	# The stored mission-space position is the inverse of the world hit through the
 	# objects container (identity here), so it must equal godot_to_bms_position(hit).
-	var expected: Vector3 = Placer.godot_to_bms_position(hit)
+	var expected: Vector3 = MissionObjectPlacer.godot_to_bms_position(hit)
 	var stored: Vector3 = controller.get_selected_entity()["position"]
 	assert_almost_eq(stored.x, expected.x, 0.05, "placed X maps back from the world hit")
 	assert_almost_eq(stored.y, expected.y, 0.05, "placed Y maps back from the world hit")
@@ -1023,7 +1022,7 @@ func test_place_entity_round_trips_under_an_offset_container() -> void:
 
 	var container: Node3D = stub.world_root.get_node("MissionObjects")
 	var local: Vector3 = container.global_transform.affine_inverse() * hit
-	var expected: Vector3 = Placer.godot_to_bms_position(local)
+	var expected: Vector3 = MissionObjectPlacer.godot_to_bms_position(local)
 	var stored: Vector3 = controller.get_selected_entity()["position"]
 	assert_almost_eq(stored.x, expected.x, 0.05, "placed X accounts for the container transform")
 	assert_almost_eq(stored.y, expected.y, 0.05, "placed Y accounts for the container transform")
@@ -1155,9 +1154,9 @@ func test_non_object_undo_skips_object_replace() -> void:
 	var mission := controller.get_mission()
 	var mesh := BoxMesh.new()
 	mesh.size = Vector3(2, 2, 2)
-	controller._placer._static_batch_cache["StaticCrate1"] = [{
+	controller._placer.register_static_batches("StaticCrate1", [{
 		"mesh": mesh, "material": null, "offset": Transform3D.IDENTITY, "submesh": 0,
-	}]
+	}])
 	assert_true(controller.place_entity_at_world(105004, Vector3(10, 0, -10)))
 	var container := controller._objects_container()
 	assert_true(is_instance_valid(container), "objects are placed into a container")
@@ -1180,9 +1179,9 @@ func test_object_transform_undo_rebakes_the_world() -> void:
 	var controller := _loaded_with_item_db()
 	var mesh := BoxMesh.new()
 	mesh.size = Vector3(2, 2, 2)
-	controller._placer._static_batch_cache["StaticCrate1"] = [{
+	controller._placer.register_static_batches("StaticCrate1", [{
 		"mesh": mesh, "material": null, "offset": Transform3D.IDENTITY, "submesh": 0,
-	}]
+	}])
 	assert_true(controller.place_entity_at_world(105004, Vector3(10, 0, -10)))
 	var container := controller._objects_container()
 	var child_before = container.get_child(0)
@@ -1210,9 +1209,9 @@ func test_delete_rebakes_pickable_index_and_frees_the_selection_box() -> void:
 	var mesh := BoxMesh.new()
 	mesh.size = Vector3(2, 2, 2)
 	# 105004 is the committed static (no-anim_def) fixture item; its graphic is StaticCrate1.
-	controller._placer._static_batch_cache["StaticCrate1"] = [{
+	controller._placer.register_static_batches("StaticCrate1", [{
 		"mesh": mesh, "material": null, "offset": Transform3D.IDENTITY, "submesh": 0,
-	}]
+	}])
 
 	# Place two instances so the survivor's index must shift down when the first is deleted.
 	assert_true(controller.place_entity_at_world(105004, Vector3(10, 0, -10)))
@@ -1380,7 +1379,7 @@ func test_reground_count_matches_engine_bake_for_rotated_anchor() -> void:
 	var graphic: String = controller._placer.graphic_for(102001)
 	assert_false(graphic.is_empty(), "items.def resolves 102001 to a graphic name")
 	var anchor_godot := Vector3(1.0, 0.5, 2.0)
-	controller._placer._anchor_cache[graphic] = anchor_godot
+	controller._placer.register_ground_anchor(graphic, anchor_godot)
 
 	# A SLOPED surface that passes exactly through the rotated ground anchor: zero
 	# drift. The slope pins the sample LOCATION too — sampling under the entity
@@ -1388,7 +1387,7 @@ func test_reground_count_matches_engine_bake_for_rotated_anchor() -> void:
 	# (~0.04 here, over the 0.01 epsilon) and would be counted.
 	var pos: Vector3 = mission.get_entity(kind, index)["position"]
 	var rot: Vector3 = mission.get_entity(kind, index)["rotation_deg"]
-	var ground: Vector3 = Placer.bms_to_godot_position(pos) + Placer.bms_to_godot_basis(rot) * anchor_godot
+	var ground: Vector3 = MissionObjectPlacer.bms_to_godot_position(pos) + MissionObjectPlacer.bms_to_godot_basis(rot) * anchor_godot
 	var stub: StubTerrainEditor = controller.terrain_editor
 	stub.sample_slope_x = 0.1
 	_stub_drift(controller, ground.y - 0.1 * ground.x)
@@ -1496,7 +1495,7 @@ func test_targeted_reground_updates_placed_nodes_in_place() -> void:
 	# Fabricate the placed-world records the placer would have built (headless
 	# cannot resolve the model) — the white-box seam, like _anchor_cache above.
 	var entity: Dictionary = mission.get_entity(kind, index)
-	var xform0: Transform3D = Placer.entity_transform(entity["position"], entity["rotation_deg"])
+	var xform0: Transform3D = MissionObjectPlacer.entity_transform(entity["position"], entity["rotation_deg"])
 	var node := Node3D.new()
 	add_child_autofree(node)
 	node.transform = xform0
@@ -2119,7 +2118,7 @@ func test_marker_drag_commits_the_new_position() -> void:
 	controller._waypoints._on_marker_drag(Vector2(10, 10))  # stub raycast -> terrain_hit
 	controller._waypoints._on_marker_left_release()
 
-	var expected: Vector3 = Placer.godot_to_bms_position(controller.terrain_editor.terrain_hit)
+	var expected: Vector3 = MissionObjectPlacer.godot_to_bms_position(controller.terrain_editor.terrain_hit)
 	var stored: Vector3 = mission.get_entity(MissionData.KIND_MARKER, marker_index)["position"]
 	assert_almost_eq(stored.x, expected.x, 0.05, "the dragged marker's X is written to the record")
 	assert_almost_eq(stored.z, expected.z, 0.05, "and its Z")
@@ -2185,9 +2184,9 @@ func test_switching_paths_clears_a_shared_marker_highlight() -> void:
 func _seed_crate_batch(controller) -> void:
 	var mesh := BoxMesh.new()
 	mesh.size = Vector3.ONE
-	controller._placer._static_batch_cache["StaticCrate1"] = [{
+	controller._placer.register_static_batches("StaticCrate1", [{
 		"mesh": mesh, "material": null, "offset": Transform3D.IDENTITY, "submesh": 0,
-	}]
+	}])
 
 
 func test_place_and_delete_report_status_and_resolve_names() -> void:
@@ -2613,7 +2612,7 @@ func _controller_with_model(bms_id: int) -> Dictionary:
 	model.set_process(false)
 	var ref := { "kind": 1, "index": 0, "bms_id": bms_id, "group": 4, "team": 0, "position": Vector3.ZERO }
 	model.set_meta("entity_ref", ref)
-	var placer := Placer.new(null, null)
+	var placer := MissionObjectPlacer.new()
 	placer.placed_entity_records.append({ "model": model, "ref": ref })
 	var controller := MissionController.new(stub)
 	controller._placer = placer

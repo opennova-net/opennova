@@ -15,7 +15,6 @@ const SCHEMA := "opennova.debug_snapshot.v1"
 const SNAPSHOT_DIR := "user://debug/snapshots"
 const DEFAULT_PLAYER_FOV_H_DEG := 80.0
 const MICROSECONDS_PER_SECOND := 1_000_000.0
-const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 const MissionRuntime := preload("res://game/world/mission_runtime.gd")
 
 ## The no-overwrite sequence for default paths (rapid consecutive snapshots

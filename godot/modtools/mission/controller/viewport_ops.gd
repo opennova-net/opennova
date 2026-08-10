@@ -130,7 +130,7 @@ func cancel_drag() -> void:
 		_c._gizmo_drag = {}
 		if not _c._selected_ref.is_empty():
 			_c._selected_rotation_deg = _c._gizmo_start_rot
-			_apply_selected_xform(Transform3D(_c.MissionObjectPlacer.bms_to_godot_basis(_c._gizmo_start_rot), _c._gizmo_start_origin))
+			_apply_selected_xform(Transform3D(MissionObjectPlacer.bms_to_godot_basis(_c._gizmo_start_rot), _c._gizmo_start_origin))
 		if _c._gizmo != null and is_instance_valid(_c._gizmo):
 			_c._gizmo.end_drag()
 			_c._gizmo.set_highlight({})
@@ -269,7 +269,7 @@ func _on_gizmo_drag(mouse_pos: Vector2) -> void:
 			r.z = nv
 		_c._selected_rotation_deg = r
 		_c._drag_moved = true
-		_apply_selected_xform(Transform3D(_c.MissionObjectPlacer.bms_to_godot_basis(r), _c._selected_xform.origin))
+		_apply_selected_xform(Transform3D(MissionObjectPlacer.bms_to_godot_basis(r), _c._selected_xform.origin))
 
 
 func _on_gizmo_release() -> void:
@@ -324,8 +324,11 @@ func _refresh_gizmo() -> void:
 		_c._gizmo = _c.MissionGizmo.new()
 		_c._gizmo.name = "MissionTransformGizmo"
 		# Mission's authored angles are nested BMS euler, not plain euler: the rings must
-		# derive their axes through the same basis the placer renders with.
-		_c._gizmo.basis_builder = _c.MissionObjectPlacer.bms_to_godot_basis
+		# derive their axes through the same basis the placer renders with. (Lambda wrap:
+		# a Callable formed from a native static reports is_valid()=false, which would
+		# silently drop the gizmo to its plain-euler fallback.)
+		_c._gizmo.basis_builder = func(rot_deg: Vector3) -> Basis:
+			return MissionObjectPlacer.bms_to_godot_basis(rot_deg)
 		container.add_child(_c._gizmo)
 	_c._gizmo.visible = true
 	_c._gizmo.show_for(_c._selected_xform.origin, _c._selected_rotation_deg)
@@ -412,7 +415,7 @@ func _refresh_pick_debug() -> void:
 			continue
 		# Container-local transform of the body (= world / container.global_transform).
 		var entity := _find_entity(kind, index)
-		var local: Transform3D = _c.MissionObjectPlacer.entity_transform(
+		var local: Transform3D = MissionObjectPlacer.entity_transform(
 			entity.get("position", Vector3.ZERO), entity.get("rotation_deg", Vector3.ZERO))
 		for shape in shapes:
 			var mi := MeshInstance3D.new()
@@ -506,7 +509,7 @@ func _select(kind: int, index: int) -> void:
 		_c._selected_ground_offset = _c._placer.ground_anchor_godot(graphic)
 	var entity := _find_entity(kind, index)
 	_c._selected_rotation_deg = entity.get("rotation_deg", Vector3.ZERO)
-	_c._selected_xform = _c.MissionObjectPlacer.entity_transform(
+	_c._selected_xform = MissionObjectPlacer.entity_transform(
 		entity.get("position", Vector3.ZERO), _c._selected_rotation_deg)
 	# A marker has no mesh records, so the selection box stays hidden; highlight its gizmo instead.
 	if kind == MissionData.KIND_MARKER and _c._marker_overlay != null and is_instance_valid(_c._marker_overlay):
@@ -653,7 +656,7 @@ func _apply_selected_xform(xform: Transform3D) -> void:
 func _commit_selected_transform() -> void:
 	if _c._selected_ref.is_empty() or _c._mission == null:
 		return
-	var bms_pos = _c.MissionObjectPlacer.godot_to_bms_position(_c._selected_xform.origin)
+	var bms_pos = MissionObjectPlacer.godot_to_bms_position(_c._selected_xform.origin)
 	if _c._mission.set_entity_transform(int(_c._selected_ref["kind"]), int(_c._selected_ref["index"]), bms_pos, _c._selected_rotation_deg):
 		# A marker's gizmo was preview-moved; rebuild the overlay so its pickable AABB tracks the
 		# committed position (re-applies the selection highlight).

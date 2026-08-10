@@ -8,7 +8,6 @@ extends GutTest
 # .3di, so the placer's asset-free tests live elsewhere.
 
 const CollisionHull := preload("res://game/object/collision_hull.gd")
-const Placer := preload("res://game/mission/mission_object_placer.gd")
 
 const FIXTURE_DIR := "res://../fixtures/threedi/3di3"
 
@@ -125,7 +124,7 @@ func test_placer_collision_shapes_for_loads_and_caches() -> void:
 	# pick shapes (the same shapes the controller attaches to bodies), cached per graphic.
 	var root := ResourceRoot.new()
 	root.set_root_dir(ProjectSettings.globalize_path(FIXTURE_DIR))
-	var placer := Placer.new(root, null)
+	var placer := MissionObjectPlacer.create(root, null)
 	var shapes: Array = placer.collision_shapes_for("Shed")
 	assert_gt(shapes.size(), 0, "Shed resolves to convex collision shapes")
 	assert_true(shapes[0] is ConvexPolygonShape3D, "and they are convex hulls")

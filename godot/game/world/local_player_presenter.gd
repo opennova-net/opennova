@@ -2,7 +2,6 @@ class_name LocalPlayerPresenter
 extends Node
 
 const MissionRuntime := preload("res://game/world/mission_runtime.gd")
-const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 
 # Faithful first-person camera. The on-foot eye is Position + CameraOffset, where
 # the local player's CameraOffset is the POSED HEAD BONE minus Position — the eye

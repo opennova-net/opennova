@@ -29,7 +29,6 @@ signal fixed_tick_completed(logic_tick: int)
 ## presentation systems use this boundary to discard transient runtime state.
 signal simulation_restarted()
 
-const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 const MissionPresentPass := preload("res://game/world/mission_present_pass.gd")
 const WirePresentPass := preload("res://game/world/wire_present_pass.gd")
 const FirePresentPass := preload("res://game/world/fire_present_pass.gd")

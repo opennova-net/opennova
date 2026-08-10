@@ -29,7 +29,6 @@ extends RefCounted
 # hot path. The per-leg behavioral semantics and their [orig] witnesses are
 # documented at the native walk — this facade keeps only the cold-path anchors.
 
-const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 
 var _sim: Simulation = null       # snapshot source
 var _placer: MissionObjectPlacer = null

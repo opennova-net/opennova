@@ -9,7 +9,6 @@ extends GutTest
 
 const OverlayScript := preload("res://game/debug/nova_debug_overlay.gd")
 const MissionRuntime := preload("res://game/world/mission_runtime.gd")
-const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 const DebugViewContext := preload("res://game/debug/nova_debug_view_context.gd")
 # Pages mount under the sidebar shell's page mount; option checkboxes are
 # named after their registry id.
@@ -73,7 +72,7 @@ func _make_pose_runtime(mission_file := "00TRe.bms",
 	var runtime := MissionRuntime.new()
 	add_child_autofree(runtime)
 	assert_gt(runtime.setup(mission, container, {
-		"placer": MissionObjectPlacer.new(null, null),
+		"placer": MissionObjectPlacer.new(),
 		"mission_file": mission_file,
 		"mission_name": mission_name,
 	}), 0)

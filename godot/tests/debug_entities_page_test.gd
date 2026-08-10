@@ -9,7 +9,6 @@ extends GutTest
 
 const PageScript := preload("res://game/debug/pages/debug_entities_page.gd")
 const MissionRuntime := preload("res://game/world/mission_runtime.gd")
-const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 
 
 ## The scenario model: the two AI cards plus the presented-row order knobs the
@@ -280,7 +279,7 @@ func test_real_sim_rows_join_ai_cards_with_edit_identity() -> void:
 	var runtime := MissionRuntime.new()
 	add_child_autofree(runtime)
 	assert_eq(runtime.setup(mission, container,
-			{"placer": MissionObjectPlacer.new(null, null)}), 2)
+			{"placer": MissionObjectPlacer.new()}), 2)
 	assert_true(runtime.tick(), "one presented tick fills the client snapshot")
 
 	var rows := DebugEntities.list(runtime.get_sim())

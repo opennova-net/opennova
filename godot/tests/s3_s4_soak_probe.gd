@@ -15,7 +15,6 @@ extends SceneTree
 #     -s res://tests/s3_s4_soak_probe.gd
 # Optional: SOAK_ROUNDS (default 300; one round = 62 ticks + one sweep).
 
-const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 const MissionRuntime := preload("res://game/world/mission_runtime.gd")
 
 const MISSION := "00TRg.bms"
@@ -59,7 +58,7 @@ func _run() -> void:
 	# leg that command-mounts the 50cal gunners) with the render placer
 	# supplied, so mounted AI resolve their UseGun frames through the native
 	# pose path every tick.
-	var placer := MissionObjectPlacer.new(root, item_db)
+	var placer := MissionObjectPlacer.create(root, item_db)
 	var runtime := MissionRuntime.new()
 	get_root().add_child(runtime)
 	var container := Node3D.new()

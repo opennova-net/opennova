@@ -22,7 +22,6 @@ extends RefCounted
 ## slots in the engine's order — the slot table lives in engine/runtime/audio
 ## (audio/bank_chain.h, via AmbientMixer.global_bank_chain).
 
-const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 
 
 class TimeOfDayRegion extends RefCounted:

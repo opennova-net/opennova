@@ -51,6 +51,14 @@ static func latest() -> PerfTimeline:
 	return _ring.back() if not _ring.is_empty() else null
 
 
+## Record an already-measured child span (a collaborator returned its own
+## timing) at the current nesting depth, ending now.
+func add_completed_span(name: String, duration_us: int) -> void:
+	var now := Time.get_ticks_usec()
+	_spans.append({ "name": name, "depth": _open.size(),
+			"start_us": now - maxi(duration_us, 0), "end_us": now })
+
+
 func span(name: String) -> void:
 	_open.push_back(_spans.size())
 	_spans.append({ "name": name, "depth": _open.size() - 1, "start_us": Time.get_ticks_usec(), "end_us": 0 })

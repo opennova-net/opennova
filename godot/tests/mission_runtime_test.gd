@@ -6,7 +6,6 @@ extends GutTest
 # engine path without introducing a second editor gameplay runtime.
 
 const MissionRuntime := preload("res://game/world/mission_runtime.gd")
-const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 const ItemSeatSpecs := preload("res://game/world/item_seat_specs.gd")
 
 
@@ -208,7 +207,7 @@ func _make_world(authored: Transform3D) -> Dictionary:
 	model.transform = authored
 	var ref := { "kind": 3, "index": 0, "bms_id": 0, "group": -1, "team": -1, "position": Vector3.ZERO }
 	model.set_meta("entity_ref", ref)
-	var placer := MissionObjectPlacer.new(null, null)
+	var placer := MissionObjectPlacer.new()
 	placer.placed_entity_records.append({ "model": model, "ref": ref })
 	return { "mission": md, "container": container, "model": model, "placer": placer }
 

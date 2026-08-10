@@ -55,7 +55,7 @@ func get_selection_summary() -> Dictionary:
 	return {
 		"kind": int(_c._selected_ref["kind"]),
 		"index": int(_c._selected_ref["index"]),
-		"position": _c.MissionObjectPlacer.godot_to_bms_position(_c._selected_xform.origin),
+		"position": MissionObjectPlacer.godot_to_bms_position(_c._selected_xform.origin),
 		"animated": _c._selected_node != null,
 	}
 
@@ -178,7 +178,7 @@ func get_selected_entity() -> Dictionary:
 func get_selected_position() -> Vector3:
 	if _c._selected_ref.is_empty():
 		return Vector3.ZERO
-	return _c.MissionObjectPlacer.godot_to_bms_position(_c._selected_xform.origin)
+	return MissionObjectPlacer.godot_to_bms_position(_c._selected_xform.origin)
 
 
 # The live selected rotation as authored (pitch, yaw, roll) degrees.
@@ -199,7 +199,7 @@ func set_selected_position(bms_pos: Vector3) -> void:
 	# space (the drag path and get_selected_position both invert exactly that), so set
 	# the local origin directly. Routing through the container's world transform would
 	# double-apply it and shift the object whenever the container is not at the origin.
-	_c._viewport._apply_selected_xform(Transform3D(_c._selected_xform.basis, _c.MissionObjectPlacer.bms_to_godot_position(bms_pos)))
+	_c._viewport._apply_selected_xform(Transform3D(_c._selected_xform.basis, MissionObjectPlacer.bms_to_godot_position(bms_pos)))
 	_c._viewport._commit_selected_transform()
 
 
@@ -213,7 +213,7 @@ func set_selected_rotation(rot_deg: Vector3) -> void:
 	# degrees, so keeping a fractional value would leave get_selected_rotation out of
 	# step with the persisted record on the next axis edit.
 	_c._selected_rotation_deg = rot_deg.round()
-	var basis: Basis = _c.MissionObjectPlacer.bms_to_godot_basis(_c._selected_rotation_deg)
+	var basis: Basis = MissionObjectPlacer.bms_to_godot_basis(_c._selected_rotation_deg)
 	_c._viewport._apply_selected_xform(Transform3D(basis, _c._selected_xform.origin))
 	_c._viewport._commit_selected_transform()
 

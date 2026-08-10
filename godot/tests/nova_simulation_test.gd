@@ -1,6 +1,5 @@
 extends GutTest
 
-const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 const PresentAimOverlay := preload("res://game/world/aim_overlay_present_pass.gd")
 const NATIVE_RUNTIME_TIMING_KEYS := [
 	"sim_tick_us",

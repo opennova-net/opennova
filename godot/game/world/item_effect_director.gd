@@ -19,7 +19,6 @@ extends RefCounted
 # sources, and the placer's ItemDatabase (typed at the resolve boundary,
 # ADR 0034 — harnesses hand real fixture databases).
 
-const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 const MissionRuntime := preload("res://game/world/mission_runtime.gd")
 
 # [orig: ItemDef_GetBoneMaskByName @ 0x49ea40 scans the first 16 points.]
@@ -215,7 +214,7 @@ func reattach() -> void:
 	if item_db == null:
 		return
 	var attached := 0
-	var container: Node = _world.get_node_or_null(NodePath(MissionObjectPlacer.CONTAINER_NAME))
+	var container: Node = _world.get_node_or_null(NodePath("MissionObjects"))
 	if container != null:
 		for child in container.get_children():
 			# Boundary filter: only placed ObjectModels carry the per-item

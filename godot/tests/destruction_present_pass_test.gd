@@ -15,7 +15,6 @@ extends GutTest
 # authoritative initial pose plus the yaw-only tilt-retention leg.
 
 const DestructionPresentPass := preload('res://game/world/destruction_present_pass.gd')
-const MissionObjectPlacer := preload('res://game/mission/mission_object_placer.gd')
 const MissionRuntime := preload('res://game/world/mission_runtime.gd')
 const WirePresentPass := preload('res://game/world/wire_present_pass.gd')
 
@@ -89,35 +88,35 @@ class CaptureResolver:
 		return by_wire_handle.get(wire_handle)
 
 
-class CapturePlacer:
-	extends MissionObjectPlacer
-	var built: Array = []
-	var hidden: Array = []
-	var shown: Array = []
-	var batched_transforms: Dictionary = {}
-	var static_shadow_ids := {}
-	var build_success := true
+const HUSK_GRAPHIC := 'Dbuggy1X'  # fixture items.def 101291's husk stage
+const HUSK_MODEL_3DI := 'res://../fixtures/3dp/armry01/Armry01.3di'
 
-	func build_model_from_graphic(_graphic: String, _adm_name: String,
-			parent: Node3D, _clip_key: String = '',
-			_rig_graphic: String = '') -> ObjectModel:
-		if not build_success:
-			return null
-		var model := ObjectModel.new()
-		parent.add_child(model)
-		built.append(model)
-		return model
 
-	func hide_static_instance(bms_id: int) -> Variant:
-		hidden.append(bms_id)
-		return batched_transforms.get(bms_id)
+# A REAL placer whose husk graphic resolves through the injected fixture
+# model (no resource root needed). resolvable=false leaves the graphic
+# unregistered so build_model_from_graphic fails naturally.
+func _husk_placer(resolvable := true) -> MissionObjectPlacer:
+	var placer := MissionObjectPlacer.new()
+	if resolvable:
+		var data := ObjectData.new()
+		assert_eq(data.open_file(ProjectSettings.globalize_path(HUSK_MODEL_3DI)),
+				OK, 'the husk fixture model loads')
+		placer.register_object_data(HUSK_GRAPHIC, data)
+	return placer
 
-	func show_static_instance(bms_id: int) -> bool:
-		shown.append(bms_id)
-		return batched_transforms.has(bms_id)
 
-	func static_instance_casts_terrain_shadow(bms_id: int) -> bool:
-		return bool(static_shadow_ids.get(bms_id, false))
+# Every husk graft the pass built anywhere under `root` (individual grafts
+# are named HuskModel, batched HuskModel_<bms>; Godot may suffix collisions).
+func _husk_models(root: Node) -> Array:
+	var out: Array = []
+	var stack: Array = [root]
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		if n is ObjectModel and String(n.name).begins_with('HuskModel'):
+			out.append(n)
+		for child in n.get_children():
+			stack.push_back(child)
+	return out
 
 
 # A real EntityIndex over real ObjectModels, built through the placer's
@@ -220,7 +219,7 @@ func test_settled_slot_reuse_replaces_the_presented_incarnation() -> void:
 func test_reset_runtime_state_restores_individual_visuals_and_retires_anchors() -> void:
 	var fx := _make_fx()
 	var anchors := CaptureAnchors.new()
-	var placer := CapturePlacer.new()
+	var placer := _husk_placer()
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var intact := ObjectModel.new()
@@ -257,10 +256,10 @@ func test_reset_runtime_state_restores_individual_visuals_and_retires_anchors() 
 	assert_false(originally_hidden.visible)
 	assert_false(static_caster.visible,
 			"the intact individual caster follows the visible model into the husk swap")
-	assert_eq(placer.built.size(), 1)
+	assert_eq(_husk_models(self).size(), 1)
 	assert_true(anchors.anchors.has('wreck:91:2'))
 	assert_true(anchors.anchors.has('piece:5'))
-	var graft: ObjectModel = placer.built[0]
+	var graft: ObjectModel = _husk_models(self)[0]
 	assert_true(graft.is_static_shadow_caster_enabled(),
 			"the individual husk replaces the intact static silhouette")
 
@@ -285,11 +284,11 @@ func test_reset_runtime_state_restores_individual_visuals_and_retires_anchors() 
 func test_reset_runtime_state_restores_batched_static_and_removes_husk_graft() -> void:
 	var fx := _make_fx()
 	var anchors := CaptureAnchors.new()
-	var placer := CapturePlacer.new()
+	var placer := _husk_placer()
 	var container := Node3D.new()
 	add_child_autofree(container)
-	placer.batched_transforms[77] = Transform3D(Basis.IDENTITY, Vector3(9, 8, 7))
-	placer.static_shadow_ids[77] = true
+	var placed := Transform3D(Basis.IDENTITY, Vector3(9, 8, 7))
+	placer.register_static_instance(77, 'StaticProp', 0, placed, true)
 	var events := {
 		'husk_swaps': [{
 			'bms_id': 77,
@@ -302,16 +301,16 @@ func test_reset_runtime_state_restores_batched_static_and_removes_husk_graft() -
 
 	presenter.present_drained(events, [])
 
-	assert_eq(placer.hidden, [77])
-	assert_eq(placer.built.size(), 1)
-	var graft: ObjectModel = placer.built[0]
-	assert_eq(graft.transform, placer.batched_transforms[77])
+	assert_true(placer.is_static_instance_hidden(77))
+	assert_eq(_husk_models(self).size(), 1)
+	var graft: ObjectModel = _husk_models(self)[0]
+	assert_eq(graft.transform, placed)
 	assert_true(graft.is_static_shadow_caster_enabled(),
 			"the batched husk inherits the carved slot's static-caster admission")
 
 	presenter.reset_runtime_state()
 
-	assert_eq(placer.shown, [77],
+	assert_false(placer.is_static_instance_hidden(77),
 			'the pass uses the placer public inverse to restore the static')
 	assert_true(graft.is_queued_for_deletion())
 
@@ -319,8 +318,7 @@ func test_reset_runtime_state_restores_batched_static_and_removes_husk_graft() -
 func test_failed_individual_husk_build_keeps_the_intact_visual_visible() -> void:
 	var fx := _make_fx()
 	var anchors := CaptureAnchors.new()
-	var placer := CapturePlacer.new()
-	placer.build_success = false
+	var placer := _husk_placer(false)
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var intact := ObjectModel.new()
@@ -342,7 +340,7 @@ func test_failed_individual_husk_build_keeps_the_intact_visual_visible() -> void
 
 	assert_true(visual.visible,
 			'a failed graft build must leave the retail intact-graphic fallback standing')
-	assert_eq(placer.built.size(), 0)
+	assert_eq(_husk_models(self).size(), 0)
 	assert_eq(presenter.get_stats().no_husk, 1)
 	presenter.teardown()
 
@@ -350,9 +348,9 @@ func test_failed_individual_husk_build_keeps_the_intact_visual_visible() -> void
 func test_failed_batched_husk_build_does_not_carve_the_static_instance() -> void:
 	var fx := _make_fx()
 	var anchors := CaptureAnchors.new()
-	var placer := CapturePlacer.new()
-	placer.build_success = false
-	placer.batched_transforms[77] = Transform3D(Basis.IDENTITY, Vector3(9, 8, 7))
+	var placer := _husk_placer(false)
+	placer.register_static_instance(77, 'StaticProp', 0,
+			Transform3D(Basis.IDENTITY, Vector3(9, 8, 7)), false)
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var events := {
@@ -367,7 +365,7 @@ func test_failed_batched_husk_build_does_not_carve_the_static_instance() -> void
 
 	presenter.present_drained(events, [])
 
-	assert_eq(placer.hidden, [],
+	assert_false(placer.is_static_instance_hidden(77),
 			'a failed graft build must not carve a visible hole in a static batch')
 	assert_eq(container.get_child_count(), 0)
 	assert_eq(presenter.get_stats().no_husk, 1)
@@ -377,7 +375,7 @@ func test_failed_batched_husk_build_does_not_carve_the_static_instance() -> void
 func test_zero_bms_husks_use_distinct_spawn_origins_for_identity_and_lookup() -> void:
 	var fx := _make_fx()
 	var anchors := CaptureAnchors.new()
-	var placer := CapturePlacer.new()
+	var placer := _husk_placer()
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var first := ObjectModel.new()
@@ -408,13 +406,13 @@ func test_zero_bms_husks_use_distinct_spawn_origins_for_identity_and_lookup() ->
 
 	presenter.present_drained(events, [])
 
-	assert_eq(placer.built.size(), 2,
+	assert_eq(_husk_models(self).size(), 2,
 			'distinct zero-BMS entities own distinct husk cache entries')
 	assert_false(first_visual.visible,
 			'the first event resolved its own node through its decoded mission origin')
 	assert_false(second_visual.visible,
 			'the second event resolved its own node through its decoded mission origin')
-	assert_eq(placer.hidden, [],
+	assert_false(placer.is_static_instance_hidden(0),
 			'individual origin fallback does not touch the static batch map')
 	presenter.teardown()
 	assert_true(first_visual.visible)
@@ -426,7 +424,7 @@ func test_synthetic_husks_use_distinct_wire_handles_for_identity_and_lookup() ->
 	var fx := _make_fx()
 	var anchors := CaptureAnchors.new()
 	var resolver := CaptureResolver.new()
-	var placer := CapturePlacer.new()
+	var placer := _husk_placer()
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var first := ObjectModel.new()
@@ -463,7 +461,7 @@ func test_synthetic_husks_use_distinct_wire_handles_for_identity_and_lookup() ->
 
 	assert_eq(resolver.wire_resolve_calls, [0x1004, 0x1005],
 			'each attachment child resolves through its packed runtime handle')
-	assert_eq(placer.built.size(), 2,
+	assert_eq(_husk_models(self).size(), 2,
 			'distinct synthetic entities own distinct husk cache entries')
 	assert_false(first_visual.visible)
 	assert_false(second_visual.visible)
@@ -475,12 +473,13 @@ func test_synthetic_husks_use_distinct_wire_handles_for_identity_and_lookup() ->
 
 func test_missing_synthetic_husk_node_never_falls_back_to_static_zero_id() -> void:
 	var resolver := CaptureResolver.new()
-	var placer := CapturePlacer.new()
+	var placer := _husk_placer()
 	var container := Node3D.new()
 	add_child_autofree(container)
 	# BMS id zero is valid for an authored static. A missing runtime wire node
 	# must not carve this unrelated instance or resolve through the sentinel.
-	placer.batched_transforms[0] = Transform3D.IDENTITY
+	placer.register_static_instance(0, 'StaticProp', 0, Transform3D.IDENTITY,
+			false)
 	var authored_zero := ObjectModel.new()
 	add_child_autofree(authored_zero)
 	var index := _index_of([_entry(authored_zero, 0, 255, 16777215)])
@@ -499,9 +498,9 @@ func test_missing_synthetic_husk_node_never_falls_back_to_static_zero_id() -> vo
 	presenter.present_drained(events, [])
 
 	assert_eq(resolver.wire_resolve_calls, [0x1004])
-	assert_true(placer.hidden.is_empty(),
+	assert_false(placer.is_static_instance_hidden(0),
 			'a missing wire node cannot hide the authored static with BMS id zero')
-	assert_true(placer.built.is_empty(),
+	assert_true(_husk_models(self).is_empty(),
 			'no unattached husk graft is built for a retired runtime row')
 	assert_eq(presenter.get_stats().no_husk, 1)
 
@@ -544,7 +543,7 @@ func test_synthetic_wreck_families_use_distinct_moving_wire_anchors() -> void:
 		'pos': Vector3(20, 30, 40),
 	})
 	var presenter := DestructionPresentPass.new()
-	presenter.setup(null, container, _index_of([]), CapturePlacer.new(),
+	presenter.setup(null, container, _index_of([]), _husk_placer(),
 			_item_db, anchors, Callable(), func(): return fx, resolver)
 
 	presenter.present_drained({'effects': effects}, [])
@@ -608,11 +607,11 @@ func test_batched_husk_and_wreck_anchor_follow_the_live_present_pose() -> void:
 
 	var fx := _make_fx()
 	var anchors := CaptureAnchors.new()
-	var placer := CapturePlacer.new()
+	var placer := _husk_placer()
 	var authored_rot := Vector3(17, 40, -12)
 	var authored := Transform3D(
 			MissionObjectPlacer.bms_to_godot_basis(authored_rot), Vector3(9, 8, 7))
-	placer.batched_transforms[0] = authored
+	placer.register_static_instance(0, 'StaticProp', 0, authored, false)
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var events := {
@@ -636,11 +635,12 @@ func test_batched_husk_and_wreck_anchor_follow_the_live_present_pose() -> void:
 
 	presenter.present_drained(events, [])
 
-	assert_eq(placer.hidden, [0], 'the node-less husk carves the batch slot')
-	assert_eq(placer.built.size(), 1)
-	if placer.built.is_empty():
+	assert_true(placer.is_static_instance_hidden(0),
+			'the node-less husk carves the batch slot')
+	assert_eq(_husk_models(self).size(), 1)
+	if _husk_models(self).is_empty():
 		return
-	var graft: ObjectModel = placer.built[0]
+	var graft: ObjectModel = _husk_models(self)[0]
 	var expected := Transform3D(authored.basis, state[0])
 	assert_true(graft.transform.is_equal_approx(expected),
 			'the graft takes the live present origin while keeping the authored tilt')

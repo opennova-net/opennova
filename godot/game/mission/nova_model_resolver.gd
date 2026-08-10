@@ -11,7 +11,6 @@ extends RefCounted
 # _needs_individual_node / _apply_skeletal_anim onto this resolver so the .bms
 # and net paths share one copy.)
 
-const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 
 var _root: ResourceRoot
 var _item_db: ItemDatabase

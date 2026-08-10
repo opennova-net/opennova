@@ -1,7 +1,6 @@
 class_name PresentHeldWeapon
 extends RefCounted
 
-const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 
 ## Placement for the THIRD-PERSON held weapon — the gun in a soldier's hands. Shared by
 ## every present path that draws one (the local player's own avatar, and wire-decoded

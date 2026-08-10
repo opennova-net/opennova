@@ -9,7 +9,6 @@
 ## reconciles model nodes against get_throwable_visuals() each frame.]
 extends RefCounted
 
-const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 
 var _sim: Simulation                  # null in data-driven tests
 var _container: Node3D

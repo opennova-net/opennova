@@ -20,7 +20,6 @@ extends Node3D
 
 const VegAssets := preload("res://game/terrain/veg_assets.gd")
 const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
-const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 const MissionRuntime := preload("res://game/world/mission_runtime.gd")
 const NovaDebugViewStatus := preload(
 		"res://game/debug/nova_debug_view_status.gd")
@@ -564,7 +563,7 @@ func _mount_runtime_root(dir: String) -> ResourceRoot:
 func _place_mission_objects(mission: MissionData, timeline: PerfTimeline = null) -> void:
 	if _resource_root == null or mission == null:
 		return
-	_placer = MissionObjectPlacer.new(_resource_root)
+	_placer = MissionObjectPlacer.create(_resource_root, null)
 	_panm_clock.sample_frame()
 	_placer.set_panm_clock(_panm_clock)
 	_placer.set_environment_state(_env.get_light_state())
@@ -648,7 +647,7 @@ func unload() -> void:
 	_local_player_spawn_loadout = {}
 	_clear_mission_tile_info()
 	_restore_idle_frame_clear_color()
-	var container := get_node_or_null(NodePath(MissionObjectPlacer.CONTAINER_NAME))
+	var container := get_node_or_null(NodePath("MissionObjects"))
 	if container != null:
 		container.queue_free()
 	# Per-item attached-effect owner keys reference nodes in that container —
@@ -2064,7 +2063,7 @@ func _route_round_impacts() -> void:
 # drives it explicitly from tick(); its drained side effects route through
 # _on_runtime_effects. A reload reuses this GameWorld, so any prior runtime is freed in unload() first.
 func _start_runtime(mission: MissionData, bms_name: String) -> int:
-	var container := get_node_or_null(NodePath(MissionObjectPlacer.CONTAINER_NAME))
+	var container := get_node_or_null(NodePath("MissionObjects"))
 	_runtime = MissionRuntime.new()
 	_runtime.name = "MissionRuntime"
 	add_child(_runtime)

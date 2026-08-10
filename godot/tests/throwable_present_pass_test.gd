@@ -8,7 +8,6 @@ extends GutTest
 # (id 101883 = the 3rd-person HE grenade).
 
 const ThrowablePresentPass := preload("res://game/world/throwable_present_pass.gd")
-const MissionObjectPlacer := preload("res://game/mission/mission_object_placer.gd")
 
 static var _item_db: ItemDatabase = null
 
@@ -20,17 +19,33 @@ func before_all() -> void:
 			"the fixture items.def loads (101883 carries graphic Frag_3rd)")
 
 
-class CapturePlacer:
-	extends MissionObjectPlacer
-	var built: Array[Node3D] = []
+const ROUND_GRAPHIC := "Frag_3rd"  # fixture items.def 101883's graphic
+const ROUND_MODEL_3DI := "res://../fixtures/3dp/armry01/Armry01.3di"
 
-	func build_model_from_graphic(_graphic: String, _adm_name: String,
-			parent: Node3D, _clip_key: String = "",
-			_rig_graphic: String = "") -> ObjectModel:
-		var model := ObjectModel.new()
-		parent.add_child(model)
-		built.append(model)
-		return model
+
+# A REAL placer whose round graphic resolves through the injected fixture
+# model (native methods cannot be intercepted from GDScript).
+func _round_placer() -> MissionObjectPlacer:
+	var placer := MissionObjectPlacer.new()
+	var data := ObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(ROUND_MODEL_3DI)),
+			OK, "the round fixture model loads")
+	placer.register_object_data(ROUND_GRAPHIC, data)
+	return placer
+
+
+# Every thrown-round model the pass built under `root` (named
+# Throwable_<item_id>; Godot may suffix collisions).
+func _thrown_models(root: Node) -> Array:
+	var out: Array = []
+	var stack: Array = [root]
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		if n is ObjectModel and String(n.name).begins_with("Throwable_"):
+			out.append(n)
+		for child in n.get_children():
+			stack.push_back(child)
+	return out
 
 
 class CaptureFx:
@@ -87,7 +102,7 @@ func _make_fx() -> CaptureFx:
 func test_present_uses_the_canonical_bms_basis_and_godot_position() -> void:
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var placer := CapturePlacer.new()
+	var placer := _round_placer()
 	var presenter := ThrowablePresentPass.new()
 	presenter.setup(null, container, placer, _item_db)
 
@@ -99,8 +114,8 @@ func test_present_uses_the_canonical_bms_basis_and_godot_position() -> void:
 			"pos": position,
 			"rotation_deg": rotation,
 		}])
-		assert_eq(placer.built.size(), 1, "the same live round reuses its model")
-		var model := placer.built[0]
+		assert_eq(_thrown_models(container).size(), 1, "the same live round reuses its model")
+		var model: ObjectModel = _thrown_models(container)[0]
 		assert_eq(model.position, position, "Godot-space position is applied verbatim")
 		assert_true(model.basis.is_equal_approx(
 				MissionObjectPlacer.bms_to_godot_basis(rotation)),
@@ -115,7 +130,7 @@ func test_move_effect_spawns_once_follows_full_round_pose_and_stops_with_round()
 	# @0x5f7410 and released by Projectile_ReleaseEffects @0x4e8280.
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var placer := CapturePlacer.new()
+	var placer := _round_placer()
 	var fx := _make_fx()
 	var anchors := CaptureAnchors.new()
 	var presenter := ThrowablePresentPass.new()
@@ -169,7 +184,7 @@ func test_two_move_effect_closures_track_and_retire_their_own_rounds() -> void:
 	var fx := _make_fx()
 	var anchors := CaptureAnchors.new()
 	var presenter := ThrowablePresentPass.new()
-	presenter.setup(null, container, CapturePlacer.new(), _item_db,
+	presenter.setup(null, container, _round_placer(), _item_db,
 			func() -> Variant: return fx, anchors)
 	var pos_a := Vector3(1, 2, 3)
 	var pos_b := Vector3(10, 20, 30)
@@ -237,7 +252,7 @@ func test_same_slot_new_generation_replaces_the_owned_effect_group() -> void:
 	var fx := _make_fx()
 	var anchors := CaptureAnchors.new()
 	var presenter := ThrowablePresentPass.new()
-	presenter.setup(null, container, CapturePlacer.new(), _item_db,
+	presenter.setup(null, container, _round_placer(), _item_db,
 			func() -> Variant: return fx, anchors)
 	presenter.present_visuals([{
 		"key": 1024, # generation 1, slot 0
@@ -283,7 +298,7 @@ func test_rejected_move_effect_spawn_leaves_no_transform_or_anchor_state() -> vo
 
 	# A missing provider is a normal startup/teardown ordering case. It must not
 	# leave an unowned transform that retirement can never discover.
-	presenter.setup(null, container, CapturePlacer.new(), _item_db,
+	presenter.setup(null, container, _round_placer(), _item_db,
 			Callable(), anchors)
 	presenter.present_visuals([row])
 	assert_eq(presenter.get_stats().move_effects, 0)
@@ -292,7 +307,7 @@ func test_rejected_move_effect_spawn_leaves_no_transform_or_anchor_state() -> vo
 
 	var fx := _make_fx()
 	fx.allow_spawn = false
-	presenter.setup(null, container, CapturePlacer.new(), _item_db,
+	presenter.setup(null, container, _round_placer(), _item_db,
 			func() -> Variant: return fx, anchors)
 	presenter.present_visuals([row])
 	assert_eq(fx.spawns.size(), 1, "the provider rejected one real request")
@@ -313,7 +328,7 @@ func test_remote_flying_round_snapshot_builds_and_retires_its_model() -> void:
 	# device: a future 0x59/0x12 decode would have to add that state explicitly.
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var placer := CapturePlacer.new()
+	var placer := _round_placer()
 	var presenter := ThrowablePresentPass.new()
 	presenter.setup(null, container, placer, _item_db)
 
@@ -323,12 +338,12 @@ func test_remote_flying_round_snapshot_builds_and_retires_its_model() -> void:
 		"pos": Vector3(4, 5, 6),
 		"rotation_deg": Vector3.ZERO,
 	}])
-	assert_eq(placer.built.size(), 1,
+	assert_eq(_thrown_models(container).size(), 1,
 			"the remote flying-round snapshot materializes its TrcrID item")
 	var live_stats := presenter.get_stats()
 	assert_true(live_stats is ThrowablePresentPass.Stats)
 	assert_eq(live_stats.live, 1)
-	var model := placer.built[0]
+	var model: ObjectModel = _thrown_models(container)[0]
 	assert_eq(model.position, Vector3(4, 5, 6))
 
 	presenter.present_visuals([])

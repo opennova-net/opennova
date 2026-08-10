@@ -85,7 +85,7 @@ func place_entity_at_world(item_id: int, global_hit: Vector3) -> bool:
 	# begin_edit/commit_edit (commit pushes one step iff the add changed the document).
 	_c._flush_edit()
 	_c._mission.begin_edit()
-	var record = _c._mission.place_entity_grounded(item_id, item_type, _c.MissionObjectPlacer.godot_to_bms_position(local), anchor_bms)
+	var record = _c._mission.place_entity_grounded(item_id, item_type, MissionObjectPlacer.godot_to_bms_position(local), anchor_bms)
 	if record.is_empty():
 		# Balance the begin_edit() bracket on the reject path (no-op step, the failed add changed
 		# nothing) so the open session does not leak into the next gesture.

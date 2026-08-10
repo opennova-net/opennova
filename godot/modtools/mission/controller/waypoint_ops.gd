@@ -287,7 +287,7 @@ func _commit_marker_drag() -> void:
 	if _c._selected_marker.is_empty() or _c._mission == null:
 		return
 	var marker_index := int(_c._selected_marker["marker_index"])
-	var bms_pos = _c.MissionObjectPlacer.godot_to_bms_position(_c._marker_drag_local)
+	var bms_pos = MissionObjectPlacer.godot_to_bms_position(_c._marker_drag_local)
 	var entity = _c._mission.get_entity(MissionData.KIND_MARKER, marker_index)
 	var rot: Vector3 = entity.get("rotation_deg", Vector3.ZERO)
 	if _c._mission.set_entity_transform(MissionData.KIND_MARKER, marker_index, bms_pos, rot):
@@ -331,7 +331,7 @@ func add_marker_to_active_path_at_world(global_hit: Vector3) -> bool:
 	if container == null:
 		return false
 	var local = container.global_transform.affine_inverse() * global_hit
-	var bms_pos = _c.MissionObjectPlacer.godot_to_bms_position(local)
+	var bms_pos = MissionObjectPlacer.godot_to_bms_position(local)
 	_c._flush_edit()
 	_c._mission.begin_edit()
 	var result = _c._mission.add_path_marker_grounded(_c._selected_path_index, bms_pos)
