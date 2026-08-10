@@ -424,6 +424,8 @@ Sources: [mnu/menu-re.md](mnu/menu-re.md), [audio/lwf-dbf-sound-re.md](audio/lwf
 | D-MNU-10 | Offline (SP) PLAYER_CLASS spin stays enabled where retail enables it only in-session [orig: UI_InitTeamClassSelection @ 0x567370] — deliberate decision 2026-07-11 | C | OPEN (kept by decision; permanent-register candidate — ADR 0022) | PAR-UI |
 | D-MNU-12 | Combo popup draw parent: retail draws the child-of-combo popup, the reimpl hosts it in the menu-top overlay — unobservable in shipped menus (single-open registry + catcher carry the behavior) | C | OPEN (kept; register candidate — ADR 0022) | PAR-UI |
 | D-MNU-14 | SP mission-select population: the shell seeds IA_LIST (and the host screen's MISSION_LIST) with raw `.bms` filenames from the dir scan, and the MISSION BRIEFING pane never populates on selection (observed live 2026-08-10, revx02 sp.mnu). Retail's populate is `SinglePlayer_PopulateMissionList @ 0x561840` (interior unwalked) — witness what rows it builds (display titles vs filenames) and where the briefing text comes from (the authored `SP_MissionDesc` string + per-mission description source), then port | A | OPEN (needs the populate witness) | PAR-UI |
+| D-MNU-15 | Combobox closed face never draws the selected item's text — retail's face is a CButtonWnd showing the selection [orig: CComboWnd @ 0x65be40]. Observed live 2026-08-10: all ten armory (weapon.mnu WEAPON) combo faces render empty over companion-seeded rows while every spinlist face draws `items[selected]` | A | OPEN | PAR-UI |
+| D-MNU-16 | Spinlist arrows authored outside the widget rect are unhittable: the pump claims by widget rect, but retail's SPINUP/SPINDOWN are child windows with their own claim rects [orig: CSpinListWnd_CreateUpDownChildren @ 0x64b8b0] — a mouse cannot cycle GAME_TYPE and kin (observed live 2026-08-10; the rects already exist for `spin_arrow_at`) | A | OPEN | PAR-UI |
 | D-CTRL-1 | Mouse/joystick binding arrays (profile-built at runtime) not ported; those rows show a blank Control column. **Scoping (2026-07-05):** NOT in `PlayerProfile_InitDefaults @ 0x54bb40` (that sets settings/macros/default weapon loadouts only) — the mouse/joystick default bindings are built by a separate input-binding init (an RE hunt), and the consumer is the Godot input-action layer (same gate as D-CTRL-3) | A | OPEN | PAR-UI |
 | D-CTRL-3 | Live double-click rebinding / DEFAULTS / CLEAR_KEY / profile persistence deferred — gated on a real input-action layer | A | WITNESSED-READY-DEFERRED | PAR-UI |
 | D-PLAYERINFO-1 | In-world (spawned-player) combo→3D-model binding untraced (the preview is witnessed + fully ported) | B | NEEDS-RE | PAR-UI / research starter |
@@ -888,7 +890,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Net | 19 | 0 | 8 | 27 | 0 |
 | Environment | 0 | 0 | 3 | 3 | 0 |
 | World / AI + events | 58 | 4 | 6 | 68 | 0 |
-| UI (menu/ctrl/sound/playerinfo/HUD) | 41 | 1 | 4 | 46 | 0 |
+| UI (menu/ctrl/sound/playerinfo/HUD) | 43 | 1 | 4 | 48 | 0 |
 | Mission `.mis` | 0 | 2 | 1 | 3 | 0 |
 | LW `.3di` | 0 | 2 | 1 | 3 | 0 |
 | Particles `.ptl` | 2 | 0 | 0 | 2 | 0 |
@@ -901,7 +903,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Render — materials/state | 0 | 0 | 1 | 1 | 0 |
 | Render — draw order | 3 | 0 | 1 | 4 | 0 |
 | Render — lighting | 3 | 0 | 2 | 5 | 0 |
-| **Total** | **132** | **13** | **27** | **172** | 0 |
+| **Total** | **134** | **13** | **27** | **174** | 0 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-INF-20, D-NET-136, D-NET-169, D-NET-179, D-NET-64, D-NET-97.
 

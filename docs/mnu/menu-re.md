@@ -370,7 +370,9 @@ is the ONE menu path (the MnuMenu Control tree is deleted). Pinned by
   overflow wrap; marquee image nodes + the 50px edge fade band; scrollbar
   art + thumb interaction (the SCROLL widget's runtime-constructed child
   BUTTONs and the medit/list/table authored scrollbars — wheel scrolling
-  rides `scroll_row` shell-side meanwhile); spin arrows compile with their
+  rides `scroll_row` shell-side meanwhile; observed live 2026-08-10: the
+  host screen's 119-row MISSION_LIST renders no scrollbar, so only the
+  first ~10 rows are mouse-reachable); spin arrows compile with their
   default-state art (their independent hover states are separate
   child-widget state the compiled path does not yet model).
 
@@ -1041,6 +1043,29 @@ Accepted/divergent (each a documented decision, not a defect):
   revx02 menus). Retail's populate is `SinglePlayer_PopulateMissionList
   @ 0x561840` (one of the strip-enabling activate handlers; interior unwalked) —
   witness the row content it builds and the briefing text source, then port.
+- **D-MNU-15 (combobox closed face — selected item not drawn):** the compiled
+  combo draws its chrome but never the selected item's text on the closed
+  face, where retail's face is a `CButtonWnd` showing the selection
+  (`CComboWnd ctor @ 0x65be40`, closed button at `this+764`). Observed live
+  2026-08-10 on the in-game armory (weapon.mnu WEAPON): all ten `combobox`
+  faces (PRIMARY/SECONDARY/ACCESSORY/GRENADE ammo tuples) render empty over
+  live companion-seeded rows, while every `spinlist` face on the same install
+  (PLAYER_CLASS "Rifleman", the host screen's GAME_TYPE/SERVERTYPE) draws
+  `items[selected]`. Diagnose the face-text channel (compiler face
+  substitution vs the runtime-rows selection reaching the frame), then pin
+  with a compiled-face test.
+- **D-MNU-16 (spinlist arrows unhittable — pump claim walk):** the witnessed
+  pump claims by widget rect (front-most LAST-hit of the forward draw walk),
+  but retail's `<SPINUP>`/`<SPINDOWN>` are child windows carrying their own
+  rects in that walk (`CSpinListWnd_CreateUpDownChildren @ 0x64b8b0`,
+  parent-relative POSITION — the paragraph above), and shipped menus author
+  them OUTSIDE the parent rect (mp.mnu GAME_TYPE: left arrow −18..−2, right
+  217..233 against a 0..215-wide widget). The compiled pump never hands those
+  presses to the spinlist — a mouse cannot cycle any arrows-outside spin
+  combo (observed live 2026-08-10: GAME_TYPE presses at both arrow rects fall
+  through to MAIN). Fix: give the compiled spin-button rects a place in the
+  claim walk (the rects already exist for `spin_arrow_at`), matching the
+  child-window claim retail gets for free.
 
 Deferred (unwitnessed or out of bar; backlog, not blocking):
 
