@@ -9,6 +9,7 @@
 #include <io/strutil.h>
 
 #include <algorithm>
+#include <climits>
 #include <cstring>
 
 namespace opennova::menu {
@@ -869,6 +870,165 @@ void MenuFrameCompiler::emit_edit(int index, const WidgetNode &node,
 	emit_widget_text(node, rect, s, visual, &local, caret_draw);
 }
 
+// The multiline edit render [orig: CMEditWnd_Render @ 0x6608e0]: frame ->
+// appearance for the RAW pump state (unlike the single-line sibling, focus
+// does NOT force state 2) -> the wrapped drawer. The caret blinks on the
+// same (time & 0x3FF) > 0x200 gate; PASSWORD masks with '*'; the vertical
+// scroll is line-based — MenuWidgetState.scroll_row carries the
+// first-visible-line count (widget +3912), fed by the embedder from
+// multiline_line_counts().
+void MenuFrameCompiler::emit_multiline_edit(const WidgetNode &node,
+		const mnu::RectEdges &rect, const WalkScale &s, int visual,
+		const MenuFrameState &frame, const MenuWidgetState *ws) {
+	const mnu::Window &w = *node.window;
+	std::string text = widget_text(node, ws);
+	if (w.password) {
+		text.assign(text.size(), '*');
+	}
+	const bool focused = ws != nullptr && ws->focused && !w.readonly;
+	const bool blink_on = (frame.time_ms & 0x3FFu) > 0x200u;
+	int caret = -1;
+	if (focused && blink_on && ws != nullptr) {
+		caret = std::clamp(ws->caret, 0,
+				static_cast<int>(text.size()));
+	}
+	if (text.empty() && caret < 0) {
+		return;
+	}
+	const int state = visual >= 0 && visual < 4 ? visual : 0;
+	const int first_line = ws != nullptr ? std::max(ws->scroll_row, 0) : 0;
+	// The edge inset rides the draw x [orig: widget[189] added into the pen
+	// origin]; the block-alignment leg (whole-unwrapped-text measure) only
+	// engages for fitting text — shipped multiline edits author none, so the
+	// compiled path keeps the top-left origin.
+	const int edge = w.string_data.has_edge ? w.string_data.edge : 0;
+	const mnu::RectEdges pen{rect.left + edge, rect.top, rect.right,
+			rect.bottom};
+	emit_wrapped_text(node, pen, s, node.colors[state], text, first_line,
+			caret);
+}
+
+// The wrapped-text drawer, clip-bottom mode [orig: draw_text_wrapped
+// @ 0x653710 via the 0x40000 wrapper draw_text_wrapped_clipped @ 0x653D60].
+// Break rules, exactly: the line accumulates chars measured at the widget
+// scale pair against trunc(wrapW * scaleX); an explicit LF (only 0x0A — CR
+// is a drawn glyph) or the terminator breaks at the char; overflow breaks at
+// the last space of the line (consumed), else the overflowing char starts
+// the next line. Skipped lines (the scroll window) advance nothing. Each
+// drawn line justifies and advances by its 1.0-scale measure; the bottom
+// clip stops when the NEXT line's bottom would overflow. The caret pass
+// draws "|" centered at the accumulated (scaled) width — the original mixes
+// the scaled accumulator into the design-space pen, preserved verbatim.
+void MenuFrameCompiler::emit_wrapped_text(const WidgetNode &node,
+		const mnu::RectEdges &rect, const WalkScale &s, uint32_t color,
+		const std::string &text, int first_visible_line, int caret) {
+	const fnt_font_t *font = font_for(node);
+	if (font == nullptr) {
+		return;
+	}
+	hud::GameFont gf;
+	gf.set_font(font);
+	int wrap_w = rect.right - rect.left;
+	if (wrap_w <= 0) {
+		wrap_w = 0x10000; // [orig: 0 -> unbounded]
+	}
+	int avail_h = rect.bottom - rect.top;
+	if (avail_h <= 0) {
+		avail_h = 0x10000;
+	}
+	const int threshold =
+			static_cast<int>(static_cast<float>(wrap_w) * s.x); // ftol
+	const int bottom = rect.top + avail_h;
+	const int x = rect.left;
+	int cur_y = rect.top;
+	int line_start = 0;
+	int last_space = 0; // index 0 doubles as "none" [orig quirk]
+	int line_no = 0;
+	int prev_accum = 0; // scaled width of [line_start, i) for the caret pass
+	const int len = static_cast<int>(text.size());
+	int i = 0;
+	while (true) {
+		const char c = i < len ? text[static_cast<size_t>(i)] : '\0';
+		if (c == ' ') {
+			last_space = i;
+		}
+		if (caret >= 0 && i == caret) {
+			int cw = 0;
+			int ch = 0;
+			gf.measure("|", 1.0f, 1.0f, &cw, &ch);
+			emit_glyph_run(node, "|", x + prev_accum - (cw >> 1), cur_y, s,
+					color, -1);
+		}
+		int accum_w = 0;
+		int accum_h = 0;
+		if (i >= line_start) {
+			gf.measure(text.substr(static_cast<size_t>(line_start),
+								 static_cast<size_t>(i - line_start) +
+										 (c != '\0' ? 1u : 0u))
+							   .c_str(),
+					s.x, s.y, &accum_w, &accum_h);
+		}
+		int break_at;
+		int next;
+		if (accum_w <= threshold) {
+			if (c != '\n' && c != '\0') {
+				prev_accum = accum_w;
+				++i;
+				continue;
+			}
+			break_at = i;
+			next = i + 1;
+		} else if (last_space != 0) {
+			break_at = last_space;
+			next = last_space + 1;
+		} else {
+			break_at = i; // the overflowing char starts the next line
+			next = i;
+			if (next <= line_start) {
+				// Finite-progress guard: a single glyph wider than the
+				// widget (cannot occur with shipped fonts/rects).
+				next = line_start + 1;
+			}
+		}
+		++line_no;
+		const char at_break =
+				break_at < len ? text[static_cast<size_t>(break_at)] : '\0';
+		if (line_no > first_visible_line) {
+			const std::string line = text.substr(
+					static_cast<size_t>(line_start),
+					static_cast<size_t>(break_at - line_start));
+			int lw = 0;
+			int lh = 0;
+			gf.measure(line.c_str(), 1.0f, 1.0f, &lw, &lh);
+			if (lh <= 0) {
+				// Blank lines keep the font line height (the "W" measure the
+				// widget family uses for row heights).
+				int tw = 0;
+				gf.measure("W", 1.0f, 1.0f, &tw, &lh);
+			}
+			if (!line.empty()) {
+				emit_glyph_run(node, line, x, cur_y, s, color, -1);
+			}
+			if (at_break == '\0') {
+				return;
+			}
+			cur_y += lh;
+			if (cur_y + lh > bottom) {
+				return; // [orig: the 0x40000 bottom clip]
+			}
+		} else if (at_break == '\0') {
+			// The original returns only on the drawn branch, relying on the
+			// clamped scroll range; the guard keeps a mis-clamped embedder
+			// finite without changing clamped behavior.
+			return;
+		}
+		prev_accum = 0;
+		last_space = 0;
+		line_start = next;
+		i = next;
+	}
+}
+
 // The checkbox label [orig: CCheckWnd_DrawLabel @ 0x64aa20]: non-AS_BUTTON
 // pins the label at rect.right + 2 with the h-justify ignored (v-justify
 // honored); AS_BUTTON honors both justifies inside the full rect. Colors
@@ -913,11 +1073,21 @@ void MenuFrameCompiler::emit_item_cell(const WidgetNode &node,
 		const mnu::RectEdges &rect, const WalkScale &s, int color_state,
 		const MenuWidgetState *ws) {
 	const int selected = ws != nullptr ? ws->selected_item : 0;
-	if (selected < 0 || selected >= static_cast<int>(node.items.size())) {
+	const bool runtime_rows = ws != nullptr && ws->has_items;
+	const int row_count = runtime_rows ? static_cast<int>(ws->items.size())
+									   : static_cast<int>(node.items.size());
+	if (selected < 0 || selected >= row_count) {
 		return;
 	}
-	const WidgetNode::ItemVisual &item =
-			node.items[static_cast<size_t>(selected)];
+	// Runtime-seeded rows are text-only (the Control-tree set_items shape).
+	WidgetNode::ItemVisual runtime_item;
+	if (runtime_rows) {
+		runtime_item.kind = WidgetNode::ItemVisual::kText;
+		runtime_item.text = ws->items[static_cast<size_t>(selected)];
+	}
+	const WidgetNode::ItemVisual &item = runtime_rows
+			? runtime_item
+			: node.items[static_cast<size_t>(selected)];
 	const mnu::Window &w = *node.window;
 	const std::string &jh = w.items.justify;
 	const std::string &jv = w.items.vjustify;
@@ -984,14 +1154,11 @@ void MenuFrameCompiler::emit_list_rows(const WidgetNode &node,
 		const mnu::RectEdges &rect, const WalkScale &s,
 		const MenuWidgetState *ws) {
 	const mnu::Window &w = *node.window;
-	int row_h = 0;
-	if (w.list_box.has_min_item_height && w.list_box.min_item_height >= 0) {
-		row_h = w.list_box.min_item_height;
-	} else {
-		int tw = 0;
-		measure_text(node, "W", &tw, &row_h);
-	}
-	if (row_h <= 0 || node.items.empty()) {
+	const int row_h = row_height_(node);
+	const bool runtime_rows = ws != nullptr && ws->has_items;
+	const int row_count = runtime_rows ? static_cast<int>(ws->items.size())
+									   : static_cast<int>(node.items.size());
+	if (row_h <= 0 || row_count == 0) {
 		return;
 	}
 	const int selected = ws != nullptr ? ws->selected_item : -1;
@@ -999,15 +1166,26 @@ void MenuFrameCompiler::emit_list_rows(const WidgetNode &node,
 	const int first = ws != nullptr ? std::max(ws->scroll_row, 0) : 0;
 	const int edge = w.string_data.has_edge ? w.string_data.edge : 0;
 	int y = rect.top;
-	for (int i = first; i < static_cast<int>(node.items.size()); ++i) {
+	for (int i = first; i < row_count; ++i) {
 		if (y + row_h > rect.bottom) {
 			break;
 		}
 		const mnu::RectEdges row{rect.left, y, rect.right, y + row_h};
 		// The row style index: selection wins over hover
 		// [orig: the per-item style dword +12, data set by the widget].
+		// MULTI lists draw every row in the selected set with the
+		// selection style.
+		bool multi_selected = false;
+		if (ws != nullptr) {
+			for (const int32_t sel : ws->selected_items) {
+				if (sel == i) {
+					multi_selected = true;
+					break;
+				}
+			}
+		}
 		int style = -1;
-		if (i == selected) {
+		if (i == selected || multi_selected) {
 			style = kStateSelected;
 		} else if (i == hovered) {
 			style = kStateMouseover;
@@ -1029,12 +1207,22 @@ void MenuFrameCompiler::emit_list_rows(const WidgetNode &node,
 				emit_outline(hi, s, pass.outline);
 			}
 		}
-		const WidgetNode::ItemVisual &item =
-				node.items[static_cast<size_t>(i)];
-		if (item.kind == WidgetNode::ItemVisual::kText && !item.text.empty()) {
-			const int color_state = style >= 0 ? style : kStateDefault;
-			emit_glyph_run(node, item.text, row.left + edge, row.top, s,
-					node.colors[color_state], -1);
+		if (runtime_rows) {
+			const std::string &text = ws->items[static_cast<size_t>(i)];
+			if (!text.empty()) {
+				const int color_state = style >= 0 ? style : kStateDefault;
+				emit_glyph_run(node, text, row.left + edge, row.top, s,
+						node.colors[color_state], -1);
+			}
+		} else {
+			const WidgetNode::ItemVisual &item =
+					node.items[static_cast<size_t>(i)];
+			if (item.kind == WidgetNode::ItemVisual::kText &&
+					!item.text.empty()) {
+				const int color_state = style >= 0 ? style : kStateDefault;
+				emit_glyph_run(node, item.text, row.left + edge, row.top, s,
+						node.colors[color_state], -1);
+			}
 		}
 		y += row_h;
 	}
@@ -1067,17 +1255,15 @@ void MenuFrameCompiler::emit_combo_popup(const WidgetNode &node,
 	if (bg.has_outline) {
 		emit_outline(popup, s, bg.outline);
 	}
-	// Rows: authored nested collection wins even when empty, else the
-	// top-level items (the documented D-MNU-7/8 model).
+	// Rows: runtime-seeded rows win; else the authored nested collection wins
+	// even when empty, else the top-level items (the documented D-MNU-7/8
+	// model).
+	const bool runtime_rows = ws != nullptr && ws->has_items;
 	const std::vector<WidgetNode::ItemVisual> &rows =
 			w.list_box.items.present ? node.popup_items : node.items;
-	int row_h = 0;
-	if (w.list_box.has_min_item_height && w.list_box.min_item_height >= 0) {
-		row_h = w.list_box.min_item_height;
-	} else {
-		int tw = 0;
-		measure_text(node, "W", &tw, &row_h);
-	}
+	const int row_count = runtime_rows ? static_cast<int>(ws->items.size())
+									   : static_cast<int>(rows.size());
+	const int row_h = row_height_(node);
 	if (row_h <= 0) {
 		return;
 	}
@@ -1087,7 +1273,7 @@ void MenuFrameCompiler::emit_combo_popup(const WidgetNode &node,
 			? w.list_box.string_data.edge
 			: 0;
 	int y = popup.top;
-	for (int i = 0; i < static_cast<int>(rows.size()); ++i) {
+	for (int i = 0; i < row_count; ++i) {
 		if (y + row_h > popup.bottom) {
 			break;
 		}
@@ -1114,11 +1300,21 @@ void MenuFrameCompiler::emit_combo_popup(const WidgetNode &node,
 						1.0f);
 			}
 		}
-		const WidgetNode::ItemVisual &item = rows[static_cast<size_t>(i)];
-		if (item.kind == WidgetNode::ItemVisual::kText && !item.text.empty()) {
-			const int color_state = style >= 0 ? style : kStateDefault;
-			emit_glyph_run(node, item.text, row.left + edge, row.top, s,
-					node.colors[color_state], -1);
+		if (runtime_rows) {
+			const std::string &text = ws->items[static_cast<size_t>(i)];
+			if (!text.empty()) {
+				const int color_state = style >= 0 ? style : kStateDefault;
+				emit_glyph_run(node, text, row.left + edge, row.top, s,
+						node.colors[color_state], -1);
+			}
+		} else {
+			const WidgetNode::ItemVisual &item = rows[static_cast<size_t>(i)];
+			if (item.kind == WidgetNode::ItemVisual::kText &&
+					!item.text.empty()) {
+				const int color_state = style >= 0 ? style : kStateDefault;
+				emit_glyph_run(node, item.text, row.left + edge, row.top, s,
+						node.colors[color_state], -1);
+			}
 		}
 		y += row_h;
 	}
@@ -1305,6 +1501,503 @@ int MenuFrameCompiler::skip_widget(int index) const {
 	return next;
 }
 
+// --- widget queries ----------------------------------------------------------
+
+int MenuFrameCompiler::row_height_(const WidgetNode &node) const {
+	// [orig: authored MIN_ITEM_HEIGHT wins, else the "W" measure —
+	//  CListWnd_DrawItems @ 0x643f30 (D-MNU-8)]
+	const mnu::Window &w = *node.window;
+	if (w.list_box.has_min_item_height && w.list_box.min_item_height >= 0) {
+		return w.list_box.min_item_height;
+	}
+	int tw = 0;
+	int row_h = 0;
+	measure_text(node, "W", &tw, &row_h);
+	return row_h;
+}
+
+bool MenuFrameCompiler::widget_shown_(int index, const MenuFrameState &state) const {
+	// The draw/hit walk's shown gate over the widget AND its ancestors.
+	int i = index;
+	while (i >= 0) {
+		const WidgetNode &node = nodes_[static_cast<size_t>(i)];
+		bool shown = !node.window->hidden;
+		const MenuWidgetState *ws = state_for(state, i);
+		if (ws != nullptr) {
+			if (ws->hide) {
+				shown = false;
+			}
+			if (ws->show) {
+				shown = true;
+			}
+		}
+		if (!shown) {
+			return false;
+		}
+		i = node.parent;
+	}
+	return true;
+}
+
+int MenuFrameCompiler::widget_count() const {
+	return static_cast<int>(nodes_.size());
+}
+
+std::string MenuFrameCompiler::widget_name(int index) const {
+	if (index < 0 || index >= static_cast<int>(nodes_.size())) {
+		return std::string();
+	}
+	return nodes_[static_cast<size_t>(index)].window->name;
+}
+
+int MenuFrameCompiler::widget_kind(int index) const {
+	if (index < 0 || index >= static_cast<int>(nodes_.size())) {
+		return -1;
+	}
+	return static_cast<int>(nodes_[static_cast<size_t>(index)].window->type);
+}
+
+std::string MenuFrameCompiler::widget_authored_text(int index) const {
+	if (index < 0 || index >= static_cast<int>(nodes_.size())) {
+		return std::string();
+	}
+	return widget_text(nodes_[static_cast<size_t>(index)], nullptr);
+}
+
+bool MenuFrameCompiler::widget_disabled(int index,
+		const MenuFrameState &state) const {
+	if (index < 0 || index >= static_cast<int>(nodes_.size())) {
+		return false;
+	}
+	const WidgetNode &node = nodes_[static_cast<size_t>(index)];
+	const MenuWidgetState *ws = state_for(state, index);
+	return node.window->disabled || (ws != nullptr && ws->disabled);
+}
+
+bool MenuFrameCompiler::widget_edit_limits(int index, EditLimits *out) const {
+	if (out == nullptr || index < 0 ||
+			index >= static_cast<int>(nodes_.size())) {
+		return false;
+	}
+	// [orig: the parsed edit constraints — read-only widget[194], numeric
+	//  widget[196] with the [min widget[202], max widget[201]] range, max len
+	//  widget[200]; edit_widget_insert_char @ 0x661ee0]
+	const mnu::Window &w = *nodes_[static_cast<size_t>(index)].window;
+	*out = EditLimits{};
+	out->read_only = w.readonly;
+	out->numeric = w.number;
+	out->min_value = w.has_minval ? w.minval : 0;
+	out->max_value = w.has_maxval ? w.maxval : 0;
+	if (w.number && !w.has_minval && !w.has_maxval) {
+		// NUMBER with no authored range: the range gate never rejects.
+		out->min_value = LONG_MIN;
+		out->max_value = LONG_MAX;
+	} else if (w.number && !w.has_maxval) {
+		out->max_value = LONG_MAX;
+	} else if (w.number && !w.has_minval) {
+		out->min_value = LONG_MIN;
+	}
+	out->max_len = w.has_maxchar ? w.maxchar : -1;
+	return true;
+}
+
+bool MenuFrameCompiler::widget_rect(int index, const MenuFrameState &state,
+		mnu::RectEdges *out) const {
+	if (out == nullptr || index < 0 ||
+			index >= static_cast<int>(nodes_.size())) {
+		return false;
+	}
+	// absolute = own solved rect + every ancestor's solved origin (the same
+	// accumulation the draw walk threads through origin_x/origin_y).
+	mnu::RectEdges rect = solve_rect(nodes_[static_cast<size_t>(index)],
+			state_for(state, index));
+	int p = nodes_[static_cast<size_t>(index)].parent;
+	while (p >= 0) {
+		const mnu::RectEdges pr = solve_rect(nodes_[static_cast<size_t>(p)],
+				state_for(state, p));
+		rect = offset_rect(rect, pr.left, pr.top);
+		p = nodes_[static_cast<size_t>(p)].parent;
+	}
+	*out = rect;
+	return true;
+}
+
+int MenuFrameCompiler::item_count(int index, const MenuFrameState &state) const {
+	if (index < 0 || index >= static_cast<int>(nodes_.size())) {
+		return 0;
+	}
+	const WidgetNode &node = nodes_[static_cast<size_t>(index)];
+	const MenuWidgetState *ws = state_for(state, index);
+	if (ws != nullptr && ws->has_items) {
+		return static_cast<int>(ws->items.size());
+	}
+	// A combo's selectable rows are its popup rows when the nested LIST_BOX
+	// collection is authored (D-MNU-7/8).
+	const mnu::Window &w = *node.window;
+	if (w.type == mnu::WindowType::Combo && w.list_box.items.present) {
+		return static_cast<int>(node.popup_items.size());
+	}
+	return static_cast<int>(node.items.size());
+}
+
+int MenuFrameCompiler::list_row_at(int index, const MenuFrameState &state,
+		float mx, float my, float sx, float sy) const {
+	mnu::RectEdges rect;
+	if (!widget_rect(index, state, &rect)) {
+		return -1;
+	}
+	const WidgetNode &node = nodes_[static_cast<size_t>(index)];
+	const int row_h = row_height_(node);
+	const int count = item_count(index, state);
+	if (row_h <= 0 || count == 0) {
+		return -1;
+	}
+	if (mx < emit_x(rect.left, sx) || mx >= emit_x(rect.right, sx)) {
+		return -1;
+	}
+	const MenuWidgetState *ws = state_for(state, index);
+	const int first = ws != nullptr ? std::max(ws->scroll_row, 0) : 0;
+	int y = rect.top;
+	for (int i = first; i < count; ++i) {
+		if (y + row_h > rect.bottom) {
+			break;
+		}
+		if (my >= emit_x(y, sy) && my < emit_x(y + row_h, sy)) {
+			return i;
+		}
+		y += row_h;
+	}
+	return -1;
+}
+
+int MenuFrameCompiler::list_visible_rows(int index,
+		const MenuFrameState &state) const {
+	mnu::RectEdges rect;
+	if (!widget_rect(index, state, &rect)) {
+		return 0;
+	}
+	const int row_h = row_height_(nodes_[static_cast<size_t>(index)]);
+	if (row_h <= 0) {
+		return 0;
+	}
+	return (rect.bottom - rect.top) / row_h;
+}
+
+bool MenuFrameCompiler::combo_popup_rect(int index, const MenuFrameState &state,
+		mnu::RectEdges *out) const {
+	if (out == nullptr || index < 0 ||
+			index >= static_cast<int>(nodes_.size())) {
+		return false;
+	}
+	const mnu::Window &w = *nodes_[static_cast<size_t>(index)].window;
+	if (!w.list_box.present) {
+		return false;
+	}
+	mnu::RectEdges rect;
+	if (!widget_rect(index, state, &rect)) {
+		return false;
+	}
+	const mnu::RectEdges local = mnu::position_rect(
+			w.list_box.position.has_left, w.list_box.position.left,
+			w.list_box.position.has_top, w.list_box.position.top,
+			w.list_box.position.has_right, w.list_box.position.right,
+			w.list_box.position.has_bottom, w.list_box.position.bottom, 0, 0);
+	*out = offset_rect(local, rect.left, rect.top);
+	return true;
+}
+
+bool MenuFrameCompiler::combo_popup_contains(int index,
+		const MenuFrameState &state, float mx, float my, float sx,
+		float sy) const {
+	mnu::RectEdges popup;
+	if (!combo_popup_rect(index, state, &popup)) {
+		return false;
+	}
+	return mx >= emit_x(popup.left, sx) && mx < emit_x(popup.right, sx) &&
+			my >= emit_x(popup.top, sy) && my < emit_x(popup.bottom, sy);
+}
+
+int MenuFrameCompiler::combo_popup_row_at(int index,
+		const MenuFrameState &state, float mx, float my, float sx,
+		float sy) const {
+	mnu::RectEdges popup;
+	if (!combo_popup_rect(index, state, &popup)) {
+		return -1;
+	}
+	const WidgetNode &node = nodes_[static_cast<size_t>(index)];
+	const int row_h = row_height_(node);
+	const int count = item_count(index, state);
+	if (row_h <= 0 || count == 0) {
+		return -1;
+	}
+	if (mx < emit_x(popup.left, sx) || mx >= emit_x(popup.right, sx)) {
+		return -1;
+	}
+	int y = popup.top;
+	for (int i = 0; i < count; ++i) {
+		if (y + row_h > popup.bottom) {
+			break;
+		}
+		if (my >= emit_x(y, sy) && my < emit_x(y + row_h, sy)) {
+			return i;
+		}
+		y += row_h;
+	}
+	return -1;
+}
+
+int MenuFrameCompiler::spin_arrow_at(int index, const MenuFrameState &state,
+		float mx, float my, float sx, float sy) const {
+	if (index < 0 || index >= static_cast<int>(nodes_.size())) {
+		return 0;
+	}
+	mnu::RectEdges rect;
+	if (!widget_rect(index, state, &rect)) {
+		return 0;
+	}
+	const WidgetNode &node = nodes_[static_cast<size_t>(index)];
+	const mnu::Window &w = *node.window;
+	const auto arrow_hit = [&](const mnu::SpinButton &btn, int32_t slot) {
+		if (!btn.present || slot < 0) {
+			return false;
+		}
+		const auto &size = texture_sizes_[static_cast<size_t>(slot)];
+		const mnu::RectEdges local = mnu::spin_button_rect(
+				btn.position.has_left, btn.position.left, btn.position.has_top,
+				btn.position.top, btn.position.has_right, btn.position.right,
+				btn.position.has_bottom, btn.position.bottom, size.first,
+				size.second);
+		const mnu::RectEdges abs = offset_rect(local, rect.left, rect.top);
+		return mx >= emit_x(abs.left, sx) && mx < emit_x(abs.right, sx) &&
+				my >= emit_x(abs.top, sy) && my < emit_x(abs.bottom, sy);
+	};
+	if (arrow_hit(w.spinup, node.spin_up_tex)) {
+		return 1;
+	}
+	if (arrow_hit(w.spindown, node.spin_down_tex)) {
+		return 2;
+	}
+	return 0;
+}
+
+int MenuFrameCompiler::table_row_at(int index, const MenuFrameState &state,
+		float mx, float my, float sx, float sy) const {
+	if (index < 0 || index >= static_cast<int>(nodes_.size())) {
+		return -1;
+	}
+	const WidgetNode &node = nodes_[static_cast<size_t>(index)];
+	const mnu::TableData &table = node.window->table_data;
+	if (table.column.headers.empty()) {
+		return -1;
+	}
+	const MenuWidgetState *ws = state_for(state, index);
+	if (ws == nullptr || ws->table_rows.empty()) {
+		return -1;
+	}
+	mnu::RectEdges rect;
+	if (!widget_rect(index, state, &rect)) {
+		return -1;
+	}
+	int em_w = 0;
+	int em_h = 0;
+	measure_text(node, "W", &em_w, &em_h);
+	int row_h = em_h;
+	if (table.has_min_item_height && table.min_item_height > 0) {
+		row_h = table.min_item_height;
+	}
+	if (row_h <= 0) {
+		return -1;
+	}
+	if (mx < emit_x(rect.left, sx) || mx >= emit_x(rect.right, sx)) {
+		return -1;
+	}
+	const int first = ws->scroll_row > 0 ? ws->scroll_row : 0;
+	int y = rect.top + em_h; // header row
+	for (size_t r = static_cast<size_t>(first); r < ws->table_rows.size();
+			++r) {
+		if (y + row_h > rect.bottom) {
+			break;
+		}
+		if (my >= emit_x(y, sy) && my < emit_x(y + row_h, sy)) {
+			return static_cast<int>(r);
+		}
+		y += row_h;
+	}
+	return -1;
+}
+
+bool MenuFrameCompiler::multiline_line_counts(int index,
+		const MenuFrameState &state, int *fit_lines, int *total_lines) const {
+	if (fit_lines == nullptr || total_lines == nullptr || index < 0 ||
+			index >= static_cast<int>(nodes_.size())) {
+		return false;
+	}
+	*fit_lines = 0;
+	*total_lines = 0;
+	const WidgetNode &node = nodes_[static_cast<size_t>(index)];
+	const mnu::Window &w = *node.window;
+	const MenuWidgetState *ws = state_for(state, index);
+	std::string text = widget_text(node, ws);
+	if (w.password) {
+		text.assign(text.size(), '*');
+	}
+	const fnt_font_t *font = font_for(node);
+	if (font == nullptr || text.empty()) {
+		return true;
+	}
+	hud::GameFont gf;
+	gf.set_font(font);
+	const mnu::RectEdges rect = solve_rect(node, ws);
+	int wrap_w = rect.right - rect.left;
+	if (wrap_w <= 0) {
+		wrap_w = 0x10000;
+	}
+	const int rect_h = rect.bottom - rect.top;
+	// The measure twin replays the drawer's break rules at scale 1.0
+	// [orig: font_cache_count_wrapped_lines @ 0x653b90].
+	std::vector<int> heights;
+	int line_start = 0;
+	int last_space = 0;
+	const int len = static_cast<int>(text.size());
+	int i = 0;
+	while (true) {
+		const char c = i < len ? text[static_cast<size_t>(i)] : '\0';
+		if (c == ' ') {
+			last_space = i;
+		}
+		int accum_w = 0;
+		int accum_h = 0;
+		if (i >= line_start) {
+			gf.measure(text.substr(static_cast<size_t>(line_start),
+								 static_cast<size_t>(i - line_start) +
+										 (c != '\0' ? 1u : 0u))
+							   .c_str(),
+					1.0f, 1.0f, &accum_w, &accum_h);
+		}
+		int break_at;
+		int next;
+		if (accum_w <= wrap_w) {
+			if (c != '\n' && c != '\0') {
+				++i;
+				continue;
+			}
+			break_at = i;
+			next = i + 1;
+		} else if (last_space != 0) {
+			break_at = last_space;
+			next = last_space + 1;
+		} else {
+			break_at = i;
+			next = i <= line_start ? line_start + 1 : i;
+		}
+		int lw = 0;
+		int lh = 0;
+		gf.measure(text.substr(static_cast<size_t>(line_start),
+							 static_cast<size_t>(break_at - line_start))
+						   .c_str(),
+				1.0f, 1.0f, &lw, &lh);
+		if (lh <= 0) {
+			int tw = 0;
+			gf.measure("W", 1.0f, 1.0f, &tw, &lh);
+		}
+		heights.push_back(lh);
+		if (break_at >= len) {
+			break;
+		}
+		last_space = 0;
+		line_start = next;
+		i = next;
+	}
+	const int total = static_cast<int>(heights.size());
+	*total_lines = total;
+	// fit = the last n with accumH(lines 1..n-1) + 2*h_n <= rectH; the final
+	// line only needs accumH(all but last) <= rectH [orig: @ 0x653b90].
+	int accum_h = 0;
+	int fit = 0;
+	for (int n = 1; n <= total; ++n) {
+		const int h_n = heights[static_cast<size_t>(n - 1)];
+		if (n == total) {
+			if (accum_h <= rect_h) {
+				fit = total;
+			}
+			break;
+		}
+		if (accum_h + 2 * h_n <= rect_h) {
+			fit = n;
+		}
+		accum_h += h_n;
+	}
+	*fit_lines = fit;
+	return true;
+}
+
+int MenuFrameCompiler::hit_widget(const MenuFrameState &state, float mx,
+		float my, float sx, float sy) const {
+	if (screen_ == nullptr || nodes_.empty()) {
+		return -1;
+	}
+	int hit = -1;
+	hit_walk(0, 0, 0, state, mx, my, sx, sy, &hit);
+	return hit;
+}
+
+int MenuFrameCompiler::hotkey_widget(const std::string &key, bool virtual_key,
+		const MenuFrameState &state) const {
+	if (key.empty() || nodes_.empty()) {
+		return -1;
+	}
+	// The accelerator scan: pre-order over the shown tree — a hidden subtree
+	// never matches (a hidden BACK must not eat ESC); VIRTUAL rows and
+	// character rows are separate namespaces, and VK_RETURN/VK_ENTER are
+	// interchangeable (the only virtual keys shipped menus author are
+	// VK_ESCAPE/VK_RETURN) [orig: the screen hotkey registration
+	// CUIWidget_AddScreenHotkey @ 0x5674a8 family; the Control-tree port's
+	// find_hotkey_target semantics, docs/mnu/menu-re.md "Hotkeys"].
+	const auto normalize_vk = [](const std::string &value) {
+		std::string folded = opennova::strutil::to_lower(value);
+		if (folded == "vk_enter") {
+			folded = "vk_return";
+		}
+		return folded;
+	};
+	const std::string want = virtual_key
+			? normalize_vk(key)
+			: opennova::strutil::to_lower(key);
+	int idx = 0;
+	const int n = static_cast<int>(nodes_.size());
+	while (idx < n) {
+		const WidgetNode &node = nodes_[static_cast<size_t>(idx)];
+		const mnu::Window &w = *node.window;
+		bool shown = !w.hidden;
+		const MenuWidgetState *ws = state_for(state, idx);
+		if (ws != nullptr) {
+			if (ws->hide) {
+				shown = false;
+			}
+			if (ws->show) {
+				shown = true;
+			}
+		}
+		if (!shown) {
+			idx = skip_widget(idx);
+			continue;
+		}
+		for (const mnu::Hotkey &hk : w.hotkeys) {
+			if (hk.virtual_key != virtual_key) {
+				continue;
+			}
+			const std::string have = virtual_key
+					? normalize_vk(hk.value)
+					: opennova::strutil::to_lower(hk.value);
+			if (have == want) {
+				return idx;
+			}
+		}
+		++idx;
+	}
+	return -1;
+}
+
 int MenuFrameCompiler::walk_widget(int index, int origin_x, int origin_y,
 		const MenuFrameState &state, const WalkScale &s) {
 	const WidgetNode &node = nodes_[static_cast<size_t>(index)];
@@ -1375,8 +2068,7 @@ int MenuFrameCompiler::walk_widget(int index, int origin_x, int origin_y,
 			emit_checkbox_label(node, rect, s, pump, ws);
 			break;
 		}
-		case mnu::WindowType::Edit:
-		case mnu::WindowType::MultilineEdit: {
+		case mnu::WindowType::Edit: {
 			// [orig: CEditWnd_Render @ 0x6619e0 — focus (non-readonly)
 			//  forces state 2 for appearance AND colors]
 			const bool focused = ws != nullptr && ws->focused && !w.readonly;
@@ -1387,6 +2079,18 @@ int MenuFrameCompiler::walk_widget(int index, int origin_x, int origin_y,
 			emit_appearance(node, rect, s,
 					appearance_state_with_fallback(node, visual));
 			emit_edit(index, node, rect, s, visual, state, ws);
+			break;
+		}
+		case mnu::WindowType::MultilineEdit: {
+			// [orig: CMEditWnd_Render @ 0x6608e0 — frame -> appearance for
+			//  the RAW pump state (no focus forcing, unlike the single-line
+			//  sibling) -> the wrapped drawer -> children]
+			if (w.draw_frame) {
+				emit_frame(node, rect, s);
+			}
+			emit_appearance(node, rect, s,
+					appearance_state_with_fallback(node, pump));
+			emit_multiline_edit(node, rect, s, pump, state, ws);
 			break;
 		}
 		case mnu::WindowType::SpinList: {

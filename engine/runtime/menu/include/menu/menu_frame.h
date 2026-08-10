@@ -11,6 +11,7 @@
 // Witness record: docs/mnu/menu-re.md ("Widget render dispatch").
 
 #include "hud/game_font.h"
+#include "menu/menu_edit.h"
 #include "mnu/mnu.h"
 #include "mnu/mnu_layout.h"
 
@@ -111,6 +112,15 @@ struct MenuWidgetState {
 	int32_t hover_item = -1;    // list hover row (row style 2)
 	int32_t scroll_row = 0;     // list first visible row
 	bool popup_open = false;    // combo: draw the LIST_BOX popup
+	// Runtime item rows (text) the embedder seeds into a list/combo/spinlist —
+	// the Control-tree path seeded these via set_items; when present they
+	// replace the authored <ITEM> rows for the closed cell, the list rows,
+	// and the combo popup alike.
+	bool has_items = false;
+	std::vector<std::string> items;
+	// Additional selected rows for MULTI lists (drawn with the selection
+	// style alongside selected_item); the single-select widgets ignore it.
+	std::vector<int32_t> selected_items;
 	// TABLE data rows (runtime content the embedder seeds — the Control-tree
 	// path seeded these from the shell): one vector of cell strings per row,
 	// in column order [orig: the 40-byte row records, CUITable_Render
@@ -174,6 +184,14 @@ public:
 	void register_font(const std::string &name, const fnt_font_t *font);
 	void clear_registered_fonts();
 
+	// Whole-value %VAR% stylesheet resolution (case-insensitive, unresolved
+	// stays literal) — public so the embedder resolves asset NAMES (fonts)
+	// the same way the compiler interns them
+	// [orig: NapiXML_ExpandVariablesInText @ 0x63a000].
+	std::string resolve_style_var(const std::string &value) const {
+		return resolve_var(value);
+	}
+
 	// The embedder resolves these after configure(): interned texture names
 	// in slot order (MenuQuad::texture indexes this) and interned font names
 	// (FontRun::font indexes this; slot 0 = the default font).
@@ -198,6 +216,76 @@ public:
 	// (case-insensitive), or -1 — the companions' name->index seam
 	// [orig: CUIScene walks resolve controls by name the same way].
 	int widget_index(const std::string &name) const;
+
+	// --- widget queries (valid after configure(); index = pre-order) --------
+	// The pre-order index space is the SAME walk a document-side DFS of the
+	// screen produces (root first, children in authored order), so embedders
+	// can zip indices against document ids.
+	int widget_count() const;
+	std::string widget_name(int index) const;
+	// The parsed mnu::WindowType as an int (out of range -> -1).
+	int widget_kind(int index) const;
+	// The authored STRING content after %VAR% + string-table resolution (the
+	// text the widget draws when no runtime override is set).
+	std::string widget_authored_text(int index) const;
+	// Authored-or-runtime effective disabled (the pump's state-1 test).
+	bool widget_disabled(int index, const MenuFrameState &state) const;
+	// The widget's authored edit constraints as menu_edit.h limits (READONLY,
+	// NUMBER + MINVAL/MAXVAL, MAXCHAR). False when the index is out of range.
+	bool widget_edit_limits(int index, EditLimits *out) const;
+	// The widget's absolute design-space rect: the three-stage POSITION solve
+	// offset by every ancestor's solved origin — the rect the draw walk and
+	// the hit walk both use. False when the index is out of range.
+	bool widget_rect(int index, const MenuFrameState &state,
+			mnu::RectEdges *out) const;
+	// The item-row count the draw uses (runtime rows when seeded, else the
+	// authored <ITEM> rows; combo popups prefer the authored LIST_BOX rows).
+	int item_count(int index, const MenuFrameState &state) const;
+
+	// --- interaction geometry (the same witnessed layout math the emitters
+	// use; raw-mouse coordinates against the scaled rects, like pump_mouse) --
+	// List/multi row under the mouse (absolute row index, honoring the scroll
+	// window), -1 = none [orig: CListWnd_DrawItems @ 0x643f30 row layout].
+	int list_row_at(int index, const MenuFrameState &state, float mx, float my,
+			float sx, float sy) const;
+	// Rows that fit the widget rect (>=1 row height only) — the scroll clamp.
+	int list_visible_rows(int index, const MenuFrameState &state) const;
+	// The combo LIST_BOX popup rect (authored combo-relative POSITION offset
+	// to the combo's absolute rect [orig: CComboWnd @ 0x65be40 D-MNU-7]).
+	bool combo_popup_rect(int index, const MenuFrameState &state,
+			mnu::RectEdges *out) const;
+	// True when the raw-mouse point lies inside the open popup's scaled rect.
+	bool combo_popup_contains(int index, const MenuFrameState &state, float mx,
+			float my, float sx, float sy) const;
+	// Popup row under the mouse, -1 = none.
+	int combo_popup_row_at(int index, const MenuFrameState &state, float mx,
+			float my, float sx, float sy) const;
+	// Spin arrow under the mouse: 0 none, 1 up, 2 down [orig:
+	// CSpinListWnd_CreateUpDownChildren @ 0x64b8b0 child rects].
+	int spin_arrow_at(int index, const MenuFrameState &state, float mx,
+			float my, float sx, float sy) const;
+	// Table DATA row under the mouse (absolute row index into table_rows,
+	// honoring the scroll window below the header), -1 = none
+	// [orig: CUITable_Render @ 0x6411d0 row layout].
+	int table_row_at(int index, const MenuFrameState &state, float mx, float my,
+			float sx, float sy) const;
+	// Non-mutating front-most hit (the pump's claim walk without the state
+	// writes) — editor/preview picking.
+	int hit_widget(const MenuFrameState &state, float mx, float my, float sx,
+			float sy) const;
+	// The multiline edit's wrapped-line counts at scale 1.0 — the scroll
+	// range twin [orig: font_cache_count_wrapped_lines @ 0x653b90 via
+	// CMEditWnd_UpdateScrollRange @ 0x661180]: *fit = rows that fit the
+	// widget rect, *total = wrapped line count; scroll range = [0,
+	// total - fit]. False when the index is out of range.
+	bool multiline_line_counts(int index, const MenuFrameState &state,
+			int *fit_lines, int *total_lines) const;
+	// The first shown widget carrying the hotkey (pre-order; a hidden subtree
+	// never matches — the witnessed accelerator scan the Control tree ran;
+	// VIRTUAL rows live in a separate namespace from character rows, and
+	// VK_RETURN/VK_ENTER are interchangeable). -1 = none.
+	int hotkey_widget(const std::string &key, bool virtual_key,
+			const MenuFrameState &state) const;
 
 	// The witnessed per-frame mouse pump [orig: scene_end_frame @ 0x63e600 ->
 	// widget_process_mouse_event @ 0x647a00 (vtable+20)]: ONE widget claims
@@ -264,6 +352,10 @@ private:
 			float sy, int *io_hit) const;
 	const MenuWidgetState *state_for(const MenuFrameState &state,
 			int index) const;
+	// Shared row-height rule (authored MIN_ITEM_HEIGHT wins, else the "W"
+	// measure) for list rows / combo popup rows.
+	int row_height_(const WidgetNode &node) const;
+	bool widget_shown_(int index, const MenuFrameState &state) const;
 	int pump_visual_state(const mnu::Window &w,
 			const MenuWidgetState *ws) const;
 	int appearance_state_with_fallback(const WidgetNode &node,
@@ -298,6 +390,12 @@ private:
 	void emit_edit(int index, const WidgetNode &node,
 			const mnu::RectEdges &rect, const WalkScale &s, int visual,
 			const MenuFrameState &frame, const MenuWidgetState *ws);
+	void emit_multiline_edit(const WidgetNode &node,
+			const mnu::RectEdges &rect, const WalkScale &s, int visual,
+			const MenuFrameState &frame, const MenuWidgetState *ws);
+	void emit_wrapped_text(const WidgetNode &node, const mnu::RectEdges &rect,
+			const WalkScale &s, uint32_t color, const std::string &text,
+			int first_visible_line, int caret);
 	void emit_checkbox_label(const WidgetNode &node,
 			const mnu::RectEdges &rect, const WalkScale &s, int color_state,
 			const MenuWidgetState *ws);

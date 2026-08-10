@@ -704,6 +704,60 @@ void test_marquee_roll(const fnt_font_t *font) {
 	CHECK(dl3.glyphs.empty(), "marquee_reset restarts the roll from the bottom");
 }
 
+// DRAW_FRAME gating [orig: CStaticWnd_Render @ 0x657b10 — field +0x134 guards
+// CUIElement_DrawFrame]: a window may author a <FRAME> purely to hand its
+// textures down to framed descendants (jo_game.mnu's root MAIN defines the
+// camo BOXTILE brush + BORDER2 stencil with NO DRAW_FRAME and must draw no
+// frame — the full-window camo bug on the in-game ESC menu); a child WINDOW
+// carrying DRAW_FRAME draws the INHERITED frame
+// [orig: CWnd_FindInheritedFrameBlock @ 0x647190].
+void test_draw_frame_gate(const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>DF</NAME>
+  <WINDOW type="window" name="MAIN">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <FRAME>
+      <STENCIL size="8">border.tga</STENCIL>
+      <BRUSH>tile.tga</BRUSH>
+    </FRAME>
+    <WINDOW type="window" name="BOX" DRAW_FRAME>
+      <POSITION><LEFT>100</LEFT><TOP>100</TOP><RIGHT>300</RIGHT><BOTTOM>250</BOTTOM></POSITION>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	c.configure(doc.first_screen(), font);
+	const int32_t border = slot_of(c, "border.tga");
+	const int32_t brush = slot_of(c, "tile.tga");
+	CHECK(border >= 0 && brush >= 0, "the parent's FRAME textures intern");
+	c.set_texture_size(border, 32, 32);
+	c.set_texture_size(brush, 64, 64);
+
+	MenuFrameState state;
+	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
+	CHECK(dl.widgets_drawn == 2, "both windows draw");
+	// The parent authored the FRAME but no DRAW_FRAME: exactly ONE brush fill
+	// and ONE eight-piece stencil set appear — the DRAW_FRAME child's.
+	CHECK(count_quads_with_texture(dl, brush) == 1,
+			"no DRAW_FRAME on the parent: only the child's brush fill draws");
+	CHECK(count_quads_with_texture(dl, border) == 8,
+			"only the child's eight stencil pieces draw");
+	// The child's brush fill covers the CHILD rect (100,100)-(300,250), not
+	// the parent window: the inherited textures never become full-window camo.
+	const MenuQuad *fill = nullptr;
+	for (const MenuQuad &q : dl.quads) {
+		if (q.texture == brush) {
+			fill = &q;
+		}
+	}
+	CHECK(fill != nullptr && fill->x0 == 100.0f && fill->y0 == 100.0f &&
+					fill->x1 == 300.0f && fill->y1 == 250.0f,
+			"the inherited frame fills the DRAW_FRAME child's rect only");
+}
+
 // The witnessed edit-input operations [orig: edit_widget_insert_char
 // @ 0x661ee0; edit_widget_handle_key_event @ 0x6623a0].
 void test_edit_input_ops() {
@@ -776,6 +830,325 @@ void test_edit_input_ops() {
 			"enter commits (the embedder releases focus)");
 }
 
+// Runtime-seeded item rows + the multi-select set: the embedder's set_items
+// replaces the authored <ITEM> rows for the closed cell, the list rows, and
+// the combo popup alike; MULTI lists style every selected-set row.
+void test_runtime_items_and_multiselect(const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>T</NAME>
+  <WINDOW type="window" name="ROOT">
+    <FONT><NAME>f.fnt</NAME><DEFAULT_FG>111111</DEFAULT_FG><MOUSEOVER_FG>FF0000</MOUSEOVER_FG><SELECTED_FG>00FF00</SELECTED_FG></FONT>
+    <WINDOW type="list" name="L1">
+      <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>64</BOTTOM></POSITION>
+      <ITEMS>
+        <APPEARANCE type="color" state="selected">204060</APPEARANCE>
+        <ITEM type="ID" value="0">AAA</ITEM>
+      </ITEMS>
+      <LIST_BOX><MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT></LIST_BOX>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	c.configure(doc.first_screen(), font);
+
+	MenuWidgetState list;
+	list.index = 1;
+	list.has_items = true;
+	list.items = {"XX", "YY", "ZZ"};
+	list.selected_item = 0;
+	list.selected_items = {0, 2};
+	MenuFrameState st;
+	st.widgets.push_back(list);
+	const MenuDrawList &dl = c.compile(st, 1.0f, 1.0f);
+	// Three runtime rows of two glyphs each replace the single authored row.
+	CHECK(dl.glyphs.size() == 6, "runtime rows replace the authored items");
+	CHECK(c.item_count(1, st) == 3, "item_count reports the runtime rows");
+	// Rows 0 and 2 both fill the selection style (the MULTI selected set).
+	int sel_fills = 0;
+	for (const MenuQuad &q : dl.quads) {
+		if (q.texture == kMenuTexNone && (q.color & 0xFFFFFFu) == 0x204060u) {
+			++sel_fills;
+		}
+	}
+	CHECK(sel_fills == 2, "the selected set styles every selected row");
+}
+
+// The widget queries: pre-order identity, names/kinds, authored text, the
+// absolute rect accumulation, and the edit-limits mapping.
+void test_widget_queries(const fnt_font_t *font) {
+	mnu::Document doc = parse_or_die(kScreenXml);
+	MenuFrameCompiler c;
+	c.configure(doc.first_screen(), font);
+
+	CHECK(c.widget_count() == 3, "widget_count covers the pre-order tree");
+	CHECK(c.widget_name(1) == "OK", "widget_name reads the authored NAME");
+	CHECK(c.widget_kind(1) == static_cast<int>(mnu::WindowType::Button),
+			"widget_kind reports the parsed type");
+	CHECK(c.widget_authored_text(1) == "OK",
+			"widget_authored_text resolves the STRING");
+	MenuFrameState st;
+	mnu::RectEdges rect{};
+	CHECK(c.widget_rect(1, st, &rect) && rect.left == 10 && rect.top == 20 &&
+					rect.right == 110 && rect.bottom == 40,
+			"widget_rect solves the nested absolute rect");
+
+	const char *edit_xml = R"(
+<SCREEN>
+  <NAME>E</NAME>
+  <WINDOW type="window" name="ROOT">
+    <WINDOW type="edit" name="NUM" NUMBER MINVAL="1" MAXVAL="99" MAXCHAR="2">
+      <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>60</RIGHT><BOTTOM>20</BOTTOM></POSITION>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	mnu::Document edoc = parse_or_die(edit_xml);
+	MenuFrameCompiler ec;
+	ec.configure(edoc.first_screen(), font);
+	opennova::menu::EditLimits lim;
+	CHECK(ec.widget_edit_limits(1, &lim) && lim.numeric &&
+					lim.min_value == 1 && lim.max_value == 99 &&
+					lim.max_len == 2 && !lim.read_only,
+			"widget_edit_limits maps the authored constraints");
+}
+
+// The interaction geometry queries reuse the emitters' witnessed layout math
+// [orig: CListWnd_DrawItems @ 0x643f30 rows; CComboWnd @ 0x65be40 popup rect;
+//  CSpinListWnd_CreateUpDownChildren @ 0x64b8b0 arrow rects].
+void test_interaction_geometry(const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>G</NAME>
+  <WINDOW type="window" name="ROOT">
+    <FONT><NAME>f.fnt</NAME><DEFAULT_FG>111111</DEFAULT_FG></FONT>
+    <WINDOW type="list" name="L1">
+      <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>64</BOTTOM></POSITION>
+      <ITEMS>
+        <ITEM type="ID" value="0">AAA</ITEM>
+        <ITEM type="ID" value="1">BBB</ITEM>
+        <ITEM type="ID" value="2">CCC</ITEM>
+        <ITEM type="ID" value="3">DDD</ITEM>
+      </ITEMS>
+      <LIST_BOX><MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT></LIST_BOX>
+    </WINDOW>
+    <WINDOW type="combo" name="C1">
+      <POSITION><LEFT>200</LEFT><TOP>0</TOP><RIGHT>300</RIGHT><BOTTOM>20</BOTTOM></POSITION>
+      <ITEMS>
+        <ITEM type="ID" value="0">ONE</ITEM>
+        <ITEM type="ID" value="1">TWO</ITEM>
+      </ITEMS>
+      <LIST_BOX>
+        <POSITION><LEFT>0</LEFT><TOP>20</TOP><RIGHT>100</RIGHT><BOTTOM>80</BOTTOM></POSITION>
+        <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+      </LIST_BOX>
+    </WINDOW>
+    <WINDOW type="spinlist" name="S1">
+      <POSITION><LEFT>400</LEFT><TOP>0</TOP><RIGHT>460</RIGHT><BOTTOM>20</BOTTOM></POSITION>
+      <ITEMS><ITEM type="ID" value="0">V</ITEM></ITEMS>
+      <SPINUP>
+        <POSITION><LEFT>40</LEFT><TOP>0</TOP><RIGHT>50</RIGHT><BOTTOM>10</BOTTOM></POSITION>
+        <APPEARANCE type="image" state="default">up.tga</APPEARANCE>
+      </SPINUP>
+      <SPINDOWN>
+        <POSITION><LEFT>40</LEFT><TOP>10</TOP><RIGHT>50</RIGHT><BOTTOM>20</BOTTOM></POSITION>
+        <APPEARANCE type="image" state="default">down.tga</APPEARANCE>
+      </SPINDOWN>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	c.configure(doc.first_screen(), font);
+	MenuFrameState st;
+
+	// List rows: 20 high from the top; the scroll window offsets.
+	CHECK(c.list_row_at(1, st, 50.0f, 25.0f, 1.0f, 1.0f) == 1,
+			"list_row_at maps a point to its row");
+	CHECK(c.list_row_at(1, st, 150.0f, 25.0f, 1.0f, 1.0f) == -1,
+			"list_row_at rejects points outside the rect");
+	CHECK(c.list_visible_rows(1, st) == 3, "list_visible_rows floors rect/row_h");
+	MenuWidgetState scrolled;
+	scrolled.index = 1;
+	scrolled.scroll_row = 1;
+	st.widgets.push_back(scrolled);
+	CHECK(c.list_row_at(1, st, 50.0f, 5.0f, 1.0f, 1.0f) == 1,
+			"the scroll window shifts the row mapping");
+	st.widgets.clear();
+
+	// The combo popup rect is combo-relative [orig: D-MNU-7], rows inside it.
+	mnu::RectEdges popup{};
+	CHECK(c.combo_popup_rect(2, st, &popup) && popup.left == 200 &&
+					popup.top == 20 && popup.right == 300 && popup.bottom == 80,
+			"combo_popup_rect offsets the authored LIST_BOX rect");
+	CHECK(c.combo_popup_contains(2, st, 250.0f, 50.0f, 1.0f, 1.0f),
+			"combo_popup_contains covers the popup");
+	CHECK(c.combo_popup_row_at(2, st, 250.0f, 45.0f, 1.0f, 1.0f) == 1,
+			"combo_popup_row_at maps popup rows");
+
+	// Spin arrows: authored child rects offset into the widget.
+	CHECK(c.spin_arrow_at(3, st, 445.0f, 5.0f, 1.0f, 1.0f) == 1,
+			"the up arrow zone reports 1");
+	CHECK(c.spin_arrow_at(3, st, 445.0f, 15.0f, 1.0f, 1.0f) == 2,
+			"the down arrow zone reports 2");
+	CHECK(c.spin_arrow_at(3, st, 405.0f, 5.0f, 1.0f, 1.0f) == 0,
+			"outside both arrows reports 0");
+
+	// The non-mutating hit query mirrors the pump's claim walk.
+	CHECK(c.hit_widget(st, 50.0f, 25.0f, 1.0f, 1.0f) == 1,
+			"hit_widget claims the front-most widget");
+	CHECK(st.widgets.empty(), "hit_widget mutates no state");
+}
+
+// The accelerator scan [orig: the screen hotkey registration family
+// @ 0x5674a8; hidden subtrees prune — a hidden BACK must not eat ESC].
+void test_hotkey_widget(const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>H</NAME>
+  <WINDOW type="window" name="ROOT">
+    <WINDOW type="window" name="HIDDEN_GROUP" HIDDEN>
+      <WINDOW type="button" name="HIDDEN_ESC">
+        <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>10</RIGHT><BOTTOM>10</BOTTOM></POSITION>
+        <HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
+      </WINDOW>
+    </WINDOW>
+    <WINDOW type="button" name="BACK">
+      <POSITION><LEFT>0</LEFT><TOP>20</TOP><RIGHT>10</RIGHT><BOTTOM>30</BOTTOM></POSITION>
+      <HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
+      <HOTKEY>V</HOTKEY>
+    </WINDOW>
+    <WINDOW type="button" name="GO">
+      <POSITION><LEFT>0</LEFT><TOP>40</TOP><RIGHT>10</RIGHT><BOTTOM>50</BOTTOM></POSITION>
+      <HOTKEY VIRTUAL>VK_ENTER</HOTKEY>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	c.configure(doc.first_screen(), font);
+	MenuFrameState st;
+	// The hidden subtree's ESC never matches; the shown BACK does.
+	CHECK(c.hotkey_widget("VK_ESCAPE", true, st) == 3,
+			"a hidden subtree prunes; the shown widget matches");
+	// Character rows are a separate namespace, case-insensitive.
+	CHECK(c.hotkey_widget("v", false, st) == 3,
+			"character hotkeys match case-insensitively");
+	CHECK(c.hotkey_widget("VK_ESCAPE", false, st) == -1,
+			"a virtual name never matches as a character");
+	// VK_RETURN and VK_ENTER are interchangeable.
+	CHECK(c.hotkey_widget("VK_RETURN", true, st) == 4,
+			"VK_RETURN matches an authored VK_ENTER");
+	// A runtime show override un-prunes the subtree; pre-order then prefers it.
+	MenuWidgetState shown;
+	shown.index = 1;
+	shown.show = true;
+	st.widgets.push_back(shown);
+	CHECK(c.hotkey_widget("VK_ESCAPE", true, st) == 2,
+			"a shown-override subtree joins the scan in pre-order");
+}
+
+// The wrapped multiline-edit drawer [orig: CMEditWnd_Render @ 0x6608e0 ->
+// draw_text_wrapped_clipped @ 0x653D60 -> draw_text_wrapped @ 0x653710]:
+// word wrap at the last space, explicit LF, the line-based scroll window,
+// the bottom clip, and the count twin [orig: @ 0x653b90].
+void test_multiline_wrap(const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>M</NAME>
+  <WINDOW type="window" name="ROOT">
+    <FONT><NAME>f.fnt</NAME><DEFAULT_FG>111111</DEFAULT_FG></FONT>
+    <WINDOW type="multiline_edit" name="BODY" READONLY>
+      <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>64</BOTTOM></POSITION>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	c.configure(doc.first_screen(), font);
+
+	// 9 px advance per glyph: 12 chars measure 106 > 100, so the line breaks
+	// at the LAST SPACE (index 9) — "AAAA BBBB" then "CCCC".
+	MenuWidgetState body;
+	body.index = 1;
+	body.has_text = true;
+	body.text = "AAAA BBBB CCCC";
+	MenuFrameState st;
+	st.widgets.push_back(body);
+	const MenuDrawList &dl = c.compile(st, 1.0f, 1.0f);
+	// Glyphs ride the GameFont half-texel offset; bucket rows by the 16px
+	// line height.
+	int rows_y0 = 0;
+	int rows_y16 = 0;
+	for (const auto &g : dl.glyphs) {
+		if (g.y_top < 8.0f) {
+			++rows_y0;
+		} else if (g.y_top < 24.0f) {
+			++rows_y16;
+		}
+	}
+	CHECK(rows_y0 == 9 && rows_y16 == 4,
+			"word wrap breaks at the last space; the space is consumed");
+
+	// An explicit LF breaks; CR is not special.
+	st.widgets[0].text = "AB\nCD";
+	const MenuDrawList &dl2 = c.compile(st, 1.0f, 1.0f);
+	rows_y0 = 0;
+	rows_y16 = 0;
+	for (const auto &g : dl2.glyphs) {
+		if (g.y_top < 8.0f) {
+			++rows_y0;
+		} else if (g.y_top < 24.0f) {
+			++rows_y16;
+		}
+	}
+	CHECK(rows_y0 == 2 && rows_y16 == 2, "an explicit LF breaks the line");
+
+	// The scroll window skips lines without advancing y.
+	st.widgets[0].text = "AAAA BBBB CCCC";
+	st.widgets[0].scroll_row = 1;
+	const MenuDrawList &dl3 = c.compile(st, 1.0f, 1.0f);
+	CHECK(dl3.glyphs.size() == 4 && dl3.glyphs[0].y_top < 8.0f,
+			"the first-visible-line window skips rows at the top");
+	st.widgets[0].scroll_row = 0;
+
+	// The bottom clip stops when the NEXT line's bottom would overflow.
+	const char *short_xml = R"(
+<SCREEN>
+  <NAME>M2</NAME>
+  <WINDOW type="window" name="ROOT">
+    <FONT><NAME>f.fnt</NAME><DEFAULT_FG>111111</DEFAULT_FG></FONT>
+    <WINDOW type="multiline_edit" name="BODY" READONLY>
+      <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>20</BOTTOM></POSITION>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	mnu::Document sdoc = parse_or_die(short_xml);
+	MenuFrameCompiler sc;
+	sc.configure(sdoc.first_screen(), font);
+	MenuFrameState sst;
+	MenuWidgetState sbody;
+	sbody.index = 1;
+	sbody.has_text = true;
+	sbody.text = "AB\nCD";
+	sst.widgets.push_back(sbody);
+	const MenuDrawList &dl4 = sc.compile(sst, 1.0f, 1.0f);
+	CHECK(dl4.glyphs.size() == 2, "the bottom clip truncates trailing lines");
+
+	// The count twin: 2 wrapped lines, both fitting a 64-high rect.
+	int fit = 0;
+	int total = 0;
+	CHECK(c.multiline_line_counts(1, st, &fit, &total) && total == 2 &&
+					fit == 2,
+			"multiline_line_counts reports the scroll range inputs");
+}
+
 } // namespace
 
 int main() {
@@ -789,7 +1162,13 @@ int main() {
 	test_mouse_pump(&font);
 	test_table_interior(&font);
 	test_marquee_roll(&font);
+	test_draw_frame_gate(&font);
 	test_edit_input_ops();
+	test_runtime_items_and_multiselect(&font);
+	test_widget_queries(&font);
+	test_interaction_geometry(&font);
+	test_hotkey_widget(&font);
+	test_multiline_wrap(&font);
 	fnt_free(&font);
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
