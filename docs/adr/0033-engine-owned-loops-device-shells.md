@@ -127,6 +127,17 @@ extended to the whole frame).
 
 - R1 and R2 are committed and staffed as the next slices; R3 waits on its
   spike; R4 waits on R3's parity results.
+- **Ladder state (2026-08-10):** R1 LANDED (the FrameDriver frame). R2
+  COMPLETE — all four packet domains (terrain, foliage, HUD, menus) compile
+  typed draw lists, and the menu cutover deleted the MnuMenu Control tree
+  outright (the compiled MenuFrame + the MenuDriver interaction runtime are
+  the one menu path). The P1 rewrite queue that followed (env/weather,
+  placer, present facades, composition slimming, avatar, menus) is complete;
+  the task-12 sweep moved every witnessed constant/table/transform in the
+  godot layer to an engine home with a bound re-export, and the engine tree
+  flattened to `engine/<group>/<lib>/*.{h,cpp}` (ADR 0024's layout
+  amendment). R3's one-scene screenshot spike vs retail remains the open
+  gate; R4 unchanged.
 - During transition a domain not yet cut over keeps its node path; the draw list
   applier makes old-vs-new diffable, which is itself the parity harness.
 - Verification per stage: R1 — full ctest + frame-golden traces + the

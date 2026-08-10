@@ -97,7 +97,8 @@ The render FRAME has no engine counterpart yet — that is ADR 0033's spike-gate
 stage R3 (the witnessed seven-pass order lives in
 [render/render-order-re.md](render/render-order-re.md); the portable ordering
 math in `engine/runtime/renderer` currently has no caller for its sort keys
-because Godot's scene renderer owns the sort). Two R2 domains are cut over:
+because Godot's scene renderer owns the sort). All four R2 domains are cut
+over to compiled draw lists (R2 completed 2026-08-09/10):
 
 - Terrain: `opennova::TerrainFrameCompiler` (`engine/runtime/terrain/terrain_frame.h`)
   owns the per-frame walk — the 512-unit sector window, quadtree traversal,
@@ -112,6 +113,17 @@ because Godot's scene renderer owns the sort). Two R2 domains are cut over:
   wind clocks; `FoliageDispatcher` applies the typed `FoliageDrawList`
   (ArrayMesh uploads for the draw list's mesh builds, draw-node pooling, material
   binding, the eviction lifecycle).
+- HUD: `hud::HudFrameCompiler` walks the whole element set into a `HudDrawList`
+  over the engine `GameFont`; the native `HudOverlay` applier rasterizes it.
+- Menus: `menu::MenuFrameCompiler` (`engine/runtime/menu/menu_frame.h`) compiles
+  a parsed `.mnu` screen + typed per-widget state into a `MenuDrawList`, and
+  ALSO owns the witnessed mouse pump, interaction geometry queries, hotkey
+  scan, and edit-input ops. `MenuFrame` (`godot/src/mnu`) uploads assets and
+  rasterizes; `MenuDriver` (`godot/game/menu_driver.gd`) is the shell-side
+  interaction runtime (navigation, actions, popups, sounds, the MUSICVAR
+  push). The MnuMenu Control tree was deleted with the 2026-08-10 cutover —
+  the game shell, the armory/deploy presenters, and the ONED Menus canvas all
+  consume this one path (record: [mnu/menu-re.md](mnu/menu-re.md)).
 
 One per-frame render loop remains deliberately SELF-DRIVEN outside the engine
 frame until its output becomes a draw list (stage R2):
