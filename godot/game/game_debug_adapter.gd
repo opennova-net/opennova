@@ -24,6 +24,8 @@ var _resume_action: Callable
 var _return_to_menu_action: Callable
 var _quit_action: Callable
 var _menu_shell_source: Callable
+var _open_ingame_menu_action: Callable
+var _open_armory_action: Callable
 
 
 func configure(
@@ -167,6 +169,16 @@ func set_menu_shell_source(source: Callable) -> void:
 	_menu_shell_source = source
 
 
+# Additive seam (same arity contract): the in-world screen verbs game_control
+# routes — the ESC pause overlay and the armory's direct-open. Each returns the
+# shell's Error verdict; unset callables report the verb unavailable.
+func set_ingame_screen_actions(
+		open_ingame_menu: Callable,
+		open_armory: Callable) -> void:
+	_open_ingame_menu_action = open_ingame_menu
+	_open_armory_action = open_armory
+
+
 func _menu_shell() -> MenuShell:
 	if _menu_shell_source.is_null():
 		return null
@@ -233,12 +245,26 @@ func mcp_game_control(action: String) -> Error:
 			if runtime == null:
 				return ERR_UNAVAILABLE
 			runtime.play()
-			if String(_shell_state_source.call()) == "paused":
+			# The armory rides the same resume leg as the pause overlay
+			# (_on_resume closes whichever is up and hands play back).
+			if String(_shell_state_source.call()) in ["paused", "armory"]:
 				_resume_action.call()
 		"step":
 			if runtime == null or (world != null and world.is_net_session()):
 				return ERR_UNAVAILABLE
 			runtime.step_once()
+		"open_ingame_menu":
+			if not _open_ingame_menu_action.is_valid():
+				return ERR_UNAVAILABLE
+			var menu_err: Error = _open_ingame_menu_action.call()
+			if menu_err != OK:
+				return menu_err
+		"open_armory":
+			if not _open_armory_action.is_valid():
+				return ERR_UNAVAILABLE
+			var armory_err: Error = _open_armory_action.call()
+			if armory_err != OK:
+				return armory_err
 		"return_to_menu":
 			if world == null or not world.is_loaded() \
 					or bool(_world_loading_source.call()):

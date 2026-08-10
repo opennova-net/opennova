@@ -18,6 +18,7 @@ const LANGUAGE_FILES := [
 ]
 const LOCALRES_FILES := [
 	"items.def", "weapon.def", "ammo.def", "main.mnu", "mp.mnu",
+	"game.mnu", "weapon.mnu",
 	"mnml.bms", "menu_style.mns", "newarow1.tga", "mnml.dbf",
 ]
 const RESOURCE_FILES := [
@@ -494,6 +495,66 @@ func test_mission_return_restores_menu_frame_and_supports_another_load() -> void
 	_assert_clean_menu(world, terrain, menu_shell, boot_clear)
 
 
+func test_mcp_screen_verbs_reach_pause_and_armory_over_a_loaded_world() -> void:
+	_shell = await _make_shell()
+	if _shell == null:
+		return
+	var world = _shell.get_node("World")
+	var menu_shell = _shell.get_node("MenuLayer/MenuShell")
+	var adapter: GameDebugAdapter = _shell.get_game_debug_adapter()
+	# In the front-end menu neither in-world screen exists.
+	assert_eq(adapter.mcp_game_control("open_ingame_menu"), ERR_UNAVAILABLE,
+			"the pause overlay needs a loaded world")
+	assert_eq(adapter.mcp_game_control("open_armory"), ERR_UNAVAILABLE,
+			"the armory needs a loaded world")
+
+	menu_shell.start_requested.emit("mnml.bms")
+	await _wait_for_world_load(world)
+	assert_true(world.is_loaded(), "the minimal mission loaded through the full shell")
+
+	# The ESC-pause leg through the MCP verb: game.mnu over the kept world.
+	assert_eq(adapter.mcp_game_control("open_ingame_menu"), OK)
+	var state: Dictionary = adapter.get_mcp_game_state()
+	assert_eq(String(state["shell"]["state"]), "paused",
+			"open_ingame_menu takes the ESC pause leg")
+	assert_true(menu_shell.visible, "the pause overlay is presented")
+	var snapshot: Dictionary = menu_shell.menu_snapshot(false)
+	assert_eq(String(snapshot["file"]).to_lower(), "game.mnu",
+			"the overlay is the in-game menu file")
+	assert_true(bool(snapshot["in_game"]),
+			"the shell marks the overlay as the in-game menu")
+	assert_eq(adapter.mcp_game_control("open_ingame_menu"), OK,
+			"open is idempotent while already paused")
+	assert_eq(adapter.mcp_game_control("open_armory"), ERR_UNAVAILABLE,
+			"the armory does not stack over the pause overlay")
+	assert_eq(adapter.mcp_game_control("resume"), OK)
+	state = adapter.get_mcp_game_state()
+	assert_eq(String(state["shell"]["state"]), "world", "resume hands play back")
+	assert_false(menu_shell.visible, "the overlay is hidden after resume")
+
+	# The armory over live play (the presenter's direct-open seam; no armory
+	# volume is authored in mnml.bms, and the verb deliberately skips the
+	# useitem key's zone gate).
+	assert_eq(adapter.mcp_game_control("open_armory"), OK)
+	state = adapter.get_mcp_game_state()
+	assert_eq(String(state["shell"]["state"]), "armory",
+			"open_armory opens weapon.mnu's WEAPON screen over live play")
+	assert_eq(adapter.mcp_game_control("open_ingame_menu"), ERR_UNAVAILABLE,
+			"ESC in the armory resumes, so the pause verb requires resume first")
+	assert_eq(adapter.mcp_game_control("open_armory"), OK,
+			"open is idempotent while the armory is up")
+	assert_eq(adapter.mcp_game_control("resume"), OK)
+	state = adapter.get_mcp_game_state()
+	assert_eq(String(state["shell"]["state"]), "world",
+			"resume closes the armory and hands play back")
+
+	menu_shell.return_to_menu_requested.emit()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	assert_eq(adapter.mcp_game_control("open_armory"), ERR_UNAVAILABLE,
+			"the unloaded world takes the armory verb back off the table")
+
+
 func test_join_loading_stays_raised_until_authoritative_admission() -> void:
 	_shell = await _make_shell()
 	if _shell == null:
@@ -842,7 +903,7 @@ func _make_shell():
 	_temp_dir = OS.get_cache_dir().path_join(
 			"opennova_main_game_lifecycle_%d" % Time.get_ticks_usec())
 	assert_eq(DirAccess.make_dir_recursive_absolute(_temp_dir), OK)
-	assert_eq(LANGUAGE_FILES.size() + LOCALRES_FILES.size() + RESOURCE_FILES.size(), 25,
+	assert_eq(LANGUAGE_FILES.size() + LOCALRES_FILES.size() + RESOURCE_FILES.size(), 27,
 			"the retail-shaped archives contain every minimal fixture resource")
 	var language_entries := _fixture_entries(LANGUAGE_FILES)
 	var localres_entries := _fixture_entries(LOCALRES_FILES)
@@ -881,6 +942,12 @@ func _fixture_entries(filenames: Array) -> Array:
 		# while retaining that logical archive name.
 		if filename == "mnml.trn":
 			source = BAKED_TERRAIN_DIR.path_join("Dvxi5.trn")
+		# The in-world screens (ESC pause overlay + armory) pack the real JO
+		# menu fixtures under their retail archive names.
+		elif filename == "game.mnu":
+			source = "res://../fixtures/mnu/jo_game.mnu"
+		elif filename == "weapon.mnu":
+			source = "res://../fixtures/mnu/jo_weapon.mnu"
 		var bytes := FileAccess.get_file_as_bytes(source)
 		if filename == "weapon.def":
 			bytes = LIFECYCLE_WEAPON_DEF.to_utf8_buffer()
