@@ -109,6 +109,9 @@ public:
 	int widget_kind(int p_index) const;
 	String widget_authored_text(int p_index) const;
 	bool is_widget_disabled(int p_index) const;
+	// Effective draw/hit visibility (own flag + ancestors + overrides) —
+	// shell overlays mounted over a widget must follow it.
+	bool is_widget_shown(int p_index) const;
 	Rect2 widget_rect(int p_index) const;
 	int item_count(int p_index) const;
 	String get_widget_text(int p_index) const; // effective: runtime else authored

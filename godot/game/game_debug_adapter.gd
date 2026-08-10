@@ -23,6 +23,7 @@ var _overlay_open_source: Callable
 var _resume_action: Callable
 var _return_to_menu_action: Callable
 var _quit_action: Callable
+var _menu_shell_source: Callable
 
 
 func configure(
@@ -160,6 +161,66 @@ func get_mcp_game_entity(index: int) -> Variant:
 
 ## Narrow transport used by GameMcpTools. Pause and step reject multiplayer
 ## because the world's network pump must keep running.
+# Additive seam (keeps configure()'s arity stable): the menu shell the
+# game_menu tool drives.
+func set_menu_shell_source(source: Callable) -> void:
+	_menu_shell_source = source
+
+
+func _menu_shell() -> MenuShell:
+	if _menu_shell_source.is_null():
+		return null
+	return _menu_shell_source.call() as MenuShell
+
+
+func mcp_game_menu(args: Dictionary) -> Variant:
+	var shell := _menu_shell()
+	if shell == null:
+		return {"error": "no menu shell"}
+	var op := String(args.get("op", ""))
+	match op:
+		"state":
+			return shell.menu_snapshot(bool(args.get("widgets", true)))
+		"press":
+			var target := String(args.get("name", ""))
+			if target.is_empty():
+				return {"error": "press requires name"}
+			if not shell.menu_press(target):
+				return {"error": "no widget named '%s'" % target}
+			return shell.menu_snapshot(false)
+		"press_at":
+			if not args.has("x") or not args.has("y"):
+				return {"error": "press_at requires x and y (design coords)"}
+			var hit := shell.menu_press_at(
+					Vector2(float(args["x"]), float(args["y"])))
+			var out := shell.menu_snapshot(false)
+			out["hit_index"] = hit
+			return out
+		"key":
+			if not args.has("keycode"):
+				return {"error": "key requires keycode"}
+			var handled := shell.menu_key(
+					int(args["keycode"]), int(args.get("unicode", 0)))
+			var out2 := shell.menu_snapshot(false)
+			out2["handled"] = handled
+			return out2
+		"screen":
+			var screen := String(args.get("name", ""))
+			if screen.is_empty():
+				return {"error": "screen requires name"}
+			if not shell.menu_show_screen(screen):
+				return {"error": "no screen named '%s'" % screen}
+			return shell.menu_snapshot(false)
+		"open":
+			var file := String(args.get("file", ""))
+			if file.is_empty():
+				return {"error": "open requires file"}
+			if not shell.open_menu(file, String(args.get("target_screen", ""))):
+				return {"error": "could not open '%s'" % file}
+			return shell.menu_snapshot(false)
+	return {"error": "unknown game_menu op '%s'" % op}
+
+
 func mcp_game_control(action: String) -> Error:
 	var world := _current_world()
 	var runtime: Variant = _current_runtime()

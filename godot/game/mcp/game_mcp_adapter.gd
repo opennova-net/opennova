@@ -21,5 +21,9 @@ func mcp_game_control(_action: String) -> Error:
 	return ERR_UNAVAILABLE
 
 
+func mcp_game_menu(_args: Dictionary) -> Variant:
+	return {}
+
+
 func get_debug_session() -> DebugSession:
 	return null

@@ -89,6 +89,30 @@ static func definitions() -> Array[McpToolDef]:
 				"filter": {"type": "string"},
 				"confirm_authority": {"type": "boolean", "default": false},
 			}, ["op"]),
+		McpToolDef.make("game_menu",
+			"Drive the compiled menu. op=state returns the current file/screen + widget rows "
+			+ "(design-space rects); press activates a named widget through the real mouse pump "
+			+ "(press+release at its center); press_at pumps at design coords x,y (list rows, "
+			+ "combo popups, spin arrows) and returns the hit widget index; key feeds one key "
+			+ "event (keycode + optional unicode); screen jumps within the open .mnu; open loads "
+			+ "another .mnu file.",
+			{
+				"op": {
+					"type": "string",
+					"enum": ["state", "press", "press_at", "key", "screen", "open"],
+				},
+				"name": {
+					"type": "string",
+					"description": "Widget name (press) or screen name (screen).",
+				},
+				"widgets": {"type": "boolean", "default": true},
+				"x": {"type": "number"},
+				"y": {"type": "number"},
+				"keycode": {"type": "integer"},
+				"unicode": {"type": "integer"},
+				"file": {"type": "string"},
+				"target_screen": {"type": "string", "default": ""},
+			}, ["op"]),
 		McpToolDef.make("game_screenshot",
 			"Capture the real game window, including F3 when it is open. Requested expensive "
 			+ "debug views are activated for this capture, then suspended again.",

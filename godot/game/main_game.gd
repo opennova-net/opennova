@@ -413,6 +413,7 @@ func get_game_debug_adapter() -> GameDebugAdapter:
 			_on_resume,
 			_on_return_to_menu,
 			request_quit)
+		_debug_adapter.set_menu_shell_source(func(): return _menu_shell)
 	return _debug_adapter
 func get_frame_stats_board() -> FrameStatsBoard:
 	return _frame_stats

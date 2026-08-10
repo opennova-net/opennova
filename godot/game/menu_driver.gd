@@ -62,7 +62,10 @@ var _index_of_id: Dictionary = {}
 # Per-screen RTXT text tables (TEXT_RSRC), cached by lowercased filename.
 var _text_rsrc_cache: Dictionary = {}
 # CBIN credits scrollers mounted over marquee widgets of the current screen.
-var _credits_players: Array = []
+# Rows are {player, id}: the overlay follows its marquee widget's EFFECTIVE
+# shown state (ancestors included — a hidden tab hides its credits), the same
+# gate the compiled draw walk applies.
+var _credits_players: Array[Dictionary] = []
 
 var _focus_id := -1        # keyboard/edit focus [orig: g_ui_focus_wnd @ 0x31C16D4]
 var _open_combo_id := -1   # single open dropdown [orig: g_ui_active_combo_wnd @ 0x31C16D0]
@@ -269,9 +272,9 @@ func _configure_frame() -> void:
 # roll [orig: marquee_load_credits_from_ini — the Control-tree builder carried
 # this resolve; the CBIN scroller is godot/src/cbin].
 func _seed_marquee_widgets() -> void:
-	for player in _credits_players:
-		if is_instance_valid(player):
-			player.queue_free()
+	for row in _credits_players:
+		if is_instance_valid(row.get("player")):
+			(row["player"] as CreditsPlayer).queue_free()
 	_credits_players.clear()
 	if _root == null:
 		return
@@ -297,13 +300,25 @@ func _seed_marquee_widgets() -> void:
 			player.size = rect.size
 			player.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			_frame.add_child(player)
-			_credits_players.append(player)
+			_credits_players.append({"player": player, "id": int(id)})
 			continue
 		var text := bytes.get_string_from_ascii()
 		var index := _frame_index(int(id))
 		if index >= 0 and not text.is_empty():
 			_frame.set_widget_marquee_lines(index,
 					text.replace("\r\n", "\n").split("\n"))
+	_sync_credits_visibility()
+
+
+# The scroller overlays are frame CHILDREN, outside the compiled draw walk —
+# re-apply the walk's shown gate whenever widget visibility changes.
+func _sync_credits_visibility() -> void:
+	for row in _credits_players:
+		var player: CreditsPlayer = row.get("player")
+		if not is_instance_valid(player):
+			continue
+		var index := _frame_index(int(row.get("id", -1)))
+		player.visible = index >= 0 and _frame.is_widget_shown(index)
 
 
 # The current screen's id<->pre-order-index maps: the frame's index space is
@@ -457,6 +472,7 @@ func set_widget_shown(id: int, shown: bool) -> void:
 	var index := _frame_index(id)
 	if index >= 0:
 		_frame.set_widget_shown_override(index, shown)
+	_sync_credits_visibility()
 
 
 func is_widget_shown(id: int) -> bool:

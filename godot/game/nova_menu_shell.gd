@@ -817,3 +817,97 @@ func get_crosshair_style() -> int:
 
 func get_menu_stack_depth() -> int:
 	return _menu_stack.size()
+
+
+# --- MCP menu-driving seam (the game_menu tool) -------------------------------
+# Typed surface for driving the compiled menu from the runtime MCP: snapshot
+# the current screen's widgets, press one through the REAL mouse pump (design
+# coords scale exactly like _gui_input's), feed a key event, or navigate.
+# Positions are design-space (800x600); the frame scales like process_mouse.
+
+
+func menu_snapshot(include_widgets: bool = true) -> Dictionary:
+	if _driver == null or _frame == null:
+		return {}
+	var snapshot := {
+		"visible": is_visible_in_tree(),
+		"file": _current_file,
+		"screen": _driver.get_current_screen(),
+		"screens": _driver.get_screen_names(),
+		"in_game": _in_game,
+		"stack_depth": _menu_stack.size(),
+		"underlay": {
+			"active_slots": _underlay.get_active_slot_count() if _underlay != null else 0,
+			"startup_layout": _underlay.is_startup_layout() if _underlay != null else false,
+			"unconverted": _underlay.get_unconverted_count() if _underlay != null else 0,
+		},
+	}
+	if include_widgets:
+		var rows: Array[Dictionary] = []
+		for i in _frame.widget_count():
+			var rect := _frame.widget_rect(i)
+			rows.append({
+				"index": i,
+				"name": _frame.widget_name(i),
+				"kind": _frame.widget_kind(i),
+				"disabled": _frame.is_widget_disabled(i),
+				"rect": [rect.position.x, rect.position.y, rect.size.x, rect.size.y],
+				"text": _frame.get_widget_text(i),
+				"items": _frame.item_count(i),
+			})
+		snapshot["widgets"] = rows
+	return snapshot
+
+
+func _design_to_local(design_pos: Vector2) -> Vector2:
+	var size := _frame.get_size()
+	return Vector2(design_pos.x * size.x / MenuFrame.DESIGN_WIDTH,
+			design_pos.y * size.y / MenuFrame.DESIGN_HEIGHT)
+
+
+# Press+release through the real pump at the widget's design-rect center;
+# click activation follows the pump's claim rules exactly. Resolution is
+# frame-side (pre-order index) — the driver's doc-id space is a DIFFERENT
+# addressing and must not index frame rects.
+func menu_press(widget_name: String) -> bool:
+	if _driver == null or _frame == null or not is_visible_in_tree():
+		return false
+	for i in _frame.widget_count():
+		if _frame.widget_name(i) != widget_name or _frame.is_widget_disabled(i):
+			continue
+		var local := _design_to_local(_frame.widget_rect(i).get_center())
+		_driver.process_mouse(local, true)
+		_driver.process_mouse(local, false)
+		return true
+	return false
+
+
+# Raw pump press+release at design coords (list rows, combo popups, spin
+# arrows). Returns the hit widget index (-1 for none).
+func menu_press_at(design_pos: Vector2) -> int:
+	if _driver == null or _frame == null or not is_visible_in_tree():
+		return -1
+	var local := _design_to_local(design_pos)
+	var hit := _frame.hit_test(local)
+	_driver.process_mouse(local, true)
+	_driver.process_mouse(local, false)
+	return hit
+
+
+func menu_key(keycode: int, unicode: int = 0) -> bool:
+	# The same guard as the real input paths: a hidden menu (a world is up)
+	# must not receive synthetic menu input either.
+	if _driver == null or not is_visible_in_tree():
+		return false
+	var ev := InputEventKey.new()
+	ev.keycode = keycode as Key
+	ev.physical_keycode = keycode as Key
+	ev.unicode = unicode
+	ev.pressed = true
+	return _driver.handle_key_input(ev)
+
+
+func menu_show_screen(name: String) -> bool:
+	if _driver == null:
+		return false
+	return _driver.show_screen(name)

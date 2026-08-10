@@ -176,6 +176,13 @@ func _tool_game_debug(args: Dictionary, _ctx: McpToolContext) -> Variant:
 					"Unknown game_debug op '%s'." % op)
 
 
+func _tool_game_menu(args: Dictionary, _ctx: McpToolContext) -> Variant:
+	var result: Variant = adapter.mcp_game_menu(args)
+	if result is Dictionary and (result as Dictionary).has("error"):
+		return McpToolResult.error(String((result as Dictionary)["error"]))
+	return result
+
+
 func _tool_game_screenshot(args: Dictionary, ctx: McpToolContext) -> Variant:
 	if adapter == null:
 		return McpToolResult.error("The game shell is not ready.")

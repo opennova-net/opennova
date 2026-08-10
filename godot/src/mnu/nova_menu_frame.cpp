@@ -424,6 +424,10 @@ bool MenuFrame::is_widget_disabled(int p_index) const {
 	return compiler_.widget_disabled(p_index, state_);
 }
 
+bool MenuFrame::is_widget_shown(int p_index) const {
+	return compiler_.widget_shown(p_index, state_);
+}
+
 Rect2 MenuFrame::widget_rect(int p_index) const {
 	mnu::RectEdges rect;
 	if (!compiler_.widget_rect(p_index, state_, &rect)) {
@@ -856,6 +860,8 @@ void MenuFrame::_bind_methods() {
 			&MenuFrame::widget_authored_text);
 	ClassDB::bind_method(D_METHOD("is_widget_disabled", "index"),
 			&MenuFrame::is_widget_disabled);
+	ClassDB::bind_method(D_METHOD("is_widget_shown", "index"),
+			&MenuFrame::is_widget_shown);
 	ClassDB::bind_method(D_METHOD("widget_rect", "index"),
 			&MenuFrame::widget_rect);
 	ClassDB::bind_method(D_METHOD("item_count", "index"),

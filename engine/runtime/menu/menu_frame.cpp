@@ -1516,6 +1516,11 @@ int MenuFrameCompiler::row_height_(const WidgetNode &node) const {
 	return row_h;
 }
 
+bool MenuFrameCompiler::widget_shown(
+		int index, const MenuFrameState &state) const {
+	return widget_shown_(index, state);
+}
+
 bool MenuFrameCompiler::widget_shown_(int index, const MenuFrameState &state) const {
 	// The draw/hit walk's shown gate over the widget AND its ancestors.
 	int i = index;

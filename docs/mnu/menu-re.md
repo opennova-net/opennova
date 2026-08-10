@@ -1035,6 +1035,12 @@ Accepted/divergent (each a documented decision, not a defect):
   later sibling would see the list above it in the reimpl but below in retail. Kept: the
   overlay is the correct Godot home for the witnessed input model, which is the
   observable contract.
+- **D-MNU-14 (SP mission-select population — needs witness):** the shell seeds
+  IA_LIST/MISSION_LIST with raw `.bms` filenames from the dir scan and never
+  fills the MISSION BRIEFING pane on selection (observed live 2026-08-10 on the
+  revx02 menus). Retail's populate is `SinglePlayer_PopulateMissionList
+  @ 0x561840` (one of the strip-enabling activate handlers; interior unwalked) —
+  witness the row content it builds and the briefing text source, then port.
 
 Deferred (unwitnessed or out of bar; backlog, not blocking):
 

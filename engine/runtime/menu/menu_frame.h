@@ -228,6 +228,11 @@ public:
 	// screen produces (root first, children in authored order), so embedders
 	// can zip indices against document ids.
 	int widget_count() const;
+	// Effective draw/hit visibility: the widget's own shown flag folded with
+	// its ancestors' (state overrides included) — the same gate the draw
+	// walk and the pump use. Companion overlays a shell mounts over a widget
+	// (e.g. the CBIN credits scroller) must follow it.
+	bool widget_shown(int index, const MenuFrameState &state) const;
 	std::string widget_name(int index) const;
 	// The parsed mnu::WindowType as an int (out of range -> -1).
 	int widget_kind(int index) const;
