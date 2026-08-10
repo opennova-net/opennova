@@ -22,6 +22,21 @@ struct FpViewmodelSpec {
 	bool show_arms = true;
 };
 
+// weapon.def viewmodel placement units: the parser stores pos/tpos POSITIONS
+// as atof(str) * 256 (16.16 fixed-point world; scale flt_7D1D70 @ 0x544770,
+// handler @ 0x54471f) and the camera ftol's the stored float straight onto
+// g_view_pos, so the net WORLD offset is file_value / 256.
+inline constexpr float kWeaponDefPosScale = 256.0f;
+// The witnessed JOX WPN_AK47AUTO def line — the no-def bring-up fallback
+// placement trio (pos hip / tpos ADS / rot-bias cant degrees).
+inline constexpr float kFallbackPosUnits[3] = {-19.46f, 21.19f, -161.31f};
+inline constexpr float kFallbackTposUnits[3] = {-62.33f, 29.19f, -152.56f};
+inline constexpr float kFallbackRotBiasDeg[3] = {5.0f, 3.75f, 353.0f};
+// The FP render pass swaps the projection near plane 0.2 -> 0.05 while the
+// viewmodel draws [orig: Render_SwapProjectionNearZ(0.05) @ 0x4dee29,
+// restore @ 0x4df0aa].
+inline constexpr float kViewmodelPassNearZ = 0.05f;
+
 // The witnessed JO default arms model when a def carries no gfx1a.
 inline constexpr const char *kDefaultArmsModel = "armsG";
 // The no-definition BRING-UP fallback (ours, not retail): before any def

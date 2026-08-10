@@ -24,13 +24,14 @@ extends RefCounted
 # equipped-weapon resolution lands); the values below are the witnessed JOX WPN_AK47AUTO line,
 # kept as the no-def fallback. (The pre-def constant (10, 0, -201) turned out to be the
 # REVX-era WPN_AK47AUTO `pos` — that SKU's def drives the AKM_1st viewmodel.)
-const WEAPON_DEF_POS_SCALE := 256.0                                # flt_7D1D70: file unit -> /256 world units
+# The witnessed scale + fallback placement values live at engine
+# simassets/fp_viewmodel_spec.h, re-exported through Simulation statics.
 # Tunable (vars, not consts) so debug drivers can sweep placements live; the values are
 # the witnessed WPN_AK47AUTO def line + the current best facing.
-var PLAYER_VIEWMODEL_POS_UNITS := Vector3(-19.46, 21.19, -161.31)  # weapon.def WPN_AK47AUTO `pos` (hip)
+var PLAYER_VIEWMODEL_POS_UNITS := Simulation.viewmodel_fallback_pos_units()
 # The ADS/sighted view offset (weapon.def `tpos` -> WeaponDef.AltCamOffset @0x10C), blended
 # in by the sim's scope fraction; JOX AK47AUTO = (-62.33, 29.19, -152.56).
-var PLAYER_VIEWMODEL_TPOS_UNITS := Vector3(-62.33, 29.19, -152.56)
+var PLAYER_VIEWMODEL_TPOS_UNITS := Simulation.viewmodel_fallback_tpos_units()
 # The FP rig's model->camera AXIS MAP, euler DEGREES in CAMERA space. The FP rig is a
 # T-posed character skeleton (BN01 Pelvis at the origin) that the wpn clips POSE into the
 # hold facing downrange; the rig renders through the standard skeletal pipeline (import-
@@ -46,7 +47,7 @@ var PLAYER_VIEWMODEL_ROT := Vector3(0.0, 180.0, 0.0)
 # (yaw, pitch, roll) ADDED to the view angles — the weapon cant. AK47AUTO = 5.0 / 3.75 / 353.0.
 # [orig: Player_UpdateFirstPersonCamera @0x4dd444: rot = view_rot + Def.Bone.rot; parser stores
 # degrees -> BAM @0x54471f.] Sign map to Godot camera axes verified visually.
-var PLAYER_VIEWMODEL_ROT_BIAS_DEF := Vector3(5.0, 3.75, 353.0)
+var PLAYER_VIEWMODEL_ROT_BIAS_DEF := Simulation.viewmodel_fallback_rot_bias_deg()
 # The FP render pass: the original draws the viewmodel through its OWN projection — the
 # weapon's `renderfov` (HORIZONTAL degrees; every JO weapon.def omits the key, so all use the
 # record default 80.0) converted to vertical via the aspect, with the near plane swapped
@@ -58,7 +59,7 @@ var PLAYER_VIEWMODEL_ROT_BIAS_DEF := Vector3(5.0, 3.75, 353.0)
 # @0x54482a]. Ported as a SubViewport sharing the world, camera cull-masked to the viewmodel
 # layer, composited over the finished frame (the depth-remap's visible equivalent).
 var PLAYER_VIEWMODEL_RENDERFOV_H_DEG := 80.0
-const VIEWMODEL_PASS_NEAR := 0.05
+# (near-z lives engine-side: Simulation.viewmodel_pass_near_z())
 const CTRL_OWNER_FP_HEAT := "first_person:heat"
 const CTRL_OWNER_FP_EMPLACED := "first_person:emplaced"
 const CTRL_OWNER_FP_TEAM := "first_person:team"
@@ -168,7 +169,7 @@ func _build_viewmodel_pass() -> void:
 	_vm_viewport.handle_input_locally = false
 	_vm_camera = Camera3D.new()
 	_vm_camera.cull_mask = Water.VISUAL_LAYER_VIEWMODEL
-	_vm_camera.near = VIEWMODEL_PASS_NEAR  # [orig: Render_SwapProjectionNearZ(0.05) @0x4dee29]
+	_vm_camera.near = Simulation.viewmodel_pass_near_z()  # [orig: Render_SwapProjectionNearZ(0.05) @0x4dee29]
 	_vm_viewport.add_child(_vm_camera)
 	container.add_child(_vm_viewport)
 	_vm_pass_layer.add_child(container)
@@ -360,7 +361,7 @@ func _viewmodel_view_offset(view_units: Vector3) -> Vector3:
 # The raw-def-units fallback for a null-sim harness: the same axis map over the
 # /256 scale the sim's blend otherwise applies [orig: flt_7D1D70=256 @0x544770].
 func _viewmodel_offset(units: Vector3) -> Vector3:
-	return _viewmodel_view_offset(units / WEAPON_DEF_POS_SCALE)
+	return _viewmodel_view_offset(units / Simulation.weapon_def_pos_scale())
 
 
 # Fold degrees into (-180, 180] (def rot columns store e.g. 353 for -7).

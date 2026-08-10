@@ -377,6 +377,19 @@ void Simulation::_bind_methods() {
 			D_METHOD("fp_viewmodel_spec", "has_def", "gfx1", "gfx1a", "animadm",
 					"flags"),
 			&Simulation::fp_viewmodel_spec);
+	ClassDB::bind_static_method("Simulation", D_METHOD("weapon_def_pos_scale"),
+			&Simulation::weapon_def_pos_scale);
+	ClassDB::bind_static_method("Simulation",
+			D_METHOD("viewmodel_fallback_pos_units"),
+			&Simulation::viewmodel_fallback_pos_units);
+	ClassDB::bind_static_method("Simulation",
+			D_METHOD("viewmodel_fallback_tpos_units"),
+			&Simulation::viewmodel_fallback_tpos_units);
+	ClassDB::bind_static_method("Simulation",
+			D_METHOD("viewmodel_fallback_rot_bias_deg"),
+			&Simulation::viewmodel_fallback_rot_bias_deg);
+	ClassDB::bind_static_method("Simulation", D_METHOD("viewmodel_pass_near_z"),
+			&Simulation::viewmodel_pass_near_z);
 	ClassDB::bind_method(D_METHOD("get_weapon_profile_summary"),
 	                     &Simulation::get_weapon_profile_summary);
 	ClassDB::bind_method(D_METHOD("request_local_player_weapon_category", "category"),

@@ -378,6 +378,29 @@ String Simulation::weapon_profile_relpath(const String &p_expansion_name) {
 					.c_str());
 }
 
+double Simulation::weapon_def_pos_scale() {
+	return opennova::simassets::kWeaponDefPosScale;
+}
+
+Vector3 Simulation::viewmodel_fallback_pos_units() {
+	const float *v = opennova::simassets::kFallbackPosUnits;
+	return Vector3(v[0], v[1], v[2]);
+}
+
+Vector3 Simulation::viewmodel_fallback_tpos_units() {
+	const float *v = opennova::simassets::kFallbackTposUnits;
+	return Vector3(v[0], v[1], v[2]);
+}
+
+Vector3 Simulation::viewmodel_fallback_rot_bias_deg() {
+	const float *v = opennova::simassets::kFallbackRotBiasDeg;
+	return Vector3(v[0], v[1], v[2]);
+}
+
+double Simulation::viewmodel_pass_near_z() {
+	return opennova::simassets::kViewmodelPassNearZ;
+}
+
 Dictionary Simulation::fp_viewmodel_spec(bool p_has_def, const String &p_gfx1,
 		const String &p_gfx1a, const String &p_animadm, int p_flags) {
 	const opennova::simassets::FpViewmodelSpec spec =

@@ -1297,6 +1297,13 @@ public:
 	// fp_viewmodel_spec [orig: Player_RenderFirstPersonViewModel @0x4ded60;
 	// the emplaced arms omission @0x4dedc7]). has_def=false is the bring-up
 	// path; an empty gun on a resolved def means submit no FP gun.
+	// The witnessed viewmodel placement units, re-exported from engine
+	// simassets/fp_viewmodel_spec.h.
+	static double weapon_def_pos_scale();
+	static Vector3 viewmodel_fallback_pos_units();
+	static Vector3 viewmodel_fallback_tpos_units();
+	static Vector3 viewmodel_fallback_rot_bias_deg();
+	static double viewmodel_pass_near_z();
 	static Dictionary fp_viewmodel_spec(bool p_has_def, const String &p_gfx1,
 			const String &p_gfx1a, const String &p_animadm, int p_flags);
 	// Read-only view of the active profile record for the shell's status copy:
