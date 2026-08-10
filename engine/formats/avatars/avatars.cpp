@@ -3,7 +3,7 @@
  * Faithful structural port of the original Joint Operations loader
  * [orig: CAvatarDefs_ParseConfigLine @ 0x57a3f0], with an authoring-superset
  * in-memory model (see avatars.h and docs/playerinfo/avatars-re.md). The lexer
- * helpers are copied from engine/formats/def/src/def.cpp per the engine/ convention (no
+ * helpers are copied from engine/formats/def/def.cpp per the engine/ convention (no
  * shared private header). The writer creates output from scratch
  * (docs/adr/0003, policy docs/adr/0021): a parse->write->parse->write round-trip
  * is byte-identical on the second write and model-equal across the parse.
@@ -19,7 +19,7 @@
 #include <string>
 
 /* ========================================================================= */
-/* Lexer helpers (copied from engine/formats/def/src/def.cpp)                          */
+/* Lexer helpers (copied from engine/formats/def/def.cpp)                          */
 /* ========================================================================= */
 
 static char *read_file(const char *path, size_t *out_len) {

@@ -3,7 +3,7 @@
 // The flat C ABI over MissionDocument: the surface the Python FFI (ctypes) and the
 // DCC tooling call. Lifted out of mission/mission.h (quality campaign W3-1) so the
 // C++ facade header is C++ only — every other consumer of mission.h wants the
-// document class, not this. Implemented in engine/runtime/mission/src/mission_capi.cpp.
+// document class, not this. Implemented in engine/runtime/mission/mission_capi.cpp.
 
 #include <stddef.h>
 #include <stdint.h>

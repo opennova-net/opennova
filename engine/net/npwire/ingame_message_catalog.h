@@ -37,7 +37,7 @@ struct MsgCatalogEntry {
 };
 
 // The catalog table + its length (via out-param). The Decoded `note`s name the
-// decoder in engine/net/npwire/include/npwire/ingame_decode.h.
+// decoder in engine/net/npwire/ingame_decode.h.
 inline const MsgCatalogEntry *ingame_message_catalog(size_t *count) {
 	static const MsgCatalogEntry table[] = {
 		// ---- S2C (server -> client) ----

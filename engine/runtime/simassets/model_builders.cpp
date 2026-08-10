@@ -10,7 +10,7 @@ namespace opennova::simassets {
 
 // Build the runtime collision model from a parsed .3di CDTA block — the exact
 // inverse of the parse scaling (BPLN normals int16 Q14 / 16384, distances + AABBs 16.16;
-// engine/formats/threedi/src/threedi_3di3_read.cpp parse_bpln/parse_bvol). Sections mirror the COBJ
+// engine/formats/threedi/threedi_3di3_read.cpp parse_bpln/parse_bvol). Sections mirror the COBJ
 // grouping: CVRT/CNRM/CFAC/BVOL arrays are sequential per object, and each face's local
 // CNRM index resolves against its object's run at build time, exactly the load-time
 // fixup retail performs [orig: the per-COBJ normal-run fixup in the collision builder

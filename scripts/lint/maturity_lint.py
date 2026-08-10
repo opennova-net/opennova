@@ -103,9 +103,9 @@ PROMOTED_SCOPES = ("godot/src/", "godot/game/", "godot/modtools/",
 PROMOTED_SUFFIXES = (".gd", ".cpp", ".h", ".hpp", ".c")
 PROMOTED_CANONICAL = (
     "godot/game/world/host_session_config.gd",
-    "engine/net/novaworld/include/novaworld/gate_probe.h",
-    "engine/net/npwire/include/npwire/net_ports.h",
-    "engine/net/npwire/include/npwire/game_type.h",
+    "engine/net/novaworld/gate_probe.h",
+    "engine/net/npwire/net_ports.h",
+    "engine/net/npwire/game_type.h",
 )
 PROMOTED_EXEMPT = re.compile(r"^\s*#|^\s*//|\[orig|\bconst\s|\bconstexpr\s|#define\s")
 

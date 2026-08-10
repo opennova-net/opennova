@@ -12,7 +12,7 @@
 // from a legitimate zero -- protocol decoders need that distinction, and
 // each was carrying its own cursor to get it. A decoder that must STOP at
 // the first truncation (rather than keep reading) wants a latching cursor
-// instead; see engine/net/npwire/src/wire_cursor.h.
+// instead; see engine/net/npwire/wire_cursor.h.
 
 #ifndef OPENNOVA_IO_BYTE_READER_H
 #define OPENNOVA_IO_BYTE_READER_H

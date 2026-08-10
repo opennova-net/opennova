@@ -100,7 +100,7 @@ protected:
 	static void _bind_methods();
 
 public:
-	// AvatarPartKind (engine/formats/avatars/include/avatars/avatars.h).
+	// AvatarPartKind (engine/formats/avatars/avatars.h).
 	enum { PART_HEAD = 0, PART_BODY = 1, PART_ARMS = 2 };
 	// AvatarSex.
 	enum { SEX_MALE = 0, SEX_FEMALE = 1 };

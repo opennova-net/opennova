@@ -105,7 +105,7 @@ inline int coords_quadrant_offset_z(int sector_id) {
 // TerrainHeightField is a by-value POD that lands in some very deep stack frames, so
 // 2 bytes fits the padding it already had where 32 overflowed tests/world/infantry_test.
 //
-// [orig: sub_402D20 @0x402D20, ported in engine/runtime/terrain/src/terrain_mesh.cpp: picks the
+// [orig: sub_402D20 @0x402D20, ported in engine/runtime/terrain/terrain_mesh.cpp: picks the
 //  entry with (tile_x >= 0x200) + 2 * (tile_y >= 0x200), then sets mask 511 / offset
 //  (tile_xy & 0x200) on a locked axis and taps (offset + (abs & mask)) & 0x3FF.]
 struct CoordsQuadrantLocks {

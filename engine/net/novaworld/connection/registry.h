@@ -22,7 +22,7 @@ enum class ConnectionState {
 
 // One tracked connection. The id is the session_id from the Layer-3
 // ProtocolPacketHeader (witnessed at offset +1 of opcode 0x43 / 0x83
-// packets — see engine/net/npwire/include/npwire/protocol_message.h).
+// packets — see engine/net/npwire/protocol_message.h).
 struct Connection {
 	// Server-local registry identity. It starts as ClientHello.CI, but the
 	// registry may synthesize it when another endpoint already owns that CI.

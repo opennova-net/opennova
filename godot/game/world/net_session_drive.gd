@@ -12,7 +12,7 @@ extends Node
 # The POLICY of all of that — the two ConnectOrHost windows (0xEA60), the
 # promote validation, the admission/deploy/loss edge machine with its latches,
 # and the expansion reconcile DECISION — is native
-# (engine/net/npruntime/src/join_session_policy.cpp, bound as
+# (engine/net/npruntime/join_session_policy.cpp, bound as
 # NetSessionPolicy). This node keeps the signals and the lifetime: it reads
 # simulation state, forwards it to the policy each frame, and executes exactly
 # what the returned edges say — signal emission, the settle call, the preload

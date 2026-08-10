@@ -194,7 +194,7 @@ protected:
 
 public:
 	// DefItemDef.type values — the witnessed engine ItemDefType at ItemDef+0x5C,
-	// mirroring DefItemType in engine/formats/def/include/def/def.h (static_asserts in the
+	// mirroring DefItemType in engine/formats/def/def.h (static_asserts in the
 	// .cpp pin the mirror). Non-injective by engine design: DECORATION==FOLIAGE
 	// and POWERUP==OBJECT share values; 7 is unused, 0 = unset/unknown.
 	// [orig: ItemDef_ParseProperty @ 0x49eb00; docs/world/itemdef-re.md D-ITEMDEF-1]

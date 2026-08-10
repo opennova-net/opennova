@@ -467,7 +467,7 @@ bank table lives in `scripts/net/README.md` "Reference captures". Decode best wi
   is the architecture-guardrails / module-ownership / frame-order owner; do not chase the
   redirect in a circle.)
 - Promote-from (both since deleted — `host_session_accept` retired at P8, `joiner_session`
-  deleted at P8.1, recorded above): `engine/net/novaworld/include/novaworld/{host_session_accept.h,joiner_session.h}`.
-- Seam: `engine/net/netsim/include/netsim/{connection_fan.h,connection.h,session_transport.h,serializing_sink.h,udp_session_transport.h}`.
+  deleted at P8.1, recorded above): `engine/net/novaworld/{host_session_accept.h,joiner_session.h}`.
+- Seam: `engine/net/netsim/{connection_fan.h,connection.h,session_transport.h,serializing_sink.h,udp_session_transport.h}`.
 - Test pattern: `tests/novaworld/nw_pool_groundtruth_test.cpp`, `tests/netsim/*`,
   `tests/novaworld/nw_pcap_stream_test.cpp`.

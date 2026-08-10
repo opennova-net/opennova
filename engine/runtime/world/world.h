@@ -373,7 +373,7 @@ public:
     // [orig: Bms_AttribFlags @0xa76258]
     // The named bits below mirror bms::AttribFlags (engine/runtime/world stays
     // mission-parser-free; parity pinned by static_asserts in
-    // engine/runtime/mission/src/promote.cpp).
+    // engine/runtime/mission/promote.cpp).
     static constexpr uint32_t kMissionAttribSinglePlayerRespawn = 0x40u;
     static constexpr uint32_t kMissionAttribEnableNVG = 0x100000u;
     uint32_t mission_attrib_flags = 0;

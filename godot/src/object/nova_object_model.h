@@ -138,7 +138,7 @@ public:
 	// The witnessed lighting uniform surface defaults — the RETAIL NOON
 	// register (shipped full_00.env tod 1200 bytes /255), so an un-enved
 	// preview lights like a JO noon world. Must stay equal to the composer's
-	// uniform defaults (engine/runtime/renderer/src/object_shader_template.cpp).
+	// uniform defaults (engine/runtime/renderer/object_shader_template.cpp).
 	static Vector3 default_hemi_sky_color() { return Vector3(84.0f / 255.0f, 88.0f / 255.0f, 89.0f / 255.0f); }
 	static Vector3 default_dir_light_dir() { return Vector3(-0.4082f, -0.8165f, -0.4082f); }
 	static Vector3 default_dir_light_color() { return Vector3(170.0f / 255.0f, 170.0f / 255.0f, 167.0f / 255.0f); }

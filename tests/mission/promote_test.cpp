@@ -1,6 +1,6 @@
 // Mission -> world promotion: a synthetic BMS mission is promoted into a live world +
 // AI system, then the AI is ticked to prove the brains/nav are wired to the real mission
-// data (entities patrol their authored routes). See engine/runtime/mission/src/promote.cpp.
+// data (entities patrol their authored routes). See engine/runtime/mission/promote.cpp.
 #include <cstdio>
 #include <cstring>
 #include <memory>

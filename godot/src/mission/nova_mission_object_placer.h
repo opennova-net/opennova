@@ -78,7 +78,7 @@ public:
 	// --- coordinate conversion (BMS is Z-up; Godot is Y-up) ---------------
 	// Thin Variant wrappers over the engine's witnessed converters — the
 	// derivation and citations live in
-	// engine/runtime/mission/include/mission/placement_traits.h.
+	// engine/runtime/mission/placement_traits.h.
 	static Vector3 bms_to_godot_position(const Vector3 &p);
 	static Vector3 godot_to_bms_position(const Vector3 &p);
 	static Basis bms_to_godot_basis(const Vector3 &rot_deg);
