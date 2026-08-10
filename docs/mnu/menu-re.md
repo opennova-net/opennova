@@ -192,9 +192,10 @@ white, or `0xFF7F7F7F` under `g_ui_half_bright_mode @ 0x31C3760`.
 | LIST, LAN_LIST | `CListWnd_DrawItems @ 0x643f30` | frame -> appearance -> rows -> children (scrollbar) |
 | SPINLIST | `CSpinListWnd_Render @ 0x64b220` | item cell (below); arrows are child windows |
 | COMBOBOX | `CComboWnd_Render @ 0x65bfd0` | closed cell, then children in array order |
-| TABLE | `@ 0x6410d0` | interior not yet walked (D-MNU-13) |
-| SCROLL | `@ 0x64c5c0` | interior not yet walked (D-MNU-13) |
-| MARQUEE | `@ 0x65cf90`, RADIOEDIT `@ 0x65d310` | interiors not yet walked (D-MNU-13) |
+| TABLE | `CUITable_Render @ 0x6411d0` | see the table paragraph below (an earlier revision cited `0x6410d0`, a transcription slip — that address is inside the rule-line helper) |
+| SCROLL | `CScrollWnd_Render @ 0x64c5c0` | the generic container walk: frame -> appearance -> children (the up/down/thumb are its three child BUTTONs, constructed at `+736`/`+1508`/`+2280` by `CScrollWnd_Construct @ 0x64c450`) — no specialised interior |
+| MARQUEE | `CMarqueeWnd_Render @ 0x65cf90` | frame -> appearance -> the credits scroller (below) -> children |
+| RADIOEDIT | `@ 0x65d310` | interior not yet walked (D-MNU-13) |
 
 **Per-state appearance records.** Four 28-byte state records interleaved from
 `elem+8` (state index picks `elem + 28*state`): flags at `+8` (bit0 COLOR,
@@ -283,16 +284,64 @@ D-MNU-4's divergence; the Control-tree path keeps its float scale). The Godot
 applier (`MenuFrame`, `godot/src/mnu/nova_menu_frame.cpp`) uploads textures/
 fonts and rasterizes the list. Pinned by `tests/menu/menu_frame_compiler_test`.
 
-- **D-MNU-13 (draw-walk residue — deferred interiors):** the TABLE
-  (`@ 0x6410d0`), SCROLL (`@ 0x64c5c0`), MARQUEE (`@ 0x65cf90`), and
-  RADIOEDIT (`@ 0x65d310`) render interiors and the wrapped-text drawer
-  (`sub_653D60`, the `+760` wrap path) are not yet walked; the compiler emits
-  their authored appearance/frame passes and defers the specialised interiors
-  (the Control-tree path still renders them). Spin arrows compile with their
+- **D-MNU-13 (draw-walk residue — deferred interiors):** the TABLE,
+  SCROLL, and MARQUEE interiors are now walked (the table and marquee
+  paragraphs below; SCROLL has no specialised interior); the COMPILER port of
+  the table/marquee interiors is the open follow-up. Still unwalked: the
+  RADIOEDIT render (`@ 0x65d310`) and the wrapped-text drawer (`sub_653D60`,
+  the `+760` wrap path). Spin arrows compile with their
   default-state art (their independent hover states are separate child-widget
   state the compiled path does not yet model). Follow-up work, not shipped
   divergences: the shell cutover keeps the witnessed Control-tree renderers
   for these widgets.
+
+## Table render `[orig: CUITable_Render @ 0x6411d0]`
+
+The table clips (`CWnd_ApplyClipViewport @ 0x6472a0`), draws its frame and the
+standard four-pass appearance, resolves the font via vtable+64 and measures
+`"W"` for the default row/header heights (used when the authored heights are
+negative), then walks:
+
+- **Header:** per column (180-byte column defs; width at `col+124`, cell type
+  at `col+108`, rule string at `col+176`): type 0/1/4 draws the aligned header
+  label (`calculate_aligned_text_rect @ 0x63ec50`); when the column leaves
+  more than 16px of headroom past the label, the RULE DIVIDER draws in
+  `0xFF7F7F7F` via `draw_rule_line @ 0x6410a0` — per character `c` of the rule
+  string, one centered horizontal segment of width `rect_w - (c - 'a' + 1)`
+  at successive y rows starting `strlen/2` above the anchor: a
+  character-PROFILED taper. Type 2 dispatches the custom draw event
+  (`0x8000002`). Columns advance by width + the column gap.
+- **Data rows:** 40-byte rows; the scroll window is first-visible + visible
+  count; rows with `row+28 & 0xA` skip. `row+28 & 4` swaps a per-row COLOR
+  override (indexed by `row+24`) into the font color slot for the row's
+  duration. Per cell by column type: 0 text, 1/4 image
+  (`draw_aligned_texture @ 0x6409e0`, per-column alignment array), 2 custom
+  callback. Row ITEM appearance records (28-byte, keyed by `row+24`) draw
+  behind non-custom cells. A column overflowing the right edge WRAPS the row
+  down by one row height.
+- Then the viewport restores and children draw (vtable+24).
+
+## Marquee credits scroller `[orig: CMarqueeWnd_Render @ 0x65cf90 -> render_scrolling_credits @ 0x65ca00]`
+
+Three passes over the node linked list (next at `node+220`):
+
+1. **Scroll:** each node's y (`node+0xAC`, mirrored at `node+172`) decreases
+   by the widget's rate (`this+0x2DC`) per frame; when the LAST node passes
+   the top threshold, EVERY node resets to its initial layout y
+   (`node+0xA0`) — the whole credits roll loops as one unit.
+2. **Fading images** (`node+208` texture, fade flag `node+212 != 0`):
+   horizontally centered on the widget's center; a 50px band at the clip top
+   and bottom ramps alpha linearly (`dist / 50`, clamped 0..1) onto
+   half-gray `0x7F7F7F`; fully inside the band draws opaque, outside skips.
+   Drawn via `CTextureManager_DrawScaledRect @ 0x654e60` at the element
+   scale pair.
+3. **Text + non-fading images:** non-fade images draw fixed `0xFF7F7F7F`
+   while inside the clip band. Text nodes format the node text, then REMAP
+   two authored separator characters (`this[185*4]` -> space,
+   `this[186*4]` -> comma), resolve the per-node font (name at `node+128`,
+   `CFontCache_LoadOrGetFont @ 0x652f70`), justify by `node+216` (0 left,
+   2 right inset 5, else centered), copy the node's 8-dword color block
+   (`node+176`), and draw through the scaled text sink.
 
 ## Widget item rendering `[orig: CSpinListWnd_Render @ 0x64b220; CUISpinList_ParseXMLDefinition @ 0x64bd10]`
 
