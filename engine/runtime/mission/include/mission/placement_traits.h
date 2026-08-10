@@ -18,6 +18,7 @@ inline constexpr int kItemTypeBuilding = 5;
 inline constexpr int kEntityKindMarker = 0;
 inline constexpr int kEntityKindItem = 1;
 inline constexpr int kEntityKindBuilding = 2;
+inline constexpr int kEntityKindOrganic = 3;
 
 // Attrib bits (DEF_ITEM_ATTRIB_NOSHADOW mirrors engine/formats/def).
 inline constexpr uint32_t kItemAttribNoShadow = 0x04000000u;

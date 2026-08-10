@@ -13,7 +13,6 @@ const LOAD_TIMEOUT_WALL_SECONDS := 240.0
 const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 const MountGuard := preload("res://tests/perf_probe_mount_guard.gd")
 const PropertyGuard := preload("res://tests/perf_probe_property_guard.gd")
-const MissionPresentPass := preload("res://game/world/mission_present_pass.gd")
 
 var _mount_guard = MountGuard.new()
 var _property_guard = PropertyGuard.new()
@@ -245,13 +244,13 @@ func _run() -> void:
 			if _present != null and _present.has_method("get_output_channels") else -1
 	if present_channels >= 0:
 		_present.set_output_channels(
-				present_channels & ~MissionPresentPass.OUTPUT_TRANSFORM)
+				present_channels & ~PresentApplier.OUTPUT_TRANSFORM)
 		await _settle_ms(500)
 		xformoff = await _measure("xformoff", 3000)
 		_present.set_output_channels(present_channels)
 	if present_channels >= 0:
 		_present.set_output_channels(
-				present_channels & ~MissionPresentPass.OUTPUT_VISIBILITY)
+				present_channels & ~PresentApplier.OUTPUT_VISIBILITY)
 		await _settle_ms(500)
 		visoff = await _measure("visoff", 3000)
 		_present.set_output_channels(present_channels)
@@ -260,7 +259,7 @@ func _run() -> void:
 	# WORLDOFF-minus-spans residual points at.
 	if present_channels >= 0:
 		_present.set_output_channels(
-				present_channels & ~MissionPresentPass.OUTPUT_BODY_ANIM)
+				present_channels & ~PresentApplier.OUTPUT_BODY_ANIM)
 		await _settle_ms(500)
 		bodyoff = await _measure("bodyoff", 3000)
 		_present.set_output_channels(present_channels)

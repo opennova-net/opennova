@@ -1,8 +1,8 @@
 extends GutTest
 
-# The unified MissionPresentPass applies each entity's transform + PANM part
-# channels + visibility onto its placed node every tick, from ONE batched sim
-# snapshot. Real native components end to end: ObjectModel nodes (their
+# The native PresentApplier (the mission present pass) applies each entity's
+# transform + PANM part channels + visibility onto its placed node every tick,
+# from ONE batched sim snapshot. Real native components end to end: ObjectModel nodes (their
 # CTRL store, body clips, and Node3D state are the observables), a real
 # EntityIndex, and PF-layout snapshots built as pure data and fed through
 # the public present_snapshot API. Change-gating claims read the applier's
@@ -13,8 +13,6 @@ extends GutTest
 # [orig: HUD_CacheEntityDisplayInfo @ 0x4A3E18..0x4A3E38], so a part channel
 # can never alias EWEAP registers; the register-independence case pins the
 # real layout.
-
-const PresentPass := preload("res://game/world/mission_present_pass.gd")
 
 const RIGGED_3DI := "res://../fixtures/threedi/3di3/Shed.3di"
 const MUZZLE_3DI := "res://../fixtures/3dp/dapche2/dapche2.3di"
@@ -181,9 +179,15 @@ func _index_of(by_bms_id: Dictionary) -> EntityIndex:
 
 
 func _make_pass(index: EntityIndex, sim: Simulation = null,
-		options: Dictionary = {}) -> Object:
-	var p := PresentPass.new()
-	p.setup(sim, index, options)
+		options: Dictionary = {}) -> PresentApplier:
+	var p := PresentApplier.new()
+	p.setup(sim, index)
+	var channels := int(PresentApplier.OUTPUT_ALL)
+	if not bool(options.get("drive_part_anim", true)):
+		channels &= ~PresentApplier.OUTPUT_PART_ANIM
+	p.set_output_channels(channels)
+	p.set_shared_visibility_maps(options.get("occlusion_hidden_ids", {}),
+			options.get("present_visibility", {}))
 	return p
 
 
@@ -658,7 +662,7 @@ func test_body_clip_poses_authoritative_two_channel_blend() -> void:
 			"a right-hand mask change reposes the retained two-channel body")
 
 	var channels := int(p.get_output_channels())
-	p.set_output_channels(channels & ~PresentPass.OUTPUT_BODY_ANIM)
+	p.set_output_channels(channels & ~PresentApplier.OUTPUT_BODY_ANIM)
 	snap.entities[0]["anim_source_phase"] = 19
 	snap.entities[0]["anim_blend_weight"] = 0.4
 	_present(p, snap)
@@ -1106,9 +1110,9 @@ func test_reenabled_output_channels_catch_up_to_current_state() -> void:
 
 	var channels := int(p.get_output_channels())
 	var frozen := (
-			PresentPass.OUTPUT_TRANSFORM
-			| PresentPass.OUTPUT_PART_ANIM
-			| PresentPass.OUTPUT_BODY_ANIM)
+			PresentApplier.OUTPUT_TRANSFORM
+			| PresentApplier.OUTPUT_PART_ANIM
+			| PresentApplier.OUTPUT_BODY_ANIM)
 	p.set_output_channels(channels & ~frozen)
 	snap.entities[0]["pos_x"] = 8.0
 	snap.entities[0]["phase1"] = 200
@@ -1191,7 +1195,7 @@ func test_body_anim_dispatch_gates_on_the_ab_seam() -> void:
 	_present(p, snap)
 	assert_eq(_stat(p, "body_dispatches"), 1, "body anim dispatches by default")
 	var channels := int(p.get_output_channels())
-	p.set_output_channels(channels & ~PresentPass.OUTPUT_BODY_ANIM)
+	p.set_output_channels(channels & ~PresentApplier.OUTPUT_BODY_ANIM)
 	_present(p, snap)
 	assert_eq(_stat(p, "body_dispatches"), 1, "the frozen seam dispatches nothing new")
 	p.set_output_channels(channels)
@@ -1222,7 +1226,7 @@ func test_disabling_part_anim_output_releases_all_retained_ctrl_writers() -> voi
 	_present(p, snap)
 	assert_false(model.get_ctrl_values().is_empty())
 	var channels := int(p.get_output_channels())
-	p.set_output_channels(channels & ~PresentPass.OUTPUT_PART_ANIM)
+	p.set_output_channels(channels & ~PresentApplier.OUTPUT_PART_ANIM)
 	assert_true(model.get_ctrl_values().is_empty(),
 			"freezing the output seam cannot retain its last CTRL frame")
 

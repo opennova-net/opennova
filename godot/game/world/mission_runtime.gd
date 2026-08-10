@@ -29,8 +29,6 @@ signal fixed_tick_completed(logic_tick: int)
 ## presentation systems use this boundary to discard transient runtime state.
 signal simulation_restarted()
 
-const MissionPresentPass := preload("res://game/world/mission_present_pass.gd")
-const WirePresentPass := preload("res://game/world/wire_present_pass.gd")
 const FirePresentPass := preload("res://game/world/fire_present_pass.gd")
 const DestructionPresentPass := preload("res://game/world/destruction_present_pass.gd")
 const ThrowablePresentPass := preload("res://game/world/throwable_present_pass.gd")
@@ -45,7 +43,7 @@ const ThrowablePresentPass := preload("res://game/world/throwable_present_pass.g
 const TICK_DT := 1.0 / 62.5
 
 var _sim: Simulation
-var _present: MissionPresentPass      # placed nodes on every role or tooling/test preview
+var _present: PresentApplier          # placed nodes on every role or tooling/test preview
 var _wire_present: WirePresentPass    # un-placed network entities or SP attachment children
 var _fire_present: FirePresentPass    # non-local fire sound + muzzle + tracers; else null
 var _fire_listener := Callable()      # -> Vector3 camera listener, stamped into the sim per frame (world/fire_sound.h)
@@ -231,8 +229,9 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 	# native sim separately materializes streamed pools 1-3 at exact packed handles for
 	# world-side consumers, while the wire pass below renders their decoded live state.
 	# Complete-BMS/debug joins still retain authored nodes and the ordinary defer identity.
-	_present = MissionPresentPass.new()
-	_present.setup(_sim, _index, options.get("present_options", {}))
+	_present = PresentApplier.new()
+	_present.setup(_sim, _index)
+	_apply_present_options(_present, options.get("present_options", {}))
 	# Co-op renders decoded remote rows WIRE-DIRECT. On a host that principally covers
 	# dynamically admitted players; on a header-only joiner it covers every remote row,
 	# because none has an authored placed node. Complete-BMS/debug roles still defer any
@@ -251,9 +250,8 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 		if mission != null and mission.is_wire_header_only():
 			wire_defer_index = null
 		_wire_present.setup(_sim, options.get("placer"), container,
-			wire_defer_index, {
-				"synthetic_origin_only": sp_attachment_present,
-			})
+				wire_defer_index)
+		_wire_present.set_synthetic_origin_only(sp_attachment_present)
 		simulation_restarted.connect(
 				Callable(_wire_present, 'reset_runtime_state'))
 	# The viewing client's fire-presentation pass: AI/remote fire sound + muzzle
@@ -323,6 +321,27 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 	_capture_transforms()
 	return _sim.get_entity_count()
 
+
+# Translate the composition's present_options bundle onto the native applier:
+# the four drive_* channel flags plus the shell's shared occlusion/visibility
+# maps (shared BY REFERENCE: GameWorld mutates the hidden set in place; the
+# release lands on the sim's current intent so neither visibility writer
+# fights the other).
+static func _apply_present_options(applier: PresentApplier,
+		options: Dictionary) -> void:
+	var channels := int(PresentApplier.OUTPUT_ALL)
+	if not bool(options.get("drive_transform", true)):
+		channels &= ~PresentApplier.OUTPUT_TRANSFORM
+	if not bool(options.get("drive_part_anim", true)):
+		channels &= ~PresentApplier.OUTPUT_PART_ANIM
+	if not bool(options.get("drive_visibility", true)):
+		channels &= ~PresentApplier.OUTPUT_VISIBILITY
+	if not bool(options.get("drive_body_anim", true)):
+		channels &= ~PresentApplier.OUTPUT_BODY_ANIM
+	applier.set_output_channels(channels)
+	applier.set_shared_visibility_maps(
+			options.get("occlusion_hidden_ids", {}),
+			options.get("present_visibility", {}))
 
 
 func get_setup_error() -> int:

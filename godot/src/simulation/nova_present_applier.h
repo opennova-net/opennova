@@ -58,18 +58,20 @@ public:
 	void set_shared_visibility_maps(const Dictionary &occlusion_hidden_ids,
 			const Dictionary &present_visibility);
 
+	// Pull the current snapshot from the wired sim and apply it (the
+	// self-driving form; the runtime driver pre-fetches one shared snapshot
+	// and calls present_snapshot instead).
+	void present();
 	void present_snapshot(const PackedFloat32Array &snap, int stride,
 			int64_t layout_revision);
 
 	Dictionary get_stats() const;
+	Ref<class MissionPresentStats> get_stats_record() const;
 
-	// The one placement convention, ported beside its GDScript origin
-	// (MissionObjectPlacer.bms_to_godot_basis — see the [orig] block there:
-	// Entity_SpawnFromBMSRecord @ 0x40eb66 + Math_BuildFixedPointMatrixFromEulerAngles
-	// @ 0x613f40 via Entity_UpdateOrientationMatrix @ 0x43b440; R_godot =
-	// RotY(90-yaw) * RotZ(pitch) * RotX(roll) * RotY(90)). The two ports are
-	// pinned equivalent by mission_present_pass_test.gd's basis parity case —
-	// keep them in lockstep.
+	// The one placement convention — a thin wrapper over the engine's
+	// witnessed converter (engine/runtime/mission placement_traits.h carries
+	// the derivation and citations; MissionObjectPlacer.bms_to_godot_basis is
+	// the same wrapper).
 	static Basis bms_to_godot_basis(const Vector3 &rot_deg);
 
 	// Aim-overlay presentation (aim_overlay_present_pass.gd delegates here so the

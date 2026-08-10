@@ -9,8 +9,10 @@
 
 #include <algorithm>
 
+#include <mission/placement_traits.h>
 #include <simassets/sim_collision_pose.h>
 
+#include "simulation/nova_present_stats.h"
 #include "simulation/nova_simulation.h"
 
 using namespace godot;
@@ -78,6 +80,9 @@ void PresentApplier::_bind_methods() {
 			D_METHOD("present_snapshot", "snap", "stride", "layout_revision"),
 			&PresentApplier::present_snapshot);
 	ClassDB::bind_method(D_METHOD("get_stats"), &PresentApplier::get_stats);
+	ClassDB::bind_method(D_METHOD("get_stats_record"),
+			&PresentApplier::get_stats_record);
+	ClassDB::bind_method(D_METHOD("present"), &PresentApplier::present);
 	ClassDB::bind_static_method("PresentApplier",
 			D_METHOD("bms_to_godot_basis", "rot_deg"),
 			&PresentApplier::bms_to_godot_basis);
@@ -115,10 +120,10 @@ void PresentApplier::_bind_methods() {
 			&PresentApplier::aim_root_basis);
 	ClassDB::bind_static_method("PresentApplier",
 			D_METHOD("aim_apply", "node", "snap", "base", "drive_root_basis"),
-			&PresentApplier::aim_apply);
+			&PresentApplier::aim_apply, DEFVAL(true));
 	ClassDB::bind_static_method("PresentApplier",
 			D_METHOD("aim_apply_valid", "node", "snap", "base", "drive_root_basis"),
-			&PresentApplier::aim_apply_valid);
+			&PresentApplier::aim_apply_valid, DEFVAL(true));
 	ClassDB::bind_static_method("PresentApplier",
 			D_METHOD("emplaced_apply", "node", "snap", "base", "clear_when_invalid"),
 			&PresentApplier::emplaced_apply);
@@ -210,16 +215,44 @@ Dictionary PresentApplier::get_stats() const {
 	return d;
 }
 
+Ref<MissionPresentStats> PresentApplier::get_stats_record() const {
+	Ref<MissionPresentStats> stats;
+	stats.instantiate();
+	stats->moved = stat_moved_;
+	stats->posed = stat_posed_;
+	stats->hidden = stat_hidden_;
+	stats->muzzles = stat_muzzles_;
+	stats->plan_rebuilds = stat_plan_rebuilds_;
+	stats->transform_builds = stat_transform_builds_;
+	stats->aim_dispatches = stat_aim_dispatches_;
+	stats->rhc_dispatches = stat_rhc_dispatches_;
+	stats->part_dispatches = stat_part_dispatches_;
+	stats->control_dispatches = stat_control_dispatches_;
+	stats->body_dispatches = stat_body_dispatches_;
+	stats->muzzle_queries = stat_muzzle_queries_;
+	return stats;
+}
+
+void PresentApplier::present() {
+	Simulation *native_sim =
+			Object::cast_to<Simulation>(ObjectDB::get_instance(sim_id_));
+	if (native_sim == nullptr || index_.is_null()) {
+		return;
+	}
+	const int stride = native_sim->get_present_stride();
+	if (stride <= 0) {
+		return;
+	}
+	present_snapshot(native_sim->get_present_snapshot(), stride,
+			native_sim->get_present_layout_revision());
+}
+
 Basis PresentApplier::bms_to_godot_basis(const Vector3 &rot_deg) {
-	// R_godot = RotY(90 - yaw) * RotZ(pitch) * RotX(roll) * RotY(90) — the one
-	// placement convention (see mission_object_placer.gd's [orig] derivation);
-	// the GDScript twin is pinned equivalent by the basis parity GUT case.
-	const double pitch = Math::deg_to_rad(static_cast<double>(rot_deg.x));
-	const double yaw = Math::deg_to_rad(static_cast<double>(rot_deg.y));
-	const double roll = Math::deg_to_rad(static_cast<double>(rot_deg.z));
-	return Basis(Vector3(0, 1, 0), Math::deg_to_rad(90.0) - yaw) *
-			Basis(Vector3(0, 0, 1), pitch) * Basis(Vector3(1, 0, 0), roll) *
-			Basis(Vector3(0, 1, 0), Math::deg_to_rad(90.0));
+	const opennova::mission::PlacementBasis b =
+			opennova::mission::bms_to_presentation_basis(rot_deg.x, rot_deg.y,
+					rot_deg.z);
+	return Basis(Vector3(b.x.x, b.x.y, b.x.z), Vector3(b.y.x, b.y.y, b.y.z),
+			Vector3(b.z.x, b.z.y, b.z.z));
 }
 
 namespace {

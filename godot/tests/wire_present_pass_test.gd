@@ -8,7 +8,6 @@ extends GutTest
 # clock, a minimal-mission boot for logic-tick stepping). Snapshots are built
 # as pure data and fed through the public present_snapshot API.
 
-const WirePresentPass := preload("res://game/world/wire_present_pass.gd")
 const PresentHeldWeapon := preload("res://game/world/present_held_weapon.gd")
 
 # Fixture items.def wire-test ids (graphic -> committed model fixture).
@@ -201,9 +200,15 @@ func _container() -> Node3D:
 
 
 func _wire_pass(sim: Simulation, placer: MissionObjectPlacer, container: Node3D,
-		defer_index: EntityIndex = null, options: Dictionary = {}) -> Object:
+		defer_index: EntityIndex = null, options: Dictionary = {}) -> WirePresentPass:
 	var presenter := WirePresentPass.new()
-	presenter.setup(sim, placer, container, defer_index, options)
+	presenter.setup(sim, placer, container, defer_index)
+	presenter.set_synthetic_origin_only(
+			bool(options.get("synthetic_origin_only", false)))
+	if options.has("cold_spawn_budget"):
+		presenter.set_cold_spawn_budget(int(options["cold_spawn_budget"]))
+	if options.has("camera"):
+		presenter.set_spectator_camera(options["camera"])
 	return presenter
 
 

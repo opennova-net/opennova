@@ -41,7 +41,6 @@ const PRESENT_EFFECT_STATE_COUNT := 2
 const INVALID_WIRE_HANDLE := 0xffff
 const SYNTHETIC_SPAWN_ORIGIN := 0xffffffff
 
-const WirePresentPass := preload("res://game/world/wire_present_pass.gd")
 
 var _sim: Simulation              # live pose source; null in data-driven tests
 var _container: Node3D = null     # mission container (node-less husk grafts land here)

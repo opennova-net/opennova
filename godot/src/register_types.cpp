@@ -53,6 +53,8 @@
 #include "hud/nova_hud_pos.h"
 #include "mission/nova_mission_data.h"
 #include "simulation/nova_present_applier.h"
+#include "simulation/nova_present_stats.h"
+#include "simulation/nova_wire_present_pass.h"
 #include "simulation/nova_simulation.h"
 #include "wac/nova_wac_program.h"
 #include "lwf/nova_lwf_data.h"
@@ -150,6 +152,9 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(HudOverlay);
 	GDREGISTER_CLASS(MissionData);
 	GDREGISTER_CLASS(PresentApplier);
+	GDREGISTER_CLASS(MissionPresentStats);
+	GDREGISTER_CLASS(WirePresentStats);
+	GDREGISTER_CLASS(WirePresentPass);
 	GDREGISTER_CLASS(Simulation);
 	GDREGISTER_CLASS(EditHistory);
 	GDREGISTER_CLASS(WacProgram);

@@ -1,6 +1,5 @@
 extends GutTest
 
-const PresentAimOverlay := preload("res://game/world/aim_overlay_present_pass.gd")
 const NATIVE_RUNTIME_TIMING_KEYS := [
 	"sim_tick_us",
 	"net_tick_us",
@@ -1555,7 +1554,7 @@ func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 	var reference_pos: Vector3 = reference_card.get("position", Vector3.ZERO)
 	var rotated_pos: Vector3 = rotated_card.get("position", Vector3.ZERO)
 	# PF_YAW_DEG / debug yaw is the gunner's independent look. The final body
-	# field is the basis PresentAimOverlay actually applies to the rendered model
+	# field is the basis PresentApplier.aim_apply actually applies to the rendered model
 	# and the same body class build_section_matrices uses for posed collision.
 	var reference_body_yaw := snapshot[reference_row_base +
 			Simulation.PF_AIM_BODY_YAW_DEG]
@@ -1719,7 +1718,7 @@ func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot(
 	model.play_body_clip_at(
 			"anim_emplaced",
 			int(snapshot[row_base + Simulation.PF_ANIM_PHASE_TICKS]))
-	PresentAimOverlay.apply(model, snapshot, row_base)
+	PresentApplier.aim_apply(model, snapshot, row_base)
 	await get_tree().process_frame
 	await get_tree().process_frame
 

@@ -16,7 +16,6 @@ extends GutTest
 
 const DestructionPresentPass := preload('res://game/world/destruction_present_pass.gd')
 const MissionRuntime := preload('res://game/world/mission_runtime.gd')
-const WirePresentPass := preload('res://game/world/wire_present_pass.gd')
 
 const BUGGY_ITEM_ID := 1291  # fixture items.def 101291, husk Dbuggy1X
 
@@ -78,14 +77,13 @@ class CaptureAnchors:
 		return resolver.call() if resolver.is_valid() else null
 
 
-class CaptureResolver:
-	extends WirePresentPass
-	var by_wire_handle: Dictionary = {}
-	var wire_resolve_calls: Array[int] = []
-
-	func resolve_wire_handle(wire_handle: int) -> ObjectModel:
-		wire_resolve_calls.append(wire_handle)
-		return by_wire_handle.get(wire_handle)
+# A REAL wire presenter with injected per-handle avatars (native methods
+# cannot be intercepted from GDScript; register_wire_node is the seam).
+func _wire_resolver(nodes: Dictionary = {}) -> WirePresentPass:
+	var presenter := WirePresentPass.new()
+	for handle in nodes:
+		presenter.register_wire_node(int(handle), nodes[handle])
+	return presenter
 
 
 const HUSK_GRAPHIC := 'Dbuggy1X'  # fixture items.def 101291's husk stage
@@ -423,7 +421,6 @@ func test_zero_bms_husks_use_distinct_spawn_origins_for_identity_and_lookup() ->
 func test_synthetic_husks_use_distinct_wire_handles_for_identity_and_lookup() -> void:
 	var fx := _make_fx()
 	var anchors := CaptureAnchors.new()
-	var resolver := CaptureResolver.new()
 	var placer := _husk_placer()
 	var container := Node3D.new()
 	add_child_autofree(container)
@@ -435,8 +432,7 @@ func test_synthetic_husks_use_distinct_wire_handles_for_identity_and_lookup() ->
 	var second_visual := Node3D.new()
 	second.add_child(second_visual)
 	container.add_child(second)
-	resolver.by_wire_handle[0x1004] = first
-	resolver.by_wire_handle[0x1005] = second
+	var resolver := _wire_resolver({ 0x1004: first, 0x1005: second })
 	# Pre-fix fallback: both synthetic children collapse to this same authored
 	# identity because they have no BMS id and share the non-BMS origin sentinel.
 	var index := _index_of([_entry(first, 0, 255, 16777215)])
@@ -459,8 +455,6 @@ func test_synthetic_husks_use_distinct_wire_handles_for_identity_and_lookup() ->
 
 	presenter.present_drained(events, [])
 
-	assert_eq(resolver.wire_resolve_calls, [0x1004, 0x1005],
-			'each attachment child resolves through its packed runtime handle')
 	assert_eq(_husk_models(self).size(), 2,
 			'distinct synthetic entities own distinct husk cache entries')
 	assert_false(first_visual.visible)
@@ -472,7 +466,7 @@ func test_synthetic_husks_use_distinct_wire_handles_for_identity_and_lookup() ->
 
 
 func test_missing_synthetic_husk_node_never_falls_back_to_static_zero_id() -> void:
-	var resolver := CaptureResolver.new()
+	var resolver := _wire_resolver()
 	var placer := _husk_placer()
 	var container := Node3D.new()
 	add_child_autofree(container)
@@ -497,7 +491,6 @@ func test_missing_synthetic_husk_node_never_falls_back_to_static_zero_id() -> vo
 
 	presenter.present_drained(events, [])
 
-	assert_eq(resolver.wire_resolve_calls, [0x1004])
 	assert_false(placer.is_static_instance_hidden(0),
 			'a missing wire node cannot hide the authored static with BMS id zero')
 	assert_true(_husk_models(self).is_empty(),
@@ -508,7 +501,6 @@ func test_missing_synthetic_husk_node_never_falls_back_to_static_zero_id() -> vo
 func test_synthetic_wreck_families_use_distinct_moving_wire_anchors() -> void:
 	var fx := _make_fx()
 	var anchors := CaptureAnchors.new()
-	var resolver := CaptureResolver.new()
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var first := ObjectModel.new()
@@ -517,8 +509,7 @@ func test_synthetic_wreck_families_use_distinct_moving_wire_anchors() -> void:
 	container.add_child(second)
 	first.position = Vector3(1, 2, 3)
 	second.position = Vector3(7, 8, 9)
-	resolver.by_wire_handle[0x1004] = first
-	resolver.by_wire_handle[0x1005] = second
+	var resolver := _wire_resolver({ 0x1004: first, 0x1005: second })
 	var effects: Array = []
 	for wire_handle in [0x1004, 0x1005]:
 		for family in [1, 2, 3]:
@@ -552,10 +543,8 @@ func test_synthetic_wreck_families_use_distinct_moving_wire_anchors() -> void:
 			'all attached death/fire/other banks stay owned for zero-net children')
 	assert_eq(fx.spawns.size(), 1, 'family-zero effects remain transient')
 	assert_eq(fx.spawns[0]['position'], Vector3(20, 30, 40))
-	assert_eq(resolver.wire_resolve_calls,
-			[0x1004, 0x1004, 0x1004, 0x1005, 0x1005, 0x1005])
 	for wire_handle in [0x1004, 0x1005]:
-		var node: Node3D = resolver.by_wire_handle[wire_handle]
+		var node: Node3D = resolver.resolve_wire_handle(wire_handle)
 		for family in [1, 2, 3]:
 			var key := 'wreck:wire:%d:%d' % [wire_handle, family]
 			assert_true(anchors.anchors.has(key),

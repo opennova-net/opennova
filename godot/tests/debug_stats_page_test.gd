@@ -42,7 +42,7 @@ class RuntimeInfoHarness:
 	func get_throwable_present_stats() -> RefCounted:
 		return ThrowableInfoStub.new()
 	func get_wire_present_stats() -> WirePresentStats:
-		return WirePresentStats.new(4, 0, 1)
+		return WirePresentStats.create(4, 0, 1)
 
 
 func _make_pane(ctx: DebugContext = DebugContext.new()) -> DebugStatsPage:
