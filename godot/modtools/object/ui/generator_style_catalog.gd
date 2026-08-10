@@ -48,13 +48,19 @@ const CONSUMERS := [
 # The editor's consumer strings mapped onto the engine's consumer enum
 # (ObjectData.GENERATOR_CONSUMER_*; the dispatch matrix lives at the engine
 # home, engine/formats/threedi threedi_panm.h).
-const _CONSUMER_IDS := {
-	CONSUMER_UV: ObjectData.GENERATOR_CONSUMER_UV,
-	CONSUMER_RGB: ObjectData.GENERATOR_CONSUMER_RGB,
-	CONSUMER_ALPHA: ObjectData.GENERATOR_CONSUMER_ALPHA,
-	CONSUMER_LIGHT: ObjectData.GENERATOR_CONSUMER_LIGHT,
-	CONSUMER_PANM: ObjectData.GENERATOR_CONSUMER_PANM,
-}
+static func _consumer_id(consumer: String) -> int:
+	match consumer:
+		CONSUMER_UV:
+			return ObjectData.GENERATOR_CONSUMER_UV
+		CONSUMER_RGB:
+			return ObjectData.GENERATOR_CONSUMER_RGB
+		CONSUMER_ALPHA:
+			return ObjectData.GENERATOR_CONSUMER_ALPHA
+		CONSUMER_LIGHT:
+			return ObjectData.GENERATOR_CONSUMER_LIGHT
+		CONSUMER_PANM:
+			return ObjectData.GENERATOR_CONSUMER_PANM
+	return -1
 
 # Named mirrors of the control-register style ids used by the label overrides
 # and callers' subset lists. The canonical id list is the engine's
@@ -68,64 +74,52 @@ const STYLE_CONTROL_ROTATE := 0x75
 
 # Friendly labels per canonical style id — an editor concern, deliberately kept
 # here (the engine keeps CODE-style names; see _base_label's fallback). The
-# canonical id LIST is the engine's; this table only decorates it.
-const _FRIENDLY_LABELS := {
-	0: "None",
-	16: "Slide",
-	17: "Slide inverse",
-	24: "Set",
-	32: "Rotate CW",
-	33: "Rotate CCW",
-	49: "Set wave: square",
-	50: "Set wave: sine",
-	51: "Set wave: triangle",
-	52: "Set wave: saw",
-	53: "Set wave: inverse saw",
-	54: "Set wave: random",
-	55: "Set wave: smooth random",
-	56: "Set wave: half sine",
-	57: "Set wave: pulse",
-	58: "Set wave: vibrate",
-	63: "Set wave: heartbeat",
-	65: "Add wave: square",
-	66: "Add wave: sine",
-	67: "Add wave: triangle",
-	68: "Add wave: saw",
-	69: "Add wave: inverse saw",
-	70: "Add wave: random",
-	71: "Add wave: smooth random",
-	72: "Add wave: half sine",
-	73: "Add wave: pulse",
-	74: "Add wave: vibrate",
-	79: "Add wave: heartbeat",
-	81: "Skew wave: square",
-	82: "Skew wave: sine",
-	83: "Skew wave: triangle",
-	84: "Skew wave: saw",
-	85: "Skew wave: inverse saw",
-	86: "Skew wave: random",
-	87: "Skew wave: smooth random",
-	88: "Skew wave: half sine",
-	89: "Skew wave: pulse",
-	90: "Skew wave: vibrate",
-	95: "Skew wave: heartbeat",
-	97: "Multiply wave: square",
-	98: "Multiply wave: sine",
-	99: "Multiply wave: triangle",
-	100: "Multiply wave: saw",
-	101: "Multiply wave: inverse saw",
-	102: "Multiply wave: random",
-	103: "Multiply wave: smooth random",
-	104: "Multiply wave: half sine",
-	105: "Multiply wave: pulse",
-	106: "Multiply wave: vibrate",
-	111: "Multiply wave: heartbeat",
-	113: "Set (control register)",
-	114: "Add (control register)",
-	115: "Skew (control register)",
-	116: "Multiply (control register)",
-	117: "Rotate (control register)",
-}
+# canonical id LIST is the engine's; this table only decorates it. Waveform
+# families compose "<family> wave: <waveform>" from the byte's two nibbles.
+const _WAVEFORM_LABELS: PackedStringArray = [
+	"", "square", "sine", "triangle", "saw", "inverse saw", "random",
+	"smooth random", "half sine", "pulse", "vibrate", "", "", "", "",
+	"heartbeat",
+]
+
+
+static func _friendly_label(id: int) -> String:
+	match id:
+		0x00:
+			return "None"
+		0x10:
+			return "Slide"
+		0x11:
+			return "Slide inverse"
+		0x18:
+			return "Set"
+		0x20:
+			return "Rotate CW"
+		0x21:
+			return "Rotate CCW"
+		STYLE_CONTROL_SET:
+			return "Set (control register)"
+		STYLE_CONTROL_ADD:
+			return "Add (control register)"
+		STYLE_CONTROL_SKEW:
+			return "Skew (control register)"
+		STYLE_CONTROL_MULTIPLY:
+			return "Multiply (control register)"
+		STYLE_CONTROL_ROTATE:
+			return "Rotate (control register)"
+	var waveform := _WAVEFORM_LABELS[id & 0xF]
+	if waveform.is_empty():
+		return ""
+	match id & 0xF0:
+		0x30:
+			return "Set wave: %s" % waveform
+		0x40:
+			return "Add wave: %s" % waveform
+		0x50:
+			return "Skew wave: %s" % waveform
+		0x60:
+			return "Multiply wave: %s" % waveform
+	return ""
 
 # Reading the global CTRL value is a property of the consumer dispatch, not the
 # raw style byte. This is deliberately separate from the on-disk parameter:
@@ -185,7 +179,7 @@ static func reads_control_value(consumer: String, id: int) -> bool:
 	if not _is_consumer(consumer):
 		return false
 	return ObjectData.generator_style_reads_control_value(
-			int(_CONSUMER_IDS[consumer]), id)
+			_consumer_id(consumer), id)
 
 
 # The loader's high-style parameter fixup threshold is the engine's
@@ -201,8 +195,9 @@ static func _is_consumer(consumer: String) -> bool:
 # The friendly label for a canonical id; an engine-listed code this table does
 # not decorate surfaces the engine's CODE-style name (never an invented one).
 static func _base_label(id: int) -> String:
-	if _FRIENDLY_LABELS.has(id):
-		return String(_FRIENDLY_LABELS[id])
+	var friendly := _friendly_label(id)
+	if not friendly.is_empty():
+		return friendly
 	return ObjectData.generator_style_code_name(id)
 
 
