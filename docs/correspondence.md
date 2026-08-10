@@ -538,6 +538,12 @@ mode 1). Originals only — none reimplemented yet; these gate a future in-proce
 | original | addr | role | evidence | status |
 |---|---|---|---|---|
 | `SinglePlayer_StartMission` | `0x561af0` | SP launch: `SetConnectionMode(3)` + `SetTransportMode(1)` + `CreateSession` → "Game Loop" | server_name `"SINGLEPLAYERGAME"`; decompile | confirm-only (not reimplemented) |
+| `MissionList_ScanAndBuildFromFiles` | `0x563170` | boot/reload mission-table build: loose `*.bms` scan + PFF volume merges + qsort by filename; titles/briefings from the sibling `.bin` `[Info]` | decompile (grill 2026-08-10); entry stride 0x11E8 | matching — `engine/runtime/mission/mission_catalog.cpp` |
+| `Mission_BuildMapListFromPFF` | `0x562910` | the same build's per-archive walk (localres/language volume pairs; loose flag 0) | decompile | matching — same builder (the mount stack serves both passes) |
+| `Mission_CompareMapNames` | `0x5628e0` | catalog order: stricmp over the two entries' filenames | decompile | matching — `mission_catalog::build`'s sort |
+| `SinglePlayer_PopulateMissionList` | `0x561840` | SP IA_LIST populate: Co-op-family filter, `*`+title rows, BRIEFING cleared, ACCEPT disabled, header/footer strips on | decompile | matching — `nova_menu_shell.gd::_seed_mission_list` (D-MNU-14) |
+| `SinglePlayer_MissionListEventHandler` | `0x561ed0` | IA_LIST select/double-click: current-entry global, BRIEFING SetText(entry briefing), ACCEPT enable, double-click launch | decompile | matching — the shell's list value-changed/activated arms |
+| `SinglePlayer_RefreshAcceptOnActivate` | `0x561a20` | screen activate: ACCEPT enabled iff the list has a selection (**defined + named in IDB 2026-08-10**, with `UIList_CountSelectedItems @ 0x6445c0`) | decompile | matching — the seed's selection gate |
 | `CGameSession_SetConnectionMode` | `0x4c49f0` | conn mode → `is_authority`/`is_mp_session_peer` (1=host, 2=client, 3=host+client) | switch writes +0x5C/+0x60/+0x64 | confirm-only |
 | `CNapiNetwork_SetTransportMode` | `0x4c8750` | socket-state field; opens a UDP socket only for modes 2/3/4 (SP=1 → no socket) | `OpenTransportSocket` gate | confirm-only |
 | `CNapiGameSession_CreateSession` | `0x4c97c0` | shared SP/MP creator: installs host callbacks, StartServer, local client conn (type 2) | decompile; host-callback installs | confirm-only |

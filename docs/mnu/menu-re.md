@@ -1037,12 +1037,48 @@ Accepted/divergent (each a documented decision, not a defect):
   later sibling would see the list above it in the reimpl but below in retail. Kept: the
   overlay is the correct Godot home for the witnessed input model, which is the
   observable contract.
-- **D-MNU-14 (SP mission-select population — needs witness):** the shell seeds
-  IA_LIST/MISSION_LIST with raw `.bms` filenames from the dir scan and never
-  fills the MISSION BRIEFING pane on selection (observed live 2026-08-10 on the
-  revx02 menus). Retail's populate is `SinglePlayer_PopulateMissionList
-  @ 0x561840` (one of the strip-enabling activate handlers; interior unwalked) —
-  witness the row content it builds and the briefing text source, then port.
+- **D-MNU-14 (SP mission-select population — CLOSED 2026-08-10, witnessed +
+  ported):** the boot/reload scan builds a global mission table of
+  0x11E8-byte entries (`MissionList_ScanAndBuildFromFiles @ 0x563170`: loose
+  `FindFirstFile *.bms` walk, then `Mission_BuildMapListFromPFF @ 0x562910`
+  over the archive volumes in localres/language PAIRS — the mission's
+  sibling `.bin` is looked up in the PAIRED volume; final order = qsort with
+  `Mission_CompareMapNames @ 0x5628e0`, stricmp on the filenames). Per
+  entry: filename (+0), display title (+1044: the `.bin`'s case-insensitive
+  `[Info] TITLE` via `TextResource_FindEntryBySectionAndKey @ 0x75D250`;
+  when NO `.bin` exists the BMS header's embedded `mission_name` (header+4)
+  stands in; either miss leaves it empty), the `[Info] BRIEFING` text
+  pointer (+1300), the loose-scan flag (+4380: 1 loose / 0 archive), and
+  the session code word (+4392: `AI_GetTaskTypeFromFlags(header+0x88)`
+  through the code-word switch — our `bms::selected_game_mode` +
+  `game_type::for_mission_mode` pair). The SP populate
+  (`SinglePlayer_PopulateMissionList @ 0x561840`, a strip-enabling activate
+  handler) filters `(gt & 0xFFFDFFFF) == 0x10020` (the waypoint/Co-op
+  family), prefixes loose rows `*`, falls back to the FILENAME when the
+  title is empty, stores the table index as the row param, CLEARS the
+  BRIEFING widget, and disables ACCEPT; selection
+  (`SinglePlayer_MissionListEventHandler @ 0x561ed0`, events
+  0x5000001/0x5000002) sets the current-entry global, fills BRIEFING from
+  the entry's briefing pointer, re-enables ACCEPT, and double-click starts
+  the mission; screen activation re-syncs ACCEPT to whether the list has a
+  selection (`SinglePlayer_RefreshAcceptOnActivate @ 0x561a20` over
+  `UIList_CountSelectedItems @ 0x6445c0` — style-slot-3 rows; both defined
+  + named in the IDB 2026-08-10). Reimpl:
+  `engine/runtime/mission/mission_catalog.{h,cpp}` (the `.bin` resolves
+  through the mount stack rather than the paired volume — identical on
+  retail data; `.npj`/`.npz` legs not ported) + the `MissionCatalog`
+  binding (the code-word stamp) + `nova_menu_shell.gd`'s SP seeding
+  (`_seed_mission_list` clears the reimpl's row-0 preselect to match the
+  witnessed no-selection populate). Pinned by `mission_catalog` ctest +
+  the shell GUT SP case over the retail `00tra.bin` fixture. The HOST
+  screen's populate/filter chain is split off as D-MNU-17.
+- **D-MNU-17 (host-screen mission population — needs witness):** the
+  MULTI_PLAYER_HOST screen shows raw catalog filenames with no GAME_TYPE
+  filtering. Retail's chain — `init_host_settings_dialog @ 0x558960`,
+  `filter_mission_list_by_game_type @ 0x556fe0`, `UI_HandleHostSessionStart
+  @ 0x556d00` (and the table-dense `sub_557FB0`, which currently fails to
+  decompile) — is unwalked; witness the row content, the spin filter, and
+  the Selected Missions rotation columns before porting.
 - **D-MNU-15 (combobox closed face — selected item not drawn):** the compiled
   combo draws its chrome but never the selected item's text on the closed
   face, where retail's face is a `CButtonWnd` showing the selection

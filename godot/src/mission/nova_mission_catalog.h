@@ -45,8 +45,8 @@ public:
 };
 
 // The front-end mission catalog over a mounted ResourceRoot: the one home for
-// "which missions exist" that every shell surface (menu seeding, host
-// screens, default picks) reads.
+// "which missions exist" that every shell surface (menu seeding, the session
+// config screens, default picks) reads.
 class MissionCatalog : public RefCounted {
 	GDCLASS(MissionCatalog, RefCounted)
 
