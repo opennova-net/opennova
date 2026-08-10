@@ -7,6 +7,7 @@
 //  @ 0x64ae20; CListWnd_DrawItems @ 0x643f30]
 // Witness record: docs/mnu/menu-re.md ("Widget render dispatch").
 
+#include <menu/menu_edit.h>
 #include <menu/menu_frame.h>
 #include <mnu/mnu.h>
 
@@ -703,6 +704,78 @@ void test_marquee_roll(const fnt_font_t *font) {
 	CHECK(dl3.glyphs.empty(), "marquee_reset restarts the roll from the bottom");
 }
 
+// The witnessed edit-input operations [orig: edit_widget_insert_char
+// @ 0x661ee0; edit_widget_handle_key_event @ 0x6623a0].
+void test_edit_input_ops() {
+	using opennova::menu::EditField;
+	using opennova::menu::EditKeyResult;
+	using opennova::menu::EditLimits;
+	using opennova::menu::edit_apply_key;
+	using opennova::menu::edit_insert_char;
+	using opennova::menu::kEditKeyBackspace;
+	using opennova::menu::kEditKeyDelete;
+	using opennova::menu::kEditKeyEnd;
+	using opennova::menu::kEditKeyEnter;
+	using opennova::menu::kEditKeyHome;
+	using opennova::menu::kEditKeyLeft;
+	using opennova::menu::kEditKeyRight;
+
+	EditField f;
+	EditLimits lim;
+	CHECK(edit_insert_char(f, lim, 'A') && f.text == "A" && f.caret == 1,
+			"insert lands at the caret and advances it");
+	f.caret = 0;
+	CHECK(edit_insert_char(f, lim, 'B') && f.text == "BA",
+			"insert respects a moved caret");
+	CHECK(!edit_insert_char(f, lim, 0x0D) && !edit_insert_char(f, lim, 0x0A),
+			"CR/LF reject");
+	lim.read_only = true;
+	CHECK(!edit_insert_char(f, lim, 'C'), "read-only rejects typing");
+	lim.read_only = false;
+	lim.max_len = 3;
+	CHECK(edit_insert_char(f, lim, 'C', 5) && f.text.size() == 3,
+			"max_len clamps the inserted run");
+	lim.max_len = -1;
+
+	EditField n;
+	EditLimits nlim;
+	nlim.numeric = true;
+	nlim.min_value = 0;
+	nlim.max_value = 100;
+	CHECK(!edit_insert_char(n, nlim, 'x'), "numeric mode admits only digits");
+	CHECK(edit_insert_char(n, nlim, '9') && edit_insert_char(n, nlim, '9'),
+			"in-range digits insert");
+	CHECK(!edit_insert_char(n, nlim, '9') && n.text == "99",
+			"an out-of-range result rolls the WHOLE insert back");
+
+	EditField k;
+	k.text = "HELLO";
+	k.caret = 5;
+	CHECK(edit_apply_key(k, kEditKeyBackspace) == EditKeyResult::kChanged &&
+					k.text == "HELL" && k.caret == 4,
+			"backspace steps the caret back then deletes");
+	CHECK(edit_apply_key(k, kEditKeyHome) == EditKeyResult::kNone &&
+					k.caret == 0,
+			"home zeroes the caret");
+	CHECK(edit_apply_key(k, kEditKeyDelete) == EditKeyResult::kChanged &&
+					k.text == "ELL",
+			"delete removes at the caret");
+	CHECK(edit_apply_key(k, kEditKeyEnd) == EditKeyResult::kNone &&
+					k.caret == 3,
+			"end lands on strlen");
+	CHECK(edit_apply_key(k, kEditKeyLeft) == EditKeyResult::kNone &&
+					k.caret == 2,
+			"left steps back");
+	CHECK(edit_apply_key(k, kEditKeyLeft, 1, true) == EditKeyResult::kNone &&
+					k.caret == 2,
+			"left under shift does not move (selection reserved)");
+	CHECK(edit_apply_key(k, kEditKeyRight) == EditKeyResult::kNone &&
+					k.caret == 3,
+			"right steps forward, clamped to strlen");
+	CHECK(edit_apply_key(k, kEditKeyEnter) == EditKeyResult::kCommit,
+			"enter commits (the embedder releases focus)");
+}
+
 } // namespace
 
 int main() {
@@ -716,6 +789,7 @@ int main() {
 	test_mouse_pump(&font);
 	test_table_interior(&font);
 	test_marquee_roll(&font);
+	test_edit_input_ops();
 	fnt_free(&font);
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
