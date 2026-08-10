@@ -74,6 +74,10 @@ public:
 	// Local control coordinates; the pump scales by this control's size.
 	int process_mouse(const Vector2 &p_position, bool p_button_down);
 
+	// The companions' name->pre-order-index seam (case-insensitive authored
+	// widget NAME; -1 = absent). Valid after configure().
+	int widget_index(const String &p_name) const;
+
 	// Debug/test accessor: compile at the current size and report counts.
 	Dictionary get_draw_list_stats();
 

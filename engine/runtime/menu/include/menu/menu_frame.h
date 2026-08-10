@@ -194,6 +194,11 @@ public:
 
 	const MenuDrawList &last_draw_list() const { return draw_list_; }
 
+	// The pre-order index of the FIRST widget whose authored NAME matches
+	// (case-insensitive), or -1 — the companions' name->index seam
+	// [orig: CUIScene walks resolve controls by name the same way].
+	int widget_index(const std::string &name) const;
+
 	// The witnessed per-frame mouse pump [orig: scene_end_frame @ 0x63e600 ->
 	// widget_process_mouse_event @ 0x647a00 (vtable+20)]: ONE widget claims
 	// the mouse per frame — front-most = last drawn (the reverse sibling walk

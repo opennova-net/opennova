@@ -1269,6 +1269,33 @@ MenuFrameCompiler::MouseClaim MenuFrameCompiler::pump_mouse(
 	return claim;
 }
 
+int MenuFrameCompiler::widget_index(const std::string &name) const {
+	if (name.empty()) {
+		return -1;
+	}
+	for (size_t i = 0; i < nodes_.size(); ++i) {
+		const mnu::Window *w = nodes_[i].window;
+		if (w == nullptr || w->name.size() != name.size()) {
+			continue;
+		}
+		bool match = true;
+		for (size_t c = 0; c < name.size(); ++c) {
+			const char a = w->name[c];
+			const char b = name[c];
+			const char al = (a >= 'A' && a <= 'Z') ? char(a - 'A' + 'a') : a;
+			const char bl = (b >= 'A' && b <= 'Z') ? char(b - 'A' + 'a') : b;
+			if (al != bl) {
+				match = false;
+				break;
+			}
+		}
+		if (match) {
+			return static_cast<int>(i);
+		}
+	}
+	return -1;
+}
+
 int MenuFrameCompiler::skip_widget(int index) const {
 	const WidgetNode &node = nodes_[static_cast<size_t>(index)];
 	int next = index + 1;

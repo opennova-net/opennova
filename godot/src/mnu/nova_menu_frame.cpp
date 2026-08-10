@@ -310,6 +310,10 @@ void MenuFrame::set_time_ms(int64_t p_ms) {
 	queue_redraw();
 }
 
+int MenuFrame::widget_index(const String &p_name) const {
+	return compiler_.widget_index(p_name.utf8().get_data());
+}
+
 int MenuFrame::process_mouse(const Vector2 &p_position, bool p_button_down) {
 	if (!is_configured()) {
 		return -1;
@@ -502,6 +506,8 @@ void MenuFrame::_bind_methods() {
 			&MenuFrame::set_time_ms);
 	ClassDB::bind_method(D_METHOD("process_mouse", "position", "button_down"),
 			&MenuFrame::process_mouse);
+	ClassDB::bind_method(D_METHOD("widget_index", "name"),
+			&MenuFrame::widget_index);
 	ClassDB::bind_method(D_METHOD("set_cursor_state", "visible", "position"),
 			&MenuFrame::set_cursor_state);
 	ClassDB::bind_method(D_METHOD("get_draw_list_stats"),
