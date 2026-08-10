@@ -33,15 +33,7 @@ hardening, and project health. Divergences from the original engine belong in
 
 ## Cleanup & verification backlog
 
-- [ ] ADR 0033 P2 residue: eyeball the ARMORY and DEPLOY screens in a live
-      session. The 2026-08-10 MCP sweep (the `game_menu` runtime tool) verified
-      menu navigation, combos, tab radios, ESC-back, the credits roll, the
-      LAN browser + host flow, and both mission-launch paths (host + SP
-      ACCEPT) on the JOTAC install — but the in-game ESC pause -> armory and
-      the death -> deploy screens need real gameplay input (or a
-      `game_control` "open_ingame_menu" extension) to eyeball. Population
-      gaps found are ledgered: D-MNU-14 (mission titles + briefing pane),
-      D-NET-210 (LAN host bind port scan).
+- [ ] Retail-LAN parity 24-cell verdict: blocked on an opennova-int MCP
       harness defect — the opennova-int MCP's single-role `onhook_host_lan`/
       `onhook_join_lan` pass role config via child env and never render `onhook.cfg`,
       so `generate_parity_manifest.ps1` rejects every RO/OO server cfg snapshot

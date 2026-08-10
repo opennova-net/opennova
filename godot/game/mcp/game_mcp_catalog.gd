@@ -14,6 +14,8 @@ const PUBLIC_GAME_CONTROL_ACTIONS: Array[String] = [
 	"pause",
 	"resume",
 	"step",
+	"open_ingame_menu",
+	"open_armory",
 	"return_to_menu",
 	"quit",
 ]
@@ -54,7 +56,11 @@ static func definitions() -> Array[McpToolDef]:
 		McpToolDef.make("game_control",
 			"Control the real game process. action is %s. " % ", ".join(
 					PUBLIC_GAME_CONTROL_ACTIONS)
-			+ "Pause/step retain the runtime's multiplayer transport restrictions.",
+			+ "Pause/step retain the runtime's multiplayer transport restrictions. "
+			+ "open_ingame_menu raises the ESC pause overlay (game.mnu) over a loaded "
+			+ "world — game_menu drives it from there; open_armory opens the in-world "
+			+ "armory (weapon.mnu WEAPON) over live play — presenter-owned, so inspect "
+			+ "it via game_screenshot, and resume hands play back from either screen.",
 			{
 				"action": {
 					"type": "string",

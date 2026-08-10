@@ -414,6 +414,8 @@ func get_game_debug_adapter() -> GameDebugAdapter:
 			_on_return_to_menu,
 			request_quit)
 		_debug_adapter.set_menu_shell_source(func(): return _menu_shell)
+		_debug_adapter.set_ingame_screen_actions(
+				mcp_open_ingame_menu, mcp_open_armory)
 	return _debug_adapter
 func get_frame_stats_board() -> FrameStatsBoard:
 	return _frame_stats
@@ -1014,6 +1016,39 @@ func _on_return_to_menu() -> void:
 	if _world_load_pending:
 		return
 	_teardown_world_to_menu()
+
+
+## The MCP screen verbs behind game_control (the in-world screens get eyeballed
+## over the runtime MCP without hand-play). Both keep the key paths' state
+## gates; "open" is not a toggle, so an already-open screen reports OK and the
+## resume verb hands play back.
+func mcp_open_ingame_menu() -> Error:
+	if _world == null or not _world.is_loaded() or _world_load_pending \
+			or _round_ended:
+		return ERR_UNAVAILABLE
+	if _state == State.PAUSED:
+		return OK
+	# ESC in the armory resumes rather than pausing, so the verb requires an
+	# explicit resume first instead of silently stacking screens.
+	if _state != State.WORLD and _state != State.DEPLOY:
+		return ERR_UNAVAILABLE
+	_pause()
+	return OK
+
+
+func mcp_open_armory() -> Error:
+	if _world == null or not _world.is_loaded() or _world_load_pending \
+			or _round_ended or _armory_presenter == null:
+		return ERR_UNAVAILABLE
+	if _state == State.ARMORY:
+		return OK
+	if _state != State.WORLD:
+		return ERR_UNAVAILABLE
+	# The armory key's leg minus the zone gate: standing in a type-6 volume is
+	# the useitem key's gameplay rule [orig: Flags & 0x400000 @0x4e0b4d], not a
+	# screen precondition — open() is the presenter's staged direct-open seam.
+	_armory_presenter.set_player_team(int(_chosen_avatar.get("team", 0)))
+	return OK if _armory_presenter.open() else ERR_UNAVAILABLE
 
 
 # One idempotent rollback for a normal return and every load failure. Runtime
