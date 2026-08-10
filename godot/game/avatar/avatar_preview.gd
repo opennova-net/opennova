@@ -1,7 +1,6 @@
 class_name AvatarPreview
 extends Control
 
-const MissionRuntime := preload("res://game/world/mission_runtime.gd")
 
 
 # 3D preview for an Avatars.def character combo: composes the resolved third-person
@@ -49,7 +48,6 @@ const MENU_ZOOM_IN := 0.78                 # camera distance scale at full hover
 const MENU_IDLE_SPEED_DEG_PER_SEC := 43.9  # 0x800000 BAM/frame x 62.5 Hz
 const MENU_SWAY_FREQ_RAD_PER_SEC := 0.8    # sin(GetTickCount * 0.0008/ms)
 const MENU_SWAY_AMP_DEG := 22.5            # 2^28 BAM amplitude
-const MENU_TICK_HZ := 1.0 / MissionRuntime.TICK_DT  # the original's menu update cadence = the engine tick rate
 
 # Skeletal idle for the composed character [orig: PlayerInfo_InitPreviewModel @ 0x5600d0]:
 # the original binds the rest skeleton Dt1rst.bad + the looping idle clip PI_Idle.BAD (raw
@@ -582,7 +580,7 @@ func _process(delta: float) -> void:
 	# Damped zoom toward 1 (hover) / 0 (rest); the per-tick 0.05 factor is made frame-rate
 	# robust by scaling against the original's 62.5 Hz cadence.
 	var target := 1.0 if _hovered else 0.0
-	var t: float = clampf(MENU_ZOOM_DAMP * delta * MENU_TICK_HZ, 0.0, 1.0)
+	var t: float = clampf(MENU_ZOOM_DAMP * delta / Simulation.tick_dt(), 0.0, 1.0)
 	_zoom_blend = lerpf(_zoom_blend, target, t)
 	# Continuous idle spin; on hover a gentle sway fades in over it (scaled by the zoom blend).
 	_idle_angle += deg_to_rad(MENU_IDLE_SPEED_DEG_PER_SEC) * delta

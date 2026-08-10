@@ -1203,7 +1203,7 @@ func test_world_driven_weather_is_invariant_to_render_batching() -> void:
 			"0.128 seconds contains seven weather/TOD ticks")
 	expected_seven.free()
 
-	var eighth_delta := 8.0 / GameWorld.WEATHER_TICK_HZ - 0.128 + 0.000001
+	var eighth_delta := 8.0 / float(Weather.WEATHER_TICK_HZ) - 0.128 + 0.000001
 	var boundary: Array = await _world_driven_weather_state_after([0.128, eighth_delta])
 	var expected_eight := MissionEnvironment.new()
 	expected_eight.configure_mission_clock(0x0540, 60)

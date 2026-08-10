@@ -584,7 +584,7 @@ func test_batched_husk_and_wreck_anchor_follow_the_live_present_pose() -> void:
 	var sim := rt.get_sim()
 	assert_not_null(sim, 'the runtime boots a real simulation over the mission')
 	rt.play()
-	rt.tick_realtime(MissionRuntime.TICK_DT)
+	rt.tick_realtime(Simulation.tick_dt())
 	var spawn_origin := (3 << 24) | 0
 	var state: PackedVector3Array = sim.get_present_effect_state_for_origin(3, 0)
 	assert_eq(state.size(), 2,

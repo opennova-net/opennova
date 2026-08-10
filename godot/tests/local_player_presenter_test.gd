@@ -31,10 +31,9 @@ extends GutTest
 # - aim_range on a world with NO terrain object: unreachable on a loaded real
 #   world; the raycast-miss -> 1000 fallback covers the same readout behavior.
 
-const MissionRuntime := preload("res://game/world/mission_runtime.gd")
 
 const TEST_ROOT := "local_player_presenter_test"
-const TICK := MissionRuntime.TICK_DT
+var TICK := Simulation.tick_dt()
 
 const MINIMAL_FIXTURE_DIR := "res://../fixtures/minimal/resources"
 const DVXI5_FIXTURE_DIR := "res://../fixtures/godot/dvxi5"

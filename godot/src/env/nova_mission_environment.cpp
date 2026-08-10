@@ -108,6 +108,9 @@ void MissionEnvironment::_bind_methods() {
 			&MissionEnvironment::get_skyfog_color);
 	ClassDB::bind_method(D_METHOD("get_frame_clear_color"),
 			&MissionEnvironment::get_frame_clear_color);
+	ClassDB::bind_method(
+			D_METHOD("frame_clear_color_for", "indoors", "above_water"),
+			&MissionEnvironment::frame_clear_color_for);
 	ClassDB::bind_method(D_METHOD("get_ceiling_color"),
 			&MissionEnvironment::get_ceiling_color);
 	ClassDB::bind_method(D_METHOD("get_cloud_tint"),
@@ -586,6 +589,13 @@ Vector3 MissionEnvironment::get_skyfog_color() const {
 
 Vector3 MissionEnvironment::get_frame_clear_color() const {
 	return to_vector3(state_.frame_clear_color());
+}
+
+Color MissionEnvironment::frame_clear_color_for(bool p_indoors,
+		bool p_above_water) const {
+	const opennova::env::Rgb rgb =
+			state_.frame_clear_color_for(p_indoors, p_above_water);
+	return Color(rgb.r, rgb.g, rgb.b);
 }
 
 Vector3 MissionEnvironment::get_ceiling_color() const {

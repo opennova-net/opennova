@@ -358,6 +358,18 @@ bool EnvironmentState::has_water_height() const {
 	return config_ != nullptr && config_->water_height_set;
 }
 
+Rgb EnvironmentState::frame_clear_color_for(bool indoors,
+		bool above_water) const {
+	if (indoors) {
+		return Rgb{0.0f, 0.0f, 0.0f};
+	}
+	if (above_water) {
+		return frame_clear_color();
+	}
+	const Rgb combined = combine_terrain_light(sun_light(), sky_ambient());
+	return lit_water_color(water_color(), combined);
+}
+
 float EnvironmentState::water_height() const {
 	return has_water_height() ? config_->water_height : 0.0f;
 }

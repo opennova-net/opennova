@@ -522,7 +522,7 @@ func test_tick_realtime_still_presents_a_zero_tick_render_frame() -> void:
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container, {"placer": w.placer})
 	rt.play()
-	assert_eq(rt.tick_realtime(MissionRuntime.TICK_DT), 1,
+	assert_eq(rt.tick_realtime(Simulation.tick_dt()), 1,
 			"seed one decoded presentation snapshot")
 	(w.model as Node3D).visible = false
 	assert_eq(rt.tick_realtime(0.0), 0, "no fixed simulation tick advances")
@@ -603,7 +603,7 @@ func test_catchup_advances_round_move_effect_at_each_live_pose_and_stops_before_
 	assert_gte(rt.get_sim().debug_spawn_round(
 			Vector3(100, 100, 100), Vector3.RIGHT, "grenadefb"), 0)
 	rt.fixed_tick_completed.connect(func(_logic_tick: int) -> void:
-		effect_world.advance_fixed_tick(MissionRuntime.TICK_DT)
+		effect_world.advance_fixed_tick(Simulation.tick_dt())
 	)
 	rt.play()
 
@@ -626,10 +626,10 @@ func test_catchup_advances_round_move_effect_at_each_live_pose_and_stops_before_
 	# ticks into a twelve-tick catch-up batch: advances 248..252 must observe no
 	# live group, rather than emitting five stale ticks until final presentation.
 	for _batch in range(7):
-		assert_eq(rt.tick_realtime(31.0 * MissionRuntime.TICK_DT), 31)
-	assert_eq(rt.tick_realtime(20.0 * MissionRuntime.TICK_DT), 20)
+		assert_eq(rt.tick_realtime(31.0 * Simulation.tick_dt()), 31)
+	assert_eq(rt.tick_realtime(20.0 * Simulation.tick_dt()), 20)
 	assert_eq(effect_world.fixed_advance_count, 240)
-	assert_eq(rt.tick_realtime(12.0 * MissionRuntime.TICK_DT), 12)
+	assert_eq(rt.tick_realtime(12.0 * Simulation.tick_dt()), 12)
 	assert_eq(effect_world.fixed_advance_count, 252)
 	assert_eq(effect_world.active_tick_numbers.size(), 247,
 			"the group advances exactly while the round is alive")

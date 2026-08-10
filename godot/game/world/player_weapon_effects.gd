@@ -2,7 +2,6 @@ class_name PlayerWeaponEffects
 extends RefCounted
 const LocalPlayerPresenter := preload("res://game/world/local_player_presenter.gd")
 
-const MissionRuntime := preload("res://game/world/mission_runtime.gd")
 
 # The local player's weapon-EVENT presentation, split out of LocalPlayerPresenter
 # (W4-4): the fixed-tick event batch consume (switch/clear/fire/recoil/
@@ -13,7 +12,6 @@ const MissionRuntime := preload("res://game/world/mission_runtime.gd")
 # stamps the camera at production-tick pose); this class presents each batch
 # against the presenter's live nodes through its public accessors.
 
-const WEAPON_TICK_DT := MissionRuntime.TICK_DT  # the weapon FSM runs on the engine tick
 
 # The world serves the presentation seams: the event drain, mission audio, the
 # effect world, and the effect-anchor registry. Untyped for the same reason as
@@ -447,7 +445,7 @@ func _play_viewmodel_clip(key: String, variant: int = 0, age_ticks: int = 0,
 		authoritative_phase: bool = false) -> void:
 	if key.is_empty():
 		return
-	var seconds := float(maxi(age_ticks, 0)) * WEAPON_TICK_DT
+	var seconds := float(maxi(age_ticks, 0)) * Simulation.tick_dt()
 	for visual in _presenter.vm_parts():
 		if not is_instance_valid(visual):
 			continue

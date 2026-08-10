@@ -38,6 +38,8 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("step"), &Simulation::step);
 	ClassDB::bind_method(D_METHOD("bank_realtime", "delta"), &Simulation::bank_realtime);
 	ClassDB::bind_method(D_METHOD("reset_tick_bank"), &Simulation::reset_tick_bank);
+	ClassDB::bind_static_method("Simulation", D_METHOD("tick_dt"),
+			&Simulation::tick_dt);
 	ClassDB::bind_method(D_METHOD("set_frame_shell", "shell", "listener"),
 			&Simulation::set_frame_shell);
 	ClassDB::bind_method(D_METHOD("set_frame_world", "world"),
@@ -157,6 +159,8 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("drain_local_player_weapon_events"), &Simulation::drain_local_player_weapon_events);
 	ClassDB::bind_method(D_METHOD("drain_round_impacts"), &Simulation::drain_round_impacts);
 	ClassDB::bind_method(D_METHOD("get_local_player_health"), &Simulation::get_local_player_health);
+	ClassDB::bind_method(D_METHOD("get_local_player_health_percent"),
+			&Simulation::get_local_player_health_percent);
 	ClassDB::bind_method(D_METHOD("get_local_player_max_health"), &Simulation::get_local_player_max_health);
 	ClassDB::bind_method(D_METHOD("get_local_player_team"), &Simulation::get_local_player_team);
 	ClassDB::bind_method(D_METHOD("get_local_player_class"), &Simulation::get_local_player_class);

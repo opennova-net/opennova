@@ -40,7 +40,6 @@ const ThrowablePresentPass := preload("res://game/world/throwable_present_pass.g
 # 0.016 s — the engine tick quantum, single-sourced natively as
 # world::TickAccumulator::kTickDt (S14); kept here for cadence CONSUMERS
 # (avatar preview's menu clock). The accumulator arithmetic itself is native.
-const TICK_DT := 1.0 / 62.5
 
 var _sim: Simulation
 var _present: PresentApplier          # placed nodes on every role or tooling/test preview
@@ -726,7 +725,7 @@ func _feed_projectile_trace_stats() -> void:
 			faces.y)
 
 
-## Real-time host entry: bank `delta`, drain it in fixed TICK_DT quanta, run that many single logic
+## Real-time host entry: bank `delta`, drain it in fixed tick_dt quanta, run that many single logic
 ## ticks (clamped to the native kMaxCatchupTicks), and present ONCE after the batch — the faithful
 ## fixed-62.5 Hz accumulator, with a zero-tick frame still presenting current render-only entity
 ## rows (camera and local attach/detach change between fixed ticks). The whole loop — bank/clamp,

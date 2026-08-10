@@ -84,6 +84,9 @@ public:
 	Vector3 get_fog_color() const;
 	Vector3 get_skyfog_color() const;
 	Vector3 get_frame_clear_color() const;
+	// The witnessed clear SELECTION (environment_state.h carries the
+	// citations): black indoors, skyfog above water, lit water underwater.
+	Color frame_clear_color_for(bool p_indoors, bool p_above_water) const;
 	Vector3 get_ceiling_color() const;
 	Vector3 get_cloud_tint() const;
 	Vector3 get_floor_color() const;

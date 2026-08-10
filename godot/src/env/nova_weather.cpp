@@ -4,6 +4,7 @@
 #include <godot_cpp/core/object.hpp>
 
 #include "env/nova_mission_environment.h"
+#include "simulation/nova_simulation.h"
 
 namespace godot {
 
@@ -51,6 +52,14 @@ void Weather::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("get_network_environment_snapshot"),
 			&Weather::get_network_environment_snapshot);
+	ClassDB::bind_method(D_METHOD("advance_world_driven", "delta", "sim"),
+			&Weather::advance_world_driven);
+	ClassDB::bind_method(D_METHOD("push_network_environment", "sim"),
+			&Weather::push_network_environment);
+	ClassDB::bind_method(D_METHOD("run_mission_start_boundary", "sim"),
+			&Weather::run_mission_start_boundary);
+	ClassDB::bind_method(D_METHOD("apply_join_network_update", "sim"),
+			&Weather::apply_join_network_update);
 	ClassDB::bind_method(D_METHOD("apply_network_environment_sample", "sample"),
 			&Weather::apply_network_environment_sample);
 
@@ -279,6 +288,85 @@ Dictionary Weather::get_network_environment_snapshot() {
 	result["overcast_blend_q16"] = snapshot.overcast_blend_q16;
 	result["precipitation_kind"] = snapshot.precipitation_kind;
 	return result;
+}
+
+void Weather::advance_world_driven(double p_delta, Object *p_sim) {
+	MissionEnvironment *env = _env_node();
+	if (env == nullptr) {
+		return;
+	}
+	const int tick_count = runtime_.consume_world_tick_credits(p_delta);
+	if (tick_count <= 0) {
+		return;
+	}
+	Simulation *sim = Object::cast_to<Simulation>(p_sim);
+	const bool authority = sim != nullptr && !sim->is_joiner();
+	for (int i = 0; i < tick_count; ++i) {
+		env->advance_mission_clock(1);
+		tick_fixed();
+		if (authority) {
+			sim->advance_network_environment_tick();
+			push_network_environment(sim);
+		}
+	}
+}
+
+void Weather::push_network_environment(Object *p_sim) {
+	Simulation *sim = Object::cast_to<Simulation>(p_sim);
+	if (sim == nullptr || sim->is_joiner()) {
+		return;
+	}
+	MissionEnvironment *env = _env_node();
+	opennova::env::NetEnvSnapshot snapshot;
+	if (env == nullptr ||
+			!runtime_.network_snapshot(&env->state(), snapshot)) {
+		return;
+	}
+	sim->set_network_environment(snapshot.fog_target_q16,
+			snapshot.fog_current_q16, snapshot.fog_accel_clamp,
+			snapshot.tod_fixed24, snapshot.tod_advance_per_tick,
+			snapshot.quake_ticks, snapshot.cloud_scroll_rate_target,
+			snapshot.rain_pct_current_q16, snapshot.overcast_blend_q16,
+			snapshot.precipitation_kind);
+}
+
+void Weather::run_mission_start_boundary(Object *p_sim) {
+	Simulation *sim = Object::cast_to<Simulation>(p_sim);
+	const bool authority = sim != nullptr && !sim->is_joiner();
+	// The first publication seeds native retail units at the authored T0. It
+	// is local state only; no host pump or phase-2 packet runs inside this
+	// boundary.
+	if (authority) {
+		push_network_environment(sim);
+		sim->run_mission_start_wac();
+		sim->initialize_network_environment_mission_start();
+	}
+	// WAC direct execution precedes the complete-weather-update settle.
+	// Joiners settle their local render owner but never run authority WAC.
+	prewarm_mission_start();
+	if (authority) {
+		for (int i = 0;
+				i < opennova::env::WeatherRuntime::kMissionStartPrewarmTicks;
+				++i) {
+			sim->advance_network_environment_tick();
+		}
+		// Non-scripted values adopt the settled resource sample; WAC-owned
+		// channels survive through the ownership masks.
+		push_network_environment(sim);
+		sim->seal_mission_start_baseline();
+	}
+}
+
+void Weather::apply_join_network_update(Object *p_sim) {
+	Simulation *sim = Object::cast_to<Simulation>(p_sim);
+	if (sim == nullptr || !sim->is_joiner()) {
+		return;
+	}
+	Dictionary sample = sim->take_join_environment_update();
+	if (sample.is_empty()) {
+		return;
+	}
+	apply_network_environment_sample(sample);
 }
 
 void Weather::apply_network_environment_sample(const Dictionary &p_sample) {

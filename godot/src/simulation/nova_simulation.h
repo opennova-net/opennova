@@ -800,6 +800,10 @@ private:
 	opennova::mission::PromoteOptions promote_options() const;
 
 	void reset_world();
+
+public:
+	// The authority network-environment mirrors — the weather device drives
+	// these natively (Weather.advance_world_driven / run_mission_start_boundary).
 	void set_network_environment(int64_t p_fog_target_q16,
 	                             int64_t p_fog_current_q16,
 	                             int64_t p_fog_accel_clamp,
@@ -812,6 +816,8 @@ private:
 	                             int64_t p_precipitation_kind);
 	void advance_network_environment_tick();
 	void initialize_network_environment_mission_start();
+
+private:
 	// Shared post-promote wiring: load the BMS arrays, register the systems, run the
 	// pre-mission pass, capture the restore baseline. Marks the sim loaded.
 	void finish_load(const opennova::bms::File &file);
@@ -933,6 +939,9 @@ public:
 	int bank_realtime(double p_delta) { return frame_driver_.accumulator().bank(p_delta); }
 	// Discard banked wall-clock (Play/Step/Stop transitions).
 	void reset_tick_bank() { frame_driver_.reset_bank(); }
+	// The fixed logic-tick quantum (1/62.5 s) — the ONE cadence constant,
+	// re-exported from the engine accumulator for GDScript composition.
+	static double tick_dt() { return opennova::world::TickAccumulator::kTickDt; }
 
 	// --- The engine-owned game frame (ADR 0033 R1; frame/frame_driver.h) ---
 	// The shell/world NODE registers ITSELF once per mission and the binding
@@ -1113,6 +1122,8 @@ public:
 	// per-frame HUD info. [orig: HUD_BuildEntityInfo @0x4b8440 — health ratio +92, team +374]
 	int get_local_player_health() const;
 	int get_local_player_max_health() const;
+	// The gamemus Var7 projection (world/music_vars.h carries the witness).
+	int get_local_player_health_percent() const;
 	int get_local_player_team() const;
 	// Authoritative armory on-show state from the spawned entity. The class is
 	// playerClass +0x294; the name resolves equipped AdmDef index +0x2B0.

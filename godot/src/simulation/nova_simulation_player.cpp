@@ -3,6 +3,8 @@
 // sibling nova_simulation_player_{view,weapon,loadout}.cpp TUs.
 #include "simulation/nova_simulation_internal.h"
 
+#include <world/music_vars.h>
+
 #include <def/def.h> // DEF_WEAPON_FLAG_* / DEF_WEAPON_FLAG2_*
 
 using namespace novasim;
@@ -382,6 +384,11 @@ int Simulation::get_local_player_max_health() const {
 	const AiEntity *p = world_->ai->for_handle(world_->cached.local_player);
 	if (!p || p->inf.max_health <= 0) return 100;
 	return p->inf.max_health;
+}
+
+int Simulation::get_local_player_health_percent() const {
+	return opennova::world::music_health_percent(get_local_player_health(),
+			get_local_player_max_health());
 }
 
 int Simulation::get_local_player_team() const {

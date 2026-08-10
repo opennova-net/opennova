@@ -62,6 +62,12 @@ public:
 	// zero-tick publish so scrubs land.
 	void process_delta(EnvironmentState *env, double delta);
 
+	// The world-driven twin of process_delta's accumulator: bank `delta`
+	// against the recovered 62 Hz weather clock and return the quantum count
+	// the world composer must run this frame (the kMaxCatchupTicks clamp
+	// drops the remainder). Zero while autonomous.
+	int consume_world_tick_credits(double delta);
+
 	// The world composer owns the recovered 62 Hz weather/TOD accumulator
 	// while a mission runtime is active.
 	void set_world_tick_driven(bool enabled);

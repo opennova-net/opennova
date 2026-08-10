@@ -167,7 +167,7 @@ func test_spawn_by_name_creates_emitters_and_sweep_expires() -> void:
 	assert_eq(world.get_children().filter(
 			func(child: Node) -> bool: return child.get_class() == "NovaParticleEmitter").size(), 0,
 			"runtime effects remain values; no per-emitter renderer Nodes are created")
-	world.advance_fixed_tick(MissionRuntime.TICK_DT)
+	world.advance_fixed_tick(Simulation.tick_dt())
 	assert_gt(int(_single_emitter(world).alive), 0,
 			"a production-tick spawn emits during that same fixed particle pass")
 	# Let the one-shot emit and die through the one authoritative scene clock.
@@ -506,7 +506,7 @@ func test_render_now_submits_a_freshly_advanced_warm_snapshot() -> void:
 	var world := _make_world()
 	world.load_particle_file(_make_renderable_effect_file())
 	assert_gt(world.spawn_effect("puff", Vector3.ZERO), 0)
-	world.advance_fixed_tick(MissionRuntime.TICK_DT)
+	world.advance_fixed_tick(Simulation.tick_dt())
 	assert_gt(world.render_now(), 0,
 			"the public warm facade synchronously submits non-empty material runs")
 

@@ -55,6 +55,25 @@ public:
 	Dictionary get_network_environment_snapshot();
 	void apply_network_environment_sample(const Dictionary &p_sample);
 
+	// --- world-composer orchestration (ADR 0033; the witnessed sequencing
+	// lives in engine/runtime/environment weather_runtime.h) ---------------
+	// The world's weather leg: bank the render delta on the engine's
+	// recovered 62 Hz weather clock and run each due quantum's sequence —
+	// advance the integer mission clock, tick every weather block once, and
+	// on the authority advance + republish the network environment.
+	void advance_world_driven(double p_delta, Object *p_sim);
+	// Publish the live typed network snapshot onto the authority sim
+	// (no-op for joiners / without a loaded environment).
+	void push_network_environment(Object *p_sim);
+	// The mission-start environment boundary: T0 seed publication, authority
+	// WAC direct execution, the prewarm settle (local + network mirrors),
+	// the settled republication, and the baseline seal.
+	void run_mission_start_boundary(Object *p_sim);
+	// Drain one authoritative phase-2 join environment update (if any) into
+	// the weather/env owners. Joiner-only; render-frame safe (the sim owns
+	// the receive-revision cursor).
+	void apply_join_network_update(Object *p_sim);
+
 	void trigger_lightning_short();
 	void trigger_lightning_long();
 	void set_wind_duration(int p_seconds);

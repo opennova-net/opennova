@@ -23,9 +23,6 @@ const ResourceDirSettings := preload("res://game/resource_index/resource_dir_set
 const MissionRuntime := preload("res://game/world/mission_runtime.gd")
 const NovaDebugViewStatus := preload(
 		"res://game/debug/nova_debug_view_status.gd")
-const TICK_DT := MissionRuntime.TICK_DT  # one source; default for tick()'s delta param
-const WEATHER_TICK_HZ := Weather.WEATHER_TICK_HZ  # one source (the weather core's cadence)
-const MAX_WEATHER_CATCHUP_TICKS := 31
 
 signal world_loaded()
 signal load_failed(reason: String)
@@ -155,7 +152,6 @@ var _local_player_spawn_loadout: Dictionary = {}
 var _perf_tick_us: int = 0
 var _perf_foliage_us: int = 0
 var _perf_runtime_us: int = 0
-var _weather_tick_credit := 0.0
 var _perf_audio_us: int = 0
 
 
@@ -740,9 +736,8 @@ func _apply_mission_environment_overrides(mission: MissionData) -> void:
 			else:
 				env_data.apply_mission_overrides(overrides)
 	var mission_water := NAN
-	if overrides.has("water_height"):
-		# Mission header values are signed engine half-units.
-		mission_water = float(overrides["water_height"]) * 0.5
+	if overrides.has("water_height_world"):
+		mission_water = float(overrides["water_height_world"])
 	_set_mission_water_height_override(mission_water)
 
 
@@ -764,14 +759,12 @@ func is_water_render_active() -> bool:
 
 
 func _set_weather_world_tick_driven(enabled: bool) -> void:
-	_weather_tick_credit = 0.0
 	var weather: Weather = get_node_or_null("Weather")
 	if weather != null:
 		weather.set_world_tick_driven(enabled)
 
 
 func _prepare_world_driven_weather() -> void:
-	_weather_tick_credit = 0.0
 	var weather: Weather = get_node_or_null("Weather")
 	if weather != null:
 		weather.prepare_world_driven()
@@ -780,7 +773,6 @@ func _prepare_world_driven_weather() -> void:
 
 
 func _prepare_autonomous_weather() -> void:
-	_weather_tick_credit = 0.0
 	var weather: Weather = get_node_or_null("Weather")
 	if weather != null:
 		weather.prepare_autonomous()
@@ -788,93 +780,19 @@ func _prepare_autonomous_weather() -> void:
 		_set_weather_world_tick_driven(false)
 
 
-func _push_network_environment() -> void:
-	var sim := get_sim() as Simulation
-	if sim == null or sim.is_joiner():
-		return
-	var weather := get_node_or_null("Weather") as Weather
-	if weather == null:
-		return
-	var sample: Dictionary = weather.get_network_environment_snapshot()
-	if sample.is_empty():
-		return
-	# Every source is live mission/runtime state in retail-native units. There is
-	# no mission-name, map, or game-type case table in this path.
-	sim.set_network_environment(
-		int(sample.get("fog_target_q16", 0)),
-		int(sample.get("fog_current_q16", 0)),
-		int(sample.get("fog_accel_clamp", 0)),
-		int(sample.get("tod_fixed24", 0)),
-		int(sample.get("tod_advance_per_tick", 0)),
-		int(sample.get("quake_ticks", 0)),
-		int(sample.get("cloud_scroll_rate_target", 0)),
-		int(sample.get("rain_pct_current_q16", 0)),
-		int(sample.get("overcast_blend_q16", 0)),
-		int(sample.get("precipitation_kind", 0)),
-	)
-
-
+# The witnessed mission-start environment boundary runs natively on the
+# weather device (Weather.run_mission_start_boundary): T0 seed publication,
+# authority WAC direct execution, the 255-tick settle, republication, seal.
 func _run_mission_start_environment_boundary() -> void:
-	var sim := get_sim() as Simulation
-	var is_authority: bool = sim != null and not sim.is_joiner()
-	# This first publication seeds native retail units at the authored T0. It is
-	# local state only; no host pump or phase-2 packet runs inside this boundary.
-	if is_authority:
-		_push_network_environment()
-		sim.run_mission_start_wac()
-		sim.initialize_network_environment_mission_start()
-
-	# WacScript_InitAndLoad's direct execution precedes 255 complete weather
-	# updates. Joiners settle their local render owner but never run authority WAC.
 	var weather := get_node_or_null("Weather") as Weather
 	if weather != null:
-		weather.prewarm_mission_start()
-	if is_authority:
-		for _tick in range(Weather.MISSION_START_PREWARM_TICKS):
-			sim.advance_network_environment_tick()
-		# Non-scripted values adopt the settled resource sample; WAC-owned channels
-		# survive through EnvNetworkState's ownership masks.
-		_push_network_environment()
-		sim.seal_mission_start_baseline()
+		weather.run_mission_start_boundary(get_sim())
 
 
 func _apply_join_network_environment_update() -> void:
-	var sim := get_sim() as Simulation
-	if sim == null or not sim.is_joiner():
-		return
-	# Simulation owns the receive-revision cursor. Repeated render frames
-	# return empty and cannot reapply one authoritative edge.
-	var sample: Dictionary = sim.take_join_environment_update()
-	if sample.is_empty():
-		return
 	var weather := get_node_or_null("Weather") as Weather
 	if weather != null:
-		weather.apply_network_environment_sample(sample)
-	else:
-		var env := _env as MissionEnvironment
-		if env != null:
-			env.apply_network_environment_sample(sample)
-
-
-func _advance_world_driven_weather(delta: float) -> void:
-	_weather_tick_credit += maxf(delta, 0.0) * WEATHER_TICK_HZ
-	var tick_count := int(floor(_weather_tick_credit + 1.0e-9))
-	if tick_count <= 0:
-		return
-	_weather_tick_credit = maxf(
-			0.0, _weather_tick_credit - float(tick_count))
-	if tick_count > MAX_WEATHER_CATCHUP_TICKS:
-		tick_count = MAX_WEATHER_CATCHUP_TICKS
-		_weather_tick_credit = 0.0
-	var weather := get_node_or_null("Weather")
-	var sim := get_sim()
-	for _tick in range(tick_count):
-		_env.advance_mission_clock(1)
-		if weather != null:
-			weather.tick_fixed()
-		if sim != null and not sim.is_joiner():
-			sim.advance_network_environment_tick()
-		_push_network_environment()
+		weather.apply_join_network_update(get_sim())
 
 
 # Retail loads <mission>.til into one shared g_TerrainTileArray used by
@@ -1254,7 +1172,9 @@ func _frame_weather_leg() -> void:
 	var probe_phase_start := Time.get_ticks_usec() if _frame_timing else 0
 	if (_loaded and _runtime != null and _runtime.is_playing()
 			and _env != null):
-		_advance_world_driven_weather(_frame_delta)
+		var weather := get_node_or_null("Weather") as Weather
+		if weather != null:
+			weather.advance_world_driven(_frame_delta, get_sim())
 	if _placer != null:
 		_placer.update_environment()
 	if _frame_timing:
@@ -1342,7 +1262,9 @@ func _frame_audio_leg(ticks_run: int) -> void:
 		_perf_audio_us = Time.get_ticks_usec() - audio_start
 
 
-func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta: float = TICK_DT) -> void:
+func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta: float = -1.0) -> void:
+	if delta < 0.0:
+		delta = Simulation.tick_dt()  # the engine's fixed logic quantum
 	_sample_panm_clock()
 	_frame_camera_pos = camera_pos
 	_frame_camera_xform = camera_xform
@@ -2249,11 +2171,11 @@ func _on_runtime_fixed_tick(_logic_tick: int) -> void:
 	if _effect_world != null and not skip_effect_tick:
 		if _frame_stats != null and _frame_stats.is_capture_active():
 			var fx_start := Time.get_ticks_usec()
-			_effect_world.advance_fixed_tick(MissionRuntime.TICK_DT)
+			_effect_world.advance_fixed_tick(Simulation.tick_dt())
 			_frame_stats.add(FrameStatsBoard.EFFECTS_TICK,
 					Time.get_ticks_usec() - fx_start)
 		else:
-			_effect_world.advance_fixed_tick(MissionRuntime.TICK_DT)
+			_effect_world.advance_fixed_tick(Simulation.tick_dt())
 
 
 func _on_runtime_simulation_restarted() -> void:
@@ -2264,14 +2186,20 @@ func _on_runtime_simulation_restarted() -> void:
 		_local_player_weapon_tick_consumer.call(
 				drain_local_player_weapon_events())
 	if _effect_world == null:
-		_push_network_environment()
+		_republish_network_environment()
 		return
 	_effect_world.reset_runtime_state()
 	# Persistent item effects belong to the restored entity set, not the scene
 	# that was just discarded. Re-register their admission and owner identities;
 	# restore emits fresh controller-start lifecycle events for occupied baselines.
 	_item_fx.reattach()
-	_push_network_environment()
+	_republish_network_environment()
+
+
+func _republish_network_environment() -> void:
+	var weather := get_node_or_null("Weather") as Weather
+	if weather != null:
+		weather.push_network_environment(get_sim())
 
 
 # Place real ambient sounds at the mission's sound markers: load the co-named .LWF
@@ -2333,7 +2261,7 @@ func _warm_effect_world_catalog() -> int:
 	# The tracer ribbon pipelines compile in the same forced frames.
 	if _runtime != null:
 		_runtime.warm_present_pipelines(warm_pos)
-	_effect_world.advance_fixed_tick(MissionRuntime.TICK_DT)
+	_effect_world.advance_fixed_tick(Simulation.tick_dt())
 	_effect_world.render_now()
 	# Pipeline compiles need real draws. Skip the forced frames inside the
 	# editor host (re-entrant editor drawing); the texture warm above still
@@ -2345,7 +2273,7 @@ func _warm_effect_world_catalog() -> int:
 		var was_visible := visible
 		visible = true
 		RenderingServer.force_draw(true)
-		_effect_world.advance_fixed_tick(MissionRuntime.TICK_DT)
+		_effect_world.advance_fixed_tick(Simulation.tick_dt())
 		_effect_world.render_now()
 		RenderingServer.force_draw(true)
 		# The reset below cancels any unserviced compositor warm request. Drain
@@ -2483,10 +2411,11 @@ func get_mission_audio() -> MissionAudio:
 func _music_var_pump() -> void:
 	if _runtime == null or not _runtime.has_player():
 		return
-	var max_h: int = _runtime.local_player_max_health()
-	var cur_h: int = _runtime.local_player_health()
+	var pump_sim := _runtime.get_sim()
+	if pump_sim == null:
+		return
 	NovaMusicService.set_var(NovaMusicService.VAR_HEALTH_PCT,
-		(cur_h * 100 / max_h) if max_h > cur_h else 100)
+		pump_sim.get_local_player_health_percent())
 	NovaMusicService.set_var(NovaMusicService.VAR_TEAM, _runtime.local_player_team())
 
 
@@ -2541,13 +2470,15 @@ func _restore_idle_frame_clear_color() -> void:
 func _update_frame_clear_color() -> void:
 	if _clear_color == null or _clear_color.environment == null or _env == null:
 		return
-	# Indoors the frame clears BLACK, not skyfog [orig: render_main_scene
-	# @ 0x5c1597 — the Env_SkyfogBlock clear runs only when the blink indoors
-	# bit is clear; the sentinel generation forces a recompute on exit].
+	# The clear SELECTION (black indoors / skyfog above water / lit water
+	# underwater) is the engine's (environment_state.h carries the witness);
+	# this device classifies the eye and writes the color. The sentinel
+	# generation (-2) forces a recompute on indoors exit.
 	if _occlusion.blink_indoors:
 		if _clear_env_generation != -2:
 			_clear_env_generation = -2
-			_clear_color.environment.background_color = Color.BLACK
+			_clear_color.environment.background_color = (
+					_env.frame_clear_color_for(true, true))
 		return
 	var above := true
 	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
@@ -2560,18 +2491,5 @@ func _update_frame_clear_color() -> void:
 		return
 	_clear_env_generation = gen
 	_clear_above_water = above
-	var rgb: Vector3
-	if above:
-		rgb = _env.get_frame_clear_color()
-	else:
-		# Underwater clear = the lit water color [orig: @ 0x5ca78b], the same
-		# derived chain the water surface renders with.
-		var combined := EnvFile.combine_terrain_light(
-			_vec3_color(_env.get_sun_light()), _vec3_color(_env.get_sky_ambient()))
-		var lit := EnvFile.lit_water_color(_vec3_color(_env.get_water_color()), combined)
-		rgb = Vector3(lit.r, lit.g, lit.b)
-	_clear_color.environment.background_color = Color(rgb.x, rgb.y, rgb.z)
-
-
-static func _vec3_color(v: Vector3) -> Color:
-	return Color(v.x, v.y, v.z)
+	_clear_color.environment.background_color = (
+			_env.frame_clear_color_for(false, above))

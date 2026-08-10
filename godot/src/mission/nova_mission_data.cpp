@@ -365,6 +365,9 @@ Dictionary MissionData::get_environment_overrides() const {
 	Dictionary out;
 	if (attrib_has(info.attrib_flags, opennova::bms::AttribFlags::WaterOverrideEnable)) {
 		out["water_height"] = static_cast<float>(info.water_override); // engine half-units
+		// The same override in WORLD units, so no shell converts (the header
+		// stores signed half-world-units; mission.h carries the note).
+		out["water_height_world"] = static_cast<float>(info.water_override) * 0.5f;
 	}
 	if (attrib_has(info.attrib_flags, opennova::bms::AttribFlags::FogDistanceOverrideEnable)) {
 		out["fog_level"] = static_cast<float>(info.fog_override);
