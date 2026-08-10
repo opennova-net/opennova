@@ -1522,6 +1522,11 @@ target_link_libraries(peer_addr_test PRIVATE opennova_net)
 target_include_directories(peer_addr_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME peer_addr COMMAND peer_addr_test)
 
+add_executable(net_ports_test npwire/net_ports_test.cpp)
+target_link_libraries(net_ports_test PRIVATE opennova_net)
+target_include_directories(net_ports_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME net_ports COMMAND net_ports_test)
+
 add_executable(game_type_policy_test npwire/game_type_policy_test.cpp)
 target_link_libraries(game_type_policy_test PRIVATE opennova_net)
 target_include_directories(game_type_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

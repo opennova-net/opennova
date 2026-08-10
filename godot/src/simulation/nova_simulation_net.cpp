@@ -10,6 +10,7 @@
 #include <threedi/threedi_panm_pose.h> // the native PANM liveness gate (S3, ADR 0028)
 #include <npwire/ingame_decode.h> // kRoundEventFlag* (the fire-mode byte)
 #include <npwire/ingame_message_id.h>
+#include <npwire/net_ports.h> // lan_host_bind_ports (the D-NET-210 bind scan)
 #include <npwire/wire_handle.h>  // pool()/kPoolItem/kInvalid (the wire handle home)
 #include <world/infantry.h>      // kAnimStanceFlag* (the witnessed stance bits)
 #include <world/spawn_select.h>  // kDeployPickNone/AutoTeam (C2S 0x2C sentinels)
@@ -705,7 +706,23 @@ bool Simulation::set_score_config_data(const PackedByteArray &p_score_ini_bytes)
 bool Simulation::enable_host_listen(int p_port) {
 	listen_server_ = true;
 	if (pump_.is_null()) pump_.instantiate();
-	if (pump_->bind_listen(p_port) != 0) {
+	// The LAN host scans the retail port range from the requested port
+	// (D-NET-210; the sequence policy is npwire net_ports.h
+	// lan_host_bind_ports). Port 0 keeps the OS-assigned bind — the dev/test
+	// seam retail has no analog for.
+	bool bound = false;
+	if (p_port <= 0) {
+		bound = pump_->bind_listen(0) == 0;
+	} else {
+		for (const uint16_t port : opennova::lan_host_bind_ports(
+					 static_cast<uint32_t>(p_port))) {
+			if (pump_->bind_listen(port) == 0) {
+				bound = true;
+				break;
+			}
+		}
+	}
+	if (!bound) {
 		host_listen_ = false;
 		return false;
 	}
@@ -718,7 +735,9 @@ bool Simulation::enable_host_listen(int p_port) {
 	// bringup_host_runtime with SocketMode::Lan. UdpPump owns the socket; all protocol/crypto/
 	// framing stays in libs (ADR 0010). host_session_config_ keeps the GDScript-facing session options
 	// (the Dictionary getter + the §5.1 reactive-reply config fed to configure_session_runtime).
-	host_bind_port_ = static_cast<uint16_t>(std::clamp(p_port, 0, 0xFFFF));
+	// The port actually bound (the scan may have stepped past the requested
+	// one) is what the session advertises.
+	host_bind_port_ = static_cast<uint16_t>(pump_->local_port());
 	return true;
 }
 
