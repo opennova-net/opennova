@@ -68,6 +68,12 @@ public:
 	void set_time_ms(int64_t p_ms);
 	void set_cursor_state(bool p_visible, const Vector2 &p_position);
 
+	// Feed one raw-mouse sample through the engine pump (menu_frame.h
+	// pump_mouse carries the witness): updates every row's hover/press, the
+	// cursor position, and returns the claimed widget index (-1 = none).
+	// Local control coordinates; the pump scales by this control's size.
+	int process_mouse(const Vector2 &p_position, bool p_button_down);
+
 	// Debug/test accessor: compile at the current size and report counts.
 	Dictionary get_draw_list_stats();
 

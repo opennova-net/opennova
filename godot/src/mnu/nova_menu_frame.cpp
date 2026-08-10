@@ -310,6 +310,20 @@ void MenuFrame::set_time_ms(int64_t p_ms) {
 	queue_redraw();
 }
 
+int MenuFrame::process_mouse(const Vector2 &p_position, bool p_button_down) {
+	if (!is_configured()) {
+		return -1;
+	}
+	const Vector2 scale = design_scale_();
+	const opennova::menu::MenuFrameCompiler::MouseClaim claim =
+			compiler_.pump_mouse(state_, p_position.x, p_position.y,
+					p_button_down, scale.x, scale.y);
+	state_.cursor_x = p_position.x;
+	state_.cursor_y = p_position.y;
+	queue_redraw();
+	return claim.hovered;
+}
+
 void MenuFrame::set_cursor_state(bool p_visible, const Vector2 &p_position) {
 	state_.cursor_visible = p_visible;
 	state_.cursor_x = p_position.x;
@@ -486,6 +500,8 @@ void MenuFrame::_bind_methods() {
 			&MenuFrame::set_widget_popup_open);
 	ClassDB::bind_method(D_METHOD("set_time_ms", "ms"),
 			&MenuFrame::set_time_ms);
+	ClassDB::bind_method(D_METHOD("process_mouse", "position", "button_down"),
+			&MenuFrame::process_mouse);
 	ClassDB::bind_method(D_METHOD("set_cursor_state", "visible", "position"),
 			&MenuFrame::set_cursor_state);
 	ClassDB::bind_method(D_METHOD("get_draw_list_stats"),

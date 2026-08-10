@@ -510,6 +510,88 @@ void test_list_rows_and_item_cell(const fnt_font_t *font) {
 	CHECK(swatch, "the spinlist color item draws the opaque swatch");
 }
 
+// The mouse pump [orig: scene_end_frame @ 0x63e600 ->
+// widget_process_mouse_event @ 0x647a00]: front-most claim, disabled keeps
+// state 1, hit+down -> pressed, hit+up -> hovered, misses clear.
+void test_mouse_pump(const fnt_font_t *font) {
+	mnu::Document doc = parse_or_die(kScreenXml);
+	MenuFrameCompiler c;
+	c.configure(doc.first_screen(), font);
+
+	MenuFrameState state;
+	// Over the OK button (design rect 10,20..110,40 under the root at 0,0),
+	// button up: the BUTTON (index 1, drawn after its parent) claims —
+	// front-most = last drawn — and lands hovered.
+	MenuFrameCompiler::MouseClaim claim =
+			c.pump_mouse(state, 50.0f, 30.0f, false, 1.0f, 1.0f);
+	CHECK(claim.hovered == 1, "the front-most hit widget claims the mouse");
+	const MenuWidgetState *row = nullptr;
+	for (const MenuWidgetState &r : state.widgets) {
+		if (r.index == 1) {
+			row = &r;
+		}
+	}
+	CHECK(row != nullptr && row->hovered && !row->pressed,
+			"hit + button up lands visual state 2 (hovered)");
+
+	// Same point, button held: pressed (state 3), hover cleared.
+	claim = c.pump_mouse(state, 50.0f, 30.0f, true, 1.0f, 1.0f);
+	CHECK(claim.hovered == 1, "the claim holds while the button is down");
+	row = nullptr;
+	for (const MenuWidgetState &r : state.widgets) {
+		if (r.index == 1) {
+			row = &r;
+		}
+	}
+	CHECK(row != nullptr && row->pressed && !row->hovered,
+			"hit + button down lands visual state 3 (pressed)");
+
+	// Off every child, over the root container: the root claims and the
+	// button's hover/press CLEARS (the per-frame claim).
+	claim = c.pump_mouse(state, 500.0f, 500.0f, false, 1.0f, 1.0f);
+	CHECK(claim.hovered == 0, "the container claims when no child hits");
+	row = nullptr;
+	for (const MenuWidgetState &r : state.widgets) {
+		if (r.index == 1) {
+			row = &r;
+		}
+	}
+	CHECK(row != nullptr && !row->hovered && !row->pressed,
+			"losing the claim clears the previous widget's hover/press");
+
+	// Outside the screen entirely: no claim, cursor stays the default.
+	claim = c.pump_mouse(state, 5000.0f, 5000.0f, false, 1.0f, 1.0f);
+	CHECK(claim.hovered == -1, "a miss claims nothing");
+
+	// A DISABLED claimant blocks widgets beneath but takes no hover/press
+	// (visual state 1 wins).
+	MenuWidgetState disabled_row;
+	disabled_row.index = 1;
+	disabled_row.disabled = true;
+	state.widgets.clear();
+	state.widgets.push_back(disabled_row);
+	claim = c.pump_mouse(state, 50.0f, 30.0f, false, 1.0f, 1.0f);
+	CHECK(claim.hovered == 1, "a disabled widget still owns the claim");
+	CHECK(!state.widgets[0].hovered && !state.widgets[0].pressed,
+			"a disabled claimant keeps visual state 1 - no hover/press");
+
+	// A HIDDEN subtree never hits: hide the button, the point falls through
+	// to the root container.
+	state.widgets.clear();
+	MenuWidgetState hidden_row;
+	hidden_row.index = 1;
+	hidden_row.hide = true;
+	state.widgets.push_back(hidden_row);
+	claim = c.pump_mouse(state, 50.0f, 30.0f, false, 1.0f, 1.0f);
+	CHECK(claim.hovered == 0, "a hidden subtree never hits; the parent claims");
+
+	// The scaled hit test: at 2x the button's design rect spans 20,40..220,80
+	// in screen space, so a raw-screen point inside THAT claims it.
+	state.widgets.clear();
+	claim = c.pump_mouse(state, 200.0f, 60.0f, false, 2.0f, 2.0f);
+	CHECK(claim.hovered == 1, "the hit test runs raw mouse against scaled rects");
+}
+
 } // namespace
 
 int main() {
@@ -520,6 +602,7 @@ int main() {
 	test_radio_checkbox_forcing(&font);
 	test_edit_caret(&font);
 	test_list_rows_and_item_cell(&font);
+	test_mouse_pump(&font);
 	fnt_free(&font);
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);

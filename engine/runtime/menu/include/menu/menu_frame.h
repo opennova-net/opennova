@@ -183,6 +183,23 @@ public:
 
 	const MenuDrawList &last_draw_list() const { return draw_list_; }
 
+	// The witnessed per-frame mouse pump [orig: scene_end_frame @ 0x63e600 ->
+	// widget_process_mouse_event @ 0x647a00 (vtable+20)]: ONE widget claims
+	// the mouse per frame — front-most = last drawn (the reverse sibling walk
+	// + the per-frame claim scene+16; equivalently the LAST hit of the
+	// forward draw walk). A disabled claimant keeps visual state 1 (no
+	// hover/press); hit + button down -> pressed (3); hit + button up ->
+	// hovered (2); every other row's hover/press clears (0). Hidden subtrees
+	// never hit. The mouse is RAW screen coordinates against the scaled
+	// rects; the claimed widget's inherited cursor (else the screen default)
+	// rides back for the unscaled cursor pass.
+	struct MouseClaim {
+		int hovered = -1;               // claimed widget index; -1 = none
+		int32_t cursor = kMenuTexNone;  // inherited +276 cursor, else default
+	};
+	MouseClaim pump_mouse(MenuFrameState &io_state, float mouse_x,
+			float mouse_y, bool button_down, float scale_x, float scale_y);
+
 private:
 	struct WidgetNode;
 	struct WalkScale {
@@ -217,6 +234,9 @@ private:
 	int walk_widget(int index, int origin_x, int origin_y,
 			const MenuFrameState &state, const WalkScale &s);
 	int skip_widget(int index) const;
+	int hit_walk(int index, int origin_x, int origin_y,
+			const MenuFrameState &state, float mx, float my, float sx,
+			float sy, int *io_hit) const;
 	const MenuWidgetState *state_for(const MenuFrameState &state,
 			int index) const;
 	int pump_visual_state(const mnu::Window &w,

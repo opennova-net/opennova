@@ -1185,6 +1185,90 @@ void MenuFrameCompiler::emit_cursor(const MenuFrameState &state) {
 
 // --- the walk ----------------------------------------------------------------
 
+int MenuFrameCompiler::hit_walk(int index, int origin_x, int origin_y,
+		const MenuFrameState &state, float mx, float my, float sx, float sy,
+		int *io_hit) const {
+	const WidgetNode &node = nodes_[static_cast<size_t>(index)];
+	const mnu::Window &w = *node.window;
+	const MenuWidgetState *ws = state_for(state, index);
+	int next = index + 1;
+	// The same shown gate as the draw walk; a hidden subtree never hits.
+	bool shown = !w.hidden;
+	if (ws != nullptr) {
+		if (ws->hide) {
+			shown = false;
+		}
+		if (ws->show) {
+			shown = true;
+		}
+	}
+	if (!shown) {
+		for (size_t c = 0; c < w.children.size(); ++c) {
+			next = skip_widget(next);
+		}
+		return next;
+	}
+	const mnu::RectEdges local = solve_rect(node, ws);
+	const mnu::RectEdges rect = offset_rect(local, origin_x, origin_y);
+	// Raw mouse against the SCALED rect (the same per-element truncation the
+	// draw emits with).
+	if (mx >= emit_x(rect.left, sx) && mx < emit_x(rect.right, sx) &&
+			my >= emit_x(rect.top, sy) && my < emit_x(rect.bottom, sy)) {
+		*io_hit = index; // later in draw order = front-most; the claim
+	}
+	for (size_t c = 0; c < w.children.size(); ++c) {
+		next = hit_walk(next, rect.left, rect.top, state, mx, my, sx, sy,
+				io_hit);
+	}
+	return next;
+}
+
+MenuFrameCompiler::MouseClaim MenuFrameCompiler::pump_mouse(
+		MenuFrameState &io_state, float mouse_x, float mouse_y,
+		bool button_down, float scale_x, float scale_y) {
+	MouseClaim claim;
+	if (screen_ == nullptr || nodes_.empty()) {
+		return claim;
+	}
+	int hit = -1;
+	hit_walk(0, 0, 0, io_state, mouse_x, mouse_y, scale_x, scale_y, &hit);
+	for (MenuWidgetState &row : io_state.widgets) {
+		row.hovered = false;
+		row.pressed = false;
+	}
+	claim.hovered = hit;
+	claim.cursor = screen_cursor_;
+	if (hit < 0) {
+		return claim;
+	}
+	const WidgetNode &node = nodes_[static_cast<size_t>(hit)];
+	if (node.cursor != kMenuTexNone) {
+		claim.cursor = node.cursor;
+	}
+	const MenuWidgetState *existing = state_for(io_state, hit);
+	// A disabled claimant still owns the mouse (blocking widgets beneath)
+	// but keeps visual state 1 — no hover/press write.
+	if (existing != nullptr && existing->disabled) {
+		return claim;
+	}
+	MenuWidgetState *row = nullptr;
+	for (MenuWidgetState &candidate : io_state.widgets) {
+		if (candidate.index == hit) {
+			row = &candidate;
+			break;
+		}
+	}
+	if (row == nullptr) {
+		MenuWidgetState fresh;
+		fresh.index = hit;
+		io_state.widgets.push_back(fresh);
+		row = &io_state.widgets.back();
+	}
+	row->pressed = button_down;
+	row->hovered = !button_down;
+	return claim;
+}
+
 int MenuFrameCompiler::skip_widget(int index) const {
 	const WidgetNode &node = nodes_[static_cast<size_t>(index)];
 	int next = index + 1;
