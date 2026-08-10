@@ -121,7 +121,7 @@ TypedArray<Dictionary> Simulation::get_attach_labels() const {
 	// and parentSlot not 2/5 (ctrl/drvr); the camera-mode/underwater/scope legs live
 	// shell-side and are unmodeled here: docs/interface/hud-re.md (D-HUD-11)].
 	const bool can_fire =
-	    player->equipped_adm_index != 0xFF &&
+	    player->equipped_adm_index != opennova::world::kAdmSlotNone &&
 	    !(player->mounted && opennova::world::is_vehicle_control_seat(player->mount_type));
 	std::vector<opennova::world::AttachLabel> labels;
 	opennova::world::collect_attach_labels(*world_, *player, armory_mode, can_fire, labels);
@@ -606,7 +606,7 @@ Error Simulation::load_weapon_table(const Ref<ResourceRoot> &p_resource_root,
 		std::vector<opennova::world::EntityHandle> handles;
 		world_->registry.for_each([&](const opennova::world::Entity &e) {
 			if (e.item_id == opennova::world::kPlayerInfantryTypeId &&
-			    e.equipped_adm_index == 0xFF)
+			    e.equipped_adm_index == opennova::world::kAdmSlotNone)
 				handles.push_back(e.handle);
 		});
 		for (const opennova::world::EntityHandle h : handles) {

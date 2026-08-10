@@ -219,6 +219,13 @@ struct RoundEndState {
     int32_t winner_team = 0;
 };
 
+// The epilog/debrief exit timeout: both end screens (WIN score epilog and the
+// LOSE debrief) force g_mission_exit_reason = 1 after 18600 ticks (~297.6 s at
+// the 62.5 Hz tick) when the player never presses ESC.
+// [orig: epilog_cinematic_state_machine_update @0x576240 — the tick compares
+//  @0x57621d/@0x5744ea]
+inline constexpr int32_t kEpilogExitTimeoutTicks = 18600;
+
 // SP mission kill tallies — the 0xC846xx stat-bucket family the epilog score
 // screen counts from and the WAC bluekills/greenkills builtins read. By-player
 // = kills by the local/host player; by-others = every other killer. Only

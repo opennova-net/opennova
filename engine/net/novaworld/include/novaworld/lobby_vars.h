@@ -89,10 +89,18 @@ struct LobbyIdentityParams {
 	std::string nwhwi = "OpenNova$0$2048$1920x1080$1920x1080";
 };
 
+// The wire-load-bearing NWPSSK/NWUSID token lengths: retail's stable-machine
+// token encoders always emit exactly these many [A-Z] characters, and any
+// fallback generator must match or the verify Cookie is malformed.
+// [orig: CDKey_GenerateHardwareFingerprint @ 0x4a4a00 /
+// generate_hardware_fingerprint @ 0x4a4d00 output widths]
+inline constexpr int kNwpsskLen = 23;
+inline constexpr int kNwusidLen = 16;
+
 // The NW-S5 10-var identity "Cookie" set (capture frame 10166), built once and reused for BOTH the
 // UDP verify var-list (ClientSession::Config::verify_cookie_vars) and the HTTP login cookies. NWUID
 // is left empty here (the consumer substitutes the SessionInit nwuid at use). The XOR masks + the
-// lengths 23/16 on NWPSSK/NWUSID are load-bearing.
+// lengths kNwpsskLen/kNwusidLen (23/16) on NWPSSK/NWUSID are load-bearing.
 // [orig: NovaWorldClient::begin_session identity build]
 std::vector<std::pair<std::string, std::string>> make_lobby_identity_vars(const LobbyIdentityParams &p);
 

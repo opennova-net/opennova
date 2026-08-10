@@ -86,8 +86,8 @@ Ref<SbfBank> SbfBank::create_empty() {
 	// matching the bytes sbf_encode_file would later write.
 	std::memset(&bank->_arc, 0, sizeof(bank->_arc));
 	bank->_arc.header.magic = SBF_MAGIC;
-	bank->_arc.header.version = 0x00000100u;
-	bank->_arc.header.flags = 0x00000001u; // byte-paired stereo (matches sbf_encode_file)
+	bank->_arc.header.version = SBF_VERSION_DEFAULT;
+	bank->_arc.header.flags = SBF_FLAGS_BYTE_PAIRED_STEREO; // matches sbf_encode_file
 	bank->_arc.header.index_offset = SBF_HEADER_SIZE;
 	bank->_arc.header.entry_count = 0;
 	bank->_arc.entries = nullptr;

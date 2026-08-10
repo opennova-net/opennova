@@ -14,6 +14,7 @@
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/string_name.hpp>
 
+#include "mus/ast.h"
 #include "mus/mus.h"
 
 namespace godot {
@@ -24,6 +25,33 @@ class MusicScript : public Resource {
 	GDCLASS(MusicScript, Resource)
 
 public:
+	// MusAstStmtKind re-exports (engine mus/ast.h is the value authority) —
+	// the integer `kind` carried by get_annotated_decompile rows. Bound as
+	// class constants so GDScript stops keeping a mirror table.
+	enum {
+		AST_PLAY = MUS_AST_PLAY,
+		AST_TRANSITION = MUS_AST_TRANSITION,
+		AST_GOTO = MUS_AST_GOTO,
+		AST_CALL = MUS_AST_CALL,
+		AST_RETURN = MUS_AST_RETURN,
+		AST_YIELD = MUS_AST_YIELD,
+		AST_NOP = MUS_AST_NOP,
+		AST_DONE = MUS_AST_DONE,
+		AST_ASSIGN = MUS_AST_ASSIGN,
+		AST_INCDEC = MUS_AST_INCDEC,
+		AST_EXPR = MUS_AST_EXPR,
+		AST_IF = MUS_AST_IF,
+		AST_SWITCH = MUS_AST_SWITCH,
+		AST_BRANCH_COMMENT = MUS_AST_BRANCH_COMMENT,
+		AST_FRAME_ENTER = MUS_AST_FRAME_ENTER,
+	};
+
+	// Flow classification re-exports (engine mus/ast.h owns the rules and the
+	// witnesses): terminators end/redirect a section's straight-line flow;
+	// locked rows (done / frame enter) must never be edited or reordered.
+	static bool ast_kind_is_terminator(int p_kind);
+	static bool ast_kind_is_locked(int p_kind);
+
 	MusicScript();
 	~MusicScript();
 

@@ -9,6 +9,7 @@
 
 #include <godot_cpp/core/math.hpp>
 
+#include <world/ai.h> // kPartAnimPhaseOne (the PLAYPARTANIM phase domain)
 #include <world/infantry.h>
 
 #include <limits>
@@ -660,7 +661,10 @@ void ObjectModel::restart_part_anim(int p_channel, int p_play_type, double p_tim
 	}
 	const String reg = resolve_anim_channel_register(slot);
 	if (!reg.is_empty() && p_play_type != 0) {
-		ctrl_values_[reg] = p_play_type >= 0 ? 0 : 65536;
+		// Rest start: 0 forward, one full phase (world/ai.h) reversed.
+		ctrl_values_[reg] = p_play_type >= 0
+				? 0
+				: static_cast<int64_t>(opennova::world::kPartAnimPhaseOne);
 		ctrl_value_owners_.erase(reg);
 		finish_ctrl_change(false);
 	}

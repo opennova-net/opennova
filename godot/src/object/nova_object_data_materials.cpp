@@ -213,7 +213,9 @@ void set_material_texture_slot_entry(ThreediMaterial &mat, int slot, int frame, 
 	std::memset(&tex, 0, sizeof(tex));
 	copy_cstr(tex.name, sizeof(tex.name), to_std(filename).c_str());
 	tex.slot = static_cast<uint8_t>(slot);
-	tex.type = (slot == THREEDI_TEX_SLOT_NORMAL || slot == THREEDI_TEX_SLOT_NORMAL_B) ? 4 : 0;
+	// Slot -> texture-type policy lives engine-side (threedi_3di3.h): normal
+	// slots stamp NORMAL_MDT, everything else DIFFUSE.
+	tex.type = threedi_tex_default_type_for_slot(tex.slot);
 	tex.flags = flags;
 	tex.frame = static_cast<uint8_t>(frame);
 }

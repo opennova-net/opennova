@@ -1042,12 +1042,13 @@ Dictionary Simulation::get_world_entity_debug(int p_net_id) const {
 	out["net_id"] = static_cast<int>(ent->net_id);
 	out["bms_id"] = ent->bms_id;
 	out["pool"] = h.pool();
-	out["kind"] = ent->spawn_origin == 0xFFFFFFFFu
+	out["kind"] = ent->spawn_origin == opennova::world::kSpawnOriginNone
 			? -1
-			: static_cast<int>(ent->spawn_origin >> 24);
-	out["index"] = ent->spawn_origin == 0xFFFFFFFFu
+			: opennova::world::spawn_origin_kind(ent->spawn_origin);
+	out["index"] = ent->spawn_origin == opennova::world::kSpawnOriginNone
 			? -1
-			: static_cast<int>(ent->spawn_origin & 0xFFFFFF);
+			: static_cast<int>(
+					  opennova::world::spawn_origin_index(ent->spawn_origin));
 	out["item_id"] = ent->item_id;
 	out["name"] = String(ent->name.c_str());
 	out["team"] = static_cast<int>(ent->team);

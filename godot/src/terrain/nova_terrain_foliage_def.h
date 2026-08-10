@@ -28,7 +28,14 @@ public:
 		COLOR_RETAIN_FULL = static_cast<int>(opennova::FoliageColorMode::RetainFullColor),
 		ATTRIB_FORCE_ON = opennova::FOLIAGE_ATTRIB_FORCE_ON,
 		ATTRIB_SHADOW = opennova::FOLIAGE_ATTRIB_SHADOW,
+		// The def-slot cap (engine foliage.h FOLIAGE_MAX_DEFS).
+		MAX_DEFS = opennova::FOLIAGE_MAX_DEFS,
 	};
+
+	// Canonical foliage-map match code for a def slot (254/253/252/251 for
+	// slots 0..3; -1 out of range) — re-export of engine foliage.h
+	// foliage_canonical_match_for_slot, the one home for the code list.
+	static int canonical_match_for_slot(int p_def_index);
 
 	void set_graphic(const String &value);
 	String get_graphic() const;

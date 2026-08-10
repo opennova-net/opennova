@@ -2,6 +2,8 @@
 
 #include "resource_index/nova_resource_root.h"
 
+#include <audio/sound_selector.h>
+
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -17,20 +19,31 @@ namespace godot {
 
 namespace {
 
-constexpr double kPitchScale = 65535.0;
+// The class-constant mirrors (nova_lwf_data.h) are pinned to their engine
+// homes here so they can never drift: selection modes to
+// opennova::audio::SelectionMode, flags to opennova::lwf::PlaylistFlags.
+static_assert(LwfData::SELECTION_FIRST == opennova::audio::kFirst);
+static_assert(LwfData::SELECTION_RANDOM == opennova::audio::kRandom);
+static_assert(LwfData::SELECTION_SEQUENTIAL == opennova::audio::kSequential);
+static_assert(LwfData::SELECTION_RANDOM_SEQ == opennova::audio::kRandomSeq);
+static_assert(LwfData::FLAG_HEADING == opennova::lwf::kFlagHeading);
+static_assert(LwfData::FLAG_INTERNAL == opennova::lwf::kFlagInternal);
+static_assert(LwfData::FLAG_EXTERNAL == opennova::lwf::kFlagExternal);
+static_assert(LwfData::FLAG_RANDOM == opennova::lwf::kFlagRandom);
+static_assert(LwfData::FLAG_SEQUENTIAL == opennova::lwf::kFlagSequential);
+static_assert(LwfData::FLAG_STOPPABLE == opennova::lwf::kFlagStoppable);
+static_assert(LwfData::FLAG_PRELOAD == opennova::lwf::kFlagPreload);
+static_assert(LwfData::FLAG_RANDOM_SEQUENTIAL == opennova::lwf::kFlagRandomSequential);
+static_assert(LwfData::FLAG_DIRECTIONAL == opennova::lwf::kFlagDirectional);
+static_assert(LwfData::FLAG_LOOPING == opennova::lwf::kFlagLooping);
+static_assert(LwfData::FLAG_REVERB == opennova::lwf::kFlagReverb);
+static_assert(LwfData::FLAG_RAPID == opennova::lwf::kFlagRapid);
 
-// Engine playback precedence [orig: SoundBank_PlayTriggerEntries @ 0x75cd5c..0x75cdfc]:
-// sequential (0x10) wins, then random-sequential (0x80); anything else -- including layers
-// carrying only kFlagRandom, or no selection flag at all -- plays RANDOM (the engine never
-// tests 0x08; random is its default).
+// Engine playback precedence lives in opennova::audio::selection_mode_for_flags
+// (audio/sound_selector.h carries the witness); the mirror pins above make
+// the cast exact.
 int selection_mode_from_flags(uint32_t flags) {
-	if (flags & opennova::lwf::kFlagSequential) {
-		return LwfData::SELECTION_SEQUENTIAL;
-	}
-	if (flags & opennova::lwf::kFlagRandomSequential) {
-		return LwfData::SELECTION_RANDOM_SEQ;
-	}
-	return LwfData::SELECTION_RANDOM;
+	return static_cast<int>(opennova::audio::selection_mode_for_flags(flags));
 }
 
 uint32_t flags_from_layer(const Dictionary &layer) {
@@ -95,7 +108,9 @@ Dictionary make_set() {
 	Dictionary s;
 	s["name"] = String("NewSoundSet");
 	s["target_id"] = 0;
-	s["pitch_base"] = 0xFFFF; // Q16 unity [orig: SoundBank_SelectTriggerEntryFromBank @ 0x75c0be]
+	// The authoring tools' stock ~unity set pitch (engine lwf.h carries the
+	// Q16 convention and its witness).
+	s["pitch_base"] = static_cast<int64_t>(opennova::lwf::kAuthoredSetPitchBase);
 	s["pitch_random_range"] = 0;
 	s["set_flags"] = 0;
 	s["layers"] = Array();
@@ -234,8 +249,9 @@ bool LwfData::decode_into_tree(const PackedByteArray &bytes) {
 				member["name"] = name;
 				member["wav_path"] = path;
 				member["value_hi"] = value_hi;
-				member["base_pitch"] = static_cast<double>(sp.pitch_scaled) / kPitchScale;
-				member["rand_pitch"] = static_cast<double>(sp.random_pitch_scaled) / kPitchScale;
+				// Q16 (0x10000 = 1.0), the one engine pitch scale (lwf.h).
+				member["base_pitch"] = opennova::lwf::pitch_from_q16(sp.pitch_scaled);
+				member["rand_pitch"] = opennova::lwf::pitch_from_q16(sp.random_pitch_scaled);
 				member["volume"] = static_cast<int>(sp.volume);
 				member["clamp_volume"] = static_cast<int>(sp.clamp_volume);
 				members.push_back(member);
@@ -313,7 +329,8 @@ PackedByteArray LwfData::encode_current(String &r_error) const {
 		Dictionary set = sets_[si];
 		opennova::lwf::Multi multi;
 		multi.name = String(set.get("name", String())).utf8().get_data();
-		multi.pitch_base = static_cast<uint32_t>(static_cast<int64_t>(set.get("pitch_base", 0xFFFF)));
+		multi.pitch_base = static_cast<uint32_t>(static_cast<int64_t>(
+				set.get("pitch_base", static_cast<int64_t>(opennova::lwf::kAuthoredSetPitchBase))));
 		multi.pitch_random_range = static_cast<uint32_t>(static_cast<int64_t>(set.get("pitch_random_range", 0)));
 		multi.target_id = static_cast<uint32_t>(static_cast<int64_t>(set.get("target_id", 0)));
 		multi.set_flags = static_cast<uint32_t>(static_cast<int64_t>(set.get("set_flags", 0)));
@@ -333,8 +350,8 @@ PackedByteArray LwfData::encode_current(String &r_error) const {
 				sndparm.single_index = intern_single(member);
 				const double base_pitch = static_cast<double>(member.get("base_pitch", 1.0));
 				const double rand_pitch = static_cast<double>(member.get("rand_pitch", 0.0));
-				sndparm.pitch_scaled = static_cast<uint32_t>(std::max(0.0, base_pitch * kPitchScale));
-				sndparm.random_pitch_scaled = static_cast<uint32_t>(std::max(0.0, rand_pitch * kPitchScale));
+				sndparm.pitch_scaled = opennova::lwf::pitch_to_q16(base_pitch);
+				sndparm.random_pitch_scaled = opennova::lwf::pitch_to_q16(rand_pitch);
 				sndparm.volume = static_cast<uint32_t>(static_cast<int>(member.get("volume", 255)));
 				sndparm.clamp_volume = static_cast<uint32_t>(static_cast<int>(member.get("clamp_volume", 255)));
 				playlist.sndparm_indices.push_back(static_cast<uint32_t>(f.sndparms.size()));

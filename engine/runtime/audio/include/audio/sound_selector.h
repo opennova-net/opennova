@@ -33,6 +33,13 @@ enum SelectionMode {
     kRandomSeq = 3,  // random anchor, then a full in-order cycle back to the anchor (flag 0x80)
 };
 
+// Map a .lwf playlist-flags word to the SelectionMode the engine actually
+// plays. Precedence: kFlagSequential (0x10) wins, then kFlagRandomSequential
+// (0x80); anything else — including layers carrying only kFlagRandom (0x08),
+// which the engine never tests — selects random, its default
+// [orig: SoundBank_PlayTriggerEntries @ 0x75cd5c..0x75cdfc].
+SelectionMode selection_mode_for_flags(uint32_t playlist_flags);
+
 // Per-(bank,set,layer) member selection. State (sequence cursor / cycle anchor) is kept per key,
 // so one selector instance backs a whole loaded bank set. The RNG is one shared stream across all
 // keys, exactly like the engine's global @ 0x85A3DC. Caveat: the engine interleaves volume/pitch

@@ -1,5 +1,7 @@
 #include "audio/sound_selector.h"
 
+#include <lwf/lwf.h>
+
 namespace opennova::audio {
 
 namespace {
@@ -9,6 +11,20 @@ inline uint32_t rol32(uint32_t v, unsigned bits) {
 }
 
 } // namespace
+
+// Flag precedence per the witnessed play path [orig: SoundBank_PlayTriggerEntries
+// @ 0x75cd5c..0x75cdfc]: sequential (0x10) is tested first, then
+// random-sequential (0x80); every other combination — kFlagRandom (0x08)
+// included, which the engine never reads — falls to the random default.
+SelectionMode selection_mode_for_flags(uint32_t playlist_flags) {
+    if (playlist_flags & lwf::kFlagSequential) {
+        return kSequential;
+    }
+    if (playlist_flags & lwf::kFlagRandomSequential) {
+        return kRandomSeq;
+    }
+    return kRandom;
+}
 
 // The engine's shared sound RNG: state = ROL32(state + ROL32(state, 11), 3), pick scaled by the
 // low byte. One stream for every layer, never reseeded.

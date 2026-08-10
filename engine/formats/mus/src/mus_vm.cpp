@@ -598,8 +598,9 @@ static void op_enter  (MusVM *vm) {
        D-MUS-6 (a.k.a. D-NEW-2): the original POPS the N args (`sub ebp,N*4`); we mirror with
        `vm->sp -= n`. (We guard sp >= n; the original does not bounds-check.) */
     int n = read_u8(vm);
-    int dst_off = vm->script ? (int)vm->script->locals_frame_offset : 0x20;
-    if (dst_off <= 0) dst_off = 0x20;
+    int dst_off = vm->script ? (int)vm->script->locals_frame_offset
+                             : MUS_DEFAULT_LOCALS_BASE;
+    if (dst_off <= 0) dst_off = MUS_DEFAULT_LOCALS_BASE;
     if (n > 0 && vm->sp >= n) {
         for (int i = 0; i < n; ++i) {
             int32_t v = vm->data_stack[vm->sp - n + i];

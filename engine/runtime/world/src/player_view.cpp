@@ -101,6 +101,17 @@ bool player_view_toggle_binoculars(PlayerViewState &v) {
     return v.binoculars_requested;
 }
 
+void player_view_binocular_sway_offset(float unit_random,
+                                       float &yaw_offset_deg,
+                                       float &pitch_offset_deg) {
+    constexpr double kTau = 6.28318530717958647692;
+    const double angle = static_cast<double>(unit_random) * kTau;
+    yaw_offset_deg =
+        static_cast<float>(std::cos(angle) * kBinocularAimOffsetDeg);
+    pitch_offset_deg =
+        static_cast<float>(std::sin(angle) * kBinocularAimOffsetDeg);
+}
+
 void player_view_update_effective_modes(PlayerViewState &v, bool alive, bool round_ended) {
     // Raw intent survives every temporary suppression. Third person only
     // suppresses the optical view: remote observers still see the raised pose.

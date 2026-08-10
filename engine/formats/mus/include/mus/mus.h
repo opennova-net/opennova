@@ -23,6 +23,28 @@ extern "C" {
 #define MUS_OPCODE_COUNT    65             /* opcodes 0x00..0x40 */
 #define MUS_INTRINSIC_NAMES 11             /* full set; runtime may bind a subset */
 
+/* The bytecode opcodes referenced by NAME outside the decoder table itself
+   (mus_decode.h kOps stays the full-width authority): the flow ops the AST /
+   editor surfaces classify on. [orig: 65-entry dispatch table @ 0x84F220,
+   AudioVM_DispatchLoop @ 0x672720] */
+typedef enum MusOpcode {
+    MUS_OP_GOTO     = 0x30,  /* unconditional branch */
+    MUS_OP_TABLEXEC = 0x35,  /* on-switch dispatch */
+    MUS_OP_ENTER    = 0x38,  /* frame setup, does NOT move the IP
+                                [orig: AudioVM_Op_Enter @ 0x672C20] */
+    MUS_OP_SETSTATE = 0x3B,  /* section transition [orig: VmOp_SetState @ 0x672C70] */
+    MUS_OP_PLAYW    = 0x3D,  /* play-and-wait [orig: VmOp_PlayWait @ 0x672C90] */
+    MUS_OP_PLAY     = 0x3E,  /* play [orig: VmOp_Play @ 0x672CB0] */
+    MUS_OP_DONE     = 0x3F   /* section terminator */
+} MusOpcode;
+
+/* Locals frame base the `enter` (0x38) opcode banks caller arguments at:
+   dst = base + 4k for the (k+1)-th input. The chunk carries it in the
+   string_section_size field (instance[+0x3C]); MDEdit invariantly emits 0x20
+   and the compiler defaults to it, with 0 treated as 0x20.
+   [orig: AudioVM_Op_Enter @ 0x672C20 reads instance[+0x3C]] */
+#define MUS_DEFAULT_LOCALS_BASE 0x20
+
 /* --- On-disk structs --- */
 
 /* SCR0 file-level header. Witnessed: Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20.

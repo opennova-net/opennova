@@ -43,12 +43,14 @@ const DefItemDef *find_item_def(const DefItemsFile &items, int item_id) {
 }
 
 int visual_item_id_for_runtime_type(int item_id, const DefItemsFile &items) {
-	if (item_id == world::kPlayerInfantryTypeId &&
-			find_item_def(items, kPlayerVisualItemId) != nullptr) {
-		return kPlayerVisualItemId;
-	}
-	return item_id + mission::kItemIdOffset;
+	// The policy lives in mission/placement_traits.h; this overload only
+	// answers the catalog probe against the retained DefItemsFile.
+	return mission::visual_item_id_for_runtime_type(item_id,
+			find_item_def(items, kPlayerVisualItemId) != nullptr);
 }
+// The mission-side policy keys on the SAME runtime player type the world
+// names; a drift would silently break the visual resolve.
+static_assert(mission::kPlayerRuntimeTypeId == world::kPlayerInfantryTypeId);
 
 int32_t collision_model_for_graphic(CollisionResolveState &state,
 		const CollisionResolveDeps &deps, const std::string &graphic_key) {

@@ -7,6 +7,8 @@
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
+#include <avatars/preview_animation.h>
+
 #include <vector>
 
 namespace godot {
@@ -106,6 +108,11 @@ public:
 	enum { ALIGN_GOOD = 0, ALIGN_EVIL = 1 };
 	// AvatarDiagnosticSeverity.
 	enum { DIAG_WARNING = 1, DIAG_ERROR = 2 };
+	// The preview initial-yaw span: a fresh preview model spawns at
+	// rand() % PREVIEW_INITIAL_YAW_RANGE_DEG degrees (engine
+	// avatars/preview_animation.h carries the witness).
+	enum { PREVIEW_INITIAL_YAW_RANGE_DEG =
+			opennova::avatars::kPreviewInitialYawRangeDeg };
 
 	// Load Avatars.def from an absolute/res path (decrypts if needed) or via the
 	// mounted resource root (VFS/PFF). Both emit "changed".

@@ -18,6 +18,15 @@
 
 namespace opennova {
 
+// The witnessed detail-collection scheme [orig:
+// Terrain_CollectNearFoliagePatches @ 0x603e60]: detail foliage lives in 16u
+// terrain cells, collected only within the 42-unit foliage limit, into a
+// visible-key list capped at 128 patches. One home for the collector AND the
+// shell-side preview dispatcher.
+constexpr int kFoliageDetailCellSize = 16;
+constexpr float kFoliageDetailDistanceLimit = 42.0f;
+constexpr int kFoliageDetailPatchCapacity = 128;
+
 struct FoliageDetailPatch {
 	uint32_t key = 0;
 	float distance = 0.0f;

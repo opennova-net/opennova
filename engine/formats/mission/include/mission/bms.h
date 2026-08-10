@@ -111,6 +111,48 @@ inline bool has_flag(AttribFlags flags, AttribFlags test) {
     return (static_cast<uint32_t>(flags) & static_cast<uint32_t>(test)) != 0;
 }
 
+// --- Game mode: a single-select among the 11 attrib_flags mode bits ---------
+// kGameModeMask is their union — the complement of the editor's `and 0x7CFFFF`
+// clear. [orig: dfx2med.exe sub_402770 — encode @0x4031cd clears with
+// `and [x+0x1D4],0x7CFFFF` then ORs exactly one bit]
+inline constexpr uint32_t kGameModeMask = 0xFF830000u;
+
+// The editor's decode priority: the combobox item is the FIRST set bit in this
+// order (none set = Single Player). [orig: sub_402770 decode @0x4050c7 tests
+// the bits in exactly this order, dfx2med.exe]
+inline constexpr AttribFlags kGameModeDecodePriority[11] = {
+    AttribFlags::Coop,
+    AttribFlags::Deathmatch,
+    AttribFlags::TeamDeathmatch,
+    AttribFlags::KingOfTheHill,
+    AttribFlags::TeamKingOfTheHill,
+    AttribFlags::CaptureTheFlag,
+    AttribFlags::AttackAndDefend,
+    AttribFlags::SearchAndDestroy,
+    AttribFlags::FlagBall,
+    AttribFlags::AdvanceAndSecure,
+    AttribFlags::ConquerAndControl,
+};
+
+// The active mode bit (0 = Single Player) under the witnessed decode priority.
+inline uint32_t selected_game_mode(AttribFlags flags) {
+    for (AttribFlags bit : kGameModeDecodePriority) {
+        if (has_flag(flags, bit)) return static_cast<uint32_t>(bit);
+    }
+    return 0;
+}
+
+// Clear all 11 mode bits, then set exactly `bit` (0 = clear all -> Single
+// Player). Returns false — flags untouched — unless `bit` is 0 or exactly one
+// mode bit. [orig: encode @0x4031cd `and 0x7CFFFF` / `or <bit>`, dfx2med.exe]
+inline bool set_game_mode(AttribFlags &flags, uint32_t bit) {
+    if (bit != 0 && ((bit & ~kGameModeMask) != 0 || (bit & (bit - 1)) != 0))
+        return false;
+    flags = static_cast<AttribFlags>(
+        (static_cast<uint32_t>(flags) & ~kGameModeMask) | bit);
+    return true;
+}
+
 // Entity AI attribute flags
 enum class BmsiAttributeFlags : uint32_t {
     None = 0,

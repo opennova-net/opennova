@@ -42,6 +42,7 @@
 #include <mission/bms.h>
 #include <mission/mission.h>          // kItemIdOffset (wire type id -> items.def id)
 #include <mission/mission_systems.h>
+#include <mission/placement_traits.h> // visual_item_id_for_runtime_type / kPlayerVisualItemId
 #include <anim/aim_overlay.h> // the torso-bend overlay blends [orig: @0x4b1290]
 #include <io/bam.h>           // bam_add/bam_sar: the FP roll term composition
 #include <io/strutil.h>       // iequals: the loadout sub-variant ammo-class compare
@@ -72,11 +73,11 @@ using opennova::world::World;
 namespace novasim {
 
 inline constexpr double kFixed16 = 65536.0;
-inline constexpr int kPlayerVisualItemId = 105310; // items.def "Player #1, Single player" -> US01/US01.adm
+// Canonical definition lives in engine/runtime/mission placement_traits.h
+// (the presentation visual-item policy home).
+inline constexpr int kPlayerVisualItemId = opennova::mission::kPlayerVisualItemId;
 // Canonical definition lives in engine/runtime/world/player_spawn.h (shared with the npruntime host).
 inline constexpr uint16_t kRetailPlayerMinEntitySlot = opennova::world::kRetailPlayerMinEntitySlot;
-inline constexpr float kBinocularAimOffsetDeg = 2.8125f; // 0x02000000 BAM
-inline constexpr double kTau = 6.28318530717958647692;
 
 inline uint64_t present_effect_origin_key(int kind, int index) {
 	return (static_cast<uint64_t>(static_cast<uint32_t>(kind)) << 32) |
@@ -111,13 +112,17 @@ using opennova::simassets::mount_blocks_weapon_channel;
 using opennova::simassets::mount_collapses_right_hand_row;
 using opennova::simassets::seat_type_blocks_weapon_channel;
 
+// The policy lives in engine/runtime/mission placement_traits.h; this wrapper
+// only answers the "does the catalog carry the player visual?" probe from the
+// shell's item database.
 inline int visual_item_id_for_runtime_type(int item_id, const Ref<ItemDatabase> &item_db) {
-	if (item_id == opennova::world::kPlayerInfantryTypeId && item_db.is_valid() &&
-	    item_db->has_item(kPlayerVisualItemId)) {
-		return kPlayerVisualItemId;
-	}
-	return item_id + opennova::mission::kItemIdOffset;
+	return opennova::mission::visual_item_id_for_runtime_type(item_id,
+			item_db.is_valid() && item_db->has_item(kPlayerVisualItemId));
 }
+// The mission-side policy keys on the SAME runtime player type the world
+// names; a drift would silently break the player visual resolve.
+static_assert(opennova::mission::kPlayerRuntimeTypeId ==
+		opennova::world::kPlayerInfantryTypeId);
 
 using opennova::simassets::aim_overlay_inputs_for;
 using opennova::simassets::mount_mode_for;

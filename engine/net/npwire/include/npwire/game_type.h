@@ -11,10 +11,12 @@
 // [orig: NapiNPMsg_0x7B_BuildPayload selector @0x507822, §5.32]; the objective
 // bit gate on the 0x0A sub-block 3 [orig: 0x430361..0x4303D0, §5.9]; the
 // two-part stock-Co-op test [orig: serialize_mission_info_to_datastream
-// @0x523620, §5.32/D-NET-205]. GDScript twin: the mission-attrib table in
-// godot/src/world/host_session_config.gd (GUT-pinned).
+// @0x523620, §5.32/D-NET-205]. The Godot layer consumes this vocabulary
+// through the NetProtocol binding (godot/src/network/nova_net_protocol.h).
 
 #include <cstdint>
+
+#include <mission/bms.h> // bms::AttribFlags — the mission-header game-mode bits
 
 namespace opennova::game_type {
 
@@ -59,4 +61,75 @@ static_assert(!is_waypoint_family(kTeamDeathmatch) && !is_waypoint_family(kDeath
 static_assert(is_stock_coop(kCoop) && !is_stock_coop(kObjectiveCoop));
 static_assert(is_objective(kObjectiveCoop) && !is_objective(kCoop));
 
+// Retail's mission-attrib -> g_GameType selection: the single-select game-mode
+// bit from the mission header (bms::AttribFlags) picks the session code word.
+// An ATTRIB_COOP mission derives the OBJECTIVE Co-op word 0x30020 (0x10010
+// was an ASH_I5A capture value, never a default); a mission with NO
+// multiplayer attrib (the retail training-mission case) resolves to the
+// non-objective Co-op family. [orig: AI_GetTaskTypeFromFlags @ 0x40DAE0 ->
+// Game_StartMission @ 0x524360]
+constexpr uint32_t for_mission_mode(uint32_t attrib_mode) {
+	using bms_flags = opennova::bms::AttribFlags;
+	switch (static_cast<bms_flags>(attrib_mode)) {
+	case bms_flags::Deathmatch:
+		return kDeathmatch;
+	case bms_flags::TeamDeathmatch:
+		return kTeamDeathmatch;
+	case bms_flags::Coop:
+		return kObjectiveCoop;
+	case bms_flags::KingOfTheHill:
+		return kKingOfTheHill;
+	case bms_flags::TeamKingOfTheHill:
+		return kTeamKingOfTheHill;
+	case bms_flags::SearchAndDestroy:
+		return kSearchAndDestroy;
+	case bms_flags::AttackAndDefend:
+		return kAttackDefend;
+	case bms_flags::CaptureTheFlag:
+		return kCaptureTheFlag;
+	case bms_flags::FlagBall:
+		return kFlagBall;
+	case bms_flags::AdvanceAndSecure:
+		return kAdvanceAndSecure;
+	case bms_flags::ConquerAndControl:
+		return kConquerAndControl;
+	default:
+		return kCoop; // no (or unknown) multiplayer attrib -> stock/training Co-op
+	}
+}
+
+static_assert(for_mission_mode(static_cast<uint32_t>(bms::AttribFlags::Coop)) == kObjectiveCoop);
+static_assert(for_mission_mode(static_cast<uint32_t>(bms::AttribFlags::Deathmatch)) == kDeathmatch);
+static_assert(for_mission_mode(static_cast<uint32_t>(bms::AttribFlags::SearchAndDestroy)) == kSearchAndDestroy);
+static_assert(for_mission_mode(0) == kCoop, "no multiplayer attrib -> stock/training Co-op");
+
 }  // namespace opennova::game_type
+
+namespace opennova::game_rules {
+
+// Retail's Config_SetDefaults session-rule baseline, also witnessed in 00TRg's
+// S2C 0x08 block (retail frame 146). These seed a fresh host's rule globals;
+// the live wire fields they default live in npruntime GameConfig (which keeps
+// zeros so a dev host stays inert). [orig: Config_SetDefaults; the g_* rule
+// globals @ 0x24D2140.. — engine/net/npruntime game_config.h names each]
+inline constexpr uint32_t kDefaultRespawnTime = 30;
+inline constexpr uint32_t kDefaultTimeLimitMinutes = 10;
+inline constexpr uint32_t kDefaultReplayEnabled = 1;
+inline constexpr uint32_t kDefaultMaxTeamLives = 100;
+inline constexpr uint32_t kDefaultScoreLimit = 50;
+inline constexpr uint32_t kDefaultRespawnTimeout = 5;
+inline constexpr uint32_t kDefaultStartDelay = 0;
+inline constexpr uint32_t kDefaultDestroyBuildings = 0;
+inline constexpr uint32_t kDefaultDeathMessages = 1;
+
+// The retail host's custom-message default, echoed by the 0x7B reply body.
+// [orig: g_sessionvar_custom_text @ 0x522123]
+inline constexpr char kCustomTextDefault[] = "Put your message here.";
+
+// The wire callsign cap: the roster/entity name rides a Name[16] cstring
+// (15 characters + NUL), so a longer callsign can never round-trip the wire
+// echo and would break the joiner's name-match self-identification
+// (D-NET-169). [orig: the entity+244 Name[16] copy — npwire/ingame_decode.h]
+inline constexpr int kMaxCallsignLength = 15;
+
+}  // namespace opennova::game_rules

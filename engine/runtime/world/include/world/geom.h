@@ -16,6 +16,12 @@ namespace opennova::world {
 inline constexpr int32_t to_fixed(double v) { return static_cast<int32_t>(v * 65536.0); }
 inline constexpr double from_fixed(int32_t v) { return static_cast<double>(v) / 65536.0; }
 
+// The mission coordinate domain in world units: positions ride signed 16.16
+// int32 carriers, so every axis spans [-32768.0, 32768.0 - 1/65536]. Edit/debug
+// surfaces clamp entry fields to this domain.
+inline constexpr double kMissionCoordMinUnits = from_fixed(INT32_MIN);
+inline constexpr double kMissionCoordMaxUnits = from_fixed(INT32_MAX);
+
 struct Vec3 {
     float x = 0.0f;
     float y = 0.0f;

@@ -39,6 +39,15 @@ public:
 	void set_cell_z(int value);
 	int get_cell_z() const;
 
+	// World-space re-exports of engine/formats/til til_world_x/z_from_fixed
+	// and their inverses: the 16.16 fixed <-> float unit conversion AND the
+	// authored-Z sign flip stay engine-side; callers never restate either.
+	void set_world_x(double value);
+	float get_world_x() const;
+
+	void set_world_z(double value);
+	float get_world_z() const;
+
 	void set_cell(int cell_x, int cell_z);
 	bool has_flag(int flag) const;
 	void set_flag(int flag, bool enabled);

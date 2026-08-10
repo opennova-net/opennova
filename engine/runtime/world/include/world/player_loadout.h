@@ -110,6 +110,31 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
                                 const std::vector<WeaponKitEntry> &kit,
                                 int32_t player_class, bool validate_banned);
 
+// The armory PLAYER_CLASS spin catalog: the five soldier classes in the
+// authored spin order, each pairing its wire class value with the "Menu"
+// section GameText label key. [orig: UI_InitWeaponClassSelection @0x567250 —
+// fills the spin with CHARCLASS_MEDIC..CHARCLASS_ENGINEER, values 5..9]
+struct ArmoryClassCatalogEntry {
+    int32_t class_value;
+    const char *text_key;
+};
+inline constexpr int kArmoryClassCount = 5;
+inline constexpr ArmoryClassCatalogEntry kArmoryClassCatalog[kArmoryClassCount] = {
+    {5, "CHARCLASS_MEDIC"},
+    {6, "CHARCLASS_SNIPER"},
+    {7, "CHARCLASS_GUNNER"},
+    {8, "CHARCLASS_RIFLEMAN"},
+    {9, "CHARCLASS_ENGINEER"},
+};
+
+// The host class-allow mask default — every wire class bit 0..9 set, i.e. no
+// restriction until an S2C 0x76 narrows it. [orig: g_hostClassAllowMask
+// default 0x3FF]
+inline constexpr uint32_t kClassAllowMaskAll = 0x3FF;
+// The five-class FILTER mask union (classes 5..9 mapped to bits 1<<0..1<<4) —
+// "show every class's weapons" for the charfilter tests.
+inline constexpr int32_t kClassFilterMaskAll = 0x1F;
+
 // The class the armory screen opens on: the player's current class when the
 // host's S2C 0x76 allow mask permits it, else the next allowed class scanning
 // up through 9, else gunner (7). The resolver indexes the class-id bits (5..9)

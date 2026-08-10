@@ -17,6 +17,13 @@ extern "C" {
    picks one by code over FFI — all resolve to the same `scr_policy` here. Dependency-free by design
    (no pff.h include): the format field is a plain int whose values mirror PffFormat. */
 
+/* The universal PFF container key: the ROL7 XOR keystream seed for
+   PFF_FLAG_ENCRYPTED entries, identical in every reversed NovaLogic title
+   [orig: PFF_LoadFileToMemory @ 0x768920]. Per-game rows carry it so a future
+   title only needs a new table entry; consumers with no resolved profile fall
+   back to this named default (never to a raw literal). */
+#define GAMEPROFILE_PFF_CONTAINER_KEY_DEFAULT 0x0312A4CEu
+
 typedef enum NovaGameId {
     NOVA_GAME_JO = 0,    /* Joint Operations: Typhoon Rising            */
     NOVA_GAME_JO_DEMO,   /* Joint Operations demo                        */

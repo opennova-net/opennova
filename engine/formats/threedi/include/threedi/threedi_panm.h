@@ -25,6 +25,49 @@ typedef enum ThreediTranslateAxis {
     THREEDI_TRANS_Z = 3
 } ThreediTranslateAxis;
 
+// The authorable PANM control styles by name (the raw generator-style byte;
+// see threedi_control_func_info for the full catalog). 114..117 are raw
+// waveform lookups selected by their low nibble — structurally valid but not
+// authorable as modes.
+typedef enum ThreediPanmStyle {
+    THREEDI_PANM_STYLE_NONE = 0,
+    THREEDI_PANM_STYLE_SLIDE = 16,
+    THREEDI_PANM_STYLE_SLIDE_INVERSE = 17,
+    THREEDI_PANM_STYLE_SET = 24,
+    THREEDI_PANM_STYLE_ROTATE_CW = 32,
+    THREEDI_PANM_STYLE_ROTATE_CCW = 33,
+    THREEDI_PANM_STYLE_SINE_WAVE = 50,
+    THREEDI_PANM_STYLE_SAW_WAVE = 52,
+    THREEDI_PANM_STYLE_INVERSE_SAW_WAVE = 53,
+    THREEDI_PANM_STYLE_CONTROL_REGISTER = 113,
+    THREEDI_PANM_STYLE_WAVE_LOOKUP_FIRST = 114,
+    THREEDI_PANM_STYLE_WAVE_LOOKUP_LAST = 117
+} ThreediPanmStyle;
+
+// Packed PANM track units [orig: PANM_SampleTrack @ 0x5B2270]: rotations are
+// signed counts of 1/16384 turn (360/16384 degrees per count); scale,
+// translation, phase and rate are signed 8.8 fixed point (1/256 per count).
+#define THREEDI_PANM_ROTATION_COUNTS_PER_TURN 16384
+#define THREEDI_PANM_VALUE_ONE 256
+
+static inline float threedi_panm_rotation_deg_from_raw(int32_t raw) {
+    return (float)raw * (360.0f / (float)THREEDI_PANM_ROTATION_COUNTS_PER_TURN);
+}
+
+static inline float threedi_panm_value_from_raw(int32_t raw) {
+    return (float)raw / (float)THREEDI_PANM_VALUE_ONE;
+}
+
+// Encode counterparts (authoring): human units -> raw track counts. Rounding
+// to nearest; range clamping stays with the caller (tracks are int16).
+static inline double threedi_panm_rotation_raw_from_deg(double degrees) {
+    return degrees * ((double)THREEDI_PANM_ROTATION_COUNTS_PER_TURN / 360.0);
+}
+
+static inline double threedi_panm_value_raw_from_float(double value) {
+    return value * (double)THREEDI_PANM_VALUE_ONE;
+}
+
 typedef enum ThreediPanmTarget {
     THREEDI_PANM_ROT_X,
     THREEDI_PANM_ROT_Y,
@@ -104,10 +147,52 @@ const char *threedi_panm_control_name(uint8_t code);
 int threedi_panm_control_uses_register(uint8_t code);
 
 // Structural loader metadata, distinct from runtime dispatch. Retail treats
-// every PANM style above 0x70 as carrying a model-local CTRL reference and
-// rewrites that parameter to a global ordinal during model load. Only style
-// 113 subsequently reads the referenced register value.
+// every PANM style above THREEDI_GENERATOR_CTRL_REFERENCE_THRESHOLD (0x70) as
+// carrying a model-local CTRL reference and rewrites that parameter to a
+// global ordinal during model load [orig: loader fixup sub_5B4640 @ 0x5B4640].
+// Only style 113 subsequently reads the referenced register value.
+#define THREEDI_GENERATOR_CTRL_REFERENCE_THRESHOLD 0x70
 int threedi_panm_parameter_is_ctrl_reference(uint8_t code);
+
+// --- Generator-style catalog (all consumers) --------------------------------
+//
+// The canonical style-byte list (the kControlEntries table): every code the
+// original tools emit, in canonical order. The byte is family (high nibble) +
+// waveform (low nibble). One catalog for every consumer; the DISPATCH of the
+// 0x71..0x75 control-register range differs per consumer (below).
+
+// Raw codes whose 0x7X interpretation varies by retail consumer.
+#define THREEDI_STYLE_CONTROL_SET      0x71
+#define THREEDI_STYLE_CONTROL_ADD      0x72
+#define THREEDI_STYLE_CONTROL_SKEW     0x73
+#define THREEDI_STYLE_CONTROL_MULTIPLY 0x74
+#define THREEDI_STYLE_CONTROL_ROTATE   0x75
+
+// Number of canonical styles, and the code at a catalog index (-1 when out of
+// range). Names for a code come from threedi_control_func_info.
+int threedi_generator_style_count(void);
+int threedi_generator_style_code_at(int index);
+
+// The retail consumers of the generator-style byte. Their 0x71..0x75 dispatch
+// differs: UV reads the CTRL value for the whole range, RGB/light for
+// SET/ADD, alpha and PANM for SET only — everything else in the range falls
+// back to the waveform selected by the low nibble.
+// [orig: compute_uv_transform_matrix @ 0x5B1990; RgbGen_EvaluateColor
+//  @ 0x5B23D0; AlphaGen_EvaluateValue @ 0x5B2320; PANM_SampleTrack @ 0x5B2270]
+typedef enum ThreediGeneratorConsumer {
+    THREEDI_GENERATOR_CONSUMER_UV = 0,
+    THREEDI_GENERATOR_CONSUMER_RGB = 1,
+    THREEDI_GENERATOR_CONSUMER_ALPHA = 2,
+    THREEDI_GENERATOR_CONSUMER_LIGHT = 3,
+    THREEDI_GENERATOR_CONSUMER_PANM = 4
+} ThreediGeneratorConsumer;
+
+// 1 when the consumer's dispatch READS the referenced control-register VALUE
+// for this style byte; 0 otherwise (including unknown consumers). Deliberately
+// separate from threedi_panm_parameter_is_ctrl_reference: the loader rewrites
+// the parameter for EVERY style > 0x70 even when a consumer then uses the
+// resolved ordinal only as phase.
+int threedi_generator_reads_control_value(int consumer, uint8_t code);
 
 // Resolve a control register name by index. Returns NULL if out of range or missing.
 const char *threedi_ctrl_reg_name(const ThreediCtrl *ctrl, uint8_t idx);

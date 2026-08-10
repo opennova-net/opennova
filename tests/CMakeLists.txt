@@ -1508,6 +1508,11 @@ target_link_libraries(peer_addr_test PRIVATE opennova_net)
 target_include_directories(peer_addr_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME peer_addr COMMAND peer_addr_test)
 
+add_executable(game_type_policy_test npwire/game_type_policy_test.cpp)
+target_link_libraries(game_type_policy_test PRIVATE opennova_net)
+target_include_directories(game_type_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME game_type_policy COMMAND game_type_policy_test)
+
 add_executable(protocol_message_test novaworld/protocol_message_test.cpp)
 target_link_libraries(protocol_message_test PRIVATE opennova_net)
 target_include_directories(protocol_message_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

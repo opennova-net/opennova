@@ -60,6 +60,21 @@ void MusicDirector::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("last_error"), &MusicDirector::last_error);
 	ClassDB::bind_method(D_METHOD("current_pc"), &MusicDirector::current_pc);
 
+	// Witnessed music-driving policy (engine audio/music_policy.h re-exports).
+	BIND_CONSTANT(MENU_MUSIC_VAR_SLOT);
+	BIND_CONSTANT(GAME_SEEDED_VAR_FIRST);
+	BIND_CONSTANT(GAME_SEEDED_VAR_LAST);
+	BIND_CONSTANT(GAME_VAR_MISSION_STATE);
+	BIND_CONSTANT(GAME_VAR_HEALTH_PCT);
+	BIND_CONSTANT(GAME_VAR_TEAM);
+	BIND_CONSTANT(GAME_HEALTH_SEED);
+	ClassDB::bind_static_method("MusicDirector",
+			D_METHOD("resolve_menu_music_pair", "expansion_name"),
+			&MusicDirector::resolve_menu_music_pair);
+	ClassDB::bind_static_method("MusicDirector",
+			D_METHOD("resolve_game_music_pair", "expansion_name"),
+			&MusicDirector::resolve_game_music_pair);
+
 	// Properties (inspector). We deliberately do NOT expose a script property
 	// because Godot scans for set_script/get_script pairs as the built-in script
 	// slot, and even renamed pairs (e.g. set_mus_script) risk surprising the
@@ -87,12 +102,35 @@ void MusicDirector::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("variable_changed",
 			PropertyInfo(Variant::INT, "var_index"),
 			PropertyInfo(Variant::INT, "value")));
+	// left/right are the script-domain 0..255 volumes (the VM hook's 16.16
+	// fixed is decoded at the trampoline; see _on_volume_changed).
 	ADD_SIGNAL(MethodInfo("volume_changed",
 			PropertyInfo(Variant::INT, "left"),
 			PropertyInfo(Variant::INT, "right")));
 	ADD_SIGNAL(MethodInfo("echo", PropertyInfo(Variant::INT, "arg")));
 	ADD_SIGNAL(MethodInfo("halted"));
 	ADD_SIGNAL(MethodInfo("vm_error", PropertyInfo(Variant::STRING, "message")));
+}
+
+// --- Witnessed music-pair naming (pure re-export) -----------------------
+
+static Dictionary music_pair_to_dict(const opennova::audio::MusicPairNames &names) {
+	Dictionary out;
+	out["stem"] = String::utf8(names.stem.c_str());
+	out["bank_file"] = String::utf8(names.bank_file.c_str());
+	out["script_file"] = String::utf8(names.script_file.c_str());
+	out["subdir"] = String::utf8(names.subdir.c_str());
+	return out;
+}
+
+Dictionary MusicDirector::resolve_menu_music_pair(const String &p_expansion_name) {
+	return music_pair_to_dict(opennova::audio::menu_music_pair_names(
+			p_expansion_name.utf8().get_data()));
+}
+
+Dictionary MusicDirector::resolve_game_music_pair(const String &p_expansion_name) {
+	return music_pair_to_dict(opennova::audio::game_music_pair_names(
+			p_expansion_name.utf8().get_data()));
 }
 
 // --- Property setters / getters ----------------------------------------
@@ -369,7 +407,12 @@ void MusicDirector::_on_volume_changed(void *user, int32_t left_16_16, int32_t r
 	if (self == nullptr) {
 		return;
 	}
-	self->emit_signal("volume_changed", (int)left_16_16, (int)right_16_16);
+	// GSV/GSDV take the script's 0..255 volume argument and store it as 16.16
+	// fixed (value << 16; the witness lives at MusVMHooks::on_volume_changed
+	// in engine mus/mus.h). The signal re-emits the script-domain 0..255
+	// value (16.16 decoded at this device boundary); the name stays
+	// "volume_changed".
+	self->emit_signal("volume_changed", (int)(left_16_16 >> 16), (int)(right_16_16 >> 16));
 }
 
 void MusicDirector::_on_echo(void *user, int32_t arg) {

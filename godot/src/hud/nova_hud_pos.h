@@ -61,6 +61,19 @@ public:
 		MESSAGE_EXPIRY_STAGGER = 186,
 		MESSAGE_TEXT_MAX = 119,
 		MESSAGE_SLOT_COUNT = 40,
+		// The loading screen's witnessed layout (hud/loading_screen.h is the
+		// single source; the cpp static_asserts pin these mirrors to it). The
+		// band values are image-space; the bar rides the loading_bar_* statics.
+		LOADING_BAND_LEFT = 21,
+		LOADING_BAND_TOP = 29,
+		LOADING_BAND_RIGHT_CUSTOM = 661,
+		LOADING_BAND_RIGHT_STOCK = 782,
+		LOADING_BAND_BOTTOM = 500,
+		LOADING_PRESENT_INTERVAL_MS = 100,
+		// The first-person view effects (hud/view_effects.h; same pinning):
+		// the rangefinder digit advance and the 16px digit-strip cell.
+		BINOCULAR_DIGIT_STEP = 10,
+		VIEW_DIGIT_CELL = 16,
 	};
 	// kPercentToAlpha (2.55 — authored percent -> 0..255 alpha), bound as a
 	// method because class constants are integer-only.
@@ -103,6 +116,30 @@ public:
 			int p_recoil_pitch_bam, int p_weight_spread_bam);
 	static int crosshair_error_row(int p_stance, bool p_scoped);
 	static bool crosshair_should_draw(bool p_aimed, bool p_keep_while_aimed);
+
+	// The mission loading screen's engine spec (hud/loading_screen.h carries
+	// the values and witnesses): the GAMETYPE -> LoadingText key policy ("" =
+	// unknown) plus the non-integer layout values the LoadingScreen shell
+	// draws with.
+	static String loading_gametype_text_key(int p_game_type);
+	static double loading_msg_x_frac();
+	static double loading_msg_right_frac();
+	static double loading_msg_label_y_frac();
+	static double loading_msg_body_y_frac();
+	static Color loading_msg_label_color();
+	static Vector2i loading_bar_pos();
+	static Vector2i loading_bar_size();
+	static Color loading_bar_border_gray();
+	static Color loading_bar_fill_color();
+
+	// The first-person view-effect spec (hud/view_effects.h carries the
+	// values and witnesses): binocular/NVG overlay rects in the 1024x768
+	// design space, the NVG scale modulate, and the rangefinder easing step.
+	static Rect2 binocular_crosshair_rect();
+	static Vector2 binocular_digit_pos();
+	static Rect2 nvg_scale_rect();
+	static Color nvg_scale_modulate();
+	static int binocular_range_step(int p_current, int p_target);
 
 	Error load(const String &path);
 	// Load hudpos.def by flat name through the mounted resource root (VFS), so the

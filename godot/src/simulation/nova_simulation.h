@@ -48,6 +48,7 @@
 #include <world/player_look.h>
 #include <world/player_spawn.h>
 #include <world/player_view.h>
+#include <world/round_sim.h> // the hit-zone damage tables (re-exported statics)
 #include <world/spawn_select.h>
 #include <world/weapon_fsm.h>
 #include <world/weapon_inventory.h>
@@ -215,6 +216,126 @@ public:
 		MOUNT_COMMAND_SKIP_CONTROLLER = 124,
 		MOUNT_COMMAND_ANY_SEAT = 125,
 	};
+
+	// The equipped-weapon FSM action ids, re-exported with the engine's values
+	// (world/weapon_fsm.h weapon_action carries the witness; assignment from
+	// the engine enum makes drift impossible).
+	enum WeaponAction {
+		WEAPON_ACTION_IDLE = opennova::world::weapon_action::kIdle,
+		WEAPON_ACTION_EMPTY_IDLE = opennova::world::weapon_action::kEmptyIdle,
+		WEAPON_ACTION_FIRE = opennova::world::weapon_action::kFire,
+		WEAPON_ACTION_RECOIL = opennova::world::weapon_action::kRecoil,
+		WEAPON_ACTION_RELOAD = opennova::world::weapon_action::kReload,
+		WEAPON_ACTION_EMPTY = opennova::world::weapon_action::kEmpty,
+		WEAPON_ACTION_SWITCH_TO = opennova::world::weapon_action::kSwitchTo,
+		WEAPON_ACTION_SWITCH_FROM = opennova::world::weapon_action::kSwitchFrom,
+		WEAPON_ACTION_SWITCH_RANK = opennova::world::weapon_action::kSwitchRank,
+		WEAPON_ACTION_SCOPE_UP = opennova::world::weapon_action::kScopeUp,
+		WEAPON_ACTION_SCOPE_DOWN = opennova::world::weapon_action::kScopeDown,
+		WEAPON_ACTION_OVERHEATED = opennova::world::weapon_action::kOverheated,
+		WEAPON_ACTION_COUNT = opennova::world::weapon_action::kCount,
+	};
+
+	// The stance vocabulary request_local_player_stance consumes — the engine's
+	// InfantryState::Stance values (world/infantry.h carries the witness; the
+	// C2S 0x1D apply's mutual-exclusion latch is cited at the request site).
+	enum Stance {
+		STANCE_STAND = static_cast<int>(
+				opennova::world::InfantryState::Stance::kStand),
+		STANCE_CROUCH = static_cast<int>(
+				opennova::world::InfantryState::Stance::kCrouch),
+		STANCE_PRONE = static_cast<int>(
+				opennova::world::InfantryState::Stance::kProne),
+	};
+
+	// Collision-face flag bits (world/collision.h kFaceFlag* carries the
+	// witness) — the hitbox debug view's face styling reads them.
+	enum FaceFlag {
+		FACE_FLAG_BOTH_SIDES = opennova::world::kFaceFlagBothSides,
+		FACE_FLAG_NEVER_HIT = opennova::world::kFaceFlagNeverHit,
+		FACE_FLAG_DOUBLE_SIDED = opennova::world::kFaceFlagDoubleSided,
+	};
+
+	// Bounding-volume type codes (world/collision.h bvol_type carries the
+	// witness; the letter names are the Super OED manual's volume suffixes).
+	enum BvolType {
+		BVOL_CONTACT_MARKER = opennova::world::bvol_type::kContactMarker,
+		BVOL_LADDER_CL = opennova::world::bvol_type::kLadderCL,
+		BVOL_ARMORY_CA = opennova::world::bvol_type::kArmoryCA,
+		BVOL_VEHICLE_VC = opennova::world::bvol_type::kVehicleVC,
+		BVOL_BLINK_BB = opennova::world::bvol_type::kBlinkBB,
+		BVOL_DOOR_CD = opennova::world::bvol_type::kDoorCD,
+		BVOL_CHANGE_TEAM_CT = opennova::world::bvol_type::kChangeTeamCT,
+		BVOL_VEHICLE_LOADOUT = opennova::world::bvol_type::kVehicleLoadout,
+		BVOL_VEHICLE_EXT = opennova::world::bvol_type::kVehicleExt,
+		BVOL_FLAG_CF = opennova::world::bvol_type::kFlagCF,
+		BVOL_DAMAGE_HIGH_DH = opennova::world::bvol_type::kDamageHighDH,
+		BVOL_DAMAGE_MEDIUM_DM = opennova::world::bvol_type::kDamageMediumDM,
+		BVOL_DAMAGE_LOW_DL = opennova::world::bvol_type::kDamageLowDL,
+	};
+
+	// Occlusion portal-face record type bytes (world/occlusion.h kOccRec*
+	// carries the witness) — the occlusion debug view's type styling.
+	enum OccRecordType {
+		OCC_REC_OCCLUDER = opennova::world::kOccRecOccluder,
+		OCC_REC_OPEN = opennova::world::kOccRecOpen,
+		OCC_REC_WINDOW = opennova::world::kOccRecWindow,
+		OCC_REC_PORTAL = opennova::world::kOccRecPortal,
+		OCC_REC_WELDED_LINK = opennova::world::kOccRecWeldedLink,
+	};
+
+	// Engine-domain scalar re-exports (each value's witness lives at its
+	// engine home; assignment from the engine constant makes drift impossible).
+	enum {
+		// One full PLAYPARTANIM sweep (16.16 1.0) — the phase/ACTIVE domain
+		// bound for the debug pages (world/ai.h kPartAnimPhaseOne).
+		PART_ANIM_PHASE_ONE = opennova::world::kPartAnimPhaseOne,
+		// The "no local record" wire-handle sentinel (world/entity.h
+		// EntityHandle::kInvalid).
+		INVALID_WIRE_HANDLE = opennova::world::EntityHandle::kInvalid,
+		// The epilog/debrief ESC-less exit timeout in ticks (world/world.h
+		// kEpilogExitTimeoutTicks; epilog_exit_timeout_seconds() derives).
+		EPILOG_EXIT_TIMEOUT_TICKS = opennova::world::kEpilogExitTimeoutTicks,
+		// The item-effect attach scan reads only a model's first 16 userpoints
+		// (threedi_3di3.h THREEDI_USER_POINT_SCAN_LIMIT; pinned by
+		// static_assert in nova_simulation_bind.cpp).
+		ITEM_USER_POINT_SCAN_LIMIT = 16,
+		// The retail signed-16 storage domain entity health lives in
+		// (world/entity.h kRetailI16Min/Max).
+		ENTITY_HEALTH_MIN = opennova::world::kRetailI16Min,
+		ENTITY_HEALTH_MAX = opennova::world::kRetailI16Max,
+		// The horizontal default camera fov, degrees (world/player_view.h
+		// kPlayerCameraFovHDeg; the static_assert in the bind TU pins the
+		// integral mirror against the engine float).
+		DEFAULT_PLAYER_FOV_H_DEG = 80,
+	};
+
+	// Spawn-origin provenance (world/entity.h): (kind << 24) | (index &
+	// 0xFFFFFF), kSpawnOriginNone = none. The decoded halves of NONE are the
+	// present rows' "no local record" kind/index sentinels. Fixed uint32_t so
+	// SPAWN_ORIGIN_NONE binds positive.
+	enum : uint32_t {
+		SPAWN_ORIGIN_NONE = opennova::world::kSpawnOriginNone,
+		SPAWN_ORIGIN_KIND_NONE =
+				static_cast<uint32_t>(opennova::world::kSpawnOriginKindNone),
+		SPAWN_ORIGIN_INDEX_NONE =
+				static_cast<uint32_t>(opennova::world::kSpawnOriginIndexNone),
+	};
+
+	// The spawn-origin pack/decode helpers, re-exported for GDScript
+	// composition (world/entity.h carries the packing contract).
+	static int64_t spawn_origin_pack(int p_kind, int p_index) {
+		return static_cast<int64_t>(opennova::world::spawn_origin_pack(
+				static_cast<uint32_t>(p_kind), static_cast<uint32_t>(p_index)));
+	}
+	static int spawn_origin_kind(int64_t p_origin) {
+		return opennova::world::spawn_origin_kind(
+				static_cast<uint32_t>(p_origin));
+	}
+	static int spawn_origin_index(int64_t p_origin) {
+		return opennova::world::spawn_origin_index(
+				static_cast<uint32_t>(p_origin));
+	}
 
 private:
 	std::unique_ptr<opennova::world::World> world_;
@@ -942,6 +1063,19 @@ public:
 	// The fixed logic-tick quantum (1/62.5 s) — the ONE cadence constant,
 	// re-exported from the engine accumulator for GDScript composition.
 	static double tick_dt() { return opennova::world::TickAccumulator::kTickDt; }
+	// The tick cadence as a rate, and wall-clock ms -> whole logic ticks —
+	// re-exports of the engine tick home (world/tick_accumulator.h carries
+	// the current_tick witness).
+	static double ticks_per_second() { return opennova::world::kTicksPerSecond; }
+	static int ticks_from_ms(int64_t p_ms) {
+		return opennova::world::ticks_from_ms(p_ms);
+	}
+	// The epilog/debrief ESC-less exit timeout in seconds, derived from the
+	// engine tick constants (world/world.h kEpilogExitTimeoutTicks).
+	static double epilog_exit_timeout_seconds() {
+		return opennova::world::kEpilogExitTimeoutTicks *
+				opennova::world::TickAccumulator::kTickDt;
+	}
 
 	// --- The engine-owned game frame (ADR 0033 R1; frame/frame_driver.h) ---
 	// The shell/world NODE registers ITSELF once per mission and the binding
@@ -1310,6 +1444,28 @@ public:
 	static double player_non_person_eye_bump();
 	static int player_head_bone_index();
 	static double player_aim_project_range();
+	// The witnessed person hit-zone -> damage-multiplier table and the
+	// Landable seat-branch bone leg (world/round_sim.h carries the witness;
+	// the engine 6.0 seat leg is the truth the debug views mirror).
+	static double hit_zone_damage_multiplier(int p_section) {
+		return opennova::world::hit_zone_damage_multiplier(p_section);
+	}
+	static double seat_hit_bone_damage_multiplier(int p_bone) {
+		return opennova::world::seat_hit_bone_damage_multiplier(p_bone);
+	}
+	// The per-axis portal-slot collection range, world units
+	// (world/occlusion.h kPortalSlotCollectRadius).
+	static double portal_slot_collect_radius() {
+		return opennova::world::kPortalSlotCollectRadius;
+	}
+	// The mission coordinate domain in world units (world/geom.h — the signed
+	// 16.16 carrier span the debug/edit fields clamp to).
+	static double mission_coord_min() {
+		return opennova::world::kMissionCoordMinUnits;
+	}
+	static double mission_coord_max() {
+		return opennova::world::kMissionCoordMaxUnits;
+	}
 	static Dictionary fp_viewmodel_spec(bool p_has_def, const String &p_gfx1,
 			const String &p_gfx1a, const String &p_animadm, int p_flags);
 	// Read-only view of the active profile record for the shell's status copy:

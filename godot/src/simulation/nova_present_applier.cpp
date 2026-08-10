@@ -787,10 +787,12 @@ void PresentApplier::present_snapshot(const PackedFloat32Array &snap,
 					field_i(p, base, Simulation::PF_ACTIVE1);
 			const int32_t active2_code =
 					field_i(p, base, Simulation::PF_ACTIVE2);
+			// The phase-domain predicate lives with the integrator
+			// (world/ai.h part_anim_phase_active).
 			const int32_t active1 =
-					active1_code > 0 && active1_code <= 0x10000 ? 1 : 0;
+					opennova::world::part_anim_phase_active(active1_code) ? 1 : 0;
 			const int32_t active2 =
-					active2_code > 0 && active2_code <= 0x10000 ? 1 : 0;
+					opennova::world::part_anim_phase_active(active2_code) ? 1 : 0;
 			const int32_t phase1 = active1 != 0
 					? Simulation::decode_present_part_anim_phase(
 							snap, base, 1)

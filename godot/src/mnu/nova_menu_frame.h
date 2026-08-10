@@ -41,6 +41,30 @@ public:
 	MenuFrame();
 	~MenuFrame();
 
+	// Re-exports of the engine's menu constants (values and witnesses live at
+	// the engine homes: menu/menu_frame.h design space, menu/menu_edit.h edit
+	// keys/results) so GDScript consumers carry no literals of their own.
+	enum {
+		// The fixed 800x600 authoring design space design_scale_() maps the
+		// control size onto.
+		DESIGN_WIDTH = opennova::menu::kMenuDesignWidth,
+		DESIGN_HEIGHT = opennova::menu::kMenuDesignHeight,
+		// The special-key codes edit_key consumes.
+		EDIT_KEY_BACKSPACE = opennova::menu::kEditKeyBackspace,
+		EDIT_KEY_ENTER = opennova::menu::kEditKeyEnter,
+		EDIT_KEY_END = opennova::menu::kEditKeyEnd,
+		EDIT_KEY_HOME = opennova::menu::kEditKeyHome,
+		EDIT_KEY_LEFT = opennova::menu::kEditKeyLeft,
+		EDIT_KEY_RIGHT = opennova::menu::kEditKeyRight,
+		EDIT_KEY_DELETE = opennova::menu::kEditKeyDelete,
+		// edit_key's return values (EditKeyResult).
+		EDIT_RESULT_NONE = static_cast<int>(opennova::menu::EditKeyResult::kNone),
+		EDIT_RESULT_CHANGED =
+				static_cast<int>(opennova::menu::EditKeyResult::kChanged),
+		EDIT_RESULT_COMMIT =
+				static_cast<int>(opennova::menu::EditKeyResult::kCommit),
+	};
+
 	// Build the compiler against a parsed document's screen (empty name = the
 	// first screen), loading widget art and every referenced .fnt through the
 	// mounted VFS root. `text_lookup` maps string-table ids to display text
@@ -107,7 +131,8 @@ public:
 
 	// Edit-input routing over the engine module (menu/menu_edit.h): applies
 	// the witnessed insert/key ops to the widget's effective text/caret
-	// state. edit_key returns 0 none / 1 changed / 2 commit.
+	// state. edit_key takes an EDIT_KEY_* code and returns
+	// EDIT_RESULT_NONE / EDIT_RESULT_CHANGED / EDIT_RESULT_COMMIT.
 	bool edit_char(int p_index, int p_unicode);
 	int edit_key(int p_index, int p_key, bool p_shift);
 

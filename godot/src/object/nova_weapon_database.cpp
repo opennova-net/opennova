@@ -21,6 +21,12 @@ static_assert(WeaponDatabase::ENCUMBRANCE_LIGHT == DEF_ENCUMBRANCE_LIGHT &&
               WeaponDatabase::ENCUMBRANCE_NORMAL == DEF_ENCUMBRANCE_NORMAL &&
               WeaponDatabase::ENCUMBRANCE_HEAVY == DEF_ENCUMBRANCE_HEAVY,
               "ENCUMBRANCE_* drifted from def.h");
+static_assert(WeaponDatabase::CLASS_ALLOW_ALL ==
+                      static_cast<int>(opennova::world::kClassAllowMaskAll),
+              "CLASS_ALLOW_ALL drifted from world/player_loadout.h");
+static_assert(WeaponDatabase::CLASS_MASK_ALL ==
+                      opennova::world::kClassFilterMaskAll,
+              "CLASS_MASK_ALL drifted from world/player_loadout.h");
 
 void WeaponDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("load", "path"), &WeaponDatabase::load);
@@ -58,6 +64,9 @@ void WeaponDatabase::_bind_methods() {
 	ClassDB::bind_static_method("WeaponDatabase",
 			D_METHOD("armory_class_filter_mask", "selected_class"),
 			&WeaponDatabase::armory_class_filter_mask);
+	ClassDB::bind_static_method("WeaponDatabase",
+			D_METHOD("armory_class_catalog"),
+			&WeaponDatabase::armory_class_catalog);
 
 	BIND_CONSTANT(SLOT_ACCESSORY);
 	BIND_CONSTANT(SLOT_PRIMARY);
@@ -69,6 +78,8 @@ void WeaponDatabase::_bind_methods() {
 	BIND_CONSTANT(ENCUMBRANCE_NORMAL);
 	BIND_CONSTANT(ENCUMBRANCE_HEAVY);
 	BIND_CONSTANT(CLIP_COUNT_DEF_DEFAULT);
+	BIND_CONSTANT(CLASS_ALLOW_ALL);
+	BIND_CONSTANT(CLASS_MASK_ALL);
 }
 
 Error WeaponDatabase::load(const String &path) {
@@ -405,6 +416,21 @@ int WeaponDatabase::armory_resolve_selected_class(int p_player_class,
 		int p_class_allow_mask) {
 	return opennova::world::armory_resolve_selected_class(p_player_class,
 			static_cast<uint32_t>(p_class_allow_mask) & 0xFFFFu);
+}
+
+Array WeaponDatabase::armory_class_catalog() {
+	// The engine table (world/player_loadout.h kArmoryClassCatalog) is the
+	// one authored spin order; this only marshals rows.
+	Array rows;
+	for (int i = 0; i < opennova::world::kArmoryClassCount; ++i) {
+		const opennova::world::ArmoryClassCatalogEntry &entry =
+				opennova::world::kArmoryClassCatalog[i];
+		Dictionary row;
+		row["value"] = entry.class_value;
+		row["text_key"] = String(entry.text_key);
+		rows.push_back(row);
+	}
+	return rows;
 }
 
 int WeaponDatabase::armory_class_filter_mask(int p_selected_class) {

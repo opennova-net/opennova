@@ -5,6 +5,8 @@
 
 #include <def/def.h>
 #include <hud/hud_math.h>
+#include <hud/loading_screen.h>
+#include <hud/view_effects.h>
 
 // The GDScript-facing mirrors are pinned to the engine's witnessed values —
 // a drifted copy here would silently split the native expiry policy from the
@@ -17,6 +19,22 @@ static_assert(godot::HudPos::MESSAGE_TEXT_MAX ==
 		opennova::hud::kMessageTextMax);
 static_assert(godot::HudPos::MESSAGE_SLOT_COUNT ==
 		opennova::hud::kMessageSlotCount);
+static_assert(godot::HudPos::LOADING_BAND_LEFT ==
+		opennova::hud::kLoadingBandLeft);
+static_assert(godot::HudPos::LOADING_BAND_TOP ==
+		opennova::hud::kLoadingBandTop);
+static_assert(godot::HudPos::LOADING_BAND_RIGHT_CUSTOM ==
+		opennova::hud::kLoadingBandRightCustom);
+static_assert(godot::HudPos::LOADING_BAND_RIGHT_STOCK ==
+		opennova::hud::kLoadingBandRightStock);
+static_assert(godot::HudPos::LOADING_BAND_BOTTOM ==
+		opennova::hud::kLoadingBandBottom);
+static_assert(godot::HudPos::LOADING_PRESENT_INTERVAL_MS ==
+		opennova::hud::kLoadingPresentIntervalMs);
+static_assert(godot::HudPos::BINOCULAR_DIGIT_STEP ==
+		opennova::hud::kBinocularDigitStep);
+static_assert(godot::HudPos::VIEW_DIGIT_CELL ==
+		opennova::hud::kViewDigitCell);
 
 double godot::HudPos::percent_to_alpha() {
 	return opennova::hud::kPercentToAlpha;
@@ -103,6 +121,21 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("crosshair_total_spread_fp16", "error_fp16", "recoil_pitch_bam", "weight_spread_bam"), &HudPos::crosshair_total_spread_fp16);
 	ClassDB::bind_static_method("HudPos", D_METHOD("crosshair_error_row", "stance", "scoped"), &HudPos::crosshair_error_row);
 	ClassDB::bind_static_method("HudPos", D_METHOD("crosshair_should_draw", "aimed", "keep_while_aimed"), &HudPos::crosshair_should_draw);
+	ClassDB::bind_static_method("HudPos", D_METHOD("loading_gametype_text_key", "game_type"), &HudPos::loading_gametype_text_key);
+	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_x_frac"), &HudPos::loading_msg_x_frac);
+	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_right_frac"), &HudPos::loading_msg_right_frac);
+	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_label_y_frac"), &HudPos::loading_msg_label_y_frac);
+	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_body_y_frac"), &HudPos::loading_msg_body_y_frac);
+	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_label_color"), &HudPos::loading_msg_label_color);
+	ClassDB::bind_static_method("HudPos", D_METHOD("loading_bar_pos"), &HudPos::loading_bar_pos);
+	ClassDB::bind_static_method("HudPos", D_METHOD("loading_bar_size"), &HudPos::loading_bar_size);
+	ClassDB::bind_static_method("HudPos", D_METHOD("loading_bar_border_gray"), &HudPos::loading_bar_border_gray);
+	ClassDB::bind_static_method("HudPos", D_METHOD("loading_bar_fill_color"), &HudPos::loading_bar_fill_color);
+	ClassDB::bind_static_method("HudPos", D_METHOD("binocular_crosshair_rect"), &HudPos::binocular_crosshair_rect);
+	ClassDB::bind_static_method("HudPos", D_METHOD("binocular_digit_pos"), &HudPos::binocular_digit_pos);
+	ClassDB::bind_static_method("HudPos", D_METHOD("nvg_scale_rect"), &HudPos::nvg_scale_rect);
+	ClassDB::bind_static_method("HudPos", D_METHOD("nvg_scale_modulate"), &HudPos::nvg_scale_modulate);
+	ClassDB::bind_static_method("HudPos", D_METHOD("binocular_range_step", "current", "target"), &HudPos::binocular_range_step);
 	ClassDB::bind_method(D_METHOD("load", "path"), &HudPos::load);
 	ClassDB::bind_method(D_METHOD("load_from_resource_root", "resource_root", "name"), &HudPos::load_from_resource_root);
 	ClassDB::bind_method(D_METHOD("is_loaded"), &HudPos::is_loaded);
@@ -137,6 +170,14 @@ void HudPos::_bind_methods() {
 	BIND_CONSTANT(MESSAGE_EXPIRY_STAGGER);
 	BIND_CONSTANT(MESSAGE_TEXT_MAX);
 	BIND_CONSTANT(MESSAGE_SLOT_COUNT);
+	BIND_CONSTANT(LOADING_BAND_LEFT);
+	BIND_CONSTANT(LOADING_BAND_TOP);
+	BIND_CONSTANT(LOADING_BAND_RIGHT_CUSTOM);
+	BIND_CONSTANT(LOADING_BAND_RIGHT_STOCK);
+	BIND_CONSTANT(LOADING_BAND_BOTTOM);
+	BIND_CONSTANT(LOADING_PRESENT_INTERVAL_MS);
+	BIND_CONSTANT(BINOCULAR_DIGIT_STEP);
+	BIND_CONSTANT(VIEW_DIGIT_CELL);
 	ClassDB::bind_static_method("HudPos", D_METHOD("percent_to_alpha"),
 			&HudPos::percent_to_alpha);
 }
@@ -576,4 +617,82 @@ int HudPos::crosshair_error_row(int p_stance, bool p_scoped) {
 
 bool HudPos::crosshair_should_draw(bool p_aimed, bool p_keep_while_aimed) {
 	return opennova::hud::crosshair_should_draw(p_aimed, p_keep_while_aimed);
+}
+
+// --- loading screen (hud/loading_screen.h carries the values/witnesses) -----
+
+String HudPos::loading_gametype_text_key(int p_game_type) {
+	return String(opennova::hud::loading_gametype_text_key(
+			static_cast<uint32_t>(p_game_type)));
+}
+
+double HudPos::loading_msg_x_frac() {
+	return opennova::hud::kLoadingMsgXFrac;
+}
+
+double HudPos::loading_msg_right_frac() {
+	return opennova::hud::kLoadingMsgRightFrac;
+}
+
+double HudPos::loading_msg_label_y_frac() {
+	return opennova::hud::kLoadingMsgLabelYFrac;
+}
+
+double HudPos::loading_msg_body_y_frac() {
+	return opennova::hud::kLoadingMsgBodyYFrac;
+}
+
+Color HudPos::loading_msg_label_color() {
+	const uint32_t rgb = opennova::hud::kLoadingMsgLabelRgb;
+	return Color(((rgb >> 16) & 0xFFu) / 255.0f, ((rgb >> 8) & 0xFFu) / 255.0f,
+			(rgb & 0xFFu) / 255.0f);
+}
+
+Vector2i HudPos::loading_bar_pos() {
+	return Vector2i(opennova::hud::kLoadingBarX, opennova::hud::kLoadingBarY);
+}
+
+Vector2i HudPos::loading_bar_size() {
+	return Vector2i(opennova::hud::kLoadingBarW, opennova::hud::kLoadingBarH);
+}
+
+Color HudPos::loading_bar_border_gray() {
+	const uint32_t rgb = opennova::hud::kLoadingBarBorderGray;
+	return Color(((rgb >> 16) & 0xFFu) / 255.0f, ((rgb >> 8) & 0xFFu) / 255.0f,
+			(rgb & 0xFFu) / 255.0f);
+}
+
+Color HudPos::loading_bar_fill_color() {
+	const uint32_t argb = opennova::hud::kLoadingBarFillArgb;
+	return Color(((argb >> 16) & 0xFFu) / 255.0f,
+			((argb >> 8) & 0xFFu) / 255.0f, (argb & 0xFFu) / 255.0f,
+			((argb >> 24) & 0xFFu) / 255.0f);
+}
+
+// --- first-person view effects (hud/view_effects.h) -------------------------
+
+Rect2 HudPos::binocular_crosshair_rect() {
+	return Rect2(opennova::hud::kBinocularCrosshairX,
+			opennova::hud::kBinocularCrosshairY,
+			opennova::hud::kBinocularCrosshairW,
+			opennova::hud::kBinocularCrosshairH);
+}
+
+Vector2 HudPos::binocular_digit_pos() {
+	return Vector2(opennova::hud::kBinocularDigitX,
+			opennova::hud::kBinocularDigitY);
+}
+
+Rect2 HudPos::nvg_scale_rect() {
+	return Rect2(opennova::hud::kNvgScaleX, opennova::hud::kNvgScaleY,
+			opennova::hud::kNvgScaleW, opennova::hud::kNvgScaleH);
+}
+
+Color HudPos::nvg_scale_modulate() {
+	const float c = opennova::hud::kNvgScaleModulate / 255.0f;
+	return Color(c, c, c, 1.0f);
+}
+
+int HudPos::binocular_range_step(int p_current, int p_target) {
+	return opennova::hud::binocular_range_step(p_current, p_target);
 }

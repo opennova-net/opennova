@@ -35,6 +35,11 @@ inline constexpr std::size_t kMaxFrameUpdateBodyBytes =
 		kProtocolMessageLen16Bytes;
 static_assert(kMaxFrameUpdateBodyBytes == 1283);
 
+// The lobby player-cap ceiling: retail clamps the advertised max_players to
+// 1..65 (the 64-player roster + the host) before storing game_settings +0xC0.
+// [orig: the 1..65 clamp on game_settings +0xC0 — see GameConfig::max_players]
+inline constexpr uint32_t kMaxPlayersCap = 65;
+
 // The session family that selects retail's default send divider. `Automatic`
 // is resolved from the installed transport by create_session: socketless is
 // SinglePlayer and a socketed session is LAN unless its caller explicitly
@@ -57,7 +62,7 @@ struct GameConfig {
 	std::string side_a_password;               // [orig game_settings +0x40] BuildFlags |0x20; join-reject 19
 	std::string side_b_password;               // [orig game_settings +0x60] BuildFlags |0x10; join-reject 20
 	std::string internet_address;              // [orig game_settings +0x80] connect-target; default "0.0.0.0"
-	uint32_t max_players = 1;                   // [orig game_settings +0xC0] clamped 1..65
+	uint32_t max_players = 1;                   // [orig game_settings +0xC0] clamped 1..kMaxPlayersCap
 	uint32_t use_lineup_queue = 0;             // [orig game_settings +0xC4]
 	uint32_t lineup_queue_size = 0;            // [orig game_settings +0xC8]
 

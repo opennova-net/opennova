@@ -19,9 +19,9 @@ constexpr int kLineBufferMax = 255; // [orig: 256-byte line buffer @ 0x6752c0]
 constexpr float kBottomVBias = 0.5f / 256.0f;
 
 bool byte_is_skipped(uint8_t byte) {
-	// Controls below space plus the three retail control bytes
-	// [orig: @ 0x674e70 / @ 0x6752c0 v11 < 0x20 || 127 || 0x80 || 0x81].
-	return byte < 0x20 || byte == 0x7F || byte == 0x80 || byte == 0x81;
+	// Controls below space plus the three retail control bytes; the range and
+	// its witness live at fnt.h's fnt_byte_is_nonprinting.
+	return fnt_byte_is_nonprinting(byte) != 0;
 }
 
 uint32_t double_channel_clamped(uint32_t argb) {

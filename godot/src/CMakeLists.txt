@@ -22,6 +22,7 @@ add_library(${TARGET_NAME} SHARED
     network/item_replication_catalog_adapter.cpp
     network/nova_udp_pump.cpp
     network/nova_lan_session.cpp
+    network/nova_net_protocol.cpp
     network/nova_net_session_policy.cpp
     terrain/nova_terrain.cpp
     terrain/nova_terrain_surface_inputs.cpp

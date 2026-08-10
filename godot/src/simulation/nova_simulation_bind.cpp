@@ -1,6 +1,8 @@
 // Simulation — ClassDB registration (_bind_methods) and _notification.
 #include "simulation/nova_simulation_internal.h"
 
+#include <threedi/threedi_3di3.h> // THREEDI_USER_POINT_SCAN_LIMIT (pin below)
+
 using namespace novasim;
 
 // The GDScript-facing seat codes are the SAME values engine/runtime/world computes with —
@@ -11,6 +13,13 @@ static_assert(Simulation::SEAT_CONTROLLER == static_cast<int>(opennova::world::S
 static_assert(Simulation::SEAT_GUNNER == static_cast<int>(opennova::world::SeatType::Gunner));
 static_assert(Simulation::SEAT_ARMORY_POINT == static_cast<int>(opennova::world::SeatType::ArmoryPoint));
 static_assert(Simulation::SEAT_DRIVER == static_cast<int>(opennova::world::SeatType::Driver));
+
+// Values the class enum cannot assign straight from the engine home: the
+// userpoint scan limit lives in a C header macro, and the integral fov mirror
+// pins against the engine float.
+static_assert(Simulation::ITEM_USER_POINT_SCAN_LIMIT == THREEDI_USER_POINT_SCAN_LIMIT);
+static_assert(static_cast<float>(Simulation::DEFAULT_PLAYER_FOV_H_DEG) ==
+              opennova::world::kPlayerCameraFovHDeg);
 
 void Simulation::_bind_methods() {
 	ClassDB::bind_method(
@@ -40,6 +49,10 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("reset_tick_bank"), &Simulation::reset_tick_bank);
 	ClassDB::bind_static_method("Simulation", D_METHOD("tick_dt"),
 			&Simulation::tick_dt);
+	ClassDB::bind_static_method("Simulation", D_METHOD("ticks_per_second"),
+			&Simulation::ticks_per_second);
+	ClassDB::bind_static_method("Simulation", D_METHOD("ticks_from_ms", "ms"),
+			&Simulation::ticks_from_ms);
 	ClassDB::bind_method(D_METHOD("set_frame_shell", "shell", "listener"),
 			&Simulation::set_frame_shell);
 	ClassDB::bind_method(D_METHOD("set_frame_world", "world"),
@@ -405,6 +418,31 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_static_method("Simulation",
 			D_METHOD("player_aim_project_range"),
 			&Simulation::player_aim_project_range);
+	ClassDB::bind_static_method("Simulation",
+			D_METHOD("hit_zone_damage_multiplier", "section"),
+			&Simulation::hit_zone_damage_multiplier);
+	ClassDB::bind_static_method("Simulation",
+			D_METHOD("seat_hit_bone_damage_multiplier", "bone"),
+			&Simulation::seat_hit_bone_damage_multiplier);
+	ClassDB::bind_static_method("Simulation",
+			D_METHOD("portal_slot_collect_radius"),
+			&Simulation::portal_slot_collect_radius);
+	ClassDB::bind_static_method("Simulation", D_METHOD("mission_coord_min"),
+			&Simulation::mission_coord_min);
+	ClassDB::bind_static_method("Simulation", D_METHOD("mission_coord_max"),
+			&Simulation::mission_coord_max);
+	ClassDB::bind_static_method("Simulation",
+			D_METHOD("epilog_exit_timeout_seconds"),
+			&Simulation::epilog_exit_timeout_seconds);
+	ClassDB::bind_static_method("Simulation",
+			D_METHOD("spawn_origin_pack", "kind", "index"),
+			&Simulation::spawn_origin_pack);
+	ClassDB::bind_static_method("Simulation",
+			D_METHOD("spawn_origin_kind", "origin"),
+			&Simulation::spawn_origin_kind);
+	ClassDB::bind_static_method("Simulation",
+			D_METHOD("spawn_origin_index", "origin"),
+			&Simulation::spawn_origin_index);
 	ClassDB::bind_method(D_METHOD("get_weapon_profile_summary"),
 	                     &Simulation::get_weapon_profile_summary);
 	ClassDB::bind_method(D_METHOD("request_local_player_weapon_category", "category"),
@@ -503,6 +541,60 @@ void Simulation::_bind_methods() {
 	BIND_ENUM_CONSTANT(JOIN_TERRAIN_TIL_RECEIVING);
 	BIND_ENUM_CONSTANT(JOIN_TERRAIN_TIL_COMPLETE);
 	BIND_ENUM_CONSTANT(JOIN_TERRAIN_TIL_INVALID);
+
+	BIND_CONSTANT(WEAPON_ACTION_IDLE);
+	BIND_CONSTANT(WEAPON_ACTION_EMPTY_IDLE);
+	BIND_CONSTANT(WEAPON_ACTION_FIRE);
+	BIND_CONSTANT(WEAPON_ACTION_RECOIL);
+	BIND_CONSTANT(WEAPON_ACTION_RELOAD);
+	BIND_CONSTANT(WEAPON_ACTION_EMPTY);
+	BIND_CONSTANT(WEAPON_ACTION_SWITCH_TO);
+	BIND_CONSTANT(WEAPON_ACTION_SWITCH_FROM);
+	BIND_CONSTANT(WEAPON_ACTION_SWITCH_RANK);
+	BIND_CONSTANT(WEAPON_ACTION_SCOPE_UP);
+	BIND_CONSTANT(WEAPON_ACTION_SCOPE_DOWN);
+	BIND_CONSTANT(WEAPON_ACTION_OVERHEATED);
+	BIND_CONSTANT(WEAPON_ACTION_COUNT);
+
+	BIND_CONSTANT(STANCE_STAND);
+	BIND_CONSTANT(STANCE_CROUCH);
+	BIND_CONSTANT(STANCE_PRONE);
+
+	BIND_CONSTANT(FACE_FLAG_BOTH_SIDES);
+	BIND_CONSTANT(FACE_FLAG_NEVER_HIT);
+	BIND_CONSTANT(FACE_FLAG_DOUBLE_SIDED);
+
+	BIND_CONSTANT(BVOL_CONTACT_MARKER);
+	BIND_CONSTANT(BVOL_LADDER_CL);
+	BIND_CONSTANT(BVOL_ARMORY_CA);
+	BIND_CONSTANT(BVOL_VEHICLE_VC);
+	BIND_CONSTANT(BVOL_BLINK_BB);
+	BIND_CONSTANT(BVOL_DOOR_CD);
+	BIND_CONSTANT(BVOL_CHANGE_TEAM_CT);
+	BIND_CONSTANT(BVOL_VEHICLE_LOADOUT);
+	BIND_CONSTANT(BVOL_VEHICLE_EXT);
+	BIND_CONSTANT(BVOL_FLAG_CF);
+	BIND_CONSTANT(BVOL_DAMAGE_HIGH_DH);
+	BIND_CONSTANT(BVOL_DAMAGE_MEDIUM_DM);
+	BIND_CONSTANT(BVOL_DAMAGE_LOW_DL);
+
+	BIND_CONSTANT(OCC_REC_OCCLUDER);
+	BIND_CONSTANT(OCC_REC_OPEN);
+	BIND_CONSTANT(OCC_REC_WINDOW);
+	BIND_CONSTANT(OCC_REC_PORTAL);
+	BIND_CONSTANT(OCC_REC_WELDED_LINK);
+
+	BIND_CONSTANT(PART_ANIM_PHASE_ONE);
+	BIND_CONSTANT(INVALID_WIRE_HANDLE);
+	BIND_CONSTANT(EPILOG_EXIT_TIMEOUT_TICKS);
+	BIND_CONSTANT(ITEM_USER_POINT_SCAN_LIMIT);
+	BIND_CONSTANT(ENTITY_HEALTH_MIN);
+	BIND_CONSTANT(ENTITY_HEALTH_MAX);
+	BIND_CONSTANT(DEFAULT_PLAYER_FOV_H_DEG);
+
+	BIND_CONSTANT(SPAWN_ORIGIN_NONE);
+	BIND_CONSTANT(SPAWN_ORIGIN_KIND_NONE);
+	BIND_CONSTANT(SPAWN_ORIGIN_INDEX_NONE);
 
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "playing"), "set_playing", "is_playing");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "loco_scale"), "set_loco_scale", "get_loco_scale");

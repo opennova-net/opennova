@@ -230,9 +230,13 @@ void WirePresentPass::present_snapshot(const PackedFloat32Array &p_snap,
 		if (type_id == 0 || handle == local_handle) {
 			continue;
 		}
+		// A wire-only row with no local BMS record carries the decoded halves
+		// of kSpawnOriginNone (world/entity.h names both sentinels).
 		if (synthetic_origin_only_ &&
-				!(int(snap[base + PF_KIND]) == 255 &&
-						int(snap[base + PF_INDEX]) == 0xFFFFFF)) {
+				!(int(snap[base + PF_KIND]) ==
+								opennova::world::kSpawnOriginKindNone &&
+						int(snap[base + PF_INDEX]) ==
+								opennova::world::kSpawnOriginIndexNone)) {
 			continue;
 		}
 		const int runtime_kind = opennova::npruntime::
@@ -248,7 +252,7 @@ void WirePresentPass::present_snapshot(const PackedFloat32Array &p_snap,
 			const int d_kind = int(snap[base + PF_KIND]);
 			const int d_index = int(snap[base + PF_INDEX]);
 			if (d_kind >= 0 && d_kind <= 3 && d_index >= 0 &&
-					d_index != 0xFFFFFF) {
+					d_index != opennova::world::kSpawnOriginIndexNone) {
 				ObjectModel *placed = defer_index_->resolve(
 						int(snap[base + PF_BMS_ID]), d_kind, d_index);
 				if (placed != nullptr) {

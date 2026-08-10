@@ -128,5 +128,47 @@ void ObjectData::_bind_methods() {
 	BIND_CONSTANT(UPDATE_PANM);
 	BIND_CONSTANT(UPDATE_ALL);
 
+	// 3DI3 flag/slot re-exports (engine threedi/threedi_3di3.h values).
+	BIND_CONSTANT(MATERIAL_FLAG_ALPHA_TEST);
+	BIND_CONSTANT(MATERIAL_FLAG_ALPHA_INVERT);
+	BIND_CONSTANT(MATERIAL_FLAG_TWO_SIDED);
+	BIND_CONSTANT(TEX_FLAG_ANIMATED);
+	BIND_CONSTANT(TEX_FLAG_CLAMPED);
+	BIND_CONSTANT(TEX_SLOT_DIFFUSE);
+	BIND_CONSTANT(TEX_SLOT_DETAIL);
+	BIND_CONSTANT(TEX_SLOT_NORMAL);
+	BIND_CONSTANT(TEX_SLOT_NORMAL_B);
+	BIND_CONSTANT(LIGHT_FLAG_DISABLE_CORONA);
+	BIND_CONSTANT(LIGHT_FLAG_DISABLE_TERRAIN);
+	BIND_CONSTANT(LIGHT_FLAG_DISABLE_OBJECTS);
+	BIND_CONSTANT(LIGHT_FLAG_TYPE_TARGET);
+
+	// Generator-style consumers + catalog/unit statics (engine
+	// threedi/threedi_panm.h values and tables).
+	BIND_CONSTANT(GENERATOR_CONSUMER_UV);
+	BIND_CONSTANT(GENERATOR_CONSUMER_RGB);
+	BIND_CONSTANT(GENERATOR_CONSUMER_ALPHA);
+	BIND_CONSTANT(GENERATOR_CONSUMER_LIGHT);
+	BIND_CONSTANT(GENERATOR_CONSUMER_PANM);
+	ClassDB::bind_static_method("ObjectData",
+			D_METHOD("panm_rotation_unit_deg"), &ObjectData::panm_rotation_unit_deg);
+	ClassDB::bind_static_method("ObjectData",
+			D_METHOD("panm_value_unit"), &ObjectData::panm_value_unit);
+	ClassDB::bind_static_method("ObjectData",
+			D_METHOD("panm_track_limits"), &ObjectData::panm_track_limits);
+	ClassDB::bind_static_method("ObjectData",
+			D_METHOD("get_panm_mode_options"), &ObjectData::get_panm_mode_options);
+	ClassDB::bind_static_method("ObjectData",
+			D_METHOD("get_generator_style_ids"), &ObjectData::get_generator_style_ids);
+	ClassDB::bind_static_method("ObjectData",
+			D_METHOD("generator_style_code_name", "style_id"),
+			&ObjectData::generator_style_code_name);
+	ClassDB::bind_static_method("ObjectData",
+			D_METHOD("generator_style_reads_control_value", "consumer", "style_id"),
+			&ObjectData::generator_style_reads_control_value);
+	ClassDB::bind_static_method("ObjectData",
+			D_METHOD("generator_style_parameter_is_ctrl_reference", "style_id"),
+			&ObjectData::generator_style_parameter_is_ctrl_reference);
+
 	ADD_SIGNAL(MethodInfo("object_changed"));
 }

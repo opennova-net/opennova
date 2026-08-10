@@ -1955,6 +1955,30 @@ void MnuDocument::set_widget_color(int p_id, int p_slot, const String &p_value) 
 	touch();
 }
 
+Variant MnuDocument::parse_color_token(const String &p_token) {
+	// Marshalling only: the token grammar (RRGGBB / AARRGGBB / '#' strip /
+	// %VAR% rejection) lives at engine mnu.h parse_hex_color.
+	uint8_t r = 0;
+	uint8_t g = 0;
+	uint8_t b = 0;
+	uint8_t a = 0;
+	if (!mnu::parse_hex_color(to_std(p_token.strip_edges()), r, g, b, a)) {
+		return Variant();
+	}
+	return Color(r / 255.0f, g / 255.0f, b / 255.0f, a / 255.0f);
+}
+
+String MnuDocument::format_color_token(const Color &p_color, bool p_force_alpha) {
+	const auto channel = [](float c) {
+		const int v = static_cast<int>(c * 255.0f + 0.5f);
+		return static_cast<uint32_t>(v < 0 ? 0 : (v > 255 ? 255 : v));
+	};
+	const uint32_t argb = (channel(p_color.a) << 24) |
+			(channel(p_color.r) << 16) | (channel(p_color.g) << 8) |
+			channel(p_color.b);
+	return to_gd(mnu::format_hex_color(argb, p_force_alpha));
+}
+
 String MnuDocument::get_widget_texture(int p_id, int p_slot) const {
 	const mnu::Window *w = window_at(locate(p_id));
 	if (!w) {
@@ -2348,6 +2372,10 @@ void MnuDocument::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("get_widget_color", "id", "slot"), &MnuDocument::get_widget_color);
 	ClassDB::bind_method(D_METHOD("set_widget_color", "id", "slot", "value"), &MnuDocument::set_widget_color);
+	ClassDB::bind_static_method("MnuDocument", D_METHOD("parse_color_token", "token"),
+			&MnuDocument::parse_color_token);
+	ClassDB::bind_static_method("MnuDocument", D_METHOD("format_color_token", "color", "force_alpha"),
+			&MnuDocument::format_color_token, DEFVAL(true));
 	ClassDB::bind_method(D_METHOD("get_widget_texture", "id", "slot"), &MnuDocument::get_widget_texture);
 	ClassDB::bind_method(D_METHOD("set_widget_texture", "id", "slot", "value"), &MnuDocument::set_widget_texture);
 	ClassDB::bind_method(D_METHOD("get_widget_appearances", "id"), &MnuDocument::get_widget_appearances);

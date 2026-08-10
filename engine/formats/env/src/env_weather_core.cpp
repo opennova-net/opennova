@@ -6,6 +6,8 @@ namespace opennova::env {
 
 namespace {
 
+constexpr float kTau = 6.28318530717958647692f;
+
 Rgb packed_to_rgb01(uint32_t packed) {
 	Rgb c;
 	c.r = static_cast<float>((packed >> 16) & 0xFF) / 255.0f;
@@ -15,6 +17,18 @@ Rgb packed_to_rgb01(uint32_t packed) {
 }
 
 } // namespace
+
+float WeatherCore::sway_amount() const {
+	return static_cast<float>(oscillator.smoothed - 0x8000) / 32768.0f * 2.0f;
+}
+
+float WeatherCore::sway_phase() const {
+	return static_cast<float>(oscillator.ring_index) * (kTau / 256.0f);
+}
+
+float WeatherCore::lightning_intensity() const {
+	return static_cast<float>(lightning.level) / 255.0f;
+}
 
 void WeatherCore::tick(uint32_t fill_target, uint32_t sun_target,
 		uint32_t fog_target, uint32_t sky_target, uint32_t lightning_packed,

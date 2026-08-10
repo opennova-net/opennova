@@ -158,6 +158,9 @@ void MissionData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("save_file"), &MissionData::save_file);
 	ClassDB::bind_method(D_METHOD("save_as", "path"), &MissionData::save_as);
 	ClassDB::bind_method(D_METHOD("set_mis_base_heights", "flat_write_order"), &MissionData::set_mis_base_heights);
+	ClassDB::bind_method(D_METHOD("set_mis_base_heights_world", "flat_write_order"), &MissionData::set_mis_base_heights_world);
+	ClassDB::bind_static_method("MissionData", D_METHOD("fixed_seconds_from_raw", "raw"), &MissionData::fixed_seconds_from_raw);
+	ClassDB::bind_static_method("MissionData", D_METHOD("fixed_seconds_to_raw", "seconds"), &MissionData::fixed_seconds_to_raw);
 	ClassDB::bind_method(D_METHOD("is_modified"), &MissionData::is_modified);
 	ClassDB::bind_method(D_METHOD("begin_edit"), &MissionData::begin_edit);
 	ClassDB::bind_method(D_METHOD("commit_edit"), &MissionData::commit_edit);
@@ -196,11 +199,61 @@ void MissionData::_bind_methods() {
 	BIND_CONSTANT(ATTRIB_SEARCH_AND_DESTROY);
 	BIND_CONSTANT(ATTRIB_GAME_MODE_MASK);
 	BIND_CONSTANT(ITEM_ID_OFFSET);
+	BIND_CONSTANT(ACTION_CHANGE_GROUP_AI);
+	BIND_CONSTANT(ACTION_AREA_AI_RED);
+	BIND_CONSTANT(ACTION_AREA_AI_BLUE);
+	BIND_CONSTANT(ACTION_CHANGE_SINGLE_AI);
+	BIND_CONSTANT(ACTION_SUB_PLAY_PART_ANIM);
+	BIND_CONSTANT(FIXED_SECONDS_RAW_STEP);
 }
 
 static_assert(MissionData::ITEM_ID_OFFSET == opennova::mission::kItemIdOffset);
+// Every ATTRIB_* mirror is pinned to its engine home (engine/formats/mission
+// bms.h AttribFlags) — a drifted copy here would silently mis-edit headers.
 static_assert(MissionData::ATTRIB_FORCE_INDOORS ==
-              static_cast<int>(opennova::bms::AttribFlags::ForceIndoors));
+              static_cast<uint32_t>(opennova::bms::AttribFlags::ForceIndoors));
+static_assert(MissionData::ATTRIB_ROTATE_MAP_180 ==
+              static_cast<uint32_t>(opennova::bms::AttribFlags::RotateMap180));
+static_assert(MissionData::ATTRIB_ENABLE_NVG ==
+              static_cast<uint32_t>(opennova::bms::AttribFlags::EnableNVG));
+static_assert(MissionData::ATTRIB_START_WITH_NVG_ON ==
+              static_cast<uint32_t>(opennova::bms::AttribFlags::StartWithNVGOn));
+static_assert(MissionData::ATTRIB_ADVANCE_AND_SECURE ==
+              static_cast<uint32_t>(opennova::bms::AttribFlags::AdvanceAndSecure));
+static_assert(MissionData::ATTRIB_CONQUER_AND_CONTROL ==
+              static_cast<uint32_t>(opennova::bms::AttribFlags::ConquerAndControl));
+static_assert(MissionData::ATTRIB_ATTACK_AND_DEFEND ==
+              static_cast<uint32_t>(opennova::bms::AttribFlags::AttackAndDefend));
+static_assert(MissionData::ATTRIB_COOP ==
+              static_cast<uint32_t>(opennova::bms::AttribFlags::Coop));
+static_assert(MissionData::ATTRIB_DEATHMATCH ==
+              static_cast<uint32_t>(opennova::bms::AttribFlags::Deathmatch));
+static_assert(MissionData::ATTRIB_KING_OF_THE_HILL ==
+              static_cast<uint32_t>(opennova::bms::AttribFlags::KingOfTheHill));
+static_assert(MissionData::ATTRIB_FLAGBALL ==
+              static_cast<uint32_t>(opennova::bms::AttribFlags::FlagBall));
+static_assert(MissionData::ATTRIB_CAPTURE_THE_FLAG ==
+              static_cast<uint32_t>(opennova::bms::AttribFlags::CaptureTheFlag));
+static_assert(MissionData::ATTRIB_TEAM_DEATHMATCH ==
+              static_cast<uint32_t>(opennova::bms::AttribFlags::TeamDeathmatch));
+static_assert(MissionData::ATTRIB_TEAM_KING_OF_THE_HILL ==
+              static_cast<uint32_t>(opennova::bms::AttribFlags::TeamKingOfTheHill));
+static_assert(MissionData::ATTRIB_SEARCH_AND_DESTROY ==
+              static_cast<uint32_t>(opennova::bms::AttribFlags::SearchAndDestroy));
+static_assert(MissionData::ATTRIB_GAME_MODE_MASK == opennova::bms::kGameModeMask);
+// The scripting action-id mirrors pin to the engine schema enums.
+static_assert(MissionData::ACTION_CHANGE_GROUP_AI ==
+              static_cast<uint32_t>(opennova::bms::ActionType::ChangeGroupAI));
+static_assert(MissionData::ACTION_AREA_AI_RED ==
+              static_cast<uint32_t>(opennova::bms::ActionType::AreaAiRed));
+static_assert(MissionData::ACTION_AREA_AI_BLUE ==
+              static_cast<uint32_t>(opennova::bms::ActionType::AreaAiBlue));
+static_assert(MissionData::ACTION_CHANGE_SINGLE_AI ==
+              static_cast<uint32_t>(opennova::bms::ActionType::ChangeSingleAI));
+static_assert(MissionData::ACTION_SUB_PLAY_PART_ANIM ==
+              static_cast<uint32_t>(opennova::bms::AIActionSubType::PlayPartAnim));
+static_assert(MissionData::FIXED_SECONDS_RAW_STEP ==
+              opennova::mission::kFixedSecondsRawStep);
 
 Error MissionData::open_file(const String &path) {
 	source_path = path;
@@ -1456,6 +1509,24 @@ void MissionData::set_mis_base_heights(const PackedInt32Array &flat_write_order)
 	mis_base_heights = flat_write_order;
 }
 
+void MissionData::set_mis_base_heights_world(const PackedFloat32Array &flat_write_order) {
+	// Encode the world-unit heights to the 16.16 raws here (round-to-nearest,
+	// NaN -> 0 — an unsampled height stages the .bms default), so no caller
+	// restates the fixed-point convention.
+	PackedInt32Array fixed;
+	fixed.resize(flat_write_order.size());
+	const float *src = flat_write_order.ptr();
+	int32_t *dst = fixed.ptrw();
+	for (int64_t i = 0; i < flat_write_order.size(); ++i) {
+		const float h = src[i];
+		dst[i] = std::isnan(h)
+				? 0
+				: static_cast<int32_t>(std::lround(
+						  static_cast<double>(h) * 65536.0));
+	}
+	mis_base_heights = fixed;
+}
+
 bool MissionData::is_modified() const {
 	return modified;
 }
@@ -1555,50 +1626,37 @@ Dictionary MissionData::structure_fingerprint() const {
 	return out;
 }
 
-// Game mode is a single-select among the 11 attrib_flags mode bits. [orig: sub_402770, dfx2med.exe.
-// Decode @0x4050c7 tests the bits in the priority order below and selects the matching combobox item;
-// encode @0x4031cd clears them with `and 0x7CFFFF` (== ~ATTRIB_GAME_MODE_MASK) then OR's exactly one.]
+// Game mode is a single-select among the 11 attrib_flags mode bits. The decode
+// priority, the mask, and the clear-then-OR encode live in the engine
+// (engine/formats/mission bms.h selected_game_mode/set_game_mode — the
+// witness cites ride there); this binding only marshals.
 int64_t MissionData::get_game_mode() const {
 	if (!document.is_loaded()) {
 		return 0;
 	}
-	const uint32_t flags = static_cast<uint32_t>(document.bms_file().header.attrib_flags);
-	// Engine decode priority (uint32 literals to avoid a narrowing conversion from the unnamed enum;
-	// values mirror the ATTRIB_* constants named in the comments).
-	const uint32_t priority[] = {
-		0x1000000u,  // ATTRIB_COOP
-		0x2000000u,  // ATTRIB_DEATHMATCH
-		0x20000000u, // ATTRIB_TEAM_DEATHMATCH
-		0x4000000u,  // ATTRIB_KING_OF_THE_HILL
-		0x40000000u, // ATTRIB_TEAM_KING_OF_THE_HILL
-		0x10000000u, // ATTRIB_CAPTURE_THE_FLAG
-		0x800000u,   // ATTRIB_ATTACK_AND_DEFEND
-		0x80000000u, // ATTRIB_SEARCH_AND_DESTROY
-		0x8000000u,  // ATTRIB_FLAGBALL
-		0x10000u,    // ATTRIB_ADVANCE_AND_SECURE
-		0x20000u,    // ATTRIB_CONQUER_AND_CONTROL
-	};
-	for (uint32_t bit : priority) {
-		if (flags & bit) {
-			return static_cast<int64_t>(bit);
-		}
-	}
-	return 0; // no mode bit set -> Single Player
+	return static_cast<int64_t>(
+			opennova::bms::selected_game_mode(document.bms_file().header.attrib_flags));
 }
 
 bool MissionData::set_game_mode(int64_t bit) {
 	if (!document.is_loaded()) {
 		return false;
 	}
-	const uint32_t b = static_cast<uint32_t>(static_cast<uint64_t>(bit));
-	const uint32_t mask = static_cast<uint32_t>(ATTRIB_GAME_MODE_MASK);
-	// Valid iff 0 (Single Player) or exactly one of the 11 mode bits.
-	if (b != 0 && ((b & ~mask) != 0 || (b & (b - 1)) != 0)) {
+	if (!opennova::bms::set_game_mode(
+				document.bms_file().header.attrib_flags,
+				static_cast<uint32_t>(static_cast<uint64_t>(bit)))) {
 		return false;
 	}
-	auto &field = document.bms_file().header.attrib_flags;
-	const uint32_t cur = static_cast<uint32_t>(field);
-	field = static_cast<opennova::bms::AttribFlags>((cur & ~mask) | b);
 	modified = true;
 	return true;
+}
+
+// FixedSeconds raw <-> seconds — one impl in engine/formats/mission
+// mission_schema.h (the Med_ParamAnimTime witness rides there).
+double MissionData::fixed_seconds_from_raw(int p_raw) {
+	return opennova::mission::fixed_seconds_from_raw(p_raw);
+}
+
+int MissionData::fixed_seconds_to_raw(double p_seconds) {
+	return opennova::mission::fixed_seconds_to_raw(p_seconds);
 }

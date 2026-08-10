@@ -10,8 +10,6 @@ namespace opennova::env {
 
 namespace {
 
-constexpr float kTau = 6.28318530717958647692f;
-
 // Same rounding as ColorSmoother's packer (and the GUT vector hex idiom):
 // byte = int(channel * 255 + 0.5); alpha packs opaque like a Godot Color's
 // default 1.0 did.
@@ -321,17 +319,18 @@ void WeatherRuntime::write_weather_state(EnvironmentState &env) {
 
 // --- smoothed reads --------------------------------------------------------
 
+// One formula home: env::WeatherCore (env_weather_core.h) — shared with the
+// Godot WeatherCore binding.
 float WeatherRuntime::sway_amount() const {
-	return static_cast<float>(core_.oscillator.smoothed - 0x8000) / 32768.0f *
-			2.0f;
+	return core_.sway_amount();
 }
 
 float WeatherRuntime::sway_phase() const {
-	return static_cast<float>(core_.oscillator.ring_index) * (kTau / 256.0f);
+	return core_.sway_phase();
 }
 
 float WeatherRuntime::lightning_intensity() const {
-	return static_cast<float>(core_.lightning.level) / 255.0f;
+	return core_.lightning_intensity();
 }
 
 Rgb WeatherRuntime::smooth_fill() const {

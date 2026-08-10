@@ -107,11 +107,11 @@ public:
 	Color get_cloudhighlight() const;
 	Color get_cloudedge() const;
 
-	// (smoothed - 0x8000) / 0x8000 * 2 — the shader-facing sway scalar.
+	// The shader-facing sway scalar/phase and lightning intensity — pure
+	// forwards of env::WeatherCore::sway_amount/sway_phase/lightning_intensity
+	// (env_weather_core.h is the formula home, shared with WeatherRuntime).
 	float get_sway_amount() const;
-	// ring_index * (TAU / 256) — the shader-facing sway phase.
 	float get_sway_phase() const;
-	// Last SET flash level / 255.
 	float get_lightning_intensity() const;
 
 	// The witnessed per-layer cloud UV translations for a camera at

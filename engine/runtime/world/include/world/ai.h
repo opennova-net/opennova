@@ -71,6 +71,18 @@ enum AiState : int32_t {
 const char *ai_state_name(int32_t state);
 
 // ----------------------------------------------------------------------------
+// PLAYPARTANIM phase domain: one full sweep spans 0..0x10000 (16.16 1.0). The
+// integrator clamps the up-sweep AT kPartAnimPhaseOne — landing exactly on it
+// remains active — and the present ACTIVE code is live only while positive and
+// within one phase. [orig: Entity_ApplyCommand case 0x22 @ 0x43B192 writes the
+// channels; integrator Entity_UpdateSuspensionBounce @ 0x456710/@ 0x456740]
+// ----------------------------------------------------------------------------
+inline constexpr int32_t kPartAnimPhaseOne = 0x10000;
+constexpr bool part_anim_phase_active(int32_t code) {
+    return code > 0 && code <= kPartAnimPhaseOne;
+}
+
+// ----------------------------------------------------------------------------
 // AiBrain — entity+100 / unk_AED380, 812 bytes (203 dwords). Modeled as a raw
 // dword array so handlers index it exactly like the decomp (`b.f[4]`).
 // ----------------------------------------------------------------------------
@@ -156,6 +168,12 @@ static_assert(sizeof(AiBrain) == 812, "AiBrain must match unk_AED380 812-byte st
 struct AiSlot {
     int32_t f[43] = {};
     uint8_t *bytes() { return reinterpret_cast<uint8_t *>(f); }
+    // Named dword indices (the perception/attack ranges the target scan reads,
+    // 16.16 world units) plus the movement flag byte the reset helpers clear.
+    enum Idx : int {
+        kAttackRange = 15, // max attack range [byte +60]
+        kSightRange = 17,  // perception/sight range [byte +68]
+    };
     enum { kMoveFlagByte = 136 };
 };
 static_assert(sizeof(AiSlot) == 172, "AiSlot must match unk_A34B90 172-byte stride");

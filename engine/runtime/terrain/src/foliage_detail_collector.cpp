@@ -6,13 +6,15 @@
 namespace opennova {
 namespace {
 
-// [orig: Terrain_CollectNearFoliagePatches @ 0x603e60]
+// [orig: Terrain_CollectNearFoliagePatches @ 0x603e60] — the cell size,
+// distance limit, and patch capacity live in the public header (shared with
+// the preview dispatcher).
 constexpr int kSectorSize = 512;
-constexpr int kDetailCellSize = 16;
+constexpr int kDetailCellSize = kFoliageDetailCellSize;
 constexpr int kFirstMipLevel = 1;
 constexpr int kLastMipLevel = 6;
-constexpr float kMaximumDistance = 42.0f;
-constexpr size_t kPatchCapacity = 128;
+constexpr float kMaximumDistance = kFoliageDetailDistanceLimit;
+constexpr size_t kPatchCapacity = kFoliageDetailPatchCapacity;
 
 bool sector_atlas_origin(int sector_id, int &atlas_x, int &atlas_z) {
 	switch (sector_id) {

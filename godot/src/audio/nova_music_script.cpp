@@ -56,9 +56,41 @@ void MusicScript::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("save_to_path", "path"), &MusicScript::save_to_path);
 	ClassDB::bind_method(D_METHOD("get_raw_file_bytes"), &MusicScript::get_raw_file_bytes);
 
+	// MusAstStmtKind re-exports + the flow predicates (engine mus/ast.h is
+	// the authority; the enum values above are defined from it directly).
+	BIND_CONSTANT(AST_PLAY);
+	BIND_CONSTANT(AST_TRANSITION);
+	BIND_CONSTANT(AST_GOTO);
+	BIND_CONSTANT(AST_CALL);
+	BIND_CONSTANT(AST_RETURN);
+	BIND_CONSTANT(AST_YIELD);
+	BIND_CONSTANT(AST_NOP);
+	BIND_CONSTANT(AST_DONE);
+	BIND_CONSTANT(AST_ASSIGN);
+	BIND_CONSTANT(AST_INCDEC);
+	BIND_CONSTANT(AST_EXPR);
+	BIND_CONSTANT(AST_IF);
+	BIND_CONSTANT(AST_SWITCH);
+	BIND_CONSTANT(AST_BRANCH_COMMENT);
+	BIND_CONSTANT(AST_FRAME_ENTER);
+	ClassDB::bind_static_method("MusicScript",
+			D_METHOD("ast_kind_is_terminator", "kind"),
+			&MusicScript::ast_kind_is_terminator);
+	ClassDB::bind_static_method("MusicScript",
+			D_METHOD("ast_kind_is_locked", "kind"),
+			&MusicScript::ast_kind_is_locked);
+
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "source_path",
 								   PROPERTY_HINT_NONE, "", PROPERTY_USAGE_DEFAULT),
 			"", "get_source_path");
+}
+
+bool MusicScript::ast_kind_is_terminator(int p_kind) {
+	return mus_ast_kind_is_terminator(p_kind) != 0;
+}
+
+bool MusicScript::ast_kind_is_locked(int p_kind) {
+	return mus_ast_kind_is_locked(p_kind) != 0;
 }
 
 void MusicScript::load_from_decrypted_bytes(const PackedByteArray &bytes, const String &p_source) {
@@ -173,14 +205,14 @@ PackedStringArray MusicScript::get_section_names(const StringName &p_script_name
 	return out;
 }
 
-// Byte offset where the `enter` (0x38) frame op banks the caller's arguments
-// in the locals area: l_<base + 4k> is the state's (k+1)-th input. Stock files
-// use 0x20 [orig: AudioVM_Op_Enter @0x672C20 reads instance[+0x3C]]; the editor
-// uses this to render those slots as "Input N".
+// Byte offset where the `enter` (MUS_OP_ENTER) frame op banks the caller's
+// arguments in the locals area: l_<base + 4k> is the state's (k+1)-th input.
+// The witness and the 0x20 stock value live at MUS_DEFAULT_LOCALS_BASE
+// (engine mus.h); the editor uses this to render those slots as "Input N".
 int MusicScript::get_locals_frame_offset(const StringName &p_script_name) const {
 	const MusScript *s = raw_script(String(p_script_name));
 	if (s == nullptr || s->locals_frame_offset == 0) {
-		return 0x20;
+		return MUS_DEFAULT_LOCALS_BASE;
 	}
 	return (int)s->locals_frame_offset;
 }
@@ -468,9 +500,9 @@ static const char *ast_kind_name(int kind) {
 }
 
 static const char *ast_switch_action_name(int inner_op) {
-	if (inner_op == 0x3D || inner_op == 0x3E) return "play";
-	if (inner_op == 0x30) return "goto";
-	return "enter"; // 0x3B and default
+	if (inner_op == MUS_OP_PLAYW || inner_op == MUS_OP_PLAY) return "play";
+	if (inner_op == MUS_OP_GOTO) return "goto";
+	return "enter"; // MUS_OP_SETSTATE and default
 }
 
 static Array ast_stmts_to_array(const MusAstProgram *prog, const MusAstStmt *stmts, uint32_t count);

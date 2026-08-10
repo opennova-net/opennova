@@ -27,6 +27,10 @@ void TerrainTileEntry::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_cell_z", "value"), &TerrainTileEntry::set_cell_z);
 	ClassDB::bind_method(D_METHOD("get_cell_z"), &TerrainTileEntry::get_cell_z);
 	ClassDB::bind_method(D_METHOD("set_cell", "cell_x", "cell_z"), &TerrainTileEntry::set_cell);
+	ClassDB::bind_method(D_METHOD("set_world_x", "value"), &TerrainTileEntry::set_world_x);
+	ClassDB::bind_method(D_METHOD("get_world_x"), &TerrainTileEntry::get_world_x);
+	ClassDB::bind_method(D_METHOD("set_world_z", "value"), &TerrainTileEntry::set_world_z);
+	ClassDB::bind_method(D_METHOD("get_world_z"), &TerrainTileEntry::get_world_z);
 	ClassDB::bind_method(D_METHOD("has_flag", "flag"), &TerrainTileEntry::has_flag);
 	ClassDB::bind_method(D_METHOD("set_flag", "flag", "enabled"), &TerrainTileEntry::set_flag);
 	ClassDB::bind_method(D_METHOD("to_dictionary"), &TerrainTileEntry::to_dictionary);
@@ -90,6 +94,22 @@ int TerrainTileEntry::get_cell_z() const {
 void TerrainTileEntry::set_cell(int cell_x, int cell_z) {
 	x_fixed = opennova::til_x_fixed_from_cell(cell_x);
 	z_fixed = opennova::til_z_fixed_from_cell(cell_z);
+}
+
+void TerrainTileEntry::set_world_x(double value) {
+	x_fixed = opennova::til_x_fixed_from_world(value);
+}
+
+float TerrainTileEntry::get_world_x() const {
+	return opennova::til_world_x_from_fixed(x_fixed);
+}
+
+void TerrainTileEntry::set_world_z(double value) {
+	z_fixed = opennova::til_z_fixed_from_world(value);
+}
+
+float TerrainTileEntry::get_world_z() const {
+	return opennova::til_world_z_from_fixed(z_fixed);
 }
 
 bool TerrainTileEntry::has_flag(int flag) const {

@@ -5,6 +5,8 @@
 #include "nova_terrain_tile_info.h"
 #include "nova_terrain_foliage_def.h"
 
+#include <terrain/foliage_detail_collector.h>
+
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/geometry_instance3d.hpp>
@@ -36,10 +38,13 @@ namespace godot {
 namespace {
 
 constexpr float INVALID_HEIGHT_THRESHOLD = -1.0e6f;
-constexpr float DETAIL_DISTANCE_LIMIT = 42.0f;
-constexpr float PREVIEW_CELL_SIZE = 16.0f;
+// The witnessed detail trio (limit / cell / cap) is engine-owned:
+// terrain/foliage_detail_collector.h carries the [orig] witness.
+constexpr float DETAIL_DISTANCE_LIMIT = opennova::kFoliageDetailDistanceLimit;
+constexpr float PREVIEW_CELL_SIZE =
+		static_cast<float>(opennova::kFoliageDetailCellSize);
 constexpr int PREVIEW_CELL_RADIUS = 4;
-constexpr int PREVIEW_CELL_LIMIT = 128;
+constexpr int PREVIEW_CELL_LIMIT = opennova::kFoliageDetailPatchCapacity;
 
 bool valid_height(float p_height) {
   return std::isfinite(p_height) && p_height > INVALID_HEIGHT_THRESHOLD;
@@ -54,9 +59,11 @@ bool finite_vector(const Vector3 &p_value) {
 uint32_t pack_preview_detail_key(int p_cell_min_x, int p_cell_min_z) {
   // The generator decodes HIGH15 as the X cell origin and LOW15 as the
   // positive-Z edge. Candidates run lowBase - localB, so a preview cell
-  // [z,z+16] stores z+16 in the low half.
+  // [z, z+cell] stores z+cell in the low half.
   const uint32_t x = static_cast<uint32_t>(p_cell_min_x) & 0x7FFFu;
-  const uint32_t z_top = static_cast<uint32_t>(p_cell_min_z + 16) & 0x7FFFu;
+  const uint32_t z_top = static_cast<uint32_t>(
+                             p_cell_min_z + opennova::kFoliageDetailCellSize) &
+                         0x7FFFu;
   return (x << 16u) | z_top;
 }
 

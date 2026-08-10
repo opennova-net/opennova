@@ -36,6 +36,19 @@ extern "C" {
 #define FNT_FIRST_CHAR 32u
 #define FNT_MAX_PAGES 16u
 
+/* The witnessed non-printing bytes: retail measures and draws text from
+ * unsigned bytes, skipping controls below space plus the 0x7F..0x81 range;
+ * every other byte directly selects its FNT glyph record
+ * [orig: CGameFont_MeasureText @ 0x674e70; CGameFont_DrawText @ 0x6752c0 —
+ * v11 < 0x20 || 0x7F || 0x80 || 0x81]. */
+#define FNT_NONPRINT_FIRST 0x7Fu
+#define FNT_NONPRINT_LAST 0x81u
+
+static inline int fnt_byte_is_nonprinting(uint8_t byte) {
+	return byte < FNT_FIRST_CHAR ||
+	       (byte >= FNT_NONPRINT_FIRST && byte <= FNT_NONPRINT_LAST);
+}
+
 typedef enum {
 	FNT_OK = 0,
 	FNT_ERR_NULL_POINTER = -1,

@@ -22,5 +22,8 @@ inline constexpr float kPreviewSwayFreqRadPerSec = 0.8f;    // 0.0008 / ms
 inline constexpr float kPreviewSwayAmpDeg = 22.5f;          // 2^28 BAM
 inline constexpr const char *kPreviewSkeletonBad = "Dt1rst.bad";
 inline constexpr const char *kPreviewIdleBad = "PI_Idle.BAD";
+// A fresh preview model spawns at a random initial yaw in [0, 180) degrees —
+// rand() % 180 [orig: PlayerInfo_InitPreviewModel @ 0x5600d0].
+inline constexpr int kPreviewInitialYawRangeDeg = 180;
 
 }  // namespace opennova::avatars

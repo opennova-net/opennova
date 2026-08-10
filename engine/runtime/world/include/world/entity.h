@@ -28,6 +28,11 @@ constexpr int32_t retail_signed_i16(int64_t value) noexcept {
                          : static_cast<int32_t>(low) - 0x10000;
 }
 
+// The retail signed-16 storage domain those fields live in (health, health_max,
+// armor classes, ...): the debug/edit surfaces clamp to it.
+inline constexpr int32_t kRetailI16Min = -32768;
+inline constexpr int32_t kRetailI16Max = 32767;
+
 // Mirrors mission::EntityKind / bms::ItemType. Kept independent so engine/runtime/world
 // has no dependency on engine/runtime/mission (promotion adapts between them).
 enum class EntityKind : uint8_t {
@@ -85,6 +90,12 @@ constexpr int spawn_origin_kind(uint32_t origin) { return static_cast<int>(origi
 constexpr int32_t spawn_origin_index(uint32_t origin) {
     return static_cast<int32_t>(origin & 0xFFFFFFu);
 }
+// The decoded halves of kSpawnOriginNone as they appear wherever provenance is
+// carried split (the present rows' PF_KIND/PF_INDEX): a wire-only row with no
+// local BMS record decodes to kind 255 / index 0xFFFFFF. Named so no consumer
+// re-derives the "no local record" sentinel by hand.
+inline constexpr int kSpawnOriginKindNone = spawn_origin_kind(kSpawnOriginNone);      // 255
+inline constexpr int32_t kSpawnOriginIndexNone = spawn_origin_index(kSpawnOriginNone); // 0xFFFFFF
 
 // Seat class for vehicle/emplacement mounting. The enum values are the original
 // seatType codes. [orig: Entity_FindBestSeatSlot @0x4351f0 classifies the seat

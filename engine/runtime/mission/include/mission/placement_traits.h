@@ -7,6 +7,8 @@
 
 #include <cstdint>
 
+#include <mission/mission.h> // kItemIdOffset (formats/mission)
+
 namespace opennova::mission {
 
 // items.def type ids consumed by placement (itemdef-re.md +0x5c).
@@ -30,7 +32,19 @@ inline constexpr uint32_t kEntityAttribNoShadow = 0x01000000u;
 // runtime entity item/type id stays unchanged; this only chooses
 // graphics/ADM data for presentation.
 inline constexpr int kPlayerRuntimeTypeId = 0x14B9;
+// items.def "Player #1, Single player" -> US01/US01.adm.
 inline constexpr int kPlayerVisualItemId = 105310;
+
+// The items.def id presentation resolves graphics/ADM by, for a runtime
+// entity type id: the runtime-only player type maps to the authored visual
+// item when the catalog carries it (`player_visual_in_catalog` — the shell's
+// item database probe); every other type is the wire/BMS id + kItemIdOffset.
+inline constexpr int visual_item_id_for_runtime_type(
+		int item_id, bool player_visual_in_catalog) {
+	if (item_id == kPlayerRuntimeTypeId && player_visual_in_catalog)
+		return kPlayerVisualItemId;
+	return item_id + kItemIdOffset;
+}
 
 // Live entity silhouettes ride the dynamic projection list: persons always,
 // otherwise the item's attrib2 dynamic-shadow bit

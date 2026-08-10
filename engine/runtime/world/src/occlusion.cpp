@@ -62,7 +62,9 @@ constexpr int32_t kWedgePlaneCap = 64;   // [orig: "render_VPT() : too many plan
 constexpr int32_t kGroupCap = 512;       // [orig: window/viewthru group caps]
 constexpr int32_t kGroupPlaneCap = 2048; // [orig: each plane-arena cap]
 constexpr int32_t kMaskSlots = 0x1000;   // pool-2 handle-slot space (retail array = 1200)
-constexpr int32_t kSlotDistFixed = 250 << 16; // [orig: the 0xFA0000 slot range @ 0x5c6d7f]
+// [orig: the 0xFA0000 slot range @ 0x5c6d7f] — the exported world-unit radius
+// lives in occlusion.h (kPortalSlotCollectRadius).
+constexpr int32_t kSlotDistFixed = static_cast<int32_t>(kPortalSlotCollectRadius) << 16;
 
 } // namespace
 

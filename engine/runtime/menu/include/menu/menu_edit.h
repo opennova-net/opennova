@@ -30,6 +30,14 @@ struct EditLimits {
 	long max_value = 0;
 };
 
+// The router's printable filter: a character event reaches the insert only
+// when it is a printable 8-bit byte — controls below space, DEL, and anything
+// past the byte range are dropped before the insert is ever consulted
+// [orig: the iscntrl/8-bit gate of edit_widget_handle_input_event @ 0x661510].
+inline constexpr bool edit_char_insertable(int unicode) {
+	return unicode >= 0x20 && unicode != 0x7F && unicode <= 0xFF;
+}
+
 // The witnessed special-key codes the handler consumes (VK_* values).
 inline constexpr int kEditKeyBackspace = 0x08;
 inline constexpr int kEditKeyEnter = 0x0D;

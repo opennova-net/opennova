@@ -364,24 +364,19 @@ int32_t calc_impact_damage(const FixedVec3 &velocity_q16, const AmmoTableEntry &
     if (speed_scaled >= 1219) speed_scaled = 1219;
     int32_t damage = wrapped_signed_product(speed_scaled, ammo.weight_in_grains) / 875;
     if (target.item_type == 3) {
+        // The zone/bone -> multiplier tables live in round_sim.h (the one home
+        // the debug views read through the binding too).
         double zone_scale = 1.0;
         if ((target.item_attrib & kItemAttribLandable) != 0) {
             // The attrib-0x200 seat branch reads the primary/reaction section
             // ray[31] (hitZoneData+124 @0x4ec977), NOT the damage zone ray[32]
             // the normal-infantry table below reads (@0x4ec9bf). The two differ
             // whenever the bone walk crosses more than one sphere.
-            if (hit_bone == 2 || hit_bone == 3 || hit_bone == 6 || hit_bone == 7) {
-                target.flags |= 0x800u;
-                zone_scale = 6.0;
-            }
-        } else if (hit_zone >= 0 && hit_zone <= 4) {
-            zone_scale = 1.25;
-        } else if ((hit_zone >= 9 && hit_zone <= 12) ||
-                   (hit_zone >= 15 && hit_zone <= 18)) {
-            zone_scale = 0.5;
-        } else if (hit_zone == 13 || hit_zone == 14) {
-            target.flags |= 0x800u;
-            zone_scale = 3.0;
+            zone_scale = seat_hit_bone_damage_multiplier(hit_bone);
+            if (seat_hit_bone_is_critical(hit_bone)) target.flags |= 0x800u;
+        } else {
+            zone_scale = hit_zone_damage_multiplier(hit_zone);
+            if (hit_zone_is_critical(hit_zone)) target.flags |= 0x800u;
         }
         damage = static_cast<int32_t>(static_cast<double>(damage) * zone_scale);
 

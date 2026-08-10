@@ -20,12 +20,14 @@
 
 using namespace godot;
 
-namespace {
+// The EDIT_RESULT_* re-exports track menu/menu_edit.h EditKeyResult; pin the
+// documented GDScript contract (0 none / 1 changed / 2 commit) so an engine
+// enum reorder cannot silently change the bound values.
+static_assert(MenuFrame::EDIT_RESULT_NONE == 0);
+static_assert(MenuFrame::EDIT_RESULT_CHANGED == 1);
+static_assert(MenuFrame::EDIT_RESULT_COMMIT == 2);
 
-// Menus are authored in the fixed 800x600 design space
-// [orig: CUIScene_SetScreenScale @ 0x639480].
-constexpr float kDesignW = 800.0f;
-constexpr float kDesignH = 600.0f;
+namespace {
 
 Color argb_to_color(uint32_t argb) {
 	return Color(((argb >> 16) & 0xFFu) / 255.0f,
@@ -544,10 +546,9 @@ bool MenuFrame::edit_char(int p_index, int p_unicode) {
 	if (!configured_) {
 		return false;
 	}
-	// The router's printable filter [orig: iscntrl-filtered chars ->
-	// vtable+0x58 insert — edit_widget_handle_input_event @ 0x661510; the ops
-	// live in engine menu/menu_edit.h].
-	if (p_unicode < 0x20 || p_unicode == 0x7F || p_unicode > 0xFF) {
+	// The router's printable filter and the ops both live in engine
+	// menu/menu_edit.h (the witnesses ride the engine header).
+	if (!opennova::menu::edit_char_insertable(p_unicode)) {
 		return false;
 	}
 	opennova::menu::EditLimits limits;
@@ -583,14 +584,7 @@ int MenuFrame::edit_key(int p_index, int p_key, bool p_shift) {
 	ws.text = field.text;
 	ws.caret = field.caret;
 	queue_redraw();
-	switch (result) {
-		case opennova::menu::EditKeyResult::kChanged:
-			return 1;
-		case opennova::menu::EditKeyResult::kCommit:
-			return 2;
-		default:
-			return 0;
-	}
+	return static_cast<int>(result); // the pinned EDIT_RESULT_* contract
 }
 
 Ref<Texture2D> MenuFrame::get_cursor_texture() const {
@@ -654,7 +648,10 @@ void MenuFrame::set_cursor_state(bool p_visible, const Vector2 &p_position) {
 Vector2 MenuFrame::design_scale_() const {
 	const Vector2 size = get_size();
 	if (size.x > 1.0f && size.y > 1.0f) {
-		return Vector2(size.x / kDesignW, size.y / kDesignH);
+		// The design space and its witness live at menu/menu_frame.h.
+		return Vector2(
+				size.x / static_cast<float>(opennova::menu::kMenuDesignWidth),
+				size.y / static_cast<float>(opennova::menu::kMenuDesignHeight));
 	}
 	return Vector2(1.0f, 1.0f);
 }
@@ -896,4 +893,16 @@ void MenuFrame::_bind_methods() {
 			&MenuFrame::get_cursor_texture);
 	ClassDB::bind_method(D_METHOD("get_unresolved_asset_count"),
 			&MenuFrame::get_unresolved_asset_count);
+	BIND_CONSTANT(DESIGN_WIDTH);
+	BIND_CONSTANT(DESIGN_HEIGHT);
+	BIND_CONSTANT(EDIT_KEY_BACKSPACE);
+	BIND_CONSTANT(EDIT_KEY_ENTER);
+	BIND_CONSTANT(EDIT_KEY_END);
+	BIND_CONSTANT(EDIT_KEY_HOME);
+	BIND_CONSTANT(EDIT_KEY_LEFT);
+	BIND_CONSTANT(EDIT_KEY_RIGHT);
+	BIND_CONSTANT(EDIT_KEY_DELETE);
+	BIND_CONSTANT(EDIT_RESULT_NONE);
+	BIND_CONSTANT(EDIT_RESULT_CHANGED);
+	BIND_CONSTANT(EDIT_RESULT_COMMIT);
 }

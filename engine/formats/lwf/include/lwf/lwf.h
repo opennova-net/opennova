@@ -25,6 +25,26 @@ namespace lwf {
 
 constexpr uint32_t kMagic = 0x4C574631;  // 'LWF1'
 
+// The one Q16 pitch convention: 0x10000 == 1.0. Member and set pitches compose
+// multiplicatively in Q16 — final = (member_pitch * set_pitch) >> 16
+// [orig: SoundBank_SelectTriggerEntryFromBank @ 0x75c0be] — so every float
+// conversion divides/multiplies by 0x10000, never 0xFFFF (authored set bases
+// ship 0xFFFF, i.e. unity minus 1/65536, but the SCALE is still 2^16).
+constexpr uint32_t kPitchUnityQ16 = 0x10000u;
+// The authoring tools' stock set-level pitch base (~unity; see above).
+constexpr uint32_t kAuthoredSetPitchBase = 0xFFFFu;
+
+inline double pitch_from_q16(uint32_t q16) {
+  return static_cast<double>(q16) / static_cast<double>(kPitchUnityQ16);
+}
+
+inline uint32_t pitch_to_q16(double pitch) {
+  if (!(pitch > 0.0)) {
+    return 0u;
+  }
+  return static_cast<uint32_t>(pitch * static_cast<double>(kPitchUnityQ16) + 0.5);
+}
+
 struct Header {
   uint32_t header_size = 0;       // expected 28
   uint32_t magic = 0;             // 'LWF1'

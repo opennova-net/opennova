@@ -331,12 +331,11 @@ Ref<FontFile> FntResource::to_font_file() const {
 	int32_t advance_adjust = font_.glyph_spacing - 1;
 	for (uint32_t i = 0; i < FNT_GLYPH_COUNT; ++i) {
 		const std::uint8_t retail_byte = static_cast<std::uint8_t>(FNT_FIRST_CHAR + i);
-		// Retail measures and draws text from unsigned bytes. Bytes 0x7F..0x81
-		// are non-printing controls; every other byte directly selects its FNT
+		// The non-printing byte range and its witness live at fnt.h's
+		// fnt_byte_is_nonprinting; every printing byte directly selects its FNT
 		// record. Expose that record at the codepoint produced by OpenNova's
 		// CP1252 string boundary so Godot selects the same bitmap and metrics.
-		// [orig: CGameFont_MeasureText @ 0x674e70; CGameFont_DrawText @ 0x6752c0]
-		if (retail_byte >= 0x7F && retail_byte <= 0x81) {
+		if (fnt_byte_is_nonprinting(retail_byte)) {
 			continue;
 		}
 		const int32_t char_code = static_cast<int32_t>(opennova::cp1252_decode_byte(retail_byte));
@@ -352,6 +351,9 @@ Ref<FontFile> FntResource::to_font_file() const {
 
 		if (width <= 0 || height <= 0) {
 			if (char_code == 32) {
+				// font_height / 3 as the empty-space advance is an uncited
+				// runtime choice pending witness (the retail advance walk is
+				// glyph-width driven; see docs/fonts/fnt-re.md).
 				font->set_glyph_advance(cache_index, font_height, char_code, Vector2(font_height / 3.0f, 0));
 			}
 			continue;

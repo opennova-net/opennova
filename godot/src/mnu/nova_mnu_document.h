@@ -10,6 +10,7 @@
 #include <godot_cpp/variant/rect2.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
+#include <godot_cpp/variant/variant.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
 
 #include <vector>
@@ -279,6 +280,17 @@ public:
 
 	String get_widget_color(int p_id, int p_slot) const; // raw string, preserves %VAR%
 	void set_widget_color(int p_id, int p_slot, const String &p_value);
+
+	// The MNU color-token codec, re-exported from the engine parser (values
+	// and witnesses live at engine/formats/mnu: mnu.h parse_hex_color /
+	// format_hex_color, the 0xAARRGGBB dword order). parse_color_token
+	// returns a Color, or null for a %VAR% reference / empty / invalid token
+	// (so editors can render it as "unresolved"); format_color_token writes
+	// the uppercase AARRGGBB form, dropping the alpha pair for fully-opaque
+	// colors when force_alpha is false so 6-digit-authored values stay
+	// 6-digit.
+	static Variant parse_color_token(const String &p_token);
+	static String format_color_token(const Color &p_color, bool p_force_alpha = true);
 
 	String get_widget_texture(int p_id, int p_slot) const;
 	void set_widget_texture(int p_id, int p_slot, const String &p_value);

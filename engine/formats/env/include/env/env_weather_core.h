@@ -80,6 +80,16 @@ struct WeatherCore {
 	void set_exposure_from_outdoor_iris(float light_x, float light_y,
 			float light_z, float iris_percent, float iris_center);
 
+	// The shader-facing sway pair and lightning intensity — ONE home for the
+	// WeatherRuntime owner and the Godot binding (they must never diverge).
+	// sway_amount = (oscillator.smoothed - 0x8000) / 0x8000 * 2 (the signed
+	// wind strength the vegetation-sway shaders scale by), sway_phase =
+	// oscillator.ring_index * (2*pi / 256) (the ring position as an angle),
+	// lightning_intensity = the last SET flash level / 255.
+	float sway_amount() const;
+	float sway_phase() const;
+	float lightning_intensity() const;
+
 	// The in-world marched exposure: one classification per sample
 	// (kIrisSampleIndoor / kIrisSampleIndoorNoData / outdoor sun level 0..8);
 	// each runs the iris curve — indoors against the static ceiling/floor

@@ -5,6 +5,7 @@
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
+#include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
@@ -118,7 +119,26 @@ public:
 		// re-hardcodes the 100000. [orig: the +100000 item-id bias in the BMS
 		// entity records — mission/mission.h]
 		ITEM_ID_OFFSET = 100000,
+		// The witnessed BMS scripting action ids the logic tooling
+		// special-cases: the AI-change action family plus its PLAYPARTANIM
+		// sub-type. Mirrors bms::ActionType / bms::AIActionSubType
+		// (engine/formats/mission bms.h carries the witness; pinned by
+		// static_assert in the .cpp).
+		ACTION_CHANGE_GROUP_AI = 3,
+		ACTION_AREA_AI_RED = 12,
+		ACTION_AREA_AI_BLUE = 13,
+		ACTION_CHANGE_SINGLE_AI = 21,
+		ACTION_SUB_PLAY_PART_ANIM = 34,
+		// The FIXED_SECONDS param spin step in raw 16.16 units (256/65536 s)
+		// — mirrors mission_schema.h kFixedSecondsRawStep, which carries the
+		// Med_ParamAnimTime witness (pinned in the .cpp).
+		FIXED_SECONDS_RAW_STEP = 256,
 	};
+
+	// FixedSeconds raw <-> seconds (one impl in engine/formats/mission
+	// mission_schema.h: raw int = seconds * 65536, editor-spin rounding).
+	static double fixed_seconds_from_raw(int p_raw);
+	static int fixed_seconds_to_raw(double p_seconds);
 
 	Error open_file(const String &path);
 	// Build a fresh, empty, valid mission in memory (no file backing). Mirrors open_file's
@@ -381,6 +401,10 @@ public:
 	// extra_bheight falls back to the entity's parsed value (0 for .bms-sourced documents —
 	// positions stay absolute-declared, offsets just lose the baked base).
 	void set_mis_base_heights(const PackedInt32Array &flat_write_order);
+	// The same staging fed world-unit floats: each height is encoded to the
+	// 16.16 raw here (round-to-nearest, NaN -> 0) so callers never restate the
+	// fixed-point convention. Same clearing/apply contract as the raw variant.
+	void set_mis_base_heights_world(const PackedFloat32Array &flat_write_order);
 	bool is_modified() const;
 
 	// --- Undo / redo + dirty (in-memory document snapshots) -------------------

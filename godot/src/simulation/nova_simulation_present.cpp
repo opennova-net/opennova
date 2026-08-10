@@ -638,8 +638,10 @@ Dictionary Simulation::get_entity_debug(int p_index) const {
 	// perception/attack ranges the scan reads (AiSlot +68/+60, world units), the
 	// D-AI-5 weapon seed (AiProfile ammo index + clip, the live magazine word),
 	// and the current combat target.
-	out["sight_range_u"] = e->slot.f[17] / 65536.0;
-	out["attack_range_u"] = e->slot.f[15] / 65536.0;
+	out["sight_range_u"] =
+			e->slot.f[opennova::world::AiSlot::kSightRange] / 65536.0;
+	out["attack_range_u"] =
+			e->slot.f[opennova::world::AiSlot::kAttackRange] / 65536.0;
 	out["ammo_primary"] = e->profile.ammo_primary;
 	out["clip_size"] = e->profile.clip_size;
 	out["magazine"] = static_cast<int>(e->inf.magazine);
@@ -1047,7 +1049,7 @@ int32_t Simulation::decode_present_part_anim_phase(
 	const float *p = p_snapshot.ptr();
 	const int32_t high_code =
 			static_cast<int32_t>(p[p_base + active_field]);
-	if (high_code <= 0 || high_code > 0x10000) return 0;
+	if (!opennova::world::part_anim_phase_active(high_code)) return 0;
 	const uint32_t low = static_cast<uint32_t>(
 			static_cast<int32_t>(p[p_base + phase_field])) & 0xFFFFu;
 	const uint32_t bits =

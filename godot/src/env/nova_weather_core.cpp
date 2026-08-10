@@ -291,16 +291,18 @@ Color WeatherCore::get_cloudedge() const {
 	return packed_to_color(core_.sky_color_blocks.cloudedge.render_color);
 }
 
+// The sway/lightning formulas live on env::WeatherCore (one home shared with
+// WeatherRuntime); this binding only forwards.
 float WeatherCore::get_sway_amount() const {
-	return static_cast<float>(core_.oscillator.smoothed - 0x8000) / 32768.0f * 2.0f;
+	return core_.sway_amount();
 }
 
 float WeatherCore::get_sway_phase() const {
-	return static_cast<float>(core_.oscillator.ring_index) * (Math_TAU / 256.0f);
+	return core_.sway_phase();
 }
 
 float WeatherCore::get_lightning_intensity() const {
-	return static_cast<float>(core_.lightning.level) / 255.0f;
+	return core_.lightning_intensity();
 }
 
 Vector2 WeatherCore::get_cloud_uv_offset1(float p_cam_x, float p_cam_z) const {

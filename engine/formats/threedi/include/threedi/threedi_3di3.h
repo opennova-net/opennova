@@ -53,6 +53,17 @@
 #define THREEDI_TEX_FLAG_ANIMATED  0x01u  // Part of animation sequence
 #define THREEDI_TEX_FLAG_CLAMPED   0x02u  // Use clamp addressing (vs wrap)
 
+// The slot -> texture-type authoring policy: a fresh texture entry in a
+// normal-map slot (NORMAL / NORMAL_B) is stamped THREEDI_TEX_TYPE_NORMAL_MDT,
+// every other slot THREEDI_TEX_TYPE_DIFFUSE — matching what the original
+// authoring pipeline writes for MDT-sourced normal maps. One home so the
+// document bindings never restate the mapping.
+static inline uint8_t threedi_tex_default_type_for_slot(uint8_t slot) {
+    return (slot == THREEDI_TEX_SLOT_NORMAL || slot == THREEDI_TEX_SLOT_NORMAL_B)
+                   ? THREEDI_TEX_TYPE_NORMAL_MDT
+                   : THREEDI_TEX_TYPE_DIFFUSE;
+}
+
 /* 3DI3 chunk-header dword: high bit = parent (has children), low 24 bits =
  * payload length. One home; the reader and writer TUs both use these. */
 #define THREEDI_3DI3_PARENT_FLAG 0x80000000u
@@ -781,6 +792,10 @@ THREEDI_EXPORT void threedi_3di3_free(Threedi3di3 *model);
 // (e.g. godot_vec3). Returns 1 unless model/out is NULL (out untouched then).
 int threedi_3di3_ground_anchor(const Threedi3di3 *model, float out[3]);
 
+// The attach scan reads only a model's FIRST 16 userpoints — the result is a
+// 16-bit mask. [orig: ItemDef_GetBoneMaskByName @ 0x49ea40]
+#define THREEDI_USER_POINT_SCAN_LIMIT 16
+
 // A userpoint name -> the 16-bit mask over the model's FIRST 16 userpoints:
 // exact case-insensitive match, and duplicate names all set their bit. This is
 // the item-effect attach scan every consumer shares (the ITEMS.DEF particlefx
@@ -791,7 +806,9 @@ static inline uint16_t threedi_3di3_user_point_mask(const Threedi3di3 *model,
                                                     const char *name) {
     if (model == NULL || name == NULL || name[0] == '\0') return 0;
     uint16_t mask = 0;
-    size_t count = model->user_point_count < 16 ? model->user_point_count : 16;
+    size_t count = model->user_point_count < THREEDI_USER_POINT_SCAN_LIMIT
+                       ? model->user_point_count
+                       : THREEDI_USER_POINT_SCAN_LIMIT;
     for (size_t i = 0; i < count; ++i) {
         const char *a = model->user_points[i].name;
         const char *b = name;

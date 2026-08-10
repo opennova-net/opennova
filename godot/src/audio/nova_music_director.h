@@ -13,8 +13,11 @@
 #include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/templates/vector.hpp>
+#include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/string_name.hpp>
+
+#include <audio/music_policy.h>
 
 #include "mus/mus.h"
 
@@ -27,6 +30,31 @@ class MusicDirector : public Node {
 	GDCLASS(MusicDirector, Node)
 
 public:
+	// Witnessed music-driving policy re-exports (engine audio/music_policy.h
+	// is the value authority and carries the [orig] witnesses). Bound as
+	// class constants for the shell/service GDScript.
+	enum {
+		// menuscript: the shown screen's MUSICVAR writes this var slot.
+		MENU_MUSIC_VAR_SLOT = opennova::audio::kMenuMusicVarSlot,
+		// gamescript: mission-start seeds Var<FIRST>..Var<LAST>; Var1 is the
+		// (never-written) mission-state seed, Var7 health % (seeded
+		// GAME_HEALTH_SEED), Var10 the local-player team.
+		GAME_SEEDED_VAR_FIRST = opennova::audio::kGameMusicSeededVarFirst,
+		GAME_SEEDED_VAR_LAST = opennova::audio::kGameMusicSeededVarLast,
+		GAME_VAR_MISSION_STATE = opennova::audio::kGameMusicMissionStateVarSlot,
+		GAME_VAR_HEALTH_PCT = opennova::audio::kGameMusicHealthPctVarSlot,
+		GAME_VAR_TEAM = opennova::audio::kGameMusicTeamVarSlot,
+		GAME_HEALTH_SEED = opennova::audio::kGameMusicHealthSeed,
+	};
+
+	// Pure name resolution for the witnessed music pairs (no filesystem):
+	// { "stem": String, "bank_file": String, "script_file": String,
+	//   "subdir": String ("" for base pairs, "expansion/<n>" when active) }.
+	// The service keeps the on-disk case probing / VFS resolution; these only
+	// name the pair (engine music_policy.h owns the scheme + witnesses).
+	static Dictionary resolve_menu_music_pair(const String &p_expansion_name);
+	static Dictionary resolve_game_music_pair(const String &p_expansion_name);
+
 	MusicDirector();
 	~MusicDirector();
 

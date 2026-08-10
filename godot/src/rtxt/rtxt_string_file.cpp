@@ -442,6 +442,24 @@ String RtxtStringFile::strip_hotkey(const String &p_text) {
 	return std_to_gd(opennova::rtxt::strip_hotkey(gd_to_std(p_text), idx));
 }
 
+// --- Engine-faithful lookup policy re-exports (engine/formats/rtxt) ---
+
+String RtxtStringFile::format_miss_marker(const String &p_section, const String &p_key) {
+	return std_to_gd(opennova::rtxt::format_miss_marker(
+			gd_to_std(p_section), gd_to_std(p_key)));
+}
+
+String RtxtStringFile::lookup_with_override(const Ref<RtxtStringFile> &p_override_table,
+		const Ref<RtxtStringFile> &p_table, const String &p_section,
+		const String &p_key) {
+	const opennova::rtxt::File *override_file =
+			p_override_table.is_valid() ? &p_override_table->get_native() : nullptr;
+	const opennova::rtxt::File *file =
+			p_table.is_valid() ? &p_table->get_native() : nullptr;
+	return std_to_gd(opennova::rtxt::lookup_with_override(
+			override_file, file, gd_to_std(p_section), gd_to_std(p_key)));
+}
+
 Dictionary RtxtStringFile::strip_hotkey_with_index(const String &p_text) {
 	int idx = -1;
 	const std::string stripped = opennova::rtxt::strip_hotkey(gd_to_std(p_text), idx);
@@ -501,6 +519,8 @@ void RtxtStringFile::_bind_methods() {
 
 	ClassDB::bind_static_method("RtxtStringFile", D_METHOD("strip_hotkey", "text"), &RtxtStringFile::strip_hotkey);
 	ClassDB::bind_static_method("RtxtStringFile", D_METHOD("strip_hotkey_with_index", "text"), &RtxtStringFile::strip_hotkey_with_index);
+	ClassDB::bind_static_method("RtxtStringFile", D_METHOD("format_miss_marker", "section", "key"), &RtxtStringFile::format_miss_marker);
+	ClassDB::bind_static_method("RtxtStringFile", D_METHOD("lookup_with_override", "override_table", "table", "section", "key"), &RtxtStringFile::lookup_with_override);
 
 	ADD_SIGNAL(MethodInfo("entries_structure_changed"));
 	ADD_SIGNAL(MethodInfo("entry_text_changed", PropertyInfo(Variant::INT, "index")));

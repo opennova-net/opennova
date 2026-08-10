@@ -7,6 +7,7 @@
 #include <godot_cpp/classes/audio_stream_wav.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include <lwf/lwf.h>
 #include <menu/menu_sound.h>
 
 using namespace godot;
@@ -107,8 +108,9 @@ bool MenuAudio::play_lwf_set_(const Ref<LwfData> &p_bank, int p_bank_id,
 		if (String(set_d.get("name", "")).to_upper() != want) {
 			continue;
 		}
-		const double set_pitch =
-				double((int64_t)set_d.get("pitch_base", 0xFFFF)) / 65536.0;
+		const double set_pitch = opennova::lwf::pitch_from_q16(static_cast<uint32_t>(
+				(int64_t)set_d.get("pitch_base",
+						static_cast<int64_t>(opennova::lwf::kAuthoredSetPitchBase))));
 		const Array layers = set_d.get("layers", Array());
 		bool played = false;
 		for (int li = 0; li < layers.size(); ++li) {

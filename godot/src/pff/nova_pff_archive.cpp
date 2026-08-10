@@ -36,8 +36,10 @@ PffFormat PffDocument::format_from_magic(uint32_t magic) {
 }
 
 uint32_t PffDocument::container_key() const {
+	// Unknown game id -> the universal named default (engine/base/gameprofile
+	// carries the witness); every resolved profile ships the same key today.
 	const NovaGameProfile *p = gameprofile_by_id(game_id_);
-	return p ? p->container_key : 0x0312A4CEu;
+	return p ? p->container_key : GAMEPROFILE_PFF_CONTAINER_KEY_DEFAULT;
 }
 
 void PffDocument::close_source() {

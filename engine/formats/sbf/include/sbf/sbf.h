@@ -16,6 +16,12 @@ extern "C" {
 
 /* --- Format constants --- */
 #define SBF_MAGIC          0x30464253u      /* 'SBF0' little-endian */
+/* The header values every observed retail bank carries and the writer stamps:
+   version 0x100 (never read by the engine) and the byte-paired-stereo
+   channel-format selector (the engine accepts flags <= 2)
+   [orig: AudioVM_OpenContextFile @ 0x672160 header reads]. */
+#define SBF_VERSION_DEFAULT            0x00000100u
+#define SBF_FLAGS_BYTE_PAIRED_STEREO   0x00000001u
 #define SBF_HEADER_SIZE    24
 #define SBF_ENTRY_SIZE     32
 #define SBF_NAME_SIZE      16

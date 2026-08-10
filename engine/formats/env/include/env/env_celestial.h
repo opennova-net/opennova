@@ -92,6 +92,36 @@ int32_t star_twinkle_tick(StarInstance &star, uint32_t &prng_state);
 // light direction in engine axes.
 bool star_visible_fixed(const StarInstance &star, const int32_t light_dir_fp[3]);
 
+// billboard_param is a 4096-fixed world size (12288..13311 -> 3.0..3.25
+// world units) [orig: render_star_field billboard submit @ 0x5adb45..].
+inline constexpr int32_t kStarBillboardScaleFixed = 4096;
+
+inline float star_billboard_world_size(const StarInstance &star) {
+	return static_cast<float>(star.billboard_param) /
+			static_cast<float>(kStarBillboardScaleFixed);
+}
+
+// The render-basis emit swizzle for one star offset: d3d/render float3 =
+// (-engY, engZ, engX) / 65536 [orig: Math_FixedPointToFloat3_YNegated
+// @ 0x611210] — the one home for the fixed->render conversion, so shells
+// never restate the axis order or the 16.16 scale.
+inline void star_offset_render_float3(const StarInstance &star, float out[3]) {
+	constexpr float kInvFixed = 1.0f / 65536.0f;
+	out[0] = -static_cast<float>(star.offset_fp[1]) * kInvFixed;
+	out[1] = static_cast<float>(star.offset_fp[2]) * kInvFixed;
+	out[2] = static_cast<float>(star.offset_fp[0]) * kInvFixed;
+}
+
+// The inverse swizzle for the visibility test's light direction: an engine
+// fixed3 from a render-basis float3 (render = (-engY, engZ, engX)/65536, so
+// eng = (-r.x, r.z, r.y) * 65536 with the reimpl's light handedness).
+inline void star_light_dir_fixed3_from_render(float rx, float ry, float rz,
+		int32_t out[3]) {
+	out[0] = static_cast<int32_t>(-rx * 65536.0f);
+	out[1] = static_cast<int32_t>(rz * 65536.0f);
+	out[2] = static_cast<int32_t>(ry * 65536.0f);
+}
+
 // Glare occlusion (env #14) [orig: render_skybox_sun_glow @ 0x5acd9e..0x5acf7f]:
 // TWO jittered rays per frame feed an 8-bit SLIDING window (>>1 per sample,
 // bit 0x80 = sample visible), so the window spans the last 4 frames. The ray

@@ -46,6 +46,20 @@ struct MissionParamSpec {
 	bool variable = false;
 };
 
+// FixedSeconds raw domain: the stored param is raw 16.16 (= seconds * 65536).
+// The original editor's ANIMTIME seconds spin steps by 256 raw units
+// (256/65536 s) [orig: Med_ParamAnimTime @0x449ff0, dfx2med.exe].
+inline constexpr int kFixedSecondsOne = 65536;
+inline constexpr int kFixedSecondsRawStep = 256;
+inline constexpr double fixed_seconds_from_raw(int raw) {
+	return static_cast<double>(raw) / kFixedSecondsOne;
+}
+inline constexpr int fixed_seconds_to_raw(double seconds) {
+	// Round-half-away, matching the editor spin's commit of value * 65536.
+	const double scaled = seconds * kFixedSecondsOne;
+	return static_cast<int>(scaled >= 0.0 ? scaled + 0.5 : scaled - 0.5);
+}
+
 MissionParamSpec trigger_param_schema(int main_type, int sub_type);
 // action_sub_type selects the per-sub-type slot layout for the AI-change action family
 // (CHANGE_GROUP_AI / AREA_AI_RED/BLUE / CHANGE_SINGLE_AI); ignored by other action types.

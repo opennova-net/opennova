@@ -309,8 +309,8 @@ extern "C" int sbf_encode_file(const char * const *names, uint32_t n,
 
     SbfHeader hdr = {};
     hdr.magic = SBF_MAGIC;
-    hdr.version = 0x00000100;
-    hdr.flags = 0x00000001;
+    hdr.version = SBF_VERSION_DEFAULT;
+    hdr.flags = SBF_FLAGS_BYTE_PAIRED_STEREO;
     hdr.reserved = 0;
     hdr.index_offset = SBF_HEADER_SIZE;
     hdr.entry_count = n;

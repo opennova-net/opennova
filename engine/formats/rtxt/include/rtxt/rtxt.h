@@ -120,14 +120,26 @@ bool write(const File &file, std::vector<uint8_t> &out, std::string &error);
 // Write an RTXT file to disk.
 bool write_file(const File &file, const std::string &path, std::string &error);
 
-// Strip the first {hot} marker from text, returning the clean text and the
-// marker's byte index; the accelerator is the character at that index after
-// stripping. Later markers stay literal [orig: CButtonWnd_SetLabel @ 0x6572F0
-// — strstr for the first marker, in-place 5-byte shift, hotkey char = byte at
-// the recorded offset]. If no marker, returns the text and hotkey_index = -1.
-std::string strip_hotkey(const std::string &text, int &hotkey_index);
+// The witnessed lookup-miss marker: a failed section/key lookup renders as
+// "??<section>:<key>??" so missing strings stay visible and debuggable
+// instead of silently blank [orig: GameErr_GetString @ 0x4C2C60 —
+// sprintf("??%s:%s??", section, key)].
+inline constexpr const char *kMissMarkerFormat = "??%s:%s??";
+std::string format_miss_marker(const std::string &section, const std::string &key);
+
+// The engine lookup ordering: the OVERRIDE table (the active expansion's text
+// bin, expansion\<exp>\<exp>.bin) is consulted BEFORE the named table, and a
+// hit there wins outright [orig: TextResource_LoadOverrideTable @ 0x75D5C0;
+// section lookup TextResource_FindEntryBySectionAndKey @ 0x75D250 via
+// GameErr_GetString @ 0x4C2C60]. Either table may be null. A miss in both
+// returns the "??section:key??" marker above.
+std::string lookup_with_override(const File *override_table, const File *table,
+                                 const std::string &section, const std::string &key);
 
 // Convert a key to uppercase for case-insensitive comparison.
 std::string to_upper(const std::string &s);
+
+// Strip the {hot} accelerator marker, reporting its char index (-1 = none).
+std::string strip_hotkey(const std::string &text, int &hotkey_index);
 
 }  // namespace opennova::rtxt

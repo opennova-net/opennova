@@ -58,9 +58,11 @@ protected:
 	static void _bind_methods();
 
 public:
-	// Mirrors opennova::lwf selection modes + PlaylistFlags. Bound as constants.
-	// SELECTION_FIRST is an authoring/preview extension; the engine's default for
-	// unflagged layers is RANDOM [orig: SoundBank_PlayTriggerEntries @ 0x75cdfc].
+	// Mirrors opennova::audio::SelectionMode + opennova::lwf::PlaylistFlags,
+	// bound as constants; the .cpp static_asserts pin every mirror to its
+	// engine home. SELECTION_FIRST is an authoring/preview extension; the
+	// engine's default for unflagged layers is RANDOM (see
+	// audio/sound_selector.h selection_mode_for_flags).
 	enum : uint32_t {
 		SELECTION_FIRST = 0,
 		SELECTION_RANDOM = 1,

@@ -21,6 +21,7 @@
 #include <oed/oed.h>
 #include <tdp/tdp.h>
 #include <threedi/threedi_3di3.h>
+#include <threedi/threedi_panm.h>
 
 #include "resource_index/nova_resource_root.h"
 
@@ -133,6 +134,56 @@ public:
 		UPDATE_PANM = OED_UPDATE_PANM,
 		UPDATE_ALL = OED_UPDATE_ALL,
 	};
+
+	// 3DI3 flag/slot re-exports (engine threedi/threedi_3di3.h is the value
+	// authority; defined FROM it so they can never drift). Bound as class
+	// constants so the ONED inspectors stop re-declaring the bytes.
+	enum {
+		MATERIAL_FLAG_ALPHA_TEST = THREEDI_MATERIAL_FLAG_ALPHA_TEST,
+		MATERIAL_FLAG_ALPHA_INVERT = THREEDI_MATERIAL_FLAG_ALPHA_INVERT,
+		MATERIAL_FLAG_TWO_SIDED = THREEDI_MATERIAL_FLAG_TWO_SIDED,
+		TEX_FLAG_ANIMATED = THREEDI_TEX_FLAG_ANIMATED,
+		TEX_FLAG_CLAMPED = THREEDI_TEX_FLAG_CLAMPED,
+		TEX_SLOT_DIFFUSE = THREEDI_TEX_SLOT_DIFFUSE,
+		TEX_SLOT_DETAIL = THREEDI_TEX_SLOT_DETAIL,
+		TEX_SLOT_NORMAL = THREEDI_TEX_SLOT_NORMAL,
+		TEX_SLOT_NORMAL_B = THREEDI_TEX_SLOT_NORMAL_B,
+		LIGHT_FLAG_DISABLE_CORONA = THREEDI_LIGHT_FLAG_DISABLE_CORONA,
+		LIGHT_FLAG_DISABLE_TERRAIN = THREEDI_LIGHT_FLAG_DISABLE_TERRAIN,
+		LIGHT_FLAG_DISABLE_OBJECTS = THREEDI_LIGHT_FLAG_DISABLE_OBJECTS,
+		LIGHT_FLAG_TYPE_TARGET = THREEDI_LIGHT_FLAG_TYPE_TARGET,
+	};
+
+	// Generator-style consumers (threedi/threedi_panm.h
+	// ThreediGeneratorConsumer): the 0x71..0x75 control-register range
+	// dispatches differently per retail consumer.
+	enum {
+		GENERATOR_CONSUMER_UV = THREEDI_GENERATOR_CONSUMER_UV,
+		GENERATOR_CONSUMER_RGB = THREEDI_GENERATOR_CONSUMER_RGB,
+		GENERATOR_CONSUMER_ALPHA = THREEDI_GENERATOR_CONSUMER_ALPHA,
+		GENERATOR_CONSUMER_LIGHT = THREEDI_GENERATOR_CONSUMER_LIGHT,
+		GENERATOR_CONSUMER_PANM = THREEDI_GENERATOR_CONSUMER_PANM,
+	};
+
+	// --- Witnessed threedi catalog/unit re-exports (statics; the engine
+	// headers carry the witnesses) ---
+	// PANM track units (threedi_panm.h): rotations in 360/16384-degree
+	// counts, values/speeds in signed 8.8 (1/256 per count).
+	static double panm_rotation_unit_deg();
+	static double panm_value_unit();
+	// Authorable per-track ranges in human units — tracks are int16, so this
+	// is the int16 span through the units above:
+	// { rotation_min/max: deg, value_min/max: 8.8, speed_min/max: 8.8 }.
+	static Dictionary panm_track_limits();
+	// The semantic PANM mode catalog the part-animation inspector offers:
+	// [{ mode:String, label:String, control:int, uses_control_register:bool }].
+	static Array get_panm_mode_options();
+	// The canonical generator-style byte list (engine kControlEntries) + the
+	// per-consumer dispatch matrix and the loader's ctrl-reference rule.
+	static PackedInt32Array get_generator_style_ids();
+	static String generator_style_code_name(int p_style_id);
+	static bool generator_style_reads_control_value(int p_consumer, int p_style_id);
+	static bool generator_style_parameter_is_ctrl_reference(int p_style_id);
 
 	ObjectData();
 	~ObjectData();

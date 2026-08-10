@@ -421,6 +421,26 @@ std::string strip_hotkey_marker(const std::string &text,
 bool parse_hex_color(const std::string &hex, uint8_t &r, uint8_t &g, uint8_t &b,
                      uint8_t &a);
 
+// Format an ARGB dword back into the authored color-token form — the writer
+// counterpart of parse_hex_color over the same witnessed 0xAARRGGBB dword
+// order the parsers build [orig: CSpinListWnd_Render @ 0x64b220
+// color | 0xFF000000; the text sink font_cache_draw_text_scaled @ 0x653170
+// consumes the dword as 0xAARRGGBB]. Uppercase hex, no '#'. force_alpha=false
+// drops the alpha pair for fully-opaque colors so 6-digit-authored values stay
+// 6-digit (authoring policy — retail only parses, it never writes tokens).
+inline std::string format_hex_color(uint32_t argb, bool force_alpha = true) {
+  static const char digits[] = "0123456789ABCDEF";
+  std::string out;
+  const bool with_alpha = force_alpha || ((argb >> 24) & 0xFFu) != 0xFFu;
+  out.reserve(with_alpha ? 8 : 6);
+  for (int shift = with_alpha ? 24 : 16; shift >= 0; shift -= 8) {
+    const uint32_t byte = (argb >> shift) & 0xFFu;
+    out.push_back(digits[byte >> 4]);
+    out.push_back(digits[byte & 0xFu]);
+  }
+  return out;
+}
+
 // Check if a color string is a variable reference (e.g., "%TRIM_COLOR%").
 bool is_color_variable(const std::string &color);
 

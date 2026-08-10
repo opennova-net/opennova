@@ -204,6 +204,38 @@ bool decode_pcx_rgb(const uint8_t *data, size_t size, RgbImage &out, std::string
 	return false;
 }
 
+bool decode_pcx_luminance_alpha(const uint8_t *data, size_t size, RgbaImage &out, std::string &error) {
+	out = RgbaImage{};
+
+	IndexedImage8 indexed;
+	if (!decode_pcx_indexed(data, size, indexed, error)) {
+		return false;
+	}
+
+	// Palette luminance table, then the per-pixel alpha plane
+	// [orig: load_texture_from_archive @ 0x58b980 — table build
+	// @ 0x58bc35..0x58bca9, per-pixel A @ 0x58bcee].
+	uint8_t lum[256];
+	for (int i = 0; i < 256; ++i) {
+		const uint16_t sum = static_cast<uint16_t>(indexed.palette[i][0]) +
+				static_cast<uint16_t>(indexed.palette[i][1]) +
+				static_cast<uint16_t>(indexed.palette[i][2]);
+		lum[i] = static_cast<uint8_t>(static_cast<uint16_t>(85u * sum) >> 8);
+	}
+
+	out.width = indexed.width;
+	out.height = indexed.height;
+	out.pixels.resize(static_cast<size_t>(indexed.width) * static_cast<size_t>(indexed.height) * 4);
+	for (int i = 0; i < indexed.width * indexed.height; ++i) {
+		const uint8_t idx = indexed.indices[static_cast<size_t>(i)];
+		out.pixels[static_cast<size_t>(i) * 4 + 0] = indexed.palette[idx][0];
+		out.pixels[static_cast<size_t>(i) * 4 + 1] = indexed.palette[idx][1];
+		out.pixels[static_cast<size_t>(i) * 4 + 2] = indexed.palette[idx][2];
+		out.pixels[static_cast<size_t>(i) * 4 + 3] = lum[idx];
+	}
+	return true;
+}
+
 bool encode_pcx_indexed(const IndexedImage8 &image, std::vector<uint8_t> &out, std::string &error) {
 	out.clear();
 

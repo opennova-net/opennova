@@ -61,6 +61,38 @@ typedef enum MusAstStmtKind {
                                 @0x672C70 which seeks pc + halts.] */
 } MusAstStmtKind;
 
+/* Flow classification over MusAstStmtKind — the ONE home for the editor's
+   authoring rules (the GDScript document mirrors these through the MusicScript
+   binding, never re-lists the kinds).
+
+   Terminators end (or redirect) a section's straight-line flow: a freshly
+   authored statement must insert BEFORE the first of these to actually run.
+   FRAME_ENTER is NOT a terminator — the 0x38 `enter` copies dwords into the
+   frame and does not move the IP [orig: AudioVM_Op_Enter @ 0x672C20], unlike
+   setstate 0x3B which seeks pc and halts [orig: VmOp_SetState @ 0x672C70]. */
+static inline int mus_ast_kind_is_terminator(int kind) {
+    switch (kind) {
+        case MUS_AST_TRANSITION:
+        case MUS_AST_GOTO:
+        case MUS_AST_CALL:
+        case MUS_AST_RETURN:
+        case MUS_AST_YIELD:
+        case MUS_AST_DONE:
+        case MUS_AST_SWITCH:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+/* Locked rows are structural and never mutable in the editor: the
+   section-closing `done` (deleting it leaks the body into the next section)
+   and the frame-setup `enter` 0x38 (its operand is a locals dword COUNT; the
+   text round-trip would collapse it into a setstate and corrupt the frame). */
+static inline int mus_ast_kind_is_locked(int kind) {
+    return kind == MUS_AST_DONE || kind == MUS_AST_FRAME_ENTER;
+}
+
 /* Structured expression tree (editor-facing).
 
    The structured twin of reconstruct_expression (mus_decompile_shared.h): the

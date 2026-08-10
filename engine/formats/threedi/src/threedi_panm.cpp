@@ -100,7 +100,40 @@ int threedi_panm_parameter_is_ctrl_reference(uint8_t code) {
     // The model loader fixes up the parameter field before PANM dispatch. Its
     // structural threshold is broader than the one runtime value-read case.
     // [orig: ThreediGp_LoadFromFile PANM fixups @ 0x5B5E0B..0x5B5EF6]
-    return code > 0x70;
+    return code > THREEDI_GENERATOR_CTRL_REFERENCE_THRESHOLD;
+}
+
+int threedi_generator_style_count(void) {
+    return (int)(sizeof(kControlEntries) / sizeof(kControlEntries[0]));
+}
+
+int threedi_generator_style_code_at(int index) {
+    if (index < 0 || index >= threedi_generator_style_count()) {
+        return -1;
+    }
+    return (int)kControlEntries[index].code;
+}
+
+int threedi_generator_reads_control_value(int consumer, uint8_t code) {
+    // Per-consumer dispatch of the 0x71..0x75 control-register range
+    // [orig: compute_uv_transform_matrix @ 0x5B1990 (whole range);
+    //  RgbGen_EvaluateColor @ 0x5B23D0 / light path (SET + ADD);
+    //  AlphaGen_EvaluateValue @ 0x5B2320 and PANM_SampleTrack @ 0x5B2270
+    //  (SET only — the rest fall back to the low-nibble waveform)].
+    switch (consumer) {
+        case THREEDI_GENERATOR_CONSUMER_UV:
+            return code >= THREEDI_STYLE_CONTROL_SET &&
+                   code <= THREEDI_STYLE_CONTROL_ROTATE;
+        case THREEDI_GENERATOR_CONSUMER_RGB:
+        case THREEDI_GENERATOR_CONSUMER_LIGHT:
+            return code == THREEDI_STYLE_CONTROL_SET ||
+                   code == THREEDI_STYLE_CONTROL_ADD;
+        case THREEDI_GENERATOR_CONSUMER_ALPHA:
+        case THREEDI_GENERATOR_CONSUMER_PANM:
+            return code == THREEDI_STYLE_CONTROL_SET;
+        default:
+            return 0;
+    }
 }
 
 const char *threedi_ctrl_reg_name(const ThreediCtrl *ctrl, uint8_t idx) {
@@ -142,12 +175,16 @@ int threedi_decode_transform(const ThreediTransform *t,
         out->ctrl_reg_name = threedi_ctrl_reg_name(ctrl, t->control_param);
     }
 
-    out->phase = (float)t->control_param / 256.0f;
-    out->rate = (float)t->rate / 256.0f;
+    out->phase = threedi_panm_value_from_raw(t->control_param);
+    out->rate = threedi_panm_value_from_raw(t->rate);
 
-    const float scale = out->is_rotation ? (360.0f / 16384.0f) : (1.0f / 256.0f);
-    out->start = (float)t->start * scale;
-    out->end = (float)t->end * scale;
+    if (out->is_rotation) {
+        out->start = threedi_panm_rotation_deg_from_raw(t->start);
+        out->end = threedi_panm_rotation_deg_from_raw(t->end);
+    } else {
+        out->start = threedi_panm_value_from_raw(t->start);
+        out->end = threedi_panm_value_from_raw(t->end);
+    }
     return 0;
 }
 

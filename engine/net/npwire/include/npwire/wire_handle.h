@@ -2,8 +2,9 @@
 
 // The wire entity-handle bit layout: the original entity pool rides the high
 // nibble and the pool slot the low 12 bits — handle = pool << 12 | slot.
-// This is the native home for that decode (godot/src/world/wire_handle.gd is
-// the GDScript twin). engine/runtime/world's EntityHandle carries the same packing for
+// This is the ONE home for that decode (the Godot layer consumes it through
+// the NetProtocol binding, godot/src/network/nova_net_protocol.h).
+// engine/runtime/world's EntityHandle carries the same packing for
 // the sim-side registry — world stays net-agnostic, so the two are pinned
 // against each other where both are visible (engine/net/netsim, entity_wire_bridge.cpp).
 // [orig: return value of EntityPool_FindByNetId @ 0x4f0a20; 0xFFFF == not found]
@@ -43,6 +44,20 @@ constexpr int slot(uint16_t handle) {
 constexpr uint16_t make(int pool_index, int slot_index) {
 	return static_cast<uint16_t>(((pool_index & kPoolMask) << kPoolShift) |
 	                             (slot_index & kSlotMask));
+}
+
+// Debug/tooling label for a pool index — the taxonomy every inspector and
+// decoder pretty-printer shares (docs/engine-primer.md; capacities per
+// D-NET-207). Out-of-range pools label "?".
+constexpr const char *pool_label(int pool_index) {
+	switch (pool_index) {
+	case kPoolOrganic: return "organics";
+	case kPoolItem: return "items";
+	case kPoolBuilding: return "buildings";
+	case kPoolMarker: return "markers";
+	case kPoolEffects: return "effects";
+	default: return "?";
+	}
 }
 
 // True when a spawn-batch slot id ends the batch (or a handle denotes no

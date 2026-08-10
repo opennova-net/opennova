@@ -22,4 +22,12 @@ struct RgbImage {
 	bool empty() const { return width <= 0 || height <= 0 || pixels.empty(); }
 };
 
+struct RgbaImage {
+	int width = 0;
+	int height = 0;
+	std::vector<uint8_t> pixels;
+
+	bool empty() const { return width <= 0 || height <= 0 || pixels.empty(); }
+};
+
 } // namespace opennova

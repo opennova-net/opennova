@@ -8,6 +8,7 @@
 #pragma once
 
 #include <def/def.h>
+#include <mission/placement_traits.h> // the visual-item policy home
 #include <simassets/sim_collision_pose.h>
 #include <simassets/sim_model_cache.h>
 #include <world/collision.h>
@@ -23,7 +24,8 @@ namespace opennova::simassets {
 
 // items.def "Player #1, Single player" -> US01/US01.adm: the visual stand-in
 // definition for the runtime player type when the database carries it.
-inline constexpr int kPlayerVisualItemId = 105310;
+// Canonical home: engine/runtime/mission placement_traits.h.
+inline constexpr int kPlayerVisualItemId = mission::kPlayerVisualItemId;
 
 // Last-wins lookup over duplicate definition ids — the same load-order
 // overwrite the id-keyed item map exposed (see simassets item_traits).

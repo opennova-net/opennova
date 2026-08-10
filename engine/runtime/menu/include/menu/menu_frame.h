@@ -39,6 +39,12 @@ enum WidgetVisualState : int32_t {
 
 inline constexpr int32_t kMenuTexNone = -1;
 
+// Menus are authored in the fixed 800x600 design space; the anamorphic scale
+// pair every compile/hit call takes is surface_w / kMenuDesignWidth and
+// surface_h / kMenuDesignHeight [orig: CUIScene_SetScreenScale @ 0x639480].
+inline constexpr int kMenuDesignWidth = 800;
+inline constexpr int kMenuDesignHeight = 600;
+
 // One draw-list quad. `texture` indexes the compiler's interned texture-name
 // table (texture_names()); kMenuTexNone is an untextured color fill. `tiled`
 // marks the frame BRUSH fill (UVs carry the repeat counts; the applier tiles)

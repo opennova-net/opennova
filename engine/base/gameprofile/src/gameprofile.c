@@ -15,7 +15,7 @@
    demores.pff: all 214 version-1 payloads (.def/.adm/.aip/.ptg/.ptl/.ptu/.txt) decode cleanly under
    DEFAULT and to garbage under JO_DFX2, and the demo ships no version-2 files. So the demo forces
    the DEFAULT key. */
-#define PFF_CONTAINER_KEY_DEFAULT 0x0312A4CEu
+#define PFF_CONTAINER_KEY_DEFAULT GAMEPROFILE_PFF_CONTAINER_KEY_DEFAULT
 #define GAMEPROFILE_FORMAT_PFF3   0  /* mirrors PffFormat in pff/pff.h */
 
 static const NovaGameProfile k_profiles[] = {

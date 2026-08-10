@@ -1,5 +1,6 @@
 #pragma once
 
+#include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/classes/resource.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
@@ -102,6 +103,17 @@ public:
 	// --- Hotkey helpers ---
 	static String strip_hotkey(const String &p_text);
 	static Dictionary strip_hotkey_with_index(const String &p_text);
+
+	// --- Engine-faithful lookup policy re-exports (engine/formats/rtxt owns
+	// the marker text and the ordering; see rtxt.h for the witnesses) ---
+	// "??section:key??" — the visible marker a failed lookup renders.
+	static String format_miss_marker(const String &p_section, const String &p_key);
+	// Override-table-first section lookup: a hit in p_override_table (the
+	// active expansion's text bin) wins outright; a miss in both returns the
+	// miss marker. Either table may be null.
+	static String lookup_with_override(const Ref<RtxtStringFile> &p_override_table,
+			const Ref<RtxtStringFile> &p_table, const String &p_section,
+			const String &p_key);
 
 	// Native access for the loader/saver.
 	void set_native(const opennova::rtxt::File &p_file);

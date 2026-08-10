@@ -213,9 +213,11 @@ opennova::LobbyIdentityParams collect_lobby_identity_params(uint32_t client_inde
 		stable_identity = to_std(os->get_processor_name()) + "|" + to_std(os->get_model_name());
 	}
 	stable_identity += "|" + adapter_name;
+	// Token lengths are the wire-load-bearing kNwpsskLen/kNwusidLen from
+	// engine/net/novaworld lobby_vars.h; the xor seeds are OpenNova's own.
 	const uint32_t seed = fnv1a_32(stable_identity);
-	out.nwpssk = opennova::az_fingerprint(seed ^ 0x5053534Bu, 23);
-	out.nwusid = opennova::az_fingerprint(seed ^ 0x55534944u, 16);
+	out.nwpssk = opennova::az_fingerprint(seed ^ 0x5053534Bu, opennova::kNwpsskLen);
+	out.nwusid = opennova::az_fingerprint(seed ^ 0x55534944u, opennova::kNwusidLen);
 #ifdef _WIN32
 	opennova::RetailMachineInputs machine;
 	if (collect_retail_machine_inputs(machine)) {

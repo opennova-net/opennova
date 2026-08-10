@@ -154,8 +154,8 @@ std::vector<std::pair<std::string, std::string>> make_lobby_identity_vars(const 
 		{"NWUID", ""},        // echoed from the ServerSessionInit at use
 		{"NWCDKIID", ""},     // empty in retail; verify is not CD-key-gated
 		{"NWCDKIIDEXP1", ""},
-		{"NWPSSK", p.nwpssk.empty() ? az_fingerprint(p.client_index ^ 0x5053534Bu, 23) : p.nwpssk},
-		{"NWUSID", p.nwusid.empty() ? az_fingerprint(p.client_key ^ 0x55534944u, 16) : p.nwusid},
+		{"NWPSSK", p.nwpssk.empty() ? az_fingerprint(p.client_index ^ 0x5053534Bu, kNwpsskLen) : p.nwpssk},
+		{"NWUSID", p.nwusid.empty() ? az_fingerprint(p.client_key ^ 0x55534944u, kNwusidLen) : p.nwusid},
 		{"NWHWI", p.nwhwi},
 	};
 }

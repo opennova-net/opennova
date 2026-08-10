@@ -698,8 +698,9 @@ Dictionary Simulation::debug_pick_entity(const Vector3 &p_from_godot,
 	}
 	out["entity_handle"] = static_cast<int>(hit.geometry_entity.packed);
 	out["pool"] = hit.geometry_entity.pool();
-	out["kind"] = static_cast<int>(ent->spawn_origin >> 24);
-	out["index"] = static_cast<int>(ent->spawn_origin & 0xFFFFFF);
+	out["kind"] = opennova::world::spawn_origin_kind(ent->spawn_origin);
+	out["index"] = static_cast<int>(
+			opennova::world::spawn_origin_index(ent->spawn_origin));
 	out["bms_id"] = ent->bms_id;
 	out["net_id"] = static_cast<int>(ent->net_id);
 	out["item_id"] = ent->item_id;

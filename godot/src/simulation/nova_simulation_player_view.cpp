@@ -140,14 +140,14 @@ bool Simulation::request_local_player_binoculars_toggle() {
 	const bool requested =
 			opennova::world::player_view_toggle_binoculars(player_view_);
 	if (requested) {
-		const double unit =
+		// The fixed-radius random aim displacement lives in the engine
+		// (world/player_view.h kBinocularAimOffsetDeg + the sway helper);
+		// this leg only samples the shell's RNG.
+		const float unit = static_cast<float>(
 				(static_cast<double>(std::rand()) + 0.5) /
-				(static_cast<double>(RAND_MAX) + 1.0);
-		const double angle = unit * kTau;
-		binocular_yaw_offset_deg_ =
-				static_cast<float>(std::cos(angle) * kBinocularAimOffsetDeg);
-		binocular_pitch_offset_deg_ =
-				static_cast<float>(std::sin(angle) * kBinocularAimOffsetDeg);
+				(static_cast<double>(RAND_MAX) + 1.0));
+		opennova::world::player_view_binocular_sway_offset(unit,
+				binocular_yaw_offset_deg_, binocular_pitch_offset_deg_);
 	} else {
 		binocular_yaw_offset_deg_ = 0.0f;
 		binocular_pitch_offset_deg_ = 0.0f;

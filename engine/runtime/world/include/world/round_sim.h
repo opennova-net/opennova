@@ -82,6 +82,30 @@ enum class RoundConsequenceMode : uint8_t {
     VisualOnly,
 };
 
+// The witnessed person hit-zone -> damage-multiplier table (ray[32] damage
+// zones; item_type 3 targets) and the Landable (attrib 0x200) seat-branch bone
+// leg (which reads the ray[31] primary/reaction section instead). The critical
+// predicates name the rows that also stamp the 0x800 entity flag at damage
+// time. [orig: Weapon_CalcImpactDamage @ 0x4EC920 — the zone table @ 0x4ec9bf
+//  (0..4 x1.25, 9..12/15..18 x0.5, 13/14 head x3.0), the seat leg @ 0x4ec977
+//  (bones 2/3/6/7 x6.0)]
+constexpr bool hit_zone_is_critical(int32_t hit_zone) {
+    return hit_zone == 13 || hit_zone == 14;
+}
+constexpr double hit_zone_damage_multiplier(int32_t hit_zone) {
+    if (hit_zone >= 0 && hit_zone <= 4) return 1.25;
+    if ((hit_zone >= 9 && hit_zone <= 12) || (hit_zone >= 15 && hit_zone <= 18))
+        return 0.5;
+    if (hit_zone_is_critical(hit_zone)) return 3.0;
+    return 1.0;
+}
+constexpr bool seat_hit_bone_is_critical(int32_t hit_bone) {
+    return hit_bone == 2 || hit_bone == 3 || hit_bone == 6 || hit_bone == 7;
+}
+constexpr double seat_hit_bone_damage_multiplier(int32_t hit_bone) {
+    return seat_hit_bone_is_critical(hit_bone) ? 6.0 : 1.0;
+}
+
 // The shooter fields RoundData_SpawnRound reads while applying weapon ERROR and
 // ammo recoil. Ordinary authoritative shots resolve these from the World owner;
 // a pure client has no World entity for a decoded peer, so its persistent wire

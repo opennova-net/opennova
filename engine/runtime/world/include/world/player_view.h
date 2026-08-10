@@ -32,6 +32,11 @@ constexpr int32_t kScopeEaseStepsHipfire = 1;
 constexpr float kPlayerCameraFovHDeg = 80.0f;
 // [orig: binocular camera fov constant in Player_UpdateFirstPersonCamera]
 constexpr float kBinocularCameraFovHDeg = 20.0f;
+// The fixed radius of the one random aim displacement a binocular raise seeds
+// (2.8125 deg = 0x02000000 BAM32). The displacement survives movement/death/
+// third-person suppression until the raw toggle (byte_B76539) drops.
+// [orig: the binocular-raise aim offset seeded with the input action 26 toggle]
+constexpr float kBinocularAimOffsetDeg = 2.8125f;
 // [orig: the five NVG gain positions selected by actions 56/57]
 constexpr int32_t kNvgGainMin = 0;
 constexpr int32_t kNvgGainMax = 4;
@@ -124,6 +129,14 @@ bool player_view_scope_up_blocked(const PlayerViewState &v, int32_t def_flags);
 // Turning the request off clears both derived states immediately. Returns the
 // new requested state. [orig: input action 26; byte_B76539]
 bool player_view_toggle_binoculars(PlayerViewState &v);
+
+// The one random fixed-radius aim displacement a binocular raise seeds:
+// `unit_random` in [0, 1) picks the angle around the kBinocularAimOffsetDeg
+// circle; the yaw/pitch offsets persist until the request drops (the caller
+// zeroes them then). [orig: the binocular-raise offset beside byte_B76539]
+void player_view_binocular_sway_offset(float unit_random,
+                                       float &yaw_offset_deg,
+                                       float &pitch_offset_deg);
 
 // Recompute the binocular body pose and first-person view. The raised pose is
 // suppressed by movement, death, and round end, but survives third person;

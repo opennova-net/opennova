@@ -12,6 +12,24 @@ namespace opennova {
 
 constexpr int FOLIAGE_MAX_DEFS = 4;
 constexpr int FOLIAGE_HEIGHTMAP_SIZE = 1024;
+
+// The canonical foliage-map match codes, one per def slot in authoring order:
+// slot 0 paints palette index 254, slot 1 -> 253, slot 2 -> 252, slot 3 ->
+// 251. Shipped .trn foliagemaps carry exactly these codes for their (at most
+// FOLIAGE_MAX_DEFS) defs; the editor re-assigns them whenever defs are
+// added/removed so the paint indices stay canonical.
+constexpr std::array<uint8_t, FOLIAGE_MAX_DEFS> FOLIAGE_CANONICAL_MATCHES = {
+	254, 253, 252, 251
+};
+
+// Canonical match code for a def slot; -1 when the slot is outside
+// [0, FOLIAGE_MAX_DEFS).
+inline int foliage_canonical_match_for_slot(int def_index) {
+	if (def_index < 0 || def_index >= FOLIAGE_MAX_DEFS) {
+		return -1;
+	}
+	return static_cast<int>(FOLIAGE_CANONICAL_MATCHES[static_cast<size_t>(def_index)]);
+}
 constexpr uint8_t FOLIAGE_ATTRIB_FORCE_ON = 1 << 0;
 constexpr uint8_t FOLIAGE_ATTRIB_SHADOW = 1 << 1;
 constexpr uint8_t FOLIAGE_ATTRIB_KNOWN_MASK = FOLIAGE_ATTRIB_FORCE_ON | FOLIAGE_ATTRIB_SHADOW;

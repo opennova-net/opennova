@@ -71,6 +71,7 @@
 #include "network/nova_world_host.h"
 #include "network/nova_udp_pump.h"
 #include "network/nova_lan_session.h"
+#include "network/nova_net_protocol.h"
 #include "network/nova_net_session_policy.h"
 #include "util/nova_paths.h"
 #include "resource_index/nova_resource_index.h"
@@ -184,6 +185,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NovaWorldHost);
 	GDREGISTER_CLASS(UdpPump);
 	GDREGISTER_CLASS(LanSession);
+	GDREGISTER_CLASS(NetProtocol);
 	GDREGISTER_CLASS(NetSessionPolicy);
 }
 

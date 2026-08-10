@@ -836,8 +836,8 @@ void Simulation::configure_host_session(Dictionary p_options) {
 		uint32_t mp = dictionary_u32(p_options, "max_players", host_max_players_);
 		if (mp < 1u) {
 			mp = 1u;
-		} else if (mp > 65u) {
-			mp = 65u;
+		} else if (mp > opennova::np::kMaxPlayersCap) {
+			mp = opennova::np::kMaxPlayersCap;
 		}
 		host_max_players_ = mp;
 	}

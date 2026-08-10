@@ -7,14 +7,44 @@
 
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include <cstdint>
 #include <cstdlib>
 
 using namespace novaobj;
 
 namespace {
 
-constexpr double kPanmRotationUnit = 360.0 / 16384.0;
-constexpr double kPanmValueUnit = 1.0 / 256.0;
+// The PANM track units live engine-side (threedi/threedi_panm.h carries the
+// [orig] witnesses); these are the double-precision views the editor math uses.
+const double kPanmRotationUnit = 360.0 / (double)THREEDI_PANM_ROTATION_COUNTS_PER_TURN;
+const double kPanmValueUnit = 1.0 / (double)THREEDI_PANM_VALUE_ONE;
+
+// The semantic modes the part-animation inspector authors, keyed by the
+// engine style byte (threedi_panm.h ThreediPanmStyle). One table drives the
+// key<->control mapping, the labels, and get_panm_mode_options().
+struct PanmModeEntry {
+	uint8_t control;
+	const char *key;
+	const char *label;
+};
+
+constexpr PanmModeEntry kPanmModes[] = {
+	{ THREEDI_PANM_STYLE_NONE, "none", "None" },
+	{ THREEDI_PANM_STYLE_SLIDE, "slide", "Slide" },
+	{ THREEDI_PANM_STYLE_SLIDE_INVERSE, "slide_inverse", "Slide inverse" },
+	{ THREEDI_PANM_STYLE_SET, "set", "Set" },
+	{ THREEDI_PANM_STYLE_ROTATE_CW, "rotate_cw", "Rotate clockwise" },
+	{ THREEDI_PANM_STYLE_ROTATE_CCW, "rotate_ccw", "Rotate counter-clockwise" },
+	{ THREEDI_PANM_STYLE_SINE_WAVE, "sine_wave", "Sine wave" },
+	{ THREEDI_PANM_STYLE_SAW_WAVE, "saw_wave", "Saw wave" },
+	{ THREEDI_PANM_STYLE_INVERSE_SAW_WAVE, "inverse_saw_wave", "Inverse saw wave" },
+	{ THREEDI_PANM_STYLE_CONTROL_REGISTER, "control_register", "Control register" },
+};
+
+bool panm_style_is_wave_lookup(uint8_t control) {
+	return control >= THREEDI_PANM_STYLE_WAVE_LOOKUP_FIRST &&
+			control <= THREEDI_PANM_STYLE_WAVE_LOOKUP_LAST;
+}
 
 String part_anim_part_label(int part_index) {
 	return vformat("Part %02d", part_index);
@@ -29,21 +59,12 @@ Dictionary part_anim_part_ref(const ThreediLod &lod, int part_index) {
 }
 
 String panm_mode_key_for_control(uint8_t control) {
-	switch (control) {
-		case 0: return "none";
-		case 16: return "slide";
-		case 17: return "slide_inverse";
-		case 24: return "set";
-		case 32: return "rotate_cw";
-		case 33: return "rotate_ccw";
-		case 50: return "sine_wave";
-		case 52: return "saw_wave";
-		case 53: return "inverse_saw_wave";
-		case 113: return "control_register";
-		default:
-			break;
+	for (const PanmModeEntry &entry : kPanmModes) {
+		if (entry.control == control) {
+			return String(entry.key);
+		}
 	}
-	if (control >= 114 && control <= 117) {
+	if (panm_style_is_wave_lookup(control)) {
 		return "unsupported";
 	}
 	const ThreediControlFuncInfo *info = threedi_control_func_info(control);
@@ -55,21 +76,12 @@ String panm_mode_key_for_control(uint8_t control) {
 }
 
 String panm_mode_label_for_control(uint8_t control) {
-	switch (control) {
-		case 0: return "None";
-		case 16: return "Slide";
-		case 17: return "Slide inverse";
-		case 24: return "Set";
-		case 32: return "Rotate clockwise";
-		case 33: return "Rotate counter-clockwise";
-		case 50: return "Sine wave";
-		case 52: return "Saw wave";
-		case 53: return "Inverse saw wave";
-		case 113: return "Control register";
-		default:
-			break;
+	for (const PanmModeEntry &entry : kPanmModes) {
+		if (entry.control == control) {
+			return String(entry.label);
+		}
 	}
-	if (control >= 114 && control <= 117) {
+	if (panm_style_is_wave_lookup(control)) {
 		return vformat("Wave lookup (raw code %d; not authorable)", control);
 	}
 	const ThreediControlFuncInfo *info = threedi_control_func_info(control);
@@ -81,7 +93,7 @@ bool panm_control_uses_register(uint8_t control) {
 }
 
 bool panm_control_supported(uint8_t control) {
-	if (control >= 114 && control <= 117) {
+	if (panm_style_is_wave_lookup(control)) {
 		return false;
 	}
 	return threedi_control_func_info(control) != nullptr;
@@ -89,45 +101,11 @@ bool panm_control_supported(uint8_t control) {
 
 bool panm_control_for_mode(const String &p_mode, uint8_t &out_control) {
 	const String mode = p_mode.to_lower();
-	if (mode == "none") {
-		out_control = 0;
-		return true;
-	}
-	if (mode == "slide") {
-		out_control = 16;
-		return true;
-	}
-	if (mode == "slide_inverse") {
-		out_control = 17;
-		return true;
-	}
-	if (mode == "set") {
-		out_control = 24;
-		return true;
-	}
-	if (mode == "rotate_cw") {
-		out_control = 32;
-		return true;
-	}
-	if (mode == "rotate_ccw") {
-		out_control = 33;
-		return true;
-	}
-	if (mode == "sine_wave") {
-		out_control = 50;
-		return true;
-	}
-	if (mode == "saw_wave") {
-		out_control = 52;
-		return true;
-	}
-	if (mode == "inverse_saw_wave") {
-		out_control = 53;
-		return true;
-	}
-	if (mode == "control_register") {
-		out_control = 113;
-		return true;
+	for (const PanmModeEntry &entry : kPanmModes) {
+		if (mode == entry.key) {
+			out_control = entry.control;
+			return true;
+		}
 	}
 	return false;
 }
@@ -749,6 +727,77 @@ bool ObjectData::set_part_anim_track_field(int p_lod_index, int p_anim_index, co
 		return true;
 	}
 	return false;
+}
+
+// --- Witnessed threedi catalog/unit re-exports (statics) --------------------
+
+double ObjectData::panm_rotation_unit_deg() {
+	return kPanmRotationUnit;
+}
+
+double ObjectData::panm_value_unit() {
+	return kPanmValueUnit;
+}
+
+Dictionary ObjectData::panm_track_limits() {
+	// Tracks are int16 raw counts; the authorable span is the int16 range
+	// through the engine units (threedi_panm.h).
+	Dictionary out;
+	out["rotation_min"] = static_cast<double>(INT16_MIN) * kPanmRotationUnit;
+	out["rotation_max"] = static_cast<double>(INT16_MAX) * kPanmRotationUnit;
+	out["value_min"] = static_cast<double>(INT16_MIN) * kPanmValueUnit;
+	out["value_max"] = static_cast<double>(INT16_MAX) * kPanmValueUnit;
+	out["speed_min"] = static_cast<double>(INT16_MIN) * kPanmValueUnit;
+	out["speed_max"] = static_cast<double>(INT16_MAX) * kPanmValueUnit;
+	return out;
+}
+
+Array ObjectData::get_panm_mode_options() {
+	Array out;
+	for (const PanmModeEntry &entry : kPanmModes) {
+		Dictionary d;
+		d["mode"] = String(entry.key);
+		d["label"] = String(entry.label);
+		d["control"] = static_cast<int>(entry.control);
+		d["uses_control_register"] = panm_control_uses_register(entry.control);
+		out.push_back(d);
+	}
+	return out;
+}
+
+PackedInt32Array ObjectData::get_generator_style_ids() {
+	PackedInt32Array out;
+	const int count = threedi_generator_style_count();
+	out.resize(count);
+	for (int i = 0; i < count; ++i) {
+		out[i] = threedi_generator_style_code_at(i);
+	}
+	return out;
+}
+
+String ObjectData::generator_style_code_name(int p_style_id) {
+	if (p_style_id < 0 || p_style_id > 255) {
+		return String();
+	}
+	const ThreediControlFuncInfo *info =
+			threedi_control_func_info(static_cast<uint8_t>(p_style_id));
+	return (info != nullptr && info->name != nullptr) ? String(info->name) : String();
+}
+
+bool ObjectData::generator_style_reads_control_value(int p_consumer, int p_style_id) {
+	if (p_style_id < 0 || p_style_id > 255) {
+		return false;
+	}
+	return threedi_generator_reads_control_value(p_consumer,
+				   static_cast<uint8_t>(p_style_id)) != 0;
+}
+
+bool ObjectData::generator_style_parameter_is_ctrl_reference(int p_style_id) {
+	if (p_style_id < 0 || p_style_id > 255) {
+		return false;
+	}
+	return threedi_panm_parameter_is_ctrl_reference(
+				   static_cast<uint8_t>(p_style_id)) != 0;
 }
 
 Error ObjectData::set_part_animation_flags(int p_lod_index, int p_anim_index, int p_flags) {

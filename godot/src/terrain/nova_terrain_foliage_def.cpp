@@ -47,6 +47,14 @@ void TerrainFoliageDef::_bind_methods() {
 	BIND_CONSTANT(COLOR_RETAIN_FULL);
 	BIND_CONSTANT(ATTRIB_FORCE_ON);
 	BIND_CONSTANT(ATTRIB_SHADOW);
+	BIND_CONSTANT(MAX_DEFS);
+	ClassDB::bind_static_method("TerrainFoliageDef",
+			D_METHOD("canonical_match_for_slot", "def_index"),
+			&TerrainFoliageDef::canonical_match_for_slot);
+}
+
+int TerrainFoliageDef::canonical_match_for_slot(int p_def_index) {
+	return opennova::foliage_canonical_match_for_slot(p_def_index);
 }
 
 void TerrainFoliageDef::set_graphic(const String &value) {

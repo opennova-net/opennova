@@ -62,6 +62,12 @@ inline constexpr uint8_t kOccRecWindow = 2;     // exterior window portal
 inline constexpr uint8_t kOccRecPortal = 3;     // interior portal (room-to-room)
 inline constexpr uint8_t kOccRecWeldedLink = 5; // cross-building link (weld-made)
 
+// The per-axis portal-slot collection range, world units: only buildings within
+// 250 u of the camera contribute portal slots to the frame (the batch itself
+// ranges out to the fog distance). [orig: the 0xFA0000 slot-range compare in
+// collect_visible_sector_userpoints @ 0x5c6b60, at @ 0x5c6d7f]
+inline constexpr float kPortalSlotCollectRadius = 250.0f;
+
 // The 60 B runtime portal-face record; slice pointers become run indices into
 // the model arrays. [orig: +0 type, +1/+2 section A/B (COBJ section ordinals;
 // 0 = exterior), +4 pos f3, +0x10 radius, +0x14/+0x18 vert count/slice,

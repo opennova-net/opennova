@@ -69,6 +69,35 @@ std::string strip_hotkey(const std::string &text, int &hotkey_index) {
   return text.substr(0, pos) + text.substr(pos + HOTKEY_MARKER_LEN);
 }
 
+std::string format_miss_marker(const std::string &section, const std::string &key) {
+  // [orig: GameErr_GetString @ 0x4C2C60 — sprintf(kMissMarkerFormat, ...)]
+  std::string out = "??";
+  out += section;
+  out += ':';
+  out += key;
+  out += "??";
+  return out;
+}
+
+std::string lookup_with_override(const File *override_table, const File *table,
+                                 const std::string &section, const std::string &key) {
+  // Override-table-first [orig: TextResource_LoadOverrideTable @ 0x75D5C0]:
+  // a hit in the expansion's table wins outright.
+  if (override_table != nullptr) {
+    const Entry *entry = override_table->find_in_section(section, key);
+    if (entry != nullptr) {
+      return entry->text;
+    }
+  }
+  if (table != nullptr) {
+    const Entry *entry = table->find_in_section(section, key);
+    if (entry != nullptr) {
+      return entry->text;
+    }
+  }
+  return format_miss_marker(section, key);
+}
+
 std::string File::get(const std::string &key) const {
   if (!lookup_built_) {
     // Fallback linear search if lookup not built.
