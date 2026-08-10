@@ -1,12 +1,13 @@
 class_name MnuCanvas
 extends Control
 
-# WYSIWYG edit surface for the Menus workspace. Owns a live MnuMenu in
-# edit_mode (inert: no navigation, audio, or cursor side effects) scaled to the
-# fixed 800x600 design space all Joint Operations (JO) and newer menus are authored
-# in. The fit is anamorphic (independent X/Y factors, no letterbox bars), matching
-# the runtime so the canvas previews exactly what the game draws [orig:
-# CUIScene_SetScreenScale @ 0x639480].
+# WYSIWYG edit surface for the Menus workspace. Owns a compiled MenuFrame
+# preview (the engine draw-list surface; inert in author mode: no navigation,
+# audio, or cursor side effects) scaled to the fixed 800x600 design space all
+# Joint Operations (JO) and newer menus are authored in. The fit is anamorphic
+# (independent X/Y factors, no letterbox bars), matching the runtime so the
+# canvas previews exactly what the game draws [orig: CUIScene_SetScreenScale
+# @ 0x639480].
 #
 # M8a: the canvas owns layout gestures. It picks the widget under the cursor
 # (computing absolute board-space rects so deeply nested widgets pick correctly),
@@ -59,13 +60,13 @@ signal rect_committed(id: int, local_rect: Rect2)
 signal selection_set(ids: PackedInt32Array)
 signal rect_committed_batch(edits: Array)
 
-var _preview: MnuMenu
+var _preview: MenuFrame
 var _document: MnuDocument
 var _resource_root: ResourceRoot
 var _text_resource: RtxtStringFile
 var _stylesheet: MnsStyleSheet
 # The document's own .mnu basename (shipped self-file screen actions compare
-# against it; see MnuMenu.set_menu_file).
+# against it; see MenuDriver.set_menu_file).
 var _menu_file := ""
 
 # The fixed 800x600 design space all JO+ menus author in (the engine scales it to
@@ -87,6 +88,11 @@ var _visible_screen_name := ""
 # and only its window shows). Author gestures (select/drag/marquee/pick) and the
 # authoring overlays are suppressed; only view gestures (pan/zoom) stay live.
 var _interactive := false
+# The play-mode runtime: a MenuDriver over the same MenuFrame (created on
+# entering interactive mode, dropped on exit) plus a persistent MenuAudio
+# child for widget sounds. Author mode configures the frame directly instead.
+var _driver: MenuDriver
+var _driver_audio: MenuAudio
 
 # View-gesture state (pan via middle-drag or Space+left-drag).
 var _panning := false
@@ -132,12 +138,14 @@ var _show_all_bounds := true
 # invisible z-cycling. Built lazily and reused.
 var _pick_menu: PopupMenu
 
-# Maps a widget's stable document id to its live preview Control (tagged by the
-# builder with the "mnu_widget_id" meta). Rebuilt with the preview. Shipped menus
-# often omit a widget's RIGHT/BOTTOM, so the document rect is sizeless; the live
-# Control carries the real rendered size (texture / type default) the overlay needs
-# to pick + outline it. Positions are always authored, so only size is sourced here.
-var _id_to_control: Dictionary = {}
+# Maps the visible screen's stable document ids to the frame's pre-order
+# widget indices (the same DFS as the document walk — the documented seam
+# contract on MenuFrameCompiler). Rebuilt on every (re)configure. Shipped
+# menus often omit a widget's RIGHT/BOTTOM, so the document rect is sizeless;
+# the frame's solved rect carries the real rendered size (texture / type
+# default) the overlay needs to pick + outline it. Positions are always
+# authored, so only size is sourced from the frame.
+var _id_to_index: Dictionary = {}
 
 # Z-cycle: successive clicks within CYCLE_TOL of the same point step through the
 # stack of overlapping widgets (top -> bottom) so an obscured widget is reachable.
@@ -150,12 +158,19 @@ func _ready() -> void:
 	clip_contents = true
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	focus_mode = Control.FOCUS_CLICK
+	set_process(false)  # ticks only while the Interactive preview plays
 	if not resized.is_connected(_on_resized):
 		resized.connect(_on_resized)
 	if not mouse_exited.is_connected(_on_mouse_exited):
 		mouse_exited.connect(_on_mouse_exited)
 	_rebuild_preview()
 	_recompute_fit()
+
+
+func _process(_delta: float) -> void:
+	# Advance the frame's blink/marquee clock while the preview plays.
+	if _driver != null:
+		_driver.tick(Time.get_ticks_msec())
 
 
 # Point the preview at a document. resource_root/text_resource are optional; when
@@ -171,7 +186,7 @@ func set_menu(doc: MnuDocument, resource_root: ResourceRoot, text_resource: Rtxt
 	if doc != null:
 		# Re-seed the visible screen when it is empty OR a stale name the new
 		# document lacks, so a document swap never leaves every screen hidden
-		# (mirrors MnuMenu::build resetting current_screen_).
+		# (mirrors MenuDriver.open_document reseeding an unknown target screen).
 		var ids := doc.get_screen_ids()
 		if not _doc_has_screen(doc, _visible_screen_name):
 			_visible_screen_name = doc.get_screen_name(ids[0]) if ids.size() > 0 else ""
@@ -194,42 +209,64 @@ func is_interactive() -> bool:
 
 
 ## Observable live-preview state for editor tools and tests. Callers never need
-## to reach through the canvas into the id-to-Control implementation map.
+## to reach through the canvas into the id-to-index implementation map.
 func get_preview_widget_state(id: int) -> MnuPreviewWidgetState:
 	var state := MnuPreviewWidgetState.new()
-	var control: Variant = _id_to_control.get(id)
-	if control == null or not is_instance_valid(control):
+	if not _is_widget(id) or _preview == null or not _preview.is_configured():
 		return state
+	if _frame_index_of(id) < 0:
+		return state  # off the configured screen: no live representation
 	state.exists = true
-	state.visible = control.is_visible_in_tree()
-	state.pressable = control is BaseButton or control is MnuEdit \
-		or control is MnuGoto
-	if control is BaseButton:
-		var button := control as BaseButton
-		state.disabled = button.disabled
-		state.pressed = button.button_pressed
+	state.visible = _widget_shown_in_tree(id)
+	state.pressable = _document.get_widget_type(id) in [
+		MnuDocument.TYPE_BUTTON, MnuDocument.TYPE_GOTO,
+		MnuDocument.TYPE_CHECKBOX, MnuDocument.TYPE_RADIO,
+		MnuDocument.TYPE_EDIT,
+	]
+	if _interactive and _driver != null:
+		state.disabled = _driver.is_widget_disabled(id)
+		state.pressed = _driver.is_widget_checked(id)
+	else:
+		state.disabled = (_document.get_widget_flags(id) & MnuDocument.FLAG_DISABLED) != 0
+		state.pressed = (_document.get_widget_flags(id) & MnuDocument.FLAG_CHECKED) != 0
 	return state
 
 
-## Activate one live preview widget with click/hotkey semantics. The canvas owns
-## the runtime-Control mapping, so activation stays behind the same small seam
-## as preview-state queries.
+# Ancestor-aware shown test (the is_visible_in_tree successor): a widget is
+# visible only when itself and every ancestor window is shown — runtime WINDOW
+# show/hide state while playing, authored flags otherwise.
+func _widget_shown_in_tree(id: int) -> bool:
+	var current := id
+	while current >= 0 and _document.widget_exists(current) and not _document.is_screen(current):
+		if _interactive and _driver != null:
+			if not _driver.is_widget_shown(current):
+				return false
+		elif (_document.get_widget_flags(current) & MnuDocument.FLAG_HIDDEN) != 0:
+			return false
+		current = _document.get_parent_id(current)
+	return true
+
+
+## Activate one live preview widget with click semantics. While the Interactive
+## preview plays a click is synthesized at the widget's rect center and routed
+## through the driver's engine mouse pump (the real activation path: actions,
+## sounds, navigation). Author mode performs nothing (the canvas is inert) and
+## returns the observable state unchanged.
 func activate_preview_widget(id: int) -> MnuPreviewWidgetState:
 	var state := get_preview_widget_state(id)
-	if not state.exists or not state.visible or not state.pressable:
+	if not state.exists or not state.visible or not state.pressable or state.disabled:
 		return state
-	var control: Variant = _id_to_control.get(id)
-	if control is BaseButton:
-		var button := control as BaseButton
-		if button.disabled:
-			return state
-		if button.toggle_mode:
-			button.set_pressed(not button.button_pressed)
-		button.emit_signal(&"pressed")
-	elif control is MnuEdit:
-		(control as MnuEdit).trigger_hotkey()
-	elif control is MnuGoto:
-		(control as MnuGoto).trigger()
+	if not _interactive or _driver == null:
+		return state
+	var index := _frame_index_of(id)
+	if index < 0:
+		return state
+	# The frame Control is pinned to the 800x600 design size, so design-space
+	# rects ARE frame-local coordinates (the canvas transform layers on top).
+	var rect: Rect2 = _preview.widget_rect(index)
+	var center := rect.position + rect.size * 0.5
+	_driver.process_mouse(center, true)
+	_driver.process_mouse(center, false)
 	state = get_preview_widget_state(id)
 	state.activated = true
 	return state
@@ -241,33 +278,62 @@ func get_rendered_widget_rect(id: int) -> Rect2:
 	return _abs_rect_of(id) if _is_widget(id) else Rect2()
 
 
-# Toggle the interactive "play" preview. On: the live menu's navigators wire up and
-# clicking a tab runs its window show/hide actions (the preview rebuilds, so authored
-# window visibility resets and only the current screen shows). Off: returns to the
-# authoring canvas (single-screen view, inert widgets) with the prior selection intact.
+# Toggle the interactive "play" preview. On: a MenuDriver takes over the frame
+# and clicking a tab runs its authored actions (window show/hide + same-file
+# screen navigation; quit/url/cross-file stay inert in the sandbox). Off: drops
+# the driver and returns to the authoring canvas (plain re-configure, inert
+# widgets) with the prior selection intact.
 func set_interactive(on: bool) -> void:
-	if _interactive == on or _preview == null:
+	if _interactive == on or _preview == null or _document == null:
 		return
 	_interactive = on
 	if on:
+		_ensure_driver()
+		_driver.attach(_preview, _driver_audio)
 		# Start the sandbox on the screen the author is viewing, then go live.
-		_preview.set_current_screen(_visible_screen_name)
-		_preview.set_interactive(true)
-		if not _preview.screen_changed.is_connected(_on_preview_screen_changed):
-			_preview.screen_changed.connect(_on_preview_screen_changed)
+		_driver.open_document(_document, _resource_root, _stylesheet,
+			_text_resource, _menu_file, _effective_screen_name())
 	else:
-		if _preview.screen_changed.is_connected(_on_preview_screen_changed):
-			_preview.screen_changed.disconnect(_on_preview_screen_changed)
-		_preview.set_interactive(false)
-		_apply_screen_visibility()  # C++ build() shows all screens; restore single-screen author view
-	_rebuild_control_map()
+		_drop_driver()
+		_configure_preview()  # restore the author-mode frame state
+	_rebuild_index_map()
+	set_process(_interactive)
 	queue_redraw()
+
+
+## The play-mode driver while the Interactive preview runs (null otherwise).
+## MCP preview tools navigate through it (show_screen/pop_screen).
+func get_interactive_driver() -> MenuDriver:
+	return _driver if _interactive else null
+
+
+func _ensure_driver() -> void:
+	if _driver_audio == null:
+		_driver_audio = MenuAudio.new()
+		_driver_audio.name = "PreviewAudio"
+		add_child(_driver_audio)
+	_driver_audio.set_resource_root(_resource_root)
+	if _driver == null:
+		_driver = MenuDriver.new()
+		_driver.set_edit_mode(false)
+		_driver.set_interactive_preview(true)
+		_driver.screen_changed.connect(_on_preview_screen_changed)
+
+
+func _drop_driver() -> void:
+	if _driver != null and _driver.screen_changed.is_connected(_on_preview_screen_changed):
+		_driver.screen_changed.disconnect(_on_preview_screen_changed)
+	_driver = null
+	# The play cursor rode the frame's claim; restore the editor's own.
+	Input.set_custom_mouse_cursor(null)
 
 
 # While interactive, follow the live menu's own screen navigation so leaving the mode
 # returns the author to whatever screen they ended on.
 func _on_preview_screen_changed(screen_name: String) -> void:
 	_visible_screen_name = screen_name
+	_rebuild_index_map()
+	queue_redraw()
 
 
 # True when the document has a screen with this (non-empty) name.
@@ -319,10 +385,12 @@ func set_show_all_bounds(on: bool) -> void:
 func _ensure_preview() -> void:
 	if _preview != null:
 		return
-	_preview = MnuMenu.new()
+	_preview = MenuFrame.new()
 	_preview.name = "Preview"
-	_preview.build_on_ready = false
-	_preview.set_edit_mode(true)
+	# Pinned to the design size: frame-local == board coordinates, and the
+	# canvas's zoom/pan rides the CanvasItem transform (a scaled CanvasItem
+	# still rasterizes correctly).
+	_preview.size = _menu_size
 	# The canvas owns input (selection + gestures); the preview never does.
 	_preview.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_preview)
@@ -332,29 +400,64 @@ func _rebuild_preview() -> void:
 	if _document == null:
 		return
 	_ensure_preview()
-	_preview.set_resource_root(_resource_root)
-	_preview.set_text_resource(_text_resource)
-	_preview.set_stylesheet(_stylesheet)
-	_preview.set_menu_file(_menu_file)
-	# Assigning the menu rebuilds the widget tree when the preview is in the tree;
-	# in edit_mode build() shows every screen, so re-apply single-screen visibility.
-	_preview.menu = _document
-	if _preview.is_inside_tree():
-		_apply_screen_visibility()
-	_rebuild_control_map()
+	if _interactive and _driver != null:
+		# A document rebind while playing: reopen so the driver's caches follow.
+		_driver.open_document(_document, _resource_root, _stylesheet,
+			_text_resource, _menu_file, _effective_screen_name())
+	else:
+		_configure_preview()
+	_rebuild_index_map()
 
 
-func _apply_screen_visibility() -> void:
-	if _preview == null:
+# Author-mode configure: compile the visible screen against the document. The
+# driver owns configure while the Interactive preview plays.
+func _configure_preview() -> void:
+	if _preview == null or _document == null:
 		return
-	var target := _visible_screen_name
-	if target.is_empty() and _document != null:
-		var ids := _document.get_screen_ids()
-		if ids.size() > 0:
-			target = _document.get_screen_name(ids[0])
-	for child in _preview.get_children():
-		if child is MnuScreen:
-			child.visible = child.get_screen_name() == target
+	_preview.configure(_document, _effective_screen_name(), _resource_root,
+		_stylesheet, _text_lookup())
+
+
+# The visible screen, falling back to the document's first (mirrors the
+# driver's open_document reseeding an unknown target screen).
+func _effective_screen_name() -> String:
+	if _document == null:
+		return ""
+	if _doc_has_screen(_document, _visible_screen_name):
+		return _visible_screen_name
+	var ids := _document.get_screen_ids()
+	return _document.get_screen_name(ids[0]) if ids.size() > 0 else ""
+
+
+# The id->text table for String/Item type=="id" lookups, flattened from the
+# shell-provided text resource: first-match-wins across sections (the
+# engine-faithful flat lookup; the interactive driver additionally loads each
+# screen's own TEXT_RSRC through the VFS).
+func _text_lookup() -> Dictionary:
+	var out := {}
+	if _text_resource == null:
+		return out
+	for section in range(_text_resource.get_section_count()):
+		for key in _text_resource.get_section_keys(section):
+			var token := String(key)
+			if not out.has(token):
+				out[token] = _text_resource.get_string_in_section(
+						_text_resource.get_section_name(section), token)
+	return out
+
+
+# Screen switching = re-configure the frame with the new screen name (one
+# compiled screen per frame). While playing, the switch routes through the
+# driver's property-setter path (no signals/music).
+func _apply_screen_visibility() -> void:
+	if _preview == null or _document == null:
+		return
+	if _interactive and _driver != null:
+		_driver.set_current_screen(_effective_screen_name())
+	else:
+		_configure_preview()
+	_rebuild_index_map()
+	queue_redraw()
 
 
 func _on_resized() -> void:
@@ -374,6 +477,7 @@ func _recompute_fit() -> void:
 	_fit_offset = Vector2.ZERO
 	_clamp_pan()
 	if _preview != null:
+		_preview.size = _menu_size  # keep frame-local == board space
 		_preview.position = _eff_offset()
 		_preview.scale = _eff_scale()
 
@@ -456,7 +560,7 @@ func _abs_rect_of(id: int) -> Rect2:
 		return Rect2()
 	var local := _document.get_window_rect(id)
 	# Position is always authored; a missing RIGHT/BOTTOM leaves that size axis 0. Fill
-	# only the missing axis from the live Control's rendered size (doc size wins when
+	# only the missing axis from the frame's solved rendered size (doc size wins when
 	# present), so a sizeless-but-rendered widget (e.g. a shipped button) is pickable
 	# and outlined where it actually draws.
 	var sz := local.size
@@ -469,30 +573,44 @@ func _abs_rect_of(id: int) -> Rect2:
 	return Rect2(_abs_offset_of(id) + local.position, sz)
 
 
-# The rendered size (board units) of a widget's live preview Control, or zero when it
-# has none (no preview, or a widget added after the last build). Control.size is the
-# unscaled local size; only the preview root carries _eff_scale, so it is already in
-# board units.
+# The rendered size (board units) of a widget's frame-solved rect, or zero
+# when it has none (no configured frame, or a widget off the visible screen /
+# added after the last configure). MenuFrame.widget_rect is DESIGN-space
+# (800x600), which is exactly the canvas's board space.
 func _live_size_of(id: int) -> Vector2:
-	var c = _id_to_control.get(id)
-	if c != null and is_instance_valid(c):
-		return (c as Control).size
-	return Vector2.ZERO
+	if _preview == null or not _preview.is_configured():
+		return Vector2.ZERO
+	var index := _frame_index_of(id)
+	if index < 0:
+		return Vector2.ZERO
+	return _preview.widget_rect(index).size
 
 
-# Rebuild the id -> live Control map by walking the preview for builder-tagged nodes.
-# Called whenever the preview rebuilds; entries are validated on read.
-func _rebuild_control_map() -> void:
-	_id_to_control.clear()
-	if _preview != null:
-		_index_controls(_preview)
+# Rebuild the id -> pre-order-frame-index map by walking the visible screen's
+# document subtree in the same DFS order the frame compiles (root first,
+# children in authored order — the documented MenuFrameCompiler seam).
+# Called whenever the frame (re)configures.
+func _rebuild_index_map() -> void:
+	_id_to_index.clear()
+	if _document == null:
+		return
+	var screen_id := _visible_screen_id()
+	if screen_id < 0:
+		return
+	var root := _document.get_screen_root_id(screen_id)
+	if root >= 0:
+		_map_widget_subtree(root)
 
 
-func _index_controls(node: Node) -> void:
-	if node.has_meta("mnu_widget_id"):
-		_id_to_control[int(node.get_meta("mnu_widget_id"))] = node
-	for c in node.get_children():
-		_index_controls(c)
+func _map_widget_subtree(id: int) -> void:
+	_id_to_index[id] = _id_to_index.size()
+	for child in _document.get_child_ids(id):
+		_map_widget_subtree(int(child))
+
+
+# The frame's pre-order index for a document id, -1 when off the visible screen.
+func _frame_index_of(id: int) -> int:
+	return int(_id_to_index.get(id, -1))
 
 
 func _visible_screen_id() -> int:
@@ -832,9 +950,12 @@ func _gui_input(event: InputEvent) -> void:
 					_pan_last = mb.position
 					accept_event()
 				elif _interactive:
-					# The live menu owns clicks (they reach its buttons directly); the
-					# canvas does no authoring selection while playing.
-					pass
+					# Play mode: forward the click to the driver in frame-local
+					# (board) coordinates — the engine mouse pump owns the click;
+					# the canvas does no authoring selection while playing.
+					if _driver != null:
+						_driver.process_mouse(_canvas_to_board(mb.position), mb.pressed)
+					accept_event()
 				elif mb.pressed:
 					_on_press(mb.position, mb.shift_pressed or mb.ctrl_pressed)
 					accept_event()
@@ -858,7 +979,11 @@ func _gui_input(event: InputEvent) -> void:
 			queue_redraw()
 			accept_event()
 		elif _interactive:
-			pass  # live menu handles its own hover; no authoring cursor/hover cues
+			# Play mode: hover/press tracking rides the driver's engine pump;
+			# no authoring cursor/hover cues.
+			if _driver != null:
+				_driver.process_mouse(_canvas_to_board(mm.position),
+					Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT))
 		elif _pressed:
 			_on_drag(mm.position, mm.alt_pressed)
 			accept_event()

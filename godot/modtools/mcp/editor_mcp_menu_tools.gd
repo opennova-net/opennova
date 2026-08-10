@@ -1416,8 +1416,10 @@ func _tool_preview(args: Dictionary, ctx: McpToolContext) -> Variant:
 			var name := String(screen_ref)
 			if _screen_id_named(resource, name) < 0:
 				return McpToolResult.error("No Screen named '%s'. Screens: %s" % [name, ", ".join(_screen_names(resource))])
-			var preview: Variant = canvas.get("_preview")
-			preview.show_screen(name)
+			var driver: MenuDriver = canvas.get_interactive_driver()
+			if driver == null:
+				return McpToolResult.error("The Interactive preview has no driver — preview_menu(op=\"on\") first.")
+			driver.show_screen(name)
 			await ctx.frames(1)
 			return { "interactive": true, "visible_screen": canvas.get_visible_screen_name() }
 		"press":
@@ -1427,8 +1429,10 @@ func _tool_preview(args: Dictionary, ctx: McpToolContext) -> Variant:
 		"back":
 			if not canvas.is_interactive():
 				return McpToolResult.error("The preview is not playing — preview_menu(op=\"on\") first.")
-			var preview: Variant = canvas.get("_preview")
-			var popped: bool = preview.pop_screen()
+			var driver: MenuDriver = canvas.get_interactive_driver()
+			if driver == null:
+				return McpToolResult.error("The Interactive preview has no driver — preview_menu(op=\"on\") first.")
+			var popped: bool = driver.pop_screen()
 			await ctx.frames(1)
 			return { "popped": popped, "visible_screen": canvas.get_visible_screen_name() }
 		"status":
@@ -1452,9 +1456,10 @@ func _preview_state_wire(state: MnuPreviewWidgetState) -> Dictionary:
 	}
 
 
-# Activate a live preview Control exactly as a click would (the hotkey
-# trigger's pattern): toggle-mode buttons flip, plain buttons emit pressed
-# (MnuButton dispatches its authored Actions), Gotos trigger.
+# Activate a live preview widget exactly as a click would: the canvas
+# synthesizes a click at the widget's rect center through the interactive
+# MenuDriver's engine mouse pump, so authored Actions, sounds, and navigation
+# all run the real dispatch path.
 func _preview_press(args: Dictionary, ctx: McpToolContext, gate: Dictionary) -> Variant:
 	var resource: Variant = gate["resource"]
 	var canvas: Variant = gate["canvas"]
@@ -1485,7 +1490,7 @@ func _preview_press(args: Dictionary, ctx: McpToolContext, gate: Dictionary) -> 
 	var fired: Array = resource.get_widget_actions(id)
 	if before.disabled:
 		# A visible disabled hotkey/click target consumes the match but performs
-		# no activation, matching MnuMenu's dispatch path.
+		# no activation, matching the driver's dispatch path.
 		return {
 			"ok": true,
 			"pressed": resource.get_widget_name(id),

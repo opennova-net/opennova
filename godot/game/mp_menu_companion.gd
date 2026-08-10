@@ -36,12 +36,11 @@ var _browse_error := ""        # last LAN search failure, shown in the empty lis
 
 # True when this menu is the JO multiplayer menu (so the shell delegates to us). Keyed on
 # control names unique to mp.mnu's LAN/host screens rather than a screen name, since the
-# whole document (all screens) is built at once.
-func owns_menu(menu: MnuMenu) -> bool:
-	if menu == null:
+# whole document (all screens) is addressable at once.
+func owns_menu(driver: MenuDriver) -> bool:
+	if driver == null:
 		return false
-	return menu.find_child("LAN_GAME_LIST", true, false) != null \
-		or menu.find_child("SELECTED_MISSIONS", true, false) != null
+	return driver.has_widget("LAN_GAME_LIST") or driver.has_widget("SELECTED_MISSIONS")
 
 
 # Provide the LAN discovery session. Kept injectable for menu and socket seam tests.
@@ -61,13 +60,15 @@ func set_lan_session(session: LanSession) -> void:
 		_lan_session.error_occurred.connect(_on_lan_browse_error)
 
 
-# All of mp.mnu's screens are built as (hidden) children at once, so we wire every owned
+# All of mp.mnu's screens are addressable at once, so we wire every owned
 # screen's controls by name regardless of which screen is visible — matching how the
 # shell wires.
 func _wire(_file: String, _screen: String) -> void:
-	# Single-click selection in the LAN list relays through the menu's aggregate signal.
-	if not _menu.widget_value_changed.is_connected(_on_widget_value_changed):
-		_menu.widget_value_changed.connect(_on_widget_value_changed)
+	# Single-click selection in the LAN list relays through the driver's aggregate signal.
+	if not _driver.widget_value_changed.is_connected(_on_widget_value_changed):
+		_driver.widget_value_changed.connect(_on_widget_value_changed)
+	if not _driver.list_activated.is_connected(_on_list_activated):
+		_driver.list_activated.connect(_on_list_activated)
 	_wire_lan_browser()
 	_wire_host_settings()
 
@@ -77,10 +78,7 @@ func _wire(_file: String, _screen: String) -> void:
 func _wire_lan_browser() -> void:
 	_connect_pressed("LAN_SEARCH", _on_lan_search)
 	_connect_pressed("LAN_JOINGAME", _on_lan_join)
-	var list := _find("LAN_GAME_LIST")
-	if list is MnuList:
-		if not (list as MnuList).item_activated.is_connected(_on_lan_list_activated):
-			(list as MnuList).item_activated.connect(_on_lan_list_activated)
+	if _driver.has_widget("LAN_GAME_LIST"):
 		_refresh_lan_list()
 
 
@@ -113,8 +111,8 @@ func _on_servers_changed(servers: Array) -> void:
 
 
 func _refresh_lan_list() -> void:
-	var list := _find("LAN_GAME_LIST")
-	if not (list is MnuList):
+	var id := _id("LAN_GAME_LIST")
+	if id < 0:
 		return
 	var rows := PackedStringArray()
 	for s in _servers:
@@ -123,7 +121,7 @@ func _refresh_lan_list() -> void:
 	# guard checks against _servers, which stays empty).
 	if rows.is_empty() and not _browse_error.is_empty():
 		rows.append("Search failed - %s" % _browse_error)
-	(list as MnuList).set_items(rows)
+	_driver.set_widget_items(id, rows)
 
 
 func _format_server_row(s: Dictionary) -> String:
@@ -141,9 +139,12 @@ func _format_server_row(s: Dictionary) -> String:
 	return "%s - %s (%d/%d)" % [name, expansion, cur, max_p]
 
 
-func _on_lan_list_activated(index: int) -> void:
-	_selected_server = index
-	_on_lan_join()
+func _on_list_activated(id: int, row: int) -> void:
+	if _driver == null or _driver.get_menu_file() != _wired_file:
+		return
+	if _driver.widget_name_of(id).nocasecmp_to("LAN_GAME_LIST") == 0:
+		_selected_server = row
+		_on_lan_join()
 
 
 func _on_lan_join() -> void:
@@ -155,9 +156,9 @@ func _on_lan_join() -> void:
 # --- Host-settings screen (MULTI_PLAYER_HOST) ---------------------------------
 
 func _wire_host_settings() -> void:
-	var mission_list := _find("MISSION_LIST")
-	if mission_list is MnuList:
-		_seed_mission_list(mission_list as MnuList)
+	var mission_list := _id("MISSION_LIST")
+	if mission_list >= 0:
+		_seed_mission_list(mission_list)
 	_connect_pressed("ADD_MISSIONS", _on_add_missions)
 	_connect_pressed("REMOVE_MISSIONS", _on_remove_missions)
 	_connect_pressed("START_GAME", _on_host_start)
@@ -165,39 +166,41 @@ func _wire_host_settings() -> void:
 
 # Fill MISSION_LIST with the resource dir's missions (the available pool). The selected
 # rotation is the SELECTED_MISSIONS table, maintained by ADD/REMOVE.
-func _seed_mission_list(list: MnuList) -> void:
-	list.set_items(MissionCatalog.mission_names(_root))
+func _seed_mission_list(id: int) -> void:
+	_driver.set_widget_items(id, MissionCatalog.mission_names(_root))
 
 
 func _on_add_missions() -> void:
-	var mission_list := _find("MISSION_LIST")
-	var table := _find("SELECTED_MISSIONS")
-	if not (mission_list is MnuList) or not (table is MnuTable):
+	var mission_list := _id("MISSION_LIST")
+	var table := _id("SELECTED_MISSIONS")
+	if mission_list < 0 or table < 0:
 		return
-	for idx in (mission_list as MnuList).get_selected_items():
-		var name := (mission_list as MnuList).get_item_text(idx)
-		if not _table_has_mission(table as MnuTable, name):
+	for idx in _driver.selected_rows(mission_list):
+		if idx < 0 or idx >= _driver.item_count(mission_list):
+			continue
+		var name := _driver.item_text(mission_list, idx)
+		if not _table_has_mission(table, name):
 			# cols: Mission / Type / Switch (the Switch bitmap value, 0 = off).
-			(table as MnuTable).add_row_values(PackedStringArray([name, "COOP", "0"]))
+			_driver.table_add_row(table, PackedStringArray([name, "COOP", "0"]))
 
 
 func _on_remove_missions() -> void:
-	var table := _find("SELECTED_MISSIONS")
-	if not (table is MnuTable):
+	var table := _id("SELECTED_MISSIONS")
+	if table < 0:
 		return
 	# Remove high index first so lower indices stay valid as rows shift down.
-	var rows := Array((table as MnuTable).get_selected_rows())
+	var rows := Array(_driver.table_selected_rows(table))
 	rows.sort()
 	rows.reverse()
 	for r in rows:
-		(table as MnuTable).remove_row(int(r))
+		_driver.table_remove_row(table, int(r))
 
 
 func _on_host_start() -> void:
 	lan_host_start_requested.emit(_read_host_config())
 
 
-# Read the host request off the built tree by control name. Unread controls
+# Read the host request off the loaded document by control name. Unread controls
 # (rules tab, weapon restrictions, server location) still render. MissionRuntime
 # derives the wire game type from the selected mission; the record's Co-op value
 # remains the fallback for explicit callers that do not request auto derivation.
@@ -231,24 +234,26 @@ func _is_dedicated() -> bool:
 
 
 func _selected_missions() -> Array[String]:
-	var table := _find("SELECTED_MISSIONS")
+	var table := _id("SELECTED_MISSIONS")
 	var out: Array[String] = []
-	if table is MnuTable:
-		for r in range((table as MnuTable).get_row_count()):
-			out.append((table as MnuTable).get_cell_text(r, 0))
+	if table >= 0:
+		for r in range(_driver.table_row_count(table)):
+			out.append(_driver.table_cell_text(table, r, 0))
 	return out
 
 
 # --- Aggregate signal + helpers -----------------------------------------------
 
 func _on_widget_value_changed(widget_name: String, kind: String, index: int, _value: String) -> void:
+	if _driver == null or _driver.get_menu_file() != _wired_file:
+		return
 	if widget_name == "LAN_GAME_LIST" and kind == "list":
 		_selected_server = index
 
 
-func _table_has_mission(table: MnuTable, name: String) -> bool:
-	for r in range(table.get_row_count()):
-		if table.get_cell_text(r, 0) == name:
+func _table_has_mission(table: int, name: String) -> bool:
+	for r in range(_driver.table_row_count(table)):
+		if _driver.table_cell_text(table, r, 0) == name:
 			return true
 	return false
 
@@ -256,7 +261,8 @@ func _table_has_mission(table: MnuTable, name: String) -> bool:
 # Returns the selected spin-list item's `value=` attribute (the semantic value the
 # original reads), not its localized display label. Used to map SERVERTYPE/GAME_TYPE to behavior.
 func _spin_attr(name: String, default_value: String) -> String:
-	var spin := _find(name) as MnuSpinList
-	if spin != null:
-		return String(spin.get_value_attr())
-	return default_value
+	var id := _id(name)
+	if id < 0:
+		return default_value
+	var value := _driver.spin_value_attr(id)
+	return value if not value.is_empty() else default_value

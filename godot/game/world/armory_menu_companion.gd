@@ -5,7 +5,8 @@ const GRENADE_CONTROLS := ["GRENADE_AMMO1", "GRENADE_AMMO2", "GRENADE_AMMO3"]
 
 # Drives the JO in-game armory — weapon.mnu's WEAPON screen — by control NAME, as a
 # companion the game-agnostic MenuShell (nova_menu_shell.gd) delegates to (the
-# mp_menu_companion / player_info_menu_companion pattern). The original registers exactly these
+# mp_menu_companion / player_info_menu_companion pattern), riding a MenuDriver
+# over the compiled MenuFrame surface. The original registers exactly these
 # controls on the "WEAPON" screen [orig: WeaponDef_RegisterUICallbacks @0x567020,
 # run once from the screen's INIT event @0x567250]:
 #   PLAYER_CLASS (spinlist)                  -> handle_team_class_selection @0x566f60
@@ -18,8 +19,8 @@ const GRENADE_CONTROLS := ["GRENADE_AMMO1", "GRENADE_AMMO2", "GRENADE_AMMO3"]
 # The screen opens in-match from the USE-ITEM key (action 177 "useitem", retail default
 # SHIFT per the shipped KeyChart) while the player stands in a type-6 armory volume
 # (entity Flags 0x400000) [orig: Input_HandleActionBinding_0 case 0xB1 @0x4e0b3f;
-# the parallel action 218 @0x49b8e3 ships with no binding row] — the shell owns that
-# key + gate and the ACCEPT apply (sim + FP viewmodel rebuild).
+# the parallel action 218 @0x49b8e3 ships with no binding row] — the presenter owns
+# that key + gate and the ACCEPT apply (sim + FP viewmodel rebuild).
 #
 # Slot population is the witnessed class/team/availability filter of the
 # WEAPON-screen populate [orig: populate_three_category_lists @0x566db0 via
@@ -33,7 +34,7 @@ const GRENADE_CONTROLS := ["GRENADE_AMMO1", "GRENADE_AMMO2", "GRENADE_AMMO3"]
 # @0x564930], the icon swaps [orig: @0x565640 tail, icon table @0x2540D70], the
 # *_AMMO2 controls, and the *_AMMO1_TYPE round-type cascade.
 
-var _menu: Node                      # the built MnuMenu
+var _driver: MenuDriver
 var _root: ResourceRoot
 var _weapons: WeaponDatabase
 var _team := 0                       # 0 = blue/good, 1 = red/evil (host stamps before open)
@@ -72,6 +73,8 @@ var _grenade_rows: Array = []
 # arms it [orig: g_weaponScreenOpenDebounce = 1 at the open @0x4e0b21; cleared by
 # Input_HandleMenuKeyRelease @0x4de2d0].
 var _accept_hotkey_armed := false
+# NAME (upper) -> Callable activation routing off the driver.
+var _activation_handlers := {}
 
 signal loadout_accepted(loadout: Dictionary)
 signal armory_closed
@@ -79,11 +82,10 @@ signal armory_closed
 
 # weapon.mnu's WEAPON screen: PLAYER_CLASS (spinlist) + PRIMARY_AMMO1 are unique to it
 # (player.mnu uses PLAYERCLASS, no ammo combos).
-func owns_menu(menu: MnuMenu) -> bool:
-	if menu == null:
+func owns_menu(driver: MenuDriver) -> bool:
+	if driver == null:
 		return false
-	return menu.find_child("PLAYER_CLASS", true, false) != null \
-		and menu.find_child("PRIMARY_AMMO1", true, false) != null
+	return driver.has_widget("PLAYER_CLASS") and driver.has_widget("PRIMARY_AMMO1")
 
 
 func set_player_team(team: int) -> void:
@@ -142,20 +144,19 @@ func set_weapon_database(weapons: WeaponDatabase) -> void:
 	_weapons = weapons
 
 
-func on_menu_built(menu: MnuMenu, _file: String, _screen: String, root: ResourceRoot) -> void:
-	_menu = menu
+func on_menu_built(driver: MenuDriver, _file: String, _screen: String, root: ResourceRoot) -> void:
+	_driver = driver
 	_root = root
+	_activation_handlers.clear()
+	if not driver.widget_activated.is_connected(_on_widget_activated):
+		driver.widget_activated.connect(_on_widget_activated)
+	if not driver.widget_value_changed.is_connected(_on_widget_value_changed):
+		driver.widget_value_changed.connect(_on_widget_value_changed)
 	_ensure_weapons()
 	_populate_classes()
-	_connect_spin("PLAYER_CLASS", _on_class_changed)
 	_populate_slots()
-	for slot_name in ["PRIMARY", "SECONDARY", "ACCESSORY"]:
-		_connect_combo(slot_name, _on_slot_selected.bind(slot_name))
-		_connect_combo(slot_name + "_AMMO1", _on_ammo_selected)
-	for control in GRENADE_CONTROLS:
-		_connect_combo(control, _on_ammo_selected)
-	_connect_pressed("ACCEPT", _on_accept)   # [orig: @0x5671f6 arg 0]
-	_connect_pressed("CANCEL", _on_cancel)   # [orig: @0x567214 arg 1 skips the apply]
+	_activation_handlers["ACCEPT"] = _on_accept   # [orig: @0x5671f6 arg 0]
+	_activation_handlers["CANCEL"] = _on_cancel   # [orig: @0x567214 arg 1 skips the apply]
 	# The on-show re-registers the ACCEPT hotkeys and the open re-stamps the
 	# debounce [orig: CUIWidget_ResetScreenHotkeys/AddScreenHotkey @0x567483..
 	# 0x5674c0; g_weaponScreenOpenDebounce = 1 @0x4e0b21].
@@ -189,22 +190,21 @@ var _selected_class_value := 0
 
 func _populate_classes() -> void:
 	_selected_class_value = _resolve_selected_class()
-	var spin := _spin("PLAYER_CLASS")
-	if spin == null:
+	var spin := _driver.widget_id("PLAYER_CLASS")
+	if spin < 0:
 		return
 	var rows := PackedStringArray()
 	for i in CLASS_KEYS.size():
 		rows.append(_menu_text(CLASS_KEYS[i], CLASS_FALLBACKS[i]))
 	_populating = true
-	spin.set_values(rows)
+	_driver.set_widget_items(spin, rows)
 	# Select by VALUE = the resolved class; a class with no row falls back to row 0
 	# [orig: SpinList_SelectItemByValue @0x64ba50 selects 0 on no match].
-	spin.set_value_index(maxi(CLASS_VALUES.find(_selected_class_value), 0))
+	_driver.select_row(spin, maxi(CLASS_VALUES.find(_selected_class_value), 0), false)
 	_populating = false
-	# Outside an MP session the class spin is inert [orig: @0x567370]. MnuSpinList
-	# has no runtime disable; parking the subtree's processing is the shell-side stand-in.
-	spin.process_mode = Node.PROCESS_MODE_INHERIT if _class_selection_enabled \
-			else Node.PROCESS_MODE_DISABLED
+	# Outside an MP session the class spin is inert — the original disables it
+	# [orig: @0x567370]; the driver's disable is the pump's visual state 1.
+	_driver.set_widget_disabled(spin, not _class_selection_enabled)
 
 
 # The class the screen opens on — the engine's one impl (world/player_loadout
@@ -222,7 +222,7 @@ func _class_mask() -> int:
 	return WeaponDatabase.armory_class_filter_mask(_selected_class_value)
 
 
-func _on_class_changed(index: int, _value: String) -> void:
+func _on_class_changed(index: int) -> void:
 	if _populating:
 		return
 	# The flip is MP-only in the original (the spin is disabled otherwise); saving the
@@ -255,8 +255,8 @@ func _available_slot_weapons(slot: int, team_mask: int) -> Array:
 
 
 func _fill_slot(control: String, slot: int, team_mask: int) -> void:
-	var combo := _combo(control)
-	if combo == null:
+	var combo := _driver.widget_id(control)
+	if combo < 0:
 		return
 	var dicts: Array = _available_slot_weapons(slot, team_mask)
 	# The map availability term: banned (0) weapons never list; every nonzero value
@@ -287,7 +287,7 @@ func _fill_slot(control: String, slot: int, team_mask: int) -> void:
 	if not current.is_empty():
 		for i in dicts.size():
 			if String(dicts[i].get("name", "")).nocasecmp_to(current) == 0:
-				combo.select_silent(i + 1)
+				_driver.select_row(combo, i + 1, false)
 				break
 
 
@@ -307,8 +307,8 @@ func _populate_grenades(team_mask: int) -> void:
 	for i in mini(dicts.size(), GRENADE_CONTROLS.size()):
 		_grenade_rows.append(dicts[i])
 	for i in GRENADE_CONTROLS.size():
-		var combo := _combo(GRENADE_CONTROLS[i])
-		if combo == null:
+		var combo := _driver.widget_id(GRENADE_CONTROLS[i])
+		if combo < 0:
 			continue
 		var w: Dictionary = _grenade_rows[i] if i < _grenade_rows.size() else {}
 		var allowed := not w.is_empty()
@@ -320,8 +320,8 @@ func _populate_grenades(team_mask: int) -> void:
 			rows.append(_ammo_row_label(w, clips))
 		_set_combo_items(combo, rows)
 		if not w.is_empty():
-			combo.select_silent(_current_grenade_clips(
-					String(w.get("name", "")), maxclips))
+			_driver.select_row(combo, _current_grenade_clips(
+					String(w.get("name", "")), maxclips), false)
 	_update_weight()
 
 
@@ -359,26 +359,20 @@ func _ammo_row_label(w: Dictionary, clips: int) -> String:
 # The slot's selected weapon dict (the WeaponDatabase transport dict; {} = NONE).
 # Public read seam (ADR 0018): tests and diagnostics read the selection here.
 func selected_weapon(control: String) -> Dictionary:
-	var combo := _combo(control)
-	if combo == null:
+	var combo := _driver.widget_id(control)
+	if combo < 0:
 		return {}
-	var row := combo.get_selected()
+	var row := _driver.selected_row(combo)
 	var dicts: Array = _slot_rows.get(control, [])
 	if row <= 0 or row > dicts.size():
 		return {}  # NONE
 	return dicts[row - 1]
 
 
-func _on_slot_selected(_row: int, _value: String, control: String) -> void:
+func _on_slot_selected(control: String) -> void:
 	if _populating:
 		return
 	_populate_ammo(control)
-	_update_weight()
-
-
-func _on_ammo_selected(_row: int, _value: String) -> void:
-	if _populating:
-		return
 	_update_weight()
 
 
@@ -386,8 +380,8 @@ func _on_ammo_selected(_row: int, _value: String) -> void:
 # clipsize rounds, and serializes as 1; row maxclips-1 is the full load
 # [orig: @0x564c7d..0x564ce4, sprintf "%d - %s"].
 func _populate_ammo(control: String) -> void:
-	var combo := _combo(control + "_AMMO1")
-	if combo == null:
+	var combo := _driver.widget_id(control + "_AMMO1")
+	if combo < 0:
 		return
 	var w := selected_weapon(control)
 	var rows := PackedStringArray()
@@ -407,26 +401,28 @@ func _populate_ammo(control: String) -> void:
 			clips = WeaponDatabase.CLIP_COUNT_DEF_DEFAULT
 		# The shared default-select rule: a saved count picks its row, the -1
 		# sentinel picks the full maxclips row [orig: the fill @0x565cd0].
-		combo.select_silent(WeaponDatabase.default_clip_row(clips, maxclips) - 1)
+		_driver.select_row(combo,
+				WeaponDatabase.default_clip_row(clips, maxclips) - 1, false)
 	_update_weight()
 
 
 # The slot's selected clip count. Public read seam (ADR 0018), paired with
 # selected_weapon.
 func selected_clips(control: String) -> int:
-	var combo := _combo(control + "_AMMO1")
-	if combo == null or combo.get_selected() < 0:
+	var combo := _driver.widget_id(control + "_AMMO1")
+	if combo < 0 or _driver.selected_row(combo) < 0 \
+			or _driver.item_count(combo) == 0:
 		# -1 = the def default; the original's main leg takes adm[23] RAW as the total
 		# (only the sub-weapon leg multiplies by clipsize) [orig: @0x565cd0 0x566166].
 		return -1
-	return combo.get_selected() + 1
+	return _driver.selected_row(combo) + 1
 
 
 func _selected_grenade_loadout() -> Array[Dictionary]:
 	var selected: Array[Dictionary] = []
 	for i in _grenade_rows.size():
-		var combo := _combo(GRENADE_CONTROLS[i])
-		var clips := combo.get_selected() if combo != null else 0
+		var combo := _driver.widget_id(GRENADE_CONTROLS[i])
+		var clips := _driver.selected_row(combo) if combo >= 0 else 0
 		if clips <= 0:
 			continue
 		selected.append({
@@ -465,8 +461,8 @@ func _update_weight() -> void:
 		counts.append(selected_clips(slot_name))  # -1 = the def default (maxclips)
 	var total := _weapons.loadout_weight(indices, counts)
 	for i in _grenade_rows.size():
-		var combo := _combo(GRENADE_CONTROLS[i])
-		var clips := combo.get_selected() if combo != null else 0
+		var combo := _driver.widget_id(GRENADE_CONTROLS[i])
+		var clips := _driver.selected_row(combo) if combo >= 0 else 0
 		if clips <= 0:
 			continue
 		var grenade := _grenade_rows[i] as Dictionary
@@ -480,14 +476,17 @@ func _update_weight() -> void:
 		encumbrance = _menu_text("HEAVY_ENCUMBRANCE", "Heavy")
 	elif band == WeaponDatabase.ENCUMBRANCE_NORMAL:
 		encumbrance = _menu_text("NORMAL_ENCUMBRANCE", "Normal")
-	var node := _find("STATIC_TOTAL_WEIGHT")
-	var label := node as Label
-	if label == null and node != null:
-		label = node.find_child("Label", false, false) as Label
-	if label != null:
-		label.text = "%s %.1f %s (%s)" % [
+	var label := _driver.widget_id("STATIC_TOTAL_WEIGHT")
+	if label >= 0:
+		_driver.set_widget_text(label, "%s %.1f %s (%s)" % [
 			_menu_text("TOTAL_WEIGHT", "Total Weight"), total,
-			_menu_text("LBS", "lbs"), encumbrance]
+			_menu_text("LBS", "lbs"), encumbrance])
+
+
+## The rendered weight line (public read seam for tests/diagnostics).
+func weight_line() -> String:
+	var label := _driver.widget_id("STATIC_TOTAL_WEIGHT")
+	return _driver.get_widget_text(label) if label >= 0 else ""
 
 
 # --- ACCEPT / CANCEL ---------------------------------------------------------------
@@ -542,40 +541,38 @@ func _on_cancel() -> void:
 	armory_closed.emit()  # [orig: CANCEL skips the apply, clears g_WeaponScreenOpen]
 
 
+# --- Driver relays -----------------------------------------------------------------
+
+func _on_widget_activated(_id: int, widget_name: String) -> void:
+	var handler: Callable = _activation_handlers.get(widget_name.to_upper(), Callable())
+	if handler.is_valid():
+		handler.call()
+
+
+func _on_widget_value_changed(widget_name: String, kind: String, index: int, _value: String) -> void:
+	if _populating:
+		return
+	if kind == "spinlist" and widget_name.nocasecmp_to("PLAYER_CLASS") == 0:
+		_on_class_changed(index)
+		return
+	if kind != "combo":
+		return
+	match widget_name.to_upper():
+		"PRIMARY", "SECONDARY", "ACCESSORY":
+			_on_slot_selected(widget_name.to_upper())
+		"PRIMARY_AMMO1", "SECONDARY_AMMO1", "ACCESSORY_AMMO1", \
+		"GRENADE_AMMO1", "GRENADE_AMMO2", "GRENADE_AMMO3":
+			_update_weight()
+
+
 # --- Helpers -----------------------------------------------------------------------
 
-func _combo(name: String) -> MnuCombo:
-	return _find(name) as MnuCombo
-
-
-func _spin(name: String) -> MnuSpinList:
-	return _find(name) as MnuSpinList
-
-
-func _set_combo_items(combo: MnuCombo, rows: PackedStringArray) -> void:
+func _set_combo_items(combo: int, rows: PackedStringArray) -> void:
 	_populating = true
-	combo.set_items(rows)
+	_driver.set_widget_items(combo, rows)
 	if rows.size() > 0:
-		combo.select_silent(0)
+		_driver.select_row(combo, 0, false)
 	_populating = false
-
-
-func _connect_combo(name: String, handler: Callable) -> void:
-	var combo := _combo(name)
-	if combo != null and not combo.item_selected.is_connected(handler):
-		combo.item_selected.connect(handler)
-
-
-func _connect_spin(name: String, handler: Callable) -> void:
-	var spin := _spin(name)
-	if spin != null and not spin.value_changed.is_connected(handler):
-		spin.value_changed.connect(handler)
-
-
-func _connect_pressed(name: String, handler: Callable) -> void:
-	var node := _find(name)
-	if node is BaseButton and not (node as BaseButton).pressed.is_connected(handler):
-		(node as BaseButton).pressed.connect(handler)
 
 
 func _menu_text(key: String, fallback: String) -> String:
@@ -586,7 +583,3 @@ func _menu_text(key: String, fallback: String) -> String:
 		if t != null and t.has_string_in_section(spec[1], key):
 			return t.get_string_in_section(spec[1], key)
 	return fallback
-
-
-func _find(name: String) -> Node:
-	return _menu.find_child(name, true, false) if _menu != null else null

@@ -1,8 +1,8 @@
 class_name MenuShell
 extends Control
 
-# Runtime menu shell: drives a live MnuMenu (the same engine node the ONED
-# Menus workspace previews, here with edit_mode off so it is fully interactive),
+# Runtime menu shell: drives the compiled menu surface — a MenuFrame (the
+# engine draw-list/pump Control) orchestrated by MenuDriver (menu_driver.gd),
 # loading the game's .mnu menu set + audio from the user's resource directory.
 # Music streams through the shared NovaMusicService autoload (one context at a
 # time, like the original AudioVM): the shell opens the MENU context; GameWorld
@@ -10,13 +10,13 @@ extends Control
 # GameWorld: GameWorld turns a resource dir into a playable world, this turns it
 # into the playable menu front-end, and main_game.gd hands off between the two.
 #
-# The menu itself owns intra-.mnu navigation, window show/hide, the back stack,
-# and per-screen music (it pushes each screen's MUSICVAR into the director). The
-# shell services the policy the menu leaves to it: cross-.mnu file jumps
-# (menu_requested), quit (quit_requested), and the gameplay launch. Shipped JO
-# menus carry no "launch" action verb; the engine wires those by well-known
-# control NAME (START_GAME, ACCEPT, EXIT, ...), so the shell scans the built tree
-# for those names and connects them. The control-name sets are exported so a
+# The driver owns intra-.mnu navigation, widget interaction, sounds, and the
+# per-screen MUSICVAR push. The shell services the policy the driver leaves to
+# it: cross-.mnu file jumps (menu_requested), quit (quit_requested), and the
+# gameplay launch. Shipped JO menus carry no "launch" action verb; the engine
+# wires those by well-known control NAME (START_GAME, ACCEPT, EXIT, ...), so
+# the shell resolves those names against the loaded document and routes the
+# driver's activation signal. The control-name sets are exported so a
 # different game's menu set can be pointed at the same shell.
 
 const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
@@ -29,18 +29,9 @@ const ResourceDirSettings := preload("res://game/resource_index/resource_dir_set
 # (the main menu's MUSICVAR=1 selects the P2..P8 theme). The original stores the
 # active screen's MUSICVAR to Var2 on every screen event [orig:
 # UI_DispatchScreenEvent @ 0x54e6a0, store @ 0x54eff4 -> AudioVM_SetVariable(2, v)].
-# setup() pushes it synchronously (open_menu rebuilds in-tree) before the
+# setup() pushes it synchronously (open_menu rebuilds in place) before the
 # director's first _process tick, so the VM starts in the right section.
 const MUSIC_VAR_INDEX := 2
-
-# Menus are authored in a fixed 800x600 virtual design space and scaled to the
-# screen by independent X/Y factors (anamorphic fill, no letterbox, origin 0,0):
-# the original computes scaleX = screenW/800, scaleY = screenH/600 and applies it
-# to every widget rect at draw [orig: CUIScene_SetScreenScale @ 0x639480, constants
-# 0.00125 = 1/800 and 0.0016666667 = 1/600; recomputed on resolution change in
-# apply_video_mode_change @ 0x55a590]. We reproduce it by scaling the menu root
-# CanvasItem; authored coords stay in 800x600 space.
-const DESIGN_SIZE := Vector2(800, 600)
 
 # Friendly labels for known expansions. The list item + persisted key stay the raw
 # folder name (e.g. "jox01"); unknown expansions display their raw folder name.
@@ -76,7 +67,7 @@ const EXPANSION_DISPLAY_NAMES := {"jox01": "Kendari"}
 @export var menu_music_file := ""        # "" -> MENUMUS.BIN (M<n>.bin under an expansion)
 
 # Well-known control names (the JO "wired by convention" launch/quit controls).
-# A button found by one of these names gets its `pressed` connected to the shell.
+# An activated control matching one of these routes to the shell handler.
 @export var start_control_names := PackedStringArray([
 	"START_GAME", "ACCEPT", "LAUNCH", "GO", "HOST_GAME", "LAN_HOSTGAME",
 ])
@@ -139,7 +130,9 @@ signal novaworld_requested()
 # Emitted after the Options spin list changes so an active HUD can reload its art.
 signal crosshair_style_changed(style: int)
 
-var _menu: MnuMenu
+var _driver: MenuDriver
+var _frame: MenuFrame
+var _audio: MenuAudio
 var _root: ResourceRoot
 var _text: RtxtStringFile
 var _style: MnsStyleSheet
@@ -151,7 +144,8 @@ var _current_file := ""
 var _selected_mission := ""
 var _selected_expansion := ""
 var _in_game := false
-var _ready_done := false
+# Named-control routing rebuilt per open_menu: NAME (upper) -> Callable.
+var _named_handlers: Dictionary = {}
 # Optional delegates that own game-specific menus the generic shell does not handle
 # (the JO multiplayer menu — mp_menu_companion.gd; the PLAYER_INFO character screen —
 # player_info_menu_companion.gd). Empty for a plain shell. The first whose owns_menu()
@@ -163,8 +157,14 @@ var _controls_model: ControlsModel = null
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_PASS
-	if not resized.is_connected(_recompute_fit):
-		resized.connect(_recompute_fit)
+	set_process(false)
+
+
+func _process(_delta: float) -> void:
+	# The blink/marquee clock rides the OS tick like the original's
+	# GetTickCount gate.
+	if _driver != null:
+		_driver.tick(Time.get_ticks_msec())
 
 
 # Install a companion that owns game-specific menus the generic shell does not handle
@@ -177,12 +177,12 @@ func add_companion(companion) -> void:
 
 
 # Build the shell against a resource root and open the main menu. Idempotent on
-# the asset/menu/director wiring (only assembled once); show_menu() returns to
+# the asset/driver wiring (only assembled once); show_menu() returns to
 # the main menu on later entries. Returns false when the main menu
 # cannot be resolved/loaded (an empty/incomplete resource dir).
 func setup(root: ResourceRoot) -> bool:
 	_root = root
-	if _menu == null:
+	if _driver == null:
 		_assemble_assets()
 	_enter_menu_music()
 	_in_game = false
@@ -211,38 +211,67 @@ func _assemble_assets() -> void:
 	_style = _load_style(_discover_name(menu_stylesheet_file, ".mns", ""))
 	_sound_profile = _load_sound_profile(_discover_name(menu_sound_profile_file, ".lwf", "menu"))
 
-	_menu = MnuMenu.new()
-	_menu.name = "Menu"
-	_menu.build_on_ready = false
-	_menu.set_edit_mode(false)
-	_menu.set_resource_root(_root)
-	if _style != null:
-		_menu.set_stylesheet(_style)
-	if _text != null:
-		_menu.set_text_resource(_text)
-	# Menu hover/click SFX come from the .lwf profile (set-by-trigger -> .wav). The
-	# SBF stays on the music director only; it is not the menu's SFX source.
-	if _sound_profile != null:
-		_menu.set_sound_profile(_sound_profile)
-	# The one music context lives on the NovaMusicService autoload (the original
-	# streams one AudioVM context at a time); the menu pushes each screen's
-	# MUSICVAR into its director at the menumus discriminator index.
-	_menu.set_music_director(NovaMusicService.director())
-	_menu.set_music_var_index(MUSIC_VAR_INDEX)
-	# Pin the menu root at the top-left, sized to the 800x600 design space; the
-	# anamorphic scale is applied per-resize in _recompute_fit. Top-left anchors keep
-	# the explicit size from being overridden, so PRESET_FULL_RECT screens fill 800x600.
-	_menu.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	_menu.size = DESIGN_SIZE
-	add_child(_menu)
+	# The compiled surface: MenuFrame renders + pumps in the fixed 800x600
+	# design space, anamorphically scaled to its own size [orig:
+	# CUIScene_SetScreenScale @ 0x639480 — the scale pair lives inside the
+	# frame's compile].
+	_frame = MenuFrame.new()
+	_frame.name = "MenuFrameSurface"
+	_frame.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_frame)
 
-	# Connect once on the persistent menu node (the child screen tree is rebuilt
-	# per open_menu; these aggregate signals survive the rebuilds).
-	_menu.menu_requested.connect(_on_menu_requested)
-	_menu.quit_requested.connect(_on_quit_requested)
-	_menu.widget_value_changed.connect(_on_widget_value_changed)
-	_menu.action_dispatched.connect(_on_action_dispatched)
-	_menu.url_requested.connect(_on_url_requested)
+	# Menu hover/click SFX come from the .lwf profile (set-by-trigger -> .wav);
+	# playback is the MenuAudio device leg. The SBF stays on the music
+	# director only; it is not the menu's SFX source.
+	_audio = MenuAudio.new()
+	_audio.name = "MenuAudio"
+	_audio.set_resource_root(_root)
+	if _sound_profile != null:
+		_audio.set_sound_profile(_sound_profile)
+	add_child(_audio)
+
+	_driver = MenuDriver.new()
+	_driver.attach(_frame, _audio)
+	# The one music context lives on the NovaMusicService autoload (the original
+	# streams one AudioVM context at a time); the driver pushes each screen's
+	# MUSICVAR into its director at the menumus discriminator index.
+	_driver.set_music_director(NovaMusicService.director())
+	_driver.set_music_var_index(MUSIC_VAR_INDEX)
+
+	# Connect once on the persistent driver (screens reconfigure under it;
+	# these aggregate signals survive).
+	_driver.menu_requested.connect(_on_menu_requested)
+	_driver.quit_requested.connect(_on_quit_requested)
+	_driver.widget_value_changed.connect(_on_widget_value_changed)
+	_driver.url_requested.connect(_on_url_requested)
+	_driver.widget_activated.connect(_on_widget_activated)
+	_driver.list_activated.connect(_on_list_activated)
+	set_process(true)
+
+
+# --- Input routing (the frame is a passive surface; the shell samples) --------
+
+func _gui_input(event: InputEvent) -> void:
+	if _driver == null or not visible:
+		return
+	if event is InputEventMouseMotion:
+		var motion := event as InputEventMouseMotion
+		_driver.process_mouse(motion.position,
+				(motion.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0)
+	elif event is InputEventMouseButton:
+		var button := event as InputEventMouseButton
+		if button.button_index == MOUSE_BUTTON_LEFT:
+			_driver.process_mouse(button.position, button.pressed)
+			accept_event()
+
+
+func _unhandled_key_input(event: InputEvent) -> void:
+	# A backgrounded menu must not steal Esc from the world.
+	if _driver == null or not is_visible_in_tree():
+		return
+	if event is InputEventKey and _driver.handle_key_input(event as InputEventKey):
+		get_viewport().set_input_as_handled()
 
 
 # --- Menu loading + navigation ------------------------------------------------
@@ -257,14 +286,14 @@ func open_menu(file: String, target_screen: String) -> bool:
 		return false
 	_current_file = file
 	_selected_mission = ""
-	# Shipped same-file screen jumps name their own file (mp.mnu does); the menu
-	# routes them as in-menu navigation by comparing against its own basename.
-	_menu.set_menu_file(file.get_file())
-	_menu.menu = doc  # in-tree -> rebuilds synchronously, fires screen/music signals
-	if not target_screen.is_empty():
-		_menu.show_screen(target_screen)
+	# Shipped same-file screen jumps name their own file (mp.mnu does); the
+	# driver routes them as in-menu navigation by comparing against this
+	# basename.
+	if not _driver.open_document(doc, _root, _style, _text, file.get_file(),
+			target_screen):
+		push_warning("MenuShell: menu '%s' has no screens" % file)
+		return false
 	_wire_named_controls()
-	_recompute_fit()
 	return true
 
 
@@ -276,15 +305,15 @@ func hide_menu() -> void:
 	visible = false
 
 
-## Process-exit-only release for the retail menu cursor. MnuScreen keeps the
-## decoded texture for later screen visits and Input keeps a second process-wide
-## reference after applying it; both must drop before RenderingServer exits.
+## Process-exit-only release for the retail menu cursor + the compiled menu's
+## GPU textures: Input keeps a process-wide cursor reference after applying it
+## and the frame retains its texture set; both must drop before RenderingServer
+## exits.
 func release_runtime_renderer_resources() -> void:
 	Input.set_custom_mouse_cursor(null, Input.CURSOR_ARROW)
-	if _menu == null:
-		return
-	for node in _menu.find_children("*", "MnuScreen", true, false):
-		(node as MnuScreen).set_cursor_texture(null)
+	if _frame != null:
+		# configure(null) wipes the retained texture/font sets.
+		_frame.configure(null, "", null, null, {})
 
 
 # Marks that the menu is now the in-game/pause overlay (a kept-loaded world sits
@@ -295,9 +324,9 @@ func open_ingame_menu() -> bool:
 	return open_menu(ingame_menu_file, "")
 
 
-# After each (re)build, connect the launch/quit controls and seed mission/mod lists.
-# The screen nodes are freshly built children, so prior connections died with the
-# old tree; we just rescan.
+# After each open, resolve the launch/quit controls and seed mission/mod lists.
+# The driver keeps per-document widget state, so this rescans names against the
+# freshly opened document.
 #
 # The "OK" control (named ACCEPT in JO) is overloaded: it launches on a play screen
 # but is a plain confirm on Options/loadout/etc. The original engine dispatches it
@@ -309,31 +338,33 @@ func open_ingame_menu() -> bool:
 # start controls are left to the menu's own actions. Binding them globally is what
 # made OK on Options launch the first mission.
 func _wire_named_controls() -> void:
+	_named_handlers.clear()
 	_seed_crosshair_style_controls()
 	# A companion (e.g. the multiplayer menu driver, or the PLAYER_INFO character screen)
 	# can own a whole menu: when one claims this one, hand it the named-control wiring and
 	# skip the generic launch/mission wiring, so e.g. START_GAME means "host a game" rather
 	# than "launch the first mission". The first claimant wins.
 	for companion in _companions:
-		if companion != null and companion.owns_menu(_menu):
-			companion.on_menu_built(_menu, _current_file, _menu.current_screen, _root)
+		if companion != null and companion.owns_menu(_driver):
+			companion.on_menu_built(_driver, _current_file,
+					_driver.get_current_screen(), _root)
 			return
 	var has_mission_list := false
 	for list_name in mission_list_names:
-		var list := _menu.find_child(list_name, true, false)
-		if list is MnuList:
+		var id := _driver.widget_id(list_name)
+		if id >= 0 and _driver.widget_kind_of(id) in _LIST_KINDS:
 			has_mission_list = true
-			_seed_mission_list(list as MnuList)
+			_seed_mission_list(id)
 	var has_mod_list := false
 	for mod_name in mod_list_names:
-		var mod_list := _menu.find_child(mod_name, true, false)
-		if mod_list is MnuList:
+		var id := _driver.widget_id(mod_name)
+		if id >= 0 and _driver.widget_kind_of(id) in _LIST_KINDS:
 			has_mod_list = true
-			_seed_mod_list(mod_list as MnuList)
+			_seed_mod_list(id)
 	for table_name in control_table_names:
-		var ctl_table := _menu.find_child(table_name, true, false)
-		if ctl_table is MnuTable:
-			_seed_control_mapping(ctl_table as MnuTable)
+		var id := _driver.widget_id(table_name)
+		if id >= 0 and _driver.widget_kind_of(id) == MnuDocument.TYPE_TABLE:
+			_seed_control_mapping(id)
 	if has_mission_list:
 		_connect_named(start_control_names, _on_start_control)
 	elif has_mod_list:
@@ -344,25 +375,45 @@ func _wire_named_controls() -> void:
 	_connect_named(back_control_names, _on_quit_requested)
 
 
+const _LIST_KINDS := [MnuDocument.TYPE_LIST, MnuDocument.TYPE_MULTI,
+	MnuDocument.TYPE_LAN_LIST]
+
+
 func _seed_crosshair_style_controls() -> void:
 	var persisted := ResourceDirSettings.get_crosshair_style()
 	for control_name in crosshair_style_control_names:
-		var spin := _menu.find_child(control_name, true, false)
-		if spin is MnuSpinList:
-			(spin as MnuSpinList).set_value_index(persisted)
+		var id := _driver.widget_id(control_name)
+		if id >= 0 and _driver.widget_kind_of(id) == MnuDocument.TYPE_SPINLIST:
+			_driver.select_row(id, persisted, false)
 
 
 func _connect_named(names: PackedStringArray, handler: Callable) -> void:
 	for n in names:
-		var node := _menu.find_child(n, true, false)
-		if node is BaseButton and not (node as BaseButton).pressed.is_connected(handler):
-			(node as BaseButton).pressed.connect(handler)
+		if _driver.has_widget(n) and not _named_handlers.has(n.to_upper()):
+			_named_handlers[n.to_upper()] = handler
 
 
-func _seed_mission_list(list: MnuList) -> void:
-	list.set_items(MissionCatalog.mission_names(_root))
-	if not list.item_activated.is_connected(_on_mission_activated):
-		list.item_activated.connect(_on_mission_activated)
+func _on_widget_activated(_id: int, widget_name: String) -> void:
+	var handler: Callable = _named_handlers.get(widget_name.to_upper(), Callable())
+	if handler.is_valid():
+		handler.call()
+
+
+func _seed_mission_list(id: int) -> void:
+	_driver.set_widget_items(id, MissionCatalog.mission_names(_root))
+
+
+func _on_list_activated(id: int, row: int) -> void:
+	# Double-click activation: launch on the mission list, mount on the mod
+	# list (the ItemList item_activated flows).
+	var widget_name := _driver.widget_name_of(id)
+	if _is_mission_list(widget_name):
+		if row >= 0 and row < _driver.item_count(id):
+			_selected_mission = _driver.item_text(id, row)
+		_on_start_control()
+	elif _is_mod_list(widget_name):
+		if row >= 0 and row < _driver.item_count(id):
+			_apply_expansion(_driver.item_text(id, row))
 
 
 # --- Controls remap table (Options -> Controls) -------------------------------
@@ -370,25 +421,23 @@ func _seed_mission_list(list: MnuList) -> void:
 # Fill the CONTROL_MAPPING table with the key-binding catalog and wire the
 # Keyboard/Mouse/Joystick device radios to repopulate it. Read-only for now: the
 # rows show the byte-exact default bindings; double-click rebinding is not wired
-# (see docs/mnu/menu-re.md D-CTRL-*). The radio nodes are rebuilt with the menu, so
-# the connections are re-made fresh each open without duplicating.
-func _seed_control_mapping(table: MnuTable) -> void:
+# (see docs/mnu/menu-re.md D-CTRL-*).
+func _seed_control_mapping(table_id: int) -> void:
 	if _controls_model == null:
 		_controls_model = ControlsModel.new()
-	_fill_control_mapping(table, ControlsModel.DEVICE_KEYBOARD)
+	_fill_control_mapping(table_id, ControlsModel.DEVICE_KEYBOARD)
 	for i in control_device_names.size():
-		var radio := _menu.find_child(control_device_names[i], true, false)
-		if radio is BaseButton:
-			var device := i  # 0=keyboard, 1=mouse, 2=joystick (ControlsModel.Device)
-			(radio as BaseButton).pressed.connect(func() -> void:
-				_fill_control_mapping(table, device))
+		var device := i  # 0=keyboard, 1=mouse, 2=joystick (ControlsModel.Device)
+		_named_handlers[control_device_names[i].to_upper()] = func() -> void:
+			_fill_control_mapping(table_id, device)
 
 
-func _fill_control_mapping(table: MnuTable, device: int) -> void:
+func _fill_control_mapping(table_id: int, device: int) -> void:
 	if _controls_model == null:
 		return
-	table.clear_rows()
-	table.add_rows(_controls_model.get_rows(device))
+	_driver.table_clear_rows(table_id)
+	for row in _controls_model.get_rows(device):
+		_driver.table_add_row(table_id, row)
 
 
 # --- Expansion / mod selection (Options -> Mods) ------------------------------
@@ -396,42 +445,30 @@ func _fill_control_mapping(table: MnuTable, device: int) -> void:
 # Fill a mod list with the expansions discoverable under the resource root, mirror
 # the persisted current selection, and wire activation. list_expansions scans
 # <root>/expansion/<name>/<name>.pff and is independent of the mounted root.
-func _seed_mod_list(list: MnuList) -> void:
+func _seed_mod_list(id: int) -> void:
 	if _root == null:
 		return
 	var expansions := _root.list_expansions(_root.get_root_dir())
-	list.set_items(expansions)
+	_driver.set_widget_items(id, expansions)
 	var current := _current_expansion()
 	var sel := expansions.find(current)
 	if sel >= 0:
-		list.select(sel)
+		_driver.select_row(id, sel, false)
 	_update_mod_desc(current if sel >= 0 else "")
-	if not list.item_activated.is_connected(_on_mod_activated):
-		list.item_activated.connect(_on_mod_activated)
-
-
-func _on_mod_activated(index: int) -> void:
-	var list := _find_mod_list()
-	if list == null or index < 0 or index >= list.item_count:
-		return
-	_apply_expansion(list.get_item_text(index))
 
 
 # OK/ACCEPT on a Mods screen: mount + persist the highlighted expansion rather than
 # launching a mission. Wired (instead of the launch handler) by _wire_named_controls
-# when the screen has a mod list but no mission list. Reads the live ItemList
-# selection (MnuList extends ItemList), so it also covers the entry _seed_mod_list
-# pre-selected. A no-op when nothing is highlighted or it is already the current mod.
+# when the screen has a mod list but no mission list. Reads the driver's live
+# selection, so it also covers the entry _seed_mod_list pre-selected. A no-op
+# when nothing is highlighted or it is already the current mod.
 func _on_apply_selected_mod() -> void:
-	var list := _find_mod_list()
-	if list == null:
+	var id := _find_mod_list()
+	if id < 0:
 		return
-	var sel := list.get_selected_items()
-	if sel.is_empty():
-		return
-	var idx := sel[0]
-	if idx >= 0 and idx < list.item_count:
-		_apply_expansion(list.get_item_text(idx))
+	var idx := _driver.selected_row(id)
+	if idx >= 0 and idx < _driver.item_count(id):
+		_apply_expansion(_driver.item_text(id, idx))
 
 
 # Mount the chosen expansion onto the live root, refresh the content that depends on
@@ -472,15 +509,15 @@ func _apply_expansion(name: String) -> void:
 func _refresh_dependent_content() -> void:
 	_selected_mission = ""
 	for list_name in mission_list_names:
-		var list := _menu.find_child(list_name, true, false)
-		if list is MnuList:
-			_seed_mission_list(list as MnuList)
+		var id := _driver.widget_id(list_name)
+		if id >= 0 and _driver.widget_kind_of(id) in _LIST_KINDS:
+			_seed_mission_list(id)
 
 
 func _update_mod_desc(name: String) -> void:
 	var desc := _find_mod_desc()
-	if desc != null:
-		desc.text = _describe(name)
+	if desc >= 0:
+		_driver.set_widget_text(desc, _describe(name))
 
 
 # Names-only is all the VFS exposes today; show a friendly label when we know one,
@@ -496,11 +533,11 @@ func _current_expansion() -> String:
 	return ResourceDirSettings.get_expansion()
 
 
-# --- Menu signal handlers -----------------------------------------------------
+# --- Driver signal handlers ---------------------------------------------------
 
 func _on_menu_requested(file: String, target_screen: String) -> void:
 	# Cross-.mnu forward jump: remember where we are so the back stack can return.
-	var previous := {"file": _current_file, "screen": _menu.current_screen}
+	var previous := {"file": _current_file, "screen": _driver.get_current_screen()}
 	if open_menu(file, target_screen):
 		_menu_stack.push_back(previous)
 
@@ -526,10 +563,6 @@ func _on_widget_value_changed(widget_name: String, kind: String, index: int, val
 	elif kind == "list" and _is_mod_list(widget_name):
 		# Single click previews the description; activation (double-click) mounts it.
 		_update_mod_desc(value)
-
-
-func _on_action_dispatched(_type: String, _target: String) -> void:
-	pass  # informational; intra-menu actions are handled by the menu itself.
 
 
 func _on_url_requested(url: String) -> void:
@@ -568,13 +601,6 @@ func _on_return_control() -> void:
 
 func _on_novaworld_control() -> void:
 	novaworld_requested.emit()
-
-
-func _on_mission_activated(index: int) -> void:
-	var list := _find_mission_list()
-	if list != null and index >= 0 and index < list.item_count:
-		_selected_mission = list.get_item_text(index)
-	_on_start_control()
 
 
 # --- Audio --------------------------------------------------------------------
@@ -618,7 +644,7 @@ func resolve_music_pair(prefix: String, base_stem: String) -> MusicPair:
 
 # The visual menu assets (.mnu document, .mns stylesheet, RTXT text) load through
 # the VFS by name so they resolve from PFF archives at runtime; menu textures and
-# fonts resolve through the resource root the menu is given (set_resource_root).
+# fonts resolve through the resource root the frame is given.
 func _load_doc(file: String) -> MnuDocument:
 	if _menu_cache.has(file):
 		return _menu_cache[file]
@@ -655,8 +681,8 @@ func _load_style(file: String) -> MnsStyleSheet:
 
 
 # The menu SFX profile (menu.lwf) loads by name through the VFS so it resolves
-# from PFF archives too; its members point at loose .wav files the menu resolves
-# on demand. Degrades to null (silent menu SFX) when absent.
+# from PFF archives too; its members point at loose .wav files resolved on
+# demand. Degrades to null (silent menu SFX) when absent.
 func _load_sound_profile(name: String) -> LwfData:
 	if _root == null or name.is_empty():
 		return null
@@ -666,73 +692,61 @@ func _load_sound_profile(name: String) -> LwfData:
 	return d if d.is_loaded() and d.get_set_count() > 0 else null
 
 
-# --- Layout (anamorphic fill of the 800x600 design space to the window) --------
-#
-# Faithful to the original: the 800x600 design space is stretched to fill the whole
-# window with independent X/Y factors (no aspect preservation, no letterbox bars,
-# origin 0,0). On a widescreen display the 4:3 menu is stretched horizontally, as in
-# the retail game [orig: CUIScene_SetScreenScale @ 0x639480].
-func _recompute_fit(_unused: Variant = null) -> void:
-	if _menu == null:
-		return
-	if size.x <= 1.0 or size.y <= 1.0:
-		return
-	_menu.position = Vector2.ZERO
-	_menu.size = DESIGN_SIZE
-	_menu.scale = Vector2(size.x / DESIGN_SIZE.x, size.y / DESIGN_SIZE.y)
-
-
 # --- Misc helpers / accessors -------------------------------------------------
 
 func _is_mission_list(widget_name: String) -> bool:
 	for n in mission_list_names:
-		if n == widget_name:
+		if n.nocasecmp_to(widget_name) == 0:
 			return true
 	return false
 
 
 func _is_mod_list(widget_name: String) -> bool:
 	for n in mod_list_names:
-		if n == widget_name:
+		if n.nocasecmp_to(widget_name) == 0:
 			return true
 	return false
 
 
 func _is_crosshair_style_control(widget_name: String) -> bool:
 	for n in crosshair_style_control_names:
-		if n == widget_name:
+		if n.nocasecmp_to(widget_name) == 0:
 			return true
 	return false
 
 
-func _find_mod_list() -> MnuList:
+func _find_mod_list() -> int:
 	for n in mod_list_names:
-		var node := _menu.find_child(n, true, false)
-		if node is MnuList:
-			return node as MnuList
-	return null
+		var id := _driver.widget_id(n)
+		if id >= 0 and _driver.widget_kind_of(id) in _LIST_KINDS:
+			return id
+	return -1
 
 
-# MOD_DESC builds as MnuMultilineEdit (a TextEdit); set_text works while READONLY.
-func _find_mod_desc() -> TextEdit:
+# MOD_DESC is authored MULTI_EDIT (readonly); the compiled path wraps its text.
+func _find_mod_desc() -> int:
 	for n in mod_desc_names:
-		var node := _menu.find_child(n, true, false)
-		if node is TextEdit:
-			return node as TextEdit
-	return null
-
-
-func _find_mission_list() -> MnuList:
-	for n in mission_list_names:
-		var node := _menu.find_child(n, true, false)
-		if node is MnuList:
-			return node as MnuList
-	return null
+		var id := _driver.widget_id(n)
+		if id >= 0:
+			return id
+	return -1
 
 
 # Accessors for owners / tests.
-func get_menu() -> MnuMenu:
-	return _menu
+func get_driver() -> MenuDriver:
+	return _driver
+
+
+func get_frame() -> MenuFrame:
+	return _frame
+
+
+func get_stylesheet() -> MnsStyleSheet:
+	return _style
+
+
+func get_resource_root() -> ResourceRoot:
+	return _root
 
 
 func get_music_director() -> MusicDirector:

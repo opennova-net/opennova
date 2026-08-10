@@ -6,7 +6,8 @@ extends MenuCompanion
 # runs the nationality -> division -> combo cascade plus the SIDE_BLUE/SIDE_RED team
 # filter. It is a companion the game-agnostic MenuShell (nova_menu_shell.gd) delegates
 # to -- the same pattern as mp_menu_companion.gd -- claimed by the NATIONALITY + COMBO_LIST
-# controls unique to this screen.
+# controls unique to this screen, riding the shell's MenuDriver over the compiled
+# MenuFrame surface (widgets addressed by document id via _id/widget_id).
 #
 # Faithful to the witnessed original (docs/playerinfo/avatars-re.md, "Screen
 # orchestration", D-PLAYERINFO-5/7):
@@ -35,7 +36,7 @@ const VOICE_PREVIEW_BANK := "menu.lwf"
 const VOICE_PREVIEW_TRIGGER_FORMAT := "VOICE_%d"
 
 # The 3D character preview (compatible head/body .3di composited), reused from the
-# ONED Avatars workspace. Mounted into the PLAYER_PREVIEW widget rect and fed the
+# ONED Avatars workspace. Mounted over the PLAYER_PREVIEW widget rect and fed the
 # resolved combo; it plays the witnessed raw-.bad idle when those assets resolve.
 const AvatarPreviewScript := preload("res://game/avatar/avatar_preview.gd")
 
@@ -67,7 +68,14 @@ var _nat_db_index: Array[int] = []      # NATIONALITY visible row -> nationality
 var _sel_nat := -1
 var _sel_div := -1
 var _populating := false                # guards the cascade against programmatic-fill re-entry
-var _preview                            # AvatarPreview mounted in PLAYER_PREVIEW (null until wired)
+var _preview                            # AvatarPreview mounted over PLAYER_PREVIEW (null until wired)
+var _preview_id := -1                   # PLAYER_PREVIEW doc id, for the hover-zoom filter
+# NAME (upper) -> Callable(row, value), dispatched off the driver's aggregate
+# widget_value_changed with kind == "combo" (the item_selected successor).
+var _combo_handlers: Dictionary = {}
+# The icon TextureRects mounted as frame children ("PRIMARY"/... -> TextureRect);
+# freed and rebuilt on each on_menu_built.
+var _icon_mounts: Dictionary = {}
 
 # The current selection, for the ACCEPT/commit seam (Phase 5). main_game persists it.
 signal avatar_chosen(profile: Dictionary)
@@ -75,17 +83,32 @@ signal avatar_chosen(profile: Dictionary)
 
 # True when this is the JO PLAYER_INFO screen, so the shell delegates to us. Keyed on
 # the NATIONALITY + COMBO_LIST controls unique to player.mnu's AVATARS block.
-func owns_menu(menu: MnuMenu) -> bool:
-	if menu == null:
+func owns_menu(driver: MenuDriver) -> bool:
+	if driver == null:
 		return false
-	return menu.find_child("NATIONALITY", true, false) != null \
-		and menu.find_child("COMBO_LIST", true, false) != null
+	return driver.has_widget("NATIONALITY") and driver.has_widget("COMBO_LIST")
 
 
-# The screen's controls are freshly built children on each (re)build, so we wire and
-# populate from scratch each time.
+# The document is re-opened on each (re)build, so we wire and populate from scratch
+# each time.
 func _wire(_file: String, _screen: String) -> void:
+	_combo_handlers.clear()
+	_clear_mounts()
 	_ensure_db()
+	# Combo selections relay through the driver's aggregate value-changed signal.
+	if not _driver.widget_value_changed.is_connected(_on_widget_value_changed):
+		_driver.widget_value_changed.connect(_on_widget_value_changed)
+	# Mousing over the preview button drives the zoom + sway, like the original
+	# [orig: update_player_preview_animation active test @ 0x55dba0].
+	if not _driver.widget_hover_changed.is_connected(_on_widget_hover_changed):
+		_driver.widget_hover_changed.connect(_on_widget_hover_changed)
+	# The frame shows one screen at a time and scales the 800x600 design space to
+	# its own size, so the icon/preview mounts re-place on screen and size changes.
+	if not _driver.screen_changed.is_connected(_on_screen_changed):
+		_driver.screen_changed.connect(_on_screen_changed)
+	var frame := _driver.get_frame()
+	if frame != null and not frame.resized.is_connected(_reposition_mounts):
+		frame.resized.connect(_reposition_mounts)
 	_wire_team_radios()
 	_connect_combo("NATIONALITY", _on_nat_selected)
 	_connect_combo("DIVISION", _on_div_selected)
@@ -152,7 +175,7 @@ func set_weapon_database(weapons: WeaponDatabase) -> void:
 	_weapons = weapons
 	_ammo_pri.clear()
 	_ammo_sec.clear()
-	if _menu != null:
+	if _driver != null:
 		_populate_loadout()
 
 
@@ -188,8 +211,8 @@ func _populate_loadout() -> void:
 
 
 func _fill_weapon_slot(control: String, slot: int, class_mask: int, team_mask: int) -> void:
-	var combo := _combo(control)
-	if combo == null:
+	var combo := _id(control)
+	if combo < 0:
 		return
 	var rows := PackedStringArray()
 	var defs: Array[Dictionary] = []
@@ -205,11 +228,11 @@ func _fill_weapon_slot(control: String, slot: int, class_mask: int, team_mask: i
 # Return the selected weapon.def transport row for a loadout control. NONE and an
 # absent control both resolve to an empty dictionary.
 func _selected_weapon(control: String) -> Dictionary:
-	var combo := _combo(control)
+	var combo := _id(control)
 	var defs: Array = _slot_rows.get(control, [])
-	if combo == null:
+	if combo < 0:
 		return {}
-	var row := combo.get_selected()
+	var row := _driver.selected_row(combo)
 	if row < 0 or row >= defs.size():
 		return {}
 	return (defs[row] as Dictionary).duplicate(true)
@@ -230,10 +253,12 @@ func _weapon_label(w: Dictionary) -> String:
 # power-of-two bit — native policy [orig: PlayerInfo_SetTeamAndClassMask
 # @ 0x55de60: 5->1,6->2,7->4,8->8,9->16].
 func _selected_class_mask() -> int:
-	var combo := _combo("PLAYERCLASS")
-	if combo == null:
+	var combo := _id("PLAYERCLASS")
+	if combo < 0:
 		return 0x1F  # no class control -> show every class's weapons (defensive)
-	var val := combo.get_selected_value()
+	# The authored row's value= attr is the class id (the get_selected_value read).
+	var row := _driver.selected_row(combo)
+	var val := _driver.item_value(combo, row) if row >= 0 else ""
 	var cls := int(val) if val.is_valid_int() else 0
 	return WeaponDatabase.player_info_class_mask(cls)
 
@@ -253,12 +278,12 @@ func _populate_slot_ammo(control: String) -> void:
 	var w := _selected_weapon(control)
 	var index := int(w.get("index", -1))
 	var clipsize := int(w.get("clipsize", 0))
-	var ammo1 := _combo(control + "_AMMO1")
-	var type_combo := _combo(control + "_AMMO1_TYPE")
-	var ammo2 := _combo(control + "_AMMO2")
+	var ammo1 := _id(control + "_AMMO1")
+	var type_combo := _id(control + "_AMMO1_TYPE")
+	var ammo2 := _id(control + "_AMMO2")
 	var has_ammo := not w.is_empty() and clipsize > 0
-	if ammo1 != null:
-		ammo1.visible = has_ammo
+	if ammo1 >= 0:
+		_driver.set_widget_shown(ammo1, has_ammo)
 		if has_ammo:
 			var maxclips := int(w.get("maxclips", 0))
 			var rows := PackedStringArray()
@@ -271,29 +296,30 @@ func _populate_slot_ammo(control: String) -> void:
 			# default) [orig: the `saved == i || (saved == -1 && i == maxclips)`
 			# select in both fills — native default_clip_row].
 			var saved := int(_ammo_pri.get(index, WeaponDatabase.CLIP_COUNT_DEF_DEFAULT))
-			ammo1.select_silent(WeaponDatabase.default_clip_row(saved, maxclips) - 1)
-	if type_combo != null:
+			_driver.select_row(ammo1,
+					WeaponDatabase.default_clip_row(saved, maxclips) - 1, false)
+	if type_combo >= 0:
 		# The TYPE combo keeps its authored FMJ/AP/SP statics; shown with AMMO1,
 		# selection = the saved per-team type byte (-1 -> 0). flags2 NOAMMOTYPES
 		# locks it non-interactive and resets the saved type
 		# [orig: @ 0x55def0 — the +188 & 0x40 gate -> UIWidget_SetInteractiveRecursive].
-		type_combo.visible = has_ammo
+		_driver.set_widget_shown(type_combo, has_ammo)
 		if has_ammo:
 			var locked := (int(w.get("flags2", 0)) & WeaponDatabase.FLAG2_NOAMMOTYPES) != 0
-			type_combo.disabled = locked
+			_driver.set_widget_disabled(type_combo, locked)
 			if locked:
 				_slot_type_store(control)[_team] = 0
 			# Select by the row's authored VALUE (0/1/2), not its position — the
 			# saved byte is the value [orig: the @ 0x55def0 row select].
 			var saved_type := str(int(_slot_type_store(control).get(_team, 0)))
-			for row in type_combo.get_item_count():
-				if type_combo.get_item_value(row) == saved_type:
-					type_combo.select_silent(row)
+			for row in _driver.item_count(type_combo):
+				if _driver.item_value(type_combo, row) == saved_type:
+					_driver.select_row(type_combo, row, false)
 					break
-	if ammo2 != null:
+	if ammo2 >= 0:
 		var sub := _subclass_weapon(w)
 		var sub_ok := has_ammo and not sub.is_empty() and int(sub.get("clipsize", 0)) > 0
-		ammo2.visible = sub_ok
+		_driver.set_widget_shown(ammo2, sub_ok)
 		if sub_ok:
 			var sub_max := int(sub.get("maxclips", 0))
 			var rows2 := PackedStringArray()
@@ -301,7 +327,8 @@ func _populate_slot_ammo(control: String) -> void:
 				rows2.append(_ammo_row_label(sub, clips))
 			_set_combo_items(ammo2, rows2)
 			var saved2 := int(_ammo_sec.get(index, WeaponDatabase.CLIP_COUNT_DEF_DEFAULT))
-			ammo2.select_silent(WeaponDatabase.default_clip_row(saved2, sub_max) - 1)
+			_driver.select_row(ammo2,
+					WeaponDatabase.default_clip_row(saved2, sub_max) - 1, false)
 
 
 # The sub-weapon behind *_AMMO2 — the native def-table walk
@@ -326,13 +353,13 @@ func _populate_grenades(class_mask: int, team_mask: int) -> void:
 		for i in mini(dicts.size(), GRENADE_CONTROLS.size()):
 			_grenade_rows.append(dicts[i] as Dictionary)
 	for i in GRENADE_CONTROLS.size():
-		var combo := _combo(GRENADE_CONTROLS[i])
-		if combo == null:
+		var combo := _id(GRENADE_CONTROLS[i])
+		if combo < 0:
 			continue
 		if i >= _grenade_rows.size():
-			combo.visible = false
+			_driver.set_widget_shown(combo, false)
 			continue
-		combo.visible = true
+		_driver.set_widget_shown(combo, true)
 		var w := _grenade_rows[i]
 		var maxclips := int(w.get("maxclips", 0))
 		var rows := PackedStringArray()
@@ -340,7 +367,8 @@ func _populate_grenades(class_mask: int, team_mask: int) -> void:
 			rows.append(_ammo_row_label(w, clips))
 		_set_combo_items(combo, rows)
 		var saved := int(_ammo_pri.get(int(w.get("index", -1)), -1))
-		combo.select_silent(maxclips if saved < 0 else clampi(saved, 0, maxclips))
+		_driver.select_row(combo,
+				maxclips if saved < 0 else clampi(saved, 0, maxclips), false)
 
 
 # "<rounds> - <round label>" [orig: sprintf "%d - %s" with i*clipsize + round_type
@@ -404,9 +432,14 @@ func _on_ammo2_selected(row: int, _value: String, control: String) -> void:
 	_update_icons()
 
 
-func _on_type_selected(_row: int, value: String, control: String) -> void:
+func _on_type_selected(row: int, _value: String, control: String) -> void:
 	if _populating:
 		return
+	# The driver's aggregate signal carries the row's display text; the semantic
+	# byte is the authored value= attr of the selected row (the statics keep their
+	# authored items, so the document lookup is the value source).
+	var type_combo := _id(control + "_AMMO1_TYPE")
+	var value := _driver.item_value(type_combo, row) if type_combo >= 0 and row >= 0 else ""
 	# [orig: @ 0x55f760/0x55f7e0 — the row VALUE byte, stored per team]
 	_slot_type_store(control)[_team] = int(value) if value.is_valid_int() else 0
 	_update_weight()
@@ -448,7 +481,7 @@ func _update_weight() -> void:
 		counts.append(int(_ammo_pri.get(index, -1)))
 		# The witnessed sub-weapon term is gated on the *_AMMO2 control existing.
 		var sub := _subclass_weapon(w)
-		if _combo(control + "_AMMO2") != null \
+		if _id(control + "_AMMO2") >= 0 \
 				and not sub.is_empty() and int(sub.get("clipsize", 0)) > 0:
 			var saved2 := int(_ammo_sec.get(index, WeaponDatabase.CLIP_COUNT_DEF_DEFAULT))
 			total += _weapons.extra_ammo_weight(int(sub.get("index", -1)),
@@ -456,8 +489,8 @@ func _update_weight() -> void:
 	total += _weapons.loadout_weight(indices, counts)
 	for i in _grenade_rows.size():
 		# The witnessed grenade term is gated on the control existing AND shown.
-		var combo := _combo(GRENADE_CONTROLS[i]) if i < GRENADE_CONTROLS.size() else null
-		if combo == null or not combo.visible:
+		var combo := _id(GRENADE_CONTROLS[i]) if i < GRENADE_CONTROLS.size() else -1
+		if combo < 0 or not _driver.is_widget_shown(combo):
 			continue
 		var g := _grenade_rows[i]
 		var saved := int(_ammo_pri.get(int(g.get("index", -1)),
@@ -469,36 +502,39 @@ func _update_weight() -> void:
 		encumbrance = _menu_ui_text("HEAVY_ENCUMBRANCE", "Heavy")
 	elif band == WeaponDatabase.ENCUMBRANCE_NORMAL:
 		encumbrance = _menu_ui_text("NORMAL_ENCUMBRANCE", "Normal")
-	var node := _find("STATIC_TOTAL_WEIGHT")
-	var label := node as Label
-	if label == null and node != null:
-		label = node.find_child("Label", false, false) as Label
-	if label != null:
+	var label := _id("STATIC_TOTAL_WEIGHT")
+	if label >= 0:
 		# [orig: update_player_info_weight_and_weapon_icons @ 0x55f480 —
 		#  sprintf "%s %.1f %s (%s)", keys TOTAL_WEIGHT / LBS / *_ENCUMBRANCE]
-		label.text = "%s %.1f %s (%s)" % [
+		_driver.set_widget_text(label, "%s %.1f %s (%s)" % [
 			_menu_ui_text("TOTAL_WEIGHT", "Total Weight"), total,
-			_menu_ui_text("LBS", "lbs"), encumbrance]
+			_menu_ui_text("LBS", "lbs"), encumbrance])
 
 
 # Texture the PRIMARY/SECONDARY/ACCESSORY_ICON windows from the selected def's
 # loadout_menu_icon (+144); NONE clears. GRENADE_ICON keeps its authored static
 # [orig: @ 0x55f480 — icons from weapon +144; GRENADE_ICON untouched; retail's
 #  no-selection resolves to the blank entry-0 icon, our NONE row clears].
+# The icon TextureRects mount as frame children over each *_ICON widget rect
+# (the compiled frame has no per-widget Controls to parent into).
 func _update_icons() -> void:
+	var frame := _driver.get_frame() if _driver != null else null
+	if frame == null:
+		return
 	for control in PARENT_SLOTS:
-		var holder := _find(control + "_ICON") as Control
-		if holder == null:
+		var holder := _id(control + "_ICON")
+		if holder < 0:
 			continue
-		var icon_rect := holder.get_node_or_null("LoadoutIcon") as TextureRect
-		if icon_rect == null:
+		var icon_rect: TextureRect = _icon_mounts.get(control)
+		if icon_rect == null or not is_instance_valid(icon_rect):
 			icon_rect = TextureRect.new()
-			icon_rect.name = "LoadoutIcon"
-			icon_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+			icon_rect.name = control + "LoadoutIcon"
 			icon_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 			icon_rect.stretch_mode = TextureRect.STRETCH_SCALE
 			icon_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
-			holder.add_child(icon_rect)
+			frame.add_child(icon_rect)
+			_icon_mounts[control] = icon_rect
+		_place_mount(icon_rect, holder)
 		var icon_name := String(_selected_weapon(control).get("icon", ""))
 		if icon_name.is_empty() or _root == null:
 			icon_rect.texture = null
@@ -522,8 +558,8 @@ func _menu_ui_text(key: String, fallback: String) -> String:
 # Fill NATIONALITY, filtered by team alignment, then cascade into division/combo/voice.
 # [orig: PlayerInfo_PopulateNationalityList @ 0x55d8c0; team filter D-PLAYERINFO-5]
 func _populate_nationalities() -> void:
-	var combo := _combo("NATIONALITY")
-	if combo == null:
+	var combo := _id("NATIONALITY")
+	if combo < 0:
 		return
 	_nat_db_index.clear()
 	var rows := PackedStringArray()
@@ -543,8 +579,8 @@ func _populate_nationalities() -> void:
 
 # [orig: PlayerInfo_PopulateDivisionList @ 0x55da50]
 func _populate_divisions() -> void:
-	var combo := _combo("DIVISION")
-	if combo == null:
+	var combo := _id("DIVISION")
+	if combo < 0:
 		return
 	var rows := PackedStringArray()
 	if _db != null and _sel_nat >= 0:
@@ -559,8 +595,8 @@ func _populate_divisions() -> void:
 # Each row is "<head display> - <body display>" (last - first).
 # [orig: populate_avatar_combo_list @ 0x560210]
 func _populate_combos() -> void:
-	var combo := _combo("COMBO_LIST")
-	if combo == null:
+	var combo := _id("COMBO_LIST")
+	if combo < 0:
 		return
 	var rows := PackedStringArray()
 	if _db != null and _sel_nat >= 0 and _sel_div >= 0:
@@ -579,8 +615,8 @@ func _populate_combos() -> void:
 # The voice list is avatar-derived: a default entry plus the selected character's
 # voice. [orig: PlayerInfo_HandleVoiceSelect @ 0x55fe00 -- DEFAULT_VOICE + CHARVOICE_%d]
 func _populate_voices() -> void:
-	var combo := _combo("PLAYERVOICE")
-	if combo == null:
+	var combo := _id("PLAYERVOICE")
+	if combo < 0:
 		return
 	var rows := PackedStringArray()
 	rows.append(_menu_text("DEFAULT_VOICE", "Default"))
@@ -593,8 +629,8 @@ func _populate_voices() -> void:
 func _selected_combo_head_voice() -> int:
 	if _db == null or _sel_nat < 0 or _sel_div < 0:
 		return -1
-	var combo := _combo("COMBO_LIST")
-	var idx := combo.get_selected() if combo != null else 0
+	var combo := _id("COMBO_LIST")
+	var idx := _driver.selected_row(combo) if combo >= 0 else 0
 	if idx < 0:
 		idx = 0
 	if idx >= _db.get_combo_count(_sel_nat, _sel_div):
@@ -606,44 +642,50 @@ func _selected_combo_head_voice() -> int:
 
 func _preview_voice() -> void:
 	var voice := _selected_combo_head_voice()
-	if voice < 0 or _menu == null:
+	if voice < 0 or _driver == null:
 		return
 	# The persisted profile override is owned by D-PLAYERINFO-9; until that profile
 	# field exists, retail's selected-avatar fallback is the authoritative voice.
-	_menu.play_widget_sound(VOICE_PREVIEW_TRIGGER_FORMAT % voice, VOICE_PREVIEW_BANK)
+	_driver.play_widget_sound(VOICE_PREVIEW_TRIGGER_FORMAT % voice, VOICE_PREVIEW_BANK)
 
 
 # --- 3D character preview (PLAYER_PREVIEW) ------------------------------------
 
-# Mount the head/body 3D preview into the PLAYER_PREVIEW widget rect (a custom
-# button surface in player.mnu) and feed it the current combo. Null-guarded: a menu
+# Mount the head/body 3D preview over the PLAYER_PREVIEW widget rect (a custom
+# button surface in player.mnu) and feed it the current combo. Guarded: a menu
 # without the widget, or without an avatar db / resource root, simply shows no preview.
 func _wire_preview() -> void:
-	# Boundary conversion: the authored PLAYER_PREVIEW window is a Control;
-	# null means this screen simply does not author the widget.
-	var rect := _find("PLAYER_PREVIEW") as Control
-	if rect == null:
+	# The authored PLAYER_PREVIEW window is a compiled widget; -1 means this screen
+	# simply does not author it. The preview Control mounts as a frame child placed
+	# by the widget's frame rect.
+	var preview_id := _id("PLAYER_PREVIEW")
+	if preview_id < 0:
 		return
+	var frame := _driver.get_frame()
+	if frame == null:
+		return
+	_preview_id = preview_id
 	_preview = AvatarPreviewScript.new()
 	_preview.name = "PlayerInfoAvatarPreview"
-	_preview.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_preview.mouse_filter = Control.MOUSE_FILTER_IGNORE  # let the button keep its clicks
-	(rect as Control).add_child(_preview)
+	_preview.mouse_filter = Control.MOUSE_FILTER_IGNORE  # let the frame pump keep its clicks
+	frame.add_child(_preview)
+	_place_mount(_preview, preview_id)
 	# Locked menu portrait: no grid/axes, camera fixed, character facing the viewer.
 	# The editor Avatars workspace keeps the interactive fly camera; only this runtime
 	# mount opts into the portrait (idle spin + hover zoom/sway, see AvatarPreview).
 	_preview.set_menu_preview(true)
 	_preview.set_resource_root(_root)
-	# Mousing over the preview button drives the zoom + sway, like the original
-	# [orig: update_player_preview_animation active test @ 0x55dba0].
-	var preview_button := rect as Control
-	if not preview_button.mouse_entered.is_connected(_on_preview_hover):
-		preview_button.mouse_entered.connect(_on_preview_hover.bind(true))
-		preview_button.mouse_exited.connect(_on_preview_hover.bind(false))
 	_refresh_preview()
 
 
-func _on_preview_hover(hovered: bool) -> void:
+# Hover edges arrive from the driver's pump claim; only the PLAYER_PREVIEW widget
+# drives the zoom + sway, like the original
+# [orig: update_player_preview_animation active test @ 0x55dba0].
+func _on_widget_hover_changed(id: int, hovered: bool) -> void:
+	if _driver == null or _driver.get_menu_file() != _wired_file:
+		return
+	if _preview_id < 0 or id != _preview_id:
+		return
 	if _preview != null and is_instance_valid(_preview):
 		_preview.set_hovered(hovered)
 
@@ -660,11 +702,56 @@ func _refresh_preview() -> void:
 
 
 func _selected_combo_index() -> int:
-	var combo := _combo("COMBO_LIST")
-	if combo == null:
+	var combo := _id("COMBO_LIST")
+	if combo < 0:
 		return -1
-	var idx := combo.get_selected()
+	var idx := _driver.selected_row(combo)
 	return idx if idx >= 0 else 0
+
+
+# --- Frame mounts (icons + preview) ---------------------------------------------
+
+# Free the previous build's frame-child mounts; the shell re-opens the document
+# and hands us a fresh on_menu_built, so the mounts rebuild from scratch too.
+func _clear_mounts() -> void:
+	for control in _icon_mounts:
+		var mount: TextureRect = _icon_mounts[control]
+		if mount != null and is_instance_valid(mount):
+			mount.queue_free()
+	_icon_mounts.clear()
+	if _preview != null and is_instance_valid(_preview):
+		_preview.queue_free()
+	_preview = null
+	_preview_id = -1
+
+
+# Place a mount over its widget: widget_frame_rect is the design rect scaled to
+# the frame's current size, and a zero rect means the widget is not on the
+# configured screen — the mount hides with it (the old per-screen Control
+# parenting gave both for free).
+func _place_mount(mount: Control, id: int) -> void:
+	var rect := _driver.widget_frame_rect(id)
+	mount.position = rect.position
+	mount.size = rect.size
+	mount.visible = rect.size.x > 0.0 and rect.size.y > 0.0
+
+
+func _reposition_mounts() -> void:
+	if _driver == null:
+		return
+	for control in _icon_mounts:
+		var icon_rect: TextureRect = _icon_mounts[control]
+		if icon_rect == null or not is_instance_valid(icon_rect):
+			continue
+		var holder := _id(String(control) + "_ICON")
+		if holder >= 0:
+			_place_mount(icon_rect, holder)
+	if _preview != null and is_instance_valid(_preview) and _preview_id >= 0:
+		_place_mount(_preview, _preview_id)
+
+
+func _on_screen_changed(_screen_name: String) -> void:
+	_reposition_mounts()
 
 
 # --- Selection handlers (cascade edges) ---------------------------------------
@@ -692,6 +779,8 @@ func _on_combo_selected(_row: int, _value: String) -> void:
 
 # --- Team radios (SIDE_BLUE / SIDE_RED) ---------------------------------------
 
+# The driver flips the radio checked state (with group exclusivity) on the click
+# before emitting the activation, so the handlers only re-run the team cascade.
 func _wire_team_radios() -> void:
 	_connect_pressed("SIDE_BLUE", _on_side_blue)
 	_connect_pressed("SIDE_RED", _on_side_red)
@@ -721,19 +810,21 @@ func _set_team(team: int) -> void:
 # (D-PLAYERINFO-1) and on-disk profile format are later phases; this does not invent
 # one, it just reports the chosen indices + name.
 func snapshot() -> Dictionary:
-	var combo := _combo("COMBO_LIST")
-	var voice := _combo("PLAYERVOICE")
+	var combo := _id("COMBO_LIST")
+	var voice := _id("PLAYERVOICE")
 	var profile := {
 		"name": _edit_text("PLAYERNAME"),
 		"team": _team,
 		"nationality": _sel_nat,
 		"division": _sel_div,
-		"combo": combo.get_selected() if combo != null else -1,
-		"voice": voice.get_selected() if voice != null else -1,
+		"combo": _driver.selected_row(combo) if combo >= 0 else -1,
+		"voice": _driver.selected_row(voice) if voice >= 0 else -1,
 	}
-	var class_combo := _combo("PLAYERCLASS")
-	if class_combo != null:
-		var class_value := class_combo.get_selected_value()
+	var class_combo := _id("PLAYERCLASS")
+	if class_combo >= 0:
+		var class_row := _driver.selected_row(class_combo)
+		var class_value := _driver.item_value(class_combo, class_row) \
+				if class_row >= 0 else ""
 		profile["player_class"] = int(class_value) if class_value.is_valid_int() else 0
 	# Missing weapon.def means there was no loadout choice to commit. Keep that
 	# distinct from a loaded screen whose three selected rows are explicitly NONE.
@@ -764,30 +855,41 @@ func commit() -> void:
 
 # --- Helpers ------------------------------------------------------------------
 
-func _combo(name: String) -> MnuCombo:
-	return _find(name) as MnuCombo
-
-
 # Fill a combo and pre-select the first row without firing the cascade (the fill is
-# programmatic; user selections come through item_selected). select_silent suppresses
-# the relay; the _populating guard covers any incidental emit from set_items.
-func _set_combo_items(combo: MnuCombo, rows: PackedStringArray) -> void:
+# programmatic; user selections come through widget_value_changed). select_row with
+# emit=false suppresses the relay; the _populating guard covers any incidental emit.
+func _set_combo_items(combo: int, rows: PackedStringArray) -> void:
 	_populating = true
-	combo.set_items(rows)
+	_driver.set_widget_items(combo, rows)
 	if rows.size() > 0:
-		combo.select_silent(0)
+		_driver.select_row(combo, 0, false)
 	_populating = false
 
 
+# Register a combo-select handler (row, value) for a named control, dispatched off
+# the driver's aggregate widget_value_changed (kind == "combo") — the item_selected
+# successor. `value` is the row's display text; handlers needing the authored
+# value= attr resolve it through item_value.
 func _connect_combo(name: String, handler: Callable) -> void:
-	var combo := _combo(name)
-	if combo != null and not combo.item_selected.is_connected(handler):
-		combo.item_selected.connect(handler)
+	if _driver.has_widget(name):
+		_combo_handlers[name.to_upper()] = handler
+
+
+func _on_widget_value_changed(widget_name: String, kind: String, index: int, value: String) -> void:
+	# The shell swaps documents under the shared driver; a stale companion's
+	# name matches must not dispatch against the new document.
+	if _driver == null or _driver.get_menu_file() != _wired_file:
+		return
+	if kind != "combo":
+		return
+	var handler: Callable = _combo_handlers.get(widget_name.to_upper(), Callable())
+	if handler.is_valid():
+		handler.call(index, value)
 
 
 func _radio_checked(name: String) -> bool:
-	var node := _find(name)
-	return node is BaseButton and (node as BaseButton).button_pressed
+	var id := _id(name)
+	return id >= 0 and _driver.is_widget_checked(id)
 
 
 func _menu_text(key: String, fallback: String) -> String:
@@ -799,5 +901,3 @@ func _menu_text(key: String, fallback: String) -> String:
 		if t != null and t.has_string_in_section(spec[1], key):
 			return t.get_string_in_section(spec[1], key)
 	return fallback
-
-

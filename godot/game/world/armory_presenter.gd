@@ -4,8 +4,9 @@ extends Node
 ## The in-world armory surface mounted by the game shell. Kept as a standalone
 ## presenter so every runtime entry uses one implementation.
 ##
-## Owns a live MnuMenu over the gameplay view showing weapon.mnu's WEAPON
-## screen, driven by the ArmoryMenuCompanion companion, zone-gated on the type-6
+## Owns a live compiled menu surface — a MenuFrame orchestrated by a MenuDriver —
+## over the gameplay view showing weapon.mnu's WEAPON screen, driven by the
+## ArmoryMenuCompanion companion, zone-gated on the type-6
 ## armory volume contact flag the collision resolver maintains. The world keeps
 ## ticking underneath — the witnessed armory has no world-stop leg (the screen is
 ## a live overlay; in an MP session the team scoreboard even draws over it
@@ -19,7 +20,6 @@ extends Node
 const MENU_FILE := "weapon.mnu"
 const MENU_SCREEN := "WEAPON"
 const STYLESHEET_FILE := "menu_style.mns"  # the canonical name (MenuShell's default)
-const DESIGN_SIZE := Vector2(800, 600)
 const MUSIC_VAR_INDEX := 2
 
 # The ACCEPT hotkey: the WEAPON screen's on-show registers the USE-ITEM binding
@@ -45,7 +45,12 @@ var _team := 0
 # by the armory ACCEPT until the spawn path carries a class of its own.
 var _player_class := 0
 
-var _menu: MnuMenu = null
+# The compiled menu surface: the frame draws + hit-tests, the audio node plays
+# widget SFX, and the RefCounted driver orchestrates both over the parsed
+# document (freed with the presenter; only the two nodes need queue_free).
+var _frame: MenuFrame = null
+var _audio: MenuAudio = null
+var _driver: MenuDriver = null
 var _menu_root: ResourceRoot = null  # the root the built menu was fed from
 var _armory := ArmoryMenuCompanion.new()
 
@@ -72,7 +77,13 @@ func set_player_team(team: int) -> void:
 
 
 func is_open() -> bool:
-	return _menu != null and is_instance_valid(_menu) and _menu.visible
+	return _frame != null and is_instance_valid(_frame) and _frame.visible
+
+
+## The live menu driver over the armory frame (ADR 0018 read seam for tests and
+## diagnostics; null until the first open builds the menu).
+func get_menu_driver() -> MenuDriver:
+	return _driver
 
 
 ## The armory key: open weapon.mnu's WEAPON screen over LIVE play when the player
@@ -175,12 +186,13 @@ func open() -> bool:
 	_armory.set_availability_lookup(
 			func(weapon_name: String) -> int:
 				return int(sim.get_weapon_availability(weapon_name)))
-	_armory.on_menu_built(_menu, MENU_FILE, MENU_SCREEN, _menu_root)
+	_armory.on_menu_built(_driver, MENU_FILE, MENU_SCREEN, _menu_root)
 	# The menu draws over every HUD element (the lazily built GameHud may have been
 	# added after us) [orig: the UI scene renders after HUD_DrawGameplayOverlays in
 	# Render_ProcessMainSceneFrame @0x5ca0f0].
-	_ui_parent.move_child(_menu, _ui_parent.get_child_count() - 1)
-	_menu.visible = true
+	_ui_parent.move_child(_frame, _ui_parent.get_child_count() - 1)
+	_frame.visible = true
+	set_process(true)
 	opened.emit()
 	return true
 
@@ -188,8 +200,21 @@ func open() -> bool:
 func close() -> void:
 	if not is_open():
 		return
-	_menu.visible = false
+	# A dropdown left open would come back mid-popup on the next open (the frame
+	# only hides; the driver's per-widget state persists across shows).
+	_driver.close_active_combo_popup()
+	_frame.visible = false
+	set_process(false)
 	closed.emit()
+
+
+func _process(_delta: float) -> void:
+	if not is_open():
+		set_process(false)
+		return
+	# The blink/marquee clock rides the OS tick like the original's GetTickCount
+	# gate (the shell does the same for the front-end menus).
+	_driver.tick(Time.get_ticks_msec())
 
 
 # Route the armory-key edges to the companion's debounced ACCEPT accelerator
@@ -206,19 +231,24 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 
 func teardown() -> void:
-	if _menu != null and is_instance_valid(_menu):
-		_menu.queue_free()
-	_menu = null
+	set_process(false)
+	if _frame != null and is_instance_valid(_frame):
+		_frame.queue_free()
+	if _audio != null and is_instance_valid(_audio):
+		_audio.queue_free()
+	_frame = null
+	_audio = null
+	_driver = null
 	_menu_root = null
 
 
-# Build the runtime menu node over the gameplay view: the same MnuMenu the
-# menu shell drives (edit_mode off), fed weapon.mnu from the WORLD's mounted
-# resource root, with the canonical stylesheet and the current root's
-# menutxt/gametext tables. Direct/headless world owners may not have run the
-# front-end text bootstrap.
+# Build the compiled menu surface over the gameplay view: the same
+# MenuFrame + MenuAudio + MenuDriver stack the menu shell drives, fed weapon.mnu
+# from the WORLD's mounted resource root, with the canonical stylesheet and the
+# current root's menutxt/gametext tables. Direct/headless world owners may not
+# have run the front-end text bootstrap.
 func _ensure_menu() -> bool:
-	if _menu != null and is_instance_valid(_menu):
+	if _driver != null and _frame != null and is_instance_valid(_frame):
 		return true
 	var root: ResourceRoot = _world.get_resource_root()
 	if root == null:
@@ -232,32 +262,55 @@ func _ensure_menu() -> bool:
 		push_warning("ArmoryPresenter: %s did not parse" % MENU_FILE)
 		return false
 	_register_text_tables(root)
-	_menu = MnuMenu.new()
-	_menu.name = "ArmoryMenu"
-	_menu.build_on_ready = false
-	_menu.set_edit_mode(false)
-	_menu.set_resource_root(root)
-	var menu_text: RtxtStringFile = Strings.get_table("menutxt")
-	if menu_text != null:
-		_menu.set_text_resource(menu_text)
-	var style := _load_style(root)
-	if style != null:
-		_menu.set_stylesheet(style)
-	_menu.set_music_director(NovaMusicService.director())
-	_menu.set_music_var_index(MUSIC_VAR_INDEX)
 	# weapon.mnu shares the retail menu's fixed 800x600 design space and the
-	# independent X/Y fill used by every front-end screen.
+	# independent X/Y fill used by every front-end screen; the frame scales that
+	# design space to its OWN size internally, so the fit just sizes the Control.
 	# [orig: CUIScene_SetScreenScale @0x639480]
-	_menu.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	_menu.size = DESIGN_SIZE
-	_ui_parent.add_child(_menu)
+	_frame = MenuFrame.new()
+	_frame.name = "ArmoryMenu"
+	_frame.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	# Unlike MenuShell (a Control parent sampling for a full-rect child frame),
+	# the presenter overlays a foreign HUD parent, so the frame itself is the
+	# input surface: its gui_input forwards into the driver's pump.
+	_frame.mouse_filter = Control.MOUSE_FILTER_STOP
+	_frame.gui_input.connect(_on_frame_gui_input)
+	_ui_parent.add_child(_frame)
 	_recompute_fit()
-	_menu.set_menu_file(MENU_FILE)
-	_menu.menu = doc
-	_menu.show_screen(MENU_SCREEN)
+	# Widget <SOUND> triggers play through the MenuAudio device leg.
+	_audio = MenuAudio.new()
+	_audio.name = "ArmoryMenuAudio"
+	_audio.set_resource_root(root)
+	_ui_parent.add_child(_audio)
+	_driver = MenuDriver.new()
+	_driver.attach(_frame, _audio)
+	_driver.set_music_director(NovaMusicService.director())
+	_driver.set_music_var_index(MUSIC_VAR_INDEX)
+	var style := _load_style(root)
+	var menu_text: RtxtStringFile = Strings.get_table("menutxt")
+	if not _driver.open_document(doc, root, style, menu_text, MENU_FILE, MENU_SCREEN):
+		push_warning("ArmoryPresenter: %s has no screens" % MENU_FILE)
+		teardown()
+		return false
 	_menu_root = root
 	_armory.set_weapon_database(_world.get_weapon_database())
 	return true
+
+
+# The compiled frame is a passive surface — it draws and hit-tests but never
+# pumps input itself; forward its gui input to the driver the way MenuShell
+# does (event positions are frame-local, the space process_mouse expects).
+func _on_frame_gui_input(event: InputEvent) -> void:
+	if _driver == null or not is_open():
+		return
+	if event is InputEventMouseMotion:
+		var motion := event as InputEventMouseMotion
+		_driver.process_mouse(motion.position,
+				(motion.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0)
+	elif event is InputEventMouseButton:
+		var button := event as InputEventMouseButton
+		if button.button_index == MOUSE_BUTTON_LEFT:
+			_driver.process_mouse(button.position, button.pressed)
+			_frame.accept_event()
 
 
 # Armory ACCEPT: the full multi-slot kit (primary/secondary/accessory/grenades + clip
@@ -361,7 +414,7 @@ func _connect_layout_source() -> void:
 
 
 func _recompute_fit() -> void:
-	if _menu == null or not is_instance_valid(_menu):
+	if _frame == null or not is_instance_valid(_frame):
 		return
 	var target_size := Vector2.ZERO
 	if _layout_control != null:
@@ -370,6 +423,7 @@ func _recompute_fit() -> void:
 		target_size = _ui_parent.get_viewport().get_visible_rect().size
 	if target_size.x <= 1.0 or target_size.y <= 1.0:
 		return
-	_menu.position = Vector2.ZERO
-	_menu.size = DESIGN_SIZE
-	_menu.scale = Vector2(target_size.x / DESIGN_SIZE.x, target_size.y / DESIGN_SIZE.y)
+	# The frame maps the 800x600 design space to its own rect internally
+	# [orig: CUIScene_SetScreenScale @0x639480] — no Control scale math here.
+	_frame.position = Vector2.ZERO
+	_frame.size = target_size

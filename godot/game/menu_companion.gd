@@ -4,52 +4,68 @@ extends RefCounted
 # Base for the game-specific menu drivers ("companions") MenuShell delegates
 # whole menus to (add_companion): the JO multiplayer menu (MpMenuCompanion) and the
 # PLAYER_INFO character screen (PlayerInfoMenuCompanion). When a companion's
-# owns_menu() claims a freshly built menu, the shell hands it the whole
+# owns_menu() claims a freshly opened document, the shell hands it the whole
 # named-control wiring through on_menu_built() instead of running its generic
 # launch/mission wiring. Subclasses override owns_menu + _wire and share the
-# by-NAME control helpers below.
+# by-NAME helpers below, all riding the shell's MenuDriver (widgets are
+# addressed by document id via widget_id — the find_child successor).
 
-var _menu: MnuMenu  # the built menu (its tree + typed signals)
+var _driver: MenuDriver
 var _root: ResourceRoot
+# NAME (upper) -> Callable, rebuilt per _wire; dispatched off the driver's
+# widget_activated. Only fires while the wired document is still loaded.
+var _activation_handlers: Dictionary = {}
+var _wired_file := ""
 
 
-## True when this companion drives `menu`. Keyed on control names unique to the
-## owned screens rather than a screen name, since a document's screens are all
-## built at once.
-func owns_menu(_menu_node: MnuMenu) -> bool:
+## True when this companion drives the loaded document. Keyed on control names
+## unique to the owned screens rather than a screen name, since a document's
+## screens are all addressable at once.
+func owns_menu(_driver_candidate: MenuDriver) -> bool:
 	return false
 
 
-## Called by MenuShell after each open_menu (re)build of a menu this
-## companion owns. The screen nodes are freshly built children, so prior
-## connections died with the old tree; _wire rescans by name.
-func on_menu_built(menu: MnuMenu, file: String, screen: String, root: ResourceRoot) -> void:
-	_menu = menu
+## Called by MenuShell after each open_menu of a document this companion owns.
+func on_menu_built(driver: MenuDriver, file: String, screen: String, root: ResourceRoot) -> void:
+	_driver = driver
 	_root = root
-	if menu == null:
+	_activation_handlers.clear()
+	_wired_file = driver.get_menu_file() if driver != null else ""
+	if driver == null:
 		return
+	if not driver.widget_activated.is_connected(_on_widget_activated):
+		driver.widget_activated.connect(_on_widget_activated)
 	_wire(file, screen)
 
 
-## Subclass hook: wire the owned screens' controls (by name) off _menu/_root.
+## Subclass hook: wire the owned screens' controls (by name) off _driver/_root.
 func _wire(_file: String, _screen: String) -> void:
 	pass
 
 
-# --- By-NAME control helpers ----------------------------------------------------
+# --- By-NAME helpers ----------------------------------------------------------
 
-func _find(name: String) -> Node:
-	return _menu.find_child(name, true, false) if _menu != null else null
+func _id(name: String) -> int:
+	return _driver.widget_id(name) if _driver != null else -1
 
 
 func _connect_pressed(name: String, handler: Callable) -> void:
-	var node := _find(name)
-	if node is BaseButton and not (node as BaseButton).pressed.is_connected(handler):
-		(node as BaseButton).pressed.connect(handler)
+	if _driver != null and _driver.has_widget(name):
+		_activation_handlers[name.to_upper()] = handler
+
+
+func _on_widget_activated(_id_activated: int, widget_name: String) -> void:
+	# The shell swaps documents under the shared driver; a stale companion's
+	# name matches must not double-dispatch against the new document.
+	if _driver == null or _driver.get_menu_file() != _wired_file:
+		return
+	var handler: Callable = _activation_handlers.get(widget_name.to_upper(), Callable())
+	if handler.is_valid():
+		handler.call()
 
 
 func _edit_text(name: String, default_value := "") -> String:
-	var node := _find(name)
-	if node is LineEdit:  # MnuEdit extends LineEdit
-		return (node as LineEdit).text
-	return default_value
+	var id := _id(name)
+	if id < 0:
+		return default_value
+	return _driver.get_widget_text(id)

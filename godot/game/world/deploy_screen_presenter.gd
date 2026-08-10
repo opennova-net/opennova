@@ -27,9 +27,13 @@ extends Node
 const MENU_FILE := "death.mnu"
 const MENU_SCREEN := "DEATH"
 const STYLESHEET_FILE := "menu_style.mns"
-const DESIGN_SIZE := Vector2(800, 600)
-const MUSIC_VAR_INDEX := 3  # death.mnu <MUSICVAR>3</MUSICVAR>
+# The menumus discriminator SLOT the driver pushes each screen's authored
+# MUSICVAR value into (death.mnu authors <MUSICVAR>3</MUSICVAR>; the slot is
+# var 2, same as MenuShell) [orig: UI_DispatchScreenEvent @ 0x54e6a0, store
+# @ 0x54eff4 -> AudioVM_SetVariable(2, v)].
+const MUSIC_VAR_INDEX := 2
 const REFRESH_INTERVAL_S := 0.25  # [orig: every 16 ticks of the 62 Hz loop @0x55477d]
+const SPAWN_LIST := "SPAWNPOINTS_LIST"
 
 signal opened
 signal closed
@@ -40,9 +44,19 @@ var _ui_parent: Node = null
 # drives the fit from its own size/resized; a CanvasLayer parent (the game HUD)
 # has no size, so the fit follows the viewport instead.
 var _layout_control: Control = null
-var _menu: MnuMenu = null
+# The compiled menu surface: the frame draws + hit-tests, the audio node plays
+# widget SFX, and the RefCounted driver orchestrates both over the parsed
+# document (freed with the presenter; only the two nodes need queue_free).
+var _frame: MenuFrame = null
+var _audio: MenuAudio = null
+var _driver: MenuDriver = null
 var _menu_root: ResourceRoot = null
 var _refresh_accum := 0.0
+# The spawn list's presenter-side row model, aligned with the compiled list's
+# visible rows: {label, param} per row, rebuilt by _populate_spawn_list. The
+# compiled list carries labels only, so the node parameter the pick serializes
+# lives here (the old ItemList's item metadata).
+var _spawn_rows: Array = []
 
 
 func setup(world: GameWorld, ui_parent: Node) -> void:
@@ -53,7 +67,19 @@ func setup(world: GameWorld, ui_parent: Node) -> void:
 
 
 func is_open() -> bool:
-	return _menu != null and is_instance_valid(_menu) and _menu.visible
+	return _frame != null and is_instance_valid(_frame) and _frame.visible
+
+
+## The live menu driver over the deploy frame (ADR 0018 read seam for tests and
+## diagnostics; null until the first open builds the menu).
+func get_menu_driver() -> MenuDriver:
+	return _driver
+
+
+## The presenter-side spawn row model ({label, param} per visible list row,
+## aligned with the compiled list's rows) — ADR 0018 read seam for tests.
+func get_spawn_rows() -> Array:
+	return _spawn_rows
 
 
 ## Open over the live world when the join owes a deployment pick.
@@ -67,8 +93,8 @@ func open() -> bool:
 		return false
 	_apply_static_visibility()
 	_populate_spawn_list(sim)
-	_ui_parent.move_child(_menu, _ui_parent.get_child_count() - 1)
-	_menu.visible = true
+	_ui_parent.move_child(_frame, _ui_parent.get_child_count() - 1)
+	_frame.visible = true
 	_refresh_accum = 0.0
 	set_process(true)
 	opened.emit()
@@ -79,22 +105,30 @@ func close() -> void:
 	set_process(false)
 	if not is_open():
 		return
-	_menu.visible = false
+	_frame.visible = false
 	closed.emit()
 
 
 func teardown() -> void:
 	set_process(false)
-	if _menu != null and is_instance_valid(_menu):
-		_menu.queue_free()
-	_menu = null
+	if _frame != null and is_instance_valid(_frame):
+		_frame.queue_free()
+	if _audio != null and is_instance_valid(_audio):
+		_audio.queue_free()
+	_frame = null
+	_audio = null
+	_driver = null
 	_menu_root = null
+	_spawn_rows = []
 
 
 func _process(delta: float) -> void:
 	if not is_open():
 		set_process(false)
 		return
+	# The blink/marquee clock rides the OS tick like the original's GetTickCount
+	# gate (the shell does the same for the front-end menus).
+	_driver.tick(Time.get_ticks_msec())
 	var sim: Simulation = _world.get_sim() if _world != null else null
 	if sim == null:
 		close()
@@ -126,54 +160,70 @@ func _process(delta: float) -> void:
 		_populate_spawn_list(sim)
 
 
-func _on_spawn_row_selected(index: int) -> void:
-	var list := _spawn_list()
-	if list == null or index < 0 or index >= list.item_count:
+# Selection commands arrive through the driver's aggregate relay. Every click on
+# a row queues a pick, including a click on the row that is already highlighted:
+# the original's select callback is a COMMAND, fired unconditionally from the
+# list event with no "did the selection change" test and no re-entry gate — and
+# the driver re-emits widget_value_changed on every list click, which carries the
+# old ItemList allow_reselect=true semantics (a re-opened DEATH screen, and any
+# re-pick after the host silently drops one, can still send another C2S 0x0E).
+# [orig: DeathScreen_OnSpawnListSelect @ 0x553630 -> Input_QueueEvent(12,
+#  node) @ 0x55364d, guarded only on node != -1]
+func _on_widget_value_changed(widget_name: String, kind: String, index: int,
+		_value: String) -> void:
+	if kind != "list" or widget_name.nocasecmp_to(SPAWN_LIST) != 0:
+		return
+	if index < 0 or index >= _spawn_rows.size():
 		return
 	var sim: Simulation = _world.get_sim() if _world != null else null
 	if sim == null:
 		return
 	# [orig: the SPAWNPOINTS_LIST select callback -> Input_QueueEvent(12, node)
 	#  @0x55364d; node 0 = the Default Spawn -> the parameter-0 pick]
-	sim.send_deployment_pick(int(list.get_item_metadata(index)))
+	sim.send_deployment_pick(int((_spawn_rows[index] as Dictionary).get("param", 0)))
 
 
 func _populate_spawn_list(sim: Simulation) -> void:
-	var list := _spawn_list()
-	if list == null:
+	if _driver == null:
 		return
-	var selected := list.get_selected_items()
+	var list_id := _driver.widget_id(SPAWN_LIST)
+	if list_id < 0:
+		return
+	# Preserve the pick across the periodic refill by PARAMETER, not row index —
+	# zone security/ownership changes can reshuffle the rows.
 	var keep_param := -1
-	if selected.size() > 0:
-		keep_param = int(list.get_item_metadata(selected[0]))
-	list.clear()
-	# Team text color rides the row [orig: the "<c4040FF>" tag, or "<cFF2020>" only
-	# when Team == 2, in the list text @0x5536a0; our list styles the row directly].
-	# The pre-spawn joiner's team is the S2C 0x04 latch the sim surfaces.
-	var team := int(sim.get_join_assigned_team())
-	var row_color := Color("ff2020") if team == 2 else Color("4040ff")
+	var selected := _driver.selected_row(list_id)
+	if selected >= 0 and selected < _spawn_rows.size():
+		keep_param = int((_spawn_rows[selected] as Dictionary).get("param", -1))
+	# Team text color rode the row [orig: the "<c4040FF>" tag, or "<cFF2020>" only
+	# when Team == 2, in the list text @0x5536a0]. DROPPED for now: the compiled
+	# list has no per-row style channel — row coloring awaits the list row-style
+	# channel (P2 parity will judge).
+	_spawn_rows = []
+	var labels := PackedStringArray()
 	# Row 0: the default spawn [orig: "'<DEFAULT_SPAWN_KEY>' <HOME>", node 0].
 	var default_text := "'%s' %s" % [
 		_menu_text("DEFAULT_SPAWN_KEY", "D"),
 		_menu_text("HOME", "Home Base"),
 	]
-	var row := list.add_item(default_text, null, true)
-	list.set_item_metadata(row, 0)
-	list.set_item_custom_fg_color(row, row_color)
+	labels.append(default_text)
+	_spawn_rows.append({"label": default_text, "param": 0})
 	# One lettered row per team-owned secured deploy zone (see Simulation.
 	# get_deploy_spawn_zones for the witnessed filter + letter/name keying).
 	for value in sim.get_deploy_spawn_zones():
 		var zone := value as Dictionary
 		var zone_name := _game_text(
 				"WPNames", String(zone.get("name_key", "")), "Spawn Point")
-		row = list.add_item(
-				"'%s' %s" % [String(zone.get("letter", "")), zone_name], null, true)
-		list.set_item_metadata(row, int(zone.get("param", 0)))
-		list.set_item_custom_fg_color(row, row_color)
+		var label := "'%s' %s" % [String(zone.get("letter", "")), zone_name]
+		labels.append(label)
+		_spawn_rows.append({"label": label, "param": int(zone.get("param", 0))})
+	# set_widget_items resets the selection to row 0; restore the previous pick by
+	# parameter without emitting (picks ride user clicks only, never the refill).
+	_driver.set_widget_items(list_id, labels)
 	if keep_param >= 0:
-		for index in range(list.item_count):
-			if int(list.get_item_metadata(index)) == keep_param:
-				list.select(index)
+		for row in _spawn_rows.size():
+			if int((_spawn_rows[row] as Dictionary).get("param", -1)) == keep_param:
+				_driver.select_row(list_id, row, false)
 				break
 
 
@@ -184,27 +234,17 @@ func _populate_spawn_list(sim: Simulation) -> void:
 func _apply_static_visibility() -> void:
 	for control_name in ["STATIC_MEDIC_MSG1", "STATIC_CALLMEDIC_MSG",
 			"STATIC_PSPRESPAWN_MSG1", "SWAP_TEAMS", "BUTTON_TEAMLIST"]:
-		# Boundary conversion: authored .mnu controls are CanvasItems; null
-		# means this screen simply does not author the control.
-		var item := _find(control_name) as CanvasItem
-		if item != null:
-			item.visible = false
+		# A -1 id means this screen simply does not author the control.
+		var id := _driver.widget_id(control_name)
+		if id >= 0:
+			_driver.set_widget_shown(id, false)
 
 
-func _spawn_list() -> ItemList:
-	return _find("SPAWNPOINTS_LIST") as ItemList
-
-
-func _find(control_name: String) -> Node:
-	if _menu == null or not is_instance_valid(_menu):
-		return null
-	return _menu.find_child(control_name, true, false)
-
-
-# Build the runtime menu the same way the armory presenter does: the shared MnuMenu
-# fed death.mnu from the world's mounted resource root.
+# Build the compiled menu surface the same way the armory presenter does: the
+# shared MenuFrame + MenuAudio + MenuDriver stack fed death.mnu from the world's
+# mounted resource root.
 func _ensure_menu() -> bool:
-	if _menu != null and is_instance_valid(_menu):
+	if _driver != null and _frame != null and is_instance_valid(_frame):
 		return true
 	var root: ResourceRoot = _world.get_resource_root()
 	if root == null:
@@ -218,43 +258,54 @@ func _ensure_menu() -> bool:
 		push_warning("DeployScreenPresenter: %s did not parse" % MENU_FILE)
 		return false
 	_register_text_tables(root)
-	_menu = MnuMenu.new()
-	_menu.name = "DeployScreenMenu"
-	_menu.build_on_ready = false
-	_menu.set_edit_mode(false)
-	_menu.set_resource_root(root)
-	var menu_text: RtxtStringFile = Strings.get_table("menutxt")
-	if menu_text != null:
-		_menu.set_text_resource(menu_text)
-	var style := _load_style(root)
-	if style != null:
-		_menu.set_stylesheet(style)
-	_menu.set_music_director(NovaMusicService.director())
-	_menu.set_music_var_index(MUSIC_VAR_INDEX)
-	_menu.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	_menu.size = DESIGN_SIZE
-	_ui_parent.add_child(_menu)
+	# death.mnu shares the retail menu's fixed 800x600 design space; the frame
+	# scales it to its OWN size internally, so the fit just sizes the Control.
+	# [orig: CUIScene_SetScreenScale @0x639480]
+	_frame = MenuFrame.new()
+	_frame.name = "DeployScreenMenu"
+	_frame.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	# Unlike MenuShell (a Control parent sampling for a full-rect child frame),
+	# the presenter overlays a foreign HUD parent, so the frame itself is the
+	# input surface: its gui_input forwards into the driver's pump.
+	_frame.mouse_filter = Control.MOUSE_FILTER_STOP
+	_frame.gui_input.connect(_on_frame_gui_input)
+	_ui_parent.add_child(_frame)
 	_recompute_fit()
-	_menu.set_menu_file(MENU_FILE)
-	_menu.menu = doc
-	_menu.show_screen(MENU_SCREEN)
+	# Widget <SOUND> triggers play through the MenuAudio device leg.
+	_audio = MenuAudio.new()
+	_audio.name = "DeployScreenMenuAudio"
+	_audio.set_resource_root(root)
+	_ui_parent.add_child(_audio)
+	_driver = MenuDriver.new()
+	_driver.attach(_frame, _audio)
+	_driver.set_music_director(NovaMusicService.director())
+	_driver.set_music_var_index(MUSIC_VAR_INDEX)
+	_driver.widget_value_changed.connect(_on_widget_value_changed)
+	var style := _load_style(root)
+	var menu_text: RtxtStringFile = Strings.get_table("menutxt")
+	if not _driver.open_document(doc, root, style, menu_text, MENU_FILE, MENU_SCREEN):
+		push_warning("DeployScreenPresenter: %s has no screens" % MENU_FILE)
+		teardown()
+		return false
 	_menu_root = root
-	var list := _spawn_list()
-	if list != null and not list.item_selected.is_connected(_on_spawn_row_selected):
-		# Every click on a row queues a pick, including a click on the row that is
-		# already highlighted: the original's select callback is a COMMAND, fired
-		# unconditionally from the list event with no "did the selection change"
-		# test and no re-entry gate. Godot's ItemList suppresses item_selected for
-		# the already-selected row unless allow_reselect is set, and the row DOES
-		# stay selected — the menu survives close() (_ensure_menu reuses it) and
-		# _populate_spawn_list restores the previous pick by parameter — so without
-		# this a re-opened DEATH screen, and any re-pick after the host silently
-		# drops one, can never send a second C2S 0x0E.
-		# [orig: DeathScreen_OnSpawnListSelect @ 0x553630 -> Input_QueueEvent(12,
-		#  node) @ 0x55364d, guarded only on node != -1]
-		list.allow_reselect = true
-		list.item_selected.connect(_on_spawn_row_selected)
 	return true
+
+
+# The compiled frame is a passive surface — it draws and hit-tests but never
+# pumps input itself; forward its gui input to the driver the way MenuShell
+# does (event positions are frame-local, the space process_mouse expects).
+func _on_frame_gui_input(event: InputEvent) -> void:
+	if _driver == null or not is_open():
+		return
+	if event is InputEventMouseMotion:
+		var motion := event as InputEventMouseMotion
+		_driver.process_mouse(motion.position,
+				(motion.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0)
+	elif event is InputEventMouseButton:
+		var button := event as InputEventMouseButton
+		if button.button_index == MOUSE_BUTTON_LEFT:
+			_driver.process_mouse(button.position, button.pressed)
+			_frame.accept_event()
 
 
 func _register_text_tables(root: ResourceRoot) -> void:
@@ -307,7 +358,7 @@ func _connect_layout_source() -> void:
 
 
 func _recompute_fit() -> void:
-	if _menu == null or not is_instance_valid(_menu):
+	if _frame == null or not is_instance_valid(_frame):
 		return
 	var target_size := Vector2.ZERO
 	if _layout_control != null:
@@ -316,6 +367,7 @@ func _recompute_fit() -> void:
 		target_size = _ui_parent.get_viewport().get_visible_rect().size
 	if target_size.x <= 1.0 or target_size.y <= 1.0:
 		return
-	_menu.position = Vector2.ZERO
-	_menu.size = DESIGN_SIZE
-	_menu.scale = Vector2(target_size.x / DESIGN_SIZE.x, target_size.y / DESIGN_SIZE.y)
+	# The frame maps the 800x600 design space to its own rect internally
+	# [orig: CUIScene_SetScreenScale @0x639480] — no Control scale math here.
+	_frame.position = Vector2.ZERO
+	_frame.size = target_size
