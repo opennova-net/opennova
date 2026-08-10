@@ -1,7 +1,7 @@
 """
 ctypes bindings for the TDP project file C API (libopennova.so / opennova.dll).
 
-Mirrors structs from engine/formats/tdp/include/tdp/tdp.h.
+Mirrors structs from engine/formats/tdp/tdp.h.
 """
 
 import ctypes

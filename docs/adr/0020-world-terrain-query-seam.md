@@ -29,7 +29,7 @@ none of it (verified pre-move: zero terrain-family includes outside
    `TerrainHeightField` POD + the `height_field_*` free functions — not a
    new abstraction invented for the cut.
 2. **Include shape and namespace are preserved**: headers stay at
-   `<terrain/height_field.h>` / `<terrain/coords.h>` in namespace
+   `<terrain_query/height_field.h>` / `<terrain_query/coords.h>` in namespace
    `opennova::terrain`, so the move is invisible to every call site.
 3. **Direction**: `world → terrain_query`; `terrain → terrain_query`
    (PUBLIC, so terrain's own consumers keep compiling unchanged).

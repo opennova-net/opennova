@@ -310,7 +310,7 @@ death edge uses it with type 5 (night) / 0 `@ 0x4b4c4a-0x4b4c6a` — unported
 | D-SND-12 | the female profile (def+2152) is never selected — primary always | the character entity's female byte picks it `@ 0x52831c` | avatar gender is unmodeled sim-side; JO NPC female defs author their own `sound_profile`, so only the shared player defs are affected |
 | D-SND-13 | SndProf.def parses per mission load off the mission resource root | one boot-time load + expansion reloads | same file, same table; no observable difference |
 | D-SND-14 | the local player's death scream rides the NPC slot-7/8 leg | org2 plays the composite `SoundProfile_FindByEntityAndType(def, 5/0)` name `@ 0x4b4c61` | the composite-name chain is unported (P2b player-death presentation); the profile scream is the same authored voice family |
-| D-SND-15 | `Terrain_GetSurfaceTypeAtPosition`'s placed-tile override leg is not modeled (`terrain/surface_type_map.h` samples the charmap only) | `.til` placements remap the surface through `byte_319F7D8` `@ 0x6065ca-0x60660c` | placed-tile data is not sim-plumbed; feet on roads/runways read the underlying charmap class |
+| D-SND-15 | `Terrain_GetSurfaceTypeAtPosition`'s placed-tile override leg is not modeled (`terrain_query/surface_type_map.h` samples the charmap only) | `.til` placements remap the surface through `byte_319F7D8` `@ 0x6065ca-0x60660c` | placed-tile data is not sim-plumbed; feet on roads/runways read the underlying charmap class |
 
 ## Ground vehicle movement sounds (grilled 2026-07-29)
 

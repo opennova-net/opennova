@@ -1,7 +1,7 @@
 """
 ctypes bindings for the ADM animation definition C API (libopennova.so / opennova.dll).
 
-Mirrors structs from engine/formats/adm/include/adm/adm.h.
+Mirrors structs from engine/formats/adm/adm.h.
 """
 
 import ctypes

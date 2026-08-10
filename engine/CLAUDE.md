@@ -19,10 +19,17 @@
     anim, audio, particle, renderer, controls, terrain, terrain_query.
   - `net/` — the wire/protocol stack (ADRs 0009–0012, 0019; Model-B-only): novacrypto,
     napi, npwire, novaworld, netsim, npruntime.
-- Layout per library: `engine/<group>/<domain>/{include/<domain>/, src/}` — the
-  one-directory-per-format layout, fixtures, and tests (ADR 0024) survive ADR 0029's
-  target collapse; a library builds inside its group target, not as its own (see the
-  group-targets bullet below). Namespace `opennova`. C ABI exports stay flat and
+- Layout per library (FLAT since 2026-08-10): `engine/<group>/<domain>/*.{h,cpp}` —
+  headers and sources sit side by side in the lib dir (nested subdirs allowed, e.g.
+  `npwire/wire/`), and each GROUP directory is the one public include dir, so
+  `#include <domain/file.h>` resolves to `engine/<group>/<domain>/file.h`. The
+  one-directory-per-format principle, fixtures, and tests (ADR 0024) survive both
+  ADR 0029's target collapse and the flatten; a library builds inside its group
+  target, not as its own (see the group-targets bullet below). Two prefix notes from
+  the flatten: `terrain_query` owns its own `<terrain_query/...>` prefix (the ADR
+  0020 seam headers — pre-flatten they shared `terrain/`), and the .ptl lib lives at
+  `engine/formats/particle` (its historical `<particle/...>` prefix names the dir).
+  Namespace `opennova`. C ABI exports stay flat and
   domain-prefixed — Python and Godot load the same `opennova_shared` library, so ABI
   stability matters.
 - C ABI conventions for NEW exports: annotate with the lib's `<DOMAIN>_EXPORT` macro
@@ -78,7 +85,7 @@
   round-trips byte-exactly; `ok()` reports truncation without changing that. A PROTOCOL
   decoder wants the opposite — the first short read poisons the cursor so a truncated
   datagram cannot half-decode into plausible state; that is
-  `engine/net/npwire/src/wire_cursor.h`, and it must not be folded into `ByteReader`.
+  `engine/net/npwire/wire_cursor.h`, and it must not be folded into `ByteReader`.
 - Migration exceptions, each with its reason (do not "clean these up" casually):
   the `mus`/`wac` VM program-counter cursors are a witnessed faithful-port surface with
   their own clamp semantics. `engine/formats/cpt`'s bit codec and `io/bit_stream.h` have DIVERGED
@@ -107,7 +114,7 @@
   encoder/decoder self-consistency. The witness record is docs/net/novaworld-net-re.md.
 - Tests for this code live in `/tests/<domain>/` (ctest), not `godot/tests/`.
 - 3DI models: 3DI3 only, consumed directly (ADR 0027). `threedi_3di3_read` produces
-  `Threedi3di3` (engine/formats/threedi/include/threedi/threedi_3di3.h) and that parsed struct IS
+  `Threedi3di3` (engine/formats/threedi/threedi_3di3.h) and that parsed struct IS
   the model every consumer walks — the Godot document edits it in place, `tdp_from_3di`
   generates `.3dp` from it, and the Python FFI mirrors its packed layout. There is no
   intermediate model representation, and the GP-era (GPM/GPS/GPP) reader/writer is gone —

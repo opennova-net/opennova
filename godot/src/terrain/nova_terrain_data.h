@@ -13,8 +13,8 @@
 #include <godot_cpp/variant/vector2i.hpp>
 
 #include <cpt/cpt_io.h>
-#include <terrain/coords.h>
-#include <terrain/height_field.h>
+#include <terrain_query/coords.h>
+#include <terrain_query/height_field.h>
 #include <trn/trn_io.h>
 
 #include "resource_index/nova_resource_root.h"
@@ -138,7 +138,7 @@ protected:
 
 public:
 	// Sector/atlas layout constants, single-sourced from engine/runtime/terrain_query
-	// (terrain/coords.h) and bound to GDScript so editor scripts reference the
+	// (terrain_query/coords.h) and bound to GDScript so editor scripts reference the
 	// engine's numbers instead of re-declaring them: SECTOR_SIZE world units per
 	// sector edge, the SECTOR_GRID_DIM x SECTOR_GRID_DIM authored grid, the
 	// ATLAS_SIZE source atlas (a 2x2 quadrant grid of sectors), and sector ids

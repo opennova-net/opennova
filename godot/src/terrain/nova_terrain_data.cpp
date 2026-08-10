@@ -7,10 +7,10 @@
 #include <til/til_io.h>
 #include <terrain/brush.h>
 #include <terrain/cdep_constraint.h>
-#include <terrain/coords.h>
-#include <terrain/height_field.h>
+#include <terrain_query/coords.h>
+#include <terrain_query/height_field.h>
 #include <terrain/lighting.h>
-#include <terrain/terrain_raycast.h>
+#include <terrain_query/terrain_raycast.h>
 
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
@@ -280,7 +280,7 @@ float sample_live_height_at(const opennova::terrain::SectorLayout &layout,
 
 // --- The raycast sampler adapter (ENG-3 B1b) --------------------------------
 // Reimpl substrate behind TerrainData::raycast_terrain: one
-// TerrainRaycastSampler (terrain/terrain_raycast.h) over BOTH height
+// TerrainRaycastSampler (terrain_query/terrain_raycast.h) over BOTH height
 // substrates — the LIVE editable FORMAT_RF image when mounted (what the
 // brushes mutate and the placement raycasts must see), else the BAKED CPT
 // heights — the same live-vs-baked split as sample_height_world_live vs
@@ -565,7 +565,7 @@ void TerrainData::_bind_methods() {
 	             "get_foliage_defs");
 
 	// Sector/atlas layout constants (single-sourced from engine/runtime/terrain_query
-	// terrain/coords.h; see the header declarations).
+	// terrain_query/coords.h; see the header declarations).
 	BIND_CONSTANT(SECTOR_SIZE);
 	BIND_CONSTANT(SECTOR_GRID_DIM);
 	BIND_CONSTANT(ATLAS_SIZE);
@@ -1468,7 +1468,7 @@ Ref<Image> TerrainData::heightmap_image_from_raw16(const PackedByteArray &p_raw1
 }
 
 // The three height queries now delegate to the shared engine/runtime/terrain sampler
-// (terrain/height_field.h) so the runtime AI grounding + the editor sample one
+// (terrain_query/height_field.h) so the runtime AI grounding + the editor sample one
 // implementation. Bodies were lifted verbatim into height_field.cpp; this class
 // keeps only the loaded-guard + world->Godot coordinate boundary.
 float TerrainData::get_height(const Vector3 &p_world_pos) const {
@@ -1634,7 +1634,7 @@ Vector3 TerrainData::raycast_terrain(const Vector3 &p_from, const Vector3 &p_to)
 	// [orig: @ 0x60ccf7]) — that is runtime-substrate behavior; this binding is
 	// the editor-mode surface, so no-data misses: the same deliberate
 	// editor-guard divergence class as the sampler's kOutOfExtent
-	// (terrain/terrain_raycast.h header note).
+	// (terrain_query/terrain_raycast.h header note).
 	RaycastSubstrate substrate;
 	PackedByteArray live_pixels; // keeps the borrowed live mip-0 alive across the march
 	if (live_heightmap_pixels(heightmap_image, live_pixels, substrate.live_w, substrate.live_h)) {

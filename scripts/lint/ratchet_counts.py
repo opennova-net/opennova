@@ -63,13 +63,12 @@ def count_engine_uncited_src_files(allowlist: set[str]) -> int:
     count = 0
     engine = REPO / "engine"
     # engine/<group>/<lib>: the libs are one level below the four group dirs.
+    # Post-flatten (2026-08-10) sources sit directly in the lib dir (nested
+    # subdirs included); there is no src/ level any more.
     for lib_dir in sorted(p for p in engine.glob("*/*") if p.is_dir()):
         if lib_dir.name in allowlist:
             continue
-        src = lib_dir / "src"
-        if not src.is_dir():
-            continue
-        for path in src.rglob("*"):
+        for path in lib_dir.rglob("*"):
             if path.suffix.lower() not in (".c", ".cc", ".cpp"):
                 continue
             try:
@@ -112,21 +111,21 @@ def count_engine_stdout_prints() -> int:
     FILE*-parameter writers (fprintf(fp, ...)) are deliberately not matched."""
     count = 0
     engine = REPO / "engine"
-    for sub in ("src", "include"):
-        # engine/<group>/<lib>/<sub>/**: one extra level for the group dirs.
-        for path in engine.glob(f"*/*/{sub}/**/*"):
-            if path.suffix.lower() not in (".c", ".cc", ".cpp", ".h", ".hpp"):
-                continue
-            if path.name == "log.h" and path.parent.name == "io":
-                continue  # the sink's own vsnprintf lives here
-            try:
-                text = path.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                continue
-            for line in text.splitlines():
-                code = line.split("//", 1)[0]
-                if LIBS_PRINT.search(code):
-                    count += 1
+    # Post-flatten (2026-08-10): sources/headers sit directly under each
+    # engine/<group>/<lib>/ dir (nested subdirs included).
+    for path in engine.glob("*/*/**/*"):
+        if path.suffix.lower() not in (".c", ".cc", ".cpp", ".h", ".hpp"):
+            continue
+        if path.name == "log.h" and path.parent.name == "io":
+            continue  # the sink's own vsnprintf lives here
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            code = line.split("//", 1)[0]
+            if LIBS_PRINT.search(code):
+                count += 1
     return count
 
 

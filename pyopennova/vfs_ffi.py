@@ -2,7 +2,7 @@
 
 The native handle is opaque, so nothing here mirrors a C++/struct layout: there is no ABI-drift
 risk of the kind the field-by-field PffArchiveC mirror carries. Wraps the mount API and file
-resolution from engine/base/vfs/include/vfs/vfs_capi.h. Resolution precedence matches the original
+resolution from engine/base/vfs/vfs_capi.h. Resolution precedence matches the original
 engine (ordered loose search paths, then primary archive, then ordered secondary archives;
 loose shadows archived). read_file() returns SCR/BFC1-decoded bytes.
 """

@@ -29,7 +29,7 @@
 
 #include "netsim/client_replica_pipeline.h"
 
-#include <terrain/height_field.h>
+#include <terrain_query/height_field.h>
 #include <world/infantry.h> // IRootMotionSource stub for the root-motion legs
 
 #include <npwire/ingame_decode.h>

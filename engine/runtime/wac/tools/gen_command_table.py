@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate engine/runtime/wac/src/command_table.gen.cpp from the extracted WAC ISA schema.
+"""Generate engine/runtime/wac/command_table.gen.cpp from the extracted WAC ISA schema.
 
 Source of truth: notes/wac/wac_commands.schema.json (dumped from Jointops.exe's
 command table @0x82D290). Re-run after re-extracting the schema.
@@ -12,7 +12,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # Schema is vendored next to this generator (extracted from Jointops.exe's command
 # table @0x82D290; see notes/wac/wac.md). Keeps the registry regenerable + auditable.
 SCHEMA = os.path.join(HERE, "wac_commands.schema.json")
-OUT = os.path.join(HERE, "..", "src", "command_table.gen.cpp")
+OUT = os.path.join(HERE, "..", "command_table.gen.cpp")
 
 PT_ENUM = [
     "Null", "Value", "Number", "Red", "Green", "Blue", "Distance", "Heading",

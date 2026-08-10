@@ -1,7 +1,7 @@
 """
 ctypes bindings for the SCR decryption C API (libopennova.so / opennova.dll).
 
-Mirrors defines from engine/formats/scr/include/scr/scr.h.
+Mirrors defines from engine/formats/scr/scr.h.
 Wraps the decrypt-to-buffer path that Python callers need.
 """
 

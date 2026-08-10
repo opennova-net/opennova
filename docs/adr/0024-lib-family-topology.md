@@ -8,6 +8,15 @@
 - **Superseded in part by [ADR 0029](0029-engine-group-targets.md)**
   (2026-08-08, targets only — the directory layout stands): decision 1's
   per-format CMake target clause and decisions 2–4 (the family link groups).
+- **Layout amended by the 2026-08-10 engine flatten (ADR 0033 P1 #13)**: the
+  per-lib `include/<prefix>/` + `src/` pair is gone — headers and sources sit
+  side by side in each `engine/<group>/<lib>/` dir and the GROUP directory is
+  the one public include dir, so `#include <prefix/file.h>` statements are
+  unchanged. One-directory-per-format, fixtures, namespaces, and tests stand.
+  Two prefix consequences: `terrain_query` owns `<terrain_query/...>` (the
+  ADR 0020 seam headers, previously shared under `terrain/`), and the .ptl
+  lib directory is `engine/formats/particle` (matching its historical
+  `<particle/...>` prefix).
   The one-directory-per-format layout with its headers, namespace, fixtures,
   and tests, decision 5's renderer reversal, and decision 6's Model A/B
   consumption models remain in force.

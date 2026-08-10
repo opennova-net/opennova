@@ -16,8 +16,8 @@
 //
 // [orig: sub_402D20 @0x402D20, ported in engine/runtime/terrain/src/terrain_mesh.cpp.]
 
-#include "terrain/coords.h"
-#include "terrain/height_field.h"
+#include "terrain_query/coords.h"
+#include "terrain_query/height_field.h"
 
 #include <cmath>
 #include <cstdio>

@@ -28,7 +28,7 @@
 #include <set>
 #include <vector>
 
-#include "terrain/height_field.h"
+#include "terrain_query/height_field.h"
 #include "world/ai.h"
 #include "world/player_input.h"
 #include "world/world.h"

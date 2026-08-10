@@ -9,35 +9,31 @@
 
 add_library(opennova_base STATIC
     # gameprofile — game identity + required-resource tables
-    ${CMAKE_CURRENT_SOURCE_DIR}/gameprofile/src/gameprofile.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/gameprofile/src/required_resources.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/gameprofile/gameprofile.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/gameprofile/required_resources.c
     # pcapio — pcap/pcapng reading (shared by capture-driven tests and tools)
-    ${CMAKE_CURRENT_SOURCE_DIR}/pcapio/src/pcap_reader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/pcapio/pcap_reader.cpp
     # refs — cross-resource reference extraction + the whole-root RefGraph
-    ${CMAKE_CURRENT_SOURCE_DIR}/refs/src/refs.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/refs/src/refs_env.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/refs/src/refs_cbin.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/refs/src/refs_def.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/refs/src/refs_avatar.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/refs/src/refs_threedi.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/refs/src/refs_mission.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/refs/src/refs_mnu.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/refs/src/ref_graph.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/refs/refs.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/refs/refs_env.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/refs/refs_cbin.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/refs/refs_def.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/refs/refs_avatar.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/refs/refs_threedi.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/refs/refs_mission.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/refs/refs_mnu.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/refs/ref_graph.cpp
     # resource_index — the mounted resource directory index
-    ${CMAKE_CURRENT_SOURCE_DIR}/resource_index/src/resource_index.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/resource_index/resource_index.cpp
     # vfs — the engine-faithful PFF+loose+expansion mount stack
-    ${CMAKE_CURRENT_SOURCE_DIR}/vfs/src/vfs.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/vfs/src/vfs_decode.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/vfs/src/vfs_capi.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/vfs/vfs.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/vfs/vfs_decode.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/vfs/vfs_capi.cpp
 )
 
 target_include_directories(opennova_base
     PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/gameprofile/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/pcapio/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/refs/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/resource_index/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/vfs/include
+        ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 target_link_libraries(opennova_base PUBLIC opennova_io opennova_formats)

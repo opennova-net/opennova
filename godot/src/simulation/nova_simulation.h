@@ -26,8 +26,8 @@
 #include <mission/event_runtime.h>
 #include <mission/promote.h>
 #include <playersav/weapon_sav.h> // weapon.sav: the per-side profile class + kit pages
-#include <terrain/height_field.h>
-#include <terrain/surface_type_map.h>
+#include <terrain_query/height_field.h>
+#include <terrain_query/surface_type_map.h>
 #include <wac/wac_system.h>
 
 #include "wac/nova_wac_program.h"

@@ -6,7 +6,7 @@
 // field). Witness record: docs/terrain/terrain-re.md §"Runtime terrain
 // queries (ENG-3 B0)".
 
-#include "terrain/terrain_raycast.h"
+#include "terrain_query/terrain_raycast.h"
 
 #include <cstdio>
 

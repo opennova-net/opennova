@@ -19,7 +19,7 @@ Consolidated 2026-06-10 from the scratch notes `ptl_format.md`, `ida_particle_wi
 `particle_visual_parity.md`, and `ptl_corpus_catalog.md` (RE passes 2026-04-27/28).
 
 Binary: `Jointops.exe` (retail JO:CA), imagebase `0x400000`; all addresses absolute in that
-image. Reimpl: `engine/formats/ptl` (the portable model / parser / writer / tables) +
+image. Reimpl: `engine/formats/particle` (the portable model / parser / writer / tables) +
 `engine/runtime/particle` (the emitter/effect-scene simulator; ADR 0030 split, shared
 `particle/` include prefix with disjoint header sets), `godot/src/particle`
 (GDExtension wrappers), `godot/modtools/particle` (ONED workspace).
@@ -408,7 +408,7 @@ one trailing space — replicated exactly so writer output matches engine layout
   23 `SIGNEDROTATIONS` (pins the random `±1` sign on rotation rates AND the box-shape
   dominant axis `[orig: @ 0x5e790f/0x5e7832]`), 24 `ONEFRAME`, 25 `BURSTDISTRIBUTE`,
   26 `AMBIENTCOLOR`, 27 `BELOWH20`, 28 `ABOVEH20`. Mirrored 1:1 in
-  `engine/formats/ptl/include/particle/particle.h::particle_flag` (which was already correct —
+  `engine/formats/particle/include/particle/particle.h::particle_flag` (which was already correct —
   cross-witnessed from ParticleEdit_v1_1.exe `@ 0x5ba500`; this dump confirms the JO table).
 - **`move` table @ `0x848800`** — 5 bits, with a memory-order/bitmask reorder verified live from
   raw bytes at `0x848A10`/`0x848B18`/`0x848C20`: ORBIT sits at memory pos 4 with mask `0x04`,
@@ -423,7 +423,7 @@ ported without byte-layout claims; **pending** = not yet decompiled.
 
 | Original | Addr (size) | Behavior witnessed | Reimpl | Verdict |
 | --- | --- | --- | --- | --- |
-| `CEffectWorld_ParseSectionCallback` | `0x5ecb40` (0x101) | references all 4 section strings; `_stricmp` branches tag → per-section parser | `engine/formats/ptl/src/parser.cpp` folds all four section tokens before one switch | match (witness; mixed-case contract) |
+| `CEffectWorld_ParseSectionCallback` | `0x5ecb40` (0x101) | references all 4 section strings; `_stricmp` branches tag → per-section parser | `engine/formats/particle/src/parser.cpp` folds all four section tokens before one switch | match (witness; mixed-case contract) |
 | `CEffectTableDef_ParseCallback` | `0x5e4010` (0x1b1) | alternate `[tabledef_edithandles]` path; likely editor-only, not on the runtime load path | — | pending |
 | `CParticleDef_ParseProperties` | `0x5ea320` (0x2525) | `_stricmp` dispatch on ~80 keys; one trailing `reverse`/`inverse` token; edithandles sentinel @ `0x5ea346`; `gN_colorM` remap bug (§1.11) | `parser.cpp::apply_particle_key`; known keys folded, unknown spelling retained | match except the documented dual-modifier superset (D-PTL-20) |
 | `CParticleDef_ParseFromConfigMap` | `0x5ed210` (0x1da5) | hydrates ~80 named keys → `CParticleEffectDef` (§2.1) | drives the `ParticleDef` field set | match (witness) |
@@ -485,7 +485,7 @@ damping, force vec); our struct does not mirror byte layout.
 
 | Wrapper | Engine analogue | Notes |
 | --- | --- | --- |
-| `godot/src/particle/nova_particle_file.{h,cpp}` | file-scope `CParticleSystemDef_*` | top-level Resource owning the parsed `ParticleFile`; load/save route through `engine/formats/ptl` |
+| `godot/src/particle/nova_particle_file.{h,cpp}` | file-scope `CParticleSystemDef_*` | top-level Resource owning the parsed `ParticleFile`; load/save route through `engine/formats/particle` |
 | `nova_particle_def.{h,cpp}` | `CParticleEffectDef` (§2.1) | ~80 fields via inspector groups; `flags`/`move` stored as both raw string and u32 bitfield (engine has both) |
 | `nova_particle_graphic_layer.{h,cpp}` | per-graphic 788 B block (§2.2) | inspector enum exposes the 8 blend modes |
 | `nova_particle_curve_ref.{h,cpp}` | curve reference | name + `reverse` (bit 0x02) + `inverse` (bit 0x01) |

@@ -27,7 +27,7 @@
 #define OPENNOVA_ARMRY_FIXTURE ""
 #endif
 
-#include "terrain/height_field.h"
+#include "terrain_query/height_field.h"
 #include "threedi/threedi_3di3.h"
 #include "world/collision.h"
 #include "world/occlusion.h"

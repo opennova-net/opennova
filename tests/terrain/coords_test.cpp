@@ -11,7 +11,7 @@
 //      of & 0xF wrap), clampi(sector_id, 0, 4), and clampf(local, 0, 512-0.001).
 //      These are exercised with hand-derived golden values.
 
-#include "terrain/coords.h"
+#include "terrain_query/coords.h"
 
 #include <cmath>
 #include <cstdio>

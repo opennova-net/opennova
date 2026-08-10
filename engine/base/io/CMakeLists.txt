@@ -5,5 +5,5 @@
 add_library(opennova_io INTERFACE)
 
 target_include_directories(opennova_io
-    INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include
+    INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/..
 )

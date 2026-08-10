@@ -14,7 +14,7 @@
 #include <cstring>
 #include <vector>
 
-#include "terrain/height_field.h"
+#include "terrain_query/height_field.h"
 #include "world/collision.h"
 #include "world/occlusion.h"
 #include "world/world.h"
