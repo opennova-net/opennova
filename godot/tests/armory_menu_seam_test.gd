@@ -247,7 +247,7 @@ func test_class_change_refilters_slots() -> void:
 	var companion := ArmoryMenuCompanion.new()
 	companion.set_weapon_database(_load_weapons())
 	companion.set_player_class(8)
-	# The flip is MP-only in the original; enable it like an in-session host does
+	# The flip is MP-only in the original; enable it the way an MP session does
 	# [orig: @0x567370 enables PLAYER_CLASS only in-session].
 	companion.set_class_selection_enabled(true)
 	var driver := _make_weapon_driver()
