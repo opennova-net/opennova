@@ -324,6 +324,21 @@ int MenuFrame::process_mouse(const Vector2 &p_position, bool p_button_down) {
 					p_button_down, scale.x, scale.y);
 	state_.cursor_x = p_position.x;
 	state_.cursor_y = p_position.y;
+	// Activation edges: press lands on the button-down edge over the claim;
+	// a click is the release edge while the SAME widget still owns the claim
+	// (moving off the widget before release cancels — the standard control
+	// contract the Control-tree buttons implemented).
+	if (p_button_down && !mouse_button_down_ && claim.hovered >= 0) {
+		press_claim_ = claim.hovered;
+		emit_signal("widget_pressed", claim.hovered);
+	} else if (!p_button_down && mouse_button_down_) {
+		if (press_claim_ >= 0 && press_claim_ == claim.hovered) {
+			emit_signal("widget_clicked", press_claim_);
+		}
+		press_claim_ = -1;
+	}
+	mouse_button_down_ = p_button_down;
+	mouse_claim_ = claim.hovered;
 	queue_redraw();
 	return claim.hovered;
 }
@@ -508,6 +523,10 @@ void MenuFrame::_bind_methods() {
 			&MenuFrame::process_mouse);
 	ClassDB::bind_method(D_METHOD("widget_index", "name"),
 			&MenuFrame::widget_index);
+	ADD_SIGNAL(MethodInfo("widget_pressed",
+			PropertyInfo(Variant::INT, "index")));
+	ADD_SIGNAL(MethodInfo("widget_clicked",
+			PropertyInfo(Variant::INT, "index")));
 	ClassDB::bind_method(D_METHOD("set_cursor_state", "visible", "position"),
 			&MenuFrame::set_cursor_state);
 	ClassDB::bind_method(D_METHOD("get_draw_list_stats"),

@@ -78,6 +78,11 @@ public:
 	// widget NAME; -1 = absent). Valid after configure().
 	int widget_index(const String &p_name) const;
 
+	// Activation edges, emitted by process_mouse: "widget_pressed(index)" on
+	// the button-down edge over a claimed widget; "widget_clicked(index)" on
+	// the release edge while the SAME widget still owns the claim (the
+	// standard control-activation contract the Control-tree buttons had).
+
 	// Debug/test accessor: compile at the current size and report counts.
 	Dictionary get_draw_list_stats();
 
@@ -107,6 +112,9 @@ private:
 	Vector2 design_scale_() const;
 
 	Ref<MnuDocument> document_;
+	int mouse_claim_ = -1;      // last pump claim (activation edge tracking)
+	int press_claim_ = -1;      // widget owning the current press, -1 = none
+	bool mouse_button_down_ = false;
 	Ref<ResourceRoot> root_;
 	bool configured_ = false;
 	opennova::menu::MenuFrameCompiler compiler_;
