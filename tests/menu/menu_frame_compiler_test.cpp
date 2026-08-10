@@ -592,6 +592,117 @@ void test_mouse_pump(const fnt_font_t *font) {
 	CHECK(claim.hovered == 1, "the hit test runs raw mouse against scaled rects");
 }
 
+// The table interior [orig: CUITable_Render @ 0x6411d0]: header labels, the
+// divider in the >16px headroom band (0xFF7F7F7F), seeded data rows from the
+// scroll window, clipped to the rect.
+void test_table_interior(const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>TBL</NAME>
+  <WINDOW type="window" name="MAIN">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <FONT><NAME>t.fnt</NAME><DEFAULT_FG>FFFFFF</DEFAULT_FG></FONT>
+    <WINDOW type="table" name="GRID">
+      <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>400</RIGHT><BOTTOM>100</BOTTOM></POSITION>
+      <COLUMN count="2">
+        <HEADER column="0" width="200" justify="LEFT">ACTION</HEADER>
+        <HEADER column="1" width="180" justify="LEFT">KEY</HEADER>
+      </COLUMN>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	c.configure(doc.first_screen(), font);
+	MenuFrameState state;
+	MenuWidgetState grid;
+	grid.index = 1;
+	grid.table_rows = {{"FIRE", "MOUSE1"}, {"JUMP", "SPACE"}};
+	state.widgets.push_back(grid);
+	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
+	CHECK(!dl.glyphs.empty(), "the table emits header + row glyph quads");
+	bool divider = false;
+	for (const auto &l : dl.lines) {
+		if (l.color == 0xFF7F7F7Fu && l.y0 == l.y1) {
+			divider = true;
+		}
+	}
+	CHECK(divider, "each headroom band draws the 0xFF7F7F7F divider segment");
+	// Second column starts after width 200: some glyph must anchor at x>=200.
+	bool second_col = false;
+	for (const auto &g : dl.glyphs) {
+		if (g.x_top_left >= 200.0f) {
+			second_col = true;
+		}
+	}
+	CHECK(second_col, "the second column lays out past the first's width");
+	// Scrolling to row 1 drops row 0's cells ("FIRE" disappears).
+	const size_t full_glyphs = dl.glyphs.size();
+	state.widgets[0].scroll_row = 1;
+	const MenuDrawList &dl2 = c.compile(state, 1.0f, 1.0f);
+	CHECK(dl2.glyphs.size() < full_glyphs,
+			"the scroll window drops rows above first-visible");
+}
+
+// The marquee credits roll [orig: render_scrolling_credits @ 0x65ca00]:
+// seeded lines draw centered, the roll advances with time_ms, and the whole
+// roll resets after the last line passes the top.
+void test_marquee_roll(const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>MRQ</NAME>
+  <WINDOW type="window" name="MAIN">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <FONT><NAME>t.fnt</NAME><DEFAULT_FG>FFFFFF</DEFAULT_FG></FONT>
+    <WINDOW type="marquee" name="ROLL">
+      <POSITION><LEFT>100</LEFT><TOP>100</TOP><RIGHT>700</RIGHT><BOTTOM>300</BOTTOM></POSITION>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	c.configure(doc.first_screen(), font);
+	MenuFrameState state;
+	MenuWidgetState roll;
+	roll.index = 1;
+	roll.marquee_lines = {"CREDITS", "", "OPENNOVA"};
+	state.widgets.push_back(roll);
+	// The roll enters from the BOTTOM: nothing draws at t=0.
+	state.time_ms = 0;
+	const MenuDrawList &dl0 = c.compile(state, 1.0f, 1.0f);
+	CHECK(dl0.glyphs.empty(), "the roll starts below the rect (enters from the bottom)");
+	// After the clock advances, the first line has scrolled into view.
+	state.time_ms = 3000;
+	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
+	float first_y = -1.0f;
+	for (const auto &g : dl.glyphs) {
+		if (first_y < 0.0f || g.y_top < first_y) {
+			first_y = g.y_top;
+		}
+	}
+	CHECK(first_y >= 0.0f, "seeded credits lines draw");
+	const size_t early_glyphs = dl.glyphs.size();
+	(void)early_glyphs;
+	// Further advance WITHIN one roll cycle (the whole-roll reset fires
+	// once the offset exceeds the 3-line roll height): the roll scrolls UP.
+	state.time_ms = 4400;
+	const MenuDrawList &dl2 = c.compile(state, 1.0f, 1.0f);
+	float second_y = 1.0e9f;
+	for (const auto &g : dl2.glyphs) {
+		if (g.y_top < second_y) {
+			second_y = g.y_top;
+		}
+	}
+	CHECK(!dl2.glyphs.empty() && second_y < first_y,
+			"the roll advances upward with time_ms");
+	// A reset restarts the roll below the rect: nothing draws again.
+	state.widgets[0].marquee_reset = true;
+	const MenuDrawList &dl3 = c.compile(state, 1.0f, 1.0f);
+	CHECK(dl3.glyphs.empty(), "marquee_reset restarts the roll from the bottom");
+}
+
 } // namespace
 
 int main() {
@@ -603,6 +714,8 @@ int main() {
 	test_edit_caret(&font);
 	test_list_rows_and_item_cell(&font);
 	test_mouse_pump(&font);
+	test_table_interior(&font);
+	test_marquee_roll(&font);
 	fnt_free(&font);
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);

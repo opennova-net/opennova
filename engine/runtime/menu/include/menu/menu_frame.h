@@ -111,6 +111,17 @@ struct MenuWidgetState {
 	int32_t hover_item = -1;    // list hover row (row style 2)
 	int32_t scroll_row = 0;     // list first visible row
 	bool popup_open = false;    // combo: draw the LIST_BOX popup
+	// TABLE data rows (runtime content the embedder seeds — the Control-tree
+	// path seeded these from the shell): one vector of cell strings per row,
+	// in column order [orig: the 40-byte row records, CUITable_Render
+	// @ 0x6411d0]. scroll_row above is the first visible row.
+	std::vector<std::vector<std::string>> table_rows;
+	// MARQUEE nodes (runtime content from the widget's datasource file):
+	// text lines in roll order; empty string = a blank spacer line
+	// [orig: render_scrolling_credits @ 0x65ca00 walks the node list].
+	std::vector<std::string> marquee_lines;
+	// Restart the roll from the initial layout on the next compile.
+	bool marquee_reset = false;
 };
 
 struct MenuFrameState {
@@ -218,6 +229,15 @@ private:
 		int start = 0;
 		int end = 0;
 	};
+	// Per-marquee roll state (compiler runtime state, like edit_scroll_):
+	// the current scroll offset in design pixels and the last time_ms sample
+	// [orig: node y -= rate per frame; whole-roll reset when the last node
+	// passes the top — render_scrolling_credits @ 0x65ca00].
+	struct MarqueeScroll {
+		double offset = 0.0;
+		uint32_t last_ms = 0;
+		bool valid = false;
+	};
 
 	// configure-time build
 	int build_node(const mnu::Window &w, int parent);
@@ -284,6 +304,12 @@ private:
 			const WalkScale &s, const MenuWidgetState *ws);
 	void emit_spin_arrows(const WidgetNode &node, const mnu::RectEdges &rect,
 			const WalkScale &s);
+	void emit_table(int index, const WidgetNode &node,
+			const mnu::RectEdges &rect, const WalkScale &s, int visual,
+			const MenuWidgetState *ws);
+	void emit_marquee(int index, const WidgetNode &node,
+			const mnu::RectEdges &rect, const WalkScale &s,
+			const MenuFrameState &frame, const MenuWidgetState *ws);
 	void emit_cursor(const MenuFrameState &state);
 
 	const mnu::Screen *screen_ = nullptr;
@@ -298,6 +324,7 @@ private:
 	std::vector<WidgetNode> nodes_;
 	int32_t screen_cursor_ = kMenuTexNone;
 	std::map<int, EditScroll> edit_scroll_;
+	std::map<int, MarqueeScroll> marquee_scroll_;
 	MenuDrawList draw_list_;
 };
 

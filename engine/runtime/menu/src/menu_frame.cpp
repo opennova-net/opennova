@@ -1311,8 +1311,7 @@ int MenuFrameCompiler::walk_widget(int index, int origin_x, int origin_y,
 		case mnu::WindowType::Static:
 		case mnu::WindowType::Label:
 		case mnu::WindowType::Button:
-		case mnu::WindowType::Goto:
-		case mnu::WindowType::Marquee: {
+		case mnu::WindowType::Goto: {
 			// [orig: CStaticWnd_Render @ 0x657b10 — frame -> appearance ->
 			//  text -> children]
 			if (w.draw_frame) {
@@ -1406,9 +1405,42 @@ int MenuFrameCompiler::walk_widget(int index, int origin_x, int origin_y,
 			}
 			break;
 		}
+		case mnu::WindowType::Scroll: {
+			// [orig: CScrollWnd_Render @ 0x64c5c0 — frame -> appearance ->
+			//  children; no specialised interior (the arrows/thumb are its
+			//  child BUTTONs)]
+			if (w.draw_frame) {
+				emit_frame(node, rect, s);
+			}
+			emit_appearance(node, rect, s,
+					appearance_state_with_fallback(node, pump));
+			break;
+		}
+		case mnu::WindowType::Table: {
+			// [orig: CUITable_Render @ 0x6411d0 — frame -> appearance ->
+			//  header + rule dividers -> data rows -> children]
+			if (w.draw_frame) {
+				emit_frame(node, rect, s);
+			}
+			emit_appearance(node, rect, s,
+					appearance_state_with_fallback(node, pump));
+			emit_table(index, node, rect, s, pump, ws);
+			break;
+		}
+		case mnu::WindowType::Marquee: {
+			// [orig: CMarqueeWnd_Render @ 0x65cf90 — frame -> appearance ->
+			//  the credits scroller -> children]
+			if (w.draw_frame) {
+				emit_frame(node, rect, s);
+			}
+			emit_appearance(node, rect, s,
+					appearance_state_with_fallback(node, pump));
+			emit_marquee(index, node, rect, s, state, ws);
+			break;
+		}
 		default: {
 			// [orig: CUIElement_Draw @ 0x64a8a0 — appearance BEFORE frame
-			//  for generic containers; TABLE/SCROLL/... interiors deferred
+			//  for generic containers; the RADIOEDIT interior stays deferred
 			//  (D-MNU-13)]
 			emit_appearance(node, rect, s,
 					appearance_state_with_fallback(node, pump));
@@ -1424,6 +1456,155 @@ int MenuFrameCompiler::walk_widget(int index, int origin_x, int origin_y,
 		next = walk_widget(next, rect.left, rect.top, state, s);
 	}
 	return next;
+}
+
+// The witnessed table interior [orig: CUITable_Render @ 0x6411d0; the full
+// walk: docs/mnu/menu-re.md "Table render"]. The compiled path draws the
+// header labels, the character-profiled taper dividers, and the seeded data
+// rows as text cells. Image/substitution/custom cells and per-row appearance
+// records are deferred with the Control-tree renderer (D-MNU-13 follow-up);
+// no shipped .mnu drives them through the compiled path yet.
+void MenuFrameCompiler::emit_table(int index, const WidgetNode &node,
+		const mnu::RectEdges &rect, const WalkScale &s, int visual,
+		const MenuWidgetState *ws) {
+	(void)index;
+	const mnu::TableData &table = node.window->table_data;
+	const std::vector<mnu::TableHeader> &headers = table.column.headers;
+	if (headers.empty()) {
+		return;
+	}
+	// The "W" measure supplies the default row/header heights [orig: the
+	// font_cache_measure_text_default("W") probe; authored min_item_height
+	// wins when present].
+	int em_w = 0;
+	int em_h = 0;
+	measure_text(node, "W", &em_w, &em_h);
+	int row_h = em_h;
+	if (table.has_min_item_height && table.min_item_height > 0) {
+		row_h = table.min_item_height;
+	}
+	const int header_h = em_h;
+	const int gap = table.column.has_spacing ? table.column.spacing : 0;
+	const uint32_t color = node.colors[static_cast<size_t>(
+			visual >= 0 && visual < 4 ? visual : 0)];
+	// Header labels + the taper rule divider under each column with >16px of
+	// headroom [orig: the header walk; divider color 0xFF7F7F7F]. The rule
+	// PROFILE string is not authored in the XML model (the runtime sets it),
+	// so the compiled divider draws the plain full-taper line row.
+	int x = rect.left;
+	for (const mnu::TableHeader &h : headers) {
+		const int width = h.has_width ? h.width : 0;
+		if (width <= 0) {
+			continue;
+		}
+		const std::string label = resolve_text_value(h.type, h.text);
+		int text_w = 0;
+		int text_h = 0;
+		measure_text(node, label, &text_w, &text_h);
+		int tx = x;
+		if (h.justify == "CENTER") {
+			tx = x + (width - text_w) / 2;
+		} else if (h.justify == "RIGHT") {
+			tx = x + width - text_w;
+		}
+		emit_glyph_run(node, label, tx, rect.top, s, color, -1);
+		if (width - text_w > 16) {
+			// One divider segment centered in the headroom band [orig:
+			// draw_rule_line @ 0x6410a0 — 0xFF7F7F7F].
+			const int seg_left = x + text_w + 1;
+			const int seg_right = x + width - 1;
+			const int seg_y = rect.top + header_h / 2;
+			draw_list_.lines.push_back(MenuLine{emit_x(seg_left, s.x),
+					emit_x(seg_y, s.y), emit_x(seg_right, s.x),
+					emit_x(seg_y, s.y), 0xFF7F7F7Fu});
+		}
+		x += width + gap;
+	}
+	if (ws == nullptr || ws->table_rows.empty()) {
+		return;
+	}
+	// Data rows: the scroll window is first-visible + as many rows as fit
+	// below the header [orig: the visible-row walk].
+	const int first = ws->scroll_row > 0 ? ws->scroll_row : 0;
+	int y = rect.top + header_h;
+	for (size_t r = static_cast<size_t>(first); r < ws->table_rows.size();
+			++r) {
+		if (y + row_h > rect.bottom) {
+			break;
+		}
+		const std::vector<std::string> &row = ws->table_rows[r];
+		x = rect.left;
+		for (size_t c = 0; c < headers.size(); ++c) {
+			const mnu::TableHeader &h = headers[c];
+			const int width = h.has_width ? h.width : 0;
+			if (width <= 0) {
+				continue;
+			}
+			if (c < row.size() && !row[c].empty()) {
+				emit_glyph_run(node, row[c], x, y, s, color, -1);
+			}
+			x += width + gap;
+		}
+		y += row_h;
+	}
+}
+
+// The witnessed credits scroller [orig: CMarqueeWnd_Render @ 0x65cf90 ->
+// render_scrolling_credits @ 0x65ca00; docs/mnu/menu-re.md "Marquee credits
+// scroller"]: per-frame scroll off the widget's rate with a whole-roll reset
+// when the last line passes the top. The compiled path drives text lines
+// (the shipped credits datasource is text); image nodes and the 50px edge
+// fade band ride the D-MNU-13 follow-up with the Control-tree renderer.
+void MenuFrameCompiler::emit_marquee(int index, const WidgetNode &node,
+		const mnu::RectEdges &rect, const WalkScale &s,
+		const MenuFrameState &frame, const MenuWidgetState *ws) {
+	if (ws == nullptr || ws->marquee_lines.empty()) {
+		// No seeded roll: the static-family label draw keeps the authored
+		// STRING visible (the pre-cutover behavior).
+		emit_widget_text(node, rect, s, kStateDefault, ws, -1);
+		return;
+	}
+	int em_w = 0;
+	int line_h = 0;
+	measure_text(node, "W", &em_w, &line_h);
+	if (line_h <= 0) {
+		line_h = 12;
+	}
+	MarqueeScroll &roll = marquee_scroll_[index];
+	if (!roll.valid || ws->marquee_reset) {
+		roll.offset = 0.0;
+		roll.last_ms = frame.time_ms;
+		roll.valid = true;
+	}
+	// The scroll rate in design pixels/second; the original stores a
+	// per-frame rate at this+0x2DC — one line every ~1.5 s at the menu tick
+	// maps to line_h / 1.5 px/s.
+	const double rate_px_per_ms =
+			static_cast<double>(line_h) / 1500.0;
+	const uint32_t now = frame.time_ms;
+	if (now > roll.last_ms) {
+		roll.offset += rate_px_per_ms * static_cast<double>(now - roll.last_ms);
+	}
+	roll.last_ms = now;
+	const int total_h =
+			static_cast<int>(ws->marquee_lines.size()) * line_h;
+	// Whole-roll reset when the LAST line passes the top.
+	if (roll.offset > static_cast<double>(total_h)) {
+		roll.offset = 0.0;
+	}
+	const uint32_t color = node.colors[0];
+	int y = rect.bottom - static_cast<int>(roll.offset);
+	for (const std::string &line : ws->marquee_lines) {
+		if (y + line_h > rect.top && y < rect.bottom && !line.empty()) {
+			int text_w = 0;
+			int text_h = 0;
+			measure_text(node, line, &text_w, &text_h);
+			const int tx =
+					rect.left + (rect.right - rect.left - text_w) / 2;
+			emit_glyph_run(node, line, tx, y, s, color, -1);
+		}
+		y += line_h;
+	}
 }
 
 const MenuDrawList &MenuFrameCompiler::compile(const MenuFrameState &state,
