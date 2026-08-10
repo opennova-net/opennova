@@ -130,6 +130,7 @@ signal crosshair_style_changed(style: int)
 
 var _driver: MenuDriver
 var _frame: MenuFrame
+var _underlay: MenuVideoUnderlay
 var _audio: MenuAudio
 var _root: ResourceRoot
 var _text: RtxtStringFile
@@ -185,6 +186,10 @@ func setup(root: ResourceRoot) -> bool:
 	_enter_menu_music()
 	_in_game = false
 	_menu_stack.clear()
+	# Menu-mode enter (fresh boot AND return-from-game) recreates the
+	# backdrop slots [orig: Menu_InitShellResources @ 0x552500 calls
+	# UI_CreateMenuBinkVideos on both branches].
+	_refresh_underlay()
 	return open_menu(main_menu_file, "")
 
 
@@ -208,6 +213,16 @@ func _assemble_assets() -> void:
 		Strings.register_table("gameui", gameui)
 	_style = _load_style(_discover_name(menu_stylesheet_file, ".mns", ""))
 	_sound_profile = _load_sound_profile(_discover_name(menu_sound_profile_file, ".lwf", "menu"))
+
+	# The movie backdrop draws UNDER the compiled surface (child order): the
+	# authored custom appearances paint nothing and the movies show through
+	# [orig: Menu_RenderFrame @ 0x54b7c0 — Bink update + draw BEFORE the
+	# scene walk; slot policy engine-side in menu/menu_video.h].
+	_underlay = MenuVideoUnderlay.new()
+	_underlay.name = "MenuVideoUnderlay"
+	_underlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_underlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_underlay)
 
 	# The compiled surface: MenuFrame renders + pumps in the fixed 800x600
 	# design space, anamorphically scaled to its own size [orig:
@@ -239,6 +254,7 @@ func _assemble_assets() -> void:
 
 	# Connect once on the persistent driver (screens reconfigure under it;
 	# these aggregate signals survive).
+	_driver.screen_changed.connect(_on_screen_changed_for_underlay)
 	_driver.menu_requested.connect(_on_menu_requested)
 	_driver.quit_requested.connect(_on_quit_requested)
 	_driver.widget_value_changed.connect(_on_widget_value_changed)
@@ -309,6 +325,8 @@ func hide_menu() -> void:
 ## exits.
 func release_runtime_renderer_resources() -> void:
 	Input.set_custom_mouse_cursor(null, Input.CURSOR_ARROW)
+	if _underlay != null:
+		_underlay.stop()
 	if _frame != null:
 		# configure(null) wipes the retained texture/font sets.
 		_frame.configure(null, "", null, null, {})
@@ -319,7 +337,27 @@ func release_runtime_renderer_resources() -> void:
 func open_ingame_menu() -> bool:
 	_in_game = true
 	_menu_stack.clear()
+	# Menu movies never tick in-game [orig: BinkVideo_UpdateAllSlots
+	# @ 0x5676f0 has exactly one caller, Menu_RenderFrame].
+	if _underlay != null:
+		_underlay.stop()
 	return open_menu(ingame_menu_file, "")
+
+
+# (Re)create the backdrop movie slots from the live root + expansion. The
+# in-game overlay never shows them.
+func _refresh_underlay() -> void:
+	if _underlay == null:
+		return
+	if _in_game or _root == null:
+		_underlay.stop()
+		return
+	_underlay.set_source(_root.get_root_dir(), _current_expansion())
+
+
+func _on_screen_changed_for_underlay(screen_name: String) -> void:
+	if _underlay != null:
+		_underlay.set_screen(screen_name)
 
 
 # After each open, resolve the launch/quit controls and seed mission/mod lists.
@@ -502,6 +540,9 @@ func _apply_expansion(name: String) -> void:
 	NovaMusicService.set_var(MusicDirector.MENU_MUSIC_VAR_SLOT, active_music_var)
 	_refresh_dependent_content()
 	_update_mod_desc(name)
+	# The expansion's movie overrides take effect with the remount [orig:
+	# UI_CreateMenuBinkVideos @ 0x54b590 expansion preference].
+	_refresh_underlay()
 
 
 # After a mount change, re-fill anything seeded from the resource dir so the

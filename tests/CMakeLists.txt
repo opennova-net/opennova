@@ -834,6 +834,14 @@ target_link_libraries(menu_frame_compiler_test PRIVATE opennova_runtime)
 target_include_directories(menu_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME menu_frame_compiler COMMAND menu_frame_compiler_test)
 
+# The menu backdrop movie policy (engine/runtime/menu/menu_video): the
+# witnessed three-slot table, the STARTUP/strips draw gate, and the
+# expansion-first source resolution (docs/mnu/menu-re.md "The menu backdrop").
+add_executable(menu_video_test menu/menu_video_test.cpp)
+target_link_libraries(menu_video_test PRIVATE opennova_runtime)
+target_include_directories(menu_video_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME menu_video COMMAND menu_video_test)
+
 
 # parametric_parity is a long byte-identical fixture parity run and remains
 # disabled until its CI stability/performance cost is addressed.

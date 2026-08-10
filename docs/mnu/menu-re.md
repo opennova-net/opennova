@@ -210,6 +210,11 @@ white or half-bright gray), OUTLINE (`CUIElement_DrawOutlineRect @ 0x647fc0` —
 four 1px lines, top edge to right-1, gated on height), CUSTOM
 (`CUIElement_DispatchCustomDrawEvent @ 0x647f10` — event 1 with the scaled
 rect through the vtable+28 sink; shell-owned, the compiler emits nothing).
+Note the event ids: the appearance CUSTOM pass fires event **1**; the table
+custom CELL fires **0x8000002** (both `push 0x8000002` sites live inside
+`CUITable_Render @ 0x6411d0`) — same vtable+28 sink, different ids, routed to
+handlers purely by the callback class mask (`1 << HIBYTE(eventId)`: event 1 →
+bit0, table cells → bit8; see "The custom-draw appearance hook" below).
 
 **Visual state vocabulary** — the same indices everywhere: **0 = DEFAULT,
 1 = DISABLED, 2 = MOUSEOVER, 3 = SELECTED/pressed**. Witnessed three ways:
@@ -368,6 +373,90 @@ is the ONE menu path (the MnuMenu Control tree is deleted). Pinned by
   rides `scroll_row` shell-side meanwhile); spin arrows compile with their
   default-state art (their independent hover states are separate
   child-widget state the compiled path does not yet model).
+
+## The menu backdrop (Bink underlay) `[orig: UI_CreateMenuBinkVideos @ 0x54b590; BinkVideo_UpdateAllSlots @ 0x5676f0]` (grilled 2026-08-10)
+
+The animated main-menu backdrop is NOT the custom appearance: main.mnu's MAIN
+window (`<APPEARANCE type="custom">`, rect (0,75)-(800,525)) and the
+LOGO_SPLASH_HDR/FTR windows register no handler — their custom events fire
+into the void, the region stays unpainted, and three looping Bink movies
+drawn BEFORE the widget scene walk show through (the shipped fixtures comment
+them `<!-- bink panels begin-->`). Mechanism, all witnessed:
+
+- **Slots** (`g_bink_slots @ 0x25E5758`, 72-byte stride, max 4; handles
+  `g_bink_slot_main/header/footer @ 0x252DD9C/98/94`): created by
+  `UI_CreateMenuBinkVideos @ 0x54b590` from `Menu_InitShellResources
+  @ 0x552500` (fresh boot AND return-from-game, BEFORE the first .mnu parse)
+  and from `apply_video_mode_change @ 0x55a590` (recreate at the new scale):
+  `main.bik` (0,75)-(800,525), `header.bik` (0,0)-(800,75), `footer.bik`
+  (0,525)-(800,600), loop=1 each; `expansion\<exp>\<file>` preferred when
+  `File_ExistsOnDisk @ 0x562d80`; a failed `BinkOpen` leaves the slot empty
+  silently. Design rects scale device-ward via
+  `CUIScene_ScaleRectDesignToDevice @ 0x63b210` (the same anamorphic 800x600
+  pair as every widget, int-truncated).
+- **Per menu frame** (`Menu_RenderFrame @ 0x54b7c0`: clear, BeginScene,
+  `BinkVideo_UpdateAllSlots @ 0x5676f0`, scene walk, Present — the update's
+  ONLY caller, so menu movies never tick in-game): per open slot, `BinkWait`
+  paces on the movie's own clock (the quad still re-draws every frame); when
+  a frame is due, `BinkVideoSlot_RenderFrameToTexture @ 0x567540`
+  (`BinkDoFrame` → LockRect → `BinkCopyToBufferRect`) then
+  `BinkVideoSlot_Draw @ 0x5674d0` — shader apply, SetTexture, ONE stretched
+  quad (`fill_fullscreen_quad_vertices @ 0x678db0`); loop = the
+  `FrameNum = 0` poke when the last frame passes; texture is movie-native
+  size (pow2-padded with UV crop when the device requires).
+- **Per-screen visibility** (draw-only gate — `BinkVideoSlot_Draw` checks
+  the +0x44 visible flag; a hidden movie keeps decoding): STARTUP shows the
+  center movie alone (`UI_OnStartupScreenActivate @ 0x5557f0`); every other
+  shipped screen enables the header+footer strips and disables main
+  (`UI_EnableHeaderFooterBinkStrips @ 0x556b50` + the per-screen inlined
+  trios). Teardown at menu exit: `Menu_TeardownShellAndCloseBinkVideos
+  @ 0x54e430` / `BinkVideo_CloseMenuBackgrounds @ 0x54b780`.
+- **Audio**: `BinkSetSoundSystem(BinkOpenDirectSound)` at slot create — a
+  movie's audio track plays as authored, independent of the menu music
+  volume (no BinkSetVolume/Pause/Goto in the import surface).
+- The intro path is separate: `Game_PlayIntroVideos @ 0x5637a0` plays
+  `prolog.BIK`/`intro.BIK` through a BLOCKING player, not the slot machinery.
+
+**Reimpl** (2026-08-10): policy engine-side in `engine/runtime/menu/
+menu_video.h` (slot table, STARTUP/strips gate, expansion-first resolution;
+`menu_video` ctest), the device leg is `MenuVideoUnderlay` (`godot/src/mnu`)
+drawing under the MenuFrame surface, wired by the menu shell at
+setup/expansion-change/in-game boundaries. Godot has no Bink decoder, so
+playback rides a converted `.ogv` sibling per movie (`onimport menu-movies`);
+a selected movie without a sibling stays empty exactly like retail's
+missing-file skip, counted via `get_unconverted_count()`.
+
+## The custom-draw appearance hook (event 1) `[orig: CUIElement_DispatchCustomDrawEvent @ 0x647f10]` (grilled 2026-08-10)
+
+The 4th appearance pass builds `{widget, name, device L,T,R,B}` (ancestor
+offsets accumulated `@ 0x6465e0`, element scale applied, edges int-truncated)
+and calls `vtable+28(this, 1, &payload)`. The default sink
+(`CWnd_EmitEventToNamedHandlerAndCallbacks @ 0x646970`) forwards to the
+authored-ACTION handler (ignores event 1) then walks the widget-local
+callback chain (`this+272`, nodes `{classMask, fn, ctx}`, invoked when
+`classMask & (1 << HIBYTE(eventType))`). The shell binds handlers by name:
+`CUIScene_RegisterControlCallback @ 0x63c060` rows `(screen, control, mask,
+fn, ctx)` are attached to widgets by `CUIScene_BindControlCallbacks
+@ 0x63af80` after every content parse (null control = whole screen; null
+screen+control = the scene-level node hosting `UI_DispatchScreenEvent
+@ 0x54e6a0`). A handler draws immediately, in walk order — over that
+widget's other passes, under its children.
+
+Complete event-1 consumer roster (registrar census):
+
+| Screen / control | Handler | Draws |
+| --- | --- | --- |
+| CMAP / MAP, ORDERS_MAP | `CMapWindow_HandleEvent @ 0x5497f0` | the command map view (mouse-class events pan/zoom/place) |
+| CMAP / CHAT_MSGS | `CMap_OnChatMsgsCustomDraw @ 0x5482d0` | `HUD_DrawConsoleMessages()` in the widget slot |
+| DEATH / MAP | `command_map_overlay_input_handler @ 0x554310` | the deploy-screen map view (D-HUD-19) |
+| ITEM_DATABASE / ITEM_DISPLAY | `UI_RenderEntityModelPreview @ 0x552a80` | 3D item model preview |
+| VEHICLE / ITEM_DISPLAY | `render_avatar_preview_3d @ 0x563c10` | 3D vehicle preview |
+| PLAYER_INFO / PLAYER_PREVIEW | `PlayerInfo_RenderPlayerPreview3D @ 0x5609c0` | the avatar 3D preview (zoom/spin from `update_player_preview_animation @ 0x55dba0`) |
+
+The menu screens (STARTUP MAIN, LOGO_SPLASH_HDR/FTR, OPTIONS CREDITS) have NO
+registration — verified by extracting every registrar's rows. jo_options
+CREDITS authors `<APPEARANCE type="custom">7f3f0000</APPEARANCE>`; nothing
+consumes the value (the credits scroller is the MARQUEE sibling).
 
 ## Table render `[orig: CUITable_Render @ 0x6411d0]`
 

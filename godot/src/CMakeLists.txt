@@ -125,6 +125,7 @@ add_library(${TARGET_NAME} SHARED
     mnu/mns_stylesheet.cpp
     mnu/nova_menu_frame.cpp
     mnu/nova_menu_audio.cpp
+    mnu/menu_video_underlay.cpp
     mnu/nova_controls_model.cpp
 )
 

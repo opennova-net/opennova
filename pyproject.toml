@@ -9,6 +9,12 @@ dependencies = [
     "PySide6>=6.5",
 ]
 
+[project.optional-dependencies]
+# `onimport menu-movies` (backdrop .bik -> .ogv) needs a bundled ffmpeg.
+video = [
+    "imageio-ffmpeg>=0.5",
+]
+
 [project.scripts]
 onimport = "apps.importer.__main__:main"
 

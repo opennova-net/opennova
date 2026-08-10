@@ -37,21 +37,7 @@ hardening, and project health. Divergences from the original engine belong in
       autonomous 2026-08-10 pass verified the compiled menu path on real
       retail assets — screenshot banked, retail menu bar/trim/text/music all
       live — and the full 00TRg world boot headless on the retail install):
-      (a) interactive menu navigation + armory/deploy screens on real
-      assets; (b) diagnose the SILENT native crash when the windowed game
-      boots
-      `--resource-dir <loose JOX> --loose-root --loose-mission 00TRg.bms`
-      (headless retail-install boot of the same mission is green; log ends
-      at the D3D12 banner, no script error — suspect the loose-mount
-      windowed path, not the P1 rewrites; the 2026-08-10 R3 spike run
-      narrowed it further: windowed + PFF root + `--loose-mission` boots
-      green, so the suspect is the `--loose-root` no-archives mount leg);
-      (c) the retail main-menu CENTER BACKDROP is the shell-owned
-      custom-draw appearance hook
-      (`<APPEARANCE type="custom">` -> the vtable+28 event) that NO path has
-      ever implemented (Control-tree era included) — witness what retail
-      draws there (likely the animated backdrop scene) and port it as a
-      device leg.
+      interactive menu navigation + armory/deploy screens on real assets.
       harness defect — the opennova-int MCP's single-role `onhook_host_lan`/
       `onhook_join_lan` pass role config via child env and never render `onhook.cfg`,
       so `generate_parity_manifest.ps1` rejects every RO/OO server cfg snapshot

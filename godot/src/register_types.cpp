@@ -87,6 +87,7 @@
 #include "mnu/mns_stylesheet.h"
 #include "mnu/nova_menu_frame.h"
 #include "mnu/nova_menu_audio.h"
+#include "mnu/menu_video_underlay.h"
 #include "mnu/nova_controls_model.h"
 
 using namespace godot;
@@ -180,6 +181,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(MnsStyleSheet);
 	GDREGISTER_CLASS(MenuFrame);
 	GDREGISTER_CLASS(MenuAudio);
+	GDREGISTER_CLASS(MenuVideoUnderlay);
 	GDREGISTER_CLASS(ControlsModel);
 	GDREGISTER_CLASS(NovaWorldClient);
 	GDREGISTER_CLASS(NovaWorldHost);
