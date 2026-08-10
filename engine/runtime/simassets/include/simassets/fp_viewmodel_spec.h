@@ -42,6 +42,8 @@ inline constexpr const char *kDefaultArmsModel = "armsG";
 // The no-definition BRING-UP fallback (ours, not retail): before any def
 // resolves, the AK set keeps the FP pipeline exercisable.
 inline constexpr const char *kBringupFallbackModel = "ak47_1st";
+// The matching weapon.def entry name the shell resolves until first equip.
+inline constexpr const char *kBringupFallbackWeapon = "WPN_AK47AUTO";
 // [orig: the Flags 0x80 emplaced test @ 0x4dedc7]
 inline constexpr uint32_t kWeaponFlagEmplaced = 0x80u;
 

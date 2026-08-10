@@ -390,6 +390,9 @@ void Simulation::_bind_methods() {
 			&Simulation::viewmodel_fallback_rot_bias_deg);
 	ClassDB::bind_static_method("Simulation", D_METHOD("viewmodel_pass_near_z"),
 			&Simulation::viewmodel_pass_near_z);
+	ClassDB::bind_static_method("Simulation",
+			D_METHOD("viewmodel_bringup_fallback_weapon"),
+			&Simulation::viewmodel_bringup_fallback_weapon);
 	ClassDB::bind_method(D_METHOD("get_weapon_profile_summary"),
 	                     &Simulation::get_weapon_profile_summary);
 	ClassDB::bind_method(D_METHOD("request_local_player_weapon_category", "category"),

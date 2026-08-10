@@ -1304,6 +1304,7 @@ public:
 	static Vector3 viewmodel_fallback_tpos_units();
 	static Vector3 viewmodel_fallback_rot_bias_deg();
 	static double viewmodel_pass_near_z();
+	static String viewmodel_bringup_fallback_weapon();
 	static Dictionary fp_viewmodel_spec(bool p_has_def, const String &p_gfx1,
 			const String &p_gfx1a, const String &p_animadm, int p_flags);
 	// Read-only view of the active profile record for the shell's status copy:

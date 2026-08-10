@@ -401,6 +401,10 @@ double Simulation::viewmodel_pass_near_z() {
 	return opennova::simassets::kViewmodelPassNearZ;
 }
 
+String Simulation::viewmodel_bringup_fallback_weapon() {
+	return String(opennova::simassets::kBringupFallbackWeapon);
+}
+
 Dictionary Simulation::fp_viewmodel_spec(bool p_has_def, const String &p_gfx1,
 		const String &p_gfx1a, const String &p_animadm, int p_flags) {
 	const opennova::simassets::FpViewmodelSpec spec =

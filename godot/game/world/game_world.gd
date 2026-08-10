@@ -1435,7 +1435,8 @@ func get_destruction_present_stats() -> RefCounted:
 ## person: in first person the body stays renderable on the reflection-only layer, because the
 ## witnessed water mirror re-renders the world scene, local body included
 ## [orig: Water_ReflectionPrerender @ 0x5c2780 -> render_main_scene @ 0x5c1240]. Null
-## when the resource root / item graphic is unavailable. 0x14B9 = player infantry [net-re §5.2b].
+## when the resource root / item graphic is unavailable. The player runtime type id is the
+## bound MissionObjectPlacer.PLAYER_RUNTIME_TYPE_ID [net-re §5.2b].
 ## The soldier's THIRD-PERSON gun. Built as a SIBLING of the avatar rather than a child:
 ## ObjectModel.rebuild() frees all of its children, so a weapon parented under the
 ## avatar would silently vanish whenever the body model rebuilds. It carries no skeleton
@@ -1458,8 +1459,9 @@ func build_local_player_avatar() -> Node3D:
 		return null
 	# _env wires the TOD-reactive lighting/fog stamp — without it the avatar
 	# freezes at the noon preview defaults (retail relights every entity per
-	# frame [orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0]).
-	return _placer.build_player_animated_model(0x14B9, self)
+	# frame; witness: placement_traits.h ledger).
+	return _placer.build_player_animated_model(
+			MissionObjectPlacer.PLAYER_RUNTIME_TYPE_ID, self)
 
 
 # Resolve the .3DI definitions that LocalPlayerPresenter would otherwise load only on
@@ -1512,7 +1514,8 @@ func _prewarm_loaded_model_challenge_definitions() -> void:
 				challenge_sim.resolve_item_traits(item_db)
 				challenge_sim.resolve_collision_instances(item_db)
 				challenge_sim.occlusion_init_mission()
-	var player_visual_item_id := int(_placer.resolve_player_visual_item_id(0x14B9))
+	var player_visual_item_id := int(_placer.resolve_player_visual_item_id(
+			MissionObjectPlacer.PLAYER_RUNTIME_TYPE_ID))
 	var avatar_graphic := String(_placer.graphic_for(player_visual_item_id))
 	if not avatar_graphic.is_empty():
 		_placer.object_data_for(avatar_graphic)
@@ -1520,14 +1523,14 @@ func _prewarm_loaded_model_challenge_definitions() -> void:
 	if _viewmodel_weapon_cleared:
 		return
 	var def := local_player_viewmodel_def()
-	var gun_name := def.gfx1 if def != null else "ak47_1st"
-	var arms_name := "armsG"
-	if def != null and not def.gfx1a.is_empty():
-		arms_name = def.gfx1a
-	var show_arms := def == null or (def.flags & WeaponDatabase.FLAG_EMPLACED) == 0
+	var spec: Dictionary = Simulation.fp_viewmodel_spec(def != null,
+			def.gfx1 if def != null else "", def.gfx1a if def != null else "",
+			def.animadm if def != null else "", def.flags if def != null else 0)
+	var gun_name := String(spec.get("gun", ""))
+	var arms_name := String(spec.get("arms", ""))
 	if not gun_name.is_empty():
 		_placer.object_data_for(gun_name)
-	if show_arms and not arms_name.is_empty():
+	if bool(spec.get("show_arms", true)) and not arms_name.is_empty():
 		_placer.object_data_for(arms_name)
 
 
@@ -1537,13 +1540,12 @@ func _prewarm_loaded_model_challenge_definitions() -> void:
 ## the weapon FP model + arms with shared bone matrices]. The models come from the mounted root's
 ## weapon.def — gfx1 (gun), gfx1a (arms; gfx1b alternate skin unused until team/skin selection),
 ## animadm (the shared animation set) [orig: WeaponDef_ParseProperty @0x54d730 rows] — for the
-## DEFAULT_VIEWMODEL_WEAPON entry until the player's equipped weapon resolves it per-weapon
+## bring-up fallback weapon entry until the player's equipped weapon resolves it per-weapon
 ## (NOVA_VM_WEAPON overrides the name for rig A/B checks). The witnessed JOX values stay as the
 ## no-def fallback. Camera sway / fire-kick / ADS [orig: Player_UpdateFirstPersonCamera @0x4dd380]
 ## are follow-ups. Null when the placer or both models fail to resolve.
-const DEFAULT_VIEWMODEL_WEAPON := "WPN_AK47AUTO"
 
-# The armory-equipped weapon name; overrides DEFAULT_VIEWMODEL_WEAPON/env once the
+# The armory-equipped weapon name; overrides the bring-up fallback/env once the
 # player accepts a loadout [orig: the equipped AdmDef drives the FP model pick,
 # Player_RenderFirstPersonViewModel @0x4ded60 via the mounted slot].
 var _viewmodel_weapon_override := ""
@@ -1791,7 +1793,7 @@ func set_local_player_weapon_tick_consumer(consumer: Callable) -> void:
 ## degrees) LocalPlayerPresenter consumes — decoded from WeaponDatabase's transport dict
 ## at this edge (ADR 0017). Null when the mounted root has no weapon.def or the weapon
 ## name is absent — callers keep their witnessed JOX AK-47 defaults then. The weapon is
-## DEFAULT_VIEWMODEL_WEAPON until equipped-weapon resolution lands; NOVA_VM_WEAPON
+## the bring-up fallback until equipped-weapon resolution lands; NOVA_VM_WEAPON
 ## overrides the name (debug: rig A/B against another SKU's def).
 func local_player_viewmodel_def() -> PlayerViewmodelDef:
 	if _viewmodel_weapon_cleared:
@@ -1805,7 +1807,7 @@ func local_player_viewmodel_def() -> PlayerViewmodelDef:
 	if weapon_name.is_empty():
 		weapon_name = OS.get_environment("NOVA_VM_WEAPON")
 	if weapon_name.is_empty():
-		weapon_name = DEFAULT_VIEWMODEL_WEAPON
+		weapon_name = Simulation.viewmodel_bringup_fallback_weapon()
 	var index: int = weapon_db.find_weapon(weapon_name)
 	if index < 0:
 		push_warning("GameWorld: weapon '%s' not in weapon.def — FP viewmodel keeps built-in defaults" % weapon_name)
