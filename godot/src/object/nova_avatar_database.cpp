@@ -4,6 +4,7 @@
 #include "util/nova_data_format.h"
 
 #include <avatars/avatars.h>
+#include <avatars/preview_animation.h>
 
 #include <godot_cpp/classes/file_access.hpp>
 
@@ -32,7 +33,49 @@ String dict_str(const Dictionary &d, const char *key) {
 
 } // namespace
 
+float AvatarDatabase::preview_zoom_damp_per_tick() {
+	return opennova::avatars::kPreviewZoomDampPerTick;
+}
+float AvatarDatabase::preview_zoom_in_scale() {
+	return opennova::avatars::kPreviewZoomInScale;
+}
+float AvatarDatabase::preview_idle_speed_deg_per_sec() {
+	return opennova::avatars::kPreviewIdleSpeedDegPerSec;
+}
+float AvatarDatabase::preview_sway_freq_rad_per_sec() {
+	return opennova::avatars::kPreviewSwayFreqRadPerSec;
+}
+float AvatarDatabase::preview_sway_amp_deg() {
+	return opennova::avatars::kPreviewSwayAmpDeg;
+}
+String AvatarDatabase::preview_skeleton_bad() {
+	return String(opennova::avatars::kPreviewSkeletonBad);
+}
+String AvatarDatabase::preview_idle_bad() {
+	return String(opennova::avatars::kPreviewIdleBad);
+}
+
 void AvatarDatabase::_bind_methods() {
+	ClassDB::bind_static_method("AvatarDatabase",
+			D_METHOD("preview_zoom_damp_per_tick"),
+			&AvatarDatabase::preview_zoom_damp_per_tick);
+	ClassDB::bind_static_method("AvatarDatabase",
+			D_METHOD("preview_zoom_in_scale"),
+			&AvatarDatabase::preview_zoom_in_scale);
+	ClassDB::bind_static_method("AvatarDatabase",
+			D_METHOD("preview_idle_speed_deg_per_sec"),
+			&AvatarDatabase::preview_idle_speed_deg_per_sec);
+	ClassDB::bind_static_method("AvatarDatabase",
+			D_METHOD("preview_sway_freq_rad_per_sec"),
+			&AvatarDatabase::preview_sway_freq_rad_per_sec);
+	ClassDB::bind_static_method("AvatarDatabase",
+			D_METHOD("preview_sway_amp_deg"),
+			&AvatarDatabase::preview_sway_amp_deg);
+	ClassDB::bind_static_method("AvatarDatabase",
+			D_METHOD("preview_skeleton_bad"),
+			&AvatarDatabase::preview_skeleton_bad);
+	ClassDB::bind_static_method("AvatarDatabase",
+			D_METHOD("preview_idle_bad"), &AvatarDatabase::preview_idle_bad);
 	ClassDB::bind_method(D_METHOD("load", "path"), &AvatarDatabase::load);
 	ClassDB::bind_method(D_METHOD("load_from_resource_root", "resource_root", "name"), &AvatarDatabase::load_from_resource_root);
 	ClassDB::bind_method(D_METHOD("save_to_path", "path"), &AvatarDatabase::save_to_path);

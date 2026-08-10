@@ -83,6 +83,17 @@ private:
 	Dictionary part_dict(const Part &p) const;
 	Dictionary diagnostic_dict(const Diagnostic &d) const;
 
+	// The witnessed menu preview-animation constants, re-exported from engine
+	// avatars/preview_animation.h (float/String values cannot be class
+	// constants).
+	static float preview_zoom_damp_per_tick();
+	static float preview_zoom_in_scale();
+	static float preview_idle_speed_deg_per_sec();
+	static float preview_sway_freq_rad_per_sec();
+	static float preview_sway_amp_deg();
+	static String preview_skeleton_bad();
+	static String preview_idle_bad();
+
 protected:
 	static void _bind_methods();
 

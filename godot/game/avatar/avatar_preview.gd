@@ -40,21 +40,10 @@ const MENU_PITCH := -0.06
 # (design size x this scale) so the menu's upscale no longer blurs a low-res texture.
 const MENU_DESIGN_SIZE := Vector2(800.0, 600.0)
 
-# Preview animation [orig: update_player_preview_animation @ 0x55dba0]: a damped zoom on
-# hover plus a continuous idle rotation that gains a gentle sinusoidal sway on hover. BAM
-# angles map 2^32 = 360 deg; the original ticks at ~62.5 Hz.
-const MENU_ZOOM_DAMP := 0.05               # blend += (target-blend)*0.05 per tick (orig 0.95/0.05)
-const MENU_ZOOM_IN := 0.78                 # camera distance scale at full hover (closer)
-const MENU_IDLE_SPEED_DEG_PER_SEC := 43.9  # 0x800000 BAM/frame x 62.5 Hz
-const MENU_SWAY_FREQ_RAD_PER_SEC := 0.8    # sin(GetTickCount * 0.0008/ms)
-const MENU_SWAY_AMP_DEG := 22.5            # 2^28 BAM amplitude
-
-# Skeletal idle for the composed character [orig: PlayerInfo_InitPreviewModel @ 0x5600d0]:
-# the original binds the rest skeleton Dt1rst.bad + the looping idle clip PI_Idle.BAD (raw
-# .bad files, no .adm) and plays the idle on the skinned parts. Registered under the canonical
-# idle key so play_body_clip / slot_to_key resolve it.
-const PREVIEW_SKELETON_BAD := "Dt1rst.bad"
-const PREVIEW_IDLE_BAD := "PI_Idle.BAD"
+# The witnessed preview animation + skeletal-idle values live at engine
+# avatars/preview_animation.h, re-exported through AvatarDatabase statics.
+# The idle clip registers under the canonical idle key so
+# play_body_clip / slot_to_key resolve it.
 const PREVIEW_IDLE_KEY := "anim_idle"
 
 var _resource_root  # ResourceRoot, or null (headless / no shell)
@@ -275,10 +264,12 @@ func _ensure_preview_skeletal():
 	_skeletal_tried = true
 	if _resource_root == null:
 		return null
-	if not _resource_root.has_file(PREVIEW_SKELETON_BAD) or not _resource_root.has_file(PREVIEW_IDLE_BAD):
+	if not _resource_root.has_file(AvatarDatabase.preview_skeleton_bad()) \
+			or not _resource_root.has_file(AvatarDatabase.preview_idle_bad()):
 		return null
 	var sk := SkeletalAnim.new()
-	if not sk.load_from_bad_files(_resource_root, PREVIEW_SKELETON_BAD, {PREVIEW_IDLE_KEY: PREVIEW_IDLE_BAD}):
+	if not sk.load_from_bad_files(_resource_root, AvatarDatabase.preview_skeleton_bad(),
+			{PREVIEW_IDLE_KEY: AvatarDatabase.preview_idle_bad()}):
 		return null
 	_skeletal = sk
 	return _skeletal
@@ -548,7 +539,7 @@ func _frame_menu_pose(bounds: AABB) -> void:
 func _apply_menu_camera() -> void:
 	if _camera == null or not _menu_framed:
 		return
-	var dist_scale: float = MENU_DISTANCE_SCALE * lerpf(1.0, MENU_ZOOM_IN, _zoom_blend)
+	var dist_scale: float = MENU_DISTANCE_SCALE * lerpf(1.0, AvatarDatabase.preview_zoom_in_scale(), _zoom_blend)
 	_camera.frame_bounds_custom(_menu_center, _menu_radius, dist_scale,
 		maxf(_menu_radius * 8.0, 6.0), 0.0, MENU_PITCH)
 
@@ -580,12 +571,14 @@ func _process(delta: float) -> void:
 	# Damped zoom toward 1 (hover) / 0 (rest); the per-tick 0.05 factor is made frame-rate
 	# robust by scaling against the original's 62.5 Hz cadence.
 	var target := 1.0 if _hovered else 0.0
-	var t: float = clampf(MENU_ZOOM_DAMP * delta / Simulation.tick_dt(), 0.0, 1.0)
+	var t: float = clampf(AvatarDatabase.preview_zoom_damp_per_tick() \
+			* delta / Simulation.tick_dt(), 0.0, 1.0)
 	_zoom_blend = lerpf(_zoom_blend, target, t)
 	# Continuous idle spin; on hover a gentle sway fades in over it (scaled by the zoom blend).
-	_idle_angle += deg_to_rad(MENU_IDLE_SPEED_DEG_PER_SEC) * delta
+	_idle_angle += deg_to_rad(AvatarDatabase.preview_idle_speed_deg_per_sec()) * delta
 	_anim_time += delta
-	var sway: float = sin(_anim_time * MENU_SWAY_FREQ_RAD_PER_SEC) * deg_to_rad(MENU_SWAY_AMP_DEG) * _zoom_blend
+	var sway: float = sin(_anim_time * AvatarDatabase.preview_sway_freq_rad_per_sec()) \
+			* deg_to_rad(AvatarDatabase.preview_sway_amp_deg()) * _zoom_blend
 	if _model_root != null:
 		_model_root.rotation.y = _idle_angle + sway
 	_apply_menu_camera()
