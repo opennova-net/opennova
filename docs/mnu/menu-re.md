@@ -188,7 +188,7 @@ white, or `0xFF7F7F7F` under `g_ui_half_bright_mode @ 0x31C3760`.
 | RADIO | `CRadioWnd_Render @ 0x656e20` | checked (+772) forces state 3 around the WHOLE static render — appearance AND label colors |
 | CHECKBOX | `CCheckWnd_Render @ 0x64ae20` | frame -> appearance (checked forces slot 3 DIRECTLY, no fallback — an unauthored selected slot has zero flags and draws nothing) -> label (raw state colors) -> children |
 | EDIT | `CEditWnd_Render @ 0x6619e0` | see the edit paragraph |
-| MULTILINE_EDIT | `CMEditWnd_Render @ 0x6608e0` | multiline variant of the edit render |
+| MULTILINE_EDIT | `CMEditWnd_Render @ 0x6608e0` | frame -> appearance (NO focus forcing, unlike the single-line edit) -> the wrapped drawer -> children (the embedded scrollbar); see the multiline paragraph below |
 | LIST, LAN_LIST | `CListWnd_DrawItems @ 0x643f30` | frame -> appearance -> rows -> children (scrollbar) |
 | SPINLIST | `CSpinListWnd_Render @ 0x64b220` | item cell (below); arrows are child windows |
 | COMBOBOX | `CComboWnd_Render @ 0x65bfd0` | closed cell, then children in array order |
@@ -235,8 +235,9 @@ parse order. Layout in DESIGN space at scale 1: avail = rect width − 2×EDGE
 below the span (the prefix-measure loop `@ 0x657199`); justify word `+744`
 (low nibble 1=center/2=right else left, high 0x10=vcenter/0x20=vbottom else
 top) anchors from the (truncated) width; x += EDGE + xoff(`+748`), y +=
-yoff(`+752`); the wrap flag `+760` routes to the wrapped drawer (`sub_653D60`,
-interior unwalked — D-MNU-13). The sink `font_cache_draw_text_scaled
+yoff(`+752`); the wrap flag `+760` routes to the wrapped drawer
+(`draw_text_wrapped_clipped @ 0x653D60` — walked 2026-08-10, see the
+multiline paragraph). The sink `font_cache_draw_text_scaled
 @ 0x653170` forces alpha 0xFF (unless flags&0x10000), halves the color under
 `g_ui_half_bright_mode`, scales the ANCHOR by the element scale pair, and
 forwards scaleX/scaleY into `CGameFont_DrawText @ 0x6752c0` (via the cdecl
@@ -262,6 +263,68 @@ cycle — drawn only while `(tick & 0x3FF) > 0x200`; drawn by
 (left-run width + `spacing+1` gap terms), x-stretched to that char's width
 (`charW / underscoreW`); the caret at end-of-text measures as `'_'` itself.
 
+**Multiline edit + the wrapped-text drawer** (walked 2026-08-10; the original
+class is `_MEditWnd`, vtable `@ 0x7e259c`, derived from CEditWnd —
+`CMEditWnd_Construct @ 0x660780`). `CMEditWnd_Render @ 0x6608e0`: shown gate ->
+clip -> frame -> the standard appearance passes for the RAW visual state
+(**no focus forcing** — the single-line sibling's focused-state-2 rule does
+not apply) -> font/colors via vtable+64 -> one call into the wrapped drawer ->
+viewport restore -> children. PASSWORD (`+780`) swaps the cached `'*'` mask
+(`+788`); the caret (`+764`) draws only while focused, non-readonly, and
+`(GetTickCount() & 0x3FF) > 0x200`.
+
+`sub_653D60` is NOT the drawer — it is an arg-marshaling wrapper appending
+`flags=0x40000` (bottom clip); renamed `draw_text_wrapped_clipped @ 0x653D60`.
+The core is **`draw_text_wrapped @ 0x653710`** (its decompiler parameter names
+are historical mislabels — the IDB function comment carries the true mapping).
+The wrap loop, exactly: chars accumulate into one static line buffer, the
+prefix measured at the WIDGET scale pair against `trunc(wrapW * scaleX)`; a
+space memoizes `lastSpace` (index 0 doubles as "none" — a space at index 0
+never registers); `accum <= threshold` + LF-or-NUL breaks at the char
+(**only `0x0A` breaks — CR is appended, measured, and drawn like any glyph**;
+the medit Enter inserts `"\r\n"`); overflow breaks at `lastSpace` (the space
+consumed), else at the char exclusively (the overflowing char starts the next
+line). Line flush: lines numbered from 1, `lineNo <= firstVisibleLine` lines
+are consumed silently with NO y advance; a drawn line measures at scale 1.0
+for justify (4=center, 5=right, else left) and the y advance, draws through
+`font_cache_draw_text_scaled @ 0x653170` (colorA only, opaque), then the
+`0x40000` mode returns when `curY + lineH` would pass the bottom. The caret
+pass draws `"|"` centered at `x + accum - w("|")/2` BEFORE the char appends —
+it mixes the scaled accumulator into the design-space pen and ignores
+line-skipping (both original quirks, preserved). A `0x20000` mode (break at
+width then discard the rest of the source line to the next LF, no bottom
+clip) serves the TABLE cell path (`calculate_aligned_text_rect @ 0x63ec50` ->
+`CTableWnd_DrawCell @ 0x640be0` / `CUITable_Render @ 0x6411d0`); MARQUEE does
+not use the drawer.
+
+The vertical scroll is LINE-based: `widget+3912` (`widget[978]`) holds the
+first-visible-line count, fed by an embedded `CScrollWnd` child at `+816`
+named `"MEDITWND_SCROLL"` (`CMEditWnd_CreateScrollChild @ 0x661260`; default
+right-edge strip `(parentW-22, 0, parentW, parentH)`; skinned by `SCROLLBAR`
+child nodes forwarded from `CMEditWnd_ParseXmlProperties @ 0x660890`). The
+range recomputes ONLY on Init/SetText (`CMEditWnd_UpdateScrollRange
+@ 0x661180` — typing does not refresh it, a witnessed staleness quirk) via the
+measure twin **`font_cache_count_wrapped_lines @ 0x653b90`** (identical break
+rules at scale 1.0): page = `fit-1`, range `[0, total-fit]`
+(`CScrollWnd_SetPageSize @ 0x64CE10`, `CScrollWnd_SetRangeAndClamp
+@ 0x64D490`), scrollbar hidden when the content fits; scroll events
+(`0x4000001`) write `widget[978]` verbatim (`CMEditWnd_HandleEvent
+@ 0x660F40`). Keys (`CMEditWnd_HandleKeyEvent @ 0x661020`): Left/Right/Home/
+End/Backspace/Delete as the single-line edit; **Enter inserts `"\r\n"`**
+(`CMEditWnd_InsertString @ 0x660DC0`); no Up/Down/PgUp/PgDn — vertical
+navigation exists only through the scrollbar. Insert paths
+(`CMEditWnd_InsertChars @ 0x660C60`) share the read-only/numeric/max-length
+gates of the single-line edit.
+
+Reimpl: `MenuFrameCompiler::emit_multiline_edit`/`emit_wrapped_text` +
+`multiline_line_counts` (`engine/runtime/menu/src/menu_frame.cpp`), pinned by
+`test_multiline_wrap` in `tests/menu/menu_frame_compiler_test`;
+`MenuWidgetState.scroll_row` carries the first-visible-line count. The
+scrollbar art/interaction ride the D-MNU-13 scrollbar follow-up (wheel/scroll
+policy is shell-side over `multiline_line_counts`); the block-alignment leg
+(the whole-unwrapped-text measure gating v-center/bottom) is not compiled —
+no shipped multiline edit authors it.
+
 **List rows** `[orig: CListWnd_DrawItems @ 0x643f30]` (extends the earlier
 combo-grill row model): 32-byte item records (text `+0`, STYLE INDEX `+12` —
 a 0..3 state slot, −1 none, set by selection/hover logic; visible flag bit 1
@@ -276,24 +339,35 @@ MIN_ITEM_HEIGHT (`+804 >= 0`); truncation against rect − 2×EDGE − scrollbar
 
 Reimpl: `engine/runtime/menu` (`MenuFrameCompiler`) compiles a parsed
 `mnu::Screen` + a typed per-widget state snapshot (hover/press/disabled/
-checked/focus/caret/value/selection — `MenuWidgetState`, keyed by pre-order
-index) into a `MenuDrawList` (quads + outline lines + GameFont glyph runs) in
-exactly this walk order, with the witnessed per-element int truncation of
-scaled coordinates (the original quantization — the compiled path closes
-D-MNU-4's divergence; the Control-tree path keeps its float scale). The Godot
-applier (`MenuFrame`, `godot/src/mnu/nova_menu_frame.cpp`) uploads textures/
-fonts and rasterizes the list. Pinned by `tests/menu/menu_frame_compiler_test`.
+checked/focus/caret/value/selection, runtime item rows, table rows, marquee
+lines — `MenuWidgetState`, keyed by pre-order index) into a `MenuDrawList`
+(quads + outline lines + GameFont glyph runs) in exactly this walk order,
+with the witnessed per-element int truncation of scaled coordinates (the
+original quantization — the compiled path closes D-MNU-4's divergence). The
+compiler also owns the mouse pump, the interaction geometry queries
+(row/popup/arrow/table hit tests over the same layout math), the hotkey scan,
+and the edit-input module. The Godot applier (`MenuFrame`,
+`godot/src/mnu/nova_menu_frame.cpp`) uploads textures/fonts and rasterizes
+the list; `MenuDriver` (`godot/game/menu_driver.gd`) orchestrates navigation,
+actions, popups, and sounds over it — since the 2026-08-10 shell cutover this
+is the ONE menu path (the MnuMenu Control tree is deleted). Pinned by
+`tests/menu/menu_frame_compiler_test`.
 
-- **D-MNU-13 (draw-walk residue — deferred interiors):** the TABLE,
-  SCROLL, and MARQUEE interiors are now walked (the table and marquee
-  paragraphs below; SCROLL has no specialised interior); the COMPILER port of
-  the table/marquee interiors is the open follow-up. Still unwalked: the
-  RADIOEDIT render (`@ 0x65d310`) and the wrapped-text drawer (`sub_653D60`,
-  the `+760` wrap path). Spin arrows compile with their
-  default-state art (their independent hover states are separate child-widget
-  state the compiled path does not yet model). Follow-up work, not shipped
-  divergences: the shell cutover keeps the witnessed Control-tree renderers
-  for these widgets.
+- **D-MNU-13 (draw-walk residue — deferred interiors):** the TABLE, SCROLL,
+  MARQUEE interiors and the wrapped-text drawer are now walked AND compiled
+  (their paragraphs below). Still unwalked: the RADIOEDIT render
+  (`@ 0x65d310`; its event interaction IS witnessed —
+  `RadioEditWnd_handle_event @ 0x65d540`, first activation selects the radio,
+  re-activation swaps radio->edit with focus + caret at end, leaving copies
+  the edit text back to the radio label — no shipped JO menu authors a
+  RADIOEDIT, so neither half is compiled). Compiled-path follow-ups: table
+  image/SUBST/custom cells, per-row appearance/color overrides, and row
+  overflow wrap; marquee image nodes + the 50px edge fade band; scrollbar
+  art + thumb interaction (the SCROLL widget's runtime-constructed child
+  BUTTONs and the medit/list/table authored scrollbars — wheel scrolling
+  rides `scroll_row` shell-side meanwhile); spin arrows compile with their
+  default-state art (their independent hover states are separate
+  child-widget state the compiled path does not yet model).
 
 ## Table render `[orig: CUITable_Render @ 0x6411d0]`
 
@@ -732,11 +806,16 @@ routes mouse input exclusively to the open list (three gates: `dispatch_mouse_ev
 (`combobox_handle_event @ 0x65c190 @ 0x65c210` over `g_ui_active_combo_wnd @ 0x31C16D0`),
 closes on an outside press with the press consumed (`@ 0x65c261`, closed cell dead while
 open), and clears the dropdown on screen switches (`CUIScene_SelectNodeByName @ 0x63b6b0`).
-Ported as the menu-top catcher overlay + MnuMenu single-open registry (D-MNU-11; the
-pre-fix reimpl let overlapped siblings steal popup clicks and stack dropdowns open). Draw
-order stays tree-positional in the original with no overlay pass; the reimpl's menu-top
-draw is a recorded reimpl divergence, unobservable in shipped menus (D-MNU-12). Pinned by
-the five input-routing tests in `mnu_combo_test.gd` (see the section above).
+Ported (post-cutover) as the MenuDriver popup gate: while a popup is open the driver
+routes every mouse sample exclusively through the engine's popup geometry queries
+(`combo_popup_row_at`/`combo_popup_contains`), keeps one open combo, consumes the
+dismissing outside press, and closes on every screen switch (D-MNU-11; the pre-fix
+Control-tree reimpl let overlapped siblings steal popup clicks and stack dropdowns
+open). The compiled popup draws inside its owning combo's walk position, matching the
+original's tree-positional order — the Control-tree era's menu-top overlay divergence
+(D-MNU-12) dissolved with the cutover. Pinned by the popup cases in
+`tests/game/menu_driver_test.gd` + the geometry checks in
+`tests/menu/menu_frame_compiler_test`.
 
 **matching** (2026-06-23b controls grill): the CONTROL_MAPPING population (the action catalog +
 Class-id->name table + per-device row build), the byte-exact default keyboard bindings, the Control
@@ -754,8 +833,21 @@ anamorphic pair, the edit focus-forces-state-2 + blinking stretched-underscore c
 password mask + scroll window, the checkbox/radio checked-state forcing rules, the list
 row style-index model, and the unscaled native-size cursor draw — ported as the
 `engine/runtime/menu` `MenuFrameCompiler` (ADR 0033 R2) with the per-element int
-truncation restored. TABLE/SCROLL/MARQUEE/RADIOEDIT render interiors and the wrapped
-text path stay deferred (D-MNU-13).
+truncation restored.
+
+**matching** (2026-08-10 multiline grill + shell cutover): the multiline edit render
+(`CMEditWnd_Render @ 0x6608e0` — no focus forcing), the wrapped-text drawer
+(`draw_text_wrapped @ 0x653710` via `draw_text_wrapped_clipped @ 0x653D60`: last-space
+word wrap, LF-only explicit breaks, the 1.0-scale per-line justify/advance vs
+widget-scale threshold, the first-visible-line window that advances nothing while
+skipping, the `0x40000` bottom clip, the caret quirks) and the line-based scroll model
+(`font_cache_count_wrapped_lines @ 0x653b90`, `CMEditWnd_UpdateScrollRange @ 0x661180`,
+`widget[978]`) — ported as `emit_multiline_edit`/`emit_wrapped_text` +
+`multiline_line_counts`, pinned by `test_multiline_wrap`. With this the game shell,
+the armory/deploy presenters, and the ONED Menus preview all cut over to the ONE
+compiled path (`MenuFrame` + `MenuDriver`); the MnuMenu Control tree and its widget
+classes are DELETED. RADIOEDIT (unauthored in shipped JO menus) and the compiled-path
+follow-ups stay under D-MNU-13.
 
 **matching** (2026-07-30 menu parity pass): the typed format retains source
 encoding/BOM, optional-field presence, ordered HOTKEY/APPEARANCE/ITEM data, the

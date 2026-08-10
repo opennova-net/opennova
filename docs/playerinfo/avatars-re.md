@@ -349,7 +349,7 @@ params, &g_MenuSoundBank)` (params `[0]=0x10000, [2]=255`). The `menu.lwf` bank 
 loaded by the screen init.
 
 The reimpl port binds `TESTPLAYERVOICE` by control name and routes the selected
-avatar fallback through `MnuMenu.play_widget_sound("VOICE_%d", "menu.lwf")`.
+avatar fallback through `MenuDriver.play_widget_sound("VOICE_%d", "menu.lwf")`.
 The persisted `profile+1532+team` override is intentionally still owned by the
 profile-persistence work in D-PLAYERINFO-9.
 

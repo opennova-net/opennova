@@ -13,7 +13,7 @@ live behavior.**
 ### Menus — `edit_mode` runtime-node reuse (the canonical exemplar)
 
 The Menus workspace previews `.mnu` screens by instantiating the *runtime*
-`MnuMenu` node and setting `edit_mode = true`, which makes the live menu
+`MenuFrame` surface in author mode (the compiled draw list, no interaction), which makes the preview
 inert and click-through so the WYSIWYG canvas can overlay selection and drag
 gestures. The game's `MenuShell` uses the same node with `edit_mode` off.
 "Interactive preview" re-arms navigation while sandboxing external Commands

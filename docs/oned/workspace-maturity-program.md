@@ -61,7 +61,7 @@ decision (ADR / RE-record entry) saying why not:
 | Strings | ✓ | ✓ | ✓ (selected entry rendered through the engine path with a font picker, STR-1 2026-07-12; encoding pinned by STR-2, D-FNT-4 minted) | — | G (F3 wiring = STR-3) |
 | Sound | ✓ | ✓ (`write_lwf`) | ✓ (audition rides the runtime set→member→wav path) | — | G |
 | Music | ✓ (headerless form excluded by pinned decision, D-SCR-1/2) | ✓ | ✓ (live director runs the VM) | — | G + usability (see MUS-D) |
-| Menus | ✓ (.mnu/.mns) | ✓ | ✓ (canvas hosts live `MnuMenu`, edit_mode on) | partial (no flow run; actions authored blind) | G |
+| Menus | ✓ (.mnu/.mns) | ✓ | ✓ (canvas hosts the compiled `MenuFrame` preview) | partial (no flow run; actions authored blind) | G |
 | HUD | ✓ (`HudPos`, read-only getters) | — | — (hand-drawn `HudLayoutPreview._draw()`) | — | everything but R |
 | Avatars | ✓ | ✓ (from-scratch writer, ADR 0021) | ✓ (workspace + 3D preview) | partial (runtime `player.mnu` population; in-world appearance open, D-PLAYERINFO-1) | G |
 
@@ -653,7 +653,7 @@ override → menu/game music) rides MUS-I's tail.
 ### Menus
 
 - MNU-1: **flow run mode** — run the runtime `MenuShell` (nova_menu_shell.gd's
-  node: the same `MnuMenu` with `edit_mode` off, fully interactive) over
+  surface: the same compiled `MenuFrame` driven interactively by `MenuDriver`) over
   the authored document in a sandboxed "Run" tab: navigation, back stack,
   window show/hide, per-screen MUSICVAR all execute for real; the shell-policy
   verbs (cross-file jump, quit, gameplay launch) route to an editor
