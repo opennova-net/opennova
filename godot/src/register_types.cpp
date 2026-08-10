@@ -51,6 +51,7 @@
 #include "object/nova_skeletal_anim.h"
 #include "hud/hud_overlay.h"
 #include "hud/nova_hud_pos.h"
+#include "mission/nova_mission_catalog.h"
 #include "mission/nova_mission_data.h"
 #include "simulation/nova_present_applier.h"
 #include "simulation/nova_present_stats.h"
@@ -137,6 +138,8 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(HudPos);
 	GDREGISTER_CLASS(HudOverlay);
 	GDREGISTER_CLASS(MissionData);
+	GDREGISTER_CLASS(MissionCatalogRow);
+	GDREGISTER_CLASS(MissionCatalog);
 	GDREGISTER_CLASS(PresentApplier);
 	GDREGISTER_CLASS(MissionPresentStats);
 	GDREGISTER_CLASS(WirePresentStats);

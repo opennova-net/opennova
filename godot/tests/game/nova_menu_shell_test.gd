@@ -11,6 +11,7 @@ const MAIN_FIXTURE := "res://../fixtures/mnu/jo_main.mnu"   # STARTUP, MUSICVAR 
 const SP_FIXTURE := "res://../fixtures/mnu/jo_loadout.mnu"  # the cross-.mnu target
 const OPTIONS_FIXTURE := "res://../fixtures/mnu/jo_options.mnu"  # has the Mods tab (AVAIL_LIST/MOD_DESC)
 const SP_PLAY_FIXTURE := "res://../fixtures/mnu/jo_sp.mnu"  # play screen: mission list IA_LIST + ACCEPT
+const MISSION_BIN_FIXTURE := "res://../fixtures/rtxt/00tra.bin"  # real per-mission bin: info/Title + briefing
 const MUS_FIXTURE := "res://../fixtures/mus/jo_gamemus.bin"  # decrypted SCR0 MUS program
 const SBF_FIXTURE := "res://../fixtures/sbf/jo_gamemus.sbf"  # real SBF bank (banks stream loose)
 
@@ -85,6 +86,30 @@ func _copy(res_path: String, dst: String) -> void:
 	var f := FileAccess.open(dst, FileAccess.WRITE)
 	if f != null:
 		f.store_buffer(FileAccess.get_file_as_bytes(res_path))
+		f.close()
+
+
+# bms::AttribFlags game-mode bits (engine/formats/mission/bms.h).
+const BMS_ATTRIB_COOP := 0x1000000
+const BMS_ATTRIB_TDM := 0x20000000
+
+
+# A minimal parseable .bms: the 616-byte header with magic BMS v19, the
+# embedded mission_name, and one game-mode attrib bit.
+func _write_bms(path: String, mission_name: String, attribs: int) -> void:
+	var bytes := PackedByteArray()
+	bytes.resize(616)
+	bytes[0] = 0x42  # 'B'
+	bytes[1] = 0x4D  # 'M'
+	bytes[2] = 0x53  # 'S'
+	bytes[3] = 19    # shipped JO header version
+	var name := mission_name.to_utf8_buffer()
+	for i in mini(name.size(), 31):
+		bytes[4 + i] = name[i]
+	bytes.encode_u32(136, attribs)
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	if f != null:
+		f.store_buffer(bytes)
 		f.close()
 
 
@@ -418,6 +443,50 @@ func test_mods_apply_refuses_on_a_loose_root_and_keeps_the_mount() -> void:
 	for sub in ["options.mnu", "menumus.bin", "menumus.sbf",
 			"expansion/jox01/jox01.pff", "expansion/jox01", "expansion"]:
 		DirAccess.remove_absolute(dir.path_join(sub))
+	DirAccess.remove_absolute(dir)
+
+
+# D-MNU-14: the SP mission list rides the catalog — Co-op-family rows only,
+# titled from the sibling .bin (the header's embedded name when no .bin), the
+# loose "*" marker, the briefing pane cleared on populate and filled on
+# selection, and ACCEPT gated on a pick
+# [orig: SinglePlayer_PopulateMissionList @ 0x561840 +
+# SinglePlayer_MissionListEventHandler @ 0x561ed0].
+func test_sp_mission_list_titles_briefing_and_accept_gate() -> void:
+	var dir := OS.get_temp_dir().path_join("menu_shell_sp_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(dir)
+	_copy(SP_PLAY_FIXTURE, dir.path_join("main.mnu"))
+	_write_bms(dir.path_join("alpha.bms"), "Alpha Header", BMS_ATTRIB_COOP)
+	_copy(MISSION_BIN_FIXTURE, dir.path_join("alpha.bin"))
+	_write_bms(dir.path_join("bravo.bms"), "Bravo Header", BMS_ATTRIB_TDM)
+	_write_bms(dir.path_join("charlie.bms"), "Charlie Header", BMS_ATTRIB_COOP)
+	var shell = _make_shell(dir)
+	if shell == null:
+		pass_test("temp root unavailable in this environment")
+		return
+	var driver: MenuDriver = shell.get_driver()
+	var list_id := driver.widget_id("IA_LIST")
+	assert_gt(list_id, -1, "jo_sp authors the IA_LIST mission list")
+	assert_eq(driver.item_count(list_id), 2, "the TDM mission is filtered off the SP list")
+	assert_eq(driver.item_text(list_id, 0), "*Training: Basic Controls / Armory",
+			"loose titled row: the * marker + the .bin's info/Title")
+	assert_eq(driver.item_text(list_id, 1), "*Charlie Header",
+			"no .bin: the BMS header's embedded name stands in")
+	var accept := driver.widget_id("ACCEPT")
+	assert_gt(accept, -1)
+	assert_true(driver.is_widget_disabled(accept), "ACCEPT is disabled before a pick")
+	var briefing := driver.widget_id("BRIEFING")
+	assert_gt(briefing, -1)
+	assert_eq(driver.get_widget_text(briefing), "", "the populate clears the briefing pane")
+	# The selection relay — the same seam the pump's list click drives.
+	driver.widget_value_changed.emit("IA_LIST", "list", 0, driver.item_text(list_id, 0))
+	assert_eq(shell.get_selected_mission(), "alpha.bms",
+			"the launch resolves the FILE behind the titled row")
+	assert_true(driver.get_widget_text(briefing).begins_with("This mission covers"),
+			"selection fills the briefing pane from the .bin")
+	assert_false(driver.is_widget_disabled(accept), "the pick arms ACCEPT")
+	for f in ["main.mnu", "alpha.bms", "alpha.bin", "bravo.bms", "charlie.bms"]:
+		DirAccess.remove_absolute(dir.path_join(f))
 	DirAccess.remove_absolute(dir)
 
 
