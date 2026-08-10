@@ -546,6 +546,7 @@ mode 1). Originals only — none reimplemented yet; these gate a future in-proce
 | `SinglePlayer_RefreshAcceptOnActivate` | `0x561a20` | screen activate: ACCEPT enabled iff the list has a selection (**defined + named in IDB 2026-08-10**, with `UIList_CountSelectedItems @ 0x6445c0`) | decompile | matching — the seed's selection gate |
 | `CGameSession_SetConnectionMode` | `0x4c49f0` | conn mode → `is_authority`/`is_mp_session_peer` (1=host, 2=client, 3=host+client) | switch writes +0x5C/+0x60/+0x64 | confirm-only |
 | `CNapiNetwork_SetTransportMode` | `0x4c8750` | socket-state field; opens a UDP socket only for modes 2/3/4 (SP=1 → no socket) | `OpenTransportSocket` gate | confirm-only |
+| `NapiUdpSocket_CreateAndBind` | `0x62d2a0` | the UDP bind scan: `(max-min+1)/step` tries from min (host) or a PRNG start (client arm), stepping + wrapping | decompile (grill 2026-08-10); clamp `NapiSocket_ClampBufferParams @ 0x62e180` | matching — `npwire/net_ports.h lan_host_bind_ports` + `Simulation::enable_host_listen` (D-NET-210) |
 | `CNapiGameSession_CreateSession` | `0x4c97c0` | shared SP/MP creator: installs host callbacks, StartServer, local client conn (type 2) | decompile; host-callback installs | confirm-only |
 | `NapiNPProtocol_StartServer` (Kong `sub_62B5E0`) | `0x62b5e0` | host bring-up: session key + `host_start_tick` + "HOST STARTED" log (§6.5) | callees `NapiNP_GenerateSessionKey`/`GetTickCount`/`LogHostStarted`; **renamed in IDB 2026-06-16** | confirm-only |
 
