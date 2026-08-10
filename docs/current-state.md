@@ -27,9 +27,10 @@ deleted the MnuMenu Control tree for the compiled MenuFrame + MenuDriver
 path) are LANDED; the P1 rewrite queue that followed (env/weather, placer,
 present facades, composition, avatar, menus), the task-12
 no-magic-in-the-godot-layer sweep, and the engine layout flatten (ADR
-0024's amendment) are complete; R3 (the render frame) remains spike-gated
-on the one-scene screenshot diff vs retail; R4 (a second backend)
-indefinitely optional. It subsumes the structural slot earlier programs
+0024's amendment) are complete; R3 (the render frame) CLOSED not taken at its
+2026-08-10 spike — the one-scene screenshot diff vs retail showed no
+ordering-attributable delta (ADR 0033 §R3 spike result); R4 (a second
+backend) waits on R3's reopen condition. It subsumes the structural slot earlier programs
 held: the **2026-07 quality campaign** closed at W4 (#310–#375; its W5
 residue stays tracked in [`TODO.md`](../TODO.md) § "Cleanup & verification
 backlog"), and the 2026-08-08 adapter-shape round (#451–#456) was this

@@ -91,13 +91,16 @@ for runtime debug/MCP controls and tests; it delegates to the driver's
 `run_single` (listener, one step, the per-tick legs, one present — no frame legs,
 no accumulator).
 
-## The render half (transition state)
+## The render half (the standing shape — ADR 0033 R3 closed not taken)
 
-The render FRAME has no engine counterpart yet — that is ADR 0033's spike-gated
-stage R3 (the witnessed seven-pass order lives in
-[render/render-order-re.md](render/render-order-re.md); the portable ordering
-math in `engine/runtime/renderer` currently has no caller for its sort keys
-because Godot's scene renderer owns the sort). All four R2 domains are cut
+The render FRAME has no engine counterpart, and ADR 0033's R3 spike
+(2026-08-10) ratified that as the standing shape: the one-scene screenshot
+diff vs retail showed the compiled draw-list domains reproduce the retail
+frame with no ordering-attributable delta, so the seven-pass ordered command
+stream was NOT ported (ADR 0033 §R3 spike result; the witnessed order lives
+in [render/render-order-re.md](render/render-order-re.md), and
+`engine/runtime/renderer`'s sort keys remain the T1-pinned witnessed spec
+with no runtime caller — D-RORD-2/-6 PERMANENT). All four R2 domains are cut
 over to compiled draw lists (R2 completed 2026-08-09/10):
 
 - Terrain: `opennova::TerrainFrameCompiler` (`engine/runtime/terrain/terrain_frame.h`)
@@ -126,13 +129,12 @@ over to compiled draw lists (R2 completed 2026-08-09/10):
   consume this one path (record: [mnu/menu-re.md](mnu/menu-re.md)).
 
 One per-frame render loop remains deliberately SELF-DRIVEN outside the engine
-frame until its output becomes a draw list (stage R2):
-`ParticleRenderer`'s `_process` (frame compile + compositor dispatch);
+frame: `ParticleRenderer`'s `_process` (frame compile + compositor dispatch);
 per-model material eval self-parks on the native `ObjectModel`
 (`godot/src/object`), whose event-driven runtime frame wakes only when it
 holds live work. The occlusion leg runs AFTER the present in the frame order
 above — the scene-graph-ownership inverse of retail's collect-then-submit —
-and stays that way until R2/R3 make the retail order expressible.
+tracked as D-RORD-8, an ADR 0033 R3-reopen candidate.
 
 ## Single-player is a listen server
 

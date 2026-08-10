@@ -37,16 +37,17 @@ hardening, and project health. Divergences from the original engine belong in
       autonomous 2026-08-10 pass verified the compiled menu path on real
       retail assets — screenshot banked, retail menu bar/trim/text/music all
       live — and the full 00TRg world boot headless on the retail install):
-      (a) R3 one-scene screenshot-parity spike vs retail (launch retail
-      windowed `/w /d`, same scene ours-vs-theirs, diff -> the ADR 0033
-      addendum decision on the render frame); (b) interactive menu
-      navigation + armory/deploy screens on real assets; (c) diagnose the
-      SILENT native crash when the windowed game boots
+      (a) interactive menu navigation + armory/deploy screens on real
+      assets; (b) diagnose the SILENT native crash when the windowed game
+      boots
       `--resource-dir <loose JOX> --loose-root --loose-mission 00TRg.bms`
       (headless retail-install boot of the same mission is green; log ends
       at the D3D12 banner, no script error — suspect the loose-mount
-      windowed path, not the P1 rewrites); (d) the retail main-menu CENTER
-      BACKDROP is the shell-owned custom-draw appearance hook
+      windowed path, not the P1 rewrites; the 2026-08-10 R3 spike run
+      narrowed it further: windowed + PFF root + `--loose-mission` boots
+      green, so the suspect is the `--loose-root` no-archives mount leg);
+      (c) the retail main-menu CENTER BACKDROP is the shell-owned
+      custom-draw appearance hook
       (`<APPEARANCE type="custom">` -> the vtable+28 event) that NO path has
       ever implemented (Control-tree era included) — witness what retail
       draws there (likely the animated backdrop scene) and port it as a
