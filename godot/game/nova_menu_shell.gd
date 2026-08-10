@@ -87,7 +87,25 @@ const EXPANSION_DISPLAY_NAMES := {"jox01": "Kendari"}
 ])
 # List widgets the shell fills with the resource dir's missions (.bms).
 @export var mission_list_names := PackedStringArray([
-	"MISSION_LIST", "MISSIONLIST", "MISSIONS", "IA_LIST", "MAP_LIST",
+	"MISSION_LIST", "MISSIONLIST", "MISSIONS", "IA_LIST", "CA_MISSION_LIST",
+	"MAP_LIST",
+])
+# The SP mission-select lists (witnessed retail control names): these filter
+# to the Co-op family, show catalog titles, drive the briefing pane, and gate
+# the confirm control on a selection [orig: SinglePlayer_PopulateMissionList
+# @ 0x561840 / SinglePlayer_MissionListEventHandler @ 0x561ed0 — IA_LIST and
+# CA_MISSION_LIST are the two lists the SP screen handlers name].
+@export var sp_mission_list_names := PackedStringArray([
+	"IA_LIST", "CA_MISSION_LIST",
+])
+# The SP briefing pane a selection fills (cleared on every populate).
+@export var briefing_pane_names := PackedStringArray([
+	"BRIEFING",
+])
+# The SP confirm control disabled until a mission row is selected
+# [orig: the ACCEPT SetInteractiveRecursive pair @ 0x56198d / 0x561f6a].
+@export var sp_accept_control_names := PackedStringArray([
+	"ACCEPT",
 ])
 # List widgets the shell fills with the expansions discoverable under the resource
 # dir (Options -> Mods). Activating one mounts it over the base game.
@@ -141,6 +159,10 @@ var _menu_cache: Dictionary = {}            # filename -> MnuDocument
 var _menu_stack: Array[Dictionary] = []     # [{file, screen}] cross-.mnu back stack
 var _current_file := ""
 var _selected_mission := ""
+# Per-widget catalog rows behind the seeded mission lists (widget id ->
+# Array[MissionCatalogRow]); the display text carries titles, so launches
+# resolve the FILE through this model rather than the row text.
+var _mission_rows := {}
 var _selected_expansion := ""
 var _in_game := false
 # Named-control routing rebuilt per open_menu: NAME (upper) -> Callable.
@@ -375,6 +397,7 @@ func _on_screen_changed_for_underlay(screen_name: String) -> void:
 # made OK on Options launch the first mission.
 func _wire_named_controls() -> void:
 	_named_handlers.clear()
+	_mission_rows.clear()
 	_seed_crosshair_style_controls()
 	# A companion (e.g. the multiplayer menu driver, or the PLAYER_INFO character screen)
 	# can own a whole menu: when one claims this one, hand it the named-control wiring and
@@ -435,8 +458,59 @@ func _on_widget_activated(_id: int, widget_name: String) -> void:
 		handler.call()
 
 
+# Seed a mission list from the catalog. The SP lists (witnessed names) show
+# the Co-op family only, with titles and the loose "*" marker; the populate
+# clears the briefing pane and disables ACCEPT, and a selection surviving in
+# the driver's per-document state re-arms ACCEPT on re-entry
+# [orig: SinglePlayer_PopulateMissionList @ 0x561840 + the activate refresh
+# SinglePlayer_RefreshAcceptOnActivate @ 0x561a20].
 func _seed_mission_list(id: int) -> void:
-	_driver.set_widget_items(id, MissionCatalog.mission_names(_root))
+	var sp := _is_sp_mission_list(_driver.widget_name_of(id))
+	var rows: Array = []
+	var texts := PackedStringArray()
+	for row: MissionCatalogRow in MissionCatalog.rows(_root):
+		if sp and not MissionCatalog.sp_visible(row.get_game_type()):
+			continue
+		rows.append(row)
+		texts.append(row.display_text())
+	_mission_rows[id] = rows
+	_driver.set_widget_items(id, texts)
+	if sp:
+		# The witnessed populate leaves NO selection (set_widget_items'
+		# row-0 preselect is a Control-semantics artifact) — ACCEPT arms
+		# only when a selection exists [orig: UIList_CountSelectedItems
+		# @ 0x6445c0 > 0 gates the activate refresh].
+		_driver.select_row(id, -1, false)
+		_set_briefing_text("")
+		_set_sp_accept_enabled(false)
+
+
+func _is_sp_mission_list(widget_name: String) -> bool:
+	for n in sp_mission_list_names:
+		if widget_name.nocasecmp_to(n) == 0:
+			return true
+	return false
+
+
+func _mission_row_at(id: int, row: int) -> MissionCatalogRow:
+	var rows: Array = _mission_rows.get(id, [])
+	if row < 0 or row >= rows.size():
+		return null
+	return rows[row]
+
+
+func _set_briefing_text(text: String) -> void:
+	for n in briefing_pane_names:
+		var id := _driver.widget_id(n)
+		if id >= 0:
+			_driver.set_widget_text(id, text)
+
+
+func _set_sp_accept_enabled(enabled: bool) -> void:
+	for n in sp_accept_control_names:
+		var id := _driver.widget_id(n)
+		if id >= 0:
+			_driver.set_widget_disabled(id, not enabled)
 
 
 func _on_list_activated(id: int, row: int) -> void:
@@ -444,8 +518,11 @@ func _on_list_activated(id: int, row: int) -> void:
 	# list (the ItemList item_activated flows).
 	var widget_name := _driver.widget_name_of(id)
 	if _is_mission_list(widget_name):
-		if row >= 0 and row < _driver.item_count(id):
-			_selected_mission = _driver.item_text(id, row)
+		# Double-click launches the row's FILE (the row text carries the
+		# display title) [orig: the 0x5000002 arm @ 0x561f8d].
+		var mission_row := _mission_row_at(id, row)
+		if mission_row != null:
+			_selected_mission = mission_row.get_file()
 		_on_start_control()
 	elif _is_mod_list(widget_name):
 		if row >= 0 and row < _driver.item_count(id):
@@ -600,7 +677,14 @@ func _on_widget_value_changed(widget_name: String, kind: String, index: int, val
 		ResourceDirSettings.set_crosshair_style(index)
 		crosshair_style_changed.emit(ResourceDirSettings.get_crosshair_style())
 	elif kind == "list" and _is_mission_list(widget_name):
-		_selected_mission = value
+		var mission_row := _mission_row_at(_driver.widget_id(widget_name), index)
+		_selected_mission = mission_row.get_file() if mission_row != null else value
+		# A selection on the SP screen fills the briefing pane and arms ACCEPT
+		# [orig: SinglePlayer_MissionListEventHandler @ 0x561ed0 — BRIEFING
+		# SetText from the entry's briefing pointer + ACCEPT re-enable].
+		if mission_row != null and _is_sp_mission_list(widget_name):
+			_set_briefing_text(mission_row.get_briefing())
+			_set_sp_accept_enabled(true)
 	elif kind == "list" and _is_mod_list(widget_name):
 		# Single click previews the description; activation (double-click) mounts it.
 		_update_mod_desc(value)

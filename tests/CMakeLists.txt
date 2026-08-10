@@ -128,6 +128,12 @@ target_link_libraries(mission_authoring_test PRIVATE opennova_formats)
 target_include_directories(mission_authoring_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mission_authoring COMMAND mission_authoring_test)
 
+add_executable(mission_catalog_test mission/mission_catalog_test.cpp)
+target_link_libraries(mission_catalog_test PRIVATE opennova_runtime)
+target_include_directories(mission_catalog_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(mission_catalog_test PRIVATE cxx_std_17)
+add_test(NAME mission_catalog COMMAND mission_catalog_test)
+
 add_executable(mission_bms_test mission/mission_bms_test.cpp)
 target_link_libraries(mission_bms_test PRIVATE opennova_formats)
 target_include_directories(mission_bms_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

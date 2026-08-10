@@ -42,6 +42,7 @@ add_library(${TARGET_NAME} SHARED
     env/env_file.cpp
     env/nova_color_smoother.cpp
     env/nova_mission_environment.cpp
+    mission/nova_mission_catalog.cpp
     mission/nova_mission_object_placer.cpp
     env/nova_celestial.cpp
     env/nova_sky_dome.cpp

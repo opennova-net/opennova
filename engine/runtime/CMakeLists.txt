@@ -43,6 +43,7 @@ add_library(opennova_runtime STATIC
     # mission (runtime half) — the BMS event runtime + mission->world promotion,
     # evaluated against the shared runtime world
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/event_runtime.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_catalog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/placement_traits.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/promote.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/runtime_boot.cpp

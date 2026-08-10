@@ -58,6 +58,12 @@ private:
 	mutable std::unordered_map<std::string, Ref<Texture2D>> texture_cache_;
 	mutable uint64_t texture_cache_epoch_ = 0;
 
+public:
+	// C++-side seam (not bound): engine consumers fed by this mounted session
+	// (the mission catalog builder). The index dies with this ResourceRoot.
+	const opennova::ResourceIndex &engine_index() const { return index_; }
+
+private:
 	static bool has_virtual_scheme(const String &path);
 	static String to_native_path(const String &path);
 	static String normalize_dir(const String &path);
