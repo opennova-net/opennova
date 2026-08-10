@@ -33,12 +33,12 @@ const ADD_ITEMS := [
 
 var _section_names: PackedStringArray = PackedStringArray()
 var _var_list: Array = []        # [{token:String, label:String}]
-var _mus = null                  # NovaMusicScript for expr validation
+var _mus = null                  # MusicScript for expr validation
 var _bank_names: Array = []
 
 
 # Supply the context every form/picker needs: the section-name list, the
-# variable picker list, the NovaMusicScript used to validate expressions, and
+# variable picker list, the MusicScript used to validate expressions, and
 # the bank track names. Safe to call repeatedly; owners refresh it on every
 # document change so pickers see current state.
 func configure(section_names: PackedStringArray, var_list: Array, mus, bank_names: Array) -> void:

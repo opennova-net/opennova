@@ -61,7 +61,7 @@ static int block0_row0_min_raw(const std::vector<float> &h, int) {
 
 int main() {
     // 1. raw16 quantization fixtures: truncation toward zero, clamped to uint16.
-    //    Matches NovaTerrainData::get_depth_raw16 and the bake guard exactly.
+    //    Matches TerrainData::get_depth_raw16 and the bake guard exactly.
     check(cdep_height_to_raw16(0.0) == 0, "0.0 -> 0");
     check(cdep_height_to_raw16(1.0) == 256, "1.0 -> 256");
     check(cdep_height_to_raw16(255.996) == 65534, "255.996 -> 65534 (truncation, not 65535)");

@@ -234,7 +234,7 @@ func _on_server_log(text: String) -> void:
 
 
 func _status(text: String) -> void:
-	if shell != null and shell.has_method("show_status_message"):
+	if shell != null:
 		shell.show_status_message(text, 6.0)
 
 

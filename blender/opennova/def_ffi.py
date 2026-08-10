@@ -1,7 +1,7 @@
 """
 ctypes bindings for the DEF file C API (libopennova.so / opennova.dll).
 
-Mirrors structs from engine/formats/def/include/def/def.h.
+Mirrors structs from engine/formats/def/def.h.
 Only wraps weapons and items parsing (what definitions.py actually consumes).
 """
 
@@ -78,7 +78,7 @@ class DefWeaponDef(ctypes.Structure):
         ("sights_count", ctypes.c_size_t),
         ("raw_lines", ctypes.c_void_p),
         ("raw_lines_count", ctypes.c_size_t),
-        # PLAYER_INFO loadout fields (appended; mirror engine/formats/def/include/def/def.h).
+        # PLAYER_INFO loadout fields (appended; mirror engine/formats/def/def.h).
         # loadout_selectable/loadout_subclasses/maxclips live above with the armory keys.
         ("loadout_menu_textid", ctypes.c_char * 64),
         ("loadout_menu_ttdesc", ctypes.c_char * 128),
@@ -228,6 +228,9 @@ class DefItemDef(ctypes.Structure):
         # Person-item firing and lifetime fields appended C-side after the raw
         # source lines; keep them here so entries[] retains the native stride.
         ("ammo_closeattack", ctypes.c_char * 32),
+        # items.def launchups_closeattack: the def-authored AI muzzle
+        # userpoint name (world-wac-ai-re §21.2).
+        ("launchups_closeattack", ctypes.c_char * 32),
         ("clipsize", ctypes.c_int),
         ("deathtime_ticks", ctypes.c_int),
         # Emplacement weapon link ('primary_weapon'; empty = key absent; mirror def.h).

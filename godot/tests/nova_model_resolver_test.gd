@@ -1,6 +1,6 @@
 extends GutTest
 
-const NovaModelResolver := preload("res://adapter/mission/nova_model_resolver.gd")
+const NovaModelResolver := preload("res://game/mission/nova_model_resolver.gd")
 const MODEL_FIXTURE := "res://../fixtures/3dp/CmpFireN/CmpFireN.3di"
 const PERSON_ID := 105310
 const DYNAMIC_SHADOW_ID := 101291
@@ -17,9 +17,9 @@ func after_each() -> void:
 
 func test_make_model_applies_retail_dynamic_shadow_admission() -> void:
 	_stage_fixture()
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(_fixture_root()), OK)
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	var load_error := item_db.load(_fixture_root().path_join("items.def"))
 	assert_eq(load_error, OK, item_db.get_last_error())
 	if load_error != OK:
@@ -29,10 +29,10 @@ func test_make_model_applies_retail_dynamic_shadow_admission() -> void:
 	var parent := Node3D.new()
 	add_child_autofree(parent)
 
-	var person := resolver.make_model(PERSON_ID, parent) as NovaObjectModel
+	var person := resolver.make_model(PERSON_ID, parent) as ObjectModel
 	var dynamic_shadow := resolver.make_model(
-			DYNAMIC_SHADOW_ID, parent) as NovaObjectModel
-	var ordinary := resolver.make_model(ORDINARY_ID, parent) as NovaObjectModel
+			DYNAMIC_SHADOW_ID, parent) as ObjectModel
+	var ordinary := resolver.make_model(ORDINARY_ID, parent) as ObjectModel
 
 	assert_not_null(person)
 	assert_not_null(dynamic_shadow)

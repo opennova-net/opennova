@@ -12,7 +12,7 @@ var _props_binder: FieldBinder
 # Link-widget services (resolve/pick/jump Callables from the shell). They arrive
 # AFTER setup() builds the forms (the workspace injects them post-build), so the
 # setter re-configures the already-built widgets.
-var _ref_services: Dictionary = {}
+var _ref_services := LinkServices.new()
 var _terrain_ref_widget: ResourceRefWidget
 var _env_ref_widget: ResourceRefWidget
 # Mission-tab bulk re-ground (B8): the manual twin of the workspace's activate-time
@@ -59,9 +59,9 @@ func _build_props_panel() -> void:
 	InspectorForms.add_section_heading(_props_box, "Game mode")
 	_add_props_game_mode()
 	InspectorForms.add_section_heading(_props_box, "Options")
-	_add_props_flag(NovaMissionData.ATTRIB_ENABLE_NVG, "Night vision")
-	_add_props_flag(NovaMissionData.ATTRIB_START_WITH_NVG_ON, "Start with night vision on")
-	_add_props_flag(NovaMissionData.ATTRIB_ROTATE_MAP_180, "Rotate map 180")
+	_add_props_flag(MissionData.ATTRIB_ENABLE_NVG, "Night vision")
+	_add_props_flag(MissionData.ATTRIB_START_WITH_NVG_ON, "Start with night vision on")
+	_add_props_flag(MissionData.ATTRIB_ROTATE_MAP_180, "Rotate map 180")
 	InspectorForms.add_section_heading(_props_box, "Audio")
 	_add_props_spin("music", "Music track", 0.0, 1000000.0)
 	_add_props_spin("reverb", "Reverb", 0.0, 1000000.0)
@@ -79,15 +79,15 @@ func _build_reground_button() -> void:
 	_reground_button.visible = false
 	_inspector._mission_content.add_child(_reground_button)
 	_reground_button.pressed.connect(func() -> void:
-		if _inspector._controller != null and _inspector._controller.has_method("reground_drifted"):
+		if _inspector._controller != null:
 			_inspector._controller.reground_drifted())
 
 
 func _refresh_reground_button() -> void:
 	if _reground_button == null:
 		return
-	var mission: NovaMissionData = _inspector._controller.get_mission() if _inspector._controller != null else null
-	_reground_button.visible = mission != null and _inspector._controller.has_method("reground_drifted")
+	var mission: MissionData = _inspector._controller.get_mission() if _inspector._controller != null else null
+	_reground_button.visible = mission != null
 
 
 func _add_props_line(field: String, label: String, tooltip: String = "") -> LineEdit:
@@ -132,9 +132,9 @@ func _add_props_ref(field: String, kind: String, label: String, tooltip: String 
 
 
 ## Wires the link widgets' resolve/pick/jump Callables (see
-## ResourceRefWidget.services_from_shell). Idempotent; safe before or after
+## LinkServices.from_shell). Idempotent; safe before or after
 ## the form is built.
-func set_reference_services(services: Dictionary) -> void:
+func set_reference_services(services: LinkServices) -> void:
 	_ref_services = services
 	_inspector._configure_selected_graphic_ref()
 	if _terrain_ref_widget != null and is_instance_valid(_terrain_ref_widget):
@@ -186,20 +186,22 @@ func _add_props_flag(bit: int, label: String) -> CheckBox:
 
 # Engine combobox order [orig: sub_402770 @0x404eff dfx2med.exe]. Index 0 = no mode bits (Single
 # Player). The dropdown uses the list INDEX as the item id (Godot ids are 32-bit, but the high modes
-# like Search & Destroy = 0x80000000 are not), mapping index <-> attrib_flags bit through this table.
+# like Search & Destroy = 0x80000000 are not), mapping index <-> attrib_flags bit through this
+# table, composed from the bound MissionData.ATTRIB_* names in the same witnessed order (the bit
+# values live at the engine home, engine/formats/mission bms.h).
 const _GAME_MODE_BITS := [
-	0,          # Single player (no mode bits)
-	0x1000000,  # Co-op
-	0x2000000,  # Deathmatch
-	0x20000000, # Team deathmatch
-	0x4000000,  # King of the hill
-	0x40000000, # Team king of the hill
-	0x10000000, # Capture the flag
-	0x800000,   # Attack & defend
-	0x80000000, # Search & destroy
-	0x8000000,  # Flagball
-	0x10000,    # Advance & secure
-	0x20000,    # Conquer & control
+	0,                                     # Single player (no mode bits)
+	MissionData.ATTRIB_COOP,
+	MissionData.ATTRIB_DEATHMATCH,
+	MissionData.ATTRIB_TEAM_DEATHMATCH,
+	MissionData.ATTRIB_KING_OF_THE_HILL,
+	MissionData.ATTRIB_TEAM_KING_OF_THE_HILL,
+	MissionData.ATTRIB_CAPTURE_THE_FLAG,
+	MissionData.ATTRIB_ATTACK_AND_DEFEND,
+	MissionData.ATTRIB_SEARCH_AND_DESTROY,
+	MissionData.ATTRIB_FLAGBALL,
+	MissionData.ATTRIB_ADVANCE_AND_SECURE,
+	MissionData.ATTRIB_CONQUER_AND_CONTROL,
 ]
 const _GAME_MODE_LABELS := [
 	"Single player", "Co-op", "Deathmatch", "Team deathmatch", "King of the hill",
@@ -258,7 +260,7 @@ func _set_header_flag(bit: int, on: bool) -> void:
 func _refresh_props_panel() -> void:
 	if _props_toggle == null:
 		return
-	var mission: NovaMissionData = _inspector._controller.get_mission() if _inspector._controller != null else null
+	var mission: MissionData = _inspector._controller.get_mission() if _inspector._controller != null else null
 	if mission == null:
 		_props_toggle.visible = false
 		_props_box.visible = false

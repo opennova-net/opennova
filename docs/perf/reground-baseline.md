@@ -86,7 +86,7 @@ bodies per apply; the targeted path touches only existing objects.
 
 ## After the batch height sampler (same protocol, same session)
 
-`NovaTerrainData.sample_heights_world_live` collapses the ~6 boundary
+`TerrainData.sample_heights_world_live` collapses the ~6 boundary
 crossings per entity to one call per build (parity with the scalar sampler
 pinned by terrain_height_revision_test). The honest result: the cache-miss
 build stays ~31-34 ms — it is **marshal-bound** (`get_all_entities`'s

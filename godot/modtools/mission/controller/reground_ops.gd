@@ -16,7 +16,7 @@ extends "res://modtools/mission/controller/controller_section.gd"
 # ground points no longer sit on the surface — the workspace prompts to re-ground
 # on a non-zero count. Returns 0 on the swap/clear and no-drift paths.
 func reconcile_with_terrain() -> int:
-	if _c._mission == null or _c.terrain_editor == null or not _c.terrain_editor.has_method("get_current_trn_path"):
+	if _c._mission == null or _c.terrain_editor == null:
 		return 0
 	if String(_c.terrain_editor.get_current_trn_path()) != _c._loaded_trn_path:
 		_c._io.clear()
@@ -24,7 +24,7 @@ func reconcile_with_terrain() -> int:
 	# Same terrain file: detect height edits made under the loaded mission. The
 	# revision gate keeps the common no-edit activate at zero cost (no request
 	# build, no sampling).
-	if _c._loaded_height_revision < 0 or not _c.terrain_editor.has_method("get_height_revision"):
+	if _c._loaded_height_revision < 0:
 		return 0
 	if int(_c.terrain_editor.get_height_revision()) == _c._loaded_height_revision:
 		return 0
@@ -43,7 +43,7 @@ func reconcile_with_terrain() -> int:
 
 
 func _record_height_revision() -> void:
-	if _c.terrain_editor != null and _c.terrain_editor.has_method("get_height_revision"):
+	if _c.terrain_editor != null:
 		_c._loaded_height_revision = int(_c.terrain_editor.get_height_revision())
 	else:
 		_c._loaded_height_revision = -1
@@ -53,15 +53,13 @@ func _record_height_revision() -> void:
 # declaration). Empty when a build precondition is missing — never cached, every
 # call rebuilds, exactly the pre-cache behavior.
 func _reground_token() -> Array:
-	if _c._mission == null or _c._placer == null or _c.terrain_editor == null \
-			or not _c.terrain_editor.has_method("sample_height_world") \
-			or not _c.terrain_editor.has_method("get_height_revision"):
+	if _c._mission == null or _c._placer == null or _c.terrain_editor == null:
 		return []
 	return [
 		_c._mission.get_instance_id(),
 		_c._mission.object_records_revision(),
 		int(_c.terrain_editor.get_height_revision()),
-		NovaResourceRoot.cache_epoch(),
+		ResourceRoot.cache_epoch(),
 	]
 
 
@@ -216,9 +214,9 @@ func _apply_reground_world_update(requests: Array, moved_rows: PackedInt32Array,
 	for n in moved_rows.size():
 		var request: Dictionary = requests[moved_rows[n]]
 		var kind := int(request.get("kind", -1))
-		if kind == NovaMissionData.KIND_MARKER:
+		if kind == MissionData.KIND_MARKER:
 			any_marker = true
-		moved["%d:%d" % [kind, int(request.get("index", -1))]] = _c.MissionObjectPlacer.entity_transform(
+		moved["%d:%d" % [kind, int(request.get("index", -1))]] = MissionObjectPlacer.entity_transform(
 				new_positions_bms[n], request.get("rotation_deg", Vector3.ZERO))
 	for r in _c._pickable:
 		var rec: Dictionary = r
@@ -244,7 +242,7 @@ func _apply_reground_world_update(requests: Array, moved_rows: PackedInt32Array,
 		for n in moved_rows.size():
 			var request: Dictionary = requests[moved_rows[n]]
 			var kind := int(request.get("kind", -1))
-			if kind == NovaMissionData.KIND_MARKER:
+			if kind == MissionData.KIND_MARKER:
 				continue
 			var index := int(request.get("index", -1))
 			var body := container.get_node_or_null(NodePath("Pick_%d_%d" % [kind, index])) as Node3D
@@ -292,7 +290,7 @@ func _build_reground_requests() -> Array:
 	var requests: Array = []
 	if _c._mission == null or _c._placer == null:
 		return requests
-	if _c.terrain_editor == null or not _c.terrain_editor.has_method("sample_height_world"):
+	if _c.terrain_editor == null:
 		return requests
 	# Pass 1: walk the entities, resolving each one's rotated ground point (and
 	# skipping unresolved graphics); the sample points land in a parallel packed
@@ -303,15 +301,15 @@ func _build_reground_requests() -> Array:
 	for e in _c._mission.get_all_entities():
 		var entity: Dictionary = e
 		var kind := int(entity.get("kind", -1))
-		var ground_godot: Vector3 = _c.MissionObjectPlacer.bms_to_godot_position(entity.get("position", Vector3.ZERO))
+		var ground_godot: Vector3 = MissionObjectPlacer.bms_to_godot_position(entity.get("position", Vector3.ZERO))
 		var anchor_bms := Vector3.ZERO
-		if kind != NovaMissionData.KIND_MARKER:
+		if kind != MissionData.KIND_MARKER:
 			var graphic: String = _c._placer.graphic_for(int(entity.get("item_id", 0)))
 			if graphic.is_empty():
 				continue
 			var anchor_godot: Vector3 = _c._placer.ground_anchor_godot(graphic)
-			anchor_bms = _c.MissionObjectPlacer.godot_to_bms_position(anchor_godot)
-			ground_godot += _c.MissionObjectPlacer.bms_to_godot_basis(entity.get("rotation_deg", Vector3.ZERO)) * anchor_godot
+			anchor_bms = MissionObjectPlacer.godot_to_bms_position(anchor_godot)
+			ground_godot += MissionObjectPlacer.bms_to_godot_basis(entity.get("rotation_deg", Vector3.ZERO)) * anchor_godot
 		rows.append({
 			"kind": kind,
 			"index": int(entity.get("index", -1)),
@@ -320,16 +318,9 @@ func _build_reground_requests() -> Array:
 			"rotation_deg": entity.get("rotation_deg", Vector3.ZERO),
 		})
 		points.append(Vector2(ground_godot.x, ground_godot.z))
-	# Pass 2: sample — batched when the editor offers it, else the scalar loop so
-	# any duck-typed mount (a headless stub faking the surface) keeps working.
-	var heights: PackedFloat32Array
-	if _c.terrain_editor.has_method("sample_heights_world"):
-		heights = _c.terrain_editor.sample_heights_world(points)
-	else:
-		heights = PackedFloat32Array()
-		heights.resize(points.size())
-		for i in points.size():
-			heights[i] = _c.terrain_editor.sample_height_world(points[i].x, points[i].y)
+	# Pass 2: sample. TerrainEditorBase's default batch loops the scalar
+	# sampler, so a stub overriding either form works.
+	var heights: PackedFloat32Array = _c.terrain_editor.sample_heights_world(points)
 	# Pass 3: assemble, dropping off-terrain rows (NAN) exactly as the per-point
 	# builder did.
 	for i in rows.size():
@@ -341,7 +332,7 @@ func _build_reground_requests() -> Array:
 		requests.append({
 			"kind": row["kind"],
 			"index": row["index"],
-			"ground_hit_bms": _c.MissionObjectPlacer.godot_to_bms_position(Vector3(ground_godot.x, height, ground_godot.z)),
+			"ground_hit_bms": MissionObjectPlacer.godot_to_bms_position(Vector3(ground_godot.x, height, ground_godot.z)),
 			"ground_anchor_bms": row["anchor_bms"],
 			# Not read by the engine (its parser ignores unknown keys); carried for
 			# the targeted world update, which rebuilds the moved entities'

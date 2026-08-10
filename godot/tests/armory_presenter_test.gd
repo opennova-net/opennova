@@ -1,133 +1,55 @@
 extends GutTest
 
-const ArmoryPresenter := preload("res://adapter/world/armory_presenter.gd")
+# ArmoryPresenter on the typed surfaces (ADR 0034): a REAL Simulation owns the
+# player/loadout state (mission boot + spawn + weapon table — the same recipe
+# the satchel/grenade tests always used), the world seam is a GameWorld
+# subclass harness, and the zone gate is exercised through try_open() while the
+# staged tests drive the post-gate open() directly (no armory volume is
+# authored in the in-memory mission).
+
+const ArmoryPresenter := preload("res://game/world/armory_presenter.gd")
 const TMP_DIR := "res://.godot/armory_presenter_test"
 
 
-class FakeSim:
-	extends RefCounted
-	var in_zone := true
-	var multiplayer := false
-	var player_class := 8
-	var class_allow_mask := 0x3FF
-	var weapon := ""
-	var entity_team := 2
-	var applies: Array = []
-
-	func local_player_in_armory_zone() -> bool:
-		return in_zone
-
-	func get_local_player_team() -> int:
-		return entity_team
-
-	func is_host_listening() -> bool:
-		return multiplayer
-
-	func is_joiner() -> bool:
-		return false
-
-	func get_local_player_class() -> int:
-		return player_class
-
-	func get_class_allow_mask() -> int:
-		return class_allow_mask
-
-	func get_local_player_weapon_name() -> String:
-		return weapon
-
-	# The ACCEPT now carries the full multi-slot kit (Array[Dictionary] rows
-	# {name, ammo_primary, ammo_secondary, flags}); the first row is the primary
-	# [orig: WeaponLoadout_ApplyFromBuffer @0x565cd0 tuple parse].
-	func apply_local_player_loadout(kit: Array, selected_class: int) -> bool:
-		var primary := ""
-		if kit.size() > 0:
-			primary = String((kit[0] as Dictionary).get("name", ""))
-		applies.append({
-			"kit": kit.duplicate(true),
-			"primary": primary,
-			"player_class": selected_class,
-		})
-		weapon = primary
-		player_class = selected_class
-		return true
-
-
-class FakeWorld:
-	extends Node
-	var root: NovaResourceRoot
-	var weapons: NovaWeaponDatabase
-	var sim
+class ArmoryWorldHarness:
+	extends GameWorld
+	var root: ResourceRoot
+	var weapons: WeaponDatabase
+	var sim: Simulation
 	var set_weapon_calls: Array[String] = []
 	var clear_calls := 0
 
-	func get_sim():
+	func get_sim() -> Simulation:
 		return sim
 
-	func get_resource_root() -> NovaResourceRoot:
+	func get_resource_root() -> ResourceRoot:
 		return root
 
-	func get_weapon_database() -> NovaWeaponDatabase:
+	func get_weapon_database() -> WeaponDatabase:
 		return weapons
 
-	func local_player_viewmodel_def():
+	func local_player_viewmodel_def() -> PlayerViewmodelDef:
 		return null
 
-	func set_local_player_weapon_by_name(name: String) -> bool:
-		set_weapon_calls.append(name)
+	func set_local_player_weapon_by_name(weapon_name: String,
+			_preserve_slot_state: bool = false) -> bool:
+		set_weapon_calls.append(weapon_name)
 		return true
 
 	func clear_local_player_weapon() -> void:
 		clear_calls += 1
 
 
-class FakePlayerPresenter:
-	extends RefCounted
+class CapturePlayerPresenter:
+	extends LocalPlayerPresenter
 	var refresh_calls := 0
 
 	func refresh_viewmodel() -> void:
 		refresh_calls += 1
 
 
-class ArmoryZoneSimProxy:
-	extends RefCounted
-	var inner: NovaSimulation
-
-	func _init(p_inner: NovaSimulation) -> void:
-		inner = p_inner
-
-	func local_player_in_armory_zone() -> bool:
-		return true
-
-	func is_host_listening() -> bool:
-		return false
-
-	func is_joiner() -> bool:
-		return false
-
-	func get_local_player_team() -> int:
-		return inner.get_local_player_team()
-
-	func get_local_player_class() -> int:
-		return inner.get_local_player_class()
-
-	func get_class_allow_mask() -> int:
-		return inner.get_class_allow_mask()
-
-	func get_local_player_weapon_name() -> String:
-		return inner.get_local_player_weapon_name()
-
-	func get_local_player_inventory() -> Dictionary:
-		return inner.get_local_player_inventory()
-
-	func get_local_player_loadout() -> Array:
-		return inner.get_local_player_loadout()
-
-	func apply_local_player_loadout(kit: Array, selected_class: int) -> bool:
-		return inner.apply_local_player_loadout(kit, selected_class)
-
-
 func before_each() -> void:
-	NovaStrings.clear()
+	Strings.clear()
 	NovaMusicService.set_var(2, 0)
 	var dir := ProjectSettings.globalize_path(TMP_DIR)
 	if not DirAccess.dir_exists_absolute(dir):
@@ -139,7 +61,7 @@ func before_each() -> void:
 
 
 func after_each() -> void:
-	NovaStrings.clear()
+	Strings.clear()
 
 
 func after_all() -> void:
@@ -159,52 +81,93 @@ func _copy_fixture(source: String, target: String) -> void:
 		output.close()
 
 
-func _make_root() -> NovaResourceRoot:
-	var root := NovaResourceRoot.new()
+func _make_root() -> ResourceRoot:
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(TMP_DIR)), OK)
 	return root
 
 
-func _make_weapons() -> NovaWeaponDatabase:
-	var weapons := NovaWeaponDatabase.new()
+func _make_weapons() -> WeaponDatabase:
+	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load(ProjectSettings.globalize_path(TMP_DIR).path_join("weapon.def")), OK)
 	return weapons
 
 
-func _label_text(node: Node) -> String:
-	if node is Label:
-		return (node as Label).text
-	for child in node.get_children():
-		var text := _label_text(child)
-		if not text.is_empty():
-			return text
-	return ""
+# A REAL spawned local player over the in-memory default mission, with the
+# fixture weapon.def loaded — the authoritative context every open reads.
+# The offline recipe (no listen session) keeps apply_local_player_loadout on
+# its SP-local leg; the MP tests layer configure_host_session + a real listen
+# socket on top AFTER staging the kit.
+func _real_sim(entity_team: int = 2) -> Simulation:
+	var mission := MissionData.new()
+	assert_eq(mission.create_default(), OK)
+	var sim := Simulation.new()
+	autofree(sim)
+	assert_true(sim.load_from_mission_data(mission))
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, entity_team))
+	assert_eq(sim.load_weapon_table(_make_root(), "weapon.def"), OK)
+	return sim
+
+
+func _make_world(sim: Simulation, weapons: WeaponDatabase) -> ArmoryWorldHarness:
+	var world := ArmoryWorldHarness.new()
+	# GameWorld's _ready resolves its $Terrain child by name (the scene always
+	# carries one); the bare harness supplies it the same way host_punt's does.
+	var terrain := Terrain.new()
+	terrain.name = "Terrain"
+	world.add_child(terrain)
+	world.root = _make_root()
+	world.weapons = weapons
+	world.sim = sim
+	add_child_autofree(world)
+	return world
 
 
 func _weapon_display_text(row: Dictionary) -> String:
 	var textid := String(row.get("display_textid", ""))
-	var gametext: RtxtStringFile = NovaStrings.get_table("gametext")
+	var gametext: RtxtStringFile = Strings.get_table("gametext")
 	if gametext != null and not textid.is_empty() \
 			and gametext.has_string_in_section("WepDes", textid):
 		return gametext.get_string_in_section("WepDes", textid)
 	return String(row.get("name", ""))
 
 
+func _loadout_names(sim: Simulation) -> Array[String]:
+	var names: Array[String] = []
+	for value in sim.get_local_player_loadout():
+		names.append(String((value as Dictionary).get("name", "")))
+	return names
+
+
+func test_out_of_zone_try_open_is_the_silent_gate() -> void:
+	# No type-6 armory volume exists in the in-memory mission, so the spawned
+	# player is out of zone and the armory key is silently ignored
+	# [orig: Flags & 0x400000 gate @0x4e0b4d].
+	var sim := _real_sim()
+	var world := _make_world(sim, _make_weapons())
+	var overlay := Control.new()
+	add_child_autofree(overlay)
+	var presenter := ArmoryPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup(world, null, overlay)
+
+	assert_false(presenter.try_open(), "out of zone the key is ignored")
+	assert_null(overlay.get_node_or_null("ArmoryMenu"))
+
+
 func test_sp_open_uses_authoritative_context_and_full_menu_protocol() -> void:
 	var weapons := _make_weapons()
 	var red_rifleman: Array = weapons.get_slot_weapons(
-			NovaWeaponDatabase.SLOT_PRIMARY, 8, 1)
+			WeaponDatabase.SLOT_PRIMARY, 8, 1)
 	assert_gt(red_rifleman.size(), 0, "fixture has a red rifleman primary")
 	var equipped := String((red_rifleman[0] as Dictionary).get("name", ""))
 
-	var sim := FakeSim.new()
-	sim.weapon = equipped
-	var world := FakeWorld.new()
-	world.root = _make_root()
-	world.weapons = weapons
-	world.sim = sim
-	add_child_autofree(world)
-	var player_presenter := FakePlayerPresenter.new()
+	var sim := _real_sim(2)
+	assert_true(sim.apply_local_player_loadout([{"name": equipped}], 8),
+			"the real simulation owns the equipped rifleman context")
+	var world := _make_world(sim, weapons)
+	var player_presenter := CapturePlayerPresenter.new()
+	add_child_autofree(player_presenter)
 	var overlay := Control.new()
 	add_child_autofree(overlay)
 	overlay.size = Vector2(1600, 900)
@@ -212,62 +175,61 @@ func test_sp_open_uses_authoritative_context_and_full_menu_protocol() -> void:
 	add_child_autofree(presenter)
 	presenter.setup(world, player_presenter, overlay)
 
-	assert_true(presenter.try_open(), "offline player in a type-6 zone opens the armory")
-	var menu := overlay.get_node_or_null("ArmoryMenu") as NovaMnuMenu
-	assert_not_null(menu)
-	assert_eq(menu.size, Vector2(800, 600), "weapon.mnu keeps its authored design space")
-	assert_eq(menu.scale, Vector2(2.0, 1.5), "the design space fills a 1600x900 presenter")
+	assert_true(presenter.open(), "the staged player opens the armory")
+	var frame := overlay.get_node_or_null("ArmoryMenu") as MenuFrame
+	assert_not_null(frame)
+	var driver: MenuDriver = presenter.get_menu_driver()
+	assert_not_null(driver)
+	# The frame scales its fixed 800x600 design space to its OWN rect internally
+	# [orig: CUIScene_SetScreenScale @0x639480]; the presenter fit just fills the
+	# ui parent (replaces the old Control size/scale math).
+	assert_eq(frame.position, Vector2.ZERO, "the armory frame anchors at the parent origin")
+	assert_eq(frame.size, Vector2(1600, 900), "the design space fills a 1600x900 presenter")
 	overlay.size = Vector2(1200, 600)
-	assert_eq(menu.scale, Vector2(1.5, 1.0), "the fit follows presenter resizes")
+	assert_eq(frame.size, Vector2(1200, 600), "the fit follows presenter resizes")
 
-	var spin := menu.find_child("PLAYER_CLASS", true, false) as NovaMnuSpinList
-	assert_eq(spin.get_value_index(), 3, "entity class 8 selects Rifleman by value")
-	assert_ne(spin.process_mode, Node.PROCESS_MODE_DISABLED,
+	var spin := driver.widget_id("PLAYER_CLASS")
+	assert_gte(spin, 0, "weapon.mnu authors the class spin")
+	assert_eq(driver.selected_row(spin), 3, "entity class 8 selects Rifleman by value")
+	assert_false(driver.is_widget_disabled(spin),
 		"the class selector is LIVE offline — D-MNU-10 (retail enables it only "
 		+ "in-session [orig: UI_InitTeamClassSelection @0x567370]; deliberate "
 		+ "divergence under the ADR 0009 listen-server model, user decision)")
-	var primary := menu.find_child("PRIMARY", true, false) as NovaMnuCombo
-	assert_eq(primary.get_item_count(), red_rifleman.size() + 1,
+	var primary := driver.widget_id("PRIMARY")
+	assert_eq(driver.item_count(primary), red_rifleman.size() + 1,
 		"entity team 2 maps to the red weapon-filter domain")
-	assert_gt(primary.get_selected(), 0, "the authoritative equipped primary is reselected")
+	assert_gt(driver.selected_row(primary), 0, "the authoritative equipped primary is reselected")
 
-	var menutxt: RtxtStringFile = NovaStrings.get_table("menutxt")
-	var cancel := menu.find_child("CANCEL", true, false)
-	assert_eq(_label_text(cancel), menutxt.get_string("WD_NOHOT_CANCEL"),
+	var menutxt: RtxtStringFile = Strings.get_table("menutxt")
+	var cancel := driver.widget_id("CANCEL")
+	assert_gte(cancel, 0, "weapon.mnu authors the CANCEL button")
+	assert_eq(driver.get_widget_text(cancel), menutxt.get_string("WD_NOHOT_CANCEL"),
 		"standalone weapon.mnu resolves button IDs through menutxt")
-	assert_ne(_label_text(cancel), "WD_NOHOT_CANCEL", "raw RTXT IDs are never shown")
+	assert_ne(driver.get_widget_text(cancel), "WD_NOHOT_CANCEL", "raw RTXT IDs are never shown")
 	assert_eq(NovaMusicService.get_var(2), 14, "WEAPON MUSICVAR drives retail menu Var2")
 
-	menu.find_child("ACCEPT", true, false).emit_signal("pressed")
-	assert_eq(String((sim.applies.back() as Dictionary)["primary"]), equipped,
+	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
+	assert_has(_loadout_names(sim), equipped,
 		"unchanged ACCEPT preserves the entity's equipped weapon")
-	assert_eq(world.set_weapon_calls, [equipped])
+	assert_eq(world.set_weapon_calls, [equipped] as Array[String])
 
-	assert_true(presenter.try_open(), "the same armory can reopen after ACCEPT")
-	menu = overlay.get_node("ArmoryMenu") as NovaMnuMenu
-	primary = menu.find_child("PRIMARY", true, false) as NovaMnuCombo
-	primary.select_silent(0)
-	menu.find_child("ACCEPT", true, false).emit_signal("pressed")
-	assert_eq(String((sim.applies.back() as Dictionary)["primary"]), "",
+	assert_true(presenter.open(), "the same armory can reopen after ACCEPT")
+	driver.select_row(primary, 0, false)  # the authored NONE row, silently
+	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
+	assert_false(_loadout_names(sim).has(equipped),
 		"the authored NONE row reaches the simulation")
 	assert_eq(world.clear_calls, 1, "NONE clears the rendered/action weapon state")
 	assert_eq(player_presenter.refresh_calls, 2, "both equip and unequip rebuild the FP view")
 
 
 func test_open_preselects_the_authoritative_satchel_loadout() -> void:
-	var mission := NovaMissionData.new()
-	assert_eq(mission.create_default(), OK)
-	var simulation := NovaSimulation.new()
-	assert_true(simulation.load_from_mission_data(mission))
-	assert_true(simulation.spawn_local_player(Vector3.ZERO, 0.0, 2))
-	var resource_root := _make_root()
-	assert_eq(simulation.load_weapon_table(resource_root, "weapon.def"), OK)
+	var simulation := _real_sim(2)
 	var weapons := _make_weapons()
-	var rows: Array = weapons.get_slot_weapons(NovaWeaponDatabase.SLOT_ACCESSORY, 8, 1)
+	var rows: Array = weapons.get_slot_weapons(WeaponDatabase.SLOT_ACCESSORY, 8, 1)
 	assert_gt(rows.size(), 0, "the fixture has an equippable red rifleman accessory")
 	var expected := String((rows[0] as Dictionary).get("name", ""))
 	assert_eq(expected, "WPN_SATCHEL_CHARGE", "the minimized fixture row is the satchel")
-	var primary_rows: Array = weapons.get_slot_weapons(NovaWeaponDatabase.SLOT_PRIMARY, 8, 1)
+	var primary_rows: Array = weapons.get_slot_weapons(WeaponDatabase.SLOT_PRIMARY, 8, 1)
 	assert_gt(primary_rows.size(), 0, "the fixture has a primary beside the satchel")
 	var primary := String((primary_rows[0] as Dictionary).get("name", ""))
 	assert_eq(primary, "WPN_AK47AUTO",
@@ -278,10 +240,8 @@ func test_open_preselects_the_authoritative_satchel_loadout() -> void:
 		{"name": primary, "ammo_primary": PRIMARY_CLIPS},
 		{"name": expected, "ammo_primary": ACCESSORY_CLIPS}], 8),
 		"the real simulation owns the primary + satchel kit before the armory opens")
-	var canonical_names: Array[String] = []
-	for value in simulation.get_local_player_loadout():
-		canonical_names.append(String((value as Dictionary).get("name", "")))
-	assert_eq(canonical_names, [primary, expected],
+	var canonical_names := _loadout_names(simulation)
+	assert_eq(canonical_names, [primary, expected] as Array[String],
 		"the armory transport preserves only the selectable parent tuples")
 	assert_does_not_have(canonical_names, "WPN_AK47",
 		"the primary's hidden subclass is not part of the canonical armory buffer")
@@ -293,12 +253,7 @@ func test_open_preselects_the_authoritative_satchel_loadout() -> void:
 	assert_has(inventory_names, "WPN_AK47",
 		"the expanded runtime pool contains the misleading hidden subclass")
 
-	var sim := ArmoryZoneSimProxy.new(simulation)
-	var world := FakeWorld.new()
-	world.root = resource_root
-	world.weapons = weapons
-	world.sim = sim
-	add_child_autofree(world)
+	var world := _make_world(simulation, weapons)
 	var overlay := Control.new()
 	add_child_autofree(overlay)
 	overlay.size = Vector2(800, 600)
@@ -306,28 +261,29 @@ func test_open_preselects_the_authoritative_satchel_loadout() -> void:
 	add_child_autofree(presenter)
 	presenter.setup(world, null, overlay)
 
-	assert_true(presenter.try_open(), "a fresh armory presenter opens for the equipped local player")
-	var menu := overlay.get_node("ArmoryMenu") as NovaMnuMenu
-	var accessory := menu.find_child("ACCESSORY", true, false) as NovaMnuCombo
-	assert_gt(accessory.get_selected(), 0,
+	assert_true(presenter.open(), "a fresh armory presenter opens for the equipped local player")
+	var driver: MenuDriver = presenter.get_menu_driver()
+	assert_not_null(driver)
+	var accessory := driver.widget_id("ACCESSORY")
+	assert_gt(driver.selected_row(accessory), 0,
 		"ACCESSORY pre-selects the satchel that is already in the player's loadout")
-	assert_eq(accessory.get_item_text(accessory.get_selected()),
+	assert_eq(driver.item_text(accessory, driver.selected_row(accessory)),
 		_weapon_display_text(rows[0] as Dictionary),
 		"the selected accessory row is exactly the canonical satchel parent")
-	var primary_combo := menu.find_child("PRIMARY", true, false) as NovaMnuCombo
-	assert_gt(primary_combo.get_selected(), 0,
+	var primary_combo := driver.widget_id("PRIMARY")
+	assert_gt(driver.selected_row(primary_combo), 0,
 		"PRIMARY pre-selects the canonical AK parent instead of relying on fallback")
-	assert_eq(primary_combo.get_item_text(primary_combo.get_selected()),
+	assert_eq(driver.item_text(primary_combo, driver.selected_row(primary_combo)),
 		_weapon_display_text(primary_rows[0] as Dictionary),
 		"the selected primary row is exactly WPN_AK47AUTO")
-	var primary_ammo := menu.find_child("PRIMARY_AMMO1", true, false) as NovaMnuCombo
-	var accessory_ammo := menu.find_child("ACCESSORY_AMMO1", true, false) as NovaMnuCombo
-	assert_eq(primary_ammo.get_selected(), PRIMARY_CLIPS - 1,
+	var primary_ammo := driver.widget_id("PRIMARY_AMMO1")
+	var accessory_ammo := driver.widget_id("ACCESSORY_AMMO1")
+	assert_eq(driver.selected_row(primary_ammo), PRIMARY_CLIPS - 1,
 		"first open converts the canonical primary clip count to its zero-based row")
-	assert_eq(accessory_ammo.get_selected(), ACCESSORY_CLIPS - 1,
+	assert_eq(driver.selected_row(accessory_ammo), ACCESSORY_CLIPS - 1,
 		"first open converts the canonical satchel clip count to its zero-based row")
 
-	menu.find_child("ACCEPT", true, false).emit_signal("pressed")
+	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
 	var accepted_by_name := {}
 	for value in simulation.get_local_player_loadout():
 		var row := value as Dictionary
@@ -336,24 +292,17 @@ func test_open_preselects_the_authoritative_satchel_loadout() -> void:
 		"untouched ACCEPT converts the primary row back to the canonical clip count")
 	assert_eq(int(accepted_by_name.get(expected, -1)), ACCESSORY_CLIPS,
 		"untouched ACCEPT converts the satchel row back to the canonical clip count")
-	simulation.free()
 
 
 func test_open_populates_the_authored_grenade_combo_from_weapon_def() -> void:
-	var mission := NovaMissionData.new()
-	assert_eq(mission.create_default(), OK)
-	var simulation := NovaSimulation.new()
-	assert_true(simulation.load_from_mission_data(mission))
-	assert_true(simulation.spawn_local_player(Vector3.ZERO, 0.0, 2))
-	var resource_root := _make_root()
-	assert_eq(simulation.load_weapon_table(resource_root, "weapon.def"), OK)
+	var simulation := _real_sim(2)
 	var weapons := _make_weapons()
 	var grenade_rows: Array = weapons.get_slot_weapons(
-			NovaWeaponDatabase.SLOT_GRENADE, 8, 1)
+			WeaponDatabase.SLOT_GRENADE, 8, 1)
 	assert_eq(grenade_rows.size(), 3,
 		"the real weapon.def fixture has three selectable red rifleman grenades")
 	var primary_rows: Array = weapons.get_slot_weapons(
-			NovaWeaponDatabase.SLOT_PRIMARY, 8, 1)
+			WeaponDatabase.SLOT_PRIMARY, 8, 1)
 	assert_gt(primary_rows.size(), 0, "the canonical kit has a normal equipped primary")
 	var primary := String((primary_rows[0] as Dictionary).get("name", ""))
 	var kit: Array[Dictionary] = [{"name": primary}]
@@ -365,31 +314,27 @@ func test_open_populates_the_authored_grenade_combo_from_weapon_def() -> void:
 	assert_true(simulation.apply_local_player_loadout(kit, 8),
 		"the authoritative simulation owns all three grenade tuples before first open")
 
-	var sim := ArmoryZoneSimProxy.new(simulation)
-	var world := FakeWorld.new()
-	world.root = resource_root
-	world.weapons = weapons
-	world.sim = sim
-	add_child_autofree(world)
+	var world := _make_world(simulation, weapons)
 	var overlay := Control.new()
 	add_child_autofree(overlay)
 	var presenter := ArmoryPresenter.new()
 	add_child_autofree(presenter)
 	presenter.setup(world, null, overlay)
 
-	assert_true(presenter.try_open(), "the real weapon.mnu armory opens")
-	var menu := overlay.get_node("ArmoryMenu") as NovaMnuMenu
+	assert_true(presenter.open(), "the real weapon.mnu armory opens")
+	var driver: MenuDriver = presenter.get_menu_driver()
+	assert_not_null(driver)
 	for i in grenade_rows.size():
 		var combo_name := "GRENADE_AMMO%d" % (i + 1)
-		var grenade_combo := menu.find_child(combo_name, true, false) as NovaMnuCombo
-		assert_not_null(grenade_combo, "weapon.mnu authors %s" % combo_name)
-		assert_eq(grenade_combo.get_item_count(),
+		var grenade_combo := driver.widget_id(combo_name)
+		assert_gte(grenade_combo, 0, "weapon.mnu authors %s" % combo_name)
+		assert_eq(driver.item_count(grenade_combo),
 			int((grenade_rows[i] as Dictionary).get("maxclips", 0)) + 1,
 			"%s exposes selectable 0..maxclips rows from weapon.def" % combo_name)
-		assert_eq(grenade_combo.get_selected(), i + 1,
+		assert_eq(driver.selected_row(grenade_combo), i + 1,
 			"%s preselects the authoritative canonical grenade count" % combo_name)
 
-	menu.find_child("ACCEPT", true, false).emit_signal("pressed")
+	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
 	var accepted_by_name := {}
 	for value in simulation.get_local_player_loadout():
 		var row := value as Dictionary
@@ -405,7 +350,6 @@ func test_open_populates_the_authored_grenade_combo_from_weapon_def() -> void:
 			"untouched ACCEPT preserves %s and its selected count" % grenade_name)
 		assert_has(inventory_names, grenade_name,
 			"the ArmoryPresenter ACCEPT rebuild keeps %s equipped in the slot pool" % grenade_name)
-	simulation.free()
 
 
 func test_multiplayer_open_is_live() -> void:
@@ -413,13 +357,10 @@ func test_multiplayer_open_is_live() -> void:
 	# applied kit (the sim's in-match queue leg) and the listen presenter applies
 	# server-authoritatively, so the armory opens in MP like retail
 	# [orig: WeaponLoadout_ApplyFromBuffer @0x565cd0 is_in_session leg @0x565d94].
-	var sim := FakeSim.new()
-	sim.multiplayer = true
-	var world := FakeWorld.new()
-	world.root = _make_root()
-	world.weapons = _make_weapons()
-	world.sim = sim
-	add_child_autofree(world)
+	var sim := _real_sim(2)
+	sim.configure_host_session({"gametype": 0x30020})
+	assert_true(sim.enable_host_listen(0), "the MP armory rides a real listen host")
+	var world := _make_world(sim, _make_weapons())
 	var overlay := Control.new()
 	add_child_autofree(overlay)
 	overlay.size = Vector2(800, 600)
@@ -427,20 +368,20 @@ func test_multiplayer_open_is_live() -> void:
 	add_child_autofree(presenter)
 	presenter.setup(world, null, overlay)
 
-	assert_true(presenter.try_open(), "the MP armory opens over live play")
+	assert_true(presenter.open(), "the MP armory opens over live play")
 	assert_not_null(overlay.get_node_or_null("ArmoryMenu"))
 
 
 func test_multiplayer_open_uses_retail_server_class_allow_mask() -> void:
-	var sim := FakeSim.new()
-	sim.multiplayer = true
-	sim.player_class = 8
-	sim.class_allow_mask = 1 << 9 # rifleman disallowed; engineer is the next allowed class
-	var world := FakeWorld.new()
-	world.root = _make_root()
-	world.weapons = _make_weapons()
-	world.sim = sim
-	add_child_autofree(world)
+	var sim := _real_sim(2)
+	assert_true(sim.apply_local_player_loadout([], 8),
+			"the staged player carries the disallowed rifleman class")
+	sim.configure_host_session({
+		"gametype": 0x30020,
+		"class_allow_mask": 1 << 9, # rifleman disallowed; engineer is next allowed
+	})
+	assert_true(sim.enable_host_listen(0), "the session class policy rides a real host")
+	var world := _make_world(sim, _make_weapons())
 	var overlay := Control.new()
 	add_child_autofree(overlay)
 	overlay.size = Vector2(800, 600)
@@ -448,13 +389,14 @@ func test_multiplayer_open_uses_retail_server_class_allow_mask() -> void:
 	add_child_autofree(presenter)
 	presenter.setup(world, null, overlay)
 
-	assert_true(presenter.try_open(), "the MP armory opens with a session class policy")
-	var menu := overlay.get_node_or_null("ArmoryMenu")
-	assert_not_null(menu)
-	if menu == null:
+	assert_true(presenter.open(), "the MP armory opens with a session class policy")
+	assert_not_null(overlay.get_node_or_null("ArmoryMenu"))
+	var driver: MenuDriver = presenter.get_menu_driver()
+	assert_not_null(driver)
+	if driver == null:
 		return
-	var spin := menu.find_child("PLAYER_CLASS", true, false) as NovaMnuSpinList
-	assert_not_null(spin)
-	if spin != null:
-		assert_eq(spin.get_value_index(), 4,
+	var spin := driver.widget_id("PLAYER_CLASS")
+	assert_gte(spin, 0)
+	if spin >= 0:
+		assert_eq(driver.selected_row(spin), 4,
 				"S2C 0x76 policy advances disallowed rifleman to allowed engineer")

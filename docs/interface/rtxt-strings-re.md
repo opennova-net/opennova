@@ -3,8 +3,8 @@
 Reverse-engineering record for NovaLogic's RTXT string-table format and the
 TextResource runtime that consumes it, grilled against retail
 `Jointops.exe` (Joint Operations: Combined Arms, kong IDB) on 2026-06-09.
-Reimplementation: `engine/formats/rtxt` (format), `godot/adapter/rtxt` (RtxtStringFile
-resource), `godot/adapter/strings/nova_strings.gd` (runtime model),
+Reimplementation: `engine/formats/rtxt` (format), `godot/src/rtxt` (RtxtStringFile
+resource), `godot/src/strings/nova_strings.gd` (runtime model),
 `godot/modtools/strings` (ONED workspace).
 
 Ground truth: all 98 RTXT-magic `.bin` files in the retail install
@@ -121,7 +121,7 @@ fits — pinned losslessly on retail data by
 |---|---|---|
 | D-RTXT-1 | Our writer emitted section row[+0] as a *name offset relative to the names blob*; engine needs *first-key offset relative to meta+4* | **fixed** (`rtxt.cpp write()`) |
 | D-RTXT-2 | Editor allowed entries interleaved across sections; engine requires contiguous per-section runs | **fixed**: model invariant (`add_entry` / `set_entry_section_index` insert into the section's run); ungrouped *files* load faithfully, validate as errors, and are repairable via `normalize_grouping()` |
-| D-RTXT-3 | Runtime lookup was flat-key only with empty-string misses; original is section-scoped with an override table and `??section:key??` miss marker | **fixed** as supersets: `File::find_in_section`, `RtxtStringFile.get_string_in_section`, `NovaStrings.register_table/set_override_table/lookup`; legacy flat APIs kept (they match `0x75D450`) |
+| D-RTXT-3 | Runtime lookup was flat-key only with empty-string misses; original is section-scoped with an override table and `??section:key??` miss marker | **fixed** as supersets: `File::find_in_section`, `RtxtStringFile.get_string_in_section`, `Strings.register_table/set_override_table/lookup`; legacy flat APIs kept (they match `0x75D450`) |
 | D-RTXT-4 | We require the RTXT magic on parse; the engine never checks it | **intentional**: 98/98 retail files carry it and resource-kind sniffing depends on it |
 | D-RTXT-5 | Editor flagged duplicate keys globally; same key in different sections is legitimate retail data (8 shipped files), and even in-section duplicates ship (5 sections; engine first-match-wins) | **fixed**: per-section scoping, later in-section duplicate = warning |
 | D-RTXT-6 | Header +8 was written as the full meta size; retail stores meta size − 4 (excl. count dword) | **fixed** |

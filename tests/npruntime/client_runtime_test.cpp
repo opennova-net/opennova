@@ -1348,7 +1348,7 @@ w::PlayerSpawn player_spawn(w::Vec3 pos, int16_t yaw, uint16_t net_id) {
 }
 
 // A 1-record S2C 0x0C organic-spawn body the joiner name-matches (the owner's PeerSpawned reaction,
-// mirroring NovaSimulation / joiner_connection_test).
+// mirroring Simulation / joiner_connection_test).
 std::vector<uint8_t> make_organic_spawn(uint16_t slot_id, const std::string &name, int32_t x,
                                         int32_t y, int32_t z, int32_t orient, uint8_t team,
                                         uint16_t net_id, uint8_t anim_slot) {
@@ -2069,7 +2069,7 @@ bool run_roundtrip_with_spawn_zones(bool player_paced) {
 		// Leave one real pre-pick C2S 0x0C staged at the production owner seam. The
 		// host may receive this datagram and the following pick in one socket pump;
 		// the older pose must be applied before, never after, the selected deploy
-		// pose. This is the ordering exercised by NovaSimulation's two-peer UDP path.
+		// pose. This is the ordering exercised by Simulation's two-peer UDP path.
 		stage_in_match_c2s = false;
 		if (!expect(staged_in_match_c2s != 0,
 				"zones-paced: one pre-pick uplink is staged ahead of the deployment request"))
@@ -2611,7 +2611,7 @@ bool run_host_startup_seeds_mounted_no_callback_carrier() {
 	cfg.serve_and_play = true;
 	np::start_host_session(owner, cfg);
 
-	// Match NovaSimulation's startup order: construct/install the replica pipeline after host bring-up,
+	// Match Simulation's startup order: construct/install the replica pipeline after host bring-up,
 	// then fold the queued initial stream and first whole-world compact frame together.
 	np::Server_TickUpdate(owner.ctx);
 	np::ClientRuntime host_view(host_loop);

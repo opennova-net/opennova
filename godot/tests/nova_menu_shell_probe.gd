@@ -14,7 +14,7 @@ extends SceneTree
 const MAIN_FIXTURE := "res://../fixtures/mnu/jo_main.mnu"
 const SP_FIXTURE := "res://../fixtures/mnu/jo_loadout.mnu"
 const RESULT_PATH := "user://nova_menu_shell_probe_result.txt"
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 
 
 func _initialize() -> void:

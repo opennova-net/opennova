@@ -5,7 +5,7 @@ extends GutTest
 # triggers the expensive whole-root build; the explicit "Find uses" button
 # does, once; a pre-built index populates immediately; rows dedupe per source
 # file and jump with the workspace-kind alias. One test runs the real
-# NovaReferenceIndex over a cache-dir fixture to pin the file+stem key merge.
+# ReferenceIndex over a cache-dir fixture to pin the file+stem key merge.
 
 const ReferenceStripScript := preload("res://modtools/framework/links/reference_strip.gd")
 
@@ -188,9 +188,9 @@ func test_duplicate_keys_query_once() -> void:
 
 
 class RootShell:
-	extends RefCounted
-	var root: NovaResourceRoot
-	func get_resource_root() -> NovaResourceRoot:
+	extends WorkspaceShell
+	var root: ResourceRoot
+	func get_resource_root() -> ResourceRoot:
 		return root
 
 
@@ -203,7 +203,7 @@ func test_resolve_source_path_translates_logical_names() -> void:
 	f.store_string("<SCREEN><NAME>M</NAME><WINDOW type=\"window\" name=\"R\"></WINDOW></SCREEN>")
 	f.close()
 	var shell := RootShell.new()
-	shell.root = NovaResourceRoot.new()
+	shell.root = ResourceRoot.new()
 	assert_eq(shell.root.set_root_dir(ROOT_DIR), OK)
 
 	var resolved: String = ReferenceStripScript.resolve_source_path(shell, "main.mnu")
@@ -213,7 +213,7 @@ func test_resolve_source_path_translates_logical_names() -> void:
 
 	assert_eq(ReferenceStripScript.resolve_source_path(shell, "ghost.mnu"), "ghost.mnu",
 		"unknown names pass through untouched")
-	assert_eq(ReferenceStripScript.resolve_source_path(RefCounted.new(), "main.mnu"), "main.mnu",
+	assert_eq(ReferenceStripScript.resolve_source_path(RootShell.new(), "main.mnu"), "main.mnu",
 		"a shell without a resource root passes through")
 	_remove_dir_recursive(ROOT_DIR)
 
@@ -225,9 +225,9 @@ func test_real_index_first_query_builds_and_merges_extension_and_stem_keys() -> 
 	f.store_string("<SCREEN><NAME>MAIN</NAME><WINDOW type=\"window\" name=\"ROOT\">" +
 		"<FONT><NAME>gunpl27b.fnt</NAME></FONT></WINDOW></SCREEN>")
 	f.close()
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(ROOT_DIR), OK)
-	var index := NovaReferenceIndex.new()
+	var index := ReferenceIndex.new()
 	index.set_resource_root(root)
 
 	var strip := _make_strip(ReferenceServices.make(

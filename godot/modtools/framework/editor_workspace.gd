@@ -28,7 +28,8 @@ extends RefCounted
 #
 #   Viewport (only if the workspace shows a 3D view):
 #     mount_viewport / unmount_viewport / release_viewport,
-#     get_viewport_camera, shows_camera_status
+#     get_viewport_camera (FlyCamera — every ONED 3D view flies the shared
+#     rig), shows_camera_status
 #     (use framework/viewport_mount.gd for the create/reparent/free mechanics)
 #
 #   Document actions (implement the cluster you support; each is gated by a
@@ -41,16 +42,15 @@ extends RefCounted
 #     jump     : focus_reference(focus) — focus an element after a cross-workspace
 #                jump (shell open_in_workspace); reads its own FocusPayload fields
 #
-#   Edit + state: override get_editor_document() to return the domain
-#     document/controller owning edit history + dirty state; the base derives
-#     can_undo / can_redo / undo / redo / has_unsaved_changes from it (and
-#     folds is_busy() into the can_* pair). Workspaces whose dirty flag lives
-#     on a different object than their edit history (fonts/mnu) keep their own
-#     has_unsaved_changes override.
+#   Edit + state: override can_undo / can_redo / undo / redo /
+#     has_unsaved_changes with typed calls into the workspace's own document
+#     (fold is_busy() into the can_* pair; the base defaults are inert).
+#     get_editor_document() stays as the untyped accessor tests and MCP tools
+#     read; the edit hooks themselves never dispatch through it.
 #   Shell services (call, don't override): _notify_status, _sync_shell,
-#     _mount_under_shell, get_reference_services, _resource_root — the guarded
-#     seams to the owning shell. Workspaces call these instead of duck-typing
-#     editor_shell; every one is a safe no-op without a shell (headless tests).
+#     _mount_under_shell, get_reference_services, _resource_root — the typed
+#     seams to the owning WorkspaceShell; every one is a safe no-op without a
+#     shell (headless tests).
 #   Asset dock: uses_asset_dock, set_asset_dock, sync_asset_dock
 #   Placement: set WorkspaceDef.popup=true for popup workspaces (Environment);
 #              shows_tile_gizmo() to opt into the in-world tile gizmo.
@@ -58,7 +58,7 @@ extends RefCounted
 # To register a new workspace see WorkspaceDef; to add a workflow inspector see
 # InspectorDef. Minimal example adapter: editor/credits_workspace.gd.
 
-var editor_shell: Node
+var editor_shell: WorkspaceShell
 
 # Cached workflow-inspector registry. Multi-workflow workspaces override
 # _build_inspector_defs(); the base lazy-builds and caches it here so the shell
@@ -66,14 +66,18 @@ var editor_shell: Node
 var _inspector_defs: Array = []
 
 
-func set_editor_shell(value: Node) -> void:
+func set_editor_shell(value: WorkspaceShell) -> void:
 	editor_shell = value
 
 
 # --- Capability hooks: the shell reads these instead of switching on workspace
 # type. Defaults describe a plain main-rail workspace with no editor binding,
 # tooltip, camera readout, or export flavors. ---
-func bind_to_editor(_editor: Node) -> void:
+
+# Receive the app root on shell bind; each workspace unwraps the typed domain
+# editor it rides (get_terrain_editor / get_environment_editor). Headless tests
+# call the workspace's own typed setter directly instead of binding an app.
+func bind_to_editor(_editor: EditorApp) -> void:
 	pass
 
 
@@ -140,7 +144,7 @@ func release_viewport() -> void:
 	pass
 
 
-func get_viewport_camera() -> Camera3D:
+func get_viewport_camera() -> FlyCamera:
 	return null
 
 
@@ -214,12 +218,12 @@ func _def_for(workflow_id: int) -> InspectorDef:
 var _workflow_inspectors: Dictionary = {}
 
 
-func _instantiate_inspector(def: InspectorDef) -> Object:
+func _instantiate_inspector(def: InspectorDef) -> WorkflowInspector:
 	return def.inspector_script.new()
 
 
-func get_workflow_inspector(workflow_id: int) -> Object:
-	var cached: Object = _workflow_inspectors.get(workflow_id)
+func get_workflow_inspector(workflow_id: int) -> WorkflowInspector:
+	var cached: WorkflowInspector = _workflow_inspectors.get(workflow_id)
 	if cached != null:
 		return cached
 	var def := _def_for(workflow_id)
@@ -272,11 +276,10 @@ func is_busy() -> bool:
 
 # --- Domain document ------------------------------------------------------
 # The single domain document/controller that owns this workspace's edit history
-# and dirty state (a domain editor Node, a RefCounted document, or a controller —
-# duck-typed, so the base guards every call with has_method). Single-document
-# workspaces override only this; the base derives the edit + dirty hooks below.
-# Documents without an edit history (credits, object) still serve dirty through
-# it: can_undo/can_redo simply stay false.
+# and dirty state (a domain editor Node, a RefCounted document, or a controller).
+# Untyped ACCESSOR only — tests and the MCP tools read the concrete document
+# through it; the edit + dirty hooks below are overridden per workspace with
+# typed calls into the same member (ADR 0034: no duck-typed derivation).
 func get_editor_document() -> Object:
 	return null
 
@@ -317,20 +320,10 @@ func close_document(_index: int) -> Error:
 	return ERR_UNAVAILABLE
 
 
+# Workspaces with a document override this (folding the tab sweep back in via
+# super() when they also hold tabs). Any open tab with unsaved work counts,
+# not just the active one (B6).
 func has_unsaved_changes() -> bool:
-	var doc := get_editor_document()
-	if doc != null:
-		# Both dirty shapes exist today: a method (mission controller, music
-		# document) and a plain bool property (the EditorDocument family).
-		# Property reads on a doc with neither return null — compare, don't
-		# bool()-construct (bool(null) is a nonexistent constructor).
-		if doc.has_method("is_dirty"):
-			if doc.is_dirty():
-				return true
-		elif doc.get("is_dirty") == true:
-			return true
-	# Any open tab with unsaved work counts, not just the active one (B6: the
-	# fold every multi-document workspace used to override for).
 	for row in get_document_tabs():
 		if row.dirty:
 			return true
@@ -504,42 +497,37 @@ func build_inspector(_mount: Control) -> void:
 	pass
 
 
-# Undo/redo, derived from get_editor_document(). Availability folds in is_busy()
-# (terrain disables the buttons while an export runs); the actions themselves are
-# deliberately unguarded by busy, matching the long-standing terrain behavior.
+# Undo/redo. Workspaces with an edit history override these with typed calls
+# into their document, folding is_busy() into the can_* pair (terrain disables
+# the buttons while an export runs); the actions themselves stay deliberately
+# unguarded by busy, matching the long-standing terrain behavior.
 func can_undo() -> bool:
-	var doc := get_editor_document()
-	return doc != null and not is_busy() and doc.has_method("can_undo") and doc.can_undo()
+	return false
 
 
 func can_redo() -> bool:
-	var doc := get_editor_document()
-	return doc != null and not is_busy() and doc.has_method("can_redo") and doc.can_redo()
+	return false
 
 
 func undo() -> void:
-	var doc := get_editor_document()
-	if doc != null and doc.has_method("undo"):
-		doc.undo()
+	pass
 
 
 func redo() -> void:
-	var doc := get_editor_document()
-	if doc != null and doc.has_method("redo"):
-		doc.redo()
+	pass
 
 
 # --- Shell services ---------------------------------------------------------
-# The guarded seams to the owning shell. Workspaces call these instead of
-# duck-typing editor_shell (the has_method guards live here, in one place);
-# every one is a safe no-op without a shell (headless tests).
+# The typed seams to the owning WorkspaceShell. Workspaces call these instead
+# of reaching for editor_shell directly; every one is a safe no-op without a
+# shell (headless tests).
 
 ## Show a toast in the shell status bar. Severities: &"info", &"success",
 ## &"warn", &"error"; duration <= 0.0 picks the per-severity default. Returns
 ## true when a shell displayed it, so a caller whose failure must not vanish
 ## headless can fall back to push_warning.
 func _notify_status(message: String, severity: StringName = &"info", duration: float = 0.0) -> bool:
-	if editor_shell != null and editor_shell.has_method("show_status_message"):
+	if editor_shell != null:
 		editor_shell.show_status_message(message, duration, severity)
 		return true
 	return false
@@ -549,7 +537,7 @@ func _notify_status(message: String, severity: StringName = &"info", duration: f
 ## dirty marker, action-button enablement). Cheap: it does NOT rebuild the
 ## inspector (the shell caches it) or remount the viewport.
 func _sync_shell() -> void:
-	if editor_shell != null and editor_shell.has_method("sync_from_editor_state"):
+	if editor_shell != null:
 		editor_shell.sync_from_editor_state()
 
 
@@ -557,7 +545,7 @@ func _sync_shell() -> void:
 ## its active workflow programmatically (activate_workflow from workspace UI
 ## rather than the rail). No-op without a shell (headless tests).
 func _sync_shell_workflow() -> void:
-	if editor_shell != null and editor_shell.has_method("sync_workflow_from_workspace"):
+	if editor_shell != null:
 		editor_shell.sync_workflow_from_workspace()
 
 
@@ -583,23 +571,21 @@ func get_reference_services() -> ReferenceServices:
 # --- Resource root (the shared VFS the shell mounts) -----------------------
 
 # The shell's mounted resource root, or null when no shell is bound (headless tests).
-func _resource_root() -> NovaResourceRoot:
-	if editor_shell != null and editor_shell.has_method("get_resource_root"):
-		return editor_shell.get_resource_root()
-	return null
+func _resource_root() -> ResourceRoot:
+	return editor_shell.get_resource_root() if editor_shell != null else null
 
 
 # Shell root, falling back to a fresh mount of the persisted resource directory.
 # Only fonts/mnu carry the fallback (their open-by-name paths must resolve without
 # a shell); the other workspaces stay shell-only on purpose — do not widen.
-func _resource_root_or_settings() -> NovaResourceRoot:
+func _resource_root_or_settings() -> ResourceRoot:
 	var root := _resource_root()
 	if root != null:
 		return root
-	var dir := NovaResourceDirSettings.get_resource_dir()
+	var dir := ResourceDirSettings.get_resource_dir()
 	if dir.is_empty():
 		return null
-	var resources := NovaResourceRoot.new()
+	var resources := ResourceRoot.new()
 	return resources if resources.set_root_dir(dir) == OK else null
 
 
@@ -610,7 +596,7 @@ func _resource_root_or_settings() -> NovaResourceRoot:
 #   if vfs != null:
 #       return editor.open_x_bytes(vfs.read_file(path), _vfs_display_path(vfs, path))
 #   return editor.open_x(path)
-func _vfs_root_for_open(path: String) -> NovaResourceRoot:
+func _vfs_root_for_open(path: String) -> ResourceRoot:
 	var resources := _resource_root()
 	if not FileAccess.file_exists(path) and resources != null and resources.has_file(path):
 		return resources
@@ -618,5 +604,5 @@ func _vfs_root_for_open(path: String) -> NovaResourceRoot:
 
 
 # The display path an editor records for a VFS-opened file (the mounted dir + bare name).
-func _vfs_display_path(root: NovaResourceRoot, path: String) -> String:
+func _vfs_display_path(root: ResourceRoot, path: String) -> String:
 	return root.get_root_dir().path_join(path.get_file())

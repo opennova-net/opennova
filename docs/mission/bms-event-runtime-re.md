@@ -144,14 +144,14 @@ yet witnessed (D-EVT-4).
 |---|---|
 | `event_runtime`: full `UpdateEntry` port — activation delay + repeat cooldown words, 64-unit decrement, unsigned-load/signed-test wrap, latch semantics, arming-call early-return, concurrent decrement | @0x454c30 |
 | `event_runtime`: three passes — pre (flag&2, whole list), post (flag&4, whole list, runtime-set phase), normal (16-tick gate + quarter cursor) | @0x454dc0/@0x454e00/@0x454d50/@0x51d7e0 |
-| `event_runtime`: cat-3 Event trigger reads the latch window (`active && delay elapsed`), exposed as `event_fired()`; NovaSimulation `has_event_fired` rerouted | @0x453a75 |
+| `event_runtime`: cat-3 Event trigger reads the latch window (`active && delay elapsed`), exposed as `event_fired()`; Simulation `has_event_fired` rerouted | @0x453a75 |
 | `event_runtime`: ResetEvent clears only the latch | @0x454974 |
 | `wac_system`: the 62-tick divider moved INSIDE WacSystem (accum `dword_C6EAD4`, pause `dword_C6EB28`, run counter `dword_C6EAD8`); skips the pre-mission pass | @0x4f81a0..@0x4f81d3 |
 | `wac/vm`: WAC time base = completed executions (`time_`, [orig: dword_C6EAD8]) for `past`/`ontick`/`elapse`/Ticks — decoupled from the engine tick | @0x4f81d3 |
 | `world`: `TickService` REMOVED (its 62:1 reducer gated the whole world tick — wrong layer; the original divides per system). `World::logic_tick` = the 62 Hz engine tick (`current_tick @0x24c1968`) | @0x5263f0 |
 | `promote`: SSN = authored record id verbatim (PromoteOptions.first_ssn removed); spawn order items→buildings→markers→organics; markers spawn into pool 3 | @0x40e9f0/@0x40f4e0/@0x4f0a20 |
 | `mission_systems.h`: grill-gate comment replaced with the witnessed order | @0x5263f0 |
-| engine: NovaSimulation drops the TickService member; `step()` = ONE 62 Hz logic tick — a render frame runs 0..N of them (**accumulator resolved 2026-06-22, see §2a**; the tick-mode enum that once selected between two identical entry points is gone, see §2b) | — |
+| engine: Simulation drops the TickService member; `step()` = ONE 62 Hz logic tick — a render frame runs 0..N of them (**accumulator resolved 2026-06-22, see §2a**; the tick-mode enum that once selected between two identical entry points is gone, see §2b) | — |
 
 Tests pinning the above: `tests/mission/event_runtime_test.cpp` (13 tests: cadence,
 delay, signed wrap, cooldown window, reset_after=0 refire, pre-pass exclusivity, cat-3
@@ -162,7 +162,7 @@ GUT `nova_simulation_test.gd` / `mission_runtime_test.gd`.
 ## 2a. Fixed-timestep accumulator landed (2026-06-22, nw-merge)
 
 The slice-D seam is closed. The reimpl previously advanced **one logic tick per rendered
-`_process` frame** (`NovaSimulation.advance_frame()` — since renamed `step()`, §2b — once
+`_process` frame** (`Simulation.advance_frame()` — since renamed `step()`, §2b — once
 per `MissionRuntime.tick()`),
 discarding the frame `delta` — a divergence from `Game_MainLoop @0x52b630` (§1.6) that coupled
 gameplay speed to the render frame rate (the shared per-tick infantry motor, `tick_infantry`,
@@ -185,7 +185,7 @@ wrong. Pinned by `mission_runtime_test.gd`
 
 ## 2b. The tick-mode enum retired (2026-07-14)
 
-Cleanup tail of §2a, no behavior change. `NovaSimulation` carried a `TickMode` enum
+Cleanup tail of §2a, no behavior change. `Simulation` carried a `TickMode` enum
 (`TICK_DIVIDED` / `TICK_EVERY_PROCESS`) selecting between `step()` and `advance_frame()` —
 but the two methods had **identical bodies** (same `loaded_` guard, same
 `host_pump`/`joiner_pump`/authoritative-tick branches), differing only in return type. The
@@ -272,7 +272,7 @@ Dispositions after the 2026-07-05 grill (§3a carries the witnesses):
   a third xref @0x51ea89 sits in an unreachable dead blob). Our earlier
   per-phase-tick evaluation was itself a divergence; the port now exposes
   `run_post_mission_pass()` as the binding's one-shot and documents the
-  one-pre-call contract (NovaSimulation delivers exactly one).
+  one-pre-call contract (Simulation delivers exactly one).
 - **D-EVT-5 — the BMS second chunk (header +0x246) is runtime-opaque.**
   Witnessed: `Mission_LoadBMSFile` fseeks past it on BOTH paths (in-session
   @0x40f6da–0x40f6ef, SP @0x40f756–0x40f76b); its only two data xrefs are
@@ -772,7 +772,7 @@ EVENTS dialog `Med_EventDialogProc @0x411e10`; populate `@0x411690` reads bits
 every other bit verbatim. So the flags dword carries exactly **0x01 RESET_AFTER,
 0x02 PRE_MISSION, 0x04 POST_MISSION** as authorable; 0x08/0x10/0x20/≥0x40 have no
 editor control. Our speculative `Unknown4=0x10`/`Unknown5=0x20` checkboxes were wrong
-→ `bms.h EventFlags` trimmed to mask 0x07 and `NovaMissionData::set_event` preserves
+→ `bms.h EventFlags` trimmed to mask 0x07 and `MissionData::set_event` preserves
 `flags & ~0x07` (mirrors the original |=/&=~ commit). What bits ≥0x08 mean at eval
 time is unwitnessed; treat as preserve-only.
 

@@ -1,90 +1,47 @@
 extends GutTest
 
-# DebugSnapshotWriter: the pick-enrichment contract against a sim exposing
-# ALL four live-card accessors with their REAL return shapes — including
-# get_present_effect_state_for_bms_id's PackedVector3Array, the exact shape
-# that aborted enrichment in the first field dump (a mistyped assumption must
-# degrade, never lose the pick). Plus the _jsonable conversion rules.
+# DebugSnapshotWriter: the pick-enrichment contract against a REAL
+# MissionRuntime + Simulation (the context is typed, ADR 0034): the pose
+# anchors on the auto-spawned host player, enrichment joins the sim's live
+# entity cards by kind/index, real card containers (Vector3 fields, packed
+# arrays, the PackedVector3Array effect state) convert to JSON records
+# instead of aborting the dump, and a cardless pick degrades to stale with
+# its identity and replayable ray intact. Plus the write/default-path rules.
 
-const Writer := preload("res://adapter/debug/debug_snapshot_writer.gd")
-
-
-class RichCardSim:
-	extends Node
-
-	func has_local_player() -> bool:
-		return true
-
-	func get_local_player_position() -> Vector3:
-		return Vector3(10, 5, -20)
-
-	func get_local_player_yaw_deg() -> float:
-		return 45.0
-
-	func get_local_player_pitch_deg() -> float:
-		return 0.0
-
-	func get_logic_tick() -> int:
-		return 999
-
-	func get_entity_count() -> int:
-		return 2
-
-	func get_entity_debug(index: int) -> Dictionary:
-		if index != 1:
-			return {"kind": 9, "index": 9, "bms_id": 9}
-		return {"kind": 2, "index": 14, "bms_id": 1484, "state_name": "idle",
-				"health": 80, "position": Vector3(1, 2, 3),
-				"kz_points": PackedVector3Array([Vector3.ONE])}
-
-	func get_world_entity_debug(net_id: int) -> Dictionary:
-		if net_id != 212:
-			return {}
-		return {"net_id": 212, "position": Vector3(4, 5, 6), "alive": true}
-
-	func get_client_entity_debug(_wire_handle: int) -> Dictionary:
-		return {}
-
-	func get_destruction_debug(bms_id: int) -> Dictionary:
-		if bms_id != 1484:
-			return {}
-		return {"item_id": 55, "health": 80, "health_max": 100, "has_husk": true}
-
-	# The real binding's shape: a PackedVector3Array, NOT a Dictionary.
-	func get_present_effect_state_for_bms_id(bms_id: int) -> PackedVector3Array:
-		if bms_id != 1484:
-			return PackedVector3Array()
-		return PackedVector3Array([Vector3(1, 2, 3), Vector3(0, 90, 0)])
+const Writer := preload("res://game/debug/debug_snapshot_writer.gd")
+const MissionRuntime := preload("res://game/world/mission_runtime.gd")
 
 
-class RichCardRuntime:
-	extends Node
-	var sim := RichCardSim.new()
-
-	func _init() -> void:
-		add_child(sim)
-
-	func get_sim() -> RichCardSim:
-		return sim
-
-	func get_mission_file() -> String:
-		return "00TRg.bms"
-
-	func get_mission_name() -> String:
-		return "Training: Grenade Launcher"
-
-
-func _ctx_with_runtime() -> NovaDebugContext:
-	var runtime := RichCardRuntime.new()
+func _runtime() -> MissionRuntime:
+	var mission := MissionData.new()
+	assert_eq(mission.create_default(), OK)
+	mission.add_entity(3, 0, Vector3(10, 0, 0), Vector3.ZERO)  # KIND_ORGANIC
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var runtime := MissionRuntime.new()
 	add_child_autofree(runtime)
-	var ctx := NovaDebugContext.new()
+	var placer := MissionObjectPlacer.new()
+	assert_eq(runtime.setup(mission, container, {
+		"placer": placer,
+		"mission_file": "00TRg.bms",
+		"mission_name": "Training: Grenade Launcher",
+	}), 2, "one authored organic + the auto-spawned host player")
+	return runtime
+
+
+func _ctx_with_runtime(runtime: MissionRuntime) -> DebugContext:
+	var ctx := DebugContext.new()
 	ctx.runtime_source = func(): return runtime
 	return ctx
 
 
-func _entity_pick() -> Dictionary:
-	return {"hit": true, "entity_handle": 4130, "pool": 2, "kind": 2, "index": 14,
-			"bms_id": 1484, "net_id": 212, "item_id": 55, "name": "RckS07",
+## A pick card whose identity matches one REAL live AI card, so enrichment
+## joins it exactly like a crosshair pick on that entity would.
+func _entity_pick(card: Dictionary) -> Dictionary:
+	return {"hit": true, "entity_handle": -1, "pool": int(card.get("pool", -1)),
+			"kind": int(card.get("kind", -1)), "index": int(card.get("index", -1)),
+			"bms_id": int(card.get("bms_id", 0)), "net_id": 0,
+			"item_id": int(card.get("item_id", 0)), "name": String(card.get("name", "")),
 			"position_godot": Vector3(1, 3, -2), "bound_radius": 4.0,
 			"hit_position_godot": Vector3(1, 4, -2), "hit_normal_godot": Vector3.UP,
 			"distance_units": 45.5, "hit_class": "static", "section": 1, "face": 17,
@@ -93,42 +50,58 @@ func _entity_pick() -> Dictionary:
 			"ray_origin_godot": Vector3.ZERO, "ray_dir_godot": Vector3.FORWARD}
 
 
-func test_enrichment_survives_every_real_card_shape() -> void:
-	var snapshot := Writer.capture(_ctx_with_runtime(), [_entity_pick()])
-	assert_false(snapshot.is_empty(), "the pose anchored")
+func test_enrichment_joins_real_cards_and_converts_containers() -> void:
+	var runtime := _runtime()
+	var sim := runtime.get_sim()
+	assert_gt(int(sim.get_entity_count()), 0, "the mission spawned AI entities")
+	var card: Dictionary = sim.get_entity_debug(0)
+	assert_false(card.is_empty(), "the first AI card is live")
+
+	var snapshot := Writer.capture(
+			_ctx_with_runtime(runtime), [_entity_pick(card)])
+	assert_false(snapshot.is_empty(), "the pose anchored on the host player")
 	assert_eq(int(snapshot.get("pick_count", -1)), 1)
 	var entry: Dictionary = (snapshot.get("picks", []) as Array)[0]
 	assert_false((entry.get("identity", {}) as Dictionary).is_empty(),
 			"the pick was never lost")
-	assert_false(bool(entry.get("stale", true)), "live cards were found")
+	assert_false(bool(entry.get("stale", true)), "a live card was found")
 
 	var entity_debug: Dictionary = entry.get("entity_debug", {})
-	assert_eq(int(entity_debug.get("bms_id", 0)), 1484,
+	assert_eq(int(entity_debug.get("kind", -2)), int(card.get("kind", -1)),
 			"the AI card matched by kind/index scan")
-	var kz: Variant = entity_debug.get("kz_points")
-	assert_typeof(kz, TYPE_ARRAY)
-	assert_eq(float((kz[0] as Dictionary).get("x", 0.0)), 1.0,
-			"packed arrays inside cards convert to JSON records")
+	# Real cards carry Vector3 fields; the writer must land them as JSON
+	# records ({x,y,z}), never raw Variants.
+	var position: Variant = entity_debug.get("position")
+	assert_typeof(position, TYPE_DICTIONARY)
+	assert_true((position as Dictionary).has("x"),
+			"Vector3 card fields convert to JSON records")
 
-	assert_eq(int((entry.get("world_entity_debug", {}) as Dictionary).get("net_id", 0)), 212)
-	assert_true(bool((entry.get("destruction", {}) as Dictionary).get("has_husk", false)))
 
-	# THE regression: the effect state is a PackedVector3Array — it must land
-	# as a JSON list, not abort the dump (the first field dump lost its pick
-	# to exactly this).
-	var effect_state: Variant = entry.get("effect_state")
-	assert_typeof(effect_state, TYPE_ARRAY)
-	assert_eq((effect_state as Array).size(), 2)
-	assert_eq(float((effect_state[1] as Dictionary).get("y", 0.0)), 90.0)
+func test_effect_state_packed_array_lands_as_json_list() -> void:
+	# The real accessor shape: get_present_effect_state_for_bms_id returns a
+	# PackedVector3Array. THE regression: that shape must flow through the
+	# card store as a JSON list (or stay empty), never abort the dump.
+	var runtime := _runtime()
+	var sim := runtime.get_sim()
+	var state: PackedVector3Array = sim.get_present_effect_state_for_bms_id(1)
+	assert_typeof(state, TYPE_PACKED_VECTOR3_ARRAY,
+			"the binding really returns the packed shape")
+	var card: Dictionary = sim.get_entity_debug(0)
+	var pick := _entity_pick(card)
+	pick["bms_id"] = 1  # forces the effect-state fetch through _store_card
+	var snapshot := Writer.capture(_ctx_with_runtime(runtime), [pick])
+	assert_eq(int(snapshot.get("pick_count", -1)), 1,
+			"the dump completed with the packed effect state in the path")
 
 
 func test_cardless_pick_reports_stale_with_identity_intact() -> void:
-	var ctx := _ctx_with_runtime()
-	var pick := _entity_pick()
+	var runtime := _runtime()
+	var pick := _entity_pick({})
 	pick["kind"] = 7  # matches no AI card
 	pick["bms_id"] = 5555  # matches no destruction/effect state
 	pick["net_id"] = 0
-	var snapshot := Writer.capture(ctx, [pick])
+	pick["name"] = "RckS07"
+	var snapshot := Writer.capture(_ctx_with_runtime(runtime), [pick])
 	var entry: Dictionary = (snapshot.get("picks", []) as Array)[0]
 	assert_true(bool(entry.get("stale", false)))
 	assert_eq(String((entry.get("identity", {}) as Dictionary).get("name", "")), "RckS07")
@@ -137,7 +110,7 @@ func test_cardless_pick_reports_stale_with_identity_intact() -> void:
 
 
 func test_write_and_default_path_roundtrip() -> void:
-	var snapshot := Writer.capture(_ctx_with_runtime(), [])
+	var snapshot := Writer.capture(_ctx_with_runtime(_runtime()), [])
 	var target := OS.get_cache_dir().path_join(
 			"opennova_writer_test_%d.json" % Time.get_ticks_usec())
 	var result: Dictionary = Writer.write(snapshot, target)

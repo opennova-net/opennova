@@ -64,9 +64,16 @@ var _sc_event_summary: Label  # "when <conditions> then <actions>" readout for t
 var _sc_diagnostics: Label
 # The event chain the panel was last populated from, so the sub-list handlers read the same data.
 var _sc_chain: Dictionary = {}
-# PLAYPARTANIM preview gate: the AI-change action family + the play-part-anim sub-type.
-const _AI_CHANGE_ACTION_TYPES := [3, 12, 13, 21]
-const _PLAYPARTANIM_SUB := 34
+# PLAYPARTANIM preview gate: the AI-change action family + the play-part-anim sub-type. The action
+# ids are the bound MissionData.ACTION_* names (the id witnesses live at the engine home,
+# engine/formats/mission bms.h).
+const _AI_CHANGE_ACTION_TYPES := [
+	MissionData.ACTION_CHANGE_GROUP_AI,
+	MissionData.ACTION_AREA_AI_RED,
+	MissionData.ACTION_AREA_AI_BLUE,
+	MissionData.ACTION_CHANGE_SINGLE_AI,
+]
+const _PLAYPARTANIM_SUB := MissionData.ACTION_SUB_PLAY_PART_ANIM
 
 
 # --- Scripting (events / triggers / actions) panel ----------------------------

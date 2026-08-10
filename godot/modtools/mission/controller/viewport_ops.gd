@@ -130,7 +130,7 @@ func cancel_drag() -> void:
 		_c._gizmo_drag = {}
 		if not _c._selected_ref.is_empty():
 			_c._selected_rotation_deg = _c._gizmo_start_rot
-			_apply_selected_xform(Transform3D(_c.MissionObjectPlacer.bms_to_godot_basis(_c._gizmo_start_rot), _c._gizmo_start_origin))
+			_apply_selected_xform(Transform3D(MissionObjectPlacer.bms_to_godot_basis(_c._gizmo_start_rot), _c._gizmo_start_origin))
 		if _c._gizmo != null and is_instance_valid(_c._gizmo):
 			_c._gizmo.end_drag()
 			_c._gizmo.set_highlight({})
@@ -164,7 +164,7 @@ func _on_left_press(mouse_pos: Vector2) -> void:
 
 
 func _on_drag(mouse_pos: Vector2) -> void:
-	if _c._selected_ref.is_empty() or _c.terrain_editor == null or not _c.terrain_editor.has_method("raycast_terrain_at"):
+	if _c._selected_ref.is_empty() or _c.terrain_editor == null:
 		return
 	var hit: Vector3 = _c.terrain_editor.raycast_terrain_at(mouse_pos)
 	if not _c.terrain_editor.is_valid_terrain_hit(hit):
@@ -210,9 +210,7 @@ func set_gizmo_enabled(value: bool) -> void:
 
 # The editor camera, or null (headless tests / no terrain editor bound).
 func _editor_camera() -> Camera3D:
-	if _c.terrain_editor == null or not _c.terrain_editor.has_method("get_editor_camera"):
-		return null
-	return _c.terrain_editor.get_editor_camera()
+	return _c.terrain_editor.get_editor_camera() if _c.terrain_editor != null else null
 
 
 # Try to start a gizmo handle drag at `mouse_pos`. Returns true (and arms the drag) when the cursor
@@ -271,7 +269,7 @@ func _on_gizmo_drag(mouse_pos: Vector2) -> void:
 			r.z = nv
 		_c._selected_rotation_deg = r
 		_c._drag_moved = true
-		_apply_selected_xform(Transform3D(_c.MissionObjectPlacer.bms_to_godot_basis(r), _c._selected_xform.origin))
+		_apply_selected_xform(Transform3D(MissionObjectPlacer.bms_to_godot_basis(r), _c._selected_xform.origin))
 
 
 func _on_gizmo_release() -> void:
@@ -317,7 +315,7 @@ func _refresh_gizmo() -> void:
 	if container == null:
 		return
 	var want = _c._gizmo_enabled and _c._mode == _c.Mode.OBJECTS and not _c._placement.is_placement_armed() \
-		and not _c._selected_ref.is_empty() and int(_c._selected_ref.get("kind", -1)) != NovaMissionData.KIND_MARKER
+		and not _c._selected_ref.is_empty() and int(_c._selected_ref.get("kind", -1)) != MissionData.KIND_MARKER
 	if not want:
 		if _c._gizmo != null and is_instance_valid(_c._gizmo):
 			_c._gizmo.visible = false
@@ -326,8 +324,11 @@ func _refresh_gizmo() -> void:
 		_c._gizmo = _c.MissionGizmo.new()
 		_c._gizmo.name = "MissionTransformGizmo"
 		# Mission's authored angles are nested BMS euler, not plain euler: the rings must
-		# derive their axes through the same basis the placer renders with.
-		_c._gizmo.basis_builder = _c.MissionObjectPlacer.bms_to_godot_basis
+		# derive their axes through the same basis the placer renders with. (Lambda wrap:
+		# a Callable formed from a native static reports is_valid()=false, which would
+		# silently drop the gizmo to its plain-euler fallback.)
+		_c._gizmo.basis_builder = func(rot_deg: Vector3) -> Basis:
+			return MissionObjectPlacer.bms_to_godot_basis(rot_deg)
 		container.add_child(_c._gizmo)
 	_c._gizmo.visible = true
 	_c._gizmo.show_for(_c._selected_xform.origin, _c._selected_rotation_deg)
@@ -414,7 +415,7 @@ func _refresh_pick_debug() -> void:
 			continue
 		# Container-local transform of the body (= world / container.global_transform).
 		var entity := _find_entity(kind, index)
-		var local: Transform3D = _c.MissionObjectPlacer.entity_transform(
+		var local: Transform3D = MissionObjectPlacer.entity_transform(
 			entity.get("position", Vector3.ZERO), entity.get("rotation_deg", Vector3.ZERO))
 		for shape in shapes:
 			var mi := MeshInstance3D.new()
@@ -426,8 +427,6 @@ func _refresh_pick_debug() -> void:
 
 
 func _pick_entity(mouse_pos: Vector2) -> Dictionary:
-	if not _c.terrain_editor.has_method("get_editor_camera"):
-		return {}
 	var camera: Camera3D = _c.terrain_editor.get_editor_camera()
 	if camera == null:
 		return {}
@@ -463,7 +462,7 @@ func _pick_entity(mouse_pos: Vector2) -> Dictionary:
 			var mt := _ray_aabb_entry(maabb, from, dir)
 			if mt >= 0.0 and mt < best_t:
 				best_t = mt
-				best = { "kind": NovaMissionData.KIND_MARKER, "index": int(rec["marker_index"]) }
+				best = { "kind": MissionData.KIND_MARKER, "index": int(rec["marker_index"]) }
 	return best
 
 
@@ -478,6 +477,7 @@ func _select(kind: int, index: int) -> void:
 	_c._selected_ref = { "kind": kind, "index": index }
 	_c._selected_records = []
 	_c._selected_node = null
+	_c._selected_model = null
 	_c._selected_graphic = ""
 	_c._selected_node_offset = Transform3D.IDENTITY
 	var graphic := ""
@@ -489,9 +489,12 @@ func _select(kind: int, index: int) -> void:
 			# ref would dangle through _apply_selected_xform. A dropped record just means no
 			# box / no drag handle for that slot, not a crash.
 			if bool(rec.get("animated", false)):
-				var node = rec.get("node")
+				# An animated record's node IS the placer's ObjectModel (its {model, ref}
+				# registration), so the typed twin binds alongside the Node3D handle.
+				var node: ObjectModel = rec.get("node")
 				if node != null and is_instance_valid(node):
 					_c._selected_node = node
+					_c._selected_model = node
 					_c._selected_node_offset = rec.get("offset", Transform3D.IDENTITY)
 			else:
 				var mmi = rec.get("mmi")
@@ -506,10 +509,10 @@ func _select(kind: int, index: int) -> void:
 		_c._selected_ground_offset = _c._placer.ground_anchor_godot(graphic)
 	var entity := _find_entity(kind, index)
 	_c._selected_rotation_deg = entity.get("rotation_deg", Vector3.ZERO)
-	_c._selected_xform = _c.MissionObjectPlacer.entity_transform(
+	_c._selected_xform = MissionObjectPlacer.entity_transform(
 		entity.get("position", Vector3.ZERO), _c._selected_rotation_deg)
 	# A marker has no mesh records, so the selection box stays hidden; highlight its gizmo instead.
-	if kind == NovaMissionData.KIND_MARKER and _c._marker_overlay != null and is_instance_valid(_c._marker_overlay):
+	if kind == MissionData.KIND_MARKER and _c._marker_overlay != null and is_instance_valid(_c._marker_overlay):
 		_c._marker_overlay.set_selected_marker(index)
 	_update_selection_box()
 	# Show the transform gizmo on this selection (hidden for markers / non-objects modes). Reset the
@@ -527,6 +530,7 @@ func _deselect() -> void:
 	_c._selected_ref = {}
 	_c._selected_records = []
 	_c._selected_node = null
+	_c._selected_model = null
 	_c._selected_graphic = ""
 	_c._selected_node_offset = Transform3D.IDENTITY
 	_c._selected_collider = null
@@ -580,9 +584,10 @@ func _free_selected_user_points_overlay() -> void:
 # --- In-editor PLAYPARTANIM preview -------------------------------------------
 # Play a scripting PLAYPARTANIM action's part animation on its target model in the editor viewport so an
 # author can see the motion without launching the game. Reuses the runtime path: it resolves the action's
-# target (SSN / group / zone) through the same MissionEntityRegistry the mount uses, then drives
-# NovaObjectModel.restart_part_anim (a clean-from-rest variant of the runtime play_part_anim). The placed
-# model already _process-ticks in the viewport, so the sweep animates live.
+# target (SSN / group / zone) through the same EntityIndex the runtime owner builds (over the placer's
+# construction-time {model, ref} registrations), then drives ObjectModel.restart_part_anim (a
+# clean-from-rest variant of the runtime play_part_anim). The placed model already _process-ticks in the
+# viewport, so the sweep animates live.
 
 # Move the selected entity so its origin sits at a world-space ground point: keep the
 # current rotation, only the origin tracks the cursor.
@@ -603,7 +608,7 @@ func _move_selected_to_world(global_hit: Vector3) -> void:
 # move the in-world object identically.
 func _apply_selected_xform(xform: Transform3D) -> void:
 	_c._selected_xform = xform
-	if not _c._selected_ref.is_empty() and int(_c._selected_ref.get("kind", -1)) == NovaMissionData.KIND_MARKER:
+	if not _c._selected_ref.is_empty() and int(_c._selected_ref.get("kind", -1)) == MissionData.KIND_MARKER:
 		_clear_selected_user_points()
 		# A marker is mesh-less: preview its gizmo (container-local origin) via the overlay. No mesh
 		# records / node to move, and the selection box stays hidden.
@@ -651,11 +656,11 @@ func _apply_selected_xform(xform: Transform3D) -> void:
 func _commit_selected_transform() -> void:
 	if _c._selected_ref.is_empty() or _c._mission == null:
 		return
-	var bms_pos = _c.MissionObjectPlacer.godot_to_bms_position(_c._selected_xform.origin)
+	var bms_pos = MissionObjectPlacer.godot_to_bms_position(_c._selected_xform.origin)
 	if _c._mission.set_entity_transform(int(_c._selected_ref["kind"]), int(_c._selected_ref["index"]), bms_pos, _c._selected_rotation_deg):
 		# A marker's gizmo was preview-moved; rebuild the overlay so its pickable AABB tracks the
 		# committed position (re-applies the selection highlight).
-		if int(_c._selected_ref.get("kind", -1)) == NovaMissionData.KIND_MARKER:
+		if int(_c._selected_ref.get("kind", -1)) == MissionData.KIND_MARKER:
 			_c._waypoints._refresh_marker_overlay()
 		_c.mark_dirty()
 
@@ -861,7 +866,7 @@ func _on_hover(mouse_pos: Vector2) -> void:
 	var kind := int(ref.get("kind", -1))
 	var index := int(ref.get("index", -1))
 	# Skip empties, markers (their own gizmo highlights), and the current selection.
-	if ref.is_empty() or kind == NovaMissionData.KIND_MARKER \
+	if ref.is_empty() or kind == MissionData.KIND_MARKER \
 			or (not _c._selected_ref.is_empty() \
 				and int(_c._selected_ref.get("kind", -2)) == kind \
 				and int(_c._selected_ref.get("index", -2)) == index):
@@ -916,6 +921,7 @@ func _reset_selection_state() -> void:
 	_c._selected_ref = {}
 	_c._selected_records = []
 	_c._selected_node = null
+	_c._selected_model = null
 	_c._selected_graphic = ""
 	_c._selected_node_offset = Transform3D.IDENTITY
 	_c._selected_xform = Transform3D.IDENTITY

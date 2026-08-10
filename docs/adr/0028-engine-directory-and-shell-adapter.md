@@ -1,10 +1,10 @@
-# 0028 — engine/ is the engine; godot/adapter/ is the shell adapter
+# 0028 — engine/ is the engine; godot/src/ is the shell adapter
 
 Status: accepted 2026-08-06. §3's target-name clause (per-lib
 `opennova_<domain>` targets, families as the only link conveniences) was
 superseded by [ADR 0029](0029-engine-group-targets.md) on 2026-08-08: the
 groups are now also the CMake build targets. Decision 5's standing rule
-("GDScript in `godot/adapter/` wires, adapts, and presents") is superseded
+("GDScript in `godot/src/` wires, adapts, and presents") is superseded
 for the GAME runtime by [ADR 0033](0033-engine-owned-loops-device-shells.md)
 (2026-08-09): the engine owns the frame; GDScript remains ONED's authoring
 language. Directories, the `opennova` namespace, and include paths stand as
@@ -57,7 +57,7 @@ one.
    segments (`<domain>/...` unchanged), not target-name segments
    (`opennova_<domain>` unchanged). One-lib-per-format stands; no physical merges.
 
-4. **`godot/engine/` is renamed `godot/adapter/`** — ADR 0016's own term. The
+4. **`godot/engine/` is renamed `godot/src/`** — ADR 0016's own term. The
    `Nova*` class names, the `opennova` GDExtension target, and `godot/bin/libopennova.*`
    are unchanged. "Engine" no longer names any Godot-side directory.
 
@@ -66,7 +66,7 @@ one.
    from GDScript; this ADR extends the same rule to gameplay orchestration — tick and
    catch-up arithmetic, mission boot ordering, session/admission state machines, the
    player weapon/loadout cluster, sim-consumed asset resolution, and witnessed
-   presentation timing. GDScript in `godot/adapter/` wires, adapts, and presents; the
+   presentation timing. GDScript in `godot/src/` wires, adapts, and presents; the
    shells own nodes, devices, and scene lifetime. Presenting means writing Godot
    resources from engine-decided state, never re-deriving the state.
 

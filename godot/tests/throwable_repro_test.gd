@@ -1,7 +1,7 @@
 extends GutTest
 
 # Throwable weapon-switch + PowerThrow lifecycle against the committed JO defs,
-# driven the way the game shells drive NovaSimulation (loadout -> switch walk ->
+# driven the way the game shells drive Simulation (loadout -> switch walk ->
 # commit events -> def installs, including the FP model resolve's delayed
 # same-weapon re-install). Pins the PR #282 field bugs:
 #  - a same-name install landing during a SWITCHFROM must not destroy the
@@ -14,9 +14,9 @@ extends GutTest
 const DEF_FIXTURES := "res://../fixtures/def"
 const TERRAIN_FIXTURE := "res://../fixtures/godot/dvxi5/Dvxi5.trn"
 
-var _sim: NovaSimulation = null
-var _db: NovaWeaponDatabase = null
-var _root: NovaResourceRoot = null
+var _sim: Simulation = null
+var _db: WeaponDatabase = null
+var _root: ResourceRoot = null
 var _reinstall_pending := ""
 var _reinstall_ticks := 0
 
@@ -26,16 +26,16 @@ func before_each() -> void:
 	_reinstall_ticks = 0
 	var def_root := ProjectSettings.globalize_path(DEF_FIXTURES)
 	assert_true(DirAccess.dir_exists_absolute(def_root), "committed def fixtures exist")
-	var md := NovaMissionData.new()
+	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
-	_sim = NovaSimulation.new()
+	_sim = Simulation.new()
 	assert_true(_sim.load_from_mission_data(md))
 	assert_true(_sim.spawn_local_player(Vector3(0, 0, 0), 0.0, 1))
-	_root = NovaResourceRoot.new()
+	_root = ResourceRoot.new()
 	assert_eq(_root.set_root_dir(def_root), OK)
 	assert_eq(_sim.load_weapon_table(_root, "weapon.def"), OK)
 	assert_eq(_sim.load_ammo_table(_root, "ammo.def"), OK)
-	_db = NovaWeaponDatabase.new()
+	_db = WeaponDatabase.new()
 	assert_eq(_db.load_from_resource_root(_root, "weapon.def"), OK)
 
 
@@ -236,11 +236,11 @@ func test_grenade_throw_then_m4_fires_bullets() -> void:
 
 
 func test_grenade_ground_bounces_are_sound_only_until_the_fuse() -> void:
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(_root, "items.def"), OK)
 	_sim.resolve_item_traits(item_db)
 
-	var terrain := NovaTerrainData.new()
+	var terrain := TerrainData.new()
 	terrain.set_trn_path(ProjectSettings.globalize_path(TERRAIN_FIXTURE))
 	assert_eq(terrain.load(), OK, "the committed Dvxi5 terrain loads")
 	assert_true(terrain.is_loaded())
@@ -299,10 +299,10 @@ func test_satchel_loadout_can_switch_to_detonator() -> void:
 	assert_eq(_sim.get_local_player_weapon_name(), "WPN_SATCHEL_CHARGE",
 			"the selectable loadout row equips the satchel charge")
 
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(_root, "items.def"), OK)
 	_sim.resolve_item_traits(item_db)
-	var terrain := NovaTerrainData.new()
+	var terrain := TerrainData.new()
 	terrain.set_trn_path(ProjectSettings.globalize_path(TERRAIN_FIXTURE))
 	assert_eq(terrain.load(), OK)
 	_sim.set_terrain_height_field(terrain)
@@ -350,7 +350,7 @@ func test_grenade_round_survives_its_flight_until_the_fuse() -> void:
 # [orig: Entity_UpdateGrenadePhysics @0x444908/@0x444976;
 # world-wac-ai-re.md section 27.2/27.4]
 func test_production_smoke_grenade_survives_arm_event_until_fuse() -> void:
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(_root, "items.def"), OK)
 	assert_eq(item_db.get_graphic(101875), "Flsh_3rd",
 			"the loose row mirrors the production smoke grenade model")

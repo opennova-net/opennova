@@ -140,11 +140,9 @@ func sync_popup_state() -> void:
 # status line). The service lives on the editor root; runtime builds have none
 # and the controls simply show Stopped/disabled.
 func sync_mcp_state() -> void:
-	var service := _mcp_service.call() as Node
-	if service != null and service.has_signal("status_changed") \
-			and not service.is_connected(
-					"status_changed", Callable(self, "sync_mcp_state")):
-		service.connect("status_changed", Callable(self, "sync_mcp_state"))
+	var service: EditorMcpService = _mcp_service.call()
+	if service != null and not service.status_changed.is_connected(sync_mcp_state):
+		service.status_changed.connect(sync_mcp_state)
 	if _settings_mcp_toggle != null:
 		_settings_mcp_toggle.set_pressed_no_signal(service != null and service.is_running())
 		_settings_mcp_toggle.disabled = service == null

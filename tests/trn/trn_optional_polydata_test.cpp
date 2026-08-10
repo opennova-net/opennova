@@ -2,7 +2,7 @@
 // Godot editor writes project-mode .trn files with no polydata since the
 // "Make CPT optional" change — this test locks in that the engine/formats/trn parser
 // handles that shape without regressions (the polydata is consumer-enforced
-// at the NovaTerrainData level, not the trn_io level).
+// at the TerrainData level, not the trn_io level).
 
 #include <trn/trn.h>
 #include <trn/trn_io.h>

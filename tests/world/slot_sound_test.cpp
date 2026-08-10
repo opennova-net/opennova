@@ -11,8 +11,8 @@
 #include <string>
 #include <vector>
 
-#include "terrain/height_field.h"
-#include "terrain/surface_type_map.h"
+#include "terrain_query/height_field.h"
+#include "terrain_query/surface_type_map.h"
 #include "world/ai.h"
 #include "world/world.h"
 

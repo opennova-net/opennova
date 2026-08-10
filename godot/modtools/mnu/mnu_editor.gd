@@ -13,7 +13,7 @@ extends Control
 # M8: the canvas reports drag/resize/nudge gestures as rect_committed(id, rect),
 # which route through apply_edit (reusing the rect-undo op). Structural ops
 # (add/delete/reparent widget, add/delete screen) push a different kind of undo
-# entry: a full-document snapshot pair (NovaMnuDocument.capture_state/apply_state),
+# entry: a full-document snapshot pair (MnuDocument.capture_state/apply_state),
 # which restores byte-identical widget ids so the fine-grained property ops below
 # them on the stack stay valid. Ctrl+Z / Ctrl+Y drive undo()/redo() while no text
 # field has focus.
@@ -31,7 +31,7 @@ signal selection_changed(ids: PackedInt32Array)
 signal interactive_changed(on: bool)
 
 var _document   # MnuEditorDocument
-var _resource_root: NovaResourceRoot
+var _resource_root: ResourceRoot
 # The resolved RTXT string table for the open menu (first screen's text_rsrc) and
 # its absolute path, cached on each preview refresh. The inspector reuses these to
 # show resolved text, drive the string picker, and jump to the Strings workspace.
@@ -257,10 +257,10 @@ func _set_authoring_enabled(enabled: bool) -> void:
 func _populate_type_picker() -> void:
 	# WidgetType enum names (minus the UNKNOWN sentinel) from the engine, so the
 	# labels stay in lockstep with the document's type table.
-	var probe := NovaMnuDocument.new()
-	for t in range(NovaMnuDocument.TYPE_UNKNOWN):
+	var probe := MnuDocument.new()
+	for t in range(MnuDocument.TYPE_UNKNOWN):
 		_type_picker.add_item(probe.get_widget_type_name(t), t)
-	var idx := _type_picker.get_item_index(NovaMnuDocument.TYPE_BUTTON)
+	var idx := _type_picker.get_item_index(MnuDocument.TYPE_BUTTON)
 	if idx >= 0:
 		_type_picker.select(idx)
 
@@ -288,7 +288,7 @@ func set_document(value) -> void:
 	_refresh_all()
 
 
-func set_resource_root(root: NovaResourceRoot) -> void:
+func set_resource_root(root: ResourceRoot) -> void:
 	_resource_root = root
 	_refresh_preview()
 
@@ -326,7 +326,7 @@ func get_preview_widget_state(id: int) -> MnuPreviewWidgetState:
 		if _canvas != null else MnuPreviewWidgetState.new()
 
 
-func _document_resource() -> NovaMnuDocument:
+func _document_resource() -> MnuDocument:
 	return _document.resource if _document != null else null
 
 
@@ -362,7 +362,7 @@ func _refresh_preview() -> void:
 # loaded table and its absolute path (the inspector reuses them for resolved-text
 # display, the string picker, and the "Edit in Strings" jump). Silent on failure
 # (the builder then shows string ids / stripped hotkeys).
-func _resolve_text_resource(doc: NovaMnuDocument) -> void:
+func _resolve_text_resource(doc: MnuDocument) -> void:
 	_text_resource = null
 	_text_resource_path = ""
 	if doc == null or _resource_root == null or _resource_root.get_root_dir().is_empty():
@@ -425,7 +425,7 @@ func get_unresolved_var_count() -> int:
 
 # Walk every widget's color/texture/font fields for whole-field %VAR% tokens
 # and count the DISTINCT names the stylesheet cannot resolve.
-func _recount_unresolved_vars(doc: NovaMnuDocument) -> void:
+func _recount_unresolved_vars(doc: MnuDocument) -> void:
 	_unresolved_var_count = 0
 	if doc == null:
 		return
@@ -880,7 +880,7 @@ func apply_list_edit(edit: Dictionary) -> void:
 	_commit_struct(op, before, sel_before, id)
 
 
-func _read_list_row(doc: NovaMnuDocument, op: String, id: int, index: int) -> Dictionary:
+func _read_list_row(doc: MnuDocument, op: String, id: int, index: int) -> Dictionary:
 	match op:
 		"item_field":
 			return doc.get_item(id, index)
@@ -896,7 +896,7 @@ func _read_list_row(doc: NovaMnuDocument, op: String, id: int, index: int) -> Di
 	return {}
 
 
-func _write_list_row(doc: NovaMnuDocument, op: String, id: int, index: int, row: Dictionary) -> void:
+func _write_list_row(doc: MnuDocument, op: String, id: int, index: int, row: Dictionary) -> void:
 	match op:
 		"item_field": doc.set_item(id, index, row)
 		"header_field": doc.set_table_header(id, index, row)
@@ -1003,7 +1003,7 @@ func _apply_struct_side(op: Dictionary, is_undo: bool) -> bool:
 	return true
 
 
-func _read_prop(doc: NovaMnuDocument, target: String, id: int, prop: String, slot: int):
+func _read_prop(doc: MnuDocument, target: String, id: int, prop: String, slot: int):
 	if target == "screen":
 		match prop:
 			"name": return doc.get_screen_name(id)
@@ -1034,7 +1034,7 @@ func _read_prop(doc: NovaMnuDocument, target: String, id: int, prop: String, slo
 	return null
 
 
-func _write_prop(doc: NovaMnuDocument, target: String, id: int, prop: String, slot: int, value) -> void:
+func _write_prop(doc: MnuDocument, target: String, id: int, prop: String, slot: int, value) -> void:
 	if target == "screen":
 		match prop:
 			"name": doc.set_screen_property(id, "name", value)
@@ -1089,7 +1089,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 # --- Toolbar handlers + state ---------------------------------------------------
 
 func _selected_type() -> int:
-	return _type_picker.get_selected_id() if _type_picker != null else NovaMnuDocument.TYPE_BUTTON
+	return _type_picker.get_selected_id() if _type_picker != null else MnuDocument.TYPE_BUTTON
 
 
 func _on_add_pressed() -> void:

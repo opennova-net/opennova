@@ -24,7 +24,7 @@ var _inspector: Control
 var _preview: SoundPreviewPlayer
 
 
-func set_editor_shell(value: Node) -> void:
+func set_editor_shell(value: WorkspaceShell) -> void:
 	super.set_editor_shell(value)
 	_ensure_editor()
 
@@ -177,6 +177,28 @@ func get_editor_document() -> Object:
 	return controller
 
 
+func has_unsaved_changes() -> bool:
+	return controller != null and controller.is_dirty
+
+
+func can_undo() -> bool:
+	return controller != null and not is_busy() and controller.can_undo()
+
+
+func can_redo() -> bool:
+	return controller != null and not is_busy() and controller.can_redo()
+
+
+func undo() -> void:
+	if controller != null:
+		controller.undo()
+
+
+func redo() -> void:
+	if controller != null:
+		controller.redo()
+
+
 func can_new() -> bool:
 	return true
 
@@ -227,7 +249,7 @@ func open_file(path: String) -> Error:
 	return controller.open_lwf(path)
 
 
-func get_resource_root() -> NovaResourceRoot:
+func get_resource_root() -> ResourceRoot:
 	return _resource_root()
 
 

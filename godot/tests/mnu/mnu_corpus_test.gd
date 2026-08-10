@@ -1,12 +1,11 @@
 extends GutTest
 
-# Corpus render harness (display-axis proof): every shipped revx02 menu must build
-# a live widget tree in-engine without crashing - the runtime counterpart to the
-# C++ round-trip coverage test. Real game textures/fonts are not present, so assets
-# degrade gracefully; the hard assertion is "parses + builds >= 1 screen and a
-# widget tree". Per-menu widget and unresolved-asset counts are printed for
-# visibility (a future builder instrumentation can turn the unresolved count into a
-# per-construct skipped report).
+# Corpus render harness (display-axis proof): every screen of every shipped
+# revx02 menu must compile through the engine draw walk (MenuFrame over
+# MenuFrameCompiler) without crashing - the runtime counterpart to the C++
+# round-trip coverage test. Real game textures/fonts are not present, so assets
+# degrade gracefully; the hard assertion is "parses + every screen configures
+# and emits a non-empty draw list".
 
 const MENUS := [
 	"jo_main", "jo_sp", "jo_mp", "jo_options", "jo_game", "jo_player",
@@ -15,14 +14,7 @@ const MENUS := [
 ]
 
 
-func _count_controls(node: Node) -> int:
-	var n := 1 if node is Control else 0
-	for c in node.get_children():
-		n += _count_controls(c)
-	return n
-
-
-func test_all_shipped_menus_build() -> void:
+func test_all_shipped_menu_screens_compile() -> void:
 	for menu_name in MENUS:
 		var path := "res://../fixtures/mnu/%s.mnu" % menu_name
 		var bytes := FileAccess.get_file_as_bytes(path)
@@ -30,19 +22,20 @@ func test_all_shipped_menus_build() -> void:
 		if bytes.is_empty():
 			continue
 
-		var doc := NovaMnuDocument.new()
+		var doc := MnuDocument.new()
 		assert_eq(doc.load_from_bytes(bytes), OK, "%s parses" % menu_name)
 		assert_gt(doc.get_screen_count(), 0, "%s has at least one screen" % menu_name)
 
-		# Runtime build path (the running game), assets degrading gracefully.
-		var menu := NovaMnuMenu.new()
-		menu.build_on_ready = false
-		add_child_autofree(menu)
-		menu.set_edit_mode(false)
-		menu.menu = doc
-
-		var controls := _count_controls(menu)
-		assert_gt(controls, doc.get_screen_count(),
-				"%s built a widget tree without crashing" % menu_name)
-		gut.p("  %s: %d controls, %d unresolved assets" % [
-				menu_name, controls, menu.get_unresolved_asset_count()])
+		var frame := MenuFrame.new()
+		add_child_autofree(frame)
+		frame.size = Vector2(800, 600)
+		for screen_id in doc.get_screen_ids():
+			var screen_name := doc.get_screen_name(screen_id)
+			assert_true(frame.configure(doc, screen_name, null, null, {}),
+					"%s/%s configures" % [menu_name, screen_name])
+			var stats: Dictionary = frame.get_draw_list_stats()
+			assert_gt(int(stats.get("widgets_drawn", 0)), 0,
+					"%s/%s draws widgets" % [menu_name, screen_name])
+		gut.p("  %s: %d screens, %d unresolved assets" % [
+				menu_name, doc.get_screen_count(),
+				frame.get_unresolved_asset_count()])

@@ -21,7 +21,7 @@ const T_MEMBER := 0  # effect output  <-> particle input
 const T_SPAWN := 1   # particle output <-> child-particle input
 
 var _editor: ParticleEditor
-var _workspace
+var _workspace: ParticleEditorWorkspace
 var _graph: GraphEdit
 var _preview: ParticlePreview
 
@@ -64,11 +64,11 @@ func get_preview() -> ParticlePreview:
 	return _preview
 
 
-func get_viewport_camera() -> Camera3D:
+func get_viewport_camera() -> FlyCamera:
 	return _preview.get_preview_camera() if _preview != null else null
 
 
-func set_workspace(value) -> void:
+func set_workspace(value: ParticleEditorWorkspace) -> void:
 	_workspace = value
 
 
@@ -217,19 +217,19 @@ func _refresh_presentations() -> void:
 			continue
 		match String(info.kind):
 			"effect":
-				var effect := info.obj as NovaParticleEffect
+				var effect := info.obj as ParticleEffect
 				node.title = "▣ %s" % effect.id
 				var label := node.get_child(0) as Label
 				if label != null:
 					label.text = "%d particle(s)" % effect.pdefs.size()
 			"particle":
-				var particle := info.obj as NovaParticleDef
+				var particle := info.obj as ParticleDef
 				node.title = "● %s" % particle.id
 				var label := node.get_child(0) as Label
 				if label != null:
 					label.text = _particle_summary(particle)
 			"table":
-				var table := info.obj as NovaParticleTable
+				var table := info.obj as ParticleTable
 				node.title = "∿ %s" % table.id
 				var spark := node.get_child(0) as Control
 				if spark != null:
@@ -344,7 +344,7 @@ func _highlight_selected() -> void:
 		return
 	_syncing = true
 	var selected_obj: Object = _editor.current_particle
-	if _workspace != null and _workspace.has_method("get_active_workflow_id"):
+	if _workspace != null:
 		match int(_workspace.get_active_workflow_id()):
 			ParticleEditorWorkspace.Workflow.EFFECTS:
 				selected_obj = _editor.current_effect

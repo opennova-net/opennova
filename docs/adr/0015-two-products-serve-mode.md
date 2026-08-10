@@ -53,9 +53,9 @@ binary with a different icon; both are debt.
 
 Authoritative network ENVIRONMENT data reaches the wire through one seam,
 `world::EnvNetworkState::publish_complete`, fed from either product shape: the
-Godot shell publishes the live `NovaWeather` node's snapshot
+Godot shell publishes the live `Weather` node's snapshot
 (`game_world.gd::_push_network_environment` ->
-`NovaSimulation::set_network_environment`), and the sim-only host
+`Simulation::set_network_environment`), and the sim-only host
 (`apps/nw_server`) publishes mission-sourced samples below the shell seam
 (`environment_startup.cpp`: `.env` parse + BMS fog overrides, prewarmed and
 advanced per tick). The #403-review concern that a sim-only host would emit

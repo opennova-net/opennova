@@ -31,7 +31,7 @@ func delete_selected() -> bool:
 		_c._report("Could not delete the selected object.", true)
 		return false
 	_c._mission.commit_edit()
-	if kind == NovaMissionData.KIND_MARKER:
+	if kind == MissionData.KIND_MARKER:
 		# Objects are untouched by a marker delete; drop the selection and rebuild only the marker
 		# overlay against the post-delete list (cheaper than re-placing every object). The marker is
 		# still part of the entity set the inspector's cached pickers marshal, so bump the membership
@@ -56,7 +56,7 @@ func delete_selected() -> bool:
 func _rebake_objects() -> void:
 	if _c._placer == null or _c._mission == null:
 		return
-	if _c.terrain_editor == null or not _c.terrain_editor.has_method("get_terrain_world_root"):
+	if _c.terrain_editor == null:
 		return
 	var world_root: Node3D = _c.terrain_editor.get_terrain_world_root()
 	if world_root == null:
@@ -69,9 +69,7 @@ func _rebake_objects() -> void:
 	# bump; see _apply_reground_world_update.)
 	_c._membership_rev += 1
 	var options: Dictionary = {}
-	var env_node: Node = _c._environment_node()
-	if env_node != null:
-		options["environment_node"] = env_node
+	_c._wire_placer_environment()
 	_c._stats = _c._placer.place(_c._mission, world_root, options)
 	_c._pickable = _c._placer.pickable_records
 	# The placer (re)created the pick colliders with the world; just refresh the debug overlay.
@@ -109,6 +107,7 @@ func set_mode(mode: int) -> void:
 	_c._selected_ref = {}
 	_c._selected_records = []
 	_c._selected_node = null
+	_c._selected_model = null
 	_c._selected_graphic = ""
 	_c._selected_node_offset = Transform3D.IDENTITY
 	_c._selected_collider = null

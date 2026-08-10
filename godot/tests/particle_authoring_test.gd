@@ -11,7 +11,7 @@ const ParticleDefInspectorScript = preload("res://modtools/particle/inspectors/p
 const ParticleTableInspectorScene = preload("res://modtools/particle/inspectors/table_inspector.tscn")
 
 const OUTPUT_DIR_NAME := "particle_authoring_test"
-const PARTICLE_FLAG_FOREVER_EMIT := NovaParticleDef.FLAG_FOREVER_EMIT
+const PARTICLE_FLAG_FOREVER_EMIT := ParticleDef.FLAG_FOREVER_EMIT
 
 
 func before_each() -> void:
@@ -26,38 +26,38 @@ func after_each() -> void:
 # --- Canonical-table bindings -------------------------------------------------
 
 func test_flag_tables_bound_from_cpp() -> void:
-	var flags := NovaParticleDef.get_particle_flag_table()
+	var flags := ParticleDef.get_particle_flag_table()
 	assert_eq(flags.size(), 29, "Particle flag table should expose all 29 engine entries.")
 	assert_true(flags.has("FOREVEREMIT"), "Flag table should include FOREVEREMIT.")
 	assert_eq(int(flags["FOREVEREMIT"]), PARTICLE_FLAG_FOREVER_EMIT, "FOREVEREMIT bit must match the engine table.")
 	assert_true(flags.has("HAZE") and flags.has("BELOWH20") and flags.has("ABOVEH20"),
 			"Flag table should include the water/haze flags added by the cross-witness grill.")
 
-	var moves := NovaParticleDef.get_move_flag_table()
+	var moves := ParticleDef.get_move_flag_table()
 	assert_eq(moves.size(), 5, "Move table should expose all 5 entries.")
 	assert_eq(int(moves["ORBIT"]), 1 << 2, "ORBIT must live at bit 2 per the engine table reorder.")
 
-	var blends := NovaParticleDef.get_blend_mode_names()
+	var blends := ParticleDef.get_blend_mode_names()
 	assert_eq(blends.size(), 8, "There should be 8 blend modes.")
 	assert_eq(String(blends[0]), "blend")
 	assert_eq(String(blends[1]), "additive")
 
-	assert_eq(String(NovaParticleDef.format_particle_flags(PARTICLE_FLAG_FOREVER_EMIT)).strip_edges(),
+	assert_eq(String(ParticleDef.format_particle_flags(PARTICLE_FLAG_FOREVER_EMIT)).strip_edges(),
 			"FOREVEREMIT", "format_particle_flags should round-trip a single bit to its name.")
 
 
 # --- Flag bitfield round-trip (the bug fix) ----------------------------------
 
 func test_flag_bitfield_survives_save_and_reload() -> void:
-	var file := NovaParticleFile.new()
-	var p := NovaParticleDef.new()
+	var file := ParticleFile.new()
+	var p := ParticleDef.new()
 	p.id = "Flagged"
 	p.flags = PARTICLE_FLAG_FOREVER_EMIT
 	p.emit_burst = 1
 	_append(file, "particles", p)
 
 	var reloaded := _roundtrip(file)
-	var rp: NovaParticleDef = reloaded.find_particle("Flagged")
+	var rp: ParticleDef = reloaded.find_particle("Flagged")
 	assert_not_null(rp, "Saved particle should reload.")
 	assert_eq(int(rp.flags) & PARTICLE_FLAG_FOREVER_EMIT, PARTICLE_FLAG_FOREVER_EMIT,
 			"A flag toggled via the bitfield must persist through the writer (which serializes flags, not flags_raw).")
@@ -73,7 +73,7 @@ func test_unknown_particle_keys_survive_godot_load_save_in_order() -> void:
 	g1_future_mode = layer_second;
 }
 """
-	var file := NovaParticleFile.new()
+	var file := ParticleFile.new()
 	assert_eq(file.load_from_buffer(source.to_utf8_buffer(), "memory.ptl"), OK)
 	var particle := file.find_particle("UnknownKeyProbe")
 	assert_not_null(particle)
@@ -86,7 +86,7 @@ func test_unknown_particle_keys_survive_godot_load_save_in_order() -> void:
 
 	var path := _output_dir().path_join("unknown_keys.ptl")
 	assert_eq(file.save_to_file(path), OK)
-	var reloaded := NovaParticleFile.new()
+	var reloaded := ParticleFile.new()
 	assert_eq(reloaded.load_from_file(path), OK)
 	var round_tripped: Array = reloaded.find_particle("UnknownKeyProbe").unknown_keys
 	assert_eq(round_tripped.size(), 4)
@@ -111,7 +111,7 @@ func test_new_document_add_particle_round_trips() -> void:
 
 	var path := _output_dir().path_join("added.ptl")
 	assert_eq(editor.save_to_path(path), OK, "The new document should save.")
-	var reloaded := NovaParticleFile.new()
+	var reloaded := ParticleFile.new()
 	assert_eq(reloaded.load_from_file(path), OK, "The saved file should reload as valid PTL.")
 	assert_eq(reloaded.particles.size(), 1, "The added particle should be present after reload.")
 
@@ -241,9 +241,9 @@ func test_table_edit_round_trips() -> void:
 
 	var path := _output_dir().path_join("table.ptl")
 	assert_eq(editor.save_to_path(path), OK)
-	var reloaded := NovaParticleFile.new()
+	var reloaded := ParticleFile.new()
 	assert_eq(reloaded.load_from_file(path), OK)
-	var rt: NovaParticleTable = reloaded.find_table(t.id)
+	var rt: ParticleTable = reloaded.find_table(t.id)
 	assert_not_null(rt, "The table should reload.")
 	var rdata: PackedByteArray = rt.get_data()
 	assert_eq(int(rdata[0]), 200, "Edited curve bytes must survive a save/reload.")
@@ -251,7 +251,7 @@ func test_table_edit_round_trips() -> void:
 	# Table lookups fold case like the engine's _stricmp resolve
 	# [orig: table find @ 0x5e9540]; shipped data mixes cases
 	# (ambfx.ptl green_func = Table11Alt vs id = table11Alt).
-	var folded: NovaParticleTable = reloaded.find_table(t.id.to_upper())
+	var folded: ParticleTable = reloaded.find_table(t.id.to_upper())
 	assert_not_null(folded, "find_table must resolve case-insensitively.")
 
 
@@ -264,7 +264,7 @@ func test_table_rename_preserves_curve_and_handle_references() -> void:
 	graphics[0].get_alpha_func().name = table.id
 	graphics[0].get_alpha_func().present = true
 	particle.set_graphics(graphics)
-	var handles := NovaParticleTableHandles.new()
+	var handles := ParticleTableHandles.new()
 	handles.table_id = table.id
 	_append(editor.particle_file, "table_handles", handles)
 
@@ -304,13 +304,14 @@ func test_blueprint_builds_nodes_from_model() -> void:
 
 
 func test_blueprint_child_connection_targets_a_particle_not_an_effect() -> void:
-	var editor = ParticleEditorScript.new()
+	var workspace := ParticleEditorWorkspace.new()
+	var editor: ParticleEditor = workspace.particle_editor
 	var parent = editor.add_particle()
 	var child = editor.add_particle()
 	var effect = editor.add_effect()
 	var screen = add_child_autofree(ParticleBlueprintScreenScript.new())
 	await get_tree().process_frame
-	screen.set_workspace(editor)
+	screen.set_workspace(workspace)
 	screen.set_particle_editor(editor)
 	await get_tree().process_frame
 
@@ -336,7 +337,9 @@ func test_effect_membership_edit_rebuilds_graph_and_live_preview() -> void:
 	var preview := ParticlePreview.new()
 	add_child_autofree(preview)
 	await get_tree().process_frame
-	screen.set_workspace(editor)
+	# No workspace bound in these scenes (the blueprint reads only the editor);
+	# the old untyped seam accepted the editor here and ignored it.
+	screen.set_workspace(null)
 	screen.set_particle_editor(editor)
 	preview.set_particle_file(editor.particle_file)
 	preview.set_effect(effect)
@@ -459,13 +462,14 @@ func test_table_inspector_rename_keeps_assignments_and_graph_title() -> void:
 
 
 func test_blueprint_multi_delete_removes_the_original_selected_objects() -> void:
-	var editor = ParticleEditorScript.new()
+	var workspace := ParticleEditorWorkspace.new()
+	var editor: ParticleEditor = workspace.particle_editor
 	var particle = editor.add_particle()
 	var first = editor.add_effect()
 	var second = editor.add_effect()
 	var screen = add_child_autofree(ParticleBlueprintScreenScript.new())
 	await get_tree().process_frame
-	screen.set_workspace(editor)
+	screen.set_workspace(workspace)
 	screen.set_particle_editor(editor)
 	var graph := _find_graphedit(screen)
 	var first_name := _graph_node_name_with_title(graph, first.id)
@@ -482,15 +486,15 @@ func test_blueprint_multi_delete_removes_the_original_selected_objects() -> void
 
 # --- Helpers -----------------------------------------------------------------
 
-func _roundtrip(file: NovaParticleFile) -> NovaParticleFile:
+func _roundtrip(file: ParticleFile) -> ParticleFile:
 	var path := _output_dir().path_join("roundtrip.ptl")
 	assert_eq(file.save_to_file(path), OK, "File should save.")
-	var reloaded := NovaParticleFile.new()
+	var reloaded := ParticleFile.new()
 	assert_eq(reloaded.load_from_file(path), OK, "File should reload.")
 	return reloaded
 
 
-func _append(file: NovaParticleFile, prop: String, value) -> void:
+func _append(file: ParticleFile, prop: String, value) -> void:
 	var arr: Array = file.get(prop)
 	arr.append(value)
 	file.set(prop, arr)

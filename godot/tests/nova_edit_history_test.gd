@@ -1,6 +1,6 @@
 extends GutTest
 
-# NovaEditHistory: the GDExtension boxing of the shared C++ undo/redo core
+# EditHistory: the GDExtension boxing of the shared C++ undo/redo core
 # (engine/base/oned_edit). Covers the two flavors the GDScript editors use — the
 # whole-document begin/commit bracket with undo_swap/redo_swap adoption, and
 # the caller-applied push_step/pop_undo/pop_redo delta stacks — plus the
@@ -14,7 +14,7 @@ func _bytes(text: String) -> PackedByteArray:
 # --- Whole-document bracket -----------------------------------------------
 
 func test_commit_without_change_records_nothing() -> void:
-	var h := NovaEditHistory.new()
+	var h := EditHistory.new()
 	var doc := _bytes("a")
 	h.begin_edit(doc)
 	assert_false(h.commit_edit(doc), "Unchanged document should record no step.")
@@ -22,7 +22,7 @@ func test_commit_without_change_records_nothing() -> void:
 
 
 func test_begin_commit_undo_swap_round_trip() -> void:
-	var h := NovaEditHistory.new()
+	var h := EditHistory.new()
 	var doc := _bytes("v1")
 	h.begin_edit(doc)
 	doc = _bytes("v2")
@@ -40,14 +40,14 @@ func test_begin_commit_undo_swap_round_trip() -> void:
 
 
 func test_undo_swap_on_empty_returns_null_not_falsy() -> void:
-	var h := NovaEditHistory.new()
+	var h := EditHistory.new()
 	var live := PackedByteArray()  # empty bytes are falsy but NOT null
 	var result = h.undo_swap(live)
 	assert_eq(typeof(result), TYPE_NIL, "Empty history must return null, the reserved sentinel.")
 
 
 func test_equal_gate_is_content_compare_for_dictionaries() -> void:
-	var h := NovaEditHistory.new()
+	var h := EditHistory.new()
 	var doc := {"value": 1, "items": [1, 2]}
 	h.begin_edit(doc.duplicate(true))
 	# A distinct Dictionary instance with equal content: the gate must suppress it.
@@ -57,7 +57,7 @@ func test_equal_gate_is_content_compare_for_dictionaries() -> void:
 
 
 func test_coalescing_second_begin_is_inert() -> void:
-	var h := NovaEditHistory.new()
+	var h := EditHistory.new()
 	var doc := _bytes("start")
 	h.begin_edit(doc)
 	h.begin_edit(_bytes("mid"))  # inert: session already open, pending stays "start"
@@ -67,7 +67,7 @@ func test_coalescing_second_begin_is_inert() -> void:
 
 
 func test_fresh_commit_after_undo_clears_redo() -> void:
-	var h := NovaEditHistory.new()
+	var h := EditHistory.new()
 	var doc := _bytes("1")
 	h.begin_edit(doc); doc = _bytes("2"); h.commit_edit(doc)
 	doc = h.undo_swap(doc)
@@ -79,7 +79,7 @@ func test_fresh_commit_after_undo_clears_redo() -> void:
 # --- Delta flavor -----------------------------------------------------------
 
 func test_push_pop_round_trip() -> void:
-	var h := NovaEditHistory.new()
+	var h := EditHistory.new()
 	h.push_step({"op": "paint", "index": 1})
 	h.push_step({"op": "paint", "index": 2})
 	assert_eq(h.undo_depth(), 2)
@@ -97,7 +97,7 @@ func test_push_pop_round_trip() -> void:
 
 
 func test_push_after_pop_clears_redo() -> void:
-	var h := NovaEditHistory.new()
+	var h := EditHistory.new()
 	h.push_step({"op": "a"})
 	h.pop_undo()
 	assert_true(h.can_redo())
@@ -106,7 +106,7 @@ func test_push_after_pop_clears_redo() -> void:
 
 
 func test_set_limit_caps_steps() -> void:
-	var h := NovaEditHistory.new()
+	var h := EditHistory.new()
 	h.set_limit(2)
 	h.push_step({"n": 1})
 	h.push_step({"n": 2})
@@ -120,7 +120,7 @@ func test_set_limit_caps_steps() -> void:
 # --- Dirty vs baseline ------------------------------------------------------
 
 func test_is_dirty_tracks_baseline_by_value() -> void:
-	var h := NovaEditHistory.new()
+	var h := EditHistory.new()
 	var doc := _bytes("clean")
 	h.mark_clean(doc)
 	assert_false(h.is_dirty(doc))
@@ -130,13 +130,13 @@ func test_is_dirty_tracks_baseline_by_value() -> void:
 
 
 func test_is_dirty_fallback_without_baseline() -> void:
-	var h := NovaEditHistory.new()
+	var h := EditHistory.new()
 	assert_false(h.is_dirty(_bytes("x")))
 	assert_true(h.is_dirty(_bytes("x"), true), "Caller fallback should be honoured pre-baseline.")
 
 
 func test_clear_drops_history_but_not_baseline() -> void:
-	var h := NovaEditHistory.new()
+	var h := EditHistory.new()
 	var doc := _bytes("base")
 	h.mark_clean(doc)
 	h.begin_edit(doc)

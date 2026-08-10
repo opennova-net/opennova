@@ -1,16 +1,16 @@
 extends GutTest
 
-# Exercises the NovaHudPos GDExtension binding over engine/formats/def hudpos.def parsing.
+# Exercises the HudPos GDExtension binding over engine/formats/def hudpos.def parsing.
 # Values mirror tests/def/def_parse_hudpos_test.cpp against fixtures/def/hudpos.def.
 
 const HUDPOS_PATH := "res://../fixtures/def/hudpos.def"
 
 
-func _load() -> NovaHudPos:
-	var hud := NovaHudPos.new()
+func _load() -> HudPos:
+	var hud := HudPos.new()
 	var abs := ProjectSettings.globalize_path(HUDPOS_PATH)
 	var err := hud.load(abs)
-	assert_eq(err, OK, "NovaHudPos.load should parse the hudpos.def fixture.")
+	assert_eq(err, OK, "HudPos.load should parse the hudpos.def fixture.")
 	return hud
 
 
@@ -21,8 +21,8 @@ func test_loads_and_reports_state() -> void:
 
 
 func test_design_space_constants() -> void:
-	assert_eq(NovaHudPos.DESIGN_WIDTH, 1024, "Witnessed HUD design width.")
-	assert_eq(NovaHudPos.DESIGN_HEIGHT, 768, "Witnessed HUD design height.")
+	assert_eq(HudPos.DESIGN_WIDTH, 1024, "Witnessed HUD design width.")
+	assert_eq(HudPos.DESIGN_HEIGHT, 768, "Witnessed HUD design height.")
 
 
 func test_health_rect_from_corners() -> void:
@@ -79,7 +79,7 @@ func test_to_dictionary_shape() -> void:
 
 
 func test_not_loaded_is_safe() -> void:
-	var hud := NovaHudPos.new()
+	var hud := HudPos.new()
 	assert_false(hud.is_loaded(), "Fresh instance is not loaded.")
 	assert_eq(hud.get_health_rect(), Rect2i(), "Unloaded getters return empty.")
 	assert_eq(hud.get_stances().size(), 0, "Unloaded stances empty.")

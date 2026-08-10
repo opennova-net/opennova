@@ -10,7 +10,7 @@ extends Node
 ##   "$GODOT_BIN" --path godot res://tests/foliage_spawn_capture_probe.tscn
 ## Optional output override: NOVA_SPAWN_CAPTURE_DIR=<absolute-or-res://-path>
 
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 const StandaloneProbe := preload("res://tests/standalone_game_probe.gd")
 
 const DEFAULT_MISSION := "00TRe.bms"
@@ -37,7 +37,7 @@ func _ready() -> void:
 		_fail("no valid loose authoring root; set NOVA_MISSION_RESOURCE_DIR")
 		return
 	var runtime_resource_dir := OS.get_environment("NOVA_RUNTIME_RESOURCE_DIR").strip_edges()
-	if not NovaResourceRoot.is_valid_root(runtime_resource_dir):
+	if not ResourceRoot.is_valid_root(runtime_resource_dir):
 		_fail("no valid packed runtime root; set NOVA_RUNTIME_RESOURCE_DIR")
 		return
 	var requested_expansion := OS.get_environment("NOVA_EXPANSION").strip_edges()
@@ -55,7 +55,7 @@ func _ready() -> void:
 	if mission_name.is_empty():
 		mission_name = DEFAULT_MISSION
 	_capture_stem = mission_name.get_file().get_basename()
-	var mission_path := NovaPaths.resolve_file(mission_resource_dir, mission_name)
+	var mission_path := Paths.resolve_file(mission_resource_dir, mission_name)
 	if mission_path.is_empty():
 		_fail("%s not found in loose authoring root %s" % [
 			mission_name, mission_resource_dir])
@@ -74,7 +74,7 @@ func _ready() -> void:
 		return
 	_game = session.game
 	_world = session.world
-	var runtime_root: NovaResourceRoot = _game.current_resource_root()
+	var runtime_root: ResourceRoot = _game.current_resource_root()
 	if runtime_root == null:
 		_fail("standalone game did not retain its packed runtime root")
 		return
@@ -100,7 +100,7 @@ func _ready() -> void:
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 	await _settle(PLAY_SETTLE_FRAMES)
 
-	var environment = world.get_node_or_null("NovaEnvironment")
+	var environment = world.get_node_or_null("MissionEnvironment")
 	if environment == null or environment.get("time_of_day") == null:
 		_fail("played mission environment/TOD unavailable")
 		return
@@ -111,7 +111,7 @@ func _ready() -> void:
 	# Freeze the real game loop. Rendering stays live, while the player,
 	# camera, mission clock, and foliage dispatch stay bit-identical for the A/B.
 	world.process_mode = Node.PROCESS_MODE_DISABLED
-	var dispatcher = world.get_node_or_null("NovaTerrain/FoliageDispatcher")
+	var dispatcher = world.get_node_or_null("Terrain/FoliageDispatcher")
 	var foliage_error := runtime_foliage_validation_error(
 		mission_name,
 		dispatcher.get_frame_stats() if dispatcher != null else {},
@@ -248,7 +248,7 @@ static func runtime_source_validation_error(
 
 
 static func _winning_source_entries(
-		root: NovaResourceRoot, logical_names: PackedStringArray) -> Array:
+		root: ResourceRoot, logical_names: PackedStringArray) -> Array:
 	var winners_by_name := {}
 	for value in root.list_file_entries():
 		var entry := value as Dictionary
@@ -265,7 +265,7 @@ static func _winning_source_entries(
 
 
 func _run_foliage_flicker_probe(
-		world, dispatcher: NovaFoliageDispatcher, camera: Camera3D,
+		world, dispatcher: FoliageDispatcher, camera: Camera3D,
 		viewport: Viewport, spawn_state: Dictionary) -> void:
 	# Freeze every scene update and drive only the real foliage dispatcher. The
 	# renderer stays live, so any remaining pixel changes come from foliage draws.
@@ -296,7 +296,7 @@ func _run_foliage_flicker_probe(
 			skipped.append("%s (%s)" % [tier, result.skipped])
 	camera.set_global_transform(base_transform)
 	if not _same_snapshot(spawn_state, _snapshot(
-			world, camera, world.get_node_or_null("NovaEnvironment"), viewport)):
+			world, camera, world.get_node_or_null("MissionEnvironment"), viewport)):
 		failures.append("exact spawn state changed during the flicker probe")
 	if not failures.is_empty():
 		_fail("; ".join(failures))
@@ -307,7 +307,7 @@ func _run_foliage_flicker_probe(
 
 
 func _probe_flicker_tier(
-		dispatcher: NovaFoliageDispatcher, camera: Camera3D, viewport: Viewport,
+		dispatcher: FoliageDispatcher, camera: Camera3D, viewport: Viewport,
 		hidden: Image, base_transform: Transform3D, tier: String) -> Dictionary:
 	camera.set_global_transform(base_transform)
 	for _warmup in 2:
@@ -393,7 +393,7 @@ func _probe_flicker_tier(
 
 
 func _configure_flicker_draws(
-		dispatcher: NovaFoliageDispatcher, tier: String,
+		dispatcher: FoliageDispatcher, tier: String,
 		hide_selected: bool, fade_adjust: float) -> Dictionary:
 	var kept := 0
 	var fade_min := INF
@@ -605,7 +605,7 @@ func _print_runtime_metadata(world, environment) -> void:
 		"sky_height_target": environment.get_sky_height_target(),
 	})
 
-	var sky = world.get_node_or_null("NovaSky")
+	var sky = world.get_node_or_null("SkyDome")
 	var sky_material: ShaderMaterial = sky.sky_material if sky != null else null
 	var cloud1: Texture2D = environment.get_sky_map1_tex()
 	var cloud2: Texture2D = environment.get_sky_map2_tex()
@@ -623,14 +623,14 @@ func _print_runtime_metadata(world, environment) -> void:
 		"cloud_tex2_size": Vector2i(cloud2.get_width(), cloud2.get_height()) if cloud2 != null else Vector2i.ZERO,
 	})
 
-	var dispatcher = world.get_node_or_null("NovaTerrain/FoliageDispatcher")
+	var dispatcher = world.get_node_or_null("Terrain/FoliageDispatcher")
 	print("[spawn-capture] dispatcher: ", {
 		"present": dispatcher != null,
 		"total_instances": dispatcher.get_total_instances() if dispatcher != null else -1,
 		"frame_stats": dispatcher.get_frame_stats() if dispatcher != null else {},
 	})
 	var data = world.get_terrain_data()
-	var terrain = world.get_node_or_null("NovaTerrain")
+	var terrain = world.get_node_or_null("Terrain")
 	var assigned_tile_info = terrain.get_tile_info_override() if terrain != null else null
 	var tile_info_source := "override"
 	if assigned_tile_info == null and data != null:
@@ -680,7 +680,7 @@ func _texture_meta(value: Variant) -> Dictionary:
 
 
 func _print_foliage_material_state(world) -> void:
-	var dispatcher: Node = world.get_node_or_null("NovaTerrain/FoliageDispatcher")
+	var dispatcher: Node = world.get_node_or_null("Terrain/FoliageDispatcher")
 	if dispatcher == null:
 		print("[spawn-capture] detail materials: dispatcher missing")
 		return

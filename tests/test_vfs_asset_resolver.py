@@ -64,7 +64,7 @@ def scr_blob(plaintext: bytes, key: int) -> bytes:
     return b"SCR\x01" + bytes(b)
 
 
-# SCR keys (mirror engine/formats/scr/include/scr/scr.h).
+# SCR keys (mirror engine/formats/scr/scr.h).
 _SCR_KEY_DEFAULT = 0xABEEFACE  # JO Demo
 _SCR_KEY_JO_DFX2 = 0x2A5A8EAD  # retail JO/DFX2
 

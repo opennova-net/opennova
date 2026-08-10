@@ -13,13 +13,43 @@ var _had_state_config := false
 var service: EditorMcpService
 
 
+# The McpToolContext accessor contract (root/index/camera/active-workspace) is
+# called directly on the shell now, so the stub carries the surface with empty
+# answers instead of relying on probe fallbacks.
+class ShellContractStub:
+	extends Node
+
+	func get_resource_root() -> ResourceRoot:
+		return null
+
+	func get_resource_index() -> Variant:
+		return null
+
+	func get_resource_root_dir() -> String:
+		return ""
+
+	func get_editor_camera() -> FlyCamera:
+		return null
+
+	func get_game_run_session() -> Variant:
+		return null
+
+	func _get_active_workspace() -> Variant:
+		return null
+
+	func _ensure_resource_index() -> void:
+		pass
+
+
 func before_each() -> void:
 	_had_state_config = FileAccess.file_exists(STATE_CONFIG_PATH)
 	_saved_state_config = FileAccess.get_file_as_bytes(STATE_CONFIG_PATH) if _had_state_config else PackedByteArray()
 	service = add_child_autofree(EditorMcpService.new())
-	var editor_stub: Node = add_child_autofree(Node.new())
+	# A bare TerrainEditorBase serves the editor seam: every sampling default
+	# answers "no terrain loaded".
+	var editor_stub: TerrainEditorBase = add_child_autofree(TerrainEditorBase.new())
 	editor_stub.name = "EditorStub"
-	var shell_stub: Node = add_child_autofree(Node.new())
+	var shell_stub: ShellContractStub = add_child_autofree(ShellContractStub.new())
 	shell_stub.name = "ShellStub"
 	service.setup(editor_stub, shell_stub)
 
@@ -56,13 +86,13 @@ func test_editor_state_shape_with_stub_shell() -> void:
 func test_describe_api_index() -> void:
 	var result: McpToolResult = await _call("describe_api")
 	var index: Dictionary = result.structured
-	assert_true((index["classes"] as Array).has("NovaMissionData"), "GDExtension classes indexed.")
+	assert_true((index["classes"] as Array).has("MissionData"), "GDExtension classes indexed.")
 	assert_true((index["topics"] as Array).has("coordinates"))
 	assert_false((index["topics"] as Array).has("ctx"), "the scripting topic is gone with the script surface")
 
 
 func test_describe_api_native_class() -> void:
-	var result: McpToolResult = await _call("describe_api", { "name": "NovaMissionData" })
+	var result: McpToolResult = await _call("describe_api", { "name": "MissionData" })
 	var described: Dictionary = result.structured
 	assert_eq(described["kind"], "native_class")
 	var method_names: Array = described["methods"].map(func(m): return m["name"])

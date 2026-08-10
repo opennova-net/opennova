@@ -9,7 +9,7 @@ extends Node
 # the ease reads ~2 sim ticks per render frame fullscreen (62.5 Hz vs ~30-45 fps),
 # so the mid-ease captures sit a few FRAMES after the RMB edge.
 
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 const StandaloneProbe := preload("res://tests/standalone_game_probe.gd")
 const OUT_DIR := "res://../.scratch/weapon_round"
 const RIG_WEAPON := "WPN_Barret"  # Scoped; M82_1st carries the empty/dup bone rows (rig-fix demo)
@@ -29,7 +29,7 @@ func _ready() -> void:
 	# NOVA_WR_EXPANSION: mount an expansion over the base game for this run (the
 	# persisted key is what GameWorld reads — mirror of the retail /exp flag).
 	var expn := OS.get_environment("NOVA_WR_EXPANSION").strip_edges()
-	NovaWindow.set_fullscreen(get_window(), true)
+	WindowState.set_fullscreen(get_window(), true)
 	await _settle(6)
 
 	var bms := OS.get_environment("NOVA_MISSION_BMS").strip_edges()
@@ -308,15 +308,15 @@ func _fire_diag() -> void:
 		_mouse_btn(MOUSE_BUTTON_LEFT, false)
 		await _settle(20)
 	# The armory-name thread: is the loadout text table resolvable on this root?
-	var root: NovaResourceRoot = _world.get_resource_root() \
+	var root: ResourceRoot = _world.get_resource_root() \
 			if _world.has_method("get_resource_root") else null
 	if root != null:
 		for f in ["menutxt.BIN", "Game.bin", "gametext.bin"]:
 			print("[wr] root has %-12s -> %s" % [f, str(root.has_file(f))])
 	for table in ["menutxt", "gametext"]:
-		var tb = NovaStrings.get_table(table)
+		var tb = Strings.get_table(table)
 		print("[wr] strings %-9s -> %s  WepDes/WEAP_SHORT_M4=%s" % [table, str(tb != null),
-				NovaStrings.lookup(table, "WepDes", "WEAP_SHORT_M4") if tb != null else "<no table>"])
+				Strings.lookup(table, "WepDes", "WEAP_SHORT_M4") if tb != null else "<no table>"])
 
 
 func _log_view(stage: String) -> void:

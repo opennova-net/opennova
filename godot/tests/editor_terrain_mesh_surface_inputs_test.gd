@@ -3,7 +3,7 @@ extends GutTest
 
 func test_editor_mesh_owns_and_applies_shared_surface_inputs() -> void:
 	var mesh: EditorTerrainMesh = add_child_autofree(EditorTerrainMesh.new())
-	var inputs: NovaTerrainSurfaceInputs = mesh.get_surface_inputs()
+	var inputs: TerrainSurfaceInputs = mesh.get_surface_inputs()
 	var heightmap_texture: Texture2D = mesh.get_material().get_shader_parameter("u_heightmap")
 	var data := _make_surface_data()
 
@@ -35,7 +35,7 @@ func test_partial_refreshes_rebuild_and_reapply_the_changed_input_family() -> vo
 	var data := _make_surface_data()
 	mesh.set_terrain_data(data)
 	assert_true(mesh.rebuild_surface_inputs())
-	var inputs: NovaTerrainSurfaceInputs = mesh.get_surface_inputs()
+	var inputs: TerrainSurfaceInputs = mesh.get_surface_inputs()
 	var material := mesh.get_material()
 
 	var first_normal: Texture2D = inputs.get_heightfield_normal_texture()
@@ -86,8 +86,8 @@ func test_tile_overlay_refresh_exposes_foliage_inputs_and_clears_material_state(
 	assert_null(mesh.get_tile_overlay_texture())
 
 
-func _make_surface_data() -> NovaTerrainData:
-	var data := NovaTerrainData.new()
+func _make_surface_data() -> TerrainData:
+	var data := TerrainData.new()
 	data.set_colormap(_solid_texture(Color8(90, 110, 70, 255), 4))
 	data.set_detailmap(_solid_texture(Color8(80, 100, 140, 255), 4))
 	data.set_detailmap_c1(_solid_texture(Color8(130, 80, 40, 255), 4))
@@ -104,9 +104,9 @@ func _make_surface_data() -> NovaTerrainData:
 	return data
 
 
-func _one_tile_info() -> NovaTerrainTileInfo:
-	var tile_info := NovaTerrainTileInfo.new()
-	var entry := NovaTerrainTileEntry.new()
+func _one_tile_info() -> TerrainTileInfo:
+	var tile_info := TerrainTileInfo.new()
+	var entry := TerrainTileEntry.new()
 	entry.set_cell(0, 0)
 	entry.set_tile_index(0)
 	tile_info.add_entry(entry)

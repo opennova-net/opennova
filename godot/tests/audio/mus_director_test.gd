@@ -5,14 +5,14 @@ const BANK_FIXTURE := "res://../fixtures/sbf/jo_gamemus.sbf"
 
 
 func test_director_starts_and_stops() -> void:
-	var bank := NovaSbfBank.new()
+	var bank := SbfBank.new()
 	bank.load_from_path(BANK_FIXTURE)
-	var script := NovaMusicScript.new()
+	var script := MusicScript.new()
 	script.load_from_path(SCRIPT_FIXTURE)
 	assert_not_null(script, "music script fixture loads")
 	if script == null:
 		return
-	var dir := NovaMusicDirector.new()
+	var dir := MusicDirector.new()
 	add_child_autofree(dir)
 	dir.bank = bank
 	dir.load_mus_script(script)
@@ -24,12 +24,12 @@ func test_director_starts_and_stops() -> void:
 
 
 func test_director_emits_section_entered_on_jump() -> void:
-	var script := NovaMusicScript.new()
+	var script := MusicScript.new()
 	script.load_from_path(SCRIPT_FIXTURE)
 	assert_not_null(script, "music script fixture loads")
 	if script == null:
 		return
-	var dir := NovaMusicDirector.new()
+	var dir := MusicDirector.new()
 	add_child_autofree(dir)
 	dir.load_mus_script(script)
 	dir.auto_start = false

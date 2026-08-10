@@ -30,7 +30,7 @@ several Actions; pressing it runs them in order.
 **Tabs** are the `window` Action in practice: one button per panel, each one hiding
 its sibling panels and showing its own. There is no "tab" widget type.
 
-Runtime path: `NovaMnuButton::on_pressed` → `NovaMnuMenu::dispatch_action` routes
+Runtime path: `MenuDriver` widget activation → `MenuDriver.dispatch_action_row` routes
 menu-owned Actions directly and hands browser/form/application Actions to their
 shell. Same-file `screen` navigates in place; `file` jumps emit `menu_requested`
 for the Menu Shell to open. Interactive preview consumes shell-side effects.

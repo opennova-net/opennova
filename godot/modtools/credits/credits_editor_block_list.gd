@@ -2,7 +2,7 @@ class_name CreditsEditorBlockList
 extends VBoxContainer
 
 const BlockCardScene = preload("res://modtools/credits/credits_editor_block_card.tscn")
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 
 signal entries_reordered
 signal selection_changed(entry)
@@ -16,8 +16,8 @@ var _entry_to_card: Dictionary = {}  # CbinEntry -> CreditsEditorBlockCard
 var _reconcile_pending: bool = false
 var _selected_entry: CbinEntry
 var _selection_emit_pending: bool = false
-var _resource_root: NovaResourceRoot
-var _ref_services: Dictionary = {}
+var _resource_root: ResourceRoot
+var _ref_services := LinkServices.new()
 
 func _ready() -> void:
 	_vbox = self
@@ -28,12 +28,12 @@ func set_resource_root_dir(path: String) -> void:
 	_resource_root = _coerce_resource_root(path)
 	_reconcile()
 
-func set_resource_root(value: NovaResourceRoot) -> void:
+func set_resource_root(value: ResourceRoot) -> void:
 	_resource_root = value
 	_reconcile()
 
 ## The shell's resolve/pick/jump trio for the cards' font link rows.
-func set_reference_services(services: Dictionary) -> void:
+func set_reference_services(services: LinkServices) -> void:
 	_ref_services = services
 	for entry in _entry_to_card.keys():
 		var card: CreditsEditorBlockCard = _entry_to_card[entry]
@@ -77,13 +77,13 @@ func _do_deferred_reconcile() -> void:
 	_reconcile_pending = false
 	_reconcile()
 
-func _coerce_resource_root(path: String) -> NovaResourceRoot:
+func _coerce_resource_root(path: String) -> ResourceRoot:
 	var dir := path.strip_edges()
 	if dir.is_empty():
 		dir = ResourceDirSettings.get_resource_dir()
 	if dir.is_empty():
 		return null
-	var resources := NovaResourceRoot.new()
+	var resources := ResourceRoot.new()
 	return resources if resources.set_root_dir(dir) == OK else null
 
 func _reconcile() -> void:

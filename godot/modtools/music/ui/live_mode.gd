@@ -61,8 +61,8 @@ const _EV_COLOR := {
 	EvType.SYSTEM: Color(1.0, 0.6, 0.55),
 }
 
-var _document: RefCounted
-var _director: NovaMusicDirector
+var _document: MusicEditorDocument
+var _director: MusicDirector
 var _preview: Node  # MusicAudioPreview, for track-chip previews on the map
 # Auto-follow the live VM: when on, a section transition drills the program view to the
 # entered state. A manual node click pins a state (turns this off); Start/Stop re-arms.
@@ -105,7 +105,7 @@ var _last_log_count: int = 0
 @onready var _now_playing: Label = %NowPlaying
 @onready var _jump_option: OptionButton = %JumpSection
 @onready var _volume_meter: Control = %VolumeMeter
-@onready var _var_inspector: Control = %VarInspector
+@onready var _var_inspector: MusicVarInspector = %VarInspector
 @onready var _events: ItemList = %Events
 @onready var _clear_btn: Button = %ClearButton
 @onready var _filter_section: CheckBox = %FilterSection
@@ -120,7 +120,7 @@ var _sidebar_add_state_btn: Button
 # Level-2 drill-in: the state's block-stack program view swaps into the
 # center canvas (the map keeps its GraphEdit; inside a state, programs are
 # vertical lists).
-var _program_view: Control
+var _program_view: MusicSectionProgramView
 # Where the user is + how they got there (trail, back/forward). Every drill,
 # back-to-map, breadcrumb click and sidebar click routes through this so the
 # canvas can never disagree with the trail.
@@ -174,8 +174,7 @@ func bind_document(document: RefCounted) -> void:
 	# pings after it's gone.
 	if _document != null and _document.changed.is_connected(_on_document_changed):
 		_document.changed.disconnect(_on_document_changed)
-	if _document != null and _document.has_signal("compile_finished") \
-			and _document.compile_finished.is_connected(_on_compile_finished):
+	if _document != null and _document.compile_finished.is_connected(_on_compile_finished):
 		_document.compile_finished.disconnect(_on_compile_finished)
 	var had_document := _document != null
 	_document = document
@@ -188,8 +187,7 @@ func bind_document(document: RefCounted) -> void:
 		# Surface compile failures on the always-visible transport label. Structured
 		# edits are gated and rolled back, so a failure here is rare (mainly Save);
 		# without this it would be silent.
-		if _document.has_signal("compile_finished"):
-			_document.compile_finished.connect(_on_compile_finished)
+		_document.compile_finished.connect(_on_compile_finished)
 	if is_node_ready():
 		_on_document_changed()
 
@@ -221,7 +219,7 @@ func _on_document_changed() -> void:
 
 
 func _ready() -> void:
-	_director = NovaMusicDirector.new()
+	_director = MusicDirector.new()
 	_director.auto_start = false
 	add_child(_director)
 	_preview = MusicAudioPreviewClass.new()
@@ -253,13 +251,12 @@ func _ready() -> void:
 	_install_add_state_button()
 	_install_program_view()
 	_install_empty_state()
-	if _var_inspector.has_method("bind_director"):
-		_var_inspector.call("bind_director", _director)
+	_var_inspector.bind_director(_director)
 	# A variable rename must reach every surface that shows var names: the event
 	# log resolves per-line, but the drilled program view and its pickers cache the
 	# var list, so re-populate them.
-	if _var_inspector != null and _var_inspector.has_signal("names_changed"):
-		_var_inspector.connect("names_changed", _on_var_names_changed)
+	if _var_inspector != null:
+		_var_inspector.names_changed.connect(_on_var_names_changed)
 	_apply_state_label(VM_STOPPED)
 	_refresh_map()
 	_refresh_button_state()
@@ -291,8 +288,8 @@ func _process(_delta: float) -> void:
 		_refresh_map()
 		_refresh_now_playing()
 	if state == VM_RUNNING or state == VM_PAUSED:
-		if _var_inspector != null and _var_inspector.has_method("refresh_from_director"):
-			_var_inspector.call("refresh_from_director")
+		if _var_inspector != null:
+			_var_inspector.refresh_from_director()
 		_update_live_highlight(state)
 	else:
 		if _program_view != null:
@@ -304,17 +301,15 @@ func _process(_delta: float) -> void:
 # friendlier controls. When no script is loaded, falls back to the
 # empty-string form which renders raw VarXX spinboxes.
 func _refresh_var_labels() -> void:
-	if _var_inspector == null or not _var_inspector.has_method("set_script_name"):
+	if _var_inspector == null:
 		return
 	var script_name: String = ""
 	var profile_path: String = ""
 	if _document != null and _document.script_loaded():
 		script_name = String(_document.mus_script.get_default_script_name())
-		if _document.has_method("get_var_profile_path"):
-			profile_path = _document.get_var_profile_path()
-	if _var_inspector.has_method("set_profile_path"):
-		_var_inspector.call("set_profile_path", profile_path)
-	_var_inspector.call("set_script_name", script_name)
+		profile_path = _document.get_var_profile_path()
+	_var_inspector.set_profile_path(profile_path)
+	_var_inspector.set_script_name(script_name)
 
 
 # --- Section jump ------------------------------------------------------

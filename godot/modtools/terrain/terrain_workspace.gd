@@ -13,13 +13,13 @@ const DETAIL_LABELS := ["Detail A", "Detail B", "Detail C"]
 # _build_inspector_defs(); Sculpt is code-first, the rest are still scene-backed
 # while the terrain port is in progress.
 
-var terrain_editor: Node
+var terrain_editor: TerrainEditorBase
 var _asset_dock_mount: Control
-var _asset_dock: Control
+var _asset_dock: TerrainEditorAssetDock
 var _mount: ViewportMount
 
 
-func _init(value: Node = null) -> void:
+func _init(value: TerrainEditorBase = null) -> void:
 	terrain_editor = value
 
 
@@ -29,20 +29,18 @@ func _ensure_mount() -> ViewportMount:
 	return _mount
 
 
-func set_terrain_editor(value: Node) -> void:
+func set_terrain_editor(value: TerrainEditorBase) -> void:
 	terrain_editor = value
 	if _mount != null:
-		var viewport := _mount.get_viewport_node()
+		var viewport: TerrainViewport = _mount.get_viewport_node()
 		if viewport != null:
 			viewport.set_terrain_editor(terrain_editor)
 
 
-func bind_to_editor(value: Node) -> void:
+func bind_to_editor(value: EditorApp) -> void:
 	# The shell binds the app root; unwrap to the terrain domain editor. Tests
-	# that bind a bare TerrainEditor keep working (no unwrap hook -> as-is).
-	if value != null and value.has_method("get_terrain_editor"):
-		value = value.get_terrain_editor()
-	set_terrain_editor(value)
+	# bind a bare editor through set_terrain_editor directly.
+	set_terrain_editor(value.get_terrain_editor() if value != null else null)
 
 
 func get_workspace_tooltip() -> String:
@@ -101,12 +99,12 @@ func shows_view_guides() -> bool:
 
 
 func set_grid_visible(value: bool) -> void:
-	if terrain_editor != null and terrain_editor.has_method("set_grid_guide_visible"):
+	if terrain_editor != null:
 		terrain_editor.set_grid_guide_visible(value)
 
 
 func set_axes_visible(value: bool) -> void:
-	if terrain_editor != null and terrain_editor.has_method("set_axes_visible"):
+	if terrain_editor != null:
 		terrain_editor.set_axes_visible(value)
 
 
@@ -150,10 +148,8 @@ func release_viewport() -> void:
 		_mount.release()
 
 
-func get_viewport_camera() -> Camera3D:
-	if terrain_editor != null and terrain_editor.has_method("get_editor_camera"):
-		return terrain_editor.get_editor_camera()
-	return null
+func get_viewport_camera() -> FlyCamera:
+	return terrain_editor.get_editor_camera() if terrain_editor != null else null
 
 
 func get_workspace_id() -> String:
@@ -234,19 +230,18 @@ func set_asset_dock(dock: Control) -> void:
 		_asset_dock.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		_asset_dock.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_asset_dock_mount.add_child(_asset_dock)
-	if _asset_dock.has_method("set_editor"):
-		_asset_dock.set_editor(terrain_editor)
+	_asset_dock.set_editor(terrain_editor)
 	# "Used by" (which missions sit on this terrain) rides the shell's reference
 	# index; headless owners get no strip. Injected here because the dock is the
 	# one terrain surface built with the shell seam in scope (the workflow
 	# inspectors receive only the terrain editor).
 	var services := get_reference_services()
-	if services != null and _asset_dock.has_method("set_reference_services"):
+	if services != null:
 		_asset_dock.set_reference_services(services)
 
 
 func sync_asset_dock() -> void:
-	if _asset_dock != null and _asset_dock.has_method("sync_from_editor_state"):
+	if _asset_dock != null:
 		_asset_dock.sync_from_editor_state()
 
 
@@ -309,9 +304,31 @@ func get_export_progress_ratio() -> float:
 	return terrain_editor.get_export_progress_ratio() if terrain_editor != null and is_busy() else 0.0
 
 
-# The domain document the EditorWorkspace base derives undo/redo + dirty from.
+# Untyped accessor for tests/MCP; the edit hooks below carry the typed calls.
 func get_editor_document() -> Object:
 	return terrain_editor
+
+
+func has_unsaved_changes() -> bool:
+	return terrain_editor != null and terrain_editor.is_dirty
+
+
+func can_undo() -> bool:
+	return terrain_editor != null and not is_busy() and terrain_editor.can_undo()
+
+
+func can_redo() -> bool:
+	return terrain_editor != null and not is_busy() and terrain_editor.can_redo()
+
+
+func undo() -> void:
+	if terrain_editor != null:
+		terrain_editor.undo()
+
+
+func redo() -> void:
+	if terrain_editor != null:
+		terrain_editor.redo()
 
 
 func can_new() -> bool:
@@ -327,7 +344,7 @@ func new_current() -> Error:
 		return ERR_UNAVAILABLE
 	if is_busy():
 		return OK
-	var ed: Node = terrain_editor
+	var ed: TerrainEditorBase = terrain_editor
 	var make_new := func() -> void: ed.new_terrain()
 	if _prompt_dirty_guard(make_new):
 		return OK
@@ -360,9 +377,7 @@ func get_open_resource_kind() -> String:
 
 
 func get_current_resource_path() -> String:
-	if terrain_editor != null and terrain_editor.has_method("get_current_trn_path"):
-		return terrain_editor.get_current_trn_path()
-	return ""
+	return terrain_editor.get_current_trn_path() if terrain_editor != null else ""
 
 
 # Single entry point for "user picked a .trn". Project vs. import mode is
@@ -373,7 +388,7 @@ func open_file(path: String) -> Error:
 		return ERR_UNAVAILABLE
 	if is_busy():
 		return OK
-	var ed: Node = terrain_editor
+	var ed: TerrainEditorBase = terrain_editor
 	var open_it := func() -> void: ed.open_trn(path)
 	if _prompt_dirty_guard(open_it):
 		return OK
@@ -388,11 +403,11 @@ func open_file(path: String) -> Error:
 func _prompt_dirty_guard(run: Callable) -> bool:
 	if terrain_editor == null or not terrain_editor.is_dirty:
 		return false
-	if editor_shell == null or not editor_shell.has_method("prompt_unsaved_for"):
+	if editor_shell == null:
 		return false
 	# Locals only in the lambdas: capturing `self` members would hold this
 	# RefCounted workspace through the shell's callable stash.
-	var shell: Object = editor_shell
+	var shell: WorkspaceShell = editor_shell
 	var ws: EditorWorkspace = self
 	shell.prompt_unsaved_for(
 		func() -> void: shell.save_then(ws, run),

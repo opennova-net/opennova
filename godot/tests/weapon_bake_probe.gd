@@ -5,7 +5,7 @@ extends SceneTree
 ## pins 'auto' collapse (missing clip -> delay 0 -> wrong cadence).
 ## Run: GODOT_BIN --headless --path godot -s res://tests/weapon_bake_probe.gd
 
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 
 
 func _init() -> void:
@@ -13,14 +13,14 @@ func _init() -> void:
 	if weapon.is_empty():
 		weapon = "WPN_Barret"
 	var dir := ResourceDirSettings.get_resource_dir()
-	var root := NovaResourceRoot.new()
-	var expansion := NovaLaunchFlags.expansion(ResourceDirSettings.get_expansion())
-	var game := NovaLaunchFlags.game(ResourceDirSettings.get_game())
-	if root.mount_runtime(dir, expansion, NovaLaunchFlags.loose_override_enabled(), game) != OK:
+	var root := ResourceRoot.new()
+	var expansion := LaunchFlags.expansion(ResourceDirSettings.get_expansion())
+	var game := LaunchFlags.game(ResourceDirSettings.get_game())
+	if root.mount_runtime(dir, expansion, LaunchFlags.loose_override_enabled(), game) != OK:
 		print("probe: mount FAILED: ", root.get_last_error())
 		quit(1)
 		return
-	var db := NovaWeaponDatabase.new()
+	var db := WeaponDatabase.new()
 	if db.load_from_resource_root(root, "weapon.def") != OK:
 		print("probe: weapon.def load FAILED: ", db.get_last_error())
 		quit(1)
@@ -34,7 +34,7 @@ func _init() -> void:
 	var adm := String(w.get("animadm", ""))
 	print("probe: %s animadm=%s gfx1=%s flags=0x%x" % [weapon, adm,
 			String(w.get("gfx1", "")), int(w.get("flags", 0))])
-	var skeletal := NovaSkeletalAnim.new()
+	var skeletal := SkeletalAnim.new()
 	var adm_file := adm if adm.to_lower().ends_with(".adm") else adm + ".adm"
 	var adm_ok := bool(skeletal.load_from_resource_root(root, adm_file))
 	print("probe: adm load(%s) = %s (%s)" % [adm_file, str(adm_ok), skeletal.get_last_error()])

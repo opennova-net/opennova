@@ -5,7 +5,7 @@ extends GutTest
 ## sets the loaded banks contain, and reports how many PlayDialog commands fire on
 ## sim-ungated ticks (pins the sim-trigger-gating follow-up). Skips without the data.
 
-const NovaMissionAudioScript = preload("res://adapter/world/nova_mission_audio.gd")
+const NovaMissionAudioScript = preload("res://game/world/nova_mission_audio.gd")
 
 const JO_DIR := "C:/Users/taylor/Desktop/JOX"
 
@@ -14,15 +14,15 @@ func test_00trg_mission_dialog_resolves() -> void:
 	if not DirAccess.dir_exists_absolute(JO_DIR):
 		pass_test("JOX not present; skipping dialog probe")
 		return
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	root.set_root_dir(JO_DIR)
 	if not root.has_file("00TRg.bms"):
 		pass_test("00TRg.bms not resolvable from JOX; skipping")
 		return
 
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.open_from_resource_root(root, "00TRg.bms"), OK, "mission parses")
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	item_db.load_from_resource_root(root, "items.def")
 
 	var container := Node3D.new()
@@ -46,10 +46,10 @@ func test_00trg_mission_dialog_resolves() -> void:
 	assert_gt(resolved, 0, "at least one dialog id resolves to a playable set")
 
 	# The dialog/zone wavs are IMA-ADPCM (audioFormat 0x11) -- they must now decode
-	# to a non-empty 16-bit stream (previously NovaWavLoader returned null -> silence).
+	# to a non-empty 16-bit stream (previously WavLoader returned null -> silence).
 	var wbytes := root.read_file("z00gr100.wav")
 	if not wbytes.is_empty():
-		var stream := NovaWavLoader.from_bytes(wbytes)
+		var stream := WavLoader.from_bytes(wbytes)
 		assert_not_null(stream, "IMA-ADPCM dialog wav decodes")
 		if stream != null:
 			assert_eq(stream.format, AudioStreamWAV.FORMAT_16_BITS)
@@ -58,7 +58,7 @@ func test_00trg_mission_dialog_resolves() -> void:
 
 	# Diagnostic: how many "dialog" effects fire on ungated ticks? (If zero, the mission's
 	# dialog is all sim-trigger-gated -> the documented follow-up.)
-	var sim := NovaSimulation.new()
+	var sim := Simulation.new()
 	if sim.load_from_mission_data(mission):
 		var fired := 0
 		# 64 ticks = one full quarter-list event cycle (every normal event evaluated once).

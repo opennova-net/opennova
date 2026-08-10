@@ -4,8 +4,8 @@ extends RefCounted
 const MusicEditHistoryClass = preload("res://modtools/music/music_edit_history.gd")
 
 # Loaded resources (either may be null if not yet opened)
-var bank: NovaSbfBank
-var mus_script: NovaMusicScript  # named mus_script to avoid shadowing Object.script
+var bank: SbfBank
+var mus_script: MusicScript  # named mus_script to avoid shadowing Object.script
 
 # Source paths for save-back
 var bank_path: String = ""
@@ -80,7 +80,7 @@ func set_script_text(_script_name: StringName, text: String) -> void:
 
 # --- Phase F3: compile -------------------------------------------------
 #
-# Compiles the cached text via the C++ NovaMusicScript::compile_text bridge
+# Compiles the cached text via the C++ MusicScript::compile_text bridge
 # (Phase F4). Returns the diagnostics array; empty on success. Always emits
 # compile_finished.
 func compile_script() -> Array:
@@ -98,7 +98,7 @@ func compile_script() -> Array:
 		var no_text: Array = [{"line": 0, "col": 0, "message": "no script text"}]
 		compile_finished.emit(false, no_text)
 		return no_text
-	# NovaMusicScript.compile_text returns a Dictionary (see header). Output
+	# MusicScript.compile_text returns a Dictionary (see header). Output
 	# references aren't viable through GDExtension; the bridge packs everything
 	# into the dict instead.
 	var d: Dictionary = mus_script.compile_text(_compiled_script_text)
@@ -134,7 +134,7 @@ func prepare_script_for_run() -> Array:
 func open_bank(path: String) -> int:
 	if not _path_exists(path):
 		return ERR_FILE_NOT_FOUND
-	var res := NovaSbfBank.new()
+	var res := SbfBank.new()
 	res.load_from_path(path)
 	if res.get_raw_file_bytes().is_empty():
 		return ERR_CANT_OPEN
@@ -148,7 +148,7 @@ func open_bank(path: String) -> int:
 func open_script(path: String) -> int:
 	if not _path_exists(path):
 		return ERR_FILE_NOT_FOUND
-	var res := NovaMusicScript.new()
+	var res := MusicScript.new()
 	if res.load_from_path(path) != OK:
 		return ERR_CANT_OPEN
 	mus_script = res
@@ -184,7 +184,7 @@ func close_pair() -> void:
 # structured edits use: compile_text -> file_bytes -> set_compiled_file_bytes ->
 # load_from_decrypted_bytes. The resulting in-memory state is byte-identical to
 # opening a real .bin (and get_raw_file_bytes() is non-empty, so the saver can
-# write it). The bank is a fresh empty SBF (NovaSbfBank.create_empty); the user
+# write it). The bank is a fresh empty SBF (SbfBank.create_empty); the user
 # imports tracks via the Tracks dock (＋ Add).
 
 # A script with one empty section. The empty body compiles to a single `done`,
@@ -193,7 +193,7 @@ const _NEW_SCRIPT_TEMPLATE := "script %s\nsection Begin\n{\n}\n"
 
 
 func new_script(script_name: String = "gamescript") -> int:
-	var ms := NovaMusicScript.new()
+	var ms := MusicScript.new()
 	var d: Dictionary = ms.compile_text(_NEW_SCRIPT_TEMPLATE % script_name)
 	if int(d.get("rc", -1)) != 0:
 		return ERR_CANT_CREATE
@@ -213,12 +213,9 @@ func new_script(script_name: String = "gamescript") -> int:
 
 
 func new_bank() -> int:
-	# create_empty is a static factory on the NovaSbfBank GDExtension class (the
-	# default constructor leaves a bank unconfigured). Guard so an older binary
-	# without the factory degrades to a script-only project instead of crashing.
-	if not ClassDB.class_has_method("NovaSbfBank", "create_empty", true):
-		return ERR_UNAVAILABLE
-	var b = NovaSbfBank.create_empty()
+	# create_empty is a static factory on the SbfBank GDExtension class (the
+	# default constructor leaves a bank unconfigured).
+	var b = SbfBank.create_empty()
 	if b == null:
 		return ERR_CANT_CREATE
 	bank = b
@@ -713,45 +710,18 @@ func _section_window_end(lines: PackedStringArray, header_idx: int) -> int:
 # Generalizes the play-edit write path to every construct. An edit is still a
 # TEXT transform over the names-less decompile of the committed script, recompiled
 # through _apply_script_text (rolls back on failure), pushed onto the one undo
-# timeline. The new precision comes from get_annotated_decompile (NovaMusicScript),
+# timeline. The new precision comes from get_annotated_decompile (MusicScript),
 # which hands back the names-less text PLUS a per-top-level-statement line span
 # (computed by the SAME emitter the AST uses), so a single statement can be
 # spliced/deleted/replaced/reordered by line range -- robust to the brace-leak and
 # compound if/on blocks that a brace scanner mishandles. The C++ twin of these
 # transforms is proven byte-stable in tests/mus/mus_structured_section_edit_test.cpp.
 
-# MusAstStmtKind mirror (engine/formats/mus/include/mus/ast.h). The annotated rows carry the
-# kind so the anchor logic can find a section's terminator.
-const _K_PLAY := 0
-const _K_TRANSITION := 1
-const _K_GOTO := 2
-const _K_CALL := 3
-const _K_RETURN := 4
-const _K_YIELD := 5
-const _K_NOP := 6
-const _K_DONE := 7
-const _K_ASSIGN := 8
-const _K_INCDEC := 9
-const _K_EXPR := 10
-const _K_IF := 11
-const _K_SWITCH := 12
-const _K_BRANCH_COMMENT := 13
-# enter (0x38) frame setup: a read-only annotation, never mutable. Its operand is
-# a locals dword count, not a section index; rewriting it as a transition (the
-# decompiler/compiler collapse "enter" to setstate 0x3B) would corrupt the frame.
-const _K_FRAME_ENTER := 14
-
-# Statements that end (or redirect) a section's straight-line flow. A new
-# statement inserts before the first of these so it actually runs. (frame_enter is
-# NOT a terminator -- 0x38 does not move the IP -- so it is excluded.)
-const _TERMINATOR_KINDS := [
-	_K_TRANSITION, _K_GOTO, _K_CALL, _K_RETURN, _K_YIELD, _K_DONE, _K_SWITCH,
-]
-
-# Structural / non-mutable rows the write path must refuse: the section-closing
-# `}` (done) and the frame-setup `enter` (0x38). Editing either corrupts the
-# section (leak the body / scramble the frame), so delete/replace/reorder reject them.
-const _LOCKED_KINDS := [_K_DONE, _K_FRAME_ENTER]
+# The statement kinds and flow classification are the engine's: the annotated
+# rows carry MusicScript.AST_* kinds, and the terminator/locked authoring rules
+# ride MusicScript.ast_kind_is_terminator/ast_kind_is_locked — the one home
+# (with the frame_enter-is-not-a-terminator and done/enter-are-structural
+# witnesses) is engine/formats/mus mus/ast.h.
 
 
 # The Phase-2 gate. Same body as can_edit_plays() (single chunk, compiles); a
@@ -810,7 +780,7 @@ func _find_row(rows: Array, section_index: int, ordinal: int) -> Dictionary:
 # section ends in a `done`, so the terminator branch always fires for real scripts.
 func _anchor_line(srows: Array) -> int:
 	for r in srows:
-		if int(r.get("kind", -1)) in _TERMINATOR_KINDS:
+		if MusicScript.ast_kind_is_terminator(int(r.get("kind", -1))):
 			return int(r.get("line_start", -1))
 	if not srows.is_empty():
 		return int(srows[-1].get("line_end", -1))
@@ -848,7 +818,7 @@ func delete_statement(section_index: int, ordinal: int) -> bool:
 		return false
 	# The section-closing `}` (done) is structural -- deleting it would leak the
 	# section into the next; the frame-setup `enter` (0x38) is read-only. Keep both.
-	if int(row.get("kind", -1)) in _LOCKED_KINDS:
+	if MusicScript.ast_kind_is_locked(int(row.get("kind", -1))):
 		return false
 	var ls := int(row.get("line_start", -1))
 	var le := int(row.get("line_end", -1))
@@ -870,7 +840,7 @@ func replace_statement(section_index: int, ordinal: int, lines: PackedStringArra
 	var row := _find_row(ann.get("rows", []), section_index, ordinal)
 	if row.is_empty():
 		return false
-	if int(row.get("kind", -1)) in _LOCKED_KINDS:
+	if MusicScript.ast_kind_is_locked(int(row.get("kind", -1))):
 		return false
 	var ls := int(row.get("line_start", -1))
 	var le := int(row.get("line_end", -1))
@@ -918,7 +888,8 @@ func reorder_statement(section_index: int, ordinal: int, direction: int) -> bool
 	var hi: Dictionary = srows[maxi(pos, other)]
 	# Don't shuffle across a locked row (the section terminator `}` would leak into
 	# the tail; the frame-setup `enter` is read-only).
-	if int(lo.get("kind", -1)) in _LOCKED_KINDS or int(hi.get("kind", -1)) in _LOCKED_KINDS:
+	if MusicScript.ast_kind_is_locked(int(lo.get("kind", -1))) \
+			or MusicScript.ast_kind_is_locked(int(hi.get("kind", -1))):
 		return false
 	if int(lo.get("line_end", -1)) != int(hi.get("line_start", -2)):
 		return false
@@ -951,7 +922,7 @@ func _row_pos(srows: Array, ordinal: int) -> int:
 # section close / engine-dispatch tail.
 func _first_terminator_pos(srows: Array) -> int:
 	for i in range(srows.size()):
-		if int(srows[i].get("kind", -1)) in _TERMINATOR_KINDS:
+		if MusicScript.ast_kind_is_terminator(int(srows[i].get("kind", -1))):
 			return i
 	return srows.size()
 
@@ -973,7 +944,7 @@ func insert_statement_at(section_index: int, before_ordinal: int, lines: PackedS
 	var pos := _row_pos(srows, before_ordinal)
 	if pos < 0 or pos > _first_terminator_pos(srows):
 		return false
-	if int(srows[pos].get("kind", -1)) == _K_FRAME_ENTER:
+	if int(srows[pos].get("kind", -1)) == MusicScript.AST_FRAME_ENTER:
 		return false
 	var at := int(srows[pos].get("line_start", -1))
 	if at < 0:
@@ -999,7 +970,7 @@ func move_statement(section_index: int, ordinal: int, before_ordinal: int) -> bo
 	if pos < 0:
 		return false
 	var row: Dictionary = srows[pos]
-	if int(row.get("kind", -1)) in _LOCKED_KINDS:
+	if MusicScript.ast_kind_is_locked(int(row.get("kind", -1))):
 		return false
 	var term := _first_terminator_pos(srows)
 	if pos > term:
@@ -1015,7 +986,7 @@ func move_statement(section_index: int, ordinal: int, before_ordinal: int) -> bo
 		var tpos := _row_pos(srows, before_ordinal)
 		if tpos < 0 or tpos > term:
 			return false
-		if int(srows[tpos].get("kind", -1)) == _K_FRAME_ENTER:
+		if int(srows[tpos].get("kind", -1)) == MusicScript.AST_FRAME_ENTER:
 			return false
 		at = int(srows[tpos].get("line_start", -1))
 	if at < 0 or (at > ls and at < le):
@@ -1060,7 +1031,7 @@ func set_run_count(section_index: int, start_ordinal: int, old_count: int, new_c
 		var r: Dictionary = srows[pos + i]
 		if int(r.get("ordinal", -1)) != start_ordinal + i:
 			return false  # a hidden row interrupts the run
-		if int(r.get("kind", -1)) in _LOCKED_KINDS:
+		if MusicScript.ast_kind_is_locked(int(r.get("kind", -1))):
 			return false
 		if int(r.get("line_start", -1)) != ls + i or int(r.get("line_end", -1)) != ls + i + 1:
 			return false  # multi-line or non-adjacent: not a foldable run

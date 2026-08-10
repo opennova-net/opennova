@@ -41,10 +41,10 @@ func register_all(registry: McpToolRegistry) -> void:
 # The Object workspace's live preview, or an error result. The preview exists only
 # while the workspace is (or has been) active — open_in_workspace mounts it.
 func _require_preview(ctx: McpToolContext) -> Dictionary:
-	var ws: Variant = ctx.workspace("object")
-	if ws == null or not ws.has_method("get_preview"):
+	var ws: ObjectEditorWorkspace = ctx.workspace("object")
+	if ws == null:
 		return { "error": "Object workspace unavailable." }
-	var preview: Variant = ws.get_preview()
+	var preview: ObjectPreview = ws.get_preview()
 	if preview == null or not is_instance_valid(preview):
 		return { "error": "No model open — open_in_workspace(workspace=\"object\", path=...) first." }
 	if preview.object_data == null:
@@ -58,9 +58,9 @@ func _tool_load_anims(args: Dictionary, ctx: McpToolContext) -> Variant:
 	var gate := _require_preview(ctx)
 	if gate.has("error"):
 		return McpToolResult.error(gate["error"])
-	var ws: Variant = gate["ws"]
-	var preview: Variant = gate["preview"]
-	var root: Variant = ws.get_resource_root() if ws.has_method("get_resource_root") else null
+	var ws: ObjectEditorWorkspace = gate["ws"]
+	var preview: ObjectPreview = gate["preview"]
+	var root: ResourceRoot = ws.get_resource_root()
 	if root == null:
 		return McpToolResult.error("No resource directory mounted — set_resource_root first.")
 	var adm := String(args.get("adm", "")).strip_edges()

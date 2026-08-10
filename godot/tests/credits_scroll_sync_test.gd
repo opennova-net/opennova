@@ -2,7 +2,7 @@ extends GutTest
 
 const CreditsEditorScene = preload("res://modtools/credits/credits_editor.tscn")
 const CreditsEditorDocument = preload("res://modtools/credits/credits_editor_document.gd")
-const ResourceDirSettings = preload("res://adapter/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings = preload("res://game/resource_index/resource_dir_settings.gd")
 const KDA_SOURCE_PATH := "res://../fixtures/cbin/nlist.reference.kda"
 const BINK_TEXTURE_PATH := "res://../fixtures/cbin/bink.tga"
 const FNT_PATH := "res://../fixtures/fnt/Serpen24.fnt"
@@ -65,7 +65,7 @@ func test_selecting_entry_seeks_preview() -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame  # let the player rebuild
 
-	var player: NovaCreditsPlayer = editor.get_node("%Player")
+	var player: CreditsPlayer = editor.get_node("%Player")
 	var block_list = editor.get_node("%BlockList")
 
 	var initial_offset := player.get_scroll_offset()
@@ -82,7 +82,7 @@ func test_selecting_entry_seeks_preview() -> void:
 	assert_almost_eq(new_offset, expected_y, 1.0, "preview scrolled near the entry's Y + viewport half")
 
 func test_fixed_image_uses_logical_stream_y_for_sync() -> void:
-	var player := NovaCreditsPlayer.new()
+	var player := CreditsPlayer.new()
 	add_child_autofree(player)
 	player.set_size(Vector2(640, 480))
 	await get_tree().process_frame
@@ -103,7 +103,7 @@ func test_fixed_image_uses_logical_stream_y_for_sync() -> void:
 	assert_eq(player.entry_index_at_scroll_center(), 1, "fixed image can be selected from the centered preview stream")
 
 func test_scrolling_image_advances_by_rendered_height() -> void:
-	var player := NovaCreditsPlayer.new()
+	var player := CreditsPlayer.new()
 	add_child_autofree(player)
 	player.set_size(Vector2(640, 480))
 	await get_tree().process_frame
@@ -133,7 +133,7 @@ func test_scrolling_image_advances_by_rendered_height() -> void:
 		"entry after a scrolling image should start after the rendered image height plus spacing.")
 
 func test_text_entry_font_does_not_carry_to_next_default_font_entry() -> void:
-	var player := NovaCreditsPlayer.new()
+	var player := CreditsPlayer.new()
 	add_child_autofree(player)
 	player.set_size(Vector2(640, 480))
 	await get_tree().process_frame
@@ -142,7 +142,7 @@ func test_text_entry_font_does_not_carry_to_next_default_font_entry() -> void:
 	var explicit := CbinTextEntry.new()
 	explicit.set_text("Explicit font")
 	var font_bytes := FileAccess.get_file_as_bytes(FNT_PATH)
-	var font: NovaFntResource = NovaFntResource.new()
+	var font: FntResource = FntResource.new()
 	if font_bytes.is_empty() or font.load_from_bytes(font_bytes) != OK:
 		font = null
 	assert_not_null(font, "Serpen24.fnt fixture should be loadable for font override regression.")
@@ -184,7 +184,7 @@ func test_player_scroll_during_playback_updates_list_selection() -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 
-	var player: NovaCreditsPlayer = editor.get_node("%Player")
+	var player: CreditsPlayer = editor.get_node("%Player")
 	var block_list = editor.get_node("%BlockList")
 
 	player.play()
@@ -210,7 +210,7 @@ func test_player_scroll_while_stopped_updates_list_selection() -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 
-	var player: NovaCreditsPlayer = editor.get_node("%Player")
+	var player: CreditsPlayer = editor.get_node("%Player")
 	var block_list = editor.get_node("%BlockList")
 	var target_index := 8
 	var target_y := player.content_y_for_entry(target_index) + player.get_size().y * 0.5
@@ -232,7 +232,7 @@ func test_mouse_wheel_over_preview_scrubs_preview() -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 
-	var player: NovaCreditsPlayer = editor.get_node("%Player")
+	var player: CreditsPlayer = editor.get_node("%Player")
 	var block_list = editor.get_node("%BlockList")
 	var ev := InputEventMouseButton.new()
 	ev.button_index = MOUSE_BUTTON_WHEEL_DOWN
@@ -244,7 +244,7 @@ func test_mouse_wheel_over_preview_scrubs_preview() -> void:
 	assert_not_null(block_list._selected_entry, "wheel scrub syncs editor selection")
 
 # CRE-1 transport: play/pause buttons and the scrub bar drive the EMBEDDED
-# engine player (NovaCreditsPlayer), so the roll itself — not just the layout —
+# engine player (CreditsPlayer), so the roll itself — not just the layout —
 # previews in-editor. Public seams only: named nodes + the player's API.
 func test_transport_play_pause_and_scrub_drive_the_embedded_player() -> void:
 	var editor = CreditsEditorScene.instantiate()
@@ -259,7 +259,7 @@ func test_transport_play_pause_and_scrub_drive_the_embedded_player() -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame  # player rebuild + one _process range sync
 
-	var player: NovaCreditsPlayer = editor.get_node("%Player")
+	var player: CreditsPlayer = editor.get_node("%Player")
 	var play_button: Button = editor.get_node("%Play")
 	var pause_button: Button = editor.get_node("%Pause")
 	var scrub: HSlider = editor.get_node("%Scrub")
@@ -308,7 +308,7 @@ func test_editor_scroll_sync_uses_centered_card() -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 
-	var player: NovaCreditsPlayer = editor.get_node("%Player")
+	var player: CreditsPlayer = editor.get_node("%Player")
 	var block_list = editor.get_node("%BlockList")
 	var block_scroll: ScrollContainer = editor.get_node("%BlockScroll")
 	var target_index := 14

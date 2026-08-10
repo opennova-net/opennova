@@ -127,7 +127,7 @@ static int test_encode_file_minimal(void) {
     return 1;
 }
 
-/* A bank authored from scratch (NovaSbfBank::create_empty) and saved before any
+/* A bank authored from scratch (SbfBank::create_empty) and saved before any
    track is added encodes as a valid 24-byte header-only file: zero entries, no
    per-entry input arrays required. Re-parses to an empty-but-valid archive. */
 static int test_encode_file_zero_entries(void) {

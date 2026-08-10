@@ -1,9 +1,9 @@
 [gd_scene format=3 uid="uid://dqiq0mn3kghyi"]
 
-[ext_resource type="Script" uid="uid://bh7gceflcrkfx" path="res://adapter/fly_camera.gd" id="2_io4ac"]
-[ext_resource type="PackedScene" path="res://adapter/ui/fps_label.tscn" id="3_fps"]
+[ext_resource type="Script" uid="uid://bh7gceflcrkfx" path="res://game/fly_camera.gd" id="2_io4ac"]
+[ext_resource type="PackedScene" path="res://game/ui/fps_label.tscn" id="3_fps"]
 [ext_resource type="Script" uid="uid://u6bng4ck62r0" path="res://game/main_game.gd" id="4_main"]
-[ext_resource type="PackedScene" path="res://adapter/world/game_world.tscn" id="10_world"]
+[ext_resource type="PackedScene" path="res://game/world/game_world.tscn" id="10_world"]
 [ext_resource type="Script" path="res://game/nova_menu_shell.gd" id="11_menu"]
 
 [node name="MainGame" type="Node3D" unique_id=1969900999]

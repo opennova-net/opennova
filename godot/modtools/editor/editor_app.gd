@@ -12,9 +12,9 @@ const EDITOR_MIN_WINDOW_SIZE := Vector2i(1366, 768)
 const EnvironmentEditorScript = preload("res://modtools/environment/environment_editor.gd")
 
 @onready var terrain_editor: TerrainEditor = $TerrainEditor
-@onready var workstation: Control = $CanvasLayer/EditorWorkstation
+@onready var workstation: EditorWorkstation = $CanvasLayer/EditorWorkstation
 
-var environment_editor
+var environment_editor: EnvironmentEditor
 var mcp_service: Node = null
 
 var _previous_window_min_size: Vector2i = Vector2i.ZERO
@@ -32,8 +32,7 @@ func _ready() -> void:
 	add_child(environment_editor)
 	terrain_editor.set_environment_editor(environment_editor)
 	terrain_editor.set_workstation(workstation)
-	if workstation.has_method("set_editor"):
-		workstation.set_editor(self)
+	workstation.set_editor(self)
 	_init_mcp_service()
 	terrain_editor.new_terrain()
 
@@ -44,11 +43,11 @@ func _exit_tree() -> void:
 		window.min_size = _previous_window_min_size
 
 
-# F11 fullscreen — the core-engine window concept (NovaWindow), shared with the
+# F11 fullscreen — the core-engine window concept (WindowState), shared with the
 # game shell; the MCP's set_fullscreen tool routes to the same helper.
 func _unhandled_key_input(event: InputEvent) -> void:
-	if NovaWindow.is_toggle_event(event):
-		NovaWindow.toggle_fullscreen(get_window())
+	if WindowState.is_toggle_event(event):
+		WindowState.toggle_fullscreen(get_window())
 		get_viewport().set_input_as_handled()
 
 
@@ -56,7 +55,7 @@ func get_terrain_editor() -> TerrainEditor:
 	return terrain_editor
 
 
-func get_environment_editor():
+func get_environment_editor() -> EnvironmentEditor:
 	return environment_editor
 
 

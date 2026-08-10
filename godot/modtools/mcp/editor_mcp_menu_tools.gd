@@ -218,9 +218,9 @@ func _screen_names(resource: Variant) -> PackedStringArray:
 # Widget type NAME -> enum int, probed from the live enum so the vocabulary
 # can never drift from the format library.
 func _type_table() -> Dictionary:
-	var probe := NovaMnuDocument.new()
+	var probe := MnuDocument.new()
 	var table := {}
-	for t in range(NovaMnuDocument.TYPE_UNKNOWN):
+	for t in range(MnuDocument.TYPE_UNKNOWN):
 		table[String(probe.get_widget_type_name(t)).to_upper()] = t
 	# Friendly aliases for the two surprising canonical tokens.
 	if table.has("COMBOBOX"):
@@ -802,9 +802,9 @@ func _widget_card(resource: Variant, id: int) -> Dictionary:
 	card["textures"] = textures
 	card["appearances"] = resource.get_widget_appearances(id)
 	var rect_flags := int(resource.get_window_rect_flags(id))
-	if (rect_flags & NovaMnuDocument.RECT_HAS_RIGHT) == 0:
+	if (rect_flags & MnuDocument.RECT_HAS_RIGHT) == 0:
 		card["auto_width"] = true
-	if (rect_flags & NovaMnuDocument.RECT_HAS_BOTTOM) == 0:
+	if (rect_flags & MnuDocument.RECT_HAS_BOTTOM) == 0:
 		card["auto_height"] = true
 	var frame: Dictionary = resource.get_window_frame(id)
 	if not String(frame.get("stencil", "")).is_empty() or not String(frame.get("brush", "")).is_empty():
@@ -1416,8 +1416,10 @@ func _tool_preview(args: Dictionary, ctx: McpToolContext) -> Variant:
 			var name := String(screen_ref)
 			if _screen_id_named(resource, name) < 0:
 				return McpToolResult.error("No Screen named '%s'. Screens: %s" % [name, ", ".join(_screen_names(resource))])
-			var preview: Variant = canvas.get("_preview")
-			preview.show_screen(name)
+			var driver: MenuDriver = canvas.get_interactive_driver()
+			if driver == null:
+				return McpToolResult.error("The Interactive preview has no driver — preview_menu(op=\"on\") first.")
+			driver.show_screen(name)
 			await ctx.frames(1)
 			return { "interactive": true, "visible_screen": canvas.get_visible_screen_name() }
 		"press":
@@ -1427,8 +1429,10 @@ func _tool_preview(args: Dictionary, ctx: McpToolContext) -> Variant:
 		"back":
 			if not canvas.is_interactive():
 				return McpToolResult.error("The preview is not playing — preview_menu(op=\"on\") first.")
-			var preview: Variant = canvas.get("_preview")
-			var popped: bool = preview.pop_screen()
+			var driver: MenuDriver = canvas.get_interactive_driver()
+			if driver == null:
+				return McpToolResult.error("The Interactive preview has no driver — preview_menu(op=\"on\") first.")
+			var popped: bool = driver.pop_screen()
 			await ctx.frames(1)
 			return { "popped": popped, "visible_screen": canvas.get_visible_screen_name() }
 		"status":
@@ -1452,9 +1456,10 @@ func _preview_state_wire(state: MnuPreviewWidgetState) -> Dictionary:
 	}
 
 
-# Activate a live preview Control exactly as a click would (the hotkey
-# trigger's pattern): toggle-mode buttons flip, plain buttons emit pressed
-# (NovaMnuButton dispatches its authored Actions), Gotos trigger.
+# Activate a live preview widget exactly as a click would: the canvas
+# synthesizes a click at the widget's rect center through the interactive
+# MenuDriver's engine mouse pump, so authored Actions, sounds, and navigation
+# all run the real dispatch path.
 func _preview_press(args: Dictionary, ctx: McpToolContext, gate: Dictionary) -> Variant:
 	var resource: Variant = gate["resource"]
 	var canvas: Variant = gate["canvas"]
@@ -1485,7 +1490,7 @@ func _preview_press(args: Dictionary, ctx: McpToolContext, gate: Dictionary) -> 
 	var fired: Array = resource.get_widget_actions(id)
 	if before.disabled:
 		# A visible disabled hotkey/click target consumes the match but performs
-		# no activation, matching NovaMnuMenu's dispatch path.
+		# no activation, matching the driver's dispatch path.
 		return {
 			"ok": true,
 			"pressed": resource.get_widget_name(id),
@@ -1556,7 +1561,7 @@ func _tool_analyze(args: Dictionary, ctx: McpToolContext) -> Variant:
 	var resource: Variant = null
 	var source := ""
 	if args.has("path") and not String(args["path"]).is_empty():
-		resource = NovaMnuDocument.new()
+		resource = MnuDocument.new()
 		var resolved := McpAssetDescribe.resolve(ctx, String(args["path"]))
 		if not resolved["ok"]:
 			return McpToolResult.error(String(resolved["error"]))
@@ -1647,8 +1652,8 @@ func _tool_analyze(args: Dictionary, ctx: McpToolContext) -> Variant:
 					action_graph.append({ "from": screen_name, "widget": name, "to": "(pop)" })
 			if actions.is_empty() and not name.is_empty():
 				var w_type := int(resource.get_widget_type(id))
-				if w_type == NovaMnuDocument.TYPE_BUTTON or w_type == NovaMnuDocument.TYPE_CHECKBOX \
-						or w_type == NovaMnuDocument.TYPE_RADIO or w_type == NovaMnuDocument.TYPE_GOTO:
+				if w_type == MnuDocument.TYPE_BUTTON or w_type == MnuDocument.TYPE_CHECKBOX \
+						or w_type == MnuDocument.TYPE_RADIO or w_type == MnuDocument.TYPE_GOTO:
 					command_hooks[name] = int(command_hooks.get(name, 0)) + 1
 			# Widget-shape rules (F4/F5/F8). Each one is calibrated to shipped data:
 			# only flag what shipped menus NEVER do, so analyze stays quiet on the
@@ -1732,7 +1737,7 @@ func _tool_save(args: Dictionary, ctx: McpToolContext) -> Variant:
 		if path.get_extension().to_lower() != "mnu":
 			return McpToolResult.error("path must end in .mnu.")
 		if path.is_relative_path():
-			var root_dir := String(ctx.shell.get_resource_root_dir()) if ctx.shell != null and ctx.shell.has_method("get_resource_root_dir") else ""
+			var root_dir := String(ctx.shell.get_resource_root_dir()) if ctx.shell != null else ""
 			if root_dir.is_empty():
 				return McpToolResult.error("No resource root mounted to resolve a relative filename — pass an absolute path.")
 			path = root_dir.path_join(path)

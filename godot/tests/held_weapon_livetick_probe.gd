@@ -3,21 +3,20 @@ extends SceneTree
 # ADVERSARIAL probe for D-WPN-32.
 #
 # Tests exactly one claim: "the AABB probe measured +Z-long at BUILD time only, before
-# NovaObjectModel self-ticks; the LIVE weapon node's long axis at DRAW time may differ."
+# ObjectModel self-ticks; the LIVE weapon node's long axis at DRAW time may differ."
 #
 # For each firearm gfx3 it builds the model exactly as the wire present pass's
 # held-weapon update
 # does, measures the combined mesh AABB in the model root's own frame, reports whether the
 # model has LIVE PANM at all, lets 30 real frames elapse (so _process/_apply_runtime_state
 # actually run), and re-measures. Then it drives the measured live attach triple through
-# PresentHeldWeapon's basis and prints the elevation of the model's own longest axis after
+# the native held-weapon basis and prints the elevation of the model's own longest axis after
 # the basis is applied -- i.e. what the viewer actually sees.
 #
 # Run:
 #   NOVA_RESOURCE_DIR=... "$GODOT_BIN" --headless --path godot -s res://tests/held_weapon_livetick_probe.gd
 
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
-const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
+const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 
 const ATTACH := Vector3(17.95, 13.57, 0.0)  # the measured LOCAL live attach triple
 
@@ -37,13 +36,13 @@ func _run() -> void:
 		exp = ResourceDirSettings.get_expansion()
 	print("resource root: %s   expansion: %s" % [root_dir, exp])
 
-	var res := NovaResourceRoot.new()
+	var res := ResourceRoot.new()
 	if res.mount_runtime(root_dir, exp) != OK:
 		print("FAIL: cannot mount ", root_dir)
 		quit(1)
 		return
 
-	var db := NovaWeaponDatabase.new()
+	var db := WeaponDatabase.new()
 	if db.load_from_resource_root(res, "weapon.def") != OK:
 		print("FAIL: weapon.def -> ", db.get_last_error())
 		quit(1)

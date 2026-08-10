@@ -7,12 +7,12 @@ extends Tree
 # Selecting an item emits widget_selected(id); the editor maps that to the canvas
 # preview + inspector. M8b: dragging a widget item onto/between other items emits
 # reparent_requested(id, new_parent, index); the editor routes that through
-# NovaMnuDocument.reparent_widget (which is the cycle authority).
+# MnuDocument.reparent_widget (which is the cycle authority).
 
 signal widget_selected(id: int)
 signal reparent_requested(id: int, new_parent: int, index: int)
 
-var _document: NovaMnuDocument
+var _document: MnuDocument
 var _item_by_id: Dictionary = {}
 var _suppress_selection := false
 var _authoring_enabled := true
@@ -31,7 +31,7 @@ func _ready() -> void:
 	rebuild()
 
 
-func set_document(doc: NovaMnuDocument) -> void:
+func set_document(doc: MnuDocument) -> void:
 	_document = doc
 	if is_node_ready():
 		rebuild()

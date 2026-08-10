@@ -1,7 +1,7 @@
 class_name ParticleEditor
 extends RefCounted
 ## Document controller for the particle workspace. Owns the parsed
-## NovaParticleFile (loaded from .ptl), tracks dirty state, and exposes the
+## ParticleFile (loaded from .ptl), tracks dirty state, and exposes the
 ## current selection to the workspace shell.
 ## RefCounted (not Node): no scene-tree role; freed when the workspace
 ## adapter drops the only reference.
@@ -17,11 +17,11 @@ signal presentation_changed
 ## don't force a full inspector rebuild.
 signal preview_refresh_requested
 
-var particle_file: NovaParticleFile
+var particle_file: ParticleFile
 var current_path: String = ""
-var current_effect: NovaParticleEffect
-var current_particle: NovaParticleDef
-var current_table: NovaParticleTable
+var current_effect: ParticleEffect
+var current_particle: ParticleDef
+var current_table: ParticleTable
 var is_dirty: bool = false
 
 
@@ -30,7 +30,7 @@ func _init() -> void:
 
 
 func new_document() -> void:
-	particle_file = NovaParticleFile.new()
+	particle_file = ParticleFile.new()
 	current_path = ""
 	current_effect = null
 	current_particle = null
@@ -41,7 +41,7 @@ func new_document() -> void:
 
 
 func open_file(path: String) -> Error:
-	var file := NovaParticleFile.new()
+	var file := ParticleFile.new()
 	var err: int = file.load_from_file(path)
 	if err != OK:
 		return err
@@ -52,7 +52,7 @@ func open_file(path: String) -> Error:
 ## VFS open: parse .ptl bytes read from a mounted resource root (PFF archives).
 ## display_path is what save/status surfaces show; saving writes loose to it.
 func open_bytes(bytes: PackedByteArray, display_path: String) -> Error:
-	var file := NovaParticleFile.new()
+	var file := ParticleFile.new()
 	var err: int = file.load_from_buffer(bytes, display_path)
 	if err != OK:
 		return err
@@ -60,7 +60,7 @@ func open_bytes(bytes: PackedByteArray, display_path: String) -> Error:
 	return OK
 
 
-func _adopt_opened(file: NovaParticleFile, path: String) -> void:
+func _adopt_opened(file: ParticleFile, path: String) -> void:
 	particle_file = file
 	current_path = path
 	current_effect = null
@@ -108,17 +108,17 @@ func _set_dirty(value: bool) -> void:
 	dirty_changed.emit(is_dirty)
 
 
-func select_effect(effect: NovaParticleEffect) -> void:
+func select_effect(effect: ParticleEffect) -> void:
 	current_effect = effect
 	selection_changed.emit()
 
 
-func select_particle(particle: NovaParticleDef) -> void:
+func select_particle(particle: ParticleDef) -> void:
 	current_particle = particle
 	selection_changed.emit()
 
 
-func select_table(table: NovaParticleTable) -> void:
+func select_table(table: ParticleTable) -> void:
 	current_table = table
 	selection_changed.emit()
 
@@ -192,10 +192,10 @@ func _unique_id(base: String, taken: PackedStringArray) -> String:
 # --- Particles: add / duplicate / remove -------------------------------------
 
 ## Create a visible default particle (white additive puff) and select it.
-func add_particle() -> NovaParticleDef:
+func add_particle() -> ParticleDef:
 	if particle_file == null:
 		return null
-	var p := NovaParticleDef.new()
+	var p := ParticleDef.new()
 	p.id = _unique_id("particle", _particle_ids())
 	p.emit_dur = 1.0
 	p.emit_rate = 24.0
@@ -213,7 +213,7 @@ func add_particle() -> NovaParticleDef:
 	# Give it one present graphic layer so it renders immediately.
 	var graphics := p.get_graphics()
 	if graphics.size() > 0 and graphics[0] != null:
-		var layer: NovaParticleGraphicLayer = graphics[0]
+		var layer: ParticleGraphicLayer = graphics[0]
 		layer.present = true
 		layer.index = 1
 		layer.blend_mode = 1  # Additive — reads well on the dark preview
@@ -226,10 +226,10 @@ func add_particle() -> NovaParticleDef:
 	return p
 
 
-func duplicate_particle(src: NovaParticleDef) -> NovaParticleDef:
+func duplicate_particle(src: ParticleDef) -> ParticleDef:
 	if particle_file == null or src == null:
 		return null
-	var p: NovaParticleDef = src.clone()
+	var p: ParticleDef = src.clone()
 	p.id = _unique_id(src.id + "_copy", _particle_ids())
 	_append_to(particle_file, "particles", p)
 	current_particle = p
@@ -239,7 +239,7 @@ func duplicate_particle(src: NovaParticleDef) -> NovaParticleDef:
 	return p
 
 
-func remove_particle(p: NovaParticleDef) -> void:
+func remove_particle(p: ParticleDef) -> void:
 	if particle_file == null or p == null:
 		return
 	var arr: Array = particle_file.particles
@@ -257,10 +257,10 @@ func remove_particle(p: NovaParticleDef) -> void:
 
 # --- Effects: add / duplicate / remove ---------------------------------------
 
-func add_effect() -> NovaParticleEffect:
+func add_effect() -> ParticleEffect:
 	if particle_file == null:
 		return null
-	var e := NovaParticleEffect.new()
+	var e := ParticleEffect.new()
 	e.id = _unique_id("effect", _effect_ids())
 	_append_to(particle_file, "effects", e)
 	current_effect = e
@@ -270,10 +270,10 @@ func add_effect() -> NovaParticleEffect:
 	return e
 
 
-func duplicate_effect(src: NovaParticleEffect) -> NovaParticleEffect:
+func duplicate_effect(src: ParticleEffect) -> ParticleEffect:
 	if particle_file == null or src == null:
 		return null
-	var e := NovaParticleEffect.new()
+	var e := ParticleEffect.new()
 	e.id = _unique_id(src.id + "_copy", _effect_ids())
 	e.pdefs = src.pdefs.duplicate()
 	_append_to(particle_file, "effects", e)
@@ -284,7 +284,7 @@ func duplicate_effect(src: NovaParticleEffect) -> NovaParticleEffect:
 	return e
 
 
-func remove_effect(e: NovaParticleEffect) -> void:
+func remove_effect(e: ParticleEffect) -> void:
 	if particle_file == null or e == null:
 		return
 	var arr: Array = particle_file.effects
@@ -302,10 +302,10 @@ func remove_effect(e: NovaParticleEffect) -> void:
 
 # --- Tables: add / duplicate / remove ----------------------------------------
 
-func add_table() -> NovaParticleTable:
+func add_table() -> ParticleTable:
 	if particle_file == null:
 		return null
-	var t := NovaParticleTable.new()
+	var t := ParticleTable.new()
 	t.id = _unique_id("table", _table_ids())
 	# Default to a linear 0..255 ramp so the curve is immediately usable.
 	var data := PackedByteArray()
@@ -321,10 +321,10 @@ func add_table() -> NovaParticleTable:
 	return t
 
 
-func duplicate_table(src: NovaParticleTable) -> NovaParticleTable:
+func duplicate_table(src: ParticleTable) -> ParticleTable:
 	if particle_file == null or src == null:
 		return null
-	var t := NovaParticleTable.new()
+	var t := ParticleTable.new()
 	t.id = _unique_id(src.id + "_copy", _table_ids())
 	t.set_data(src.get_data().duplicate())
 	_append_to(particle_file, "tables", t)
@@ -335,7 +335,7 @@ func duplicate_table(src: NovaParticleTable) -> NovaParticleTable:
 	return t
 
 
-func remove_table(t: NovaParticleTable) -> void:
+func remove_table(t: ParticleTable) -> void:
 	if particle_file == null or t == null:
 		return
 	var arr: Array = particle_file.tables
@@ -356,12 +356,12 @@ func remove_table(t: NovaParticleTable) -> void:
 ## Mark the first non-present layer present. Editor-created layers use the first
 ## free slot; loaded retail files may still retain sparse authored slots.
 ## Returns the new layer index, or -1 if full.
-func add_graphic_layer(p: NovaParticleDef) -> int:
+func add_graphic_layer(p: ParticleDef) -> int:
 	if p == null:
 		return -1
 	var graphics := p.get_graphics()
 	for i in range(graphics.size()):
-		var layer: NovaParticleGraphicLayer = graphics[i]
+		var layer: ParticleGraphicLayer = graphics[i]
 		if layer != null and not layer.present:
 			layer.present = true
 			layer.index = i + 1
@@ -374,25 +374,25 @@ func add_graphic_layer(p: NovaParticleDef) -> int:
 
 ## Remove a layer and COMPACT the remaining present layers into slots 0..k-1 so
 ## the writer (which emits graphic1..N from graphics[0..N-1]) stays valid.
-func remove_graphic_layer(p: NovaParticleDef, slot: int) -> void:
+func remove_graphic_layer(p: ParticleDef, slot: int) -> void:
 	if p == null:
 		return
 	var graphics := p.get_graphics()
 	if slot < 0 or slot >= graphics.size():
 		return
-	var kept: Array[NovaParticleGraphicLayer] = []
+	var kept: Array[ParticleGraphicLayer] = []
 	for i in range(graphics.size()):
 		if i == slot:
 			continue
-		var layer: NovaParticleGraphicLayer = graphics[i]
+		var layer: ParticleGraphicLayer = graphics[i]
 		if layer != null and layer.present:
 			kept.append(layer)
-	var out: Array[NovaParticleGraphicLayer] = []
+	var out: Array[ParticleGraphicLayer] = []
 	for i in range(kept.size()):
 		kept[i].index = i + 1
 		out.append(kept[i])
 	while out.size() < 4:
-		var blank := NovaParticleGraphicLayer.new()
+		var blank := ParticleGraphicLayer.new()
 		blank.present = false
 		blank.index = out.size() + 1
 		out.append(blank)
@@ -401,7 +401,7 @@ func remove_graphic_layer(p: NovaParticleDef, slot: int) -> void:
 	presentation_changed.emit()
 
 
-func present_graphic_count(p: NovaParticleDef) -> int:
+func present_graphic_count(p: ParticleDef) -> int:
 	if p == null:
 		return 0
 	var count := 0
@@ -413,14 +413,14 @@ func present_graphic_count(p: NovaParticleDef) -> int:
 
 # --- Reference edits (used by the blueprint graph + inspectors) --------------
 
-func set_particle_id(particle: NovaParticleDef, value: String) -> void:
+func set_particle_id(particle: ParticleDef, value: String) -> void:
 	if particle == null or particle.id == value:
 		return
 	var old_id := String(particle.id)
 	particle.id = value
 	if particle_file != null:
 		for effect_entry in particle_file.effects:
-			var effect := effect_entry as NovaParticleEffect
+			var effect := effect_entry as ParticleEffect
 			if effect == null:
 				continue
 			var pdefs := effect.pdefs
@@ -432,7 +432,7 @@ func set_particle_id(particle: NovaParticleDef, value: String) -> void:
 			if changed:
 				effect.pdefs = pdefs
 		for entry in particle_file.particles:
-			var candidate := entry as NovaParticleDef
+			var candidate := entry as ParticleDef
 			if candidate != null and candidate.child_id == old_id:
 				candidate.child_id = value
 	_set_dirty(true)
@@ -440,18 +440,18 @@ func set_particle_id(particle: NovaParticleDef, value: String) -> void:
 	preview_refresh_requested.emit()
 
 
-func set_table_id(table: NovaParticleTable, value: String) -> void:
+func set_table_id(table: ParticleTable, value: String) -> void:
 	if table == null or table.id == value:
 		return
 	var old_id := String(table.id)
 	table.id = value
 	if particle_file != null:
 		for entry in particle_file.particles:
-			var particle := entry as NovaParticleDef
+			var particle := entry as ParticleDef
 			if particle != null:
 				_rename_table_refs(particle, old_id, value)
 		for entry in particle_file.table_handles:
-			var handles := entry as NovaParticleTableHandles
+			var handles := entry as ParticleTableHandles
 			if handles != null and handles.table_id == old_id:
 				handles.table_id = value
 	_set_dirty(true)
@@ -459,7 +459,7 @@ func set_table_id(table: NovaParticleTable, value: String) -> void:
 	preview_refresh_requested.emit()
 
 
-func _rename_table_refs(particle: NovaParticleDef, old_id: String, new_id: String) -> void:
+func _rename_table_refs(particle: ParticleDef, old_id: String, new_id: String) -> void:
 	const PARTICLE_CURVES := [
 		"scale_func", "alpha_func", "red_func", "green_func", "blue_func",
 		"emit_rate_func",
@@ -468,20 +468,20 @@ func _rename_table_refs(particle: NovaParticleDef, old_id: String, new_id: Strin
 		"scale_func", "alpha_func", "red_func", "green_func", "blue_func",
 	]
 	for field in PARTICLE_CURVES:
-		var curve := particle.get(field) as NovaParticleCurveRef
+		var curve := particle.get(field) as ParticleCurveRef
 		if curve != null and curve.name == old_id:
 			curve.name = new_id
 	for graphic_entry in particle.get_graphics():
-		var graphic := graphic_entry as NovaParticleGraphicLayer
+		var graphic := graphic_entry as ParticleGraphicLayer
 		if graphic == null:
 			continue
 		for field in GRAPHIC_CURVES:
-			var curve := graphic.get(field) as NovaParticleCurveRef
+			var curve := graphic.get(field) as ParticleCurveRef
 			if curve != null and curve.name == old_id:
 				curve.name = new_id
 
 
-func set_effect_id(effect: NovaParticleEffect, value: String) -> void:
+func set_effect_id(effect: ParticleEffect, value: String) -> void:
 	if effect == null or effect.id == value:
 		return
 	effect.id = value
@@ -489,7 +489,7 @@ func set_effect_id(effect: NovaParticleEffect, value: String) -> void:
 	document_changed.emit()
 
 
-func set_effect_pdefs(effect: NovaParticleEffect, values: PackedStringArray) -> void:
+func set_effect_pdefs(effect: ParticleEffect, values: PackedStringArray) -> void:
 	if effect == null or effect.pdefs == values:
 		return
 	effect.pdefs = values
@@ -497,7 +497,7 @@ func set_effect_pdefs(effect: NovaParticleEffect, values: PackedStringArray) -> 
 	document_changed.emit()
 	preview_refresh_requested.emit()
 
-func effect_add_pdef(effect: NovaParticleEffect, pdef_id: String) -> void:
+func effect_add_pdef(effect: ParticleEffect, pdef_id: String) -> void:
 	if effect == null or pdef_id.is_empty():
 		return
 	var arr := effect.pdefs
@@ -510,7 +510,7 @@ func effect_add_pdef(effect: NovaParticleEffect, pdef_id: String) -> void:
 	preview_refresh_requested.emit()
 
 
-func effect_remove_pdef(effect: NovaParticleEffect, pdef_id: String) -> void:
+func effect_remove_pdef(effect: ParticleEffect, pdef_id: String) -> void:
 	if effect == null:
 		return
 	var arr := effect.pdefs
@@ -524,7 +524,7 @@ func effect_remove_pdef(effect: NovaParticleEffect, pdef_id: String) -> void:
 	preview_refresh_requested.emit()
 
 
-func set_child_id(p: NovaParticleDef, child: String) -> void:
+func set_child_id(p: ParticleDef, child: String) -> void:
 	if p == null or p.child_id == child:
 		return
 	p.child_id = child
@@ -535,10 +535,10 @@ func set_child_id(p: NovaParticleDef, child: String) -> void:
 
 ## Assign (or clear, when table_id == "") a [tabledef] to one of the particle's
 ## *_func curve slots. Keeps CurveRef.present in sync with the writer's gate.
-func assign_curve(p: NovaParticleDef, field: String, table_id: String) -> void:
+func assign_curve(p: ParticleDef, field: String, table_id: String) -> void:
 	if p == null:
 		return
-	var curve: NovaParticleCurveRef = _curve_for(p, field)
+	var curve: ParticleCurveRef = _curve_for(p, field)
 	if curve == null:
 		return
 	curve.name = table_id
@@ -547,7 +547,7 @@ func assign_curve(p: NovaParticleDef, field: String, table_id: String) -> void:
 	_set_dirty(true)
 
 
-func _curve_for(p: NovaParticleDef, field: String) -> NovaParticleCurveRef:
+func _curve_for(p: ParticleDef, field: String) -> ParticleCurveRef:
 	match field:
 		"scale_func": return p.get_scale_func()
 		"alpha_func": return p.get_alpha_func()
@@ -558,7 +558,7 @@ func _curve_for(p: NovaParticleDef, field: String) -> NovaParticleCurveRef:
 	return null
 
 
-func _apply_curve(p: NovaParticleDef, field: String, curve: NovaParticleCurveRef) -> void:
+func _apply_curve(p: ParticleDef, field: String, curve: ParticleCurveRef) -> void:
 	match field:
 		"scale_func": p.set_scale_func(curve)
 		"alpha_func": p.set_alpha_func(curve)
@@ -582,7 +582,7 @@ func validate() -> Array:
 	_validate_unique_nonempty(particle_file.effects, "effect", issues)
 	_validate_unique_nonempty(particle_file.tables, "table", issues)
 	for entry in particle_file.particles:
-		var p: NovaParticleDef = entry
+		var p: ParticleDef = entry
 		if p == null:
 			continue
 		if p.emit_burst < 1:
@@ -609,7 +609,7 @@ func _validate_unique_nonempty(items: Array, label: String, issues: Array) -> vo
 # --- Internal array mutation --------------------------------------------------
 
 ## get -> append -> set-back, the safe TypedArray-property mutation pattern.
-func _append_to(file: NovaParticleFile, prop: String, value) -> void:
+func _append_to(file: ParticleFile, prop: String, value) -> void:
 	var arr: Array = file.get(prop)
 	arr.append(value)
 	file.set(prop, arr)

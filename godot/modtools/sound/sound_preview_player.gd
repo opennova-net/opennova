@@ -2,8 +2,8 @@ class_name SoundPreviewPlayer
 extends Node
 
 ## Editor-local audition for the Sound workspace. Resolves a member's .wav from
-## the shell's NovaResourceRoot (the loose game data), decodes it via
-## NovaWavLoader (RIFF -> AudioStreamWAV, 8-bit-unsigned fix), and plays it on a
+## the shell's ResourceRoot (the loose game data), decodes it via
+## WavLoader (RIFF -> AudioStreamWAV, 8-bit-unsigned fix), and plays it on a
 ## single reused 2D AudioStreamPlayer with the member's pitch/volume applied.
 ## Non-positional and non-looping: this is a quick preview, not the runtime mixer.
 
@@ -18,7 +18,7 @@ func _ensure_player() -> AudioStreamPlayer:
 	return _player
 
 
-func preview_member(data: NovaLwfData, resource_root, si: int, li: int, mi: int) -> void:
+func preview_member(data: LwfData, resource_root, si: int, li: int, mi: int) -> void:
 	if data == null:
 		return
 	var member := data.get_member(si, li, mi)
@@ -27,7 +27,7 @@ func preview_member(data: NovaLwfData, resource_root, si: int, li: int, mi: int)
 	_play_member(member, resource_root)
 
 
-func preview_set(data: NovaLwfData, resource_root, si: int) -> void:
+func preview_set(data: LwfData, resource_root, si: int) -> void:
 	# Editor-local path: audition the first member of the first non-empty layer.
 	# (Runtime selection logic lives in Phase 4's nova_sound_bank; the editor only
 	# needs a representative sample.)
@@ -53,14 +53,14 @@ func _play_member(member: Dictionary, resource_root) -> void:
 		push_warning("SoundPreviewPlayer: member has no .wav reference")
 		return
 	var name := wav_path.get_file()
-	if resource_root == null or not resource_root.has_method("read_file"):
+	if resource_root == null:
 		push_warning("SoundPreviewPlayer: no resource root to resolve %s" % name)
 		return
 	var bytes: PackedByteArray = resource_root.read_file(name)
 	if bytes.is_empty():
 		push_warning("SoundPreviewPlayer: .wav not found in resource root: %s" % name)
 		return
-	var stream := NovaWavLoader.from_bytes(bytes)
+	var stream := WavLoader.from_bytes(bytes)
 	if stream == null:
 		push_warning("SoundPreviewPlayer: could not decode .wav: %s" % name)
 		return

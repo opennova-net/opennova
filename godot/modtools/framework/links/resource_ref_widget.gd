@@ -8,7 +8,7 @@ extends HBoxContainer
 ##
 ## Services arrive as Callables so the widget works anywhere: with no services
 ## (headless tests, runtime owners) it degrades to a plain name field — badge,
-## browse, and jump simply hide. services_from_shell builds the editor trio.
+## browse, and jump simply hide. LinkServices.from_shell builds the editor trio.
 
 signal value_changed(value: String)
 
@@ -25,7 +25,7 @@ var clear_button: Button
 
 var _kind := ""
 var _label := ""
-var _services: Dictionary = {}
+var _services := LinkServices.new()
 var _current := ""
 var _shown := ""
 var _resolved_path := ""
@@ -110,28 +110,21 @@ func _init() -> void:
 	clear_button.set_drag_forwarding(Callable(), _can_drop_data, _drop_data)
 
 
-## services: { "resolve": Callable(kind, name) -> {status, path},
-##             "pick":    Callable(kind, title, on_pick: Callable(path)),
-##             "jump":    Callable(kind, path) }
-## Any subset works; missing entries hide their affordance. Safe to call again
-## when services arrive after the form was built.
-func configure(kind: String, display_label: String, services: Dictionary = {}) -> void:
+## services: the LinkServices trio (resolve/pick/jump). Any unset Callable
+## hides its affordance. Safe to call again when services arrive after the
+## form was built.
+func configure(kind: String, display_label: String, services: LinkServices = null) -> void:
 	_kind = kind
 	_label = display_label
-	_services = services
+	_services = services if services != null else LinkServices.new()
 	name_edit.placeholder_text = "(none)"
-	browse_button.visible = _service("pick").is_valid()
+	browse_button.visible = _services.pick.is_valid()
 	browse_button.tooltip_text = _browse_copy if not _browse_copy.is_empty() \
 			else "Choose a %s from the resource folder." % _label.to_lower()
 	jump_button.tooltip_text = "Open this %s in its editor." % _label.to_lower()
 	_memo_value = ""
 	_memo_epoch = -1
 	_refresh_status_ui()
-
-
-func _service(service_name: String) -> Callable:
-	var cb: Variant = _services.get(service_name)
-	return cb if cb is Callable else Callable()
 
 
 func set_value(text: String) -> void:
@@ -159,15 +152,7 @@ func set_status_copy(browse_tooltip: String, missing_tooltip: String) -> void:
 	_missing_copy = missing_tooltip
 
 
-static func services_from_shell(shell: Object) -> Dictionary:
-	return {
-		"resolve": func(kind: String, name: String) -> Dictionary:
-			return shell.get_reference_index().resolve(kind, name),
-		"pick": func(kind: String, title: String, on_pick: Callable) -> void:
-			shell.open_kind_picker(kind, title, on_pick),
-		"jump": func(kind: String, path: String) -> void:
-			shell.open_in_workspace(ResourceKinds.jump_kind(kind), path),
-	}
+
 
 
 func _get_drag_data(_at: Vector2) -> Variant:
@@ -245,7 +230,7 @@ func _commit(text: String) -> void:
 
 
 func _on_browse_pressed() -> void:
-	var pick := _service("pick")
+	var pick := _services.pick
 	if not pick.is_valid():
 		return
 	pick.call(_kind, "Choose a %s" % _label.to_lower(), func(path: String) -> void:
@@ -253,19 +238,19 @@ func _on_browse_pressed() -> void:
 
 
 func _on_jump_pressed() -> void:
-	var jump := _service("jump")
+	var jump := _services.jump
 	if not jump.is_valid() or _resolved_path.is_empty():
 		return
 	jump.call(_kind, _resolved_path)
 
 
 func _resolve() -> Dictionary:
-	var resolve := _service("resolve")
+	var resolve := _services.resolve
 	if not resolve.is_valid() or _current.is_empty():
 		return {}
 	var epoch := -1
-	if ClassDB.class_exists("NovaResourceRoot"):
-		epoch = NovaResourceRoot.cache_epoch()
+	if ClassDB.class_exists("ResourceRoot"):
+		epoch = ResourceRoot.cache_epoch()
 	if _current == _memo_value and epoch == _memo_epoch:
 		return _memo_result
 	_memo_value = _current
@@ -279,7 +264,7 @@ func _refresh_status_ui() -> void:
 	var result := _resolve()
 	_resolved_path = String(result.get("path", ""))
 	var has_resolve := not result.is_empty()
-	var has_jump := _service("jump").is_valid()
+	var has_jump := _services.jump.is_valid()
 	badge.visible = has_resolve
 	jump_button.visible = has_jump and has_resolve
 	if not has_resolve:

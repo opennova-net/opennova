@@ -1,7 +1,7 @@
 extends GutTest
 
 # Global-color EnvScale coverage at the runtime boundary. EnvFile deliberately
-# retains raw authored colors for export; NovaEnvironment exposes the parser-
+# retains raw authored colors for export; MissionEnvironment exposes the parser-
 # equivalent scaled bytes to render/weather consumers.
 
 
@@ -29,16 +29,16 @@ func _make_static_data() -> EnvFile:
 	return data
 
 
-func _add_environment(data: EnvFile, node_name: String) -> NovaEnvironment:
-	var env := NovaEnvironment.new()
+func _add_environment(data: EnvFile, node_name: String) -> MissionEnvironment:
+	var env := MissionEnvironment.new()
 	env.name = node_name
 	env.environment_data = data
 	add_child_autofree(env)
 	return env
 
 
-func _add_world_driven_weather(env: NovaEnvironment, node_name: String) -> NovaWeather:
-	var weather := NovaWeather.new()
+func _add_world_driven_weather(env: MissionEnvironment, node_name: String) -> Weather:
+	var weather := Weather.new()
 	weather.name = node_name
 	weather.environment_path = env.get_path()
 	add_child_autofree(weather)
@@ -108,7 +108,7 @@ func _make_black_lightning_data(envscale: float, lightning: Color) -> EnvFile:
 	return data
 
 
-static func _flash_snapshot(weather: NovaWeather) -> Array:
+static func _flash_snapshot(weather: Weather) -> Array:
 	return [
 		_units(weather.get_smooth_sky()),
 		_units(weather.get_smooth_fog()),
@@ -119,7 +119,7 @@ static func _flash_snapshot(weather: NovaWeather) -> Array:
 
 func test_lightning_consumes_the_scaled_runtime_color() -> void:
 	# These describe the same engine byte color: trunc(Color8(201,101,51) *
-	# .5) == Color8(100,50,25). If NovaWeather bypasses the EnvScale view and
+	# .5) == Color8(100,50,25). If Weather bypasses the EnvScale view and
 	# reads the raw EnvFile color, their first flash epoch diverges.
 	var scaled_env := _add_environment(
 		_make_black_lightning_data(0.5, Color8(201, 101, 51)),

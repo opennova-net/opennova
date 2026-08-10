@@ -27,12 +27,12 @@ func after_each() -> void:
 func test_terrain_editor_path_state_preserves_shared_resource_directory() -> void:
 	var root := OS.get_cache_dir().path_join(TEST_ROOT).path_join("root_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(root)
-	NovaResourceDirSettings.set_resource_dir(root)
+	ResourceDirSettings.set_resource_dir(root)
 
 	var editor = autofree(TerrainEditorScript.new())
 	editor._remember_open_path(root.path_join("Dvxi5.trn"))
 
-	assert_eq(NovaResourceDirSettings.get_resource_dir(), root, "Saving terrain editor path state must preserve the shared resource directory.")
+	assert_eq(ResourceDirSettings.get_resource_dir(), root, "Saving terrain editor path state must preserve the shared resource directory.")
 
 
 func _remove_dir_recursive(path: String) -> void:

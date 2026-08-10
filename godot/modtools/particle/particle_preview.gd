@@ -1,30 +1,32 @@
 class_name ParticlePreview
 extends Control
 ## SubViewport mount for the particle editor. The preview owns one value-only
-## NovaEffectScene rendered through one shared NovaParticleRenderer.
+## EffectScene rendered through one shared ParticleRenderer.
 ## A bottom overlay adds transport controls (play/pause, restart, time scale, a
 ## deterministic fixed-tick timeline) plus a live stats readout. Edits in the
 ## inspector ask for a debounced live refresh.
 
-const FlyCameraScript = preload("res://adapter/fly_camera.gd")
+const FlyCameraScript = preload("res://game/fly_camera.gd")
 
-const STEP_SECONDS := 1.0 / 62.5
-const PARTICLE_FLAG_FOREVER_EMIT := NovaParticleDef.FLAG_FOREVER_EMIT
+# The engine's fixed simulation tick (Simulation.tick_dt(); the cadence lives
+# at the engine home, engine/runtime/world tick accumulator).
+static var STEP_SECONDS: float = Simulation.tick_dt()
+const PARTICLE_FLAG_FOREVER_EMIT := ParticleDef.FLAG_FOREVER_EMIT
 const PREVIEW_EFFECT_ID := "__oned_particle_preview__"
 
 var _viewport_container: SubViewportContainer
 var _viewport: SubViewport
 var _root: Node3D
-var _camera: Camera3D
-var _scene: NovaEffectScene
-var _renderer: NovaParticleRenderer
-var _particle_file: NovaParticleFile
-var _preview_document: NovaParticleFile
+var _camera: FlyCamera
+var _scene: EffectScene
+var _renderer: ParticleRenderer
+var _particle_file: ParticleFile
+var _preview_document: ParticleFile
 var _preview_effect_name := ""
 var _effect_handle := 0
 var _spawn_receipt: Dictionary = {}
 var _preview_definition_indices: Array[int] = []
-var _preview_definitions: Array[NovaParticleDef] = []
+var _preview_definitions: Array[ParticleDef] = []
 var _preview_finite := true
 var _texture_provider := Callable()
 var _grid: MeshInstance3D
@@ -43,8 +45,8 @@ var _bg_level := 0
 
 # What is currently previewed, so a live refresh can re-apply it.
 var _last_mode := 0  # 0 none, 1 particle, 2 effect
-var _last_def: NovaParticleDef
-var _last_effect: NovaParticleEffect
+var _last_def: ParticleDef
+var _last_effect: ParticleEffect
 var _refresh_timer: Timer
 
 # Overlay controls.
@@ -102,7 +104,7 @@ func _build_viewport() -> void:
 	_world_env.environment = env
 	_root.add_child(_world_env)
 
-	_renderer = NovaParticleRenderer.new()
+	_renderer = ParticleRenderer.new()
 	_renderer.name = "ParticleRenderer"
 	_renderer.set_procedural_fallback_enabled(true)
 	_root.add_child(_renderer)
@@ -277,7 +279,7 @@ func _process(delta: float) -> void:
 
 # --- Document / selection ----------------------------------------------------
 
-func set_particle_file(file: NovaParticleFile) -> void:
+func set_particle_file(file: ParticleFile) -> void:
 	_particle_file = file
 	_configure_renderer_textures()
 
@@ -291,7 +293,7 @@ func get_texture_provider() -> Callable:
 	return _texture_provider
 
 
-func set_effect(effect: NovaParticleEffect) -> void:
+func set_effect(effect: ParticleEffect) -> void:
 	clear_preview()
 	_last_mode = 2
 	_last_effect = effect
@@ -313,7 +315,7 @@ func set_effect(effect: NovaParticleEffect) -> void:
 	_reset_timeline()
 
 
-func set_particle_def(def: NovaParticleDef) -> void:
+func set_particle_def(def: ParticleDef) -> void:
 	clear_preview()
 	_last_mode = 1
 	_last_def = def
@@ -343,21 +345,21 @@ func clear_preview() -> void:
 
 
 func _make_preview_document(
-		effect: NovaParticleEffect, selected_def: NovaParticleDef) -> NovaParticleFile:
-	var document := NovaParticleFile.new()
+		effect: ParticleEffect, selected_def: ParticleDef) -> ParticleFile:
+	var document := ParticleFile.new()
 	if _particle_file != null:
 		document.source_path = _particle_file.source_path
 		document.tables = _particle_file.tables
 		document.table_handles = _particle_file.table_handles
 
-	var preview_effect := NovaParticleEffect.new()
+	var preview_effect := ParticleEffect.new()
 	preview_effect.id = PREVIEW_EFFECT_ID
-	var particles: Array[NovaParticleDef] = []
+	var particles: Array[ParticleDef] = []
 	if selected_def != null:
 		var preview_def := selected_def
 		var preview_id := String(selected_def.id)
 		if preview_id.is_empty():
-			preview_def = selected_def.duplicate(true) as NovaParticleDef
+			preview_def = selected_def.duplicate(true) as ParticleDef
 			if preview_def != null:
 				preview_id = "__oned_selected_particle_def__"
 				preview_def.id = preview_id
@@ -372,7 +374,7 @@ func _make_preview_document(
 	# selected pdef is first so duplicate ids resolve to the value being edited.
 	if _particle_file != null:
 		for entry in _particle_file.particles:
-			var candidate := entry as NovaParticleDef
+			var candidate := entry as ParticleDef
 			if candidate == null:
 				continue
 			if selected_def != null \
@@ -380,12 +382,12 @@ func _make_preview_document(
 				continue
 			particles.append(candidate)
 	document.particles = particles
-	var effects: Array[NovaParticleEffect] = [preview_effect]
+	var effects: Array[ParticleEffect] = [preview_effect]
 	document.effects = effects
 	return document
 
 
-func _start_preview(document: NovaParticleFile) -> void:
+func _start_preview(document: ParticleFile) -> void:
 	_preview_document = document
 	_preview_effect_name = PREVIEW_EFFECT_ID
 	_preview_definitions.clear()
@@ -395,8 +397,8 @@ func _start_preview(document: NovaParticleFile) -> void:
 			var preview_def := document.find_particle(definition_name)
 			if preview_def != null:
 				_preview_definitions.append(preview_def)
-	_scene = NovaEffectScene.new()
-	var files: Array[NovaParticleFile] = [document]
+	_scene = EffectScene.new()
+	var files: Array[ParticleFile] = [document]
 	_scene.open(files, {
 		"simulation_tick_seconds": STEP_SECONDS,
 		"random_seed": 1,
@@ -421,8 +423,8 @@ func _start_preview(document: NovaParticleFile) -> void:
 
 
 func _reset_scene() -> void:
-	_scene = NovaEffectScene.new()
-	var files: Array[NovaParticleFile] = []
+	_scene = EffectScene.new()
+	var files: Array[ParticleFile] = []
 	_scene.open(files, {"simulation_tick_seconds": STEP_SECONDS})
 	if _renderer != null:
 		_renderer.set_scene(_scene)
@@ -551,10 +553,8 @@ func restart() -> void:
 
 
 func reset_view() -> void:
-	if _camera != null and _camera.has_method("frame_bounds_custom"):
+	if _camera != null:
 		_camera.frame_bounds_custom(Vector3.ZERO, 9.0, 1.4, 80.0, 0.0, -0.3)
-	elif _camera != null:
-		_camera.look_at_from_position(Vector3(0.0, 4.0, 12.0), Vector3.ZERO)
 
 
 func set_grid_visible(value: bool) -> void:
@@ -660,7 +660,7 @@ func _bg_color_for_level(level: int) -> Color:
 		_: return Color(0.09, 0.10, 0.12)
 
 
-func _def_window_seconds(def: NovaParticleDef) -> float:
+func _def_window_seconds(def: ParticleDef) -> float:
 	if def == null:
 		return 4.0
 	var forever := (int(def.flags) & PARTICLE_FLAG_FOREVER_EMIT) != 0
@@ -691,7 +691,7 @@ func get_visual_layer_count() -> int:
 		var present := 0
 		var graphics: Array = definition.get_graphics()
 		for graphic_v in graphics:
-			var graphic := graphic_v as NovaParticleGraphicLayer
+			var graphic := graphic_v as ParticleGraphicLayer
 			if graphic != null and graphic.get_present():
 				present += 1
 		# The editor deliberately supplies one procedural diagnostic layer when
@@ -750,7 +750,7 @@ func _retail_frame_names(authored: String, frame_count: int) -> PackedStringArra
 	# the runtime resolves.
 	var result := PackedStringArray()
 	for frame in range(1, maxi(frame_count, 1) + 1):
-		result.append(NovaParticleRenderer.retail_frame_name(
+		result.append(ParticleRenderer.retail_frame_name(
 				authored, frame_count, frame))
 	return result
 
@@ -821,7 +821,7 @@ func get_texture_dir() -> String:
 	return _renderer.get_texture_dir() if _renderer != null else _texture_dir()
 
 
-func get_preview_camera() -> Camera3D:
+func get_preview_camera() -> FlyCamera:
 	return _camera
 
 

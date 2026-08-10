@@ -9,7 +9,7 @@ extends RefCounted
 # Result interface:
 #   value       command-specific return value (optional)
 #   op          snapshot-history label (present only for a mutation)
-#   before      pre-mutation NovaMnuDocument state
+#   before      pre-mutation MnuDocument state
 #   sel_before  selection restored by undo
 #   sel_after   selection restored by redo
 #   selection   full multi-selection to restore after the command (optional)
@@ -19,7 +19,7 @@ const DEFAULT_WIDGET_RECT := Rect2(20, 20, 100, 30)
 var _clipboard_payload: PackedByteArray = PackedByteArray()
 
 
-func execute(document: NovaMnuDocument, command: StringName,
+func execute(document: MnuDocument, command: StringName,
 		context: Dictionary = {}) -> Dictionary:
 	if document == null:
 		return {}
@@ -75,7 +75,7 @@ func _visible_screen_id(context: Dictionary) -> int:
 	return int(context.get("visible_screen_id", -1))
 
 
-func _move_rects(document: NovaMnuDocument, context: Dictionary) -> Dictionary:
+func _move_rects(document: MnuDocument, context: Dictionary) -> Dictionary:
 	var edits: Array = context.get("edits", [])
 	if edits.is_empty():
 		return {}
@@ -91,13 +91,13 @@ func _move_rects(document: NovaMnuDocument, context: Dictionary) -> Dictionary:
 	return result
 
 
-func _parent_for_add(document: NovaMnuDocument, selected: int) -> int:
+func _parent_for_add(document: MnuDocument, selected: int) -> int:
 	if selected >= 0 and document.widget_exists(selected):
 		return selected
 	return document.get_screen_ids()[0] if document.get_screen_count() > 0 else -1
 
 
-func _add_widget(document: NovaMnuDocument, context: Dictionary) -> Dictionary:
+func _add_widget(document: MnuDocument, context: Dictionary) -> Dictionary:
 	var selected := _selected_id(context)
 	var parent := _parent_for_add(document, selected)
 	if parent < 0:
@@ -112,7 +112,7 @@ func _add_widget(document: NovaMnuDocument, context: Dictionary) -> Dictionary:
 	return result
 
 
-func _add_widgets(document: NovaMnuDocument, context: Dictionary) -> Dictionary:
+func _add_widgets(document: MnuDocument, context: Dictionary) -> Dictionary:
 	var rows: Array = context.get("rows", [])
 	var results: Array = []
 	if rows.is_empty():
@@ -138,7 +138,7 @@ func _add_widgets(document: NovaMnuDocument, context: Dictionary) -> Dictionary:
 	return result
 
 
-func _delete_widget(document: NovaMnuDocument, context: Dictionary) -> Dictionary:
+func _delete_widget(document: MnuDocument, context: Dictionary) -> Dictionary:
 	var selected := _selected_id(context)
 	if selected < 0 or not document.widget_exists(selected) \
 			or document.is_screen(selected) or _is_root_window(document, selected):
@@ -150,7 +150,7 @@ func _delete_widget(document: NovaMnuDocument, context: Dictionary) -> Dictionar
 		_resolve_existing_selection(document, parent))
 
 
-func _reparent_widget(document: NovaMnuDocument, context: Dictionary) -> Dictionary:
+func _reparent_widget(document: MnuDocument, context: Dictionary) -> Dictionary:
 	var selected := _selected_id(context)
 	var id := int(context.get("id", -1))
 	var before := document.capture_state()
@@ -160,7 +160,7 @@ func _reparent_widget(document: NovaMnuDocument, context: Dictionary) -> Diction
 	return _history_result("reparent_widget", before, selected, id)
 
 
-func _copy_widget(document: NovaMnuDocument, context: Dictionary) -> Dictionary:
+func _copy_widget(document: MnuDocument, context: Dictionary) -> Dictionary:
 	var selected := _selected_id(context)
 	if selected < 0 or not document.widget_exists(selected) \
 			or document.is_screen(selected) or _is_root_window(document, selected):
@@ -169,7 +169,7 @@ func _copy_widget(document: NovaMnuDocument, context: Dictionary) -> Dictionary:
 	return {"value": not _clipboard_payload.is_empty()}
 
 
-func _sibling_target(document: NovaMnuDocument, id: int) -> Dictionary:
+func _sibling_target(document: MnuDocument, id: int) -> Dictionary:
 	if id < 0 or not document.widget_exists(id):
 		return {}
 	if document.is_screen(id):
@@ -181,7 +181,7 @@ func _sibling_target(document: NovaMnuDocument, id: int) -> Dictionary:
 	return {"parent": parent, "index": children.find(id) + 1}
 
 
-func _paste_widget(document: NovaMnuDocument, context: Dictionary) -> Dictionary:
+func _paste_widget(document: MnuDocument, context: Dictionary) -> Dictionary:
 	if _clipboard_payload.is_empty():
 		return {"value": -1}
 	var selected := _selected_id(context)
@@ -200,7 +200,7 @@ func _paste_widget(document: NovaMnuDocument, context: Dictionary) -> Dictionary
 	return result
 
 
-func _duplicate_widget(document: NovaMnuDocument, context: Dictionary) -> Dictionary:
+func _duplicate_widget(document: MnuDocument, context: Dictionary) -> Dictionary:
 	var selected := _selected_id(context)
 	if selected < 0 or not document.widget_exists(selected) \
 			or document.is_screen(selected) or _is_root_window(document, selected):
@@ -226,7 +226,7 @@ func _selection(context: Dictionary) -> PackedInt32Array:
 	return ids
 
 
-func _selected_widgets_same_parent(document: NovaMnuDocument,
+func _selected_widgets_same_parent(document: MnuDocument,
 		context: Dictionary, minimum: int) -> PackedInt32Array:
 	var ids := _selection(context)
 	if ids.size() < minimum:
@@ -244,7 +244,7 @@ func _selected_widgets_same_parent(document: NovaMnuDocument,
 	return ids
 
 
-func _layout_rect(document: NovaMnuDocument, context: Dictionary, id: int) -> Rect2:
+func _layout_rect(document: MnuDocument, context: Dictionary, id: int) -> Rect2:
 	var rendered_rects: Dictionary = context.get("rendered_rects", {})
 	var rendered: Rect2 = rendered_rects.get(id, Rect2())
 	if rendered.size.x > 0.0 or rendered.size.y > 0.0:
@@ -252,26 +252,26 @@ func _layout_rect(document: NovaMnuDocument, context: Dictionary, id: int) -> Re
 	return document.get_window_rect(id)
 
 
-func _rect_preserving_auto(document: NovaMnuDocument, id: int,
+func _rect_preserving_auto(document: MnuDocument, id: int,
 		position: Vector2) -> Rect2:
 	var rect := document.get_window_rect(id)
 	var flags := int(document.get_window_rect_flags(id))
 	var size := rect.size
-	if (flags & NovaMnuDocument.RECT_HAS_RIGHT) == 0:
+	if (flags & MnuDocument.RECT_HAS_RIGHT) == 0:
 		size.x = -1
-	if (flags & NovaMnuDocument.RECT_HAS_BOTTOM) == 0:
+	if (flags & MnuDocument.RECT_HAS_BOTTOM) == 0:
 		size.y = -1
 	return Rect2(position, size)
 
 
-func _layout_to_local_position(document: NovaMnuDocument, context: Dictionary,
+func _layout_to_local_position(document: MnuDocument, context: Dictionary,
 		id: int, board_position: Vector2) -> Vector2:
 	var local := document.get_window_rect(id)
 	var rendered := _layout_rect(document, context, id)
 	return board_position - (rendered.position - local.position)
 
 
-func _align(document: NovaMnuDocument, context: Dictionary) -> Dictionary:
+func _align(document: MnuDocument, context: Dictionary) -> Dictionary:
 	var ids := _selected_widgets_same_parent(document, context, 2)
 	if ids.is_empty():
 		return {}
@@ -298,7 +298,7 @@ func _align(document: NovaMnuDocument, context: Dictionary) -> Dictionary:
 	return _move_rects(document, move_context)
 
 
-func _distribute(document: NovaMnuDocument, context: Dictionary) -> Dictionary:
+func _distribute(document: MnuDocument, context: Dictionary) -> Dictionary:
 	var ids := _selected_widgets_same_parent(document, context, 3)
 	if ids.is_empty():
 		return {}
@@ -337,7 +337,7 @@ func _distribute(document: NovaMnuDocument, context: Dictionary) -> Dictionary:
 	return _move_rects(document, move_context)
 
 
-func _change_z_order(document: NovaMnuDocument, context: Dictionary) -> Dictionary:
+func _change_z_order(document: MnuDocument, context: Dictionary) -> Dictionary:
 	var ids := _selected_widgets_same_parent(document, context, 1)
 	if ids.is_empty():
 		return {}
@@ -395,7 +395,7 @@ func _change_z_order(document: NovaMnuDocument, context: Dictionary) -> Dictiona
 	return result
 
 
-func _duplicate_screen(document: NovaMnuDocument, context: Dictionary) -> Dictionary:
+func _duplicate_screen(document: MnuDocument, context: Dictionary) -> Dictionary:
 	var screen_id := _visible_screen_id(context)
 	if screen_id < 0:
 		return {"value": -1}
@@ -413,7 +413,7 @@ func _duplicate_screen(document: NovaMnuDocument, context: Dictionary) -> Dictio
 	return result
 
 
-func _move_screen(document: NovaMnuDocument, context: Dictionary) -> Dictionary:
+func _move_screen(document: MnuDocument, context: Dictionary) -> Dictionary:
 	var screen_id := _visible_screen_id(context)
 	if screen_id < 0:
 		return {}
@@ -428,7 +428,7 @@ func _move_screen(document: NovaMnuDocument, context: Dictionary) -> Dictionary:
 	return _history_result("move_screen", before, screen_id, screen_id)
 
 
-func _unique_screen_name(document: NovaMnuDocument) -> String:
+func _unique_screen_name(document: MnuDocument) -> String:
 	var existing := {}
 	for screen_id in document.get_screen_ids():
 		existing[document.get_screen_name(screen_id)] = true
@@ -440,7 +440,7 @@ func _unique_screen_name(document: NovaMnuDocument) -> String:
 	return "SCREEN_%d" % suffix
 
 
-func _add_screen(document: NovaMnuDocument, context: Dictionary) -> Dictionary:
+func _add_screen(document: MnuDocument, context: Dictionary) -> Dictionary:
 	var custom_name := String(context.get("name", ""))
 	var selected := _selected_id(context)
 	var before := document.capture_state()
@@ -452,7 +452,7 @@ func _add_screen(document: NovaMnuDocument, context: Dictionary) -> Dictionary:
 	return result
 
 
-func _delete_screen(document: NovaMnuDocument, context: Dictionary) -> Dictionary:
+func _delete_screen(document: MnuDocument, context: Dictionary) -> Dictionary:
 	if document.get_screen_count() <= 1:
 		return {}
 	var screen_id := _visible_screen_id(context)
@@ -466,28 +466,28 @@ func _delete_screen(document: NovaMnuDocument, context: Dictionary) -> Dictionar
 	return _history_result("delete_screen", before, selected, first)
 
 
-func _screen_id_named(document: NovaMnuDocument, name: String) -> int:
+func _screen_id_named(document: MnuDocument, name: String) -> int:
 	for screen_id in document.get_screen_ids():
 		if String(document.get_screen_name(screen_id)).nocasecmp_to(name) == 0:
 			return screen_id
 	return -1
 
 
-func _is_root_window(document: NovaMnuDocument, id: int) -> bool:
+func _is_root_window(document: MnuDocument, id: int) -> bool:
 	if not document.widget_exists(id) or document.is_screen(id):
 		return false
 	var parent := int(document.get_parent_id(id))
 	return parent > 0 and document.is_screen(parent)
 
 
-func _resolve_existing_selection(document: NovaMnuDocument, id: int) -> int:
+func _resolve_existing_selection(document: MnuDocument, id: int) -> int:
 	if id >= 0 and document.widget_exists(id):
 		return id
 	return int(document.get_screen_ids()[0]) \
 		if document.get_screen_count() > 0 else -1
 
 
-func _write_widget_prop(document: NovaMnuDocument, id: int,
+func _write_widget_prop(document: MnuDocument, id: int,
 		prop: String, value) -> void:
 	match prop:
 		"name": document.set_widget_name(id, value)

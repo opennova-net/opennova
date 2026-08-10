@@ -181,7 +181,7 @@ func _commit_loadout_editors() -> void:
 func _refresh_loadout_panel() -> void:
 	if _loadout_toggle == null:
 		return
-	var mission: NovaMissionData = _inspector._controller.get_mission() if _inspector._controller != null else null
+	var mission: MissionData = _inspector._controller.get_mission() if _inspector._controller != null else null
 	if mission == null:
 		_loadout_toggle.visible = false
 		_loadout_box.visible = false
@@ -289,7 +289,7 @@ func _on_group_spin_changed(_value: float) -> void:
 func _refresh_groups_panel() -> void:
 	if _groups_toggle == null:
 		return
-	var mission: NovaMissionData = _inspector._controller.get_mission() if _inspector._controller != null else null
+	var mission: MissionData = _inspector._controller.get_mission() if _inspector._controller != null else null
 	if mission == null:
 		_groups_toggle.visible = false
 		_groups_box.visible = false

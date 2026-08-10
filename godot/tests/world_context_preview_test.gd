@@ -80,7 +80,7 @@ func test_preview_sky_tracks_active_camera_with_retail_half_height() -> void:
 	var sky: Node3D = preview.get_sky_node()
 	await get_tree().process_frame
 	await get_tree().process_frame
-	assert_eq(sky.mesh_instance.global_position, Vector3(10.0, 373.5, 20.0),
+	assert_eq(sky.get_mesh_instance().global_position, Vector3(10.0, 373.5, 20.0),
 		"ONED keeps the recovered retail half-height dome anchor; the below-rim area is frame clear.")
 
 	var second_camera := Camera3D.new()
@@ -88,7 +88,7 @@ func test_preview_sky_tracks_active_camera_with_retail_half_height() -> void:
 	world_root.add_child(second_camera)
 	second_camera.current = true
 	await get_tree().process_frame
-	assert_eq(sky.mesh_instance.global_position, Vector3(-30.0, 450.0, 45.0),
+	assert_eq(sky.get_mesh_instance().global_position, Vector3(-30.0, 450.0, 45.0),
 		"The preview sky follows the viewport's newly active camera after a workspace camera switch.")
 
 

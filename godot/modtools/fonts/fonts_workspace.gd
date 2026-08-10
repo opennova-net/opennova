@@ -5,7 +5,7 @@ const FntEditorDocument = preload("res://modtools/fonts/fnt_editor_document.gd")
 const FntEditorScript = preload("res://modtools/fonts/fnt_editor.gd")
 
 var _document: FntEditorDocument
-var _editor: Control
+var _editor: FntEditor
 var _inspector_root: Control
 
 
@@ -160,7 +160,7 @@ func _populate_inspector() -> void:
 	if _document.resource == null:
 		meta_label.text = ""
 	else:
-		var res: NovaFntResource = _document.resource
+		var res: FntResource = _document.resource
 		var first := res.get_first_char()
 		var drawn := 0
 		for i in range(res.get_glyph_count()):
@@ -287,3 +287,25 @@ func get_save_dialog_dir() -> String:
 # (the two live on different objects here), so has_unsaved_changes keeps its override.
 func get_editor_document() -> Object:
 	return _editor
+
+
+func has_unsaved_changes() -> bool:
+	return _editor != null and _editor.is_dirty()
+
+
+func can_undo() -> bool:
+	return _editor != null and not is_busy() and _editor.can_undo()
+
+
+func can_redo() -> bool:
+	return _editor != null and not is_busy() and _editor.can_redo()
+
+
+func undo() -> void:
+	if _editor != null:
+		_editor.undo()
+
+
+func redo() -> void:
+	if _editor != null:
+		_editor.redo()

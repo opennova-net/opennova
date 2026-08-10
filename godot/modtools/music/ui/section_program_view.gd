@@ -9,7 +9,7 @@ extends Control
 # node-per-statement chain: the state-machine MAP keeps its graph (that
 # metaphor fits BETWEEN states); inside a state, programs are lists.
 #
-# Built purely from NovaMusicScript.get_program_ast(section). The view never
+# Built purely from MusicScript.get_program_ast(section). The view never
 # writes bytecode; it emits add/replace/delete/reorder/move intents the mount
 # (live_mode) hands to the document's parity-gated, undoable write path.
 #
@@ -88,7 +88,7 @@ var _editable: bool = false
 var _forms = MusForms.new()
 var _section_names: PackedStringArray = PackedStringArray()
 var _var_list: Array = []
-var _mus = null
+var _mus: MusicScript = null
 var _authoring_blocked_reason: String = ""
 var _profile_path: String = ""
 var _inputs_by_section: Dictionary = {}
@@ -160,8 +160,7 @@ func configure_authoring(section_names: PackedStringArray, var_list: Array, mus,
 	_profile_path = profile_path
 	_inputs_by_section = inputs_by_section
 	_locals_base = MusDisplayNames.DEFAULT_LOCALS_BASE
-	if _mus != null and _mus.has_method("get_locals_frame_offset") \
-			and _mus.has_method("get_default_script_name"):
+	if _mus != null:
 		_locals_base = int(_mus.get_locals_frame_offset(_mus.get_default_script_name()))
 	_forms.configure(section_names, var_list, mus, bank_names)
 	if _add_menu != null:
@@ -176,7 +175,7 @@ func _read_only_add_tooltip() -> String:
 	return "Authoring is unavailable for this script."
 
 
-# Render one AST section dict (NovaMusicScript.get_program_ast element).
+# Render one AST section dict (MusicScript.get_program_ast element).
 func show_section(section: Dictionary, bank_names: Array) -> void:
 	var new_index := int(section.get("index", -1))
 	if new_index != _section_index:
@@ -474,8 +473,7 @@ func _find_row_by_key(key: Dictionary) -> Control:
 
 # Profile-named caller inputs for the SHOWN section ({0-based index -> label}).
 func _input_names() -> Dictionary:
-	if _profile_path == "" or _section_name == "" or _mus == null \
-			or not _mus.has_method("get_default_script_name"):
+	if _profile_path == "" or _section_name == "" or _mus == null:
 		return {}
 	return MusInputNames.labels_for(String(_mus.get_default_script_name()), _section_name, _profile_path)
 
@@ -488,7 +486,7 @@ func callee_inputs_text(target: String) -> String:
 	if count <= 0:
 		return ""
 	var names := {}
-	if _profile_path != "" and _mus != null and _mus.has_method("get_default_script_name"):
+	if _profile_path != "" and _mus != null:
 		names = MusInputNames.labels_for(String(_mus.get_default_script_name()), target, _profile_path)
 	var slots := []
 	for k in range(count):

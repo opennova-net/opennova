@@ -16,17 +16,17 @@ const MnuListEditorScript = preload("res://modtools/mnu/mnu_list_editor.gd")
 
 const SIZE_MAX := 4096
 
-var _document: NovaMnuDocument
+var _document: MnuDocument
 var _id := -1
-var _wtype := NovaMnuDocument.TYPE_UNKNOWN
+var _wtype := MnuDocument.TYPE_UNKNOWN
 var _authoring: Dictionary = {}
 var _sound_sets: PackedStringArray = PackedStringArray()
-var _ref_services: Dictionary = {}
+var _ref_services := LinkServices.new()
 
 
-func configure(document: NovaMnuDocument, id: int, wtype: int,
+func configure(document: MnuDocument, id: int, wtype: int,
 		authoring: Dictionary, sound_sets: PackedStringArray,
-		reference_services: Dictionary) -> void:
+		reference_services: LinkServices) -> void:
 	_document = document
 	_id = id
 	_wtype = wtype
@@ -112,15 +112,15 @@ func _build_behavior_section(box: VBoxContainer) -> void:
 	var behavior: Dictionary = _authoring.get("behavior", {})
 	var constraints: Dictionary = _authoring.get("constraints", {})
 	MnuUiHelpersScript.add_heading(box, "Behavior")
-	if _wtype == NovaMnuDocument.TYPE_CHECKBOX:
+	if _wtype == MnuDocument.TYPE_CHECKBOX:
 		var as_button := MnuUiHelpersScript.add_check_row(box,
 			"Button presentation", bool(behavior.get("as_button", false)))
 		as_button.tooltip_text = "Lay out this checkbox as a full-rect toggle button"
 		as_button.toggled.connect(func(on: bool) -> void:
 			_emit_patch_path(["behavior", "as_button"], on))
-	if _wtype == NovaMnuDocument.TYPE_RADIO \
-			or _wtype == NovaMnuDocument.TYPE_CHECKBOX \
-			or _wtype == NovaMnuDocument.TYPE_RADIOEDIT:
+	if _wtype == MnuDocument.TYPE_RADIO \
+			or _wtype == MnuDocument.TYPE_CHECKBOX \
+			or _wtype == MnuDocument.TYPE_RADIOEDIT:
 		_build_optional_int(box, "Group", behavior, "has_group", "group",
 			["behavior"], 0, SIZE_MAX)
 
@@ -131,9 +131,9 @@ func _build_behavior_section(box: VBoxContainer) -> void:
 	global_var.toggled.connect(func(on: bool) -> void:
 		_emit_patch_path(["behavior", "global_var"], on))
 
-	var is_edit := _wtype == NovaMnuDocument.TYPE_EDIT \
-		or _wtype == NovaMnuDocument.TYPE_MULTILINE_EDIT \
-		or _wtype == NovaMnuDocument.TYPE_RADIOEDIT
+	var is_edit := _wtype == MnuDocument.TYPE_EDIT \
+		or _wtype == MnuDocument.TYPE_MULTILINE_EDIT \
+		or _wtype == MnuDocument.TYPE_RADIOEDIT
 	if is_edit:
 		var password := MnuUiHelpersScript.add_check_row(box, "Password",
 			bool(behavior.get("password", false)))
@@ -150,18 +150,18 @@ func _build_behavior_section(box: VBoxContainer) -> void:
 		_build_optional_int(box, "Maximum characters", constraints,
 			"has_maxchar", "maxchar", ["constraints"], 0, SIZE_MAX)
 
-	if _wtype == NovaMnuDocument.TYPE_SCROLL \
-			or _wtype == NovaMnuDocument.TYPE_MARQUEE:
+	if _wtype == MnuDocument.TYPE_SCROLL \
+			or _wtype == MnuDocument.TYPE_MARQUEE:
 		var orientation := MnuUiHelpersScript.add_option_row(box, "Orientation",
 			String(behavior.get("orientation", "")),
 			["", "HORIZONTAL", "VERTICAL"])
 		_wire_patch_option(orientation, ["behavior", "orientation"])
-	if _wtype == NovaMnuDocument.TYPE_MARQUEE:
+	if _wtype == MnuDocument.TYPE_MARQUEE:
 		_add_asset_row(box, "Datasource",
 			String(behavior.get("datasource", "")), "credits",
 			func(value: String) -> void:
 				_emit_patch_path(["behavior", "datasource"], value))
-	if _wtype == NovaMnuDocument.TYPE_SCROLL:
+	if _wtype == MnuDocument.TYPE_SCROLL:
 		var scroll_size: Dictionary = _authoring.get("scroll_size", {})
 		_build_optional_int(box, "Scroll height", scroll_size,
 			"has_height", "height", ["scroll_size"], 0, SIZE_MAX)

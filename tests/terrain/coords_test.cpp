@@ -2,7 +2,7 @@
 //
 // Characterizes two things the A2 refactor must preserve byte-for-byte:
 //   1. The RUNTIME formula currently inlined as resolve_world_sample() in
-//      godot/adapter/terrain/nova_terrain_data.cpp (float, & 0xF grid wrap, no
+//      godot/src/terrain/nova_terrain_data.cpp (float, & 0xF grid wrap, no
 //      id clamp, no local clamp). ref_resolve_world_sample() below is a verbatim
 //      copy of that formula and is the oracle for the runtime-mode kernel.
 //   2. The EDITOR guard divergences ported from
@@ -11,7 +11,7 @@
 //      of & 0xF wrap), clampi(sector_id, 0, 4), and clampf(local, 0, 512-0.001).
 //      These are exercised with hand-derived golden values.
 
-#include "terrain/coords.h"
+#include "terrain_query/coords.h"
 
 #include <cmath>
 #include <cstdio>

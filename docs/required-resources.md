@@ -168,7 +168,7 @@ Write-side / debug outputs (not boot inputs): `SS%0.5d.tga`, `_errlog.txt`,
   Wave-2 trunk)**: `engine/base/gameprofile/required_resources.h` instantiates this
   record (phase-major witnessed order, severity classes, per-row failure text
   + citation; `required_resources` ctest pins the fatal set and completeness).
-  `NovaResourceRoot.list_missing_boot_resources()` /
+  `ResourceRoot.list_missing_boot_resources()` /
   `boot_resource_failure_text()` probe the individually-fatal file rows
   against the mounted root (the archive-table trio stays `mount_runtime`'s
   own gate), and the game shell raises honest missing-resource errors at

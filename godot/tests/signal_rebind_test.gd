@@ -8,11 +8,6 @@ class Emitter:
 	signal changed(value)
 
 
-class SignalLess:
-	extends RefCounted
-	# Deliberately has no "changed" signal.
-
-
 var _hits: int = 0
 var _last: Variant = null
 
@@ -58,12 +53,12 @@ func test_rebind_is_idempotent() -> void:
 	assert_eq(_hits, 1, "An idempotent rebind should still fire only once.")
 
 
-func test_rebind_tolerates_sources_without_the_signal() -> void:
-	var signal_less := SignalLess.new()
-	# Neither of these should raise: missing-signal sources are simply skipped.
-	SignalRebindScript.rebind(null, signal_less, &"changed", _on_changed)
-	SignalRebindScript.rebind(signal_less, null, &"changed", _on_changed)
-	assert_eq(_hits, 0, "A source without the signal should not be connected.")
+func test_rebind_tolerates_null_sources() -> void:
+	# Null sources are simply skipped; sources are otherwise typed to carry the
+	# signal (ADR 0034 dropped the has_signal probing, so a wrong-typed source
+	# is a caller bug, not a tolerated shape).
+	SignalRebindScript.rebind(null, null, &"changed", _on_changed)
+	assert_eq(_hits, 0, "Null sources connect nothing.")
 
 
 func test_rebind_passes_connect_flags() -> void:

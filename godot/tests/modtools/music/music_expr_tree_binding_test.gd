@@ -1,7 +1,7 @@
 extends GutTest
 
 # End-to-end closure of the structured-expression path: the C++ AST's
-# rhs_tree/expr_tree dictionaries (NovaMusicScript.get_program_ast) must
+# rhs_tree/expr_tree dictionaries (MusicScript.get_program_ast) must
 # serialize through the editor's MusExpr to EXACTLY the canonical flat text the
 # decompiler stored beside them. ctest pins C-tree -> C-render equality; this
 # pins the binding's dict shape + MusExpr.serialize as the same function, so an
@@ -12,10 +12,10 @@ const BANK_FIXTURE := "res://../fixtures/sbf/jo_gamemus.sbf"
 const SCRIPT_FIXTURE := "res://../fixtures/mus/jo_gamemus.bin"
 
 
-func _load_script() -> NovaMusicScript:
+func _load_script() -> MusicScript:
 	var bytes := FileAccess.get_file_as_bytes(SCRIPT_FIXTURE)
 	assert_gt(bytes.size(), 0, "fixture readable")
-	var ms := NovaMusicScript.new()
+	var ms := MusicScript.new()
 	ms.load_from_decrypted_bytes(bytes, "gamemus")
 	return ms
 

@@ -4,8 +4,9 @@ extends RefCounted
 ## documents plus the active index. Pure bookkeeping, no UI — a workspace owns
 ## one of these, forwards the EditorWorkspace document-tab hooks to it, and
 ## re-emits `changed` as `documents_changed` for the shell's tab strip.
-## Documents are duck-typed to the EditorDocument shape (`current_path`,
-## `is_dirty`), so any domain document family fits (Strings now, Mnu next).
+## Documents carry the EditorDocument shape (`current_path`, `is_dirty` plain
+## properties) — both document families (Node-side EditorDocument and the
+## RefCounted EditorResourceDocument) do, so either fits.
 
 signal changed
 
@@ -90,11 +91,7 @@ func tabs() -> Array[DocumentTabRow]:
 	var rows: Array[DocumentTabRow] = []
 	for doc in _docs:
 		var path := String(doc.get("current_path"))
-		var dirty := false
-		if doc.has_method("is_dirty"):
-			dirty = doc.is_dirty()
-		else:
-			dirty = bool(doc.get("is_dirty"))
+		var dirty := bool(doc.get("is_dirty"))
 		rows.append(DocumentTabRow.make(
 			path.get_file() if not path.is_empty() else "Untitled",
 			dirty,

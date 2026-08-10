@@ -1,6 +1,6 @@
 extends GutTest
 
-# NovaDebugPickList: the shell-owned debug pick set. Cap, dedupe-by-handle
+# DebugPickList: the shell-owned debug pick set. Cap, dedupe-by-handle
 # (refresh in place), removal, and the changed signal — the model contract
 # the overlay's picks section and the highlight view both build on.
 
@@ -24,7 +24,7 @@ func _pick(handle: int, name: String = "thing", tick: int = 1) -> Dictionary:
 
 
 func test_add_dedupes_by_handle_and_refreshes_the_row() -> void:
-	var list := NovaDebugPickList.new()
+	var list := DebugPickList.new()
 	var emissions := [0]
 	list.changed.connect(func(): emissions[0] += 1)
 	assert_eq(list.add(_pick(5, "crate", 10)), 0)
@@ -39,20 +39,20 @@ func test_add_dedupes_by_handle_and_refreshes_the_row() -> void:
 
 
 func test_rejects_misses_and_caps_without_evicting() -> void:
-	var list := NovaDebugPickList.new()
+	var list := DebugPickList.new()
 	assert_eq(list.add({"hit": false, "blocked": "terrain"}), -1,
 			"terrain/water misses never become rows")
-	for i in range(NovaDebugPickList.MAX_PICKS):
+	for i in range(DebugPickList.MAX_PICKS):
 		assert_eq(list.add(_pick(i)), i)
 	assert_true(list.is_full())
 	assert_eq(list.add(_pick(100)), -1, "a full list rejects instead of evicting")
-	assert_eq(list.size(), NovaDebugPickList.MAX_PICKS)
+	assert_eq(list.size(), DebugPickList.MAX_PICKS)
 	assert_eq(list.add(_pick(3, "again", 50)), 3,
 			"...but refreshing a listed entity still works at cap")
 
 
 func test_remove_and_clear_announce() -> void:
-	var list := NovaDebugPickList.new()
+	var list := DebugPickList.new()
 	list.add(_pick(1))
 	list.add(_pick(2))
 	var emissions := [0]
@@ -69,7 +69,7 @@ func test_remove_and_clear_announce() -> void:
 
 
 func test_get_picks_returns_deep_copies() -> void:
-	var list := NovaDebugPickList.new()
+	var list := DebugPickList.new()
 	list.add(_pick(4))
 	var copy: Dictionary = list.get_picks()[0]
 	copy["name"] = "mutated"

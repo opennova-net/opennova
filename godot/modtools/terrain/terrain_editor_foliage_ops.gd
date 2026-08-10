@@ -44,7 +44,7 @@ func set_foliage_def_field(index: int, field: String, value: Variant) -> void:
 		return
 	if index < 0 or index >= _te._document.foliage_defs.size():
 		return
-	var def: NovaTerrainFoliageDef = _te._document.foliage_defs[index]
+	var def: TerrainFoliageDef = _te._document.foliage_defs[index]
 	if def == null:
 		return
 	var before_state: Dictionary = _te._document.capture_foliage_editor_history_state()

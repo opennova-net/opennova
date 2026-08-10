@@ -34,7 +34,7 @@ the IR cost us:
 
 1. **3DI3 is the model format, and it is first class.** `Threedi3di3` (the
    typed parse of the file) is the in-memory model every consumer walks:
-   the Godot document (`NovaObjectData` edits it in place), the simulation's
+   the Godot document (`ObjectData` edits it in place), the simulation's
    runtime collision/occlusion builders, `libs/tdp`'s `.3dp` generator
    (`tdp_from_3di`), and the Python/DCC importers (ctypes mirrors of the raw
    packed structs).

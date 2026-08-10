@@ -12,7 +12,7 @@ extends Node
 const HOLD_SECONDS := 6.0
 const MISSION := "00TRg.bms"
 
-var _screen: NovaLoadingScreen
+var _screen: LoadingScreen
 var _elapsed := 0.0
 
 
@@ -22,7 +22,7 @@ func _ready() -> void:
 		push_error("loading_screen_probe: set OPENNOVA_JO_DIR to a retail install")
 		get_tree().quit(1)
 		return
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	if root.mount_runtime(dir, "", false, "jo") != OK:
 		push_error("loading_screen_probe: mount failed: %s" % root.get_last_error())
 		get_tree().quit(1)
@@ -31,8 +31,8 @@ func _ready() -> void:
 	# normally registers it) [orig: g_TextGameText loads gametext.bin @ 0x4a6cd0].
 	var table := RtxtStringFile.new()
 	if table.load_from_byte_array(root.read_file("gametext.bin")) == OK:
-		NovaStrings.register_table("gametext", table)
-	_screen = NovaLoadingScreen.new()
+		Strings.register_table("gametext", table)
+	_screen = LoadingScreen.new()
 	add_child(_screen)
 	_screen.setup(root, {
 		"mission_file": MISSION,

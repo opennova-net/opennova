@@ -42,7 +42,7 @@ this, so MP/co-op is the same loop with the transport swapped rather than a late
    authoritative `World` tick (the host = `Server_TickUpdate` equivalent) serializes real entity state
    through `NetSystem`/the per-class callbacks, an in-process channel loops the datagrams back, a local
    client decodes them via `libs/novaworld/ingame_decode`, and **the present pass reads the
-   client-decoded state** — not `NovaSimulation::get_present_snapshot()` directly. `is_authority`
+   client-decoded state** — not `Simulation::get_present_snapshot()` directly. `is_authority`
    stays the authority seam; `INetCommandSink` stays the outbound boundary, now backed by a serializing
    sink for SP rather than `LocalSink`.
 

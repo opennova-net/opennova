@@ -1,17 +1,17 @@
 extends GutTest
 
-# M2 gate: load a fixture .mnu into NovaMnuDocument, assert the parsed tree, and
+# M2 gate: load a fixture .mnu into MnuDocument, assert the parsed tree, and
 # verify a serialize round-trip plus the core mutation surface.
 
 const FIXTURE := "res://../fixtures/mnu/widgets.mnu"
 const JO_FIXTURE := "res://../fixtures/mnu/jo_main.mnu"
 
 
-func _load_doc() -> NovaMnuDocument:
+func _load_doc() -> MnuDocument:
 	# Read bytes directly so the test does not depend on the resource cache.
 	var bytes := FileAccess.get_file_as_bytes(FIXTURE)
 	assert_gt(bytes.size(), 0, "fixture bytes are non-empty")
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	var err := doc.load_from_bytes(bytes)
 	assert_eq(err, OK, "load_from_bytes succeeds")
 	return doc
@@ -29,7 +29,7 @@ func test_menu_size_derived_from_content() -> void:
 
 	var jo_bytes := FileAccess.get_file_as_bytes(JO_FIXTURE)
 	assert_gt(jo_bytes.size(), 0, "jo_main fixture bytes are non-empty")
-	var jo := NovaMnuDocument.new()
+	var jo := MnuDocument.new()
 	assert_eq(jo.load_from_bytes(jo_bytes), OK, "jo_main loads")
 	assert_eq(jo.get_menu_size(), Vector2i(801, 600),
 		"real JO menu derives its 800x600 canvas, not the 640x480 default")
@@ -54,7 +54,7 @@ func test_root_window_and_children() -> void:
 	var root_id := doc.get_screen_root_id(main_id)
 	assert_gt(root_id, 0, "root id valid")
 	assert_eq(doc.get_widget_name(root_id), "ROOT", "root window name")
-	assert_eq(doc.get_widget_type(root_id), NovaMnuDocument.TYPE_WINDOW, "root is a window")
+	assert_eq(doc.get_widget_type(root_id), MnuDocument.TYPE_WINDOW, "root is a window")
 	assert_eq(doc.get_parent_id(root_id), main_id, "root's parent is its screen")
 
 	var children := doc.get_child_ids(root_id)
@@ -66,11 +66,11 @@ func test_root_window_and_children() -> void:
 		names.append(doc.get_widget_name(cid))
 		types.append(doc.get_widget_type(cid))
 	assert_eq(names, ["Title", "StartBtn", "SoundChk", "Difficulty", "Version"], "child names in order")
-	assert_eq(types[0], NovaMnuDocument.TYPE_STATIC, "Title is static")
-	assert_eq(types[1], NovaMnuDocument.TYPE_BUTTON, "StartBtn is button")
-	assert_eq(types[2], NovaMnuDocument.TYPE_CHECKBOX, "SoundChk is checkbox")
-	assert_eq(types[3], NovaMnuDocument.TYPE_SPINLIST, "Difficulty is spinlist")
-	assert_eq(types[4], NovaMnuDocument.TYPE_LABEL, "Version is label")
+	assert_eq(types[0], MnuDocument.TYPE_STATIC, "Title is static")
+	assert_eq(types[1], MnuDocument.TYPE_BUTTON, "StartBtn is button")
+	assert_eq(types[2], MnuDocument.TYPE_CHECKBOX, "SoundChk is checkbox")
+	assert_eq(types[3], MnuDocument.TYPE_SPINLIST, "Difficulty is spinlist")
+	assert_eq(types[4], MnuDocument.TYPE_LABEL, "Version is label")
 
 
 func test_widget_rect_and_properties() -> void:
@@ -82,13 +82,13 @@ func test_widget_rect_and_properties() -> void:
 	assert_eq(rect, Rect2(270, 120, 100, 30), "StartBtn rect")
 	assert_eq(doc.get_widget_text(start_id), "MM_Start", "StartBtn string value")
 	assert_eq(doc.get_widget_string_type(start_id), "id", "StartBtn string is an id ref")
-	assert_eq(doc.get_widget_texture(start_id, NovaMnuDocument.TEX_DEFAULT), "btn_up.tga", "default appearance")
-	assert_eq(doc.get_widget_texture(start_id, NovaMnuDocument.TEX_MOUSEOVER), "btn_over.tga", "mouseover appearance")
+	assert_eq(doc.get_widget_texture(start_id, MnuDocument.TEX_DEFAULT), "btn_up.tga", "default appearance")
+	assert_eq(doc.get_widget_texture(start_id, MnuDocument.TEX_MOUSEOVER), "btn_over.tga", "mouseover appearance")
 	assert_eq(doc.get_widget_font(root_id), "%DEF_FONTNAME%", "font %VAR% preserved raw")
-	assert_eq(doc.get_widget_color(root_id, NovaMnuDocument.COLOR_DEFAULT_FG), "%DEF_TEXT_FG%", "color %VAR% preserved raw")
+	assert_eq(doc.get_widget_color(root_id, MnuDocument.COLOR_DEFAULT_FG), "%DEF_TEXT_FG%", "color %VAR% preserved raw")
 
 	var chk_id: int = doc.get_child_ids(root_id)[2]  # SoundChk
-	assert_true((doc.get_widget_flags(chk_id) & NovaMnuDocument.FLAG_CHECKED) != 0, "SoundChk is checked")
+	assert_true((doc.get_widget_flags(chk_id) & MnuDocument.FLAG_CHECKED) != 0, "SoundChk is checked")
 
 
 func test_serialize_roundtrip() -> void:
@@ -96,7 +96,7 @@ func test_serialize_roundtrip() -> void:
 	var bytes := doc.to_byte_array()
 	assert_gt(bytes.size(), 0, "serialize produces bytes")
 
-	var doc2 := NovaMnuDocument.new()
+	var doc2 := MnuDocument.new()
 	assert_eq(doc2.load_from_bytes(bytes), OK, "re-parse serialized bytes")
 	assert_eq(doc2.get_screen_count(), 2, "round-trip keeps 2 screens")
 
@@ -119,7 +119,7 @@ func test_mutation_emits_changed_and_persists() -> void:
 
 	# The id stays stable across a serialize round-trip is NOT guaranteed (ids are
 	# per-instance), but the mutation must survive serialize -> parse by content.
-	var doc2 := NovaMnuDocument.new()
+	var doc2 := MnuDocument.new()
 	doc2.load_from_bytes(doc.to_byte_array())
 	var root2 := doc2.get_screen_root_id(doc2.get_screen_ids()[0])
 	assert_eq(doc2.get_widget_name(doc2.get_child_ids(root2)[1]), "PlayBtn", "renamed widget persisted")
@@ -130,11 +130,11 @@ func test_add_and_delete_widget() -> void:
 	var root_id := doc.get_screen_root_id(doc.get_screen_ids()[0])
 	var before := doc.get_child_ids(root_id).size()
 
-	var new_id := doc.add_widget(root_id, NovaMnuDocument.TYPE_BUTTON, Rect2(0, 0, 50, 20))
+	var new_id := doc.add_widget(root_id, MnuDocument.TYPE_BUTTON, Rect2(0, 0, 50, 20))
 	assert_gt(new_id, 0, "add_widget returns a valid id")
 	assert_eq(doc.get_child_ids(root_id).size(), before + 1, "child added")
 	assert_eq(doc.get_parent_id(new_id), root_id, "new widget parented to root")
-	assert_eq(doc.get_widget_type(new_id), NovaMnuDocument.TYPE_BUTTON, "new widget is a button")
+	assert_eq(doc.get_widget_type(new_id), MnuDocument.TYPE_BUTTON, "new widget is a button")
 
 	doc.delete_widget(new_id)
 	assert_eq(doc.get_child_ids(root_id).size(), before, "child removed")
@@ -142,11 +142,11 @@ func test_add_and_delete_widget() -> void:
 
 
 func test_create_empty() -> void:
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	doc.create_empty()
 	assert_eq(doc.get_screen_count(), 1, "empty doc has one screen")
 	var root := doc.get_screen_root_id(doc.get_screen_ids()[0])
-	assert_eq(doc.get_widget_type(root), NovaMnuDocument.TYPE_WINDOW, "empty root is a window")
+	assert_eq(doc.get_widget_type(root), MnuDocument.TYPE_WINDOW, "empty root is a window")
 	assert_eq(doc.get_widget_name(root), "MAIN", "empty root uses the retail-safe MAIN name")
 	assert_eq(doc.get_window_rect(root), Rect2(0, 0, 800, 600), "empty root has all four bounds")
 	assert_eq(doc.get_menu_size(), Vector2i(800, 600), "new menus open on the retail canvas")
@@ -159,7 +159,7 @@ func test_create_empty() -> void:
 
 # Full pre-order id walk (screen id, then its root-window subtree depth-first) —
 # the order rebuild_ids/collect_ids use, so it is stable for a given tree shape.
-func _all_ids(doc: NovaMnuDocument) -> Array:
+func _all_ids(doc: MnuDocument) -> Array:
 	var out: Array = []
 	for sid in doc.get_screen_ids():
 		out.append(sid)
@@ -167,7 +167,7 @@ func _all_ids(doc: NovaMnuDocument) -> Array:
 	return out
 
 
-func _walk_ids(doc: NovaMnuDocument, id: int, out: Array) -> void:
+func _walk_ids(doc: MnuDocument, id: int, out: Array) -> void:
 	out.append(id)
 	for c in doc.get_child_ids(id):
 		_walk_ids(doc, c, out)
@@ -180,7 +180,7 @@ func test_capture_apply_preserves_ids() -> void:
 	var state := doc.capture_state()
 
 	# Mutate the shape (advance next_id + change the tree) then restore.
-	doc.add_widget(root, NovaMnuDocument.TYPE_BUTTON, Rect2(0, 0, 10, 10))
+	doc.add_widget(root, MnuDocument.TYPE_BUTTON, Rect2(0, 0, 10, 10))
 	doc.delete_widget(doc.get_child_ids(root)[0])  # delete Title
 	doc.apply_state(state)
 
@@ -194,10 +194,10 @@ func test_apply_state_restores_next_id_no_collision() -> void:
 	var doc := _load_doc()
 	var root := doc.get_screen_root_id(doc.get_screen_ids()[0])
 	var state := doc.capture_state()
-	var first_add := doc.add_widget(root, NovaMnuDocument.TYPE_BUTTON, Rect2(0, 0, 10, 10))
+	var first_add := doc.add_widget(root, MnuDocument.TYPE_BUTTON, Rect2(0, 0, 10, 10))
 
 	doc.apply_state(state)
-	var second_add := doc.add_widget(root, NovaMnuDocument.TYPE_BUTTON, Rect2(0, 0, 10, 10))
+	var second_add := doc.add_widget(root, MnuDocument.TYPE_BUTTON, Rect2(0, 0, 10, 10))
 	assert_eq(second_add, first_add, "an add after restore mints the same next id (deterministic, no collision)")
 	# The restored ids do not contain the minted id before the second add.
 	assert_eq(doc.get_child_ids(root).size(), 6, "exactly one widget added after restore")
@@ -228,7 +228,7 @@ func test_reparent_refuses_screen_root_and_cycle() -> void:
 	assert_false(doc.reparent_widget(root, children[0], 0), "cannot reparent a root window")
 	assert_false(doc.reparent_widget(start_id, start_id, 0), "cannot reparent into self")
 
-	var grand := doc.add_widget(start_id, NovaMnuDocument.TYPE_WINDOW, Rect2(0, 0, 10, 10))
+	var grand := doc.add_widget(start_id, MnuDocument.TYPE_WINDOW, Rect2(0, 0, 10, 10))
 	assert_false(doc.reparent_widget(start_id, grand, 0), "cannot reparent into own descendant (cycle)")
 	assert_eq(doc.get_parent_id(start_id), root, "refused cycle leaves the parent unchanged")
 
@@ -262,7 +262,7 @@ func test_reparent_noop_same_slot_returns_false() -> void:
 
 # M9.7: datasource (marquee) + orientation (scroll/marquee) scalar accessors
 # round-trip through the document and survive a serialize cycle.
-func _walk_for_name(doc: NovaMnuDocument, id: int, wname: String) -> int:
+func _walk_for_name(doc: MnuDocument, id: int, wname: String) -> int:
 	if doc.get_widget_name(id) == wname:
 		return id
 	for cid in doc.get_child_ids(id):
@@ -272,7 +272,7 @@ func _walk_for_name(doc: NovaMnuDocument, id: int, wname: String) -> int:
 	return -1
 
 
-func _find_widget(doc: NovaMnuDocument, wname: String) -> int:
+func _find_widget(doc: MnuDocument, wname: String) -> int:
 	for sid in doc.get_screen_ids():
 		var f := _walk_for_name(doc, doc.get_screen_root_id(sid), wname)
 		if f != -1:
@@ -281,19 +281,19 @@ func _find_widget(doc: NovaMnuDocument, wname: String) -> int:
 
 
 func test_datasource_orientation_round_trip() -> void:
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(FileAccess.get_file_as_bytes(
 		"res://../fixtures/mnu/all_widgets.mnu")), OK, "all_widgets loads")
 	var marquee := _find_widget(doc, "Credits")
 	var scroll := _find_widget(doc, "VolumeBar")
-	assert_eq(doc.get_widget_type(marquee), NovaMnuDocument.TYPE_MARQUEE, "Credits is a marquee")
+	assert_eq(doc.get_widget_type(marquee), MnuDocument.TYPE_MARQUEE, "Credits is a marquee")
 	assert_eq(doc.get_widget_datasource(marquee), "credits.txt", "parsed DATASOURCE")
 	assert_eq(doc.get_widget_orientation(marquee), "VERTICAL", "parsed marquee ORIENTATION")
 	assert_eq(doc.get_widget_orientation(scroll), "VERTICAL", "parsed scroll ORIENTATION")
 
 	doc.set_widget_datasource(marquee, "newcredits.txt")
 	doc.set_widget_orientation(scroll, "HORIZONTAL")
-	var doc2 := NovaMnuDocument.new()
+	var doc2 := MnuDocument.new()
 	doc2.load_from_bytes(doc.to_byte_array())
 	assert_eq(doc2.get_widget_datasource(_find_widget(doc2, "Credits")), "newcredits.txt",
 		"datasource survives serialize")
@@ -427,8 +427,8 @@ func test_mns_remove_rejects_control_flow_owning_entry_without_dirtying() -> voi
 
 # --- M10.1: item-row authoring (list / multi / spinlist / combo) ----------------
 
-func _load_all_widgets() -> NovaMnuDocument:
-	var doc := NovaMnuDocument.new()
+func _load_all_widgets() -> MnuDocument:
+	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(FileAccess.get_file_as_bytes(
 		"res://../fixtures/mnu/all_widgets.mnu")), OK, "all_widgets loads")
 	return doc
@@ -473,7 +473,7 @@ func test_item_add_move_remove_round_trip() -> void:
 
 	# Serialize -> reload: the row-bearing <ITEMS> must survive (the List serializer
 	# previously split rows and selection into two <ITEMS> and dropped the rows).
-	var doc2 := NovaMnuDocument.new()
+	var doc2 := MnuDocument.new()
 	assert_eq(doc2.load_from_bytes(doc.to_byte_array()), OK, "re-parse serialized bytes")
 	var list2 := _find_widget(doc2, "MissionList")
 	assert_eq(doc2.get_item_count(list2), 3, "rows survive the round-trip")
@@ -489,14 +489,14 @@ func test_item_add_move_remove_round_trip() -> void:
 func test_item_combo_uses_list_box_and_round_trips() -> void:
 	var doc := _load_all_widgets()
 	var combo := _find_widget(doc, "ServerList")
-	assert_eq(doc.get_widget_type(combo), NovaMnuDocument.TYPE_COMBO, "ServerList is a combo")
+	assert_eq(doc.get_widget_type(combo), MnuDocument.TYPE_COMBO, "ServerList is a combo")
 	assert_eq(doc.get_item_count(combo), 3, "combo reads its LIST_BOX rows")
 	assert_eq(doc.get_item(combo, 2)["text"], "LAN Server", "third LIST_BOX row")
 
 	doc.add_item(combo, {"value": "3", "text": "Co-op Server"})
 	assert_eq(doc.get_item_count(combo), 4, "row added to the combo")
 
-	var doc2 := NovaMnuDocument.new()
+	var doc2 := MnuDocument.new()
 	assert_eq(doc2.load_from_bytes(doc.to_byte_array()), OK, "combo round-trip re-parses")
 	var combo2 := _find_widget(doc2, "ServerList")
 	assert_eq(doc2.get_item_count(combo2), 4, "combo LIST_BOX rows survive the round-trip")
@@ -522,14 +522,14 @@ func test_item_combo_top_level_items_with_empty_list_box() -> void:
   </WINDOW>
 </WINDOW></SCREEN>
 """
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(src.to_utf8_buffer()), OK, "inline combo parses")
 	var combo := _find_widget(doc, "ModeBox")
 	assert_eq(doc.get_item_count(combo), 2, "reads the top-level ITEMS, not the empty LIST_BOX")
 	assert_eq(doc.get_item(combo, 1)["text"], "Team", "second top-level row")
 
 	doc.add_item(combo, {"value": "2", "text": "Co-op"})
-	var doc2 := NovaMnuDocument.new()
+	var doc2 := MnuDocument.new()
 	assert_eq(doc2.load_from_bytes(doc.to_byte_array()), OK, "edited combo re-parses")
 	var combo2 := _find_widget(doc2, "ModeBox")
 	assert_eq(doc2.get_item_count(combo2), 3, "the added row survives the round-trip")
@@ -552,7 +552,7 @@ func test_widget_sounds_read_edit_roundtrip() -> void:
 	assert_eq(doc.get_widget_sounds(start).size(), 2, "click sound added in-place")
 
 	# Both survive a serialize round-trip.
-	var doc2 := NovaMnuDocument.new()
+	var doc2 := MnuDocument.new()
 	assert_eq(doc2.load_from_bytes(doc.to_byte_array()), OK, "edited menu re-parses")
 	var start2 := _find_widget(doc2, "StartBtn")
 	var sounds2 := doc2.get_widget_sounds(start2)
@@ -577,7 +577,7 @@ func test_widget_actions_read_edit_roundtrip() -> void:
 	doc.set_widget_actions(start, actions)
 	assert_eq(doc.get_widget_actions(start).size(), 2, "second action added in-place")
 
-	var doc2 := NovaMnuDocument.new()
+	var doc2 := MnuDocument.new()
 	assert_eq(doc2.load_from_bytes(doc.to_byte_array()), OK, "edited menu re-parses")
 	var start2 := _find_widget(doc2, "StartBtn")
 	var actions2: Array = doc2.get_widget_actions(start2)
@@ -628,7 +628,7 @@ func test_authoring_state_apply_preserves_presence_and_nested_data() -> void:
   </WINDOW>
 </WINDOW></SCREEN>
 """
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(src.to_utf8_buffer()), OK)
 	var screen := int(doc.get_screen_ids()[0])
 	assert_true(doc.get_screen_has_music_var(screen), "explicit MUSICVAR=0 presence is exposed")
@@ -675,26 +675,26 @@ func test_authoring_state_apply_preserves_presence_and_nested_data() -> void:
 
 
 func test_scalar_explicit_zero_presence_and_type_token_are_immediate() -> void:
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	doc.create_empty()
 	var screen := int(doc.get_screen_ids()[0])
 	var root := int(doc.get_screen_root_id(screen))
-	var radio := int(doc.add_widget(root, NovaMnuDocument.TYPE_RADIO, Rect2(0, 0, 20, 20)))
+	var radio := int(doc.add_widget(root, MnuDocument.TYPE_RADIO, Rect2(0, 0, 20, 20)))
 	doc.set_widget_group(radio, 0)
 	assert_true(bool(doc.get_widget_authoring_state(radio)["behavior"]["has_group"]))
 
-	var table := int(doc.add_widget(root, NovaMnuDocument.TYPE_GLB_TABLE, Rect2(0, 30, 100, 80)))
+	var table := int(doc.add_widget(root, MnuDocument.TYPE_GLB_TABLE, Rect2(0, 30, 100, 80)))
 	doc.set_table_column_count(table, 0)
 	doc.set_table_column_spacing(table, 0)
 	var table_state: Dictionary = doc.get_widget_authoring_state(table)["table"]
 	assert_true(bool(table_state["has_count"]))
 	assert_true(bool(table_state["has_spacing"]))
 
-	var button := int(doc.add_widget(root, NovaMnuDocument.TYPE_BUTTON, Rect2(0, 120, 40, 20)))
+	var button := int(doc.add_widget(root, MnuDocument.TYPE_BUTTON, Rect2(0, 120, 40, 20)))
 	assert_true(doc.apply_widget_patch(button, {"type_token": "RADIO"}))
-	assert_eq(doc.get_widget_type(button), NovaMnuDocument.TYPE_RADIO,
+	assert_eq(doc.get_widget_type(button), MnuDocument.TYPE_RADIO,
 		"raw authored type updates the live enum without save/reload")
-	var reloaded := NovaMnuDocument.new()
+	var reloaded := MnuDocument.new()
 	assert_eq(reloaded.load_from_bytes(doc.to_byte_array()), OK)
 	assert_true(String(reloaded.to_byte_array().get_string_from_utf8()).contains('type="RADIO"'))
 
@@ -716,13 +716,13 @@ func test_document_bridge_preserves_bom_and_utf16_source_encoding() -> void:
 	var utf8_bom := PackedByteArray([0xEF, 0xBB, 0xBF])
 	utf8_bom.append_array(src.to_utf8_buffer())
 	for encoded in [utf8_bom, _ascii_utf16(src, false), _ascii_utf16(src, true)]:
-		var doc := NovaMnuDocument.new()
+		var doc := MnuDocument.new()
 		assert_eq(doc.load_from_bytes(encoded), OK)
 		var saved := doc.to_byte_array()
 		assert_gt(saved.size(), 3)
 		assert_eq(saved[0], encoded[0], "first encoding marker byte survives")
 		assert_eq(saved[1], encoded[1], "second encoding marker byte survives")
-		var reparsed := NovaMnuDocument.new()
+		var reparsed := MnuDocument.new()
 		assert_eq(reparsed.load_from_bytes(saved), OK, "preserved encoding remains parseable")
 
 
@@ -737,7 +737,7 @@ func test_combo_closed_and_dropdown_items_edit_independently() -> void:
   </WINDOW>
 </WINDOW></SCREEN>
 """
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(src.to_utf8_buffer()), OK)
 	var combo := _find_widget(doc, "Mode")
 	assert_true(doc.apply_widget_patch(combo, {
@@ -758,7 +758,7 @@ func test_combo_closed_and_dropdown_items_edit_independently() -> void:
 	assert_eq(String(doc.get_item(combo, 0)["text"]), "Popup two",
 		"generic item convenience targets the authored dropdown collection")
 
-	var reloaded := NovaMnuDocument.new()
+	var reloaded := MnuDocument.new()
 	assert_eq(reloaded.load_from_bytes(doc.to_byte_array()), OK)
 	var state2: Dictionary = reloaded.get_widget_authoring_state(
 		_find_widget(reloaded, "Mode"))
@@ -790,7 +790,7 @@ func test_presence_false_retains_latent_values_but_omits_authored_fields() -> vo
   </WINDOW>
 </WINDOW></SCREEN>
 """
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(src.to_utf8_buffer()), OK)
 	var screen := int(doc.get_screen_ids()[0])
 	var deep := _find_widget(doc, "Deep")
@@ -863,7 +863,7 @@ func test_table_color_aliases_update_only_last_matching_ordered_row() -> void:
   </ITEMS></WINDOW>
 </WINDOW></SCREEN>
 """
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(src.to_utf8_buffer()), OK)
 	var grid := _find_widget(doc, "Grid")
 	assert_true(doc.apply_widget_patch(grid, {"table": {
@@ -877,7 +877,7 @@ func test_table_color_aliases_update_only_last_matching_ordered_row() -> void:
 	assert_eq(String(rows[3]["value"]), "BBBBBB", "last selected row is authoritative")
 	assert_true(bool(state["items"]["present"]), "scalar aliases author ITEMS")
 
-	var reloaded := NovaMnuDocument.new()
+	var reloaded := MnuDocument.new()
 	assert_eq(reloaded.load_from_bytes(doc.to_byte_array()), OK)
 	var grid2 := _find_widget(reloaded, "Grid")
 	var state2: Dictionary = reloaded.get_widget_authoring_state(grid2)
@@ -896,10 +896,10 @@ func test_table_color_aliases_update_only_last_matching_ordered_row() -> void:
 
 
 func test_apply_widget_patch_noop_and_unknown_only_do_not_touch() -> void:
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	doc.create_empty()
 	var root := int(doc.get_screen_root_id(doc.get_screen_ids()[0]))
-	var button := int(doc.add_widget(root, NovaMnuDocument.TYPE_BUTTON,
+	var button := int(doc.add_widget(root, MnuDocument.TYPE_BUTTON,
 		Rect2(0, 0, 40, 20)))
 	var state: Dictionary = doc.get_widget_authoring_state(button)
 	assert_false(doc.apply_widget_patch(button, {"name": state["name"]}),
@@ -921,7 +921,7 @@ func test_items_selection_alias_reconciles_duplicates_deletion_and_clear() -> vo
   </ITEMS></LIST_BOX></WINDOW>
 </WINDOW></SCREEN>
 """
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(src.to_utf8_buffer()), OK)
 	var list := _find_widget(doc, "Rows")
 	var list_items: Dictionary = doc.get_widget_authoring_state(list)["items"]
@@ -968,7 +968,7 @@ func test_combo_generic_items_ignore_latent_list_box_parent() -> void:
   </WINDOW>
 </WINDOW></SCREEN>
 """
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(src.to_utf8_buffer()), OK)
 	var combo := _find_widget(doc, "Mode")
 	assert_true(doc.apply_widget_patch(combo, {"list_box": {"present": false}}))
@@ -982,10 +982,10 @@ func test_combo_generic_items_ignore_latent_list_box_parent() -> void:
 
 
 func test_direct_authoring_patch_rejects_malformed_shapes_atomically() -> void:
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	doc.create_empty()
 	var root := int(doc.get_screen_root_id(doc.get_screen_ids()[0]))
-	var combo := int(doc.add_widget(root, NovaMnuDocument.TYPE_COMBO,
+	var combo := int(doc.add_widget(root, MnuDocument.TYPE_COMBO,
 		Rect2(0, 0, 100, 24)))
 	var before := doc.to_byte_array()
 	watch_signals(doc)

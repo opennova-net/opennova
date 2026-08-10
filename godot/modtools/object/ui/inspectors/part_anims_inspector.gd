@@ -5,22 +5,14 @@ extends ObjectListDetailInspector
 ## channel cards for the selected entry.
 
 # Part-animation drivers reuse the shared generator-style enum, but PANM is a
-# consumer-specific subset: retail's sampler reads a register only for code 113.
-# Codes 114..117 are ordinary wave lookups and are not present in the retail PANM
-# corpus, so the editor does not mislabel or author them as register operations.
-const MOTION_MODE_IDS := [0, 16, 17, 24, 32, 33, 50, 52, 53, 113]
-const MOTION_MODE_KEYS := {
-	0: "none",
-	16: "slide",
-	17: "slide_inverse",
-	24: "set",
-	32: "rotate_cw",
-	33: "rotate_ccw",
-	50: "sine_wave",
-	52: "saw_wave",
-	53: "inverse_saw_wave",
-	113: "control_register",
-}
+# consumer-specific subset: retail's sampler reads a register only for the
+# control_register mode; higher codes are ordinary wave lookups and are not
+# present in the retail PANM corpus, so the editor does not mislabel or author
+# them as register operations. The mode catalog is the engine's
+# (ObjectData.get_panm_mode_options(); the style-byte table lives at the
+# engine home, engine/formats/threedi threedi_panm.h).
+static var MOTION_MODE_IDS: Array = _engine_mode_ids()
+static var MOTION_MODE_KEYS: Dictionary = _engine_mode_keys()
 const PART_ANIM_SCALE_STYLE_OPTIONS := [
 	{"id": 1, "label": "Uniform"},
 	{"id": 2, "label": "Per-axis"},
@@ -30,10 +22,35 @@ const PART_ANIM_TRANSLATION_AXIS_OPTIONS := [
 	{"id": 2, "label": "Y"},
 	{"id": 3, "label": "Z"},
 ]
-const PANM_TRANSLATION_VALUE_MIN := -128.0
-const PANM_TRANSLATION_VALUE_MAX := 127.99609375
-# Motion-mode IDs that bind a control register (see _motion_mode_options()).
-const CONTROL_REGISTER_MODE_ID := 113
+# Authorable translation span: the int16 track range through the engine's 8.8
+# value unit (ObjectData.panm_track_limits(); the units live at the engine home).
+static var PANM_TRANSLATION_VALUE_MIN: float = float(ObjectData.panm_track_limits()["value_min"])
+static var PANM_TRANSLATION_VALUE_MAX: float = float(ObjectData.panm_track_limits()["value_max"])
+# The one motion mode that binds a control register, from the engine catalog.
+static var CONTROL_REGISTER_MODE_ID: int = _engine_control_register_mode_id()
+
+
+static func _engine_mode_ids() -> Array:
+	var ids: Array = []
+	for option in ObjectData.get_panm_mode_options():
+		ids.append(int((option as Dictionary).get("control", 0)))
+	return ids
+
+
+static func _engine_mode_keys() -> Dictionary:
+	var keys := {}
+	for option in ObjectData.get_panm_mode_options():
+		var entry := option as Dictionary
+		keys[int(entry.get("control", 0))] = String(entry.get("mode", "none"))
+	return keys
+
+
+static func _engine_control_register_mode_id() -> int:
+	for option in ObjectData.get_panm_mode_options():
+		var entry := option as Dictionary
+		if bool(entry.get("uses_control_register", false)):
+			return int(entry.get("control", 0))
+	return 0
 
 var _part_anim_lod_index := 0
 var _part_anim_selected_index := 0
@@ -90,7 +107,7 @@ func _axis_id_for_name(axis_name: String) -> int:
 
 
 func _part_options_for_lod(lod_index: int) -> Array:
-	var data: NovaObjectData = object_editor.object_data if object_editor else null
+	var data: ObjectData = object_editor.object_data if object_editor else null
 	var options := []
 	var lod_info: Dictionary = data.get_render_lod_info(lod_index) if data != null else {}
 	var part_count := maxi(1, int(lod_info.get("part_count", lod_info.get("render_object_count", 1))))
@@ -100,14 +117,14 @@ func _part_options_for_lod(lod_index: int) -> Array:
 
 
 func _part_anim_entries() -> Array:
-	var data: NovaObjectData = object_editor.object_data if object_editor else null
+	var data: ObjectData = object_editor.object_data if object_editor else null
 	if data == null:
 		return []
 	return data.get_part_anim_editor_entries(_part_anim_lod_index)
 
 
 func _refresh_part_anim_list(preferred_index: int = -1, rebuild_detail: bool = true) -> void:
-	var data: NovaObjectData = object_editor.object_data if object_editor else null
+	var data: ObjectData = object_editor.object_data if object_editor else null
 	if data == null:
 		return
 	var summary: Dictionary = data.get_summary()
@@ -145,7 +162,7 @@ func _refresh_part_anim_list(preferred_index: int = -1, rebuild_detail: bool = t
 func _build_part_anims_inspector(mount: Control) -> void:
 	var box := _make_inspector_box(mount)
 	box.name = "PartAnimListPane"
-	var data: NovaObjectData = object_editor.object_data if object_editor else null
+	var data: ObjectData = object_editor.object_data if object_editor else null
 	var summary: Dictionary = data.get_summary() if data != null else {}
 	var lod_count := maxi(1, int(summary.get("lod_count", 1)))
 	_part_anim_lod_index = clampi(_part_anim_lod_index, 0, lod_count - 1)
@@ -229,7 +246,7 @@ func _build_part_anims_inspector(mount: Control) -> void:
 
 
 func _build_part_anim_detail_dock(box: VBoxContainer) -> void:
-	var data: NovaObjectData = object_editor.object_data if object_editor else null
+	var data: ObjectData = object_editor.object_data if object_editor else null
 	_add_section_heading(box, "Part animation")
 
 	var entries := _part_anim_entries()

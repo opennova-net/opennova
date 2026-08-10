@@ -6,8 +6,8 @@ byte) to device render state, witnessed in retail `Jointops.exe`
 `engine/formats/oed/include/oed/{types.h,material_descriptor.h}` (the tag registry),
 `engine/runtime/renderer` (`material_classify`, `material_eval`, `uv_anim`,
 `object_shader_template`),
-`godot/adapter/object/{nova_object_shader_cache,nova_object_data_materials,nova_object_data_runtime_eval}.cpp`,
-`godot/adapter/object/nova_object_model.gd`. Landed by maturity REN-2
+`godot/src/object/{nova_object_shader_cache,nova_object_data_materials,nova_object_data_runtime_eval}.cpp`,
+`godot/src/object/nova_object_model.gd`. Landed by maturity REN-2
 ([maturity-program.md](../maturity-program.md); standing rules
 [ADR 0023](../adr/0023-render-visual-parity.md)). The T1 parity instrument
 (`tests/renderer/state_vectors_test.cpp` golden) pins every classification in
@@ -25,7 +25,7 @@ this record.
 | Per-effect capability/sort flag words (file effects) | MATCHING (after D-RMAT-4 fixes) | the probe REPLICATED over the shipped localres text (REN-4): booleans are unions over ALL techniques `[orig: technique loop @ 0x5ae690]`; 14/19 tags matched the OED dump, 5 drift rows corrected on the renderer descriptor table (catalog below); `renderer_material_classify` pins the corrected words |
 | Composed lighting math | MATCHING (after D-RMAT-5 fix, REN-5) | the composer emits the witnessed FF model — `tex × min(mix(HemiGround, HemiSky, N.y·0.5+0.5) + DirLightColor·max(0,N·L), 1) × 2`, SELFLUM = `tex × min(ColorSrcGlobalGain,1) × 2` — on the witnessed uniform surface (slots pinned: 225 CameraPos, 226 DirLightVector, 227 DirLightColor, 228 HemiGroundColor, 229 HemiSkyColor, 230 AmbientColor `[orig: handle stores @ 0x5af3fe..0x5af485]`); values engine-fed from the env blocks ([render-lighting-re.md](render-lighting-re.md)); `renderer_state_vectors` section 5 + the 630-hash cited re-dump pin it |
 | Technique-class pass system (6 classes) | witnessed / reimpl-deferred | class selection + slots + fallbacks witnessed; NORMAL-class state ported; the pass EXECUTION model (pass rules, per-light multiplication, MATCHTERRAIN texture bind) witnessed at REN-4 (§Pass execution); GLOW content witnessed (LUM copy + the glass specular-cube technique) with classification landed — the reimpl bloom wiring rides D-RORD-5's residual (D-RMAT-6) |
-| UV animation (MatTexCoord1) | MATCHING deterministic math, live full-matrix bridge; stochastic lifetime partial | `renderer::uv_anim` structurally ports `[orig: compute_uv_transform_matrix @ 0x5b1990; wave_lookup @ 0x5de6b0]`; `NovaObjectData` now carries the complete row-vector 2×3 result into two shader `vec3` uniforms, preserving controlled set and shear as well as scroll/scale/rotation. Table/dispatch math is pinned by `renderer_state_vectors` section 4 and `renderer_material_eval`; retail's process-wide CRT RNG lifetime and cross-model submit/flush order remain D-3DI-2 |
+| UV animation (MatTexCoord1) | MATCHING deterministic math, live full-matrix bridge; stochastic lifetime partial | `renderer::uv_anim` structurally ports `[orig: compute_uv_transform_matrix @ 0x5b1990; wave_lookup @ 0x5de6b0]`; `ObjectData` now carries the complete row-vector 2×3 result into two shader `vec3` uniforms, preserving controlled set and shear as well as scroll/scale/rotation. Table/dispatch math is pinned by `renderer_state_vectors` section 4 and `renderer_material_eval`; retail's process-wide CRT RNG lifetime and cross-model submit/flush order remain D-3DI-2 |
 | Controlled flipbook | MATCHING for the reachable retail branch | `[orig: apply_shader_parameters @ 0x58db80]` reads a signed CTRL value and keeps 32-bit `IMUL`'s low product before `SAR 16`; the static-zero adjacent state dword selects the fractional-frame interpretation; `renderer_material_eval` pins exact `0x10000`, negative, and wrap cases |
 | RGB/alpha generators and point-light color | MATCHING deterministic/controlled math, live; stochastic lifetime partial | consumer-specific branches are preserved: RGB/light 113/114 `[orig: RgbGen_EvaluateColor @ 0x5b23d0]`, alpha 113 `[orig: AlphaGen_EvaluateValue @ 0x5b2320]`, and waveform fallback otherwise. The signed/wrapping evaluator and live point-light CTRL feed are pinned by `renderer_material_eval`; noise samples retain D-3DI-2's process-wide RNG/order gap |
 | Tracer soft edge (VS_TRACER look) | MATCHING (after D-RMAT-2 fix) | `OSCAP_VIEW_FADE` composes `color x \|dot(eye, normal)\|^2` `[orig: vsTracer in Tracer.fx]`; `renderer_material_classify` + the vectors golden pin it |
@@ -287,7 +287,7 @@ bands per type {1→0, 2→256, 3→768, 4→1024, 5→1280, 6→rand, 7→1536 
 8→1792, 9→2048, 0xA→2304 lerped, 0xF→2560}. Ported as
 `renderer::uv_anim` (vectors section 4). The live bridge feeds the parsed U/V
 channel blocks into this port and carries its complete row-vector matrix
-through `NovaObjectData` and the object shader:
+through `ObjectData` and the object shader:
 `u' = u*m00 + v*m10 + m20`,
 `v' = u*m01 + v*m11 + m21`. Two shader `vec3` rows replace the former
 offset/scale/rotation decomposition, so controlled set (zero diagonal) and
@@ -323,7 +323,7 @@ Point-light color shares the RGB generator contract:
 `[orig: Light_GetPointLightParams @ 0x5a9180]` obtains its color through
 `RgbGen_EvaluateColor`. The runtime light bridge therefore resolves a control
 value only for RGB styles 113/114; styles 115–117 retain waveform behavior.
-`NovaObjectData::evaluate_lights` now supplies that signed register value, so
+`ObjectData::evaluate_lights` now supplies that signed register value, so
 point lights share the same endpoint, negative-extrapolation, and wrapping
 behavior as material RGB.
 

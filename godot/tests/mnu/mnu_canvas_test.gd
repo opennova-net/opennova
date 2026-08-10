@@ -10,13 +10,13 @@ const MnuCanvasScript = preload("res://modtools/mnu/mnu_canvas.gd")
 const FIXTURE := "res://../fixtures/mnu/widgets.mnu"
 
 
-func _load_doc() -> NovaMnuDocument:
-	var doc := NovaMnuDocument.new()
+func _load_doc() -> MnuDocument:
+	var doc := MnuDocument.new()
 	doc.load_from_bytes(FileAccess.get_file_as_bytes(FIXTURE))
 	return doc
 
 
-func _first_root_child(doc: NovaMnuDocument, index: int) -> int:
+func _first_root_child(doc: MnuDocument, index: int) -> int:
 	var root := doc.get_screen_root_id(doc.get_screen_ids()[0])
 	return doc.get_child_ids(root)[index]
 
@@ -47,7 +47,7 @@ func _key(code: int, shift := false) -> InputEventKey:
 func test_pick_widget_at_returns_widget_under_point() -> void:
 	var pair = await _canvas_with_fixture()
 	var canvas = pair[0]
-	var doc: NovaMnuDocument = pair[1]
+	var doc: MnuDocument = pair[1]
 	var start_id := _first_root_child(doc, 1)  # StartBtn (270,120,100,30)
 	assert_eq(canvas.pick_widget_at(Vector2(320, 135)), start_id, "Picks the widget under the point.")
 
@@ -55,7 +55,7 @@ func test_pick_widget_at_returns_widget_under_point() -> void:
 func test_pick_prefers_child_over_root() -> void:
 	var pair = await _canvas_with_fixture()
 	var canvas = pair[0]
-	var doc: NovaMnuDocument = pair[1]
+	var doc: MnuDocument = pair[1]
 	var root := doc.get_screen_root_id(doc.get_screen_ids()[0])
 	var start_id := _first_root_child(doc, 1)
 	assert_eq(canvas.pick_widget_at(Vector2(320, 135)), start_id, "A child is picked over its containing root window.")
@@ -65,7 +65,7 @@ func test_pick_prefers_child_over_root() -> void:
 func test_pick_empty_board_returns_screen() -> void:
 	var pair = await _canvas_with_fixture()
 	var canvas = pair[0]
-	var doc: NovaMnuDocument = pair[1]
+	var doc: MnuDocument = pair[1]
 	var screen := doc.get_screen_ids()[0]
 	assert_eq(canvas.pick_widget_at(Vector2(-50, -50)), screen, "A point outside every widget returns the screen id.")
 
@@ -73,10 +73,10 @@ func test_pick_empty_board_returns_screen() -> void:
 func test_abs_rect_of_nested_widget() -> void:
 	var pair = await _canvas_with_fixture()
 	var canvas = pair[0]
-	var doc: NovaMnuDocument = pair[1]
+	var doc: MnuDocument = pair[1]
 	var root := doc.get_screen_root_id(doc.get_screen_ids()[0])
-	var w1 := doc.add_widget(root, NovaMnuDocument.TYPE_WINDOW, Rect2(100, 100, 200, 200))
-	var w2 := doc.add_widget(w1, NovaMnuDocument.TYPE_STATIC, Rect2(10, 10, 50, 30))
+	var w1 := doc.add_widget(root, MnuDocument.TYPE_WINDOW, Rect2(100, 100, 200, 200))
+	var w2 := doc.add_widget(w1, MnuDocument.TYPE_STATIC, Rect2(10, 10, 50, 30))
 	assert_eq(doc.get_window_rect(w2), Rect2(10, 10, 50, 30), "The local rect is parent-relative.")
 	assert_eq(canvas._abs_rect_of(w2), Rect2(110, 110, 50, 30), "The absolute rect sums ancestor offsets (deep nesting).")
 
@@ -84,7 +84,7 @@ func test_abs_rect_of_nested_widget() -> void:
 func test_pick_stack_orders_top_to_bottom() -> void:
 	var pair = await _canvas_with_fixture()
 	var canvas = pair[0]
-	var doc: NovaMnuDocument = pair[1]
+	var doc: MnuDocument = pair[1]
 	var root := doc.get_screen_root_id(doc.get_screen_ids()[0])
 	var start_id := _first_root_child(doc, 1)  # StartBtn, over the root window
 	var stack = canvas.pick_stack_at(Vector2(320, 135))
@@ -96,7 +96,7 @@ func test_pick_stack_orders_top_to_bottom() -> void:
 func test_repeated_click_cycles_overlapping_stack() -> void:
 	var pair = await _canvas_with_fixture()
 	var canvas = pair[0]
-	var doc: NovaMnuDocument = pair[1]
+	var doc: MnuDocument = pair[1]
 	var root := doc.get_screen_root_id(doc.get_screen_ids()[0])
 	var start_id := _first_root_child(doc, 1)
 	# Successive clicks at ~the same point step down the z-stack, then wrap.
@@ -110,8 +110,8 @@ func test_repeated_click_cycles_overlapping_stack() -> void:
 func test_walk_ids_collects_subtree_excluding_screens() -> void:
 	var doc := _load_doc()
 	var root := doc.get_screen_root_id(doc.get_screen_ids()[0])
-	var w1 := doc.add_widget(root, NovaMnuDocument.TYPE_WINDOW, Rect2(0, 0, 100, 100))
-	doc.add_widget(w1, NovaMnuDocument.TYPE_STATIC, Rect2(0, 0, 10, 10))
+	var w1 := doc.add_widget(root, MnuDocument.TYPE_WINDOW, Rect2(0, 0, 100, 100))
+	doc.add_widget(w1, MnuDocument.TYPE_STATIC, Rect2(0, 0, 10, 10))
 	var ids := PackedInt32Array()
 	MnuCanvasScript._walk_ids(doc, root, ids)
 	assert_true(ids.has(root), "Includes the root window.")
@@ -162,7 +162,7 @@ func test_reset_view_restores_identity_fit() -> void:
 func test_drag_moves_widget_and_emits_one_commit() -> void:
 	var pair = await _canvas_with_fixture()
 	var canvas = pair[0]
-	var doc: NovaMnuDocument = pair[1]
+	var doc: MnuDocument = pair[1]
 	var start_id := _first_root_child(doc, 1)  # (270,120,100,30)
 	watch_signals(canvas)
 	canvas._on_press(Vector2(320, 135))       # select StartBtn + arm a move
@@ -177,7 +177,7 @@ func test_drag_moves_widget_and_emits_one_commit() -> void:
 func test_resize_from_corner_handle() -> void:
 	var pair = await _canvas_with_fixture()
 	var canvas = pair[0]
-	var doc: NovaMnuDocument = pair[1]
+	var doc: MnuDocument = pair[1]
 	var start_id := _first_root_child(doc, 1)  # (270,120,100,30); BR handle at (370,150)
 	canvas.set_selected(start_id)
 	watch_signals(canvas)
@@ -191,7 +191,7 @@ func test_resize_from_corner_handle() -> void:
 func test_resize_clamps_to_min_size() -> void:
 	var pair = await _canvas_with_fixture()
 	var canvas = pair[0]
-	var doc: NovaMnuDocument = pair[1]
+	var doc: MnuDocument = pair[1]
 	var start_id := _first_root_child(doc, 1)  # (270,120,100,30)
 	canvas.set_selected(start_id)
 	watch_signals(canvas)
@@ -205,7 +205,7 @@ func test_resize_clamps_to_min_size() -> void:
 func test_snap_rounds_to_grid() -> void:
 	var pair = await _canvas_with_fixture()
 	var canvas = pair[0]
-	var doc: NovaMnuDocument = pair[1]
+	var doc: MnuDocument = pair[1]
 	watch_signals(canvas)
 	canvas._on_press(Vector2(320, 135))        # select StartBtn (x=270)
 	canvas._on_drag(Vector2(331, 135), false)  # +11 x, snap ON
@@ -218,7 +218,7 @@ func test_snap_rounds_to_grid() -> void:
 func test_alt_disables_snap() -> void:
 	var pair = await _canvas_with_fixture()
 	var canvas = pair[0]
-	var doc: NovaMnuDocument = pair[1]
+	var doc: MnuDocument = pair[1]
 	watch_signals(canvas)
 	canvas._on_press(Vector2(320, 135))
 	canvas._on_drag(Vector2(331, 135), true)   # +11 x, Alt = no snap
@@ -230,7 +230,7 @@ func test_alt_disables_snap() -> void:
 func test_bare_click_selects_without_commit() -> void:
 	var pair = await _canvas_with_fixture()
 	var canvas = pair[0]
-	var doc: NovaMnuDocument = pair[1]
+	var doc: MnuDocument = pair[1]
 	watch_signals(canvas)
 	canvas._on_press(Vector2(320, 135))  # select StartBtn
 	canvas._on_release()                  # no motion -> not a drag
@@ -243,7 +243,7 @@ func test_bare_click_selects_without_commit() -> void:
 func test_keyboard_nudge_emits_commit() -> void:
 	var pair = await _canvas_with_fixture()
 	var canvas = pair[0]
-	var doc: NovaMnuDocument = pair[1]
+	var doc: MnuDocument = pair[1]
 	var start_id := _first_root_child(doc, 1)  # (270,120,100,30)
 	canvas.set_selected(start_id)
 	watch_signals(canvas)
@@ -256,7 +256,7 @@ func test_keyboard_nudge_emits_commit() -> void:
 func test_keyboard_nudge_guarded_by_screen_selection() -> void:
 	var pair = await _canvas_with_fixture()
 	var canvas = pair[0]
-	var doc: NovaMnuDocument = pair[1]
+	var doc: MnuDocument = pair[1]
 	canvas.set_selected(doc.get_screen_ids()[0])  # a screen, not a widget
 	watch_signals(canvas)
 	canvas._unhandled_key_input(_key(KEY_RIGHT))
@@ -302,7 +302,7 @@ func test_rect_off_board_pure_helper() -> void:
 func test_is_selection_off_board_tracks_selection() -> void:
 	var pair = await _canvas_with_fixture()
 	var canvas = pair[0]
-	var doc: NovaMnuDocument = pair[1]
+	var doc: MnuDocument = pair[1]
 	var start_id := _first_root_child(doc, 1)  # StartBtn (270,120,100,30), on-board
 	canvas.set_selected(start_id)
 	assert_false(canvas.is_selection_off_board(), "An on-board selection is not flagged.")
@@ -320,22 +320,22 @@ func test_is_selection_off_board_tracks_selection() -> void:
 func _canvas_with_pair() -> Array:
 	var pair = await _canvas_with_fixture()
 	var canvas = pair[0]
-	var doc: NovaMnuDocument = pair[1]
+	var doc: MnuDocument = pair[1]
 	var root := doc.get_screen_root_id(doc.get_screen_ids()[0])
-	var a := doc.add_widget(root, NovaMnuDocument.TYPE_BUTTON, Rect2(20, 360, 80, 30))   # center (60,375)
-	var b := doc.add_widget(root, NovaMnuDocument.TYPE_BUTTON, Rect2(500, 360, 80, 30))  # center (540,375)
+	var a := doc.add_widget(root, MnuDocument.TYPE_BUTTON, Rect2(20, 360, 80, 30))   # center (60,375)
+	var b := doc.add_widget(root, MnuDocument.TYPE_BUTTON, Rect2(500, 360, 80, 30))  # center (540,375)
 	return [canvas, doc, a, b]
 
 
 func test_marquee_collects_intersecting_widgets() -> void:
 	var pair = await _canvas_with_fixture()
 	var canvas = pair[0]
-	var doc: NovaMnuDocument = pair[1]
+	var doc: MnuDocument = pair[1]
 	var root := doc.get_screen_root_id(doc.get_screen_ids()[0])
 	# Added after set_menu (no live Control), so these resolve via their document rects.
-	var win := doc.add_widget(root, NovaMnuDocument.TYPE_WINDOW, Rect2(100, 100, 200, 200))
-	var child := doc.add_widget(win, NovaMnuDocument.TYPE_STATIC, Rect2(10, 10, 50, 30))  # abs (110,110,50,30)
-	var far := doc.add_widget(root, NovaMnuDocument.TYPE_BUTTON, Rect2(500, 400, 40, 20))
+	var win := doc.add_widget(root, MnuDocument.TYPE_WINDOW, Rect2(100, 100, 200, 200))
+	var child := doc.add_widget(win, MnuDocument.TYPE_STATIC, Rect2(10, 10, 50, 30))  # abs (110,110,50,30)
+	var far := doc.add_widget(root, MnuDocument.TYPE_BUTTON, Rect2(500, 400, 40, 20))
 	var hits = canvas._marquee_ids(Rect2(90, 90, 150, 150))
 	assert_true(hits.has(win), "A window intersecting the box is selected.")
 	assert_true(hits.has(child), "A nested child intersecting the box is selected (absolute-rect math).")
@@ -364,11 +364,11 @@ func test_shift_click_toggles_membership() -> void:
 func test_plain_click_replaces_multi_selection() -> void:
 	var arr = await _canvas_with_pair()
 	var canvas = arr[0]
-	var doc: NovaMnuDocument = arr[1]
+	var doc: MnuDocument = arr[1]
 	var a: int = arr[2]
 	var b: int = arr[3]
 	var root := doc.get_screen_root_id(doc.get_screen_ids()[0])
-	var c := doc.add_widget(root, NovaMnuDocument.TYPE_BUTTON, Rect2(250, 360, 80, 30))  # center (290,375)
+	var c := doc.add_widget(root, MnuDocument.TYPE_BUTTON, Rect2(250, 360, 80, 30))  # center (290,375)
 	canvas.set_selection(PackedInt32Array([a, b]))
 	watch_signals(canvas)
 	canvas._on_press(Vector2(290, 375))   # plain click on a non-member
@@ -394,7 +394,7 @@ func test_click_member_no_drag_collapses() -> void:
 func test_marquee_drag_selects_and_emits() -> void:
 	var pair = await _canvas_with_fixture()
 	var canvas = pair[0]
-	var doc: NovaMnuDocument = pair[1]
+	var doc: MnuDocument = pair[1]
 	var start_id := _first_root_child(doc, 1)  # StartBtn (270,120,100,30)
 	watch_signals(canvas)
 	# (10,100) is a proven root-only point (see test_pick_prefers_child_over_root); the
@@ -409,7 +409,7 @@ func test_marquee_drag_selects_and_emits() -> void:
 func test_empty_click_no_drag_clears() -> void:
 	var pair = await _canvas_with_fixture()
 	var canvas = pair[0]
-	var doc: NovaMnuDocument = pair[1]
+	var doc: MnuDocument = pair[1]
 	canvas.set_selected(_first_root_child(doc, 1))
 	watch_signals(canvas)
 	canvas._on_press(Vector2(-50, -50))   # truly empty (outside every widget)
@@ -442,10 +442,10 @@ func test_group_move_emits_one_batch() -> void:
 func test_group_move_carries_nested_child() -> void:
 	var pair = await _canvas_with_fixture()
 	var canvas = pair[0]
-	var doc: NovaMnuDocument = pair[1]
+	var doc: MnuDocument = pair[1]
 	var root := doc.get_screen_root_id(doc.get_screen_ids()[0])
-	var parent := doc.add_widget(root, NovaMnuDocument.TYPE_WINDOW, Rect2(100, 100, 200, 150))  # center (200,175)
-	var child := doc.add_widget(parent, NovaMnuDocument.TYPE_STATIC, Rect2(20, 20, 60, 30))      # local
+	var parent := doc.add_widget(root, MnuDocument.TYPE_WINDOW, Rect2(100, 100, 200, 150))  # center (200,175)
+	var child := doc.add_widget(parent, MnuDocument.TYPE_STATIC, Rect2(20, 20, 60, 30))      # local
 	canvas.set_selection(PackedInt32Array([parent, child]))
 	watch_signals(canvas)
 	canvas._on_press(Vector2(200, 175))           # press on the parent (over no child here)
@@ -464,8 +464,8 @@ func test_group_move_carries_nested_child() -> void:
 func test_pick_menu_rows_orders_top_to_bottom_with_depth() -> void:
 	var doc := _load_doc()
 	var root := doc.get_screen_root_id(doc.get_screen_ids()[0])
-	var win := doc.add_widget(root, NovaMnuDocument.TYPE_WINDOW, Rect2(100, 100, 200, 200))
-	var child := doc.add_widget(win, NovaMnuDocument.TYPE_STATIC, Rect2(10, 10, 50, 30))
+	var win := doc.add_widget(root, MnuDocument.TYPE_WINDOW, Rect2(100, 100, 200, 200))
+	var child := doc.add_widget(win, MnuDocument.TYPE_STATIC, Rect2(10, 10, 50, 30))
 	# A stack ordered as pick_stack_at returns it: topmost (deepest) first.
 	var stack := PackedInt32Array([child, win, root])
 	var rows := MnuCanvasScript._pick_menu_rows(doc, stack)
@@ -490,27 +490,41 @@ func test_pick_menu_rows_orders_top_to_bottom_with_depth() -> void:
 const JO_FIXTURE := "res://../fixtures/mnu/jo_main.mnu"
 
 
-func _load_jo() -> NovaMnuDocument:
-	var doc := NovaMnuDocument.new()
+func _load_jo() -> MnuDocument:
+	var doc := MnuDocument.new()
 	doc.load_from_bytes(FileAccess.get_file_as_bytes(JO_FIXTURE))
 	return doc
 
 
 # A canvas over jo_main sized to the derived design canvas (identity letterbox fit).
 # Two frames let any anchored windows resolve. Returns [canvas, doc].
+# The rendered auto-height now comes from the compiled MenuFrame's text
+# measure, which needs a real .fnt: serve one from a temp resource root under
+# jo_main's authored font name (the first loadable font doubles as the frame
+# default, so the %DEF_FONTNAME_LG% var-named widgets resolve to it too).
 func _canvas_with_jo() -> Array:
 	var doc := _load_jo()
+	var dir := OS.get_temp_dir().path_join("mnu_canvas_jo_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(dir)
+	var fnt_out := FileAccess.open(dir.path_join("Arial12b.fnt"), FileAccess.WRITE)
+	assert_not_null(fnt_out, "temp .fnt fixture should be writable")
+	if fnt_out != null:
+		fnt_out.store_buffer(FileAccess.get_file_as_bytes("res://../fixtures/fnt/Gunpl22b.fnt"))
+		fnt_out.close()
+	var res_root := ResourceRoot.new()
+	if res_root.set_root_dir(dir) != OK:
+		res_root = null
 	var canvas = MnuCanvasScript.new()
 	add_child_autofree(canvas)
 	canvas.size = Vector2(doc.get_menu_size())
 	await get_tree().process_frame
-	canvas.set_menu(doc, null, null)
+	canvas.set_menu(doc, res_root, null)
 	await get_tree().process_frame
 	await get_tree().process_frame
 	return [canvas, doc]
 
 
-func _find_named(doc: NovaMnuDocument, id: int, wname: String) -> int:
+func _find_named(doc: MnuDocument, id: int, wname: String) -> int:
 	if doc.get_widget_name(id) == wname:
 		return id
 	for cid in doc.get_child_ids(id):
@@ -520,14 +534,14 @@ func _find_named(doc: NovaMnuDocument, id: int, wname: String) -> int:
 	return -1
 
 
-func _jo_widget(doc: NovaMnuDocument, wname: String) -> int:
+func _jo_widget(doc: MnuDocument, wname: String) -> int:
 	return _find_named(doc, doc.get_screen_root_id(doc.get_screen_ids()[0]), wname)
 
 
 func test_jo_bottomless_button_is_pickable() -> void:
 	var pair = await _canvas_with_jo()
 	var canvas = pair[0]
-	var doc: NovaMnuDocument = pair[1]
+	var doc: MnuDocument = pair[1]
 	var sp := _jo_widget(doc, "SINGLE_PLAYER")
 	assert_gt(sp, 0, "Located the SINGLE_PLAYER button.")
 	# Precondition: the shipped button has no authored height (no <BOTTOM>).
@@ -548,7 +562,7 @@ func test_jo_bottomless_button_is_pickable() -> void:
 func test_jo_button_in_pick_stack_and_right_click_menu() -> void:
 	var pair = await _canvas_with_jo()
 	var canvas = pair[0]
-	var doc: NovaMnuDocument = pair[1]
+	var doc: MnuDocument = pair[1]
 	var sp := _jo_widget(doc, "SINGLE_PLAYER")
 	var r = canvas._abs_rect_of(sp)
 	var center = canvas._board_to_canvas(r.position + r.size * 0.5)
@@ -565,19 +579,21 @@ func test_jo_button_in_pick_stack_and_right_click_menu() -> void:
 func test_jo_button_resizable_and_in_control_map() -> void:
 	var pair = await _canvas_with_jo()
 	var canvas = pair[0]
-	var doc: NovaMnuDocument = pair[1]
+	var doc: MnuDocument = pair[1]
 	var sp := _jo_widget(doc, "SINGLE_PLAYER")
 	canvas.set_selected(sp)
 	assert_true(canvas._has_resizable_selection(), "A rendered-but-sizeless button is resizable.")
-	assert_true(canvas._id_to_control.has(sp), "The id->Control map includes the button.")
-	var c = canvas._id_to_control[sp]
-	assert_gt((c as Control).size.y, 0.0, "The mapped live Control has a non-zero rendered height.")
+	# The id->Control map died with the Control tree; the id->index map plus
+	# the frame-solved rect is its successor.
+	assert_true(canvas._id_to_index.has(sp), "The id->index map includes the button.")
+	assert_gt(canvas._live_size_of(sp).y, 0.0,
+			"The frame-solved rect has a non-zero rendered height.")
 
 
 func test_jo_button_drag_pins_concrete_size() -> void:
 	var pair = await _canvas_with_jo()
 	var canvas = pair[0]
-	var doc: NovaMnuDocument = pair[1]
+	var doc: MnuDocument = pair[1]
 	var sp := _jo_widget(doc, "SINGLE_PLAYER")
 	var r = canvas._abs_rect_of(sp)
 	var center = canvas._board_to_canvas(r.position + r.size * 0.5)
@@ -593,7 +609,7 @@ func test_jo_button_drag_pins_concrete_size() -> void:
 func test_jo_full_rect_widget_unchanged() -> void:
 	var pair = await _canvas_with_jo()
 	var canvas = pair[0]
-	var doc: NovaMnuDocument = pair[1]
+	var doc: MnuDocument = pair[1]
 	var ftr := _jo_widget(doc, "LOGO_SPLASH_FTR")  # has all four edges
 	assert_gt(ftr, 0, "Located LOGO_SPLASH_FTR.")
 	var dr := doc.get_window_rect(ftr)
@@ -609,7 +625,7 @@ func test_jo_bottomless_imageless_static_known_limitation() -> void:
 	# fabricating a height and shifting text). Defensive: only assert when applicable.
 	var pair = await _canvas_with_jo()
 	var canvas = pair[0]
-	var doc: NovaMnuDocument = pair[1]
+	var doc: MnuDocument = pair[1]
 	var v := _jo_widget(doc, "VERSION_EXP")
 	if v < 0 or doc.get_window_rect(v).size.y > 0.0 or canvas._live_size_of(v).y > 0.0:
 		pass_test("No bottomless image-less static to check in this fixture.")

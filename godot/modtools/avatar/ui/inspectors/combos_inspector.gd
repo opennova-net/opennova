@@ -156,9 +156,9 @@ func _build_combo_card(combo: Dictionary, combo_index: int) -> void:
 	id_row.add_child(remove)
 	card.add_child(id_row)
 
-	var head_opt := _build_part_dropdown(card, "Head", NovaAvatarDatabase.PART_HEAD, String(combo.get("head_name", "")), false)
-	var body_opt := _build_part_dropdown(card, "Body", NovaAvatarDatabase.PART_BODY, String(combo.get("body_name", "")), false)
-	var arms_opt := _build_part_dropdown(card, "Arms", NovaAvatarDatabase.PART_ARMS, String(combo.get("arms_name", "")), true)
+	var head_opt := _build_part_dropdown(card, "Head", AvatarDatabase.PART_HEAD, String(combo.get("head_name", "")), false)
+	var body_opt := _build_part_dropdown(card, "Body", AvatarDatabase.PART_BODY, String(combo.get("body_name", "")), false)
+	var arms_opt := _build_part_dropdown(card, "Arms", AvatarDatabase.PART_ARMS, String(combo.get("arms_name", "")), true)
 	var issues := _combo_issues(combo)
 	if not issues.is_empty():
 		var issue := Label.new()
@@ -276,8 +276,8 @@ func _add_combo() -> void:
 	var combos: Array = div["combos"]
 	# Seed with the first head + body (required); arms optional/empty. The next
 	# free id is one past the current max so it does not collide.
-	var heads := _part_names(NovaAvatarDatabase.PART_HEAD)
-	var bodies := _part_names(NovaAvatarDatabase.PART_BODY)
+	var heads := _part_names(AvatarDatabase.PART_HEAD)
+	var bodies := _part_names(AvatarDatabase.PART_BODY)
 	var next_id := 0
 	for c in combos:
 		next_id = maxi(next_id, int((c as Dictionary).get("id", 0)) + 1)

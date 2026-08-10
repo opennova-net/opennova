@@ -43,8 +43,8 @@ a local-document error.
 `ParticleEditor` document (`particle_editor.gd`, dirty state + selection +
 CRUD), mounts `blueprint/particle_blueprint_screen.gd` (GraphEdit +
 `particle_preview.gd`) in the viewport lane, and declares the three workflow
-inspectors under `inspectors/`. The preview drives one `NovaEffectScene` and
-one `NovaParticleRenderer`—the same 62.5 Hz value scene, exact shared atlas,
+inspectors under `inspectors/`. The preview drives one `EffectScene` and
+one `ParticleRenderer`—the same 62.5 Hz value scene, exact shared atlas,
 ordered packet compiler, and compositor backend the game runtime uses. No
 per-emitter renderer Nodes or preview-only simulation path are involved
 (witness record: [`docs/particles/ptl-format-re.md`](../../../docs/particles/ptl-format-re.md)).

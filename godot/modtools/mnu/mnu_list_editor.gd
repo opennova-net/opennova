@@ -24,7 +24,7 @@ var _spec: Array = []
 var _allow_move := true
 var _add_label := "+ Add"
 var _rows_box: VBoxContainer
-var _ref_services: Dictionary = {}
+var _ref_services := LinkServices.new()
 var _color_resolver: Callable = Callable()
 var _color_variables: Array = []
 
@@ -35,7 +35,7 @@ func configure(spec: Array, allow_move := true, add_label := "+ Add") -> void:
 	_add_label = add_label
 
 
-func set_reference_services(services: Dictionary) -> void:
+func set_reference_services(services: LinkServices) -> void:
 	_ref_services = services
 
 

@@ -1,7 +1,7 @@
 extends GutTest
 
 # F2 gate (docs/oned/workspace-maturity-program.md): the EngineTextPreview
-# widget renders sample text through the game's own font path — NovaFntResource
+# widget renders sample text through the game's own font path — FntResource
 # -> FontFile plus HudText's draw semantics (fixed pixel size, alignment
 # anchors, half-bright). Public API only (ADR 0018); rendering itself is
 # validated visually in the driver run, here we lock the contract.
@@ -29,12 +29,12 @@ func _make_preview() -> Control:
 	return preview
 
 
-func _load_fixture_fnt() -> NovaFntResource:
+func _load_fixture_fnt() -> FntResource:
 	var bytes := FileAccess.get_file_as_bytes(FNT_PATH)
-	var res: NovaFntResource = NovaFntResource.new()
+	var res: FntResource = FntResource.new()
 	if bytes.is_empty() or res.load_from_bytes(bytes) != OK:
 		res = null
-	assert_not_null(res, "Serpen24.fnt fixture should load as NovaFntResource.")
+	assert_not_null(res, "Serpen24.fnt fixture should load as FntResource.")
 	return res
 
 
@@ -73,7 +73,7 @@ func test_resolves_a_font_from_the_resource_root_like_the_runtime() -> void:
 	out.store_buffer(bytes)
 	out.close()
 
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(root_dir), OK, "Temp dir mounts as a loose resource root.")
 	assert_true(preview.set_font_from_root(root, "Serpen24.fnt"),
 		"The runtime resolution path (HudText.load_font over the VFS) finds the font.")
@@ -108,7 +108,7 @@ func test_alignment_moves_the_design_space_anchor() -> void:
 	var fs := float(preview.font_pixel_size())
 	var expected_y := 768.0 * (preview.size.y - fs) / (2.0 * preview.size.y)
 	assert_almost_eq(preview.draw_anchor_design().y, expected_y, 0.001,
-		"The vertical anchor keeps the glyph cell mid-panel after HudLayout scaling.")
+		"The vertical anchor keeps the glyph cell mid-panel after HudPos scaling.")
 
 
 func test_draws_without_error_in_tree() -> void:

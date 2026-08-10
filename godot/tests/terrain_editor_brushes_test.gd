@@ -1,7 +1,7 @@
 extends GutTest
 
-## Brush-session behaviour, now driven through the C++ kernels on NovaTerrainData
-## (terrain_editor_brushes.gd was removed in A4). NovaTerrainData owns the editable
+## Brush-session behaviour, now driven through the C++ kernels on TerrainData
+## (terrain_editor_brushes.gd was removed in A4). TerrainData owns the editable
 ## buffers; set_*_image hands it the SAME Image the test asserts on, so the in-place
 ## set_data round-trip is observed here. Byte-parity vs the old GDScript is locked by
 ## tests/terrain/brush_color_test.cpp (and was gated against real Godot during A4).
@@ -34,7 +34,7 @@ func test_raise_lower_invert() -> void:
 	var mesh := DummyTerrainMesh.new()
 	var session := TerrainEditorBrushSession.new()
 	var heightmap := _make_heightmap(10.0)
-	var data := NovaTerrainData.new()
+	var data := TerrainData.new()
 	data.set_heightmap_image(heightmap)
 
 	session.current_tool = TerrainEditorBrushSession.Tool.RAISE
@@ -63,7 +63,7 @@ func test_clone_paint_uses_source_color() -> void:
 	var source := _make_color_image(Color(0.0, 0.0, 0.0, 1.0))
 	var dest := _make_color_image(Color(0.0, 0.0, 0.0, 1.0))
 	source.set_pixel(10, 10, Color(0.25, 0.7, 0.4, 1.0))
-	var data := NovaTerrainData.new()
+	var data := TerrainData.new()
 	data.set_colormap_image(dest)
 
 	session.current_tool = TerrainEditorBrushSession.Tool.CLONE_COLOR
@@ -82,7 +82,7 @@ func test_clone_paint_uses_source_color() -> void:
 
 func test_blend_paint_stays_normalized() -> void:
 	var image := _make_color_image(Color(1.0, 0.0, 0.0, 1.0))
-	var data := NovaTerrainData.new()
+	var data := TerrainData.new()
 	data.set_blendmap_image(image)
 	data.brush_blend_paint(1, 16, 16, 4, 1.0, 1.0, Rect2i(0, 0, 64, 64))
 	var painted := image.get_pixel(16, 16)
@@ -95,9 +95,9 @@ func test_hardness_changes_edge_falloff() -> void:
 	var clip_rect := Rect2i(0, 0, 64, 64)
 	var soft := _make_color_image(Color(0.0, 0.0, 0.0, 1.0))
 	var hard := _make_color_image(Color(0.0, 0.0, 0.0, 1.0))
-	var soft_data := NovaTerrainData.new()
+	var soft_data := TerrainData.new()
 	soft_data.set_colormap_image(soft)
-	var hard_data := NovaTerrainData.new()
+	var hard_data := TerrainData.new()
 	hard_data.set_colormap_image(hard)
 
 	soft_data.brush_colormap_paint(Color(1.0, 1.0, 1.0, 1.0), 16, 16, 4, 1.0, 0.0, clip_rect)
@@ -115,7 +115,7 @@ func test_brush_writeback_preserves_mipmaps() -> void:
 	var colormap := _make_color_image(Color(0.2, 0.4, 0.6, 1.0))
 	colormap.generate_mipmaps()
 	assert_true(colormap.has_mipmaps(), "precondition: colormap is mipmapped")
-	var data := NovaTerrainData.new()
+	var data := TerrainData.new()
 	data.set_colormap_image(colormap)
 	data.brush_colormap_paint(Color(1.0, 1.0, 1.0, 1.0), 16, 16, 4, 1.0, 1.0, Rect2i(0, 0, 64, 64))
 	assert_true(colormap.has_mipmaps(), "colormap keeps mipmaps after paint (ImageTexture.update stays valid)")
@@ -131,7 +131,7 @@ func test_brush_writeback_preserves_mipmaps() -> void:
 	var heightmap := Image.create(64, 64, true, Image.FORMAT_RF)
 	heightmap.fill(Color(10.0, 0.0, 0.0, 1.0))
 	assert_true(heightmap.has_mipmaps(), "precondition: heightmap is mipmapped")
-	var hdata := NovaTerrainData.new()
+	var hdata := TerrainData.new()
 	hdata.set_heightmap_image(heightmap)
 	hdata.brush_raise_lower(16, 16, 4, 5.0, 1.0, Rect2i(0, 0, 64, 64))
 	assert_true(heightmap.has_mipmaps(), "heightmap keeps mipmaps after raise")

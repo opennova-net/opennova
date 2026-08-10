@@ -38,12 +38,12 @@ func before_all() -> void:
 	for f in FIXTURES:
 		var bytes := FileAccess.get_file_as_bytes(f[0])
 		assert_gt(bytes.size(), 0, "%s fixture readable" % f[1])
-		var ms := NovaMusicScript.new()
+		var ms := MusicScript.new()
 		ms.load_from_decrypted_bytes(bytes, f[1])
 		_scripts.append([f[1], ms])
 
 
-func _ast(ms: NovaMusicScript) -> Array:
+func _ast(ms: MusicScript) -> Array:
 	return ms.get_program_ast(ms.get_default_script_name())
 
 
@@ -61,7 +61,7 @@ func _authored_end(stmts: Array) -> int:
 func test_corpus_census_and_invariants() -> void:
 	for entry in _scripts:
 		var label: String = entry[0]
-		var ms: NovaMusicScript = entry[1]
+		var ms: MusicScript = entry[1]
 		var ast := _ast(ms)
 		assert_gt(ast.size(), 0, "%s has sections" % label)
 		assert_eq(ms.get_locals_frame_offset(ms.get_default_script_name()), 32,
@@ -149,7 +149,7 @@ func test_gamemus_begin_tail_shape() -> void:
 	# The one shipped dispatch tail the divider design was drawn from: Begin's
 	# main loop leaks past `enter Testmission` as frame_enter (the engine hands
 	# a value -> l_32), an FB() call, and the 3-way event switch.
-	var ms: NovaMusicScript = _scripts[0][1]
+	var ms: MusicScript = _scripts[0][1]
 	var begin: Dictionary = {}
 	for sec in _ast(ms):
 		if String(sec.get("name", "")) == "Begin":

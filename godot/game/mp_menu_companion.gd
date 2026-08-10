@@ -2,7 +2,7 @@ class_name MpMenuCompanion
 extends MenuCompanion
 
 # Drives the multiplayer menu (mp.mnu) by control NAME for the LAN co-op path. It is a
-# companion the game-agnostic NovaMenuShell (nova_menu_shell.gd) delegates to: when the shell
+# companion the game-agnostic MenuShell (nova_menu_shell.gd) delegates to: when the shell
 # loads a menu the companion owns (the JO mp.mnu LAN browser + host-settings screens),
 # the shell hands the whole menu over here instead of running its generic
 # launch/mission wiring, so START_GAME on the host screen means "host a game" rather
@@ -16,7 +16,7 @@ extends MenuCompanion
 #
 # Scope this pass is CO-OP-MINIMAL: the host reads GAME_NAME, the selected missions, the
 # player cap, and forces COOP; the rest of the host-settings controls render but are not
-# read. LAN search/join call the production NovaLanSession discovery seam.
+# read. LAN search/join call the production LanSession discovery seam.
 
 # The mp.mnu screens this companion owns. The shell skips its generic start/mission
 # wiring on a menu containing these so START_GAME is not double-bound to a SP launch.
@@ -28,7 +28,7 @@ signal lan_join_requested(target: JoinTarget)
 # START_GAME on the host screen, with the co-op-minimal host request (see _read_host_config).
 signal lan_host_start_requested(config: HostSessionConfig)
 
-var _lan_session = null        # NovaLanSession; injected by MainGame
+var _lan_session: LanSession = null  # injected by MainGame
 var _servers: Array = []       # last LAN browse result; rows for LAN_GAME_LIST
 var _selected_server := -1
 var _browse_error := ""        # last LAN search failure, shown in the empty list
@@ -36,40 +36,39 @@ var _browse_error := ""        # last LAN search failure, shown in the empty lis
 
 # True when this menu is the JO multiplayer menu (so the shell delegates to us). Keyed on
 # control names unique to mp.mnu's LAN/host screens rather than a screen name, since the
-# whole document (all screens) is built at once.
-func owns_menu(menu: Node) -> bool:
-	if menu == null:
+# whole document (all screens) is addressable at once.
+func owns_menu(driver: MenuDriver) -> bool:
+	if driver == null:
 		return false
-	return menu.find_child("LAN_GAME_LIST", true, false) != null \
-		or menu.find_child("SELECTED_MISSIONS", true, false) != null
+	return driver.has_widget("LAN_GAME_LIST") or driver.has_widget("SELECTED_MISSIONS")
 
 
 # Provide the LAN discovery session. Kept injectable for menu and socket seam tests.
-func set_lan_session(session) -> void:
-	if _lan_session != null and _lan_session.has_signal("servers_changed") \
+func set_lan_session(session: LanSession) -> void:
+	if _lan_session != null \
 			and _lan_session.servers_changed.is_connected(_on_servers_changed):
 		_lan_session.servers_changed.disconnect(_on_servers_changed)
-	if _lan_session != null and _lan_session.has_signal("error_occurred") \
+	if _lan_session != null \
 			and _lan_session.error_occurred.is_connected(_on_lan_browse_error):
 		_lan_session.error_occurred.disconnect(_on_lan_browse_error)
 	_lan_session = session
-	if _lan_session != null and _lan_session.has_signal("servers_changed") \
+	if _lan_session != null \
 			and not _lan_session.servers_changed.is_connected(_on_servers_changed):
 		_lan_session.servers_changed.connect(_on_servers_changed)
-	if _lan_session != null and _lan_session.has_signal("error_occurred") \
+	if _lan_session != null \
 			and not _lan_session.error_occurred.is_connected(_on_lan_browse_error):
 		_lan_session.error_occurred.connect(_on_lan_browse_error)
 
 
-# All of mp.mnu's screens are built as (hidden) children at once, so we wire every owned
+# All of mp.mnu's screens are addressable at once, so we wire every owned
 # screen's controls by name regardless of which screen is visible — matching how the
 # shell wires.
 func _wire(_file: String, _screen: String) -> void:
-	# Single-click selection in the LAN list relays through the menu's aggregate signal.
-	# Connected by name so the companion stays decoupled from the concrete menu class.
-	if _menu.has_signal("widget_value_changed") \
-			and not _menu.is_connected("widget_value_changed", _on_widget_value_changed):
-		_menu.connect("widget_value_changed", _on_widget_value_changed)
+	# Single-click selection in the LAN list relays through the driver's aggregate signal.
+	if not _driver.widget_value_changed.is_connected(_on_widget_value_changed):
+		_driver.widget_value_changed.connect(_on_widget_value_changed)
+	if not _driver.list_activated.is_connected(_on_list_activated):
+		_driver.list_activated.connect(_on_list_activated)
 	_wire_lan_browser()
 	_wire_host_settings()
 
@@ -79,10 +78,7 @@ func _wire(_file: String, _screen: String) -> void:
 func _wire_lan_browser() -> void:
 	_connect_pressed("LAN_SEARCH", _on_lan_search)
 	_connect_pressed("LAN_JOINGAME", _on_lan_join)
-	var list := _find("LAN_GAME_LIST")
-	if list is NovaMnuList:
-		if not (list as NovaMnuList).item_activated.is_connected(_on_lan_list_activated):
-			(list as NovaMnuList).item_activated.connect(_on_lan_list_activated)
+	if _driver.has_widget("LAN_GAME_LIST"):
 		_refresh_lan_list()
 
 
@@ -90,7 +86,7 @@ func _on_lan_search() -> void:
 	# Begin LAN session discovery. A missing binding remains a safe no-op so the retail
 	# menu can still render in parser-only/test builds.
 	_browse_error = ""
-	if _lan_session != null and _lan_session.has_method("start_browsing"):
+	if _lan_session != null:
 		# Returns a Godot Error; the session also emits error_occurred with the
 		# specific reason, which lands in _browse_error first.
 		if int(_lan_session.start_browsing()) != OK and _browse_error.is_empty():
@@ -115,8 +111,8 @@ func _on_servers_changed(servers: Array) -> void:
 
 
 func _refresh_lan_list() -> void:
-	var list := _find("LAN_GAME_LIST")
-	if not (list is NovaMnuList):
+	var id := _id("LAN_GAME_LIST")
+	if id < 0:
 		return
 	var rows := PackedStringArray()
 	for s in _servers:
@@ -125,7 +121,7 @@ func _refresh_lan_list() -> void:
 	# guard checks against _servers, which stays empty).
 	if rows.is_empty() and not _browse_error.is_empty():
 		rows.append("Search failed - %s" % _browse_error)
-	(list as NovaMnuList).set_items(rows)
+	_driver.set_widget_items(id, rows)
 
 
 func _format_server_row(s: Dictionary) -> String:
@@ -143,9 +139,12 @@ func _format_server_row(s: Dictionary) -> String:
 	return "%s - %s (%d/%d)" % [name, expansion, cur, max_p]
 
 
-func _on_lan_list_activated(index: int) -> void:
-	_selected_server = index
-	_on_lan_join()
+func _on_list_activated(id: int, row: int) -> void:
+	if _driver == null or _driver.get_menu_file() != _wired_file:
+		return
+	if _driver.widget_name_of(id).nocasecmp_to("LAN_GAME_LIST") == 0:
+		_selected_server = row
+		_on_lan_join()
 
 
 func _on_lan_join() -> void:
@@ -157,9 +156,9 @@ func _on_lan_join() -> void:
 # --- Host-settings screen (MULTI_PLAYER_HOST) ---------------------------------
 
 func _wire_host_settings() -> void:
-	var mission_list := _find("MISSION_LIST")
-	if mission_list is NovaMnuList:
-		_seed_mission_list(mission_list as NovaMnuList)
+	var mission_list := _id("MISSION_LIST")
+	if mission_list >= 0:
+		_seed_mission_list(mission_list)
 	_connect_pressed("ADD_MISSIONS", _on_add_missions)
 	_connect_pressed("REMOVE_MISSIONS", _on_remove_missions)
 	_connect_pressed("START_GAME", _on_host_start)
@@ -167,39 +166,41 @@ func _wire_host_settings() -> void:
 
 # Fill MISSION_LIST with the resource dir's missions (the available pool). The selected
 # rotation is the SELECTED_MISSIONS table, maintained by ADD/REMOVE.
-func _seed_mission_list(list: NovaMnuList) -> void:
-	list.set_items(MissionCatalog.mission_names(_root))
+func _seed_mission_list(id: int) -> void:
+	_driver.set_widget_items(id, MissionCatalog.mission_names(_root))
 
 
 func _on_add_missions() -> void:
-	var mission_list := _find("MISSION_LIST")
-	var table := _find("SELECTED_MISSIONS")
-	if not (mission_list is NovaMnuList) or not (table is NovaMnuTable):
+	var mission_list := _id("MISSION_LIST")
+	var table := _id("SELECTED_MISSIONS")
+	if mission_list < 0 or table < 0:
 		return
-	for idx in (mission_list as NovaMnuList).get_selected_items():
-		var name := (mission_list as NovaMnuList).get_item_text(idx)
-		if not _table_has_mission(table as NovaMnuTable, name):
+	for idx in _driver.selected_rows(mission_list):
+		if idx < 0 or idx >= _driver.item_count(mission_list):
+			continue
+		var name := _driver.item_text(mission_list, idx)
+		if not _table_has_mission(table, name):
 			# cols: Mission / Type / Switch (the Switch bitmap value, 0 = off).
-			(table as NovaMnuTable).add_row_values(PackedStringArray([name, "COOP", "0"]))
+			_driver.table_add_row(table, PackedStringArray([name, "COOP", "0"]))
 
 
 func _on_remove_missions() -> void:
-	var table := _find("SELECTED_MISSIONS")
-	if not (table is NovaMnuTable):
+	var table := _id("SELECTED_MISSIONS")
+	if table < 0:
 		return
 	# Remove high index first so lower indices stay valid as rows shift down.
-	var rows := Array((table as NovaMnuTable).get_selected_rows())
+	var rows := Array(_driver.table_selected_rows(table))
 	rows.sort()
 	rows.reverse()
 	for r in rows:
-		(table as NovaMnuTable).remove_row(int(r))
+		_driver.table_remove_row(table, int(r))
 
 
 func _on_host_start() -> void:
 	lan_host_start_requested.emit(_read_host_config())
 
 
-# Read the host request off the built tree by control name. Unread controls
+# Read the host request off the loaded document by control name. Unread controls
 # (rules tab, weapon restrictions, server location) still render. MissionRuntime
 # derives the wire game type from the selected mission; the record's Co-op value
 # remains the fallback for explicit callers that do not request auto derivation.
@@ -233,24 +234,26 @@ func _is_dedicated() -> bool:
 
 
 func _selected_missions() -> Array[String]:
-	var table := _find("SELECTED_MISSIONS")
+	var table := _id("SELECTED_MISSIONS")
 	var out: Array[String] = []
-	if table is NovaMnuTable:
-		for r in range((table as NovaMnuTable).get_row_count()):
-			out.append((table as NovaMnuTable).get_cell_text(r, 0))
+	if table >= 0:
+		for r in range(_driver.table_row_count(table)):
+			out.append(_driver.table_cell_text(table, r, 0))
 	return out
 
 
 # --- Aggregate signal + helpers -----------------------------------------------
 
 func _on_widget_value_changed(widget_name: String, kind: String, index: int, _value: String) -> void:
+	if _driver == null or _driver.get_menu_file() != _wired_file:
+		return
 	if widget_name == "LAN_GAME_LIST" and kind == "list":
 		_selected_server = index
 
 
-func _table_has_mission(table: NovaMnuTable, name: String) -> bool:
-	for r in range(table.get_row_count()):
-		if table.get_cell_text(r, 0) == name:
+func _table_has_mission(table: int, name: String) -> bool:
+	for r in range(_driver.table_row_count(table)):
+		if _driver.table_cell_text(table, r, 0) == name:
 			return true
 	return false
 
@@ -258,7 +261,8 @@ func _table_has_mission(table: NovaMnuTable, name: String) -> bool:
 # Returns the selected spin-list item's `value=` attribute (the semantic value the
 # original reads), not its localized display label. Used to map SERVERTYPE/GAME_TYPE to behavior.
 func _spin_attr(name: String, default_value: String) -> String:
-	var node := _find(name)
-	if node != null and node.has_method("get_value_attr"):  # NovaMnuSpinList
-		return String(node.get_value_attr())
-	return default_value
+	var id := _id(name)
+	if id < 0:
+		return default_value
+	var value := _driver.spin_value_attr(id)
+	return value if not value.is_empty() else default_value

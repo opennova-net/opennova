@@ -223,15 +223,15 @@ func _refresh_waypoint_panel() -> void:
 	var has_active := not active_path.is_empty()
 	var flags := int(active_path.get("flags", 0))
 	_wp_flags_syncing = true
-	_wp_loop_check.button_pressed = (flags & NovaMissionData.WP_FLAG_DOES_NOT_LOOP) == 0
-	_wp_blue_check.button_pressed = (flags & NovaMissionData.WP_FLAG_BLUE_TEAM) != 0
-	_wp_red_check.button_pressed = (flags & NovaMissionData.WP_FLAG_RED_TEAM) != 0
+	_wp_loop_check.button_pressed = (flags & MissionData.WP_FLAG_DOES_NOT_LOOP) == 0
+	_wp_blue_check.button_pressed = (flags & MissionData.WP_FLAG_BLUE_TEAM) != 0
+	_wp_red_check.button_pressed = (flags & MissionData.WP_FLAG_RED_TEAM) != 0
 	_wp_loop_check.disabled = not has_active
 	_wp_blue_check.disabled = not has_active
 	_wp_red_check.disabled = not has_active
 	_wp_flags_syncing = false
 
-	var mission: NovaMissionData = _inspector._controller.get_mission()
+	var mission: MissionData = _inspector._controller.get_mission()
 	var marker_sel: Dictionary = _inspector._controller.get_selected_marker()
 	var selected_marker_index := int(marker_sel.get("marker_index", -1)) if not marker_sel.is_empty() else -1
 	var indices: PackedInt32Array = active_path.get("marker_indices", PackedInt32Array()) if has_active else PackedInt32Array()
@@ -240,7 +240,7 @@ func _refresh_waypoint_panel() -> void:
 	_wp_marker_rows = []
 	for order in indices.size():
 		var mi: int = indices[order]
-		var pos: Vector3 = mission.get_entity(NovaMissionData.KIND_MARKER, mi).get("position", Vector3.ZERO)
+		var pos: Vector3 = mission.get_entity(MissionData.KIND_MARKER, mi).get("position", Vector3.ZERO)
 		_wp_marker_list.add_item("%d.  marker #%d  (%.0f, %.0f, %.0f)" % [order + 1, mi, pos.x, pos.y, pos.z])
 		_wp_marker_rows.append(mi)
 		if mi == selected_marker_index:
@@ -272,10 +272,10 @@ func _refresh_waypoint_panel() -> void:
 # A short "[loop, blue]"-style suffix describing a path's flags, or "" when none apply.
 func _flag_suffix(flags: int) -> String:
 	var parts: Array = []
-	if (flags & NovaMissionData.WP_FLAG_DOES_NOT_LOOP) == 0:
+	if (flags & MissionData.WP_FLAG_DOES_NOT_LOOP) == 0:
 		parts.append("loop")
-	if (flags & NovaMissionData.WP_FLAG_BLUE_TEAM) != 0:
+	if (flags & MissionData.WP_FLAG_BLUE_TEAM) != 0:
 		parts.append("blue")
-	if (flags & NovaMissionData.WP_FLAG_RED_TEAM) != 0:
+	if (flags & MissionData.WP_FLAG_RED_TEAM) != 0:
 		parts.append("red")
 	return "  [%s]" % ", ".join(parts) if not parts.is_empty() else ""

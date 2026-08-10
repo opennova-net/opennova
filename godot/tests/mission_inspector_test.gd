@@ -37,7 +37,7 @@ class FakeController:
 	var last_property_value: int = 0
 
 	# Phase 3 place-object palette state.
-	var mission_ref  # NovaMissionData or null; non-null makes the inspector show the panels
+	var mission_ref  # MissionData or null; non-null makes the inspector show the panels
 	var placeable: Array = []
 	var armed_id: int = 0
 	var arm_calls: Array = []
@@ -336,7 +336,7 @@ class FakeController:
 		changed.emit()
 		return true
 
-	# Phase 2: area-trigger (zone) surface. `zones` are NovaMissionData-shaped dicts.
+	# Phase 2: area-trigger (zone) surface. `zones` are MissionData-shaped dicts.
 	var zones: Array = []
 	var selected_zone: int = -1
 	var add_zone_calls: int = 0
@@ -395,7 +395,7 @@ class FakeController:
 		changed.emit()
 
 	# Phase 3: weapon loadout + groups (mission-global). `loadout`/`groups` are
-	# NovaMissionData-shaped dictionaries; the *_calls arrays record what the inspector sent.
+	# MissionData-shaped dictionaries; the *_calls arrays record what the inspector sent.
 	var loadout: Array = []
 	var groups: Array = []
 	var set_loadout_calls: Array = []
@@ -456,7 +456,7 @@ class FakeController:
 			groups[index] = {"index": index, "field0": f0, "field8": f8, "field12": f12}
 		changed.emit()
 
-	# Phase 4: mission scripting. `events` are NovaMissionData-shaped event dicts; `chain` is the
+	# Phase 4: mission scripting. `events` are MissionData-shaped event dicts; `chain` is the
 	# selected event's chain ({ event, triggers, actions, references, diagnostics }); the *_calls arrays
 	# record what the inspector's Scripting tab sent. Mode 3 is SCRIPTING.
 	var events: Array = []
@@ -583,7 +583,7 @@ class FakeController:
 
 func _sample_entity() -> Dictionary:
 	return {
-		"kind": NovaMissionData.KIND_ORGANIC, "index": 4,
+		"kind": MissionData.KIND_ORGANIC, "index": 4,
 		"position": Vector3(10.0, 2.0, -5.0), "rotation_deg": Vector3(0.0, 45.0, 0.0),
 		"team": 1, "group": 2,
 		# Behavior fields the format carries beyond team / group (P7).
@@ -697,15 +697,15 @@ func test_identity_graphic_jump_opens_resolved_object_model() -> void:
 	var ctx := _make(_sample_entity())
 	ctx.fake.graphic_name = "SpecOps"
 	var log := {}
-	ctx.inspector.set_reference_services({
-		"resolve": func(kind: String, name: String) -> Dictionary:
-			log["resolve"] = [kind, name]
-			return {"status": "found", "path": "C:/res/SpecOps.3di"},
-		"pick": func(kind: String, title: String, _on_pick: Callable) -> void:
-			log["pick"] = [kind, title],
-		"jump": func(kind: String, path: String) -> void:
-			log["jump"] = [kind, path],
-	})
+	var services := LinkServices.new()
+	services.resolve = func(kind: String, name: String) -> Dictionary:
+		log["resolve"] = [kind, name]
+		return {"status": "found", "path": "C:/res/SpecOps.3di"}
+	services.pick = func(kind: String, title: String, _on_pick: Callable) -> void:
+		log["pick"] = [kind, title]
+	services.jump = func(kind: String, path: String) -> void:
+		log["jump"] = [kind, path]
+	ctx.inspector.set_reference_services(services)
 	ctx.inspector._refresh()
 	assert_eq(log["resolve"], ["object_model", "SpecOps"], "the selected graphic resolves as an object model")
 	assert_true(ctx.inspector._identity_graphic.jump_button.visible, "resolved graphics expose the jump button")
@@ -951,15 +951,15 @@ func test_pressing_delete_button_deletes_through_the_controller() -> void:
 
 func _palette_items() -> Array:
 	return [
-		{"id": 102001, "display_name": "Guard Tower", "type": NovaItemDatabase.TYPE_BUILDING},
-		{"id": 101291, "display_name": "Dune Buggy", "type": NovaItemDatabase.TYPE_VEHICLE},
-		{"id": 105311, "display_name": "Soldier", "type": NovaItemDatabase.TYPE_PERSON},
+		{"id": 102001, "display_name": "Guard Tower", "type": ItemDatabase.TYPE_BUILDING},
+		{"id": 101291, "display_name": "Dune Buggy", "type": ItemDatabase.TYPE_VEHICLE},
+		{"id": 105311, "display_name": "Soldier", "type": ItemDatabase.TYPE_PERSON},
 	]
 
 
 func _palette_ctx() -> Dictionary:
 	var fake := FakeController.new()
-	fake.mission_ref = NovaMissionData.new()  # a stable non-null ref so the panels show
+	fake.mission_ref = MissionData.new()  # a stable non-null ref so the panels show
 	fake.placeable = _palette_items()
 	var inspector = MissionInspector.new()
 	add_child_autofree(inspector)
@@ -1015,7 +1015,7 @@ func test_empty_palette_repopulates_when_the_item_db_arrives_late() -> void:
 	# a later refresh must populate the palette WITHOUT the mission ref changing -- the
 	# user must not have to close and reopen the mission.
 	var fake := FakeController.new()
-	fake.mission_ref = NovaMissionData.new()
+	fake.mission_ref = MissionData.new()
 	fake.placeable = []  # items.def not yet resolvable
 	var inspector = MissionInspector.new()
 	add_child_autofree(inspector)
@@ -1052,16 +1052,16 @@ func test_active_search_filter_survives_a_changed_echo() -> void:
 
 func _object_rows() -> Array:
 	return [
-		{"kind": NovaMissionData.KIND_ORGANIC, "index": 0, "item_id": 105311, "name": "Soldier", "category": "Person"},
-		{"kind": NovaMissionData.KIND_ORGANIC, "index": 1, "item_id": 105311, "name": "Soldier", "category": "Person"},
-		{"kind": NovaMissionData.KIND_BUILDING, "index": 0, "item_id": 102001, "name": "Guard Tower", "category": "Building"},
-		{"kind": NovaMissionData.KIND_ITEM, "index": 0, "item_id": 999, "name": "", "category": "Item"},
+		{"kind": MissionData.KIND_ORGANIC, "index": 0, "item_id": 105311, "name": "Soldier", "category": "Person"},
+		{"kind": MissionData.KIND_ORGANIC, "index": 1, "item_id": 105311, "name": "Soldier", "category": "Person"},
+		{"kind": MissionData.KIND_BUILDING, "index": 0, "item_id": 102001, "name": "Guard Tower", "category": "Building"},
+		{"kind": MissionData.KIND_ITEM, "index": 0, "item_id": 999, "name": "", "category": "Item"},
 	]
 
 
 func _browser_ctx() -> Dictionary:
 	var fake := FakeController.new()
-	fake.mission_ref = NovaMissionData.new()
+	fake.mission_ref = MissionData.new()
 	fake.object_list = _object_rows()
 	var inspector = MissionInspector.new()
 	add_child_autofree(inspector)
@@ -1092,7 +1092,7 @@ func test_selecting_a_browser_row_selects_that_entity() -> void:
 	var ctx := _browser_ctx()
 	ctx.inspector._browser._on_object_row_selected(2)  # the Guard Tower row
 	assert_eq(ctx.fake.select_object_calls.size(), 1, "the row drives exactly one select")
-	assert_eq(ctx.fake.select_object_calls[0], [NovaMissionData.KIND_BUILDING, 0],
+	assert_eq(ctx.fake.select_object_calls[0], [MissionData.KIND_BUILDING, 0],
 		"with the kind + index from that row (which also frames the camera in the real controller)")
 
 
@@ -1100,7 +1100,7 @@ func test_browser_search_filters_rows() -> void:
 	var ctx := _browser_ctx()
 	ctx.inspector._browser._on_object_search_changed("tower")
 	assert_eq(ctx.inspector._browser._objects_list.item_count, 1, "the search narrows to matching names")
-	assert_eq(ctx.inspector._browser._objects_rows[0], {"kind": NovaMissionData.KIND_BUILDING, "index": 0},
+	assert_eq(ctx.inspector._browser._objects_rows[0], {"kind": MissionData.KIND_BUILDING, "index": 0},
 		"and the surviving row maps to the matching entity")
 	# Category words are searchable too, so "person" finds both Soldiers.
 	ctx.inspector._browser._on_object_search_changed("person")
@@ -1112,7 +1112,7 @@ func test_browser_search_filters_rows() -> void:
 func test_browser_highlights_the_controllers_selection() -> void:
 	var ctx := _browser_ctx()
 	# A viewport pick selects an entity; the list must light up + scroll to the matching row.
-	ctx.fake.entity = {"kind": NovaMissionData.KIND_BUILDING, "index": 0, "position": Vector3.ZERO}
+	ctx.fake.entity = {"kind": MissionData.KIND_BUILDING, "index": 0, "position": Vector3.ZERO}
 	ctx.inspector._refresh()
 	assert_eq(ctx.inspector._browser._objects_list.get_selected_items(), PackedInt32Array([2]),
 		"the row for the current selection is highlighted")
@@ -1123,10 +1123,10 @@ func test_browser_repopulates_when_the_item_db_arrives_late() -> void:
 	# so the rows first show "Item <id>" placeholders. Once names resolve, a later refresh must
 	# relabel them WITHOUT the object set (count) changing.
 	var fake := FakeController.new()
-	fake.mission_ref = NovaMissionData.new()
+	fake.mission_ref = MissionData.new()
 	fake.has_item_db = false
 	fake.object_list = [
-		{"kind": NovaMissionData.KIND_BUILDING, "index": 0, "item_id": 102001, "name": "", "category": "Building"},
+		{"kind": MissionData.KIND_BUILDING, "index": 0, "item_id": 102001, "name": "", "category": "Building"},
 	]
 	var inspector = MissionInspector.new()
 	add_child_autofree(inspector)
@@ -1135,7 +1135,7 @@ func test_browser_repopulates_when_the_item_db_arrives_late() -> void:
 
 	fake.has_item_db = true
 	fake.object_list = [
-		{"kind": NovaMissionData.KIND_BUILDING, "index": 0, "item_id": 102001, "name": "Guard Tower", "category": "Building"},
+		{"kind": MissionData.KIND_BUILDING, "index": 0, "item_id": 102001, "name": "Guard Tower", "category": "Building"},
 	]
 	inspector._refresh()
 	assert_eq(inspector._browser._objects_list.get_item_text(0), "Guard Tower", "relabelled without the object set changing")
@@ -1157,7 +1157,7 @@ func test_browser_rows_survive_a_same_mission_changed_echo() -> void:
 
 func _waypoint_ctx(summaries: Array, active: int) -> Dictionary:
 	var fake := FakeController.new()
-	fake.mission_ref = NovaMissionData.new()
+	fake.mission_ref = MissionData.new()
 	fake.mode = 1  # WAYPOINTS
 	# A populated selection makes the "_edit_box hidden in waypoint mode" gate assertion
 	# load-bearing (the edit panel would otherwise be hidden just for lack of a selection).
@@ -1188,7 +1188,7 @@ func test_mode_tabs_hidden_without_a_mission() -> void:
 
 func test_inspector_has_no_embedded_runtime_controls() -> void:
 	var fake := FakeController.new()
-	fake.mission_ref = NovaMissionData.new()
+	fake.mission_ref = MissionData.new()
 	var inspector = MissionInspector.new()
 	inspector.size = Vector2(280, 640)
 	add_child_autofree(inspector)
@@ -1204,8 +1204,8 @@ func test_inspector_has_no_embedded_runtime_controls() -> void:
 func test_waypoint_panel_shows_and_lists_paths_in_waypoint_mode() -> void:
 	var ctx := _waypoint_ctx([
 		{"index": 2, "flags": 0, "marker_count": 3},
-		{"index": 5, "flags": NovaMissionData.WP_FLAG_DOES_NOT_LOOP, "marker_count": 0},
-		{"index": 7, "flags": NovaMissionData.WP_FLAG_BLUE_TEAM, "marker_count": 2},
+		{"index": 5, "flags": MissionData.WP_FLAG_DOES_NOT_LOOP, "marker_count": 0},
+		{"index": 7, "flags": MissionData.WP_FLAG_BLUE_TEAM, "marker_count": 2},
 	], 2)
 	assert_true(ctx.inspector._waypoints._wp_box.visible, "the waypoint panel shows in waypoint mode")
 	assert_false(ctx.inspector._edit_box.visible, "the object edit panel is hidden in waypoint mode")
@@ -1250,7 +1250,7 @@ func test_flag_checkboxes_reflect_the_active_path() -> void:
 	var ctx := _waypoint_ctx([{"index": 2, "flags": 0, "marker_count": 1}], 2)
 	ctx.fake.active_path = {
 		"index": 2, "marker_count": 1, "marker_indices": PackedInt32Array([5]),
-		"flags": NovaMissionData.WP_FLAG_DOES_NOT_LOOP | NovaMissionData.WP_FLAG_BLUE_TEAM,
+		"flags": MissionData.WP_FLAG_DOES_NOT_LOOP | MissionData.WP_FLAG_BLUE_TEAM,
 	}
 	ctx.fake.changed.emit()
 	assert_false(ctx.inspector._waypoints._wp_loop_check.button_pressed, "DoesNotLoop set -> Loop unchecked")
@@ -1381,8 +1381,8 @@ func test_real_controller_provides_every_method_the_inspector_calls() -> void:
 
 # --- Phase 1: hidden entity fields + mission-properties (header) form ----------
 
-func _loaded_mission_for_props() -> NovaMissionData:
-	var m := NovaMissionData.new()
+func _loaded_mission_for_props() -> MissionData:
+	var m := MissionData.new()
 	m.open_file(ProjectSettings.globalize_path("res://../fixtures/bms/ash_i5b.reference.bms"))
 	return m
 
@@ -1479,12 +1479,12 @@ func test_reference_services_enable_browse_on_world_widgets() -> void:
 	assert_false(terrain.browse_button.visible, "no services yet: browse hidden")
 	# Services arrive after the form is built (the workspace injects them
 	# post-build); the setter must re-configure the live widgets.
-	ctx.inspector.set_reference_services({
-		"resolve": func(_kind: String, _name: String) -> Dictionary:
-			return {"status": "found", "path": "C:/res/x.trn"},
-		"pick": func(_kind: String, _title: String, _on_pick: Callable) -> void:
-			pass,
-	})
+	var services := LinkServices.new()
+	services.resolve = func(_kind: String, _name: String) -> Dictionary:
+		return {"status": "found", "path": "C:/res/x.trn"}
+	services.pick = func(_kind: String, _title: String, _on_pick: Callable) -> void:
+		pass
+	ctx.inspector.set_reference_services(services)
 	assert_true(terrain.browse_button.visible, "services injected: browse shows")
 	assert_true(terrain.badge.visible, "services injected: badge resolves")
 	assert_eq(terrain.badge.text, "●", "fake resolve reports found")
@@ -1507,14 +1507,14 @@ func test_changing_climate_commits_through_set_header_int() -> void:
 
 
 func test_start_with_nvg_is_a_distinct_mission_option() -> void:
-	assert_eq(int(NovaMissionData.ATTRIB_START_WITH_NVG_ON), 0x400000,
+	assert_eq(int(MissionData.ATTRIB_START_WITH_NVG_ON), 0x400000,
 		"StartWithNVGOn binds the retail mission attribute bit")
-	assert_ne(int(NovaMissionData.ATTRIB_START_WITH_NVG_ON), int(NovaMissionData.ATTRIB_ENABLE_NVG),
+	assert_ne(int(MissionData.ATTRIB_START_WITH_NVG_ON), int(MissionData.ATTRIB_ENABLE_NVG),
 		"starting enabled is distinct from the mission's NVG/night semantics")
 	var ctx := _make({})
 	ctx.fake.mission_ref = _loaded_mission_for_props()
 	ctx.fake.changed.emit()
-	var check_name := "MissionFlag_%d" % int(NovaMissionData.ATTRIB_START_WITH_NVG_ON)
+	var check_name := "MissionFlag_%d" % int(MissionData.ATTRIB_START_WITH_NVG_ON)
 	var check := ctx.inspector.find_child(check_name, true, false) as CheckBox
 	assert_not_null(check, "mission properties expose Start with night vision on")
 	if check == null:
@@ -1538,7 +1538,7 @@ func test_selecting_game_mode_commits_through_set_game_mode() -> void:
 	option.selected = 2
 	option.item_selected.emit(2)
 	assert_eq(ctx.fake.game_mode_calls.size(), 1, "one set_game_mode commit")
-	assert_eq(int(ctx.fake.game_mode_calls[0]), int(NovaMissionData.ATTRIB_DEATHMATCH), "bit is Deathmatch")
+	assert_eq(int(ctx.fake.game_mode_calls[0]), int(MissionData.ATTRIB_DEATHMATCH), "bit is Deathmatch")
 	assert_eq(ctx.fake.header_flag_calls.size(), 0, "game mode no longer routes through set_header_flag")
 
 
@@ -1546,7 +1546,7 @@ func test_selecting_game_mode_commits_through_set_game_mode() -> void:
 
 func _trigger_ctx(zones: Array, selected: int) -> Dictionary:
 	var fake := FakeController.new()
-	fake.mission_ref = NovaMissionData.new()
+	fake.mission_ref = MissionData.new()
 	fake.mode = 2  # AREA_TRIGGERS
 	fake.zones = zones
 	fake.selected_zone = selected
@@ -1647,7 +1647,7 @@ func test_trigger_panel_editors_disabled_when_zones_exist_but_none_selected() ->
 
 func _loadout_ctx(loadout: Array) -> Dictionary:
 	var fake := FakeController.new()
-	fake.mission_ref = NovaMissionData.new()
+	fake.mission_ref = MissionData.new()
 	fake.mode = 0
 	fake.entity = _sample_entity()
 	fake.loadout = loadout
@@ -1662,7 +1662,7 @@ func _loadout_ctx(loadout: Array) -> Dictionary:
 
 func _groups_ctx(groups: Array) -> Dictionary:
 	var fake := FakeController.new()
-	fake.mission_ref = NovaMissionData.new()
+	fake.mission_ref = MissionData.new()
 	fake.mode = 0
 	fake.entity = _sample_entity()
 	fake.groups = groups
@@ -1860,7 +1860,7 @@ func _sc_chain_dict(event: Dictionary, triggers: Array, actions: Array, diagnost
 
 func _scripting_ctx(events: Array, selected: int, chain: Dictionary) -> Dictionary:
 	var fake := FakeController.new()
-	fake.mission_ref = NovaMissionData.new()
+	fake.mission_ref = MissionData.new()
 	fake.mode = 3  # SCRIPTING
 	fake.events = events
 	fake.selected_event = selected
@@ -2309,7 +2309,7 @@ func test_scripting_ref_integrity_flags_bad_group() -> void:
 func _make_split(entity: Dictionary) -> Dictionary:
 	var fake := FakeController.new()
 	fake.entity = entity
-	fake.mission_ref = NovaMissionData.new()  # a mission makes the palette + Mission form live
+	fake.mission_ref = MissionData.new()  # a mission makes the palette + Mission form live
 	var dock := PanelContainer.new()
 	dock.custom_minimum_size = Vector2(280, 0)
 	add_child_autofree(dock)
@@ -2392,7 +2392,7 @@ func test_reground_button_shows_with_a_mission_and_delegates() -> void:
 	assert_not_null(button, "the Re-ground button is built up front")
 	assert_false(button.visible, "and hidden while no mission is loaded")
 
-	ctx.fake.mission_ref = NovaMissionData.new()
+	ctx.fake.mission_ref = MissionData.new()
 	ctx.fake.changed.emit()
 	assert_true(button.visible, "a loaded mission shows the button")
 	assert_false(button.disabled, "authoring controls remain available in the editor")

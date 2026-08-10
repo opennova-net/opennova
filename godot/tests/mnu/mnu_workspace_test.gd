@@ -54,8 +54,8 @@ func _cleanup_dir(dir_path: String) -> void:
 	DirAccess.remove_absolute(abs)
 
 
-func _load_resource() -> NovaMnuDocument:
-	var doc := NovaMnuDocument.new()
+func _load_resource() -> MnuDocument:
+	var doc := MnuDocument.new()
 	doc.load_from_bytes(FileAccess.get_file_as_bytes(FIXTURE))
 	return doc
 
@@ -101,7 +101,7 @@ func _first_line_edit(node: Node) -> LineEdit:
 	return null
 
 
-func _first_root_child(doc: NovaMnuDocument, index: int) -> int:
+func _first_root_child(doc: MnuDocument, index: int) -> int:
 	var root := doc.get_screen_root_id(doc.get_screen_ids()[0])
 	return doc.get_child_ids(root)[index]
 
@@ -193,29 +193,25 @@ func test_canvas_builds_inert_preview_with_single_screen() -> void:
 	await get_tree().process_frame
 
 	var preview := canvas.get_node_or_null("Preview")
-	assert_not_null(preview, "Canvas holds a NovaMnuMenu preview.")
-	assert_true(preview is NovaMnuMenu, "Preview is a NovaMnuMenu.")
-	assert_true(preview.get_edit_mode(), "Preview is in edit_mode (inert: no nav/audio/cursor).")
+	assert_not_null(preview, "Canvas holds a compiled preview surface.")
+	assert_true(preview is MenuFrame, "Preview is the engine MenuFrame surface.")
+	var frame := preview as MenuFrame
+	assert_true(frame.is_configured(), "Preview compiled the visible screen.")
+	assert_null(canvas.get_interactive_driver(),
+		"Author-mode preview is inert (no play driver: no nav/audio/cursor).")
+	# One compiled screen per frame: MAIN's tree is ROOT + its 5 widgets.
+	assert_eq(frame.widget_count(), 6, "Only the visible screen is compiled.")
 
-	var screens := 0
-	var visible := 0
-	for child in preview.get_children():
-		if child is NovaMnuScreen:
-			screens += 1
-			if child.visible:
-				visible += 1
-	assert_eq(screens, 2, "Both screens are built.")
-	assert_eq(visible, 1, "Exactly one screen is visible in the preview.")
-
-	# Anamorphic fill: the 800x600 board fills the 320x240 canvas -> 320/800 == 240/600 == 0.4.
-	assert_almost_eq(preview.scale.x, 0.4, 0.01, "Preview scales to fill the canvas (anamorphic).")
+	# Anamorphic fill: the frame stays pinned at the 800x600 board size and the
+	# canvas scales it -> 320/800 == 240/600 == 0.4.
+	assert_eq(frame.size, Vector2(800, 600), "Frame pinned to the design space.")
+	assert_almost_eq(frame.scale.x, 0.4, 0.01, "Preview scales to fill the canvas (anamorphic).")
 
 	canvas.show_screen_named("OPTIONS")
-	var options_visible := false
-	for child in preview.get_children():
-		if child is NovaMnuScreen and child.get_screen_name() == "OPTIONS":
-			options_visible = child.visible
-	assert_true(options_visible, "Switching to OPTIONS makes it the visible screen.")
+	assert_eq(canvas.get_visible_screen_name(), "OPTIONS", "Screen switch tracked.")
+	assert_true(frame.is_configured(), "OPTIONS compiled after the switch.")
+	assert_eq(frame.widget_count(), 2,
+		"Switching screens re-configures the frame (ROOT2 + BackBtn).")
 
 
 func test_editor_preview_uses_menu_stylesheet_from_resource_root() -> void:
@@ -228,7 +224,7 @@ func test_editor_preview_uses_menu_stylesheet_from_resource_root() -> void:
 	f.store_string("DEF_FONTNAME Gunpl22b.fnt\nDEF_TEXT_FG FFFFFFFF\n")
 	f.close()
 
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(dir), OK, "Temp resource root should open.")
 
 	var ed = MnuEditorScript.new()
@@ -242,15 +238,20 @@ func test_editor_preview_uses_menu_stylesheet_from_resource_root() -> void:
 	ed.set_document(editordoc)
 	await get_tree().process_frame
 
-	var preview := ed._canvas.get_node_or_null("Preview") as NovaMnuMenu
-	assert_not_null(preview, "Editor canvas should mount a NovaMnuMenu preview.")
+	var preview := ed._canvas.get_node_or_null("Preview") as MenuFrame
+	assert_not_null(preview, "Editor canvas should mount a compiled MenuFrame preview.")
 	if preview == null:
 		return
-	var sheet := preview.get_stylesheet()
+	assert_true(preview.is_configured(), "Preview compiled against the resource root.")
+	# The stylesheet plumb: the editor resolves the canonical menu_style.mns from
+	# the resource root and hands it to the canvas, which feeds every configure.
+	var sheet := ed.get_stylesheet()
 	assert_not_null(sheet, "Editor preview should use menu_style.mns from the resource root.")
 	if sheet != null:
 		assert_eq(sheet.substitute("%DEF_FONTNAME%"), "Gunpl22b.fnt",
 			"Preview stylesheet should be the canonical menu stylesheet.")
+		assert_same(ed._canvas._stylesheet, sheet,
+			"The canvas configures the frame with the editor's resolved stylesheet.")
 	DirAccess.remove_absolute(dir.path_join("menu_style.mns"))
 	DirAccess.remove_absolute(dir)
 
@@ -587,7 +588,7 @@ func _editor_with_fixture() -> Array:
 	return [ed, editordoc]
 
 
-func _find_widget_id(doc: NovaMnuDocument, id: int, wname: String) -> int:
+func _find_widget_id(doc: MnuDocument, id: int, wname: String) -> int:
 	if doc.get_widget_name(id) == wname:
 		return id
 	for cid in doc.get_child_ids(id):
@@ -754,8 +755,8 @@ func test_inspector_flag_toggle_emits_recomputed_mask() -> void:
 			var e: Dictionary = captured[0]
 			assert_eq(e.get("prop"), "flags", "A flag toggle commits the flags property.")
 			var mask := int(e.get("value"))
-			assert_true((mask & NovaMnuDocument.FLAG_DISABLED) != 0, "The toggled flag is set in the mask.")
-			assert_true((mask & NovaMnuDocument.FLAG_CHECKED) != 0, "Existing flags are preserved in the mask.")
+			assert_true((mask & MnuDocument.FLAG_DISABLED) != 0, "The toggled flag is set in the mask.")
+			assert_true((mask & MnuDocument.FLAG_CHECKED) != 0, "Existing flags are preserved in the mask.")
 
 
 func test_adapter_delegates_undo_redo() -> void:
@@ -789,13 +790,13 @@ func test_editor_color_edit_preserves_variable_token() -> void:
 	ed.select_widget(root_id)
 
 	ed.apply_edit({"target": "widget", "id": root_id, "prop": "color",
-		"slot": NovaMnuDocument.COLOR_DEFAULT_FG, "value": "00FF00"})
-	assert_eq(editordoc.resource.get_widget_color(root_id, NovaMnuDocument.COLOR_DEFAULT_FG), "00FF00",
+		"slot": MnuDocument.COLOR_DEFAULT_FG, "value": "00FF00"})
+	assert_eq(editordoc.resource.get_widget_color(root_id, MnuDocument.COLOR_DEFAULT_FG), "00FF00",
 		"A literal hex color applies.")
 
 	ed.apply_edit({"target": "widget", "id": root_id, "prop": "color",
-		"slot": NovaMnuDocument.COLOR_DEFAULT_FG, "value": "%CUSTOM_FG%"})
-	assert_eq(editordoc.resource.get_widget_color(root_id, NovaMnuDocument.COLOR_DEFAULT_FG), "%CUSTOM_FG%",
+		"slot": MnuDocument.COLOR_DEFAULT_FG, "value": "%CUSTOM_FG%"})
+	assert_eq(editordoc.resource.get_widget_color(root_id, MnuDocument.COLOR_DEFAULT_FG), "%CUSTOM_FG%",
 		"A %VAR% token is stored verbatim (survives the round-trip).")
 	await get_tree().process_frame  # flush queue_free'd preview generations
 
@@ -839,7 +840,7 @@ func test_inspector_text_commit_skipped_when_detached() -> void:
 
 # --- M8b: structural ops (add / delete / reparent / screens) + snapshot undo ----
 
-func _main_root(doc: NovaMnuDocument) -> int:
+func _main_root(doc: MnuDocument) -> int:
 	return doc.get_screen_root_id(doc.get_screen_ids()[0])
 
 
@@ -847,12 +848,12 @@ func test_editor_add_widget_grows_tree_and_undo() -> void:
 	var pair = await _editor_with_fixture()
 	var ed = pair[0]
 	var editordoc = pair[1]
-	var doc: NovaMnuDocument = editordoc.resource
+	var doc: MnuDocument = editordoc.resource
 	var root := _main_root(doc)
 	ed.select_widget(root)
 	var before := doc.get_child_ids(root).size()
 
-	var new_id: int = ed.add_widget_action(NovaMnuDocument.TYPE_BUTTON)
+	var new_id: int = ed.add_widget_action(MnuDocument.TYPE_BUTTON)
 	assert_gt(new_id, 0, "add_widget_action returns a new id.")
 	assert_eq(doc.get_child_ids(root).size(), before + 1, "The tree grew by one child.")
 	assert_eq(ed.get_selected_id(), new_id, "The new widget is selected.")
@@ -873,12 +874,12 @@ func test_editor_delete_widget_shrinks_and_undo() -> void:
 	var pair = await _editor_with_fixture()
 	var ed = pair[0]
 	var editordoc = pair[1]
-	var doc: NovaMnuDocument = editordoc.resource
+	var doc: MnuDocument = editordoc.resource
 	var root := _main_root(doc)
 	var start_id := _first_root_child(doc, 1)  # StartBtn
 	var name: String = doc.get_widget_name(start_id)
 	var rect: Rect2 = doc.get_window_rect(start_id)
-	var tex: String = doc.get_widget_texture(start_id, NovaMnuDocument.TEX_DEFAULT)
+	var tex: String = doc.get_widget_texture(start_id, MnuDocument.TEX_DEFAULT)
 	var before := doc.get_child_ids(root).size()
 
 	ed.select_widget(start_id)
@@ -890,7 +891,7 @@ func test_editor_delete_widget_shrinks_and_undo() -> void:
 	assert_true(doc.widget_exists(start_id), "Undo restores the deleted widget.")
 	assert_eq(doc.get_widget_name(start_id), name, "Undo restores the name.")
 	assert_eq(doc.get_window_rect(start_id), rect, "Undo restores the rect.")
-	assert_eq(doc.get_widget_texture(start_id, NovaMnuDocument.TEX_DEFAULT), tex, "Undo restores the texture.")
+	assert_eq(doc.get_widget_texture(start_id, MnuDocument.TEX_DEFAULT), tex, "Undo restores the texture.")
 	await get_tree().process_frame
 
 
@@ -898,7 +899,7 @@ func test_editor_delete_refused_for_screen_and_root() -> void:
 	var pair = await _editor_with_fixture()
 	var ed = pair[0]
 	var editordoc = pair[1]
-	var doc: NovaMnuDocument = editordoc.resource
+	var doc: MnuDocument = editordoc.resource
 	var screen := doc.get_screen_ids()[0]
 
 	ed.select_widget(screen)
@@ -916,7 +917,7 @@ func test_editor_reparent_moves_subtree_and_undo() -> void:
 	var pair = await _editor_with_fixture()
 	var ed = pair[0]
 	var editordoc = pair[1]
-	var doc: NovaMnuDocument = editordoc.resource
+	var doc: MnuDocument = editordoc.resource
 	var root := _main_root(doc)
 	var children := doc.get_child_ids(root)
 	var title_id: int = children[0]
@@ -937,12 +938,12 @@ func test_editor_reparent_cycle_refused() -> void:
 	var pair = await _editor_with_fixture()
 	var ed = pair[0]
 	var editordoc = pair[1]
-	var doc: NovaMnuDocument = editordoc.resource
+	var doc: MnuDocument = editordoc.resource
 	var root := _main_root(doc)
 	var start_id := _first_root_child(doc, 1)  # StartBtn
 
 	ed.select_widget(start_id)
-	var grand: int = ed.add_widget_action(NovaMnuDocument.TYPE_WINDOW)  # child of StartBtn
+	var grand: int = ed.add_widget_action(MnuDocument.TYPE_WINDOW)  # child of StartBtn
 	ed.reparent_action(start_id, grand, 0)  # move parent into its own descendant
 	assert_eq(doc.get_parent_id(start_id), root, "A cycle reparent is refused; the parent is unchanged.")
 	await get_tree().process_frame
@@ -955,11 +956,11 @@ func test_editor_interleaved_struct_and_prop_undo_redo() -> void:
 	var pair = await _editor_with_fixture()
 	var ed = pair[0]
 	var editordoc = pair[1]
-	var doc: NovaMnuDocument = editordoc.resource
+	var doc: MnuDocument = editordoc.resource
 	var root := _main_root(doc)
 
 	ed.select_widget(root)
-	var added: int = ed.add_widget_action(NovaMnuDocument.TYPE_BUTTON)
+	var added: int = ed.add_widget_action(MnuDocument.TYPE_BUTTON)
 	assert_gt(added, 0, "Add succeeds.")
 	ed.apply_edit({"target": "widget", "id": added, "prop": "name", "value": "MyBtn"})
 	assert_eq(doc.get_widget_name(added), "MyBtn", "The added widget is renamed.")
@@ -993,7 +994,7 @@ func test_editor_add_and_delete_screen_undo() -> void:
 	var pair = await _editor_with_fixture()
 	var ed = pair[0]
 	var editordoc = pair[1]
-	var doc: NovaMnuDocument = editordoc.resource
+	var doc: MnuDocument = editordoc.resource
 	var n := doc.get_screen_count()
 
 	var sid: int = ed.add_screen_action()
@@ -1017,7 +1018,7 @@ func test_editor_add_screen_uses_unique_name() -> void:
 	var pair = await _editor_with_fixture()
 	var ed = pair[0]
 	var editordoc = pair[1]
-	var doc: NovaMnuDocument = editordoc.resource
+	var doc: MnuDocument = editordoc.resource
 	var s1: int = ed.add_screen_action()
 	var s2: int = ed.add_screen_action()
 	assert_ne(doc.get_screen_name(s1), doc.get_screen_name(s2), "Two added screens get distinct names.")
@@ -1028,7 +1029,7 @@ func test_editor_reparent_noop_not_recorded() -> void:
 	var pair = await _editor_with_fixture()
 	var ed = pair[0]
 	var editordoc = pair[1]
-	var doc: NovaMnuDocument = editordoc.resource
+	var doc: MnuDocument = editordoc.resource
 	var root := _main_root(doc)
 	var children := doc.get_child_ids(root)
 	var last: int = children[children.size() - 1]
@@ -1057,13 +1058,13 @@ func test_struct_edit_then_save_reload_roundtrip() -> void:
 	add_child_autofree(mount)
 	ws.mount_viewport(mount)
 	await get_tree().process_frame
-	var doc: NovaMnuDocument = ws._document.resource
+	var doc: MnuDocument = ws._document.resource
 	var root := doc.get_screen_root_id(doc.get_screen_ids()[0])
 
 	# Add a Static under root, then reparent StartBtn under Title.
 	ws._editor.select_widget(root)
-	var static_name: String = NovaMnuDocument.new().get_widget_type_name(NovaMnuDocument.TYPE_STATIC)
-	ws._editor.add_widget_action(NovaMnuDocument.TYPE_STATIC)
+	var static_name: String = MnuDocument.new().get_widget_type_name(MnuDocument.TYPE_STATIC)
+	ws._editor.add_widget_action(MnuDocument.TYPE_STATIC)
 	var children := doc.get_child_ids(root)
 	ws._editor.reparent_action(children[1], children[0], 0)  # StartBtn under Title
 
@@ -1107,7 +1108,7 @@ func _editor_with_all_widgets() -> Array:
 	return [ed, editordoc]
 
 
-func _widget_named(doc: NovaMnuDocument, wname: String) -> int:
+func _widget_named(doc: MnuDocument, wname: String) -> int:
 	for sid in doc.get_screen_ids():
 		var f := _find_widget_id(doc, doc.get_screen_root_id(sid), wname)
 		if f != -1:
@@ -1119,7 +1120,7 @@ func test_editor_item_add_remove_undo_redo() -> void:
 	var pair = await _editor_with_all_widgets()
 	var ed = pair[0]
 	var editordoc = pair[1]
-	var doc: NovaMnuDocument = editordoc.resource
+	var doc: MnuDocument = editordoc.resource
 	var list := _widget_named(doc, "MissionList")
 	ed.select_widget(list)
 	assert_eq(doc.get_item_count(list), 2, "MissionList starts with 2 items.")
@@ -1141,7 +1142,7 @@ func test_editor_item_move_and_undo() -> void:
 	var pair = await _editor_with_all_widgets()
 	var ed = pair[0]
 	var editordoc = pair[1]
-	var doc: NovaMnuDocument = editordoc.resource
+	var doc: MnuDocument = editordoc.resource
 	var list := _widget_named(doc, "MissionList")
 	ed.select_widget(list)
 
@@ -1156,7 +1157,7 @@ func test_editor_item_field_edit_keeps_selection_and_undo() -> void:
 	var pair = await _editor_with_all_widgets()
 	var ed = pair[0]
 	var editordoc = pair[1]
-	var doc: NovaMnuDocument = editordoc.resource
+	var doc: MnuDocument = editordoc.resource
 	var list := _widget_named(doc, "MissionList")
 	ed.select_widget(list)
 
@@ -1181,7 +1182,7 @@ func test_editor_combo_item_add_round_trips_through_save() -> void:
 	add_child_autofree(mount)
 	ws.mount_viewport(mount)
 	await get_tree().process_frame
-	var doc: NovaMnuDocument = ws._document.resource
+	var doc: MnuDocument = ws._document.resource
 	var combo := _widget_named(doc, "ServerList")
 	assert_eq(doc.get_item_count(combo), 3, "ServerList combo reads its LIST_BOX rows.")
 
@@ -1201,7 +1202,7 @@ func test_editor_table_header_edit_and_undo() -> void:
 	var pair = await _editor_with_all_widgets()
 	var ed = pair[0]
 	var editordoc = pair[1]
-	var doc: NovaMnuDocument = editordoc.resource
+	var doc: MnuDocument = editordoc.resource
 	var table := _widget_named(doc, "MissionTable")
 	ed.select_widget(table)
 	assert_eq(doc.get_table_headers(table).size(), 3, "MissionTable has 3 headers.")
@@ -1223,7 +1224,7 @@ func test_editor_action_edit_and_undo() -> void:
 	var pair = await _editor_with_fixture()
 	var ed = pair[0]
 	var editordoc = pair[1]
-	var doc: NovaMnuDocument = editordoc.resource
+	var doc: MnuDocument = editordoc.resource
 	var start := _first_root_child(doc, 1)
 	ed.select_widget(start)
 	var before: Array = doc.get_widget_actions(start)
@@ -1244,7 +1245,7 @@ func test_editor_action_edit_and_undo() -> void:
 
 
 func test_inspector_renders_item_and_table_sections() -> void:
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	doc.load_from_bytes(FileAccess.get_file_as_bytes(ALL_WIDGETS))
 	var inspector = MnuPropertyInspectorScript.new()
 	add_child_autofree(inspector)
@@ -1292,24 +1293,24 @@ func test_editor_add_color_slot_persists_through_save_and_undo() -> void:
 	add_child_autofree(mount)
 	ws.mount_viewport(mount)
 	await get_tree().process_frame
-	var doc: NovaMnuDocument = ws._document.resource
+	var doc: MnuDocument = ws._document.resource
 	var root := _main_root(doc)
-	assert_eq(doc.get_widget_color(root, NovaMnuDocument.COLOR_DEFAULT_BG), "", "Root background color starts empty.")
+	assert_eq(doc.get_widget_color(root, MnuDocument.COLOR_DEFAULT_BG), "", "Root background color starts empty.")
 
 	ws._on_inspector_edit({"target": "widget", "id": root, "prop": "color",
-		"slot": NovaMnuDocument.COLOR_DEFAULT_BG, "value": "FFFFFF"})
-	assert_eq(doc.get_widget_color(root, NovaMnuDocument.COLOR_DEFAULT_BG), "FFFFFF", "The add-color edit sets the slot.")
+		"slot": MnuDocument.COLOR_DEFAULT_BG, "value": "FFFFFF"})
+	assert_eq(doc.get_widget_color(root, MnuDocument.COLOR_DEFAULT_BG), "FFFFFF", "The add-color edit sets the slot.")
 	assert_true(ws._editor.can_undo(), "Adding a color slot is undoable.")
 
 	assert_eq(ws.save_as(TEMP_DIR), OK)
 	var reloaded = autofree(MnuEditorDocumentScript.new())
 	assert_eq(reloaded.open_mnu(ws._document.current_path), OK)
 	var rroot := _main_root(reloaded.resource)
-	assert_eq(reloaded.resource.get_widget_color(rroot, NovaMnuDocument.COLOR_DEFAULT_BG), "FFFFFF",
+	assert_eq(reloaded.resource.get_widget_color(rroot, MnuDocument.COLOR_DEFAULT_BG), "FFFFFF",
 		"The added color slot survives save + reload.")
 
 	ws._editor.undo()
-	assert_eq(doc.get_widget_color(root, NovaMnuDocument.COLOR_DEFAULT_BG), "", "Undo clears the added color slot.")
+	assert_eq(doc.get_widget_color(root, MnuDocument.COLOR_DEFAULT_BG), "", "Undo clears the added color slot.")
 	await get_tree().process_frame
 
 
@@ -1324,7 +1325,7 @@ func test_editor_table_subst_edit_and_round_trip() -> void:
 	add_child_autofree(mount)
 	ws.mount_viewport(mount)
 	await get_tree().process_frame
-	var doc: NovaMnuDocument = ws._document.resource
+	var doc: MnuDocument = ws._document.resource
 	var table := _widget_named(doc, "MissionTable")
 	assert_eq(doc.get_table_substs(table).size(), 1, "MissionTable reads its one SUBST cell.")
 	var first: Dictionary = doc.get_table_substs(table)[0]
@@ -1360,7 +1361,7 @@ func test_editor_apply_rect_batch_one_undo() -> void:
 	var pair = await _editor_with_fixture()
 	var ed = pair[0]
 	var editordoc = pair[1]
-	var doc: NovaMnuDocument = editordoc.resource
+	var doc: MnuDocument = editordoc.resource
 	var a := _first_root_child(doc, 1)
 	var b := _first_root_child(doc, 0)
 	var a0: Rect2 = doc.get_window_rect(a)
@@ -1387,7 +1388,7 @@ func test_editor_select_widgets_emits_selection_changed() -> void:
 	var pair = await _editor_with_fixture()
 	var ed = pair[0]
 	var editordoc = pair[1]
-	var doc: NovaMnuDocument = editordoc.resource
+	var doc: MnuDocument = editordoc.resource
 	var a := _first_root_child(doc, 1)
 	var b := _first_root_child(doc, 0)
 	watch_signals(ed)
@@ -1426,7 +1427,7 @@ func test_adapter_routes_multi_selection_to_inspector() -> void:
 	ws.mount_viewport(mount)
 	ws.build_inspector(inspector_mount)
 	await get_tree().process_frame
-	var doc: NovaMnuDocument = ws._document.resource
+	var doc: MnuDocument = ws._document.resource
 	var a := _first_root_child(doc, 1)
 	var b := _first_root_child(doc, 0)
 	ws._editor.select_widgets(PackedInt32Array([a, b]))
@@ -1438,29 +1439,27 @@ func test_adapter_routes_multi_selection_to_inspector() -> void:
 # --- Phase 5: strings integration + cross-workspace jumps ------------------------
 
 # Stub shell capturing the cross-workspace jump calls the adapter makes.
-class _StubShell extends Node:
+class _StubShell extends WorkspaceShell:
 	var strings_calls: Array = []
 	var font_calls: Array = []
 	var menu_calls: Array = []
-	func open_strings_workspace(path: String, key: String) -> int:
+	func open_strings_workspace(path: String, key: String) -> Error:
 		strings_calls.append([path, key])
 		return OK
-	func open_font_workspace(font: String) -> int:
+	func open_font_workspace(font: String) -> Error:
 		font_calls.append(font)
 		return OK
-	func open_menu_workspace(file: String, screen: String) -> int:
+	func open_menu_workspace(file: String, screen: String = "") -> Error:
 		menu_calls.append([file, screen])
 		return OK
-	func show_status_message(_text: String, _duration := 4.0, _severity: StringName = &"info") -> void:
-		pass
 
 
 # Stub editor exposing only the resolved-table path the adapter reads for the jump.
-class _StubEditor extends Control:
+class _StubEditor extends MnuEditor:
 	var path: String = ""
 	func get_text_resource_path() -> String:
 		return path
-	func get_text_resource():
+	func get_text_resource() -> RtxtStringFile:
 		return null
 
 
@@ -1534,16 +1533,16 @@ func test_add_widgets_batch_is_one_undo_step_with_props() -> void:
 	var pair = await _editor_with_fixture()
 	var ed = pair[0]
 	var editordoc = pair[1]
-	var doc: NovaMnuDocument = editordoc.resource
+	var doc: MnuDocument = editordoc.resource
 	var root := doc.get_screen_root_id(doc.get_screen_ids()[0])
 	var before_children := doc.get_child_ids(root).size()
 
 	var results: Array = ed.add_widgets_batch([
-		{ "parent": root, "type": NovaMnuDocument.TYPE_BUTTON, "rect": Rect2(10, 10, 100, 24),
+		{ "parent": root, "type": MnuDocument.TYPE_BUTTON, "rect": Rect2(10, 10, 100, 24),
 			"props": { "name": "BatchBtn", "text": "Press" } },
-		{ "parent": root, "type": NovaMnuDocument.TYPE_STATIC, "rect": Rect2(10, 40, 100, 24),
+		{ "parent": root, "type": MnuDocument.TYPE_STATIC, "rect": Rect2(10, 40, 100, 24),
 			"props": { "name": "BatchLabel" } },
-		{ "parent": 999999, "type": NovaMnuDocument.TYPE_BUTTON, "rect": Rect2(0, 0, 10, 10) },
+		{ "parent": 999999, "type": MnuDocument.TYPE_BUTTON, "rect": Rect2(0, 0, 10, 10) },
 	])
 	assert_eq(results.size(), 3)
 	assert_true(bool(results[0]["ok"]))
@@ -1568,7 +1567,7 @@ func test_add_screen_action_accepts_a_custom_name() -> void:
 	var pair = await _editor_with_fixture()
 	var ed = pair[0]
 	var editordoc = pair[1]
-	var doc: NovaMnuDocument = editordoc.resource
+	var doc: MnuDocument = editordoc.resource
 	var named: int = ed.add_screen_action("CUSTOM_SCREEN")
 	assert_gt(named, 0)
 	assert_eq(doc.get_screen_name(named), "CUSTOM_SCREEN")
@@ -1592,7 +1591,7 @@ func test_document_save_as_path_adopts_path_and_validates() -> void:
 	assert_true(FileAccess.file_exists(path), "The file lands exactly where named.")
 	assert_eq(editordoc.current_path, path, "The path is adopted as current.")
 	assert_false(editordoc.is_dirty, "The save marks the document clean.")
-	var reloaded := NovaMnuDocument.new()
+	var reloaded := MnuDocument.new()
 	assert_eq(reloaded.load_from_bytes(FileAccess.get_file_as_bytes(path)), OK, "The saved menu round-trips.")
 	DirAccess.remove_absolute(path)
 	DirAccess.remove_absolute(dir)
@@ -1604,7 +1603,7 @@ func test_add_screen_creates_a_game_shaped_root() -> void:
 	var pair = await _editor_with_fixture()
 	var ed = pair[0]
 	var editordoc = pair[1]
-	var doc: NovaMnuDocument = editordoc.resource
+	var doc: MnuDocument = editordoc.resource
 	var sid: int = ed.add_screen_action("SHAPED")
 	var root := doc.get_screen_root_id(sid)
 	assert_eq(doc.get_widget_name(root), "MAIN", "Shipped screens always name the root MAIN.")
@@ -1622,10 +1621,10 @@ func test_appearances_and_frame_round_trip_through_apply_edit() -> void:
 	var pair = await _editor_with_fixture()
 	var ed = pair[0]
 	var editordoc = pair[1]
-	var doc: NovaMnuDocument = editordoc.resource
+	var doc: MnuDocument = editordoc.resource
 	var root := doc.get_screen_root_id(doc.get_screen_ids()[0])
 	var results: Array = ed.add_widgets_batch([
-		{ "parent": root, "type": NovaMnuDocument.TYPE_BUTTON, "rect": Rect2(10, 10, 100, 24),
+		{ "parent": root, "type": MnuDocument.TYPE_BUTTON, "rect": Rect2(10, 10, 100, 24),
 			"props": { "name": "AppBtn", "appearances": [
 				{ "state": "default" }, { "state": "mouseover" },
 			] } },
@@ -1669,16 +1668,16 @@ func test_auto_size_rects_omit_extents_on_disk() -> void:
 	var pair = await _editor_with_fixture()
 	var ed = pair[0]
 	var editordoc = pair[1]
-	var doc: NovaMnuDocument = editordoc.resource
+	var doc: MnuDocument = editordoc.resource
 	var root := doc.get_screen_root_id(doc.get_screen_ids()[0])
 	var results: Array = ed.add_widgets_batch([
-		{ "parent": root, "type": NovaMnuDocument.TYPE_CHECKBOX, "rect": Rect2(20, 20, -1, 25),
+		{ "parent": root, "type": MnuDocument.TYPE_CHECKBOX, "rect": Rect2(20, 20, -1, 25),
 			"props": { "name": "AutoChk" } },
 	])
 	var chk := int(results[0]["id"])
 	var flags := doc.get_window_rect_flags(chk)
-	assert_eq(flags & NovaMnuDocument.RECT_HAS_RIGHT, 0, "Auto width leaves RIGHT unset.")
-	assert_ne(flags & NovaMnuDocument.RECT_HAS_BOTTOM, 0, "Explicit height keeps BOTTOM.")
+	assert_eq(flags & MnuDocument.RECT_HAS_RIGHT, 0, "Auto width leaves RIGHT unset.")
+	assert_ne(flags & MnuDocument.RECT_HAS_BOTTOM, 0, "Explicit height keeps BOTTOM.")
 
 	var dir := OS.get_cache_dir().path_join("opennova_mnu_autosize_test")
 	var path := dir.path_join("autosize.mnu")
@@ -1747,10 +1746,10 @@ func test_reopening_a_clean_tab_reloads_from_disk() -> void:
 func test_editor_copy_paste_and_duplicate_preserve_subtrees_one_undo_each() -> void:
 	var pair = await _editor_with_fixture()
 	var ed = pair[0]
-	var doc: NovaMnuDocument = pair[1].resource
+	var doc: MnuDocument = pair[1].resource
 	var root := int(doc.get_screen_root_id(doc.get_screen_ids()[0]))
 	var start := _find_widget_id(doc, root, "StartBtn")
-	var nested := int(doc.add_widget(start, NovaMnuDocument.TYPE_STATIC,
+	var nested := int(doc.add_widget(start, MnuDocument.TYPE_STATIC,
 		Rect2(2, 3, 20, 10)))
 	doc.set_widget_name(nested, "Nested")
 	doc.set_widget_text(nested, "Child")
@@ -1780,15 +1779,36 @@ func test_editor_copy_paste_and_duplicate_preserve_subtrees_one_undo_each() -> v
 
 
 func test_editor_align_uses_rendered_auto_extent_and_preserves_auto_width() -> void:
+	# The rendered extent now comes from MenuFrame.widget_rect (the engine
+	# frame-solved text measure, mapped through the canvas id->index map),
+	# which needs a real .fnt: serve one from a temp resource root and give
+	# the auto widget a literal font name so the frame can load it.
+	var dir := OS.get_temp_dir().path_join("mnu_align_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(dir)
+	var fnt_out := FileAccess.open(dir.path_join("Gunpl22b.fnt"), FileAccess.WRITE)
+	assert_not_null(fnt_out, "temp .fnt fixture should be writable")
+	if fnt_out == null:
+		return
+	fnt_out.store_buffer(FileAccess.get_file_as_bytes("res://../fixtures/fnt/Gunpl22b.fnt"))
+	fnt_out.close()
+	var res_root := ResourceRoot.new()
+	if res_root.set_root_dir(dir) != OK:
+		pass_test("temp resource root unavailable: %s" % res_root.get_last_error())
+		DirAccess.remove_absolute(dir.path_join("Gunpl22b.fnt"))
+		DirAccess.remove_absolute(dir)
+		return
+
 	var pair = await _editor_with_fixture()
 	var ed = pair[0]
-	var doc: NovaMnuDocument = pair[1].resource
+	ed.set_resource_root(res_root)
+	var doc: MnuDocument = pair[1].resource
 	var root := int(doc.get_screen_root_id(doc.get_screen_ids()[0]))
-	var auto := int(doc.add_widget(root, NovaMnuDocument.TYPE_STATIC,
+	var auto := int(doc.add_widget(root, MnuDocument.TYPE_STATIC,
 		Rect2(30, 300, -1, 24)))
 	doc.set_widget_name(auto, "AutoLabel")
 	doc.set_widget_text(auto, "A rendered auto-sized label")
-	var fixed := int(doc.add_widget(root, NovaMnuDocument.TYPE_BUTTON,
+	doc.set_widget_font(auto, "Gunpl22b.fnt")
+	var fixed := int(doc.add_widget(root, MnuDocument.TYPE_BUTTON,
 		Rect2(360, 300, 80, 24)))
 	doc.set_widget_name(fixed, "RightEdge")
 	await get_tree().process_frame
@@ -1806,17 +1826,19 @@ func test_editor_align_uses_rendered_auto_extent_and_preserves_auto_width() -> v
 	var rendered_after: Rect2 = ed.get_rendered_widget_rect(auto)
 	assert_almost_eq(rendered_after.end.x, expected_right, 0.75,
 		"right alignment uses the rendered auto extent")
-	assert_eq(doc.get_window_rect_flags(auto) & NovaMnuDocument.RECT_HAS_RIGHT, 0,
+	assert_eq(doc.get_window_rect_flags(auto) & MnuDocument.RECT_HAS_RIGHT, 0,
 		"alignment keeps RIGHT omitted for auto width")
 	ed.undo()
 	assert_almost_eq(doc.get_window_rect(auto).position.x, original_x, 0.01)
 	assert_false(ed.can_undo(), "alignment is one undo entry")
+	DirAccess.remove_absolute(dir.path_join("Gunpl22b.fnt"))
+	DirAccess.remove_absolute(dir)
 
 
 func test_editor_group_z_order_preserves_relative_order_and_one_undo() -> void:
 	var pair = await _editor_with_fixture()
 	var ed = pair[0]
-	var doc: NovaMnuDocument = pair[1].resource
+	var doc: MnuDocument = pair[1].resource
 	var root := int(doc.get_screen_root_id(doc.get_screen_ids()[0]))
 	var before: PackedInt32Array = doc.get_child_ids(root)
 	assert_gt(before.size(), 4)
@@ -1840,7 +1862,7 @@ func test_editor_group_z_order_preserves_relative_order_and_one_undo() -> void:
 func test_editor_duplicate_and_reorder_screen_are_undoable() -> void:
 	var pair = await _editor_with_fixture()
 	var ed = pair[0]
-	var doc: NovaMnuDocument = pair[1].resource
+	var doc: MnuDocument = pair[1].resource
 	var first := int(doc.get_screen_ids()[0])
 	ed.select_widget(first)
 	var copied: int = ed.duplicate_screen_action()
@@ -1865,7 +1887,7 @@ func test_editor_duplicate_and_reorder_screen_are_undoable() -> void:
 func test_musicvar_presence_zero_is_undoable_without_destroying_value() -> void:
 	var pair = await _editor_with_fixture()
 	var ed = pair[0]
-	var doc: NovaMnuDocument = pair[1].resource
+	var doc: MnuDocument = pair[1].resource
 	var sid := int(doc.get_screen_ids()[0])
 	doc.set_screen_property(sid, "music_var", 0)
 	ed.restore_history({})
@@ -1894,7 +1916,7 @@ func test_interactive_lock_blocks_menu_inspector_and_styles_mutations() -> void:
 	ws.build_inspector(dock)
 	await get_tree().process_frame
 	var ed = ws.get_editor_document()
-	var doc: NovaMnuDocument = ws.get_menu_resource()
+	var doc: MnuDocument = ws.get_menu_resource()
 	var start := _find_widget_id(doc,
 		doc.get_screen_root_id(doc.get_screen_ids()[0]), "StartBtn")
 	ed.select_widget(start)

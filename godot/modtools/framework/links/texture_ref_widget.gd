@@ -29,11 +29,13 @@ func _init() -> void:
 	add_child(preview)
 
 
-func configure(kind: String, display_label: String, services: Dictionary = {}) -> void:
+func configure(kind: String, display_label: String, services: LinkServices = null) -> void:
 	# No texture workspace exists to jump to; strip the jump affordance while
 	# keeping resolve (badge) and pick (browse).
-	var trimmed := services.duplicate()
-	trimmed.erase("jump")
+	var trimmed := LinkServices.new()
+	if services != null:
+		trimmed.resolve = services.resolve
+		trimmed.pick = services.pick
 	ref_row.configure(kind, display_label, trimmed)
 
 

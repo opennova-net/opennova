@@ -10,7 +10,7 @@ func test_surface_paint_circle_overwrites_indices() -> void:
 	var palette := PackedByteArray()
 	palette.resize(256 * 3)
 
-	var surface_map := NovaTerrainSurfaceMap.new()
+	var surface_map := TerrainSurfaceMap.new()
 	surface_map.load_from_dictionary({
 		"width": 16,
 		"height": 16,
@@ -25,7 +25,7 @@ func test_surface_paint_circle_overwrites_indices() -> void:
 
 
 func test_nova_terrain_data_charmap_state_roundtrips() -> void:
-	var data := NovaTerrainData.new()
+	var data := TerrainData.new()
 	data.reset_pcx_slot_default("charmap", 8, 8)
 	var state: Dictionary = data.get_pcx_slot_state("charmap")
 	assert_eq(int(state.get("width", 0)), 8, "Charmap state should preserve width.")

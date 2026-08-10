@@ -2,8 +2,8 @@
 
 How Joint Operations loads and plays its `.lwf` sound-profile banks and `.dbf` dialog banks, as
 witnessed in the original engine. This is the reverse-engineering record behind `engine/formats/lwf`,
-`engine/formats/dbf`, `engine/runtime/audio` (member selection), the `NovaLwfData`/`NovaDbfData` wrappers, and the
-`NovaSoundBank`/`NovaMissionAudio` runtime.
+`engine/formats/dbf`, `engine/runtime/audio` (member selection), the `LwfData`/`DbfData` wrappers, and the
+`SoundBank`/`MissionAudio` runtime.
 
 Reverse-engineered from `Jointops.exe` (Joint Operations: Combined Arms, imagebase `0x400000`,
 IDB `Jointops.exe.kong.i64`). All addresses below are absolute in that image. The container
@@ -73,7 +73,7 @@ statically seeded `0x2B0749C1` in .data and never reseeded; volume and pitch jit
 the same stream during playback. `opennova::audio::SoundSelector` implements exactly this
 machine (the stream is pinned by `tests/audio/sound_selector_test.cpp`); the reimpl does not
 reproduce the interleaved volume/pitch draws, so a long-run stream diverges from a real session
-even though algorithm and seed match. `SELECTION_FIRST` in `NovaLwfData` is an authoring-side
+even though algorithm and seed match. `SELECTION_FIRST` in `LwfData` is an authoring-side
 extension with no engine equivalent.
 
 ## Bank slots and load order
@@ -105,20 +105,20 @@ the `.dbf` exists. The menu UI has its own banks: `menu.lwf` loads at profile-se
 name through a 212-byte-entry collection (`sound_bank_collection_add_or_ref @ 0x652b40`, called
 from `CUIElement_ParseXMLDefinition @ 0x648ada`) — menu-slice grill scope.
 
-`NovaMissionAudio` loads one merged chain instead: co-named bank first (it carries the dialog
+`MissionAudio` loads one merged chain instead: co-named bank first (it carries the dialog
 voices), then the global slots in the engine's order. The slot table itself is native — 
 `audio::global_bank_chain` (engine/runtime/audio bank_chain.h, S13 close-out 2026-08-08)
 returns the ordered names with the expansion pair folded in when one is mounted; the shell
-iterates it via `NovaAmbientMixer.global_bank_chain` (ctest `audio_bank_chain` pins the
+iterates it via `AmbientMixer.global_bank_chain` (ctest `audio_bank_chain` pins the
 order both ways). Divergences from the original, accepted and documented:
 
 - **D-SND-1 (bank scope):** the engine scopes the co-named bank to dialog playback; we keep it
   in the single search chain (a superset — dialog set names do not collide with ambient sets in
   JO assets).
-- **D-SND-2 (expansion banks) — FIXED 2026-07-05:** `NovaMissionAudio` loads
+- **D-SND-2 (expansion banks) — FIXED 2026-07-05:** `MissionAudio` loads
   `<exp>L.lwf` / `<exp>.lwf` ahead of the static banks in the engine's slot order
   [orig: Expansion_LoadAssets @ 0x4a4989 / @ 0x4a495e; slot table @ 0x82A5B0] when the
-  root was runtime-mounted with an expansion (`NovaResourceRoot.get_expansion()`, the
+  root was runtime-mounted with an expansion (`ResourceRoot.get_expansion()`, the
   `/exp` launch flag's mount). Missing files skip exactly like `SoundBank_LoadIfExists`.
 - **D-SND-3 (strictness):** parser rejects what the engine silently tolerates (see above).
 
@@ -166,7 +166,7 @@ and a per-frame updater plays the queue **one audio channel at a time**:
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-SND-4 | `NovaMissionAudio.play_dialog` **enqueues** the resolved line set-name(s) and plays them one at a time, starting the next on the previous voice's `finished` (`_dialog_queue` + `spawn_oneshot_2d`) | one dialog channel, `dword_A895FC`-gated, advanced by `Dialog_UpdatePlayback` | reimpl-side serialization that reproduces the observable behavior (no dialog overlap). The prior reimpl played every drained `dialog` effect immediately and non-blocking, so a mission's PreMission/early `PlayWavList` actions blared simultaneously at t=0. We do not model the 16-active-slot table or the per-line countdown timing (the reimpl presents on stream `finished`); the *id -> "dlg%03d" -> .DBF group lines* resolution matches the engine's `"dlg%03i"` path. S13 close-out (2026-08-08): the FIFO stays **shell-owned by decision** — its advance trigger is the stream's `finished` signal (node/stream lifetime, the shell's half under the end-state rule), so a native queue would move no policy, only the Array. The witnessed one-channel serialization rule is this row. |
+| D-SND-4 | `MissionAudio.play_dialog` **enqueues** the resolved line set-name(s) and plays them one at a time, starting the next on the previous voice's `finished` (`_dialog_queue` + `spawn_oneshot_2d`) | one dialog channel, `dword_A895FC`-gated, advanced by `Dialog_UpdatePlayback` | reimpl-side serialization that reproduces the observable behavior (no dialog overlap). The prior reimpl played every drained `dialog` effect immediately and non-blocking, so a mission's PreMission/early `PlayWavList` actions blared simultaneously at t=0. We do not model the 16-active-slot table or the per-line countdown timing (the reimpl presents on stream `finished`); the *id -> "dlg%03d" -> .DBF group lines* resolution matches the engine's `"dlg%03i"` path. S13 close-out (2026-08-08): the FIFO stays **shell-owned by decision** — its advance trigger is the stream's `finished` signal (node/stream lifetime, the shell's half under the end-state rule), so a native queue would move no policy, only the Array. The witnessed one-channel serialization rule is this row. |
 
 ## WAC scripted voice — `wave` / `pwave` (grilled 2026-06-15; re-confirmed 2026-07-09)
 
@@ -198,7 +198,7 @@ direct `.wav` name, not a `.DBF` dialog id.
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-SND-5 | WAC `wave`/`pwave` emit a `"dialog_wav"` effect carrying the filename; the reimpl (`NovaMissionAudio.play_wac_wave`) reads the wav through the VFS, decodes via `NovaWavLoader`, and plays it on a single `_wac_voice` `AudioStreamPlayer` that `play()` restarts (interrupt-on-new) | `Wac_PlayScriptedVoiceWave` resets `dword_C6EC30` then plays the loaded wav | reimpl-side reproduction of the single interrupting voice channel. Previously WAC `wave`/`pwave` fell through `vm.cpp`'s default case to an unrouted `kind="wave"` effect and never played. Scope: `wave`/`pwave`; positional `SSNwave`/`SSNradio` (voice at an entity) and the rest of the sound family (`sound`, `sound2tgt`, `SS2SSN`, `waveready`) remain parsed-but-unconsumed, tracked follow-ups. |
+| D-SND-5 | WAC `wave`/`pwave` emit a `"dialog_wav"` effect carrying the filename; the reimpl (`MissionAudio.play_wac_wave`) reads the wav through the VFS, decodes via `WavLoader`, and plays it on a single `_wac_voice` `AudioStreamPlayer` that `play()` restarts (interrupt-on-new) | `Wac_PlayScriptedVoiceWave` resets `dword_C6EC30` then plays the loaded wav | reimpl-side reproduction of the single interrupting voice channel. Previously WAC `wave`/`pwave` fell through `vm.cpp`'s default case to an unrouted `kind="wave"` effect and never played. Scope: `wave`/`pwave`; positional `SSNwave`/`SSNradio` (voice at an entity) and the rest of the sound family (`sound`, `sound2tgt`, `SS2SSN`, `waveready`) remain parsed-but-unconsumed, tracked follow-ups. |
 
 ## items.def marker sounds
 
@@ -229,7 +229,7 @@ use a separate composite-name path (`SoundProfile_FindByEntityAndType @ 0x528180
 The per-item slot-sound layer the footsteps/screams/foley ride. Port surfaces:
 `engine/runtime/audio/sound_profile.{h,cpp}` (`SoundProfileTable`), `engine/formats/def` (the two
 profile keys), `engine/runtime/world/src/infantry.cpp` (`AiSystem::infantry_anim_sound_pass`
-/ `emit_slot_sound`), `NovaSimulation::set_sound_profiles`/`drain_slot_sounds`,
+/ `emit_slot_sound`), `Simulation::set_sound_profiles`/`drain_slot_sounds`,
 `fire_present_pass.gd` `_drain_slot_sounds`. Evidence ctests: `sound_profile`
 (parse + lookup + the asset-gated 49-profile retail sweep), `slot_sound`
 (emission semantics).
@@ -266,7 +266,7 @@ and `BM1_DEATH`/`BM1_DEATH_K`.
 `resolve_sound_profile_triggers @ 0x528210` fills id[slot] =
 `SoundBank_FindTriggerByName(name24[slot])` across the active banks
 (first bank wins; empty name -> 0). Our reimpl resolves by NAME at play time
-(NovaSoundBank is name-keyed), so the port's "id" IS the authored set name and
+(SoundBank is name-keyed), so the port's "id" IS the authored set name and
 an empty slot is the id-0 no-op.
 
 **Item binding.** `ItemDef_AllocateWithDefaults @ 0x49e3f5` seeds BOTH def
@@ -310,7 +310,7 @@ death edge uses it with type 5 (night) / 0 `@ 0x4b4c4a-0x4b4c6a` — unported
 | D-SND-12 | the female profile (def+2152) is never selected — primary always | the character entity's female byte picks it `@ 0x52831c` | avatar gender is unmodeled sim-side; JO NPC female defs author their own `sound_profile`, so only the shared player defs are affected |
 | D-SND-13 | SndProf.def parses per mission load off the mission resource root | one boot-time load + expansion reloads | same file, same table; no observable difference |
 | D-SND-14 | the local player's death scream rides the NPC slot-7/8 leg | org2 plays the composite `SoundProfile_FindByEntityAndType(def, 5/0)` name `@ 0x4b4c61` | the composite-name chain is unported (P2b player-death presentation); the profile scream is the same authored voice family |
-| D-SND-15 | `Terrain_GetSurfaceTypeAtPosition`'s placed-tile override leg is not modeled (`terrain/surface_type_map.h` samples the charmap only) | `.til` placements remap the surface through `byte_319F7D8` `@ 0x6065ca-0x60660c` | placed-tile data is not sim-plumbed; feet on roads/runways read the underlying charmap class |
+| D-SND-15 | `Terrain_GetSurfaceTypeAtPosition`'s placed-tile override leg is not modeled (`terrain_query/surface_type_map.h` samples the charmap only) | `.til` placements remap the surface through `byte_319F7D8` `@ 0x6065ca-0x60660c` | placed-tile data is not sim-plumbed; feet on roads/runways read the underlying charmap class |
 
 ## Ground vehicle movement sounds (grilled 2026-07-29)
 
@@ -383,7 +383,7 @@ for `cveh`/`ctank`/`cbike` would invent behavior.
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-SND-17 | **PORTED 2026-07-29 (structural ground slice).** `world::update_ground_vehicle_sound` emits generic `SoundEmitterEvent` rows from the final ground-motor state: profile/item-override slots 0/1/2, lanes 0/10/20, the witnessed Q16 gain/pitch and p4 gear branches, 30-tick lifetime, validated primary-occupant gate, collision/wreck behavior, and slot-32 direction edges. `stop_ground_vehicle_sound` emits claimant-detach clears plus the above-water slot-31 stop. A bounded 767-key `SoundEmitterMailbox` retains only the newest source/lane intent and its producer tick; non-allocating clear/anchor controls displace allocation intents at saturation. `NovaSimulation::drain_sound_emitters` and `NovaMissionAudio.apply_sound_emitters` replay those ticks into the existing `AmbientMixer` and persistent eight-voice bank. Source-only anchor rows preserve retail's entity-position-pointer behavior while an unrefreshed lane expires. | the occupied ground-physics path refreshes the eligible idle/direction lanes with speed-derived volume/pitch; an ordinary inactive moving lane expires after 30 ticks, while collision/wreck/detach explicitly clear both; collision forces a full idle refresh; direction edges play slot 32 and claimant detach plays slot 31 only above water | An NPC claimant now keeps the same engine loops alive as a player claimant, keyed by registry lifetime + lane and competing in the shared 767-slot/loudest-eight mix. Focused proof covers stationary NPC occupancy on authority and joiner paths, stale-claim expiry, no-claimant silence, item override, forward/reverse gain and pitch, the p4 gear branch, collision/wreck behavior, direction and water-gated detach one-shots, bounded/coalesced and saturation-safe control transport, 64-bit lifetime keys, moving residual anchors, catch-up chronology, simulation/presentation drain, ID recycling, and shared reimpl ranking (`world`, `ai`, `vehicle_motor`, `ambient_mixer`, `nova_simulation_test.gd`, `nova_mission_audio_test.gd`, `fire_present_pass_test.gd`). Remote compact vehicle rows do not yet restore `veh.speed` or collision contact, so a joiner can reproduce the stationary NPC-truck idle case but moving remote gain/pitch and collision refresh remain open. Scope otherwise stays on the witnessed ground caller; the aircraft-only slot-30 start spawner and other vehicle families/slots remain unclaimed. |
+| D-SND-17 | **PORTED 2026-07-29 (structural ground slice).** `world::update_ground_vehicle_sound` emits generic `SoundEmitterEvent` rows from the final ground-motor state: profile/item-override slots 0/1/2, lanes 0/10/20, the witnessed Q16 gain/pitch and p4 gear branches, 30-tick lifetime, validated primary-occupant gate, collision/wreck behavior, and slot-32 direction edges. `stop_ground_vehicle_sound` emits claimant-detach clears plus the above-water slot-31 stop. A bounded 767-key `SoundEmitterMailbox` retains only the newest source/lane intent and its producer tick; non-allocating clear/anchor controls displace allocation intents at saturation. `Simulation::drain_sound_emitters` and `MissionAudio.apply_sound_emitters` replay those ticks into the existing `AmbientMixer` and persistent eight-voice bank. Source-only anchor rows preserve retail's entity-position-pointer behavior while an unrefreshed lane expires. | the occupied ground-physics path refreshes the eligible idle/direction lanes with speed-derived volume/pitch; an ordinary inactive moving lane expires after 30 ticks, while collision/wreck/detach explicitly clear both; collision forces a full idle refresh; direction edges play slot 32 and claimant detach plays slot 31 only above water | An NPC claimant now keeps the same engine loops alive as a player claimant, keyed by registry lifetime + lane and competing in the shared 767-slot/loudest-eight mix. Focused proof covers stationary NPC occupancy on authority and joiner paths, stale-claim expiry, no-claimant silence, item override, forward/reverse gain and pitch, the p4 gear branch, collision/wreck behavior, direction and water-gated detach one-shots, bounded/coalesced and saturation-safe control transport, 64-bit lifetime keys, moving residual anchors, catch-up chronology, simulation/presentation drain, ID recycling, and shared reimpl ranking (`world`, `ai`, `vehicle_motor`, `ambient_mixer`, `nova_simulation_test.gd`, `nova_mission_audio_test.gd`, `fire_present_pass_test.gd`). Remote compact vehicle rows do not yet restore `veh.speed` or collision contact, so a joiner can reproduce the stationary NPC-truck idle case but moving remote gain/pitch and collision refresh remain open. Scope otherwise stays on the witnessed ground caller; the aircraft-only slot-30 start spawner and other vehicle families/slots remain unclaimed. |
 
 Follow-ups: the remaining vehicle slot consumers (30, 33-50; direct def+0x864
 readers outside the ground movement pass) ride their own vehicle-family grills.
@@ -567,10 +567,10 @@ candidate slice where only def-type-5 (building-kind) candidates block (`allowAl
 pushed at both sound sites `@ 0x52999e/0x5299c3`). Applied in both the emitter mix
 (`@ 0x528659`) and the positional one-shot path (`@ 0x527d95`).
 
-Reimpl port (2026-07-10, `NovaSoundBank` + `NovaMissionAudio`; re-grilled 2026-07-11): the
+Reimpl port (2026-07-10, `SoundBank` + `MissionAudio`; re-grilled 2026-07-11): the
 witnessed curve, the two-radius model, member-0 selection, the time-of-day
 slots/crossfade/stagger, and the loudest-8 budget are structural translations driven from
-`NovaMissionAudio.tick`; voices are persistent `AudioStreamPlayer3D`s with
+`MissionAudio.tick`; voices are persistent `AudioStreamPlayer3D`s with
 `ATTENUATION_DISABLED` (Godot must not attenuate on top — its inverse-distance curve
 amplifying inside `unit_size` is what buried mission dialog under a +21 dB ambient wall once
 the loop-region fix made the bed audible). The 2026-07-11 re-grill fixed four port
@@ -587,11 +587,11 @@ slots / crossfade), and the `dialog_vs_ambient_probe.gd` bed-vs-dialog gate.
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-SND-6 | persistent per-marker `AudioStreamPlayer3D`s, paused/volume-driven by `NovaMissionAudio.tick`; a voice re-entering the mix RESUMES its loop position | transient emitter slots re-registered per tick; a drop-out's channel is STOPPED and a re-entrant reopens from the wave start (`AudioChannel_ResetByHandle @ 0x767160` / `AudioChannel_OpenSlotChecked @ 0x767060`) | reimpl architecture: Godot voices are cheap to keep; resume-vs-restart on a looping bed is inaudible. Whether a retail channel loops natively (AUD1 descriptor flag) or restarts per registration is an open follow-up (the DirectSound service layer was not walked). |
-| D-SND-7 | **PORTED 2026-07-16** (reviewed 2026-07-17): `CollisionWorld::sound_occlusion_inflate` (engine/runtime/world/src/collision_los.cpp) + `terrain_raycast_los_clear` (engine/runtime/terrain_query) implement the compounding two-ray form; `NovaSimulation.sound_occlusion_distance_q16` feeds the emitter mix (`NovaMissionAudio.tick`, rays only for markers already audible at the raw distance) and the one-shot cull recheck + volume snapshot (`NovaSoundBank.play_oneshot_3d`). Authored marker ids, remote-fire ids, and the local-player sentinel now preserve source exclusion and the both-indoors terrain bypass; static emitters refresh blink state at this boundary. | compounding two-LOS-ray distance inflation (`Sound_ApplyOcclusionDistance @ 0x529970` — the corrected form above; terrain leg + building-only entity leg with the -0x8000 radius-slot reuse on ray 2) in both the emitter mix and positional one-shots | evidence: `collision` ctest sound-occlusion cases (both-blocked/one-blocked/clear/clamp), `collision` nearest-point bias, `terrain_raycast` LOS cases, and GUT ambient/one-shot provider wiring; residue = D-SND-9. |
+| D-SND-6 | persistent per-marker `AudioStreamPlayer3D`s, paused/volume-driven by `MissionAudio.tick`; a voice re-entering the mix RESUMES its loop position | transient emitter slots re-registered per tick; a drop-out's channel is STOPPED and a re-entrant reopens from the wave start (`AudioChannel_ResetByHandle @ 0x767160` / `AudioChannel_OpenSlotChecked @ 0x767060`) | reimpl architecture: Godot voices are cheap to keep; resume-vs-restart on a looping bed is inaudible. Whether a retail channel loops natively (AUD1 descriptor flag) or restarts per registration is an open follow-up (the DirectSound service layer was not walked). |
+| D-SND-7 | **PORTED 2026-07-16** (reviewed 2026-07-17): `CollisionWorld::sound_occlusion_inflate` (engine/runtime/world/src/collision_los.cpp) + `terrain_raycast_los_clear` (engine/runtime/terrain_query) implement the compounding two-ray form; `Simulation.sound_occlusion_distance_q16` feeds the emitter mix (`MissionAudio.tick`, rays only for markers already audible at the raw distance) and the one-shot cull recheck + volume snapshot (`SoundBank.play_oneshot_3d`). Authored marker ids, remote-fire ids, and the local-player sentinel now preserve source exclusion and the both-indoors terrain bypass; static emitters refresh blink state at this boundary. | compounding two-LOS-ray distance inflation (`Sound_ApplyOcclusionDistance @ 0x529970` — the corrected form above; terrain leg + building-only entity leg with the -0x8000 radius-slot reuse on ray 2) in both the emitter mix and positional one-shots | evidence: `collision` ctest sound-occlusion cases (both-blocked/one-blocked/clear/clamp), `collision` nearest-point bias, `terrain_raycast` LOS cases, and GUT ambient/one-shot provider wiring; residue = D-SND-9. |
 | D-SND-9 | the entity-leg clip applies the raw radius to EVERY plane | flagged planes (BPLN flags byte nonzero) clamp the clip radius at 0 (`@ 0x538bd8-0x538e1b` — only flag-0 planes read 0.5u thin on ray 2) | plane flags aren't plumbed through the collision feed yet; the remaining difference is sub-0.5u in the ray-2 entity clip. The LOS terrain callback now reads the witnessed nearest 0.5u-quantized texel. |
 | D-SND-8 | master fade ramp, underwater vol/pan halving, options SFX volume, and the bearing-byte pan map to reimpl territory (Ambient bus volume, Godot's spatial panner); doppler (emitter/listener velocity feed) unported | `g_SoundMasterFadeQ24 @ 0x85A3E4` (255/256 steady), `g_SoundListenerUnderwater @ 0x33429A8` halving @ 0x75ca7d, `g_SoundVolumeOption @ 0x24D20CC` per channel write, atan2 bearing pan @ 0x5289c0, `calculate_3d_sound_attenuation @ 0x527f60` doppler | reimpl playback/bus routing (not grillable address-by-address); the underwater duck and doppler are candidates once an underwater/vehicle pass needs them. |
-| D-SND-16 | **PORTED 2026-07-28** (`engine/runtime/audio` `AmbientMixer` + the `NovaAmbientMixer` binding): marker eval/registration runs on the logic-tick clock through the witnessed `tick & 7` cohort walk (each placed marker every 8th tick), layers register into a faithful 767-slot transient table with TICK-unit keep-alives (marker default 10; vol-0 register clears), and the per-render-frame call is only the live-slot mix — lazy range cache, axis+euclid cull, one lazy LOS per raw-audible marker, member-0 two-radius volume, loudest-first ranking. `NovaMissionAudio` keeps stream resolution, decode-failure fallback, and the eight persistent voices (D-SND-6/8); hosts with no ticking runtime (editor idle) free-run an autonomous 62.5 Hz eval clock (the weather world-driven/autonomous split). The curve statics (`calc_distance_volume`/`emitter_layer_volume`/`crossfade_volume_byte`/`time_of_day_region`) moved to engine/runtime/audio; the GDScript seams delegate | registration and mix on split clocks (§driver cadence): the pool-2 `tick & 7` stagger @ 0x4c225a (attached emitters per tick), tick-unit lifetimes, the per-frame render-lane mix @ 0x521341 | evidence: `ambient_mixer` ctest (curve integer pins, cohort stagger, tick-lifetime expiry/revisit, region-flip overlap, same-set suppress, occlusion-once, ranking, vol-0 clear, autonomous clock); GUT `nova_mission_audio_test.gd` / `sound_runtime_test.gd` on the new seam. Measured A/B (ASH_I5A spawn, 143 markers, 10 s windows, same box): the world tick's audio leg 1.19 ms -> 0.21 ms avg per frame (p95 1.41 -> 0.29 ms); frame wall 10.4 -> 8.8 ms. Reimpl residues: candidate-id tie-break for deterministic membership (retail ties by slot order), the range cull compares reimpl-float axes (Q16 at the curve boundary), and min-only layers cull like retail (zero JOX layers are min-only). Was: the full marker x layer eval every render frame in GDScript — the measured 1.2-1.5 ms/frame F3 "Audio" row. |
+| D-SND-16 | **PORTED 2026-07-28** (`engine/runtime/audio` `AmbientMixer` + the `AmbientMixer` binding): marker eval/registration runs on the logic-tick clock through the witnessed `tick & 7` cohort walk (each placed marker every 8th tick), layers register into a faithful 767-slot transient table with TICK-unit keep-alives (marker default 10; vol-0 register clears), and the per-render-frame call is only the live-slot mix — lazy range cache, axis+euclid cull, one lazy LOS per raw-audible marker, member-0 two-radius volume, loudest-first ranking. `MissionAudio` keeps stream resolution, decode-failure fallback, and the eight persistent voices (D-SND-6/8); hosts with no ticking runtime (editor idle) free-run an autonomous 62.5 Hz eval clock (the weather world-driven/autonomous split). The curve statics (`calc_distance_volume`/`emitter_layer_volume`/`crossfade_volume_byte`/`time_of_day_region`) moved to engine/runtime/audio; the GDScript seams delegate | registration and mix on split clocks (§driver cadence): the pool-2 `tick & 7` stagger @ 0x4c225a (attached emitters per tick), tick-unit lifetimes, the per-frame render-lane mix @ 0x521341 | evidence: `ambient_mixer` ctest (curve integer pins, cohort stagger, tick-lifetime expiry/revisit, region-flip overlap, same-set suppress, occlusion-once, ranking, vol-0 clear, autonomous clock); GUT `nova_mission_audio_test.gd` / `sound_runtime_test.gd` on the new seam. Measured A/B (ASH_I5A spawn, 143 markers, 10 s windows, same box): the world tick's audio leg 1.19 ms -> 0.21 ms avg per frame (p95 1.41 -> 0.29 ms); frame wall 10.4 -> 8.8 ms. Reimpl residues: candidate-id tie-break for deterministic membership (retail ties by slot order), the range cull compares reimpl-float axes (Q16 at the curve boundary), and min-only layers cull like retail (zero JOX layers are min-only). Was: the full marker x layer eval every render frame in GDScript — the measured 1.2-1.5 ms/frame F3 "Audio" row. |
 
 **IDB changes (2026-07-10 session):** renamed `Entity_SpawnBoneEffect -> Entity_UpdateEnvSoundEmitter @ 0x4a8080`,
 `Entity_CalcTerrainRegion -> Entity_CalcTimeOfDayRegion @ 0x408110`, `Env_GetTimeOfDayHoursQ16 ->
@@ -665,7 +665,7 @@ semantics, and the global bank-slot order are all engine-witnessed and implement
   render frame on a `current_tick` clock from the "Game Loop" mode render callback
   (`0x521310`), listener per frame. The cadence-faithful port landed the same
   day: `engine/runtime/audio` `AmbientMixer` (staggered eval + slot table + live-slot mix,
-  curve statics included) with `NovaMissionAudio` reduced to stream resolution +
+  curve statics included) with `MissionAudio` reduced to stream resolution +
   the persistent voice binds — D-SND-16 PORTED (the `ambient_mixer` ctest and the
   GUT audio suites pin it).
 - one-shot view gating and set-pitch compose (witnessed 2026-07-11, unported,
@@ -691,6 +691,6 @@ semantics, and the global bank-slot order are all engine-witnessed and implement
   (D-SND-10..15; ctests `sound_profile` + `slot_sound`); ground slots 31/32 are
   now consumed by D-SND-17, while slots 30/33-50 and the composite entity-type
   path remain vehicle/P2b scope.
-- follow-up: rename the `engine/formats/lwf` `Multi.target_id` field (and its NovaLwfData/ONED
+- follow-up: rename the `engine/formats/lwf` `Multi.target_id` field (and its LwfData/ONED
   exposures) to its witnessed one-shot-cull-range meaning; the ONED sound workspace shows
   it as "(id N)" today.

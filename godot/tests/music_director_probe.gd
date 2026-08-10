@@ -1,6 +1,6 @@
 extends SceneTree
 
-# Headless probe (NOT collected by GUT): drives NovaMusicDirector with the real
+# Headless probe (NOT collected by GUT): drives MusicDirector with the real
 # menumus script+bank, logs the triggered SBF-entry sequence, and dumps the
 # main.mnu per-screen MUSICVARs. Used to (1) confirm the VM is paced (plays ~one
 # track at a time, not ~60/sec), and (2) confirm the menu music state var index:
@@ -33,23 +33,23 @@ func _run() -> void:
 	if dir.is_empty():
 		_write(out + ["RESULT=SKIP (no dir)"]); quit(0); return
 
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	root.mount_runtime(dir, "", false, "jo")
 
 	# Dump main.mnu per-screen MUSICVARs (the value the menu pushes into the VM).
 	var mnu_bytes := root.read_file("main.mnu")
 	if not mnu_bytes.is_empty():
-		var doc := NovaMnuDocument.new()
+		var doc := MnuDocument.new()
 		if doc.load_from_bytes(mnu_bytes) == OK:
 			for sid in doc.get_screen_ids():
 				out.append("screen[%d] '%s' music_var=%d" % [
 					sid, doc.get_screen_name(sid), doc.get_screen_music_var(sid)])
 
 	var sbytes := root.read_file(script_name)
-	var script := NovaMusicScript.new()
+	var script := MusicScript.new()
 	if not sbytes.is_empty():
 		script.load_from_decrypted_bytes(sbytes, script_name)
-	var bank := NovaSbfBank.new()
+	var bank := SbfBank.new()
 	var loose := root.get_root_dir().path_join(bank_name)
 	if FileAccess.file_exists(loose):
 		bank.load_from_path(loose)
@@ -57,7 +57,7 @@ func _run() -> void:
 	if script.get_script_count() <= 0 or bank.get_entry_count() <= 0:
 		_write(out + ["RESULT=SKIP (assets missing)"]); quit(0); return
 
-	var director := NovaMusicDirector.new()
+	var director := MusicDirector.new()
 	director.auto_start = false
 	get_root().add_child(director)
 	director.set_bank(bank)

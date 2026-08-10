@@ -6,7 +6,7 @@ extends SceneTree
 #
 # This is deliberately a probe rather than a GUT test: the assertions consume
 # real rasterized viewport bytes and therefore require a non-headless renderer.
-# The fixture is asset-free but exercises NovaFoliageDispatcher, its retail
+# The fixture is asset-free but exercises FoliageDispatcher, its retail
 # one-frame detail cache, generated ArrayMeshes, draw pools, ShaderMaterials,
 # and the production foliage detail and MODEL shaders.
 #
@@ -104,15 +104,15 @@ func _run() -> void:
 		_fail("; ".join(contract_failures))
 		return
 
-	var dispatcher := NovaFoliageDispatcher.new()
+	var dispatcher := FoliageDispatcher.new()
 	dispatcher.name = "FoliageRegressionDispatcher"
 	viewport.add_child(dispatcher)
 
-	var definition := NovaTerrainFoliageDef.new()
+	var definition := TerrainFoliageDef.new()
 	definition.graphic = "procedural_regression_cross"
 	definition.match = _foliage_index
 
-	var colormap_data := NovaTerrainData.new()
+	var colormap_data := TerrainData.new()
 	colormap_data.colormap = _solid_texture(Color(0.72, 0.90, 0.66, 1.0), 16)
 	dispatcher.colormap_source = colormap_data
 	dispatcher.height_sampler = Callable(self, "_sample_height")
@@ -575,7 +575,7 @@ func _sample_foliage(_world_x: float, _world_z: float) -> int:
 	return _foliage_index
 
 
-func _pin_wind(dispatcher: NovaFoliageDispatcher) -> void:
+func _pin_wind(dispatcher: FoliageDispatcher) -> void:
 	for child in dispatcher.get_children():
 		if child is MeshInstance3D and child.visible and (
 			child.name.begins_with("FoliageDetailDraw")

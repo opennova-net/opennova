@@ -19,7 +19,11 @@ extends Control
 
 signal exit_requested
 
-const EXIT_TIMEOUT_S := 300.0 # [orig: 18600 ticks at 62 Hz @0x57621d/@0x5744ea]
+# The ESC-less exit timeout: engine truth 297.6 s — 18600 ticks of the 62.5 Hz
+# loop (world/world.h kEpilogExitTimeoutTicks carries the
+# [orig: @0x57621d/@0x5744ea] witness). Deliberate correction: the old
+# godot-side 300.0 assumed a 62 Hz tick; the engine value is adopted.
+static var EXIT_TIMEOUT_S: float = Simulation.epilog_exit_timeout_seconds()
 const FADE_IN_S := 1.5        # stands in for the 48+48-tick cine fade pair [orig: @0x574512]
 
 var _age := 0.0
@@ -69,7 +73,7 @@ func setup(outcome: Dictionary, banner: String, root) -> void:
 		# MISSION FAILED + the WAC Lose cause [orig: Overlays/STROVER_MISSION_FAILED
 		# at y=120, the g_banner_text line at y=230].
 		_add_line(column,
-				NovaStrings.lookup_display("gametext", "Overlays", "STROVER_MISSION_FAILED"),
+				Strings.lookup_display("gametext", "Overlays", "STROVER_MISSION_FAILED"),
 				"", 40)
 		if not banner.is_empty():
 			_add_line(column, banner, "", 26)
@@ -80,7 +84,7 @@ func setup(outcome: Dictionary, banner: String, root) -> void:
 
 
 func _epilog(key: String) -> String:
-	return NovaStrings.lookup_display("gametext", "Epilog", key)
+	return Strings.lookup_display("gametext", "Epilog", key)
 
 
 func _add_line(column: VBoxContainer, text: String, value: String, size: int) -> void:
@@ -95,11 +99,11 @@ func _add_line(column: VBoxContainer, text: String, value: String, size: int) ->
 # force loose-first for this lookup; a missing/unparsable image degrades to the
 # plain dim, never a load failure.
 # [orig: CUIImage_LoadTextureFromFile @ 0x6541ba]
-func _add_backdrop(root, image_name: String) -> void:
-	if root == null or not root.has_method("read_file"):
+func _add_backdrop(root: ResourceRoot, image_name: String) -> void:
+	if root == null:
 		return
 	var bytes: PackedByteArray = root.read_file(
-			image_name, NovaResourceRoot.LOOKUP_FORCE_LOOSE_FIRST)
+			image_name, ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST)
 	if bytes.is_empty():
 		return
 	var img := Image.new()

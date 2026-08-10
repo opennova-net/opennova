@@ -12,7 +12,7 @@ extends RefCounted
 ##   - show_status(text)                          mirror a message into the status bar
 ##   - on_extracted(dir)                          files landed in `dir` (shell may reindex)
 ##
-## Each opened archive is a NovaPffArchive (the C++ shim). Loaded archives live in this object,
+## Each opened archive is a PffDocument (the C++ shim). Loaded archives live in this object,
 ## which the shell keeps for the whole session, so closing the dialog just hides it. The .pff
 ## files on disk are only ever read.
 
@@ -45,7 +45,7 @@ var _cancelled: bool = false
 # Same-named files across archives that clobbered each other in the last Extract-All run.
 var _last_collisions: int = 0
 
-# One NovaPffArchive per opened .pff; _active indexes the one shown on the right.
+# One PffDocument per opened .pff; _active indexes the one shown on the right.
 var _archives: Array = []
 var _active: int = -1
 
@@ -213,7 +213,7 @@ func _make_tool_button(text: String, tooltip: String, on_pressed: Callable) -> B
 
 func _populate_games() -> void:
 	_game_option.clear()
-	for game in NovaPffArchive.list_games():
+	for game in PffDocument.list_games():
 		var entry := game as Dictionary
 		var idx := _game_option.item_count
 		_game_option.add_item(String(entry.get("name", "Game")))
@@ -224,7 +224,7 @@ func _populate_games() -> void:
 # Refresh
 # ---------------------------------------------------------------------------
 
-func _active_archive() -> NovaPffArchive:
+func _active_archive() -> PffDocument:
 	if _active >= 0 and _active < _archives.size():
 		return _archives[_active]
 	return null
@@ -244,7 +244,7 @@ func _refresh_archive_list() -> void:
 		return
 	_archive_list.clear()
 	for i in _archives.size():
-		var arc: NovaPffArchive = _archives[i]
+		var arc: PffDocument = _archives[i]
 		var base := arc.get_source_path().get_file()
 		if base.is_empty():
 			base = "(archive)"
@@ -343,7 +343,7 @@ func _on_archives_picked(paths: PackedStringArray) -> void:
 	var opened := 0
 	var failed := 0
 	for path in paths:
-		var arc := NovaPffArchive.new()
+		var arc := PffDocument.new()
 		if arc.open(path) == OK:
 			_archives.append(arc)
 			opened += 1

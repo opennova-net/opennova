@@ -1,6 +1,6 @@
 extends GutTest
 
-const VegAssetsScript = preload("res://adapter/terrain/veg_assets.gd")
+const VegAssetsScript = preload("res://game/terrain/veg_assets.gd")
 const SOURCE_OBJECT := "res://../fixtures/3dp/Bird1/Bird1.3di"
 const OVERRIDE_OBJECT := "res://../fixtures/threedi/3di3/House.3di"
 
@@ -8,12 +8,12 @@ const OVERRIDE_OBJECT := "res://../fixtures/threedi/3di3/House.3di"
 func before_each() -> void:
 	_cleanup_dir(_fixture_root())
 	VegAssetsScript.clear_cache()
-	NovaObjectData.reset_network_challenge_model_registry()
+	ObjectData.reset_network_challenge_model_registry()
 
 
 func after_each() -> void:
 	VegAssetsScript.clear_cache()
-	NovaObjectData.reset_network_challenge_model_registry()
+	ObjectData.reset_network_challenge_model_registry()
 	_cleanup_dir(_fixture_root())
 
 
@@ -46,7 +46,7 @@ func test_list_graphics_cache_returns_caller_safe_copy() -> void:
 
 func test_resolve_slot_meshes_preserves_slots_and_loads_known_graphic() -> void:
 	var resource_root := _prepare_veg_fixture("Mveg6.3di")
-	var def := NovaTerrainFoliageDef.new()
+	var def := TerrainFoliageDef.new()
 	def.graphic = "Mveg6.3di"
 
 	var meshes := VegAssetsScript.resolve_slot_meshes(resource_root, [null, def])
@@ -58,55 +58,55 @@ func test_resolve_slot_meshes_preserves_slots_and_loads_known_graphic() -> void:
 
 func test_foliage_model_is_sticky_excluded_from_network_challenge_snapshot() -> void:
 	var resource_root := _prepare_veg_fixture("Mveg6.3di")
-	NovaObjectData.reset_network_challenge_model_registry()
+	ObjectData.reset_network_challenge_model_registry()
 
 	assert_not_null(VegAssetsScript.load_mesh(resource_root, "Mveg6"))
-	assert_eq(NovaObjectData.network_challenge_model_count(), 0,
+	assert_eq(ObjectData.network_challenge_model_count(), 0,
 		"foliage geometry loads normally but its model-def row is excluded")
 
 	# Retail marks the shared definition node, so a later ordinary lookup of the
 	# same filename does not clear the foliage bit before the snapshot.
-	var ordinary := NovaObjectData.new()
+	var ordinary := ObjectData.new()
 	assert_eq(ordinary.open_from_resource_root(resource_root, "MVEG6.3DI"), OK)
-	assert_eq(NovaObjectData.network_challenge_model_count(), 0,
+	assert_eq(ObjectData.network_challenge_model_count(), 0,
 		"the foliage marker is sticky on a case-folded shared definition")
 
 
 func test_cached_foliage_hit_restores_marker_after_mission_registry_reset() -> void:
 	var resource_root := _prepare_veg_fixture("Mveg6.3di")
-	NovaObjectData.reset_network_challenge_model_registry()
+	ObjectData.reset_network_challenge_model_registry()
 
 	var first_mesh := VegAssetsScript.load_mesh(resource_root, "Mveg6")
 	assert_not_null(first_mesh)
-	assert_eq(NovaObjectData.network_challenge_model_count(), 0)
+	assert_eq(ObjectData.network_challenge_model_count(), 0)
 
 	# Game_StartMission destroys the logical loaded-definition registry, while
 	# MainGame keeps the mounted resource root and VegAssets renderer cache alive.
 	# The next mission's cache hit must therefore recreate the model-def's sticky
 	# foliage mark without reparsing or rebuilding its mesh.
-	NovaObjectData.reset_network_challenge_model_registry()
+	ObjectData.reset_network_challenge_model_registry()
 	var cached_mesh := VegAssetsScript.load_mesh(resource_root, "mVEG6.3di")
 	assert_same(cached_mesh, first_mesh, "the second mission takes the real mesh-cache hit")
 
-	var ordinary := NovaObjectData.new()
+	var ordinary := ObjectData.new()
 	assert_eq(ordinary.open_from_resource_root(resource_root, "MVEG6.3DI"), OK)
-	assert_eq(NovaObjectData.network_challenge_model_count(), 0,
+	assert_eq(ObjectData.network_challenge_model_count(), 0,
 		"a cached foliage definition remains excluded when another path loads it normally")
 
 
 func test_network_challenge_model_registry_deduplicates_and_resets() -> void:
 	var resource_root := _prepare_veg_fixture("Mveg6.3di")
-	NovaObjectData.reset_network_challenge_model_registry()
-	var first := NovaObjectData.new()
-	var duplicate := NovaObjectData.new()
+	ObjectData.reset_network_challenge_model_registry()
+	var first := ObjectData.new()
+	var duplicate := ObjectData.new()
 
 	assert_eq(first.open_from_resource_root(resource_root, "Mveg6.3di"), OK)
 	assert_eq(duplicate.open_from_resource_root(resource_root, "mVEG6.3di"), OK)
-	assert_eq(NovaObjectData.network_challenge_model_count(), 1,
+	assert_eq(ObjectData.network_challenge_model_count(), 1,
 		"case variants of one mounted .3DI contribute one renderer definition")
 
-	NovaObjectData.reset_network_challenge_model_registry()
-	assert_eq(NovaObjectData.network_challenge_model_count(), 0,
+	ObjectData.reset_network_challenge_model_registry()
+	assert_eq(ObjectData.network_challenge_model_count(), 0,
 		"mission cache destruction starts the next frozen page empty")
 
 
@@ -119,10 +119,10 @@ func test_resolve_slot_meshes_loads_graphic_resident_only_in_runtime_pff() -> vo
 		'name': 'Mveg6.3di',
 		'bytes': model_bytes,
 	}])
-	var resource_root := NovaResourceRoot.new()
+	var resource_root := ResourceRoot.new()
 	assert_eq(resource_root.mount_runtime(root_dir), OK)
 
-	var def := NovaTerrainFoliageDef.new()
+	var def := TerrainFoliageDef.new()
 	def.graphic = 'Mveg6'
 	var meshes := VegAssetsScript.resolve_slot_meshes(resource_root, [def])
 
@@ -148,8 +148,8 @@ func test_mesh_cache_does_not_alias_base_and_expansion_mounts_of_same_directory(
 		'name': 'Mveg6.3di',
 		'bytes': expansion_bytes,
 	}])
-	var base_root := NovaResourceRoot.new()
-	var expansion_root := NovaResourceRoot.new()
+	var base_root := ResourceRoot.new()
+	var expansion_root := ResourceRoot.new()
 	assert_eq(base_root.mount_runtime(root_dir), OK)
 	assert_eq(expansion_root.mount_runtime(root_dir, 'jox01'), OK)
 
@@ -169,17 +169,17 @@ func test_installed_dvxi5_foliage_assets_enable_every_authored_slot() -> void:
 	if install_dir.is_empty():
 		pass_test('OPENNOVA_JO_DIR is unset; installed-game foliage asset check skipped.')
 		return
-	var resource_root := NovaResourceRoot.new()
+	var resource_root := ResourceRoot.new()
 	var expansion := OS.get_environment('JO_EXPANSION')
 	assert_eq(resource_root.mount_runtime(install_dir, expansion, false, 'jo'), OK,
 		'Installed JO root must mount through the production packed VFS.')
-	var terrain := NovaTerrainData.new()
+	var terrain := TerrainData.new()
 	assert_eq(terrain.load_from_resource_root(resource_root, 'Dvxi5.trn'), OK)
 	var defs: Array = terrain.get_foliage_defs()
 	assert_gt(defs.size(), 0, 'Dvxi5 must contain authored foliage definitions.')
 	var meshes := VegAssetsScript.resolve_slot_meshes(resource_root, defs)
 	var textures := VegAssetsScript.resolve_slot_fd_textures(resource_root, defs)
-	var dispatcher := NovaFoliageDispatcher.new()
+	var dispatcher := FoliageDispatcher.new()
 	add_child_autofree(dispatcher)
 	dispatcher.configure_slots(defs, meshes, textures)
 
@@ -220,13 +220,13 @@ func test_lod0_aggregation_keeps_every_submesh_surface() -> void:
 
 
 func test_cache_epoch_is_monotonic_and_bumped_by_mount() -> void:
-	var before := NovaResourceRoot.cache_epoch()
-	NovaResourceRoot.bump_cache_epoch()
-	assert_gt(NovaResourceRoot.cache_epoch(), before, "Explicit bump should advance the epoch.")
+	var before := ResourceRoot.cache_epoch()
+	ResourceRoot.bump_cache_epoch()
+	assert_gt(ResourceRoot.cache_epoch(), before, "Explicit bump should advance the epoch.")
 
-	var at_bump := NovaResourceRoot.cache_epoch()
+	var at_bump := ResourceRoot.cache_epoch()
 	_prepare_veg_fixture("Mveg6.3di")  # set_root_dir routes through mount_with_mode
-	assert_gt(NovaResourceRoot.cache_epoch(), at_bump, "Any root mount should advance the epoch.")
+	assert_gt(ResourceRoot.cache_epoch(), at_bump, "Any root mount should advance the epoch.")
 
 
 func test_caches_self_clear_when_epoch_moves() -> void:
@@ -238,7 +238,7 @@ func test_caches_self_clear_when_epoch_moves() -> void:
 	# Any mount/rescan/clear in this process bumps the global epoch; the next
 	# cache access self-clears before refilling, so a rescanned resource dir is
 	# never served a stale listing or mesh.
-	NovaResourceRoot.bump_cache_epoch()
+	ResourceRoot.bump_cache_epoch()
 	VegAssetsScript._check_epoch()
 	assert_true(VegAssetsScript._graphics_cache_by_root.is_empty(),
 		"An epoch move should drop the listing cache on next access.")
@@ -246,11 +246,11 @@ func test_caches_self_clear_when_epoch_moves() -> void:
 		"An epoch move should drop the mesh cache on next access.")
 
 
-func _prepare_veg_fixture(filename: String) -> NovaResourceRoot:
+func _prepare_veg_fixture(filename: String) -> ResourceRoot:
 	var root := _fixture_root()
 	assert_eq(DirAccess.make_dir_recursive_absolute(root), OK)
 	_copy_file(ProjectSettings.globalize_path(SOURCE_OBJECT), root.path_join(filename))
-	var resource_root := NovaResourceRoot.new()
+	var resource_root := ResourceRoot.new()
 	assert_eq(resource_root.set_root_dir(root), OK)
 	return resource_root
 

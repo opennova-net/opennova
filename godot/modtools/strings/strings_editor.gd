@@ -188,7 +188,7 @@ func normalize_grouping() -> void:
 
 
 # --- Editing session + undo/redo: the shared EditorDocument snapshot history
-# (NovaEditHistory over engine/base/oned_edit). The hooks below give it this domain's
+# (EditHistory over engine/base/oned_edit). The hooks below give it this domain's
 # snapshot shape and signals; the bracket/undo/redo mechanics live in the base.
 
 func _snapshot() -> Variant:

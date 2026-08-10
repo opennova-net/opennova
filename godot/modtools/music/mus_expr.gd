@@ -7,7 +7,7 @@ extends RefCounted
 # -- binops always fully parenthesized "(a op b)", unary "!x"/"-x"/"~x" with no
 # space, intrinsics in split G/F/T surface form -- so an expression built here is
 # byte-stable through the compile -> decompile round-trip. There is no GDScript
-# PARSER: per the design, the compiler (NovaMusicScript.compile_text) is the only
+# PARSER: per the design, the compiler (MusicScript.compile_text) is the only
 # grammar authority; validate_expr() probes it. No class_name (preload as a const).
 
 enum { LITERAL, VARREF, ME, BINOP, UNOP, CALL, RAW }
@@ -88,7 +88,7 @@ static func serialize(node) -> String:
 
 # Decompiler surface form of a stored intrinsic name: G* drops the G (GSV->SV),
 # F*/T* become Obj.method (FSet->F.Set). Matches split_method_name in
-# engine/formats/mus/src/mus_decompile_shared.h, and the compiler inverts it.
+# engine/formats/mus/mus_decompile_shared.h, and the compiler inverts it.
 static func surface(stored: String) -> String:
 	if stored.length() > 1 and stored[0] == "G":
 		return stored.substr(1)
@@ -145,13 +145,23 @@ const INTRINSICS := [
 ]
 
 
+## The typed expression-check record (ADR 0017).
+class ExprCheck:
+	extends RefCounted
+	var ok := true
+	var err := ""
+
+
 # Validate an expression string by compiling a throwaway probe script that uses it
 # as a condition. Reuses the native compiler (the single grammar authority) so the
 # builder never re-implements parsing. mus may be null (then always ok, for tests
-# that have no script handy). Returns { ok: bool, err: String }.
-static func validate_expr(text: String, mus) -> Dictionary:
-	if mus == null or not mus.has_method("compile_text"):
-		return {"ok": true, "err": ""}
+# that have no script handy).
+static func validate_expr(text: String, mus: MusicScript) -> ExprCheck:
+	var out := ExprCheck.new()
+	if mus == null:
+		return out
 	var probe := "script _probe\nsection _s\n{\nif (%s)\n{\nreturn\n}\n}\n" % text
 	var r: Dictionary = mus.compile_text(probe)
-	return {"ok": int(r.get("rc", -1)) == 0, "err": String(r.get("err_msg", ""))}
+	out.ok = int(r.get("rc", -1)) == 0
+	out.err = String(r.get("err_msg", ""))
+	return out

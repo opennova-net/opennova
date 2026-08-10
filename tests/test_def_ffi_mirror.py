@@ -1,7 +1,7 @@
 """The def.h ctypes mirrors must agree with each other — and with the native stride.
 
 pyopennova/def_ffi.py and blender/opennova/def_ffi.py each mirror
-engine/formats/def/include/def/def.h by hand; a field missed in one changes that mirror's
+engine/formats/def/def.h by hand; a field missed in one changes that mirror's
 ARRAY STRIDE, so every `entries[i]` after index zero reads shifted bytes —
 silently (names and floats just come out wrong; scope_max_mag went missing from
 the Blender mirror exactly this way). Two nets:
@@ -178,6 +178,14 @@ def test_pyopennova_items_stride_reads_every_entry():
         fx = ifl.entries[0].particlefx
         assert fx.effect.decode() == "Effect_whiteExhaust"
         assert fx.userpoint.decode() == "FX00"
+        # The appended launchups_closeattack field rides the far end of the
+        # stride: the wire rifleman's authored AI muzzle name is the canary.
+        launchups = {
+            ifl.entries[i].display_name.decode(): (
+                ifl.entries[i].launchups_closeattack.decode())
+            for i in range(ifl.count)
+        }
+        assert launchups["Wire Test Rifleman"] == "mflash01"
     finally:
         py_def.free_items_def(ifl)
     assert names == ITEMS_HEAD

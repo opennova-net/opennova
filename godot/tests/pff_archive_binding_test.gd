@@ -1,12 +1,12 @@
 extends GutTest
 
-## Integration tests for the NovaPffArchive Godot binding: open a synthetic PFF3 (no game data),
+## Integration tests for the PffDocument Godot binding: open a synthetic PFF3 (no game data),
 ## inspect/extract/edit/save it, and reopen to confirm the round-trip. The C++ writer internals
 ## are covered by tests/pff; this exercises the Godot shim (model, decode path, file IO, Save-As).
 
 
 func test_list_games_returns_the_profile_table() -> void:
-	var games := NovaPffArchive.list_games()
+	var games := PffDocument.list_games()
 	assert_eq(games.size(), 5, "Five shipping game profiles are exposed.")
 	var names := []
 	for g in games:
@@ -22,7 +22,7 @@ func test_open_lists_entries() -> void:
 		{"name": "alpha.txt", "bytes": "hello"},
 		{"name": "Bravo.dat", "bytes": "world!!"},
 	])
-	var arc := NovaPffArchive.new()
+	var arc := PffDocument.new()
 	assert_eq(arc.open(path), OK, arc.get_last_error())
 	assert_eq(arc.get_entry_count(), 2)
 	assert_true(arc.has_file("ALPHA.TXT"), "Lookup is case-insensitive.")
@@ -38,7 +38,7 @@ func test_open_lists_entries() -> void:
 func test_read_entry_raw_and_decoded() -> void:
 	var path := _pff_dir().path_join("read.pff")
 	_write_pff(path, [{"name": "note.txt", "bytes": "plaintext"}])
-	var arc := NovaPffArchive.new()
+	var arc := PffDocument.new()
 	assert_eq(arc.open(path), OK)
 	# A plain (non-SCR/BFC1) payload decodes to itself, so raw and decoded match here.
 	assert_eq(arc.read_entry("note.txt", false).get_string_from_utf8(), "plaintext")
@@ -56,7 +56,7 @@ func test_plaintext_scr0_music_script_survives_decode() -> void:
 	mus.append_array(PackedByteArray([0, 1, 0, 0, 42, 7, 99, 1, 2, 3]))
 	var path := root.path_join("mus.pff")
 	_write_pff(path, [{"name": "gamemus.bin", "bytes": mus}])
-	var arc := NovaPffArchive.new()
+	var arc := PffDocument.new()
 	assert_eq(arc.open(path), OK)
 
 	assert_eq(arc.read_entry("gamemus.bin", true), mus, "Decoded read returns plaintext SCR0 byte-identical.")
@@ -72,7 +72,7 @@ func test_extract_to_and_extract_all() -> void:
 		{"name": "a.bin", "bytes": "AAAA"},
 		{"name": "b.bin", "bytes": "BBBBBB"},
 	])
-	var arc := NovaPffArchive.new()
+	var arc := PffDocument.new()
 	assert_eq(arc.open(path), OK)
 
 	var single := root.path_join("a_out.bin")
@@ -94,7 +94,7 @@ func test_extract_async_selected_and_all() -> void:
 		{"name": "b.bin", "bytes": "BBBBBB"},
 		{"name": "c.bin", "bytes": "CC"},
 	])
-	var arc := NovaPffArchive.new()
+	var arc := PffDocument.new()
 	assert_eq(arc.open(path), OK)
 
 	# Selected names: only a.bin and c.bin should land.
@@ -130,7 +130,7 @@ func test_extract_async_reports_raw_fallback() -> void:
 	bad.append_array(PackedByteArray([0, 0, 1, 0, 255, 255, 255, 255, 255, 255, 255, 255]))
 	var path := root.path_join("asyncraw.pff")
 	_write_pff(path, [{"name": "broken.dat", "bytes": bad}, {"name": "plain.txt", "bytes": "hello"}])
-	var arc := NovaPffArchive.new()
+	var arc := PffDocument.new()
 	assert_eq(arc.open(path), OK)
 
 	var out := root.path_join("out")
@@ -151,7 +151,7 @@ func test_add_remove_save_roundtrip() -> void:
 		{"name": "keep.txt", "bytes": "keep me"},
 		{"name": "drop.txt", "bytes": "remove me"},
 	])
-	var arc := NovaPffArchive.new()
+	var arc := PffDocument.new()
 	assert_eq(arc.open(path), OK)
 	assert_false(arc.is_dirty(), "A freshly opened archive is clean.")
 
@@ -169,7 +169,7 @@ func test_add_remove_save_roundtrip() -> void:
 	assert_eq(arc.save_as(out), OK, arc.get_last_error())
 	assert_false(arc.is_dirty(), "Save-As clears the dirty flag.")
 
-	var reopened := NovaPffArchive.new()
+	var reopened := PffDocument.new()
 	assert_eq(reopened.open(out), OK)
 	assert_eq(reopened.get_entry_count(), 2)
 	assert_true(reopened.has_file("added.bin"))
@@ -181,7 +181,7 @@ func test_add_remove_save_roundtrip() -> void:
 func test_save_as_refuses_overwriting_source() -> void:
 	var path := _pff_dir().path_join("guard.pff")
 	_write_pff(path, [{"name": "x.bin", "bytes": "x"}])
-	var arc := NovaPffArchive.new()
+	var arc := PffDocument.new()
 	assert_eq(arc.open(path), OK)
 	assert_ne(arc.save_as(path), OK, "Save-As must refuse to overwrite the source archive.")
 	assert_string_contains(arc.get_last_error().to_lower(), "source", "Error explains the refusal.")
@@ -196,7 +196,7 @@ func test_extract_to_status_raw_fallback() -> void:
 	bad.append_array(PackedByteArray([0, 0, 1, 0, 255, 255, 255, 255, 255, 255, 255, 255]))
 	var path := root.path_join("raw.pff")
 	_write_pff(path, [{"name": "broken.dat", "bytes": bad}, {"name": "plain.txt", "bytes": "hello"}])
-	var arc := NovaPffArchive.new()
+	var arc := PffDocument.new()
 	assert_eq(arc.open(path), OK)
 
 	var bad_out := root.path_join("broken.out")

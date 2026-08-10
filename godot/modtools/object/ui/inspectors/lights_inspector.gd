@@ -3,10 +3,9 @@ extends ObjectListDetailInspector
 ## Lights workflow: a left list of object lights plus a right detail dock for
 ## the selected light's color, falloff, animation, and output flags.
 
-# Light "flags" bitfield.
-const LIGHT_FLAG_DISABLE_CORONA := 0x01
-const LIGHT_FLAG_DISABLE_TERRAIN := 0x02
-const LIGHT_FLAG_DISABLE_OBJECTS := 0x04
+# The light flag bits live on the binding as ObjectData.LIGHT_FLAG_* (value
+# authority: engine/formats/threedi threedi_3di3.h); the binding always emits
+# the typed disable_* keys, so this panel reads those, never raw bits.
 
 # Light color uses the RGB generator dispatch. Styles 113 and 114 read CTRL;
 # 115..117 remain low-nibble waveform lookups.
@@ -125,12 +124,14 @@ func _build_detail_fields(detail_box: VBoxContainer, _index: int) -> void:
 		object_editor.object_data.set_light_field(int(selected["index"]), key, value)
 		_refresh_list()
 
+	# The binding always emits the typed disable_* keys (get_light_info /
+	# get_lights), so there is no raw-bit fallback to keep.
 	var corona_disabled := func(info: Dictionary) -> bool:
-		return bool(info.get("disable_corona", (int(info.get("flags", 0)) & LIGHT_FLAG_DISABLE_CORONA) != 0))
+		return bool(info.get("disable_corona", false))
 	var terrain_disabled := func(info: Dictionary) -> bool:
-		return bool(info.get("disable_lightterrain", (int(info.get("flags", 0)) & LIGHT_FLAG_DISABLE_TERRAIN) != 0))
+		return bool(info.get("disable_lightterrain", false))
 	var objects_disabled := func(info: Dictionary) -> bool:
-		return bool(info.get("disable_lightobjects", (int(info.get("flags", 0)) & LIGHT_FLAG_DISABLE_OBJECTS) != 0))
+		return bool(info.get("disable_lightobjects", false))
 
 	binder.bind_color(start_color,
 		func(info): return info.get("color_start", Color.WHITE),

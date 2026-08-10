@@ -5,8 +5,11 @@
   (`editor/editor_app.gd`), which owns boot wiring, window sizing, and the MCP service.
 - Code-first: no `.tres` workspace resources, and the shell never switches on workspace
   type — it reads capability hooks off each workspace. The contract is
-  `framework/editor_workspace.gd`; the how-to (add a workspace / add an inspector) is in
-  [README.md](README.md), plus one README per workspace directory.
+  `framework/editor_workspace.gd` (typed virtual methods, never `has_method` probes —
+  ADR 0034); the workspace-to-shell direction is the typed `WorkspaceShell` base
+  (`framework/workspace_shell.gd`), which headless tests subclass. The how-to (add a
+  workspace / add an inspector) is in [README.md](README.md), plus one README per
+  workspace directory.
 - UI copy is artist-facing: physical/visual language ("draw distance", "blend layer"),
   not engine internals ("CDEP", "LOD bitstream", "mip slot").
 - Mission testing always launches the standalone game from saved loose assets:

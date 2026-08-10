@@ -1,13 +1,13 @@
 extends GutTest
 
-## The mission loading screen (NovaLoadingScreen): the sidecar-image rule, the
+## The mission loading screen (LoadingScreen): the sidecar-image rule, the
 ## game-type text mapping, the progress-bar smoothing and fill arithmetic, and
 ## the SP-vs-MP text split — each against the witnessed original behavior
 ## [orig: render_loading_screen @ 0x521d10, HUD_GetLoadingScreenTextByGameType
 ## @ 0x51f300, LoadingScreen_UpdateAndPresent @ 0x586be0, draw_progress_bar_0
 ## @ 0x5d4c40].
 
-const LoadingScreen := preload("res://adapter/ui/nova_loading_screen.gd")
+const LoadingScreen := preload("res://game/ui/nova_loading_screen.gd")
 
 var _temp_dirs: Array[String] = []
 
@@ -40,7 +40,7 @@ func test_background_prefers_mission_sidecar_then_falls_back() -> void:
 	var dir := _make_temp_dir("loadscreen_bg")
 	_touch(dir.path_join("00trg.pcx"))
 	_touch(dir.path_join("loadscrn.pcx"))
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	root.set_root_dir(dir)
 	var bg := LoadingScreen.resolve_background(root, "00TRg.bms")
 	assert_eq(String(bg["name"]).to_lower(), "00trg.pcx", "sidecar wins when present")
@@ -56,10 +56,10 @@ func test_background_decodes_sidecar_from_language_archive_without_loose_mode() 
 		"name": "00trg.pcx",
 		"bytes": _test_pcx_bytes(),
 	}])
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.mount_runtime(dir, "", false, "jo"), OK,
 			"the retail archive table mounts with loose lookup disabled")
-	var screen: NovaLoadingScreen = autofree(NovaLoadingScreen.new())
+	var screen: LoadingScreen = autofree(LoadingScreen.new())
 	screen.setup(root, {"mission_file": "00TRg.bms"})
 	assert_true(screen.has_background(),
 			"setup decodes the mission sidecar found only in language.pff")
@@ -72,10 +72,10 @@ func test_background_setup_forces_loose_image_over_archive_in_packed_mode() -> v
 		"name": "00trg.pcx",
 		"bytes": _solid_test_pcx(Color.RED),
 	}])
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.mount_runtime(dir), OK,
 		"packed-default mode would normally select the archived PCX")
-	var screen: NovaLoadingScreen = autofree(NovaLoadingScreen.new())
+	var screen: LoadingScreen = autofree(LoadingScreen.new())
 	screen.setup(root, {"mission_file": "00TRg.bms"})
 
 	assert_true(screen.has_background())
@@ -175,7 +175,7 @@ func test_mp_setup_carries_the_session_variables() -> void:
 	assert_eq(lines[1], "Trainingsmission")
 	assert_ne(lines[2], "", "LTGT_AAS resolves from the gametext table")
 	assert_eq(lines[3], "Welcome aboard")
-	NovaStrings.register_table("gametext", null)
+	Strings.register_table("gametext", null)
 
 
 func test_present_tracks_reported_progress_then_leads() -> void:
@@ -232,13 +232,13 @@ func test_prepare_for_blocking_load_rejects_an_unmounted_screen() -> void:
 
 # --- helpers -------------------------------------------------------------------
 
-func _setup_screen(info: Dictionary) -> NovaLoadingScreen:
+func _setup_screen(info: Dictionary) -> LoadingScreen:
 	var dir := _make_temp_dir("loadscreen_setup")
 	_write_test_pcx(dir.path_join("00trg.pcx"))
 	_write_test_pcx(dir.path_join("loadscrn.pcx"))
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	root.set_root_dir(dir)
-	var screen: NovaLoadingScreen = autofree(NovaLoadingScreen.new())
+	var screen: LoadingScreen = autofree(LoadingScreen.new())
 	screen.setup(root, info)
 	assert_true(screen.has_background(), "the test pcx decodes into a texture")
 	return screen
@@ -249,7 +249,7 @@ func _register_gametext_fixture() -> void:
 	assert_eq(table.load_from_byte_array(
 		FileAccess.get_file_as_bytes("res://../fixtures/rtxt/gametext.bin")), OK,
 		"gametext.bin fixture loads")
-	NovaStrings.register_table("gametext", table)
+	Strings.register_table("gametext", table)
 
 
 func _make_temp_dir(name: String) -> String:
@@ -282,7 +282,7 @@ func _remove_dir_recursive(path: String) -> void:
 	DirAccess.remove_absolute(path)
 
 
-# A minimal valid 8-bit palettized PCX (2x2) so NovaResourceRoot.load_texture
+# A minimal valid 8-bit palettized PCX (2x2) so ResourceRoot.load_texture
 # has something real to decode.
 func _write_test_pcx(path: String) -> void:
 	var f := FileAccess.open(path, FileAccess.WRITE)

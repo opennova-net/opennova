@@ -1,7 +1,7 @@
 extends Control
 
 # EngineTextPreview (maturity slice F2): one widget that renders a sample line
-# through the SAME seams the game runtime draws text with — NovaFntResource ->
+# through the SAME seams the game runtime draws text with — FntResource ->
 # FontFile (the .fnt parser view menus/credits text rides) and HudText.draw_text
 # (design-space anchor scaling [orig: Viewport_ScaleToVirtualCoords @0x5d2b20],
 # baseline/ascent placement, alignment, half-bright
@@ -55,7 +55,7 @@ func set_font_file(font: FontFile) -> void:
 
 ## Adopt the edited document's font (the Fonts workspace case). A null or
 ## unloadable resource clears the panel and reports false.
-func set_font_from_fnt(fnt: NovaFntResource) -> bool:
+func set_font_from_fnt(fnt: FntResource) -> bool:
 	if fnt == null:
 		set_font_file(null)
 		return false
@@ -65,9 +65,9 @@ func set_font_from_fnt(fnt: NovaFntResource) -> bool:
 
 
 ## Resolve a font by name from the mounted resource root, the way the runtime
-## does (HudText.load_font -> VFS read -> NovaFntResource). A failed load keeps
+## does (HudText.load_font -> VFS read -> FntResource). A failed load keeps
 ## the current font (a typo must not blank the panel) and reports false.
-func set_font_from_root(root: NovaResourceRoot, font_name: String) -> bool:
+func set_font_from_root(root: ResourceRoot, font_name: String) -> bool:
 	var font := HudText.load_font(root, font_name)
 	if font == null:
 		return false
@@ -117,16 +117,16 @@ func font_pixel_size() -> int:
 
 ## The design-space (1024x768) anchor the sample is drawn at: x from the
 ## alignment (left margin / center / right margin), y chosen so the glyph cell
-## sits mid-panel after HudLayout scaling.
+## sits mid-panel after the HudPos design-space scaling.
 func draw_anchor_design() -> Vector2:
 	var x := LEFT_MARGIN_X
 	if _align == int(HudText.Align.CENTER):
-		x = HudLayout.DESIGN_WIDTH * 0.5
+		x = HudPos.DESIGN_WIDTH * 0.5
 	elif _align == int(HudText.Align.RIGHT):
 		x = RIGHT_MARGIN_X
-	var y := HudLayout.DESIGN_HEIGHT * 0.5
+	var y := HudPos.DESIGN_HEIGHT * 0.5
 	if size.y > 0.0:
-		y = HudLayout.DESIGN_HEIGHT * (size.y - float(font_pixel_size())) / (2.0 * size.y)
+		y = HudPos.DESIGN_HEIGHT * (size.y - float(font_pixel_size())) / (2.0 * size.y)
 	return Vector2(x, y)
 
 

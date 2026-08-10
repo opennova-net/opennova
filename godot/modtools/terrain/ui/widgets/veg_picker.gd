@@ -6,7 +6,7 @@ extends Window
 
 signal graphic_selected(basename: String)
 
-const VegAssets := preload("res://adapter/terrain/veg_assets.gd")
+const VegAssets := preload("res://game/terrain/veg_assets.gd")
 
 const _CELL_SIZE := Vector2(128, 156)
 const _PREVIEW_SIZE := Vector2(112, 112)
@@ -16,10 +16,10 @@ const _PREVIEW_SIZE := Vector2(112, 112)
 @onready var _close_button: Button = %CloseButton
 
 var _populated: bool = false
-var _resource_root: NovaResourceRoot
+var _resource_root: ResourceRoot
 
 
-func set_resource_root(value: NovaResourceRoot) -> void:
+func set_resource_root(value: ResourceRoot) -> void:
 	if _resource_root == value:
 		return
 	_resource_root = value

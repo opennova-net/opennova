@@ -15,7 +15,7 @@ the one substantially **reimplemented but unwitnessed** subsystem. The 45-entry
 shader-tag table (`libs/oed/include/oed/material_descriptor.h`, static_assert-locked
 to the raw `gMaterialInfoTable` dump in `oed/types.h`) and its consumption chain —
 `libs/renderer` `classify_object_material()` → `ObjectMaterialClassification` →
-`compose_object_shader_glsl()` → `NovaObjectShaderCache` → the ShaderMaterials
+`compose_object_shader_glsl()` → `ObjectShaderCache` → the ShaderMaterials
 `nova_object_model.gd` builds — carry only ModSuperOed-side `[orig]` citations. Not
 one Jointops runtime render address is cited anywhere in `libs/` outside `libs/env`,
 no RE record covers the runtime material path, batching/draw order, the runtime TSS

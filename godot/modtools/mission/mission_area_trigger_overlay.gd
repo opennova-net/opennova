@@ -6,15 +6,14 @@ extends Node3D
 # grab cube on the selected zone's centre. Area triggers are 32-byte box records the engine
 # reads as interleaved per-axis bounds + a flags dword (Entity_IsTeamInTriggerBounds
 # @0x43c75c); the lib (engine/runtime/mission) round-trips them byte-faithfully and the binding
-# (NovaMissionData.get_area_triggers) hands them here as { index, id, min, max, active,
+# (MissionData.get_area_triggers) hands them here as { index, id, min, max, active,
 # constrain_z, raw_flags } in mission space. This overlay only reads; the controller mutates.
 #
 # Parented under the MissionObjects container (so it hides / frees with the placed world),
 # rebuilt by the controller. Referenced via preload (no class_name), same convention as the
 # waypoint overlay.
 
-const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
-const Overlay := preload("res://adapter/mission/mission_overlay_util.gd")
+const Overlay := preload("res://game/mission/mission_overlay_util.gd")
 
 # Half-extent (world units) of the centre grab cube; also its pick-target half-size.
 const HANDLE_HALF := 1.5

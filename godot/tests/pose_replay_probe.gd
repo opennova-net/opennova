@@ -2,7 +2,7 @@ extends Node
 
 # Pose-replay hit-detection probe: boots the standalone game on the mission a
 # NOVA_POSE_JSON snapshot names, then re-fires the dumped camera ray through
-# the REAL RoundSim (NovaSimulation.debug_spawn_round) as a small fan around
+# the REAL RoundSim (Simulation.debug_spawn_round) as a small fan around
 # the dumped forward, and reports every outcome the F3 Rounds debug ring
 # recorded — face hits with section/face/material, sphere stand-ins, terrain
 # stops, and the face-miss fly-ons. The tool for "I was standing HERE and the
@@ -17,9 +17,8 @@ extends Node
 # Also lists the mission entities within 80 u of the camera as context for
 # what SHOULD be along the ray.
 
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 const StandaloneProbe := preload("res://tests/standalone_game_probe.gd")
-const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
 const OUT_DIR := "res://../.scratch/pose_replay"
 
 # Yaw/pitch offsets (degrees) around the dumped forward — the "sometimes" net.
@@ -92,10 +91,10 @@ func _ready() -> void:
 	var root := OS.get_environment("NOVA_RESOURCE_DIR").strip_edges()
 	if root.is_empty():
 		root = ResourceDirSettings.get_resource_dir()
-	NovaWindow.set_fullscreen(get_window(), true)
+	WindowState.set_fullscreen(get_window(), true)
 	await _settle(6)
 
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	if mission.open_file(root.path_join(mission_file)) != OK:
 		push_error("[pr] open failed: " + mission_file)
 		get_tree().quit(1)

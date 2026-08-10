@@ -222,8 +222,6 @@ func _section_is_idle_loop(section_name: String) -> bool:
 	if _lm._document == null or not _lm._document.script_loaded():
 		return false
 	var ms = _lm._document.mus_script
-	if not ms.has_method("get_section_model"):
-		return false
 	var sn := StringName(ms.get_default_script_name())
 	for sec in ms.get_section_model(sn):
 		if String(sec.get("name", "")) == section_name:
@@ -235,8 +233,6 @@ func _section_is_unlinked(section_name: String) -> bool:
 	if _lm._document == null or not _lm._document.script_loaded():
 		return false
 	var ms = _lm._document.mus_script
-	if not ms.has_method("get_section_model"):
-		return false
 	var sn := StringName(ms.get_default_script_name())
 	var model: Array = _lm.MusicSectionGraphClass.build(ms, sn)
 	var incoming_by_index: Dictionary = _lm._incoming_by_index(model)
@@ -266,11 +262,10 @@ func _populate_program_view(section_name: String) -> bool:
 		if total > 0:
 			inputs_by_section[String(sec.get("name", ""))] = total
 	var profile_path := ""
-	if _lm._document.has_method("get_var_profile_path"):
-		profile_path = _lm._document.get_var_profile_path()
+	profile_path = _lm._document.get_var_profile_path()
 	for sec in ast:
 		if String(sec.get("name", "")) == section_name:
-			var editable: bool = _lm._document.has_method("can_author") and _lm._document.can_author()
+			var editable: bool = _lm._document.can_author()
 			var section_names: PackedStringArray = _lm._document.mus_script.get_section_names(sn)
 			_lm._program_view.configure_authoring(section_names, _lm._build_var_list(), _lm._document.mus_script,
 				_lm._bank_names(), editable, _lm._authoring_blocked_reason(), profile_path, inputs_by_section)

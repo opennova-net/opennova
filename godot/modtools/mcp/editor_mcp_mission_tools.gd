@@ -9,8 +9,8 @@ extends RefCounted
 ## Holding the API wrong (the raw-script era's floating objects) is impossible
 ## by construction.
 
-const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
-const ItemSeatSpecs := preload("res://adapter/world/item_seat_specs.gd")
+const MissionControllerScript := preload("res://modtools/mission/mission_controller.gd")
+const ItemSeatSpecs := preload("res://game/world/item_seat_specs.gd")
 
 ## Watchdog budget for tools that (re)load the mission's terrain and place
 ## its objects — that path can take seconds on large maps.
@@ -134,8 +134,8 @@ func register_all(registry: McpToolRegistry) -> void:
 # The open mission's controller, or an error result. Every mission tool funnels
 # through here so the "open a mission first" guidance is uniform.
 func _require_mission(ctx: McpToolContext) -> Dictionary:
-	var controller: Variant = ctx.mission()
-	if controller == null or not controller.has_method("is_loaded") or not controller.is_loaded():
+	var controller: MissionControllerScript = ctx.mission()
+	if controller == null or not controller.is_loaded():
 		return { "error": "No mission open — open_in_workspace(workspace=\"mission\", path=...) first; list candidates with list_assets(kind=\"mission\")." }
 	return { "controller": controller }
 
@@ -148,9 +148,10 @@ func _require_editable(ctx: McpToolContext) -> Dictionary:
 # Batch-sample terrain heights at world (x, z) pairs; null per off-terrain point.
 func _sample(ctx: McpToolContext, points: PackedVector2Array) -> Array:
 	var out: Array = []
-	if ctx.editor == null or not ctx.editor.has_method("sample_heights_world"):
+	var editor: TerrainEditorBase = ctx.editor
+	if editor == null:
 		return out
-	var heights: PackedFloat32Array = ctx.editor.sample_heights_world(points)
+	var heights: PackedFloat32Array = editor.sample_heights_world(points)
 	for h in heights:
 		out.append(null if is_nan(h) else h)
 	return out
@@ -158,13 +159,13 @@ func _sample(ctx: McpToolContext, points: PackedVector2Array) -> Array:
 
 static func _kind_label(kind: int) -> String:
 	match kind:
-		NovaMissionData.KIND_MARKER:
+		MissionData.KIND_MARKER:
 			return "marker"
-		NovaMissionData.KIND_ITEM:
+		MissionData.KIND_ITEM:
 			return "item"
-		NovaMissionData.KIND_BUILDING:
+		MissionData.KIND_BUILDING:
 			return "building"
-		NovaMissionData.KIND_ORGANIC:
+		MissionData.KIND_ORGANIC:
 			return "person"
 	return str(kind)
 
@@ -180,11 +181,10 @@ static func _world_echo(bms_pos: Vector3) -> Array:
 # editor's New action (MissionController.new_mission) so authoring needs no manual
 # click — the gap that made the MCP server require human interaction.
 func _tool_new_mission(args: Dictionary, ctx: McpToolContext) -> Variant:
-	var controller: Variant = ctx.mission()
-	if controller == null or not controller.has_method("new_mission"):
+	var controller: MissionControllerScript = ctx.mission()
+	if controller == null:
 		return McpToolResult.error("Mission workspace unavailable.")
-	if controller.has_method("is_loaded") and controller.is_loaded() \
-			and controller.has_method("is_dirty") and controller.is_dirty() \
+	if controller.is_loaded() and controller.is_dirty() \
 			and not bool(args.get("discard", false)):
 		return McpToolResult.error("The open mission has unsaved changes — save_mission first, or pass discard: true to replace it.")
 	if ctx.shell == null:
@@ -204,10 +204,10 @@ func _tool_new_mission(args: Dictionary, ctx: McpToolContext) -> Variant:
 		return McpToolResult.error("New mission failed: %s" % controller.get_last_status())
 	# Bring the Mission workspace forward so the human sees the empty world.
 	var mission_ws_id := int(ctx.shell._workspace_id_for_resource_kind("mission"))
-	if mission_ws_id != -1 and ctx.shell.has_method("set_active_workspace"):
+	if mission_ws_id != -1:
 		ctx.shell.set_active_workspace(mission_ws_id)
 		await ctx.frames(1)
-	var info: Dictionary = controller.get_mission().get_info() if controller.has_method("get_mission") else {}
+	var info: Dictionary = controller.get_mission().get_info()
 	return { "ok": true, "terrain": info.get("terrain", ""), "status": controller.get_last_status(), "dirty": controller.is_dirty() }
 
 
@@ -220,7 +220,7 @@ func _tool_list_items(args: Dictionary, ctx: McpToolContext) -> Variant:
 	var want_kind := int(args.get("kind", -1)) if args.has("kind") else -1
 	var matched: Array = []
 	for item: Dictionary in controller.get_placeable_items():
-		var kind := int(NovaMissionData.kind_for_item_type(int(item["type"])))
+		var kind := int(MissionData.kind_for_item_type(int(item["type"])))
 		if want_kind >= 0 and kind != want_kind:
 			continue
 		if not filter.is_empty() and not String(item["display_name"]).to_lower().contains(filter):
@@ -239,7 +239,7 @@ func _tool_sample_terrain(args: Dictionary, ctx: McpToolContext) -> Variant:
 	var gate := _require_mission(ctx)
 	if gate.has("error"):
 		return McpToolResult.error(gate["error"])
-	if ctx.editor == null or not ctx.editor.has_method("sample_heights_world"):
+	if ctx.editor == null:
 		return McpToolResult.error("No terrain loaded — open a terrain or mission first.")
 	var points := PackedVector2Array()
 	for pair in args.get("points", []):
@@ -543,7 +543,7 @@ func _tool_set_header(args: Dictionary, ctx: McpToolContext) -> Variant:
 			controller.set_header_int(name, int(fields[key]))
 		applied.append(name)
 	var note := ""
-	if env_changed and controller.has_method("reload_environment"):
+	if env_changed:
 		note = String(controller.reload_environment())
 	var out := { "applied": applied, "dirty": controller.is_dirty() }
 	if not note.is_empty():
@@ -567,12 +567,12 @@ func _tool_analyze(args: Dictionary, ctx: McpToolContext) -> Variant:
 	var names := {}
 	var source := ""
 	if args.has("path") and not String(args["path"]).is_empty():
-		mission = NovaMissionData.new()
+		mission = MissionData.new()
 		var opened := McpAssetDescribe.open_data(mission, ctx, String(args["path"]))
 		if not opened["ok"]:
 			return McpToolResult.error(String(opened["error"]))
 		source = String(opened["path"])
-		var db := NovaItemDatabase.new()
+		var db := ItemDatabase.new()
 		if ctx.root() != null and db.load_from_resource_root(ctx.root(), "items.def") == OK:
 			for item: Dictionary in db.get_items():
 				names[int(item["id"])] = item["display_name"]
@@ -602,7 +602,7 @@ func _tool_analyze(args: Dictionary, ctx: McpToolContext) -> Variant:
 			var world := MissionObjectPlacer.bms_to_godot_position(entity["position"])
 			var cell := Vector2i(floori(world.x / 64.0), floori(world.z / 64.0))
 			cells[cell] = int(cells.get(cell, 0)) + 1
-		if kind == NovaMissionData.KIND_ORGANIC:
+		if kind == MissionData.KIND_ORGANIC:
 			var team := str(entity.get("team", "?"))
 			teams[team] = int(teams.get(team, 0)) + 1
 			var name1 := String(entity.get("name1", ""))
@@ -650,7 +650,7 @@ func _tool_analyze_mounts(args: Dictionary, ctx: McpToolContext) -> Variant:
 	var rows: Array = []
 	for raw in mission.get_all_entities():
 		var organic: Dictionary = raw
-		if int(organic.get("kind", -1)) != NovaMissionData.KIND_ORGANIC:
+		if int(organic.get("kind", -1)) != MissionData.KIND_ORGANIC:
 			continue
 		var command_id := int(organic.get("waypoint_id", 0))
 		if not command_ids.has(command_id):
@@ -685,7 +685,7 @@ func _tool_analyze_mounts(args: Dictionary, ctx: McpToolContext) -> Variant:
 
 func _mission_for_readonly_analysis(args: Dictionary, ctx: McpToolContext) -> Dictionary:
 	if args.has("path") and not String(args["path"]).is_empty():
-		var mission := NovaMissionData.new()
+		var mission := MissionData.new()
 		var opened := McpAssetDescribe.open_data(mission, ctx, String(args["path"]))
 		if not opened["ok"]:
 			return { "error": String(opened["error"]) }
@@ -703,11 +703,9 @@ func _mission_for_readonly_analysis(args: Dictionary, ctx: McpToolContext) -> Di
 
 func _item_db_for_mount_analysis(ctx: McpToolContext, controller: Variant) -> Variant:
 	if ctx.root() != null:
-		var db := NovaItemDatabase.new()
+		var db := ItemDatabase.new()
 		if db.load_from_resource_root(ctx.root(), "items.def") == OK:
 			return db
-	if controller != null and controller.has_method("_item_db"):
-		return controller._placement._item_db()
 	return null
 
 
@@ -795,7 +793,7 @@ func _mount_entity_card(entity: Dictionary, item_db: Variant) -> Dictionary:
 	}
 	if entity.get("position") is Vector3:
 		out["world_position"] = _world_echo(entity["position"])
-	if item_db != null and item_id != 0 and item_db.has_method("has_item") and item_db.has_item(item_id):
+	if item_db != null and item_id != 0 and item_db.has_item(item_id):
 		out["display_name"] = String(item_db.get_display_name(item_id))
 		out["graphic"] = String(item_db.get_graphic(item_id))
 	return out
@@ -825,7 +823,7 @@ func _tool_save(args: Dictionary, ctx: McpToolContext) -> Variant:
 		if path.get_extension().to_lower() != "bms":
 			return McpToolResult.error("path must end in .bms.")
 		if path.is_relative_path():
-			var root_dir := String(ctx.shell.get_resource_root_dir()) if ctx.shell != null and ctx.shell.has_method("get_resource_root_dir") else ""
+			var root_dir := String(ctx.shell.get_resource_root_dir()) if ctx.shell != null else ""
 			if root_dir.is_empty():
 				return McpToolResult.error("No resource root mounted to resolve a relative filename — pass an absolute path.")
 			path = root_dir.path_join(path)

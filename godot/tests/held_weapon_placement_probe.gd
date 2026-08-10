@@ -3,7 +3,7 @@ extends SceneTree
 # End-to-end placement probe for the THIRD-PERSON held weapon (D-WPN-32).
 #
 # The axis probe measures how a gfx3 is AUTHORED; this one measures what the shipped
-# placement code actually DOES with it. It drives the real PresentHeldWeapon.attach_transform
+# placement code actually DOES with it. It drives the real PresentApplier.held_weapon_attach_transform
 # against a real posed character skeleton and reports, in WORLD space, where the barrel ends
 # up — as an elevation angle and a compass bearing, not as a matrix to be eyeballed.
 #
@@ -19,9 +19,7 @@ extends SceneTree
 #   "$GODOT_BIN" --headless --path godot -s res://tests/held_weapon_placement_probe.gd
 # Not collected by GUT (*_probe.gd).
 
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
-const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
-const PresentHeldWeapon := preload("res://adapter/world/present_held_weapon.gd")
+const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 
 # The cases worth reading. A level soldier is the one whose answer we already know.
 const CASES := [
@@ -37,7 +35,7 @@ func _init() -> void:
 	var root := OS.get_environment("NOVA_RESOURCE_DIR").strip_edges()
 	if root.is_empty():
 		root = ResourceDirSettings.get_resource_dir()
-	var res := NovaResourceRoot.new()
+	var res := ResourceRoot.new()
 	if res.mount_runtime(root, ResourceDirSettings.get_expansion()) != OK:
 		print("FAIL: cannot mount ", root)
 		quit(1)
@@ -55,19 +53,19 @@ func _init() -> void:
 		print("FAIL: the player character model did not build")
 		quit(1)
 		return
-	var skel := PresentHeldWeapon.find_skeleton(body)
+	var skel := PresentApplier.find_skeleton(body)
 	if skel == null:
 		print("FAIL: no Skeleton3D under the character model")
 		quit(1)
 		return
 	print("skeleton bones: %d   bone %d name: %s" % [
-			skel.get_bone_count(), PresentHeldWeapon.BONE_INDEX,
-			skel.get_bone_name(PresentHeldWeapon.BONE_INDEX)
-					if skel.get_bone_count() > PresentHeldWeapon.BONE_INDEX else "<absent>"])
+			skel.get_bone_count(), PresentApplier.HELD_WEAPON_BONE_INDEX,
+			skel.get_bone_name(PresentApplier.HELD_WEAPON_BONE_INDEX)
+					if skel.get_bone_count() > PresentApplier.HELD_WEAPON_BONE_INDEX else "<absent>"])
 	# The nudge is authored in MODEL space and carried through bone 16's model->world
 	# rotation. Whether that reduces to the bone's posed basis depends on the bone's REST
 	# basis being identity, so measure it rather than assume it.
-	var bi := PresentHeldWeapon.BONE_INDEX
+	var bi := PresentApplier.HELD_WEAPON_BONE_INDEX
 	var rest_g := skel.get_bone_global_rest(bi)
 	var pose_g := skel.get_bone_global_pose(bi)
 	print("bone %d rest origin   = %s" % [bi, _v(rest_g.origin)])
@@ -109,7 +107,7 @@ func _init() -> void:
 			"case", "pitch", "yaw", "world barrel dir", "elev", "bearing"])
 	for c in CASES:
 		var angles: Vector3 = c["angles"]
-		var attach: Variant = PresentHeldWeapon.attach_transform(body, angles)
+		var attach: Variant = PresentApplier.held_weapon_attach_transform(body, angles)
 		if attach == null:
 			print("%-32s  <attach_transform returned null>" % c["name"])
 			continue

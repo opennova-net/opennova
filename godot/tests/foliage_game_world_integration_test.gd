@@ -4,7 +4,7 @@ extends GutTest
 # Dvxi5 terrain plus real 3DI geometry under both authored vegetation names,
 # then drives GameWorld exactly through its public load/tick surface.
 
-const VegAssets := preload("res://adapter/terrain/veg_assets.gd")
+const VegAssets := preload("res://game/terrain/veg_assets.gd")
 const DVXI5_FIXTURE := "res://../fixtures/godot/dvxi5"
 const ENV_FIXTURE := "res://../fixtures/env/full_00.env"
 const MODEL_FIXTURE := "res://../fixtures/3dp/CmpFireN/CmpFireN.3di"
@@ -31,10 +31,10 @@ func after_each() -> void:
 
 func test_game_world_resolves_both_dvxi5_models_and_emits_foliage() -> void:
 	_stage_runtime_fixture()
-	var resource_root := NovaResourceRoot.new()
+	var resource_root := ResourceRoot.new()
 	assert_eq(resource_root.set_root_dir(_fixture_root()), OK)
 
-	var packed := load("res://adapter/world/game_world.tscn") as PackedScene
+	var packed := load("res://game/world/game_world.tscn") as PackedScene
 	assert_not_null(packed)
 	if packed == null:
 		return
@@ -52,7 +52,7 @@ func test_game_world_resolves_both_dvxi5_models_and_emits_foliage() -> void:
 	assert_eq(world.load_world(), OK)
 
 	var data := world.get_terrain_data()
-	var dispatcher := world.get_node_or_null("NovaTerrain/FoliageDispatcher") as NovaFoliageDispatcher
+	var dispatcher := world.get_node_or_null("Terrain/FoliageDispatcher") as FoliageDispatcher
 	assert_not_null(data)
 	assert_not_null(dispatcher)
 	if data == null or dispatcher == null:
@@ -62,7 +62,7 @@ func test_game_world_resolves_both_dvxi5_models_and_emits_foliage() -> void:
 	# Two disjoint witnesses prove the authored foliagemap is interpreted with
 	# the retail policy for each consumer: flat wrapping for detail grass and
 	# sector routing for MODEL masks.
-	var foliage_map: NovaTerrainFoliageMap = data.get_foliage_map()
+	var foliage_map: TerrainFoliageMap = data.get_foliage_map()
 	assert_not_null(foliage_map)
 	if foliage_map == null:
 		world.unload()
@@ -132,7 +132,7 @@ func test_game_world_resolves_both_dvxi5_models_and_emits_foliage() -> void:
 			break
 
 	assert_true(bool(stats.get("native_detail_source", false)),
-		"GameWorld foliage must consume NovaTerrain native detail cells.")
+		"GameWorld foliage must consume Terrain native detail cells.")
 	assert_gt(int(stats.get("detail_cells", 0)), 0,
 		"The detail camera witness should collect native 16-unit detail cells: %s" % stats)
 	assert_gt(int(stats.get("runtime_detail_intents", 0)), 0,
@@ -149,7 +149,7 @@ func test_game_world_resolves_both_dvxi5_models_and_emits_foliage() -> void:
 	await get_tree().process_frame
 
 
-func _has_complete_detail_output(dispatcher: NovaFoliageDispatcher, stats: Dictionary) -> bool:
+func _has_complete_detail_output(dispatcher: FoliageDispatcher, stats: Dictionary) -> bool:
 	return (
 		int(stats.get("runtime_detail_intents", 0)) > 0
 		and int(stats.get("detail_vertices", 0)) > 0

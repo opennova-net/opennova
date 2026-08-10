@@ -10,7 +10,7 @@ extends RefCounted
 
 const MainGameScene := preload("res://game/main_game.tscn")
 const ResourceDirSettings := preload(
-		"res://adapter/resource_index/resource_dir_settings.gd")
+		"res://game/resource_index/resource_dir_settings.gd")
 const LOAD_TIMEOUT_MSEC := 240_000
 
 
@@ -31,14 +31,14 @@ static func boot(
 	if bms.is_empty() or bms != bms.get_file() \
 			or bms.get_extension().to_lower() != "bms":
 		return {"error": "mission must be a top-level .bms name: %s" % bms}
-	var saved_mission: NovaMissionData = null
+	var saved_mission: MissionData = null
 	if saved_path.is_empty() and not FileAccess.file_exists(dir.path_join(bms)):
 		return {"error": "%s not found in %s" % [bms, dir]}
 	if not saved_path.is_empty():
 		if saved_path.get_extension().to_lower() != "bms" \
 				or not FileAccess.file_exists(saved_path):
 			return {"error": "saved mission file not found: %s" % saved_path}
-		saved_mission = NovaMissionData.new()
+		saved_mission = MissionData.new()
 		if saved_mission.open_file(saved_path) != OK:
 			return {"error": "failed to parse saved mission %s: %s" % [
 				saved_path, saved_mission.get_last_error()]}

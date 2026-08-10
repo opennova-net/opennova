@@ -21,13 +21,20 @@ THE structural program is the **rearchitecture**
 ([ADR 0033](adr/0033-engine-owned-loops-device-shells.md), approved
 2026-08-09, replacing the ADR 0031/0032 adapter-seam regime in full): the
 engine takes ownership of the main/tick/render loops behind a device
-boundary — R1 (the frame port) and R2 (packet presentation) are committed;
-R3 (the render frame) is spike-gated; R4 (a second backend) indefinitely
-optional. It subsumes the structural slot earlier programs held: the
-**2026-07 quality campaign** closed at W4 (#310–#375; its W5 residue stays
-tracked in [`TODO.md`](../TODO.md) § "Cleanup & verification backlog"), and
-the 2026-08-08 adapter-shape round (#451–#456) was this program's census
-and ground-clearing.
+boundary. As of 2026-08-10 (trunk PR #460): R1 (the frame port) and R2
+(packet presentation — terrain, foliage, HUD, and menus, whose cutover
+deleted the MnuMenu Control tree for the compiled MenuFrame + MenuDriver
+path) are LANDED; the P1 rewrite queue that followed (env/weather, placer,
+present facades, composition, avatar, menus), the task-12
+no-magic-in-the-godot-layer sweep, and the engine layout flatten (ADR
+0024's amendment) are complete; R3 (the render frame) CLOSED not taken at its
+2026-08-10 spike — the one-scene screenshot diff vs retail showed no
+ordering-attributable delta (ADR 0033 §R3 spike result); R4 (a second
+backend) waits on R3's reopen condition. It subsumes the structural slot earlier programs
+held: the **2026-07 quality campaign** closed at W4 (#310–#375; its W5
+residue stays tracked in [`TODO.md`](../TODO.md) § "Cleanup & verification
+backlog"), and the 2026-08-08 adapter-shape round (#451–#456) was this
+program's census and ground-clearing.
 
 ## The standing loop for a fidelity slice
 
@@ -104,7 +111,7 @@ first grill.
 | [divergence-ledger.md](divergence-ledger.md) + `scripts/lint/ledger_check.py` | a divergence being known but untracked, or the scoreboard drifting from its own tables | CI, hard-fail; `--write` regenerates |
 | `scripts/lint/ratchet_counts.py` | new uncited `engine/` source files; new tests poking privates | CI, fail-on-increase against a committed baseline |
 | `scripts/lint/link_graph_check.py` | forbidden lib edges (ADR 0019/0020 seams) | CI, hard-fail |
-| `scripts/lint/include_graph_check.py` | the ADR 0020 terrain seam dissolving with the ADR 0029 target collapse — net/wac/mission may include only terrain_query's four `terrain/` headers, never the terrain-format stack | CI, hard-fail |
+| `scripts/lint/include_graph_check.py` | the ADR 0020 terrain seam dissolving with the ADR 0029 target collapse — net/wac/mission may include only terrain_query's four `terrain_query/` headers, never the terrain-format stack | CI, hard-fail |
 | `scripts/lint/host_lint.py` | "host" regressing to any non-game-host sense (the terminology campaign's teeth) | CI, hard-fail on code suffixes; Markdown gets a non-failing advisory |
 | `scripts/lint/maturity_lint.py` | dict-contract drift and new magic numbers in changed `.gd` ranges | CI, hard-fail (advisory legs stay advisory) |
 | `abi_export_identity` ctest | an accidental change to the flat C ABI | default ctest; a baseline bump is same-commit and logged in [maturity-program.md](maturity-program.md) |

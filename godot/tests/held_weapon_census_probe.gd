@@ -13,21 +13,20 @@ extends SceneTree
 #   "$GODOT_BIN" --headless --path godot -s res://tests/held_weapon_census_probe.gd
 # Not collected by GUT (*_probe.gd).
 
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
-const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
+const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 
 
 func _init() -> void:
 	var root := OS.get_environment("NOVA_RESOURCE_DIR").strip_edges()
 	if root.is_empty():
 		root = ResourceDirSettings.get_resource_dir()
-	var res := NovaResourceRoot.new()
+	var res := ResourceRoot.new()
 	if res.mount_runtime(root, ResourceDirSettings.get_expansion()) != OK:
 		print("FAIL: cannot mount ", root)
 		quit(1)
 		return
 
-	var db := NovaWeaponDatabase.new()
+	var db := WeaponDatabase.new()
 	if db.load_from_resource_root(res, "weapon.def") != OK:
 		print("FAIL: weapon.def -> ", db.get_last_error())
 		quit(1)

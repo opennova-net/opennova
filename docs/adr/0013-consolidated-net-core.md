@@ -18,7 +18,7 @@ role remains matchmaking-only. The recorded caution: a mis-addressed retail clie
 now walk admission further into that phantom world than the old World-less responder
 allowed — capping the responder's admission depth is fair follow-up work); and the
 **game server is the
-opennova Godot game itself** — `NovaSimulation` owns a `libs/npruntime` `HostOwner`,
+opennova Godot game itself** — `Simulation` owns a `libs/npruntime` `HostOwner`,
 `start_host_session` stands up a real `world::World` plus the selected host role, and
 `host_session_pump` drives the 62 Hz owner loop (ADRs [0009](0009-in-match-net-seam.md)–
 [0012](0012-player-is-host-side-server-entity.md)). Aligning that game server with the
@@ -91,7 +91,7 @@ no local client. Both continue through `set_transport_mode` → `create_session`
 [→ `Server_InitNewRoundState`] → `configure_session_runtime`; only mode 3 runs the
 own-player spawn/initial-stream path
 [orig: `SinglePlayer_StartMission @0x561af0`;
-`UI_HandleHostSessionStart @0x556d00`]. The Godot binding (`NovaSimulation`) delegates to
+`UI_HandleHostSessionStart @0x556d00`]. The Godot binding (`Simulation`) delegates to
 the same helper as the CLI harness and host-session tests. `create_session` owns the
 single `Server_InitNewRoundState` call.
 

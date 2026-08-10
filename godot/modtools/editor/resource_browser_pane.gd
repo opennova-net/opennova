@@ -86,7 +86,7 @@ func _init() -> void:
 	add_child(table)
 
 
-## Capabilities: get_index() -> NovaResourceIndex wrapper, get_root_dir() ->
+## Capabilities: get_index() -> ResourceIndex wrapper, get_root_dir() ->
 ## String, scan_root() (index the configured root), current_resource_path(kind)
 ## -> String (the active workspace's open file, for the row tint), and
 ## open_entry(kind, path) (the shell's open_in_workspace).

@@ -1,31 +1,11 @@
 extends GutTest
 
 # PickDebugView: the world highlight for the debug pick list. Draws rows from
-# the injected shell-owned model, re-resolves mover positions through the sim
-# accessor it names, and clears cleanly when the list empties.
+# the injected shell-owned model through the public render seam (mover
+# positions arrive as the net_id -> live position map the sim fetch builds),
+# and clears cleanly when the list empties.
 
-const ViewScript := preload("res://adapter/debug/pick/pick_debug_view.gd")
-
-
-class StubSim:
-	extends Node
-	var mover_position := Vector3(9, 9, 9)
-
-	func get_world_entity_debug(net_id: int) -> Dictionary:
-		if net_id != 212:
-			return {}
-		return {"net_id": net_id, "position": mover_position}
-
-
-class StubWorld:
-	extends Node
-	var sim := StubSim.new()
-
-	func _init() -> void:
-		add_child(sim)
-
-	func get_sim() -> StubSim:
-		return sim
+const ViewScript := preload("res://game/debug/pick/pick_debug_view.gd")
 
 
 func _static_pick() -> Dictionary:
@@ -44,22 +24,20 @@ func _mover_pick() -> Dictionary:
 	}
 
 
-func _make_view(world: StubWorld, picks: NovaDebugPickList) -> PickDebugView:
+func _make_view(picks: DebugPickList) -> PickDebugView:
 	var view: PickDebugView = ViewScript.new()
 	view.set_pick_list(picks)
 	add_child_autofree(view)
-	view.setup(world)
+	view.setup(null)
 	return view
 
 
 func test_draws_one_labeled_highlight_per_pick() -> void:
-	var world := StubWorld.new()
-	add_child_autofree(world)
-	var picks := NovaDebugPickList.new()
+	var picks := DebugPickList.new()
 	picks.add(_static_pick())
 	picks.add(_mover_pick())
-	var view := _make_view(world, picks)
-	view.refresh_now()
+	var view := _make_view(picks)
+	view.render_picks({212: Vector3(9, 9, 9)})
 
 	var lines := view.get_node("PickDebugLines") as MeshInstance3D
 	assert_gt((lines.mesh as ImmediateMesh).get_surface_count(), 0,
@@ -76,43 +54,36 @@ func test_draws_one_labeled_highlight_per_pick() -> void:
 
 
 func test_movers_follow_the_live_sim_position() -> void:
-	var world := StubWorld.new()
-	add_child_autofree(world)
-	var picks := NovaDebugPickList.new()
+	var picks := DebugPickList.new()
 	picks.add(_mover_pick())
-	var view := _make_view(world, picks)
-	view.refresh_now()
+	var view := _make_view(picks)
+	view.render_picks({212: Vector3(9, 9, 9)})
 
 	var label := view.get_node("PickDebugLabel0") as Label3D
 	assert_almost_eq(label.position.x, 9.0, 0.001,
 			"the highlight re-resolved the mover's LIVE position (pick-time was x=5)")
-	world.sim.mover_position = Vector3(20, 0, 9)
-	view.refresh_now()
+	view.render_picks({212: Vector3(20, 0, 9)})
 	assert_almost_eq(label.position.x, 20.0, 0.001,
 			"...and keeps following it")
 
 
 func test_static_picks_keep_their_pick_time_position() -> void:
-	var world := StubWorld.new()
-	add_child_autofree(world)
-	var picks := NovaDebugPickList.new()
+	var picks := DebugPickList.new()
 	picks.add(_static_pick())
-	var view := _make_view(world, picks)
-	view.refresh_now()
+	var view := _make_view(picks)
+	view.render_picks({212: Vector3(9, 9, 9)})
 	var label := view.get_node("PickDebugLabel0") as Label3D
 	assert_almost_eq(label.position.x, 1.0, 0.001,
-			"statics (net_id 0) never consult the mover accessor")
+			"statics (net_id 0) never consult the mover positions")
 
 
 func test_emptying_the_list_clears_everything() -> void:
-	var world := StubWorld.new()
-	add_child_autofree(world)
-	var picks := NovaDebugPickList.new()
+	var picks := DebugPickList.new()
 	picks.add(_static_pick())
-	var view := _make_view(world, picks)
-	view.refresh_now()
+	var view := _make_view(picks)
+	view.render_picks({})
 	picks.clear()
-	view.refresh_now()
+	view.render_picks({})
 	var lines := view.get_node("PickDebugLines") as MeshInstance3D
 	assert_eq((lines.mesh as ImmediateMesh).get_surface_count(), 0)
 	assert_false((view.get_node("PickDebugLabel0") as Label3D).visible)

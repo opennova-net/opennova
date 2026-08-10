@@ -21,14 +21,16 @@ easier to relay than to rediscover.
   `net/` (novacrypto, napi, npwire, novaworld, netsim, npruntime). Consumed via the
   flat C ABI by Python and the DCC plugins, by direct static link everywhere else.
   See `engine/CLAUDE.md`.
-- `godot/` — the Godot 4.6.1 project: `adapter/` (the shell adapter, ADR 0028:
-  GDExtension C++ glue, `Nova*` classes, plus the shared shell-neutral GDScript layer —
-  see `godot/adapter/CLAUDE.md`), `modtools/` (the OpenNova Editor "ONED" — thirteen
-  authoring workspaces), `game/` (the game shell), `tests/` (GUT suite).
+- `godot/` — the Godot 4.6.1 project: `src/` (pure C++ GDExtension bindings —
+  part of the core engine, ADR 0034 d6; see `godot/src/CLAUDE.md`),
+  `game/` (the game shell PLUS the game-level GDScript runtime both
+  front-ends compose — world, debug, environment, mission, ui, ...),
+  `modtools/` (the OpenNova Editor "ONED" — thirteen authoring workspaces),
+  `tests/` (GUT suite).
 - `apps/` — `importer/` (Python + native FFI importer behind `onimport.exe`),
   `novaworld_server/` (the NovaWorld service), `nw_server/` (dev/golden-harness
   in-match host; never shipped), `nw_lan_probe/` (LAN readiness probe),
-  `nw_pp/` (packet pretty-printer), `common/` (shared
+  `nw_pp/` (draw list pretty-printer), `common/` (shared
   socket helpers, deliberately app-layer; pcap I/O lives in `engine/base/pcapio`),
   `modsuperoed.py` (the OED automation smoke driver). Top-level `blender/` and
   `opennova_max/` are the DCC export plugins, `pyopennova/` the Python ctypes FFI
@@ -88,7 +90,7 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
 
 - `engine/` libraries: built as the five group targets (ADR 0029 — no per-lib CMake
   targets), C++ namespace `opennova`, flat domain-prefixed C ABI (consumed by
-  `apps/importer/` and `godot/adapter/`). The shared FFI target is `opennova_shared`
+  `apps/importer/` and `godot/src/`). The shared FFI target is `opennova_shared`
   (`opennova.dll` / `libopennova.so`).
 - This is a faithful reimplementation — parity, not reinterpretation ([GOALS.md](GOALS.md)).
   Implementing "our own version" of engine behavior is never allowed: port the witnessed
@@ -170,10 +172,10 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
 - [CONTEXT.md](CONTEXT.md) — the project glossary; use its canonical vocabulary.
 - [docs/runtime-architecture.md](docs/runtime-architecture.md) — how a mission runs. Read
   it plus the ADRs before touching `mission_runtime.gd` / `mission_present_pass.gd` /
-  `NovaSimulation`.
+  `Simulation`.
 - [godot/modtools/README.md](godot/modtools/README.md) — the ONED workspace framework,
   with one README per workspace.
-- Directory-scoped agent rules: `engine/CLAUDE.md`, `godot/adapter/CLAUDE.md`,
+- Directory-scoped agent rules: `engine/CLAUDE.md`, `godot/src/CLAUDE.md`,
   `godot/modtools/CLAUDE.md`, `godot/tests/CLAUDE.md`.
 - Project skills in `.claude/skills/`: `gut`, `oned-run`, `new-format-lib`, `re-doc`,
   `extract-pr`, `grill-ida`, `engine-research`, `blender-object`, `diagnosing-bugs`.

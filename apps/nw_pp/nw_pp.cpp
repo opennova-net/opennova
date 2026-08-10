@@ -15,7 +15,7 @@
 // 65535 so we don't see it in practice; fragments are dropped with a
 // stderr warning). Anything else is read as hexcap text.
 //
-// Tag-specific decoders live in `engine/net/npwire/include/npwire/ingame_decode.h`
+// Tag-specific decoders live in `engine/net/npwire/ingame_decode.h`
 // (shared with `nw_ingame_pool_records_test` and the future real handlers).
 // As new tags get field maps in docs/net/novaworld-net-re.md, their decoders
 // land there and a printer for them lands here.

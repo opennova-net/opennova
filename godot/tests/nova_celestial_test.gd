@@ -1,6 +1,6 @@
 extends GutTest
 
-# Reflection-pass fidelity pins for NovaCelestial. The committed CmpFireN 3DI
+# Reflection-pass fidelity pins for Celestial. The committed CmpFireN 3DI
 # stands in for the retail body models, letting the test exercise the public
 # environment/resource-root lifecycle without requiring an external JO install.
 
@@ -13,7 +13,7 @@ const FAR_CAMERA_POSITION := Vector3(50000.0, 64.0, -40000.0)
 
 
 func _make_fixture() -> Dictionary:
-	var resource_root := NovaResourceRoot.new()
+	var resource_root := ResourceRoot.new()
 	assert_eq(resource_root.set_root_dir(
 			ProjectSettings.globalize_path(MODEL_FIXTURE_ROOT)), OK)
 
@@ -24,7 +24,7 @@ func _make_fixture() -> Dictionary:
 	env_data.set_glare_3di(MODEL_NAME)
 	env_data.set_star_3di(MODEL_NAME)
 
-	var env := NovaEnvironment.new()
+	var env := MissionEnvironment.new()
 	env.name = "CelestialTestEnv"
 	env.environment_data = env_data
 	add_child_autofree(env)
@@ -35,12 +35,12 @@ func _make_fixture() -> Dictionary:
 	add_child_autofree(camera)
 	camera.make_current()
 
-	var celestial := NovaCelestial.new()
+	var celestial := Celestial.new()
 	celestial.name = "CelestialUnderTest"
 	celestial.environment_path = NodePath("../CelestialTestEnv")
 	add_child_autofree(celestial)
 	celestial.set_resource_root(resource_root)
-	simulate(celestial, 1, TICK)
+	celestial.advance_frame(TICK)
 	return {
 		"celestial": celestial,
 		"camera": camera,
@@ -61,7 +61,7 @@ func test_body_updates_reach_installed_surface_materials() -> void:
 	assert_gt(meshes.size(), 0)
 	for mesh in meshes:
 		assert_null(mesh.material_override,
-				"the NovaObjectModel whole-mesh material cannot mask celestial surfaces")
+				"the ObjectModel whole-mesh material cannot mask celestial surfaces")
 		assert_true(mesh.ignore_occlusion_culling,
 				"reflection relocation must survive main-view occlusion culling")
 		assert_true(mesh.extra_cull_margin >= 1.0e5,
@@ -82,13 +82,13 @@ func test_additive_source_material_keeps_black_as_transparent_zero() -> void:
 	source_shader.code = "shader_type spatial; render_mode blend_add;"
 	var source_material := ShaderMaterial.new()
 	source_material.shader = source_shader
-	assert_true(NovaCelestial.source_material_uses_additive(source_material),
+	assert_true(Celestial.source_material_uses_additive(source_material),
 			"FF_ST_AD-style sun/moon textures must keep additive blend semantics")
 
 	source_shader = Shader.new()
 	source_shader.code = "shader_type spatial; render_mode blend_mix;"
 	source_material.shader = source_shader
-	assert_false(NovaCelestial.source_material_uses_additive(source_material))
+	assert_false(Celestial.source_material_uses_additive(source_material))
 
 
 func test_star_instances_are_local_to_a_camera_anchored_multimesh() -> void:

@@ -1,15 +1,13 @@
 extends GutTest
 
 # Editor<->runtime parity (deferred from PR #24): the terrain preview drives the
-# same NovaWater + NovaWeather stack as the runtime. These lock the API the
+# same Water + Weather stack as the runtime. These lock the API the
 # terrain editor relies on so the bespoke hardcoded water plane cannot return.
 
-const NovaWaterScript = preload("res://adapter/environment/nova_water.gd")
-const NovaWeatherScript = preload("res://adapter/environment/nova_weather.gd")
 
 
 func test_water_height_override_drives_height() -> void:
-	var water = add_child_autofree(NovaWaterScript.new())
+	var water = add_child_autofree(Water.new())
 	water.set_height_override(42.5)
 	assert_almost_eq(water.water_height, 42.5, 0.001, "Height override should drive the water height directly.")
 
@@ -20,8 +18,8 @@ func test_water_height_override_drives_height() -> void:
 
 
 func test_weather_exposes_resync_for_discrete_scrubs() -> void:
-	var weather = add_child_autofree(NovaWeatherScript.new())
-	assert_true(weather.has_method("resync_colors"), "NovaWeather must expose resync_colors for TOD scrubs.")
+	var weather = add_child_autofree(Weather.new())
+	assert_true(weather.has_method("resync_colors"), "Weather must expose resync_colors for TOD scrubs.")
 	# Calling it before any env is bound must be safe (editor calls it on every edit).
 	weather.resync_colors()
 	assert_true(weather.has_method("get_smooth_fog"), "Smoothed color getters back the editor terrain push.")

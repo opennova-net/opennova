@@ -43,7 +43,7 @@ func _on_tabs_changed() -> void:
 	documents_changed.emit()
 
 
-func set_editor_shell(value: Node) -> void:
+func set_editor_shell(value: WorkspaceShell) -> void:
 	super.set_editor_shell(value)
 	_ensure_editor()
 
@@ -267,7 +267,7 @@ func get_preview_font_names() -> PackedStringArray:
 		# plain picker enumeration; the picker then eager-previews only fonts
 		# that can actually load.
 		var bytes := root.read_file(file)
-		if bytes.size() < 4 or bytes.decode_u32(0) != NovaFntResource.MAGIC:
+		if bytes.size() < 4 or bytes.decode_u32(0) != FntResource.MAGIC:
 			continue
 		names.append(file)
 	names.sort()
@@ -275,7 +275,7 @@ func get_preview_font_names() -> PackedStringArray:
 
 
 ## Load one of those fonts the way the runtime does (VFS read ->
-## NovaFntResource -> FontFile). Null when unresolvable.
+## FntResource -> FontFile). Null when unresolvable.
 func load_preview_font(font_name: String) -> FontFile:
 	return HudText.load_font(_resource_root(), font_name)
 
@@ -350,6 +350,28 @@ func _on_doc_edited(doc: StringsEditor) -> void:
 # The domain document the EditorWorkspace base derives undo/redo + dirty from.
 func get_editor_document() -> Object:
 	return strings_editor
+
+
+func has_unsaved_changes() -> bool:
+	return (strings_editor != null and strings_editor.is_dirty) or super.has_unsaved_changes()
+
+
+func can_undo() -> bool:
+	return strings_editor != null and not is_busy() and strings_editor.can_undo()
+
+
+func can_redo() -> bool:
+	return strings_editor != null and not is_busy() and strings_editor.can_redo()
+
+
+func undo() -> void:
+	if strings_editor != null:
+		strings_editor.undo()
+
+
+func redo() -> void:
+	if strings_editor != null:
+		strings_editor.redo()
 
 
 func can_new() -> bool:

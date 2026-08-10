@@ -84,7 +84,7 @@ func test_structural_keyframe_change_is_one_undo_step() -> void:
 
 	editor.push_undo_step(func():
 		var frames: Array = editor.env_file.get_tod_keyframes()
-		var kf := NovaEnvKeyframe.new()
+		var kf := EnvKeyframe.new()
 		kf.set_time(900)
 		frames.append(kf)
 		editor.env_file.set_tod_keyframes(frames))

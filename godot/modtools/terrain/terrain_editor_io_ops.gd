@@ -53,13 +53,13 @@ func new_terrain() -> void:
 func open_trn(trn_path: String, timeline: PerfTimeline = null) -> Error:
 	if _te.is_export_running():
 		return ERR_BUSY
-	var resources: NovaResourceRoot = _te.get_resource_root()
+	var resources: ResourceRoot = _te.get_resource_root()
 	if not FileAccess.file_exists(trn_path) and resources != null and resources.has_file(trn_path):
 		return _open_trn_from_resource_root(resources, trn_path, timeline)
 	_te._brush_session.clear_history()
 	_te.clear_clone_source()
 	PerfTimeline.span_on(timeline, "trn_data")
-	_te._data = NovaTerrainData.new()
+	_te._data = TerrainData.new()
 	_te._data.set_trn_path(trn_path)
 	var err: Error = _te._data.load()
 	if err != OK:
@@ -119,13 +119,13 @@ func open_trn(trn_path: String, timeline: PerfTimeline = null) -> Error:
 	return OK
 
 
-func _open_trn_from_resource_root(resources: NovaResourceRoot, trn_name: String, timeline: PerfTimeline = null) -> Error:
+func _open_trn_from_resource_root(resources: ResourceRoot, trn_name: String, timeline: PerfTimeline = null) -> Error:
 	if resources == null:
 		return ERR_INVALID_PARAMETER
 	_te._brush_session.clear_history()
 	_te.clear_clone_source()
 	PerfTimeline.span_on(timeline, "trn_data")
-	_te._data = NovaTerrainData.new()
+	_te._data = TerrainData.new()
 	var err: Error = _te._data.load_from_resource_root(resources, trn_name)
 	if err != OK:
 		return err
@@ -150,7 +150,7 @@ func _open_trn_from_resource_root(resources: NovaResourceRoot, trn_name: String,
 	_te._sync_sector_layout(true)
 	PerfTimeline.end_on(timeline)
 	_te._document.capture_trn_resource(_te._data)
-	var tileinfo: NovaTerrainTileInfo = _te._data.get_tileinfo_resource()
+	var tileinfo: TerrainTileInfo = _te._data.get_tileinfo_resource()
 	if tileinfo != null:
 		_te._document.tileinfo_resource = tileinfo
 		_te._document.tileinfo_source_path = resources.get_root_dir().path_join(_te._data.get_tileinfo_filename())
@@ -201,7 +201,7 @@ func save_project(dir_path: String) -> Error:
 		return err
 
 	# Project save writes the .trn with no polydata — CPT is an export-time
-	# bake artifact, not an authoring one. NovaTerrainData::load() tolerates
+	# bake artifact, not an authoring one. TerrainData::load() tolerates
 	# missing CPT since the "make CPT optional" change.
 	_te._document.prepare_data_for_trn_save(name, "")
 	err = _te._data.save_to_path(dir_path + "/" + name + ".trn")
@@ -228,7 +228,7 @@ func _check_loaded_cdep_violations() -> void:
 	var count: int = _te._data.cdep_count_violations()
 	if count == 0:
 		return
-	if _te.workstation and _te.workstation.has_method("prompt_cdep_violations"):
+	if _te.workstation != null:
 		_te.workstation.prompt_cdep_violations(count, Callable(self, "_auto_fix_cdep_violations"))
 	else:
 		_te._notify_status("Heightmap has %d area%s too steep for Joint Operations / DFX export." % [count, "" if count == 1 else "s"])
@@ -286,8 +286,8 @@ func begin_export_terrain(output_dir: String, flavor: int) -> Error:
 	var raw16: PackedByteArray = _te._data.get_depth_raw16()
 	if raw16.is_empty():
 		return ERR_INVALID_DATA
-	var builder: NovaTerrainBuilder = NovaTerrainBuilder.new()
-	var job: NovaTerrainBuildJob = builder.begin_build_from_data(
+	var builder: TerrainBuilder = TerrainBuilder.new()
+	var job: TerrainBuildJob = builder.begin_build_from_data(
 		raw16, output_dir, name, "", flavor, _te._data.get_quadrant_locks()
 	)
 	if job == null:
@@ -299,7 +299,7 @@ func begin_export_terrain(output_dir: String, flavor: int) -> Error:
 	_te._brush_session.reset_stroke_tracking()
 	_te._remember_export_dir(output_dir)
 
-	if _te.workstation and _te.workstation.has_method("on_export_started"):
+	if _te.workstation != null:
 		_te.workstation.on_export_started(output_dir)
 
 	return OK
@@ -317,7 +317,7 @@ func export_terrain(output_dir: String, flavor: int) -> Error:
 	var raw16: PackedByteArray = _te._data.get_depth_raw16()
 	if raw16.is_empty():
 		return ERR_INVALID_DATA
-	var builder: NovaTerrainBuilder = NovaTerrainBuilder.new()
+	var builder: TerrainBuilder = TerrainBuilder.new()
 	var err: Error = builder.build_from_data(
 		raw16, output_dir, _te._get_terrain_name(), "", flavor,
 		_te._data.get_quadrant_locks()
@@ -352,7 +352,7 @@ func _poll_export_job() -> void:
 
 
 func _finish_export_job() -> void:
-	var job: NovaTerrainBuildJob = _te._export_job
+	var job: TerrainBuildJob = _te._export_job
 	if job == null:
 		return
 
@@ -379,7 +379,7 @@ func _finish_export_job() -> void:
 	_te._export_job = null
 	_te._export_output_dir = ""
 
-	if _te.workstation and _te.workstation.has_method("on_export_completed"):
+	if _te.workstation != null:
 		_te.workstation.on_export_completed(err, message)
 	_te._mark_ui_state_changed()
 

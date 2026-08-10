@@ -70,7 +70,7 @@ func place_entity_at_world(item_id: int, global_hit: Vector3) -> bool:
 		return false
 	var db := _item_db()
 	var item_type := db.get_item_type(item_id) if db != null else -1
-	var kind := NovaMissionData.kind_for_item_type(item_type)
+	var kind := MissionData.kind_for_item_type(item_type)
 	# A readable label for the status line: the model name when resolvable, else the raw id.
 	var item_name: String = db.get_display_name(item_id) if db != null and db.has_item(item_id) else ""
 	if item_name.is_empty():
@@ -79,13 +79,13 @@ func place_entity_at_world(item_id: int, global_hit: Vector3) -> bool:
 	# The list selection + Ground-userpoint bake [orig: sub_401A90, dfx2med.exe] live in the
 	# engine's authoring facade; the editor only converts the hit/anchor to mission space.
 	var anchor_bms := Vector3.ZERO
-	if _c._placer != null and kind != NovaMissionData.KIND_MARKER:
+	if _c._placer != null and kind != MissionData.KIND_MARKER:
 		anchor_bms = _c._placer.ground_anchor_bms(_c._placer.graphic_for(item_id))
 	# Placing is its own undo step: close any open session, then bracket the add with
 	# begin_edit/commit_edit (commit pushes one step iff the add changed the document).
 	_c._flush_edit()
 	_c._mission.begin_edit()
-	var record = _c._mission.place_entity_grounded(item_id, item_type, _c.MissionObjectPlacer.godot_to_bms_position(local), anchor_bms)
+	var record = _c._mission.place_entity_grounded(item_id, item_type, MissionObjectPlacer.godot_to_bms_position(local), anchor_bms)
 	if record.is_empty():
 		# Balance the begin_edit() bracket on the reject path (no-op step, the failed add changed
 		# nothing) so the open session does not leak into the next gesture.
@@ -99,7 +99,7 @@ func place_entity_at_world(item_id: int, global_hit: Vector3) -> bool:
 	_c._membership_rev += 1
 	# Markers are mesh-less: the placer skips them, so render via the marker overlay (rebuild so the
 	# new gizmo + pickable exist before we select it). Mesh entities render incrementally.
-	if kind == NovaMissionData.KIND_MARKER:
+	if kind == MissionData.KIND_MARKER:
 		_c._waypoints._refresh_marker_overlay()
 	else:
 		_render_placed_entity(kind, new_index)
@@ -110,7 +110,7 @@ func place_entity_at_world(item_id: int, global_hit: Vector3) -> bool:
 
 
 
-func _item_db() -> NovaItemDatabase:
+func _item_db() -> ItemDatabase:
 	if _c._placer == null:
 		return null
 	return _c._placer.get_item_db()
@@ -119,8 +119,6 @@ func _item_db() -> NovaItemDatabase:
 # Raycast the terrain under the cursor and place the armed item there. A miss (off the
 # terrain) is ignored so a stray click into the sky does nothing.
 func _place_armed_at(mouse_pos: Vector2) -> void:
-	if not _c.terrain_editor.has_method("raycast_terrain_at"):
-		return
 	var hit: Vector3 = _c.terrain_editor.raycast_terrain_at(mouse_pos)
 	if not _c.terrain_editor.is_valid_terrain_hit(hit):
 		return
@@ -136,7 +134,7 @@ func _render_placed_entity(kind: int, index: int) -> void:
 	if container == null:
 		return
 	# place_single already added this entity's pick collider node under the container.
-	var delta: Dictionary = _c._placer.place_single(_c._mission, container, kind, index, _c._environment_node())
+	var delta: Dictionary = _c._placer.place_single(_c._mission, container, kind, index)
 	_c._pickable = _c._placer.pickable_records
 	for key in delta:
 		_c._stats[key] = int(_c._stats.get(key, 0)) + int(delta[key])

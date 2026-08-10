@@ -1,7 +1,7 @@
 extends GutTest
 
 # The SP-as-listen-server present path (ADR 0009/0011). With the listen server on,
-# NovaSimulation.get_present_snapshot() returns the state the LOCAL CLIENT decoded off
+# Simulation.get_present_snapshot() returns the state the LOCAL CLIENT decoded off
 # the in-process loopback — real entity state serialized through the wire codec
 # (engine/net/netsim NetSystem) and decoded back (engine/net/novaworld ingame_decode) — instead of
 # reading the authoritative AI pool directly. This is the in-Godot end of the Phase 1
@@ -9,7 +9,7 @@ extends GutTest
 
 # Native seat/mount fixtures (S16): the Dictionary seat seam is gone — the sim
 # extracts seats/attachments from items.def rows + model userpoints through its
-# own asset root. NovaResourceRoot rejects user:// paths, so the composed loose
+# own asset root. ResourceRoot rejects user:// paths, so the composed loose
 # roots live under OS.get_cache_dir().
 
 var _native_fixture_dirs: Array[String] = []
@@ -47,12 +47,12 @@ func _fixture_items_text() -> String:
 
 # Compose <dir>/items.def from the fixture superset text, load it, wire the dir
 # as the sim's asset root, and run the native seat-spec install for type_ids.
-func _install_native_seats(sim: NovaSimulation, dir: String, items_text: String,
-		type_ids: PackedInt32Array) -> NovaItemDatabase:
+func _install_native_seats(sim: Simulation, dir: String, items_text: String,
+		type_ids: PackedInt32Array) -> ItemDatabase:
 	_write_fixture_text(dir, "items.def", items_text)
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(dir.path_join("items.def")), OK)
-	var seat_root := NovaResourceRoot.new()
+	var seat_root := ResourceRoot.new()
 	assert_eq(seat_root.set_root_dir(dir), OK)
 	sim.set_asset_root(seat_root)
 	assert_true(sim.install_seat_specs_for_type_ids(item_db, type_ids),
@@ -61,11 +61,11 @@ func _install_native_seats(sim: NovaSimulation, dir: String, items_text: String,
 
 
 func _present_row_base_for_handle(
-		sim: NovaSimulation, snapshot: PackedFloat32Array, wire_handle: int) -> int:
+		sim: Simulation, snapshot: PackedFloat32Array, wire_handle: int) -> int:
 	var stride := sim.get_present_stride()
 	for record in range(snapshot.size() / stride):
 		var base := record * stride
-		if int(snapshot[base + NovaSimulation.PF_WIRE_HANDLE]) == wire_handle:
+		if int(snapshot[base + Simulation.PF_WIRE_HANDLE]) == wire_handle:
 			return base
 	return -1
 
@@ -75,8 +75,8 @@ func _packed_aim_angles(
 	var angles := PackedVector3Array()
 	angles.resize(9)
 	for overlay_class in range(9):
-		var offset: int = (base + NovaSimulation.PF_AIM_ANGLES
-				+ overlay_class * NovaSimulation.PF_AIM_CLASS_STRIDE)
+		var offset: int = (base + Simulation.PF_AIM_ANGLES
+				+ overlay_class * Simulation.PF_AIM_CLASS_STRIDE)
 		angles[overlay_class] = Vector3(
 				snapshot[offset], snapshot[offset + 1], snapshot[offset + 2])
 	return angles
@@ -87,13 +87,13 @@ func test_mounted_local_overlay_matches_packed_present_for_valid_zero_and_six() 
 	# same authoritative selector result. Config 0 is deliberately included: an
 	# explicit zero must survive as a real counter-lean branch, not become unknown.
 	for config_value in [0, 6]:
-		var md := NovaMissionData.new()
+		var md := MissionData.new()
 		assert_eq(md.create_default(), OK)
 		assert_false(md.add_entity(
-				NovaMissionData.KIND_ITEM, 101294,
+				MissionData.KIND_ITEM, 101294,
 				Vector3(2, 0, 0), Vector3.ZERO).is_empty())
 
-		var sim := NovaSimulation.new()
+		var sim := Simulation.new()
 		sim.enable_listen_server(true)
 		# B50cal's authored Usegun row (bone 6) + the fixture def's WPN_AVENGER
 		# primary; phrase_set is authored per config — an explicit 0 must
@@ -115,11 +115,11 @@ func test_mounted_local_overlay_matches_packed_present_for_valid_zero_and_six() 
 		# [orig: Entity_AttachToUseGunSlot @0x546c07], but this fixture has not
 		# loaded weapon.def yet. Complete the normal mission-start weapon/loadout
 		# leg so the parent's embedded MountSlot and its presentation resolve.
-		var root := NovaResourceRoot.new()
+		var root := ResourceRoot.new()
 		assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
 				"res://../fixtures/def")), OK)
 		assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
-		var weapons := NovaWeaponDatabase.new()
+		var weapons := WeaponDatabase.new()
 		assert_eq(weapons.load(ProjectSettings.globalize_path(
 				"res://../fixtures/def/weapon.def")), OK)
 		var personal_index := weapons.find_weapon("WPN_M4AUTO")
@@ -148,13 +148,13 @@ func test_mounted_local_overlay_matches_packed_present_for_valid_zero_and_six() 
 				sim, snapshot, sim.get_local_player_wire_handle())
 		assert_gte(base, 0, "the mounted local player reached its decoded client view")
 		if base >= 0:
-			assert_eq(int(snapshot[base + NovaSimulation.PF_AIM_OVERLAY_VALID]), 1)
-			assert_eq(int(snapshot[base + NovaSimulation.PF_RIGHT_HAND_COLLAPSED]), 0,
+			assert_eq(int(snapshot[base + Simulation.PF_AIM_OVERLAY_VALID]), 1)
+			assert_eq(int(snapshot[base + Simulation.PF_RIGHT_HAND_COLLAPSED]), 0,
 					"retail Flags 0x100 keeps the player BN17 row live on UseGun")
 			var packed_body := Vector3(
-					snapshot[base + NovaSimulation.PF_AIM_BODY_PITCH_DEG],
-					snapshot[base + NovaSimulation.PF_AIM_BODY_YAW_DEG],
-					snapshot[base + NovaSimulation.PF_AIM_BODY_ROLL_DEG])
+					snapshot[base + Simulation.PF_AIM_BODY_PITCH_DEG],
+					snapshot[base + Simulation.PF_AIM_BODY_YAW_DEG],
+					snapshot[base + Simulation.PF_AIM_BODY_ROLL_DEG])
 			assert_lt(packed_body.distance_to(local.get("body", Vector3.ZERO)), 0.001,
 					"packed body orientation equals the local selector result")
 			var packed_angles := _packed_aim_angles(snapshot, base)
@@ -189,20 +189,20 @@ func test_mounted_local_overlay_matches_packed_present_for_valid_zero_and_six() 
 		assert_gte(dismounted_base, 0)
 		if dismounted_base >= 0:
 			assert_eq(int(dismounted_snapshot[dismounted_base
-					+ NovaSimulation.PF_RIGHT_HAND_COLLAPSED]), 0,
+					+ Simulation.PF_RIGHT_HAND_COLLAPSED]), 0,
 					"dismount clears the transient bone-collapse verdict")
 		sim.free()
 
 
 func test_listen_server_present_reads_client_decoded_state() -> void:
-	var md := NovaMissionData.new()
+	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	# Two standing organics at known, close positions (KIND_ORGANIC = 3). No route + no
 	# anim clips -> they hold, so the decoded positions are their spawn positions.
 	md.add_entity(3, 0, Vector3(0, 0, 0), Vector3.ZERO)
 	md.add_entity(3, 0, Vector3(10, 0, 0), Vector3.ZERO)
 
-	var sim := NovaSimulation.new()
+	var sim := Simulation.new()
 	sim.enable_listen_server(true)
 	assert_true(sim.is_listen_server(), "listen server enabled before load")
 	assert_true(sim.load_from_mission_data(md), "promoted as the npruntime in-process listen server")
@@ -238,16 +238,16 @@ func test_listen_server_present_reads_client_decoded_state() -> void:
 	var matched := 0
 	for rec in range(records):
 		var base := rec * stride
-		assert_eq(int(snap[base + NovaSimulation.PF_ALIVE]), 1, "decoded entity is alive")
-		var wh := int(snap[base + NovaSimulation.PF_WIRE_HANDLE])
+		assert_eq(int(snap[base + Simulation.PF_ALIVE]), 1, "decoded entity is alive")
+		var wh := int(snap[base + Simulation.PF_WIRE_HANDLE])
 		assert_true(truth.has(wh), "decoded wire handle maps back to a sim entity")
 		# Organics resolve KIND_ORGANIC (3) from the registry behind the decoded handle; the host
 		# player has no BMS placement so it carries no (kind,index) origin (kind 0).
-		assert_eq(int(snap[base + NovaSimulation.PF_KIND]), int(truth[wh]["kind"]),
+		assert_eq(int(snap[base + Simulation.PF_KIND]), int(truth[wh]["kind"]),
 			"kind matches the AI-pool truth for the entity behind the decoded handle")
-		var p := Vector3(snap[base + NovaSimulation.PF_POS_X],
-			snap[base + NovaSimulation.PF_POS_Y],
-			snap[base + NovaSimulation.PF_POS_Z])
+		var p := Vector3(snap[base + Simulation.PF_POS_X],
+			snap[base + Simulation.PF_POS_Y],
+			snap[base + Simulation.PF_POS_Z])
 		# Position rides the wire compressed (lossy); the reconstruction lands within a
 		# codec quantization step of the authoritative value.
 		assert_lt(p.distance_to(truth[wh]["pos"]), 0.5,
@@ -258,13 +258,13 @@ func test_listen_server_present_reads_client_decoded_state() -> void:
 
 
 func test_items_attachment_follows_through_listen_client() -> void:
-	var md := NovaMissionData.new()
+	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	var vehicle := md.add_entity(
-			NovaMissionData.KIND_ITEM, 101291,
+			MissionData.KIND_ITEM, 101291,
 			Vector3(10, 0, 0), Vector3.ZERO)
 	assert_false(vehicle.is_empty())
-	var sim := NovaSimulation.new()
+	var sim := Simulation.new()
 	sim.enable_listen_server(true)
 	# The authored addeweap row names a userpoint its (unresolved Dbuggy1)
 	# graphic cannot anchor: the child keeps the parent-root fallback frame and
@@ -283,11 +283,11 @@ func test_items_attachment_follows_through_listen_client() -> void:
 	var child_base := -1
 	for record in range(snapshot.size() / stride):
 		var base := record * stride
-		if int(snapshot[base + NovaSimulation.PF_TYPE_ID]) == 1419:
+		if int(snapshot[base + Simulation.PF_TYPE_ID]) == 1419:
 			child_base = base
 			break
 	assert_gte(child_base, 0, "the ewep child reached the listen client")
-	var spawn_x := snapshot[child_base + NovaSimulation.PF_POS_X]
+	var spawn_x := snapshot[child_base + Simulation.PF_POS_X]
 
 	# The child has no 0x0A callback of its own. Its presented motion comes from
 	# the stock 0x0D parent relation recomposed against the decoded vehicle row.
@@ -298,28 +298,28 @@ func test_items_attachment_follows_through_listen_client() -> void:
 	child_base = -1
 	for record in range(snapshot.size() / stride):
 		var base := record * stride
-		if int(snapshot[base + NovaSimulation.PF_TYPE_ID]) == 1419:
+		if int(snapshot[base + Simulation.PF_TYPE_ID]) == 1419:
 			child_base = base
 			break
 	assert_gte(child_base, 0, "the moving child remains presented")
 	if child_base >= 0:
-		assert_gt(absf(snapshot[child_base + NovaSimulation.PF_POS_X] - spawn_x), 15.0,
+		assert_gt(absf(snapshot[child_base + Simulation.PF_POS_X] - spawn_x), 15.0,
 				"the child follows the decoded carrier instead of freezing at spawn")
 	sim.free()
 
 
 func test_present_effect_lookup_matches_client_snapshot_and_reloads_cleanly() -> void:
-	var first_mission := NovaMissionData.new()
+	var first_mission := MissionData.new()
 	assert_eq(first_mission.create_default(), OK)
 	first_mission.add_entity(3, 5311, Vector3(12, 4, -3), Vector3.ZERO)
 	# Use the second pool-0 organic so its wire handle is non-zero; handle zero is
 	# the presentation sentinel even though slot zero is valid in the registry.
 	first_mission.add_entity(3, 5311, Vector3(18, 4, -3), Vector3(10, 20, 30))
 
-	var sim := NovaSimulation.new()
+	var sim := Simulation.new()
 	sim.enable_listen_server(true)
 	assert_true(sim.load_from_mission_data(first_mission))
-	var items := NovaItemDatabase.new()
+	var items := ItemDatabase.new()
 	assert_eq(items.load(ProjectSettings.globalize_path(
 			"res://../fixtures/def/items.def")), OK)
 	sim.resolve_item_traits(items)
@@ -334,28 +334,28 @@ func test_present_effect_lookup_matches_client_snapshot_and_reloads_cleanly() ->
 	var row_base := -1
 	for record in range(snapshot.size() / stride):
 		var base := record * stride
-		if int(snapshot[base + NovaSimulation.PF_KIND]) == 3 \
-				and int(snapshot[base + NovaSimulation.PF_INDEX]) == 1:
+		if int(snapshot[base + Simulation.PF_KIND]) == 3 \
+				and int(snapshot[base + Simulation.PF_INDEX]) == 1:
 			row_base = base
 			break
 	assert_gte(row_base, 0, "the placed organic reached the client view")
 	var expected_position := Vector3(
-			snapshot[row_base + NovaSimulation.PF_POS_X],
-			snapshot[row_base + NovaSimulation.PF_POS_Y],
-			snapshot[row_base + NovaSimulation.PF_POS_Z])
+			snapshot[row_base + Simulation.PF_POS_X],
+			snapshot[row_base + Simulation.PF_POS_Y],
+			snapshot[row_base + Simulation.PF_POS_Z])
 	var expected_rotation := Vector3(
-			snapshot[row_base + NovaSimulation.PF_PITCH_DEG],
-			snapshot[row_base + NovaSimulation.PF_YAW_DEG],
-			snapshot[row_base + NovaSimulation.PF_ROLL_DEG])
+			snapshot[row_base + Simulation.PF_PITCH_DEG],
+			snapshot[row_base + Simulation.PF_YAW_DEG],
+			snapshot[row_base + Simulation.PF_ROLL_DEG])
 	assert_almost_eq(expected_rotation.x, 10.0, 0.001,
 			"the host snapshot restores authored pitch from the registry")
 	assert_almost_eq(expected_rotation.y, 20.0, 1.5,
 			"yaw remains the retail compact-byte view")
 	assert_almost_eq(expected_rotation.z, 30.0, 0.001,
 			"the host snapshot restores authored roll from the registry")
-	var wire_handle := int(snapshot[row_base + NovaSimulation.PF_WIRE_HANDLE])
-	var bms_id := int(snapshot[row_base + NovaSimulation.PF_BMS_ID])
-	var ssn := int(snapshot[row_base + NovaSimulation.PF_NET_ID])
+	var wire_handle := int(snapshot[row_base + Simulation.PF_WIRE_HANDLE])
+	var bms_id := int(snapshot[row_base + Simulation.PF_BMS_ID])
+	var ssn := int(snapshot[row_base + Simulation.PF_NET_ID])
 	var lookups: Array = [
 		sim.get_present_effect_state_for_wire_handle(wire_handle),
 		sim.get_present_effect_state_for_origin(3, 1),
@@ -367,16 +367,16 @@ func test_present_effect_lookup_matches_client_snapshot_and_reloads_cleanly() ->
 		lookups.append(sim.get_present_effect_state_for_ssn(ssn))
 	for state_v in lookups:
 		var state: PackedVector3Array = state_v
-		assert_eq(state.size(), NovaSimulation.EFFECT_STATE_COUNT)
-		assert_true(state[NovaSimulation.EFFECT_STATE_POSITION].is_equal_approx(
+		assert_eq(state.size(), Simulation.EFFECT_STATE_COUNT)
+		assert_true(state[Simulation.EFFECT_STATE_POSITION].is_equal_approx(
 				expected_position), "compact lookup keeps the decoded wire position")
-		assert_true(state[NovaSimulation.EFFECT_STATE_ROTATION_DEG].is_equal_approx(
+		assert_true(state[Simulation.EFFECT_STATE_ROTATION_DEG].is_equal_approx(
 				expected_rotation), "compact lookup keeps the present-pass yaw conversion")
 	# A second identity in the same epoch resolves independently of the first
 	# lazily materialized owner.
 	var other_state: PackedVector3Array = \
 			sim.get_present_effect_state_for_origin(3, 0)
-	assert_eq(other_state.size(), NovaSimulation.EFFECT_STATE_COUNT)
+	assert_eq(other_state.size(), Simulation.EFFECT_STATE_COUNT)
 	assert_eq(sim.get_present_effect_state_for_wire_handle(-1).size(), 0,
 		"invalid wire identity stays absent")
 	assert_eq(sim.get_present_effect_state_for_bms_id(0).size(), 0,
@@ -395,13 +395,13 @@ func test_present_effect_lookup_matches_client_snapshot_and_reloads_cleanly() ->
 			"pose-only movement does not invalidate presentation row routing")
 	var moved_state: PackedVector3Array = \
 			sim.get_present_effect_state_for_origin(3, 1)
-	assert_eq(moved_state.size(), NovaSimulation.EFFECT_STATE_COUNT)
-	assert_gt(moved_state[NovaSimulation.EFFECT_STATE_POSITION].distance_to(
+	assert_eq(moved_state.size(), Simulation.EFFECT_STATE_COUNT)
+	assert_gt(moved_state[Simulation.EFFECT_STATE_POSITION].distance_to(
 			expected_position), 30.0, "the next epoch resolves the moved client pose")
 
 	# A replacement world restarts both generation counters at the same values.
 	# The cache must still belong to the new presentation epoch.
-	var replacement := NovaMissionData.new()
+	var replacement := MissionData.new()
 	assert_eq(replacement.create_default(), OK)
 	replacement.add_entity(3, 5311, Vector3(96, 4, -3), Vector3.ZERO)
 	assert_true(sim.load_from_mission_data(replacement))
@@ -412,21 +412,21 @@ func test_present_effect_lookup_matches_client_snapshot_and_reloads_cleanly() ->
 			"world replacement invalidates the exact ordered row topology")
 	var replacement_state: PackedVector3Array = \
 			sim.get_present_effect_state_for_origin(3, 0)
-	assert_eq(replacement_state.size(), NovaSimulation.EFFECT_STATE_COUNT)
-	assert_gt(replacement_state[NovaSimulation.EFFECT_STATE_POSITION].distance_to(
+	assert_eq(replacement_state.size(), Simulation.EFFECT_STATE_COUNT)
+	assert_gt(replacement_state[Simulation.EFFECT_STATE_POSITION].distance_to(
 			expected_position), 40.0,
 			"world replacement invalidates an equal-tick pose cache")
 	sim.free()
 
 
 func test_present_effect_lookup_accepts_zero_wire_handle() -> void:
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	assert_false(mission.add_entity(
-			NovaMissionData.KIND_ORGANIC, 5311,
+			MissionData.KIND_ORGANIC, 5311,
 			Vector3(12, 4, -3), Vector3.ZERO).is_empty())
 
-	var sim := NovaSimulation.new()
+	var sim := Simulation.new()
 	sim.enable_listen_server(true)
 	assert_true(sim.load_from_mission_data(mission))
 	sim.step()
@@ -436,29 +436,29 @@ func test_present_effect_lookup_accepts_zero_wire_handle() -> void:
 	var row_base := -1
 	for record in range(snapshot.size() / stride):
 		var base := record * stride
-		if int(snapshot[base + NovaSimulation.PF_TYPE_ID]) != 0 \
-				and int(snapshot[base + NovaSimulation.PF_WIRE_HANDLE]) == 0:
+		if int(snapshot[base + Simulation.PF_TYPE_ID]) != 0 \
+				and int(snapshot[base + Simulation.PF_WIRE_HANDLE]) == 0:
 			row_base = base
 			break
 	assert_gte(row_base, 0, "the first organic keeps its valid packed handle zero")
 	var state := sim.get_present_effect_state_for_wire_handle(0)
-	assert_eq(state.size(), NovaSimulation.EFFECT_STATE_COUNT,
+	assert_eq(state.size(), Simulation.EFFECT_STATE_COUNT,
 			"the compact effect lookup accepts packed handle zero")
-	if row_base >= 0 and state.size() == NovaSimulation.EFFECT_STATE_COUNT:
+	if row_base >= 0 and state.size() == Simulation.EFFECT_STATE_COUNT:
 		var expected := Vector3(
-				snapshot[row_base + NovaSimulation.PF_POS_X],
-				snapshot[row_base + NovaSimulation.PF_POS_Y],
-				snapshot[row_base + NovaSimulation.PF_POS_Z])
-		assert_true(state[NovaSimulation.EFFECT_STATE_POSITION].is_equal_approx(expected))
+				snapshot[row_base + Simulation.PF_POS_X],
+				snapshot[row_base + Simulation.PF_POS_Y],
+				snapshot[row_base + Simulation.PF_POS_Z])
+		assert_true(state[Simulation.EFFECT_STATE_POSITION].is_equal_approx(expected))
 	sim.free()
 
 
 func test_present_effect_missing_handle_retries_on_the_next_client_epoch() -> void:
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	mission.add_entity(3, 0, Vector3(8, 0, 0), Vector3.ZERO)
 
-	var sim := NovaSimulation.new()
+	var sim := Simulation.new()
 	assert_true(sim.enable_host_listen(0))
 	assert_true(sim.load_from_mission_data(mission))
 	# Establish the host client's initial decoded epoch before admitting a peer.
@@ -492,20 +492,20 @@ func test_present_effect_missing_handle_retries_on_the_next_client_epoch() -> vo
 	sim.step()
 	var admitted_state: PackedVector3Array = \
 			sim.get_present_effect_state_for_wire_handle(admitted_handle)
-	assert_eq(admitted_state.size(), NovaSimulation.EFFECT_STATE_COUNT,
+	assert_eq(admitted_state.size(), Simulation.EFFECT_STATE_COUNT,
 			"a new decoded-client epoch retries a formerly missing identity")
-	if admitted_state.size() == NovaSimulation.EFFECT_STATE_COUNT:
-		assert_lt(admitted_state[NovaSimulation.EFFECT_STATE_POSITION].distance_to(
+	if admitted_state.size() == Simulation.EFFECT_STATE_COUNT:
+		assert_lt(admitted_state[Simulation.EFFECT_STATE_POSITION].distance_to(
 				admitted_pos), 0.5)
 	sim.free()
 
 
 func test_listen_server_restart_preserves_auto_spawned_local_identity() -> void:
-	var md := NovaMissionData.new()
+	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	md.add_entity(3, 0, Vector3(8, 0, 0), Vector3.ZERO)
 
-	var sim := NovaSimulation.new()
+	var sim := Simulation.new()
 	sim.enable_listen_server(true)
 	assert_true(sim.load_from_mission_data(md))
 	assert_true(sim.has_local_player())
@@ -520,7 +520,7 @@ func test_listen_server_restart_preserves_auto_spawned_local_identity() -> void:
 	var snapshot := sim.get_present_snapshot()
 	var found_player := false
 	for record in range(snapshot.size() / stride):
-		if int(snapshot[record * stride + NovaSimulation.PF_WIRE_HANDLE]) == player_handle:
+		if int(snapshot[record * stride + Simulation.PF_WIRE_HANDLE]) == player_handle:
 			found_player = true
 			break
 	assert_true(found_player,
@@ -534,11 +534,11 @@ func test_listen_server_auto_spawns_and_replicates_local_player() -> void:
 	# that replicates through the wire to its own client view like any other entity. set_player_input
 	# feeds its player-body input. (Headless has no anim clips, so the soldier holds — motion comes
 	# from clips, as in the original; clip-driven forward motion is covered by the C++ player_spawn_test.)
-	var md := NovaMissionData.new()
+	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	md.add_entity(3, 0, Vector3(0, 0, 0), Vector3.ZERO)  # a standing organic for company
 
-	var sim := NovaSimulation.new()
+	var sim := Simulation.new()
 	sim.enable_listen_server(true)
 	assert_true(sim.load_from_mission_data(md), "loaded as the npruntime listen server")
 	# Faithful §5.0: the host's own player auto-spawns at bring-up (no explicit spawn call needed).
@@ -558,16 +558,16 @@ func test_listen_server_auto_spawns_and_replicates_local_player() -> void:
 	var found_player := false
 	for rec in range(records):
 		var base := rec * stride
-		if int(snap[base + NovaSimulation.PF_WIRE_HANDLE]) == player_handle:
+		if int(snap[base + Simulation.PF_WIRE_HANDLE]) == player_handle:
 			found_player = true
-			assert_eq(int(snap[base + NovaSimulation.PF_ALIVE]), 1, "player is alive")
+			assert_eq(int(snap[base + Simulation.PF_ALIVE]), 1, "player is alive")
 			# The player has no BMS placement: it carries the explicit none/synthetic
 			# origin (kind 255, index 0xFFFFFF), which the wire present pass renders
 			# wire-direct instead of deferring to a placed node. (The old Entity
 			# default 0 read as authored kind 0/index 0 and defer-swallowed the row.)
-			assert_eq(int(snap[base + NovaSimulation.PF_KIND]), 255,
+			assert_eq(int(snap[base + Simulation.PF_KIND]), 255,
 				"player carries the synthetic origin kind, not a fake authored identity")
-			assert_eq(int(snap[base + NovaSimulation.PF_INDEX]), 0xFFFFFF,
+			assert_eq(int(snap[base + Simulation.PF_INDEX]), 0xFFFFFF,
 				"player carries the synthetic origin index sentinel")
 	assert_true(found_player, "the auto-spawned local player replicated into the client-decoded present")
 	sim.free()

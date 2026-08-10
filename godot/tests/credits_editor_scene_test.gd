@@ -4,7 +4,7 @@ const CreditsEditorScene = preload("res://modtools/credits/credits_editor.tscn")
 const CreditsEditorBlockCardScene = preload("res://modtools/credits/credits_editor_block_card.tscn")
 const CreditsEditorDocument = preload("res://modtools/credits/credits_editor_document.gd")
 const CreditsWorkspaceScript = preload("res://modtools/credits/credits_workspace.gd")
-const ResourceDirSettings = preload("res://adapter/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings = preload("res://game/resource_index/resource_dir_settings.gd")
 const KDA_PATH := "res://../fixtures/cbin/nlist.reference.kda"
 const CREDITS_FIXTURE_DIR := "res://../fixtures/cbin"
 const MINIMAL_SOURCE := "[ENV]\nscroll_rate=1.25\nvertical_space=18\ncenter_x=360\n\n[TEXT]\nApplied from source\n"
@@ -20,13 +20,13 @@ class RefIndexStub:
 
 
 class RefShell:
-	extends Node
+	extends WorkspaceShell
 
 	var index := RefIndexStub.new()
 	var picked_kind := ""
 	var jumped: Array = []
 
-	func get_reference_index() -> RefIndexStub:
+	func get_reference_index() -> RefCounted:
 		return index
 
 	func open_kind_picker(kind: String, _title: String, on_pick: Callable) -> void:
@@ -69,7 +69,7 @@ func test_editor_panes_clip_preview_and_list_overflow() -> void:
 	var left_pane: Control = editor.get_node("HSplit/LeftPane")
 	var right_pane: Control = editor.get_node("HSplit/RightPane")
 	var preview_mount: Control = editor.get_node("%PreviewMount")
-	var player: NovaCreditsPlayer = editor.get_node("%Player")
+	var player: CreditsPlayer = editor.get_node("%Player")
 
 	assert_true(left_pane.clip_contents, "left editor pane clips card overflow at the split")
 	assert_true(right_pane.clip_contents, "right preview pane clips preview overflow at the split")
@@ -371,7 +371,7 @@ func test_preview_pause_resume_and_stop_show_first_entries() -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 
-	var player: NovaCreditsPlayer = editor.get_node("%Player")
+	var player: CreditsPlayer = editor.get_node("%Player")
 	var play: Button = editor.get_node("%Play")
 	var pause: Button = editor.get_node("%Pause")
 	var stop: Button = editor.get_node("%Stop")

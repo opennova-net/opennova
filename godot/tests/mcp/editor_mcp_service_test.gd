@@ -45,9 +45,13 @@ class ShellStub:
 	extends Node
 
 	var session := SessionGateStub.new()
+	var status_messages: Array = []
 
 	func get_game_run_session() -> Variant:
 		return session
+
+	func show_status_message(text: String, _duration: float = 0.0, _severity: StringName = &"info") -> void:
+		status_messages.append(text)
 
 
 class DisableFailureGameTools:

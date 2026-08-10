@@ -1,7 +1,7 @@
 # ADR 0021 - Avatars.def writer policy
 
 Status: accepted. Gates the `Avatars.def` save path (`libs/avatars` writer +
-the planned `NovaAvatarDatabase.save_to_path` / ONED Avatars workspace).
+the planned `AvatarDatabase.save_to_path` / ONED Avatars workspace).
 Witnessed behavior is in [docs/playerinfo/avatars-re.md](../playerinfo/avatars-re.md);
 addresses are Jointops.exe retail (imagebase 0x400000).
 

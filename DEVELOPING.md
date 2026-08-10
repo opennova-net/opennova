@@ -59,7 +59,7 @@ ctest --test-dir build --output-on-failure -R "gate|lobby|novaworld|napi|nwu|cry
 ## Build the GDExtension
 
 This is the native library that registers our C++ classes (`NovaWorldClient`,
-`NovaTerrain`, `NovaResourceRoot`, ...) with Godot:
+`Terrain`, `ResourceRoot`, ...) with Godot:
 
 ```bash
 scripts/build_godot.sh            # Dev       -> the editor (optimized + symbols)
@@ -79,7 +79,7 @@ hot-reload reliably, and on Windows the running editor holds the DLL lock so the
 deferred. A stale DLL shows up as GDScript "class not found" errors for classes that
 `engine/` has since added.
 
-(The README documents a `cmake -S godot/adapter -B build-godot ...` equivalent; the script
+(The README documents a `cmake -S godot/src -B build-godot ...` equivalent; the script
 is the canonical path.)
 
 ## Run the Godot editor and game

@@ -291,7 +291,7 @@ size_flags_horizontal = 3
 size_flags_vertical = 3
 theme_override_styles/panel = SubResource("PreviewScreen")
 
-[node name="Player" type="NovaCreditsPlayer" parent="HSplit/RightPane/PreviewMount/PreviewScreen"]
+[node name="Player" type="CreditsPlayer" parent="HSplit/RightPane/PreviewMount/PreviewScreen"]
 unique_name_in_owner = true
 size_flags_horizontal = 3
 size_flags_vertical = 3

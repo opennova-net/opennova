@@ -5,7 +5,7 @@ extends RefCounted
 ## cancel every frame-awaited load leg, allow those stacks to resume, then drop
 ## renderer resources while the GDExtension and RenderingServer are still alive.
 
-const VegAssetsScript := preload("res://adapter/terrain/veg_assets.gd")
+const VegAssetsScript := preload("res://game/terrain/veg_assets.gd")
 const DRAIN_FRAMES := 4
 
 var _shell: Node = null
@@ -54,7 +54,7 @@ func request_quit() -> void:
 
 ## True while shutdown owns the frame. The first call may occur in the request
 ## frame, leaving three complete process-frame emissions before release: enough
-## for NovaLoadingScreen's two-signal barrier and the outer continuation.
+## for LoadingScreen's two-signal barrier and the outer continuation.
 func process_frame() -> bool:
 	if not _prepared:
 		return false

@@ -66,7 +66,7 @@ func _run() -> void:
 
 	# Camera first: besides framing the ground shots it disambiguates WHICH
 	# env/weather pair to drive — the shell furnishes one preview world per 3D
-	# workspace (the object preview owns a NovaEnvironment too); the mission
+	# workspace (the object preview owns a MissionEnvironment too); the mission
 	# view's pair lives in the same viewport world as the workspace camera.
 	var camera: Camera3D = _find_workspace_camera(ws)
 	var env_nodes: Array = []
@@ -191,27 +191,27 @@ func _pick_in_camera_world(candidates: Array, camera: Camera3D):
 
 
 # In the editor shell the terrain lives on the ONED terrain domain editor
-# (get_data + sample_height_world), not a NovaTerrain node; standalone game and
-# runtime worlds hang a NovaTerrain (or another get_terrain_data holder).
-# Sweep all three shapes; the first loaded NovaTerrainData wins.
-func _find_terrain_data() -> NovaTerrainData:
-	for terrain in root.find_children("*", "NovaTerrain", true, false):
+# (get_data + sample_height_world), not a Terrain node; standalone game and
+# runtime worlds hang a Terrain (or another get_terrain_data holder).
+# Sweep all three shapes; the first loaded TerrainData wins.
+func _find_terrain_data() -> TerrainData:
+	for terrain in root.find_children("*", "Terrain", true, false):
 		var d = terrain.get_terrain_data()
-		if d is NovaTerrainData and d.is_loaded():
+		if d is TerrainData and d.is_loaded():
 			return d
 	for node in root.find_children("*", "", true, false):
 		if node.has_method("get_terrain_data"):
 			var d = node.get_terrain_data()
-			if d is NovaTerrainData and d.is_loaded():
+			if d is TerrainData and d.is_loaded():
 				return d
 		elif node.has_method("get_data") and node.has_method("sample_height_world"):
 			var d = node.get_data()
-			if d is NovaTerrainData and d.is_loaded():
+			if d is TerrainData and d.is_loaded():
 				return d
 	return null
 
 
-func _find_painted_world_point(data: NovaTerrainData) -> Dictionary:
+func _find_painted_world_point(data: TerrainData) -> Dictionary:
 	var defs: Array = data.get_foliage_defs()
 	var grid := data.get_sector_grid()
 	var origin_x := data.get_origin_x()
@@ -276,9 +276,9 @@ func _find_painted_world_point(data: NovaTerrainData) -> Dictionary:
 
 func _has_matching_foliage_def(defs: Array, painted: int) -> bool:
 	for value in defs:
-		if not (value is NovaTerrainFoliageDef):
+		if not (value is TerrainFoliageDef):
 			continue
-		var def := value as NovaTerrainFoliageDef
+		var def := value as TerrainFoliageDef
 		if int(def.match) == painted:
 			return true
 	return false

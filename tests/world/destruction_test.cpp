@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "terrain/height_field.h"
+#include "terrain_query/height_field.h"
 #include "world/angle.h"
 #include "world/collision.h"
 #include "world/destruction.h"

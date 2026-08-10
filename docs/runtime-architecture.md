@@ -38,12 +38,13 @@ present-once shape AND the fixed per-frame leg order; the shells install device 
 main_game.gd
   -> GameWorld.tick(camera, delta)                  the device shell: stashes camera state,
        MissionRuntime.tick_realtime(delta)          gates on the transport, then drives
-         NovaSimulation.frame_realtime(delta)       ONE engine frame:
+         Simulation.frame_realtime(delta)       ONE engine frame:
            frame::FrameDriver.run_frame             [orig: Game_MainLoop @0x52b630]
-             foliage leg                              (GameWorld hook: dispatcher render)
+             terrain leg                              (engine TerrainFrameCompiler draw list -> Terrain applies; ADR 0033 R2)
+             foliage leg                              (engine FoliageFrameCompiler draw list -> dispatcher applies; ADR 0033 R2)
              listener stamp                           (fire-sound gate, before the batch)
              bank delta; for each banked 16 ms quantum:
-               NovaSimulation.step()                  one engine tick  [Game_ProcessMainFrame @0x5263f0]
+               Simulation.step()                  one engine tick  [Game_ProcessMainFrame @0x5263f0]
                  host_pump/joiner pump                 net drain -> Server_TickUpdate owns the tick
                    World.run_logic_tick()              WAC -> BMS -> AI over one world
                begin effect tick / throwable sync / drain effects / fixed_tick_completed
@@ -90,20 +91,50 @@ for runtime debug/MCP controls and tests; it delegates to the driver's
 `run_single` (listener, one step, the per-tick legs, one present — no frame legs,
 no accumulator).
 
-## The render half (transition state)
+## The render half (the standing shape — ADR 0033 R3 closed not taken)
 
-The render FRAME has no engine counterpart yet — that is ADR 0033's spike-gated
-stage R3 (the witnessed seven-pass order lives in
-[render/render-order-re.md](render/render-order-re.md); the portable ordering
-math in `engine/runtime/renderer` currently has no caller for its sort keys
-because Godot's scene renderer owns the sort). Two per-frame render loops remain
-deliberately SELF-DRIVEN outside the engine frame until their outputs become
-packets (stage R2): `NovaTerrain`'s `_process` (LOD walk + patch-pool submission)
-and `NovaParticleRenderer`'s `_process` (frame compile + compositor dispatch);
-per-model material eval self-parks in `nova_object_model.gd`. The occlusion leg
-runs AFTER the present in the frame order above — the scene-graph-ownership
-inverse of retail's collect-then-submit — and stays that way until R2/R3 make
-the retail order expressible.
+The render FRAME has no engine counterpart, and ADR 0033's R3 spike
+(2026-08-10) ratified that as the standing shape: the one-scene screenshot
+diff vs retail showed the compiled draw-list domains reproduce the retail
+frame with no ordering-attributable delta, so the seven-pass ordered command
+stream was NOT ported (ADR 0033 §R3 spike result; the witnessed order lives
+in [render/render-order-re.md](render/render-order-re.md), and
+`engine/runtime/renderer`'s sort keys remain the T1-pinned witnessed spec
+with no runtime caller — D-RORD-2/-6 PERMANENT). All four R2 domains are cut
+over to compiled draw lists (R2 completed 2026-08-09/10):
+
+- Terrain: `opennova::TerrainFrameCompiler` (`engine/runtime/terrain/terrain_frame.h`)
+  owns the per-frame walk — the 512-unit sector window, quadtree traversal,
+  foliage detail-cell handoff, front-to-back order, patch budget, and
+  LOD-family resolve — and `Terrain.render_frame()` applies the typed
+  patch draw list onto its RenderingServer instance pool from the frame's terrain
+  leg (ordered before foliage, whose applier consumes the draw list's detail
+  cells the same frame).
+- Foliage: `renderer::FoliageFrameCompiler` (`engine/runtime/renderer/foliage_frame.h`)
+  owns the silhouette anchor gate, both retail placement algorithms,
+  per-identity vertex expansion, per-submission uniform state, and both retail
+  wind clocks; `FoliageDispatcher` applies the typed `FoliageDrawList`
+  (ArrayMesh uploads for the draw list's mesh builds, draw-node pooling, material
+  binding, the eviction lifecycle).
+- HUD: `hud::HudFrameCompiler` walks the whole element set into a `HudDrawList`
+  over the engine `GameFont`; the native `HudOverlay` applier rasterizes it.
+- Menus: `menu::MenuFrameCompiler` (`engine/runtime/menu/menu_frame.h`) compiles
+  a parsed `.mnu` screen + typed per-widget state into a `MenuDrawList`, and
+  ALSO owns the witnessed mouse pump, interaction geometry queries, hotkey
+  scan, and edit-input ops. `MenuFrame` (`godot/src/mnu`) uploads assets and
+  rasterizes; `MenuDriver` (`godot/game/menu_driver.gd`) is the shell-side
+  interaction runtime (navigation, actions, popups, sounds, the MUSICVAR
+  push). The MnuMenu Control tree was deleted with the 2026-08-10 cutover —
+  the game shell, the armory/deploy presenters, and the ONED Menus canvas all
+  consume this one path (record: [mnu/menu-re.md](mnu/menu-re.md)).
+
+One per-frame render loop remains deliberately SELF-DRIVEN outside the engine
+frame: `ParticleRenderer`'s `_process` (frame compile + compositor dispatch);
+per-model material eval self-parks on the native `ObjectModel`
+(`godot/src/object`), whose event-driven runtime frame wakes only when it
+holds live work. The occlusion leg runs AFTER the present in the frame order
+above — the scene-graph-ownership inverse of retail's collect-then-submit —
+tracked as D-RORD-8, an ADR 0033 R3-reopen candidate.
 
 ## Single-player is a listen server
 
@@ -111,7 +142,7 @@ There is no no-net path. Single-player constructs the same in-process host the L
 paths use, and the local player is a host-side server entity driven by a wire-shaped intent
 ([ADR 0011](adr/0011-single-player-in-process-listen-server.md),
 [ADR 0012](adr/0012-player-is-host-side-server-entity.md)). The consequence for this map: the net
-pump is inside the 62.5 Hz tick for *every* session — `NovaSimulation.step` routes the authority
+pump is inside the 62.5 Hz tick for *every* session — `Simulation.step` routes the authority
 roles through `np::host_session_pump`, whose `Server_TickUpdate` owns the logic tick (the
 former NetSystem-as-ISystem seam retired at P8; D-NET-123/125) — `local_player_presenter.gd` feeds
 intent rather than writing entity state, and the wire encoders run in single-player exactly as they
@@ -135,7 +166,7 @@ matchmaking/handoff client and does not own a second gameplay entity model.
   the WAC VM runs once per 62 ticks (`WacSystem::kTicksPerExecution`, the `0x3E` divider of
   `WacScript_AdvanceTick`), BMS events run a 16-tick gate over a quarter cursor, and the AI motor runs every
   tick (witnessed in [bms-event-runtime-re.md](mission/bms-event-runtime-re.md) §1.6/§2).
-- **Binding (C++ GDExtension)** — `NovaSimulation` wraps the World, exposes transport
+- **Binding (C++ GDExtension)** — `Simulation` wraps the World, exposes transport
   (`step` = exactly one 62 Hz logic tick, `restart`), `drain_effects`, and **one batched present snapshot**
   (`get_present_snapshot()` → a flat `PackedFloat32Array`, `PF_*` field layout) so the per-tick
   present loop makes one call, not ~10 Variant-boxed scalar getters per entity.
@@ -148,14 +179,14 @@ matchmaking/handoff client and does not own a second gameplay entity model.
   passes, index}`, installs the shell device legs on the sim
   (`set_frame_shell_hooks`), and exposes the transport (`play`/`pause`/`step_once`,
   the lockout predicate); its `tick_realtime`/`tick` are thin delegates over
-  `NovaSimulation.frame_realtime`/`frame_single`. `game_world.gd` is its only live
+  `Simulation.frame_realtime`/`frame_single`. `game_world.gd` is its only live
   owner and installs the world legs (`set_frame_world_hooks`); every hook binds a
   NODE (never a RefCounted presenter) so a leaked instance cannot crash teardown.
   ONED authoring previews do not drive a mission runtime.
 - **Present passes** — `mission_present_pass.gd` applies each entity's transform + PANM part
   channels + visibility onto its placed node. Hybrid: the engine decides the state (snapshot), the
   shell writes the `Node3D`. Its per-row hot loop (row plan, snapshot reads, change-gated dispatch)
-  is native — `NovaPresentApplier` (`godot/adapter/simulation/nova_present_applier.cpp`), with the
+  is native — `PresentApplier` (`godot/src/simulation/nova_present_applier.cpp`), with the
   GDScript file as the shell-facing facade and the node-side visual contract (ADR 0007) still
   GDScript; the aim-overlay/emplaced-weapon adapters delegate to the same native statics so the
   mission and wire passes share one implementation. The basis convention is single-sourced in
@@ -190,7 +221,7 @@ Capture is default-off. The close edge disables native runtime profiling and
 both measured viewports immediately; leaving their parent trees performs the
 same teardown. While closed, the trace/net/occlusion paths take no diagnostic
 clock reads. While open, `MissionRuntime` samples projectile attribution
-without a per-tick `Dictionary`: `NovaSimulation` returns value types through
+without a per-tick `Dictionary`: `Simulation` returns value types through
 `get_last_projectile_trace_times_us()` (`terrain/static/dynamic/person`),
 `get_last_projectile_trace_counts()` (`calls/static/dynamic/person
 survivors`), and `get_last_projectile_trace_faces()` (`static/dynamic`).
@@ -206,8 +237,8 @@ owner/exclusion setup are intentionally outside those native timing buckets.
 - **`.bad` / `.adm` (main skeletal/skinning)** — the primary infantry/view-model animation (walk/idle/
   fire), selected by AI state. **Implemented** (see
   [ADR 0007](adr/0007-skeletal-runtime-and-entity-visual.md)): portable `engine/runtime/anim` samples `.bad` clips
-  (per-bone keyframe-duration walk, engine-native Y-up), `NovaSkeletalAnim` builds the bind from the
-  BadBone matrix, and `NovaObjectModel` drives a `Skeleton3D` + rest-derived `Skin` (skinned organics +
+  (per-bone keyframe-duration walk, engine-native Y-up), `SkeletalAnim` builds the bind from the
+  BadBone matrix, and `ObjectModel` drives a `Skeleton3D` + rest-derived `Skin` (skinned organics +
   fake-skinned rigid weapons). Mission NPCs pick a clip from `Entity.anim_slot` (`engine/runtime/world`
   `body_anim.h`), driven by AI state (`Entity_UpdateInfantryAI @0x4b9910`); the present pass routes it via
   `play_body_anim`. Pose chain: `BoneAnim_FindKeyframeAtTime @0x410220` → `build_world_bone_matrices
@@ -232,7 +263,7 @@ owner/exclusion setup are intentionally outside those native timing buckets.
   property, not a gap.
 - Audio: reverb preset table (`Audio_LoadReverbDefs @0x766d80`) and MUS music
   (`AudioVM_OpenMusicContext @0x6722a0`) are seams; dialog-id resolution stays shell-side (it is bound
-  to `NovaDbfData`).
+  to `DbfData`).
 - The exact main-loop / entity-render order is cited from existing RE notes; a focused `grill-ida`
   pass to pin `WacScript_AdvanceTick`'s surroundings + the entity-render function is a tracked
   follow-up (TODO.md § Cleanup & verification backlog).

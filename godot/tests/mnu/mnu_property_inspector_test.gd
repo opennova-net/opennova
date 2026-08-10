@@ -24,10 +24,10 @@ func _make_table() -> RtxtStringFile:
 # A fixture document with one extra string-id widget under MAIN's root. Returns
 # [doc, widget_id].
 func _doc_with_id_widget(key: String) -> Array:
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	doc.load_from_bytes(FileAccess.get_file_as_bytes(FIXTURE))
 	var root := doc.get_screen_root_id(doc.get_screen_ids()[0])
-	var w := doc.add_widget(root, NovaMnuDocument.TYPE_STATIC, Rect2(10, 10, 100, 30))
+	var w := doc.add_widget(root, MnuDocument.TYPE_STATIC, Rect2(10, 10, 100, 30))
 	doc.set_widget_string_type(w, "id")
 	doc.set_widget_text(w, key)
 	return [doc, w]
@@ -81,7 +81,7 @@ func _subtree_has_line_text(node: Node, text: String) -> bool:
 	return false
 
 
-func _inspector_for(doc: NovaMnuDocument, id: int, text_res: RtxtStringFile):
+func _inspector_for(doc: MnuDocument, id: int, text_res: RtxtStringFile):
 	var inspector = MnuPropertyInspectorScript.new()
 	add_child_autofree(inspector)
 	await get_tree().process_frame
@@ -155,7 +155,7 @@ func test_inspector_pick_commits_text_edit() -> void:
 
 
 func test_screen_text_rsrc_is_a_link_widget() -> void:
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	doc.load_from_bytes(FileAccess.get_file_as_bytes(FIXTURE))
 	var screen_id: int = doc.get_screen_ids()[0]
 	var inspector = await _inspector_for(doc, screen_id, null)
@@ -173,7 +173,7 @@ func test_screen_text_rsrc_is_a_link_widget() -> void:
 
 func test_inspector_font_jump_emits_font() -> void:
 	var arr := _doc_with_id_widget("ALPHA")
-	var doc: NovaMnuDocument = arr[0]
+	var doc: MnuDocument = arr[0]
 	var w: int = arr[1]
 	doc.set_widget_font(w, "Gunpl22b.fnt")
 	var inspector = await _inspector_for(doc, w, null)
@@ -190,13 +190,13 @@ func test_inspector_font_jump_emits_font() -> void:
 
 # widgets.mnu MAIN root children: [Title, StartBtn, SoundChk, Difficulty, Version].
 # StartBtn carries a MOUSE_OVER sound; Title has none.
-func _widgets_doc() -> NovaMnuDocument:
-	var doc := NovaMnuDocument.new()
+func _widgets_doc() -> MnuDocument:
+	var doc := MnuDocument.new()
 	doc.load_from_bytes(FileAccess.get_file_as_bytes(FIXTURE))
 	return doc
 
 
-func _main_child(doc: NovaMnuDocument, index: int) -> int:
+func _main_child(doc: MnuDocument, index: int) -> int:
 	var root := doc.get_screen_root_id(doc.get_screen_ids()[0])
 	return doc.get_child_ids(root)[index]
 
@@ -237,7 +237,7 @@ func _find_color_picker(node: Node) -> ColorPickerButton:
 func test_widget_color_has_picker_and_preserves_raw_token_until_changed() -> void:
 	var doc := _widgets_doc()
 	var root := doc.get_screen_root_id(doc.get_screen_ids()[0])
-	assert_true(doc.get_widget_color(root, NovaMnuDocument.COLOR_DEFAULT_FG).begins_with("%"),
+	assert_true(doc.get_widget_color(root, MnuDocument.COLOR_DEFAULT_FG).begins_with("%"),
 		"fixture starts with a raw style-variable color")
 	var inspector = await _inspector_for(doc, root, null)
 	var picker := _find_color_picker(inspector)
@@ -415,7 +415,7 @@ func test_combo_exposes_closed_and_dropdown_items_separately() -> void:
   </WINDOW>
 </WINDOW></SCREEN>
 """
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(src.to_utf8_buffer()), OK)
 	var root := int(doc.get_screen_root_id(doc.get_screen_ids()[0]))
 	var combo := int(doc.get_child_ids(root)[0])
@@ -437,7 +437,7 @@ func test_nested_rows_are_labeled_cards_with_color_pickers() -> void:
   </WINDOW>
 </WINDOW></SCREEN>
 """
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(src.to_utf8_buffer()), OK)
 	var root := int(doc.get_screen_root_id(doc.get_screen_ids()[0]))
 	var styled := int(doc.get_child_ids(root)[0])

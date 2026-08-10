@@ -2,13 +2,13 @@ extends GutTest
 
 
 func test_surface_inputs_are_registered_for_runtime_and_oned() -> void:
-	assert_true(ClassDB.class_exists("NovaTerrainSurfaceInputs"),
+	assert_true(ClassDB.class_exists("TerrainSurfaceInputs"),
 		"Runtime terrain preprocessing must be available to ONED through a registered shared object.")
 
 
 func test_full_rebuild_produces_retail_surface_inputs_from_live_data() -> void:
 	var data := _make_surface_data()
-	var inputs := NovaTerrainSurfaceInputs.new()
+	var inputs := TerrainSurfaceInputs.new()
 
 	assert_true(inputs.rebuild(data))
 	assert_true(inputs.has_normalized_blend())
@@ -39,7 +39,7 @@ func test_full_rebuild_produces_retail_surface_inputs_from_live_data() -> void:
 
 func test_partial_rebuilds_replace_only_the_changed_allocation_family() -> void:
 	var data := _make_surface_data()
-	var inputs := NovaTerrainSurfaceInputs.new()
+	var inputs := TerrainSurfaceInputs.new()
 	assert_true(inputs.rebuild(data))
 
 	var first_height: Texture2D = inputs.get_heightfield_normal_texture()
@@ -68,7 +68,7 @@ func test_partial_rebuilds_replace_only_the_changed_allocation_family() -> void:
 
 
 func test_null_terrain_reapply_clears_every_material_input() -> void:
-	var inputs := NovaTerrainSurfaceInputs.new()
+	var inputs := TerrainSurfaceInputs.new()
 	assert_true(inputs.rebuild(_make_surface_data()))
 	var material := ShaderMaterial.new()
 	material.shader = _surface_shader()
@@ -97,15 +97,15 @@ func test_null_terrain_reapply_clears_every_material_input() -> void:
 
 
 func test_tile_overlay_composite_is_shared_and_independently_refreshable() -> void:
-	var data := NovaTerrainData.new()
+	var data := TerrainData.new()
 	data.set_tilestrip_tex(_solid_texture(Color8(12, 90, 34, 255), 64))
-	var tile_info := NovaTerrainTileInfo.new()
-	var entry := NovaTerrainTileEntry.new()
+	var tile_info := TerrainTileInfo.new()
+	var entry := TerrainTileEntry.new()
 	entry.set_cell(0, 0)
 	entry.set_tile_index(0)
 	tile_info.add_entry(entry)
 
-	var inputs := NovaTerrainSurfaceInputs.new()
+	var inputs := TerrainSurfaceInputs.new()
 	assert_true(inputs.rebuild(data, tile_info, true))
 	assert_true(inputs.has_tile_overlay())
 	assert_eq(inputs.get_tile_overlay_texture().get_size(), Vector2(1024, 1024))
@@ -118,16 +118,16 @@ func test_tile_overlay_composite_is_shared_and_independently_refreshable() -> vo
 
 
 func test_nova_terrain_delegates_surface_input_ownership() -> void:
-	var terrain: NovaTerrain = add_child_autofree(NovaTerrain.new())
-	var data := NovaTerrainData.new()
+	var terrain: Terrain = add_child_autofree(Terrain.new())
+	var data := TerrainData.new()
 	terrain.set_terrain_data(data)
 
 	assert_not_null(terrain.get_surface_inputs())
 	assert_same(terrain.get_surface_inputs().get_terrain_data(), data)
 
 
-func _make_surface_data() -> NovaTerrainData:
-	var data := NovaTerrainData.new()
+func _make_surface_data() -> TerrainData:
+	var data := TerrainData.new()
 	data.set_colormap(_solid_texture(Color8(90, 110, 70, 255), 4))
 	data.set_detailmap(_solid_texture(Color8(80, 100, 140, 255), 4))
 	data.set_detailmap_c1(_solid_texture(Color8(130, 80, 40, 255), 4))

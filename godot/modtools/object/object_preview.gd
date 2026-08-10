@@ -1,21 +1,19 @@
 class_name ObjectPreview
 extends Control
 
-const FlyCameraScript = preload("res://adapter/fly_camera.gd")
-const NovaObjectModelScript = preload("res://adapter/object/nova_object_model.gd")
-const NovaEnvironmentScript = preload("res://adapter/environment/nova_environment.gd")
-const CollisionHull = preload("res://adapter/object/collision_hull.gd")
-const ObjectUserPointOverlayScript = preload("res://adapter/object/object_user_point_overlay.gd")
+const FlyCameraScript = preload("res://game/fly_camera.gd")
+const CollisionHull = preload("res://game/object/collision_hull.gd")
+const ObjectUserPointOverlayScript = preload("res://game/object/object_user_point_overlay.gd")
 
-var object_data: NovaObjectData
+var object_data: ObjectData
 
 var _viewport_container: SubViewportContainer
 var _viewport: SubViewport
 var _root: Node3D
 var _guide_root: Node3D
 var _model
-var _environment: NovaEnvironment
-var _camera: Camera3D
+var _environment: MissionEnvironment
+var _camera: FlyCamera
 var _grid_material: StandardMaterial3D
 var _axis_material: StandardMaterial3D
 var _collision_materials: Dictionary = {}
@@ -34,11 +32,11 @@ var _robj_nodes: Dictionary = {}
 var _surface_material_indices: PackedInt32Array = PackedInt32Array()
 var _surface_materials: Array = []
 
-var _skeletal                   # NovaSkeletalAnim, or null
+var _skeletal                   # SkeletalAnim, or null
 var _last_anim_error := ""
 
-var _arms_model                 # NovaObjectModel arms overlay, or null
-var _arms_data: NovaObjectData
+var _arms_model                 # ObjectModel arms overlay, or null
+var _arms_data: ObjectData
 var _current_clip := ""         # active clip key, mirrored onto the arms overlay
 var _last_arms_error := ""
 
@@ -51,7 +49,7 @@ func _ready() -> void:
 	_sync_model_debug_refs()
 
 
-func set_object_data(value: NovaObjectData) -> void:
+func set_object_data(value: ObjectData) -> void:
 	if object_data == value:
 		return
 	if object_data != value:
@@ -91,7 +89,7 @@ func _build_viewport() -> void:
 	_root = Node3D.new()
 	_viewport.add_child(_root)
 
-	_environment = NovaEnvironmentScript.new()
+	_environment = MissionEnvironment.new()
 	_environment.name = "ObjectPreviewEnvironment"
 	_root.add_child(_environment)
 
@@ -99,8 +97,8 @@ func _build_viewport() -> void:
 	_guide_root.name = "ObjectPreviewGuides"
 	_root.add_child(_guide_root)
 
-	_model = NovaObjectModelScript.new()
-	_model.name = "NovaObjectModel"
+	_model = ObjectModel.new()
+	_model.name = "ObjectModel"
 	_model.set_model_light_preview_enabled(true)
 	_root.add_child(_model)
 	_model.bounds_changed.connect(_on_model_bounds_changed)
@@ -161,7 +159,7 @@ func reset_animation_time() -> void:
 #
 # The rig ALWAYS comes from a model's bone table — count and hierarchy from the model
 # rows, rest positions reconstructed from the model pivots + the reset .bad's bind
-# rotations (the corpus-exact export relation; NovaSkeletalAnim); the lossy shipped
+# rotations (the corpus-exact export relation; SkeletalAnim); the lossy shipped
 # BadBone.position is never read (12 of 43 JO viewmodel rigs ship it zeroed/stale and
 # retail renders them all) [orig: BoneAnim_BuildWorldMatrices @0x40c400 walks
 # modelDef+56, bounded by modelDef+52]. The skeleton belongs to the .adm's MODEL,
@@ -185,7 +183,7 @@ func load_animation_set(adm_name: String, resource_root) -> PackedStringArray:
 	var skel_data := _resolve_skeleton_model(adm_name, resource_root)
 	var origins: PackedVector3Array = skel_data.get_bone_origins() if skel_data != null else PackedVector3Array()
 	var parents: PackedInt32Array = skel_data.get_bone_parents() if skel_data != null else PackedInt32Array()
-	var sk := NovaSkeletalAnim.new()
+	var sk := SkeletalAnim.new()
 	if not sk.load_from_resource_root(resource_root, adm_name, origins, parents):
 		_last_anim_error = sk.get_last_error()
 		_clear_skeletal_binding()
@@ -200,12 +198,12 @@ func load_animation_set(adm_name: String, resource_root) -> PackedStringArray:
 # The .3di whose bone table defines the rig for `adm_name`: the open model when the
 # names match, else the .adm basename's own model from the resource root, else the
 # open model (a rig-less .adm preview still binds; the model table just stays its own).
-func _resolve_skeleton_model(adm_name: String, resource_root) -> NovaObjectData:
+func _resolve_skeleton_model(adm_name: String, resource_root) -> ObjectData:
 	var adm_base := adm_name.get_file().get_basename()
 	var own_base := String(object_data.get_object_name()).get_file().get_basename() if object_data != null else ""
 	if object_data != null and adm_base.nocasecmp_to(own_base) == 0:
 		return object_data
-	var d := NovaObjectData.new()
+	var d := ObjectData.new()
 	if d.open_from_resource_root(resource_root, adm_base + ".3di") == OK:
 		return d
 	return object_data
@@ -258,7 +256,7 @@ func get_animation_playhead() -> float:
 
 # --- Arms overlay (first-person view model: skinned arms riding the same .adm skeleton) ---------
 # Load a SECOND .3di (e.g. ArmsG.3di) into a sibling model that shares the main model's
-# NovaSkeletalAnim, so the arms animate together with the weapon/body. Returns false on failure
+# SkeletalAnim, so the arms animate together with the weapon/body. Returns false on failure
 # (see get_arms_error()). With no .adm loaded yet the arms render static at rest; load_animation_set()
 # rebinds them when an .adm is loaded.
 func load_arms(arms_name: String, resource_root) -> bool:
@@ -269,18 +267,18 @@ func load_arms(arms_name: String, resource_root) -> bool:
 	if arms_name.strip_edges().is_empty():
 		_last_arms_error = "Pick a .3di"
 		return false
-	var data := NovaObjectData.new()
+	var data := ObjectData.new()
 	var err := data.open_from_resource_root(resource_root, arms_name)
 	if err != OK:
 		_last_arms_error = "Could not load %s (error %d)" % [arms_name, err]
 		return false
 	_arms_data = data
 	if _arms_model == null:
-		_arms_model = NovaObjectModelScript.new()
+		_arms_model = ObjectModel.new()
 		_arms_model.name = "NovaArmsModel"
 		_arms_model.set_model_light_preview_enabled(true)
 		_root.add_child(_arms_model)
-		_arms_model.set_environment_node(_environment)
+		_arms_model.set_environment_state(_environment.get_light_state())
 	_arms_model.set_object_data(data)
 	_arms_model.set_skeletal_anim(_skeletal)  # share the main model's .adm skeleton (may be null)
 	_arms_model.set_playing(_model.is_playing() if _model != null else true)
@@ -323,7 +321,7 @@ func get_active_lod() -> int:
 	return _model.get_active_lod() if _model != null else 0
 
 
-func get_editor_camera() -> Camera3D:
+func get_editor_camera() -> FlyCamera:
 	return _camera
 
 
@@ -478,7 +476,7 @@ func _apply_environment_to_model() -> void:
 		_environment.environment_data = _environment_file
 		_environment.time_of_day = _environment_time
 	if _model != null:
-		_model.set_environment_node(_environment)
+		_model.set_environment_state(_environment.get_light_state())
 
 
 func _on_model_bounds_changed(bounds: AABB) -> void:

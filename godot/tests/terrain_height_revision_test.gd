@@ -64,7 +64,7 @@ func test_sample_height_world_reads_the_live_editable_surface() -> void:
 
 
 func test_batch_and_scalar_run_the_single_cpp_sampler() -> void:
-	# Scalar and batch both forward to NovaTerrainData's live-surface sampler
+	# Scalar and batch both forward to TerrainData's live-surface sampler
 	# (one C++ per-point core), so this pins that single path end-to-end through
 	# the wrappers, including their NAN/sentinel translation (the mesh's scalar
 	# maps NAN to -1e6; terrain_editor's sample_height_world maps it back to
@@ -107,7 +107,7 @@ func test_batch_and_scalar_run_the_single_cpp_sampler() -> void:
 
 func test_raycast_world_hits_the_live_surface() -> void:
 	# EditorTerrainMesh.raycast_world forwards to the engine's witnessed segment
-	# raycast (NovaTerrainData.raycast_terrain, the ENG-3 B1 port [orig:
+	# raycast (TerrainData.raycast_terrain, the ENG-3 B1 port [orig:
 	# Terrain_RaycastHeightmapLoRes @ 0x60cb80; Terrain_RaycastHeightmapHiRes_0
 	# @ 0x60e710]) over the SAME live editable surface the height samplers above
 	# read, so a hit must land on the sampled surface and on the cast segment.
@@ -152,7 +152,7 @@ func test_raycast_world_hits_the_live_surface() -> void:
 
 	# No terrain mounted at all (neither a live image nor a baked CPT) -> the
 	# all-NAN miss, never a fake ground plane.
-	var bare_hit: Vector3 = NovaTerrainData.new().raycast_terrain(
+	var bare_hit: Vector3 = TerrainData.new().raycast_terrain(
 		Vector3(0.0, 100.0, 0.0), Vector3(0.0, -100.0, 0.0))
 	assert_true(is_nan(bare_hit.x) and is_nan(bare_hit.y) and is_nan(bare_hit.z),
 		"no terrain data -> the all-NAN miss")

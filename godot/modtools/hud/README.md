@@ -2,8 +2,8 @@
 
 A read-only ONED workspace that previews the in-game HUD layout authored in
 `hudpos.def`. It is the editor-side companion to the runtime HUD overlay; both
-read the same data (`NovaHudPos`) and draw with the same shell-neutral helpers
-(`godot/adapter/ui/hud_*.gd`), so the preview and the live HUD cannot drift.
+read the same data (`HudPos`) and draw with the same shell-neutral helpers
+(`godot/src/ui/hud_*.gd`), so the preview and the live HUD cannot drift.
 
 ## Files
 
@@ -25,7 +25,7 @@ The element model is the witnessed original — see
 "spinmap" widget is the **stance indicator** (discrete `HUDSTANCE` frames), not a
 compass (D-HUD-1); the design space is a fixed 1024x768
 (`Viewport_ScaleToVirtualCoords @0x5d2b20`); and HUD text uses the original `.fnt`
-bitmap fonts via `NovaFntResource`. The weapon-coupled elements (ammo, weapon
+bitmap fonts via `FntResource`. The weapon-coupled elements (ammo, weapon
 name, dynamic crosshair spread) are follow-ups for the preview; they are live in
 the game HUD. There is no in-HUD radar to preview: the 2026-07-18 grill resolved
 the old "minimap `@0x599700`" misnomer as the weapon heat bar, and JO:CA has no

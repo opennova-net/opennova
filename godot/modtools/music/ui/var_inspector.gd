@@ -7,7 +7,7 @@ signal names_changed
 
 const MusVarNames = preload("res://modtools/music/mus_var_names.gd")
 
-var _director: NovaMusicDirector
+var _director: MusicDirector
 # The MU01 chunk's script name (e.g. "menuscript"). Drives the friendly-label
 # and control-type lookup. Empty string means rows render the raw VarXX form
 # with plain int32 spinboxes (the user-authored / unknown-script case).
@@ -23,7 +23,7 @@ var _controls: Dictionary = {}
 @onready var _grid: GridContainer = %Grid
 
 
-func bind_director(d: NovaMusicDirector) -> void:
+func bind_director(d: MusicDirector) -> void:
 	if _director != null and _director.variable_changed.is_connected(_on_var_changed_external):
 		_director.variable_changed.disconnect(_on_var_changed_external)
 	_director = d

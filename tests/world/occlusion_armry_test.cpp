@@ -27,7 +27,7 @@
 #define OPENNOVA_ARMRY_FIXTURE ""
 #endif
 
-#include "terrain/height_field.h"
+#include "terrain_query/height_field.h"
 #include "threedi/threedi_3di3.h"
 #include "world/collision.h"
 #include "world/occlusion.h"
@@ -63,7 +63,7 @@ struct Field {
 
 // The host's model->runtime collision conversion, replicated (the canonical
 // copy is collision_model_from_3di in
-// godot/adapter/simulation/nova_simulation_internal.h — engine/runtime/world stays
+// godot/src/simulation/nova_simulation_internal.h — engine/runtime/world stays
 // format-free by design, so the leaf test carries its own).
 bool collision_from_3di(const ThreediCollisionModel *col, CollisionModel &out) {
     if (col == nullptr || col->volume_count == 0 || !threedi_3di3_collision_is_runtime_safe(col))

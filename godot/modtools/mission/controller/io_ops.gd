@@ -10,12 +10,9 @@ extends "res://modtools/mission/controller/controller_section.gd"
 # True when `trn_path` already IS the mounted terrain (case-insensitive,
 # slash-normalized — resolve_file and a user's own open can disagree on form)
 # and that terrain has no unsaved edits. Dirty never matches, so the reload
-# there preserves today's semantics; the dirty read is duck-typed because the
-# headless test stub carries no is_dirty.
+# there preserves today's semantics.
 func _is_same_clean_terrain(trn_path: String) -> bool:
-	if not _c.terrain_editor.has_method("get_current_trn_path"):
-		return false
-	if bool(_c.terrain_editor.get("is_dirty")):
+	if _c.terrain_editor.is_dirty:
 		return false
 	var current := String(_c.terrain_editor.get_current_trn_path())
 	if current.is_empty():
@@ -30,7 +27,7 @@ func open_mission(bms_path: String) -> Error:
 	if _c.terrain_editor == null:
 		_c._last_status = "No terrain editor is bound."
 		return ERR_UNAVAILABLE
-	var resource_root: NovaResourceRoot = _c._resource_root()
+	var resource_root: ResourceRoot = _c._resource_root()
 	if resource_root == null:
 		_c._last_status = "Set a resource directory before opening a mission."
 		return ERR_UNCONFIGURED
@@ -40,7 +37,7 @@ func open_mission(bms_path: String) -> Error:
 	var timeline := PerfTimeline.begin("Mission load %s" % bms_path.get_file())
 
 	timeline.span("parse")
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	if mission.open_file(bms_path) != OK:
 		_c._last_status = "Could not read %s: %s" % [bms_path.get_file(), mission.get_last_error()]
 		return ERR_CANT_OPEN
@@ -121,17 +118,17 @@ func new_mission() -> Error:
 	if _c.terrain_editor == null:
 		_c._last_status = "No terrain editor is bound."
 		return ERR_UNAVAILABLE
-	var resource_root: NovaResourceRoot = _c._resource_root()
+	var resource_root: ResourceRoot = _c._resource_root()
 	if resource_root == null:
 		_c._last_status = "Set a resource directory before creating a mission."
 		return ERR_UNCONFIGURED
-	var trn_path := String(_c.terrain_editor.get_current_trn_path()) if _c.terrain_editor.has_method("get_current_trn_path") else ""
-	var world_root: Node3D = _c.terrain_editor.get_terrain_world_root() if _c.terrain_editor.has_method("get_terrain_world_root") else null
+	var trn_path := String(_c.terrain_editor.get_current_trn_path())
+	var world_root: Node3D = _c.terrain_editor.get_terrain_world_root()
 	if trn_path.is_empty() or world_root == null:
 		_c._last_status = "Open or create a terrain first, then start a new mission on it."
 		return ERR_UNCONFIGURED
 
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	if mission.create_default() != OK:
 		_c._last_status = "Could not create a new mission: %s" % mission.get_last_error()
 		return FAILED
@@ -180,7 +177,7 @@ func clear() -> void:
 	_c._clear_mission_tile_info()
 	_clear_objects()
 	# Dropping the document drops its undo history + clean baseline with it (they live on the
-	# NovaMissionData), so there is nothing else to reset; is_dirty() reads false once _mission is null.
+	# MissionData), so there is nothing else to reset; is_dirty() reads false once _mission is null.
 	_c._mission = null
 	_c._current_path = ""
 	_c._loaded_trn_path = ""
@@ -276,7 +273,7 @@ func save_as_path(path: String) -> Error:
 
 
 # --- Authoring (Phase 5): undo / redo -----------------------------------------
-# The history + dirty flag live on the document (NovaMissionData): in-memory bms::File snapshots,
+# The history + dirty flag live on the document (MissionData): in-memory bms::File snapshots,
 # never serialized bytes. The controller drives them. A continuous gesture (a drag, a run of
 # inspector edits) is bracketed by begin_edit/commit_edit so it becomes one step; one-shot
 # mutations bracket the same way (commit pushes a step only if the document actually changed, so a
@@ -287,45 +284,31 @@ func save_as_path(path: String) -> Error:
 
 # --- Internals ----------------------------------------------------------------
 
-# Stage terrain base heights on the document for a .mis save: one 16.16 fixed-point height per
-# entity, FLAT in the .mis writer's order (items, buildings, markers, organics). The original
-# editor subtracts extra_bheight from a height-locked item's absolute z to recover the
-# terrain-relative offset [orig: MisLdr_WriteNileProjectXml @ 0x10004930, misldr.dll], so each
-# entity's base height is the terrain height under its (x, y) plane position — sampled through
-# the same transform the placer uses (bms_to_godot_position maps mission (x, y, z) to godot
-# (x, z, -y)): the godot-world sample point for mission (x, y) is (x, -y), and the sampled godot
-# Y IS the mission z-units height. Off-terrain samples (NAN) bake 0; with no terrain surface at
-# all nothing is staged (extra_bheight stays 0 — positions remain absolute-declared either way,
-# only the baked base is absent). Duck-typed like _build_reground_requests so headless stubs work.
+# Stage terrain base heights on the document for a .mis save: one height per entity, FLAT in
+# the .mis writer's order (items, buildings, markers, organics). The original editor subtracts
+# extra_bheight from a height-locked item's absolute z to recover the terrain-relative offset
+# [orig: MisLdr_WriteNileProjectXml @ 0x10004930, misldr.dll], so each entity's base height is
+# the terrain height under its plane position — sampled through the same transform the placer
+# uses (MissionObjectPlacer.bms_to_godot_position; the axis map lives at that engine home), and
+# the sampled godot Y IS the mission z-units height. The 16.16 encode and the NAN-bakes-0 rule
+# live on MissionData.set_mis_base_heights_world; with no terrain surface at all nothing is
+# staged (extra_bheight stays 0 — positions remain absolute-declared either way, only the baked
+# base is absent).
 func _stage_mis_base_heights() -> void:
 	if _c._mission == null or _c.terrain_editor == null:
 		return
-	var batched: bool = _c.terrain_editor.has_method("sample_heights_world")
-	if not batched and not _c.terrain_editor.has_method("sample_height_world"):
-		return
 	var points := PackedVector2Array()
-	for kind in [NovaMissionData.KIND_ITEM, NovaMissionData.KIND_BUILDING, NovaMissionData.KIND_MARKER, NovaMissionData.KIND_ORGANIC]:
+	for kind in [MissionData.KIND_ITEM, MissionData.KIND_BUILDING, MissionData.KIND_MARKER, MissionData.KIND_ORGANIC]:
 		for e in _c._mission.get_entities(kind):
 			var pos: Vector3 = (e as Dictionary).get("position", Vector3.ZERO)
-			points.append(Vector2(pos.x, -pos.y))
+			var g := MissionObjectPlacer.bms_to_godot_position(pos)
+			points.append(Vector2(g.x, g.z))
 	if points.is_empty():
 		return
-	var heights: PackedFloat32Array
-	if batched:
-		heights = _c.terrain_editor.sample_heights_world(points)
-	else:
-		heights = PackedFloat32Array()
-		heights.resize(points.size())
-		for i in points.size():
-			heights[i] = _c.terrain_editor.sample_height_world(points[i].x, points[i].y)
+	var heights: PackedFloat32Array = _c.terrain_editor.sample_heights_world(points)
 	if heights.size() != points.size():
 		return
-	var fixed := PackedInt32Array()
-	fixed.resize(points.size())
-	for i in points.size():
-		var h := heights[i]
-		fixed[i] = 0 if is_nan(h) else int(roundf(h * 65536.0))
-	_c._mission.set_mis_base_heights(fixed)
+	_c._mission.set_mis_base_heights_world(heights)
 
 
 # Load the mission's environment into the shared editor environment. Returns a
@@ -334,10 +317,8 @@ func _stage_mis_base_heights() -> void:
 # just because the atmosphere is missing, but the rendered world is always made to
 # match the mission rather than carrying over the previously-open mission's
 # environment — when the mission brings no usable env, reset to a neutral default.
-func _load_environment(mission: NovaMissionData, resource_root: NovaResourceRoot) -> String:
-	if not _c.terrain_editor.has_method("get_environment_editor"):
-		return ""
-	var env_editor = _c.terrain_editor.get_environment_editor()
+func _load_environment(mission: MissionData, resource_root: ResourceRoot) -> String:
+	var env_editor: EnvironmentEditor = _c.terrain_editor.get_environment_editor()
 	if env_editor == null:
 		return ""
 
@@ -347,25 +328,23 @@ func _load_environment(mission: NovaMissionData, resource_root: NovaResourceRoot
 		var env_path := resource_root.resolve_file(env_ref + ".env")
 		if env_path.is_empty():
 			note = "environment %s was not found" % env_ref
-		elif env_editor.has_method("open_env") and int(env_editor.open_env(env_path)) == OK:
+		elif env_editor.open_env(env_path) == OK:
 			# Game parity: the runtime layers the mission's attrib-gated fog/water
 			# overrides on top of the .env (get_environment_overrides builds exactly
 			# the apply_mission_overrides payload). Apply them to the preview too,
 			# then re-fan-out — open_env already emitted with the bare .env values.
-			var env_file: Variant = env_editor.get("env_file")
+			var env_file: EnvFile = env_editor.env_file
 			var overrides: Dictionary = mission.get_environment_overrides()
-			if env_file != null and not overrides.is_empty() and env_file.has_method("apply_mission_overrides"):
+			if env_file != null and not overrides.is_empty():
 				env_file.apply_mission_overrides(overrides)
-				if env_editor.has_method("_emit_all_changed"):
-					env_editor._emit_all_changed()
+				env_editor._emit_all_changed()
 			return ""  # loaded the mission's own environment; nothing to reset or note
 		else:
 			note = "environment %s could not be loaded" % env_ref
 
 	# Blank, unresolved, or unreadable reference: reset to a neutral default so the
 	# atmosphere matches the inspector instead of lingering from a prior mission.
-	if env_editor.has_method("create_default_environment"):
-		env_editor.create_default_environment(false)
+	env_editor.create_default_environment(false)
 	return note
 
 
@@ -376,13 +355,13 @@ func _load_environment(mission: NovaMissionData, resource_root: NovaResourceRoot
 func reload_environment() -> String:
 	if _c._mission == null:
 		return "no mission open"
-	var resource_root: NovaResourceRoot = _c._resource_root()
+	var resource_root: ResourceRoot = _c._resource_root()
 	if resource_root == null:
 		return "no resource root mounted"
 	return _load_environment(_c._mission, resource_root)
 
 
-func _place_objects(mission: NovaMissionData, resource_root: NovaResourceRoot, timeline: PerfTimeline = null) -> void:
+func _place_objects(mission: MissionData, resource_root: ResourceRoot, timeline: PerfTimeline = null) -> void:
 	_c._stats = {}
 	# A fresh placement replaces the container (and the old selection box with it), so
 	# drop any stale selection refs before re-harvesting the pickable index.
@@ -390,20 +369,18 @@ func _place_objects(mission: NovaMissionData, resource_root: NovaResourceRoot, t
 	_c._pickable = []
 	_c._place_item_id = 0
 	_c._placer = null
-	if not _c.terrain_editor.has_method("get_terrain_world_root"):
-		return
 	var world_root: Node3D = _c.terrain_editor.get_terrain_world_root()
 	if world_root == null:
 		return
-	_c._placer = _c.MissionObjectPlacer.new(resource_root)
+	_c._placer = MissionObjectPlacer.create(resource_root, null)
 	_c._placer.edit_mode = true
-	var options: Dictionary = {}
-	var env_node = _c._environment_node()
-	if env_node != null:
-		options["environment_node"] = env_node
+	_c._wire_placer_environment()
+	_c._stats = _c._placer.place(mission, world_root)
+	# The native placer times its own stages; fold them into the load timeline.
 	if timeline != null:
-		options["timeline"] = timeline
-	_c._stats = _c._placer.place(mission, world_root, options)
+		var spans: Dictionary = _c._stats.get("spans", {})
+		for span_name in spans:
+			timeline.add_completed_span(String(span_name), int(spans[span_name]))
 	_c._pickable = _c._placer.pickable_records
 	# The placer created the pick colliders with the world; refresh the debug overlay if on.
 	_c._viewport._refresh_pick_debug()
@@ -416,7 +393,7 @@ func _clear_objects() -> void:
 		container.queue_free()
 
 
-func _describe_load(mission: NovaMissionData, bms_path: String, env_note: String = "") -> String:
+func _describe_load(mission: MissionData, bms_path: String, env_note: String = "") -> String:
 	var mission_name := mission.get_mission_name().strip_edges()
 	if mission_name.is_empty():
 		mission_name = bms_path.get_file()

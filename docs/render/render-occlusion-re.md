@@ -8,14 +8,14 @@ the occlusion model data they all consume. Binary: retail **Jointops.exe**
 that binary's. The consumer engine is **PORTED** (2026-07-17):
 `engine/runtime/world/occlusion.{h,cpp}` (`OcclusionWorld` + the render-float math),
 the `CollisionWorld` camera blink query, and the reimpl wiring
-(`NovaSimulation::run_occlusion_frame`, `OcclusionFramePass.apply_frame (godot/adapter/world/occlusion_frame_pass.gd)`,
-the placer de-batch + `NovaObjectModel.set_section_visibility_mask`); ctest
+(`Simulation::run_occlusion_frame`, `OcclusionFramePass.apply_frame (godot/src/world/occlusion_frame_pass.gd)`,
+the placer de-batch + `ObjectModel.set_section_visibility_mask`); ctest
 `occlusion` + GUT `game_world_test` / `nova_object_model_section_mask_test`
 cover it. The *producer* side (blink volume queries, the indoors bit,
 per-entity blink hits) is §15 of
 [world-wac-ai-re.md](../world/world-wac-ai-re.md); this record is the
 *consumer* side that §15 deferred as "REN-scope follow-ups". Sound occlusion is
-witnessed here too (its port target is `godot/adapter/world` audio; the catalog
+witnessed here too (its port target is `godot/src/world` audio; the catalog
 entry stays [lwf-dbf-sound-re.md](../audio/lwf-dbf-sound-re.md) D-SND-7).
 
 ## Verdict table
@@ -23,14 +23,14 @@ entry stays [lwf-dbf-sound-re.md](../audio/lwf-dbf-sound-re.md) D-SND-7).
 | Component | Verdict | Evidence |
 | --- | --- | --- |
 | Occlusion model data (`OVRT`/`OPLN`/`OFAC`/`OOBJ` chunks → 60 B runtime records) | **PORTED** (2026-07-17: the 3DI3-side promotion `ThreediIROcclusion` → `world::OcclusionModel`; the GPM-path runtime is deliberately unsupported — project decision, no GP runtime/ONED support) | `[orig: load_occlusion_model_data @ 0x5b4a00]`, caller `[orig: ThreediGp_LoadFromFile @ 0x5b5c37]`; tag immediates witnessed in disasm; copy loops re-derived from disasm (OVRT/OPLN identity, OFAC keeps disk field order, OOBJ 36→60 with sequential slice pointers) |
-| Mission-start portal init (register + weld + per-building flags) | **PORTED** (2026-07-17, `OcclusionWorld::init_mission` + `NovaSimulation::occlusion_init_mission`; the weld's type-5 rewrite mutates the SHARED per-graphic record array like retail's model cache) | `[orig: Terrain_InitBuildingPortals @ 0x5c7480 (tail @ 0x5c5860)]` from `[orig: Game_StartMission @ 0x525e11]`; thresholds 0.80000001f / −0.89999998f / 0.2 from decompile |
+| Mission-start portal init (register + weld + per-building flags) | **PORTED** (2026-07-17, `OcclusionWorld::init_mission` + `Simulation::occlusion_init_mission`; the weld's type-5 rewrite mutates the SHARED per-graphic record array like retail's model cache) | `[orig: Terrain_InitBuildingPortals @ 0x5c7480 (tail @ 0x5c5860)]` from `[orig: Game_StartMission @ 0x525e11]`; thresholds 0.80000001f / −0.89999998f / 0.2 from decompile |
 | Camera blink query | **PORTED** (2026-07-17, `CollisionWorld::query_blink_boxes_at_point`) | `[orig: Entity_QueryBlinkBoxesAtPoint @ 0x4af350]` |
 | Per-frame section-mask build | **PORTED** (2026-07-17, `OcclusionWorld::build_section_masks`; masks keyed by pool-2 handle slot like `Pool_GetIndexFromPtr`) | `[orig: build_sector_visibility_masks @ 0x5c8610]` |
 | Portal traversal (section expansion, window/viewthru wedges) | **PORTED** (2026-07-17, `OcclusionWorld::traverse` + seeders, in the render float world — see §1a) | `[orig: render_visibility_portal_traversal @ 0x5c4ae0]` + the two seeders `@ 0x5c73d0 / @ 0x5c7330`; recursion args witnessed at `@ 0x5c5619/0x5c57fc` (backface-latch recursion re-uses the CALLER's planes with section 0) |
 | Occluder culling (render_TOC) | **PORTED** (2026-07-17, `OcclusionWorld::toc_occluded` + `build_occluder_planes`) | `[orig: test_sector_entity_occlusion @ 0x5c4610]`, planes `[orig: Terrain_BuildPortalOccluderPlanes @ 0x5c44c0 → build_clip_planes_from_collision @ 0x5b34e0]`; the 8-corner refinement's collision-AABB swizzle witnessed @ 0x5c4920 |
 | Entity-vs-terrain three-ray occlusion latch | **PORTED** (2026-07-17, `OcclusionWorld::three_rays_clear` + the `Entity.occlusion_latch` byte; own `PRNG_Next16_C`-form stream, D-OCC-15) | `[orig: terrain_occlusion_check_three_rays @ 0x610ed0]` + the three collectors below |
 | Frame-level indoor gates (terrain/sky/water/foliage) | **PORTED** (2026-07-16, `OcclusionFramePass.apply_blink_gates` + the indoor black clear; 2026-07-17: the `g_BlinkWaterVisible` straddle/window-latch override + the `Bms_AttribFlags & 0x10` force-indoors landed in `OcclusionFramePass.apply_frame`) | gates at `@ 0x5c1353 / @ 0x5d0570 / @ 0x5ca84f / @ 0x5c93cb / @ 0x5c95bf / @ 0x5c9665 / @ 0x5ca1ab`; GUT `game_world_test.gd` blink-gate + occlusion-frame cases |
-| Draw-side mask consumption (hidden-section mask, two-pass open buildings, per-light section masks) | **PORTED** (2026-07-17, visibility data only: the union mask + forced def bits drive `NovaObjectModel.set_section_visibility_mask` per-part visibility on de-batched buildings; the two-pass draw order / per-light scoping / mirror clip are renderer-specific legs, D-OCC-13) | `[orig: Terrain_RenderSectorModels @ 0x5c5d30]` |
+| Draw-side mask consumption (hidden-section mask, two-pass open buildings, per-light section masks) | **PORTED** (2026-07-17, visibility data only: the union mask + forced def bits drive `ObjectModel.set_section_visibility_mask` per-part visibility on de-batched buildings; the two-pass draw order / per-light scoping / mirror clip are renderer-specific legs, D-OCC-13) | `[orig: Terrain_RenderSectorModels @ 0x5c5d30]` |
 | Sound occlusion (distance inflation + LOS legs) | **PORTED** (2026-07-16, closes D-SND-7; residue D-SND-9) | `[orig: Sound_ApplyOcclusionDistance @ 0x529970]` + callees; ported as `CollisionWorld::sound_occlusion_inflate` + `terrain_raycast_los_clear`; `collision` + `terrain_raycast` ctests; see [lwf-dbf-sound-re.md](../audio/lwf-dbf-sound-re.md) |
 | BMS `blink_parent`/`blink_group` (record bytes 84–87) | runtime-unconsumed (probable) | not read by `[orig: Entity_SpawnFromBMSRecord @ 0x40e9f0]`; no other consumer found; matches the net-RE parsed-but-unconsumed note |
 

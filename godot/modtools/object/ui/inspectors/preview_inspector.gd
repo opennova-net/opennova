@@ -4,7 +4,7 @@ extends ObjectInspector
 ## and per-control-register sliders. The export mask itself is coordinator
 ## state (used by begin_export); this inspector only builds its checkboxes.
 
-const CollisionHull = preload("res://adapter/object/collision_hull.gd")
+const CollisionHull = preload("res://game/object/collision_hull.gd")
 
 
 func build_main(mount: Control) -> void:

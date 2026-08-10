@@ -10,8 +10,7 @@ extends Node3D
 #
 # Referenced via preload (no class_name), the same convention as the controller / placer.
 
-const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
-const Overlay := preload("res://adapter/mission/mission_overlay_util.gd")
+const Overlay := preload("res://game/mission/mission_overlay_util.gd")
 
 # Half-extent (world units) of a marker gizmo cube; also its pick-target half-size.
 const MARKER_HALF := Overlay.MARKER_HALF
@@ -66,7 +65,7 @@ func rebuild(mission, active_path_index: int) -> void:
 	if mission == null:
 		return
 
-	var markers: Array = mission.get_entities(NovaMissionData.KIND_MARKER)
+	var markers: Array = mission.get_entities(MissionData.KIND_MARKER)
 	var paths: Array = mission.get_waypoint_paths()
 
 	# Collect every line segment first, so the ImmediateMesh surface is only opened when
@@ -137,14 +136,14 @@ func _collect_path_segments(out: Array, markers: Array, indices: PackedInt32Arra
 	for i in pts.size() - 1:
 		out.append({ "a": pts[i], "b": pts[i + 1], "color": color })
 	# A path loops back to its first marker unless flagged DoesNotLoop.
-	if (flags & NovaMissionData.WP_FLAG_DOES_NOT_LOOP) == 0:
+	if (flags & MissionData.WP_FLAG_DOES_NOT_LOOP) == 0:
 		out.append({ "a": pts[pts.size() - 1], "b": pts[0], "color": color })
 
 
 func _path_color(flags: int) -> Color:
-	if (flags & NovaMissionData.WP_FLAG_BLUE_TEAM) != 0:
+	if (flags & MissionData.WP_FLAG_BLUE_TEAM) != 0:
 		return COLOR_BLUE
-	if (flags & NovaMissionData.WP_FLAG_RED_TEAM) != 0:
+	if (flags & MissionData.WP_FLAG_RED_TEAM) != 0:
 		return COLOR_RED
 	return COLOR_NEUTRAL
 

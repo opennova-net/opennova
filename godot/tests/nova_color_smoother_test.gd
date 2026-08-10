@@ -1,11 +1,11 @@
 extends GutTest
 
-# NovaColorSmoother wraps the engine's 12.20 fixed-point eighth-step channel
+# ColorSmoother wraps the engine's 12.20 fixed-point eighth-step channel
 # smoother [orig: interpolate_weather_color @ 0x57d9e0]. See docs/env/env-tod-re.md.
 
 
 func test_eighth_step_decays_toward_target() -> void:
-	var smoother := NovaColorSmoother.new()
+	var smoother := ColorSmoother.new()
 	smoother.snap(Color(1.0, 0.5, 0.25))
 	var stepped := smoother.step(Color(0.0, 0.0, 0.0), 255.0)
 	# One unclamped eighth-step keeps ~7/8 with +0x80000 rounding: 255->223.
@@ -15,7 +15,7 @@ func test_eighth_step_decays_toward_target() -> void:
 
 
 func test_step_converges_to_target() -> void:
-	var smoother := NovaColorSmoother.new()
+	var smoother := ColorSmoother.new()
 	smoother.snap(Color(0.0, 0.0, 0.0))
 	var target := Color(1.0, 1.0, 1.0)
 	for _i in 200:
@@ -25,7 +25,7 @@ func test_step_converges_to_target() -> void:
 
 
 func test_max_step_clamps_rate() -> void:
-	var smoother := NovaColorSmoother.new()
+	var smoother := ColorSmoother.new()
 	smoother.snap(Color(1.0, 0.0, 0.0))
 	# max_step is in byte units; a 1-byte cap limits a full-range channel to a
 	# single byte per tick (255 -> 254) instead of the default eighth-step.

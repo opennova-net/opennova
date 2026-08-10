@@ -104,7 +104,7 @@ function Invoke-GDExtensionBuild {
     )
 
     Write-Host "=== Building $GodotCppTarget GDExtension ==="
-    cmake -S godot/adapter -B $BuildDir "-DGODOTCPP_TARGET=$GodotCppTarget"
+    cmake -S godot/src -B $BuildDir "-DGODOTCPP_TARGET=$GodotCppTarget"
     if ($LASTEXITCODE -ne 0) { throw "CMake configure failed for $GodotCppTarget (exit $LASTEXITCODE)" }
 
     cmake --build $BuildDir --config $Config --target opennova

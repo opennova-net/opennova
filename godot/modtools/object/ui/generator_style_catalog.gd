@@ -45,73 +45,81 @@ const CONSUMERS := [
 	CONSUMER_PANM,
 ]
 
-# Raw codes whose 0x7X interpretation varies by retail consumer.
+# The editor's consumer strings mapped onto the engine's consumer enum
+# (ObjectData.GENERATOR_CONSUMER_*; the dispatch matrix lives at the engine
+# home, engine/formats/threedi threedi_panm.h).
+static func _consumer_id(consumer: String) -> int:
+	match consumer:
+		CONSUMER_UV:
+			return ObjectData.GENERATOR_CONSUMER_UV
+		CONSUMER_RGB:
+			return ObjectData.GENERATOR_CONSUMER_RGB
+		CONSUMER_ALPHA:
+			return ObjectData.GENERATOR_CONSUMER_ALPHA
+		CONSUMER_LIGHT:
+			return ObjectData.GENERATOR_CONSUMER_LIGHT
+		CONSUMER_PANM:
+			return ObjectData.GENERATOR_CONSUMER_PANM
+	return -1
+
+# Named mirrors of the control-register style ids used by the label overrides
+# and callers' subset lists. The canonical id list is the engine's
+# (ObjectData.get_generator_style_ids()); generator_style_catalog_test pins
+# these against it.
 const STYLE_CONTROL_SET := 0x71
 const STYLE_CONTROL_ADD := 0x72
 const STYLE_CONTROL_SKEW := 0x73
 const STYLE_CONTROL_MULTIPLY := 0x74
 const STYLE_CONTROL_ROTATE := 0x75
 
-# Private storage for every code in kControlEntries, in canonical order. Typed
-# StyleInfo records are the cross-object contract; dictionaries do not escape
-# this module.
-const _STYLES := [
-	{"id": 0, "label": "None"},
-	{"id": 16, "label": "Slide"},
-	{"id": 17, "label": "Slide inverse"},
-	{"id": 24, "label": "Set"},
-	{"id": 32, "label": "Rotate CW"},
-	{"id": 33, "label": "Rotate CCW"},
-	{"id": 49, "label": "Set wave: square"},
-	{"id": 50, "label": "Set wave: sine"},
-	{"id": 51, "label": "Set wave: triangle"},
-	{"id": 52, "label": "Set wave: saw"},
-	{"id": 53, "label": "Set wave: inverse saw"},
-	{"id": 54, "label": "Set wave: random"},
-	{"id": 55, "label": "Set wave: smooth random"},
-	{"id": 56, "label": "Set wave: half sine"},
-	{"id": 57, "label": "Set wave: pulse"},
-	{"id": 58, "label": "Set wave: vibrate"},
-	{"id": 63, "label": "Set wave: heartbeat"},
-	{"id": 65, "label": "Add wave: square"},
-	{"id": 66, "label": "Add wave: sine"},
-	{"id": 67, "label": "Add wave: triangle"},
-	{"id": 68, "label": "Add wave: saw"},
-	{"id": 69, "label": "Add wave: inverse saw"},
-	{"id": 70, "label": "Add wave: random"},
-	{"id": 71, "label": "Add wave: smooth random"},
-	{"id": 72, "label": "Add wave: half sine"},
-	{"id": 73, "label": "Add wave: pulse"},
-	{"id": 74, "label": "Add wave: vibrate"},
-	{"id": 79, "label": "Add wave: heartbeat"},
-	{"id": 81, "label": "Skew wave: square"},
-	{"id": 82, "label": "Skew wave: sine"},
-	{"id": 83, "label": "Skew wave: triangle"},
-	{"id": 84, "label": "Skew wave: saw"},
-	{"id": 85, "label": "Skew wave: inverse saw"},
-	{"id": 86, "label": "Skew wave: random"},
-	{"id": 87, "label": "Skew wave: smooth random"},
-	{"id": 88, "label": "Skew wave: half sine"},
-	{"id": 89, "label": "Skew wave: pulse"},
-	{"id": 90, "label": "Skew wave: vibrate"},
-	{"id": 95, "label": "Skew wave: heartbeat"},
-	{"id": 97, "label": "Multiply wave: square"},
-	{"id": 98, "label": "Multiply wave: sine"},
-	{"id": 99, "label": "Multiply wave: triangle"},
-	{"id": 100, "label": "Multiply wave: saw"},
-	{"id": 101, "label": "Multiply wave: inverse saw"},
-	{"id": 102, "label": "Multiply wave: random"},
-	{"id": 103, "label": "Multiply wave: smooth random"},
-	{"id": 104, "label": "Multiply wave: half sine"},
-	{"id": 105, "label": "Multiply wave: pulse"},
-	{"id": 106, "label": "Multiply wave: vibrate"},
-	{"id": 111, "label": "Multiply wave: heartbeat"},
-	{"id": 113, "label": "Set (control register)"},
-	{"id": 114, "label": "Add (control register)"},
-	{"id": 115, "label": "Skew (control register)"},
-	{"id": 116, "label": "Multiply (control register)"},
-	{"id": 117, "label": "Rotate (control register)"},
+# Friendly labels per canonical style id — an editor concern, deliberately kept
+# here (the engine keeps CODE-style names; see _base_label's fallback). The
+# canonical id LIST is the engine's; this table only decorates it. Waveform
+# families compose "<family> wave: <waveform>" from the byte's two nibbles.
+const _WAVEFORM_LABELS: PackedStringArray = [
+	"", "square", "sine", "triangle", "saw", "inverse saw", "random",
+	"smooth random", "half sine", "pulse", "vibrate", "", "", "", "",
+	"heartbeat",
 ]
+
+
+static func _friendly_label(id: int) -> String:
+	match id:
+		0x00:
+			return "None"
+		0x10:
+			return "Slide"
+		0x11:
+			return "Slide inverse"
+		0x18:
+			return "Set"
+		0x20:
+			return "Rotate CW"
+		0x21:
+			return "Rotate CCW"
+		STYLE_CONTROL_SET:
+			return "Set (control register)"
+		STYLE_CONTROL_ADD:
+			return "Add (control register)"
+		STYLE_CONTROL_SKEW:
+			return "Skew (control register)"
+		STYLE_CONTROL_MULTIPLY:
+			return "Multiply (control register)"
+		STYLE_CONTROL_ROTATE:
+			return "Rotate (control register)"
+	var waveform := _WAVEFORM_LABELS[id & 0xF]
+	if waveform.is_empty():
+		return ""
+	match id & 0xF0:
+		0x30:
+			return "Set wave: %s" % waveform
+		0x40:
+			return "Add wave: %s" % waveform
+		0x50:
+			return "Skew wave: %s" % waveform
+		0x60:
+			return "Multiply wave: %s" % waveform
+	return ""
 
 # Reading the global CTRL value is a property of the consumer dispatch, not the
 # raw style byte. This is deliberately separate from the on-disk parameter:
@@ -125,35 +133,30 @@ const _STYLES := [
 static func style_info(consumer: String, id: int) -> StyleInfo:
 	if not _is_consumer(consumer):
 		return null
-	for base_style in _STYLES:
-		if int(base_style.get("id", -1)) != id:
-			continue
-		return StyleInfo.new(
-				id,
-				_label_for_consumer(consumer, id, String(base_style.get("label", ""))),
-				reads_control_value(consumer, id),
-				parameter_is_ctrl_reference(id))
-	return null
+	if not style_ids().has(id):
+		return null
+	return StyleInfo.new(
+			id,
+			_label_for_consumer(consumer, id, _base_label(id)),
+			reads_control_value(consumer, id),
+			parameter_is_ctrl_reference(id))
 
 
-# Canonical ids are copied so callers cannot mutate the catalog implementation.
+# The canonical style-id list is the engine's (kControlEntries; the byte table
+# lives at the engine home, engine/formats/threedi threedi_panm.cpp).
 static func style_ids() -> PackedInt32Array:
-	var result := PackedInt32Array()
-	result.resize(_STYLES.size())
-	for index in range(_STYLES.size()):
-		result[index] = int(_STYLES[index].get("id", -1))
-	return result
+	return ObjectData.get_generator_style_ids()
 
 
 static func style_count() -> int:
-	return _STYLES.size()
+	return style_ids().size()
 
 
-# Full typed option list for one retail consumer.
+# Full typed option list for one retail consumer, in canonical engine order.
 static func options_for_consumer(consumer: String) -> Array[StyleInfo]:
 	var result: Array[StyleInfo] = []
-	for style in _STYLES:
-		var info := style_info(consumer, int(style.get("id", -1)))
+	for id in style_ids():
+		var info := style_info(consumer, int(id))
 		if info != null:
 			result.append(info)
 	return result
@@ -170,24 +173,32 @@ static func options_for_ids(consumer: String, ids: Array) -> Array[StyleInfo]:
 	return result
 
 
+# The per-consumer control-register dispatch is the engine's
+# (ObjectData.generator_style_reads_control_value over the witnessed matrix).
 static func reads_control_value(consumer: String, id: int) -> bool:
-	match consumer:
-		CONSUMER_UV:
-			return id >= STYLE_CONTROL_SET and id <= STYLE_CONTROL_ROTATE
-		CONSUMER_RGB, CONSUMER_LIGHT:
-			return id == STYLE_CONTROL_SET or id == STYLE_CONTROL_ADD
-		CONSUMER_ALPHA, CONSUMER_PANM:
-			return id == STYLE_CONTROL_SET
-		_:
-			return false
+	if not _is_consumer(consumer):
+		return false
+	return ObjectData.generator_style_reads_control_value(
+			_consumer_id(consumer), id)
 
 
+# The loader's high-style parameter fixup threshold is the engine's
+# (ObjectData.generator_style_parameter_is_ctrl_reference).
 static func parameter_is_ctrl_reference(id: int) -> bool:
-	return id > 0x70
+	return ObjectData.generator_style_parameter_is_ctrl_reference(id)
 
 
 static func _is_consumer(consumer: String) -> bool:
 	return CONSUMERS.has(consumer)
+
+
+# The friendly label for a canonical id; an engine-listed code this table does
+# not decorate surfaces the engine's CODE-style name (never an invented one).
+static func _base_label(id: int) -> String:
+	var friendly := _friendly_label(id)
+	if not friendly.is_empty():
+		return friendly
+	return ObjectData.generator_style_code_name(id)
 
 
 # The generic names describe UV operations. Retail's other consumers route the

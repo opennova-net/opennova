@@ -1,6 +1,6 @@
 extends GutTest
 
-# Phase 1 bindings: NovaMissionData (engine/runtime/mission) + NovaItemDatabase (engine/formats/def),
+# Phase 1 bindings: MissionData (engine/runtime/mission) + ItemDatabase (engine/formats/def),
 # and the entity item_id -> items.def graphic resolution chain that "populate the
 # world" depends on. Uses committed fixtures (the items.def fixture is a small
 # 12-item subset, so resolution is partial by design).
@@ -18,7 +18,7 @@ func _items_abs() -> String:
 
 
 func test_reground_entities_counts_and_applies_with_one_policy() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.create_default(), OK)
 	# 5 = building in the witnessed type mapping [orig: ItemDef_ParseProperty @ 0x49eb00]
 	# (the pre-D-ITEMDEF-1 invented enum said 4; witnessed 4 = marker, which is
@@ -48,17 +48,17 @@ func test_reground_entities_counts_and_applies_with_one_policy() -> void:
 
 
 func test_mission_data_parses_header_and_entities() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK, "ash_i5b.reference.bms should parse")
 	assert_true(m.is_loaded(), "mission should report loaded")
 	assert_eq(m.get_terrain_ref(), "dvxi5", "header terrain reference")
 	assert_eq(m.get_environment_ref(), "full_00", "header environment reference")
 	assert_false(m.get_mission_name().is_empty(), "mission name should be populated")
 
-	var building_count := m.get_entity_count(NovaMissionData.KIND_BUILDING)
+	var building_count := m.get_entity_count(MissionData.KIND_BUILDING)
 	assert_gt(building_count, 0, "ash_i5b places buildings")
 
-	var buildings := m.get_entities(NovaMissionData.KIND_BUILDING)
+	var buildings := m.get_entities(MissionData.KIND_BUILDING)
 	assert_eq(buildings.size(), building_count, "get_entities count matches get_entity_count")
 
 	var first: Dictionary = buildings[0]
@@ -67,28 +67,28 @@ func test_mission_data_parses_header_and_entities() -> void:
 	assert_typeof(first["position"], TYPE_VECTOR3, "position is a Vector3")
 	assert_typeof(first["rotation_deg"], TYPE_VECTOR3, "rotation_deg is a Vector3")
 
-	var total := m.get_entity_count(NovaMissionData.KIND_ITEM) \
-		+ m.get_entity_count(NovaMissionData.KIND_BUILDING) \
-		+ m.get_entity_count(NovaMissionData.KIND_MARKER) \
-		+ m.get_entity_count(NovaMissionData.KIND_ORGANIC)
+	var total := m.get_entity_count(MissionData.KIND_ITEM) \
+		+ m.get_entity_count(MissionData.KIND_BUILDING) \
+		+ m.get_entity_count(MissionData.KIND_MARKER) \
+		+ m.get_entity_count(MissionData.KIND_ORGANIC)
 	assert_eq(m.get_all_entities().size(), total, "get_all_entities aggregates every kind")
 
 
 func test_get_entity_matches_the_scanned_entry() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
-	var first: Dictionary = m.get_entities(NovaMissionData.KIND_BUILDING)[0]
+	var first: Dictionary = m.get_entities(MissionData.KIND_BUILDING)[0]
 	var index := int(first["index"])
-	var direct := m.get_entity(NovaMissionData.KIND_BUILDING, index)
+	var direct := m.get_entity(MissionData.KIND_BUILDING, index)
 	assert_eq(int(direct.get("index", -1)), index, "get_entity returns the entity at that index")
 	assert_eq(direct.get("position"), first.get("position"), "with the same position as the scanned entry")
 	assert_eq(int(direct.get("item_id", -1)), int(first.get("item_id", -2)), "and the same item_id")
-	assert_eq(m.get_entity(NovaMissionData.KIND_BUILDING, 999999), {}, "an out-of-range index yields an empty dict")
-	assert_eq(m.get_entity(NovaMissionData.KIND_BUILDING, -1), {}, "a negative index yields an empty dict")
+	assert_eq(m.get_entity(MissionData.KIND_BUILDING, 999999), {}, "an out-of-range index yields an empty dict")
+	assert_eq(m.get_entity(MissionData.KIND_BUILDING, -1), {}, "a negative index yields an empty dict")
 
 
 func test_item_database_loads_and_handles_missing() -> void:
-	var db := NovaItemDatabase.new()
+	var db := ItemDatabase.new()
 	assert_eq(db.load(_items_abs()), OK, "items.def fixture should parse")
 	assert_true(db.is_loaded(), "database should report loaded")
 	assert_gt(db.get_count(), 0, "items.def yields at least one item")
@@ -112,7 +112,7 @@ func test_item_database_exposes_retail_interior_light_transfer() -> void:
 			+ "  light_transfer 20\n"
 			+ "end\n")
 	file.close()
-	var db := NovaItemDatabase.new()
+	var db := ItemDatabase.new()
 	assert_eq(db.load(tmp), OK)
 	assert_eq(db.get_light_transfer(710010), 0.0,
 			"an unauthored building keeps the zero-initialized retail value")
@@ -139,7 +139,7 @@ func test_item_database_mount_config_preserves_presence_and_explicit_zero() -> v
 			+ "  phrase_set 0\n"
 			+ "end\n")
 	file.close()
-	var db := NovaItemDatabase.new()
+	var db := ItemDatabase.new()
 	assert_eq(db.load(tmp), OK)
 	assert_eq(db.get_mount_config(710001), {"valid": false, "value": 0},
 			"absent phrase_set remains unknown")
@@ -168,7 +168,7 @@ func test_item_database_preserves_emplacement_attachment_variants_and_markers() 
 			+ "  addeweapG ignored05 710105\n"
 			+ "end\n")
 	file.close()
-	var db := NovaItemDatabase.new()
+	var db := ItemDatabase.new()
 	assert_eq(db.load(tmp), OK)
 	var rows: Array = db.get_emplacement_attachments(710100)
 	assert_eq(rows.size(), 4, "retail stores at most four child emplacement rows")
@@ -194,9 +194,9 @@ func test_item_database_preserves_emplacement_attachment_variants_and_markers() 
 
 
 func test_entities_resolve_to_models() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
-	var db := NovaItemDatabase.new()
+	var db := ItemDatabase.new()
 	assert_eq(db.load(_items_abs()), OK)
 
 	var resolved := 0
@@ -223,11 +223,11 @@ func _temp_mis_path() -> String:
 
 
 func test_set_entity_transform_persists_through_save_reload() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 	assert_false(m.is_modified(), "a freshly opened mission is not modified")
 
-	var buildings := m.get_entities(NovaMissionData.KIND_BUILDING)
+	var buildings := m.get_entities(MissionData.KIND_BUILDING)
 	assert_gt(buildings.size(), 1, "need at least two buildings to check a neighbor")
 	var target: Dictionary = buildings[0]
 	var neighbor_before: Vector3 = buildings[1]["position"]
@@ -243,9 +243,9 @@ func test_set_entity_transform_persists_through_save_reload() -> void:
 	assert_eq(m.save_as(tmp), OK, "save_as writes the edited mission")
 	assert_false(m.is_modified(), "a successful save clears the modified flag")
 
-	var reopened := NovaMissionData.new()
+	var reopened := MissionData.new()
 	assert_eq(reopened.open_file(tmp), OK, "the saved mission reopens")
-	var b2 := reopened.get_entities(NovaMissionData.KIND_BUILDING)
+	var b2 := reopened.get_entities(MissionData.KIND_BUILDING)
 	assert_eq(b2.size(), buildings.size(), "entity count is unchanged by an in-place move")
 
 	var moved: Vector3 = b2[0]["position"]
@@ -266,7 +266,7 @@ func test_set_entity_transform_persists_through_save_reload() -> void:
 # re-bakes the ~1600-node world only when an object actually changed and otherwise just refreshes the
 # overlay.
 func test_object_records_revision_and_fingerprint_track_placed_objects() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 
 	var rev0 := m.object_records_revision()
@@ -289,7 +289,7 @@ func test_object_records_revision_and_fingerprint_track_placed_objects() -> void
 	assert_eq(m.object_records_revision(), rev0, "adding a zone does not move the object revision")
 
 	# An object edit (moving a placed entity) MUST move the revision -> a full re-bake on undo/redo.
-	var buildings := m.get_entities(NovaMissionData.KIND_BUILDING)
+	var buildings := m.get_entities(MissionData.KIND_BUILDING)
 	assert_gt(buildings.size(), 0, "need a building to move")
 	var b: Dictionary = buildings[0]
 	assert_true(m.set_entity_transform(int(b["kind"]), int(b["index"]),
@@ -301,19 +301,19 @@ func test_object_records_revision_and_fingerprint_track_placed_objects() -> void
 # preserves the non-mode option bits, decodes by priority, and rejects invalid bits.
 # [orig: sub_402770 decode @0x4050c7 / encode @0x4031cd, dfx2med.exe]
 func test_game_mode_single_select_and_priority() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
-	var mask := int(NovaMissionData.ATTRIB_GAME_MODE_MASK)
+	var mask := int(MissionData.ATTRIB_GAME_MODE_MASK)
 
 	# Deathmatch: exactly that mode bit, nothing else in the mode mask.
-	assert_true(m.set_game_mode(NovaMissionData.ATTRIB_DEATHMATCH), "set deathmatch")
-	assert_eq(int(m.get_info()["attrib_flags"]) & mask, int(NovaMissionData.ATTRIB_DEATHMATCH), "only DM mode bit set")
-	assert_eq(int(m.get_game_mode()), int(NovaMissionData.ATTRIB_DEATHMATCH), "get_game_mode reports DM")
+	assert_true(m.set_game_mode(MissionData.ATTRIB_DEATHMATCH), "set deathmatch")
+	assert_eq(int(m.get_info()["attrib_flags"]) & mask, int(MissionData.ATTRIB_DEATHMATCH), "only DM mode bit set")
+	assert_eq(int(m.get_game_mode()), int(MissionData.ATTRIB_DEATHMATCH), "get_game_mode reports DM")
 
 	# Switch to Search & destroy (the high bit 0x80000000): replaces DM, no leftovers.
-	assert_true(m.set_game_mode(NovaMissionData.ATTRIB_SEARCH_AND_DESTROY), "set S&D")
-	assert_eq(int(m.get_info()["attrib_flags"]) & mask, int(NovaMissionData.ATTRIB_SEARCH_AND_DESTROY), "DM cleared, S&D set")
-	assert_eq(int(m.get_game_mode()), int(NovaMissionData.ATTRIB_SEARCH_AND_DESTROY), "get reports S&D (high bit survives)")
+	assert_true(m.set_game_mode(MissionData.ATTRIB_SEARCH_AND_DESTROY), "set S&D")
+	assert_eq(int(m.get_info()["attrib_flags"]) & mask, int(MissionData.ATTRIB_SEARCH_AND_DESTROY), "DM cleared, S&D set")
+	assert_eq(int(m.get_game_mode()), int(MissionData.ATTRIB_SEARCH_AND_DESTROY), "get reports S&D (high bit survives)")
 
 	# Single player (0) clears all mode bits.
 	assert_true(m.set_game_mode(0), "set single player")
@@ -321,38 +321,38 @@ func test_game_mode_single_select_and_priority() -> void:
 	assert_eq(int(m.get_game_mode()), 0, "get reports single player")
 
 	# Non-mode option bits survive a game-mode change.
-	assert_true(m.set_header_flag(NovaMissionData.ATTRIB_ROTATE_MAP_180, true), "set rotate option")
-	assert_true(m.set_game_mode(NovaMissionData.ATTRIB_COOP), "set coop")
-	assert_ne(int(m.get_info()["attrib_flags"]) & int(NovaMissionData.ATTRIB_ROTATE_MAP_180), 0, "rotate option preserved across mode change")
-	assert_eq(int(m.get_game_mode()), int(NovaMissionData.ATTRIB_COOP), "coop active")
+	assert_true(m.set_header_flag(MissionData.ATTRIB_ROTATE_MAP_180, true), "set rotate option")
+	assert_true(m.set_game_mode(MissionData.ATTRIB_COOP), "set coop")
+	assert_ne(int(m.get_info()["attrib_flags"]) & int(MissionData.ATTRIB_ROTATE_MAP_180), 0, "rotate option preserved across mode change")
+	assert_eq(int(m.get_game_mode()), int(MissionData.ATTRIB_COOP), "coop active")
 
 	# Invalid bits are rejected and change nothing.
 	var before := int(m.get_info()["attrib_flags"])
 	assert_false(m.set_game_mode(0x4), "an override bit is not a valid game mode")
-	assert_false(m.set_game_mode(int(NovaMissionData.ATTRIB_COOP) | int(NovaMissionData.ATTRIB_DEATHMATCH)), "two mode bits is invalid")
+	assert_false(m.set_game_mode(int(MissionData.ATTRIB_COOP) | int(MissionData.ATTRIB_DEATHMATCH)), "two mode bits is invalid")
 	assert_eq(int(m.get_info()["attrib_flags"]), before, "rejected calls leave flags unchanged")
 
 	# A mode set round-trips through save / reopen.
-	assert_true(m.set_game_mode(NovaMissionData.ATTRIB_CAPTURE_THE_FLAG), "set CTF")
+	assert_true(m.set_game_mode(MissionData.ATTRIB_CAPTURE_THE_FLAG), "set CTF")
 	var tmp := _temp_bms_path()
 	assert_eq(m.save_as(tmp), OK, "save")
-	var reopened := NovaMissionData.new()
+	var reopened := MissionData.new()
 	assert_eq(reopened.open_file(tmp), OK, "reopen")
-	assert_eq(int(reopened.get_game_mode()), int(NovaMissionData.ATTRIB_CAPTURE_THE_FLAG), "CTF persists across save/reload")
+	assert_eq(int(reopened.get_game_mode()), int(MissionData.ATTRIB_CAPTURE_THE_FLAG), "CTF persists across save/reload")
 	DirAccess.remove_absolute(tmp)
 
 
 func test_save_without_edits_is_non_destructive() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
-	var before := m.get_entities(NovaMissionData.KIND_BUILDING)
+	var before := m.get_entities(MissionData.KIND_BUILDING)
 
 	var tmp := _temp_bms_path()
 	assert_eq(m.save_as(tmp), OK, "saving an unedited mission succeeds")
 
-	var reopened := NovaMissionData.new()
+	var reopened := MissionData.new()
 	assert_eq(reopened.open_file(tmp), OK)
-	var after := reopened.get_entities(NovaMissionData.KIND_BUILDING)
+	var after := reopened.get_entities(MissionData.KIND_BUILDING)
 	assert_eq(after.size(), before.size(), "save->reload preserves the entity set")
 	for i in before.size():
 		var p0: Vector3 = before[i]["position"]
@@ -365,11 +365,11 @@ func test_save_without_edits_is_non_destructive() -> void:
 
 
 func test_set_entity_transform_rejects_out_of_range() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
-	assert_false(m.set_entity_transform(NovaMissionData.KIND_BUILDING, 999999, Vector3.ZERO, Vector3.ZERO),
+	assert_false(m.set_entity_transform(MissionData.KIND_BUILDING, 999999, Vector3.ZERO, Vector3.ZERO),
 		"an out-of-range index is rejected")
-	assert_false(m.set_entity_transform(NovaMissionData.KIND_BUILDING, -1, Vector3.ZERO, Vector3.ZERO),
+	assert_false(m.set_entity_transform(MissionData.KIND_BUILDING, -1, Vector3.ZERO, Vector3.ZERO),
 		"a negative index is rejected")
 	assert_false(m.is_modified(), "a rejected mutation does not dirty the document")
 
@@ -377,14 +377,14 @@ func test_set_entity_transform_rejects_out_of_range() -> void:
 func test_save_file_without_path_is_invalid() -> void:
 	# A document constructed without open_file has no source path; save_file must
 	# return the no-path code (the editor shell then routes to Save As).
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.save_file(), ERR_INVALID_PARAMETER, "save_file with no path is ERR_INVALID_PARAMETER")
 
 
 func test_ai_flag_bits_are_distinct_named_bits() -> void:
 	# get_ai_flag_bits drives the Behavior > Flags checkboxes; each entry must be a single distinct bit
 	# with a label so the inspector's merge-on-write (clear known mask, OR checked bits) is unambiguous.
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	var bits := m.get_ai_flag_bits()
 	assert_gt(bits.size(), 0, "engine exposes AI attribute flag bits")
 	var seen_mask := 0
@@ -418,7 +418,7 @@ const _OTHER_PROPERTY_KEYS := [
 ]
 
 
-func _entity(m: NovaMissionData, kind: int, index: int) -> Dictionary:
+func _entity(m: MissionData, kind: int, index: int) -> Dictionary:
 	for e in m.get_entities(kind):
 		if int((e as Dictionary)["index"]) == index:
 			return e
@@ -426,17 +426,17 @@ func _entity(m: NovaMissionData, kind: int, index: int) -> Dictionary:
 
 
 func test_set_entity_property_int_team_preserves_other_fields() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
-	var before: Dictionary = m.get_entities(NovaMissionData.KIND_BUILDING)[0]
+	var before: Dictionary = m.get_entities(MissionData.KIND_BUILDING)[0]
 	var index := int(before["index"])
 
 	var new_team := int(before.get("team", 0)) + 1
-	assert_true(m.set_entity_property_int(NovaMissionData.KIND_BUILDING, index, "team", new_team),
+	assert_true(m.set_entity_property_int(MissionData.KIND_BUILDING, index, "team", new_team),
 		"editing team on a valid entity succeeds")
 	assert_true(m.is_modified(), "a property edit sets the modified flag")
 
-	var after := _entity(m, NovaMissionData.KIND_BUILDING, index)
+	var after := _entity(m, MissionData.KIND_BUILDING, index)
 	assert_eq(int(after["team"]), new_team, "team takes the new value")
 	assert_eq(int(after["group"]), int(before["group"]), "group is left untouched by a team edit")
 	for key in _OTHER_PROPERTY_KEYS:
@@ -444,37 +444,37 @@ func test_set_entity_property_int_team_preserves_other_fields() -> void:
 
 
 func test_set_entity_property_int_group_roundtrips() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
-	var before: Dictionary = m.get_entities(NovaMissionData.KIND_BUILDING)[0]
+	var before: Dictionary = m.get_entities(MissionData.KIND_BUILDING)[0]
 	var index := int(before["index"])
 
 	var new_group := int(before.get("group", 0)) + 3
-	assert_true(m.set_entity_property_int(NovaMissionData.KIND_BUILDING, index, "group", new_group))
-	var after := _entity(m, NovaMissionData.KIND_BUILDING, index)
+	assert_true(m.set_entity_property_int(MissionData.KIND_BUILDING, index, "group", new_group))
+	var after := _entity(m, MissionData.KIND_BUILDING, index)
 	assert_eq(int(after["group"]), new_group, "group takes the new value")
 	assert_eq(int(after["team"]), int(before["team"]), "team is left untouched by a group edit")
 
 
 func test_set_entity_property_int_persists_through_save_reload() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
-	var index := int(m.get_entities(NovaMissionData.KIND_BUILDING)[0]["index"])
-	assert_true(m.set_entity_property_int(NovaMissionData.KIND_BUILDING, index, "team", 4))
+	var index := int(m.get_entities(MissionData.KIND_BUILDING)[0]["index"])
+	assert_true(m.set_entity_property_int(MissionData.KIND_BUILDING, index, "team", 4))
 
 	var tmp := _temp_bms_path()
 	assert_eq(m.save_as(tmp), OK)
-	var reopened := NovaMissionData.new()
+	var reopened := MissionData.new()
 	assert_eq(reopened.open_file(tmp), OK)
-	assert_eq(int(_entity(reopened, NovaMissionData.KIND_BUILDING, index)["team"]), 4,
+	assert_eq(int(_entity(reopened, MissionData.KIND_BUILDING, index)["team"]), 4,
 		"an edited team survives the byte-faithful save and reload")
 	DirAccess.remove_absolute(tmp)
 
 
 func test_set_entity_property_int_unknown_property_is_inert() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
-	assert_false(m.set_entity_property_int(NovaMissionData.KIND_BUILDING, 0, "not_a_real_property", 9),
+	assert_false(m.set_entity_property_int(MissionData.KIND_BUILDING, 0, "not_a_real_property", 9),
 		"a property the binding does not map is rejected")
 	assert_false(m.is_modified(), "a rejected property edit does not dirty the document")
 
@@ -489,17 +489,17 @@ const _BEHAVIOR_PROPERTY_KEYS := [
 ]
 
 
-func _kind_with_entities(m: NovaMissionData) -> int:
+func _kind_with_entities(m: MissionData) -> int:
 	# Prefer an organic (richest AI fields), then item, then building (the fixture always
 	# has buildings), so the round-trip exercises real non-zero state where it exists.
-	for kind in [NovaMissionData.KIND_ORGANIC, NovaMissionData.KIND_ITEM, NovaMissionData.KIND_BUILDING]:
+	for kind in [MissionData.KIND_ORGANIC, MissionData.KIND_ITEM, MissionData.KIND_BUILDING]:
 		if m.get_entity_count(kind) > 0:
 			return kind
-	return NovaMissionData.KIND_BUILDING
+	return MissionData.KIND_BUILDING
 
 
 func test_set_entity_property_int_supports_behavior_fields() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 	var kind := _kind_with_entities(m)
 	for prop in _BEHAVIOR_PROPERTY_KEYS:
@@ -523,7 +523,7 @@ func test_behavior_spin_table_matches_engine_setter() -> void:
 	# the single UI table) must be accepted by the engine's set_entity_property_int (whose name->member
 	# map lives in engine/runtime/mission). A typo'd or stale property in the table would otherwise bind a row
 	# whose edits are silently rejected. Section markers carry no property and are skipped.
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 	var kind := _kind_with_entities(m)
 	var index := int(m.get_entities(kind)[0]["index"])
@@ -537,7 +537,7 @@ func test_behavior_spin_table_matches_engine_setter() -> void:
 
 
 func test_set_entity_property_int_behavior_field_persists_through_save_reload() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 	var kind := _kind_with_entities(m)
 	var index := int(m.get_entities(kind)[0]["index"])
@@ -546,7 +546,7 @@ func test_set_entity_property_int_behavior_field_persists_through_save_reload() 
 
 	var tmp := _temp_bms_path()
 	assert_eq(m.save_as(tmp), OK)
-	var reopened := NovaMissionData.new()
+	var reopened := MissionData.new()
 	assert_eq(reopened.open_file(tmp), OK)
 	assert_eq(int(_entity(reopened, kind, index)["waypoint_id"]), 5,
 		"the waypoint assignment survives the byte-faithful save and reload")
@@ -554,36 +554,36 @@ func test_set_entity_property_int_behavior_field_persists_through_save_reload() 
 
 
 func test_set_entity_property_int_rejects_out_of_range() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
-	assert_false(m.set_entity_property_int(NovaMissionData.KIND_BUILDING, 999999, "team", 1),
+	assert_false(m.set_entity_property_int(MissionData.KIND_BUILDING, 999999, "team", 1),
 		"an out-of-range index is rejected")
-	assert_false(m.set_entity_property_int(NovaMissionData.KIND_BUILDING, -1, "team", 1),
+	assert_false(m.set_entity_property_int(MissionData.KIND_BUILDING, -1, "team", 1),
 		"a negative index is rejected")
 	assert_false(m.is_modified(), "a rejected edit leaves the document clean")
 
 
 # --- Authoring (Phase 3): place a new entity + item enumeration --------------
 # add_entity appends a new record of a kind for an items.def id and returns it; the
-# binding is the write side the editor's place-object palette drives. NovaItemDatabase
+# binding is the write side the editor's place-object palette drives. ItemDatabase
 # enumeration (get_items / get_item_ids) is the read side that fills the palette.
 
 func test_add_entity_appends_and_returns_the_new_record() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
-	var before := m.get_entity_count(NovaMissionData.KIND_BUILDING)
+	var before := m.get_entity_count(MissionData.KIND_BUILDING)
 	assert_false(m.is_modified(), "a freshly opened mission is not modified")
 
 	var pos := Vector3(111.0, 22.0, -33.0)
-	var record := m.add_entity(NovaMissionData.KIND_BUILDING, 102001, pos, Vector3.ZERO)
+	var record := m.add_entity(MissionData.KIND_BUILDING, 102001, pos, Vector3.ZERO)
 	assert_false(record.is_empty(), "add_entity returns the new record")
 	assert_true(m.is_modified(), "adding an entity dirties the document")
-	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), before + 1, "the kind's count grows by one")
+	assert_eq(m.get_entity_count(MissionData.KIND_BUILDING), before + 1, "the kind's count grows by one")
 	assert_eq(int(record["index"]), before, "the new entity is appended at the end of its list")
 	assert_eq(int(record["item_id"]), 102001, "the record carries the placed item id")
-	assert_eq(int(record["kind"]), NovaMissionData.KIND_BUILDING, "the record carries the requested kind")
+	assert_eq(int(record["kind"]), MissionData.KIND_BUILDING, "the record carries the requested kind")
 
-	var fetched := m.get_entity(NovaMissionData.KIND_BUILDING, before)
+	var fetched := m.get_entity(MissionData.KIND_BUILDING, before)
 	assert_eq(int(fetched.get("item_id", -1)), 102001, "get_entity finds the appended entity")
 	var fp: Vector3 = fetched["position"]
 	assert_almost_eq(fp.x, pos.x, 0.02, "stored X matches what was placed")
@@ -592,18 +592,18 @@ func test_add_entity_appends_and_returns_the_new_record() -> void:
 
 
 func test_add_entity_persists_through_save_reload() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
-	var before := m.get_entity_count(NovaMissionData.KIND_ITEM)
-	var record := m.add_entity(NovaMissionData.KIND_ITEM, 101291, Vector3(7.0, 8.0, 9.0), Vector3(0, 90, 0))
+	var before := m.get_entity_count(MissionData.KIND_ITEM)
+	var record := m.add_entity(MissionData.KIND_ITEM, 101291, Vector3(7.0, 8.0, 9.0), Vector3(0, 90, 0))
 	var new_index := int(record["index"])
 
 	var tmp := _temp_bms_path()
 	assert_eq(m.save_as(tmp), OK, "the mission with a new entity saves")
-	var reopened := NovaMissionData.new()
+	var reopened := MissionData.new()
 	assert_eq(reopened.open_file(tmp), OK, "and reopens")
-	assert_eq(reopened.get_entity_count(NovaMissionData.KIND_ITEM), before + 1, "the added entity survives save+reload")
-	var roundtripped := reopened.get_entity(NovaMissionData.KIND_ITEM, new_index)
+	assert_eq(reopened.get_entity_count(MissionData.KIND_ITEM), before + 1, "the added entity survives save+reload")
+	var roundtripped := reopened.get_entity(MissionData.KIND_ITEM, new_index)
 	assert_eq(int(roundtripped.get("item_id", -1)), 101291, "the placed item id round-trips")
 	var rot: Vector3 = roundtripped["rotation_deg"]
 	assert_almost_eq(rot.y, 90.0, 0.5, "the placed yaw round-trips (rounded to integer degrees)")
@@ -611,14 +611,14 @@ func test_add_entity_persists_through_save_reload() -> void:
 
 
 func test_add_entity_without_a_mission_is_rejected() -> void:
-	var m := NovaMissionData.new()  # never opened -> no document loaded
-	assert_eq(m.add_entity(NovaMissionData.KIND_ITEM, 101291, Vector3.ZERO, Vector3.ZERO), {},
+	var m := MissionData.new()  # never opened -> no document loaded
+	assert_eq(m.add_entity(MissionData.KIND_ITEM, 101291, Vector3.ZERO, Vector3.ZERO), {},
 		"adding to an unloaded mission returns an empty dict")
 	assert_false(m.is_modified(), "a rejected add does not dirty the document")
 
 
 func test_item_database_enumeration_is_sorted_and_complete() -> void:
-	var db := NovaItemDatabase.new()
+	var db := ItemDatabase.new()
 	assert_eq(db.load(_items_abs()), OK)
 	var items := db.get_items()
 	var ids := db.get_item_ids()
@@ -626,7 +626,7 @@ func test_item_database_enumeration_is_sorted_and_complete() -> void:
 	assert_eq(ids.size(), db.get_count(), "get_item_ids returns every id")
 
 	# Stable order: sorted with Godot's natural, case-insensitive comparator, matching
-	# NovaItemDatabase::sorted_items (so the assertion can actually catch a sort
+	# ItemDatabase::sorted_items (so the assertion can actually catch a sort
 	# regression, not just lexicographic ordering that happens to coincide).
 	for i in range(1, items.size()):
 		var prev := String(items[i - 1]["display_name"])
@@ -651,10 +651,10 @@ func test_item_database_enumeration_is_sorted_and_complete() -> void:
 # level). The binding is the write side the editor's delete action drives.
 
 func test_remove_entity_drops_count_and_reindexes() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 	assert_false(m.is_modified(), "a freshly opened mission is not modified")
-	var buildings := m.get_entities(NovaMissionData.KIND_BUILDING)
+	var buildings := m.get_entities(MissionData.KIND_BUILDING)
 	assert_gt(buildings.size(), 2, "need a few buildings to check reindexing")
 
 	# Capture the entity at index 1: after removing index 0 it must shift down to index 0,
@@ -662,11 +662,11 @@ func test_remove_entity_drops_count_and_reindexes() -> void:
 	var was_at_1_item: int = int(buildings[1]["item_id"])
 	var was_at_1_pos: Vector3 = buildings[1]["position"]
 
-	assert_true(m.remove_entity(NovaMissionData.KIND_BUILDING, 0), "removing a valid entity succeeds")
+	assert_true(m.remove_entity(MissionData.KIND_BUILDING, 0), "removing a valid entity succeeds")
 	assert_true(m.is_modified(), "a removal dirties the document")
-	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), buildings.size() - 1, "the kind's count drops by one")
+	assert_eq(m.get_entity_count(MissionData.KIND_BUILDING), buildings.size() - 1, "the kind's count drops by one")
 
-	var new_first := m.get_entity(NovaMissionData.KIND_BUILDING, 0)
+	var new_first := m.get_entity(MissionData.KIND_BUILDING, 0)
 	assert_eq(int(new_first["item_id"]), was_at_1_item, "the entity at index 1 shifted down into index 0")
 	var np: Vector3 = new_first["position"]
 	assert_almost_eq(np.x, was_at_1_pos.x, 0.02, "the shifted entity kept its X position")
@@ -674,32 +674,32 @@ func test_remove_entity_drops_count_and_reindexes() -> void:
 
 
 func test_remove_entity_persists_through_save_reload() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
-	var before := m.get_entity_count(NovaMissionData.KIND_BUILDING)
-	var other_kind_before := m.get_entity_count(NovaMissionData.KIND_ITEM)
-	assert_true(m.remove_entity(NovaMissionData.KIND_BUILDING, 0))
+	var before := m.get_entity_count(MissionData.KIND_BUILDING)
+	var other_kind_before := m.get_entity_count(MissionData.KIND_ITEM)
+	assert_true(m.remove_entity(MissionData.KIND_BUILDING, 0))
 
 	var tmp := _temp_bms_path()
 	assert_eq(m.save_as(tmp), OK, "the mission with a removed entity saves")
-	var reopened := NovaMissionData.new()
+	var reopened := MissionData.new()
 	assert_eq(reopened.open_file(tmp), OK, "and reopens")
-	assert_eq(reopened.get_entity_count(NovaMissionData.KIND_BUILDING), before - 1, "the removal survives save+reload")
-	assert_eq(reopened.get_entity_count(NovaMissionData.KIND_ITEM), other_kind_before, "removing a building leaves the item list untouched")
+	assert_eq(reopened.get_entity_count(MissionData.KIND_BUILDING), before - 1, "the removal survives save+reload")
+	assert_eq(reopened.get_entity_count(MissionData.KIND_ITEM), other_kind_before, "removing a building leaves the item list untouched")
 	DirAccess.remove_absolute(tmp)
 
 
 func test_remove_entity_rejects_out_of_range() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
-	assert_false(m.remove_entity(NovaMissionData.KIND_BUILDING, 999999), "an out-of-range index is rejected")
-	assert_false(m.remove_entity(NovaMissionData.KIND_BUILDING, -1), "a negative index is rejected")
+	assert_false(m.remove_entity(MissionData.KIND_BUILDING, 999999), "an out-of-range index is rejected")
+	assert_false(m.remove_entity(MissionData.KIND_BUILDING, -1), "a negative index is rejected")
 	assert_false(m.is_modified(), "a rejected removal does not dirty the document")
 
 
 func test_remove_entity_without_a_mission_is_rejected() -> void:
-	var m := NovaMissionData.new()  # never opened -> no document loaded
-	assert_false(m.remove_entity(NovaMissionData.KIND_BUILDING, 0), "removing from an unloaded mission fails")
+	var m := MissionData.new()  # never opened -> no document loaded
+	assert_false(m.remove_entity(MissionData.KIND_BUILDING, 0), "removing from an unloaded mission fails")
 	assert_false(m.is_modified(), "a rejected removal does not dirty the document")
 
 
@@ -707,10 +707,10 @@ func test_set_entity_property_int_preserves_other_fields_across_kinds() -> void:
 	# Buildings tend to carry all-zero AI fields, so a dropped field in the read-modify-
 	# write copy would read 0 == 0 and pass. Organics (and items) carry richer state, so
 	# exercise every selectable kind that the fixture provides.
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 	var covered := 0
-	for kind in [NovaMissionData.KIND_ITEM, NovaMissionData.KIND_ORGANIC]:
+	for kind in [MissionData.KIND_ITEM, MissionData.KIND_ORGANIC]:
 		var entities := m.get_entities(kind)
 		if entities.is_empty():
 			continue
@@ -735,22 +735,22 @@ func test_set_entity_property_int_preserves_other_fields_across_kinds() -> void:
 # these assert the GDScript boundary: summaries enumerate, add_waypoint_marker creates a
 # marker AND links it, set/clear rewrite the references, and it all survives save+reload.
 
-func _first_empty_waypoint_path(m: NovaMissionData) -> int:
+func _first_empty_waypoint_path(m: MissionData) -> int:
 	for s in m.get_waypoint_summaries():
 		if int((s as Dictionary)["marker_count"]) == 0:
 			return int((s as Dictionary)["index"])
 	return -1
 
 
-func _any_marker_item_id(m: NovaMissionData) -> int:
+func _any_marker_item_id(m: MissionData) -> int:
 	# Reuse a real marker's item id when the fixture has markers; otherwise any id works
 	# (the lib stores it without validating against items.def).
-	var markers := m.get_entities(NovaMissionData.KIND_MARKER)
+	var markers := m.get_entities(MissionData.KIND_MARKER)
 	return int(markers[0]["item_id"]) if not markers.is_empty() else 100001
 
 
 func test_get_waypoint_summaries_enumerates_all_paths() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 	var summaries := m.get_waypoint_summaries()
 	assert_eq(summaries.size(), 128, "a mission has 128 fixed waypoint records")
@@ -760,24 +760,24 @@ func test_get_waypoint_summaries_enumerates_all_paths() -> void:
 
 
 func test_add_waypoint_marker_creates_marker_and_links_it() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 	var path_index := _first_empty_waypoint_path(m)
 	assert_true(path_index >= 0, "the fixture has at least one empty waypoint path to author into")
-	var markers_before := m.get_entity_count(NovaMissionData.KIND_MARKER)
+	var markers_before := m.get_entity_count(MissionData.KIND_MARKER)
 	assert_false(m.is_modified(), "a freshly opened mission is not modified")
 
 	var result := m.add_waypoint_marker(path_index, _any_marker_item_id(m), Vector3(5, 1, -5), Vector3.ZERO, -1)
 	assert_false(result.is_empty(), "add_waypoint_marker returns the new marker + path")
 	assert_true(result.has("marker") and result.has("path"), "the result carries both halves")
-	assert_eq(m.get_entity_count(NovaMissionData.KIND_MARKER), markers_before + 1,
+	assert_eq(m.get_entity_count(MissionData.KIND_MARKER), markers_before + 1,
 		"one marker entity was created (no separate add_entity needed)")
 	assert_eq(int((result["path"] as Dictionary)["marker_count"]), 1, "the path now references one marker")
 	assert_true(m.is_modified(), "authoring a marker dirties the document")
 
 
 func test_add_waypoint_marker_round_trips_through_save_reload() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 	var path_index := _first_empty_waypoint_path(m)
 	assert_true(path_index >= 0)
@@ -785,7 +785,7 @@ func test_add_waypoint_marker_round_trips_through_save_reload() -> void:
 
 	var tmp := _temp_bms_path()
 	assert_eq(m.save_as(tmp), OK)
-	var reopened := NovaMissionData.new()
+	var reopened := MissionData.new()
 	assert_eq(reopened.open_file(tmp), OK)
 	assert_eq(int(reopened.get_waypoint_path(path_index)["marker_count"]), 1,
 		"the authored marker survives save+reload")
@@ -793,7 +793,7 @@ func test_add_waypoint_marker_round_trips_through_save_reload() -> void:
 
 
 func test_set_waypoint_path_reorders_and_flags() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 	var path_index := _first_empty_waypoint_path(m)
 	assert_true(path_index >= 0)
@@ -804,18 +804,18 @@ func test_set_waypoint_path_reorders_and_flags() -> void:
 	assert_eq(indices.size(), 2, "the path has two markers to reorder")
 
 	var reversed := PackedInt32Array([indices[1], indices[0]])
-	assert_true(m.set_waypoint_path(path_index, reversed, NovaMissionData.WP_FLAG_DOES_NOT_LOOP),
+	assert_true(m.set_waypoint_path(path_index, reversed, MissionData.WP_FLAG_DOES_NOT_LOOP),
 		"set_waypoint_path accepts a reordered list + flags")
 	var after := m.get_waypoint_path(path_index)
 	var after_indices: PackedInt32Array = after["marker_indices"]
 	assert_eq(after_indices[0], indices[1], "the order was reversed")
-	assert_eq(int(after["flags"]) & NovaMissionData.WP_FLAG_DOES_NOT_LOOP, NovaMissionData.WP_FLAG_DOES_NOT_LOOP,
+	assert_eq(int(after["flags"]) & MissionData.WP_FLAG_DOES_NOT_LOOP, MissionData.WP_FLAG_DOES_NOT_LOOP,
 		"the DoesNotLoop flag was set")
 	assert_eq(int(after["marker_count"]), 2, "reorder does not change the marker count")
 
 
 func test_clear_waypoint_path_empties_it() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 	var path_index := _first_empty_waypoint_path(m)
 	assert_true(path_index >= 0)
@@ -827,7 +827,7 @@ func test_clear_waypoint_path_empties_it() -> void:
 
 
 func test_waypoint_methods_reject_out_of_range_paths() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 	assert_eq(m.get_waypoint_path(128), {}, "path index 128 is out of range (0..127)")
 	assert_eq(m.get_waypoint_path(-1), {}, "a negative path index is out of range")
@@ -843,49 +843,49 @@ func test_waypoint_methods_reject_out_of_range_paths() -> void:
 # GDScript boundary: loaded + empty, editable, and savable + reopenable.
 
 func test_create_default_is_loaded_and_empty() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.create_default(), OK, "create_default succeeds")
 	assert_true(m.is_loaded(), "a default mission reports loaded")
 	assert_eq(m.get_source_path(), "", "a default mission has no source path")
-	assert_eq(m.get_entity_count(NovaMissionData.KIND_ITEM), 0, "no items")
-	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), 0, "no buildings")
-	assert_eq(m.get_entity_count(NovaMissionData.KIND_MARKER), 0, "no markers")
+	assert_eq(m.get_entity_count(MissionData.KIND_ITEM), 0, "no items")
+	assert_eq(m.get_entity_count(MissionData.KIND_BUILDING), 0, "no buildings")
+	assert_eq(m.get_entity_count(MissionData.KIND_MARKER), 0, "no markers")
 	assert_false(m.is_dirty(), "a freshly-created mission is not dirty")
 
 
 func test_create_default_save_and_reopen() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.create_default(), OK)
 	assert_true(m.set_header_string("terrain", "dvxi5"), "terrain ref is settable")
-	m.add_entity(NovaMissionData.KIND_ITEM, 101291, Vector3(5, 6, 7), Vector3.ZERO)
+	m.add_entity(MissionData.KIND_ITEM, 101291, Vector3(5, 6, 7), Vector3.ZERO)
 	var path := ProjectSettings.globalize_path("user://test_create_default.bms")
 	assert_eq(m.save_as(path), OK, "a from-scratch mission saves to disk")
 
-	var reopened := NovaMissionData.new()
+	var reopened := MissionData.new()
 	assert_eq(reopened.open_file(path), OK, "the saved from-scratch mission reopens")
 	assert_eq(reopened.get_terrain_ref(), "dvxi5", "terrain ref round-trips")
-	assert_eq(reopened.get_entity_count(NovaMissionData.KIND_ITEM), 1, "the placed item round-trips")
+	assert_eq(reopened.get_entity_count(MissionData.KIND_ITEM), 1, "the placed item round-trips")
 	DirAccess.remove_absolute(path)
 
 
 func test_create_default_save_as_mis_and_reopen() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.create_default(), OK)
 	assert_true(m.set_header_string("mission_name", "MIS Binding"))
 	assert_true(m.set_header_string("terrain", "dvxi5"))
-	m.add_entity(NovaMissionData.KIND_ITEM, 101291, Vector3(5, 6, 7), Vector3(1, 90, 3))
+	m.add_entity(MissionData.KIND_ITEM, 101291, Vector3(5, 6, 7), Vector3(1, 90, 3))
 	var path := _temp_mis_path()
 	assert_eq(m.save_as(path), OK, "save_as chooses the .mis writer by extension")
 	var text := FileAccess.get_file_as_string(path)
 	assert_true(text.begins_with("// mission metafile\r\n"), ".mis Save As writes the text metafile")
 	assert_eq(m.get_source_path(), path, "Save As adopts the .mis path")
 
-	var reopened := NovaMissionData.new()
+	var reopened := MissionData.new()
 	assert_eq(reopened.open_file(path), OK, "the saved .mis reopens through the generic open_file")
 	assert_eq(reopened.get_source_path(), path, "open_file records the .mis path")
 	assert_eq(reopened.get_mission_name(), "MIS Binding")
 	assert_eq(reopened.get_terrain_ref(), "dvxi5")
-	assert_eq(reopened.get_entity_count(NovaMissionData.KIND_ITEM), 1)
+	assert_eq(reopened.get_entity_count(MissionData.KIND_ITEM), 1)
 	DirAccess.remove_absolute(path)
 
 
@@ -894,9 +894,9 @@ func test_save_as_mis_writes_height_lock_and_staged_base_heights() -> void:
 	# editor-sampled terrain height under it as extra_bheight, so the original editor
 	# recovers the terrain-relative offset as z - extra_bheight
 	# [orig: MisLdr_WriteNileProjectXml @ 0x10004930, misldr.dll]. See D-MIS-4.
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.create_default(), OK)
-	m.add_entity(NovaMissionData.KIND_ITEM, 101291, Vector3(5, 6, 40), Vector3.ZERO)
+	m.add_entity(MissionData.KIND_ITEM, 101291, Vector3(5, 6, 40), Vector3.ZERO)
 	var path := _temp_mis_path()
 	# One 16.16 base height (25.0), flat in write order (items, buildings, markers, organics).
 	m.set_mis_base_heights(PackedInt32Array([25 * 65536]))
@@ -920,21 +920,21 @@ func test_save_as_mis_writes_height_lock_and_staged_base_heights() -> void:
 # document; is_dirty() is exact against the clean baseline set by mark_clean().
 
 func test_begin_commit_undo_rewinds_a_mutation() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 	m.mark_clean()
-	var before := m.get_entity_count(NovaMissionData.KIND_BUILDING)
+	var before := m.get_entity_count(MissionData.KIND_BUILDING)
 	assert_false(m.can_undo(), "a freshly opened mission has no undo history")
 
 	m.begin_edit()
-	m.add_entity(NovaMissionData.KIND_BUILDING, 102001, Vector3(1, 2, 3), Vector3.ZERO)
+	m.add_entity(MissionData.KIND_BUILDING, 102001, Vector3(1, 2, 3), Vector3.ZERO)
 	m.commit_edit()
-	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), before + 1, "the placement landed")
+	assert_eq(m.get_entity_count(MissionData.KIND_BUILDING), before + 1, "the placement landed")
 	assert_true(m.can_undo(), "the committed edit is one undo step")
 	assert_eq(m.undo_depth(), 1, "exactly one step")
 
 	assert_true(m.undo(), "undo succeeds")
-	assert_eq(m.get_entity_count(NovaMissionData.KIND_BUILDING), before, "undo rewinds the placement")
+	assert_eq(m.get_entity_count(MissionData.KIND_BUILDING), before, "undo rewinds the placement")
 	assert_true(m.is_loaded(), "the document is still loaded after an undo")
 	assert_true(m.can_redo(), "and is now redoable")
 
@@ -942,42 +942,42 @@ func test_begin_commit_undo_rewinds_a_mutation() -> void:
 func test_no_change_session_pushes_no_step() -> void:
 	# A begin/commit with no actual mutation (or a same-value edit) must add no undo step --
 	# this pins bms::equal at the binding boundary.
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 	m.begin_edit()
 	m.commit_edit()
 	assert_false(m.can_undo(), "an empty edit session pushes nothing")
 
-	var index := int(m.get_entities(NovaMissionData.KIND_BUILDING)[0]["index"])
-	var pos: Vector3 = m.get_entity(NovaMissionData.KIND_BUILDING, index)["position"]
-	var rot: Vector3 = m.get_entity(NovaMissionData.KIND_BUILDING, index)["rotation_deg"]
+	var index := int(m.get_entities(MissionData.KIND_BUILDING)[0]["index"])
+	var pos: Vector3 = m.get_entity(MissionData.KIND_BUILDING, index)["position"]
+	var rot: Vector3 = m.get_entity(MissionData.KIND_BUILDING, index)["rotation_deg"]
 	m.begin_edit()
-	m.set_entity_transform(NovaMissionData.KIND_BUILDING, index, pos, rot) # same value
+	m.set_entity_transform(MissionData.KIND_BUILDING, index, pos, rot) # same value
 	m.commit_edit()
 	assert_false(m.can_undo(), "a same-value edit pushes nothing")
 
 
 func test_undo_redo_round_trip() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
-	var before := m.get_entity_count(NovaMissionData.KIND_ITEM)
+	var before := m.get_entity_count(MissionData.KIND_ITEM)
 	m.begin_edit()
-	m.add_entity(NovaMissionData.KIND_ITEM, 101291, Vector3.ZERO, Vector3.ZERO)
+	m.add_entity(MissionData.KIND_ITEM, 101291, Vector3.ZERO, Vector3.ZERO)
 	m.commit_edit()
 	assert_true(m.undo(), "undo")
-	assert_eq(m.get_entity_count(NovaMissionData.KIND_ITEM), before, "undo removes the item")
+	assert_eq(m.get_entity_count(MissionData.KIND_ITEM), before, "undo removes the item")
 	assert_true(m.redo(), "redo")
-	assert_eq(m.get_entity_count(NovaMissionData.KIND_ITEM), before + 1, "redo re-adds the item")
+	assert_eq(m.get_entity_count(MissionData.KIND_ITEM), before + 1, "redo re-adds the item")
 	assert_false(m.can_redo(), "the redo step is consumed")
 
 
 func test_is_dirty_tracks_the_clean_baseline() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 	m.mark_clean()
 	assert_false(m.is_dirty(), "a freshly-cleaned mission is not dirty")
 	m.begin_edit()
-	m.add_entity(NovaMissionData.KIND_ITEM, 101291, Vector3.ZERO, Vector3.ZERO)
+	m.add_entity(MissionData.KIND_ITEM, 101291, Vector3.ZERO, Vector3.ZERO)
 	m.commit_edit()
 	assert_true(m.is_dirty(), "an edit dirties the mission")
 	assert_true(m.undo(), "undo")
@@ -989,7 +989,7 @@ func test_is_dirty_tracks_the_clean_baseline() -> void:
 
 
 func test_undo_on_empty_history_returns_false() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 	assert_false(m.undo(), "undo with no history returns false")
 	assert_false(m.redo(), "redo with no history returns false")
@@ -998,9 +998,9 @@ func test_undo_on_empty_history_returns_false() -> void:
 # --- Phase 1: hidden entity fields + mission-header editing --------------------
 
 func test_entity_dictionary_exposes_hidden_fields() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
-	var e: Dictionary = m.get_entities(NovaMissionData.KIND_BUILDING)[0]
+	var e: Dictionary = m.get_entities(MissionData.KIND_BUILDING)[0]
 	assert_true(e.has("no_less_than"), "dict carries no_less_than (byte 75)")
 	assert_true(e.has("map_symbol"), "dict carries map_symbol (byte 81)")
 	assert_true(e.has("name1"), "dict carries name1 (AI class)")
@@ -1009,9 +1009,9 @@ func test_entity_dictionary_exposes_hidden_fields() -> void:
 
 
 func test_set_entity_property_string_round_trips_through_save_reload() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
-	var target: Dictionary = m.get_entities(NovaMissionData.KIND_BUILDING)[0]
+	var target: Dictionary = m.get_entities(MissionData.KIND_BUILDING)[0]
 	var kind := int(target["kind"])
 	var index := int(target["index"])
 	assert_true(m.set_entity_property_string(kind, index, "name1", "rifle"), "name1 write succeeds")
@@ -1019,7 +1019,7 @@ func test_set_entity_property_string_round_trips_through_save_reload() -> void:
 	assert_false(m.set_entity_property_string(kind, index, "bogus", "x"), "unknown string property rejected")
 	var tmp := _temp_bms_path()
 	assert_eq(m.save_as(tmp), OK)
-	var r := NovaMissionData.new()
+	var r := MissionData.new()
 	assert_eq(r.open_file(tmp), OK)
 	var e2: Dictionary = r.get_entity(kind, index)
 	assert_eq(String(e2["name1"]), "rifle", "name1 survives save/reload")
@@ -1027,9 +1027,9 @@ func test_set_entity_property_string_round_trips_through_save_reload() -> void:
 
 
 func test_set_hidden_int_fields_round_trip() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
-	var target: Dictionary = m.get_entities(NovaMissionData.KIND_BUILDING)[0]
+	var target: Dictionary = m.get_entities(MissionData.KIND_BUILDING)[0]
 	var kind := int(target["kind"])
 	var index := int(target["index"])
 	assert_true(m.set_entity_property_int(kind, index, "no_less_than", 9))
@@ -1040,7 +1040,7 @@ func test_set_hidden_int_fields_round_trip() -> void:
 
 
 func test_set_header_string_and_int_round_trip() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 	assert_true(m.set_header_string("mission_name", "Grill Test"), "name set")
 	assert_true(m.set_header_int("climate", 2), "climate set")
@@ -1048,7 +1048,7 @@ func test_set_header_string_and_int_round_trip() -> void:
 	assert_true(m.is_modified(), "a header edit dirties the mission")
 	var tmp := _temp_bms_path()
 	assert_eq(m.save_as(tmp), OK)
-	var r := NovaMissionData.new()
+	var r := MissionData.new()
 	assert_eq(r.open_file(tmp), OK)
 	var info := r.get_info()
 	assert_eq(String(info["mission_name"]), "Grill Test", "mission_name survives reload")
@@ -1056,13 +1056,13 @@ func test_set_header_string_and_int_round_trip() -> void:
 
 
 func test_set_header_flag_toggles_one_bit_and_preserves_others() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 	var before := int(m.get_info()["attrib_flags"])
-	assert_true(m.set_header_flag(NovaMissionData.ATTRIB_COOP, true), "set COOP")
+	assert_true(m.set_header_flag(MissionData.ATTRIB_COOP, true), "set COOP")
 	var after := int(m.get_info()["attrib_flags"])
-	assert_eq(after & NovaMissionData.ATTRIB_COOP, NovaMissionData.ATTRIB_COOP, "COOP bit is set")
-	var other_mask := ~NovaMissionData.ATTRIB_COOP
+	assert_eq(after & MissionData.ATTRIB_COOP, MissionData.ATTRIB_COOP, "COOP bit is set")
+	var other_mask := ~MissionData.ATTRIB_COOP
 	assert_eq(after & other_mask, before & other_mask, "other attrib bits are preserved")
 
 
@@ -1071,7 +1071,7 @@ func test_set_event_preserves_unmodeled_flag_bits() -> void:
 	# (event_flag_bits = ResetAfter/PreMission/PostMission, mask 0x07 — matching the DFX2 editor), so
 	# set_event must preserve confirmed internal bits it does not surface (e.g. 0x10) instead of clobbering them,
 	# mirroring trigger condition_flags. Otherwise nudging any event attribute silently drops those bits.
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.create_default(), OK)
 	var UNMODELED := 0x10 # confirmed internal bit: no event_flag_bits() checkbox, must survive edits
 	# Seed an event carrying the unmodeled bit plus an exposed one (ResetAfter = 0x01).
@@ -1090,7 +1090,7 @@ func test_set_event_preserves_unmodeled_flag_bits() -> void:
 # --- Phase 2: area-trigger / zone binding -------------------------------------
 
 func test_area_trigger_dictionary_shape() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 	assert_eq(m.get_area_triggers().size(), m.get_area_trigger_count(), "list size matches count")
 	# Add one so the shape is exercised even if the fixture carries none.
@@ -1106,7 +1106,7 @@ func test_area_trigger_dictionary_shape() -> void:
 
 
 func test_area_trigger_add_set_remove_round_trip() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 	var base := m.get_area_trigger_count()
 	# Crossed corners must be normalized to min<=max (the engine does not auto-swap).
@@ -1125,7 +1125,7 @@ func test_area_trigger_add_set_remove_round_trip() -> void:
 	# Persist + reload: the new zone survives a byte round-trip.
 	var tmp := _temp_bms_path()
 	assert_eq(m.save_as(tmp), OK)
-	var r := NovaMissionData.new()
+	var r := MissionData.new()
 	assert_eq(r.open_file(tmp), OK)
 	assert_eq(r.get_area_trigger_count(), base + 1, "zone count survives reload")
 	var rz := r.get_area_trigger(idx)
@@ -1140,7 +1140,7 @@ func test_area_trigger_add_set_remove_round_trip() -> void:
 
 
 func test_weapon_loadout_dictionary_and_round_trip() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 	var entries := m.get_weapon_loadout()
 	# The fixture canonicalizes to 7 loadout records in the public four-field view.
@@ -1159,7 +1159,7 @@ func test_weapon_loadout_dictionary_and_round_trip() -> void:
 	assert_true(m.is_modified(), "editing the loadout dirties the mission")
 	var tmp := _temp_bms_path()
 	assert_eq(m.save_as(tmp), OK)
-	var r := NovaMissionData.new()
+	var r := MissionData.new()
 	assert_eq(r.open_file(tmp), OK)
 	var reloaded := r.get_weapon_loadout()
 	assert_eq(reloaded.size(), 8, "edited loadout survives reload")
@@ -1173,7 +1173,7 @@ func test_weapon_loadout_dictionary_and_round_trip() -> void:
 
 
 func test_group_get_set_round_trip() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 	assert_eq(m.get_group_count(), 64, "64 fixed group records")
 	assert_eq(m.get_groups().size(), m.get_group_count(), "groups list matches count")
@@ -1191,7 +1191,7 @@ func test_group_get_set_round_trip() -> void:
 	# Persist + reload.
 	var tmp := _temp_bms_path()
 	assert_eq(m.save_as(tmp), OK)
-	var r := NovaMissionData.new()
+	var r := MissionData.new()
 	assert_eq(r.open_file(tmp), OK)
 	assert_eq(int(r.get_group(3)["field8"]), 5678, "edited group survives reload")
 	# Out-of-range guards.
@@ -1204,7 +1204,7 @@ func test_group_get_set_round_trip() -> void:
 # --- Phase 4: mission scripting (events / triggers / actions) ------------------
 
 func test_event_chain_dictionary_shape() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 	assert_gt(m.get_event_count(), 0, "the reference mission has events")
 	var chain := m.get_event_chain(0)
@@ -1218,7 +1218,7 @@ func test_event_chain_dictionary_shape() -> void:
 
 
 func test_enum_tables_reflect_the_engine_names() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 	# Group(1)..Player(7) -> 7 named main types.
 	assert_eq(m.get_trigger_main_types().size(), 7, "seven trigger main types")
@@ -1237,7 +1237,7 @@ func test_enum_tables_reflect_the_engine_names() -> void:
 
 
 func test_add_event_with_trigger_and_action_persists_through_save_reload() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 	var base_events := m.get_event_count()
 
@@ -1256,7 +1256,7 @@ func test_add_event_with_trigger_and_action_persists_through_save_reload() -> vo
 
 	var tmp := _temp_bms_path()
 	assert_eq(m.save_as(tmp), OK)
-	var r := NovaMissionData.new()
+	var r := MissionData.new()
 	assert_eq(r.open_file(tmp), OK, "the augmented mission reopens")
 	assert_eq(r.get_event_count(), base_events + 1, "the new event survives reload")
 	var chain := r.get_event_chain(ev_index)
@@ -1271,7 +1271,7 @@ func test_add_event_with_trigger_and_action_persists_through_save_reload() -> vo
 
 
 func test_set_event_trigger_edits_a_param_in_place() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 	var event := m.add_event(0, 0, 0)
 	var ev_index := int(event["index"])
@@ -1286,7 +1286,7 @@ func test_set_event_trigger_edits_a_param_in_place() -> void:
 
 
 func test_remove_event_drops_it_and_repairs_reset_references() -> void:
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(_bms_abs()), OK)
 	var base_events := m.get_event_count()
 	# Append an event whose action resets itself, then remove event 0: the self-reference must follow.

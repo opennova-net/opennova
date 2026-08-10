@@ -1,6 +1,6 @@
 extends GutTest
 
-# Covers NovaMusicScript.get_program_ast: the full structured statement tree the
+# Covers MusicScript.get_program_ast: the full structured statement tree the
 # visual-first editor renders (every play, transition, assignment, intrinsic
 # call, if/else, on-switch -- not just the section topology the model exposes).
 # Built from engine/formats/mus mus_parse_to_ast, the structured twin of the decompiler.
@@ -9,9 +9,9 @@ const FIXTURE := "res://../fixtures/mus/jo_gamemus.bin"
 
 
 func _ast() -> Array:
-	var ms := NovaMusicScript.new()
+	var ms := MusicScript.new()
 	ms.load_from_path(FIXTURE)
-	assert_not_null(ms, "fixture loads as NovaMusicScript")
+	assert_not_null(ms, "fixture loads as MusicScript")
 	if ms == null:
 		return []
 	return ms.get_program_ast(StringName(ms.get_default_script_name()))
@@ -132,7 +132,7 @@ func test_statements_ascend_by_offset() -> void:
 
 
 func test_unknown_script_is_empty() -> void:
-	var ms := NovaMusicScript.new()
+	var ms := MusicScript.new()
 	ms.load_from_path(FIXTURE)
 	if ms == null:
 		return

@@ -180,7 +180,7 @@ target_link_libraries(frame_driver_test PRIVATE opennova_runtime)
 add_test(NAME frame_driver COMMAND frame_driver_test)
 
 # The menu sound profile (fixtures/menu_sound/menu.LWF): trigger sets resolve to
-# loose .wav members (drives MNU hover/click via NovaMnuMenu).
+# loose .wav members (drives MNU hover/click via MnuMenu).
 add_executable(menu_lwf_test lwf/menu_lwf_test.cpp)
 target_link_libraries(menu_lwf_test PRIVATE opennova_formats)
 target_include_directories(menu_lwf_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -761,6 +761,13 @@ target_link_libraries(env_render_unit_test PRIVATE opennova_formats)
 target_include_directories(env_render_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME env_render_unit COMMAND env_render_unit_test)
 
+# The environment runtime (engine/runtime/environment): the TOD state owner +
+# weather embedding ported from the shell scripts (ADR 0034 d6 de-scripting).
+add_executable(environment_state_test environment/environment_state_test.cpp)
+target_link_libraries(environment_state_test PRIVATE opennova_runtime)
+target_include_directories(environment_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME environment_state COMMAND environment_state_test)
+
 # The HUD view-helper math cluster (engine/runtime/hud, S15): design-space
 # scaling, ALPHAFADE decay + quirk, stance Q16 scale/centering, health bands,
 # message tick policy, half-bright, ammo fold + nudge, round icons, crosshair
@@ -807,6 +814,34 @@ add_executable(terrain_foliage_detail_collector_test terrain/terrain_foliage_det
 target_link_libraries(terrain_foliage_detail_collector_test PRIVATE opennova_runtime)
 target_include_directories(terrain_foliage_detail_collector_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME terrain_foliage_detail_collector COMMAND terrain_foliage_detail_collector_test)
+
+add_executable(terrain_frame_compiler_test terrain/terrain_frame_compiler_test.cpp)
+target_link_libraries(terrain_frame_compiler_test PRIVATE opennova_runtime)
+target_include_directories(terrain_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME terrain_frame_compiler COMMAND terrain_frame_compiler_test)
+
+add_executable(hud_frame_compiler_test hud/hud_frame_compiler_test.cpp)
+target_link_libraries(hud_frame_compiler_test PRIVATE opennova_runtime)
+target_include_directories(hud_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME hud_frame_compiler COMMAND hud_frame_compiler_test)
+
+# The menu draw-list compiler (engine/runtime/menu, ADR 0033 R2): the
+# witnessed .mnu widget draw walk — order, state-driven appearance/color
+# selection, text placement/truncation, the edit caret, frame pieces, and the
+# per-element int truncation (docs/mnu/menu-re.md "Widget render dispatch").
+add_executable(menu_frame_compiler_test menu/menu_frame_compiler_test.cpp)
+target_link_libraries(menu_frame_compiler_test PRIVATE opennova_runtime)
+target_include_directories(menu_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME menu_frame_compiler COMMAND menu_frame_compiler_test)
+
+# The menu backdrop movie policy (engine/runtime/menu/menu_video): the
+# witnessed three-slot table, the STARTUP/strips draw gate, and the
+# expansion-first source resolution (docs/mnu/menu-re.md "The menu backdrop").
+add_executable(menu_video_test menu/menu_video_test.cpp)
+target_link_libraries(menu_video_test PRIVATE opennova_runtime)
+target_include_directories(menu_video_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME menu_video COMMAND menu_video_test)
+
 
 # parametric_parity is a long byte-identical fixture parity run and remains
 # disabled until its CI stability/performance cost is addressed.
@@ -1480,6 +1515,11 @@ add_executable(peer_addr_test npwire/peer_addr_test.cpp)
 target_link_libraries(peer_addr_test PRIVATE opennova_net)
 target_include_directories(peer_addr_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME peer_addr COMMAND peer_addr_test)
+
+add_executable(game_type_policy_test npwire/game_type_policy_test.cpp)
+target_link_libraries(game_type_policy_test PRIVATE opennova_net)
+target_include_directories(game_type_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME game_type_policy COMMAND game_type_policy_test)
 
 add_executable(protocol_message_test novaworld/protocol_message_test.cpp)
 target_link_libraries(protocol_message_test PRIVATE opennova_net)

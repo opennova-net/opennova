@@ -1,13 +1,11 @@
 extends GutTest
 
-const NovaObjectModelScript := preload(
-		"res://adapter/object/nova_object_model.gd")
 const PresentEmplacedWeapon := preload(
-		"res://adapter/world/emplaced_weapon_present_pass.gd")
+		"res://game/world/emplaced_weapon_present_pass.gd")
 
-# Co-op LAN bidirectional bring-up (D.2) at the NovaSimulation layer: a HOST listen server
+# Co-op LAN bidirectional bring-up (D.2) at the Simulation layer: a HOST listen server
 # (enable_host_listen) and a JOINER (enable_join) run in the same headless process, each on a
-# real loopback UDP socket (NovaUdpPump), and free-run their own step() — no manual
+# real loopback UDP socket (UdpPump), and free-run their own step() — no manual
 # byte carry. This exercises the full witnessed JOIN end to end: the joiner handshakes
 # (ClientHello/Auth), drives the spawn-gate burst, name-matches the host's S2C 0x0C organic
 # spawn to learn its wire handle H, spawns its local player L, and uplinks C2S 0x0C; the host
@@ -15,7 +13,7 @@ const PresentEmplacedWeapon := preload(
 # tests/novaworld/joiner_session_test; this is the Godot-layer glue + the two-handle present.)
 #
 # Most tests assert the DATA layer (the present snapshots both sides decode). The focused
-# B50 aim regression additionally loads the authored B50Cal.3di into a real NovaObjectModel
+# B50 aim regression additionally loads the authored B50Cal.3di into a real ObjectModel
 # and applies the decoded controls through the production presenter, so headless verifies
 # the actual yaw-controlled ROBJ transform too. The §5.38b two-handle (L vs H)
 # reconciliation shows up as: the host's present carries the joiner (SSN 0xFFEF), and the
@@ -38,7 +36,7 @@ const MARKER_TYPE := 0x1773   # a start marker
 const SPAWN_ZONE_TYPE := 1359 # pool-1 fixture; ItemDef supplies SpawnPoint (0x40000)
 
 # S16 native seat tables: the Dictionary install seam is gone. Tests compose a
-# flat asset dir under the gitignored res://.godot (NovaResourceRoot rejects
+# flat asset dir under the gitignored res://.godot (ResourceRoot rejects
 # user:// roots), wire it with sim.set_asset_root FIRST, then
 # install_seat_specs_for_type_ids(item_db, ...) runs the ONE engine extractor
 # (simassets::extract_item_seat_specs) over items.def rows + .3di userpoints.
@@ -126,8 +124,8 @@ func before_all() -> void:
 			"composed the zero-offset control-seat carrier fixture")
 
 
-func _native_asset_root() -> NovaResourceRoot:
-	var root := NovaResourceRoot.new()
+func _native_asset_root() -> ResourceRoot:
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(
 			ProjectSettings.globalize_path(NATIVE_MODEL_DIR)), OK)
 	assert_true(root.has_file("B50Cal.3di"),
@@ -135,16 +133,16 @@ func _native_asset_root() -> NovaResourceRoot:
 	return root
 
 
-func _fixture_items_db() -> NovaItemDatabase:
-	var def_root := NovaResourceRoot.new()
+func _fixture_items_db() -> ItemDatabase:
+	var def_root := ResourceRoot.new()
 	assert_eq(def_root.set_root_dir(ProjectSettings.globalize_path(
 			"res://../fixtures/def")), OK)
-	var db := NovaItemDatabase.new()
+	var db := ItemDatabase.new()
 	assert_eq(db.load_from_resource_root(def_root, "items.def"), OK)
 	return db
 
 
-func _attachment_items_db(anchor_name: String, ambiguous: bool) -> NovaItemDatabase:
+func _attachment_items_db(anchor_name: String, ambiguous: bool) -> ItemDatabase:
 	# The synthetic 5004 carrier, authored the native way: an items.def row
 	# whose addeweap child anchors at the DISCOVERED articulated userpoint.
 	# The ambiguous variant repeats the child type on a second missing-anchor
@@ -169,72 +167,72 @@ func _attachment_items_db(anchor_name: String, ambiguous: bool) -> NovaItemDatab
 		file.store_string("  addeweap missing 101419\n")
 	file.store_string("end\n")
 	file.close()
-	var db := NovaItemDatabase.new()
+	var db := ItemDatabase.new()
 	assert_eq(db.load(path), OK)
 	return db
 
 
-func _combat_mission() -> NovaMissionData:
-	var md := NovaMissionData.new()
+func _combat_mission() -> MissionData:
+	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	# Two independent north-facing fire lanes. Spawn selection puts the host at
 	# x=20 first (farthest from the two organics), then the joiner at x=0
 	# (farthest from the already-spawned host). Both yaw-zero players therefore
 	# have a Generic Soldier down their own +mission-y lane (host at nine
 	# metres, joiner at eight); the unequal scores avoid the retail rand tie.
-	assert_false(md.add_entity(NovaMissionData.KIND_ORGANIC, 5311,
+	assert_false(md.add_entity(MissionData.KIND_ORGANIC, 5311,
 			Vector3(0, 8, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(NovaMissionData.KIND_ORGANIC, 5311,
+	assert_false(md.add_entity(MissionData.KIND_ORGANIC, 5311,
 			Vector3(20, 9, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(NovaMissionData.KIND_MARKER, 6002,
+	assert_false(md.add_entity(MissionData.KIND_MARKER, 6002,
 			Vector3(20, 0, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(NovaMissionData.KIND_MARKER, 6002,
+	assert_false(md.add_entity(MissionData.KIND_MARKER, 6002,
 			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
 	return md
 
 
-func _peer_duel_mission() -> NovaMissionData:
-	var md := NovaMissionData.new()
+func _peer_duel_mission() -> MissionData:
+	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	# The host first takes the marker farthest from the lone organic: (0, 8).
 	# Once the host is in the retail avoid set, the joiner takes (0, 0). Both
 	# yaw-zero players face +mission-y, putting the host directly in the
 	# joiner's fire lane without a debug teleport or invented aim override.
-	assert_false(md.add_entity(NovaMissionData.KIND_ORGANIC, 5311,
+	assert_false(md.add_entity(MissionData.KIND_ORGANIC, 5311,
 			Vector3(4, 0, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(NovaMissionData.KIND_MARKER, 6002,
+	assert_false(md.add_entity(MissionData.KIND_MARKER, 6002,
 			Vector3(0, 8, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(NovaMissionData.KIND_MARKER, 6002,
+	assert_false(md.add_entity(MissionData.KIND_MARKER, 6002,
 			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
 	return md
 
 
-func _vehicle_peer_mission() -> NovaMissionData:
-	var md := NovaMissionData.new()
+func _vehicle_peer_mission() -> MissionData:
+	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	# Keep the replicated vehicle well away from both deploy markers. The listen
 	# host presents its authoritative placed row while the joiner presents the
 	# decoded pool-1 wire row; their world poses must remain the same.
-	assert_false(md.add_entity(NovaMissionData.KIND_ITEM, 101291,
+	assert_false(md.add_entity(MissionData.KIND_ITEM, 101291,
 			Vector3(40, 30, 0), Vector3(10, 0, 20)).is_empty())
 	# A synthetic cbot with non-zero authored attitude catches first-arm
 	# prediction accidentally replacing the retained spawn Euler with zero. It
 	# sits beside the joiner start so the same real-UDP case can also exercise a
 	# local control-seat body following the final predicted carrier pose.
-	assert_false(md.add_entity(NovaMissionData.KIND_ITEM, 105008,
+	assert_false(md.add_entity(MissionData.KIND_ITEM, 105008,
 			Vector3(2, 0, 0), Vector3(13, 0, -17)).is_empty())
 	# Break the deploy-marker tie deliberately: the host takes (0, 8), then the
 	# joiner takes (0, 0), within the retail four-unit seat scan of the boat.
-	assert_false(md.add_entity(NovaMissionData.KIND_ORGANIC, 5311,
+	assert_false(md.add_entity(MissionData.KIND_ORGANIC, 5311,
 			Vector3(4, 0, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(NovaMissionData.KIND_MARKER, 6002,
+	assert_false(md.add_entity(MissionData.KIND_MARKER, 6002,
 			Vector3(0, 8, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(NovaMissionData.KIND_MARKER, 6002,
+	assert_false(md.add_entity(MissionData.KIND_MARKER, 6002,
 			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
 	return md
 
 
-func _net_watercraft_item_db() -> NovaItemDatabase:
+func _net_watercraft_item_db() -> ItemDatabase:
 	# resolve_item_traits sweeps every live entity, so this test database must be
 	# a complete items table rather than a one-row replacement. Otherwise the
 	# second resolve turns the mission's player and Dune Buggy rows Unknown.
@@ -290,12 +288,12 @@ func _net_watercraft_item_db() -> NovaItemDatabase:
 end
 """)
 	file.close()
-	var result := NovaItemDatabase.new()
+	var result := ItemDatabase.new()
 	assert_eq(result.load(path), OK)
 	return result
 
 
-func _net_spawn_zone_item_db() -> NovaItemDatabase:
+func _net_spawn_zone_item_db() -> ItemDatabase:
 	# Keep the normal compact table intact, then add one deploy-selectable pool-1
 	# row. The mission stores id 1359 and promotion applies ITEM_ID_OFFSET, so the
 	# ItemDef identity is 101359.
@@ -326,16 +324,16 @@ func _net_spawn_zone_item_db() -> NovaItemDatabase:
 end
 """)
 	file.close()
-	var result := NovaItemDatabase.new()
+	var result := ItemDatabase.new()
 	assert_eq(result.load(path), OK)
 	return result
 
 
-func _install_combat_tables(sim: NovaSimulation) -> void:
-	var root := NovaResourceRoot.new()
+func _install_combat_tables(sim: Simulation) -> void:
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
 			"res://../fixtures/def")), OK)
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load_from_resource_root(root, "items.def"), OK)
 	sim.resolve_item_traits(item_db)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
@@ -343,10 +341,10 @@ func _install_combat_tables(sim: NovaSimulation) -> void:
 
 
 func _retail_m4() -> Dictionary:
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
 			"res://../fixtures/def")), OK)
-	var weapons := NovaWeaponDatabase.new()
+	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load_from_resource_root(root, "weapon.def"), OK)
 	var index := weapons.find_weapon("WPN_M4AUTO")
 	assert_gte(index, 0)
@@ -354,10 +352,10 @@ func _retail_m4() -> Dictionary:
 
 
 func _retail_m9() -> Dictionary:
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
 			"res://../fixtures/def")), OK)
-	var weapons := NovaWeaponDatabase.new()
+	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load_from_resource_root(root, "weapon.def"), OK)
 	var index := weapons.find_weapon("WPN_M9Beretta")
 	assert_gte(index, 0)
@@ -365,10 +363,10 @@ func _retail_m9() -> Dictionary:
 
 
 func _retail_smoke_grenade() -> Dictionary:
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
 			"res://../fixtures/def")), OK)
-	var weapons := NovaWeaponDatabase.new()
+	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load_from_resource_root(root, "weapon.def"), OK)
 	var index := weapons.find_weapon("WPN_GRENADESM")
 	assert_gte(index, 0)
@@ -376,17 +374,17 @@ func _retail_smoke_grenade() -> Dictionary:
 
 
 func _retail_emplaced_50() -> Dictionary:
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
 			"res://../fixtures/def")), OK)
-	var weapons := NovaWeaponDatabase.new()
+	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load_from_resource_root(root, "weapon.def"), OK)
 	var index := weapons.find_weapon("WPN_EMPLCD50NA")
 	assert_gte(index, 0)
 	return weapons.get_weapon(index) if index >= 0 else {}
 
 
-func _throwable_visual_count(sim: NovaSimulation, item_id: int) -> int:
+func _throwable_visual_count(sim: Simulation, item_id: int) -> int:
 	var count := 0
 	for value in sim.get_throwable_visuals():
 		if int((value as Dictionary).get("item_id", 0)) == item_id:
@@ -394,7 +392,7 @@ func _throwable_visual_count(sim: NovaSimulation, item_id: int) -> int:
 	return count
 
 
-func _throwable_move_effect(sim: NovaSimulation, item_id: int) -> String:
+func _throwable_move_effect(sim: Simulation, item_id: int) -> String:
 	for value in sim.get_throwable_visuals():
 		var visual := value as Dictionary
 		if int(visual.get("item_id", 0)) == item_id:
@@ -402,7 +400,7 @@ func _throwable_move_effect(sim: NovaSimulation, item_id: int) -> String:
 	return ""
 
 
-func _inventory_clip(sim: NovaSimulation, weapon_name: String) -> int:
+func _inventory_clip(sim: Simulation, weapon_name: String) -> int:
 	for value in sim.get_local_player_inventory().get("slots", []):
 		var slot: Dictionary = value
 		if String(slot.get("name", "")) == weapon_name:
@@ -410,7 +408,7 @@ func _inventory_clip(sim: NovaSimulation, weapon_name: String) -> int:
 	return -1
 
 
-func _organic_index_at_x(sim: NovaSimulation, x: float) -> int:
+func _organic_index_at_x(sim: Simulation, x: float) -> int:
 	for ai_index in range(sim.get_entity_count()):
 		var card: Dictionary = sim.get_entity_debug(ai_index)
 		var item_id := int(card.get("item_id", 0))
@@ -422,7 +420,7 @@ func _organic_index_at_x(sim: NovaSimulation, x: float) -> int:
 	return -1
 
 
-func _drive_pair_to_match(host: NovaSimulation, joiner: NovaSimulation) -> bool:
+func _drive_pair_to_match(host: Simulation, joiner: Simulation) -> bool:
 	for _i in range(800):
 		host.step()
 		joiner.step()
@@ -438,15 +436,15 @@ func _drive_pair_to_match(host: NovaSimulation, joiner: NovaSimulation) -> bool:
 	return false
 
 
-func _anim_root() -> NovaResourceRoot:
-	var root := NovaResourceRoot.new()
+func _anim_root() -> ResourceRoot:
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
 			"res://../fixtures/anim")), OK)
 	return root
 
 
-func _two_organics() -> NovaMissionData:
-	var md := NovaMissionData.new()
+func _two_organics() -> MissionData:
+	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	md.add_entity(3, AI_TYPE, Vector3(0, 0, 0), Vector3.ZERO)    # KIND_ORGANIC (pool 0)
 	md.add_entity(3, AI_TYPE, Vector3(10, 0, 0), Vector3.ZERO)
@@ -455,52 +453,52 @@ func _two_organics() -> NovaMissionData:
 	return md
 
 
-func _two_organics_with_spawn_zone() -> NovaMissionData:
+func _two_organics_with_spawn_zone() -> MissionData:
 	var md := _two_organics()
 	var zone := md.add_entity(
-			NovaMissionData.KIND_ITEM, SPAWN_ZONE_TYPE,
+			MissionData.KIND_ITEM, SPAWN_ZONE_TYPE,
 			Vector3(40, 0, 0), Vector3.ZERO)
 	assert_false(zone.is_empty())
 	if not zone.is_empty():
 		assert_true(md.set_entity_property_int(
-				NovaMissionData.KIND_ITEM, int(zone.get("index", -1)), "team", 1))
+				MissionData.KIND_ITEM, int(zone.get("index", -1)), "team", 1))
 	return md
 
 
-func _present_position_for_type(sim: NovaSimulation, type_id: int) -> Vector3:
+func _present_position_for_type(sim: Simulation, type_id: int) -> Vector3:
 	var snapshot := sim.get_present_snapshot()
 	var stride := sim.get_present_stride()
 	for record in range(snapshot.size() / stride):
 		var base := record * stride
-		if int(snapshot[base + NovaSimulation.PF_TYPE_ID]) == type_id:
+		if int(snapshot[base + Simulation.PF_TYPE_ID]) == type_id:
 			return Vector3(
-					snapshot[base + NovaSimulation.PF_POS_X],
-					snapshot[base + NovaSimulation.PF_POS_Y],
-					snapshot[base + NovaSimulation.PF_POS_Z])
+					snapshot[base + Simulation.PF_POS_X],
+					snapshot[base + Simulation.PF_POS_Y],
+					snapshot[base + Simulation.PF_POS_Z])
 	return Vector3.INF
 
 
-func _present_field_for_type(sim: NovaSimulation, type_id: int, field: int) -> int:
+func _present_field_for_type(sim: Simulation, type_id: int, field: int) -> int:
 	var snapshot := sim.get_present_snapshot()
 	var stride := sim.get_present_stride()
 	for record in range(snapshot.size() / stride):
 		var base := record * stride
-		if int(snapshot[base + NovaSimulation.PF_TYPE_ID]) == type_id:
+		if int(snapshot[base + Simulation.PF_TYPE_ID]) == type_id:
 			return int(snapshot[base + field])
 	return -1
 
 
-func _present_record_for_type(sim: NovaSimulation, type_id: int) -> Dictionary:
+func _present_record_for_type(sim: Simulation, type_id: int) -> Dictionary:
 	var snapshot := sim.get_present_snapshot()
 	var stride := sim.get_present_stride()
 	for record in range(snapshot.size() / stride):
 		var base := record * stride
-		if int(snapshot[base + NovaSimulation.PF_TYPE_ID]) == type_id:
+		if int(snapshot[base + Simulation.PF_TYPE_ID]) == type_id:
 			return {"snapshot": snapshot, "base": base}
 	return {}
 
 
-func _moving_eweap_userpoint(data: NovaObjectData) -> Dictionary:
+func _moving_eweap_userpoint(data: ObjectData) -> Dictionary:
 	var neutral: Dictionary = data.evaluate_panm(0, 0, {
 		"EWEAP_GUNYAW": 0,
 		"EWEAP_GUNPITCH": 0,
@@ -523,7 +521,7 @@ func _moving_eweap_userpoint(data: NovaObjectData) -> Dictionary:
 	return {}
 
 
-func _apply_weapon_switch_events(sim: NovaSimulation,
+func _apply_weapon_switch_events(sim: Simulation,
 		defs_by_name: Dictionary) -> void:
 	for value in sim.drain_local_player_weapon_events():
 		var name := String((value as Dictionary).get("switch_to_weapon", ""))
@@ -537,7 +535,7 @@ func test_joiner_learns_mission_before_wire_world_load_on_same_session() -> void
 	var mission := _two_organics()
 	assert_true(mission.set_header_string("mission_name", "Preload Island"))
 
-	var host := NovaSimulation.new()
+	var host := Simulation.new()
 	host.configure_host_session({
 		"server_name": "Preload Host",
 		"mission_name": "Preload Island",
@@ -550,7 +548,7 @@ func test_joiner_learns_mission_before_wire_world_load_on_same_session() -> void
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 
-	var joiner := NovaSimulation.new()
+	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "PreloadJoiner"))
 	joiner.set_join_world_ready(false)
@@ -603,7 +601,7 @@ func test_joiner_learns_mission_before_wire_world_load_on_same_session() -> void
 
 func test_joiner_drains_phase2_environment_once_per_received_revision() -> void:
 	var mission := _two_organics()
-	var host := NovaSimulation.new()
+	var host := Simulation.new()
 	host.configure_host_session({"gametype": 0x30020})
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
@@ -613,7 +611,7 @@ func test_joiner_drains_phase2_environment_once_per_received_revision() -> void:
 			0x01230000, 0x01010000, 0x00123456, (0x3456 << 13) - 0x1000,
 			0, 0x012C, 0x0002ABCD, 0x000056FF, 0x000078AA, 0x1234569A)
 
-	var joiner := NovaSimulation.new()
+	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "EnvironmentJoiner"))
 	assert_true(joiner.load_from_mission_data(mission))
@@ -644,7 +642,7 @@ func test_joiner_drains_phase2_environment_once_per_received_revision() -> void:
 
 func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 	var mission := _two_organics_with_spawn_zone()
-	var host := NovaSimulation.new()
+	var host := Simulation.new()
 	# Captured retail Co-op g_GameType: bit 0x20000 makes every phase-3
 	# 0x0A carry a 16-byte objective block before the local-health tail.
 	host.configure_host_session({"gametype": 0x30020})
@@ -662,7 +660,7 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 	var host_port: int = host.get_host_listen_port()
 	assert_gt(host_port, 0, "host got a real bound port")
 
-	var joiner := NovaSimulation.new()
+	var joiner := Simulation.new()
 	assert_true(joiner.enable_join("127.0.0.1", host_port, "JoinerOne"), "joiner dialed the host")
 	assert_true(joiner.is_joiner(), "joiner flag set before load")
 	assert_eq(joiner.get_joiner_phase(), 0, "joiner phase Idle before the first frame")
@@ -780,12 +778,12 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 	var host_joiner_index := -1
 	for rec in range(hsnap.size() / stride):
 		var base := rec * stride
-		if int(hsnap[base + NovaSimulation.PF_TYPE_ID]) == 0x14B9 \
-				and int(hsnap[base + NovaSimulation.PF_WIRE_HANDLE]) != host_own:
+		if int(hsnap[base + Simulation.PF_TYPE_ID]) == 0x14B9 \
+				and int(hsnap[base + Simulation.PF_WIRE_HANDLE]) != host_own:
 			host_sees_joiner = true
-			host_joiner_type = int(hsnap[base + NovaSimulation.PF_TYPE_ID])
-			host_joiner_kind = int(hsnap[base + NovaSimulation.PF_KIND])
-			host_joiner_index = int(hsnap[base + NovaSimulation.PF_INDEX])
+			host_joiner_type = int(hsnap[base + Simulation.PF_TYPE_ID])
+			host_joiner_kind = int(hsnap[base + Simulation.PF_KIND])
+			host_joiner_index = int(hsnap[base + Simulation.PF_INDEX])
 	assert_true(host_sees_joiner, "host's present includes the admitted joiner (a player row that isn't the host's own)")
 	assert_eq(host_joiner_type, 0x14B9,
 			"the host's joiner row resolves the player runtime type so the wire pass builds its avatar")
@@ -818,16 +816,16 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 	var host_player_anim_phase := -2
 	for rec in range(jsnap.size() / stride):
 		var base := rec * stride
-		var tid := int(jsnap[base + NovaSimulation.PF_TYPE_ID])
-		var whandle := int(jsnap[base + NovaSimulation.PF_WIRE_HANDLE])
+		var tid := int(jsnap[base + Simulation.PF_TYPE_ID])
+		var whandle := int(jsnap[base + Simulation.PF_WIRE_HANDLE])
 		if whandle == h:
 			saw_self_echo = true
 		if tid == 0x14B9 and whandle != h:
 			joiner_sees_host = true
 			host_player_anim_state = int(
-					jsnap[base + NovaSimulation.PF_ANIM_STATE])
+					jsnap[base + Simulation.PF_ANIM_STATE])
 			host_player_anim_phase = int(
-					jsnap[base + NovaSimulation.PF_ANIM_PHASE_TICKS])
+					jsnap[base + Simulation.PF_ANIM_PHASE_TICKS])
 	assert_true(joiner_sees_host, "joiner's wire present includes the host player (0x14B9), not itself")
 	assert_false(saw_self_echo, "the joiner's own wire echo (handle H) is self-filtered from its present")
 	assert_gte(host_player_anim_state, 0,
@@ -859,12 +857,12 @@ func test_joiner_handshakes_and_sees_host_bidirectional() -> void:
 	var building_seen := false
 	for rec in range(jsnap.size() / stride):
 		var base := rec * stride
-		var tid := int(jsnap[base + NovaSimulation.PF_TYPE_ID])
+		var tid := int(jsnap[base + Simulation.PF_TYPE_ID])
 		if tid == AI_TYPE:
 			ai_seen += 1
-			if int(jsnap[base + NovaSimulation.PF_ANIM_STATE]) >= 0:
+			if int(jsnap[base + Simulation.PF_ANIM_STATE]) >= 0:
 				ai_with_anim_state += 1
-			if int(jsnap[base + NovaSimulation.PF_ANIM_PHASE_TICKS]) >= 0:
+			if int(jsnap[base + Simulation.PF_ANIM_PHASE_TICKS]) >= 0:
 				ai_with_sim_phase += 1
 		elif tid == BUILDING_TYPE:
 			building_seen = true
@@ -994,7 +992,7 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 	# its own. The remote client has enough stock wire state to recover this one
 	# family: the parent's pose plus its decoded gunner's yaw/pitch. Generic
 	# PLAYPARTANIM is intentionally not part of this contract.
-	var model := NovaObjectData.new()
+	var model := ObjectData.new()
 	assert_eq(model.open_file(ProjectSettings.globalize_path(
 			"res://../fixtures/3dp/B50Cal/B50Cal.3di")), OK)
 	var moving_anchor := _moving_eweap_userpoint(model)
@@ -1018,13 +1016,13 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 			root, 105004)
 	assert_eq((carrier_card.get("seats", []) as Array).size(), 1,
 			"B50Cal exposes its authored Usegun seat")
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	assert_false(mission.add_entity(
-			NovaMissionData.KIND_ITEM, 105004,
+			MissionData.KIND_ITEM, 105004,
 			Vector3(2, 0, 0), Vector3.ZERO).is_empty())
 
-	var host := NovaSimulation.new()
+	var host := Simulation.new()
 	assert_true(host.enable_host_listen(0))
 	host.set_asset_root(root)
 	assert_true(host.install_seat_specs_for_type_ids(
@@ -1033,13 +1031,13 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 			"mounted_graphic_sources", 0)), 0,
 			"the native install resolved the carrier model source")
 	assert_true(host.load_from_mission_data(mission))
-	var def_root := NovaResourceRoot.new()
+	var def_root := ResourceRoot.new()
 	assert_eq(def_root.set_root_dir(ProjectSettings.globalize_path(
 			"res://../fixtures/def")), OK)
 	assert_eq(host.load_weapon_table(def_root, "weapon.def"), OK)
 	assert_true(host.spawn_local_player(Vector3.ZERO, 120.0, 1))
 	assert_true(host.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 1))
-	var weapons := NovaWeaponDatabase.new()
+	var weapons := WeaponDatabase.new()
 	assert_eq(weapons.load(ProjectSettings.globalize_path(
 			"res://../fixtures/def/weapon.def")), OK)
 	var personal: Dictionary = weapons.get_weapon(
@@ -1057,7 +1055,7 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 	assert_true(bool(host.get_entity_debug(0).get("mounted", false)),
 			"host player remains mounted after the local switch commit")
 
-	var joiner := NovaSimulation.new()
+	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "AttachmentJoiner"))
 	joiner.set_asset_root(root)
@@ -1097,10 +1095,10 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 	var host_after := _present_position_for_type(host, 1419)
 	var joiner_after := _present_position_for_type(joiner, 1419)
 	assert_eq(_present_field_for_type(joiner, 5004,
-			NovaSimulation.PF_EMPLACED_CONTROLS_VALID), 1,
+			Simulation.PF_EMPLACED_CONTROLS_VALID), 1,
 			"joiner decoded the mounted gunner relationship")
 	assert_ne(_present_field_for_type(joiner, 5004,
-			NovaSimulation.PF_EWEAP_GUNYAW), 0,
+			Simulation.PF_EWEAP_GUNYAW), 0,
 			"joiner derived a non-neutral EWEAP yaw control")
 	assert_gt(host_after.distance_to(host_before), 0.05,
 			"authoritative child follows the live EWEAP userpoint")
@@ -1127,7 +1125,7 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 	# the player operating the B50 is the UDP joiner, not the listen host. The
 	# local L entity waits for the host's 0x0A relationship echo, while the host
 	# applies its uplink look to H and drives the parent's EWEAP controls.
-	var model := NovaObjectData.new()
+	var model := ObjectData.new()
 	assert_eq(model.open_file(ProjectSettings.globalize_path(
 			"res://../fixtures/3dp/B50Cal/B50Cal.3di")), OK)
 	var moving_anchor := _moving_eweap_userpoint(model)
@@ -1145,16 +1143,16 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 	var b50_card: Dictionary = seat_db.extract_seat_specs_for_item(root, 101419)
 	assert_eq((b50_card.get("seats", []) as Array).size(), 1,
 			"B50Cal exposes its authored Usegun seat")
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	var mounted_item := mission.add_entity(
-			NovaMissionData.KIND_ITEM, 101419,
+			MissionData.KIND_ITEM, 101419,
 			Vector3(2, 0, 0), Vector3.ZERO)
 	assert_false(mounted_item.is_empty())
 	var mounted_bms_id := int(mounted_item.get("bms_id", 0))
 	assert_gt(mounted_bms_id, 0)
 
-	var host := NovaSimulation.new()
+	var host := Simulation.new()
 	host.configure_host_session({
 		"serve_and_play": false,
 		"gametype": 0x30020,
@@ -1169,7 +1167,7 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
 
-	var joiner := NovaSimulation.new()
+	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "MountedJoiner"))
 	joiner.set_asset_root(root)
@@ -1223,7 +1221,7 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 				and bool(host.get_entity_debug(
 						host_joiner_index).get("mounted", false)) \
 				and _present_field_for_type(joiner, 1419,
-						NovaSimulation.PF_EMPLACED_CONTROLS_VALID) == 1:
+						Simulation.PF_EMPLACED_CONTROLS_VALID) == 1:
 			mounted_echoed = true
 			break
 		OS.delay_msec(2)
@@ -1266,8 +1264,8 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 	var authority_yaw_before := float(host.get_entity_debug(
 			host_joiner_index).get("yaw_deg", 0.0))
 	var yaw_before := _present_field_for_type(
-			joiner, 1419, NovaSimulation.PF_EWEAP_GUNYAW)
-	var visual: Node3D = add_child_autofree(NovaObjectModelScript.new())
+			joiner, 1419, Simulation.PF_EWEAP_GUNYAW)
+	var visual: Node3D = add_child_autofree(ObjectModel.new())
 	visual.set_object_data(model)
 	var visual_parts: Dictionary = visual.get_render_part_nodes()
 	assert_has(visual_parts, yaw_part,
@@ -1296,14 +1294,14 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 		var authority_yaw := float(host.get_entity_debug(
 				host_joiner_index).get("yaw_deg", authority_yaw_before))
 		var presented_yaw := _present_field_for_type(
-				joiner, 1419, NovaSimulation.PF_EWEAP_GUNYAW)
+				joiner, 1419, Simulation.PF_EWEAP_GUNYAW)
 		if absf(wrapf(authority_yaw - authority_yaw_before,
 				-180.0, 180.0)) > 0.1 and presented_yaw != yaw_before:
 			aim_echoed = true
 			break
 		OS.delay_msec(2)
 	var yaw_after := _present_field_for_type(
-			joiner, 1419, NovaSimulation.PF_EWEAP_GUNYAW)
+			joiner, 1419, Simulation.PF_EWEAP_GUNYAW)
 	assert_true(aim_echoed,
 			"joiner look changed authority H and returned as visible gun articulation")
 	assert_ne(yaw_after, yaw_before,
@@ -1311,10 +1309,10 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 	assert_ne(yaw_after, 0,
 			"the host publishes a non-neutral EWEAP yaw phase")
 	assert_eq(_present_field_for_type(joiner, 1419,
-			NovaSimulation.PF_EMPLACED_CONTROLS_VALID), 1,
+			Simulation.PF_EMPLACED_CONTROLS_VALID), 1,
 			"the joiner reconstructs the same active gunner controls")
 	assert_ne(_present_field_for_type(joiner, 1419,
-			NovaSimulation.PF_EWEAP_GUNYAW), 0,
+			Simulation.PF_EWEAP_GUNYAW), 0,
 			"the joiner sees the rotated articulated gun")
 	var visual_after_record := _present_record_for_type(joiner, 1419)
 	assert_false(visual_after_record.is_empty())
@@ -1351,7 +1349,7 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 				and not bool(host.get_entity_debug(
 						host_joiner_index).get("mounted", true)) \
 				and _present_field_for_type(joiner, 1419,
-						NovaSimulation.PF_EMPLACED_CONTROLS_VALID) == 0:
+						Simulation.PF_EMPLACED_CONTROLS_VALID) == 0:
 			detached_echoed = true
 			break
 		OS.delay_msec(2)
@@ -1363,13 +1361,13 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 
 func test_joiner_fire_and_reload_round_trip_over_real_udp() -> void:
 	var mission := _combat_mission()
-	var host := NovaSimulation.new()
+	var host := Simulation.new()
 	host.configure_host_session({"gametype": 0x30020})
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
 
-	var joiner := NovaSimulation.new()
+	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "CombatJoiner"))
 	assert_true(joiner.load_from_mission_data(mission))
@@ -1477,7 +1475,7 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 	# resolve their control seat natively from the dsuvzero graphic: one
 	# zero-offset ctrlx userpoint, the exact shape the old hand table carried.
 	var root := _native_asset_root()
-	var host := NovaSimulation.new()
+	var host := Simulation.new()
 	host.configure_host_session({"gametype": 0x30020})
 	assert_true(host.enable_host_listen(0))
 	host.set_asset_root(root)
@@ -1490,7 +1488,7 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 	_install_combat_tables(host)
 	host.resolve_item_traits(watercraft_db)
 
-	var joiner := NovaSimulation.new()
+	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "VehicleObserver"))
 	joiner.set_asset_root(root)
@@ -1552,12 +1550,12 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 		var host_base: int = host_record["base"]
 		var joiner_base: int = joiner_record["base"]
 		assert_almost_eq(
-				joiner_snapshot[joiner_base + NovaSimulation.PF_PITCH_DEG],
-				host_snapshot[host_base + NovaSimulation.PF_PITCH_DEG], 0.01,
+				joiner_snapshot[joiner_base + Simulation.PF_PITCH_DEG],
+				host_snapshot[host_base + Simulation.PF_PITCH_DEG], 0.01,
 				"the joiner publishes the decoded/predicted vehicle pitch")
 		assert_almost_eq(
-				joiner_snapshot[joiner_base + NovaSimulation.PF_ROLL_DEG],
-				host_snapshot[host_base + NovaSimulation.PF_ROLL_DEG], 0.01,
+				joiner_snapshot[joiner_base + Simulation.PF_ROLL_DEG],
+				host_snapshot[host_base + Simulation.PF_ROLL_DEG], 0.01,
 				"the joiner publishes the decoded/predicted vehicle roll")
 	var family := -1
 	for ai_index in range(host.get_entity_count()):
@@ -1579,17 +1577,17 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 		var joiner_boat: PackedFloat32Array = joiner_boat_record["snapshot"]
 		var host_boat_base := int(host_boat_record["base"])
 		var joiner_boat_base := int(joiner_boat_record["base"])
-		assert_ne(host_boat[host_boat_base + NovaSimulation.PF_PITCH_DEG], 0.0,
+		assert_ne(host_boat[host_boat_base + Simulation.PF_PITCH_DEG], 0.0,
 				"the authored watercraft pitch is non-zero")
-		assert_ne(host_boat[host_boat_base + NovaSimulation.PF_ROLL_DEG], 0.0,
+		assert_ne(host_boat[host_boat_base + Simulation.PF_ROLL_DEG], 0.0,
 				"the authored watercraft roll is non-zero")
 		assert_almost_eq(
-				joiner_boat[joiner_boat_base + NovaSimulation.PF_PITCH_DEG],
-				host_boat[host_boat_base + NovaSimulation.PF_PITCH_DEG], 0.01,
+				joiner_boat[joiner_boat_base + Simulation.PF_PITCH_DEG],
+				host_boat[host_boat_base + Simulation.PF_PITCH_DEG], 0.01,
 				"first prediction arms from the retained watercraft pitch")
 		assert_almost_eq(
-				joiner_boat[joiner_boat_base + NovaSimulation.PF_ROLL_DEG],
-				host_boat[host_boat_base + NovaSimulation.PF_ROLL_DEG], 0.01,
+				joiner_boat[joiner_boat_base + Simulation.PF_ROLL_DEG],
+				host_boat[host_boat_base + Simulation.PF_ROLL_DEG], 0.01,
 				"first prediction arms from the retained watercraft roll")
 
 	# Joiner L does not predict an attach: wait for the host relationship echo,
@@ -1636,13 +1634,13 @@ func test_joiner_pool1_vehicle_stays_at_authoritative_pose_over_real_udp() -> vo
 
 func test_joiner_rifle_fire_does_not_drive_the_remote_host_body_or_weapon() -> void:
 	var mission := _peer_duel_mission()
-	var host := NovaSimulation.new()
+	var host := Simulation.new()
 	host.configure_host_session({"gametype": 0x30020})
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
 
-	var joiner := NovaSimulation.new()
+	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "AnimIsolationJoiner"))
 	assert_true(joiner.load_from_mission_data(mission))
@@ -1672,13 +1670,13 @@ func test_joiner_rifle_fire_does_not_drive_the_remote_host_body_or_weapon() -> v
 	var before_snap: PackedFloat32Array = remote_before["snapshot"]
 	var before_base := int(remote_before["base"])
 	var host_anim_before := int(before_snap[
-			before_base + NovaSimulation.PF_ANIM_STATE])
+			before_base + Simulation.PF_ANIM_STATE])
 	var host_weapon_before: Dictionary = host.get_local_player_weapon_state()
 	var host_fired_before := int(host_weapon_before.get("fired_serial", 0))
 	# The viewmodel clip channel is SEPARATE from the fire channel: the first-person
 	# parts are re-posed every tick from (anim_key, anim_variant, anim_age_ticks) and
 	# a play event bumps play_serial without necessarily bumping fired_serial
-	# [play write site: NovaSimulation weapon_fsm_tick play_anim leg]. A remote shot
+	# [play write site: Simulation weapon_fsm_tick play_anim leg]. A remote shot
 	# that perturbs any of these makes the host's own gun re-scrub its clip.
 	var host_play_before := int(host_weapon_before.get("play_serial", 0))
 	var host_anim_key_before := String(host_weapon_before.get("anim_key", ""))
@@ -1711,7 +1709,7 @@ func test_joiner_rifle_fire_does_not_drive_the_remote_host_body_or_weapon() -> v
 			var snap: PackedFloat32Array = remote["snapshot"]
 			var base := int(remote["base"])
 			observed_remote_states[int(
-					snap[base + NovaSimulation.PF_ANIM_STATE])] = true
+					snap[base + Simulation.PF_ANIM_STATE])] = true
 		OS.delay_msec(2)
 	joiner.set_local_player_weapon_input(false, false, false)
 
@@ -1792,13 +1790,13 @@ func test_joiner_rifle_fire_does_not_drive_the_remote_host_body_or_weapon() -> v
 
 func test_host_smoke_grenade_survives_arm_age_on_joiner_until_real_fuse() -> void:
 	var mission := _combat_mission()
-	var host := NovaSimulation.new()
+	var host := Simulation.new()
 	host.configure_host_session({"gametype": 0x30020})
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
 
-	var joiner := NovaSimulation.new()
+	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "SmokeObserver"))
 	assert_true(joiner.load_from_mission_data(mission))
@@ -1918,13 +1916,13 @@ func test_host_smoke_grenade_survives_arm_age_on_joiner_until_real_fuse() -> voi
 
 func test_listen_host_reload_relays_over_loopback_without_double_refill() -> void:
 	var mission := _combat_mission()
-	var host := NovaSimulation.new()
+	var host := Simulation.new()
 	host.configure_host_session({"gametype": 0x30020})
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
 
-	var joiner := NovaSimulation.new()
+	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "HostReloadWitness"))
 	assert_true(joiner.load_from_mission_data(mission))
@@ -2004,13 +2002,13 @@ func test_listen_host_reload_relays_over_loopback_without_double_refill() -> voi
 
 func test_late_reload_echo_refills_payload_weapon_after_joiner_switches() -> void:
 	var mission := _combat_mission()
-	var host := NovaSimulation.new()
+	var host := Simulation.new()
 	host.configure_host_session({"gametype": 0x30020})
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
 
-	var joiner := NovaSimulation.new()
+	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "LateReloadJoiner"))
 	assert_true(joiner.load_from_mission_data(mission))
@@ -2117,7 +2115,7 @@ func test_late_reload_echo_refills_payload_weapon_after_joiner_switches() -> voi
 
 func test_reload_echo_at_done_prevents_same_slot_reload_loop() -> void:
 	var mission := _combat_mission()
-	var host := NovaSimulation.new()
+	var host := Simulation.new()
 	# This regression isolates receive-before-actions ordering, so deliver the
 	# authority echo on the next test tick instead of waiting on retail cadence.
 	host.configure_host_session({
@@ -2128,7 +2126,7 @@ func test_reload_echo_at_done_prevents_same_slot_reload_loop() -> void:
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
 
-	var joiner := NovaSimulation.new()
+	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "DoneEchoJoiner"))
 	assert_true(joiner.load_from_mission_data(mission))
@@ -2212,13 +2210,13 @@ func test_reload_echo_at_done_prevents_same_slot_reload_loop() -> void:
 
 func test_joiner_round_hits_host_authoritatively_and_predicts_peer_impact() -> void:
 	var mission := _peer_duel_mission()
-	var host := NovaSimulation.new()
+	var host := Simulation.new()
 	host.configure_host_session({"gametype": 0x30020})
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
 
-	var joiner := NovaSimulation.new()
+	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "PeerShooter"))
 	assert_true(joiner.load_from_mission_data(mission))
@@ -2283,30 +2281,30 @@ func test_joiner_round_hits_host_authoritatively_and_predicts_peer_impact() -> v
 # (0, 8). A production header-only join has no such copy. The predicted round
 # must impact the wire proxy and leave the fixture copy untouched/non-colliding.
 func test_joiner_round_hits_decoded_ai_at_wire_pose_not_local_ghost() -> void:
-	var host_mission := NovaMissionData.new()
+	var host_mission := MissionData.new()
 	assert_eq(host_mission.create_default(), OK)
-	assert_false(host_mission.add_entity(NovaMissionData.KIND_ORGANIC, 5311,
+	assert_false(host_mission.add_entity(MissionData.KIND_ORGANIC, 5311,
 			Vector3(0, 8, 0), Vector3.ZERO).is_empty())
-	assert_false(host_mission.add_entity(NovaMissionData.KIND_MARKER, 6002,
+	assert_false(host_mission.add_entity(MissionData.KIND_MARKER, 6002,
 			Vector3(20, 0, 0), Vector3.ZERO).is_empty())
-	assert_false(host_mission.add_entity(NovaMissionData.KIND_MARKER, 6002,
+	assert_false(host_mission.add_entity(MissionData.KIND_MARKER, 6002,
 			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
-	var joiner_mission := NovaMissionData.new()
+	var joiner_mission := MissionData.new()
 	assert_eq(joiner_mission.create_default(), OK)
-	assert_false(joiner_mission.add_entity(NovaMissionData.KIND_ORGANIC, 5311,
+	assert_false(joiner_mission.add_entity(MissionData.KIND_ORGANIC, 5311,
 			Vector3(0, 12, 0), Vector3.ZERO).is_empty())
-	assert_false(joiner_mission.add_entity(NovaMissionData.KIND_MARKER, 6002,
+	assert_false(joiner_mission.add_entity(MissionData.KIND_MARKER, 6002,
 			Vector3(20, 0, 0), Vector3.ZERO).is_empty())
-	assert_false(joiner_mission.add_entity(NovaMissionData.KIND_MARKER, 6002,
+	assert_false(joiner_mission.add_entity(MissionData.KIND_MARKER, 6002,
 			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
 
-	var host := NovaSimulation.new()
+	var host := Simulation.new()
 	host.configure_host_session({"gametype": 0x30020})
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(host_mission))
 	_install_combat_tables(host)
 
-	var joiner := NovaSimulation.new()
+	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "GhostWatch"))
 	assert_true(joiner.load_from_mission_data(joiner_mission))
@@ -2363,7 +2361,7 @@ func test_joiner_round_hits_decoded_ai_at_wire_pose_not_local_ghost() -> void:
 
 func test_remote_host_round_event_resimulates_visually_on_joiner() -> void:
 	var mission := _combat_mission()
-	var host := NovaSimulation.new()
+	var host := Simulation.new()
 	host.configure_host_session({"gametype": 0x30020})
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
@@ -2371,7 +2369,7 @@ func test_remote_host_round_event_resimulates_visually_on_joiner() -> void:
 	assert_true(host.apply_local_player_loadout([{"name": "WPN_M4AUTO"}], 8))
 	host.set_local_player_weapon(_retail_m4(), {})
 
-	var joiner := NovaSimulation.new()
+	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "RoundObserver"))
 	assert_true(joiner.load_from_mission_data(mission))
@@ -2416,7 +2414,7 @@ func test_remote_host_round_event_resimulates_visually_on_joiner() -> void:
 
 
 func test_joiner_off_by_default() -> void:
-	var sim := NovaSimulation.new()
+	var sim := Simulation.new()
 	sim.build_demo_mission()
 	assert_false(sim.is_joiner(), "joiner off by default")
 	assert_eq(sim.get_joiner_phase(), -1, "no joiner phase when not joining")
@@ -2432,13 +2430,13 @@ func test_joiner_off_by_default() -> void:
 # joiner could never shoot or reload.
 func test_joiner_kit_applied_before_spawn_still_arms_fire_and_reload() -> void:
 	var mission := _combat_mission()
-	var host := NovaSimulation.new()
+	var host := Simulation.new()
 	host.configure_host_session({"gametype": 0x30020})
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
 	_install_combat_tables(host)
 
-	var joiner := NovaSimulation.new()
+	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "PrespawnKitJoiner"))
 	assert_true(joiner.load_from_mission_data(mission))
@@ -2509,7 +2507,7 @@ func test_joiner_kit_applied_before_spawn_still_arms_fire_and_reload() -> void:
 	host.free()
 
 
-func _subrate_walk_mission() -> NovaMissionData:
+func _subrate_walk_mission() -> MissionData:
 	# A populated-enough entity set that the BANDWIDTH-capped 0x0A rotates
 	# entities across frames (the D-NET-154 regime): eight parked AI organics
 	# plus the deploy markers. They sit far from the walkers so nothing
@@ -2520,14 +2518,14 @@ func _subrate_walk_mission() -> NovaMissionData:
 	# and the walker starves — retail's own geometry rule. Behind the viewer
 	# the fillers' folded angle keeps the walker streaming every frame, which
 	# is this test's baseline (the chase-glide contract, not starvation).
-	var md := NovaMissionData.new()
+	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	for i in range(8):
-		assert_false(md.add_entity(NovaMissionData.KIND_ORGANIC, 5311,
+		assert_false(md.add_entity(MissionData.KIND_ORGANIC, 5311,
 				Vector3(120 + 6 * i, -140, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(NovaMissionData.KIND_MARKER, 6002,
+	assert_false(md.add_entity(MissionData.KIND_MARKER, 6002,
 			Vector3(0, 8, 0), Vector3.ZERO).is_empty())
-	assert_false(md.add_entity(NovaMissionData.KIND_MARKER, 6002,
+	assert_false(md.add_entity(MissionData.KIND_MARKER, 6002,
 			Vector3(0, 0, 0), Vector3.ZERO).is_empty())
 	return md
 
@@ -2538,7 +2536,7 @@ func test_joiner_remote_player_glides_across_subrate_records_over_real_udp() -> 
 	# walking player must keep advancing every tick through the ported
 	# per-class chase - never hold-then-teleport at the wire cadence.
 	var mission := _subrate_walk_mission()
-	var host := NovaSimulation.new()
+	var host := Simulation.new()
 	host.configure_host_session({"gametype": 0x30020, "bandwidth": 100})
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
@@ -2546,7 +2544,7 @@ func test_joiner_remote_player_glides_across_subrate_records_over_real_udp() -> 
 	assert_true(host.spawn_local_player(Vector3(5, 0, 5), 0.0, 1),
 			"host spawned its own player")
 
-	var joiner := NovaSimulation.new()
+	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "GlideObserver"))
 	assert_true(joiner.load_from_mission_data(mission))
@@ -2618,7 +2616,7 @@ func test_joiner_remote_player_glides_across_subrate_records_over_real_udp() -> 
 	host.free()
 
 
-func _present_pose_for_type(sim: NovaSimulation, type_id: int) -> Dictionary:
+func _present_pose_for_type(sim: Simulation, type_id: int) -> Dictionary:
 	var record := _present_record_for_type(sim, type_id)
 	if record.is_empty():
 		return {}
@@ -2626,10 +2624,10 @@ func _present_pose_for_type(sim: NovaSimulation, type_id: int) -> Dictionary:
 	var base := int(record["base"])
 	return {
 		"position": Vector3(
-				snapshot[base + NovaSimulation.PF_POS_X],
-				snapshot[base + NovaSimulation.PF_POS_Y],
-				snapshot[base + NovaSimulation.PF_POS_Z]),
-		"yaw": snapshot[base + NovaSimulation.PF_YAW_DEG],
+				snapshot[base + Simulation.PF_POS_X],
+				snapshot[base + Simulation.PF_POS_Y],
+				snapshot[base + Simulation.PF_POS_Z]),
+		"yaw": snapshot[base + Simulation.PF_YAW_DEG],
 	}
 
 
@@ -2641,21 +2639,21 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 	# (world from the wire, no local .bms body) — and pins the joiner's presented
 	# gunner row to the host's, frame over frame.
 	var root := _native_asset_root()
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	# The 00TRg emplacements are authored at non-cardinal yaws; a zero-yaw gun
 	# would hide any carrier-frame recomposition error on the joiner.
-	assert_false(mission.add_entity(NovaMissionData.KIND_ITEM, 101419,
+	assert_false(mission.add_entity(MissionData.KIND_ITEM, 101419,
 			Vector3(2, 12, 0), Vector3(0, 0, 135)).is_empty())
-	var gunner := mission.add_entity(NovaMissionData.KIND_ORGANIC, 5311,
+	var gunner := mission.add_entity(MissionData.KIND_ORGANIC, 5311,
 			Vector3(2, 11, 0), Vector3.ZERO)
 	assert_false(gunner.is_empty())
 	var gunner_ssn := int(gunner.get("bms_id", 0))
 	assert_gt(gunner_ssn, 0)
 	# Deploy markers away from the emplacement so neither player spawns into it.
-	assert_false(mission.add_entity(NovaMissionData.KIND_MARKER, 6002,
+	assert_false(mission.add_entity(MissionData.KIND_MARKER, 6002,
 			Vector3(20, 0, 0), Vector3.ZERO).is_empty())
-	assert_false(mission.add_entity(NovaMissionData.KIND_MARKER, 6002,
+	assert_false(mission.add_entity(MissionData.KIND_MARKER, 6002,
 			Vector3(24, 0, 0), Vector3.ZERO).is_empty())
 	# The unconditional attach event — the same mechanism 00TRg uses to seat its
 	# rebel gunners at mission start.
@@ -2663,10 +2661,10 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 	assert_false(mission.add_event_action(0,
 			{"action_type": 37, "param1": gunner_ssn}).is_empty())
 
-	var fixture_def_root := NovaResourceRoot.new()
+	var fixture_def_root := ResourceRoot.new()
 	assert_eq(fixture_def_root.set_root_dir(ProjectSettings.globalize_path(
 			"res://../fixtures/def")), OK)
-	var fixture_item_db := NovaItemDatabase.new()
+	var fixture_item_db := ItemDatabase.new()
 	assert_eq(fixture_item_db.load_from_resource_root(
 			fixture_def_root, "items.def"), OK)
 	var b50_card: Dictionary = fixture_item_db.extract_seat_specs_for_item(
@@ -2674,7 +2672,7 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 	assert_eq((b50_card.get("seats", []) as Array).size(), 1,
 			"B50Cal exposes its authored Usegun seat")
 
-	var host := NovaSimulation.new()
+	var host := Simulation.new()
 	assert_true(host.enable_host_listen(0))
 	host.set_asset_root(root)
 	assert_true(host.install_seat_specs_for_type_ids(
@@ -2690,7 +2688,7 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 
 	# Retail-faithful joiner: the mission body never comes from a local .bms —
 	# only the host's streamed 616-byte header plus the wire world (D-NET-194).
-	var joiner := NovaSimulation.new()
+	var joiner := Simulation.new()
 	assert_true(joiner.enable_join(
 			"127.0.0.1", host.get_host_listen_port(), "GunnerWatcher"))
 	joiner.set_join_world_ready(false)
@@ -2708,7 +2706,7 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 		joiner.free()
 		host.free()
 		return
-	var wire_mission := NovaMissionData.new()
+	var wire_mission := MissionData.new()
 	assert_eq(wire_mission.open_wire_header(header), OK)
 	assert_true(joiner.load_from_mission_data(wire_mission))
 	_install_combat_tables(joiner)
@@ -2765,7 +2763,7 @@ func test_joiner_view_of_ai_emplacement_gunner_tracks_host() -> void:
 	# aim-capable body node (present_one_wire_row), so the NODE facing is
 	# sampled too — PF_YAW alone stays sane while the aim-overlay body frame
 	# is what actually spins a rendered gunner.
-	var applier := NovaPresentApplier.new()
+	var applier := PresentApplier.new()
 	var worst_distance := 0.0
 	var worst_vertical := 0.0
 	var worst_yaw_disagreement := 0.0

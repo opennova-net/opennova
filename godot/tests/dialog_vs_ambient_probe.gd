@@ -1,7 +1,7 @@
 extends SceneTree
 
 # Headless DIALOG-vs-AMBIENCE probe (NOT collected by GUT): reproduces the
-# "enabling ambient sounds broke mission dialog" report at the NovaMissionAudio
+# "enabling ambient sounds broke mission dialog" report at the MissionAudio
 # seam against a mounted install. Runs the full mission-audio setup (ambient
 # marker voices ON unless --no-ambient), then plays the first N resolvable .DBF
 # dialog ids the way _route_mission_effects does, asserting for each line:
@@ -14,7 +14,7 @@ extends SceneTree
 # Use: godot --headless --path godot -s res://tests/dialog_vs_ambient_probe.gd \
 #        -- <dir> <expansion> <mission.bms> [--no-ambient] [--lines N]
 
-const NovaMissionAudioScript = preload("res://adapter/world/nova_mission_audio.gd")
+const NovaMissionAudioScript = preload("res://game/world/nova_mission_audio.gd")
 
 const SILENCE_FLOOR_DB := -50.0
 const LINE_TIMEOUT_SLACK_S := 3.0
@@ -51,16 +51,16 @@ func _run() -> void:
 		elif args[i] == "--sim" and i + 1 < args.size():
 			sim_ticks = int(args[i + 1])
 
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	var err: int = root.mount_runtime(dir, expansion, false, "jo")
 	print("[dlgprobe] mount %s exp='%s' -> %d  ambient=%s" % [dir, expansion, err, str(ambient)])
 	if err != OK:
 		quit(1)
 		return
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	item_db.load_from_resource_root(root, "items.def")
 
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	if mission.open_from_resource_root(root, mission_name) != OK:
 		print("[dlgprobe] %s PARSE FAILED" % mission_name)
 		quit(1)
@@ -72,7 +72,7 @@ func _run() -> void:
 	# position so the audio arm can park the listener where the play test stood.
 	var player_pos := Vector3.INF
 	if sim_ticks > 0:
-		var sim := NovaSimulation.new()
+		var sim := Simulation.new()
 		if sim.load_from_mission_data(mission):
 			if sim.has_method("spawn_local_player_at_start") and sim.spawn_local_player_at_start():
 				player_pos = sim.get_local_player_position()

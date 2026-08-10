@@ -15,11 +15,10 @@ func _on_start() -> void:
 		# already looking after pressing Start.
 		_flash_start_warning("Load a project first")
 		return
-	if _lm._document.has_method("prepare_script_for_run"):
-		var errs: Array = _lm._document.prepare_script_for_run()
-		if errs.size() > 0:
-			_flash_start_warning("Fix script errors first")
-			return
+	var errs: Array = _lm._document.prepare_script_for_run()
+	if errs.size() > 0:
+		_flash_start_warning("Fix script errors first")
+		return
 	_lm._director.bank = _lm._document.bank
 	_lm._director.load_mus_script(_lm._document.mus_script)
 	_lm._refresh_var_labels()
@@ -150,7 +149,9 @@ func _on_volume_changed(left: int, right: int) -> void:
 	_lm._vol_seen = true
 	_lm._last_vol_l = left
 	_lm._last_vol_r = right
-	_log_typed(_lm.EvType.VOLUME, "volume L=%.2f R=%.2f" % [left / 65536.0, right / 65536.0])
+	# volume_changed emits the script-domain 0..255 values directly (the 16.16
+	# decode lives at the binding's trampoline).
+	_log_typed(_lm.EvType.VOLUME, "volume L=%d R=%d" % [left, right])
 
 
 func _on_clear() -> void:

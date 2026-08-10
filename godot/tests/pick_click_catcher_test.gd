@@ -1,72 +1,62 @@
 extends GutTest
 
 # PickClickCatcher: the overlay-open mouse picker. A left-press ray-picks
-# through the live camera into the injected list; everything else passes
-# through untouched.
-
-class StubSim:
-	extends Node
-	var calls := 0
-	var last_range := 0.0
-
-	func debug_pick_entity(_from: Vector3, _dir: Vector3, range_units: float) -> Dictionary:
-		calls += 1
-		last_range = range_units
-		return {
-			"hit": true, "entity_handle": 7, "kind": 1, "index": 3, "bms_id": 42,
-			"net_id": 0, "name": "crate", "position_godot": Vector3.ZERO,
-			"bound_radius": 1.0, "hit_position_godot": Vector3.FORWARD,
-		}
+# through the live typed sim into the injected list; everything else passes
+# through untouched. The world seam is typed (ADR 0034): a GameWorld harness
+# lends the catcher a REAL (worldless) Simulation, whose picks are honest
+# misses — provenance stamping is pinned on DebugEntityPicker directly.
 
 
-class StubWorld:
-	extends Node
-	var sim := StubSim.new()
+## Typed world double: IS a GameWorld, lending the catcher a real sim.
+class CatcherWorld:
+	extends GameWorld
+	var sim_override: Simulation = null
 
-	func _init() -> void:
-		add_child(sim)
-
-	func get_sim() -> StubSim:
-		return sim
+	func get_sim() -> Simulation:
+		return sim_override
 
 
-func _make_catcher(list: NovaDebugPickList) -> Array:
+func _make_catcher(list: DebugPickList) -> Dictionary:
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(320, 240)
+	add_child_autofree(viewport)
 	var camera := Camera3D.new()
-	add_child_autofree(camera)
+	viewport.add_child(camera)
 	camera.current = true
-	var world := StubWorld.new()
-	add_child_autofree(world)
+	# The world stays off-tree (the GameWorld script class alone has no scene
+	# children); the catcher needs only its typed reference plus a viewport.
+	var world := CatcherWorld.new()
+	world.sim_override = Simulation.new()
+	autofree(world)
+	autofree(world.sim_override)
 	var catcher := PickClickCatcher.new()
-	world.add_child(catcher)
+	viewport.add_child(catcher)
 	catcher.setup(world, list)
-	return [catcher, world]
+	return {"catcher": catcher, "world": world, "viewport": viewport}
 
 
-func test_left_press_picks_into_the_list_with_provenance() -> void:
-	var list := NovaDebugPickList.new()
+func test_left_press_ray_picks_through_the_live_sim() -> void:
+	var list := DebugPickList.new()
 	var made := _make_catcher(list)
-	var catcher: PickClickCatcher = made[0]
-	var world: StubWorld = made[1]
+	var catcher: PickClickCatcher = made["catcher"]
+	var viewport: SubViewport = made["viewport"]
 
 	var click := InputEventMouseButton.new()
 	click.button_index = MOUSE_BUTTON_LEFT
 	click.pressed = true
 	catcher._unhandled_input(click)
 
-	assert_eq(world.sim.calls, 1, "the click ray-picked through the sim")
-	assert_almost_eq(world.sim.last_range, DebugEntityPicker.PICK_RANGE_UNITS, 0.001)
-	assert_eq(list.size(), 1, "the hit landed in the pick list")
-	var pick: Dictionary = list.get_picks()[0]
-	assert_eq(String(pick.get("source", "")), "mouse_click",
-			"the card records its input provenance")
-	assert_true(pick.has("ray_origin_godot"), "the card records the replayable ray")
+	assert_true(viewport.is_input_handled(),
+			"the click ray-picked through the sim and consumed the event")
+	assert_eq(list.size(), 0,
+			"a worldless sim answers an honest miss, which the list rejects")
 
 
 func test_other_input_is_ignored() -> void:
-	var list := NovaDebugPickList.new()
+	var list := DebugPickList.new()
 	var made := _make_catcher(list)
-	var catcher: PickClickCatcher = made[0]
-	var world: StubWorld = made[1]
+	var catcher: PickClickCatcher = made["catcher"]
+	var viewport: SubViewport = made["viewport"]
 
 	var release := InputEventMouseButton.new()
 	release.button_index = MOUSE_BUTTON_LEFT
@@ -79,5 +69,36 @@ func test_other_input_is_ignored() -> void:
 	var motion := InputEventMouseMotion.new()
 	catcher._unhandled_input(motion)
 
-	assert_eq(world.sim.calls, 0, "no ray ever ran")
+	assert_false(viewport.is_input_handled(), "no ray ever ran")
 	assert_eq(list.size(), 0)
+
+
+func test_detached_pick_list_never_consumes_the_click() -> void:
+	var made := _make_catcher(null)
+	var catcher: PickClickCatcher = made["catcher"]
+	var viewport: SubViewport = made["viewport"]
+	var click := InputEventMouseButton.new()
+	click.button_index = MOUSE_BUTTON_LEFT
+	click.pressed = true
+	catcher._unhandled_input(click)
+	assert_false(viewport.is_input_handled(),
+			"no list means no pick and an unconsumed event")
+
+
+func test_picker_stamps_provenance_and_replayable_ray() -> void:
+	# The shared ray recipe both pick inputs use, against the REAL sim binding:
+	# even a worldless miss keeps the stable card shape plus the provenance
+	# fields the snapshot writer replays.
+	var sim := Simulation.new()
+	add_child_autofree(sim)
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	camera.current = true
+	var pick := DebugEntityPicker.pick_with_camera(
+			sim, camera, Vector2(10, 10), "mouse_click")
+	assert_false(pick.is_empty(), "the sim always answers the stable card")
+	assert_eq(String(pick.get("source", "")), "mouse_click",
+			"the card records its input provenance")
+	assert_true(pick.has("ray_origin_godot"), "the card records the replayable ray")
+	assert_true(pick.has("ray_dir_godot"))
+	assert_false(bool(pick.get("hit", true)), "worldless picks are honest misses")

@@ -1,5 +1,5 @@
 // Terrain-grounded movement (Phase 1) tests:
-//   * the portable terrain/height_field.h samplers (the three NovaTerrainData::get_height*
+//   * the portable terrain_query/height_field.h samplers (the three TerrainData::get_height*
 //     bodies, now shared) over a synthetic X-ramp atlas,
 //   * calc_average_ground_height (Entity_CalcAverageGroundHeight @0x457230): the 5-tap
 //     weighted average, the >= center clamp, and the worldY water clamp, by hand math,
@@ -10,7 +10,7 @@
 #include <cmath>
 #include <vector>
 
-#include "terrain/height_field.h"
+#include "terrain_query/height_field.h"
 #include "world/ai.h"
 #include "world/world.h"
 

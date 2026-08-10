@@ -17,7 +17,7 @@ var time_of_day: float = 1200.0
 var _suspend_dirty: bool = false
 
 # Undo/redo + the begin/commit session live on the shared EditorDocument
-# snapshot history (NovaEditHistory over engine/base/oned_edit); the hooks below give
+# snapshot history (EditHistory over engine/base/oned_edit); the hooks below give
 # it EnvFile's byte snapshots and this editor's signal fan-out.
 
 
@@ -57,7 +57,7 @@ func open_env(path: String) -> Error:
 	return OK
 
 
-func open_env_from_resource_root(resources: NovaResourceRoot, name: String) -> Error:
+func open_env_from_resource_root(resources: ResourceRoot, name: String) -> Error:
 	if resources == null:
 		return ERR_INVALID_PARAMETER
 	var next_file := EnvFile.new()
@@ -120,7 +120,7 @@ func _save_to_path(path: String, clear_dirty: bool) -> Error:
 
 
 func set_time_of_day(value: float, mark_dirty: bool = true) -> void:
-	time_of_day = fposmod(value, NovaEnvironment.HHMM_DAY)
+	time_of_day = fposmod(value, MissionEnvironment.HHMM_DAY)
 	if env_file:
 		# Guard the inner EnvFile change so its environment_changed echo does not
 		# fan out a second, redundant environment_changed/state_changed for this

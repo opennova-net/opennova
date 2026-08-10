@@ -16,8 +16,8 @@ const MusicEditorDocumentClass = preload("res://modtools/music/music_editor_docu
 const STATE_PATH := "user://music_editor_state.cfg"
 
 var _active_workflow: int = Workflow.MAP
-var _root: Control
-var _document: RefCounted   # MusicEditorDocument
+var _root: MusicWorkspaceRoot
+var _document: MusicEditorDocument
 
 
 func _init(_arg = null) -> void:
@@ -178,6 +178,28 @@ func get_editor_document() -> Object:
 	return _document
 
 
+func has_unsaved_changes() -> bool:
+	return _document != null and _document.is_dirty()
+
+
+func can_undo() -> bool:
+	return _document != null and not is_busy() and _document.can_undo()
+
+
+func can_redo() -> bool:
+	return _document != null and not is_busy() and _document.can_redo()
+
+
+func undo() -> void:
+	if _document != null:
+		_document.undo()
+
+
+func redo() -> void:
+	if _document != null:
+		_document.redo()
+
+
 # One unified screen means one consolidated edit history on the document: bank
 # reorder / rename and the structured play edits all push do/undo pairs onto the
 # same stack, reachable regardless of which dock has focus. The Bank panel
@@ -288,8 +310,8 @@ func deactivate() -> void:
 func _stop_live() -> void:
 	if _root == null:
 		return
-	var live_node: Node = _root.get_panel("Live")
-	if live_node != null and live_node.has_method("stop_director"):
+	var live_node: MusicLiveMode = _root.get_panel("Live")
+	if live_node != null:
 		live_node.stop_director()
 
 
@@ -329,9 +351,8 @@ func mount_viewport(mount: Control) -> void:
 			_root.get_parent().remove_child(_root)
 		mount.add_child(_root)
 	_root.bind_document(_document)
-	if _root.has_signal("workflow_requested"):
-		if not _root.workflow_requested.is_connected(activate_workflow):
-			_root.workflow_requested.connect(activate_workflow)
+	if not _root.workflow_requested.is_connected(activate_workflow):
+		_root.workflow_requested.connect(activate_workflow)
 	_root.set_active_workflow(_active_workflow)
 
 

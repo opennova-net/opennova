@@ -1,91 +1,62 @@
 extends GutTest
 
 # DebugAnimationPage: the Animation & models debug page. Formats the local
-# player's animation scalars and one row per registry animatable, and
-# degrades to empty states when the world/registry are gone.
+# player's animation scalars (the pure format seam + the live typed sim) and
+# one row per registry animatable, and degrades to empty states when the
+# world/registry are gone. Sources are the typed classes (ADR 0034): a real
+# GameWorld subtree, a MissionRuntime harness carrying the registry, and the
+# real minimal-mission sim for the live-scalar leg.
 
-const PageScript := preload("res://adapter/debug/pages/debug_animation_page.gd")
-
-
-class StubModel:
-	extends NovaObjectModel
-	var clip := ""
-	var lod := 0
-	var skinned := false
-	var playhead := 0.0
-	var part_anims: Dictionary = {}
-	var ctrl_values: Dictionary = {}
-
-	func get_active_body_clip() -> String:
-		return clip
-
-	func get_active_lod() -> int:
-		return lod
-
-	func has_skeleton() -> bool:
-		return skinned
-
-	func get_animation_time() -> float:
-		return playhead
-
-	func get_active_part_anims() -> Dictionary:
-		return part_anims.duplicate(true)
-
-	func get_ctrl_values() -> Dictionary:
-		return ctrl_values.duplicate(true)
+const PageScript := preload("res://game/debug/pages/debug_animation_page.gd")
+const MissionRuntime := preload("res://game/world/mission_runtime.gd")
 
 
-class StubRegistry:
-	extends RefCounted
-	var nodes: Array = []
-
-	func get_animatable_nodes() -> Array:
-		return nodes
+# Real native models: state is DRIVEN through the public surface (committed
+# rig + object fixtures back the clip/skeleton legs), never faked by
+# overriding. The object data makes rebuild() construct the Skeleton3D.
+const RIGGED_3DI := "res://../fixtures/threedi/3di3/Shed.3di"
 
 
-# The value-only sim double the page reads through _ctx.sim(): the local
-# player's animation scalars under NovaSimulation's native getter names.
-class StubSim:
-	extends RefCounted
-
-	func get_local_player_anim_key() -> String:
-		return "prone_crawl"
-
-	func get_local_player_body_anim_slot() -> int:
-		return 17
-
-	func get_local_player_anim_phase_ticks() -> int:
-		return 42
-
-	func get_local_player_anim_source_key() -> String:
-		return "stand_idle"
-
-	func get_local_player_anim_source_phase_ticks() -> int:
-		return 12
-
-	func get_local_player_anim_blend_weight() -> float:
-		return 0.25
+static func _rigged_model(parent: Node, clip: String) -> ObjectModel:
+	# Enter the tree FIRST (global_transform/bounds math must be valid before
+	# rebuild), the production placer order.
+	var m := ObjectModel.new()
+	parent.add_child(m)
+	var data := ObjectData.new()
+	assert(data.open_file(ProjectSettings.globalize_path(RIGGED_3DI)) == OK)
+	var root := ResourceRoot.new()
+	assert(root.set_root_dir(
+			ProjectSettings.globalize_path("res://../fixtures/anim")) == OK)
+	var sk := SkeletalAnim.new()
+	assert(sk.load_from_bad_files(root, "idle.bad",
+			{ "anim_idle": "idle.bad", "anim_walk": "walk.bad" }))
+	m.set_object_data(data)
+	m.set_skeletal_anim(sk)
+	if not clip.is_empty():
+		m.play_body_clip(clip)
+	return m
 
 
-class StubRuntime:
-	extends Node
-	var registry := StubRegistry.new()
-	var sim := StubSim.new()
+## The typed runtime double: IS a MissionRuntime, carrying a test-built
+## registry (no live sim — model discovery is sim-independent).
+class RuntimeHarness:
+	extends MissionRuntime
+	var registry := EntityIndex.new()
 
-	func get_sim() -> Object:
-		return sim
-
-	func get_registry() -> StubRegistry:
+	func get_registry() -> EntityIndex:
 		return registry
 
 
-class StubWorld:
-	extends Node
+func _world() -> GameWorld:
+	# The full packaged scene: rigged models must rebuild INSIDE the tree.
+	var world := (load("res://game/world/game_world.tscn") as PackedScene) 			.instantiate() as GameWorld
+	add_child_autofree(world)
+	return world
 
 
-func _make_page(world: Node = null, runtime: Node = null) -> DebugAnimationPage:
-	var ctx := NovaDebugContext.new()
-	ctx.options = NovaDebugOptionState.new()
+func _make_page(world: GameWorld = null, runtime: MissionRuntime = null) -> DebugAnimationPage:
+	var ctx := DebugContext.new()
+	ctx.options = DebugOptionState.new()
 	if world != null:
 		ctx.world_source = func(): return world
 	if runtime != null:
@@ -105,28 +76,21 @@ func test_renders_empty_states_without_sources() -> void:
 			"No live models")
 
 
-func test_formats_player_scalars_and_model_rows() -> void:
-	var world := StubWorld.new()
-	add_child_autofree(world)
-	var runtime := StubRuntime.new()
+func test_formats_model_rows() -> void:
+	var world := _world()
+	var runtime := RuntimeHarness.new()
 	add_child_autofree(runtime)
-	var idle := StubModel.new()
+	var idle := ObjectModel.new()
 	idle.name = "Crate01"
-	var soldier := StubModel.new()
-	soldier.name = "Rifleman"
-	soldier.clip = "run_f"
-	soldier.lod = 1
-	soldier.skinned = true
 	runtime.add_child(idle)
-	runtime.add_child(soldier)
-	runtime.registry.nodes = [idle, soldier]
+	var soldier := _rigged_model(runtime, "anim_walk")
+	soldier.name = "Rifleman"
+	runtime.registry.build([
+		{ "model": idle, "ref": { "bms_id": 1 } },
+		{ "model": soldier, "ref": { "bms_id": 2 } },
+	], [])
 	var page := _make_page(world, runtime)
 	page.refresh()
-
-	var player := (page.find_child("AnimPlayer", true, false) as Label).text
-	assert_string_contains(player, "prone_crawl")
-	assert_string_contains(player, "slot 17")
-	assert_string_contains(player, "42 ticks")
 
 	var header := (page.find_child("AnimModelsHeader", true, false) as Label).text
 	assert_string_contains(header, "2 animatable")
@@ -145,21 +109,16 @@ func test_formats_player_scalars_and_model_rows() -> void:
 			soldier_row = row
 	assert_string_contains(crate_row, "Crate01")
 	assert_string_contains(soldier_row, "Rifleman")
-	assert_string_contains(soldier_row, "clip run_f")
-	assert_string_contains(soldier_row, "detail L1")
+	assert_string_contains(soldier_row, "clip anim_walk")
 	assert_string_contains(soldier_row, "skinned")
 
 
 func test_discovers_dynamic_world_models_outside_the_placed_registry() -> void:
-	var world := StubWorld.new()
-	add_child_autofree(world)
-	var runtime := StubRuntime.new()
+	var world := _world()
+	var runtime := RuntimeHarness.new()
 	add_child_autofree(runtime)
-	var remote := StubModel.new()
+	var remote := _rigged_model(world, "anim_walk")
 	remote.name = "RemotePlayerAvatar"
-	remote.clip = "run_f"
-	remote.skinned = true
-	world.add_child(remote)
 
 	var page := _make_page(world, runtime)
 	page.refresh()
@@ -176,18 +135,24 @@ func test_discovers_dynamic_world_models_outside_the_placed_registry() -> void:
 
 
 func test_steady_refresh_does_not_reset_model_list_browsing_position() -> void:
-	var world := StubWorld.new()
-	add_child_autofree(world)
-	var runtime := StubRuntime.new()
+	var runtime := RuntimeHarness.new()
 	add_child_autofree(runtime)
+	var entries: Array = []
 	for index in range(36):
-		var model := StubModel.new()
+		var model := ObjectModel.new()
 		model.name = "Model_%02d" % index
 		runtime.add_child(model)
-		runtime.registry.nodes.append(model)
-	var page := _make_page(world, runtime)
-	page.size = Vector2(300, 190)
+		entries.append({ "model": model, "ref": { "bms_id": 1000 + index } })
+	runtime.registry.build(entries, [])
+	var page := _make_page(null, runtime)
 	page.refresh()
+	# The fresh ItemList reports its content height as minimum until its first
+	# layout pass settles; sizing before that clamps the page to ~36 rows tall
+	# and no scrollbar ever engages. Settle first, then assign the constrained
+	# overlay-shaped rect (taller than the page chrome, far shorter than 36
+	# rows) so the list gets a real scrolling viewport.
+	await wait_process_frames(1)
+	page.size = Vector2(300, 420)
 	await wait_process_frames(2)
 
 	var list := page.find_child("AnimModels", true, false) as ItemList
@@ -205,12 +170,9 @@ func test_steady_refresh_does_not_reset_model_list_browsing_position() -> void:
 
 
 func test_explains_the_local_player_transition_and_blend() -> void:
-	var runtime := StubRuntime.new()
-	add_child_autofree(runtime)
-	var page := _make_page(null, runtime)
-	page.refresh()
-
-	var player := (page.find_child("AnimPlayer", true, false) as Label).text
+	# The value branch drives the pure format seam directly.
+	var player := DebugAnimationPage.format_player_status(
+			"prone_crawl", 17, 42, "stand_idle", 12, 0.25)
 	assert_string_contains(player, "stand_idle")
 	assert_string_contains(player, "12 ticks")
 	assert_string_contains(player, "prone_crawl")
@@ -218,31 +180,50 @@ func test_explains_the_local_player_transition_and_blend() -> void:
 	assert_string_contains(player, "25%")
 	assert_string_contains(player, "source")
 	assert_string_contains(player, "target")
+	var settled := DebugAnimationPage.format_player_status(
+			"prone_crawl", 17, 42, "prone_crawl", 42, 1.0)
+	assert_string_contains(settled, "settled")
+	assert_string_contains(settled, "slot 17")
+
+
+func test_player_scalars_render_from_the_live_sim() -> void:
+	# The wiring leg: a REAL minimal-mission runtime (auto-spawned host
+	# player) feeds the same format seam through _ctx.sim().
+	var mission := MissionData.new()
+	assert_eq(mission.create_default(), OK)
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var runtime := MissionRuntime.new()
+	add_child_autofree(runtime)
+	assert_gt(runtime.setup(mission, container,
+			{"placer": MissionObjectPlacer.new()}), 0)
+	var page := _make_page(null, runtime)
+	page.refresh()
+
+	var sim := runtime.get_sim()
+	var label := (page.find_child("AnimPlayer", true, false) as Label).text
+	assert_ne(label, "No local player.")
+	assert_eq(label, DebugAnimationPage.format_player_status(
+			String(sim.get_local_player_anim_key()),
+			int(sim.get_local_player_body_anim_slot()),
+			int(sim.get_local_player_anim_phase_ticks()),
+			String(sim.get_local_player_anim_source_key()),
+			int(sim.get_local_player_anim_source_phase_ticks()),
+			float(sim.get_local_player_anim_blend_weight())),
+			"the label renders the live sim scalars through the format seam")
 
 
 func test_selected_model_detail_survives_registry_reorder_by_stable_identity() -> void:
-	var runtime := StubRuntime.new()
+	var runtime := RuntimeHarness.new()
 	add_child_autofree(runtime)
-	var crate := StubModel.new()
+	var crate := ObjectModel.new()
 	crate.name = "Crate01"
 	crate.set_meta("entity_ref", {"bms_id": 101, "kind": 3, "index": 0})
-	var soldier := StubModel.new()
+	var soldier := _rigged_model(runtime, "anim_walk")
 	soldier.name = "Rifleman"
-	soldier.clip = "run_f"
-	soldier.lod = 1
-	soldier.skinned = true
-	soldier.playhead = 1.25
-	soldier.part_anims = {
-		"VEHICLE_SPECIAL1": {
-			"dir": 1,
-			"rate": 1048,
-			"value": 16384,
-		},
-	}
-	soldier.ctrl_values = {
-		"HEAT_GLOW": 32768,
-		"VEHICLE_SPECIAL1": 16384,
-	}
+	soldier.set_animation_time(0.125)
+	soldier.play_part_anim(1, 1, 4.0)
+	soldier.set_ctrl_value("HEAT_GLOW", 32768)
 	soldier.set_meta("entity_ref", {
 		"bms_id": 220,
 		"kind": 1,
@@ -250,8 +231,10 @@ func test_selected_model_detail_survives_registry_reorder_by_stable_identity() -
 		"item_id": 45,
 	})
 	runtime.add_child(crate)
-	runtime.add_child(soldier)
-	runtime.registry.nodes = [crate, soldier]
+	runtime.registry.build([
+		{ "model": crate, "ref": { "bms_id": 101, "kind": 3, "index": 0 } },
+		{ "model": soldier, "ref": { "bms_id": 220, "kind": 1, "index": 7 } },
+	], [])
 	var page := _make_page(null, runtime)
 	page.refresh()
 
@@ -273,9 +256,8 @@ func test_selected_model_detail_survives_registry_reorder_by_stable_identity() -
 		return
 	assert_string_contains(detail.text, "Rifleman")
 	assert_string_contains(detail.text, "BMS 220")
-	assert_string_contains(detail.text, "run_f")
-	assert_string_contains(detail.text, "1.250 s")
-	assert_string_contains(detail.text, "detail L1")
+	assert_string_contains(detail.text, "anim_walk")
+	assert_string_contains(detail.text, "0.125 s")
 	assert_string_contains(detail.text, "skinned")
 	assert_string_contains(detail.text, "VEHICLE_SPECIAL1")
 	assert_string_contains(detail.text, "HEAT_GLOW")
@@ -284,9 +266,19 @@ func test_selected_model_detail_survives_registry_reorder_by_stable_identity() -
 	# Change which model is actively playing as well as registry order, so the
 	# useful-model sort moves the selected row. Selection must follow BMS 220,
 	# not whichever model inherits the old row index.
-	crate.clip = "idle"
-	soldier.clip = ""
-	runtime.registry.nodes = [soldier, crate]
+	var crate_root := ResourceRoot.new()
+	assert_eq(crate_root.set_root_dir(
+			ProjectSettings.globalize_path("res://../fixtures/anim")), OK)
+	var crate_sk := SkeletalAnim.new()
+	assert_true(crate_sk.load_from_bad_files(crate_root, "idle.bad",
+			{ "anim_idle": "idle.bad" }))
+	crate.set_skeletal_anim(crate_sk)
+	crate.play_body_clip("anim_idle")
+	soldier.stop_body_clip()
+	runtime.registry.build([
+		{ "model": soldier, "ref": { "bms_id": 220, "kind": 1, "index": 7 } },
+		{ "model": crate, "ref": { "bms_id": 101, "kind": 3, "index": 0 } },
+	], [])
 	page.refresh()
 	var moved_soldier_index := -1
 	for i in range(list.item_count):

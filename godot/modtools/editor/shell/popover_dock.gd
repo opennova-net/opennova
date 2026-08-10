@@ -304,7 +304,7 @@ func _ensure_camera_content() -> void:
 
 # The camera panel's editor API is the shell itself (get_editor_camera etc.).
 func sync_camera_editor() -> void:
-	if _camera_settings_panel != null and _camera_settings_panel.has_method("set_editor"):
+	if _camera_settings_panel != null:
 		_camera_settings_panel.set_editor(_shell)
 
 
@@ -328,7 +328,7 @@ func refresh_camera_state() -> void:
 		_camera_popup.visible = false
 	if (_camera_popup != null and _camera_popup.visible) or floating:
 		_ensure_camera_content()
-		if _camera_settings_panel != null and _camera_settings_panel.has_method("sync_from_editor_state"):
+		if _camera_settings_panel != null:
 			_camera_settings_panel.sync_from_editor_state()
 
 

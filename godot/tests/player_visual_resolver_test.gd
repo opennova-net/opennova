@@ -1,12 +1,11 @@
 extends GutTest
 
-const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
 
 
 func test_runtime_player_type_resolves_to_us01_visual_item() -> void:
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/godot/dvxi5")), OK)
-	var placer := MissionObjectPlacer.new(root)
+	var placer := MissionObjectPlacer.create(root, null)
 	var db := placer.get_item_db()
 	assert_eq(db.get_graphic(0x14B9), "", "runtime type id is not an items.def authoring id")
 
@@ -27,9 +26,9 @@ func test_raw_runtime_item_type_resolves_to_full_items_def_id() -> void:
 			+ "  graphic M1trret\n"
 			+ "end\n")
 	file.close()
-	var db := NovaItemDatabase.new()
+	var db := ItemDatabase.new()
 	assert_eq(db.load(tmp), OK)
-	var placer := MissionObjectPlacer.new(null, db)
+	var placer := MissionObjectPlacer.create(null, db)
 	assert_eq(placer.resolve_player_visual_item_id(166), 100166)
 	assert_eq(placer.resolve_player_visual_item_id(100166), 100166,
 			"already-full authored ids stay unchanged")

@@ -402,7 +402,7 @@ func _track_name(names: Array, track: int) -> String:
 func _preview_track(track: int) -> void:
 	if _lm._preview == null or _lm._document == null or not _lm._document.bank_loaded():
 		return
-	var stream: NovaSbfAudioStream = _lm._document.bank.get_stream_at(track)
+	var stream: SbfAudioStream = _lm._document.bank.get_stream_at(track)
 	if stream != null:
 		_lm._preview.play_stream(stream)
 
@@ -456,7 +456,7 @@ func _on_node_gui_input(event: InputEvent, section_name: String) -> void:
 # this on can_edit_plays() and recompiles; document.changed rebuilds the map and
 # re-populates the drilled-in program view, so there's nothing else to refresh here.
 func _on_inspector_add_play(section_name: StringName, track: int) -> void:
-	if _lm._document == null or not _lm._document.has_method("insert_play"):
+	if _lm._document == null:
 		return
 	if _lm._document.insert_play(section_name, track):
 		_lm._follow_live = false
@@ -473,8 +473,7 @@ func _build_var_list() -> Array:
 	var profile := ""
 	if _lm._document != null and _lm._document.script_loaded():
 		sname = String(_lm._document.mus_script.get_default_script_name())
-		if _lm._document.has_method("get_var_profile_path"):
-			profile = _lm._document.get_var_profile_path()
+		profile = _lm._document.get_var_profile_path()
 	for i in range(17):
 		var label: String = _lm.MusVarNames.label_for(sname, i, profile) if sname != "" else "Var%02d" % i
 		out.append({"token": "Var%02d" % i, "label": label})

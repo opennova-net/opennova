@@ -23,8 +23,8 @@ run/main_scene.runtime_game="res://game/main_game.tscn"
 
 [autoload]
 
-NovaStrings="*res://adapter/strings/nova_strings.gd"
-NovaMusicService="*res://adapter/world/nova_music_service.gd"
+Strings="*res://game/strings/nova_strings.gd"
+NovaMusicService="*res://game/world/nova_music_service.gd"
 
 [display]
 

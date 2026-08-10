@@ -1,12 +1,12 @@
 extends GutTest
 
 # MissionRuntime is GameWorld's live mission driver: it owns a real
-# NovaSimulation, present pass, and entity index and ticks them in one order.
+# Simulation, present pass, and entity index and ticks them in one order.
 # These focused tests instantiate it directly over fixture nodes to prove the
 # engine path without introducing a second editor gameplay runtime.
 
-const MissionRuntime := preload("res://adapter/world/mission_runtime.gd")
-const ItemSeatSpecs := preload("res://adapter/world/item_seat_specs.gd")
+const MissionRuntime := preload("res://game/world/mission_runtime.gd")
+const ItemSeatSpecs := preload("res://game/world/item_seat_specs.gd")
 
 
 func test_mission_loadout_chunk_promotes_through_the_native_gate() -> void:
@@ -15,13 +15,13 @@ func test_mission_loadout_chunk_promotes_through_the_native_gate() -> void:
 	# document's chunk strings stash at load and promote as ints once the weapon
 	# catalog can resolve names — offline only, the witnessed gate
 	# [orig: Mission_LoadBMSFile @0x40F4E0 — gate @0x40f694; the tuple parse].
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.create_default(), OK)
 	assert_true(m.set_weapon_loadout([
 		{ "name": "WPN_KNIFE", "ammo_primary": "3", "ammo_secondary": "0", "flags": "2" }]))
-	var sim := NovaSimulation.new()
+	var sim := Simulation.new()
 	assert_true(sim.load_from_mission_data(m))
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
 			"res://../fixtures/def")), OK)
 	assert_eq(sim.load_weapon_table(root, "weapon.def"), OK)
@@ -62,10 +62,10 @@ func test_shared_seat_rules_predict_original_command_rules() -> void:
 
 
 func test_production_seat_specs_extract_target_phrase_set_config() -> void:
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
 			"res://../fixtures/def/items.def")), OK)
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	root.set_root_dir(ProjectSettings.globalize_path(
 			"res://../fixtures/3dp/B50Cal"))
 	var spec := item_db.extract_seat_specs_for_item(root, 101419)
@@ -87,13 +87,13 @@ func test_production_seat_specs_extract_target_phrase_set_config() -> void:
 
 
 func test_wire_type_ids_install_the_same_late_vehicle_metadata() -> void:
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
 			"res://../fixtures/def/items.def")), OK)
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	root.set_root_dir(ProjectSettings.globalize_path(
 			"res://../fixtures/3dp/B50Cal"))
-	var sim := NovaSimulation.new()
+	var sim := Simulation.new()
 	autofree(sim)
 	assert_false(sim.install_seat_specs_for_type_ids(
 			item_db, PackedInt32Array([1419])),
@@ -105,7 +105,7 @@ func test_wire_type_ids_install_the_same_late_vehicle_metadata() -> void:
 	assert_eq(int(sim.debug_native_pose_stats()["mounted_graphic_sources"]), 1,
 			"duplicate/zero type ids collapse to the one resolved model source")
 	# The metadata the install extracted, via the tooling card over the same
-	# native extractor (NovaItemDatabase.extract_seat_specs_for_item).
+	# native extractor (ItemDatabase.extract_seat_specs_for_item).
 	var spec := item_db.extract_seat_specs_for_item(root, 101419)
 	assert_eq(int(spec.get("item_id", 0)), 101419,
 			"the wire type maps back into the items.def id space")
@@ -114,17 +114,6 @@ func test_wire_type_ids_install_the_same_late_vehicle_metadata() -> void:
 			"the late join path resolves the model's UseGun seat")
 	assert_true(bool(spec.get("mount_config_valid", false)))
 	assert_eq(int(spec.get("mount_config", -1)), 4)
-
-
-# An animatable placed entity: play_part_anim marks it for the registry, set_part_phase + Node3D
-# transform/visible let the present pass drive it.
-class FakeModel:
-	extends Node3D
-	var phases: Array = []
-	func play_part_anim(_channel: int, _play_type: int, _time_s: float) -> void:
-		pass
-	func set_part_phase(channel: int, phase: int) -> void:
-		phases.append([channel, phase])
 
 
 class FireAudioStub:
@@ -145,19 +134,23 @@ class FireAudioStub:
 		return true
 
 
+# The typed owner-anchor registry (ItemEffectDirector) with the registrations
+# captured for the pose-follow assertions below.
 class CatchupEffectAnchorMount:
-	extends RefCounted
+	extends ItemEffectDirector
 	var anchors: Dictionary = {}
 
 	func register_effect_anchor(owner_key: Variant, resolver: Callable) -> void:
 		anchors[owner_key] = resolver
+		super.register_effect_anchor(owner_key, resolver)
 
 	func unregister_effect_anchor(owner_key: Variant) -> void:
 		anchors.erase(owner_key)
+		super.unregister_effect_anchor(owner_key)
 
 
 class CatchupEffectWorld:
-	extends RefCounted
+	extends EffectWorld
 	var anchor_mount: CatchupEffectAnchorMount
 	var owner_key: Variant
 	var group_live := false
@@ -171,7 +164,7 @@ class CatchupEffectWorld:
 		anchor_mount = mount
 
 	func spawn_effect_owned_request(key: Variant, _name: String,
-			_position: Vector3, _orientation: Vector3) -> Dictionary:
+			_position: Vector3, _orientation: Vector3 = Vector3.ZERO) -> Dictionary:
 		owner_key = key
 		group_live = true
 		spawn_count += 1
@@ -195,27 +188,35 @@ class CatchupEffectWorld:
 			active_poses.append(pose)
 
 
-# Build a one-organic mission + a container holding one fake node tagged to match it by (kind,index)
-# (the in-memory mission has bms_id 0, so the present index resolves by the fallback key).
+# Build a one-organic mission + a real placer registering one real ObjectModel for it by
+# (kind,index) — the in-memory mission has bms_id 0, so the present index resolves by the fallback
+# key. The runtime builds its EntityIndex from options.placer's construction-time
+# placed_entity_records ({model, ref} — the channel MissionObjectPlacer.place() records; never a
+# container scan), so the harness registers through that same channel and every setup below passes
+# {"placer": w.placer}. The tests assert only Node3D position/visible on the model.
 func _make_world(authored: Transform3D) -> Dictionary:
-	var md := NovaMissionData.new()
+	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	md.add_entity(3, 0, Vector3(10, 0, 0), Vector3.ZERO)  # KIND_ORGANIC
 
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var model := FakeModel.new()
-	model.transform = authored
-	model.set_meta("entity_ref", { "kind": 3, "index": 0, "bms_id": 0, "group": -1 })
+	var model := ObjectModel.new()
 	container.add_child(model)
-	return { "mission": md, "container": container, "model": model }
+	model.set_process(false)
+	model.transform = authored
+	var ref := { "kind": 3, "index": 0, "bms_id": 0, "group": -1, "team": -1, "position": Vector3.ZERO }
+	model.set_meta("entity_ref", ref)
+	var placer := MissionObjectPlacer.new()
+	placer.placed_entity_records.append({ "model": model, "ref": ref })
+	return { "mission": md, "container": container, "model": model, "placer": placer }
 
 
 func test_setup_promotes_and_counts() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
-	var count := int(rt.setup(w.mission, w.container))
+	var count := int(rt.setup(w.mission, w.container, {"placer": w.placer}))
 	# P7: every preview is the in-process listen server, so the host player auto-spawns at bring-up —
 	# the world is the one authored organic + the host player.
 	assert_eq(count, 2, "one organic + the auto-spawned host player")
@@ -229,7 +230,7 @@ func test_stats_and_manual_probe_share_one_native_profiling_owner_gate() -> void
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
 	rt.set_frame_stats_board(board)
-	rt.setup(w.mission, w.container)
+	rt.setup(w.mission, w.container, {"placer": w.placer})
 	var sim := rt.get_sim()
 	assert_false(sim.is_runtime_profiling_enabled(),
 			"an attached but closed Stats board leaves native profiling off")
@@ -275,13 +276,14 @@ func test_stats_and_manual_probe_share_one_native_profiling_owner_gate() -> void
 # controllable for F3 diagnostics and focused fixtures.
 func test_transport_is_locked_out_of_a_live_net_session() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
-	var joiner := NovaSimulation.new()
+	var joiner := Simulation.new()
 	assert_true(joiner.enable_join("127.0.0.1", 9, "TransportLockJoiner"))
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
 	assert_gt(int(rt.setup(w.mission, w.container, {
 		"simulation": joiner,
 		"net_transport": "lan-join",
+		"placer": w.placer,
 	})), 0)
 
 	assert_true(rt.is_transport_locked(), "a joiner runtime reports a locked transport")
@@ -299,7 +301,7 @@ func test_transport_still_works_for_a_local_runtime() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
-	assert_gt(int(rt.setup(w.mission, w.container)), 0)
+	assert_gt(int(rt.setup(w.mission, w.container, {"placer": w.placer})), 0)
 	# A directly instantiated runtime has no bound socket or peers, so it is not
 	# a live net session and keeps its transport.
 	assert_false(rt.is_transport_locked(),
@@ -316,7 +318,7 @@ func test_joiner_runtime_owns_fire_and_throwable_presenters() -> void:
 	# consumers on the joiner just as it does on the host. A pre-connected sim
 	# pins the real production setup branch without requiring a live peer.
 	var w := _make_world(Transform3D.IDENTITY)
-	var joiner := NovaSimulation.new()
+	var joiner := Simulation.new()
 	assert_true(joiner.enable_join("127.0.0.1", 9, "PresentJoiner"))
 	var target := JoinTarget.new()
 	target.host_ip = "127.0.0.1"
@@ -329,6 +331,7 @@ func test_joiner_runtime_owns_fire_and_throwable_presenters() -> void:
 		"simulation": joiner,
 		"join_target": target,
 		"fire_audio": func(): return audio,
+		"placer": w.placer,
 	})), 0)
 
 	var fire_stats := rt.get_fire_present_stats()
@@ -339,7 +342,7 @@ func test_joiner_runtime_owns_fire_and_throwable_presenters() -> void:
 			"the joiner constructs the flying-throwable snapshot consumer")
 	assert_eq(throwable_stats.live, 0)
 
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(ProjectSettings.globalize_path(
 			"res://../fixtures/def")), OK)
 	assert_eq(rt.get_sim().load_ammo_table(root, "ammo.def"), OK)
@@ -377,8 +380,7 @@ func test_wire_presenter_resets_with_runtime_stop() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
-	var placer := RefCounted.new()
-	rt.setup(w.mission, w.container, {"placer": placer})
+	rt.setup(w.mission, w.container, {"placer": w.placer})
 	var wire_present := rt.get_wire_presenter()
 	assert_not_null(wire_present)
 	var reset_wire := Callable(wire_present, "reset_runtime_state")
@@ -392,7 +394,7 @@ func test_presentation_clock_survives_setup_and_forwards_immediately() -> void:
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
 	rt.set_presentation_time_ms(0x1ffffffff)
-	rt.setup(w.mission, w.container)
+	rt.setup(w.mission, w.container, {"placer": w.placer})
 	assert_eq(rt.get_sim().get_panm_time_ms(), 0xffffffff,
 		"preconfigured clock is injected after mission-load reset")
 	rt.set_presentation_time_ms(1234)
@@ -407,6 +409,7 @@ func test_setup_exposes_normalized_diagnostic_mission_identity() -> void:
 	rt.setup(w.mission, w.container, {
 		"debug_mission_file": "C:\\missions\\00TRe.bms",
 		"debug_mission_name": "Training Grounds",
+		"placer": w.placer,
 	})
 	assert_eq(rt.get_mission_file(), "00TRe.bms",
 			"diagnostics expose a portable basename, never the editor's local path")
@@ -419,7 +422,7 @@ func test_tick_presents_sim_position_onto_node() -> void:
 	var w := _make_world(Transform3D(Basis(), Vector3(99, 99, 99)))
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container)
+	rt.setup(w.mission, w.container, {"placer": w.placer})
 	rt.step_once()
 	var sim_pos: Vector3 = rt.get_sim().get_entity_position(0)
 	assert_true((w.model as Node3D).position.is_equal_approx(sim_pos),
@@ -429,7 +432,7 @@ func test_tick_presents_sim_position_onto_node() -> void:
 
 
 # (Historical transform-restore test deleted: MissionRuntime.stop() still
-# rewinds NovaSimulation for teardown/fixtures, but ONED no longer owns a live
+# rewinds Simulation for teardown/fixtures, but ONED no longer owns a live
 # runtime whose Stop must restore authored editor nodes.)
 
 
@@ -441,7 +444,7 @@ func test_tick_and_step_advance_and_present_like_the_game() -> void:
 	var w := _make_world(Transform3D(Basis(), Vector3(99, 99, 99)))
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container)
+	rt.setup(w.mission, w.container, {"placer": w.placer})
 	assert_true(rt.tick(), "tick() advances one logic tick")
 	rt.step_once()
 	var sim_pos: Vector3 = rt.get_sim().get_entity_position(0)
@@ -452,7 +455,7 @@ func test_tick_and_step_advance_and_present_like_the_game() -> void:
 func test_effects_drained_signal_fires() -> void:
 	# A mission runtime drains side effects each tick; the shell listens on effects_drained. Build an
 	# unconditional OutputText event and confirm the signal carries it.
-	var md := NovaMissionData.new()
+	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	assert_false(md.add_event(0, 0, 0).is_empty())
 	assert_false(md.add_event_action(0, { "action_type": 6, "param1": 42 }).is_empty())
@@ -480,7 +483,7 @@ func test_tick_realtime_accumulates_fixed_quanta() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container)
+	rt.setup(w.mission, w.container, {"placer": w.placer})
 	rt.play()
 	# 0.1 s of wall-clock at 62.5 Hz = floor(0.1 / 0.016) = 6 ticks.
 	assert_eq(rt.tick_realtime(0.1), 6, "0.1 s banks 6 fixed-step ticks")
@@ -493,7 +496,7 @@ func test_tick_realtime_clamps_catchup() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container)
+	rt.setup(w.mission, w.container, {"placer": w.placer})
 	rt.play()
 	# 1.0 s would be ~62 ticks; the spiral-of-death clamp caps a single frame's
 	# catch-up at the native world::TickAccumulator::kMaxCatchupTicks (S14).
@@ -506,7 +509,7 @@ func test_tick_realtime_ignored_when_not_playing() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container)
+	rt.setup(w.mission, w.container, {"placer": w.placer})
 	# Not played -> paused -> banks nothing regardless of elapsed wall-clock (no burst on Play).
 	assert_eq(rt.tick_realtime(1.0), 0, "a paused runtime banks nothing")
 	rt.play()
@@ -517,9 +520,9 @@ func test_tick_realtime_still_presents_a_zero_tick_render_frame() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container)
+	rt.setup(w.mission, w.container, {"placer": w.placer})
 	rt.play()
-	assert_eq(rt.tick_realtime(MissionRuntime.TICK_DT), 1,
+	assert_eq(rt.tick_realtime(Simulation.tick_dt()), 1,
 			"seed one decoded presentation snapshot")
 	(w.model as Node3D).visible = false
 	assert_eq(rt.tick_realtime(0.0), 0, "no fixed simulation tick advances")
@@ -533,7 +536,7 @@ func test_tick_realtime_presents_latest_state_once() -> void:
 	var w := _make_world(Transform3D(Basis(), Vector3(99, 99, 99)))
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container)
+	rt.setup(w.mission, w.container, {"placer": w.placer})
 	rt.play()
 	assert_gt(rt.tick_realtime(0.1), 0, "the batch ran at least one tick")
 	var sim_pos: Vector3 = rt.get_sim().get_entity_position(0)
@@ -548,7 +551,7 @@ func test_catchup_exposes_each_fixed_ticks_pose_before_batched_presentation() ->
 	var w := _make_world(authored)
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container)
+	rt.setup(w.mission, w.container, {"placer": w.placer})
 	var entity_ref := {"kind": 3, "index": 0, "bms_id": 0}
 	var observed: Array = []
 	rt.fixed_tick_completed.connect(func(_logic_tick: int) -> void:
@@ -582,23 +585,25 @@ func test_catchup_advances_round_move_effect_at_each_live_pose_and_stops_before_
 	var w := _make_world(Transform3D.IDENTITY)
 	var anchor_mount := CatchupEffectAnchorMount.new()
 	var effect_world := CatchupEffectWorld.new(anchor_mount)
+	add_child_autofree(effect_world)
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container, {
 		"fire_fx": func() -> Variant: return effect_world,
-		"game_world": anchor_mount,
+		"effect_anchors": anchor_mount,
+		"placer": w.placer,
 	})
-	var def_root := NovaResourceRoot.new()
+	var def_root := ResourceRoot.new()
 	def_root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/def"))
 	assert_eq(rt.get_sim().load_ammo_table(def_root, "ammo.def"), OK)
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(ProjectSettings.globalize_path(
 			"res://../fixtures/def/items.def")), OK)
 	rt.get_sim().resolve_item_traits(item_db)
 	assert_gte(rt.get_sim().debug_spawn_round(
 			Vector3(100, 100, 100), Vector3.RIGHT, "grenadefb"), 0)
 	rt.fixed_tick_completed.connect(func(_logic_tick: int) -> void:
-		effect_world.advance_fixed_tick(MissionRuntime.TICK_DT)
+		effect_world.advance_fixed_tick(Simulation.tick_dt())
 	)
 	rt.play()
 
@@ -621,10 +626,10 @@ func test_catchup_advances_round_move_effect_at_each_live_pose_and_stops_before_
 	# ticks into a twelve-tick catch-up batch: advances 248..252 must observe no
 	# live group, rather than emitting five stale ticks until final presentation.
 	for _batch in range(7):
-		assert_eq(rt.tick_realtime(31.0 * MissionRuntime.TICK_DT), 31)
-	assert_eq(rt.tick_realtime(20.0 * MissionRuntime.TICK_DT), 20)
+		assert_eq(rt.tick_realtime(31.0 * Simulation.tick_dt()), 31)
+	assert_eq(rt.tick_realtime(20.0 * Simulation.tick_dt()), 20)
 	assert_eq(effect_world.fixed_advance_count, 240)
-	assert_eq(rt.tick_realtime(12.0 * MissionRuntime.TICK_DT), 12)
+	assert_eq(rt.tick_realtime(12.0 * Simulation.tick_dt()), 12)
 	assert_eq(effect_world.fixed_advance_count, 252)
 	assert_eq(effect_world.active_tick_numbers.size(), 247,
 			"the group advances exactly while the round is alive")
@@ -637,7 +642,7 @@ func test_catchup_advances_round_move_effect_at_each_live_pose_and_stops_before_
 func test_tick_realtime_drains_effects_per_tick() -> void:
 	# Effects must drain PER logic tick INSIDE the catch-up batch (not coalesced into one emit at the
 	# end): the BMS quarter-pass one-shot still surfaces when many ticks run in a single real-time frame.
-	var md := NovaMissionData.new()
+	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	assert_false(md.add_event(0, 0, 0).is_empty())
 	assert_false(md.add_event_action(0, { "action_type": 6, "param1": 42 }).is_empty())
@@ -675,7 +680,7 @@ func _run_realtime(step: float, count: int) -> Dictionary:
 	var w := _make_world(Transform3D.IDENTITY)
 	var rt := MissionRuntime.new()
 	add_child_autofree(rt)
-	rt.setup(w.mission, w.container)
+	rt.setup(w.mission, w.container, {"placer": w.placer})
 	rt.play()
 	var ticks := 0
 	for _i in range(count):

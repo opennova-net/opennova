@@ -8,7 +8,7 @@ extends GutTest
 #     -> RtxtStringFile decode (cp1252-aware, D-RTXT-8 in
 #        docs/interface/rtxt-strings-re.md; the strings editor's read path)
 #     -> Godot String (Unicode)
-#     -> NovaFntResource.to_font_file() FontFile (the runtime's .fnt view;
+#     -> FntResource.to_font_file() FontFile (the runtime's .fnt view;
 #        glyph slots keyed at their decoded cp1252 codepoints)
 #     -> the engine draw (HudText.draw_text / menus / credits).
 #
@@ -96,10 +96,10 @@ func test_cp1252_bytes_decode_to_the_code_pages_unicode() -> void:
 
 func _fixture_font() -> FontFile:
 	var fnt_bytes := FileAccess.get_file_as_bytes(FNT_PATH)
-	var res: NovaFntResource = NovaFntResource.new()
+	var res: FntResource = FntResource.new()
 	if fnt_bytes.is_empty() or res.load_from_bytes(fnt_bytes) != OK:
 		res = null
-	assert_not_null(res, "Serpen24.fnt fixture should load as NovaFntResource.")
+	assert_not_null(res, "Serpen24.fnt fixture should load as FntResource.")
 	if res == null:
 		return null
 	var font := res.to_font_file()

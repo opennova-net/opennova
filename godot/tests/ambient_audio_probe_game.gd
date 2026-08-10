@@ -14,7 +14,7 @@ extends SceneTree
 const LOAD_TIMEOUT_WALL_SECONDS := 240.0
 const WARM_MS := 6000
 const SAMPLE_MS := 10000
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 const MountGuard := preload("res://tests/perf_probe_mount_guard.gd")
 
 var _mount_guard = MountGuard.new()

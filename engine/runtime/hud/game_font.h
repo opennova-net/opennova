@@ -1,0 +1,122 @@
+#pragma once
+
+// The retail game-font text engine (ADR 0033 R2): measurement and glyph-quad
+// layout over a parsed .fnt, ported structurally from CGameFont. The embedder
+// keeps only texture upload and quad rasterization; alignment, per-page
+// passes, bold double-strike, italic shear, the underline pass, tab stops,
+// inline format tags, and the byte-indexed glyph walk all live here.
+// [orig: CGameFont_MeasureText @ 0x674e70; CGameFont_DrawText @ 0x6752c0;
+//  GText_ParseFormatTag @ 0x674200; CGameFont_ReadLine @ 0x676480]
+// Witness record: docs/fonts/fnt-re.md.
+
+#include <fnt/fnt.h>
+
+#include <cstdint>
+#include <vector>
+
+namespace opennova::hud {
+
+// Layout flags — the drawer's packed flag word (v164) [orig: @ 0x6752c0].
+enum GameFontFlags : uint32_t {
+	kFontAlignCenter = 0x1,
+	kFontAlignRight = 0x2,
+	kFontStyleBold = 0x10,
+	kFontStyleItalic = 0x20,
+	kFontStyleUnderline = 0x40,
+	kFontTagsDisabled = 0x100,
+};
+
+// The persistent inline-format state a draw call threads (retail's 5-dword
+// textBuffer block; the drawer persists it at this+4860.. and mirrors it back
+// through the optional state pointer) [orig: @ 0x6752c0 tail].
+struct GameFontState {
+	bool bold = false;
+	bool underline = false;
+	bool italic = false;
+	bool tags_disabled = false;
+	uint32_t color_xor = 0;      // low 24 bits XORed into the draw color
+	uint32_t original_color = 0; // the <CO> restore target (RGB)
+	int tab_width = 0;           // 0 = the font's own tab stop
+	int timer = 0;               // <Tnnn> — carried, not consumed here
+};
+
+// One glyph quad in output space. The four corners are explicit because the
+// italic pass shears the TOP edge by height/8 [orig: @ 0x6752c0 the 0.125
+// skew]; UVs carry the drawer's half-texel bottom-V bias.
+struct GameFontQuad {
+	uint32_t page = 0;
+	float x_top_left = 0.0f;
+	float x_top_right = 0.0f;
+	float x_bottom_left = 0.0f;
+	float x_bottom_right = 0.0f;
+	float y_top = 0.0f;
+	float y_bottom = 0.0f;
+	float u0 = 0.0f;
+	float v0 = 0.0f;
+	float u1 = 0.0f;
+	float v1 = 0.0f;
+	uint32_t color = 0; // 0xAARRGGBB as the caller supplied / tag-adjusted
+};
+
+// The underline pass draws LINE segments under the run, at DOUBLED text color
+// (2x per channel, clamped) [orig: @ 0x6752c0 the line-list buffer +
+// per-channel 2x fold].
+struct GameFontUnderline {
+	float x0 = 0.0f;
+	float x1 = 0.0f;
+	float y = 0.0f;
+	uint32_t color = 0;
+};
+
+struct GameFontRun {
+	std::vector<GameFontQuad> quads;
+	std::vector<GameFontUnderline> underlines;
+	float width = 0.0f;  // the measured extent actually laid out
+	float height = 0.0f;
+};
+
+class GameFont {
+public:
+	// Borrow a parsed font (not owned; the caller keeps it alive).
+	void set_font(const fnt_font_t *font) { font_ = font; }
+	const fnt_font_t *font() const { return font_; }
+
+	// Pixel measurement [orig: CGameFont_MeasureText @ 0x674e70]: byte-indexed
+	// glyphs (controls < 0x20 and 0x7F/0x80/0x81 skipped), '\\' escapes,
+	// '<' tags via the shared parser, '\t' to the next tab stop, '\n' folds
+	// width into the max and adds the SPACE glyph's v-extent as line height;
+	// the final width strips the trailing (glyph_spacing - 1) pad.
+	void measure(const char *text, float scale_x, float scale_y,
+			int *out_w, int *out_h, GameFontState *state = nullptr) const;
+
+	// Glyph-quad layout [orig: CGameFont_DrawText @ 0x6752c0]: one pass per
+	// texture page over each 255-byte line [orig: CGameFont_ReadLine
+	// @ 0x676480]; center/right alignment re-measures per line; bold emits a
+	// second strike at (+1, -1); italic shears the top edge by height/8;
+	// underline emits doubled-color segments; every glyph advance is
+	// floor(w * scale + (spacing - 1) * scale + 0.5) from the same cursor walk
+	// the measurer uses. (x, y) is the anchor the alignment resolves against.
+	GameFontRun layout(const char *text, float x, float y, float scale_x,
+			float scale_y, uint32_t flags, uint32_t color,
+			GameFontState *state = nullptr) const;
+
+	// The shared inline-tag parser [orig: GText_ParseFormatTag @ 0x674200]:
+	// <B>/<I>/<U> (with '-' prefix off), <Cxxxxxx> hex color, <CO> restore
+	// original, <CH> half-bright (3/4 c + 0x40 per channel), <Tnnn> timer.
+	// Returns true when the tag was well-formed; advances *index past it.
+	static bool parse_format_tag(const char *text, int *index,
+			GameFontState *state);
+
+	// The engine's per-font line height: the SPACE glyph's v-extent in pixels
+	// [orig: @ 0x6752c0 (this[95] - this[93]) * 256].
+	float line_height(float scale_y) const;
+
+private:
+	struct Cursor;
+	const fnt_glyph_t *glyph_for_byte(uint8_t byte) const;
+	float glyph_advance(const fnt_glyph_t *glyph, float scaled_x) const;
+
+	const fnt_font_t *font_ = nullptr;
+};
+
+} // namespace opennova::hud

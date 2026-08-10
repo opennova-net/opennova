@@ -7,7 +7,7 @@ add_library(opennova_oned_edit INTERFACE)
 
 target_include_directories(opennova_oned_edit
     INTERFACE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/..
 )
 
 target_compile_features(opennova_oned_edit INTERFACE cxx_std_17)

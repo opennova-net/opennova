@@ -6,7 +6,7 @@ cbik (bike) mover, and the aircraft contact solve. Implementing code:
 `engine/runtime/world/src/vehicle_motor.cpp` (the family `*_client_tick` movers +
 `watercraft_platform_solve`), `engine/net/netsim/src/client_replica_pipeline.cpp` (the
 per-class row chases), with the joiner wiring in
-`godot/adapter/simulation/nova_simulation_net.cpp`. Binary: retail
+`godot/src/simulation/nova_simulation_net.cpp`. Binary: retail
 `Jointops.exe`, imagebase `0x400000`, IDB `Jointops.exe.kong.i64` — every
 address below is absolute in that image. The between-update mover architecture
 (stage-only reads, the class table, the chase templates) is

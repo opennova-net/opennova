@@ -4,7 +4,7 @@ extends SceneTree
 #
 # Renders a deterministic grid of material swatches — one cell per unique
 # object-shader key reachable from the canonical shader-tag table
-# (NovaObjectShaderCache.get_known_shader_tags()) under a curated flag/emissive
+# (ObjectShaderCache.get_known_shader_tags()) under a curated flag/emissive
 # variant set — using code-generated textures only (asset-free), and saves one
 # grid PNG + a JSON manifest. Compare mode diffs two captures exactly.
 # Not collected by GUT (probe suffix). Asset-gated world baselines ride
@@ -31,7 +31,7 @@ extends SceneTree
 # The composite mode (REN-3) renders the DRAW-ORDER scenes: overlapping
 # translucent quads whose depths are arranged AGAINST the witnessed order, so
 # only the ported priority ladder (engine/runtime/renderer/render_order via
-# NovaObjectShaderCache) produces the correct stack — Godot's per-object
+# ObjectShaderCache) produces the correct stack — Godot's per-object
 # depth sort alone would compose them backwards. Scene 1 is the water bracket
 # (below-water alpha under the water surface under above-water alpha
 # [orig: Terrain_RenderSceneWithReflection @ 0x5c93a0]); scene 2 is the sky
@@ -77,7 +77,7 @@ func _capture_mode(out_dir: String, prefix: String) -> void:
 	DirAccess.make_dir_recursive_absolute(out_dir)
 	get_root().get_window().size = WINDOW_SIZE
 
-	var cache := NovaObjectShaderCache.get_singleton()
+	var cache := ObjectShaderCache.get_singleton()
 	var tags: PackedStringArray = cache.get_known_shader_tags()
 	tags.append("VS_LEAVESWIND") # unknown-tag fallback swatch
 
@@ -176,7 +176,7 @@ func _composite_mode(out_dir: String, prefix: String) -> void:
 	DirAccess.make_dir_recursive_absolute(out_dir)
 	get_root().get_window().size = WINDOW_SIZE
 
-	var cache := NovaObjectShaderCache.get_singleton()
+	var cache := ObjectShaderCache.get_singleton()
 	# Exercise the real session seam: water plane at world height 0.
 	cache.set_water_split_height(0.0)
 
@@ -198,16 +198,16 @@ func _composite_mode(out_dir: String, prefix: String) -> void:
 			"name": "water_bracket",
 			"layers": [
 				["alpha_below", Color(0.9, 0.15, 0.1, 0.75), cache.alpha_rung_for_height(-8.0), 2.0],
-				["water", Color(0.1, 0.25, 0.9, 0.75), NovaObjectShaderCache.RENDER_RUNG_WATER, 0.0],
+				["water", Color(0.1, 0.25, 0.9, 0.75), ObjectShaderCache.RENDER_RUNG_WATER, 0.0],
 				["alpha_above", Color(0.1, 0.85, 0.2, 0.75), cache.alpha_rung_for_height(8.0), -2.0],
 			],
 		},
 		{
 			"name": "sky_ladder",
 			"layers": [
-				["stars", Color(0.95, 0.95, 0.95, 0.75), NovaObjectShaderCache.RENDER_RUNG_SKY_STARS, 2.0],
-				["body", Color(0.95, 0.75, 0.1, 0.75), NovaObjectShaderCache.RENDER_RUNG_SKY_BODY, 0.0],
-				["glow", Color(0.95, 0.4, 0.7, 0.75), NovaObjectShaderCache.RENDER_RUNG_SUN_GLOW, -2.0],
+				["stars", Color(0.95, 0.95, 0.95, 0.75), ObjectShaderCache.RENDER_RUNG_SKY_STARS, 2.0],
+				["body", Color(0.95, 0.75, 0.1, 0.75), ObjectShaderCache.RENDER_RUNG_SKY_BODY, 0.0],
+				["glow", Color(0.95, 0.4, 0.7, 0.75), ObjectShaderCache.RENDER_RUNG_SUN_GLOW, -2.0],
 			],
 		},
 	]
@@ -467,10 +467,10 @@ func _make_swatch_material(cache, cell: Dictionary, diffuse: Texture2D, detail: 
 	material.set_shader_parameter("u_diffuse", diffuse)
 	material.set_shader_parameter("u_detail", detail)
 	material.set_shader_parameter("u_normal_map", normal)
-	if (cell["flags"] & NovaObjectShaderCache.MATERIAL_FLAG_ALPHA_TEST) != 0:
+	if (cell["flags"] & ObjectShaderCache.MATERIAL_FLAG_ALPHA_TEST) != 0:
 		material.set_shader_parameter("u_alpha_test_threshold", float(cell["atb"]) / 255.0)
 		material.set_shader_parameter("u_alpha_test_invert",
-				1.0 if (cell["flags"] & NovaObjectShaderCache.MATERIAL_FLAG_ALPHA_INVERT) != 0 else 0.0)
+				1.0 if (cell["flags"] & ObjectShaderCache.MATERIAL_FLAG_ALPHA_INVERT) != 0 else 0.0)
 	else:
 		material.set_shader_parameter("u_alpha_test_threshold", 0.0)
 		material.set_shader_parameter("u_alpha_test_invert", 0.0)

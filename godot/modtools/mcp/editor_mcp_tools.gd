@@ -1,6 +1,8 @@
 class_name EditorMcpTools
 extends RefCounted
 
+const MissionControllerScript = preload("res://modtools/mission/mission_controller.gd")
+
 ## The editor-wide MCP tool catalog for ONED: thin handlers over the editor's
 ## existing surface (EditorWorkstation facade, EditorWorkspace capability
 ## hooks, the Nova* GDExtension classes). Mission authoring lives in
@@ -74,7 +76,15 @@ const WORKSPACE_TO_KIND := {
 const _OPEN_TIMEOUT_MS := 120000
 const _SCREENSHOT_TIMEOUT_MS := 30000
 
-const EXTRA_API_CLASSES: Array[String] = ["EnvFile", "RtxtStringFile", "CbinCreditsResource", "MnsStyleSheet", "PerfTimeline", "FlyCamera"]
+# The Nova* prefix filter below no longer catches the de-prefixed engine
+# classes (MissionData, ObjectData, ...), so they are indexed by name here.
+const EXTRA_API_CLASSES: Array[String] = [
+	"EnvFile", "RtxtStringFile", "CbinCreditsResource", "MnsStyleSheet", "PerfTimeline", "FlyCamera",
+	"MissionData", "ObjectData", "ObjectModel", "Simulation", "EntityIndex",
+	"Terrain", "TerrainData", "TerrainTileInfo", "TerrainTileEntry", "TerrainFoliageDef",
+	"MusicScript", "SbfBank", "ResourceRoot", "ResourceIndex", "ReferenceIndex",
+	"ItemDatabase", "SkeletalAnim",
+]
 
 var service: Node
 
@@ -101,7 +111,7 @@ func register_all(registry: McpToolRegistry) -> void:
 				"duration_s": { "type": "number", "default": 4.0 },
 			}, ["text"]), Callable(self, "_tool_show_status"))
 	registry.register(McpToolDef.make("set_fullscreen",
-			"Put the editor window into (or out of) fullscreen — the core-engine window mode (NovaWindow), the same F11 toggles. Do this before screenshots so the 3D viewport fills the display. Omit `enabled` to toggle. Returns the resulting fullscreen state.",
+			"Put the editor window into (or out of) fullscreen — the core-engine window mode (WindowState), the same F11 toggles. Do this before screenshots so the 3D viewport fills the display. Omit `enabled` to toggle. Returns the resulting fullscreen state.",
 			{
 				"enabled": { "type": "boolean", "description": "true = fullscreen, false = windowed; omit to toggle." },
 			}), Callable(self, "_tool_set_fullscreen"))
@@ -124,7 +134,7 @@ func register_all(registry: McpToolRegistry) -> void:
 				"call": { "type": "array", "items": { "type": "string" }, "description": "Zero-arg query methods to call — get_*/is_*/has_* names only." },
 			}, ["path"]), Callable(self, "_tool_get_node_state"))
 	registry.register(McpToolDef.make("describe_api",
-			"Read-only API reference: with no args, lists topics, engine classes (Nova*), and live editor objects. name: methods/properties/constants of a class (\"NovaMissionData\") or live object (\"shell\", \"editor\", \"mission_controller\", \"game_session\", \"camera\", \"resource_root\", \"workspace:strings\") — useful for understanding result shapes. topic: a guide (\"coordinates\", \"camera\", \"workspaces\", \"menus\").",
+			"Read-only API reference: with no args, lists topics, engine classes (Nova*), and live editor objects. name: methods/properties/constants of a class (\"MissionData\") or live object (\"shell\", \"editor\", \"mission_controller\", \"game_session\", \"camera\", \"resource_root\", \"workspace:strings\") — useful for understanding result shapes. topic: a guide (\"coordinates\", \"camera\", \"workspaces\", \"menus\").",
 			{
 				"name": { "type": "string", "description": "Class or live-object name." },
 				"topic": { "type": "string", "description": "Guide topic." },
@@ -197,9 +207,9 @@ func _tool_set_resource_root(args: Dictionary, ctx: McpToolContext) -> Variant:
 	if not DirAccess.dir_exists_absolute(dir):
 		return McpToolResult.error("Directory does not exist: %s" % dir)
 	var shell := ctx.shell
-	if shell == null or not shell.has_method("set_resource_root_dir"):
-		return McpToolResult.error("The editor shell is not bound or has no set_resource_root_dir.")
-	var previous: String = shell.get_resource_root_dir() if shell.has_method("get_resource_root_dir") else ""
+	if shell == null:
+		return McpToolResult.error("The editor shell is not bound.")
+	var previous := String(shell.get_resource_root_dir())
 	shell.set_resource_root_dir(dir)
 	return {
 		"ok": true,
@@ -259,6 +269,8 @@ func _tool_get_node_state(args: Dictionary, _ctx: McpToolContext) -> Variant:
 			var mname := String(m)
 			if not (mname.begins_with("get_") or mname.begins_with("is_") or mname.begins_with("has_")):
 				calls[mname] = "SKIPPED: only get_*/is_*/has_* query methods"
+			# Reflection by design: the method names arrive as MCP tool-call
+			# data, so this stays a runtime probe (kept off the no-probing rule).
 			elif not node.has_method(mname):
 				calls[mname] = "SKIPPED: no such method"
 			else:
@@ -324,10 +336,10 @@ func _tool_editor_state(_args: Dictionary, ctx: McpToolContext) -> Variant:
 			"godot": Engine.get_version_info().get("string", ""),
 		},
 		"resource_root": {
-			"dir": shell.get_resource_root_dir() if shell.has_method("get_resource_root_dir") else "",
+			"dir": shell.get_resource_root_dir() if shell != null else "",
 			"mounted": ctx.root() != null,
-			"expansion": NovaResourceDirSettings.get_expansion(),
-			"game": NovaResourceDirSettings.get_game(),
+			"expansion": ResourceDirSettings.get_expansion(),
+			"game": ResourceDirSettings.get_game(),
 		},
 		"active_workspace": String(active.get_workspace_id()) if active != null else "",
 		"workspaces": workspaces,
@@ -364,22 +376,20 @@ func _workspace_state(ws: Variant) -> Dictionary:
 
 
 func _mission_state(ctx: McpToolContext) -> Dictionary:
-	var controller: Variant = ctx.mission()
+	var controller: MissionControllerScript = ctx.mission()
 	var out := { "loaded": false }
-	if controller != null and controller.has_method("is_loaded"):
+	if controller != null:
 		out["loaded"] = bool(controller.is_loaded())
-	if controller != null and controller.has_method("get_current_path"):
 		out["path"] = controller.get_current_path()
-	if controller != null and controller.has_method("get_stats"):
 		out["stats"] = controller.get_stats()
 	return out
 
 
-func _game_run_state(shell: Variant) -> Dictionary:
-	if shell == null or not shell.has_method("get_game_run_session"):
+func _game_run_state(shell: Node) -> Dictionary:
+	if shell == null:
 		return {"state": "unavailable", "running": false}
 	var session: Variant = shell.get_game_run_session()
-	if session == null or not session.has_method("get_state"):
+	if session == null:
 		return {"state": "unavailable", "running": false}
 	return session.get_state()
 
@@ -421,7 +431,7 @@ func _tool_get_logs(args: Dictionary, ctx: McpToolContext) -> Variant:
 
 
 func _tool_show_status(args: Dictionary, ctx: McpToolContext) -> Variant:
-	if ctx.shell == null or not ctx.shell.has_method("show_status_message"):
+	if ctx.shell == null:
 		return McpToolResult.error("The editor shell is not bound yet.")
 	ctx.shell.show_status_message(String(args.get("text", "")), float(args.get("duration_s", 4.0)))
 	return { "ok": true }
@@ -434,10 +444,10 @@ func _tool_set_fullscreen(args: Dictionary, ctx: McpToolContext) -> Variant:
 		return McpToolResult.error("No window is available.")
 	var fullscreen: bool
 	if args.has("enabled"):
-		NovaWindow.set_fullscreen(window, bool(args["enabled"]))
-		fullscreen = NovaWindow.is_fullscreen(window)
+		WindowState.set_fullscreen(window, bool(args["enabled"]))
+		fullscreen = WindowState.is_fullscreen(window)
 	else:
-		fullscreen = NovaWindow.toggle_fullscreen(window)
+		fullscreen = WindowState.toggle_fullscreen(window)
 	return { "ok": true, "fullscreen": fullscreen }
 
 
@@ -505,7 +515,7 @@ static func _describe_live_object(name: String, object: Variant) -> Dictionary:
 		"kind": "live_object",
 		"object": name,
 		"class": object.get_class(),
-		"script_class": String(script.get_global_name()) if script.has_method("get_global_name") else "",
+		"script_class": String((script as Script).get_global_name()),
 		"methods": methods,
 	}
 
@@ -535,8 +545,7 @@ static func _live_object(ctx: McpToolContext, name: String) -> Variant:
 		"mission_controller":
 			return ctx.mission()
 		"game_session":
-			return ctx.shell.get_game_run_session() \
-					if ctx.shell != null and ctx.shell.has_method("get_game_run_session") else null
+			return ctx.shell.get_game_run_session() if ctx.shell != null else null
 		"camera":
 			return ctx.camera()
 		"resource_root":
@@ -548,8 +557,7 @@ func _tool_list_assets(args: Dictionary, ctx: McpToolContext) -> Variant:
 	var shell := ctx.shell
 	if shell == null or ctx.root() == null:
 		return McpToolResult.error("No resource directory mounted — set one in the editor's Settings (gear) popup.")
-	if shell.has_method("_ensure_resource_index"):
-		shell._ensure_resource_index()
+	shell._ensure_resource_index()
 	var index: Variant = ctx.index()
 	if index == null:
 		return McpToolResult.error("Resource index unavailable.")
@@ -697,14 +705,16 @@ func _screenshot_context(ctx: McpToolContext) -> String:
 
 
 func _tool_set_camera(args: Dictionary, ctx: McpToolContext) -> Variant:
-	var camera := ctx.camera()
-	if camera == null:
+	# Every ONED 3D view flies the shared FlyCamera rig, so the pose routes
+	# through its orbit state.
+	var fly_camera: FlyCamera = ctx.camera()
+	if fly_camera == null:
 		return McpToolResult.error("No 3D camera in the active workspace — open terrain/mission/object first (open_in_workspace).")
 	var note := ""
 	if args.get("frame_entity") is Dictionary:
 		var target: Dictionary = args["frame_entity"]
-		var controller: Variant = ctx.mission()
-		if controller == null or not controller.has_method("select_object"):
+		var controller: MissionControllerScript = ctx.mission()
+		if controller == null:
 			return McpToolResult.error("frame_entity needs an open mission — open_in_workspace(workspace=\"mission\", ...) first.")
 		controller.select_object(int(target.get("kind", -1)), int(target.get("index", -1)))
 		if (controller.get_selection_summary() as Dictionary).is_empty():
@@ -715,19 +725,15 @@ func _tool_set_camera(args: Dictionary, ctx: McpToolContext) -> Variant:
 		var x := float(point.get("x", 0.0))
 		var z := float(point.get("z", 0.0))
 		var height := 0.0
-		if ctx.editor != null and ctx.editor.has_method("sample_height_world"):
-			var sampled: float = ctx.editor.sample_height_world(x, z)
+		var editor: TerrainEditorBase = ctx.editor
+		if editor != null:
+			var sampled: float = editor.sample_height_world(x, z)
 			if is_nan(sampled):
 				note = "point is off the terrain; framed at height 0. "
 			else:
 				height = sampled
-		if camera.has_method("frame_bounds_custom"):
-			camera.frame_bounds_custom(Vector3(x, height, z), float(point.get("radius", 60.0)), 1.35, 4000.0,
-					deg_to_rad(float(point.get("yaw_deg", 0.0))), deg_to_rad(float(point.get("pitch_deg", -32.0))))
-		else:
-			var center := Vector3(x, height, z)
-			camera.global_position = center + Vector3(0, 40, 60)
-			camera.look_at(center)
+		fly_camera.frame_bounds_custom(Vector3(x, height, z), float(point.get("radius", 60.0)), 1.35, 4000.0,
+				deg_to_rad(float(point.get("yaw_deg", 0.0))), deg_to_rad(float(point.get("pitch_deg", -32.0))))
 	elif args.get("position") is Array and args.get("look_at") is Array:
 		var pos: Array = args["position"]
 		var aim: Array = args["look_at"]
@@ -735,22 +741,18 @@ func _tool_set_camera(args: Dictionary, ctx: McpToolContext) -> Variant:
 		var aim_v := Vector3(float(aim[0]), float(aim[1]), float(aim[2]))
 		if pos_v.distance_to(aim_v) < 0.01:
 			return McpToolResult.error("position and look_at coincide.")
-		if camera.has_method("frame_bounds_custom"):
-			# Route through the orbit state so subsequent human orbiting does not
-			# snap: distance/yaw/pitch derived from the requested pose.
-			var to_cam := pos_v - aim_v
-			var yaw := atan2(to_cam.x, to_cam.z)
-			var pitch := -asin(clampf(to_cam.normalized().y, -1.0, 1.0))
-			camera.frame_bounds_custom(aim_v, to_cam.length(), 1.0, 100000.0, yaw, pitch)
-		else:
-			camera.global_position = pos_v
-			camera.look_at(aim_v)
+		# Route through the orbit state so subsequent human orbiting does not
+		# snap: distance/yaw/pitch derived from the requested pose.
+		var to_cam := pos_v - aim_v
+		var yaw := atan2(to_cam.x, to_cam.z)
+		var pitch := -asin(clampf(to_cam.normalized().y, -1.0, 1.0))
+		fly_camera.frame_bounds_custom(aim_v, to_cam.length(), 1.0, 100000.0, yaw, pitch)
 	else:
 		return McpToolResult.error("Pass exactly one mode: frame_entity, frame_point, or position+look_at.")
 	await ctx.frames(1)
 	return {
-		"position": camera.global_position,
-		"rotation_deg": camera.rotation_degrees,
+		"position": fly_camera.global_position,
+		"rotation_deg": fly_camera.rotation_degrees,
 		"note": note,
 		"hint": "screenshot(target=\"viewport\") shows this view.",
 	}

@@ -58,7 +58,7 @@ func _refresh_surface_inputs_for_texture_slot(slot_id: String) -> void:
 
 
 func _apply_surface_paint_stroke(_delta: float) -> bool:
-	var surface_map: NovaTerrainSurfaceMap = _te._document.surface_map
+	var surface_map: TerrainSurfaceMap = _te._document.surface_map
 	if surface_map == null or not _te._hover_hit_valid:
 		_te._brush_session.reset_stroke_tracking()
 		return false
@@ -104,7 +104,7 @@ func _apply_surface_paint_stroke(_delta: float) -> bool:
 
 
 func _eyedrop_surface_at_hover() -> bool:
-	var surface_map: NovaTerrainSurfaceMap = _te._document.surface_map
+	var surface_map: TerrainSurfaceMap = _te._document.surface_map
 	if surface_map == null or not _te._hover_hit_valid:
 		return false
 	var map_width := surface_map.get_width()
@@ -185,7 +185,7 @@ func _on_primary_start() -> void:
 			_te._foliage_ops._eyedrop_foliage_at_hover()
 			return
 		if not Input.is_key_pressed(KEY_CTRL):
-			var selected_def: NovaTerrainFoliageDef = _te._document.get_selected_foliage_def()
+			var selected_def: TerrainFoliageDef = _te._document.get_selected_foliage_def()
 			if selected_def == null or selected_def.get_match() < 0:
 				return
 		_te._foliage_map_stroke_before = _te._document.capture_foliage_map_history_state()

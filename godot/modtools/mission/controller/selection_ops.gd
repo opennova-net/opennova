@@ -55,16 +55,14 @@ func get_selection_summary() -> Dictionary:
 	return {
 		"kind": int(_c._selected_ref["kind"]),
 		"index": int(_c._selected_ref["index"]),
-		"position": _c.MissionObjectPlacer.godot_to_bms_position(_c._selected_xform.origin),
+		"position": MissionObjectPlacer.godot_to_bms_position(_c._selected_xform.origin),
 		"animated": _c._selected_node != null,
 	}
 
 
 func selected_has_user_points() -> bool:
 	var data := _selected_object_data()
-	return data != null \
-		and data.has_method("get_user_point_count") \
-		and data.get_user_point_count() > 0
+	return data != null and data.get_user_point_count() > 0
 
 
 func is_selected_user_points_visible() -> bool:
@@ -77,12 +75,10 @@ func set_selected_user_points_visible(value: bool) -> void:
 	_c._notify_changed()
 
 
-func _selected_object_data() -> NovaObjectData:
+func _selected_object_data() -> ObjectData:
 	if _c._selected_ref.is_empty() or _c._selected_graphic.is_empty() or _c._placer == null:
 		return null
-	if int(_c._selected_ref.get("kind", -1)) == NovaMissionData.KIND_MARKER:
-		return null
-	if not _c._placer.has_method("object_data_for"):
+	if int(_c._selected_ref.get("kind", -1)) == MissionData.KIND_MARKER:
 		return null
 	return _c._placer.object_data_for(_c._selected_graphic)
 
@@ -102,10 +98,10 @@ func select_object(kind: int, index: int) -> void:
 # authored origin when the selection has no baked mesh). Keeps the current heading so the
 # view does not spin. Returns false with no camera / nothing selected (e.g. headless tests).
 func focus_selection_in_view() -> bool:
-	if _c._selected_ref.is_empty() or _c.terrain_editor == null or not _c.terrain_editor.has_method("get_editor_camera"):
+	if _c._selected_ref.is_empty() or _c.terrain_editor == null:
 		return false
-	var camera: Camera3D = _c.terrain_editor.get_editor_camera()
-	if camera == null or not camera.has_method("frame_bounds_custom"):
+	var camera: FlyCamera = _c.terrain_editor.get_editor_camera()
+	if camera == null:
 		return false
 	var aabb = _c._viewport._selected_world_aabb()
 	var center: Vector3
@@ -135,11 +131,9 @@ func get_mission_title() -> String:
 
 ## The mounted resource root, via the bound terrain editor — the controller's one
 ## VFS seam. The controller runs headless in tests (no shell), so this reads the
-## editor, not the workspace; the duck-type guard for bare doubles lives here.
-func _resource_root() -> NovaResourceRoot:
-	if _c.terrain_editor != null and _c.terrain_editor.has_method("get_resource_root"):
-		return _c.terrain_editor.get_resource_root()
-	return null
+## editor, not the workspace.
+func _resource_root() -> ResourceRoot:
+	return _c.terrain_editor.get_resource_root() if _c.terrain_editor != null else null
 
 
 # Retail loads <mission>.til into one shared terrain tile array used by both
@@ -147,7 +141,7 @@ func _resource_root() -> NovaResourceRoot:
 # VFS lookup identical to GameWorld._load_mission_tile_info.
 # [orig: Terrain_LoadFoliageFile @ 0x60a740;
 # Foliage_PathBlockedByPlacedTile @ 0x606490]
-func _load_mission_tile_info(bms_name: String, resource_root: NovaResourceRoot) -> void:
+func _load_mission_tile_info(bms_name: String, resource_root: ResourceRoot) -> void:
 	_clear_mission_tile_info()
 	if resource_root == null:
 		return
@@ -160,7 +154,7 @@ func _load_mission_tile_info(bms_name: String, resource_root: NovaResourceRoot) 
 	var til_bytes := resource_root.read_file(til_name)
 	if til_bytes.is_empty():
 		return
-	var tile_info := NovaTerrainTileInfo.new()
+	var tile_info := TerrainTileInfo.new()
 	if tile_info.load_from_bytes(til_bytes) != OK:
 		push_warning("MissionController: failed to parse mission tile file '%s'." % til_name)
 		return
@@ -171,7 +165,7 @@ func _clear_mission_tile_info() -> void:
 	_c._mission_tile_info = null
 
 
-# The full editable dictionary for the selected entity (see NovaMissionData entity
+# The full editable dictionary for the selected entity (see MissionData entity
 # fields: position is mission-space, rotation_deg is authored degrees, plus team /
 # group), or {} when nothing is selected.
 func get_selected_entity() -> Dictionary:
@@ -184,7 +178,7 @@ func get_selected_entity() -> Dictionary:
 func get_selected_position() -> Vector3:
 	if _c._selected_ref.is_empty():
 		return Vector3.ZERO
-	return _c.MissionObjectPlacer.godot_to_bms_position(_c._selected_xform.origin)
+	return MissionObjectPlacer.godot_to_bms_position(_c._selected_xform.origin)
 
 
 # The live selected rotation as authored (pitch, yaw, roll) degrees.
@@ -205,7 +199,7 @@ func set_selected_position(bms_pos: Vector3) -> void:
 	# space (the drag path and get_selected_position both invert exactly that), so set
 	# the local origin directly. Routing through the container's world transform would
 	# double-apply it and shift the object whenever the container is not at the origin.
-	_c._viewport._apply_selected_xform(Transform3D(_c._selected_xform.basis, _c.MissionObjectPlacer.bms_to_godot_position(bms_pos)))
+	_c._viewport._apply_selected_xform(Transform3D(_c._selected_xform.basis, MissionObjectPlacer.bms_to_godot_position(bms_pos)))
 	_c._viewport._commit_selected_transform()
 
 
@@ -219,7 +213,7 @@ func set_selected_rotation(rot_deg: Vector3) -> void:
 	# degrees, so keeping a fractional value would leave get_selected_rotation out of
 	# step with the persisted record on the next axis edit.
 	_c._selected_rotation_deg = rot_deg.round()
-	var basis: Basis = _c.MissionObjectPlacer.bms_to_godot_basis(_c._selected_rotation_deg)
+	var basis: Basis = MissionObjectPlacer.bms_to_godot_basis(_c._selected_rotation_deg)
 	_c._viewport._apply_selected_xform(Transform3D(basis, _c._selected_xform.origin))
 	_c._viewport._commit_selected_transform()
 
@@ -281,8 +275,8 @@ func set_selected_string_property(property: String, value: String) -> void:
 
 
 # --- Authoring: mission-header editing ----------------------------------------
-# Each setter snapshots, writes one header field through NovaMissionData, then pushes a
-# single undo step. Field names match NovaMissionData::set_header_* and the inspector form.
+# Each setter snapshots, writes one header field through MissionData, then pushes a
+# single undo step. Field names match MissionData::set_header_* and the inspector form.
 func set_header_string(field: String, value: String) -> void:
 	_c._edit_step(func(): return _c._mission.set_header_string(field, value),
 		"Could not set mission %s." % field)
@@ -299,7 +293,7 @@ func set_header_flag(bit: int, on: bool) -> void:
 
 
 # Single-select game mode (one attrib_flags mode bit, or 0 = Single Player). Mirrors set_header_*:
-# one undo step + dirty. NovaMissionData.set_game_mode clears the other mode bits.
+# one undo step + dirty. MissionData.set_game_mode clears the other mode bits.
 func set_game_mode(bit: int) -> void:
 	_c._edit_step(func(): return _c._mission.set_game_mode(bit),
 		"Could not set the game mode.")
@@ -351,7 +345,7 @@ func get_all_entities() -> Array:
 		return []
 	var out: Array = []
 	var id_counts: Dictionary = {}
-	for kind in [NovaMissionData.KIND_MARKER, NovaMissionData.KIND_ITEM, NovaMissionData.KIND_BUILDING, NovaMissionData.KIND_ORGANIC]:
+	for kind in [MissionData.KIND_MARKER, MissionData.KIND_ITEM, MissionData.KIND_BUILDING, MissionData.KIND_ORGANIC]:
 		for e in _c._mission.get_entities(kind):
 			var ed := e as Dictionary
 			var bms_id := int(ed.get("bms_id", 0))
@@ -379,11 +373,11 @@ func get_all_entities() -> Array:
 # there, gizmo-picked via the always-on marker overlay; Waypoints mode is just a second view of them).
 func _object_kind_label(kind: int) -> String:
 	match kind:
-		NovaMissionData.KIND_BUILDING:
+		MissionData.KIND_BUILDING:
 			return "Building"
-		NovaMissionData.KIND_ORGANIC:
+		MissionData.KIND_ORGANIC:
 			return "Person"
-		NovaMissionData.KIND_MARKER:
+		MissionData.KIND_MARKER:
 			return "Marker"
 		_:
 			return "Item"
@@ -397,7 +391,7 @@ func get_object_list() -> Array:
 	var out: Array = []
 	if _c._mission == null:
 		return out
-	for kind in [NovaMissionData.KIND_ITEM, NovaMissionData.KIND_BUILDING, NovaMissionData.KIND_ORGANIC, NovaMissionData.KIND_MARKER]:
+	for kind in [MissionData.KIND_ITEM, MissionData.KIND_BUILDING, MissionData.KIND_ORGANIC, MissionData.KIND_MARKER]:
 		var category := _object_kind_label(kind)
 		for e in _c._mission.get_entities(kind):
 			var ed := e as Dictionary
@@ -417,10 +411,10 @@ func get_object_list() -> Array:
 func get_object_count() -> int:
 	if _c._mission == null:
 		return 0
-	return _c._mission.get_entity_count(NovaMissionData.KIND_ITEM) \
-		+ _c._mission.get_entity_count(NovaMissionData.KIND_BUILDING) \
-		+ _c._mission.get_entity_count(NovaMissionData.KIND_ORGANIC) \
-		+ _c._mission.get_entity_count(NovaMissionData.KIND_MARKER)
+	return _c._mission.get_entity_count(MissionData.KIND_ITEM) \
+		+ _c._mission.get_entity_count(MissionData.KIND_BUILDING) \
+		+ _c._mission.get_entity_count(MissionData.KIND_ORGANIC) \
+		+ _c._mission.get_entity_count(MissionData.KIND_MARKER)
 
 
 # Whether item names are resolvable yet. A mission can open before its items.def is reachable
@@ -459,7 +453,7 @@ func get_group_options() -> Array:
 	if _c._mission == null:
 		return out
 	var counts: Dictionary = {}
-	for kind in [NovaMissionData.KIND_MARKER, NovaMissionData.KIND_ITEM, NovaMissionData.KIND_BUILDING, NovaMissionData.KIND_ORGANIC]:
+	for kind in [MissionData.KIND_MARKER, MissionData.KIND_ITEM, MissionData.KIND_BUILDING, MissionData.KIND_ORGANIC]:
 		for e in _c._mission.get_entities(kind):
 			var g := int((e as Dictionary).get("group", 0))
 			if g > 0:

@@ -73,7 +73,7 @@ func _run() -> void:
 	# the app's own settings seam; the expansion resets to base alongside it.
 	var res_dir := OS.get_environment("NW_RESOURCE_DIR")
 	if not res_dir.is_empty():
-		var settings := load("res://adapter/resource_index/resource_dir_settings.gd")
+		var settings := load("res://game/resource_index/resource_dir_settings.gd")
 		settings.set_resource_dir(res_dir)
 		settings.set_expansion("")
 	Engine.time_scale = TIME_SCALE

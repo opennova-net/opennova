@@ -18,27 +18,36 @@ var _saved_state_config := PackedByteArray()
 var _had_state_config := false
 
 
+# set_editor takes the app root (EditorApp) since the typed bind (ADR 0034);
+# tests that exercise a bare TerrainEditor wrap it in a scene-less app shell so
+# every workspace unwraps the same way production does.
+func _app_for(editor: TerrainEditor) -> EditorApp:
+	var app: EditorApp = autofree(EditorApp.new())
+	app.terrain_editor = editor
+	# Mirror the production wiring: the app root owns the environment document
+	# the Environment/Object workspaces unwrap.
+	app.environment_editor = editor.environment_editor
+	return app
+
+
 # Minimal terrain-editor double for the dirty-replace guard tests: dirty, no
 # project directory yet, records saves/opens. Avoids set_editor()'s full bind
 # cost being the point of the test.
 class DirtyTerrainStub:
-	extends Node
-	var is_dirty := true
+	extends TerrainEditorBase
 	var opened := PackedStringArray()
 	var saved_dirs := PackedStringArray()
+	var _dirty := true
 
-	func is_export_running() -> bool:
-		return false
+	func _get_is_dirty() -> bool:
+		return _dirty
 
-	func set_viewport_active(_active: bool, _edit_input: bool) -> void:
-		pass
+	func _set_is_dirty(value: bool) -> void:
+		_dirty = value
 
-	func open_trn(path: String) -> Error:
+	func open_trn(path: String, _timeline: PerfTimeline = null) -> Error:
 		opened.append(path)
 		return OK
-
-	func new_terrain() -> void:
-		pass
 
 	func save_project_to_current_dir() -> Error:
 		# No project directory yet - the shell's save_then must fall back to Save As.
@@ -48,35 +57,16 @@ class DirtyTerrainStub:
 		saved_dirs.append(dir_path)
 		return OK
 
-	func has_current_project_dir() -> bool:
-		return false
-
-	func get_current_project_dir() -> String:
-		return ""
-
-	func get_last_save_dir() -> String:
-		return ""
-
 
 # Records begin_export_terrain calls: pins the export-confirm to the workspace
 # that opened the flavor dialog (never the tab active at confirmation).
 class ExportRecordingTerrainStub:
-	extends Node
+	extends TerrainEditorBase
 	var exports: Array = []  # [dir_path, flavor] per call
-	var is_dirty := false  # read by the workspace's unsaved-state checks
 
-	func is_export_running() -> bool:
-		return false
-
-	func set_viewport_active(_active: bool, _edit_input: bool) -> void:
-		pass
-
-	func begin_export_terrain(dir_path: String, flavor: int) -> Error:
+	func begin_export_terrain(dir_path: String, flavor: int = ExportFlavor.DFX_JO) -> Error:
 		exports.append([dir_path, flavor])
 		return OK
-
-	func get_last_export_dir() -> String:
-		return ""
 
 	func has_current_project_dir() -> bool:
 		return false
@@ -364,7 +354,7 @@ func test_mission_workspace_exposes_document_actions_and_inspector() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	var editor = autofree(TerrainEditorScript.new())
 
-	workstation.set_editor(editor)
+	workstation.set_editor(_app_for(editor))
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.MISSION)
 
 	var actions_mount: BoxContainer = workstation.get_node("%WorkspaceActionsMount")
@@ -401,7 +391,7 @@ func test_mission_workspace_exposes_document_actions_and_inspector() -> void:
 
 func test_resource_index_lists_object_resources_without_glb_models() -> void:
 	var root := _make_resource_fixture("resource_index_godot")
-	var index := NovaResourceIndex.new()
+	var index := ResourceIndex.new()
 
 	assert_eq(index.scan(root), OK, "Resource index should scan a filesystem directory.")
 	assert_eq(index.get_resource_files("mission").size(), 1, "BMS files should be indexed as mission resources.")
@@ -534,7 +524,7 @@ func test_workspace_open_uses_resource_browser_without_filesystem_escape() -> vo
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	var editor = autofree(TerrainEditorScript.new())
 	var root := _make_resource_fixture("resource_browser_terrain")
-	workstation.set_editor(editor)
+	workstation.set_editor(_app_for(editor))
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.TERRAIN)
 	assert_eq(workstation._set_resource_root_dir(root, false, true), OK, "Resource browser should use the configured resource directory.")
 
@@ -574,7 +564,7 @@ func test_resource_browser_open_button_opens_selection() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	var editor = autofree(TerrainEditorScript.new())
 	var root := _make_resource_fixture("resource_browser_ok_button")
-	workstation.set_editor(editor)
+	workstation.set_editor(_app_for(editor))
 	assert_eq(workstation._set_resource_root_dir(root, false, true), OK)
 	var workspace = workstation._get_active_workspace()
 	assert_not_null(workspace, "Terrain workspace should be active by default.")
@@ -689,7 +679,7 @@ func test_workstation_opens_menu_workspace_by_action_target() -> void:
 func test_workspace_open_without_resource_dir_shows_empty_browser() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	var editor = autofree(TerrainEditorScript.new())
-	workstation.set_editor(editor)
+	workstation.set_editor(_app_for(editor))
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.TERRAIN)
 	assert_eq(workstation._set_resource_root_dir("", false, false), OK, "Test should clear the resource directory without persisting it.")
 
@@ -816,7 +806,7 @@ func test_startup_applies_persisted_resource_dir_to_shared_resource_root() -> vo
 	assert_eq(w1._set_resource_root_dir(root, true, false), OK, "Persisting the resource dir should succeed.")
 
 	var w2 = add_child_autofree(EditorWorkstationScene.instantiate())
-	var resource_root: NovaResourceRoot = w2.get_resource_root()
+	var resource_root: ResourceRoot = w2.get_resource_root()
 	assert_eq(w2.get_resource_root_dir(), root, "Editor startup should load the persisted resource directory.")
 	assert_eq(_norm_path(resource_root.get_root_dir()), _norm_path(root), "The shared resource root should be the persisted directory.")
 	assert_eq(_norm_path(resource_root.resolve_file("alpha.3di")), _norm_path(root.path_join("alpha.3di")), "The startup resource root should resolve top-level files.")
@@ -829,7 +819,7 @@ func test_resource_root_inside_user_data_is_rejected_on_load() -> void:
 	# internal path.
 	var bogus := OS.get_user_data_dir().path_join("resource_settings_persist_bogus_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(bogus)
-	NovaResourceDirSettings.set_resource_dir(bogus)
+	ResourceDirSettings.set_resource_dir(bogus)
 
 	var w2 = add_child_autofree(EditorWorkstationScene.instantiate())
 	assert_eq(w2.get_resource_root_dir(), "", "A resource root inside the app user-data dir should be rejected on load.")
@@ -973,7 +963,7 @@ func test_terrain_workspace_exposes_project_save_and_export_actions() -> void:
 	var editor = autofree(TerrainEditorScript.new())
 	editor.is_dirty = true
 
-	workstation.set_editor(editor)
+	workstation.set_editor(_app_for(editor))
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.TERRAIN)
 
 	var actions_mount: BoxContainer = workstation.get_node("%WorkspaceActionsMount")
@@ -995,7 +985,7 @@ func test_switching_workspaces_preserves_terrain_dirty_state() -> void:
 	var editor = autofree(TerrainEditorScript.new())
 	editor.is_dirty = true
 
-	workstation.set_editor(editor)
+	workstation.set_editor(_app_for(editor))
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.MISSION)
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.TERRAIN)
 
@@ -1007,7 +997,7 @@ func test_switching_workspaces_preserves_terrain_dirty_state() -> void:
 func test_workstation_mounts_workspace_specific_right_docks() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	var editor = autofree(TerrainEditorScript.new())
-	workstation.set_editor(editor)
+	workstation.set_editor(_app_for(editor))
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.TERRAIN)
 
 	var dock: Control = workstation.get_node("%AssetDock")
@@ -1094,7 +1084,7 @@ func test_workstation_tracks_mode_from_editor_tool() -> void:
 	editor.brush_strength = 0.8
 	editor.brush_hardness = 0.3
 
-	workstation.set_editor(editor)
+	workstation.set_editor(_app_for(editor))
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.TERRAIN)
 	workstation.sync_from_editor_state()
 
@@ -1106,37 +1096,37 @@ func test_workstation_tracks_mode_from_editor_tool() -> void:
 	assert_eq(workstation._current_workflow_id, TerrainWorkspaceScript.Workflow.STAMP, "Workstation should switch to Tile mode when the editor tool becomes tile placement.")
 
 
-# Minimal tileinfo surface for the gizmo capability hooks.
+# Minimal tileinfo surface for the gizmo capability hooks. The gizmo entry is
+# a real (blank) TerrainTileEntry, since the typed base pins the return type.
 class TileGizmoTerrainStub:
-	extends Node
+	extends TerrainEditorBase
 
-	class Entry:
-		extends RefCounted
-
-		func get_tile_index() -> int:
-			return 7
-
-		func get_cell_x() -> int:
-			return 3
-
-		func get_cell_z() -> int:
-			return 4
-
-	var current_tool := TerrainEditor.Tool.TILE_STAMP
 	var rotations := 0
 	var cleared := 0
+	var _tool: Tool = Tool.TILE_STAMP
+
+	func _get_current_tool() -> Tool:
+		return _tool
+
+	func _set_current_tool(value: Tool) -> void:
+		_tool = value
 
 	func has_selected_tileinfo_entry() -> bool:
 		return true
 
-	func get_selected_tileinfo_entry() -> Variant:
-		return Entry.new()
+	func get_selected_tileinfo_entry() -> TerrainTileEntry:
+		var entry := TerrainTileEntry.new()
+		entry.tile_index = 7
+		entry.cell_x = 3
+		entry.cell_z = 4
+		return entry
 
 	func get_selected_tileinfo_world_center() -> Vector3:
 		return Vector3(10, 0, 20)
 
-	func rotate_selected_tileinfo_clockwise() -> void:
+	func rotate_selected_tileinfo_clockwise() -> bool:
 		rotations += 1
+		return true
 
 	func clear_tileinfo_selection() -> void:
 		cleared += 1
@@ -1435,7 +1425,7 @@ func test_pressing_layout_mode_restores_edit_sectors_tool() -> void:
 	var editor = autofree(TerrainEditorScript.new())
 	editor.current_tool = TerrainEditorScript.Tool.PAINT_DETAIL
 
-	workstation.set_editor(editor)
+	workstation.set_editor(_app_for(editor))
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.TERRAIN)
 	workstation._on_workflow_pressed(TerrainWorkspaceScript.Workflow.LAYOUT)
 
@@ -1533,7 +1523,7 @@ func test_stamp_inspector_atlas_click_replaces_selected_tile_immediately() -> vo
 	inspector.set_editor(editor)
 	inspector._on_atlas_selected(5)
 
-	var entry: NovaTerrainTileEntry = editor.get_selected_tileinfo_entry()
+	var entry: TerrainTileEntry = editor.get_selected_tileinfo_entry()
 	assert_not_null(entry, "Tile selection should remain valid after replacing from the atlas.")
 	assert_eq(entry.get_tile_index(), 5, "Atlas clicks should replace the selected tile immediately.")
 
@@ -1542,7 +1532,7 @@ func test_stamp_inspector_atlas_focus_follows_selected_tile() -> void:
 	var mount = add_child_autofree(Control.new())
 	var inspector := StampInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
-	editor._document.data = NovaTerrainData.new()
+	editor._document.data = TerrainData.new()
 	editor._document.new_tileinfo()
 	# Seed a dummy tilestrip so the atlas has enough tiles for index 2 to be selectable.
 	var strip_image := Image.create(256, 64, false, Image.FORMAT_RGBA8)
@@ -1566,7 +1556,7 @@ func test_stamp_inspector_reuses_tile_preview_icons_until_atlas_changes() -> voi
 	var mount = add_child_autofree(Control.new())
 	var inspector := StampInspector.new()
 	var editor = autofree(TerrainEditorScript.new())
-	editor._document.data = NovaTerrainData.new()
+	editor._document.data = TerrainData.new()
 	var strip_image := Image.create(256, 64, false, Image.FORMAT_RGBA8)
 	strip_image.fill(Color(0.5, 0.5, 0.5, 1.0))
 	var tilestrip := ImageTexture.create_from_image(strip_image)
@@ -1595,9 +1585,9 @@ func test_stamp_inspector_flag_toggle_updates_selected_tile_immediately() -> voi
 	inspector.set_editor(editor)
 	inspector._on_flip_x(true)
 
-	var entry: NovaTerrainTileEntry = editor.get_selected_tileinfo_entry()
+	var entry: TerrainTileEntry = editor.get_selected_tileinfo_entry()
 	assert_not_null(entry, "Tile selection should remain valid after toggling a transform flag.")
-	assert_true((entry.get_flags() & NovaTerrainTileInfo.FLAG_FLIP_X) != 0, "Tile transform toggles should update the selected tile immediately.")
+	assert_true((entry.get_flags() & TerrainTileInfo.FLAG_FLIP_X) != 0, "Tile transform toggles should update the selected tile immediately.")
 
 
 func test_stamp_inspector_shows_quiet_empty_selection_state() -> void:
@@ -1700,7 +1690,7 @@ func test_resource_browser_uses_theme_not_handcoded_styleboxes() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	var editor = autofree(TerrainEditorScript.new())
 	var root := _make_resource_fixture("resource_browser_theme")
-	workstation.set_editor(editor)
+	workstation.set_editor(_app_for(editor))
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.TERRAIN)
 	assert_eq(workstation._set_resource_root_dir(root, false, true), OK, "Resource browser should index the configured resource directory.")
 
@@ -2260,7 +2250,7 @@ func test_set_editor_rebuilds_content_inside_detached_window() -> void:
 	# get its content rebuilt immediately, not sit empty until the next toggle.
 	var editor = autofree(TerrainEditorScript.new())
 	editor.environment_editor = environment_editor
-	workstation.set_editor(editor)
+	workstation.set_editor(_app_for(editor))
 	assert_true(workstation._popovers.environment_panel_mount().is_floating(), "the panel keeps floating")
 	assert_gt(workstation.get_node("%EnvironmentActionsMount").get_child_count(), 0,
 		"the rebuilt actions land inside the floating window")

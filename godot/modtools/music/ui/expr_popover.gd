@@ -180,7 +180,7 @@ func _current_valid() -> bool:
 	var text := current_text()
 	if text == "":
 		return false
-	return bool(MusExpr.validate_expr(text, _mus).get("ok", true))
+	return MusExpr.validate_expr(text, _mus).ok
 
 
 func _refresh_apply() -> void:
@@ -192,12 +192,12 @@ func _refresh_apply() -> void:
 	if _raw_status != null:
 		var text := _raw.text.strip_edges()
 		if _tabs.current_tab == 1 and text != "":
-			var v: Dictionary = MusExpr.validate_expr(text, _mus)
-			if bool(v.get("ok", true)):
+			var v := MusExpr.validate_expr(text, _mus)
+			if v.ok:
 				_raw_status.text = "✓ %s" % MusDisplayNames.pretty_expr(text)
 				_raw_status.add_theme_color_override("font_color", Color(0.6, 0.9, 0.6))
 			else:
-				_raw_status.text = "✗ %s" % String(v.get("err", "invalid"))
+				_raw_status.text = "✗ %s" % (v.err if not v.err.is_empty() else "invalid")
 				_raw_status.add_theme_color_override("font_color", Color(1.0, 0.5, 0.5))
 		else:
 			_raw_status.text = ""

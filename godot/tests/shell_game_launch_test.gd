@@ -5,7 +5,7 @@ const GameSession := preload("res://modtools/editor/shell/shell_game_session.gd"
 # Managed standalone run shell
 # action launches the game runtime over the shared authoring directory with
 # the engine's own `/d` loose-file override ([orig: `/d` loose-override
-# @ 0x4a7310], NovaLaunchFlags). Seams are injected Callables, so the whole
+# @ 0x4a7310], LaunchFlags). Seams are injected Callables, so the whole
 # composition is asserted without touching the OS. Public API only (ADR 0018).
 
 

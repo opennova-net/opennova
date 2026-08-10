@@ -26,7 +26,7 @@ signal join_in_match_requested(target: JoinTarget)
 # the mission + callsign and stands up a browsable listen host (net_session_drive._maybe_start_nw_host).
 signal host_requested(config: HostSessionConfig)
 
-var _client            # NovaWorldClient (created at runtime if the class exists)
+var _client: NovaWorldClient  # created when the panel opens; torn down on close
 var _status_label: Label
 var _server_list: ItemList
 var _host_button: Button
@@ -47,7 +47,7 @@ var _pending_mission := ""
 var _pending_player := ""
 # The mounted resource root, set by MainGame BEFORE _ready so the host Map picker can list the
 # install's .bms missions (the panel owns no mission list; the world's root is null until a load).
-var resource_root  # NovaResourceRoot
+var resource_root: ResourceRoot
 var _mission_option: OptionButton
 
 
@@ -147,10 +147,7 @@ func _build_ui() -> void:
 
 
 func _create_client() -> void:
-	if not ClassDB.class_exists("NovaWorldClient"):
-		_set_status("NovaWorld is unavailable in this build.")
-		return
-	_client = ClassDB.instantiate("NovaWorldClient")
+	_client = NovaWorldClient.new()
 	add_child(_client)
 	_client.host = _resolved_host()
 	_client.gate_port = gate_port
@@ -159,16 +156,11 @@ func _create_client() -> void:
 	_client.connected.connect(_on_connected)
 	_client.disconnected.connect(_on_disconnected)
 	_client.error_occurred.connect(_on_error)
-	if _client.has_signal("server_list_updated"):
-		_client.server_list_updated.connect(_on_server_list_updated)
-	if _client.has_signal("server_info_received"):
-		_client.server_info_received.connect(_on_server_info_received)
-	if _client.has_signal("login_succeeded"):
-		_client.login_succeeded.connect(_on_login_succeeded)
-	if _client.has_signal("login_failed"):
-		_client.login_failed.connect(_on_login_failed)
-	if _client.has_signal("joined_game"):
-		_client.joined_game.connect(_on_joined_game)
+	_client.server_list_updated.connect(_on_server_list_updated)
+	_client.server_info_received.connect(_on_server_info_received)
+	_client.login_succeeded.connect(_on_login_succeeded)
+	_client.login_failed.connect(_on_login_failed)
+	_client.joined_game.connect(_on_joined_game)
 	_client.start()
 
 
@@ -211,15 +203,24 @@ func _set_status(text: String) -> void:
 # Map the protocol state to plain language (no wire jargon for the player).
 func _on_state_changed(state: int) -> void:
 	match state:
-		0: _set_status("Ready.")                # Idle
-		1: _set_status("Finding the server...") # GateProbing
-		2, 3: _set_status("Connecting...")      # SessionHello / SessionJoin
-		4: _set_status("Connected.")            # Connected
-		5: _set_status("Disconnected.")         # Disconnected
-		6: _set_status("Connection problem.")   # Error
-		7: _set_status("Joining game...")       # Joining (NWJoin in flight)
-		8: _set_status("Connecting to game host...")  # InGameHello (proto switched)
-		_: _set_status("Connection problem.")
+		NovaWorldClient.STATE_IDLE:
+			_set_status("Ready.")
+		NovaWorldClient.STATE_GATE_PROBING:
+			_set_status("Finding the server...")
+		NovaWorldClient.STATE_SESSION_HELLO, NovaWorldClient.STATE_SESSION_JOIN:
+			_set_status("Connecting...")
+		NovaWorldClient.STATE_CONNECTED:
+			_set_status("Connected.")
+		NovaWorldClient.STATE_DISCONNECTED:
+			_set_status("Disconnected.")
+		NovaWorldClient.STATE_ERROR:
+			_set_status("Connection problem.")
+		NovaWorldClient.STATE_JOINING:
+			_set_status("Joining game...")       # NWJoin in flight
+		NovaWorldClient.STATE_IN_GAME_HELLO:
+			_set_status("Connecting to game host...")  # proto switched
+		_:
+			_set_status("Connection problem.")
 
 
 func _on_connected() -> void:
@@ -251,7 +252,7 @@ func _on_error(message: String) -> void:
 func _refresh_servers() -> void:
 	_server_list.clear()
 	_rows = []
-	if _client != null and _client.has_method("get_server_rows"):
+	if _client != null:
 		for row in _client.get_server_rows():
 			_rows.append(row)
 			var idx := _server_list.add_item(format_server_row(row))
@@ -321,7 +322,7 @@ func _on_server_info_received(_info: Dictionary) -> void:
 
 
 func _on_login_pressed() -> void:
-	if _client == null or not _client.has_method("login"):
+	if _client == null:
 		_set_status("Login is not available in this build.")
 		return
 	var user := _username_edit.text.strip_edges()
@@ -363,7 +364,7 @@ func _on_join_pressed() -> void:
 	_pending_mission = String(row.get("mission_name", ""))
 	_pending_player = player_name
 	_set_status("Joining %s..." % String(row.get("name", "server")))
-	if _client != null and _client.has_method("join"):
+	if _client != null:
 		_client.join(rid)
 
 

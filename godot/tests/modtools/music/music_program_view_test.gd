@@ -217,10 +217,10 @@ func test_glow_brackets_to_greatest_offset_at_or_before_pc():
 
 # ---- the engine-events tail (real gamemus Begin) ----
 
-func _load_gamemus() -> NovaMusicScript:
+func _load_gamemus() -> MusicScript:
 	var bytes := FileAccess.get_file_as_bytes(SCRIPT_FIXTURE)
 	assert_gt(bytes.size(), 0, "fixture readable")
-	var ms := NovaMusicScript.new()
+	var ms := MusicScript.new()
 	ms.load_from_decrypted_bytes(bytes, "gamemus")
 	return ms
 
@@ -342,14 +342,18 @@ func test_read_only_add_is_disabled_with_the_reason():
 const INPUTS_PROFILE := "user://music_progview_profile.json"
 
 
-class StubMus:
-	extends RefCounted
-
-	func get_default_script_name() -> StringName:
-		return &"gamescript"
-
-	func get_locals_frame_offset(_n) -> int:
-		return 32
+# A REAL MusicScript (the view's _mus seam is typed): compiled from text, so
+# its default script name is empty and its locals frame offset is the engine's
+# 32 default — the profile below keys by the same empty name.
+static func _compiled_mus() -> MusicScript:
+	var ms := MusicScript.new()
+	ms.compile_text("script gamescript
+section S
+{
+return
+}
+")
+	return ms
 
 
 func _rm_profile() -> void:
@@ -360,9 +364,9 @@ func _rm_profile() -> void:
 
 func test_named_inputs_reach_card_pickers_and_sentences():
 	_rm_profile()
-	MusInputNames.set_input_label(INPUTS_PROFILE, "gamescript", "S", 0, "Mission event")
+	MusInputNames.set_input_label(INPUTS_PROFILE, "", "S", 0, "Mission event")
 	var v := _view()
-	v.configure_authoring(PackedStringArray(["S"]), [], StubMus.new(), [], true, "", INPUTS_PROFILE)
+	v.configure_authoring(PackedStringArray(["S"]), [], _compiled_mus(), [], true, "", INPUTS_PROFILE)
 	v.show_section(_sec([
 		{"kind": "frame_enter", "code_offset": 0, "locals_count": 2, "text": "enter S"},
 		{"kind": "switch", "code_offset": 2, "expr": "l_32", "action": "enter",

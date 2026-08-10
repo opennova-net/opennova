@@ -5,7 +5,7 @@ extends Node
 # Boots the standalone game on open ground and prints the sim view (lean_deg etc.),
 # the camera basis roll, the head-bone eye, and the aim projections at each stage.
 
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 const StandaloneProbe := preload("res://tests/standalone_game_probe.gd")
 const OUT_DIR := "res://../.scratch/leantp"
 
@@ -21,7 +21,7 @@ func _ready() -> void:
 	var root := OS.get_environment("NOVA_RESOURCE_DIR").strip_edges()
 	if root.is_empty():
 		root = ResourceDirSettings.get_resource_dir()
-	NovaWindow.set_fullscreen(get_window(), true)
+	WindowState.set_fullscreen(get_window(), true)
 	await _settle(6)
 
 	var bms := OS.get_environment("NOVA_MISSION_BMS").strip_edges()

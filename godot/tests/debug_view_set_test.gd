@@ -1,7 +1,7 @@
 extends GutTest
 
 const NovaDebugViewStatus := preload(
-		"res://adapter/debug/nova_debug_view_status.gd")
+		"res://game/debug/nova_debug_view_status.gd")
 
 
 func test_world_reports_overlay_installation_and_drawable_state() -> void:
@@ -83,8 +83,8 @@ func test_every_installed_overlay_reports_when_it_has_no_drawable_data() -> void
 
 func _make_world() -> GameWorld:
 	var world := GameWorld.new()
-	var terrain := NovaTerrain.new()
-	terrain.name = "NovaTerrain"
+	var terrain := Terrain.new()
+	terrain.name = "Terrain"
 	world.add_child(terrain)
 	return world
 

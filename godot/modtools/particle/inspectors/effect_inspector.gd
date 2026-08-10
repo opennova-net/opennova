@@ -10,7 +10,7 @@ extends Control
 @onready var _empty_label: Label = %EmptyLabel
 
 var _editor: ParticleEditor
-var _workspace
+var _workspace: ParticleEditorWorkspace
 var _effects: Array = []
 var _suppress_signals := false
 var _dup_button: Button
@@ -45,21 +45,21 @@ func _build_toolbar() -> void:
 
 
 func _on_add_pressed() -> void:
-	if _workspace != null and _workspace.has_method("add_effect"):
+	if _workspace != null:
 		_workspace.add_effect()
 
 
 func _on_duplicate_pressed() -> void:
 	if _editor == null or _editor.current_effect == null:
 		return
-	if _workspace != null and _workspace.has_method("duplicate_effect"):
+	if _workspace != null:
 		_workspace.duplicate_effect(_editor.current_effect)
 
 
 func _on_delete_pressed() -> void:
 	if _editor == null or _editor.current_effect == null:
 		return
-	if _workspace != null and _workspace.has_method("remove_effect"):
+	if _workspace != null:
 		_workspace.remove_effect(_editor.current_effect)
 
 
@@ -76,7 +76,7 @@ func set_particle_editor(value: ParticleEditor) -> void:
 	_refresh()
 
 
-func set_workspace(value) -> void:
+func set_workspace(value: ParticleEditorWorkspace) -> void:
 	_workspace = value
 
 
@@ -86,7 +86,7 @@ func _refresh() -> void:
 	if _editor != null and _editor.particle_file != null:
 		var src: Array = _editor.particle_file.effects
 		for entry in src:
-			var effect: NovaParticleEffect = entry
+			var effect: ParticleEffect = entry
 			if effect != null:
 				_effects.append(effect)
 				_list.add_item(effect.id)
@@ -119,7 +119,7 @@ func _refresh_selection() -> void:
 func _on_item_selected(idx: int) -> void:
 	if idx < 0 or idx >= _effects.size():
 		return
-	if _workspace != null and _workspace.has_method("select_effect"):
+	if _workspace != null:
 		_workspace.select_effect(_effects[idx])
 
 

@@ -4,7 +4,7 @@ extends GutTest
 # fit, fade, alpha-reference, and :fd vectors live in the portable core tests;
 # these checks pin which authored map drives each render tier.
 
-var _dispatcher: NovaFoliageDispatcher
+var _dispatcher: FoliageDispatcher
 var _foliage_index := 1
 var _detail_sampler_calls := 0
 var _model_sampler_calls := 0
@@ -14,10 +14,10 @@ func before_each() -> void:
 	_foliage_index = 1
 	_detail_sampler_calls = 0
 	_model_sampler_calls = 0
-	_dispatcher = NovaFoliageDispatcher.new()
+	_dispatcher = FoliageDispatcher.new()
 	add_child_autofree(_dispatcher)
 
-	var def := NovaTerrainFoliageDef.new()
+	var def := TerrainFoliageDef.new()
 	def.graphic = "adapter_test"
 	def.match = 1
 
@@ -56,7 +56,7 @@ func _camera_xform() -> Transform3D:
 
 
 func test_detail_authoring_brush_wraps_effective_resolution() -> void:
-	var foliage_map := NovaTerrainFoliageMap.new()
+	var foliage_map := TerrainFoliageMap.new()
 	foliage_map.set_size(300, 300)
 	assert_eq(foliage_map.get_detail_sample_resolution(), 256)
 	assert_true(foliage_map.paint_detail_circle_wrap(
@@ -137,7 +137,7 @@ func test_detail_preview_uses_foliage_map() -> void:
 		)
 		assert_eq(child.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_OFF,
 			"Fresh retail audit confirms both foliage tiers are absent from shadow passes.")
-		assert_eq(child.layers & NovaWater.VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER, 0,
+		assert_eq(child.layers & Water.VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER, 0,
 			"an alpha-blind catcher must not darken whole foliage cards")
 		var material := child.material_override as ShaderMaterial
 		assert_not_null(material)
@@ -287,14 +287,14 @@ func test_mission_tile_info_blocks_covering_detail_candidates() -> void:
 	if not _dispatcher.has_method("set_tile_info"):
 		return
 
-	var tile_info := NovaTerrainTileInfo.new()
+	var tile_info := TerrainTileInfo.new()
 	var entries: Array = []
 	# Cover every 16-unit preview cell around the origin. The portable runtime
 	# still chooses candidates; this fixture only supplies retail's mission
 	# tile AABBs to the recovered radius-2 blocker.
 	for cell_z in range(-5, 6):
 		for cell_x in range(-5, 6):
-			var entry := NovaTerrainTileEntry.new()
+			var entry := TerrainTileEntry.new()
 			entry.set_cell(cell_x, cell_z)
 			entries.append(entry)
 	tile_info.entries = entries
@@ -324,8 +324,8 @@ func test_mission_tile_info_uses_decoded_terrain_plane_z() -> void:
 	assert_gt(unblocked_intents, 0,
 		"The exact 00TRa spawn control frame must contain foliage before blocking.")
 
-	var tile_info := NovaTerrainTileInfo.new()
-	var entries: Array[NovaTerrainTileEntry] = []
+	var tile_info := TerrainTileInfo.new()
+	var entries: Array[TerrainTileEntry] = []
 	# Exact 00TRa.til subset responsible for the player-start and armory-truck
 	# exclusions. Stored-negated fixed Z decodes once onto terrain/Godot +Z.
 	for raw_position in [
@@ -335,7 +335,7 @@ func test_mission_tile_info_uses_decoded_terrain_plane_z() -> void:
 		Vector2i(20185088, -24838144), # entry 753
 		Vector2i(19202048, -25034752), # entry 764
 	]:
-		var entry := NovaTerrainTileEntry.new()
+		var entry := TerrainTileEntry.new()
 		entry.x_fixed = raw_position.x
 		entry.z_fixed = raw_position.y
 		entries.append(entry)
@@ -465,7 +465,7 @@ func test_duplicate_silhouette_anchors_reuse_mesh_but_submit_twice() -> void:
 
 
 func test_terrain_change_invalidates_resident_geometry() -> void:
-	var data := NovaTerrainData.new()
+	var data := TerrainData.new()
 	_dispatcher.colormap_source = data
 	_dispatcher.render_preview(_camera_xform())
 	_dispatcher.render_preview(_camera_xform())
@@ -488,7 +488,7 @@ func test_non_triangle_array_mesh_disables_slot() -> void:
 	])
 	line_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_LINES, arrays)
 
-	var def := NovaTerrainFoliageDef.new()
+	var def := TerrainFoliageDef.new()
 	def.graphic = "line_mesh"
 	def.match = 1
 	_dispatcher.configure_slots([def], [line_mesh], [])
@@ -501,13 +501,13 @@ func test_non_triangle_array_mesh_disables_slot() -> void:
 
 
 func test_slot_diagnostics_explain_every_authored_slot_that_cannot_render() -> void:
-	var enabled := NovaTerrainFoliageDef.new()
+	var enabled := TerrainFoliageDef.new()
 	enabled.graphic = 'enabled_veg'
 	enabled.match = 1
-	var missing := NovaTerrainFoliageDef.new()
+	var missing := TerrainFoliageDef.new()
 	missing.graphic = 'missing_veg'
 	missing.match = 2
-	var invalid := NovaTerrainFoliageDef.new()
+	var invalid := TerrainFoliageDef.new()
 	invalid.graphic = 'invalid_veg'
 	invalid.match = 3
 

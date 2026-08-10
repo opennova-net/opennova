@@ -37,7 +37,7 @@ func _flush_edit() -> void:
 
 
 # One-shot mutation recipe shared by the simple setters. Flush any open edit session as its own step,
-# open a fresh edit, run `do` (which performs exactly one NovaMissionData mutation and returns its
+# open a fresh edit, run `do` (which performs exactly one MissionData mutation and returns its
 # result), and on success commit a single undo step, run `on_success` (e.g. an overlay refresh), and
 # mark the document dirty. A bool result commits when true; a Dictionary / Array result (the chain
 # mutators return the edited record / chain) commits when non-empty. On a rejected edit, surface
@@ -108,7 +108,7 @@ func _restore_step(is_undo: bool) -> void:
 
 # Sync the world + selection to the document after an in-memory undo/redo swap, then re-bake and
 # notify once so the inspector refreshes against the restored world in a single pass. `before` is the
-# pre-restore NovaMissionData.structure_fingerprint() -- { events, zones, object_rev }.
+# pre-restore MissionData.structure_fingerprint() -- { events, zones, object_rev }.
 #
 # Adding / deleting an event shifts later event indices, so a kept _selected_event_index could bind to
 # a DIFFERENT event (the in-range clamp can't see a shift); drop the selection only when the event set
@@ -134,7 +134,7 @@ func _after_restore(before: Dictionary) -> void:
 	# ~all MultiMesh instances is pure waste. The placed nodes + pickable index + stats + object selection
 	# all stay valid; only the active mode's overlay (which reads events / zones / paths from the document)
 	# needs a refresh. Any object change moves object_rev -> full re-bake. object_rev is computed in C++
-	# (NovaMissionData.object_records_revision) over the raw record bytes, so this no longer marshals the
+	# (MissionData.object_records_revision) over the raw record bytes, so this no longer marshals the
 	# placed-object set into ~1600 entity dictionaries twice per undo.
 	if int(after["object_rev"]) == int(before["object_rev"]):
 		_c._refresh_active_overlay()

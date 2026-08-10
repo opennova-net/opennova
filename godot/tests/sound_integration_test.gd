@@ -1,10 +1,10 @@
 extends GutTest
 
 ## Guarded end-to-end probe against real loose JO data (Desktop/JOX):
-## mount the dir, load 00TRa.bms + items.def, run NovaMissionAudio, and report how
+## mount the dir, load 00TRa.bms + items.def, run MissionAudio, and report how
 ## many sound markers resolved to a sound set. Skips when the data is absent.
 
-const NovaMissionAudioScript = preload("res://adapter/world/nova_mission_audio.gd")
+const NovaMissionAudioScript = preload("res://game/world/nova_mission_audio.gd")
 
 const JO_DIR := "C:/Users/taylor/Desktop/JOX"
 
@@ -14,17 +14,17 @@ func test_jo_00tra_sound_marker_resolution() -> void:
 		pass_test("JOX not present; skipping real-data probe")
 		return
 
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	root.set_root_dir(JO_DIR)
 	if not root.has_file("00TRa.bms"):
 		pass_test("00TRa.bms not resolvable from JOX; skipping")
 		return
 	assert_true(root.has_file("00TRa.LWF"), "mission has a co-named sound profile")
 
-	var mission := NovaMissionData.new()
+	var mission := MissionData.new()
 	assert_eq(mission.open_from_resource_root(root, "00TRa.bms"), OK, "mission parses")
 
-	var item_db := NovaItemDatabase.new()
+	var item_db := ItemDatabase.new()
 	item_db.load_from_resource_root(root, "items.def")
 
 	var container := Node3D.new()

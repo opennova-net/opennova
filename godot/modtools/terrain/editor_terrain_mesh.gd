@@ -1,10 +1,10 @@
 class_name EditorTerrainMesh
 extends Node3D
 
-const ATLAS_SIZE := NovaTerrainData.ATLAS_SIZE
-const SECTOR_SIZE := float(NovaTerrainData.SECTOR_SIZE)
+const ATLAS_SIZE := TerrainData.ATLAS_SIZE
+const SECTOR_SIZE := float(TerrainData.SECTOR_SIZE)
 # Verts per sector edge: one per heightmap texel plus the shared far-edge vert.
-const PATCH_VERTS := NovaTerrainData.SECTOR_SIZE + 1
+const PATCH_VERTS := TerrainData.SECTOR_SIZE + 1
 
 var _sector_instances: Array[MeshInstance3D] = []
 var _material: ShaderMaterial
@@ -19,10 +19,10 @@ var _origin_y: int = 0
 var _sector_grid := PackedInt32Array()
 var _bounds := AABB()
 # Source-of-truth for world->atlas coordinate transforms. The math lives in C++
-# (NovaTerrainData / engine/runtime/terrain_query/coords.h); this node forwards to it so the
+# (TerrainData / engine/runtime/terrain_query/coords.h); this node forwards to it so the
 # editor brush paths and the runtime samplers share one implementation.
-var _data: NovaTerrainData = null
-var _surface_inputs: NovaTerrainSurfaceInputs = NovaTerrainSurfaceInputs.new()
+var _data: TerrainData = null
+var _surface_inputs: TerrainSurfaceInputs = TerrainSurfaceInputs.new()
 
 
 func _ready() -> void:
@@ -105,7 +105,7 @@ func set_sector_layout(sector_count: int, sector_rows: int, sector_grid: PackedI
 	_update_sector_instances()
 
 
-func set_terrain_data(data: NovaTerrainData) -> void:
+func set_terrain_data(data: TerrainData) -> void:
 	_data = data
 	_surface_inputs.set_terrain_data(data)
 
@@ -167,14 +167,14 @@ func get_material() -> ShaderMaterial:
 ## Shared retail-faithful terrain inputs used by both the runtime and ONED.
 ## The object is stable for this mesh lifetime so foliage preview consumers
 ## can retain it while transaction-boundary refreshes replace its textures.
-func get_surface_inputs() -> NovaTerrainSurfaceInputs:
+func get_surface_inputs() -> TerrainSurfaceInputs:
 	return _surface_inputs
 
 
 ## Rebuild every derived input after a terrain document load or Mission context
 ## change, then bind the effective inputs to the existing editor material.
 func rebuild_surface_inputs(
-	tile_info: NovaTerrainTileInfo = null,
+	tile_info: TerrainTileInfo = null,
 	tile_overlay_enabled: bool = true
 ) -> bool:
 	if _data == null:
@@ -214,7 +214,7 @@ func refresh_surface_inputs_details() -> bool:
 ## Rebuild only the baked tile composite for the effective Terrain/Mission TIL.
 ## A disabled or empty overlay is a valid refresh and clears the material flag.
 func refresh_surface_inputs_tile_overlay(
-	tile_info: NovaTerrainTileInfo = null,
+	tile_info: TerrainTileInfo = null,
 	enabled: bool = true
 ) -> bool:
 	_surface_inputs.set_tile_info_override(tile_info)
@@ -254,8 +254,8 @@ func get_sector_rows() -> int:
 func get_sector_cell_value(row: int, col: int) -> int:
 	if row < 0 or row >= _sector_rows or col < 0 or col >= _sector_count:
 		return 0
-	var idx := row * NovaTerrainData.SECTOR_GRID_DIM + col
-	return clampi(_sector_grid[idx], 0, NovaTerrainData.SECTOR_ID_MAX)
+	var idx := row * TerrainData.SECTOR_GRID_DIM + col
+	return clampi(_sector_grid[idx], 0, TerrainData.SECTOR_ID_MAX)
 
 
 func world_to_sector_cell(world_x: float, world_z: float) -> Vector2i:
@@ -295,8 +295,8 @@ func sample_world_height(world_x: float, world_z: float) -> float:
 
 # Batch variant of sample_world_height: one C++ call for the whole point set
 # instead of one crossing per point. Scalar and batch run the same
-# NovaTerrainData per-point sampler core over the SAME live editable image
-# (the document hands one Image to both this mesh and the NovaTerrainData;
+# TerrainData per-point sampler core over the SAME live editable image
+# (the document hands one Image to both this mesh and the TerrainData;
 # pinned by terrain_height_revision_test). Off-mesh / no-data points are NAN,
 # not the scalar path's -1e6 sentinel.
 func sample_world_heights(points: PackedVector2Array) -> PackedFloat32Array:
@@ -309,7 +309,7 @@ func sample_world_heights(points: PackedVector2Array) -> PackedFloat32Array:
 
 
 # Segment raycast against the live terrain surface. Forwards to the engine's
-# witnessed raycast (NovaTerrainData.raycast_terrain, the ENG-3 B1 port
+# witnessed raycast (TerrainData.raycast_terrain, the ENG-3 B1 port
 # [orig: Terrain_RaycastHeightmapLoRes @ 0x60cb80; Terrain_RaycastHeightmapHiRes_0
 # @ 0x60e710]); returns the refined world-space hit or the all-NAN miss.
 # Pre-load (no data) misses, like the sampler forwarders above.

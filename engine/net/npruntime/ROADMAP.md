@@ -24,7 +24,7 @@ The old in-match glue grew empirically against captures and is overworked:
 `engine/net/novaworld/game_session.cpp` (1332-line phase machine with hardcoded retail fixtures +
 ack-loop hacks), the `replication_min` `build_tag_*` builders (quarantined/superseded), the
 `netsim` deferred stubs, and the SP/host/joiner entanglement in
-`godot/adapter/simulation/nova_simulation.cpp`. The codecs themselves (`novacrypto`, `napi`, the
+`godot/src/simulation/nova_simulation.cpp`. The codecs themselves (`novacrypto`, `napi`, the
 `novaworld` encode/decode/framing/capture layer) are byte-witnessed and solid. This effort
 rebuilds the *runtime* on top of those codecs as one faithful, maintainable core.
 
@@ -279,7 +279,7 @@ popped inner `[tag][body]` via `frame_in_match_s2c` and routes inbound raw `0x43
   (`pop_outbound` → `frame_in_match_s2c` → `sendto`). The joiner spawn is AUTOMATIC (`tick_connections`
   → `Server_ProcessPendingPlayerSpawns` binds `owned_entity`); the owner only attaches the peer's
   `UdpSessionTransport` and streams the joiner's NAMED dcb-bearing `0x0C` (mirrors
-  `NovaSimulation::announce_joiner_organic_spawn`). **CMake godot-cpp guard is structural** — godot-cpp
+  `Simulation::announce_joiner_organic_spawn`). **CMake godot-cpp guard is structural** — godot-cpp
   is a separate SCons build never in this CMake graph; linking only `opennova_*` static libs makes the
   target incapable of pulling it (there is no toggle).
 - **§5.44 housekeeping ported** into `ClientRuntime` (the P5 deferred-and-logged set): `0x34` keepalive
@@ -467,7 +467,7 @@ bank table lives in `scripts/net/README.md` "Reference captures". Decode best wi
   is the architecture-guardrails / module-ownership / frame-order owner; do not chase the
   redirect in a circle.)
 - Promote-from (both since deleted — `host_session_accept` retired at P8, `joiner_session`
-  deleted at P8.1, recorded above): `engine/net/novaworld/include/novaworld/{host_session_accept.h,joiner_session.h}`.
-- Seam: `engine/net/netsim/include/netsim/{connection_fan.h,connection.h,session_transport.h,serializing_sink.h,udp_session_transport.h}`.
+  deleted at P8.1, recorded above): `engine/net/novaworld/{host_session_accept.h,joiner_session.h}`.
+- Seam: `engine/net/netsim/{connection_fan.h,connection.h,session_transport.h,serializing_sink.h,udp_session_transport.h}`.
 - Test pattern: `tests/novaworld/nw_pool_groundtruth_test.cpp`, `tests/netsim/*`,
   `tests/novaworld/nw_pcap_stream_test.cpp`.

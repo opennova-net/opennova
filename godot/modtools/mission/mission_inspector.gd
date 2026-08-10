@@ -10,7 +10,7 @@ extends MarginContainer
 #   _box       — the read-only mission summary (metadata, world, object counts).
 #                Cheap to rebuild, so it is torn down and rebuilt on every `changed`.
 #
-# All edits go through the controller (never NovaMissionData directly); the controller
+# All edits go through the controller (never MissionData directly); the controller
 # moves the in-world object and writes the record. Referenced via preload (no
 # class_name), the same convention as the controller and placer.
 
@@ -113,16 +113,16 @@ var _mode_syncing: bool = false
 # them on each `changed` (every edit commit / drag release) is the dominant per-edit cost. Cache them
 # and rebuild only when the controller's membership revision (entity set + group membership) changes.
 var _options_rev: int = -1
-var _options_mission: NovaMissionData
+var _options_mission: MissionData
 var _cached_group_options: Array = []
 var _cached_waypoint_options: Array = []
 var _cached_all_entities: Array = []
 
 # The mission object last seen by _refresh. When it changes (a new mission opened, or cleared to
 # null) the per-list selections above are stale -- the same row index is a different weapon / group /
-# event in another document -- so they reset. open_mission builds a fresh NovaMissionData; edits and
+# event in another document -- so they reset. open_mission builds a fresh MissionData; edits and
 # undo/redo reuse the same object, so this only flips on an actual document swap.
-var _last_mission: NovaMissionData = null
+var _last_mission: MissionData = null
 
 # Signature of the values the read-only summary last rendered. _refresh (and thus _rebuild_summary)
 # fires on every model `changed` -- each spin nudge, drag-commit, and placement -- but the summary
@@ -287,7 +287,7 @@ func set_detail_mount(detail_mount: Control) -> void:
 
 # Public API: the workspace injects the shell's resolve/pick/jump services after
 # the form is built; the Mission-properties section owns the widgets.
-func set_reference_services(services: Dictionary) -> void:
+func set_reference_services(services: LinkServices) -> void:
 	_properties.set_reference_services(services)
 
 
@@ -301,7 +301,7 @@ func _refresh() -> void:
 		_properties._props_binder.reset_guard()
 	# Reset the per-list selections when the mission identity flips (open / clear): a kept row index
 	# would otherwise bind to a different weapon / group / event in the newly opened document.
-	var mission: NovaMissionData = _controller.get_mission() if _controller != null else null
+	var mission: MissionData = _controller.get_mission() if _controller != null else null
 	if mission != _last_mission:
 		_last_mission = mission
 		_loadout_groups._loadout_selected = -1
@@ -663,7 +663,7 @@ func _refresh_option_caches() -> void:
 		_cached_waypoint_options = []
 		_cached_all_entities = []
 		return
-	var mission: NovaMissionData = _controller.get_mission()
+	var mission: MissionData = _controller.get_mission()
 	var rev: int = _controller.get_membership_revision()
 	# Rebuild only when the document or its membership revision changes. (get_group_options etc. handle
 	# a null mission by returning their base list, so this is safe before a mission is loaded too.)
@@ -741,8 +741,8 @@ func _sync_user_points_check(has_selection: bool) -> void:
 	var has_points := false
 	var visible := false
 	if has_selection and _controller != null:
-		has_points = _controller.selected_has_user_points() if _controller.has_method("selected_has_user_points") else false
-		visible = _controller.is_selected_user_points_visible() if _controller.has_method("is_selected_user_points_visible") else false
+		has_points = _controller.selected_has_user_points()
+		visible = _controller.is_selected_user_points_visible()
 	_user_points_check.disabled = not has_points
 	_user_points_check.button_pressed = has_points and visible
 
@@ -750,8 +750,7 @@ func _sync_user_points_check(has_selection: bool) -> void:
 func _on_user_points_toggled(pressed: bool) -> void:
 	if _loading or _controller == null:
 		return
-	if _controller.has_method("set_selected_user_points_visible"):
-		_controller.set_selected_user_points_visible(pressed)
+	_controller.set_selected_user_points_visible(pressed)
 
 
 func _on_position_axis(value: float, axis: int) -> void:
@@ -865,7 +864,7 @@ func _rebuild_summary() -> void:
 	if _box == null:
 		return
 
-	var mission: NovaMissionData = _controller.get_mission() if _controller != null else null
+	var mission: MissionData = _controller.get_mission() if _controller != null else null
 	var info := {}
 	var stats := {}
 	var selection := {}
@@ -884,10 +883,10 @@ func _rebuild_summary() -> void:
 			selection.is_empty(),
 			int(stats.get("placed", 0)), int(stats.get("batched", 0)), int(stats.get("batches", 0)),
 			int(stats.get("animated", 0)), int(stats.get("unresolved", 0)), int(stats.get("markers", 0)),
-			mission.get_entity_count(NovaMissionData.KIND_ITEM),
-			mission.get_entity_count(NovaMissionData.KIND_BUILDING),
-			mission.get_entity_count(NovaMissionData.KIND_ORGANIC),
-			mission.get_entity_count(NovaMissionData.KIND_MARKER),
+			mission.get_entity_count(MissionData.KIND_ITEM),
+			mission.get_entity_count(MissionData.KIND_BUILDING),
+			mission.get_entity_count(MissionData.KIND_ORGANIC),
+			mission.get_entity_count(MissionData.KIND_MARKER),
 		]
 	if sig == _summary_sig:
 		return
@@ -932,10 +931,10 @@ func _rebuild_summary() -> void:
 
 	_add_separator()
 	_add_heading("Entities")
-	_add_row("Items", str(mission.get_entity_count(NovaMissionData.KIND_ITEM)))
-	_add_row("Buildings", str(mission.get_entity_count(NovaMissionData.KIND_BUILDING)))
-	_add_row("Organics", str(mission.get_entity_count(NovaMissionData.KIND_ORGANIC)))
-	_add_row("Markers", str(mission.get_entity_count(NovaMissionData.KIND_MARKER)))
+	_add_row("Items", str(mission.get_entity_count(MissionData.KIND_ITEM)))
+	_add_row("Buildings", str(mission.get_entity_count(MissionData.KIND_BUILDING)))
+	_add_row("Organics", str(mission.get_entity_count(MissionData.KIND_ORGANIC)))
+	_add_row("Markers", str(mission.get_entity_count(MissionData.KIND_MARKER)))
 
 
 # --- Row builders -------------------------------------------------------------
@@ -984,13 +983,13 @@ func _nonempty(text: String, fallback: String) -> String:
 
 func _kind_label(kind: int) -> String:
 	match kind:
-		NovaMissionData.KIND_ITEM:
+		MissionData.KIND_ITEM:
 			return "Item"
-		NovaMissionData.KIND_BUILDING:
+		MissionData.KIND_BUILDING:
 			return "Building"
-		NovaMissionData.KIND_ORGANIC:
+		MissionData.KIND_ORGANIC:
 			return "Organic"
-		NovaMissionData.KIND_MARKER:
+		MissionData.KIND_MARKER:
 			return "Marker"
 		_:
 			return "Entity"

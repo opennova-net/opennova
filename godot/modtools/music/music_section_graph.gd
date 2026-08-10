@@ -2,7 +2,7 @@ class_name MusicSectionGraph
 extends RefCounted
 
 # Section transition map, built from the C++ structural model
-# (NovaMusicScript.get_section_model), which reads OPCODES -- so a real state
+# (MusicScript.get_section_model), which reads OPCODES -- so a real state
 # transition (setstate 0x3B) is distinguished from the frame-setup `enter`
 # (0x38), and tablexec switch fan-out is captured.
 #
@@ -20,7 +20,7 @@ const KIND_BRANCH := 2       # goto/brfalse/brtrue whose target is a section ent
 #   { name, index, is_entry, is_idle_loop,
 #     edges:[{to:int, to_name:String, kind:int}], plays:[{track:int, wait:bool}] }
 # Empty Array when the script can't be modelled (no script).
-static func build(script_resource: NovaMusicScript, script_name: StringName) -> Array:
+static func build(script_resource: MusicScript, script_name: StringName) -> Array:
 	if script_resource == null:
 		return []
 	return script_resource.get_section_model(script_name)

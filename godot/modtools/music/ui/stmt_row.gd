@@ -48,7 +48,7 @@ var _glyph: Label = null
 var _sentence: Label = null      # read-only rendering only
 var _badges: HBoxContainer = null
 var _box: HBoxContainer = null
-var _mount = null                 # MusicSectionProgramView
+var _mount: MusicSectionProgramView = null
 # Live value controls (editable rendering), per kind:
 var _track_opt: OptionButton = null
 var _section_opt: OptionButton = null
@@ -531,7 +531,7 @@ func _target_label(stmt: Dictionary) -> String:
 
 # "hands it: <input names>" for a call to a state that takes inputs; "" else.
 func _callee_hand_text(stmt: Dictionary) -> String:
-	if kind != "call" or _mount == null or not _mount.has_method("callee_inputs_text"):
+	if kind != "call" or _mount == null:
 		return ""
 	return String(_mount.callee_inputs_text(String(stmt.get("target_name", ""))))
 

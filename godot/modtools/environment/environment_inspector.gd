@@ -11,7 +11,7 @@ extends ScrollContainer
 const BADGE_PARTIAL := "◐"
 const BADGE_UNCONSUMED := "○"
 
-var _editor
+var _editor: EnvironmentEditor
 var _syncing := false
 var _selected_keyframe := 0
 var _consumption: Dictionary = {}
@@ -42,7 +42,7 @@ var _iris_percent: SpinBox
 var _iris_center: SpinBox
 # Link-widget services (resolve/pick/jump from the shell); they arrive after
 # the workspace builds this inspector, so the setter re-configures live widgets.
-var _ref_services: Dictionary = {}
+var _ref_services := LinkServices.new()
 var _keyframe_list: ItemList
 var _selected_time: SpinBox
 var _color_buttons: Dictionary = {}
@@ -243,7 +243,7 @@ func _sync_keyframe_list() -> void:
 	_keyframe_list.clear()
 	var keyframes := _keyframes()
 	for i in keyframes.size():
-		var keyframe: NovaEnvKeyframe = keyframes[i]
+		var keyframe: EnvKeyframe = keyframes[i]
 		_keyframe_list.add_item("%04d" % keyframe.get_time())
 	if keyframes.is_empty():
 		_selected_keyframe = -1
@@ -348,9 +348,9 @@ func _add_sky_map(parent: Control, label_text: String, commit: Callable) -> Text
 
 
 ## Wires the link widgets' resolve/pick/jump Callables (see
-## ResourceRefWidget.services_from_shell). Idempotent; safe before or after
+## LinkServices.from_shell). Idempotent; safe before or after
 ## the form is built.
-func set_reference_services(services: Dictionary) -> void:
+func set_reference_services(services: LinkServices) -> void:
 	_ref_services = services
 	if _sun_model != null and is_instance_valid(_sun_model):
 		_sun_model.configure("object_model", "Sun", services)
@@ -391,7 +391,7 @@ func _keyframes() -> Array:
 	return _editor.env_file.get_tod_keyframes()
 
 
-func _current_keyframe() -> NovaEnvKeyframe:
+func _current_keyframe() -> EnvKeyframe:
 	var keyframes := _keyframes()
 	if _selected_keyframe < 0 or _selected_keyframe >= keyframes.size():
 		return null
@@ -407,12 +407,12 @@ func _mark_env_changed() -> void:
 # Open the editing burst before mutating env_file; the commit triggers wired in
 # _build_ui (focus-out / picker-close / slider drag-end) close it as one step.
 func _begin_edit() -> void:
-	if _editor and _editor.has_method("begin_edit"):
+	if _editor != null:
 		_editor.begin_edit()
 
 
 func _commit_edit() -> void:
-	if _editor and _editor.has_method("commit_edit"):
+	if _editor != null:
 		_editor.commit_edit()
 
 
@@ -552,7 +552,7 @@ func _on_add_keyframe() -> void:
 		return
 	_editor.push_undo_step(func():
 		var keyframes := _keyframes()
-		var keyframe := NovaEnvKeyframe.new()
+		var keyframe := EnvKeyframe.new()
 		keyframe.set_time(int(_editor.time_of_day))
 		if not keyframes.is_empty():
 			_copy_keyframe(keyframes[clampi(_selected_keyframe, 0, keyframes.size() - 1)], keyframe)
@@ -569,7 +569,7 @@ func _on_duplicate_keyframe() -> void:
 		return
 	_editor.push_undo_step(func():
 		var keyframes := _keyframes()
-		var duplicate := NovaEnvKeyframe.new()
+		var duplicate := EnvKeyframe.new()
 		_copy_keyframe(source, duplicate)
 		duplicate.set_time(clampi(source.get_time() + 100, 0, 2359))
 		keyframes.append(duplicate)
@@ -578,7 +578,7 @@ func _on_duplicate_keyframe() -> void:
 	sync_from_editor()
 
 
-func _copy_keyframe(source: NovaEnvKeyframe, target: NovaEnvKeyframe) -> void:
+func _copy_keyframe(source: EnvKeyframe, target: EnvKeyframe) -> void:
 	target.set_time(source.get_time())
 	target.set_sun_color(source.get_sun_color())
 	target.set_ground_color(source.get_ground_color())

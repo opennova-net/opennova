@@ -26,7 +26,7 @@ const DEFAULT_WINDOW_SECONDS := 10.0
 const DEFAULT_WINDOW_COUNT := 5
 
 const ResourceDirSettings := preload(
-		"res://adapter/resource_index/resource_dir_settings.gd")
+		"res://game/resource_index/resource_dir_settings.gd")
 const MountGuard := preload("res://tests/perf_probe_mount_guard.gd")
 
 const PRESENT_SLOTS := [
@@ -445,7 +445,7 @@ func _build_fingerprint(world, runtime, bms: String) -> Dictionary:
 		var node: Node = stack.pop_back()
 		for child in node.get_children():
 			stack.push_back(child)
-		if not (node is NovaObjectModel):
+		if not (node is ObjectModel):
 			continue
 		model_count += 1
 		if not (node as Node3D).is_visible_in_tree():

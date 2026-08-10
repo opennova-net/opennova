@@ -44,12 +44,12 @@ Per recipient, per frame — all in `Jointops.exe` (IDA @ 127.0.0.1:13337):
 | **sub-block 2 (env)** | **DEFERRED at this snapshot — D-NET-134** | fixed 2026-08-03 with the live environment owner |
 | phase-8 mounted-ammo tail (`phase & 0xF == 8`) | deferred at this snapshot | fixed 2026-08-03 with selected-`MountSlot` modeling |
 | entity loop: priority + aging + 600-B budget | DONE (D-NET-134 step 2) | `select_frame_entities`, `connection_fan.cpp`; round-robin is EMERGENT from aging (no cursor) |
-| replication classes from items.def | DONE (load-bearing) | `resolve_item_traits` (NovaSimulation) stamps `Entity::net_class_code` via `class_from_tag`; pool alone NEVER selects a record (ewep desync, v13) |
+| replication classes from items.def | DONE (load-bearing) | `resolve_item_traits` (Simulation) stamps `Entity::net_class_code` via `class_from_tag`; pool alone NEVER selects a record (ewep desync, v13) |
 | field-17 health byte (packed tier\|class) | DONE (D-NET-138 FIXED) | `health_classification_byte` [orig: @0x4AD4E0]; killed the 0x0F flood (v11: 0 C 0x0F) |
 | vehicle record health word (+286) | DONE (D-NET-63 corrected) | live items.def hp via `resolve_item_traits`; 0 = wreck, small = burning (v12/v13 regressions) |
 | player record field sources (input/state/pitch/yaw-trunc/mount) | DONE | witnessed apply map in §5.10; off-12 is MOVEMENT INPUT (uplink-echoed), off-13 bit2 = dead/undeployed |
 | 0x5A loadout reply derived from C2S 0x2F | DONE (set+order) | `build_tag_5a_weapon_loadout` (server_message_dispatch) |
-| 0x5A ammo bytes (real counts) | DONE (D-NET-141; index rule CLOSED §5.57) | `world::WeaponTable` fed via `NovaSimulation::load_weapon_table`; rules in `weapon_table_build.cpp` [orig: WeaponSlot_GetTotalClips @0x5425F0]; table-less hosts keep the echo fallback |
+| 0x5A ammo bytes (real counts) | DONE (D-NET-141; index rule CLOSED §5.57) | `world::WeaponTable` fed via `Simulation::load_weapon_table`; rules in `weapon_table_build.cpp` [orig: WeaponSlot_GetTotalClips @0x5425F0]; table-less hosts keep the echo fallback |
 | C2S 0x25 → S2C 0x49 reload relay | DONE (D-NET-142) | dispatch case 0x25 stages the relayed 0x49 on EVERY in-match transport incl. the requester [orig: @0x514DF0 → SendFiltered @0x4C87E0]; host-side clip bookkeeping deferred |
 | off-14/15/16 anim bytes (LIVE states + ratio + adm index) | DONE (D-NET-143 → D-NET-159) | off-14/15 = the motor mirror (`AiSystem::mirror_wire_anim`, pending-wins); the AUTHORITY selection runs for net-snapped peers from the replicated input (`remote_player_body_anim` [orig: @0x4B40E0]); stance rides C2S 0x1D → `Entity::net_stance_bits` + the tail echo; off-16 = `Entity::equipped_adm_index` (category<11-gated [orig: @0x4C20A3]). Deferred inside D-NET-159: run/jog promotion (ADM gait class), prone lean, real .adm channel rate for data-less hosts, deathAnim variants |
 | joiner spawn health (tier byte 0x28) | DONE (D-NET-144) | spawns seed `World::player_item_hp` at full (150/150) [orig: Entity_InitFromItemDef @0x49e550] |
@@ -121,7 +121,7 @@ target) in net-re D-NET-146.
   0x13, non-players 0x26 via the single Server_SendEntityStatePacket emit. Port: engine/formats/def
   ammo.def parse (§5.60 token subset) → `world::AmmoTable` + round_type resolve →
   `world::RoundSim` (spawn on 0x06, per-tick flight/terrain/organics, kinetic damage) →
-  Server_TickUpdate death routing + host respawn release → NovaSimulation::load_ammo_table.
+  Server_TickUpdate death routing + host respawn release → Simulation::load_ammo_table.
   Pinned by `npruntime_round_sim_test` + `def_parse_ammo` (real 5.56 fixture fields).
   MVP deferrals in round_sim.h: bone zones, drag/gravity, spread, vehicles, explosion kill
   zones, arm-age child, 0x52/0x54/0x32, scoring. **v29 LIVE (same day, 2 retail clients):**

@@ -31,7 +31,7 @@
 #include <npwire/protocol_message.h>
 #include <npwire/replication_model.h>
 
-#include <terrain/height_field.h>
+#include <terrain_query/height_field.h>
 
 #include <world/ai.h>
 #include <world/geom.h>

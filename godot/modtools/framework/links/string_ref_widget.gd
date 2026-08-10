@@ -15,7 +15,7 @@ signal value_changed(value: String)
 var ref_row: ResourceRefWidget
 var preview: Label
 
-var _services: Dictionary = {}
+var _services := LinkServices.new()
 # The resolved table path, captured from the last LIVE resolve - the jump
 # service receives it so the Strings workspace opens the right table. Reuse
 # hazard for future adopters: the inner row memoizes resolves on (value,
@@ -52,12 +52,12 @@ func _init() -> void:
 ##              "path": <table path>, "text": <display text, hotkey-stripped> }
 ##   "pick":    Callable(current_key, on_pick: Callable(key))
 ##   "jump":    Callable(key, table_path)
-func configure(display_label: String, services: Dictionary = {}) -> void:
-	_services = services
-	var inner := {}
-	var resolve := _service("resolve")
+func configure(display_label: String, services: LinkServices = null) -> void:
+	_services = services if services != null else LinkServices.new()
+	var inner := LinkServices.new()
+	var resolve := _services.resolve
 	if resolve.is_valid():
-		inner["resolve"] = func(_kind: String, key: String) -> Dictionary:
+		inner.resolve = func(_kind: String, key: String) -> Dictionary:
 			var result: Dictionary = resolve.call(key)
 			_table_path = String(result.get("path", ""))
 			# The inner row gates its jump on a non-empty resolved path; for
@@ -71,13 +71,13 @@ func configure(display_label: String, services: Dictionary = {}) -> void:
 				patched["path"] = key
 				return patched
 			return result
-	var pick := _service("pick")
+	var pick := _services.pick
 	if pick.is_valid():
-		inner["pick"] = func(_kind: String, _title: String, on_pick: Callable) -> void:
+		inner.pick = func(_kind: String, _title: String, on_pick: Callable) -> void:
 			pick.call(ref_row.get_value(), on_pick)
-	var jump := _service("jump")
+	var jump := _services.jump
 	if jump.is_valid():
-		inner["jump"] = func(_kind: String, _path: String) -> void:
+		inner.jump = func(_kind: String, _path: String) -> void:
 			jump.call(ref_row.get_value(), _table_path)
 	ref_row.configure("string_id", display_label, inner)
 	_refresh_preview()
@@ -92,13 +92,8 @@ func get_value() -> String:
 	return ref_row.get_value()
 
 
-func _service(service_name: String) -> Callable:
-	var cb: Variant = _services.get(service_name)
-	return cb if cb is Callable else Callable()
-
-
 func _refresh_preview() -> void:
-	var resolve := _service("resolve")
+	var resolve := _services.resolve
 	var key := ref_row.get_value()
 	if not resolve.is_valid() or key.is_empty():
 		preview.visible = false

@@ -23,20 +23,21 @@ SCAN_TREES = (
 SOURCE_SUFFIXES = (".h", ".cpp", ".c", ".hpp", ".cc")
 SKIP_PARTS = {"third_party", "build"}
 
-# Include prefixes that live behind the seam. terrain/ is the subtle one:
-# the terrain and terrain_query libs expose DISJOINT header sets under the
-# SAME terrain/ include prefix, so the allowlist is by exact header — the
-# terrain_query seam surface — never by directory. tpm/ (the TPM1 tile mesh)
-# and dep/ (the depth-buffer intermediate) were blanket-forbidden under
-# terrain/ before their formats extraction (ADR 0030) and stay forbidden by
-# their new prefixes.
+# Include prefixes that live behind the seam. Since the 2026-08-10 engine
+# flatten, terrain_query owns its own terrain_query/ include prefix
+# (pre-flatten it shared terrain/ with the terrain lib as disjoint header
+# sets), so terrain/ is fully forbidden and the seam surface is the exact
+# terrain_query header set below. tpm/ (the TPM1 tile mesh) and dep/ (the
+# depth-buffer intermediate) were blanket-forbidden under terrain/ before
+# their formats extraction (ADR 0030) and stay forbidden by their new
+# prefixes.
 FORBIDDEN_PREFIXES = ("cpt/", "til/", "trn/", "tpj/", "foliage/", "terrain/",
-                      "tpm/", "dep/")
+                      "terrain_query/", "tpm/", "dep/")
 TERRAIN_QUERY_HEADERS = {
-    "terrain/coords.h",
-    "terrain/height_field.h",
-    "terrain/surface_type_map.h",
-    "terrain/terrain_raycast.h",
+    "terrain_query/coords.h",
+    "terrain_query/height_field.h",
+    "terrain_query/surface_type_map.h",
+    "terrain_query/terrain_raycast.h",
 }
 
 INCLUDE_LINE = re.compile(r'^\s*#\s*include\s*[<"]([^<>"]+)[>"]')
@@ -104,9 +105,9 @@ def main() -> int:
 
     if violations and args.enforce:
         print("[include-graph] FAIL: net/wac/mission may reach terrain only "
-              "through the terrain_query seam headers (terrain/coords.h, "
-              "terrain/height_field.h, terrain/surface_type_map.h, "
-              "terrain/terrain_raycast.h) — ADR 0020. Route the access "
+              "through the terrain_query seam headers (terrain_query/coords.h, "
+              "terrain_query/height_field.h, terrain_query/surface_type_map.h, "
+              "terrain_query/terrain_raycast.h) — ADR 0020. Route the access "
               "through terrain_query, or move the logic behind the seam.")
         return 1
     if missing and args.enforce:

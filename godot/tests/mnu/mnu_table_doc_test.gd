@@ -1,19 +1,19 @@
 extends GutTest
 
 # M10.2: table COLUMN authoring (count / spacing / header + body definitions) on
-# NovaMnuDocument, and that edits survive a serialize round-trip. The fixture's
+# MnuDocument, and that edits survive a serialize round-trip. The fixture's
 # MissionTable carries 3 columns (Name/Players/Ping) with one bitmap BODY.
 
 const FIXTURE := "res://../fixtures/mnu/all_widgets.mnu"
 
 
-func _load() -> NovaMnuDocument:
-	var doc := NovaMnuDocument.new()
+func _load() -> MnuDocument:
+	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(FileAccess.get_file_as_bytes(FIXTURE)), OK, "all_widgets loads")
 	return doc
 
 
-func _walk_for_name(doc: NovaMnuDocument, id: int, wname: String) -> int:
+func _walk_for_name(doc: MnuDocument, id: int, wname: String) -> int:
 	if doc.get_widget_name(id) == wname:
 		return id
 	for cid in doc.get_child_ids(id):
@@ -23,7 +23,7 @@ func _walk_for_name(doc: NovaMnuDocument, id: int, wname: String) -> int:
 	return -1
 
 
-func _find_widget(doc: NovaMnuDocument, wname: String) -> int:
+func _find_widget(doc: MnuDocument, wname: String) -> int:
 	for sid in doc.get_screen_ids():
 		var f := _walk_for_name(doc, doc.get_screen_root_id(sid), wname)
 		if f != -1:
@@ -34,7 +34,7 @@ func _find_widget(doc: NovaMnuDocument, wname: String) -> int:
 func test_table_columns_parsed() -> void:
 	var doc := _load()
 	var table := _find_widget(doc, "MissionTable")
-	assert_eq(doc.get_widget_type(table), NovaMnuDocument.TYPE_TABLE, "MissionTable is a table")
+	assert_eq(doc.get_widget_type(table), MnuDocument.TYPE_TABLE, "MissionTable is a table")
 	assert_eq(doc.get_table_column_count(table), 3, "3 columns")
 	assert_eq(doc.get_table_column_spacing(table), 4, "spacing 4")
 
@@ -77,7 +77,7 @@ func test_table_header_edit_round_trip() -> void:
 	doc.set_table_column_count(table, 4)
 	doc.set_table_column_spacing(table, 6)
 
-	var doc2 := NovaMnuDocument.new()
+	var doc2 := MnuDocument.new()
 	assert_eq(doc2.load_from_bytes(doc.to_byte_array()), OK, "table round-trip re-parses")
 	var table2 := _find_widget(doc2, "MissionTable")
 	assert_eq(doc2.get_table_column_count(table2), 4, "column count persisted")
@@ -114,7 +114,7 @@ func test_table_compound_edit_preserves_header_type_and_body_custom_draw() -> vo
   </WINDOW>
 </WINDOW></SCREEN>
 """
-	var doc := NovaMnuDocument.new()
+	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(src.to_utf8_buffer()), OK, "typed table parses")
 	var table := _find_widget(doc, "TypedTable")
 	var headers := doc.get_table_headers(table)
@@ -131,7 +131,7 @@ func test_table_compound_edit_preserves_header_type_and_body_custom_draw() -> vo
 	body["justify"] = "RIGHT"
 	doc.set_table_body(table, 0, body)
 
-	var doc2 := NovaMnuDocument.new()
+	var doc2 := MnuDocument.new()
 	assert_eq(doc2.load_from_bytes(doc.to_byte_array()), OK, "edited typed table re-parses")
 	var table2 := _find_widget(doc2, "TypedTable")
 	assert_eq(String(doc2.get_table_headers(table2)[0]["type"]), "id",

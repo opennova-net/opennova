@@ -1,27 +1,42 @@
 extends GutTest
 
-## Runtime audio tests: NovaSoundBank name indexing/resolution (case-insensitive,
-## the grilled name-keyed model) and NovaWavLoader RIFF decode incl. the 8-bit
+## Runtime audio tests: SoundBank name indexing/resolution (case-insensitive,
+## the grilled name-keyed model) and WavLoader RIFF decode incl. the 8-bit
 ## unsigned -> signed conversion. Self-contained (no real game data required).
 
-const NovaSoundBankScript = preload("res://adapter/world/nova_sound_bank.gd")
+const NovaSoundBankScript = preload("res://game/world/nova_sound_bank.gd")
 
 
-# Duck-typed NovaResourceRoot stand-in serving in-memory wav bytes.
-class ResourceRootStub:
-	extends RefCounted
-	var files := {}  # filename(lower) -> PackedByteArray
-	var read_calls := 0
-
-	func has_file(name: String) -> bool:
-		return files.has(name.to_lower())
-
-	func read_file(name: String) -> PackedByteArray:
-		read_calls += 1
-		return files.get(name.to_lower(), PackedByteArray())
+# A REAL ResourceRoot over a per-test temp dir (ADR 0034 typed seam): the
+# in-memory wav bytes land as files, and the bank reads them through the same
+# native VFS the runtime uses.
+var _root_dirs: Array[String] = []
 
 
-# Public NovaSoundBank dependency seam: the live NovaSimulation implements this
+func after_each() -> void:
+	for dir in _root_dirs:
+		for entry in DirAccess.get_files_at(dir):
+			DirAccess.remove_absolute(dir.path_join(entry))
+		DirAccess.remove_absolute(dir)
+	_root_dirs.clear()
+
+
+func _real_root(files: Dictionary) -> ResourceRoot:
+	var dir := OS.get_temp_dir().replace("\\", "/") + 			"/opennova_sound_rt_%d_%d" % [Time.get_ticks_usec(), _root_dirs.size()]
+	assert_eq(DirAccess.make_dir_recursive_absolute(dir), OK)
+	_root_dirs.append(dir)
+	for name in files.keys():
+		var file := FileAccess.open(dir.path_join(String(name)), FileAccess.WRITE)
+		assert_not_null(file)
+		if file != null:
+			file.store_buffer(files[name])
+			file.close()
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(dir), OK)
+	return root
+
+
+# Public SoundBank dependency seam: the live Simulation implements this
 # method; the value-only stand-in lets the test pin what the bank does with the
 # returned retail occlusion distance without fabricating collision internals.
 class OcclusionProviderStub:
@@ -41,8 +56,8 @@ class OcclusionProviderStub:
 		return raw_distance_q16 if distance_q16 < 0 else distance_q16
 
 
-func _profile_with_set(set_name: String, wav: String) -> NovaLwfData:
-	var d := NovaLwfData.new()
+func _profile_with_set(set_name: String, wav: String) -> LwfData:
+	var d := LwfData.new()
 	d.create_empty()
 	var si := d.add_set()
 	d.set_set_field(si, "name", set_name)
@@ -77,10 +92,9 @@ func test_spawn_ambient_loops_the_full_decoded_stream() -> void:
 	# "0 = whole stream". With LOOP_FORWARD and loop_end 0, playback wraps at
 	# sample 0 forever, so every looping "snd:" ambient marker voice in-game was
 	# a constant sample-0 value — silence.
-	var root := ResourceRootStub.new()
 	var samples := PackedByteArray()
 	samples.resize(32)  # 16 mono 16-bit frames
-	root.files["z00ar100.wav"] = _build_wav(samples, 1, 22050, 16)
+	var root := _real_root({"z00ar100.wav": _build_wav(samples, 1, 22050, 16)})
 	var bank = NovaSoundBankScript.new(root)
 	bank.add_bank(_profile_with_set("Z00AMB1", "Z00aR100.wav"))
 	var parent := Node3D.new()
@@ -105,21 +119,19 @@ func test_spawn_ambient_loops_the_full_decoded_stream() -> void:
 
 
 func test_ambient_description_defers_and_caches_wav_decode() -> void:
-	var root := ResourceRootStub.new()
 	var samples := PackedByteArray()
 	samples.resize(32)
-	root.files["z00ar100.wav"] = _build_wav(samples, 1, 22050, 16)
+	var root := _real_root({"z00ar100.wav": _build_wav(samples, 1, 22050, 16)})
 	var bank = NovaSoundBankScript.new(root)
 	bank.add_bank(_profile_with_set("Z00AMB1", "Z00aR100.wav"))
 
 	var descriptors: Array = bank.describe_ambient("Z00AMB1")
 	assert_eq(descriptors.size(), 1)
-	assert_eq(root.read_calls, 0,
-		"describing a virtual ambient layer does not read or decode its WAV")
-	assert_not_null(bank.resolve_ambient_stream(descriptors[0]))
-	assert_eq(root.read_calls, 1, "the first selected candidate resolves lazily")
-	assert_not_null(bank.resolve_ambient_stream(descriptors[0]))
-	assert_eq(root.read_calls, 1, "the bank cache prevents a second VFS read")
+	var first: AudioStreamWAV = bank.resolve_ambient_stream(descriptors[0])
+	assert_not_null(first, "the first selected candidate resolves lazily")
+	var second: AudioStreamWAV = bank.resolve_ambient_stream(descriptors[0])
+	assert_same(first, second,
+		"the bank cache serves the same decoded stream instead of a second VFS read")
 
 
 # --- The witnessed distance-volume curve [orig: SoundBank_CalcDistanceVolPan
@@ -194,10 +206,9 @@ func test_oneshot_no_falloff_plays_at_emitter_volume() -> void:
 
 
 func test_zero_range_oneshot_only_fires_at_the_exact_source() -> void:
-	var root := ResourceRootStub.new()
 	var samples := PackedByteArray()
 	samples.resize(32)
-	root.files["tone.wav"] = _build_wav(samples, 1, 22050, 16)
+	var root := _real_root({"tone.wav": _build_wav(samples, 1, 22050, 16)})
 	var profile := _profile_with_set("POINT_ONLY", "tone.wav")
 	profile.set_set_field(0, "target_id", 0)
 	var bank = NovaSoundBankScript.new(root)
@@ -214,10 +225,9 @@ func test_zero_range_oneshot_only_fires_at_the_exact_source() -> void:
 func test_oneshot_occlusion_distance_drives_fire_volume() -> void:
 	# Raw distance is 50u, but the witnessed two-ray result inflates it to 100u.
 	# With a 200u falloff, that is the pinned half-range volume byte 63.
-	var root := ResourceRootStub.new()
 	var samples := PackedByteArray()
 	samples.resize(32)
-	root.files["tone.wav"] = _build_wav(samples, 1, 22050, 16)
+	var root := _real_root({"tone.wav": _build_wav(samples, 1, 22050, 16)})
 	var profile := _profile_with_set("OCCLUDED", "tone.wav")
 	profile.set_set_field(0, "target_id", 200)
 	profile.set_layer_field(0, 0, "falloff_radius", 200)
@@ -242,10 +252,9 @@ func test_oneshot_occlusion_distance_drives_fire_volume() -> void:
 func test_oneshot_occlusion_distance_rechecks_set_cull_range() -> void:
 	# Raw 100u passes the set's 120u cull. Occlusion inflates it to 130u,
 	# so the witnessed post-LOS range recheck rejects the voice.
-	var root := ResourceRootStub.new()
 	var samples := PackedByteArray()
 	samples.resize(32)
-	root.files["tone.wav"] = _build_wav(samples, 1, 22050, 16)
+	var root := _real_root({"tone.wav": _build_wav(samples, 1, 22050, 16)})
 	var profile := _profile_with_set("OCCLUDED_CULL", "tone.wav")
 	profile.set_set_field(0, "target_id", 120)
 	profile.set_layer_field(0, 0, "falloff_radius", 200)
@@ -263,7 +272,7 @@ func test_oneshot_occlusion_distance_rechecks_set_cull_range() -> void:
 
 
 func test_crossfade_volume_byte_rounding() -> void:
-	var A := preload("res://adapter/world/nova_mission_audio.gd")
+	var A := preload("res://game/world/nova_mission_audio.gd")
 	# The register volume word is (0xFFFF * blend + 0x8000) >> 16, ROUNDED, and
 	# the mixer reads its high byte [orig: Entity_UpdateEnvSoundEmitter
 	# @ 0x4a81c6]. Full blend (the 0xFFFF sentinel) -> 255; half -> 128 (the
@@ -274,7 +283,7 @@ func test_crossfade_volume_byte_rounding() -> void:
 
 
 func test_time_of_day_regions_and_blend() -> void:
-	var A := preload("res://adapter/world/nova_mission_audio.gd")
+	var A := preload("res://game/world/nova_mission_audio.gd")
 	# Region cuts [orig: Entity_CalcTimeOfDayRegion @ 0x408110]:
 	# [4,10) morning, [10,17) day, [17,21) evening, else night.
 	assert_eq(int(A.time_of_day_region(6.0).region), 0)
@@ -312,7 +321,7 @@ func test_wav_loader_decodes_pcm8_unsigned() -> void:
 	# Minimal 8-bit unsigned mono 22050 Hz PCM WAV with 4 samples.
 	var samples := PackedByteArray([0x80, 0x00, 0xFF, 0x80])  # center, min, max, center
 	var wav := _build_wav(samples, 1, 22050, 8)
-	var stream := NovaWavLoader.from_bytes(wav)
+	var stream := WavLoader.from_bytes(wav)
 	assert_not_null(stream, "PCM8 WAV decodes")
 	# 8-bit input is upconverted to signed 16-bit (matches Godot's own .wav importer).
 	assert_eq(stream.format, AudioStreamWAV.FORMAT_16_BITS)
@@ -328,14 +337,14 @@ func test_wav_loader_decodes_pcm8_unsigned() -> void:
 
 
 func test_wav_loader_rejects_non_riff() -> void:
-	assert_null(NovaWavLoader.from_bytes(PackedByteArray([1, 2, 3, 4])), "garbage is rejected")
+	assert_null(WavLoader.from_bytes(PackedByteArray([1, 2, 3, 4])), "garbage is rejected")
 
 
 func test_wav_loader_decodes_ima_adpcm() -> void:
 	# One mono IMA-ADPCM block: predictor=1000, step index 0, then a 4-byte word of
 	# zero-nibbles. At step index 0 a zero nibble adds 0, so every sample stays 1000.
 	var wav := _build_ima_wav(1000, 0, PackedByteArray([0, 0, 0, 0]), 11025, 8)
-	var stream := NovaWavLoader.from_bytes(wav)
+	var stream := WavLoader.from_bytes(wav)
 	assert_not_null(stream, "IMA-ADPCM WAV decodes")
 	assert_eq(stream.format, AudioStreamWAV.FORMAT_16_BITS, "ADPCM is decoded to 16-bit PCM")
 	assert_eq(stream.mix_rate, 11025)

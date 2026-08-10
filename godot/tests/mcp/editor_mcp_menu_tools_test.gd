@@ -28,7 +28,7 @@ class ShellStub:
 	func get_resource_root_dir() -> String:
 		return root_dir
 
-	func get_resource_root() -> NovaResourceRoot:
+	func get_resource_root() -> ResourceRoot:
 		return null
 
 	func _get_active_workspace() -> Variant:
@@ -77,7 +77,7 @@ func _call(name: String, args := {}) -> McpToolResult:
 	return await service.server.registry.call_tool(name, args, ctx)
 
 
-func _resource() -> NovaMnuDocument:
+func _resource() -> MnuDocument:
 	return ws.get_menu_resource()
 
 
@@ -458,7 +458,7 @@ func test_preview_radio_dispatches_actions_and_disabled_consumes_without_activat
 	var first := String(_resource().get_screen_name(_resource().get_screen_ids()[0]))
 	var added: McpToolResult = await _call("add_menu_widgets", {"rows": [
 		{"parent": first, "type": "WINDOW", "rect": [200, 40, 120, 80],
-			"name": "Panel", "flags": NovaMnuDocument.FLAG_HIDDEN},
+			"name": "Panel", "flags": MnuDocument.FLAG_HIDDEN},
 		{"parent": first, "type": "RADIO", "rect": [20, 40, 24, 24],
 			"name": "RadioShow", "group": 1, "appearances": [
 				{"state": "default"}, {"state": "selected"},
@@ -487,9 +487,9 @@ func test_preview_radio_dispatches_actions_and_disabled_consumes_without_activat
 	await _call("preview_menu", {"op": "off"})
 
 	await _call("edit_menu_widget", {"set": {"id": panel,
-		"props": {"flags": NovaMnuDocument.FLAG_HIDDEN}}})
+		"props": {"flags": MnuDocument.FLAG_HIDDEN}}})
 	await _call("edit_menu_widget", {"set": {"id": radio,
-		"props": {"flags": NovaMnuDocument.FLAG_DISABLED}}})
+		"props": {"flags": MnuDocument.FLAG_DISABLED}}})
 	await _call("preview_menu", {"op": "on"})
 	var disabled: McpToolResult = await _call("preview_menu",
 		{"op": "press", "widget": radio})
@@ -530,7 +530,7 @@ func test_save_menu_round_trip_and_errors() -> void:
 	var path := String(saved.structured["path"])
 	assert_true(path.begins_with(_abs(SAVE_DIR)), "Relative filenames land in the mounted root.")
 	assert_false(bool(saved.structured["dirty"]))
-	var reloaded := NovaMnuDocument.new()
+	var reloaded := MnuDocument.new()
 	assert_eq(reloaded.load_from_bytes(FileAccess.get_file_as_bytes(path)), OK)
 	assert_gt(reloaded.get_screen_count(), 0, "The saved menu round-trips.")
 	var resaved: McpToolResult = await _call("save_menu")
@@ -719,7 +719,7 @@ func test_add_widgets_appearance_defaults_and_game_warnings() -> void:
 	assert_eq(String(rows[0]["type"]), "")
 	var chk := int(added.structured["ids"][1])
 	assert_eq((_resource().get_widget_appearances(chk) as Array).size(), 0, "Toggles get no silent default art.")
-	assert_eq(_resource().get_window_rect_flags(chk) & NovaMnuDocument.RECT_HAS_RIGHT, 0, "null width = auto-size")
+	assert_eq(_resource().get_window_rect_flags(chk) & MnuDocument.RECT_HAS_RIGHT, 0, "null width = auto-size")
 	var warnings := String("\n".join(PackedStringArray(added.structured["warnings"])))
 	assert_true(warnings.contains("CHECKBOX"), "Bare toggle art warning")
 	assert_true(warnings.contains("sibling STATIC"), "Radio-label warning teaches the shipped pattern")
@@ -730,11 +730,11 @@ func test_game_safety_flags_broken_shapes() -> void:
 	# refuse them now) and expect the analyzer to call each one out.
 	var first_sid := int(_resource().get_screen_ids()[0])
 	var root := int(_resource().get_screen_root_id(first_sid))
-	var bad_btn := int(_resource().add_widget(root, NovaMnuDocument.TYPE_BUTTON, Rect2(10, 10, 100, 0)))
+	var bad_btn := int(_resource().add_widget(root, MnuDocument.TYPE_BUTTON, Rect2(10, 10, 100, 0)))
 	_resource().set_widget_name(bad_btn, "BadJump")
 	_resource().set_widget_text(bad_btn, "Crash me")
 	_resource().set_widget_actions(bad_btn, [{ "type": "screen", "target": "NOWHERE", "file": "", "state": "" }])
-	var bad_list := int(_resource().add_widget(root, NovaMnuDocument.TYPE_LIST, Rect2(10, 40, 200, 100)))
+	var bad_list := int(_resource().add_widget(root, MnuDocument.TYPE_LIST, Rect2(10, 40, 200, 100)))
 	_resource().set_widget_name(bad_list, "BareList")
 
 	var analyzed: McpToolResult = await _call("analyze_menu")

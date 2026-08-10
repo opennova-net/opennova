@@ -1,7 +1,7 @@
 extends GutTest
 
 # B4: object undo — the shadow-step funnel. Mutations reach the editor through
-# NovaObjectData's DEFERRED object_changed signal, so steps record there
+# ObjectData's DEFERRED object_changed signal, so steps record there
 # against the cached pre-mutation baseline (the B3 native edit-state blob);
 # inspector call sites need zero changes. The native byte roundtrip and
 # mismatched-geometry rejection are pinned in object_editor_test.gd.

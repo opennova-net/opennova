@@ -1,7 +1,7 @@
 extends GutTest
 
 # Binding-layer smoke over a directory of real shipped .bms missions. Opens every file through
-# NovaMissionData -- the GDExtension surface the editor actually drives -- and validates that the
+# MissionData -- the GDExtension surface the editor actually drives -- and validates that the
 # editor-facing data is sane: pool counts agree with get_entities, waypoint summaries are clamped to
 # the 32-slot region (CP19.bms ships a path with a raw marker_count of 39), full waypoint paths never
 # exceed 32 markers, and the read accessors (area triggers, events, all-entities) don't crash. One
@@ -43,14 +43,14 @@ func test_real_missions_open_and_are_sane_through_the_binding() -> void:
 	assert_gt(files.size(), 0, "corpus dir has .bms files")
 
 	var kinds := [
-		NovaMissionData.KIND_MARKER, NovaMissionData.KIND_ITEM,
-		NovaMissionData.KIND_BUILDING, NovaMissionData.KIND_ORGANIC,
+		MissionData.KIND_MARKER, MissionData.KIND_ITEM,
+		MissionData.KIND_BUILDING, MissionData.KIND_ORGANIC,
 	]
 	var problems := PackedStringArray()
 	var checked := 0
 	for path in files:
 		var name := path.get_file()
-		var m := NovaMissionData.new()
+		var m := MissionData.new()
 		if m.open_file(path) != OK or not m.is_loaded():
 			problems.append("%s: failed to open through the binding" % name)
 			continue
@@ -95,7 +95,7 @@ func test_cp19_over_count_waypoint_loads_and_is_clamped() -> void:
 	if not FileAccess.file_exists(path):
 		pending("CP19.bms not present in the corpus dir")
 		return
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(path), OK, "CP19.bms opens through the binding (no rejection)")
 	assert_true(m.is_loaded(), "CP19.bms is loaded")
 	for s in m.get_waypoint_summaries():
@@ -114,16 +114,16 @@ func test_real_mission_round_trips_through_the_binding_save_path() -> void:
 		return
 
 	var src := files[0]
-	var m := NovaMissionData.new()
+	var m := MissionData.new()
 	assert_eq(m.open_file(src), OK, "source mission opens")
 
 	var out_path := "user://corpus_binding_roundtrip.bms"
 	assert_eq(m.save_as(ProjectSettings.globalize_path(out_path)), OK, "save_as writes through the binding")
 
-	var reopened := NovaMissionData.new()
+	var reopened := MissionData.new()
 	assert_eq(reopened.open_file(ProjectSettings.globalize_path(out_path)), OK, "the written mission reopens")
 	assert_eq(reopened.get_terrain_ref(), m.get_terrain_ref(), "terrain ref survives the binding round-trip")
-	for kind in [NovaMissionData.KIND_MARKER, NovaMissionData.KIND_ITEM, NovaMissionData.KIND_BUILDING, NovaMissionData.KIND_ORGANIC]:
+	for kind in [MissionData.KIND_MARKER, MissionData.KIND_ITEM, MissionData.KIND_BUILDING, MissionData.KIND_ORGANIC]:
 		assert_eq(reopened.get_entity_count(kind), m.get_entity_count(kind),
 			"kind %d count survives the binding round-trip" % kind)
 

@@ -124,7 +124,7 @@ bool run_fanout_and_per_connection_anchor() {
 	if (!expect(conns.size() == 2, "two connections registered")) return false;
 	(void)conn_self;
 
-	// Fallback anchor = the host player position (what NovaSimulation::compute_net_anchor builds).
+	// Fallback anchor = the host player position (what Simulation::compute_net_anchor builds).
 	nw::PlayerReplicationState fallback;
 	fallback.spawn_x = static_cast<uint32_t>(w::to_fixed(5.0));
 	fallback.spawn_y = static_cast<uint32_t>(w::to_fixed(10.0));

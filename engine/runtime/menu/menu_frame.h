@@ -1,0 +1,445 @@
+#pragma once
+
+// The menu frame compiler (ADR 0033 R2): one compile turns a parsed .mnu
+// SCREEN + the per-frame widget state into a typed draw list — screen-space
+// quads (widget art, color fills, tiled frame pieces), outline wireframes,
+// and game-font glyph quads — in the witnessed per-widget draw order. The
+// embedder keeps texture upload and rasterization only.
+// [orig: Menu_RenderFrame @ 0x54b7c0 -> CUIScene_DrawScreensAndCursor
+//  @ 0x63bf60 -> the CWnd Draw vtable family (CUIElement_Draw @ 0x64a8a0,
+//  CStaticWnd_Render @ 0x657b10, CEditWnd_Render @ 0x6619e0, ...)]
+// Witness record: docs/mnu/menu-re.md ("Widget render dispatch").
+
+#include "hud/game_font.h"
+#include "menu/menu_edit.h"
+#include "mnu/mnu.h"
+#include "mnu/mnu_layout.h"
+
+#include <cstdint>
+#include <map>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace opennova::menu {
+
+// The runtime visual state written to elem+236 every frame by the input pump
+// [orig: widget_process_mouse_event @ 0x647a00; setter CWnd_SetVisualState
+// @ 0x646340]. The numeric values are the original's: they index the
+// per-state appearance records AND select the FONT color pair, and the
+// APPEARANCE STATE attribute parses to the same indices
+// [orig: @ 0x6483d4..0x64845e — DEFAULT=0, DISABLED=1, MOUSEOVER=2,
+// SELECTED=3].
+enum WidgetVisualState : int32_t {
+	kStateDefault = 0,
+	kStateDisabled = 1,
+	kStateMouseover = 2,
+	kStateSelected = 3,
+};
+
+inline constexpr int32_t kMenuTexNone = -1;
+
+// Menus are authored in the fixed 800x600 design space; the anamorphic scale
+// pair every compile/hit call takes is surface_w / kMenuDesignWidth and
+// surface_h / kMenuDesignHeight [orig: CUIScene_SetScreenScale @ 0x639480].
+inline constexpr int kMenuDesignWidth = 800;
+inline constexpr int kMenuDesignHeight = 600;
+
+// One draw-list quad. `texture` indexes the compiler's interned texture-name
+// table (texture_names()); kMenuTexNone is an untextured color fill. `tiled`
+// marks the frame BRUSH fill (UVs carry the repeat counts; the applier tiles)
+// [orig: CUIElement_DrawFrame @ 0x64a210 center fill]. Everything else is
+// stretched into the quad, UV 0..1 (or a stencil sub-rect)
+// [orig: CUIElement_DrawStretchedTexture @ 0x647d40; the IMAGE pass
+//  CUIElement_DrawTextureNative @ 0x647e40 -> CTextureManager_DrawScaledRect
+//  @ 0x654e60].
+struct MenuQuad {
+	float x0 = 0.0f;
+	float y0 = 0.0f;
+	float x1 = 0.0f;
+	float y1 = 0.0f;
+	float u0 = 0.0f;
+	float v0 = 0.0f;
+	float u1 = 1.0f;
+	float v1 = 1.0f;
+	uint32_t color = 0xFFFFFFFFu; // 0xAARRGGBB modulate
+	int32_t texture = kMenuTexNone;
+	bool tiled = false;
+};
+
+// One 1px outline segment [orig: CUIElement_DrawOutlineRect @ 0x647fc0 —
+// four lines around the scaled rect in the entry color].
+struct MenuLine {
+	float x0 = 0.0f;
+	float y0 = 0.0f;
+	float x1 = 0.0f;
+	float y1 = 0.0f;
+	uint32_t color = 0xFFFFFFFFu;
+};
+
+struct MenuDrawList {
+	std::vector<MenuQuad> quads;
+	std::vector<MenuLine> lines;
+	std::vector<hud::GameFontQuad> glyphs;
+	std::vector<hud::GameFontUnderline> underlines;
+	// Glyphs group into font runs; `font` indexes font_names() so the applier
+	// knows which font atlas each glyph's page index refers to.
+	struct FontRun {
+		int32_t font = 0;
+		int32_t first = 0;
+		int32_t count = 0;
+	};
+	std::vector<FontRun> font_runs;
+	int64_t widgets_drawn = 0;
+};
+
+// Per-widget per-frame state, keyed by the widget's pre-order index over the
+// configured screen tree (0 = the root window; children in authored order).
+// Unlisted widgets take the defaults. The fields mirror the original runtime
+// widget fields: shown (+224), enabled (+228), the pump's hover/press verdict
+// (+236) [orig: widget_process_mouse_event @ 0x647a00], checked (+772),
+// keyboard focus (g_ui_focus_wnd @ 0x31C16D4), and the caret char index
+// (+764) the edit render feeds the shared text draw
+// [orig: CEditWnd_Render @ 0x6619e0].
+struct MenuWidgetState {
+	int32_t index = 0;
+	bool hide = false;        // runtime WINDOW HIDE override
+	bool show = false;        // runtime WINDOW SHOW override
+	bool disabled = false;    // runtime disable (visual state 1)
+	bool hovered = false;     // mouse over, button up (visual state 2)
+	bool pressed = false;     // mouse held on the widget (visual state 3)
+	bool has_checked = false; // runtime checked override (else authored)
+	bool checked = false;
+	bool focused = false;     // keyboard focus [orig: @ 0x31C16D4]
+	int32_t caret = -1;       // edit caret char index into the value text
+	bool has_text = false;    // runtime text override (edit value, ...)
+	std::string text;
+	int32_t selected_item = 0;  // spinlist/combo/list selected row
+	int32_t hover_item = -1;    // list hover row (row style 2)
+	int32_t scroll_row = 0;     // list first visible row
+	bool popup_open = false;    // combo: draw the LIST_BOX popup
+	// Runtime item rows (text) the embedder seeds into a list/combo/spinlist —
+	// the Control-tree path seeded these via set_items; when present they
+	// replace the authored <ITEM> rows for the closed cell, the list rows,
+	// and the combo popup alike.
+	bool has_items = false;
+	std::vector<std::string> items;
+	// Additional selected rows for MULTI lists (drawn with the selection
+	// style alongside selected_item); the single-select widgets ignore it.
+	std::vector<int32_t> selected_items;
+	// TABLE data rows (runtime content the embedder seeds — the Control-tree
+	// path seeded these from the shell): one vector of cell strings per row,
+	// in column order [orig: the 40-byte row records, CUITable_Render
+	// @ 0x6411d0]. scroll_row above is the first visible row.
+	std::vector<std::vector<std::string>> table_rows;
+	// MARQUEE nodes (runtime content from the widget's datasource file):
+	// text lines in roll order; empty string = a blank spacer line
+	// [orig: render_scrolling_credits @ 0x65ca00 walks the node list].
+	std::vector<std::string> marquee_lines;
+	// Restart the roll from the initial layout on the next compile.
+	bool marquee_reset = false;
+};
+
+struct MenuFrameState {
+	std::vector<MenuWidgetState> widgets;
+	// Milliseconds clock for the caret blink: the caret draws while
+	// (time_ms & 0x3FF) > 0x200 [orig: CEditWnd_Render @ 0x661c63].
+	uint32_t time_ms = 0;
+	// The mouse cursor pass [orig: CUIScene_DrawScreensAndCursor @ 0x63bf60]:
+	// drawn LAST at the raw mouse position, native texture size, UNSCALED.
+	bool cursor_visible = false;
+	float cursor_x = 0.0f;
+	float cursor_y = 0.0f;
+};
+
+// Deep in-process module: configure() walks the screen once (interning every
+// texture and font name it will reference); compile() emits one frame's draw
+// list in the witnessed walk order. Scale is the 800x600 anamorphic pair
+// [orig: CUIScene_SetScreenScale @ 0x639480]; every scaled coordinate is
+// truncated to int PER ELEMENT [orig: @ 0x647d40], and glyph runs are laid
+// out at the same pair [orig: font_cache_draw_text_scaled @ 0x653170
+// forwards scaleX/scaleY into CGameFont_DrawText]. The edit scroll window
+// (start/end per widget [orig: update_edit_scroll_range @ 0x661790]) is
+// compiler runtime state and survives across compiles.
+class MenuFrameCompiler {
+public:
+	// Out-of-line: WidgetNode is complete only in the .cpp.
+	MenuFrameCompiler();
+	~MenuFrameCompiler();
+	MenuFrameCompiler(const MenuFrameCompiler &) = delete;
+	MenuFrameCompiler &operator=(const MenuFrameCompiler &) = delete;
+
+	// Borrow the screen (not owned; the caller keeps document + fonts alive).
+	void configure(const mnu::Screen *screen, const fnt_font_t *default_font);
+
+	// The flattened stylesheet (menu_style.mns evaluate output); %VAR% color
+	// and texture values resolve through it, case-insensitive, unresolved
+	// stays literal [orig: NapiXML_ExpandVariablesInText @ 0x63a000]. Set
+	// before configure().
+	void set_style_vars(const std::map<std::string, std::string> &vars);
+
+	// The RTXT text table for String/Item type=="id" lookups
+	// [orig: CUIStringTable_LookupString @ 0x6527c0]; a miss keeps the id
+	// literal. Set before configure().
+	void set_text_lookup(const std::map<std::string, std::string> &table);
+
+	// Per-name font registration (case-insensitive, as authored in <FONT>).
+	// Unregistered names fall back to the default font. Set before
+	// configure(); clear before re-registering when the backing storage is
+	// reloaded (the compiler borrows the pointers).
+	void register_font(const std::string &name, const fnt_font_t *font);
+	void clear_registered_fonts();
+
+	// Whole-value %VAR% stylesheet resolution (case-insensitive, unresolved
+	// stays literal) — public so the embedder resolves asset NAMES (fonts)
+	// the same way the compiler interns them
+	// [orig: NapiXML_ExpandVariablesInText @ 0x63a000].
+	std::string resolve_style_var(const std::string &value) const {
+		return resolve_var(value);
+	}
+
+	// The embedder resolves these after configure(): interned texture names
+	// in slot order (MenuQuad::texture indexes this) and interned font names
+	// (FontRun::font indexes this; slot 0 = the default font).
+	const std::vector<std::string> &texture_names() const {
+		return texture_names_;
+	}
+	const std::vector<std::string> &font_names() const { return font_names_; }
+
+	// Report a loaded texture's pixel size. The three-stage POSITION
+	// fallback, spin-arrow sizing, native-size item images, the frame brush
+	// tiling, and the cursor consume these; an unreported texture keeps size
+	// 0 (degenerate rects stay empty) [orig: the parse-tail POSITION solve
+	// @ 0x648120].
+	void set_texture_size(int32_t slot, int width, int height);
+
+	const MenuDrawList &compile(const MenuFrameState &state, float scale_x,
+			float scale_y);
+
+	const MenuDrawList &last_draw_list() const { return draw_list_; }
+
+	// The pre-order index of the FIRST widget whose authored NAME matches
+	// (case-insensitive), or -1 — the companions' name->index seam
+	// [orig: CUIScene walks resolve controls by name the same way].
+	int widget_index(const std::string &name) const;
+
+	// --- widget queries (valid after configure(); index = pre-order) --------
+	// The pre-order index space is the SAME walk a document-side DFS of the
+	// screen produces (root first, children in authored order), so embedders
+	// can zip indices against document ids.
+	int widget_count() const;
+	// Effective draw/hit visibility: the widget's own shown flag folded with
+	// its ancestors' (state overrides included) — the same gate the draw
+	// walk and the pump use. Companion overlays a shell mounts over a widget
+	// (e.g. the CBIN credits scroller) must follow it.
+	bool widget_shown(int index, const MenuFrameState &state) const;
+	std::string widget_name(int index) const;
+	// The parsed mnu::WindowType as an int (out of range -> -1).
+	int widget_kind(int index) const;
+	// The authored STRING content after %VAR% + string-table resolution (the
+	// text the widget draws when no runtime override is set).
+	std::string widget_authored_text(int index) const;
+	// Authored-or-runtime effective disabled (the pump's state-1 test).
+	bool widget_disabled(int index, const MenuFrameState &state) const;
+	// The widget's authored edit constraints as menu_edit.h limits (READONLY,
+	// NUMBER + MINVAL/MAXVAL, MAXCHAR). False when the index is out of range.
+	bool widget_edit_limits(int index, EditLimits *out) const;
+	// The widget's absolute design-space rect: the three-stage POSITION solve
+	// offset by every ancestor's solved origin — the rect the draw walk and
+	// the hit walk both use. False when the index is out of range.
+	bool widget_rect(int index, const MenuFrameState &state,
+			mnu::RectEdges *out) const;
+	// The item-row count the draw uses (runtime rows when seeded, else the
+	// authored <ITEM> rows; combo popups prefer the authored LIST_BOX rows).
+	int item_count(int index, const MenuFrameState &state) const;
+
+	// --- interaction geometry (the same witnessed layout math the emitters
+	// use; raw-mouse coordinates against the scaled rects, like pump_mouse) --
+	// List/multi row under the mouse (absolute row index, honoring the scroll
+	// window), -1 = none [orig: CListWnd_DrawItems @ 0x643f30 row layout].
+	int list_row_at(int index, const MenuFrameState &state, float mx, float my,
+			float sx, float sy) const;
+	// Rows that fit the widget rect (>=1 row height only) — the scroll clamp.
+	int list_visible_rows(int index, const MenuFrameState &state) const;
+	// The combo LIST_BOX popup rect (authored combo-relative POSITION offset
+	// to the combo's absolute rect [orig: CComboWnd @ 0x65be40 D-MNU-7]).
+	bool combo_popup_rect(int index, const MenuFrameState &state,
+			mnu::RectEdges *out) const;
+	// True when the raw-mouse point lies inside the open popup's scaled rect.
+	bool combo_popup_contains(int index, const MenuFrameState &state, float mx,
+			float my, float sx, float sy) const;
+	// Popup row under the mouse, -1 = none.
+	int combo_popup_row_at(int index, const MenuFrameState &state, float mx,
+			float my, float sx, float sy) const;
+	// Spin arrow under the mouse: 0 none, 1 up, 2 down [orig:
+	// CSpinListWnd_CreateUpDownChildren @ 0x64b8b0 child rects].
+	int spin_arrow_at(int index, const MenuFrameState &state, float mx,
+			float my, float sx, float sy) const;
+	// Table DATA row under the mouse (absolute row index into table_rows,
+	// honoring the scroll window below the header), -1 = none
+	// [orig: CUITable_Render @ 0x6411d0 row layout].
+	int table_row_at(int index, const MenuFrameState &state, float mx, float my,
+			float sx, float sy) const;
+	// Non-mutating front-most hit (the pump's claim walk without the state
+	// writes) — editor/preview picking.
+	int hit_widget(const MenuFrameState &state, float mx, float my, float sx,
+			float sy) const;
+	// The multiline edit's wrapped-line counts at scale 1.0 — the scroll
+	// range twin [orig: font_cache_count_wrapped_lines @ 0x653b90 via
+	// CMEditWnd_UpdateScrollRange @ 0x661180]: *fit = rows that fit the
+	// widget rect, *total = wrapped line count; scroll range = [0,
+	// total - fit]. False when the index is out of range.
+	bool multiline_line_counts(int index, const MenuFrameState &state,
+			int *fit_lines, int *total_lines) const;
+	// The first shown widget carrying the hotkey (pre-order; a hidden subtree
+	// never matches — the witnessed accelerator scan the Control tree ran;
+	// VIRTUAL rows live in a separate namespace from character rows, and
+	// VK_RETURN/VK_ENTER are interchangeable). -1 = none.
+	int hotkey_widget(const std::string &key, bool virtual_key,
+			const MenuFrameState &state) const;
+
+	// The witnessed per-frame mouse pump [orig: scene_end_frame @ 0x63e600 ->
+	// widget_process_mouse_event @ 0x647a00 (vtable+20)]: ONE widget claims
+	// the mouse per frame — front-most = last drawn (the reverse sibling walk
+	// + the per-frame claim scene+16; equivalently the LAST hit of the
+	// forward draw walk). A disabled claimant keeps visual state 1 (no
+	// hover/press); hit + button down -> pressed (3); hit + button up ->
+	// hovered (2); every other row's hover/press clears (0). Hidden subtrees
+	// never hit. The mouse is RAW screen coordinates against the scaled
+	// rects; the claimed widget's inherited cursor (else the screen default)
+	// rides back for the unscaled cursor pass.
+	struct MouseClaim {
+		int hovered = -1;               // claimed widget index; -1 = none
+		int32_t cursor = kMenuTexNone;  // inherited +276 cursor, else default
+	};
+	MouseClaim pump_mouse(MenuFrameState &io_state, float mouse_x,
+			float mouse_y, bool button_down, float scale_x, float scale_y);
+
+private:
+	struct WidgetNode;
+	struct WalkScale {
+		float x = 1.0f;
+		float y = 1.0f;
+	};
+	struct StatePass {
+		bool present = false;
+		bool has_color = false; // COLOR=1 -> stretched fill [orig: entry+12]
+		uint32_t color = 0;
+		int32_t texture = kMenuTexNone; // IMAGE=2 [orig: entry+20]
+		bool has_outline = false;       // OUTLINE=8 [orig: entry+16]
+		uint32_t outline = 0;
+	};
+	struct EditScroll {
+		int start = 0;
+		int end = 0;
+	};
+	// Per-marquee roll state (compiler runtime state, like edit_scroll_):
+	// the current scroll offset in design pixels and the last time_ms sample
+	// [orig: node y -= rate per frame; whole-roll reset when the last node
+	// passes the top — render_scrolling_credits @ 0x65ca00].
+	struct MarqueeScroll {
+		double offset = 0.0;
+		uint32_t last_ms = 0;
+		bool valid = false;
+	};
+
+	// configure-time build
+	int build_node(const mnu::Window &w, int parent);
+	void build_state_passes(const std::vector<mnu::Appearance> &rows,
+			StatePass (&states)[4]);
+	std::string resolve_var(const std::string &value) const;
+	uint32_t resolve_text_color(const std::string &value) const;
+	std::string resolve_text_value(const std::string &type,
+			const std::string &raw) const;
+	int32_t intern_texture(const std::string &name);
+	int32_t intern_font(const std::string &name);
+
+	// compile-time walk
+	int walk_widget(int index, int origin_x, int origin_y,
+			const MenuFrameState &state, const WalkScale &s);
+	int skip_widget(int index) const;
+	int hit_walk(int index, int origin_x, int origin_y,
+			const MenuFrameState &state, float mx, float my, float sx,
+			float sy, int *io_hit) const;
+	const MenuWidgetState *state_for(const MenuFrameState &state,
+			int index) const;
+	// Shared row-height rule (authored MIN_ITEM_HEIGHT wins, else the "W"
+	// measure) for list rows / combo popup rows.
+	int row_height_(const WidgetNode &node) const;
+	bool widget_shown_(int index, const MenuFrameState &state) const;
+	int pump_visual_state(const mnu::Window &w,
+			const MenuWidgetState *ws) const;
+	int appearance_state_with_fallback(const WidgetNode &node,
+			int state) const;
+	mnu::RectEdges solve_rect(const WidgetNode &node,
+			const MenuWidgetState *ws) const;
+	std::string widget_text(const WidgetNode &node,
+			const MenuWidgetState *ws) const;
+	const fnt_font_t *font_for(const WidgetNode &node) const;
+	void measure_text(const WidgetNode &node, const std::string &text,
+			int *out_w, int *out_h) const;
+
+	// emitters
+	static float emit_x(int design, float scale);
+	void emit_rect_quad(const mnu::RectEdges &design, const WalkScale &s,
+			uint32_t color, int32_t texture, bool tiled, float tile_u,
+			float tile_v);
+	void emit_outline(const mnu::RectEdges &design, const WalkScale &s,
+			uint32_t color);
+	void emit_appearance(const WidgetNode &node, const mnu::RectEdges &rect,
+			const WalkScale &s, int appearance_slot);
+	void emit_frame(const WidgetNode &node, const mnu::RectEdges &rect,
+			const WalkScale &s);
+	void emit_glyph_run(const WidgetNode &node, const std::string &text,
+			int design_x, int design_y, const WalkScale &s, uint32_t color,
+			int caret);
+	void emit_caret(hud::GameFont &gf, const std::string &text, float x,
+			float y, const WalkScale &s, uint32_t color, int caret);
+	void emit_widget_text(const WidgetNode &node, const mnu::RectEdges &rect,
+			const WalkScale &s, int color_state, const MenuWidgetState *ws,
+			int caret);
+	void emit_edit(int index, const WidgetNode &node,
+			const mnu::RectEdges &rect, const WalkScale &s, int visual,
+			const MenuFrameState &frame, const MenuWidgetState *ws);
+	void emit_multiline_edit(const WidgetNode &node,
+			const mnu::RectEdges &rect, const WalkScale &s, int visual,
+			const MenuFrameState &frame, const MenuWidgetState *ws);
+	void emit_wrapped_text(const WidgetNode &node, const mnu::RectEdges &rect,
+			const WalkScale &s, uint32_t color, const std::string &text,
+			int first_visible_line, int caret);
+	void emit_checkbox_label(const WidgetNode &node,
+			const mnu::RectEdges &rect, const WalkScale &s, int color_state,
+			const MenuWidgetState *ws);
+	void emit_item_cell(const WidgetNode &node, const mnu::RectEdges &rect,
+			const WalkScale &s, int color_state, const MenuWidgetState *ws);
+	void emit_list_rows(const WidgetNode &node, const mnu::RectEdges &rect,
+			const WalkScale &s, const MenuWidgetState *ws);
+	void emit_combo_popup(const WidgetNode &node, const mnu::RectEdges &rect,
+			const WalkScale &s, const MenuWidgetState *ws);
+	void emit_spin_arrows(const WidgetNode &node, const mnu::RectEdges &rect,
+			const WalkScale &s);
+	void emit_table(int index, const WidgetNode &node,
+			const mnu::RectEdges &rect, const WalkScale &s, int visual,
+			const MenuWidgetState *ws);
+	void emit_marquee(int index, const WidgetNode &node,
+			const mnu::RectEdges &rect, const WalkScale &s,
+			const MenuFrameState &frame, const MenuWidgetState *ws);
+	void emit_cursor(const MenuFrameState &state);
+
+	const mnu::Screen *screen_ = nullptr;
+	const fnt_font_t *default_font_ = nullptr;
+	std::map<std::string, std::string> style_vars_;
+	std::map<std::string, std::string> text_lookup_;
+	std::map<std::string, const fnt_font_t *> registered_fonts_;
+	std::vector<std::string> texture_names_;
+	std::vector<std::pair<int, int>> texture_sizes_;
+	std::vector<std::string> font_names_;
+	std::vector<const fnt_font_t *> fonts_;
+	std::vector<WidgetNode> nodes_;
+	int32_t screen_cursor_ = kMenuTexNone;
+	std::map<int, EditScroll> edit_scroll_;
+	std::map<int, MarqueeScroll> marquee_scroll_;
+	MenuDrawList draw_list_;
+};
+
+} // namespace opennova::menu

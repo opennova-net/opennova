@@ -13,7 +13,7 @@ extends EditorWorkspace
 # ([orig: CAvatarDefs_Init @ 0x57b180], [orig: CAvatarDefs_ParseConfigLine @ 0x57a3f0]).
 
 const AvatarsDocumentScript = preload("res://modtools/avatar/avatars_document.gd")
-const AvatarPreviewScript = preload("res://adapter/avatar/avatar_preview.gd")
+const AvatarPreviewScript = preload("res://game/avatar/avatar_preview.gd")
 const TreeInspectorScript = preload("res://modtools/avatar/ui/inspectors/tree_inspector.gd")
 const PartsInspectorScript = preload("res://modtools/avatar/ui/inspectors/parts_inspector.gd")
 const CombosInspectorScript = preload("res://modtools/avatar/ui/inspectors/combos_inspector.gd")
@@ -21,9 +21,9 @@ const CombosInspectorScript = preload("res://modtools/avatar/ui/inspectors/combo
 # TREE is the default workflow; ids are stable (never renumber — tests pin them).
 enum Workflow { TREE, PARTS, COMBOS }
 
-var document  # AvatarsDocument
+var document: AvatarsDocumentScript
 var _active_workflow_id: int = Workflow.TREE
-var _preview  # AvatarPreview
+var _preview: AvatarPreview
 var _mount: ViewportMount
 # Preview guide visibility, driven by the shell's View settings. Stored here so a
 # re-mounted preview (ViewportMount rebuilds it) inherits the current choice.
@@ -40,10 +40,9 @@ func _init() -> void:
 
 
 func _on_document_state_changed() -> void:
-	if editor_shell != null and editor_shell.has_method("sync_from_editor_state"):
-		editor_shell.sync_from_editor_state()
+	_sync_shell()
 	var inspector := get_workflow_inspector(_active_workflow_id)
-	if inspector != null and inspector.has_method("refresh"):
+	if inspector != null:
 		inspector.refresh()
 
 
@@ -83,7 +82,7 @@ func get_status_context() -> String:
 		return "No Avatars.def loaded"
 	var text := "%d part(s), %d nationalities" % [
 		document.resource.get_part_count(), document.resource.get_nationality_count()]
-	var issues: int = document.resource.get_diagnostics().size() if document.resource.has_method("get_diagnostics") else 0
+	var issues: int = document.resource.get_diagnostics().size()
 	if issues > 0:
 		text += ", %d issue%s" % [issues, "" if issues == 1 else "s"]
 	return text
@@ -95,13 +94,35 @@ func get_editor_document() -> Object:
 	return document
 
 
+func has_unsaved_changes() -> bool:
+	return document != null and document.is_dirty
+
+
+func can_undo() -> bool:
+	return document != null and not is_busy() and document.can_undo()
+
+
+func can_redo() -> bool:
+	return document != null and not is_busy() and document.can_redo()
+
+
+func undo() -> void:
+	if document != null:
+		document.undo()
+
+
+func redo() -> void:
+	if document != null:
+		document.redo()
+
+
 # The avatar database the inspectors read + the resource root the preview resolves
 # part .3di files against.
 func db():
 	return document.resource
 
 
-func get_resource_root() -> NovaResourceRoot:
+func get_resource_root() -> ResourceRoot:
 	return _resource_root()
 
 
@@ -140,10 +161,8 @@ func release_viewport() -> void:
 	_preview = null
 
 
-func get_viewport_camera() -> Camera3D:
-	if _preview != null and _preview.has_method("get_editor_camera"):
-		return _preview.get_editor_camera()
-	return null
+func get_viewport_camera() -> FlyCamera:
+	return _preview.get_editor_camera() if _preview != null else null
 
 
 func shows_view_guides() -> bool:
@@ -226,7 +245,7 @@ func _build_inspector_defs() -> Array:
 
 
 # Avatars inspectors take the owning workspace in their constructor.
-func _instantiate_inspector(def: InspectorDef) -> Object:
+func _instantiate_inspector(def: InspectorDef) -> WorkflowInspector:
 	return def.inspector_script.new(self)
 
 
@@ -247,13 +266,13 @@ func focus_reference(focus: FocusPayload) -> Error:
 	if database == null or not database.is_loaded() or focus.is_empty():
 		return OK
 	if not focus.part.is_empty():
-		var kind := focus.part_kind if focus.part_kind >= 0 else NovaAvatarDatabase.PART_HEAD
+		var kind := focus.part_kind if focus.part_kind >= 0 else AvatarDatabase.PART_HEAD
 		var name := focus.part
 		if database.get_part(kind, name).is_empty():
 			return ERR_DOES_NOT_EXIST
 		activate_workflow(Workflow.PARTS)
-		var parts := get_workflow_inspector(Workflow.PARTS)
-		if parts != null and parts.has_method("focus_part"):
+		var parts: PartsInspectorScript = get_workflow_inspector(Workflow.PARTS)
+		if parts != null:
 			return parts.focus_part(kind, name)
 		return OK
 	if focus.nat >= 0 and focus.div >= 0 and focus.combo >= 0:
@@ -267,8 +286,8 @@ func focus_reference(focus: FocusPayload) -> Error:
 		if combo >= database.get_combo_count(nat, div):
 			return ERR_DOES_NOT_EXIST
 		activate_workflow(Workflow.TREE)
-		var tree := get_workflow_inspector(Workflow.TREE)
-		if tree != null and tree.has_method("focus_combo"):
+		var tree: TreeInspectorScript = get_workflow_inspector(Workflow.TREE)
+		if tree != null:
 			tree.focus_combo(nat, div, combo)
 		show_combo(nat, div, combo)
 		return OK

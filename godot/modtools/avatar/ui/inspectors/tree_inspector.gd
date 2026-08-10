@@ -116,7 +116,7 @@ func _combo_tooltip(combo: Dictionary) -> String:
 func _update_issue_summary(database) -> void:
 	if _issue_label == null or not is_instance_valid(_issue_label):
 		return
-	var diagnostics: Array = database.get_diagnostics() if database.has_method("get_diagnostics") else []
+	var diagnostics: Array = database.get_diagnostics()
 	if diagnostics.is_empty():
 		_issue_label.visible = false
 		return

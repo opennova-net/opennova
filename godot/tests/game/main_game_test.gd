@@ -31,7 +31,7 @@ func before_each() -> void:
 	_had_config = FileAccess.file_exists(STATE_CONFIG_PATH)
 	_saved_config = FileAccess.get_file_as_bytes(STATE_CONFIG_PATH) \
 			if _had_config else PackedByteArray()
-	NovaStrings.clear()
+	Strings.clear()
 
 
 func after_each() -> void:
@@ -43,8 +43,8 @@ func after_each() -> void:
 			if world_root != null:
 				world_root.clear()
 		var menu_shell = _shell.get_node_or_null("MenuLayer/MenuShell")
-		if menu_shell != null and menu_shell.get_menu() != null:
-			var menu_root = menu_shell.get_menu().get_resource_root()
+		if menu_shell != null and menu_shell.get_resource_root() != null:
+			var menu_root = menu_shell.get_resource_root()
 			if menu_root != null:
 				menu_root.clear()
 		_shell.queue_free()
@@ -61,7 +61,7 @@ func after_each() -> void:
 			file.close()
 	elif FileAccess.file_exists(STATE_CONFIG_PATH):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_CONFIG_PATH))
-	NovaStrings.clear()
+	Strings.clear()
 
 
 func _make() -> Node:
@@ -106,11 +106,13 @@ func test_loading_background_query_is_false_without_a_live_handoff() -> void:
 func test_main_frame_probe_spans_are_default_off() -> void:
 	var game := _make()
 	var world := GameWorld.new()
-	var terrain := NovaTerrain.new()
-	terrain.name = "NovaTerrain"
+	var terrain := Terrain.new()
+	terrain.name = "Terrain"
 	world.add_child(terrain)
 	add_child_autofree(world)
-	var camera := Camera3D.new()
+	# The shell's camera member is typed FlyCamera (the scene's camera
+	# class); a plain Camera3D would be rejected by the typed member set.
+	var camera := FlyCamera.new()
 	add_child_autofree(camera)
 	world.set("_loaded", true)
 	game.set("_world", world)
@@ -137,11 +139,13 @@ func test_main_frame_stats_feeds_gate_on_the_board() -> void:
 	# but lands on the FrameStatsBoard, and only while capture is active.
 	var game := _make()
 	var world := GameWorld.new()
-	var terrain := NovaTerrain.new()
-	terrain.name = "NovaTerrain"
+	var terrain := Terrain.new()
+	terrain.name = "Terrain"
 	world.add_child(terrain)
 	add_child_autofree(world)
-	var camera := Camera3D.new()
+	# The shell's camera member is typed FlyCamera (the scene's camera
+	# class); a plain Camera3D would be rejected by the typed member set.
+	var camera := FlyCamera.new()
 	add_child_autofree(camera)
 	world.set("_loaded", true)
 	game.set("_world", world)
@@ -197,11 +201,11 @@ func test_runtime_root_honors_the_persisted_game_profile() -> void:
 	if _shell == null:
 		return
 	var menu_shell = _shell.get_node("MenuLayer/MenuShell")
-	var menu = menu_shell.get_menu()
-	assert_not_null(menu, "the packed fixture boots the public menu shell")
-	if menu == null:
+	assert_not_null(menu_shell.get_driver(),
+			"the packed fixture boots the public menu shell")
+	if menu_shell.get_driver() == null:
 		return
-	var root: NovaResourceRoot = menu.get_resource_root()
+	var root: ResourceRoot = menu_shell.get_resource_root()
 	assert_not_null(root, "the live menu exposes its mounted runtime root")
 	if root != null:
 		assert_eq(root.read_file(POLICY_FILE).get_string_from_utf8(), POLICY_PLAIN,
@@ -209,13 +213,13 @@ func test_runtime_root_honors_the_persisted_game_profile() -> void:
 
 
 func test_mission_text_effect_reaches_hud_objective() -> void:
-	# Drained effects carry {kind, a..d, str} (NovaSimulation::drain_effects); the
+	# Drained effects carry {kind, a..d, str} (Simulation::drain_effects); the
 	# WAC text/ptext family lands as kind=="text" with the string in "str". The
 	# old handler read nonexistent "text"/"message" keys, so mission text never
 	# reached the HUD.
-	# The surface lives on the shared NovaGameHudPresenter (main_game passes through);
+	# The surface lives on the shared GameHudPresenter (main_game passes through);
 	# out-of-tree _make() never runs _ready, so drive the presenter directly.
-	var presenter := NovaGameHudPresenter.new()
+	var presenter := GameHudPresenter.new()
 	autofree(presenter)
 	presenter.apply_mission_effects([
 		{"kind": "dialog", "a": 3},
@@ -230,7 +234,7 @@ func test_console_debug_text_does_not_reach_hud_objective() -> void:
 	# consol/pconsol ride the distinct debug_text channel. The game does not yet
 	# present an on-screen debug console, so these effects remain intentionally
 	# unrouted instead of replacing player-facing mission text.
-	var presenter := NovaGameHudPresenter.new()
+	var presenter := GameHudPresenter.new()
 	autofree(presenter)
 	presenter.apply_mission_effects([
 		{"kind": "text", "str": "Hold this position"},
@@ -246,7 +250,7 @@ func test_lose_effect_sets_endround_banner_and_message() -> void:
 	# the gametext KEY; the presenter resolves it against 'Misc' (the miss-format marker
 	# stands in when no gametext table is registered) and keeps the banner line for
 	# the MISSION FAILED screen.
-	var presenter := NovaGameHudPresenter.new()
+	var presenter := GameHudPresenter.new()
 	autofree(presenter)
 	presenter.apply_mission_effects([
 		{"kind": "lose", "a": 0, "str": "STRMISC_KILLEDGREEN"},
@@ -305,7 +309,7 @@ func _screen_has_label_containing(node: Node, text: String) -> bool:
 func test_crosshair_option_updates_an_existing_hud() -> void:
 	# The Options signal reaches the built HUD through the shared presenter's public
 	# set_crosshair_style (main_game delegates its _on_crosshair_style_changed there).
-	var presenter := NovaGameHudPresenter.new()
+	var presenter := GameHudPresenter.new()
 	autofree(presenter)
 	var hud := FakeGameHud.new()
 	presenter._game_hud = hud
@@ -314,14 +318,19 @@ func test_crosshair_option_updates_an_existing_hud() -> void:
 
 
 func test_hud_loads_text_for_the_mission_that_actually_started() -> void:
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	var fixture_dir := ProjectSettings.globalize_path("res://../fixtures/minimal/resources")
 	assert_eq(root.set_root_dir(fixture_dir), OK)
 
 	var world := GameWorld.new()
-	var terrain := NovaTerrain.new()
-	terrain.name = "NovaTerrain"
+	var terrain := Terrain.new()
+	terrain.name = "Terrain"
 	world.add_child(terrain)
+	# The environment child makes the code-built world mission-loadable: the
+	# typed placement path stamps _env.light_state onto every placed batch.
+	var env := MissionEnvironment.new()
+	env.name = "MissionEnvironment"
+	world.add_child(env)
 	add_child_autofree(world)
 	await get_tree().process_frame
 	world.set_resource_root(root)
@@ -335,12 +344,12 @@ func test_hud_loads_text_for_the_mission_that_actually_started() -> void:
 
 	# The mission string table selection lives on the shared HUD presenter now (the
 	# exists-only mission-bin fallback rides its world wiring).
-	var presenter := NovaGameHudPresenter.new()
+	var presenter := GameHudPresenter.new()
 	autofree(presenter)
 	presenter.setup(world, null, null)
 	presenter._load_hud_text_tables(root)
 
-	assert_not_null(NovaStrings.get_table("mission"),
+	assert_not_null(Strings.get_table("mission"),
 		"mnml.bin exists and must be selected from the successfully loaded BMS; medmssn.bin is absent")
 
 
@@ -360,9 +369,9 @@ func _make_packed_shell(game_code: String):
 	})
 	_write_pff(_temp_dir.path_join("resource.pff"), entries)
 
-	NovaResourceDirSettings.set_resource_dir(_temp_dir)
-	NovaResourceDirSettings.set_expansion("")
-	NovaResourceDirSettings.set_game(game_code)
+	ResourceDirSettings.set_resource_dir(_temp_dir)
+	ResourceDirSettings.set_expansion("")
+	ResourceDirSettings.set_game(game_code)
 	var shell = MainGameScene.instantiate()
 	assert_not_null(shell)
 	if shell == null:

@@ -21,7 +21,7 @@ signal expr_changed(text: String)
 const MAX_DEPTH := 4
 
 var _var_list: Array = []   # [{token:String, label:String}]
-var _mus = null             # NovaMusicScript for validation (may be null)
+var _mus = null             # MusicScript for validation (may be null)
 var _root: ExprCell = null
 var _valid_label: Label
 var _validate_timer: Timer
@@ -344,7 +344,7 @@ func get_expr_text() -> String:
 
 
 func is_valid() -> bool:
-	return bool(MusExpr.validate_expr(get_expr_text(), _mus).get("ok", true))
+	return MusExpr.validate_expr(get_expr_text(), _mus).ok
 
 
 func _on_changed() -> void:
@@ -362,10 +362,10 @@ func _run_validation() -> void:
 	if _valid_label == null:
 		return
 	var text := get_expr_text()
-	var v: Dictionary = MusExpr.validate_expr(text, _mus)
-	if bool(v.get("ok", true)):
+	var v := MusExpr.validate_expr(text, _mus)
+	if v.ok:
 		_valid_label.text = "✓ %s" % MusDisplayNames.pretty_expr(text, _var_list)
 		_valid_label.add_theme_color_override("font_color", Color(0.6, 0.9, 0.6))
 	else:
-		_valid_label.text = "✗ %s" % String(v.get("err", "invalid"))
+		_valid_label.text = "✗ %s" % (v.err if not v.err.is_empty() else "invalid")
 		_valid_label.add_theme_color_override("font_color", Color(1.0, 0.5, 0.5))

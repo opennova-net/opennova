@@ -1,5 +1,5 @@
 class_name EditorWorkstation
-extends Control
+extends WorkspaceShell
 
 const TerrainWorkspaceAdapter = preload("res://modtools/terrain/terrain_workspace.gd")
 const EnvironmentWorkspaceAdapter = preload("res://modtools/environment/environment_workspace.gd")
@@ -98,7 +98,7 @@ enum Workspace { TERRAIN, ENVIRONMENT, OBJECT, MISSION, CREDITS, FONTS, STRINGS,
 @onready var _progress_bar: ProgressBar = %ProgressBar
 @onready var _progress_counts_label: Label = %ProgressCountsLabel
 
-var editor: Node
+var editor: EditorApp
 var _active_workspace_id: int = Workspace.MISSION
 var _workspaces: Dictionary = {}
 var _workspace_defs_cache: Array = []
@@ -215,8 +215,8 @@ func _ready() -> void:
 	_game_launch.setup(
 		_play_in_game_button,
 		func() -> String: return _resource_library.get_root_dir(),
-		func() -> String: return NovaResourceDirSettings.get_expansion(),
-		func() -> String: return NovaResourceDirSettings.get_game(),
+		func() -> String: return ResourceDirSettings.get_expansion(),
+		func() -> String: return ResourceDirSettings.get_game(),
 		func(path: String, args: PackedStringArray) -> int: return OS.create_process(path, args),
 		func(path: String) -> bool: return FileAccess.file_exists(path),
 		get_unsaved_workspace_labels,
@@ -392,17 +392,15 @@ func _quit_after_game_shutdown() -> void:
 func _shutdown_game_for_close() -> bool:
 	if _game_launch.shutdown():
 		return true
-	var session: Variant = _game_launch.get_session() \
-			if _game_launch.has_method("get_session") else null
-	var reason := String(session.get_last_error()) \
-			if session != null and session.has_method("get_last_error") else ""
+	var session := _game_launch.get_session()
+	var reason := String(session.get_last_error()) if session != null else ""
 	if reason.is_empty():
 		reason = "Could not stop the running game; the editor remains open."
 	show_status_message(reason, 0.0, &"error")
 	return false
 
 
-func set_editor(value: Node) -> void:
+func set_editor(value: EditorApp) -> void:
 	editor = value
 	_ensure_workspaces()
 	for workspace in _workspaces.values():
@@ -416,10 +414,9 @@ func set_editor(value: Node) -> void:
 		_popovers.ensure_environment_content()
 	_popovers.sync_camera_editor()
 	_remount_active_workspace_viewport()
+	# Inspector UIs never re-bind in place: the surface refresh above rebuilt
+	# them against the new editor.
 	_refresh_workspace_surface()
-	for child in _inspector_mount.get_children():
-		if child.has_method("set_editor"):
-			child.set_editor(value)
 	sync_from_editor_state()
 
 
@@ -1322,14 +1319,14 @@ func _unhandled_input(event: InputEvent) -> void:
 # The active workspace's camera via its capability hook; null in workspaces
 # without a 3D view (the camera popup then reports no camera instead of
 # silently editing a hidden terrain camera).
-func get_editor_camera() -> Camera3D:
+func get_editor_camera() -> FlyCamera:
 	var workspace := _get_active_workspace()
 	if workspace != null:
 		return workspace.get_viewport_camera()
 	return null
 
 
-func _get_editor_camera() -> Camera3D:
+func _get_editor_camera() -> FlyCamera:
 	return get_editor_camera()
 
 
@@ -1346,7 +1343,7 @@ func _popup_workspace() -> EditorWorkspace:
 
 
 func _mcp_service() -> Node:
-	return editor.get("mcp_service") if editor != null else null
+	return editor.mcp_service if editor != null else null
 
 
 func _ensure_resource_index() -> void:
@@ -1361,7 +1358,7 @@ func get_resource_root_dir() -> String:
 	return _resource_library.get_root_dir()
 
 
-func get_resource_root() -> NovaResourceRoot:
+func get_resource_root() -> ResourceRoot:
 	return _resource_library.get_resource_root()
 
 
@@ -1439,7 +1436,7 @@ func open_file_picker(title: String, files: PackedStringArray, on_pick: Callable
 
 
 ## Open the indexed resource picker over every resource of `kind`. The browse
-## affordance behind link widgets (ResourceRefWidget.services_from_shell);
+## affordance behind link widgets (LinkServices.from_shell);
 ## `on_pick` receives the chosen resource's path.
 func open_kind_picker(kind: String, title: String, on_pick: Callable) -> void:
 	_resource_browser.open_kind(kind, title, on_pick)
@@ -1447,7 +1444,7 @@ func open_kind_picker(kind: String, title: String, on_pick: Callable) -> void:
 
 ## The shared reference index over the resource root — link widgets resolve
 ## their validity badges through this.
-func get_reference_index() -> NovaReferenceIndex:
+func get_reference_index() -> ReferenceIndex:
 	return _resource_library.get_reference_index()
 
 

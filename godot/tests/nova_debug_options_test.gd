@@ -1,12 +1,12 @@
 extends GutTest
 
-# NovaDebugOptions + NovaDebugOptionState: the declarative option registry
+# DebugOptions + DebugOptionState: the declarative option registry
 # that keeps the game shell and the editor wired identically. Rows are
 # integrity-checked against the REAL target scripts (setter must exist), and
 # the state object's single-write-path contract is pinned.
 
-const GameWorldScript := preload("res://adapter/world/game_world.gd")
-const LocalPlayerPresenterScript := preload("res://adapter/world/local_player_presenter.gd")
+const GameWorldScript := preload("res://game/world/game_world.gd")
+const LocalPlayerPresenterScript := preload("res://game/world/local_player_presenter.gd")
 
 
 func _script_method_names(script: Script) -> PackedStringArray:
@@ -21,30 +21,30 @@ func _script_method_names(script: Script) -> PackedStringArray:
 
 func test_registry_rows_are_complete_and_unique() -> void:
 	var seen: Dictionary = {}
-	for option in NovaDebugOptions.OPTIONS:
+	for option in DebugOptions.OPTIONS:
 		var id := StringName(option["id"])
 		assert_false(seen.has(id), "option id '%s' is unique" % id)
 		seen[id] = true
 		assert_false(String(option["label"]).is_empty(), "'%s' carries a label" % id)
 		assert_false(String(option["tooltip"]).is_empty(), "'%s' carries a tooltip" % id)
-		assert_has([NovaDebugOptions.KIND_CHECK, NovaDebugOptions.KIND_SLIDER,
-				NovaDebugOptions.KIND_ENUM], int(option["kind"]),
+		assert_has([DebugOptions.KIND_CHECK, DebugOptions.KIND_SLIDER,
+				DebugOptions.KIND_ENUM], int(option["kind"]),
 				"'%s' has a known kind" % id)
-		assert_has([NovaDebugOptions.TARGET_WORLD, NovaDebugOptions.TARGET_PLAYER],
+		assert_has([DebugOptions.TARGET_WORLD, DebugOptions.TARGET_PLAYER],
 				StringName(option["target"]), "'%s' has a known target" % id)
-		if int(option["kind"]) == NovaDebugOptions.KIND_CHECK:
+		if int(option["kind"]) == DebugOptions.KIND_CHECK:
 			assert_eq(typeof(option["default"]), TYPE_BOOL,
 					"checkbox '%s' defaults to a bool" % id)
-	assert_true(NovaDebugOptions.find(&"nonexistent_option").is_empty(),
+	assert_true(DebugOptions.find(&"nonexistent_option").is_empty(),
 			"unknown ids resolve to an empty row")
 
 
 func test_every_setter_exists_on_its_target_script() -> void:
 	var world_methods := _script_method_names(GameWorldScript)
 	var player_methods := _script_method_names(LocalPlayerPresenterScript)
-	for option in NovaDebugOptions.OPTIONS:
+	for option in DebugOptions.OPTIONS:
 		var setter := String(option["setter"])
-		if option["target"] == NovaDebugOptions.TARGET_WORLD:
+		if option["target"] == DebugOptions.TARGET_WORLD:
 			assert_has(world_methods, setter,
 					"GameWorld implements '%s' for '%s'" % [setter, option["id"]])
 		else:
@@ -53,7 +53,7 @@ func test_every_setter_exists_on_its_target_script() -> void:
 
 
 func test_state_defaults_and_single_write_path() -> void:
-	var state := NovaDebugOptionState.new()
+	var state := DebugOptionState.new()
 	assert_eq(state.value(&"show_skeletons"), false, "unset reads the registry default")
 	assert_null(state.value(&"nonexistent_option"), "unknown ids read null")
 
@@ -70,7 +70,7 @@ func test_state_defaults_and_single_write_path() -> void:
 
 
 func test_registered_control_resyncs_without_refiring() -> void:
-	var state := NovaDebugOptionState.new()
+	var state := DebugOptionState.new()
 	var check := CheckBox.new()
 	autofree(check)
 	var toggles := [0]

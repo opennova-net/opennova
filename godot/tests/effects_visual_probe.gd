@@ -1,7 +1,7 @@
 extends Node3D
 
 # Environment-particle visual probe: loads the mounted .ptl set (NOVA_RESOURCE_DIR)
-# into a bare NovaEffectWorld, spawns a spread of representative effects — explosion,
+# into a bare EffectWorld, spawns a spread of representative effects — explosion,
 # smoke column, brazier fire, muzzle flash, dirt impact, casing — into an empty dark
 # scene, and captures frames over their lifetimes. Verifies the RUNTIME effect path
 # (textures via the provider, blend draw, cadence, motion) without mission hunting.
@@ -9,7 +9,7 @@ extends Node3D
 
 const OUT_DIR := "res://../.scratch/fx_probe"
 
-var _fx: NovaEffectWorld
+var _fx: EffectWorld
 var _out_abs := ""
 
 const SPAWNS := [
@@ -26,7 +26,7 @@ func _ready() -> void:
 	_out_abs = ProjectSettings.globalize_path(OUT_DIR)
 	DirAccess.make_dir_recursive_absolute(_out_abs)
 	var dir := OS.get_environment("NOVA_RESOURCE_DIR").strip_edges()
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	if root.set_root_dir(dir) != OK:
 		push_error("[fx] mount failed for %s" % dir)
 		get_tree().quit(1)
@@ -46,7 +46,7 @@ func _ready() -> void:
 	env.environment = e
 	add_child(env)
 
-	_fx = NovaEffectWorld.new()
+	_fx = EffectWorld.new()
 	add_child(_fx)
 	var n := _fx.load_from_resource_root(root)
 	print("[fx] loaded: files=%d effects=%d" % [_fx.file_count(), n])

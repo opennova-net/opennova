@@ -1,0 +1,374 @@
+#include "simassets/collision_resolve.h"
+
+#include <simassets/model_builders.h>
+#include <threedi/threedi_3di3.h>
+#include <threedi/threedi_panm_pose.h> // the native PANM liveness gate (S3, ADR 0028)
+
+#include <io/strutil.h>
+#include <mission/mission.h> // kItemIdOffset
+#include <world/player_spawn.h> // kPlayerInfantryTypeId
+
+#include <algorithm>
+#include <climits>
+#include <cstring>
+
+namespace opennova::simassets {
+
+namespace {
+
+bool iends_with_adm(const std::string &name) {
+	static const char kExt[] = ".adm";
+	if (name.size() < 4) return false;
+	return strutil::iequals(name.c_str() + (name.size() - 4), kExt);
+}
+
+} // namespace
+
+void CollisionResolveState::clear() {
+	model_by_graphic.clear();
+	occlusion_by_graphic.clear();
+	radius_by_graphic.clear();
+	husk_kz_points_by_graphic.clear();
+	husk_pieces_by_graphic.clear();
+	resolution_attempted.clear();
+}
+
+const DefItemDef *find_item_def(const DefItemsFile &items, int item_id) {
+	// Last-wins over duplicate definition ids — the same load-order overwrite
+	// the id-keyed item map exposed (see simassets item_traits).
+	const DefItemDef *found = nullptr;
+	for (size_t i = 0; i < items.count; ++i)
+		if (items.entries[i].id == item_id) found = &items.entries[i];
+	return found;
+}
+
+int visual_item_id_for_runtime_type(int item_id, const DefItemsFile &items) {
+	// The policy lives in mission/placement_traits.h; this overload only
+	// answers the catalog probe against the retained DefItemsFile.
+	return mission::visual_item_id_for_runtime_type(item_id,
+			find_item_def(items, kPlayerVisualItemId) != nullptr);
+}
+// The mission-side policy keys on the SAME runtime player type the world
+// names; a drift would silently break the visual resolve.
+static_assert(mission::kPlayerRuntimeTypeId == world::kPlayerInfantryTypeId);
+
+int32_t collision_model_for_graphic(CollisionResolveState &state,
+		const CollisionResolveDeps &deps, const std::string &graphic_key) {
+	auto it = state.model_by_graphic.find(graphic_key);
+	if (it != state.model_by_graphic.end()) return it->second;
+	int32_t model_id = -1;
+	int32_t occlusion_id = -1;
+	float bound_radius = 0.0f;
+	if (deps.models.has_index()) {
+		// ADR 0028: the sim reads its own parse-once cache. The placer
+		// now supplies only the render-side pose sources (live-PANM
+		// object data + skeletal sets) — the S3 push-down target.
+		if (const Threedi3di3 *m3 = deps.models.model_for(graphic_key)) {
+			world::CollisionModel model;
+			if (collision_model_from_3di(m3->collision, model,
+					model_has_collision(*m3))) {
+				model_id = deps.collision.add_model(std::move(model));
+				// S3 (ADR 0028): the engine-side provider poses this
+				// model from the sim's own retained parse. The legacy
+				// pose map stays empty in production — the fallback is
+				// stub-world-only, so a shadow render-bound copy here
+				// could only mask a native decline.
+				if (threedi_panm_lod_has_live(*m3, 0))
+					deps.pose.register_generic_model(model_id, m3);
+			}
+			world::OcclusionModel occ;
+			if (occlusion_model_from_3di(*m3, occ))
+				occlusion_id = deps.occlusion.add_model(std::move(occ));
+			bound_radius = model_bound_radius_from_3di(*m3);
+		}
+	}
+	state.model_by_graphic.emplace(graphic_key, model_id);
+	state.occlusion_by_graphic.emplace(graphic_key, occlusion_id);
+	state.radius_by_graphic.emplace(graphic_key, bound_radius);
+	return model_id;
+}
+
+int resolve_collision_instances(world::World &world, const DefItemsFile &items,
+		CollisionResolveState &state, const CollisionResolveDeps &deps) {
+	std::vector<world::EntityHandle> handles;
+	world.registry.for_each(
+			[&](const world::Entity &e) { handles.push_back(e.handle); });
+	int attached = 0;
+	for (const world::EntityHandle h : handles) {
+		world::Entity *e = world.registry.get(h);
+		if (!e || e->kind == world::EntityKind::Marker)
+			continue;
+		const auto previous_attempt = state.resolution_attempted.find(h.packed);
+		if (previous_attempt != state.resolution_attempted.end() &&
+				previous_attempt->second != e->registry_spawn_id) {
+			deps.collision.remove_entity_instance(h);
+			deps.pose.remove_entity(h);
+		}
+		state.resolution_attempted[h.packed] = e->registry_spawn_id;
+		const bool is_organic = e->kind == world::EntityKind::Organic;
+		const int def_id = is_organic
+				? visual_item_id_for_runtime_type(e->item_id, items)
+				: static_cast<int>(e->item_id) + mission::kItemIdOffset;
+		const DefItemDef *def = find_item_def(items, def_id);
+		if (def == nullptr || def->graphic[0] == '\0') continue;
+		const std::string key(def->graphic);
+		const int32_t resolved_model = collision_model_for_graphic(state, deps, key);
+		// The bound-sphere radius (entity+0 boundRadius) comes from the .3di
+		// MODEL header bound, not the collision block — every placed item
+		// carries one, so collision-less props are still hittable by rounds and
+		// reachable by blasts. Raised to the husk model's bound below, then
+		// padded +0.0625 [orig: Entity_InitFromModel @ 0x40dc30 — boundRadius =
+		// max(gpm[5], husk gpm[5]) + 0x1000; the authored def scale factor is
+		// not yet applied (tracked, D-COL-3)].
+		float entity_bound = state.radius_by_graphic[key];
+		// Platform probe boxes (vehicle-client-movers-re.md §3 §3): the union of the
+		// authored per-subobject collision AABBs — exact 16.16 values in the
+		// 3di's own model space, the space the retail modelData boxes
+		// [0x28..0x4C] live in. The box1-vs-footprint provenance (and the
+		// axis-pair naming) is the spec's tracked unknown: both map to this
+		// union here, verified against hull proportions at the solve's bench.
+		if (h.pool() == 1) {
+			world::VehicleTraits *vt =
+					world.vehicle_traits.get_mutable(e->item_id);
+			if (vt != nullptr && vt->box_z_hi == vt->box_z_lo) {
+				const Threedi3di3 *vm3 = deps.models.has_index()
+						? deps.models.model_for(key)
+						: nullptr;
+				if (vm3 != nullptr) {
+					const ThreediCollisionModel *col = vm3->collision;
+					if (col != nullptr && col->objects != nullptr &&
+							col->object_count > 0) {
+						int32_t lo[3] = {INT32_MAX, INT32_MAX, INT32_MAX};
+						int32_t hi[3] = {INT32_MIN, INT32_MIN, INT32_MIN};
+						for (size_t o = 0; o < col->object_count; ++o) {
+							const auto &obj = col->objects[o];
+							for (int a = 0; a < 3; ++a) {
+								lo[a] = std::min(lo[a], obj.offset[a] + obj.min[a]);
+								hi[a] = std::max(hi[a], obj.offset[a] + obj.max[a]);
+							}
+						}
+						if (hi[0] > lo[0] && hi[1] > lo[1] && hi[2] > lo[2]) {
+							vt->box_x_lo = lo[0];
+							vt->box_x_hi = hi[0];
+							vt->box_y_lo = lo[1];
+							vt->box_y_hi = hi[1];
+							vt->box_z_lo = lo[2];
+							vt->box_z_hi = hi[2];
+							vt->foot_x_lo = lo[0];
+							vt->foot_x_hi = hi[0];
+							vt->foot_y_lo = lo[1];
+							vt->foot_y_hi = hi[1];
+						}
+					}
+				}
+			}
+		}
+		if (resolved_model >= 0) {
+			deps.collision.assign_entity(h, resolved_model, e->registry_spawn_id);
+			++attached;
+			if (is_organic) {
+				deps.pose.remove_entity(h);
+				// S3 (ADR 0028): the native skeletal source resolves from
+				// the retained def rows + the sim's own model parse; the
+				// provider validates rig/FK and declines at query time
+				// exactly like the unregistered legacy leg when it cannot.
+				if (deps.models.has_index() && def->anim_def[0] != '\0') {
+					std::string adm(def->anim_def);
+					if (!iends_with_adm(adm)) adm += ".adm";
+					deps.pose.register_skeletal_entity(
+							h, e->registry_spawn_id, resolved_model,
+							strutil::to_lower(adm) + "|" + key,
+							adm, deps.models.model_for(key));
+				}
+			}
+		}
+		// The husk-stage collision model: attached beside the graphic instance so
+		// every query swaps to the wreck once Flags & 4 sets. The collision pick
+		// is the FIRST husk stage (entity+52 huskModel), not huskFinal [orig: the
+		// +52 substitution @ 0x538720 / @ 0x413086; D-AI-7 residual closed].
+		const std::string first_husk_name(def->husk);
+		const std::string final_husk_name(def->huskfinal);
+		const std::string &husk_name =
+				first_husk_name.empty() ? final_husk_name : first_husk_name;
+		if (!husk_name.empty()) {
+			// Retail keeps live huskModel and huskFinalModel pointers on the
+			// entity. A successfully opened model supplies that pointer even when
+			// it has no collision block; missing/corrupt assets leave it null.
+			// [orig: Entity_ProcessBuildingDeath @ 0x49442c]
+			// S3b full: husk models resolve exclusively through the sim cache's
+			// parse-once source.
+			const Threedi3di3 *first_husk_m3 = nullptr;
+			const Threedi3di3 *final_husk_m3 = nullptr;
+			if (deps.models.has_index()) {
+				if (!first_husk_name.empty())
+					first_husk_m3 = deps.models.model_for(first_husk_name);
+				if (!final_husk_name.empty())
+					final_husk_m3 = deps.models.model_for(final_husk_name);
+			}
+			if (world::ItemDeathTraits *t =
+						world.item_death_traits.get_mutable(e->item_id))
+				t->husk_model_loaded =
+						first_husk_m3 != nullptr || final_husk_m3 != nullptr;
+			const std::string &husk_key = husk_name;
+			const Threedi3di3 *husk_m3 = first_husk_name.empty()
+					? final_husk_m3
+					: first_husk_m3;
+			auto hit = state.model_by_graphic.find(husk_key);
+			if (hit == state.model_by_graphic.end()) {
+				int32_t husk_model_id = -1;
+				if (husk_m3 != nullptr) {
+					world::CollisionModel hmodel;
+					const bool husk_spheres = model_has_collision(*husk_m3);
+					if (collision_model_from_3di(
+							husk_m3->collision, hmodel, husk_spheres)) {
+						husk_model_id = deps.collision.add_model(std::move(hmodel));
+						// S3b full: the provider poses husks from the sim
+						// cache's lifetime-stable parse (the provider drops
+						// registrations whenever the index switches).
+						if (threedi_panm_lod_has_live(*husk_m3, 0))
+							deps.pose.register_generic_model(
+									husk_model_id, husk_m3);
+					}
+					state.radius_by_graphic.emplace(husk_key,
+							model_bound_radius_from_3di(*husk_m3));
+				}
+				hit = state.model_by_graphic.emplace(
+						husk_key, husk_model_id).first;
+				state.occlusion_by_graphic.emplace(husk_key, -1);
+			}
+			if (hit->second >= 0 && resolved_model >= 0)
+				deps.collision.assign_entity_husk(h, hit->second);
+			// Retail's death-sound tail walks exact, case-insensitive "KZ"
+			// user points on the active FIRST husk, not the huskFinal piece
+			// model, and queues a radius-5 blast at every match. Cache this
+			// metadata separately from collision registration: the same graphic
+			// may already be resident as another entity's main model.
+			// Unlike collision's legacy final-only fallback, the retail KZ walker
+			// reads entity+52 huskModel. A def with only huskFinal has no KZ source
+			// and therefore takes the entity-origin fallback blast.
+			if (!first_husk_name.empty()) {
+				auto kz_it = state.husk_kz_points_by_graphic.find(husk_key);
+				if (kz_it == state.husk_kz_points_by_graphic.end()) {
+					std::vector<world::Vec3> kz_points;
+					if (husk_m3 != nullptr) {
+						const Threedi3di3 &hmodel3di = *husk_m3;
+						for (size_t up_index = 0;
+								hmodel3di.user_points != nullptr && up_index < hmodel3di.user_point_count;
+								++up_index) {
+							const ThreediUserPoint &point = hmodel3di.user_points[up_index];
+							if (!strutil::iequals(point.name, "KZ"))
+								continue;
+							// Decoded model space is (-source y, source z, source x);
+							// destruction's placement math consumes mission-local (x, y, z).
+							float up_pos[3];
+							threedi_user_point_position(&point, up_pos);
+							kz_points.push_back(world::Vec3{
+									up_pos[2],
+									-up_pos[0],
+									up_pos[1]});
+						}
+					}
+					kz_it = state.husk_kz_points_by_graphic.emplace(
+							husk_key, std::move(kz_points)).first;
+				}
+				if (world::ItemDeathTraits *t =
+							world.item_death_traits.get_mutable(e->item_id);
+						t != nullptr && t->kz_points.empty() && !kz_it->second.empty())
+					t->kz_points = kz_it->second;
+			}
+			// The PIECE model is huskFINAL first [orig: @ 0x4934af
+			// huskFinalModel ?: huskModel] — the opposite preference from the
+			// collision husk pick above. Its LOD-0 part table feeds the
+			// death-piece loop bound [orig: renderObj[8]+52 @ 0x49361a], the
+			// per-section centers [orig: the section-row center @ 0x4938bf],
+			// and section 0's z extents (the wreck ground-rest offset
+			// [orig: @ 0x461e23-0x461e4b]). Its own cache, independent of the
+			// collision cache: a husk graphic can double as some entity's main
+			// graphic, which would leave the joint cache without an entry.
+			const std::string &piece_key = final_husk_name.empty()
+					? first_husk_name
+					: final_husk_name;
+			auto hs = state.husk_pieces_by_graphic.find(piece_key);
+			if (hs == state.husk_pieces_by_graphic.end()) {
+				CollisionHuskPieceInfo info;
+				const Threedi3di3 *piece_m3 = final_husk_name.empty()
+						? first_husk_m3
+						: final_husk_m3;
+				if (piece_m3 != nullptr && piece_m3->lod_count > 0 &&
+				    piece_m3->lods != nullptr) {
+					const ThreediLod &lod = piece_m3->lods[0];
+					info.sections = static_cast<int32_t>(lod.render_object_count);
+					for (size_t pi = 0; lod.render_objects != nullptr && pi < lod.render_object_count;
+							++pi) {
+						const ThreediRenderObject &part = lod.render_objects[pi];
+						info.centers.push_back(world::Vec3{
+								part.abs[0] + part.bounding_center[0],
+								part.abs[1] + part.bounding_center[1],
+								part.abs[2] + part.bounding_center[2]});
+					}
+					// Section 0 owns the first opaque+alpha strip run (strips are
+					// stored sequentially per render object).
+					if (lod.render_objects != nullptr && lod.render_object_count > 0 &&
+					    lod.strips != nullptr) {
+						const ThreediRenderObject &p0 = lod.render_objects[0];
+						const int32_t p0_strip_count = p0.num_strips + p0.num_alpha_strips;
+						bool any = false;
+						for (int32_t pr = 0; pr < p0_strip_count; ++pr) {
+							const size_t idx = static_cast<size_t>(pr);
+							if (idx >= lod.strip_count) break;
+							const ThreediTriangleStrip &prim = lod.strips[idx];
+							info.rest_min_z =
+									any ? std::min(info.rest_min_z, prim.min[2])
+									    : prim.min[2];
+							info.rest_max_z =
+									any ? std::max(info.rest_max_z, prim.max[2])
+									    : prim.max[2];
+							any = true;
+						}
+					}
+				}
+				hs = state.husk_pieces_by_graphic.emplace(
+						piece_key, std::move(info)).first;
+				if (piece_m3 != nullptr)
+					state.radius_by_graphic.emplace(piece_key,
+							model_bound_radius_from_3di(*piece_m3));
+			}
+			if (world::ItemDeathTraits *t =
+						world.item_death_traits.get_mutable(e->item_id)) {
+				const CollisionHuskPieceInfo &info = hs->second;
+				if (t->husk_section_count == 0 && info.sections > 0)
+					t->husk_section_count = info.sections;
+				if (t->husk_section_centers.empty() && !info.centers.empty())
+					t->husk_section_centers = info.centers;
+				t->husk_rest_min_z = info.rest_min_z;
+				t->husk_rest_max_z = info.rest_max_z;
+			}
+			// The husk model's bound joins the entity bound max [orig:
+			// Entity_InitFromModel @ 0x40dc30, the huskModel[5] compare].
+			entity_bound = std::max(
+					entity_bound, state.radius_by_graphic[husk_key]);
+		}
+		if (entity_bound > 0.0f && e->bound_radius <= 0.0f)
+			e->bound_radius = entity_bound + 0.0625f;  // the +0x1000 16.16 pad
+		const int32_t occ_id = state.occlusion_by_graphic[key];
+		// Entity_ClassifyForMinimap's ordinary-Building branch checks the
+		// live graphic model's +0xE0 portal/occlusion pointer. The parsed .3di
+		// and the collision/occlusion resolver are the portable ownership seam
+		// for that otherwise renderer-private fact.
+		e->has_minimap_model_marker = occ_id >= 0;
+		if (occ_id >= 0 && e->kind == world::EntityKind::Building) {
+			// The def bits the occlusion engine reads: attrib2 bit 6 "weldable"
+			// [orig: itemDef+88 >> 6 @ 0x5c5cce], attrib bit 27 recurse-windows
+			// [orig: itemDef+84 >> 27 @ 0x5c7456]; the destruction bone-map
+			// bytes (+2193/+2194) stay 0 until the destruction system lands
+			// (D-COL-2 / D-OCC-9).
+			world::OcclusionWorld::EntityDefBits bits;
+			bits.weldable = (def->attrib2 & (1u << 6)) != 0;
+			bits.recurse_windows = (def->attrib & (1u << 27)) != 0;
+			deps.occlusion.assign_entity(h, occ_id, bits);
+		}
+	}
+	return attached;
+}
+
+} // namespace opennova::simassets

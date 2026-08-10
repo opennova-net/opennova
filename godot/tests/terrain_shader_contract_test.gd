@@ -118,7 +118,6 @@ func test_runtime_and_oned_share_tile_overlay_composition() -> void:
 	var shared := _compact(_source("res://shaders/terrain_lighting.gdshaderinc"))
 	var runtime := _compact(_source("res://shaders/terrain.gdshader"))
 	var editor := _compact(_source("res://shaders/terrain_editor.gdshader"))
-	var environment := _compact(_source("res://adapter/environment/nova_environment.gd"))
 
 	assert_true(shared.contains("uniformsampler2Du_tile_overlay"),
 		"The tile composite input must live in the surface shader shared by runtime and ONED.")
@@ -128,5 +127,12 @@ func test_runtime_and_oned_share_tile_overlay_composition() -> void:
 		"Runtime terrain must use the shared tile-composition implementation.")
 	assert_true(editor.contains("compose_retail_tile_overlay("),
 		"ONED terrain must composite mission tiles in its terrain material.")
-	assert_true(environment.contains("set_shader_parameter(\"u_tile_overlay_tint\",get_tile_overlay_tint())"),
+	# The shared environment binding (native MissionEnvironment) must apply the
+	# retail tile tint through the one terrain-uniform push both shells drive.
+	var environment := MissionEnvironment.new()
+	add_child_autofree(environment)
+	var material := ShaderMaterial.new()
+	environment.apply_terrain_uniforms(material)
+	assert_eq(material.get_shader_parameter("u_tile_overlay_tint"),
+		environment.get_tile_overlay_tint(),
 		"The shared environment binding must apply the retail tile tint in runtime and ONED.")

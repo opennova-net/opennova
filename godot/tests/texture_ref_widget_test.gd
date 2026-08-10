@@ -104,14 +104,14 @@ func test_preview_box_lets_the_drop_walk_through() -> void:
 
 func test_configure_strips_jump_but_keeps_resolve_and_pick() -> void:
 	var w := _make_widget()
-	w.configure("texture", "Cloud map", {
-		"resolve": func(_kind: String, _name: String) -> Dictionary:
-			return {"status": "found", "path": "C:/res/cloud01.pcx"},
-		"pick": func(_kind: String, _title: String, _on_pick: Callable) -> void:
-			pass,
-		"jump": func(_kind: String, _path: String) -> void:
-			pass,
-	})
+	var services := LinkServices.new()
+	services.resolve = func(_kind: String, _name: String) -> Dictionary:
+		return {"status": "found", "path": "C:/res/cloud01.pcx"}
+	services.pick = func(_kind: String, _title: String, _on_pick: Callable) -> void:
+		pass
+	services.jump = func(_kind: String, _path: String) -> void:
+		pass
+	w.configure("texture", "Cloud map", services)
 	w.set_value("cloud01.pcx")
 	assert_true(w.ref_row.browse_button.visible, "pick survives")
 	assert_true(w.ref_row.badge.visible, "resolve survives")

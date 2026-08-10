@@ -27,8 +27,8 @@ func _ready() -> void:
 	var plane := PlaneMesh.new()
 	plane.size = Vector2(10.0, 10.0)
 	receiver.mesh = plane
-	receiver.layers = NovaWater.VISUAL_LAYER_WORLD \
-			| NovaWater.VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER
+	receiver.layers = Water.VISUAL_LAYER_WORLD \
+			| Water.VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER
 	var base := StandardMaterial3D.new()
 	base.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	base.albedo_color = Color(0.65, 0.65, 0.65)
@@ -48,14 +48,14 @@ func _ready() -> void:
 	caster_material.albedo_color = Color(0.35, 0.2, 0.15)
 	caster.material_override = caster_material
 	caster.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY
-	caster.layers = NovaWater.VISUAL_LAYER_STATIC_SHADOW_CASTER
+	caster.layers = Water.VISUAL_LAYER_STATIC_SHADOW_CASTER
 	add_child(caster)
 
 	_light = DirectionalLight3D.new()
 	_light.light_energy = 1.0
 	_light.shadow_enabled = false
-	_light.light_cull_mask = NovaWater.VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER
-	_light.shadow_caster_mask = NovaWater.VISUAL_LAYER_STATIC_SHADOW_CASTER
+	_light.light_cull_mask = Water.VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER
+	_light.shadow_caster_mask = Water.VISUAL_LAYER_STATIC_SHADOW_CASTER
 	_light.directional_shadow_max_distance = 32.0
 	_light.shadow_bias = 0.02
 	_light.shadow_normal_bias = 0.2
@@ -66,9 +66,9 @@ func _ready() -> void:
 	var dynamic_light := DirectionalLight3D.new()
 	dynamic_light.light_energy = 1.0
 	dynamic_light.shadow_enabled = true
-	dynamic_light.light_cull_mask = NovaWater.VISUAL_LAYER_WORLD
+	dynamic_light.light_cull_mask = Water.VISUAL_LAYER_WORLD
 	dynamic_light.shadow_caster_mask = \
-			NovaWater.VISUAL_LAYER_DYNAMIC_SHADOW_CASTER
+			Water.VISUAL_LAYER_DYNAMIC_SHADOW_CASTER
 	add_child(dynamic_light)
 	dynamic_light.look_at(
 			dynamic_light.global_position + Vector3(-0.6, -1.0, -0.4).normalized(),

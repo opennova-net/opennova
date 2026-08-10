@@ -172,7 +172,7 @@ don't):
    `// [orig: Scr_DecryptBuffer @ 0x53D090]` (GDScript: `##`; doc-comment `/** … */` above a
    public API; one marker per definition).
 2. **IDA** — a `set_comments` on the original's **entry address** pointing back:
-   `reimpl: opennova::scr::scr_decrypt @ engine/formats/scr/src/scr.cpp`.
+   `reimpl: opennova::scr::scr_decrypt @ engine/formats/scr/scr.cpp`.
    Keep the reverse link entry-only; use additional `set_comments` at inner addresses solely to
    annotate a specific divergence at its site.
 3. **The row** — a correspondence row drafted in the session notes in the
@@ -190,8 +190,8 @@ Format: `target ← tool addr old→new (confidence: reason)`. Examples:
 ```
 IDA   ← rename 0x40e250  sub_40E250 → BMS_ValidateRecordCounts   (anchored: "Too many" strings @ 0x40e326)
 IDA   ← set_type 0x53d090  int(uint8_t*, int)                    [probable — confirm before apply?]
-IDA   ← comment 0x53d090  reimpl: opennova::scr::scr_decrypt @ engine/formats/scr/src/scr.cpp
-code  ← marker  engine/formats/scr/src/scr.cpp:41  // [orig: Scr_DecryptBuffer @ 0x53D090]
+IDA   ← comment 0x53d090  reimpl: opennova::scr::scr_decrypt @ engine/formats/scr/scr.cpp
+code  ← marker  engine/formats/scr/scr.cpp:41  // [orig: Scr_DecryptBuffer @ 0x53D090]
 notes ← row     scr_decrypt ↔ Scr_DecryptBuffer @ 0x53D090  status=matching
 ```
 

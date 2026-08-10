@@ -5,7 +5,7 @@ const TextureSlotWidgetScript = preload("res://modtools/object/ui/widgets/textur
 
 signal frame_changed()
 
-var _data: NovaObjectData
+var _data: ObjectData
 var _material_index := -1
 var _shader_info := {}
 var _scroll: ScrollContainer
@@ -20,7 +20,7 @@ func _init() -> void:
 	get_ok_button().text = "Close"
 
 
-func setup(data: NovaObjectData, material_index: int, shader_info: Dictionary) -> void:
+func setup(data: ObjectData, material_index: int, shader_info: Dictionary) -> void:
 	_data = data
 	_material_index = material_index
 	_shader_info = shader_info

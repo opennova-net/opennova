@@ -1,6 +1,6 @@
 extends GutTest
 
-const SyncGuardScript = preload("res://adapter/ui/sync_guard.gd")
+const SyncGuardScript = preload("res://game/ui/sync_guard.gd")
 
 
 func test_active_is_false_initially() -> void:

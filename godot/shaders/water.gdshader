@@ -18,13 +18,13 @@ render_mode unshaded, blend_premul_alpha, cull_disabled, depth_draw_always;
 // (regenerated per frame in engine/formats/env - Water_GenerateNoiseTextures
 // @ 0x5c0360), per-vertex diffuse/alpha from the row color chain, and the
 // shared scene fog. The screen-marched strip tessellation is LIVE (env #29):
-// NovaWater rebuilds the mesh per frame from NovaWaterCore.strip_build, so
+// Water rebuilds the mesh per frame from WaterCore.strip_build, so
 // COLOR carries the witnessed row diffuse (brightness x 0x10101, murk/
 // distance alpha in A), CUSTOM1 the v1 specular register, CUSTOM0
 // (depth, rhw, screen U, screen V) - the projective depth pair + the
 // texm3x2 screen coordinates - and CUSTOM2 the texm3x2 perturbation basis
 // (t1.xy, t2.xy). The reflection RTT consumer is LIVE too (env #30):
-// NovaWater owns the mirrored-scene SubViewport and the fragment below
+// Water owns the mirrored-scene SubViewport and the fragment below
 // runs the witnessed texm3x2 lookup against it (the fog term rides the
 // per-row spec-alpha factor — see v_fog). Remaining variants: the LOW tier
 // (render_water_strip @ 0x5c1d60) and the nightvision redraw.
@@ -51,7 +51,7 @@ render_mode unshaded, blend_premul_alpha, cull_disabled, depth_draw_always;
 //     mov r0, t2 / mul_x2 r0.rgb, r0, v0 / mul_x4 r0.rgb, r0, t3
 //     +mul_x2 r0.a, t3.a, v0.a / add r0.rgb, r0, v1
 //   (t2 = the bump-perturbed reflection sample; the fragment below runs the
-//   chain against NovaWater's mirror-scene RTT, u_water_color standing in
+//   chain against Water's mirror-scene RTT, u_water_color standing in
 //   only on reflection-less owners). FF fallback: s0 MOD2X(reflection,
 //   diffuse), s1 MOD2X(noise, current), alpha MOD(noise.a, diffuse.a).
 
@@ -61,7 +61,7 @@ render_mode unshaded, blend_premul_alpha, cull_disabled, depth_draw_always;
 // Env_WaterColorLit — since env #30 this is only the reflection-LESS
 // stand-in for the t2 sample (headless owners/tests, u_has_reflection false).
 uniform vec3 u_water_color = vec3(0.408, 0.314, 0.224);
-// The reflection RTT (env #30): NovaWater's mirror-camera SubViewport
+// The reflection RTT (env #30): Water's mirror-camera SubViewport
 // texture, the chain's t2 [orig: texm3x2pad/texm3x2tex t2 —
 // Water_InitSurfaceShaders @ 0x5c19b0; the mirror scene RTT
 // render_main_scene @ 0x5c1240]. Sampled WITHOUT source_color on purpose:
@@ -71,13 +71,13 @@ uniform sampler2D u_reflection : filter_linear;
 uniform bool u_has_reflection = false;
 // The witnessed texm3x2 rows are normalized against the MAIN viewport, while
 // Godot derives the mirror camera's vertical projection from its square RTT.
-// NovaWater preserves horizontal FOV, so X is already registered and Y needs
+// Water preserves horizontal FOV, so X is already registered and Y needs
 // the source-to-square focal-scale ratio (source height / source width).
 uniform vec2 u_reflection_uv_scale = vec2(1.0);
 // water_murk [orig: SetWaterMurk @ 0x57d4f0] no longer has a uniform: the
 // witnessed angle-weighted murk x distance chain arrives per vertex in
 // COLOR.a now that the strip march is live (env #29) — the former flat
-// (1 - u_water_murk) knob is retired (NovaWater still sets the parameter for
+// (1 - u_water_murk) knob is retired (Water still sets the parameter for
 // probe compatibility; a ShaderMaterial ignores unknown names).
 // (scale, bias, offset_u, offset_v) [orig: @ 0x5c3348..0x5c33db]: scale/bias
 // from the fog-distance INT part, offsets = cam/128 + cloud accumulators.

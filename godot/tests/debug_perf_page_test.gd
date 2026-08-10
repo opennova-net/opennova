@@ -6,13 +6,13 @@ extends GutTest
 # across the whole GUT run, so tests use UNIQUE labels and never assert ring
 # totals or ordering beyond their own entries.
 
-const PaneScript := preload("res://adapter/debug/pages/debug_perf_page.gd")
-const OverlayScript := preload("res://adapter/debug/nova_debug_overlay.gd")
+const PaneScript := preload("res://game/debug/pages/debug_perf_page.gd")
+const OverlayScript := preload("res://game/debug/nova_debug_overlay.gd")
 
 
 func _make_pane() -> DebugPerfPage:
 	var pane: DebugPerfPage = PaneScript.new()
-	pane.setup(NovaDebugContext.new())
+	pane.setup(DebugContext.new())
 	add_child_autofree(pane)
 	return pane
 
@@ -71,7 +71,7 @@ func test_span_tree_keeps_time_readable_in_a_narrow_perf_page() -> void:
 	mount.size = Vector2(388, 560)
 	add_child_autofree(mount)
 	var pane: DebugPerfPage = PaneScript.new()
-	pane.setup(NovaDebugContext.new())
+	pane.setup(DebugContext.new())
 	mount.add_child(pane)
 	pane.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var long_label := \
@@ -134,7 +134,7 @@ func test_monitor_values_stay_visible_beside_clipped_names_at_narrow_width() -> 
 	mount.size = Vector2(388, 900)
 	add_child_autofree(mount)
 	var pane: DebugPerfPage = PaneScript.new()
-	pane.setup(NovaDebugContext.new())
+	pane.setup(DebugContext.new())
 	mount.add_child(pane)
 	pane.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var long_label := \

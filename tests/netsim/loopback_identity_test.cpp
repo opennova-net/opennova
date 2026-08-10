@@ -24,7 +24,7 @@
 #include <npwire/ingame_decode.h> // EntityPacketSubHeader / PlayerExtendedUplink
 #include <npwire/ingame_message_id.h>
 #include <npwire/ingame_encode.h> // network_compress_fixedpoint, encode_* uplink
-#include <terrain/height_field.h>
+#include <terrain_query/height_field.h>
 #include <world/ai.h>                 // AiSystem / AiEntity (engine-frame mirror)
 #include <world/entity.h>
 #include <world/geom.h>

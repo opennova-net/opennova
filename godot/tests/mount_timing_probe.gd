@@ -1,6 +1,6 @@
 extends SceneTree
 
-# Headless probe (NOT collected by GUT): times NovaResourceRoot.mount_runtime at
+# Headless probe (NOT collected by GUT): times ResourceRoot.mount_runtime at
 # a PFF install, step by step, to diagnose a hang/slow mount observed when the
 # sound_pff_install_test mounted the JO:TR install with the revx02 expansion.
 #
@@ -17,7 +17,7 @@ func _run() -> void:
 	var expansion := args[1] if args.size() >= 2 else ""
 	print("[probe] mount_runtime dir=%s exp='%s'" % [dir, expansion])
 	var t0 := Time.get_ticks_msec()
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	var err: int = root.mount_runtime(dir, expansion, false, "jo")
 	var t1 := Time.get_ticks_msec()
 	print("[probe] mount_runtime -> %d in %d ms" % [err, t1 - t0])

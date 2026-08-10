@@ -4,7 +4,7 @@ The original engine's file-resolution pipeline: the boot PFF mount, the
 loose-vs-archive precedence and its `/d` gate, the search-path walk, the PFF
 container/entry formats, and the read disciplines. Reimplementation surface:
 `engine/base/vfs` (`vfs.cpp` — the engine-faithful mount stack), `engine/formats/pff`
-(container codec), `godot/adapter/resource_index/nova_resource_root.cpp`
+(container codec), `godot/src/resource_index/nova_resource_root.cpp`
 (`mount_runtime`) and `nova_launch_flags.gd` (`/d`). Binary: retail
 **Jointops.exe** (IDB `Jointops.exe.kong.i64`); produced by the PAR-R7 audit
 (2026-07-05) that converted this system's `UNAUDITED` ledger row into the
@@ -95,13 +95,13 @@ stands confirmed.
    second one. **Joining a session drives the same call** before connecting
    (`UI_JoinSelectedSession @ 0x5699d0` @ 0x569b02, from the browser session
    record's expansion @ 0x569afa) — the reimpl copy's join leg is D-NET-178.
-   Ours re-points a live `NovaResourceRoot` in place (`mount_runtime` on an
+   Ours re-points a live `ResourceRoot` in place (`mount_runtime` on an
    already-mounted root): the archive set is REPLACED, not layered
    (`Vfs::mount_game` clears first), the index is re-scanned, `expansion_` is
    re-derived from what actually layered, and the texture-resolver caches plus
    the global cache epoch are invalidated BEFORE the new mount populates
    anything. `mount_runtime` reports the mount kind through
-   `NovaResourceRoot::is_runtime_mount()`, so callers can tell a runtime mount
+   `ResourceRoot::is_runtime_mount()`, so callers can tell a runtime mount
    (the only kind that layers expansions) from an editor `set_root_dir` one.
    Pinned by `resource_root_contract_test.gd`
    (`test_runtime_remount_in_place_switches_expansion`,
@@ -126,13 +126,13 @@ unreferenced) · `0x334180C` `g_FS_SearchLooseFirst` (default 0) ·
 paths (16×16 B) · `0x33428C0` /FRISK gate · `0x829F90` name table[6][260] ·
 `0xB49A54` handles[6] · `0xB4C4D4` /D flag · `0xB4C584` expansion name.
 
-## D-VFS divergence catalog (ours: engine/base/vfs, engine/formats/pff, NovaResourceRoot)
+## D-VFS divergence catalog (ours: engine/base/vfs, engine/formats/pff, ResourceRoot)
 
 | ID | Class | Disposition | One-liner |
 |---|---|---|---|
-| D-VFS-1 | A | FIXED (2026-07-17) | `VfsLookupPolicy` now separates the session default from `ForceLooseFirst` and `ForceArchiveOnly` per query; `ResourceIndex` and runtime-mounted `NovaResourceRoot` carry it without mutating the session, and the texture cache keys policy + normalized qualified texture query. Implemented consumers force mission `.til`, MNU/loading/end-screen UI art loose-first and local/network BMS validation + reads archive-only. `test_per_call_resolution_policy` pins packed and `/d` behavior; `resource_root_contract_test` pins has/read parity and policy-separated texture caching; `game_world_test` discriminates loose/archive BMS + TIL conflicts, and `loading_screen_test` the loose/archive image conflict. Savegame, `gt.ssc`, and minimap consumers remain unimplemented rather than incorrectly session-bound [orig: @ 0x4395a2, 0x60a74e, 0x4cdcf4, 0x6541ba, 0x59b13a, 0x40d43c] |
-| D-VFS-2 | A | FIXED (2026-07-05) | Fixed 6-slot archive name table ported: `Vfs::mount_game` defaults to `VfsArchiveDiscovery::RetailTable` (language/localres/resource.pff probed by name, slot order = precedence, extra .pff never mounts; pinned by `test_mount_game_retail_table`) [orig: @ 0x829f90 + @ 0x4a4310]. **Recorded decision**: the editor's browse index (`ResourceIndex::scan` → `NovaResourceRoot::set_root_dir`) AND the C ABI (`opennova_vfs_mount_game`, the importer/Python `AssetResolver`) deliberately keep `ScanAll` — authoring/extraction tools must index arbitrary archives; ONLY the game runtime (`mount_runtime`) passes `RetailTable` |
-| D-VFS-3 | A | FIXED (2026-07-17) | Retail-policy lookups now pass the full relative query: a component-wise, ASCII-case-insensitive loose walk reaches subdirectories, while archive matching retains the full spelling and therefore never aliases a flat basename. Runtime `NovaResourceRoot` forwards that query; editor `set_root_dir` deliberately retains its legacy flat authoring contract. Pinned by `test_path_qualified_lookup_is_verbatim` and `test_runtime_qualified_query_reaches_loose_file_without_aliasing_flat_archive` [orig: dead basename-strip setter @ 0x75a590] |
+| D-VFS-1 | A | FIXED (2026-07-17) | `VfsLookupPolicy` now separates the session default from `ForceLooseFirst` and `ForceArchiveOnly` per query; `ResourceIndex` and runtime-mounted `ResourceRoot` carry it without mutating the session, and the texture cache keys policy + normalized qualified texture query. Implemented consumers force mission `.til`, MNU/loading/end-screen UI art loose-first and local/network BMS validation + reads archive-only. `test_per_call_resolution_policy` pins packed and `/d` behavior; `resource_root_contract_test` pins has/read parity and policy-separated texture caching; `game_world_test` discriminates loose/archive BMS + TIL conflicts, and `loading_screen_test` the loose/archive image conflict. Savegame, `gt.ssc`, and minimap consumers remain unimplemented rather than incorrectly session-bound [orig: @ 0x4395a2, 0x60a74e, 0x4cdcf4, 0x6541ba, 0x59b13a, 0x40d43c] |
+| D-VFS-2 | A | FIXED (2026-07-05) | Fixed 6-slot archive name table ported: `Vfs::mount_game` defaults to `VfsArchiveDiscovery::RetailTable` (language/localres/resource.pff probed by name, slot order = precedence, extra .pff never mounts; pinned by `test_mount_game_retail_table`) [orig: @ 0x829f90 + @ 0x4a4310]. **Recorded decision**: the editor's browse index (`ResourceIndex::scan` → `ResourceRoot::set_root_dir`) AND the C ABI (`opennova_vfs_mount_game`, the importer/Python `AssetResolver`) deliberately keep `ScanAll` — authoring/extraction tools must index arbitrary archives; ONLY the game runtime (`mount_runtime`) passes `RetailTable` |
+| D-VFS-3 | A | FIXED (2026-07-17) | Retail-policy lookups now pass the full relative query: a component-wise, ASCII-case-insensitive loose walk reaches subdirectories, while archive matching retains the full spelling and therefore never aliases a flat basename. Runtime `ResourceRoot` forwards that query; editor `set_root_dir` deliberately retains its legacy flat authoring contract. Pinned by `test_path_qualified_lookup_is_verbatim` and `test_runtime_qualified_query_reaches_loose_file_without_aliasing_flat_archive` [orig: dead basename-strip setter @ 0x75a590] |
 | D-VFS-5 | B | NEEDS-RE | Encrypted-entry (bit0) streaming: retail decrypts ONLY whole-file reads; streaming + partial reads return ciphertext; ours always decrypts — needs the corpus check (does any retail JO pff carry bit0, ever streamed?) |
 | D-VFS-7 | A | FIXED (2026-07-17) | Retail archive lookup now has a dedicated query key: at most 31 bytes, ASCII-uppercase, compared exactly against the entry name uppercased at mount. No trimming occurs—the apparent trim starts on the NUL and is dead—so stored/query trailing spaces remain significant; overlength queries cannot match the format's ≤16-byte entry names. `test_archive_names_keep_trailing_spaces` pins the distinction [orig: `PFF_FindEntry @ 0x7685d0`; `PFF_CompareSearchNameToEntry @ 0x768240`] |
 | D-VFS-10 | C | PERMANENT (2026-07-17) | The retail loose path is built from an unchecked query; the reimpl rejects rooted/drive-qualified/ADS/`..` queries and canonicalizes every component so symlinks cannot escape a mounted search root. This is a ratified mount-sandbox boundary: legitimate relative, case-insensitive in-root queries retain retail behavior, while exposing arbitrary host files through an asset name would be wrong. Pinned by `test_retail_query_stays_inside_mounted_root` [orig: FileSystem_OpenFile @ 0x75b1c0 / FileSystem_FileExists @ 0x75aa50] |

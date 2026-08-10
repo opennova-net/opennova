@@ -8,7 +8,7 @@ extends SceneTree
 #
 # Use: godot --headless --path godot -s res://tests/vm_mesh_probe.gd -- <resource-dir>
 
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 
 
 func _initialize() -> void:
@@ -18,7 +18,7 @@ func _initialize() -> void:
 func _run() -> void:
 	var args := OS.get_cmdline_user_args()
 	var dir: String = args[0] if not args.is_empty() else ResourceDirSettings.get_resource_dir()
-	var root := NovaResourceRoot.new()
+	var root := ResourceRoot.new()
 	if root.set_root_dir(dir) != OK:
 		push_error("[vm] set_root_dir failed")
 		quit(1)
@@ -33,8 +33,8 @@ func _run() -> void:
 	quit(0)
 
 
-func _dump(root: NovaResourceRoot, graphic: String, adm: String, bone_count: int) -> void:
-	var data := NovaObjectData.new()
+func _dump(root: ResourceRoot, graphic: String, adm: String, bone_count: int) -> void:
+	var data := ObjectData.new()
 	if data.open_from_resource_root(root, graphic + ".3di") != OK:
 		print("[vm] %s: NOT FOUND" % graphic)
 		return
@@ -76,8 +76,8 @@ func _dump(root: NovaResourceRoot, graphic: String, adm: String, bone_count: int
 	if adm.is_empty():
 		return
 	# Model-table rig: count/hierarchy from the model rows, rest positions reconstructed
-	# from the model pivots + the reset .bad's bind rotations (NovaSkeletalAnim).
-	var sk := NovaSkeletalAnim.new()
+	# from the model pivots + the reset .bad's bind rotations (SkeletalAnim).
+	var sk := SkeletalAnim.new()
 	if not sk.load_from_resource_root(root, adm + ".adm", data.get_bone_origins(0), data.get_bone_parents(0)):
 		print("[vm] adm load failed: ", sk.get_last_error())
 		return
@@ -104,7 +104,7 @@ func _locals_from_bones(bones: Array) -> Array[Transform3D]:
 	return out
 
 
-func _dump_pose(sk: NovaSkeletalAnim, label: String, locals: Array[Transform3D], parents: Array[int]) -> void:
+func _dump_pose(sk: SkeletalAnim, label: String, locals: Array[Transform3D], parents: Array[int]) -> void:
 	var world: Array[Transform3D] = []
 	var lo := Vector3(INF, INF, INF)
 	var hi := Vector3(-INF, -INF, -INF)

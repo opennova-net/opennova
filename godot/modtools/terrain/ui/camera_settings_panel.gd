@@ -5,7 +5,8 @@ extends VBoxContainer
 @onready var _near_plane_spin: SpinBox = %NearPlaneSpin
 @onready var _far_plane_spin: SpinBox = %FarPlaneSpin
 
-var editor: Node
+# The shell: its get_editor_camera() resolves the active workspace's camera.
+var editor: EditorWorkstation
 var _syncing: bool = false
 
 
@@ -16,8 +17,7 @@ func _ready() -> void:
 	_sync_from_editor()
 
 
-func set_editor(value: Node) -> void:
-	SignalRebind.rebind(editor, value, &"ui_state_changed", Callable(self, "_on_editor_ui_state_changed"))
+func set_editor(value: EditorWorkstation) -> void:
 	editor = value
 	_sync_from_editor()
 
@@ -41,12 +41,10 @@ func _sync_from_editor() -> void:
 	_syncing = false
 
 
-func _get_camera() -> Camera3D:
+func _get_camera() -> FlyCamera:
 	if editor == null:
 		return null
-	if editor.has_method("get_editor_camera"):
-		return editor.get_editor_camera()
-	return editor.get("camera") as Camera3D
+	return editor.get_editor_camera()
 
 
 func _on_fly_speed_changed(value: float) -> void:

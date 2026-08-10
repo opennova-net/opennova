@@ -49,12 +49,12 @@ tests asserting the layer itself.
 - 26 registered classes deleted across #451 and this round's cut (the format
   fleet, the NovaTexture front-priority loader, the import-plugin chain,
   `NovaDataFile`); `register_types.cpp` carries no resource-system calls at
-  all, and `godot/adapter` registers ~90 classes, every one a binding,
+  all, and `godot/src` registers ~90 classes, every one a binding,
   document, or presenter.
 - The moved loader/saver bodies became direct-IO bindings:
-  `NovaTerrainData::save_to_path`, `NovaTerrainTileInfo::load_from_path`/
-  `save_to_path`, `NovaSbfBank::save_to_path`,
-  `NovaMusicScript::load_from_path`/`save_to_path`,
+  `TerrainData::save_to_path`, `TerrainTileInfo::load_from_path`/
+  `save_to_path`, `SbfBank::save_to_path`,
+  `MusicScript::load_from_path`/`save_to_path`,
   `CbinCreditsResource::load_from_path`/`save_to_path`.
 - ADR 0031 §1's share column was a one-time estimate; the post-program
   file-level census measured binding glue ~21%, ONED document surface ~33%,

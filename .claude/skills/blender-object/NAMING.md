@@ -3,7 +3,7 @@
 An object's 3DI role is encoded in its **scene-object name**. The importer assigns these
 names (`apps/importer/scene_builder/`), the exporter classifies by them
 (`blender/ase_exporter.py`), and the authoritative parser is `classify_name()` in
-`engine/formats/oed/src/convert_internal.cpp` (a port of `[orig: ConvertToInternal @ 0x4268B3]`).
+`engine/formats/oed/convert_internal.cpp` (a port of `[orig: ConvertToInternal @ 0x4268B3]`).
 Keep names exactly as below. **Indices are two-digit and 1-based** in the name (`01` is the
 first), stored 0-based internally. The artist-facing source is
 `godot/modtools/object/README.md`.
@@ -71,7 +71,7 @@ subobject's transforms. Position them in part-local space the way the importer d
 
 Both are helper **meshes** classified by `classify_name` objType 5: leading char in
 `C B L D O V`, second char `A`–`Z` (excluding `BN*` bones and `BIP*`). The two letters map
-to a numeric **collidableType**; `engine/formats/oed/src/export_3di.cpp` then routes types **20–23
+to a numeric **collidableType**; `engine/formats/oed/export_3di.cpp` then routes types **20–23
 (0x14–0x18)** to *occlusion* objects and all others to the *collision* BVOL list. Use the
 `-colonly` suffix for collision, `-occonly` for occlusion. Repeated same-kind volumes get a
 base-26 letter suffix (`CB01`, `CB01a`, `CB01b`, …).
@@ -169,7 +169,7 @@ pose ultimately reads the seat transform (`Entity_GetBoneTransformAndOrientation
 ## Materials (`Material_<index>_<shader tag>`)
 
 The leading integer sets export order (so ASE order matches `.3dp`); the shader tag must
-be one of the canonical tags from `engine/formats/oed/include/oed/types.h` `kMaterialInfoTable` (OED
+be one of the canonical tags from `engine/formats/oed/types.h` `kMaterialInfoTable` (OED
 keeps this table rather than parsing `.fx`). Common tags:
 
 - `FF_ST_OP` — fixed-function single-texture **opaque** diffuse (default static prop).

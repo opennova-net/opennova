@@ -16,7 +16,7 @@ var _objects_status: Label
 var _objects_cache: Array = []
 # { kind, index } parallel to the currently-shown (filtered) _objects_list rows.
 var _objects_rows: Array = []
-var _objects_built_for: NovaMissionData
+var _objects_built_for: MissionData
 var _objects_built_count: int = -1
 # The controller membership revision the rows were built for. Gating on the count alone would miss an
 # identity change at a constant total (e.g. an undo/redo that swaps an entity for a different one of the
@@ -81,7 +81,7 @@ func _build_object_browser() -> void:
 
 
 func _refresh_object_browser() -> void:
-	var mission: NovaMissionData = _inspector._controller.get_mission() if _inspector._controller != null else null
+	var mission: MissionData = _inspector._controller.get_mission() if _inspector._controller != null else null
 	if mission == null:
 		_objects_box.visible = false
 		_objects_built_for = null

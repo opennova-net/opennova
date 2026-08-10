@@ -1,6 +1,6 @@
 extends GutTest
 
-# Co-op LAN host wiring (Increment C) on NovaSimulation: enable_host_listen binds a real UDP
+# Co-op LAN host wiring (Increment C) on Simulation: enable_host_listen binds a real UDP
 # socket and stands up the witnessed host-accept handshake (the npruntime host runtime,
 # P7) against the live World; on a joiner reaching Spawned the host admits it as a pool-0
 # player bound to a netsim connection. The full handshake->spawn LOGIC is unit-tested in
@@ -11,8 +11,8 @@ extends GutTest
 # bytes in GDScript).
 
 
-func _host_sim(md: NovaMissionData) -> NovaSimulation:
-	var sim := NovaSimulation.new()
+func _host_sim(md: MissionData) -> Simulation:
+	var sim := Simulation.new()
 	assert_true(sim.enable_host_listen(0), "host bound an OS-assigned UDP port")
 	assert_true(sim.is_host_listening(), "host listening flag set")
 	assert_true(sim.is_listen_server(), "host listen implies the in-process listen server")
@@ -20,8 +20,8 @@ func _host_sim(md: NovaMissionData) -> NovaSimulation:
 	return sim
 
 
-func _two_organics() -> NovaMissionData:
-	var md := NovaMissionData.new()
+func _two_organics() -> MissionData:
+	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
 	md.add_entity(3, 0, Vector3(0, 0, 0), Vector3.ZERO)   # KIND_ORGANIC
 	md.add_entity(3, 0, Vector3(10, 0, 0), Vector3.ZERO)
@@ -43,7 +43,7 @@ func test_enable_host_listen_binds_and_keeps_sp_present() -> void:
 
 
 func test_host_session_config_survives_native_accept_start() -> void:
-	var sim := NovaSimulation.new()
+	var sim := Simulation.new()
 	sim.configure_host_session({
 		"server_name": "Configured Host",
 		"mission_name": "Custom Island Test",
@@ -76,7 +76,7 @@ func test_host_receives_joiner_datagrams_without_disturbing_sp() -> void:
 	# A joiner dials the host's bound port and sends raw (non-handshake) datagrams. The host's
 	# per-frame poll drains them through the accept component; malformed bytes register no JO
 	# peer and must not crash or disturb the host's own present.
-	var join := NovaUdpPump.new()
+	var join := UdpPump.new()
 	autofree(join)
 	assert_eq(join.dial("127.0.0.1", host_port), OK, "joiner dialed the host")
 	assert_eq(join.send_to_host(PackedByteArray([0xEE, 0x01, 0x02, 0x03])), OK)
@@ -126,7 +126,7 @@ func test_admit_remote_peer_spawns_a_world_entity() -> void:
 
 
 func test_host_listen_off_by_default() -> void:
-	var sim := NovaSimulation.new()
+	var sim := Simulation.new()
 	sim.build_demo_mission()
 	assert_false(sim.is_host_listening(), "host listening off by default")
 	assert_eq(sim.get_host_listen_port(), 0, "no bound port when not listening")

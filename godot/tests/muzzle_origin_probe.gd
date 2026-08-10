@@ -6,15 +6,15 @@ extends SceneTree
 # Reports, all in the character model's OWN frame (the body node sits at identity):
 #   * every userpoint authored on the player character model (0x14B9 -> its visual item),
 #   * which userpoint the model's muzzle resolver picks, and on which bone,
-#   * NovaObjectModel.get_muzzle_world_position() (what the mission presenter
-#     feeds NovaSimulation.set_ai_muzzle_world),
+#   * ObjectModel.get_muzzle_world_position() (what the mission presenter
+#     feeds Simulation.set_ai_muzzle_world),
 #   * the HEAD bone (LocalPlayerPresenter.PLAYER_HEAD_BONE_INDEX = 14) origin — the local
 #     player's EYE anchor, and the origin we put on the wire for our own shots,
 #   * bone 16 "BN17 R Hand" — the held-weapon joint,
 #   * the 0.9 u chest-lift fallback (pos.z + 0xE666) the AI fire path uses when no
 #     binding-pushed muzzle is fresh,
 #   * the M4_3RD gfx3's MFLASH01 userpoint carried through
-#     PresentHeldWeapon.attach_transform (both attach frames) — the REAL muzzle of the
+#     PresentApplier.held_weapon_attach_transform (both attach frames) — the REAL muzzle of the
 #     gun we actually draw in the hand.
 #
 # Measured in REST pose and again in a posed standing clip, because the rest pose of
@@ -25,13 +25,11 @@ extends SceneTree
 #   "$GODOT_BIN" --headless --path godot -s res://tests/muzzle_origin_probe.gd
 # Not collected by GUT (*_probe.gd).
 
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
-const MissionObjectPlacer := preload("res://adapter/mission/mission_object_placer.gd")
-const PresentHeldWeapon := preload("res://adapter/world/present_held_weapon.gd")
+const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 
 const PLAYER_RUNTIME_TYPE_ID := 0x14B9
 const HEAD_BONE_INDEX := 14      # LocalPlayerPresenter.PLAYER_HEAD_BONE_INDEX
-const HAND_BONE_INDEX := 16      # PresentHeldWeapon.BONE_INDEX
+const HAND_BONE_INDEX := 16      # PresentApplier.HELD_WEAPON_BONE_INDEX
 const FALLBACK_LIFT := 0.9       # 0xE666 in 16.16 — infantry.cpp:1849 / ai.cpp:1194
 
 var _placer
@@ -57,7 +55,7 @@ func _run() -> void:
 	var root_dir := OS.get_environment("NOVA_RESOURCE_DIR").strip_edges()
 	if root_dir.is_empty():
 		root_dir = ResourceDirSettings.get_resource_dir()
-	var res := NovaResourceRoot.new()
+	var res := ResourceRoot.new()
 	if res.mount_runtime(root_dir, ResourceDirSettings.get_expansion()) != OK:
 		print("FAIL: cannot mount ", root_dir)
 		quit(1)
@@ -81,7 +79,7 @@ func _run() -> void:
 		quit(1)
 		return
 	await _frames(2)
-	_skel = PresentHeldWeapon.find_skeleton(_body)
+	_skel = PresentApplier.find_skeleton(_body)
 	if _skel == null:
 		print("FAIL: no Skeleton3D under the character model")
 		quit(1)
@@ -204,7 +202,7 @@ func _measure(label: String, body_key: String, weapon_key: String, yaw_deg: floa
 	for frame_case in [
 			{"name": "ENTITY frame (attach triple = entity angles)", "hand": false},
 			{"name": "HAND frame (0x80 hold states)", "hand": true}]:
-		var attach: Variant = PresentHeldWeapon.attach_transform(
+		var attach: Variant = PresentApplier.held_weapon_attach_transform(
 				_body, angles, bool(frame_case["hand"]))
 		if attach == null:
 			print("  %-44s <attach_transform null>" % frame_case["name"])

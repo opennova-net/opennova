@@ -5,7 +5,7 @@ extends Control
 ## Instantiate programmatically (`VegPreview.new()`), add as a child, then call
 ## `set_graphic(basename)` or `set_mesh(mesh)`.
 
-const VegAssets := preload("res://adapter/terrain/veg_assets.gd")
+const VegAssets := preload("res://game/terrain/veg_assets.gd")
 
 const _PREVIEW_PIXELS := Vector2i(192, 192)
 const _BG_COLOR := Color(0.12, 0.13, 0.15, 1.0)
@@ -16,10 +16,10 @@ var _mesh_instance: MeshInstance3D
 var _pending_mesh: Mesh = null
 var _has_pending: bool = false
 var _current_graphic: String = ""
-var _resource_root: NovaResourceRoot
+var _resource_root: ResourceRoot
 
 
-func set_resource_root(value: NovaResourceRoot) -> void:
+func set_resource_root(value: ResourceRoot) -> void:
 	if _resource_root == value:
 		return
 	_resource_root = value

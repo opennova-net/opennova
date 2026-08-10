@@ -6,7 +6,7 @@ extends Node
 # user's keyboard feeds — and reports which gestures actually land. Reproduces (or
 # refutes) dead runtime-key reports at the routing layer the GUT unit tests bypass.
 
-const ResourceDirSettings := preload("res://adapter/resource_index/resource_dir_settings.gd")
+const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 const StandaloneProbe := preload("res://tests/standalone_game_probe.gd")
 
 var _fails := 0
@@ -59,7 +59,7 @@ func _ready() -> void:
 	_check(bool(presenter.get("_crouch")) != crouch_before, "C toggles crouch")
 
 	# Shift: the armory — the USE-ITEM key (action 177, retail default SHIFT), via
-	# the shared NovaArmoryPresenter (zone-gated). Out of zone the key is ignored (the
+	# the shared ArmoryPresenter (zone-gated). Out of zone the key is ignored (the
 	# original's silent gate); in zone the WEAPON overlay opens.
 	var sim = world.get_sim() if world != null and world.has_method("get_sim") else null
 	var in_zone: bool = sim != null and sim.has_method("local_player_in_armory_zone") \

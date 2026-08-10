@@ -1,0 +1,39 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://game/world/game_world.gd" id="1_world"]
+
+[sub_resource type="Environment" id="Environment_clear"]
+background_mode = 1
+ambient_light_source = 1
+
+[node name="GameWorld" type="Node3D"]
+script = ExtResource("1_world")
+
+[node name="ClearColor" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_clear")
+
+[node name="Terrain" type="Terrain" parent="."]
+environment_path = NodePath("../MissionEnvironment")
+weather_path = NodePath("../Weather")
+
+[node name="FoliageDispatcher" type="FoliageDispatcher" parent="Terrain"]
+
+[node name="TileOverlay" type="TerrainTileOverlay" parent="Terrain"]
+
+[node name="MissionEnvironment" type="MissionEnvironment" parent="."]
+process_priority = -20
+
+[node name="SkyDome" type="SkyDome" parent="."]
+environment_path = NodePath("../MissionEnvironment")
+weather_path = NodePath("../Weather")
+
+[node name="Weather" type="Weather" parent="."]
+process_priority = -10
+environment_path = NodePath("../MissionEnvironment")
+
+[node name="Water" type="Water" parent="."]
+environment_path = NodePath("../MissionEnvironment")
+weather_path = NodePath("../Weather")
+
+[node name="Celestial" type="Celestial" parent="."]
+environment_path = NodePath("../MissionEnvironment")
