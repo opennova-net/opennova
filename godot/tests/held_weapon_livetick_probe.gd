@@ -10,7 +10,7 @@ extends SceneTree
 # does, measures the combined mesh AABB in the model root's own frame, reports whether the
 # model has LIVE PANM at all, lets 30 real frames elapse (so _process/_apply_runtime_state
 # actually run), and re-measures. Then it drives the measured live attach triple through
-# PresentHeldWeapon's basis and prints the elevation of the model's own longest axis after
+# the native held-weapon basis and prints the elevation of the model's own longest axis after
 # the basis is applied -- i.e. what the viewer actually sees.
 #
 # Run:

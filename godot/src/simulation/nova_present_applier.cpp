@@ -109,12 +109,24 @@ void PresentApplier::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("reset_wire_runtime_state"),
 			&PresentApplier::reset_wire_runtime_state);
 	ClassDB::bind_static_method("PresentApplier",
-			D_METHOD("held_weapon_attach_transform", "skeleton", "attach_angles_bms",
+			D_METHOD("held_weapon_attach_transform", "body", "attach_angles_bms",
 					"hand_frame"),
-			&PresentApplier::held_weapon_attach_transform);
+			&PresentApplier::held_weapon_attach_transform, DEFVAL(false));
 	ClassDB::bind_static_method("PresentApplier",
 			D_METHOD("held_weapon_hand_frame_basis", "bone_model_to_world"),
 			&PresentApplier::held_weapon_hand_frame_basis);
+	ClassDB::bind_static_method("PresentApplier",
+			D_METHOD("find_skeleton", "root"), &PresentApplier::find_skeleton);
+	ClassDB::bind_static_method("PresentApplier",
+			D_METHOD("held_weapon_attach_nudge"),
+			&PresentApplier::held_weapon_attach_nudge);
+	ClassDB::bind_static_method("PresentApplier",
+			D_METHOD("held_weapon_hand_frame_z_rad"),
+			&PresentApplier::held_weapon_hand_frame_z_rad);
+	ClassDB::bind_static_method("PresentApplier",
+			D_METHOD("held_weapon_hand_frame_y_rad"),
+			&PresentApplier::held_weapon_hand_frame_y_rad);
+	BIND_CONSTANT(HELD_WEAPON_BONE_INDEX);
 	ClassDB::bind_static_method("PresentApplier",
 			D_METHOD("aim_root_basis", "snap", "base", "fallback"),
 			&PresentApplier::aim_root_basis);
@@ -257,10 +269,9 @@ Basis PresentApplier::bms_to_godot_basis(const Vector3 &rot_deg) {
 
 namespace {
 
-// The held weapon rides bone INDEX 16 (".bad row BN17 R Hand") with a fixed
+// The held weapon placement — the calibration and the full derivation live at
 // pivot nudge in raw def units, X negated into the render frame — the values
-// single-source from simassets (the sim-side muzzle shares them); every
-// derivation lives at the GDScript reference, present_held_weapon.gd
+// engine simassets/sim_collision_pose.h (the sim-side muzzle shares them)
 // [orig: flt_7C68E8 = 0.05 +X/-Y, flt_7C9BA8 = 0.051 +Z @ 0x4b2186].
 constexpr int kHeldWeaponBoneIndex = opennova::simassets::kHeldWeaponBoneIndex;
 const Vector3 kHeldWeaponAttachNudge(opennova::simassets::kHeldWeaponAttachNudgeX,
@@ -275,15 +286,15 @@ constexpr double kHandFrameYRad = opennova::simassets::kHeldWeaponHandFrameYRad;
 
 Basis PresentApplier::held_weapon_hand_frame_basis(const Basis &bone_model_to_world) {
 	// Row-major `Ry_e · Rz_e · M16` = the calibrations on the RIGHT in column
-	// form; signs as authored (two inversions cancel — present_held_weapon.gd
-	// documents why) [orig: branch @ 0x4b220f, Rz @ 0x4b2215, Ry @ 0x4b2256].
+	// form; signs as authored (two inversions cancel — the simassets ledger
+	// documents why).
 	return bone_model_to_world * Basis(Vector3(0, 0, 1), kHandFrameZRad) *
 			Basis(Vector3(0, 1, 0), kHandFrameYRad);
 }
 
-Variant PresentApplier::held_weapon_attach_transform(Object *skeleton,
+Variant PresentApplier::held_weapon_attach_transform(Object *body,
 		const Vector3 &attach_angles_bms, bool hand_frame) {
-	Skeleton3D *skel = Object::cast_to<Skeleton3D>(skeleton);
+	Skeleton3D *skel = Object::cast_to<Skeleton3D>(find_skeleton(body));
 	if (skel == nullptr || skel->get_bone_count() <= kHeldWeaponBoneIndex) {
 		return Variant();
 	}
@@ -299,6 +310,18 @@ Variant PresentApplier::held_weapon_attach_transform(Object *skeleton,
 			: bms_to_godot_basis(attach_angles_bms);
 	return Transform3D(basis,
 			joint_world.origin + model_to_world.basis.xform(kHeldWeaponAttachNudge));
+}
+
+Vector3 PresentApplier::held_weapon_attach_nudge() {
+	return kHeldWeaponAttachNudge;
+}
+
+double PresentApplier::held_weapon_hand_frame_z_rad() {
+	return opennova::simassets::kHeldWeaponHandFrameZRad;
+}
+
+double PresentApplier::held_weapon_hand_frame_y_rad() {
+	return opennova::simassets::kHeldWeaponHandFrameYRad;
 }
 
 Basis PresentApplier::aim_root_basis(const PackedFloat32Array &snap, int base,

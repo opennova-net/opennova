@@ -30,15 +30,44 @@ struct AiEntity;
 
 namespace opennova::simassets {
 
-// The third-person held-weapon attach calibration — single-sourced here for
-// the render applier and the sim-side muzzle resolution alike (the GDScript
-// reference derivation lives in present_held_weapon.gd; the applier/reference
-// pair is pinned equivalent by wire_present_pass_test.gd).
+// The third-person held-weapon attach calibration and derivation — the ONE
+// home, single-sourced for the render applier (PresentApplier's
+// held_weapon_* statics) and the sim-side muzzle resolution alike.
+//
+// The original draws the held gun RIGID: one matrix is qmemcpy'd into EVERY
+// bone slot of the weapon model, so it carries no skeleton, clip, or pose of
+// its own — the whole appearance is the transform built from this
+// calibration. Position is bone 16's own pivot nudged and carried through
+// that bone's posed matrix — `M16 · (pivot16 + nudge)`; since `M16 · pivot16`
+// IS the joint world position, that reduces to joint + M16_rotation · nudge.
+// The nudge X term is authored in the x-negated render frame, so it is
+// NEGATED here rather than copied.
+//
+// Orientation is one of TWO frames, chosen on a single bit:
+//  * The ENTITY frame (default): the weapon's own attach triple through the
+//    generic placed-object basis builder — a gfx3 poses exactly like a
+//    placed .3di (weapon models are authored muzzle +Z / up +Y).
+//  * The HAND frame: bone 16's own matrix with a fixed calibration,
+//    `Ry_e · Rz_e · M16` — selected when the WEAPON-channel hold state
+//    carries g_animStateFlagsTable bit 0x80 (knife/grenade/designator holds,
+//    melee, binoculars, BOTH reloads, the death family). The calibration
+//    angles survive to Godot unchanged in SIGN: the rotation builder stores
+//    -sin θ (each block rotates by -θ) and conjugating through the loader's
+//    X-negation flips it back — two inversions, so the authored constants
+//    are used as-is (it looks like a missing negation and is not one).
+//
 // [orig: the weapon rides model bone 16 ".bad row BN17 R Hand"
-//  (BoneCallback_org0_World draw 5 @ 0x4e3c87..0x4e3d99); pivot nudge
-//  flt_7C68E8 = 0.05 +X/-Y, flt_7C9BA8 = 0.051 +Z @ 0x4b2186; hand-frame
-//  Rz dbl_7C9BA0 / Ry dbl_7C9B98 via Math_BuildRotationMatrix4x4_ByAxis
-//  @ 0x611db0, branch @ 0x4b220f]
+//  (BoneCallback_org0_World draw 5 @ 0x4e3c87..0x4e3d99, all-bones fill
+//  @ 0x4e3d71); matrix build @ 0x4b2180..0x4b22f8, translation-only
+//  overwrite @ 0x4b22cf..0x4b22f8; entity attach basis @ 0x4b1bdc..0x4b1bf8;
+//  pivot nudge flt_7C68E8 = 0.05 +X/-Y, flt_7C9BA8 = 0.051 +Z @ 0x4b2186;
+//  hand-frame gate @ 0x4b21b6, branch @ 0x4b220f, Rz dbl_7C9BA0
+//  @ 0x4b2215..0x4b2251, Ry dbl_7C9B98 @ 0x4b2256..0x4b22c2 via
+//  Math_BuildRotationMatrix4x4_ByAxis @ 0x611db0 (sin negated via
+//  dbl_7C57B0); the state's writer Entity_UpdateInfantryPlayerBody
+//  @ 0x4b5dad..0x4b5ea9; the shared placement builder
+//  Math_BuildFixedPointToFloatMatrix4x4 @ 0x612200.
+//  world-wac-ai-re §14.2/§14.4/§14.4a/§14.4b]
 inline constexpr int kHeldWeaponBoneIndex = 16;
 inline constexpr float kHeldWeaponAttachNudgeX = -0.05f;
 inline constexpr float kHeldWeaponAttachNudgeY = -0.05f;

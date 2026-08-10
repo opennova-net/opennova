@@ -17,7 +17,7 @@ extends SceneTree
 #     receiver's mass hangs to one side of the bore -- that side is DOWN.
 #
 # Everything is reported in the model's own local (Godot render) space, i.e. exactly the
-# frame PresentHeldWeapon.attach_transform multiplies.
+# frame PresentApplier.held_weapon_attach_transform multiplies.
 #
 # Run:
 #   "$GODOT_BIN" --headless --path godot -s res://tests/held_weapon_frame_probe.gd

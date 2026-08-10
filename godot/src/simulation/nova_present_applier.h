@@ -13,6 +13,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include <simassets/sim_collision_pose.h>
+
 #include "object/nova_entity_index.h"
 #include "object/nova_object_model.h"
 
@@ -104,17 +106,25 @@ public:
 	void release_wire_handle(int handle);
 	void reset_wire_runtime_state();
 
-	// Third-person held-weapon placement — the native twin of
-	// PresentHeldWeapon.attach_transform/hand_frame_basis (present_held_weapon.gd
-	// keeps the reference math and every [orig] derivation; the two are pinned
-	// equivalent by wire_present_pass_test.gd's parity cases — keep them in
-	// lockstep). The weapon rides bone index 16 (".bad row BN17 R Hand");
-	// returns a Transform3D, or null when the skeleton cannot place one
-	// [orig: BoneCallback_org0_World draw 5 @ 0x4e3c87..0x4e3d99; matrix build
-	//  @ 0x4b2180..0x4b22f8; hand-frame gate @ 0x4b21b6].
-	static Variant held_weapon_attach_transform(Object *skeleton,
+	// Third-person held-weapon placement — the ONE home (the witnessed
+	// calibration constants and the full derivation live at engine
+	// simassets/sim_collision_pose.h). `body` may be the body root or the
+	// skeleton itself (resolved via find_skeleton); returns a Transform3D, or
+	// null when the skeleton cannot place one.
+	static Variant held_weapon_attach_transform(Object *body,
 			const Vector3 &attach_angles_bms, bool hand_frame);
 	static Basis held_weapon_hand_frame_basis(const Basis &bone_model_to_world);
+	// The first Skeleton3D under `root` (or `root` itself), or null.
+	static Object *find_skeleton(Object *root);
+	// The engine calibration re-exported for tests/tooling (float/vector
+	// values cannot be class constants).
+	static Vector3 held_weapon_attach_nudge();
+	static double held_weapon_hand_frame_z_rad();
+	static double held_weapon_hand_frame_y_rad();
+	enum HeldWeaponConstants {
+		HELD_WEAPON_BONE_INDEX =
+				opennova::simassets::kHeldWeaponBoneIndex,
+	};
 
 	// Emplaced-weapon CTRL registers (emplaced_weapon_present_pass.gd delegates
 	// here): EWEAP_GUNYAW/EWEAP_GUNPITCH only — clear_ctrl_values() would also
@@ -250,7 +260,6 @@ private:
 	void store_wire_remote_body_cache(const WireRow &row);
 	void update_wire_held_weapon(WireRow &row, Node3D *node,
 			const PackedFloat32Array &snap, bool body_visible);
-	static Object *find_wire_skeleton(Node *root);
 
 	Callable wire_rebuild_held_weapon_;
 	std::vector<WireRow> wire_rows_;

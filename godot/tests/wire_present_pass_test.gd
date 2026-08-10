@@ -8,7 +8,6 @@ extends GutTest
 # clock, a minimal-mission boot for logic-tick stepping). Snapshots are built
 # as pure data and fed through the public present_snapshot API.
 
-const PresentHeldWeapon := preload("res://game/world/present_held_weapon.gd")
 
 # Fixture items.def wire-test ids (graphic -> committed model fixture).
 const TYPE_PUMP := 6100      # -> item 106100, Pmpjk01 (static, PANM channels)
@@ -1159,7 +1158,7 @@ func test_wire_row_builds_a_held_weapon_only_when_it_is_armed() -> void:
 	# The static pump has no rig of its own; the hand chain the attach math
 	# walks is scaffolded exactly as the placed body would carry it.
 	var skeleton := Skeleton3D.new()
-	for bone_index in range(PresentHeldWeapon.BONE_INDEX + 1):
+	for bone_index in range(PresentApplier.HELD_WEAPON_BONE_INDEX + 1):
 		skeleton.add_bone("Bone%d" % bone_index)
 	body.add_child(skeleton)
 
@@ -1201,7 +1200,7 @@ func test_native_hand_frame_basis_matches_the_gdscript_origin() -> void:
 		Basis(Vector3(0, 0, -1), PI / 2.0) * Basis(Vector3(0, -1, 0), 0.3),
 	]
 	for b in bases:
-		var expected := PresentHeldWeapon.hand_frame_basis(b)
+		var expected := PresentApplier.held_weapon_hand_frame_basis(b)
 		var got: Basis = PresentApplier.held_weapon_hand_frame_basis(b)
 		assert_true(got.is_equal_approx(expected),
 				"hand-frame parity at %s: native %s vs gd %s" % [b, got, expected])
@@ -1217,7 +1216,7 @@ func test_native_held_weapon_attach_matches_the_gdscript_origin() -> void:
 	var skeleton := Skeleton3D.new()
 	body.add_child(skeleton)
 	skeleton.position = Vector3(0.1, 0.9, 0.0)
-	for bone_index in range(PresentHeldWeapon.BONE_INDEX + 1):
+	for bone_index in range(PresentApplier.HELD_WEAPON_BONE_INDEX + 1):
 		skeleton.add_bone("Bone%d" % bone_index)
 		if bone_index > 0:
 			skeleton.set_bone_parent(bone_index, bone_index - 1)
@@ -1229,11 +1228,11 @@ func test_native_held_weapon_attach_matches_the_gdscript_origin() -> void:
 	# Pose the hand chain away from rest so pose != rest.
 	skeleton.set_bone_pose_rotation(10,
 			Quaternion(Vector3(1, 0, 0).normalized(), 0.6))
-	skeleton.set_bone_pose_rotation(PresentHeldWeapon.BONE_INDEX,
+	skeleton.set_bone_pose_rotation(PresentApplier.HELD_WEAPON_BONE_INDEX,
 			Quaternion(Vector3(0.3, -0.8, 0.52).normalized(), -1.1))
 	for angles: Vector3 in [Vector3.ZERO, Vector3(15, -120, 40), Vector3(-80, 270, -30)]:
 		for hand_frame in [false, true]:
-			var expected: Variant = PresentHeldWeapon.attach_transform(
+			var expected: Variant = PresentApplier.held_weapon_attach_transform(
 					body, angles, hand_frame)
 			var got: Variant = PresentApplier.held_weapon_attach_transform(
 					skeleton, angles, hand_frame)

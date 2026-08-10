@@ -540,7 +540,7 @@ void PresentApplier::update_wire_held_weapon(WireRow &row, Node3D *node,
 		return;
 	}
 	const Variant attach = held_weapon_attach_transform(
-			find_wire_skeleton(node),
+			find_skeleton(node),
 			Vector3(p[base + Simulation::PF_HELD_WEAPON_PITCH_DEG],
 					p[base + Simulation::PF_HELD_WEAPON_YAW_DEG],
 					p[base + Simulation::PF_HELD_WEAPON_ROLL_DEG]),
@@ -553,7 +553,7 @@ void PresentApplier::update_wire_held_weapon(WireRow &row, Node3D *node,
 	weapon->set_visible(true);
 }
 
-Object *PresentApplier::find_wire_skeleton(Node *root) {
+Object *PresentApplier::find_skeleton(Object *root) {
 	// The recursive Skeleton3D walk the GDScript reference ran per call, native
 	// (ObjectModel.rebuild() frees children, so caching the result by
 	// ObjectID would go stale mid-play; the walk itself is now cheap).
@@ -563,8 +563,12 @@ Object *PresentApplier::find_wire_skeleton(Node *root) {
 	if (Object::cast_to<Skeleton3D>(root) != nullptr) {
 		return root;
 	}
-	for (int i = 0; i < root->get_child_count(); ++i) {
-		Object *found = find_wire_skeleton(root->get_child(i));
+	Node *node = Object::cast_to<Node>(root);
+	if (node == nullptr) {
+		return nullptr;
+	}
+	for (int i = 0; i < node->get_child_count(); ++i) {
+		Object *found = find_skeleton(node->get_child(i));
 		if (found != nullptr) {
 			return found;
 		}
