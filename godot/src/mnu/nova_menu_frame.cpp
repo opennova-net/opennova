@@ -79,6 +79,10 @@ bool MenuFrame::configure(const Ref<MnuDocument> &p_document,
 	compiler_.clear_registered_fonts();
 	free_fonts_();
 	state_ = opennova::menu::MenuFrameState{};
+	cursor_slot_ = -1;
+	press_claim_ = -1;
+	mouse_claim_ = -1;
+	unresolved_assets_ = 0;
 	if (document_.is_null()) {
 		queue_redraw();
 		return false;
@@ -117,21 +121,42 @@ bool MenuFrame::configure(const Ref<MnuDocument> &p_document,
 	// before configure() interns them. The first loadable font doubles as the
 	// default (an unauthored FONT falls back to it, the shell's existing
 	// fallback policy).
+	std::vector<String> raw_font_names;
+	collect_font_names_(&screen->root_window, raw_font_names);
+	// Authored FONT names are frequently stylesheet variables
+	// (%DEF_FONTNAME%); resolve them the way the compiler interns them so the
+	// VFS load and the slot mapping key on the SAME resolved name.
 	std::vector<String> font_names;
-	collect_font_names_(&screen->root_window, font_names);
+	for (const String &raw : raw_font_names) {
+		const String resolved = String::utf8(
+				compiler_.resolve_style_var(to_std(raw)).c_str());
+		bool seen = false;
+		for (const String &existing : font_names) {
+			if (existing.nocasecmp_to(resolved) == 0) {
+				seen = true;
+				break;
+			}
+		}
+		if (!seen) {
+			font_names.push_back(resolved);
+		}
+	}
 	std::map<std::string, LoadedFont *> loaded;
 	LoadedFont *default_font = nullptr;
 	for (const String &name : font_names) {
 		if (root_.is_null()) {
-			break;
+			++unresolved_assets_;
+			continue;
 		}
 		const PackedByteArray bytes = root_->read_file(name.get_file());
 		if (bytes.is_empty()) {
+			++unresolved_assets_;
 			continue;
 		}
 		auto owned = std::make_unique<LoadedFont>();
 		if (fnt_parse(bytes.ptr(), static_cast<size_t>(bytes.size()),
 					&owned->font) != FNT_OK) {
+			++unresolved_assets_;
 			continue;
 		}
 		owned->valid = true;
@@ -169,16 +194,19 @@ bool MenuFrame::configure(const Ref<MnuDocument> &p_document,
 	textures_.resize(tex_names.size());
 	for (size_t i = 0; i < tex_names.size(); ++i) {
 		if (root_.is_null()) {
-			break;
+			++unresolved_assets_;
+			continue;
 		}
 		const String name = String::utf8(tex_names[i].c_str());
 		const PackedByteArray bytes = root_->read_file(name.get_file());
 		if (bytes.is_empty()) {
+			++unresolved_assets_;
 			continue;
 		}
 		Ref<Image> image;
 		image.instantiate();
 		if (image->load_tga_from_buffer(bytes) != OK) {
+			++unresolved_assets_;
 			continue;
 		}
 		const Ref<Texture2D> tex = ImageTexture::create_from_image(image);
@@ -305,6 +333,278 @@ void MenuFrame::set_widget_popup_open(int p_index, bool p_open) {
 	queue_redraw();
 }
 
+void MenuFrame::set_widget_items(int p_index,
+		const PackedStringArray &p_items) {
+	opennova::menu::MenuWidgetState &ws = widget_(p_index);
+	ws.has_items = true;
+	ws.items.clear();
+	ws.items.reserve(static_cast<size_t>(p_items.size()));
+	for (int64_t i = 0; i < p_items.size(); ++i) {
+		ws.items.push_back(to_std(p_items[i]));
+	}
+	queue_redraw();
+}
+
+void MenuFrame::clear_widget_items(int p_index) {
+	opennova::menu::MenuWidgetState &ws = widget_(p_index);
+	ws.has_items = false;
+	ws.items.clear();
+	queue_redraw();
+}
+
+void MenuFrame::set_widget_selected_set(int p_index,
+		const PackedInt32Array &p_rows) {
+	opennova::menu::MenuWidgetState &ws = widget_(p_index);
+	ws.selected_items.clear();
+	ws.selected_items.reserve(static_cast<size_t>(p_rows.size()));
+	for (int64_t i = 0; i < p_rows.size(); ++i) {
+		ws.selected_items.push_back(p_rows[i]);
+	}
+	queue_redraw();
+}
+
+void MenuFrame::set_widget_table_rows(int p_index,
+		const TypedArray<PackedStringArray> &p_rows) {
+	opennova::menu::MenuWidgetState &ws = widget_(p_index);
+	ws.table_rows.clear();
+	ws.table_rows.reserve(static_cast<size_t>(p_rows.size()));
+	for (int64_t r = 0; r < p_rows.size(); ++r) {
+		const PackedStringArray row = p_rows[r];
+		std::vector<std::string> cells;
+		cells.reserve(static_cast<size_t>(row.size()));
+		for (int64_t c = 0; c < row.size(); ++c) {
+			cells.push_back(to_std(row[c]));
+		}
+		ws.table_rows.push_back(std::move(cells));
+	}
+	queue_redraw();
+}
+
+void MenuFrame::clear_widget_table_rows(int p_index) {
+	widget_(p_index).table_rows.clear();
+	queue_redraw();
+}
+
+void MenuFrame::set_widget_marquee_lines(int p_index,
+		const PackedStringArray &p_lines) {
+	opennova::menu::MenuWidgetState &ws = widget_(p_index);
+	ws.marquee_lines.clear();
+	ws.marquee_lines.reserve(static_cast<size_t>(p_lines.size()));
+	for (int64_t i = 0; i < p_lines.size(); ++i) {
+		ws.marquee_lines.push_back(to_std(p_lines[i]));
+	}
+	ws.marquee_reset = true; // fresh content restarts the roll
+	queue_redraw();
+}
+
+void MenuFrame::reset_widget_marquee(int p_index) {
+	widget_(p_index).marquee_reset = true;
+	queue_redraw();
+}
+
+int MenuFrame::widget_count() const {
+	return compiler_.widget_count();
+}
+
+String MenuFrame::widget_name(int p_index) const {
+	return String::utf8(compiler_.widget_name(p_index).c_str());
+}
+
+int MenuFrame::widget_kind(int p_index) const {
+	return compiler_.widget_kind(p_index);
+}
+
+String MenuFrame::widget_authored_text(int p_index) const {
+	return String::utf8(compiler_.widget_authored_text(p_index).c_str());
+}
+
+bool MenuFrame::is_widget_disabled(int p_index) const {
+	return compiler_.widget_disabled(p_index, state_);
+}
+
+Rect2 MenuFrame::widget_rect(int p_index) const {
+	mnu::RectEdges rect;
+	if (!compiler_.widget_rect(p_index, state_, &rect)) {
+		return Rect2();
+	}
+	return Rect2(static_cast<float>(rect.left), static_cast<float>(rect.top),
+			static_cast<float>(rect.right - rect.left),
+			static_cast<float>(rect.bottom - rect.top));
+}
+
+int MenuFrame::item_count(int p_index) const {
+	return compiler_.item_count(p_index, state_);
+}
+
+String MenuFrame::get_widget_text(int p_index) const {
+	for (const opennova::menu::MenuWidgetState &ws : state_.widgets) {
+		if (ws.index == p_index && ws.has_text) {
+			return String::utf8(ws.text.c_str());
+		}
+	}
+	return String::utf8(compiler_.widget_authored_text(p_index).c_str());
+}
+
+int MenuFrame::get_widget_caret(int p_index) const {
+	for (const opennova::menu::MenuWidgetState &ws : state_.widgets) {
+		if (ws.index == p_index) {
+			return ws.caret;
+		}
+	}
+	return -1;
+}
+
+int MenuFrame::hit_test(const Vector2 &p_position) const {
+	if (!configured_) {
+		return -1;
+	}
+	const Vector2 scale = design_scale_();
+	return compiler_.hit_widget(state_, p_position.x, p_position.y, scale.x,
+			scale.y);
+}
+
+int MenuFrame::list_row_at(int p_index, const Vector2 &p_position) const {
+	if (!configured_) {
+		return -1;
+	}
+	const Vector2 scale = design_scale_();
+	return compiler_.list_row_at(p_index, state_, p_position.x, p_position.y,
+			scale.x, scale.y);
+}
+
+int MenuFrame::list_visible_rows(int p_index) const {
+	return compiler_.list_visible_rows(p_index, state_);
+}
+
+Rect2 MenuFrame::combo_popup_rect(int p_index) const {
+	mnu::RectEdges rect;
+	if (!compiler_.combo_popup_rect(p_index, state_, &rect)) {
+		return Rect2();
+	}
+	return Rect2(static_cast<float>(rect.left), static_cast<float>(rect.top),
+			static_cast<float>(rect.right - rect.left),
+			static_cast<float>(rect.bottom - rect.top));
+}
+
+bool MenuFrame::combo_popup_contains(int p_index,
+		const Vector2 &p_position) const {
+	if (!configured_) {
+		return false;
+	}
+	const Vector2 scale = design_scale_();
+	return compiler_.combo_popup_contains(p_index, state_, p_position.x,
+			p_position.y, scale.x, scale.y);
+}
+
+int MenuFrame::combo_popup_row_at(int p_index,
+		const Vector2 &p_position) const {
+	if (!configured_) {
+		return -1;
+	}
+	const Vector2 scale = design_scale_();
+	return compiler_.combo_popup_row_at(p_index, state_, p_position.x,
+			p_position.y, scale.x, scale.y);
+}
+
+int MenuFrame::spin_arrow_at(int p_index, const Vector2 &p_position) const {
+	if (!configured_) {
+		return 0;
+	}
+	const Vector2 scale = design_scale_();
+	return compiler_.spin_arrow_at(p_index, state_, p_position.x, p_position.y,
+			scale.x, scale.y);
+}
+
+int MenuFrame::table_row_at(int p_index, const Vector2 &p_position) const {
+	if (!configured_) {
+		return -1;
+	}
+	const Vector2 scale = design_scale_();
+	return compiler_.table_row_at(p_index, state_, p_position.x, p_position.y,
+			scale.x, scale.y);
+}
+
+int MenuFrame::hotkey_widget(const String &p_key, bool p_virtual) const {
+	if (!configured_) {
+		return -1;
+	}
+	return compiler_.hotkey_widget(to_std(p_key), p_virtual, state_);
+}
+
+Vector2i MenuFrame::multiline_line_counts(int p_index) const {
+	int fit = 0;
+	int total = 0;
+	if (configured_) {
+		compiler_.multiline_line_counts(p_index, state_, &fit, &total);
+	}
+	return Vector2i(fit, total);
+}
+
+bool MenuFrame::edit_char(int p_index, int p_unicode) {
+	if (!configured_) {
+		return false;
+	}
+	// The router's printable filter [orig: iscntrl-filtered chars ->
+	// vtable+0x58 insert — edit_widget_handle_input_event @ 0x661510; the ops
+	// live in engine menu/menu_edit.h].
+	if (p_unicode < 0x20 || p_unicode == 0x7F || p_unicode > 0xFF) {
+		return false;
+	}
+	opennova::menu::EditLimits limits;
+	if (!compiler_.widget_edit_limits(p_index, &limits)) {
+		return false;
+	}
+	opennova::menu::MenuWidgetState &ws = widget_(p_index);
+	opennova::menu::EditField field;
+	field.text = ws.has_text ? ws.text : compiler_.widget_authored_text(p_index);
+	field.caret = ws.caret >= 0 ? ws.caret : static_cast<int>(field.text.size());
+	field.caret = std::min(field.caret, static_cast<int>(field.text.size()));
+	const bool changed = opennova::menu::edit_insert_char(field, limits,
+			static_cast<char>(p_unicode));
+	ws.has_text = true;
+	ws.text = field.text;
+	ws.caret = field.caret;
+	queue_redraw();
+	return changed;
+}
+
+int MenuFrame::edit_key(int p_index, int p_key, bool p_shift) {
+	if (!configured_) {
+		return 0;
+	}
+	opennova::menu::MenuWidgetState &ws = widget_(p_index);
+	opennova::menu::EditField field;
+	field.text = ws.has_text ? ws.text : compiler_.widget_authored_text(p_index);
+	field.caret = ws.caret >= 0 ? ws.caret : static_cast<int>(field.text.size());
+	field.caret = std::min(field.caret, static_cast<int>(field.text.size()));
+	const opennova::menu::EditKeyResult result =
+			opennova::menu::edit_apply_key(field, p_key, 1, p_shift);
+	ws.has_text = true;
+	ws.text = field.text;
+	ws.caret = field.caret;
+	queue_redraw();
+	switch (result) {
+		case opennova::menu::EditKeyResult::kChanged:
+			return 1;
+		case opennova::menu::EditKeyResult::kCommit:
+			return 2;
+		default:
+			return 0;
+	}
+}
+
+Ref<Texture2D> MenuFrame::get_cursor_texture() const {
+	if (cursor_slot_ >= 0 &&
+			cursor_slot_ < static_cast<int32_t>(textures_.size())) {
+		return textures_[static_cast<size_t>(cursor_slot_)];
+	}
+	return Ref<Texture2D>();
+}
+
+int MenuFrame::get_unresolved_asset_count() const {
+	return unresolved_assets_;
+}
+
 void MenuFrame::set_time_ms(int64_t p_ms) {
 	state_.time_ms = static_cast<uint32_t>(p_ms);
 	queue_redraw();
@@ -324,6 +624,7 @@ int MenuFrame::process_mouse(const Vector2 &p_position, bool p_button_down) {
 					p_button_down, scale.x, scale.y);
 	state_.cursor_x = p_position.x;
 	state_.cursor_y = p_position.y;
+	cursor_slot_ = claim.cursor;
 	// Activation edges: press lands on the button-down edge over the claim;
 	// a click is the release edge while the SAME widget still owns the claim
 	// (moving off the widget before release cancels — the standard control
@@ -400,6 +701,10 @@ void MenuFrame::_draw() {
 	const Vector2 scale = design_scale_();
 	const opennova::menu::MenuDrawList &list =
 			compiler_.compile(state_, scale.x, scale.y);
+	// The marquee reset request is one-shot: the compile above consumed it.
+	for (opennova::menu::MenuWidgetState &ws : state_.widgets) {
+		ws.marquee_reset = false;
+	}
 	// Quads and lines in compiler order; glyphs above them per font run
 	// (retail's text draws ride the same walk after each widget's art).
 	for (const opennova::menu::MenuQuad &quad : list.quads) {
@@ -531,4 +836,64 @@ void MenuFrame::_bind_methods() {
 			&MenuFrame::set_cursor_state);
 	ClassDB::bind_method(D_METHOD("get_draw_list_stats"),
 			&MenuFrame::get_draw_list_stats);
+	ClassDB::bind_method(D_METHOD("set_widget_items", "index", "items"),
+			&MenuFrame::set_widget_items);
+	ClassDB::bind_method(D_METHOD("clear_widget_items", "index"),
+			&MenuFrame::clear_widget_items);
+	ClassDB::bind_method(D_METHOD("set_widget_selected_set", "index", "rows"),
+			&MenuFrame::set_widget_selected_set);
+	ClassDB::bind_method(D_METHOD("set_widget_table_rows", "index", "rows"),
+			&MenuFrame::set_widget_table_rows);
+	ClassDB::bind_method(D_METHOD("clear_widget_table_rows", "index"),
+			&MenuFrame::clear_widget_table_rows);
+	ClassDB::bind_method(D_METHOD("set_widget_marquee_lines", "index", "lines"),
+			&MenuFrame::set_widget_marquee_lines);
+	ClassDB::bind_method(D_METHOD("reset_widget_marquee", "index"),
+			&MenuFrame::reset_widget_marquee);
+	ClassDB::bind_method(D_METHOD("widget_count"), &MenuFrame::widget_count);
+	ClassDB::bind_method(D_METHOD("widget_name", "index"),
+			&MenuFrame::widget_name);
+	ClassDB::bind_method(D_METHOD("widget_kind", "index"),
+			&MenuFrame::widget_kind);
+	ClassDB::bind_method(D_METHOD("widget_authored_text", "index"),
+			&MenuFrame::widget_authored_text);
+	ClassDB::bind_method(D_METHOD("is_widget_disabled", "index"),
+			&MenuFrame::is_widget_disabled);
+	ClassDB::bind_method(D_METHOD("widget_rect", "index"),
+			&MenuFrame::widget_rect);
+	ClassDB::bind_method(D_METHOD("item_count", "index"),
+			&MenuFrame::item_count);
+	ClassDB::bind_method(D_METHOD("get_widget_text", "index"),
+			&MenuFrame::get_widget_text);
+	ClassDB::bind_method(D_METHOD("get_widget_caret", "index"),
+			&MenuFrame::get_widget_caret);
+	ClassDB::bind_method(D_METHOD("hit_test", "position"),
+			&MenuFrame::hit_test);
+	ClassDB::bind_method(D_METHOD("list_row_at", "index", "position"),
+			&MenuFrame::list_row_at);
+	ClassDB::bind_method(D_METHOD("list_visible_rows", "index"),
+			&MenuFrame::list_visible_rows);
+	ClassDB::bind_method(D_METHOD("combo_popup_rect", "index"),
+			&MenuFrame::combo_popup_rect);
+	ClassDB::bind_method(
+			D_METHOD("combo_popup_contains", "index", "position"),
+			&MenuFrame::combo_popup_contains);
+	ClassDB::bind_method(D_METHOD("combo_popup_row_at", "index", "position"),
+			&MenuFrame::combo_popup_row_at);
+	ClassDB::bind_method(D_METHOD("spin_arrow_at", "index", "position"),
+			&MenuFrame::spin_arrow_at);
+	ClassDB::bind_method(D_METHOD("table_row_at", "index", "position"),
+			&MenuFrame::table_row_at);
+	ClassDB::bind_method(D_METHOD("hotkey_widget", "key", "is_virtual"),
+			&MenuFrame::hotkey_widget);
+	ClassDB::bind_method(D_METHOD("multiline_line_counts", "index"),
+			&MenuFrame::multiline_line_counts);
+	ClassDB::bind_method(D_METHOD("edit_char", "index", "unicode"),
+			&MenuFrame::edit_char);
+	ClassDB::bind_method(D_METHOD("edit_key", "index", "key", "shift"),
+			&MenuFrame::edit_key);
+	ClassDB::bind_method(D_METHOD("get_cursor_texture"),
+			&MenuFrame::get_cursor_texture);
+	ClassDB::bind_method(D_METHOD("get_unresolved_asset_count"),
+			&MenuFrame::get_unresolved_asset_count);
 }

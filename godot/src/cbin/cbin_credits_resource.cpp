@@ -367,6 +367,11 @@ String CbinImageEntry::get_texture_name() const {
 // ============================================================================
 
 void CbinCreditsResource::_bind_methods() {
+	// The decode entry (null on a non-CBIN payload) — the menu driver routes
+	// marquee DATASOURCE files through it.
+	ClassDB::bind_static_method("CbinCreditsResource",
+			D_METHOD("from_cbin_bytes", "data"),
+			&CbinCreditsResource::from_cbin_bytes);
 	// ENV properties.
 	ClassDB::bind_method(D_METHOD("set_scroll_rate", "rate"), &CbinCreditsResource::set_scroll_rate);
 	ClassDB::bind_method(D_METHOD("get_scroll_rate"), &CbinCreditsResource::get_scroll_rate);

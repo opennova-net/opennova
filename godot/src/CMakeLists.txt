@@ -122,27 +122,8 @@ add_library(${TARGET_NAME} SHARED
     mnu/nova_mnu_document.cpp
     mnu/nova_mnu_document_state.cpp
     mnu/mns_stylesheet.cpp
-    mnu/nova_mnu_screen.cpp
-    mnu/nova_mnu_label.cpp
-    mnu/nova_mnu_button.cpp
-    mnu/nova_mnu_checkbox.cpp
-    mnu/nova_mnu_widget_behavior.cpp
-    mnu/nova_mnu_edit.cpp
-    mnu/nova_mnu_multiline_edit.cpp
-    mnu/nova_mnu_goto.cpp
-    mnu/nova_mnu_list.cpp
-    mnu/nova_mnu_multi.cpp
-    mnu/nova_mnu_spinlist.cpp
-    mnu/nova_mnu_scroll.cpp
-    mnu/nova_mnu_combo.cpp
-    mnu/nova_mnu_table.cpp
-    mnu/nova_mnu_map.cpp
-    mnu/nova_mnu_globe.cpp
-    mnu/nova_mnu_marquee.cpp
-    mnu/mnu_item_cell.cpp
-    mnu/nova_mnu_builder.cpp
-    mnu/nova_mnu_menu.cpp
     mnu/nova_menu_frame.cpp
+    mnu/nova_menu_audio.cpp
     mnu/nova_controls_model.cpp
 )
 

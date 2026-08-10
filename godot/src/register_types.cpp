@@ -84,24 +84,8 @@
 #include "pff/nova_pff_archive.h"
 #include "mnu/nova_mnu_document.h"
 #include "mnu/mns_stylesheet.h"
-#include "mnu/nova_mnu_screen.h"
-#include "mnu/nova_mnu_label.h"
-#include "mnu/nova_mnu_button.h"
-#include "mnu/nova_mnu_checkbox.h"
-#include "mnu/nova_mnu_combo.h"
-#include "mnu/nova_mnu_edit.h"
-#include "mnu/nova_mnu_multiline_edit.h"
-#include "mnu/nova_mnu_goto.h"
-#include "mnu/nova_mnu_list.h"
-#include "mnu/nova_mnu_multi.h"
-#include "mnu/nova_mnu_spinlist.h"
-#include "mnu/nova_mnu_scroll.h"
-#include "mnu/nova_mnu_table.h"
-#include "mnu/nova_mnu_map.h"
-#include "mnu/nova_mnu_globe.h"
-#include "mnu/nova_mnu_marquee.h"
-#include "mnu/nova_mnu_menu.h"
 #include "mnu/nova_menu_frame.h"
+#include "mnu/nova_menu_audio.h"
 #include "mnu/nova_controls_model.h"
 
 using namespace godot;
@@ -193,24 +177,8 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(PffDocument);
 	GDREGISTER_CLASS(MnuDocument);
 	GDREGISTER_CLASS(MnsStyleSheet);
-	GDREGISTER_CLASS(MnuScreen);
-	GDREGISTER_CLASS(MnuLabel);
-	GDREGISTER_CLASS(MnuButton);
-	GDREGISTER_CLASS(MnuCheckBox);
-	GDREGISTER_CLASS(MnuEdit);
-	GDREGISTER_CLASS(MnuMultilineEdit);
-	GDREGISTER_CLASS(MnuGoto);
-	GDREGISTER_CLASS(MnuList);
-	GDREGISTER_CLASS(MnuMulti);
-	GDREGISTER_CLASS(MnuSpinList);
-	GDREGISTER_CLASS(MnuScroll);
-	GDREGISTER_CLASS(MnuCombo);
-	GDREGISTER_CLASS(MnuTable);
-	GDREGISTER_CLASS(MnuMap);
-	GDREGISTER_CLASS(MnuGlobe);
-	GDREGISTER_CLASS(MnuMarquee);
-	GDREGISTER_CLASS(MnuMenu);
 	GDREGISTER_CLASS(MenuFrame);
+	GDREGISTER_CLASS(MenuAudio);
 	GDREGISTER_CLASS(ControlsModel);
 	GDREGISTER_CLASS(NovaWorldClient);
 	GDREGISTER_CLASS(NovaWorldHost);
