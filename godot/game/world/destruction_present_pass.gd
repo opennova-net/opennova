@@ -33,13 +33,6 @@ extends RefCounted
 
 const BURST_EFFECT := "Effect_TreeWoodExp"       # [orig: g_fx_TreeWoodExp @ 0x2C25BF4]
 const BURST_COUNT := 6                            # sampling stand-in (see header)
-# Mirrors Simulation.EffectStateField (kept local so the constants read at the
-# use sites).
-const PRESENT_EFFECT_POSITION := 0
-const PRESENT_EFFECT_ROTATION_DEG := 1
-const PRESENT_EFFECT_STATE_COUNT := 2
-const INVALID_WIRE_HANDLE := 0xffff
-const SYNTHETIC_SPAWN_ORIGIN := 0xffffffff
 
 
 var _sim: Simulation              # live pose source; null in data-driven tests
@@ -199,11 +192,11 @@ func _spawn_origin_parts(spawn_origin_v: Variant) -> Vector2i:
 
 func _uses_dynamic_husk_identity(bms_id: int, spawn_origin_v: Variant,
 		wire_handle: int) -> bool:
-	if wire_handle < 0 or wire_handle == INVALID_WIRE_HANDLE or bms_id != 0:
+	if wire_handle < 0 or wire_handle == WireHandle.INVALID or bms_id != 0:
 		return false
 	# A real authored origin remains canonical even when its BMS id is zero.
 	# Runtime-only entities carry either no origin or the promotion sentinel.
-	return spawn_origin_v == null or int(spawn_origin_v) == SYNTHETIC_SPAWN_ORIGIN
+	return spawn_origin_v == null or int(spawn_origin_v) == SpawnOrigin.NONE
 
 
 func _husk_identity_key(bms_id: int, spawn_origin_v: Variant,
@@ -353,13 +346,13 @@ func _present_transform_for_identity(bms_id: int,
 	var state := PackedVector3Array()
 	if bms_id > 0:
 		state = _sim.get_present_effect_state_for_bms_id(bms_id)
-	if state.size() != PRESENT_EFFECT_STATE_COUNT and spawn_origin_v != null:
+	if state.size() != Simulation.EFFECT_STATE_COUNT and spawn_origin_v != null:
 		var spawn_origin := int(spawn_origin_v)
 		state = _sim.get_present_effect_state_for_origin(
 				SpawnOrigin.kind(spawn_origin), SpawnOrigin.index(spawn_origin))
-	if state.size() != PRESENT_EFFECT_STATE_COUNT:
+	if state.size() != Simulation.EFFECT_STATE_COUNT:
 		return null
-	var rotation_deg := state[PRESENT_EFFECT_ROTATION_DEG]
+	var rotation_deg := state[Simulation.EFFECT_STATE_ROTATION_DEG]
 	var basis := MissionObjectPlacer.bms_to_godot_basis(rotation_deg)
 	# Compact peer poses carry yaw only. Static death motion changes position but
 	# not orientation, so retain the exact authored basis carved from the batch
@@ -372,7 +365,7 @@ func _present_transform_for_identity(bms_id: int,
 			var placed_v: Variant = (restore_v as Dictionary).get('placed_transform')
 			if placed_v is Transform3D:
 				basis = (placed_v as Transform3D).basis
-	return Transform3D(basis, state[PRESENT_EFFECT_POSITION])
+	return Transform3D(basis, state[Simulation.EFFECT_STATE_POSITION])
 
 
 func _sync_static_husks() -> void:

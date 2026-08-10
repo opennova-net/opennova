@@ -17,10 +17,13 @@ const TARGET_GAME_SHELL := &"game_shell"
 const TARGET_ENVIRONMENT := &"environment"
 const TARGET_WEATHER := &"weather"
 
-const MISSION_COORD_MIN := -32768.0
-const MISSION_COORD_MAX := 32767.999
-const ENTITY_HEALTH_MIN := -(1 << 15)
-const ENTITY_HEALTH_MAX := (1 << 15) - 1
+# The engine edit domains: mission coordinates ride signed 16.16 carriers
+# (world/geom.h kMissionCoordMin/MaxUnits) and entity health the retail
+# signed-16 storage (world/entity.h kRetailI16Min/Max).
+static var MISSION_COORD_MIN: float = Simulation.mission_coord_min()
+static var MISSION_COORD_MAX: float = Simulation.mission_coord_max()
+const ENTITY_HEALTH_MIN := Simulation.ENTITY_HEALTH_MIN
+const ENTITY_HEALTH_MAX := Simulation.ENTITY_HEALTH_MAX
 const AUDIO_BUS_VOLUME_MIN_DB := -60.0
 const AUDIO_BUS_VOLUME_MAX_DB := 6.0
 

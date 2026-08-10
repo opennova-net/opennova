@@ -1,26 +1,28 @@
 class_name WireHandle
 extends RefCounted
 
-# The wire entity-handle bit layout: the original entity pool rides the high
-# nibble and the pool slot the low 12 bits — handle = pool << 12 | slot.
-# This is the ONE GDScript home for that decode (engine/net/npwire owns it on the
-# native side); inspectors, HUD feeds, and the wire present pass all read it
-# here instead of re-deriving the shifts. Pools 0/1/2/3 =
-# organic/item/building/marker. [orig: EntityPool_FindByNetId @ 0x4f0a20]
+# Thin re-export of the wire entity-handle bit layout: the original entity pool
+# rides the high nibble and the pool slot the low 12 bits —
+# handle = pool << 12 | slot. Pools 0/1/2/3/4 = organic/item/building/marker/
+# effects. The engine home is engine/net/npwire wire_handle.h (bound as
+# NetProtocol.WIRE_HANDLE_* + wire_handle_* statics), and the witness
+# [orig: EntityPool_FindByNetId @ 0x4f0a20] lives there; inspectors, HUD feeds,
+# and the wire present pass keep the WireHandle.* spelling instead of
+# re-deriving the shifts.
 
-const POOL_SHIFT := 12
-const POOL_MASK := 0xF
-const SLOT_MASK := 0xFFF
-const INVALID := 0xFFFF   # "not found" / no-entity sentinel
-const POOL_COUNT := 5     # live pools 0..4 (pool 4 = effects)
+const POOL_SHIFT := NetProtocol.WIRE_HANDLE_POOL_SHIFT
+const POOL_MASK := NetProtocol.WIRE_HANDLE_POOL_MASK
+const SLOT_MASK := NetProtocol.WIRE_HANDLE_SLOT_MASK
+const INVALID := NetProtocol.WIRE_HANDLE_INVALID       # "not found" / no-entity sentinel
+const POOL_COUNT := NetProtocol.WIRE_HANDLE_POOL_COUNT # live pools 0..4 (pool 4 = effects)
 
 
 static func pool(handle: int) -> int:
-	return (handle >> POOL_SHIFT) & POOL_MASK
+	return NetProtocol.wire_handle_pool(handle)
 
 
 static func slot(handle: int) -> int:
-	return handle & SLOT_MASK
+	return NetProtocol.wire_handle_slot(handle)
 
 
 ## The debug label every inspector row uses: "pool/slot".

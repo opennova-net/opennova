@@ -117,8 +117,9 @@ func render_report(debug: Dictionary) -> void:
 		var ev: Dictionary = events[i]
 		var kind := int(ev.get("kind", 4))
 		var row := "t%d  %s" % [int(ev.get("tick", 0)), String(ev.get("kind_name", "?"))]
-		var ent := int(ev.get("entity_handle", 0xFFFF))
-		if ent != 0xFFFF:
+		# The "no local record" sentinel (world/entity.h EntityHandle::kInvalid).
+		var ent := int(ev.get("entity_handle", Simulation.INVALID_WIRE_HANDLE))
+		if ent != Simulation.INVALID_WIRE_HANDLE:
 			row += "  " + WireHandle.label(ent)
 			var ent_name := String(ev.get("entity_name", ""))
 			if not ent_name.is_empty():

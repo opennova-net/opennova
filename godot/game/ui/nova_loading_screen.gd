@@ -28,39 +28,13 @@ const FALLBACK_IMAGE := "loadscrn.pcx"
 const FONT_SMALL := "Arials18.fnt"
 const FONT_LARGE := "Arial22.fnt"
 
-## Top text band, in image space [orig: rect (21, 29, right, 500) @ 0x52200f;
-## right edge 661 with a custom background, 782 with the stock one @ 0x521ec4].
-const BAND_LEFT := 21
-const BAND_TOP := 29
-const BAND_RIGHT_CUSTOM := 661
-const BAND_RIGHT_STOCK := 782
-const BAND_BOTTOM := 500
-
-## Server-message block, as fractions of the image size
-## [orig: doubles 0.02 @ 0x7D01A0, 0.98 @ 0x7D0198, 0.87 @ 0x7D0190, 0.9 @ 0x7C4878].
-const MSG_X_FRAC := 0.02
-const MSG_RIGHT_FRAC := 0.98
-const MSG_LABEL_Y_FRAC := 0.87
-const MSG_BODY_Y_FRAC := 0.9
-## The message label color tag [orig: "<c80E0FF>%s:\r\n<cFFFFFF>" @ 0x7D01A8].
-const MSG_LABEL_COLOR := Color(0x80 / 255.0, 0xE0 / 255.0, 1.0)
+## The layout values (image-space text band, server-message fractions/color,
+## progress-bar rect/colors, the redraw throttle) are the engine's
+## HudPos.LOADING_* constants and loading_* statics — the witnesses live at
+## the engine home, engine/runtime/hud hud/loading_screen.h.
 ## Fallback label when the gametext table misses
 ## [orig: GameText_GetStringWithFallback("LoadingText", "LT_SERVERMSG", ...) @ 0x522074].
 const MSG_LABEL_FALLBACK := "Message from Game Server"
-
-## Progress bar, in the 1024x768 virtual overlay space
-## [orig: x=368 y=732 w=286 h=15 @ 0x586c78-0x586c90, scaled via
-## Viewport_ScaleToVirtualCoords @ 0x5d2b20].
-const VIRTUAL_SIZE := Vector2(1024, 768)
-const BAR_POS := Vector2i(368, 732)
-const BAR_SIZE := Vector2i(286, 15)
-## Bar colors: border black/gray/black [orig: 0, 0xC0C0C0, 0 @ 0x5d4c40], fill
-## red [orig: override color 0xFFEB0000 @ 0x586cd0].
-const BAR_BORDER_GRAY := Color8(0xC0, 0xC0, 0xC0)
-const BAR_FILL := Color8(0xEB, 0x00, 0x00)
-
-## Redraw throttle [orig: GetTickCount() - last >= 100 @ 0x586c24].
-const PRESENT_INTERVAL_MS := 100
 
 var _texture: Texture2D = null
 var _has_custom_bg := false
@@ -75,7 +49,7 @@ var _font_large: FontFile = null
 var _reported := 0        # last progress input [orig: this[8] @ 0x586c32]
 var _displayed := 0       # smoothed bar value [orig: this[9] @ 0x586c2f]
 var _last_drawn_reported := -1
-var _last_present_ms := -PRESENT_INTERVAL_MS
+var _last_present_ms := -HudPos.LOADING_PRESENT_INTERVAL_MS
 
 
 ## <mission>.bms -> <mission>.pcx: the sidecar image name for a mission file
@@ -90,24 +64,11 @@ static func sidecar_image_name(mission_file: String) -> String:
 
 
 ## The LoadingText key for a numeric session game type, or "" for an unknown
-## type (the original leaves the line empty) [orig: switch @ 0x51f30b-0x51f3a6].
+## type (the original leaves the line empty). The GAMETYPE -> key table is the
+## engine's; the witness lives at the engine home, hud/loading_screen.h
+## (HudPos.loading_gametype_text_key).
 static func gametype_text_key(game_type: int) -> String:
-	if game_type == 0:
-		return "LTGT_DM"
-	if game_type == 0x10000:
-		return "LTGT_TDM"
-	if (game_type & 0xFFFDFFFF) == 0x10020:
-		return "LTGT_COOP"
-	match game_type:
-		0x10001: return "LTGT_TKOTH"
-		0x00001: return "LTGT_KOTH"
-		0x90002: return "LTGT_SD"
-		0x10002: return "LTGT_AD"
-		0x10004: return "LTGT_CTF"
-		0x10008: return "LTGT_FB"
-		0x10010: return "LTGT_AAS"
-		0x50010: return "LTGT_CAC"
-	return ""
+	return HudPos.loading_gametype_text_key(game_type)
 
 
 ## One smoothing step: catch the displayed value up to the reported progress,
@@ -226,7 +187,7 @@ func present(force := false) -> void:
 	# value still trails it — the trailing case redraws unthrottled, so the bar
 	# catches a jump quickly, then creeps ahead at the 100 ms cadence
 	# [orig: elapsed >= 100 || this[8] != progress || this[9] < progress @ 0x586c24].
-	var due := now - _last_present_ms >= PRESENT_INTERVAL_MS \
+	var due := now - _last_present_ms >= HudPos.LOADING_PRESENT_INTERVAL_MS \
 		or _last_drawn_reported != _reported or _displayed < _reported
 	if not (force or due):
 		return
@@ -306,27 +267,34 @@ func _draw_session_text() -> void:
 	if tex_size.x <= 0.0 or tex_size.y <= 0.0:
 		return
 	draw_set_transform(Vector2.ZERO, 0.0, size / tex_size)
-	var band_right := BAND_RIGHT_CUSTOM if _has_custom_bg else BAND_RIGHT_STOCK
-	var band_width := band_right - BAND_LEFT
+	var band_right: int = HudPos.LOADING_BAND_RIGHT_CUSTOM if _has_custom_bg \
+			else HudPos.LOADING_BAND_RIGHT_STOCK
+	var band_width: int = band_right - HudPos.LOADING_BAND_LEFT
 	# Title / mission / game type share one band: left-, center- and
 	# right-aligned [orig: alignment 3/4/5 @ 0x52200f/0x52202e/0x522050 ->
 	# left/center/right @ 0x58106c/0x581071]. All white (<cFFFFFF> @ 0x51f42d).
 	if _font_large != null:
-		_draw_wrapped(_font_large, _title, BAND_LEFT, BAND_TOP, band_width,
-			BAND_BOTTOM, HORIZONTAL_ALIGNMENT_LEFT, Color.WHITE)
-		_draw_wrapped(_font_large, _mission_name, BAND_LEFT, BAND_TOP, band_width,
-			BAND_BOTTOM, HORIZONTAL_ALIGNMENT_CENTER, Color.WHITE)
-		_draw_wrapped(_font_large, _game_type_text, BAND_LEFT, BAND_TOP, band_width,
-			BAND_BOTTOM, HORIZONTAL_ALIGNMENT_RIGHT, Color.WHITE)
+		_draw_wrapped(_font_large, _title, HudPos.LOADING_BAND_LEFT,
+			HudPos.LOADING_BAND_TOP, band_width,
+			HudPos.LOADING_BAND_BOTTOM, HORIZONTAL_ALIGNMENT_LEFT, Color.WHITE)
+		_draw_wrapped(_font_large, _mission_name, HudPos.LOADING_BAND_LEFT,
+			HudPos.LOADING_BAND_TOP, band_width,
+			HudPos.LOADING_BAND_BOTTOM, HORIZONTAL_ALIGNMENT_CENTER, Color.WHITE)
+		_draw_wrapped(_font_large, _game_type_text, HudPos.LOADING_BAND_LEFT,
+			HudPos.LOADING_BAND_TOP, band_width,
+			HudPos.LOADING_BAND_BOTTOM, HORIZONTAL_ALIGNMENT_RIGHT, Color.WHITE)
 	# The server message block [orig: gate on a non-empty CUSTOMTEXT @ 0x52205f;
-	# label "<c80E0FF>%s:" at (0.02w, 0.87h), body from 0.90h, box to (0.98w, h)].
+	# the fraction/color witnesses live at the engine home, hud/loading_screen.h].
 	if _font_small != null and not _custom_text.is_empty():
 		var label := _lookup_loading_text("LT_SERVERMSG", MSG_LABEL_FALLBACK) + ":"
-		var mx := int(MSG_X_FRAC * tex_size.x)
-		var mw := int(MSG_RIGHT_FRAC * tex_size.x) - mx
-		_draw_wrapped(_font_small, label, mx, int(MSG_LABEL_Y_FRAC * tex_size.y),
-			mw, int(tex_size.y), HORIZONTAL_ALIGNMENT_LEFT, MSG_LABEL_COLOR)
-		_draw_wrapped(_font_small, _custom_text, mx, int(MSG_BODY_Y_FRAC * tex_size.y),
+		var mx := int(HudPos.loading_msg_x_frac() * tex_size.x)
+		var mw := int(HudPos.loading_msg_right_frac() * tex_size.x) - mx
+		_draw_wrapped(_font_small, label, mx,
+			int(HudPos.loading_msg_label_y_frac() * tex_size.y),
+			mw, int(tex_size.y), HORIZONTAL_ALIGNMENT_LEFT,
+			HudPos.loading_msg_label_color())
+		_draw_wrapped(_font_small, _custom_text, mx,
+			int(HudPos.loading_msg_body_y_frac() * tex_size.y),
 			mw, int(tex_size.y), HORIZONTAL_ALIGNMENT_LEFT, Color.WHITE)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
@@ -350,24 +318,27 @@ func _draw_wrapped(font: FontFile, text: String, x: int, y: int, width: int,
 		align, width, fs, max_lines, color)
 
 
-# The progress bar, scaled from the 1024x768 virtual overlay space onto the
-# display; the 1px border/inset steps stay in real pixels
+# The progress bar, scaled from the HudPos.DESIGN_* virtual overlay space onto
+# the display; the 1px border/inset steps stay in real pixels (the rect/color
+# witnesses live at the engine home, hud/loading_screen.h)
 # [orig: LoadingScreen_UpdateAndPresent @ 0x586c78 + draw_progress_bar_0 @ 0x5d4c40].
 func _draw_progress_bar() -> void:
-	var s := size / VIRTUAL_SIZE
-	var x := int(BAR_POS.x * s.x)
-	var y := int(BAR_POS.y * s.y)
-	var w := int(BAR_SIZE.x * s.x)
-	var h := int(BAR_SIZE.y * s.y)
+	var s := size / Vector2(HudPos.DESIGN_WIDTH, HudPos.DESIGN_HEIGHT)
+	var bar_pos := HudPos.loading_bar_pos()
+	var bar_size := HudPos.loading_bar_size()
+	var x := int(bar_pos.x * s.x)
+	var y := int(bar_pos.y * s.y)
+	var w := int(bar_size.x * s.x)
+	var h := int(bar_size.y * s.y)
 	# Layered filled rects, each inset 1px: black, gray, black track, then the
 	# fill [orig: draw_progress_bar_0 — outer spans w+6/h+6, three inset border
 	# draws, fill right edge = pct*(inner width)/100 + left + 2, one last inset].
 	draw_rect(Rect2(x, y, w + 6, h + 6), Color.BLACK)
-	draw_rect(Rect2(x + 1, y + 1, w + 4, h + 4), BAR_BORDER_GRAY)
+	draw_rect(Rect2(x + 1, y + 1, w + 4, h + 4), HudPos.loading_bar_border_gray())
 	draw_rect(Rect2(x + 2, y + 2, w + 2, h + 2), Color.BLACK)
 	var span := bar_fill_span(x, w, _displayed)
 	if span.y > span.x:
-		draw_rect(Rect2(span.x, y + 3, span.y - span.x, h), BAR_FILL)
+		draw_rect(Rect2(span.x, y + 3, span.y - span.x, h), HudPos.loading_bar_fill_color())
 
 
 # LoadingText lookup against the registered gametext table; a miss returns the

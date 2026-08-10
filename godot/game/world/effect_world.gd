@@ -6,13 +6,16 @@ extends Node3D
 ## node owns one ParticleRenderer for both render domains.
 
 const PARTICLE_FLAG_FOREVER_EMIT := ParticleDef.FLAG_FOREVER_EMIT
-const ADMISSION_ALWAYS := 0
-const ADMISSION_REPLACE_OWNED := 1
-const ADMISSION_SUPPRESS_WHILE_OWNED := 2
-const BINDING_WORLD := 0
-const BINDING_FOLLOW_OWNER := 1
-const RENDER_DOMAIN_WORLD := 0
-const RENDER_DOMAIN_FIRST_PERSON := 1
+# Aliases of the EffectScene bound enums — the portable effect scene owns the
+# admission/binding/render-domain vocabulary; callers keep the EffectWorld.*
+# spelling.
+const ADMISSION_ALWAYS := EffectScene.ADMISSION_ALWAYS
+const ADMISSION_REPLACE_OWNED := EffectScene.ADMISSION_REPLACE_OWNED
+const ADMISSION_SUPPRESS_WHILE_OWNED := EffectScene.ADMISSION_SUPPRESS_WHILE_OWNED
+const BINDING_WORLD := EffectScene.BINDING_WORLD
+const BINDING_FOLLOW_OWNER := EffectScene.BINDING_FOLLOW_OWNER
+const RENDER_DOMAIN_WORLD := EffectScene.RENDER_DOMAIN_WORLD
+const RENDER_DOMAIN_FIRST_PERSON := EffectScene.RENDER_DOMAIN_FIRST_PERSON
 const KILL_PLANE_DISABLED := EffectScene.KILL_PLANE_DISABLED
 
 var _files: Array[ParticleFile] = []

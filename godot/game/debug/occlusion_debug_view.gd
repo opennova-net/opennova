@@ -15,25 +15,28 @@ extends SimDebugView
 # payload changes (static per mission apart from the weld retypes at load).
 # Built / freed by GameWorld on the overlay's toggle, like the collision view.
 
-# The engine's own portal-slot collection radius [orig: the 250 u range in
-# collect_visible_sector_userpoints @ 0x5c6b60] -- the drawn sweep matches the
-# buildings whose portals can hold live slots around the camera.
-const RANGE_UNITS := 250.0
+# The engine's own portal-slot collection radius drives the drawn sweep — it
+# matches the buildings whose portals can hold live slots around the camera
+# (the witness [orig: the 250 u range in collect_visible_sector_userpoints
+# @ 0x5c6b60] lives at engine world/occlusion.h kPortalSlotCollectRadius,
+# read via Simulation.portal_slot_collect_radius()).
+static var RANGE_UNITS: float = Simulation.portal_slot_collect_radius()
 const LABEL_CAP := 200
 
-# Record type -> outline color (the 60 B record type byte,
-# engine/runtime/world/include/world/occlusion.h).
+# Record type -> outline color (the 60 B record type byte — engine
+# world/occlusion.h kOccRec*, bound as Simulation.OCC_REC_*; the colors stay
+# godot-side).
 static func type_color(record_type: int) -> Color:
 	match record_type:
-		0:
+		Simulation.OCC_REC_OCCLUDER:
 			return Color(0.55, 0.55, 0.55)  # occluder face - gray
-		1:
+		Simulation.OCC_REC_OPEN:
 			return Color(1.0, 0.6, 0.15)    # open occluder slot (doors) - orange
-		2:
+		Simulation.OCC_REC_WINDOW:
 			return Color(0.25, 0.9, 1.0)    # exterior window portal - cyan
-		3:
+		Simulation.OCC_REC_PORTAL:
 			return Color(0.35, 1.0, 0.45)   # interior room-to-room portal - green
-		5:
+		Simulation.OCC_REC_WELDED_LINK:
 			return Color(1.0, 0.4, 1.0)     # welded cross-building link - magenta
 		_:
 			return COLOR_UNKNOWN
@@ -42,15 +45,15 @@ const COLOR_UNKNOWN := Color(1.0, 0.9, 0.3)
 
 static func type_name(record_type: int) -> String:
 	match record_type:
-		0:
+		Simulation.OCC_REC_OCCLUDER:
 			return "occluder"
-		1:
+		Simulation.OCC_REC_OPEN:
 			return "open"
-		2:
+		Simulation.OCC_REC_WINDOW:
 			return "window"
-		3:
+		Simulation.OCC_REC_PORTAL:
 			return "portal"
-		5:
+		Simulation.OCC_REC_WELDED_LINK:
 			return "link"
 		_:
 			return "type %d" % record_type
@@ -146,7 +149,7 @@ func _update_geometry(buildings: Array) -> void:
 			# Portal-type records carry a section label (record normal points
 			# a -> b; section 0 = exterior). Plain occluder faces are numerous
 			# and stay label-free.
-			if rtype != 0 and label_count < LABEL_CAP:
+			if rtype != Simulation.OCC_REC_OCCLUDER and label_count < LABEL_CAP:
 				label_count += 1
 				_labels.add_child(_make_label(rec, rtype, color))
 	if segments.is_empty():

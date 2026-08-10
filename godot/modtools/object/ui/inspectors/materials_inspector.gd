@@ -17,11 +17,9 @@ const TEXTURE_SLOTS := [
 # Generator style names come from GeneratorStyleCatalog's consumer-specific
 # views; the raw style id still passes straight through to
 # set_material_*_generator.
-# Material "flags" bitfield.
-const MATERIAL_FLAG_ALPHA := 0x01
-# Texture-slot "flags" bitfield.
-const TEXTURE_FLAG_ANIMATED := 0x01
-const TEXTURE_FLAG_CLAMPED := 0x02
+# The material/texture-slot flag bits are the bound ObjectData.MATERIAL_FLAG_*/
+# TEX_FLAG_* names — the value authority lives at the engine home,
+# engine/formats/threedi threedi_3di3.h.
 
 var _material_paste_button: Button
 var _material_clipboard: Dictionary = {}
@@ -259,7 +257,7 @@ func build_detail(box: VBoxContainer) -> void:
 		var shader_info := _shader_info_for_material(material, shader_catalog)
 		shader_status.text = _shader_status_text(shader_info)
 		alpha.value = float(material.get("alpha_threshold", 0.0))
-		alpha.editable = bool(shader_info.get("is_alpha", false)) or (int(material.get("flags", 0)) & MATERIAL_FLAG_ALPHA) != 0
+		alpha.editable = bool(shader_info.get("is_alpha", false)) or (int(material.get("flags", 0)) & ObjectData.MATERIAL_FLAG_ALPHA_TEST) != 0
 		for slot_def in TEXTURE_SLOTS:
 			var slot := int(slot_def.get("slot", 0))
 			var controls: Dictionary = slot_controls.get(slot, {})
@@ -291,10 +289,10 @@ func build_detail(box: VBoxContainer) -> void:
 				clear.disabled = not supported or not occupied
 			var texture_flags := int(texture_info.get("flags", 0))
 			if clamped != null:
-				clamped.button_pressed = (texture_flags & TEXTURE_FLAG_CLAMPED) != 0
+				clamped.button_pressed = (texture_flags & ObjectData.TEX_FLAG_CLAMPED) != 0
 				clamped.disabled = not supported or not occupied
 			if animated != null:
-				animated.button_pressed = (texture_flags & TEXTURE_FLAG_ANIMATED) != 0
+				animated.button_pressed = (texture_flags & ObjectData.TEX_FLAG_ANIMATED) != 0
 				animated.disabled = not supported or not occupied
 			if frame != null:
 				frame.value = int(texture_info.get("frame", 0))
@@ -331,10 +329,18 @@ func build_detail(box: VBoxContainer) -> void:
 		var frame := controls.get("frame") as SpinBox
 		var flags := 0
 		if animated != null and animated.button_pressed:
-			flags |= 0x01
+			flags |= ObjectData.TEX_FLAG_ANIMATED
 		if clamped != null and clamped.button_pressed:
-			flags |= 0x02
-		var type := 4 if slot == 3 or slot == 4 else 0
+			flags |= ObjectData.TEX_FLAG_CLAMPED
+		# Preserve the engine-stamped texture type: the slot -> type policy is
+		# the engine's (threedi_tex_default_type_for_slot, threedi_3di3.h, applied
+		# by set_material_texture_slot). Passing the current value through also
+		# adopts the engine's .tga-normal refinement (type 5) that this panel's
+		# old blanket normal-slot->4 policy clobbered.
+		var mats: Array = object_editor.object_data.get_materials()
+		var type := 0
+		if current_index < mats.size():
+			type = int(_texture_for_slot(mats[current_index], slot).get("type", 0))
 		object_editor.object_data.set_material_texture_slot_options(current_index, slot, flags, int(frame.value) if frame != null else 0, type)
 		resync_selected.call()
 

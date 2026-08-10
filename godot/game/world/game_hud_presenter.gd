@@ -347,10 +347,12 @@ func tick() -> void:
 			_frame_stats.add(FrameStatsBoard.HUD_FLUSH, probe_t5 - probe_t4)
 
 
-# The HUD's 62 Hz presentation clock driving the fade/message timers.
-# [orig: current_tick @0x24c1968]
+# The HUD's presentation clock driving the fade/message timers — the engine's
+# ms -> tick quantum count (world/tick_accumulator.h ticks_from_ms carries the
+# [orig: current_tick @0x24c1968] witness). Adopting the engine's exact 16 ms
+# quantum corrects the old 0.062 ticks/ms approximation (62 Hz vs 62.5 Hz).
 func _hud_ticks() -> int:
-	return int(Time.get_ticks_msec() * 0.062)
+	return Simulation.ticks_from_ms(Time.get_ticks_msec())
 
 
 # The waypoint label's entry: the sim's current track entry with its display

@@ -40,9 +40,11 @@ var _weapons: WeaponDatabase
 var _team := 0                       # 0 = blue/good, 1 = red/evil (host stamps before open)
 # The local player's class + the host's class-allow mask feeding the witnessed
 # open-time class resolution [orig: Armory_ResolveSelectedClass @0x5642f0].
-# 0 = unclassed (SP spawn before any armory apply); mask default = no restriction.
+# 0 = unclassed (SP spawn before any armory apply); the no-restriction mask
+# default lives at engine world/player_loadout.h kClassAllowMaskAll
+# [orig: g_hostClassAllowMask default 0x3FF].
 var _player_class := 0
-var _class_allow_mask := 0x3FF
+var _class_allow_mask := WeaponDatabase.CLASS_ALLOW_ALL
 # Class selection is interactive only in an MP session — the original disables the
 # PLAYER_CLASS spin (and its label) outside one [orig: the is_in_session branch of
 # the WEAPON on-show handler @0x567370]. SP leaves this false.
@@ -174,14 +176,21 @@ func _ensure_weapons() -> void:
 		_weapons = null
 
 
-# PLAYER_CLASS carries the five MP soldier classes 5..9; the host fills the spinlist
-# (weapon.mnu authors it empty) with the "Menu" section CHARCLASS_* names, ids 5..9
-# [orig: UI_InitWeaponClassSelection @0x567250 — CHARCLASS_MEDIC..ENGINEER, values
-# 5..9 via spin_list_insert_item].
-const CLASS_VALUES := [5, 6, 7, 8, 9]
-const CLASS_KEYS := ["CHARCLASS_MEDIC", "CHARCLASS_SNIPER", "CHARCLASS_GUNNER",
-	"CHARCLASS_RIFLEMAN", "CHARCLASS_ENGINEER"]
-const CLASS_FALLBACKS := ["Medic", "Sniper", "Gunner", "Rifleman", "Engineer"]
+# PLAYER_CLASS carries the five MP soldier classes; the host fills the spinlist
+# (weapon.mnu authors it empty) from the engine catalog rows
+# ({value:int, text_key:String} in the authored spin order — the witness
+# [orig: UI_InitWeaponClassSelection @0x567250 — CHARCLASS_MEDIC..ENGINEER,
+# values 5..9 via spin_list_insert_item] lives at engine
+# world/player_loadout.h kArmoryClassCatalog).
+var _class_catalog: Array = WeaponDatabase.armory_class_catalog()
+# Display FALLBACK strings stay godot-side, keyed by the catalog row's text_key.
+const CLASS_FALLBACK_TEXT := {
+	"CHARCLASS_MEDIC": "Medic",
+	"CHARCLASS_SNIPER": "Sniper",
+	"CHARCLASS_GUNNER": "Gunner",
+	"CHARCLASS_RIFLEMAN": "Rifleman",
+	"CHARCLASS_ENGINEER": "Engineer",
+}
 
 # The g_armorySelectedClass mirror: the class the filters + ACCEPT run against. The
 # spin row only writes it through _on_class_changed (MP); an unclassed resolve keeps
@@ -194,13 +203,15 @@ func _populate_classes() -> void:
 	if spin < 0:
 		return
 	var rows := PackedStringArray()
-	for i in CLASS_KEYS.size():
-		rows.append(_menu_text(CLASS_KEYS[i], CLASS_FALLBACKS[i]))
+	for row_v in _class_catalog:
+		var text_key := String((row_v as Dictionary).get("text_key", ""))
+		rows.append(_menu_text(text_key,
+				String(CLASS_FALLBACK_TEXT.get(text_key, text_key))))
 	_populating = true
 	_driver.set_widget_items(spin, rows)
 	# Select by VALUE = the resolved class; a class with no row falls back to row 0
 	# [orig: SpinList_SelectItemByValue @0x64ba50 selects 0 on no match].
-	_driver.select_row(spin, maxi(CLASS_VALUES.find(_selected_class_value), 0), false)
+	_driver.select_row(spin, maxi(_class_row_for_value(_selected_class_value), 0), false)
 	_populating = false
 	# Outside an MP session the class spin is inert — the original disables it
 	# [orig: @0x567370]; the driver's disable is the pump's visual state 1.
@@ -222,12 +233,22 @@ func _class_mask() -> int:
 	return WeaponDatabase.armory_class_filter_mask(_selected_class_value)
 
 
+# The catalog row carrying a class VALUE, -1 when no row does (the resolved
+# class can sit outside 5..9 on an unclassed resolve).
+func _class_row_for_value(class_value: int) -> int:
+	for i in _class_catalog.size():
+		if int((_class_catalog[i] as Dictionary).get("value", -1)) == class_value:
+			return i
+	return -1
+
+
 func _on_class_changed(index: int) -> void:
 	if _populating:
 		return
 	# The flip is MP-only in the original (the spin is disabled otherwise); saving the
 	# outgoing class's selections into its per-class buffer is the tracked deferral.
-	_selected_class_value = CLASS_VALUES[clampi(index, 0, CLASS_VALUES.size() - 1)]
+	var row := clampi(index, 0, _class_catalog.size() - 1)
+	_selected_class_value = int((_class_catalog[row] as Dictionary).get("value", 0))
 	_populate_slots()  # the class re-filters every slot list [orig: @0x566f60]
 	_update_weight()
 
@@ -237,7 +258,9 @@ func _on_class_changed(index: int) -> void:
 func _populate_slots() -> void:
 	if _weapons == null:
 		return
-	var team_mask := 2 if _team == 0 else 1  # [orig: g_playerInfoTeamMask = 2 - (team != 0)]
+	# [orig: g_playerInfoTeamMask = 2 - (team != 0)] — the witness lives at
+	# engine world/player_loadout.h player_info_team_mask.
+	var team_mask := WeaponDatabase.player_info_team_mask(_team)
 	_fill_slot("PRIMARY", WeaponDatabase.SLOT_PRIMARY, team_mask)
 	_fill_slot("SECONDARY", WeaponDatabase.SLOT_SECONDARY, team_mask)
 	_fill_slot("ACCESSORY", WeaponDatabase.SLOT_ACCESSORY, team_mask)

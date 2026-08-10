@@ -24,13 +24,13 @@ func _resolve_part_anim_node(action: Dictionary) -> ObjectModel:
 	var target := int(action.get("param1", 0))
 	var models: Array = []
 	match int(action.get("action_type", -1)):
-		_c._ACT_CHANGE_SINGLE_AI:
+		MissionData.ACTION_CHANGE_SINGLE_AI:
 			var hit := registry.resolve_single(target)
 			if hit != null:
 				models = [hit]
-		_c._ACT_CHANGE_GROUP_AI:
+		MissionData.ACTION_CHANGE_GROUP_AI:
 			models = registry.resolve_group(target)
-		_c._ACT_AREA_AI_RED, _c._ACT_AREA_AI_BLUE:
+		MissionData.ACTION_AREA_AI_RED, MissionData.ACTION_AREA_AI_BLUE:
 			models = registry.resolve_zone(target)
 	for model: ObjectModel in models:
 		if model != null:
@@ -45,7 +45,8 @@ func can_preview_part_anim(action: Dictionary) -> bool:
 
 
 ## Play the action's part animation on its target model (clean restart from rest). Returns false when no
-## target resolves. channel = param2, play_type = param3, time = param4 (16.16 seconds -> seconds).
+## target resolves. channel = param2, play_type = param3, time = param4 (fixed-seconds raw ->
+## seconds via MissionData.fixed_seconds_from_raw; the scale witness lives at the engine home).
 func preview_part_anim(action: Dictionary) -> bool:
 	var model := _resolve_part_anim_node(action)
 	if model == null:
@@ -54,7 +55,7 @@ func preview_part_anim(action: Dictionary) -> bool:
 	_c._preview_node = model
 	var channel := int(action.get("param2", 0))
 	var play_type := int(action.get("param3", 0))
-	var time_s := float(int(action.get("param4", 0))) / 65536.0
+	var time_s := float(MissionData.fixed_seconds_from_raw(int(action.get("param4", 0))))
 	model.set_playing(true)
 	model.reset_animation_time()
 	model.restart_part_anim(channel, play_type, time_s)

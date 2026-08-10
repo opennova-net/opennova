@@ -391,8 +391,9 @@ func test_volume_meter_reflects_signal():
 	var lm: Control = LiveModeScene.instantiate()
 	add_child_autofree(lm)
 	await get_tree().process_frame
-	# 200 << 16 = 13107200 -> 200.0 after the 16.16 decode.
-	lm._director.volume_changed.emit(13107200, 13107200)
+	# volume_changed emits the script-domain 0..255 volume directly (the 16.16
+	# decode happens at the binding's trampoline before the signal).
+	lm._director.volume_changed.emit(200, 200)
 	var meter: Control = lm.get_node("%VolumeMeter")
 	var bar_l: ProgressBar = meter.get_node("VBox/RowL/BarL")
 	assert_almost_eq(bar_l.value, 200.0, 0.5, "meter reflects the volume signal")

@@ -17,16 +17,17 @@ extends Control
 
 class SightRowControl:
 	extends Control
-	const DESIGN := Vector2(1024, 768)
 	var tex: Texture2D
 	var rect_v := Rect2()
 
 	func _draw() -> void:
 		if tex == null:
 			return
-		var s := get_viewport_rect().size
-		var scale_v := Vector2(s.x / DESIGN.x, s.y / DESIGN.y)
-		draw_texture_rect(tex, Rect2(rect_v.position * scale_v, rect_v.size * scale_v), false)
+		# The virtual design space and rect scaling are the engine's
+		# (HudPos.DESIGN_* / scale_rect — the witness lives at the engine home,
+		# engine/runtime/hud hud/hud_math.h).
+		draw_texture_rect(tex,
+				HudPos.scale_rect(rect_v, get_viewport_rect().size), false)
 
 	func _notification(what: int) -> void:
 		if what == NOTIFICATION_RESIZED:
@@ -55,6 +56,10 @@ func set_weapon_sights(sights: Array, root: ResourceRoot) -> void:
 		var x1 := float(e.get("x1", 0))
 		var y1 := float(e.get("y1", 0))
 		row.rect_v = Rect2(x1, y1, float(e.get("x2", 0)) - x1, float(e.get("y2", 0)) - y1)
+		# Blend token 1 is the additive entry of the original's blend-token map
+		# [orig: sub_540180 blend/add/...]; the full map is not ported yet, so
+		# the token stays a literal here — no bound name exists until the
+		# sub_540180 blend-map port lands in the engine.
 		if int(e.get("blend", 0)) == 1:
 			var mat := CanvasItemMaterial.new()
 			mat.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD

@@ -255,7 +255,10 @@ func _weapon_label(w: Dictionary) -> String:
 func _selected_class_mask() -> int:
 	var combo := _id("PLAYERCLASS")
 	if combo < 0:
-		return 0x1F  # no class control -> show every class's weapons (defensive)
+		# No class control -> show every class's weapons (defensive; the
+		# five-class union mask lives at engine world/player_loadout.h
+		# kClassFilterMaskAll).
+		return WeaponDatabase.CLASS_MASK_ALL
 	# The authored row's value= attr is the class id (the get_selected_value read).
 	var row := _driver.selected_row(combo)
 	var val := _driver.item_value(combo, row) if row >= 0 else ""

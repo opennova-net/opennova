@@ -27,10 +27,27 @@ extends RefCounted
 # (grounded only), 16/17/18 DH/DM/DL damage -50/-6/-1 HP, 19 CP player
 # collision (not AI), 20..23 occlusion. [orig: Entity_ComputeBoneCollisionForce @0x4ae150 +
 # Entity_TestCollisionSections @0x4aef90 + Entity_RaycastCollisionModel @0x413060]
+# The type codes are the engine's bvol families (world/collision.h bvol_type,
+# bound as Simulation.BVOL_*); the LETTER-CODE display strings stay godot-side.
+# Types 1 (generic CB solid), 14 (LP) and 19 (CP player collision) have no
+# engine bvol_type home yet and keep their raw ids.
 const TYPE_NAMES := {
-	1: "CB", 4: "CL", 5: "CV", 6: "CA", 7: "VC", 8: "BB", 9: "CD",
-	10: "CT", 11: "CM", 12: "VK", 13: "CF", 14: "LP",
-	16: "DH", 17: "DM", 18: "DL", 19: "CP",
+	1: "CB",
+	Simulation.BVOL_LADDER_CL: "CL",
+	Simulation.BVOL_CONTACT_MARKER: "CV",
+	Simulation.BVOL_ARMORY_CA: "CA",
+	Simulation.BVOL_VEHICLE_VC: "VC",
+	Simulation.BVOL_BLINK_BB: "BB",
+	Simulation.BVOL_DOOR_CD: "CD",
+	Simulation.BVOL_CHANGE_TEAM_CT: "CT",
+	Simulation.BVOL_VEHICLE_LOADOUT: "CM",
+	Simulation.BVOL_VEHICLE_EXT: "VK",
+	Simulation.BVOL_FLAG_CF: "CF",
+	14: "LP",
+	Simulation.BVOL_DAMAGE_HIGH_DH: "DH",
+	Simulation.BVOL_DAMAGE_MEDIUM_DM: "DM",
+	Simulation.BVOL_DAMAGE_LOW_DL: "DL",
+	19: "CP",
 }
 
 

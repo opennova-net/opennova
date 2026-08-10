@@ -8,7 +8,9 @@ extends Control
 
 const FlyCameraScript = preload("res://game/fly_camera.gd")
 
-const STEP_SECONDS := 1.0 / 62.5
+# The engine's fixed simulation tick (Simulation.tick_dt(); the cadence lives
+# at the engine home, engine/runtime/world tick accumulator).
+static var STEP_SECONDS: float = Simulation.tick_dt()
 const PARTICLE_FLAG_FOREVER_EMIT := ParticleDef.FLAG_FOREVER_EMIT
 const PREVIEW_EFFECT_ID := "__oned_particle_preview__"
 

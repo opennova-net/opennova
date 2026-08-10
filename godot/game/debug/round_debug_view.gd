@@ -128,8 +128,9 @@ func _update(events: Array) -> void:
 static func describe_event(ev: Dictionary) -> String:
 	var kind := int(ev.get("kind", 4))
 	var line := String(ev.get("kind_name", "?"))
-	var ent := int(ev.get("entity_handle", 0xFFFF))
-	if ent != 0xFFFF:
+	# The "no local record" sentinel (world/entity.h EntityHandle::kInvalid).
+	var ent := int(ev.get("entity_handle", Simulation.INVALID_WIRE_HANDLE))
+	if ent != Simulation.INVALID_WIRE_HANDLE:
 		var name := String(ev.get("entity_name", ""))
 		line += "  ent %s%s" % [WireHandle.label(ent),
 				("  " + name) if not name.is_empty() else ""]

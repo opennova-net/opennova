@@ -19,7 +19,11 @@ extends Control
 
 signal exit_requested
 
-const EXIT_TIMEOUT_S := 300.0 # [orig: 18600 ticks at 62 Hz @0x57621d/@0x5744ea]
+# The ESC-less exit timeout: engine truth 297.6 s — 18600 ticks of the 62.5 Hz
+# loop (world/world.h kEpilogExitTimeoutTicks carries the
+# [orig: @0x57621d/@0x5744ea] witness). Deliberate correction: the old
+# godot-side 300.0 assumed a 62 Hz tick; the engine value is adopted.
+static var EXIT_TIMEOUT_S: float = Simulation.epilog_exit_timeout_seconds()
 const FADE_IN_S := 1.5        # stands in for the 48+48-tick cine fade pair [orig: @0x574512]
 
 var _age := 0.0

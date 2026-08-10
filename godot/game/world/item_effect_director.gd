@@ -21,8 +21,10 @@ extends RefCounted
 
 const MissionRuntime := preload("res://game/world/mission_runtime.gd")
 
-# [orig: ItemDef_GetBoneMaskByName @ 0x49ea40 scans the first 16 points.]
-const ITEM_EFFECT_USER_POINT_SCAN_LIMIT := 16
+# The attach scan reads only a model's first 16 userpoints — the witness
+# ([orig: ItemDef_GetBoneMaskByName @ 0x49ea40]) lives at engine
+# formats/threedi threedi_3di3.h THREEDI_USER_POINT_SCAN_LIMIT.
+const ITEM_EFFECT_USER_POINT_SCAN_LIMIT := Simulation.ITEM_USER_POINT_SCAN_LIMIT
 
 # The GameWorld whose entities carry the effects (public surface only; see
 # above).

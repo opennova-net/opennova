@@ -118,9 +118,10 @@ func _clear_pending_session() -> void:
 
 
 # Retail's ClientAuth does not invent a network-only player id: it uploads the
-# two profile character selections packed from Avatars.def. The packed value is
-# [nat:5 | division:4 | combo:6 | alignment:1], and the companion avatar byte is
-# the selected combo's head voice unless the profile has an explicit override.
+# two profile character selections packed from Avatars.def. The bit-pack lives
+# at the engine home, engine/net/npwire session_hello.h character_id (bound as
+# NetProtocol.pack_character_id), and the companion avatar byte is the selected
+# combo's head voice unless the profile has an explicit override.
 # [orig: PlayerProfile_InitDefaults @0x54BB40,
 #  lookup_entity_slot_and_pack_entry @0x57AD40,
 #  sub_57AE60 @0x57AE60, CNapiServerInfo_SerializeToSession @0x4C3650]
@@ -140,11 +141,9 @@ static func _join_character_selection(
 	var combo: Dictionary = db.get_combo(nat_index, div_index, combo_index)
 	if nat.is_empty() or div.is_empty() or combo.is_empty():
 		return {}
-	var packed_id := (
-			(int(nat.get("id", 0)) & 0x1F)
-			| ((int(div.get("id", 0)) & 0x0F) << 5)
-			| ((int(combo.get("id", 0)) & 0x3F) << 9)
-			| ((1 if expected_alignment != 0 else 0) << 15))
+	var packed_id := NetProtocol.pack_character_id(
+			int(nat.get("id", 0)), int(div.get("id", 0)),
+			int(combo.get("id", 0)), expected_alignment)
 	var head: Dictionary = combo.get("head", {})
 	return {
 		"character_id": packed_id,

@@ -439,12 +439,12 @@ func test_synthetic_husks_use_distinct_wire_handles_for_identity_and_lookup() ->
 	var events := {
 		'husk_swaps': [{
 			'bms_id': 0,
-			'spawn_origin': DestructionPresentPass.SYNTHETIC_SPAWN_ORIGIN,
+			'spawn_origin': SpawnOrigin.NONE,
 			'wire_handle': 0x1004,
 			'item_id': BUGGY_ITEM_ID,
 		}, {
 			'bms_id': 0,
-			'spawn_origin': DestructionPresentPass.SYNTHETIC_SPAWN_ORIGIN,
+			'spawn_origin': SpawnOrigin.NONE,
 			'wire_handle': 0x1005,
 			'item_id': BUGGY_ITEM_ID,
 		}],
@@ -480,7 +480,7 @@ func test_missing_synthetic_husk_node_never_falls_back_to_static_zero_id() -> vo
 	var events := {
 		'husk_swaps': [{
 			'bms_id': 0,
-			'spawn_origin': DestructionPresentPass.SYNTHETIC_SPAWN_ORIGIN,
+			'spawn_origin': SpawnOrigin.NONE,
 			'wire_handle': 0x1004,
 			'item_id': BUGGY_ITEM_ID,
 		}],
@@ -519,7 +519,7 @@ func test_synthetic_wreck_families_use_distinct_moving_wire_anchors() -> void:
 				'attach_net_id': 0,
 				'attach_bms_id': 0,
 				'attach_wire_handle': wire_handle,
-				'attach_spawn_origin': DestructionPresentPass.SYNTHETIC_SPAWN_ORIGIN,
+				'attach_spawn_origin': SpawnOrigin.NONE,
 				'pos': Vector3(100, 100, 100),
 			})
 	# Even when a payload happens to carry a valid dynamic identity, family zero
@@ -530,7 +530,7 @@ func test_synthetic_wreck_families_use_distinct_moving_wire_anchors() -> void:
 		'attach_net_id': 0,
 		'attach_bms_id': 0,
 		'attach_wire_handle': 0x1004,
-		'attach_spawn_origin': DestructionPresentPass.SYNTHETIC_SPAWN_ORIGIN,
+		'attach_spawn_origin': SpawnOrigin.NONE,
 		'pos': Vector3(20, 30, 40),
 	})
 	var presenter := DestructionPresentPass.new()

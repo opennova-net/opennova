@@ -12,12 +12,10 @@ extends Node
 ##
 ## Full driving witness: docs/audio/mus-sbf-re.md §Game music driving.
 
-# gamescript var indices the mission-start seed and the per-frame pump write
-# (full per-index witness map: docs/audio/mus-sbf-re.md §Game music driving).
-const VAR_HEALTH_PCT := 7  # health % [orig: seed @ 0x5255f0; per-frame @ 0x4b6324]
-const VAR_TEAM := 10       # local-player team [orig: @ 0x4b62fc]
-const SEEDED_VARS_FIRST := 1   # Var1..Var12 seeded at mission start
-const SEEDED_VARS_LAST := 12   # [orig: @ 0x5255b3-0x52561b]
+# The gamescript var slots (mission-start seed + per-frame pump) are the bound
+# MusicDirector.GAME_* constants — the witnesses live at the engine home,
+# engine/runtime/audio audio/music_policy.h (full per-index witness map:
+# docs/audio/mus-sbf-re.md §Game music driving).
 
 # The service owns the one director (and thereby the AudioStreamPlayer pool).
 var _director: MusicDirector = null
@@ -46,43 +44,57 @@ func current_script() -> MusicScript:
 	return _script
 
 
-## Resolve one interactive-music pair by its witnessed hardcoded stem against a
-## mounted root. The engine names the base pairs MENUMUS.SBF/.BIN and
-## GAMEMUS.SBF/.BIN; when expansion <n> is active they become
-## expansion\<n>\M<n>.sbf + M<n>.bin (menu) and expansion\<n>\G<n>.sbf +
-## G<n>.bin (game) [orig: Expansion_LoadAssets @ 0x4a4798 (base names) /
-## @ 0x4a4906-0x4a494a (expansion forms)]. Retail's ONLY reselect is the
-## expansion .pff existence check — a missing expansion\<n>\<n>.pff clears the
-## expansion and reselects the base names [orig: File_CheckExists @ 0x4a4767,
-## clear @ 0x4a4775]; once the .pff exists the expansion names are set
-## unconditionally, and the context open then bails when the loose .sbf is
-## absent (the CreateFileA gate precedes the script load [orig:
-## AudioVM_OpenContextFile @ 0x672160]), so an expansion that ships partial or
-## no music is SILENT in retail. Bank and script always come from the SAME stem
-## (the script's play ops index that bank's entries), so halves are never mixed
-## — the MusicPair typed record carries the two halves (ADR 0017).
-static func resolve_music_pair(root, prefix: String, base_stem: String) -> MusicPair:
-	var pair := MusicPair.new()
+## Resolve one interactive-music pair against a mounted root. The witnessed
+## name derivation (base MENUMUS/GAMEMUS stems, expansion M<n>/G<n> forms and
+## their expansion\<n> subdir) is the engine's —
+## MusicDirector.resolve_menu_music_pair / resolve_game_music_pair; the
+## witness lives at the engine home, engine/runtime/audio
+## audio/music_policy.h. This seam keeps only the filesystem orchestration:
+## retail's ONLY reselect is the expansion .pff existence check — a missing
+## expansion\<n>\<n>.pff clears the expansion and reselects the base names
+## [orig: File_CheckExists @ 0x4a4767, clear @ 0x4a4775]; once the .pff
+## exists the expansion names are set unconditionally, and the context open
+## then bails when the loose .sbf is absent (the CreateFileA gate precedes
+## the script load [orig: AudioVM_OpenContextFile @ 0x672160]), so an
+## expansion that ships partial or no music is SILENT in retail. Bank and
+## script always come from the SAME stem (the script's play ops index that
+## bank's entries), so halves are never mixed — the MusicPair typed record
+## carries the two halves (ADR 0017).
+static func resolve_menu_music_pair(root) -> MusicPair:
 	if root == null:
-		return pair
-	var exp_name: String = root.get_expansion()
-	if not exp_name.is_empty():
-		var stem := prefix + exp_name
+		return MusicPair.new()
+	return _pair_from_names(root,
+			MusicDirector.resolve_menu_music_pair(String(root.get_expansion())))
+
+
+static func resolve_game_music_pair(root) -> MusicPair:
+	if root == null:
+		return MusicPair.new()
+	return _pair_from_names(root,
+			MusicDirector.resolve_game_music_pair(String(root.get_expansion())))
+
+
+static func _pair_from_names(root, names: Dictionary) -> MusicPair:
+	var pair := MusicPair.new()
+	var bank_file := String(names.get("bank_file", ""))
+	var script_file := String(names.get("script_file", ""))
+	var subdir := String(names.get("subdir", ""))
+	if not subdir.is_empty():
 		# The expansion bank lives inside the expansion folder, streamed loose
-		# [orig: "expansion\\%s\\M%s.sbf" @ 0x4a4906 / "expansion\\%s\\G%s.sbf" @ 0x4a4936].
+		# (the subdir witness lives at the engine home, audio/music_policy.h).
 		# Resolve its spelling case-insensitively, as retail did on Windows. Keep
 		# the actual on-disk spelling for case-sensitive filesystems, and poison an
 		# ambiguous duplicate instead of choosing by enumeration order.
-		var expansion_dir: String = root.get_root_dir().path_join("expansion").path_join(exp_name)
-		var bank_path := _resolve_loose_file(expansion_dir, stem + ".sbf")
+		var expansion_dir: String = root.get_root_dir().path_join(subdir)
+		var bank_path := _resolve_loose_file(expansion_dir, bank_file)
 		# Retail writes both expansion names immediately after the expansion PFF
 		# exists-check. Preserve the actual spelling when the bank exists, but keep
 		# the canonical missing path otherwise so the bank-first open fails silent.
-		pair.bank = bank_path if not bank_path.is_empty() else expansion_dir.path_join(stem + ".sbf")
-		pair.script_name = stem + ".bin"
+		pair.bank = bank_path if not bank_path.is_empty() else expansion_dir.path_join(bank_file)
+		pair.script_name = script_file
 		return pair
-	pair.bank = String(root.resolve_file(base_stem + ".sbf"))
-	pair.script_name = base_stem + ".bin" if root.has_file(base_stem + ".bin") else ""
+	pair.bank = String(root.resolve_file(bank_file))
+	pair.script_name = script_file if root.has_file(script_file) else ""
 	return pair
 
 
@@ -107,7 +119,7 @@ static func _resolve_loose_file(dir_path: String, filename: String) -> String:
 ## seams (an explicit script loads by loose path via ResourceLoader).
 ## Returns true when the context is loaded and the VM has been freshly started.
 func open_menu_context(root, script_override := "", bank_override := "") -> bool:
-	var pair := resolve_music_pair(root, "M", "menumus")
+	var pair := resolve_menu_music_pair(root)
 	var bank_path := pair.bank
 	if not bank_override.is_empty() and root != null:
 		bank_path = String(root.resolve_file(bank_override))  # explicit override wins
@@ -120,16 +132,19 @@ func open_menu_context(root, script_override := "", bank_override := "") -> bool
 ## (g_path_game_sbf/bin), else AudioVM_StopMusicContext @ 0x671e00]; ours opens
 ## it in ALL sessions — D-MUS-SPGATE, maintainer decision 2026-07-09 (our SP
 ## runs as a listen server, ADR 0009/0011/0012). The witnessed var seeding runs
-## after the open exactly as retail's mission start does on both branches
-## [orig: @ 0x5255b3-0x52561b]: Var1 = g_music_mission_state_seed (never
-## written -> always 0; gamemus loops its Multiplayerstart P0 track),
-## Var2..Var6 = 0, Var7 = 100 (health %), Var8..Var12 = 0.
+## after the open exactly as retail's mission start does on both branches:
+## GAME_SEEDED_VAR_FIRST..LAST zeroed except GAME_VAR_HEALTH_PCT =
+## GAME_HEALTH_SEED (GAME_VAR_MISSION_STATE stays 0 — never written by retail,
+## so gamemus loops its Multiplayerstart P0 track); the slot/seed witnesses
+## live at the engine home, engine/runtime/audio audio/music_policy.h.
 func open_game_context(root) -> bool:
-	var pair := resolve_music_pair(root, "G", "gamemus")
+	var pair := resolve_game_music_pair(root)
 	var opened := _open_context("game", root, pair.bank, pair.script_name, "")
 	if opened:
-		for idx in range(SEEDED_VARS_FIRST, SEEDED_VARS_LAST + 1):
-			_director.set_var(idx, 100 if idx == VAR_HEALTH_PCT else 0)
+		for idx in range(MusicDirector.GAME_SEEDED_VAR_FIRST,
+				MusicDirector.GAME_SEEDED_VAR_LAST + 1):
+			_director.set_var(idx, MusicDirector.GAME_HEALTH_SEED
+					if idx == MusicDirector.GAME_VAR_HEALTH_PCT else 0)
 	return opened
 
 

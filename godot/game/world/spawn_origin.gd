@@ -1,24 +1,24 @@
 class_name SpawnOrigin
 extends RefCounted
 
-## The ONE GDScript home for the spawn-origin provenance word decode:
-## (kind << 24) | (record index & 0xFFFFFF); NONE = no provenance.
-## C++ twin: engine/runtime/world entity.h spawn_origin_pack/kind/index (packed by
-## mission promotion; consumed by the present passes).
+## Thin re-export of the spawn-origin provenance word decode:
+## (kind << 24) | (record index & 0xFFFFFF); NONE = no provenance. The engine
+## home is engine/runtime/world entity.h spawn_origin_pack/kind/index (bound as
+## Simulation.SPAWN_ORIGIN_* + spawn_origin_* statics; packed by mission
+## promotion, consumed by the present passes).
 
-const KIND_SHIFT := 24
-const KIND_MASK := 0xFF
-const INDEX_MASK := 0xFFFFFF
-const NONE := 0xFFFFFFFF
+const NONE := Simulation.SPAWN_ORIGIN_NONE
+const KIND_NONE := Simulation.SPAWN_ORIGIN_KIND_NONE
+const INDEX_NONE := Simulation.SPAWN_ORIGIN_INDEX_NONE
 
 
 static func pack(kind: int, index: int) -> int:
-	return ((kind & KIND_MASK) << KIND_SHIFT) | (index & INDEX_MASK)
+	return Simulation.spawn_origin_pack(kind, index)
 
 
 static func kind(origin: int) -> int:
-	return (origin >> KIND_SHIFT) & KIND_MASK
+	return Simulation.spawn_origin_kind(origin)
 
 
 static func index(origin: int) -> int:
-	return origin & INDEX_MASK
+	return Simulation.spawn_origin_index(origin)

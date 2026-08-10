@@ -140,6 +140,7 @@ static func _make_row(
 		"alive": bool(detail.get("alive", false)),
 		"hidden": bool(detail.get("hidden", false)),
 		"world_position": position,
-		"mission_position": Vector3(position.x, -position.z, position.y),
+		# The engine axis map (mission/placement_traits.h presentation_to_bms_position).
+		"mission_position": MissionObjectPlacer.godot_to_bms_position(position),
 		"detail": detail,
 	}

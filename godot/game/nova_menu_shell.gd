@@ -21,17 +21,14 @@ extends Control
 
 const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 
-# Var index the director sets to the current screen's MUSICVAR. The menumus MUS
-# script reads its section discriminator at var INDEX 2 (golden test
-# tests/mus/mus_vm_test.cpp drives "jo_menumus.bin" via var 2; gamemus uses var 1),
-# so the screen MUSICVAR must land at var2 — at index 0 it was inert and the VM
-# always ran the var2=0 path (P1,P2 then a P0 loop) instead of the screen's section
-# (the main menu's MUSICVAR=1 selects the P2..P8 theme). The original stores the
-# active screen's MUSICVAR to Var2 on every screen event [orig:
-# UI_DispatchScreenEvent @ 0x54e6a0, store @ 0x54eff4 -> AudioVM_SetVariable(2, v)].
-# setup() pushes it synchronously (open_menu rebuilds in place) before the
-# director's first _process tick, so the VM starts in the right section.
-const MUSIC_VAR_INDEX := 2
+# The director var the current screen's MUSICVAR lands in is
+# MusicDirector.MENU_MUSIC_VAR_SLOT — the witness lives at the engine home,
+# engine/runtime/audio audio/music_policy.h kMenuMusicVarSlot (the menumus MUS
+# script reads its section discriminator there; at index 0 it was inert and
+# the VM always ran the var2=0 path instead of the screen's section — golden
+# test tests/mus/mus_vm_test.cpp). setup() pushes it synchronously (open_menu
+# rebuilds in place) before the director's first _process tick, so the VM
+# starts in the right section.
 
 # Friendly labels for known expansions. The list item + persisted key stay the raw
 # folder name (e.g. "jox01"); unknown expansions display their raw folder name.
@@ -59,7 +56,8 @@ const EXPANSION_DISPLAY_NAMES := {"jox01": "Kendari"}
 # Interactive music: the engine hardcodes two bank+script pairs -- MENUMUS.SBF/.BIN
 # (menu) and GAMEMUS.SBF/.BIN (game), renamed to M<n>/G<n> forms when expansion <n>
 # is active [orig: Expansion_LoadAssets @ 0x4a4798]. Blank = that witnessed
-# resolution (see resolve_music_pair); an explicit value wins (loose dev override).
+# resolution (see resolve_menu_music_pair / resolve_game_music_pair); an
+# explicit value wins (loose dev override).
 @export var menu_sound_bank_file := ""   # "" -> MENUMUS.SBF (M<n>.sbf under an expansion)
 # Menu SFX profile: the .lwf the widgets' <SOUND> elements reference (hover/click).
 # "" -> a .lwf whose name contains "menu" (i.e. menu.lwf), else the first .lwf found.
@@ -237,7 +235,7 @@ func _assemble_assets() -> void:
 	# streams one AudioVM context at a time); the driver pushes each screen's
 	# MUSICVAR into its director at the menumus discriminator index.
 	_driver.set_music_director(NovaMusicService.director())
-	_driver.set_music_var_index(MUSIC_VAR_INDEX)
+	_driver.set_music_var_index(MusicDirector.MENU_MUSIC_VAR_SLOT)
 
 	# Connect once on the persistent driver (screens reconfigure under it;
 	# these aggregate signals survive).
@@ -490,8 +488,10 @@ func _apply_expansion(name: String) -> void:
 	# A full context reload clears the AudioVM globals. Preserve the active
 	# screen selector so the expansion's newly selected M<n> script enters the
 	# same menu section [orig: Expansion_ReloadAllAssets @ 0x568370 followed by
-	# UI_DispatchScreenEvent @ 0x54e6a0 -> AudioVM_SetVariable(2, MUSICVAR)].
-	var active_music_var := NovaMusicService.get_var(MUSIC_VAR_INDEX)
+	# UI_DispatchScreenEvent @ 0x54e6a0 -> AudioVM_SetVariable(slot, MUSICVAR);
+	# the slot witness lives at the engine home, audio/music_policy.h
+	# kMenuMusicVarSlot].
+	var active_music_var := NovaMusicService.get_var(MusicDirector.MENU_MUSIC_VAR_SLOT)
 	if _root.mount_runtime(dir, name, LaunchFlags.loose_override_enabled()) != OK:
 		push_warning("MenuShell: could not mount expansion '%s': %s" % [name, _root.get_last_error()])
 		_root.mount_runtime(dir, prev, LaunchFlags.loose_override_enabled())  # rollback
@@ -499,7 +499,7 @@ func _apply_expansion(name: String) -> void:
 	ResourceDirSettings.set_expansion(name)
 	_selected_expansion = name
 	_enter_menu_music()
-	NovaMusicService.set_var(MUSIC_VAR_INDEX, active_music_var)
+	NovaMusicService.set_var(MusicDirector.MENU_MUSIC_VAR_SLOT, active_music_var)
 	_refresh_dependent_content()
 	_update_mod_desc(name)
 
@@ -634,12 +634,17 @@ func _discover_name(explicit: String, suffix: String, prefer: String) -> String:
 	return String(files[0]).get_file()
 
 
-# The witnessed music-pair resolution (base MENUMUS/GAMEMUS names, expansion
-# M<n>/G<n> forms, complete-pair-or-base fallback) lives on NovaMusicService;
-# this seam keeps it queryable against the shell's root (ADR 0018 — tests and
-# diagnostics read it here, not the privates).
-func resolve_music_pair(prefix: String, base_stem: String) -> MusicPair:
-	return NovaMusicService.resolve_music_pair(_root, prefix, base_stem)
+# The witnessed music-pair resolution (engine-derived names via
+# MusicDirector.resolve_*_music_pair + the VFS/loose fallback orchestration)
+# lives on NovaMusicService; these seams keep it queryable against the
+# shell's root (ADR 0018 — tests and diagnostics read it here, not the
+# privates).
+func resolve_menu_music_pair() -> MusicPair:
+	return NovaMusicService.resolve_menu_music_pair(_root)
+
+
+func resolve_game_music_pair() -> MusicPair:
+	return NovaMusicService.resolve_game_music_pair(_root)
 
 
 # The visual menu assets (.mnu document, .mns stylesheet, RTXT text) load through

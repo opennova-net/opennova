@@ -6,13 +6,9 @@ extends Control
 ## HUD dispatcher, so health, stance, ammo, objectives, and triggered text remain
 ## visible while either effect is active.
 
-const DESIGN_SIZE := Vector2(1024.0, 768.0)
-const BINOCULAR_CROSSHAIR_RECT := Rect2(384.0, 256.0, 256.0, 256.0)
-const BINOCULAR_DIGIT_POS := Vector2(486.0, 683.0)
-const BINOCULAR_DIGIT_STEP := 10.0
-const NVG_SCALE_RECT := Rect2(960.0, 32.0, 48.0, 32.0)
-const DIGIT_SIZE := Vector2(16.0, 16.0)
-const NVG_SCALE_MODULATE := Color(127.0 / 255.0, 127.0 / 255.0, 127.0 / 255.0, 1.0)
+# The design space, overlay rects, digit metrics, and NVG modulate are the
+# engine's HudPos constants/statics — the witnesses live at the engine home,
+# engine/runtime/hud hud/view_effects.h.
 const NVG_SHADER := preload("res://shaders/nvg_view.gdshader")
 
 var _root: ResourceRoot
@@ -63,26 +59,11 @@ func update_info(info: Dictionary) -> void:
 
 ## Retail's persistent rangefinder easing. Large corrections step quickly while
 ## the final digits settle one unit at a time; the value is intentionally retained
-## while the binocular view is temporarily suppressed or toggled away.
-## [orig: the misnamed HUD_DrawSpeedometer @0x590810]
+## while the binocular view is temporarily suppressed or toggled away. The math
+## is the engine's HudPos.binocular_range_step — the witness lives at the engine
+## home, hud/view_effects.h [orig: the misnamed HUD_DrawSpeedometer @0x590810].
 static func smooth_range_value(current: int, target: int) -> int:
-	target = clampi(target, 1, 1000)
-	var delta := target - current
-	var magnitude := absi(delta)
-	if magnitude == 0:
-		return current
-	if magnitude > 1000:
-		return target
-	var step := 1
-	if magnitude > 111:
-		step = 111
-	elif magnitude > 33:
-		step = 33
-	elif magnitude > 11:
-		step = 11
-	elif magnitude > 3:
-		step = 3
-	return current + step * (1 if delta > 0 else -1)
+	return HudPos.binocular_range_step(current, target)
 
 
 func _notification(what: int) -> void:
@@ -104,9 +85,11 @@ func _draw_nvg(surface: Vector2) -> void:
 	if _nvg_scale == null:
 		return
 	var gain := clampi(int(_info.get("nvg_gain", 0)), 0, 4)
-	var source := Rect2(0.0, float(gain * 16), 16.0, 16.0)
-	draw_texture_rect_region(_nvg_scale, _scale_rect(NVG_SCALE_RECT, surface), source,
-			NVG_SCALE_MODULATE)
+	var source := Rect2(0.0, float(gain * HudPos.VIEW_DIGIT_CELL),
+			float(HudPos.VIEW_DIGIT_CELL), float(HudPos.VIEW_DIGIT_CELL))
+	draw_texture_rect_region(_nvg_scale,
+			HudPos.scale_rect(HudPos.nvg_scale_rect(), surface), source,
+			HudPos.nvg_scale_modulate())
 
 
 func _draw_binoculars(surface: Vector2) -> void:
@@ -114,22 +97,20 @@ func _draw_binoculars(surface: Vector2) -> void:
 		draw_texture_rect(_binocular_mask, Rect2(Vector2.ZERO, surface), false)
 	if _binocular_crosshair != null:
 		draw_texture_rect(_binocular_crosshair,
-				_scale_rect(BINOCULAR_CROSSHAIR_RECT, surface), false)
+				HudPos.scale_rect(HudPos.binocular_crosshair_rect(), surface), false)
 	if _binocular_numbers == null:
 		return
 	var digits := "%04d" % clampi(_range_display, 0, 1000)
 	for i in 4:
 		var digit := digits.unicode_at(i) - 48
 		var target := Rect2(
-				BINOCULAR_DIGIT_POS + Vector2(BINOCULAR_DIGIT_STEP * i, 0.0),
-				DIGIT_SIZE)
-		var source := Rect2(0.0, float(digit * 16), 16.0, 16.0)
-		draw_texture_rect_region(_binocular_numbers, _scale_rect(target, surface), source)
-
-
-func _scale_rect(design_rect: Rect2, surface: Vector2) -> Rect2:
-	var scale_v := surface / DESIGN_SIZE
-	return Rect2(design_rect.position * scale_v, design_rect.size * scale_v)
+				HudPos.binocular_digit_pos()
+					+ Vector2(HudPos.BINOCULAR_DIGIT_STEP * i, 0.0),
+				Vector2(HudPos.VIEW_DIGIT_CELL, HudPos.VIEW_DIGIT_CELL))
+		var source := Rect2(0.0, float(digit * HudPos.VIEW_DIGIT_CELL),
+				float(HudPos.VIEW_DIGIT_CELL), float(HudPos.VIEW_DIGIT_CELL))
+		draw_texture_rect_region(_binocular_numbers,
+				HudPos.scale_rect(target, surface), source)
 
 
 func _load_texture(name: String) -> Texture2D:

@@ -34,13 +34,9 @@ const OBJECTS_CONTAINER := "MissionObjects"
 # the "terrain changed under N objects" prompt and the move share one policy.
 const REGROUND_EPSILON := 0.01
 
-# AI-change action family + the PLAYPARTANIM sub-type, for resolving a scripting action's target to a
-# live model for in-editor preview. Mirrors the runtime present pass. [orig: Entity_ApplyCommand case 0x22]
-const _ACT_CHANGE_GROUP_AI := 3
-const _ACT_AREA_AI_RED := 12
-const _ACT_AREA_AI_BLUE := 13
-const _ACT_CHANGE_SINGLE_AI := 21
-const _AI_SUB_PLAYPARTANIM := 34
+# The AI-change action family + the PLAYPARTANIM sub-type used by the in-editor preview are the
+# bound MissionData.ACTION_* names — the id witnesses live at the engine home,
+# engine/formats/mission bms.h [orig: Entity_ApplyCommand case 0x22].
 
 # Editing modes. The viewport + inspector follow the active mode; they are mutually exclusive
 # (entering one drops every other's selection + armed tool). OBJECTS is the default (P1-P5

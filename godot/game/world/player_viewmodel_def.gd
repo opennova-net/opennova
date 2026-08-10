@@ -23,7 +23,10 @@ var animadm := ""    # the shared animation set (.adm basename)
 var pos_units := Vector3.ZERO       # hip view bias, raw def units
 var rot_bias_deg := Vector3.ZERO    # def rot columns: yaw/pitch/roll degrees
 var tpos_units := Vector3.ZERO      # ADS view bias [orig: WeaponDef.AltCamOffset @0x10C]
-var renderfov_h_deg := 80.0
+# Record default = the engine base camera fov (world/player_view.h
+# kPlayerCameraFovHDeg, Simulation.DEFAULT_PLAYER_FOV_H_DEG)
+# [orig: renderfov default flt_7D1898 @0x53ff31].
+var renderfov_h_deg: float = Simulation.DEFAULT_PLAYER_FOV_H_DEG
 # The witnessed WeaponDef+8 flag mask (file tokens: scoped 1, sighted 2, burst 0x20,
 # auto 0x100) — Flags & 3 gates the ADS toggle [orig: Player_ToggleWeaponScope
 # @0x4df0c0] — and the ADS zoom magnification (scoped camera FOV = 80 / zoom
@@ -55,7 +58,7 @@ static func from_weapon_dict(d: Dictionary) -> PlayerViewmodelDef:
 	var tpos: PackedFloat32Array = d.get("tpos", PackedFloat32Array())
 	if tpos.size() >= 3:
 		out.tpos_units = Vector3(tpos[0], tpos[1], tpos[2])
-	out.renderfov_h_deg = float(d.get("renderfov", 80.0))
+	out.renderfov_h_deg = float(d.get("renderfov", Simulation.DEFAULT_PLAYER_FOV_H_DEG))
 	out.flags = int(d.get("flags", 0))
 	out.scope_max_mag = float(d.get("scope_max_mag", 0.0))
 	out.clipsize = int(d.get("clipsize", 0))

@@ -183,9 +183,10 @@ func consume(view: PlayerWeaponView,
 					view.anim_age_ticks, false)
 
 
-# The FIRE action kind [orig: engine/runtime/world weapon_fsm.h weapon_action::kFire = 2] —
-# the only local action-begin that takes the with-effect (muzzle) shim.
-const WEAPON_ACTION_FIRE := 2
+# The FIRE action kind — the only local action-begin that takes the with-effect
+# (muzzle) shim. The witness lives at the engine home, engine/runtime/world
+# weapon_fsm.h weapon_action::kFire, bound as Simulation.WEAPON_ACTION_FIRE.
+const WEAPON_ACTION_FIRE := Simulation.WEAPON_ACTION_FIRE
 
 
 # Weapon particles always enter the global EffectWorld and render in the later

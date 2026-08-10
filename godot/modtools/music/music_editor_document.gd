@@ -717,38 +717,11 @@ func _section_window_end(lines: PackedStringArray, header_idx: int) -> int:
 # compound if/on blocks that a brace scanner mishandles. The C++ twin of these
 # transforms is proven byte-stable in tests/mus/mus_structured_section_edit_test.cpp.
 
-# MusAstStmtKind mirror (engine/formats/mus/include/mus/ast.h). The annotated rows carry the
-# kind so the anchor logic can find a section's terminator.
-const _K_PLAY := 0
-const _K_TRANSITION := 1
-const _K_GOTO := 2
-const _K_CALL := 3
-const _K_RETURN := 4
-const _K_YIELD := 5
-const _K_NOP := 6
-const _K_DONE := 7
-const _K_ASSIGN := 8
-const _K_INCDEC := 9
-const _K_EXPR := 10
-const _K_IF := 11
-const _K_SWITCH := 12
-const _K_BRANCH_COMMENT := 13
-# enter (0x38) frame setup: a read-only annotation, never mutable. Its operand is
-# a locals dword count, not a section index; rewriting it as a transition (the
-# decompiler/compiler collapse "enter" to setstate 0x3B) would corrupt the frame.
-const _K_FRAME_ENTER := 14
-
-# Statements that end (or redirect) a section's straight-line flow. A new
-# statement inserts before the first of these so it actually runs. (frame_enter is
-# NOT a terminator -- 0x38 does not move the IP -- so it is excluded.)
-const _TERMINATOR_KINDS := [
-	_K_TRANSITION, _K_GOTO, _K_CALL, _K_RETURN, _K_YIELD, _K_DONE, _K_SWITCH,
-]
-
-# Structural / non-mutable rows the write path must refuse: the section-closing
-# `}` (done) and the frame-setup `enter` (0x38). Editing either corrupts the
-# section (leak the body / scramble the frame), so delete/replace/reorder reject them.
-const _LOCKED_KINDS := [_K_DONE, _K_FRAME_ENTER]
+# The statement kinds and flow classification are the engine's: the annotated
+# rows carry MusicScript.AST_* kinds, and the terminator/locked authoring rules
+# ride MusicScript.ast_kind_is_terminator/ast_kind_is_locked — the one home
+# (with the frame_enter-is-not-a-terminator and done/enter-are-structural
+# witnesses) is engine/formats/mus mus/ast.h.
 
 
 # The Phase-2 gate. Same body as can_edit_plays() (single chunk, compiles); a
@@ -807,7 +780,7 @@ func _find_row(rows: Array, section_index: int, ordinal: int) -> Dictionary:
 # section ends in a `done`, so the terminator branch always fires for real scripts.
 func _anchor_line(srows: Array) -> int:
 	for r in srows:
-		if int(r.get("kind", -1)) in _TERMINATOR_KINDS:
+		if MusicScript.ast_kind_is_terminator(int(r.get("kind", -1))):
 			return int(r.get("line_start", -1))
 	if not srows.is_empty():
 		return int(srows[-1].get("line_end", -1))
@@ -845,7 +818,7 @@ func delete_statement(section_index: int, ordinal: int) -> bool:
 		return false
 	# The section-closing `}` (done) is structural -- deleting it would leak the
 	# section into the next; the frame-setup `enter` (0x38) is read-only. Keep both.
-	if int(row.get("kind", -1)) in _LOCKED_KINDS:
+	if MusicScript.ast_kind_is_locked(int(row.get("kind", -1))):
 		return false
 	var ls := int(row.get("line_start", -1))
 	var le := int(row.get("line_end", -1))
@@ -867,7 +840,7 @@ func replace_statement(section_index: int, ordinal: int, lines: PackedStringArra
 	var row := _find_row(ann.get("rows", []), section_index, ordinal)
 	if row.is_empty():
 		return false
-	if int(row.get("kind", -1)) in _LOCKED_KINDS:
+	if MusicScript.ast_kind_is_locked(int(row.get("kind", -1))):
 		return false
 	var ls := int(row.get("line_start", -1))
 	var le := int(row.get("line_end", -1))
@@ -915,7 +888,8 @@ func reorder_statement(section_index: int, ordinal: int, direction: int) -> bool
 	var hi: Dictionary = srows[maxi(pos, other)]
 	# Don't shuffle across a locked row (the section terminator `}` would leak into
 	# the tail; the frame-setup `enter` is read-only).
-	if int(lo.get("kind", -1)) in _LOCKED_KINDS or int(hi.get("kind", -1)) in _LOCKED_KINDS:
+	if MusicScript.ast_kind_is_locked(int(lo.get("kind", -1))) \
+			or MusicScript.ast_kind_is_locked(int(hi.get("kind", -1))):
 		return false
 	if int(lo.get("line_end", -1)) != int(hi.get("line_start", -2)):
 		return false
@@ -948,7 +922,7 @@ func _row_pos(srows: Array, ordinal: int) -> int:
 # section close / engine-dispatch tail.
 func _first_terminator_pos(srows: Array) -> int:
 	for i in range(srows.size()):
-		if int(srows[i].get("kind", -1)) in _TERMINATOR_KINDS:
+		if MusicScript.ast_kind_is_terminator(int(srows[i].get("kind", -1))):
 			return i
 	return srows.size()
 
@@ -970,7 +944,7 @@ func insert_statement_at(section_index: int, before_ordinal: int, lines: PackedS
 	var pos := _row_pos(srows, before_ordinal)
 	if pos < 0 or pos > _first_terminator_pos(srows):
 		return false
-	if int(srows[pos].get("kind", -1)) == _K_FRAME_ENTER:
+	if int(srows[pos].get("kind", -1)) == MusicScript.AST_FRAME_ENTER:
 		return false
 	var at := int(srows[pos].get("line_start", -1))
 	if at < 0:
@@ -996,7 +970,7 @@ func move_statement(section_index: int, ordinal: int, before_ordinal: int) -> bo
 	if pos < 0:
 		return false
 	var row: Dictionary = srows[pos]
-	if int(row.get("kind", -1)) in _LOCKED_KINDS:
+	if MusicScript.ast_kind_is_locked(int(row.get("kind", -1))):
 		return false
 	var term := _first_terminator_pos(srows)
 	if pos > term:
@@ -1012,7 +986,7 @@ func move_statement(section_index: int, ordinal: int, before_ordinal: int) -> bo
 		var tpos := _row_pos(srows, before_ordinal)
 		if tpos < 0 or tpos > term:
 			return false
-		if int(srows[tpos].get("kind", -1)) == _K_FRAME_ENTER:
+		if int(srows[tpos].get("kind", -1)) == MusicScript.AST_FRAME_ENTER:
 			return false
 		at = int(srows[tpos].get("line_start", -1))
 	if at < 0 or (at > ls and at < le):
@@ -1057,7 +1031,7 @@ func set_run_count(section_index: int, start_ordinal: int, old_count: int, new_c
 		var r: Dictionary = srows[pos + i]
 		if int(r.get("ordinal", -1)) != start_ordinal + i:
 			return false  # a hidden row interrupts the run
-		if int(r.get("kind", -1)) in _LOCKED_KINDS:
+		if MusicScript.ast_kind_is_locked(int(r.get("kind", -1))):
 			return false
 		if int(r.get("line_start", -1)) != ls + i or int(r.get("line_end", -1)) != ls + i + 1:
 			return false  # multi-line or non-adjacent: not a foldable run

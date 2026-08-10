@@ -354,10 +354,12 @@ func _refresh_entity_detail(force_editor_values := false) -> void:
 	if force_editor_values or not _entity_editor_has_focus():
 		_health_value.value = int(card.get("health", 0))
 		# get_entity_debug.position is Godot world; the public edit seam accepts
-		# mission coordinates (x, y, z) = (gx, -gz, gy).
-		_position_values[0].value = pos.x
-		_position_values[1].value = -pos.z
-		_position_values[2].value = pos.y
+		# mission coordinates — the engine axis map
+		# (mission/placement_traits.h presentation_to_bms_position).
+		var mission_pos := MissionObjectPlacer.godot_to_bms_position(pos)
+		_position_values[0].value = mission_pos.x
+		_position_values[1].value = mission_pos.y
+		_position_values[2].value = mission_pos.z
 	_set_editors_visible(true)
 	_refresh_edit_state()
 

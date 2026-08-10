@@ -284,16 +284,16 @@ func save_as_path(path: String) -> Error:
 
 # --- Internals ----------------------------------------------------------------
 
-# Stage terrain base heights on the document for a .mis save: one 16.16 fixed-point height per
-# entity, FLAT in the .mis writer's order (items, buildings, markers, organics). The original
-# editor subtracts extra_bheight from a height-locked item's absolute z to recover the
-# terrain-relative offset [orig: MisLdr_WriteNileProjectXml @ 0x10004930, misldr.dll], so each
-# entity's base height is the terrain height under its (x, y) plane position — sampled through
-# the same transform the placer uses (bms_to_godot_position maps mission (x, y, z) to godot
-# (x, z, -y)): the godot-world sample point for mission (x, y) is (x, -y), and the sampled godot
-# Y IS the mission z-units height. Off-terrain samples (NAN) bake 0; with no terrain surface at
-# all nothing is staged (extra_bheight stays 0 — positions remain absolute-declared either way,
-# only the baked base is absent).
+# Stage terrain base heights on the document for a .mis save: one height per entity, FLAT in
+# the .mis writer's order (items, buildings, markers, organics). The original editor subtracts
+# extra_bheight from a height-locked item's absolute z to recover the terrain-relative offset
+# [orig: MisLdr_WriteNileProjectXml @ 0x10004930, misldr.dll], so each entity's base height is
+# the terrain height under its plane position — sampled through the same transform the placer
+# uses (MissionObjectPlacer.bms_to_godot_position; the axis map lives at that engine home), and
+# the sampled godot Y IS the mission z-units height. The 16.16 encode and the NAN-bakes-0 rule
+# live on MissionData.set_mis_base_heights_world; with no terrain surface at all nothing is
+# staged (extra_bheight stays 0 — positions remain absolute-declared either way, only the baked
+# base is absent).
 func _stage_mis_base_heights() -> void:
 	if _c._mission == null or _c.terrain_editor == null:
 		return
@@ -301,18 +301,14 @@ func _stage_mis_base_heights() -> void:
 	for kind in [MissionData.KIND_ITEM, MissionData.KIND_BUILDING, MissionData.KIND_MARKER, MissionData.KIND_ORGANIC]:
 		for e in _c._mission.get_entities(kind):
 			var pos: Vector3 = (e as Dictionary).get("position", Vector3.ZERO)
-			points.append(Vector2(pos.x, -pos.y))
+			var g := MissionObjectPlacer.bms_to_godot_position(pos)
+			points.append(Vector2(g.x, g.z))
 	if points.is_empty():
 		return
 	var heights: PackedFloat32Array = _c.terrain_editor.sample_heights_world(points)
 	if heights.size() != points.size():
 		return
-	var fixed := PackedInt32Array()
-	fixed.resize(points.size())
-	for i in points.size():
-		var h := heights[i]
-		fixed[i] = 0 if is_nan(h) else int(roundf(h * 65536.0))
-	_c._mission.set_mis_base_heights(fixed)
+	_c._mission.set_mis_base_heights_world(heights)
 
 
 # Load the mission's environment into the shared editor environment. Returns a

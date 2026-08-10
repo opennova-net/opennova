@@ -282,8 +282,11 @@ func _ctrl_state_text(model: ObjectModel) -> String:
 
 
 func _phase_text(value: int) -> String:
-	if value >= 0 and value <= 65536:
-		return "%d (%.1f%%)" % [value, float(value) * 100.0 / 65536.0]
+	# One full PLAYPARTANIM sweep is 16.16 1.0 (world/ai.h kPartAnimPhaseOne,
+	# bound as Simulation.PART_ANIM_PHASE_ONE).
+	if value >= 0 and value <= Simulation.PART_ANIM_PHASE_ONE:
+		return "%d (%.1f%%)" % [value,
+				float(value) * 100.0 / float(Simulation.PART_ANIM_PHASE_ONE)]
 	return str(value)
 
 

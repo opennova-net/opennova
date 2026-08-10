@@ -225,8 +225,10 @@ func _rebuild_tile_overlay_node() -> void:
 static func entry_center_world(entry: TerrainTileEntry, terrain_mesh: EditorTerrainMesh) -> Vector3:
 	if entry == null or terrain_mesh == null:
 		return Vector3.ZERO
-	var center_x := float(entry.get_x_fixed()) / 65536.0 + CELL_WORLD_SIZE * 0.5
-	var center_z := -float(entry.get_z_fixed()) / 65536.0 + CELL_WORLD_SIZE * 0.5
+	# The fixed-point scale and the z negation live at the engine home
+	# (engine/formats/til til.h, surfaced as get_world_x/get_world_z).
+	var center_x := float(entry.get_world_x()) + CELL_WORLD_SIZE * 0.5
+	var center_z := float(entry.get_world_z()) + CELL_WORLD_SIZE * 0.5
 	var center_y := terrain_mesh.sample_world_height(center_x, center_z)
 	if center_y <= -1000000.0:
 		center_y = 0.0
@@ -355,8 +357,9 @@ func _rebuild_ghost_mesh() -> void:
 
 
 func _build_entry_quad(entry: TerrainTileEntry, y_offset: float) -> Array:
-	var origin_x := float(entry.get_x_fixed()) / 65536.0
-	var origin_z := -float(entry.get_z_fixed()) / 65536.0
+	# Fixed->world (scale + z negation) is the engine's (til.h get_world_x/z).
+	var origin_x := float(entry.get_world_x())
+	var origin_z := float(entry.get_world_z())
 	var x1 := origin_x + CELL_WORLD_SIZE
 	var z1 := origin_z + CELL_WORLD_SIZE
 

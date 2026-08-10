@@ -9,9 +9,11 @@ extends Control
 const FntEditorDocument = preload("res://modtools/fonts/fnt_editor_document.gd")
 const EngineTextPreviewScript = preload("res://modtools/framework/engine_text_preview.gd")
 const EDITOR_THEME_PATH := "res://modtools/editor/ui/theme/editor_theme.tres"
-const FIRST_CHAR := 32
-const GLYPH_COUNT := 224
-const TEX_SIZE := 256
+# The .fnt glyph range and page size are the engine's (FntResource.*; the
+# format constants live at the engine home, engine/formats/fnt fnt.h).
+const FIRST_CHAR := FntResource.FIRST_CHAR
+const GLYPH_COUNT := FntResource.GLYPH_COUNT
+const TEX_SIZE := FntResource.TEXTURE_WIDTH  # pages are square (== TEXTURE_HEIGHT)
 
 const TOOL_PENCIL := "pencil"
 const TOOL_ERASER := "eraser"
@@ -547,7 +549,7 @@ func _build_inspector_rows(box: VBoxContainer) -> void:
 	var xy := _add_spin_pair(box, "Pos X/Y", 0, 255, 1)
 	_glyph_x_spin = xy[0]
 	_glyph_y_spin = xy[1]
-	var wh := _add_spin_pair(box, "Size W/H", 0, 256, 1)
+	var wh := _add_spin_pair(box, "Size W/H", 0, TEX_SIZE, 1)
 	_glyph_w_spin = wh[0]
 	_glyph_h_spin = wh[1]
 	for sp in [_glyph_x_spin, _glyph_y_spin, _glyph_w_spin, _glyph_h_spin]:
@@ -937,7 +939,7 @@ func _shortcut_input(event: InputEvent) -> void:
 # --- painting surface -----------------------------------------------------------
 
 class FntCanvas extends Control:
-	const TEX := 256
+	const TEX := FntResource.TEXTURE_WIDTH  # square page (== TEXTURE_HEIGHT)
 	const GRID_THRESHOLD := 6.0
 	const COL_BG := Color(0.07, 0.08, 0.09)
 	const COL_BOARD := Color(0.18, 0.20, 0.23)

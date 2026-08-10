@@ -29,10 +29,15 @@ const MENU_SCREEN := "DEATH"
 const STYLESHEET_FILE := "menu_style.mns"
 # The menumus discriminator SLOT the driver pushes each screen's authored
 # MUSICVAR value into (death.mnu authors <MUSICVAR>3</MUSICVAR>; the slot is
-# var 2, same as MenuShell) [orig: UI_DispatchScreenEvent @ 0x54e6a0, store
-# @ 0x54eff4 -> AudioVM_SetVariable(2, v)].
-const MUSIC_VAR_INDEX := 2
-const REFRESH_INTERVAL_S := 0.25  # [orig: every 16 ticks of the 62 Hz loop @0x55477d]
+# the same as MenuShell's — the witness [orig: UI_DispatchScreenEvent
+# @ 0x54e6a0, store @ 0x54eff4 -> AudioVM_SetVariable(2, v)] lives at engine
+# audio/music_policy.h kMenuMusicVarSlot).
+const MUSIC_VAR_INDEX := MusicDirector.MENU_MUSIC_VAR_SLOT
+# The content refresh cadence: engine truth 0.256 s — 16 ticks of the 62.5 Hz
+# loop (world/tick_accumulator.h kTickDt; the witness
+# [orig: every 16 ticks @0x55477d] rides the tick, not a round 250 ms).
+# Deliberate correction: the old godot-side 0.25 approximated the tick rate.
+static var REFRESH_INTERVAL_S: float = 16.0 * Simulation.tick_dt()
 const SPAWN_LIST := "SPAWNPOINTS_LIST"
 
 signal opened

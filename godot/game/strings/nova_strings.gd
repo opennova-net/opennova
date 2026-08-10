@@ -18,8 +18,9 @@ extends Node
 ## The single-table convenience API (load_table/get_string/...) below predates
 ## the registry and keeps working unchanged; it reads the default table.
 
-## Marker formatted on lookup() misses, after the original's "??%s:%s??".
-const MISS_FORMAT := "??%s:%s??"
+# The lookup-miss marker and the override-first ordering are the engine's
+# RtxtStringFile.format_miss_marker / lookup_with_override statics — the
+# witnesses live at the engine home, engine/formats/rtxt rtxt.h.
 
 var _table: RtxtStringFile
 var _tables: Dictionary = {}
@@ -100,26 +101,17 @@ func get_override_table() -> RtxtStringFile:
 
 ## Section-scoped lookup against a named table, override-table-first. A miss
 ## returns "??section:key??", the visible marker the original engine produces,
-## so missing strings are debuggable instead of silently blank.
+## so missing strings are debuggable instead of silently blank. The ordering
+## and marker are the engine's RtxtStringFile.lookup_with_override; adopting
+## it also adopts the engine's found-entry-with-empty-text-is-a-HIT behavior
+## (returns "" — the earlier .gd version returned the miss marker for an
+## authored empty string).
 func lookup(table_name: String, section: String, key: String) -> String:
-	var entry := _lookup_raw(table_name, section, key)
-	if entry == "":
-		return MISS_FORMAT % [section, key]
-	return entry
+	return RtxtStringFile.lookup_with_override(_override_table,
+			_tables.get(table_name.to_lower()), section, key)
 
 
-## lookup() with the {hot} accelerator marker stripped for display.
+## lookup() with the {hot} accelerator marker stripped for display (the miss
+## marker never carries a {hot} token, so stripping the result is exact).
 func lookup_display(table_name: String, section: String, key: String) -> String:
-	var entry := _lookup_raw(table_name, section, key)
-	if entry == "":
-		return MISS_FORMAT % [section, key]
-	return RtxtStringFile.strip_hotkey(entry)
-
-
-func _lookup_raw(table_name: String, section: String, key: String) -> String:
-	if _override_table != null and _override_table.has_string_in_section(section, key):
-		return _override_table.get_string_in_section(section, key)
-	var table: RtxtStringFile = _tables.get(table_name.to_lower())
-	if table == null or not table.has_string_in_section(section, key):
-		return ""
-	return table.get_string_in_section(section, key)
+	return RtxtStringFile.strip_hotkey(lookup(table_name, section, key))

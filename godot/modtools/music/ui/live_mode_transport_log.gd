@@ -149,7 +149,9 @@ func _on_volume_changed(left: int, right: int) -> void:
 	_lm._vol_seen = true
 	_lm._last_vol_l = left
 	_lm._last_vol_r = right
-	_log_typed(_lm.EvType.VOLUME, "volume L=%.2f R=%.2f" % [left / 65536.0, right / 65536.0])
+	# volume_changed emits the script-domain 0..255 values directly (the 16.16
+	# decode lives at the binding's trampoline).
+	_log_typed(_lm.EvType.VOLUME, "volume L=%d R=%d" % [left, right])
 
 
 func _on_clear() -> void:

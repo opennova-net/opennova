@@ -170,37 +170,21 @@ static func add_check_row(parent: Control, label: String, pressed: bool) -> Chec
 
 
 # Parse an MNU color token into a Color, or null when it is a %VAR% reference,
-# empty, or not valid hex (so the caller can render it as "unresolved").
-# MNU colors are AARRGGBB (8 digits) or RRGGBB (6, opaque) — NOT Godot's HTML
-# RRGGBBAA, so the pairs are read by hand [orig: the menu color parser reads
-# the dword as 0xAARRGGBB, see engine/formats/mnu color handling].
+# empty, or invalid (so the caller can render it as "unresolved"). The codec is
+# the engine's (MnuDocument.parse_color_token; the AARRGGBB/RRGGBB grammar and
+# 0xAARRGGBB dword-order witness live at the engine home, engine/formats/mnu
+# mnu.h parse_hex_color). Adopting it also adopts the engine's strtol/wcstoul
+# pair decode: a 6/8-digit token with garbage digits parses those pairs as 0
+# instead of rejecting the whole token (the earlier .gd version returned null).
 static func color_from_mnu(raw: String):
-	var token := raw.strip_edges()
-	if token.begins_with("#"):
-		token = token.substr(1)
-	if token.is_empty() or token.begins_with("%"):
-		return null
-	if not ((token.length() == 6 or token.length() == 8) and token.is_valid_hex_number(false)):
-		return null
-	var a := 255
-	if token.length() == 8:
-		a = token.substr(0, 2).hex_to_int()
-		token = token.substr(2)
-	var r := token.substr(0, 2).hex_to_int()
-	var g := token.substr(2, 2).hex_to_int()
-	var b := token.substr(4, 2).hex_to_int()
-	return Color(r / 255.0, g / 255.0, b / 255.0, a / 255.0)
+	return MnuDocument.parse_color_token(raw)
 
 
-# Format a Color as an MNU hex token (uppercase). force_alpha=false drops the
-# alpha pair for fully opaque colors, keeping 6-digit-authored values 6-digit.
+# Format a Color as an MNU hex token (uppercase; MnuDocument.format_color_token,
+# the engine parse's writer counterpart). force_alpha=false drops the alpha
+# pair for fully opaque colors, keeping 6-digit-authored values 6-digit.
 static func color_to_mnu(color: Color, force_alpha := true) -> String:
-	var rgb := "%02X%02X%02X" % [
-		roundi(color.r * 255.0), roundi(color.g * 255.0), roundi(color.b * 255.0),
-	]
-	if not force_alpha and color.a >= 1.0:
-		return rgb
-	return "%02X%s" % [roundi(color.a * 255.0), rgb]
+	return MnuDocument.format_color_token(color, force_alpha)
 
 
 # Resolve a raw color token to a Color: a %VAR% goes through the stylesheet

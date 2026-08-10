@@ -39,7 +39,9 @@ const TILEINFO_LOCAL_CORNERS := [
 	Vector2(0.0, 1.0),
 	Vector2(1.0, 1.0),
 ]
-const FOLIAGE_CANONICAL_MATCHES := [254, 253, 252, 251]
+# The canonical foliage-map match codes and the def-slot cap are the engine's
+# (TerrainFoliageDef.canonical_match_for_slot() / MAX_DEFS — the table lives at
+# the engine home, engine/formats/foliage foliage.h).
 
 var data: TerrainData
 var texture_files: Dictionary = {}
@@ -487,9 +489,7 @@ func set_selected_foliage_def_index(index: int) -> void:
 
 
 func get_canonical_foliage_match(index: int) -> int:
-	if index < 0 or index >= FOLIAGE_CANONICAL_MATCHES.size():
-		return -1
-	return int(FOLIAGE_CANONICAL_MATCHES[index])
+	return TerrainFoliageDef.canonical_match_for_slot(index)
 
 
 func get_selected_foliage_paint_index() -> int:
@@ -591,7 +591,7 @@ func normalize_foliage_state_for_editor() -> void:
 
 
 func add_foliage_def() -> bool:
-	if foliage_defs.size() >= FOLIAGE_CANONICAL_MATCHES.size():
+	if foliage_defs.size() >= TerrainFoliageDef.MAX_DEFS:
 		return false
 	var def := TerrainFoliageDef.new()
 	def.color_lower = TerrainFoliageDef.COLOR_MATCH_GROUND

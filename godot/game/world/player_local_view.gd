@@ -33,7 +33,9 @@ var binocular_pitch_offset_deg := 0.0
 var nvg_active := false
 var nvg_visible := false
 var nvg_gain := 0
-var fov_h_deg := 80.0         # the main camera's HORIZONTAL fov (policy applied)
+# The main camera's HORIZONTAL fov (policy applied); default = the engine base
+# fov (world/player_view.h kPlayerCameraFovHDeg, Simulation.DEFAULT_PLAYER_FOV_H_DEG).
+var fov_h_deg: float = Simulation.DEFAULT_PLAYER_FOV_H_DEG
 var tp_anchor := Vector3.ZERO # the chased eye anchor, Godot space
 var tp_anchor_valid := false
 # Retail adds twice the live recoil accumulator to the first-person camera pitch.
@@ -77,7 +79,9 @@ static func from_view_dict(d: Dictionary) -> PlayerLocalView:
 	out.nvg_active = bool(d.get("nvg_active", false))
 	out.nvg_visible = bool(d.get("nvg_visible", false))
 	out.nvg_gain = clampi(int(d.get("nvg_gain", 0)), 0, 4)
-	out.fov_h_deg = float(d.get("fov_h_deg", 80.0))
+	# Default = the engine's base camera fov (world/player_view.h
+	# kPlayerCameraFovHDeg, bound as Simulation.DEFAULT_PLAYER_FOV_H_DEG).
+	out.fov_h_deg = float(d.get("fov_h_deg", Simulation.DEFAULT_PLAYER_FOV_H_DEG))
 	out.tp_anchor = d.get("tp_anchor", Vector3.ZERO)
 	out.tp_anchor_valid = bool(d.get("tp_anchor_valid", false))
 	out.fp_pitch_recoil_deg = float(d.get("fp_pitch_recoil_deg", 0.0))

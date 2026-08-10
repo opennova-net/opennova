@@ -179,14 +179,16 @@ func handle_key_input(event: InputEvent, active: bool) -> bool:
 		if sim != null:
 			sim.request_local_player_nvg_gain(-1)
 		return true
+	# The stance ids' witness lives at the engine home, engine/runtime/world
+	# infantry.h InfantryState::Stance (bound as Simulation.STANCE_*).
 	if key.keycode == KEY_Z:
-		_request_stance(2)  # prone [orig: case 170 sends 0xAA]
+		_request_stance(Simulation.STANCE_PRONE)  # [orig: case 170 sends 0xAA]
 		return true
 	if key.keycode == KEY_X:
-		_request_stance(1)  # crouch [orig: case 169 sends 0xA9]
+		_request_stance(Simulation.STANCE_CROUCH)  # [orig: case 169 sends 0xA9]
 		return true
 	if key.keycode == KEY_C:
-		_request_stance(0)  # stand [orig: case 172 sends 0xAC]
+		_request_stance(Simulation.STANCE_STAND)  # [orig: case 172 sends 0xAC]
 		return true
 	return false
 

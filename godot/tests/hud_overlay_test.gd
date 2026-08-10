@@ -120,7 +120,7 @@ func test_sighted_m4_builds_all_authored_sight_card_rows() -> void:
 		"Settled ADS constructs every authored M4AUTO sight-card row")
 	if card.row_count() != 3:
 		return
-	var scale_v := card.get_viewport_rect().size / Vector2(1024, 768)
+	var surface := card.get_viewport_rect().size
 	for i in range(sights.size()):
 		var row := card.get_child(i) as Control
 		assert_not_null(row, "SIGHTS row %d is a drawable Control" % i)
@@ -129,10 +129,13 @@ func test_sighted_m4_builds_all_authored_sight_card_rows() -> void:
 		var sight: Dictionary = sights[i]
 		var x1 := float(sight.get("x1", 0))
 		var y1 := float(sight.get("y1", 0))
-		var expected := Rect2(
-			Vector2(x1, y1) * scale_v,
+		# The card scales through the engine's witnessed per-corner pixel snap
+		# (HudPos.scale_rect [orig: Viewport_ScaleToVirtualCoords @0x5d2b20]),
+		# which replaced the old .gd position*scale approximation.
+		var expected := HudPos.scale_rect(Rect2(
+			Vector2(x1, y1),
 			Vector2(float(sight.get("x2", 0)) - x1,
-				float(sight.get("y2", 0)) - y1) * scale_v)
+				float(sight.get("y2", 0)) - y1)), surface)
 		assert_eq(RenderingServer.debug_canvas_item_get_rect(row.get_canvas_item()), expected,
 			"SIGHTS row %d emits its authored draw rectangle" % i)
 	var reticle_row := card.get_child(2) as Control

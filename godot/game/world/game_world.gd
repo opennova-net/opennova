@@ -2416,9 +2416,9 @@ func _music_var_pump() -> void:
 	var pump_sim := _runtime.get_sim()
 	if pump_sim == null:
 		return
-	NovaMusicService.set_var(NovaMusicService.VAR_HEALTH_PCT,
+	NovaMusicService.set_var(MusicDirector.GAME_VAR_HEALTH_PCT,
 		pump_sim.get_local_player_health_percent())
-	NovaMusicService.set_var(NovaMusicService.VAR_TEAM, _runtime.local_player_team())
+	NovaMusicService.set_var(MusicDirector.GAME_VAR_TEAM, _runtime.local_player_team())
 
 
 # The marched iris-exposure feed (D-RLIT-2): three camera-ray samples from the

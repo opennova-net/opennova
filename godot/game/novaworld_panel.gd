@@ -203,15 +203,24 @@ func _set_status(text: String) -> void:
 # Map the protocol state to plain language (no wire jargon for the player).
 func _on_state_changed(state: int) -> void:
 	match state:
-		0: _set_status("Ready.")                # Idle
-		1: _set_status("Finding the server...") # GateProbing
-		2, 3: _set_status("Connecting...")      # SessionHello / SessionJoin
-		4: _set_status("Connected.")            # Connected
-		5: _set_status("Disconnected.")         # Disconnected
-		6: _set_status("Connection problem.")   # Error
-		7: _set_status("Joining game...")       # Joining (NWJoin in flight)
-		8: _set_status("Connecting to game host...")  # InGameHello (proto switched)
-		_: _set_status("Connection problem.")
+		NovaWorldClient.STATE_IDLE:
+			_set_status("Ready.")
+		NovaWorldClient.STATE_GATE_PROBING:
+			_set_status("Finding the server...")
+		NovaWorldClient.STATE_SESSION_HELLO, NovaWorldClient.STATE_SESSION_JOIN:
+			_set_status("Connecting...")
+		NovaWorldClient.STATE_CONNECTED:
+			_set_status("Connected.")
+		NovaWorldClient.STATE_DISCONNECTED:
+			_set_status("Disconnected.")
+		NovaWorldClient.STATE_ERROR:
+			_set_status("Connection problem.")
+		NovaWorldClient.STATE_JOINING:
+			_set_status("Joining game...")       # NWJoin in flight
+		NovaWorldClient.STATE_IN_GAME_HELLO:
+			_set_status("Connecting to game host...")  # proto switched
+		_:
+			_set_status("Connection problem.")
 
 
 func _on_connected() -> void:

@@ -2,20 +2,17 @@ class_name MenuDriver
 extends RefCounted
 
 # The compiled-menu interaction runtime: drives ONE MenuFrame (the engine
-# draw-list/pump surface) over a parsed MnuDocument, replacing the deleted
-# MnuMenu Control tree. The engine owns everything witnessed — the draw walk,
-# the mouse pump, row/popup/arrow geometry, hotkey resolution, and the edit
-# ops (engine/runtime/menu; record: docs/mnu/menu-re.md). This driver is the
-# orchestration the original shell performed around those primitives: screen
-# navigation and the in-file back stack, ACTION dispatch, combo popup
-# lifecycle, selection bookkeeping, sound-trigger edges, the music-var push,
-# and the aggregate value-changed relay. The signal surface mirrors the old
-# MnuMenu node so MenuShell and the companions keep their shape.
+# draw-list/pump surface) over a parsed MnuDocument. The engine owns
+# everything witnessed — the draw walk, the mouse pump, row/popup/arrow
+# geometry, hotkey resolution, and the edit ops (engine/runtime/menu; record:
+# docs/mnu/menu-re.md). This driver is the shell-side orchestration around
+# those primitives: screen navigation + the in-file back stack, ACTION
+# dispatch, combo popup lifecycle, selection bookkeeping, sound edges, the
+# music-var push, and the aggregate value-changed relay; its signal surface
+# mirrors the deleted MnuMenu node so MenuShell + the companions keep shape.
 #
-# Addressing: widgets are addressed by their stable MnuDocument id — valid
-# across every screen of the document (the Control tree's find_child searched
-# all screens; one MenuFrame shows one screen, so per-id runtime state is
-# stored here and replayed onto the frame whenever its screen configures).
+# Addressing: widgets go by their stable MnuDocument id, valid across every
+# screen — per-id runtime state is replayed at each screen configure.
 
 signal screen_changed(screen_name: String)
 signal music_changed(music_var: int)
@@ -446,9 +443,12 @@ func widget_frame_rect(id: int) -> Rect2:
 
 
 func _design_scale() -> Vector2:
+	# The fixed authoring design space (the witness lives at the engine home,
+	# engine/runtime/menu menu_frame.h kMenuDesignWidth/Height).
 	var size := _frame.get_size()
 	if size.x > 1.0 and size.y > 1.0:
-		return Vector2(size.x / 800.0, size.y / 600.0)
+		return Vector2(size.x / float(MenuFrame.DESIGN_WIDTH),
+				size.y / float(MenuFrame.DESIGN_HEIGHT))
 	return Vector2.ONE
 
 
@@ -1013,24 +1013,27 @@ func _route_edit_key(event: InputEventKey) -> bool:
 		_focus_id = -1
 		return false
 	var id := _focus_id
+	# Godot key -> the engine's edit VK codes (the witness lives at the engine
+	# home, engine/runtime/menu menu_edit.h kEditKey*).
 	var vk := 0
 	match event.get_keycode():
-		KEY_BACKSPACE: vk = 0x08
-		KEY_ENTER, KEY_KP_ENTER: vk = 0x0D
-		KEY_END: vk = 0x23
-		KEY_HOME: vk = 0x24
-		KEY_LEFT: vk = 0x25
-		KEY_RIGHT: vk = 0x27
-		KEY_DELETE: vk = 0x2E
+		KEY_BACKSPACE: vk = MenuFrame.EDIT_KEY_BACKSPACE
+		KEY_ENTER, KEY_KP_ENTER: vk = MenuFrame.EDIT_KEY_ENTER
+		KEY_END: vk = MenuFrame.EDIT_KEY_END
+		KEY_HOME: vk = MenuFrame.EDIT_KEY_HOME
+		KEY_LEFT: vk = MenuFrame.EDIT_KEY_LEFT
+		KEY_RIGHT: vk = MenuFrame.EDIT_KEY_RIGHT
+		KEY_DELETE: vk = MenuFrame.EDIT_KEY_DELETE
 	if vk != 0:
 		var result := _frame.edit_key(index, vk, event.is_shift_pressed())
-		if result == 2:
-			# Enter commits: the value fires and focus releases [orig:
-			# edit_widget_handle_key_event @ 0x6623a0 — clears g_ui_focus_wnd
-			# and fires the commit event 0x7000002].
+		if result == MenuFrame.EDIT_RESULT_COMMIT:
+			# Enter commits: the value fires and focus releases (the witness
+			# lives at the engine home, engine/runtime/menu menu_edit.h
+			# EditKeyResult::kCommit — clears g_ui_focus_wnd and fires the
+			# commit event 0x7000002).
 			_clear_edit_focus()
 			_play_widget_sound_state(id, "SELECTED")
-		elif result == 1:
+		elif result == MenuFrame.EDIT_RESULT_CHANGED:
 			_emit_edit_changed(id)
 		return true
 	var unicode := event.get_unicode()

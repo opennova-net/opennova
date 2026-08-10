@@ -28,10 +28,8 @@ const ORGANIC_LIMB_COLOR := Color(0.45, 1.0, 0.25, 0.95)
 const ORGANIC_MASKED_COLOR := Color(0.45, 0.08, 0.08, 0.8)
 const ORGANIC_FALLBACK_COLOR := Color(1.0, 0.65, 0.15, 0.95)
 
-# Face flags that change the read of a triangle.
-const FLAG_NEVER_HIT := 0x100   # authored never-hit — rounds ignore it
-const FLAG_DOUBLE_SIDED := 0x800
-const FLAG_BOTH_SIDES := 0x1
+# Face flags that change the read of a triangle come from the engine
+# (world/collision.h kFaceFlag*, bound as Simulation.FACE_FLAG_*).
 
 var _mesh: ImmediateMesh        # static entities: rebuilt only on set/pose/husk change
 var _dyn_multimesh: MultiMesh   # posed organic spheres: retained across pose updates
@@ -50,29 +48,23 @@ static func material_color(mat: int) -> Color:
 
 
 ## Color contract for the organic section spheres. Masked sections win so an
-## authored exclusion can never be mistaken for a live hit volume.
+## authored exclusion can never be mistaken for a live hit volume. Colors stay
+## godot-side, keyed off the ENGINE damage class for the section — the zone
+## table lives at engine world/round_sim.h hit_zone_damage_multiplier
+## [orig: Weapon_CalcImpactDamage @0x4EC920, the zone table @0x4ec9bf].
 static func organic_section_color(section: int, masked: bool, fallback: bool) -> Color:
 	if masked:
 		return ORGANIC_MASKED_COLOR
 	if fallback:
 		return ORGANIC_FALLBACK_COLOR
-	if section == 13 or section == 14:
-		return ORGANIC_HEAD_COLOR
-	if section >= 0 and section <= 4:
-		return ORGANIC_HEAVY_COLOR
-	if (section >= 9 and section <= 12) or (section >= 15 and section <= 18):
-		return ORGANIC_LIMB_COLOR
+	var mult := Simulation.hit_zone_damage_multiplier(section)
+	if mult >= 3.0:
+		return ORGANIC_HEAD_COLOR   # the critical x3.0 head zone (13-14)
+	if mult > 1.0:
+		return ORGANIC_HEAVY_COLOR  # the x1.25 torso zone (0-4)
+	if mult < 1.0:
+		return ORGANIC_LIMB_COLOR   # the x0.5 limb zones (9-12/15-18)
 	return ORGANIC_BODY_COLOR
-
-
-static func organic_damage_multiplier(section: int) -> float:
-	if section >= 0 and section <= 4:
-		return 1.25
-	if (section >= 9 and section <= 12) or (section >= 15 and section <= 18):
-		return 0.5
-	if section == 13 or section == 14:
-		return 3.0
-	return 1.0
 
 
 func _make_unit_wire_sphere_mesh() -> ArrayMesh:
@@ -303,9 +295,9 @@ func _update(entities: Array, organics: Array) -> void:
 			var c := tris[f * 3 + 2]
 			var fl := flags[f]
 			var color := material_color(mats[f])
-			if fl & FLAG_NEVER_HIT:
+			if fl & Simulation.FACE_FLAG_NEVER_HIT:
 				color = Color(0.45, 0.08, 0.08)  # authored never-hit: dark red
-			elif fl & (FLAG_DOUBLE_SIDED | FLAG_BOTH_SIDES):
+			elif fl & (Simulation.FACE_FLAG_DOUBLE_SIDED | Simulation.FACE_FLAG_BOTH_SIDES):
 				color = color.lightened(0.25)    # hits from both sides
 			segments.append({ "a": a, "b": b, "color": color })
 			segments.append({ "a": b, "b": c, "color": color })
@@ -343,7 +335,7 @@ func _update_labels(entities: Array, organics: Array) -> void:
 		var lb := _labels[i]
 		var is_organic: bool = order[i][1]
 		var e3: Dictionary = order[i][2]
-		var ent := int(e3.get("entity_handle", 0xFFFF))
+		var ent := int(e3.get("entity_handle", Simulation.INVALID_WIRE_HANDLE))
 		var text := WireHandle.label(ent)
 		var label_position: Vector3
 		var label_modulate: Color
@@ -351,14 +343,25 @@ func _update_labels(entities: Array, organics: Array) -> void:
 			var section := int(e3.get("section", -1))
 			var radius := float(e3.get("radius", 0.0))
 			text += "  bone %d" % section
+			# The engine zone table is the label truth (world/round_sim.h
+			# hit_zone_damage_multiplier; HEAD = the critical x3.0 rows,
+			# LIMB = the x0.5 rows).
+			var mult := Simulation.hit_zone_damage_multiplier(section)
 			if bool(e3.get("fallback", false)):
 				text += "  damage neutral"
 			else:
-				text += "  damage x%.2f" % organic_damage_multiplier(section)
-			if section == 13 or section == 14:
+				text += "  damage x%.2f" % mult
+			if mult >= 3.0:
 				text += " HEAD"
-			elif (section >= 9 and section <= 12) or (section >= 15 and section <= 18):
+			elif mult < 1.0:
 				text += " LIMB"
+			# The Landable (attrib 0x200) seat branch reads this same bone
+			# against its own table (world/round_sim.h
+			# seat_hit_bone_damage_multiplier — bones 2/3/6/7 x6.0). The view
+			# cannot see seat context, so surface the would-be seat leg here.
+			var seat_mult := Simulation.seat_hit_bone_damage_multiplier(section)
+			if seat_mult != 1.0:
+				text += "  seat x%.1f" % seat_mult
 			text += "  r %.2f" % radius
 			if bool(e3.get("masked", false)):
 				text += "  MASKED"

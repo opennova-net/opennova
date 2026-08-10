@@ -186,20 +186,22 @@ func _add_props_flag(bit: int, label: String) -> CheckBox:
 
 # Engine combobox order [orig: sub_402770 @0x404eff dfx2med.exe]. Index 0 = no mode bits (Single
 # Player). The dropdown uses the list INDEX as the item id (Godot ids are 32-bit, but the high modes
-# like Search & Destroy = 0x80000000 are not), mapping index <-> attrib_flags bit through this table.
+# like Search & Destroy = 0x80000000 are not), mapping index <-> attrib_flags bit through this
+# table, composed from the bound MissionData.ATTRIB_* names in the same witnessed order (the bit
+# values live at the engine home, engine/formats/mission bms.h).
 const _GAME_MODE_BITS := [
-	0,          # Single player (no mode bits)
-	0x1000000,  # Co-op
-	0x2000000,  # Deathmatch
-	0x20000000, # Team deathmatch
-	0x4000000,  # King of the hill
-	0x40000000, # Team king of the hill
-	0x10000000, # Capture the flag
-	0x800000,   # Attack & defend
-	0x80000000, # Search & destroy
-	0x8000000,  # Flagball
-	0x10000,    # Advance & secure
-	0x20000,    # Conquer & control
+	0,                                     # Single player (no mode bits)
+	MissionData.ATTRIB_COOP,
+	MissionData.ATTRIB_DEATHMATCH,
+	MissionData.ATTRIB_TEAM_DEATHMATCH,
+	MissionData.ATTRIB_KING_OF_THE_HILL,
+	MissionData.ATTRIB_TEAM_KING_OF_THE_HILL,
+	MissionData.ATTRIB_CAPTURE_THE_FLAG,
+	MissionData.ATTRIB_ATTACK_AND_DEFEND,
+	MissionData.ATTRIB_SEARCH_AND_DESTROY,
+	MissionData.ATTRIB_FLAGBALL,
+	MissionData.ATTRIB_ADVANCE_AND_SECURE,
+	MissionData.ATTRIB_CONQUER_AND_CONTROL,
 ]
 const _GAME_MODE_LABELS := [
 	"Single player", "Co-op", "Deathmatch", "Team deathmatch", "King of the hill",

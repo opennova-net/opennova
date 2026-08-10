@@ -15,29 +15,28 @@ extends SimDebugView
 # capsule redraws every frame. Built / freed by GameWorld on the overlay's
 # "Show collision" toggle, like the skeleton view.
 
-const TYPE_CD := 9
-const TYPE_CT := 10
-const TYPE_CF := 13
-
-# Volume type -> wireframe color (the collidable-type table in
-# docs/world/world-wac-ai-re.md section 15 / engine/runtime/world/include/world/collision.h).
+# Volume type -> wireframe color. The type codes are the engine's bvol families
+# (world/collision.h bvol_type, bound as Simulation.BVOL_*; the collidable-type
+# table in docs/world/world-wac-ai-re.md section 15); the colors stay
+# godot-side. Types 1 (generic solid) and 19 (CP player collision) have no
+# engine bvol_type home yet and keep their raw ids.
 static func type_color(volume_type: int) -> Color:
 	match volume_type:
 		1:
 			return Color(0.78, 0.78, 0.78)   # solid walls/floors - gray
-		4:
+		Simulation.BVOL_LADDER_CL:
 			return Color(0.30, 0.55, 1.0)    # CL ladder - blue
-		6:
+		Simulation.BVOL_ARMORY_CA:
 			return Color(0.30, 1.0, 0.45)    # CA armory - green
-		8:
+		Simulation.BVOL_BLINK_BB:
 			return Color(1.0, 0.9, 0.25)     # BB blink box - yellow
-		TYPE_CD:
+		Simulation.BVOL_DOOR_CD:
 			return Color(0.8, 0.4, 0.0)      # CD door - brown
-		TYPE_CT:
+		Simulation.BVOL_CHANGE_TEAM_CT:
 			return Color(1.0, 0.2, 0.2)      # CT change team - coral
-		TYPE_CF:
+		Simulation.BVOL_FLAG_CF:
 			return Color(0.3, 1.0, 0.3)      # CF flag / special function - green
-		16, 17, 18:
+		Simulation.BVOL_DAMAGE_HIGH_DH, Simulation.BVOL_DAMAGE_MEDIUM_DM, Simulation.BVOL_DAMAGE_LOW_DL:
 			return Color(1.0, 0.25, 0.2)     # DH/DM/DL damage - red
 		19:
 			return Color(0.75, 0.35, 1.0)    # CP player collision - purple

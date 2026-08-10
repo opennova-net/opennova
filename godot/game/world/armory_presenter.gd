@@ -20,7 +20,6 @@ extends Node
 const MENU_FILE := "weapon.mnu"
 const MENU_SCREEN := "WEAPON"
 const STYLESHEET_FILE := "menu_style.mns"  # the canonical name (MenuShell's default)
-const MUSIC_VAR_INDEX := 2
 
 # The ACCEPT hotkey: the WEAPON screen's on-show registers the USE-ITEM binding
 # row's runtime keys (retail default: the Shifts — the same row 177 the shells'
@@ -284,7 +283,7 @@ func _ensure_menu() -> bool:
 	_driver = MenuDriver.new()
 	_driver.attach(_frame, _audio)
 	_driver.set_music_director(NovaMusicService.director())
-	_driver.set_music_var_index(MUSIC_VAR_INDEX)
+	_driver.set_music_var_index(MusicDirector.MENU_MUSIC_VAR_SLOT)
 	var style := _load_style(root)
 	var menu_text: RtxtStringFile = Strings.get_table("menutxt")
 	if not _driver.open_document(doc, root, style, menu_text, MENU_FILE, MENU_SCREEN):

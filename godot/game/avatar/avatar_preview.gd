@@ -527,9 +527,11 @@ func _frame_menu_pose(bounds: AABB) -> void:
 	_menu_radius = maxf(bounds.size.length() * 0.5, 1.0)
 	_camera.near = clampf(_menu_radius * 0.001, 0.02, 5.0)
 	_camera.far = maxf(_menu_radius * 12.0, 50.0)
-	# Random initial yaw [orig: 0x5600d0 dword_25DC53C = (rand()%180)*0xB60B60 — 0-179 deg in
-	# BAM]; the continuous idle spin in _process accumulates from this starting facing.
-	_idle_angle = deg_to_rad(float(randi() % 180))
+	# Random initial yaw: rand() % AvatarDatabase.PREVIEW_INITIAL_YAW_RANGE_DEG
+	# degrees (the witness lives at the bound name's engine home — [orig:
+	# 0x5600d0 dword_25DC53C = (rand()%180)*0xB60B60, 0-179 deg in BAM]); the
+	# continuous idle spin in _process accumulates from this starting facing.
+	_idle_angle = deg_to_rad(float(randi() % AvatarDatabase.PREVIEW_INITIAL_YAW_RANGE_DEG))
 	_menu_framed = true
 	_apply_menu_camera()  # initial pose; _process re-poses each frame with the zoom blend
 

@@ -117,10 +117,10 @@ func test_startup_drives_music_var() -> void:
 		_cleanup(dir)
 		return
 	# jo_main STARTUP declares MUSICVAR 1; the menu pushes it into the menumus
-	# discriminator var. menumus reads var INDEX 2 (golden test); at index 0 the
-	# MUSICVAR was inert and the menu played the wrong section. Track the shell's
-	# constant so this stays in sync.
-	var idx: int = MenuShellScript.MUSIC_VAR_INDEX
+	# discriminator var (MusicDirector.MENU_MUSIC_VAR_SLOT — the witness lives
+	# at the engine home, audio/music_policy.h kMenuMusicVarSlot); at index 0
+	# the MUSICVAR was inert and the menu played the wrong section.
+	var idx: int = MusicDirector.MENU_MUSIC_VAR_SLOT
 	assert_eq(shell.get_music_director().get_var(idx), 1, "STARTUP MUSICVAR -> director var %d" % idx)
 	_cleanup(dir)
 
@@ -599,10 +599,10 @@ func test_music_resolution_keeps_incomplete_expansion_pair() -> void:
 	if NovaMusicService.current_script() != null:
 		assert_eq(NovaMusicService.current_script().get_source_path(), "Mjox01.bin",
 			"M<n>.bin preferred over menumus.bin (complete pair)")
-	var menu_pair: MusicPair = shell.resolve_music_pair("M", "menumus")
+	var menu_pair: MusicPair = shell.resolve_menu_music_pair()
 	assert_true(String(menu_pair.bank).ends_with("Mjox01.sbf"),
 		"the menu bank streams loose from the expansion folder")
-	var game_pair: MusicPair = shell.resolve_music_pair("G", "gamemus")
+	var game_pair: MusicPair = shell.resolve_game_music_pair()
 	assert_eq(String(game_pair.script_name), "Gjox01.bin",
 		"missing G<n>.sbf does not reselect the base script")
 	assert_true(String(game_pair.bank).ends_with("Gjox01.sbf"),
@@ -639,7 +639,7 @@ func test_music_incomplete_expansion_bank_only_stays_expansion() -> void:
 	shell.size = Vector2(800, 600)
 	add_child_autofree(shell)
 	shell.setup(root)
-	var pair: MusicPair = shell.resolve_music_pair("G", "gamemus")
+	var pair: MusicPair = shell.resolve_game_music_pair()
 	assert_eq(String(pair.script_name), "Gjox01.bin",
 		"bank-only G stem keeps the missing expansion script name")
 	assert_true(String(pair.bank).ends_with("Gjox01.sbf"),
@@ -685,7 +685,7 @@ func test_musicless_expansion_does_not_reselect_base_pair() -> void:
 		"musicless mounted expansion leaves the menu context silent")
 	assert_null(NovaMusicService.current_script(),
 		"musicless mounted expansion does not load MENUMUS.BIN")
-	var pair: MusicPair = shell.resolve_music_pair("M", "menumus")
+	var pair: MusicPair = shell.resolve_menu_music_pair()
 	assert_true(String(pair.bank).ends_with("Mjox01.sbf"),
 		"musicless mounted expansion keeps the missing expansion bank path")
 	assert_eq(String(pair.script_name), "Mjox01.bin",
