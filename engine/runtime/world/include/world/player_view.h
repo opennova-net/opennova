@@ -45,6 +45,10 @@ constexpr float kFpEyePullback = 0.1875f;
 // [orig: the 0x2000 floor @ 0x4b6b98; the +0x10000 bump @ 0x437e8f]
 constexpr float kEyeMinAbovePosition = 0.125f;
 constexpr float kNonPersonEyeBump = 1.0f;
+// The head bone the person eye reads (".bad row BN15", model bone table
+// index 14) and the aim-projection ray length (65536000 q16 = 1000 units).
+constexpr int kHeadBoneIndex = 14;
+constexpr float kAimProjectRange = 1000.0f;
 // The chase camera's in-play numbers: the ROUND-START reset (distance 1.0,
 // orbit zeroed — the tight over-the-shoulder view) and the pivot nudge/march.
 // [orig: Camera_ResetToLocalPlayer @ 0x4a3d30 (distance 0x10000 @ 0x4a3d4c,

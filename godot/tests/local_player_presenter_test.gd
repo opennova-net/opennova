@@ -628,11 +628,11 @@ func test_aim_range_measures_the_real_terrain_and_clamps_to_the_projection() -> 
 	# eye is the posed head (floored), the endpoint the 1000-unit projection.
 	var pos: Vector3 = sim.get_local_player_position()
 	var eye: Vector3 = presenter.avatar_head_world()
-	eye.y = maxf(eye.y, pos.y + presenter.PLAYER_EYE_MIN)
+	eye.y = maxf(eye.y, pos.y + Simulation.player_eye_min_above_position())
 	var forward := _forward_for(float(sim.get_local_player_yaw_deg()),
 			float(sim.get_local_player_pitch_deg()))
 	var hit: Vector3 = terrain.raycast_terrain(
-			eye, eye + forward * presenter.AIM_PROJECT_RANGE)
+			eye, eye + forward * Simulation.player_aim_project_range())
 	assert_false(is_nan(hit.x), "the downward ray hits the real heightfield")
 	var expected := clampi(int(pos.distance_to(hit)), 1, 1000)
 	assert_between(range_down, expected - 1, expected + 1,

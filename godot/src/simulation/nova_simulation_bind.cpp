@@ -393,6 +393,18 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_static_method("Simulation",
 			D_METHOD("viewmodel_bringup_fallback_weapon"),
 			&Simulation::viewmodel_bringup_fallback_weapon);
+	ClassDB::bind_static_method("Simulation",
+			D_METHOD("player_eye_min_above_position"),
+			&Simulation::player_eye_min_above_position);
+	ClassDB::bind_static_method("Simulation",
+			D_METHOD("player_non_person_eye_bump"),
+			&Simulation::player_non_person_eye_bump);
+	ClassDB::bind_static_method("Simulation",
+			D_METHOD("player_head_bone_index"),
+			&Simulation::player_head_bone_index);
+	ClassDB::bind_static_method("Simulation",
+			D_METHOD("player_aim_project_range"),
+			&Simulation::player_aim_project_range);
 	ClassDB::bind_method(D_METHOD("get_weapon_profile_summary"),
 	                     &Simulation::get_weapon_profile_summary);
 	ClassDB::bind_method(D_METHOD("request_local_player_weapon_category", "category"),

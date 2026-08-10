@@ -4,6 +4,7 @@
 #include "simulation/nova_simulation_internal.h"
 
 #include <world/music_vars.h>
+#include <world/player_view.h>
 
 #include <def/def.h> // DEF_WEAPON_FLAG_* / DEF_WEAPON_FLAG2_*
 
@@ -384,6 +385,19 @@ int Simulation::get_local_player_max_health() const {
 	const AiEntity *p = world_->ai->for_handle(world_->cached.local_player);
 	if (!p || p->inf.max_health <= 0) return 100;
 	return p->inf.max_health;
+}
+
+double Simulation::player_eye_min_above_position() {
+	return opennova::world::kEyeMinAbovePosition;
+}
+double Simulation::player_non_person_eye_bump() {
+	return opennova::world::kNonPersonEyeBump;
+}
+int Simulation::player_head_bone_index() {
+	return opennova::world::kHeadBoneIndex;
+}
+double Simulation::player_aim_project_range() {
+	return opennova::world::kAimProjectRange;
 }
 
 int Simulation::get_local_player_health_percent() const {

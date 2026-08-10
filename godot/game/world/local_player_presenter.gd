@@ -13,12 +13,12 @@ const MissionRuntime := preload("res://game/world/mission_runtime.gd")
 # raw pixel deltas feed Simulation.add_local_player_look (the witnessed integer
 # pipeline — sensitivity<<11, scoped zoom reduction, ±80° pitch clamp with the +40°
 # up-limit while prone) [orig: Input_ProcessMouseAxisBindings @0x499680].
-const PLAYER_EYE_HEIGHT := 1.0          # the non-person +0x10000 bump [orig: @0x437e8f]
-const PLAYER_EYE_MIN := 0.125           # CameraOffset.z floor 0x2000 [orig: @0x4b6b98]
+# Calibration values live at engine world/player_view.h (Simulation re-exports).
+
 # The head is bone INDEX 14 (.bad row "BN15 Head") — the rig is index-driven and the
 # model bone order IS the BN order [world-wac-ai-re §14.2]; the original reads the
 # head row of its bone-matrix array, never a name [orig: the local bone path @0x4b6bb3].
-const PLAYER_HEAD_BONE_INDEX := 14
+
 # The FP eye pull-back (-0x3000 along the view forward), the eye floor, and the
 # non-person bump compose in the SIM's camera pose now (world/player_view.h
 # kFpEyePullback/kEyeMinAbovePosition/kNonPersonEyeBump); the constants below
@@ -339,7 +339,7 @@ func set_fly_camera_locked(locked: bool) -> void:
 # clipped @0x592932..3c; Viewport_ScreenToVirtual @0x5d2c70]. Vector2.INF = "no
 # projection" (1P pin, no camera/player, or the far point behind the camera) — the
 # HUD falls back to the design center.
-const AIM_PROJECT_RANGE := 1000.0  # [orig: 65536000 q16 = 1000.0 units]
+
 
 func aim_screen_point() -> Vector2:
 	if not _third_person:
@@ -352,7 +352,7 @@ func aim_screen_point() -> Vector2:
 	var forward := Vector3(sin(yr) * cos(pr), sin(pr), -cos(yr) * cos(pr))
 	var sim = _sim()
 	var eye := _eye_position(sim.get_local_player_position() if sim != null else Vector3.ZERO)
-	var target := eye + forward * AIM_PROJECT_RANGE
+	var target := eye + forward * Simulation.player_aim_project_range()
 	if _camera.is_position_behind(target):
 		return Vector2.INF
 	return _camera.unproject_position(target)
@@ -371,7 +371,7 @@ func aim_range_units() -> int:
 	var yr := deg_to_rad(angles.x)
 	var pr := deg_to_rad(angles.y)
 	var forward := Vector3(sin(yr) * cos(pr), sin(pr), -cos(yr) * cos(pr))
-	var endpoint := eye + forward * AIM_PROJECT_RANGE
+	var endpoint := eye + forward * Simulation.player_aim_project_range()
 	# The terrain surface, through the ported retail raycast
 	# (TerrainData.raycast_terrain -> engine/runtime/terrain_query/terrain_raycast.h
 	# [orig: Terrain_RaycastHeightmapHiRes_0 @0x60e710]) rather than a Godot
@@ -409,8 +409,8 @@ func _aim_angles_deg() -> Vector2:
 func _eye_position(pos: Vector3) -> Vector3:
 	var head := avatar_head_world()
 	if head == Vector3.INF:
-		return pos + Vector3(0, PLAYER_EYE_HEIGHT, 0)  # non-person bump [orig: @0x437e8f]
-	head.y = maxf(head.y, pos.y + PLAYER_EYE_MIN)
+		return pos + Vector3(0, Simulation.player_non_person_eye_bump(), 0)  # non-person bump [orig: @0x437e8f]
+	head.y = maxf(head.y, pos.y + Simulation.player_eye_min_above_position())
 	return head
 
 
@@ -420,9 +420,9 @@ func avatar_head_world() -> Vector3:
 	if _avatar == null or not is_instance_valid(_avatar):
 		return Vector3.INF
 	var skel := _find_skeleton(_avatar)
-	if skel == null or skel.get_bone_count() <= PLAYER_HEAD_BONE_INDEX:
+	if skel == null or skel.get_bone_count() <= Simulation.player_head_bone_index():
 		return Vector3.INF
-	return skel.global_transform * skel.get_bone_global_pose(PLAYER_HEAD_BONE_INDEX).origin
+	return skel.global_transform * skel.get_bone_global_pose(Simulation.player_head_bone_index()).origin
 
 
 ## The soldier's third-person gun: retail's draw 5. The model is the equipped weapon's
