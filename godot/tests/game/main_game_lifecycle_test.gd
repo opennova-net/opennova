@@ -222,8 +222,8 @@ func after_each() -> void:
 			if world_root != null:
 				world_root.clear()
 		var menu_shell = _shell.get_node_or_null("MenuLayer/MenuShell")
-		if menu_shell != null and menu_shell.get_menu() != null:
-			var menu_root = menu_shell.get_menu().get_resource_root()
+		if menu_shell != null:
+			var menu_root = menu_shell.get_resource_root()
 			if menu_root != null:
 				menu_root.clear()
 		_shell.queue_free()
@@ -283,13 +283,11 @@ func test_shell_exit_releases_runtime_texture_caches_before_renderer_shutdown() 
 	assert_not_null(resource_root)
 	var texture: Texture2D = resource_root.load_texture("mnml_c.tga")
 	assert_not_null(texture, "the packed runtime root owns a decoded ImageTexture")
-	var cursor_texture: Texture2D = null
-	var menu: MnuMenu = _shell.get_node("MenuLayer/MenuShell").get_menu()
-	for node in menu.find_children("*", "MnuScreen", true, false):
-		var screen := node as MnuScreen
-		if screen.get_cursor_texture() != null:
-			cursor_texture = screen.get_cursor_texture()
-			break
+	# The compiled frame resolves the claim cursor (screen default) on the first
+	# pump; one mouse sample installs the retail cursor process-wide via Input.
+	var menu_shell = _shell.get_node("MenuLayer/MenuShell")
+	menu_shell.get_driver().process_mouse(Vector2(400, 300), false)
+	var cursor_texture: Texture2D = menu_shell.get_frame().get_cursor_texture()
 	assert_not_null(cursor_texture,
 			"the retail-shaped main menu installs its decoded custom cursor")
 	var weak_cursor: WeakRef = weakref(cursor_texture)
@@ -338,13 +336,9 @@ func test_shutdown_drain_releases_join_target_awaited_by_loading_barrier() -> vo
 	_shell = await _make_shell()
 	if _shell == null:
 		return
-	var cursor_texture: Texture2D = null
-	var menu: MnuMenu = _shell.get_node("MenuLayer/MenuShell").get_menu()
-	for node in menu.find_children("*", "MnuScreen", true, false):
-		var screen := node as MnuScreen
-		if screen.get_cursor_texture() != null:
-			cursor_texture = screen.get_cursor_texture()
-			break
+	var menu_shell = _shell.get_node("MenuLayer/MenuShell")
+	menu_shell.get_driver().process_mouse(Vector2(400, 300), false)
+	var cursor_texture: Texture2D = menu_shell.get_frame().get_cursor_texture()
 	assert_not_null(cursor_texture)
 	var weak_cursor: WeakRef = weakref(cursor_texture)
 	cursor_texture = null
@@ -366,6 +360,10 @@ func test_shutdown_drain_releases_join_target_awaited_by_loading_barrier() -> vo
 			"shutdown leaves the loading screen alive long enough for the outer "
 			+ "load coroutine to release its bound JoinTarget")
 	_shell.release_runtime_resources_for_shutdown()
+	assert_null(menu_shell.get_frame().get_cursor_texture(),
+			"the released frame retains no cursor texture")
+	assert_false(menu_shell.get_frame().is_configured(),
+			"release_runtime_renderer_resources leaves the frame unconfigured")
 	assert_null(weak_cursor.get_ref(),
 			"the cooperative shutdown path drops its global custom cursor before exit")
 
@@ -915,7 +913,7 @@ func _wait_for_load_to_settle(frame_limit := 240) -> void:
 func _assert_loaded(world, terrain, menu_shell) -> void:
 	assert_false(_shell.is_world_loading(), "the loading gate closes after world_loaded")
 	assert_true(world.is_loaded(), "the minimal mission loaded through the full shell")
-	assert_same(world.get_resource_root(), menu_shell.get_menu().get_resource_root(),
+	assert_same(world.get_resource_root(), menu_shell.get_resource_root(),
 			"menu, loading screen, and GameWorld share one mounted resource session")
 	assert_true(world.visible, "the loaded world is presented")
 	assert_false(menu_shell.visible, "the main menu stays hidden during play")

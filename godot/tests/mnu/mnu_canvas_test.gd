@@ -498,13 +498,27 @@ func _load_jo() -> MnuDocument:
 
 # A canvas over jo_main sized to the derived design canvas (identity letterbox fit).
 # Two frames let any anchored windows resolve. Returns [canvas, doc].
+# The rendered auto-height now comes from the compiled MenuFrame's text
+# measure, which needs a real .fnt: serve one from a temp resource root under
+# jo_main's authored font name (the first loadable font doubles as the frame
+# default, so the %DEF_FONTNAME_LG% var-named widgets resolve to it too).
 func _canvas_with_jo() -> Array:
 	var doc := _load_jo()
+	var dir := OS.get_temp_dir().path_join("mnu_canvas_jo_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(dir)
+	var fnt_out := FileAccess.open(dir.path_join("Arial12b.fnt"), FileAccess.WRITE)
+	assert_not_null(fnt_out, "temp .fnt fixture should be writable")
+	if fnt_out != null:
+		fnt_out.store_buffer(FileAccess.get_file_as_bytes("res://../fixtures/fnt/Gunpl22b.fnt"))
+		fnt_out.close()
+	var res_root := ResourceRoot.new()
+	if res_root.set_root_dir(dir) != OK:
+		res_root = null
 	var canvas = MnuCanvasScript.new()
 	add_child_autofree(canvas)
 	canvas.size = Vector2(doc.get_menu_size())
 	await get_tree().process_frame
-	canvas.set_menu(doc, null, null)
+	canvas.set_menu(doc, res_root, null)
 	await get_tree().process_frame
 	await get_tree().process_frame
 	return [canvas, doc]
@@ -569,9 +583,11 @@ func test_jo_button_resizable_and_in_control_map() -> void:
 	var sp := _jo_widget(doc, "SINGLE_PLAYER")
 	canvas.set_selected(sp)
 	assert_true(canvas._has_resizable_selection(), "A rendered-but-sizeless button is resizable.")
-	assert_true(canvas._id_to_control.has(sp), "The id->Control map includes the button.")
-	var c = canvas._id_to_control[sp]
-	assert_gt((c as Control).size.y, 0.0, "The mapped live Control has a non-zero rendered height.")
+	# The id->Control map died with the Control tree; the id->index map plus
+	# the frame-solved rect is its successor.
+	assert_true(canvas._id_to_index.has(sp), "The id->index map includes the button.")
+	assert_gt(canvas._live_size_of(sp).y, 0.0,
+			"The frame-solved rect has a non-zero rendered height.")
 
 
 func test_jo_button_drag_pins_concrete_size() -> void:

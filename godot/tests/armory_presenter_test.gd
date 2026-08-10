@@ -123,16 +123,6 @@ func _make_world(sim: Simulation, weapons: WeaponDatabase) -> ArmoryWorldHarness
 	return world
 
 
-func _label_text(node: Node) -> String:
-	if node is Label:
-		return (node as Label).text
-	for child in node.get_children():
-		var text := _label_text(child)
-		if not text.is_empty():
-			return text
-	return ""
-
-
 func _weapon_display_text(row: Dictionary) -> String:
 	var textid := String(row.get("display_textid", ""))
 	var gametext: RtxtStringFile = Strings.get_table("gametext")
@@ -186,41 +176,46 @@ func test_sp_open_uses_authoritative_context_and_full_menu_protocol() -> void:
 	presenter.setup(world, player_presenter, overlay)
 
 	assert_true(presenter.open(), "the staged player opens the armory")
-	var menu := overlay.get_node_or_null("ArmoryMenu") as MnuMenu
-	assert_not_null(menu)
-	assert_eq(menu.size, Vector2(800, 600), "weapon.mnu keeps its authored design space")
-	assert_eq(menu.scale, Vector2(2.0, 1.5), "the design space fills a 1600x900 presenter")
+	var frame := overlay.get_node_or_null("ArmoryMenu") as MenuFrame
+	assert_not_null(frame)
+	var driver: MenuDriver = presenter.get_menu_driver()
+	assert_not_null(driver)
+	# The frame scales its fixed 800x600 design space to its OWN rect internally
+	# [orig: CUIScene_SetScreenScale @0x639480]; the presenter fit just fills the
+	# ui parent (replaces the old Control size/scale math).
+	assert_eq(frame.position, Vector2.ZERO, "the armory frame anchors at the parent origin")
+	assert_eq(frame.size, Vector2(1600, 900), "the design space fills a 1600x900 presenter")
 	overlay.size = Vector2(1200, 600)
-	assert_eq(menu.scale, Vector2(1.5, 1.0), "the fit follows presenter resizes")
+	assert_eq(frame.size, Vector2(1200, 600), "the fit follows presenter resizes")
 
-	var spin := menu.find_child("PLAYER_CLASS", true, false) as MnuSpinList
-	assert_eq(spin.get_value_index(), 3, "entity class 8 selects Rifleman by value")
-	assert_ne(spin.process_mode, Node.PROCESS_MODE_DISABLED,
+	var spin := driver.widget_id("PLAYER_CLASS")
+	assert_gte(spin, 0, "weapon.mnu authors the class spin")
+	assert_eq(driver.selected_row(spin), 3, "entity class 8 selects Rifleman by value")
+	assert_false(driver.is_widget_disabled(spin),
 		"the class selector is LIVE offline — D-MNU-10 (retail enables it only "
 		+ "in-session [orig: UI_InitTeamClassSelection @0x567370]; deliberate "
 		+ "divergence under the ADR 0009 listen-server model, user decision)")
-	var primary := menu.find_child("PRIMARY", true, false) as MnuCombo
-	assert_eq(primary.get_item_count(), red_rifleman.size() + 1,
+	var primary := driver.widget_id("PRIMARY")
+	assert_eq(driver.item_count(primary), red_rifleman.size() + 1,
 		"entity team 2 maps to the red weapon-filter domain")
-	assert_gt(primary.get_selected(), 0, "the authoritative equipped primary is reselected")
+	assert_gt(driver.selected_row(primary), 0, "the authoritative equipped primary is reselected")
 
 	var menutxt: RtxtStringFile = Strings.get_table("menutxt")
-	var cancel := menu.find_child("CANCEL", true, false)
-	assert_eq(_label_text(cancel), menutxt.get_string("WD_NOHOT_CANCEL"),
+	var cancel := driver.widget_id("CANCEL")
+	assert_gte(cancel, 0, "weapon.mnu authors the CANCEL button")
+	assert_eq(driver.get_widget_text(cancel), menutxt.get_string("WD_NOHOT_CANCEL"),
 		"standalone weapon.mnu resolves button IDs through menutxt")
-	assert_ne(_label_text(cancel), "WD_NOHOT_CANCEL", "raw RTXT IDs are never shown")
+	assert_ne(driver.get_widget_text(cancel), "WD_NOHOT_CANCEL", "raw RTXT IDs are never shown")
 	assert_eq(NovaMusicService.get_var(2), 14, "WEAPON MUSICVAR drives retail menu Var2")
 
-	menu.find_child("ACCEPT", true, false).emit_signal("pressed")
+	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
 	assert_has(_loadout_names(sim), equipped,
 		"unchanged ACCEPT preserves the entity's equipped weapon")
 	assert_eq(world.set_weapon_calls, [equipped] as Array[String])
 
 	assert_true(presenter.open(), "the same armory can reopen after ACCEPT")
-	menu = overlay.get_node("ArmoryMenu") as MnuMenu
-	primary = menu.find_child("PRIMARY", true, false) as MnuCombo
-	primary.select_silent(0)
-	menu.find_child("ACCEPT", true, false).emit_signal("pressed")
+	driver.select_row(primary, 0, false)  # the authored NONE row, silently
+	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
 	assert_false(_loadout_names(sim).has(equipped),
 		"the authored NONE row reaches the simulation")
 	assert_eq(world.clear_calls, 1, "NONE clears the rendered/action weapon state")
@@ -267,27 +262,28 @@ func test_open_preselects_the_authoritative_satchel_loadout() -> void:
 	presenter.setup(world, null, overlay)
 
 	assert_true(presenter.open(), "a fresh armory presenter opens for the equipped local player")
-	var menu := overlay.get_node("ArmoryMenu") as MnuMenu
-	var accessory := menu.find_child("ACCESSORY", true, false) as MnuCombo
-	assert_gt(accessory.get_selected(), 0,
+	var driver: MenuDriver = presenter.get_menu_driver()
+	assert_not_null(driver)
+	var accessory := driver.widget_id("ACCESSORY")
+	assert_gt(driver.selected_row(accessory), 0,
 		"ACCESSORY pre-selects the satchel that is already in the player's loadout")
-	assert_eq(accessory.get_item_text(accessory.get_selected()),
+	assert_eq(driver.item_text(accessory, driver.selected_row(accessory)),
 		_weapon_display_text(rows[0] as Dictionary),
 		"the selected accessory row is exactly the canonical satchel parent")
-	var primary_combo := menu.find_child("PRIMARY", true, false) as MnuCombo
-	assert_gt(primary_combo.get_selected(), 0,
+	var primary_combo := driver.widget_id("PRIMARY")
+	assert_gt(driver.selected_row(primary_combo), 0,
 		"PRIMARY pre-selects the canonical AK parent instead of relying on fallback")
-	assert_eq(primary_combo.get_item_text(primary_combo.get_selected()),
+	assert_eq(driver.item_text(primary_combo, driver.selected_row(primary_combo)),
 		_weapon_display_text(primary_rows[0] as Dictionary),
 		"the selected primary row is exactly WPN_AK47AUTO")
-	var primary_ammo := menu.find_child("PRIMARY_AMMO1", true, false) as MnuCombo
-	var accessory_ammo := menu.find_child("ACCESSORY_AMMO1", true, false) as MnuCombo
-	assert_eq(primary_ammo.get_selected(), PRIMARY_CLIPS - 1,
+	var primary_ammo := driver.widget_id("PRIMARY_AMMO1")
+	var accessory_ammo := driver.widget_id("ACCESSORY_AMMO1")
+	assert_eq(driver.selected_row(primary_ammo), PRIMARY_CLIPS - 1,
 		"first open converts the canonical primary clip count to its zero-based row")
-	assert_eq(accessory_ammo.get_selected(), ACCESSORY_CLIPS - 1,
+	assert_eq(driver.selected_row(accessory_ammo), ACCESSORY_CLIPS - 1,
 		"first open converts the canonical satchel clip count to its zero-based row")
 
-	menu.find_child("ACCEPT", true, false).emit_signal("pressed")
+	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
 	var accepted_by_name := {}
 	for value in simulation.get_local_player_loadout():
 		var row := value as Dictionary
@@ -326,18 +322,19 @@ func test_open_populates_the_authored_grenade_combo_from_weapon_def() -> void:
 	presenter.setup(world, null, overlay)
 
 	assert_true(presenter.open(), "the real weapon.mnu armory opens")
-	var menu := overlay.get_node("ArmoryMenu") as MnuMenu
+	var driver: MenuDriver = presenter.get_menu_driver()
+	assert_not_null(driver)
 	for i in grenade_rows.size():
 		var combo_name := "GRENADE_AMMO%d" % (i + 1)
-		var grenade_combo := menu.find_child(combo_name, true, false) as MnuCombo
-		assert_not_null(grenade_combo, "weapon.mnu authors %s" % combo_name)
-		assert_eq(grenade_combo.get_item_count(),
+		var grenade_combo := driver.widget_id(combo_name)
+		assert_gte(grenade_combo, 0, "weapon.mnu authors %s" % combo_name)
+		assert_eq(driver.item_count(grenade_combo),
 			int((grenade_rows[i] as Dictionary).get("maxclips", 0)) + 1,
 			"%s exposes selectable 0..maxclips rows from weapon.def" % combo_name)
-		assert_eq(grenade_combo.get_selected(), i + 1,
+		assert_eq(driver.selected_row(grenade_combo), i + 1,
 			"%s preselects the authoritative canonical grenade count" % combo_name)
 
-	menu.find_child("ACCEPT", true, false).emit_signal("pressed")
+	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
 	var accepted_by_name := {}
 	for value in simulation.get_local_player_loadout():
 		var row := value as Dictionary
@@ -393,12 +390,13 @@ func test_multiplayer_open_uses_retail_server_class_allow_mask() -> void:
 	presenter.setup(world, null, overlay)
 
 	assert_true(presenter.open(), "the MP armory opens with a session class policy")
-	var menu := overlay.get_node_or_null("ArmoryMenu")
-	assert_not_null(menu)
-	if menu == null:
+	assert_not_null(overlay.get_node_or_null("ArmoryMenu"))
+	var driver: MenuDriver = presenter.get_menu_driver()
+	assert_not_null(driver)
+	if driver == null:
 		return
-	var spin := menu.find_child("PLAYER_CLASS", true, false) as MnuSpinList
-	assert_not_null(spin)
-	if spin != null:
-		assert_eq(spin.get_value_index(), 4,
+	var spin := driver.widget_id("PLAYER_CLASS")
+	assert_gte(spin, 0)
+	if spin >= 0:
+		assert_eq(driver.selected_row(spin), 4,
 				"S2C 0x76 policy advances disallowed rifleman to allowed engineer")

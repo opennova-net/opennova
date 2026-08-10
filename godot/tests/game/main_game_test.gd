@@ -43,8 +43,8 @@ func after_each() -> void:
 			if world_root != null:
 				world_root.clear()
 		var menu_shell = _shell.get_node_or_null("MenuLayer/MenuShell")
-		if menu_shell != null and menu_shell.get_menu() != null:
-			var menu_root = menu_shell.get_menu().get_resource_root()
+		if menu_shell != null and menu_shell.get_resource_root() != null:
+			var menu_root = menu_shell.get_resource_root()
 			if menu_root != null:
 				menu_root.clear()
 		_shell.queue_free()
@@ -201,11 +201,11 @@ func test_runtime_root_honors_the_persisted_game_profile() -> void:
 	if _shell == null:
 		return
 	var menu_shell = _shell.get_node("MenuLayer/MenuShell")
-	var menu = menu_shell.get_menu()
-	assert_not_null(menu, "the packed fixture boots the public menu shell")
-	if menu == null:
+	assert_not_null(menu_shell.get_driver(),
+			"the packed fixture boots the public menu shell")
+	if menu_shell.get_driver() == null:
 		return
-	var root: ResourceRoot = menu.get_resource_root()
+	var root: ResourceRoot = menu_shell.get_resource_root()
 	assert_not_null(root, "the live menu exposes its mounted runtime root")
 	if root != null:
 		assert_eq(root.read_file(POLICY_FILE).get_string_from_utf8(), POLICY_PLAIN,

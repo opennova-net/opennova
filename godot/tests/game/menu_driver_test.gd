@@ -1,0 +1,486 @@
+extends GutTest
+
+# Menu-RUNTIME semantics on MenuDriver (godot/game/menu_driver.gd) — the
+# carve-out coverage the deleted MnuMenu Control-tree tests pinned, now driven
+# through the compiled surface: action dispatch (screen/pop/quit/url/window/
+# shell verbs), the per-screen MUSICVAR push, hotkey routing, the
+# widget_value_changed relay kinds, combo popup lifecycle, edit focus/typing,
+# checkbox/radio toggling, and sound-trigger edges. The engine owns the
+# witnessed primitives (draw walk, pump, geometry, edit ops — pinned by ctest
+# tests/menu/menu_frame_compiler_test.cpp); these tests pin the orchestration
+# the driver performs around them.
+#
+# Frameless drivers exercise the pure store/dispatch seams; an attached
+# 800x600 MenuFrame (design coords == local coords) drives the mouse paths.
+
+const ACTIONS_XML := """
+<SCREEN>
+  <NAME>MAIN</NAME>
+  <MUSICVAR>3</MUSICVAR>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <WINDOW type="window" name="PANEL">
+      <POSITION><LEFT>10</LEFT><TOP>10</TOP><RIGHT>200</RIGHT><BOTTOM>200</BOTTOM></POSITION>
+    </WINDOW>
+    <WINDOW type="list" name="PICKLIST">
+      <POSITION><LEFT>300</LEFT><TOP>10</TOP><RIGHT>400</RIGHT><BOTTOM>100</BOTTOM></POSITION>
+      <ITEMS>
+        <ITEM value="0">AAA</ITEM>
+        <ITEM value="1">BBB</ITEM>
+        <ITEM value="2">CCC</ITEM>
+      </ITEMS>
+      <LIST_BOX><MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT></LIST_BOX>
+    </WINDOW>
+    <WINDOW type="spinlist" name="SPIN">
+      <POSITION><LEFT>300</LEFT><TOP>120</TOP><RIGHT>400</RIGHT><BOTTOM>140</BOTTOM></POSITION>
+      <ITEMS>
+        <ITEM value="0">LOW</ITEM>
+        <ITEM value="1">MED</ITEM>
+        <ITEM value="2">HIGH</ITEM>
+      </ITEMS>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+<SCREEN>
+  <NAME>SUB</NAME>
+  <WINDOW type="window" name="ROOT2">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <WINDOW type="window" name="SUB_PANEL">
+      <POSITION><LEFT>10</LEFT><TOP>10</TOP><RIGHT>100</RIGHT><BOTTOM>100</BOTTOM></POSITION>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+"""
+
+# The interactive board: hotkey targets, a combo with an authored popup
+# (MIN_ITEM_HEIGHT keeps row geometry font-free), edits, toggles, a sound
+# button, and a plain OTHER button for popup-dismissal checks.
+const BOARD_XML := """
+<SCREEN>
+  <NAME>MAIN</NAME>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <WINDOW type="window" name="HIDDEN_GROUP" HIDDEN>
+      <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>50</RIGHT><BOTTOM>50</BOTTOM></POSITION>
+      <WINDOW type="button" name="HIDDEN_ESC">
+        <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>40</RIGHT><BOTTOM>20</BOTTOM></POSITION>
+        <HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
+      </WINDOW>
+    </WINDOW>
+    <WINDOW type="button" name="BACK">
+      <POSITION><LEFT>600</LEFT><TOP>500</TOP><RIGHT>700</RIGHT><BOTTOM>530</BOTTOM></POSITION>
+      <HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
+      <HOTKEY>V</HOTKEY>
+    </WINDOW>
+    <WINDOW type="combo" name="MODE">
+      <POSITION><LEFT>200</LEFT><TOP>0</TOP><RIGHT>300</RIGHT><BOTTOM>20</BOTTOM></POSITION>
+      <ITEMS>
+        <ITEM value="0">ONE</ITEM>
+        <ITEM value="1">TWO</ITEM>
+      </ITEMS>
+      <LIST_BOX>
+        <POSITION><LEFT>0</LEFT><TOP>20</TOP><RIGHT>100</RIGHT><BOTTOM>80</BOTTOM></POSITION>
+        <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+      </LIST_BOX>
+    </WINDOW>
+    <WINDOW type="edit" name="NAME_EDIT">
+      <POSITION><LEFT>10</LEFT><TOP>100</TOP><RIGHT>210</RIGHT><BOTTOM>120</BOTTOM></POSITION>
+    </WINDOW>
+    <WINDOW type="edit" name="NUM_EDIT" NUMBER MINVAL="1" MAXVAL="99" MAXCHAR="3">
+      <POSITION><LEFT>10</LEFT><TOP>140</TOP><RIGHT>210</RIGHT><BOTTOM>160</BOTTOM></POSITION>
+    </WINDOW>
+    <WINDOW type="checkbox" name="CHK">
+      <POSITION><LEFT>10</LEFT><TOP>200</TOP><RIGHT>110</RIGHT><BOTTOM>220</BOTTOM></POSITION>
+    </WINDOW>
+    <WINDOW type="radio" name="R1" group="1">
+      <POSITION><LEFT>10</LEFT><TOP>240</TOP><RIGHT>110</RIGHT><BOTTOM>260</BOTTOM></POSITION>
+    </WINDOW>
+    <WINDOW type="radio" name="R2" group="1">
+      <POSITION><LEFT>10</LEFT><TOP>280</TOP><RIGHT>110</RIGHT><BOTTOM>300</BOTTOM></POSITION>
+    </WINDOW>
+    <WINDOW type="button" name="SND_BTN">
+      <POSITION><LEFT>400</LEFT><TOP>200</TOP><RIGHT>500</RIGHT><BOTTOM>230</BOTTOM></POSITION>
+      <SOUND state="selected" trigger="CLICK_SET">bank.lwf</SOUND>
+    </WINDOW>
+    <WINDOW type="button" name="OTHER">
+      <POSITION><LEFT>500</LEFT><TOP>300</TOP><RIGHT>600</RIGHT><BOTTOM>330</BOTTOM></POSITION>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+"""
+
+const HIDDEN_ONLY_XML := """
+<SCREEN>
+  <NAME>S</NAME>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <WINDOW type="window" name="HGROUP" HIDDEN>
+      <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>50</RIGHT><BOTTOM>50</BOTTOM></POSITION>
+      <WINDOW type="button" name="HIDDEN_ESC">
+        <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>40</RIGHT><BOTTOM>20</BOTTOM></POSITION>
+        <HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
+      </WINDOW>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+"""
+
+
+func _doc(xml: String) -> MnuDocument:
+	var doc := MnuDocument.new()
+	assert_eq(doc.load_from_bytes(xml.to_utf8_buffer()), OK, "fixture parses")
+	return doc
+
+
+func _frameless_driver(xml: String, menu_file := "menu.mnu") -> MenuDriver:
+	var driver := MenuDriver.new()
+	assert_true(driver.open_document(_doc(xml), null, null, null, menu_file),
+			"document opens frameless")
+	return driver
+
+
+func _framed_driver(xml: String, menu_file := "menu.mnu") -> MenuDriver:
+	var frame := MenuFrame.new()
+	add_child_autofree(frame)
+	frame.size = Vector2(800, 600)
+	var driver := MenuDriver.new()
+	driver.attach(frame, null)
+	assert_true(driver.open_document(_doc(xml), null, null, null, menu_file),
+			"document opens on the frame")
+	return driver
+
+
+func _click(driver: MenuDriver, pos: Vector2) -> void:
+	driver.process_mouse(pos, true)
+	driver.process_mouse(pos, false)
+
+
+func _click_widget(driver: MenuDriver, name: String) -> void:
+	var rect := driver.widget_frame_rect(driver.widget_id(name))
+	assert_gt(rect.size.x, 0.0, "%s has a solved rect to click" % name)
+	_click(driver, rect.get_center())
+
+
+func _key(keycode: Key, unicode := 0, pressed := true, echo := false) -> InputEventKey:
+	var k := InputEventKey.new()
+	k.keycode = keycode
+	k.unicode = unicode
+	k.pressed = pressed
+	k.echo = echo
+	return k
+
+
+# --- (a) action dispatch --------------------------------------------------------
+
+
+func test_screen_action_same_file_navigates_and_pushes_stack() -> void:
+	var driver := _frameless_driver(ACTIONS_XML)
+	# Empty file = same file.
+	assert_true(driver.dispatch_action_row({"type": "screen", "target": "SUB", "file": ""}),
+			"empty-file screen action handled")
+	assert_eq(driver.get_current_screen(), "SUB", "navigated to SUB")
+	assert_eq(driver.get_nav_stack_depth(), 1, "forward move pushed MAIN")
+	assert_true(driver.pop_screen(), "pop returns")
+	assert_eq(driver.get_current_screen(), "MAIN", "pop returned to MAIN")
+	assert_eq(driver.get_nav_stack_depth(), 0, "stack emptied")
+	# Shipped same-file jumps spell their own filename, case-insensitively.
+	assert_true(driver.dispatch_action_row({"type": "screen", "target": "SUB", "file": "MENU.MNU"}),
+			"own-filename screen action handled")
+	assert_eq(driver.get_current_screen(), "SUB", "case-insensitive same-file jump navigated")
+	assert_eq(driver.get_nav_stack_depth(), 1, "same-file jump pushed the stack")
+
+
+func test_pop_past_root_emits_quit_requested() -> void:
+	var driver := _frameless_driver(ACTIONS_XML)
+	watch_signals(driver)
+	assert_false(driver.pop_screen(), "pop past the root fails")
+	assert_signal_emitted(driver, "quit_requested")
+	assert_eq(driver.get_current_screen(), "MAIN", "screen unchanged")
+
+
+func test_cross_file_screen_action_emits_menu_requested() -> void:
+	var driver := _frameless_driver(ACTIONS_XML)
+	watch_signals(driver)
+	assert_true(driver.dispatch_action_row(
+			{"type": "screen", "target": "LOBBY", "file": "other.mnu"}),
+			"cross-file action consumed")
+	assert_signal_emitted_with_parameters(driver, "menu_requested", ["other.mnu", "LOBBY"])
+	assert_eq(driver.get_current_screen(), "MAIN", "cross-file jump does not navigate in-file")
+
+
+func test_quit_and_url_actions() -> void:
+	var driver := _frameless_driver(ACTIONS_XML)
+	watch_signals(driver)
+	assert_true(driver.dispatch_action_row({"type": "quit"}), "quit consumed")
+	assert_signal_emitted(driver, "quit_requested")
+	assert_true(driver.dispatch_action_row({"type": "url", "target": "www.novalogic.com"}),
+			"url consumed")
+	assert_signal_emitted_with_parameters(driver, "url_requested", ["www.novalogic.com"])
+	assert_signal_emitted(driver, "shell_action_requested")
+
+
+func test_window_actions_show_hide_enable_disable_toggle() -> void:
+	var driver := _frameless_driver(ACTIONS_XML)
+	var panel := driver.widget_id("PANEL")
+	assert_true(driver.is_widget_shown(panel), "panel starts shown")
+	assert_true(driver.dispatch_action_row({"type": "window", "target": "PANEL", "state": "hide"}))
+	assert_false(driver.is_widget_shown(panel), "hide hides")
+	assert_true(driver.dispatch_action_row({"type": "window", "target": "PANEL", "state": "show"}))
+	assert_true(driver.is_widget_shown(panel), "show shows")
+	assert_true(driver.dispatch_action_row(
+			{"type": "window", "target": "PANEL", "state": "hide", "toggle": true}))
+	assert_false(driver.is_widget_shown(panel), "hide+TOGGLE flips shown -> hidden")
+	assert_true(driver.dispatch_action_row(
+			{"type": "window", "target": "PANEL", "state": "show", "toggle": true}))
+	assert_true(driver.is_widget_shown(panel), "show+TOGGLE flips hidden -> shown")
+	assert_true(driver.dispatch_action_row({"type": "window", "target": "PANEL", "state": "toggle"}))
+	assert_false(driver.is_widget_shown(panel), "the toggle state verb flips")
+
+	assert_false(driver.is_widget_disabled(panel), "panel starts enabled")
+	assert_true(driver.dispatch_action_row({"type": "window", "target": "PANEL", "state": "disable"}))
+	assert_true(driver.is_widget_disabled(panel), "disable disables")
+	assert_true(driver.dispatch_action_row({"type": "window", "target": "PANEL", "state": "enable"}))
+	assert_false(driver.is_widget_disabled(panel), "enable enables")
+	assert_true(driver.dispatch_action_row(
+			{"type": "window", "target": "PANEL", "state": "disable", "toggle": true}))
+	assert_true(driver.is_widget_disabled(panel), "disable+TOGGLE flips enabled -> disabled")
+	assert_true(driver.dispatch_action_row(
+			{"type": "window", "target": "PANEL", "state": "enable", "toggle": true}))
+	assert_false(driver.is_widget_disabled(panel), "enable+TOGGLE flips disabled -> enabled")
+
+
+func test_window_action_rejects_off_screen_target() -> void:
+	var driver := _frameless_driver(ACTIONS_XML)
+	assert_eq(driver.get_current_screen(), "MAIN")
+	assert_false(driver.dispatch_action_row(
+			{"type": "window", "target": "SUB_PANEL", "state": "hide"}),
+			"a WINDOW action only reaches the current screen's widgets")
+	assert_false(driver.dispatch_action_row(
+			{"type": "window", "target": "NO_SUCH", "state": "hide"}),
+			"an unknown target is rejected")
+
+
+func test_shell_verbs_emit_shell_action_requested() -> void:
+	var driver := _frameless_driver(ACTIONS_XML)
+	watch_signals(driver)
+	var action := {"type": "lan_search", "target": "SERVER_ROWS", "source": "lan"}
+	assert_true(driver.dispatch_action_row(action), "shell verb consumed")
+	assert_signal_emitted(driver, "shell_action_requested")
+	var args: Array = get_signal_parameters(driver, "shell_action_requested", 0)
+	assert_eq(args[0], "lan_search", "verb type relayed")
+	var payload := args[1] as Dictionary
+	assert_eq(payload.get("target"), "SERVER_ROWS", "payload preserved")
+	assert_eq(payload.get("source"), "lan", "payload fields preserved")
+	assert_eq(driver.get_current_screen(), "MAIN", "the driver invents no LAN effects")
+
+
+func test_action_dispatched_emits_first() -> void:
+	var driver := _frameless_driver(ACTIONS_XML)
+	var order: Array = []
+	driver.action_dispatched.connect(
+			func(type: String, _target: String) -> void: order.append("dispatched:" + type))
+	driver.shell_action_requested.connect(
+			func(type: String, _action: Dictionary) -> void: order.append("shell:" + type))
+	driver.screen_changed.connect(
+			func(name: String) -> void: order.append("screen:" + name))
+	driver.dispatch_action_row({"type": "lan_search", "target": "ROWS"})
+	driver.dispatch_action_row({"type": "screen", "target": "SUB", "file": ""})
+	assert_eq(order, ["dispatched:lan_search", "shell:lan_search",
+			"dispatched:screen", "screen:SUB"],
+			"action_dispatched precedes every effect signal")
+
+
+# --- (b) screen_changed + music_changed -----------------------------------------
+
+
+func test_screen_changed_and_music_changed_on_every_show() -> void:
+	var driver := MenuDriver.new()
+	watch_signals(driver)
+	assert_true(driver.open_document(_doc(ACTIONS_XML), null, null, null, "menu.mnu"))
+	assert_signal_emitted_with_parameters(driver, "screen_changed", ["MAIN"])
+	assert_signal_emitted_with_parameters(driver, "music_changed", [3])
+	assert_signal_emit_count(driver, "music_changed", 1, "one push for the initial show")
+
+	assert_true(driver.show_screen("SUB"))
+	# SUB authors no MUSICVAR: the push still fires with zero [orig:
+	# UI_DispatchScreenEvent @ 0x54e6a0 -> AudioVM_SetVariable @ 0x54eff4].
+	assert_signal_emitted_with_parameters(driver, "music_changed", [0])
+	assert_signal_emit_count(driver, "music_changed", 2, "a no-MUSICVAR screen resets to 0")
+	assert_signal_emit_count(driver, "screen_changed", 2)
+
+	assert_true(driver.show_screen("SUB"))
+	assert_signal_emit_count(driver, "music_changed", 3, "repeated screen events repeat the push")
+	assert_signal_emit_count(driver, "screen_changed", 3)
+
+
+# --- (c) hotkeys through handle_key_input ---------------------------------------
+
+
+func test_esc_hotkey_activates_authored_widget() -> void:
+	var driver := _framed_driver(BOARD_XML)
+	watch_signals(driver)
+	assert_true(driver.handle_key_input(_key(KEY_ESCAPE)), "ESC consumed")
+	# The hidden subtree's VK_ESCAPE prunes; the shown BACK activates.
+	assert_signal_emitted_with_parameters(driver, "widget_activated",
+			[driver.widget_id("BACK"), "BACK"])
+
+
+func test_hidden_subtree_hotkey_never_fires() -> void:
+	var driver := _framed_driver(HIDDEN_ONLY_XML)
+	watch_signals(driver)
+	assert_false(driver.handle_key_input(_key(KEY_ESCAPE)),
+			"a hidden-subtree hotkey neither fires nor consumes")
+	assert_signal_not_emitted(driver, "widget_activated")
+
+
+func test_disabled_hotkey_target_consumes_without_activating() -> void:
+	var driver := _framed_driver(BOARD_XML)
+	driver.set_widget_disabled(driver.widget_id("BACK"), true)
+	watch_signals(driver)
+	assert_true(driver.handle_key_input(_key(KEY_ESCAPE)),
+			"a disabled target still consumes the key")
+	assert_signal_not_emitted(driver, "widget_activated")
+
+
+func test_character_hotkey_fires_case_insensitively() -> void:
+	var driver := _framed_driver(BOARD_XML)
+	watch_signals(driver)
+	# BACK authors <HOTKEY>V</HOTKEY>; a lowercase 'v' keystroke matches.
+	assert_true(driver.handle_key_input(_key(KEY_V, "v".unicode_at(0))),
+			"lowercase character hotkey consumed")
+	assert_signal_emitted_with_parameters(driver, "widget_activated",
+			[driver.widget_id("BACK"), "BACK"])
+
+
+# --- (d) widget_value_changed relay kinds ---------------------------------------
+
+
+func test_select_row_emits_list_kind() -> void:
+	var driver := _frameless_driver(ACTIONS_XML)
+	var list := driver.widget_id("PICKLIST")
+	watch_signals(driver)
+	driver.select_row(list, 1)
+	assert_signal_emitted_with_parameters(driver, "widget_value_changed",
+			["PICKLIST", "list", 1, "BBB"])
+	assert_eq(driver.selected_row(list), 1, "selection tracked")
+
+
+func test_spin_cycle_wraps_and_emits_spinlist() -> void:
+	var driver := _frameless_driver(ACTIONS_XML)
+	var spin := driver.widget_id("SPIN")
+	assert_eq(driver.selected_row(spin), 0, "spin starts on the first row")
+	watch_signals(driver)
+	driver.spin_cycle(spin, -1)
+	assert_eq(driver.selected_row(spin), 2, "cycling back from 0 wraps to the last row")
+	assert_signal_emitted_with_parameters(driver, "widget_value_changed",
+			["SPIN", "spinlist", 2, "HIGH"])
+	driver.spin_cycle(spin, 1)
+	assert_eq(driver.selected_row(spin), 0, "cycling forward wraps modulo the row count")
+	assert_signal_emitted_with_parameters(driver, "widget_value_changed",
+			["SPIN", "spinlist", 0, "LOW"], 1)
+
+
+func test_combo_popup_mouse_select() -> void:
+	var driver := _framed_driver(BOARD_XML)
+	var combo := driver.widget_id("MODE")
+	_click_widget(driver, "MODE")
+	assert_true(driver.is_combo_popup_open(combo), "clicking the combo opens its popup")
+	watch_signals(driver)
+	# The authored LIST_BOX (0,20)-(100,80) offsets to (200,20)-(300,80) with
+	# 20px rows: (250,45) is popup row 1 [orig: D-MNU-7 combo-relative rect].
+	_click(driver, Vector2(250, 45))
+	assert_eq(driver.selected_row(combo), 1, "popup row click selects")
+	assert_false(driver.is_combo_popup_open(combo), "a row pick closes the popup")
+	assert_signal_emitted_with_parameters(driver, "widget_value_changed",
+			["MODE", "combo", 1, "TWO"])
+
+
+func test_combo_outside_click_dismisses_and_is_consumed() -> void:
+	var driver := _framed_driver(BOARD_XML)
+	var combo := driver.widget_id("MODE")
+	_click_widget(driver, "MODE")
+	assert_true(driver.is_combo_popup_open(combo), "popup open")
+	watch_signals(driver)
+	# A press outside the popup (over the OTHER button) dismisses; the
+	# dismissing click is consumed [orig: combobox_handle_event @ 0x65c190,
+	# outside check @ 0x65c290 — D-MNU-11/12].
+	_click_widget(driver, "OTHER")
+	assert_false(driver.is_combo_popup_open(combo), "outside click dismissed the popup")
+	assert_signal_not_emitted(driver, "widget_activated")
+	# A later plain click DOES reach the button, proving only the dismissing
+	# click was eaten.
+	_click_widget(driver, "OTHER")
+	assert_signal_emitted_with_parameters(driver, "widget_activated",
+			[driver.widget_id("OTHER"), "OTHER"])
+
+
+# --- (e) edit focus + typing ----------------------------------------------------
+
+
+func test_edit_click_focus_type_and_enter_commit() -> void:
+	var driver := _framed_driver(BOARD_XML)
+	var edit := driver.widget_id("NAME_EDIT")
+	_click_widget(driver, "NAME_EDIT")
+	assert_eq(driver.get_focused_widget(), edit, "click focuses the edit")
+	watch_signals(driver)
+	assert_true(driver.handle_key_input(_key(KEY_A, "A".unicode_at(0))), "typing consumed")
+	assert_eq(driver.get_widget_text(edit), "A", "the character landed")
+	assert_signal_emitted_with_parameters(driver, "widget_value_changed",
+			["NAME_EDIT", "edit", -1, "A"])
+	# Enter commits and releases focus [orig: edit_widget_handle_key_event
+	# @ 0x6623a0 — clears g_ui_focus_wnd and fires the commit event].
+	assert_true(driver.handle_key_input(_key(KEY_ENTER)), "Enter consumed")
+	assert_eq(driver.get_focused_widget(), -1, "commit released focus")
+	assert_eq(driver.get_widget_text(edit), "A", "committed text persists")
+
+
+func test_edit_numeric_mode_rolls_back_out_of_range() -> void:
+	var driver := _framed_driver(BOARD_XML)
+	var edit := driver.widget_id("NUM_EDIT")
+	_click_widget(driver, "NUM_EDIT")
+	assert_eq(driver.get_focused_widget(), edit, "numeric edit focused")
+	assert_true(driver.handle_key_input(_key(KEY_9, "9".unicode_at(0))))
+	assert_true(driver.handle_key_input(_key(KEY_9, "9".unicode_at(0))))
+	assert_eq(driver.get_widget_text(edit), "99", "in-range digits insert")
+	assert_true(driver.handle_key_input(_key(KEY_9, "9".unicode_at(0))),
+			"the rejected keystroke is still consumed by the focused edit")
+	assert_eq(driver.get_widget_text(edit), "99",
+			"an out-of-range result rolls the whole insert back (MAXVAL 99)")
+
+
+# --- (f) checked toggling -------------------------------------------------------
+
+
+func test_checkbox_click_toggles() -> void:
+	var driver := _framed_driver(BOARD_XML)
+	var chk := driver.widget_id("CHK")
+	assert_false(driver.is_widget_checked(chk), "checkbox starts unchecked")
+	_click_widget(driver, "CHK")
+	assert_true(driver.is_widget_checked(chk), "click checks")
+	_click_widget(driver, "CHK")
+	assert_false(driver.is_widget_checked(chk), "second click unchecks")
+
+
+func test_radio_group_exclusivity() -> void:
+	var driver := _framed_driver(BOARD_XML)
+	var r1 := driver.widget_id("R1")
+	var r2 := driver.widget_id("R2")
+	_click_widget(driver, "R1")
+	assert_true(driver.is_widget_checked(r1), "clicked radio checks")
+	_click_widget(driver, "R2")
+	assert_true(driver.is_widget_checked(r2), "second radio checks")
+	assert_false(driver.is_widget_checked(r1), "GROUP=1 sibling unchecks")
+
+
+# --- (g) sound-trigger edges ----------------------------------------------------
+
+
+func test_selected_sound_emits_sound_requested_on_activation() -> void:
+	var driver := _framed_driver(BOARD_XML)
+	watch_signals(driver)
+	_click_widget(driver, "SND_BTN")
+	assert_signal_emitted_with_parameters(driver, "widget_activated",
+			[driver.widget_id("SND_BTN"), "SND_BTN"])
+	# MenuAudio is null: play_widget_sound still emits the request seam.
+	assert_signal_emitted_with_parameters(driver, "sound_requested",
+			["bank.lwf", "CLICK_SET"])

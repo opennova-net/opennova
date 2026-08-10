@@ -193,29 +193,25 @@ func test_canvas_builds_inert_preview_with_single_screen() -> void:
 	await get_tree().process_frame
 
 	var preview := canvas.get_node_or_null("Preview")
-	assert_not_null(preview, "Canvas holds a MnuMenu preview.")
-	assert_true(preview is MnuMenu, "Preview is a MnuMenu.")
-	assert_true(preview.get_edit_mode(), "Preview is in edit_mode (inert: no nav/audio/cursor).")
+	assert_not_null(preview, "Canvas holds a compiled preview surface.")
+	assert_true(preview is MenuFrame, "Preview is the engine MenuFrame surface.")
+	var frame := preview as MenuFrame
+	assert_true(frame.is_configured(), "Preview compiled the visible screen.")
+	assert_null(canvas.get_interactive_driver(),
+		"Author-mode preview is inert (no play driver: no nav/audio/cursor).")
+	# One compiled screen per frame: MAIN's tree is ROOT + its 5 widgets.
+	assert_eq(frame.widget_count(), 6, "Only the visible screen is compiled.")
 
-	var screens := 0
-	var visible := 0
-	for child in preview.get_children():
-		if child is MnuScreen:
-			screens += 1
-			if child.visible:
-				visible += 1
-	assert_eq(screens, 2, "Both screens are built.")
-	assert_eq(visible, 1, "Exactly one screen is visible in the preview.")
-
-	# Anamorphic fill: the 800x600 board fills the 320x240 canvas -> 320/800 == 240/600 == 0.4.
-	assert_almost_eq(preview.scale.x, 0.4, 0.01, "Preview scales to fill the canvas (anamorphic).")
+	# Anamorphic fill: the frame stays pinned at the 800x600 board size and the
+	# canvas scales it -> 320/800 == 240/600 == 0.4.
+	assert_eq(frame.size, Vector2(800, 600), "Frame pinned to the design space.")
+	assert_almost_eq(frame.scale.x, 0.4, 0.01, "Preview scales to fill the canvas (anamorphic).")
 
 	canvas.show_screen_named("OPTIONS")
-	var options_visible := false
-	for child in preview.get_children():
-		if child is MnuScreen and child.get_screen_name() == "OPTIONS":
-			options_visible = child.visible
-	assert_true(options_visible, "Switching to OPTIONS makes it the visible screen.")
+	assert_eq(canvas.get_visible_screen_name(), "OPTIONS", "Screen switch tracked.")
+	assert_true(frame.is_configured(), "OPTIONS compiled after the switch.")
+	assert_eq(frame.widget_count(), 2,
+		"Switching screens re-configures the frame (ROOT2 + BackBtn).")
 
 
 func test_editor_preview_uses_menu_stylesheet_from_resource_root() -> void:
@@ -242,15 +238,20 @@ func test_editor_preview_uses_menu_stylesheet_from_resource_root() -> void:
 	ed.set_document(editordoc)
 	await get_tree().process_frame
 
-	var preview := ed._canvas.get_node_or_null("Preview") as MnuMenu
-	assert_not_null(preview, "Editor canvas should mount a MnuMenu preview.")
+	var preview := ed._canvas.get_node_or_null("Preview") as MenuFrame
+	assert_not_null(preview, "Editor canvas should mount a compiled MenuFrame preview.")
 	if preview == null:
 		return
-	var sheet := preview.get_stylesheet()
+	assert_true(preview.is_configured(), "Preview compiled against the resource root.")
+	# The stylesheet plumb: the editor resolves the canonical menu_style.mns from
+	# the resource root and hands it to the canvas, which feeds every configure.
+	var sheet := ed.get_stylesheet()
 	assert_not_null(sheet, "Editor preview should use menu_style.mns from the resource root.")
 	if sheet != null:
 		assert_eq(sheet.substitute("%DEF_FONTNAME%"), "Gunpl22b.fnt",
 			"Preview stylesheet should be the canonical menu stylesheet.")
+		assert_same(ed._canvas._stylesheet, sheet,
+			"The canvas configures the frame with the editor's resolved stylesheet.")
 	DirAccess.remove_absolute(dir.path_join("menu_style.mns"))
 	DirAccess.remove_absolute(dir)
 
@@ -1778,14 +1779,35 @@ func test_editor_copy_paste_and_duplicate_preserve_subtrees_one_undo_each() -> v
 
 
 func test_editor_align_uses_rendered_auto_extent_and_preserves_auto_width() -> void:
+	# The rendered extent now comes from MenuFrame.widget_rect (the engine
+	# frame-solved text measure, mapped through the canvas id->index map),
+	# which needs a real .fnt: serve one from a temp resource root and give
+	# the auto widget a literal font name so the frame can load it.
+	var dir := OS.get_temp_dir().path_join("mnu_align_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(dir)
+	var fnt_out := FileAccess.open(dir.path_join("Gunpl22b.fnt"), FileAccess.WRITE)
+	assert_not_null(fnt_out, "temp .fnt fixture should be writable")
+	if fnt_out == null:
+		return
+	fnt_out.store_buffer(FileAccess.get_file_as_bytes("res://../fixtures/fnt/Gunpl22b.fnt"))
+	fnt_out.close()
+	var res_root := ResourceRoot.new()
+	if res_root.set_root_dir(dir) != OK:
+		pass_test("temp resource root unavailable: %s" % res_root.get_last_error())
+		DirAccess.remove_absolute(dir.path_join("Gunpl22b.fnt"))
+		DirAccess.remove_absolute(dir)
+		return
+
 	var pair = await _editor_with_fixture()
 	var ed = pair[0]
+	ed.set_resource_root(res_root)
 	var doc: MnuDocument = pair[1].resource
 	var root := int(doc.get_screen_root_id(doc.get_screen_ids()[0]))
 	var auto := int(doc.add_widget(root, MnuDocument.TYPE_STATIC,
 		Rect2(30, 300, -1, 24)))
 	doc.set_widget_name(auto, "AutoLabel")
 	doc.set_widget_text(auto, "A rendered auto-sized label")
+	doc.set_widget_font(auto, "Gunpl22b.fnt")
 	var fixed := int(doc.add_widget(root, MnuDocument.TYPE_BUTTON,
 		Rect2(360, 300, 80, 24)))
 	doc.set_widget_name(fixed, "RightEdge")
@@ -1809,6 +1831,8 @@ func test_editor_align_uses_rendered_auto_extent_and_preserves_auto_width() -> v
 	ed.undo()
 	assert_almost_eq(doc.get_window_rect(auto).position.x, original_x, 0.01)
 	assert_false(ed.can_undo(), "alignment is one undo entry")
+	DirAccess.remove_absolute(dir.path_join("Gunpl22b.fnt"))
+	DirAccess.remove_absolute(dir)
 
 
 func test_editor_group_z_order_preserves_relative_order_and_one_undo() -> void:

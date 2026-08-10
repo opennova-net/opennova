@@ -192,13 +192,13 @@ func _make_presenter(sim: Simulation) -> DeployPresenter:
 	return presenter
 
 
-func _spawn_list() -> ItemList:
-	if _overlay == null:
-		return null
-	var menu := _overlay.get_node_or_null("DeployScreenMenu") as MnuMenu
-	if menu == null:
-		return null
-	return menu.find_child("SPAWNPOINTS_LIST", true, false) as ItemList
+# The presenter's row PARAM at a visible list row (the old ItemList metadata's
+# successor: the presenter row model carries the node parameter per row).
+func _row_param(presenter: DeployPresenter, row: int) -> int:
+	var rows: Array = presenter.get_spawn_rows()
+	if row < 0 or row >= rows.size():
+		return -1
+	return int((rows[row] as Dictionary).get("param", -1))
 
 
 # The shell leaves State.WORLD on `opened` and returns on `closed`; without those
@@ -266,35 +266,39 @@ func test_refresh_preserves_selected_spawn_identity_by_param() -> void:
 	var presenter := _make_presenter(pair.joiner)
 
 	assert_true(presenter.open(), "the player-paced join opens death.mnu")
-	var list := _spawn_list()
-	assert_not_null(list)
-	if list == null:
+	var driver: MenuDriver = presenter.get_menu_driver()
+	assert_not_null(driver)
+	if driver == null:
 		return
+	var list_id := driver.widget_id("SPAWNPOINTS_LIST")
+	assert_gte(list_id, 0, "death.mnu authors the spawn list")
 	var zone_rows: Array = pair.joiner.get_deploy_spawn_zones()
 	assert_eq(zone_rows.size(), 1,
 			"the fixture exposes one team-owned non-default spawn-zone row")
-	assert_eq(list.item_count, 1 + zone_rows.size(), "default plus the secured zone")
+	assert_eq(driver.get_widget_items(list_id).size(), 1 + zone_rows.size(),
+			"default plus the secured zone")
+	assert_eq(presenter.get_spawn_rows().size(), 1 + zone_rows.size(),
+			"the presenter row model aligns with the compiled list")
 	var zone_param := int((zone_rows[0] as Dictionary).get("param", 0))
 	assert_gt(zone_param, 0)
-	list.select(1)
-	assert_eq(int(list.get_item_metadata(1)), zone_param,
+	driver.select_row(list_id, 1, false)  # highlight only; picks ride user clicks
+	assert_eq(_row_param(presenter, 1), zone_param,
 			"the zone row is selected by deploy param")
 
 	await get_tree().create_timer(DeployPresenter.REFRESH_INTERVAL_S + 0.05).timeout
 
-	var selected := list.get_selected_items()
-	assert_eq(selected.size(), 1, "the selected spawn survives the periodic rebuild")
-	if selected.size() == 1:
-		assert_eq(int(list.get_item_metadata(selected[0])), zone_param,
-				"selection follows the spawn param across the clear+repopulate")
+	var reselected := driver.selected_row(list_id)
+	assert_gte(reselected, 0, "the selected spawn survives the periodic rebuild")
+	assert_eq(_row_param(presenter, reselected), zone_param,
+			"selection follows the spawn param across the clear+repopulate")
 
 
 # Death mid-match re-arms the pick and the shell reopens THIS SAME presenter: the menu is
-# built once (_ensure_menu reuses it) and close() only hides it, so the ItemList — and
-# the row the player picked last time — survive into the next deploy screen, where
-# _populate_spawn_list re-selects that row by param. Godot's SELECT_SINGLE ItemList does
-# not emit item_selected when an already-selected row is clicked unless allow_reselect is
-# set, so without it the reopened screen can never send a second C2S 0x0E.
+# configured once (_ensure_menu reuses the frame+driver) and close() only hides it, so the
+# driver's list state — and the row the player picked last time — survive into the next
+# deploy screen, where _populate_spawn_list re-selects that row by param. The driver
+# re-emits widget_value_changed on every list click (the old ItemList allow_reselect=true
+# successor semantics), so a click on the already-selected row still queues a pick.
 # [orig: DeathScreen_OnSpawnListSelect @0x553630 -> Input_QueueEvent(12, node) @0x55364d]
 # The tail is the REAL deployment release: the default-spawn pick rides C2S 0x0E to the
 # live host and the falling pending bit closes the screen through `closed`.
@@ -304,32 +308,33 @@ func test_a_reopened_death_screen_repicks_and_the_release_closes_it() -> void:
 	watch_signals(presenter)
 
 	assert_true(presenter.open(), "the join deploy screen opens")
-	var list := _spawn_list()
-	assert_not_null(list)
-	if list == null:
+	var driver: MenuDriver = presenter.get_menu_driver()
+	assert_not_null(driver)
+	if driver == null:
 		return
-	assert_true(list.allow_reselect,
-			"clicking the already-selected spawn row must still queue a pick")
+	var list_id := driver.widget_id("SPAWNPOINTS_LIST")
+	assert_gte(list_id, 0, "death.mnu authors the spawn list")
 
-	# Close and reopen WITHOUT a release: the same built menu and its selected
-	# row must come back (the death-edge reopen shape).
-	list.select(0)
+	# Close and reopen WITHOUT a release: the once-configured menu and its
+	# selected row must come back (the death-edge reopen shape).
+	driver.select_row(list_id, 0, false)  # the player's pick, highlight only
 	presenter.close()
 	assert_false(presenter.is_open())
 	assert_true(pair.joiner.is_join_deploy_pick_pending(),
 			"nothing was released; the pick is still owed")
 	assert_true(presenter.open(), "the death edge reopens the deploy screen")
-	var reopened := _spawn_list()
-	assert_eq(reopened, list, "the menu and its list survive close(); they are rebuilt once")
-	var selected := reopened.get_selected_items()
-	assert_eq(selected.size(), 1, "the reopened screen restores the previous pick")
-	assert_eq(int(reopened.get_item_metadata(selected[0])), 0,
+	assert_eq(presenter.get_menu_driver(), driver,
+			"the menu is configured once; close() only hides it")
+	var selected := driver.selected_row(list_id)
+	assert_gte(selected, 0, "the reopened screen restores the previous pick")
+	assert_eq(_row_param(presenter, selected), 0,
 			"and the restored row is the default spawn")
 
-	# The re-pick on the already-selected row queues the REAL C2S 0x0E; the
+	# The re-pick CLICK on the already-selected row queues the REAL C2S 0x0E
+	# (the driver re-emits on every click — allow_reselect successor); the
 	# host's release clears the pending bit, and the presenter's poll closes
 	# the screen through `closed` (the deployment release, not a teardown).
-	reopened.item_selected.emit(selected[0])
+	driver.select_row(list_id, selected)
 	var released := false
 	for _i in range(800):
 		pair.host.step()

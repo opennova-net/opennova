@@ -890,13 +890,15 @@ func test_armory_can_reuse_game_world_weapon_database_on_first_open() -> void:
 	add_child_autofree(presenter)
 	presenter.setup(world, null, overlay)
 	assert_true(presenter.open(), "the production world catalog reaches first armory open")
-	var menu := overlay.get_node("ArmoryMenu") as MnuMenu
-	var primary := menu.find_child("PRIMARY", true, false) as MnuCombo
-	var accessory := menu.find_child("ACCESSORY", true, false) as MnuCombo
-	assert_gt(primary.get_selected(), 0, "the current primary is not NONE on first visit")
-	assert_gt(accessory.get_selected(), 0, "the current satchel is not NONE on first visit")
+	assert_not_null(overlay.get_node_or_null("ArmoryMenu"))
+	var driver: MenuDriver = presenter.get_menu_driver()
+	assert_not_null(driver)
+	assert_gt(driver.selected_row(driver.widget_id("PRIMARY")), 0,
+		"the current primary is not NONE on first visit")
+	assert_gt(driver.selected_row(driver.widget_id("ACCESSORY")), 0,
+		"the current satchel is not NONE on first visit")
 
-	menu.find_child("ACCEPT", true, false).emit_signal("pressed")
+	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
 	var after_names: Array[String] = []
 	for value in sim.get_local_player_loadout():
 		after_names.append(String((value as Dictionary).get("name", "")))

@@ -2,11 +2,12 @@ extends GutTest
 
 # The mp.mnu LAN co-op menu seam: the companion (mp_menu_companion.gd) drives the JO
 # multiplayer menu by control NAME — the same Command-by-name convention the shell's
-# start/exit controls use, but for hosting/joining a LAN game. This pins the wiring
-# (which controls do what, and the host config START_GAME reports). The live two-machine
-# flow (real discovery + a second client spawning) is the manual smoke; this is the unit.
+# start/exit controls use, but for hosting/joining a LAN game — riding a MenuDriver
+# over a real MnuDocument (the compiled-menu surface; the Control tree is gone).
+# This pins the wiring (which controls do what, and the host config START_GAME
+# reports). The live two-machine flow (real discovery + a second client spawning)
+# is the manual smoke; this is the unit.
 
-const MenuShell := preload("res://game/nova_menu_shell.gd")
 const MissionRuntime := preload("res://game/world/mission_runtime.gd")
 
 
@@ -17,65 +18,96 @@ class _LanSessionFeed extends LanSession:
 		emit_signal("servers_changed", servers)
 
 
+# --- Driver harness (the compiled-menu seam) ----------------------------------
+
+func _doc_from_xml(xml: String) -> MnuDocument:
+	var doc := MnuDocument.new()
+	assert_eq(doc.load_from_bytes(xml.to_utf8_buffer()), OK,
+			"the synthetic .mnu XML parses")
+	return doc
 
 
-# A stand-in for the built mp.mnu host-settings screen: a plain Node (the companion only
-# needs find_child + the optional widget_value_changed signal) with the named NovaMnu*
-# controls as children, exactly as the menu builder would name them from the .mnu.
-func _make_host_menu() -> MnuMenu:
-	var menu := MnuMenu.new()
-	menu.build_on_ready = false
-	menu.name = "Menu"
-	add_child_autofree(menu)
-	for n in ["GAME_NAME", "MAX_PLAYERS"]:
-		var e := MnuEdit.new()
-		e.name = n
-		menu.add_child(e)
-	var mission_list := MnuList.new()
-	mission_list.name = "MISSION_LIST"
-	menu.add_child(mission_list)
-	var selected := MnuTable.new()
-	selected.name = "SELECTED_MISSIONS"
-	selected.add_column(80, 0, false)  # Mission
-	selected.add_column(60, 0, false)  # Type
-	selected.add_column(40, 0, false)  # Switch
-	menu.add_child(selected)
-	for n in ["ADD_MISSIONS", "REMOVE_MISSIONS", "START_GAME"]:
-		var b := Button.new()
-		b.name = n
-		menu.add_child(b)
-	return menu
+func _driver_over(doc: MnuDocument, menu_file: String, screen := "") -> MenuDriver:
+	# Frameless on purpose: the driver's state store carries the companion seam
+	# without a render surface (the documented headless-test contract).
+	var driver := MenuDriver.new()
+	assert_true(driver.open_document(doc, null, null, null, menu_file, screen),
+			"the document opens on the driver")
+	return driver
 
 
-func _make_lan_menu() -> MnuMenu:
-	var menu := MnuMenu.new()
-	menu.build_on_ready = false
-	menu.name = "Menu"
-	add_child_autofree(menu)
-	var server_list := MnuList.new()
-	server_list.name = "LAN_GAME_LIST"
-	menu.add_child(server_list)
-	for control_name in ["LAN_SEARCH", "LAN_JOINGAME"]:
-		var button := Button.new()
-		button.name = control_name
-		menu.add_child(button)
-	return menu
+func _wnd(type: String, name: String, top: int, inner := "") -> String:
+	return ('<WINDOW type="%s" name="%s"><POSITION><LEFT>10</LEFT><TOP>%d</TOP>'
+			+ '<RIGHT>250</RIGHT><BOTTOM>%d</BOTTOM></POSITION>%s</WINDOW>') % [
+			type, name, top, top + 20, inner]
 
 
-func _press(menu: Node, name: String) -> void:
-	menu.find_child(name, true, false).emit_signal("pressed")
+func _screen_xml(screen_name: String, body: String) -> String:
+	return ('<SCREEN><NAME>%s</NAME><WINDOW type="window" name="MAIN">'
+			+ '<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT>'
+			+ '<BOTTOM>600</BOTTOM></POSITION>%s</WINDOW></SCREEN>') % [
+			screen_name, body]
+
+
+# A synthetic mp.mnu host-settings screen: the named controls as authored .mnu
+# markup (edits + mission list + the 3-column rotation table + buttons). The
+# with_spins variant adds the GAME_TYPE/SERVERTYPE spin lists with authored
+# `value=` items (the semantic attr distinct from the display label).
+func _host_screen_xml(with_spins := false) -> String:
+	var body := _wnd("edit", "GAME_NAME", 10)
+	body += _wnd("edit", "MAX_PLAYERS", 34)
+	body += _wnd("list", "MISSION_LIST", 58)
+	body += ('<WINDOW type="table" name="SELECTED_MISSIONS">'
+			+ '<POSITION><LEFT>300</LEFT><TOP>58</TOP><RIGHT>520</RIGHT><BOTTOM>200</BOTTOM></POSITION>'
+			+ '<COLUMN count="3">'
+			+ '<HEADER column="0" width="80" justify="LEFT">MISSION</HEADER>'
+			+ '<HEADER column="1" width="60" justify="LEFT">TYPE</HEADER>'
+			+ '<HEADER column="2" width="40" justify="LEFT">SWITCH</HEADER>'
+			+ '</COLUMN></WINDOW>')
+	body += _wnd("button", "ADD_MISSIONS", 210)
+	body += _wnd("button", "REMOVE_MISSIONS", 234)
+	body += _wnd("button", "START_GAME", 258)
+	if with_spins:
+		# Synthetic value attrs: the test pins pass-through of the authored
+		# value=, not any specific retail number.
+		body += _wnd("spinlist", "GAME_TYPE", 282,
+				'<ITEMS><ITEM value="3">HG_COOPERATIVE</ITEM><ITEM value="0">HG_DEATHMATCH</ITEM></ITEMS>')
+		body += _wnd("spinlist", "SERVERTYPE", 306,
+				'<ITEMS><ITEM value="0">HG_SERVEPLAY</ITEM><ITEM value="1">HG_SERVEONLY</ITEM></ITEMS>')
+	return _screen_xml("MULTI_PLAYER_HOST", body)
+
+
+func _lan_screen_xml() -> String:
+	var body := _wnd("list", "LAN_GAME_LIST", 10)
+	body += _wnd("button", "LAN_SEARCH", 200)
+	body += _wnd("button", "LAN_JOINGAME", 224)
+	return _screen_xml("LAN_MULTI_PLAYER", body)
+
+
+func _make_host_driver(with_spins := false) -> MenuDriver:
+	return _driver_over(_doc_from_xml(_host_screen_xml(with_spins)), "jo_mp.mnu")
+
+
+func _make_lan_driver() -> MenuDriver:
+	return _driver_over(_doc_from_xml(_lan_screen_xml()), "jo_mp.mnu")
+
+
+# Simulate a control press: the driver emits widget_activated(id, NAME) on the
+# click/hotkey edge and companions route by NAME — the seam contract.
+func _press(driver: MenuDriver, name: String) -> void:
+	driver.widget_activated.emit(driver.widget_id(name), name)
 
 
 func _start_host_config(mission_file: String) -> HostSessionConfig:
 	var mp := MpMenuCompanion.new()
 	watch_signals(mp)
-	var menu := _make_host_menu()
-	mp.on_menu_built(menu, "jo_mp.mnu", "MULTI_PLAYER_HOST", null)
-	var mission_list := menu.find_child("MISSION_LIST", true, false) as MnuList
-	mission_list.set_items(PackedStringArray([mission_file]))
-	mission_list.select(0)
-	_press(menu, "ADD_MISSIONS")
-	_press(menu, "START_GAME")
+	var driver := _make_host_driver()
+	mp.on_menu_built(driver, "jo_mp.mnu", "MULTI_PLAYER_HOST", null)
+	var mission_list := driver.widget_id("MISSION_LIST")
+	driver.set_widget_items(mission_list, PackedStringArray([mission_file]))
+	driver.select_row(mission_list, 0)
+	_press(driver, "ADD_MISSIONS")
+	_press(driver, "START_GAME")
 	assert_signal_emitted(mp, "lan_host_start_requested")
 	return get_signal_parameters(mp, "lan_host_start_requested")[0] as HostSessionConfig
 
@@ -87,44 +119,43 @@ func test_owned_screens_default() -> void:
 
 func test_owns_menu_detects_mp_menu() -> void:
 	var mp := MpMenuCompanion.new()
-	var menu := _make_host_menu()
-	assert_true(mp.owns_menu(menu), "a menu carrying SELECTED_MISSIONS is the JO mp menu")
-	var plain := MnuMenu.new()
-	plain.build_on_ready = false
-	add_child_autofree(plain)
+	assert_true(mp.owns_menu(_make_host_driver()),
+			"a menu carrying SELECTED_MISSIONS is the JO mp menu")
+	var plain := _driver_over(_doc_from_xml(_screen_xml("PLAIN",
+			_wnd("button", "OK", 10))), "plain.mnu")
 	assert_false(mp.owns_menu(plain), "a plain menu is left to the shell")
 
 
 func test_add_and_remove_missions() -> void:
 	var mp := MpMenuCompanion.new()
-	var menu := _make_host_menu()
-	mp.on_menu_built(menu, "jo_mp.mnu", "MULTI_PLAYER_HOST", null)
-	var mission_list := menu.find_child("MISSION_LIST", true, false) as MnuList
-	mission_list.set_items(PackedStringArray(["alpha.bms", "bravo.bms"]))
-	mission_list.select(0)
-	_press(menu, "ADD_MISSIONS")
-	var table := menu.find_child("SELECTED_MISSIONS", true, false) as MnuTable
-	assert_eq(table.get_row_count(), 1, "ADD moved the highlighted mission into the rotation")
-	assert_eq(table.get_cell_text(0, 0), "alpha.bms")
-	_press(menu, "ADD_MISSIONS")
-	assert_eq(table.get_row_count(), 1, "ADD de-dupes the same mission")
-	table.select_row(0)
-	_press(menu, "REMOVE_MISSIONS")
-	assert_eq(table.get_row_count(), 0, "REMOVE dropped the selected row")
+	var driver := _make_host_driver()
+	mp.on_menu_built(driver, "jo_mp.mnu", "MULTI_PLAYER_HOST", null)
+	var mission_list := driver.widget_id("MISSION_LIST")
+	driver.set_widget_items(mission_list, PackedStringArray(["alpha.bms", "bravo.bms"]))
+	driver.select_row(mission_list, 0)
+	_press(driver, "ADD_MISSIONS")
+	var table := driver.widget_id("SELECTED_MISSIONS")
+	assert_eq(driver.table_row_count(table), 1, "ADD moved the highlighted mission into the rotation")
+	assert_eq(driver.table_cell_text(table, 0, 0), "alpha.bms")
+	_press(driver, "ADD_MISSIONS")
+	assert_eq(driver.table_row_count(table), 1, "ADD de-dupes the same mission")
+	driver.table_select_row(table, 0)
+	_press(driver, "REMOVE_MISSIONS")
+	assert_eq(driver.table_row_count(table), 0, "REMOVE dropped the selected row")
 
 
 func test_start_game_emits_host_config() -> void:
 	var mp := MpMenuCompanion.new()
 	watch_signals(mp)
-	var menu := _make_host_menu()
-	mp.on_menu_built(menu, "jo_mp.mnu", "MULTI_PLAYER_HOST", null)
-	(menu.find_child("GAME_NAME", true, false) as LineEdit).text = "CoopNight"
-	(menu.find_child("MAX_PLAYERS", true, false) as LineEdit).text = "6"
-	var mission_list := menu.find_child("MISSION_LIST", true, false) as MnuList
-	mission_list.set_items(PackedStringArray(["alpha.bms"]))
-	mission_list.select(0)
-	_press(menu, "ADD_MISSIONS")
-	_press(menu, "START_GAME")
+	var driver := _make_host_driver()
+	mp.on_menu_built(driver, "jo_mp.mnu", "MULTI_PLAYER_HOST", null)
+	driver.set_widget_text(driver.widget_id("GAME_NAME"), "CoopNight")
+	driver.set_widget_text(driver.widget_id("MAX_PLAYERS"), "6")
+	var mission_list := driver.widget_id("MISSION_LIST")
+	driver.set_widget_items(mission_list, PackedStringArray(["alpha.bms"]))
+	driver.select_row(mission_list, 0)
+	_press(driver, "ADD_MISSIONS")
+	_press(driver, "START_GAME")
 	assert_signal_emitted(mp, "lan_host_start_requested")
 	var config: HostSessionConfig = get_signal_parameters(mp, "lan_host_start_requested")[0]
 	assert_eq(config.server_name, "CoopNight")
@@ -141,24 +172,52 @@ func test_start_game_emits_host_config() -> void:
 		"the FFI options retain the LAN cadence selector")
 	assert_eq(int(session_options.get("lan_mode", 0)), 1,
 		"a stock LAN request carries retail g_LanMode 1")
-	# SERVERTYPE absent in the stand-in menu -> serve-and-play (dedicated=false). The real screen's
-	# SERVERTYPE spinlist (HG_SERVEONLY value=1) flips this; the value-attr read is unit-tested in
-	# mnu_widgets_test (test_spinlist_get_value_attr_returns_value_not_label).
+	# SERVERTYPE absent in this stand-in menu -> serve-and-play (dedicated=false). The real
+	# screen's SERVERTYPE spinlist (HG_SERVEONLY value=1) flips this; the value-attr read is
+	# pinned in test_servertype_value_attr_selects_dedicated_not_the_label below.
 	assert_eq(config.dedicated, false, "no SERVERTYPE control -> serve-and-play default")
 
 
 func test_start_game_defaults() -> void:
 	var mp := MpMenuCompanion.new()
 	watch_signals(mp)
-	var menu := _make_host_menu()
-	mp.on_menu_built(menu, "jo_mp.mnu", "MULTI_PLAYER_HOST", null)
-	_press(menu, "START_GAME")
+	var driver := _make_host_driver()
+	mp.on_menu_built(driver, "jo_mp.mnu", "MULTI_PLAYER_HOST", null)
+	_press(driver, "START_GAME")
 	var config: HostSessionConfig = get_signal_parameters(mp, "lan_host_start_requested")[0]
 	assert_eq(config.server_name, "COOPGAME", "blank name -> default")
 	assert_eq(config.max_players, 4, "blank cap -> default 4")
 	assert_eq(config.mission, "", "no missions selected -> empty")
 	assert_eq(config.bind_port, HostSessionConfig.DEFAULT_LAN_PORT,
 		"the witnessed retail LAN host port rides the record default")
+
+
+# The SERVERTYPE/GAME_TYPE spin semantics ride the authored item `value=` attr, NOT
+# the localized display label [orig: the host dialog server-type read,
+# UI_HandleHostSessionStart @0x556d00 — HG_SERVEPLAY value=0 (serve-and-play) vs
+# HG_SERVEONLY value=1 (dedicated)]. This replaces the deleted mnu_widgets_test.gd
+# coverage (test_spinlist_get_value_attr_returns_value_not_label) after the
+# Control-tree cutover: driver.spin_value_attr is the compiled surface's read of
+# the same authored item value.
+func test_servertype_value_attr_selects_dedicated_not_the_label() -> void:
+	var mp := MpMenuCompanion.new()
+	watch_signals(mp)
+	var driver := _make_host_driver(true)
+	mp.on_menu_built(driver, "jo_mp.mnu", "MULTI_PLAYER_HOST", null)
+	var servertype := driver.widget_id("SERVERTYPE")
+	assert_eq(driver.spin_value_attr(servertype), "0",
+		"the authored HG_SERVEPLAY row reads its value attr 0")
+	assert_ne(driver.spin_value_attr(servertype), driver.item_text(servertype, 0),
+		"the value attr is the semantic value, not the display text")
+	driver.select_row(servertype, 1)  # emits "spinlist" — the user flip
+	assert_eq(driver.spin_value_attr(servertype), "1",
+		"HG_SERVEONLY reads its authored value attr 1")
+	_press(driver, "START_GAME")
+	assert_signal_emitted(mp, "lan_host_start_requested")
+	var config: HostSessionConfig = get_signal_parameters(mp, "lan_host_start_requested")[0]
+	assert_true(config.dedicated, "SERVERTYPE value 1 hosts dedicated (no local player)")
+	assert_eq(config.game_type_attr, "3",
+		"the GAME_TYPE spin relays its selected row's authored value attr")
 
 
 func test_hosted_mission_game_type_reaches_native_session_config() -> void:
@@ -269,9 +328,13 @@ func test_host_session_carries_retail_rule_defaults() -> void:
 func test_lan_join_emits_selected_server() -> void:
 	var mp := MpMenuCompanion.new()
 	watch_signals(mp)
+	var driver := _make_lan_driver()
+	mp.on_menu_built(driver, "jo_mp.mnu", "LAN_MULTI_PLAYER", null)
 	mp._servers = [{"name": "biggy", "host_ip": "192.168.1.10", "port": 32768}]
-	# A single-click selection relays the row index through the menu's aggregate signal.
-	mp._on_widget_value_changed("LAN_GAME_LIST", "list", 0, "biggy (1/4)")
+	var lan_list := driver.widget_id("LAN_GAME_LIST")
+	driver.set_widget_items(lan_list, PackedStringArray(["biggy (1/4)"]))
+	# A single-click selection relays the row index through the driver's aggregate signal.
+	driver.select_row(lan_list, 0)
 	mp._on_lan_join()
 	assert_signal_emitted(mp, "lan_join_requested")
 	var target: JoinTarget = get_signal_parameters(mp, "lan_join_requested")[0]
@@ -284,28 +347,28 @@ func test_lan_join_emits_selected_server() -> void:
 func test_refreshed_lan_rows_require_a_fresh_selection() -> void:
 	var mp := MpMenuCompanion.new()
 	watch_signals(mp)
-	var menu := _make_lan_menu()
-	mp.on_menu_built(menu, "jo_mp.mnu", "LAN_MULTI_PLAYER", null)
+	var driver := _make_lan_driver()
+	mp.on_menu_built(driver, "jo_mp.mnu", "LAN_MULTI_PLAYER", null)
 	var session := _LanSessionFeed.new()
 	autofree(session)
 	mp.set_lan_session(session)
 	session.publish([{"name": "old", "host_ip": "192.168.1.10", "port": 32768}])
-	menu.emit_signal("widget_value_changed", "LAN_GAME_LIST", "list", 0, "old")
+	var lan_list := driver.widget_id("LAN_GAME_LIST")
+	driver.select_row(lan_list, 0)  # single click on the old row
 
 	session.publish([{"name": "replacement", "host_ip": "192.168.1.11", "port": 32769}])
-	var server_list := menu.find_child("LAN_GAME_LIST", true, false) as MnuList
-	assert_eq(server_list.get_item_count(), 1,
+	assert_eq(driver.item_count(lan_list), 1,
 		"a servers_changed payload replaces the prior full snapshot instead of appending")
-	assert_eq(server_list.get_item_text(0), "replacement (0/0)")
-	_press(menu, "LAN_JOINGAME")
+	assert_eq(driver.item_text(lan_list, 0), "replacement (0/0)")
+	_press(driver, "LAN_JOINGAME")
 	assert_signal_not_emitted(mp, "lan_join_requested",
 		"refreshed rows invalidate the selection from the previous result set")
 
 
 func test_swapping_lan_sessions_disconnects_the_previous_discovery_source() -> void:
 	var mp := MpMenuCompanion.new()
-	var menu := _make_lan_menu()
-	mp.on_menu_built(menu, "jo_mp.mnu", "LAN_MULTI_PLAYER", null)
+	var driver := _make_lan_driver()
+	mp.on_menu_built(driver, "jo_mp.mnu", "LAN_MULTI_PLAYER", null)
 	var previous := _LanSessionFeed.new()
 	autofree(previous)
 	var current := _LanSessionFeed.new()
@@ -315,14 +378,14 @@ func test_swapping_lan_sessions_disconnects_the_previous_discovery_source() -> v
 	current.publish([{"name": "current", "players": 1, "max_players": 4, "mission": "new.bms"}])
 	previous.publish([{"name": "stale", "players": 4, "max_players": 4, "mission": "old.bms"}])
 
-	var server_list := menu.find_child("LAN_GAME_LIST", true, false) as MnuList
-	assert_eq(server_list.get_item_count(), 1)
-	assert_eq(server_list.get_item_text(0), "current (1/4)",
+	var lan_list := driver.widget_id("LAN_GAME_LIST")
+	assert_eq(driver.item_count(lan_list), 1)
+	assert_eq(driver.item_text(lan_list, 0), "current (1/4)",
 		"the current source wins and pre-auth rows do not invent a mission label")
 
 
 func test_shell_accepts_companion() -> void:
-	var host = MenuShell.new()
-	add_child_autofree(host)
-	host.add_companion(MpMenuCompanion.new())  # installs without a menu loaded, no crash
-	assert_true(true, "companion installed on a menuless shell without error")
+	var shell := MenuShell.new()
+	add_child_autofree(shell)
+	shell.add_companion(MpMenuCompanion.new())  # installs without a menu loaded, no crash
+	assert_null(shell.get_driver(), "no driver is assembled until setup() builds the surface")

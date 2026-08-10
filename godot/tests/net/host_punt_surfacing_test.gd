@@ -86,8 +86,8 @@ func after_each() -> void:
 			if world_root != null:
 				world_root.clear()
 		var menu_shell = _shell.get_node_or_null("MenuLayer/MenuShell")
-		if menu_shell != null and menu_shell.get_menu() != null:
-			var menu_root = menu_shell.get_menu().get_resource_root()
+		if menu_shell != null and menu_shell.get_resource_root() != null:
+			var menu_root = menu_shell.get_resource_root()
 			if menu_root != null:
 				menu_root.clear()
 		_shell.queue_free()
