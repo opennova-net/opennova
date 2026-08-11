@@ -779,11 +779,34 @@ void MenuFrameCompiler::emit_caret(hud::GameFont &gf, const std::string &text,
 // [orig: CStaticWnd_DrawLabel @ 0x656fb0 — edge-inset available width,
 //  truncate-to-fit, justify from the truncated width, then the state-colored
 //  draw; the wrap path (+760 -> sub_653D60) is deferred (D-MNU-13)].
+// [orig: CComboWnd_Render @ 0x65c05b..0x65c083 — this[183] = row_text(list,
+// selected_row(list)); CStaticWnd_DrawLabel; restore. Text-only: image/color
+// rows contribute their stored text (possibly empty).]
+std::string MenuFrameCompiler::combo_face_text(const WidgetNode &node,
+		const MenuWidgetState *ws) const {
+	const int selected = ws != nullptr ? ws->selected_item : 0;
+	if (ws != nullptr && ws->has_items) {
+		if (selected < 0 || selected >= static_cast<int>(ws->items.size())) {
+			return std::string();
+		}
+		return ws->items[static_cast<size_t>(selected)];
+	}
+	const mnu::Window &w = *node.window;
+	const std::vector<WidgetNode::ItemVisual> &rows =
+			w.list_box.items.present ? node.popup_items : node.items;
+	if (selected < 0 || selected >= static_cast<int>(rows.size())) {
+		return std::string();
+	}
+	return rows[static_cast<size_t>(selected)].text;
+}
+
 void MenuFrameCompiler::emit_widget_text(const WidgetNode &node,
 		const mnu::RectEdges &rect, const WalkScale &s, int color_state,
-		const MenuWidgetState *ws, int caret) {
+		const MenuWidgetState *ws, int caret,
+		const std::string *override_text) {
 	const mnu::Window &w = *node.window;
-	const std::string text = widget_text(node, ws);
+	const std::string text =
+			override_text != nullptr ? *override_text : widget_text(node, ws);
 	if (text.empty()) {
 		return;
 	}
@@ -2196,25 +2219,35 @@ int MenuFrameCompiler::walk_widget(int index, int origin_x, int origin_y,
 			break;
 		}
 		case mnu::WindowType::Combo: {
-			// [orig: CComboWnd_Render @ 0x65bfd0 — the closed cell, then the
-			//  embedded list child at its authored rect when open]
+			// [orig: CComboWnd_Render @ 0x65bfd0 — frame, appearance, then the
+			//  LABEL temporarily swapped to the embedded list's SELECTED row
+			//  text (@ 0x65c05b..0x65c083: this[183] = row_text(list,
+			//  selected_row(list)); CStaticWnd_DrawLabel; restore) — the
+			//  closed face IS the list selection, text-only, laid out by the
+			//  combo's OWN STRING block. Shipped options.mnu authors rows only
+			//  inside <LIST_BOX>, so a face reading widget-level ITEMS alone
+			//  rendered blank (D-MNU-15's runtime-rows fix carried the same
+			//  root cause for authored rows).]
 			if (w.draw_frame) {
 				emit_frame(node, rect, s);
 			}
 			emit_appearance(node, rect, s,
 					appearance_state_with_fallback(node, pump));
-			// The closed face shows the SELECTION whenever rows exist —
-			// authored OR runtime-seeded (the armory's companion rows); the
-			// authored-only gate left every runtime-filled combo face blank
-			// (D-MNU-15) [orig: the closed face is the +764 CButtonWnd showing
-			// items[selected], CComboWnd ctor @ 0x65be40].
-			if (!node.items.empty() || (ws != nullptr && ws->has_items)) {
-				emit_item_cell(node, rect, s, pump, ws);
+			const std::string face = combo_face_text(node, ws);
+			if (!face.empty()) {
+				emit_widget_text(node, rect, s, pump, ws, -1, &face);
 			} else {
 				emit_widget_text(node, rect, s, pump, ws, -1);
 			}
 			if (ws != nullptr && ws->popup_open) {
-				emit_combo_popup(node, rect, s, ws);
+				// The open dropdown is DEFERRED to the post-walk overlay pass:
+				// retail's own tree order (options.mnu authors WATERQUALITY
+				// before the rows its 80px popup covers) draws the popup
+				// inline per the witnessed walk, yet renders it visually on
+				// top — the topmost mechanism is unwalked. The reimpl hosts
+				// open popups menu-top by decision (D-MNU-12), as the
+				// Control-tree overlay did.
+				deferred_popups_.push_back(index);
 			}
 			break;
 		}
@@ -2461,7 +2494,22 @@ const MenuDrawList &MenuFrameCompiler::compile(const MenuFrameState &state,
 	WalkScale s;
 	s.x = scale_x;
 	s.y = scale_y;
+	deferred_popups_.clear();
 	walk_widget(0, 0, 0, state, s);
+	// The open-dropdown overlay pass (D-MNU-12): popups collected during the
+	// walk paint after every widget, before the cursor.
+	for (int index : deferred_popups_) {
+		const WidgetNode &node = nodes_[static_cast<size_t>(index)];
+		mnu::RectEdges rect;
+		if (!widget_rect(index, state, &rect)) {
+			continue;
+		}
+		const MenuWidgetState *ws = state_for(state, index);
+		if (ws != nullptr && ws->popup_open) {
+			emit_combo_popup(node, rect, s, ws);
+		}
+	}
+	deferred_popups_.clear();
 	emit_cursor(state);
 	return draw_list_;
 }

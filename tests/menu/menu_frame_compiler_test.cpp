@@ -1754,6 +1754,196 @@ void test_draw_list_preserves_interleaved_primitive_order(
 	}
 }
 
+// The witnessed CScrollWnd interaction map: arrows step, the track pages
+// toward the click, the shuttle press anchors a drag whose moves invert the
+// travel ratio into a clamped value.
+// [orig: CScrollWnd_HandleEvent @ 0x64d050 (arrows @ 0x64d2d9/0x64d31a, track
+//  @ 0x64d0f0/0x64d10e, anchor @ 0x64d1cb..0x64d217, drag @ 0x64d231..
+//  0x64d2aa); ctor defaults step 1 @ 0x64c4cf, page 10 @ 0x64c4d9]
+void test_scroll_interaction_hits_and_drag(const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>OPTIONS</NAME>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <WINDOW type="scroll" name="GAMMA">
+      <POSITION><LEFT>100</LEFT><TOP>72</TOP><RIGHT>300</RIGHT><BOTTOM>92</BOTTOM></POSITION>
+      <ORIENTATION>HORIZONTAL</ORIENTATION>
+      <APPEARANCE type="image" state="default">track.tga</APPEARANCE>
+      <SHUTTLE type="color" state="default">80FF0000</SHUTTLE>
+      <SCROLLUP type="image" state="default">left.tga</SCROLLUP>
+      <SCROLLDOWN type="image" state="default">right.tga</SCROLLDOWN>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	c.configure(doc.first_screen(), font);
+	c.set_texture_size(slot_of(c, "track.tga"), 76, 20);
+	c.set_texture_size(slot_of(c, "left.tga"), 12, 20);
+	c.set_texture_size(slot_of(c, "right.tga"), 12, 20);
+
+	MenuWidgetState gamma;
+	gamma.index = 1;
+	gamma.has_scroll_range = true;
+	gamma.scroll_min = 0;
+	gamma.scroll_max = 100;
+	gamma.scroll_page = 10;
+	gamma.scroll_value = 0;
+	MenuFrameState state;
+	state.widgets.push_back(gamma);
+	c.compile(state, 1.0f, 1.0f);
+
+	// Widget 100..300 wide, ctor part extent 20: arrows 100..120 / 280..300,
+	// track 120..280 (160px), 20px-floored shuttle at 120..140 for value 0.
+	CHECK(c.scroll_hit_at(1, state, 105.0f, 80.0f, 1.0f, 1.0f) ==
+					MenuFrameCompiler::kScrollHitUp,
+			"the left arrow strip hits Up");
+	CHECK(c.scroll_hit_at(1, state, 295.0f, 80.0f, 1.0f, 1.0f) ==
+					MenuFrameCompiler::kScrollHitDown,
+			"the right arrow strip hits Down");
+	CHECK(c.scroll_hit_at(1, state, 125.0f, 80.0f, 1.0f, 1.0f) ==
+					MenuFrameCompiler::kScrollHitShuttle,
+			"the value-0 shuttle sits at the track start");
+	CHECK(c.scroll_hit_at(1, state, 270.0f, 80.0f, 1.0f, 1.0f) ==
+					MenuFrameCompiler::kScrollHitTrackAfter,
+			"the strip past the shuttle hits track-after");
+	CHECK(c.scroll_hit_at(1, state, 50.0f, 80.0f, 1.0f, 1.0f) ==
+					MenuFrameCompiler::kScrollHitNone,
+			"outside the widget nothing hits");
+
+	// Drag: anchor at a press on the shuttle, then a move to the track end
+	// lands the max value; back to the start lands the min.
+	const int anchor = c.scroll_drag_anchor(1, state, 125.0f, 80.0f, 1.0f, 1.0f);
+	CHECK(c.scroll_drag_value(1, state, 500.0f, 80.0f, 1.0f, 1.0f, anchor) == 100,
+			"dragging past the track end clamps to max");
+	CHECK(c.scroll_drag_value(1, state, 125.0f, 80.0f, 1.0f, 1.0f, anchor) == 0,
+			"dragging back to the press point restores the pressed value");
+	CHECK(c.scroll_drag_value(1, state, 0.0f, 80.0f, 1.0f, 1.0f, anchor) == 0,
+			"dragging before the track start clamps to min");
+}
+
+// The retail combo closed face (the +764 CButtonWnd) shows the SELECTED row of
+// the embedded LIST — shipped options.mnu combos (WATERQUALITY et al.) author
+// their rows ONLY inside <LIST_BOX><ITEMS> with an empty widget STRING, so a
+// face that reads only widget-level ITEMS renders blank.
+// [orig: CComboWnd ctor @ 0x65be40 — the closed cell; the LIST_BOX parse
+//  delegate CComboWnd_ParseXMLDefinition @ 0x65c0d0]
+void test_combo_face_shows_list_box_selection(const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>COMBO_FACE</NAME>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <FONT><NAME>f.fnt</NAME><DEFAULT_FG>FFFFFF</DEFAULT_FG></FONT>
+    <WINDOW type="combo" name="WATER">
+      <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>152</RIGHT><BOTTOM>20</BOTTOM></POSITION>
+      <STRING edge="5" justify="CENTER" vjustify="CENTER"></STRING>
+      <LIST_BOX>
+        <POSITION><LEFT>0</LEFT><TOP>20</TOP><RIGHT>152</RIGHT><BOTTOM>80</BOTTOM></POSITION>
+        <ITEMS justify="LEFT" vjustify="CENTER">
+          <ITEM type="ID" value="1">LOW</ITEM>
+          <ITEM type="ID" value="2">NORMAL</ITEM>
+          <ITEM type="ID" value="3">HIGH</ITEM>
+        </ITEMS>
+        <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+      </LIST_BOX>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	c.configure(doc.first_screen(), font);
+	MenuWidgetState combo;
+	combo.index = 1;
+	combo.selected_item = 1; // NORMAL
+	MenuFrameState state;
+	state.widgets.push_back(combo);
+	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
+	// The closed cell draws the selection's glyphs inside the widget rect
+	// (y within [0, 20)) — 6 glyphs for "NORMAL".
+	int face_glyphs = 0;
+	for (const auto &g : dl.glyphs) {
+		if (g.y_top >= 0.0f && g.y_bottom <= 20.0f) {
+			++face_glyphs;
+		}
+	}
+	CHECK(face_glyphs == 6,
+			"the closed combo face draws the LIST_BOX selection (NORMAL)");
+}
+
+// The open dropdown draws OVER later widgets: shipped options.mnu authors
+// WATERQUALITY before SHADOWQUALITY/PARTICLES, yet its open popup covers
+// them — the scene draw defers the registered open popup to the end of the
+// walk, it is NOT painted inline at tree position.
+// [orig: CUIElement_Draw @ 0x64a8a0 (the popup-flagged re-register);
+//  g_ui_open_popup_wnd @ 0x31C16D8]
+void test_open_combo_popup_draws_over_later_widgets(const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>COMBO_OVER</NAME>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <FONT><NAME>f.fnt</NAME><DEFAULT_FG>FFFFFF</DEFAULT_FG></FONT>
+    <WINDOW type="combo" name="WATER">
+      <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>152</RIGHT><BOTTOM>20</BOTTOM></POSITION>
+      <LIST_BOX>
+        <APPEARANCE type="color" state="default">445566</APPEARANCE>
+        <POSITION><LEFT>0</LEFT><TOP>20</TOP><RIGHT>152</RIGHT><BOTTOM>80</BOTTOM></POSITION>
+        <ITEMS justify="LEFT" vjustify="CENTER">
+          <ITEM type="ID" value="1">LOW</ITEM>
+          <ITEM type="ID" value="2">NORMAL</ITEM>
+        </ITEMS>
+        <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+      </LIST_BOX>
+    </WINDOW>
+    <WINDOW type="window" name="SHADOWS_BELOW">
+      <POSITION><LEFT>0</LEFT><TOP>30</TOP><RIGHT>152</RIGHT><BOTTOM>50</BOTTOM></POSITION>
+      <APPEARANCE type="color" state="default">112233</APPEARANCE>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	c.configure(doc.first_screen(), font);
+	MenuWidgetState combo;
+	combo.index = 1;
+	combo.popup_open = true;
+	MenuFrameState state;
+	state.widgets.push_back(combo);
+	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
+	int popup_bg = -1;
+	int later_cover = -1;
+	for (size_t i = 0; i < dl.quads.size(); ++i) {
+		if ((dl.quads[i].color & 0x00FFFFFFu) == 0x445566u) {
+			popup_bg = static_cast<int>(i);
+		}
+		if ((dl.quads[i].color & 0x00FFFFFFu) == 0x112233u) {
+			later_cover = static_cast<int>(i);
+		}
+	}
+	CHECK(popup_bg >= 0 && later_cover >= 0,
+			"both the popup background and the later sibling emit quads");
+	int popup_op = -1;
+	int later_op = -1;
+	for (size_t i = 0; i < dl.draw_ops.size(); ++i) {
+		const auto &op = dl.draw_ops[i];
+		if (op.kind == MenuDrawList::DrawOp::Kind::Quad) {
+			if (op.index == popup_bg) {
+				popup_op = static_cast<int>(i);
+			}
+			if (op.index == later_cover) {
+				later_op = static_cast<int>(i);
+			}
+		}
+	}
+	CHECK(popup_op >= 0 && later_op >= 0 && popup_op > later_op,
+			"the open popup paints AFTER the later sibling that overlaps it");
+}
+
 } // namespace
 
 int main() {
@@ -1783,6 +1973,9 @@ int main() {
 	test_hotkey_widget(&font);
 	test_multiline_wrap(&font);
 	test_draw_list_preserves_interleaved_primitive_order(&font);
+	test_scroll_interaction_hits_and_drag(&font);
+	test_combo_face_shows_list_box_selection(&font);
+	test_open_combo_popup_draws_over_later_widgets(&font);
 	fnt_free(&font);
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);

@@ -321,6 +321,24 @@ void MenuFrame::clear_widget_text(int p_index) {
 	queue_redraw();
 }
 
+void MenuFrame::set_widget_hover_item(int p_index, int p_row) {
+	opennova::menu::MenuWidgetState &ws = widget_(p_index);
+	if (ws.hover_item == p_row) {
+		return;
+	}
+	ws.hover_item = p_row;
+	queue_redraw();
+}
+
+int MenuFrame::get_widget_hover_item(int p_index) const {
+	for (const opennova::menu::MenuWidgetState &ws : state_.widgets) {
+		if (ws.index == p_index) {
+			return ws.hover_item;
+		}
+	}
+	return -1;
+}
+
 void MenuFrame::set_widget_selection(int p_index, int p_selected_item,
 		int p_hover_item, int p_scroll_row) {
 	opennova::menu::MenuWidgetState &ws = widget_(p_index);
@@ -526,6 +544,35 @@ int MenuFrame::combo_popup_row_at(int p_index,
 	const Vector2 scale = design_scale_();
 	return compiler_.combo_popup_row_at(p_index, state_, p_position.x,
 			p_position.y, scale.x, scale.y);
+}
+
+int MenuFrame::scroll_hit_at(int p_index, const Vector2 &p_position) const {
+	if (!configured_) {
+		return 0;
+	}
+	const Vector2 scale = design_scale_();
+	return compiler_.scroll_hit_at(p_index, state_, p_position.x, p_position.y,
+			scale.x, scale.y);
+}
+
+int MenuFrame::scroll_drag_anchor(int p_index,
+		const Vector2 &p_position) const {
+	if (!configured_) {
+		return 0;
+	}
+	const Vector2 scale = design_scale_();
+	return compiler_.scroll_drag_anchor(p_index, state_, p_position.x,
+			p_position.y, scale.x, scale.y);
+}
+
+int MenuFrame::scroll_drag_value(int p_index, const Vector2 &p_position,
+		int p_anchor) const {
+	if (!configured_) {
+		return 0;
+	}
+	const Vector2 scale = design_scale_();
+	return compiler_.scroll_drag_value(p_index, state_, p_position.x,
+			p_position.y, scale.x, scale.y, p_anchor);
 }
 
 int MenuFrame::spin_arrow_at(int p_index, const Vector2 &p_position) const {
@@ -862,6 +909,17 @@ void MenuFrame::_bind_methods() {
 			&MenuFrame::set_widget_text);
 	ClassDB::bind_method(D_METHOD("clear_widget_text", "index"),
 			&MenuFrame::clear_widget_text);
+	ClassDB::bind_method(D_METHOD("set_widget_hover_item", "index", "row"),
+			&MenuFrame::set_widget_hover_item);
+	ClassDB::bind_method(D_METHOD("scroll_hit_at", "index", "position"),
+			&MenuFrame::scroll_hit_at);
+	ClassDB::bind_method(D_METHOD("scroll_drag_anchor", "index", "position"),
+			&MenuFrame::scroll_drag_anchor);
+	ClassDB::bind_method(
+			D_METHOD("scroll_drag_value", "index", "position", "anchor"),
+			&MenuFrame::scroll_drag_value);
+	ClassDB::bind_method(D_METHOD("get_widget_hover_item", "index"),
+			&MenuFrame::get_widget_hover_item);
 	ClassDB::bind_method(
 			D_METHOD("set_widget_selection", "index", "selected_item",
 					"hover_item", "scroll_row"),

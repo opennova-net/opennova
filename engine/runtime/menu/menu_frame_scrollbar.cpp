@@ -107,6 +107,11 @@ void MenuFrameCompiler::emit_scrollbar(const WidgetNode &node,
 	if (visual == nullptr || !visual->present) {
 		return;
 	}
+	ScrollParts parts;
+	if (!solve_scroll_parts_(node, kind, rect, range_min, range_max, page,
+				value, &parts)) {
+		return;
+	}
 	const int track_slot =
 			track_state >= 0 && track_state < 4 && visual->track[track_state].present
 			? track_state
@@ -115,9 +120,52 @@ void MenuFrameCompiler::emit_scrollbar(const WidgetNode &node,
 	const StatePass &shuttle = visual->shuttle[kStateDefault];
 	const StatePass &up = visual->up[kStateDefault];
 	const StatePass &down = visual->down[kStateDefault];
-	const int extent = std::max(visual->part_extent, 0);
+	const mnu::RectEdges &track_rect = parts.track;
+	const mnu::RectEdges &up_rect = parts.up;
+	const mnu::RectEdges &down_rect = parts.down;
+	const mnu::RectEdges &shuttle_rect = parts.shuttle;
+	if (track.has_color) {
+		emit_rect_quad(rect, s, track.color, kMenuTexNone, false, 1.0f, 1.0f);
+	}
+	emit_state_texture(track_rect, s, track);
+	if (track.has_outline) {
+		emit_outline(rect, s, track.outline);
+	}
+	emit_state_pass(shuttle_rect, s, shuttle);
+	emit_state_pass(up_rect, s, up);
+	emit_state_pass(down_rect, s, down);
+}
+
+// Shared scrollbar part geometry [orig: CUIScrollbar_CalcThumbRect @ 0x64cba0;
+// CScrollWnd_UpdateThumbPosition @ 0x64cd50 - thumb origin = track_base +
+// (value - min) * ratio; thumb length = track * (page + 1) /
+// (page - min + max + 1), min 20px].
+bool MenuFrameCompiler::solve_scroll_parts_(const WidgetNode &node,
+		ScrollbarKind kind, const mnu::RectEdges &rect,
+		int range_min, int range_max, int page, int value,
+		ScrollParts *out) const {
+	if (out == nullptr) {
+		return false;
+	}
+	const WidgetNode::ScrollbarVisual *visual_ptr = nullptr;
+	switch (kind) {
+		case ScrollbarKind::Standalone:
+			visual_ptr = &node.scrollbar;
+			break;
+		case ScrollbarKind::Embedded:
+			visual_ptr = &node.embedded_scrollbar;
+			break;
+		case ScrollbarKind::Popup:
+			visual_ptr = &node.popup_scrollbar;
+			break;
+	}
+	if (visual_ptr == nullptr || !visual_ptr->present) {
+		return false;
+	}
+	const WidgetNode::ScrollbarVisual &visual = *visual_ptr;
+	const int extent = std::max(visual.part_extent, 0);
 	const int axis =
-			visual->vertical ? rect.bottom - rect.top : rect.right - rect.left;
+			visual.vertical ? rect.bottom - rect.top : rect.right - rect.left;
 	const int track_length = std::max(axis - 2 * extent, 0);
 	int shuttle_length = track_length;
 	const int range_length = std::max(range_max - range_min, 0);
@@ -140,36 +188,130 @@ void MenuFrameCompiler::emit_scrollbar(const WidgetNode &node,
 				static_cast<int>(static_cast<int64_t>(clamped_value - range_min) *
 						travel / range_length);
 	}
-
-	mnu::RectEdges track_rect;
-	mnu::RectEdges up_rect;
-	mnu::RectEdges down_rect;
-	mnu::RectEdges shuttle_rect;
-	if (visual->vertical) {
-		track_rect = { rect.left, rect.top + extent, rect.right,
+	if (visual.vertical) {
+		out->track = { rect.left, rect.top + extent, rect.right,
 			rect.bottom - extent };
-		up_rect = { rect.left, rect.top, rect.right, rect.top + extent };
-		down_rect = { rect.left, rect.bottom - extent, rect.right, rect.bottom };
-		shuttle_rect = { rect.left, rect.top + shuttle_offset, rect.right,
+		out->up = { rect.left, rect.top, rect.right, rect.top + extent };
+		out->down = { rect.left, rect.bottom - extent, rect.right, rect.bottom };
+		out->shuttle = { rect.left, rect.top + shuttle_offset, rect.right,
 			rect.top + shuttle_offset + shuttle_length };
 	} else {
-		track_rect = { rect.left + extent, rect.top, rect.right - extent,
+		out->track = { rect.left + extent, rect.top, rect.right - extent,
 			rect.bottom };
-		up_rect = { rect.left, rect.top, rect.left + extent, rect.bottom };
-		down_rect = { rect.right - extent, rect.top, rect.right, rect.bottom };
-		shuttle_rect = { rect.left + shuttle_offset, rect.top,
+		out->up = { rect.left, rect.top, rect.left + extent, rect.bottom };
+		out->down = { rect.right - extent, rect.top, rect.right, rect.bottom };
+		out->shuttle = { rect.left + shuttle_offset, rect.top,
 			rect.left + shuttle_offset + shuttle_length, rect.bottom };
 	}
-	if (track.has_color) {
-		emit_rect_quad(rect, s, track.color, kMenuTexNone, false, 1.0f, 1.0f);
+	out->vertical = visual.vertical;
+	out->extent = extent;
+	out->travel = travel;
+	out->shuttle_offset = shuttle_offset;
+	out->range_min = range_min;
+	out->range_max = range_max;
+	return true;
+}
+
+bool MenuFrameCompiler::solve_standalone_scroll_(int index,
+		const MenuFrameState &state, ScrollParts *out) const {
+	if (index < 0 || index >= static_cast<int>(nodes_.size())) {
+		return false;
 	}
-	emit_state_texture(track_rect, s, track);
-	if (track.has_outline) {
-		emit_outline(rect, s, track.outline);
+	const WidgetNode &node = nodes_[static_cast<size_t>(index)];
+	if (node.window == nullptr ||
+			node.window->type != mnu::WindowType::Scroll ||
+			!node.scrollbar.present) {
+		return false;
 	}
-	emit_state_pass(shuttle_rect, s, shuttle);
-	emit_state_pass(up_rect, s, up);
-	emit_state_pass(down_rect, s, down);
+	mnu::RectEdges rect;
+	if (!widget_rect(index, state, &rect)) {
+		return false;
+	}
+	const MenuWidgetState *ws = state_for(state, index);
+	const int range_min = ws != nullptr && ws->has_scroll_range ? ws->scroll_min : 0;
+	const int range_max = ws != nullptr && ws->has_scroll_range ? ws->scroll_max : 0;
+	const int page = ws != nullptr && ws->has_scroll_range ? ws->scroll_page : 10;
+	const int value = ws != nullptr && ws->has_scroll_range ? ws->scroll_value : 0;
+	return solve_scroll_parts_(node, ScrollbarKind::Standalone, rect, range_min,
+			range_max, page, value, out);
+}
+
+// The witnessed CScrollWnd interaction map [orig: CScrollWnd_HandleEvent
+// @ 0x64d050 - SCROLLWND_UP/DOWN click = value -/+ step (ctor default 1
+// @ 0x64c4cf); a track press pages toward the click (value -/+ page,
+// SetPageSize @ 0x64ce10; ctor default 10 @ 0x64c4d9); a shuttle press
+// captures and drags].
+int MenuFrameCompiler::scroll_hit_at(int index, const MenuFrameState &state,
+		float mouse_x, float mouse_y, float scale_x, float scale_y) const {
+	ScrollParts parts;
+	if (!solve_standalone_scroll_(index, state, &parts)) {
+		return kScrollHitNone;
+	}
+	const float mx = scale_x > 0.0f ? mouse_x / scale_x : mouse_x;
+	const float my = scale_y > 0.0f ? mouse_y / scale_y : mouse_y;
+	auto inside = [&](const mnu::RectEdges &r) {
+		return mx >= r.left && mx < r.right && my >= r.top && my < r.bottom;
+	};
+	if (inside(parts.up)) {
+		return kScrollHitUp;
+	}
+	if (inside(parts.down)) {
+		return kScrollHitDown;
+	}
+	if (inside(parts.shuttle)) {
+		return kScrollHitShuttle;
+	}
+	if (inside(parts.track)) {
+		const float axis_pos = parts.vertical ? my : mx;
+		const float shuttle_start = parts.vertical
+				? static_cast<float>(parts.shuttle.top)
+				: static_cast<float>(parts.shuttle.left);
+		return axis_pos < shuttle_start ? kScrollHitTrackBefore
+										: kScrollHitTrackAfter;
+	}
+	return kScrollHitNone;
+}
+
+// Press anchor: shuttle origin minus the mouse along the axis (design units)
+// [orig: the L-down leg @ 0x64d1cb..0x64d217 - this[763] = shuttle_origin -
+// track_base - mouse].
+int MenuFrameCompiler::scroll_drag_anchor(int index,
+		const MenuFrameState &state, float mouse_x, float mouse_y,
+		float scale_x, float scale_y) const {
+	ScrollParts parts;
+	if (!solve_standalone_scroll_(index, state, &parts)) {
+		return 0;
+	}
+	const float mx = scale_x > 0.0f ? mouse_x / scale_x : mouse_x;
+	const float my = scale_y > 0.0f ? mouse_y / scale_y : mouse_y;
+	const int axis_pos = static_cast<int>(parts.vertical ? my : mx);
+	return parts.shuttle_offset - axis_pos;
+}
+
+// Drag: the would-be shuttle offset (mouse + anchor) maps back to a value
+// through the travel ratio, clamped [orig: the capture-move leg
+// @ 0x64d231..0x64d2aa - value = min + offset / ratio, clamped;
+// CScrollWnd_UpdateThumbPosition @ 0x64cd50 is the forward map].
+int MenuFrameCompiler::scroll_drag_value(int index,
+		const MenuFrameState &state, float mouse_x, float mouse_y,
+		float scale_x, float scale_y, int anchor) const {
+	ScrollParts parts;
+	if (!solve_standalone_scroll_(index, state, &parts)) {
+		return 0;
+	}
+	const int range_length = std::max(parts.range_max - parts.range_min, 0);
+	if (range_length <= 0 || parts.travel <= 0) {
+		return parts.range_min;
+	}
+	const float mx = scale_x > 0.0f ? mouse_x / scale_x : mouse_x;
+	const float my = scale_y > 0.0f ? mouse_y / scale_y : mouse_y;
+	const int axis_pos = static_cast<int>(parts.vertical ? my : mx);
+	const int offset = axis_pos + anchor - parts.extent;
+	const double ratio =
+			static_cast<double>(parts.travel) / static_cast<double>(range_length);
+	const int value = parts.range_min +
+			static_cast<int>(static_cast<double>(offset) / ratio + 0.5);
+	return std::clamp(value, parts.range_min, parts.range_max);
 }
 
 // The combo LIST_BOX popup at its authored combo-relative rect. Keeping this

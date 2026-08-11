@@ -34,6 +34,12 @@ signal list_activated(id: int, row: int)
 # The pump's claim moved between widgets (hover edges; PLAYER_PREVIEW zoom).
 signal widget_hover_changed(id: int, hovered: bool)
 
+# An active standalone-scroll thumb drag [orig: the SCROLLWND_SHUTTLE
+# press-capture, CScrollWnd_HandleEvent @ 0x64d050]: the dragged widget id and
+# the press anchor (shuttle origin minus mouse, design units).
+var _scroll_drag_id := -1
+var _scroll_drag_anchor := 0
+
 # Double-click window for list/table activation, matching Godot's default.
 const DOUBLE_CLICK_MS := 400
 
@@ -563,6 +569,57 @@ func set_scroll_row(id: int, row: int) -> void:
 				int(state["scroll_row"]))
 
 
+# The standalone scroll widget under the mouse (by frame claim geometry).
+func _scroll_widget_at(position: Vector2) -> int:
+	var index := _frame.hit_test(position)
+	if index < 0:
+		return -1
+	var id := _id_at_index(index)
+	if id < 0 or widget_kind_of(id) != MnuDocument.TYPE_SCROLL:
+		return -1
+	return id
+
+
+func _handle_scroll_press(id: int, position: Vector2) -> void:
+	var index := _frame_index(id)
+	if index < 0:
+		return
+	var state: Dictionary = _id_state.get(id, {})
+	var scroll := state.get("scroll_range") as MenuScrollRange
+	if scroll == null:
+		return
+	match _frame.scroll_hit_at(index, position):
+		1:  # up arrow: value - step (ctor step 1) [orig: @ 0x64d2d9]
+			_apply_scroll_value(id, scroll.value - 1)
+		2:  # down arrow: value + step [orig: @ 0x64d31a]
+			_apply_scroll_value(id, scroll.value + 1)
+		3:  # shuttle: capture + anchor [orig: @ 0x64d1cb..0x64d217]
+			_scroll_drag_id = id
+			_scroll_drag_anchor = _frame.scroll_drag_anchor(index, position)
+		4:  # track before the shuttle: page up [orig: @ 0x64d0f0]
+			_apply_scroll_value(id, scroll.value - scroll.page)
+		5:  # track after: page down [orig: @ 0x64d10e]
+			_apply_scroll_value(id, scroll.value + scroll.page)
+
+
+func _apply_scroll_value(id: int, value: int) -> void:
+	var state: Dictionary = _id_state.get(id, {})
+	var scroll := state.get("scroll_range") as MenuScrollRange
+	if scroll == null:
+		return
+	value = clampi(value, scroll.minimum, scroll.maximum)
+	if value == scroll.value:
+		return
+	scroll.value = value
+	var index := _frame_index(id)
+	if index >= 0:
+		_frame.set_widget_scroll_range(index, scroll.minimum, scroll.maximum,
+				scroll.page, scroll.value)
+	# The change dispatch [orig: message 0x4000001 with the new value
+	# @ 0x64d15c] — companions consume the scroll kind.
+	widget_value_changed.emit(widget_name_of(id), "scroll", value, str(value))
+
+
 ## Set the original CScrollWnd min/max/inclusive-page/value state used by a
 ## standalone type=scroll widget. Interaction is intentionally separate: this
 ## is the render/state seam settings companions can update.
@@ -705,6 +762,12 @@ func process_mouse(position: Vector2, button_down: bool) -> void:
 			_open_combo_id = -1
 		else:
 			_frame.set_cursor_state(not _edit_mode, position)
+			# The popup-exclusive pump hovers the row under the mouse (style 2)
+			# [orig: the per-frame pump runs ONLY on the popup while open —
+			# scene_end_frame @ 0x63e600 gate @ 0x63e691; the row mouseover
+			# style = CListWnd_DrawItems @ 0x643f30].
+			_frame.set_widget_hover_item(combo_index,
+					_frame.combo_popup_row_at(combo_index, position))
 			if down_edge:
 				var row := _frame.combo_popup_row_at(combo_index, position)
 				if row >= 0:
@@ -714,6 +777,26 @@ func process_mouse(position: Vector2, button_down: bool) -> void:
 						and not _frame.widget_rect(combo_index).has_point(
 								position / _design_scale()):
 					close_active_combo_popup()
+			return
+
+	# Standalone scroll interaction [orig: CScrollWnd_HandleEvent @ 0x64d050 —
+	# arrows step -/+1 (ctor default @ 0x64c4cf), the track pages toward the
+	# click, the shuttle press captures and drags through the travel ratio].
+	if _scroll_drag_id >= 0:
+		if not button_down:
+			_scroll_drag_id = -1
+		else:
+			var drag_index := _frame_index(_scroll_drag_id)
+			if drag_index >= 0:
+				_apply_scroll_value(_scroll_drag_id, _frame.scroll_drag_value(
+						drag_index, position, _scroll_drag_anchor))
+			_frame.set_cursor_state(not _edit_mode, position)
+			return
+	if down_edge:
+		var scroll_id := _scroll_widget_at(position)
+		if scroll_id >= 0:
+			_handle_scroll_press(scroll_id, position)
+			_frame.set_cursor_state(not _edit_mode, position)
 			return
 
 	var claim := _frame.process_mouse(position, button_down)
@@ -893,6 +976,7 @@ func close_active_combo_popup() -> void:
 	var index := _frame_index(_open_combo_id)
 	if index >= 0:
 		_frame.set_widget_popup_open(index, false)
+		_frame.set_widget_hover_item(index, -1)
 	_open_combo_id = -1
 
 

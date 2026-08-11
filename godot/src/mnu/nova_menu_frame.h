@@ -83,6 +83,19 @@ public:
 	void clear_widget_shown_override(int p_index);
 	void set_widget_disabled(int p_index, bool p_disabled);
 	void set_widget_hovered(int p_index, bool p_hovered);
+	// The open dropdown's hovered ROW (style 2) — the driver's popup-exclusive
+	// pump updates it per move [orig: the popup-only per-frame pump,
+	// scene_end_frame @ 0x63e600 gate @ 0x63e691; row style 2 =
+	// CListWnd_DrawItems @ 0x643f30 mouseover].
+	void set_widget_hover_item(int p_index, int p_row);
+	// Standalone scroll interaction (the witnessed CScrollWnd map): the part
+	// under the mouse (0 none / 1 up / 2 down / 3 shuttle / 4 track-before /
+	// 5 track-after), the press anchor, and the drag's value inverse.
+	int scroll_hit_at(int p_index, const Vector2 &p_position) const;
+	int scroll_drag_anchor(int p_index, const Vector2 &p_position) const;
+	int scroll_drag_value(int p_index, const Vector2 &p_position,
+			int p_anchor) const;
+	int get_widget_hover_item(int p_index) const;
 	void set_widget_pressed(int p_index, bool p_pressed);
 	void set_widget_checked(int p_index, bool p_checked);
 	void set_widget_focused(int p_index, bool p_focused);

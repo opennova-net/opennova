@@ -299,6 +299,23 @@ public:
 			float my, float sx, float sy) const;
 	// Spin arrow under the mouse: 0 none, 1 up, 2 down [orig:
 	// CSpinListWnd_CreateUpDownChildren @ 0x64b8b0 child rects].
+	// Standalone scroll interaction (the witnessed CScrollWnd map; see
+	// menu_frame_scrollbar.cpp): hit parts + the thumb drag inverse.
+	enum ScrollHit {
+		kScrollHitNone = 0,
+		kScrollHitUp = 1,
+		kScrollHitDown = 2,
+		kScrollHitShuttle = 3,
+		kScrollHitTrackBefore = 4,
+		kScrollHitTrackAfter = 5,
+	};
+	int scroll_hit_at(int index, const MenuFrameState &state, float mouse_x,
+			float mouse_y, float scale_x, float scale_y) const;
+	int scroll_drag_anchor(int index, const MenuFrameState &state,
+			float mouse_x, float mouse_y, float scale_x, float scale_y) const;
+	int scroll_drag_value(int index, const MenuFrameState &state,
+			float mouse_x, float mouse_y, float scale_x, float scale_y,
+			int anchor) const;
 	int spin_arrow_at(int index, const MenuFrameState &state, float mx,
 			float my, float sx, float sy) const;
 	// Table DATA row under the mouse (absolute row index into table_rows,
@@ -447,7 +464,13 @@ private:
 			float y, const WalkScale &s, uint32_t color, int caret);
 	void emit_widget_text(const WidgetNode &node, const mnu::RectEdges &rect,
 			const WalkScale &s, int color_state, const MenuWidgetState *ws,
-			int caret);
+			int caret, const std::string *override_text = nullptr);
+	// The closed combo face: the popup row collection's selected row TEXT
+	// (runtime rows win; else the same nested-wins/top-level-fallback set the
+	// popup renders) [orig: CComboWnd_Render @ 0x65c05b..0x65c083 — the label
+	// swapped to the embedded list's selected row].
+	std::string combo_face_text(const WidgetNode &node,
+			const MenuWidgetState *ws) const;
 	void emit_edit(int index, const WidgetNode &node,
 			const mnu::RectEdges &rect, const WalkScale &s, int visual,
 			const MenuFrameState &frame, const MenuWidgetState *ws);
@@ -466,10 +489,32 @@ private:
 			const WalkScale &s, const MenuWidgetState *ws);
 	void emit_combo_popup(const WidgetNode &node, const mnu::RectEdges &rect,
 			const WalkScale &s, const MenuWidgetState *ws);
+	// Combos with an open dropdown collected during the walk; their popups
+	// emit AFTER the whole walk so the dropdown paints over later widgets
+	// (the D-MNU-12 menu-top hosting decision — retail's inline tree order
+	// visibly renders popups on top via a still-unwalked mechanism).
+	std::vector<int> deferred_popups_;
 	bool resolve_scrollbar_rect(const WidgetNode &node, ScrollbarKind kind,
 			const mnu::RectEdges &owner, int fallback_top,
 			int fallback_height, int fallback_width,
 			mnu::RectEdges *out) const;
+	struct ScrollParts {
+		mnu::RectEdges track{};
+		mnu::RectEdges up{};
+		mnu::RectEdges down{};
+		mnu::RectEdges shuttle{};
+		bool vertical = true;
+		int extent = 0;
+		int travel = 0;
+		int shuttle_offset = 0;
+		int range_min = 0;
+		int range_max = 0;
+	};
+	bool solve_scroll_parts_(const WidgetNode &node, ScrollbarKind kind,
+			const mnu::RectEdges &rect, int range_min, int range_max, int page,
+			int value, ScrollParts *out) const;
+	bool solve_standalone_scroll_(int index, const MenuFrameState &state,
+			ScrollParts *out) const;
 	void emit_scrollbar(const WidgetNode &node, ScrollbarKind kind,
 			const mnu::RectEdges &rect, const WalkScale &s,
 			int range_min, int range_max, int page, int value,
