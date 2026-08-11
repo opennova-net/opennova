@@ -3,6 +3,12 @@
 Status: accepted (branch `unified-edit-history`). Supersedes the "main-body skeletal" deferred seam in
 [ADR 0006](0006-unified-mission-runtime-present-pass.md).
 
+Amended: the duck-typed `NovaEntityVisual` dispatch is superseded —
+[ADR 0033](0033-engine-owned-loops-device-shells.md)'s R2 draw-list cutover
+killed it (presentation rides typed draw-list compilers + appliers; no
+duck-typed visual contract survives). The skeletal-runtime decisions below
+stand.
+
 ## Context
 
 ADR 0006 unified the mission runtime + present pass but left the largest seam open: the main-body
