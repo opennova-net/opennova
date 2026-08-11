@@ -1079,29 +1079,29 @@ Accepted/divergent (each a documented decision, not a defect):
   @ 0x556d00` (and the table-dense `sub_557FB0`, which currently fails to
   decompile) — is unwalked; witness the row content, the spin filter, and
   the Selected Missions rotation columns before porting.
-- **D-MNU-15 (combobox closed face — selected item not drawn):** the compiled
-  combo draws its chrome but never the selected item's text on the closed
-  face, where retail's face is a `CButtonWnd` showing the selection
-  (`CComboWnd ctor @ 0x65be40`, closed button at `this+764`). Observed live
-  2026-08-10 on the in-game armory (weapon.mnu WEAPON): all ten `combobox`
-  faces (PRIMARY/SECONDARY/ACCESSORY/GRENADE ammo tuples) render empty over
-  live companion-seeded rows, while every `spinlist` face on the same install
-  (PLAYER_CLASS "Rifleman", the host screen's GAME_TYPE/SERVERTYPE) draws
-  `items[selected]`. Diagnose the face-text channel (compiler face
-  substitution vs the runtime-rows selection reaching the frame), then pin
-  with a compiled-face test.
-- **D-MNU-16 (spinlist arrows unhittable — pump claim walk):** the witnessed
+- **D-MNU-15 (combobox closed face — FIXED 2026-08-10):** the compiled combo's
+  face gated on AUTHORED items only, so every runtime-seeded combo (the
+  armory's ten companion-filled PRIMARY/SECONDARY/ACCESSORY/GRENADE ammo
+  tuples, observed live 2026-08-10) fell through to the empty widget-text
+  label while spinlist faces (the shared `emit_item_cell`, which handles
+  runtime rows) drew fine. The face now takes the item cell whenever rows
+  exist — authored OR runtime (`ws->has_items`) — matching retail's face,
+  a `CButtonWnd` showing the selection (`CComboWnd ctor @ 0x65be40`, closed
+  button at `this+764`). Pinned by the `menu_frame_compiler` runtime-rows
+  face case.
+- **D-MNU-16 (spinlist arrows unhittable — FIXED 2026-08-10):** the witnessed
   pump claims by widget rect (front-most LAST-hit of the forward draw walk),
   but retail's `<SPINUP>`/`<SPINDOWN>` are child windows carrying their own
   rects in that walk (`CSpinListWnd_CreateUpDownChildren @ 0x64b8b0`,
-  parent-relative POSITION — the paragraph above), and shipped menus author
-  them OUTSIDE the parent rect (mp.mnu GAME_TYPE: left arrow −18..−2, right
-  217..233 against a 0..215-wide widget). The compiled pump never hands those
-  presses to the spinlist — a mouse cannot cycle any arrows-outside spin
-  combo (observed live 2026-08-10: GAME_TYPE presses at both arrow rects fall
-  through to MAIN). Fix: give the compiled spin-button rects a place in the
-  claim walk (the rects already exist for `spin_arrow_at`), matching the
-  child-window claim retail gets for free.
+  parent-relative POSITION), and shipped menus author them OUTSIDE the parent
+  rect (mp.mnu GAME_TYPE: left arrow −18..−2, right 217..233 against a
+  0..215-wide widget) — so no arrows-outside spin combo could cycle by mouse
+  (observed live 2026-08-10: GAME_TYPE presses at both arrow rects fell
+  through to MAIN). The claim walk now tests the spin-button rects too (the
+  shared `spin_arrow_hit_` behind `spin_arrow_at`), the compiled equivalent
+  of the child-window claim retail gets for free; the driver's existing
+  press routing then cycles. Pinned by the `menu_frame_compiler`
+  outside-rect claim case.
 
 Deferred (unwitnessed or out of bar; backlog, not blocking):
 

@@ -373,6 +373,11 @@ private:
 			int state) const;
 	mnu::RectEdges solve_rect(const WidgetNode &node,
 			const MenuWidgetState *ws) const;
+	// Arrow hit over the widget's ABSOLUTE rect (0 none / 1 up / 2 down) —
+	// shared by spin_arrow_at and the claim walk's outside-rect arrow claim
+	// (D-MNU-16) [orig: CSpinListWnd_CreateUpDownChildren @ 0x64b8b0].
+	int spin_arrow_hit_(const WidgetNode &node, const mnu::RectEdges &rect,
+			float mx, float my, float sx, float sy) const;
 	std::string widget_text(const WidgetNode &node,
 			const MenuWidgetState *ws) const;
 	const fnt_font_t *font_for(const WidgetNode &node) const;

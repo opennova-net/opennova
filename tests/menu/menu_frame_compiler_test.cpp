@@ -1003,6 +1003,95 @@ void test_interaction_geometry(const fnt_font_t *font) {
 	CHECK(st.widgets.empty(), "hit_widget mutates no state");
 }
 
+// D-MNU-15/16: the combo closed face draws the selection over RUNTIME-seeded
+// rows (the armory's companion fill — the authored-only gate left every such
+// face blank) [orig: the closed face is the +764 CButtonWnd showing
+// items[selected], CComboWnd ctor @ 0x65be40], and the pump's claim walk
+// hands presses in the OUTSIDE-authored spin arrow rects to the spin widget
+// (mp.mnu GAME_TYPE authors −18..−2 / 217..233 against a 0..215 widget)
+// [orig: CSpinListWnd_CreateUpDownChildren @ 0x64b8b0 child-window rects].
+void test_combo_face_and_outside_arrow_claim(const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>K</NAME>
+  <WINDOW type="window" name="ROOT">
+    <FONT><NAME>f.fnt</NAME><DEFAULT_FG>111111</DEFAULT_FG></FONT>
+    <WINDOW type="combo" name="C1">
+      <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>20</BOTTOM></POSITION>
+      <LIST_BOX>
+        <POSITION><LEFT>0</LEFT><TOP>20</TOP><RIGHT>100</RIGHT><BOTTOM>80</BOTTOM></POSITION>
+        <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+      </LIST_BOX>
+    </WINDOW>
+    <WINDOW type="spinlist" name="S1">
+      <POSITION><LEFT>200</LEFT><TOP>0</TOP><RIGHT>260</RIGHT><BOTTOM>20</BOTTOM></POSITION>
+      <ITEMS><ITEM type="ID" value="0">V</ITEM></ITEMS>
+      <SPINUP>
+        <POSITION><LEFT>-18</LEFT><TOP>0</TOP><RIGHT>-2</RIGHT><BOTTOM>16</BOTTOM></POSITION>
+        <APPEARANCE type="image" state="default">up.tga</APPEARANCE>
+      </SPINUP>
+      <SPINDOWN>
+        <POSITION><LEFT>62</LEFT><TOP>0</TOP><RIGHT>78</RIGHT><BOTTOM>16</BOTTOM></POSITION>
+        <APPEARANCE type="image" state="default">down.tga</APPEARANCE>
+      </SPINDOWN>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	c.configure(doc.first_screen(), font);
+
+	// No authored items, no runtime rows: the face falls back to the (empty)
+	// widget text — no glyphs from the combo.
+	MenuFrameState st;
+	const MenuDrawList &empty_face = c.compile(st, 1.0f, 1.0f);
+	int combo_glyphs = 0;
+	for (const auto &g : empty_face.glyphs) {
+		if (g.x_top_left < 150.0f) {
+			++combo_glyphs;
+		}
+	}
+	CHECK(combo_glyphs == 0, "an unseeded authored-itemless combo face is empty");
+
+	// Runtime rows: the closed face draws items[selected] (D-MNU-15).
+	MenuWidgetState combo;
+	combo.index = 1;
+	combo.has_items = true;
+	combo.items = {"ALPHA", "BRAVO"};
+	combo.selected_item = 1;
+	st.widgets.push_back(combo);
+	const MenuDrawList &face = c.compile(st, 1.0f, 1.0f);
+	combo_glyphs = 0;
+	for (const auto &g : face.glyphs) {
+		if (g.x_top_left < 150.0f) {
+			++combo_glyphs;
+		}
+	}
+	CHECK(combo_glyphs == 5,
+			"the closed combo face draws the runtime selection 'BRAVO'");
+
+	// The outside-authored arrows claim the spin widget in the pump walk
+	// (D-MNU-16): SPINUP local -18..-2 -> absolute 182..198.
+	st.widgets.clear();
+	const auto claim_up = c.pump_mouse(st, 190.0f, 8.0f, false, 1.0f, 1.0f);
+	CHECK(claim_up.hovered == 2, "the outside SPINUP rect claims the spinlist");
+	CHECK(c.spin_arrow_at(2, st, 190.0f, 8.0f, 1.0f, 1.0f) == 1,
+			"spin_arrow_at reports up in the same rect");
+	// SPINDOWN local 62..78 -> absolute 262..278 (right of the widget).
+	const auto claim_down = c.pump_mouse(st, 270.0f, 8.0f, false, 1.0f, 1.0f);
+	CHECK(claim_down.hovered == 2,
+			"the outside SPINDOWN rect claims the spinlist");
+	CHECK(c.spin_arrow_at(2, st, 270.0f, 8.0f, 1.0f, 1.0f) == 2,
+			"spin_arrow_at reports down in the same rect");
+	// Between the arrows and the widget nothing claims.
+	const auto claim_gap = c.pump_mouse(st, 199.0f, 8.0f, false, 1.0f, 1.0f);
+	CHECK(claim_gap.hovered == 0 || claim_gap.hovered == -1,
+			"the gap between arrow and widget claims spin never");
+	CHECK(c.hit_widget(st, 190.0f, 8.0f, 1.0f, 1.0f) == 2,
+			"hit_widget mirrors the arrow claim");
+}
+
 // The accelerator scan [orig: the screen hotkey registration family
 // @ 0x5674a8; hidden subtrees prune — a hidden BACK must not eat ESC].
 void test_hotkey_widget(const fnt_font_t *font) {
@@ -1167,6 +1256,7 @@ int main() {
 	test_runtime_items_and_multiselect(&font);
 	test_widget_queries(&font);
 	test_interaction_geometry(&font);
+	test_combo_face_and_outside_arrow_claim(&font);
 	test_hotkey_widget(&font);
 	test_multiline_wrap(&font);
 	fnt_free(&font);
