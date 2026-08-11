@@ -458,12 +458,15 @@ func sync_from_editor_state() -> void:
 	_layout.apply_split_layout()
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	_game_launch.poll()
 	_refresh_shell_state()
 	_export_progress.sync()
 	_status.refresh()
 	_tile_gizmo_overlay.refresh()
+	# ONED's one model runtime-frame driver: object/mission preview models are
+	# ObjectModels, which no longer self-clock (per-frame-guarded static advance).
+	ObjectModel.advance_awake_frame(delta)
 
 
 func _workspace_defs() -> Array:

@@ -181,11 +181,15 @@ func _ready() -> void:
 	set_process(false)
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	# The blink/marquee clock rides the OS tick like the original's
 	# GetTickCount gate.
 	if _driver != null:
 		_driver.tick(Time.get_ticks_msec())
+	# The one model runtime-frame driver outside a live mission: menu portraits
+	# (avatar previews) are ObjectModels, which no longer self-clock. The static
+	# advance is per-frame-guarded, so a mission's own driver takes precedence.
+	ObjectModel.advance_awake_frame(delta)
 
 
 # Install a companion that owns game-specific menus the generic shell does not handle

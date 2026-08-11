@@ -8,6 +8,7 @@
 #include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/core/math.hpp>
+#include <godot_cpp/templates/local_vector.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include "object/nova_object_shader_cache.h"
@@ -120,6 +121,15 @@ void PanmClock::set_time_ms_for_test(int64_t p_value_ms) {
 ObjectModel::ObjectModel() {
 	env_stagger_slot_ = static_cast<int>(
 			(static_cast<uint64_t>(get_instance_id()) >> 3) % kEnvRestampSpreadFrames);
+}
+
+ObjectModel::~ObjectModel() {
+	// A model can be freed without a PREDELETE notification in some teardown
+	// paths; never leave a dangling pointer in the shared awake set.
+	if (awake_) {
+		awake_ = false;
+		awake_models_.erase(this);
+	}
 }
 
 void ObjectModel::set_object_data(const Ref<ObjectData> &p_data) {
@@ -499,17 +509,56 @@ int64_t ObjectModel::last_object_update_mask() const {
 	return ObjectData::UPDATE_ALL;
 }
 
-void ObjectModel::_process(double p_delta) {
-	advance_runtime_frame(p_delta);
+// The shared awake set: every model with live per-frame work. One driver
+// (ObjectModel::advance_awake_frame) walks it per render frame — the game from
+// GameFramePipeline's render_material_frame leg, the menu shell and ONED from
+// their one process loop. There is no per-node _process, so nothing self-clocks
+// off Godot's frame outside that one driver.
+HashSet<ObjectModel *> ObjectModel::awake_models_;
+
+void ObjectModel::advance_awake_frame(double p_delta) {
+	// The set is process-global while the drivers are per-context; a per-frame
+	// guard keeps exactly one advance per Godot frame no matter how many
+	// contexts call — the first caller wins, so a game frame and an idle menu
+	// process cannot double-advance anim time.
+	static uint64_t last_frame = UINT64_MAX;
+	const uint64_t frame = Engine::get_singleton()->get_process_frames();
+	if (frame == last_frame) {
+		return;
+	}
+	last_frame = frame;
+	if (awake_models_.is_empty()) {
+		return;
+	}
+	// Copy first: advance_runtime_frame parks models (erasing them), and a model
+	// could theoretically wake another mid-walk.
+	LocalVector<ObjectModel *> batch;
+	batch.reserve(awake_models_.size());
+	for (ObjectModel *model : awake_models_) {
+		batch.push_back(model);
+	}
+	for (ObjectModel *model : batch) {
+		if (awake_models_.has(model)) {
+			model->advance_runtime_frame(p_delta);
+		}
+	}
+}
+
+int64_t ObjectModel::awake_model_count() {
+	return static_cast<int64_t>(awake_models_.size());
 }
 
 // Event-driven scheduling for the per-frame runtime advance. Models self-park:
-// every mutation that can create per-frame work wakes the model, and
-// advance_runtime_frame parks it again the first frame nothing is live.
+// every mutation that can create per-frame work wakes the model (adds it to the
+// shared set), and advance_runtime_frame parks it again the first frame nothing
+// is live.
 // [orig: Terrain_RenderSectorModels @0x5c5d30 computes runtime constants only
 //  for models the batch draws]
 void ObjectModel::wake_runtime_frame() {
-	set_process(true);
+	if (!awake_) {
+		awake_ = true;
+		awake_models_.insert(this);
+	}
 }
 
 void ObjectModel::sleep_runtime_frame_if_idle() {
@@ -521,7 +570,10 @@ void ObjectModel::sleep_runtime_frame_if_idle() {
 	if (panm_clock_.is_null() && is_playing_) {
 		return;
 	}
-	set_process(false);
+	if (awake_) {
+		awake_ = false;
+		awake_models_.erase(this);
+	}
 }
 
 void ObjectModel::on_env_generation_changed() {
@@ -551,6 +603,10 @@ void ObjectModel::_notification(int p_what) {
 		if (submission_registry_bound_) {
 			submission_registry_.erase(get_instance_id());
 		}
+		if (awake_) {
+			awake_ = false;
+			awake_models_.erase(this);
+		}
 	}
 }
 
@@ -559,7 +615,10 @@ void ObjectModel::_notification(int p_what) {
 // model can be submitted again.
 void ObjectModel::advance_runtime_frame(double p_delta) {
 	if (object_data_.is_null() || !object_data_->has_document()) {
-		set_process(false);
+		if (awake_) {
+			awake_ = false;
+			awake_models_.erase(this);
+		}
 		return;
 	}
 	const bool renderable = is_visible_in_tree() && on_screen_;
@@ -771,6 +830,15 @@ bool ObjectModel::aabb_equal_approx(const AABB &p_a, const AABB &p_b) {
 }
 
 void ObjectModel::_bind_methods() {
+	ClassDB::bind_static_method("ObjectModel",
+			D_METHOD("advance_awake_frame", "delta"),
+			&ObjectModel::advance_awake_frame);
+	ClassDB::bind_static_method("ObjectModel",
+			D_METHOD("awake_model_count"), &ObjectModel::awake_model_count);
+	ClassDB::bind_method(D_METHOD("is_runtime_frame_awake"),
+			&ObjectModel::is_runtime_frame_awake);
+	ClassDB::bind_method(D_METHOD("wake_runtime_frame"),
+			&ObjectModel::wake_runtime_frame);
 	ClassDB::bind_method(D_METHOD("set_object_data", "data"), &ObjectModel::set_object_data);
 	ClassDB::bind_method(D_METHOD("get_object_data"), &ObjectModel::get_object_data);
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "object_data",
