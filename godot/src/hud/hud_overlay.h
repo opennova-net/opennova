@@ -95,6 +95,20 @@ public:
 			const PackedByteArray &p_done);
 	void set_attach_labels(const PackedVector2Array &p_screens,
 			const PackedStringArray &p_texts, const PackedByteArray &p_nearest);
+	// The projected friendly tags (D-HUD-20): parallel typed arrays; flags
+	// bit 0 = medic marker, bit 1 = speaking, bit 2 = player-slot entry.
+	void set_friendly_tags(const PackedVector2Array &p_screens,
+			const PackedInt32Array &p_dists_q16, const PackedStringArray &p_names,
+			const PackedInt32Array &p_entity_ids,
+			const PackedInt32Array &p_health_ratios_fp16,
+			const PackedInt32Array &p_flags);
+	// Mode 0 off / 1 text < 300 m / 2 text always (default) / 3 tick marks
+	// (retail g_friendlyTagsMode; the witnessed rules live in hud_math).
+	void set_friendly_tag_mode(int p_mode);
+	int get_friendly_tag_mode() const;
+	// Per-frame environment feed: the fog cull distance (16.16; <= 0 disables)
+	// and the speaking entity's voice level 0..255.
+	void set_friendly_tag_env(int p_fog_dist_q16, int p_speaking_level255);
 
 	// Debug/test accessor: compile at the current surface size and report the
 	// draw list's element counts.

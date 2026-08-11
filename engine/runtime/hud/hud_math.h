@@ -82,6 +82,12 @@ int message_expire_tick(int now_ticks, int prev_expire, bool has_prev);
 
 uint32_t half_bright_argb(uint32_t argb);
 
+// The alpha-PRESERVING half-bright fold the friendly-tag text rides — the
+// distance fade must survive the transform
+// [orig: HUD_DrawTextHalfBrightF @0x580720 —
+//  (color & 0xFF000000) + ((color >> 1) & 0x7F7F7F)].
+uint32_t half_bright_keep_alpha(uint32_t argb);
+
 // ---------------------------------------------------------------------------
 // The ammo counter's text fold [orig: hud_draw_weapon_ammo_and_name @0x5939d0,
 // @0x593a33..0x593ab0]: "clip/reserve" for a magazine weapon (clip valid,
@@ -171,5 +177,40 @@ int32_t crosshair_total_spread_fp16(int32_t error_fp16, int32_t recoil_pitch_bam
 		int32_t weapon_weight_spread_bam);
 int crosshair_error_row(int stance, bool scoped);
 bool crosshair_should_draw(bool aimed_shot_available, bool keep_while_aimed);
+
+// ---------------------------------------------------------------------------
+// Friendly tags (D-HUD-20) [orig: HUD_DrawEntityLabel @0x5a39b0, called by
+// HUD_DrawFriendlyTagsPass @0x5a4480]. Modes cycle 0 off / 1 text under 300 m
+// ("FARBRIEF") / 2 text always ("FULL", the boot default @0x4a7fed) / 3 tick
+// marks ("BRIEF") [orig: input action case 30 @0x49b573].
+
+inline constexpr int kFriendlyTagModeOff = 0;
+inline constexpr int kFriendlyTagModeFarBrief = 1;
+inline constexpr int kFriendlyTagModeFull = 2;
+inline constexpr int kFriendlyTagModeBrief = 3;
+inline constexpr int kFriendlyTagModeCount = 4;
+
+// The minimum draw distance (0.5 u) [orig: @0x5a3b0c] and the mode-1 text
+// cutoff (300.0 u) [orig: @0x5a3fcf], both 16.16 world units.
+inline constexpr int32_t kFriendlyTagMinDistQ16 = 0x8000;
+inline constexpr int32_t kFriendlyTagTextCutQ16 = 0x12C0000;
+
+// The distance alpha: 255 at <= 50 m fading to 63 at >= 300 m
+// [orig: @0x5a3eeb..0x5a3f18 — alpha byte = 255 - clamp(192*(m-50)/250, 0, 192)].
+int friendly_tag_alpha(int32_t dist_q16);
+
+// Whether the text form draws for this mode/distance [orig: @0x5a3fc3..0x5a3fcf].
+bool friendly_tag_text_visible(int mode, int32_t dist_q16);
+
+// The speaking-entity pulse: each channel saturates at c/2 + level/4
+// [orig: the MMX blend @0x5a3e98..0x5a3ebf against g_audioOutLevelStage1;
+// the speaking entity is g_voicePlaybackEntity @0xC6EC38, stamped at scripted
+// positional voice start @0x4ece03]. Alpha byte passes through.
+uint32_t friendly_tag_speaking_blend(uint32_t argb, int level255);
+
+// The unnamed-entity fallback: a literal '^' + the compiled-in 36-name table
+// indexed by the pool-encoded entity id [orig: @0x5a4047..0x5a40cd;
+// g_fallbackPeopleNames @0x840a78, count @0x840a0c].
+std::string friendly_tag_fallback_name(uint16_t encoded_entity_id);
 
 } // namespace opennova::hud

@@ -11,6 +11,7 @@
 #include <godot_cpp/variant/rect2.hpp>
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 
@@ -93,6 +94,15 @@ void HudOverlay::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_objectives", "texts", "done"), &HudOverlay::set_objectives);
 	ClassDB::bind_method(D_METHOD("set_attach_labels", "screens", "texts", "nearest"),
 			&HudOverlay::set_attach_labels);
+	ClassDB::bind_method(D_METHOD("set_friendly_tags", "screens", "dists_q16",
+								  "names", "entity_ids", "health_ratios_fp16", "flags"),
+			&HudOverlay::set_friendly_tags);
+	ClassDB::bind_method(D_METHOD("set_friendly_tag_mode", "mode"),
+			&HudOverlay::set_friendly_tag_mode);
+	ClassDB::bind_method(D_METHOD("get_friendly_tag_mode"),
+			&HudOverlay::get_friendly_tag_mode);
+	ClassDB::bind_method(D_METHOD("set_friendly_tag_env", "fog_dist_q16", "speaking_level"),
+			&HudOverlay::set_friendly_tag_env);
 	ClassDB::bind_method(D_METHOD("get_draw_list_stats"), &HudOverlay::get_draw_list_stats);
 
 	BIND_CONSTANT(MIN_CROSSHAIR_STYLE);
@@ -419,6 +429,49 @@ void HudOverlay::set_attach_labels(const PackedVector2Array &p_screens,
 		state_.attach_labels.push_back(label);
 	}
 	queue_redraw();
+}
+
+void HudOverlay::set_friendly_tags(const PackedVector2Array &p_screens,
+		const PackedInt32Array &p_dists_q16, const PackedStringArray &p_names,
+		const PackedInt32Array &p_entity_ids,
+		const PackedInt32Array &p_health_ratios_fp16,
+		const PackedInt32Array &p_flags) {
+	state_.friendly_tags.clear();
+	const int64_t count = std::min(p_screens.size(), p_dists_q16.size());
+	state_.friendly_tags.reserve(static_cast<size_t>(count));
+	for (int64_t i = 0; i < count; ++i) {
+		opennova::hud::HudFriendlyTag tag;
+		tag.screen_x = p_screens[i].x;
+		tag.screen_y = p_screens[i].y;
+		tag.dist_q16 = p_dists_q16[i];
+		if (i < p_names.size()) tag.name = p_names[i].utf8().get_data();
+		if (i < p_entity_ids.size())
+			tag.entity_id = static_cast<uint16_t>(p_entity_ids[i]);
+		if (i < p_health_ratios_fp16.size())
+			tag.health_ratio_fp16 = p_health_ratios_fp16[i];
+		const int32_t flags = i < p_flags.size() ? p_flags[i] : 0;
+		tag.medic = (flags & 1) != 0;
+		tag.speaking = (flags & 2) != 0;
+		tag.player = (flags & 4) != 0;
+		state_.friendly_tags.push_back(tag);
+	}
+	queue_redraw();
+}
+
+void HudOverlay::set_friendly_tag_mode(int p_mode) {
+	state_.friendly_tag_mode =
+			CLAMP(p_mode, 0, opennova::hud::kFriendlyTagModeCount - 1);
+	queue_redraw();
+}
+
+int HudOverlay::get_friendly_tag_mode() const {
+	return state_.friendly_tag_mode;
+}
+
+void HudOverlay::set_friendly_tag_env(int p_fog_dist_q16,
+		int p_speaking_level255) {
+	state_.fog_dist_q16 = p_fog_dist_q16 > 0 ? p_fog_dist_q16 : INT32_MAX;
+	state_.speaking_level255 = p_speaking_level255;
 }
 
 Vector2 HudOverlay::draw_surface_() const {

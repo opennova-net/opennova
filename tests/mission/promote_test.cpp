@@ -7,6 +7,7 @@
 
 #include "mission/promote.h"
 #include "world/ai.h"
+#include "world/friendly_tags.h"
 #include "world/world.h"
 
 using namespace opennova;
@@ -278,6 +279,78 @@ static void test_unresolved_emplacement_preserves_streamed_pose() {
     CHECK(child->position.x == 17.f && child->position.y == 23.f &&
           child->position.z == 9.f);
     CHECK(child->yaw == 37 && child->pitch == -4 && child->roll == 6);
+}
+
+// D-HUD-20: the authored display name rides name_index through the embedder's
+// [PeopleNames] resolver with the retail 15-char copy, and the friendly-tag
+// gather applies the witnessed pass gates (team, player flag, aliveness).
+// [orig: Entity_SpawnFromBMSRecord @0x40ecbf..0x40ed0a;
+//  HUD_DrawFriendlyTagsPass @0x5a4480]
+static void test_friendly_tag_names_and_gather() {
+    bms::File m{};
+    m.organics.push_back(organic(10 << 16, 10 << 16, 0, /*team=*/1, 0, 0));
+    m.organics[0].id = 21;
+    m.organics[0].name_index = 5;
+    m.organics.push_back(organic(20 << 16, 10 << 16, 0, /*team=*/1, 0, 0));
+    m.organics[1].id = 22; // name_index 0 -> unnamed, the draw-time fallback
+    m.organics.push_back(organic(30 << 16, 10 << 16, 0, /*team=*/2, 0, 0));
+    m.organics[2].id = 23; // enemy team: never gathered
+
+    mission::PromoteOptions o{};
+    o.people_name_resolver = [](int32_t idx) {
+        return idx == 5 ? std::string("123456789012345XYZ") : std::string();
+    };
+    auto w = std::make_unique<World>();
+    auto ai = std::make_unique<AiSystem>();
+    mission::promote_mission(m, *w, *ai, o);
+
+    Entity *named = w->registry.get(w->registry.find_by_net_id(21));
+    Entity *unnamed = w->registry.get(w->registry.find_by_net_id(22));
+    Entity *enemy = w->registry.get(w->registry.find_by_net_id(23));
+    CHECK(named != nullptr && unnamed != nullptr && enemy != nullptr);
+    if (named == nullptr || unnamed == nullptr || enemy == nullptr) return;
+    CHECK(named->display_name == "123456789012345"); // the strncpy(_, _, 15)
+    CHECK(unnamed->display_name.empty());
+    // The production item-traits sweep stamps has_item_def; mirror it here.
+    named->has_item_def = true;
+    unnamed->has_item_def = true;
+    enemy->has_item_def = true;
+
+    Entity viewer{};
+    viewer.team = 1; // a synthetic local player outside the registry
+    std::vector<FriendlyTagSource> tags;
+    collect_friendly_tags(*w, viewer, tags);
+    CHECK(tags.size() == 2); // both team-1 organics, never the enemy
+    bool saw_named = false;
+    bool saw_unnamed = false;
+    for (const FriendlyTagSource &t : tags) {
+        if (t.net_id == 21) {
+            saw_named = true;
+            CHECK(t.name == "123456789012345");
+            CHECK(t.health_ratio_fp16 == 0x10000);
+        }
+        if (t.net_id == 22) {
+            saw_unnamed = true;
+            CHECK(t.name.empty()); // the compiler resolves '^' + table[id % 36]
+        }
+        CHECK(!t.player);
+    }
+    CHECK(saw_named && saw_unnamed);
+
+    // A dead entity drops [orig: the Flags & 1 / itemDef bails @0x5a39eb].
+    named->alive = false;
+    tags.clear();
+    collect_friendly_tags(*w, viewer, tags);
+    CHECK(tags.size() == 1);
+    named->alive = true;
+
+    // Player-controlled entities ride the slot walk, not the pool walk
+    // [orig: the Flags & 0x100 skip @0x5a44bc].
+    unnamed->flags |= kEntityFlagPlayer;
+    tags.clear();
+    collect_friendly_tags(*w, viewer, tags);
+    CHECK(tags.size() == 1 && tags[0].net_id == 21);
+    unnamed->flags &= ~kEntityFlagPlayer;
 }
 
 int main() {
@@ -685,6 +758,7 @@ int main() {
 
     // ---- items.def addeweap*: spawn every child and carry it on the parent frame ----
     test_emplacement_attachments();
+    test_friendly_tag_names_and_gather();
     test_emplacement_parent_death_cascades();
     test_unresolved_emplacement_preserves_streamed_pose();
 

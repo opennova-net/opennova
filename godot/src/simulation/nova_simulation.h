@@ -568,6 +568,11 @@ private:
 	// bringup_host_runtime resolves these against type-2044 BMS markers in
 	// spawn order for the S2C 0x0F deploy-map label block.
 	std::unordered_map<int32_t, std::string> mission_location_texts_;
+	// Numeric suffix -> [PeopleNames] STRNAME%03i value; promote resolves an
+	// entity's authored display name (D-HUD-20) from its BMS name_index here
+	// (retail: Entity_SpawnFromBMSRecord @0x40ecbf..0x40ed0a; the witnessed
+	// resolve lives engine-side in promote.cpp).
+	std::unordered_map<int32_t, std::string> mission_people_names_;
 	// Build the PF_* present buffer from the client-decoded ClientState (runtime_->state()).
 	PackedFloat32Array present_snapshot_from_client_replicas() const;
 
@@ -2050,6 +2055,7 @@ public:
 	//  Player_CanFireWeapon @0x5cf780 — its camera/underwater legs are shell state,
 	//  unmodeled here: docs/interface/hud-re.md (D-HUD-11)]
 	TypedArray<Dictionary> get_attach_labels() const;
+	TypedArray<Dictionary> get_friendly_tags() const;
 
 	// Parse weapon.def from the resource root and install the armory table on the sim world
 	// (world::World::weapons) — the server-side source for the 0x2F/0x5A loadout service, the

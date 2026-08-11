@@ -53,6 +53,18 @@ float GameFont::glyph_advance(const fnt_glyph_t *glyph, float scaled_x) const {
 	return width_px * scaled_x + pad * scaled_x;
 }
 
+float GameFont::char_height(uint8_t byte, float scale_y) const {
+	// One glyph's v-extent in pixels [orig: GameFont_MeasureCharHeight
+	// @ 0x580a80 — CGameFont_GetCharMetrics scaled by the fontDesc scale;
+	// the friendly-tag drawer measures '0' @ 0x5a3a36].
+	const fnt_glyph_t *glyph = glyph_for_byte(byte);
+	if (glyph == nullptr) {
+		return 0.0f;
+	}
+	return (glyph->uv.v1 - glyph->uv.v0) * 256.0f *
+			fnt_design_scale(font_->design_width) * scale_y;
+}
+
 float GameFont::line_height(float scale_y) const {
 	if (font_ == nullptr) {
 		return 0.0f;

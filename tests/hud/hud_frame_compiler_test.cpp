@@ -5,6 +5,7 @@
 
 #include <hud/game_font.h>
 #include <hud/hud_frame.h>
+#include <hud/hud_math.h>
 
 #include <cstdio>
 #include <cstring>
@@ -180,6 +181,121 @@ void test_compiler_crosshair(const fnt_font_t *font) {
 	CHECK(hidden.tris.empty(), "a settled aimed shot hides the reticle");
 }
 
+// Friendly tags (D-HUD-20) [orig: HUD_DrawEntityLabel @ 0x5a39b0]: the
+// witnessed gates, tier colors, distance alpha, fallback name, medic plate,
+// and the BRIEF tick form, over the default (retail) tag colors.
+void test_compiler_friendly_tags(const fnt_font_t *font) {
+	HudFrameCompiler compiler;
+	HudLayout layout;
+	compiler.configure(layout, font);
+
+	HudFrameState state;
+	opennova::hud::HudFriendlyTag tag;
+	tag.screen_x = 200.0f;
+	tag.screen_y = 100.0f;
+	tag.dist_q16 = 100 << 16;
+	tag.entity_id = 24; // the fallback table's "SGT  Brown"
+	state.friendly_tags.push_back(tag);
+
+	// FULL (the boot default): centered half-bright text of the fallback name.
+	const HudDrawList &full = compiler.compile(state, 1024.0f, 768.0f);
+	CHECK(full.glyphs.size() == 11,
+			"the fallback '^SGT  Brown' lays out 11 glyphs");
+	// 100 m -> alpha 255 - 192*50/250 = 217; good tier = tagcolor_good with
+	// the alpha-preserving half-bright fold.
+	const uint32_t good = (217u << 24) | (layout.tag_good & 0xFFFFFFu);
+	CHECK(!full.glyphs.empty() &&
+					full.glyphs[0].color ==
+							opennova::hud::half_bright_keep_alpha(good),
+			"good tier rides tagcolor_good + the distance alpha");
+	// Centered on x=200: 11 glyphs at advance 9 minus the trailing pad = 98
+	// wide -> cursor 151 -> the -0.5 vertex offset.
+	CHECK(!full.glyphs.empty() && full.glyphs[0].x_top_left == 150.5f,
+			"the text centers on the projected x");
+	CHECK(full.quads.empty(), "no medic plate without the medic flag");
+
+	// The health tiers swap the color.
+	state.friendly_tags[0].health_ratio_fp16 = 0x8000;
+	const HudDrawList &mid = compiler.compile(state, 1024.0f, 768.0f);
+	const uint32_t middle = (217u << 24) | (layout.tag_middle & 0xFFFFFFu);
+	CHECK(!mid.glyphs.empty() &&
+					mid.glyphs[0].color ==
+							opennova::hud::half_bright_keep_alpha(middle),
+			"the middle tier rides tagcolor_middle");
+	state.friendly_tags[0].health_ratio_fp16 = 0x10000;
+
+	// The medic plate: white square + the two red cross bars, left of the text.
+	state.friendly_tags[0].medic = true;
+	const HudDrawList &medic = compiler.compile(state, 1024.0f, 768.0f);
+	CHECK(medic.quads.size() == 3, "the medic plate is three untextured quads");
+	if (medic.quads.size() == 3) {
+		CHECK(medic.quads[0].color == ((217u << 24) | 0xFFFFFFu),
+				"the plate is white at the tag alpha");
+		CHECK(medic.quads[1].color == ((217u << 24) | 0xFF0000u),
+				"the cross bars are red at the tag alpha");
+		// left = 200 - (98/2 + 16) - 0.5, a fontH/2 = 8 px square at the text top.
+		CHECK(medic.quads[0].x0 == 134.5f && medic.quads[0].y0 == 91.5f,
+				"the plate sits one fontH left of the text");
+		CHECK(medic.quads[0].x1 - medic.quads[0].x0 == 8.0f,
+				"the plate is a fontH/2 square");
+	}
+	state.friendly_tags[0].medic = false;
+
+	// Gates: too close, fogged, FARBRIEF far, OFF.
+	state.friendly_tags[0].dist_q16 = 0x4000;
+	CHECK(compiler.compile(state, 1024.0f, 768.0f).glyphs.empty(),
+			"under 0.5 u nothing draws");
+	state.friendly_tags[0].dist_q16 = 100 << 16;
+	state.fog_dist_q16 = 50 << 16;
+	CHECK(compiler.compile(state, 1024.0f, 768.0f).glyphs.empty(),
+			"the fog cull hides the tag");
+	state.fog_dist_q16 = INT32_MAX;
+	state.friendly_tag_mode = 1;
+	state.friendly_tags[0].dist_q16 = 400 << 16;
+	state.fog_dist_q16 = 1000 << 16;
+	CHECK(compiler.compile(state, 1024.0f, 768.0f).glyphs.empty(),
+			"FARBRIEF draws nothing past 300 m");
+	state.friendly_tags[0].dist_q16 = 100 << 16;
+	CHECK(!compiler.compile(state, 1024.0f, 768.0f).glyphs.empty(),
+			"FARBRIEF draws text under 300 m");
+	state.friendly_tag_mode = 0;
+	CHECK(compiler.compile(state, 1024.0f, 768.0f).glyphs.empty(),
+			"OFF draws nothing");
+
+	// BRIEF: the three 1-px tick lines replace the text.
+	state.friendly_tag_mode = 3;
+	const HudDrawList &brief = compiler.compile(state, 1024.0f, 768.0f);
+	CHECK(brief.glyphs.empty(), "BRIEF draws no text");
+	CHECK(brief.lines.size() == 3, "BRIEF draws the three tick lines");
+	if (brief.lines.size() == 3) {
+		CHECK(brief.lines[1].x0 == 200.0f && brief.lines[1].y0 == 96.0f &&
+						brief.lines[1].y1 == 104.0f,
+				"the tick spans +-fontH/4 around the projected point");
+	}
+
+	// A slot entry with an empty callsign draws the single bar.
+	state.friendly_tag_mode = 2;
+	state.friendly_tags[0].player = true;
+	state.friendly_tags[0].name.clear();
+	const HudDrawList &bar = compiler.compile(state, 1024.0f, 768.0f);
+	CHECK(bar.glyphs.empty() && bar.lines.size() == 1,
+			"an empty player callsign draws the bar form");
+
+	// The speaking pulse lifts the color.
+	state.friendly_tags[0].player = false;
+	state.friendly_tags[0].speaking = true;
+	state.speaking_level255 = 255;
+	const HudDrawList &speak = compiler.compile(state, 1024.0f, 768.0f);
+	const uint32_t pulsed = (217u << 24) |
+			(opennova::hud::friendly_tag_speaking_blend(
+					 layout.tag_good, 255) &
+					0xFFFFFFu);
+	CHECK(!speak.glyphs.empty() &&
+					speak.glyphs[0].color ==
+							opennova::hud::half_bright_keep_alpha(pulsed),
+			"the speaking tag pulses toward white");
+}
+
 } // namespace
 
 int main() {
@@ -189,6 +305,7 @@ int main() {
 	test_format_tags(&font);
 	test_compiler_health_and_order(&font);
 	test_compiler_crosshair(&font);
+	test_compiler_friendly_tags(&font);
 	fnt_free(&font);
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);

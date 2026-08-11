@@ -463,6 +463,16 @@ PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
             uint32_t origin = spawn_origin_pack(static_cast<uint32_t>(kind), idx);
             ++idx;
             Entity seed = make_seed(e, kind, static_cast<uint16_t>(e.id), origin);
+            // The authored display name: name_index 0 = none; the resolver maps
+            // the index through the mission RTXT [PeopleNames] STRNAME%03i entry
+            // and the copy truncates at the retail 15 chars [orig:
+            // Entity_SpawnFromBMSRecord @0x40ecbf..0x40ed0a — the rec+4 gate,
+            // sprintf("STRNAME%03i") -> "PeopleNames" lookup -> strncpy(+0xF4, 15)].
+            if (e.name_index != 0 && opts.people_name_resolver) {
+                std::string authored = opts.people_name_resolver(e.name_index);
+                if (authored.size() > 15) authored.resize(15);
+                seed.display_name = std::move(authored);
+            }
             EntityHandle h = world.registry.spawn(pool_for_kind(kind), seed);
             if (!h.valid()) { ++r.dropped; continue; }
             ++r.spawned;

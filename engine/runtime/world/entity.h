@@ -268,6 +268,13 @@ struct Entity {
     // so the player cannot move/crouch/prone. Set from the player's loadout at spawn (default a valid
     // class for players); 0 = unset / non-player. [orig: re-grill 2026-06-28; net-re §5.2b/§5.23]
     uint8_t player_class = 0;
+    // GamePlayerEntity.Name (entity+0xF4, 15 chars + NUL): the display name the
+    // friendly-tag drawer reads. Authored at BMS promote from the record's
+    // name_index through the mission RTXT [PeopleNames] STRNAME%03i entry;
+    // empty resolves the compiled-in fallback table at draw time.
+    // [orig: Entity_SpawnFromBMSRecord @0x40ecbf..0x40ed0a; read
+    //  HUD_DrawEntityLabel @0x5a4021]
+    std::string display_name;
     uint8_t group_id = 0;     // named-group membership
     uint8_t waypoint_id = 0;  // wplist / route this entity follows
     int32_t wp_number = 0;    // position along that route

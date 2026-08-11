@@ -24,6 +24,7 @@
 #include "world/geom.h"
 #include "world/player_loadout.h"
 
+#include <functional>
 #include <string>
 #include <utility>
 
@@ -115,6 +116,14 @@ struct PromoteOptions {
         int32_t combat_speed = -1;
     };
     std::vector<AiProfileSpeeds> ai_profile_speeds;
+
+    // The record's name_index -> mission-RTXT [PeopleNames] STRNAME%03i display
+    // name (empty = no entry; index 0 never resolves). The embedder builds this
+    // from the same mission text table the boot installs; the promote truncates
+    // to the retail 15-char copy. [orig: Entity_SpawnFromBMSRecord
+    // @0x40ecbf..0x40ed0a — sprintf("STRNAME%03i", rec+4) ->
+    // TextResource_FindEntryBySectionAndKey("PeopleNames") -> strncpy(+0xF4, 15)]
+    std::function<std::string(int32_t)> people_name_resolver;
 
     // Command 123/124/125 authored spawn attachment: Entity_UpdateInfantryAI @0x4B9910
     // resolves slot+152 (BMS wp_number) as a target entity serial, then walks/attaches to a
