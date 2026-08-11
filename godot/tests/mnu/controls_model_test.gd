@@ -21,3 +21,46 @@ func test_controls_model_keyboard_defaults() -> void:
 		assert_ne(cells[0], "Server", "admin class hidden")
 		assert_ne(cells[0], "Cheat", "cheat class hidden")
 	assert_true(found_forward, "Forward row present in the keyboard rows")
+
+
+# The live remap operations behind the Controls table [orig:
+# KeyBinding_HandleKeyAssignment @ 0x55bb20; CLEAR_KEY @ 0x55bfd0;
+# DEFAULTS @ 0x55bd90; mouse capture @ 0x55c780].
+func test_remap_assign_clear_defaults_and_blob() -> void:
+	var model := ControlsModel.new()
+	var action: int = model.action_index_for_row(0)
+	assert_gte(action, 0, "row 0 maps to a catalog action")
+	assert_eq(model.control_text(action, ControlsModel.DEVICE_KEYBOARD),
+			"W or Up", "row 0 is Forward with its default binding")
+
+	# Both slots full: the assigned key replaces the primary.
+	assert_true(model.assign_godot_key(action, KEY_G, false), "assign G")
+	assert_eq(model.control_text(action, ControlsModel.DEVICE_KEYBOARD),
+			"G or Up", "assignment replaces the primary slot")
+
+	# Mouse capture stores the witnessed mask; clear empties per device.
+	model.assign_mouse_mask(action, 0x2)
+	assert_eq(model.control_text(action, ControlsModel.DEVICE_MOUSE),
+			"Right", "mouse mask formats")
+	model.clear_binding(action, ControlsModel.DEVICE_MOUSE)
+	assert_eq(model.control_text(action, ControlsModel.DEVICE_MOUSE),
+			"", "mouse clear")
+	model.clear_binding(action, ControlsModel.DEVICE_KEYBOARD)
+	assert_eq(model.control_text(action, ControlsModel.DEVICE_KEYBOARD),
+			"", "keyboard clear empties both slots")
+
+	# The blob round-trips edits into a fresh model; DEFAULTS restores.
+	model.assign_godot_key(action, KEY_F5, false)
+	var blob: Dictionary = model.save_blob()
+	var other := ControlsModel.new()
+	other.load_blob(blob)
+	assert_eq(other.control_text(action, ControlsModel.DEVICE_KEYBOARD),
+			"F5", "blob round-trips the edit")
+	other.restore_defaults()
+	assert_eq(other.control_text(action, ControlsModel.DEVICE_KEYBOARD),
+			"W or Up", "DEFAULTS restores the catalog binding")
+
+	# The gameplay lookup follows the live records.
+	var keys: PackedInt32Array = model.godot_keys_for_token("move_forward")
+	assert_eq(keys.size(), 1, "one live key after the edits")
+	assert_eq(keys[0], int(KEY_F5), "the lookup yields the Godot keycode")

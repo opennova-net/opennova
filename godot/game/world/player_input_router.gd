@@ -29,8 +29,9 @@ var _frame_sequence := 0
 # / cycleweaponN ']' cycle prev/next [orig: input cases 200-210 @ 0x4e1144 ->
 # Player_SwitchToWeaponByHandle((action-200)*65); cases 212/214 ->
 # Player_CycleWeaponSlot @ 0x4dfe70; engine/runtime/controls k_catalog rows].
-const _WEAPON_CATEGORY_KEYS: Array[Key] = [KEY_1, KEY_2, KEY_3, KEY_4, KEY_5,
-		KEY_6, KEY_7, KEY_8, KEY_9]
+const _WEAPON_CATEGORY_TOKENS: Array[String] = ["Knife", "Secondary",
+		"Primary", "Flashbang", "FragGrenade", "SmokeGrenade", "Accessory",
+		"Detonator", "medpack"]
 var _category_was_down := 0
 var _cycle_prev_was_down := false
 var _cycle_next_was_down := false
@@ -117,7 +118,7 @@ func _sample_weapon_input(frame_input: MissionFrameInput,
 	var fire_held := captured and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
 	var fire_edge := fire_held and not _fire_was_held
 	_fire_was_held = fire_held
-	var reload_down := captured and Input.is_physical_key_pressed(KEY_R)
+	var reload_down := captured and ControlsBindings.pressed("magazine")
 	var reload_edge := reload_down and not _reload_was_down
 	_reload_was_down = reload_down
 	var scope_down := captured and Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
@@ -137,17 +138,17 @@ func _sample_weapon_input(frame_input: MissionFrameInput,
 func _send_weapon_switch_input(captured: bool) -> void:
 	var sim = _sim()
 	var down_mask := 0
-	for i in _WEAPON_CATEGORY_KEYS.size():
-		if captured and Input.is_physical_key_pressed(_WEAPON_CATEGORY_KEYS[i]):
+	for i in _WEAPON_CATEGORY_TOKENS.size():
+		if captured and ControlsBindings.pressed(_WEAPON_CATEGORY_TOKENS[i]):
 			down_mask |= 1 << i
 			if (_category_was_down & (1 << i)) == 0 and sim != null:
 				sim.request_local_player_weapon_category(i + 1)
 	_category_was_down = down_mask
-	var prev_down := captured and Input.is_physical_key_pressed(KEY_BRACKETLEFT)
+	var prev_down := captured and ControlsBindings.pressed("cycleweaponP")
 	if prev_down and not _cycle_prev_was_down and sim != null:
 		sim.request_local_player_weapon_cycle(-1)
 	_cycle_prev_was_down = prev_down
-	var next_down := captured and Input.is_physical_key_pressed(KEY_BRACKETRIGHT)
+	var next_down := captured and ControlsBindings.pressed("cycleweaponN")
 	if next_down and not _cycle_next_was_down and sim != null:
 		sim.request_local_player_weapon_cycle(1)
 	_cycle_next_was_down = next_down
@@ -237,10 +238,11 @@ func release_mouse_capture() -> void:
 		Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 
 
-# WASD is the 8-way move relative to the look (W/S forward/back, A/D strafe);
-# Q/E lean (catalog ids 6/7); Space jumps (momentary — the motor jumps once when
-# grounded). There is no run key: running is the automatic forward-walk promotion
-# in the sim's body selection, suppressed while scoped.
+# The live binding table drives every key below (defaults: WASD move,
+# Q/E lean, Space jump — see engine/runtime/controls k_catalog);
+# jump is momentary (the motor jumps once when grounded). There is no run
+# key: running is the automatic forward-walk promotion in the sim's body
+# selection, suppressed while scoped.
 # [orig: Player_PackInputStateToEntity @0x4df450; promotion @0x4b729d]
 func _read_input_state() -> Dictionary:
 	if _input_source.is_valid():
@@ -248,13 +250,13 @@ func _read_input_state() -> Dictionary:
 		if out is Dictionary:
 			return out
 	return {
-		"forward": Input.is_physical_key_pressed(KEY_W),
-		"back": Input.is_physical_key_pressed(KEY_S),
-		"left": Input.is_physical_key_pressed(KEY_A),
-		"right": Input.is_physical_key_pressed(KEY_D),
-		"lean_left": Input.is_physical_key_pressed(KEY_Q),
-		"lean_right": Input.is_physical_key_pressed(KEY_E),
-		"jump": Input.is_physical_key_pressed(KEY_SPACE),
+		"forward": ControlsBindings.pressed("move_forward"),
+		"back": ControlsBindings.pressed("move_back"),
+		"left": ControlsBindings.pressed("strafe_left"),
+		"right": ControlsBindings.pressed("strafe_right"),
+		"lean_left": ControlsBindings.pressed("LeanRoll_left"),
+		"lean_right": ControlsBindings.pressed("LeanRoll_right"),
+		"jump": ControlsBindings.pressed("move_jump"),
 	}
 
 

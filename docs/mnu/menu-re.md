@@ -1347,11 +1347,58 @@ delegate `@ 0x643b22`). The menu cursor is the OS custom cursor carrying the cla
 retail texture; the compiled software cursor stays off in the game shell (drawing
 both showed a trailing second cursor).
 
+## Controls key-remap flow `[orig: sub_55D560 @ 0x55d560; the capture pump @ 0x55c67c]`
+
+The OPTIONS scene registers per-widget callbacks (`@ 0x55d737..0x55d827`):
+`CONTROL_MAPPING` -> the arm handler `sub_55D560 @ 0x55d560`, `DEFAULTS` ->
+`@ 0x55bd90`, `CLEAR_KEY` -> `@ 0x55bfd0`. The arm fires on the table
+activation event `0x5000002` OR a click on the already-stored row: it sets the
+options pump to remap state, stores the row's value (the catalog index) in the
+capture global, flushes the input queue, CLEARS the row's Control cell
+(`CTableWnd_SetCellText @ 0x63edf0`), takes focus, and for the mouse device
+registers a button callback (`sub_7613B0`). The pump (`@ 0x55c67c`, inside
+`sub_55C450`) then consumes input by device: Esc restores the display and ends
+the capture (`update_control_mapping_display @ 0x55b700` — formats the bound
+control per device, resets both capture globals to -1); keyboard keys drain
+into `KeyBinding_HandleKeyAssignment @ 0x55bb20`; the joystick page polls the
+button bitfield and writes `button+1` into the record byte (`@ 0x55c712`).
+
+The live records are 432-byte entries (base `0x25C772C`): +8 primary scan,
++10 secondary scan, +12/+14 the extended-flag words, +16 mouse mask,
++20/+21 joystick bytes (relative to the record's binding block at
+`word_25C7734`). Assignment semantics (`@ 0x55bb20`): a repeating Ctrl and
+VK `0xDE` are dropped; the keypad Enter captures as scan 269; re-assigning a
+held key collapses the record to that key as the sole primary; otherwise the
+key fills the empty slot, or replaces the PRIMARY when both are full. The
+mouse callback (`@ 0x55c780`) maps events to masks (LMB 1, RMB 2, MMB 0x10,
+wheel up 0x400, wheel down 0x800), writes the record's mouse word, and
+unhooks. `CLEAR_KEY` clears the SELECTED row's slots for the active device;
+`DEFAULTS` qsorts by id, re-copies the 72-byte runtime default array at
+`0x254CC2C`, reformats, and resets the profile mouse-sensitivity/invert
+fields (`profile+0x590 = 0x80`, +0x594.. = 0). Bindings persist inside the
+player profile: the 432-byte records copy to `profile+1808` (72-byte stride,
+count at +1804, `@ 0x559d50`) and `PlayerProfile_SaveToFiles @ 0x54be00`
+writes player.sav ("FPBC0211" 16-byte header + five 15488-byte records + an
+8-byte trailer).
+
+Reimpl: `engine/runtime/controls/binding_set.*` (records + assignment/clear/
+defaults semantics), the `ControlsModel` binding (VK <-> Godot key seam),
+`controls_bindings.gd` (the shared live model + persistence),
+`nova_menu_shell.gd` (arm/capture/cancel + DEFAULTS/CLEAR_KEY), and
+`player_input_router.gd` samples gameplay keys through the live records.
+Divergences: persistence rides `user://controls.cfg` until the player.sav
+profile format slice exists, and the joystick capture page is not wired
+(both under D-CTRL rows). The retail arm also fires on a single click of the
+already-selected row; the reimpl arms on the driver's double-click activation
+(the shipped REMAP_INSTRUCTION text documents double-click).
+
 Deferred (unwitnessed or out of bar; backlog, not blocking):
 
-- The Controls key-remap flow (double-click a CONTROL_MAPPING row -> key capture ->
-  rebind + persistence) is unimplemented; the binding DATA side is the D-CTRL family
-  (D-CTRL-1: the mouse/joystick default binding arrays are an RE hunt).
+- The binding DATA side of the D-CTRL family remains: D-CTRL-1 (the
+  mouse/joystick default binding arrays are an RE hunt), the player.sav
+  profile-record format (only its geometry is witnessed), and the
+  refresh pass's yellow active-binding highlight
+  (`refresh_control_mapping_list @ 0x55b320`, unwalked interior).
 - Live data/behavior for `GLB_TABLE`, `LAN_LIST`, and `GOPHER` remains owned by
   the multiplayer/news hosts. Their authored menu structure and Action payloads
   are preserved; this menu-contained pass does not invent offline services.

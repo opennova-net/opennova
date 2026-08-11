@@ -429,7 +429,7 @@ Sources: [mnu/menu-re.md](mnu/menu-re.md), [audio/lwf-dbf-sound-re.md](audio/lwf
 | D-MNU-15 | FIXED 2026-08-10: the combo closed face's authored-only gate left every RUNTIME-seeded combo blank (the armory's ten companion-filled faces); the face now draws `items[selected]` whenever rows exist — authored or runtime — matching retail's selection-showing CButtonWnd face [orig: CComboWnd ctor @ 0x65be40, the +764 closed button]. `menu_frame_compiler` pins the runtime-rows face | A | FIXED | PAR-UI |
 | D-MNU-16 | FIXED 2026-08-10: the pump's claim walk now claims the spin widget from its SPINUP/SPINDOWN rects too (shared `spin_arrow_hit_` with `spin_arrow_at`), matching the child-window claim retail gets for free [orig: CSpinListWnd_CreateUpDownChildren @ 0x64b8b0] — outside-authored arrows (mp.mnu GAME_TYPE −18..−2 / 217..233) cycle by mouse again. `menu_frame_compiler` pins the outside-rect claim | A | FIXED | PAR-UI |
 | D-CTRL-1 | Mouse/joystick binding arrays (profile-built at runtime) not ported; those rows show a blank Control column. **Scoping (2026-07-05):** NOT in `PlayerProfile_InitDefaults @ 0x54bb40` (that sets settings/macros/default weapon loadouts only) — the mouse/joystick default bindings are built by a separate input-binding init (an RE hunt), and the consumer is the Godot input-action layer (same gate as D-CTRL-3) | A | OPEN | PAR-UI |
-| D-CTRL-3 | Live double-click rebinding / DEFAULTS / CLEAR_KEY / profile persistence deferred — gated on a real input-action layer | A | WITNESSED-READY-DEFERRED | PAR-UI |
+| D-CTRL-3 | **Remap flow ported 2026-08-11** (double-click arm -> capture -> witnessed assignment/dedupe, Esc cancel, mouse-mask capture, DEFAULTS/CLEAR_KEY; gameplay sampler reads the live records) [orig: sub_55D560 @0x55d560; KeyBinding_HandleKeyAssignment @0x55bb20; @0x55bd90/@0x55bfd0; @0x55c780]. Residue: persistence rides `user://controls.cfg` — retail stores the records in player.sav (profile+1804/+1808, 72-byte stride; PlayerProfile_SaveToFiles @0x54be00) and the profile record format beyond its geometry is unwalked; joystick capture unwired (with D-CTRL-1); the single-click-of-selected-row arm and the refresh pass's yellow active-binding highlight (@0x55b320) are not ported | A | OPEN (player.sav profile format slice; joystick page) | PAR-UI |
 | D-PLAYERINFO-1 | In-world (spawned-player) combo→3D-model binding untraced (the preview is witnessed + fully ported) | B | NEEDS-RE | PAR-UI / research starter |
 | D-PLAYERINFO-9 | ACCEPT/commit + profile persistence: the ACCEPT seam is wired (`commit` → `avatar_chosen` → main_game `[orig: save_player_info_from_dialog @ 0x55ee10]`) and the NAME half persists (`PlayerProfile.save_callsign` → `user://player_profile.cfg`); residual = persisting the avatar/class/loadout selection (in-memory `_chosen_avatar` only) + restoring it into the screen on entry | A | OPEN (partial; seam landed 2026-06-23, callsign persistence 2026-07-27 with #300) | PAR-UI |
 | D-PLAYERINFO-12 | Per-(slot, team) selection-state globals not modeled: retail remembers the selection per profile slot and team; the shipped `PlayerInfoMenuCompanion` keeps a single current selection (`snapshot()`). Port = the per-slot/per-team memory + restore on screen entry (witness in avatars-re.md §Screen orchestration) | A | WITNESSED-READY-DEFERRED | PAR-UI |
@@ -892,7 +892,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Net | 18 | 0 | 8 | 26 | 1 |
 | Environment | 0 | 0 | 3 | 3 | 0 |
 | World / AI + events | 58 | 4 | 6 | 68 | 0 |
-| UI (menu/ctrl/sound/playerinfo/HUD) | 40 | 1 | 4 | 45 | 5 |
+| UI (menu/ctrl/sound/playerinfo/HUD) | 41 | 1 | 3 | 45 | 5 |
 | Mission `.mis` | 0 | 2 | 1 | 3 | 0 |
 | LW `.3di` | 0 | 2 | 1 | 3 | 0 |
 | Particles `.ptl` | 2 | 0 | 0 | 2 | 0 |
@@ -905,7 +905,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Render — materials/state | 0 | 0 | 1 | 1 | 0 |
 | Render — draw order | 3 | 0 | 1 | 4 | 0 |
 | Render — lighting | 3 | 0 | 2 | 5 | 0 |
-| **Total** | **130** | **13** | **27** | **170** | 6 |
+| **Total** | **131** | **13** | **26** | **170** | 6 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-INF-20, D-NET-136, D-NET-169, D-NET-179, D-NET-64, D-NET-97.
 

@@ -936,3 +936,83 @@ func test_multiple_companions_first_owner_drives_menu() -> void:
 	assert_false(skipped.built, "a non-owning companion is skipped")
 	assert_true(owner.built, "the first owning companion drives the menu")
 	_cleanup(dir)
+
+
+# The Controls remap flow end-to-end at the shell seam: double-click arms the
+# capture (Control cell clears), the next key assigns through the witnessed
+# record semantics and persists, Esc cancels, and CLEAR_KEY/DEFAULTS drive the
+# same live model [orig: sub_55D560 @ 0x55d560; KeyBinding_HandleKeyAssignment
+# @ 0x55bb20; CLEAR_KEY @ 0x55bfd0; DEFAULTS @ 0x55bd90].
+func test_control_mapping_remap_flow() -> void:
+	var had_cfg := FileAccess.file_exists(ControlsBindings.CONFIG_PATH)
+	var saved_cfg := FileAccess.get_file_as_bytes(ControlsBindings.CONFIG_PATH) \
+			if had_cfg else PackedByteArray()
+	ControlsBindings.model().restore_defaults()
+
+	var dir := OS.get_temp_dir().path_join("menu_shell_remap_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(dir)
+	var file := FileAccess.open(dir.path_join("options.mnu"), FileAccess.WRITE)
+	assert_not_null(file)
+	file.store_buffer(FileAccess.get_file_as_bytes(OPTIONS_FIXTURE))
+	file.close()
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(dir), OK)
+	var shell = MenuShellScript.new()
+	shell.main_menu_file = "options.mnu"
+	shell.size = Vector2(800, 600)
+	add_child_autofree(shell)
+	assert_true(shell.setup(root), "the options fixture boots")
+	var driver: MenuDriver = shell.get_driver()
+	var table: int = driver.widget_id("CONTROL_MAPPING")
+	assert_gte(table, 0, "the mapping table exists")
+	assert_gt(driver.table_row_count(table), 40, "the live rows are seeded")
+	assert_eq(driver.table_cell_text(table, 0, 2), "W or Up",
+			"row 0 shows the Forward default")
+
+	# Double-click row 0: the capture arms and the Control cell clears.
+	driver.list_activated.emit(table, 0)
+	assert_eq(driver.table_cell_text(table, 0, 2), "",
+			"the armed row's Control cell clears")
+
+	# The next key assigns (Y replaces the primary: both slots were full).
+	var key := InputEventKey.new()
+	key.pressed = true
+	key.physical_keycode = KEY_Y
+	shell.get_viewport().push_input(key)
+	assert_eq(driver.table_cell_text(table, 0, 2), "Y or Up",
+			"the captured key lands in the record and the cell restores")
+	assert_true(FileAccess.file_exists(ControlsBindings.CONFIG_PATH),
+			"the edit persists")
+
+	# Esc cancels a fresh capture without changing the record.
+	driver.list_activated.emit(table, 0)
+	var esc := InputEventKey.new()
+	esc.pressed = true
+	esc.physical_keycode = KEY_ESCAPE
+	shell.get_viewport().push_input(esc)
+	assert_eq(driver.table_cell_text(table, 0, 2), "Y or Up",
+			"Esc restores the cell unchanged")
+
+	# CLEAR_KEY empties the selected row; DEFAULTS restores the catalog.
+	driver.table_select_row(table, 0)
+	driver.widget_activated.emit(driver.widget_id("CLEAR_KEY"), "CLEAR_KEY")
+	assert_eq(driver.table_cell_text(table, 0, 2), "",
+			"CLEAR_KEY empties the keyboard slots")
+	driver.widget_activated.emit(driver.widget_id("DEFAULTS"), "DEFAULTS")
+	assert_eq(driver.table_cell_text(table, 0, 2), "W or Up",
+			"DEFAULTS restores the catalog binding")
+
+	# The gameplay lookup follows the live records again.
+	var keys: PackedInt32Array = ControlsBindings.model().godot_keys_for_token("move_forward")
+	assert_eq(keys.size(), 2, "defaults restored for the sampler")
+
+	ControlsBindings.model().restore_defaults()
+	if had_cfg:
+		var out := FileAccess.open(ControlsBindings.CONFIG_PATH, FileAccess.WRITE)
+		if out != null:
+			out.store_buffer(saved_cfg)
+			out.close()
+	elif FileAccess.file_exists(ControlsBindings.CONFIG_PATH):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(ControlsBindings.CONFIG_PATH))
+	DirAccess.remove_absolute(dir.path_join("options.mnu"))
+	DirAccess.remove_absolute(dir)
