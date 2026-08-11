@@ -127,11 +127,14 @@ func test_world_backend_executes_a_live_gpu_submission() -> void:
 	viewport.add_child(fog_source)
 	renderer.environment_source = fog_source
 	viewport.add_child(renderer)
-	renderer.render_now()
+	# The renderer no longer self-clocks: the owner drives render_now() once per
+	# frame (the game's particles leg). Re-submit each frame so the compositor
+	# callback has live commands to draw.
 	# Do not await frame_post_draw: headless compatibility renderers may never
 	# emit it. Ordinary process frames still exercise the callback whenever the
 	# RenderingDevice compositor is available.
 	for _frame in 5:
+		renderer.render_now()
 		await get_tree().process_frame
 
 	var report := renderer.get_debug_draw_list_report()

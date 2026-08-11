@@ -95,6 +95,8 @@ void Simulation::set_frame_world(Object *p_world) {
 		frame_weather_cb_ = Callable();
 		frame_blink_cb_ = Callable();
 		frame_occlusion_cb_ = Callable();
+		frame_materials_cb_ = Callable();
+		frame_particles_cb_ = Callable();
 		frame_iris_cb_ = Callable();
 		frame_audio_cb_ = Callable();
 		return;
@@ -107,6 +109,8 @@ void Simulation::set_frame_world(Object *p_world) {
 		"_frame_weather_leg",
 		"_frame_blink_leg",
 		"_frame_occlusion_leg",
+		"_frame_materials_leg",
+		"_frame_particles_leg",
 		"_frame_iris_leg",
 		"_frame_audio_leg",
 	};
@@ -118,10 +122,12 @@ void Simulation::set_frame_world(Object *p_world) {
 		&frame_weather_cb_,
 		&frame_blink_cb_,
 		&frame_occlusion_cb_,
+		&frame_materials_cb_,
+		&frame_particles_cb_,
 		&frame_iris_cb_,
 		&frame_audio_cb_,
 	};
-	wire_leg_contract(p_world, kNames, 9, slots);
+	wire_leg_contract(p_world, kNames, 11, slots);
 }
 
 opennova::frame::FrameHooks Simulation::build_frame_hooks() {
@@ -172,6 +178,8 @@ opennova::frame::FrameHooks Simulation::build_frame_hooks() {
 	hooks.weather = leg(frame_weather_cb_);
 	hooks.blink_gates = leg(frame_blink_cb_);
 	hooks.occlusion_frame = leg(frame_occlusion_cb_);
+	hooks.materials = leg(frame_materials_cb_);
+	hooks.particles = leg(frame_particles_cb_);
 	hooks.iris_samples = leg(frame_iris_cb_);
 	hooks.audio = leg_int(frame_audio_cb_);
 	return hooks;

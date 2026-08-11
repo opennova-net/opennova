@@ -68,12 +68,22 @@ struct FrameHooks {
 	std::function<void()> present_local_view;
 	// The post-batch frame legs, in order: session-drive observation, the
 	// world-driven weather tick, the occlusion blink gates (only when at
-	// least one logic tick ran), the render-occlusion frame, the iris
-	// exposure samples, and the audio pass.
+	// least one logic tick ran), the render-occlusion frame, the particle
+	// render compile (pose sync + packet build against the render camera —
+	// the ex-self-clocked _process loop [orig: the particle passes render
+	// inside the render frame after visibility, Render_ProcessMainSceneFrame
+	// @ 0x5ca0f0 / D-RORD-7]), the iris exposure samples, and the audio pass.
 	std::function<void()> net_drive;
 	std::function<void()> weather;
 	std::function<void()> blink_gates;
 	std::function<void()> occlusion_frame;
+	// Per-model runtime advance (PANM registers, dynamic materials, part/body
+	// anim, staggered env restamp) — the ex-self-clocked ObjectModel _process
+	// [orig: Terrain_RenderSectorModels @ 0x5c5d30 computes the runtime
+	// constants during the render sector walk]. Runs after occlusion (only the
+	// awake set walks) and before the particle compile that composites over it.
+	std::function<void()> materials;
+	std::function<void()> particles;
 	std::function<void()> iris_samples;
 	std::function<void(int32_t ticks_run)> audio;
 };

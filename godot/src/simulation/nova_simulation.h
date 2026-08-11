@@ -375,6 +375,8 @@ private:
 	Callable frame_blink_cb_;
 	Callable frame_local_view_cb_;
 	Callable frame_occlusion_cb_;
+	Callable frame_materials_cb_;
+	Callable frame_particles_cb_;
 	Callable frame_iris_cb_;
 	Callable frame_audio_cb_;
 	int64_t frame_net_us_ = 0;

@@ -50,10 +50,13 @@ main_game.gd
                begin effect tick / throwable sync / drain effects / fixed_tick_completed
              present ONCE after the batch             (rows-only on a zero-tick frame)
                MissionPresentPass / WirePresentPass / Fire / Destruction / Throwable
+             local-view leg                           (camera/viewmodel placement, D-RORD-8)
              net-drive leg                            (session edges, join-wire gate)
              weather leg                              (the distinct 62 Hz TOD clock)
              blink-gates leg                          (only after a batch that ran)
              occlusion-frame leg                      (camera-driven, every render frame)
+             materials leg                            (ObjectModel awake-set advance, ex-_process)
+             particles leg                            (EffectWorld pose sync + ParticleRenderer compile)
              iris leg                                 (marched exposure samples)
              audio leg                                (mission audio + music var pump)
 ```
@@ -128,16 +131,22 @@ over to compiled draw lists (R2 completed 2026-08-09/10):
   the game shell, the armory/deploy presenters, and the ONED Menus canvas all
   consume this one path (record: [mnu/menu-re.md](mnu/menu-re.md)).
 
-One per-frame render loop remains deliberately SELF-DRIVEN outside the engine
-frame: `ParticleRenderer`'s `_process` (frame compile + compositor dispatch);
-per-model material eval self-parks on the native `ObjectModel`
-(`godot/src/object`), whose event-driven runtime frame wakes only when it
-holds live work. The occlusion leg runs AFTER the present in the frame order
-above — present re-asserts base visibility, occlusion layers hides on top, and
-the local-view present leg (`FrameHooks.present_local_view`, the present
-ladder's closer) places the camera first so occlusion/iris read the render
-view (D-RORD-8, fixed 2026-08-10; the residue is the pre-batch
-terrain/foliage camera phase).
+No per-frame render loop self-clocks anymore (2026-08-10). The two ex-self-
+driven `_process` loops are frame legs: the **particles leg** drives
+`EffectWorld.frame_render()` (owner-pose sync + `ParticleRenderer.render_now()`
+— the renderer no longer processes on its own), and the **materials leg**
+drives `ObjectModel.advance_awake_frame(delta)` — one static driver over the
+shared AWAKE set (every model holding live PANM/material/anim/restamp work;
+models add themselves on wake and self-park when idle, with a per-frame guard
+so the game leg and an idle menu/ONED process cannot double-advance). The
+non-mission contexts drive the same static advance from their one process loop
+(`nova_menu_shell.gd` for menu portraits, `editor_workstation.gd` for ONED);
+ONED's particle preview drives `render_now()` itself. The occlusion leg runs
+AFTER present — present re-asserts base visibility, occlusion layers hides on
+top, and the local-view present leg (`FrameHooks.present_local_view`, the
+present ladder's closer) places the camera first so occlusion/materials/
+particles/iris read the render view (D-RORD-8, fixed 2026-08-10; the residue
+is the pre-batch terrain/foliage camera phase).
 
 ## Single-player is a listen server
 

@@ -1255,6 +1255,28 @@ func _frame_occlusion_leg() -> void:
 		_perf_probe_spans["occl_frame"] = 0
 
 
+# The per-model runtime advance at its ladder slot — after occlusion (only
+# the awake set walks), before the particle composite. Folds the ex-self-
+# clocked ObjectModel _process into the frame; one static driver advances
+# every awake model this frame [orig: Terrain_RenderSectorModels @ 0x5c5d30].
+func _frame_materials_leg() -> void:
+	if _frame_aborted:
+		return
+	ObjectModel.advance_awake_frame(_frame_delta)
+
+
+# The particle render compile at its ladder slot — after occlusion, against
+# the render camera the local-view leg placed (folding the ex-self-clocked
+# EffectWorld/ParticleRenderer _process pair into the frame)
+# [orig: the particle passes render inside the render frame,
+# Render_ProcessMainSceneFrame @ 0x5ca0f0; render-order-re.md D-RORD-7].
+func _frame_particles_leg() -> void:
+	if _frame_aborted:
+		return
+	if _loaded and _effect_world != null:
+		_effect_world.frame_render()
+
+
 func _frame_iris_leg() -> void:
 	if _frame_aborted:
 		if _frame_probe_enabled:
@@ -1371,6 +1393,8 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 		if runtime_ticks > 0:
 			_frame_blink_leg()
 		_frame_occlusion_leg()
+		_frame_materials_leg()
+		_frame_particles_leg()
 		_frame_iris_leg()
 		_frame_audio_leg(runtime_ticks)
 	if _frame_aborted:

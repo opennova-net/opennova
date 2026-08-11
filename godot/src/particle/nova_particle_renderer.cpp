@@ -1284,9 +1284,11 @@ void ParticleRenderer::_bind_methods() {
 void ParticleRenderer::_notification(int p_what) {
 	if (p_what == NOTIFICATION_READY) {
 		impl_->ensure_visuals(this);
-		set_process(true);
-		render_now();
-	} else if (p_what == NOTIFICATION_PROCESS) {
+		// The renderer never self-clocks: its owner drives render_now() once
+		// per frame — the game from the engine frame's particles leg (against
+		// the render camera the local-view leg placed, D-RORD-7), ONED's
+		// particle preview from its own advance. One compile per frame, at a
+		// defined ladder position — not an arbitrary _process slot.
 		render_now();
 	} else if (p_what == NOTIFICATION_EXIT_TREE) {
 		if (impl_)

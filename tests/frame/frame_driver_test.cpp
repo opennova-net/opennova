@@ -51,6 +51,8 @@ struct Trace {
 		h.weather = [this] { calls.push_back("weather"); };
 		h.blink_gates = [this] { calls.push_back("blink"); };
 		h.occlusion_frame = [this] { calls.push_back("occlusion"); };
+		h.materials = [this] { calls.push_back("materials"); };
+		h.particles = [this] { calls.push_back("particles"); };
 		h.iris_samples = [this] { calls.push_back("iris"); };
 		h.audio = [this](int32_t n) {
 			calls.push_back("audio:" + std::to_string(n));
@@ -84,7 +86,7 @@ int main() {
 		const std::string want =
 				"terrain foliage listener step effect_tick:101 sync_fixed drain "
 				"fixed_done:101 present_frame local_view net_drive weather blink "
-				"occlusion iris audio:1";
+				"occlusion materials particles iris audio:1";
 		if (!expect(joined(t.calls) == want, "the frame order is fixed")) {
 			std::fprintf(stderr, "  got:  %s\n  want: %s\n",
 					joined(t.calls).c_str(), want.c_str());
@@ -101,7 +103,7 @@ int main() {
 		if (!expect(ran == 0, "half a quantum runs nothing")) return 1;
 		const std::string want =
 				"terrain foliage listener present_rows local_view net_drive weather "
-				"occlusion iris audio:0";
+				"occlusion materials particles iris audio:0";
 		if (!expect(joined(t.calls) == want,
 				"the zero-tick frame presents rows only and skips blink")) {
 			std::fprintf(stderr, "  got:  %s\n  want: %s\n",
@@ -157,7 +159,7 @@ int main() {
 		if (!expect(ran == 0, "a declined step counts zero ticks")) return 1;
 		const std::string want =
 				"terrain foliage listener step present_frame local_view net_drive "
-				"weather occlusion iris audio:0";
+				"weather occlusion materials particles iris audio:0";
 		if (!expect(joined(t.calls) == want,
 				"declined step: no per-tick legs, no blink")) {
 			std::fprintf(stderr, "  got:  %s\n  want: %s\n",

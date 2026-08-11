@@ -47,7 +47,6 @@ func _init() -> void:
 
 func _ready() -> void:
 	_ensure_renderer()
-	set_process(true)
 
 
 func _ensure_renderer() -> void:
@@ -545,9 +544,15 @@ func advance_fixed_tick(delta: float) -> void:
 	_scene.advance_in_place(maxf(delta, 0.0))
 
 
-## Render-frame work may update attachment poses, but never advances particles.
-func _process(_delta: float) -> void:
+## The render-frame compile: refresh attachment poses (never advances the sim)
+## then rebuild the render packet. The game world drives this from the engine
+## frame's particles leg — after occlusion, against the render camera the
+## local-view leg placed — so the packet builds at a defined ladder slot
+## instead of an arbitrary _process order.
+func frame_render() -> void:
 	_sync_owner_poses()
+	if is_instance_valid(_renderer):
+		_renderer.render_now()
 
 
 ## Value-only F3 read model. Emitter ids join portable simulation values to

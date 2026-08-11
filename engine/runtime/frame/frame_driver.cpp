@@ -106,6 +106,12 @@ int32_t FrameDriver::run_frame(double dt, const FrameHooks &hooks) {
 	if (hooks.occlusion_frame) {
 		hooks.occlusion_frame();
 	}
+	if (hooks.materials) {
+		hooks.materials();
+	}
+	if (hooks.particles) {
+		hooks.particles();
+	}
 	if (hooks.iris_samples) {
 		hooks.iris_samples();
 	}

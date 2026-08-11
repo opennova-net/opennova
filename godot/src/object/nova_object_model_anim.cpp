@@ -820,6 +820,13 @@ void ObjectModel::set_right_hand_collapsed(bool p_collapsed) {
 	}
 	collapse_right_hand_ = p_collapsed;
 	body_pose_dirty_ = true;
+	// Re-pose immediately, like play_body_clip_at: the collapse is a mount-edge
+	// presentation flag and must land on the current pose without waiting for
+	// the next runtime-frame advance (models no longer self-clock — the frame
+	// driver advances the awake set, and a caller may read the pose same-frame).
+	if (!anim_key_.is_empty()) {
+		advance_body_animation(0.0);
+	}
 }
 
 // Pose the Skeleton3D from the active main-body clip: advance the playhead

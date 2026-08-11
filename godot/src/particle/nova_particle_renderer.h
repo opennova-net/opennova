@@ -77,9 +77,9 @@ public:
 	void clear_warm_pipelines();
 
 	// Compiles the latest fixed-tick scene snapshot for both render domains and
-	// publishes an immutable World copy across the render-thread boundary.
-	// Process-driven rendering calls this automatically; tests and previews may
-	// call it explicitly after advancing a scene.
+	// publishes an immutable World copy across the render-thread boundary. The
+	// owner drives this once per frame (the game's particles leg, ONED's
+	// preview advance); the renderer does not self-clock.
 	void render_now();
 
 	// Renderer-owned diagnostics are plain values. No MeshInstance or material
