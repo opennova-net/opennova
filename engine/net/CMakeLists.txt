@@ -87,6 +87,7 @@ add_library(opennova_net STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/lan_discovery.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/weapon_table_build.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/ammo_table_build.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/npruntime/mission_session.cpp
 )
 
 target_include_directories(opennova_net

@@ -81,3 +81,8 @@ func _capture(name: String, wait_s: float) -> void:
 			particles += int(c.get_alive_count())
 	print("[fx] wrote %s live_groups=%d emitters=%d alive=%s" % [
 		name, _fx.live_group_count(), _fx.get_child_count(), str(particles)])
+
+
+func _process(_delta: float) -> void:
+	if _fx != null:
+		_fx.render_frame()

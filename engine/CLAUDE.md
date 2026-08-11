@@ -12,13 +12,14 @@
     threedi, tdp, ase, bad, def, dep, avatars, mission, trn, tpj, tpm, cpt, til,
     foliage, env, mnu, mns, sbf, lwf, dbf, mus, playersav, ptl,
     wac (front end; compiler/VM stay runtime), oed.
-  - `runtime/` — the in-match systems: frame (the game frame: the main-loop
-    bank/catch-up/present-once shape + the fixed per-frame leg order over
-    shell-installed device hooks, ADR 0033 R1), world, wac (compiler/VM), mission (the runtime
+  - `runtime/` — the in-match systems: world, wac (compiler/VM), mission (the runtime
     half — event runtime, promotion, boot; the document model is `formats/mission`),
     anim, audio, particle, renderer, controls, terrain, terrain_query.
-  - `net/` — the wire/protocol stack (ADRs 0009–0012, 0019; Model-B-only): novacrypto,
-    napi, npwire, novaworld, netsim, npruntime.
+  - `net/` — the wire/protocol stack and portable mission-session control
+    (ADRs 0009–0012, 0019, 0035; Model-B-only): novacrypto, napi, npwire,
+    novaworld, netsim, npruntime. `npruntime/mission_session.*` owns lifecycle,
+    role policy, fixed-tick banking, and input consumption over a
+    `MissionTickTarget`; Godot orders its own presentation/device pipeline.
 - Layout per library (FLAT since 2026-08-10): `engine/<group>/<domain>/*.{h,cpp}` —
   headers and sources sit side by side in the lib dir (nested subdirs allowed, e.g.
   `npwire/wire/`), and each GROUP directory is the one public include dir, so

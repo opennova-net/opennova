@@ -1284,9 +1284,7 @@ void ParticleRenderer::_bind_methods() {
 void ParticleRenderer::_notification(int p_what) {
 	if (p_what == NOTIFICATION_READY) {
 		impl_->ensure_visuals(this);
-		set_process(true);
-		render_now();
-	} else if (p_what == NOTIFICATION_PROCESS) {
+		set_process(false);
 		render_now();
 	} else if (p_what == NOTIFICATION_EXIT_TREE) {
 		if (impl_)

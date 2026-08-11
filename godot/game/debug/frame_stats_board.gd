@@ -52,7 +52,7 @@ enum {
 	OCCL_PROBE,            # native per-entity render-gate loop
 	OCCL_APPLY,            # GDScript node application (masks + culled set + water)
 	OCCL_GLUE,             # run_occlusion_frame call minus build+probe (marshalling)
-	# MissionRuntime legs
+	# MissionPresentation legs
 	SIM_STEP,              # sim.step() total, summed over the frame's logic ticks
 	SIM_NET,               # native wire leg of step: joiner recv/uplink pump, or the
 	                       # host's ClientState fold (S2C emit stays inside SIM_STEP

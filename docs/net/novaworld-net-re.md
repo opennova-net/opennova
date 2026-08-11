@@ -1582,7 +1582,7 @@ present type wins, returning the one farthest (mission 2D) from any live `Entity
 avoid set; the faithful `Flags & 0x100` set is approximated by live soldiers — at select time the
 player has not spawned, so every organic is an NPC). A mission is authored for one mode, so
 typically exactly one family type is present (00TRa → its 6001). `Simulation::spawn_local_player_at_start`
-feeds the result into the §5.2b `spawn_player`; `mission_runtime.gd` calls it instead of the prior
+feeds the result into the §5.2b `spawn_player`; `mission_presentation.gd` calls it instead of the prior
 placeholder that read `get_entity_position(0)` (= the first promoted organic = NPC #0), which spawned
 the player on top of the first soldier. No family marker → a safe fallback origin, never an NPC
 position. **D-NET-88 divergence:** the unified family scan replaces the exact per-game-type
@@ -4335,7 +4335,7 @@ serializer GUARANTEES `0x0800` for any AI-capable item def. The crash window is 
 (`Entity::is_ai_capable`), which is resolved from `items.def ItemDefAttrib & 0x100000` (the `AIData` token) —
 parsed into `DefItemDef.attrib` (`engine/formats/def`), surfaced as `ItemDatabase::is_ai_capable`, and stamped onto
 every live entity by the host's `Simulation::resolve_item_traits` post-load pass (called from
-`MissionRuntime` alongside `resolve_infantry_adm_ids`). Because our emit gate is now the SAME predicate as the
+`MissionPresentation` alongside `resolve_infantry_adm_ids`). Because our emit gate is now the SAME predicate as the
 decoder's own gate (`attrib & 0x100000`), an AI-capable record ALWAYS carries the `0x0800` flag + a valid
 in-packet NUL-terminated name → byte-faithful (retail emits the trailer iff AI-capable) AND crash-safe. The
 earlier dc90f64f stopgap (force `0x0800` on EVERY pool-1 record) is removed — no remaining divergence on the
@@ -7015,7 +7015,7 @@ damage number `min(62·|vel|,1219)·grains/875` floored/capped, clamped to remai
 standard-kill feed event to every non-host in-match connection; a dead HOST player queues
 for the 620-tick respawn release back to its recorded spawn point at template health; a
 joiner's respawn rides its own deploy request) → engine feed `Simulation::load_ammo_table`
-(mission_runtime.gd, after the armory). Pinned by `npruntime_round_sim_test` (build+resolve,
+(mission_presentation.gd, after the armory). Pinned by `npruntime_round_sim_test` (build+resolve,
 spawn velocity/frame, 3-hit kill at 60/60/30, 0x13/0x1E bytes, no-auto-respawn for clients,
 host respawn snap). That historical MVP deliberately used coarse collision and damage;
 the current collision/damage status is the alignment record immediately below.
@@ -8440,7 +8440,7 @@ loads — the expansion setting must name it (config, not code).
 Reimpl: `engine/runtime/world/weapon_inventory.{h,cpp}` (the pool/kit/walk translations, ctest
 `weapon_inventory`), `Simulation` (`rebuild_local_player_loadout` + the switch/commit
 seams), `local_player_presenter.gd` (keys 1..9, `[`/`]`), `armory_presenter.gd`/`armory_menu_companion.gd`
-(availability filter + multi-slot ACCEPT), `mission_runtime.gd` (the .bms promote), GUT
+(availability filter + multi-slot ACCEPT), `mission_presentation.gd` (the .bms promote), GUT
 `nova_simulation_test.gd` / `armory_presenter_test.gd`.
 
 **The spawn-kit buffer.** `restrictionData @ 0x24D4E00` (IDB comment proposes

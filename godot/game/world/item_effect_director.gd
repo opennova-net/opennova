@@ -19,7 +19,7 @@ extends RefCounted
 # sources, and the placer's ItemDatabase (typed at the resolve boundary,
 # ADR 0034 — harnesses hand real fixture databases).
 
-const MissionRuntime := preload("res://game/world/mission_runtime.gd")
+const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 
 # The attach scan reads only a model's first 16 userpoints — the witness
 # ([orig: ItemDef_GetBoneMaskByName @ 0x49ea40]) lives at engine
@@ -118,7 +118,7 @@ func on_effect_world_started() -> void:
 	# (resolved to the placed node's live transform).
 	effect_world.set_owner_position_provider(Callable(self, "_effect_owner_transform"))
 	reattach()
-	var runtime: MissionRuntime = _world.get_runtime()
+	var runtime: MissionPresentation = _world.get_runtime()
 	if runtime != null:
 		runtime.set_wire_node_spawned_callback(Callable(self, "_on_wire_node_spawned"))
 
@@ -164,7 +164,7 @@ func _effect_owner_transform(owner_key: Variant) -> Variant:
 		var node: Variant = _item_fx_nodes.get(owner_key)
 		if node is Node3D and is_instance_valid(node) and node.is_inside_tree():
 			var entity_ref: Dictionary = _item_fx_owner_refs.get(owner_key, {})
-			var pose_runtime: MissionRuntime = _world.get_runtime()
+			var pose_runtime: MissionPresentation = _world.get_runtime()
 			if not entity_ref.is_empty() and pose_runtime != null \
 					and pose_runtime.has_current_present_effect_snapshot():
 				# Null here means the identity left THIS tick's replica set. Do
@@ -175,7 +175,7 @@ func _effect_owner_transform(owner_key: Variant) -> Variant:
 		_item_fx_nodes.erase(owner_key)
 		_item_fx_owner_refs.erase(owner_key)
 		return null
-	var ssn_runtime: MissionRuntime = _world.get_runtime()
+	var ssn_runtime: MissionPresentation = _world.get_runtime()
 	if ssn_runtime != null:
 		return ssn_runtime.entity_effect_transform_for_ssn(owner_key)
 	return null

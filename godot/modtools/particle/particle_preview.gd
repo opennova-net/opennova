@@ -271,6 +271,10 @@ func _process(delta: float) -> void:
 		_elapsed = minf(_elapsed + step, _max_seconds)
 		if _elapsed >= _max_seconds:
 			set_paused(true)
+	# ParticleRenderer has no self-driven process loop. This preview is the
+	# editor-side frame owner, just as GameFramePipeline is for a live mission.
+	if _renderer != null:
+		_renderer.render_now()
 	_stats_accum += delta
 	if _stats_accum >= 0.2:
 		_stats_accum = 0.0

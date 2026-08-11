@@ -28,10 +28,6 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/environment/sky_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/environment/water_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/environment/weather_runtime.cpp
-    # frame — the game frame: the main-loop shape (bank/catch-up/present-once)
-    # and the fixed per-frame leg order, over shell-supplied device hooks
-    # (ADR 0033 R1)
-    ${CMAKE_CURRENT_SOURCE_DIR}/frame/frame_driver.cpp
     # hud — pure witnessed HUD math (the shell owns every draw/Font blit)
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_math.cpp
     # menu — the .mnu screen draw-list compiler (ADR 0033 R2; witness:
@@ -54,7 +50,6 @@ add_library(opennova_runtime STATIC
     # hud — the retail game-font text engine + element frame math
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/game_font.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_math.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_runtime.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/material_eval.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/material_classify.cpp

@@ -1,7 +1,7 @@
 extends GutTest
 
 # DebugSnapshotWriter: the pick-enrichment contract against a REAL
-# MissionRuntime + Simulation (the context is typed, ADR 0034): the pose
+# MissionPresentation + Simulation (the context is typed, ADR 0034): the pose
 # anchors on the auto-spawned host player, enrichment joins the sim's live
 # entity cards by kind/index, real card containers (Vector3 fields, packed
 # arrays, the PackedVector3Array effect state) convert to JSON records
@@ -9,16 +9,16 @@ extends GutTest
 # its identity and replayable ray intact. Plus the write/default-path rules.
 
 const Writer := preload("res://game/debug/debug_snapshot_writer.gd")
-const MissionRuntime := preload("res://game/world/mission_runtime.gd")
+const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 
 
-func _runtime() -> MissionRuntime:
+func _runtime() -> MissionPresentation:
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	mission.add_entity(3, 0, Vector3(10, 0, 0), Vector3.ZERO)  # KIND_ORGANIC
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var runtime := MissionRuntime.new()
+	var runtime := MissionPresentation.new()
 	add_child_autofree(runtime)
 	var placer := MissionObjectPlacer.new()
 	assert_eq(runtime.setup(mission, container, {
@@ -29,7 +29,7 @@ func _runtime() -> MissionRuntime:
 	return runtime
 
 
-func _ctx_with_runtime(runtime: MissionRuntime) -> DebugContext:
+func _ctx_with_runtime(runtime: MissionPresentation) -> DebugContext:
 	var ctx := DebugContext.new()
 	ctx.runtime_source = func(): return runtime
 	return ctx

@@ -12,7 +12,7 @@ extends SceneTree
 #   NOVA_RESOURCE_DIR=<loose JOX> godot --headless --path godot \
 #     -s res://tests/wave1_native_assets_probe.gd
 
-const MissionRuntime := preload("res://game/world/mission_runtime.gd")
+const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 
 const MISSION := "00TRg.bms"
 
@@ -128,18 +128,25 @@ func _run() -> void:
 		_fail("unknown weapon name must not install")
 		return
 
-	# The native 62.5 Hz bank [orig: Game_MainLoop @ 0x52b630].
-	if int(sim.bank_realtime(0.032)) != 2:
+	# The native MissionSession 62.5 Hz bank [orig: Game_MainLoop @ 0x52b630].
+	sim.resume_session()
+	var frame_input := MissionFrameInput.new()
+	frame_input.delta_seconds = 0.032
+	if int(sim.advance_session_frame(frame_input).get_ticks_run()) != 2:
 		sim.free()
-		_fail("bank_realtime(0.032) != 2")
+		_fail("MissionSession.advance(0.032) != 2 ticks")
 		return
-	if int(sim.bank_realtime(0.001)) != 0:
+	frame_input = MissionFrameInput.new()
+	frame_input.delta_seconds = 0.001
+	if int(sim.advance_session_frame(frame_input).get_ticks_run()) != 0:
 		sim.free()
-		_fail("bank_realtime(0.001) != 0")
+		_fail("MissionSession.advance(0.001) != 0 ticks")
 		return
-	if int(sim.bank_realtime(2.0)) != 31:
+	frame_input = MissionFrameInput.new()
+	frame_input.delta_seconds = 2.0
+	if int(sim.advance_session_frame(frame_input).get_ticks_run()) != 31:
 		sim.free()
-		_fail("bank_realtime(2.0) != 31 (spiral clamp)")
+		_fail("MissionSession.advance(2.0) != 31 ticks (spiral clamp)")
 		return
 
 	sim.free()
@@ -149,7 +156,7 @@ func _run() -> void:
 	# engine's run_mission_boot, and its native file resolution (mission-text
 	# fallback, .aip profile speeds) must match the legacy shell resolution
 	# recomputed here.
-	var runtime := MissionRuntime.new()
+	var runtime := MissionPresentation.new()
 	get_root().add_child(runtime)
 	var boot_container := Node3D.new()
 	get_root().add_child(boot_container)

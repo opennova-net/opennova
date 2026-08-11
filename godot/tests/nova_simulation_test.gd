@@ -1372,7 +1372,7 @@ func test_local_fire_spawns_the_authoritative_round_and_impact() -> void:
 	# could pass (the compensating-error pair the fp_impact_probe pinned;
 	# ledger D-WPN-18).
 	# Use the fixture's Generic Soldier (wire id 5311 -> items.def id 105311),
-	# then resolve traits through the same production seam as mission_runtime. Retail
+	# then resolve traits through the same production seam as MissionPresentation. Retail
 	# returns before projectile damage when the struck entity has no ItemDef.
 	assert_false(md.add_entity(MissionData.KIND_ORGANIC, 5311,
 			Vector3(0, 8, 0), Vector3.ZERO).is_empty())
@@ -1858,7 +1858,7 @@ func test_weapon_event_batch_does_not_cross_lifecycle_boundaries() -> void:
 		"clear discards the unmounted weapon's queued presentation")
 	sim.set_local_player_weapon(def, clips)
 	sim.step()
-	sim.restart()
+	sim.reset_session()
 	assert_true(sim.drain_local_player_weapon_events().is_empty(),
 		"restart cannot age a pre-rewind event across the logic-tick reset")
 	sim.free()
@@ -1890,7 +1890,7 @@ func test_restart_clears_powerthrow_charge_and_input_latches() -> void:
 	assert_true(bool(wound.get("windup_active", false)))
 	assert_gt(int(wound.get("windup_held_ticks", 0)), 0)
 
-	sim.restart()
+	sim.reset_session()
 	var rewound: Dictionary = sim.get_local_player_weapon_state()
 	assert_false(bool(rewound.get("windup_active", true)))
 	assert_eq(int(rewound.get("windup_held_ticks", -1)), 0)
@@ -2125,7 +2125,7 @@ func test_infantry_anim_map_failure_paths() -> void:
 
 func test_restart_rebinds_baseline_player_to_own_adm() -> void:
 	# The listen host's player is captured in AiSystem's baseline before the
-	# MissionRuntime per-entity ADM sweep. Stop/Restart replaces the live AI rows
+	# MissionPresentation per-entity ADM sweep. Stop/Restart replaces the live AI rows
 	# with that baseline at the same count, so a count-only late-spawn resolver
 	# must explicitly repopulate the restored rows.
 	var md := MissionData.new()
@@ -2153,7 +2153,7 @@ func test_restart_rebinds_baseline_player_to_own_adm() -> void:
 	assert_eq(sim.get_local_player_anim_key(), "anim_idle",
 			"US01 lacks the requested gait and resolves through its own idle clip")
 
-	sim.restart()
+	sim.reset_session()
 	assert_eq(String(sim.get_entity_debug(player_ai_index).get("adm_name", "")),
 			"US01.adm", "restart immediately repopulates the restored baseline row")
 	sim.set_player_input(true, false, false, false, false, false, false)
@@ -2164,7 +2164,7 @@ func test_restart_rebinds_baseline_player_to_own_adm() -> void:
 
 
 func test_late_spawn_player_resolves_own_adm_before_configured_usegun_pose() -> void:
-	# MissionRuntime resolves per-entity ADMs once after the host player spawn. A
+	# MissionPresentation resolves per-entity ADMs once after the host player spawn. A
 	# joiner's local L and host-admitted remote players spawn later; they must still
 	# receive US01 rather than retaining the default E_STAND/soldier map. Otherwise
 	# B50 phrase_set 4 cannot select anim_emplaced_5 and silently uses the generic
@@ -3119,7 +3119,7 @@ func test_local_usegun_switches_viewmodel_and_borrows_parent_weapon_slot() -> vo
 			mounted_clip_after,
 			"the emplacement keeps its own clip state while nobody is attached")
 
-	sim.restart()
+	sim.reset_session()
 	var restart_event: Dictionary = {}
 	for raw in sim.drain_local_player_weapon_events():
 		var event: Dictionary = raw
@@ -3470,12 +3470,12 @@ func test_foliage_mask_anchors_ignore_standing_npcs() -> void:
 	sim.free()
 
 
-func test_transport_play_flag() -> void:
+func test_transport_uses_session_state() -> void:
 	var sim := Simulation.new()
 	sim.build_demo_mission()
 	assert_false(sim.is_playing(), "starts paused")
-	sim.set_playing(true)
-	assert_true(sim.is_playing(), "play flag toggles")
+	assert_true(sim.resume_session())
+	assert_true(sim.is_playing(), "resume enters the Running session state")
 	sim.free()
 
 func test_bms_event_fires_through_binding() -> void:
@@ -3518,7 +3518,7 @@ func test_logic_tick_advances_per_step_and_rewinds_on_restart() -> void:
 	sim.step()
 	sim.step()
 	assert_eq(sim.get_logic_tick(), t0 + 3)
-	sim.restart()
+	sim.reset_session()
 	assert_eq(sim.get_logic_tick(), t0, "Stop rewinds the clock to the play-start baseline")
 	sim.free()
 
@@ -4259,7 +4259,7 @@ func test_listen_snapshot_attachment_follows_animated_userpoint() -> void:
 	assert_true(retired,
 			"decoded zero-health carrier retires the synthetic child subtree")
 
-	sim.restart()
+	sim.reset_session()
 	snapshot = sim.get_present_snapshot()
 	var restored := false
 	for record in range(snapshot.size() / stride):
@@ -4690,7 +4690,7 @@ func test_restart_re_resolves_the_restored_collision_identity() -> void:
 			"has_collision_instance", false)),
 			"the replacement local occupant receives the cached graphic")
 
-	sim.restart()
+	sim.reset_session()
 	var restored := sim.get_destruction_debug(bms_id)
 	assert_true(bool(restored.get("has_collision_instance", false)),
 			"restart rebinds the baseline before any F3 or round demand query")

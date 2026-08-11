@@ -1,10 +1,8 @@
-// Simulation — the game-frame binding (ADR 0033 R1). The loop shape, the
-// per-tick leg order, and the post-batch frame-leg order are
-// frame::FrameDriver's (engine/runtime/frame); this TU installs the shell's
-// device legs as hooks, supplies step/logic-tick/effects natively, and reads
-// the perf spans back for the probe/F3 seam.
+// Simulation's first-class Godot adapter to the portable MissionSession.
+// Lifecycle, input deposit, fixed cadence, catch-up, and cancellation stay in
+// engine/net/npruntime. Godot supplies one synchronous typed tick sink so its
+// presentation devices consume a tick before the next catch-up tick runs.
 #include "simulation/nova_simulation_internal.h"
-#include <godot_cpp/variant/utility_functions.hpp>
 
 #include <godot_cpp/classes/time.hpp>
 
@@ -12,192 +10,222 @@ using namespace novasim;
 
 namespace {
 
-// Box a shell Callable as a niladic hook; an invalid Callable is an absent leg.
-std::function<void()> leg(const Callable &p_cb) {
-	if (!p_cb.is_valid()) {
-		return {};
-	}
-	return [p_cb]() { p_cb.call(); };
-}
-
-std::function<void(int32_t)> leg_int(const Callable &p_cb) {
-	if (!p_cb.is_valid()) {
-		return {};
-	}
-	return [p_cb](int32_t v) { p_cb.call(v); };
+Ref<MissionFrameOutcome> godot_outcome(
+		const opennova::np::FrameOutcome &p_native) {
+	Ref<MissionFrameOutcome> out;
+	out.instantiate();
+	out->assign(p_native);
+	return out;
 }
 
 } // namespace
 
-namespace {
+opennova::np::MissionSessionRole Simulation::configured_session_role() const {
+	if (joiner_) return opennova::np::MissionSessionRole::Joiner;
+	if (host_listen_) {
+		return host_serve_and_play_
+				? opennova::np::MissionSessionRole::ListenHost
+				: opennova::np::MissionSessionRole::DedicatedHost;
+	}
+	return opennova::np::MissionSessionRole::SinglePlayer;
+}
 
-// Install-time leg-contract wiring: every named leg must exist on the
-// registrant — a missing one rejects the whole install (fail loudly; no
-// fallback path).
-bool wire_leg_contract(Object *p_owner, const char *const *p_names, int p_count,
-		Callable *const *p_slots) {
-	for (int i = 0; i < p_count; ++i) {
-		if (!p_owner->has_method(StringName(p_names[i]))) {
-			UtilityFunctions::push_error(String("frame leg owner ") +
-					p_owner->get_class() + " is missing leg " + p_names[i] +
-					"; install rejected");
+bool Simulation::begin_session_load() {
+	using State = opennova::np::MissionSessionState;
+	const State state = mission_session_.state();
+	// A pre-connected joiner deliberately carries its live socket into load.
+	// Every other prior session, including Failed, closes its concrete target
+	// before a replacement world is installed.
+	if (state != State::Unloaded && state != State::Connecting) {
+		(void)mission_session_.close();
+	}
+	if (mission_session_.state() != State::Connecting) {
+		const opennova::np::TransitionResult role =
+				mission_session_.configure_role(configured_session_role());
+		if (role.code != opennova::np::TransitionCode::Applied &&
+				role.code != opennova::np::TransitionCode::NoOp) {
 			return false;
 		}
 	}
-	for (int i = 0; i < p_count; ++i) {
-		*p_slots[i] = Callable(p_owner, StringName(p_names[i]));
+	return mission_session_.begin_load().applied();
+}
+
+void Simulation::complete_session_load() {
+	if (mission_session_.state() !=
+			opennova::np::MissionSessionState::Loading) return;
+	if (!mission_session_.complete_load().applied()) return;
+	// Direct/local simulations historically start paused. Live GameFramePipeline
+	// resumes them after presentation setup; network roles must keep pumping.
+	if (mission_session_.role() ==
+			opennova::np::MissionSessionRole::SinglePlayer) {
+		(void)mission_session_.pause();
 	}
+}
+
+void Simulation::fail_session_load(const char *p_message) {
+	world_installed_ = false;
+	(void)mission_session_.fail({opennova::np::SessionErrorCode::LoadFailed,
+			p_message != nullptr ? p_message : "mission load failed"});
+}
+
+bool Simulation::is_loaded() const {
+	if (!world_installed_) return false;
+	const opennova::np::MissionSessionState state = mission_session_.state();
+	return state == opennova::np::MissionSessionState::Running ||
+			state == opennova::np::MissionSessionState::Paused;
+}
+
+bool Simulation::pause_session() {
+	const opennova::np::TransitionResult out = mission_session_.pause();
+	return out.applied() || out.code == opennova::np::TransitionCode::NoOp;
+}
+
+bool Simulation::resume_session() {
+	const opennova::np::TransitionResult out = mission_session_.resume();
+	return out.applied() || out.code == opennova::np::TransitionCode::NoOp;
+}
+
+bool Simulation::reset_session() {
+	const opennova::np::TransitionResult out =
+			mission_session_.reset_to_baseline();
+	return out.applied();
+}
+
+void Simulation::fail_session(const String &p_reason) {
+	const CharString reason = p_reason.utf8();
+	(void)mission_session_.fail({opennova::np::SessionErrorCode::SessionLost,
+			std::string(reason.get_data(), static_cast<size_t>(reason.length()))});
+}
+
+void Simulation::close_session() {
+	(void)mission_session_.close();
+}
+
+void Simulation::close_mission() {
+	leave_net_session();
+}
+
+bool Simulation::reset_mission_to_baseline(
+		opennova::np::SessionError &r_error) {
+	if (!world_installed_ || !have_baseline_) {
+		r_error = {opennova::np::SessionErrorCode::TickFailed,
+				"mission baseline is unavailable"};
+		return false;
+	}
+	restore_world_baseline();
 	return true;
 }
 
-} // namespace
+opennova::np::TickOutcome Simulation::advance_mission_tick(
+		const opennova::np::TickInput &p_input) {
+	const opennova::world::PlayerInput &movement = p_input.player.movement;
+	set_player_input(movement.forward, movement.back, movement.left,
+			movement.right, movement.lean_left, movement.lean_right,
+			movement.jump);
+	if (p_input.player.look_delta_x != 0.0f ||
+			p_input.player.look_delta_y != 0.0f) {
+		add_local_player_look(p_input.player.look_delta_x,
+				p_input.player.look_delta_y);
+	}
+	set_local_player_weapon_input(
+			(p_input.player.held_action_bits & MissionFrameInput::HELD_FIRE) != 0,
+			(p_input.player.pressed_action_bits &
+					MissionFrameInput::PRESSED_FIRE) != 0,
+			(p_input.player.pressed_action_bits &
+					MissionFrameInput::PRESSED_RELOAD) != 0);
 
-void Simulation::set_frame_shell(Object *p_shell,
-		const Callable &p_listener) {
-	if (p_shell == nullptr) {
-		frame_listener_cb_ = Callable();
-		frame_begin_effect_cb_ = Callable();
-		frame_sync_fixed_cb_ = Callable();
-		frame_effects_cb_ = Callable();
-		frame_fixed_done_cb_ = Callable();
-		frame_present_rows_cb_ = Callable();
-		frame_present_frame_cb_ = Callable();
-		return;
+	const int64_t sim_start = Time::get_singleton()->get_ticks_usec();
+	const bool did_tick = advance_world_tick();
+	frame_sim_us_ += Time::get_singleton()->get_ticks_usec() - sim_start;
+	frame_net_us_ += static_cast<int64_t>(get_last_net_tick_us());
+	if (!did_tick) return {};
+	if (is_session_lost()) {
+		return {opennova::np::TickStatus::SessionLost,
+				static_cast<int32_t>(get_logic_tick()),
+				{opennova::np::SessionErrorCode::SessionLost,
+						std::string(get_session_loss_reason().utf8().get_data())}};
 	}
-	static const char *const kNames[] = {
-		"_begin_present_effect_tick",
-		"_frame_sync_fixed_leg",
-		"_frame_effects_drained",
-		"_frame_fixed_tick_completed",
-		"_frame_present_rows_leg",
-		"_frame_present_frame_leg",
-	};
-	Callable *const slots[] = {
-		&frame_begin_effect_cb_,
-		&frame_sync_fixed_cb_,
-		&frame_effects_cb_,
-		&frame_fixed_done_cb_,
-		&frame_present_rows_cb_,
-		&frame_present_frame_cb_,
-	};
-	if (!wire_leg_contract(p_shell, kNames, 6, slots)) {
-		return;
+
+	opennova::np::TickOutcome tick;
+	tick.status = opennova::np::TickStatus::Ran;
+	tick.logic_tick = static_cast<int32_t>(get_logic_tick());
+	if (session_tick_sink_.is_valid()) {
+		Ref<MissionTickOutcome> value;
+		value.instantiate();
+		value->assign(tick);
+		const int64_t sink_start = Time::get_singleton()->get_ticks_usec();
+		const Variant accepted = session_tick_sink_.call(value);
+		frame_sink_us_ += Time::get_singleton()->get_ticks_usec() - sink_start;
+		if (accepted.get_type() == Variant::BOOL && !static_cast<bool>(accepted)) {
+			tick.status = opennova::np::TickStatus::SessionLost;
+			tick.error = {opennova::np::SessionErrorCode::SessionLost,
+					"Godot frame pipeline cancelled the tick batch"};
+		}
 	}
-	frame_listener_cb_ = p_listener;
+	return tick;
 }
 
-void Simulation::set_frame_world(Object *p_world) {
-	if (p_world == nullptr) {
-		frame_terrain_cb_ = Callable();
-		frame_foliage_cb_ = Callable();
-		frame_net_drive_cb_ = Callable();
-		frame_weather_cb_ = Callable();
-		frame_blink_cb_ = Callable();
-		frame_occlusion_cb_ = Callable();
-		frame_iris_cb_ = Callable();
-		frame_audio_cb_ = Callable();
-		return;
-	}
-	static const char *const kNames[] = {
-		"_frame_terrain_leg",
-		"_frame_foliage_leg",
-		"_frame_net_drive_leg",
-		"_frame_weather_leg",
-		"_frame_blink_leg",
-		"_frame_occlusion_leg",
-		"_frame_iris_leg",
-		"_frame_audio_leg",
-	};
-	Callable *const slots[] = {
-		&frame_terrain_cb_,
-		&frame_foliage_cb_,
-		&frame_net_drive_cb_,
-		&frame_weather_cb_,
-		&frame_blink_cb_,
-		&frame_occlusion_cb_,
-		&frame_iris_cb_,
-		&frame_audio_cb_,
-	};
-	wire_leg_contract(p_world, kNames, 8, slots);
-}
-
-opennova::frame::FrameHooks Simulation::build_frame_hooks() {
-	opennova::frame::FrameHooks hooks;
-	hooks.terrain = leg(frame_terrain_cb_);
-	hooks.foliage = leg(frame_foliage_cb_);
-	// The listener stamp: read the shell's camera listener and stamp the
-	// sim's fire-sound gate; a role with no listener (dedicated) never stamps
-	// — the witnessed peer gate [orig: @ 0x528e57; world/fire_sound.h].
-	if (frame_listener_cb_.is_valid()) {
-		const Callable listener = frame_listener_cb_;
-		hooks.stamp_listener = [this, listener]() {
-			const Variant v = listener.call();
-			if (v.get_type() == Variant::VECTOR3) {
-				const Vector3 pos = v;
-				if (pos.is_finite()) {
-					set_sound_listener(pos);
-				}
-			}
-		};
-	}
-	hooks.step = [this]() {
-		const bool did_tick = step();
-		frame_net_us_ += get_last_net_tick_us();
-		return did_tick;
-	};
-	hooks.logic_tick = [this]() { return static_cast<int32_t>(get_logic_tick()); };
-	hooks.begin_effect_tick = leg_int(frame_begin_effect_cb_);
-	hooks.sync_fixed_effects = leg(frame_sync_fixed_cb_);
-	// The drain is native; the shell leg only receives a non-empty batch (the
-	// old driver's emit-if-any behavior, one Array boundary per tick).
-	if (frame_effects_cb_.is_valid()) {
-		const Callable effects = frame_effects_cb_;
-		hooks.drain_effects = [this, effects]() {
-			const Array drained = drain_effects();
-			if (!drained.is_empty()) {
-				effects.call(drained);
-			}
-		};
-	} else {
-		hooks.drain_effects = [this]() { (void)drain_effects(); };
-	}
-	hooks.fixed_tick_completed = leg_int(frame_fixed_done_cb_);
-	hooks.present_rows = leg(frame_present_rows_cb_);
-	hooks.present_frame = leg(frame_present_frame_cb_);
-	hooks.net_drive = leg(frame_net_drive_cb_);
-	hooks.weather = leg(frame_weather_cb_);
-	hooks.blink_gates = leg(frame_blink_cb_);
-	hooks.occlusion_frame = leg(frame_occlusion_cb_);
-	hooks.iris_samples = leg(frame_iris_cb_);
-	hooks.audio = leg_int(frame_audio_cb_);
-	return hooks;
-}
-
-int Simulation::frame_realtime(double p_delta) {
+Ref<MissionFrameOutcome> Simulation::advance_session_frame(
+		const Ref<MissionFrameInput> &p_input,
+		const Callable &p_tick_sink) {
 	frame_net_us_ = 0;
-	frame_driver_.set_clock([]() {
-		return static_cast<int64_t>(Time::get_singleton()->get_ticks_usec());
-	});
-	return frame_driver_.run_frame(p_delta, build_frame_hooks());
+	frame_sim_us_ = 0;
+	frame_sink_us_ = 0;
+	opennova::np::FrameInput input;
+	if (p_input.is_valid()) input = p_input->native_value();
+	if (input.camera.listener_valid) {
+		set_sound_listener(Vector3(input.camera.position[0],
+				input.camera.position[1], input.camera.position[2]));
+	}
+	session_tick_sink_ = p_tick_sink;
+	const opennova::np::FrameOutcome outcome = mission_session_.advance(input);
+	session_tick_sink_ = Callable();
+	return godot_outcome(outcome);
 }
 
-bool Simulation::frame_single() {
+Ref<MissionFrameOutcome> Simulation::step_session_frame(
+		const Ref<MissionFrameInput> &p_input,
+		const Callable &p_tick_sink) {
 	frame_net_us_ = 0;
-	frame_driver_.set_clock([]() {
-		return static_cast<int64_t>(Time::get_singleton()->get_ticks_usec());
-	});
-	return frame_driver_.run_single(build_frame_hooks());
+	frame_sim_us_ = 0;
+	frame_sink_us_ = 0;
+	opennova::np::FrameInput input;
+	if (p_input.is_valid()) input = p_input->native_value();
+	if (input.camera.listener_valid) {
+		set_sound_listener(Vector3(input.camera.position[0],
+				input.camera.position[1], input.camera.position[2]));
+	}
+	session_tick_sink_ = p_tick_sink;
+	const opennova::np::FrameOutcome outcome = mission_session_.step_once(input);
+	session_tick_sink_ = Callable();
+	return godot_outcome(outcome);
 }
 
-Dictionary Simulation::get_frame_perf() const {
-	const opennova::frame::FramePerf &perf = frame_driver_.perf();
+bool Simulation::step() {
+	// Focused probes deposit input directly on Simulation before asking for one
+	// deterministic tick. Preserve that public seam without adding a second tick
+	// path: snapshot the concrete target's held/edge latches into the same typed
+	// frame value MissionSession consumes. Direct look input has already updated
+	// player_input_'s composed heading/pitch, so it must not be replayed as a
+	// second pixel delta here.
+	opennova::np::FrameInput input;
+	input.player.movement = player_input_;
+	input.player.held_action_bits = local_weapon_.fire_held
+			? MissionFrameInput::HELD_FIRE : 0u;
+	input.player.pressed_action_bits =
+			(local_weapon_.fire_pressed ? MissionFrameInput::PRESSED_FIRE : 0u) |
+			(local_weapon_.reload_pressed ? MissionFrameInput::PRESSED_RELOAD : 0u);
+	return mission_session_.drive_one(input).ticks_run() == 1;
+}
+
+Dictionary Simulation::get_session_perf() const {
+	const opennova::np::FramePerf &perf = mission_session_.last_perf();
 	Dictionary out;
-	out["tick_us"] = static_cast<int64_t>(perf.tick_us);
-	out["sim_us"] = static_cast<int64_t>(perf.sim_us);
-	out["present_us"] = static_cast<int64_t>(perf.present_us);
-	out["effects_us"] = static_cast<int64_t>(perf.effects_us);
+	out["frame_us"] = perf.frame_us;
+	out["tick_us"] = perf.tick_us;
+	out["sim_us"] = frame_sim_us_;
+	out["sink_us"] = frame_sink_us_;
 	out["net_us"] = frame_net_us_;
-	out["did_tick"] = perf.did_tick;
-	out["ticks"] = static_cast<int64_t>(perf.ticks);
+	out["ticks"] = perf.ticks;
 	return out;
 }

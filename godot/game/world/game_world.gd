@@ -9,7 +9,7 @@ extends Node3D
 # in game_world.tscn so the game shell and focused engine tests can instance it;
 # production play mounts the selected runtime resource directory.
 #
-# HOST CONTRACT: a shell or focused test instances game_world.tscn, optionally injects a root,
+# EMBEDDER CONTRACT: a shell or focused test instances game_world.tscn, optionally injects a root,
 # calls one load_* entry, then
 #   * drives tick(camera_position) once per frame while playing (foliage ->
 #     runtime logic+present -> audio, in that order; pausing = not ticking),
@@ -19,8 +19,9 @@ extends Node3D
 #     audio, env overrides) before loading another mission or leaving.
 
 const VegAssets := preload("res://game/terrain/veg_assets.gd")
+const GameFramePipelineScript := preload("res://game/world/game_frame_pipeline.gd")
 const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
-const MissionRuntime := preload("res://game/world/mission_runtime.gd")
+const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 const NovaDebugViewStatus := preload(
 		"res://game/debug/nova_debug_view_status.gd")
 
@@ -57,7 +58,7 @@ signal session_lost(reason: String)
 # from inside the model-load loops [orig: Game_StartMission's
 # LoadingScreen_UpdateAndPresent calls @ 0x52498f..0x525d29].
 signal load_progress(percent: int)
-# Host-presentation side effects drained from the mission runtime's EffectLog each tick
+# Presentation side effects drained from the mission runtime's EffectLog each tick
 # (kind: "text"/"debug_text"/"win"/"subgoal_*"/"show_waypoints"/"set_light"/"dialog").
 # Player text is consumed by the HUD; debug_text remains a distinct unrouted channel.
 # "dialog" is also routed straight to mission audio below.
@@ -90,20 +91,21 @@ var _join_wire_assets_pending := false
 var _join_wire_til_applied := false
 var _join_wire_assets_failed := false
 var _join_wire_asset_failure_emitted := false
-var _loaded: bool = false
+var _world_ready := false
 var _loaded_mission: MissionData
 # The BMS argument that completed the active mission load. This is runtime
 # state, deliberately separate from mission_file (the exported boot option).
 var _loaded_mission_file: String = ""
-var _runtime: MissionRuntime = null  # the one mission runtime driver (sim + present pass + index), DIVIDED cadence
+var _runtime: MissionPresentation = null  # the one mission runtime driver (sim + present pass + index), DIVIDED cadence
 var _panm_clock := PanmClock.new()
+var _frame_pipeline: GameFramePipeline
 var _mission_stats: Dictionary = {}
 var _placer  # MissionObjectPlacer (kept so mission audio reuses its item database)
 var _weapon_db: WeaponDatabase = null  # weapon.def, lazy per mounted root (FP viewmodel)
 var _local_weapon_dict := {}  # the resolved weapon's raw dict (FSM setup transport, ADR 0017 edge)
 var _mission_audio: MissionAudio
 var _effect_world: EffectWorld  # the runtime .ptl effect world (render-only, per mission)
-# Host-owned first-person presentation seam. MissionRuntime invokes GameWorld
+# GameWorld-owned first-person presentation seam. MissionPresentation invokes GameWorld
 # once per completed fixed tick; this callback consumes that tick's weapon
 # events before EffectWorld advances, matching retail's action -> particle-pass
 # order without coupling the simulation to LocalPlayerPresenter Nodes.
@@ -122,7 +124,7 @@ var _occlusion: OcclusionFramePass
 # entries as an argument. [orig: Bms_AttribFlags & 0x10 @ 0x5ca1c8-0x5ca1cd]
 var _mission_forces_indoors := false
 var _idle_frame_clear_color := Color.BLACK
-# A host-injected resource root (main_game hands its boot mount over; tests
+# A shell-injected resource root (main_game hands its boot mount over; tests
 # hand fixture roots). When set, the load_*
 # entries skip the settings lookup + their own mount and resolve through it; the
 # game path (no injection) still mounts from the persisted resource directory.
@@ -139,12 +141,12 @@ var _net_drive: NetSessionDrive
 # internal child node on the same pattern (see debug_view_set.gd). The views
 # it builds attach to THIS world node — hosts and tests pin them as
 # world-relative lookups — and the moved public toggles keep one-line
-# delegates below so the host-facing surface never moved.
+# delegates below so the shell-facing surface never moved.
 var _debug_views: DebugViewSet
 # The per-item ITEMS.DEF effect director (item_effect_director.gd): the
 # attached/static/controller item emitters, the effect-anchor resolvers, and
 # the retail master particle switch, on the same internal pattern (plain
-# RefCounted — it owns no Nodes). Public delegates below keep the host-facing
+# RefCounted — it owns no Nodes). Public delegates below keep the shell-facing
 # names on GameWorld. ALSO the sanctioned test-injection seam: like _runtime,
 # harnesses may swap in a director double (see game_world_test.gd).
 var _item_fx: ItemEffectDirector
@@ -240,6 +242,9 @@ func _init() -> void:
 
 
 func _ready() -> void:
+	set_process(false)
+	_frame_pipeline = GameFramePipelineScript.new()
+	_frame_pipeline.setup(self)
 	if _clear_color != null and _clear_color.environment != null:
 		_idle_frame_clear_color = _clear_color.environment.background_color
 	if _terrain != null:
@@ -260,7 +265,7 @@ func _ready() -> void:
 	add_child(_static_sun_shadow)
 	_static_sun_shadow.set_environment_node(_env)
 	# Both retained render systems start dormant until a successful load chooses
-	# their host mode. In particular, do not let an authored scene height make
+	# their runtime mode. In particular, do not let an authored scene height make
 	# initial/menu frames look underwater.
 	_set_water_world_rendering_enabled(false)
 	# Freeze the retained weather node until a load selects autonomous bare/net
@@ -274,7 +279,7 @@ func _notification(what: int) -> void:
 		return
 	if what != NOTIFICATION_VISIBILITY_CHANGED or not is_node_ready():
 		return
-	if _loaded and is_visible_in_tree():
+	if _world_ready and is_visible_in_tree():
 		_clear_env_generation = -1
 		_update_frame_clear_color()
 	else:
@@ -309,7 +314,7 @@ func load_world(dir: String = "") -> int:
 		load_failed.emit("failed to load %s" % terrain_file)
 		return ERR_CANT_OPEN
 
-	_loaded = true
+	_world_ready = true
 	_prepare_autonomous_weather()
 	_set_water_world_rendering_enabled(true)
 	_debug_views.on_loaded()
@@ -500,7 +505,7 @@ func _load_mission_internal(mission: MissionData, bms_name: String,
 		return runtime_error
 	# Retail freezes its non-foliage loaded-.3DI page once, after the entity,
 	# celestial, HUD, and renderer resource loads and before the loading screen
-	# drops. MissionRuntime.setup has now resolved the placed/wire mission models
+	# drops. MissionPresentation.setup has now resolved the placed/wire mission models
 	# (including collision/husk definitions); late network spawns must not change
 	# this page. [orig: sub_5B3A80 @0x5871CF from Game_StartMission @0x525A6E]
 	var challenge_sim: Simulation = _runtime.get_sim()
@@ -528,7 +533,7 @@ func _load_mission_internal(mission: MissionData, bms_name: String,
 	load_progress.emit(95)
 	timeline.finish()
 	_loaded_mission_file = bms_name
-	_loaded = true
+	_world_ready = true
 	_set_water_world_rendering_enabled(true)
 	load_progress.emit(100)
 	_debug_views.on_loaded()
@@ -567,7 +572,7 @@ func _place_mission_objects(mission: MissionData, timeline: PerfTimeline = null)
 	# A wire-header join deliberately has no authored body records. The load stream
 	# creates native pools 2/1/3 from S2C 0x10/0x0D/0x20 at exact handles; remote
 	# pool-0 organics arrive in 0x0C and every live pose advances through 0x0A.
-	# MissionRuntime presents those decoded rows directly instead of deferring them
+	# MissionPresentation presents those decoded rows directly instead of deferring them
 	# onto nonexistent local BMS placements (D-NET-194). Explicit-mission/debug
 	# joins still use their complete document.
 	if timeline != null:
@@ -615,7 +620,7 @@ func get_weapon_database() -> WeaponDatabase:
 	return _weapon_db if _weapon_db.is_loaded() else null
 
 
-func get_runtime() -> MissionRuntime:
+func get_runtime() -> MissionPresentation:
 	return _runtime
 
 
@@ -623,13 +628,13 @@ func get_mission_stats() -> Dictionary:
 	return _mission_stats
 
 
-## Tear down a loaded world so the host can return to the menu (or load a
+## Tear down a loaded world so the shell can return to the menu (or load a
 ## different mission) without the previous world lingering. Frees the dynamically
 ## placed MissionObjects subtree and resets the load state; the terrain /
 ## environment scene nodes are kept in place and rebuilt by the next load_*().
 ## Safe to call when nothing is loaded.
 func unload() -> void:
-	_loaded = false
+	_world_ready = false
 	_join_wire_assets_pending = false
 	_join_wire_til_applied = false
 	_join_wire_assets_failed = false
@@ -672,7 +677,7 @@ func unload() -> void:
 	_loaded_mission = null
 	_loaded_mission_file = ""
 	if _runtime != null:
-		_runtime.queue_free()  # frees its off-tree sim too (MissionRuntime._exit_tree)
+		_runtime.queue_free()  # frees its off-tree sim too (MissionPresentation._exit_tree)
 	_runtime = null
 	if _effect_world != null:
 		_effect_world.queue_free()
@@ -920,7 +925,7 @@ func settle_join_wire_assets() -> bool:
 ## deferred-spawn queue drains behind the loading/DEATH hold. Trivially true
 ## with no runtime, a harness stub runtime, or no wire presenter.
 func is_join_wire_present_drained() -> bool:
-	var runtime := _runtime as MissionRuntime
+	var runtime := _runtime as MissionPresentation
 	return runtime == null or runtime.join_wire_present_pending() == 0
 
 
@@ -1019,7 +1024,7 @@ func get_resource_root() -> ResourceRoot:
 
 
 func is_loaded() -> bool:
-	return _loaded
+	return _world_ready
 
 
 func get_current_frame_clear_color() -> Color:
@@ -1034,10 +1039,10 @@ func _sample_panm_clock() -> void:
 		_runtime.set_presentation_time_ms(_panm_clock.time_ms)
 
 
-## The host per-frame order, faithful to the original main loop's server-tick-then-client-render:
-## foliage coverage around the viewer, then the mission runtime (MissionRuntime.tick advances the
+## The Godot per-frame order, faithful to the original main loop's server-tick-then-client-render:
+## foliage coverage around the viewer, then the mission runtime (MissionPresentation.tick advances the
 ## logic at the 62-frame cadence, presents entity state onto the placed nodes, and drains side
-## effects), then the audio render pass. Effects come back through MissionRuntime.effects_drained.
+## effects), then the audio render pass. Effects come back through MissionPresentation.effects_drained.
 var _perf_probe_enabled := false
 var _perf_probe_spans: Dictionary = {}
 var _perf_probe_skip_occl := false
@@ -1054,7 +1059,7 @@ var _stats_water_vp_ref: WeakRef = null
 
 
 ## The game shell hands its FrameStatsBoard here; the world re-hands it to
-## every MissionRuntime it creates and feeds its own tick legs.
+## every MissionPresentation it creates and feeds its own tick legs.
 func set_frame_stats_board(board: FrameStatsBoard) -> void:
 	if board == _frame_stats:
 		return
@@ -1098,13 +1103,9 @@ func set_perf_probe_enabled(enabled: bool) -> void:
 	_sync_runtime_profiling()
 
 
-# --- The engine frame (ADR 0033 R1/R2) ---------------------------------------
-# The frame legs below are the world-host device hooks the engine FrameDriver
-# invokes in its fixed order (terrain then foliage before the batch; net-drive,
-# weather, blink, occlusion, iris, audio after it). tick() stashes the
-# per-frame camera state these legs read, then drives ONE engine frame through
-# the runtime; the legacy explicit sequence survives only for paused frames and
-# the duck-typed test runtimes that implement tick() alone.
+# --- Godot frame device legs (ADR 0035) --------------------------------------
+# GameFramePipeline invokes these concrete renderer/audio/environment operations in
+# one visible order around MissionSession.advance().
 
 var _frame_camera_pos := Vector3()
 # Untyped on purpose: a Transform3D-typed member on this class crashes the
@@ -1116,24 +1117,22 @@ var _frame_probe_enabled := false
 var _frame_stats_on := false
 var _frame_timing := false
 var _frame_skip_occlusion := false
-# A failed join-wire asset apply aborts the frame mid-legs (the old early
-# return); later legs see this and no-op.
-var _frame_aborted := false
+var _device_frame_start_us := 0
 
 
-func _frame_terrain_leg() -> void:
+func render_terrain_frame() -> void:
 	# The engine compiles the terrain patch packet for this frame's camera and
 	# Terrain applies it (ADR 0033 R2). Runs before the foliage leg, whose
 	# dispatcher consumes the packet's fresh detail-cell handoff — the old
 	# self-driven _process walk left foliage reading a stale cell list.
-	if _loaded and _terrain != null:
+	if _world_ready and _terrain != null:
 		_terrain.render_frame()
 
 
-func _frame_foliage_leg() -> void:
+func render_foliage_frame() -> void:
 	var foliage_start := Time.get_ticks_usec()
 	_perf_foliage_us = 0
-	if _loaded and _dispatcher != null:
+	if _world_ready and _dispatcher != null:
 		# The silhouette tier is the hide-in-grass mechanic: retail's sector-entity
 		# walk generates model foliage only around CROUCHED/PRONE infantry standing
 		# on terrain — never around placed objects, whose MoveOrder stays 0
@@ -1149,28 +1148,26 @@ func _frame_foliage_leg() -> void:
 		_perf_foliage_us = Time.get_ticks_usec() - foliage_start
 
 
-func _frame_net_drive_leg() -> void:
-	if _frame_aborted or not (_loaded and _runtime != null and _runtime.is_playing()):
-		return
+func drive_network_frame() -> bool:
+	if not (_world_ready and _runtime != null and _runtime.is_playing()):
+		return true
 	if _join_wire_assets_pending and not _apply_join_wire_til_if_ready():
 		report_join_wire_asset_failure(
 				"join: host sent an incomplete or invalid S2C 0x45 terrain stream")
-		_frame_aborted = true
-		return
+		return false
 	# Net-session edges (admission/deploy/loss) + the gate's occupancy report.
 	_net_drive.observe_tick(_runtime)
 	_apply_join_network_environment_update()
+	return _runtime != null
 
 
-func _frame_weather_leg() -> void:
-	if _frame_aborted:
-		return
+func advance_weather_frame() -> void:
 	# Weather/TOD is a distinct 62 Hz fixed clock; the mission simulation
 	# remains 62.5 Hz. Each weather quantum advances integer fixed24 time, which
 	# recomputes TOD targets, then ticks every weather block exactly once
 	# [orig: Environment_UpdateWeatherTick @ 0x57e9b0].
 	var probe_phase_start := Time.get_ticks_usec() if _frame_timing else 0
-	if (_loaded and _runtime != null and _runtime.is_playing()
+	if (_world_ready and _runtime != null and _runtime.is_playing()
 			and _env != null):
 		var weather := get_node_or_null("Weather") as Weather
 		if weather != null:
@@ -1185,13 +1182,11 @@ func _frame_weather_leg() -> void:
 			_frame_stats.add(FrameStatsBoard.WORLD_WEATHER, weather_us)
 
 
-func _frame_blink_leg() -> void:
-	if _frame_aborted:
-		return
+func apply_blink_frame() -> void:
 	# Blink flags only change on sim ticks; the driver invokes this leg only
 	# after a batch that ran at least one.
 	var probe_phase_start := Time.get_ticks_usec() if _frame_timing else 0
-	if _loaded:
+	if _world_ready:
 		_occlusion.apply_blink_gates(_mission_forces_indoors)
 	if _frame_timing:
 		var blink_us := Time.get_ticks_usec() - probe_phase_start
@@ -1201,16 +1196,12 @@ func _frame_blink_leg() -> void:
 			_frame_stats.add(FrameStatsBoard.WORLD_BLINK, blink_us)
 
 
-func _frame_occlusion_leg() -> void:
+func apply_occlusion_frame() -> void:
 	# The render-occlusion frame is camera-driven: it runs every render frame
 	# (retail collects visible entities per scene render, not per sim tick).
 	# [orig: Terrain_CollectVisibleEntities @ 0x5c9160 from
 	# Terrain_RenderSceneWithReflection @ 0x5c94f0]
-	if _frame_aborted:
-		if _frame_probe_enabled:
-			_perf_probe_spans["occl_frame"] = 0
-		return
-	if _loaded:
+	if _world_ready:
 		var probe_phase_start := Time.get_ticks_usec() if _frame_timing else 0
 		if not _frame_skip_occlusion:
 			_occlusion.apply_frame(_frame_camera_xform, _mission_forces_indoors)
@@ -1221,12 +1212,8 @@ func _frame_occlusion_leg() -> void:
 		_perf_probe_spans["occl_frame"] = 0
 
 
-func _frame_iris_leg() -> void:
-	if _frame_aborted:
-		if _frame_probe_enabled:
-			_perf_probe_spans["iris"] = 0
-		return
-	if _loaded:
+func sample_iris_frame() -> void:
+	if _world_ready:
 		var probe_phase_start := Time.get_ticks_usec() if _frame_timing else 0
 		_stamp_iris_samples(_frame_camera_xform)
 		if _frame_timing:
@@ -1239,11 +1226,9 @@ func _frame_iris_leg() -> void:
 		_perf_probe_spans["iris"] = 0
 
 
-func _frame_audio_leg(ticks_run: int) -> void:
-	if _frame_aborted:
-		return
+func mix_audio_frame(ticks_run: int) -> void:
 	var audio_start := Time.get_ticks_usec()
-	if _loaded and _mission_audio != null:
+	if _world_ready and _mission_audio != null:
 		# Ambient soundloop regions read that same clock [orig:
 		# Entity_CalcTimeOfDayRegion @ 0x408110].
 		if _env != null and _env.get("time_of_day") != null:
@@ -1251,7 +1236,7 @@ func _frame_audio_leg(ticks_run: int) -> void:
 		# Marker eval/registration rides the sim's logic-tick clock — the witnessed
 		# pool-2 stagger [orig: Entity_UpdateAllEntities @ 0x4c225a]; the per-frame
 		# call below is only the live-slot mix + voice binds [orig:
-		# SoundEmitter_UpdateAndMixTop8 @ 0x521341]. A host with no ticking runtime
+		# SoundEmitter_UpdateAndMixTop8 @ 0x521341]. A world with no ticking runtime
 		# (editor idle) free-runs the eval clock off render delta instead.
 		if ticks_run > 0 and _runtime != null:
 			var audio_sim := _runtime.get_sim()
@@ -1262,34 +1247,24 @@ func _frame_audio_leg(ticks_run: int) -> void:
 		_perf_audio_us = Time.get_ticks_usec() - audio_start
 
 
-func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta: float = -1.0) -> void:
-	if delta < 0.0:
-		delta = Simulation.tick_dt()  # the engine's fixed logic quantum
+func begin_device_frame(camera_pos: Vector3, camera_xform: Transform3D,
+		delta: float) -> void:
+	_device_frame_start_us = Time.get_ticks_usec()
 	_sample_panm_clock()
 	_frame_camera_pos = camera_pos
 	_frame_camera_xform = camera_xform
 	_frame_delta = delta
 	_frame_probe_enabled = _perf_probe_enabled
 	_frame_stats_on = _frame_stats != null and _frame_stats.is_capture_active()
-	# One shared gate for the per-leg clock reads: the manual A/B probe and the
-	# F3 Stats capture consume the same measurements.
 	_frame_timing = _frame_probe_enabled or _frame_stats_on
 	_frame_skip_occlusion = _frame_probe_enabled and _perf_probe_skip_occl
-	_frame_aborted = false
 	if _frame_probe_enabled:
 		_perf_probe_spans.clear()
-	var tick_start := Time.get_ticks_usec()
-	_last_tick_camera_pos = camera_pos  # the fire present pass's listener (audio-tick source)
+	_last_tick_camera_pos = camera_pos
 	_perf_foliage_us = 0
 	_perf_runtime_us = 0
 	_perf_audio_us = 0
-	# Occlusion no longer restores-then-rehides per frame: the apply leg is
-	# diff-based and the present pass consults the shared occlusion-hidden set,
-	# so steady verdicts leave nodes untouched. Only the A/B seam edges do bulk
-	# work: entering the skip releases every occlusion override (mission
-	# blink/indoors semantics remain authoritative; iris keeps sampling),
-	# leaving it re-arms a full re-emit from the sim's delta baseline.
-	if _frame_probe_enabled and _loaded:
+	if _frame_probe_enabled and _world_ready:
 		if _frame_skip_occlusion != _perf_probe_occlusion_skipped:
 			if _frame_skip_occlusion:
 				_occlusion.enter_probe_skip()
@@ -1298,50 +1273,47 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 		_perf_probe_occlusion_skipped = _frame_skip_occlusion
 	elif _frame_probe_enabled:
 		_perf_probe_occlusion_skipped = false
-	var runtime_ticks := 0
-	# Gate on the runtime transport so MissionRuntime._playing is THE play flag
-	# for the real game: F3 and runtime MCP Pause/Step share this public flag.
-	# _start_runtime calls play(), so normal missions run exactly as before.
-	if _loaded and _runtime != null and _runtime.is_playing():
-		# The live path: ONE engine frame. The FrameDriver banks wall-clock,
-		# runs the 62.5 Hz batch, presents once, and invokes every world leg
-		# above in its fixed order [orig: Game_MainLoop @ 0x52b630].
-		runtime_ticks = int(_runtime.tick_realtime(delta))
-		# A join-wire failure aborts inside the net-drive leg and can tear the
-		# world down synchronously (unload frees _runtime) — bail before
-		# touching it again.
-		if _frame_aborted or _runtime == null:
-			return
-		# The runtime span for the stats board: the sim batch + present cost
-		# (the world legs land their own WORLD_* spans from inside the frame).
+
+
+func finish_device_frame() -> void:
+	_perf_tick_us = Time.get_ticks_usec() - _device_frame_start_us
+	if _runtime != null:
 		var runtime_perf: Dictionary = _runtime.get_perf_counters()
 		_perf_runtime_us = int(runtime_perf.get("sim_us", 0)) \
 				+ int(runtime_perf.get("present_us", 0)) \
 				+ int(runtime_perf.get("effects_us", 0))
-	else:
-		# Paused, unloaded, or a duck-typed test runtime (tick() only): the
-		# legacy explicit sequence in the same leg order.
-		_frame_terrain_leg()
-		_frame_foliage_leg()
-		if _loaded and _runtime != null and _runtime.is_playing():
-			var runtime_start := Time.get_ticks_usec()
-			runtime_ticks = 1 if bool(_runtime.tick()) else 0
-			_perf_runtime_us = Time.get_ticks_usec() - runtime_start
-			_frame_net_drive_leg()
-		_frame_weather_leg()
-		if runtime_ticks > 0:
-			_frame_blink_leg()
-		_frame_occlusion_leg()
-		_frame_iris_leg()
-		_frame_audio_leg(runtime_ticks)
-	if _frame_aborted:
-		return
-	_perf_tick_us = Time.get_ticks_usec() - tick_start
 	if _frame_stats_on:
 		_frame_stats.add(FrameStatsBoard.WORLD_FOLIAGE, _perf_foliage_us)
 		_frame_stats.add(FrameStatsBoard.WORLD_RUNTIME, _perf_runtime_us)
 		_frame_stats.add(FrameStatsBoard.WORLD_AUDIO, _perf_audio_us)
 	_sample_water_render_stats(_frame_stats_on)
+
+
+func render_particle_frame() -> void:
+	if _effect_world != null:
+		_effect_world.render_frame()
+
+
+func update_clear_frame() -> void:
+	if not _world_ready or not is_visible_in_tree():
+		_restore_idle_frame_clear_color()
+	else:
+		_update_frame_clear_color()
+
+
+func session_frame_failed(reason: String) -> void:
+	var message := reason if not reason.is_empty() else "mission session lost"
+	session_lost.emit(message)
+
+
+func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(),
+		delta: float = -1.0, frame_input: MissionFrameInput = null) -> void:
+	if delta < 0.0:
+		delta = Simulation.tick_dt()
+	if _frame_pipeline == null:
+		_frame_pipeline = GameFramePipelineScript.new()
+		_frame_pipeline.setup(self)
+	_frame_pipeline.advance(camera_pos, camera_xform, delta, frame_input)
 
 
 # Water-reflection RTT sampling for the Stats tab: flip measured render time on
@@ -1425,12 +1397,12 @@ func get_fire_present_stats() -> Dictionary:
 
 
 # Destruction-presentation counters (DestructionPresentPass.Stats, typed per
-# ADR 0017; null until a host mission runs with the pass).
+# ADR 0017; null until a loaded mission runs with the pass).
 func get_destruction_present_stats() -> RefCounted:
 	return _runtime.get_destruction_present_stats() if _runtime != null else null
 
 
-## Build a host-managed avatar model for the local player (which has no BMS placement of its
+## Build a GameWorld-managed avatar model for the local player (which has no BMS placement of its
 ## own). The caller (LocalPlayerPresenter) positions it and swaps its visual layer per first/third
 ## person: in first person the body stays renderable on the reflection-only layer, because the
 ## witnessed water mirror re-renders the world scene, local body included
@@ -1495,7 +1467,7 @@ func _prewarm_loaded_model_challenge_definitions() -> void:
 				if not wire_graphic.is_empty():
 					_placer.object_data_for(wire_graphic)
 		# The header-only join learned its entity types from the stream after
-		# MissionRuntime's ordinary mission-body setup. Resolve the model-derived
+		# MissionPresentation's ordinary mission-body setup. Resolve the model-derived
 		# seat/emplacement table and world collision/trait consumers now, before
 		# admission and before the loaded-model challenge page freezes.
 		if _loaded_mission != null and _loaded_mission.is_wire_header_only():
@@ -1534,7 +1506,7 @@ func _prewarm_loaded_model_challenge_definitions() -> void:
 		_placer.object_data_for(arms_name)
 
 
-## Build a host-managed FIRST-PERSON weapon viewmodel for the local player (shown in 1st person; the
+## Build a GameWorld-managed FIRST-PERSON weapon viewmodel for the local player (shown in 1st person; the
 ## inverse of the 3rd-person avatar). Faithful composition: the equipped weapon's FP gun model PLUS
 ## the character arms, sharing one skeleton [orig: Player_RenderFirstPersonViewModel @0x4ded60 draws
 ## the weapon FP model + arms with shared bone matrices]. The models come from the mounted root's
@@ -1557,7 +1529,7 @@ var _viewmodel_weapon_cleared := false
 # later ADM-duration rebake must preserve that slot's action/ammo state.
 var _local_weapon_preserve_slot_state := false
 
-## Armory apply, host side: point the FP viewmodel + action FSM at `weapon_name`.
+## Armory apply, presentation side: point the FP viewmodel + action FSM at `weapon_name`.
 ## Validates against weapon.def; the caller (main_game) drops the old viewmodel so the
 ## per-frame pass rebuilds gun/arms/FSM from the new def [orig: the ACCEPT re-mount,
 ## WeaponLoadout_ApplyFromBuffer @0x565cd0 -> Player_MountWeaponSlot @0x4dfa40].
@@ -1709,7 +1681,7 @@ func build_local_player_viewmodel() -> Node3D:
 		push_warning("GameWorld: FP gun model '%s' failed to load from the resource root" % gun_name)
 	if arms == null and gun == null:
 		# A valid definition with no resolved fpModel is a stable, intentionally
-		# empty presentation epoch. Returning its container prevents the host from
+		# empty presentation epoch. Returning its container prevents the caller from
 		# retrying every frame or substituting a different weapon.
 		if def == null:
 			container.queue_free()
@@ -1781,7 +1753,7 @@ func drain_local_player_weapon_events() -> Array[PlayerWeaponEvent]:
 	return out
 
 
-## Register the host-side presenter for fixed-tick weapon events. The game
+## Register the GameWorld presenter for fixed-tick weapon events. The game
 ## installs LocalPlayerPresenter here; headless/runtime-only hosts leave it
 ## invalid and may drain the typed event queue explicitly.
 func set_local_player_weapon_tick_consumer(consumer: Callable) -> void:
@@ -1820,7 +1792,7 @@ func local_player_viewmodel_def() -> PlayerViewmodelDef:
 # The build/teardown lifecycle lives in DebugViewSet (debug_view_set.gd), an
 # internal child constructed in _init; the views it builds still attach under
 # THIS node, so world-relative lookups (SkeletonDebug/PickDebug/...) are
-# unchanged. These one-line delegates keep the host-facing names on GameWorld:
+# unchanged. These one-line delegates keep the presentation-facing names on GameWorld:
 # the F3 option registry dispatches its setters against the world script
 # (nova_debug_options), and probes duck-find the world by these methods.
 
@@ -1921,7 +1893,7 @@ func is_foliage_hidden() -> bool:
 # Fire mission audio + particle effects for presentation. PlayWavList actions surface as "dialog"
 # effects carrying the dialog/wav id in `a`; route them to the mission audio (which resolves the id
 # through the co-named .DBF and plays the LWF set). WAC fx commands surface with the effect name in
-# `str`; route them to the effect world. Other kinds are still emitted via mission_effects for host
+# `str`; route them to the effect world. Other kinds are still emitted via mission_effects for downstream
 # consumers (HUD, etc.).
 func _route_mission_effects(effects: Array) -> void:
 	for e in effects:
@@ -1958,7 +1930,7 @@ func _route_mission_effects(effects: Array) -> void:
 
 # Drain the flight sim's resolved round impacts and present both descriptor legs.
 # Impact particles are generic Always transients in the world domain; their
-# production tick/order and catch-up age survive a multi-tick host frame.
+# production tick/order and catch-up age survive a multi-tick render frame.
 # [orig: Projectile_UpdatePhysics @ 0x4e9d70 -> the type-specific impact
 #  handler -> Projectile_SpawnImpactEffect @ 0x4e9b80]
 func _route_round_impacts() -> void:
@@ -1988,8 +1960,8 @@ func _route_round_impacts() -> void:
 # _on_runtime_effects. A reload reuses this GameWorld, so any prior runtime is freed in unload() first.
 func _start_runtime(mission: MissionData, bms_name: String) -> int:
 	var container := get_node_or_null(NodePath("MissionObjects"))
-	_runtime = MissionRuntime.new()
-	_runtime.name = "MissionRuntime"
+	_runtime = MissionPresentation.new()
+	_runtime.name = "MissionPresentation"
 	add_child(_runtime)
 	if _frame_stats != null:
 		_runtime.set_frame_stats_board(_frame_stats)
@@ -2027,7 +1999,7 @@ func _start_runtime(mission: MissionData, bms_name: String) -> int:
 	opts["playable"] = _playable and not _net_drive.pending_dedicated()
 	# Spread the staged net-session request (typed record + derived staging +
 	# the surrendered preload sim, consumed once per load) into the runtime's
-	# options — MissionRuntime alone adopts opts["simulation"] (ADR 0011/0012).
+	# options — MissionPresentation alone adopts opts["simulation"] (ADR 0011/0012).
 	_net_drive.stage_runtime_options(opts)
 	# The placer + environment node let the wire present pass resolve + light its
 	# remote-entity avatars (build_player_animated_model): every remote row on a
@@ -2068,11 +2040,6 @@ func _start_runtime(mission: MissionData, bms_name: String) -> int:
 		else:
 			load_failed.emit("failed to start mission runtime")
 		return setup_error if setup_error != OK else ERR_CANT_CREATE
-	# ADR 0033 R1/R2: register this world on the engine frame. The binding
-	# wires the whole leg contract (_frame_*_leg methods) and the FrameDriver
-	# runs them in its fixed order around the tick batch (terrain then foliage
-	# before; net-drive, weather, blink, occlusion, iris, audio after).
-	_runtime.get_sim().set_frame_world(self)
 	_run_mission_start_environment_boundary()
 	_sync_runtime_profiling()
 	# The player profile's saved weapon kits, loaded before ANY kit is applied or
@@ -2142,7 +2109,7 @@ func _load_player_weapon_profile() -> void:
 
 # Consume render-internal lifecycle effects first, route "dialog" actions to
 # mission audio (resolved through the co-named .DBF + LWF set), then expose only
-# the remaining host-facing effects to HUD consumers.
+# the remaining downstream effects to HUD consumers.
 func _on_runtime_effects(effects: Array) -> void:
 	var routed: Array = []
 	for effect_v in effects:
@@ -2165,7 +2132,7 @@ func _on_runtime_fixed_tick(_logic_tick: int) -> void:
 	# Retail executes local weapon actions and physical impacts before the same
 	# frame's global particle update. Consume each source tick synchronously so
 	# admission slots, first emission, and catch-up chronology are exact; only
-	# mission render Nodes remain batched until tick_realtime() returns.
+	# mission render Nodes remain batched until the session frame returns.
 	if _local_player_weapon_tick_consumer.is_valid():
 		_local_player_weapon_tick_consumer.call(drain_local_player_weapon_events())
 	_route_round_impacts()
@@ -2266,7 +2233,7 @@ func _warm_effect_world_catalog() -> int:
 	_effect_world.advance_fixed_tick(Simulation.tick_dt())
 	_effect_world.render_now()
 	# Pipeline compiles need real draws. Skip the forced frames inside the
-	# editor host (re-entrant editor drawing); the texture warm above still
+	# editor embedder (re-entrant editor drawing); the texture warm above still
 	# runs there, and the shipped game is what the full warm protects.
 	if is_inside_tree() and not Engine.is_editor_hint():
 		# MainGame keeps World hidden behind the opaque loading CanvasLayer.
@@ -2379,7 +2346,7 @@ func get_water_node() -> Water:
 	return _water
 
 
-## A host registers a live pose resolver for an owner-bound effect group it
+## A caller registers a live pose resolver for an owner-bound effect group it
 ## spawned (e.g. the local muzzle flash riding the viewmodel userpoint). The
 ## resolver is polled by the effect world's owner-pose sync while any group
 ## bound to owner_key is alive; re-registering the same key overwrites.
@@ -2443,13 +2410,6 @@ func _stamp_iris_samples(camera_xform: Transform3D) -> void:
 
 # --- Frame clear color (env divergence #21, closed) ----------------------------
 
-func _process(_delta: float) -> void:
-	_sample_panm_clock()
-	if not _loaded or not is_visible_in_tree():
-		_restore_idle_frame_clear_color()
-		return
-	_update_frame_clear_color()
-
 
 func _restore_idle_frame_clear_color() -> void:
 	_clear_env_generation = -1
@@ -2463,10 +2423,10 @@ func _restore_idle_frame_clear_color() -> void:
 # 0x5ca792 - clear color = alternate_fog ? 0x808080 : cam above water ?
 # skyfog[0] : Env_WaterColorLit; the vehicle alternate-fog view is not modeled
 # yet]. Both branches serve RENDER-SPACE (x2-gained) colors, consumed VERBATIM
-# by the modulate2x-path Clear this host reproduces (D-RMAT-7): above water the
+# by the modulate2x-path Clear this renderer reproduces (D-RMAT-7): above water the
 # post-blend DOUBLED skyfog, underwater Env_WaterColorLit = water x light >> 7;
 # the halving branch [orig: @ 0x67715d] is the non-modulate2x fallback with no
-# host analog. The ClearColor Environment must stay BG_COLOR with ambient
+# Godot analog. The ClearColor Environment must stay BG_COLOR with ambient
 # disabled - BG_SKY with no sky renders black and swallows these writes
 # (GUT-pinned).
 func _update_frame_clear_color() -> void:

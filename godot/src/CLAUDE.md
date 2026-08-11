@@ -2,12 +2,13 @@
 
 The Godot layer's native half (ADR 0016/0028/0034 d6): C++ only — the
 GDExtension classes binding `engine/` to Godot. Register new classes in
-`register_types.cpp`. The standing rule is ADR 0033's one-line test: a line
-here earns its place only as a device leg (marshalling, nodes, servers,
-input, audio, draw-list appliers), a Resource-shaped ONED document surface,
-or a documented seam bridge — format/runtime logic and every witnessed
-behavior belong in `engine/`. Nova formats never touch Godot's resource
-system (documents self-read/write via `load_from_path`/`save_to_path`). The
+`register_types.cpp`. ADR 0035 supersedes ADR 0033's callback-bus design: a
+line here earns its place only as a device leg (marshalling, nodes, servers,
+input, audio, draw-list appliers), the typed bridge from `MissionSession` to
+Godot's `GameFramePipeline`, a Resource-shaped ONED document surface, or a
+documented seam bridge — format/runtime logic and every witnessed behavior
+belong in `engine/`. Nova formats never touch Godot's resource system
+(documents self-read/write via `load_from_path`/`save_to_path`). The
 `adapter_cpp_orig_cites` ratchet is the transition gauge: a new `[orig:]`
 cite here is either a documented seam contract or code that belongs
 engine-side.

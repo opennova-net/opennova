@@ -17,7 +17,7 @@ const SNAPSHOT_DIR := "user://debug/snapshots"
 # kPlayerCameraFovHDeg, re-exported as the bound constant).
 const DEFAULT_PLAYER_FOV_H_DEG := Simulation.DEFAULT_PLAYER_FOV_H_DEG
 const MICROSECONDS_PER_SECOND := 1_000_000.0
-const MissionRuntime := preload("res://game/world/mission_runtime.gd")
+const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 
 ## The no-overwrite sequence for default paths (rapid consecutive snapshots
 ## never collide even within one microsecond stamp).
@@ -90,7 +90,7 @@ static func default_path(snapshot: Dictionary) -> String:
 
 # --- Pose capture (the opennova.player_pose.v1 shape, kept verbatim) ---------
 
-static func _capture_local_player_pose(runtime: MissionRuntime, sim: Simulation,
+static func _capture_local_player_pose(runtime: MissionPresentation, sim: Simulation,
 		ctx: DebugContext) -> Dictionary:
 	if runtime == null or sim == null or not bool(sim.has_local_player()):
 		return {}

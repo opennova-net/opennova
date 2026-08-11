@@ -1,0 +1,83 @@
+extends GutTest
+
+
+class FakePresentation:
+	extends RefCounted
+
+	var trace: Array[String]
+	var seen_input: MissionFrameInput
+	var playing := true
+
+	func _init(p_trace: Array[String]) -> void:
+		trace = p_trace
+
+	func is_playing() -> bool:
+		return playing
+
+	func advance_session_frame(input: MissionFrameInput) -> MissionFrameOutcome:
+		seen_input = input
+		trace.append("session")
+		return MissionFrameOutcome.new()
+
+
+class FakeWorld:
+	extends Node
+
+	var trace: Array[String] = []
+	var network_ok := true
+	var presentation := FakePresentation.new(trace)
+
+	func begin_device_frame(_camera_pos: Vector3, _camera_xform: Transform3D,
+			_delta: float) -> void:
+		trace.append("begin")
+
+	func render_terrain_frame() -> void: trace.append("terrain")
+	func render_foliage_frame() -> void: trace.append("foliage")
+	func get_runtime() -> FakePresentation: return presentation
+	func drive_network_frame() -> bool:
+		trace.append("network")
+		return network_ok
+	func advance_weather_frame() -> void: trace.append("weather")
+	func apply_blink_frame() -> void: trace.append("blink")
+	func apply_occlusion_frame() -> void: trace.append("occlusion")
+	func sample_iris_frame() -> void: trace.append("iris")
+	func render_particle_frame() -> void: trace.append("particles")
+	func mix_audio_frame(ticks_run: int) -> void:
+		trace.append("audio:%d" % ticks_run)
+	func update_clear_frame() -> void: trace.append("clear")
+	func finish_device_frame() -> void: trace.append("finish")
+	func session_frame_failed(_reason: String) -> void: trace.append("failed")
+
+
+func test_pipeline_orders_one_typed_session_call_between_concrete_devices() -> void:
+	var world := FakeWorld.new()
+	add_child_autofree(world)
+	var pipeline := GameFramePipeline.new()
+	pipeline.setup(world)
+	var input := MissionFrameInput.new()
+
+	var outcome := pipeline.advance(Vector3(1, 2, 3), Transform3D.IDENTITY,
+			0.0125, input)
+
+	assert_not_null(outcome)
+	assert_same(world.presentation.seen_input, input,
+			"the one sampled input object crosses the pipeline unchanged")
+	assert_almost_eq(input.delta_seconds, 0.0125, 0.000001)
+	assert_eq(world.trace, [
+		"begin", "terrain", "foliage", "session", "network", "weather",
+		"occlusion", "iris", "particles", "audio:0", "clear", "finish",
+	])
+
+
+func test_network_install_failure_suppresses_every_later_device_phase() -> void:
+	var world := FakeWorld.new()
+	add_child_autofree(world)
+	world.network_ok = false
+	var pipeline := GameFramePipeline.new()
+	pipeline.setup(world)
+
+	pipeline.advance(Vector3.ZERO, Transform3D.IDENTITY, 0.016,
+			MissionFrameInput.new())
+
+	assert_eq(world.trace,
+			["begin", "terrain", "foliage", "session", "network"])

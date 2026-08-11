@@ -209,17 +209,17 @@ func present(force := false) -> void:
 ## loading. `process_frame` fires at the start of a frame, so crossing two of
 ## those signals is what lets one ordinary render/present finish. The forced
 ## present after that frame keeps the window responsive during the block.
-func prepare_for_blocking_load() -> bool:
-	if not is_inside_tree():
+func prepare_for_blocking_load(operation: WorldLoadOperation) -> bool:
+	if operation == null or operation.is_cancelled() or not is_inside_tree():
 		return false
 	# Seed the smoothed bar before the registration frame so that frame submits
 	# both the background and a non-empty fill to the canvas draw list.
 	present(true)
 	await get_tree().process_frame
-	if not is_inside_tree():
+	if operation.is_cancelled() or not is_inside_tree():
 		return false
 	await get_tree().process_frame
-	if not is_inside_tree():
+	if operation.is_cancelled() or not is_inside_tree():
 		return false
 	present(true)
 	return true

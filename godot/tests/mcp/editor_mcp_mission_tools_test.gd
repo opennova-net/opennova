@@ -387,7 +387,7 @@ func test_analyze_mounts_reports_static_prediction_from_shared_runtime_rules() -
 	var result: McpToolResult = await _call("analyze_mounts", { "include_live": false })
 	assert_false(result.is_error, str(result.content))
 	var out: Dictionary = result.structured
-	assert_eq(String(out["runtime_parity"]["shared_rules"]), "MissionRuntime")
+	assert_eq(String(out["runtime_parity"]["shared_rules"]), "MissionPresentation")
 	assert_eq(String(out["runtime_parity"]["editor_mode"]), "static_analysis",
 		"the editor predicts from authored data instead of running gameplay")
 	assert_eq(String(out["runtime_parity"]["live_runtime"]), "GameWorld",

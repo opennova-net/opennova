@@ -1,4 +1,4 @@
-// Simulation — ClassDB registration (_bind_methods) and _notification.
+// Simulation — ClassDB registration.
 #include "simulation/nova_simulation_internal.h"
 
 #include <threedi/threedi_3di3.h> // THREEDI_USER_POINT_SCAN_LIMIT (pin below)
@@ -42,26 +42,31 @@ void Simulation::_bind_methods() {
 			&Simulation::get_mission_boot_debug);
 	ClassDB::bind_method(D_METHOD("build_demo_mission"), &Simulation::build_demo_mission);
 	ClassDB::bind_method(D_METHOD("is_loaded"), &Simulation::is_loaded);
-	ClassDB::bind_method(D_METHOD("set_playing", "playing"), &Simulation::set_playing);
+	ClassDB::bind_method(D_METHOD("get_session_state"),
+			&Simulation::get_session_state);
+	ClassDB::bind_method(D_METHOD("get_session_error"),
+			&Simulation::get_session_error);
 	ClassDB::bind_method(D_METHOD("is_playing"), &Simulation::is_playing);
 	ClassDB::bind_method(D_METHOD("step"), &Simulation::step);
-	ClassDB::bind_method(D_METHOD("bank_realtime", "delta"), &Simulation::bank_realtime);
-	ClassDB::bind_method(D_METHOD("reset_tick_bank"), &Simulation::reset_tick_bank);
 	ClassDB::bind_static_method("Simulation", D_METHOD("tick_dt"),
 			&Simulation::tick_dt);
 	ClassDB::bind_static_method("Simulation", D_METHOD("ticks_per_second"),
 			&Simulation::ticks_per_second);
 	ClassDB::bind_static_method("Simulation", D_METHOD("ticks_from_ms", "ms"),
 			&Simulation::ticks_from_ms);
-	ClassDB::bind_method(D_METHOD("set_frame_shell", "shell", "listener"),
-			&Simulation::set_frame_shell);
-	ClassDB::bind_method(D_METHOD("set_frame_world", "world"),
-			&Simulation::set_frame_world);
-	ClassDB::bind_method(D_METHOD("frame_realtime", "delta"), &Simulation::frame_realtime);
-	ClassDB::bind_method(D_METHOD("frame_single"), &Simulation::frame_single);
-	ClassDB::bind_method(D_METHOD("get_frame_perf"), &Simulation::get_frame_perf);
+	ClassDB::bind_method(D_METHOD("advance_session_frame", "input", "tick_sink"),
+			&Simulation::advance_session_frame, DEFVAL(Callable()));
+	ClassDB::bind_method(D_METHOD("step_session_frame", "input", "tick_sink"),
+			&Simulation::step_session_frame, DEFVAL(Callable()));
+	ClassDB::bind_method(D_METHOD("pause_session"), &Simulation::pause_session);
+	ClassDB::bind_method(D_METHOD("resume_session"), &Simulation::resume_session);
+	ClassDB::bind_method(D_METHOD("reset_session"), &Simulation::reset_session);
+	ClassDB::bind_method(D_METHOD("fail_session", "reason"),
+			&Simulation::fail_session);
+	ClassDB::bind_method(D_METHOD("close_session"), &Simulation::close_session);
+	ClassDB::bind_method(D_METHOD("get_session_perf"),
+			&Simulation::get_session_perf);
 	ClassDB::bind_method(D_METHOD("is_transport_locked"), &Simulation::is_transport_locked);
-	ClassDB::bind_method(D_METHOD("restart"), &Simulation::restart);
 	ClassDB::bind_method(D_METHOD("enable_listen_server", "enable"), &Simulation::enable_listen_server);
 	ClassDB::bind_method(D_METHOD("set_terrain_til_data", "til_bytes"), &Simulation::set_terrain_til_data);
 	ClassDB::bind_method(D_METHOD("set_mission_text_data", "rtxt_bytes"), &Simulation::set_mission_text_data);
@@ -597,12 +602,5 @@ void Simulation::_bind_methods() {
 	BIND_CONSTANT(SPAWN_ORIGIN_KIND_NONE);
 	BIND_CONSTANT(SPAWN_ORIGIN_INDEX_NONE);
 
-	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "playing"), "set_playing", "is_playing");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "loco_scale"), "set_loco_scale", "get_loco_scale");
-}
-
-void Simulation::_notification(int p_what) {
-	if (p_what == NOTIFICATION_PROCESS && playing_ && loaded_) {
-		step();
-	}
 }

@@ -47,7 +47,7 @@ func _init() -> void:
 
 func _ready() -> void:
 	_ensure_renderer()
-	set_process(true)
+	set_process(false)
 
 
 func _ensure_renderer() -> void:
@@ -545,9 +545,13 @@ func advance_fixed_tick(delta: float) -> void:
 	_scene.advance_in_place(maxf(delta, 0.0))
 
 
-## Render-frame work may update attachment poses, but never advances particles.
-func _process(_delta: float) -> void:
+## Explicit GameFramePipeline device leg. Attachment poses and the immutable draw
+## list are refreshed once at the pipeline's chosen point; particles never advance
+## on render delta.
+func render_frame() -> void:
 	_sync_owner_poses()
+	_ensure_renderer()
+	_renderer.render_now()
 
 
 ## Value-only F3 read model. Emitter ids join portable simulation values to

@@ -11,7 +11,7 @@ extends RefCounted
 ## the source is unset, invalid, freed, or the wrong type; pages render their
 ## own empty states off that.
 
-const MissionRuntime := preload("res://game/world/mission_runtime.gd")
+const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 
 var runtime_source := Callable()
 var view_context_source := Callable()
@@ -43,12 +43,12 @@ var pick_list: DebugPickList = null
 var dump_snapshot := Callable()
 
 
-## The current MissionRuntime, or null.
-func runtime() -> MissionRuntime:
+## The current MissionPresentation, or null.
+func runtime() -> MissionPresentation:
 	if not runtime_source.is_valid():
 		return null
 	var value: Variant = runtime_source.call()
-	if value is MissionRuntime and is_instance_valid(value):
+	if value is MissionPresentation and is_instance_valid(value):
 		return value
 	return null
 

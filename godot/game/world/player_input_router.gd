@@ -20,6 +20,8 @@ var _input_source := Callable()
 var _fire_was_held := false
 var _reload_was_down := false
 var _scope_was_down := false
+var _look_delta := Vector2.ZERO
+var _frame_sequence := 0
 # The manual weapon-switch keys — the retail defaults from the shipped binding
 # catalog: rows 28-36 Knife '1' / Secondary '2' / Primary '3' / Flashbang '4' /
 # FragGrenade '5' / SmokeGrenade '6' / Accessory '7' / Detonator '8' / medpack '9'
@@ -56,15 +58,20 @@ func set_input_source(source: Callable) -> void:
 	_input_source = source
 
 
-func before_world_tick(_delta: float, capture_mouse: bool = false,
-		gameplay_input_active: bool = true) -> void:
+func before_world_tick(delta: float, capture_mouse: bool = false,
+		gameplay_input_active: bool = true) -> MissionFrameInput:
+	var frame_input := MissionFrameInput.new()
+	frame_input.delta_seconds = delta
+	_frame_sequence += 1
+	frame_input.sequence = _frame_sequence
 	if _presenter == null:
-		return
+		return frame_input
 	if not _presenter.has_player():
 		_presenter.set_fly_camera_locked(false)
 		release_mouse_capture()
 		_presenter.clear_models()
-		return
+		_look_delta = Vector2.ZERO
+		return frame_input
 	_presenter.set_fly_camera_locked(true)
 	if capture_mouse and Input.get_mouse_mode() != Input.MOUSE_MODE_CAPTURED:
 		Input.set_mouse_mode(Input.MOUSE_MODE_CAPTURED)
@@ -74,8 +81,7 @@ func before_world_tick(_delta: float, capture_mouse: bool = false,
 	# so a player who opened the armory while running would keep running under it.
 	var state := _read_input_state() if gameplay_input_active else {}
 	var sim = _sim()
-	if sim != null:
-		sim.set_player_input(
+	frame_input.set_movement(
 			_bool(state, "forward"),
 			_bool(state, "back"),
 			_bool(state, "left"),
@@ -83,6 +89,9 @@ func before_world_tick(_delta: float, capture_mouse: bool = false,
 			_bool(state, "lean_left"),
 			_bool(state, "lean_right"),
 			_bool(state, "jump"))
+	frame_input.look_delta = _look_delta if gameplay_input_active else Vector2.ZERO
+	_look_delta = Vector2.ZERO
+	if sim != null:
 		# Feed the sim the head-bone eye for the 3P anchor chase [orig: the chase target
 		# is Position + CameraOffset @0x437b70; CameraOffset is the posed head bone,
 		# computed sim-side in the original @0x4b6bb3 — in the port, the render skeleton is
@@ -90,7 +99,8 @@ func before_world_tick(_delta: float, capture_mouse: bool = false,
 		var head: Vector3 = _presenter.avatar_head_world()
 		sim.set_local_player_eye(head if head != Vector3.INF else Vector3.ZERO,
 				head != Vector3.INF)
-	_send_weapon_input()
+	_sample_weapon_input(frame_input, gameplay_input_active)
+	return frame_input
 
 
 # The weapon trigger input: LMB fire (held + edge), R reload (raw edge — the
@@ -99,9 +109,11 @@ func before_world_tick(_delta: float, capture_mouse: bool = false,
 # mouse is captured - UI clicks never fire. [orig: the binding dispatch cases
 # 0x95 fire / 0xD3 reload / 6 scope, Input_HandleActionBinding_0 @0x4e0420 —
 # ported in engine/runtime/world weapon_fsm + Simulation]
-func _send_weapon_input() -> void:
+func _sample_weapon_input(frame_input: MissionFrameInput,
+		gameplay_input_active: bool) -> void:
 	var sim = _sim()
-	var captured := Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED
+	var captured := gameplay_input_active \
+			and Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED
 	var fire_held := captured and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
 	var fire_edge := fire_held and not _fire_was_held
 	_fire_was_held = fire_held
@@ -115,8 +127,7 @@ func _send_weapon_input() -> void:
 	# Latches update even with no sim (the deleted forwarders no-op'd downstream):
 	# a key held across a mission reload must not fire a spurious edge on the
 	# first frame the new sim appears.
-	if sim != null:
-		sim.set_local_player_weapon_input(fire_held, fire_edge, reload_edge)
+	frame_input.set_weapon_input(fire_held, fire_edge, reload_edge)
 	_send_weapon_switch_input(captured)
 
 
@@ -206,11 +217,8 @@ func handle_input(event: InputEvent, active: bool) -> bool:
 	if not active or _presenter == null or not _presenter.has_player() \
 			or not (event is InputEventMouseMotion):
 		return false
-	var sim = _sim()
-	if sim == null:
-		return false
 	var mm := event as InputEventMouseMotion
-	sim.add_local_player_look(mm.relative.x, mm.relative.y)
+	_look_delta += mm.relative
 	return true
 
 
@@ -221,6 +229,7 @@ func reset() -> void:
 	_fire_was_held = false
 	_reload_was_down = false
 	_scope_was_down = false
+	_look_delta = Vector2.ZERO
 
 
 func release_mouse_capture() -> void:

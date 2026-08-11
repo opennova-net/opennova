@@ -1,15 +1,16 @@
 // nw-server — the headless in-match game HOST (engine/net/npruntime P6). A pure C++ dedicated server: it
 // loads a mission, stands up the npruntime runtime as a NovaWorld HostOnly session, opens a real UDP
-// socket, and drives the in-match host loop at the
-// original 62 Hz cadence so retail-wire-compatible clients (opennova or, as a follow-up, stock retail)
-// can join -> spawn -> play. All protocol/crypto/framing live in the libs; this binary only owns the
-// socket + the cadence (npruntime/host_session.h is the shared owner loop, also used by the P6 test).
+// socket, and asks MissionSession to drive the in-match host loop at the original fixed cadence so
+// retail-wire-compatible clients (opennova or, as a follow-up, stock retail) can join -> spawn ->
+// play. All protocol/crypto/framing and cadence live in the libs; this binary owns the socket and
+// wall-clock pacing only.
 //
 // It NEVER links godot-cpp (godot-cpp is a separate SCons build, not in this CMake graph). Separate from
 // the matchmaking apps/novaworld_server (gate/lobby/HTTP) — this is the authoritative game server.
 
 #include <npwire/net_ports.h>
 #include <npruntime/host_session.h> // the host owner loop, promoted to engine/net/npruntime (P7/A3)
+#include <npruntime/mission_session.h>
 
 #include "net_datagram_socket.h" // net::Socket-backed netsim::IDatagramSocket adapter
 #include "net_sockets.h"         // net::startup / udp_bind / ScopedSocket
@@ -48,6 +49,38 @@ uint16_t env_port(const char *name, uint16_t fallback) {
 	}
 	return fallback;
 }
+
+// The dedicated host's one adapter to MissionSession. The portable session
+// decides when a fixed tick is due; this adapter performs that real tick using
+// the shared network owner loop.
+class HeadlessMissionTickTarget final : public opennova::np::MissionTickTarget {
+public:
+	HeadlessMissionTickTarget(opennova::world::World &world,
+			opennova::np::HostOwner &owner,
+			opennova::netsim::IDatagramSocket &socket)
+			: world_(world), owner_(owner), socket_(socket) {}
+
+	opennova::np::TickOutcome advance_mission_tick(
+			const opennova::np::TickInput &) override {
+		world_.network_env.advance_tick();
+		opennova::np::host_session_pump(owner_, socket_);
+		return {opennova::np::TickStatus::Ran,
+				static_cast<int32_t>(world_.logic_tick), {}};
+	}
+
+	bool reset_mission_to_baseline(opennova::np::SessionError &error) override {
+		error = {opennova::np::SessionErrorCode::NetworkRoleLocked,
+				"dedicated hosts cannot reset a live mission"};
+		return false;
+	}
+
+	void close_mission() override {}
+
+private:
+	opennova::world::World &world_;
+	opennova::np::HostOwner &owner_;
+	opennova::netsim::IDatagramSocket &socket_;
+};
 
 } // namespace
 
@@ -170,22 +203,37 @@ int main() {
 
 	std::signal(SIGINT, on_signal);
 	std::signal(SIGTERM, on_signal);
-	std::fprintf(stderr, "nw-server: hosting on UDP %u at 62 Hz (Ctrl+C to stop)\n", bound);
+	std::fprintf(stderr, "nw-server: hosting on UDP %u at 62.5 Hz (Ctrl+C to stop)\n", bound);
 
-	// --- The fixed 62 Hz host loop. Absolute-deadline sleep_until so the cadence does not drift. ---
+	// --- MissionSession owns fixed-tick cadence. The app only paces outer frames against an
+	//     absolute deadline so wall-clock scheduling does not drift. ---
 	using clock = std::chrono::steady_clock;
 	const auto baseline = clock::now();
 	constexpr int64_t kPeriodNs =
-			1000000000LL / opennova::JO_ENGINE_TICK_RATE; // ~16.129 ms per engine tick (the original cadence)
+			static_cast<int64_t>(1000000000.0 * opennova::world::TickAccumulator::kTickDt);
 	net::NetDatagramSocket dgram(sock.get()); // recv_timeout_ms = 0 (non-blocking; the loop self-paces)
+	HeadlessMissionTickTarget target(world, owner, dgram);
+	np::MissionSession session(target, np::MissionSessionRole::DedicatedHost);
+	if (!session.begin_load().applied() || !session.complete_load().applied()) {
+		std::fprintf(stderr, "nw-server: failed to start mission session\n");
+		net::shutdown();
+		return 1;
+	}
 	for (uint64_t frame = 0; !g_shutdown.load(); ++frame) {
-		world.network_env.advance_tick();
-		np::host_session_pump(owner, dgram);
+		np::FrameInput input;
+		input.delta_seconds = world::TickAccumulator::kTickDt;
+		const np::FrameOutcome outcome = session.advance(input);
+		if (outcome.terminal()) {
+			std::fprintf(stderr, "nw-server: mission session failed: %s\n",
+					outcome.error.message.c_str());
+			break;
+		}
 		std::this_thread::sleep_until(
 				baseline + std::chrono::nanoseconds(static_cast<int64_t>(frame + 1) * kPeriodNs));
 	}
 
 	std::fprintf(stderr, "nw-server: shutting down\n");
+	(void)session.close();
 	net::shutdown();
 	return 0;
 }

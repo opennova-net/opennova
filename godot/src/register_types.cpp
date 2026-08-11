@@ -55,6 +55,7 @@
 #include "mission/nova_mission_data.h"
 #include "simulation/nova_present_applier.h"
 #include "simulation/nova_present_stats.h"
+#include "simulation/nova_mission_session_values.h"
 #include "simulation/nova_wire_present_pass.h"
 #include "simulation/nova_simulation.h"
 #include "wac/nova_wac_program.h"
@@ -142,6 +143,9 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(MissionCatalog);
 	GDREGISTER_CLASS(PresentApplier);
 	GDREGISTER_CLASS(MissionPresentStats);
+	GDREGISTER_CLASS(MissionFrameInput);
+	GDREGISTER_CLASS(MissionTickOutcome);
+	GDREGISTER_CLASS(MissionFrameOutcome);
 	GDREGISTER_CLASS(WirePresentStats);
 	GDREGISTER_CLASS(WirePresentPass);
 	GDREGISTER_CLASS(Simulation);

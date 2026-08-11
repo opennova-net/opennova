@@ -179,12 +179,12 @@ func _attach_presenter(world: GameWorld, camera: Camera3D) -> LocalPlayerPresent
 
 
 # One shell frame, in main_game's order: input sample -> world tick (the engine
-# FrameDriver batch + the fixed-tick weapon consumer) -> presentation.
+# MissionSession batch + the fixed-tick weapon consumer) -> presentation.
 func _frame(world: GameWorld, presenter: LocalPlayerPresenter, camera: Camera3D,
 		ticks: int = 1, gameplay_active: bool = true) -> void:
 	for i in ticks:
-		presenter.before_world_tick(TICK, false, gameplay_active)
-		world.tick(camera.global_position, camera.global_transform, TICK)
+		var frame_input := presenter.before_world_tick(TICK, false, gameplay_active)
+		world.tick(camera.global_position, camera.global_transform, TICK, frame_input)
 		presenter.after_world_tick()
 
 
@@ -288,8 +288,8 @@ func test_input_source_movement_reaches_the_motor_and_neutralizes_when_inactive(
 		return {"forward": true})
 	var tick_before := int(sim.get_logic_tick())
 	for i in 30:
-		presenter.before_world_tick(TICK, false, false)
-		world.tick(camera.global_position, camera.global_transform, TICK)
+		var frame_input := presenter.before_world_tick(TICK, false, false)
+		world.tick(camera.global_position, camera.global_transform, TICK, frame_input)
 		presenter.after_world_tick()
 	assert_eq(String(sim.get_local_player_anim_key()), "anim_idle",
 			"the armory overlay's neutral submit keeps the player standing")
@@ -720,9 +720,9 @@ func test_fire_event_plays_the_fsm_clip_on_both_real_viewmodel_parts() -> void:
 
 	# One trigger pull, injected on the same seam the input router drives (the
 	# router's own sample overwrites earlier in this frame; last write wins).
-	presenter.before_world_tick(TICK, false, true)
-	sim.set_local_player_weapon_input(true, true, false)
-	world.tick(camera.global_position, camera.global_transform, TICK)
+	var frame_input := presenter.before_world_tick(TICK, false, true)
+	frame_input.set_weapon_input(true, true, false)
+	world.tick(camera.global_position, camera.global_transform, TICK, frame_input)
 	presenter.after_world_tick()
 
 	assert_eq(String(world.local_player_weapon_view().anim_key), "anim_wpn_fire",
@@ -738,9 +738,9 @@ func test_fire_event_plays_the_fsm_clip_on_both_real_viewmodel_parts() -> void:
 	var part0 := presenter.vm_parts()[0] as ObjectModel
 	var reached_recoil := false
 	for i in 30:
-		presenter.before_world_tick(TICK, false, true)
-		sim.set_local_player_weapon_input(true, false, false)
-		world.tick(camera.global_position, camera.global_transform, TICK)
+		frame_input = presenter.before_world_tick(TICK, false, true)
+		frame_input.set_weapon_input(true, false, false)
+		world.tick(camera.global_position, camera.global_transform, TICK, frame_input)
 		presenter.after_world_tick()
 		if String(part0.get_active_body_clip()) == "anim_wpn_recoil":
 			reached_recoil = true

@@ -164,7 +164,7 @@ Array Simulation::drain_round_impacts() {
 
 Array Simulation::drain_effects() {
 	Array out;
-	if (!loaded_) return out;
+	if (!world_installed_) return out;
 	for (const opennova::world::Effect &e : world_->effects.entries()) {
 		Dictionary d;
 		d["kind"] = String(e.kind.c_str());
@@ -187,7 +187,7 @@ Array Simulation::drain_effects() {
 // [orig: RoundData_SpawnRound @0x4ec5e9], axis-mapped mission -> godot (x, z, -y).
 Array Simulation::drain_fire_presentation_events() {
 	Array out;
-	if (!loaded_) return out;
+	if (!world_installed_) return out;
 	constexpr double kRadPerBam = (2.0 * 3.14159265358979323846) / 4294967296.0;
 	const bool have_local = world_->cached.local_player.valid();
 	for (const opennova::world::FireEvent &fe : world_->round_sim.fired) {
@@ -268,7 +268,7 @@ static_assert(opennova::world::round_event_flag::kAdmIndexed ==
 // [orig: listener_pos @ 0x24D6630; world/fire_sound.h]. Never called on a
 // dedicated host, which is the witnessed peer gate.
 void Simulation::set_sound_listener(const Vector3 &p_listener_godot) {
-	if (!loaded_) return;
+	if (!world_installed_) return;
 	world_->fire_sounds.set_listener(opennova::world::Vec3{
 			p_listener_godot.x, -p_listener_godot.z, p_listener_godot.y});
 }
@@ -281,7 +281,7 @@ void Simulation::set_sound_listener(const Vector3 &p_listener_godot) {
 //  Sound_TickPendingSlots @ 0x529310]
 Array Simulation::drain_fire_sounds() {
 	Array out;
-	if (!loaded_) return out;
+	if (!world_installed_) return out;
 	for (const opennova::world::ReadyFireSound &sound :
 			world_->fire_sounds.drain()) {
 		Dictionary d;
@@ -298,7 +298,7 @@ Array Simulation::drain_fire_sounds() {
 // (x, y, z-up) -> Godot (x, z, -y), the drain_fire_presentation_events rule.
 Dictionary Simulation::drain_destruction_events() {
 	Dictionary out;
-	if (!loaded_) return out;
+	if (!world_installed_) return out;
 	opennova::world::DestructionEvents &ev = world_->destruction;
 	auto to_godot = [](const opennova::world::Vec3 &v) {
 		return Vector3(v.x, v.z, -v.y);
@@ -376,7 +376,7 @@ Dictionary Simulation::drain_destruction_events() {
 // its single husk-model section [orig: the piece render mask piece[31]; §24].
 Array Simulation::get_death_pieces() const {
 	Array out;
-	if (!loaded_) return out;
+	if (!world_installed_) return out;
 	for (size_t slot = 0; slot < world_->death_pieces.pieces.size(); ++slot) {
 		const opennova::world::DeathPiece &p = world_->death_pieces.pieces[slot];
 		if (!p.active) continue;
@@ -447,7 +447,7 @@ Dictionary Simulation::get_destruction_debug(int p_bms_id) const {
 // Mission -> godot axis map (x, z, -y), matching the other presentation drains.
 PackedFloat32Array Simulation::get_tracer_trails() const {
 	PackedFloat32Array out;
-	if (!loaded_) return out;
+	if (!world_installed_) return out;
 	for (const opennova::world::TracerTrailChannel &c : world_->round_sim.trails.channels) {
 		if (!c.active || c.count <= 0) continue;
 		const int64_t base = out.size();

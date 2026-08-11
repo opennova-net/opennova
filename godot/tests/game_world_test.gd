@@ -2,7 +2,7 @@ extends GutTest
 
 const WORLD_TEST_ROOT := "game_world_test"
 const ArmoryPresenter := preload("res://game/world/armory_presenter.gd")
-const MissionRuntime := preload("res://game/world/mission_runtime.gd")
+const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 
 
 func after_each() -> void:
@@ -12,8 +12,8 @@ func after_each() -> void:
 
 # (The Node runtime/sim doubles that used to live here — TransportRuntimeStub,
 # ProfilingRuntimeStub, FxRuntimeStub, ItemPoseRuntimeStub, the anchor/blink/
-# occlusion/joiner stubs — are gone: GameWorld._runtime is typed MissionRuntime
-# and MissionRuntime._sim is typed Simulation, so every runtime-consuming
+# occlusion/joiner stubs — are gone: GameWorld._runtime is typed MissionPresentation
+# and MissionPresentation._sim is typed Simulation, so every runtime-consuming
 # test now boots the REAL stack through the public load path.)
 
 
@@ -324,7 +324,7 @@ class ItemFxGameWorldHarness:
 		_on_runtime_effects(effects)
 	func configure_item_owner(key: String, node: Node3D,
 			entity_ref: Dictionary) -> void:
-		# The runtime the resolve consults is the REAL MissionRuntime the world
+		# The runtime the resolve consults is the REAL MissionPresentation the world
 		# built in _start_runtime — the typed seam admits nothing else.
 		fx.seed_owner(key, node, entity_ref)
 	func resolve_item_owner(key: String) -> Variant:
@@ -470,7 +470,7 @@ const ONE_TICK_DELTA := 0.02
 
 
 # Load the minimal fixture mission onto `world` through the PUBLIC path: the
-# REAL MissionRuntime + Simulation stack (no doubles can enter the typed
+# REAL MissionPresentation + Simulation stack (no doubles can enter the typed
 # _runtime seam). `mutator` edits the opened document before the load.
 func _load_minimal_mission(world: GameWorld, root_dir: String = "",
 		mutator: Callable = Callable()) -> void:
@@ -537,20 +537,20 @@ func test_manual_perf_probe_routes_through_the_public_runtime_gate() -> void:
 
 	world.set_perf_probe_enabled(true)
 	assert_true(bool(sim.get_runtime_perf_counters().get("runtime_profiling_enabled", false)),
-			"GameWorld forwards consumer intent through MissionRuntime's public seam")
+			"GameWorld forwards consumer intent through MissionPresentation's public seam")
 	world.set_perf_probe_enabled(false)
 	assert_false(bool(sim.get_runtime_perf_counters().get("runtime_profiling_enabled", true)),
 			"disabling the probe releases the native timer through the same seam")
 
 
 func test_tick_gates_the_runtime_on_its_transport() -> void:
-	# The game shell's tick must respect MissionRuntime's play flag - the debug
+	# The game shell's tick must respect MissionSession state - the debug
 	# overlay's Pause/Step work on a live mission BECAUSE this gate exists
 	# (before it, play()/pause() were inert in the game).
 	var world := _make_world()
 	add_child_autofree(world)
 	_load_minimal_mission(world)
-	var runtime: MissionRuntime = world.get_runtime()
+	var runtime: MissionPresentation = world.get_runtime()
 	var sim := world.get_sim()
 	assert_not_null(sim)
 
@@ -991,7 +991,7 @@ func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear
 	camera.position.y = 10.25
 	camera.v_offset = -1.0
 	assert_lt(camera.get_camera_transform().origin.y, water.water_height)
-	await get_tree().process_frame
+	world.tick(camera.global_position, camera.get_global_transform())
 	var combined := EnvFile.combine_terrain_light(
 			Color(env.get_sun_light().x, env.get_sun_light().y, env.get_sun_light().z),
 			Color(env.get_sky_ambient().x, env.get_sky_ambient().y, env.get_sky_ambient().z))
@@ -1003,7 +1003,7 @@ func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear
 	camera.v_offset = 0.0
 	camera.position.y = 71.0
 	water.set_height_override(NAN)
-	await get_tree().process_frame
+	world.tick(camera.global_position, camera.get_global_transform())
 	assert_eq(world.get_current_frame_clear_color(), mission_clear)
 
 	world.visible = false
@@ -2473,7 +2473,7 @@ func test_static_item_effects_spawn_world_bound_from_value_descriptors() -> void
 
 
 func test_live_item_effect_owner_uses_each_fixed_ticks_value_pose() -> void:
-	# The REAL MissionRuntime pose chain: before the first completed logic tick
+	# The REAL MissionPresentation pose chain: before the first completed logic tick
 	# there is no present snapshot (the authored Node seeds the spawn); once a
 	# tick completes, the owner follows the sim's client-view value pose; an
 	# identity absent from the snapshot detaches (null). The old runtime double

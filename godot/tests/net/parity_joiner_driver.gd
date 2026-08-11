@@ -10,7 +10,6 @@ const HEARTBEAT_INTERVAL_MS := 500
 const MOTION_PRE_ROLL_MS := 250
 const MOTION_INTER_PHASE_GAP_MS := 250
 const LOOK_SAMPLES_PER_PHASE := 20
-const SHUTDOWN_DRAIN_FRAMES := 4
 
 enum Phase {
 	WAIT_READY,
@@ -45,7 +44,7 @@ var _motion_gate_steady_started_utc := ""
 var _motion_started_ticks_msec := 0
 var _motion_completed_ticks_msec := 0
 
-var _game: Node = null
+var _game: MainGame = null
 var _world: Node = null
 var _phase := Phase.WAIT_READY
 var _phase_started_ms := 0
@@ -55,7 +54,7 @@ var _motion_key: Key = KEY_NONE
 var _motion_duration_ms := 0
 var _motion_total_look := 0
 var _motion_sample_index := 0
-var _shutdown_frames_left := 0
+var _shutdown_load_operation: WorldLoadOperation = null
 var _shutdown_request: Dictionary = {}
 var _shutdown_emit_witness := false
 var _requested_exit_code := 1
@@ -113,17 +112,13 @@ func _process(_delta: float) -> bool:
 
 
 func _finalize() -> void:
-	# WM_CLOSE and error/timeout fallbacks may bypass the cooperative drain. Free
+	# WM_CLOSE and error/timeout fallbacks may bypass cooperative settlement. Free
 	# the complete game synchronously while ScriptServer and the GDExtension are
 	# still alive; no further frame is available from MainLoop finalization.
 	_release_motion_keys()
 	if is_instance_valid(_game):
-		if _game.has_method("prepare_runtime_shutdown"):
-			_game.call("prepare_runtime_shutdown")
-		elif is_instance_valid(_world) and _world.has_method("unload"):
-			_world.call("unload")
-		if _game.has_method("release_runtime_resources_for_shutdown"):
-			_game.call("release_runtime_resources_for_shutdown")
+		_game.begin_runtime_shutdown()
+		_game.finish_runtime_shutdown()
 		_game.free()
 	_world = null
 	_game = null
@@ -167,7 +162,7 @@ func _boot_game() -> bool:
 	if packed == null:
 		push_error("[parity-joiner] failed to load main_game.tscn")
 		return false
-	_game = packed.instantiate()
+	_game = packed.instantiate() as MainGame
 	packed = null
 	if _game == null:
 		push_error("[parity-joiner] failed to instantiate MainGame")
@@ -519,37 +514,29 @@ func _begin_shutdown(request: Dictionary, exit_code: int, emit_witness: bool) ->
 	_shutdown_emit_witness = emit_witness
 	_requested_exit_code = exit_code
 	if is_instance_valid(_game):
-		if _game.has_method("prepare_runtime_shutdown"):
-			_game.call("prepare_runtime_shutdown")
-		elif is_instance_valid(_world) and _world.has_method("unload"):
-			_world.call("unload")
+		_shutdown_load_operation = _game.begin_runtime_shutdown()
 	elif is_instance_valid(_world) and _world.has_method("unload"):
 		_world.call("unload")
 	_world = null
-	_shutdown_frames_left = SHUTDOWN_DRAIN_FRAMES
 	_phase = Phase.SHUTDOWN_WORLD
 
 
 func _tick_shutdown_world() -> void:
-	_shutdown_frames_left -= 1
-	if _shutdown_frames_left > 0:
+	if _shutdown_load_operation != null \
+			and not _shutdown_load_operation.is_settled():
 		return
+	_shutdown_load_operation = null
 	if is_instance_valid(_game):
-		if _game.has_method("release_runtime_resources_for_shutdown"):
-			_game.call("release_runtime_resources_for_shutdown")
-		# This MainLoop owns the game outright. Free synchronously after the
-		# world drain so no queued Node/GDExtension object can survive the later
+		_game.finish_runtime_shutdown()
+		# This MainLoop owns the game outright. Free synchronously after load
+		# settlement so no queued Node/GDExtension object can survive the later
 		# ScriptServer/module deinitialization boundary.
 		_game.free()
 	_game = null
-	_shutdown_frames_left = SHUTDOWN_DRAIN_FRAMES
 	_phase = Phase.SHUTDOWN_GAME
 
 
 func _tick_shutdown_game() -> void:
-	_shutdown_frames_left -= 1
-	if _shutdown_frames_left > 0:
-		return
 	if _shutdown_emit_witness and not _write_shutdown_witness():
 		_requested_exit_code = 7
 	_phase = Phase.DONE

@@ -1,7 +1,7 @@
 class_name LocalPlayerPresenter
 extends Node
 
-const MissionRuntime := preload("res://game/world/mission_runtime.gd")
+const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 
 # Faithful first-person camera. The on-foot eye is Position + CameraOffset, where
 # the local player's CameraOffset is the POSED HEAD BONE minus Position — the eye
@@ -218,8 +218,9 @@ func viewmodel_rig() -> PlayerViewmodelRig:
 
 
 func before_world_tick(delta: float, capture_mouse: bool = false,
-		gameplay_input_active: bool = true) -> void:
-	_input_router.before_world_tick(delta, capture_mouse, gameplay_input_active)
+		gameplay_input_active: bool = true) -> MissionFrameInput:
+	return _input_router.before_world_tick(
+			delta, capture_mouse, gameplay_input_active)
 
 
 func after_world_tick() -> void:
