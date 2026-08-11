@@ -371,10 +371,11 @@ public:
 
 	// The one runtime-frame clock: every process's single driver advances the
 	// AWAKE set once per render frame — the game from the engine frame's
-	// materials leg [orig: Terrain_RenderSectorModels @ 0x5c5d30 computes the
-	// runtime constants during the render walk], the menu shell and ONED from
-	// their one process loop. Models self-park out of the set the first frame
-	// they hold no live work; there is no per-node _process.
+	// materials leg (retail computes model runtime constants during the render
+	// sector walk; the witnessed anchor is cited engine-side at the frame
+	// driver's `materials` hook), the menu shell and ONED from their one
+	// process loop. Models self-park out of the set the first frame they hold
+	// no live work; there is no per-node _process.
 	static void advance_awake_frame(double p_delta);
 	static int64_t awake_model_count();
 	// True while this model is in the shared awake set (the park/re-arm gate's

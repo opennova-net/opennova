@@ -17,20 +17,17 @@ const RuntimeShutdownScript := preload("res://game/runtime_shutdown_coordinator.
 # control (the game *is* its install folder); this is an OpenNova convenience so a
 # wrong / menu-less folder can be re-picked without restarting. Front-end only.
 const CHANGE_DIR_KEY := KEY_F9
-# The objectives-panel toggle. The retail action toggles the panel's alpha byte
-# in co-op [orig: Input_HandleActionBinding case @0x49b68b — dword_24C18CC ^=
-# 0xFF]; the authored default binding rides the unported input-binding layer
-# (D-CTRL-3), so the key itself is a reimpl mapping.
+# The objectives-panel toggle [orig: co-op action @0x49b68b — dword_24C18CC ^=
+# 0xFF]; the authored binding rides the unported input layer (D-CTRL-3), so the
+# key is a reimpl mapping.
 const OBJECTIVES_KEY := KEY_O
 const FRIENDLY_TAGS_KEY := KEY_N  # retail action 30 @0x49b573; reimpl key (D-CTRL-3)
-# The armory key — the USE-ITEM key (input action 177 "useitem"; retail default =
-# SHIFT on the shipped KeyChart, labeled "USE ITEM/ATTACH/ARMORY"). Zone-gated: it
-# opens weapon.mnu's WEAPON screen only while the player stands inside a type-6
-# armory volume (entity Flags 0x400000, maintained by the collision resolver)
-# [orig: Input_HandleActionBinding_0 case 0xB1 @0x4e0b3f ->
-# UI_OpenMenuScreen("weapon.mnu", "WEAPON"); the parallel action 218 @0x49b8e3
-# ships with no binding row]. Out of zone the key falls through to its use-item
-# leg (unported; our motor separately polls Shift as the run modifier).
+# The armory key — the USE-ITEM key (input action 177 "useitem"; retail default
+# SHIFT). Zone-gated: opens weapon.mnu's WEAPON screen only inside a type-6
+# armory volume (entity Flags 0x400000) [orig: Input_HandleActionBinding_0 case
+# 0xB1 @0x4e0b3f -> UI_OpenMenuScreen("weapon.mnu", "WEAPON"); parallel action
+# 218 @0x49b8e3 has no binding row]. Out of zone it falls through to the
+# use-item leg (unported; the motor polls Shift as the run modifier).
 const ARMORY_KEY := KEY_SHIFT
 # The mission debug overlay (entities / sim transport / script variables).
 const DEBUG_OVERLAY_KEY := KEY_F3
@@ -154,9 +151,7 @@ func _ready() -> void:
 	_player_presenter.name = "LocalPlayerPresenter"
 	add_child(_player_presenter)
 	_player_presenter.setup(_world, _camera, _camera)
-	# The world's local-view present leg runs this presenter's camera placement
-	# inside the engine frame, before the occlusion/iris legs (D-RORD-8).
-	_world.set_local_view_presenter(_player_presenter)
+	_world.set_local_view_presenter(_player_presenter)  # D-RORD-8 present leg
 	# The in-world armory + HUD ride their shared engine presenters. Created here,
 	# not in _wire_shell, so menu-less entries (the env launch hooks) still get
 	# them; the HUD presenter's
@@ -1169,9 +1164,8 @@ func _process(delta: float) -> void:
 	if not skip_world:
 		_world.tick(_camera.global_position, _camera.global_transform, delta)
 	var probe_t2 := Time.get_ticks_usec() if timing else 0
-	# The camera/viewmodel placement now runs INSIDE the world frame (the
-	# local-view present leg, D-RORD-8); this fallback covers the frames that
-	# never reach it — the probe's world skip and a mid-frame unload/abort.
+	# Camera placement runs in the world frame now (local-view leg, D-RORD-8);
+	# this covers frames that skip it (probe world-skip, mid-frame unload).
 	if _player_presenter != null and (skip_world or not _world.is_loaded()):
 		_player_presenter.after_world_tick()
 	var probe_t3 := Time.get_ticks_usec() if timing else 0
