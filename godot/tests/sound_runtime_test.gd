@@ -36,10 +36,11 @@ func _real_root(files: Dictionary) -> ResourceRoot:
 	return root
 
 
-# Public SoundBank dependency seam: the live Simulation implements this
-# method; the value-only stand-in lets the test pin what the bank does with the
-# returned retail occlusion distance without fabricating collision internals.
-class OcclusionProviderStub:
+# Occlusion recorder driven through the bank's typed Callable override seam
+# (occlusion_override) — the live path is the Simulation provider; the value-only
+# stand-in pins what the bank does with the returned retail occlusion distance
+# without fabricating collision internals.
+class OcclusionRecorder:
 	extends RefCounted
 	var distance_q16 := -1
 	var calls := 0
@@ -48,9 +49,8 @@ class OcclusionProviderStub:
 	func _init(p_distance_q16: int = -1) -> void:
 		distance_q16 = p_distance_q16
 
-	func sound_occlusion_distance_q16(
-			_listener_pos: Vector3, _source_pos: Vector3, raw_distance_q16: int,
-			source_bms_id: int = 0) -> int:
+	func occlude(_listener_pos: Vector3, _source_pos: Vector3,
+			raw_distance_q16: int, source_bms_id: int) -> int:
 		calls += 1
 		source_bms_ids.append(source_bms_id)
 		return raw_distance_q16 if distance_q16 < 0 else distance_q16
@@ -231,9 +231,9 @@ func test_oneshot_occlusion_distance_drives_fire_volume() -> void:
 	var profile := _profile_with_set("OCCLUDED", "tone.wav")
 	profile.set_set_field(0, "target_id", 200)
 	profile.set_layer_field(0, 0, "falloff_radius", 200)
-	var provider := OcclusionProviderStub.new(100 << 16)
+	var provider := OcclusionRecorder.new(100 << 16)
 	var bank = NovaSoundBankScript.new(root)
-	bank.occlusion_provider = provider
+	bank.occlusion_override = provider.occlude
 	bank.add_bank(profile)
 	var parent := Node3D.new()
 	add_child_autofree(parent)
@@ -258,9 +258,9 @@ func test_oneshot_occlusion_distance_rechecks_set_cull_range() -> void:
 	var profile := _profile_with_set("OCCLUDED_CULL", "tone.wav")
 	profile.set_set_field(0, "target_id", 120)
 	profile.set_layer_field(0, 0, "falloff_radius", 200)
-	var provider := OcclusionProviderStub.new(130 << 16)
+	var provider := OcclusionRecorder.new(130 << 16)
 	var bank = NovaSoundBankScript.new(root)
-	bank.occlusion_provider = provider
+	bank.occlusion_override = provider.occlude
 	bank.add_bank(profile)
 	var parent := Node3D.new()
 	add_child_autofree(parent)

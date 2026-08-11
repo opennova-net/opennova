@@ -33,7 +33,10 @@ var _resource_root: ResourceRoot  # null = menu/isolated-bank use (no VFS reads)
 # inflate through the witnessed two-ray LOS so occluded sources fire quieter /
 # cull farther [orig: Sound_ApplyOcclusionDistance @ 0x529970, applied in
 # Sound_Play3DPositional @ 0x527d95]. Null (tests/menu) fires unoccluded.
-var occlusion_provider: Object = null
+var occlusion_provider: Simulation = null
+# Test-injection seam: Callable(listener, source, dist_q16, source_bms_id) -> int,
+# consulted only when no Simulation provider is set.
+var occlusion_override: Callable = Callable()
 var _banks: Array = []  # Array[LwfData]
 # name(lower) -> Array[{bank:int, set:int}]
 var _index: Dictionary = {}
@@ -228,7 +231,12 @@ func play_oneshot_3d(parent: Node3D, world_pos: Vector3, name: String, bus: Stri
 		# snapshot [orig: the Sound_ApplyOcclusionDistance call @ 0x527d95 and
 		# the <= range recheck @ 0x527da1].
 		if occlusion_provider != null:
-			dist_q16 = int(occlusion_provider.sound_occlusion_distance_q16(
+			dist_q16 = occlusion_provider.sound_occlusion_distance_q16(
+				listener_pos, world_pos, dist_q16, source_bms_id)
+			if dist_q16 > cull_q16:
+				return false
+		elif occlusion_override.is_valid():
+			dist_q16 = int(occlusion_override.call(
 				listener_pos, world_pos, dist_q16, source_bms_id))
 			if dist_q16 > cull_q16:
 				return false

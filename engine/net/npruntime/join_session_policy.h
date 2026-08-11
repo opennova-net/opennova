@@ -7,7 +7,7 @@
 #include <vector>
 
 // The joiner session-drive POLICY: the decisions the shell's net-session drive
-// (godot/src/world/net_session_drive.gd) executes around a LAN join — the
+// (godot/game/world/net_session_drive.gd) executes around a LAN join — the
 // two ConnectOrHost wait windows, the S2C 0x7B promote validation, the
 // post-load admission/deploy edge machine with its session-loss latch, and the
 // D-NET-178 expansion reconcile decision. Pure state + text: no sockets, no

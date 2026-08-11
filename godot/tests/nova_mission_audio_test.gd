@@ -10,15 +10,15 @@ const NovaMissionAudioScript = preload("res://game/world/nova_mission_audio.gd")
 const SILENT_DB := -80.0
 
 
-# Public MissionAudio dependency seam implemented by Simulation.
-class OcclusionProviderStub:
+# Occlusion recorder driven through MissionAudio's typed Callable override seam
+# (set_occlusion_override) — the live path is the Simulation provider.
+class OcclusionRecorder:
 	extends RefCounted
 	var calls := 0
 	var source_bms_ids: Array[int] = []
 
-	func sound_occlusion_distance_q16(
-			_listener_pos: Vector3, _source_pos: Vector3, raw_distance_q16: int,
-			source_bms_id: int = 0) -> int:
+	func occlude(_listener_pos: Vector3, _source_pos: Vector3,
+			raw_distance_q16: int, source_bms_id: int) -> int:
 		calls += 1
 		source_bms_ids.append(source_bms_id)
 		return raw_distance_q16
@@ -139,8 +139,8 @@ func test_ambient_queries_occlusion_once_per_raw_audible_marker() -> void:
 	# Two active layers on one audible marker share one two-ray result. A second
 	# active marker is already silent by raw falloff and must not spend a query.
 	var audio = NovaMissionAudioScript.new(null, null)
-	var provider := OcclusionProviderStub.new()
-	audio.set_simulation(provider)
+	var provider := OcclusionRecorder.new()
+	audio.set_occlusion_override(provider.occlude)
 	var holder := Node3D.new()
 	add_child_autofree(holder)
 	audio.set_markers([
@@ -502,8 +502,8 @@ end
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var audio = NovaMissionAudioScript.new(root, item_db)
-	var provider := OcclusionProviderStub.new()
-	audio.set_simulation(provider)
+	var provider := OcclusionRecorder.new()
+	audio.set_occlusion_override(provider.occlude)
 	var stats: Dictionary = audio.setup(mission, "probe.bms", container)
 
 	assert_eq(int(stats.get("markers_total", 0)), 1,

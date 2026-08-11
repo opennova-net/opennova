@@ -611,9 +611,9 @@ func _frame_bounds(bounds: AABB) -> void:
 		radius = 1.0
 	_camera.near = clampf(radius * 0.001, 0.02, 5.0)
 	_camera.far = maxf(radius * 12.0, 50.0)
-	_camera.set("fly_speed", clampf(radius * 2.5, 1.0, 250.0))
-	_camera.set("zoom_speed", clampf(radius * 0.18, 0.05, 20.0))
-	_camera.set("pan_sensitivity", clampf(radius * 0.01, 0.01, 1.0))
+	_camera.fly_speed = clampf(radius * 2.5, 1.0, 250.0)
+	_camera.zoom_speed = clampf(radius * 0.18, 0.05, 20.0)
+	_camera.pan_sensitivity = clampf(radius * 0.01, 0.01, 1.0)
 	if not _has_framed:
-		_camera.call("frame_bounds_custom", center, radius, 1.5, maxf(radius * 8.0, 6.0), 2.8, -0.18)
+		_camera.frame_bounds_custom(center, radius, 1.5, maxf(radius * 8.0, 6.0), 2.8, -0.18)
 		_has_framed = true

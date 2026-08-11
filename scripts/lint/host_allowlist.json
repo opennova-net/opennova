@@ -141,7 +141,6 @@
   ],
   "comment_ok_paths": [
     "godot/src/simulation/*",
-    "godot/game/world/wire_present_pass.gd",
     "godot/game/world/game_world.gd",
     "godot/game/world/mission_presentation.gd",
     "godot/game/debug/*",
