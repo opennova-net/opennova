@@ -1,18 +1,18 @@
 class_name MenuDriver
 extends RefCounted
 
+const MenuFrameStateReplay := preload("res://game/menu_frame_state_replay.gd")
+const MenuScrollRange := preload("res://game/menu_scroll_range.gd")
+const MenuTableState := preload("res://game/menu_table_state.gd")
+
 # The compiled-menu interaction runtime: drives ONE MenuFrame (the engine
 # draw-list/pump surface) over a parsed MnuDocument. The engine owns
-# everything witnessed — the draw walk, the mouse pump, row/popup/arrow
-# geometry, hotkey resolution, and the edit ops (engine/runtime/menu; record:
-# docs/mnu/menu-re.md). This driver is the shell-side orchestration around
-# those primitives: screen navigation + the in-file back stack, ACTION
-# dispatch, combo popup lifecycle, selection bookkeeping, sound edges, the
-# music-var push, and the aggregate value-changed relay; its signal surface
-# mirrors the deleted MnuMenu node so MenuShell + the companions keep shape.
-#
-# Addressing: widgets go by their stable MnuDocument id, valid across every
-# screen — per-id runtime state is replayed at each screen configure.
+# everything witnessed (engine/runtime/menu; record: docs/mnu/menu-re.md);
+# this driver is the shell-side orchestration: navigation + the back stack,
+# ACTION dispatch, popup/scroll/table lifecycle, sound edges, the music-var
+# push, and the value-changed relay — its signal surface mirrors the deleted
+# MnuMenu node. Widgets go by stable MnuDocument id, valid across screens;
+# per-id runtime state is replayed at each screen configure.
 
 signal screen_changed(screen_name: String)
 signal music_changed(music_var: int)
@@ -80,6 +80,8 @@ func attach(frame: MenuFrame, audio: MenuAudio) -> void:
 	_audio = audio
 	if not _frame.widget_clicked.is_connected(_on_frame_widget_clicked):
 		_frame.widget_clicked.connect(_on_frame_widget_clicked)
+	if not _frame.scroll_value_changed.is_connected(_on_frame_scroll_value):
+		_frame.scroll_value_changed.connect(_on_frame_scroll_value)
 
 
 func set_music_director(director: MusicDirector) -> void:
@@ -259,7 +261,7 @@ func _configure_frame() -> void:
 		return
 	_frame.configure(_doc, _current_screen, _root, _style,
 			_screen_text_lookup())
-	_replay_widget_state()
+	MenuFrameStateReplay.apply(_frame, _index_of_id, _id_state)
 	_seed_marquee_widgets()
 	_apply_cursor(null)
 
@@ -314,33 +316,6 @@ func _map_widget_subtree(id: int) -> void:
 	_id_of_index.append(id)
 	for child_id in _doc.get_child_ids(id):
 		_map_widget_subtree(int(child_id))
-
-
-func _replay_widget_state() -> void:
-	for id in _index_of_id:
-		var state: Dictionary = _id_state.get(id, {})
-		if state.is_empty():
-			continue
-		var index := int(_index_of_id[id])
-		if state.has("shown"):
-			_frame.set_widget_shown_override(index, bool(state["shown"]))
-		if state.has("disabled"):
-			_frame.set_widget_disabled(index, bool(state["disabled"]))
-		if state.has("checked"):
-			_frame.set_widget_checked(index, bool(state["checked"]))
-		if state.has("text"):
-			_frame.set_widget_text(index, String(state["text"]))
-		if state.has("items"):
-			_frame.set_widget_items(index, state["items"])
-		if state.has("selected_item") or state.has("scroll_row"):
-			_frame.set_widget_selection(index, int(state.get("selected_item", 0)),
-					-1, int(state.get("scroll_row", 0)))
-		if state.has("selected_set"):
-			_frame.set_widget_selected_set(index, state["selected_set"])
-		if state.has("table_rows"):
-			_frame.set_widget_table_rows(index, state["table_rows"])
-		if state.has("marquee_lines"):
-			_frame.set_widget_marquee_lines(index, state["marquee_lines"])
 
 
 # The id->text table for String/Item type=="id" lookups: the screen's own
@@ -587,6 +562,45 @@ func set_scroll_row(id: int, row: int) -> void:
 				int(state["scroll_row"]))
 
 
+# The engine pump's CScrollWnd interaction result (already clamped and
+# applied to the frame): mirror it into the saved-state store and relay the
+# value change.
+func _on_frame_scroll_value(index: int, value: int) -> void:
+	var id := _id_at_index(index)
+	if id < 0:
+		return
+	if widget_kind_of(id) != MnuDocument.TYPE_SCROLL:
+		set_scroll_row(id, value)
+		return
+	var scroll := _id_state.get(id, {}).get("scroll_range") as MenuScrollRange
+	if scroll == null or value == scroll.value:
+		return
+	scroll.value = clampi(value, scroll.minimum, scroll.maximum)
+	widget_value_changed.emit(widget_name_of(id), "scroll", scroll.value,
+			str(scroll.value))
+
+
+## The CScrollWnd min/max/inclusive-page/value render/state seam settings
+## companions update (the interaction lives in the engine pump).
+func set_widget_scroll_range(id: int, minimum: int, maximum: int,
+		page: int, value: int) -> void:
+	if minimum > maximum:
+		minimum = 0
+		maximum = 0
+	value = clampi(value, minimum, maximum)
+	var scroll := MenuScrollRange.new(minimum, maximum, page, value)
+	_state_of(id)["scroll_range"] = scroll
+	var index := _frame_index(id)
+	if index >= 0:
+		_frame.set_widget_scroll_range(index, scroll.minimum, scroll.maximum,
+				scroll.page, scroll.value)
+
+
+## Current standalone scroll state, or null until seeded.
+func get_widget_scroll_range(id: int) -> MenuScrollRange:
+	return _id_state.get(id, {}).get("scroll_range") as MenuScrollRange
+
+
 func set_widget_marquee_lines(id: int, lines: PackedStringArray) -> void:
 	_state_of(id)["marquee_lines"] = lines
 	var index := _frame_index(id)
@@ -594,51 +608,29 @@ func set_widget_marquee_lines(id: int, lines: PackedStringArray) -> void:
 		_frame.set_widget_marquee_lines(index, lines)
 
 
-# --- Table state ---------------------------------------------------------------
+# --- Table state (menu_table_state.gd owns the shapes) --------------------------
 
 func table_add_row(id: int, cells: PackedStringArray) -> void:
-	var state := _state_of(id)
-	var rows: Array = state.get("table_rows", [])
-	rows.append(cells)
-	state["table_rows"] = rows
+	MenuTableState.add_row(_state_of(id), cells)
 	_push_table_rows(id)
 
 
 func table_remove_row(id: int, row: int) -> void:
-	var state := _state_of(id)
-	var rows: Array = state.get("table_rows", [])
-	if row < 0 or row >= rows.size():
-		return
-	rows.remove_at(row)
-	state["table_rows"] = rows
-	var selected: PackedInt32Array = state.get("table_selected", PackedInt32Array())
-	var reindexed := PackedInt32Array()
-	for r in selected:
-		if r < row:
-			reindexed.append(r)
-		elif r > row:
-			reindexed.append(r - 1)
-	state["table_selected"] = reindexed
-	_push_table_rows(id)
+	if MenuTableState.remove_row(_state_of(id), row):
+		_push_table_rows(id)
 
 
 func table_clear_rows(id: int) -> void:
-	var state := _state_of(id)
-	state["table_rows"] = []
-	state["table_selected"] = PackedInt32Array()
+	MenuTableState.clear_rows(_state_of(id))
 	_push_table_rows(id)
 
 
 func table_row_count(id: int) -> int:
-	return (_id_state.get(id, {}).get("table_rows", []) as Array).size()
+	return MenuTableState.row_count(_id_state.get(id, {}))
 
 
 func table_cell_text(id: int, row: int, col: int) -> String:
-	var rows: Array = _id_state.get(id, {}).get("table_rows", [])
-	if row < 0 or row >= rows.size():
-		return ""
-	var cells: PackedStringArray = rows[row]
-	return cells[col] if col >= 0 and col < cells.size() else ""
+	return MenuTableState.cell_text(_id_state.get(id, {}), row, col)
 
 
 func table_selected_rows(id: int) -> PackedInt32Array:
@@ -646,43 +638,12 @@ func table_selected_rows(id: int) -> PackedInt32Array:
 
 
 func table_select_row(id: int, row: int, additive := false) -> void:
-	var state := _state_of(id)
-	var selected: PackedInt32Array = state.get("table_selected", PackedInt32Array()) \
-			if additive else PackedInt32Array()
-	if selected.has(row):
-		var kept := PackedInt32Array()
-		for r in selected:
-			if r != row:
-				kept.append(r)
-		selected = kept
-	else:
-		selected.append(row)
-	state["table_selected"] = selected
-	_push_table_selection(id)
+	MenuTableState.select_row(_state_of(id), row, additive)
+	MenuTableState.push_selection(_frame, _frame_index(id), _id_state.get(id, {}))
 
 
 func _push_table_rows(id: int) -> void:
-	var index := _frame_index(id)
-	if index < 0:
-		return
-	var rows: Array = _id_state.get(id, {}).get("table_rows", [])
-	var typed: Array[PackedStringArray] = []
-	for row in rows:
-		typed.append(row as PackedStringArray)
-	_frame.set_widget_table_rows(index, typed)
-	_push_table_selection(id)
-
-
-func _push_table_selection(id: int) -> void:
-	var index := _frame_index(id)
-	if index < 0:
-		return
-	var selected: PackedInt32Array = _id_state.get(id, {}).get("table_selected",
-			PackedInt32Array())
-	_frame.set_widget_selected_set(index, selected)
-	var first := selected[0] if selected.size() > 0 else -1
-	_frame.set_widget_selection(index, first, -1,
-			int(_id_state.get(id, {}).get("scroll_row", 0)))
+	MenuTableState.push_rows(_frame, _frame_index(id), _id_state.get(id, {}))
 
 
 # --- Input: mouse ---------------------------------------------------------------
@@ -706,7 +667,13 @@ func process_mouse(position: Vector2, button_down: bool) -> void:
 		if combo_index < 0:
 			_open_combo_id = -1
 		else:
-			_frame.set_cursor_state(not _edit_mode, position)
+			_frame.set_cursor_state(false, position)
+			# The popup-exclusive pump hovers the row under the mouse (style 2)
+			# [orig: the per-frame pump runs ONLY on the popup while open —
+			# scene_end_frame @ 0x63e600 gate @ 0x63e691; the row mouseover
+			# style = CListWnd_DrawItems @ 0x643f30].
+			_frame.set_widget_hover_item(combo_index,
+					_frame.combo_popup_row_at(combo_index, position))
 			if down_edge:
 				var row := _frame.combo_popup_row_at(combo_index, position)
 				if row >= 0:
@@ -718,8 +685,10 @@ func process_mouse(position: Vector2, button_down: bool) -> void:
 					close_active_combo_popup()
 			return
 
+	# The CScrollWnd interaction (arrows/track/shuttle drag) lives in the
+	# engine pump; its value changes arrive on scroll_value_changed.
 	var claim := _frame.process_mouse(position, button_down)
-	_frame.set_cursor_state(not _edit_mode, position)
+	_frame.set_cursor_state(false, position)
 	if claim != _last_claim:
 		_on_claim_changed(_last_claim, claim)
 		_last_claim = claim
@@ -749,9 +718,10 @@ func _id_at_index(index: int) -> int:
 
 
 func _apply_cursor(texture: Texture2D) -> void:
-	# The retail cursor rides the claim (inherited widget CURSOR, else the
-	# screen default); suppressed while authoring so the ONED preview never
-	# hijacks the editor cursor.
+	# The retail cursor rides the claim as the OS custom cursor — the ONE
+	# live cursor (both drawn showed the compiled one trailing by a pump
+	# frame; emit_cursor stays for surfaces without an OS cursor).
+	# Suppressed while authoring so ONED keeps the editor cursor.
 	if _edit_mode:
 		return
 	Input.set_custom_mouse_cursor(texture, Input.CURSOR_ARROW)
@@ -895,6 +865,7 @@ func close_active_combo_popup() -> void:
 	var index := _frame_index(_open_combo_id)
 	if index >= 0:
 		_frame.set_widget_popup_open(index, false)
+		_frame.set_widget_hover_item(index, -1)
 	_open_combo_id = -1
 
 

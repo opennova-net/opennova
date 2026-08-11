@@ -4,7 +4,7 @@
 //  @ 0x63bf60 -> the Draw vtable family, cited per pass below]
 // Witness record: docs/mnu/menu-re.md ("Widget render dispatch").
 
-#include "menu/menu_frame.h"
+#include "menu/menu_frame_internal.h"
 
 #include <io/strutil.h>
 
@@ -46,49 +46,6 @@ mnu::RectEdges offset_rect(const mnu::RectEdges &rect, int dx, int dy) {
 }
 
 } // namespace
-
-// Per-widget resolved build info. Rects stay in the 800x600 design space
-// (ints); scaling + the per-element int truncation happen at emit
-// [orig: CUIElement_DrawStretchedTexture @ 0x647d40].
-struct MenuFrameCompiler::WidgetNode {
-	const mnu::Window *window = nullptr;
-	int parent = -1;
-	// The per-visual-state appearance records [orig: the 28-byte state
-	// records at elem+8; flags bit0 COLOR / bit1 IMAGE / bit3 OUTLINE].
-	StatePass states[4];
-	// The ITEMS per-state appearance records (list-row highlight)
-	// [orig: CListWnd_DrawItems @ 0x643f30 — the row style records at +828].
-	StatePass items_states[4];
-	// The effective FONT + per-state fg colors, resolved like the draw-time
-	// walk [orig: CWnd_GetFontAndColors @ 0x646a70 — self-then-parent to the
-	// first widget with a font; colors in parse order, only fg is drawn].
-	int32_t font = 0;
-	uint32_t colors[4] = {0, 0, 0, 0};
-	// The effective FRAME block [orig: CWnd_FindInheritedFrameBlock
-	// @ 0x647190 — nearest ancestor carrying a frame; the draw gate stays the
-	// widget's own DRAW_FRAME].
-	int frame_owner = -1;
-	int32_t frame_stencil = kMenuTexNone;
-	int32_t frame_brush = kMenuTexNone;
-	// The inherited CURSOR texture [orig: widget_process_mouse_event
-	// @ 0x647a00 walks parents for +276 into g_ui_frame_cursor_texture].
-	int32_t cursor = kMenuTexNone;
-	// Spin arrows: default-state art (their independent hover states are
-	// child-widget state the compiled path defers — D-MNU-13).
-	int32_t spin_up_tex = kMenuTexNone;
-	int32_t spin_down_tex = kMenuTexNone;
-	// Item rows [orig: CUISpinList_ParseXMLDefinition @ 0x64bd10].
-	struct ItemVisual {
-		enum Kind { kText, kImage, kColor } kind = kText;
-		std::string text;
-		int32_t texture = kMenuTexNone;
-		uint32_t color = 0;
-	};
-	std::vector<ItemVisual> items;
-	std::vector<ItemVisual> popup_items; // combo LIST_BOX rows when authored
-	StatePass popup_states[4];           // LIST_BOX background appearances
-	StatePass popup_items_states[4];     // LIST_BOX ITEMS row appearances
-};
 
 MenuFrameCompiler::MenuFrameCompiler() = default;
 MenuFrameCompiler::~MenuFrameCompiler() = default;
@@ -200,6 +157,18 @@ void MenuFrameCompiler::set_texture_size(int32_t slot, int width, int height) {
 	}
 }
 
+std::pair<int, int>
+MenuFrameCompiler::state_texture_size(const StatePass &pass) const {
+	if (pass.texture < 0 ||
+			pass.texture >= static_cast<int32_t>(texture_sizes_.size())) {
+		return { 0, 0 };
+	}
+	const auto &size = texture_sizes_[static_cast<size_t>(pass.texture)];
+	return { size.first,
+		mnu::appearance_extent_height(pass.has_image_height,
+				pass.image_height, size.second) };
+}
+
 // --- configure ---------------------------------------------------------------
 
 void MenuFrameCompiler::build_state_passes(
@@ -231,6 +200,10 @@ void MenuFrameCompiler::build_state_passes(
 		} else if (iequals(ap.type, "image") || ap.type.empty()) {
 			// [orig: IMAGE=2 -> stretched into the element rect @ 0x647e40]
 			pass.texture = intern_texture(ap.value);
+			pass.has_map_state = ap.has_map_state;
+			pass.map_state = ap.map_state;
+			pass.has_image_height = ap.has_height;
+			pass.image_height = ap.height;
 		}
 		// type="cursor" is the shell-owned custom hook (the CURSOR=4 bit ->
 		// the vtable+28 event); the compiler emits nothing for it.
@@ -267,8 +240,47 @@ int MenuFrameCompiler::build_node(const mnu::Window &w, int parent) {
 		build_state_passes(w.appearances, node.states);
 		build_state_passes(w.items.appearances, node.items_states);
 		build_state_passes(w.list_box.appearances, node.popup_states);
-		build_state_passes(w.list_box.items.appearances,
-				node.popup_items_states);
+		build_state_passes(w.list_box.items.appearances, node.popup_items_states);
+		auto build_scrollbar = [&](const auto &source,
+									   WidgetNode::ScrollbarVisual &visual) {
+			visual.present = source.present;
+			visual.position = source.position;
+			visual.has_position = source.position.has_left && source.position.has_top;
+			build_state_passes(source.track, visual.track);
+			build_state_passes(source.shuttle, visual.shuttle);
+			build_state_passes(source.scrollup, visual.up);
+			build_state_passes(source.scrolldown, visual.down);
+		};
+		build_scrollbar(w.table_data.scrollbar, node.embedded_scrollbar);
+		build_scrollbar(w.list_box.scrollbar, node.popup_scrollbar);
+		node.popup_scrollbar.edge_pad =
+				w.list_box.has_sb_edge_pad ? std::max(w.list_box.sb_edge_pad, 0) : 0;
+		if (w.type == mnu::WindowType::Scroll) {
+			node.scrollbar.present = true;
+			node.scrollbar.vertical = !iequals(w.orientation, "HORIZONTAL");
+			// HEIGHT/WIDTH both feed the original's one along-axis child
+			// extent. Shipped horizontal bars author HEIGHT and vertical bars
+			// author WIDTH; either spelling is accepted, with ctor default 20.
+			// [orig: CScrollWnd_Construct @ 0x64c450;
+			// CUIScrollWidget_ParseExtendedXMLDef @ 0x64c6d0]
+			if (node.scrollbar.vertical) {
+				if (w.has_scroll_width && w.scroll_width > 0) {
+					node.scrollbar.part_extent = w.scroll_width;
+				} else if (w.has_scroll_height && w.scroll_height > 0) {
+					node.scrollbar.part_extent = w.scroll_height;
+				}
+			} else if (w.has_scroll_height && w.scroll_height > 0) {
+				node.scrollbar.part_extent = w.scroll_height;
+			} else if (w.has_scroll_width && w.scroll_width > 0) {
+				node.scrollbar.part_extent = w.scroll_width;
+			}
+			for (int state = 0; state < 4; ++state) {
+				node.scrollbar.track[state] = node.states[state];
+			}
+			build_state_passes(w.shuttle, node.scrollbar.shuttle);
+			build_state_passes(w.scrollup, node.scrollbar.up);
+			build_state_passes(w.scrolldown, node.scrollbar.down);
+		}
 		// FONT: the draw-time walk takes the first self-or-ancestor widget
 		// with a font; its 8 colors ride along in parse order
 		// [orig: CWnd_GetFontAndColors @ 0x646a70].
@@ -311,22 +323,36 @@ int MenuFrameCompiler::build_node(const mnu::Window &w, int parent) {
 			node.cursor = nodes_[static_cast<size_t>(parent)].cursor;
 		}
 		// Spin arrows: default-state art (see WidgetNode note).
-		auto arrow_texture = [&](const mnu::SpinButton &btn) {
+		auto arrow_pass = [&](const mnu::SpinButton &btn) {
+			const mnu::Appearance *selected = nullptr;
 			for (const mnu::Appearance &ap : btn.appearances) {
 				if ((iequals(ap.type, "image") || ap.type.empty()) &&
 						appearance_state_slot(ap.state) == kStateDefault) {
-					return intern_texture(ap.value);
+					selected = &ap;
+					break;
 				}
 			}
-			for (const mnu::Appearance &ap : btn.appearances) {
-				if (iequals(ap.type, "image") || ap.type.empty()) {
-					return intern_texture(ap.value);
+			if (selected == nullptr) {
+				for (const mnu::Appearance &ap : btn.appearances) {
+					if (iequals(ap.type, "image") || ap.type.empty()) {
+						selected = &ap;
+						break;
+					}
 				}
 			}
-			return kMenuTexNone;
+			StatePass pass;
+			if (selected != nullptr) {
+				pass.present = true;
+				pass.texture = intern_texture(selected->value);
+				pass.has_map_state = selected->has_map_state;
+				pass.map_state = selected->map_state;
+				pass.has_image_height = selected->has_height;
+				pass.image_height = selected->height;
+			}
+			return pass;
 		};
-		node.spin_up_tex = arrow_texture(w.spinup);
-		node.spin_down_tex = arrow_texture(w.spindown);
+		node.spin_up = arrow_pass(w.spinup);
+		node.spin_down = arrow_pass(w.spindown);
 		// Item rows [orig: id -> text via the string table, image filename
 		// loaded, color wcstoul base 16 @ 0x64bd10].
 		auto build_items = [&](const std::vector<mnu::Item> &rows,
@@ -411,22 +437,9 @@ mnu::RectEdges MenuFrameCompiler::solve_rect(const WidgetNode &node,
 		if (pass.texture < 0) {
 			continue;
 		}
-		const auto &size = texture_sizes_[static_cast<size_t>(pass.texture)];
+		const auto size = state_texture_size(pass);
 		max_w = std::max(max_w, size.first);
-		// The HEIGHT sprite-frame attr participates through the parse-time
-		// appearance rows; the interned per-state pass keeps texture extents.
-		int height_attr = 0;
-		bool has_height_attr = false;
-		for (const mnu::Appearance &ap : w.appearances) {
-			if (appearance_state_slot(ap.state) == slot_state &&
-					(iequals(ap.type, "image") || ap.type.empty())) {
-				has_height_attr = ap.has_height;
-				height_attr = ap.height;
-				break;
-			}
-		}
-		max_h = std::max(max_h, mnu::appearance_extent_height(has_height_attr,
-								  height_attr, size.second));
+		max_h = std::max(max_h, size.second);
 	}
 	mnu::RectEdges rect = mnu::position_rect(w.position.has_left,
 			w.position.left, w.position.has_top, w.position.top,
@@ -487,6 +500,27 @@ float MenuFrameCompiler::emit_x(int design, float scale) {
 			static_cast<int>(static_cast<double>(design) * scale));
 }
 
+void MenuFrameCompiler::push_quad(const MenuQuad &quad) {
+	draw_list_.draw_ops.push_back(
+			{ MenuDrawList::DrawOp::Kind::Quad,
+					static_cast<int32_t>(draw_list_.quads.size()) });
+	draw_list_.quads.push_back(quad);
+}
+
+void MenuFrameCompiler::push_line(const MenuLine &line) {
+	draw_list_.draw_ops.push_back(
+			{ MenuDrawList::DrawOp::Kind::Line,
+					static_cast<int32_t>(draw_list_.lines.size()) });
+	draw_list_.lines.push_back(line);
+}
+
+void MenuFrameCompiler::push_font_run(const MenuDrawList::FontRun &run) {
+	draw_list_.draw_ops.push_back(
+			{ MenuDrawList::DrawOp::Kind::FontRun,
+					static_cast<int32_t>(draw_list_.font_runs.size()) });
+	draw_list_.font_runs.push_back(run);
+}
+
 void MenuFrameCompiler::emit_rect_quad(const mnu::RectEdges &design,
 		const WalkScale &s, uint32_t color, int32_t texture, bool tiled,
 		float tile_u, float tile_v) {
@@ -502,7 +536,47 @@ void MenuFrameCompiler::emit_rect_quad(const mnu::RectEdges &design,
 		quad.u1 = tile_u;
 		quad.v1 = tile_v;
 	}
-	draw_list_.quads.push_back(quad);
+	push_quad(quad);
+}
+
+// MAP_STATE/HEIGHT selects one source row while the IMAGE pass still stretches
+// into the authored destination rect. The typed list carries that source band
+// as normalized UVs [orig: CUIElement_ParseXMLDefinition @ 0x648120;
+// CUIElement_DrawTextureNative @ 0x647e40 ->
+// CTextureManager_DrawScaledRect @ 0x654e60].
+void MenuFrameCompiler::emit_state_texture(const mnu::RectEdges &design,
+		const WalkScale &s,
+		const StatePass &pass) {
+	if (pass.texture < 0) {
+		return;
+	}
+	emit_rect_quad(design, s, 0xFFFFFFFFu, pass.texture, false, 1.0f, 1.0f);
+	if (!pass.has_map_state || pass.map_state < 0 || !pass.has_image_height ||
+			pass.image_height <= 0) {
+		return;
+	}
+	const int texture_height =
+			texture_sizes_[static_cast<size_t>(pass.texture)].second;
+	if (texture_height <= 0) {
+		return;
+	}
+	MenuQuad &quad = draw_list_.quads.back();
+	quad.v0 = static_cast<float>(pass.map_state * pass.image_height) /
+			static_cast<float>(texture_height);
+	quad.v1 = static_cast<float>((pass.map_state + 1) * pass.image_height) /
+			static_cast<float>(texture_height);
+}
+
+void MenuFrameCompiler::emit_state_pass(const mnu::RectEdges &design,
+		const WalkScale &s,
+		const StatePass &pass) {
+	if (pass.has_color) {
+		emit_rect_quad(design, s, pass.color, kMenuTexNone, false, 1.0f, 1.0f);
+	}
+	emit_state_texture(design, s, pass);
+	if (pass.has_outline) {
+		emit_outline(design, s, pass.outline);
+	}
 }
 
 // [orig: CUIElement_DrawOutlineRect @ 0x647fc0 — top edge to right-1, then
@@ -513,11 +587,11 @@ void MenuFrameCompiler::emit_outline(const mnu::RectEdges &design,
 	const float y0 = emit_x(design.top, s.y);
 	const float x1 = emit_x(design.right, s.x) - 1.0f;
 	const float y1 = emit_x(design.bottom, s.y) - 1.0f;
-	draw_list_.lines.push_back({x0, y0, x1, y0, color});
+	push_line({ x0, y0, x1, y0, color });
 	if (y1 > y0) {
-		draw_list_.lines.push_back({x1, y0, x1, y1, color});
-		draw_list_.lines.push_back({x1, y1, x0, y1, color});
-		draw_list_.lines.push_back({x0, y1, x0, y0, color});
+		push_line({ x1, y0, x1, y1, color });
+		push_line({ x1, y1, x0, y1, color });
+		push_line({ x0, y1, x0, y0, color });
 	}
 }
 
@@ -531,20 +605,12 @@ void MenuFrameCompiler::emit_appearance(const WidgetNode &node,
 	if (appearance_slot < 0 || appearance_slot > 3) {
 		return;
 	}
-	const StatePass &pass = node.states[appearance_slot];
-	if (pass.has_color) {
-		emit_rect_quad(rect, s, pass.color, kMenuTexNone, false, 1.0f, 1.0f);
-	}
-	if (pass.texture >= 0) {
-		emit_rect_quad(rect, s, 0xFFFFFFFFu, pass.texture, false, 1.0f, 1.0f);
-	}
-	if (pass.has_outline) {
-		emit_outline(rect, s, pass.outline);
-	}
+	emit_state_pass(rect, s, node.states[appearance_slot]);
 }
 
-// The 8-piece frame + tiled brush fill, every quad modulated 0x7F7F7F
-// (neutral in the modulate-2x path); nothing draws when neither texture
+// The 8-piece frame + tiled brush fill. Retail submits 0x7F7F7F through its
+// modulate-2x material (therefore no tint); MenuQuad carries the effective
+// ordinary-multiply backend color, so the equivalent value is white.
 // resolves [orig: CUIElement_DrawFrame @ 0x64a210 over init_border_materials
 // @ 0x646f70].
 void MenuFrameCompiler::emit_frame(const WidgetNode &node,
@@ -570,7 +636,7 @@ void MenuFrameCompiler::emit_frame(const WidgetNode &node,
 		const float tiles_v = size.second > 0
 				? static_cast<float>(h) / static_cast<float>(size.second)
 				: 1.0f;
-		emit_rect_quad(rect, s, 0xFF7F7F7Fu, node.frame_brush, true, tiles_u,
+		emit_rect_quad(rect, s, 0xFFFFFFFFu, node.frame_brush, true, tiles_u,
 				tiles_v);
 	}
 	if (!has_stencil) {
@@ -616,7 +682,7 @@ void MenuFrameCompiler::emit_frame(const WidgetNode &node,
 		quad.y0 = emit_x(dest.top, s.y);
 		quad.x1 = emit_x(dest.right, s.x);
 		quad.y1 = emit_x(dest.bottom, s.y);
-		quad.color = 0xFF7F7F7Fu;
+		quad.color = 0xFFFFFFFFu;
 		quad.texture = node.frame_stencil;
 		if (tex_w > 0.0f && tex_h > 0.0f) {
 			quad.u0 = static_cast<float>(uv.x) / tex_w;
@@ -624,7 +690,7 @@ void MenuFrameCompiler::emit_frame(const WidgetNode &node,
 			quad.u1 = static_cast<float>(uv.x + uv.size) / tex_w;
 			quad.v1 = static_cast<float>(uv.y + uv.size) / tex_h;
 		}
-		draw_list_.quads.push_back(quad);
+		push_quad(quad);
 	}
 }
 
@@ -642,6 +708,7 @@ void MenuFrameCompiler::emit_glyph_run(const WidgetNode &node,
 	hud::GameFont gf;
 	gf.set_font(font);
 	const size_t first = draw_list_.glyphs.size();
+	const size_t underline_first = draw_list_.underlines.size();
 	const float x = emit_x(design_x, s.x);
 	const float y = emit_x(design_y, s.y);
 	const hud::GameFontRun run =
@@ -659,7 +726,10 @@ void MenuFrameCompiler::emit_glyph_run(const WidgetNode &node,
 		fr.font = node.font;
 		fr.first = static_cast<int32_t>(first);
 		fr.count = static_cast<int32_t>(count);
-		draw_list_.font_runs.push_back(fr);
+		fr.underline_first = static_cast<int32_t>(underline_first);
+		fr.underline_count =
+				static_cast<int32_t>(draw_list_.underlines.size() - underline_first);
+		push_font_run(fr);
 	}
 }
 
@@ -711,9 +781,11 @@ void MenuFrameCompiler::emit_caret(hud::GameFont &gf, const std::string &text,
 //  draw; the wrap path (+760 -> sub_653D60) is deferred (D-MNU-13)].
 void MenuFrameCompiler::emit_widget_text(const WidgetNode &node,
 		const mnu::RectEdges &rect, const WalkScale &s, int color_state,
-		const MenuWidgetState *ws, int caret) {
+		const MenuWidgetState *ws, int caret,
+		const std::string *override_text) {
 	const mnu::Window &w = *node.window;
-	const std::string text = widget_text(node, ws);
+	const std::string text =
+			override_text != nullptr ? *override_text : widget_text(node, ws);
 	if (text.empty()) {
 		return;
 	}
@@ -810,7 +882,7 @@ void MenuFrameCompiler::emit_edit(int index, const WidgetNode &node,
 					fr.font = node.font;
 					fr.first = static_cast<int32_t>(first);
 					fr.count = static_cast<int32_t>(count);
-					draw_list_.font_runs.push_back(fr);
+					push_font_run(fr);
 				}
 			}
 		}
@@ -1193,19 +1265,8 @@ void MenuFrameCompiler::emit_list_rows(const WidgetNode &node,
 		if (style >= 0 && node.items_states[style].present) {
 			const StatePass &pass = node.items_states[style];
 			// The row rect inflates -1 horizontally [orig: InflateRect -1,0].
-			const mnu::RectEdges hi{row.left + 1, row.top, row.right - 1,
-					row.bottom};
-			if (pass.has_color) {
-				emit_rect_quad(hi, s, pass.color, kMenuTexNone, false, 1.0f,
-						1.0f);
-			}
-			if (pass.texture >= 0) {
-				emit_rect_quad(hi, s, 0xFFFFFFFFu, pass.texture, false, 1.0f,
-						1.0f);
-			}
-			if (pass.has_outline) {
-				emit_outline(hi, s, pass.outline);
-			}
+			const mnu::RectEdges hi{ row.left + 1, row.top, row.right - 1, row.bottom };
+			emit_state_pass(hi, s, pass);
 		}
 		if (runtime_rows) {
 			const std::string &text = ws->items[static_cast<size_t>(i)];
@@ -1228,120 +1289,26 @@ void MenuFrameCompiler::emit_list_rows(const WidgetNode &node,
 	}
 }
 
-// The combo LIST_BOX popup at its authored combo-relative rect
-// [orig: CComboWnd_Render @ 0x65bfd0 — the embedded CListWnd child draws at
-// its own rect (D-MNU-7); rows per CListWnd_DrawItems @ 0x643f30].
-void MenuFrameCompiler::emit_combo_popup(const WidgetNode &node,
-		const mnu::RectEdges &rect, const WalkScale &s,
-		const MenuWidgetState *ws) {
-	const mnu::Window &w = *node.window;
-	if (!w.list_box.present) {
-		return;
-	}
-	const mnu::RectEdges local = mnu::position_rect(
-			w.list_box.position.has_left, w.list_box.position.left,
-			w.list_box.position.has_top, w.list_box.position.top,
-			w.list_box.position.has_right, w.list_box.position.right,
-			w.list_box.position.has_bottom, w.list_box.position.bottom, 0, 0);
-	const mnu::RectEdges popup = offset_rect(local, rect.left, rect.top);
-	// Popup background appearances (default state).
-	const StatePass &bg = node.popup_states[kStateDefault];
-	if (bg.has_color) {
-		emit_rect_quad(popup, s, bg.color, kMenuTexNone, false, 1.0f, 1.0f);
-	}
-	if (bg.texture >= 0) {
-		emit_rect_quad(popup, s, 0xFFFFFFFFu, bg.texture, false, 1.0f, 1.0f);
-	}
-	if (bg.has_outline) {
-		emit_outline(popup, s, bg.outline);
-	}
-	// Rows: runtime-seeded rows win; else the authored nested collection wins
-	// even when empty, else the top-level items (the documented D-MNU-7/8
-	// model).
-	const bool runtime_rows = ws != nullptr && ws->has_items;
-	const std::vector<WidgetNode::ItemVisual> &rows =
-			w.list_box.items.present ? node.popup_items : node.items;
-	const int row_count = runtime_rows ? static_cast<int>(ws->items.size())
-									   : static_cast<int>(rows.size());
-	const int row_h = row_height_(node);
-	if (row_h <= 0) {
-		return;
-	}
-	const int selected = ws != nullptr ? ws->selected_item : -1;
-	const int hovered = ws != nullptr ? ws->hover_item : -1;
-	const int edge = w.list_box.string_data.has_edge
-			? w.list_box.string_data.edge
-			: 0;
-	int y = popup.top;
-	for (int i = 0; i < row_count; ++i) {
-		if (y + row_h > popup.bottom) {
-			break;
-		}
-		const mnu::RectEdges row{popup.left, y, popup.right, y + row_h};
-		int style = -1;
-		if (i == selected) {
-			style = kStateSelected;
-		} else if (i == hovered) {
-			style = kStateMouseover;
-		}
-		const StatePass(&row_states)[4] = w.list_box.items.present
-				? node.popup_items_states
-				: node.items_states;
-		if (style >= 0 && row_states[style].present) {
-			const StatePass &pass = row_states[style];
-			const mnu::RectEdges hi{row.left + 1, row.top, row.right - 1,
-					row.bottom};
-			if (pass.has_color) {
-				emit_rect_quad(hi, s, pass.color, kMenuTexNone, false, 1.0f,
-						1.0f);
-			}
-			if (pass.texture >= 0) {
-				emit_rect_quad(hi, s, 0xFFFFFFFFu, pass.texture, false, 1.0f,
-						1.0f);
-			}
-		}
-		if (runtime_rows) {
-			const std::string &text = ws->items[static_cast<size_t>(i)];
-			if (!text.empty()) {
-				const int color_state = style >= 0 ? style : kStateDefault;
-				emit_glyph_run(node, text, row.left + edge, row.top, s,
-						node.colors[color_state], -1);
-			}
-		} else {
-			const WidgetNode::ItemVisual &item = rows[static_cast<size_t>(i)];
-			if (item.kind == WidgetNode::ItemVisual::kText &&
-					!item.text.empty()) {
-				const int color_state = style >= 0 ? style : kStateDefault;
-				emit_glyph_run(node, item.text, row.left + edge, row.top, s,
-						node.colors[color_state], -1);
-			}
-		}
-		y += row_h;
-	}
-}
-
 // Spin up/down arrows: parent-relative child windows sized by the
 // three-stage fallback over their appearance art
 // [orig: CSpinListWnd_CreateUpDownChildren @ 0x64b8b0].
 void MenuFrameCompiler::emit_spin_arrows(const WidgetNode &node,
 		const mnu::RectEdges &rect, const WalkScale &s) {
 	const mnu::Window &w = *node.window;
-	const auto emit_arrow = [&](const mnu::SpinButton &btn, int32_t slot) {
-		if (!btn.present || slot < 0) {
+	const auto emit_arrow = [&](const mnu::SpinButton &btn,
+									const StatePass &pass) {
+		if (!btn.present || pass.texture < 0) {
 			return;
 		}
-		const auto &size = texture_sizes_[static_cast<size_t>(slot)];
+		const auto size = state_texture_size(pass);
 		const mnu::RectEdges local = mnu::spin_button_rect(
-				btn.position.has_left, btn.position.left,
-				btn.position.has_top, btn.position.top,
-				btn.position.has_right, btn.position.right,
-				btn.position.has_bottom, btn.position.bottom, size.first,
-				size.second);
-		emit_rect_quad(offset_rect(local, rect.left, rect.top), s,
-				0xFFFFFFFFu, slot, false, 1.0f, 1.0f);
+				btn.position.has_left, btn.position.left, btn.position.has_top,
+				btn.position.top, btn.position.has_right, btn.position.right,
+				btn.position.has_bottom, btn.position.bottom, size.first, size.second);
+		emit_state_texture(offset_rect(local, rect.left, rect.top), s, pass);
 	};
-	emit_arrow(w.spinup, node.spin_up_tex);
-	emit_arrow(w.spindown, node.spin_down_tex);
+	emit_arrow(w.spinup, node.spin_up);
+	emit_arrow(w.spindown, node.spin_down);
 }
 
 // The cursor pass [orig: CUIScene_DrawScreensAndCursor @ 0x63bf60]: the
@@ -1376,7 +1343,7 @@ void MenuFrameCompiler::emit_cursor(const MenuFrameState &state) {
 	quad.x1 = state.cursor_x + static_cast<float>(size.first);
 	quad.y1 = state.cursor_y + static_cast<float>(size.second);
 	quad.texture = slot;
-	draw_list_.quads.push_back(quad);
+	push_quad(quad);
 }
 
 // --- the walk ----------------------------------------------------------------
@@ -1436,7 +1403,15 @@ MenuFrameCompiler::MouseClaim MenuFrameCompiler::pump_mouse(
 		return claim;
 	}
 	int hit = -1;
-	hit_walk(0, 0, 0, io_state, mouse_x, mouse_y, scale_x, scale_y, &hit);
+	// The scrollbar interaction runs ahead of the claim walk: a pressed part
+	// owns every sample until release (retail's child-window capture), so the
+	// walk never turns a scrollbar press into another widget's press.
+	if (scroll_pump_mouse_(io_state, mouse_x, mouse_y, button_down, scale_x,
+				scale_y, &claim)) {
+		hit = claim.hovered;
+	} else {
+		hit_walk(0, 0, 0, io_state, mouse_x, mouse_y, scale_x, scale_y, &hit);
+	}
 	for (MenuWidgetState &row : io_state.widgets) {
 		row.hovered = false;
 		row.pressed = false;
@@ -1516,8 +1491,15 @@ int MenuFrameCompiler::row_height_(const WidgetNode &node) const {
 	// [orig: authored MIN_ITEM_HEIGHT wins, else the "W" measure —
 	//  CListWnd_DrawItems @ 0x643f30 (D-MNU-8)]
 	const mnu::Window &w = *node.window;
-	if (w.list_box.has_min_item_height && w.list_box.min_item_height >= 0) {
-		return w.list_box.min_item_height;
+	// A combo's rows live in its nested LIST_BOX. Direct LIST/MULTI/LAN_LIST
+	// syntax stores the sibling MIN_ITEM_HEIGHT in table_data.
+	if (w.type == mnu::WindowType::Combo) {
+		if (w.list_box.has_min_item_height && w.list_box.min_item_height >= 0) {
+			return w.list_box.min_item_height;
+		}
+	} else if (w.table_data.has_min_item_height &&
+			w.table_data.min_item_height >= 0) {
+		return w.table_data.min_item_height;
 	}
 	int tw = 0;
 	int row_h = 0;
@@ -1671,6 +1653,17 @@ int MenuFrameCompiler::list_row_at(int index, const MenuFrameState &state,
 	}
 	const MenuWidgetState *ws = state_for(state, index);
 	const int first = ws != nullptr ? std::max(ws->scroll_row, 0) : 0;
+	const int visible = std::max((rect.bottom - rect.top) / row_h, 0);
+	mnu::RectEdges scrollbar_rect;
+	if (count > visible &&
+			resolve_scrollbar_rect(node, ScrollbarKind::Embedded, rect, 0,
+					rect.bottom - rect.top, 22, &scrollbar_rect) &&
+			mx >= emit_x(scrollbar_rect.left, sx) &&
+			mx < emit_x(scrollbar_rect.right, sx) &&
+			my >= emit_x(scrollbar_rect.top, sy) &&
+			my < emit_x(scrollbar_rect.bottom, sy)) {
+		return -1;
+	}
 	int y = rect.top;
 	for (int i = first; i < count; ++i) {
 		if (y + row_h > rect.bottom) {
@@ -1747,8 +1740,24 @@ int MenuFrameCompiler::combo_popup_row_at(int index,
 	if (mx < emit_x(popup.left, sx) || mx >= emit_x(popup.right, sx)) {
 		return -1;
 	}
+	const MenuWidgetState *ws = state_for(state, index);
+	const int first = ws != nullptr ? std::max(ws->scroll_row, 0) : 0;
+	const int visible = std::max((popup.bottom - popup.top) / row_h, 0);
+	mnu::RectEdges scrollbar_rect;
+	if (count > visible &&
+			resolve_scrollbar_rect(node, ScrollbarKind::Popup, popup, 0,
+					popup.bottom - popup.top, 22, &scrollbar_rect) &&
+			mx >= emit_x(scrollbar_rect.left, sx) &&
+			mx < emit_x(scrollbar_rect.right, sx) &&
+			my >= emit_x(scrollbar_rect.top, sy) &&
+			my < emit_x(scrollbar_rect.bottom, sy)) {
+		// The original routes the child scrollbar before the list rows.
+		// Part interaction is deferred, but the covered strip must not select
+		// a row. [orig: CListWnd child walk @ 0x643f30]
+		return -1;
+	}
 	int y = popup.top;
-	for (int i = 0; i < count; ++i) {
+	for (int i = first; i < count; ++i) {
 		if (y + row_h > popup.bottom) {
 			break;
 		}
@@ -1767,11 +1776,12 @@ int MenuFrameCompiler::spin_arrow_hit_(const WidgetNode &node,
 		const mnu::RectEdges &rect, float mx, float my, float sx,
 		float sy) const {
 	const mnu::Window &w = *node.window;
-	const auto arrow_hit = [&](const mnu::SpinButton &btn, int32_t slot) {
-		if (!btn.present || slot < 0) {
+	const auto arrow_hit = [&](const mnu::SpinButton &btn,
+								   const StatePass &pass) {
+		if (!btn.present || pass.texture < 0) {
 			return false;
 		}
-		const auto &size = texture_sizes_[static_cast<size_t>(slot)];
+		const auto size = state_texture_size(pass);
 		const mnu::RectEdges local = mnu::spin_button_rect(
 				btn.position.has_left, btn.position.left, btn.position.has_top,
 				btn.position.top, btn.position.has_right, btn.position.right,
@@ -1781,10 +1791,10 @@ int MenuFrameCompiler::spin_arrow_hit_(const WidgetNode &node,
 		return mx >= emit_x(abs.left, sx) && mx < emit_x(abs.right, sx) &&
 				my >= emit_x(abs.top, sy) && my < emit_x(abs.bottom, sy);
 	};
-	if (arrow_hit(w.spinup, node.spin_up_tex)) {
+	if (arrow_hit(w.spinup, node.spin_up)) {
 		return 1;
 	}
-	if (arrow_hit(w.spindown, node.spin_down_tex)) {
+	if (arrow_hit(w.spindown, node.spin_down)) {
 		return 2;
 	}
 	return 0;
@@ -1801,52 +1811,6 @@ int MenuFrameCompiler::spin_arrow_at(int index, const MenuFrameState &state,
 	}
 	const WidgetNode &node = nodes_[static_cast<size_t>(index)];
 	return spin_arrow_hit_(node, rect, mx, my, sx, sy);
-}
-
-int MenuFrameCompiler::table_row_at(int index, const MenuFrameState &state,
-		float mx, float my, float sx, float sy) const {
-	if (index < 0 || index >= static_cast<int>(nodes_.size())) {
-		return -1;
-	}
-	const WidgetNode &node = nodes_[static_cast<size_t>(index)];
-	const mnu::TableData &table = node.window->table_data;
-	if (table.column.headers.empty()) {
-		return -1;
-	}
-	const MenuWidgetState *ws = state_for(state, index);
-	if (ws == nullptr || ws->table_rows.empty()) {
-		return -1;
-	}
-	mnu::RectEdges rect;
-	if (!widget_rect(index, state, &rect)) {
-		return -1;
-	}
-	int em_w = 0;
-	int em_h = 0;
-	measure_text(node, "W", &em_w, &em_h);
-	int row_h = em_h;
-	if (table.has_min_item_height && table.min_item_height > 0) {
-		row_h = table.min_item_height;
-	}
-	if (row_h <= 0) {
-		return -1;
-	}
-	if (mx < emit_x(rect.left, sx) || mx >= emit_x(rect.right, sx)) {
-		return -1;
-	}
-	const int first = ws->scroll_row > 0 ? ws->scroll_row : 0;
-	int y = rect.top + em_h; // header row
-	for (size_t r = static_cast<size_t>(first); r < ws->table_rows.size();
-			++r) {
-		if (y + row_h > rect.bottom) {
-			break;
-		}
-		if (my >= emit_x(y, sy) && my < emit_x(y + row_h, sy)) {
-			return static_cast<int>(r);
-		}
-		y += row_h;
-	}
-	return -1;
 }
 
 bool MenuFrameCompiler::multiline_line_counts(int index,
@@ -2114,6 +2078,17 @@ int MenuFrameCompiler::walk_widget(int index, int origin_x, int origin_y,
 			emit_appearance(node, rect, s,
 					appearance_state_with_fallback(node, pump));
 			emit_multiline_edit(node, rect, s, pump, state, ws);
+			int fit_lines = 0;
+			int total_lines = 0;
+			multiline_line_counts(index, state, &fit_lines, &total_lines);
+			mnu::RectEdges scrollbar_rect;
+			if (total_lines > fit_lines &&
+					resolve_scrollbar_rect(node, ScrollbarKind::Embedded, rect, 0,
+							rect.bottom - rect.top, 22, &scrollbar_rect)) {
+				emit_scrollbar(node, ScrollbarKind::Embedded, scrollbar_rect, s, 0,
+						std::max(total_lines - fit_lines, 0), fit_lines - 1,
+						ws != nullptr ? ws->scroll_row : 0, kStateDefault);
+			}
 			break;
 		}
 		case mnu::WindowType::SpinList: {
@@ -2139,40 +2114,61 @@ int MenuFrameCompiler::walk_widget(int index, int origin_x, int origin_y,
 			emit_appearance(node, rect, s,
 					appearance_state_with_fallback(node, pump));
 			emit_list_rows(node, rect, s, ws);
+			emit_row_scrollbar_(index, node, rect, s, state, ws);
 			break;
 		}
 		case mnu::WindowType::Combo: {
-			// [orig: CComboWnd_Render @ 0x65bfd0 — the closed cell, then the
-			//  embedded list child at its authored rect when open]
+			// [orig: CComboWnd_Render @ 0x65bfd0 — frame, appearance, then the
+			//  LABEL temporarily swapped to the embedded list's SELECTED row
+			//  text (@ 0x65c05b..0x65c083: this[183] = row_text(list,
+			//  selected_row(list)); CStaticWnd_DrawLabel; restore) — the
+			//  closed face IS the list selection, text-only, laid out by the
+			//  combo's OWN STRING block. Shipped options.mnu authors rows only
+			//  inside <LIST_BOX>, so a face reading widget-level ITEMS alone
+			//  rendered blank (D-MNU-15's runtime-rows fix carried the same
+			//  root cause for authored rows).]
 			if (w.draw_frame) {
 				emit_frame(node, rect, s);
 			}
 			emit_appearance(node, rect, s,
 					appearance_state_with_fallback(node, pump));
-			// The closed face shows the SELECTION whenever rows exist —
-			// authored OR runtime-seeded (the armory's companion rows); the
-			// authored-only gate left every runtime-filled combo face blank
-			// (D-MNU-15) [orig: the closed face is the +764 CButtonWnd showing
-			// items[selected], CComboWnd ctor @ 0x65be40].
-			if (!node.items.empty() || (ws != nullptr && ws->has_items)) {
-				emit_item_cell(node, rect, s, pump, ws);
-			} else {
-				emit_widget_text(node, rect, s, pump, ws, -1);
-			}
+			// The swapped row text draws unconditionally — an empty selected
+			// row leaves a blank face, never the widget's own authored TEXT.
+			const std::string face = combo_face_text(node, ws);
+			emit_widget_text(node, rect, s, pump, ws, -1, &face);
 			if (ws != nullptr && ws->popup_open) {
-				emit_combo_popup(node, rect, s, ws);
+				// Deferred to the post-walk overlay pass: retail's witnessed
+				// walk paints popups inline yet renders them on top (that
+				// mechanism is unwalked); open popups draw menu-top by the
+				// D-MNU-12 decision, as the Control-tree overlay did.
+				deferred_popups_.push_back(index);
 			}
 			break;
 		}
 		case mnu::WindowType::Scroll: {
-			// [orig: CScrollWnd_Render @ 0x64c5c0 — frame -> appearance ->
-			//  children; no specialised interior (the arrows/thumb are its
-			//  child BUTTONs)]
+			// The track COLOR/OUTLINE use the full widget, its IMAGE uses the
+			// middle span, and the two arrow children plus shuttle share this rect.
+			// [orig: CScrollWnd_Render @ 0x64c5c0; scroll COLOR sink @ 0x64ce70;
+			// scroll IMAGE sink @ 0x64cf70; CUIScrollbar_CalcThumbRect
+			// @ 0x64cba0]
 			if (w.draw_frame) {
 				emit_frame(node, rect, s);
 			}
-			emit_appearance(node, rect, s,
-					appearance_state_with_fallback(node, pump));
+			mnu::RectEdges scrollbar_rect;
+			if (resolve_scrollbar_rect(node, ScrollbarKind::Standalone, rect, 0, 0, 0,
+						&scrollbar_rect)) {
+				const int range_min =
+						ws != nullptr && ws->has_scroll_range ? ws->scroll_min : 0;
+				const int range_max =
+						ws != nullptr && ws->has_scroll_range ? ws->scroll_max : 0;
+				const int page =
+						ws != nullptr && ws->has_scroll_range ? ws->scroll_page : 10;
+				const int value =
+						ws != nullptr && ws->has_scroll_range ? ws->scroll_value : 0;
+				emit_scrollbar(node, ScrollbarKind::Standalone, scrollbar_rect, s,
+						range_min, range_max, page, value,
+						appearance_state_with_fallback(node, pump));
+			}
 			break;
 		}
 		case mnu::WindowType::Table: {
@@ -2183,7 +2179,8 @@ int MenuFrameCompiler::walk_widget(int index, int origin_x, int origin_y,
 			}
 			emit_appearance(node, rect, s,
 					appearance_state_with_fallback(node, pump));
-			emit_table(index, node, rect, s, pump, ws);
+			emit_table(index, node, rect, s, ws);
+			emit_row_scrollbar_(index, node, rect, s, state, ws);
 			break;
 		}
 		case mnu::WindowType::Marquee: {
@@ -2215,97 +2212,6 @@ int MenuFrameCompiler::walk_widget(int index, int origin_x, int origin_y,
 		next = walk_widget(next, rect.left, rect.top, state, s);
 	}
 	return next;
-}
-
-// The witnessed table interior [orig: CUITable_Render @ 0x6411d0; the full
-// walk: docs/mnu/menu-re.md "Table render"]. The compiled path draws the
-// header labels, the character-profiled taper dividers, and the seeded data
-// rows as text cells. Image/substitution/custom cells and per-row appearance
-// records are deferred with the Control-tree renderer (D-MNU-13 follow-up);
-// no shipped .mnu drives them through the compiled path yet.
-void MenuFrameCompiler::emit_table(int index, const WidgetNode &node,
-		const mnu::RectEdges &rect, const WalkScale &s, int visual,
-		const MenuWidgetState *ws) {
-	(void)index;
-	const mnu::TableData &table = node.window->table_data;
-	const std::vector<mnu::TableHeader> &headers = table.column.headers;
-	if (headers.empty()) {
-		return;
-	}
-	// The "W" measure supplies the default row/header heights [orig: the
-	// font_cache_measure_text_default("W") probe; authored min_item_height
-	// wins when present].
-	int em_w = 0;
-	int em_h = 0;
-	measure_text(node, "W", &em_w, &em_h);
-	int row_h = em_h;
-	if (table.has_min_item_height && table.min_item_height > 0) {
-		row_h = table.min_item_height;
-	}
-	const int header_h = em_h;
-	const int gap = table.column.has_spacing ? table.column.spacing : 0;
-	const uint32_t color = node.colors[static_cast<size_t>(
-			visual >= 0 && visual < 4 ? visual : 0)];
-	// Header labels + the taper rule divider under each column with >16px of
-	// headroom [orig: the header walk; divider color 0xFF7F7F7F]. The rule
-	// PROFILE string is not authored in the XML model (the runtime sets it),
-	// so the compiled divider draws the plain full-taper line row.
-	int x = rect.left;
-	for (const mnu::TableHeader &h : headers) {
-		const int width = h.has_width ? h.width : 0;
-		if (width <= 0) {
-			continue;
-		}
-		const std::string label = resolve_text_value(h.type, h.text);
-		int text_w = 0;
-		int text_h = 0;
-		measure_text(node, label, &text_w, &text_h);
-		int tx = x;
-		if (h.justify == "CENTER") {
-			tx = x + (width - text_w) / 2;
-		} else if (h.justify == "RIGHT") {
-			tx = x + width - text_w;
-		}
-		emit_glyph_run(node, label, tx, rect.top, s, color, -1);
-		if (width - text_w > 16) {
-			// One divider segment centered in the headroom band [orig:
-			// draw_rule_line @ 0x6410a0 — 0xFF7F7F7F].
-			const int seg_left = x + text_w + 1;
-			const int seg_right = x + width - 1;
-			const int seg_y = rect.top + header_h / 2;
-			draw_list_.lines.push_back(MenuLine{emit_x(seg_left, s.x),
-					emit_x(seg_y, s.y), emit_x(seg_right, s.x),
-					emit_x(seg_y, s.y), 0xFF7F7F7Fu});
-		}
-		x += width + gap;
-	}
-	if (ws == nullptr || ws->table_rows.empty()) {
-		return;
-	}
-	// Data rows: the scroll window is first-visible + as many rows as fit
-	// below the header [orig: the visible-row walk].
-	const int first = ws->scroll_row > 0 ? ws->scroll_row : 0;
-	int y = rect.top + header_h;
-	for (size_t r = static_cast<size_t>(first); r < ws->table_rows.size();
-			++r) {
-		if (y + row_h > rect.bottom) {
-			break;
-		}
-		const std::vector<std::string> &row = ws->table_rows[r];
-		x = rect.left;
-		for (size_t c = 0; c < headers.size(); ++c) {
-			const mnu::TableHeader &h = headers[c];
-			const int width = h.has_width ? h.width : 0;
-			if (width <= 0) {
-				continue;
-			}
-			if (c < row.size() && !row[c].empty()) {
-				emit_glyph_run(node, row[c], x, y, s, color, -1);
-			}
-			x += width + gap;
-		}
-		y += row_h;
-	}
 }
 
 // The witnessed credits scroller [orig: CMarqueeWnd_Render @ 0x65cf90 ->
@@ -2373,6 +2279,7 @@ const MenuDrawList &MenuFrameCompiler::compile(const MenuFrameState &state,
 	draw_list_.glyphs.clear();
 	draw_list_.underlines.clear();
 	draw_list_.font_runs.clear();
+	draw_list_.draw_ops.clear();
 	draw_list_.widgets_drawn = 0;
 	if (screen_ == nullptr || nodes_.empty()) {
 		return draw_list_;
@@ -2380,7 +2287,22 @@ const MenuDrawList &MenuFrameCompiler::compile(const MenuFrameState &state,
 	WalkScale s;
 	s.x = scale_x;
 	s.y = scale_y;
+	deferred_popups_.clear();
 	walk_widget(0, 0, 0, state, s);
+	// The open-dropdown overlay pass (D-MNU-12): popups collected during the
+	// walk paint after every widget, before the cursor.
+	for (int index : deferred_popups_) {
+		const WidgetNode &node = nodes_[static_cast<size_t>(index)];
+		mnu::RectEdges rect;
+		if (!widget_rect(index, state, &rect)) {
+			continue;
+		}
+		const MenuWidgetState *ws = state_for(state, index);
+		if (ws != nullptr && ws->popup_open) {
+			emit_combo_popup(node, rect, s, ws);
+		}
+	}
+	deferred_popups_.clear();
 	emit_cursor(state);
 	return draw_list_;
 }

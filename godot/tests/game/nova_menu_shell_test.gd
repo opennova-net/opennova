@@ -37,23 +37,37 @@ const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
 
 var _saved_state_config := PackedByteArray()
 var _had_state_config := false
+var _saved_controls_cfg := PackedByteArray()
+var _had_controls_cfg := false
 
 
 func before_each() -> void:
 	_had_state_config = FileAccess.file_exists(STATE_CONFIG_PATH)
 	_saved_state_config = FileAccess.get_file_as_bytes(STATE_CONFIG_PATH) if _had_state_config else PackedByteArray()
+	_had_controls_cfg = FileAccess.file_exists(ControlsBindings.CONFIG_PATH)
+	_saved_controls_cfg = FileAccess.get_file_as_bytes(ControlsBindings.CONFIG_PATH) \
+			if _had_controls_cfg else PackedByteArray()
 
 
 func after_each() -> void:
 	# The music service is an autoload; leave no context behind for the next test.
 	NovaMusicService.stop_context()
-	if _had_state_config:
-		var file := FileAccess.open(STATE_CONFIG_PATH, FileAccess.WRITE)
+	_restore_config(STATE_CONFIG_PATH, _had_state_config, _saved_state_config)
+	# The live binding model is a static shared with the whole run: restore the
+	# catalog defaults and the on-disk cfg even when a remap test fails early.
+	ControlsBindings.model().restore_defaults()
+	_restore_config(ControlsBindings.CONFIG_PATH, _had_controls_cfg,
+			_saved_controls_cfg)
+
+
+func _restore_config(path: String, existed: bool, bytes: PackedByteArray) -> void:
+	if existed:
+		var file := FileAccess.open(path, FileAccess.WRITE)
 		if file != null:
-			file.store_buffer(_saved_state_config)
+			file.store_buffer(bytes)
 			file.close()
-	elif FileAccess.file_exists(STATE_CONFIG_PATH):
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(STATE_CONFIG_PATH))
+	elif FileAccess.file_exists(path):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 
 
 # Build a throwaway resource dir holding main.mnu (+ a sp.mnu jump target and a
@@ -114,7 +128,7 @@ func _write_bms(path: String, mission_name: String, attribs: int) -> void:
 
 
 func _cleanup(dir: String) -> void:
-	for f in ["main.mnu", "sp.mnu", "test.bms"]:
+	for f in ["main.mnu", "sp.mnu", "options.mnu", "test.bms"]:
 		DirAccess.remove_absolute(dir.path_join(f))
 	DirAccess.remove_absolute(dir)
 
@@ -131,6 +145,40 @@ func test_boots_into_main_menu_startup() -> void:
 	assert_not_null(driver, "the interaction driver is built")
 	assert_not_null(shell.get_frame(), "the compiled frame surface is built")
 	assert_eq(driver.get_current_screen(), "STARTUP", "STARTUP screen shown")
+	_cleanup(dir)
+
+
+# The shell seeds the five named Options sliders with the exact original
+# ranges/pages. Until OpenNova owns persisted render/audio/input settings, the
+# current value is deterministically clamped to each range minimum.
+# [orig: options_screen_init @ 0x554800;
+# UI_PopulateRenderAndAudioSettings @ 0x55c830]
+func test_options_scrolls_seed_original_ranges() -> void:
+	var dir := _make_dir()
+	_copy(OPTIONS_FIXTURE, dir.path_join("options.mnu"))
+	var shell = _make_shell(dir)
+	if shell == null:
+		pass_test("temp resource root unavailable")
+		_cleanup(dir)
+		return
+	assert_true(shell.open_menu("options.mnu", ""), "Options fixture opens")
+	var driver: MenuDriver = shell.get_driver()
+	var expected := [
+		["GAMMA", 5, 20, 2, 5],
+		["SOUNDFXVOLUME", 0, 255, 10, 0],
+		["DIALOGVOLUME", 0, 255, 10, 0],
+		["MUSICVOLUME", 0, 255, 10, 0],
+		["MOUSE_SENSITIVITY", 4, 511, 10, 4],
+	]
+	for row in expected:
+		var control_name := String(row[0])
+		var id := driver.widget_id(control_name)
+		assert_gte(id, 0, "%s exists" % control_name)
+		var scroll = driver.get_widget_scroll_range(id)
+		assert_not_null(scroll, "%s receives scroll state" % control_name)
+		assert_eq([scroll.minimum, scroll.maximum, scroll.page, scroll.value],
+				row.slice(1),
+				"%s receives its original range/page and min fallback" % control_name)
 	_cleanup(dir)
 
 
@@ -902,3 +950,120 @@ func test_multiple_companions_first_owner_drives_menu() -> void:
 	assert_false(skipped.built, "a non-owning companion is skipped")
 	assert_true(owner.built, "the first owning companion drives the menu")
 	_cleanup(dir)
+
+
+# The Controls remap flow end-to-end at the shell seam: double-click arms the
+# capture (Control cell clears), the next key assigns through the witnessed
+# record semantics and persists, Esc cancels, and CLEAR_KEY/DEFAULTS drive the
+# same live model [orig: sub_55D560 @ 0x55d560; KeyBinding_HandleKeyAssignment
+# @ 0x55bb20; CLEAR_KEY @ 0x55bfd0; DEFAULTS @ 0x55bd90].
+func test_control_mapping_remap_flow() -> void:
+	# before_each snapshots user://controls.cfg; after_each restores it and the
+	# catalog defaults even on an early assert failure.
+	ControlsBindings.model().restore_defaults()
+
+	var dir := OS.get_temp_dir().path_join("menu_shell_remap_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(dir)
+	var file := FileAccess.open(dir.path_join("options.mnu"), FileAccess.WRITE)
+	assert_not_null(file)
+	file.store_buffer(FileAccess.get_file_as_bytes(OPTIONS_FIXTURE))
+	file.close()
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(dir), OK)
+	var shell = MenuShellScript.new()
+	shell.main_menu_file = "options.mnu"
+	shell.size = Vector2(800, 600)
+	add_child_autofree(shell)
+	assert_true(shell.setup(root), "the options fixture boots")
+	var driver: MenuDriver = shell.get_driver()
+	var table: int = driver.widget_id("CONTROL_MAPPING")
+	assert_gte(table, 0, "the mapping table exists")
+	assert_gt(driver.table_row_count(table), 40, "the live rows are seeded")
+	assert_eq(driver.table_cell_text(table, 0, 2), "W or Up",
+			"row 0 shows the Forward default")
+
+	# Double-click row 0: the capture arms and the Control cell clears.
+	driver.list_activated.emit(table, 0)
+	assert_eq(driver.table_cell_text(table, 0, 2), "",
+			"the armed row's Control cell clears")
+
+	# The next key assigns (Y replaces the primary: both slots were full).
+	var key := InputEventKey.new()
+	key.pressed = true
+	key.physical_keycode = KEY_Y
+	shell.get_viewport().push_input(key)
+	assert_eq(driver.table_cell_text(table, 0, 2), "Y or Up",
+			"the captured key lands in the record and the cell restores")
+	assert_true(FileAccess.file_exists(ControlsBindings.CONFIG_PATH),
+			"the edit persists")
+
+	# Esc cancels a fresh capture without changing the record.
+	driver.list_activated.emit(table, 0)
+	var esc := InputEventKey.new()
+	esc.pressed = true
+	esc.physical_keycode = KEY_ESCAPE
+	shell.get_viewport().push_input(esc)
+	assert_eq(driver.table_cell_text(table, 0, 2), "Y or Up",
+			"Esc restores the cell unchanged")
+
+	# CLEAR_KEY empties the selected row; DEFAULTS restores the catalog.
+	driver.table_select_row(table, 0)
+	driver.widget_activated.emit(driver.widget_id("CLEAR_KEY"), "CLEAR_KEY")
+	assert_eq(driver.table_cell_text(table, 0, 2), "",
+			"CLEAR_KEY empties the keyboard slots")
+	driver.widget_activated.emit(driver.widget_id("DEFAULTS"), "DEFAULTS")
+	assert_eq(driver.table_cell_text(table, 0, 2), "W or Up",
+			"DEFAULTS restores the catalog binding")
+
+	# The gameplay lookup follows the live records again.
+	var keys: PackedInt32Array = ControlsBindings.model().godot_keys_for_token("move_forward")
+	assert_eq(keys.size(), 2, "defaults restored for the sampler")
+
+	DirAccess.remove_absolute(dir.path_join("options.mnu"))
+	DirAccess.remove_absolute(dir)
+
+
+# Leaving the screen while a capture is armed tears the capture down: a later
+# keypress must neither assign nor be swallowed as an invisible Esc target.
+# Retail cannot exhibit the stale capture — its pump state lives with the
+# Options screen [orig: sub_55D560 @ 0x55d560].
+func test_control_mapping_capture_dies_on_screen_change() -> void:
+	ControlsBindings.model().restore_defaults()
+	var dir := OS.get_temp_dir().path_join("menu_shell_remap_nav_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(dir)
+	var file := FileAccess.open(dir.path_join("options.mnu"), FileAccess.WRITE)
+	assert_not_null(file)
+	file.store_buffer(FileAccess.get_file_as_bytes(OPTIONS_FIXTURE))
+	file.close()
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(dir), OK)
+	var shell = MenuShellScript.new()
+	shell.main_menu_file = "options.mnu"
+	shell.size = Vector2(800, 600)
+	add_child_autofree(shell)
+	assert_true(shell.setup(root), "the options fixture boots")
+	var driver: MenuDriver = shell.get_driver()
+	var table: int = driver.widget_id("CONTROL_MAPPING")
+	assert_eq(driver.table_cell_text(table, 0, 2), "W or Up",
+			"row 0 shows the Forward default")
+
+	# Arm, then navigate: the screen change cancels the capture and restores
+	# the blanked cell.
+	driver.list_activated.emit(table, 0)
+	assert_eq(driver.table_cell_text(table, 0, 2), "",
+			"the armed row's Control cell clears")
+	assert_true(driver.navigate_to_screen("OPTIONS"), "navigation succeeds")
+	assert_eq(driver.table_cell_text(table, 0, 2), "W or Up",
+			"the canceled capture restores the Control cell")
+
+	# The next key must not assign to the stale action.
+	var key := InputEventKey.new()
+	key.pressed = true
+	key.physical_keycode = KEY_U
+	shell.get_viewport().push_input(key)
+	assert_eq(ControlsBindings.model().control_text(
+			ControlsBindings.model().action_index_for_row(0),
+			ControlsModel.DEVICE_KEYBOARD), "W or Up",
+			"the Forward record still holds its defaults")
+	DirAccess.remove_absolute(dir.path_join("options.mnu"))
+	DirAccess.remove_absolute(dir)

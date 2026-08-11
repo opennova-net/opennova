@@ -20,6 +20,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/sound_profile.cpp
     # controls — the JO input-binding catalog + CONTROL_MAPPING model
     ${CMAKE_CURRENT_SOURCE_DIR}/controls/controls.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/controls/binding_set.cpp
     # environment — the TOD environment state owner + the weather runtime
     # embedding (the 62 Hz tick credit, reset epoch, prewarm, per-tick
     # target-feed/writeback order); the witnessed math cores stay in
@@ -33,6 +34,8 @@ add_library(opennova_runtime STATIC
     # menu — the .mnu screen draw-list compiler (ADR 0033 R2; witness:
     # docs/mnu/menu-re.md "Widget render dispatch")
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_scrollbar.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_table.cpp
     # menu backdrop movie policy (slots/gating/resolution; witness:
     # docs/mnu/menu-re.md "The menu backdrop (Bink underlay)")
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_video.cpp

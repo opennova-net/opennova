@@ -235,10 +235,23 @@ std::string key_name(int vk) {
   return std::string("#") + std::to_string(vk);
 }
 
-std::string format_binding(int key, int key2) {
+std::string format_binding(int key, int key2, int modifier, int modifier2) {
+  // Per-slot modifier prefix: word 17 (VK_CONTROL) -> "Ctrl - ", 16
+  // (VK_SHIFT) -> "Shift - " (the "XXCtrl - "/"XXShift - " fallbacks,
+  // marker-stripped like the " XXor " separator)
+  // [orig: KeyBinding_FormatBindingString @ 0x559a10].
+  auto prefix = [](int mod) -> std::string {
+    if (mod == 17) {
+      return "Ctrl - ";
+    }
+    if (mod == 16) {
+      return "Shift - ";
+    }
+    return "";
+  };
   std::string out;
   if (key != 0) {
-    out = key_name(key);
+    out = prefix(modifier) + key_name(key);
   }
   if (key2 != 0) {
     // Slots joined by the engine's " or " separator (the " XXor " fallback,
@@ -246,7 +259,7 @@ std::string format_binding(int key, int key2) {
     if (!out.empty()) {
       out += " or ";
     }
-    out += key_name(key2);
+    out += prefix(modifier2) + key_name(key2);
   }
   return out;
 }

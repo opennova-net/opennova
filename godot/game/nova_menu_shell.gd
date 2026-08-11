@@ -20,6 +20,7 @@ extends Control
 # different game's menu set can be pointed at the same shell.
 
 const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
+const MenuOptionScrollPolicy := preload("res://game/menu_option_scroll_policy.gd")
 
 # The director var the current screen's MUSICVAR lands in is
 # MusicDirector.MENU_MUSIC_VAR_SLOT — the witness lives at the engine home,
@@ -172,8 +173,13 @@ var _named_handlers: Dictionary = {}
 # player_info_menu_companion.gd). Empty for a plain shell. The first whose owns_menu()
 # claims a loaded menu drives it; otherwise the shell's generic wiring runs.
 var _companions: Array = []
-# Lazily-built Options -> Controls key-binding catalog (engine/runtime/controls).
-var _controls_model: ControlsModel = null
+# The armed remap capture (Options -> Controls): -1 = idle. Retail arms on the
+# table activation, clears the Control cell, and consumes the next key/button
+# [orig: the arm handler sub_55D560 @ 0x55d560; the capture pump @ 0x55c67c].
+var _remap_table_id := -1
+var _remap_row := -1
+var _remap_action := -1
+var _control_device := ControlsModel.DEVICE_KEYBOARD
 
 
 func _ready() -> void:
@@ -280,7 +286,7 @@ func _assemble_assets() -> void:
 
 	# Connect once on the persistent driver (screens reconfigure under it;
 	# these aggregate signals survive).
-	_driver.screen_changed.connect(_on_screen_changed_for_underlay)
+	_driver.screen_changed.connect(_on_screen_changed)
 	_driver.menu_requested.connect(_on_menu_requested)
 	_driver.quit_requested.connect(_on_quit_requested)
 	_driver.widget_value_changed.connect(_on_widget_value_changed)
@@ -301,6 +307,11 @@ func _gui_input(event: InputEvent) -> void:
 				(motion.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0)
 	elif event is InputEventMouseButton:
 		var button := event as InputEventMouseButton
+		if _remap_action >= 0 and button.pressed \
+				and _control_device == ControlsModel.DEVICE_MOUSE:
+			_consume_remap_mouse(button.button_index)
+			accept_event()
+			return
 		if button.button_index == MOUSE_BUTTON_LEFT:
 			_driver.process_mouse(button.position, button.pressed)
 			accept_event()
@@ -309,6 +320,10 @@ func _gui_input(event: InputEvent) -> void:
 func _unhandled_key_input(event: InputEvent) -> void:
 	# A backgrounded menu must not steal Esc from the world.
 	if _driver == null or not is_visible_in_tree():
+		return
+	if event is InputEventKey and _remap_action >= 0:
+		if _consume_remap_key(event as InputEventKey):
+			get_viewport().set_input_as_handled()
 		return
 	if event is InputEventKey and _driver.handle_key_input(event as InputEventKey):
 		get_viewport().set_input_as_handled()
@@ -381,7 +396,13 @@ func _refresh_underlay() -> void:
 	_underlay.set_source(_root.get_root_dir(), _current_expansion())
 
 
-func _on_screen_changed_for_underlay(screen_name: String) -> void:
+func _on_screen_changed(screen_name: String) -> void:
+	# Leaving the screen tears down an armed remap capture like retail's
+	# per-screen pump state — otherwise a later keypress on ANY screen would
+	# assign to the stale action. The refill restores the blanked Control
+	# cell in the persisted table rows [orig: the pump state lives with the
+	# Options screen, sub_55D560 @ 0x55d560].
+	_end_remap(true)
 	if _underlay != null:
 		_underlay.set_screen(screen_name)
 
@@ -402,6 +423,7 @@ func _on_screen_changed_for_underlay(screen_name: String) -> void:
 func _wire_named_controls() -> void:
 	_named_handlers.clear()
 	_mission_rows.clear()
+	MenuOptionScrollPolicy.apply(_driver)
 	_seed_crosshair_style_controls()
 	# A companion (e.g. the multiplayer menu driver, or the PLAYER_INFO character screen)
 	# can own a whole menu: when one claims this one, hand it the named-control wiring and
@@ -531,30 +553,114 @@ func _on_list_activated(id: int, row: int) -> void:
 	elif _is_mod_list(widget_name):
 		if row >= 0 and row < _driver.item_count(id):
 			_apply_expansion(_driver.item_text(id, row))
+	elif widget_name in control_table_names:
+		_arm_remap(id, row)
 
 
 # --- Controls remap table (Options -> Controls) -------------------------------
 
-# Fill the CONTROL_MAPPING table with the key-binding catalog and wire the
-# Keyboard/Mouse/Joystick device radios to repopulate it. Read-only for now: the
-# rows show the byte-exact default bindings; double-click rebinding is not wired
-# (see docs/mnu/menu-re.md D-CTRL-*).
+# Fill the CONTROL_MAPPING table with the LIVE key-binding records and wire the
+# Keyboard/Mouse/Joystick device radios, the remap capture, and the DEFAULTS /
+# CLEAR_KEY buttons [orig: UI_PopulateControlMappingList @ 0x55c0c0; the
+# OPTIONS callback registrations @ 0x55d737..0x55d809].
 func _seed_control_mapping(table_id: int) -> void:
-	if _controls_model == null:
-		_controls_model = ControlsModel.new()
-	_fill_control_mapping(table_id, ControlsModel.DEVICE_KEYBOARD)
+	_control_device = ControlsModel.DEVICE_KEYBOARD
+	_fill_control_mapping(table_id, _control_device)
 	for i in control_device_names.size():
 		var device := i  # 0=keyboard, 1=mouse, 2=joystick (ControlsModel.Device)
 		_named_handlers[control_device_names[i].to_upper()] = func() -> void:
+			_end_remap(false)
+			_control_device = device
 			_fill_control_mapping(table_id, device)
+	# DEFAULTS re-copies every record's defaults; CLEAR_KEY empties the
+	# selected row's slots for the active device
+	# [orig: @ 0x55bd90 / @ 0x55bfd0].
+	_named_handlers["DEFAULTS"] = func() -> void:
+		_end_remap(false)
+		ControlsBindings.model().restore_defaults()
+		ControlsBindings.persist()
+		_fill_control_mapping(table_id, _control_device)
+	_named_handlers["CLEAR_KEY"] = func() -> void:
+		_end_remap(false)
+		var selected := _driver.table_selected_rows(table_id)
+		var row := selected[0] if selected.size() > 0 else -1
+		var action := ControlsBindings.model().action_index_for_row(row)
+		if action >= 0:
+			ControlsBindings.model().clear_binding(action, _control_device)
+			ControlsBindings.persist()
+			_fill_control_mapping(table_id, _control_device)
+			_driver.table_select_row(table_id, row)
 
 
-func _fill_control_mapping(table_id: int, device: int) -> void:
-	if _controls_model == null:
-		return
+func _fill_control_mapping(table_id: int, device: int, blank_row := -1) -> void:
 	_driver.table_clear_rows(table_id)
-	for row in _controls_model.get_rows(device):
-		_driver.table_add_row(table_id, row)
+	var rows := ControlsBindings.model().get_rows(device)
+	for i in rows.size():
+		var cells: PackedStringArray = rows[i]
+		if i == blank_row:
+			cells[2] = ""
+		_driver.table_add_row(table_id, cells)
+
+
+# Double-click on a mapping row arms the capture: the Control cell clears and
+# the next key (or mouse button, on the Mouse page) binds; Esc cancels
+# [orig: sub_55D560 @ 0x55d560 — pump state 1, row stored, cell cleared,
+#  focus taken; the joystick page's poll capture is not wired (D-CTRL-1)].
+func _arm_remap(table_id: int, row: int) -> void:
+	if _control_device == ControlsModel.DEVICE_JOYSTICK:
+		return
+	var action := ControlsBindings.model().action_index_for_row(row)
+	if action < 0:
+		return
+	_remap_table_id = table_id
+	_remap_row = row
+	_remap_action = action
+	_fill_control_mapping(table_id, _control_device, row)
+	_driver.table_select_row(table_id, row)
+
+
+# The armed keyboard capture: Esc cancels, anything mappable assigns. The
+# modifier flags feed the original event flag word (a key pressed with Ctrl
+# held alone records the Ctrl- combo)
+# [orig: the capture pump's Esc/assign split @ 0x55c68c/0x55c743;
+#  Input_QueueKeyEvent @ 0x760c10].
+func _consume_remap_key(event: InputEventKey) -> bool:
+	if not event.pressed:
+		return true
+	if event.physical_keycode == KEY_ESCAPE:
+		_end_remap(true)
+		return true
+	if ControlsBindings.model().assign_godot_key(_remap_action,
+			event.physical_keycode, event.ctrl_pressed, event.shift_pressed,
+			event.echo):
+		ControlsBindings.persist()
+		_end_remap(true)
+	return true
+
+
+# The armed mouse capture: the witnessed button->mask translation lives at
+# the seam [orig: the capture callback @ 0x55c780].
+func _consume_remap_mouse(button_index: int) -> void:
+	var mask := ControlsModel.mouse_mask_from_godot_button(button_index)
+	if mask != 0:
+		ControlsBindings.model().assign_mouse_mask(_remap_action, mask)
+		ControlsBindings.persist()
+	_end_remap(true)
+
+
+# Restore the live rows and drop the capture state [orig:
+# update_control_mapping_display @ 0x55b700 — cell restored, globals reset].
+func _end_remap(refill: bool) -> void:
+	if _remap_action < 0:
+		return
+	var table_id := _remap_table_id
+	var row := _remap_row
+	_remap_table_id = -1
+	_remap_row = -1
+	_remap_action = -1
+	if refill and table_id >= 0:
+		_fill_control_mapping(table_id, _control_device)
+		_driver.table_select_row(table_id, row)
 
 
 # --- Expansion / mod selection (Options -> Mods) ------------------------------
@@ -992,6 +1098,9 @@ func menu_key(keycode: int, unicode: int = 0) -> bool:
 	ev.physical_keycode = keycode as Key
 	ev.unicode = unicode
 	ev.pressed = true
+	# Same order as the real path: an armed remap capture consumes keys first.
+	if _remap_action >= 0:
+		return _consume_remap_key(ev)
 	return _driver.handle_key_input(ev)
 
 

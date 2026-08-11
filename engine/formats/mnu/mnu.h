@@ -328,8 +328,9 @@ struct Window {
   bool global_var = false;  // GLOBAL_VAR flag
   bool password = false;    // PASSWORD flag (edit widgets: masked input)
 
-  // Scroll-bar thickness from a window-level <HEIGHT>/<WIDTH> on type="scroll"
-  // (sibling of POSITION; orig CUIScrollWidget_ParseExtendedXMLDef @0x64c6d0).
+  // Along-axis arrow/shuttle part extent from a window-level <HEIGHT>/<WIDTH>
+  // on type="scroll" (sibling of POSITION)
+  // [orig: CUIScrollWidget_ParseExtendedXMLDef @ 0x64c6d0].
   bool has_scroll_height = false;
   int scroll_height = 0;
   bool has_scroll_width = false;

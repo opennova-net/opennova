@@ -63,6 +63,15 @@ public:
 				static_cast<int>(opennova::menu::EditKeyResult::kChanged),
 		EDIT_RESULT_COMMIT =
 				static_cast<int>(opennova::menu::EditKeyResult::kCommit),
+		// scroll_hit_at's part codes (the engine ScrollHit map).
+		SCROLL_HIT_NONE = opennova::menu::MenuFrameCompiler::kScrollHitNone,
+		SCROLL_HIT_UP = opennova::menu::MenuFrameCompiler::kScrollHitUp,
+		SCROLL_HIT_DOWN = opennova::menu::MenuFrameCompiler::kScrollHitDown,
+		SCROLL_HIT_SHUTTLE = opennova::menu::MenuFrameCompiler::kScrollHitShuttle,
+		SCROLL_HIT_TRACK_BEFORE =
+				opennova::menu::MenuFrameCompiler::kScrollHitTrackBefore,
+		SCROLL_HIT_TRACK_AFTER =
+				opennova::menu::MenuFrameCompiler::kScrollHitTrackAfter,
 	};
 
 	// Build the compiler against a parsed document's screen (empty name = the
@@ -83,14 +92,27 @@ public:
 	void clear_widget_shown_override(int p_index);
 	void set_widget_disabled(int p_index, bool p_disabled);
 	void set_widget_hovered(int p_index, bool p_hovered);
+	// The open dropdown's hovered ROW (style 2) — the driver's popup-exclusive
+	// pump updates it per move (the witness map lives at the engine compiler,
+	// engine/runtime/menu/menu_frame.h).
+	void set_widget_hover_item(int p_index, int p_row);
+	// Scrollbar-part geometry probe (the SCROLL_HIT_* codes above). The
+	// interaction itself — arrows, track pages, shuttle drag — lives in the
+	// engine pump and reports through the scroll_value_changed signal.
+	int scroll_hit_at(int p_index, const Vector2 &p_position) const;
+	int get_widget_hover_item(int p_index) const;
 	void set_widget_pressed(int p_index, bool p_pressed);
 	void set_widget_checked(int p_index, bool p_checked);
 	void set_widget_focused(int p_index, bool p_focused);
 	void set_widget_caret(int p_index, int p_caret);
 	void set_widget_text(int p_index, const String &p_text);
 	void clear_widget_text(int p_index);
-	void set_widget_selection(int p_index, int p_selected_item,
-			int p_hover_item, int p_scroll_row);
+	void set_widget_selection(int p_index, int p_selected_item, int p_hover_item,
+			int p_scroll_row);
+	// Standalone type=scroll range/page/value. Page is the original inclusive
+	// page field (visible count - 1).
+	void set_widget_scroll_range(int p_index, int p_minimum, int p_maximum,
+			int p_page, int p_value);
 	void set_widget_popup_open(int p_index, bool p_open);
 	// Runtime content channels (the Control-tree path's set_items /
 	// add_row_values / marquee content, now engine state).

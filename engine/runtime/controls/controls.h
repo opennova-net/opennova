@@ -17,8 +17,8 @@
 // [orig: KeyBinding_FormatBindingString @ 0x559a10]; the per-device row build from
 // [orig: UI_PopulateControlMappingList @ 0x55c0c0].
 //
-// This models what the Controls tab DISPLAYS, read-only. Live rebinding, DEFAULTS /
-// CLEAR, and profile persistence are deferred. Default key VALUES are the byte-exact
+// This models the static catalog and formatting; the LIVE records behind
+// rebinding / DEFAULTS / CLEAR_KEY live in binding_set.h. Default key VALUES are the byte-exact
 // catalog defaults (validated against the canonical JO scheme: Forward=W/Up,
 // Reload=R, Jump=Space, ...); see docs/mnu/menu-re.md D-CTRL-* for the documented
 // gaps (per-entry visibility flag and the mouse/joystick default arrays).
@@ -87,7 +87,8 @@ std::string key_name(int vk);
 // Format a binding for the Control column: the primary key, optionally joined to a
 // secondary with " or ". Empty when unbound.
 // [orig: KeyBinding_FormatBindingString @ 0x559a10]
-std::string format_binding(int key, int key2);
+std::string format_binding(int key, int key2, int modifier = 0,
+                           int modifier2 = 0);
 
 // One produced display row for the CONTROL_MAPPING table.
 struct ControlRow {

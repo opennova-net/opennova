@@ -78,13 +78,17 @@ Three stages, no per-type default sizes:
    measured string, anchored per `JUSTIFY`/`VJUSTIFY` (left/centre/right edge;
    top/centre/bottom).
 
-The element texture is stretched INTO the resulting rect, UV 0..1
-(`CUIElement_DrawStretchedTexture @ 0x647d40`). Reimpl:
-`MenuFrameCompiler::solve_rect` + the stretched-quad emit in
-`engine/runtime/menu/menu_frame.cpp`; checkboxes stretch like every other
-element (the old keep-aspect was a reference-repo choice). With no resolvable
-font the compiler measures a nominal 8x16 glyph box so headless layout stays
-deterministic.
+The element texture is stretched INTO the resulting rect
+(`CUIElement_DrawStretchedTexture @ 0x647d40`). A plain IMAGE uses UV 0..1;
+when `MAP_STATE` and `HEIGHT` are authored, `MAP_STATE` selects that
+`HEIGHT`-tall source row and only that band is stretched into the destination
+`[orig: CUIElement_ParseXMLDefinition @ 0x648120;
+CUIElement_DrawTextureNative @ 0x647e40 -> CTextureManager_DrawScaledRect
+@ 0x654e60]`. Reimpl: `MenuFrameCompiler::solve_rect` uses the cropped HEIGHT
+as the image extent, and `emit_state_texture` carries the same row as normalized
+UVs; checkboxes stretch like every other element (the old keep-aspect was a
+reference-repo choice). With no resolvable font the compiler measures a nominal
+8x16 glyph box so headless layout stays deterministic.
 
 ## Frame `[orig: CUIElement_DrawFrame @ 0x64a210; init_border_materials @ 0x646f70]`
 
@@ -94,9 +98,12 @@ row 2 = bottom row. The drawer paints a center fill quad (the BRUSH, tiled) plus
 INDEPENDENT border pieces: corners at `SIZE`, edges stretched between them, the whole
 border hanging OUTSIDE the window rect by `SIZE` and pulled back by the authored
 `STENCIL INSETX/INSETY` (floats at elem+0x288/+0x28C, default 0). Every quad is
-modulated by `0x7F7F7F` (neutral in the modulate-2x fixed-function path -> no tint).
-Reimpl: `MenuFrameCompiler::emit_frame` in `engine/runtime/menu/menu_frame.cpp`
-(8 border quads + the tiled BRUSH fill).
+modulated by `0x7F7F7F`, which is neutral in retail's modulate-2x fixed-function
+path and therefore produces no visible tint `[orig: CUIElement_DrawFrame
+@ 0x64a210; init_border_materials @ 0x646f70]`. Reimpl:
+`MenuFrameCompiler::emit_frame` emits effective white (`0xFFFFFFFF`) for the
+Godot ordinary-multiply applier, preserving the retail result rather than
+darkening the BRUSH and eight STENCIL quads to half intensity.
 The old 4x4 mirrored-corner NinePatch bake with hardcoded 16/24 insets is retired.
 
 A frame draws ONLY when the window's `DRAW_FRAME` flag is set: the render gate is
@@ -192,11 +199,11 @@ white, or `0xFF7F7F7F` under `g_ui_half_bright_mode @ 0x31C3760`.
 | CHECKBOX | `CCheckWnd_Render @ 0x64ae20` | frame -> appearance (checked forces slot 3 DIRECTLY, no fallback — an unauthored selected slot has zero flags and draws nothing) -> label (raw state colors) -> children |
 | EDIT | `CEditWnd_Render @ 0x6619e0` | see the edit paragraph |
 | MULTILINE_EDIT | `CMEditWnd_Render @ 0x6608e0` | frame -> appearance (NO focus forcing, unlike the single-line edit) -> the wrapped drawer -> children (the embedded scrollbar); see the multiline paragraph below |
-| LIST, LAN_LIST | `CListWnd_DrawItems @ 0x643f30` | frame -> appearance -> rows -> children (scrollbar) |
+| LIST, MULTI, LAN_LIST | `CListWnd_DrawItems @ 0x643f30` | frame -> appearance -> rows -> children (scrollbar) |
 | SPINLIST | `CSpinListWnd_Render @ 0x64b220` | item cell (below); arrows are child windows |
 | COMBOBOX | `CComboWnd_Render @ 0x65bfd0` | closed cell, then children in array order |
 | TABLE | `CUITable_Render @ 0x6411d0` | see the table paragraph below (an earlier revision cited `0x6410d0`, a transcription slip — that address is inside the rule-line helper) |
-| SCROLL | `CScrollWnd_Render @ 0x64c5c0` | the generic container walk: frame -> appearance -> children (the up/down/thumb are its three child BUTTONs, constructed at `+736`/`+1508`/`+2280` by `CScrollWnd_Construct @ 0x64c450`) — no specialised interior |
+| SCROLL | `CScrollWnd_Render @ 0x64c5c0` | frame -> COLOR/OUTLINE on the full rect + IMAGE on the inset middle track -> child BUTTONs in shuttle/up/down painter order (constructed by `CUIScrollbar_CreateChildWindows @ 0x64d330`) |
 | MARQUEE | `CMarqueeWnd_Render @ 0x65cf90` | frame -> appearance -> the credits scroller (below) -> children |
 | RADIOEDIT | `@ 0x65d310` | interior not yet walked (D-MNU-13) |
 
@@ -209,7 +216,13 @@ image draw flags at `+24`. Pass order per state: COLOR fill (stretched quad,
 (`CUIElement_DrawTextureNative @ 0x647e40` -> `CTextureManager_DrawScaledRect
 @ 0x654e60` — STRETCHED into the scaled element rect; "native" size applies
 only when a caller passes a texture-sized rect, e.g. the spinlist image cell;
-white or half-bright gray), OUTLINE (`CUIElement_DrawOutlineRect @ 0x647fc0` —
+white or half-bright gray). For an authored IMAGE atlas, `MAP_STATE` is the
+zero-based row and `HEIGHT` is its source-band height; the compiler preserves
+that pair through state selection and emits `v0 = MAP_STATE*HEIGHT/textureH`,
+`v1 = (MAP_STATE+1)*HEIGHT/textureH` before stretching `[orig:
+CUIElement_ParseXMLDefinition @ 0x648120; CUIElement_DrawTextureNative
+@ 0x647e40 -> CTextureManager_DrawScaledRect @ 0x654e60]`. OUTLINE
+(`CUIElement_DrawOutlineRect @ 0x647fc0` —
 four 1px lines, top edge to right-1, gated on height), CUSTOM
 (`CUIElement_DispatchCustomDrawEvent @ 0x647f10` — event 1 with the scaled
 rect through the vtable+28 sink; shell-owned, the compiler emits nothing).
@@ -325,11 +338,17 @@ navigation exists only through the scrollbar. Insert paths
 gates of the single-line edit.
 
 Reimpl: `MenuFrameCompiler::emit_multiline_edit`/`emit_wrapped_text` +
-`multiline_line_counts` (`engine/runtime/menu/src/menu_frame.cpp`), pinned by
+`multiline_line_counts` (`engine/runtime/menu/menu_frame.cpp`), pinned by
 `test_multiline_wrap` in `tests/menu/menu_frame_compiler_test`;
-`MenuWidgetState.scroll_row` carries the first-visible-line count. The
-scrollbar art/interaction ride the D-MNU-13 scrollbar follow-up (wheel/scroll
-policy is shell-side over `multiline_line_counts`); the block-alignment leg
+`MenuWidgetState.scroll_row` carries the first-visible-line count. The authored
+default-state track/arrows/shuttle and line-derived thumb now compile for its
+direct `<SCROLLBAR>` child; a missing/zero-width child rect uses the witnessed
+rightmost 22px/full-height fallback and the child stays hidden while all lines
+fit `[orig: CMEditWnd_CreateScrollChild @ 0x661260;
+CMEditWnd_UpdateScrollRange @ 0x661180; CScrollWnd_SetPageSize @ 0x64CE10;
+CScrollWnd_SetRangeAndClamp @ 0x64D490]`. Child-button hover/press and
+arrow/shuttle interaction remain D-MNU-13 residue, while wheel/scroll policy
+is shell-side over `multiline_line_counts`. The block-alignment leg
 (the whole-unwrapped-text measure gating v-center/bottom) is not compiled —
 no shipped multiline edit authors it.
 
@@ -339,20 +358,81 @@ a 0..3 state slot, −1 none, set by selection/hover logic; visible flag bit 1
 at `+16`; per-row justify `+20`; x/y text offsets `+24`/`+28`; image `+48`).
 Each visible row first draws the ITEMS per-state appearance record for its
 style index (28-byte stride at `+828`) into the row rect (inflated −1
-horizontally, minus the shown scrollbar's width `+4088`) — that appearance IS
-the selection/hover highlight — then the row text with colorIndex = the same
-style index (a selected row renders the selected FONT pair). Rows run from
-scroll start `+796` for `+800` visible rows; height = font "W" else
-MIN_ITEM_HEIGHT (`+804 >= 0`); truncation against rect − 2×EDGE − scrollbar.
+horizontally; when the child scrollbar is shown, the right edge is reduced by
+the conditional `SB_EDGE_PAD` at `+4088`, not by the scrollbar width) — that
+appearance IS the selection/hover highlight — then the row text with
+colorIndex = the same style index (a selected row renders the selected FONT
+pair). Rows run from scroll start `+796` for `+800` visible rows; height = font
+"W" else MIN_ITEM_HEIGHT (`+804 >= 0`); truncation uses rect − 2×EDGE − the
+conditional `SB_EDGE_PAD` `[orig: CListWnd_DrawItems @ 0x643f30]`.
+In the typed reimpl schema, direct LIST/MULTI/LAN_LIST widgets read that sibling
+top-level `<MIN_ITEM_HEIGHT>`, while a COMBO reads the same field from its
+nested `<LIST_BOX>` `[orig: CListWnd_ParseXMLDefinition @ 0x645770;
+CListWnd_DrawItems @ 0x643f30]`. TABLE is deliberately separate: its header
+height remains the FONT "W" measure, its body row height takes the top-level
+`MIN_ITEM_HEIGHT` when authored, and only the body area determines the visible
+page `[orig: CTableWnd_ParseXMLContentDefinition @ 0x6427d0;
+CUITable_Render @ 0x6411d0]`.
+
+**Scrollbar visuals and owner geometry.** A SCROLL's own COLOR and OUTLINE
+passes cover the full widget rect, but its IMAGE pass covers only the middle
+track after one part extent is removed at each end. The part extent defaults
+to the constructor's **20**; a standalone SCROLL's widget HEIGHT/WIDTH setting
+overrides it, while arrow texture dimensions never choose it. The child
+painter order is **SHUTTLE, SCROLLUP, SCROLLDOWN** `[orig: CScrollWnd_Construct
+@ 0x64c450; CUIScrollWidget_ParseExtendedXMLDef @ 0x64c6d0;
+CScrollWnd_Render @ 0x64c5c0; scroll COLOR sink @ 0x64ce70; scroll IMAGE sink
+@ 0x64cf70; CUIElement_DrawOutlineRect @ 0x647fc0;
+CUIScrollbar_CreateChildWindows @ 0x64d330]`.
+
+For a bound owner, the shuttle is proportional to the current range/page with
+a 20px minimum, moves with the clamped value, and the owner hides the child
+when its content fits `[orig: CUIScrollbar_CalcThumbRect @ 0x64cba0;
+CScrollWnd_SetPageSize @ 0x64ce10; CScrollWnd_SetRangeAndClamp @ 0x64d490;
+CListWnd_DrawItems @ 0x643f30; CMEditWnd_UpdateScrollRange @ 0x661180]`.
+An absent or zero-width embedded POSITION falls back to the owner's rightmost
+**22px for its full height**—including the table header—rather than deriving
+width or end-cap extent from a texture `[orig: CListWnd_CreateScrollChild
+@ 0x6444c0; CMEditWnd_CreateScrollChild @ 0x661260; CTableWnd_Init
+@ 0x640790]`. A combo's `SB_EDGE_PAD` only narrows its row/highlight/text
+content; it neither locates nor sizes the scrollbar `[orig:
+CListWnd_ParseXMLDefinition @ 0x645770; CListWnd_DrawItems @ 0x643f30]`.
+
+Standalone range state is now carried end to end: `MenuWidgetState` owns
+min/max/page/value, `MenuFrame::set_widget_scroll_range` exposes it to Godot,
+and `MenuDriver.set_widget_scroll_range` retains and forwards it. `MenuShell`
+seeds the witnessed Options controls (page is retail's inclusive page field)
+as GAMMA **5..20, page 2**;
+SOUNDFXVOLUME, DIALOGVOLUME, and MUSICVOLUME **0..255, page 10**; and
+MOUSE_SENSITIVITY **4..511, page 10** `[orig: options_screen_init @ 0x554800;
+UI_PopulateRenderAndAudioSettings @ 0x55c830]`. Persisted render/audio/input
+values are not yet modeled, so each current value temporarily starts at its
+minimum; that is an explicit reimpl fallback, not a claim about retail's saved
+setting. Direct scrollbar input is PORTED into the compiler's mouse pump
+(2026-08-11): the pump runs the witnessed interaction ahead of the claim
+walk — arrows step -/+1 (ctor default), a track press pages toward the
+click, a shuttle press captures an anchor and drags through the travel
+ratio (ftol-truncated), and the pressed part keeps the mouse until release
+like retail's child-window capture `[orig: CScrollWnd_HandleEvent
+@ 0x64d050 — arrows @ 0x64d2d9/0x64d31a, track @ 0x64d0f0/0x64d10e, anchor
+@ 0x64d1cb..0x64d217, drag @ 0x64d231..0x64d2aa; ctor defaults step 1
+@ 0x64c4cf, page 10 @ 0x64c4d9]`. Independent per-part hover/pressed states
+and named scroll events remain D-MNU-13 residue.
 
 Reimpl: `engine/runtime/menu` (`MenuFrameCompiler`) compiles a parsed
 `mnu::Screen` + a typed per-widget state snapshot (hover/press/disabled/
 checked/focus/caret/value/selection, runtime item rows, table rows, marquee
 lines — `MenuWidgetState`, keyed by pre-order index) into a `MenuDrawList`
-(quads + outline lines + GameFont glyph runs) in exactly this walk order,
-with the witnessed per-element int truncation of scaled coordinates (the
-original quantization — the compiled path closes D-MNU-4's divergence). The
-compiler also owns the mouse pump, the interaction geometry queries
+(quad, outline-line, and GameFont-run payload arrays plus one interleaved
+`draw_ops` painter sequence). `MenuFrame` consumes `draw_ops`, so a later
+widget's quad stays later than an earlier widget's text or outline instead of
+the payload type deciding the layer. This preserves the witnessed forward
+scene/child walk and each widget vtable's cross-kind pass order `[orig:
+CUIScene_DrawScreensAndCursor @ 0x63bf60; CUIElement_Draw @ 0x64a8a0;
+CStaticWnd_Render @ 0x657b10]`, with the witnessed per-element int truncation
+of scaled coordinates (the original quantization — the compiled path closes
+D-MNU-4's divergence). The compiler also owns the mouse pump, the interaction
+geometry queries
 (row/popup/arrow/table hit tests over the same layout math), the hotkey scan,
 and the edit-input module. The Godot applier (`MenuFrame`,
 `godot/src/mnu/nova_menu_frame.cpp`) uploads textures/fonts and rasterizes
@@ -369,13 +449,40 @@ is the ONE menu path (the MnuMenu Control tree is deleted). Pinned by
   re-activation swaps radio->edit with focus + caret at end, leaving copies
   the edit text back to the radio label — no shipped JO menu authors a
   RADIOEDIT, so neither half is compiled). Compiled-path follow-ups: table
-  image/SUBST/custom cells, per-row appearance/color overrides, and row
-  overflow wrap; marquee image nodes + the 50px edge fade band; scrollbar
-  art + thumb interaction (the SCROLL widget's runtime-constructed child
-  BUTTONs and the medit/list/table authored scrollbars — wheel scrolling
-  rides `scroll_row` shell-side meanwhile; observed live 2026-08-10: the
-  host screen's 119-row MISSION_LIST renders no scrollbar, so only the
-  first ~10 rows are mouse-reachable); spin arrows compile with their
+  image/SUBST/custom cells, the per-row color override (`row+28 & 4` swapping
+  the `row+24` color slot with `row+32`), locked rows (state 1), and row
+  overflow wrap; marquee image nodes + the 50px edge fade band. (The per-ROW-
+  STATE `ITEMS` appearance passes and row-state text colors ARE compiled —
+  see the table paragraph.) The compiled
+  path now emits the authored at-rest track, `SHUTTLE`, `SCROLLUP`, and
+  `SCROLLDOWN` for standalone SCROLL widgets and direct `<SCROLLBAR>` blocks
+  used by LIST/MULTI/LAN_LIST, TABLE, MULTILINE_EDIT, and a combo's LIST_BOX.
+  It preserves the full-rect COLOR/OUTLINE versus inset IMAGE geometry, the
+  20px default/authored WIDTH-or-HEIGHT part extent, and shuttle/up/down child
+  order `[orig: CScrollWnd_Construct @ 0x64c450;
+  CUIScrollWidget_ParseExtendedXMLDef @ 0x64c6d0; CScrollWnd_Render
+  @ 0x64c5c0; CUIScrollbar_CreateChildWindows @ 0x64d330]`. Embedded owners
+  drive the proportional, minimum-20px thumb from their row/line range and
+  `scroll_row`, hide it when content fits, and use a rightmost 22px fallback
+  spanning the owner's full height when no usable POSITION width is authored `[orig:
+  CUIScrollbar_CalcThumbRect @ 0x64cba0; CScrollWnd_SetPageSize @ 0x64ce10;
+  CScrollWnd_SetRangeAndClamp @ 0x64d490; CListWnd_CreateScrollChild
+  @ 0x6444c0; CMEditWnd_CreateScrollChild @ 0x661260; CTableWnd_Init
+  @ 0x640790]`.
+
+  Standalone min/max/page/value now crosses `MenuWidgetState` -> `MenuFrame` ->
+  `MenuDriver`; `MenuShell` seeds the five named Options controls with their
+  witnessed ranges/pages `[orig: options_screen_init @ 0x554800;
+  UI_PopulateRenderAndAudioSettings @ 0x55c830]`. Persisted setting values are
+  not modeled yet, so current=min is the explicit temporary fallback.
+  Arrow clicks, track paging, and the shuttle drag/capture are PORTED into
+  the compiler's mouse pump (2026-08-11 — the pump claims the pressed part
+  until release, standalone sliders change their range value, embedded
+  owners change `scroll_row`, and `MenuFrame.scroll_value_changed` relays
+  the result `[orig: CScrollWnd_HandleEvent @ 0x64d050]`). Remaining
+  scrollbar residue is the constructed child BUTTONs' independent
+  hover/selected/pressed states and named scroll events; wheel scrolling
+  continues to ride `scroll_row` shell-side. Spin arrows compile with their
   default-state art (their independent hover states are separate
   child-widget state the compiled path does not yet model).
 
@@ -480,13 +587,22 @@ negative), then walks:
   character-PROFILED taper. Type 2 dispatches the custom draw event
   (`0x8000002`). Columns advance by width + the column gap.
 - **Data rows:** 40-byte rows; the scroll window is first-visible + visible
-  count; rows with `row+28 & 0xA` skip. `row+28 & 4` swaps a per-row COLOR
-  override (indexed by `row+24`) into the font color slot for the row's
-  duration. Per cell by column type: 0 text, 1/4 image
-  (`draw_aligned_texture @ 0x6409e0`, per-column alignment array), 2 custom
-  callback. Row ITEM appearance records (28-byte, keyed by `row+24`) draw
-  behind non-custom cells. A column overflowing the right edge WRAPS the row
-  down by one row height.
+  count; rows with `row+28 & 0xA` skip. `row+24` is the row's OWN state
+  (`CTableWnd_SetRowSelected @ 0x63f5f0`: 0 default, 1 locked — immune to
+  select/clear, 3 selected; the click handler `@ 0x642550..0x64259d`
+  single-select clears every non-locked row to 0 then sets the hit row to 3,
+  multiselect toggles 3<->0). Cell TEXT draws with the widget's state color
+  indexed by that row state — `row+28 & 1` forces state 1 — never by the
+  widget-level mouseover visual (`@ 0x64189a..0x6418da`); the header always
+  pushes state 0 (`@ 0x641446`). `row+28 & 4` swaps a per-row COLOR override
+  (`row+32`, into the `row+24` slot) around the row's draw. Per cell by
+  column type: 0 text, 1/4 image (`draw_aligned_texture @ 0x6409e0`,
+  per-column alignment array), 2 custom callback. Row ITEM appearance
+  records (28-byte at `this+824`, keyed by `row+24`: COLOR fill / IMAGE /
+  OUTLINE bits — options.mnu CONTROL_MAPPING authors the default-state
+  OUTLINE grid + selected-state COLOR bar) draw behind non-custom cells,
+  per CELL rect. A column overflowing the right edge WRAPS the row down by
+  one row height.
 - Then the viewport restores and children draw (vtable+24).
 
 ## Marquee credits scroller `[orig: CMarqueeWnd_Render @ 0x65cf90 -> render_scrolling_credits @ 0x65ca00]`
@@ -584,7 +700,14 @@ arrows ~150px left and producing the doubled/misplaced look.
 ## Combo dropdown `[orig: CComboWnd @ 0x65be40; CComboWnd_Render @ 0x65bfd0; CComboWnd_ParseXMLDefinition @ 0x65c0d0]`
 
 A combobox is a closed `CButtonWnd` (`this+764`, showing the selected item) plus an
-embedded `CListWnd` popup (`this+1536`) `[orig: CComboWnd ctor @ 0x65be40]`. The parse
+embedded `CListWnd` popup (`this+1536`) `[orig: CComboWnd ctor @ 0x65be40]`. The closed
+FACE is the embedded list's SELECTION rendered as the combo's own label: the render
+temporarily swaps the widget text slot to `row_text(list, selected_row(list))`, draws
+via `CStaticWnd_DrawLabel` (the combo's own STRING layout — shipped options.mnu combos
+author an EMPTY widget STRING and rows only inside `<LIST_BOX>`), then restores
+`[orig: CComboWnd_Render @ 0x65c05b..0x65c083]`. Reimpl: `combo_face_text` over the
+same row collection the popup renders, emitted through the label path (2026-08-11 —
+the widget-level-ITEMS-only face left every options.mnu combo blank). The parse
 `[orig: CComboWnd_ParseXMLDefinition @ 0x65c0d0]` delegates the `<LIST_BOX>` content to
 that embedded list, whose own window RECT (`this+13`) is set from the authored
 `<LIST_BOX>` `<POSITION>` — combo-relative, in 800x600 design space. So the dropdown is a
@@ -607,7 +730,10 @@ rules; historical.) Top-level `ITEMS`
 and `LIST_BOX/ITEMS` remain independent: an authored nested collection wins even when
 empty, otherwise the popup uses authored top-level fallback rows. Popup text honors
 the active ITEMS horizontal/vertical justification and the LIST_BOX STRING edge
-inset; the closed cell independently honors its outer STRING layout. Two earlier bugs are
+inset; `SB_EDGE_PAD` shortens only that popup row/highlight/text content when
+the scrollbar is shown—it does not reposition or resize the scrollbar child
+`[orig: CListWnd_ParseXMLDefinition @ 0x645770; CListWnd_DrawItems
+@ 0x643f30]`. The closed cell independently honors its outer STRING layout. Two earlier bugs are
 fixed: the popup background (`%COLOR_BLACK%`/`%SEMIOPAQUE_BLACK%` color appearance) not
 resolving (the `%VAR%` color change above), and the popup geometry being recomputed below
 the combo instead of using the authored rect — see **D-MNU-7** and **D-MNU-8**.
@@ -663,13 +789,21 @@ the widget's own name):
   @ 0x6497f0, @ 0x6498ce/0x6499ea/0x649a51`) and track the popup global only when the
   action's target is itself popup-flagged (`@ 0x64993a / 0x64997b`).
 
-Draw order has **no overlay pass**: the open list renders at its tree position
-(`CComboWnd_Render @ 0x65bfd0` renders the closed cell, then children in array order —
-the embedded list is attached as a child by `CWnd_SetParentAndAttach @ 0x6480a0` during
-parse — and `CListWnd_DrawItems @ 0x643f30` early-outs on hidden). The shipped menus are
-authored so this is unobservable: all three `player.mnu` combos (NATIONALITY / DIVISION /
-COMBO_LIST) author their LIST_BOX rects to the SAME parent-space region `(0,65)-(214,306)`,
-below every closed cell — dropdowns cover background art, never interactive siblings.
+Draw order in the WALKED code has **no overlay pass**: the open list renders at its
+tree position (`CComboWnd_Render @ 0x65bfd0` renders the closed cell, then children in
+array order — the embedded list is attached as a child by `CWnd_SetParentAndAttach
+@ 0x6480a0` during parse — and `CListWnd_DrawItems @ 0x643f30` early-outs on hidden).
+The earlier "unobservable in shipped menus" reading (from `player.mnu`, whose three
+combos all author their LIST_BOX rects below every closed cell) is FALSIFIED by
+`options.mnu`: the Advanced video panel authors WATERQUALITY before SHADOWQUALITY /
+PARTICLES at a 30px row pitch under an 80px popup — pure tree-order painting would
+overdraw the open popup, yet retail renders it on top. **The retail topmost mechanism
+remains unwalked** (2026-08-11 sweep ruled out: a scene/frame overlay pass
+(`Menu_RenderFrame @ 0x54b7c0` is gate → clear → walk → present), a draw-path
+`IsVisibleInHierarchy` gate (input-only xrefs), tree reordering at toggle
+(`combobox_handle_event @ 0x65c190`), and the `+0x290` dirty flag (no menu-range
+reader)). The reimpl defers open popups to a post-walk overlay pass — the D-MNU-12
+menu-top decision the Control-tree overlay carried.
 
 Reimpl: the exclusivity is hosted as a full-menu transparent catcher overlay
 (`ComboPopupOverlay`) added as the owning `MnuMenu`'s **last child** on open, with the
@@ -781,9 +915,18 @@ compiled-path follow-ups):
   `custom_cell_requested(row, column, value, slot)` handler synchronously fills a
   table-owned cell slot. With no shell—or in Edit mode—the normal cell fallback
   remains visible; slots are recreated on every rebuild and must not be cached.
-- **The scrollbar honors the authored `<SCROLLBAR><POSITION>`** (table-relative) and art width
-  instead of a hardcoded 16px right strip; the track texture is applied like `build_scroll`. The
-  ITEMS `%TRIM_COLOR%` outline now draws as a header rule + per-row grid line.
+- **The compiled scrollbar honors a usable authored
+  `<SCROLLBAR><POSITION>`** (table-relative); otherwise it uses retail's
+  rightmost 22px/full-table-height child rect. The header keeps the FONT "W"
+  height while top-level `MIN_ITEM_HEIGHT` controls body rows, so the visible
+  page excludes the header even though the scrollbar itself spans it. The
+  default-state parts use that body page, row count, and `scroll_row` for the
+  proportional minimum-20px thumb and remain hidden when all rows fit `[orig:
+  table SCROLLBAR parse delegate @ 0x643b22; CTableWnd_Init @ 0x640790;
+  CUITable_Render @ 0x6411d0; CUIScrollbar_CalcThumbRect @ 0x64cba0;
+  CScrollWnd_SetPageSize @ 0x64ce10; CScrollWnd_SetRangeAndClamp @ 0x64d490]`.
+  Per-part states and direct manipulation remain D-MNU-13 residue. The ITEMS
+  `%TRIM_COLOR%` outline now draws as a header rule + per-row grid line.
 
 ## Sound `[orig: widget_process_mouse_event @ 0x647a00]`
 
@@ -932,6 +1075,51 @@ password mask + scroll window, the checkbox/radio checked-state forcing rules, t
 row style-index model, and the unscaled native-size cursor draw — ported as the
 `engine/runtime/menu` `MenuFrameCompiler` (ADR 0033 R2) with the per-element int
 truncation restored.
+
+**matching** (2026-08-11 compiled-menu visual regression repair): authored
+`MAP_STATE`/`HEIGHT` IMAGE bands survive compilation as cropped atlas UVs
+`[orig: CUIElement_ParseXMLDefinition @ 0x648120;
+CUIElement_DrawTextureNative @ 0x647e40 -> CTextureManager_DrawScaledRect
+@ 0x654e60]`; frame BRUSH/STENCIL quads translate retail's neutral
+`0x7F7F7F` modulate-2x input to effective white for Godot's ordinary multiply
+`[orig: CUIElement_DrawFrame @ 0x64a210; init_border_materials @ 0x646f70]`;
+and `MenuDrawList::draw_ops` preserves quad/line/font-run interleaving across
+the forward painter walk `[orig: CUIScene_DrawScreensAndCursor @ 0x63bf60;
+CUIElement_Draw @ 0x64a8a0; CStaticWnd_Render @ 0x657b10]`. Authored
+at-rest scrollbar visuals now preserve the full-rect COLOR/OUTLINE versus
+middle-track IMAGE split, the 20px default/authored WIDTH-or-HEIGHT part
+extent, and shuttle/up/down child order `[orig: CScrollWnd_Construct
+@ 0x64c450; CUIScrollWidget_ParseExtendedXMLDef @ 0x64c6d0;
+CScrollWnd_Render @ 0x64c5c0; CUIScrollbar_CreateChildWindows @ 0x64d330]`.
+Bound list/table/multiline/combo owners provide the proportional minimum-20px
+thumb, hide-on-fit, and rightmost 22px/full-height fallback geometry `[orig:
+CUIScrollbar_CalcThumbRect @ 0x64cba0; CScrollWnd_SetPageSize @ 0x64ce10;
+CScrollWnd_SetRangeAndClamp @ 0x64d490; CListWnd_CreateScrollChild @ 0x6444c0;
+CMEditWnd_CreateScrollChild @ 0x661260; CTableWnd_Init @ 0x640790]`.
+Standalone min/max/page/value now crosses `MenuWidgetState`, `MenuFrame`, and
+`MenuDriver`; `MenuShell` seeds GAMMA 5..20/page 2, the three volume controls
+0..255/page 10, and MOUSE_SENSITIVITY 4..511/page 10 `[orig:
+options_screen_init @ 0x554800; UI_PopulateRenderAndAudioSettings @ 0x55c830]`.
+Persisted setting values remain unmodeled, so current=min is explicitly
+temporary. Per-part state remains D-MNU-13 residue.
+
+**matching** (2026-08-11 review round, same slice): the CScrollWnd
+INTERACTION joined the compiler's mouse pump — arrows step -/+1, a track
+press pages toward the click, a shuttle press captures and drags through the
+ftol-truncated travel-ratio inverse, and the pressed part keeps the mouse
+until release exactly like retail's child-window capture, so a scrollbar
+press can never become another widget's click `[orig: CScrollWnd_HandleEvent
+@ 0x64d050]`. The combo closed face now swaps unconditionally (an empty
+selected row draws a blank face, never the widget's authored TEXT
+`[orig: CComboWnd_Render @ 0x65c05b..0x65c083]`), and the draw/interaction
+visible-row gates share one span solve. On the Controls side, the record's
+"+12/+14 extended-flag words" reading is FALSIFIED: they are per-slot
+MODIFIER VK words (17 Ctrl / 16 Shift) driving the display prefixes, the
+capture writes 17 iff the queued event flag word is EXACTLY Ctrl-held-alone
+(0x800), and the Ctrl key itself can never be captured — witnessed through
+`Input_QueueKeyEvent @ 0x760c10` / `Input_DequeueKeyEvent @ 0x760d60` /
+`KeyBinding_FormatBindingString @ 0x559a10` and ported end to end
+(capture, display, blob, and the modifier-gated gameplay sampling).
 
 **matching** (2026-08-10 multiline grill + shell cutover): the multiline edit render
 (`CMEditWnd_Render @ 0x6608e0` — no focus forcing), the wrapped-text drawer
@@ -1169,8 +1357,100 @@ and the misnomer `CPreprocessor_SetCellTexture @ 0x63edf0 →
 CTableWnd_SetCellText`; entry comments on the four HostDialog handlers +
 `init_host_settings_dialog` + `UI_HandleHostSessionStart`.
 
+## Scroll interaction `[orig: CScrollWnd_HandleEvent @ 0x64d050]` (2026-08-11)
+
+The standalone CScrollWnd input map: **arrows** (`SCROLLWND_UP`/`SCROLLWND_DOWN`
+clicks) step `value -/+ step` (`+0xBFC`, ctor default 1 `@ 0x64c4cf`); a **track
+press** pages toward the click (`value -/+ page`, `+0xC00` via `CScrollWnd_SetPageSize
+@ 0x64ce10`, ctor default 10 `@ 0x64c4d9`; direction by the click's side of the
+shuttle `@ 0x64d0ca..0x64d10e`); a **shuttle press** anchors `this[763] =
+shuttle_origin - track_base - mouse` (`@ 0x64d1cb..0x64d217`) and, while the shuttle
+child holds press-capture, every move maps `value = min + (mouse + anchor) / ratio`
+clamped to `[min, max]` (`@ 0x64d231..0x64d2aa`; the ratio is the px-per-unit double
+at `+0xC08`, whose forward map is `CScrollWnd_UpdateThumbPosition @ 0x64cd50`). Every
+change re-lays the thumb and dispatches `0x4000001` with the new value (`@ 0x64d15c`).
+Reimpl: the whole interaction lives in the compiler's mouse pump
+(`MenuFrameCompiler::scroll_pump_mouse_` over `scroll_hit_at`/
+`scroll_drag_anchor`/`scroll_drag_value` and the shared `solve_scroll_parts_`
+geometry, `engine/runtime/menu/menu_frame_scrollbar.cpp`): the pump runs it
+ahead of the claim walk, the pressed part keeps the mouse until release
+(retail's child-window press-capture), and value changes surface through
+`MenuFrame`'s `scroll_value_changed` signal, which `MenuDriver` mirrors and
+relays. Embedded Table/List scrollbars ride the same parts with the rows
+model (range `0..rows-visible`, page `visible-1`, value = first visible
+row — the table SCROLLBAR delegate `@ 0x643b22`). The menu cursor is the OS
+custom cursor carrying the claim's retail texture; the compiled software
+cursor stays off in the game shell (drawing both showed a trailing second
+cursor).
+
+## Controls key-remap flow `[orig: sub_55D560 @ 0x55d560; the capture pump @ 0x55c67c]`
+
+The OPTIONS scene registers per-widget callbacks (`@ 0x55d737..0x55d827`):
+`CONTROL_MAPPING` -> the arm handler `sub_55D560 @ 0x55d560`, `DEFAULTS` ->
+`@ 0x55bd90`, `CLEAR_KEY` -> `@ 0x55bfd0`. The arm fires on the table
+activation event `0x5000002` OR a click on the already-stored row: it sets the
+options pump to remap state, stores the row's value (the catalog index) in the
+capture global, flushes the input queue, CLEARS the row's Control cell
+(`CTableWnd_SetCellText @ 0x63edf0`), takes focus, and for the mouse device
+registers a button callback (`sub_7613B0`). The pump (`@ 0x55c67c`, inside
+`sub_55C450`) then consumes input by device: Esc restores the display and ends
+the capture (`update_control_mapping_display @ 0x55b700` — formats the bound
+control per device, resets both capture globals to -1); keyboard keys drain
+into `KeyBinding_HandleKeyAssignment @ 0x55bb20`; the joystick page polls the
+button bitfield and writes `button+1` into the record byte (`@ 0x55c712`).
+
+The live records are 432-byte entries (base `0x25C772C`): +8 primary scan
+(`g_keybind_slot1_scan`), +10 secondary scan, +12/+14 the per-slot MODIFIER
+VK words (`g_keybind_slot1_modifier`/`slot2` — 2026-08-11: an earlier
+"extended-flag" reading is FALSIFIED; the word is 17 = VK_CONTROL rendering
+the "Ctrl-" display prefix, 16 = VK_SHIFT rendering "Shift-", 0 = none
+`[orig: KeyBinding_FormatBindingString @ 0x559a10]`), +16 mouse mask,
++20/+21 joystick bytes. The capture's key events ride the 128-slot circular
+keyboard queue (`Input_QueueKeyEvent @ 0x760c10` -> `Input_DequeueKeyEvent
+@ 0x760d60`): byte 0 = VK, flag word = 0x800 Ctrl held + 0x200 Shift held +
+0x100 extended (lParam bit 24) + 0x80 auto-repeat (lParam bit 30). Assignment
+semantics (`@ 0x55bb20`): VK `0x11` with the Ctrl-held flag is dropped — the
+`g_input_ctrl_down` state is set BEFORE its own event enqueues, so EVERY
+Ctrl press arrives flagged and the Ctrl key itself can never be captured;
+VK `0xDE` is dropped; the slot modifier becomes 17 iff the flag word is
+EXACTLY 0x800 (Ctrl held alone — a shift/extended/repeat flag defeats it);
+the keypad Enter captures as scan 269; re-assigning a held (scan, modifier)
+collapses the record to that key as the sole primary; otherwise the key
+fills the empty slot, or replaces the PRIMARY when both are full. The
+mouse callback (`@ 0x55c780`) maps events to masks (LMB 1, RMB 2, MMB 0x10,
+wheel up 0x400, wheel down 0x800), writes the record's mouse word, and
+unhooks. `CLEAR_KEY` clears the SELECTED row's slots for the active device;
+`DEFAULTS` qsorts by id, re-copies the 72-byte runtime default array at
+`0x254CC2C`, reformats, and resets the profile mouse-sensitivity/invert
+fields (`profile+0x590 = 0x80`, +0x594.. = 0). Bindings persist inside the
+player profile: the 432-byte records copy to `profile+1808` (72-byte stride,
+count at +1804, `@ 0x559d50`) and `PlayerProfile_SaveToFiles @ 0x54be00`
+writes player.sav ("FPBC0211" 16-byte header + five 15488-byte records + an
+8-byte trailer).
+
+Reimpl: `engine/runtime/controls/binding_set.*` (records + assignment/clear/
+defaults semantics, including the modifier word and the extended-VK
+derivation), the `ControlsModel` binding (VK <-> Godot key seam, the
+button->mask translation, and `is_token_pressed` — the one gameplay sampling
+call: keyboard slots gated on their modifier plus the held-sampleable
+L/R/M mouse-mask buttons; wheel masks are impulse-only and display/persist
+without sampling), `controls_bindings.gd` (the shared live model +
+persistence), `nova_menu_shell.gd` (arm/capture/cancel + DEFAULTS/CLEAR_KEY;
+a screen change cancels an armed capture like retail's screen-owned pump
+state), and `player_input_router.gd` samples gameplay input through the live
+records. Divergences: persistence rides `user://controls.cfg` until the
+player.sav profile format slice exists, and the joystick capture page is not
+wired (both under D-CTRL rows). The retail arm also fires on a single click
+of the already-selected row; the reimpl arms on the driver's double-click
+activation (the shipped REMAP_INSTRUCTION text documents double-click).
+
 Deferred (unwitnessed or out of bar; backlog, not blocking):
 
+- The binding DATA side of the D-CTRL family remains: D-CTRL-1 (the
+  mouse/joystick default binding arrays are an RE hunt), the player.sav
+  profile-record format (only its geometry is witnessed), and the
+  refresh pass's yellow active-binding highlight
+  (`refresh_control_mapping_list @ 0x55b320`, unwalked interior).
 - Live data/behavior for `GLB_TABLE`, `LAN_LIST`, and `GOPHER` remains owned by
   the multiplayer/news hosts. Their authored menu structure and Action payloads
   are preserved; this menu-contained pass does not invent offline services.
@@ -1195,8 +1475,8 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | Original | OpenNova |
 |---|---|
 | `UIScene_LoadAndParseContent @ 0x63c830` | menu load path: `MnuDocument` + `godot/game/nova_menu_shell.gd` |
-| `Menu_RenderFrame @ 0x54b7c0` -> `CUIScene_DrawScreensAndCursor @ 0x63bf60` | the scene draw walk -> `MenuFrameCompiler::compile` — `engine/runtime/menu/src/menu_frame.cpp` (2026-08-09) |
-| `CUIElement_Draw @ 0x64a8a0` / `CStaticWnd_Render @ 0x657b10` (the Draw vtable family) | the per-widget walk order — `MenuFrameCompiler::walk_widget` |
+| `Menu_RenderFrame @ 0x54b7c0` -> `CUIScene_DrawScreensAndCursor @ 0x63bf60` | the scene draw walk -> `MenuFrameCompiler::compile` + interleaved `MenuDrawList::draw_ops` — `engine/runtime/menu/menu_frame.cpp` |
+| `CUIElement_Draw @ 0x64a8a0` / `CStaticWnd_Render @ 0x657b10` (the Draw vtable family) | the per-widget and cross-kind painter order — `MenuFrameCompiler::walk_widget` -> `draw_ops` -> `MenuFrame::_draw` |
 | `CWnd_SetVisualState @ 0x646340` + `widget_process_mouse_event @ 0x647a00` (state write +236) | `MenuFrameCompiler::visual_state_for` + `MenuWidgetState` |
 | `CWnd_GetFontAndColors @ 0x646a70` (vtable+64 draw-time font/color inheritance) | `MenuFrameCompiler` `WidgetNode::font/colors` |
 | `CStaticWnd_DrawLabel @ 0x656fb0` + `draw_text_with_cursor @ 0x6533b0` + `font_cache_draw_text_scaled @ 0x653170` | `MenuFrameCompiler::emit_widget_text` / `emit_caret` over `opennova::hud::GameFont` |
@@ -1210,17 +1490,22 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | `CUIElement_ParseXMLDefinition @ 0x648120` | `mnu::parse_window` — `engine/formats/mnu/src/mnu.cpp`; layout in `MenuFrameCompiler::solve_rect` — `engine/runtime/menu/menu_frame.cpp` |
 | `parse_edit_widget_xml_properties @ 0x661d10` | EDIT attrs (`NUMBER/MINVAL/MAXVAL/MAXCHAR/READONLY/PASSWORD`) in `mnu::parse_window` |
 | `sub_64AD90 @ 0x64ad90` (CHECKBOX attr parse) | CHECKBOX attrs (`AS_BUTTON/CHECKED`) in `mnu::parse_window` |
-| `CUIScrollWidget_ParseExtendedXMLDef @ 0x64c6d0` | SCROLL `ORIENTATION` + `HEIGHT/WIDTH` thickness in `mnu::parse_window` |
+| `CScrollWnd_Construct @ 0x64c450` + `CUIScrollWidget_ParseExtendedXMLDef @ 0x64c6d0` | SCROLL orientation and one along-axis part extent: constructor default 20, with authored `WIDTH`/`HEIGHT` override; texture size is not the extent source |
 | `CUIScene_CreateWidgetByType @ 0x64f630` | `mnu::parse_type_string` / `window_type_name` — `engine/formats/mnu/src/mnu.cpp` |
 | `CTableWnd_ParseXMLContentDefinition @ 0x6427d0` | `mnu::parse_table_*` — `engine/formats/mnu/src/mnu.cpp` |
-| `CListWnd_ParseXMLDefinition @ 0x645770` | `mnu::parse_listbox` — `engine/formats/mnu/src/mnu.cpp` (`<MI>`/`<MIN_ITEM_HEIGHT>` -> `this+201`; justify/vjustify/items/appearances) |
+| `CListWnd_ParseXMLDefinition @ 0x645770` | `mnu::parse_listbox` / direct list fields — `engine/formats/mnu/src/mnu.cpp`; LIST/MULTI/LAN_LIST take sibling top-level `MIN_ITEM_HEIGHT`, COMBO takes it from nested `LIST_BOX` |
 | `CListWnd_Construct @ 0x643bb0` (embedded `CScrollWnd@+976`; row-height sentinel `this+201 = -1`) | popup row defaults — `MenuFrameCompiler::row_height_` (`engine/runtime/menu/menu_frame.cpp`, authored `MIN_ITEM_HEIGHT` sentinel) (D-MNU-8) |
-| `CListWnd_DrawItems @ 0x643f30` (rows inside `this+13`; row height = font "W" or `this+201`; per-row text truncation) | `MenuFrameCompiler::emit_combo_popup` + `row_height_` — `engine/runtime/menu/menu_frame.cpp` (D-MNU-7/8) |
-| `CComboWnd_ParseXMLDefinition @ 0x65c0d0` (feeds `<LIST_BOX>` to embedded `CListWnd` `this+384`) | `mnu::parse_window`'s LIST_BOX + `MenuFrameCompiler::combo_popup_rect` (authored combo-relative POSITION) (D-MNU-7) |
-| `CUIElement_DrawFrame @ 0x64a210` | `MenuFrameCompiler::emit_frame` — `engine/runtime/menu/menu_frame.cpp` (8 border quads + tiled fill; draws nothing when textures absent; no monogram) |
+| `CListWnd_DrawItems @ 0x643f30` (rows inside `this+13`; row height = font "W" or `this+201`; per-row text truncation) | `MenuFrameCompiler::emit_combo_popup` (`engine/runtime/menu/menu_frame_scrollbar.cpp`) + `row_height_` (`menu_frame.cpp`) (D-MNU-7/8) |
+| `CScrollWnd_Render @ 0x64c5c0` (COLOR sink `@ 0x64ce70`, IMAGE sink `@ 0x64cf70`, outline via `CUIElement_DrawOutlineRect @ 0x647fc0`) + `CUIScrollbar_CreateChildWindows @ 0x64d330` | `MenuFrameCompiler::emit_scrollbar` (`engine/runtime/menu/menu_frame_scrollbar.cpp`) — COLOR/OUTLINE full rect, IMAGE middle inset, then SHUTTLE/SCROLLUP/SCROLLDOWN painter order |
+| `CUIScrollbar_CalcThumbRect @ 0x64cba0` + `CScrollWnd_SetPageSize @ 0x64ce10` + `CScrollWnd_SetRangeAndClamp @ 0x64d490` + `CScrollWnd_SetScrollPos @ 0x64ce20` | proportional thumb with 20px minimum and clamped min/max/page/value; embedded owners hide-on-fit, while standalone state crosses `MenuWidgetState` -> `MenuFrame::set_widget_scroll_range` -> `MenuDriver.set_widget_scroll_range`; direct input/per-part state remains D-MNU-13 |
+| `options_screen_init @ 0x554800` + `UI_PopulateRenderAndAudioSettings @ 0x55c830` | `MenuOptionScrollPolicy.apply` (`godot/game/menu_option_scroll_policy.gd`, invoked by `MenuShell`) — GAMMA 5..20/page 2; SOUNDFXVOLUME/DIALOGVOLUME/MUSICVOLUME 0..255/page 10; MOUSE_SENSITIVITY 4..511/page 10; current=min only until persisted setting values are modeled |
+| `CListWnd_CreateScrollChild @ 0x6444c0` / `CMEditWnd_CreateScrollChild @ 0x661260` / `CTableWnd_Init @ 0x640790` | an absent/zero-width embedded scrollbar POSITION falls back to the rightmost 22px of the owner's full height |
+| `CComboWnd_ParseXMLDefinition @ 0x65c0d0` (feeds `<LIST_BOX>` to embedded `CListWnd` `this+384`) | `mnu::parse_window`'s LIST_BOX + `MenuFrameCompiler::combo_popup_rect` (authored combo-relative POSITION; `SB_EDGE_PAD` narrows content only, not scrollbar geometry) (D-MNU-7) |
+| `CUIElement_DrawFrame @ 0x64a210` + `init_border_materials @ 0x646f70` | `MenuFrameCompiler::emit_frame` — 8 border quads + tiled fill; retail-neutral 0x7F modulate-2x becomes effective white for Godot ordinary multiply; draws nothing when textures are absent; no monogram |
 | `CStaticWnd_Render @ 0x657b10` | the base window render order (frame -> appearance -> text -> children); the frame pass is gated on the DRAW_FRAME flag (`elem+0x134`) -> the compiler's draw walk gates `emit_frame` on `w.draw_frame`; confirms the menu monogram is never drawn |
 | `CUIScene_SetScreenScale @ 0x639480` (was `sub_639480`) | 800x600 anamorphic scale -> `_recompute_fit` in `nova_menu_shell.gd` / `mnu_canvas.gd` |
 | `CWnd_SetScaleRecursive @ 0x646c60` | scale propagation (root CanvasItem `set_scale`) |
+| `CUIElement_ParseXMLDefinition @ 0x648120` + `CUIElement_DrawTextureNative @ 0x647e40` -> `CTextureManager_DrawScaledRect @ 0x654e60` | `MenuFrameCompiler::emit_state_texture` — IMAGE stretched into the solved rect, with authored `MAP_STATE`/`HEIGHT` retained as the cropped atlas source band |
 | `CUIElement_DrawStretchedTexture @ 0x647d40` | the compiler's stretched-quad emit (texture into the solved rect); per-element int truncation of scaled coordinates is compiled (closes D-MNU-4's divergence) |
 | `CWnd_AccumulateAncestorOffset @ 0x6465e0` (was `sub_6465E0`) | Godot parent-child nesting (positions are parent-relative) |
 | `CSpinListWnd_Render @ 0x64b220` + `CUISpinList_ParseXMLDefinition @ 0x64bd10` | `resolve_item` + `mnu_render_item_cell` (`mnu_item_cell.{h,cpp}`) + `build_spinlist` |
@@ -1244,7 +1529,7 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | `KeyBinding_GetKeyNameAndDisplayName @ 0x494c60` (VK -> display name) | `controls::key_name` |
 | `KeyBinding_FormatBindingString @ 0x559a10` (`Ctrl-`/`Shift-`/`OR`) | `controls::format_binding` |
 | `sub_55bcd0 @ 0x55bcd0` (device-mode radio, sets `dword_25db7d8`) | Keyboard/Mouse/Joystick radio wiring — `nova_menu_shell.gd::_seed_control_mapping` |
-| `CTableWnd_ParseXMLContentDefinition @ 0x6427d0` (header `type="id"` `@ 0x64344a`, SCROLLBAR delegate `@ 0x643b22`) | `mnu::parse_table_*` + `MenuFrameCompiler::emit_table` — `engine/runtime/menu/menu_frame.cpp` (id lookup + body justify; scrollbar art is D-MNU-13 residue) |
+| `CTableWnd_ParseXMLContentDefinition @ 0x6427d0` (header `type="id"` `@ 0x64344a`, SCROLLBAR delegate `@ 0x643b22`) + `CUITable_Render @ 0x6411d0` | `mnu::parse_table_*` + `MenuFrameCompiler::emit_table` — FONT "W" header height, separate top-level-MIN_ITEM_HEIGHT body rows/page, full-height authored-or-22px scrollbar rect, default-state art/thumb geometry |
 | `ControlsModel` (Godot wrapper) | `godot/src/mnu/nova_controls_model.cpp` |
 | `Input_HandleActionBinding_0 case 0xB1 @ 0x4e0b3f` (useitem armory leg) + `Input_HandleActionBinding case 218 @ 0x49b83d` | the shell armory key (SHIFT) + `_try_open_armory` — `main_game.gd` |
 | `UI_InitWeaponClassSelection @ 0x567250` (CHARCLASS_* rows, values 5..9) | `ArmoryMenuCompanion._populate_classes` |

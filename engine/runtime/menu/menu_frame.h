@@ -88,8 +88,22 @@ struct MenuDrawList {
 		int32_t font = 0;
 		int32_t first = 0;
 		int32_t count = 0;
+		int32_t underline_first = 0;
+		int32_t underline_count = 0;
 	};
 	std::vector<FontRun> font_runs;
+	// Painter-order stream over the typed payload arrays. Primitive storage
+	// stays compact by kind; this sequence preserves the original forward
+	// widget/child walk across kind boundaries.
+	// [orig: CUIScene_DrawScreensAndCursor @ 0x63bf60; per-widget vtable+24]
+	struct DrawOp {
+		enum class Kind { Quad,
+			Line,
+			FontRun };
+		Kind kind = Kind::Quad;
+		int32_t index = 0;
+	};
+	std::vector<DrawOp> draw_ops;
 	int64_t widgets_drawn = 0;
 };
 
@@ -117,6 +131,18 @@ struct MenuWidgetState {
 	int32_t selected_item = 0;  // spinlist/combo/list selected row
 	int32_t hover_item = -1;    // list hover row (row style 2)
 	int32_t scroll_row = 0;     // list first visible row
+	// Standalone CScrollWnd range state. The page value is the original
+	// inclusive-page field (visible count - 1), not a row count. Constructor
+	// defaults are min=max=value=0, page=10; the embedder sets authored controls
+	// after finding them by NAME.
+	// [orig: CScrollWnd_Construct @ 0x64c450; CScrollWnd_SetPageSize
+	// @ 0x64ce10; CScrollWnd_SetRangeAndClamp @ 0x64d490;
+	// CScrollWnd_SetScrollPos @ 0x64ce20]
+	bool has_scroll_range = false;
+	int32_t scroll_min = 0;
+	int32_t scroll_max = 0;
+	int32_t scroll_page = 10;
+	int32_t scroll_value = 0;
 	bool popup_open = false;    // combo: draw the LIST_BOX popup
 	// Runtime item rows (text) the embedder seeds into a list/combo/spinlist —
 	// the Control-tree path seeded these via set_items; when present they
@@ -273,6 +299,32 @@ public:
 			float my, float sx, float sy) const;
 	// Spin arrow under the mouse: 0 none, 1 up, 2 down [orig:
 	// CSpinListWnd_CreateUpDownChildren @ 0x64b8b0 child rects].
+	// Standalone scroll interaction (the witnessed CScrollWnd map; see
+	// menu_frame_scrollbar.cpp): hit parts + the thumb drag inverse.
+	enum ScrollHit {
+		kScrollHitNone = 0,
+		kScrollHitUp = 1,
+		kScrollHitDown = 2,
+		kScrollHitShuttle = 3,
+		kScrollHitTrackBefore = 4,
+		kScrollHitTrackAfter = 5,
+	};
+	int scroll_hit_at(int index, const MenuFrameState &state, float mouse_x,
+			float mouse_y, float scale_x, float scale_y) const;
+	int scroll_drag_anchor(int index, const MenuFrameState &state,
+			float mouse_x, float mouse_y, float scale_x, float scale_y) const;
+	int scroll_drag_value(int index, const MenuFrameState &state,
+			float mouse_x, float mouse_y, float scale_x, float scale_y,
+			int anchor) const;
+	// Embedded-scrollbar owners (Table/List/Multi/LanList): the max first
+	// visible row and the page step (visible - 1) the driver's arrow/track
+	// presses use.
+	int scroll_row_limit(int index, const MenuFrameState &state) const;
+	// The widget whose scrollbar parts contain the point (shipped menus
+	// author scrollbars OUTSIDE the owner rect — the D-MNU-16 claim class).
+	int scroll_owner_at(const MenuFrameState &state, float mouse_x,
+			float mouse_y, float scale_x, float scale_y) const;
+	int scroll_page_rows(int index, const MenuFrameState &state) const;
 	int spin_arrow_at(int index, const MenuFrameState &state, float mx,
 			float my, float sx, float sy) const;
 	// Table DATA row under the mouse (absolute row index into table_rows,
@@ -311,6 +363,17 @@ public:
 	struct MouseClaim {
 		int hovered = -1;               // claimed widget index; -1 = none
 		int32_t cursor = kMenuTexNone;  // inherited +276 cursor, else default
+		// The CScrollWnd interaction result for this sample [orig:
+		// CScrollWnd_HandleEvent @ 0x64d050]: when a scrollbar part owns the
+		// sample (press, latch, or drag capture) scroll_index is the owning
+		// widget — the claim above stays on it, exactly like retail's child
+		// BUTTON capture, so no other widget sees the held samples. A
+		// completed arrow/track/drag step reports the new value (standalone
+		// Scroll: the authored range value; embedded owners: the
+		// first-visible row).
+		int scroll_index = -1;
+		bool scroll_value_changed = false;
+		int scroll_value = 0;
 	};
 	MouseClaim pump_mouse(MenuFrameState &io_state, float mouse_x,
 			float mouse_y, bool button_down, float scale_x, float scale_y);
@@ -326,6 +389,12 @@ private:
 		bool has_color = false; // COLOR=1 -> stretched fill [orig: entry+12]
 		uint32_t color = 0;
 		int32_t texture = kMenuTexNone; // IMAGE=2 [orig: entry+20]
+		// IMAGE sprite-sheet crop. MAP_STATE selects a HEIGHT-tall row from
+		// the source texture while the destination remains the widget rect.
+		bool has_map_state = false;
+		int32_t map_state = -1;
+		bool has_image_height = false;
+		int32_t image_height = 0;
 		bool has_outline = false;       // OUTLINE=8 [orig: entry+16]
 		uint32_t outline = 0;
 	};
@@ -333,6 +402,9 @@ private:
 		int start = 0;
 		int end = 0;
 	};
+	enum class ScrollbarKind { Standalone,
+		Embedded,
+		Popup };
 	// Per-marquee roll state (compiler runtime state, like edit_scroll_):
 	// the current scroll offset in design pixels and the last time_ms sample
 	// [orig: node y -= rate per frame; whole-roll reset when the last node
@@ -347,6 +419,7 @@ private:
 	int build_node(const mnu::Window &w, int parent);
 	void build_state_passes(const std::vector<mnu::Appearance> &rows,
 			StatePass (&states)[4]);
+	std::pair<int, int> state_texture_size(const StatePass &pass) const;
 	std::string resolve_var(const std::string &value) const;
 	uint32_t resolve_text_color(const std::string &value) const;
 	std::string resolve_text_value(const std::string &type,
@@ -366,6 +439,8 @@ private:
 	// Shared row-height rule (authored MIN_ITEM_HEIGHT wins, else the "W"
 	// measure) for list rows / combo popup rows.
 	int row_height_(const WidgetNode &node) const;
+	void table_row_heights_(const WidgetNode &node, int *header_height,
+			int *body_row_height) const;
 	bool widget_shown_(int index, const MenuFrameState &state) const;
 	int pump_visual_state(const mnu::Window &w,
 			const MenuWidgetState *ws) const;
@@ -386,9 +461,16 @@ private:
 
 	// emitters
 	static float emit_x(int design, float scale);
+	void push_quad(const MenuQuad &quad);
+	void push_line(const MenuLine &line);
+	void push_font_run(const MenuDrawList::FontRun &run);
 	void emit_rect_quad(const mnu::RectEdges &design, const WalkScale &s,
 			uint32_t color, int32_t texture, bool tiled, float tile_u,
 			float tile_v);
+	void emit_state_texture(const mnu::RectEdges &design, const WalkScale &s,
+			const StatePass &pass);
+	void emit_state_pass(const mnu::RectEdges &design, const WalkScale &s,
+			const StatePass &pass);
 	void emit_outline(const mnu::RectEdges &design, const WalkScale &s,
 			uint32_t color);
 	void emit_appearance(const WidgetNode &node, const mnu::RectEdges &rect,
@@ -402,7 +484,13 @@ private:
 			float y, const WalkScale &s, uint32_t color, int caret);
 	void emit_widget_text(const WidgetNode &node, const mnu::RectEdges &rect,
 			const WalkScale &s, int color_state, const MenuWidgetState *ws,
-			int caret);
+			int caret, const std::string *override_text = nullptr);
+	// The closed combo face: the popup row collection's selected row TEXT
+	// (runtime rows win; else the same nested-wins/top-level-fallback set the
+	// popup renders) [orig: CComboWnd_Render @ 0x65c05b..0x65c083 — the label
+	// swapped to the embedded list's selected row].
+	std::string combo_face_text(const WidgetNode &node,
+			const MenuWidgetState *ws) const;
 	void emit_edit(int index, const WidgetNode &node,
 			const mnu::RectEdges &rect, const WalkScale &s, int visual,
 			const MenuFrameState &frame, const MenuWidgetState *ws);
@@ -421,10 +509,62 @@ private:
 			const WalkScale &s, const MenuWidgetState *ws);
 	void emit_combo_popup(const WidgetNode &node, const mnu::RectEdges &rect,
 			const WalkScale &s, const MenuWidgetState *ws);
+	// Combos with an open dropdown collected during the walk; their popups
+	// emit AFTER the whole walk so the dropdown paints over later widgets
+	// (the D-MNU-12 menu-top decision — retail's inline tree order visibly
+	// renders popups on top via a still-unwalked mechanism).
+	std::vector<int> deferred_popups_;
+	bool resolve_scrollbar_rect(const WidgetNode &node, ScrollbarKind kind,
+			const mnu::RectEdges &owner, int fallback_top,
+			int fallback_height, int fallback_width,
+			mnu::RectEdges *out) const;
+	struct ScrollParts {
+		mnu::RectEdges track{};
+		mnu::RectEdges up{};
+		mnu::RectEdges down{};
+		mnu::RectEdges shuttle{};
+		bool vertical = true;
+		int extent = 0;
+		int travel = 0;
+		int shuttle_offset = 0;
+		int range_min = 0;
+		int range_max = 0;
+	};
+	bool solve_scroll_parts_(const WidgetNode &node, ScrollbarKind kind,
+			const mnu::RectEdges &rect, int range_min, int range_max, int page,
+			int value, ScrollParts *out) const;
+	bool solve_scroll_for_widget_(int index, const MenuFrameState &state,
+			ScrollParts *out) const;
+	bool scroll_row_span_(int index, const MenuFrameState &state, int *rows,
+			int *visible) const;
+	// The embedded-scrollbar emit for a row-scrolling owner (List/Multi/
+	// LanList/Table): gated on the SAME span the interaction path solves, so
+	// a drawn scrollbar is always an interactive one.
+	void emit_row_scrollbar_(int index, const WidgetNode &node,
+			const mnu::RectEdges &rect, const WalkScale &s,
+			const MenuFrameState &state, const MenuWidgetState *ws);
+	// The CScrollWnd interaction pump ahead of the claim walk (compiler
+	// runtime state, like edit_scroll_): the shuttle drag capture and the
+	// pressed-part latch until release
+	// [orig: CScrollWnd_HandleEvent @ 0x64d050].
+	struct ScrollPump {
+		bool button_was_down = false;
+		int captured_index = -1;  // shuttle drag capture owner
+		int drag_anchor = 0;
+		int latched_index = -1;   // arrow/track press owner until release
+	};
+	ScrollPump scroll_pump_;
+	bool scroll_pump_mouse_(MenuFrameState &io_state, float mouse_x,
+			float mouse_y, bool button_down, float scale_x, float scale_y,
+			MouseClaim *claim);
+	void emit_scrollbar(const WidgetNode &node, ScrollbarKind kind,
+			const mnu::RectEdges &rect, const WalkScale &s,
+			int range_min, int range_max, int page, int value,
+			int track_state);
 	void emit_spin_arrows(const WidgetNode &node, const mnu::RectEdges &rect,
 			const WalkScale &s);
 	void emit_table(int index, const WidgetNode &node,
-			const mnu::RectEdges &rect, const WalkScale &s, int visual,
+			const mnu::RectEdges &rect, const WalkScale &s,
 			const MenuWidgetState *ws);
 	void emit_marquee(int index, const WidgetNode &node,
 			const mnu::RectEdges &rect, const WalkScale &s,
