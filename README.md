@@ -45,8 +45,6 @@ Pre-built binaries are available on the [Releases](../../releases) page:
 | **`opennova-3ds-max-ase-exporter-windows-v<version>.mzp`** | 3ds Max plugin installer that adds NovaLogic ASE export. | Run the MZP in 3ds Max, restart 3ds Max, then use `File > Export > Novalogic ASE (.ase)`. |
 | **`opennova-modding-editor-windows-v<version>.zip`** | Standalone OpenNova Editor (ONED) for authoring terrain, object, mission, interface, audio, and environment mod data. | Extract the zip, then run `opennova-modtools.exe`. |
 | **`opennova-game-runtime-windows-v<version>.zip`** | Godot-based OpenNova runtime for loading exported scenes and runtime systems. | Extract the zip, then run `opennova.exe`. |
-| **`opennova-modding-editor-macos-v<version>.zip`** | The ONED editor as a universal macOS app (Apple Silicon and Intel). | Unzip, move the `.app` to Applications, then open it. The app is ad-hoc signed, not notarized: right-click then `Open` the first time, or run `xattr -dr com.apple.quarantine` on the `.app`. |
-| **`opennova-game-runtime-macos-v<version>.zip`** | The OpenNova runtime as a universal macOS app (Apple Silicon and Intel). | Unzip, move the `.app` to Applications, then open it. Clear Gatekeeper the same way as the editor app. |
 
 ## Asset Importer
 
