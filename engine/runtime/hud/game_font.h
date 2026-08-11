@@ -111,6 +111,10 @@ public:
 	// [orig: @ 0x6752c0 (this[95] - this[93]) * 256].
 	float line_height(float scale_y) const;
 
+	// One glyph's v-extent in pixels [orig: GameFont_MeasureCharHeight
+	// @ 0x580a80 — the friendly-tag line metric is the '0' glyph's height].
+	float char_height(uint8_t byte, float scale_y) const;
+
 private:
 	struct Cursor;
 	const fnt_glyph_t *glyph_for_byte(uint8_t byte) const;

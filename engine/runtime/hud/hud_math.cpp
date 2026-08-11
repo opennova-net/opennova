@@ -79,6 +79,11 @@ uint32_t half_bright_argb(uint32_t argb) {
 	return ((argb >> 1) & 0x7F7F7Fu) | 0xFF000000u;
 }
 
+// [orig: HUD_DrawTextHalfBrightF @0x580720]
+uint32_t half_bright_keep_alpha(uint32_t argb) {
+	return (argb & 0xFF000000u) + ((argb >> 1) & 0x7F7F7Fu);
+}
+
 // [orig: hud_draw_weapon_ammo_and_name @0x593a33..0x593ab0]
 std::string format_ammo(int clip, int reserve, int capacity) {
 	if (reserve == -1 || capacity == -1) return std::string();
@@ -190,6 +195,62 @@ int crosshair_error_row(int stance, bool scoped) {
 // [orig: gate @0x592afa]
 bool crosshair_should_draw(bool aimed_shot_available, bool keep_while_aimed) {
 	return !aimed_shot_available || keep_while_aimed;
+}
+
+// [orig: HUD_DrawEntityLabel @0x5a3eeb..0x5a3f18 — v30 = 192*(dist_m-50)/250
+// clamped to [0,192]; the (color & 0xFFFFFF) - ((v30+1)<<24) borrow leaves
+// alpha = 255 - v30]
+int friendly_tag_alpha(int32_t dist_q16) {
+	const int dist_m = dist_q16 / 0x10000;
+	int fade = 192 * (dist_m - 50) / 250;
+	fade = std::clamp(fade, 0, 192);
+	return 255 - fade;
+}
+
+// [orig: @0x5a3fc3 mode 2 always; @0x5a3fcf mode 1 iff dist < 0x12C0000;
+// modes 0/3 never draw the text form]
+bool friendly_tag_text_visible(int mode, int32_t dist_q16) {
+	if (mode == kFriendlyTagModeFull) return true;
+	return mode == kFriendlyTagModeFarBrief && dist_q16 < kFriendlyTagTextCutQ16;
+}
+
+// [orig: the MMX block @0x5a3e98..0x5a3ebf — punpcklbw(c,c) >> 1 (~c*128.5)
+// paddusw (level << 6) per 16-bit lane, >> 8, packuswb: each channel
+// saturates at c/2 + level/4]
+uint32_t friendly_tag_speaking_blend(uint32_t argb, int level255) {
+	const uint32_t lvl = static_cast<uint32_t>(std::clamp(level255, 0, 255));
+	uint32_t out = argb & 0xFF000000u;
+	for (int shift = 0; shift <= 16; shift += 8) {
+		const uint32_t c = (argb >> shift) & 0xFFu;
+		// The duplicated-byte lane is c*257; >>1 then +level<<6 then >>8.
+		const uint32_t lane = std::min<uint32_t>(
+				((c * 257u) >> 1) + (lvl << 6), 0xFFFFu);
+		out |= std::min<uint32_t>(lane >> 8, 0xFFu) << shift;
+	}
+	return out;
+}
+
+// [orig: g_fallbackPeopleNames @0x840a78 — the 36 compiled-in name strings,
+// verbatim including the double-space rank padding; count @0x840a0c]
+static const char *const kFallbackPeopleNames[] = {
+	"PFC  Mitchell", "PVT  Neibauer", "PFC  Daly", "SPC  Berg",
+	"PVT  Spence", "PFC  Gordon", "SGT  Taylor", "PVT  Browning",
+	"SGT  Wyatt", "CPL  King", "PFC  Herrell", "SSG  Smith",
+	"SPC  Jones", "PFC  Mathis", "SGT  Berg", "PFC  Hargrove",
+	"CPL  Draper", "SFC  King", "SGT  Cleveland", "SSG  Whalen",
+	"SPC  Street", "PVT  West", "PFC  Garcia", "CPL  Martinez",
+	"SGT  Brown", "SSG  Alvarez", "SFC  Fedoroff", "SGT  Cooper",
+	"PFC  Bennett", "PFC  Davison", "SGT  White", "SGT  Travis",
+	"SSG  McLean", "SFC  Santiago", "SGT  Bertsch", "SGT  Barber",
+};
+inline constexpr int kFallbackPeopleNameCount = 36;
+
+// [orig: @0x5a4047..0x5a40cd — name[0] = '^' (0x5E), then the table entry at
+// encoded_id % count; the id is the (pool << 12) | slot the walk derives]
+std::string friendly_tag_fallback_name(uint16_t encoded_entity_id) {
+	std::string out = "^";
+	out += kFallbackPeopleNames[encoded_entity_id % kFallbackPeopleNameCount];
+	return out;
 }
 
 } // namespace opennova::hud

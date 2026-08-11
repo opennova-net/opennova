@@ -9,6 +9,7 @@
 #include <mission/promote.h> // stash_mission_loadout_rules (the chunk-tuple conversion)
 #include <npwire/ingame_message_id.h>
 #include <simassets/fp_viewmodel_spec.h> // the FP viewmodel submit rule
+#include <world/friendly_tags.h> // the D-HUD-20 tag gather
 
 #include <godot_cpp/classes/file_access.hpp> // weapon.sav lives on the filesystem, not a mount
 
@@ -144,6 +145,29 @@ TypedArray<Dictionary> Simulation::get_attach_labels() const {
 			}
 		}
 		d["attach_text_key"] = key;
+		out.push_back(d);
+	}
+	return out;
+}
+
+TypedArray<Dictionary> Simulation::get_friendly_tags() const {
+	// The friendly-tags gather (D-HUD-20): raw positions + per-entity facts; the
+	// presenter lifts, projects, and feeds the HUD compiler's element. The
+	// witnessed pass is cited at the engine gather (world/friendly_tags.cpp).
+	TypedArray<Dictionary> out;
+	if (!world_) return out;
+	const opennova::world::Entity *player =
+			world_->registry.get(world_->cached.local_player);
+	if (player == nullptr) return out;
+	std::vector<opennova::world::FriendlyTagSource> tags;
+	opennova::world::collect_friendly_tags(*world_, *player, tags);
+	for (const opennova::world::FriendlyTagSource &t : tags) {
+		Dictionary d;
+		d["position"] = Vector3(t.position.x, t.position.y, t.position.z);
+		d["name"] = String::utf8(t.name.c_str());
+		d["entity_id"] = static_cast<int>(t.net_id);
+		d["health_ratio_fp16"] = t.health_ratio_fp16;
+		d["player"] = t.player;
 		out.push_back(d);
 	}
 	return out;

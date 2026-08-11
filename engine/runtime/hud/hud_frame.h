@@ -199,6 +199,22 @@ struct HudAttachLabel {
 	bool nearest = false;
 };
 
+// One projected friendly tag (D-HUD-20) [orig: HUD_DrawEntityLabel @ 0x5a39b0
+// via HUD_DrawFriendlyTagsPass @ 0x5a4480]. The presenter projects the anchor
+// (entity position + display height + 0.25 u) and supplies the view distance;
+// the compiler owns every witnessed draw rule.
+struct HudFriendlyTag {
+	float screen_x = 0.0f;
+	float screen_y = 0.0f;
+	int32_t dist_q16 = 0;   // |anchor - view position|, 16.16 world units
+	std::string name;       // authored/callsign; empty resolves the fallback
+	uint16_t entity_id = 0; // the fallback-name index [orig: (pool<<12)|slot]
+	int32_t health_ratio_fp16 = 0x10000;
+	bool medic = false;     // CharAttr class flag 8 [orig: charattr.def Medic]
+	bool speaking = false;  // entity == g_voicePlaybackEntity @ 0xC6EC38
+	bool player = false;    // slot-walk entry (empty callsign draws the bar leg)
+};
+
 struct HudMessageLine {
 	std::string text;
 	int expire_tick = 0;
@@ -229,6 +245,14 @@ struct HudFrameState {
 	HudWaypointState waypoint;
 	std::vector<HudObjectiveRow> objectives;
 	std::vector<HudAttachLabel> attach_labels;
+	// Friendly tags (D-HUD-20). Mode default 2 = FULL [orig: Game_Run
+	// @ 0x4a7fed]; fog cull against the environment's current fog distance
+	// [orig: Env_FogDistCurrent @ 0x5a3b28]; one speaking level shared by the
+	// (single) speaking entity [orig: g_audioOutLevelStage1].
+	std::vector<HudFriendlyTag> friendly_tags;
+	int friendly_tag_mode = 2;
+	int32_t fog_dist_q16 = INT32_MAX;
+	int speaking_level255 = 0;
 };
 
 struct HudDrawList {
@@ -289,6 +313,7 @@ private:
 	void element_waypoint(const HudFrameState &state, float w, float h);
 	void element_objectives(const HudFrameState &state, float w, float h);
 	void element_attach_labels(const HudFrameState &state, float w, float h);
+	void element_friendly_tags(const HudFrameState &state, float w, float h);
 	void element_objective_line(const HudFrameState &state, float w, float h);
 	void element_messages(const HudFrameState &state, float w, float h);
 	void element_sights_card(const HudFrameState &state, float w, float h);

@@ -258,6 +258,13 @@ opennova::mission::PromoteOptions Simulation::promote_options() const {
 	opennova::mission::PromoteOptions opts;
 	opts.item_seat_specs = item_seat_specs_;
 	opts.ai_profile_speeds = ai_profile_speeds_;
+	// Authored display names from the installed mission text's [PeopleNames]
+	// STRNAME%03i entries (the boot installs the table before load_mission
+	// runs). Promote applies the retail 15-char copy at its cited port site.
+	opts.people_name_resolver = [this](int32_t index) {
+		const auto it = mission_people_names_.find(index);
+		return it != mission_people_names_.end() ? it->second : std::string();
+	};
 	return opts;
 }
 

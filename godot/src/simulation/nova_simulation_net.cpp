@@ -624,6 +624,7 @@ void Simulation::set_mission_text_data(const PackedByteArray &p_rtxt_bytes) {
 	mission_briefing3_.clear();
 	mission_briefing2_.clear();
 	mission_location_texts_.clear();
+	mission_people_names_.clear();
 	if (p_rtxt_bytes.is_empty()) return;
 
 	opennova::rtxt::File table;
@@ -647,51 +648,59 @@ void Simulation::set_mission_text_data(const PackedByteArray &p_rtxt_bytes) {
 			mission_briefing2_ = e->text;
 	}
 
-	// The world-state writer resolves type-2044 markers by their one-based spawn
-	// order against [Locations]/LOCATION%03i. Preserve raw cp1252 bytes
-	// just like the briefing path; only the ASCII key is interpreted here.
-	for (std::size_t section_index = 0;
-	     section_index < table.sections.size(); ++section_index) {
-		const std::string &section_name = table.sections[section_index].name;
-		if (section_name.size() != 9) continue;
-		bool is_locations = true;
-		constexpr char kLocations[] = "locations";
-		for (std::size_t i = 0; i < 9; ++i) {
-			char folded = section_name[i];
-			if (folded >= 'A' && folded <= 'Z') folded = char(folded - 'A' + 'a');
-			if (folded != kLocations[i]) {
-				is_locations = false;
-				break;
+	// The numeric-key section harvests, raw cp1252 values with only the ASCII
+	// section/key interpreted: [Locations] LOCATION%03i (type-2044 markers by
+	// one-based spawn order, the S2C 0x0F deploy-map labels) and [PeopleNames]
+	// STRNAME%03i (the D-HUD-20 authored entity display names promote resolves
+	// from each record's name_index — the witnessed resolve is cited at the
+	// promote.cpp port site).
+	const auto fold = [](char c) {
+		return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
+	};
+	const auto harvest_indexed = [&](const char *section_lc,
+			std::size_t section_len, const char *prefix_lc,
+			std::size_t prefix_len,
+			std::unordered_map<int32_t, std::string> &out_map) {
+		for (std::size_t section_index = 0;
+		     section_index < table.sections.size(); ++section_index) {
+			const std::string &section_name = table.sections[section_index].name;
+			if (section_name.size() != section_len) continue;
+			bool is_match = true;
+			for (std::size_t i = 0; i < section_len; ++i) {
+				if (fold(section_name[i]) != section_lc[i]) {
+					is_match = false;
+					break;
+				}
 			}
-		}
-		if (!is_locations) continue;
+			if (!is_match) continue;
 
-		for (const opennova::rtxt::Entry *entry :
-		     table.get_section_entries(static_cast<uint32_t>(section_index))) {
-			if (entry == nullptr || entry->key.size() <= 8) continue;
-			constexpr char kPrefix[] = "location";
-			bool valid = true;
-			for (std::size_t i = 0; i < 8; ++i) {
-				char folded = entry->key[i];
-				if (folded >= 'A' && folded <= 'Z') folded = char(folded - 'A' + 'a');
-				if (folded != kPrefix[i]) {
-					valid = false;
-					break;
+			for (const opennova::rtxt::Entry *entry :
+			     table.get_section_entries(static_cast<uint32_t>(section_index))) {
+				if (entry == nullptr || entry->key.size() <= prefix_len) continue;
+				bool valid = true;
+				for (std::size_t i = 0; i < prefix_len; ++i) {
+					if (fold(entry->key[i]) != prefix_lc[i]) {
+						valid = false;
+						break;
+					}
 				}
-			}
-			int32_t index = 0;
-			for (std::size_t i = 8; valid && i < entry->key.size(); ++i) {
-				const char digit = entry->key[i];
-				if (digit < '0' || digit > '9' || index > 214748364) {
-					valid = false;
-					break;
+				int32_t index = 0;
+				for (std::size_t i = prefix_len; valid && i < entry->key.size();
+				     ++i) {
+					const char digit = entry->key[i];
+					if (digit < '0' || digit > '9' || index > 214748364) {
+						valid = false;
+						break;
+					}
+					index = index * 10 + (digit - '0');
 				}
-				index = index * 10 + (digit - '0');
+				if (valid) out_map.emplace(index, entry->text);
 			}
-			if (valid) mission_location_texts_.emplace(index, entry->text);
+			break;
 		}
-		break;
-	}
+	};
+	harvest_indexed("locations", 9, "location", 8, mission_location_texts_);
+	harvest_indexed("peoplenames", 11, "strname", 7, mission_people_names_);
 	mission_text_loaded_ = true;
 }
 

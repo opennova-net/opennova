@@ -22,6 +22,7 @@ const CHANGE_DIR_KEY := KEY_F9
 # 0xFF]; the authored default binding rides the unported input-binding layer
 # (D-CTRL-3), so the key itself is a reimpl mapping.
 const OBJECTIVES_KEY := KEY_O
+const FRIENDLY_TAGS_KEY := KEY_N  # retail action 30 @0x49b573; reimpl key (D-CTRL-3)
 # The armory key — the USE-ITEM key (input action 177 "useitem"; retail default =
 # SHIFT on the shipped KeyChart, labeled "USE ITEM/ATTACH/ARMORY"). Zone-gated: it
 # opens weapon.mnu's WEAPON screen only while the player stands inside a type-6
@@ -283,6 +284,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	# [orig: the co-op action toggle @0x49b68b -> HUD_DrawWinConditions @0x5be163]
 	if key.keycode == OBJECTIVES_KEY and is_gameplay_input_active() and _hud_presenter != null:
 		_hud_presenter.toggle_objectives()
+		get_viewport().set_input_as_handled()
+		return
+	if key.keycode == FRIENDLY_TAGS_KEY and is_gameplay_input_active() and _hud_presenter != null:
+		_hud_presenter.cycle_friendly_tags()
 		get_viewport().set_input_as_handled()
 		return
 	# The USE-ITEM key: in-world only. Zone legs first — the armory volume opens

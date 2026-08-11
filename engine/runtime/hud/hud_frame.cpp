@@ -145,6 +145,10 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	element_objectives(state, surface_w, surface_h);
 	element_attach_labels(state, surface_w, surface_h);
 	element_objective_line(state, surface_w, surface_h);
+	// Friendly tags draw after the overlay cluster and before the console
+	// messages, exactly the retail pass order [orig: HUD_DrawFriendlyTagsPass
+	// @ 0x5a87cc, then HUD_DrawConsoleMessages @ 0x5a87d1].
+	element_friendly_tags(state, surface_w, surface_h);
 	element_messages(state, surface_w, surface_h);
 	return draw_list_;
 }
@@ -677,6 +681,116 @@ void HudFrameCompiler::element_attach_labels(const HudFrameState &state,
 				half_bright_argb(color));
 		draw_list_.glyphs.insert(draw_list_.glyphs.end(), run.quads.begin(),
 				run.quads.end());
+	}
+	++draw_list_.elements_drawn;
+}
+
+void HudFrameCompiler::element_friendly_tags(const HudFrameState &state,
+		float w, float h) {
+	// D-HUD-20 [orig: HUD_DrawEntityLabel @ 0x5a39b0]. Screen-pixel anchors
+	// like the attach labels — the presenter projects, the compiler draws.
+	(void)w;
+	(void)h;
+	if (state.friendly_tag_mode == 0 || state.friendly_tags.empty() ||
+			font_.font() == nullptr) {
+		return;
+	}
+	// The line metric is the '0' glyph's height [orig: GameFont_MeasureCharHeight
+	// ('0', font) @ 0x5a3a36].
+	const float font_h = font_.char_height('0', 1.0f);
+	for (const HudFriendlyTag &tag : state.friendly_tags) {
+		// Too close to draw [orig: dist >= 0x8000 gate @ 0x5a3b0c] and the fog
+		// cull [orig: dist <= Env_FogDistCurrent @ 0x5a3b28].
+		if (tag.dist_q16 < kFriendlyTagMinDistQ16) {
+			continue;
+		}
+		if (tag.dist_q16 > state.fog_dist_q16) {
+			continue;
+		}
+		// Health tier -> the hudpos tag colors; the good tier reads
+		// tagcolor_good under the retail default hud_color_index == 2 (the
+		// scheme table swap for other indices is the documented residue)
+		// [orig: HUD_ClassifyHealthBand @ 0x5a3c2b; colors @ 0x5a3ca5..0x5a3cf5;
+		// cfg default 2 @ 0x54d28b].
+		const int band = health_color_band_fp16(tag.health_ratio_fp16);
+		uint32_t rgb = band == 0 ? layout_.tag_good
+				: band == 1        ? layout_.tag_middle
+									: layout_.tag_bad;
+		// The speaking pulse rides the voice output level [orig: @ 0x5a3e8f].
+		if (tag.speaking) {
+			rgb = friendly_tag_speaking_blend(rgb, state.speaking_level255);
+		}
+		// Distance alpha 255 -> 63 over 50..300 m [orig: @ 0x5a3eeb..0x5a3f18].
+		const uint32_t argb =
+				(static_cast<uint32_t>(friendly_tag_alpha(tag.dist_q16)) << 24) |
+				(rgb & 0xFFFFFFu);
+		const float top_y = tag.screen_y - font_h * 0.5f; // [orig: @ 0x5a4264]
+
+		// A slot entry with an empty callsign draws the bar form
+		// [orig: the empty-name leg @ 0x5a4398 — y unadjusted, height fontH].
+		std::string resolved = tag.name;
+		if (resolved.empty()) {
+			if (tag.player) {
+				HudLine bar;
+				bar.color = argb;
+				bar.x0 = tag.screen_x;
+				bar.y0 = tag.screen_y;
+				bar.x1 = tag.screen_x;
+				bar.y1 = tag.screen_y + font_h;
+				draw_list_.lines.push_back(bar);
+				continue;
+			}
+			// '^' + the compiled-in name table [orig: @ 0x5a4047..0x5a40cd].
+			resolved = friendly_tag_fallback_name(tag.entity_id);
+		}
+
+		if (friendly_tag_text_visible(state.friendly_tag_mode, tag.dist_q16)) {
+			// Centered text at the projected point, half-bright with the
+			// distance alpha kept [orig: HUD_DrawTextHalfBrightF @ 0x5a4268 ->
+			// CGameFont_DrawText flags 1].
+			const GameFontRun run = font_.layout(resolved.c_str(), tag.screen_x,
+					top_y, 1.0f, 1.0f, kFontAlignCenter,
+					half_bright_keep_alpha(argb));
+			draw_list_.glyphs.insert(draw_list_.glyphs.end(), run.quads.begin(),
+					run.quads.end());
+			if (tag.medic) {
+				// The red-cross-on-white medic plate, a fontH/2 square left of
+				// the text at the tag alpha [orig: rect @ 0x5a4309..0x5a436c;
+				// mesh = white quad + two red bars inset by an eighth,
+				// HUD_DrawMedicCrossQuad @ 0x59bcb0].
+				int text_w = 0;
+				int text_h = 0;
+				font_.measure(resolved.c_str(), 1.0f, 1.0f, &text_w, &text_h);
+				const float x0 = tag.screen_x -
+						(static_cast<float>(text_w) * 0.5f + font_h) - 0.5f;
+				const float y0 = top_y - 0.5f;
+				const float x1 = x0 + font_h * 0.5f;
+				const float y1 = y0 + font_h * 0.5f;
+				const uint32_t a = argb & 0xFF000000u;
+				const float dx8 = (x1 - x0) * 0.125f;
+				const float dy8 = (y1 - y0) * 0.125f;
+				const float mid_x = (x0 + x1) * 0.5f;
+				const float mid_y = (y0 + y1) * 0.5f;
+				emit_rect(x0, y0, x1, y1, a | 0xFFFFFFu, true);
+				emit_rect(mid_x - dx8, y0 + dy8, mid_x + dx8, y1 - dy8,
+						a | 0xFF0000u, true);
+				emit_rect(x0 + dx8, mid_y - dy8, x1 - dx8, mid_y + dy8,
+						a | 0xFF0000u, true);
+			}
+		} else if (state.friendly_tag_mode == kFriendlyTagModeBrief) {
+			// The BRIEF tick: three 1-px vertical lines at x-1/x/x+1 spanning
+			// +-fontH/4 around the projected point [orig: @ 0x5a40eb..0x5a4160].
+			const float half = font_h * 0.25f;
+			for (int dx = -1; dx <= 1; ++dx) {
+				HudLine seg;
+				seg.color = argb;
+				seg.x0 = tag.screen_x + static_cast<float>(dx);
+				seg.y0 = tag.screen_y - half;
+				seg.x1 = seg.x0;
+				seg.y1 = tag.screen_y + half;
+				draw_list_.lines.push_back(seg);
+			}
+		}
 	}
 	++draw_list_.elements_drawn;
 }

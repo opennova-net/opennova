@@ -165,6 +165,39 @@ int main() {
 		expect(empty.right <= empty.left, "0%% draws an empty fill");
 	}
 
+	// Friendly tags (D-HUD-20) [orig: HUD_DrawEntityLabel @0x5a39b0].
+	expect(hud::friendly_tag_alpha(50 << 16) == 255, "no fade at 50 m");
+	expect(hud::friendly_tag_alpha(10 << 16) == 255, "fade clamps below 50 m");
+	expect(hud::friendly_tag_alpha(175 << 16) == 159,
+			"192*(175-50)/250 = 96 off the midpoint");
+	expect(hud::friendly_tag_alpha(300 << 16) == 63, "fade floor at 300 m");
+	expect(hud::friendly_tag_alpha(1000 << 16) == 63, "fade clamps past 300 m");
+	expect(hud::friendly_tag_text_visible(hud::kFriendlyTagModeFull, 500 << 16),
+			"FULL always draws the text form");
+	expect(hud::friendly_tag_text_visible(hud::kFriendlyTagModeFarBrief,
+				   (300 << 16) - 1),
+			"FARBRIEF draws text under 300 m");
+	expect(!hud::friendly_tag_text_visible(hud::kFriendlyTagModeFarBrief,
+				   300 << 16),
+			"FARBRIEF cuts the text at 300 m");
+	expect(!hud::friendly_tag_text_visible(hud::kFriendlyTagModeBrief, 100 << 16),
+			"BRIEF never draws the text form");
+	expect(!hud::friendly_tag_text_visible(hud::kFriendlyTagModeOff, 100 << 16),
+			"OFF never draws the text form");
+	expect(hud::friendly_tag_fallback_name(24) == "^SGT  Brown",
+			"the '^' + table entry (the capture's SGT Brown at 24)");
+	expect(hud::friendly_tag_fallback_name(36) == "^PFC  Mitchell",
+			"the table wraps modulo 36");
+	expect(hud::friendly_tag_fallback_name(4120) == "^CPL  Draper",
+			"pool-encoded ids index mod 36 (4120 %% 36 = 16)");
+	// The speaking blend: each channel saturates at c/2 + level/4, alpha kept.
+	expect(hud::friendly_tag_speaking_blend(0xFF00FF00u, 0) == 0xFF007F00u,
+			"level 0 halves each channel");
+	expect(hud::friendly_tag_speaking_blend(0xFF00FF00u, 255) == 0xFF3FBF3Fu,
+			"level 255 lifts every channel by ~level/4");
+	expect(hud::half_bright_keep_alpha(0xC005FA0Du) == 0xC0027D06u,
+			"the text fold halves RGB and keeps the fade alpha");
+
 	if (failures) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
 		return 1;

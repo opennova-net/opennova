@@ -367,6 +367,7 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("local_player_in_vehicle_loadout_zone"), &Simulation::local_player_in_vehicle_loadout_zone);
 	ClassDB::bind_method(D_METHOD("local_player_toggle_mount"), &Simulation::local_player_toggle_mount);
 	ClassDB::bind_method(D_METHOD("get_attach_labels"), &Simulation::get_attach_labels);
+	ClassDB::bind_method(D_METHOD("get_friendly_tags"), &Simulation::get_friendly_tags);
 	ClassDB::bind_method(D_METHOD("apply_local_player_loadout", "kit", "player_class"),
 	                     &Simulation::apply_local_player_loadout);
 	ClassDB::bind_method(D_METHOD("set_spawn_loadout", "kit", "filter_by_availability"),

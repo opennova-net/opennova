@@ -40,6 +40,10 @@ var _endround_banner := ""
 # an alpha byte 0<->255). [orig: input action case @0x49b68b — dword_24C18CC ^= 0xFF
 # in co-op; the binding row itself is the unported input-binding layer]
 var _objectives_visible := false
+# The friendly-tags mode, held here so it survives the per-mission HUD rebuild
+# like retail's process-lifetime global. Boot default 2 = FULL.
+# [orig: g_friendlyTagsMode @0x24C18C4; default @0x4a7fed]
+var _friendly_tag_mode := 2
 
 
 func setup(world, player_presenter_in, ui_parent: Node) -> void:
@@ -133,6 +137,9 @@ func _ensure_game_hud() -> void:
 	if t != null and t.has_string_in_section("Overlays", "STROVER_MISSIONOBJECTIVES"):
 		_game_hud.set_objectives_header(
 				t.get_string_in_section("Overlays", "STROVER_MISSIONOBJECTIVES"))
+	# The presenter-held friendly-tags mode survives the per-mission rebuild
+	# like retail's process-lifetime global [orig: g_friendlyTagsMode @0x24C18C4].
+	_game_hud.set_friendly_tag_mode(_friendly_tag_mode)
 
 
 # The string tables the HUD resolves against: the current root's gametext table
@@ -279,6 +286,7 @@ func tick() -> void:
 
 	var probe_t1 := Time.get_ticks_usec() if timing else 0
 	_apply_attach_labels()
+	_apply_friendly_tags()
 	var probe_t2 := Time.get_ticks_usec() if timing else 0
 	var waypoint := _build_waypoint_entry()
 	var probe_t3 := Time.get_ticks_usec() if timing else 0
@@ -434,6 +442,59 @@ func _apply_attach_labels() -> void:
 	_game_hud.set_attach_labels(screens, texts, nearest)
 
 
+# The overhead-anchor lift: the entity position raised by the standing model
+# height + the witnessed 0.25 u [orig: anchor z = z + entity[+116] + 0x4000
+# @0x5a3a98 — +116 is the display-height field (writer unwalked); the standing
+# infantry constant stands in for it, docs/interface/hud-re.md D-HUD-20].
+const FRIENDLY_TAG_LIFT := 2.15
+
+
+# The overhead friendly tags (D-HUD-20): the sim's pool-0 gather projected
+# through the play camera with its view distance, fed as parallel typed arrays;
+# the environment's live fog distance rides along for the compiler's fog cull.
+# Behind-camera anchors drop at projection, mirroring the frustum clip.
+# [orig: HUD_DrawFriendlyTagsPass @0x5a4480 -> HUD_DrawEntityLabel @0x5a39b0 —
+#  distance @0x5a3aba, projection Math_FixedPointTransformPoint22 +
+#  clip_point_to_frustum_and_project @0x5a3b47, fog Env_FogDistCurrent
+#  @0x5a3b28. The speaking-pulse level feed is the dialog-channel follow-up.]
+func _apply_friendly_tags() -> void:
+	if _game_hud == null:
+		return
+	var screens := PackedVector2Array()
+	var dists := PackedInt32Array()
+	var names := PackedStringArray()
+	var ids := PackedInt32Array()
+	var ratios := PackedInt32Array()
+	var flags := PackedInt32Array()
+	var sim = _world.get_sim() if _world != null else null
+	if sim != null and _game_hud.get_friendly_tag_mode() != 0:
+		var tags: Array = sim.get_friendly_tags()
+		var camera: Camera3D = _game_hud.get_viewport().get_camera_3d() \
+				if not tags.is_empty() else null
+		if camera != null:
+			var cam_pos := camera.global_position
+			for raw in tags:
+				var tag: Dictionary = raw
+				var world_pos := MissionObjectPlacer.bms_to_godot_position(
+						Vector3(tag.get("position", Vector3.ZERO)))
+				world_pos.y += FRIENDLY_TAG_LIFT
+				if camera.is_position_behind(world_pos):
+					continue # [orig: the nonzero-clip bail @0x5a3b80]
+				screens.append(camera.unproject_position(world_pos))
+				dists.append(int(cam_pos.distance_to(world_pos) * 65536.0))
+				names.append(String(tag.get("name", "")))
+				ids.append(int(tag.get("entity_id", 0)))
+				ratios.append(int(tag.get("health_ratio_fp16", 0x10000)))
+				flags.append(4 if bool(tag.get("player", false)) else 0)
+	var fog_q16 := 0
+	var env: MissionEnvironment = _world.get_environment_node() \
+			if _world != null else null
+	if env != null:
+		fog_q16 = int(env.get_fog_distance() * 65536.0)
+	_game_hud.set_friendly_tag_env(fog_q16, 0)
+	_game_hud.set_friendly_tags(screens, dists, names, ids, ratios, flags)
+
+
 # The label text per seat type, resolved in the gametext table's Overlays section with
 # the witnessed missing-string fallbacks. The Gunner label prefers the weapon's
 # attachtextid key: a PRESENT key resolves even to an empty string (the original stores
@@ -552,6 +613,27 @@ func waypoint_hud_entry() -> WaypointHudEntry:
 ## [orig: the co-op action toggle @0x49b68b]
 func toggle_objectives() -> void:
 	_objectives_visible = not _objectives_visible
+
+
+# The retail toast keys, indexed by the mode they announce.
+# [orig: @0x49b596/@0x49b5c1/@0x49b5d0/@0x49b5da]
+const FRIENDLY_TAG_TOAST_KEYS: Array[String] = ["STRMISC_FRIENDLYTAGS_OFF",
+		"STRMISC_FRIENDLYTAGS_FARBRIEF", "STRMISC_FRIENDLYTAGS_FULL",
+		"STRMISC_FRIENDLYTAGS_BRIEF"]
+
+
+## The friendly-tags mode cycle 0->1->2->3->0 with the retail toast through the
+## message feed. [orig: Input_HandleActionBinding case 30 @0x49b573 ->
+##  GameText("Misc", STRMISC_FRIENDLYTAGS_*) -> Chat_AddDebugMessage @0x49bc60]
+func cycle_friendly_tags() -> void:
+	_friendly_tag_mode = (_friendly_tag_mode + 1) % 4
+	if _game_hud == null:
+		return
+	_game_hud.set_friendly_tag_mode(_friendly_tag_mode)
+	var t: RtxtStringFile = Strings.get_table("gametext")
+	var key := FRIENDLY_TAG_TOAST_KEYS[_friendly_tag_mode]
+	if t != null and t.has_string_in_section("Misc", key):
+		_game_hud.push_message(t.get_string_in_section("Misc", key))
 
 
 # The panel's resolved rows: shown win-condition slots with mission-text lines
