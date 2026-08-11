@@ -16,6 +16,8 @@ void AmbientMixer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("clear"), &AmbientMixer::clear);
 	ClassDB::bind_method(D_METHOD("set_occlusion_provider", "provider"),
 			&AmbientMixer::set_occlusion_provider);
+	ClassDB::bind_method(D_METHOD("set_occlusion_override", "override"),
+			&AmbientMixer::set_occlusion_override);
 	ClassDB::bind_method(
 			D_METHOD("add_marker", "pos", "source_bms_id", "stagger_slot",
 					"lifetime_ticks", "slot_keys", "sets"),
@@ -75,14 +77,17 @@ PackedStringArray AmbientMixer::global_bank_chain(
 void AmbientMixer::clear() {
 	mixer_.clear();
 	sim_ = nullptr;
-	duck_ = nullptr;
+	occlusion_override_ = Callable();
 	provider_id_ = ObjectID();
 }
 
-void AmbientMixer::set_occlusion_provider(Object *provider) {
+void AmbientMixer::set_occlusion_provider(Simulation *provider) {
 	provider_id_ = provider != nullptr ? provider->get_instance_id() : ObjectID();
 	sim_ = nullptr;
-	duck_ = nullptr;
+}
+
+void AmbientMixer::set_occlusion_override(const Callable &override) {
+	occlusion_override_ = override;
 }
 
 int AmbientMixer::add_marker(const Vector3 &pos, int64_t source_bms_id,
@@ -165,9 +170,9 @@ int64_t AmbientMixer::occlusion_trampoline(void *ctx, const float listener[3],
 		return self->sim_->sound_occlusion_distance_q16(l, s, dist_q16,
 				static_cast<int>(source_id));
 	}
-	if (self->duck_ != nullptr) {
-		return static_cast<int64_t>(self->duck_->call("sound_occlusion_distance_q16",
-				l, s, dist_q16, static_cast<int>(source_id)));
+	if (self->occlusion_override_.is_valid()) {
+		return static_cast<int64_t>(self->occlusion_override_.call(l, s, dist_q16,
+				static_cast<int>(source_id)));
 	}
 	return dist_q16;
 }
@@ -177,13 +182,8 @@ PackedFloat32Array AmbientMixer::mix(const Vector3 &listener) {
 		static_cast<float>(listener.y), static_cast<float>(listener.z) };
 	// Resolve the provider fresh each mix: a freed provider silently degrades to
 	// the unoccluded mix instead of dangling.
-	Object *provider = ObjectDB::get_instance(provider_id_);
-	sim_ = Object::cast_to<Simulation>(provider);
-	duck_ = (sim_ == nullptr && provider != nullptr &&
-					provider->has_method("sound_occlusion_distance_q16"))
-			? provider
-			: nullptr;
-	const bool has_provider = sim_ != nullptr || duck_ != nullptr;
+	sim_ = Object::cast_to<Simulation>(ObjectDB::get_instance(provider_id_));
+	const bool has_provider = sim_ != nullptr || occlusion_override_.is_valid();
 	const std::vector<opennova::audio::AmbientCandidate> &out = mixer_.mix(
 			l, has_provider ? &AmbientMixer::occlusion_trampoline : nullptr, this);
 	PackedFloat32Array rows;

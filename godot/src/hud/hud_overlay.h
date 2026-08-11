@@ -32,7 +32,7 @@ class ResourceRoot;
 // the compiled HudDrawList with CanvasItem draw calls.
 //
 // The standard-weapon SIGHTS card and the PlayerViewEffects post stack stay
-// shell-side child controls (see godot/src/world/hud_sights_card.gd): their
+// shell-side child controls (see godot/game/world/hud_sights_card.gd): their
 // per-row blend modes need separate CanvasItems, so the compiler's sights
 // element is left unfed here (layout.sights stays empty).
 class HudOverlay : public Control {

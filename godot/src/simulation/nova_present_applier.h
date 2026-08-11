@@ -22,9 +22,9 @@ namespace godot {
 
 class Simulation;
 
-// The native mission present-pass row walk. MissionPresentPass (GDScript,
-// godot/src/world/mission_present_pass.gd) stays the shell-facing component —
-// this class owns its hot loop: the revision-bound row plan (resolved typed
+// The native mission present-pass row walk — the one home of the mission
+// present pass (the former mission_present_pass.gd facade dissolved here) —
+// owning its hot loop: the revision-bound row plan (resolved typed
 // ObjectModel, applied-state caches) and the per-frame walk over the
 // sim's flat PackedFloat32Array snapshot, dispatching direct C++ calls only
 // on change. There is no name-based dispatch and no capability probing:
@@ -86,9 +86,10 @@ public:
 	static void aim_apply_valid(Object *node, const PackedFloat32Array &snap,
 			int base, bool drive_root_basis);
 
-	// --- The WIRE (joiner/MP) walk: plan + per-row hot path (the facade
-	// wire_present_pass.gd keeps the cold spawn/defer/prune path and pushes the
-	// finished plan here; nova_present_applier_wire.cpp holds the bodies).
+	// --- The WIRE (joiner/MP) walk: plan + per-row hot path (the native
+	// WirePresentPass (nova_wire_present_pass.cpp) keeps the cold
+	// spawn/defer/prune path and pushes the finished plan here;
+	// nova_present_applier_wire.cpp holds the bodies).
 
 	// `rebuild_held_weapon(handle, adm) -> Node3D|null` stays on the facade,
 	// which owns the sim graphic resolve and the weapon-node maps its consumers

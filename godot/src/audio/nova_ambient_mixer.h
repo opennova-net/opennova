@@ -2,6 +2,7 @@
 
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/callable.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
@@ -19,7 +20,7 @@ class Simulation;
 // §driver cadence, D-SND-16). The GDScript mission audio (nova_mission_audio.gd)
 // feeds resolved marker/layer data at setup, pumps the clocks, and binds the ranked
 // result to its persistent AudioStreamPlayer3D channels; occlusion routes to the
-// Simulation natively (duck-typed objects — test stubs — via call()).
+// Simulation natively (tests inject a Callable override — the typed seam).
 //
 // The curve family is exposed as statics so the GDScript sound bank keeps its
 // public seams (calc_distance_volume / emitter_layer_volume /
@@ -29,10 +30,12 @@ class AmbientMixer : public RefCounted {
 
 	opennova::audio::AmbientMixer mixer_;
 	ObjectID provider_id_; // the occlusion provider; resolved fresh each mix
-	// Per-mix transient views of the resolved provider (never cached across mixes,
+	// Per-mix transient view of the resolved provider (never cached across mixes,
 	// so a freed provider degrades to the unoccluded mix instead of dangling).
 	Simulation *sim_ = nullptr; // native fast path
-	Object *duck_ = nullptr;        // duck-typed fallback (test stubs) via call()
+	// Test-injection seam: a Callable(listener, source, dist_q16, source_id) -> int
+	// override consulted only when no Simulation provider is set.
+	Callable occlusion_override_;
 
 	static int64_t occlusion_trampoline(void *ctx, const float listener[3],
 			const float source[3], int64_t dist_q16, int64_t source_id);
@@ -42,7 +45,8 @@ protected:
 
 public:
 	void clear();
-	void set_occlusion_provider(Object *provider);
+	void set_occlusion_provider(Simulation *provider);
+	void set_occlusion_override(const Callable &override);
 
 	// One placed marker: `slot_keys` maps region 0..3 to an index into `sets`
 	// (-1 = silent region), `sets` is an Array of per-set PackedInt32Array layer

@@ -10,10 +10,11 @@
 #include "simulation/nova_simulation.h"
 
 // The WIRE (joiner/MP) per-row hot walk — the native twin of the plan walk
-// wire_present_pass.gd carried before this TU (that facade keeps the COLD path:
-// spawn/defer/unresolved bookkeeping, the liveness prune, spawn callbacks and
-// stats; per-leg behavioral semantics and their [orig] witnesses moved here
-// with the code). The walk deliberately TRANSLITERATES the GDScript's dispatch
+// the former wire_present_pass.gd carried (the native WirePresentPass,
+// nova_wire_present_pass.cpp, keeps the COLD path: spawn/defer/unresolved
+// bookkeeping, the liveness prune, spawn callbacks and stats; per-leg
+// behavioral semantics and their [orig] witnesses moved here with the
+// code). The walk deliberately TRANSLITERATES the GDScript's dispatch
 // pattern — the same legs fire in the same order under the same conditions —
 // so the pass's behavioral contract (pinned by wire_present_pass_test.gd's 33
 // cases) is preserved by construction; further edge-gating of the

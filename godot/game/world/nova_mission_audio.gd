@@ -57,7 +57,10 @@ const SILENT_DB := -80.0  # hard-silent floor for out-of-mix voices
 
 var _resource_root: ResourceRoot
 var _item_db: ItemDatabase
-var _simulation: Object = null  # Simulation (occlusion LOS); optional
+var _simulation: Simulation = null  # occlusion LOS; optional
+# Test-injection seam (Callable(listener, source, dist_q16, source_id) -> int),
+# forwarded to the bank and every fresh mixer; production uses _simulation.
+var _occlusion_override: Callable = Callable()
 var _bank: SoundBank
 var _dbf  # DbfData (mission co-named dialog bank; null if absent)
 var _audio_root: Node3D
@@ -160,6 +163,7 @@ func setup(mission, mission_name: String, container: Node3D) -> Dictionary:
 
 	_bank = SoundBank.new(_resource_root)
 	_bank.occlusion_provider = _simulation
+	_bank.occlusion_override = _occlusion_override
 	_load_bank(mission_name.get_file().get_basename() + ".LWF")
 	# The global slots in the engine's order — expansion pair (when one is
 	# mounted) ahead of the statics [orig: slot table @ 0x82A5B0, walk
@@ -519,12 +523,23 @@ func advance_ticks(logic_tick: int) -> void:
 ## through the witnessed two-ray LOS so occluded sources sound farther [orig:
 ## Sound_ApplyOcclusionDistance @ 0x529970]. Optional: tests and the menu run
 ## without a sim and mix unoccluded.
-func set_simulation(sim: Object) -> void:
+func set_simulation(sim: Simulation) -> void:
 	_simulation = sim
 	if _bank != null:
 		_bank.occlusion_provider = sim
 	if _mixer != null:
 		_mixer.set_occlusion_provider(sim)
+
+
+## Test-injection seam: a Callable(listener, source, dist_q16, source_id) -> int
+## occlusion override, consulted by the bank and the mixer only when no
+## Simulation is set. Replaces the deleted duck-typed provider stubs.
+func set_occlusion_override(override: Callable) -> void:
+	_occlusion_override = override
+	if _bank != null:
+		_bank.occlusion_override = override
+	if _mixer != null:
+		_mixer.set_occlusion_override(override)
 
 
 ## The per-frame ambient mix pass [orig: SoundEmitter_UpdateAndMixTop8 @ 0x5284a0,
@@ -776,6 +791,7 @@ func teardown() -> void:
 func _feed_mixer() -> void:
 	_mixer = AmbientMixer.new()
 	_mixer.set_occlusion_provider(_simulation)
+	_mixer.set_occlusion_override(_occlusion_override)
 	_mixer.set_time_of_day_hours(_hhmm_to_hours(_time_of_day_hhmm))
 	_candidate_lookup.clear()
 	_free_candidate_ids.clear()

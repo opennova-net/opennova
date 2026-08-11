@@ -168,7 +168,10 @@ HAS_METHOD_GUARD = re.compile(r"(?<!\w)has_method\s*\(")
 def count_has_method_guards() -> int:
     """Duck-type guards in the shipping godot layer (W4-2): the floor is the
     documented kept set (harness seams, workspace capability hooks, dynamic
-    dispatch) - not zero. class_has_method is excluded by the word boundary."""
+    dispatch) - not zero. class_has_method is excluded by the word boundary.
+    Covers the native binding layer too (godot/src *.cpp/*.h) - a C++
+    has_method() probe is the same duck dispatch, just invisible to GDScript
+    greps."""
     count = 0
     for sub in ("src", "game", "modtools"):
         for path in (REPO / "godot" / sub).rglob("*.gd"):
@@ -178,6 +181,16 @@ def count_has_method_guards() -> int:
                 continue
             for line in text.splitlines():
                 count += len(HAS_METHOD_GUARD.findall(line.split("#", 1)[0]))
+    for pattern in ("*.cpp", "*.h"):
+        for path in (REPO / "godot" / "src").rglob(pattern):
+            if "build" in path.relative_to(REPO).parts:
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for line in text.splitlines():
+                count += len(HAS_METHOD_GUARD.findall(line.split("//", 1)[0]))
     return count
 
 
