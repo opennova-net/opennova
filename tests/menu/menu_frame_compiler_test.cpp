@@ -1824,6 +1824,73 @@ void test_scroll_interaction_hits_and_drag(const fnt_font_t *font) {
 			"dragging before the track start clamps to min");
 }
 
+// The embedded-scrollbar owners scroll ROWS: range 0..rows-visible, page =
+// visible-1, value = the first visible row — the same CScrollWnd parts and
+// drag math as the standalone slider. [orig: the table SCROLLBAR delegate
+// @ 0x643b22; CMEditWnd page = visibleLines - 1; CScrollWnd_HandleEvent
+// @ 0x64d050]
+void test_table_embedded_scrollbar_scrolls_rows(const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>CONTROLS</NAME>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <FONT><NAME>f.fnt</NAME><DEFAULT_FG>FFFFFF</DEFAULT_FG></FONT>
+    <WINDOW type="table" name="MAPPING">
+      <POSITION><LEFT>100</LEFT><TOP>100</TOP><RIGHT>400</RIGHT><BOTTOM>216</BOTTOM></POSITION>
+      <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+      <COLUMN count="1">
+        <HEADER column="0" width="200" justify="LEFT">ACTION</HEADER>
+      </COLUMN>
+      <SCROLLBAR>
+        <POSITION><LEFT>280</LEFT><TOP>0</TOP><RIGHT>300</RIGHT><BOTTOM>116</BOTTOM></POSITION>
+        <APPEARANCE type="color" state="default">303030</APPEARANCE>
+        <SHUTTLE type="color" state="default">80FF0000</SHUTTLE>
+        <SCROLLUP type="color" state="default">505050</SCROLLUP>
+        <SCROLLDOWN type="color" state="default">505050</SCROLLDOWN>
+      </SCROLLBAR>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	c.configure(doc.first_screen(), font);
+	MenuWidgetState table;
+	table.index = 1;
+	for (int i = 0; i < 10; ++i) {
+		table.table_rows.push_back({ "ROW" });
+	}
+	table.scroll_row = 0;
+	MenuFrameState state;
+	state.widgets.push_back(table);
+	c.compile(state, 1.0f, 1.0f);
+
+	// Header (font "W" = 16+2 spacing measure) + 20px body rows over the
+	// 116px widget: the row span reports rows=10 and a visible count; the
+	// scrollable remainder is the row limit.
+	const int limit = c.scroll_row_limit(1, state);
+	const int page = c.scroll_page_rows(1, state);
+	CHECK(limit > 0 && limit < 10, "part of the 10 rows scrolls out of view");
+	CHECK(page >= 1, "the page step is at least one row");
+	// The authored scrollbar strip (combo-relative 380..400 x 100..216):
+	// arrows at the extent ends, the value-0 shuttle at the track start.
+	CHECK(c.scroll_hit_at(1, state, 390.0f, 105.0f, 1.0f, 1.0f) ==
+					MenuFrameCompiler::kScrollHitUp,
+			"the top strip hits Up");
+	CHECK(c.scroll_hit_at(1, state, 390.0f, 210.0f, 1.0f, 1.0f) ==
+					MenuFrameCompiler::kScrollHitDown,
+			"the bottom strip hits Down");
+	CHECK(c.scroll_hit_at(1, state, 390.0f, 125.0f, 1.0f, 1.0f) ==
+					MenuFrameCompiler::kScrollHitShuttle,
+			"the value-0 shuttle sits at the track start");
+	// A drag from the shuttle to the track end reaches the row limit.
+	const int anchor = c.scroll_drag_anchor(1, state, 390.0f, 125.0f, 1.0f, 1.0f);
+	CHECK(c.scroll_drag_value(1, state, 390.0f, 400.0f, 1.0f, 1.0f, anchor) ==
+					limit,
+			"dragging to the track end lands the last first-visible row");
+}
+
 // The retail combo closed face (the +764 CButtonWnd) shows the SELECTED row of
 // the embedded LIST — shipped options.mnu combos (WATERQUALITY et al.) author
 // their rows ONLY inside <LIST_BOX><ITEMS> with an empty widget STRING, so a
@@ -1974,6 +2041,7 @@ int main() {
 	test_multiline_wrap(&font);
 	test_draw_list_preserves_interleaved_primitive_order(&font);
 	test_scroll_interaction_hits_and_drag(&font);
+	test_table_embedded_scrollbar_scrolls_rows(&font);
 	test_combo_face_shows_list_box_selection(&font);
 	test_open_combo_popup_draws_over_later_widgets(&font);
 	fnt_free(&font);

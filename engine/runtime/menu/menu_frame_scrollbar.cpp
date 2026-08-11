@@ -212,15 +212,18 @@ bool MenuFrameCompiler::solve_scroll_parts_(const WidgetNode &node,
 	return true;
 }
 
+// Dispatch by widget type: a standalone Scroll widget scrolls its authored
+// range; a Table/List embedded scrollbar scrolls first-visible ROWS (range
+// 0..rows-visible, page = visible - 1, value = scroll_row) [orig: the table
+// SCROLLBAR delegate @ 0x643b22; CMEditWnd page = visibleLines - 1;
+// CScrollWnd_SetRangeAndClamp @ 0x64d490].
 bool MenuFrameCompiler::solve_standalone_scroll_(int index,
 		const MenuFrameState &state, ScrollParts *out) const {
 	if (index < 0 || index >= static_cast<int>(nodes_.size())) {
 		return false;
 	}
 	const WidgetNode &node = nodes_[static_cast<size_t>(index)];
-	if (node.window == nullptr ||
-			node.window->type != mnu::WindowType::Scroll ||
-			!node.scrollbar.present) {
+	if (node.window == nullptr) {
 		return false;
 	}
 	mnu::RectEdges rect;
@@ -228,12 +231,95 @@ bool MenuFrameCompiler::solve_standalone_scroll_(int index,
 		return false;
 	}
 	const MenuWidgetState *ws = state_for(state, index);
-	const int range_min = ws != nullptr && ws->has_scroll_range ? ws->scroll_min : 0;
-	const int range_max = ws != nullptr && ws->has_scroll_range ? ws->scroll_max : 0;
-	const int page = ws != nullptr && ws->has_scroll_range ? ws->scroll_page : 10;
-	const int value = ws != nullptr && ws->has_scroll_range ? ws->scroll_value : 0;
-	return solve_scroll_parts_(node, ScrollbarKind::Standalone, rect, range_min,
-			range_max, page, value, out);
+	const mnu::WindowType type = node.window->type;
+	if (type == mnu::WindowType::Scroll && node.scrollbar.present) {
+		const int range_min =
+				ws != nullptr && ws->has_scroll_range ? ws->scroll_min : 0;
+		const int range_max =
+				ws != nullptr && ws->has_scroll_range ? ws->scroll_max : 0;
+		const int page = ws != nullptr && ws->has_scroll_range ? ws->scroll_page : 10;
+		const int value = ws != nullptr && ws->has_scroll_range ? ws->scroll_value : 0;
+		return solve_scroll_parts_(node, ScrollbarKind::Standalone, rect,
+				range_min, range_max, page, value, out);
+	}
+	if (!node.embedded_scrollbar.present) {
+		return false;
+	}
+	int rows = 0;
+	int visible = 0;
+	if (!scroll_row_span_(index, state, &rows, &visible) || rows <= visible) {
+		return false;
+	}
+	mnu::RectEdges scrollbar_rect;
+	if (!resolve_scrollbar_rect(node, ScrollbarKind::Embedded, rect, 0,
+				rect.bottom - rect.top, 22, &scrollbar_rect)) {
+		return false;
+	}
+	const int value = ws != nullptr ? std::max(ws->scroll_row, 0) : 0;
+	return solve_scroll_parts_(node, ScrollbarKind::Embedded, scrollbar_rect, 0,
+			std::max(rows - visible, 0), std::max(visible - 1, 0), value, out);
+}
+
+// Rows + visible rows for the embedded-scrollbar owners (Table counts its
+// body under the header; List/Multi/LanList by row height).
+bool MenuFrameCompiler::scroll_row_span_(int index, const MenuFrameState &state,
+		int *rows, int *visible) const {
+	if (rows == nullptr || visible == nullptr || index < 0 ||
+			index >= static_cast<int>(nodes_.size())) {
+		return false;
+	}
+	const WidgetNode &node = nodes_[static_cast<size_t>(index)];
+	if (node.window == nullptr) {
+		return false;
+	}
+	const MenuWidgetState *ws = state_for(state, index);
+	switch (node.window->type) {
+		case mnu::WindowType::Table: {
+			mnu::RectEdges rect;
+			if (!widget_rect(index, state, &rect)) {
+				return false;
+			}
+			int header_h = 0;
+			int row_h = 0;
+			table_row_heights_(node, &header_h, &row_h);
+			if (row_h <= 0) {
+				return false;
+			}
+			*rows = ws != nullptr ? static_cast<int>(ws->table_rows.size()) : 0;
+			*visible = std::max(
+					(rect.bottom - rect.top - header_h) / row_h, 1);
+			return true;
+		}
+		case mnu::WindowType::List:
+		case mnu::WindowType::Multi:
+		case mnu::WindowType::LanList: {
+			*rows = item_count(index, state);
+			*visible = std::max(list_visible_rows(index, state), 1);
+			return true;
+		}
+		default:
+			return false;
+	}
+}
+
+int MenuFrameCompiler::scroll_row_limit(int index,
+		const MenuFrameState &state) const {
+	int rows = 0;
+	int visible = 0;
+	if (!scroll_row_span_(index, state, &rows, &visible)) {
+		return 0;
+	}
+	return std::max(rows - visible, 0);
+}
+
+int MenuFrameCompiler::scroll_page_rows(int index,
+		const MenuFrameState &state) const {
+	int rows = 0;
+	int visible = 0;
+	if (!scroll_row_span_(index, state, &rows, &visible)) {
+		return 0;
+	}
+	return std::max(visible - 1, 1);
 }
 
 // The witnessed CScrollWnd interaction map [orig: CScrollWnd_HandleEvent

@@ -316,6 +316,11 @@ public:
 	int scroll_drag_value(int index, const MenuFrameState &state,
 			float mouse_x, float mouse_y, float scale_x, float scale_y,
 			int anchor) const;
+	// Embedded-scrollbar owners (Table/List/Multi/LanList): the max first
+	// visible row and the page step (visible - 1) the driver's arrow/track
+	// presses use.
+	int scroll_row_limit(int index, const MenuFrameState &state) const;
+	int scroll_page_rows(int index, const MenuFrameState &state) const;
 	int spin_arrow_at(int index, const MenuFrameState &state, float mx,
 			float my, float sx, float sy) const;
 	// Table DATA row under the mouse (absolute row index into table_rows,
@@ -515,6 +520,8 @@ private:
 			int value, ScrollParts *out) const;
 	bool solve_standalone_scroll_(int index, const MenuFrameState &state,
 			ScrollParts *out) const;
+	bool scroll_row_span_(int index, const MenuFrameState &state, int *rows,
+			int *visible) const;
 	void emit_scrollbar(const WidgetNode &node, ScrollbarKind kind,
 			const mnu::RectEdges &rect, const WalkScale &s,
 			int range_min, int range_max, int page, int value,

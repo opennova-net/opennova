@@ -32,8 +32,7 @@ signal list_activated(id: int, row: int)
 # The pump's claim moved between widgets (hover edges; PLAYER_PREVIEW zoom).
 signal widget_hover_changed(id: int, hovered: bool)
 
-# menu_scroll_interaction.gd owns the CScrollWnd map + drag capture state.
-var _scroll := MenuScrollInteraction.new()
+var _scroll := MenuScrollInteraction.new()  # CScrollWnd map + drag capture
 
 # Double-click window for list/table activation, matching Godot's default.
 const DOUBLE_CLICK_MS := 400
@@ -564,21 +563,18 @@ func set_scroll_row(id: int, row: int) -> void:
 				int(state["scroll_row"]))
 
 
-# The standalone scroll widget under the mouse (by frame claim geometry).
 func _scroll_widget_at(position: Vector2) -> int:
-	var index := _frame.hit_test(position)
-	if index < 0:
-		return -1
-	var id := _id_at_index(index)
-	if id < 0 or widget_kind_of(id) != MnuDocument.TYPE_SCROLL:
-		return -1
-	return id
+	return _scroll.widget_at(self, _frame, position)
 
 
 func _handle_scroll_press(id: int, position: Vector2) -> void:
 	var index := _frame_index(id)
-	var scroll := _id_state.get(id, {}).get("scroll_range") as MenuScrollRange
-	if index < 0 or scroll == null:
+	if index < 0:
+		return
+	var scroll := _scroll.model_of(self, _frame, id, index,
+			_id_state.get(id, {}).get("scroll_range") as MenuScrollRange,
+			int(_id_state.get(id, {}).get("scroll_row", 0)))
+	if scroll == null:
 		return
 	var value := _scroll.press(_frame, id, index, scroll, position)
 	if value != MenuScrollInteraction.NO_VALUE:
@@ -586,6 +582,10 @@ func _handle_scroll_press(id: int, position: Vector2) -> void:
 
 
 func _apply_scroll_value(id: int, value: int) -> void:
+	if widget_kind_of(id) != MnuDocument.TYPE_SCROLL:
+		var limit: int = _frame.scroll_row_limit(_frame_index(id))
+		set_scroll_row(id, clampi(value, 0, limit))
+		return
 	var scroll := _id_state.get(id, {}).get("scroll_range") as MenuScrollRange
 	if scroll == null:
 		return
@@ -600,9 +600,8 @@ func _apply_scroll_value(id: int, value: int) -> void:
 	widget_value_changed.emit(widget_name_of(id), "scroll", value, str(value))
 
 
-## Set the original CScrollWnd min/max/inclusive-page/value state used by a
-## standalone type=scroll widget. Interaction is intentionally separate: this
-## is the render/state seam settings companions can update.
+## The CScrollWnd min/max/inclusive-page/value render/state seam settings
+## companions update (interaction lives in menu_scroll_interaction.gd).
 func set_widget_scroll_range(id: int, minimum: int, maximum: int,
 		page: int, value: int) -> void:
 	if minimum > maximum:
@@ -688,7 +687,7 @@ func process_mouse(position: Vector2, button_down: bool) -> void:
 		if combo_index < 0:
 			_open_combo_id = -1
 		else:
-			_frame.set_cursor_state(not _edit_mode, position)
+			_frame.set_cursor_state(false, position)
 			# The popup-exclusive pump hovers the row under the mouse (style 2)
 			# [orig: the per-frame pump runs ONLY on the popup while open —
 			# scene_end_frame @ 0x63e600 gate @ 0x63e691; the row mouseover
@@ -716,17 +715,17 @@ func process_mouse(position: Vector2, button_down: bool) -> void:
 			if drag_index >= 0:
 				_apply_scroll_value(_scroll.drag_id(),
 						_scroll.drag_value(_frame, drag_index, position))
-			_frame.set_cursor_state(not _edit_mode, position)
+			_frame.set_cursor_state(false, position)
 			return
 	if down_edge:
 		var scroll_id := _scroll_widget_at(position)
 		if scroll_id >= 0:
 			_handle_scroll_press(scroll_id, position)
-			_frame.set_cursor_state(not _edit_mode, position)
+			_frame.set_cursor_state(false, position)
 			return
 
 	var claim := _frame.process_mouse(position, button_down)
-	_frame.set_cursor_state(not _edit_mode, position)
+	_frame.set_cursor_state(false, position)
 	if claim != _last_claim:
 		_on_claim_changed(_last_claim, claim)
 		_last_claim = claim
@@ -756,9 +755,10 @@ func _id_at_index(index: int) -> int:
 
 
 func _apply_cursor(texture: Texture2D) -> void:
-	# The retail cursor rides the claim (inherited widget CURSOR, else the
-	# screen default); suppressed while authoring so the ONED preview never
-	# hijacks the editor cursor.
+	# The retail cursor rides the claim as the OS custom cursor — the ONE
+	# live cursor (both drawn showed the compiled one trailing by a pump
+	# frame; emit_cursor stays for surfaces without an OS cursor).
+	# Suppressed while authoring so ONED keeps the editor cursor.
 	if _edit_mode:
 		return
 	Input.set_custom_mouse_cursor(texture, Input.CURSOR_ARROW)

@@ -676,7 +676,14 @@ arrows ~150px left and producing the doubled/misplaced look.
 ## Combo dropdown `[orig: CComboWnd @ 0x65be40; CComboWnd_Render @ 0x65bfd0; CComboWnd_ParseXMLDefinition @ 0x65c0d0]`
 
 A combobox is a closed `CButtonWnd` (`this+764`, showing the selected item) plus an
-embedded `CListWnd` popup (`this+1536`) `[orig: CComboWnd ctor @ 0x65be40]`. The parse
+embedded `CListWnd` popup (`this+1536`) `[orig: CComboWnd ctor @ 0x65be40]`. The closed
+FACE is the embedded list's SELECTION rendered as the combo's own label: the render
+temporarily swaps the widget text slot to `row_text(list, selected_row(list))`, draws
+via `CStaticWnd_DrawLabel` (the combo's own STRING layout — shipped options.mnu combos
+author an EMPTY widget STRING and rows only inside `<LIST_BOX>`), then restores
+`[orig: CComboWnd_Render @ 0x65c05b..0x65c083]`. Reimpl: `combo_face_text` over the
+same row collection the popup renders, emitted through the label path (2026-08-11 —
+the widget-level-ITEMS-only face left every options.mnu combo blank). The parse
 `[orig: CComboWnd_ParseXMLDefinition @ 0x65c0d0]` delegates the `<LIST_BOX>` content to
 that embedded list, whose own window RECT (`this+13`) is set from the authored
 `<LIST_BOX>` `<POSITION>` — combo-relative, in 800x600 design space. So the dropdown is a
@@ -758,13 +765,21 @@ the widget's own name):
   @ 0x6497f0, @ 0x6498ce/0x6499ea/0x649a51`) and track the popup global only when the
   action's target is itself popup-flagged (`@ 0x64993a / 0x64997b`).
 
-Draw order has **no overlay pass**: the open list renders at its tree position
-(`CComboWnd_Render @ 0x65bfd0` renders the closed cell, then children in array order —
-the embedded list is attached as a child by `CWnd_SetParentAndAttach @ 0x6480a0` during
-parse — and `CListWnd_DrawItems @ 0x643f30` early-outs on hidden). The shipped menus are
-authored so this is unobservable: all three `player.mnu` combos (NATIONALITY / DIVISION /
-COMBO_LIST) author their LIST_BOX rects to the SAME parent-space region `(0,65)-(214,306)`,
-below every closed cell — dropdowns cover background art, never interactive siblings.
+Draw order in the WALKED code has **no overlay pass**: the open list renders at its
+tree position (`CComboWnd_Render @ 0x65bfd0` renders the closed cell, then children in
+array order — the embedded list is attached as a child by `CWnd_SetParentAndAttach
+@ 0x6480a0` during parse — and `CListWnd_DrawItems @ 0x643f30` early-outs on hidden).
+The earlier "unobservable in shipped menus" reading (from `player.mnu`, whose three
+combos all author their LIST_BOX rects below every closed cell) is FALSIFIED by
+`options.mnu`: the Advanced video panel authors WATERQUALITY before SHADOWQUALITY /
+PARTICLES at a 30px row pitch under an 80px popup — pure tree-order painting would
+overdraw the open popup, yet retail renders it on top. **The retail topmost mechanism
+remains unwalked** (2026-08-11 sweep ruled out: a scene/frame overlay pass
+(`Menu_RenderFrame @ 0x54b7c0` is gate → clear → walk → present), a draw-path
+`IsVisibleInHierarchy` gate (input-only xrefs), tree reordering at toggle
+(`combobox_handle_event @ 0x65c190`), and the `+0x290` dirty flag (no menu-range
+reader)). The reimpl defers open popups to a post-walk overlay pass — the D-MNU-12
+menu-top decision the Control-tree overlay carried.
 
 Reimpl: the exclusivity is hosted as a full-menu transparent catcher overlay
 (`ComboPopupOverlay`) added as the owning `MnuMenu`'s **last child** on open, with the
@@ -1300,8 +1315,31 @@ and the misnomer `CPreprocessor_SetCellTexture @ 0x63edf0 →
 CTableWnd_SetCellText`; entry comments on the four HostDialog handlers +
 `init_host_settings_dialog` + `UI_HandleHostSessionStart`.
 
+## Scroll interaction `[orig: CScrollWnd_HandleEvent @ 0x64d050]` (2026-08-11)
+
+The standalone CScrollWnd input map: **arrows** (`SCROLLWND_UP`/`SCROLLWND_DOWN`
+clicks) step `value -/+ step` (`+0xBFC`, ctor default 1 `@ 0x64c4cf`); a **track
+press** pages toward the click (`value -/+ page`, `+0xC00` via `CScrollWnd_SetPageSize
+@ 0x64ce10`, ctor default 10 `@ 0x64c4d9`; direction by the click's side of the
+shuttle `@ 0x64d0ca..0x64d10e`); a **shuttle press** anchors `this[763] =
+shuttle_origin - track_base - mouse` (`@ 0x64d1cb..0x64d217`) and, while the shuttle
+child holds press-capture, every move maps `value = min + (mouse + anchor) / ratio`
+clamped to `[min, max]` (`@ 0x64d231..0x64d2aa`; the ratio is the px-per-unit double
+at `+0xC08`, whose forward map is `CScrollWnd_UpdateThumbPosition @ 0x64cd50`). Every
+change re-lays the thumb and dispatches `0x4000001` with the new value (`@ 0x64d15c`).
+Reimpl: `MenuFrameCompiler::scroll_hit_at`/`scroll_drag_anchor`/`scroll_drag_value`
+(the shared `solve_scroll_parts_` geometry) + `menu_scroll_interaction.gd` routing;
+embedded Table/List scrollbars ride the same parts with the rows model (range
+`0..rows-visible`, page `visible-1`, value = first visible row — the table SCROLLBAR
+delegate `@ 0x643b22`). The menu cursor is the OS custom cursor carrying the claim's
+retail texture; the compiled software cursor stays off in the game shell (drawing
+both showed a trailing second cursor).
+
 Deferred (unwitnessed or out of bar; backlog, not blocking):
 
+- The Controls key-remap flow (double-click a CONTROL_MAPPING row -> key capture ->
+  rebind + persistence) is unimplemented; the binding DATA side is the D-CTRL family
+  (D-CTRL-1: the mouse/joystick default binding arrays are an RE hunt).
 - Live data/behavior for `GLB_TABLE`, `LAN_LIST`, and `GOPHER` remains owned by
   the multiplayer/news hosts. Their authored menu structure and Action payloads
   are preserved; this menu-contained pass does not invent offline services.

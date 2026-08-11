@@ -575,6 +575,20 @@ int MenuFrame::scroll_drag_value(int p_index, const Vector2 &p_position,
 			p_position.y, scale.x, scale.y, p_anchor);
 }
 
+int MenuFrame::scroll_row_limit(int p_index) const {
+	if (!configured_) {
+		return 0;
+	}
+	return compiler_.scroll_row_limit(p_index, state_);
+}
+
+int MenuFrame::scroll_page_rows(int p_index) const {
+	if (!configured_) {
+		return 0;
+	}
+	return compiler_.scroll_page_rows(p_index, state_);
+}
+
 int MenuFrame::spin_arrow_at(int p_index, const Vector2 &p_position) const {
 	if (!configured_) {
 		return 0;
@@ -918,6 +932,10 @@ void MenuFrame::_bind_methods() {
 	ClassDB::bind_method(
 			D_METHOD("scroll_drag_value", "index", "position", "anchor"),
 			&MenuFrame::scroll_drag_value);
+	ClassDB::bind_method(D_METHOD("scroll_row_limit", "index"),
+			&MenuFrame::scroll_row_limit);
+	ClassDB::bind_method(D_METHOD("scroll_page_rows", "index"),
+			&MenuFrame::scroll_page_rows);
 	ClassDB::bind_method(D_METHOD("get_widget_hover_item", "index"),
 			&MenuFrame::get_widget_hover_item);
 	ClassDB::bind_method(
