@@ -133,8 +133,11 @@ frame: `ParticleRenderer`'s `_process` (frame compile + compositor dispatch);
 per-model material eval self-parks on the native `ObjectModel`
 (`godot/src/object`), whose event-driven runtime frame wakes only when it
 holds live work. The occlusion leg runs AFTER the present in the frame order
-above — the scene-graph-ownership inverse of retail's collect-then-submit —
-tracked as D-RORD-8, an ADR 0033 R3-reopen candidate.
+above — present re-asserts base visibility, occlusion layers hides on top, and
+the local-view present leg (`FrameHooks.present_local_view`, the present
+ladder's closer) places the camera first so occlusion/iris read the render
+view (D-RORD-8, fixed 2026-08-10; the residue is the pre-batch
+terrain/foliage camera phase).
 
 ## Single-player is a listen server
 

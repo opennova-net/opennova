@@ -80,6 +80,16 @@ int32_t FrameDriver::run_frame(double dt, const FrameHooks &hooks) {
 			perf_.present_us = now_us() - present_start;
 		}
 	}
+	// The local-view present closes the ladder on EVERY render frame (the
+	// camera changes between fixed ticks exactly like the entity rows), so
+	// the occlusion/iris legs below read the view the imminent render uses
+	// (D-RORD-8) [orig: Render_ProcessMainSceneFrame @ 0x5ca0f0 builds the
+	// view before collect+submit].
+	if (hooks.present_local_view) {
+		const int64_t view_start = now_us();
+		hooks.present_local_view();
+		perf_.present_us += now_us() - view_start;
+	}
 	// The post-batch frame legs, in the one fixed order the shell used to
 	// hand-sequence: session drive, world-driven weather, the blink gates
 	// (only after a batch that ran), the render-occlusion frame, the iris
@@ -122,6 +132,11 @@ bool FrameDriver::run_single(const FrameHooks &hooks) {
 			const int64_t present_start = now_us();
 			hooks.present_frame();
 			perf_.present_us = now_us() - present_start;
+		}
+		if (hooks.present_local_view) {
+			const int64_t view_start = now_us();
+			hooks.present_local_view();
+			perf_.present_us += now_us() - view_start;
 		}
 	}
 	perf_.did_tick = did_tick;

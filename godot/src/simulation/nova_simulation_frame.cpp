@@ -90,6 +90,7 @@ void Simulation::set_frame_world(Object *p_world) {
 	if (p_world == nullptr) {
 		frame_terrain_cb_ = Callable();
 		frame_foliage_cb_ = Callable();
+		frame_local_view_cb_ = Callable();
 		frame_net_drive_cb_ = Callable();
 		frame_weather_cb_ = Callable();
 		frame_blink_cb_ = Callable();
@@ -101,6 +102,7 @@ void Simulation::set_frame_world(Object *p_world) {
 	static const char *const kNames[] = {
 		"_frame_terrain_leg",
 		"_frame_foliage_leg",
+		"_frame_local_view_leg",
 		"_frame_net_drive_leg",
 		"_frame_weather_leg",
 		"_frame_blink_leg",
@@ -111,6 +113,7 @@ void Simulation::set_frame_world(Object *p_world) {
 	Callable *const slots[] = {
 		&frame_terrain_cb_,
 		&frame_foliage_cb_,
+		&frame_local_view_cb_,
 		&frame_net_drive_cb_,
 		&frame_weather_cb_,
 		&frame_blink_cb_,
@@ -118,7 +121,7 @@ void Simulation::set_frame_world(Object *p_world) {
 		&frame_iris_cb_,
 		&frame_audio_cb_,
 	};
-	wire_leg_contract(p_world, kNames, 8, slots);
+	wire_leg_contract(p_world, kNames, 9, slots);
 }
 
 opennova::frame::FrameHooks Simulation::build_frame_hooks() {
@@ -164,6 +167,7 @@ opennova::frame::FrameHooks Simulation::build_frame_hooks() {
 	hooks.fixed_tick_completed = leg_int(frame_fixed_done_cb_);
 	hooks.present_rows = leg(frame_present_rows_cb_);
 	hooks.present_frame = leg(frame_present_frame_cb_);
+	hooks.present_local_view = leg(frame_local_view_cb_);
 	hooks.net_drive = leg(frame_net_drive_cb_);
 	hooks.weather = leg(frame_weather_cb_);
 	hooks.blink_gates = leg(frame_blink_cb_);

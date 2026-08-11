@@ -373,6 +373,7 @@ private:
 	Callable frame_net_drive_cb_;
 	Callable frame_weather_cb_;
 	Callable frame_blink_cb_;
+	Callable frame_local_view_cb_;
 	Callable frame_occlusion_cb_;
 	Callable frame_iris_cb_;
 	Callable frame_audio_cb_;

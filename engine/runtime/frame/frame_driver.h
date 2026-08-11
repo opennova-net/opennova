@@ -59,6 +59,13 @@ struct FrameHooks {
 	// passes) after a batch that ran.
 	std::function<void()> present_rows;
 	std::function<void()> present_frame;
+	// The local-player VIEW presentation — camera + viewmodel placement from
+	// the just-simulated player state. Every render frame, closing the present
+	// ladder, so the post-batch occlusion/iris legs read the same view the
+	// imminent render uses (D-RORD-8) [orig: the render frame builds its view
+	// from the current player state before collect+submit,
+	// Render_ProcessMainSceneFrame @ 0x5ca0f0].
+	std::function<void()> present_local_view;
 	// The post-batch frame legs, in order: session-drive observation, the
 	// world-driven weather tick, the occlusion blink gates (only when at
 	// least one logic tick ran), the render-occlusion frame, the iris

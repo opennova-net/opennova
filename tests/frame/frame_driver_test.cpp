@@ -46,6 +46,7 @@ struct Trace {
 		};
 		h.present_rows = [this] { calls.push_back("present_rows"); };
 		h.present_frame = [this] { calls.push_back("present_frame"); };
+		h.present_local_view = [this] { calls.push_back("local_view"); };
 		h.net_drive = [this] { calls.push_back("net_drive"); };
 		h.weather = [this] { calls.push_back("weather"); };
 		h.blink_gates = [this] { calls.push_back("blink"); };
@@ -82,7 +83,7 @@ int main() {
 		if (!expect(ran == 1, "one quantum runs one tick")) return 1;
 		const std::string want =
 				"terrain foliage listener step effect_tick:101 sync_fixed drain "
-				"fixed_done:101 present_frame net_drive weather blink "
+				"fixed_done:101 present_frame local_view net_drive weather blink "
 				"occlusion iris audio:1";
 		if (!expect(joined(t.calls) == want, "the frame order is fixed")) {
 			std::fprintf(stderr, "  got:  %s\n  want: %s\n",
@@ -99,8 +100,8 @@ int main() {
 		const int32_t ran = driver.run_frame(TickAccumulator::kTickDt / 2.0, t.hooks());
 		if (!expect(ran == 0, "half a quantum runs nothing")) return 1;
 		const std::string want =
-				"terrain foliage listener present_rows net_drive weather occlusion "
-				"iris audio:0";
+				"terrain foliage listener present_rows local_view net_drive weather "
+				"occlusion iris audio:0";
 		if (!expect(joined(t.calls) == want,
 				"the zero-tick frame presents rows only and skips blink")) {
 			std::fprintf(stderr, "  got:  %s\n  want: %s\n",
@@ -155,8 +156,8 @@ int main() {
 		const int32_t ran = driver.run_frame(TickAccumulator::kTickDt, t.hooks());
 		if (!expect(ran == 0, "a declined step counts zero ticks")) return 1;
 		const std::string want =
-				"terrain foliage listener step present_frame net_drive weather "
-				"occlusion iris audio:0";
+				"terrain foliage listener step present_frame local_view net_drive "
+				"weather occlusion iris audio:0";
 		if (!expect(joined(t.calls) == want,
 				"declined step: no per-tick legs, no blink")) {
 			std::fprintf(stderr, "  got:  %s\n  want: %s\n",
@@ -173,7 +174,7 @@ int main() {
 		if (!expect(driver.run_single(t.hooks()), "single step runs the tick")) return 1;
 		const std::string want =
 				"listener step effect_tick:101 sync_fixed drain fixed_done:101 "
-				"present_frame";
+				"present_frame local_view";
 		if (!expect(joined(t.calls) == want, "single-step order")) {
 			std::fprintf(stderr, "  got:  %s\n  want: %s\n",
 					joined(t.calls).c_str(), want.c_str());

@@ -154,6 +154,9 @@ func _ready() -> void:
 	_player_presenter.name = "LocalPlayerPresenter"
 	add_child(_player_presenter)
 	_player_presenter.setup(_world, _camera, _camera)
+	# The world's local-view present leg runs this presenter's camera placement
+	# inside the engine frame, before the occlusion/iris legs (D-RORD-8).
+	_world.set_local_view_presenter(_player_presenter)
 	# The in-world armory + HUD ride their shared engine presenters. Created here,
 	# not in _wire_shell, so menu-less entries (the env launch hooks) still get
 	# them; the HUD presenter's
@@ -1166,7 +1169,10 @@ func _process(delta: float) -> void:
 	if not skip_world:
 		_world.tick(_camera.global_position, _camera.global_transform, delta)
 	var probe_t2 := Time.get_ticks_usec() if timing else 0
-	if _player_presenter != null:
+	# The camera/viewmodel placement now runs INSIDE the world frame (the
+	# local-view present leg, D-RORD-8); this fallback covers the frames that
+	# never reach it — the probe's world skip and a mid-frame unload/abort.
+	if _player_presenter != null and (skip_world or not _world.is_loaded()):
 		_player_presenter.after_world_tick()
 	var probe_t3 := Time.get_ticks_usec() if timing else 0
 	# The shared HUD presenter rebuilds the per-frame info while the player is in-world

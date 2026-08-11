@@ -1119,6 +1119,9 @@ var _frame_skip_occlusion := false
 # A failed join-wire asset apply aborts the frame mid-legs (the old early
 # return); later legs see this and no-op.
 var _frame_aborted := false
+# The shell-owned local-player presenter whose camera/viewmodel placement the
+# local-view present leg runs (null in worlds without one — tests, dedicated).
+var _local_view_presenter: LocalPlayerPresenter = null
 
 
 func _frame_terrain_leg() -> void:
@@ -1201,9 +1204,40 @@ func _frame_blink_leg() -> void:
 			_frame_stats.add(FrameStatsBoard.WORLD_BLINK, blink_us)
 
 
+# The local-player view presentation — the present-ladder leg that places the
+# camera/viewmodel from the just-simulated state, BEFORE the occlusion/iris
+# legs read the camera (D-RORD-8) [orig: the render frame builds its view
+# from the current player state before collect+submit,
+# Render_ProcessMainSceneFrame @ 0x5ca0f0]. The presenter is handed once by
+# the shell; a world without one (tests, dedicated) skips the leg.
+func _frame_local_view_leg() -> void:
+	if _frame_aborted:
+		return
+	if _local_view_presenter != null:
+		_local_view_presenter.after_world_tick()
+
+
+## One-time handoff from the shell that owns the local-player presenter.
+func set_local_view_presenter(presenter: LocalPlayerPresenter) -> void:
+	_local_view_presenter = presenter
+
+
+# The view the imminent render uses: the live camera AFTER the local-view leg
+# placed it; the frame-entry stash only when no camera exists (headless
+# worlds/tests) (D-RORD-8).
+func _render_camera_xform() -> Transform3D:
+	if is_inside_tree():
+		var cam := get_viewport().get_camera_3d()
+		if cam != null:
+			return cam.global_transform
+	return _frame_camera_xform
+
+
 func _frame_occlusion_leg() -> void:
 	# The render-occlusion frame is camera-driven: it runs every render frame
-	# (retail collects visible entities per scene render, not per sim tick).
+	# (retail collects visible entities per scene render, not per sim tick)
+	# and consumes the RENDER camera — the local-view leg above has already
+	# placed it for this frame (D-RORD-8).
 	# [orig: Terrain_CollectVisibleEntities @ 0x5c9160 from
 	# Terrain_RenderSceneWithReflection @ 0x5c94f0]
 	if _frame_aborted:
@@ -1213,7 +1247,7 @@ func _frame_occlusion_leg() -> void:
 	if _loaded:
 		var probe_phase_start := Time.get_ticks_usec() if _frame_timing else 0
 		if not _frame_skip_occlusion:
-			_occlusion.apply_frame(_frame_camera_xform, _mission_forces_indoors)
+			_occlusion.apply_frame(_render_camera_xform(), _mission_forces_indoors)
 		if _frame_probe_enabled:
 			_perf_probe_spans["occl_frame"] = (0 if _frame_skip_occlusion
 					else Time.get_ticks_usec() - probe_phase_start)
@@ -1228,7 +1262,9 @@ func _frame_iris_leg() -> void:
 		return
 	if _loaded:
 		var probe_phase_start := Time.get_ticks_usec() if _frame_timing else 0
-		_stamp_iris_samples(_frame_camera_xform)
+		# The iris re-target reads the render view too [orig: retail re-targets
+		# from the local player's view every render pass] (D-RORD-8).
+		_stamp_iris_samples(_render_camera_xform())
 		if _frame_timing:
 			var iris_us := Time.get_ticks_usec() - probe_phase_start
 			if _frame_probe_enabled:
@@ -1327,7 +1363,10 @@ func tick(camera_pos: Vector3, camera_xform: Transform3D = Transform3D(), delta:
 			var runtime_start := Time.get_ticks_usec()
 			runtime_ticks = 1 if bool(_runtime.tick()) else 0
 			_perf_runtime_us = Time.get_ticks_usec() - runtime_start
+			_frame_local_view_leg()
 			_frame_net_drive_leg()
+		else:
+			_frame_local_view_leg()
 		_frame_weather_leg()
 		if runtime_ticks > 0:
 			_frame_blink_leg()
