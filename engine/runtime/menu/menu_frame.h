@@ -363,6 +363,17 @@ public:
 	struct MouseClaim {
 		int hovered = -1;               // claimed widget index; -1 = none
 		int32_t cursor = kMenuTexNone;  // inherited +276 cursor, else default
+		// The CScrollWnd interaction result for this sample [orig:
+		// CScrollWnd_HandleEvent @ 0x64d050]: when a scrollbar part owns the
+		// sample (press, latch, or drag capture) scroll_index is the owning
+		// widget — the claim above stays on it, exactly like retail's child
+		// BUTTON capture, so no other widget sees the held samples. A
+		// completed arrow/track/drag step reports the new value (standalone
+		// Scroll: the authored range value; embedded owners: the
+		// first-visible row).
+		int scroll_index = -1;
+		bool scroll_value_changed = false;
+		int scroll_value = 0;
 	};
 	MouseClaim pump_mouse(MenuFrameState &io_state, float mouse_x,
 			float mouse_y, bool button_down, float scale_x, float scale_y);
@@ -522,10 +533,30 @@ private:
 	bool solve_scroll_parts_(const WidgetNode &node, ScrollbarKind kind,
 			const mnu::RectEdges &rect, int range_min, int range_max, int page,
 			int value, ScrollParts *out) const;
-	bool solve_standalone_scroll_(int index, const MenuFrameState &state,
+	bool solve_scroll_for_widget_(int index, const MenuFrameState &state,
 			ScrollParts *out) const;
 	bool scroll_row_span_(int index, const MenuFrameState &state, int *rows,
 			int *visible) const;
+	// The embedded-scrollbar emit for a row-scrolling owner (List/Multi/
+	// LanList/Table): gated on the SAME span the interaction path solves, so
+	// a drawn scrollbar is always an interactive one.
+	void emit_row_scrollbar_(int index, const WidgetNode &node,
+			const mnu::RectEdges &rect, const WalkScale &s,
+			const MenuFrameState &state, const MenuWidgetState *ws);
+	// The CScrollWnd interaction pump ahead of the claim walk (compiler
+	// runtime state, like edit_scroll_): the shuttle drag capture and the
+	// pressed-part latch until release
+	// [orig: CScrollWnd_HandleEvent @ 0x64d050].
+	struct ScrollPump {
+		bool button_was_down = false;
+		int captured_index = -1;  // shuttle drag capture owner
+		int drag_anchor = 0;
+		int latched_index = -1;   // arrow/track press owner until release
+	};
+	ScrollPump scroll_pump_;
+	bool scroll_pump_mouse_(MenuFrameState &io_state, float mouse_x,
+			float mouse_y, bool button_down, float scale_x, float scale_y,
+			MouseClaim *claim);
 	void emit_scrollbar(const WidgetNode &node, ScrollbarKind kind,
 			const mnu::RectEdges &rect, const WalkScale &s,
 			int range_min, int range_max, int page, int value,
@@ -533,7 +564,7 @@ private:
 	void emit_spin_arrows(const WidgetNode &node, const mnu::RectEdges &rect,
 			const WalkScale &s);
 	void emit_table(int index, const WidgetNode &node,
-			const mnu::RectEdges &rect, const WalkScale &s, int visual,
+			const mnu::RectEdges &rect, const WalkScale &s,
 			const MenuWidgetState *ws);
 	void emit_marquee(int index, const WidgetNode &node,
 			const mnu::RectEdges &rect, const WalkScale &s,

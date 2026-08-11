@@ -438,7 +438,8 @@ func test_scroll_slider_arrows_track_and_thumb_drag() -> void:
 	# Thumb drag: press on the shuttle, drag to the track end, release.
 	var index := frame.widget_index("GAMMA")
 	var thumb_rect_probe := frame.scroll_hit_at(index, Vector2(180, 80))
-	assert_eq(thumb_rect_probe, 3, "the mid-track point is the shuttle")
+	assert_eq(thumb_rect_probe, MenuFrame.SCROLL_HIT_SHUTTLE,
+			"the mid-track point is the shuttle")
 	driver.process_mouse(Vector2(180, 80), true)   # press = capture
 	driver.process_mouse(Vector2(500, 80), true)   # drag past the end
 	assert_signal_emitted_with_parameters(driver, "widget_value_changed",
@@ -446,6 +447,55 @@ func test_scroll_slider_arrows_track_and_thumb_drag() -> void:
 	driver.process_mouse(Vector2(500, 80), false)  # release ends the drag
 	driver.process_mouse(Vector2(180, 80), true)
 	driver.process_mouse(Vector2(180, 80), false)
+
+
+const SLIDER_AND_BUTTON_XML := """
+<SCREEN>
+  <NAME>OPTIONS</NAME>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <WINDOW type="scroll" name="GAMMA">
+      <POSITION><LEFT>100</LEFT><TOP>72</TOP><RIGHT>300</RIGHT><BOTTOM>92</BOTTOM></POSITION>
+      <ORIENTATION>HORIZONTAL</ORIENTATION>
+      <APPEARANCE type="color" state="default">303030</APPEARANCE>
+      <SHUTTLE type="color" state="default">80FF0000</SHUTTLE>
+      <SCROLLUP type="color" state="default">505050</SCROLLUP>
+      <SCROLLDOWN type="color" state="default">505050</SCROLLDOWN>
+    </WINDOW>
+    <WINDOW type="button" name="APPLY">
+      <POSITION><LEFT>100</LEFT><TOP>200</TOP><RIGHT>300</RIGHT><BOTTOM>230</BOTTOM></POSITION>
+      <STRING>APPLY</STRING>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+"""
+
+
+func test_scroll_press_never_ghost_clicks_another_widget() -> void:
+	# A press that lands on a scrollbar part is captured by that part until
+	# release [orig: CScrollWnd_HandleEvent @ 0x64d050 capture] — drifting
+	# onto a neighboring button while held must not press or click it, and
+	# the arrow must not auto-repeat on the held samples.
+	var frame := MenuFrame.new()
+	add_child_autofree(frame)
+	frame.size = Vector2(800, 600)
+	var driver := MenuDriver.new()
+	driver.attach(frame, null)
+	assert_true(driver.open_document(_doc(SLIDER_AND_BUTTON_XML), null, null,
+			null, "options.mnu"), "document opens on the frame")
+	var gamma := driver.widget_id("GAMMA")
+	driver.set_widget_scroll_range(gamma, 0, 100, 10, 50)
+	watch_signals(driver)
+	driver.process_mouse(Vector2(290, 80), true)   # press the right arrow
+	assert_signal_emitted_with_parameters(driver, "widget_value_changed",
+			["GAMMA", "scroll", 51, "51"])
+	driver.process_mouse(Vector2(200, 215), true)  # drift onto APPLY, held
+	driver.process_mouse(Vector2(200, 215), true)  # further held samples
+	driver.process_mouse(Vector2(200, 215), false) # release over APPLY
+	assert_signal_not_emitted(driver, "widget_activated",
+			"the scroll-captured press never activates the button")
+	assert_signal_emit_count(driver, "widget_value_changed", 1,
+			"the arrow steps once — no auto-repeat, no ghost press")
 
 
 func test_combo_popup_row_hover_tracks_mouse() -> void:

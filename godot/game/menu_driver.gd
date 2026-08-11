@@ -3,7 +3,6 @@ extends RefCounted
 
 const MenuFrameStateReplay := preload("res://game/menu_frame_state_replay.gd")
 const MenuScrollRange := preload("res://game/menu_scroll_range.gd")
-const MenuScrollInteraction := preload("res://game/menu_scroll_interaction.gd")
 const MenuTableState := preload("res://game/menu_table_state.gd")
 
 # The compiled-menu interaction runtime: drives ONE MenuFrame (the engine
@@ -31,8 +30,6 @@ signal widget_activated(id: int, widget_name: String)
 signal list_activated(id: int, row: int)
 # The pump's claim moved between widgets (hover edges; PLAYER_PREVIEW zoom).
 signal widget_hover_changed(id: int, hovered: bool)
-
-var _scroll := MenuScrollInteraction.new()  # CScrollWnd map + drag capture
 
 # Double-click window for list/table activation, matching Godot's default.
 const DOUBLE_CLICK_MS := 400
@@ -83,6 +80,8 @@ func attach(frame: MenuFrame, audio: MenuAudio) -> void:
 	_audio = audio
 	if not _frame.widget_clicked.is_connected(_on_frame_widget_clicked):
 		_frame.widget_clicked.connect(_on_frame_widget_clicked)
+	if not _frame.scroll_value_changed.is_connected(_on_frame_scroll_value):
+		_frame.scroll_value_changed.connect(_on_frame_scroll_value)
 
 
 func set_music_director(director: MusicDirector) -> void:
@@ -563,45 +562,26 @@ func set_scroll_row(id: int, row: int) -> void:
 				int(state["scroll_row"]))
 
 
-func _scroll_widget_at(position: Vector2) -> int:
-	return _scroll.widget_at(self, _frame, position)
-
-
-func _handle_scroll_press(id: int, position: Vector2) -> void:
-	var index := _frame_index(id)
-	if index < 0:
+# The engine pump's CScrollWnd interaction result (already clamped and
+# applied to the frame): mirror it into the saved-state store and relay the
+# value change.
+func _on_frame_scroll_value(index: int, value: int) -> void:
+	var id := _id_at_index(index)
+	if id < 0:
 		return
-	var scroll := _scroll.model_of(self, _frame, id, index,
-			_id_state.get(id, {}).get("scroll_range") as MenuScrollRange,
-			int(_id_state.get(id, {}).get("scroll_row", 0)))
-	if scroll == null:
-		return
-	var value := _scroll.press(_frame, id, index, scroll, position)
-	if value != MenuScrollInteraction.NO_VALUE:
-		_apply_scroll_value(id, value)
-
-
-func _apply_scroll_value(id: int, value: int) -> void:
 	if widget_kind_of(id) != MnuDocument.TYPE_SCROLL:
-		var limit: int = _frame.scroll_row_limit(_frame_index(id))
-		set_scroll_row(id, clampi(value, 0, limit))
+		set_scroll_row(id, value)
 		return
 	var scroll := _id_state.get(id, {}).get("scroll_range") as MenuScrollRange
-	if scroll == null:
+	if scroll == null or value == scroll.value:
 		return
-	value = clampi(value, scroll.minimum, scroll.maximum)
-	if value == scroll.value:
-		return
-	scroll.value = value
-	var index := _frame_index(id)
-	if index >= 0:
-		_frame.set_widget_scroll_range(index, scroll.minimum, scroll.maximum,
-				scroll.page, scroll.value)
-	widget_value_changed.emit(widget_name_of(id), "scroll", value, str(value))
+	scroll.value = clampi(value, scroll.minimum, scroll.maximum)
+	widget_value_changed.emit(widget_name_of(id), "scroll", scroll.value,
+			str(scroll.value))
 
 
 ## The CScrollWnd min/max/inclusive-page/value render/state seam settings
-## companions update (interaction lives in menu_scroll_interaction.gd).
+## companions update (the interaction lives in the engine pump).
 func set_widget_scroll_range(id: int, minimum: int, maximum: int,
 		page: int, value: int) -> void:
 	if minimum > maximum:
@@ -705,25 +685,8 @@ func process_mouse(position: Vector2, button_down: bool) -> void:
 					close_active_combo_popup()
 			return
 
-	# Standalone scroll interaction (menu_scroll_interaction.gd carries the
-	# CScrollWnd witness map).
-	if _scroll.active():
-		if not button_down:
-			_scroll.end_drag()
-		else:
-			var drag_index := _frame_index(_scroll.drag_id())
-			if drag_index >= 0:
-				_apply_scroll_value(_scroll.drag_id(),
-						_scroll.drag_value(_frame, drag_index, position))
-			_frame.set_cursor_state(false, position)
-			return
-	if down_edge:
-		var scroll_id := _scroll_widget_at(position)
-		if scroll_id >= 0:
-			_handle_scroll_press(scroll_id, position)
-			_frame.set_cursor_state(false, position)
-			return
-
+	# The CScrollWnd interaction (arrows/track/shuttle drag) lives in the
+	# engine pump; its value changes arrive on scroll_value_changed.
 	var claim := _frame.process_mouse(position, button_down)
 	_frame.set_cursor_state(false, position)
 	if claim != _last_claim:

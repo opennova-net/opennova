@@ -92,7 +92,7 @@ int MenuFrameCompiler::table_row_at(int index, const MenuFrameState &state,
 // records are deferred with the Control-tree renderer (D-MNU-13 follow-up);
 // no shipped .mnu drives them through the compiled path yet.
 void MenuFrameCompiler::emit_table(int index, const WidgetNode &node,
-		const mnu::RectEdges &rect, const WalkScale &s, int visual,
+		const mnu::RectEdges &rect, const WalkScale &s,
 		const MenuWidgetState *ws) {
 	(void)index;
 	const mnu::TableData &table = node.window->table_data;
@@ -112,7 +112,6 @@ void MenuFrameCompiler::emit_table(int index, const WidgetNode &node,
 	// [orig: CUITable_Render header push 0 @ 0x641446, cell text state =
 	//  row state @ 0x64189a..0x6418da; CTableWnd_SetRowSelected @ 0x63f5f0
 	//  keeps states 0/1/3].
-	(void)visual;
 	const uint32_t color = node.colors[kStateDefault];
 	// Header labels + the taper rule divider under each column with >16px of
 	// headroom [orig: the header walk; divider color 0xFF7F7F7F]. The rule

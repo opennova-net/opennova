@@ -217,7 +217,7 @@ bool MenuFrameCompiler::solve_scroll_parts_(const WidgetNode &node,
 // 0..rows-visible, page = visible - 1, value = scroll_row) [orig: the table
 // SCROLLBAR delegate @ 0x643b22; CMEditWnd page = visibleLines - 1;
 // CScrollWnd_SetRangeAndClamp @ 0x64d490].
-bool MenuFrameCompiler::solve_standalone_scroll_(int index,
+bool MenuFrameCompiler::solve_scroll_for_widget_(int index,
 		const MenuFrameState &state, ScrollParts *out) const {
 	if (index < 0 || index >= static_cast<int>(nodes_.size())) {
 		return false;
@@ -316,7 +316,7 @@ int MenuFrameCompiler::scroll_owner_at(const MenuFrameState &state,
 			continue;
 		}
 		ScrollParts parts;
-		if (!solve_standalone_scroll_(i, state, &parts)) {
+		if (!solve_scroll_for_widget_(i, state, &parts)) {
 			continue;
 		}
 		auto inside = [&](const mnu::RectEdges &r) {
@@ -358,7 +358,7 @@ int MenuFrameCompiler::scroll_page_rows(int index,
 int MenuFrameCompiler::scroll_hit_at(int index, const MenuFrameState &state,
 		float mouse_x, float mouse_y, float scale_x, float scale_y) const {
 	ScrollParts parts;
-	if (!solve_standalone_scroll_(index, state, &parts)) {
+	if (!solve_scroll_for_widget_(index, state, &parts)) {
 		return kScrollHitNone;
 	}
 	const float mx = scale_x > 0.0f ? mouse_x / scale_x : mouse_x;
@@ -393,7 +393,7 @@ int MenuFrameCompiler::scroll_drag_anchor(int index,
 		const MenuFrameState &state, float mouse_x, float mouse_y,
 		float scale_x, float scale_y) const {
 	ScrollParts parts;
-	if (!solve_standalone_scroll_(index, state, &parts)) {
+	if (!solve_scroll_for_widget_(index, state, &parts)) {
 		return 0;
 	}
 	const float mx = scale_x > 0.0f ? mouse_x / scale_x : mouse_x;
@@ -410,7 +410,7 @@ int MenuFrameCompiler::scroll_drag_value(int index,
 		const MenuFrameState &state, float mouse_x, float mouse_y,
 		float scale_x, float scale_y, int anchor) const {
 	ScrollParts parts;
-	if (!solve_standalone_scroll_(index, state, &parts)) {
+	if (!solve_scroll_for_widget_(index, state, &parts)) {
 		return 0;
 	}
 	const int range_length = std::max(parts.range_max - parts.range_min, 0);
@@ -423,9 +423,158 @@ int MenuFrameCompiler::scroll_drag_value(int index,
 	const int offset = axis_pos + anchor - parts.extent;
 	const double ratio =
 			static_cast<double>(parts.travel) / static_cast<double>(range_length);
+	// The original's double->int is an ftol truncation, not a rounding.
 	const int value = parts.range_min +
-			static_cast<int>(static_cast<double>(offset) / ratio + 0.5);
+			static_cast<int>(static_cast<double>(offset) / ratio);
 	return std::clamp(value, parts.range_min, parts.range_max);
+}
+
+void MenuFrameCompiler::emit_row_scrollbar_(int index, const WidgetNode &node,
+		const mnu::RectEdges &rect, const WalkScale &s,
+		const MenuFrameState &state, const MenuWidgetState *ws) {
+	int rows = 0;
+	int visible = 0;
+	if (!scroll_row_span_(index, state, &rows, &visible) || rows <= visible) {
+		return;
+	}
+	mnu::RectEdges scrollbar_rect;
+	if (!resolve_scrollbar_rect(node, ScrollbarKind::Embedded, rect, 0,
+				rect.bottom - rect.top, 22, &scrollbar_rect)) {
+		return;
+	}
+	emit_scrollbar(node, ScrollbarKind::Embedded, scrollbar_rect, s, 0,
+			std::max(rows - visible, 0), std::max(visible - 1, 0),
+			ws != nullptr ? std::max(ws->scroll_row, 0) : 0, kStateDefault);
+}
+
+// The witnessed CScrollWnd interaction, run ahead of the claim walk [orig:
+// CScrollWnd_HandleEvent @ 0x64d050 — SCROLLWND_UP/DOWN click = value -/+
+// step (ctor default 1 @ 0x64c4cf); a track press pages toward the click
+// (value -/+ page, SetPageSize @ 0x64ce10, ctor default 10 @ 0x64c4d9); a
+// shuttle press captures an anchor and drags through the travel ratio
+// (@ 0x64d1cb..0x64d2aa)]. The pressed part keeps the mouse until release,
+// like retail's child-BUTTON capture, so a press that began on a scrollbar
+// can never become a click on another widget. A disabled owner still claims
+// (blocking widgets beneath) but takes no action. Standalone Scroll widgets
+// change their authored-range value; embedded row owners change scroll_row.
+bool MenuFrameCompiler::scroll_pump_mouse_(MenuFrameState &io_state,
+		float mouse_x, float mouse_y, bool button_down, float scale_x,
+		float scale_y, MouseClaim *claim) {
+	const bool press_edge = button_down && !scroll_pump_.button_was_down;
+	scroll_pump_.button_was_down = button_down;
+	if (!button_down) {
+		scroll_pump_.captured_index = -1;
+		scroll_pump_.latched_index = -1;
+		return false; // the release sample flows to the normal claim walk
+	}
+	auto value_of = [&](int index) {
+		const MenuWidgetState *ws = state_for(io_state, index);
+		if (nodes_[static_cast<size_t>(index)].window->type ==
+				mnu::WindowType::Scroll) {
+			return ws != nullptr && ws->has_scroll_range ? ws->scroll_value : 0;
+		}
+		return ws != nullptr ? std::max(ws->scroll_row, 0) : 0;
+	};
+	auto apply = [&](int index, int value) {
+		const bool standalone = nodes_[static_cast<size_t>(index)].window->type ==
+				mnu::WindowType::Scroll;
+		MenuWidgetState *row = nullptr;
+		for (MenuWidgetState &candidate : io_state.widgets) {
+			if (candidate.index == index) {
+				row = &candidate;
+				break;
+			}
+		}
+		if (row == nullptr) {
+			MenuWidgetState fresh;
+			fresh.index = index;
+			io_state.widgets.push_back(fresh);
+			row = &io_state.widgets.back();
+		}
+		if (standalone) {
+			if (!row->has_scroll_range) {
+				return; // no seeded range: the deterministic zero-range hold
+			}
+			value = std::clamp(value, row->scroll_min, row->scroll_max);
+			if (value == row->scroll_value) {
+				return;
+			}
+			row->scroll_value = value;
+		} else {
+			value = std::clamp(value, 0, scroll_row_limit(index, io_state));
+			if (value == std::max(row->scroll_row, 0)) {
+				return;
+			}
+			row->scroll_row = value;
+		}
+		claim->scroll_value_changed = true;
+		claim->scroll_value = value;
+	};
+	if (scroll_pump_.captured_index >= 0) {
+		const int index = scroll_pump_.captured_index;
+		claim->hovered = index;
+		claim->scroll_index = index;
+		apply(index, scroll_drag_value(index, io_state, mouse_x, mouse_y,
+				scale_x, scale_y, scroll_pump_.drag_anchor));
+		return true;
+	}
+	if (scroll_pump_.latched_index >= 0) {
+		claim->hovered = scroll_pump_.latched_index;
+		claim->scroll_index = scroll_pump_.latched_index;
+		return true; // held after an arrow/track press: no auto-repeat
+	}
+	if (!press_edge) {
+		return false;
+	}
+	const int index =
+			scroll_owner_at(io_state, mouse_x, mouse_y, scale_x, scale_y);
+	if (index < 0) {
+		return false;
+	}
+	claim->hovered = index;
+	claim->scroll_index = index;
+	if (widget_disabled(index, io_state)) {
+		scroll_pump_.latched_index = index;
+		return true;
+	}
+	int page = 10;
+	if (nodes_[static_cast<size_t>(index)].window->type ==
+			mnu::WindowType::Scroll) {
+		const MenuWidgetState *ws = state_for(io_state, index);
+		if (ws != nullptr && ws->has_scroll_range) {
+			page = ws->scroll_page;
+		}
+	} else {
+		page = scroll_page_rows(index, io_state);
+	}
+	switch (scroll_hit_at(index, io_state, mouse_x, mouse_y, scale_x,
+			scale_y)) {
+		case kScrollHitUp:
+			apply(index, value_of(index) - 1);
+			scroll_pump_.latched_index = index;
+			break;
+		case kScrollHitDown:
+			apply(index, value_of(index) + 1);
+			scroll_pump_.latched_index = index;
+			break;
+		case kScrollHitTrackBefore:
+			apply(index, value_of(index) - page);
+			scroll_pump_.latched_index = index;
+			break;
+		case kScrollHitTrackAfter:
+			apply(index, value_of(index) + page);
+			scroll_pump_.latched_index = index;
+			break;
+		case kScrollHitShuttle:
+			scroll_pump_.captured_index = index;
+			scroll_pump_.drag_anchor = scroll_drag_anchor(index, io_state,
+					mouse_x, mouse_y, scale_x, scale_y);
+			break;
+		default:
+			scroll_pump_.latched_index = index;
+			break;
+	}
+	return true;
 }
 
 // [orig: CComboWnd_Render @ 0x65c05b..0x65c083 — this[183] = row_text(list,
@@ -467,16 +616,7 @@ void MenuFrameCompiler::emit_combo_popup(const WidgetNode &node,
 			w.list_box.position.has_bottom, w.list_box.position.bottom, 0, 0);
 	const mnu::RectEdges popup = offset_rect(local, rect.left, rect.top);
 	// Popup background appearances (default state).
-	const StatePass &bg = node.popup_states[kStateDefault];
-	if (bg.has_color) {
-		emit_rect_quad(popup, s, bg.color, kMenuTexNone, false, 1.0f, 1.0f);
-	}
-	if (bg.texture >= 0) {
-		emit_state_texture(popup, s, bg);
-	}
-	if (bg.has_outline) {
-		emit_outline(popup, s, bg.outline);
-	}
+	emit_state_pass(popup, s, node.popup_states[kStateDefault]);
 	// Rows: runtime-seeded rows win; else the authored nested collection wins
 	// even when empty, else the top-level items (the documented D-MNU-7/8
 	// model).

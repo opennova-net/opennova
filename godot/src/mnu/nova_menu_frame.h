@@ -63,6 +63,15 @@ public:
 				static_cast<int>(opennova::menu::EditKeyResult::kChanged),
 		EDIT_RESULT_COMMIT =
 				static_cast<int>(opennova::menu::EditKeyResult::kCommit),
+		// scroll_hit_at's part codes (the engine ScrollHit map).
+		SCROLL_HIT_NONE = opennova::menu::MenuFrameCompiler::kScrollHitNone,
+		SCROLL_HIT_UP = opennova::menu::MenuFrameCompiler::kScrollHitUp,
+		SCROLL_HIT_DOWN = opennova::menu::MenuFrameCompiler::kScrollHitDown,
+		SCROLL_HIT_SHUTTLE = opennova::menu::MenuFrameCompiler::kScrollHitShuttle,
+		SCROLL_HIT_TRACK_BEFORE =
+				opennova::menu::MenuFrameCompiler::kScrollHitTrackBefore,
+		SCROLL_HIT_TRACK_AFTER =
+				opennova::menu::MenuFrameCompiler::kScrollHitTrackAfter,
 	};
 
 	// Build the compiler against a parsed document's screen (empty name = the
@@ -87,16 +96,10 @@ public:
 	// pump updates it per move (the witness map lives at the engine compiler,
 	// engine/runtime/menu/menu_frame.h).
 	void set_widget_hover_item(int p_index, int p_row);
-	// Standalone scroll interaction (the witnessed CScrollWnd map): the part
-	// under the mouse (0 none / 1 up / 2 down / 3 shuttle / 4 track-before /
-	// 5 track-after), the press anchor, and the drag's value inverse.
+	// Scrollbar-part geometry probe (the SCROLL_HIT_* codes above). The
+	// interaction itself — arrows, track pages, shuttle drag — lives in the
+	// engine pump and reports through the scroll_value_changed signal.
 	int scroll_hit_at(int p_index, const Vector2 &p_position) const;
-	int scroll_drag_anchor(int p_index, const Vector2 &p_position) const;
-	int scroll_drag_value(int p_index, const Vector2 &p_position,
-			int p_anchor) const;
-	int scroll_row_limit(int p_index) const;
-	int scroll_owner_at(const Vector2 &p_position) const;
-	int scroll_page_rows(int p_index) const;
 	int get_widget_hover_item(int p_index) const;
 	void set_widget_pressed(int p_index, bool p_pressed);
 	void set_widget_checked(int p_index, bool p_checked);

@@ -1596,8 +1596,9 @@ void test_combo_face_and_outside_arrow_claim(const fnt_font_t *font) {
 	MenuFrameCompiler c;
 	c.configure(doc.first_screen(), font);
 
-	// No authored items, no runtime rows: the face falls back to the (empty)
-	// widget text — no glyphs from the combo.
+	// No authored items, no runtime rows: the swapped row text is empty and
+	// the face draws NOTHING — never the widget's own authored TEXT
+	// [orig: CComboWnd_Render @ 0x65c05b..0x65c083 swaps unconditionally].
 	MenuFrameState st;
 	const MenuDrawList &empty_face = c.compile(st, 1.0f, 1.0f);
 	int combo_glyphs = 0;
@@ -2099,6 +2100,123 @@ void test_open_combo_popup_draws_over_later_widgets(const fnt_font_t *font) {
 			"the open popup paints AFTER the later sibling that overlaps it");
 }
 
+// The pump-integrated CScrollWnd interaction: a press on a part claims and
+// applies at the pump seam, the pressed part captures every held sample
+// until release (retail's child-window capture — no other widget can turn
+// the press into a click), and a disabled owner claims without acting.
+// [orig: CScrollWnd_HandleEvent @ 0x64d050 — arrows @ 0x64d2d9/0x64d31a,
+//  track @ 0x64d0f0/0x64d10e, anchor @ 0x64d1cb..0x64d217, drag
+//  @ 0x64d231..0x64d2aa]
+void test_scroll_pump_owns_press_capture_and_value(const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>OPTIONS</NAME>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <WINDOW type="scroll" name="GAMMA">
+      <POSITION><LEFT>100</LEFT><TOP>72</TOP><RIGHT>300</RIGHT><BOTTOM>92</BOTTOM></POSITION>
+      <ORIENTATION>HORIZONTAL</ORIENTATION>
+      <APPEARANCE type="color" state="default">303030</APPEARANCE>
+      <SHUTTLE type="color" state="default">80FF0000</SHUTTLE>
+      <SCROLLUP type="color" state="default">505050</SCROLLUP>
+      <SCROLLDOWN type="color" state="default">505050</SCROLLDOWN>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	c.configure(doc.first_screen(), font);
+	MenuWidgetState gamma;
+	gamma.index = 1;
+	gamma.has_scroll_range = true;
+	gamma.scroll_min = 0;
+	gamma.scroll_max = 100;
+	gamma.scroll_page = 10;
+	gamma.scroll_value = 50;
+	MenuFrameState state;
+	state.widgets.push_back(gamma);
+
+	// Press edge on the right arrow: the slider claims, steps +1, applies.
+	auto claim = c.pump_mouse(state, 295.0f, 80.0f, true, 1.0f, 1.0f);
+	CHECK(claim.hovered == 1 && claim.scroll_index == 1,
+			"the arrow press claims the slider through the pump");
+	CHECK(claim.scroll_value_changed && claim.scroll_value == 51,
+			"the arrow steps +1");
+	CHECK(state.widgets[0].scroll_value == 51,
+			"the pump applies the value into the widget state");
+
+	// Held samples drifting elsewhere: the latch keeps the claim on the
+	// slider and never auto-repeats — the ghost-press class is impossible.
+	claim = c.pump_mouse(state, 400.0f, 300.0f, true, 1.0f, 1.0f);
+	CHECK(claim.hovered == 1 && claim.scroll_index == 1 &&
+					!claim.scroll_value_changed,
+			"the latched part keeps the mouse without repeating");
+	claim = c.pump_mouse(state, 400.0f, 300.0f, false, 1.0f, 1.0f);
+	CHECK(claim.scroll_index == -1, "release frees the latch to the walk");
+
+	// Shuttle press captures with no step; the drag lands the ratio value.
+	// value 51 -> shuttle offset 20 + 51*140/100 = 91 -> x 191..211.
+	claim = c.pump_mouse(state, 200.0f, 80.0f, true, 1.0f, 1.0f);
+	CHECK(claim.scroll_index == 1 && !claim.scroll_value_changed,
+			"the shuttle press captures without a value step");
+	claim = c.pump_mouse(state, 500.0f, 80.0f, true, 1.0f, 1.0f);
+	CHECK(claim.scroll_value_changed && claim.scroll_value == 100,
+			"the captured drag past the track end lands the max");
+	c.pump_mouse(state, 500.0f, 80.0f, false, 1.0f, 1.0f);
+
+	// A disabled owner claims (blocking beneath) but takes no action.
+	state.widgets[0].disabled = true;
+	claim = c.pump_mouse(state, 295.0f, 80.0f, true, 1.0f, 1.0f);
+	CHECK(claim.scroll_index == 1 && !claim.scroll_value_changed,
+			"a disabled slider claims without scrolling");
+	CHECK(state.widgets[0].scroll_value == 100, "the disabled value holds");
+	c.pump_mouse(state, 295.0f, 80.0f, false, 1.0f, 1.0f);
+}
+
+// A list shorter than one full row holding a single item must not draw a
+// scrollbar its own interaction refuses to hit: the draw walk and the
+// interaction solve share scroll_row_span_'s min-1 visible clamp.
+void test_degenerate_list_draws_no_dead_scrollbar(const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>SHORT_LIST</NAME>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <FONT><NAME>f.fnt</NAME><DEFAULT_FG>FFFFFF</DEFAULT_FG></FONT>
+    <WINDOW type="list" name="SHORTY">
+      <POSITION><LEFT>100</LEFT><TOP>100</TOP><RIGHT>300</RIGHT><BOTTOM>110</BOTTOM></POSITION>
+      <ITEMS>
+        <ITEM type="ID" value="0">ONLY</ITEM>
+      </ITEMS>
+      <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+      <SCROLLBAR>
+        <APPEARANCE type="color" state="default">303030</APPEARANCE>
+        <SHUTTLE type="color" state="default">80FF0000</SHUTTLE>
+        <SCROLLUP type="color" state="default">505050</SCROLLUP>
+        <SCROLLDOWN type="color" state="default">505050</SCROLLDOWN>
+      </SCROLLBAR>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	c.configure(doc.first_screen(), font);
+	MenuFrameState state;
+	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
+	bool shuttle_drawn = false;
+	for (const MenuQuad &q : dl.quads) {
+		if (q.color == 0x80FF0000u) {
+			shuttle_drawn = true;
+		}
+	}
+	CHECK(!shuttle_drawn,
+			"the one-visible-row clamp hides the single-item scrollbar");
+	CHECK(c.scroll_owner_at(state, 290.0f, 105.0f, 1.0f, 1.0f) == -1,
+			"the interaction solve agrees with the draw gate");
+}
+
 } // namespace
 
 int main() {
@@ -2130,6 +2248,8 @@ int main() {
 	test_multiline_wrap(&font);
 	test_draw_list_preserves_interleaved_primitive_order(&font);
 	test_scroll_interaction_hits_and_drag(&font);
+	test_scroll_pump_owns_press_capture_and_value(&font);
+	test_degenerate_list_draws_no_dead_scrollbar(&font);
 	test_table_embedded_scrollbar_scrolls_rows(&font);
 	test_combo_face_shows_list_box_selection(&font);
 	test_open_combo_popup_draws_over_later_widgets(&font);

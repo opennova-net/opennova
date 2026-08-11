@@ -555,49 +555,6 @@ int MenuFrame::scroll_hit_at(int p_index, const Vector2 &p_position) const {
 			scale.x, scale.y);
 }
 
-int MenuFrame::scroll_drag_anchor(int p_index,
-		const Vector2 &p_position) const {
-	if (!configured_) {
-		return 0;
-	}
-	const Vector2 scale = design_scale_();
-	return compiler_.scroll_drag_anchor(p_index, state_, p_position.x,
-			p_position.y, scale.x, scale.y);
-}
-
-int MenuFrame::scroll_drag_value(int p_index, const Vector2 &p_position,
-		int p_anchor) const {
-	if (!configured_) {
-		return 0;
-	}
-	const Vector2 scale = design_scale_();
-	return compiler_.scroll_drag_value(p_index, state_, p_position.x,
-			p_position.y, scale.x, scale.y, p_anchor);
-}
-
-int MenuFrame::scroll_owner_at(const Vector2 &p_position) const {
-	if (!configured_) {
-		return -1;
-	}
-	const Vector2 scale = design_scale_();
-	return compiler_.scroll_owner_at(state_, p_position.x, p_position.y,
-			scale.x, scale.y);
-}
-
-int MenuFrame::scroll_row_limit(int p_index) const {
-	if (!configured_) {
-		return 0;
-	}
-	return compiler_.scroll_row_limit(p_index, state_);
-}
-
-int MenuFrame::scroll_page_rows(int p_index) const {
-	if (!configured_) {
-		return 0;
-	}
-	return compiler_.scroll_page_rows(p_index, state_);
-}
-
 int MenuFrame::spin_arrow_at(int p_index, const Vector2 &p_position) const {
 	if (!configured_) {
 		return 0;
@@ -712,8 +669,11 @@ int MenuFrame::process_mouse(const Vector2 &p_position, bool p_button_down) {
 	// Activation edges: press lands on the button-down edge over the claim;
 	// a click is the release edge while the SAME widget still owns the claim
 	// (moving off the widget before release cancels — the standard control
-	// contract the Control-tree buttons implemented).
-	if (p_button_down && !mouse_button_down_ && claim.hovered >= 0) {
+	// contract the Control-tree buttons implemented). A press a scrollbar
+	// part consumed never arms a click — the part keeps the mouse until
+	// release, like retail's child-BUTTON capture.
+	if (p_button_down && !mouse_button_down_ && claim.hovered >= 0 &&
+			claim.scroll_index < 0) {
 		press_claim_ = claim.hovered;
 		emit_signal("widget_pressed", claim.hovered);
 	} else if (!p_button_down && mouse_button_down_) {
@@ -724,6 +684,12 @@ int MenuFrame::process_mouse(const Vector2 &p_position, bool p_button_down) {
 	}
 	mouse_button_down_ = p_button_down;
 	mouse_claim_ = claim.hovered;
+	if (claim.scroll_value_changed) {
+		// Standalone Scroll: the authored-range value; embedded row owners:
+		// the new first-visible row.
+		emit_signal("scroll_value_changed", claim.scroll_index,
+				claim.scroll_value);
+	}
 	queue_redraw();
 	return claim.hovered;
 }
@@ -934,21 +900,10 @@ void MenuFrame::_bind_methods() {
 			&MenuFrame::clear_widget_text);
 	ClassDB::bind_method(D_METHOD("set_widget_hover_item", "index", "row"),
 			&MenuFrame::set_widget_hover_item);
-	ClassDB::bind_method(D_METHOD("scroll_hit_at", "index", "position"),
-			&MenuFrame::scroll_hit_at);
-	ClassDB::bind_method(D_METHOD("scroll_drag_anchor", "index", "position"),
-			&MenuFrame::scroll_drag_anchor);
-	ClassDB::bind_method(
-			D_METHOD("scroll_drag_value", "index", "position", "anchor"),
-			&MenuFrame::scroll_drag_value);
-	ClassDB::bind_method(D_METHOD("scroll_row_limit", "index"),
-			&MenuFrame::scroll_row_limit);
-	ClassDB::bind_method(D_METHOD("scroll_owner_at", "position"),
-			&MenuFrame::scroll_owner_at);
-	ClassDB::bind_method(D_METHOD("scroll_page_rows", "index"),
-			&MenuFrame::scroll_page_rows);
 	ClassDB::bind_method(D_METHOD("get_widget_hover_item", "index"),
 			&MenuFrame::get_widget_hover_item);
+	ClassDB::bind_method(D_METHOD("scroll_hit_at", "index", "position"),
+			&MenuFrame::scroll_hit_at);
 	ClassDB::bind_method(
 			D_METHOD("set_widget_selection", "index", "selected_item",
 					"hover_item", "scroll_row"),
@@ -968,6 +923,11 @@ void MenuFrame::_bind_methods() {
 			PropertyInfo(Variant::INT, "index")));
 	ADD_SIGNAL(MethodInfo("widget_clicked",
 			PropertyInfo(Variant::INT, "index")));
+	// The engine pump's CScrollWnd interaction result: a standalone Scroll's
+	// authored-range value, or an embedded row owner's new first-visible row.
+	ADD_SIGNAL(MethodInfo("scroll_value_changed",
+			PropertyInfo(Variant::INT, "index"),
+			PropertyInfo(Variant::INT, "value")));
 	ClassDB::bind_method(D_METHOD("set_cursor_state", "visible", "position"),
 			&MenuFrame::set_cursor_state);
 	ClassDB::bind_method(D_METHOD("get_draw_list_stats"),
@@ -1046,4 +1006,10 @@ void MenuFrame::_bind_methods() {
 	BIND_CONSTANT(EDIT_RESULT_NONE);
 	BIND_CONSTANT(EDIT_RESULT_CHANGED);
 	BIND_CONSTANT(EDIT_RESULT_COMMIT);
+	BIND_CONSTANT(SCROLL_HIT_NONE);
+	BIND_CONSTANT(SCROLL_HIT_UP);
+	BIND_CONSTANT(SCROLL_HIT_DOWN);
+	BIND_CONSTANT(SCROLL_HIT_SHUTTLE);
+	BIND_CONSTANT(SCROLL_HIT_TRACK_BEFORE);
+	BIND_CONSTANT(SCROLL_HIT_TRACK_AFTER);
 }

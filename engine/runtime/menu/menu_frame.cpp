@@ -1403,7 +1403,15 @@ MenuFrameCompiler::MouseClaim MenuFrameCompiler::pump_mouse(
 		return claim;
 	}
 	int hit = -1;
-	hit_walk(0, 0, 0, io_state, mouse_x, mouse_y, scale_x, scale_y, &hit);
+	// The scrollbar interaction runs ahead of the claim walk: a pressed part
+	// owns every sample until release (retail's child-window capture), so the
+	// walk never turns a scrollbar press into another widget's press.
+	if (scroll_pump_mouse_(io_state, mouse_x, mouse_y, button_down, scale_x,
+				scale_y, &claim)) {
+		hit = claim.hovered;
+	} else {
+		hit_walk(0, 0, 0, io_state, mouse_x, mouse_y, scale_x, scale_y, &hit);
+	}
 	for (MenuWidgetState &row : io_state.widgets) {
 		row.hovered = false;
 		row.pressed = false;
@@ -2105,23 +2113,8 @@ int MenuFrameCompiler::walk_widget(int index, int origin_x, int origin_y,
 			}
 			emit_appearance(node, rect, s,
 					appearance_state_with_fallback(node, pump));
-			const int row_height = row_height_(node);
-			const int row_count = ws != nullptr && ws->has_items
-					? static_cast<int>(ws->items.size())
-					: static_cast<int>(node.items.size());
-			const int visible_rows =
-					row_height > 0 ? std::max((rect.bottom - rect.top) / row_height, 0) : 0;
-			mnu::RectEdges scrollbar_rect;
-			const bool show_scrollbar =
-					row_count > visible_rows &&
-					resolve_scrollbar_rect(node, ScrollbarKind::Embedded, rect, 0,
-							rect.bottom - rect.top, 22, &scrollbar_rect);
 			emit_list_rows(node, rect, s, ws);
-			if (show_scrollbar) {
-				emit_scrollbar(node, ScrollbarKind::Embedded, scrollbar_rect, s, 0,
-						std::max(row_count - visible_rows, 0), visible_rows - 1,
-						ws != nullptr ? ws->scroll_row : 0, kStateDefault);
-			}
+			emit_row_scrollbar_(index, node, rect, s, state, ws);
 			break;
 		}
 		case mnu::WindowType::Combo: {
@@ -2139,12 +2132,10 @@ int MenuFrameCompiler::walk_widget(int index, int origin_x, int origin_y,
 			}
 			emit_appearance(node, rect, s,
 					appearance_state_with_fallback(node, pump));
+			// The swapped row text draws unconditionally — an empty selected
+			// row leaves a blank face, never the widget's own authored TEXT.
 			const std::string face = combo_face_text(node, ws);
-			if (!face.empty()) {
-				emit_widget_text(node, rect, s, pump, ws, -1, &face);
-			} else {
-				emit_widget_text(node, rect, s, pump, ws, -1);
-			}
+			emit_widget_text(node, rect, s, pump, ws, -1, &face);
 			if (ws != nullptr && ws->popup_open) {
 				// Deferred to the post-walk overlay pass: retail's witnessed
 				// walk paints popups inline yet renders them on top (that
@@ -2188,23 +2179,8 @@ int MenuFrameCompiler::walk_widget(int index, int origin_x, int origin_y,
 			}
 			emit_appearance(node, rect, s,
 					appearance_state_with_fallback(node, pump));
-			emit_table(index, node, rect, s, pump, ws);
-			int header_height = 0;
-			int row_height = 0;
-			table_row_heights_(node, &header_height, &row_height);
-			const int body_height = std::max(rect.bottom - rect.top - header_height, 0);
-			const int visible_rows =
-					row_height > 0 ? std::max(body_height / row_height, 1) : 0;
-			const int row_count =
-					ws != nullptr ? static_cast<int>(ws->table_rows.size()) : 0;
-			mnu::RectEdges scrollbar_rect;
-			if (row_count > visible_rows &&
-					resolve_scrollbar_rect(node, ScrollbarKind::Embedded, rect, 0,
-							rect.bottom - rect.top, 22, &scrollbar_rect)) {
-				emit_scrollbar(node, ScrollbarKind::Embedded, scrollbar_rect, s, 0,
-						std::max(row_count - visible_rows, 0), visible_rows - 1,
-						ws != nullptr ? ws->scroll_row : 0, kStateDefault);
-			}
+			emit_table(index, node, rect, s, ws);
+			emit_row_scrollbar_(index, node, rect, s, state, ws);
 			break;
 		}
 		case mnu::WindowType::Marquee: {

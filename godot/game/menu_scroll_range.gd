@@ -1,8 +1,9 @@
 extends RefCounted
 
 # Typed CScrollWnd render state shared by MenuDriver's saved-state store and
-# the frame replay module. Construction owns the original range normalization:
-# invalid min/max resets to zero and the current value is clamped.
+# the frame replay module. A plain value record: the original range
+# normalization (invalid min/max -> zero, value clamped) happens in
+# MenuDriver.set_widget_scroll_range, the one write path into the store.
 
 var minimum: int
 var maximum: int
