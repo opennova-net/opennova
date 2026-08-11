@@ -16,8 +16,6 @@ FIXTURE_SOURCES = {
     "max-ase-exporter": "opennova_max-v0.1.5.mzp",
     "modding-editor": "opennova-modtools-windows-v0.0.10.zip",
     "game-runtime": "opennova-runtime-windows-v0.0.10.zip",
-    "modding-editor-macos": "opennova-modtools-macos-v0.0.10.zip",
-    "game-runtime-macos": "opennova-runtime-macos-v0.0.10.zip",
 }
 
 
@@ -88,22 +86,6 @@ def _write_deliverable_fixtures(dist: Path) -> None:
             "libopennova.windows.template_release.x86_64.dll",
         ],
     )
-    _write_zip(
-        dist / "opennova-modtools-macos-v0.0.10.zip",
-        [
-            "opennova-modtools.app/Contents/Info.plist",
-            "opennova-modtools.app/Contents/MacOS/OpenNova",
-            "opennova-modtools.app/Contents/Frameworks/libopennova.macos.template_release.universal.dylib",
-        ],
-    )
-    _write_zip(
-        dist / "opennova-runtime-macos-v0.0.10.zip",
-        [
-            "opennova.app/Contents/Info.plist",
-            "opennova.app/Contents/MacOS/OpenNova",
-            "opennova.app/Contents/Frameworks/libopennova.macos.template_release.universal.dylib",
-        ],
-    )
 
 
 def _keep_deliverable_fixtures(dist: Path, deliverable_ids: set[str]) -> None:
@@ -133,9 +115,7 @@ def test_release_validator_stages_public_assets_and_release_body(tmp_path: Path)
         "opennova-3ds-max-ase-exporter-windows-v0.0.10.mzp",
         "opennova-asset-importer-windows-v0.0.10.exe",
         "opennova-blender-ase-exporter-v0.0.10.zip",
-        "opennova-game-runtime-macos-v0.0.10.zip",
         "opennova-game-runtime-windows-v0.0.10.zip",
-        "opennova-modding-editor-macos-v0.0.10.zip",
         "opennova-modding-editor-windows-v0.0.10.zip",
     ]
     assert sorted(item.public_name for item in result.items) == public_names
@@ -310,8 +290,6 @@ def test_release_workflow_validates_and_publishes_staged_assets() -> None:
         "package-importer",
         "package-godot-windows-editor",
         "package-godot-windows-runtime",
-        "package-godot-macos-editor",
-        "package-godot-macos-runtime",
     ]
 
     assert "scripts/validate_release_deliverables.py" in workflow
@@ -421,7 +399,7 @@ def test_windows_godot_tests_use_console_binary_for_bash_runner() -> None:
 def test_ci_builds_windows_gdextension_once_and_caches_with_sccache() -> None:
     workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
 
-    # Regular CI is Windows-only; tag release CI retains the macOS deliverables.
+    # Regular CI is Windows-only; macOS delivery was removed entirely 2026-08-11.
     assert "os: [windows-latest]" in _workflow_job(workflow, "test")
     assert "os: [windows-latest]" in _workflow_job(workflow, "godot-tests")
     assert "macos-latest" not in workflow
@@ -503,35 +481,28 @@ def test_release_splits_godot_editor_and_runtime_package_jobs() -> None:
         "package-importer",
         "package-godot-windows-editor",
         "package-godot-windows-runtime",
-        "package-godot-macos-editor",
-        "package-godot-macos-runtime",
     ]
     godot_package_jobs = [
         "package-godot-windows-editor",
         "package-godot-windows-runtime",
-        "package-godot-macos-editor",
-        "package-godot-macos-runtime",
     ]
 
     assert "package-godot-windows-editor:" in workflow
     assert "package-godot-windows-runtime:" in workflow
-    assert "package-godot-macos-editor:" in workflow
-    assert "package-godot-macos-runtime:" in workflow
     assert "package-godot:" not in workflow
     assert "package-godot-editor:" not in workflow
     assert "package-godot-runtime:" not in workflow
-    assert "package-godot-macos:" not in workflow
+    # macOS delivery removed 2026-08-11 (maintainer decision): release ships
+    # Windows only; the engine stays portable but nothing packages for macOS.
+    assert "macos" not in workflow.lower()
     assert "scripts/package_godot_editor_windows.ps1" in workflow
     assert "scripts/package_godot_runtime_windows.ps1" in workflow
-    assert "scripts/package_godot_editor_macos.sh" in workflow
-    assert "scripts/package_godot_runtime_macos.sh" in workflow
     assert "BUILD_GODOT: \"0\"" in _workflow_job(workflow, "test")
     for package_job in package_jobs:
         assert "needs:" not in _workflow_job(workflow, package_job)
     assert (
         "needs: [test, package-addon, package-max-mzp, package-importer, "
-        "package-godot-windows-editor, package-godot-windows-runtime, "
-        "package-godot-macos-editor, package-godot-macos-runtime]"
+        "package-godot-windows-editor, package-godot-windows-runtime]"
     ) in _workflow_job(workflow, "release")
     for package_job in godot_package_jobs:
         body = _workflow_job(workflow, package_job)
@@ -543,16 +514,10 @@ def test_godot_package_wrappers_target_editor_and_runtime() -> None:
     windows_editor = (ROOT / "scripts/package_godot_editor_windows.ps1").read_text(encoding="utf-8")
     windows_runtime = (ROOT / "scripts/package_godot_runtime_windows.ps1").read_text(encoding="utf-8")
     windows_shared = (ROOT / "scripts/package_godot_windows.ps1").read_text(encoding="utf-8")
-    macos_editor = (ROOT / "scripts/package_godot_editor_macos.sh").read_text(encoding="utf-8")
-    macos_runtime = (ROOT / "scripts/package_godot_runtime_macos.sh").read_text(encoding="utf-8")
-    macos_shared = (ROOT / "scripts/package_godot_macos.sh").read_text(encoding="utf-8")
 
     assert "-Target editor" in windows_editor
     assert "-Target runtime" in windows_runtime
     assert "[ValidateSet(\"all\", \"editor\", \"runtime\")]" in windows_shared
-    assert "package_godot_macos.sh editor" in macos_editor
-    assert "package_godot_macos.sh runtime" in macos_runtime
-    assert "TARGET=\"${1:-all}\"" in macos_shared
 
 
 def test_readme_lists_public_asset_names_and_install_hints() -> None:

@@ -222,97 +222,9 @@ jobs:
           archive: false
           if-no-files-found: error
 
-  package-godot-macos-editor:
-    runs-on: macos-latest
-    outputs:
-      artifact_id: ${{ steps.upload_modtools_macos.outputs.artifact-id }}
-    env:
-      GODOT_VERSION: 4.6.1-stable
-      GODOT_VERSION_PLAIN: 4.6.1
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          lfs: true
-          submodules: recursive
-
-      - name: Pull Git LFS assets
-        shell: bash
-        run: |
-          git lfs install --local
-          git lfs pull
-          git lfs fsck --objects
-
-      - name: Cache Godot binary
-        uses: actions/cache@v4
-        with:
-          path: .godot-bin
-          key: godot-${{ runner.os }}-${{ env.GODOT_VERSION }}
-
-      - name: Cache Godot export templates
-        uses: actions/cache@v4
-        with:
-          path: ~/Library/Application Support/Godot/export_templates/${{ env.GODOT_VERSION_PLAIN }}.stable
-          key: godot-export-templates-${{ runner.os }}-${{ env.GODOT_VERSION }}
-
-      - name: Package Godot macOS editor export
-        shell: bash
-        run: scripts/package_godot_editor_macos.sh
-
-      - name: Upload opennova-modtools macOS zip
-        id: upload_modtools_macos
-        uses: actions/upload-artifact@v7
-        with:
-          path: dist/opennova-modtools-macos-v*.zip
-          archive: false
-          if-no-files-found: error
-
-  package-godot-macos-runtime:
-    runs-on: macos-latest
-    outputs:
-      artifact_id: ${{ steps.upload_runtime_macos.outputs.artifact-id }}
-    env:
-      GODOT_VERSION: 4.6.1-stable
-      GODOT_VERSION_PLAIN: 4.6.1
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          lfs: true
-          submodules: recursive
-
-      - name: Pull Git LFS assets
-        shell: bash
-        run: |
-          git lfs install --local
-          git lfs pull
-          git lfs fsck --objects
-
-      - name: Cache Godot binary
-        uses: actions/cache@v4
-        with:
-          path: .godot-bin
-          key: godot-${{ runner.os }}-${{ env.GODOT_VERSION }}
-
-      - name: Cache Godot export templates
-        uses: actions/cache@v4
-        with:
-          path: ~/Library/Application Support/Godot/export_templates/${{ env.GODOT_VERSION_PLAIN }}.stable
-          key: godot-export-templates-${{ runner.os }}-${{ env.GODOT_VERSION }}
-
-      - name: Package Godot macOS runtime export
-        shell: bash
-        run: scripts/package_godot_runtime_macos.sh
-
-      - name: Upload opennova runtime macOS zip
-        id: upload_runtime_macos
-        uses: actions/upload-artifact@v7
-        with:
-          path: dist/opennova-runtime-macos-v*.zip
-          archive: false
-          if-no-files-found: error
-
   release:
     runs-on: ubuntu-latest
-    needs: [test, package-addon, package-max-mzp, package-importer, package-godot-windows-editor, package-godot-windows-runtime, package-godot-macos-editor, package-godot-macos-runtime]
+    needs: [test, package-addon, package-max-mzp, package-importer, package-godot-windows-editor, package-godot-windows-runtime]
     permissions:
       contents: write
     steps:
@@ -331,9 +243,7 @@ jobs:
             ${{ needs.package-max-mzp.outputs.artifact_id }},
             ${{ needs.package-importer.outputs.artifact_id }},
             ${{ needs.package-godot-windows-editor.outputs.artifact_id }},
-            ${{ needs.package-godot-windows-runtime.outputs.artifact_id }},
-            ${{ needs.package-godot-macos-editor.outputs.artifact_id }},
-            ${{ needs.package-godot-macos-runtime.outputs.artifact_id }}
+            ${{ needs.package-godot-windows-runtime.outputs.artifact_id }}
           merge-multiple: true
           # The package jobs upload with `archive: false` (raw blob, no archive
           # wrapper), so the .zip deliverables are stored as the bare .zip. Without
