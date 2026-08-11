@@ -1098,6 +1098,9 @@ func menu_key(keycode: int, unicode: int = 0) -> bool:
 	ev.physical_keycode = keycode as Key
 	ev.unicode = unicode
 	ev.pressed = true
+	# Same order as the real path: an armed remap capture consumes keys first.
+	if _remap_action >= 0:
+		return _consume_remap_key(ev)
 	return _driver.handle_key_input(ev)
 
 
