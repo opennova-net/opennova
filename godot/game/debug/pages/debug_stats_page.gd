@@ -12,7 +12,7 @@ extends DebugPage
 ## in place. Every read/format runs at the (divided) overlay refresh cadence,
 ## never per frame.
 
-const MissionRuntime := preload("res://game/world/mission_runtime.gd")
+const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 
 const _KIND_SPAN := 0    # one board slot: avg + max ms
 const _KIND_GROUP := 1   # sum of several slots: avg ms only (maxes don't add)
@@ -282,7 +282,7 @@ func get_display_snapshot() -> Array[DebugStatsDisplayRow]:
 ## Format one drained window into the rows. Split from refresh() so tests can
 ## drive the pane with fabricated windows.
 func render_window(frames: int, sums: PackedInt64Array, maxes: PackedInt64Array,
-		counts: PackedInt32Array, runtime: MissionRuntime, sim: Simulation) -> void:
+		counts: PackedInt32Array, runtime: MissionPresentation, sim: Simulation) -> void:
 	for row_v in _ROWS:
 		var row: Dictionary = row_v
 		var item: TreeItem = _items[row["id"]]
@@ -371,7 +371,7 @@ func _set_info(id: String, text: String) -> void:
 # only, every source optional (null when its mission-scoped owner is gone) so
 # SP, listen-host and joiner sessions all render what they have.
 func _refresh_info(sums: PackedInt64Array, counts: PackedInt32Array, frames: int,
-		runtime: MissionRuntime, sim: Simulation) -> void:
+		runtime: MissionPresentation, sim: Simulation) -> void:
 	# Sources are mission-scoped and can disappear between divided refreshes.
 	# Clear every conditional cell first so reload/menu transitions cannot retain
 	# counters from the previous world.

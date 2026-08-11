@@ -1,3 +1,4 @@
+class_name MainGame
 extends Node3D
 
 # Runtime shell: boots into the game's menu front-end (MenuShell, driving the
@@ -12,7 +13,8 @@ const DebugOverlayScript := preload("res://game/debug/nova_debug_overlay.gd")
 const DebugViewContext := preload("res://game/debug/nova_debug_view_context.gd")
 const GameDebugAdapterScript := preload("res://game/game_debug_adapter.gd")
 const LocalPlayerPresenterScript := preload("res://game/world/local_player_presenter.gd")
-const RuntimeShutdownScript := preload("res://game/runtime_shutdown_coordinator.gd")
+const VegAssetsScript := preload("res://game/terrain/veg_assets.gd")
+const WorldLoadCoordinatorScript := preload("res://game/world_load_coordinator.gd")
 # Re-summon the game-folder picker. The original engine has no "change game dir"
 # control (the game *is* its install folder); this is an OpenNova convenience so a
 # wrong / menu-less folder can be re-picked without restarting. Front-end only.
@@ -87,13 +89,8 @@ var _armory_presenter: ArmoryPresenter  # the SHARED in-world armory surface (we
 var _deploy_presenter: DeployScreenPresenter  # the joiner's deploy-map screen (death.mnu DEATH)
 var _use_latched := false  # USE-ITEM press latch; the mount toggle runs on RELEASE
 var _chosen_avatar: Dictionary = {}  # last avatar/name picked on PLAYER_INFO (the persistence seam)
-# The mission loading screen (per-mission sidecar image / loadscrn.pcx + the red
-# progress bar), mounted over everything for the duration of a world load
-# [orig: render_loading_screen @ 0x521d10 + LoadingScreen_UpdateAndPresent @ 0x586be0].
-var _loading_screen: LoadingScreen
-var _loading_layer: CanvasLayer
+var _world_load := WorldLoadCoordinatorScript.new()
 var _world_load_pending := false
-var _world_load_request_id := 0
 # End-of-mission flow (SP): set by the sim's "round_end" effect [orig:
 # Server_ProcessRoundEnd @0x5164f0 SP tail]. The world keeps ticking underneath
 # (the SP world runs through the epilog — humans >= 1 keeps the run gate open);
@@ -103,21 +100,71 @@ var _round_ended := false
 var _end_winner := 0
 var _end_screen_delay := 0.0
 var _end_screen: MissionEndScreen = null
-var _runtime_shutdown := RuntimeShutdownScript.new()
+var _shutdown_prepared := false
+var _shutdown_resources_released := false
+var _quit_requested := false
+var _quit_policy_installed := false
+var _previous_auto_accept_quit := true
 
 
 func _init() -> void:
 	# The sampler observes the board's capture close edge directly (render-time
 	# measurement is RenderingServer state, not Node-owned state).
 	_render_stats.setup(_frame_stats)
+	_world_load.load_failed.connect(_on_world_load_failed)
 
 
 func _notification(what: int) -> void:
-	if _runtime_shutdown.handle_notification(what): _render_stats.stop()
+	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		request_quit()
+	elif what == NOTIFICATION_EXIT_TREE:
+		begin_runtime_shutdown()
+		finish_runtime_shutdown()
+		_restore_quit_policy()
+		_render_stats.stop()
 
 
-func prepare_runtime_shutdown() -> void: _runtime_shutdown.prepare()
-func release_runtime_resources_for_shutdown() -> void: _runtime_shutdown.release_resources()
+## Synchronously invalidate mission ownership and request cancellation of the
+## active load. The returned operation settles only after its awaiting stack has
+## released the loading screen and bound Callable references.
+func begin_runtime_shutdown() -> WorldLoadOperation:
+	if _shutdown_prepared:
+		return _world_load.current_operation()
+	_shutdown_prepared = true
+	var load_operation := _world_load.cancel_current()
+	_world_load_pending = false
+	_cleanup_picker()
+	for presenter in [
+		_player_presenter, _armory_presenter, _deploy_presenter, _hud_presenter,
+	]:
+		if presenter != null:
+			presenter.teardown()
+	if _world != null:
+		_world.cancel_join_preload()
+		_world.cancel_join_admission()
+		_world.unload()
+	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+	return load_operation
+
+
+## Idempotent renderer/resource release. Normal quit calls this only after the
+## active WorldLoadOperation settles; EXIT_TREE uses it as a synchronous fallback.
+func finish_runtime_shutdown() -> void:
+	if _shutdown_resources_released:
+		return
+	begin_runtime_shutdown()
+	_shutdown_resources_released = true
+	_world_load.dismiss()
+	_cleanup_picker()
+	if is_instance_valid(_menu_shell):
+		_menu_shell.release_runtime_renderer_resources()
+	else:
+		Input.set_custom_mouse_cursor(null, Input.CURSOR_ARROW)
+	if _world != null:
+		_world.release_runtime_renderer_resources()
+	if _root != null:
+		_root.clear()
+	VegAssetsScript.clear_cache()
 ## True from the menu-to-loading handoff until the world reports success or
 ## failure. This is the public shell-level observation seam for load lifecycle
 ## tests and rendered probes (ADR 0018).
@@ -129,7 +176,7 @@ func is_world_loading() -> bool:
 ## This keeps lifecycle probes on the shell's public surface instead of reaching
 ## into the transient LoadingScreen node.
 func has_loading_background() -> bool:
-	return _loading_screen != null and _loading_screen.has_background()
+	return _world_load.has_background()
 
 
 ## The mounted menu/runtime resource root (null before the first mount) —
@@ -140,7 +187,9 @@ func current_resource_root() -> ResourceRoot:
 
 
 func _ready() -> void:
-	_runtime_shutdown.install_quit_policy(self, get_tree())
+	_previous_auto_accept_quit = get_tree().auto_accept_quit
+	get_tree().auto_accept_quit = false
+	_quit_policy_installed = true
 	if _world == null or _camera == null or _menu_shell == null:
 		return
 	var debug_adapter := get_game_debug_adapter()
@@ -750,7 +799,26 @@ func start_loose_mission(bms_name: String) -> void:
 
 
 ## Graceful cross-process stop seam used by an editor-managed runtime peer.
-func request_quit() -> void: _runtime_shutdown.request_quit()
+func request_quit() -> void:
+	if _quit_requested:
+		return
+	_quit_requested = true
+	_complete_runtime_shutdown(begin_runtime_shutdown())
+
+
+func _complete_runtime_shutdown(load_operation: WorldLoadOperation) -> void:
+	if load_operation != null and not load_operation.is_settled():
+		await load_operation.settled
+	finish_runtime_shutdown()
+	_restore_quit_policy()
+	if is_inside_tree():
+		get_tree().quit()
+
+
+func _restore_quit_policy() -> void:
+	if _quit_policy_installed and get_tree() != null:
+		get_tree().auto_accept_quit = _previous_auto_accept_quit
+	_quit_policy_installed = false
 
 
 ## Public delegate for "join this server" — kept on the shell so lifecycle tests
@@ -773,43 +841,19 @@ func join_lan_server(target: JoinTarget) -> void:
 # variables (in_session, server_name, mission_name, game_type, custom_text)
 # [orig: the SERVERNAME/MISSIONNAME/GAMETYPE/CUSTOMTEXT session vars @ 0x5202f0].
 func start_world_load(load_info: Dictionary, operation: Callable) -> void:
-	if _world_load_pending:
+	if not _world_load.can_start():
 		return
 	if _lan_session != null:
 		_lan_session.stop()
 	_world_load_pending = true
-	_world_load_request_id += 1
-	var request_id := _world_load_request_id
 	_world.set_local_player_spawn_loadout(_chosen_avatar)
-	_begin_world_load(load_info.duplicate(true))
-	_run_world_load(request_id, operation)
+	_begin_world_load()
+	if _world_load.start(self, _root, _world,
+			load_info.duplicate(true), operation) == null:
+		_on_world_load_failed("mission load handoff could not start")
 
 
-# The loader APIs are synchronous, so mounting a Control and immediately calling
-# one blocks the SceneTree before that Control can finish a frame. Let the screen
-# cross its completed-frame barrier, then enter the load.
-func _run_world_load(request_id: int, operation: Callable) -> void:
-	var screen := _loading_screen
-	if screen != null:
-		var prepared := await screen.prepare_for_blocking_load()
-		if request_id != _world_load_request_id or not _world_load_pending:
-			return
-		if not prepared:
-			_on_world_load_failed("loading screen left the SceneTree before mission load")
-			return
-	else:
-		await get_tree().process_frame
-		if request_id != _world_load_request_id or not _world_load_pending:
-			return
-	var result = operation.call()
-	var err := int(result) if result != null else OK
-	# GameWorld normally emits load_failed before returning an error. Preserve a
-	# deterministic rollback for any implementation that returns without emitting.
-	if err != OK and request_id == _world_load_request_id and _world_load_pending:
-		_on_world_load_failed(error_string(err))
-
-
-func _begin_world_load(load_info: Dictionary = {}) -> void:
+func _begin_world_load() -> void:
 	_menu_shell.hide_menu()
 	_world.visible = false
 	_set_hud_visible(false)
@@ -818,58 +862,6 @@ func _begin_world_load(load_info: Dictionary = {}) -> void:
 		_world.world_loaded.connect(_on_world_loaded)
 	if not _world.load_failed.is_connected(_on_world_load_failed):
 		_world.load_failed.connect(_on_world_load_failed)
-	_show_loading_screen(load_info)
-
-
-# Build and present the loading screen for this load. A missing background image
-# leaves the screen dark, exactly like the original's texture-miss path (no
-# draw at all) [orig: tex_data_ptr null -> return @ 0x521eb0].
-func _show_loading_screen(load_info: Dictionary) -> void:
-	_dismiss_loading_screen()
-	if _root == null:
-		return
-	if _loading_layer == null:
-		_loading_layer = CanvasLayer.new()
-		_loading_layer.name = "LoadingLayer"
-		_loading_layer.layer = 3  # above MenuLayer (2): nothing overdraws the load
-		add_child(_loading_layer)
-	_loading_screen = LoadingScreen.new()
-	_loading_screen.name = "LoadingScreen"
-	_loading_layer.add_child(_loading_screen)
-	_loading_screen.setup(_root, load_info)
-	# CanvasLayer is not a Control parent, so full-rect anchors have no layout
-	# rectangle to resolve against. Use top-left anchors before assigning the
-	# viewport size; changing size under full-rect anchors emits a Godot warning.
-	_loading_screen.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	_loading_screen.position = Vector2.ZERO
-	_loading_screen.size = _loading_screen.get_viewport_rect().size
-	if not _world.load_progress.is_connected(_on_load_progress):
-		_world.load_progress.connect(_on_load_progress)
-	if not _world.join_session_identified.is_connected(_on_join_session_identified):
-		_world.join_session_identified.connect(_on_join_session_identified)
-
-
-# The joiner's 0x7B session record resolved mid-load: refresh the screen's
-# session text and sidecar background the way retail's connect stream fills
-# the same buffers before its wire-header world load [orig: parse_server_session_variables
-# @ 0x5202f0 -> the loading-screen title/mission bufs @ 0x51f533/0x51f53a].
-func _on_join_session_identified(info: Dictionary) -> void:
-	if _loading_screen != null and _world_load_pending:
-		_loading_screen.update_session_info(_root, info)
-
-
-func _on_load_progress(percent: int) -> void:
-	if _loading_screen != null:
-		_loading_screen.set_progress(percent)
-		_loading_screen.present()
-
-
-func _dismiss_loading_screen() -> void:
-	if _world != null and _world.load_progress.is_connected(_on_load_progress):
-		_world.load_progress.disconnect(_on_load_progress)
-	if _loading_screen != null:
-		_loading_screen.queue_free()
-		_loading_screen = null
 
 
 
@@ -903,7 +895,7 @@ func _finish_world_load_presentation() -> void:
 	if not _world_load_pending:
 		return
 	_world_load_pending = false
-	_dismiss_loading_screen()
+	_world_load.finish_presentation()
 	_world.visible = true
 	_set_hud_visible(true)
 
@@ -1060,7 +1052,7 @@ func mcp_open_armory() -> Error:
 # presenters keep references to the old world/root, so their teardown order is part
 # of the shell boundary rather than a menu-specific detail.
 func _teardown_world_to_menu() -> void:
-	_dismiss_loading_screen()
+	_world_load.dismiss()
 	_round_ended = false
 	_end_winner = 0
 	_end_screen_delay = 0.0
@@ -1123,7 +1115,8 @@ func set_perf_probe_enabled(enabled: bool) -> void:
 
 
 func _process(delta: float) -> void:
-	if _runtime_shutdown.process_frame(): return
+	if _shutdown_prepared:
+		return
 	var probe_enabled := _perf_probe_enabled
 	var stats_on := _frame_stats.is_capture_active()
 	# One shared gate for the frame-leg clock reads: the manual A/B probe and
@@ -1158,13 +1151,17 @@ func _process(delta: float) -> void:
 	if _state == State.PAUSED and not _world.is_net_session():
 		return
 	var probe_t0 := Time.get_ticks_usec() if timing else 0
+	var frame_input := MissionFrameInput.new()
+	frame_input.delta_seconds = delta
 	if _player_presenter != null:
 		var player_live := is_gameplay_input_active()
-		_player_presenter.before_world_tick(delta, player_live, player_live)
+		frame_input = _player_presenter.before_world_tick(
+				delta, player_live, player_live)
 	var probe_t1 := Time.get_ticks_usec() if timing else 0
 	var skip_world := probe_enabled and _perf_probe_skip_world
 	if not skip_world:
-		_world.tick(_camera.global_position, _camera.global_transform, delta)
+		_world.tick(_camera.global_position, _camera.global_transform,
+				delta, frame_input)
 	var probe_t2 := Time.get_ticks_usec() if timing else 0
 	if _player_presenter != null:
 		_player_presenter.after_world_tick()

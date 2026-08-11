@@ -115,7 +115,7 @@ func _run() -> void:
 	print("[pfg] mission=%s loaded, player spawned" % bms)
 	await _settle_ms(5000)
 
-	_runtime = _find_by_method(root, "tick_realtime")
+	_runtime = _find_by_method(root, "advance_session_frame")
 	if _runtime != null and _runtime.has_method("get_sim"):
 		_sim = _runtime.get_sim()
 	if _runtime != null:

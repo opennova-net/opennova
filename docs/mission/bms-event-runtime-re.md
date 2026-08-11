@@ -157,31 +157,30 @@ Tests pinning the above: `tests/mission/event_runtime_test.cpp` (13 tests: caden
 delay, signed wrap, cooldown window, reset_after=0 refire, pre-pass exclusivity, cat-3
 window, ResetEvent), `tests/wac/wac_behavior_test.cpp` (`test_execution_cadence`),
 `tests/mission/promote_test.cpp` (authored SSNs, pool-3 markers, find_by_net_id),
-GUT `nova_simulation_test.gd` / `mission_runtime_test.gd`.
+GUT `nova_simulation_test.gd` / `mission_presentation_test.gd`.
 
 ## 2a. Fixed-timestep accumulator landed (2026-06-22, nw-merge)
 
 The slice-D seam is closed. The reimpl previously advanced **one logic tick per rendered
 `_process` frame** (`Simulation.advance_frame()` — since renamed `step()`, §2b — once
-per `MissionRuntime.tick()`),
+per the then-live presentation driver's `tick()`),
 discarding the frame `delta` — a divergence from `Game_MainLoop @0x52b630` (§1.6) that coupled
 gameplay speed to the render frame rate (the shared per-tick infantry motor, `tick_infantry`,
 integrates a fixed displacement per tick, so locomotion/animation ran fast at high FPS and slow
 at low FPS).
 
-`MissionRuntime.tick_realtime(delta)` now ports the original's accumulator: it banks `delta`,
-runs `floor(accum / (1/62.5))` single ticks (clamped to `MAX_CATCHUP_TICKS = 31`, the 500 ms
-cap), and presents **once** after the batch — sim at a constant 62.5 Hz, render decoupled at the
-render frame rate, no inter-tick interpolation (faithful to §1.6). The single-tick
-`MissionRuntime.tick()` survives as the deterministic primitive for the standalone game's
-F3/MCP Step, tests, and isolated tooling previews. `MainGame` → `GameWorld` is now the sole
-live real-time runtime. When this accumulator landed, the old ONED mission preview also threaded
-real `delta` through `MissionRuntime._process` self-tick; [ADR 0025](../adr/0025-standalone-game-is-the-only-live-mission-runtime.md)
-later retired that embedded preview. F5/F6 now launch the standalone game from saved loose assets, where
-`game_world.tick` → `tick_realtime` drives the cadence. The portable `engine/runtime/world` per-tick
+`MissionSession.advance(FrameInput)` now owns the original's accumulator: it banks `delta`,
+runs `floor(accum / (1/62.5))` single ticks (clamped to 31, the 500 ms cap), and
+the Godot presentation owner presents **once** after the batch — sim at a
+constant 62.5 Hz, render decoupled at the render frame rate, no inter-tick
+interpolation (faithful to §1.6). `MissionPresentation.tick()` survives as the
+deterministic primitive for F3/MCP Step and focused fixtures, but delegates to
+the same session state machine. `MainGame` → `GameWorld` → `GameFramePipeline` is
+the sole live real-time route. ADR 0025 retired the old ONED embedded preview;
+F5/F6 launch the standalone game from saved loose assets. The portable `engine/runtime/world` per-tick
 motors are unchanged — they were already correct per tick; only the driving tick **cadence** was
-wrong. Pinned by `mission_runtime_test.gd`
-(`test_tick_realtime_*`, `test_distance_per_real_second_is_frame_rate_independent`).
+wrong. Pinned by `mission_presentation_test.gd`
+(`test_session_frame_*`, `test_distance_per_real_second_is_frame_rate_independent`).
 
 ## 2b. The tick-mode enum retired (2026-07-14)
 
@@ -190,15 +189,15 @@ Cleanup tail of §2a, no behavior change. `Simulation` carried a `TickMode` enum
 but the two methods had **identical bodies** (same `loaded_` guard, same
 `host_pump`/`joiner_pump`/authoritative-tick branches), differing only in return type. The
 enum therefore chose between two copies of one behavior, and its comment still deferred the
-62 Hz accumulator to "a future" that had already shipped as `MissionRuntime.tick_realtime`
+62 Hz accumulator to "a future" that had already shipped in the presentation driver
 (§2a). Its stated reason for surviving — "API stability" — is the internal back-compat that
 is not kept pre-1.0 (CLAUDE.md).
 
 Retired: one `bool step()` (false only when no mission is loaded), no enum, no
 `tick_mode` property. The one behavioral wrinkle removed with it: the `TICK_EVERY_PROCESS`
-branch of `MissionRuntime._advance_one_tick_no_present` hard-coded `did_tick = true`, so an
+branch of the old presentation driver's `_advance_one_tick_no_present` hard-coded `did_tick = true`, so an
 unloaded sim reported a tick it never ran; the merged path returns the honest `step()`
-result. Cadence parity among `MissionRuntime` consumers is now structural (one
+result. Cadence parity among session consumers is now structural (one
 path) rather than asserted, so the standalone game and
 direct test/tooling fixtures cannot select divergent step implementations.
 `mission_controller_test.gd`'s obsolete tick-mode assert is gone and its

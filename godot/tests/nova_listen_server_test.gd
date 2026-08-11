@@ -511,7 +511,7 @@ func test_listen_server_restart_preserves_auto_spawned_local_identity() -> void:
 	assert_true(sim.has_local_player())
 	var player_handle := sim.get_local_player_wire_handle()
 
-	sim.restart()
+	sim.reset_session()
 	assert_true(sim.has_local_player(),
 			"restart restores the listen baseline's host-player identity")
 	assert_eq(sim.get_local_player_wire_handle(), player_handle)

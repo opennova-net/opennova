@@ -1,14 +1,14 @@
 extends GutTest
 
 # DebugOverlay: the shared F3 mission inspector. The context is typed
-# (ADR 0034), so every runtime-fed test drives a REAL MissionRuntime over the
+# (ADR 0034), so every runtime-fed test drives a REAL MissionPresentation over the
 # in-memory minimal mission (the host player auto-spawns; poses are set
 # through the public debug teleport). Canned report data (rounds, occlusion)
 # drives the pages through their public render seams.
-# MissionRuntime metadata and game/ONED shell wiring are covered separately.
+# MissionPresentation metadata and game/ONED shell wiring are covered separately.
 
 const OverlayScript := preload("res://game/debug/nova_debug_overlay.gd")
-const MissionRuntime := preload("res://game/world/mission_runtime.gd")
+const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 const DebugViewContext := preload("res://game/debug/nova_debug_view_context.gd")
 # Pages mount under the sidebar shell's page mount; option checkboxes are
 # named after their registry id.
@@ -64,12 +64,12 @@ class FakeTransportWorld:
 ## auto-spawned host player. Pose tests drive the pose through the public
 ## debug teleport (mission coordinates); identity rides the setup options.
 func _make_pose_runtime(mission_file := "00TRe.bms",
-		mission_name := "Training Grounds") -> MissionRuntime:
+		mission_name := "Training Grounds") -> MissionPresentation:
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var runtime := MissionRuntime.new()
+	var runtime := MissionPresentation.new()
 	add_child_autofree(runtime)
 	assert_gt(runtime.setup(mission, container, {
 		"placer": MissionObjectPlacer.new(),
@@ -478,7 +478,7 @@ func test_hide_foliage_toggle_lives_on_the_terrain_page() -> void:
 
 
 func test_player_tab_disables_dump_without_a_local_player() -> void:
-	# No runtime = no sim = no local player (a live MissionRuntime always
+	# No runtime = no sim = no local player (a live MissionPresentation always
 	# auto-spawns its host player, so the no-player state IS the no-source
 	# state).
 	var overlay := _make_overlay()

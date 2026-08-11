@@ -4,11 +4,11 @@ extends GutTest
 # player's animation scalars (the pure format seam + the live typed sim) and
 # one row per registry animatable, and degrades to empty states when the
 # world/registry are gone. Sources are the typed classes (ADR 0034): a real
-# GameWorld subtree, a MissionRuntime harness carrying the registry, and the
+# GameWorld subtree, a MissionPresentation harness carrying the registry, and the
 # real minimal-mission sim for the live-scalar leg.
 
 const PageScript := preload("res://game/debug/pages/debug_animation_page.gd")
-const MissionRuntime := preload("res://game/world/mission_runtime.gd")
+const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 
 
 # Real native models: state is DRIVEN through the public surface (committed
@@ -37,10 +37,10 @@ static func _rigged_model(parent: Node, clip: String) -> ObjectModel:
 	return m
 
 
-## The typed runtime double: IS a MissionRuntime, carrying a test-built
+## The typed runtime double: IS a MissionPresentation, carrying a test-built
 ## registry (no live sim — model discovery is sim-independent).
 class RuntimeHarness:
-	extends MissionRuntime
+	extends MissionPresentation
 	var registry := EntityIndex.new()
 
 	func get_registry() -> EntityIndex:
@@ -54,7 +54,7 @@ func _world() -> GameWorld:
 	return world
 
 
-func _make_page(world: GameWorld = null, runtime: MissionRuntime = null) -> DebugAnimationPage:
+func _make_page(world: GameWorld = null, runtime: MissionPresentation = null) -> DebugAnimationPage:
 	var ctx := DebugContext.new()
 	ctx.options = DebugOptionState.new()
 	if world != null:
@@ -193,7 +193,7 @@ func test_player_scalars_render_from_the_live_sim() -> void:
 	assert_eq(mission.create_default(), OK)
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var runtime := MissionRuntime.new()
+	var runtime := MissionPresentation.new()
 	add_child_autofree(runtime)
 	assert_gt(runtime.setup(mission, container,
 			{"placer": MissionObjectPlacer.new()}), 0)

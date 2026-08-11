@@ -1,7 +1,7 @@
 class_name OcclusionFramePass
 extends RefCounted
 
-const MissionRuntime := preload("res://game/world/mission_runtime.gd")
+const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 
 # The render-occlusion frame (docs/render/render-occlusion-re.md §3/§4/§5),
 # extracted from GameWorld: the blink letter gates, the per-render-frame
@@ -96,7 +96,7 @@ func present_visibility() -> Dictionary:
 ## GameWorld._mission_forces_indoors, passed per call — the mission attribute
 ## is mission state and stays (test-pinned) on the world.
 func apply_blink_gates(forces_indoors: bool) -> void:
-	var runtime: MissionRuntime = _world.get_runtime()
+	var runtime: MissionPresentation = _world.get_runtime()
 	if runtime == null:
 		return
 	var sim: Simulation = runtime.get_sim()
@@ -145,11 +145,11 @@ func apply_blink_gates(forces_indoors: bool) -> void:
 # portal traversal -> section masks + TOC occluder culling + the entity render
 # gates), then drive the de-batched building nodes' per-section masks and the
 # gated entities' visibility. Runs after the present pass (inside
-# tick_realtime) so present's base visibility is re-asserted first each frame.
+# session frame) so present's base visibility is re-asserted first each frame.
 # (The marched iris-exposure weather feed that renders alongside stays on
 # GameWorld — _stamp_iris_samples.)
 func apply_frame(camera_xform: Transform3D, forces_indoors: bool) -> void:
-	var runtime: MissionRuntime = _world.get_runtime()
+	var runtime: MissionPresentation = _world.get_runtime()
 	if runtime == null:
 		return
 	var sim: Simulation = runtime.get_sim()
@@ -289,7 +289,7 @@ func _set_occlusion_hidden(sim: Simulation, node: ObjectModel, bms_id: int,
 # The live sim for the occlusion apply paths (null before a mission runtime
 # exists — a real state on the unload/A-B seams).
 func _occlusion_sim() -> Simulation:
-	var runtime: MissionRuntime = _world.get_runtime()
+	var runtime: MissionPresentation = _world.get_runtime()
 	return runtime.get_sim() if runtime != null else null
 
 

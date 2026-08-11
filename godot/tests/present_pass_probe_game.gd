@@ -128,7 +128,7 @@ func _run() -> void:
 
 	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
 	Engine.max_fps = 0
-	_runtime = _find_by_method(root, "tick_realtime")
+	_runtime = _find_by_method(root, "advance_session_frame")
 	if _runtime == null:
 		push_error("[ppp] no mission runtime found")
 		_finish(1)

@@ -1,6 +1,9 @@
 # ADR 0033: the engine owns the loops; shells are devices
 
 - **Status**: accepted (2026-08-09; the rearchitecture plan, maintainer-approved)
+- **Amended**: ADR 0035 (2026-08-10) replaces the R1 callback-driven
+  `FrameDriver` with `MissionSession` plus the first-class `GameFramePipeline`.
+  The R2 draw-list and R3/R4 dispositions below remain in force.
 - **Owners**: runtime architecture
 - **Supersedes/updates**: **replaces ADR 0031 and ADR 0032 in full as the
   standing architecture contract — there is ONE seam (the device boundary)
@@ -168,7 +171,8 @@ parity payoff.
 
 - R1 and R2 landed. R3's spike ran 2026-08-10 and closed the rung NOT TAKEN
   (§R3 spike result); R4 waits on R3's reopen.
-- **Ladder state (2026-08-10):** R1 LANDED (the FrameDriver frame). R2
+- **Ladder state (2026-08-10):** R1 was superseded by ADR 0035's typed
+  mission-session/frame-pipeline cutover. R2
   COMPLETE — all four packet domains (terrain, foliage, HUD, menus) compile
   typed draw lists, and the menu cutover deleted the MnuMenu Control tree
   outright (the compiled MenuFrame + the MenuDriver interaction runtime are

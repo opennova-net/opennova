@@ -6,7 +6,7 @@ extends GutTest
 
 const PaneScript := preload("res://game/debug/pages/debug_stats_page.gd")
 const OverlayScript := preload("res://game/debug/nova_debug_overlay.gd")
-const MissionRuntime := preload("res://game/world/mission_runtime.gd")
+const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 
 
 class DestructionInfoStub:
@@ -20,7 +20,7 @@ class ThrowableInfoStub:
 	var live := 5
 
 
-# Typed test doubles (ADR 0034): the page reads the GameWorld/MissionRuntime
+# Typed test doubles (ADR 0034): the page reads the GameWorld/MissionPresentation
 # classes, so the doubles ARE those classes with the counter getters
 # overridden. The effect world is a real (empty) EffectWorld — 0 live still
 # renders a non-empty info cell.
@@ -38,7 +38,7 @@ class WorldInfoHarness:
 
 
 class RuntimeInfoHarness:
-	extends MissionRuntime
+	extends MissionPresentation
 	func get_throwable_present_stats() -> RefCounted:
 		return ThrowableInfoStub.new()
 	func get_wire_present_stats() -> WirePresentStats:

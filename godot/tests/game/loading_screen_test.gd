@@ -212,7 +212,9 @@ func test_prepare_for_blocking_load_waits_for_a_completed_frame() -> void:
 	if not preparable:
 		return
 	var frame_before := Engine.get_process_frames()
-	var prepared: bool = bool(await screen.call("prepare_for_blocking_load"))
+	var operation := WorldLoadOperation.new()
+	var prepared: bool = bool(await screen.call(
+			"prepare_for_blocking_load", operation))
 	assert_true(prepared)
 	assert_gte(Engine.get_process_frames(), frame_before + 2,
 		"one ordinary frame must complete before the blocking load begins")
@@ -226,8 +228,18 @@ func test_prepare_for_blocking_load_rejects_an_unmounted_screen() -> void:
 	assert_true(preparable)
 	if not preparable:
 		return
-	assert_false(bool(await screen.call("prepare_for_blocking_load")),
+	var operation := WorldLoadOperation.new()
+	assert_false(bool(await screen.call("prepare_for_blocking_load", operation)),
 		"there is no frame to present before the Control enters the SceneTree")
+
+
+func test_prepare_for_blocking_load_rejects_a_cancelled_operation() -> void:
+	var screen := _setup_screen({"mission_file": "00TRg.bms"})
+	add_child(screen)
+	var operation := WorldLoadOperation.new()
+	assert_true(operation.cancel())
+	assert_false(bool(await screen.prepare_for_blocking_load(operation)),
+			"a cancelled load never enters the two-frame presentation barrier")
 
 
 # --- helpers -------------------------------------------------------------------

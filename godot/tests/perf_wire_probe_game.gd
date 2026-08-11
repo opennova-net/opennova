@@ -105,7 +105,7 @@ func _run() -> void:
 			target, float(Time.get_ticks_msec() - wall_start) / 1000.0])
 	await _settle_ms(5000)
 
-	_runtime = _find_by_method(root, "tick_realtime")
+	_runtime = _find_by_method(root, "advance_session_frame")
 	_main = game
 	_gw = world
 	for target_v in [_main, _gw]:

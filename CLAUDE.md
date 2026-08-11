@@ -15,7 +15,7 @@ easier to relay than to rediscover.
   header-only `opennova_io`/`opennova_oned_edit`; no per-lib targets):
   `base/` (io, vfs, resource_index, gameprofile, pcapio, oned_edit, refs),
   `formats/` (one directory per NovaLogic format — pff, threedi, def, mnu, env, oed, ...;
-  ADR 0024 layout; the target also builds mission's format half), `runtime/` (frame,
+  ADR 0024 layout; the target also builds mission's format half), `runtime/`(
   world, wac, mission, anim, audio, particle, renderer, controls, terrain,
   terrain_query),
   `net/` (novacrypto, napi, npwire, novaworld, netsim, npruntime). Consumed via the
@@ -102,14 +102,15 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
   primitives (strcpy/sprintf, D3D, file I/O) — use standard or platform equivalents. Engine-wide
   conventions (binaries/IDBs, fixed-point, coordinates, the 62 Hz tick) are in
   [docs/engine-primer.md](docs/engine-primer.md); RE-doc conventions in [docs/README.md](docs/README.md).
-- The engine owns the loops; shells are devices (ADR 0033, the ONE standing
-  architecture contract — it replaced the ADR 0031/0032 band regime): gameplay rules,
-  witnessed math, orchestration, and the frame/tick sequencing are portable C++
-  (`engine/runtime/frame` owns the main-loop shape and leg order). A `godot/` line
-  earns its place only as a device leg (node writes, GPU dispatch, input sampling,
-  audio players — installed as frame hooks) or as ONED authoring surface. Nova
-  formats never touch Godot's resource system: documents read/write themselves
-  (`load_from_path`/`save_to_path`).
+- The mission session owns lifecycle, role policy, fixed-tick banking, and input
+  consumption in portable C++ (`engine/net/npruntime/mission_session.*`; ADR 0035,
+  superseding ADR 0033's callback-bus design). A `MissionTickTarget` supplies the
+  concrete simulation kernel. Godot's first-class `GameFramePipeline` samples one
+  typed frame input, advances that session, and orders Godot-only presentation/device
+  work once per display frame. A `godot/` line earns its place only as that device
+  work (node writes, GPU dispatch, input sampling, audio players), a thin typed seam,
+  or ONED authoring surface. Nova formats never touch Godot's resource system:
+  documents read/write themselves (`load_from_path`/`save_to_path`).
 - Never carry raw original bytes through a writer to make a parity test pass — writers
   produce output from scratch (docs/adr/0003-no-raw-passthrough-create-from-scratch.md).
 - Pre-1.0, no internal backwards compatibility: refactors update every caller of our own
@@ -171,8 +172,8 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
   before engine work.
 - [CONTEXT.md](CONTEXT.md) — the project glossary; use its canonical vocabulary.
 - [docs/runtime-architecture.md](docs/runtime-architecture.md) — how a mission runs. Read
-  it plus the ADRs before touching `mission_runtime.gd` / `mission_present_pass.gd` /
-  `Simulation`.
+  it plus the ADRs before touching `mission_presentation.gd`,
+  `game_frame_pipeline.gd`, `mission_present_pass.gd`, or `Simulation`.
 - [godot/modtools/README.md](godot/modtools/README.md) — the ONED workspace framework,
   with one README per workspace.
 - Directory-scoped agent rules: `engine/CLAUDE.md`, `godot/src/CLAUDE.md`,

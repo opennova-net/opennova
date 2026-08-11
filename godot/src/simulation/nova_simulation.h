@@ -39,7 +39,7 @@
 #include <simassets/collision_resolve.h> // the collision/occlusion resolution sweep (ADR 0031)
 #include <simassets/sim_collision_pose.h> // the engine-side pose provider (S3, ADR 0028)
 #include <simassets/sim_model_cache.h> // the sim's own .3di source (ADR 0028)
-#include <frame/frame_driver.h> // the engine-owned game frame (ADR 0033 R1)
+#include <npruntime/mission_session.h>
 #include <world/ai.h>
 #include <world/tick_accumulator.h>
 #include <world/collision.h>
@@ -72,6 +72,8 @@
 #include <npruntime/host_session.h>           // HostOwner + host_session_pump (the shared host owner loop)
 #include <npruntime/joiner_world_bridge.h>    // the joiner's per-frame world<->net bridge (S10a)
 
+#include "simulation/nova_mission_session_values.h"
+
 namespace godot {
 
 class TerrainData;
@@ -80,12 +82,12 @@ class SkeletalAnim;
 class ItemDatabase;
 class ResourceRoot;
 
-// THE mission runtime binding: a thin shell over the portable engine/runtime/world runtime.
-// Owns one World + the three logic systems (WAC VM, BMS event evaluator, AI) and drives
-// them through World::run_logic_tick — one logic tick per step(), the original's
-// 62 Hz engine tick (current_tick in Game_ProcessMainFrame @0x5263f0). A render frame runs
-// 0..N of those: the wall-clock accumulator lives in the driver (MissionRuntime.
-// tick_realtime), faithful to Game_MainLoop @0x52b630. The per-system
+// The Godot adapter for one portable MissionSession tick target. It owns the
+// World and logic systems (WAC VM, BMS evaluator, AI); MissionSession owns
+// lifecycle, input retention, fixed cadence, and terminal outcomes. One target
+// advance is the original's 62 Hz engine tick (current_tick in
+// Game_ProcessMainFrame @0x5263f0), while advance_session_frame runs 0..N of
+// those, faithful to Game_MainLoop @0x52b630. The per-system
 // cadences live INSIDE the systems, as in the original: the WAC VM self-gates to every
 // 62nd tick (WacScript_AdvanceTick @0x4f81b1) and the BMS evaluator quarter-passes every 16th
 // (Server_TickUpdate @0x51d7e0). MainGame/GameWorld is the sole live owner for
@@ -98,6 +100,7 @@ class ResourceRoot;
 // EffectLog each tick. Runtime transport and fixture teardown use the same
 // play/pause/step/restart surface.
 class Simulation : public Node3D,
+                       private opennova::np::MissionTickTarget,
                        private opennova::world::ICollisionSectionMatrixProvider,
                        private opennova::world::IMountedPoseProvider {
 	GDCLASS(Simulation, Node3D)
@@ -356,30 +359,24 @@ private:
 	// attachment models through it (one mounted matrix path, S4b).
 	Ref<ResourceRoot> asset_root_;
 	mutable opennova::simassets::SimModelCache sim_models_;
-	// The engine-owned game frame (ADR 0033 R1): the loop shape, the per-tick
-	// leg order, the post-batch frame-leg order, and the 62.5 Hz bank all live
-	// in frame::FrameDriver (frame/frame_driver.h carries the witness); this
-	// binding installs the shell's device legs and reads perf back.
-	opennova::frame::FrameDriver frame_driver_;
-	Callable frame_listener_cb_;
-	Callable frame_begin_effect_cb_;
-	Callable frame_sync_fixed_cb_;
-	Callable frame_effects_cb_;
-	Callable frame_fixed_done_cb_;
-	Callable frame_present_rows_cb_;
-	Callable frame_present_frame_cb_;
-	Callable frame_terrain_cb_;
-	Callable frame_foliage_cb_;
-	Callable frame_net_drive_cb_;
-	Callable frame_weather_cb_;
-	Callable frame_blink_cb_;
-	Callable frame_occlusion_cb_;
-	Callable frame_iris_cb_;
-	Callable frame_audio_cb_;
+	// Portable mission lifecycle and cadence. During one advance call the Godot
+	// adapter holds a single typed tick sink so presentation consumes every
+	// catch-up tick before the next simulation tick.
+	opennova::np::MissionSession mission_session_;
+	Callable session_tick_sink_;
 	int64_t frame_net_us_ = 0;
-	// Box the installed Callables + the native step/tick/drain legs into the
-	// driver's hook set (nova_simulation_frame.cpp).
-	opennova::frame::FrameHooks build_frame_hooks();
+	int64_t frame_sim_us_ = 0;
+	int64_t frame_sink_us_ = 0;
+	opennova::np::MissionSessionRole configured_session_role() const;
+	bool begin_session_load();
+	void complete_session_load();
+	void fail_session_load(const char *p_message);
+	bool advance_world_tick();
+	void restore_world_baseline();
+	opennova::np::TickOutcome advance_mission_tick(
+			const opennova::np::TickInput &p_input) override;
+	bool reset_mission_to_baseline(opennova::np::SessionError &r_error) override;
+	void close_mission() override;
 	// The mission-lifetime collision graphic caches + the negative demand
 	// cache, engine-owned (simassets::CollisionResolveState, ADR 0031); the
 	// registry sweep and the joiner's wire ghosts share one implementation.
@@ -465,8 +462,11 @@ private:
 		std::vector<opennova::mission::PromoteOptions::AiProfileSpeeds> aip_rows;
 	};
 	MissionBootDebug boot_debug_;
-	bool loaded_ = false;
-	bool playing_ = false;
+	// Resource-install invariant only. Public lifecycle is
+	// mission_session_.state(); this prevents partially constructed worlds from
+	// serving data while Loading/Failed transitions are in flight.
+	bool world_installed_ = false;
+	bool defer_session_load_completion_ = false;
 	bool have_baseline_ = false;
 	bool have_wac_baseline_ = false;
 
@@ -899,7 +899,7 @@ private:
 	opennova::simassets::AdmRootMotion infantry_anim_;
 	// Per-entity ADM resolution is a spawn-time invariant, not a one-shot mission-load
 	// sweep: joiner-local and host-admitted players are attached to the AI pool after
-	// MissionRuntime's initial call. Retain the resolver inputs and advance this
+	// MissionPresentation's initial call. Retain the resolver inputs and advance this
 	// high-water mark whenever AiSystem gains entries (its attach storage is append-only).
 	void resolve_client_row_adm_ids();
 	std::unordered_map<uint16_t, int> client_row_adm_by_type_;
@@ -956,7 +956,6 @@ private:
 
 protected:
 	static void _bind_methods();
-	void _notification(int p_what);
 
 public:
 	Simulation();
@@ -988,20 +987,27 @@ public:
 	bool load_mission_file(const String &path);
 	// Build + promote a small synthetic patrol mission (no file) for the headless unit test.
 	void build_demo_mission();
-	bool is_loaded() const { return loaded_; }
+	bool is_loaded() const;
+	int get_session_state() const {
+		return static_cast<int>(mission_session_.state());
+	}
+	String get_session_error() const {
+		return String::utf8(mission_session_.last_error().message.c_str());
+	}
 
 	// Transport.
-	void set_playing(bool p_playing) { playing_ = p_playing; }
-	bool is_playing() const { return playing_; }
+	bool is_playing() const {
+		return mission_session_.state() ==
+				opennova::np::MissionSessionState::Running;
+	}
 	// Advance exactly ONE 62 Hz logic tick — the original's engine tick. The per-system
 	// dividers gate INSIDE the systems (the WAC VM self-gates to every 62nd tick, the BMS
 	// evaluator quarter-passes every 16th), exactly where the original keeps them. Returns
-	// false when no mission is loaded. Banking wall-clock and dispatching 0..N of these per
-	// render frame is the driver's job (MissionRuntime.tick_realtime, the Game_MainLoop
-	// @0x52b630 accumulator) — a render frame is NOT one tick.
+	// false when the session cannot take a direct local/test tick. Banking wall
+	// clock and dispatching 0..N ticks per render frame belongs to MissionSession
+	// (the Game_MainLoop @0x52b630 accumulator) — a render frame is NOT one tick.
 	// [orig: Game_ProcessMainFrame @0x5263f0 (one current_tick++ @0x24c1968)]
 	bool step();
-	void restart();        // Restore the runtime-start baseline (rewinds world + AI)
 
 	// Turn the sim into an SP in-process listen server (ADR 0011): the host serializes
 	// real entity state onto an in-process loopback (Server_TickUpdate's per-connection S2C
@@ -1059,12 +1065,6 @@ public:
 	// The single home for the rule — F3 transport, MCP, and the ESC pause all
 	// read this predicate.
 	bool is_transport_locked() const { return joiner_ || host_listen_; }
-	// The fixed-62.5 Hz wall-clock bank [orig: Game_MainLoop @ 0x52b630]:
-	// returns the logic ticks due for `delta` banked seconds (0..31). Exposed
-	// for probes; the live host runs frame_realtime, which banks internally.
-	int bank_realtime(double p_delta) { return frame_driver_.accumulator().bank(p_delta); }
-	// Discard banked wall-clock (Play/Step/Stop transitions).
-	void reset_tick_bank() { frame_driver_.reset_bank(); }
 	// The fixed logic-tick quantum (1/62.5 s) — the ONE cadence constant,
 	// re-exported from the engine accumulator for GDScript composition.
 	static double tick_dt() { return opennova::world::TickAccumulator::kTickDt; }
@@ -1082,36 +1082,25 @@ public:
 				opennova::world::TickAccumulator::kTickDt;
 	}
 
-	// --- The engine-owned game frame (ADR 0033 R1; frame/frame_driver.h) ---
-	// The shell/world NODE registers ITSELF once per mission and the binding
-	// wires the whole leg contract (documented method names below) — no
-	// Callable bundles. A registrant missing any leg is rejected loudly at
-	// install. Null releases the legs. The loop shape, the per-tick leg
-	// order, and the post-batch frame-leg order are frame::FrameDriver's;
-	// the sim supplies step/logic-tick/effects natively.
-	//
-	// The runtime-driver contract (MissionRuntime): _begin_present_effect_tick,
-	// _frame_sync_fixed_leg, _frame_effects_drained(Array),
-	// _frame_fixed_tick_completed(int), _frame_present_rows_leg,
-	// _frame_present_frame_leg. The camera listener source (-> Vector3) stays
-	// an explicit Callable: it is a distinct device owned by whoever holds the
-	// camera, and a dedicated host has none.
-	void set_frame_shell(Object *p_shell, const Callable &p_listener);
-	// The world leg contract (GameWorld), in the fixed frame order:
-	// _frame_terrain_leg (packet compile + apply — its detail-cell handoff
-	// feeds foliage), _frame_foliage_leg, _frame_net_drive_leg,
-	// _frame_weather_leg, _frame_blink_leg, _frame_occlusion_leg,
-	// _frame_iris_leg, _frame_audio_leg(int ticks_run).
-	void set_frame_world(Object *p_world);
-	// One realtime frame (the FrameDriver's run_frame; the main-loop
-	// witness lives on the engine header); returns the logic ticks run. One
-	// deterministic single step (debug Step / tests); returns whether the
-	// tick ran.
-	int frame_realtime(double p_delta);
-	bool frame_single();
+	// --- Portable session frame (ADR 0035) --------------------------------
+	// The input and outcomes are typed values. The one temporary tick sink keeps
+	// per-tick Godot presentation synchronous during catch-up without installing
+	// a persistent callback bus; GameFramePipeline orders concrete devices around
+	// this call.
+	Ref<MissionFrameOutcome> advance_session_frame(
+			const Ref<MissionFrameInput> &p_input,
+			const Callable &p_tick_sink = Callable());
+	Ref<MissionFrameOutcome> step_session_frame(
+			const Ref<MissionFrameInput> &p_input,
+			const Callable &p_tick_sink = Callable());
+	bool pause_session();
+	bool resume_session();
+	bool reset_session();
+	void fail_session(const String &p_reason);
+	void close_session();
 	// Last frame's spans: {tick_us, sim_us, present_us, effects_us, net_us,
 	// did_tick, ticks} — the probe/F3 accounting seam.
-	Dictionary get_frame_perf() const;
+	Dictionary get_session_perf() const;
 	// Set the per-side character ids/classes/avatar bytes carried by ClientAuth.
 	// Must be called before enable_join; later runtime rebuilds retain the values.
 	void set_join_character_profile(const Dictionary &p_profile);
@@ -1798,7 +1787,7 @@ public:
 	// Wire the terrain the AI grounds on (the shell's loaded TerrainData). Copies the depth
 	// buffer + sector layout so the portable height field outlives the source and survives reload.
 	// Null/unloaded clears grounding (entities keep their authored Z). GameWorld
-	// and direct test/tooling fixtures call this through MissionRuntime.setup().
+	// and direct test/tooling fixtures call this through MissionPresentation.setup().
 	void set_terrain_height_field(const Ref<TerrainData> &p_terrain);
 	// S16 (ADR 0028): the seat/mount table installs through the NATIVE
 	// extractor (simassets::extract_item_seat_specs) over the retained def

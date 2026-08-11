@@ -1,5 +1,5 @@
 // Editor parameter-schema tests (mission_schema.h): the trigger/action -> widget metadata the
-// ONED inspector renders. Split out of the old mission_runtime_test when the duplicate MissionRuntime
+// ONED inspector renders. Split out of the old runtime test when the duplicate mission driver
 // evaluator was retired in favour of the shared-world BmsEventSystem (see event_runtime_test).
 #include <string>
 

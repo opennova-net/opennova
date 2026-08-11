@@ -123,7 +123,7 @@ void Simulation::sync_local_mounted_input_heading() {
 }
 
 bool Simulation::spawn_local_player(Vector3 p_position, float p_yaw_deg, int p_team) {
-	if (!loaded_ || !world_ || !world_->ai) return false;
+	if (!world_installed_ || !world_ || !world_->ai) return false;
 	// P7: the npruntime listen server auto-spawns the host's own player at bring-up (the faithful §5.0
 	// mode-3 path), so an explicit spawn is a no-op success there. The legacy LAN host + any non-listen
 	// caller (no auto-spawn) still spawn at the requested pose below.
@@ -148,7 +148,7 @@ bool Simulation::spawn_local_player(Vector3 p_position, float p_yaw_deg, int p_t
 }
 
 int Simulation::spawn_local_player_at_start() {
-	if (!loaded_ || !world_ || !world_->ai) return -1;
+	if (!world_installed_ || !world_ || !world_->ai) return -1;
 	// P7: the npruntime listen server auto-spawns the host's own player at bring-up via the SAME
 	// select_player_spawn start-marker scan (Server_BuildPlayerInfoAndAdd), so when a player already
 	// exists this is a no-op success (the player is at its start, input seeded by bringup_host_runtime).

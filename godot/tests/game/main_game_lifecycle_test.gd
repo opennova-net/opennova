@@ -7,7 +7,7 @@ const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
 const FIXTURE_DIR := "res://../fixtures/minimal/resources"
 const BAKED_TERRAIN_DIR := "res://../fixtures/godot/dvxi5"
 const MAIN_GAME_SCENE := preload("res://game/main_game.tscn")
-const MissionRuntime := preload("res://game/world/mission_runtime.gd")
+const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 const VegAssetsScript := preload("res://game/terrain/veg_assets.gd")
 # Witnessed retail placement (fixtures/minimal/README.md): strings plus the
 # mission .bin/.pcx/.lwf family live in language; menus/defs/.bms/.dbf in
@@ -74,11 +74,11 @@ const ISOLATED_ENV := [
 class EntityShellHarness:
 	extends "res://game/main_game.gd"
 
-	# A real MissionRuntime over an in-memory mission: two authored organics
+	# A real MissionPresentation over an in-memory mission: two authored organics
 	# plus the auto-spawned host player supply the AI/present rows the
 	# discovery pages walk (the sim-double era ended with the typed
 	# DebugEntities.list(sim: Simulation) signature).
-	var runtime: MissionRuntime = null
+	var runtime: MissionPresentation = null
 
 	func ensure_runtime(parent: Node) -> void:
 		if runtime != null:
@@ -89,7 +89,7 @@ class EntityShellHarness:
 		mission.add_entity(3, 0, Vector3(20, 0, -40), Vector3.ZERO)
 		var container := Node3D.new()
 		parent.add_child(container)
-		runtime = MissionRuntime.new()
+		runtime = MissionPresentation.new()
 		parent.add_child(runtime)
 		runtime.setup(mission, container)
 
@@ -333,7 +333,7 @@ func test_shell_exit_releases_runtime_texture_caches_before_renderer_shutdown() 
 			"the water normal ImageTexture dies before RenderingServer shutdown")
 
 
-func test_shutdown_drain_releases_join_target_awaited_by_loading_barrier() -> void:
+func test_shutdown_settlement_releases_join_target_awaited_by_loading_barrier() -> void:
 	_shell = await _make_shell()
 	if _shell == null:
 		return
@@ -353,18 +353,18 @@ func test_shutdown_drain_releases_join_target_awaited_by_loading_barrier() -> vo
 			"the bound JoinTarget enters the two-frame loading-screen barrier")
 	target = null
 
-	_shell.prepare_runtime_shutdown()
-	for _frame in range(4):
-		await get_tree().process_frame
+	var load_operation: WorldLoadOperation = _shell.begin_runtime_shutdown()
+	assert_not_null(load_operation)
+	if not load_operation.is_settled():
+		await load_operation.settled
 
 	assert_null(weak_target.get_ref(),
-			"shutdown leaves the loading screen alive long enough for the outer "
-			+ "load coroutine to release its bound JoinTarget")
-	_shell.release_runtime_resources_for_shutdown()
+			"settlement proves the outer load coroutine released its bound JoinTarget")
+	_shell.finish_runtime_shutdown()
 	assert_null(menu_shell.get_frame().get_cursor_texture(),
 			"the released frame retains no cursor texture")
 	assert_false(menu_shell.get_frame().is_configured(),
-			"release_runtime_renderer_resources leaves the frame unconfigured")
+			"finish_runtime_shutdown leaves the frame unconfigured")
 	assert_null(weak_cursor.get_ref(),
 			"the cooperative shutdown path drops its global custom cursor before exit")
 

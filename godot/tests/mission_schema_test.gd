@@ -2,7 +2,7 @@ extends GutTest
 
 # MissionData exposes the trigger/action parameter schema (mission_schema.h) to the ONED
 # inspector via get_*_param_schema -> MissionParamSchema. Pins that binding path (moved here when
-# the duplicate NovaMissionRuntime evaluator was retired).
+# the duplicate NovaMissionPresentation evaluator was retired).
 
 func test_mission_data_exposes_core_param_schema() -> void:
 	var mission := MissionData.new()

@@ -43,7 +43,7 @@ void Simulation::bringup_host_runtime(const opennova::bms::File &file) {
 	// D-NET-124). serve_and_play: host_session_pump must NOT discard the host's own loopback 0x0A — we
 	// fold it into ClientState (runtime_) to render the host's own view.
 	// Serve-and-play (default) vs dedicated. Standalone SP is ALWAYS serve-and-play (it renders the
-	// host's own player); isolated test/tooling MissionRuntime instantiations keep that default too.
+	// host's own player); isolated test/tooling MissionPresentation instantiations keep that default too.
 	// ONED has no live editor-preview branch: MainGame/GameWorld is its sole live mission runtime
 	// (ADR 0025). A LAN host honors the UI server-type (host_serve_and_play_, from
 	// configure_host_session). A dedicated host (serve_and_play=false) skips the own-player spawn +
@@ -966,6 +966,14 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port, const String &
 	// it owns the connect-leg state machine + the S2C->ClientState fold internally. Here we only dial
 	// the socket + store the player name (the ClientAuth.NA the host echoes for the name-match). Leave
 	// listen_server_ false (the present gate adds || joiner_); a sim is host XOR joiner.
+	// Validate the lifecycle transition before opening a socket. Re-dialing a
+	// live mission is rejected without partially replacing its transport.
+	const opennova::np::TransitionResult role = mission_session_.configure_role(
+			opennova::np::MissionSessionRole::Joiner);
+	if (role.code != opennova::np::TransitionCode::Applied &&
+			role.code != opennova::np::TransitionCode::NoOp) {
+		return false;
+	}
 	if (pump_.is_null()) pump_.instantiate();
 	if (pump_->dial(p_host_ip, p_port) != 0) {
 		joiner_ = false;
@@ -987,6 +995,10 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port, const String &
 	joiner_bridge_.reset_for_join();
 	joiner_environment_revision_seen_ = 0;
 	joiner_applied_loadout_revision_ = 0;
+	if (!mission_session_.begin_connect().applied()) {
+		joiner_ = false;
+		return false;
+	}
 	return true;
 }
 

@@ -99,8 +99,8 @@ func test_sim_runs_an_installed_program_at_the_62_tick_divider() -> void:
 	assert_eq(sim.get_mission_variable(2), 0, "paused: no executions")
 	sim.set_wac_paused(false)
 
-	# restart() rewinds: the system's on_load resets the accumulator + runs.
-	sim.restart()
+	# reset_session() rewinds: the system's on_load resets the accumulator + runs.
+	sim.reset_session()
 	assert_eq(int(sim.get_wac_state()["runs"]), 0, "restart resets the completed-runs counter")
 
 
@@ -127,7 +127,7 @@ func test_mission_start_wac_is_eager_idempotent_and_restartable() -> void:
 	assert_eq(int(sim.get_wac_state()["runs"]), 2, "the next WAC run remains tick 62")
 	assert_eq(sim.get_mission_variable(2), 1, "the startup edge does not refire")
 
-	sim.restart()
+	sim.reset_session()
 	assert_eq(int(sim.get_wac_state()["runs"]), 1, "restart restores the sealed post-eager VM")
 	assert_eq(sim.get_mission_variable(2), 1)
 	for _i in range(62):

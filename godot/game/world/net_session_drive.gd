@@ -29,7 +29,7 @@ extends Node
 # step is available before load_as_joiner runs.
 
 const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
-const MissionRuntime := preload("res://game/world/mission_runtime.gd")
+const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 
 # The GameWorld this drive loads through — its PUBLIC surface only
 # (load_mission / mission_file / get_runtime) plus the session signals emitted
@@ -51,7 +51,7 @@ var _nw_host: NovaWorldHost = null
 var _host_config: Dictionary = {}  # internal staging derived from the typed request; consumed once by stage_runtime_options
 # The typed session request at the shell seam (ADR 0017): exactly one is non-null
 # during a net load — the host screen's HostSessionConfig or the joiner's dial
-# JoinTarget — threaded to MissionRuntime as opts["host_session"]/opts["join_target"].
+# JoinTarget — threaded to MissionPresentation as opts["host_session"]/opts["join_target"].
 var _pending_host: HostSessionConfig = null
 var _pending_join: JoinTarget = null
 # A retail LAN join authenticates before the wire-header world load. This off-tree
@@ -448,7 +448,7 @@ func _reconcile_join_expansion() -> bool:
 # clears; admission-ready is once per join and holds for the cold wire drain
 # behind the loading hold [orig: the reap @ 0x4ca4a0 -> @ 0x4c63d0]).
 func _update_joiner_admission_signals() -> void:
-	var runtime: MissionRuntime = _world.get_runtime()
+	var runtime: MissionPresentation = _world.get_runtime()
 	if runtime == null:
 		_policy.disarm_admission_watch()
 		return
@@ -562,7 +562,7 @@ func pending_dedicated() -> bool:
 ## Spread the staged session request into the runtime's option dictionary, then
 ## clear the staging: the typed record (host_session/join_target), the derived
 ## _host_config keys, and the preload-sim surrender — the sim reference moves
-## into opts["simulation"] and is cleared here so MissionRuntime remains the one
+## into opts["simulation"] and is cleared here so MissionPresentation remains the one
 ## adopter (ADR 0011/0012 ownership stays singular). Called once per load by the
 ## world's _start_runtime; opts must already carry "resource_root".
 func stage_runtime_options(opts: Dictionary) -> void:
@@ -585,7 +585,7 @@ func stage_runtime_options(opts: Dictionary) -> void:
 			if _host_config.has(k):
 				opts[k] = _host_config[k]
 		_host_config = {}
-	# Consume the already-authenticated joiner. MissionRuntime adopts and frees
+	# Consume the already-authenticated joiner. MissionPresentation adopts and frees
 	# this off-tree Node like its usual freshly-created simulation; clearing our
 	# reference before setup makes ownership singular even on a setup failure.
 	if _join_preload_sim != null:
@@ -602,7 +602,7 @@ func on_runtime_started(opts: Dictionary, bms_name: String) -> void:
 
 ## Per-frame observer, called from the world's tick after the runtime ticked:
 ## the admission/deploy/session-loss edges plus the gate's advertised occupancy.
-func observe_tick(runtime: MissionRuntime) -> void:
+func observe_tick(runtime: MissionPresentation) -> void:
 	_update_joiner_admission_signals()
 	# Keep the gate's advertised occupancy current (host + admitted joiners).
 	# set_player_count self-dedupes, so this is a no-op until the count changes.
@@ -644,7 +644,7 @@ func _maybe_start_nw_host(opts: Dictionary, bms_name: String) -> void:
 		if channel == "NovaWorld":
 			push_warning("NetSessionDrive: NovaWorld host requested but no gate address (nw_gate_host) — gate registration skipped; host is LAN-reachable only")
 		return  # no gate configured -> pure LAN, nothing to register with
-	var runtime: MissionRuntime = _world.get_runtime()
+	var runtime: MissionPresentation = _world.get_runtime()
 	var sim: Simulation = runtime.get_sim() if runtime != null else null
 	if sim == null or not sim.is_host_listening():
 		return  # the listen socket never came up; nothing reachable to advertise

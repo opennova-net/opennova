@@ -4,7 +4,7 @@ class_name DebugCatalog
 ## Definitions name only public owner methods/properties. Target adapters bind
 ## the corresponding target sources on DebugSession.
 
-const MissionRuntime := preload("res://game/world/mission_runtime.gd")
+const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 
 const TARGET_WORLD := &"world"
 const TARGET_PLAYER := &"player"
@@ -329,11 +329,11 @@ static func _resolve_world(source: Callable) -> GameWorld:
 	return null
 
 
-static func _resolve_runtime(source: Callable) -> MissionRuntime:
+static func _resolve_runtime(source: Callable) -> MissionPresentation:
 	if not source.is_valid():
 		return null
 	var runtime: Variant = source.call()
-	if runtime is MissionRuntime and is_instance_valid(runtime):
+	if runtime is MissionPresentation and is_instance_valid(runtime):
 		return runtime
 	return null
 

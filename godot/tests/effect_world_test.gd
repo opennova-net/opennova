@@ -7,7 +7,7 @@ extends GutTest
 # @ 0x5f6df0 spawns by handle or name.
 
 const EffectWorldScript = preload("res://game/world/effect_world.gd")
-const MissionRuntime := preload("res://game/world/mission_runtime.gd")
+const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 
 var _root_dir := ""
 

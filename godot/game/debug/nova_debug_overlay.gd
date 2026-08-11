@@ -1,7 +1,7 @@
 class_name DebugOverlay
 extends CanvasLayer
 ## The mission debug overlay: the real game's F3 cockpit over its live
-## MissionRuntime. It stays engine/UI-only and reads the typed runtime
+## MissionPresentation. It stays engine/UI-only and reads the typed runtime
 ## surfaces through DebugContext so the debug catalog is also usable by
 ## runtime automation.
 ##
@@ -13,7 +13,7 @@ extends CanvasLayer
 ## idle pages cost nothing.
 ##
 ## The runtime is re-resolved through a Callable on EVERY refresh — mission
-## reloads free and recreate the MissionRuntime, so a held reference would go
+## reloads free and recreate the MissionPresentation, so a held reference would go
 ## stale. Panel width and the last-selected page persist per user via
 ## ConfigStore; live toggles deliberately do not.
 
@@ -36,7 +36,7 @@ const DEFAULT_CONFIG_PATH := "user://debug_overlay.cfg"
 const CONFIG_SECTION := "overlay"
 const RenderingPageScript := preload(
 		"res://game/debug/pages/debug_rendering_page.gd")
-const MissionRuntime := preload("res://game/world/mission_runtime.gd")
+const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 
 ## Sidebar section order; register_page categories outside this list append
 ## after, in first-seen order.
@@ -117,7 +117,7 @@ func _ready() -> void:
 	_apply_panel_width()
 
 
-## The runtime supplier: a Callable returning the current MissionRuntime (or
+## The runtime supplier: a Callable returning the current MissionPresentation (or
 ## null). Re-resolved every refresh because reloads recreate the runtime.
 func set_runtime_source(source: Callable) -> void:
 	_ctx.runtime_source = source
@@ -137,7 +137,7 @@ func set_view_context_source(source: Callable) -> void:
 
 
 ## Convenience for owners holding one runtime instance directly.
-func set_runtime(runtime: MissionRuntime) -> void:
+func set_runtime(runtime: MissionPresentation) -> void:
 	var ref: WeakRef = weakref(runtime)
 	set_runtime_source(func(): return ref.get_ref())
 

@@ -1,12 +1,19 @@
 extends GutTest
 
-# MissionRuntime is GameWorld's live mission driver: it owns a real
+# MissionPresentation is GameWorld's live mission driver: it owns a real
 # Simulation, present pass, and entity index and ticks them in one order.
-# These focused tests instantiate it directly over fixture nodes to prove the
+# These focused presentation tests instantiate it over fixture nodes to prove the
 # engine path without introducing a second editor gameplay runtime.
 
-const MissionRuntime := preload("res://game/world/mission_runtime.gd")
+const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 const ItemSeatSpecs := preload("res://game/world/item_seat_specs.gd")
+
+
+func _advance_ticks(runtime: MissionPresentation, delta: float) -> int:
+	var input := MissionFrameInput.new()
+	input.delta_seconds = delta
+	var outcome: MissionFrameOutcome = runtime.advance_session_frame(input)
+	return outcome.get_ticks_run() if outcome != null else 0
 
 
 func test_mission_loadout_chunk_promotes_through_the_native_gate() -> void:
@@ -31,6 +38,7 @@ func test_mission_loadout_chunk_promotes_through_the_native_gate() -> void:
 	assert_eq(int(kit[0]["ammo_primary"]), 3, "the chunk string reaches the kit as an int")
 	assert_eq(int(kit[0]["ammo_secondary"]), 0)
 	assert_eq(int(kit[0]["flags"]), 2, "the damage class rides the flags field")
+	sim.free()
 
 
 # Seat-spec EXTRACTION rules (name-prefix typing incl. embedded-token
@@ -214,7 +222,7 @@ func _make_world(authored: Transform3D) -> Dictionary:
 
 func test_setup_promotes_and_counts() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
-	var rt := MissionRuntime.new()
+	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
 	var count := int(rt.setup(w.mission, w.container, {"placer": w.placer}))
 	# P7: every preview is the in-process listen server, so the host player auto-spawns at bring-up —
@@ -227,7 +235,7 @@ func test_setup_promotes_and_counts() -> void:
 func test_stats_and_manual_probe_share_one_native_profiling_owner_gate() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var board := FrameStatsBoard.new()
-	var rt := MissionRuntime.new()
+	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
 	rt.set_frame_stats_board(board)
 	rt.setup(w.mission, w.container, {"placer": w.placer})
@@ -278,7 +286,7 @@ func test_transport_is_locked_out_of_a_live_net_session() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var joiner := Simulation.new()
 	assert_true(joiner.enable_join("127.0.0.1", 9, "TransportLockJoiner"))
-	var rt := MissionRuntime.new()
+	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
 	assert_gt(int(rt.setup(w.mission, w.container, {
 		"simulation": joiner,
@@ -299,7 +307,7 @@ func test_transport_is_locked_out_of_a_live_net_session() -> void:
 
 func test_transport_still_works_for_a_local_runtime() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
-	var rt := MissionRuntime.new()
+	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
 	assert_gt(int(rt.setup(w.mission, w.container, {"placer": w.placer})), 0)
 	# A directly instantiated runtime has no bound socket or peers, so it is not
@@ -314,7 +322,7 @@ func test_transport_still_works_for_a_local_runtime() -> void:
 
 func test_joiner_runtime_owns_fire_and_throwable_presenters() -> void:
 	# Joiner S2C tag-2 descriptors append to the visual RoundSim's fired queue
-	# and may carry a flying throwable TrcrID. MissionRuntime must own both
+	# and may carry a flying throwable TrcrID. MissionPresentation must own both
 	# consumers on the joiner just as it does on the host. A pre-connected sim
 	# pins the real production setup branch without requiring a live peer.
 	var w := _make_world(Transform3D.IDENTITY)
@@ -325,7 +333,7 @@ func test_joiner_runtime_owns_fire_and_throwable_presenters() -> void:
 	target.port = 9
 	target.player_name = "PresentJoiner"
 	var audio := FireAudioStub.new()
-	var rt := MissionRuntime.new()
+	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
 	assert_gt(int(rt.setup(w.mission, w.container, {
 		"simulation": joiner,
@@ -350,7 +358,8 @@ func test_joiner_runtime_owns_fire_and_throwable_presenters() -> void:
 		assert_gte(rt.get_sim().debug_spawn_round(
 				Vector3(0, 2, 0), Vector3.FORWARD,
 				"AMMO_CAR15_556MM"), 0)
-		assert_true(rt.tick())
+		assert_eq(_advance_ticks(rt, Simulation.tick_dt()), 1,
+				"the live joiner advances through the typed session frame")
 		assert_true(rt.get_sim().drain_fire_presentation_events().is_empty(),
 				"the runtime drained the complete fire queue this frame")
 
@@ -362,7 +371,7 @@ func test_joiner_runtime_owns_fire_and_throwable_presenters() -> void:
 
 
 func test_mission_present_stats_are_a_typed_record() -> void:
-	var rt := MissionRuntime.new()
+	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
 	var stats: MissionPresentStats = rt.get_mission_present_stats()
 	assert_not_null(stats)
@@ -378,7 +387,7 @@ func test_mission_present_stats_are_a_typed_record() -> void:
 
 func test_wire_presenter_resets_with_runtime_stop() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
-	var rt := MissionRuntime.new()
+	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container, {"placer": w.placer})
 	var wire_present := rt.get_wire_presenter()
@@ -391,7 +400,7 @@ func test_wire_presenter_resets_with_runtime_stop() -> void:
 
 func test_presentation_clock_survives_setup_and_forwards_immediately() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
-	var rt := MissionRuntime.new()
+	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
 	rt.set_presentation_time_ms(0x1ffffffff)
 	rt.setup(w.mission, w.container, {"placer": w.placer})
@@ -404,7 +413,7 @@ func test_presentation_clock_survives_setup_and_forwards_immediately() -> void:
 
 func test_setup_exposes_normalized_diagnostic_mission_identity() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
-	var rt := MissionRuntime.new()
+	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container, {
 		"debug_mission_file": "C:\\missions\\00TRe.bms",
@@ -420,7 +429,7 @@ func test_tick_presents_sim_position_onto_node() -> void:
 	# The node is authored far from the entity's spawn; after a tick the present pass moves it onto the
 	# sim's computed position (the consolidated path the old game path never did).
 	var w := _make_world(Transform3D(Basis(), Vector3(99, 99, 99)))
-	var rt := MissionRuntime.new()
+	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container, {"placer": w.placer})
 	rt.step_once()
@@ -431,7 +440,7 @@ func test_tick_presents_sim_position_onto_node() -> void:
 		"node left its authored position while playing")
 
 
-# (Historical transform-restore test deleted: MissionRuntime.stop() still
+# (Historical transform-restore test deleted: MissionPresentation.stop() still
 # rewinds Simulation for teardown/fixtures, but ONED no longer owns a live
 # runtime whose Stop must restore authored editor nodes.)
 
@@ -442,7 +451,7 @@ func test_tick_and_step_advance_and_present_like_the_game() -> void:
 	# (the engine's own dividers — WAC every 62nd tick, BMS quarter-pass every 16th — gate inside
 	# the systems), so direct fixture tick() and Step must both advance + present.
 	var w := _make_world(Transform3D(Basis(), Vector3(99, 99, 99)))
-	var rt := MissionRuntime.new()
+	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container, {"placer": w.placer})
 	assert_true(rt.tick(), "tick() advances one logic tick")
@@ -462,7 +471,7 @@ func test_effects_drained_signal_fires() -> void:
 	var container := Node3D.new()
 	add_child_autofree(container)
 
-	var rt := MissionRuntime.new()
+	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
 	rt.setup(md, container)
 	# GDScript lambdas capture locals by value; mutate the array by reference (append) rather than
@@ -476,69 +485,69 @@ func test_effects_drained_signal_fires() -> void:
 	assert_eq(String((drained[0] as Dictionary)["kind"]), "text", "OutputText -> text effect")
 
 
-# --- Fixed-timestep accumulator (tick_realtime): the sim runs at a constant 62.5 Hz independent of
+# --- Fixed-timestep accumulator (session_frame): the sim runs at a constant 62.5 Hz independent of
 # the render/frame rate. [orig: Game_MainLoop @ 0x52b630 -> Game_ProcessMainFrame @ 0x5263f0] -----
 
-func test_tick_realtime_accumulates_fixed_quanta() -> void:
+func test_session_frame_accumulates_fixed_quanta() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
-	var rt := MissionRuntime.new()
+	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container, {"placer": w.placer})
 	rt.play()
 	# 0.1 s of wall-clock at 62.5 Hz = floor(0.1 / 0.016) = 6 ticks.
-	assert_eq(rt.tick_realtime(0.1), 6, "0.1 s banks 6 fixed-step ticks")
+	assert_eq(_advance_ticks(rt, 0.1), 6, "0.1 s banks 6 fixed-step ticks")
 	# Sub-quantum deltas accumulate ACROSS calls instead of each firing a tick.
-	assert_eq(rt.tick_realtime(0.008), 0, "half a quantum (plus the 0.004 remainder) fires nothing yet")
-	assert_eq(rt.tick_realtime(0.008), 1, "the banked remainder crosses one quantum and fires once")
+	assert_eq(_advance_ticks(rt, 0.008), 0, "half a quantum (plus the 0.004 remainder) fires nothing yet")
+	assert_eq(_advance_ticks(rt, 0.008), 1, "the banked remainder crosses one quantum and fires once")
 
 
-func test_tick_realtime_clamps_catchup() -> void:
+func test_session_frame_clamps_catchup() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
-	var rt := MissionRuntime.new()
+	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container, {"placer": w.placer})
 	rt.play()
 	# 1.0 s would be ~62 ticks; the spiral-of-death clamp caps a single frame's
 	# catch-up at the native world::TickAccumulator::kMaxCatchupTicks (S14).
-	assert_eq(rt.tick_realtime(1.0), 31, "a long stall is clamped to the catch-up cap")
+	assert_eq(_advance_ticks(rt, 1.0), 31, "a long stall is clamped to the catch-up cap")
 	# The clamp DROPS the backlog (no banked spiral): a tiny delta afterward fires nothing.
-	assert_eq(rt.tick_realtime(0.001), 0, "the backlog was dropped, not carried into the next frames")
+	assert_eq(_advance_ticks(rt, 0.001), 0, "the backlog was dropped, not carried into the next frames")
 
 
-func test_tick_realtime_ignored_when_not_playing() -> void:
+func test_session_frame_ignored_when_not_playing() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
-	var rt := MissionRuntime.new()
+	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container, {"placer": w.placer})
 	# Not played -> paused -> banks nothing regardless of elapsed wall-clock (no burst on Play).
-	assert_eq(rt.tick_realtime(1.0), 0, "a paused runtime banks nothing")
+	assert_eq(_advance_ticks(rt, 1.0), 0, "a paused runtime banks nothing")
 	rt.play()
-	assert_eq(rt.tick_realtime(0.0), 0, "play() reset the accumulator; zero delta fires nothing")
+	assert_eq(_advance_ticks(rt, 0.0), 0, "play() reset the accumulator; zero delta fires nothing")
 
 
-func test_tick_realtime_still_presents_a_zero_tick_render_frame() -> void:
+func test_session_frame_still_presents_a_zero_tick_render_frame() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
-	var rt := MissionRuntime.new()
+	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container, {"placer": w.placer})
 	rt.play()
-	assert_eq(rt.tick_realtime(Simulation.tick_dt()), 1,
+	assert_eq(_advance_ticks(rt, Simulation.tick_dt()), 1,
 			"seed one decoded presentation snapshot")
 	(w.model as Node3D).visible = false
-	assert_eq(rt.tick_realtime(0.0), 0, "no fixed simulation tick advances")
+	assert_eq(_advance_ticks(rt, 0.0), 0, "no fixed simulation tick advances")
 	assert_true((w.model as Node3D).visible,
 			"the render frame still reapplies current visibility state")
 
 
-func test_tick_realtime_presents_latest_state_once() -> void:
+func test_session_frame_presents_latest_state_once() -> void:
 	# The node is authored far from spawn; after a catch-up batch the single present puts it on the
 	# sim's LATEST position (decoupled render = present once per render frame, no inter-tick interpolation).
 	var w := _make_world(Transform3D(Basis(), Vector3(99, 99, 99)))
-	var rt := MissionRuntime.new()
+	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container, {"placer": w.placer})
 	rt.play()
-	assert_gt(rt.tick_realtime(0.1), 0, "the batch ran at least one tick")
+	assert_gt(_advance_ticks(rt, 0.1), 0, "the batch ran at least one tick")
 	var sim_pos: Vector3 = rt.get_sim().get_entity_position(0)
 	assert_true((w.model as Node3D).position.is_equal_approx(sim_pos),
 		"the node ends on the latest sim position after the batch")
@@ -549,7 +558,7 @@ func test_tick_realtime_presents_latest_state_once() -> void:
 func test_catchup_exposes_each_fixed_ticks_pose_before_batched_presentation() -> void:
 	var authored := Transform3D(Basis.IDENTITY, Vector3(99, 99, 99))
 	var w := _make_world(authored)
-	var rt := MissionRuntime.new()
+	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container, {"placer": w.placer})
 	var entity_ref := {"kind": 3, "index": 0, "bms_id": 0}
@@ -561,7 +570,7 @@ func test_catchup_exposes_each_fixed_ticks_pose_before_batched_presentation() ->
 		})
 	)
 	rt.play()
-	assert_eq(rt.tick_realtime(0.05), 3, "one render frame catches up three fixed ticks")
+	assert_eq(_advance_ticks(rt, 0.05), 3, "one render frame catches up three fixed ticks")
 	assert_eq(observed.size(), 3, "each fixed tick exposes its own attachment snapshot")
 	for row_v in observed:
 		var row: Dictionary = row_v
@@ -586,7 +595,7 @@ func test_catchup_advances_round_move_effect_at_each_live_pose_and_stops_before_
 	var anchor_mount := CatchupEffectAnchorMount.new()
 	var effect_world := CatchupEffectWorld.new(anchor_mount)
 	add_child_autofree(effect_world)
-	var rt := MissionRuntime.new()
+	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container, {
 		"fire_fx": func() -> Variant: return effect_world,
@@ -607,7 +616,7 @@ func test_catchup_advances_round_move_effect_at_each_live_pose_and_stops_before_
 	)
 	rt.play()
 
-	assert_eq(rt.tick_realtime(0.05), 3,
+	assert_eq(_advance_ticks(rt, 0.05), 3,
 			"one render frame catches up the first three round ticks")
 	assert_eq(effect_world.spawn_count, 1,
 			"the attached move group exists before its first particle advance")
@@ -626,10 +635,10 @@ func test_catchup_advances_round_move_effect_at_each_live_pose_and_stops_before_
 	# ticks into a twelve-tick catch-up batch: advances 248..252 must observe no
 	# live group, rather than emitting five stale ticks until final presentation.
 	for _batch in range(7):
-		assert_eq(rt.tick_realtime(31.0 * Simulation.tick_dt()), 31)
-	assert_eq(rt.tick_realtime(20.0 * Simulation.tick_dt()), 20)
+		assert_eq(_advance_ticks(rt, 31.0 * Simulation.tick_dt()), 31)
+	assert_eq(_advance_ticks(rt, 20.0 * Simulation.tick_dt()), 20)
 	assert_eq(effect_world.fixed_advance_count, 240)
-	assert_eq(rt.tick_realtime(12.0 * Simulation.tick_dt()), 12)
+	assert_eq(_advance_ticks(rt, 12.0 * Simulation.tick_dt()), 12)
 	assert_eq(effect_world.fixed_advance_count, 252)
 	assert_eq(effect_world.active_tick_numbers.size(), 247,
 			"the group advances exactly while the round is alive")
@@ -639,7 +648,7 @@ func test_catchup_advances_round_move_effect_at_each_live_pose_and_stops_before_
 			"release happens before fixed advance 248, inside the catch-up batch")
 
 
-func test_tick_realtime_drains_effects_per_tick() -> void:
+func test_session_frame_drains_effects_per_tick() -> void:
 	# Effects must drain PER logic tick INSIDE the catch-up batch (not coalesced into one emit at the
 	# end): the BMS quarter-pass one-shot still surfaces when many ticks run in a single real-time frame.
 	var md := MissionData.new()
@@ -648,14 +657,14 @@ func test_tick_realtime_drains_effects_per_tick() -> void:
 	assert_false(md.add_event_action(0, { "action_type": 6, "param1": 42 }).is_empty())
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var rt := MissionRuntime.new()
+	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
 	rt.setup(md, container)
 	rt.play()
 	var drained: Array = []
 	rt.effects_drained.connect(func(effects): drained.append_array(effects))
 	# 20.5 quanta of wall-clock in ONE frame -> 20 ticks; crosses the 16th-tick quarter-pass boundary.
-	assert_eq(rt.tick_realtime(0.328), 20, "20+ quanta of wall-clock run 20 logic ticks in one frame")
+	assert_eq(_advance_ticks(rt, 0.328), 20, "20+ quanta of wall-clock run 20 logic ticks in one frame")
 	assert_eq(drained.size(), 1, "the per-tick one-shot effect surfaced from inside the batch")
 	assert_eq(String((drained[0] as Dictionary)["kind"]), "text")
 
@@ -674,15 +683,15 @@ func test_distance_per_real_second_is_frame_rate_independent() -> void:
 	assert_true(hi.pos.is_equal_approx(lo.pos), "the deterministic sim lands the entity at one position")
 
 
-# Drive a fresh MissionRuntime with `count` frames of `step` seconds each and report total ticks +
+# Drive a fresh MissionPresentation with `count` frames of `step` seconds each and report total ticks +
 # the entity position. Fixed iteration count (not a while-elapsed loop) keeps the fed wall-clock exact.
 func _run_realtime(step: float, count: int) -> Dictionary:
 	var w := _make_world(Transform3D.IDENTITY)
-	var rt := MissionRuntime.new()
+	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
 	rt.setup(w.mission, w.container, {"placer": w.placer})
 	rt.play()
 	var ticks := 0
 	for _i in range(count):
-		ticks += rt.tick_realtime(step)
+		ticks += _advance_ticks(rt, step)
 	return { "ticks": ticks, "pos": rt.get_sim().get_entity_position(0) }

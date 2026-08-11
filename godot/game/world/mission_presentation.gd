@@ -1,31 +1,26 @@
+class_name MissionPresentation
 extends Node
 
-# THE shared mission runtime driver. Owns the sim (Simulation), present pass, entity index, and
-# one faithful tick pipeline. `GameWorld`, under `MainGame`, is its sole live mission host; ONED has
-# no PIE or in-place mission simulation. Tests and non-gameplay tooling previews may still instantiate
-# this component directly. It consolidated the historical game's hand-wired Simulation +
-# MissionCommandHost stack and the editor's separate MissionSimDriver.
+# The Godot presentation owner for one native MissionSession. It owns the
+# Simulation adapter, present passes, and entity index; cadence, lifecycle, and
+# input retention remain native. GameWorld is its sole live owner.
 #
 # Per-tick order (single-sourced here, faithful to the original main loop's server-tick-then-render):
 #   advance logic (sim) -> present entity state onto nodes -> drain + emit side effects.
 # [orig: WacScript_AdvanceTick runs the logic systems; the client then renders the entities. Terrain/foliage/audio
-#  are host render passes the caller composes around this.]
+#  are Godot render passes the caller composes around this.]
 #
-# Cadence: Simulation.step() runs ONE logic tick (the original's 62 Hz engine tick) — the
-# engine's dividers gate INSIDE the systems (the WAC VM fires every 62nd tick, the BMS evaluator
-# quarter-passes every 16th). Deciding HOW MANY ticks a host frame runs is this driver's job, not
-# the sim's: tick_realtime() banks wall-clock and dispatches 0..N of them; tick() dispatches exactly
-# one. Live cadence is driven explicitly by GameWorld so it can order the runtime against its other
-# passes. `_process` self-tick remains an opt-in seam for isolated tests/tooling previews; ONED does
-# not use it for gameplay. Stop rewinds the world (World::restore) AND restores the authored node
-# transforms captured at setup.
+# Cadence: MissionSession banks wall clock and dispatches 0..N 62.5 Hz ticks;
+# tick() asks that same session for one deterministic local/test step. The
+# engine's WAC/BMS dividers remain inside their systems. Stop rewinds both the
+# native world baseline and the authored node transforms captured at setup.
 
 signal effects_drained(effects: Array)
 ## Emitted once after every authoritative 62.5 Hz logic step, after that
 ## step's side effects have been delivered. Presentation-only fixed-step
 ## systems (particles) subscribe here instead of integrating render delta.
 signal fixed_tick_completed(logic_tick: int)
-## Emitted after Stop rewinds simulation and authored transforms. Host-owned
+## Emitted after Stop rewinds simulation and authored transforms. GameWorld-owned
 ## presentation systems use this boundary to discard transient runtime state.
 signal simulation_restarted()
 
@@ -49,7 +44,6 @@ var _fire_listener := Callable()      # -> Vector3 camera listener, stamped into
 var _destruction_present: DestructionPresentPass  # husk swap + debris + wreck effects (every viewing peer); null without fire_audio
 var _throwable_present: ThrowablePresentPass      # flying/placed throwable models
 var _index: EntityIndex
-var _playing := false
 var _orig_transforms: Dictionary = {} # node -> Transform3D captured at setup, for restore-on-stop
 var _perf_tick_us: int = 0
 var _perf_sim_us: int = 0
@@ -62,7 +56,7 @@ var _perf_did_tick := false
 var _frame_stats: FrameStatsBoard = null
 var _runtime_probe_enabled := false
 var _has_trace_stats_sampling := false
-var _ticks_last_frame := 0           # logic ticks run by the last tick_realtime() call (catch-up signal)
+var _ticks_last_frame := 0           # logic ticks run by the last session frame
 var _presentation_time_ms := -1      # shared render/PANM DWORD; negative = direct-sim fallback
 # Stable mission identity for shell-neutral diagnostics such as the F3 overlay.
 var _mission_file := ""
@@ -107,7 +101,7 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 		_sim.set_loco_scale(int(options["loco_scale"]))
 	# P7 / ADR 0011: every authoritative live mission is an in-process listen server, stood up BEFORE
 	# load; the host player auto-spawns at bring-up (faithful §5.0 mode-3). MainGame/GameWorld is the
-	# sole live host (ADR 0025); F5/F6 launch that standalone path. Isolated tests/tooling previews may
+	# sole live runtime owner (ADR 0025); F5/F6 launch that standalone path. Isolated tests/tooling previews may
 	# instantiate this same seam, but ONED does not. A co-op LAN host additionally binds a real UDP
 	# socket; a joiner is the non-authority client.
 	var playable := bool(options.get("playable", false))
@@ -128,7 +122,7 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 			_sim.set_join_character_profile(options["join_character_profile"])
 		if needs_join_connection and not join_target.integrity_profile.is_empty() and not \
 				_sim.set_join_integrity_profile(join_target.integrity_profile):
-			push_warning("MissionRuntime: unknown join integrity profile '%s'." % \
+			push_warning("MissionPresentation: unknown join integrity profile '%s'." % \
 					join_target.integrity_profile)
 			_setup_error = ERR_INVALID_PARAMETER
 			_sim.free()
@@ -137,7 +131,7 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 			return 0
 		if needs_join_connection and not _sim.enable_join(
 				join_target.host_ip, join_target.port, join_target.player_name):
-			push_warning("MissionRuntime: could not dial co-op host %s:%d — joiner disabled." % [
+			push_warning("MissionPresentation: could not dial co-op host %s:%d — joiner disabled." % [
 				join_target.host_ip, join_target.port])
 	elif host_session != null:
 		# Co-op LAN HOST: encode the typed session request at the FFI boundary (ADR 0017)
@@ -175,7 +169,7 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 			var score_ini_bytes := session_resource_root.read_file(
 					"score.ini", ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST)
 			if not score_ini_bytes.is_empty() and not _sim.set_score_config_data(score_ini_bytes):
-				push_warning("MissionRuntime: rejected score.ini; session status uses zero score values.")
+				push_warning("MissionPresentation: rejected score.ini; session status uses zero score values.")
 		if not _sim.enable_host_listen(host_session.bind_port):
 			# A requested LAN host that cannot own its UDP endpoint is not a host.
 			# Never degrade into the visually-identical socketless SP/listen path:
@@ -217,8 +211,8 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 		_sim.set_panm_time_ms(_presentation_time_ms)
 	# The SIM is held off-tree (never add_child'd): only this driver advances it, and an off-tree
 	# node never self-ticks via _process; it is freed explicitly in _exit_tree (mirrors the old
-	# MissionSimDriver). This MissionRuntime node itself IS in the tree — its host adds it and
-	# drives tick_realtime() explicitly (ADR 0025: the game shell is the only live host).
+	# MissionSimDriver). This MissionPresentation node itself IS in the tree — GameWorld adds it and
+	# drives advance_session_frame() explicitly (ADR 0025: the game shell is the only live runtime owner).
 	_index = EntityIndex.new()
 	var registry_placer: MissionObjectPlacer = options.get("placer")
 	_index.build(registry_placer.placed_entity_records if registry_placer != null else [],
@@ -272,8 +266,8 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 			Callable(_wire_present, "muzzle_world_for") if _wire_present != null
 					else Callable())
 		# The sim's fire-sound distance gate reads the camera listener at fire
-		# time on the logic clock (world/fire_sound.h) — stamped per frame in
-		# tick_realtime. A host with no fire presentation (dedicated) never
+		# time on the logic clock (world/fire_sound.h) — stamped in each typed
+		# session frame. A host with no fire presentation (dedicated) never
 		# stamps, which is the witnessed peer gate [orig: @ 0x528e57].
 		_fire_listener = options.get("fire_listener", Callable())
 	# The destruction-presentation pass: husk model swaps, death-piece debris,
@@ -306,16 +300,10 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 		options.get("fire_fx", Callable()), options.get("effect_anchors"))
 	simulation_restarted.connect(
 		Callable(_throwable_present, 'reset_runtime_state'))
-	# ADR 0033 R1: the loop shape, the per-tick leg order, and the post-batch
-	# frame legs live in the engine FrameDriver (frame/frame_driver.h). This
-	# runtime registers itself ONCE and the binding wires the leg contract; the
-	# camera listener stays an explicit device Callable (a dedicated host has
-	# none). The registrant is a NODE, never a RefCounted presenter: a
-	# Node-bound leg carries an ObjectID and stays safe to destroy in any
-	# leaked-object teardown order, while a RefCounted-bound one would make the
-	# sim a hidden owner of the presenter.
-	_sim.set_frame_shell(self, _fire_listener)
-	# Capture the authored node transforms now (pre-tick) so Stop restores them whether the host
+	# ADR 0035: the native session owns lifecycle/cadence and invokes one
+	# synchronous per-tick presentation sink. The camera remains a Godot device;
+	# a dedicated host has none.
+	# Capture the authored node transforms now (pre-tick) so Stop restores them whether the caller
 	# played or only stepped. Cheap; the game never Stops but holding the map costs nothing.
 	_capture_transforms()
 	return _sim.get_entity_count()
@@ -360,7 +348,7 @@ func entity_position_for_ssn(ssn: int) -> Variant:
 
 
 # Full attached-effect transform for fx2ssn. Simulation owns the LIVE
-# registry lookup and frame data; the host applies the single canonical basis
+# registry lookup and frame data; presentation applies the single canonical basis
 # conversion shared with the mission present pass.
 func entity_effect_transform_for_ssn(ssn: int) -> Variant:
 	if _sim == null or ssn <= 0:
@@ -453,7 +441,7 @@ func local_player_team() -> int:
 	return int(_sim.get_local_player_team()) if _sim != null else 0
 
 
-## The host hands the shared FrameStatsBoard here (game shell -> GameWorld ->
+## GameWorld hands the shared FrameStatsBoard here (game shell -> GameWorld ->
 ## each runtime it creates).
 func set_frame_stats_board(board: FrameStatsBoard) -> void:
 	if board == _frame_stats:
@@ -528,7 +516,7 @@ func get_throwable_present_stats() -> RefCounted:
 
 func get_destruction_present_stats() -> RefCounted:
 	# DestructionPresentPass.Stats (typed counters, ADR 0017); null until a
-	# host mission runs with the pass.
+	# loaded mission runs with the pass.
 	return _destruction_present.get_stats() if _destruction_present != null else null
 
 func get_sim() -> Simulation:
@@ -565,7 +553,7 @@ func entity_count() -> int:
 
 
 func is_playing() -> bool:
-	return _playing
+	return _sim != null and _sim.is_playing()
 
 
 func _present_entity_rows(stats_on := false) -> void:
@@ -625,11 +613,10 @@ func _present_frame(stats_on: bool) -> void:
 
 ## Advance EXACTLY ONE cadence step and present. Returns true when a logic tick fired (and effects
 ## were drained). The deterministic single-tick primitive: standalone F3/MCP Step and isolated
-## tests/tooling previews use this. GameWorld is the sole live real-time host and calls
-## tick_realtime(), which accumulates wall-clock; ONED has no self-ticking mission host.
-## The step order (listener stamp, one step, the per-tick legs, one present)
-## is the engine FrameDriver's run_single.
+## tests/tooling previews use this. GameWorld is the sole live real-time owner and
+## advances the native session; ONED has no self-ticking mission runtime.
 func tick() -> bool:
+	_perf_effects_us = 0
 	if _sim == null:
 		_perf_tick_us = 0
 		_perf_sim_us = 0
@@ -638,52 +625,55 @@ func tick() -> bool:
 		_perf_did_tick = false
 		_ticks_last_frame = 0
 		return false
-	var did_tick := bool(_sim.frame_single())
+	var input := MissionFrameInput.new()
+	input.delta_seconds = Simulation.tick_dt()
+	var outcome: MissionFrameOutcome = _sim.step_session_frame(
+			input, _consume_session_tick)
 	_read_frame_perf()
-	return did_tick
+	if outcome != null and not outcome.is_terminal() and outcome.did_tick():
+		_present_frame(_stats_capture_on())
+	return outcome != null and outcome.did_tick()
 
 
-# --- The engine-frame device legs (ADR 0033 R1). The FrameDriver invokes
-# these in its fixed order; each is a thin shell leg over state this host
-# owns. The listener stamp and the effects drain run adapter-side.
+# --- Per-tick presentation sink (ADR 0035) -----------------------------------
 
 
-func _frame_sync_fixed_leg() -> void:
+func _consume_session_tick(outcome: MissionTickOutcome) -> bool:
+	if _sim == null or outcome == null or outcome.is_terminal():
+		return false
+	_begin_present_effect_tick(outcome.logic_tick)
 	if _throwable_present != null:
 		_throwable_present.sync_fixed_tick_effects()
-
-
-func _frame_effects_drained(effects: Array) -> void:
-	effects_drained.emit(effects)
-
-
-func _frame_fixed_tick_completed(logic_tick: int) -> void:
+	var effects_start := Time.get_ticks_usec()
+	var effects: Array = _sim.drain_effects()
+	_perf_effects_us += Time.get_ticks_usec() - effects_start
+	if not effects.is_empty():
+		effects_drained.emit(effects)
 	_feed_projectile_trace_stats()
-	fixed_tick_completed.emit(logic_tick)
+	fixed_tick_completed.emit(outcome.logic_tick)
+	return true
 
 
 func _stats_capture_on() -> bool:
 	return _frame_stats != null and _frame_stats.is_capture_active()
 
 
-func _frame_present_rows_leg() -> void:
+func present_entity_rows() -> void:
 	_present_entity_rows(_stats_capture_on())
 
 
-func _frame_present_frame_leg() -> void:
+func present_frame() -> void:
 	_present_frame(_stats_capture_on())
 
 
-# Pull the engine driver's spans into the probe counters and land the batch
+# Pull the native session spans into the probe counters and land the batch
 # accounting on the stats board (the per-pass present spans land inside the
 # present legs themselves).
 func _read_frame_perf() -> void:
-	var perf: Dictionary = _sim.get_frame_perf()
+	var perf: Dictionary = _sim.get_session_perf()
 	_perf_tick_us = int(perf.get("tick_us", 0))
 	_perf_sim_us = int(perf.get("sim_us", 0))
-	_perf_present_us = int(perf.get("present_us", 0))
-	_perf_effects_us = int(perf.get("effects_us", 0))
-	_perf_did_tick = bool(perf.get("did_tick", false))
+	_perf_did_tick = int(perf.get("ticks", 0)) > 0
 	_ticks_last_frame = int(perf.get("ticks", 0))
 	if _ticks_last_frame > 0 and _stats_capture_on():
 		_frame_stats.add(FrameStatsBoard.SIM_STEP, _perf_sim_us)
@@ -725,20 +715,27 @@ func _feed_projectile_trace_stats() -> void:
 			faces.y)
 
 
-## Real-time host entry: bank `delta`, drain it in fixed tick_dt quanta, run that many single logic
+## Real-time frame entry: bank `delta`, drain it in fixed tick_dt quanta, run that many single logic
 ## ticks (clamped to the native kMaxCatchupTicks), and present ONCE after the batch — the faithful
 ## fixed-62.5 Hz accumulator, with a zero-tick frame still presenting current render-only entity
-## rows (camera and local attach/detach change between fixed ticks). The whole loop — bank/clamp,
-## the per-tick leg order, present-once, and the post-batch world legs GameWorld installs — runs
-## in the engine FrameDriver [orig: Game_MainLoop @ 0x52b630]; this host reads the spans back.
-## Returns the number of logic ticks run this call.
-func tick_realtime(delta: float) -> int:
-	if _sim == null or not _playing:
+## rows (camera and local attach/detach change between fixed ticks). The native
+## session owns bank/clamp, input retention, and per-tick order; GameFramePipeline
+## owns the concrete Godot device order [orig: Game_MainLoop @ 0x52b630].
+func advance_session_frame(input: MissionFrameInput) -> MissionFrameOutcome:
+	_perf_effects_us = 0
+	if _sim == null:
 		_ticks_last_frame = 0
-		return 0
-	var n := int(_sim.frame_realtime(delta))
+		return null
+	var outcome: MissionFrameOutcome = _sim.advance_session_frame(
+			input, _consume_session_tick)
 	_read_frame_perf()
-	return n
+	if outcome == null or outcome.is_terminal():
+		return outcome
+	if outcome.did_tick():
+		_present_frame(_stats_capture_on())
+	else:
+		_present_entity_rows(_stats_capture_on())
+	return outcome
 
 
 func get_perf_counters() -> Dictionary:
@@ -773,18 +770,15 @@ func is_transport_locked() -> bool:
 
 
 func play() -> void:
-	_playing = true
 	if _sim != null:
-		# Discard wall-clock banked while paused / loading, so Play doesn't burst-catch-up.
-		_sim.reset_tick_bank()
+		_sim.resume_session()
 
 
 func pause() -> void:
 	if is_transport_locked():
 		return
-	_playing = false
 	if _sim != null:
-		_sim.reset_tick_bank()
+		_sim.pause_session()
 
 
 ## One manual debug/tooling tick: one logic tick + present, outside the real-time loop.
@@ -794,9 +788,8 @@ func step_once() -> void:
 	# the socket between steps just as pause() does. See is_transport_locked().
 	if is_transport_locked():
 		return
-	_playing = false
 	if _sim != null:
-		_sim.reset_tick_bank()  # manual stepping is fully decoupled from wall-clock
+		_sim.pause_session()
 	tick()
 
 
@@ -807,10 +800,8 @@ func stop() -> void:
 	# peers that are still streaming against it. See is_transport_locked().
 	if is_transport_locked():
 		return
-	_playing = false
 	if _sim != null:
-		_sim.reset_tick_bank()  # a Stop -> Play cycle must not replay banked time
-		_sim.restart()  # World::restore baseline (registry/vars/env/clock) + AI re-seed
+		_sim.reset_session()
 	_clear_present_effect_poses()
 	_restore_transforms()
 	simulation_restarted.emit()
@@ -859,10 +850,7 @@ func _exit_tree() -> void:
 	_has_trace_stats_sampling = false
 	if _sim != null:
 		_sim.set_runtime_profiling_enabled(false)
-		# Release the frame device legs before the presenters tear down: the
-		# sim must not hold Callables into objects this exit is about to free.
-		_sim.set_frame_shell(null, Callable())
-		_sim.set_frame_world(null)
+		_sim.close_session()
 	_clear_present_effect_poses()
 	if _fire_present != null:
 		_fire_present.teardown()  # frees the tracer mesh instance under the container

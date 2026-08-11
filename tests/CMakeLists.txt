@@ -181,9 +181,9 @@ add_executable(wav_pcm_test lwf/wav_pcm_test.cpp)
 target_link_libraries(wav_pcm_test PRIVATE opennova_formats)
 add_test(NAME wav_pcm COMMAND wav_pcm_test)
 
-add_executable(frame_driver_test frame/frame_driver_test.cpp)
-target_link_libraries(frame_driver_test PRIVATE opennova_runtime)
-add_test(NAME frame_driver COMMAND frame_driver_test)
+add_executable(mission_session_test frame/mission_session_test.cpp)
+target_link_libraries(mission_session_test PRIVATE opennova_net)
+add_test(NAME mission_session COMMAND mission_session_test)
 
 # The menu sound profile (fixtures/menu_sound/menu.LWF): trigger sets resolve to
 # loose .wav members (drives MNU hover/click via MnuMenu).

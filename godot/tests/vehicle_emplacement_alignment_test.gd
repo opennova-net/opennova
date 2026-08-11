@@ -384,7 +384,7 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 	if mission_objects == null:
 		return
 
-	var rt = preload("res://game/world/mission_runtime.gd").new()
+	var rt = preload("res://game/world/mission_presentation.gd").new()
 	add_child_autofree(rt)
 	assert_gt(int(rt.setup(mission, mission_objects, {
 		"resource_root": root,

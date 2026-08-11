@@ -134,7 +134,7 @@ public:
 
 	// The terrain frame leg (ADR 0033 R2): compile the engine patch draw list for
 	// this node's viewport camera and apply it onto the instance pool. Driven
-	// by the engine FrameDriver through the shell's terrain hook — this node
+	// by GameFramePipeline through the concrete terrain leg — this node
 	// no longer self-processes.
 	void render_frame();
 

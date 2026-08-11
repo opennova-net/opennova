@@ -496,7 +496,7 @@ func set_time_of_day_hhmm(hhmm: float) -> void:
 
 
 ## World-driven eval clock: the world tick pushes the sim's logic tick after each
-## tick_realtime batch, and the native mixer runs the witnessed staggered cohort
+## session tick batch, and the native mixer runs the witnessed staggered cohort
 ## walk for the elapsed ticks — each placed marker re-evaluates every 8th 62.5 Hz
 ## tick [orig: Entity_UpdateAllEntities @ 0x4c225a pool-2 walk;
 ## Entity_UpdateEnvSoundEmitter @ 0x4a8080]. The first world-driven tick rebases the

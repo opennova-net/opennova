@@ -144,7 +144,7 @@ func join_lan_server(target: JoinTarget) -> void:
 	# Joiner: the retail client obtains the full session-variable set from the
 	# connect stream before wire-header world load [orig: parse_server_session_variables
 	# @ 0x5202f0]. Browse-time values are display hints only; GameWorld replaces
-	# them with the authoritative post-auth record before starting MissionRuntime.
+	# them with the authoritative post-auth record before starting MissionPresentation.
 	# Retail also holds the screen through the post-world-load connection/game-start
 	# waits [orig: NapiClient_WaitForDisconnect @ 0x42cb20 then
 	# NapiClient_WaitForGameStart @ 0x42cc10]. GameWorld pumps the loaded runtime

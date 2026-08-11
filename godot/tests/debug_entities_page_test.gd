@@ -8,7 +8,7 @@ extends GutTest
 # target, the same registered-contract seam runtime MCP drives.
 
 const PageScript := preload("res://game/debug/pages/debug_entities_page.gd")
-const MissionRuntime := preload("res://game/world/mission_runtime.gd")
+const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 
 
 ## The scenario model: the two AI cards plus the presented-row order knobs the
@@ -276,7 +276,7 @@ func test_real_sim_rows_join_ai_cards_with_edit_identity() -> void:
 	mission.add_entity(3, 0, Vector3(10, 0, 0), Vector3.ZERO)  # KIND_ORGANIC
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var runtime := MissionRuntime.new()
+	var runtime := MissionPresentation.new()
 	add_child_autofree(runtime)
 	assert_eq(runtime.setup(mission, container,
 			{"placer": MissionObjectPlacer.new()}), 2)

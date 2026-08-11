@@ -114,7 +114,7 @@ func register_all(registry: McpToolRegistry) -> void:
 				"top": { "type": "integer", "default": 15, "minimum": 1, "maximum": 50 },
 			}), Callable(self, "_tool_analyze"))
 	registry.register(McpToolDef.make("analyze_mounts",
-			"Read-only NPC mount/seat diagnostic for attach commands 123/124/125. Uses the same seat extraction rules as MissionRuntime: authored organic -> target SSN -> target model userpoints -> predicted seat. path can name any .bms through the mounted resource root; omit it for the open mission.",
+			"Read-only NPC mount/seat diagnostic for attach commands 123/124/125. Uses the same seat extraction rules as MissionPresentation: authored organic -> target SSN -> target model userpoints -> predicted seat. path can name any .bms through the mounted resource root; omit it for the open mission.",
 			{
 				"path": { "type": "string" },
 				"command_ids": { "type": "array", "items": { "type": "integer" } },
@@ -672,7 +672,7 @@ func _tool_analyze_mounts(args: Dictionary, ctx: McpToolContext) -> Variant:
 	return {
 		"source": source,
 		"runtime_parity": {
-			"shared_rules": "MissionRuntime",
+			"shared_rules": "MissionPresentation",
 			"editor_mode": "static_analysis",
 			"live_runtime": "GameWorld",
 			"source": "static",

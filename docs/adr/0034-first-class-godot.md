@@ -1,6 +1,8 @@
 # ADR 0034: Godot is the first-class shell
 
 - **Status**: accepted (2026-08-09; maintainer directive)
+- **Amended**: ADR 0035 replaces the transitional frame-hook registration
+  described below with a typed native session and direct Godot frame pipeline.
 - **Owners**: runtime architecture
 - **Supersedes/updates**: amends ADR 0028 and ADR 0033's POSTURE — the
   "adapter" framing and the shell-neutral pretense — without touching their

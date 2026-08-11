@@ -74,13 +74,13 @@ opennova::bms::File make_demo_mission() {
 
 } // namespace
 
-Simulation::Simulation() {
+Simulation::Simulation() : mission_session_(*this) {
 	reset_world();
-	set_process(true);
+	set_process(false);
 }
 
 Simulation::~Simulation() {
-	leave_net_session();
+	(void)mission_session_.close();
 	if (weapon_defs_loaded_) {
 		def_free_weapons(&weapon_defs_);
 		weapon_defs_loaded_ = false;
@@ -137,8 +137,7 @@ void Simulation::reset_world() {
 	bms_ = std::make_unique<opennova::mission::BmsEventSystem>();
 	wac_ = std::make_unique<opennova::wac::WacSystem>();
 	promo_ = opennova::mission::PromoteResult{};
-	loaded_ = false;
-	playing_ = false;
+	world_installed_ = false;
 	have_baseline_ = false;
 	have_wac_baseline_ = false;
 	last_sim_tick_us_ = 0;
@@ -210,7 +209,7 @@ void Simulation::advance_network_environment_tick() {
 }
 
 void Simulation::initialize_network_environment_mission_start() {
-	if (!loaded_ || joiner_ || world_ == nullptr) return;
+	if (!world_installed_ || joiner_ || world_ == nullptr) return;
 	world_->network_env.initialize_mission_start();
 }
 
@@ -330,7 +329,7 @@ void Simulation::set_water_z(double p_water_y) {
 
 Array Simulation::drain_slot_sounds() {
 	Array out;
-	if (!loaded_) return out;
+	if (!world_installed_) return out;
 	for (const opennova::world::SoundSlotEvent &ev : world_->slot_sounds) {
 		Dictionary d;
 		d["set"] = String(ev.set_name);
@@ -348,7 +347,7 @@ Array Simulation::drain_slot_sounds() {
 
 Array Simulation::drain_sound_emitters() {
 	Array out;
-	if (!loaded_) return out;
+	if (!world_installed_) return out;
 	const std::vector<opennova::world::SoundEmitterEvent> events =
 			world_->sound_emitters.drain();
 	for (const opennova::world::SoundEmitterEvent &ev : events) {
@@ -445,7 +444,8 @@ void Simulation::finish_load(const opennova::bms::File &file) {
 	have_baseline_ = true;
 	wac_baseline_ = wac_->capture_runtime_state();
 	have_wac_baseline_ = true;
-	loaded_ = true;
+	world_installed_ = true;
+	if (!defer_session_load_completion_) complete_session_load();
 }
 
 void Simulation::apply_host_session_mission_header(const opennova::bms::File &file) {
@@ -582,7 +582,7 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	steps.install_infantry_anim = [&] {
 		if (set_infantry_anim_map(p_resource_root, infantry_adm) <= 0)
 			UtilityFunctions::push_warning(vformat(
-					"MissionRuntime: no infantry clips from '%s' — AI soldiers will stand still.",
+					"MissionPresentation: no infantry clips from '%s' — AI soldiers will stand still.",
 					infantry_adm));
 	};
 	steps.install_wac = [&] {
@@ -594,7 +594,7 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 			set_wac_program(wac);
 		} else if (wac_err != ERR_DOES_NOT_EXIST) {
 			UtilityFunctions::push_warning(vformat(
-					"MissionRuntime: WAC for '%s' failed to compile (%d error(s)) — scripts disabled.",
+					"MissionPresentation: WAC for '%s' failed to compile (%d error(s)) — scripts disabled.",
 					p_wac_basename, wac->get_error_count()));
 		}
 	};
@@ -602,10 +602,10 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 		const int spawn_status = spawn_local_player_at_start();
 		if (spawn_status < 0)
 			UtilityFunctions::push_warning(
-					"MissionRuntime: spawn_local_player failed (pool 0 full / no AI?)");
+					"MissionPresentation: spawn_local_player failed (pool 0 full / no AI?)");
 		else if (spawn_status == 0)
 			UtilityFunctions::push_warning(
-					"MissionRuntime: no player-start marker (60xx start family) in this mission — spawned at fallback origin.");
+					"MissionPresentation: no player-start marker (60xx start family) in this mission — spawned at fallback origin.");
 	};
 	steps.resolve_infantry_adm = [&] {
 		resolve_infantry_adm_ids(p_resource_root, p_item_db);
@@ -617,18 +617,25 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	steps.load_weapon_table = [&] {
 		if (load_weapon_table(p_resource_root, "weapon.def") != OK)
 			UtilityFunctions::push_warning(
-					"MissionRuntime: weapon.def not loaded — 0x5A ammo resolve degraded to echo");
+					"MissionPresentation: weapon.def not loaded — 0x5A ammo resolve degraded to echo");
 	};
 	steps.load_ammo_table = [&] {
 		if (load_ammo_table(p_resource_root, "ammo.def") == OK) return true;
 		UtilityFunctions::push_warning(
-				"MissionRuntime: ammo.def not loaded — client fire echoes without authoritative rounds");
+				"MissionPresentation: ammo.def not loaded — client fire echoes without authoritative rounds");
 		return false;
 	};
 	steps.resolve_ai_weapons = [&] { resolve_ai_weapons(p_item_db); };
 
+	defer_session_load_completion_ = true;
 	const ms::BootAbort abort = ms::run_mission_boot(params, steps);
-	return abort == ms::BootAbort::kNone ? OK : ERR_CANT_OPEN;
+	defer_session_load_completion_ = false;
+	if (abort == ms::BootAbort::kNone) {
+		complete_session_load();
+		return OK;
+	}
+	fail_session_load("mission boot failed");
+	return ERR_CANT_OPEN;
 }
 
 Dictionary Simulation::get_mission_boot_debug() const {
@@ -650,6 +657,7 @@ Dictionary Simulation::get_mission_boot_debug() const {
 
 bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {
 	if (p_mission.is_null()) return false;
+	if (!begin_session_load()) return false;
 	reset_world();
 	// Do not infer this from `joiner_`: tests/tools and legacy direct joins may
 	// still load a complete BMS, whose authored promotion is already canonical.
@@ -664,10 +672,12 @@ bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {
 }
 
 bool Simulation::load_mission_file(const String &path) {
+	if (!begin_session_load()) return false;
 	reset_world();
 	opennova::bms::File file;
 	std::string err;
 	if (!opennova::bms::parse_file(std::string(path.utf8().get_data()), file, err)) {
+		fail_session_load(err.c_str());
 		return false;
 	}
 	host_session_config_.mission_file = std::string(path.get_file().utf8().get_data());
@@ -678,6 +688,7 @@ bool Simulation::load_mission_file(const String &path) {
 }
 
 void Simulation::build_demo_mission() {
+	if (!begin_session_load()) return;
 	reset_world();
 	opennova::bms::File file = make_demo_mission();
 	host_session_config_.mission_file = "demo.bms";
@@ -686,12 +697,12 @@ void Simulation::build_demo_mission() {
 	apply_host_session_mission_header(file);
 }
 
-bool Simulation::step() {
-	if (!loaded_) return false;
+bool Simulation::advance_world_tick() {
+	if (!world_installed_) return false;
 	// ONE logic tick (the original's 62 Hz engine tick). The WAC VM self-gates to every
 	// 62nd tick and the BMS evaluator quarter-passes every 16th, inside their systems —
 	// exactly where the original keeps those dividers. A render frame runs 0..N of these;
-	// the accumulator that decides N lives in MissionRuntime.tick_realtime
+	// the accumulator that decides N lives in MissionSession
 	// [orig: Game_MainLoop @ 0x52b630].
 	//
 	// Listen-server frame order [orig: Game_ProcessMainFrame @ 0x5263f0]:
@@ -729,8 +740,8 @@ bool Simulation::step() {
 // The post-logic half of the listen-server frame: serialize the live world into one
 // S2C 0x0A frame, loop it back in-process, and let the local client decode it into the
 // ClientState the present pass reads. No-op when the listen server is off.
-void Simulation::restart() {
-	if (!loaded_ || !have_baseline_) return;
+void Simulation::restore_world_baseline() {
+	if (!world_installed_ || !have_baseline_) return;
 	const bool usegun_was_active = local_weapon_.usegun_slot_active;
 	const bool usegun_was_pending =
 			local_weapon_.usegun_switch != LocalUseGunSwitch::kNone;
@@ -763,7 +774,7 @@ void Simulation::restart() {
 		joiner_bridge_.reset_materialization();
 		deploy_zone_registry_built_ = false;
 	}
-	// The baseline is captured during finish_load, before MissionRuntime supplies
+	// The baseline is captured during finish_load, before MissionPresentation supplies
 	// items.def. Restore those authoritative callback/health traits first; the
 	// encoder and the client classifier must agree on every 0x0A record width.
 	if (item_traits_db_.is_valid()) resolve_item_traits(item_traits_db_);
@@ -793,7 +804,7 @@ void Simulation::restart() {
 	if (usegun_was_active) {
 		// The world snapshot restores the play-start entity set, while the host
 		// still presents the borrowed emplacement definition. Reinstall the saved
-		// personal selection as a fresh restart epoch; MissionRuntime delivers this
+		// personal selection as a fresh restart epoch; MissionPresentation delivers this
 		// event synchronously while stopped.
 		if (opennova::world::Entity *player =
 					world_->registry.get(world_->cached.local_player))
@@ -832,7 +843,7 @@ void Simulation::restart() {
 
 void Simulation::set_wac_program(const Ref<WacProgram> &p_program) {
 	wac_program_ = p_program;
-	if (!loaded_ || !wac_) {
+	if (!world_installed_ || !wac_) {
 		return; // finish_load applies it on the next load
 	}
 	if (wac_program_.is_valid() && wac_program_->is_ok()) {
@@ -843,7 +854,7 @@ void Simulation::set_wac_program(const Ref<WacProgram> &p_program) {
 }
 
 bool Simulation::compile_and_set_wac(const PackedStringArray &p_sources) {
-	ERR_FAIL_COND_V_MSG(!loaded_, false, "compile_and_set_wac needs a loaded world (the registry resolves symbolic names).");
+	ERR_FAIL_COND_V_MSG(!world_installed_, false, "compile_and_set_wac needs a loaded world (the registry resolves symbolic names).");
 	std::vector<std::string> sources;
 	sources.reserve(static_cast<size_t>(p_sources.size()));
 	for (int64_t i = 0; i < p_sources.size(); ++i) {
@@ -867,12 +878,12 @@ bool Simulation::compile_and_set_wac(const PackedStringArray &p_sources) {
 }
 
 bool Simulation::run_mission_start_wac() {
-	if (!loaded_ || joiner_ || world_ == nullptr || wac_ == nullptr) return false;
+	if (!world_installed_ || joiner_ || world_ == nullptr || wac_ == nullptr) return false;
 	return wac_->execute_initial(*world_);
 }
 
 void Simulation::seal_mission_start_baseline() {
-	if (!loaded_ || joiner_ || world_ == nullptr || ai_ == nullptr || wac_ == nullptr)
+	if (!world_installed_ || joiner_ || world_ == nullptr || ai_ == nullptr || wac_ == nullptr)
 		return;
 	baseline_ = world_->snapshot();
 	ai_->capture_spawn_baseline();
@@ -929,7 +940,7 @@ Vector2i Simulation::get_last_projectile_trace_faces() const {
 
 Dictionary Simulation::get_runtime_perf_counters() const {
 	Dictionary out;
-	out["loaded"] = loaded_;
+	out["loaded"] = is_loaded();
 	out["listen_server"] = listen_server_;
 	out["ai_count"] = ai_ ? ai_->count() : 0;
 	out["present_entity_count"] = last_present_entity_count_;

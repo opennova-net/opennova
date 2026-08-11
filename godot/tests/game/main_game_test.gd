@@ -114,7 +114,7 @@ func test_main_frame_probe_spans_are_default_off() -> void:
 	# class); a plain Camera3D would be rejected by the typed member set.
 	var camera := FlyCamera.new()
 	add_child_autofree(camera)
-	world.set("_loaded", true)
+	world.set("_world_ready", true)
 	game.set("_world", world)
 	game.set("_camera", camera)
 	game.set("_state", MainGameScript.State.WORLD)
@@ -147,7 +147,7 @@ func test_main_frame_stats_feeds_gate_on_the_board() -> void:
 	# class); a plain Camera3D would be rejected by the typed member set.
 	var camera := FlyCamera.new()
 	add_child_autofree(camera)
-	world.set("_loaded", true)
+	world.set("_world_ready", true)
 	game.set("_world", world)
 	game.set("_camera", camera)
 	game.set("_state", MainGameScript.State.WORLD)

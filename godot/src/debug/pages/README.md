@@ -37,14 +37,14 @@ func refresh() -> void:              # 0.25 s cadence, ONLY while active
    a custom category grows its own sidebar section.
 3. Add `godot/tests/debug_<system>_page_test.gd`: drive the page with a
    fabricated `DebugContext` over real typed sources (a minimal in-memory
-   `MissionRuntime`/`Simulation`, `extends GameWorld` harnesses) — empty
+   `MissionPresentation`/`Simulation`, `extends GameWorld` harnesses) — empty
    states, canned formatting, knob pokes + mirror-back. Value-shape stubs
    don't resolve: the context is typed (ADR 0034).
 
 ## Data and knobs
 
 - All live data comes through `DebugContext` (`_ctx.runtime()/sim()/
-  world()/effect_world()/view_context()`): typed resolvers (MissionRuntime /
+  world()/effect_world()/view_context()`): typed resolvers (MissionPresentation /
   Simulation / GameWorld / EffectWorld), re-resolved on every call — mission
   reloads must never leave a stale reference, and pages render their empty
   state when a resolver returns null.

@@ -8,7 +8,7 @@ extends GutTest
 # reports). The live two-machine flow (real discovery + a second client spawning)
 # is the manual smoke; this is the unit.
 
-const MissionRuntime := preload("res://game/world/mission_runtime.gd")
+const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 
 
 # A REAL LanSession (typed seam) whose discovery feed is driven by hand:
@@ -244,7 +244,7 @@ func test_hosted_mission_game_type_reaches_native_session_config() -> void:
 		assert_eq(mission.create_default(), OK)
 		assert_true(mission.set_game_mode(int(row["mode"])))
 		var sim := Simulation.new()
-		var runtime := MissionRuntime.new()
+		var runtime := MissionPresentation.new()
 		add_child_autofree(runtime)
 		var container := Node3D.new()
 		add_child_autofree(container)

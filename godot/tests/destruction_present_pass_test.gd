@@ -15,7 +15,7 @@ extends GutTest
 # authoritative initial pose plus the yaw-only tilt-retention leg.
 
 const DestructionPresentPass := preload('res://game/world/destruction_present_pass.gd')
-const MissionRuntime := preload('res://game/world/mission_runtime.gd')
+const MissionPresentation := preload('res://game/world/mission_presentation.gd')
 
 const BUGGY_ITEM_ID := 1291  # fixture items.def 101291, husk Dbuggy1X
 
@@ -563,7 +563,7 @@ func test_synthetic_wreck_families_use_distinct_moving_wire_anchors() -> void:
 
 func test_batched_husk_and_wreck_anchor_follow_the_live_present_pose() -> void:
 	# The REAL pose chain: an authored building boots into a real Simulation
-	# (through MissionRuntime, the production owner), and the node-less batched
+	# (through MissionPresentation, the production owner), and the node-less batched
 	# husk graft plus its owned wreck anchor land on the sim's authoritative
 	# present-effect pose — the origin-keyed leg — rather than the carved batch
 	# transform. The authored yaw-only entity pose additionally pins the
@@ -578,13 +578,15 @@ func test_batched_husk_and_wreck_anchor_follow_the_live_present_pose() -> void:
 	mission.add_entity(3, 0, Vector3(12, 3, -7), Vector3(0, 40, 0))  # KIND_ORGANIC
 	var boot_container := Node3D.new()
 	add_child_autofree(boot_container)
-	var rt := MissionRuntime.new()
+	var rt := MissionPresentation.new()
 	add_child_autofree(rt)
 	rt.setup(mission, boot_container, {})
 	var sim := rt.get_sim()
 	assert_not_null(sim, 'the runtime boots a real simulation over the mission')
 	rt.play()
-	rt.tick_realtime(Simulation.tick_dt())
+	var frame_input := MissionFrameInput.new()
+	frame_input.delta_seconds = Simulation.tick_dt()
+	rt.advance_session_frame(frame_input)
 	var spawn_origin := (3 << 24) | 0
 	var state: PackedVector3Array = sim.get_present_effect_state_for_origin(3, 0)
 	assert_eq(state.size(), 2,
