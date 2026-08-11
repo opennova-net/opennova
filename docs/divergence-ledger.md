@@ -425,7 +425,7 @@ Sources: [mnu/menu-re.md](mnu/menu-re.md), [audio/lwf-dbf-sound-re.md](audio/lwf
 | D-MNU-12 | Combo popup draw parent: retail draws the child-of-combo popup, the reimpl hosts it in the menu-top overlay — unobservable in shipped menus (single-open registry + catcher carry the behavior) | C | OPEN (kept; register candidate — ADR 0022) | PAR-UI |
 | D-MNU-13 | Draw-walk residue — deferred interiors (menu-re.md D-MNU-13): the RADIOEDIT render (`@ 0x65d310`) is unwalked (its event interaction IS witnessed; no shipped JO menu authors one); compiled-path follow-ups: table image/SUBST/custom cells + per-row appearance overrides + row-overflow wrap; marquee image nodes + the 50px edge fade band; scrollbar art + thumb interaction (wheel scrolling rides `scroll_row` shell-side meanwhile) | B | OPEN (deferred interiors — menu-re.md draw-walk residue) | PAR-UI |
 | D-MNU-14 | SP mission-select population — CLOSED 2026-08-10: the populate is witnessed and ported. The mission table build ([orig: MissionList_ScanAndBuildFromFiles @ 0x563170 + Mission_BuildMapListFromPFF @ 0x562910, qsorted by Mission_CompareMapNames @ 0x5628e0]) lives in engine/runtime/mission/mission_catalog (titles from the sibling `.bin`'s [Info] TITLE, header mission_name only when no `.bin`, briefing text, loose "*" flag, single-select game mode), and the shell's SP lists ride it: Co-op-family filter, briefing cleared on populate / filled on selection, ACCEPT disabled until a pick [orig: SinglePlayer_PopulateMissionList @ 0x561840 + SinglePlayer_MissionListEventHandler @ 0x561ed0 + SinglePlayer_RefreshAcceptOnActivate @ 0x561a20]. The HOST screen's populate split off as D-MNU-17 | A | FIXED (2026-08-10 — SP side ported; host screen = D-MNU-17) | PAR-UI |
-| D-MNU-17 | Host-screen mission population: MULTI_PLAYER_HOST's MISSION_LIST shows raw catalog filenames with no gametype filtering — retail's populate/filter chain (init_host_settings_dialog @ 0x558960, filter_mission_list_by_game_type @ 0x556fe0, UI_HandleHostSessionStart @ 0x556d00) is unwalked; witness what rows it builds (titles vs filenames, the GAME_TYPE spin filter, the Selected Missions rotation columns) before porting | B | NEEDS-RE | PAR-UI |
+| D-MNU-17 | FIXED 2026-08-10 (core): the host-screen populate chain is fully witnessed (init_host_settings_dialog @ 0x558960; filter @ 0x556fe0; the ADD/REMOVE handler @ 0x557c10 — an unowned tail chunk repaired, THE sub_557FB0 decompile blocker; the table events @ 0x557fb0; start @ 0x556d00) and ported: title-else-filename rows, the stock-co-op (pure-SP) exclusion, the 13-way code→category GAME_TYPE filter with ALL=255, the rotation table (localized GateTypeAbbrev cell + the team-game rotation default), ADD/REMOVE hide/restore, and the non-empty-rotation START_GAME gate — engine rules in npwire game_type.h (game_type_policy ctest) + mp_menu_companion.gd (mp_lan_menu_seam GUT). Residues in the menu-re.md entry: per-item spin enablement, the rotation-cell toggle/double-click surfaces, the restriction lists, the config-word gate, rotation beyond its head | B | FIXED (core; residues listed) | PAR-UI |
 | D-MNU-15 | FIXED 2026-08-10: the combo closed face's authored-only gate left every RUNTIME-seeded combo blank (the armory's ten companion-filled faces); the face now draws `items[selected]` whenever rows exist — authored or runtime — matching retail's selection-showing CButtonWnd face [orig: CComboWnd ctor @ 0x65be40, the +764 closed button]. `menu_frame_compiler` pins the runtime-rows face | A | FIXED | PAR-UI |
 | D-MNU-16 | FIXED 2026-08-10: the pump's claim walk now claims the spin widget from its SPINUP/SPINDOWN rects too (shared `spin_arrow_hit_` with `spin_arrow_at`), matching the child-window claim retail gets for free [orig: CSpinListWnd_CreateUpDownChildren @ 0x64b8b0] — outside-authored arrows (mp.mnu GAME_TYPE −18..−2 / 217..233) cycle by mouse again. `menu_frame_compiler` pins the outside-rect claim | A | FIXED | PAR-UI |
 | D-CTRL-1 | Mouse/joystick binding arrays (profile-built at runtime) not ported; those rows show a blank Control column. **Scoping (2026-07-05):** NOT in `PlayerProfile_InitDefaults @ 0x54bb40` (that sets settings/macros/default weapon loadouts only) — the mouse/joystick default bindings are built by a separate input-binding init (an RE hunt), and the consumer is the Godot input-action layer (same gate as D-CTRL-3) | A | OPEN | PAR-UI |
@@ -892,7 +892,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Net | 18 | 0 | 8 | 26 | 1 |
 | Environment | 0 | 0 | 3 | 3 | 0 |
 | World / AI + events | 58 | 4 | 6 | 68 | 0 |
-| UI (menu/ctrl/sound/playerinfo/HUD) | 40 | 2 | 4 | 46 | 4 |
+| UI (menu/ctrl/sound/playerinfo/HUD) | 40 | 1 | 4 | 45 | 5 |
 | Mission `.mis` | 0 | 2 | 1 | 3 | 0 |
 | LW `.3di` | 0 | 2 | 1 | 3 | 0 |
 | Particles `.ptl` | 2 | 0 | 0 | 2 | 0 |
@@ -905,7 +905,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Render — materials/state | 0 | 0 | 1 | 1 | 0 |
 | Render — draw order | 3 | 0 | 1 | 4 | 0 |
 | Render — lighting | 3 | 0 | 2 | 5 | 0 |
-| **Total** | **130** | **14** | **27** | **171** | 5 |
+| **Total** | **130** | **13** | **27** | **170** | 6 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-INF-20, D-NET-136, D-NET-169, D-NET-179, D-NET-64, D-NET-97.
 

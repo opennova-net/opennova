@@ -1083,13 +1083,55 @@ Accepted/divergent (each a documented decision, not a defect):
   witnessed no-selection populate). Pinned by `mission_catalog` ctest +
   the shell GUT SP case over the retail `00tra.bin` fixture. The HOST
   screen's populate/filter chain is split off as D-MNU-17.
-- **D-MNU-17 (host-screen mission population — needs witness):** the
-  MULTI_PLAYER_HOST screen shows raw catalog filenames with no GAME_TYPE
-  filtering. Retail's chain — `init_host_settings_dialog @ 0x558960`,
-  `filter_mission_list_by_game_type @ 0x556fe0`, `UI_HandleHostSessionStart
-  @ 0x556d00` (and the table-dense `sub_557FB0`, which currently fails to
-  decompile) — is unwalked; witness the row content, the spin filter, and
-  the Selected Missions rotation columns before porting.
+- **D-MNU-17 (host-screen mission population — FIXED 2026-08-10, core):** the
+  full chain is witnessed and the populate/filter/selection core is ported.
+  `init_host_settings_dialog @ 0x558960` (one-shot, guard `@ 0x25C76DC`):
+  clears the per-mission selected flags (entry+4412), registers the 17
+  control handlers, selects the GENERAL tab, populates settings/weapon/class
+  lists, DISABLES `START_GAME`, clears both mission widgets, then fills
+  `MISSION_LIST` — row text = title(+1044) else filename, row value = the
+  mission index, EXCLUDING the stock (non-objective) Co-op family
+  (`(code & 0xFFFDFFFF) == 0x10020` without `0x20000` — the pure-SP/training
+  missions, `@ 0x558a70`) — and enables only the `GAME_TYPE` spin values at
+  least one mission maps to (the shared 13-way code→category switch:
+  0→11, TDM→1, objective-Co-op→2, TKOTH→3, KOTH→4, SD→5, AD→6, CTF→7, FB→8,
+  8→12, AAS→9, CAC→10; 255 = ALL, always on, selected at init).
+  `filter_mission_list_by_game_type @ 0x556fe0` (the spin event): hide all
+  rows, re-show those whose mapped category matches (or 255) minus the
+  already-selected set (+4412). `HostDialog_AddRemoveSelectedMissions
+  @ 0x557c10` (ADD_MISSIONS +1 / REMOVE_MISSIONS −1; was an unowned shared
+  tail chunk of `0x557f70`/`0x557fb0` — THE reason `sub_557FB0` never
+  decompiled; boundaries repaired 2026-08-10): ADD walks the SELECTED list
+  rows into `SELECTED_MISSIONS` — cells = title-else-filename /
+  `GameText("GateTypeAbbrev", key)` (keys DM/TDM/KOTH/TKOTH/CTF/SD/AD/FB/FM/
+  AAS/CAC + COOP for the waypoint family, `get_game_type_abbreviation
+  @ 0x520fc0`) / the rotation "Switch" cell defaulting ON for team games
+  without the objective bit (`(code & 0x10000) && !(code & 0x20000)`,
+  entry+4416) — marks +4412 and hides the list row; REMOVE restores through
+  the same category filter. `HostDialog_MissionListDoubleClick @ 0x557f70` =
+  select + ADD; `HostDialog_SelectedMissionsTableEvent @ 0x557fb0` = the
+  column-2 rotation toggle (eligible codes only) + double-click REMOVE.
+  The common tail arms `START_GAME` only while the table has rows (plus the
+  `0x25510A4..CC` config-word gate). `UI_HandleHostSessionStart @ 0x556d00`:
+  queues every table row into the rotation (`sub_501960` +
+  `Server_QueueEntityAction`), the FIRST row stamps `g_map_file_name` /
+  `missionData` / its rotation flag / `g_GameType`(+4392), then the
+  SERVERTYPE arm (1 = NovaWorld HTTP hosting, 2 = LAN session).
+  **Port:** the witnessed rules live engine-side in `npwire/game_type.h`
+  (`host_list_visible` / `host_filter_category` / `host_abbreviation_key` /
+  `host_rotation_default`, pinned by `game_type_policy` ctest) through the
+  `NetProtocol` binding; `mp_menu_companion.gd` seeds the host pool from
+  `MissionCatalog.rows` (display = title-else-filename), filters on the
+  GAME_TYPE spin value (ALL = 255 when unauthored), fills the rotation table
+  columns (localized abbreviation with the key fallback), hides/restores
+  list rows across ADD/REMOVE, and gates START_GAME on a non-empty rotation;
+  the start config carries the rotation's FILE names with the head as the
+  mission. Pinned by `mp_lan_menu_seam_test.gd`. Residues: the per-item
+  GAME_TYPE spin enablement, the rotation-cell click toggle + double-click
+  add/remove (the compiled table has no per-cell click surface yet), the
+  weapon/class restriction lists, the `0x25510A4` config-word gate, and the
+  rotation beyond its head (the runtime plays one mission; the rotation
+  system is unported).
 - **D-MNU-15 (combobox closed face — FIXED 2026-08-10):** the compiled combo's
   face gated on AUTHORED items only, so every runtime-seeded combo (the
   armory's ten companion-filled PRIMARY/SECONDARY/ACCESSORY/GRENADE ammo
@@ -1113,6 +1155,19 @@ Accepted/divergent (each a documented decision, not a defect):
   of the child-window claim retail gets for free; the driver's existing
   press routing then cycles. Pinned by the `menu_frame_compiler`
   outside-rect claim case.
+
+**IDB changes (2026-08-10, the D-MNU-17 host-dialog walk; saved):** repaired
+the function boundaries at `0x557c10..0x557f6a` (an unowned tail chunk shared
+by BOTH `0x557f70` and `0x557fb0` — the reason `sub_557FB0` never decompiled);
+renamed `sub_557C10 → HostDialog_AddRemoveSelectedMissions`, `sub_557F70 →
+HostDialog_MissionListDoubleClick`, `sub_557FB0 →
+HostDialog_SelectedMissionsTableEvent`, and the widget helpers `sub_63F3C0/
+63F3D0/63F5C0/63F5F0 → CTableWnd_GetRowCount/GetRowValue/IsRowSelected/
+SetRowSelected`, `sub_644580/6445F0/644A00/645150 → CListWnd_GetRowCount/
+GetRowValue/SetRowEnabled/IsRowSelected`, `sub_642750 → CTableWnd_AddRow`,
+and the misnomer `CPreprocessor_SetCellTexture @ 0x63edf0 →
+CTableWnd_SetCellText`; entry comments on the four HostDialog handlers +
+`init_host_settings_dialog` + `UI_HandleHostSessionStart`.
 
 Deferred (unwitnessed or out of bar; backlog, not blocking):
 

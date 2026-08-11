@@ -103,6 +103,82 @@ static_assert(for_mission_mode(static_cast<uint32_t>(bms::AttribFlags::Deathmatc
 static_assert(for_mission_mode(static_cast<uint32_t>(bms::AttribFlags::SearchAndDestroy)) == kSearchAndDestroy);
 static_assert(for_mission_mode(0) == kCoop, "no multiplayer attrib -> stock/training Co-op");
 
+// --- The MULTI_PLAYER_HOST dialog's witnessed game-type rules (D-MNU-17) ----
+
+// The GAME_TYPE spin's ALL-types value [orig: init_host_settings_dialog
+// @ 0x558aee selects 255; the filter's show-all test @ 0x55717c].
+inline constexpr int kHostFilterAll = 255;
+
+// Which catalog rows the host MISSION_LIST shows at all: everything except
+// STOCK (non-objective) Co-op — the pure-SP/training family
+// [orig: the populate skip @ 0x558a70 — (code & 0x20000) == 0 &&
+//  (code & 0xFFFDFFFF) == 0x10020 rows are never added].
+constexpr bool host_list_visible(uint32_t g) {
+	return !is_stock_coop(g);
+}
+
+// The 13-way code -> GAME_TYPE spin item value map the host dialog filters
+// with (255 = ALL; 0 = unmapped) [orig: the shared switch —
+// init_host_settings_dialog @ 0x558b16, filter_mission_list_by_game_type
+// @ 0x5570a6, HostDialog_AddRemoveSelectedMissions @ 0x557cd9].
+constexpr int host_filter_category(uint32_t g) {
+	if (g == 0) return 11;
+	if (g == kTeamDeathmatch) return 1;
+	if (is_waypoint_family(g) && is_objective(g)) return 2;
+	switch (g) {
+	case kTeamKingOfTheHill: return 3;
+	case kKingOfTheHill: return 4;
+	case kSearchAndDestroy: return 5;
+	case kAttackDefend: return 6;
+	case kCaptureTheFlag: return 7;
+	case kFlagBall: return 8;
+	case 8: return 12;
+	case kAdvanceAndSecure: return 9;
+	case kConquerAndControl: return 10;
+	default: return 0;
+	}
+}
+
+// The SELECTED_MISSIONS type cell's gametext key in the GateTypeAbbrev
+// section [orig: get_game_type_abbreviation @ 0x520fc0 host arm — the DM/TDM/
+// KOTH/TKOTH/CTF/SD/AD/FB/FM/AAS/CAC literals + COOP for the waypoint family].
+constexpr const char *host_abbreviation_key(uint32_t g) {
+	if (is_waypoint_family(g)) return "COOP";
+	if (g == 0) return "DM";
+	switch (g) {
+	case kTeamDeathmatch: return "TDM";
+	case kKingOfTheHill: return "KOTH";
+	case kTeamKingOfTheHill: return "TKOTH";
+	case kCaptureTheFlag: return "CTF";
+	case kSearchAndDestroy: return "SD";
+	case kAttackDefend: return "AD";
+	case kFlagBall: return "FB";
+	case 8: return "FM";
+	case kAdvanceAndSecure: return "AAS";
+	case kConquerAndControl: return "CAC";
+	default: return "";
+	}
+}
+
+// A freshly added mission's rotation ("Switch") default: on for team games
+// without the objective bit [orig: the add branch @ 0x557e79..0x557e9f —
+// entry+4416 = (code & 0x10000) && !(code & 0x20000)].
+constexpr bool host_rotation_default(uint32_t g) {
+	return (g & 0x10000u) != 0 && !is_objective(g);
+}
+// The rotation cell/toggle eligibility is the same predicate [orig: the
+// column-2 toggle gate @ 0x558076].
+
+static_assert(!host_list_visible(kCoop) && host_list_visible(kObjectiveCoop));
+static_assert(host_list_visible(kTeamDeathmatch) && host_list_visible(kDeathmatch));
+static_assert(host_filter_category(kObjectiveCoop) == 2);
+static_assert(host_filter_category(kTeamDeathmatch) == 1);
+static_assert(host_filter_category(kDeathmatch) == 11);
+static_assert(host_filter_category(kConquerAndControl) == 10);
+static_assert(host_rotation_default(kTeamDeathmatch) &&
+		!host_rotation_default(kObjectiveCoop) &&
+		!host_rotation_default(kDeathmatch));
+
 }  // namespace opennova::game_type
 
 namespace opennova::game_rules {

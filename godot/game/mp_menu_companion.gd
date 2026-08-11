@@ -154,20 +154,81 @@ func _on_lan_join() -> void:
 
 
 # --- Host-settings screen (MULTI_PLAYER_HOST) ---------------------------------
+# The witnessed populate/filter/selection chain (D-MNU-17):
+# [orig: init_host_settings_dialog @0x558960 (rows = title else filename,
+#  stock-co-op excluded, GAME_TYPE ALL=255 selected);
+#  filter_mission_list_by_game_type @0x556fe0 (show rows whose mapped category
+#  matches the spin value or 255, minus the already-selected set);
+#  HostDialog_AddRemoveSelectedMissions @0x557c10 (ADD: table row = name /
+#  GateTypeAbbrev cell / rotation default, hide from the list; REMOVE:
+#  restore); the START_GAME interactive gate on the selected table].
+# The engine rules live in npwire game_type.h through the NetProtocol binding.
+
+# The GAME_TYPE spin's ALL-types item value [orig: @0x558aee].
+const HOST_FILTER_ALL := 255
+
+# The host pool: catalog rows the host screen may list, parallel to nothing —
+# each entry carries its catalog row; the LIST maps row -> pool index through
+# _list_pool_rows (retail's row VALUE = mission index).
+var _host_pool: Array = []            # Array[MissionCatalogRow]
+var _list_pool_rows := PackedInt32Array()  # visible list row -> _host_pool index
+var _selected_pool_rows := PackedInt32Array()  # table row -> _host_pool index
+
 
 func _wire_host_settings() -> void:
-	var mission_list := _id("MISSION_LIST")
-	if mission_list >= 0:
-		_seed_mission_list(mission_list)
+	if _driver.has_widget("MISSION_LIST"):
+		seed_host_pool(MissionCatalog.rows(_root))
 	_connect_pressed("ADD_MISSIONS", _on_add_missions)
 	_connect_pressed("REMOVE_MISSIONS", _on_remove_missions)
 	_connect_pressed("START_GAME", _on_host_start)
+	_sync_start_gate()
 
 
-# Fill MISSION_LIST with the resource dir's missions (the available pool). The selected
-# rotation is the SELECTED_MISSIONS table, maintained by ADD/REMOVE.
+## The host screen's available-mission pool (MissionCatalogRow array). The wire
+## path hands the resource-dir catalog; tests inject synthetic rows. Stock
+## (non-objective) co-op — the pure-SP/training family — never lists
+## [orig: the populate skip @0x558a70]; the selected rotation resets.
+func seed_host_pool(rows: Array) -> void:
+	_host_pool.clear()
+	_selected_pool_rows = PackedInt32Array()
+	for row in rows:
+		if NetProtocol.game_type_host_list_visible(int(row.get_game_type())):
+			_host_pool.append(row)
+	var table := _id("SELECTED_MISSIONS")
+	if table >= 0:
+		_driver.table_clear_rows(table)
+	var mission_list := _id("MISSION_LIST")
+	if mission_list >= 0:
+		_seed_mission_list(mission_list)
+	_sync_start_gate()
+
+
+# Rebuild MISSION_LIST from the pool: rows whose mapped game-type category
+# matches the GAME_TYPE spin (or ALL), minus the already-selected set; the row
+# text is the catalog display (title else filename, the loose "*" carried)
+# [orig: the populate @0x558a48 + the filter walk @0x557072].
 func _seed_mission_list(id: int) -> void:
-	_driver.set_widget_items(id, MissionCatalog.mission_names(_root))
+	var filter_value := _host_filter_value()
+	var rows := PackedStringArray()
+	_list_pool_rows = PackedInt32Array()
+	for i in range(_host_pool.size()):
+		if _selected_pool_rows.has(i):
+			continue
+		var code := int(_host_pool[i].get_game_type())
+		if filter_value != HOST_FILTER_ALL \
+				and NetProtocol.game_type_host_filter_category(code) != filter_value:
+			continue
+		rows.append(String(_host_pool[i].display_text()))
+		_list_pool_rows.append(i)
+	_driver.set_widget_items(id, rows)
+	# The witnessed populate leaves NO selection (the reimpl list preselects
+	# row 0 — the same clear the SP seeding applies).
+	_driver.select_row(id, -1, false)
+
+
+func _host_filter_value() -> int:
+	var value := _spin_attr("GAME_TYPE", str(HOST_FILTER_ALL))
+	return int(value) if value.is_valid_int() else HOST_FILTER_ALL
 
 
 func _on_add_missions() -> void:
@@ -175,28 +236,73 @@ func _on_add_missions() -> void:
 	var table := _id("SELECTED_MISSIONS")
 	if mission_list < 0 or table < 0:
 		return
+	# Resolve selections to pool indices first — the reseed below rebuilds the
+	# row mapping.
+	var picked := PackedInt32Array()
 	for idx in _driver.selected_rows(mission_list):
-		if idx < 0 or idx >= _driver.item_count(mission_list):
+		if idx >= 0 and idx < _list_pool_rows.size():
+			picked.append(_list_pool_rows[idx])
+	for pool_idx in picked:
+		if _selected_pool_rows.has(pool_idx):
 			continue
-		var name := _driver.item_text(mission_list, idx)
-		if not _table_has_mission(table, name):
-			# cols: Mission / Type / Switch (the Switch bitmap value, 0 = off).
-			_driver.table_add_row(table, PackedStringArray([name, "COOP", "0"]))
+		var row: MissionCatalogRow = _host_pool[pool_idx]
+		var code := int(row.get_game_type())
+		# cols: Mission / Type (the localized GateTypeAbbrev entry) / Switch
+		# (rotation; default on for team games without the objective bit)
+		# [orig: the add branch @0x557e27..0x557ef1].
+		var rotation := NetProtocol.game_type_host_rotation_default(code)
+		_driver.table_add_row(table, PackedStringArray([
+			String(row.display_text()),
+			_abbreviation_text(code),
+			"1" if rotation else "0",
+		]))
+		_selected_pool_rows.append(pool_idx)
+	_seed_mission_list(mission_list)
+	_sync_start_gate()
 
 
 func _on_remove_missions() -> void:
 	var table := _id("SELECTED_MISSIONS")
 	if table < 0:
 		return
-	# Remove high index first so lower indices stay valid as rows shift down.
+	# Remove high index first so lower indices stay valid as rows shift down
+	# [orig: the backward walk @0x557c84].
 	var rows := Array(_driver.table_selected_rows(table))
 	rows.sort()
 	rows.reverse()
 	for r in rows:
-		_driver.table_remove_row(table, int(r))
+		var row := int(r)
+		_driver.table_remove_row(table, row)
+		if row >= 0 and row < _selected_pool_rows.size():
+			_selected_pool_rows.remove_at(row)
+	var mission_list := _id("MISSION_LIST")
+	if mission_list >= 0:
+		_seed_mission_list(mission_list)
+	_sync_start_gate()
+
+
+# The localized Type cell: gametext GateTypeAbbrev/<key>, the key itself as
+# the parser-only fallback [orig: get_game_type_abbreviation @0x520fc0].
+func _abbreviation_text(code: int) -> String:
+	var key := String(NetProtocol.game_type_host_abbreviation_key(code))
+	var t: RtxtStringFile = Strings.get_table("gametext")
+	if t != null and t.has_string_in_section("GateTypeAbbrev", key):
+		return t.get_string_in_section("GateTypeAbbrev", key)
+	return key
+
+
+# START_GAME is interactive only while the rotation has missions
+# [orig: the @0x557f09 tail + the init disable @0x5589f2].
+func _sync_start_gate() -> void:
+	var start := _id("START_GAME")
+	if start < 0:
+		return
+	_driver.set_widget_disabled(start, _selected_pool_rows.is_empty())
 
 
 func _on_host_start() -> void:
+	if _selected_pool_rows.is_empty():
+		return
 	lan_host_start_requested.emit(_read_host_config())
 
 
@@ -233,12 +339,13 @@ func _is_dedicated() -> bool:
 	return _spin_attr("SERVERTYPE", "0") == "1"
 
 
+# The rotation's mission FILE names, in table order (the table cells carry
+# the DISPLAY text; the start config needs the catalog file names)
+# [orig: the START walk resolves each table row's mission index @0x556dae].
 func _selected_missions() -> Array[String]:
-	var table := _id("SELECTED_MISSIONS")
 	var out: Array[String] = []
-	if table >= 0:
-		for r in range(_driver.table_row_count(table)):
-			out.append(_driver.table_cell_text(table, r, 0))
+	for pool_idx in _selected_pool_rows:
+		out.append(String((_host_pool[pool_idx] as MissionCatalogRow).get_file()))
 	return out
 
 
@@ -249,13 +356,12 @@ func _on_widget_value_changed(widget_name: String, kind: String, index: int, _va
 		return
 	if widget_name == "LAN_GAME_LIST" and kind == "list":
 		_selected_server = index
-
-
-func _table_has_mission(table: int, name: String) -> bool:
-	for r in range(_driver.table_row_count(table)):
-		if _driver.table_cell_text(table, r, 0) == name:
-			return true
-	return false
+	# The GAME_TYPE spin re-filters the available pool
+	# [orig: filter_mission_list_by_game_type @0x556fe0 on the spin event].
+	if widget_name == "GAME_TYPE" and kind == "spinlist":
+		var mission_list := _id("MISSION_LIST")
+		if mission_list >= 0:
+			_seed_mission_list(mission_list)
 
 
 # Returns the selected spin-list item's `value=` attribute (the semantic value the

@@ -12,6 +12,7 @@
 #include <npwire/session_hello.h>
 
 #include <cstdio>
+#include <string>
 
 namespace {
 
@@ -87,6 +88,29 @@ int main() {
 				  static_cast<uint32_t>(AttribFlags::Coop) |
 						  static_cast<uint32_t>(AttribFlags::Deathmatch)),
 			"set_game_mode rejects multi-bit input");
+
+	// The MULTI_PLAYER_HOST dialog rules (D-MNU-17)
+	// [orig: init_host_settings_dialog @ 0x558960; the shared 13-way switch;
+	//  get_game_type_abbreviation @ 0x520fc0; the add branch @ 0x557e79].
+	CHECK(!game_type::host_list_visible(game_type::kCoop),
+			"stock co-op never lists on the host screen");
+	CHECK(game_type::host_list_visible(game_type::kObjectiveCoop),
+			"objective co-op lists");
+	CHECK(game_type::host_filter_category(game_type::kObjectiveCoop) == 2 &&
+					game_type::host_filter_category(game_type::kAdvanceAndSecure) == 9 &&
+					game_type::host_filter_category(game_type::kDeathmatch) == 11,
+			"the filter categories match the witnessed switch");
+	CHECK(std::string(game_type::host_abbreviation_key(
+				  game_type::kObjectiveCoop)) == "COOP" &&
+					std::string(game_type::host_abbreviation_key(
+							game_type::kSearchAndDestroy)) == "SD" &&
+					std::string(game_type::host_abbreviation_key(
+							game_type::kConquerAndControl)) == "CAC",
+			"the GateTypeAbbrev keys match the witnessed table");
+	CHECK(game_type::host_rotation_default(game_type::kCaptureTheFlag) &&
+					!game_type::host_rotation_default(game_type::kObjectiveCoop) &&
+					!game_type::host_rotation_default(game_type::kKingOfTheHill),
+			"rotation defaults on for team games without the objective bit");
 
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
