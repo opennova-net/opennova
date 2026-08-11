@@ -3,19 +3,17 @@ extends RefCounted
 
 const MenuFrameStateReplay := preload("res://game/menu_frame_state_replay.gd")
 const MenuScrollRange := preload("res://game/menu_scroll_range.gd")
+const MenuScrollInteraction := preload("res://game/menu_scroll_interaction.gd")
+const MenuTableState := preload("res://game/menu_table_state.gd")
 
 # The compiled-menu interaction runtime: drives ONE MenuFrame (the engine
 # draw-list/pump surface) over a parsed MnuDocument. The engine owns
-# everything witnessed — the draw walk, the mouse pump, row/popup/arrow
-# geometry, hotkey resolution, and the edit ops (engine/runtime/menu; record:
-# docs/mnu/menu-re.md). This driver is the shell-side orchestration around
-# those primitives: screen navigation + the in-file back stack, ACTION
-# dispatch, combo popup lifecycle, selection bookkeeping, sound edges, the
-# music-var push, and the aggregate value-changed relay; its signal surface
-# mirrors the deleted MnuMenu node so MenuShell + the companions keep shape.
-#
-# Addressing: widgets go by their stable MnuDocument id, valid across every
-# screen — per-id runtime state is replayed at each screen configure.
+# everything witnessed (engine/runtime/menu; record: docs/mnu/menu-re.md);
+# this driver is the shell-side orchestration: navigation + the back stack,
+# ACTION dispatch, popup/scroll/table lifecycle, sound edges, the music-var
+# push, and the value-changed relay — its signal surface mirrors the deleted
+# MnuMenu node. Widgets go by stable MnuDocument id, valid across screens;
+# per-id runtime state is replayed at each screen configure.
 
 signal screen_changed(screen_name: String)
 signal music_changed(music_var: int)
@@ -34,11 +32,8 @@ signal list_activated(id: int, row: int)
 # The pump's claim moved between widgets (hover edges; PLAYER_PREVIEW zoom).
 signal widget_hover_changed(id: int, hovered: bool)
 
-# An active standalone-scroll thumb drag [orig: the SCROLLWND_SHUTTLE
-# press-capture, CScrollWnd_HandleEvent @ 0x64d050]: the dragged widget id and
-# the press anchor (shuttle origin minus mouse, design units).
-var _scroll_drag_id := -1
-var _scroll_drag_anchor := 0
+# menu_scroll_interaction.gd owns the CScrollWnd map + drag capture state.
+var _scroll := MenuScrollInteraction.new()
 
 # Double-click window for list/table activation, matching Godot's default.
 const DOUBLE_CLICK_MS := 400
@@ -582,29 +577,16 @@ func _scroll_widget_at(position: Vector2) -> int:
 
 func _handle_scroll_press(id: int, position: Vector2) -> void:
 	var index := _frame_index(id)
-	if index < 0:
+	var scroll := _id_state.get(id, {}).get("scroll_range") as MenuScrollRange
+	if index < 0 or scroll == null:
 		return
-	var state: Dictionary = _id_state.get(id, {})
-	var scroll := state.get("scroll_range") as MenuScrollRange
-	if scroll == null:
-		return
-	match _frame.scroll_hit_at(index, position):
-		1:  # up arrow: value - step (ctor step 1) [orig: @ 0x64d2d9]
-			_apply_scroll_value(id, scroll.value - 1)
-		2:  # down arrow: value + step [orig: @ 0x64d31a]
-			_apply_scroll_value(id, scroll.value + 1)
-		3:  # shuttle: capture + anchor [orig: @ 0x64d1cb..0x64d217]
-			_scroll_drag_id = id
-			_scroll_drag_anchor = _frame.scroll_drag_anchor(index, position)
-		4:  # track before the shuttle: page up [orig: @ 0x64d0f0]
-			_apply_scroll_value(id, scroll.value - scroll.page)
-		5:  # track after: page down [orig: @ 0x64d10e]
-			_apply_scroll_value(id, scroll.value + scroll.page)
+	var value := _scroll.press(_frame, id, index, scroll, position)
+	if value != MenuScrollInteraction.NO_VALUE:
+		_apply_scroll_value(id, value)
 
 
 func _apply_scroll_value(id: int, value: int) -> void:
-	var state: Dictionary = _id_state.get(id, {})
-	var scroll := state.get("scroll_range") as MenuScrollRange
+	var scroll := _id_state.get(id, {}).get("scroll_range") as MenuScrollRange
 	if scroll == null:
 		return
 	value = clampi(value, scroll.minimum, scroll.maximum)
@@ -615,8 +597,6 @@ func _apply_scroll_value(id: int, value: int) -> void:
 	if index >= 0:
 		_frame.set_widget_scroll_range(index, scroll.minimum, scroll.maximum,
 				scroll.page, scroll.value)
-	# The change dispatch [orig: message 0x4000001 with the new value
-	# @ 0x64d15c] — companions consume the scroll kind.
 	widget_value_changed.emit(widget_name_of(id), "scroll", value, str(value))
 
 
@@ -649,51 +629,29 @@ func set_widget_marquee_lines(id: int, lines: PackedStringArray) -> void:
 		_frame.set_widget_marquee_lines(index, lines)
 
 
-# --- Table state ---------------------------------------------------------------
+# --- Table state (menu_table_state.gd owns the shapes) --------------------------
 
 func table_add_row(id: int, cells: PackedStringArray) -> void:
-	var state := _state_of(id)
-	var rows: Array = state.get("table_rows", [])
-	rows.append(cells)
-	state["table_rows"] = rows
+	MenuTableState.add_row(_state_of(id), cells)
 	_push_table_rows(id)
 
 
 func table_remove_row(id: int, row: int) -> void:
-	var state := _state_of(id)
-	var rows: Array = state.get("table_rows", [])
-	if row < 0 or row >= rows.size():
-		return
-	rows.remove_at(row)
-	state["table_rows"] = rows
-	var selected: PackedInt32Array = state.get("table_selected", PackedInt32Array())
-	var reindexed := PackedInt32Array()
-	for r in selected:
-		if r < row:
-			reindexed.append(r)
-		elif r > row:
-			reindexed.append(r - 1)
-	state["table_selected"] = reindexed
-	_push_table_rows(id)
+	if MenuTableState.remove_row(_state_of(id), row):
+		_push_table_rows(id)
 
 
 func table_clear_rows(id: int) -> void:
-	var state := _state_of(id)
-	state["table_rows"] = []
-	state["table_selected"] = PackedInt32Array()
+	MenuTableState.clear_rows(_state_of(id))
 	_push_table_rows(id)
 
 
 func table_row_count(id: int) -> int:
-	return (_id_state.get(id, {}).get("table_rows", []) as Array).size()
+	return MenuTableState.row_count(_id_state.get(id, {}))
 
 
 func table_cell_text(id: int, row: int, col: int) -> String:
-	var rows: Array = _id_state.get(id, {}).get("table_rows", [])
-	if row < 0 or row >= rows.size():
-		return ""
-	var cells: PackedStringArray = rows[row]
-	return cells[col] if col >= 0 and col < cells.size() else ""
+	return MenuTableState.cell_text(_id_state.get(id, {}), row, col)
 
 
 func table_selected_rows(id: int) -> PackedInt32Array:
@@ -701,43 +659,12 @@ func table_selected_rows(id: int) -> PackedInt32Array:
 
 
 func table_select_row(id: int, row: int, additive := false) -> void:
-	var state := _state_of(id)
-	var selected: PackedInt32Array = state.get("table_selected", PackedInt32Array()) \
-			if additive else PackedInt32Array()
-	if selected.has(row):
-		var kept := PackedInt32Array()
-		for r in selected:
-			if r != row:
-				kept.append(r)
-		selected = kept
-	else:
-		selected.append(row)
-	state["table_selected"] = selected
-	_push_table_selection(id)
+	MenuTableState.select_row(_state_of(id), row, additive)
+	MenuTableState.push_selection(_frame, _frame_index(id), _id_state.get(id, {}))
 
 
 func _push_table_rows(id: int) -> void:
-	var index := _frame_index(id)
-	if index < 0:
-		return
-	var rows: Array = _id_state.get(id, {}).get("table_rows", [])
-	var typed: Array[PackedStringArray] = []
-	for row in rows:
-		typed.append(row as PackedStringArray)
-	_frame.set_widget_table_rows(index, typed)
-	_push_table_selection(id)
-
-
-func _push_table_selection(id: int) -> void:
-	var index := _frame_index(id)
-	if index < 0:
-		return
-	var selected: PackedInt32Array = _id_state.get(id, {}).get("table_selected",
-			PackedInt32Array())
-	_frame.set_widget_selected_set(index, selected)
-	var first := selected[0] if selected.size() > 0 else -1
-	_frame.set_widget_selection(index, first, -1,
-			int(_id_state.get(id, {}).get("scroll_row", 0)))
+	MenuTableState.push_rows(_frame, _frame_index(id), _id_state.get(id, {}))
 
 
 # --- Input: mouse ---------------------------------------------------------------
@@ -779,17 +706,16 @@ func process_mouse(position: Vector2, button_down: bool) -> void:
 					close_active_combo_popup()
 			return
 
-	# Standalone scroll interaction [orig: CScrollWnd_HandleEvent @ 0x64d050 —
-	# arrows step -/+1 (ctor default @ 0x64c4cf), the track pages toward the
-	# click, the shuttle press captures and drags through the travel ratio].
-	if _scroll_drag_id >= 0:
+	# Standalone scroll interaction (menu_scroll_interaction.gd carries the
+	# CScrollWnd witness map).
+	if _scroll.active():
 		if not button_down:
-			_scroll_drag_id = -1
+			_scroll.end_drag()
 		else:
-			var drag_index := _frame_index(_scroll_drag_id)
+			var drag_index := _frame_index(_scroll.drag_id())
 			if drag_index >= 0:
-				_apply_scroll_value(_scroll_drag_id, _frame.scroll_drag_value(
-						drag_index, position, _scroll_drag_anchor))
+				_apply_scroll_value(_scroll.drag_id(),
+						_scroll.drag_value(_frame, drag_index, position))
 			_frame.set_cursor_state(not _edit_mode, position)
 			return
 	if down_edge:

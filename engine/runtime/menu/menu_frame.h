@@ -491,8 +491,8 @@ private:
 			const WalkScale &s, const MenuWidgetState *ws);
 	// Combos with an open dropdown collected during the walk; their popups
 	// emit AFTER the whole walk so the dropdown paints over later widgets
-	// (the D-MNU-12 menu-top hosting decision — retail's inline tree order
-	// visibly renders popups on top via a still-unwalked mechanism).
+	// (the D-MNU-12 menu-top decision — retail's inline tree order visibly
+	// renders popups on top via a still-unwalked mechanism).
 	std::vector<int> deferred_popups_;
 	bool resolve_scrollbar_rect(const WidgetNode &node, ScrollbarKind kind,
 			const mnu::RectEdges &owner, int fallback_top,

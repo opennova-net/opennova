@@ -314,6 +314,27 @@ int MenuFrameCompiler::scroll_drag_value(int index,
 	return std::clamp(value, parts.range_min, parts.range_max);
 }
 
+// [orig: CComboWnd_Render @ 0x65c05b..0x65c083 — this[183] = row_text(list,
+// selected_row(list)); CStaticWnd_DrawLabel; restore. Text-only: image/color
+// rows contribute their stored text (possibly empty).]
+std::string MenuFrameCompiler::combo_face_text(const WidgetNode &node,
+		const MenuWidgetState *ws) const {
+	const int selected = ws != nullptr ? ws->selected_item : 0;
+	if (ws != nullptr && ws->has_items) {
+		if (selected < 0 || selected >= static_cast<int>(ws->items.size())) {
+			return std::string();
+		}
+		return ws->items[static_cast<size_t>(selected)];
+	}
+	const mnu::Window &w = *node.window;
+	const std::vector<WidgetNode::ItemVisual> &rows =
+			w.list_box.items.present ? node.popup_items : node.items;
+	if (selected < 0 || selected >= static_cast<int>(rows.size())) {
+		return std::string();
+	}
+	return rows[static_cast<size_t>(selected)].text;
+}
+
 // The combo LIST_BOX popup at its authored combo-relative rect. Keeping this
 // beside scrollbar planning makes the popup child painter order local: rows
 // paint before the authored scrollbar child.

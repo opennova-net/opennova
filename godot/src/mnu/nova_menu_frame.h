@@ -84,9 +84,8 @@ public:
 	void set_widget_disabled(int p_index, bool p_disabled);
 	void set_widget_hovered(int p_index, bool p_hovered);
 	// The open dropdown's hovered ROW (style 2) — the driver's popup-exclusive
-	// pump updates it per move [orig: the popup-only per-frame pump,
-	// scene_end_frame @ 0x63e600 gate @ 0x63e691; row style 2 =
-	// CListWnd_DrawItems @ 0x643f30 mouseover].
+	// pump updates it per move (the witness map lives at the engine compiler,
+	// engine/runtime/menu/menu_frame.h).
 	void set_widget_hover_item(int p_index, int p_row);
 	// Standalone scroll interaction (the witnessed CScrollWnd map): the part
 	// under the mouse (0 none / 1 up / 2 down / 3 shuttle / 4 track-before /
