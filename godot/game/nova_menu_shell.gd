@@ -173,8 +173,6 @@ var _named_handlers: Dictionary = {}
 # player_info_menu_companion.gd). Empty for a plain shell. The first whose owns_menu()
 # claims a loaded menu drives it; otherwise the shell's generic wiring runs.
 var _companions: Array = []
-# Lazily-built Options -> Controls key-binding catalog (engine/runtime/controls).
-var _controls_model: ControlsModel = null
 # The armed remap capture (Options -> Controls): -1 = idle. Retail arms on the
 # table activation, clears the Control cell, and consumes the next key/button
 # [orig: the arm handler sub_55D560 @ 0x55d560; the capture pump @ 0x55c67c].
@@ -288,7 +286,7 @@ func _assemble_assets() -> void:
 
 	# Connect once on the persistent driver (screens reconfigure under it;
 	# these aggregate signals survive).
-	_driver.screen_changed.connect(_on_screen_changed_for_underlay)
+	_driver.screen_changed.connect(_on_screen_changed)
 	_driver.menu_requested.connect(_on_menu_requested)
 	_driver.quit_requested.connect(_on_quit_requested)
 	_driver.widget_value_changed.connect(_on_widget_value_changed)
@@ -398,7 +396,13 @@ func _refresh_underlay() -> void:
 	_underlay.set_source(_root.get_root_dir(), _current_expansion())
 
 
-func _on_screen_changed_for_underlay(screen_name: String) -> void:
+func _on_screen_changed(screen_name: String) -> void:
+	# Leaving the screen tears down an armed remap capture like retail's
+	# per-screen pump state — otherwise a later keypress on ANY screen would
+	# assign to the stale action. The refill restores the blanked Control
+	# cell in the persisted table rows [orig: the pump state lives with the
+	# Options screen, sub_55D560 @ 0x55d560].
+	_end_remap(true)
 	if _underlay != null:
 		_underlay.set_screen(screen_name)
 
@@ -560,8 +564,6 @@ func _on_list_activated(id: int, row: int) -> void:
 # CLEAR_KEY buttons [orig: UI_PopulateControlMappingList @ 0x55c0c0; the
 # OPTIONS callback registrations @ 0x55d737..0x55d809].
 func _seed_control_mapping(table_id: int) -> void:
-	if _controls_model == null:
-		_controls_model = ControlsBindings.model()
 	_control_device = ControlsModel.DEVICE_KEYBOARD
 	_fill_control_mapping(table_id, _control_device)
 	for i in control_device_names.size():
@@ -617,8 +619,11 @@ func _arm_remap(table_id: int, row: int) -> void:
 	_driver.table_select_row(table_id, row)
 
 
-# The armed keyboard capture: Esc cancels, anything mappable assigns
-# [orig: the capture pump's Esc/assign split @ 0x55c68c/0x55c743].
+# The armed keyboard capture: Esc cancels, anything mappable assigns. The
+# modifier flags feed the original event flag word (a key pressed with Ctrl
+# held alone records the Ctrl- combo)
+# [orig: the capture pump's Esc/assign split @ 0x55c68c/0x55c743;
+#  Input_QueueKeyEvent @ 0x760c10].
 func _consume_remap_key(event: InputEventKey) -> bool:
 	if not event.pressed:
 		return true
@@ -626,22 +631,17 @@ func _consume_remap_key(event: InputEventKey) -> bool:
 		_end_remap(true)
 		return true
 	if ControlsBindings.model().assign_godot_key(_remap_action,
-			event.physical_keycode, event.echo):
+			event.physical_keycode, event.ctrl_pressed, event.shift_pressed,
+			event.echo):
 		ControlsBindings.persist()
 		_end_remap(true)
 	return true
 
 
-# The armed mouse capture: the witnessed button->mask map
-# [orig: the capture callback @ 0x55c780].
+# The armed mouse capture: the witnessed button->mask translation lives at
+# the seam [orig: the capture callback @ 0x55c780].
 func _consume_remap_mouse(button_index: int) -> void:
-	var mask := 0
-	match button_index:
-		MOUSE_BUTTON_LEFT: mask = 0x1
-		MOUSE_BUTTON_RIGHT: mask = 0x2
-		MOUSE_BUTTON_MIDDLE: mask = 0x10
-		MOUSE_BUTTON_WHEEL_UP: mask = 0x400
-		MOUSE_BUTTON_WHEEL_DOWN: mask = 0x800
+	var mask := ControlsModel.mouse_mask_from_godot_button(button_index)
 	if mask != 0:
 		ControlsBindings.model().assign_mouse_mask(_remap_action, mask)
 		ControlsBindings.persist()

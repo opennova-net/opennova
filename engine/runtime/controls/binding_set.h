@@ -35,14 +35,28 @@ inline constexpr uint16_t kMouseWheelUp = 0x400;
 inline constexpr uint16_t kMouseWheelDown = 0x800;
 
 // One live binding record (the ported slice of the 432-byte original).
+// The per-slot modifier word is a modifier VK: 17 (VK_CONTROL) renders the
+// "Ctrl-" display prefix, 16 (VK_SHIFT) "Shift-", 0 none. The capture writes
+// 17 exactly when the queued event's flag word is Ctrl-held alone
+// [orig: KeyBinding_FormatBindingString @ 0x559a10 prefixes;
+//  the capture's modifier write @ 0x55bb51; Input_QueueKeyEvent @ 0x760c10
+//  flag word — 0x800 Ctrl held, 0x200 Shift held, 0x100 extended,
+//  0x80 auto-repeat].
 struct BindingRecord {
   uint16_t primary = 0;        // slot-1 VK scan (0 = unbound)
   uint16_t secondary = 0;      // slot-2 VK scan
-  uint16_t primary_ext = 0;    // slot-1 extended flag (17 when extended)
-  uint16_t secondary_ext = 0;  // slot-2 extended flag
+  uint16_t primary_mod = 0;    // slot-1 modifier VK (17 Ctrl / 16 Shift / 0)
+  uint16_t secondary_mod = 0;  // slot-2 modifier VK
   uint16_t mouse_mask = 0;     // kMouse* mask (0 = unbound)
   uint8_t joy_button = 0;      // button index + 1 (0 = unbound)
 };
+
+// Whether a VK rides Windows' extended-key lParam bit (bit 24), which the
+// original's queue folds into the event flag word as 0x100 — an extended key
+// held with Ctrl therefore records NO modifier (the capture's compare is
+// against Ctrl-held ALONE) [orig: Input_QueueKeyEvent @ 0x760c10;
+// KeyBinding_HandleKeyAssignment @ 0x55bb4f].
+bool is_extended_vk(int vk);
 
 class BindingSet {
  public:
@@ -53,11 +67,17 @@ class BindingSet {
   void restore_defaults();
 
   // Assign a captured key to a catalog action. Returns false for the two
-  // rejected events (Ctrl auto-repeat, VK 0xDE). Assigning a key the record
-  // already holds collapses it to the sole primary; otherwise the key fills
-  // the empty slot, or replaces the primary when both slots are full
-  // [orig: KeyBinding_HandleKeyAssignment @ 0x55bb20].
-  bool assign_key(int index, int vk, bool extended, bool repeat = false);
+  // rejected events: every Ctrl press (the ctrl-down state is set before its
+  // own event enqueues, so VK 0x11 always arrives Ctrl-flagged — retail
+  // cannot capture the Ctrl key) and VK 0xDE. The slot modifier becomes 17
+  // exactly when Ctrl is held with no shift/extended/repeat flag. Assigning
+  // a (scan, modifier) the record already holds collapses it to the sole
+  // primary; otherwise the key fills the empty slot, or replaces the primary
+  // when both slots are full [orig: KeyBinding_HandleKeyAssignment
+  // @ 0x55bb20 — the drop @ 0x55bb26/0x55bb38, the modifier compare
+  // @ 0x55bb4f..0x55bb51].
+  bool assign_key(int index, int vk, bool ctrl_held, bool shift_held,
+                  bool extended, bool repeat);
 
   // Assign a captured mouse button mask [orig: word write @ 0x55c815].
   void assign_mouse(int index, uint16_t mask);

@@ -1,7 +1,5 @@
 #include "controls/binding_set.h"
 
-#include <cstring>
-
 namespace opennova::controls {
 
 namespace {
@@ -11,6 +9,28 @@ namespace {
 constexpr int kKeypadEnterScan = 269;
 
 }  // namespace
+
+bool is_extended_vk(int vk) {
+  switch (vk) {
+    case 0x21:  // PageUp
+    case 0x22:  // PageDown
+    case 0x23:  // End
+    case 0x24:  // Home
+    case 0x25:  // Left
+    case 0x26:  // Up
+    case 0x27:  // Right
+    case 0x28:  // Down
+    case 0x2C:  // PrintScreen
+    case 0x2D:  // Insert
+    case 0x2E:  // Delete
+    case 0x6F:  // keypad divide
+    case 0x90:  // NumLock
+    case kKeypadEnterScan:
+      return true;
+    default:
+      return false;
+  }
+}
 
 BindingSet::BindingSet() {
   restore_defaults();
@@ -29,39 +49,45 @@ void BindingSet::restore_defaults() {
   }
 }
 
-bool BindingSet::assign_key(int index, int vk, bool extended, bool repeat) {
+bool BindingSet::assign_key(int index, int vk, bool ctrl_held, bool shift_held,
+                            bool extended, bool repeat) {
   if (index < 0 || index >= static_cast<int>(records_.size())) {
     return false;
   }
-  // [orig: @ 0x55bb26 — a repeating Ctrl is dropped; @ 0x55bb38 — VK 0xDE
-  //  never assigns]
-  if (vk == 0x11 && repeat) {
+  // [orig: @ 0x55bb26 — VK 0x11 with the Ctrl-held flag never assigns (the
+  //  ctrl-down state is set before its own event enqueues, so this is every
+  //  Ctrl press); @ 0x55bb38 — VK 0xDE never assigns]
+  if (vk == 0x11 && ctrl_held) {
     return false;
   }
   if (vk == 0xDE) {
     return false;
   }
-  const uint16_t ext = extended ? 17 : 0;
+  // Modifier 17 iff the event flag word is Ctrl-held ALONE (the exact
+  // HIWORD == 0x800 compare — shift/extended/repeat flags defeat it)
+  // [orig: @ 0x55bb4f..0x55bb51; Input_QueueKeyEvent @ 0x760c10].
+  const uint16_t mod =
+      (ctrl_held && !shift_held && !extended && !repeat) ? 17 : 0;
   uint16_t scan = static_cast<uint16_t>(vk & 0xFF);
   if (vk == kKeypadEnterScan) {
     scan = kKeypadEnterScan;
   }
   BindingRecord &r = records_[static_cast<std::size_t>(index)];
-  // Re-assigning a key the record already holds collapses the record to that
-  // key as the sole primary [orig: @ 0x55bb82..0x55bc04].
+  // Re-assigning a (scan, modifier) the record already holds collapses the
+  // record to that key as the sole primary [orig: @ 0x55bb82..0x55bc04].
   bool cleared = false;
-  if (r.primary == scan && r.primary_ext == ext) {
+  if (r.primary == scan && r.primary_mod == mod) {
     r.primary = scan;
-    r.primary_ext = ext;
+    r.primary_mod = mod;
     r.secondary = 0;
-    r.secondary_ext = 0;
+    r.secondary_mod = 0;
     cleared = true;
   }
-  if (r.secondary == scan && r.secondary_ext == ext) {
+  if (r.secondary == scan && r.secondary_mod == mod) {
     r.primary = scan;
-    r.primary_ext = ext;
+    r.primary_mod = mod;
     r.secondary = 0;
-    r.secondary_ext = 0;
+    r.secondary_mod = 0;
     return true;
   }
   if (cleared) {
@@ -72,17 +98,17 @@ bool BindingSet::assign_key(int index, int vk, bool extended, bool repeat) {
   if (r.primary != 0) {
     if (r.secondary == 0) {
       r.secondary = scan;
-      r.secondary_ext = ext;
+      r.secondary_mod = mod;
     } else {
       r.primary = scan;
-      r.primary_ext = ext;
+      r.primary_mod = mod;
     }
   } else if (r.secondary != 0) {
     r.secondary = scan;
-    r.secondary_ext = ext;
+    r.secondary_mod = mod;
   } else {
     r.primary = scan;
-    r.primary_ext = ext;
+    r.primary_mod = mod;
   }
   return true;
 }
@@ -103,8 +129,8 @@ void BindingSet::clear(int index, Device device) {
     case Device::Keyboard:
       r.primary = 0;
       r.secondary = 0;
-      r.primary_ext = 0;
-      r.secondary_ext = 0;
+      r.primary_mod = 0;
+      r.secondary_mod = 0;
       break;
     case Device::Mouse:
       r.mouse_mask = 0;
@@ -122,7 +148,8 @@ std::string BindingSet::control_text(int index, Device device) const {
   }
   switch (device) {
     case Device::Keyboard:
-      return format_binding(r->primary, r->secondary);
+      return format_binding(r->primary, r->secondary, r->primary_mod,
+                            r->secondary_mod);
     case Device::Mouse:
       // [orig: the mouse-mask display switch @ 0x55b803..0x55b961]
       switch (r->mouse_mask) {

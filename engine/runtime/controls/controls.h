@@ -87,7 +87,8 @@ std::string key_name(int vk);
 // Format a binding for the Control column: the primary key, optionally joined to a
 // secondary with " or ". Empty when unbound.
 // [orig: KeyBinding_FormatBindingString @ 0x559a10]
-std::string format_binding(int key, int key2);
+std::string format_binding(int key, int key2, int modifier = 0,
+                           int modifier2 = 0);
 
 // One produced display row for the CONTROL_MAPPING table.
 struct ControlRow {

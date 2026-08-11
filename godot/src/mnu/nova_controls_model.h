@@ -42,23 +42,38 @@ public:
 	String control_text(int p_action, int p_device) const;
 
 	// Remap operations over the live records (see binding_set.h for the
-	// witnessed semantics). assign_godot_key returns false when the key has
-	// no VK mapping or the engine rejects it.
-	bool assign_godot_key(int p_action, int p_godot_key, bool p_repeat);
+	// witnessed semantics — ctrl/shift/repeat feed the original event flag
+	// word; the extended-key flag derives from the VK). assign_godot_key
+	// returns false when the key has no VK mapping or the engine rejects it.
+	bool assign_godot_key(int p_action, int p_godot_key, bool p_ctrl,
+			bool p_shift, bool p_repeat);
 	void assign_mouse_mask(int p_action, int p_mask);
 	void clear_binding(int p_action, int p_device);
 	void restore_defaults();
 
-	// Godot keycodes currently bound to a catalog token (for the gameplay
-	// input sampler; primary then secondary).
+	// Godot keycodes currently bound to a catalog token (primary then
+	// secondary; modifiers not included — display/diagnostic use).
 	PackedInt32Array godot_keys_for_token(const String &p_token) const;
+
+	// Whether the token's binding is held RIGHT NOW: keyboard slots (their
+	// modifier word gating Ctrl-/Shift- combos) plus the held-sampleable
+	// mouse-mask buttons (wheel masks are impulse-only and never sample).
+	// The one gameplay-sampler entry point — samples Godot Input here at the
+	// device seam.
+	bool is_token_pressed(const String &p_token) const;
+
+	// The capture button->mask translation (0 = unmappable). The witnessed
+	// mask values are the engine's kMouse* constants (controls/binding_set.h
+	// carries the citation); this seam only maps Godot's MouseButton onto
+	// them.
+	static int mouse_mask_from_godot_button(int p_button);
 
 	// VK <-> Godot Key translation (0 when unmappable).
 	static int vk_from_godot_key(int p_godot_key);
 	static int godot_key_from_vk(int p_vk);
 
-	// Persistence blob: token -> [primary, secondary, primary_ext,
-	// secondary_ext, mouse_mask, joy_button]. The shell owns where it lives.
+	// Persistence blob: token -> [primary, secondary, primary_mod,
+	// secondary_mod, mouse_mask, joy_button]. The shell owns where it lives.
 	Dictionary save_blob() const;
 	void load_blob(const Dictionary &p_blob);
 

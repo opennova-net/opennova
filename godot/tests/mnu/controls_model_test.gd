@@ -64,3 +64,65 @@ func test_remap_assign_clear_defaults_and_blob() -> void:
 	var keys: PackedInt32Array = model.godot_keys_for_token("move_forward")
 	assert_eq(keys.size(), 1, "one live key after the edits")
 	assert_eq(keys[0], int(KEY_F5), "the lookup yields the Godot keycode")
+
+
+# A key captured with Ctrl held alone records the Ctrl- combo; extra flags
+# defeat the exact modifier compare [orig: KeyBinding_HandleKeyAssignment
+# @ 0x55bb4f..0x55bb51; Input_QueueKeyEvent @ 0x760c10; the "Ctrl-" prefix
+# KeyBinding_FormatBindingString @ 0x559a10].
+func test_ctrl_combo_records_and_round_trips() -> void:
+	var model := ControlsModel.new()
+	var action: int = model.action_index_for_row(0)
+	assert_true(model.assign_godot_key(action, KEY_Y, true), "Ctrl+Y assigns")
+	assert_eq(model.control_text(action, ControlsModel.DEVICE_KEYBOARD),
+			"Ctrl - Y or Up", "the Ctrl- prefix renders on the slot")
+	assert_false(model.assign_godot_key(action, KEY_CTRL, true),
+			"the Ctrl key itself never captures")
+	var blob: Dictionary = model.save_blob()
+	var other := ControlsModel.new()
+	other.load_blob(blob)
+	assert_eq(other.control_text(action, ControlsModel.DEVICE_KEYBOARD),
+			"Ctrl - Y or Up", "the modifier word round-trips the blob")
+
+
+# The witnessed capture button->mask map lives at the seam
+# [orig: the mouse capture callback @ 0x55c78b..0x55c7d5].
+func test_mouse_mask_seam_translation() -> void:
+	assert_eq(ControlsModel.mouse_mask_from_godot_button(MOUSE_BUTTON_LEFT), 0x1)
+	assert_eq(ControlsModel.mouse_mask_from_godot_button(MOUSE_BUTTON_RIGHT), 0x2)
+	assert_eq(ControlsModel.mouse_mask_from_godot_button(MOUSE_BUTTON_MIDDLE), 0x10)
+	assert_eq(ControlsModel.mouse_mask_from_godot_button(MOUSE_BUTTON_WHEEL_UP), 0x400)
+	assert_eq(ControlsModel.mouse_mask_from_godot_button(MOUSE_BUTTON_WHEEL_DOWN), 0x800)
+	assert_eq(ControlsModel.mouse_mask_from_godot_button(MOUSE_BUTTON_XBUTTON1), 0,
+			"unmapped buttons translate to no mask")
+
+
+# Every VK the catalog or the translation table can produce must round-trip
+# VK -> Godot Key -> the same VK — a silent collision or typo in the 60-pair
+# table would otherwise break load/display invisibly.
+func test_vk_godot_key_round_trip_sweep() -> void:
+	var model := ControlsModel.new()
+	var seen_keys := {}
+	var checked := 0
+	# Sweep the whole byte VK space plus the keypad-Enter 269 remap.
+	var vks := range(1, 256)
+	vks.append(269)
+	for vk in vks:
+		var key: int = ControlsModel.godot_key_from_vk(vk)
+		if key == 0:
+			continue
+		assert_false(seen_keys.has(key),
+			"VK %d maps to Godot key %d already produced by VK %d" %
+					[vk, key, int(seen_keys.get(key, -1))])
+		seen_keys[key] = vk
+		assert_eq(ControlsModel.vk_from_godot_key(key), vk,
+				"VK %d survives the round trip" % vk)
+		checked += 1
+	assert_gt(checked, 70, "the sweep exercised the whole table")
+	# Every catalog default key must be displayable through the translation.
+	var rows: Array = model.get_rows(ControlsModel.DEVICE_KEYBOARD)
+	for r in rows:
+		var cells := r as PackedStringArray
+		if cells[2] != "":
+			assert_false(cells[2].contains("#"),
+					"%s displays through the table (no raw #VK fallback)" % cells[1])

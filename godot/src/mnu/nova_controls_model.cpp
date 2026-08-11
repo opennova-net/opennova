@@ -1,6 +1,7 @@
 #include "nova_controls_model.h"
 
 #include <godot_cpp/classes/global_constants.hpp>
+#include <godot_cpp/classes/input.hpp>
 
 #include "controls/controls.h"
 
@@ -76,12 +77,14 @@ String ControlsModel::control_text(int p_action, int p_device) const {
 			bindings_.control_text(p_action, device_of(p_device)).c_str());
 }
 
-bool ControlsModel::assign_godot_key(int p_action, int p_godot_key, bool p_repeat) {
+bool ControlsModel::assign_godot_key(int p_action, int p_godot_key, bool p_ctrl,
+		bool p_shift, bool p_repeat) {
 	const int vk = vk_from_godot_key(p_godot_key);
 	if (vk == 0) {
 		return false;
 	}
-	return bindings_.assign_key(p_action, vk, false, p_repeat);
+	return bindings_.assign_key(p_action, vk, p_ctrl, p_shift,
+			opennova::controls::is_extended_vk(vk), p_repeat);
 }
 
 void ControlsModel::assign_mouse_mask(int p_action, int p_mask) {
@@ -107,6 +110,78 @@ PackedInt32Array ControlsModel::godot_keys_for_token(const String &p_token) cons
 		}
 	}
 	return out;
+}
+
+bool ControlsModel::is_token_pressed(const String &p_token) const {
+	const int index = bindings_.index_of_token(p_token.utf8().get_data());
+	const opennova::controls::BindingRecord *r = bindings_.record(index);
+	if (r == nullptr) {
+		return false;
+	}
+	Input *input = Input::get_singleton();
+	if (input == nullptr) {
+		return false;
+	}
+	auto key_held = [&](uint16_t scan, uint16_t mod) {
+		if (scan == 0) {
+			return false;
+		}
+		const int key = godot_key_from_vk(scan);
+		if (key == 0 ||
+				!input->is_physical_key_pressed(static_cast<Key>(key))) {
+			return false;
+		}
+		if (mod != 0) {
+			// A Ctrl-/Shift- combo binding requires its modifier held too.
+			const int mod_key = godot_key_from_vk(mod);
+			if (mod_key == 0 ||
+					!input->is_physical_key_pressed(static_cast<Key>(mod_key))) {
+				return false;
+			}
+		}
+		return true;
+	};
+	if (key_held(r->primary, r->primary_mod) ||
+			key_held(r->secondary, r->secondary_mod)) {
+		return true;
+	}
+	// Wheel masks (0x400/0x800) are impulse events with no held state — they
+	// display and persist but never sample here.
+	using opennova::controls::kMouseLeft;
+	using opennova::controls::kMouseMiddle;
+	using opennova::controls::kMouseRight;
+	if ((r->mouse_mask & kMouseLeft) != 0 &&
+			input->is_mouse_button_pressed(MOUSE_BUTTON_LEFT)) {
+		return true;
+	}
+	if ((r->mouse_mask & kMouseRight) != 0 &&
+			input->is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)) {
+		return true;
+	}
+	if ((r->mouse_mask & kMouseMiddle) != 0 &&
+			input->is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE)) {
+		return true;
+	}
+	return false;
+}
+
+int ControlsModel::mouse_mask_from_godot_button(int p_button) {
+	// Godot MouseButton -> the engine's witnessed kMouse* masks (the
+	// citation lives at controls/binding_set.h).
+	switch (p_button) {
+		case MOUSE_BUTTON_LEFT:
+			return opennova::controls::kMouseLeft;
+		case MOUSE_BUTTON_RIGHT:
+			return opennova::controls::kMouseRight;
+		case MOUSE_BUTTON_MIDDLE:
+			return opennova::controls::kMouseMiddle;
+		case MOUSE_BUTTON_WHEEL_UP:
+			return opennova::controls::kMouseWheelUp;
+		case MOUSE_BUTTON_WHEEL_DOWN:
+			return opennova::controls::kMouseWheelDown;
+		default:
+			return 0;
+	}
 }
 
 int ControlsModel::vk_from_godot_key(int p_godot_key) {
@@ -150,8 +225,8 @@ Dictionary ControlsModel::save_blob() const {
 		PackedInt32Array values;
 		values.push_back(r->primary);
 		values.push_back(r->secondary);
-		values.push_back(r->primary_ext);
-		values.push_back(r->secondary_ext);
+		values.push_back(r->primary_mod);
+		values.push_back(r->secondary_mod);
 		values.push_back(r->mouse_mask);
 		values.push_back(r->joy_button);
 		blob[String::utf8(cat[i].token)] = values;
@@ -174,8 +249,8 @@ void ControlsModel::load_blob(const Dictionary &p_blob) {
 		opennova::controls::BindingRecord rec;
 		rec.primary = static_cast<uint16_t>(values[0]);
 		rec.secondary = static_cast<uint16_t>(values[1]);
-		rec.primary_ext = static_cast<uint16_t>(values[2]);
-		rec.secondary_ext = static_cast<uint16_t>(values[3]);
+		rec.primary_mod = static_cast<uint16_t>(values[2]);
+		rec.secondary_mod = static_cast<uint16_t>(values[3]);
 		rec.mouse_mask = static_cast<uint16_t>(values[4]);
 		rec.joy_button = static_cast<uint8_t>(values[5]);
 		bindings_.set_record(index, rec);
@@ -188,8 +263,10 @@ void ControlsModel::_bind_methods() {
 			&ControlsModel::action_index_for_row);
 	ClassDB::bind_method(D_METHOD("control_text", "action", "device"),
 			&ControlsModel::control_text);
-	ClassDB::bind_method(D_METHOD("assign_godot_key", "action", "key", "repeat"),
-			&ControlsModel::assign_godot_key);
+	ClassDB::bind_method(D_METHOD("assign_godot_key", "action", "key", "ctrl",
+								 "shift", "repeat"),
+			&ControlsModel::assign_godot_key, DEFVAL(false), DEFVAL(false),
+			DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("assign_mouse_mask", "action", "mask"),
 			&ControlsModel::assign_mouse_mask);
 	ClassDB::bind_method(D_METHOD("clear_binding", "action", "device"),
@@ -197,6 +274,17 @@ void ControlsModel::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("restore_defaults"), &ControlsModel::restore_defaults);
 	ClassDB::bind_method(D_METHOD("godot_keys_for_token", "token"),
 			&ControlsModel::godot_keys_for_token);
+	ClassDB::bind_method(D_METHOD("is_token_pressed", "token"),
+			&ControlsModel::is_token_pressed);
+	ClassDB::bind_static_method("ControlsModel",
+			D_METHOD("mouse_mask_from_godot_button", "button"),
+			&ControlsModel::mouse_mask_from_godot_button);
+	ClassDB::bind_static_method("ControlsModel",
+			D_METHOD("vk_from_godot_key", "key"),
+			&ControlsModel::vk_from_godot_key);
+	ClassDB::bind_static_method("ControlsModel",
+			D_METHOD("godot_key_from_vk", "vk"),
+			&ControlsModel::godot_key_from_vk);
 	ClassDB::bind_method(D_METHOD("save_blob"), &ControlsModel::save_blob);
 	ClassDB::bind_method(D_METHOD("load_blob", "blob"), &ControlsModel::load_blob);
 

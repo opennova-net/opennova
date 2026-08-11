@@ -93,6 +93,12 @@ bool test_format_binding() {
   CHECK(format_binding(0x57, 0x26) == "W or Up", "two-slot join");
   CHECK(format_binding(0x52, 0x00) == "R", "single key");
   CHECK(format_binding(0x00, 0x00).empty(), "unbound empty");
+  // Modifier-word prefixes [orig: KeyBinding_FormatBindingString @ 0x559a10 —
+  // word 17 "Ctrl-", word 16 "Shift-"].
+  CHECK(format_binding(0x57, 0x26, 17, 0) == "Ctrl - W or Up",
+        "slot-1 Ctrl prefix");
+  CHECK(format_binding(0x57, 0x26, 0, 16) == "W or Shift - Up",
+        "slot-2 Shift prefix");
   return true;
 }
 
@@ -163,28 +169,53 @@ bool test_binding_set_assignment() {
   const uint16_t default_secondary = r->secondary;
 
   // Both slots full: a new key replaces the PRIMARY.
-  CHECK(set.assign_key(fwd, 0x47, false), "assign G");
+  CHECK(set.assign_key(fwd, 0x47, false, false, false, false), "assign G");
   r = set.record(fwd);
   CHECK(r->primary == 0x47 && r->secondary == default_secondary,
         "both-full assignment replaces the primary");
 
   // Assigning an already-held key collapses the record to it alone.
-  CHECK(set.assign_key(fwd, static_cast<int>(default_secondary), false),
+  CHECK(set.assign_key(fwd, static_cast<int>(default_secondary), false, false,
+                       false, false),
         "assign the held secondary");
   r = set.record(fwd);
   CHECK(r->primary == default_secondary && r->secondary == 0,
         "duplicate assignment collapses to the sole primary");
 
   // One empty slot: the new key fills it.
-  CHECK(set.assign_key(fwd, 0x48, false), "assign H");
+  CHECK(set.assign_key(fwd, 0x48, false, false, false, false), "assign H");
   r = set.record(fwd);
   CHECK(r->primary == default_secondary && r->secondary == 0x48,
         "the empty secondary slot fills");
 
-  // Rejected events.
-  CHECK(!set.assign_key(fwd, 0xDE, false), "VK 0xDE never assigns");
-  CHECK(!set.assign_key(fwd, 0x11, false, true), "repeating Ctrl is dropped");
-  CHECK(set.assign_key(fwd, 0x11, false), "a fresh Ctrl press assigns");
+  // Rejected events [orig: KeyBinding_HandleKeyAssignment @ 0x55bb26 —
+  // every Ctrl press arrives Ctrl-flagged (the state byte is set before its
+  // own event enqueues), so VK 0x11 never assigns through the capture].
+  CHECK(!set.assign_key(fwd, 0xDE, false, false, false, false),
+        "VK 0xDE never assigns");
+  CHECK(!set.assign_key(fwd, 0x11, true, false, false, false),
+        "a Ctrl press never assigns (its own flag is already set)");
+
+  // The Ctrl- combo: a key with Ctrl held ALONE records modifier 17; any
+  // extra flag (shift/extended/repeat) defeats the exact-0x800 compare
+  // [orig: @ 0x55bb4f..0x55bb51; Input_QueueKeyEvent @ 0x760c10].
+  CHECK(set.assign_key(fwd, 0x59, true, false, false, false),
+        "Ctrl+Y assigns");
+  r = set.record(fwd);
+  CHECK(r->primary == 0x59 && r->primary_mod == 17,
+        "Ctrl-held-alone records modifier 17");
+  CHECK(set.control_text(fwd, Device::Keyboard).rfind("Ctrl - Y", 0) == 0,
+        "the Ctrl- prefix renders");
+  CHECK(set.assign_key(fwd, 0x59, true, true, false, false),
+        "Ctrl+Shift+Y assigns");
+  r = set.record(fwd);
+  CHECK(r->primary == 0x59 && r->primary_mod == 0,
+        "a second flag defeats the modifier and the new (scan,0) replaces");
+  CHECK(set.assign_key(fwd, 0x25, true, false, true, false),
+        "Ctrl+Left (extended) assigns");
+  r = set.record(fwd);
+  CHECK(r->primary == 0x25 && r->primary_mod == 0,
+        "an extended key records no modifier even with Ctrl held");
 
   // CLEAR_KEY per device; DEFAULTS restores the catalog values.
   set.clear(fwd, Device::Keyboard);
