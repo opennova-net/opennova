@@ -1,7 +1,7 @@
 class_name EffectWorld
 extends Node3D
 
-## Compatibility facade for the portable effect scene and packet renderer.
+## Compatibility facade for the portable effect scene and draw list renderer.
 ## Effects, emitters, and particles are values owned by EffectScene; this
 ## node owns one ParticleRenderer for both render domains.
 
@@ -332,7 +332,7 @@ func warm_all_effects(position: Vector3) -> int:
 			if effect_id.is_empty() or seen.has(effect_id):
 				continue
 			seen[effect_id] = true
-			# Catalog values warm through the uncapped World packet. The
+			# Catalog values warm through the uncapped World draw list. The
 			# deterministic helpers above already compile all eight
 			# FirstPerson shaders; cloning a large catalog into that ArrayMesh
 			# domain can exceed Godot's per-mesh surface limit.
@@ -348,7 +348,7 @@ func warm_all_effects(position: Vector3) -> int:
 ## Compile and submit the latest scene snapshot synchronously. The normal
 ## process path calls the renderer every frame; mission loading uses this seam
 ## between fixed warm ticks and forced draws so freshly emitted values are in
-## the submitted packet immediately. Returns the number of material runs.
+## the submitted draw list immediately. Returns the number of material runs.
 func render_now() -> int:
 	_ensure_renderer()
 	_renderer.render_now()
@@ -555,7 +555,7 @@ func render_frame() -> void:
 
 
 ## Value-only F3 read model. Emitter ids join portable simulation values to
-## the renderer's packet bounds; no particle/render Nodes escape this facade.
+## the renderer's draw list bounds; no particle/render Nodes escape this facade.
 func get_debug_group_report() -> Array:
 	var out: Array = []
 	if _particles_disabled:

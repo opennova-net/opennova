@@ -772,7 +772,7 @@ func is_finished() -> bool:
 
 
 ## Value-only emitter diagnostics. Entries join the portable scene snapshot,
-## lifetime inspection, and renderer packet bounds by stable emitter id.
+## lifetime inspection, and renderer draw list bounds by stable emitter id.
 func get_emitter_diagnostics() -> Array:
 	var result: Array = []
 	if _scene == null:

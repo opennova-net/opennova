@@ -493,7 +493,7 @@ func test_warm_all_effects_spawns_the_catalog_once_and_resets_clean() -> void:
 		var group := group_v as Dictionary
 		assert_eq(int(group.get("render_domain", -1)),
 				EffectWorld.RENDER_DOMAIN_WORLD,
-				"catalog values warm through the uncapped World packet")
+				"catalog values warm through the uncapped World draw list")
 	assert_gt(world.active_entry_count(), 0, "warm spawns occupy live entries")
 	world.advance_fixed_tick(0.016)
 	world.reset_runtime_state()

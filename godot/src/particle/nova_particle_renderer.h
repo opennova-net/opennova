@@ -18,7 +18,7 @@
 namespace godot {
 
 // Thin Godot adapter for the portable particle scene/frame modules. World
-// packets are immutable values consumed by a POST_TRANSPARENT compositor
+// draw lists are immutable values consumed by a POST_TRANSPARENT compositor
 // effect; only the explicitly diagnosed FirstPerson tool path uses ArrayMesh.
 // Effects, emitters, and particles remain values in EffectScene.
 class ParticleRenderer : public Node3D {

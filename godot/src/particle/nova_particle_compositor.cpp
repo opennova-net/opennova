@@ -362,7 +362,7 @@ public:
 			diagnostics.status = "waiting_for_submission";
 			diagnostics.failure.clear();
 		} else if (!submission->valid) {
-			diagnostics.status = "packet_invalid";
+			diagnostics.status = "draw_list_invalid";
 			diagnostics.failure = submission->validation_error;
 		} else if (submission->commands.empty()) {
 			diagnostics.status = "idle";
@@ -532,7 +532,7 @@ bool ParticleCompositorEffect::Impl::initialize_rd() {
 	// Every pipeline shares one shader layout, so set 1 must be bound even when
 	// the color-only branches never sample scene_texture. Keep that descriptor
 	// valid with a tiny shared texture; full-resolution per-view scratch targets
-	// are allocated lazily only for packets that actually contain Distort.
+	// are allocated lazily only for draw lists that actually contain Distort.
 	Ref<RDTextureFormat> fallback_format;
 	fallback_format.instantiate();
 	fallback_format->set_format(RenderingDevice::DATA_FORMAT_R8G8B8A8_UNORM);
@@ -1152,26 +1152,26 @@ bool ParticleCompositorEffect::Impl::validate_submission(
 		const NovaParticleWorldSubmission &submission) const {
 	if (!submission.valid) {
 		const_cast<Impl *>(this)->set_failure(submission.validation_error,
-				"packet_invalid");
+				"draw_list_invalid");
 		return false;
 	}
 	if (!submission.atlas) {
-		const_cast<Impl *>(this)->set_failure("World packet has no atlas snapshot",
+		const_cast<Impl *>(this)->set_failure("World draw list has no atlas snapshot",
 				"atlas_missing");
 		return false;
 	}
 	if (submission.triangle_vertices.size() % kRetailVertexStride != 0) {
 		const_cast<Impl *>(this)->set_failure(
-				"Expanded World packet does not retain the 28-byte vertex stride",
-				"packet_invalid");
+				"Expanded World draw list does not retain the 28-byte vertex stride",
+				"draw_list_invalid");
 		return false;
 	}
 	const std::uint64_t vertex_count = static_cast<std::uint64_t>(
 			submission.triangle_vertices.size() / kRetailVertexStride);
 	if (vertex_count % kTriangleVerticesPerQuad != 0) {
 		const_cast<Impl *>(this)->set_failure(
-				"Expanded World packet is not a whole number of quads",
-				"packet_invalid");
+				"Expanded World draw list is not a whole number of quads",
+				"draw_list_invalid");
 		return false;
 	}
 	const std::uint64_t quad_count = vertex_count / kTriangleVerticesPerQuad;
@@ -1183,7 +1183,7 @@ bool ParticleCompositorEffect::Impl::validate_submission(
 					submission.atlas->pages.size() || command.quad_count == 0) {
 			const_cast<Impl *>(this)->set_failure(
 					"Unsupported state in World draw command " +
-							std::to_string(i), "packet_invalid");
+							std::to_string(i), "draw_list_invalid");
 			return false;
 		}
 		const bool distortion = command.pipeline ==
@@ -1194,7 +1194,7 @@ bool ParticleCompositorEffect::Impl::validate_submission(
 					renderer::ParticleRenderPass::Color)) {
 			const_cast<Impl *>(this)->set_failure(
 					"Render pass/pipeline mismatch in World draw command " +
-							std::to_string(i), "packet_invalid");
+							std::to_string(i), "draw_list_invalid");
 			return false;
 		}
 		const std::uint64_t first = command.first_quad;
@@ -1204,7 +1204,7 @@ bool ParticleCompositorEffect::Impl::validate_submission(
 						std::numeric_limits<std::uint32_t>::max()) {
 			const_cast<Impl *>(this)->set_failure(
 					"Out-of-range geometry in World draw command " +
-							std::to_string(i), "packet_invalid");
+							std::to_string(i), "draw_list_invalid");
 			return false;
 		}
 	}
@@ -1243,7 +1243,7 @@ bool ParticleCompositorEffect::Impl::draw(
 		return false;
 
 	// Preflight every resource before beginning a pass. A failed command must
-	// reject the whole packet instead of drawing a reordered or partial prefix.
+	// reject the whole draw list instead of drawing a reordered or partial prefix.
 	for (const ViewTarget &target : targets) {
 		const int64_t format = rd->framebuffer_get_format(target.framebuffer);
 		for (const renderer::ParticleDrawCommand &command : submission.commands) {
@@ -1266,7 +1266,7 @@ bool ParticleCompositorEffect::Impl::draw(
 
 		// RenderSceneData::get_view_projection(view) already includes Godot's
 		// depth/Y correction and TAA jitter. Applying another depth correction
-		// makes this packet disagree with ordinary scene geometry as the camera
+		// makes this draw list disagree with ordinary scene geometry as the camera
 		// turns. Only the world-to-view camera inverse remains to be composed.
 		const Projection view_projection =
 				scene_data->get_view_projection(view) *
@@ -1370,12 +1370,12 @@ Dictionary ParticleCompositorEffect::Impl::report() const {
 	result["depth_test"] = true;
 	result["depth_write"] = false;
 	result["reverse_z_compare"] = "greater_or_equal";
-	result["packet_order_preserved"] = true;
-	result["packet_command_cap"] = static_cast<int64_t>(0);
+	result["draw_list_order_preserved"] = true;
+	result["draw_list_command_cap"] = static_cast<int64_t>(0);
 	result["uncapped_commands"] = true;
-	result["packet_commands_dropped"] = static_cast<int64_t>(0);
+	result["draw_list_commands_dropped"] = static_cast<int64_t>(0);
 	result["immutable_submission_copy"] = true;
-	result["retains_compiler_packet_pointer"] = false;
+	result["retains_compiler_draw_list_pointer"] = false;
 	result["push_constant_bytes"] = static_cast<int64_t>(kPushConstantBytes);
 	result["push_constant_layout"] =
 			"mat4@0,vec4@64,vec4@80,vec4@96,vec2@112,float@120,uint@124";
@@ -1472,7 +1472,7 @@ void ParticleCompositorEffect::set_particles_hidden(bool p_hidden) {
 		impl_->diagnostics.status = "waiting_for_submission";
 		impl_->diagnostics.failure.clear();
 	} else if (!submission->valid) {
-		impl_->diagnostics.status = "packet_invalid";
+		impl_->diagnostics.status = "draw_list_invalid";
 		impl_->diagnostics.failure = submission->validation_error;
 	} else {
 		impl_->diagnostics.status = submission->commands.empty() ?
@@ -1570,7 +1570,7 @@ void ParticleCompositorEffect::_render_callback(
 		return;
 	}
 	if (!submission->valid) {
-		impl_->set_failure(submission->validation_error, "packet_invalid");
+		impl_->set_failure(submission->validation_error, "draw_list_invalid");
 		return;
 	}
 	if (submission->commands.empty()) {
