@@ -12,7 +12,8 @@
     "vfs"
   ],
   "counters": {
-    "adapter_cpp_orig_cites": 497,
+    "adapter_cpp_orig_cites_device": 122,
+    "adapter_cpp_orig_cites_pushdown": 375,
     "cpp_binding_console_writes": 0,
     "engine_stdout_prints": 0,
     "engine_uncited_src_files": 50,
@@ -26,7 +27,6 @@
     "link_payload.gd|func to_drag_data()",
     "link_payload.gd|func from_drag_data(",
     "armory_menu_companion.gd|func selected_weapon(",
-    "nova_weather.gd|func get_network_environment_snapshot()",
     "document_tab_row.gd|func to_dict()",
     "mcp_tool_def.gd|var input_schema",
     "mcp_tool_def.gd|func to_list_entry()",
@@ -34,7 +34,6 @@
     "host_session_config.gd|func to_session_options()",
     "occlusion_frame_pass.gd|func occlusion_hidden_ids()",
     "occlusion_frame_pass.gd|func present_visibility()",
-    "nova_object_body_anim.gd|func get_active_part_anims()",
     "selection_ops.gd|func get_selection_summary()",
     "selection_ops.gd|func get_selected_entity()",
     "selection_ops.gd|func get_group(",

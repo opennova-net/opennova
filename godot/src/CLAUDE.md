@@ -9,12 +9,16 @@ Godot's `GameFramePipeline`, a Resource-shaped ONED document surface, or a
 documented seam bridge — format/runtime logic and every witnessed behavior
 belong in `engine/`. Nova formats never touch Godot's resource system
 (documents self-read/write via `load_from_path`/`save_to_path`). The
-`adapter_cpp_orig_cites` ratchet is the transition gauge: a new `[orig:]`
-cite here is either a documented seam contract or code that belongs
-engine-side.
+two `adapter_cpp_orig_cites_*` ratchets are the transition gauge, split by
+population (2026-08-11): `_pushdown` (simulation/, object/, mission/) is
+witnessed engine behavior still living here — the burn-down class, and it
+can legitimately reach zero; `_device` (env/, terrain/, hud/, mnu/,
+particle/, network/, ...) is the retail-D3D→Godot device-leg mappings ADR
+0035 sanctions — it must not grow, but its floor is NON-ZERO BY DESIGN:
+deleting a device citation is a documentation regression, not a win.
 
-The game-level GDScript runtime (world, debug, environment, mission, ui,
-avatar, mcp, strings, util) lives in `godot/game/` (ADR 0034 d6) — anything
+The game-level GDScript runtime (world, debug, mission, object, terrain,
+ui, avatar, mcp, resource_index, strings, util) lives in `godot/game/` (ADR 0034 d6) — anything
 there that is really engine behavior is the C++ rewrite queue.
 
 Placement rule: no GDScript here, ever. Scripts go to `godot/game/` (game
@@ -53,6 +57,7 @@ Gotchas:
   unit-testable and interoperable; see `docs/net/novaworld-net-re.md`.
 - Decoded in-match entities have one runtime fold and one presenter (ADR 0026):
   `ClientReplicaPipeline` owns `ClientState`, and the native `WirePresentPass`
-  (`simulation/nova_present_applier_wire.cpp`) renders it for live joiners.
+  (`simulation/nova_wire_present_pass.cpp`; the hot row walk lives in
+  `nova_present_applier_wire.cpp`) renders it for live joiners.
   Nothing may grow another entity reducer or presenter. `NovaWorldClient` is matchmaking/handoff, not a
   gameplay-replication stack.
