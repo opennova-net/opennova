@@ -5,7 +5,8 @@ Checks ONLY lines ADDED in the given diff range — untouched code is never
 flagged (the ratchet in ratchet_counts.py covers the stock):
 
   dict-contract (ADR 0017): new Dictionary-shaped public contracts in
-      godot/modtools/ or godot/src/ GDScript — a public `-> Dictionary`
+      godot/game/ or godot/modtools/ GDScript (godot/src/ stays in scope
+      as a tripwire — it is C++-only by policy) — a public `-> Dictionary`
       return, a public `var x: Dictionary`, or a `const NAME := {` map
       table, all at CLASS level (column 0). Indented declarations are
       function-locals — annotating a local as Dictionary is not a new
@@ -40,7 +41,11 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 BASELINE_PATH = Path(__file__).resolve().parent / "maturity_baseline.json"
 
-LINT_SCOPES = ("godot/modtools/", "godot/src/")
+# godot/game/ carries the GDScript that lived in godot/adapter/ before the
+# ADR 0034 split — the #460 rename pointed this at godot/src/ (now C++-only)
+# and silently dropped the game layer; restored 2026-08-11. godot/src/ stays
+# as a zero-cost tripwire against policy-violating GDScript.
+LINT_SCOPES = ("godot/modtools/", "godot/game/", "godot/src/")
 
 # Column 0 only: class-level declarations. GDScript function bodies are
 # indented, so an indented match is a local, not a contract.

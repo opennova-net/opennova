@@ -124,13 +124,14 @@ def main() -> int:
         baseline = [ln.strip() for ln in args.baseline.read_text(encoding="utf-8").splitlines()
                     if ln.strip() and not ln.startswith("#")]
 
-    # The C-ABI family set comes from the baseline itself; platform noise
-    # (_init/_fini, mangled locals that leak into dynsym) is filtered out.
-    prefixes = {name.split("_", 1)[0] for name in baseline}
-    if prefixes:
-        current = sorted(s for s in symbols if s.split("_", 1)[0] in prefixes)
-    else:
-        current = sorted(symbols)
+    # Filter explicit platform noise only (_init/_fini, mangled C++ locals
+    # that leak into dynsym). Deriving the compare set from the baseline's
+    # own family prefixes silently admitted any NEW family (sph_*, til_*,
+    # mus_*, ...) — a brand-new export must show up as drift, not vanish.
+    NOISE = ("_init", "_fini", "_edata", "_end", "__bss_start")
+    current = sorted(
+        s for s in symbols
+        if s not in NOISE and not s.startswith("_Z") and not s.startswith("__"))
 
     if args.write_baseline:
         args.baseline.write_text(

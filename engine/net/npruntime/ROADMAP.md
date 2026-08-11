@@ -10,8 +10,8 @@ golden pcaps. **Server-first.**
 > module map, the frame order, what P8 retired, and the test-harness design. It is **not** live
 > status: in-match work since P8.2 (world-stream paging, the 0x0A/0x18 residual repairs, the
 > retail-join fidelity rounds) is tracked per-divergence in
-> [`docs/divergence-ledger.md`](../../docs/divergence-ledger.md) (the `PAR-NET` slice) and witnessed
-> in [`docs/net/novaworld-net-re.md`](../../docs/net/novaworld-net-re.md) §8. Start there for what
+> [`docs/divergence-ledger.md`](../../../docs/divergence-ledger.md) (the `PAR-NET` slice) and witnessed
+> in [`docs/net/novaworld-net-re.md`](../../../docs/net/novaworld-net-re.md) §8. Start there for what
 > is open today.
 
 The witness record is `docs/net/novaworld-net-re.md`; governing decisions are ADRs 0009–0013 and
@@ -45,7 +45,7 @@ rebuilds the *runtime* on top of those codecs as one faithful, maintainable core
   `ingame_encode`, `protocol_message`, `nw_session_framing`, `session_hello`, `session_keys`,
   `wire_capture`, `replay_timeline`, `serverlog_decode`); the `engine/net/netsim` seam
   (`ISessionTransport`, `LoopbackChannel`, `Connection`/`NetSystem`, `ClientReplicaPipeline`/`ClientState`,
-  `EntityWireBridge`, `PlayerIntent`) — finish the stubs, don't redesign; `apps/common/pcap_reader`;
+  `EntityWireBridge`, `PlayerIntent`) — finish the stubs, don't redesign; `engine/base/pcapio/pcap_reader`;
   `ClientSession` / `LobbySession`.
 - **Promote (keep proven logic, re-target):** `HostSessionAccept` → `NapiNPProtocol` server
   handshake legs; `JoinerSession` → `client_runtime` in-match leg. **Port the F3 dcb-timing fix
@@ -377,7 +377,7 @@ over `conn.burst` is the sole spawn driver — and moved ONLY the reactive gamep
 the new `engine/net/npruntime/server_message_dispatch.{h,cpp}` (`dispatch_session_replies` over
 `ctx.session_config` + the per-connection `NapiNPConnection.reply` state). Reply BODIES are carried
 verbatim (captured-from-observation fixtures, D-NET-127); the faithful per-body serializer port + the
-deferred §5.2a serializers + the `Server_OnPlayerJoin` join-burst tail (`0x42/0x0F/0x4D/seed/0x3E`,
+`Server_OnPlayerJoin` join-burst tail (the deferred §5.2a serializer half closed at P8.2 below) (`0x42/0x0F/0x4D/seed/0x3E`,
 to fold into `Server_SendInitialGameStateToPlayer`) stay the tracked grill-wave follow-up.
 
 Migrations the deletion forced: `napi_np_protocol.cpp` (drop `ctx.game_runtime` + the mirror; reactive

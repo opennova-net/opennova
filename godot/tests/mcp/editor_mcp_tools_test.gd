@@ -135,7 +135,7 @@ func test_read_file_unresolvable_is_actionable() -> void:
 
 
 func test_describe_asset_strings_fixture() -> void:
-	var path := ProjectSettings.globalize_path("res://fixtures/strings/menu.bin")
+	var path := ProjectSettings.globalize_path("res://../fixtures/rtxt/menu.bin")
 	var summary: McpToolResult = await _call("describe_asset", { "path": path })
 	assert_false(summary.is_error)
 	assert_eq(summary.structured["kind"], "strings")

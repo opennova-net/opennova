@@ -5,10 +5,12 @@ description: Launches this repo's Godot project — the ONED editor or the game 
 
 # Run ONED / the OpenNova runtime
 
-The Godot project is `godot/` (Godot 4.6.1). The default scene is
-`res://modtools/editor/editor_main.tscn` — the EditorApp root hosting the whole
-ONED shell with all thirteen workspaces. The game runtime is
-`res://game/main_game.tscn`. All commands are Git Bash, from the repo root.
+The Godot project is `godot/` (Godot 4.6.1). The DEFAULT main scene is the
+GAME runtime, `res://game/main_game.tscn` (project.godot run/main_scene); the
+ONED editor scene `res://modtools/editor/editor_main.tscn` — the EditorApp
+root hosting all thirteen workspaces — is only the `.modtools` feature-tag
+override (the packaged editor exe). To run ONED from source, pass the editor
+scene path EXPLICITLY. All commands are Git Bash, from the repo root.
 
 ## 1. Find the Godot binary
 
@@ -27,7 +29,7 @@ exists, ask the user — do not download one.
   empty), then `bash scripts/build_godot.sh` — `godot/bin/` contains only
   `opennova.gdextension` until you build, and nothing Godot-side works without
   the DLL. The editor and any `--path godot` run load `template_debug`.
-- Stale code: if behavior doesn't reflect new `godot/adapter/` C++, compare the
+- Stale code: if behavior doesn't reflect new `godot/src/` C++, compare the
   timestamp of `godot/bin/libopennova.windows.template_debug.x86_64.dll`
   against the source change, rebuild, and FULLY restart Godot — GDExtension
   registration does not hot-reload, and a running editor holds the DLL lock.
@@ -43,7 +45,7 @@ exists, ask the user — do not download one.
 
 ONED and the runtime share one external "resource root" persisted in
 `user://terrain_editor_state.cfg` (see
-`godot/adapter/resource_index/resource_dir_settings.gd`) — an interactive launch
+`godot/game/resource_index/resource_dir_settings.gd`) — an interactive launch
 on a machine that has used ONED before usually just works. Env vars are for
 automation only:
 
@@ -58,9 +60,10 @@ needed, ask the user for the path; never guess or commit one.
 
 - Interactive / visual check (needs a real window): prefer the MCP godot
   server — `mcp__godot__run_project` with the absolute path to `godot/`
-  (optional `scene` for `res://game/main_game.tscn`), then poll
-  `mcp__godot__get_debug_output`, and finish with `mcp__godot__stop_project`.
-  Raw fallback (run in background): `"$GODOT_BIN" --path godot [scene]`.
+  (no `scene` = the GAME; pass `res://modtools/editor/editor_main.tscn` for
+  ONED), then poll `mcp__godot__get_debug_output`, and finish with
+  `mcp__godot__stop_project`. Raw fallback (run in background):
+  `"$GODOT_BIN" --path godot [scene]` — again, no scene launches the GAME.
 - Game-under-ONED (the managed F5/F6 child, ADR 0025): when ONED is running
   with its MCP server, drive the game through the repo's own `oned` server
   instead — `run_game(op="start", mode="game"|"mission")` mirrors F5/F6,

@@ -27,8 +27,7 @@ the importer inherits their parity, it does not re-derive it:
 | `threedi_ffi` / `adm_ffi` | `engine/formats/threedi` | [threedi/3di-gp-format-re.md](../threedi/3di-gp-format-re.md) |
 | `bad_ffi` (skeletal anim) | `engine/runtime/anim` | `.bad`/`.adm` skeletal runtime record |
 | `def_ffi` (item defs) | `engine/formats/def` | [world/itemdef-re.md](../world/itemdef-re.md) (D-ITEMDEF) |
-| `pff_ffi` (archives) | `engine/formats/pff` / `engine/base/vfs` | [vfs/vfs-pff-mount-re.md](../vfs/vfs-pff-mount-re.md) (D-VFS) |
-| `scr_ffi` (SCR container) | `engine/formats/scr` | D-SCR register (ledger PERMANENT) |
+| `vfs_ffi` (PFF mount / SCR / BFC1 — inside the native VFS) | `engine/base/vfs` (`engine/formats/pff`, `engine/formats/scr`) | [vfs/vfs-pff-mount-re.md](../vfs/vfs-pff-mount-re.md) (D-VFS); D-SCR register (ledger PERMANENT) |
 | `ase_ffi` / `ase_material_writer` | `engine/formats/threedi` ASE path | 3DI material-pipeline record |
 
 ## Where the importer's own choices live — and why they are NOT parity divergences

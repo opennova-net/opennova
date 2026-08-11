@@ -588,7 +588,8 @@ along seams that already exist as signal boundaries in the code.
   scripting inspector tests.
 - MIS-3: scripting depth audit — event/param coverage vs the 218-file WAC/BMS
   corpus; close typing gaps found (each new param type cited). Gate: corpus
-  parse sweep, no regressions.
+  parse sweep, no regressions. Known instances are listed in `TODO.md`
+  § General Mission / § BMS Scripting — new ones land THERE, not here.
 - MIS-4 (= F5): controller decomposition — DONE before any MIS work
   (#204 + #373; see F5).
 

@@ -20,7 +20,7 @@ extends RefCounted
 # "EditorClearColor" is the faithful below-rim frame-clear consumer.
 #
 # Reference via preload(), not class_name, so it resolves without an editor
-# re-import (same convention as mission_object_placer.gd).
+# re-import (same convention as nova_mission_object_placer.cpp).
 
 const HHMM_DAY := MissionEnvironment.HHMM_DAY
 

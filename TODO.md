@@ -52,7 +52,8 @@ hardening, and project health. Divergences from the original engine belong in
       the native walks (`nova_present_applier.{h,cpp}` 12, the wire walk +
       cold path `godot/src/simulation/nova_present_applier_wire.cpp`, the
       held-weapon reference math `engine/net/npruntime/client_replica_present.h`) —
-      but `engine/world/mission_entity_registry.gd` still carries none. Remaining:
+      but the native `EntityIndex` (`godot/src/object/nova_entity_index.cpp` —
+      the registry's successor) still carries none. Remaining:
       engine-research the original entity-reconcile chain and cite it into
       `docs/runtime-architecture.md` + `docs/correspondence.md`
 - [ ] Env/water/sky/weather singleton `_process` set: re-measure at the ASH_I5A
@@ -71,7 +72,7 @@ hardening, and project health. Divergences from the original engine belong in
       tile files as a cache. Decide: ledger it as a D-TERRAIN row (cache-trust is the
       witnessed semantic) or record it in `terrain-re.md` as a deliberate tool-side
       divergence
-- [ ] `opennova::io` adoption continuation: migrate remaining per-lib byte readers on-touch (policy in engine/CLAUDE.md); excluded: mus/wac VM cursors (faithful-port surface)
+- [ ] `opennova::io` adoption continuation: migrate remaining per-lib byte readers on-touch (policy in engine/CLAUDE.md); excluded: mus/wac VM cursors (faithful-port surface) and cpt (a real migration, tracked as its own row below)
 - [ ] Mission workspace rail conversion: with the inspector decomposed into section components, moving Mission onto `_build_inspector_defs()` workflow rows is a small step, but it swaps the in-panel mode tabs for the shell's workflow rail (visible layout change) - needs a deliberate UX pass
 - [ ] NovaWorld disconnect-state reset (owner: `godot/game/novaworld_panel.gd`): clear all connection-derived rows, login/join state, pending mission/player data, and disable Host/Join/Login on disconnect or error. Acceptance (`godot/tests/novaworld_panel_test.gd`): a populated, logged-in, pending-join panel returns to a clean disconnected state and cannot submit a stale row. Coordinate with the unlanded novaworld_panel rework held in the `gsb` worktree (WIP commit 0fd58850b on `worktree-gsb`; the branch's earlier commits landed via #300) before landing.
 - [ ] Export-progress overlay initiator awareness (owner: `godot/modtools/editor/shell/export_progress_overlay.gd`): the overlay polls the ACTIVE workspace, so an export running on a non-active workspace — reachable now that the flavor confirm exports the initiator — shows no progress UI. Route the overlay through the exporting workspace instead.
@@ -80,8 +81,8 @@ hardening, and project health. Divergences from the original engine belong in
 - [ ] W5 consolidations + push-downs (the 2026-07 quality campaign's last wave;
       waves 1-4 landed as #310-#375): perf-span unify, sim debug-snapshot
       narrowing (debug half only), ShellServices/DocumentKind/undo consolidation,
-      the avatar/object preview de-fork + shared MCP arg helper, push-downs
-      (the camera and armory push-downs are their own rows below) — opportunistic
+      the avatar/object preview de-fork + shared MCP arg helper, push-downs —
+      opportunistic
 - [ ] OED rattrib/pattrib no-magic (witness-first): named constants for the OED
       rattrib/pattrib magic values — #365 landed the net-message-id and
       witnessed-flag-bit halves; blocked on a ModSuperOed IDB witness
@@ -120,14 +121,6 @@ hardening, and project health. Divergences from the original engine belong in
 - [ ] Incremental conventional linting: establish project-owned editor/format settings, then add per-language lint checks in advisory or changed-file mode before enforcing them. Acceptance: CI checks new changes without requiring a repository-wide reformat, with documented local commands for each enabled linter.
 - [ ] Two ctests are `DISABLED TRUE` in `tests/CMakeLists.txt` with reasons recorded but no owner: `parametric_parity` (long byte-identical CPT fixture run, disabled pending CI stability/perf cost) and `particle_smoke_all_fixtures` (waiting on the full 77-file corpus being mirrored into `fixtures/particle/`). Acceptance: each is either re-enabled or converted into an env-gated test alongside the rest of the asset-gated set (`docs/asset-gated-tests.md`).
 - [ ] Product/engine boundary lint: PR #252's `scripts/lint/product_boundary_check.py` (mechanical teeth for the ADR 0015/0016 boundaries, 106 lines) closed unmerged 2026-07-17 and never landed in any form; the `heigene` worktree (branch `boundary-lint-pack`, head 149b88144) still holds it. Decide: reland a current-tree version, or record the drop as covered by `link_graph_check` (ADR 0020) + `host_lint`.
-
-## Player info (player.mnu / PLAYER_INFO)
-
-player.mnu is wired end to end (`player_info_menu_companion.gd`; grilled in
-docs/playerinfo/avatars-re.md, D-PLAYERINFO-7..12). Remaining:
-
-- [ ] Persist the avatar/class/loadout selections to the on-disk profile
-      (D-PLAYERINFO-9 — the NAME half is done: `PlayerProfile.save_callsign` writes
-      `user://player_profile.cfg`; the ammo/type picks now ride `snapshot()` as
-      `*_clips`/`*_ammo_type`) + render the chosen combo on the spawned soldier
-      (D-PLAYERINFO-1, still NEEDS-RE).
+- [ ] Serve mode (PROD-1, ADR 0015): `opennova.exe --server` / `--headless
+      --server` and a packaging boot-smoke leg — tracked future work, never
+      implemented; specs live in `docs/maturity-program.md` §PROD.

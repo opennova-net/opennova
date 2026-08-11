@@ -39,8 +39,6 @@ Godot direct-launch variables:
 - Host: `NW_LAN_HOST`, `NW_LAN_PORT`, `NW_GATE_HOST`, `NW_GATE_PORT`,
   `NW_LAN_NAME`
 - Joiner: `NW_LAN_JOIN`, `NW_LAN_MISSION`, `NW_LAN_NAME`
-- Replay spectator: `NW_REPLAY`, `NW_REPLAY_DIR`, `NW_REPLAY_LOOSE`,
-  `NW_REPLAY_ITEMS`
 
 ## What Can Be Automated Today
 
@@ -53,7 +51,7 @@ Godot direct-launch variables:
   `.agents/retail-lan-parity.md`.
 - API polling through `/api/server-info`, `/api/hosts`, `/api/lobbies`, and
   `/api/unknowns`.
-- Packet decode with `nw_pp` and replay/spectator streaming with `nw_replay`.
+- Packet decode with `nw_pp`.
 
 Direct LAN host/join no longer requires menu navigation: the debug hook's
 cfg-driven driver uses the witnessed stock transitions and fails closed to a
@@ -77,8 +75,6 @@ Supported inputs:
 - `nw_pp <capture.pcapng>` or `nw_pp <capture.pcap>`
 - `nw_pp <capture.hexcap>`
 - `nw_pp <host.sph>` or `nw_pp <client.sph>`
-- `nw_replay <capture.pcapng> --print-roles`
-- `nw_replay <capture.pcapng> --validate --items <items.def>`
 
 Useful env-gated witnesses:
 
@@ -148,8 +144,6 @@ paging rather than assuming either "all statics" or "no statics."
 
 ## Paths Not To Confuse
 
-- `NovaNetClient` is replay/spectator receive plumbing over the canonical
-  `ClientReplicaPipeline`, not a second gameplay client stack (ADR 0026).
 - `ClientSession` is the NOVAWORLDUDP lobby-verify/proto-switch client (the
   `LobbySession` mirror — "lobby verify" is that exchange's protocol name), not
   in-match replication.

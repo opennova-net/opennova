@@ -69,7 +69,7 @@ func test_open_populates_table() -> void:
 
 	var ws = workstation._get_workspace(EditorWorkstationScript.Workspace.STRINGS)
 	assert_not_null(ws, "the strings workspace adapter should exist")
-	var err: int = ws.open_file("res://fixtures/strings/menu.bin")
+	var err: int = ws.open_file("res://../fixtures/rtxt/menu.bin")
 	assert_eq(err, OK, "opening the fixture should succeed")
 	await get_tree().process_frame
 
@@ -86,7 +86,7 @@ func test_inspector_offers_used_by_for_the_open_table_without_index_build() -> v
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.STRINGS)
 	await get_tree().process_frame
 	var ws = workstation._get_workspace(EditorWorkstationScript.Workspace.STRINGS)
-	assert_eq(ws.open_file("res://fixtures/strings/menu.bin"), OK)
+	assert_eq(ws.open_file("res://../fixtures/rtxt/menu.bin"), OK)
 	await get_tree().process_frame
 
 	var strip = workstation.find_child("StringsUsedByStrip", true, false)
@@ -126,7 +126,7 @@ func test_used_by_queries_table_spellings_and_retargets_on_tab_switch() -> void:
 	var shell: UsedByShell = add_child_autofree(UsedByShell.new())
 	var ws = autofree(workspace_script.new())
 	ws.set_editor_shell(shell)
-	assert_eq(ws.open_file("res://fixtures/strings/menu.bin"), OK)
+	assert_eq(ws.open_file("res://../fixtures/rtxt/menu.bin"), OK)
 
 	var mount := Control.new()
 	add_child_autofree(mount)
@@ -148,7 +148,7 @@ func test_used_by_queries_table_spellings_and_retargets_on_tab_switch() -> void:
 	var copy_dir := "user://test_strings_used_by"
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(copy_dir))
 	var copy_path := copy_dir + "/other.bin"
-	DirAccess.copy_absolute(ProjectSettings.globalize_path("res://fixtures/strings/menu.bin"),
+	DirAccess.copy_absolute(ProjectSettings.globalize_path("res://../fixtures/rtxt/menu.bin"),
 		ProjectSettings.globalize_path(copy_path))
 	var before := (shell.index.queries as Array).size()
 	assert_eq(ws.open_file(copy_path), OK, "a second table opens in its own tab")
@@ -200,7 +200,7 @@ func test_detail_game_preview_renders_selected_entry_through_engine_font() -> vo
 	assert_not_null(ws.load_preview_font("Serpen24.fnt"),
 		"fonts load through the runtime path (VFS read -> FntResource -> FontFile)")
 
-	assert_eq(ws.open_file("res://fixtures/strings/menu.bin"), OK)
+	assert_eq(ws.open_file("res://../fixtures/rtxt/menu.bin"), OK)
 	var mount := Control.new()
 	add_child_autofree(mount)
 	ws.mount_viewport(mount)
@@ -240,7 +240,7 @@ func test_detail_game_preview_without_a_mounted_root_offers_no_fonts() -> void:
 	assert_eq(ws.get_preview_font_names(), PackedStringArray(),
 		"headless / no mounted folder yields no fonts (strings stays shell-only)")
 
-	assert_eq(ws.open_file("res://fixtures/strings/menu.bin"), OK)
+	assert_eq(ws.open_file("res://../fixtures/rtxt/menu.bin"), OK)
 	var mount := Control.new()
 	add_child_autofree(mount)
 	ws.mount_viewport(mount)
@@ -263,7 +263,7 @@ func test_section_filter_scopes_rows() -> void:
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.STRINGS)
 	await get_tree().process_frame
 	var ws = workstation._get_workspace(EditorWorkstationScript.Workspace.STRINGS)
-	assert_eq(ws.open_file("res://fixtures/strings/menu.bin"), OK)
+	assert_eq(ws.open_file("res://../fixtures/rtxt/menu.bin"), OK)
 	await get_tree().process_frame
 
 	var mount: Control = workstation.get_node("%ViewportMount")
@@ -304,7 +304,7 @@ func test_session_restore_reopens_last_file() -> void:
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.STRINGS)
 	await get_tree().process_frame
 	var ws = workstation._get_workspace(EditorWorkstationScript.Workspace.STRINGS)
-	assert_eq(ws.open_file("res://fixtures/strings/menu.bin"), OK)
+	assert_eq(ws.open_file("res://../fixtures/rtxt/menu.bin"), OK)
 	workstation.queue_free()
 	await get_tree().process_frame
 
@@ -313,7 +313,7 @@ func test_session_restore_reopens_last_file() -> void:
 	workstation2.set_active_workspace(EditorWorkstationScript.Workspace.STRINGS)
 	await get_tree().process_frame
 	var ws2 = workstation2._get_workspace(EditorWorkstationScript.Workspace.STRINGS)
-	assert_eq(ws2.strings_editor.current_path, "res://fixtures/strings/menu.bin",
+	assert_eq(ws2.strings_editor.current_path, "res://../fixtures/rtxt/menu.bin",
 		"the last opened table should be restored on activate")
 	assert_eq(ws2.strings_editor.string_table.get_entry_count(), 6)
 	assert_false(ws2.strings_editor.is_dirty, "a restored table starts clean")
@@ -324,7 +324,7 @@ func test_inspector_lookup_tester_resolves_like_the_game() -> void:
 	workstation.set_active_workspace(EditorWorkstationScript.Workspace.STRINGS)
 	await get_tree().process_frame
 	var ws = workstation._get_workspace(EditorWorkstationScript.Workspace.STRINGS)
-	assert_eq(ws.open_file("res://fixtures/strings/menu.bin"), OK)
+	assert_eq(ws.open_file("res://../fixtures/rtxt/menu.bin"), OK)
 	await get_tree().process_frame
 
 	var lookup: LineEdit = workstation.find_child("StringsLookupEdit", true, false)

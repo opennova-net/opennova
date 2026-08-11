@@ -59,6 +59,7 @@ SCAN_PREFIXES = (
     "godot/", "engine/", "apps/", "scripts/", "web/src/", "pyopennova/",
     "tests/", "launcher/", "backend/", "blender/", "opennova_max/",
     "opennova_qt_ui/", "opennova_jobs/", "opennova_blender/", "release/",
+    "tools/", "deploy/", "infra/", "fixtures/",
 )
 HARD_EXCLUDES = ("third_party/", "/build/", "scripts/lint/host_lint.py",
                  "scripts/lint/host_allowlist.json")

@@ -18,7 +18,7 @@ behavior is summarized and cited.
 |---|---|
 | [`current-state.md`](current-state.md) | Where the project is and where the next step is written down: the phase (maturity program closed, retail-fidelity slices current), the standing slice loop, which record names each domain's next step, and the research queue |
 | [`engine-primer.md`](engine-primer.md) | Start here for engine work: the original engine in one read — binaries/IDBs, engine-wide conventions (fixed-point, coordinates, the 62 Hz tick), subsystem index, and the research toolbox |
-| [`runtime-architecture.md`](runtime-architecture.md) | How a mission runs: the consolidated logic tick, present pass, and audio pass, mapped onto the original main loop |
+| [`runtime-architecture.md`](runtime-architecture.md) | How a mission runs: how a mission runs under ADR 0035: the portable `MissionSession` tick and the `GameFramePipeline` device-leg order, mapped onto the original main loop |
 | [`correspondence.md`](correspondence.md) | The cross-system parity matrix: which original function each reimplementation corresponds to, with verdicts |
 | [`perf/mission-load-baseline.md`](perf/mission-load-baseline.md) | Recorded mission-load timings (PerfTimeline) and the verdict that gates the perf push-down slices |
 | [`perf/reground-baseline.md`](perf/reground-baseline.md) | Recorded bulk re-ground timings (the activate-time "terrain changed under N objects" flow) behind the re-ground perf slices |
@@ -85,7 +85,7 @@ behavior is summarized and cited.
 | Fonts | [`fonts/fnt-re.md`](fonts/fnt-re.md) | landed (PAR-R4 audit: the `.fnt` format + load contract, D-FNT-1..4; cp1252 glyph mapping fixed 2026-07-19) |
 | Foliage | [`foliage/foliage-re.md`](foliage/foliage-re.md) | landed (fresh 2026-07-13 re-grill and replacement: ported detail/MODEL tier semantics, separate flat-detail and sector-routed MODEL authored-map gates, all-surface LOD0 geometry, `:fd`, shaders, static `.til` RGB/tint at the pre-wind coordinate, persistent LRU/1000-entry cache cadence, identity/eviction order, and matching shadow-off for retail's dead flag; D-FOLIAGE-7/-9/-10 bound the general page/cache + ordered RT producer, visibility membership, and reimpl draw order/reflection) |
 | Tiles | [`tiles/til-re.md`](tiles/til-re.md) | landed (PAR-R3 audit: overlay/atlas/flip-rotate MATCHING vs retail `@0x60df0d`/`@0x604700`, D-TIL-1 outline) |
-| Importer | [`importer/importer-audit.md`](importer/importer-audit.md) | landed (PAR-R6: tracked-by-composition — no independent parity surface, composes RE'd `libs` via `pyopennova`) |
+| Importer | [`importer/importer-audit.md`](importer/importer-audit.md) | landed (PAR-R6: tracked-by-composition — no independent parity surface, composes the RE'd engine libraries via `pyopennova`) |
 | Interface | [`interface/rtxt-strings-re.md`](interface/rtxt-strings-re.md) | landed |
 | Terrain | [`terrain/terrain-re.md`](terrain/terrain-re.md) | partial (fresh 2026-07-13 rendering re-grill: exact eight-family LOD selector, authored coefficient/DBlend/paired mips, four-lock heightfield-normal atlas, bare cached-tile RGB/DOT3 alpha, direct light packing, top ps.1.4 arithmetic, overlay order, and fog; D-TERRAIN-7/-8/-9 now bound only remaining dynamic composition, local lights/shadows, and editor-preview inputs) |
 | Interface | [`interface/loading-screen-re.md`](interface/loading-screen-re.md) | landed (2026-07-12: the sidecar `<missionbase>.pcx` rule, MP session text, progress bar + creep smoothing witnessed AND ported; D-LOADSCR-1..7; SP splash + joiner hold tracked) |

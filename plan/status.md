@@ -10,7 +10,9 @@ Integration trunk: `web-nw-for-real-master`. All 20 PRs below were **MERGED** to
 and the single integration PR **#136** (`web-nw-for-real-master` → `master`) followed.
 Last updated as live status: 2026-06-12.
 
-**Remaining: PR 21 (operator-run cutover).** Runbook: [`pr21-cutover-runbook.md`](pr21-cutover-runbook.md).
+PR 21 (operator-run cutover) was never executed; it is tracked live in
+[TODO.md](../TODO.md) § Project health follow-ups. Runbook:
+[`pr21-cutover-runbook.md`](pr21-cutover-runbook.md).
 
 ## Client completion (ADR 0010)
 
@@ -78,7 +80,6 @@ Our own runtime client against both targets (OpenNova server / original NovaWorl
 | — | grill wave 3: novacrypto NW-C1..C4 (EPASK/PUBcrypto/url_cipher/NWU) | A | MERGED | `edbb6c33`, all MATCHING byte-exact vs retail; RE doc §8 + correspondence §5.1-5.4 |
 | 21 | production deploy + cutover | B | **runbook ready, pending operator** | [`pr21-cutover-runbook.md`](pr21-cutover-runbook.md); needs AWS + 1P vault + Cloudflare + docker host |
 
-Final step after PR 21: merge **#136** → `master`.
 
 ## Decisions log
 
@@ -103,8 +104,10 @@ Final step after PR 21: merge **#136** → `master`.
 - [x] Unknowns API shows JOINTOPERATIONS PN sightings when a match starts (PR 9)
 - [x] Two-client menu milestone through our game shell (PR 19)
 - [x] novacrypto byte-exact vs retail: NWU + EPASK + PUBcrypto + url_cipher (grill wave 3)
-- [ ] Production deploy from a docker-only machine: infra apply, app deploy, backup verified (PR 21)
-- [ ] Retail JO smoke over the internet; `nw.<domain>` resolves to the EIP and the launcher connects (PR 21)
+
+PR 21's two milestones (the production deploy from a docker-only machine and
+the retail JO smoke over the internet) were never run — tracked live in
+[TODO.md](../TODO.md) § Project health follow-ups.
 
 ## Grill items carried
 

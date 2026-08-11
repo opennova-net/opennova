@@ -13,11 +13,14 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 
-# The consumer trees on the far side of the seam.
+# The consumer trees on the far side of the seam. engine/runtime/world is
+# ADR 0020's protagonist — the lib the query capability exists FOR — so it
+# is scanned too (0 violations at add time; this locks the property in).
 SCAN_TREES = (
     "engine/net",
     "engine/runtime/wac",
     "engine/runtime/mission",
+    "engine/runtime/world",
 )
 
 SOURCE_SUFFIXES = (".h", ".cpp", ".c", ".hpp", ".cc")

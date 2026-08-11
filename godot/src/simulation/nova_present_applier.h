@@ -127,9 +127,9 @@ public:
 				opennova::simassets::kHeldWeaponBoneIndex,
 	};
 
-	// Emplaced-weapon CTRL registers (emplaced_weapon_present_pass.gd delegates
-	// here): EWEAP_GUNYAW/EWEAP_GUNPITCH only — clear_ctrl_values() would also
-	// erase live WAC channels.
+	// Emplaced-weapon CTRL registers (bound statics = the coop_two_sim test's
+	// seam onto the native leg): EWEAP_GUNYAW/EWEAP_GUNPITCH only —
+	// clear_ctrl_values() would also erase live WAC channels.
 	static int emplaced_apply(Object *node, const PackedFloat32Array &snap,
 			int base, bool clear_when_invalid);
 	static void emplaced_clear(Object *node);

@@ -7,15 +7,22 @@ in maturity_baseline.json:
   test_private_pokes    lines in godot/tests/**/*.gd that access an
                         _underscore member of ANOTHER object (self._ excluded)
                         -- ADR 0018: each is a missing public seam.
-  engine_uncited_src_files  files under engine/<group>/<lib>/src with zero
-                        "[orig" citations, excluding the allowlisted infra libs
-                        (citation is inapplicable there) -- the faithful-port
-                        rule's coverage floor.
-  adapter_cpp_orig_cites  "[orig:" citations across godot/src C++ (ADR
-                        0031): witnessed engine behavior belongs in engine/,
-                        so an adapter cite is either a documented seam
-                        contract or a push-down candidate. New ones need a
-                        deliberate bump; push-downs bank the decrease.
+  engine_uncited_src_files  engine/<group>/<lib> source files (post-flatten:
+                        no src/ level) with zero "[orig" citations, excluding
+                        the allowlisted infra libs (citation is inapplicable
+                        there) -- the faithful-port rule's coverage floor.
+  adapter_cpp_orig_cites_pushdown  "[orig:" citations in godot/src
+                        simulation/, object/, and mission/ -- witnessed
+                        engine behavior still living in the binding layer.
+                        The burn-down class: push-downs bank the decrease,
+                        and this one CAN legitimately reach zero.
+  adapter_cpp_orig_cites_device  "[orig:" citations in the rest of godot/src
+                        (env, terrain, hud, mnu, particle, network, ...) --
+                        the retail-D3D-to-Godot device-leg mappings ADR 0035
+                        sanctions. Ratcheted so it cannot grow, but its floor
+                        is NON-ZERO BY DESIGN: a device-leg citation is the
+                        seam contract working, and deleting one is a
+                        documentation regression, not a win.
 
 Modes:
   (default)         report counts vs baseline; exit 0 regardless (soft mode)
@@ -80,15 +87,23 @@ def count_engine_uncited_src_files(allowlist: set[str]) -> int:
     return count
 
 
-def count_adapter_cpp_orig_cites() -> int:
+# The push-down population: witnessed gameplay/format behavior in the binding
+# layer with a named engine/ destination (godot/src/CLAUDE.md). Everything
+# else under godot/src is the device population — seam contracts that stay.
+ADAPTER_PUSHDOWN_DIRS = ("simulation", "object", "mission")
+
+
+def _count_adapter_cites(pushdown: bool) -> int:
     count = 0
     adapter = REPO / "godot" / "src"
-    # build/ is the generated CMake tree (godot-cpp bindings) — not source.
-    build_dir = adapter / "build"
     for path in adapter.rglob("*"):
         if path.suffix.lower() not in (".c", ".cc", ".cpp", ".h", ".hpp"):
             continue
-        if build_dir in path.parents:
+        rel_parts = path.relative_to(REPO).parts
+        if "build" in rel_parts:  # generated CMake tree (godot-cpp), not source
+            continue
+        sub = path.relative_to(adapter).parts[0] if path.relative_to(adapter).parts else ""
+        if (sub in ADAPTER_PUSHDOWN_DIRS) != pushdown:
             continue
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
@@ -96,6 +111,14 @@ def count_adapter_cpp_orig_cites() -> int:
             continue
         count += text.count("[orig:")
     return count
+
+
+def count_adapter_cpp_orig_cites_pushdown() -> int:
+    return _count_adapter_cites(pushdown=True)
+
+
+def count_adapter_cpp_orig_cites_device() -> int:
+    return _count_adapter_cites(pushdown=False)
 
 
 LIBS_PRINT = re.compile(
@@ -136,13 +159,15 @@ GD_PRINT = re.compile(r"(?:^|[^_a-zA-Z\"])(?:print|prints|printerr|print_rich|pr
 GD_PRINT_ALLOWLIST = {"godot/modtools/tools/screenshot_capture.gd"}
 CPP_CONSOLE = re.compile(
     r"UtilityFunctions::print(?!_verbose)\s*\(|UtilityFunctions::printerr\s*\("
+    r"|UtilityFunctions::print_rich\s*\("
     r"|(?<![\w:])print_line\s*\(|\bWARN_PRINT(?:_ONCE|_ED)?\s*\(|\bERR_PRINT(?:_ONCE|_ED)?\s*\(")
 
 
 def count_gd_prints_outside_debug() -> int:
     """Raw print() family in the shipping godot layer (W1-2): the sanctioned
     channels are push_error/push_warning, print_verbose, and the F3 overlay.
-    godot/tests and the GUT addon are out of scope (probes print by design)."""
+    godot/tests and the GUT addon are out of scope (probes print by design).
+    godot/src is C++-only (ADR 0034 d6); its .gd leg here is a tripwire."""
     count = 0
     for sub in ("src", "game", "modtools"):
         for path in (REPO / "godot" / sub).rglob("*.gd"):
@@ -243,8 +268,9 @@ def count_oversize_gd_files() -> int:
 def count_cpp_binding_console_writes() -> int:
     """Console writes in the GDExtension bindings (W1-2): error paths use
     push_error/push_warning (the engine's error channel); narration uses
-    print_verbose. Raw print/printerr/print_line and the WARN/ERR_PRINT
-    macros are ratcheted at zero."""
+    print_verbose. Raw print/printerr/print_line, the WARN/ERR_PRINT macros,
+    AND raw CRT console writes (printf/std::cout/fprintf(stderr) — the same
+    family engine_stdout_prints ratchets engine-side) are all at zero."""
     count = 0
     for path in (REPO / "godot" / "src").rglob("*"):
         if path.suffix.lower() not in (".cpp", ".h", ".hpp"):
@@ -258,7 +284,7 @@ def count_cpp_binding_console_writes() -> int:
             continue
         for line in text.splitlines():
             code = line.split("//", 1)[0]
-            if CPP_CONSOLE.search(code):
+            if CPP_CONSOLE.search(code) or LIBS_PRINT.search(code):
                 count += 1
     return count
 
@@ -278,7 +304,8 @@ def main() -> int:
     current = {
         "test_private_pokes": count_test_private_pokes(),
         "engine_uncited_src_files": count_engine_uncited_src_files(allowlist),
-        "adapter_cpp_orig_cites": count_adapter_cpp_orig_cites(),
+        "adapter_cpp_orig_cites_pushdown": count_adapter_cpp_orig_cites_pushdown(),
+        "adapter_cpp_orig_cites_device": count_adapter_cpp_orig_cites_device(),
         "engine_stdout_prints": count_engine_stdout_prints(),
         "gd_prints_outside_debug": count_gd_prints_outside_debug(),
         "cpp_binding_console_writes": count_cpp_binding_console_writes(),

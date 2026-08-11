@@ -6,8 +6,8 @@
 > schema remain current against [DEPLOY.md](../DEPLOY.md). Tracked in
 > TODO.md § Project health follow-ups.
 
-Final step of the integration. Everything else is merged into the trunk
-`web-nw-for-real-master` (the single integration PR **#136** → `master` is open), CI is green
+Final step of the integration. The trunk merged long ago (#136 landed on
+`master`; see status.md), CI is green
 except the two known-unrelated reds (`modsuperoed-smoke`, `validate-deliverables`, also red on
 master), and the crypto is verified byte-exact vs retail (grill wave 3 NW-C1..C4, `edbb6c33`).
 
@@ -16,7 +16,7 @@ Cloudflare-managed domain, and a docker-only host — it makes outward-facing in
 Every command comes from `deploy/bin/on-deploy` and [`DEPLOY.md`](../DEPLOY.md).
 
 Goal: deploy the stack (gate + NovaWorld server + legacy HTTP services + web portal) to your cloud,
-smoke-test it against a retail JO client over the internet, and **merge #136**.
+smoke-test it against a retail JO client over the internet.
 
 ## One-time operator setup
 
@@ -119,10 +119,6 @@ immediate check add a Windows hosts entry `gs.novaworld.net  <EIP>` by hand. The
 
 If you are migrating off an older box, retire it once traffic is confirmed on the new one.
 
-## Merge gate
-
-Once the smoke passes, **merge PR #136** (`web-nw-for-real-master` → `master`).
-
 ## Gotchas
 
 - **GHCR packages must be public** (or add a registry login) before `app deploy`.
@@ -136,4 +132,3 @@ Once the smoke passes, **merge PR #136** (`web-nw-for-real-master` → `master`)
   `/api/server-info` + `/api/unknowns` respond; `backup now` produces an S3 object (`backup list`
   shows it).
 - `nw.<domain>` resolves to the EIP and the launcher connects through it.
-- **#136 merged** to `master`.

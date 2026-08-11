@@ -13,7 +13,7 @@ extends RefCounted
 # workspace picking bodies so both see identical geometry.
 #
 # Reference via preload(), not class_name, so it resolves without an editor
-# re-import (same convention as mission_object_placer.gd / veg_assets.gd).
+# re-import (same convention as nova_mission_object_placer.cpp / veg_assets.gd).
 
 
 # Collidable-type abbreviations (from the reference exporter's map_collidable_type).

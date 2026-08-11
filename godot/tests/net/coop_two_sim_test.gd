@@ -1,7 +1,5 @@
 extends GutTest
 
-const PresentEmplacedWeapon := preload(
-		"res://game/world/emplaced_weapon_present_pass.gd")
 
 # Co-op LAN bidirectional bring-up (D.2) at the Simulation layer: a HOST listen server
 # (enable_host_listen) and a JOINER (enable_join) run in the same headless process, each on a
@@ -1279,7 +1277,7 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 		return
 	var visual_before_snap: PackedFloat32Array = visual_before_record["snapshot"]
 	var visual_before_base := int(visual_before_record["base"])
-	assert_eq(PresentEmplacedWeapon.apply(
+	assert_eq(PresentApplier.emplaced_apply(
 			visual, visual_before_snap, visual_before_base, false), 2,
 			"production presentation consumes both decoded B50 controls")
 	var visual_yaw_before: Basis = (
@@ -1319,7 +1317,7 @@ func test_joiner_mount_aim_and_detach_are_authoritative_over_real_udp() -> void:
 	if not visual_after_record.is_empty():
 		var visual_after_snap: PackedFloat32Array = visual_after_record["snapshot"]
 		var visual_after_base := int(visual_after_record["base"])
-		assert_eq(PresentEmplacedWeapon.apply(
+		assert_eq(PresentApplier.emplaced_apply(
 				visual, visual_after_snap, visual_after_base, false), 2)
 		var visual_yaw_after: Basis = (
 				visual_parts[yaw_part] as Node3D).transform.basis

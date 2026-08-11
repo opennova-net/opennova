@@ -49,7 +49,7 @@ none of it (verified pre-move: zero terrain-family includes outside
 6. **The forbidden-edge check is permanent**:
    `scripts/lint/link_graph_check.py` asserts the TRANSITIVE link closure
    (graphviz dump of the configured tree, with a CMake-file walk fallback
-   for pre-build contexts) against `scripts/lint/forbidden_edges.json` —
+   for pre-build contexts) against its inlined forbidden-edge rules —
    wac/mission/net libs never reach
    terrain/cpt/til/trn/tpj/foliage, and npwire never reaches sqlite
    (ADR 0019). Soft in Wave 1, hard-fail forever after, per the umbrella's

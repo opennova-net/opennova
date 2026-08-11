@@ -305,7 +305,7 @@ void print_parity_event(const InGameMessage &message, uint64_t ts_nanos) {
 			message.settings_update ? 1u : 0u, message.payload.size(), body.c_str());
 }
 
-// pcap/pcapng reading is shared with the test suite: apps/common/pcap_reader.h
+// pcap/pcapng reading is shared with the test suite: engine/base/pcapio/pcap_reader.h
 // The outer-decode pipeline (envelope -> NWU -> SCRK -> 0x43/0x83 -> reassembly)
 // is shared too: engine/net/npwire/wire_capture.h decode_capture_to_messages.
 

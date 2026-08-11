@@ -10,11 +10,12 @@
   - `formats/` — one library per NovaLogic format (ADR 0024; what earns a lib vs stays
     runtime-fused: ADR 0030): adm, aip, pff, scr, sph, bfc1, pcx, fnt, rtxt, cbin,
     threedi, tdp, ase, bad, def, dep, avatars, mission, trn, tpj, tpm, cpt, til,
-    foliage, env, mnu, mns, sbf, lwf, dbf, mus, playersav, ptl,
+    foliage, env, mnu, mns, sbf, lwf, dbf, mus, playersav, particle (.ptl),
     wac (front end; compiler/VM stay runtime), oed.
   - `runtime/` — the in-match systems: world, wac (compiler/VM), mission (the runtime
     half — event runtime, promotion, boot; the document model is `formats/mission`),
-    anim, audio, particle, renderer, controls, terrain, terrain_query.
+    anim, audio, particle, renderer, controls, terrain, terrain_query,
+    environment, hud, menu, simassets.
   - `net/` — the wire/protocol stack and portable mission-session control
     (ADRs 0009–0012, 0019, 0035; Model-B-only): novacrypto, napi, npwire,
     novaworld, netsim, npruntime. `npruntime/mission_session.*` owns lifecycle,
@@ -70,8 +71,9 @@
   PARSE formats: pff/scr/bfc1, env/cbin/def/avatars/threedi/mnu/mission_format),
   runtime links base, net links runtime, the service links net. The ADR 0024 family
   groups are deleted as subsumed; ADR 0020's terrain seam is include-level now
-  (`scripts/lint/include_graph_check.py` — net/wac/mission may include only
-  terrain_query's four `terrain/` headers), and `link_graph_check.py` keeps the sqlite
+  (`scripts/lint/include_graph_check.py` — for net/wac/mission/world the
+  `terrain/` prefix is fully forbidden; the seam is terrain_query's four
+  `<terrain_query/...>` headers), and `link_graph_check.py` keeps the sqlite
   containment.
 - Shared infrastructure lives in `engine/base/io` (`opennova::io` / `opennova::strutil`,
   header-only): bounds-checked `ByteReader`/`ByteWriter`, LSB-first `BitReader`/
