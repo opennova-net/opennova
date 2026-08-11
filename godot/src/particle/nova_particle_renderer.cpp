@@ -269,7 +269,7 @@ AABB godot_aabb(const renderer::ParticleAabb &bounds) {
 	return AABB(minimum, maximum - minimum);
 }
 
-struct PacketDiagnostics {
+struct DrawListDiagnostics {
 	bool present = false;
 	std::uint64_t frame_id = 0;
 	renderer::ParticleFrameDebugCounters debug{};
@@ -277,7 +277,7 @@ struct PacketDiagnostics {
 	std::vector<renderer::ParticleEmitterDrawBounds> emitter_bounds;
 };
 
-void capture_draw_list_diagnostics(PacketDiagnostics &destination,
+void capture_draw_list_diagnostics(DrawListDiagnostics &destination,
 		const renderer::ParticleDrawList &draw_list) {
 	destination.present = true;
 	destination.frame_id = draw_list.frame_id;
@@ -286,7 +286,7 @@ void capture_draw_list_diagnostics(PacketDiagnostics &destination,
 	destination.emitter_bounds = draw_list.emitter_bounds;
 }
 
-Dictionary draw_list_report(const PacketDiagnostics &draw_list) {
+Dictionary draw_list_report(const DrawListDiagnostics &draw_list) {
 	Dictionary result;
 	if (!draw_list.present)
 		return result;
@@ -485,7 +485,7 @@ public:
 	MeshInstance3D *first_person_instance = nullptr;
 	Ref<ArrayMesh> first_person_mesh;
 	std::array<renderer::ParticleFrameCompiler, 2> compilers;
-	std::array<PacketDiagnostics, 2> draw_lists;
+	std::array<DrawListDiagnostics, 2> draw_lists;
 	renderer::ParticleFrameSnapshot render_snapshot;
 	std::shared_ptr<const std::vector<opennova::particle::ParticleDef>> catalog_definitions;
 	std::vector<DefinitionVisual> definition_visuals;
@@ -1491,7 +1491,7 @@ int64_t ParticleRenderer::get_rendered_quad_count() const {
 	if (!impl_)
 		return 0;
 	std::size_t total = 0;
-	for (const PacketDiagnostics &draw_list : impl_->draw_lists) {
+	for (const DrawListDiagnostics &draw_list : impl_->draw_lists) {
 		if (draw_list.present)
 			total += draw_list.debug.emitted_quads;
 	}
@@ -1502,7 +1502,7 @@ int64_t ParticleRenderer::get_draw_command_count() const {
 	if (!impl_)
 		return 0;
 	std::size_t total = 0;
-	for (const PacketDiagnostics &draw_list : impl_->draw_lists) {
+	for (const DrawListDiagnostics &draw_list : impl_->draw_lists) {
 		if (draw_list.present)
 			total += draw_list.debug.draw_commands;
 	}
@@ -1577,7 +1577,7 @@ Array ParticleRenderer::get_debug_emitter_bounds() const {
 	if (!impl_)
 		return result;
 	for (std::size_t domain = 0; domain < impl_->draw_lists.size(); ++domain) {
-		const PacketDiagnostics &draw_list = impl_->draw_lists[domain];
+		const DrawListDiagnostics &draw_list = impl_->draw_lists[domain];
 		if (!draw_list.present)
 			continue;
 		for (const renderer::ParticleEmitterDrawBounds &bounds :
