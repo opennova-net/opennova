@@ -86,6 +86,18 @@ void NetProtocol::_bind_methods() {
 	ClassDB::bind_static_method("NetProtocol",
 			D_METHOD("game_type_for_mission_mode", "attrib_mode"),
 			&NetProtocol::game_type_for_mission_mode);
+	ClassDB::bind_static_method("NetProtocol",
+			D_METHOD("game_type_host_list_visible", "game_type"),
+			&NetProtocol::game_type_host_list_visible);
+	ClassDB::bind_static_method("NetProtocol",
+			D_METHOD("game_type_host_filter_category", "game_type"),
+			&NetProtocol::game_type_host_filter_category);
+	ClassDB::bind_static_method("NetProtocol",
+			D_METHOD("game_type_host_abbreviation_key", "game_type"),
+			&NetProtocol::game_type_host_abbreviation_key);
+	ClassDB::bind_static_method("NetProtocol",
+			D_METHOD("game_type_host_rotation_default", "game_type"),
+			&NetProtocol::game_type_host_rotation_default);
 	ClassDB::bind_static_method("NetProtocol", D_METHOD("custom_text_default"),
 			&NetProtocol::custom_text_default);
 	ClassDB::bind_static_method("NetProtocol", D_METHOD("wire_handle_pool", "handle"),
@@ -148,6 +160,26 @@ void NetProtocol::_bind_methods() {
 int NetProtocol::game_type_for_mission_mode(int p_attrib_mode) {
 	return static_cast<int>(opennova::game_type::for_mission_mode(
 			static_cast<uint32_t>(p_attrib_mode)));
+}
+
+bool NetProtocol::game_type_host_list_visible(int p_game_type) {
+	return opennova::game_type::host_list_visible(
+			static_cast<uint32_t>(p_game_type));
+}
+
+int NetProtocol::game_type_host_filter_category(int p_game_type) {
+	return opennova::game_type::host_filter_category(
+			static_cast<uint32_t>(p_game_type));
+}
+
+String NetProtocol::game_type_host_abbreviation_key(int p_game_type) {
+	return String(opennova::game_type::host_abbreviation_key(
+			static_cast<uint32_t>(p_game_type)));
+}
+
+bool NetProtocol::game_type_host_rotation_default(int p_game_type) {
+	return opennova::game_type::host_rotation_default(
+			static_cast<uint32_t>(p_game_type));
 }
 
 String NetProtocol::custom_text_default() {

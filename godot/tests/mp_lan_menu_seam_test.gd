@@ -98,13 +98,19 @@ func _press(driver: MenuDriver, name: String) -> void:
 	driver.widget_activated.emit(driver.widget_id(name), name)
 
 
+# A synthetic host-listable catalog row (objective co-op unless overridden —
+# stock co-op is host-invisible by the witnessed populate skip).
+func _pool_row(file: String, game_type := 0x30020) -> MissionCatalogRow:
+	return MissionCatalogRow.create(file, "", "", game_type, false)
+
+
 func _start_host_config(mission_file: String) -> HostSessionConfig:
 	var mp := MpMenuCompanion.new()
 	watch_signals(mp)
 	var driver := _make_host_driver()
 	mp.on_menu_built(driver, "jo_mp.mnu", "MULTI_PLAYER_HOST", null)
+	mp.seed_host_pool([_pool_row(mission_file)])
 	var mission_list := driver.widget_id("MISSION_LIST")
-	driver.set_widget_items(mission_list, PackedStringArray([mission_file]))
 	driver.select_row(mission_list, 0)
 	_press(driver, "ADD_MISSIONS")
 	_press(driver, "START_GAME")
@@ -130,18 +136,28 @@ func test_add_and_remove_missions() -> void:
 	var mp := MpMenuCompanion.new()
 	var driver := _make_host_driver()
 	mp.on_menu_built(driver, "jo_mp.mnu", "MULTI_PLAYER_HOST", null)
+	mp.seed_host_pool([_pool_row("alpha.bms"), _pool_row("bravo.bms")])
 	var mission_list := driver.widget_id("MISSION_LIST")
-	driver.set_widget_items(mission_list, PackedStringArray(["alpha.bms", "bravo.bms"]))
+	assert_eq(driver.item_count(mission_list), 2, "the pool seeds the list")
 	driver.select_row(mission_list, 0)
 	_press(driver, "ADD_MISSIONS")
 	var table := driver.widget_id("SELECTED_MISSIONS")
 	assert_eq(driver.table_row_count(table), 1, "ADD moved the highlighted mission into the rotation")
 	assert_eq(driver.table_cell_text(table, 0, 0), "alpha.bms")
+	assert_eq(driver.table_cell_text(table, 0, 1), "COOP",
+			"the Type cell carries the GateTypeAbbrev key (no gametext here)")
+	assert_eq(driver.table_cell_text(table, 0, 2), "0",
+			"objective co-op defaults its rotation Switch off")
+	# The added mission leaves the available list [orig: the +4412 hide]; the
+	# reseed also clears the selection, so a second ADD picks nothing.
+	assert_eq(driver.item_count(mission_list), 1, "the added mission left the list")
 	_press(driver, "ADD_MISSIONS")
 	assert_eq(driver.table_row_count(table), 1, "ADD de-dupes the same mission")
 	driver.table_select_row(table, 0)
 	_press(driver, "REMOVE_MISSIONS")
 	assert_eq(driver.table_row_count(table), 0, "REMOVE dropped the selected row")
+	assert_eq(driver.item_count(mission_list), 2,
+			"REMOVE restored the mission to the available list")
 
 
 func test_start_game_emits_host_config() -> void:
@@ -151,8 +167,8 @@ func test_start_game_emits_host_config() -> void:
 	mp.on_menu_built(driver, "jo_mp.mnu", "MULTI_PLAYER_HOST", null)
 	driver.set_widget_text(driver.widget_id("GAME_NAME"), "CoopNight")
 	driver.set_widget_text(driver.widget_id("MAX_PLAYERS"), "6")
+	mp.seed_host_pool([_pool_row("alpha.bms")])
 	var mission_list := driver.widget_id("MISSION_LIST")
-	driver.set_widget_items(mission_list, PackedStringArray(["alpha.bms"]))
 	driver.select_row(mission_list, 0)
 	_press(driver, "ADD_MISSIONS")
 	_press(driver, "START_GAME")
@@ -183,11 +199,23 @@ func test_start_game_defaults() -> void:
 	watch_signals(mp)
 	var driver := _make_host_driver()
 	mp.on_menu_built(driver, "jo_mp.mnu", "MULTI_PLAYER_HOST", null)
+	# An empty rotation never starts [orig: the START_GAME interactive gate on
+	# the selected table @0x557f09 / the init disable @0x5589f2].
+	_press(driver, "START_GAME")
+	assert_signal_not_emitted(mp, "lan_host_start_requested",
+			"an empty rotation gates START_GAME off")
+	assert_true(driver.is_widget_disabled(driver.widget_id("START_GAME")),
+			"the button is non-interactive while the rotation is empty")
+	mp.seed_host_pool([_pool_row("alpha.bms")])
+	driver.select_row(driver.widget_id("MISSION_LIST"), 0)
+	_press(driver, "ADD_MISSIONS")
+	assert_false(driver.is_widget_disabled(driver.widget_id("START_GAME")),
+			"a filled rotation arms START_GAME")
 	_press(driver, "START_GAME")
 	var config: HostSessionConfig = get_signal_parameters(mp, "lan_host_start_requested")[0]
 	assert_eq(config.server_name, "COOPGAME", "blank name -> default")
 	assert_eq(config.max_players, 4, "blank cap -> default 4")
-	assert_eq(config.mission, "", "no missions selected -> empty")
+	assert_eq(config.mission, "alpha.bms", "the rotation head is the mission")
 	assert_eq(config.bind_port, HostSessionConfig.DEFAULT_LAN_PORT,
 		"the witnessed retail LAN host port rides the record default")
 
@@ -212,12 +240,48 @@ func test_servertype_value_attr_selects_dedicated_not_the_label() -> void:
 	driver.select_row(servertype, 1)  # emits "spinlist" — the user flip
 	assert_eq(driver.spin_value_attr(servertype), "1",
 		"HG_SERVEONLY reads its authored value attr 1")
+	# The rotation must hold a mission before START arms; the pool row's
+	# category (TKOTH -> 3) matches this menu's selected GAME_TYPE value "3".
+	mp.seed_host_pool([_pool_row("alpha.bms", 0x10001)])
+	driver.select_row(driver.widget_id("MISSION_LIST"), 0)
+	_press(driver, "ADD_MISSIONS")
 	_press(driver, "START_GAME")
 	assert_signal_emitted(mp, "lan_host_start_requested")
 	var config: HostSessionConfig = get_signal_parameters(mp, "lan_host_start_requested")[0]
 	assert_true(config.dedicated, "SERVERTYPE value 1 hosts dedicated (no local player)")
 	assert_eq(config.game_type_attr, "3",
 		"the GAME_TYPE spin relays its selected row's authored value attr")
+
+
+# The witnessed host pool rules (D-MNU-17): stock co-op (the pure-SP family)
+# never lists [orig: the populate skip @0x558a70]; the GAME_TYPE spin filters
+# by the mapped category with an absent spin reading ALL
+# [orig: filter_mission_list_by_game_type @0x556fe0].
+func test_host_pool_filter_and_sp_exclusion() -> void:
+	var mp := MpMenuCompanion.new()
+	var driver := _make_host_driver()
+	mp.on_menu_built(driver, "jo_mp.mnu", "MULTI_PLAYER_HOST", null)
+	mp.seed_host_pool([
+		_pool_row("training.bms", 0x10020),
+		_pool_row("coop.bms", 0x30020),
+		_pool_row("tkoth.bms", 0x10001),
+	])
+	var mission_list := driver.widget_id("MISSION_LIST")
+	assert_eq(driver.item_count(mission_list), 2,
+			"stock co-op is host-invisible; no GAME_TYPE spin reads ALL")
+
+	var spun := MpMenuCompanion.new()
+	var spin_driver := _make_host_driver(true)
+	spun.on_menu_built(spin_driver, "jo_mp.mnu", "MULTI_PLAYER_HOST", null)
+	spun.seed_host_pool([
+		_pool_row("coop.bms", 0x30020),
+		_pool_row("tkoth.bms", 0x10001),
+	])
+	var spun_list := spin_driver.widget_id("MISSION_LIST")
+	# This menu's GAME_TYPE row 0 authors value "3" — the TKOTH category.
+	assert_eq(spin_driver.item_count(spun_list), 1,
+			"the selected category filters the pool")
+	assert_eq(spin_driver.item_text(spun_list, 0), "tkoth.bms")
 
 
 func test_hosted_mission_game_type_reaches_native_session_config() -> void:

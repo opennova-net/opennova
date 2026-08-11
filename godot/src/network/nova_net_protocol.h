@@ -88,6 +88,12 @@ public:
 	// single-select game-mode bit picks the session code word; 0 / unknown
 	// resolves to GAME_TYPE_TRAINING_COOP (npwire game_type::for_mission_mode).
 	static int game_type_for_mission_mode(int p_attrib_mode);
+	// The MULTI_PLAYER_HOST dialog's witnessed game-type rules (D-MNU-17);
+	// the logic lives in engine/net/npwire game_type.h.
+	static bool game_type_host_list_visible(int p_game_type);
+	static int game_type_host_filter_category(int p_game_type);
+	static String game_type_host_abbreviation_key(int p_game_type);
+	static bool game_type_host_rotation_default(int p_game_type);
 
 	// The retail host's custom-message default (npwire game_rules::kCustomTextDefault).
 	static String custom_text_default();
