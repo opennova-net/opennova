@@ -1126,9 +1126,9 @@ var _local_view_presenter
 
 
 func render_terrain_frame() -> void:
-	# The engine compiles the terrain patch packet for this frame's camera and
+	# The engine compiles the terrain patch draw list for this frame's camera and
 	# Terrain applies it (ADR 0033 R2). Runs before the foliage leg, whose
-	# dispatcher consumes the packet's fresh detail-cell handoff — the old
+	# dispatcher consumes the draw list's fresh detail-cell handoff — the old
 	# self-driven _process walk left foliage reading a stale cell list.
 	if _world_ready and _terrain != null:
 		_terrain.render_frame()

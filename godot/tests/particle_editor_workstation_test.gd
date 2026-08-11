@@ -317,7 +317,7 @@ func test_particle_preview_populates_render_instances_after_selection() -> void:
 			"Live particles should populate render instances in the preview particle batches.")
 
 
-func test_particle_preview_uses_value_emitters_and_one_shared_packet_renderer() -> void:
+func test_particle_preview_uses_value_emitters_and_one_shared_draw_list_renderer() -> void:
 	var preview := add_child_autofree(ParticlePreview.new()) as ParticlePreview
 	await get_tree().process_frame
 	preview.set_particle_def(_make_render_test_particle())
@@ -327,12 +327,12 @@ func test_particle_preview_uses_value_emitters_and_one_shared_packet_renderer() 
 	assert_false(emitter.is_empty(), "Selected particle should expose value diagnostics.")
 	assert_true(emitter.has("emitter_id"), "Diagnostics should expose the stable emitter id.")
 	assert_true(emitter.has("frame"), "Diagnostics should include the frame value snapshot.")
-	assert_true(emitter.has("render"), "Diagnostics should include joined packet bounds.")
+	assert_true(emitter.has("render"), "Diagnostics should include joined draw list bounds.")
 	for descendant in preview.find_children("*", "", true, false):
 		assert_ne(descendant.get_class(), "NovaParticleEmitter",
 				"ONED preview must not create a render node per particle emitter.")
 	assert_gt(preview.get_render_batch_count(), 0,
-			"Shared renderer should expose its world draw-packet diagnostics.")
+			"Shared renderer should expose its world draw-list diagnostics.")
 
 
 func test_particle_preview_renders_mipmapped_provider_texture() -> void:
@@ -358,7 +358,7 @@ func test_particle_preview_renders_mipmapped_provider_texture() -> void:
 	assert_gt(preview.get_alive_count(), 0,
 			"Mipmapped provider texture should retain a live preview particle.")
 	assert_gt(preview.get_rendered_instance_count(), 0,
-			"Mipmapped provider texture should produce a visible packet quad.")
+			"Mipmapped provider texture should produce a visible draw list quad.")
 	assert_gt(preview.get_render_batch_count(), 0,
 			"Mipmapped provider texture should produce a shared renderer batch.")
 

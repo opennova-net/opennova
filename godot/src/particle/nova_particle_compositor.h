@@ -48,7 +48,7 @@ struct NovaParticleWorldSubmission {
 	std::string validation_error;
 };
 
-// Deep Godot adapter at the packet-to-GPU seam. Callers publish one immutable
+// Deep Godot adapter at the draw-list-to-GPU seam. Callers publish one immutable
 // value; this resource owns render-thread synchronization, persistent buffers,
 // atlas textures, shader/pipeline/uniform caches, framebuffer attachment, the
 // scene-color copy required by Distort, and explicit failure diagnostics.

@@ -155,6 +155,13 @@ runs the 62 Hz host/client session over it; the **net seam** (`engine/net/netsim
 world sim and the wire meet (`INetCommandSink`, the replication fan, ADR 0009).
 _Avoid_: "the netcode" (say which layer)
 
+**Packet / Draw list**:
+A **packet** is wire data — bytes on the network, and nothing else. What a frame
+compiler hands a renderer/applier is a **draw list** (`*DrawList` types, "draw-list
+order/bounds/diagnostics" in prose). The rearchitecture campaign renamed every render
+output to this shape; new render-side "packet" vocabulary is a regression.
+_Avoid_: packet for any render/compile output; "draw packet"
+
 **Entity**:
 An addressable object in a running world. A Person and a Vehicle are both Entities, but neither term implies who controls it.
 _Avoid_: actor, object (when identity on the wire or in the world is meant)

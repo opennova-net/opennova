@@ -6,7 +6,7 @@ extends Node3D
 # particle debug boxes: retail draws every emitter's accumulated AABB in
 # opaque red inside the particle render pass [orig: CParticleManager_RenderBatch
 # @ 0x5e9890 gate mgr[182] -> Render_DrawDebugBoundingBox @ 0x5e06e0, color
-# 0xFFFF0000; ptl-format-re.md §11]. Bounds come from draw-packet values (the
+# 0xFFFF0000; ptl-format-re.md §11]. Bounds come from draw-list values (the
 # same rendered coverage F3 displays, without walking renderer Nodes). Labels
 # are our diagnostic extension; catalog-wide missing textures stay in the F3
 # list instead of being assigned to arbitrary live groups. Retail's boxes carry
