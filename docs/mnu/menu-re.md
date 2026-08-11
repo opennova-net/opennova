@@ -408,8 +408,16 @@ MOUSE_SENSITIVITY **4..511, page 10** `[orig: options_screen_init @ 0x554800;
 UI_PopulateRenderAndAudioSettings @ 0x55c830]`. Persisted render/audio/input
 values are not yet modeled, so each current value temporarily starts at its
 minimum; that is an explicit reimpl fallback, not a claim about retail's saved
-setting. Direct scrollbar input and independent per-part states remain
-D-MNU-13 residue.
+setting. Direct scrollbar input is PORTED into the compiler's mouse pump
+(2026-08-11): the pump runs the witnessed interaction ahead of the claim
+walk — arrows step -/+1 (ctor default), a track press pages toward the
+click, a shuttle press captures an anchor and drags through the travel
+ratio (ftol-truncated), and the pressed part keeps the mouse until release
+like retail's child-window capture `[orig: CScrollWnd_HandleEvent
+@ 0x64d050 — arrows @ 0x64d2d9/0x64d31a, track @ 0x64d0f0/0x64d10e, anchor
+@ 0x64d1cb..0x64d217, drag @ 0x64d231..0x64d2aa; ctor defaults step 1
+@ 0x64c4cf, page 10 @ 0x64c4d9]`. Independent per-part hover/pressed states
+and named scroll events remain D-MNU-13 residue.
 
 Reimpl: `engine/runtime/menu` (`MenuFrameCompiler`) compiles a parsed
 `mnu::Screen` + a typed per-widget state snapshot (hover/press/disabled/
@@ -467,10 +475,14 @@ is the ONE menu path (the MnuMenu Control tree is deleted). Pinned by
   witnessed ranges/pages `[orig: options_screen_init @ 0x554800;
   UI_PopulateRenderAndAudioSettings @ 0x55c830]`. Persisted setting values are
   not modeled yet, so current=min is the explicit temporary fallback.
-  Remaining scrollbar residue is the constructed child BUTTONs' independent
-  hover/selected/pressed states, arrow clicks, track clicks, shuttle
-  drag/capture, and named scroll events; wheel scrolling continues to ride
-  `scroll_row` shell-side. Spin arrows compile with their
+  Arrow clicks, track paging, and the shuttle drag/capture are PORTED into
+  the compiler's mouse pump (2026-08-11 — the pump claims the pressed part
+  until release, standalone sliders change their range value, embedded
+  owners change `scroll_row`, and `MenuFrame.scroll_value_changed` relays
+  the result `[orig: CScrollWnd_HandleEvent @ 0x64d050]`). Remaining
+  scrollbar residue is the constructed child BUTTONs' independent
+  hover/selected/pressed states and named scroll events; wheel scrolling
+  continues to ride `scroll_row` shell-side. Spin arrows compile with their
   default-state art (their independent hover states are separate
   child-widget state the compiled path does not yet model).
 
@@ -1089,7 +1101,25 @@ Standalone min/max/page/value now crosses `MenuWidgetState`, `MenuFrame`, and
 0..255/page 10, and MOUSE_SENSITIVITY 4..511/page 10 `[orig:
 options_screen_init @ 0x554800; UI_PopulateRenderAndAudioSettings @ 0x55c830]`.
 Persisted setting values remain unmodeled, so current=min is explicitly
-temporary. Per-part state and direct scrollbar input remain D-MNU-13 residue.
+temporary. Per-part state remains D-MNU-13 residue.
+
+**matching** (2026-08-11 review round, same slice): the CScrollWnd
+INTERACTION joined the compiler's mouse pump — arrows step -/+1, a track
+press pages toward the click, a shuttle press captures and drags through the
+ftol-truncated travel-ratio inverse, and the pressed part keeps the mouse
+until release exactly like retail's child-window capture, so a scrollbar
+press can never become another widget's click `[orig: CScrollWnd_HandleEvent
+@ 0x64d050]`. The combo closed face now swaps unconditionally (an empty
+selected row draws a blank face, never the widget's authored TEXT
+`[orig: CComboWnd_Render @ 0x65c05b..0x65c083]`), and the draw/interaction
+visible-row gates share one span solve. On the Controls side, the record's
+"+12/+14 extended-flag words" reading is FALSIFIED: they are per-slot
+MODIFIER VK words (17 Ctrl / 16 Shift) driving the display prefixes, the
+capture writes 17 iff the queued event flag word is EXACTLY Ctrl-held-alone
+(0x800), and the Ctrl key itself can never be captured — witnessed through
+`Input_QueueKeyEvent @ 0x760c10` / `Input_DequeueKeyEvent @ 0x760d60` /
+`KeyBinding_FormatBindingString @ 0x559a10` and ported end to end
+(capture, display, blob, and the modifier-gated gameplay sampling).
 
 **matching** (2026-08-10 multiline grill + shell cutover): the multiline edit render
 (`CMEditWnd_Render @ 0x6608e0` — no focus forcing), the wrapped-text drawer
@@ -1339,13 +1369,19 @@ child holds press-capture, every move maps `value = min + (mouse + anchor) / rat
 clamped to `[min, max]` (`@ 0x64d231..0x64d2aa`; the ratio is the px-per-unit double
 at `+0xC08`, whose forward map is `CScrollWnd_UpdateThumbPosition @ 0x64cd50`). Every
 change re-lays the thumb and dispatches `0x4000001` with the new value (`@ 0x64d15c`).
-Reimpl: `MenuFrameCompiler::scroll_hit_at`/`scroll_drag_anchor`/`scroll_drag_value`
-(the shared `solve_scroll_parts_` geometry) + `menu_scroll_interaction.gd` routing;
-embedded Table/List scrollbars ride the same parts with the rows model (range
-`0..rows-visible`, page `visible-1`, value = first visible row — the table SCROLLBAR
-delegate `@ 0x643b22`). The menu cursor is the OS custom cursor carrying the claim's
-retail texture; the compiled software cursor stays off in the game shell (drawing
-both showed a trailing second cursor).
+Reimpl: the whole interaction lives in the compiler's mouse pump
+(`MenuFrameCompiler::scroll_pump_mouse_` over `scroll_hit_at`/
+`scroll_drag_anchor`/`scroll_drag_value` and the shared `solve_scroll_parts_`
+geometry, `engine/runtime/menu/menu_frame_scrollbar.cpp`): the pump runs it
+ahead of the claim walk, the pressed part keeps the mouse until release
+(retail's child-window press-capture), and value changes surface through
+`MenuFrame`'s `scroll_value_changed` signal, which `MenuDriver` mirrors and
+relays. Embedded Table/List scrollbars ride the same parts with the rows
+model (range `0..rows-visible`, page `visible-1`, value = first visible
+row — the table SCROLLBAR delegate `@ 0x643b22`). The menu cursor is the OS
+custom cursor carrying the claim's retail texture; the compiled software
+cursor stays off in the game shell (drawing both showed a trailing second
+cursor).
 
 ## Controls key-remap flow `[orig: sub_55D560 @ 0x55d560; the capture pump @ 0x55c67c]`
 
@@ -1363,13 +1399,24 @@ control per device, resets both capture globals to -1); keyboard keys drain
 into `KeyBinding_HandleKeyAssignment @ 0x55bb20`; the joystick page polls the
 button bitfield and writes `button+1` into the record byte (`@ 0x55c712`).
 
-The live records are 432-byte entries (base `0x25C772C`): +8 primary scan,
-+10 secondary scan, +12/+14 the extended-flag words, +16 mouse mask,
-+20/+21 joystick bytes (relative to the record's binding block at
-`word_25C7734`). Assignment semantics (`@ 0x55bb20`): a repeating Ctrl and
-VK `0xDE` are dropped; the keypad Enter captures as scan 269; re-assigning a
-held key collapses the record to that key as the sole primary; otherwise the
-key fills the empty slot, or replaces the PRIMARY when both are full. The
+The live records are 432-byte entries (base `0x25C772C`): +8 primary scan
+(`g_keybind_slot1_scan`), +10 secondary scan, +12/+14 the per-slot MODIFIER
+VK words (`g_keybind_slot1_modifier`/`slot2` — 2026-08-11: an earlier
+"extended-flag" reading is FALSIFIED; the word is 17 = VK_CONTROL rendering
+the "Ctrl-" display prefix, 16 = VK_SHIFT rendering "Shift-", 0 = none
+`[orig: KeyBinding_FormatBindingString @ 0x559a10]`), +16 mouse mask,
++20/+21 joystick bytes. The capture's key events ride the 128-slot circular
+keyboard queue (`Input_QueueKeyEvent @ 0x760c10` -> `Input_DequeueKeyEvent
+@ 0x760d60`): byte 0 = VK, flag word = 0x800 Ctrl held + 0x200 Shift held +
+0x100 extended (lParam bit 24) + 0x80 auto-repeat (lParam bit 30). Assignment
+semantics (`@ 0x55bb20`): VK `0x11` with the Ctrl-held flag is dropped — the
+`g_input_ctrl_down` state is set BEFORE its own event enqueues, so EVERY
+Ctrl press arrives flagged and the Ctrl key itself can never be captured;
+VK `0xDE` is dropped; the slot modifier becomes 17 iff the flag word is
+EXACTLY 0x800 (Ctrl held alone — a shift/extended/repeat flag defeats it);
+the keypad Enter captures as scan 269; re-assigning a held (scan, modifier)
+collapses the record to that key as the sole primary; otherwise the key
+fills the empty slot, or replaces the PRIMARY when both are full. The
 mouse callback (`@ 0x55c780`) maps events to masks (LMB 1, RMB 2, MMB 0x10,
 wheel up 0x400, wheel down 0x800), writes the record's mouse word, and
 unhooks. `CLEAR_KEY` clears the SELECTED row's slots for the active device;
@@ -1382,15 +1429,20 @@ writes player.sav ("FPBC0211" 16-byte header + five 15488-byte records + an
 8-byte trailer).
 
 Reimpl: `engine/runtime/controls/binding_set.*` (records + assignment/clear/
-defaults semantics), the `ControlsModel` binding (VK <-> Godot key seam),
-`controls_bindings.gd` (the shared live model + persistence),
-`nova_menu_shell.gd` (arm/capture/cancel + DEFAULTS/CLEAR_KEY), and
-`player_input_router.gd` samples gameplay keys through the live records.
-Divergences: persistence rides `user://controls.cfg` until the player.sav
-profile format slice exists, and the joystick capture page is not wired
-(both under D-CTRL rows). The retail arm also fires on a single click of the
-already-selected row; the reimpl arms on the driver's double-click activation
-(the shipped REMAP_INSTRUCTION text documents double-click).
+defaults semantics, including the modifier word and the extended-VK
+derivation), the `ControlsModel` binding (VK <-> Godot key seam, the
+button->mask translation, and `is_token_pressed` — the one gameplay sampling
+call: keyboard slots gated on their modifier plus the held-sampleable
+L/R/M mouse-mask buttons; wheel masks are impulse-only and display/persist
+without sampling), `controls_bindings.gd` (the shared live model +
+persistence), `nova_menu_shell.gd` (arm/capture/cancel + DEFAULTS/CLEAR_KEY;
+a screen change cancels an armed capture like retail's screen-owned pump
+state), and `player_input_router.gd` samples gameplay input through the live
+records. Divergences: persistence rides `user://controls.cfg` until the
+player.sav profile format slice exists, and the joystick capture page is not
+wired (both under D-CTRL rows). The retail arm also fires on a single click
+of the already-selected row; the reimpl arms on the driver's double-click
+activation (the shipped REMAP_INSTRUCTION text documents double-click).
 
 Deferred (unwitnessed or out of bar; backlog, not blocking):
 
