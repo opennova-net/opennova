@@ -41,16 +41,18 @@ MainGame._process
             typed TickOutcome values
           per-tick Godot presentation sink  effects + fixed-tick listeners
         present entity/effect rows once
+      present local view                    camera/viewmodel placement (D-RORD-8)
       drive network session edges
       advance weather
       apply blink gates when a tick ran
       apply camera occlusion
       sample iris
+      render material frame                 per-model ObjectModel advance
       render particles
       mix mission audio
       update frame clear
       finish device frame
-  local-player post-present
+  local-view fallback only when the world leg was skipped (probe skip / no world)
   HUD compile/apply
 ```
 

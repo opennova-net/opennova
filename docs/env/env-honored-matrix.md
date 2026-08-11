@@ -20,7 +20,7 @@ Classifications:
 
 Chains below run editor inspector → `EnvFile` (godot/src/env/env_file.h) →
 runtime nodes (`MissionEnvironment` / `SkyDome` / `Water` / `Weather` /
-`Celestial`, godot/src/environment/) → shader. The portable math lives in
+`Celestial`, godot/src/env/) → shader. The portable math lives in
 `engine/formats/env` (`env.h`, `env_weather.h`, `env_celestial.h`, `env_water_render.h`).
 
 ## Scalars, fog, water

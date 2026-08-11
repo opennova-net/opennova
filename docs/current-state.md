@@ -22,9 +22,17 @@ THE structural program is the **rearchitecture**
 2026-08-09, replacing the ADR 0031/0032 adapter-seam regime in full): the
 engine takes ownership of the main/tick/render loops behind a device
 boundary. As of 2026-08-10 (trunk PR #460): R1 (the frame port) and R2
-(packet presentation — terrain, foliage, HUD, and menus, whose cutover
+(draw-list presentation — terrain, foliage, HUD, and menus, whose cutover
 deleted the MnuMenu Control tree for the compiled MenuFrame + MenuDriver
-path) are LANDED; the P1 rewrite queue that followed (env/weather, placer,
+path) LANDED — and R1 was then superseded by
+[ADR 0035](adr/0035-mission-session-game-frame-pipeline.md) (ADR 0033's
+ladder state records it): PR #465 rearchitected the mission-session
+lifecycle as the portable `opennova::np::MissionSession` in
+`engine/net/npruntime` with `godot/game/world/game_frame_pipeline.gd` as
+the device-order owner, superseding ADR 0033's R1 frame port and
+callback-bus design, and PR #468 moved local-player camera placement plus
+the ObjectModel material loop onto pipeline legs. The P1 rewrite queue that
+followed (env/weather, placer,
 present facades, composition, avatar, menus), the task-12
 no-magic-in-the-godot-layer sweep, and the engine layout flatten (ADR
 0024's amendment) are complete; R3 (the render frame) CLOSED not taken at its
@@ -59,10 +67,10 @@ Every recent slice ran this same shape, and a new one should too:
 
 Counts come from the ledger's generated scoreboard — read them there, not here,
 because `scripts/lint/ledger_check.py --check` keeps that table honest and
-nothing keeps this sentence honest. As of the 2026-08-05 regeneration the shape was:
-**World/AI** carries the largest share (67 of 166 domain-open), **UI** (44 — swollen
+nothing keeps this sentence honest. As of the 2026-08-11 regeneration the shape was:
+**World/AI** carries the largest share (68 of 171 domain-open), **UI** (46 — swollen
 by the 2026-08-04 D-SND/D-MNU/D-LOADSCR catalog tabling; most of those rows are
-small or permanent-register candidates) and **Net** (25) the next largest, and every
+small or permanent-register candidates) and **Net** (26) the next largest, and every
 other domain is in single digits.
 
 Each domain's next step is named in its own record, not centrally:

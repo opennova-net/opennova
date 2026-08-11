@@ -5,9 +5,9 @@ batch queues, the sort keys, the render-state stack, the technique-class
 selection, and the frame's pass sequence, witnessed in retail `Jointops.exe`
 (imagebase `0x400000`, IDB `Jointops.exe.kong.i64`). Implementing code:
 `engine/runtime/renderer` (`render_order`, this slice's port; `material_classify` /
-`object_shader_template` from REN-2), `godot/src/object/nova_object_model.gd`
+`object_shader_template` from REN-2), `godot/src/object/nova_object_model.cpp`
 + `nova_object_shader_cache.cpp` (ladder application),
-`godot/src/environment/{nova_celestial,nova_water}.gd` (the generalized
+`godot/src/env/{nova_celestial,nova_water}.cpp` (the generalized
 priority ladder). Landed by maturity REN-3
 ([maturity-program.md](../maturity-program.md); standing rules
 [ADR 0023](../adr/0023-render-visual-parity.md) — the queue machinery is

@@ -1077,7 +1077,7 @@ family's rows in the same 0x80 flag table the hand-frame branch reads. The origi
 below still describes the seat taxonomy the port reuses.
 
 The predicate gates the weapon node's visibility, reusing the existing seat
-taxonomy (`godot/src/world/item_seat_specs.gd` SEAT_PASSENGER/CONTROLLER/GUNNER/
+taxonomy (`godot/game/world/item_seat_specs.gd` SEAT_PASSENGER/CONTROLLER/GUNNER/
 DRIVER) and the `mount_type` already exported through `nova_simulation.cpp`. The exact
 `Entity_CanFireWeapon` predicate (incl. the `Flags & 2` weapon-disabled gate and the local
 gunner third-person condition) is the faithful rule. **Open follow-ups:** IDB hygiene (rename
@@ -2915,7 +2915,7 @@ spawn, the original's fire-time moment; the shell stamps the camera listener via
 binding drains = `Simulation::
 drain_fire_presentation_events` / `get_tracer_trails` (ex `get_tracer_rounds` —
 replaced by the witnessed trail channels, §24); the EFFECT presentation =
-`godot/src/world/fire_present_pass.gd` (muzzle effect + the §24 tracer
+`godot/game/world/fire_present_pass.gd` (muzzle effect + the §24 tracer
 ribbons); the LOS legs = `CollisionWorld::raycast_clear` +
 `los_terrain_blocked` (`engine/runtime/world/src/collision_los.cpp`) behind
 `AiSystem::line_of_sight_clear`. Pins: the `def` ctest (token fields), the
@@ -3326,7 +3326,7 @@ at round end, and what the SP player then SEES. Port surfaces:
 `engine/runtime/mission/src/event_runtime.cpp` (the BMS win actions + zone-ref resolution),
 `engine/runtime/world/src/world.cpp` (`World::process_round_end`, `EntityCommands::resolve_ssn`),
 `engine/net/npruntime/src/server_tick.cpp` (kill tallies, `humans`, the win-condition
-check, the respawn hold), `godot/src/world/game_hud_presenter.gd` (the lose banner),
+check, the respawn hold), `godot/game/world/game_hud_presenter.gd` (the lose banner),
 `godot/game/mission_end_screen.gd` + `main_game.gd` (the end screens + exit).
 Evidence ctests: `wac_behavior` (the outcome builtins + the 04TR else-if block),
 `npruntime_round_end`, `event_runtime_bms` (BlueWin + zone-ref resolution);
@@ -4268,7 +4268,7 @@ blast), the destroyed/husk model swap, and the explosion/pieces/sounds at
 death. Witnessed on retail `Jointops.exe` (`Jointops.exe.kong.i64`, imagebase
 0x400000). Ported subset: `engine/runtime/world/destruction.{h,cpp}` + the round_sim
 item leg + the collision husk swap +
-`godot/src/world/destruction_present_pass.gd`. The native collision,
+`godot/game/world/destruction_present_pass.gd`. The native collision,
 damage, callback-routing, death-piece, and item-settle mechanics are pinned by
 the `destruction` ctest and the def-parse additions in
 `tests/def/def_parse_items_test.cpp` (ctest `def_parse_items`). The presenter
@@ -5167,7 +5167,7 @@ Reimpl: `engine/runtime/world/throwables.{h,cpp}` (motors + placed devices + thi
 the `RoundSim` spawn dispatches and witnessed throwable `useownmove` leg
 (`engine/runtime/world/round_sim.{h,cpp}`),
 the PowerThrow charge chain (`godot/src/simulation/nova_simulation.cpp`), the
-class/trait feed (`resolve_item_traits`), and `godot/src/world/throwable_present_pass.gd`.
+class/trait feed (`resolve_item_traits`), and `godot/game/world/throwable_present_pass.gd`.
 Binary: retail `Jointops.exe` (kong IDB, imagebase 0x400000). ctest `throwables`
 + the claymore rows in `def_parse_ammo`.
 
@@ -5296,7 +5296,9 @@ AV_Minekillzone @ 0x24E7DD8/D4/D0/CC/C8/C0/C4`.
   final output pixels**, not 15 design-space pixels; the port converts that
   delta through `HudLayout.pixel_delta_to_design` before the shared HUD scale.
   Everything uses the flat 0xFF800000 half-red `@ 0x840B1C`. Ported:
-  `game_hud.gd _draw_power_bar` off the sim's windup state (closes D-THROW-5).
+  the HUD power-bar element off the sim's windup state (now
+`HudFrameCompiler::element_power`; originally `game_hud.gd _draw_power_bar`;
+closes D-THROW-5).
 - The mount zeroes the charge state: `Player_SwitchToWeaponByHandle @ 0x4e0170`
   clears `g_fireChargeStartTick` before mounting — a new mount can never carry
   a stale windup or charge byte (the port mirrors this in the sim's mount
@@ -5464,7 +5466,7 @@ death hook).
 | D-THROW-2 | world-local PRNG streams (the retail generator shape) | shared globals @ 0x31BFBB0/B8 | bounce kicks / fan angles distribution-faithful, not sequence-identical (the destruction-port precedent) |
 | D-THROW-3 | CLOSED 2026-07-22: device LOS uses the shared full terrain-plus-sector query, excluding the device and candidate (`CollisionWorld::raycast_clear`) | `Physics_RaycastSegment @ 0x415550` (terrain + sectors) | `test_claymore_sector_los_blocks_trigger` pins a type-1 building wall blocking the cone and removal exposing the same target |
 | D-THROW-4 | stick pose derived geometrically from the face normal; parent-follow = translation + yaw orbit | `Entity_OrientToSurfaceNormal @ 0x445fa0` exact euler decomposition; `Entity_InterpolateFromParentDelta @ 0x4a8d60` full euler | presentation-only pose deltas on steep faces / pitching vehicles; the cone axis (yaw) is exact |
-| D-THROW-5 | CLOSED 2026-07-21: the charge bar is ported (`game_hud.gd _draw_power_bar` at the hudpos HUDPOWERBAR x,y,w,h rect, witnessed fill curve + percent text at an exact 15-output-pixel lift + 0xFF800000 half-red) | `HUD_DrawPowerThrowChargeBar @ 0x599830` (ex "HUD_DrawWeaponReloadBar" misnomer, renamed) | §27.3 windup meter entry; throwable_repro_test windup-state pin |
+| D-THROW-5 | CLOSED 2026-07-21: the charge bar is ported (now `HudFrameCompiler::element_power`, originally `game_hud.gd _draw_power_bar` — the hudpos HUDPOWERBAR x,y,w,h rect, witnessed fill curve + percent text at an exact 15-output-pixel lift + 0xFF800000 half-red) | `HUD_DrawPowerThrowChargeBar @ 0x599830` (ex "HUD_DrawWeaponReloadBar" misnomer, renamed) | §27.3 windup meter entry; throwable_repro_test windup-state pin |
 | D-THROW-6 | landmine items (`lndm`) unported | `Entity_LandmineThink @ 0x441A40` witnessed in full | the def wiring for ammo slots +692/+696 (`SMALLLANDMINE`/`LARGELANDMINE` names) is unwitnessed; no lndm items found in JO:CA missions so far |
 | D-THROW-7 | clients consume decoded tag-2 round events through a visual-only `RoundSim`; placed-device 0x59/0x12 host emit and client fold remain unwired | retail re-simulates tag-2 rounds, then applies S2C 0x59 (net-re §5.36) + 0x12 removal | remote clients see flying throwables and their move effects, but not the persisted-device replacement |
 | D-THROW-8 | placed devices collide via the 0.5 u bound-sphere fallback | the item model's CFAC via the collision instance | visible graphics are hosted, but collision remains spherical; register the deployed model's CFAC for face-accurate hits |

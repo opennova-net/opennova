@@ -12,10 +12,10 @@ compile — the ADR 0033 R2 home of every element previously ported in
 `game_hud.gd` + the `hud_*.gd` helpers, which the 2026-08-09 cutover deleted);
 the `HudPos`/`HudOverlay` GDExtension bindings (`godot/src/hud/` — the overlay
 keeps texture upload and draw-list rasterization only); the shell-side
-`godot/src/world/hud_sights_card.gd` (per-row blend child controls) fed with
-the overlay by `godot/src/world/game_hud_presenter.gd`; and the ONED preview
+`godot/game/world/hud_sights_card.gd` (per-row blend child controls) fed with
+the overlay by `godot/game/world/game_hud_presenter.gd`; and the ONED preview
 workspace (`godot/modtools/hud/`, over the same `HudPos` statics plus the kept
-`godot/src/ui/hud_text.gd` FontFile preview helper). The 2026-06-22 session witnessed the
+`godot/game/ui/hud_text.gd` FontFile preview helper). The 2026-06-22 session witnessed the
 core pipeline read-only; the 2026-07-09 session witnessed the weapon-coupled
 elements and ported them (the weapon FSM of net-re §5.62 supplies the live
 clip/reserve/ADS state); the 2026-07-11 re-grill (the extraction-train slice
@@ -43,27 +43,27 @@ projectile-versus-HUD shifts are now witnessed and ported (D-HUD-7).
 | Component | Verdict | Evidence |
 | --- | --- | --- |
 | Render pipeline + two-struct model | confirm-only (read-only grill) | `[orig: HUD_RenderAllOverlays @0x5a8070]` → `[orig: HUD_RenderOverlays @0x5a7bb0]` → element draws; per-frame `[orig: HUD_BuildEntityInfo @0x4b8440]` |
-| Virtual coordinate space (1024×768) | ported (`hud_layout.gd`) | `[orig: Viewport_ScaleToVirtualCoords @0x5d2b20]` exact formula; `hud_helpers_test.gd` |
-| Health bar | ported (`hud_health_bar.gd`) | `[orig: HUD_DrawHealthBar @0x5a2e50]` rect/fill/threshold-color; `hud_helpers_test.gd` thresholds |
-| Stance indicator + cross-fade (IDB-misnamed "compass") | ported (`hud_stance.gd` + `hud_fade.gd` + `game_hud.gd`) | `[orig: HUD_DrawStanceIndicator @0x599f10]` full witness incl. fade pair + per-frame offsets; `hud_helpers_test.gd` fade curve |
-| HUD text + half-bright | ported (`hud_text.gd`) | `[orig: HUD_DrawTextRightAligned_HalfBright @0x580850]` → `[orig: CGameFont_DrawText @0x6752c0]` |
-| Ammo count + weapon name text | **ported** (`hud_weapon_text.gd`) | `[orig: hud_draw_weapon_ammo_and_name @0x5939d0]`; format/hide/alignment/nudge witnessed; `hud_helpers_test.gd` format_ammo |
-| Clip + rounds indicator (HUDCLIPGFX/HUDRNDGFX) | **ported** (`hud_clip_indicator.gd`, D-HUD-5) | `[orig: draw_hud_ammo_indicator @0x599a30]`; parse `[orig: @0x5442fc]`; `hud_helpers_test.gd` round_icon_count + flash |
-| Crosshair / reticle + spread | **ported** (`hud_crosshair.gd`, D-HUD-7 CLOSED; D-HUD-8/9/10; target cursor / aim-point quad / lock brackets unported) | `[orig: HUD_DrawCrosshair @ 0x592640]` + `[orig: HUD_DrawCrosshairCornerQuad @ 0x590f50]`; accumulator producers `[orig: RoundData_SpawnRound @ 0x4ec0d0]` + `[orig: Entity_UpdateInfantryPlayerBody @ 0x4b40e0]`; `npruntime_round_sim`, `infantry`, `netsim_client_replica_pipeline_recoil`, and `hud_helpers_test.gd` |
-| Standard weapon SIGHTS card | **ported** (`world::weapon_sights_card_eligible` → sim `scope_card_active`; `game_hud.gd` materializes the authored rows) | `[orig: Render_ProcessMainSceneFrame @0x5ca299..0x5ca304 / @0x5caaf3..0x5cab15]`; Scoped/Sighted selectors + SWITCHFROM + NoCardSwitch/ForceScoped suppression; `nova_simulation_test.gd` + `game_hud_test.gd` |
-| ALPHAFADE semantics | **ported** (`hud_fade.gd`) | `[orig: parse @0x5a086c]` ×2.55/×2.55/×62; flash curve `[orig: @0x599af9]`; `hud_helpers_test.gd` |
-| Attach labels (seat/armory floats) | **ported** (`world::collect_attach_labels` + `hud_attach_labels.gd` + `game_hud_presenter.gd`, D-HUD-11/12/13) | `[orig: draw_vehicle_seat_and_armory_labels @0x5a3290]` full witness; label strings `[orig: HUD_InitOverlaySystem @0x5a479c..0x5a481e]`; `attachtextid` parse `[orig: @0x544d6c]`; ctest `vehicle_mount` + `def_parse_weapons`/`def_parse_items`; GUT `nova_simulation_test.gd`/`hud_helpers_test.gd` |
+| Virtual coordinate space (1024×768) | ported (`engine/runtime/hud/hud_math` — the virtual-coords scale) | `[orig: Viewport_ScaleToVirtualCoords @0x5d2b20]` exact formula; `hud_helpers_test.gd` |
+| Health bar | ported (`HudFrameCompiler::element_health` + `hud_math::health_color_band_fp16`) | `[orig: HUD_DrawHealthBar @0x5a2e50]` rect/fill/threshold-color; `hud_helpers_test.gd` thresholds |
+| Stance indicator + cross-fade (IDB-misnamed "compass") | ported (`HudFrameCompiler::element_stance` — frame draw, offsets, fade pair, prev/current state) | `[orig: HUD_DrawStanceIndicator @0x599f10]` full witness incl. fade pair + per-frame offsets; `hud_helpers_test.gd` fade curve |
+| HUD text + half-bright | ported (`engine/runtime/hud/game_font` — the CGameFont text engine; `godot/game/ui/hud_text.gd` survives as the ONED FontFile preview helper) | `[orig: HUD_DrawTextRightAligned_HalfBright @0x580850]` → `[orig: CGameFont_DrawText @0x6752c0]` |
+| Ammo count + weapon name text | **ported** (`HudFrameCompiler::element_weapon_cluster` + `hud_math::format_ammo`) | `[orig: hud_draw_weapon_ammo_and_name @0x5939d0]`; format/hide/alignment/nudge witnessed; `hud_helpers_test.gd` format_ammo |
+| Clip + rounds indicator (HUDCLIPGFX/HUDRNDGFX) | **ported** (`HudFrameCompiler::element_clip_indicator`, D-HUD-5) | `[orig: draw_hud_ammo_indicator @0x599a30]`; parse `[orig: @0x5442fc]`; `hud_helpers_test.gd` round_icon_count + flash |
+| Crosshair / reticle + spread | **ported** (`HudFrameCompiler::element_crosshair`, D-HUD-7 CLOSED; D-HUD-8/9/10; target cursor / aim-point quad / lock brackets unported) | `[orig: HUD_DrawCrosshair @ 0x592640]` + `[orig: HUD_DrawCrosshairCornerQuad @ 0x590f50]`; accumulator producers `[orig: RoundData_SpawnRound @ 0x4ec0d0]` + `[orig: Entity_UpdateInfantryPlayerBody @ 0x4b40e0]`; `npruntime_round_sim`, `infantry`, `netsim_client_replica_pipeline_recoil`, and `hud_helpers_test.gd` |
+| Standard weapon SIGHTS card | **ported** (`world::weapon_sights_card_eligible` → sim `scope_card_active`; `HudFrameCompiler::element_sights_card` + `godot/game/world/hud_sights_card.gd` materialize the authored rows) | `[orig: Render_ProcessMainSceneFrame @0x5ca299..0x5ca304 / @0x5caaf3..0x5cab15]`; Scoped/Sighted selectors + SWITCHFROM + NoCardSwitch/ForceScoped suppression; `nova_simulation_test.gd` + `game_hud_test.gd` |
+| ALPHAFADE semantics | **ported** (`hud_math::fade_decay`/`fade_flash_alpha`) | `[orig: parse @0x5a086c]` ×2.55/×2.55/×62; flash curve `[orig: @0x599af9]`; `hud_helpers_test.gd` |
+| Attach labels (seat/armory floats) | **ported** (`world::collect_attach_labels` + `HudFrameCompiler::element_attach_labels` + `game_hud_presenter.gd`, D-HUD-11/12/13) | `[orig: draw_vehicle_seat_and_armory_labels @0x5a3290]` full witness; label strings `[orig: HUD_InitOverlaySystem @0x5a479c..0x5a481e]`; `attachtextid` parse `[orig: @0x544d6c]`; ctest `vehicle_mount` + `def_parse_weapons`/`def_parse_items`; GUT `nova_simulation_test.gd`/`hud_helpers_test.gd` |
 | Friendly tags (overhead name labels) | **ported** (`world::collect_friendly_tags` + `HudFrameCompiler::element_friendly_tags` + `game_hud_presenter.gd`, D-HUD-20) | `[orig: HUD_DrawFriendlyTagsPass @0x5a4480]` → `[orig: HUD_DrawEntityLabel @0x5a39b0]` full witness; names `[orig: Entity_SpawnFromBMSRecord @0x40ecbf]` + the 36-name fallback `[orig: g_fallbackPeopleNames @0x840a78]`; modes/toggle `[orig: @0x49b573]`; ctest `hud_math`/`hud_frame_compiler`/`promote` |
 | Armory/vehicle-bay/FARP bottom prompts | witnessed — deferred with their systems (D-HUD-14) | `[orig: HUD_DrawGameplayOverlays @0x5bde60]` — preround/0x0A armory prompt, Flags 0x800 bay prompt, FARP wait/reload |
-| Mission triggered text (WAC/BMS `text`) | **ported** (`hud_messages.gd` + `main_game.gd`, D-HUD-6) | `[orig: HUD_DisplayTriggeredText @0x51f190]` → `[orig: Chat_AddDebugMessage @0x4987f0]`; `hud_helpers_test.gd` expiry |
+| Mission triggered text (WAC/BMS `text`) | **ported** (`HudFrameCompiler::element_messages` + `game_hud_presenter.gd`, D-HUD-6) | `[orig: HUD_DisplayTriggeredText @0x51f190]` → `[orig: Chat_AddDebugMessage @0x4987f0]`; `hud_helpers_test.gd` expiry |
 | `hudpos.def` parser token map + 4-field positions | ported (`engine/formats/def`) | `[orig: loc_59F370; AMMOCOUNTPOS @0x59fc3d]`; ctest `def_parse_hudpos` |
 | Parachute / armor status icons | witnessed — port pending (entity+44 flag writer unwalked) | `[orig: HUD_DrawParachuteAndArmorIcons @0x5925c0]` — entity+44 `&0x10` parachute / `&0x8` armor through the info struct's entity ptr; `ParachuteIcon`/`ArmorIcon` tokens |
 | MP objective status text + team tile | confirm-only — MP HUD phase | `[orig: draw_objective_status_text @0x59aa30]` client/strcli* strings witnessed |
-| Weapon heat bar (HUDHEAT) | **ported** (`game_hud.gd` `_draw_heat_bar`, D-HUD-15) | `[orig: HUD_DrawWeaponHeatBar @0x599700]` (ex kong "draw_minimap_overlay" — a misnomer; there is no radar here) full witness: border + proportional fill in the HUDHEAT rect |
-| Waypoint HUD label (HUDWPDINFO) | **ported** (`game_hud.gd` `_draw_waypoint_info` + `game_hud_presenter.gd`, D-HUD-16/17) | `[orig: HUD_DrawWaypointNameAndDistance @0x5947a0]` + `[orig: get_waypoint_name @0x594630]` full witness; gates `[orig: @0x5a7daf]` |
+| Weapon heat bar (HUDHEAT) | **ported** (`HudFrameCompiler::element_heat`, D-HUD-15) | `[orig: HUD_DrawWeaponHeatBar @0x599700]` (ex kong "draw_minimap_overlay" — a misnomer; there is no radar here) full witness: border + proportional fill in the HUDHEAT rect |
+| Waypoint HUD label (HUDWPDINFO) | **ported** (`HudFrameCompiler::element_waypoint` + `game_hud_presenter.gd`, D-HUD-16/17) | `[orig: HUD_DrawWaypointNameAndDistance @0x5947a0]` + `[orig: get_waypoint_name @0x594630]` full witness; gates `[orig: @0x5a7daf]` |
 | Waypoint track (list/current/advance/mission gate) | **ported** (`engine/runtime/world` waypoint track + `Simulation`, D-HUD-16/17) | list `[orig: NetPacket_WriteWorldStateLoad0x0F @0x502d10 @0x502e41]` (nav channel `flags&2`); BMS marker fields `[orig: Entity_SpawnFromBMSRecord @0x40f0aa]`; advance `[orig: Player_UpdatePerFrame @0x4de5f7]`; done-mark `[orig: EventTrigger_MarkLinkedSpawnPoints @0x452ce0]`; cycle `[orig: Spectator_CycleTarget @0x4dc1d0]` + input case 23 `[orig: @0x49b3de]`; `ShowWaypoints` `[orig: Game_SetShowWaypoints @0x58fb50]` |
 | Map overlay (fullscreen map: terrain, grid, blips, waypoints) | confirm-only — located + structured, follow-up | `[orig: HUD_DrawMapOverlay @0x5a5f40]` (7278 B): grid coords, `minimap_draw_ring_blip`, `update_radar_contacts`, `draw_compass_indicator`, WPNames labels, `%01.2fk` distances |
-| Objectives panel + subgoal state (MISSION OBJECTIVES) | **ported** (`World::SubgoalState` + `game_hud.gd` `_draw_objectives_panel` + `game_hud_presenter.gd`, D-HUD-18) | `[orig: HUD_DrawWinConditions @0x5ba940]` full witness; actions 14/15/35/36 `[orig: EventAction_Dispatch @0x454500/@0x4545e0/@0x4546af/@0x454724]`; toggle `[orig: @0x49b68b]`; ctest `event_runtime_bms` subgoal block |
+| Objectives panel + subgoal state (MISSION OBJECTIVES) | **ported** (`World::SubgoalState` + `HudFrameCompiler::element_objectives` + `game_hud_presenter.gd`, D-HUD-18) | `[orig: HUD_DrawWinConditions @0x5ba940]` full witness; actions 14/15/35/36 `[orig: EventAction_Dispatch @0x454500/@0x4545e0/@0x4546af/@0x454724]`; toggle `[orig: @0x49b68b]`; ctest `event_runtime_bms` subgoal block |
 
 ## Render pipeline — the two-struct model
 
@@ -139,7 +139,7 @@ node, no sim consumer; a lib hop adds nothing observable.
 
 Field offsets into `dword_2723388` that the ported elements read.
 This is the model the OpenNova runtime "HUD info" gatherer mirrors
-(`main_game.gd _update_game_hud`).
+(`godot/game/world/game_hud_presenter.gd` — the per-frame info rebuild).
 
 | Offset | Meaning | Source |
 |---|---|---|
@@ -223,8 +223,9 @@ the stance index from `HUD_BuildEntityInfo`. It is **not** a compass.
 - Stance indices: `0`=stand, `1`=crouch (`&0x200`), `2`=prone (`&0x100`),
   `3`=vehicle/mounted, `5`=parachute.
 
-Port: `hud_stance.gd` (frame draw + offsets) + `hud_fade.gd` (the fade pair) +
-`game_hud.gd _draw_stance` (prev/current state).
+Port: `HudFrameCompiler::element_stance` (frame draw + offsets + the fade pair
++ prev/current state — `engine/runtime/hud/hud_frame.cpp`; originally ported
+across `hud_stance.gd`/`hud_fade.gd`/`game_hud.gd`, deleted at the cutover).
 
 ### HUD text + half-bright — `HUD_DrawTextRightAligned_HalfBright @0x580850`
 
@@ -272,8 +273,9 @@ in `WEAPON_TEXTCOLOR` (`dword_2723AC4`) with the token's alignment
   miss @0x51ec00]`. On surfaces ≤ 640 wide the x nudges −4 (left-aligned) /
   +4 (right-aligned) `[orig: @0x593b36..0x593b4d]`.
 
-Port: `hud_weapon_text.gd`; name resolution + capacity/-1 mapping in
-`main_game.gd` (`_resolve_weapon_display_name`, `_update_game_hud`).
+Port: `HudFrameCompiler::element_weapon_cluster`; name resolution +
+capacity/-1 mapping in `godot/game/world/game_hud_presenter.gd`
+(`_resolve_weapon_display_name` + the per-frame info build).
 
 ### Clip + rounds indicator — `draw_hud_ammo_indicator @0x599a30` (ported 2026-07-09)
 
@@ -292,7 +294,8 @@ either component nonzero enables), gated on the ALPHAFADE ramp and the ammo
   included) with a parse warning when the art is missing
   `[orig: @0x544295 / @0x544316]` — behaviorally equal to the port's
   null-texture draw gates (`engine/formats/def` has no VFS; the load-time miss lands in
-  `game_hud._load_texture`). Retail JO sample: `hudrndgfx 9 0 18 0 1 H_round.tga`.
+  the `HudOverlay` texture upload, `godot/src/hud/hud_overlay.cpp`). Retail JO
+  sample: `hudrndgfx 9 0 18 0 1 H_round.tga`.
 - **Flash restamp**: the stamp tick (`dword_2723D48`) resets when the ammo
   class (`weapondef+220`), the reserve count, or the pool id byte
   (`weapondef+216`) changes `[orig: @0x599ab2]` — i.e. weapon switch or reload,
@@ -452,9 +455,9 @@ required for retail parity. `[orig: RoundData_SpawnRound @ 0x4ec0d0]`
   Vertex format: `rhw = 0.9`, `diffuse = 1.0`, `specular = color`; emitted via
   `[orig: GDynamicVB_DrawPrimitive @0x6788e0]` (D-HUD-8 on the color stage).
 
-Port: `hud_crosshair.gd` (spread_px / error_row / the 5 strips as UV'd
-polygons); visibility + row select in `game_hud.gd _draw_crosshair`, fed by
-the sim's shared `Player_CanFireWeapon` projection. Scoped/Sighted,
+Port: `HudFrameCompiler::element_crosshair` (spread_px / error_row / the 5
+UV'd strips, visibility + row select — `engine/runtime/hud/hud_frame.cpp`),
+fed by the sim's shared `Player_CanFireWeapon` projection. Scoped/Sighted,
 promotion timing, movement, camera, reload, air/water, ForceScoped, and the
 seat gates therefore select visibility and the ERROR triplet together.
 
@@ -492,8 +495,9 @@ NoCardSwitch, and authors `M4ET_SGT.TGA` plus additive/scaled `et_rtcle.tga`;
 both textures exist in the retail resource root.
 
 Port: `world::weapon_sights_card_eligible` owns the dynamic selector, the sim
-publishes it as `scope_card_active`, and `game_hud.gd` always materializes the
-authored rows and uses that selector only for visibility.
+publishes it as `scope_card_active`, and `HudFrameCompiler::element_sights_card`
++ `godot/game/world/hud_sights_card.gd` always materialize the authored rows
+and use that selector only for visibility.
 
 ### Mission triggered text — `HUD_DisplayTriggeredText @0x51f190` (ported 2026-07-09)
 

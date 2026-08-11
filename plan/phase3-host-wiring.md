@@ -2,7 +2,7 @@
 
 > **Completed-effort record** — the host-side wiring this file tracked landed
 > 2026-06-12 (see `plan/status.md`: "Phase 3 (EPASK account login) LANDED"); the
-> login binding ships in `godot/engine/network/nova_world_client`. Kept as the
+> login binding ships in `godot/src/network/nova_world_client`. Kept as the
 > phase-3 design context per `plan/README.md`; not live status.
 
 ## What's done

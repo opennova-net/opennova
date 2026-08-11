@@ -10,8 +10,8 @@ witnessed chain as pure functions), `engine/formats/env` `env_weather.h`/`env_re
 (`ModulatorChain`, `WeatherColorBlock::set_step_deltas`, `iris_gain`),
 `engine/runtime/renderer/object_shader_template.cpp` (the composed FF lighting model),
 `godot/src/env/nova_weather_core.cpp` (the ticked chain),
-`godot/src/environment/{nova_weather,nova_environment}.gd` +
-`godot/src/object/nova_object_model.gd` (the uniform feed),
+`godot/src/env/{nova_weather,nova_mission_environment}.cpp` +
+`godot/src/object/nova_object_model.cpp` (the uniform feed),
 `godot/shaders/terrain_lighting.gdshaderinc` (the terrain c0/c1 surface).
 Landed by maturity REN-5 ([maturity-program.md](../maturity-program.md);
 standing rules [ADR 0023](../adr/0023-render-visual-parity.md)). The T1

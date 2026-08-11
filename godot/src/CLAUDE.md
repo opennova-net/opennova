@@ -52,7 +52,7 @@ Gotchas:
   crypto in `engine/` (ADR 0010). Keep wire behavior in the portable libs so it stays
   unit-testable and interoperable; see `docs/net/novaworld-net-re.md`.
 - Decoded in-match entities have one runtime fold and one presenter (ADR 0026):
-  `ClientReplicaPipeline` owns `ClientState`, and `world/wire_present_pass.gd`
-  renders it for live joiners. Nothing may grow another entity reducer or
-  presenter. `NovaWorldClient` is matchmaking/handoff, not a
+  `ClientReplicaPipeline` owns `ClientState`, and the native `WirePresentPass`
+  (`simulation/nova_present_applier_wire.cpp`) renders it for live joiners.
+  Nothing may grow another entity reducer or presenter. `NovaWorldClient` is matchmaking/handoff, not a
   gameplay-replication stack.

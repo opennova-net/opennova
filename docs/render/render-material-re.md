@@ -7,7 +7,7 @@ byte) to device render state, witnessed in retail `Jointops.exe`
 `engine/runtime/renderer` (`material_classify`, `material_eval`, `uv_anim`,
 `object_shader_template`),
 `godot/src/object/{nova_object_shader_cache,nova_object_data_materials,nova_object_data_runtime_eval}.cpp`,
-`godot/src/object/nova_object_model.gd`. Landed by maturity REN-2
+`godot/src/object/nova_object_model.cpp`. Landed by maturity REN-2
 ([maturity-program.md](../maturity-program.md); standing rules
 [ADR 0023](../adr/0023-render-visual-parity.md)). The T1 parity instrument
 (`tests/renderer/state_vectors_test.cpp` golden) pins every classification in

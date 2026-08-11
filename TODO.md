@@ -49,9 +49,9 @@ hardening, and project health. Divergences from the original engine belong in
       remaining builder files carry none); `docs/terrain/terrain-re.md` is still partial
       (PAR-R1); narrow or close this entry after the sweep
 - [ ] Present-pass / entity-reconcile citation pass: the present anchors live at
-      the native walks (`nova_present_applier.{h,cpp}` 12, the wire walk
-      `nova_present_applier_wire.cpp` 5, the `wire_present_pass.gd` facade's
-      cold-path 3, `present_held_weapon.gd`'s reference math) —
+      the native walks (`nova_present_applier.{h,cpp}` 12, the wire walk +
+      cold path `godot/src/simulation/nova_present_applier_wire.cpp`, the
+      held-weapon reference math `engine/net/npruntime/client_replica_present.h`) —
       but `engine/world/mission_entity_registry.gd` still carries none. Remaining:
       engine-research the original entity-reconcile chain and cite it into
       `docs/runtime-architecture.md` + `docs/correspondence.md`
@@ -71,7 +71,6 @@ hardening, and project health. Divergences from the original engine belong in
       tile files as a cache. Decide: ledger it as a D-TERRAIN row (cache-trust is the
       witnessed semantic) or record it in `terrain-re.md` as a deliberate tool-side
       divergence
-- [ ] `engine/mcp/` relocation (optional): all 16 files are class_name-referenced with zero `res://src/mcp` literals (#376 added the `game_mcp_*` service trio and `mcp_peer_client.gd`), so it can move (e.g. next to `modtools/mcp/`) without path edits if engine/ layering ever needs it
 - [ ] `opennova::io` adoption continuation: migrate remaining per-lib byte readers on-touch (policy in engine/CLAUDE.md); excluded: mus/wac VM cursors (faithful-port surface)
 - [ ] Mission workspace rail conversion: with the inspector decomposed into section components, moving Mission onto `_build_inspector_defs()` workflow rows is a small step, but it swaps the in-panel mode tabs for the shell's workflow rail (visible layout change) - needs a deliberate UX pass
 - [ ] NovaWorld disconnect-state reset (owner: `godot/game/novaworld_panel.gd`): clear all connection-derived rows, login/join state, pending mission/player data, and disable Host/Join/Login on disconnect or error. Acceptance (`godot/tests/novaworld_panel_test.gd`): a populated, logged-in, pending-join panel returns to a clean disconnected state and cannot submit a stale row. Coordinate with the unlanded novaworld_panel rework held in the `gsb` worktree (WIP commit 0fd58850b on `worktree-gsb`; the branch's earlier commits landed via #300) before landing.
