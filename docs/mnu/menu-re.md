@@ -441,8 +441,11 @@ is the ONE menu path (the MnuMenu Control tree is deleted). Pinned by
   re-activation swaps radio->edit with focus + caret at end, leaving copies
   the edit text back to the radio label — no shipped JO menu authors a
   RADIOEDIT, so neither half is compiled). Compiled-path follow-ups: table
-  image/SUBST/custom cells, per-row appearance/color overrides, and row
-  overflow wrap; marquee image nodes + the 50px edge fade band. The compiled
+  image/SUBST/custom cells, the per-row color override (`row+28 & 4` swapping
+  the `row+24` color slot with `row+32`), locked rows (state 1), and row
+  overflow wrap; marquee image nodes + the 50px edge fade band. (The per-ROW-
+  STATE `ITEMS` appearance passes and row-state text colors ARE compiled —
+  see the table paragraph.) The compiled
   path now emits the authored at-rest track, `SHUTTLE`, `SCROLLUP`, and
   `SCROLLDOWN` for standalone SCROLL widgets and direct `<SCROLLBAR>` blocks
   used by LIST/MULTI/LAN_LIST, TABLE, MULTILINE_EDIT, and a combo's LIST_BOX.
@@ -572,13 +575,22 @@ negative), then walks:
   character-PROFILED taper. Type 2 dispatches the custom draw event
   (`0x8000002`). Columns advance by width + the column gap.
 - **Data rows:** 40-byte rows; the scroll window is first-visible + visible
-  count; rows with `row+28 & 0xA` skip. `row+28 & 4` swaps a per-row COLOR
-  override (indexed by `row+24`) into the font color slot for the row's
-  duration. Per cell by column type: 0 text, 1/4 image
-  (`draw_aligned_texture @ 0x6409e0`, per-column alignment array), 2 custom
-  callback. Row ITEM appearance records (28-byte, keyed by `row+24`) draw
-  behind non-custom cells. A column overflowing the right edge WRAPS the row
-  down by one row height.
+  count; rows with `row+28 & 0xA` skip. `row+24` is the row's OWN state
+  (`CTableWnd_SetRowSelected @ 0x63f5f0`: 0 default, 1 locked — immune to
+  select/clear, 3 selected; the click handler `@ 0x642550..0x64259d`
+  single-select clears every non-locked row to 0 then sets the hit row to 3,
+  multiselect toggles 3<->0). Cell TEXT draws with the widget's state color
+  indexed by that row state — `row+28 & 1` forces state 1 — never by the
+  widget-level mouseover visual (`@ 0x64189a..0x6418da`); the header always
+  pushes state 0 (`@ 0x641446`). `row+28 & 4` swaps a per-row COLOR override
+  (`row+32`, into the `row+24` slot) around the row's draw. Per cell by
+  column type: 0 text, 1/4 image (`draw_aligned_texture @ 0x6409e0`,
+  per-column alignment array), 2 custom callback. Row ITEM appearance
+  records (28-byte at `this+824`, keyed by `row+24`: COLOR fill / IMAGE /
+  OUTLINE bits — options.mnu CONTROL_MAPPING authors the default-state
+  OUTLINE grid + selected-state COLOR bar) draw behind non-custom cells,
+  per CELL rect. A column overflowing the right edge WRAPS the row down by
+  one row height.
 - Then the viewport restores and children draw (vtable+24).
 
 ## Marquee credits scroller `[orig: CMarqueeWnd_Render @ 0x65cf90 -> render_scrolling_credits @ 0x65ca00]`

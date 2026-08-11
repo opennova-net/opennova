@@ -692,6 +692,94 @@ void test_table_visible_count_floors_to_one(const fnt_font_t *font) {
 			"one stored visible row keeps a one-row tiny table scrollbar hidden");
 }
 
+// Table cells draw with the ROW's own state, never the widget hover visual:
+// headers push state 0, a selected row is state 3, and the per-cell background
+// comes from the ITEMS appearance record for that row state (outline grid on
+// default rows, color fill on the selected row — options.mnu CONTROL_MAPPING
+// authors exactly that pair). [orig: CUITable_Render text state @
+// 0x64189a..0x6418da, header push 0 @ 0x641446, cell backgrounds @
+// 0x641642..0x6416b6; CTableWnd_SetRowSelected @ 0x63f5f0 — states 0/1/3]
+void test_table_rows_draw_row_state_not_widget_hover(const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>TABLE_SEL</NAME>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <FONT><NAME>f.fnt</NAME><DEFAULT_FG>AAAAAA</DEFAULT_FG></FONT>
+    <WINDOW type="table" name="TABLE">
+      <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>116</BOTTOM></POSITION>
+      <FONT><NAME>f.fnt</NAME><DEFAULT_FG>AAAAAA</DEFAULT_FG><MOUSEOVER_FG>FF0000</MOUSEOVER_FG><SELECTED_FG>00FF00</SELECTED_FG></FONT>
+      <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+      <COLUMN count="1"><HEADER column="0" width="80" justify="LEFT">NAME</HEADER></COLUMN>
+      <ITEMS>
+        <APPEARANCE type="outline" state="default">445566</APPEARANCE>
+        <APPEARANCE type="color" state="selected">112233</APPEARANCE>
+      </ITEMS>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	c.configure(doc.first_screen(), font);
+	MenuWidgetState table_state;
+	table_state.index = 1;
+	table_state.hovered = true; // the widget-level visual must not tint cells
+	table_state.selected_item = -1;
+	table_state.selected_items.push_back(1);
+	for (int i = 0; i < 3; ++i) {
+		table_state.table_rows.push_back({ "r" + std::to_string(i) });
+	}
+	MenuFrameState state;
+	state.widgets.push_back(table_state);
+	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
+
+	// Row 1 spans y 36..56 (16px measured header + 20px rows); glyph tops
+	// carry the font's -0.5 bake offset.
+	bool any_mouseover_text = false;
+	bool selected_row_text_selected_fg = false;
+	bool other_text_default_fg = false;
+	for (const auto &g : dl.glyphs) {
+		const uint32_t rgb = g.color & 0xFFFFFFu;
+		if (rgb == 0xFF0000u) {
+			any_mouseover_text = true;
+		}
+		if (g.y_top >= 35.0f && g.y_top < 55.0f) {
+			if (rgb == 0x00FF00u) {
+				selected_row_text_selected_fg = true;
+			}
+		} else if (rgb == 0xAAAAAAu) {
+			other_text_default_fg = true;
+		}
+	}
+	CHECK(!any_mouseover_text,
+			"widget hover never tints table cells or headers");
+	CHECK(selected_row_text_selected_fg,
+			"the selected row's text uses the selected fg");
+	CHECK(other_text_default_fg,
+			"header and unselected rows keep the default fg");
+
+	bool selected_fill = false;
+	for (const MenuQuad &q : dl.quads) {
+		if ((q.color & 0xFFFFFFu) == 0x112233u && q.texture == kMenuTexNone &&
+				q.y0 == 36.0f && q.y1 == 56.0f) {
+			selected_fill = true;
+		}
+	}
+	CHECK(selected_fill,
+			"the selected row's cell draws the ITEMS selected color fill");
+
+	int trim_lines = 0;
+	for (const auto &l : dl.lines) {
+		if ((l.color & 0xFFFFFFu) == 0x445566u) {
+			++trim_lines;
+		}
+	}
+	// Two default-state rows x one cell x 4 outline edges.
+	CHECK(trim_lines == 8,
+			"default rows draw the ITEMS outline grid per cell");
+}
+
 void test_text_placement_and_truncation(const fnt_font_t *font) {
 	mnu::Document doc = parse_or_die(kScreenXml);
 	MenuFrameCompiler c;
@@ -2023,6 +2111,7 @@ int main() {
 	test_combo_scrollbar_offsets_rows_and_hit(&font);
 	test_table_scrollbar_separates_header_and_body_row_heights(&font);
 	test_table_visible_count_floors_to_one(&font);
+	test_table_rows_draw_row_state_not_widget_hover(&font);
 	test_text_placement_and_truncation(&font);
 	test_scale_truncation(&font);
 	test_radio_checkbox_forcing(&font);
