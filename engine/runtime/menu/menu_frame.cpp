@@ -1411,6 +1411,15 @@ int MenuFrameCompiler::hit_walk(int index, int origin_x, int origin_y,
 	if (mx >= emit_x(rect.left, sx) && mx < emit_x(rect.right, sx) &&
 			my >= emit_x(rect.top, sy) && my < emit_x(rect.bottom, sy)) {
 		*io_hit = index; // later in draw order = front-most; the claim
+	} else if (w.type == mnu::WindowType::SpinList &&
+			spin_arrow_hit_(node, rect, mx, my, sx, sy) != 0) {
+		// The SPINUP/SPINDOWN arrows are child WINDOWS carrying their own
+		// rects in this same walk, and shipped menus author them OUTSIDE the
+		// parent rect (mp.mnu GAME_TYPE: −18..−2 / 217..233 against a
+		// 0..215 widget) — an arrow hit claims the spin widget exactly like
+		// retail's child-window claim (D-MNU-16)
+		// [orig: CSpinListWnd_CreateUpDownChildren @ 0x64b8b0].
+		*io_hit = index;
 	}
 	for (size_t c = 0; c < w.children.size(); ++c) {
 		next = hit_walk(next, rect.left, rect.top, state, mx, my, sx, sy,
@@ -1751,16 +1760,12 @@ int MenuFrameCompiler::combo_popup_row_at(int index,
 	return -1;
 }
 
-int MenuFrameCompiler::spin_arrow_at(int index, const MenuFrameState &state,
-		float mx, float my, float sx, float sy) const {
-	if (index < 0 || index >= static_cast<int>(nodes_.size())) {
-		return 0;
-	}
-	mnu::RectEdges rect;
-	if (!widget_rect(index, state, &rect)) {
-		return 0;
-	}
-	const WidgetNode &node = nodes_[static_cast<size_t>(index)];
+// Shared arrow hit over the widget's ABSOLUTE rect: 0 none, 1 up, 2 down —
+// the pump's claim walk and the driver's press routing use the same rects
+// [orig: CSpinListWnd_CreateUpDownChildren @ 0x64b8b0 child rects].
+int MenuFrameCompiler::spin_arrow_hit_(const WidgetNode &node,
+		const mnu::RectEdges &rect, float mx, float my, float sx,
+		float sy) const {
 	const mnu::Window &w = *node.window;
 	const auto arrow_hit = [&](const mnu::SpinButton &btn, int32_t slot) {
 		if (!btn.present || slot < 0) {
@@ -1783,6 +1788,19 @@ int MenuFrameCompiler::spin_arrow_at(int index, const MenuFrameState &state,
 		return 2;
 	}
 	return 0;
+}
+
+int MenuFrameCompiler::spin_arrow_at(int index, const MenuFrameState &state,
+		float mx, float my, float sx, float sy) const {
+	if (index < 0 || index >= static_cast<int>(nodes_.size())) {
+		return 0;
+	}
+	mnu::RectEdges rect;
+	if (!widget_rect(index, state, &rect)) {
+		return 0;
+	}
+	const WidgetNode &node = nodes_[static_cast<size_t>(index)];
+	return spin_arrow_hit_(node, rect, mx, my, sx, sy);
 }
 
 int MenuFrameCompiler::table_row_at(int index, const MenuFrameState &state,
@@ -2131,7 +2149,12 @@ int MenuFrameCompiler::walk_widget(int index, int origin_x, int origin_y,
 			}
 			emit_appearance(node, rect, s,
 					appearance_state_with_fallback(node, pump));
-			if (!node.items.empty()) {
+			// The closed face shows the SELECTION whenever rows exist —
+			// authored OR runtime-seeded (the armory's companion rows); the
+			// authored-only gate left every runtime-filled combo face blank
+			// (D-MNU-15) [orig: the closed face is the +764 CButtonWnd showing
+			// items[selected], CComboWnd ctor @ 0x65be40].
+			if (!node.items.empty() || (ws != nullptr && ws->has_items)) {
 				emit_item_cell(node, rect, s, pump, ws);
 			} else {
 				emit_widget_text(node, rect, s, pump, ws, -1);
