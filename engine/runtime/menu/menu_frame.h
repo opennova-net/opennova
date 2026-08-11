@@ -88,8 +88,22 @@ struct MenuDrawList {
 		int32_t font = 0;
 		int32_t first = 0;
 		int32_t count = 0;
+		int32_t underline_first = 0;
+		int32_t underline_count = 0;
 	};
 	std::vector<FontRun> font_runs;
+	// Painter-order stream over the typed payload arrays. Primitive storage
+	// stays compact by kind; this sequence preserves the original forward
+	// widget/child walk across kind boundaries.
+	// [orig: CUIScene_DrawScreensAndCursor @ 0x63bf60; per-widget vtable+24]
+	struct DrawOp {
+		enum class Kind { Quad,
+			Line,
+			FontRun };
+		Kind kind = Kind::Quad;
+		int32_t index = 0;
+	};
+	std::vector<DrawOp> draw_ops;
 	int64_t widgets_drawn = 0;
 };
 
@@ -117,6 +131,18 @@ struct MenuWidgetState {
 	int32_t selected_item = 0;  // spinlist/combo/list selected row
 	int32_t hover_item = -1;    // list hover row (row style 2)
 	int32_t scroll_row = 0;     // list first visible row
+	// Standalone CScrollWnd range state. The page value is the original
+	// inclusive-page field (visible count - 1), not a row count. Constructor
+	// defaults are min=max=value=0, page=10; the embedder sets authored controls
+	// after finding them by NAME.
+	// [orig: CScrollWnd_Construct @ 0x64c450; CScrollWnd_SetPageSize
+	// @ 0x64ce10; CScrollWnd_SetRangeAndClamp @ 0x64d490;
+	// CScrollWnd_SetScrollPos @ 0x64ce20]
+	bool has_scroll_range = false;
+	int32_t scroll_min = 0;
+	int32_t scroll_max = 0;
+	int32_t scroll_page = 10;
+	int32_t scroll_value = 0;
 	bool popup_open = false;    // combo: draw the LIST_BOX popup
 	// Runtime item rows (text) the embedder seeds into a list/combo/spinlist —
 	// the Control-tree path seeded these via set_items; when present they
@@ -326,6 +352,12 @@ private:
 		bool has_color = false; // COLOR=1 -> stretched fill [orig: entry+12]
 		uint32_t color = 0;
 		int32_t texture = kMenuTexNone; // IMAGE=2 [orig: entry+20]
+		// IMAGE sprite-sheet crop. MAP_STATE selects a HEIGHT-tall row from
+		// the source texture while the destination remains the widget rect.
+		bool has_map_state = false;
+		int32_t map_state = -1;
+		bool has_image_height = false;
+		int32_t image_height = 0;
 		bool has_outline = false;       // OUTLINE=8 [orig: entry+16]
 		uint32_t outline = 0;
 	};
@@ -333,6 +365,9 @@ private:
 		int start = 0;
 		int end = 0;
 	};
+	enum class ScrollbarKind { Standalone,
+		Embedded,
+		Popup };
 	// Per-marquee roll state (compiler runtime state, like edit_scroll_):
 	// the current scroll offset in design pixels and the last time_ms sample
 	// [orig: node y -= rate per frame; whole-roll reset when the last node
@@ -347,6 +382,7 @@ private:
 	int build_node(const mnu::Window &w, int parent);
 	void build_state_passes(const std::vector<mnu::Appearance> &rows,
 			StatePass (&states)[4]);
+	std::pair<int, int> state_texture_size(const StatePass &pass) const;
 	std::string resolve_var(const std::string &value) const;
 	uint32_t resolve_text_color(const std::string &value) const;
 	std::string resolve_text_value(const std::string &type,
@@ -366,6 +402,8 @@ private:
 	// Shared row-height rule (authored MIN_ITEM_HEIGHT wins, else the "W"
 	// measure) for list rows / combo popup rows.
 	int row_height_(const WidgetNode &node) const;
+	void table_row_heights_(const WidgetNode &node, int *header_height,
+			int *body_row_height) const;
 	bool widget_shown_(int index, const MenuFrameState &state) const;
 	int pump_visual_state(const mnu::Window &w,
 			const MenuWidgetState *ws) const;
@@ -386,9 +424,16 @@ private:
 
 	// emitters
 	static float emit_x(int design, float scale);
+	void push_quad(const MenuQuad &quad);
+	void push_line(const MenuLine &line);
+	void push_font_run(const MenuDrawList::FontRun &run);
 	void emit_rect_quad(const mnu::RectEdges &design, const WalkScale &s,
 			uint32_t color, int32_t texture, bool tiled, float tile_u,
 			float tile_v);
+	void emit_state_texture(const mnu::RectEdges &design, const WalkScale &s,
+			const StatePass &pass);
+	void emit_state_pass(const mnu::RectEdges &design, const WalkScale &s,
+			const StatePass &pass);
 	void emit_outline(const mnu::RectEdges &design, const WalkScale &s,
 			uint32_t color);
 	void emit_appearance(const WidgetNode &node, const mnu::RectEdges &rect,
@@ -421,6 +466,14 @@ private:
 			const WalkScale &s, const MenuWidgetState *ws);
 	void emit_combo_popup(const WidgetNode &node, const mnu::RectEdges &rect,
 			const WalkScale &s, const MenuWidgetState *ws);
+	bool resolve_scrollbar_rect(const WidgetNode &node, ScrollbarKind kind,
+			const mnu::RectEdges &owner, int fallback_top,
+			int fallback_height, int fallback_width,
+			mnu::RectEdges *out) const;
+	void emit_scrollbar(const WidgetNode &node, ScrollbarKind kind,
+			const mnu::RectEdges &rect, const WalkScale &s,
+			int range_min, int range_max, int page, int value,
+			int track_state);
 	void emit_spin_arrows(const WidgetNode &node, const mnu::RectEdges &rect,
 			const WalkScale &s);
 	void emit_table(int index, const WidgetNode &node,

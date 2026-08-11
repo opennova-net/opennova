@@ -114,7 +114,7 @@ func _write_bms(path: String, mission_name: String, attribs: int) -> void:
 
 
 func _cleanup(dir: String) -> void:
-	for f in ["main.mnu", "sp.mnu", "test.bms"]:
+	for f in ["main.mnu", "sp.mnu", "options.mnu", "test.bms"]:
 		DirAccess.remove_absolute(dir.path_join(f))
 	DirAccess.remove_absolute(dir)
 
@@ -131,6 +131,40 @@ func test_boots_into_main_menu_startup() -> void:
 	assert_not_null(driver, "the interaction driver is built")
 	assert_not_null(shell.get_frame(), "the compiled frame surface is built")
 	assert_eq(driver.get_current_screen(), "STARTUP", "STARTUP screen shown")
+	_cleanup(dir)
+
+
+# The shell seeds the five named Options sliders with the exact original
+# ranges/pages. Until OpenNova owns persisted render/audio/input settings, the
+# current value is deterministically clamped to each range minimum.
+# [orig: options_screen_init @ 0x554800;
+# UI_PopulateRenderAndAudioSettings @ 0x55c830]
+func test_options_scrolls_seed_original_ranges() -> void:
+	var dir := _make_dir()
+	_copy(OPTIONS_FIXTURE, dir.path_join("options.mnu"))
+	var shell = _make_shell(dir)
+	if shell == null:
+		pass_test("temp resource root unavailable")
+		_cleanup(dir)
+		return
+	assert_true(shell.open_menu("options.mnu", ""), "Options fixture opens")
+	var driver: MenuDriver = shell.get_driver()
+	var expected := [
+		["GAMMA", 5, 20, 2, 5],
+		["SOUNDFXVOLUME", 0, 255, 10, 0],
+		["DIALOGVOLUME", 0, 255, 10, 0],
+		["MUSICVOLUME", 0, 255, 10, 0],
+		["MOUSE_SENSITIVITY", 4, 511, 10, 4],
+	]
+	for row in expected:
+		var control_name := String(row[0])
+		var id := driver.widget_id(control_name)
+		assert_gte(id, 0, "%s exists" % control_name)
+		var scroll = driver.get_widget_scroll_range(id)
+		assert_not_null(scroll, "%s receives scroll state" % control_name)
+		assert_eq([scroll.minimum, scroll.maximum, scroll.page, scroll.value],
+				row.slice(1),
+				"%s receives its original range/page and min fallback" % control_name)
 	_cleanup(dir)
 
 

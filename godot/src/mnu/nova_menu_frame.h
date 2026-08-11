@@ -89,8 +89,12 @@ public:
 	void set_widget_caret(int p_index, int p_caret);
 	void set_widget_text(int p_index, const String &p_text);
 	void clear_widget_text(int p_index);
-	void set_widget_selection(int p_index, int p_selected_item,
-			int p_hover_item, int p_scroll_row);
+	void set_widget_selection(int p_index, int p_selected_item, int p_hover_item,
+			int p_scroll_row);
+	// Standalone type=scroll range/page/value. Page is the original inclusive
+	// page field (visible count - 1).
+	void set_widget_scroll_range(int p_index, int p_minimum, int p_maximum,
+			int p_page, int p_value);
 	void set_widget_popup_open(int p_index, bool p_open);
 	// Runtime content channels (the Control-tree path's set_items /
 	// add_row_values / marquee content, now engine state).

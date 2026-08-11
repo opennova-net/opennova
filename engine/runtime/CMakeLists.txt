@@ -33,6 +33,7 @@ add_library(opennova_runtime STATIC
     # menu — the .mnu screen draw-list compiler (ADR 0033 R2; witness:
     # docs/mnu/menu-re.md "Widget render dispatch")
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_scrollbar.cpp
     # menu backdrop movie policy (slots/gating/resolution; witness:
     # docs/mnu/menu-re.md "The menu backdrop (Bink underlay)")
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_video.cpp

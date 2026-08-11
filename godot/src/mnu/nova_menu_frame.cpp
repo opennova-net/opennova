@@ -330,6 +330,22 @@ void MenuFrame::set_widget_selection(int p_index, int p_selected_item,
 	queue_redraw();
 }
 
+void MenuFrame::set_widget_scroll_range(int p_index, int p_minimum,
+		int p_maximum, int p_page,
+		int p_value) {
+	opennova::menu::MenuWidgetState &ws = widget_(p_index);
+	if (p_minimum > p_maximum) {
+		p_minimum = 0;
+		p_maximum = 0;
+	}
+	ws.has_scroll_range = true;
+	ws.scroll_min = p_minimum;
+	ws.scroll_max = p_maximum;
+	ws.scroll_page = p_page;
+	ws.scroll_value = std::clamp(p_value, p_minimum, p_maximum);
+	queue_redraw();
+}
+
 void MenuFrame::set_widget_popup_open(int p_index, bool p_open) {
 	widget_(p_index).popup_open = p_open;
 	queue_redraw();
@@ -706,11 +722,14 @@ void MenuFrame::_draw() {
 	for (opennova::menu::MenuWidgetState &ws : state_.widgets) {
 		ws.marquee_reset = false;
 	}
-	// Quads and lines in compiler order; glyphs above them per font run
-	// (retail's text draws ride the same walk after each widget's art).
-	for (const opennova::menu::MenuQuad &quad : list.quads) {
-		const Rect2 rect(quad.x0, quad.y0, quad.x1 - quad.x0,
-				quad.y1 - quad.y0);
+	// Apply the compiler's one painter-order stream across primitive kinds.
+	// The original walks screens/children forward and each widget emits its
+	// frame, appearance, text, then children in vtable+24 order; batching all
+	// glyphs after all quads lets later backgrounds leak earlier text through.
+	// The engine-side MenuDrawList witness record in docs/mnu/menu-re.md owns
+	// the original address correspondence; this adapter only replays it.
+	const auto apply_quad = [&](const opennova::menu::MenuQuad &quad) {
+		const Rect2 rect(quad.x0, quad.y0, quad.x1 - quad.x0, quad.y1 - quad.y0);
 		const Color color = argb_to_color(quad.color);
 		Ref<Texture2D> tex;
 		if (quad.texture >= 0 &&
@@ -723,7 +742,7 @@ void MenuFrame::_draw() {
 			}
 			// An unresolved texture draws nothing [orig: every draw is gated
 			// on a successful texture load].
-			continue;
+			return;
 		}
 		if (quad.tiled) {
 			draw_texture_rect(tex, rect, true, color);
@@ -738,53 +757,79 @@ void MenuFrame::_draw() {
 		} else {
 			draw_texture_rect(tex, rect, false, color);
 		}
-	}
-	for (const opennova::menu::MenuLine &line : list.lines) {
-		draw_line(Vector2(line.x0, line.y0), Vector2(line.x1, line.y1),
+	};
+	const auto apply_line = [&](const opennova::menu::MenuLine &line) {
+		this->draw_line(Vector2(line.x0, line.y0), Vector2(line.x1, line.y1),
 				argb_to_color(line.color), 1.0f);
-	}
-	// Glyphs: each font run renders over its own font's page textures.
-	for (const opennova::menu::MenuDrawList::FontRun &run : list.font_runs) {
-		LoadedFont *font = nullptr;
-		if (run.font >= 0 && run.font < static_cast<int32_t>(fonts_.size())) {
-			font = fonts_[static_cast<size_t>(run.font)];
+	};
+	const auto apply_font_run =
+			[&](const opennova::menu::MenuDrawList::FontRun &run) {
+				LoadedFont *font = nullptr;
+				if (run.font >= 0 && run.font < static_cast<int32_t>(fonts_.size())) {
+					font = fonts_[static_cast<size_t>(run.font)];
+				}
+				if (font == nullptr) {
+					return;
+				}
+				const int32_t end = run.first + run.count;
+				for (int32_t i = run.first;
+						i < end && i < static_cast<int32_t>(list.glyphs.size()); ++i) {
+					const opennova::hud::GameFontQuad &glyph =
+							list.glyphs[static_cast<size_t>(i)];
+					if (glyph.page >= font->pages.size()) {
+						continue;
+					}
+					const Ref<Texture2D> page = font->pages[glyph.page];
+					if (page.is_null()) {
+						continue;
+					}
+					PackedVector2Array points;
+					points.resize(4);
+					points.set(0, Vector2(glyph.x_top_left, glyph.y_top));
+					points.set(1, Vector2(glyph.x_top_right, glyph.y_top));
+					points.set(2, Vector2(glyph.x_bottom_right, glyph.y_bottom));
+					points.set(3, Vector2(glyph.x_bottom_left, glyph.y_bottom));
+					PackedVector2Array uvs;
+					uvs.resize(4);
+					uvs.set(0, Vector2(glyph.u0, glyph.v0));
+					uvs.set(1, Vector2(glyph.u1, glyph.v0));
+					uvs.set(2, Vector2(glyph.u1, glyph.v1));
+					uvs.set(3, Vector2(glyph.u0, glyph.v1));
+					PackedColorArray colors;
+					colors.push_back(argb_to_color(glyph.color));
+					draw_polygon(points, colors, uvs, page);
+				}
+				const int32_t underline_end = run.underline_first + run.underline_count;
+				for (int32_t i = run.underline_first;
+						i < underline_end &&
+						i < static_cast<int32_t>(list.underlines.size());
+						++i) {
+					const opennova::hud::GameFontUnderline &underline =
+							list.underlines[static_cast<size_t>(i)];
+					this->draw_line(Vector2(underline.x0, underline.y),
+							Vector2(underline.x1, underline.y),
+							argb_to_color(underline.color), 1.0f);
+				}
+			};
+	for (const opennova::menu::MenuDrawList::DrawOp &op : list.draw_ops) {
+		switch (op.kind) {
+			case opennova::menu::MenuDrawList::DrawOp::Kind::Quad:
+				if (op.index >= 0 && op.index < static_cast<int32_t>(list.quads.size())) {
+					apply_quad(list.quads[static_cast<size_t>(op.index)]);
+				}
+				break;
+			case opennova::menu::MenuDrawList::DrawOp::Kind::Line:
+				if (op.index >= 0 && op.index < static_cast<int32_t>(list.lines.size())) {
+					apply_line(list.lines[static_cast<size_t>(op.index)]);
+				}
+				break;
+			case opennova::menu::MenuDrawList::DrawOp::Kind::FontRun:
+				if (op.index >= 0 &&
+						op.index < static_cast<int32_t>(list.font_runs.size())) {
+					apply_font_run(list.font_runs[static_cast<size_t>(op.index)]);
+				}
+				break;
 		}
-		if (font == nullptr) {
-			continue;
-		}
-		const int32_t end = run.first + run.count;
-		for (int32_t i = run.first;
-				i < end && i < static_cast<int32_t>(list.glyphs.size()); ++i) {
-			const opennova::hud::GameFontQuad &glyph =
-					list.glyphs[static_cast<size_t>(i)];
-			if (glyph.page >= font->pages.size()) {
-				continue;
-			}
-			const Ref<Texture2D> page = font->pages[glyph.page];
-			if (page.is_null()) {
-				continue;
-			}
-			PackedVector2Array points;
-			points.resize(4);
-			points.set(0, Vector2(glyph.x_top_left, glyph.y_top));
-			points.set(1, Vector2(glyph.x_top_right, glyph.y_top));
-			points.set(2, Vector2(glyph.x_bottom_right, glyph.y_bottom));
-			points.set(3, Vector2(glyph.x_bottom_left, glyph.y_bottom));
-			PackedVector2Array uvs;
-			uvs.resize(4);
-			uvs.set(0, Vector2(glyph.u0, glyph.v0));
-			uvs.set(1, Vector2(glyph.u1, glyph.v0));
-			uvs.set(2, Vector2(glyph.u1, glyph.v1));
-			uvs.set(3, Vector2(glyph.u0, glyph.v1));
-			PackedColorArray colors;
-			colors.push_back(argb_to_color(glyph.color));
-			draw_polygon(points, colors, uvs, page);
-		}
-	}
-	for (const opennova::hud::GameFontUnderline &underline : list.underlines) {
-		draw_line(Vector2(underline.x0, underline.y),
-				Vector2(underline.x1, underline.y),
-				argb_to_color(underline.color), 1.0f);
 	}
 }
 
@@ -821,6 +866,9 @@ void MenuFrame::_bind_methods() {
 			D_METHOD("set_widget_selection", "index", "selected_item",
 					"hover_item", "scroll_row"),
 			&MenuFrame::set_widget_selection);
+	ClassDB::bind_method(D_METHOD("set_widget_scroll_range", "index", "minimum",
+								 "maximum", "page", "value"),
+			&MenuFrame::set_widget_scroll_range);
 	ClassDB::bind_method(D_METHOD("set_widget_popup_open", "index", "open"),
 			&MenuFrame::set_widget_popup_open);
 	ClassDB::bind_method(D_METHOD("set_time_ms", "ms"),

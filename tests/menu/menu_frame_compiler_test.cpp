@@ -145,14 +145,19 @@ void test_draw_order_and_state_selection(const fnt_font_t *font) {
 	CHECK(dl.quads[1].texture == brush && dl.quads[1].tiled,
 			"the frame brush tiles right after the fill");
 	int stencil_quads = 0;
+	bool stencil_quads_are_untinted = true;
 	for (size_t i = 2; i < 10; ++i) {
 		if (dl.quads[i].texture == border) {
 			++stencil_quads;
+			stencil_quads_are_untinted =
+					stencil_quads_are_untinted && dl.quads[i].color == 0xFFFFFFFFu;
 		}
 	}
 	CHECK(stencil_quads == 8, "eight stencil border pieces");
-	CHECK((dl.quads[1].color & 0xFFFFFFu) == 0x7F7F7Fu,
-			"frame quads modulate 0x7F7F7F");
+	CHECK(dl.quads[1].color == 0xFFFFFFFFu,
+			"the frame brush is untinted for the ordinary-multiply backend");
+	CHECK(stencil_quads_are_untinted,
+			"the frame stencil is untinted for the ordinary-multiply backend");
 	CHECK(dl.quads[1].u1 > 12.0f && dl.quads[1].v1 > 9.0f,
 			"the brush fill carries tile repeat counts");
 	// Default state: the idle art draws, the hover art does not.
@@ -224,6 +229,467 @@ void test_draw_order_and_state_selection(const fnt_font_t *font) {
 	CHECK(count_quads_with_texture(dl5, ok_idle) == 0,
 			"hidden widget draws no art");
 	CHECK(dl5.lines.size() == 4, "the sibling still draws");
+}
+
+// Options-menu tabs and buttons use vertically stacked sprite sheets. The
+// authored MAP_STATE selects one HEIGHT-tall row; emitting the whole texture
+// stretches all four states into the widget and is immediately visible on the
+// shipped Options screen. [orig: CUIElement_ParseXMLDefinition @ 0x648120;
+// CUIElement_DrawTextureNative @ 0x647e40 ->
+// CTextureManager_DrawScaledRect @ 0x654e60]
+void test_image_appearance_crops_authored_map_state(const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>OPTIONS</NAME>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <WINDOW type="button" name="TAB">
+      <POSITION><LEFT>10</LEFT><TOP>20</TOP><RIGHT>110</RIGHT><BOTTOM>40</BOTTOM></POSITION>
+      <APPEARANCE type="image" state="default" map_state="2" height="20">tab_atlas.tga</APPEARANCE>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	c.configure(doc.first_screen(), font);
+	const int32_t atlas = slot_of(c, "tab_atlas.tga");
+	CHECK(atlas >= 0, "the Options tab atlas is interned");
+	c.set_texture_size(atlas, 100, 80);
+
+	MenuFrameState state;
+	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
+	const MenuQuad *tab = nullptr;
+	for (const MenuQuad &q : dl.quads) {
+		if (q.texture == atlas) {
+			tab = &q;
+			break;
+		}
+	}
+	CHECK(tab != nullptr, "the Options tab image draws");
+	if (tab != nullptr) {
+		CHECK(tab->u0 == 0.0f && tab->u1 == 1.0f,
+				"the atlas row spans the full texture width");
+		CHECK(tab->v0 == 0.5f && tab->v1 == 0.75f,
+				"map_state 2 crops the third 20px row from an 80px atlas");
+	}
+}
+
+// A type="scroll" Window draws its COLOR/OUTLINE over the full rect and its
+// IMAGE in the middle span, then its shuttle/up/down children. Options GAMMA
+// authors no HEIGHT, so the constructor's 20px part extent wins rather than
+// the arrow appearance crop. Its seeded retail range (5..20, page 2) produces
+// the original 25px thumb in the 150px middle span. [orig:
+// CScrollWnd_Construct @ 0x64c450; CScrollWnd_Render @ 0x64c5c0;
+// scroll COLOR sink @ 0x64ce70; scroll IMAGE sink @ 0x64cf70;
+// CUIScrollbar_CreateChildWindows @ 0x64d330;
+// CUIScrollbar_CalcThumbRect @ 0x64cba0; options_screen_init @ 0x554800]
+void test_scroll_draws_authored_visual_parts(const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>OPTIONS</NAME>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <WINDOW type="scroll" name="GAMMA">
+      <POSITION><LEFT>185</LEFT><TOP>72</TOP><RIGHT>375</RIGHT><BOTTOM>94</BOTTOM></POSITION>
+      <ORIENTATION>HORIZONTAL</ORIENTATION>
+      <APPEARANCE type="image" state="default">track.tga</APPEARANCE>
+      <SHUTTLE type="color" state="default">80FF0000</SHUTTLE>
+      <SCROLLUP type="image" state="default">left.tga</SCROLLUP>
+      <SCROLLDOWN type="image" state="default">right.tga</SCROLLDOWN>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	c.configure(doc.first_screen(), font);
+	const int32_t track = slot_of(c, "track.tga");
+	const int32_t up = slot_of(c, "left.tga");
+	const int32_t down = slot_of(c, "right.tga");
+	CHECK(track >= 0 && up >= 0 && down >= 0,
+			"configure interns every authored scroll visual");
+	c.set_texture_size(track, 76, 20);
+	c.set_texture_size(up, 12, 20);
+	c.set_texture_size(down, 12, 20);
+
+	MenuWidgetState gamma_state;
+	gamma_state.index = 1;
+	gamma_state.has_scroll_range = true;
+	gamma_state.scroll_min = 5;
+	gamma_state.scroll_max = 20;
+	gamma_state.scroll_page = 2;
+	gamma_state.scroll_value = 5;
+	MenuFrameState state;
+	state.widgets.push_back(gamma_state);
+	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
+	CHECK(count_quads_with_texture(dl, track) == 1,
+			"the scroll track draws exactly once");
+	CHECK(up >= 0 && count_quads_with_texture(dl, up) == 1,
+			"the authored up/left arrow draws exactly once");
+	CHECK(down >= 0 && count_quads_with_texture(dl, down) == 1,
+			"the authored down/right arrow draws exactly once");
+
+	// Widget x=185..375, default extent=20: IMAGE track x=205..355.
+	// Thumb = trunc(150 * (2+1) / (2-5+20+1)) = 25px; current=min
+	// places it at the leading edge, x=205..230.
+	if (dl.quads.size() == 4) {
+		CHECK(dl.quads[0].texture == track && dl.quads[0].x0 == 205.0f &&
+						dl.quads[0].y0 == 72.0f && dl.quads[0].x1 == 355.0f &&
+						dl.quads[0].y1 == 94.0f,
+				"the scroll IMAGE pass occupies only the middle track span");
+		CHECK(dl.quads[1].texture == kMenuTexNone &&
+						dl.quads[1].color == 0x80FF0000u && dl.quads[1].x0 == 205.0f &&
+						dl.quads[1].x1 == 230.0f,
+				"the color-only shuttle uses the seeded retail range and page");
+		CHECK(dl.quads[2].texture == up && dl.quads[2].x0 == 185.0f &&
+						dl.quads[2].y0 == 72.0f && dl.quads[2].x1 == 205.0f &&
+						dl.quads[2].y1 == 94.0f,
+				"the up/left arrow occupies the leading 20px extent");
+		CHECK(dl.quads[3].texture == down && dl.quads[3].x0 == 355.0f &&
+						dl.quads[3].y0 == 72.0f && dl.quads[3].x1 == 375.0f &&
+						dl.quads[3].y1 == 94.0f,
+				"the down/right arrow occupies the trailing extent");
+	} else {
+		CHECK(false, "the scroll emits exactly four visual quads");
+	}
+}
+
+// An omitted RIGHT/BOTTOM on a spin arrow is completed from the native image
+// extent, which means an authored HEIGHT row — not the full atlas —
+// supplies the fallback height. The same completed rect is the arrow's hit
+// target. [orig: CSpinListWnd_CreateUpDownChildren @ 0x64b8b0;
+//  CUIElement_DrawTextureNative @ 0x647e40]
+void test_spin_arrow_uses_cropped_atlas_extent(const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>SPIN_CROP</NAME>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <WINDOW type="spinlist" name="SPIN">
+      <POSITION><LEFT>100</LEFT><TOP>100</TOP><RIGHT>200</RIGHT><BOTTOM>120</BOTTOM></POSITION>
+      <ITEMS><ITEM type="ID" value="0">VALUE</ITEM></ITEMS>
+      <SPINUP>
+        <POSITION><LEFT>10</LEFT><TOP>5</TOP></POSITION>
+        <APPEARANCE type="image" state="default" map_state="2" height="20">spin_up_atlas.tga</APPEARANCE>
+      </SPINUP>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	c.configure(doc.first_screen(), font);
+	const int32_t up = slot_of(c, "spin_up_atlas.tga");
+	CHECK(up >= 0, "the spin-arrow atlas is interned");
+	c.set_texture_size(up, 16, 80);
+
+	MenuFrameState state;
+	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
+	const MenuQuad *arrow = nullptr;
+	for (const MenuQuad &q : dl.quads) {
+		if (q.texture == up) {
+			arrow = &q;
+			break;
+		}
+	}
+	CHECK(arrow != nullptr, "the authored spin-up arrow draws");
+	if (arrow != nullptr) {
+		CHECK(arrow->x0 == 110.0f && arrow->y0 == 105.0f && arrow->x1 == 126.0f &&
+						arrow->y1 == 125.0f,
+				"the omitted arrow edges use the 16x20 cropped native extent");
+		CHECK(arrow->v0 == 0.5f && arrow->v1 == 0.75f,
+				"the spin arrow draws only map_state 2 from the 80px atlas");
+	}
+	CHECK(c.spin_arrow_at(1, state, 115.0f, 124.0f, 1.0f, 1.0f) == 1,
+			"the hit target reaches the cropped row's completed bottom edge");
+	CHECK(c.spin_arrow_at(1, state, 115.0f, 125.0f, 1.0f, 1.0f) == 0,
+			"the half-open hit target ends at the cropped row height");
+}
+
+// A list draws its authored child scrollbar after its rows; the child uses
+// its own rect, the original 20px part extent, and the owner's
+// row range/page/value to place a proportional shuttle. [orig:
+// CListWnd_DrawItems @ 0x643f30;
+//  CScrollWnd_Render @ 0x64c5c0; CScrollWnd_SetPageSize @ 0x64ce10;
+//  CScrollWnd_SetRangeAndClamp @ 0x64d490]
+void test_list_scrollbar_uses_authored_geometry_and_range(
+		const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>LIST_SCROLL</NAME>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <WINDOW type="list" name="LIST">
+      <POSITION><LEFT>10</LEFT><TOP>20</TOP><RIGHT>110</RIGHT><BOTTOM>120</BOTTOM></POSITION>
+      <ITEMS>
+        <ITEM type="ID" value="0">ZERO</ITEM>
+        <ITEM type="ID" value="1">ONE</ITEM>
+        <ITEM type="ID" value="2">TWO</ITEM>
+        <ITEM type="ID" value="3">THREE</ITEM>
+        <ITEM type="ID" value="4">FOUR</ITEM>
+        <ITEM type="ID" value="5">FIVE</ITEM>
+        <ITEM type="ID" value="6">SIX</ITEM>
+        <ITEM type="ID" value="7">SEVEN</ITEM>
+        <ITEM type="ID" value="8">EIGHT</ITEM>
+        <ITEM type="ID" value="9">NINE</ITEM>
+      </ITEMS>
+      <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+      <SCROLLBAR>
+        <POSITION><LEFT>80</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>100</BOTTOM></POSITION>
+        <APPEARANCE type="image" state="default">list_track.tga</APPEARANCE>
+        <SHUTTLE type="image" state="default">list_shuttle.tga</SHUTTLE>
+        <SCROLLUP type="image" state="default" map_state="1" height="20">list_up_atlas.tga</SCROLLUP>
+        <SCROLLDOWN type="image" state="default" map_state="3" height="20">list_down_atlas.tga</SCROLLDOWN>
+      </SCROLLBAR>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	c.configure(doc.first_screen(), font);
+	const int32_t track = slot_of(c, "list_track.tga");
+	const int32_t shuttle = slot_of(c, "list_shuttle.tga");
+	const int32_t up = slot_of(c, "list_up_atlas.tga");
+	const int32_t down = slot_of(c, "list_down_atlas.tga");
+	CHECK(track >= 0 && shuttle >= 0 && up >= 0 && down >= 0,
+			"configure interns every nested list-scroll visual");
+	c.set_texture_size(track, 20, 60);
+	c.set_texture_size(shuttle, 20, 30);
+	c.set_texture_size(up, 20, 80);
+	c.set_texture_size(down, 20, 80);
+
+	MenuWidgetState list_state;
+	list_state.index = 1;
+	list_state.scroll_row = 2;
+	MenuFrameState state;
+	state.widgets.push_back(list_state);
+	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
+	const MenuQuad *track_quad = nullptr;
+	const MenuQuad *shuttle_quad = nullptr;
+	const MenuQuad *up_quad = nullptr;
+	const MenuQuad *down_quad = nullptr;
+	for (const MenuQuad &q : dl.quads) {
+		if (q.texture == track) {
+			track_quad = &q;
+		} else if (q.texture == shuttle) {
+			shuttle_quad = &q;
+		} else if (q.texture == up) {
+			up_quad = &q;
+		} else if (q.texture == down) {
+			down_quad = &q;
+		}
+	}
+	CHECK(track_quad != nullptr && shuttle_quad != nullptr &&
+					up_quad != nullptr && down_quad != nullptr,
+			"the nested list scrollbar draws track, shuttle, and both arrows");
+	if (track_quad != nullptr) {
+		CHECK(track_quad->x0 == 90.0f && track_quad->y0 == 40.0f &&
+						track_quad->x1 == 110.0f && track_quad->y1 == 100.0f,
+				"the scrollbar IMAGE pass occupies the span between its arrows");
+	}
+	if (up_quad != nullptr && down_quad != nullptr) {
+		CHECK(up_quad->x0 == 90.0f && up_quad->y0 == 20.0f &&
+						up_quad->x1 == 110.0f && up_quad->y1 == 40.0f &&
+						down_quad->x0 == 90.0f && down_quad->y0 == 100.0f &&
+						down_quad->x1 == 110.0f && down_quad->y1 == 120.0f,
+				"the arrows occupy the authored scrollbar's two ends");
+		CHECK(up_quad->v0 == 0.25f && up_quad->v1 == 0.5f &&
+						down_quad->v0 == 0.75f && down_quad->v1 == 1.0f,
+				"each arrow crops its authored 20px atlas row");
+	}
+	if (shuttle_quad != nullptr) {
+		// 10 rows, 5 visible: 30px thumb in a 60px middle span. scroll_row=2
+		// advances 2/5 of the remaining 30px travel: y=40+12..70+12.
+		CHECK(shuttle_quad->x0 == 90.0f && shuttle_quad->y0 == 52.0f &&
+						shuttle_quad->x1 == 110.0f && shuttle_quad->y1 == 82.0f,
+				"range, page, and scroll_row place the proportional shuttle");
+	}
+	CHECK(c.list_row_at(1, state, 20.0f, 25.0f, 1.0f, 1.0f) == 2,
+			"the first visible list row keeps its scrolled absolute index");
+	CHECK(c.list_row_at(1, state, 95.0f, 25.0f, 1.0f, 1.0f) == -1,
+			"the visible child scrollbar strip does not select a list row");
+
+	// Retail hides the child when the visible page contains every row.
+	state.widgets[0].has_items = true;
+	state.widgets[0].items = { "A", "B", "C", "D", "E" };
+	state.widgets[0].scroll_row = 0;
+	const MenuDrawList &fit = c.compile(state, 1.0f, 1.0f);
+	CHECK(count_quads_with_texture(fit, track) == 0 &&
+					count_quads_with_texture(fit, shuttle) == 0 &&
+					count_quads_with_texture(fit, up) == 0 &&
+					count_quads_with_texture(fit, down) == 0,
+			"a list scrollbar stays hidden while all rows fit");
+}
+
+// A combo delegates its popup to the same CList range/child model. Scrolling
+// changes the absolute item index at the top, and the visible scrollbar child
+// owns its strip before row selection. [orig: CComboWnd_Render @ 0x65bfd0;
+// CListWnd_DrawItems @ 0x643f30; CListWnd_CreateScrollChild @ 0x6444c0]
+void test_combo_scrollbar_offsets_rows_and_hit(const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>COMBO_SCROLL</NAME>
+  <WINDOW type="window" name="ROOT">
+    <FONT><NAME>f.fnt</NAME><DEFAULT_FG>FFFFFF</DEFAULT_FG></FONT>
+    <WINDOW type="combo" name="COMBO">
+      <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>20</BOTTOM></POSITION>
+      <ITEMS>
+        <ITEM type="ID" value="0">ZERO</ITEM><ITEM type="ID" value="1">ONE</ITEM>
+        <ITEM type="ID" value="2">TWO</ITEM><ITEM type="ID" value="3">THREE</ITEM>
+        <ITEM type="ID" value="4">FOUR</ITEM><ITEM type="ID" value="5">FIVE</ITEM>
+      </ITEMS>
+      <LIST_BOX>
+        <POSITION><LEFT>0</LEFT><TOP>20</TOP><RIGHT>100</RIGHT><BOTTOM>100</BOTTOM></POSITION>
+        <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+        <SCROLLBAR>
+          <POSITION><LEFT>80</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>80</BOTTOM></POSITION>
+          <APPEARANCE type="image" state="default">combo_track.tga</APPEARANCE>
+          <SHUTTLE type="image" state="default">combo_shuttle.tga</SHUTTLE>
+          <SCROLLUP type="image" state="default">combo_up.tga</SCROLLUP>
+          <SCROLLDOWN type="image" state="default">combo_down.tga</SCROLLDOWN>
+        </SCROLLBAR>
+      </LIST_BOX>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	c.configure(doc.first_screen(), font);
+	for (const char *name : { "combo_track.tga", "combo_shuttle.tga",
+				 "combo_up.tga", "combo_down.tga" }) {
+		c.set_texture_size(slot_of(c, name), 20, 20);
+	}
+	MenuWidgetState combo;
+	combo.index = 1;
+	combo.popup_open = true;
+	combo.scroll_row = 1;
+	MenuFrameState state;
+	state.widgets.push_back(combo);
+	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
+	CHECK(count_quads_with_texture(dl, slot_of(c, "combo_track.tga")) == 1,
+			"the overflowing combo popup draws its scrollbar");
+	CHECK(c.combo_popup_row_at(1, state, 10.0f, 21.0f, 1.0f, 1.0f) == 1,
+			"the popup's top hit maps to its first scrolled absolute row");
+	CHECK(c.combo_popup_row_at(1, state, 90.0f, 21.0f, 1.0f, 1.0f) == -1,
+			"the popup scrollbar strip does not select a row");
+}
+
+// TABLE has two independent heights: the FONT "W" measure owns the header,
+// while top-level MIN_ITEM_HEIGHT owns body rows. An unpositioned scrollbar
+// covers the full table height, while its page ratio uses the body-row height.
+// [orig: CTableWnd_ParseXMLContentDefinition @ 0x6427d0; table SCROLLBAR
+// delegate
+// @ 0x643b22; CUITable_Render @ 0x6411d0; CScrollWnd_SetPageSize @ 0x64ce10;
+// CScrollWnd_SetRangeAndClamp @ 0x64d490]
+void test_table_scrollbar_separates_header_and_body_row_heights(
+		const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>TABLE_SCROLL</NAME>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <FONT><NAME>f.fnt</NAME><DEFAULT_FG>FFFFFF</DEFAULT_FG></FONT>
+    <WINDOW type="table" name="TABLE">
+      <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>116</BOTTOM></POSITION>
+      <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+      <COLUMN count="1">
+        <HEADER column="0" width="80" justify="LEFT">NAME</HEADER>
+      </COLUMN>
+      <SCROLLBAR>
+        <APPEARANCE type="image" state="default">table_track.tga</APPEARANCE>
+        <SHUTTLE type="image" state="default">table_shuttle.tga</SHUTTLE>
+        <SCROLLUP type="image" state="default">table_up.tga</SCROLLUP>
+        <SCROLLDOWN type="image" state="default">table_down.tga</SCROLLDOWN>
+      </SCROLLBAR>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	c.configure(doc.first_screen(), font);
+	const int32_t shuttle = slot_of(c, "table_shuttle.tga");
+	const int32_t up = slot_of(c, "table_up.tga");
+	CHECK(shuttle >= 0 && up >= 0,
+			"configure interns the table scrollbar visuals");
+	for (const char *name : { "table_track.tga", "table_shuttle.tga",
+				 "table_up.tga", "table_down.tga" }) {
+		c.set_texture_size(slot_of(c, name), 16, 16);
+	}
+
+	MenuWidgetState table_state;
+	table_state.index = 1;
+	table_state.scroll_row = 2;
+	for (int i = 0; i < 10; ++i) {
+		table_state.table_rows.push_back({ std::to_string(i) });
+	}
+	MenuFrameState state;
+	state.widgets.push_back(table_state);
+	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
+	const MenuQuad *up_quad = nullptr;
+	const MenuQuad *shuttle_quad = nullptr;
+	for (const MenuQuad &q : dl.quads) {
+		if (q.texture == up) {
+			up_quad = &q;
+		} else if (q.texture == shuttle) {
+			shuttle_quad = &q;
+		}
+	}
+	CHECK(up_quad != nullptr && shuttle_quad != nullptr,
+			"the table scrollbar emits its arrow and shuttle");
+	if (up_quad != nullptr) {
+		CHECK(up_quad->x0 == 78.0f && up_quad->y0 == 0.0f &&
+						up_quad->x1 == 100.0f && up_quad->y1 == 20.0f,
+				"the unpositioned table bar is a full-height rightmost 22px strip");
+	}
+	if (shuttle_quad != nullptr) {
+		// (116-16px header) / 20px rows = a 5-row page. The 76px middle
+		// span yields a 38px thumb; scroll_row 2 places it at y=35..73.
+		CHECK(shuttle_quad->x0 == 78.0f && shuttle_quad->y0 == 35.0f &&
+						shuttle_quad->x1 == 100.0f && shuttle_quad->y1 == 73.0f,
+				"the thumb page uses body MIN_ITEM_HEIGHT, not header height");
+	}
+}
+
+// Retail clamps the table's stored visible-row count to one after dividing the
+// body height by the row height. A one-row table therefore does not sprout a
+// scrollbar merely because less than one complete body row fits below the
+// header. [orig: CTableWnd_RecalcLayout @ 0x63f1a0, clamp @ 0x63f276]
+void test_table_visible_count_floors_to_one(const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>TABLE_TINY</NAME>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <FONT><NAME>f.fnt</NAME><DEFAULT_FG>FFFFFF</DEFAULT_FG></FONT>
+    <WINDOW type="table" name="TABLE">
+      <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>25</BOTTOM></POSITION>
+      <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+      <COLUMN count="1"><HEADER column="0" width="80">NAME</HEADER></COLUMN>
+      <SCROLLBAR>
+        <SCROLLUP type="image" state="default">tiny_up.tga</SCROLLUP>
+      </SCROLLBAR>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	c.configure(doc.first_screen(), font);
+	const int32_t up = slot_of(c, "tiny_up.tga");
+	CHECK(up >= 0, "the tiny-table scrollbar visual is interned");
+	c.set_texture_size(up, 16, 16);
+	MenuWidgetState table_state;
+	table_state.index = 1;
+	table_state.table_rows.push_back({ "only" });
+	MenuFrameState state;
+	state.widgets.push_back(table_state);
+	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
+	CHECK(count_quads_with_texture(dl, up) == 0,
+			"one stored visible row keeps a one-row tiny table scrollbar hidden");
 }
 
 void test_text_placement_and_truncation(const fnt_font_t *font) {
@@ -453,7 +919,7 @@ void test_list_rows_and_item_cell(const fnt_font_t *font) {
         <ITEM type="ID" value="1">BBB</ITEM>
         <ITEM type="ID" value="2">CCC</ITEM>
       </ITEMS>
-      <LIST_BOX><MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT></LIST_BOX>
+      <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
     </WINDOW>
     <WINDOW type="spinlist" name="S1">
       <POSITION><LEFT>0</LEFT><TOP>100</TOP><RIGHT>45</RIGHT><BOTTOM>120</BOTTOM></POSITION>
@@ -845,7 +1311,7 @@ void test_runtime_items_and_multiselect(const fnt_font_t *font) {
         <APPEARANCE type="color" state="selected">204060</APPEARANCE>
         <ITEM type="ID" value="0">AAA</ITEM>
       </ITEMS>
-      <LIST_BOX><MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT></LIST_BOX>
+      <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
     </WINDOW>
   </WINDOW>
 </SCREEN>
@@ -932,7 +1398,7 @@ void test_interaction_geometry(const fnt_font_t *font) {
         <ITEM type="ID" value="2">CCC</ITEM>
         <ITEM type="ID" value="3">DDD</ITEM>
       </ITEMS>
-      <LIST_BOX><MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT></LIST_BOX>
+      <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
     </WINDOW>
     <WINDOW type="combo" name="C1">
       <POSITION><LEFT>200</LEFT><TOP>0</TOP><RIGHT>300</RIGHT><BOTTOM>20</BOTTOM></POSITION>
@@ -1238,11 +1704,68 @@ void test_multiline_wrap(const fnt_font_t *font) {
 			"multiline_line_counts reports the scroll range inputs");
 }
 
+// The compiler walk is painter ordered across primitive kinds. A later
+// sibling's background must cover an earlier sibling's label; separate quad
+// and glyph vectors cannot communicate that ordering to the applier. [orig:
+// CUIScene_DrawScreensAndCursor @ 0x63bf60; CUIElement_Draw @ 0x64a8a0;
+// CStaticWnd_Render @ 0x657b10]
+void test_draw_list_preserves_interleaved_primitive_order(
+		const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>INTERLEAVED</NAME>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <FONT><NAME>f.fnt</NAME><DEFAULT_FG>FFFFFF</DEFAULT_FG></FONT>
+    <WINDOW type="static" name="EARLIER_LABEL">
+      <POSITION><LEFT>10</LEFT><TOP>10</TOP><RIGHT>110</RIGHT><BOTTOM>30</BOTTOM></POSITION>
+      <STRING>EARLIER</STRING>
+    </WINDOW>
+    <WINDOW type="window" name="LATER_COVER">
+      <POSITION><LEFT>10</LEFT><TOP>10</TOP><RIGHT>110</RIGHT><BOTTOM>30</BOTTOM></POSITION>
+      <APPEARANCE type="color" state="default">112233</APPEARANCE>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	c.configure(doc.first_screen(), font);
+
+	MenuFrameState state;
+	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
+	CHECK(dl.font_runs.size() == 1 && dl.quads.size() == 1,
+			"the fixture emits earlier text and one later covering quad");
+	CHECK(!dl.glyphs.empty() && !dl.quads.empty() &&
+					dl.glyphs[0].x_bottom_right > dl.quads[0].x0 &&
+					dl.glyphs[0].x_top_left < dl.quads[0].x1 &&
+					dl.glyphs[0].y_bottom > dl.quads[0].y0 &&
+					dl.glyphs[0].y_top < dl.quads[0].y1,
+			"the later quad geometrically overlaps the earlier label");
+
+	using DrawKind = MenuDrawList::DrawOp::Kind;
+	CHECK(dl.draw_ops.size() == 2,
+			"the draw list records both primitive groups in compiler order");
+	if (dl.draw_ops.size() == 2) {
+		CHECK(dl.draw_ops[0].kind == DrawKind::FontRun && dl.draw_ops[0].index == 0,
+				"the earlier label's font run is the first draw operation");
+		CHECK(dl.draw_ops[1].kind == DrawKind::Quad && dl.draw_ops[1].index == 0,
+				"the later covering quad follows the label in painter order");
+	}
+}
+
 } // namespace
 
 int main() {
 	fnt_font_t font = make_font();
 	test_draw_order_and_state_selection(&font);
+	test_image_appearance_crops_authored_map_state(&font);
+	test_scroll_draws_authored_visual_parts(&font);
+	test_spin_arrow_uses_cropped_atlas_extent(&font);
+	test_list_scrollbar_uses_authored_geometry_and_range(&font);
+	test_combo_scrollbar_offsets_rows_and_hit(&font);
+	test_table_scrollbar_separates_header_and_body_row_heights(&font);
+	test_table_visible_count_floors_to_one(&font);
 	test_text_placement_and_truncation(&font);
 	test_scale_truncation(&font);
 	test_radio_checkbox_forcing(&font);
@@ -1259,6 +1782,7 @@ int main() {
 	test_combo_face_and_outside_arrow_claim(&font);
 	test_hotkey_widget(&font);
 	test_multiline_wrap(&font);
+	test_draw_list_preserves_interleaved_primitive_order(&font);
 	fnt_free(&font);
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);

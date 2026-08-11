@@ -20,6 +20,7 @@ extends Control
 # different game's menu set can be pointed at the same shell.
 
 const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
+const MenuOptionScrollPolicy := preload("res://game/menu_option_scroll_policy.gd")
 
 # The director var the current screen's MUSICVAR lands in is
 # MusicDirector.MENU_MUSIC_VAR_SLOT — the witness lives at the engine home,
@@ -402,6 +403,7 @@ func _on_screen_changed_for_underlay(screen_name: String) -> void:
 func _wire_named_controls() -> void:
 	_named_handlers.clear()
 	_mission_rows.clear()
+	MenuOptionScrollPolicy.apply(_driver)
 	_seed_crosshair_style_controls()
 	# A companion (e.g. the multiplayer menu driver, or the PLAYER_INFO character screen)
 	# can own a whole menu: when one claims this one, hand it the named-control wiring and

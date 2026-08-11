@@ -1,6 +1,9 @@
 class_name MenuDriver
 extends RefCounted
 
+const MenuFrameStateReplay := preload("res://game/menu_frame_state_replay.gd")
+const MenuScrollRange := preload("res://game/menu_scroll_range.gd")
+
 # The compiled-menu interaction runtime: drives ONE MenuFrame (the engine
 # draw-list/pump surface) over a parsed MnuDocument. The engine owns
 # everything witnessed — the draw walk, the mouse pump, row/popup/arrow
@@ -259,7 +262,7 @@ func _configure_frame() -> void:
 		return
 	_frame.configure(_doc, _current_screen, _root, _style,
 			_screen_text_lookup())
-	_replay_widget_state()
+	MenuFrameStateReplay.apply(_frame, _index_of_id, _id_state)
 	_seed_marquee_widgets()
 	_apply_cursor(null)
 
@@ -314,33 +317,6 @@ func _map_widget_subtree(id: int) -> void:
 	_id_of_index.append(id)
 	for child_id in _doc.get_child_ids(id):
 		_map_widget_subtree(int(child_id))
-
-
-func _replay_widget_state() -> void:
-	for id in _index_of_id:
-		var state: Dictionary = _id_state.get(id, {})
-		if state.is_empty():
-			continue
-		var index := int(_index_of_id[id])
-		if state.has("shown"):
-			_frame.set_widget_shown_override(index, bool(state["shown"]))
-		if state.has("disabled"):
-			_frame.set_widget_disabled(index, bool(state["disabled"]))
-		if state.has("checked"):
-			_frame.set_widget_checked(index, bool(state["checked"]))
-		if state.has("text"):
-			_frame.set_widget_text(index, String(state["text"]))
-		if state.has("items"):
-			_frame.set_widget_items(index, state["items"])
-		if state.has("selected_item") or state.has("scroll_row"):
-			_frame.set_widget_selection(index, int(state.get("selected_item", 0)),
-					-1, int(state.get("scroll_row", 0)))
-		if state.has("selected_set"):
-			_frame.set_widget_selected_set(index, state["selected_set"])
-		if state.has("table_rows"):
-			_frame.set_widget_table_rows(index, state["table_rows"])
-		if state.has("marquee_lines"):
-			_frame.set_widget_marquee_lines(index, state["marquee_lines"])
 
 
 # The id->text table for String/Item type=="id" lookups: the screen's own
@@ -585,6 +561,28 @@ func set_scroll_row(id: int, row: int) -> void:
 		_frame.set_widget_selection(index,
 				int(state.get("selected_item", -1)), -1,
 				int(state["scroll_row"]))
+
+
+## Set the original CScrollWnd min/max/inclusive-page/value state used by a
+## standalone type=scroll widget. Interaction is intentionally separate: this
+## is the render/state seam settings companions can update.
+func set_widget_scroll_range(id: int, minimum: int, maximum: int,
+		page: int, value: int) -> void:
+	if minimum > maximum:
+		minimum = 0
+		maximum = 0
+	value = clampi(value, minimum, maximum)
+	var scroll := MenuScrollRange.new(minimum, maximum, page, value)
+	_state_of(id)["scroll_range"] = scroll
+	var index := _frame_index(id)
+	if index >= 0:
+		_frame.set_widget_scroll_range(index, scroll.minimum, scroll.maximum,
+				scroll.page, scroll.value)
+
+
+## Current standalone scroll state, or null until seeded.
+func get_widget_scroll_range(id: int) -> MenuScrollRange:
+	return _id_state.get(id, {}).get("scroll_range") as MenuScrollRange
 
 
 func set_widget_marquee_lines(id: int, lines: PackedStringArray) -> void:
