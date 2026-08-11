@@ -95,6 +95,7 @@ public:
 	int scroll_drag_value(int p_index, const Vector2 &p_position,
 			int p_anchor) const;
 	int scroll_row_limit(int p_index) const;
+	int scroll_owner_at(const Vector2 &p_position) const;
 	int scroll_page_rows(int p_index) const;
 	int get_widget_hover_item(int p_index) const;
 	void set_widget_pressed(int p_index, bool p_pressed);

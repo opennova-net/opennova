@@ -58,20 +58,19 @@ func drag_id() -> int:
 ## A slider, or a table/list whose embedded scrollbar strip is under the
 ## point (drives MenuDriver's press routing).
 func widget_at(driver: MenuDriver, frame: MenuFrame, position: Vector2) -> int:
-	var index := frame.hit_test(position)
+	# Scrollbar parts claim directly — shipped menus author scrollbar rects
+	# OUTSIDE the owner widget (options.mnu CONTROL_MAPPING), so the plain
+	# rect hit misses them (the D-MNU-16 outside-arrow class).
+	var index: int = frame.scroll_owner_at(position)
 	if index < 0:
+		var hit: int = frame.hit_test(position)
+		if hit < 0:
+			return -1
+		var hit_id := driver._id_at_index(hit)
+		if hit_id >= 0 and driver.widget_kind_of(hit_id) == MnuDocument.TYPE_SCROLL:
+			return hit_id
 		return -1
-	var id := driver._id_at_index(index)
-	if id < 0:
-		return -1
-	var kind := driver.widget_kind_of(id)
-	if kind == MnuDocument.TYPE_SCROLL:
-		return id
-	if kind in [MnuDocument.TYPE_TABLE, MnuDocument.TYPE_LIST,
-			MnuDocument.TYPE_MULTI, MnuDocument.TYPE_LAN_LIST] \
-			and frame.scroll_hit_at(index, position) != 0:
-		return id
-	return -1
+	return driver._id_at_index(index)
 
 
 ## A slider's authored range, or the rows model (0..row_limit, page =

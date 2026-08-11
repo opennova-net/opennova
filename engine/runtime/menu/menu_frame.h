@@ -320,6 +320,10 @@ public:
 	// visible row and the page step (visible - 1) the driver's arrow/track
 	// presses use.
 	int scroll_row_limit(int index, const MenuFrameState &state) const;
+	// The widget whose scrollbar parts contain the point (shipped menus
+	// author scrollbars OUTSIDE the owner rect — the D-MNU-16 claim class).
+	int scroll_owner_at(const MenuFrameState &state, float mouse_x,
+			float mouse_y, float scale_x, float scale_y) const;
 	int scroll_page_rows(int index, const MenuFrameState &state) const;
 	int spin_arrow_at(int index, const MenuFrameState &state, float mx,
 			float my, float sx, float sy) const;

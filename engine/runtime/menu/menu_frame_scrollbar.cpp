@@ -302,6 +302,34 @@ bool MenuFrameCompiler::scroll_row_span_(int index, const MenuFrameState &state,
 	}
 }
 
+// The scrollable widget whose scrollbar PARTS contain the point — shipped
+// menus author scrollbar rects OUTSIDE the owner's widget rect (options.mnu
+// CONTROL_MAPPING: table-relative 452..472 on a 451-wide table), so the
+// plain rect claim misses them (the same class as the D-MNU-16 outside
+// spin arrows).
+int MenuFrameCompiler::scroll_owner_at(const MenuFrameState &state,
+		float mouse_x, float mouse_y, float scale_x, float scale_y) const {
+	const float mx = scale_x > 0.0f ? mouse_x / scale_x : mouse_x;
+	const float my = scale_y > 0.0f ? mouse_y / scale_y : mouse_y;
+	for (int i = 0; i < static_cast<int>(nodes_.size()); ++i) {
+		if (!widget_shown_(i, state)) {
+			continue;
+		}
+		ScrollParts parts;
+		if (!solve_standalone_scroll_(i, state, &parts)) {
+			continue;
+		}
+		auto inside = [&](const mnu::RectEdges &r) {
+			return mx >= r.left && mx < r.right && my >= r.top && my < r.bottom;
+		};
+		if (inside(parts.up) || inside(parts.down) || inside(parts.shuttle) ||
+				inside(parts.track)) {
+			return i;
+		}
+	}
+	return -1;
+}
+
 int MenuFrameCompiler::scroll_row_limit(int index,
 		const MenuFrameState &state) const {
 	int rows = 0;
