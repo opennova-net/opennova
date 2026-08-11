@@ -40,8 +40,6 @@ Packet tools:
 
 ```bash
 nw_pp .scratch/capture.pcapng --stream --items /path/to/items.def
-nw_replay .scratch/capture.pcapng --print-roles
-nw_replay .scratch/capture.pcapng --validate --items /path/to/items.def
 ```
 
 ## Env-Gated Witnesses
@@ -68,7 +66,7 @@ A skip is not coverage.
   failures, rerun the single test file before trusting full-suite noise.
 - Visual Studio multi-config generators IGNORE `CMAKE_BUILD_TYPE`: judge a build's
   flavor by which `build/<Config>/opennova.dll` (or the per-domain objects at
-  `build/engine/*/*/opennova_*.dir/<Config>/*.obj`) is NEWEST, never by cache variables
+  `build/engine/*/opennova_*.dir/<Config>/*.obj`) is NEWEST, never by cache variables
   or directory existence (`opennova_shared`'s own .dir holds only a stub TU). For
   perf observations never use a Debug config — `.agents/retail-lan-parity.md` §4
   carries the GDExtension rule (MSVC /Od /RTC1 invalidates frame-time readings);

@@ -15,20 +15,20 @@ with retail is *the reimpl*. Godot is never "the engine".
 _Avoid_: libs (the pre-2026-08 path), core, framework
 
 **The Godot layer (first-class, ADR 0034)**:
-`godot/src/` — the GDExtension bindings plus the shared
-GDScript runtime that wires Godot nodes to engine facts. Both shells consume it; it
-depends on neither.
+`godot/src/` (pure C++ GDExtension bindings) plus `godot/game/` (the shared
+game-level GDScript runtime) — the layer that wires Godot nodes to engine
+facts. Both shells consume it; it depends on neither.
 _Avoid_: godot/engine (the pre-2026-08 path), engine layer (that word is the
 engine's), glue, bindings (only half of it)
 
 **Shell**:
-An application front-end over the adapter: the game shell (`godot/game/`) and ONED
+An application front-end over the Godot layer: the game shell (`godot/game/`) and ONED
 (`godot/modtools/`). Shells own UI and application flow, never engine behavior.
 _Avoid_: frontend, app (in project prose), host (reserved for the game host)
 
 **Simulation**:
 The deterministic in-match world state advanced at the 62 Hz tick by the engine's world
-systems (WAC VM, BMS events, AI). `Simulation` is the adapter binding that owns it
+systems (WAC VM, BMS events, AI). `Simulation` is the Godot-layer binding that owns it
 shell-side; present passes project it onto scene nodes and never mutate it.
 _Avoid_: game logic, GameWorld (that is the scene, below)
 
@@ -96,7 +96,7 @@ The vocabulary separating the in-game world from the online service. The names c
 historically; they are now distinct.
 
 **GameWorld**:
-The runtime world-sim scene (`godot/src/world/game_world.tscn`): terrain,
+The runtime world-sim scene (`godot/game/world/game_world.tscn`): terrain,
 environment, mission runtime, and audio under one embeddable root. The standalone
 game is the sole live mission runtime; ONED authoring previews do not run gameplay
 (ADR 0025). Formerly named `NovaWorld`.
@@ -316,6 +316,6 @@ _Avoid_: overlay (that is the debug overlay), UI (too broad)
 
 **Present pass**:
 The per-frame apply step that projects simulation state onto scene nodes
-(`MissionPresentPass`). It runs once in the standalone game runtime; F6 tests the
+(the native `PresentApplier`). It runs once in the standalone game runtime; F6 tests the
 current saved loose mission through that same game path (ADRs 0006 and 0025).
 _Avoid_: render pass, sync pass

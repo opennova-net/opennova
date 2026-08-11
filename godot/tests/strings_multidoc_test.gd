@@ -7,7 +7,7 @@ const EditorWorkstationScene = preload("res://modtools/editor/editor_workstation
 const EditorWorkstationScript = preload("res://modtools/editor/editor_workstation.gd")
 
 const STATE_PATH := "user://strings_editor_state.cfg"
-const FIXTURE := "res://fixtures/strings/menu.bin"
+const FIXTURE := "res://../fixtures/rtxt/menu.bin"
 const SECOND_TABLE := "user://strings_multidoc_second.bin"
 
 

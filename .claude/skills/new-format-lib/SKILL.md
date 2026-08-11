@@ -37,20 +37,21 @@ Then decide, before writing code:
 
 ## 1. Library skeleton (post-ADR-0029: no per-lib CMake target)
 
-Files: `engine/formats/<name>/{include/<prefix>/<name>.h, src/<name>.cpp}`.
+Files: `engine/formats/<name>/<name>.{h,cpp}` — FLAT since 2026-08-10:
+headers and sources sit side by side in the lib dir (nested subdirs allowed).
 There is NO per-lib CMakeLists.txt — the lib builds inside the
-`opennova_formats` group. Registration is exactly two edits in
-`engine/formats/CMakeLists.txt`:
+`opennova_formats` group, and the group dir is the ONE public include dir
+(`#include <name>/<name>.h` resolves repo-wide). Registration is exactly ONE
+edit in `engine/formats/CMakeLists.txt`:
 
 1. the source block, alphabetical by domain, with a one-line format comment:
    `# <name> — <what the format holds>` + one
-   `${CMAKE_CURRENT_SOURCE_DIR}/<name>/src/<file>.cpp` line per TU;
-2. `${CMAKE_CURRENT_SOURCE_DIR}/<name>/include` in the PUBLIC include list,
-   same alphabetical slot.
+   `${CMAKE_CURRENT_SOURCE_DIR}/<name>/<file>.cpp` line per TU.
 
 The group already carries C++17, C99, POSITION_INDEPENDENT_CODE, and a PUBLIC
-link to `opennova_io` — add nothing else. Private headers under `src/` that
-another TU includes go in the group's PRIVATE include list (see bfc1/oed).
+link to `opennova_io` — add nothing else; no include-list edit exists any
+more (the pre-flatten `include/<prefix>/` + `src/` split and the per-lib
+PUBLIC include entries are gone).
 
 Include prefix: keep the format's historical prefix (usually `<name>/...`).
 When a domain is split across formats/ and runtime/, the two libs may expose
@@ -101,8 +102,8 @@ Run loop:
 
 ## 5. Optional: engine binding and editor surface
 
-- Binding: `godot/adapter/<name>/nova_<name>*.{h,cpp}`, `GDREGISTER_CLASS` in
-  `godot/adapter/register_types.cpp` (the adapter already links the group —
+- Binding: `godot/src/<name>/nova_<name>*.{h,cpp}`, `GDREGISTER_CLASS` in
+  `godot/src/register_types.cpp` (the adapter already links the group —
   no CMake link edit), then `bash scripts/build_godot.sh` and fully restart
   any open editor (no hot-reload). Add a GDScript smoke test
   `godot/tests/<name>_data_test.gd` using the fixture-skip pattern; run it via
@@ -114,19 +115,18 @@ Run loop:
 
 When a format already exists inside a runtime lib and passes the step-0 gate:
 
-1. `git mv` the format's headers and TUs into
-   `engine/formats/<name>/{include/<prefix>/, src/}`. Decide the prefix per
-   step 1's rule — keeping a shared prefix with disjoint sets means ZERO
-   consumer include churn; renaming is right only when the includer count is
-   trivial.
-2. Two source-list edits: add the block + include dir in
+1. `git mv` the format's headers and TUs into `engine/formats/<name>/`
+   (flat). Decide the prefix per step 1's rule — keeping a shared prefix
+   with disjoint sets means ZERO consumer include churn; renaming is right
+   only when the includer count is trivial.
+2. Two source-list edits: add the block in
    `engine/formats/CMakeLists.txt`; remove the lines (and any per-source
    property entries, e.g. the terrain FP-flag list) from
    `engine/runtime/CMakeLists.txt`, rewording the runtime comment.
 3. Flip the format-level tests' link word to `opennova_formats` in
    `tests/CMakeLists.txt`; consumer-level tests stay on `opennova_runtime`
    (it PUBLIC-chains formats).
-4. Instruments: the citation ratchet is move-invariant (`engine/*/*/src`);
+4. Instruments: the citation ratchet is move-invariant (it walks every `engine/<group>/<lib>` source);
    pure moves never touch `abi_exports_baseline.txt`; update
    `include_graph_check.py` prefixes if the format was previously covered by
    a blanket-forbidden directory prefix.

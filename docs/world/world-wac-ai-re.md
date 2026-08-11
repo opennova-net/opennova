@@ -3109,12 +3109,12 @@ PORT (same day, worktree play): the selector + the full 252-entry state tables =
 `engine/runtime/world` (`compute_death_anim_state`, `death_quadrant_from_round`,
 `kInfantryAnimNames/Flags`); the kill-time selection = `world::RoundSim::tick` (the
 organic-kill leg); the death-edge consume + the corpse block = `AiSystem::tick_infantry`
-(`engine/runtime/world/src/infantry.cpp`); rows 21/23 = `ai.cpp` (`h_enter_vehicle_dying`,
+(`engine/runtime/world/infantry.cpp`); rows 21/23 = `ai.cpp` (`h_enter_vehicle_dying`,
 `h_vehicle_dying_tick/event`, `h_enter_vehicle_dead`, `h_vehicle_dead_tick/event`);
 `deathtime` parse = `engine/formats/def`; the def traits stamp = `Simulation::
 resolve_item_traits` (`leave_corpse`, `deathtime_ticks`); presentation =
-`mission_present_pass.gd` (dead ORGANICS stay visible; the sim ends the corpse via
-`Entity::hidden`). Pins: the `infantry` ctest (selector matrix, consume, countdown/
+the native `PresentApplier` (`godot/src/simulation/nova_present_applier.cpp`;
+dead ORGANICS stay visible; the sim ends the corpse via `Entity::hidden`). Pins: the `infantry` ctest (selector matrix, consume, countdown/
 despawn, LeaveCorpse, the watch retry), the `ai` ctest (rows 21/23, the integration
 kill's selection + group alert), the `def` items test.
 

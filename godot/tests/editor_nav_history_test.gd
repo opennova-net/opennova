@@ -10,7 +10,7 @@ const EditorWorkstationScene = preload("res://modtools/editor/editor_workstation
 const EditorWorkstationScript = preload("res://modtools/editor/editor_workstation.gd")
 
 const STRINGS_STATE_PATH := "user://strings_editor_state.cfg"
-const STRINGS_FIXTURE := "res://fixtures/strings/menu.bin"
+const STRINGS_FIXTURE := "res://../fixtures/rtxt/menu.bin"
 const SCRATCH_TABLE := "user://nav_history_scratch.bin"
 
 

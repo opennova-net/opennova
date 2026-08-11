@@ -8,7 +8,7 @@ extends GutTest
 
 const EditorWorkstationScene = preload("res://modtools/editor/editor_workstation.tscn")
 const EditorWorkstationScript = preload("res://modtools/editor/editor_workstation.gd")
-const STRINGS_FIXTURE := "res://fixtures/strings/menu.bin"
+const STRINGS_FIXTURE := "res://../fixtures/rtxt/menu.bin"
 
 
 func _make_mount() -> Node:

@@ -1,5 +1,10 @@
 extends Node3D
 
+## Visual probe for the projected entity sun shadow: a bare lit scene with a
+## catcher plane, capturing PNGs into $NOVA_SHADOW_PROBE_DIR. Needs a real
+## rendering window (not --headless). Run:
+##   NOVA_SHADOW_PROBE_DIR=<out dir> "$GODOT_BIN" --path godot res://tests/sun_shadow_catcher_probe.tscn
+
 const OUT_DIR_ENV := "NOVA_SHADOW_PROBE_DIR"
 
 var _light: DirectionalLight3D

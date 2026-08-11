@@ -24,8 +24,7 @@ Improve organization without changing behavior or packet bytes.
 - Changing wire bytes or timing as part of cleanup.
 - Deleting strange retail behavior because it looks redundant.
 - Replacing typed models with raw passthrough.
-- Moving gameplay into `NovaWorldClient`, `NovaNetClient`, or the NovaWorld
-  backend service.
+- Moving gameplay into `NovaWorldClient` or the NovaWorld backend service.
 
 ## Output
 

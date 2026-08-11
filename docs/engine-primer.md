@@ -88,7 +88,7 @@ appear only where a record says so. Known scales, each owned by its record:
   ([bms-event-runtime-re.md §1.6](mission/bms-event-runtime-re.md)).
 - Dividers are **per system**, inside each system: the WAC VM executes once per
   **62 ticks** (`[orig: WacScript_AdvanceTick @ 0x4f81a0]`, the 0x3E divider — ours is
-  `WacSystem::kTicksPerExecution`, `engine/runtime/wac/include/wac/wac_system.h`); normal BMS
+  `WacSystem::kTicksPerExecution`, `engine/runtime/wac/wac_system.h`); normal BMS
   events run a 16-tick gate over a quarter-list cursor (each event evaluated about
   every 64 ticks); the AI/entity motor runs every tick with its own 2/8/16-tick
   stagger (same doc).
@@ -159,7 +159,7 @@ is authoritative, and each record owns the rationale and the stable `D-…` dive
 | Render — materials / state | `engine/formats/oed` tag registry, `engine/runtime/renderer`, `ObjectShaderCache` | [render/render-material-re.md](render/render-material-re.md) | matching (REN-2; D-RMAT catalog) |
 | Render — draw order | `engine/runtime/renderer` render_order + the engine priority ladder | [render/render-order-re.md](render/render-order-re.md) | matching for the ported ladder (REN-3; D-RORD catalog) |
 | Render — lighting | `engine/runtime/renderer/light_runtime`, `engine/formats/env::ModulatorChain` | [render/render-lighting-re.md](render/render-lighting-re.md) | matching for the ported chain (REN-5; D-RLIT catalog) |
-| Render — occlusion / blink boxes | `engine/runtime/world/occlusion`, `GameWorld` frame gates | [render/render-occlusion-re.md](render/render-occlusion-re.md) | landed 2026-07-16 (sound occlusion + indoor gates ported; section-mask/portal engine ported 2026-07-17 — init, mask build, traversal, occluder culling (engine/runtime/world/src/occlusion.cpp); D-OCC-1..8) |
+| Render — occlusion / blink boxes | `engine/runtime/world/occlusion`, `GameWorld` frame gates | [render/render-occlusion-re.md](render/render-occlusion-re.md) | landed 2026-07-16 (sound occlusion + indoor gates ported; section-mask/portal engine ported 2026-07-17 — init, mask build, traversal, occluder culling (engine/runtime/world/occlusion.cpp); D-OCC-1..8) |
 | Skeletal animation (`.bad`/`.adm`) | `engine/runtime/anim`, SkeletalAnim | [ADR 0007](adr/0007-skeletal-runtime-and-entity-visual.md) | implemented (deferrals listed there) |
 | Models (`.3di`: 3DI3 + GP) | `engine/formats/threedi` | [threedi/3di-gp-format-re.md](threedi/3di-gp-format-re.md) | landed format record |
 | Models (Land Warrior `.3di`) | — | [threedi/3di-lw-format-re.md](threedi/3di-lw-format-re.md) | unlanded (PR #45 closed) |
@@ -210,7 +210,7 @@ Order of operations when you need an engine truth:
      (98/98 retail bins), `tests/terrain/dvd4_parity_test.cpp`, the `.bad`/3DI
      roundtrips under `tests/<domain>/`.
    - Retail-install sweeps and corpus tests, gated on env vars (`OPENNOVA_JO_DIR`,
-     `OPENNOVA_MISSION_CORPUS`, `OPENNOVA_JO_ASSETS` — see the root CLAUDE.md).
+     `OPENNOVA_MISSION_CORPUS`, `OPENNOVA_JO_ASSETS` — see docs/asset-gated-tests.md).
 5. **Runtime introspection:**
    - The debug overlay (F3 in the standalone game): Entities/Sim/Vars/Perf
      tabs, sim transport (play/pause/step), and mission-variable writes —

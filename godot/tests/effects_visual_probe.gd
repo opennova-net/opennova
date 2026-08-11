@@ -6,6 +6,8 @@ extends Node3D
 # scene, and captures frames over their lifetimes. Verifies the RUNTIME effect path
 # (textures via the provider, blend draw, cadence, motion) without mission hunting.
 # Output: .scratch/fx_probe/*.png + per-capture live-group/particle counters.
+# Needs a real rendering window (not --headless). Run:
+#   NOVA_RESOURCE_DIR=<retail root> "$GODOT_BIN" --path godot res://tests/effects_visual_probe.tscn
 
 const OUT_DIR := "res://../.scratch/fx_probe"
 

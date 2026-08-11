@@ -68,7 +68,7 @@ Every recent slice ran this same shape, and a new one should too:
 Counts come from the ledger's generated scoreboard — read them there, not here,
 because `scripts/lint/ledger_check.py --check` keeps that table honest and
 nothing keeps this sentence honest. As of the 2026-08-11 regeneration the shape was:
-**World/AI** carries the largest share (68 of 171 domain-open), **UI** (46 — swollen
+**World/AI** carries the largest share (68 of 170 domain-open), **UI** (45 — swollen
 by the 2026-08-04 D-SND/D-MNU/D-LOADSCR catalog tabling; most of those rows are
 small or permanent-register candidates) and **Net** (26) the next largest, and every
 other domain is in single digits.

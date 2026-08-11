@@ -215,7 +215,7 @@ func test_strip_hotkey_statics() -> void:
 
 
 func test_committed_fixture_loads_and_reserializes_byte_exact() -> void:
-	var fixture := "res://fixtures/strings/menu.bin"
+	var fixture := "res://../fixtures/rtxt/menu.bin"
 	assert_true(FileAccess.file_exists(fixture), "the menu.bin fixture should be committed")
 	var table := RtxtStringFile.new()
 	assert_eq(table.load_from_path(fixture), OK, "the fixture should parse")

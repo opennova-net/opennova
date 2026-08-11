@@ -9,7 +9,7 @@ const EditorWorkstationScript = preload("res://modtools/editor/editor_workstatio
 const DocumentTabSetScript = preload("res://modtools/framework/document_tab_set.gd")
 
 const STATE_PATH := "user://strings_editor_state.cfg"
-const FIXTURE := "res://fixtures/strings/menu.bin"
+const FIXTURE := "res://../fixtures/rtxt/menu.bin"
 const SECOND_TABLE := "user://document_tabs_second.bin"
 
 

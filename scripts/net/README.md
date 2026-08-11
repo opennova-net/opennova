@@ -463,7 +463,7 @@ child exits.
 - Wireshark/dumpcap at `C:\Program Files\Wireshark\dumpcap.exe`; Npcap running with
   the loopback adapter `\Device\NPF_Loopback` present → `CAPTURE_READY=loopback`.
 - `nw_pp` reads dumpcap's loopback-adapter pcapng directly (link-type handled by
-  `apps/common/pcap_reader`). Build the tools with `scripts/build.sh`; binaries land
+  `engine/base/pcapio/pcap_reader`). Build the tools with `scripts/build.sh`; binaries land
   in `build\apps\nw_pp\{Release|Debug}\`.
 - Pass dumpcap a device **name** (`\Device\NPF_Loopback`), not the `dumpcap -D`
   ordinal — the ordinal is rejected.

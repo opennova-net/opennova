@@ -56,7 +56,7 @@ first pass (`@ 0x5afc92..0x5afcaa`).
 
 **File effects.** `HLSLEffect_LoadFromFile @ 0x5ae690`: VFS read + SCR layer
 (`ScriptFile_LoadAndDecrypt @ 0x5ae060`, key 0xA55B1EED — see
-[scr](../../engine/formats/scr/include/scr/scr.h)); `D3DXCreateEffect` with
+[scr](../../engine/formats/scr/scr.h)); `D3DXCreateEffect` with
 `TRILINEAR/ANISO` (from `HLSLEffect_TextureFilterMode @ 0x27e5698`) +
 `FFPTRANSPOSE` (+ `TEX_UVXFORM` for the UVGen twin); reads the `EffectInfo`
 annotations (`EffectTag`, `EffectName`, `EffectSpecial`, `EffectAlt_UV`,

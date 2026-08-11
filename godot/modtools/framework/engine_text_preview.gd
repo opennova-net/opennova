@@ -14,7 +14,7 @@ extends Control
 # alignment shift, fixed pixel size, half-bright — is the engine path.
 #
 # Reference via preload(), not class_name, so it resolves without an editor
-# re-import (same convention as world_context_preview.gd / mission_object_placer.gd).
+# re-import (same convention as world_context_preview.gd / nova_mission_object_placer.cpp).
 
 const BACKGROUND_COLOR := Color(0.08, 0.09, 0.10, 1.0)
 const BORDER_COLOR := Color(0.2, 0.22, 0.25, 1.0)

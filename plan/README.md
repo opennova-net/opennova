@@ -7,7 +7,9 @@
 > [status.md](status.md) keeps the historical PR tables. Track designs:
 > [Track A (server + engine)](track-a-server-engine.md),
 > [Track B (infra + deploy)](track-b-infra.md),
-> [Track C (launcher + website)](track-c-launcher-web.md).
+> [Track C (launcher + website)](track-c-launcher-web.md). A later completed
+> effort also archived here: [mission-session-rearchitecture.md](mission-session-rearchitecture.md)
+> (ADR 0035, PR #465).
 
 ## Goal
 
