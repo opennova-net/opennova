@@ -34,6 +34,7 @@ class FakeWorld:
 	func render_terrain_frame() -> void: trace.append("terrain")
 	func render_foliage_frame() -> void: trace.append("foliage")
 	func get_runtime() -> FakePresentation: return presentation
+	func present_local_view_frame() -> void: trace.append("local_view")
 	func drive_network_frame() -> bool:
 		trace.append("network")
 		return network_ok
@@ -41,6 +42,7 @@ class FakeWorld:
 	func apply_blink_frame() -> void: trace.append("blink")
 	func apply_occlusion_frame() -> void: trace.append("occlusion")
 	func sample_iris_frame() -> void: trace.append("iris")
+	func render_material_frame() -> void: trace.append("materials")
 	func render_particle_frame() -> void: trace.append("particles")
 	func mix_audio_frame(ticks_run: int) -> void:
 		trace.append("audio:%d" % ticks_run)
@@ -64,8 +66,9 @@ func test_pipeline_orders_one_typed_session_call_between_concrete_devices() -> v
 			"the one sampled input object crosses the pipeline unchanged")
 	assert_almost_eq(input.delta_seconds, 0.0125, 0.000001)
 	assert_eq(world.trace, [
-		"begin", "terrain", "foliage", "session", "network", "weather",
-		"occlusion", "iris", "particles", "audio:0", "clear", "finish",
+		"begin", "terrain", "foliage", "session", "local_view", "network",
+		"weather", "occlusion", "iris", "materials", "particles", "audio:0",
+		"clear", "finish",
 	])
 
 
@@ -80,4 +83,4 @@ func test_network_install_failure_suppresses_every_later_device_phase() -> void:
 			MissionFrameInput.new())
 
 	assert_eq(world.trace,
-			["begin", "terrain", "foliage", "session", "network"])
+			["begin", "terrain", "foliage", "session", "local_view", "network"])

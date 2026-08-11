@@ -1118,6 +1118,11 @@ var _frame_stats_on := false
 var _frame_timing := false
 var _frame_skip_occlusion := false
 var _device_frame_start_us := 0
+# The shell-owned local-player presenter whose camera/viewmodel placement the
+# local-view device leg runs inside the frame (null in worlds without one —
+# tests, dedicated). D-RORD-8: placing it before the occlusion/iris/particle
+# legs lets them read the camera THIS frame's tick produced, not last frame's.
+var _local_view_presenter
 
 
 func render_terrain_frame() -> void:
@@ -1196,15 +1201,43 @@ func apply_blink_frame() -> void:
 			_frame_stats.add(FrameStatsBoard.WORLD_BLINK, blink_us)
 
 
+# The local-player VIEW placement, as a device leg: the camera/viewmodel move
+# from the state THIS frame's session tick produced, BEFORE occlusion/iris/
+# particles read the camera (D-RORD-8) [orig: the render frame builds its view
+# from the current player state before collect+submit,
+# Render_ProcessMainSceneFrame @ 0x5ca0f0]. A world without a presenter (tests,
+# dedicated) skips it; main_game covers the frames that never reach this leg.
+func present_local_view_frame() -> void:
+	if _local_view_presenter != null:
+		_local_view_presenter.after_world_tick()
+
+
+## One-time handoff from the shell that owns the local-player presenter.
+func set_local_view_presenter(presenter) -> void:
+	_local_view_presenter = presenter
+
+
+# The view the imminent render uses: the live camera AFTER the local-view leg
+# placed it; the frame-entry stash only when no camera exists (headless
+# worlds/tests) (D-RORD-8).
+func _render_camera_xform() -> Transform3D:
+	if is_inside_tree():
+		var cam := get_viewport().get_camera_3d()
+		if cam != null:
+			return cam.global_transform
+	return _frame_camera_xform
+
+
 func apply_occlusion_frame() -> void:
 	# The render-occlusion frame is camera-driven: it runs every render frame
-	# (retail collects visible entities per scene render, not per sim tick).
+	# (retail collects visible entities per scene render, not per sim tick),
+	# and consumes the RENDER camera the local-view leg just placed (D-RORD-8).
 	# [orig: Terrain_CollectVisibleEntities @ 0x5c9160 from
 	# Terrain_RenderSceneWithReflection @ 0x5c94f0]
 	if _world_ready:
 		var probe_phase_start := Time.get_ticks_usec() if _frame_timing else 0
 		if not _frame_skip_occlusion:
-			_occlusion.apply_frame(_frame_camera_xform, _mission_forces_indoors)
+			_occlusion.apply_frame(_render_camera_xform(), _mission_forces_indoors)
 		if _frame_probe_enabled:
 			_perf_probe_spans["occl_frame"] = (0 if _frame_skip_occlusion
 					else Time.get_ticks_usec() - probe_phase_start)
@@ -1215,7 +1248,9 @@ func apply_occlusion_frame() -> void:
 func sample_iris_frame() -> void:
 	if _world_ready:
 		var probe_phase_start := Time.get_ticks_usec() if _frame_timing else 0
-		_stamp_iris_samples(_frame_camera_xform)
+		# The iris re-target reads the render view too (D-RORD-8) [orig: retail
+		# re-targets from the local player's view every render pass].
+		_stamp_iris_samples(_render_camera_xform())
 		if _frame_timing:
 			var iris_us := Time.get_ticks_usec() - probe_phase_start
 			if _frame_probe_enabled:
@@ -1287,6 +1322,16 @@ func finish_device_frame() -> void:
 		_frame_stats.add(FrameStatsBoard.WORLD_RUNTIME, _perf_runtime_us)
 		_frame_stats.add(FrameStatsBoard.WORLD_AUDIO, _perf_audio_us)
 	_sample_water_render_stats(_frame_stats_on)
+
+
+func render_material_frame() -> void:
+	# The per-model runtime advance (PANM registers, dynamic materials, part/body
+	# anim, staggered env restamp) — the ex-self-clocked ObjectModel _process,
+	# now one static driver over the shared awake set at a defined ladder slot
+	# (after occlusion resolves visibility, before the particle composite)
+	# [orig: Terrain_RenderSectorModels @ 0x5c5d30 computes model runtime
+	# constants during the render sector walk].
+	ObjectModel.advance_awake_frame(_frame_delta)
 
 
 func render_particle_frame() -> void:

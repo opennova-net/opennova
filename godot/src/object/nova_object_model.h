@@ -25,6 +25,7 @@
 #include <godot_cpp/classes/visible_on_screen_notifier3d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/templates/hash_map.hpp>
+#include <godot_cpp/templates/hash_set.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
@@ -226,6 +227,15 @@ private:
 	bool on_screen_ = true;
 	VisibleOnScreenNotifier3D *screen_notifier_ = nullptr;
 	bool native_frame_ = false;
+	bool awake_ = false; // in the shared awake set below
+
+	// The one runtime-frame set: every model holding live per-frame work (PANM,
+	// dynamic materials, part/body anim, an env restamp due). The single frame
+	// driver — GameFramePipeline's render_material_frame leg, the menu/ONED
+	// process loop — advances this set once per render frame; models add
+	// themselves on wake and drop out on park. Replaces the per-node _process
+	// clock so nothing self-clocks outside that one driver.
+	static HashSet<ObjectModel *> awake_models_;
 
 	// Main-body skeletal animation (.bad/.adm via SkeletalAnim).
 	Ref<SkeletalAnim> skeletal_;
@@ -357,8 +367,18 @@ protected:
 
 public:
 	ObjectModel();
+	~ObjectModel();
 
-	void _process(double p_delta) override;
+	// The one runtime-frame clock: every context's single driver advances the
+	// AWAKE set once per render frame — the game from GameFramePipeline's
+	// render_material_frame leg, the menu shell and ONED from their one process
+	// loop. Models self-park out of the set the first frame they hold no live
+	// work; there is no per-node _process.
+	static void advance_awake_frame(double p_delta);
+	static int64_t awake_model_count();
+	// True while this model is in the shared awake set (the park/re-arm gate's
+	// observable — replaces the ex-per-node is_processing() the tests read).
+	bool is_runtime_frame_awake() const { return awake_; }
 
 	// --- data / configuration ---
 	void set_object_data(const Ref<ObjectData> &p_data);

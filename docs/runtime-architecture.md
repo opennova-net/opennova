@@ -139,13 +139,28 @@ The proven deep render modules remain unchanged:
 - `MenuFrameCompiler -> MenuFrame`.
 
 These modules own traversal, ordering, and typed draw records. Godot owns asset
-upload and draw application. Particle rendering is now explicitly invoked by
-`GameFramePipeline`; `ParticleRenderer`, `EffectWorld`, and `GameWorld` do
-not run independent process loops.
+upload and draw application. Particle rendering, per-model material eval, and
+the local-player view placement are all explicitly invoked by
+`GameFramePipeline` (`render_particle_frame`, `render_material_frame`, and the
+`present_local_view_frame` leg); `ParticleRenderer`, `EffectWorld`,
+`ObjectModel`, and `GameWorld` no longer run independent process loops. The
+per-model advance is one static driver over a shared awake set
+(`ObjectModel::advance_awake_frame`, per-frame-guarded); the menu shell and
+ONED drive that same static advance from their one process loop for portrait/
+preview models outside a live mission.
+
+D-RORD-8 (fixed 2026-08-11): the one-frame visibility lag was the CAMERA, not
+the occlusion-after-present order. The local-player camera/viewmodel placement
+is now the `present_local_view_frame` leg, run inside the pipeline right after
+the session tick and BEFORE occlusion, so the occlusion/iris/material/particle
+legs read the render camera THIS frame's tick produced (`GameWorld` reads the
+live camera, not the frame-entry stash). Occlusion staying after present is the
+correct ownership order — present re-asserts base visibility, occlusion layers
+hides, Godot renders after both. The residue is the pre-batch terrain/foliage
+legs still consuming the frame-entry camera.
 
 ADR 0033 R3 remains closed not taken: visual parity did not justify an abstract
-seven-pass render-command stream. The known occlusion collect/apply ordering
-difference remains D-RORD-8 and is the evidence gate for reopening that choice.
+seven-pass render-command stream.
 
 ## Network shape
 

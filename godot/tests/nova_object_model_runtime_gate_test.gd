@@ -322,9 +322,9 @@ func _clocked_spy_model() -> ObjectModel:
 
 func test_idle_clocked_model_parks_after_one_runtime_frame() -> void:
 	var model := _clocked_spy_model()  # static house: no live per-frame work
-	model.set_process(true)
+	model.wake_runtime_frame()
 	model.advance_runtime_frame(0.016)
-	assert_false(model.is_processing(),
+	assert_false(model.is_runtime_frame_awake(),
 			"a shared-clock model with no live per-frame work parks itself")
 
 
@@ -332,44 +332,44 @@ func test_clockless_playing_model_stays_awake() -> void:
 	# The OED-preview carve-out: no shared clock + playing means the private
 	# age accumulates per frame, so the model must keep processing.
 	var model := _spy_model()
-	model.set_process(true)
+	model.wake_runtime_frame()
 	model.advance_runtime_frame(0.016)
-	assert_true(model.is_processing(),
+	assert_true(model.is_runtime_frame_awake(),
 			"a clockless playing model keeps its private preview clock running")
 
 
 func test_mutators_rearm_processing_and_park_when_drained() -> void:
 	var model := _clocked_spy_model()
 	model.advance_runtime_frame(0.016)
-	assert_false(model.is_processing(), "baseline: parked while idle")
+	assert_false(model.is_runtime_frame_awake(), "baseline: parked while idle")
 
 	model.set_ctrl_value("VEHICLE_SPECIAL1", 1024)
-	assert_true(model.is_processing(), "a CTRL write re-arms the runtime frame")
+	assert_true(model.is_runtime_frame_awake(), "a CTRL write re-arms the runtime frame")
 	model.advance_runtime_frame(0.016)
-	assert_false(model.is_processing(),
+	assert_false(model.is_runtime_frame_awake(),
 			"an inline-applied CTRL write leaves no pending work: parked again")
 
 	model.play_part_anim(1, 1, 1.0)
-	assert_true(model.is_processing(), "a commanded part anim re-arms")
+	assert_true(model.is_runtime_frame_awake(), "a commanded part anim re-arms")
 	model.advance_runtime_frame(0.016)
-	assert_true(model.is_processing(),
+	assert_true(model.is_runtime_frame_awake(),
 			"a live part-anim sweep is per-frame work: stays awake")
 
 
 func test_visibility_edge_rearms_for_one_restamp_frame() -> void:
 	var model := _clocked_spy_model()
 	model.advance_runtime_frame(0.016)
-	assert_false(model.is_processing(), "baseline: parked while idle")
+	assert_false(model.is_runtime_frame_awake(), "baseline: parked while idle")
 	model.visible = false
-	assert_true(model.is_processing(),
+	assert_true(model.is_runtime_frame_awake(),
 			"a visibility edge re-arms the env-restamp check")
 	model.advance_runtime_frame(0.016)
-	assert_false(model.is_processing(), "a hidden idle model parks again")
+	assert_false(model.is_runtime_frame_awake(), "a hidden idle model parks again")
 	model.visible = true
-	assert_true(model.is_processing(),
+	assert_true(model.is_runtime_frame_awake(),
 			"re-shown models re-check the env generation missed while hidden")
 	model.advance_runtime_frame(0.016)
-	assert_false(model.is_processing(), "and park once the restamp is done")
+	assert_false(model.is_runtime_frame_awake(), "and park once the restamp is done")
 
 
 # --- Camera-submission gate: retail computes per SUBMITTED model ------------
@@ -465,7 +465,7 @@ func test_off_screen_model_advances_clocks_but_skips_render_derives() -> void:
 			"the commanded part anim still advanced while off camera")
 
 	model.set_on_screen(true)
-	assert_true(model.is_processing(),
+	assert_true(model.is_runtime_frame_awake(),
 			"re-entering the screen wakes the model for the catch-up frame")
 	clock.set_time_ms_for_test(1200)
 	model.advance_runtime_frame(0.5)

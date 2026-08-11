@@ -34,6 +34,9 @@ func advance(camera_pos: Vector3, camera_xform: Transform3D, delta: float,
 			_world.session_frame_failed(outcome.error)
 			return outcome
 
+	# Place the local-player camera/viewmodel from the state the session tick
+	# just produced, BEFORE the camera-driven legs below read it (D-RORD-8).
+	_world.present_local_view_frame()
 	if not _world.drive_network_frame():
 		return outcome
 	_world.advance_weather_frame()
@@ -41,6 +44,9 @@ func advance(camera_pos: Vector3, camera_xform: Transform3D, delta: float,
 		_world.apply_blink_frame()
 	_world.apply_occlusion_frame()
 	_world.sample_iris_frame()
+	# Per-model runtime advance (ex-self-clocked ObjectModel _process): after
+	# occlusion resolves visibility, before the particle composite over it.
+	_world.render_material_frame()
 	_world.render_particle_frame()
 	_world.mix_audio_frame(outcome.get_ticks_run() if outcome != null else 0)
 	_world.update_clear_frame()
