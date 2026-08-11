@@ -173,7 +173,8 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
 - [CONTEXT.md](CONTEXT.md) — the project glossary; use its canonical vocabulary.
 - [docs/runtime-architecture.md](docs/runtime-architecture.md) — how a mission runs. Read
   it plus the ADRs before touching `mission_presentation.gd`,
-  `game_frame_pipeline.gd`, `mission_present_pass.gd`, or `Simulation`.
+  `game_frame_pipeline.gd`, the native present appliers
+  (`godot/src/simulation/nova_present_applier*.cpp`), or `Simulation`.
 - [godot/modtools/README.md](godot/modtools/README.md) — the ONED workspace framework,
   with one README per workspace.
 - Directory-scoped agent rules: `engine/CLAUDE.md`, `godot/src/CLAUDE.md`,

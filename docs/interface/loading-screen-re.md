@@ -1,7 +1,7 @@
 # Mission loading screen — reverse-engineering record
 
-Validation record for the mission loading screen (`godot/src/ui/nova_loading_screen.gd`,
-progress wiring in `godot/src/world/game_world.gd` + `godot/src/mission/mission_object_placer.gd`,
+Validation record for the mission loading screen (`godot/game/ui/nova_loading_screen.gd`,
+progress wiring in `godot/game/world/game_world.gd` + `godot/src/mission/nova_mission_object_placer.cpp`,
 shell lifecycle in `godot/game/main_game.gd`) against the original engine as witnessed in IDA
 Pro. Binary: retail **Jointops.exe** (IDB `Jointops.exe.kong.i64`). All addresses below are
 that binary's. This file is the committed home for the divergence catalog that code comments
@@ -223,7 +223,7 @@ key (`Input_HandleSpecialKeys @ 0x49c5c0`, key `dword_B3B744`, @ 0x49c887).
 
 ## Port notes (the structural translation)
 
-- `LoadingScreen` (godot/src/ui/nova_loading_screen.gd) draws the texture stretched
+- `LoadingScreen` (godot/game/ui/nova_loading_screen.gd) draws the texture stretched
   over the display and the MP text in image space under the image's scale transform — the
   same net composite the original gets by rendering glyphs into the texture then
   stretching. The bar arithmetic, colors, throttle and creep are ported integer-exact.

@@ -12,7 +12,9 @@ The replay/spectate consumer named throughout — `NovaNetClient`,
 dev scaffolding (it never shipped and no live path consumed it; the capture
 DECODE chain that feeds parity tests is untouched). The decision itself is
 unchanged and now reads simpler: `ClientReplicaPipeline` is the sole S2C entity
-reducer and `wire_present_pass.gd` its sole presenter, with the live joiner
+reducer and `WirePresentPass` its sole presenter (then `wire_present_pass.gd`;
+native `godot/src/simulation/nova_present_applier_wire.cpp` since the #460
+rework), with the live joiner
 (`ClientRuntime`) as the one consumer. Mentions of the replay consumer below
 are the original decision text, left as written.
 

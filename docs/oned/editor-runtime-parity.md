@@ -70,7 +70,7 @@ rather than adding an editor-owned transport around the simulation.
 
 ### Local player and debug UI — game-owned surfaces
 
-`godot/src/world/local_player_presenter.gd` is instantiated only by the game
+`godot/game/world/local_player_presenter.gd` is instantiated only by the game
 shell. Gameplay input, mouse ownership, the viewmodel render pass, HUD feeds,
 and F3 therefore have one boot path and one lifecycle. Editor automation may
 control or inspect the managed child through the runtime debug/MCP seam, but

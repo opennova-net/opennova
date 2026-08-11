@@ -38,11 +38,11 @@ remain parsed-but-deferred — is tracked per field in
 | `Environment_GetLightDirectionFloat @ 0x57d870` | day/night light selection (`env_render`) |
 | `Environment_LoadTimeOfDayConfig @ 0x57db30` | two-pass load model (see §Load pipeline) |
 | `Environment_SnapStateToTargets @ 0x57d1e0` | mission-start snap (`env_render` weather state) |
-| `Environment_UpdateWeatherTick @ 0x57e9b0` | `env_render` weather tick + `nova_weather.gd` |
+| `Environment_UpdateWeatherTick @ 0x57e9b0` | `env_render` weather tick + `engine/runtime/environment/weather_runtime.h` (`godot/src/env/nova_weather.cpp` node) |
 | `interpolate_weather_color @ 0x57d9e0` | `env_render` channel smoother |
 | `Environment_SetLightningFlash @ 0x57d320` | `env_render` lightning additive injection |
 | `Environment_GetFogEndDistance @ 0x57e3e0` | `env_render::compute_fog_params` (end distance) |
-| `Environment_ApplyFogAndAmbient @ 0x57e440` | fog application (`nova_environment.gd` + shaders) |
+| `Environment_ApplyFogAndAmbient @ 0x57e440` | fog application (`engine/runtime/environment/environment_state.h` + `godot/src/env/nova_mission_environment.cpp` + shaders) |
 | `Render_SetFogState @ 0x58a950` | `env_render::compute_fog_params` (per-type start) |
 | `render_skybox @ 0x579080` | `nova_sky.gd` + `godot/shaders/sky.gdshader` |
 | `EffectWorld_LoadCelestialModels @ 0x5adc50` | `nova_celestial.gd` (Phase 3) |
@@ -1026,7 +1026,7 @@ declared "Target binary: Jointops.exe" but cited jodemo addresses (`0x53xxxx` / 
 `0x501FB0` / `0x5D0A90`). Function bodies are identical between the two images, so the C++
 port was behaviorally correct throughout — only the citations were wrong. Recovered retail
 addresses (verified by body comparison; 18 recites applied across `engine/formats/env`, `engine/runtime/terrain`,
-and `godot/src/environment`):
+and the env nodes now under `godot/src/env`):
 
 | Old cite (jodemo, mislabeled) | Jointops retail | Note |
 |---|---|---|

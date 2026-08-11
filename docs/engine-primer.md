@@ -71,7 +71,7 @@ appear only where a record says so. Known scales, each owned by its record:
   `[orig: Mission_LoadBMSAndExtractSpawnPoints @ 0x40d650]`
   ([correspondence.md §3](correspondence.md)).
 - The conversion is **single-sourced** in `MissionObjectPlacer.bms_to_godot_basis` /
-  `bms_to_godot_position` (`godot/src/mission/mission_object_placer.gd` statics),
+  `bms_to_godot_position` (`godot/src/mission/nova_mission_object_placer.cpp` statics),
   citing `[orig: Entity_SpawnFromBMSRecord @ 0x40eb66]` +
   `[orig: Math_BuildFixedPointMatrixFromEulerAngles @ 0x613f40]`
   ([runtime-architecture.md](runtime-architecture.md)). **Never re-derive it** — a
@@ -153,8 +153,8 @@ is authoritative, and each record owns the rationale and the stable `D-…` dive
 | BMS event runtime + promotion | `engine/runtime/mission` | [mission/bms-event-runtime-re.md](mission/bms-event-runtime-re.md) | matching (D-EVT-1..5) |
 | World / WAC VM / AI / gameplay systems | `engine/runtime/world`, `engine/runtime/wac` | [world/world-wac-ai-re.md](world/world-wac-ai-re.md) | matching core, largest live surface: §14–§28 carry the infantry motor, collision + blink boxes, ground-AI combat, fire/death presentation, the round-outcome loop, player-body physics, the vehicle pass, item destruction, tracers, allegiance/mounted weapons, and throwables. Catalogs D-INF / D-COL / D-AI / D-ITEM / D-WPN / D-THROW; open rows in the [ledger](divergence-ledger.md) |
 | Items (items.def entity defs) | `engine/formats/def`, `ItemDatabase` | [world/itemdef-re.md](world/itemdef-re.md) | landed |
-| HUD + interface overlays | `godot/src/ui/hud_*.gd`, `HudPos`, `game_hud.gd` | [interface/hud-re.md](interface/hud-re.md) | ported (weapon-coupled elements, waypoint track, heat bar, objectives panel, attach labels; D-HUD-1..18) |
-| Mission loading screen | `godot/src/ui/nova_loading_screen.gd` | [interface/loading-screen-re.md](interface/loading-screen-re.md) | matching for sidecar rule / MP text / bar (D-LOADSCR-1..7) |
+| HUD + interface overlays | `engine/runtime/hud` (`HudFrameCompiler` + `hud_math`), `godot/src/hud` (`HudOverlay`/`HudPos`) | [interface/hud-re.md](interface/hud-re.md) | ported (weapon-coupled elements, waypoint track, heat bar, objectives panel, attach labels; D-HUD-1..18) |
+| Mission loading screen | `godot/game/ui/nova_loading_screen.gd` | [interface/loading-screen-re.md](interface/loading-screen-re.md) | matching for sidecar rule / MP text / bar (D-LOADSCR-1..7) |
 | Player info / avatars | `engine/formats/avatars`, `AvatarDatabase`, `player_info_menu_companion.gd` | [playerinfo/avatars-re.md](playerinfo/avatars-re.md) | matching for parser + screen orchestration (D-PLAYERINFO-1..12; loadout combos FIXED 2026-07-30; open: -1 spawned-soldier render NEEDS-RE, -9 persistence, -12 per-slot selection state) |
 | Render — materials / state | `engine/formats/oed` tag registry, `engine/runtime/renderer`, `ObjectShaderCache` | [render/render-material-re.md](render/render-material-re.md) | matching (REN-2; D-RMAT catalog) |
 | Render — draw order | `engine/runtime/renderer` render_order + the engine priority ladder | [render/render-order-re.md](render/render-order-re.md) | matching for the ported ladder (REN-3; D-RORD catalog) |
@@ -214,13 +214,13 @@ Order of operations when you need an engine truth:
 5. **Runtime introspection:**
    - The debug overlay (F3 in the standalone game): Entities/Sim/Vars/Perf
      tabs, sim transport (play/pause/step), and mission-variable writes —
-     `godot/src/debug/nova_debug_overlay.gd`. ONED launches that same game
+     `godot/game/debug/nova_debug_overlay.gd`. ONED launches that same game
      with F5, or its current saved loose mission with F6; it has no embedded
      mission preview or debug overlay.
    - `Simulation` introspection: `get_present_snapshot()`,
      `get_entity_debug(index)`, `get_fired_events_snapshot()`, `get_wac_state()`,
      and the mission/global/music variable snapshots.
-   - PerfTimeline ring (`godot/src/util/perf_timeline.gd`), rendered in the
+   - PerfTimeline ring (`godot/game/util/perf_timeline.gd`), rendered in the
      overlay's Perf pane; recorded baselines in `docs/perf/`.
    - Headless probes `godot/tests/*_probe.gd` (menu_shell, mission_load_perf,
      mission_reground_perf, runtime_scene, trn_project_roundtrip).
