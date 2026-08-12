@@ -185,6 +185,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
             t.particleh2odeath = def->particleh2odeath;
             t.particlefire = def->particlefire;
             t.particleother = def->particleother;
+            t.particlefinale = def->particlefinale;
             // The collision-instance sweep enriches this row with live
             // husk-model state and the active first-stage husk's KZ user points.
             world.item_death_traits.set(e->item_id, std::move(t));

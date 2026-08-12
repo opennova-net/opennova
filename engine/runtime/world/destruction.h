@@ -87,6 +87,10 @@ struct ItemDeathTraits {
     std::string particleh2odeath;   // +0x44A name — the submerged family
     std::string particlefire;       // +0x47E name — the Fire-bone family
     std::string particleother;      // +0x4B2 name — the Other-bone family
+    // +0x4E4 name — the ground-impact effect the settle transition plays once
+    // at the entity position (interned to the +0x4E2 handle at mission start)
+    // [orig: Entity_TransitionToGroundDeath @ 0x493080 read @ 0x493088].
+    std::string particlefinale;
     // Husk-model "KZ" user points (model-local, mission axes) — each queues a
     // kz_OrganicBlast r=5.0 at its full-Euler world pose; empty -> one blast
     // at the entity position
