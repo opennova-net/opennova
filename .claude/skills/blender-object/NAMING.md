@@ -143,7 +143,7 @@ Name format `UP<c>NN <label>` (`convert_internal.cpp` objType 6 parse):
 ### Vehicle seating user points
 
 Mountable vehicles/emplacements expose seats as user points whose **label** the engine
-classifies by name (`[orig: Entity_FindBestSeatSlot @0x4351f0]`, `engine/runtime/world/.../entity.h`
+classifies by name (`[orig: Entity_FindBestSeatSlot @0x4351f0]`, `engine/runtime/world/entity.h`
 `SeatType`):
 
 | Label prefix | SeatType | Notes |
