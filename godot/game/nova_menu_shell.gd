@@ -315,6 +315,12 @@ func _gui_input(event: InputEvent) -> void:
 		if button.button_index == MOUSE_BUTTON_LEFT:
 			_driver.process_mouse(button.position, button.pressed)
 			accept_event()
+		elif button.pressed and (button.button_index == MOUSE_BUTTON_WHEEL_DOWN \
+				or button.button_index == MOUSE_BUTTON_WHEEL_UP):
+			# One notch = one row tick (D-MNU-18 deliberate divergence).
+			if _driver.process_wheel(button.position,
+					1 if button.button_index == MOUSE_BUTTON_WHEEL_DOWN else -1):
+				accept_event()
 
 
 func _unhandled_key_input(event: InputEvent) -> void:

@@ -714,6 +714,25 @@ bool MenuFrame::process_popup_mouse(int p_index, const Vector2 &p_position,
 	return claim.scroll_index >= 0;
 }
 
+bool MenuFrame::process_mouse_wheel(const Vector2 &p_position, int p_steps) {
+	if (!is_configured()) {
+		return false;
+	}
+	const Vector2 scale = design_scale_();
+	opennova::menu::MenuFrameCompiler::MouseClaim claim;
+	if (!compiler_.pump_mouse_wheel(state_, p_position.x, p_position.y,
+				p_steps, scale.x, scale.y, &claim)) {
+		return false;
+	}
+	if (claim.scroll_value_changed) {
+		// The row window moved: the new first-visible row.
+		emit_signal("scroll_value_changed", claim.scroll_index,
+				claim.scroll_value);
+		queue_redraw();
+	}
+	return true;
+}
+
 void MenuFrame::set_cursor_state(bool p_visible, const Vector2 &p_position) {
 	state_.cursor_visible = p_visible;
 	state_.cursor_x = p_position.x;
@@ -940,6 +959,8 @@ void MenuFrame::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("process_popup_mouse", "index", "position",
 								 "button_down"),
 			&MenuFrame::process_popup_mouse);
+	ClassDB::bind_method(D_METHOD("process_mouse_wheel", "position", "steps"),
+			&MenuFrame::process_mouse_wheel);
 	ClassDB::bind_method(D_METHOD("widget_index", "name"),
 			&MenuFrame::widget_index);
 	ADD_SIGNAL(MethodInfo("widget_pressed",

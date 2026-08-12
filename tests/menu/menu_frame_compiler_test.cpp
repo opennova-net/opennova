@@ -2278,6 +2278,79 @@ void test_combo_popup_scrollbar_scrolls_through_pump(const fnt_font_t *font) {
 	c.pump_popup_mouse(state, 1, 90.0f, 90.0f, false, 1.0f, 1.0f);
 }
 
+// Wheel ticks (D-MNU-18, deliberate divergence — retail ships no functioning
+// menu wheel scroll; witness map at pump_mouse_wheel): one tick = one row,
+// the open popup consumes ticks exclusively wherever the cursor sits, a
+// closed overflowing list scrolls only under the point, and rows clamp.
+void test_wheel_ticks_scroll_popup_and_row_owners(const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>WHEELY</NAME>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <FONT><NAME>f.fnt</NAME><DEFAULT_FG>FFFFFF</DEFAULT_FG></FONT>
+    <WINDOW type="list" name="ROSTER">
+      <POSITION><LEFT>400</LEFT><TOP>100</TOP><RIGHT>600</RIGHT><BOTTOM>140</BOTTOM></POSITION>
+      <ITEMS>
+        <ITEM type="ID" value="0">A</ITEM><ITEM type="ID" value="1">B</ITEM>
+        <ITEM type="ID" value="2">C</ITEM><ITEM type="ID" value="3">D</ITEM>
+      </ITEMS>
+      <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+    </WINDOW>
+    <WINDOW type="combo" name="COMBO">
+      <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>20</BOTTOM></POSITION>
+      <ITEMS>
+        <ITEM type="ID" value="0">ZERO</ITEM><ITEM type="ID" value="1">ONE</ITEM>
+        <ITEM type="ID" value="2">TWO</ITEM><ITEM type="ID" value="3">THREE</ITEM>
+        <ITEM type="ID" value="4">FOUR</ITEM><ITEM type="ID" value="5">FIVE</ITEM>
+      </ITEMS>
+      <LIST_BOX>
+        <POSITION><LEFT>0</LEFT><TOP>20</TOP><RIGHT>100</RIGHT><BOTTOM>100</BOTTOM></POSITION>
+        <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+      </LIST_BOX>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	c.configure(doc.first_screen(), font);
+	MenuFrameState state;
+
+	// The 4-row list shows 2 rows: wheel over it scrolls, clamped 0..2.
+	MenuFrameCompiler::MouseClaim claim;
+	CHECK(c.pump_mouse_wheel(state, 500.0f, 120.0f, 1, 1.0f, 1.0f, &claim),
+			"a wheel tick over the overflowing list claims");
+	CHECK(claim.scroll_index == 1 && claim.scroll_value_changed &&
+					claim.scroll_value == 1,
+			"one down tick scrolls the list one row");
+	claim = MenuFrameCompiler::MouseClaim();
+	c.pump_mouse_wheel(state, 500.0f, 120.0f, 5, 1.0f, 1.0f, &claim);
+	CHECK(claim.scroll_value == 2, "the down tick clamps at rows - visible");
+	claim = MenuFrameCompiler::MouseClaim();
+	CHECK(!c.pump_mouse_wheel(state, 200.0f, 300.0f, 1, 1.0f, 1.0f, &claim),
+			"a tick over nothing scrollable claims no one");
+	claim = MenuFrameCompiler::MouseClaim();
+	c.pump_mouse_wheel(state, 500.0f, 120.0f, -9, 1.0f, 1.0f, &claim);
+	CHECK(claim.scroll_value_changed && claim.scroll_value == 0,
+			"the up tick clamps at row zero");
+
+	// An OPEN popup consumes the tick exclusively — even over the list.
+	MenuWidgetState combo;
+	combo.index = 2;
+	combo.popup_open = true;
+	state.widgets.push_back(combo);
+	claim = MenuFrameCompiler::MouseClaim();
+	CHECK(c.pump_mouse_wheel(state, 500.0f, 120.0f, 1, 1.0f, 1.0f, &claim),
+			"the open popup claims the tick");
+	CHECK(claim.scroll_index == 2 && claim.scroll_value == 1,
+			"the popup rows scroll instead of the list under the cursor");
+	// 6 rows, 4 visible: popup clamps at 2.
+	claim = MenuFrameCompiler::MouseClaim();
+	c.pump_mouse_wheel(state, 500.0f, 120.0f, 9, 1.0f, 1.0f, &claim);
+	CHECK(claim.scroll_value == 2, "the popup clamps at its own row limit");
+}
+
 // A list shorter than one full row holding a single item must not draw a
 // scrollbar its own interaction refuses to hit: the draw walk and the
 // interaction solve share scroll_row_span_'s min-1 visible clamp.
@@ -2354,6 +2427,7 @@ int main() {
 	test_scroll_interaction_hits_and_drag(&font);
 	test_scroll_pump_owns_press_capture_and_value(&font);
 	test_combo_popup_scrollbar_scrolls_through_pump(&font);
+	test_wheel_ticks_scroll_popup_and_row_owners(&font);
 	test_degenerate_list_draws_no_dead_scrollbar(&font);
 	test_table_embedded_scrollbar_scrolls_rows(&font);
 	test_combo_face_shows_list_box_selection(&font);

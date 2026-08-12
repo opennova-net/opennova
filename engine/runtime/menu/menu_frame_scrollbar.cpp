@@ -637,6 +637,100 @@ bool MenuFrameCompiler::scroll_pump_mouse_(MenuFrameState &io_state,
 	return true;
 }
 
+// One wheel tick against the row-scroll model — a DELIBERATE divergence
+// (D-MNU-18): retail JO ships no functioning menu wheel scroll. The witnessed
+// plumbing: WM_MOUSEWHEEL accumulates HIWORD(wParam) and fires one callback
+// tick per +/-120 with direction masks 0x100/0x200 [orig:
+// Input_DispatchMouseEvent @ 0x761571..0x7615d0], the shell bridge collapses
+// BOTH masks into the direction-less widget event 0x100000B that no widget
+// handler consumes [orig: Menu_ShellMouseCallback @ 0x54b8c6;
+// dispatch_mouse_event @ 0x63ab72], and the in-game bridge (the armory's)
+// drops the ticks entirely [orig: Menu_InGameMouseCallback @ 0x568760]. By
+// the 2026-08-12 maintainer decision the reimpl scrolls anyway: one tick =
+// one row (the CScrollWnd arrow step), routed the way the witnessed dispatch
+// routes every mouse event — the open popup exclusively [orig:
+// g_ui_open_popup_wnd gate @ 0x63abb5], else the front-most row owner under
+// the point (the reverse child walk @ 0x63abd3).
+bool MenuFrameCompiler::pump_mouse_wheel(MenuFrameState &io_state,
+		float mouse_x, float mouse_y, int steps, float scale_x, float scale_y,
+		MouseClaim *claim) {
+	if (screen_ == nullptr || nodes_.empty() || steps == 0 ||
+			claim == nullptr) {
+		return false;
+	}
+	auto apply_row = [&](int index) {
+		claim->hovered = index;
+		claim->scroll_index = index;
+		MenuWidgetState *row = nullptr;
+		for (MenuWidgetState &candidate : io_state.widgets) {
+			if (candidate.index == index) {
+				row = &candidate;
+				break;
+			}
+		}
+		if (row == nullptr) {
+			MenuWidgetState fresh;
+			fresh.index = index;
+			io_state.widgets.push_back(fresh);
+			row = &io_state.widgets.back();
+		}
+		const int value = std::clamp(std::max(row->scroll_row, 0) + steps, 0,
+				scroll_row_limit(index, io_state));
+		if (value == std::max(row->scroll_row, 0)) {
+			return;
+		}
+		row->scroll_row = value;
+		claim->scroll_value_changed = true;
+		claim->scroll_value = value;
+	};
+	// The open popup owns the mouse exclusively — every tick scrolls it,
+	// wherever the cursor sits.
+	for (int i = 0; i < static_cast<int>(nodes_.size()); ++i) {
+		const mnu::Window *w = nodes_[static_cast<size_t>(i)].window;
+		if (w == nullptr || w->type != mnu::WindowType::Combo) {
+			continue;
+		}
+		const MenuWidgetState *ws = state_for(io_state, i);
+		if (ws != nullptr && ws->popup_open) {
+			apply_row(i);
+			return true;
+		}
+	}
+	// Front-most row owner under the point (draw order = pre-order; later
+	// nodes paint over earlier, so the reverse scan finds the front-most).
+	const float mx = scale_x > 0.0f ? mouse_x / scale_x : mouse_x;
+	const float my = scale_y > 0.0f ? mouse_y / scale_y : mouse_y;
+	for (int i = static_cast<int>(nodes_.size()) - 1; i >= 0; --i) {
+		const mnu::Window *w = nodes_[static_cast<size_t>(i)].window;
+		if (w == nullptr || !widget_shown_(i, io_state)) {
+			continue;
+		}
+		switch (w->type) {
+			case mnu::WindowType::List:
+			case mnu::WindowType::Multi:
+			case mnu::WindowType::LanList:
+			case mnu::WindowType::Table:
+				break;
+			default:
+				continue;
+		}
+		mnu::RectEdges rect;
+		if (!widget_rect(i, io_state, &rect)) {
+			continue;
+		}
+		if (mx < rect.left || mx >= rect.right || my < rect.top ||
+				my >= rect.bottom) {
+			continue;
+		}
+		if (scroll_row_limit(i, io_state) <= 0) {
+			return false; // the front-most owner fits: nothing scrolls
+		}
+		apply_row(i);
+		return true;
+	}
+	return false;
+}
+
 // The open-dropdown pump: the popup's scrollbar child sees the sample ahead
 // of row picking, restricted to the open combo — while a popup is open only
 // the popup window receives events, and its scrollbar child claims before
