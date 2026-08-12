@@ -170,8 +170,8 @@ func consume(view: PlayerWeaponView,
 			_apply_weapon_clear()
 		elif not event.switch_to_weapon.is_empty():
 			_apply_weapon_switch(event.switch_to_weapon, event.preserve_slot_state)
-		# event.switch_denied is the deny-sound seam [orig: PlaySoundOnDedicatedServer
-		# (dword_24E08C4) @ 0x4e0354] — the shipped set name is unwitnessed (D-WPN-22).
+		if event.switch_denied:
+			_play_switch_deny_sound()
 	if batch_started_clip:
 		_weapon_play_serial = view.play_serial
 	# First adoption and a fresh viewmodel both synchronize to the latest snapshot,
@@ -435,6 +435,28 @@ func _fire_action_end_sound(event: PlayerWeaponEvent) -> void:
 	var audio = _world.get_mission_audio()
 	if audio != null:
 		audio.fire_soundset(event.action_end_soundset, event.world_position, -1)
+
+
+# The switch/equip DENY click (D-WPN-22): a refused weapon switch plays the
+# "DRY_CLAYSATCH" trigger set as a non-positional interface one-shot. The deny
+# legs tail-call the interface play with the mission-load-resolved handle at
+# dword_24E08C4 [orig: Player_SwitchToWeaponByHandle @ 0x4e0344 /
+# Player_EquipWeaponByEntity @ 0x4e037e -> PlaySoundOnDedicatedServer
+# @ 0x527be0]; the name->slot row lives in the @ 0x82F590 resolver table
+# (DialogSystem_Init @ 0x527687). game.lwf ships the set. The play's
+# is_mp_session_peer gate (@ 0x527be5) is the is_client bit — TRUE in SP
+# mode 3, false only on dedicated hosts (correspondence.md
+# Sound_PlayWithDistanceAttenuation) — and this presenter only exists on a
+# client, so playing unconditionally here IS the gate.
+const SWITCH_DENY_SOUNDSET := "DRY_CLAYSATCH"
+
+
+func _play_switch_deny_sound() -> void:
+	if _world == null:
+		return
+	var audio = _world.get_mission_audio()
+	if audio != null:
+		audio.ui_soundset(SWITCH_DENY_SOUNDSET)
 
 
 # Start an FSM clip on every viewmodel part (arms + gun share the animadm) - a replay

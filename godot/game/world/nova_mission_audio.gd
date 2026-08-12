@@ -369,6 +369,20 @@ func fire_soundset(name: String, world_pos: Vector3, source_bms_id: int = 0) -> 
 		_audio_root, world_pos, name, SFX_BUS, _last_camera_pos, source_bms_id)
 
 
+## A non-positional interface one-shot: the engine's zero-position play used by
+## the weapon-switch/equip deny click — a 24-byte emitter with header 0x10000,
+## zeroed position, and the interface volume option, routed straight into the
+## trigger-set player [orig: PlaySoundOnDedicatedServer @ 0x527be0 ->
+## SoundBank_PlayTriggerEntries @ 0x75ccd0]. The set NAME comes from the
+## mission-load resolver walking the 36-B {name[32], slot*} table @ 0x82F590
+## across every loaded bank (DialogSystem_Init @ 0x527687/@ 0x5276e6, two
+## passes of SoundBank_FindTriggerByName @ 0x75be90).
+func ui_soundset(name: String) -> bool:
+	if _bank == null or _audio_root == null:
+		return false
+	return _bank.spawn_oneshot_2d(_audio_root, name, SFX_BUS) != null
+
+
 ## A body slot sound (footstep/foley/landing/scream) from the sim's per-tick
 ## drain: the same full-volume positional one-shot as fire_soundset [orig:
 ## Entity_PlaySound3D_FullVolume @ 0x528e20 — emitter volume 255], with an

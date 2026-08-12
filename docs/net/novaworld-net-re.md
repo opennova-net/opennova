@@ -8521,8 +8521,19 @@ one per-entity array keyed by a build-time ammo-class registry (D-WPN-24).
   category = exact-slot check then the rank scan from 0. Eligibility `@ 0x4e02c3`:
   weapon_class (+0x3A4) ∈ {1,2} OR nonzero ammo score (`calculate_kill_score @ 0x5407e0`
   as the slot predicate = class pool + loaded clip), AND !(flags2&1). A full wrap plays
-  the deny sound `PlaySoundOnDedicatedServer(dword_24E08C4)` `@ 0x4e0354` (set name
-  unwitnessed — D-WPN-22).
+  the deny sound `PlaySoundOnDedicatedServer(dword_24E08C4)` `@ 0x4e0354`. The set is
+  **`DRY_CLAYSATCH`** (witnessed 2026-08-12, closing D-WPN-22): `dword_24E08C4` is the
+  `DRY_CLAYSATCH` row's slot in the 36-B `{name[32], slot*}` resolver table
+  `@ 0x82F590`, filled at mission load by `DialogSystem_Init` — two passes over the
+  `dword_830160`-count table, each name resolved across every loaded bank via
+  `SoundBank_FindTriggerByName @ 0x75be90` (first bank wins; pass 2 retries only
+  still-zero slots) `@ 0x527687/@ 0x5276e6`. `Player_EquipWeaponByEntity @ 0x4e037e`
+  plays the same set on a null entity/def. The play itself is the non-positional
+  interface one-shot (`PlaySoundOnDedicatedServer @ 0x527be0`: 24-B emitter, header
+  0x10000, zeroed position, interface volume, gated on `is_mp_session_peer` — the
+  is_client bit, TRUE in SP mode 3). game.lwf ships the set. Reimpl:
+  `NovaMissionAudio.ui_soundset` + `PlayerWeaponEffects._play_switch_deny_sound` on
+  the sim's `switch_denied` event.
 - `Player_CycleWeaponSlot @ 0x4dfe70` — next/previous (input cases 212/214, ±1) over ALL
   780 combos with wraparound; EVERY candidate needs the ammo score (no weapon_class
   exemption `@ 0x4dff39`); reaching the start again returns silently (no deny). Cases
