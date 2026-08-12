@@ -16,6 +16,7 @@
 #include <godot_cpp/variant/vector3.hpp>
 #include <godot_cpp/variant/vector4i.hpp>
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -887,6 +888,13 @@ private:
 	// @ 0x606510]. Shares terrain_sector_grid_/origins with the height field.
 	std::vector<uint8_t> surface_indices_;
 	opennova::terrain::SurfaceTypeMap surface_map_;
+	// The placed-tile surface override (D-SND-15): the mission .til entries
+	// plus the tileset's .TSD-fed tile-index -> surface table, both resolved
+	// engine-side (terrain_query surface_tiles.h — the witnesses live there).
+	// Owned here like the heightmap so world.surface_map's raw pointers
+	// survive reset_world; the zero table is retail's no-.TSD default.
+	std::vector<opennova::terrain::SurfaceTileEntry> surface_tiles_;
+	std::array<uint8_t, 256> tile_surface_table_{};
 	// SndProf.def text + water plane held for (re)application on reset_world.
 	std::vector<uint8_t> sndprof_text_;
 	int32_t env_water_z_q16_ = 0;

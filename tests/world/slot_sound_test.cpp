@@ -12,7 +12,10 @@
 #include <vector>
 
 #include "terrain_query/height_field.h"
+#include "terrain_query/surface_tiles.h"
 #include "terrain_query/surface_type_map.h"
+#include <til/til.h>
+#include <til/til_io.h>
 #include "world/ai.h"
 #include "world/world.h"
 
@@ -349,6 +352,86 @@ void test_surface_sampler_defaults() {
     CHECK(surface_type_at_fixed(m, fx(600.0), -fx(10.0)) == 7);
 }
 
+void test_surface_sampler_placed_tile_override() {
+    using opennova::terrain::SurfaceTileEntry;
+    using opennova::terrain::SurfaceTypeMap;
+    using opennova::terrain::surface_type_at_fixed;
+    // D-SND-15: a position covered by a placed tile returns the tileset .TSD
+    // table's entry for the tile index — 0 (TSD_NULL) included; retail never
+    // falls back to the charmap under a tile, and shipped JO carries no .TSD
+    // so its placed tiles all read 0. [orig: Terrain_GetSurfaceTypeAtPosition
+    // @ 0x606510, walk @ 0x6065ca-0x606601, table read @ 0x60660c]
+    static const uint8_t raster[4] = {5, 6, 7, 8};
+    static const int grid[256] = {1};
+    SurfaceTypeMap m;
+    m.data = raster;
+    m.width = 2;
+    m.height = 2;
+    m.sector_grid = grid;
+    // One tile at mission (16..32, 16..32): x_fixed = 16u, z_fixed stores the
+    // NEGATED mission y base [orig: entry +4].
+    static const SurfaceTileEntry tiles[3] = {
+            {fx(16.0), -fx(16.0), 12},
+            {fx(16.0), -fx(16.0), 30}, // later duplicate: first containing wins
+            {fx(592.0), -fx(16.0), 12}, // covers the unmapped sector cell below
+    };
+    m.tiles = tiles;
+    m.tile_count = 3;
+    static uint8_t table[256];
+    table[12] = 3;  // TSD_SNOW
+    table[30] = 9;  // TSD_MUD (must lose to the first entry)
+    m.tile_surface = table;
+    // Inside the tile square (inclusive edges): the table entry wins.
+    CHECK(surface_type_at_fixed(m, fx(20.0), fx(20.0)) == 3);
+    CHECK(surface_type_at_fixed(m, fx(16.0), fx(16.0)) == 3);
+    CHECK(surface_type_at_fixed(m, fx(32.0), fx(32.0)) == 3);
+    // Outside the square: the charmap class.
+    CHECK(surface_type_at_fixed(m, fx(33.0), fx(20.0)) == raster[0]);
+    // No .TSD table (retail memset default): a covered position reads 0, not
+    // the charmap.
+    m.tile_surface = nullptr;
+    CHECK(surface_type_at_fixed(m, fx(20.0), fx(20.0)) == 0);
+    // The unmapped-cell early return precedes the walk: (600, 20) sits inside
+    // the third tile, yet the unmapped sector still answers 7 [orig: @0x606573].
+    m.tile_surface = table;
+    CHECK(surface_type_at_fixed(m, fx(600.0), fx(20.0)) == 7);
+}
+
+void test_surface_tile_resolvers() {
+    // The engine-side D-SND-15 resolvers (terrain_query/surface_tiles.h):
+    // the .TSD probe derives `<tilestrip base>.tsd` and fills the table; an
+    // absent file leaves retail's zeroed default.
+    opennova::terrain::SurfaceTileFileSource files;
+    files.has_file = [](const std::string &n) { return n == "trntile10.tsd"; };
+    files.read_file = [](const std::string &n, std::vector<uint8_t> &out) {
+        if (n != "trntile10.tsd") return false;
+        static const char text[] = "INDEX_12 TSD_SNOW\r\n";
+        out.assign(text, text + sizeof(text) - 1);
+        return true;
+    };
+    uint8_t table[256];
+    opennova::terrain::resolve_tileset_surface_table(files, "trntile10.tga", table);
+    CHECK(table[12] == 3); // TSD_SNOW
+    CHECK(table[0] == 0);
+    opennova::terrain::resolve_tileset_surface_table(files, "other.tga", table);
+    CHECK(table[12] == 0); // no .TSD -> the memset default
+
+    // The til0 fold keeps exactly the three walk fields per entry.
+    opennova::TilFile til;
+    til.entries.push_back(opennova::make_til_overlay_entry(1, 2, 12, 0));
+    std::vector<uint8_t> bytes;
+    std::string err;
+    CHECK(opennova::save_til(til, bytes, err));
+    const auto tiles = opennova::terrain::surface_tiles_from_til_bytes(bytes);
+    CHECK(tiles.size() == 1);
+    if (tiles.size() == 1) {
+        CHECK(tiles[0].x_fixed == til.entries[0].x_fixed);
+        CHECK(tiles[0].z_fixed == til.entries[0].z_fixed);
+        CHECK(tiles[0].tile_index == 12);
+    }
+    CHECK(opennova::terrain::surface_tiles_from_til_bytes({}).empty());
+}
+
 } // namespace
 
 int main() {
@@ -361,6 +444,8 @@ int main() {
     test_death_scream_day_and_night();
     test_local_player_death_scream_composite();
     test_surface_sampler_defaults();
+    test_surface_sampler_placed_tile_override();
+    test_surface_tile_resolvers();
     if (failures == 0) std::printf("slot_sound_test OK\n");
     return failures == 0 ? 0 : 1;
 }

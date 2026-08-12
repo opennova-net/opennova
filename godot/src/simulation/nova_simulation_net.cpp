@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include <npruntime/session_status.h>
+#include <terrain_query/surface_tiles.h> // surface_tiles_from_til_bytes (D-SND-15)
 #include <threedi/threedi_panm_pose.h> // the native PANM liveness gate (S3, ADR 0028)
 #include <npwire/ingame_decode.h> // kRoundEventFlag* (the fire-mode byte)
 #include <npwire/ingame_message_id.h>
@@ -617,6 +618,12 @@ void Simulation::enable_listen_server(bool p_enable) {
 
 void Simulation::set_terrain_til_data(const PackedByteArray &p_til_bytes) {
 	terrain_til_data_.assign(p_til_bytes.ptr(), p_til_bytes.ptr() + p_til_bytes.size());
+	// The same bytes feed the sim's placed-tile surface array (D-SND-15);
+	// the fold and its witness live engine-side (terrain_query
+	// surface_tiles_from_til_bytes).
+	surface_tiles_ =
+			opennova::terrain::surface_tiles_from_til_bytes(terrain_til_data_);
+	apply_terrain_to_ai();
 }
 
 void Simulation::set_mission_text_data(const PackedByteArray &p_rtxt_bytes) {

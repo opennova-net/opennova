@@ -93,8 +93,11 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/texture_preprocess.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/tristrip.cpp
     # terrain_query — the world->terrain seam leaf (ADR 0020): height query +
-    # the retail segment raycast; zero format dependencies
+    # the retail segment raycast (format-free), plus the placed-tile surface
+    # resolvers (surface_tiles.cpp — the one TU with .til format access,
+    # D-SND-15; the seam headers themselves stay format-free)
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/height_field.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/surface_tiles.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/terrain_raycast.cpp
     # wac — the WAC compiler (binds names/vars against the live world) + the VM;
     # the language front end (lexer, parser/AST, command table, Program model)

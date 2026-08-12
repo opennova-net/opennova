@@ -7181,8 +7181,8 @@ runtime path (D-WPN-8/D-THROW-7; §5.36). Three ledger rows record the audit:
 terrain samples the charmap (`Terrain_GetSurfaceTypeAtPosition @0x606510` result + 4 at the
 impact point, for the ballistic terrain leg and the grenade bounce/full-stop material + 4
 @0x4447c3); person hits take tag 2; CFAC static/dynamic hits carry `poly_type + 4` with the
-building material-1→23 remap; water-plane hits take tag 11. Only the placed-tile `.TIL`
-override remap remains open (D-SND-15); and
+building material-1→23 remap; water-plane hits take tag 11. The placed-tile `.TSD`
+override remap closed with D-SND-15 (2026-08-12, lwf-dbf-sound-re.md); and
 **D-WPN-16** tracks the genuinely unported Knife/instant-kill-zone family. Pinned by
 `nova_simulation_test.gd` (the local FIRE→impact route) and `npruntime_round_sim`
 (the bake rules + the tag-2 impact row).

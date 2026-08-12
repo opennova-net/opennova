@@ -128,6 +128,7 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/til/til_io.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/til/til_foliage_blocker.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/til/til_overlay_bake.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/til/til_tsd.cpp
     # tpj — terrain project
     ${CMAKE_CURRENT_SOURCE_DIR}/tpj/tpj_io.cpp
     # tpm — TPM1 terrain tile mesh (.tml/.tms; magic-shaped name, precedent

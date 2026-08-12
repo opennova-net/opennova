@@ -68,10 +68,13 @@ inline int32_t static_slot_coord_q16(uint16_t word) {
 // Runtime collision model (per graphic).
 // ----------------------------------------------------------------------------
 
-// [orig: runtime BPLN record, 12 B — int16 flags? + Q14 normal xyz @+2/+4/+6 +
+// [orig: runtime BPLN record, 12 B — int16 flags @+0 + Q14 normal xyz @+2/+4/+6 +
 // 16.16 dist @+8; dot scales witnessed as >>14 (ray clip) and >>9 vs 32*dist
-// (contact force).]
+// (contact force). The sound-occlusion clip is the witnessed flags consumer:
+// a nonzero flags BYTE (the word's low byte, @ 0x538d00) clamps that plane's
+// clip radius at 0 (D-SND-9).]
 struct CollisionPlane {
+    int16_t flags = 0;              // authored BPLN flags word
     int16_t nx = 0, ny = 0, nz = 0; // Q14 unit normal
     int32_t dist = 0;               // 16.16 plane distance
 };

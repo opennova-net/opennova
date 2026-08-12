@@ -4,6 +4,7 @@
 #include "simulation/nova_simulation_internal.h"
 
 #include <mission/runtime_boot.h> // the S9 boot order + file-resolution policy
+#include <terrain_query/surface_tiles.h> // the D-SND-15 placed-tile resolvers
 
 using namespace novasim;
 
@@ -223,6 +224,13 @@ void Simulation::apply_terrain_to_ai() {
 		// zero-initialized map is the sampler's "no charmap -> surface 1" leg.
 		world_->surface_map =
 			surface_indices_.empty() ? opennova::terrain::SurfaceTypeMap{} : surface_map_;
+		// The placed-tile override rides the same view (D-SND-15). With no
+		// charmap the sampler's early return-1 skips the walk exactly like
+		// retail, so attaching the tiles unconditionally is faithful.
+		world_->surface_map.tiles =
+				surface_tiles_.empty() ? nullptr : surface_tiles_.data();
+		world_->surface_map.tile_count = static_cast<int32_t>(surface_tiles_.size());
+		world_->surface_map.tile_surface = tile_surface_table_.data();
 	}
 	apply_sound_state_to_world();
 	if (!ai_) return;
@@ -569,7 +577,20 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	steps.load_mission = [&] {
 		return p_mission.is_valid() && load_from_mission_data(p_mission);
 	};
-	steps.install_terrain_field = [&] { set_terrain_height_field(p_terrain); };
+	steps.install_terrain_field = [&] {
+		set_terrain_height_field(p_terrain);
+		// The D-SND-15 placed-tile surface table: the .TSD probe/parse policy
+		// is engine-side (terrain_query resolve_tileset_surface_table).
+		tile_surface_table_.fill(0);
+		if (p_terrain.is_valid() && p_terrain->is_loaded()) {
+			opennova::terrain::SurfaceTileFileSource tile_files;
+			tile_files.has_file = files.has_file;
+			tile_files.read_file = files.read_file;
+			opennova::terrain::resolve_tileset_surface_table(tile_files,
+					p_terrain->get_trn().tilestrip, tile_surface_table_.data());
+		}
+		apply_terrain_to_ai();
+	};
 	steps.install_sound_profiles = [&] {
 		if (!files.valid() || !files.has_file("SndProf.def")) return;
 		std::vector<uint8_t> text;

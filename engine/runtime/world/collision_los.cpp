@@ -222,10 +222,11 @@ namespace {
 // the end @ 0x538e3d-0x538f06.] The LOS callers pass the height offset as
 // the radius (the frameless-callee arg-slot reuse): ray 1 radius 0, ray 2
 // radius -0x8000 — planes read 0.5u THINNER, the mechanism that lets ray 2
-// clear near-miss walls the unshifted segment grazes. Every plane takes the
-// raw radius here; the original's per-plane flag-byte branch (flagged planes
-// use the max(radius, 0) clamp instead) rides D-SND-9 until plane flags are
-// plumbed through the collision feed.
+// clear near-miss walls the unshifted segment grazes. Per plane, a nonzero
+// BPLN flags BYTE (the +0 word's low byte) substitutes the max(radius, 0)
+// clamp for the raw radius, so only flag-0 planes read thin on ray 2
+// [orig: the flag-byte branch @ 0x538d00; flagged arm subtracts the clamped
+// register, flag-0 arm the raw arg @ 0x538d4b/0x538dd6] (the D-SND-9 closure).
 bool sound_segment_blocked(const CollisionTargetView &target, const CollisionRay &ray,
                            int32_t radius) {
     if (target.model == nullptr || target.matrices == nullptr) return false;
@@ -266,8 +267,10 @@ bool sound_segment_blocked(const CollisionTargetView &target, const CollisionRay
                                          static_cast<int64_t>(ce[0]) * pl.nx +
                                          static_cast<int64_t>(ce[2]) * pl.nz) >> 14) +
                                     pl.dist;
-                const int32_t d0 = d0u - radius;
-                const int32_t d1 = d1u - radius;
+                const int32_t plane_r =
+                        (pl.flags & 0xFF) != 0 ? (radius > 0 ? radius : 0) : radius;
+                const int32_t d0 = d0u - plane_r;
+                const int32_t d1 = d1u - plane_r;
                 if (d0 > 0 && d1 > 0) { miss = true; break; } // [orig: @ 0x538e29/0x538e37]
                 if (d0 > 0 || d1 > 0) {
                     // Straddle split on the unradiused distances. [orig: @ 0x538e3d-0x538f06]
