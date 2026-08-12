@@ -6,7 +6,9 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdint>
+#include <vector>
 
+#include "terrain_query/height_field.h"
 #include "world/player_view.h"
 #include "world/weapon_fsm.h"
 
@@ -346,8 +348,8 @@ void test_compose_camera_first_person() {
     PlayerCameraPose pose;
     // recoil 1 deg (BAM), torso roll 2 deg, lean 4 deg -> roll 2 + 1 = 3 deg.
     const int32_t deg_bam = 11930465; // 2^32 / 360, rounded
-    player_view_compose_camera(v, position, anchor, true, 90.0f, 0.0f,
-            deg_bam, 2 * deg_bam, 4 * deg_bam, pose);
+    player_view_compose_camera(v, position, anchor, true, nullptr, false,
+            90.0f, 0.0f, deg_bam, 2 * deg_bam, 4 * deg_bam, pose);
     CHECK(!pose.third_person);
     CHECK(near_eq(pose.yaw_deg, 90.0f));
     CHECK(near_eq(pose.pitch_deg, 2.0f, 0.01f)); // twice the 1-deg accumulator
@@ -359,14 +361,69 @@ void test_compose_camera_first_person() {
 
     // The floor: an anchor below position + 0.125 clamps up [orig: @ 0x4b6b98].
     const float low_anchor[3] = {10.0f, 20.0f, 5.0f};
-    player_view_compose_camera(v, position, low_anchor, true, 0.0f, 0.0f, 0, 0,
-            0, pose);
+    player_view_compose_camera(v, position, low_anchor, true, nullptr, false,
+            0.0f, 0.0f, 0, 0, 0, pose);
     CHECK(near_eq(pose.eye[2], 5.125f, 0.001f));
 
     // No anchor: the non-person +1.0 bump over position [orig: @ 0x437e8f].
-    player_view_compose_camera(v, position, position, false, 0.0f, 0.0f, 0, 0,
-            0, pose);
+    player_view_compose_camera(v, position, position, false, nullptr, false,
+            0.0f, 0.0f, 0, 0, 0, pose);
     CHECK(near_eq(pose.eye[2], 6.0f, 0.001f));
+}
+
+// The D-INF-18 terrain floor [orig: Entity_UpdateInfantryPlayerBody
+// @ 0x4b6c08..0x4b6ca4]: five bilinear samples (eye column + 0.25u along each
+// ground axis), each + 0.0625, max-folded into a floor on the head-bone eye Z —
+// skipped indoors, and never applied on the non-person bump path.
+void test_compose_camera_terrain_floor() {
+    // A flat 512x512 identity atlas at 8.0 world units (raw16 = units * 256) —
+    // the tests/world/ground_height_test.cpp wiring: all sector cells id 1, so
+    // world (x, z) indexes the atlas directly and one texel is one world unit.
+    constexpr int kDim = 512;
+    std::vector<uint16_t> heightmap(kDim * kDim, 8 * 256);
+    std::vector<int> sector_grid(256, 1);
+    opennova::terrain::TerrainHeightField field;
+    field.heightmap = heightmap.data();
+    field.dim = kDim;
+    field.layout.sector_grid = sector_grid.data();
+    field.layout.origin_x = 0;
+    field.layout.origin_y = 0;
+
+    PlayerViewState v;
+    // Mission y = -4 samples atlas z = +4 (the engine-y -> atlas-z negation).
+    const float position[3] = {100.0f, -4.0f, 5.0f};
+    const float anchor[3] = {100.0f, -4.0f, 6.6f}; // below terrain 8.0
+    PlayerCameraPose pose;
+    player_view_compose_camera(v, position, anchor, true, &field, false,
+            0.0f, 0.0f, 0, 0, 0, pose);
+    // yaw 0 pitch 0: fwd = (0, 1, 0); the pull-back rides Y, the Z is the
+    // floored eye = 8.0 + 0.0625.
+    CHECK(near_eq(pose.eye[2], 8.0625f, 0.001f));
+
+    // INDOORS skips the floor [orig: the Flags & 0x800000 gate @ 0x4b6c08].
+    player_view_compose_camera(v, position, anchor, true, &field, true,
+            0.0f, 0.0f, 0, 0, 0, pose);
+    CHECK(near_eq(pose.eye[2], 6.6f, 0.001f));
+
+    // An eye already above the floored height passes through untouched.
+    const float high_anchor[3] = {100.0f, -4.0f, 9.5f};
+    player_view_compose_camera(v, position, high_anchor, true, &field, false,
+            0.0f, 0.0f, 0, 0, 0, pose);
+    CHECK(near_eq(pose.eye[2], 9.5f, 0.001f));
+
+    // The non-person bump path has no terrain leg [orig: the fallback branch
+    // @ 0x4b6b92 stores its offset with only the 0x2000 floor].
+    player_view_compose_camera(v, position, position, false, &field, false,
+            0.0f, 0.0f, 0, 0, 0, pose);
+    CHECK(near_eq(pose.eye[2], 6.0f, 0.001f));
+
+    // The neighbor probes: a ridge one column to +X raises the floor through
+    // the +0.25 probe's bilinear tap — the max fold over the five samples.
+    // Column x=101 at 24.0u: probe x=100.25 -> 8 + (24-8)*0.25 = 12.0.
+    for (int z = 0; z < kDim; ++z) heightmap[z * kDim + 101] = 24 * 256;
+    player_view_compose_camera(v, position, anchor, true, &field, false,
+            0.0f, 0.0f, 0, 0, 0, pose);
+    CHECK(near_eq(pose.eye[2], 12.0625f, 0.001f));
 }
 
 // The TP leg: the chased anchor wins over the live eye, the pivot nudges
@@ -383,7 +440,8 @@ void test_compose_camera_third_person() {
     const float anchor[3] = {9.0f, 9.0f, 9.0f}; // must be ignored
     PlayerCameraPose pose;
     const int32_t deg_bam = 11930465;
-    player_view_compose_camera(v, position, anchor, true, 0.0f, 0.0f,
+    player_view_compose_camera(v, position, anchor, true, nullptr, false,
+            0.0f, 0.0f,
             deg_bam /* recoil must not leak into TP */, deg_bam, deg_bam, pose);
     CHECK(pose.third_person);
     CHECK(near_eq(pose.pitch_deg, kTpOrbitPitchDeg));
@@ -429,6 +487,7 @@ int main() {
     test_unscope_on_move_and_up_refusal();
     test_tp_effective_distance_march();
     test_compose_camera_first_person();
+    test_compose_camera_terrain_floor();
     test_compose_camera_third_person();
     test_bias_view_units();
     if (failures == 0) std::printf("player_view_test: all passed\n");

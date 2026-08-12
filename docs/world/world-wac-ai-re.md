@@ -501,14 +501,20 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     our port gates on alive/prone/airborne only (the modeled equivalents of 0x2/0x2000).
     The seated (`+0x168 == 1`) ±0x1400000 ramp variant [orig: `@0x4b66b5`] rides the
     mounting slice. `infantry_lean_tick` / `player_body_select`.
-  - **D-INF-18** the FP eye's terrain clamp and the remote CameraOffset approximation
-    unported. The local head-bone eye is sampled binding-side from the render skeleton (the
-    structural translation of the `@0x4b6bb3` bone path, floored at Position + 0.125
-    [orig min `0x2000 @0x4b6b98`]); the original additionally floors it at
-    `max(4 terrain samples ±0x4000) + 0x1000` unless `Flags & 0x800000` [orig:
-    `@0x4b6c1c-0x4b6c97`], and remote players take the capsule-height trig path
-    [orig: `@0x4b6984`]. The camera's `torsoRoll(+0x2DC)` and `2·pitchBlend(+0x380)`
-    terms are also unported (their producers are open). `local_player_presenter.gd`.
+  - **D-INF-18** the remote CameraOffset approximation unported; the FP eye's terrain
+    clamp FIXED 2026-08-12. The local head-bone eye is sampled binding-side from the
+    render skeleton (the structural translation of the `@0x4b6bb3` bone path, floored at
+    Position + 0.125 [orig min `0x2000 @0x4b6b98`]); the original's FIVE-sample terrain
+    floor — the eye column plus ±0x4000 along each ground axis, each sample + 0x1000,
+    max-folded onto the eye Z unless `Flags & 0x800000` (indoors — the heightmap has no
+    interiors) [orig: `@0x4b6c08-0x4b6ca4`; sampler `Terrain_SampleHeightBilinear
+    @0x6067b0`] — is now ported as `world::player_view_floor_eye_to_terrain`
+    (terrain_query seam), applied inside `player_view_compose_camera`'s head-bone path
+    AND on the third-person anchor-chase feed (retail floors the one CameraOffset both
+    consumers read), pinned by `player_view_test::test_compose_camera_terrain_floor`.
+    Remote players still take the capsule-height trig path [orig: `@0x4b6984`]. The
+    camera's `torsoRoll(+0x2DC)` and `2·pitchBlend(+0x380)` terms are also unported
+    (their producers are open). `local_player_presenter.gd`.
   - **D-INF-19** the slope pass's conform selector dropped by the port — FIXED 2026-07-13.
     The dump-based port applied the slope lean+slide to EVERY live body and wrote the look
     pitch (`+0x14`) instead of `bodyPitch(+0x90)`, so a standing local player's Roll chased

@@ -211,11 +211,19 @@ void Simulation::tick_local_player_view() {
 	// [orig: ThirdPersonCamera_Update @ 0x437b70..76], fed by the host's per-frame
 	// skeleton sample (see local_weapon_.eye_mission). Without a sample: Position + 1.0,
 	// the witnessed NON-person bump [orig: @ 0x437e8f].
-	const float eye[3] = {
+	float eye[3] = {
 		local_weapon_.eye_valid ? local_weapon_.eye_mission[0] : e->position.x,
 		local_weapon_.eye_valid ? local_weapon_.eye_mission[1] : e->position.y,
 		local_weapon_.eye_valid ? local_weapon_.eye_mission[2] : e->position.z + 1.0f,
 	};
+	// The chase target inherits the CameraOffset terrain floor: retail's
+	// producer floors the head-bone eye before the store the chase reads
+	// (D-INF-18; the witnessed walk lives in world::player_view_floor_eye_to_terrain).
+	if (local_weapon_.eye_valid) {
+		opennova::world::player_view_floor_eye_to_terrain(
+				world_->ai != nullptr ? world_->ai->terrain : nullptr,
+				(e->flags & opennova::world::kEntityFlagIndoors) != 0, eye);
+	}
 	opennova::world::player_view_tick(player_view_, eye);
 }
 
@@ -314,7 +322,10 @@ Dictionary Simulation::get_local_player_view() const {
 				opennova::world::PlayerCameraPose pose;
 				opennova::world::player_view_compose_camera(player_view_,
 						position, local_weapon_.eye_mission,
-						local_weapon_.eye_valid, aim_yaw, aim_pitch,
+						local_weapon_.eye_valid,
+						world_->ai != nullptr ? world_->ai->terrain : nullptr,
+						(e->flags & opennova::world::kEntityFlagIndoors) != 0,
+						aim_yaw, aim_pitch,
 						p->inf.recoil_pitch, p->inf.torso_roll,
 						p->inf.lean_angle, pose);
 				out["camera_pose_valid"] = true;
