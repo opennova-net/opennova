@@ -168,15 +168,14 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 		# CRC'd from the loose expansion/<name>/version.txt under the install root;
 		# the join gate compares it against each joiner's VERSIONCRCSTRING while an
 		# expansion is active (D-NET-166).
-		var host_resource_root: ResourceRoot = options.get("resource_root")
-		if host_resource_root != null:
-			session_options["game_root"] = host_resource_root.get_root_dir()
+		var session_resource_root: ResourceRoot = options.get("resource_root")
+		if session_resource_root != null:
+			session_options["game_root"] = session_resource_root.get_root_dir()
 		_sim.configure_host_session(session_options)
 		# Retail builds the active game-type score table, then overlays the loose
 		# VERSION 40 score.ini before answering C2S 0x2D with S2C 0x58. This
 		# caller is explicitly loose-first even in a packed runtime: retail opens
 		# score.ini from the game directory rather than resolving it from a PFF.
-		var session_resource_root: ResourceRoot = options.get("resource_root")
 		if session_resource_root != null:
 			var score_ini_bytes := session_resource_root.read_file(
 					"score.ini", ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST)
