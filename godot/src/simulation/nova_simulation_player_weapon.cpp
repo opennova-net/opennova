@@ -477,6 +477,10 @@ Dictionary Simulation::get_local_player_weapon_state() const {
 			? static_cast<int64_t>(world_->logic_tick - w.power_throw_start_tick)
 			: static_cast<int64_t>(0);
 	out["fired_serial"] = static_cast<int64_t>(w.fired_serial);
+	// The per-slot tracer cadence byte (retail weaponSlot+0x80): each weapon
+	// keeps its own phase across switches — the F3 weapon row shows it.
+	out["tracer_counter"] =
+			static_cast<int64_t>(active_slot.tracer_shot_counter);
 	out["dry_serial"] = static_cast<int64_t>(w.dry_serial);
 	out["reload_serial"] = static_cast<int64_t>(w.reload_serial);
 	out["reload_applied_serial"] =

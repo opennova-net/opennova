@@ -8,6 +8,8 @@ extends DebugPage
 ## DebugViewContext so the file reproduces the visual viewpoint, not just
 ## the player root.
 
+const BAM_TO_DEG := 360.0 / 4294967296.0
+
 var _player_mission_label: Label
 var _player_position_label: Label
 var _player_orientation_label: Label
@@ -157,6 +159,36 @@ func _clear_live() -> void:
 	_player_dump_status.text = "Start a playable mission to capture the local player."
 
 
+## The local player's stance and water classification — the same facts the
+## recoil, spread, and aimed-shot gates read, so the panel explains what the
+## sim decided rather than re-deriving its own verdict.
+func _append_body_details(sim: Object, combat: PackedStringArray) -> void:
+	var body: Dictionary = sim.get_local_player_body_debug()
+	if body.is_empty():
+		return
+	var stance := int(body.get("stance", 0))
+	var stance_names := PackedStringArray(["standing", "crouched", "prone"])
+	var posture: String = stance_names[mini(stance, 2)]
+	if bool(body.get("in_air", false)):
+		posture += ", airborne"
+	if bool(body.get("drowning", false)):
+		posture += ", swimming"
+	combat.append("Posture: %s | eye %.2f (body %.2f + eye height %.2f)" % [
+		posture,
+		float(body.get("eye_z", 0.0)),
+		float(body.get("body_z", 0.0)),
+		float(body.get("eye_height", 0.0))])
+	var water := "Water: none on this mission"
+	if bool(body.get("water_authored", false)):
+		water = "Water: plane %.2f | %s" % [
+			float(body.get("water_z", 0.0)),
+			"eyes under water" if bool(body.get("eye_below_water", false))
+					else "eyes above water"]
+	water += " | fire counts as underwater: %s" \
+			% ("yes" if bool(body.get("submerged", false)) else "no")
+	combat.append(water)
+
+
 func _info_label(node_name: String) -> Label:
 	var label := Label.new()
 	label.name = node_name
@@ -288,9 +320,17 @@ func _refresh_player_details() -> void:
 		combat.append("State: phase %d | Animation: %s" % [
 			int(weapon.get("phase", 0)), String(weapon.get("anim_key", "")),
 		])
-		combat.append("Events: shot %d | reload %d" % [
+		combat.append("Events: shot %d | reload %d | tracer count %d" % [
 			int(weapon.get("fired_serial", 0)),
-			int(weapon.get("reload_serial", 0))])
+			int(weapon.get("reload_serial", 0)),
+			int(weapon.get("tracer_counter", 0))])
+		var spread_row := int(weapon.get("hud_spread_row", 0))
+		combat.append("Recoil: %.2f deg | sway %.2f deg | crosshair row %d | spread %.3f" % [
+			float(weapon.get("recoil_pitch_bam", 0)) * BAM_TO_DEG,
+			float(weapon.get("weapon_weight_spread_bam", 0)) * BAM_TO_DEG,
+			spread_row,
+			float(weapon.get("hud_spread_fp16", 0)) / 65536.0])
+	_append_body_details(sim, combat)
 	_set_optional_text(_player_combat_label, "\n".join(combat))
 
 	var inventory_lines := PackedStringArray()

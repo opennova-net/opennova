@@ -147,6 +147,7 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_local_player_body_anim_slot"), &Simulation::get_local_player_body_anim_slot);
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_key"), &Simulation::get_local_player_anim_key);
 	ClassDB::bind_method(D_METHOD("get_local_player_stance"), &Simulation::get_local_player_stance);
+	ClassDB::bind_method(D_METHOD("get_local_player_body_debug"), &Simulation::get_local_player_body_debug);
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_phase_ticks"), &Simulation::get_local_player_anim_phase_ticks);
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_source_key"), &Simulation::get_local_player_anim_source_key);
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_source_phase_ticks"), &Simulation::get_local_player_anim_source_phase_ticks);
@@ -351,6 +352,7 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_collision_debug"), &Simulation::get_collision_debug);
 	ClassDB::bind_method(D_METHOD("get_occlusion_debug"), &Simulation::get_occlusion_debug);
 	ClassDB::bind_method(D_METHOD("get_round_debug"), &Simulation::get_round_debug);
+	ClassDB::bind_method(D_METHOD("get_throwable_debug"), &Simulation::get_throwable_debug);
 	ClassDB::bind_method(D_METHOD("get_throwable_visuals"), &Simulation::get_throwable_visuals);
 	ClassDB::bind_method(D_METHOD("debug_spawn_round", "from_godot", "dir_godot", "ammo_name"),
 	                     &Simulation::debug_spawn_round);

@@ -346,6 +346,44 @@ int Simulation::get_local_player_stance() const {
 	return static_cast<int>(p->inf.stance);
 }
 
+Dictionary Simulation::get_local_player_body_debug() const {
+	// Read-only F3 card for the local player's water/eye classification — the
+	// exact terms the recoil/spread/aimed-shot gates consume (the shared
+	// world::entity_eye_below_water witness), so the panel explains the
+	// verdict instead of re-deriving one.
+	Dictionary d;
+	if (!world_ || !world_->cached.local_player.valid()) return d;
+	const opennova::world::Entity *local =
+			world_->registry.get(world_->cached.local_player);
+	if (local == nullptr) return d;
+	const AiEntity *body =
+			world_->ai != nullptr
+					? world_->ai->for_handle(world_->cached.local_player)
+					: nullptr;
+	const int32_t body_z = body != nullptr
+			? body->pos[2]
+			: opennova::world::to_fixed(local->position.z);
+	const uint32_t flags = local->flags | local->engine_flags;
+	const bool drowning =
+			(flags & opennova::world::kEntityFlagDrowning) != 0;
+	const bool eye_below = opennova::world::entity_eye_below_water(
+			*world_, body_z, local->eye_offset_z);
+	constexpr double kQ16 = 65536.0;
+	d["body_z"] = static_cast<double>(body_z) / kQ16;
+	d["eye_height"] = static_cast<double>(local->eye_offset_z) / kQ16;
+	d["eye_z"] =
+			static_cast<double>(body_z + local->eye_offset_z) / kQ16;
+	d["water_authored"] = world_->env.water_z != 0;
+	d["water_z"] = static_cast<double>(world_->env.water_z) / kQ16;
+	d["drowning"] = drowning;
+	d["eye_below_water"] = eye_below;
+	d["submerged"] = drowning || eye_below;
+	d["in_air"] = (body != nullptr && body->inf.airborne) ||
+			(flags & opennova::world::kEntityFlagInAir) != 0;
+	d["stance"] = get_local_player_stance();
+	return d;
+}
+
 int Simulation::get_local_player_anim_phase_ticks() const {
 	if (!world_ || !world_->ai || !world_->cached.local_player.valid()) return 0;
 	const AiEntity *p = world_->ai->for_handle(world_->cached.local_player);
