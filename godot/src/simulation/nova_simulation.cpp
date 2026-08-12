@@ -264,7 +264,7 @@ void Simulation::apply_root_motion_to_ai() {
 opennova::mission::PromoteOptions Simulation::promote_options() const {
 	opennova::mission::PromoteOptions opts;
 	opts.item_seat_specs = item_seat_specs_;
-	opts.ai_profile_speeds = ai_profile_speeds_;
+	opts.ai_profiles = ai_profiles_;
 	// Authored display names from the installed mission text's [PeopleNames]
 	// STRNAME%03i entries (the boot installs the table before load_mission
 	// runs). Promote applies the retail 15-char copy at its cited port site.
@@ -553,15 +553,15 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 		}
 		install_native_seat_specs(p_item_db, seeds);
 	};
-	steps.install_ai_profile_speeds = [&] {
+	steps.install_ai_profiles = [&] {
 		// The native .aip resolve (runtime_boot). Assigning an empty row set
 		// clears the retained table, exactly like the shell resolver's empty
 		// dictionary did through set_ai_profile_speeds.
-		ai_profile_speeds_ = p_mission.is_valid()
-				? ms::resolve_ai_profile_speeds(
+		ai_profiles_ = p_mission.is_valid()
+				? ms::resolve_ai_profiles(
 						  files, p_mission->native_document().bms_file())
-				: std::vector<ms::PromoteOptions::AiProfileSpeeds>{};
-		boot_debug_.aip_rows = ai_profile_speeds_;
+				: std::vector<ms::PromoteOptions::AiProfileRow>{};
+		boot_debug_.aip_rows = ai_profiles_;
 	};
 	steps.install_terrain_til = [&] { set_terrain_til_data(p_terrain_til); };
 	steps.install_mission_text = [&] {
@@ -666,11 +666,11 @@ Dictionary Simulation::get_mission_boot_debug() const {
 	out["text_size"] = boot_debug_.text_size;
 	out["infantry_adm"] = String(boot_debug_.infantry_adm.c_str());
 	Dictionary aip;
-	for (const opennova::mission::PromoteOptions::AiProfileSpeeds &row :
+	for (const opennova::mission::PromoteOptions::AiProfileRow &row :
 			boot_debug_.aip_rows) {
 		Dictionary speeds;
-		if (row.patrol_speed != -1) speeds["patrol"] = row.patrol_speed;
-		if (row.combat_speed != -1) speeds["combat"] = row.combat_speed;
+		if (row.data.patrol_speed != -1) speeds["patrol"] = row.data.patrol_speed;
+		if (row.data.combat_speed != -1) speeds["combat"] = row.data.combat_speed;
 		aip[String(row.profile.c_str())] = speeds;
 	}
 	out["aip"] = aip;

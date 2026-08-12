@@ -380,7 +380,7 @@ void Simulation::refresh_item_seat_spec(
 }
 
 // (set_ai_profile_speeds retired with S9b: the .aip resolve is native in
-// mission::resolve_ai_profile_speeds, driven by boot_mission.)
+// mission::resolve_ai_profiles, driven by boot_mission.)
 
 void Simulation::finalize_installed_seat_specs() {
 	// Lookup table, ordered for the binary search in item_seat_spec_for_type —

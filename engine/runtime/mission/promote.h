@@ -19,6 +19,8 @@
 #include <cstdint>
 #include <vector>
 
+#include <aip/aip.h>
+
 #include "mission/bms.h"
 #include "world/entity.h"
 #include "world/geom.h"
@@ -99,23 +101,23 @@ struct PromoteOptions {
     // pass the extracted seat list here before promotion.
     std::vector<ItemSeatSpec> item_seat_specs;
 
-    // The two witnessed .aip profile speeds, keyed by the BMS ai_textfile (name2,
-    // ASCII case-insensitive, no extension) — raw authored values; the brain seed
-    // applies the parse scale x65536/225 (1000 x 1/225000 x 65536, truncated).
-    // Hosts that can read loose/PFF .aip files pass them here before promotion;
-    // entities whose profile is absent keep the default_speed stand-in (the rest
-    // of the profile parse remains D-AI-11 h).
-    // [orig: AIProfile_ParseProperty "patrol_speed" -> profile+0xC0
-    //  @0x45E6DF..0x45E717 / "combat_speed" -> profile+0xC4 (shared scale);
+    // The parsed .aip profiles, keyed by the BMS ai_textfile (name2, ASCII
+    // case-insensitive, no extension). The parse (engine/formats/aip) carries
+    // the witnessed GROUND-type set — speeds stay raw authored values; the
+    // brain seed applies the x65536/225 scale (1000 x 1/225000 x 65536,
+    // truncated). Hosts that can read loose/PFF .aip files pass rows here
+    // before promotion; entities whose profile is absent keep the
+    // default_speed stand-in.
+    // [orig: AIProfile_ParseProperty @0x45de70 ("patrol_speed" -> profile+0xC0,
+    //  "combat_speed" -> profile+0xC4, the GROUND weapon blocks +120/+152);
     //  Entity_InitVehicleAIFromDef seeds brain[49] = profile+0xC4 and
     //  brain[50] = profile+0xC0 @0x4688C7/@0x4688D3, profile name = the slot
     //  ai_textfile, def-level fallback itemDef+0x8B8, then "helo1"]
-    struct AiProfileSpeeds {
-        std::string profile;       // ai_textfile, lowercase
-        int32_t patrol_speed = -1; // raw .aip value; -1 = unauthored
-        int32_t combat_speed = -1;
+    struct AiProfileRow {
+        std::string profile; // ai_textfile, lowercase
+        aip::Profile data;
     };
-    std::vector<AiProfileSpeeds> ai_profile_speeds;
+    std::vector<AiProfileRow> ai_profiles;
 
     // The record's name_index -> mission-RTXT [PeopleNames] STRNAME%03i display
     // name (empty = no entry; index 0 never resolves). The embedder builds this

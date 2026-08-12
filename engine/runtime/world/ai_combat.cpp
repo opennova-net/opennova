@@ -283,6 +283,163 @@ bool AiSystem::fire_ai_round(World &world, AiEntity &e, const int32_t origin[3],
     return true;
 }
 
+// The SM/turret fire-transform solve — the D-AI-2 core, ported as a structural
+// translation of Entity_ComputeWeaponFireTransform_0 @0x456980 (the record's old
+// 0x455b30 address was a transcription slip). Deviations, each bounded and cited
+// in place: our world model carries no SM muzzle bone lists (brain+224/+292 stay
+// unfilled), so the muzzle always takes the witnessed EMPTY-LIST leg; the solve
+// frame is yaw-only because AiEntity carries no pitch/roll (retail inverts the
+// full entity matrix — level shooters are identical); the §17.2 ctx range legs
+// stay with the acquire-time gates (D-AI-1's ctx model); and the per-type turret
+// CTRL diagnostic globals (dword_83FE88/dword_83FEE0 pairs @0x456E33/0x456F9C)
+// are unported — their consumer is the D-3DI-2 bus.
+bool AiSystem::solve_weapon_fire_transform(World &world, AiEntity &e, const Entity *target,
+                                           const AiProfile::WeaponFire &wb, int32_t aim_offset,
+                                           bool skip_los, int32_t out[6]) {
+    AiBrain &b = e.brain;
+    const uint32_t flags = wb.flags;
+
+    // Head gate [orig: @0x4569B2 — (weaponDef+16 & 0x18) == 0 && no target -> 0].
+    if ((flags & 0x18u) == 0 && target == nullptr) return false;
+    b.bytes()[AiBrain::kBoneFlagByte] = 0; // [orig: @0x4569D5]
+
+    // Muzzle origin + frame pre-seed. The empty-bone-list leg: entity position
+    // with +2.0u Z [orig: @0x456B03 out[2] += 0x20000]; angles pre-seeded from
+    // the entity (the call sites copy entity+4..+0x18 into the out block), then
+    // the def yaw bias [orig: @0x456B1C out[3] += weaponDef+0x14].
+    out[0] = e.pos[0];
+    out[1] = e.pos[1];
+    out[2] = e.pos[2] + 0x20000;
+    out[3] = e.heading + wb.facing_bam;
+    out[4] = 0; // AiEntity carries no pitch/roll — retail seeds the live values
+    out[5] = 0;
+
+    // The WEAPON_PITCHLOCKED legs fire at a fixed/commanded elevation with no
+    // target solve, no cone gate, and no slew [orig: @0x45705D].
+    if ((flags & 0x10u) != 0 || (flags & 0x8u) != 0) {
+        if ((flags & 0x10u) != 0)
+            out[4] += static_cast<int32_t>(0xE0000020u); // -45 deg-ish [orig: @0x457061]
+        else
+            out[4] += b.f[AiBrain::kElevationBias]; // [orig: @0x45706A brain+0x314]
+        if ((flags & 0x1u) != 0) {
+            // WEAPON_TURRET staging: stage the pose, mirror the yaw, snap active
+            // [orig: @0x45707D..0x457113; the current-pose muzzle refine behind
+            // it needs the model handle our no-list leg never has — retail
+            // returns 1 right there too].
+            for (int i = 0; i < 6; ++i) b.f[AiBrain::kStagingBlock + i] = out[i];
+            b.f[AiBrain::kStagingBlock + 3] = -1 - out[3] - wb.facing_bam; // [orig: @0x4570B3]
+            for (int i = 0; i < 6; ++i)
+                b.f[AiBrain::kActiveBlock + i] = b.f[AiBrain::kStagingBlock + i];
+        }
+        return true;
+    }
+
+    // The aim solve. Target aim point = the target's fire origin [orig:
+    // Entity_ValidateWeaponTarget @0x53a400 runs Entity_ComputeWeaponFireOrigin
+    // on the TARGET; our entities carry no muzzle bones, so the raw position
+    // stands in — the same D-AI-6 seam as the LOS endpoints], plus the caller's
+    // aim offset rotated by the shooter yaw [orig: sub_6158F0 @0x456C59 —
+    // R_yaw(entity+0x10) * (distance, 0, 0) added to the target position and
+    // restored after the solve].
+    if (target == nullptr) return false;
+    int32_t aim[3] = {static_cast<int32_t>(target->position.x * 65536.0f),
+                      static_cast<int32_t>(target->position.y * 65536.0f),
+                      static_cast<int32_t>(target->position.z * 65536.0f)};
+    if (aim_offset != 0) {
+        const double theta = static_cast<double>(e.heading) / kBamPerRadian;
+        aim[0] += static_cast<int32_t>(std::cos(theta) * static_cast<double>(aim_offset));
+        aim[1] += static_cast<int32_t>(std::sin(theta) * static_cast<double>(aim_offset));
+    }
+
+    // Relative yaw/pitch in the biased shooter frame + the witnessed integer
+    // horizontal-distance recipe [orig: compute_relative_position_metrics
+    // @0x545710 — sq(v) = ((v>>8)*(v>>8)+0x8000)>>16, hdist = sqrt<<16, pitch =
+    // atan2(z, hdist)*2^31/pi, yaw = atan2(y, x)*2^31/pi]. With the yaw-only
+    // frame the relative yaw is the world bearing minus the frame yaw.
+    const int32_t rx = aim[0] - out[0];
+    const int32_t ry = aim[1] - out[1];
+    const int32_t rz = aim[2] - out[2];
+    const int64_t sqx = ((static_cast<int64_t>(rx >> 8) * (rx >> 8)) + 0x8000) >> 16;
+    const int64_t sqy = ((static_cast<int64_t>(ry >> 8) * (ry >> 8)) + 0x8000) >> 16;
+    const int32_t hdist = static_cast<int32_t>(
+                                  std::sqrt(static_cast<double>(sqx + sqy)))
+                          << 16;
+    const int32_t rel_yaw = bearing_bam(ry, rx) - out[3];
+    const int32_t rel_pitch = static_cast<int32_t>(
+            std::atan2(static_cast<double>(rz), static_cast<double>(hdist)) * kBamPerRadian);
+
+    // LOS unless the caller defers it [orig: the ctx 0x8000 defer-LOS bit from
+    // arg 7 @0x456BD5; Entity_ValidateWeaponTarget's Physics_RaycastTerrainAndSectors
+    // leg @0x53a400 tail].
+    if (!skip_los && !line_of_sight_clear(world, out, aim, e.handle, target->handle))
+        return false;
+
+    // The cone gate: |relative angle| in 1/256-turn units vs the def cone with a
+    // floor of 1 [orig: @0x456D17..0x456D6B — HIBYTE fold, limit =
+    // (weaponDef+8 | 0x2000000) >> 25].
+    const int32_t limit = (wb.cone_bam | 0x2000000) >> 25;
+    uint32_t yaw_mag = static_cast<uint32_t>(rel_yaw) >> 24;
+    if (yaw_mag >= 0x80u) yaw_mag = 256u - yaw_mag;
+    if (yaw_mag > static_cast<uint32_t>(limit)) return false;
+    uint32_t pitch_mag = static_cast<uint32_t>(rel_pitch) >> 24;
+    if (pitch_mag >= 0x80u) pitch_mag = 256u - pitch_mag;
+    if (pitch_mag > static_cast<uint32_t>(limit)) return false;
+
+    // Compose back to world angles [orig: Math_BuildFixedPointRotationMatrixYXZ
+    // multiplies R(relYaw, relPitch) INTO the entity frame matrix @0x456CE5,
+    // then Math_FixedPointMatrixToEulerAngles re-extracts @0x456CFA — for a
+    // yaw-only level frame that is heading + relYaw / relPitch exactly. The
+    // authored facing bias cancels out of the final yaw by that composition
+    // (frame built pre-bias, relative solved post-bias).]
+    out[3] = e.heading + rel_yaw;
+    out[4] = rel_pitch;
+    out[5] = 0;
+
+    if ((flags & 0x1u) == 0) return true; // no turret tracking [orig: @0x456D71 -> ret 1]
+
+    // WEAPON_TURRET staging [orig: @0x456D7B]: {hdist, ?, dist, yaw, pitch, ?},
+    // staged yaw mirrored minus the def bias [orig: @0x456DB7 -1 - yaw - def+0x14].
+    const int64_t sqz = ((static_cast<int64_t>(rz >> 8) * (rz >> 8)) + 0x8000) >> 16;
+    const int32_t dist = static_cast<int32_t>(
+                                 std::sqrt(static_cast<double>(sqx + sqy + sqz)))
+                         << 16;
+    b.f[AiBrain::kStagingBlock + 0] = hdist;
+    b.f[AiBrain::kStagingBlock + 1] = 0;
+    b.f[AiBrain::kStagingBlock + 2] = dist;
+    b.f[AiBrain::kStagingBlock + 3] = -1 - rel_yaw - wb.facing_bam;
+    b.f[AiBrain::kStagingBlock + 4] = rel_pitch;
+    b.f[AiBrain::kStagingBlock + 5] = 0;
+
+    const auto snap_active = [&] {
+        for (int i = 0; i < 6; ++i)
+            b.f[AiBrain::kActiveBlock + i] = b.f[AiBrain::kStagingBlock + i];
+    };
+
+    if ((flags & 0x2u) == 0 && (flags & 0x4u) == 0) {
+        snap_active(); // instant turret [orig: @0x456DDC]
+        return true;
+    }
+
+    // WEAPON_SLOW / WEAPON_FAST slew toward the staged yaw. Aligned when the
+    // remaining delta is under one step's threshold; otherwise advance the
+    // ACTIVE yaw by the fixed slew step and hold fire [orig: SLOW @0x456E52 —
+    // threshold step*0x18C6318, slew +-0x2108421; FAST @0x456EF9 — exactly
+    // double, threshold step*0x318C631, slew +-0x4210842].
+    const int32_t staged = b.f[AiBrain::kStagingBlock + 3];
+    const int32_t active = b.f[AiBrain::kActiveYaw];
+    const int32_t delta = staged - active;
+    const bool fast = (flags & 0x4u) != 0 && (flags & 0x2u) == 0;
+    const int32_t threshold =
+            b.f[AiBrain::kStep] * (fast ? 0x318C631 : 0x18C6318);
+    if (iabs32(delta) < threshold) {
+        snap_active();
+        return true;
+    }
+    const int32_t slew = fast ? 0x4210842 : 0x2108421;
+    b.f[AiBrain::kActiveYaw] = active + (delta > 0 ? slew : -slew);
+    return false;
+}
+
 // The engagement block [orig: @0x4677b3..0x4678b2]: the sees quad, Entity_SetAITarget,
 // reset the combat timer, set the fire-delay with the exact PRNG jitter (the
 // has_controller branch guards the jitter by base-delay and uses the inline LCG; the
@@ -325,13 +482,33 @@ void AiSystem::engage_target(World &world, AiEntity &e, const AiTarget &t) {
     rel_ops.push_back({kRelSpotted, e.net_id, t.net_id});
 }
 
-// [orig: AI_HandleCommand @0x465770] command dispatcher (cases 6..0x16). Deferred to the
-// AI-command phase. The combat event types (1/3/4) are not commands, so the original returns 0
-// for them and the event switch proceeds; this faithfully returns false.
-bool AiSystem::ai_handle_command(AiEntity &, const AiEventEntry &ev) {
+// [orig: AI_HandleCommand @0x465770] command dispatcher (cases 6..0x16). The two
+// SM-weapon commands are ported; the rest stay deferred to the AI-command phase.
+// The combat event types (1/3/4) are not commands, so the original returns 0 for
+// them and the event switch proceeds; this faithfully returns false.
+bool AiSystem::ai_handle_command(AiEntity &e, const AiEventEntry &ev) {
     int32_t t = ev.type();
-    if (t >= 6 && t <= 0x16) ++unported_calls; // a real command would be handled by the AI-command phase
-    return false;
+    switch (t) {
+    case 0x15: // stationary weapons-free [orig: @0x4659A7 — arg 0 clears byte
+               // +785; nonzero pushes the type's combat state (GROUND -> 17,
+               // HELO -> 8) into pending when different, then sets it 1]
+        if (ev.f[3] != 0) {
+            if (e.brain.f[AiBrain::kCurState] != kAiGroundCombat)
+                e.brain.set_pend(kAiGroundCombat); // the HELO(8) leg rides the HELO SM port
+            e.brain.bytes()[AiBrain::kGuardFireByte] = 1;
+        } else {
+            e.brain.bytes()[AiBrain::kGuardFireByte] = 0;
+        }
+        return true;
+    case 0x16: // commanded elevation, degrees -> BAM32 [orig: @0x4659EF —
+               // brain+0x314 = arg * 11930464; the solver's WEAPON_PITCHLOCKED leg]
+        e.brain.f[AiBrain::kElevationBias] =
+                static_cast<int32_t>(ev.f[3] * kBamPerDegreeInt);
+        return true;
+    default:
+        if (t >= 6 && t <= 0x16) ++unported_calls; // handled by the AI-command phase
+        return false;
+    }
 }
 
 } // namespace opennova::world

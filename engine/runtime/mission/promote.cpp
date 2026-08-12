@@ -196,19 +196,56 @@ void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, 
         const auto lower = [](char c) {
             return (c >= 'A' && c <= 'Z') ? static_cast<char>(c + 32) : c;
         };
-        for (const PromoteOptions::AiProfileSpeeds &ps : opts.ai_profile_speeds) {
+        for (const PromoteOptions::AiProfileRow &ps : opts.ai_profiles) {
             if (ps.profile.size() != n2len) continue;
             bool match = true;
             for (size_t i = 0; i < n2len; ++i) {
                 if (lower(ps.profile[i]) != lower(e.name2[i])) { match = false; break; }
             }
             if (!match) continue;
-            if (ps.combat_speed >= 0)
+            if (ps.data.combat_speed >= 0)
                 b.f[AiBrain::kSpeedA] = static_cast<int32_t>(
-                        (static_cast<int64_t>(ps.combat_speed) << 16) / 225);
-            if (ps.patrol_speed >= 0)
+                        (static_cast<int64_t>(ps.data.combat_speed) << 16) / 225);
+            if (ps.data.patrol_speed >= 0)
                 b.f[AiBrain::kSpeedB] = static_cast<int32_t>(
-                        (static_cast<int64_t>(ps.patrol_speed) << 16) / 225);
+                        (static_cast<int64_t>(ps.data.patrol_speed) << 16) / 225);
+            // The GROUND weapon def blocks (profile+120/+152) + their brain
+            // seeds. The ammo COUNT seed rides the same unwitnessed spawn
+            // block-copy family as D-AI-5 (no per-field writer exists; the
+            // stationary pump reads brain[53]/[54] as the live counts of the
+            // +120/+152 capacities), so the capacities seed them here. The
+            // authored "*_weap" ammo names resolve against the loaded ammo
+            // table at the item-traits sweep [orig: AIProfile_ParseProperty
+            // @0x45de70 GROUND block; AIEntity_ProcessWeaponFire field map
+            // §17.6].
+            if (ps.data.type == 2) {
+                const auto seed_block = [](world::AiProfile::WeaponFire &dst,
+                                           const aip::WeaponBlock &src) {
+                    dst.ammo_cap = src.ammo;
+                    dst.cone_bam = src.cone_bam;
+                    dst.flags = src.flags;
+                    dst.facing_bam = src.facing_bam;
+                    dst.pitch_bam = src.pitch_bam;
+                    dst.ammo_name = src.weapon;
+                };
+                seed_block(ae.profile.fire_a, ps.data.primary);
+                seed_block(ae.profile.fire_b, ps.data.secondary);
+                ae.profile.fire_interval_a = ps.data.primary.rate_ticks;
+                ae.profile.fire_interval_b = ps.data.secondary.rate_ticks;
+                b.f[AiBrain::kAmmoA] = ps.data.primary.ammo;
+                b.f[AiBrain::kAmmoB] = ps.data.secondary.ammo;
+                // COMBAT_FLAGS is the witnessed flags100 source (ATEAM/
+                // ATEAM_LOCK/RC_FIRE ride the SM weapon dispatch).
+                ae.profile.flags100 |= static_cast<uint8_t>(ps.data.combat_flags);
+                if (ps.data.aim_skill >= 0) {
+                    // PROBABLE, not anchored: aim_skill (+28, clamped 0..4) is
+                    // the only 0..4-shaped profile field feeding the (6 -
+                    // brain[43]) scatter modulus; the spawn copy site itself
+                    // is the same unwitnessed block-copy as the ammo counts.
+                    ae.profile.accuracy = ps.data.aim_skill;
+                    b.f[AiBrain::kAccuracy] = ps.data.aim_skill;
+                }
+            }
             break;
         }
     }

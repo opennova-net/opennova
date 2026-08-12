@@ -357,6 +357,20 @@ int resolve_ai_weapons(world::World &world, const DefItemsFile &items) {
         ae->inf.magazine = static_cast<int16_t>(ae->profile.clip_size);
         ++armed;
     }
+    // The SM weapon blocks' authored ammo names (.aip "primary_weap"/
+    // "secondary_weap"), resolved against the same loaded table — retail
+    // resolves at parse time through the ammo-def registry [orig:
+    // AIProfile_ParseProperty -> AmmoDef_LookupByName -> profile+148/+180];
+    // our parse keeps the name because the table loads after promotion.
+    for (int i = 0; i < world.ai->count(); ++i) {
+        world::AiEntity *ae = world.ai->at(i);
+        if (ae == nullptr) continue;
+        for (world::AiProfile::WeaponFire *wf : {&ae->profile.fire_a, &ae->profile.fire_b}) {
+            if (wf->ammo_name.empty()) continue;
+            wf->ammo_index = world.ammo.index_of(wf->ammo_name.c_str());
+            if (wf->ammo_index >= 0) ++armed;
+        }
+    }
     return armed;
 }
 

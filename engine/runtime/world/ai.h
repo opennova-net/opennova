@@ -27,6 +27,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <string>
 #include <vector>
 
 #include "world/collision.h"
@@ -132,9 +133,33 @@ struct AiBrain {
                            // [orig: brain[52] += 65537*deltaTime @0x472e00; bytes +208/+210]
         kAmmoA = 53,       // primary ammo count [byte +212]
         kAmmoB = 54,       // secondary ammo count [byte +216]
+        kBoneCountA = 55,  // primary muzzle bone-list count [byte +220; list at +224]
+        kBoneCountB = 72,  // secondary muzzle bone-list count [byte +288; list at +292]
         kLastWeapon = 106, // 1/2 = which weapon the continuation branches re-fire [byte +424]
+        kBoneRoundRobin = 107, // seed<=0 muzzle-bone rotation counter; 0 -> -1 reseed,
+                               // slot = ctr % count, then -- [orig: brain+0x1AC @0x4569F1]
+        // ---- the turret solve blocks (Entity_ComputeWeaponFireTransform_0 @0x456980) ----
+        // Active = the live turret pose the slew legs advance; staging = the fresh
+        // solve. Layout (both): {hdist, ?, dist, yaw, pitch, ?} — yaw at +12/pitch
+        // at +16 within the block; the CTRL-global writers read the yaw/pitch high
+        // words [orig: staging @0x456D7B brain+0x1E4..0x1F8; active copy @0x456DDC
+        // brain+0x1CC..0x1E0; AI_GetSuspensionFirePoint reads brain[118]].
+        kActiveBlock = 115,  // brain+0x1CC..0x1E0 (yaw = f[118], pitch = f[119])
+        kActiveYaw = 118,    // brain+0x1D8 — the slewed live turret yaw
+        kActivePitch = 119,  // brain+0x1DC
+        kStagingBlock = 121, // brain+0x1E4..0x1F8 (yaw = f[124], pitch = f[125])
         kSweepPhase = 180, // sweep-fire lateral phase, -196608..196608 step 10918 [byte +720]
         kBurstWindow = 181,// burst window: armed to 1 on fire, += step while <= 186 [byte +724]
+        // Saved continuation solutions: out-transform minus entity pos/angles,
+        // written at each mobile solve; the burst continuation re-fires them
+        // without re-solving [orig: @0x4735F9..0x47363A primary +0x2D8, secondary
+        // +0x2F0; §17.6].
+        kSavedDeltaA = 182, // brain+0x2D8..0x2EC (pos xyz, yaw, pitch, roll deltas)
+        kSavedDeltaB = 188, // brain+0x2F0..0x304
+        kElevationBias = 197, // WEAPON_PITCHLOCKED commanded elevation, BAM32.
+                              // [orig: brain+0x314; AI_HandleCommand case 22 writes
+                              //  arg x 11930464 (deg->BAM) @0x4659EF; the solver's
+                              //  flags&8 leg adds it to pitch @0x45706A]
         // ---- part-anim channels (vehicle/emplacement parts; PLAYPARTANIM, 2 channels) ----
         // [orig: Entity_ApplyCommand @0x43ab60 case 0x22 writes comp+436 (direction) /
         // comp+444 (rate). Def defaults: Entity_CopyVehicleDefToAIComp @0x45ddf9 copies
@@ -156,6 +181,18 @@ struct AiBrain {
         kGuard = 144,      // guards kNoTargetIdle [byte +576]
         kBoneFlag = 196,   // bone-tracking flag (byte +784)
     };
+
+    // Byte-addressed fields packed inside dword 196 [orig: the brain is
+    // byte-addressed; +784 = the solver's bone slot | 0x80 (fire commit ORs
+    // 0x40, give-up clears), +785 = the stationary weapons-free gate].
+    enum ByteIdx : int {
+        kBoneFlagByte = 784, // [orig: brain+0x310 @0x456A23 slot|0x80; @0x47306F |=0x40]
+        kGuardFireByte = 785, // [orig: brain+0x311 — read @0x472EDE; written by the
+                              //  WAC AI command (AI_HandleCommand case 21 @0x4659D2)
+                              //  and the savegame restore @0x45DDBA; spawn default 0]
+    };
+    uint8_t *bytes() { return reinterpret_cast<uint8_t *>(f); }
+    const uint8_t *bytes() const { return reinterpret_cast<const uint8_t *>(f); }
 
     int32_t cur_state() const { return f[kCurState]; }
     int32_t pend_state() const { return f[kPendState]; }
@@ -202,6 +239,23 @@ struct AiProfile {
     int32_t fire_interval_b = 0;  // +156: secondary fire interval (word +210 gate)
     uint8_t weapon_a = 0;         // +148 byte: primary ammo-def id
     uint8_t weapon_b = 0;         // +180 byte: secondary ammo-def id
+    // The two .aip weapon def blocks the fire-transform solver reads
+    // (profile+120 primary / +152 secondary; engine/formats/aip WeaponBlock).
+    // ammo_index is the world.ammo row resolved from the authored weapon NAME
+    // at the item-traits sweep (-1 = unresolved -> the leg cannot fire), the
+    // sibling of the D-AI-5 infantry seed. [orig: AIProfile_ParseProperty
+    // "primary_weap" -> AmmoDef_LookupByName -> profile+148 @0x45e0xx]
+    struct WeaponFire {
+        int32_t ammo_cap = 0;     // block+0: brain[53]/[54] spawn seed
+        int32_t cone_bam = 0;     // block+8: solve cone half-angle (BAM32)
+        uint32_t flags = 0;       // block+16: aip::kWeapon* mask
+        int32_t facing_bam = 0;   // block+20: yaw bias
+        int32_t pitch_bam = 0;    // block+24: pitch bias
+        int32_t ammo_index = -1;  // resolved world.ammo row for block+28's name
+        std::string ammo_name;    // authored "*_weap" value, pre-resolution
+    };
+    WeaponFire fire_a;
+    WeaponFire fire_b;
     int32_t accuracy = 0;         // brain[43] seed: scatter modulus = 6 - accuracy (0..5)
                                   // [orig: the ai.def copy block seeds brain[43]; source
                                   // field unwitnessed — part of Entity_CopyVehicleDefToAIComp]
@@ -691,6 +745,24 @@ public:
     // ring append + RoundData_SpawnRound @0x4ec0d0; net-re §5.60]
     bool fire_ai_round(World &world, AiEntity &e, const int32_t origin[3], int32_t yaw_bam,
                        int32_t pitch_bam, int32_t ammo_index);
+
+    // The SM/turret fire-transform solve [orig: Entity_ComputeWeaponFireTransform_0
+    // @0x456980 — the D-AI-2 core]. Solves the muzzle origin + aim toward `target`
+    // through one .aip weapon block: origin = entity pos + 2.0u Z (the witnessed
+    // empty-bone-list leg — our world model carries no SM muzzle bone lists;
+    // brain+224/+292 stay unfilled, which retail itself routes to this leg), aim =
+    // the relative yaw/pitch of the target position in the biased shooter frame,
+    // the caller's aim offset (retail passes it through the `distance` global:
+    // sweep phase under ATEAM, -3.0u under ATEAM_LOCK), the cone gate, then the
+    // WEAPON_TURRET staging + WEAPON_SLOW/FAST slew. `target` may be null — only
+    // the WEAPON_PITCHLOCKED* legs (flags & 0x18) can solve then [orig: the
+    // @0x4569B2 head gate]. Returns true when the pose is solved (and, for
+    // turrets, aligned) — the caller then fires; false = hold (slewing, cone
+    // miss, LOS block, or no valid solve). `out` = {pos xyz 16.16, yaw, pitch,
+    // roll BAM}.
+    bool solve_weapon_fire_transform(World &world, AiEntity &e, const Entity *target,
+                                     const AiProfile::WeaponFire &wb, int32_t aim_offset,
+                                     bool skip_los, int32_t out[6]);
 
     // [orig: AI_HandleCommand @0x465770] AI command dispatcher (cases 6..0x16). Deferred to the
     // AI-command phase; for damage/death/destroy events (1/3/4) the original returns 0, so this

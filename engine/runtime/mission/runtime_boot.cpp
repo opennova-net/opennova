@@ -55,12 +55,12 @@ MissionTextSource resolve_mission_text(const BootFileSource &files,
 	return MissionTextSource::kNone;
 }
 
-std::vector<PromoteOptions::AiProfileSpeeds> resolve_ai_profile_speeds(
+std::vector<PromoteOptions::AiProfileRow> resolve_ai_profiles(
 		const BootFileSource &files, const bms::File &mission) {
-	std::vector<PromoteOptions::AiProfileSpeeds> rows;
+	std::vector<PromoteOptions::AiProfileRow> rows;
 	if (!files.valid()) return rows;
 	auto have = [&rows](const std::string &profile) {
-		for (const PromoteOptions::AiProfileSpeeds &r : rows)
+		for (const PromoteOptions::AiProfileRow &r : rows)
 			if (r.profile == profile) return true;
 		return false;
 	};
@@ -83,15 +83,16 @@ std::vector<PromoteOptions::AiProfileSpeeds> resolve_ai_profile_speeds(
 			// The parse itself is format knowledge (engine/formats/aip,
 			// partial-port documented there); this resolver owns only the
 			// profile walk and the install row.
-			const aip::ProfileSpeeds parsed =
-					aip::parse_profile_speeds(text.data(), text.size());
-			// A profile carrying neither key contributes no row, exactly like
-			// the shell resolver this replaces (its dictionary stayed empty).
-			if (parsed.patrol_speed == -1 && parsed.combat_speed == -1) continue;
-			PromoteOptions::AiProfileSpeeds row;
+			aip::Profile parsed = aip::parse_profile(text.data(), text.size());
+			// A file that parsed no witnessed field contributes no row, like
+			// the speeds-only resolver this extends (its dictionary stayed
+			// empty for such files).
+			if (parsed.type == 0 && parsed.patrol_speed == -1 &&
+					parsed.combat_speed == -1)
+				continue;
+			PromoteOptions::AiProfileRow row;
 			row.profile = profile;
-			row.patrol_speed = parsed.patrol_speed;
-			row.combat_speed = parsed.combat_speed;
+			row.data = std::move(parsed);
 			rows.push_back(std::move(row));
 		}
 	}
@@ -101,7 +102,7 @@ std::vector<PromoteOptions::AiProfileSpeeds> resolve_ai_profile_speeds(
 BootAbort run_mission_boot(const BootParams &params, const BootSteps &steps) {
 	if (params.has_resource_root && params.has_item_db)
 		steps.install_seat_specs();
-	if (params.has_resource_root) steps.install_ai_profile_speeds();
+	if (params.has_resource_root) steps.install_ai_profiles();
 	if (params.has_terrain_til) steps.install_terrain_til();
 	steps.install_mission_text();
 	if (!steps.load_mission()) return BootAbort::kLoadFailed;
