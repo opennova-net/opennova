@@ -10,6 +10,7 @@ extends DebugPage
 ## rounds actually test, and the object collision volumes + player capsule.
 
 var _rnd_status_label: Label
+var _device_label: Label
 var _rnd_list: ItemList
 
 
@@ -43,6 +44,13 @@ func _build() -> void:
 	add_option_check(&"show_round_trails")
 	add_option_check(&"show_hit_meshes")
 	add_option_check(&"show_collision")
+
+	_device_label = Label.new()
+	_device_label.name = "PlacedDevices"
+	_device_label.text = ""
+	_device_label.visible = false
+	_device_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	add_child(_device_label)
 
 
 # Kind colors mirror RoundDebugView.kind_color so the list rows and the world
@@ -78,8 +86,41 @@ func refresh() -> void:
 	var sim := _ctx.sim()
 	if sim == null:
 		_clear_pane("No round data.")
+		if _device_label != null:
+			_device_label.visible = false
 		return
 	render_report(sim.get_round_debug())
+	_refresh_devices(sim)
+
+
+## Placed satchels/claymores/mines: the live device records the think chain
+## runs — stick pose, what they ride, and the arm countdown.
+func _refresh_devices(sim: Object) -> void:
+	if _device_label == null:
+		return
+	var devices: Array = sim.get_throwable_debug()
+	if devices.is_empty():
+		_device_label.visible = false
+		return
+	var lines := PackedStringArray()
+	lines.append("Placed devices: %d" % devices.size())
+	for dev_v in devices:
+		var dev: Dictionary = dev_v
+		var pos: Vector3 = dev.get("pos", Vector3.ZERO)
+		var row := "%s at %.1f, %.1f, %.1f | health %d" % [
+			String(dev.get("think", "?")), pos.x, pos.y, pos.z,
+			int(dev.get("health", 0))]
+		var arm := int(dev.get("arm_delay_ticks", 0))
+		if arm > 0:
+			row += " | arming (%d ticks)" % arm
+		row += " | pitch %.0f roll %.0f" % [
+			float(dev.get("pitch_deg", 0.0)), float(dev.get("roll_deg", 0.0))]
+		var parent := int(dev.get("parent_handle", Simulation.INVALID_WIRE_HANDLE))
+		if bool(dev.get("parent_live", false)):
+			row += " | riding " + WireHandle.label(parent)
+		lines.append(row)
+	_device_label.text = "\n".join(lines)
+	_device_label.visible = true
 
 
 ## Render one round-outcome snapshot (Simulation.get_round_debug's shape).
