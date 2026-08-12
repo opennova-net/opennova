@@ -29,7 +29,6 @@ const OPTIONS: Array[Dictionary] = [
 		"page": &"Animation",
 		"getter": &"is_skeleton_debug",
 		"setter": &"set_skeleton_debug",
-		"expensive": true,
 		"tooltip": "Draw character bones (joint-to-parent lines + axis crosses) over the world.",
 	},
 	{
@@ -41,7 +40,6 @@ const OPTIONS: Array[Dictionary] = [
 		"page": &"Animation",
 		"getter": &"is_user_point_debug",
 		"setter": &"set_user_point_debug",
-		"expensive": true,
 		"tooltip": "Draw every named model user point as a cyan marker + label, following live animated bones and including static-batched mission objects.",
 	},
 	{
@@ -53,7 +51,6 @@ const OPTIONS: Array[Dictionary] = [
 		"page": &"Rounds",
 		"getter": &"is_collision_debug",
 		"setter": &"set_collision_debug",
-		"expensive": true,
 		"tooltip": "Draw object collision volumes (type-colored boxes) and the player's capsule test points over the world.",
 	},
 	{
@@ -87,7 +84,6 @@ const OPTIONS: Array[Dictionary] = [
 		"page": &"Particles",
 		"getter": &"is_particle_debug",
 		"setter": &"set_particle_debug",
-		"expensive": true,
 		"tooltip": "Draw a red wireframe box (retail's debug box color) and effect name over every live emitter. Missing textures stay in the Particles catalog issues report.",
 	},
 	{
@@ -99,7 +95,6 @@ const OPTIONS: Array[Dictionary] = [
 		"page": &"Occlusion",
 		"getter": &"is_occlusion_debug",
 		"setter": &"set_occlusion_debug",
-		"expensive": true,
 		"tooltip": "Draw every nearby building's occlusion faces over the world — windows, portals and welded links as colored outlines with section labels, plain occluder faces in gray.",
 	},
 	{
@@ -111,7 +106,6 @@ const OPTIONS: Array[Dictionary] = [
 		"page": &"Rounds",
 		"getter": &"is_round_debug",
 		"setter": &"set_round_debug",
-		"expensive": true,
 		"tooltip": "Draw the recent round outcomes over the world — flight segments and hit markers colored by result (green = face hit, amber = sphere stand-in, red ring = a graze whose face test missed and flew on).",
 	},
 	{
@@ -123,7 +117,6 @@ const OPTIONS: Array[Dictionary] = [
 		"page": &"Rounds",
 		"getter": &"is_hitbox_debug",
 		"setter": &"set_hitbox_debug",
-		"expensive": true,
 		"tooltip": "Hit geometry is sampled at 6 Hz. Draw nearby hit geometry within 80 mission units of the local player: object bullet meshes and broad-phase spheres, plus posed person bone spheres (local player omitted; up to 96 targets). Person colors show normal-infantry damage zones: orange = x1.25 (0-4), cyan = x1.0 (5-8), lime = x0.5 (9-12/15-18), magenta = x3.0 head (13-14), dark red = masked, amber = unresolved fallback.",
 	},
 	{

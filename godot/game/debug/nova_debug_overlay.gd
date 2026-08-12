@@ -194,7 +194,6 @@ func set_pick_list(pick_list: DebugPickList) -> void:
 
 func toggle() -> void:
 	visible = not visible
-	_session.set_presented(visible)
 	_sync_timer()
 	# Controls under a hidden CanvasLayer don't observe the layer hide; tell
 	# the active page explicitly so capture-owning pages (Stats) close their

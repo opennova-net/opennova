@@ -128,7 +128,6 @@ static func _options_definition(row: Dictionary) -> DebugControlDef:
 			StringName(row.get("getter", &"")),
 			StringName(row["setter"]),
 			bool(row.get("default", false)))
-	definition.expensive = bool(row.get("expensive", false))
 	# OPTIONS rows are applied by the game reading recorded intents, so they
 	# stay togglable before their target world binds.
 	definition.allow_unresolved_intent = true
@@ -141,7 +140,6 @@ static func _install_terrain(session: DebugSession) -> void:
 			"Color terrain by renderer decisions instead of textures.",
 			TARGET_TERRAIN, &"get_debug_mode", &"set_debug_mode", 0,
 			["Normal", "Detail levels", "Sector colors", "Surface angle", "Height map"])
-	draw_mode.expensive = true
 	session.register_control(draw_mode)
 	session.register_control(DebugControlDef.slider(
 			&"terrain_lod_quality", &"Terrain", "Terrain detail",
@@ -178,7 +176,6 @@ static func _add_terrain_check(
 	var definition := DebugControlDef.check(
 			id, &"Terrain", label, description, TARGET_TERRAIN,
 			getter, setter, false)
-	definition.expensive = true
 	session.register_control(definition)
 
 
@@ -188,7 +185,6 @@ static func _install_rendering(session: DebugSession) -> void:
 			"Show the renderer's built-in diagnostic buffers.",
 			TARGET_VIEWPORT, &"", &"", 0, VIEWPORT_DRAW_CHOICES)
 	draw_mode.property_name = &"debug_draw"
-	draw_mode.expensive = true
 	session.register_control(draw_mode)
 
 
