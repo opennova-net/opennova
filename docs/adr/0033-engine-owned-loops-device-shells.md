@@ -163,10 +163,10 @@ parity payoff.
 - REOPEN CONDITION: a divergence diagnosed to draw order or pass placement
   that a scene demonstrates visibly — the standing candidates are the
   water-boundary rows D-RORD-3/-7 — reopens R3 with that row's scene as the
-  new spike scene. (D-RORD-8 left the candidate list 2026-08-11: its
-  one-frame lag was the CAMERA phase, not the leg order — narrowed to the
-  terrain/foliage camera phase, and the post-present occlusion slot stands;
-  render-order-re.md + the ledger row.)
+  new spike scene. (D-RORD-8 left the candidate list 2026-08-12: its
+  one-frame lag was the CAMERA phase, not the leg order — local-view placement
+  now precedes terrain/foliage, and the post-present occlusion slot stands;
+  render-order-re.md + the ledger closure.)
 - R4 stays indefinitely optional and now waits on R3's reopen (a second
   backend requires the engine-owned command stream R3 would have built).
 

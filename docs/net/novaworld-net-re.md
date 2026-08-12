@@ -6419,11 +6419,18 @@ S2C 0x50 team assign and the death-screen close leg of the 0x0A handler. Four ca
 - `WeaponLoadout_ApplyFromBuffer @ 0x565d94` — the armory ACCEPT re-send: live `entity->Team` +
   the armory-selected class + `g_armoryLoadoutBufferByClass` + `g_currentWeaponSlot`; a
   non-authority client resets its slot pool first (the S2C 0x5A grant refills it).
-Reimpl: `encode_loadout_submit` (npwire), the `JoinerConnection::set_loadout_kit` seam + the
-S2C 0x04 team latch (assigned_team_), `Simulation::push_joiner_loadout_kit` (the shell's
-applied kit → ADM rows + class + equipped combo). Headless callers keep the capture-default kit
-byte-for-byte (`npruntime_client_runtime` pins both: the canned pair under the 0x04 team, and an
-injected kit riding the zones e2e).
+**Reimpl status (D-NET-180 FIXED 2026-08-12).** `encode_loadout_submit` (npwire), the
+`JoinerConnection::set_loadout_kit` seam + the S2C 0x04 team latch (`assigned_team_`), and
+`Simulation::push_joiner_loadout_kit` carry the shell's applied kit → ADM rows + class + equipped
+combo. `resolve_loadout_submit_combo` now performs the witnessed send-time side walk against the
+valid local `WeaponInventory`: keep a legal occupied combo, otherwise scan the same 65-slot category
+in ascending rank, otherwise preserve the raw argument. Simulation supplies that table only after it
+exists, so the pre-`Player_InitPlayer` first submit and S2C 0x50 team-change submit retain raw 195;
+the second start submit and an armory re-send carry the resolved effective combo. Direct/headless kit
+callers continue to treat their combo as already effective. `npruntime_weapon_table` pins side masks,
+category confinement, first-rank selection, empty/missing/invalid fallthrough, and the builder handoff;
+`npruntime_client_runtime` and `npruntime_entity_lifecycle_net` retain the exact raw-first,
+effective-second, armory, and raw-team-change packet assertions.
 Related C2S rows witnessed in the same wave: 0x03 (`[i32] → entity+372`), 0x0E respawn/deploy request
 (`[i16 spawnHandle]`, 0xFFFE = auto team spawn, `Server_ProcessClientRequestRespawn @ 0x519AF0`),
 0x26/0x27 vehicle attach/detach (@ 0x502390 / @ 0x4FC980 — attach overwrites wire word0 with the

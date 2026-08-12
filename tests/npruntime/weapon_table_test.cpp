@@ -14,6 +14,7 @@
 
 #include <npruntime/weapon_table_build.h>
 #include <npruntime/ammo_table_build.h>
+#include <npruntime/loadout_submit.h>
 
 #include <def/def.h>
 #include <vfs/vfs.h>
@@ -206,6 +207,52 @@ int main(void) {
 	      np::charfilter_bit("engineer") == 0x10 && np::charfilter_bit("bogus") == 0);
 	CHECK(np::teamfilter_bit("red") == 0x01 && np::teamfilter_bit("BLUE") == 0x02 &&
 	      np::teamfilter_bit("green") == 0);
+
+	// --- C2S 0x2F send-time slot re-resolution. The requested red-only
+	// category-3 slot is corrected to the first populated blue slot for teams
+	// 1/3, but stays raw when the local table/category cannot supply a legal
+	// replacement [orig: NetPacket_SendLoadoutSubmit @0x42ce2d..0x42ce8b].
+	{
+		world::WeaponTable slots_table;
+		slots_table.entries.resize(5);
+		const auto define = [&](int adm, uint8_t category, uint8_t rank,
+				uint8_t teamfilter) {
+			world::WeaponTableEntry &entry = slots_table.entries[adm];
+			entry.valid = true;
+			entry.category = category;
+			entry.rank = rank;
+			entry.teamfilter = teamfilter;
+		};
+		define(1, 3, 4, 1); // red, combo 199 (the requested live slot)
+		define(2, 3, 1, 2); // blue, combo 196 (first legal fallback)
+		define(3, 3, 2, 2); // blue, combo 197
+		define(4, 4, 0, 1); // red, combo 260; no blue peer in category 4
+
+		world::WeaponInventory inventory;
+		inventory.reset(slots_table);
+		inventory.slots[199].adm_index = 1;
+		inventory.slots[196].adm_index = 2;
+		inventory.slots[197].adm_index = 3;
+		inventory.slots[260].adm_index = 4;
+
+		CHECK(np::resolve_loadout_submit_combo(slots_table, &inventory, 1, 199) == 196);
+		CHECK(np::resolve_loadout_submit_combo(slots_table, &inventory, 3, 199) == 196);
+		CHECK(np::resolve_loadout_submit_combo(slots_table, &inventory, 2, 199) == 199);
+		CHECK(np::resolve_loadout_submit_combo(slots_table, &inventory, 0, 199) == 199);
+		CHECK(np::resolve_loadout_submit_combo(slots_table, &inventory, 1, 258) == 196);
+		CHECK(np::resolve_loadout_submit_combo(slots_table, &inventory, 1, 260) == 260);
+		CHECK(np::resolve_loadout_submit_combo(slots_table, nullptr, 1, 199) == 199);
+		CHECK(np::resolve_loadout_submit_combo(slots_table, &inventory, 1, 900) == 900);
+
+		world::World submit_world;
+		submit_world.weapons = slots_table;
+		playersav::Record profile;
+		world::LocalPlayerLoadout loadout;
+		np::JoinerConnection::LoadoutKit wire_kit;
+		np::build_joiner_loadout_kit(submit_world, profile, 1, loadout, 199,
+				&inventory, wire_kit);
+		CHECK(wire_kit.equipped_combo == 196);
+	}
 
 	// --- ammo spread/recoil bake: exact fixed carrier plus the original byte stores.
 	// Values outside byte range wrap exactly as the parser's atol-to-byte assignment

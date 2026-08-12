@@ -13,6 +13,7 @@
 
 #include <playersav/weapon_sav.h>
 #include <world/player_loadout.h>
+#include <world/weapon_inventory.h>
 #include <world/world.h>
 
 #include <cstdint>
@@ -70,9 +71,19 @@ void kit_from_authoritative_grant(const world::WeaponTable &weapons,
 		const WeaponLoadout &grant,
 		std::vector<world::WeaponKitEntry> &r_kit);
 
+// NetPacket_SendLoadoutSubmit does not blindly serialize the requested combo.
+// Once the local slot table exists it keeps a side-legal slot, otherwise walks
+// that combo's 65-rank category for the first populated side-legal slot. A
+// missing table, an out-of-range combo, or no legal replacement preserves the
+// raw argument [orig: @0x42ce2d..0x42ce8b].
+int32_t resolve_loadout_submit_combo(const world::WeaponTable &weapons,
+		const world::WeaponInventory *inventory, uint8_t team,
+		int32_t requested_combo);
+
 void build_joiner_loadout_kit(const world::World &world,
 		const playersav::Record &profile, uint8_t assigned_team,
 		const world::LocalPlayerLoadout &loadout, int equipped_combo,
+		const world::WeaponInventory *inventory,
 		JoinerConnection::LoadoutKit &out);
 
 } // namespace opennova::np

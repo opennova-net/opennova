@@ -267,7 +267,8 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
     };
 
     // Ammo flag 0x80 is the recovered NoCollide terrain bypass.
-    if ((trace.ammo_flags & 0x80u) == 0 && terrain != nullptr && terrain->valid()) {
+    if (trace.walk_terrain && (trace.ammo_flags & 0x80u) == 0 &&
+        terrain != nullptr && terrain->valid()) {
         const int32_t start[3] = {trace.start.x, trace.start.y, trace.start.z};
         const int32_t end[3] = {trace.end.x, trace.end.y, trace.end.z};
         int32_t hit[3] = {};
@@ -309,7 +310,7 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
     // Water is pass two regardless of a ClipWater-style ammo flag. Retail
     // requires a strict straddle, so an endpoint on the plane is not a hit.
     const int32_t water_z = world.env.water_z;
-    if (water_z != 0 &&
+    if (trace.walk_water && water_z != 0 &&
         ((trace.start.z > water_z && trace.end.z < water_z) ||
          (trace.start.z < water_z && trace.end.z > water_z))) {
         const int64_t t =

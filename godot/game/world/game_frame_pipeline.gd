@@ -23,8 +23,6 @@ func advance(camera_pos: Vector3, camera_xform: Transform3D, delta: float,
 	input.delta_seconds = delta
 	input.set_camera_sample(camera_pos, -camera_xform.basis.z, true)
 	_world.begin_device_frame(camera_pos, camera_xform, delta)
-	_world.render_terrain_frame()
-	_world.render_foliage_frame()
 
 	var presentation = _world.get_runtime()
 	var outcome: MissionFrameOutcome = null
@@ -35,8 +33,13 @@ func advance(camera_pos: Vector3, camera_xform: Transform3D, delta: float,
 			return outcome
 
 	# Place the local-player camera/viewmodel from the state the session tick
-	# just produced, BEFORE the camera-driven legs below read it (D-RORD-8).
+	# just produced, BEFORE every camera-driven render leg reads it (D-RORD-8).
 	_world.present_local_view_frame()
+	# Terrain samples the viewport camera directly; foliage receives the same
+	# live render transform. Their producer order stays terrain then foliage so
+	# foliage consumes this frame's detail-cell handoff.
+	_world.render_terrain_frame()
+	_world.render_foliage_frame()
 	if not _world.drive_network_frame():
 		return outcome
 	_world.advance_weather_frame()

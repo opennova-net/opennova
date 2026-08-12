@@ -78,9 +78,41 @@ bool reseed_session_kit_on_side_change(world::World &world,
 			world, profile, assigned_team, loadout, seeded_side);
 }
 
+int32_t resolve_loadout_submit_combo(const world::WeaponTable &weapons,
+		const world::WeaponInventory *inventory, uint8_t team,
+		int32_t requested_combo) {
+	if (inventory == nullptr || requested_combo < 0 ||
+			requested_combo >= world::weapon_combo::kSlotCount)
+		return requested_combo;
+
+	// byte_A85B48 teams 1/3 use BLUE (2), 2/4 use RED (1), and every
+	// other latch value accepts either side (3) [orig: @0x42ce2d..0x42ce58].
+	const uint8_t side_mask =
+			(team == 1 || team == 3) ? 2u : ((team == 2 || team == 4) ? 1u : 3u);
+	const auto is_side_legal = [&](int32_t combo) {
+		const world::WeaponInventorySlot *slot = inventory->slot(combo);
+		if (slot == nullptr || slot->adm_index < 0 || slot->adm_index > 255)
+			return false;
+		const world::WeaponTableEntry *def =
+				weapons.by_index(static_cast<uint8_t>(slot->adm_index));
+		return def != nullptr && (def->teamfilter & side_mask) != 0;
+	};
+
+	if (is_side_legal(requested_combo)) return requested_combo;
+	const int32_t category_base =
+			(requested_combo / world::weapon_combo::kRanksPerCategory) *
+			world::weapon_combo::kRanksPerCategory;
+	for (int32_t rank = 0; rank < world::weapon_combo::kRanksPerCategory; ++rank) {
+		const int32_t candidate = category_base + rank;
+		if (is_side_legal(candidate)) return candidate;
+	}
+	return requested_combo;
+}
+
 void build_joiner_loadout_kit(const world::World &world,
 		const playersav::Record &profile, uint8_t assigned_team,
 		const world::LocalPlayerLoadout &loadout, int equipped_combo,
+		const world::WeaponInventory *inventory,
 		JoinerConnection::LoadoutKit &out) {
 	// The side selector. The host's S2C 0x04 tail byte is retail's byte_A85B48, and
 	// teams 1/3 read the BLUE block, 2/4 the RED one [orig: @0x525788]. Before that
@@ -101,9 +133,14 @@ void build_joiner_loadout_kit(const world::World &world,
 	uint8_t player_class = side.player_class;
 	if (player_class < 5 || player_class > 9) player_class = 8;
 	out.player_class = player_class;
-	// The pair's SECOND submit carries the live equipped slot instead of the fixed 195
-	// [orig: Game_StartMission @0x525c2e passes g_currentWeaponSlot].
-	out.equipped_combo = equipped_combo;
+	// The pair's SECOND submit carries the live equipped slot instead of the fixed 195.
+	// The sender re-resolves that slot against the populated local pool and the
+	// assigned side; the pre-Player_InitPlayer first submit and team-change submit
+	// retain their separate raw-195 paths because they never consume this field
+	// [orig: Game_StartMission @0x525c2e; NetPacket_SendLoadoutSubmit
+	// @0x42ce2d..0x42ce8b].
+	out.equipped_combo = resolve_loadout_submit_combo(
+			world.weapons, inventory, team, equipped_combo);
 	// The RESIDENT rows are the resident kit buffer, not a fresh read of the profile
 	// page. Retail has exactly ONE buffer: Game_StartMission copies the profile page
 	// into restrictionData, Player_InitPlayer builds the local display list from that
