@@ -133,6 +133,11 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 				join_target.host_ip, join_target.port, join_target.player_name):
 			push_warning("MissionPresentation: could not dial co-op host %s:%d — joiner disabled." % [
 				join_target.host_ip, join_target.port])
+		# The JOIN VERSIONCRCSTRING checksum reads the loose
+		# expansion/<name>/version.txt under the install root (D-NET-166).
+		var join_resource_root: ResourceRoot = options.get("resource_root")
+		if needs_join_connection and join_resource_root != null:
+			_sim.set_join_expansion_version_root(join_resource_root.get_root_dir())
 	elif host_session != null:
 		# Co-op LAN HOST: encode the typed session request at the FFI boundary (ADR 0017)
 		# and stamp the mission-derived identity the session advertises on top. bind_port
@@ -159,6 +164,13 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 			session_options["mission_name"] = mission_name
 			if Array(session_options.get("spawn_names", [])).is_empty():
 				session_options["spawn_names"] = [mission_name]
+		# The host's expansion version checksum (retail's g_expansion_checksum) is
+		# CRC'd from the loose expansion/<name>/version.txt under the install root;
+		# the join gate compares it against each joiner's VERSIONCRCSTRING while an
+		# expansion is active (D-NET-166).
+		var host_resource_root: ResourceRoot = options.get("resource_root")
+		if host_resource_root != null:
+			session_options["game_root"] = host_resource_root.get_root_dir()
 		_sim.configure_host_session(session_options)
 		# Retail builds the active game-type score table, then overlays the loose
 		# VERSION 40 score.ini before answering C2S 0x2D with S2C 0x58. This

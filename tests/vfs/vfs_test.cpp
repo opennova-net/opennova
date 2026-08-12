@@ -17,6 +17,8 @@ namespace fs = std::filesystem;
 using opennova::Vfs;
 using opennova::VfsLookupPolicy;
 using opennova::VfsSource;
+using opennova::vfs_expansion_version_checksum;
+using opennova::vfs_version_crc;
 
 // SCR keys (mirror engine/formats/scr/scr.h; vfs_test doesn't link opennova_scr).
 static const uint32_t SCR_KEY_DEFAULT_C = 0xABEEFACEu; // JO Demo
@@ -487,6 +489,37 @@ static int test_list_files() {
     return 1;
 }
 
+// D-NET-166: the expansion version-file checksum. vfs_version_crc is retail's
+// CRC_ComputeCustomTable @ 0x53c820 (MSB-first CRC-32, poly 0x04C11DB7, init
+// -1, no reflection/final xor — "CRC-32/MPEG-2", whose standard check value
+// for "123456789" is 0x0376E6E7); vfs_expansion_version_checksum is
+// g_expansion_checksum's producer over the loose expansion/<name>/version.txt
+// [orig: Expansion_LoadAssets @ 0x4a4781..0x4a488a].
+static int test_expansion_version_checksum() {
+    const char *check = "123456789";
+    CHECK(vfs_version_crc(reinterpret_cast<const uint8_t *>(check), 9) ==
+                  static_cast<int32_t>(0x0376E6E7),
+          "vfs_version_crc matches the CRC-32/MPEG-2 check value");
+
+    fs::path root = fresh_dir("crc_game");
+    fs::path exp = root / "expansion" / "jox01";
+    fs::create_directories(exp);
+    CHECK(vfs_expansion_version_checksum(root.string(), "jox01") == 0,
+          "no loose version.txt keeps the checksum 0 [orig: @ 0x4a487b]");
+    CHECK(vfs_expansion_version_checksum(root.string(), "") == 0,
+          "an empty expansion never probes the file [orig: @ 0x4a4787]");
+
+    write_loose(exp / "version.txt", "123456789");
+    CHECK(vfs_expansion_version_checksum(root.string(), "jox01") ==
+                  static_cast<int32_t>(0x0376E6E7),
+          "the loose version.txt bytes feed the CRC [orig: @ 0x4a4885]");
+
+    write_loose(exp / "version.txt", "");
+    CHECK(vfs_expansion_version_checksum(root.string(), "jox01") == 0,
+          "an empty version.txt is treated like an absent one (retail-UB guard)");
+    return 1;
+}
+
 int main() {
     std::error_code ec;
     g_root = (fs::temp_directory_path(ec) / "opennova_vfs_test").string();
@@ -508,6 +541,7 @@ int main() {
     RUN_TEST(test_scr_decode_policy);
     RUN_TEST(test_vfs_scr_policy);
     RUN_TEST(test_list_files);
+    RUN_TEST(test_expansion_version_checksum);
 
     fs::remove_all(g_root, ec);
     printf("\n%d passed, %d failed\n", passed, failed);

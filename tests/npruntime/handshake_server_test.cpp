@@ -155,7 +155,8 @@ ClientAuth make_valid_client_auth(uint32_t ci, uint32_t ck, uint32_t hk,
 	return auth;
 }
 
-std::vector<uint8_t> retail_join_request(std::string_view expansion) {
+std::vector<uint8_t> retail_join_request(std::string_view expansion,
+		std::string_view version_crc = "0") {
 	std::vector<uint8_t> body;
 	auto append_string_tlv = [&](std::string_view name, std::string_view value) {
 		body.insert(body.end(), name.begin(), name.end());
@@ -167,7 +168,7 @@ std::vector<uint8_t> retail_join_request(std::string_view expansion) {
 		body.push_back(0);
 	};
 	if (!expansion.empty()) append_string_tlv("EXP", expansion);
-	append_string_tlv("VERSIONCRCSTRING", "0");
+	append_string_tlv("VERSIONCRCSTRING", version_crc);
 	return body;
 }
 
@@ -1171,6 +1172,99 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 		if (!expect(
 					result.outbound.empty() && np::connection_count(ctx) == 0,
 					"malformed 0x00 JOIN is dropped and releases the pending admission")) {
+			return false;
+		}
+	}
+
+	// D-NET-166: the expansion version-checksum gate. An EXPANSION host compares
+	// atol(VERSIONCRCSTRING) against its own g_expansion_checksum and rejects a
+	// mismatch; a matching nonzero (and negative — "%ld" of a bit-31 CRC) value
+	// admits [orig: Server_ValidatePlayerJoinRequest — gate @0x51231e, compare
+	// @0x512331, reject DPC=48 @0x512341].
+	{
+		np::NapiNPServerCtx ctx;
+		np::test::bring_up_host(
+				ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
+		ctx.config.expansion_version_checksum = -559038737; // 0xDEADBEEF as i32
+		const PeerAddr peer{0x0100007Fu, 31335};
+		std::string server_scrk;
+		uint32_t server_sk = 0;
+		if (!handshake(
+					ctx, peer, scrk, 0xA0000015u, server_scrk,
+					&server_sk, nullptr, false)) {
+			return false;
+		}
+		// The stale-checksum join ("0" against a host that carries a real CRC).
+		auto dg = craft_session(
+				scrk, server_sk, 1,
+				{make_protocol_message(
+						0x00, retail_join_request(ctx.config.expansion))});
+		auto result = np::handle_server_datagram(
+				ctx, peer, dg.data(), dg.size(), 12);
+		if (!expect(
+					result.outbound.empty() && np::connection_count(ctx) == 0,
+					"a mismatched expansion version checksum is rejected [orig: @0x512341]")) {
+			return false;
+		}
+		// The matching signed-decimal value admits (a fresh handshake — the
+		// mismatch above tore the pending node down).
+		std::string server_scrk2;
+		uint32_t server_sk2 = 0;
+		if (!handshake(
+					ctx, peer, scrk, 0xA0000016u, server_scrk2,
+					&server_sk2, nullptr, false)) {
+			return false;
+		}
+		auto ok_dg = craft_session(
+				scrk, server_sk2, 1,
+				{make_protocol_message(
+						0x00, retail_join_request(
+								ctx.config.expansion, "-559038737"))});
+		auto ok_result = np::handle_server_datagram(
+				ctx, peer, ok_dg.data(), ok_dg.size(), 13);
+		ProtocolPacketHeader crc_hdr;
+		std::vector<ProtocolMessage> crc_replies;
+		if (!expect(
+					ok_result.outbound.size() == 1 &&
+							decode_s2c(ok_result.outbound.front(), server_scrk2,
+									crc_hdr, crc_replies) &&
+							crc_replies.size() == 1 && crc_replies.front().tag == 0x00,
+					"the matching signed-decimal checksum is acknowledged [orig: @0x512331]")) {
+			return false;
+		}
+	}
+
+	// D-NET-166: a BASE-GAME host (no active expansion) never runs the compare —
+	// retail stores the TLV without reading it [orig: the g_ExpansionName[0]
+	// gate @0x51231e].
+	{
+		np::NapiNPServerCtx ctx;
+		np::test::bring_up_host(
+				ctx, np::ConnectionMode::HostOnly, np::SocketMode::Lan, kHostKey);
+		ctx.config.expansion.clear();
+		ctx.config.expansion_version_checksum = 0;
+		const PeerAddr peer{0x0100007Fu, 31336};
+		std::string server_scrk;
+		uint32_t server_sk = 0;
+		if (!handshake(
+					ctx, peer, scrk, 0xA0000017u, server_scrk,
+					&server_sk, nullptr, false)) {
+			return false;
+		}
+		auto dg = craft_session(
+				scrk, server_sk, 1,
+				{make_protocol_message(
+						0x00, retail_join_request("", "12345"))});
+		auto result = np::handle_server_datagram(
+				ctx, peer, dg.data(), dg.size(), 12);
+		ProtocolPacketHeader base_hdr;
+		std::vector<ProtocolMessage> base_replies;
+		if (!expect(
+					result.outbound.size() == 1 &&
+							decode_s2c(result.outbound.front(), server_scrk,
+									base_hdr, base_replies) &&
+							base_replies.size() == 1 && base_replies.front().tag == 0x00,
+					"a base-game host stores VERSIONCRCSTRING without comparing it [orig: @0x51231e]")) {
 			return false;
 		}
 	}

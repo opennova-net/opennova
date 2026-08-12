@@ -607,6 +607,10 @@ private:
 	// sources. Empty keeps safe silence. Retained across direct-load runtime
 	// rebuilds just like the character and charattr profile data.
 	std::string join_integrity_profile_id_;
+	// The install root the joiner's JOIN VERSIONCRCSTRING checksum reads its
+	// loose expansion/<name>/version.txt from (D-NET-166). Empty keeps the
+	// golden "0". Retained across direct-load runtime rebuilds.
+	std::string join_expansion_version_root_;
 	// The live environment owner consumes each decoded phase-2 edge once. The
 	// ClientState revision is monotonic for one ClientRuntime; fresh runtimes
 	// reset this cursor with their other receive-side cursors.
@@ -857,6 +861,8 @@ private:
 	void install_character_join_vars();
 	// Install or clear the explicitly selected retail integrity corpus profile.
 	void install_join_integrity_profile();
+	// Install the retained JOIN-checksum install root (D-NET-166).
+	void install_expansion_version_root();
 	// Per-load host bring-up: mode 3 -> create_session(&host_loop_) -> configure_session_runtime
 	// -> Server_InitNewRoundState -> the faithful host-player auto-spawn. Mirrors apps/nw_server.
 	void bringup_host_runtime(const opennova::bms::File &file);
@@ -1115,6 +1121,10 @@ public:
 	// Select a registered retail resource-corpus profile for S2C 0x30/0x31.
 	// Empty clears it; an unknown id also clears it and returns false.
 	bool set_join_integrity_profile(const String &p_profile_id);
+	// The install root whose loose expansion/<name>/version.txt feeds the JOIN
+	// VERSIONCRCSTRING checksum (D-NET-166). Empty keeps the golden "0".
+	// Retained across runtime rebuilds like the character/integrity data.
+	void set_join_expansion_version_root(const String &p_game_root);
 	// Load the process-scoped anti-cheat CHARACTER table before the first join
 	// network pump. Missing/empty charattr.def is soft and leaves all rows inactive,
 	// matching Game_Run's continue-after-error behavior.
