@@ -296,6 +296,71 @@ void test_compiler_friendly_tags(const fnt_font_t *font) {
 			"the speaking tag pulses toward white");
 }
 
+// The overlay label fonts: friendly tags draw with the NORMAL label font,
+// attach labels with the BOLD one, both at the slot scale, each in its own
+// draw-list page namespace. [orig: HUD_InitAllFonts @ 0x51ee20; tag font
+// g_hudLabelFont @ 0x5a3a0c; attach font (the bold slot) @ 0x5a3680; the slot
+// scales enter the draw/measure/char-height helpers @ 0x580680/@ 0x580ab0/
+// @ 0x580a80]
+void test_compiler_label_fonts(const fnt_font_t *font) {
+	HudFrameCompiler compiler;
+	HudLayout layout;
+	compiler.configure(layout, font);
+	compiler.configure_label_fonts(font, font, 2.0f);
+
+	HudFrameState state;
+	opennova::hud::HudFriendlyTag tag;
+	tag.screen_x = 200.0f;
+	tag.screen_y = 100.0f;
+	tag.dist_q16 = 100 << 16;
+	tag.entity_id = 24; // "^SGT  Brown", 11 glyphs
+	state.friendly_tags.push_back(tag);
+	opennova::hud::HudAttachLabel label;
+	label.screen_x = 300.0f;
+	label.screen_y = 60.0f;
+	label.text = "Sit";
+	state.attach_labels.push_back(label);
+
+	const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+	size_t normal_glyphs = 0;
+	size_t bold_glyphs = 0;
+	const opennova::hud::GameFontQuad *first_tag_glyph = nullptr;
+	for (const opennova::hud::GameFontQuad &g : list.glyphs) {
+		if (g.page ==
+				static_cast<uint32_t>(opennova::hud::kHudFontSlotLabel) *
+						FNT_MAX_PAGES) {
+			if (first_tag_glyph == nullptr) {
+				first_tag_glyph = &g;
+			}
+			++normal_glyphs;
+		}
+		if (g.page ==
+				static_cast<uint32_t>(opennova::hud::kHudFontSlotLabelBold) *
+						FNT_MAX_PAGES) {
+			++bold_glyphs;
+		}
+	}
+	CHECK(normal_glyphs == 11,
+			"tag glyphs ride the normal label font's page namespace");
+	CHECK(bold_glyphs == 3,
+			"attach glyphs ride the bold label font's page namespace");
+	// Scale 2: the 98-wide line centers as 200 - 98 -> 101.5 after the -0.5
+	// offset; fontH = 16*2, text top = y - fontH/2 -> 83.5.
+	CHECK(first_tag_glyph != nullptr &&
+					first_tag_glyph->x_top_left == 101.5f &&
+					first_tag_glyph->y_top == 83.5f,
+			"the slot scale doubles the centered layout metrics");
+
+	// Null label fonts fall back to the hudpos font at scale 1 (page 0).
+	compiler.configure_label_fonts(nullptr, nullptr, 1.0f);
+	const HudDrawList &fallback = compiler.compile(state, 1024.0f, 768.0f);
+	bool all_page0 = !fallback.glyphs.empty();
+	for (const opennova::hud::GameFontQuad &g : fallback.glyphs) {
+		all_page0 = all_page0 && g.page == 0;
+	}
+	CHECK(all_page0, "absent label fonts fall back to the hudpos font");
+}
+
 } // namespace
 
 int main() {
@@ -306,6 +371,7 @@ int main() {
 	test_compiler_health_and_order(&font);
 	test_compiler_crosshair(&font);
 	test_compiler_friendly_tags(&font);
+	test_compiler_label_fonts(&font);
 	fnt_free(&font);
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);

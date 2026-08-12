@@ -130,9 +130,20 @@ private:
 	opennova::hud::HudFrameState state_;
 	Ref<ResourceRoot> root_;
 	std::array<Ref<Texture2D>, kTextureSlots> textures_;
-	std::array<Ref<Texture2D>, FNT_MAX_PAGES> page_textures_;
+	// Font glyph pages, one namespace per compiler font slot
+	// (opennova::hud::kHudFontSlot*): slot * FNT_MAX_PAGES + page.
+	std::array<Ref<Texture2D>, opennova::hud::kHudFontSlotCount * FNT_MAX_PAGES>
+			page_textures_;
 	fnt_font_t font_ = {};
 	bool font_valid_ = false;
+	// The Arial overlay label pair (engine hud_label_font_choice picks the
+	// faces/scale), loaded lazily per surface-width tier — retail re-inits
+	// its overlay fonts on resolution change.
+	fnt_font_t label_font_ = {};
+	bool label_font_valid_ = false;
+	fnt_font_t label_font_bold_ = {};
+	bool label_font_bold_valid_ = false;
+	int label_tier_ = -1; // -1 = not loaded; 0 <=640 / 1 <=800 / 2 >800
 	bool configured_ = false;
 	int crosshair_style_ = MIN_CROSSHAIR_STYLE;
 	// Additive rows cannot share this item's blend mode: they render through a
@@ -144,6 +155,12 @@ private:
 	Ref<Texture2D> load_hud_texture_(const String &p_name) const;
 	void load_crosshair_texture_();
 	void clear_font_();
+	// Parse one .fnt through the VFS and upload its pages into the slot's
+	// page-texture namespace; returns parse success.
+	bool load_fnt_(const String &p_name, fnt_font_t &r_font, int p_slot);
+	// (Re)load the Arial label pair when the surface width crosses a retail
+	// breakpoint, and hand the compiler the pair + the witnessed slot scale.
+	void ensure_label_fonts_(float p_surface_w);
 	void ensure_additive_item_();
 	void render_list_(const opennova::hud::HudDrawList &p_list);
 };

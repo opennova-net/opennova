@@ -389,7 +389,7 @@ GameFontRun GameFont::layout(const char *text, float x, float y,
 					for (int strike = 0; strike < strikes; ++strike) {
 						const float sx = cursor + static_cast<float>(strike);
 						GameFontQuad quad;
-						quad.page = page;
+						quad.page = page + page_base_;
 						quad.x_top_left = sx + skew - 0.5f;
 						quad.x_top_right = sx + glyph_w + skew - 0.5f;
 						quad.x_bottom_left = sx - skew - 0.5f;

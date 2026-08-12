@@ -40,6 +40,19 @@ void HudFrameCompiler::configure(const HudLayout &layout,
 	reset_runtime_state();
 }
 
+void HudFrameCompiler::configure_label_fonts(const fnt_font_t *normal,
+		const fnt_font_t *bold, float scale) {
+	// [orig: HUD_InitAllFonts @ 0x51ee20 stores each pair through the
+	// {font, scale_x, scale_y} slot writer @ 0x580453..0x580468]
+	label_font_.set_font(normal);
+	label_font_.set_page_base(
+			static_cast<uint32_t>(kHudFontSlotLabel * FNT_MAX_PAGES));
+	label_font_bold_.set_font(bold);
+	label_font_bold_.set_page_base(
+			static_cast<uint32_t>(kHudFontSlotLabelBold * FNT_MAX_PAGES));
+	label_scale_ = scale > 0.0f ? scale : 1.0f;
+}
+
 void HudFrameCompiler::update_layout(const HudLayout &layout) {
 	// Texture-table refresh only — the fade/flash/message state survives
 	// [orig: HUD_LoadAllTextures @ 0x59e3d6 reloads art without a HUD reset].
@@ -653,7 +666,13 @@ void HudFrameCompiler::element_attach_labels(const HudFrameState &state,
 	// full color, others ((rgb & 0xFEFEFE) | 0xFE000001) >> 1 @ 0x5a364e]
 	(void)w;
 	(void)h;
-	if (state.attach_labels.empty() || font_.font() == nullptr) {
+	// Attach labels draw with the BOLD Arial label font at the slot scale
+	// [orig: fontObj @ 0x5a3680/@ 0x5a38a1 via HUD_MeasureTextWH @ 0x580ab0 /
+	// HUD_DrawTextCentered_HalfBright @ 0x580680 — both pass the slot scales].
+	const bool have_label = label_font_bold_.font() != nullptr;
+	const GameFont &lf = have_label ? label_font_bold_ : font_;
+	const float ls = have_label ? label_scale_ : 1.0f;
+	if (state.attach_labels.empty() || lf.font() == nullptr) {
 		return;
 	}
 	for (const HudAttachLabel &label : state.attach_labels) {
@@ -669,15 +688,15 @@ void HudFrameCompiler::element_attach_labels(const HudFrameState &state,
 		//  Render_DrawWireframeRect @ 0x5a36ad].
 		int text_w = 0;
 		int text_h = 0;
-		font_.measure(label.text.c_str(), 1.0f, 1.0f, &text_w, &text_h);
+		lf.measure(label.text.c_str(), ls, ls, &text_w, &text_h);
 		const float half_w = static_cast<float>(text_w) * 0.5f;
 		emit_wire_rect(label.screen_x - half_w, label.screen_y - 2.0f,
 				label.screen_x + half_w + 5.0f,
 				label.screen_y + static_cast<float>(text_h) + 1.0f, color);
 		// The text rides the half-bright color mode like every HUD text draw
 		// [orig: HUD_DrawTextCentered_HalfBright @ 0x5a36c1].
-		const GameFontRun run = font_.layout(label.text.c_str(),
-				label.screen_x, label.screen_y, 1.0f, 1.0f, kFontAlignCenter,
+		const GameFontRun run = lf.layout(label.text.c_str(),
+				label.screen_x, label.screen_y, ls, ls, kFontAlignCenter,
 				half_bright_argb(color));
 		draw_list_.glyphs.insert(draw_list_.glyphs.end(), run.quads.begin(),
 				run.quads.end());
@@ -691,13 +710,20 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state,
 	// like the attach labels — the presenter projects, the compiler draws.
 	(void)w;
 	(void)h;
+	// Friendly tags draw with the NORMAL Arial label font at the slot scale
+	// [orig: g_hudLabelFont @ 0x5a3a0c; the spectated g_hudLabelFontLarge
+	// Impac22b leg @ 0x5a3a29 rides the unported death screen].
+	const bool have_label = label_font_.font() != nullptr;
+	const GameFont &lf = have_label ? label_font_ : font_;
+	const float ls = have_label ? label_scale_ : 1.0f;
 	if (state.friendly_tag_mode == 0 || state.friendly_tags.empty() ||
-			font_.font() == nullptr) {
+			lf.font() == nullptr) {
 		return;
 	}
-	// The line metric is the '0' glyph's height [orig: GameFont_MeasureCharHeight
-	// ('0', font) @ 0x5a3a36].
-	const float font_h = font_.char_height('0', 1.0f);
+	// The line metric is the '0' glyph's height at the slot scale
+	// [orig: GameFont_MeasureCharHeight ('0', font) @ 0x5a3a36 — the helper
+	// multiplies by the slot's scale_y @ 0x580a80].
+	const float font_h = lf.char_height('0', ls);
 	for (const HudFriendlyTag &tag : state.friendly_tags) {
 		// Too close to draw [orig: dist >= 0x8000 gate @ 0x5a3b0c] and the fog
 		// cull [orig: dist <= Env_FogDistCurrent @ 0x5a3b28].
@@ -747,9 +773,9 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state,
 		if (friendly_tag_text_visible(state.friendly_tag_mode, tag.dist_q16)) {
 			// Centered text at the projected point, half-bright with the
 			// distance alpha kept [orig: HUD_DrawTextHalfBrightF @ 0x5a4268 ->
-			// CGameFont_DrawText flags 1].
-			const GameFontRun run = font_.layout(resolved.c_str(), tag.screen_x,
-					top_y, 1.0f, 1.0f, kFontAlignCenter,
+			// CGameFont_DrawText flags 1, the slot scales pushed @ 0x580720].
+			const GameFontRun run = lf.layout(resolved.c_str(), tag.screen_x,
+					top_y, ls, ls, kFontAlignCenter,
 					half_bright_keep_alpha(argb));
 			draw_list_.glyphs.insert(draw_list_.glyphs.end(), run.quads.begin(),
 					run.quads.end());
@@ -760,7 +786,7 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state,
 				// HUD_DrawMedicCrossQuad @ 0x59bcb0].
 				int text_w = 0;
 				int text_h = 0;
-				font_.measure(resolved.c_str(), 1.0f, 1.0f, &text_w, &text_h);
+				lf.measure(resolved.c_str(), ls, ls, &text_w, &text_h);
 				const float x0 = tag.screen_x -
 						(static_cast<float>(text_w) * 0.5f + font_h) - 0.5f;
 				const float y0 = top_y - 0.5f;

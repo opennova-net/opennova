@@ -52,8 +52,8 @@ projectile-versus-HUD shifts are now witnessed and ported (D-HUD-7).
 | Crosshair / reticle + spread | **ported** (`HudFrameCompiler::element_crosshair`, D-HUD-7 CLOSED; D-HUD-8/9/10; target cursor / aim-point quad / lock brackets unported) | `[orig: HUD_DrawCrosshair @ 0x592640]` + `[orig: HUD_DrawCrosshairCornerQuad @ 0x590f50]`; accumulator producers `[orig: RoundData_SpawnRound @ 0x4ec0d0]` + `[orig: Entity_UpdateInfantryPlayerBody @ 0x4b40e0]`; `npruntime_round_sim`, `infantry`, `netsim_client_replica_pipeline_recoil`, and `hud_helpers_test.gd` |
 | Standard weapon SIGHTS card | **ported** (`world::weapon_sights_card_eligible` → sim `scope_card_active`; `HudFrameCompiler::element_sights_card` + `godot/game/world/hud_sights_card.gd` materialize the authored rows) | `[orig: Render_ProcessMainSceneFrame @0x5ca299..0x5ca304 / @0x5caaf3..0x5cab15]`; Scoped/Sighted selectors + SWITCHFROM + NoCardSwitch/ForceScoped suppression; `nova_simulation_test.gd` + `game_hud_test.gd` |
 | ALPHAFADE semantics | **ported** (`hud_math::fade_decay`/`fade_flash_alpha`) | `[orig: parse @0x5a086c]` ×2.55/×2.55/×62; flash curve `[orig: @0x599af9]`; `hud_helpers_test.gd` |
-| Attach labels (seat/armory floats) | **ported** (`world::collect_attach_labels` + `HudFrameCompiler::element_attach_labels` + `game_hud_presenter.gd`, D-HUD-11/12/13) | `[orig: draw_vehicle_seat_and_armory_labels @0x5a3290]` full witness; label strings `[orig: HUD_InitOverlaySystem @0x5a479c..0x5a481e]`; `attachtextid` parse `[orig: @0x544d6c]`; ctest `vehicle_mount` + `def_parse_weapons`/`def_parse_items`; GUT `nova_simulation_test.gd`/`hud_helpers_test.gd` |
-| Friendly tags (overhead name labels) | **ported** (`world::collect_friendly_tags` + `HudFrameCompiler::element_friendly_tags` + `game_hud_presenter.gd`, D-HUD-20) | `[orig: HUD_DrawFriendlyTagsPass @0x5a4480]` → `[orig: HUD_DrawEntityLabel @0x5a39b0]` full witness; names `[orig: Entity_SpawnFromBMSRecord @0x40ecbf]` + the 36-name fallback `[orig: g_fallbackPeopleNames @0x840a78]`; modes/toggle `[orig: @0x49b573]`; ctest `hud_math`/`hud_frame_compiler`/`promote` |
+| Attach labels (seat/armory floats) | **ported** (`world::collect_attach_labels` + `HudFrameCompiler::element_attach_labels` + `game_hud_presenter.gd`, D-HUD-11/12/13) | `[orig: draw_vehicle_seat_and_armory_labels @0x5a3290]` full witness; label strings `[orig: HUD_InitOverlaySystem @0x5a479c..0x5a481e]`; `attachtextid` parse `[orig: @0x544d6c]`; the bold Arial label font + slot scale `[orig: @0x5a3680; HUD_InitAllFonts @0x51ee20]` ported 2026-08-11; ctest `vehicle_mount` + `def_parse_weapons`/`def_parse_items`; GUT `nova_simulation_test.gd`/`hud_helpers_test.gd` |
+| Friendly tags (overhead name labels) | **ported** (`world::collect_friendly_tags` + `HudFrameCompiler::element_friendly_tags` + `game_hud_presenter.gd`, D-HUD-20) | `[orig: HUD_DrawFriendlyTagsPass @0x5a4480]` → `[orig: HUD_DrawEntityLabel @0x5a39b0]` full witness; names `[orig: Entity_SpawnFromBMSRecord @0x40ecbf]` + the 36-name fallback `[orig: g_fallbackPeopleNames @0x840a78]`; modes/toggle `[orig: @0x49b573]`; eye-offset anchor `[orig: @0x4bf078..0x4bf14c]` + Arial label font `[orig: HUD_InitAllFonts @0x51ee20]` witnessed + ported 2026-08-11; ctest `hud_math`/`hud_frame_compiler`/`infantry`/`promote` |
 | Armory/vehicle-bay/FARP bottom prompts | witnessed — deferred with their systems (D-HUD-14) | `[orig: HUD_DrawGameplayOverlays @0x5bde60]` — preround/0x0A armory prompt, Flags 0x800 bay prompt, FARP wait/reload |
 | Mission triggered text (WAC/BMS `text`) | **ported** (`HudFrameCompiler::element_messages` + `game_hud_presenter.gd`, D-HUD-6) | `[orig: HUD_DisplayTriggeredText @0x51f190]` → `[orig: Chat_AddDebugMessage @0x4987f0]`; `hud_helpers_test.gd` expiry |
 | `hudpos.def` parser token map + 4-field positions | ported (`engine/formats/def`) | `[orig: loc_59F370; AMMOCOUNTPOS @0x59fc3d]`; ctest `def_parse_hudpos` |
@@ -608,7 +608,8 @@ resolves text, `hud_attach_labels.gd` draws):
   `((rgb & 0xFEFEFE) | 0xFE000001) >> 1` — RGB halved, alpha forced 0x7F
   `[orig: @0x5a3640..0x5a364e]`.
 - Geometry: measure w/h (`HUD_MeasureTextWH @0x580ab0` →
-  `CGameFont_MeasureText @0x674e70` with the fontObj scale pair); box
+  `CGameFont_MeasureText @0x674e70` with the bold slot's
+  (`g_hudLabelFontBold @0xB4C394`, ex "fontObj") scale pair); box
   `(x−w/2, y−2)..(x+w/2+5, y+h+1)` (`Render_DrawWireframeRect @0x5a36ad`);
   text centered through the half-bright text path
   (`HUD_DrawTextCentered_HalfBright @0x5a36c1`).
@@ -648,17 +649,47 @@ walk 2 = the player-slot table (`g_playerSlotPtrTable @0xA822D0`, entries
   `PlayerSlot_FindByEntityPtr` call at `@0x5a3a5a` discards its result (dead
   code); the `Player_CanFireWeapon`/`Player_IsEquippedWeaponScoped` pair at
   `@0x5a3b1a` runs for its auto-aim side effect only.
-- Anchor `(x, y, z + entity[+116] + 0x4000)` `[orig: @0x5a3a98]` — +116 is the
-  display-height field (writer unwalked); the port lifts by the standing
-  infantry constant + 0.25 u shell-side.
+- Anchor `(x, y, z + entity[+116] + 0x4000)` `[orig: @0x5a3a84..0x5a3a98]` —
+  +116 (+0x74) is the z of the entity's **eye/camera-offset triple**
+  (+0x6C/+0x70/+0x74), restamped per body tick from the anim capsule (writers
+  walked 2026-08-11): the NPC updater stores
+  `max(out_transform[4] − out_transform[3], 0x9000) · cosQ22(leanAngle +0xB0)`
+  with the lateral pair `delta·sinQ22(lean)·3/4` rotated by heading
+  `[orig: Entity_UpdateInfantryAI @0x4bf078..0x4bf14c]`; the non-local player
+  leg caps the extent at `0xD000`, tilts by lean/heading, and floors the store
+  at `0x2000` `[orig: Entity_UpdateInfantryPlayerBody @0x4b6984..0x4b68f5]`;
+  the local player takes the exact head-bone z − origin
+  `[orig: @0x4b6908..0x4b696c]`. Seeds: `0xB333`
+  `[orig: Player_InitPlayer @0x4e18a1]`, deploy reset `0xD000`
+  `[orig: NapiNPClientMsg_0x00A @0x42ffc9]`. Port: the infantry motor restamps
+  `Entity::eye_offset_z` (z only) each clip advance and the gather feeds it per
+  tag; the presenter lifts eye + 0.25 u. The head-bone local leg and the
+  lateral lean shift are residues (tags never draw the local player).
 - Gates: view distance ≥ `0x8000` (0.5 u, spectate target exempt)
   `[orig: @0x5a3b0c]`; fog cull vs `Env_FogDistCurrent` `[orig: @0x5a3b28]`;
   frustum project-or-bail (`Math_FixedPointTransformPoint22` +
   `clip_point_to_frustum_and_project @0x5a3b47`); the death screen pins the
   spectated entity to `(screenW/2, 2·fontH)` `[orig: @0x5a3b74]`.
-- Line metric = the `'0'` glyph's height
+- Line metric = the `'0'` glyph's height × the slot's scaleY
   `[orig: GameFont_MeasureCharHeight @0x580a80 ('0', font) @0x5a3a36]`; fonts
   `g_hudLabelFont @0xB4C388` / spectated `g_hudLabelFontLarge @0xB4C3A0`.
+  The overlay font slots are `{CGameFont*, scaleX float, scaleY float}` loaded
+  by `HUD_LoadFontIntoSlot @0x580400` (scale float = `scaleFP/65536`
+  `[orig: @0x58045d]`) from `HUD_InitAllFonts @0x51ee20`:
+  `g_hudLabelFont` = `Arial14n.fnt` (width ≤ 800) / `Arial16n.fnt` (> 800),
+  the bold slot `g_hudLabelFontBold @0xB4C394` = `Arial12b/14b/16b.fnt` per
+  the same 640/800/1024 tiers, both at scale
+  `(screenWidth<<16)/{640,800,1024}` `[orig: @0x51ef26]`;
+  `g_hudLabelFontLarge` = `Impac22b.fnt`, `g_hudLabelFontImpact38 @0xB4C3AC`
+  = `Impac38b.fnt`, both over 800. The draw/measure helpers pass the slot
+  scales into `CGameFont_DrawText`/`_MeasureText`
+  `[orig: HUD_DrawTextCentered_HalfBright @0x580680;
+  HUD_DrawTextHalfBrightF @0x580720; HUD_MeasureTextWH @0x580ab0]`.
+  Attach labels draw with the BOLD slot `[orig: @0x5a3680/@0x5a38a1]`.
+  Port: `HudOverlay::ensure_label_fonts_` loads the Arial pair per surface
+  width tier and `HudFrameCompiler::configure_label_fonts` draws the
+  friendly-tag and attach-label elements with it at the witnessed scale
+  (page-namespaced per font in the shared draw list).
 - **Colors**: health tier by the health bar's exact bands
   (`HUD_ClassifyHealthBand @0x59c1f0` — good > 0xC000, middle > 0x6FFF, both
   callers pass health ratios; the "distance LOD" name was a misnomer) →
@@ -725,10 +756,17 @@ walk 2 = the player-slot table (`g_playerSlotPtrTable @0xA822D0`, entries
 fog feed, the KEY_N cycle + toast) → `HudOverlay::set_friendly_tags` →
 `HudFrameCompiler::element_friendly_tags` + the hud_math policy helpers (the
 alpha ramp, mode rules, fallback table, speaking blend, alpha-preserving
-half-bright). Names ride BMS `name_index` → the mission `.bin`
+half-bright). The anchor rides the witnessed eye offset: the infantry motor
+restamps `Entity::eye_offset_z` per clip advance (NPC/player clamps above),
+the gather carries it per tag, and the presenter lifts eye + 0.25 u
+(2026-08-11; replaces the earlier 2.15 u standing-constant stand-in). Text
+draws with the witnessed Arial label font at the resolution-tier scale
+(`HudOverlay::ensure_label_fonts_` → `configure_label_fonts`; attach labels
+take the bold face). Names ride BMS `name_index` → the mission `.bin`
 `[PeopleNames]` harvest → `PromoteOptions::people_name_resolver` →
-`Entity::display_name`. Pinned by ctest `hud_math`, `hud_frame_compiler`,
-`promote`. Residues in the D-HUD-20 row.
+`Entity::display_name`. Pinned by ctest `hud_math`, `hud_frame_compiler`
+(label-font faces/scale/page namespaces), `infantry` (the eye-offset
+restamp), `promote`. Residues in the D-HUD-20 row.
 
 ### Gameplay prompts — `HUD_DrawGameplayOverlays @0x5bde60` (witnessed, deferred)
 
@@ -973,7 +1011,7 @@ behind it.
 | D-HUD-9 | **CLOSED 2026-07-31.** The crosshair previously hid from generic settled ADS | it draws while an aimed shot is NOT available — `!Player_CanFireWeapon() @0x5cf780`, whose promoted predicates are Scoped (`Flags & 1`) or Sighted (`Flags & 2`, except SWITCHFROM); movement/water reject only the ordinary Scoped leg, while reload-card-switch, camera, dead/airborne, ForceScoped, and seat gates complete the verdict | **FIXED.** The sim now stamps that bounded retail verdict once and feeds both visibility and ERROR row selection. The reticle remains through ADS ease and follows the witnessed Scoped/Sighted failure/override gates rather than raw `scope_engaged`. |
 | D-HUD-10 | the crosshair anchors at the fixed design center (512, 384) | the anchor is the projected aim point through `Viewport_ScreenToVirtual`: the literal screen center only for the on-foot local player with no camera mode `[orig: @0x5928a0]`; spectate / `g_camera_mode` (external/3P) project `Entity_BuildCameraView` (far point 65536000 q16 = 1000.0) `[orig: @0x592910..0x59295e]` | FIXED 2026-07-11 (weapon round): `LocalPlayerPresenter.aim_screen_point()` — `Vector2.INF` in first person (the HUD pins the exact center, matching `@0x5928a0`), the projected aim in third person; `GameHudPresenter` feeds it to both shells. |
 | D-HUD-11 | the label nearest-only gate models `equipped_adm_index != 0xFF` + not-in-a-ctrl/drvr-seat (`Simulation::get_attach_labels`) | `Player_CanFireWeapon @0x5cf780` additionally requires no camera mode (`g_camera_mode`), not underwater (`Position.Z + CameraOffset.Z < Env_WaterHeightFixed` with the 0x8000 flag), and the settled-scope legs | The extra legs are presentation/render state the sim doesn't carry; on foot with a weapon the observable difference is the underwater/camera cases. Wire when those states reach the sim. |
-| D-HUD-12 | label text metrics ride the `.fnt` fixed size through Godot layout (`hud_attach_labels.gd`) | `HUD_MeasureTextWH @0x580ab0` measures through the fontObj `{handle, scale_x, scale_y}` pair (`CGameFont_MeasureText @0x674e70`); labels draw at raw screen pixels | Same glyph source; exact per-glyph spacing is the standing CGameFont follow-up. Box arithmetic `(x−w/2,y−2)..(x+w/2+5,y+h+1)` is ported verbatim. |
+| D-HUD-12 | **FIXED 2026-08-11.** Attach labels lay out through the ported CGameFont engine with the witnessed BOLD Arial label font at the slot scale (`HudFrameCompiler::element_attach_labels` + `configure_label_fonts`) | `HUD_MeasureTextWH @0x580ab0` measures through the bold slot's (`g_hudLabelFontBold @0xB4C394`, ex "fontObj") `{handle, scale_x, scale_y}` pair (`CGameFont_MeasureText @0x674e70`); labels draw at raw screen pixels | Same glyph walk, same font file, same scale; box arithmetic `(x−w/2,y−2)..(x+w/2+5,y+h+1)` ported verbatim. Pinned by ctest `hud_frame_compiler` (label-font faces/scale). |
 | D-HUD-13 | **CLOSED 2026-08-10.** The label color base is the hudpos `hud_textcolor` | the master overlay color `g_hudActiveColor @0x24c1868` — writer NOW WITNESSED: `= g_hudColorTable[cfg_hud_color_index] \| 0xFF000000` (`HUD_InitTeamColorTable @0x51f240`; the input case 10 cycle `@0x49afc7`; config token `hud_color_index`, default **2** `@0x54d28b`), and table slot 2 is refreshed per frame from hudpos `hud_textcolor` (`@0x5a8100`) | **The reimpl base was already exact**: under the retail default scheme the master color IS `hud_textcolor`. The dim transform stays ported (`HudAttachLabels.dim`). Residue: the non-default schemes (table 0 white / 1 green / 3 light blue / 4 yellow / 5 salmon) ride the unported `hud_color_index` config cycle — recorded in the D-HUD-20 residue list. |
 | D-HUD-14 | no bottom prompts | `HUD_DrawGameplayOverlays @0x5bde60`: the preround armory prompt (`STROVER_ARMORY_INFO`, S2C-0x0A-fed `dword_A85B64`; SP never draws it), the vehicle-bay prompt (`Flags & 0x800` + team-gated groundEntity), the FARP wait/reload overlays (`attrib2 & 0x2000` + unlock mask) | Witnessed, deferred: each rides an unported system (MP preround state / vehicle.mnu / FARP rearm). The `STROVER_ARMORY_WAIT` leg is dead code in retail (the impossible `@0x5bdef8` recheck). |
 | D-HUD-15 | **CLOSED 2026-07-22.** The drawer was already parity-complete; the missing half was the source. The accumulator is now witnessed and ported (D-WPN-4, net-re §5.62): heat is a DEADLINE on the slot, `def+880 × (slot+0x14 − tick)`, stamped once per shot by the recoil arbiter | heat = `WeaponSlot_CalcAccumulatedHeat @0x53f780` per frame, clamped to `0xFFFF` into `hudInfo+60` `[orig: HUD_BuildEntityInfo @0x4b852e, clamp @0x4b854d]` | Fed sim → weapon view → HUD with the clamp applied where the original's info builder applies it. The bar fills on the thirteen emplaced/vehicle guns that author `heat_values` and stays hidden on foot, because no infantry weapon authors heat in retail either. |
@@ -1020,9 +1058,12 @@ behind it.
   wounded-icon gate (`+885 && !Entity_FindChildByDefType(e,1,1)`, viewer mount
   kind 2/5 or own +885); its writer is unwitnessed (net-re records a
   sector-action 30-tick timer at the same offset on pool-3 entities).
-- **`entity+116` (the label display height)** — the friendly-tag anchor addend
-  `[orig: @0x5a3a98]`; writer unwalked (the port lifts by the standing
-  constant).
+- **`entity+116` eye-offset writers** — RESOLVED 2026-08-11: the +0x6C/+0x74
+  triple is the per-tick eye/camera offset (`Entity_UpdateInfantryAI
+  @0x4bf078..0x4bf14c`; `Entity_UpdateInfantryPlayerBody @0x4b6984..0x4b696c`;
+  seeds `@0x4e18a1`/`@0x42ffc9`) — see the friendly-tags anchor bullet. Still
+  open here: the local head-bone exact leg and the lateral lean shift are
+  unported (tag consumers never read them for the drawn population).
 - **CGameFont glyph layout** `[orig: CGameFont_DrawText @0x6752c0]` — per-glyph
   D3D vertex build / spacing, to confirm `FntResource` layout parity.
 - **Timer/score, altitude/power bar, weapon slot bar** — enable flags
@@ -1048,6 +1089,19 @@ behind it.
   net views surface it.
 
 ## IDB changes
+
+Applied 2026-08-11 (the D-HUD-20 eye-offset + label-font hunt; anchored
+renames; IDB saved):
+
+- **Rename** `sub_580400` → `HUD_LoadFontIntoSlot` (anchored: allocates the
+  CGameFont, loads via `File_LoadResource`, stores the slot scale floats).
+- **Data renames** `fontObj @0xB4C394` → `g_hudLabelFontBold` (anchored:
+  `HUD_InitAllFonts` loads the Arial bold tier into it — the placeholder name
+  said nothing), `dword_B4C3AC` → `g_hudLabelFontImpact38` (anchored:
+  `Impac38b.fnt`).
+- **Comments** at `0x51ee20` (the four font slots, names + divisors),
+  `0x4bf078` (the org1 eye-offset restamp math + port back-ref), `0x4e18a1` /
+  `0x42ffc9` (the local eye-offset seeds), `0x580400` (the slot layout).
 
 Applied 2026-08-10 (the D-HUD-20 friendly-tags hunt; auto-name renames at
 anchored confidence; IDB saved):

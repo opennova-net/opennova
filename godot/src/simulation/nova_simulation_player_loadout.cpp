@@ -164,6 +164,9 @@ TypedArray<Dictionary> Simulation::get_friendly_tags() const {
 	for (const opennova::world::FriendlyTagSource &t : tags) {
 		Dictionary d;
 		d["position"] = Vector3(t.position.x, t.position.y, t.position.z);
+		// The eye height above the entity origin in mission units (16.16 ->
+		// float); the anchor witness lives at the gather (friendly_tags.h).
+		d["eye_height"] = static_cast<float>(t.eye_offset_z) / 65536.0f;
 		d["name"] = String::utf8(t.name.c_str());
 		d["entity_id"] = static_cast<int>(t.net_id);
 		d["health_ratio_fp16"] = t.health_ratio_fp16;

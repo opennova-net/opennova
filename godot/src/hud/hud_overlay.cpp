@@ -132,7 +132,80 @@ void HudOverlay::clear_font_() {
 	}
 	font_ = {};
 	font_valid_ = false;
+	if (label_font_valid_) {
+		fnt_free(&label_font_);
+	}
+	label_font_ = {};
+	label_font_valid_ = false;
+	if (label_font_bold_valid_) {
+		fnt_free(&label_font_bold_);
+	}
+	label_font_bold_ = {};
+	label_font_bold_valid_ = false;
+	label_tier_ = -1;
 	page_textures_ = {};
+}
+
+bool HudOverlay::load_fnt_(const String &p_name, fnt_font_t &r_font, int p_slot) {
+	if (root_.is_null() || p_name.is_empty()) {
+		return false;
+	}
+	const PackedByteArray bytes = root_->read_file(p_name.get_file());
+	if (bytes.is_empty() ||
+			fnt_parse(bytes.ptr(), static_cast<size_t>(bytes.size()), &r_font) != FNT_OK) {
+		return false;
+	}
+	const size_t base = static_cast<size_t>(p_slot) * FNT_MAX_PAGES;
+	for (uint32_t page = 0; page < r_font.num_pages && page < FNT_MAX_PAGES; ++page) {
+		const uint8_t *data = fnt_get_page_data_const(&r_font, page);
+		if (data == nullptr) {
+			continue;
+		}
+		PackedByteArray page_bytes;
+		page_bytes.resize(FNT_TEXTURE_SIZE);
+		memcpy(page_bytes.ptrw(), data, FNT_TEXTURE_SIZE);
+		const Ref<Image> image = Image::create_from_data(FNT_TEXTURE_WIDTH,
+				FNT_TEXTURE_HEIGHT, false, Image::FORMAT_RGBA8, page_bytes);
+		if (image.is_valid()) {
+			page_textures_[base + page] = ImageTexture::create_from_image(image);
+		}
+	}
+	return true;
+}
+
+void HudOverlay::ensure_label_fonts_(float p_surface_w) {
+	// Device leg only: the tier/name/scale policy is the engine's
+	// hud_label_font_choice; this loads the chosen .fnt pair through the VFS
+	// and re-uploads when the width tier changes.
+	const int w = static_cast<int>(p_surface_w);
+	if (w <= 0 || root_.is_null()) {
+		return;
+	}
+	const opennova::hud::HudLabelFontChoice choice =
+			opennova::hud::hud_label_font_choice(w);
+	if (choice.tier == label_tier_) {
+		return;
+	}
+	if (label_font_valid_) {
+		fnt_free(&label_font_);
+		label_font_ = {};
+		label_font_valid_ = false;
+	}
+	if (label_font_bold_valid_) {
+		fnt_free(&label_font_bold_);
+		label_font_bold_ = {};
+		label_font_bold_valid_ = false;
+	}
+	label_font_valid_ = load_fnt_(String(choice.normal_fnt), label_font_,
+			opennova::hud::kHudFontSlotLabel);
+	label_font_bold_valid_ =
+			load_fnt_(String(choice.bold_fnt), label_font_bold_,
+					opennova::hud::kHudFontSlotLabelBold);
+	label_tier_ = choice.tier;
+	compiler_.configure_label_fonts(
+			label_font_valid_ ? &label_font_ : nullptr,
+			label_font_bold_valid_ ? &label_font_bold_ : nullptr,
+			choice.scale);
 }
 
 Ref<Texture2D> HudOverlay::load_hud_texture_(const String &p_name) const {
@@ -168,6 +241,9 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	layout_ = HudLayout{};
 	textures_ = {};
 	clear_font_();
+	// The freed label pair must leave the compiler too; the first draw's
+	// ensure_label_fonts_ reloads it for the fresh root.
+	compiler_.configure_label_fonts(nullptr, nullptr, 1.0f);
 	configured_ = false;
 	if (p_hudpos.is_null() || !p_hudpos->is_loaded()) {
 		queue_redraw();
@@ -255,27 +331,7 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	if (font_name.is_empty()) {
 		font_name = p_hudpos->get_font_lo();
 	}
-	if (root_.is_valid() && !font_name.is_empty()) {
-		const PackedByteArray bytes = root_->read_file(font_name.get_file());
-		if (!bytes.is_empty() &&
-				fnt_parse(bytes.ptr(), static_cast<size_t>(bytes.size()), &font_) == FNT_OK) {
-			font_valid_ = true;
-			for (uint32_t page = 0; page < font_.num_pages && page < FNT_MAX_PAGES; ++page) {
-				const uint8_t *data = fnt_get_page_data_const(&font_, page);
-				if (data == nullptr) {
-					continue;
-				}
-				PackedByteArray page_bytes;
-				page_bytes.resize(FNT_TEXTURE_SIZE);
-				memcpy(page_bytes.ptrw(), data, FNT_TEXTURE_SIZE);
-				const Ref<Image> image = Image::create_from_data(FNT_TEXTURE_WIDTH,
-						FNT_TEXTURE_HEIGHT, false, Image::FORMAT_RGBA8, page_bytes);
-				if (image.is_valid()) {
-					page_textures_[page] = ImageTexture::create_from_image(image);
-				}
-			}
-		}
-	}
+	font_valid_ = load_fnt_(font_name, font_, opennova::hud::kHudFontSlotHud);
 
 	configured_ = true;
 	compiler_.configure(layout_, font_valid_ ? &font_ : nullptr);
@@ -565,6 +621,9 @@ void HudOverlay::_draw() {
 		return;
 	}
 	const Vector2 surface = draw_surface_();
+	// Retail re-inits the overlay fonts on resolution change; the lazy tier
+	// check is that re-init (the policy lives in hud_label_font_choice).
+	ensure_label_fonts_(surface.x);
 	render_list_(compiler_.compile(state_, surface.x, surface.y));
 }
 
@@ -638,7 +697,7 @@ void HudOverlay::render_list_(const HudDrawList &p_list) {
 	// top edge), so each renders as a polygon over its page texture, keeping
 	// the engine's -0.5 vertex offsets as-is.
 	for (const opennova::hud::GameFontQuad &glyph : p_list.glyphs) {
-		if (glyph.page >= FNT_MAX_PAGES) {
+		if (glyph.page >= page_textures_.size()) {
 			continue;
 		}
 		const Ref<Texture2D> page = page_textures_[glyph.page];

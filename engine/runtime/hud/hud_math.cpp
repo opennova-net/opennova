@@ -253,4 +253,21 @@ std::string friendly_tag_fallback_name(uint16_t encoded_entity_id) {
 	return out;
 }
 
+// [orig: HUD_InitAllFonts @0x51ee20 — the sprintf'd names per width branch
+// @0x51ee8a..0x51ef0e; the retail fixed-point (w<<16)/divisor lands in the
+// slot as a float @0x58045d, so the float division is the same value modulo
+// the 16.16 truncation]
+HudLabelFontChoice hud_label_font_choice(int surface_w) {
+	if (surface_w > 800) {
+		return {"Arial16n.fnt", "Arial16b.fnt",
+				static_cast<float>(surface_w) / 1024.0f, 2};
+	}
+	if (surface_w > 640) {
+		return {"Arial14n.fnt", "Arial14b.fnt",
+				static_cast<float>(surface_w) / 800.0f, 1};
+	}
+	return {"Arial14n.fnt", "Arial12b.fnt",
+			static_cast<float>(surface_w) / 640.0f, 0};
+}
+
 } // namespace opennova::hud
