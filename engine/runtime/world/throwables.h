@@ -77,6 +77,17 @@ int32_t throwable_item_for_viewer(int32_t friendly_item, int32_t enemy_item,
 // stick [orig: Entity_UpdateSatchelPhysics @ 0x448858 / claymore @ 0x447802].
 bool throwable_surface_accepts_stick(const FixedVec3 &normal_q16);
 
+// The accepted-face stick pose [orig: Entity_OrientToSurfaceNormal @ 0x445fa0]:
+// the hit-face normal is rotated into the device's yaw-local frame by the
+// inverse yaw matrix (Q22, truncated trig, +0x200000 rounding), then the two
+// atan2 legs write pitch/roll as BAM deltas off the caller biases while yaw is
+// KEPT. The satchel passes pitch bias 0xC0000040 (~-90 deg, lies flat) and the
+// claymore 0 (stands upright); both pass roll bias 0 and their own yaw
+// [orig: schl @ 0x448898..0x4488aa; clym @ 0x447842..0x447850].
+void throwable_stick_pose(const int32_t normal_q16[3], int32_t yaw_bam,
+                          int32_t pitch_bias_bam, int32_t roll_bias_bam,
+                          int32_t &pitch_bam, int32_t &roll_bam);
+
 // Host-fed binding rows: item type id (items.def id - 100000, the TrcrID space)
 // -> {think class (ai_function), motor class (move_function)}.
 struct ThrowableClassRow {
@@ -133,9 +144,6 @@ struct PlacedDevice {
     int32_t roll_bam = 0;
     EntityHandle parent;          // stuck-to entity [orig: +40 groundEntity]
     uint64_t parent_spawn_id = 0;
-    Vec3 parent_offset;           // device pos in the parent's yaw frame at stick time
-    int32_t parent_yaw_at_stick = 0;
-    int32_t device_yaw_at_stick = 0;
     // Remaining ticks until the think starts — the ARM DELAY. [orig: the clone
     // keeps the round's un-aged +684 (noage skipped aging) = ammo max_age, and
     // Entity_UpdatePool1Slot decrements 1/tick, thinking every tick at <= 0.]
