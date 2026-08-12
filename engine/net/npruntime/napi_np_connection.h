@@ -450,10 +450,10 @@ inline void reset_s2c_send_holdoff_counter(NapiNPConnection &conn) {
 // loopback latch this the SAME way: tick_connections drives every connection's §5.2a burst
 // (including the host loopback, D-NET-114) until completion, THEN this flips true. So the host's own
 // loopback is no longer starved of its per-frame 0x0A once Server_TickUpdate is the SP/host driver.
-// Its 0x0A anchors correctly (not the D-NET-121 dvxi5 fallback) because Server_BuildPlayerInfoAndAdd
-// binds conn.link.owned_entity to the host player when it spawns. [orig: the per-frame replicate fan
-// is is_in_session-gated inside Server_TickUpdate; the per-connection in-match selector is the burst
-// completion]
+// Server_BuildPlayerInfoAndAdd binds the loopback's live owner; D-NET-121 separately rejects an
+// unbound/freed/lifetime-stale owner before the writer can mutate or emit.
+// [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 gate; recipient entity eye reads
+// @0x517BF5..0x517C13; the outer filtered fan is NapiNPServer_SendFiltered @0x4C87E0]
 inline bool is_in_match(const NapiNPConnection &conn) {
 	return conn.burst.spawned && !conn.host_disconnect_sent;
 }

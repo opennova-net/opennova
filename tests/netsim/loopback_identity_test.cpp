@@ -252,22 +252,18 @@ bool run() {
 	world.net = &sink;
 	if (!expect(world.net->is_authority(h), "SP host is authority")) return false;
 
-	// --- frame anchor = the subject (local player) reference position ---
-	nw::PlayerReplicationState anchor;
-	anchor.spawn_x = static_cast<uint32_t>(w::to_fixed(8.0));
-	anchor.spawn_y = static_cast<uint32_t>(w::to_fixed(18.0));
-	anchor.spawn_z = static_cast<uint32_t>(w::to_fixed(-5.0));
-
-	// --- one loopback connection in the host's table (no owned entity -> rides the fallback anchor) ---
+	// --- one loopback connection owned by the live subject ---
+	// [orig: Server_SendEntityStateToPlayer @0x517BA0 takes its reference from
+	// the deployed recipient entity @0x517BF5..0x517C13]
 	std::vector<ns::Connection> conns;
-	conns.push_back(ns::Connection{&channel, ns::TransportMode::Loopback, {}, 0});
+	conns.push_back(ns::Connection{&channel, ns::TransportMode::Loopback, h, 0});
 	world.load_systems();
 	const uint32_t t0 = world.logic_tick;
 	world.run_logic_tick(); // advances under authority (the C2S drain is host-driven, not an ISystem)
 	if (!expect(world.logic_tick == t0 + 1, "logic tick advanced")) return false;
 
 	// --- host emits the post-logic S2C frame; the local client decodes it ---
-	ns::test::emit_all(world, conns, anchor);
+	ns::test::emit_all(world, conns);
 	if (!expect(channel.s2c_pending() == 1, "one 0x0A frame on the loopback")) return false;
 
 	ns::ClientReplicaPipeline view([](uint16_t type_id) {
@@ -290,21 +286,17 @@ bool run() {
 	            "decoded with the organic-Person wire codec")) return false;
 	if (!expect(es.type_id == 0x2000, "type id round-trips")) return false;
 
-	// Anchor stored verbatim.
-	if (!expect(cs.anchor_x == static_cast<int32_t>(anchor.spawn_x) &&
-	            cs.anchor_y == static_cast<int32_t>(anchor.spawn_y) &&
-	            cs.anchor_z == static_cast<int32_t>(anchor.spawn_z),
-	            "frame anchor stored")) return false;
-
 	// Position is the codec's exact reconstruction of the entity's wire position.
 	const int32_t wx = w::to_fixed(seed.position.x);
 	const int32_t wy = w::to_fixed(seed.position.y);
 	const int32_t wz = w::to_fixed(seed.position.z);
-	if (!expect(es.x == codec_recon(wx, static_cast<int32_t>(anchor.spawn_x)),
+	if (!expect(cs.anchor_x == wx && cs.anchor_y == wy && cs.anchor_z == wz,
+	            "frame anchor is the live owned entity")) return false;
+	if (!expect(es.x == codec_recon(wx, wx),
 	            "x is the codec's exact reconstruction")) return false;
-	if (!expect(es.y == codec_recon(wy, static_cast<int32_t>(anchor.spawn_y)),
+	if (!expect(es.y == codec_recon(wy, wy),
 	            "y is the codec's exact reconstruction")) return false;
-	if (!expect(es.z == codec_recon(wz, static_cast<int32_t>(anchor.spawn_z)),
+	if (!expect(es.z == codec_recon(wz, wz),
 	            "z is the codec's exact reconstruction")) return false;
 
 	// Coarse heading round-trips: the high byte of the 32-bit engine-frame BAM that
@@ -316,7 +308,7 @@ bool run() {
 	if (!expect(es.yaw_byte == want_yaw, "coarse yaw byte round-trips (engine-frame BAM)")) return false;
 
 	// A second emit/pump applies cleanly (frame counter advances, entity reused).
-	ns::test::emit_all(world, conns, anchor);
+	ns::test::emit_all(world, conns);
 	view.pump(channel);
 	if (!expect(view.frames_applied() == 2 && view.state().entities.size() == 1,
 	            "second frame re-applies to the same entity")) return false;
@@ -966,9 +958,8 @@ bool run_parented_pool_spawn_follows_and_retires() {
 
 	ns::LoopbackChannel channel;
 	std::vector<ns::Connection> conns;
-	conns.push_back(ns::Connection{&channel, ns::TransportMode::Loopback, {}, 0});
-	nw::PlayerReplicationState anchor;
-	ns::test::emit_all(world, conns, anchor);
+	conns.push_back(ns::Connection{&channel, ns::TransportMode::Loopback, parent_h, 0});
+	ns::test::emit_all(world, conns);
 	view.pump(channel);
 	decoded_child = view.state().find(child_h.packed);
 	decoded_parent = view.state().find(parent_h.packed);
@@ -987,7 +978,7 @@ bool run_parented_pool_spawn_follows_and_retires() {
 	world.run_logic_tick();
 	if (!expect(world.registry.get(child_h) == nullptr,
 	            "authoritative parent death despawned the attachment")) return false;
-	ns::test::emit_all(world, conns, anchor);
+	ns::test::emit_all(world, conns);
 	view.pump(channel);
 	if (!expect(view.state().find(child_h.packed) == nullptr,
 	            "decoded zero-health parent retires the attachment subtree")) return false;
@@ -1044,9 +1035,8 @@ bool run_mounted_infantry_pose_fields_round_trip() {
 
 	ns::LoopbackChannel channel;
 	std::vector<ns::Connection> conns;
-	conns.push_back(ns::Connection{&channel, ns::TransportMode::Loopback, {}, 0});
-	nw::PlayerReplicationState fallback;
-	ns::test::emit_all(world, conns, fallback);
+	conns.push_back(ns::Connection{&channel, ns::TransportMode::Loopback, ih, 0});
+	ns::test::emit_all(world, conns);
 	ns::Datagram dg;
 	if (!expect(channel.client_recv(dg), "mounted infantry frame dequeued")) return false;
 
@@ -1100,7 +1090,7 @@ bool run_mounted_infantry_pose_fields_round_trip() {
 		return false;
 
 	if (!expect(w::entity_detach_from_vehicle(world, ih), "infantry detaches")) return false;
-	ns::test::emit_all(world, conns, fallback);
+	ns::test::emit_all(world, conns);
 	if (!expect(channel.client_recv(dg), "dismounted infantry frame dequeued")) return false;
 	view.apply(nw::s2c::PER_FRAME_UPDATE, dg.body);
 	decoded = view.state().find(ih.packed);
@@ -1435,9 +1425,8 @@ bool run_remote_mounted_player_death_detaches_compact() {
 
 	ns::LoopbackChannel channel;
 	std::vector<ns::Connection> conns;
-	conns.push_back(ns::Connection{&channel, ns::TransportMode::Loopback, {}, 0});
-	nw::PlayerReplicationState fallback;
-	ns::test::emit_all(world, conns, fallback);
+	conns.push_back(ns::Connection{&channel, ns::TransportMode::Loopback, ph, 0});
+	ns::test::emit_all(world, conns);
 	ns::Datagram dg;
 	if (!expect(channel.client_recv(dg), "post-death compact frame dequeued")) return false;
 	auto classify = [](uint16_t type_id) {

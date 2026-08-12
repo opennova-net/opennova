@@ -38,9 +38,9 @@ struct Connection {
 	// anchored to, and the owner the host verifies a C2S 0x0C uplink against [orig:
 	// dispatch_entity_packet_callback @0x4D6A80 `entity == *owner_ctx`]. The host spawns it for
 	// a joiner (spawn_remote_player, bound by the host driver). An INVALID handle = pre-spawn
-	// (still handshaking): emit
-	// falls back to the default anchor. The host's own loopback connection leaves this invalid
-	// and rides the default anchor (= the local player; compute_net_anchor), preserving SP.
+	// (still handshaking), which cannot enter the per-player 0x0A writer. The host's own
+	// loopback binds its local player through the same host spawn path.
+	// [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 gate]
 	world::EntityHandle owned_entity{};
 
 	// Per-connection visibility/filter descriptor [orig: g_napi_np_ctx send_mask +0x1198].
@@ -49,6 +49,17 @@ struct Connection {
 	// SendFiltered cull is a deferred optimization; the field is here so it slots in without an
 	// API change.
 	uint32_t send_mask = 0;
+
+	// Allocation lifetime of `owned_entity`. Packed retail handles are reused, so
+	// the handle alone can silently retarget a connection after a despawn/slot
+	// reuse. Zero means "not stamped yet" (the pre-World reply path binds only a
+	// wire handle); the first live authoritative use stamps the registry serial.
+	// The original player slot owns a live entity pointer and the per-frame writer
+	// runs only for its deployed state, so a freed entity is never replaced by an
+	// unrelated same-slot allocation behind the writer's back.
+	// [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 gate and recipient
+	// entity eye read @0x517BF5..0x517C13]
+	uint64_t owned_entity_spawn_id = 0;
 
 	// Per-connection S2C 0x0A sub-block phase — the reimpl of the original's per-player-slot send
 	// counter [orig: playerSlot+100566, ++ before every 0x0A in Server_SendEntityStateToPlayer

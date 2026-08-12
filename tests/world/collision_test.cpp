@@ -1893,6 +1893,36 @@ struct ReusedSlotPersonProvider final : ICollisionSectionMatrixProvider {
     }
 };
 
+// Test host for the late clone's model-initialization leg.
+// [orig: Entity_CloneFromTemplateByType @0x4398A0 -> Entity_InitFromModel @0x40DC30]
+struct DemandItemProvider final : ICollisionSectionMatrixProvider {
+    CollisionWorld *collision = nullptr;
+    EntityHandle expected;
+    uint64_t expected_spawn_id = 0;
+    int32_t model_id = -1;
+    int ensure_calls = 0;
+    int matrix_calls = 0;
+
+    bool ensure_collision_instance(World &world, EntityHandle entity) override {
+        ++ensure_calls;
+        const Entity *current = world.registry.get(entity);
+        if (collision == nullptr || entity != expected || current == nullptr ||
+            current->registry_spawn_id != expected_spawn_id || model_id < 0)
+            return false;
+        collision->assign_entity(entity, model_id, current->registry_spawn_id);
+        return true;
+    }
+
+    bool build_section_matrices(World &, EntityHandle, int32_t,
+                                const CollisionMatrix &entity_world,
+                                const CollisionModel &model,
+                                std::vector<CollisionMatrix> &out) override {
+        ++matrix_calls;
+        out.assign(model.sections.size(), entity_world);
+        return true;
+    }
+};
+
 void test_person_section_raycast_uses_posed_bone_matrix() {
     Rig rig(person_section_model());
     rig.cw.assign_entity(rig.soldier, 0);
@@ -3436,6 +3466,107 @@ void test_projectile_polygon_raycast() {
     CHECK(!collision_raycast_polygons(scale_target, scale_ray, fx(10.0), 0, hit));
 }
 
+// A placed throwable is cloned into pool 1 after the mission-start asset sweep,
+// but retail initializes that clone's item model before the ordinary pool-1
+// projectile CFAC walk. The reimpl must demand-resolve the late collision
+// instance before its unresolved 0.5-unit sphere can decide the hit.
+// [orig: Entity_CloneFromTemplateByType @0x4398A0 -> Entity_InitFromModel
+// @0x40DC30; Projectile_RaycastProximitySlots @0x4E53D4 ->
+// Physics_RaycastAgainstBoneCollision @0x4E4CB0]
+void test_late_pool1_item_resolves_cfac_before_sphere_fallback() {
+    World world;
+    world.registry.configure_pool(0, 2);
+    world.registry.configure_pool(1, 2);
+
+    Entity shooter;
+    shooter.kind = EntityKind::Organic;
+    shooter.health = 150;
+    const EntityHandle owner = world.registry.spawn(0, shooter);
+    CHECK(owner.valid());
+
+    Entity placed;
+    placed.kind = EntityKind::Item;
+    placed.has_item_def = true;
+    placed.item_id = 7001;
+    placed.position = {5.0f, 0.0f, 0.0f};
+    placed.yaw = 90; // identity model placement [orig: entity matrix @0x613F40]
+    placed.bound_radius = 0.5f; // ThrowableSim::place_from_round stand-in
+    placed.uniform_scale_q16 = fx(0.1); // face is narrower than the fallback sphere
+    const EntityHandle first = world.registry.spawn(1, placed);
+    CHECK(first.valid());
+
+    CollisionWorld collision;
+    const int32_t first_model =
+            collision.add_model(wall_triangle_model(0x1234u, 9));
+    DemandItemProvider provider;
+    provider.collision = &collision;
+    provider.expected = first;
+    provider.expected_spawn_id = world.registry.get(first)->registry_spawn_id;
+    provider.model_id = first_model;
+    collision.set_section_matrix_provider(&provider);
+    collision.build_tick_tables(world);
+
+    ProjectileTrace graze;
+    graze.owner = owner;
+    graze.start = FixedVec3{fx(0.0), fx(0.45), fx(0.05)};
+    graze.end = FixedVec3{fx(10.0), fx(0.45), fx(0.05)};
+    CHECK(!collision.trace_projectile(world, graze).hit());
+    CHECK(provider.ensure_calls == 1);
+    CHECK(collision.has_instance(world, first));
+
+    // The same allocation now uses its resolved face. It must not ask the
+    // provider again, and it reports the authored section/material instead of
+    // a metadata-free sphere contact.
+    ProjectileTrace face = graze;
+    face.start.y = face.end.y = 0;
+    face.start.z = face.end.z = fx(0.1);
+    const ProjectileHit first_hit = collision.trace_projectile(world, face);
+    CHECK(first_hit.hit_class == ProjectileHitClass::DynamicEntity);
+    CHECK(first_hit.geometry_entity == first);
+    CHECK(first_hit.section_index == 0);
+    CHECK(first_hit.surface_type == 9);
+    CHECK(first_hit.material_flags == 0x1234u);
+    CHECK(provider.ensure_calls == 1);
+
+    // Reusing the packed slot cannot inherit the prior allocation's model.
+    const uint64_t first_spawn_id = provider.expected_spawn_id;
+    world.registry.despawn(first);
+    const EntityHandle replacement = world.registry.spawn(1, placed);
+    CHECK(replacement == first);
+    CHECK(world.registry.get(replacement)->registry_spawn_id != first_spawn_id);
+    const int32_t replacement_model =
+            collision.add_model(wall_triangle_model(0x0034u, 12));
+    provider.expected = replacement;
+    provider.expected_spawn_id =
+            world.registry.get(replacement)->registry_spawn_id;
+    provider.model_id = replacement_model;
+    collision.build_tick_tables(world);
+    const ProjectileHit replacement_hit =
+            collision.trace_projectile(world, face);
+    CHECK(replacement_hit.geometry_entity == replacement);
+    CHECK(replacement_hit.surface_type == 12);
+    CHECK(replacement_hit.material_flags == 0x0034u);
+    CHECK(provider.ensure_calls == 2);
+
+    // A genuinely model-less late item still receives the bounded compatibility
+    // sphere, preserving the existing unresolved-item rule.
+    Entity unresolved = placed;
+    unresolved.position = {8.0f, 0.0f, 0.0f};
+    unresolved.uniform_scale_q16 = 0;
+    const EntityHandle unresolved_h = world.registry.spawn(1, unresolved);
+    CHECK(unresolved_h.valid());
+    collision.build_tick_tables(world);
+    ProjectileTrace sphere;
+    sphere.owner = owner;
+    sphere.extra_ignore = replacement;
+    sphere.start = FixedVec3{fx(6.0), 0, 0};
+    sphere.end = FixedVec3{fx(10.0), 0, 0};
+    const ProjectileHit sphere_hit = collision.trace_projectile(world, sphere);
+    CHECK(sphere_hit.hit_class == ProjectileHitClass::DynamicEntity);
+    CHECK(sphere_hit.geometry_entity == unresolved_h);
+    CHECK(sphere_hit.section_index == -1);
+}
+
 void test_projectile_trace_authority_radius_and_damage_gates() {
     World world;
     world.registry.configure_pool(0, 8);
@@ -3877,6 +4008,7 @@ int main() {
     test_round_indestructible_organic_still_collides();
     test_round_person_sections_drive_hit_and_death_animation();
     test_projectile_polygon_raycast();
+    test_late_pool1_item_resolves_cfac_before_sphere_fallback();
     test_projectile_trace_authority_radius_and_damage_gates();
     test_published_person_bone_pose();
     test_person_mesh_row_keeps_authored_zero_sphere();

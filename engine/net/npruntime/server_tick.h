@@ -2,7 +2,6 @@
 
 #include <npwire/protocol_message.h> // JO_ENGINE_TICK_RATE
 
-#include <npwire/replication_model.h> // PlayerReplicationState (opennova::)
 #include <npwire/session_hello.h> // DisconnectEvent
 
 #include "npruntime/napi_np_server_ctx.h" // NapiNPServerCtx
@@ -44,10 +43,10 @@ bool Server_StageHostPunt(
 //       outbound_, which the owner pops + frames into a 0x83 SESSION via frame_in_match_s2c).
 //       Socket-free here (no UDP in engine/; the owner pumps bytes through the transport).
 //
-// `fallback_anchor` is the 0x0A subject for any connection with no owned entity yet (the host's own
-// loopback) [D-NET-121: PlayerReplicationState default-constructs to the dvxi5 map-center coords, NOT
-// origin — so the {} default is a NON-zero anchor; a spawned connection with no resolvable owned
-// entity anchors its 0x0A there]. A joiner (is_authority == 0) and the pre-World P2 path
+// A connection without its live owned player emits no 0x0A. Retail's writer is
+// state==6 gated and reads the recipient entity before it increments the frame
+// phase [orig: Server_SendEntityStateToPlayer @0x517BA0,
+// @0x517BF5..0x517C13, @0x517BE8]. A joiner (is_authority == 0) and the pre-World P2 path
 // (ctx.world == nullptr) no-op [orig: the host tick runs under is_authority @0x5266b4; is_in_session
 // @+0x58 gates the replicate/broadcast at step (3), not the C2S drain or the whole tick].
 //
@@ -56,7 +55,6 @@ bool Server_StageHostPunt(
 // through Server_TickUpdate, or the C2S queue drains — and the sim advances — twice. The drain/emit
 // primitives (netsim::drain_connection_c2s / emit_connection_s2c, connection_fan.h) are invoked ONLY
 // from here over connection_list; the legacy NetSystem-as-ISystem was retired at P8.
-void Server_TickUpdate(NapiNPServerCtx &ctx,
-		const PlayerReplicationState &fallback_anchor = {});
+void Server_TickUpdate(NapiNPServerCtx &ctx);
 
 } // namespace opennova::np

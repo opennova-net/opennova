@@ -513,6 +513,21 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
                 continue;
             CollisionPolygonHit model_hit;
             const CollisionTargetView *target = trace_target_view(world, h);
+            if (target == nullptr &&
+                hit_class == ProjectileHitClass::DynamicEntity &&
+                entity->kind == EntityKind::Item) {
+                // Runtime-placed satchels/mines are ordinary pool-1 item clones:
+                // their model initialization precedes the same CFAC projectile
+                // walk as mission-start items. Give the retained host asset
+                // provider one idempotent chance to attach that late allocation
+                // before choosing the unresolved compatibility sphere.
+                // [orig: Entity_CloneFromTemplateByType @0x4398A0 ->
+                // Entity_InitFromModel @0x40DC30; Projectile_RaycastProximitySlots
+                // @0x4E53D4 -> Physics_RaycastAgainstBoneCollision @0x4E4CB0]
+                const_cast<CollisionWorld *>(this)->ensure_entity_instance(
+                    const_cast<World &>(world), h);
+                target = trace_target_view(world, h);
+            }
             if (profile_trace && target != nullptr && target->model != nullptr) {
                 const int64_t faces =
                     static_cast<int64_t>(target->model->faces.size());

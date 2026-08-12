@@ -217,6 +217,9 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	if (!h.valid()) return h;
 
 	conn.link.owned_entity = h; // the per-connection S2C anchor + C2S owner-verify subject
+	conn.link.owned_entity_spawn_id = world.registry.get(h)->registry_spawn_id;
+	// [orig: Server_BuildPlayerInfoAndAdd @0x51D560 binds the newly allocated
+	// player row into the recipient slot used by Server_SendEntityStateToPlayer]
 
 	// RESPAWN-PENDING at join, iff the mission offers deploy-selectable spawn zones — the
 	// joiner enters UNDEPLOYED and its per-frame 0x0A flags1 bit1 holds the deploy screen
@@ -333,6 +336,8 @@ world::EntityHandle admit_synthetic_peer(NapiNPServerCtx &ctx, world::World &wor
 	conn->assigned_team = spawn.team;
 	conn->assigned_team_valid = true;
 	conn->link.owned_entity = h;
+	conn->link.owned_entity_spawn_id = world.registry.get(h)->registry_spawn_id;
+	// [orig: Server_PlayerAdd @0x51CBC0 binds the fresh player allocation]
 	conn->link.transport = transport;
 	conn->link.mode = netsim::TransportMode::Client;
 	conn->phase = ConnectionPhase::PlayerAdded;

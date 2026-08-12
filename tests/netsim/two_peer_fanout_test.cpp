@@ -8,8 +8,8 @@
 // Godot or OS sockets — the harness carries raw datagrams between the two transports the way a
 // real UDP socket pair would.
 //
-// Asserts: (a) one emit_s2c fans the SAME frame to both connections (byte-identical when both
-// share an anchor) AND each connection's frame is anchored to ITS OWN owned entity; (b) a
+// Asserts: (a) an ownerless/stale connection emits nothing and preserves its
+// replication state, while each live connection's frame is anchored to ITS OWN owned entity; (b) a
 // joiner's C2S 0x0C uplink drains through its connection and SNAPs its remote-peer entity; (c)
 // a 0x0C for the host's own player is drained but REJECTED (the §5.38a host-SNAP split).
 
@@ -98,8 +98,10 @@ w::PlayerSpawn player_spawn(w::Vec3 pos, int16_t yaw, uint16_t net_id,
 	return s;
 }
 
-// (a) One emit fans to BOTH connections; same-anchor frames are byte-identical, and each
-//     connection's frame is anchored to its OWN owned entity (per-connection anchoring).
+// (a) The per-player writer is absent until the connection owns a live player,
+// then anchors to that allocation and rejects a later same-slot lifetime.
+// [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 gate, recipient eye
+// reference @0x517BF5..0x517C13, phase increment @0x517BE8]
 bool run_fanout_and_per_connection_anchor() {
 	w::World world;
 	world.registry.configure_pool(0, 16);
@@ -124,29 +126,29 @@ bool run_fanout_and_per_connection_anchor() {
 	if (!expect(conns.size() == 2, "two connections registered")) return false;
 	(void)conn_self;
 
-	// Fallback anchor = the host player position (what Simulation::compute_net_anchor builds).
-	nw::PlayerReplicationState fallback;
-	fallback.spawn_x = static_cast<uint32_t>(w::to_fixed(5.0));
-	fallback.spawn_y = static_cast<uint32_t>(w::to_fixed(10.0));
-	fallback.spawn_z = static_cast<uint32_t>(w::to_fixed(-3.0));
-
-	// --- sub-case a1: byte-identity. conn_join still has NO owned entity, so it rides the
-	//     fallback anchor = the host position = conn_self's anchor. Both frames identical. ---
-	ns::test::emit_all(world, conns, fallback);
+	// --- sub-case a1: conn_join has no player. The live host emits, while the
+	// joiner produces neither bytes nor any hidden phase/cache/watermark progress. ---
+	conns[conn_join].s2c_phase = 7;
+	conns[conn_join].s2c_entity_age[3] = 9;
+	conns[conn_join].s2c_entity_heading[3] = 11;
+	conns[conn_join].s2c_entity_speed[3] = 13;
+	conns[conn_join].round_watermark = 17;
+	conns[conn_join].round_watermark_armed = true;
+	ns::test::emit_all(world, conns);
 	if (!expect(self_ch.s2c_pending() == 1, "loopback got one S2C frame")) return false;
-	if (!expect(udp_host.outbound_pending() == 1, "udp got one S2C raw datagram")) return false;
+	if (!expect(udp_host.outbound_pending() == 0,
+	            "ownerless connection got no S2C frame")) return false;
+	if (!expect(conns[conn_join].s2c_phase == 7 &&
+	                    conns[conn_join].s2c_entity_age[3] == 9 &&
+	                    conns[conn_join].s2c_entity_heading[3] == 11 &&
+	                    conns[conn_join].s2c_entity_speed[3] == 13 &&
+	                    conns[conn_join].round_watermark == 17 &&
+	                    conns[conn_join].round_watermark_armed,
+	            "ownerless skip preserved phase, cache, age, and watermark state"))
+		return false;
 
 	ns::Datagram self_dg;
 	if (!expect(self_ch.client_recv(self_dg), "loopback S2C dequeued")) return false;
-	std::vector<uint8_t> raw;
-	if (!expect(udp_host.pop_outbound(raw), "udp S2C dequeued")) return false;
-	// Identity framing: raw = [tag][body...].
-	if (!expect(raw.size() == self_dg.body.size() + 1, "udp raw = tag + body length")) return false;
-	if (!expect(raw[0] == self_dg.tag, "udp tag prefix == loopback tag")) return false;
-	bool bodies_equal = true;
-	for (std::size_t i = 0; i < self_dg.body.size(); ++i)
-		bodies_equal = bodies_equal && (raw[i + 1] == self_dg.body[i]);
-	if (!expect(bodies_equal, "fan-out bodies byte-identical (same anchor)")) return false;
 
 	// --- sub-case a2: per-connection anchor. Admit the joiner -> conn_join now owns joiner_h
 	//     and anchors to ITS position; conn_self stays anchored to host_h. ---
@@ -157,7 +159,7 @@ bool run_fanout_and_per_connection_anchor() {
 	if (!expect(world.cached.local_player == host_h,
 	            "admit_peer did NOT steal local_player from the host")) return false;
 
-	ns::test::emit_all(world, conns, fallback);
+	ns::test::emit_all(world, conns);
 	ns::UdpSessionTransport udp_join(ns::UdpSessionTransport::Role::Client);
 	carry(udp_host, udp_join);
 
@@ -199,6 +201,69 @@ bool run_fanout_and_per_connection_anchor() {
 	// is only possible if the two frames carried different anchors.
 	if (!expect(sh->x == hx && jj->x == jx,
 	            "per-connection anchor: each view exact on its own player")) return false;
+
+	// A packed pool/slot can be reused, but the retail player slot's live
+	// entity pointer does not silently retarget to the new allocation. Preserve
+	// that lifetime edge across the reimpl's packed-handle registry.
+	// [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 slot gate and
+	// recipient entity read @0x517BF5..0x517C13]
+	const uint64_t old_spawn_id = conns[conn_join].owned_entity_spawn_id;
+	world.registry.despawn(joiner_h);
+	w::Entity replacement_seed;
+	replacement_seed.kind = w::EntityKind::Organic;
+	replacement_seed.has_item_def = true;
+	replacement_seed.item_type = 3;
+	replacement_seed.item_id = 0x14B9;
+	replacement_seed.health = 150;
+	replacement_seed.position = {75.0f, 80.0f, -25.0f};
+	const w::EntityHandle replacement = world.registry.spawn_from(
+			0, static_cast<std::size_t>(joiner_h.slot()), replacement_seed);
+	if (!expect(replacement == joiner_h &&
+	                    world.registry.get(replacement)->registry_spawn_id != old_spawn_id,
+	            "pool slot reused by a distinct allocation lifetime"))
+		return false;
+
+	const uint8_t stale_phase = conns[conn_join].s2c_phase;
+	const uint8_t stale_age = conns[conn_join].s2c_entity_age[0];
+	const uint32_t stale_watermark = conns[conn_join].round_watermark;
+	const bool stale_armed = conns[conn_join].round_watermark_armed;
+	const std::vector<nw::GameEntitySnapshot> replacement_snapshot =
+			ns::snapshot_world(world);
+	if (!expect(!ns::emit_connection_s2c(
+	                    world, conns[conn_join], replacement_snapshot),
+	            "same packed handle with a stale lifetime emits nothing"))
+		return false;
+	if (!expect(udp_host.outbound_pending() == 0 &&
+	                    conns[conn_join].s2c_phase == stale_phase &&
+	                    conns[conn_join].s2c_entity_age[0] == stale_age &&
+	                    conns[conn_join].round_watermark == stale_watermark &&
+	                    conns[conn_join].round_watermark_armed == stale_armed,
+	            "stale-lifetime skip emits no bytes and mutates no frame state"))
+		return false;
+
+	// A deliberate rebind stamps the replacement lifetime and resumes on the
+	// next open frame boundary, anchored to that replacement's live position.
+	conns[conn_join].owned_entity_spawn_id =
+			world.registry.get(replacement)->registry_spawn_id;
+	if (!expect(ns::emit_connection_s2c(
+	                    world, conns[conn_join], replacement_snapshot),
+	            "valid replacement binding resumes emission"))
+		return false;
+	std::vector<uint8_t> rebound_raw;
+	if (!expect(udp_host.pop_outbound(rebound_raw) &&
+	                    rebound_raw.size() > 13 &&
+	                    rebound_raw[0] == nw::s2c::PER_FRAME_UPDATE,
+	            "replacement frame reached the transport"))
+		return false;
+	nw::FrameUpdate rebound_frame;
+	if (!expect(nw::decode_frame_update(
+	                    rebound_raw.data() + 1, rebound_raw.size() - 1,
+	                    ns::class_for_type_id, rebound_frame) &&
+	                    rebound_frame.anchor_x == w::to_fixed(75.0) &&
+	                    rebound_frame.anchor_y == w::to_fixed(80.0) &&
+	                    rebound_frame.anchor_z == w::to_fixed(-25.0),
+	            "replacement frame anchors to the replacement allocation"))
+		return false;
 	return true;
 }
 
@@ -364,11 +429,7 @@ bool run_retail_player_slots_start_after_bms_organics() {
 	if (!expect(joiner_h == w::EntityHandle::make(0, 5), "retail joiner player uses slot 5"))
 		return false;
 
-	nw::PlayerReplicationState fallback;
-	fallback.spawn_x = static_cast<uint32_t>(w::to_fixed(0.0));
-	fallback.spawn_y = static_cast<uint32_t>(w::to_fixed(0.0));
-	fallback.spawn_z = static_cast<uint32_t>(w::to_fixed(0.0));
-	ns::test::emit_all(world, conns, fallback);
+	ns::test::emit_all(world, conns);
 
 	ns::UdpSessionTransport udp_join(ns::UdpSessionTransport::Role::Client);
 	carry(udp_host, udp_join);
@@ -402,10 +463,6 @@ bool run_0a_subblock_phase_cycle() {
 	ns::LoopbackChannel ch;
 	conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, host_h, 0});
 
-	nw::PlayerReplicationState fallback;
-	fallback.spawn_x = static_cast<uint32_t>(w::to_fixed(1.0));
-	fallback.spawn_y = static_cast<uint32_t>(w::to_fixed(2.0));
-	fallback.spawn_z = static_cast<uint32_t>(w::to_fixed(3.0));
 
 	// Nontrivial engine-native values prove phase 2 is data-driven rather than a fixed map table.
 	world.network_env.valid = true;
@@ -420,7 +477,7 @@ bool run_0a_subblock_phase_cycle() {
 
 	// One full low-nibble cycle. Retail pre-increments, so the first flags2 is 1.
 	for (int i = 1; i <= 16; ++i) {
-		ns::test::emit_all(world, conns, fallback);
+	ns::test::emit_all(world, conns);
 		ns::Datagram dg;
 		if (!expect(ch.client_recv(dg), "0x0A frame dequeued")) return false;
 		if (!expect(dg.tag == nw::s2c::PER_FRAME_UPDATE, "tag 0x0A")) return false;
@@ -463,7 +520,7 @@ bool run_0a_subblock_phase_cycle() {
 
 	// The retail byte wraps naturally: 0xFF pre-increments to 0 and selects phase 0.
 	conns[0].s2c_phase = 0xFFu;
-	ns::test::emit_all(world, conns, fallback);
+	ns::test::emit_all(world, conns);
 	ns::Datagram wrap_dg;
 	if (!expect(ch.client_recv(wrap_dg), "wrapped 0x0A frame dequeued")) return false;
 	nw::FrameUpdate wrap_fu;
@@ -481,7 +538,7 @@ bool run_0a_subblock_phase_cycle() {
 	world.subgoals.show_win = 0x00000408u;
 	world.subgoals.show_lose = 0x00000810u;
 	conns[0].s2c_phase = 2; // next retail counter value is phase 3
-	ns::test::emit_all(world, conns, fallback, 0x30020u);
+	ns::test::emit_all(world, conns, 0x30020u);
 	ns::Datagram objective_dg;
 	if (!expect(ch.client_recv(objective_dg), "objective 0x0A frame dequeued")) return false;
 	nw::FrameUpdate objective_fu;
@@ -542,10 +599,9 @@ bool run_0a_health_class_byte_packed() {
 	std::vector<ns::Connection> conns;
 	ns::LoopbackChannel ch;
 	conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, host_h, 0});
-	nw::PlayerReplicationState fallback;
 
 	const auto emitted_health_byte = [&](uint8_t &out) -> bool {
-		ns::test::emit_all(world, conns, fallback);
+	ns::test::emit_all(world, conns);
 		ns::Datagram dg;
 		if (!expect(ch.client_recv(dg), "0x0A frame dequeued")) return false;
 		nw::FrameUpdate fu;
@@ -619,12 +675,11 @@ bool run_0a_vehicle_budget_round_robin() {
 	std::vector<ns::Connection> conns;
 	ns::LoopbackChannel ch;
 	conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, host_h, 0});
-	nw::PlayerReplicationState fallback;
 
 	// Frame math (flags2=1 first send): header 28 B + player 23 B + N x 26-B vehicle records
 	// (tail B, flags 0); the soft cap completes the record crossing 600 -> 22 vehicles/frame.
 	const auto pump_frame = [&](nw::FrameUpdate &fu) -> bool {
-		ns::test::emit_all(world, conns, fallback);
+	ns::test::emit_all(world, conns);
 		ns::Datagram dg;
 		if (!expect(ch.client_recv(dg), "0x0A frame dequeued")) return false;
 		const auto resolver = [](uint16_t tid) {
@@ -696,7 +751,7 @@ bool run_0a_vehicle_budget_round_robin() {
 	// the vehicle compact bodies with its DEFAULT resolver (which alone cannot know them).
 	ns::ClientReplicaPipeline view;
 	view.apply(0x0D, nw::encode_pool_spawn_batch(ns::build_pool1_spawn_batch(world)));
-	ns::test::emit_all(world, conns, fallback);
+	ns::test::emit_all(world, conns);
 	view.pump(ch);
 	if (!expect(view.frames_applied() == 1, "view applied the 0x0A frame")) return false;
 	int view_vehicles = 0;
@@ -779,7 +834,6 @@ bool run_0a_priority_view_terms() {
 	std::vector<ns::Connection> conns;
 	ns::LoopbackChannel ch;
 	conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, host_h, 0});
-	nw::PlayerReplicationState fallback;
 
 	const auto record_index = [](const nw::FrameUpdate &fu, uint16_t handle) {
 		for (std::size_t i = 0; i < fu.records.size(); ++i)
@@ -787,7 +841,7 @@ bool run_0a_priority_view_terms() {
 		return -1;
 	};
 	const auto pump = [&](nw::FrameUpdate &fu) -> bool {
-		ns::test::emit_all(world, conns, fallback);
+	ns::test::emit_all(world, conns);
 		ns::Datagram dg;
 		if (!expect(ch.client_recv(dg), "0x0A frame dequeued")) return false;
 		const auto resolver = [](uint16_t tid) {
@@ -883,14 +937,13 @@ bool run_0a_priority_dead_recipient_social_score() {
 	std::vector<ns::Connection> conns;
 	ns::LoopbackChannel ch;
 	conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, host_h, 0});
-	nw::PlayerReplicationState fallback;
 	const auto record_index = [](const nw::FrameUpdate &fu, uint16_t handle) {
 		for (std::size_t i = 0; i < fu.records.size(); ++i)
 			if (fu.records[i].handle == handle) return int(i);
 		return -1;
 	};
 	const auto pump = [&](nw::FrameUpdate &fu) -> bool {
-		ns::test::emit_all(world, conns, fallback);
+	ns::test::emit_all(world, conns);
 		ns::Datagram dg;
 		if (!expect(ch.client_recv(dg), "0x0A frame dequeued")) return false;
 		const auto resolver = [](uint16_t tid) {
@@ -945,8 +998,7 @@ bool run_0a_player_record_field_sources() {
 	std::vector<ns::Connection> conns;
 	ns::LoopbackChannel ch;
 	conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, host_h, 0});
-	nw::PlayerReplicationState fallback;
-	ns::test::emit_all(world, conns, fallback);
+	ns::test::emit_all(world, conns);
 
 	ns::Datagram dg;
 	if (!expect(ch.client_recv(dg), "0x0A frame dequeued")) return false;
@@ -980,7 +1032,7 @@ bool run_0a_player_record_field_sources() {
 	// Pending-wins selection [orig: reads +0x2B8 ?: +0x2BC @0x4c0cc7] + the channel ratio byte.
 	e->net_anim_pending = 11; // a queued crouch-walk commit
 	e->net_anim_phase = 37;
-	ns::test::emit_all(world, conns, fallback);
+	ns::test::emit_all(world, conns);
 	if (!expect(ch.client_recv(dg), "second 0x0A frame dequeued")) return false;
 	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), ns::class_for_type_id, fu),
 	            "second 0x0A frame decodes")) return false;
@@ -1018,8 +1070,7 @@ bool run_0a_deploy_hold_and_tail_stance() {
 	e->flags |= 1u; // the hidden bit the join sets with the pending flag [orig: @0x4ff7dd]
 	e->net_stance_bits = 2; // crouched — the tail must echo it (bit1)
 
-	nw::PlayerReplicationState fallback;
-	ns::test::emit_all(world, conns, fallback);
+	ns::test::emit_all(world, conns);
 	ns::Datagram dg;
 	if (!expect(ch.client_recv(dg), "0x0A frame dequeued")) return false;
 	nw::FrameUpdate fu;
@@ -1039,7 +1090,7 @@ bool run_0a_deploy_hold_and_tail_stance() {
 	conns[0].respawn_pending = false;
 	e->flags &= ~1u;
 	e->net_stance_bits = 0;
-	ns::test::emit_all(world, conns, fallback);
+	ns::test::emit_all(world, conns);
 	if (!expect(ch.client_recv(dg), "post-deploy 0x0A dequeued")) return false;
 	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), ns::class_for_type_id, fu),
 	            "post-deploy 0x0A decodes")) return false;
@@ -1053,7 +1104,7 @@ bool run_0a_deploy_hold_and_tail_stance() {
 	// stores + Health = 0; the 1->0 edge is the spawn hook @0x4c1109].
 	e->health = 0;
 	e->flags |= 2u;
-	ns::test::emit_all(world, conns, fallback);
+	ns::test::emit_all(world, conns);
 	if (!expect(ch.client_recv(dg), "dead-state 0x0A dequeued")) return false;
 	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), ns::class_for_type_id, fu),
 	            "dead-state 0x0A decodes")) return false;
@@ -1132,8 +1183,7 @@ bool run_0x26_attach_mounted_echo() {
 	std::vector<ns::Connection> conns;
 	ns::LoopbackChannel ch;
 	conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, ph, 0});
-	nw::PlayerReplicationState fallback;
-	ns::test::emit_all(world, conns, fallback);
+	ns::test::emit_all(world, conns);
 	ns::Datagram dg;
 	if (!expect(ch.client_recv(dg), "0x0A frame dequeued")) return false;
 	nw::FrameUpdate fu;
@@ -1156,7 +1206,7 @@ bool run_0x26_attach_mounted_echo() {
 	// The free-running byte's low nibble 8 carries the recipient mount target
 	// followed by that target MountSlot's +0x10/+0x12 clip/reserve words.
 	conns[0].s2c_phase = 7;
-	ns::test::emit_all(world, conns, fallback);
+	ns::test::emit_all(world, conns);
 	if (!expect(ch.client_recv(dg), "phase-8 mounted 0x0A dequeued")) return false;
 	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), attach_test_class, fu),
 	            "phase-8 mounted 0x0A decodes")) return false;
@@ -1176,7 +1226,7 @@ bool run_0x26_attach_mounted_echo() {
 	w::Entity *veh = world.registry.get(vh);
 	if (!expect(veh != nullptr && !veh->seats[0].occupant.valid(), "seat occupant freed"))
 		return false;
-	ns::test::emit_all(world, conns, fallback);
+	ns::test::emit_all(world, conns);
 	if (!expect(ch.client_recv(dg), "post-detach 0x0A dequeued")) return false;
 	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), attach_test_class, fu),
 	            "post-detach 0x0A decodes")) return false;
@@ -1228,10 +1278,9 @@ bool run_mounted_g_slot_route_echo() {
 	std::vector<ns::Connection> conns;
 	ns::LoopbackChannel ch;
 	conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, ph, 0});
-	nw::PlayerReplicationState fallback;
 
 	const auto emitted_seat_type = [&]() -> int {
-		ns::test::emit_all(world, conns, fallback);
+	ns::test::emit_all(world, conns);
 		ns::Datagram dg;
 		if (!ch.client_recv(dg)) return -1;
 		nw::FrameUpdate fu;
@@ -1324,7 +1373,7 @@ bool run_grounded_uplink_apply_and_echo() {
 
 	// (2) ECHO: the joiner's 0x0A record re-emits the carrier + compressed LOCAL pos +
 	// local yaw byte (single-bit locals survive the 12-bit-mantissa compressor exactly).
-	ns::test::emit_all(world, conns, nw::PlayerReplicationState{});
+	ns::test::emit_all(world, conns);
 	ns::Datagram dg;
 	if (!expect(join_ch.client_recv(dg), "joiner 0x0A frame dequeued")) return false;
 	nw::FrameUpdate fu;
@@ -1424,10 +1473,6 @@ bool run_round_event_fanout() {
 	conns.push_back(ns::Connection{&ch_host, ns::TransportMode::Loopback, host_h, 0});
 	conns.push_back(ns::Connection{&ch_peer, ns::TransportMode::Client, peer_h, 0});
 
-	nw::PlayerReplicationState fallback;
-	fallback.spawn_x = static_cast<uint32_t>(w::to_fixed(1.0));
-	fallback.spawn_y = static_cast<uint32_t>(w::to_fixed(2.0));
-	fallback.spawn_z = static_cast<uint32_t>(w::to_fixed(3.0));
 
 	auto next_frame = [&](ns::LoopbackChannel &ch, nw::FrameUpdate &fu) {
 		ns::Datagram dg;
@@ -1444,7 +1489,7 @@ bool run_round_event_fanout() {
 		backlog.adm_index = 9;
 		world.rounds.add(backlog);
 	}
-	ns::test::emit_all(world, conns, fallback);
+	ns::test::emit_all(world, conns);
 	{
 		nw::FrameUpdate fh, fp;
 		if (!expect(next_frame(ch_host, fh) && next_frame(ch_peer, fp), "arm frames decode"))
@@ -1475,7 +1520,7 @@ bool run_round_event_fanout() {
 		ev.adm_index = 11;
 		world.rounds.add(ev);
 	}
-	ns::test::emit_all(world, conns, fallback);
+	ns::test::emit_all(world, conns);
 	{
 		nw::FrameUpdate fh;
 		if (!expect(next_frame(ch_host, fh), "host frame decodes")) return false;
@@ -1508,7 +1553,7 @@ bool run_round_event_fanout() {
 	}
 
 	// Watermark: the same round never repeats on the next frame.
-	ns::test::emit_all(world, conns, fallback);
+	ns::test::emit_all(world, conns);
 	{
 		nw::FrameUpdate fh, fp;
 		if (!expect(next_frame(ch_host, fh) && next_frame(ch_peer, fp),
@@ -1604,10 +1649,9 @@ bool run_vehicle_drive_authority() {
 	std::vector<ns::Connection> conns;
 	ns::LoopbackChannel ch;
 	conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, ph, 0});
-	nw::PlayerReplicationState fallback;
 
 	// Frame A: parked pose.
-	ns::test::emit_all(world, conns, fallback);
+	ns::test::emit_all(world, conns);
 	ns::Datagram dg;
 	if (!expect(ch.client_recv(dg), "frame A dequeued")) return false;
 	nw::FrameUpdate fa;
@@ -1669,7 +1713,7 @@ bool run_vehicle_drive_authority() {
 
 	// Frame B: the streamed record carries the LIVE pose (compressed coords changed while
 	// the recipient anchor held still).
-	ns::test::emit_all(world, conns, fallback);
+	ns::test::emit_all(world, conns);
 	if (!expect(ch.client_recv(dg), "frame B dequeued")) return false;
 	nw::FrameUpdate fb;
 	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), attach_test_class, fb),

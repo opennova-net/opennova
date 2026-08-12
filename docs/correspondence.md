@@ -1089,7 +1089,8 @@ Reimpl seam (opennova ↔ opennova self-consistent + retail byte-parity where ci
 |---|---|---|
 | `np::ClientRuntime` / `Client_ProcessNetworkFrame` | `Client_ProcessNetworkFrame @0x42c180` | role-aware headless client (Joiner + host-as-client); recv-fold → C2S 0x0C (`!is_authority`-gated) |
 | `np::apply_in_match_c2s` (D-NET-126) | `NapiNPServerMsg_0x00C @0x501c30` | production `PeerC2SInMatch` consumer → `deliver_c2s` onto the owning connection → `Server_TickUpdate` drain |
-| `np::is_in_match(conn)` (D-NET-121/122) | `NapiNPServer_SendFiltered @0x4c87e0` | single in-match predicate shared by the drain + emit fan; host loopback no longer starved, anchors to its player |
+| `np::is_in_match(conn)` (D-NET-122) | `NapiNPServer_SendFiltered @0x4c87e0` | single in-match predicate shared by the drain + emit fan; host loopback no longer starved |
+| `netsim::emit_connection_s2c` owner validation (D-NET-121) | `Server_SendEntityStateToPlayer @0x517BA0..0x517C13` | resolve the live recipient allocation before phase/cache/watermark mutation; an unbound, freed, or same-handle replacement emits no 0x0A |
 | `netsim::ClientReplicaPipeline::apply` / `ISessionTransport::deliver_c2s` | `NapiNPProtocol_Pump @0x62a650` | remote-wire fold path / uniform C2S inbound-inject |
 
 ## 5.8 Throwables (engine-research 2026-07-20; world-wac-ai-re §27)

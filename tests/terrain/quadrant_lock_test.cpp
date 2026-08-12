@@ -11,14 +11,17 @@
 //
 // Covers:
 //   1. coords_locked_tap against a verbatim copy of the original's masking.
-//   2. height_field_height_world_bilinear at a sector seam, locked and unlocked.
-//   3. The default (all-zero locks) field still taps across the full atlas.
+//   2. Quadrant selection uses the original's quadrant-specific lock pair.
+//   3. height_field_height_world_bilinear at a sector seam, locked and unlocked.
+//   4. Runtime surface normals share the generated-map kernel and lock policy.
+//   5. The default (all-zero locks) field still taps across the full atlas.
 //
 // [orig: sub_402D20 @0x402D20, ported in engine/runtime/terrain/terrain_mesh.cpp.]
 
 #include "terrain_query/coords.h"
 #include "terrain_query/height_field.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdint>
@@ -174,7 +177,48 @@ int main() {
                     "nearest tap: plateau");
     }
 
-    // 4. A default-constructed field keeps the old full-atlas wrap, so terrains that
+    // 4. Normal queries use the retail generated-map basis: centered raw16
+    //    differences, a literal unit up, normalization, and the same quadrant
+    //    locks as height sampling. Invalid/empty sectors retain canonical up.
+    // [orig: Terrain_GenerateNormalMap @0x603210; diff scale @0x7C6950;
+    // WacScript_SpawnEffectAtSsnEntity terrain-normal read @0x4F23A0]
+    {
+        const TerrainSurfaceNormal asymmetric =
+                height_field_normal_from_raw16(512, 0, 768, 256);
+        check_close(asymmetric.x, 2.0 / 3.0, 1e-12,
+                    "normal kernel: asymmetric x component");
+        check_close(asymmetric.z, 2.0 / 3.0, 1e-12,
+                    "normal kernel: asymmetric z component");
+        check_close(asymmetric.up, 1.0 / 3.0, 1e-12,
+                    "normal kernel: unit-up component normalized");
+
+        const TerrainHeightField invalid{};
+        const TerrainSurfaceNormal invalid_normal =
+                height_field_surface_normal_world(invalid, 0.0f, 0.0f);
+        check_close(invalid_normal.x, 0.0, 0.0, "invalid normal: x is zero");
+        check_close(invalid_normal.z, 0.0, 0.0, "invalid normal: z is zero");
+        check_close(invalid_normal.up, 1.0, 0.0, "invalid normal: up is one");
+
+        SeamAtlas empty_atlas;
+        std::fill(empty_atlas.sector_grid.begin(), empty_atlas.sector_grid.end(), 0);
+        const TerrainSurfaceNormal empty_normal =
+                height_field_surface_normal_world(empty_atlas.field, 100.0f, 100.0f);
+        check_close(empty_normal.up, 1.0, 0.0, "empty sector normal: canonical up");
+
+        SeamAtlas seam_atlas;
+        const TerrainSurfaceNormal crossing =
+                height_field_surface_normal_world(seam_atlas.field, 100.0f, 511.0f);
+        check(crossing.z > 0.99 && crossing.up > 0.0,
+              "unlocked normal crosses into the neighbouring quadrant");
+        seam_atlas.field.locks.set(0, false, true);
+        const TerrainSurfaceNormal locked =
+                height_field_surface_normal_world(seam_atlas.field, 100.0f, 511.0f);
+        check_close(locked.x, 0.0, 0.0, "locked seam normal: x is flat");
+        check_close(locked.z, 0.0, 0.0, "locked seam normal: z is flat");
+        check_close(locked.up, 1.0, 0.0, "locked seam normal: canonical up");
+    }
+
+    // 5. A default-constructed field keeps the old full-atlas wrap, so terrains that
     //    declare no lock (Dvxg1 and friends) render exactly as before.
     {
         SeamAtlas atlas;

@@ -249,11 +249,14 @@ loopback view (handshake-less, `is_authority`, recv-fold only, `0x0C` suppressed
 loopback path — one fold path per role), `netsim::ISessionTransport::deliver_c2s` (uniform C2S
 inbound-inject), `np::apply_in_match_c2s` (the production `PeerC2SInMatch` consumer, D-NET-126), and the
 single `np::is_in_match(conn)` predicate shared by `Server_TickUpdate`'s drain + emit (resolving
-D-NET-121/122 — the host loopback's own per-frame `0x0A`, anchored to its player).
+D-NET-122 and the host-loopback half of D-NET-121). The remaining ownerless D-NET-121 edge closed
+2026-08-12: `emit_connection_s2c` validates the live owner allocation before writer-state mutation
+and emits nothing for an unbound/freed/reused slot. `[orig: Server_SendEntityStateToPlayer
+@0x517BA0..0x517C13]`
 
 Bar met: `npruntime_client_runtime` (always-on) — the full in-process client↔server round-trip
 (handshake → spawn → per-frame `0x0C` → `apply_in_match_c2s` → `Server_TickUpdate` drain/SNAP + `0x0A`
-fan → `ClientReplicaPipeline` fold) + the host-as-client D-NET-121/122 anchor path; `npruntime_golden_client`
+fan → `ClientReplicaPipeline` fold) + the host-as-client D-NET-121/122 owner/anchor path; `npruntime_golden_client`
 (env-gated `NW_GOLDEN_GAMEPLAY`, skip-clean) — the real emission path reproduces the captured retail
 `0x0C` **inner message byte-for-byte** and re-frames the captured 9-message bundle into a **byte-identical
 datagram** (emitted C2S == client-origin), with the S2C `0x0A` fold cross-checked against the

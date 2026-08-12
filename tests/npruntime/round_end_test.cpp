@@ -99,23 +99,21 @@ int main() {
 	ctx.np_protocol.connection_list.push_back(
 			make_conn(1, 2, &loop, ns::TransportMode::Loopback, player, true));
 
-	const PlayerReplicationState anchor{};
-
 	// --- 1. humans = the active human slot count (the SP host counts itself). ---
-	np::Server_TickUpdate(ctx, anchor);
+	np::Server_TickUpdate(ctx);
 	expect(world.cached.humans == 1, "humans == 1 for the SP host");
 
 	// --- 2. Kill tallies by the local player: green person -> greenkills, blue person
 	// -> bluekills, red person -> enemy; a green NON-person tallies nothing. ---
 	push_death(world, green_person, player);
-	np::Server_TickUpdate(ctx, anchor);
+	np::Server_TickUpdate(ctx);
 	expect(world.kill_stats.greenkills_by_player == 1, "green person kill -> greenkills");
 	expect(!world.round_end.ended, "kill tallies alone never end the round");
 
 	push_death(world, blue_person, player);
 	push_death(world, red_person, player);
 	push_death(world, green_item, player);
-	np::Server_TickUpdate(ctx, anchor);
+	np::Server_TickUpdate(ctx);
 	expect(world.kill_stats.bluekills_by_player == 1, "blue person kill -> bluekills");
 	expect(world.kill_stats.enemy_kills_by_player == 1, "team>=2 kill -> enemy bucket");
 	expect(world.kill_stats.greenkills_by_player == 1,
@@ -123,7 +121,7 @@ int main() {
 
 	// --- 3. A kill by someone else lands in the by-others family. ---
 	push_death(world, green_person2, red_person);
-	np::Server_TickUpdate(ctx, anchor);
+	np::Server_TickUpdate(ctx);
 	expect(world.kill_stats.friendly_kills_by_others == 1,
 	       "green person killed by an NPC -> friendly_kills_by_others");
 	expect(world.kill_stats.greenkills_by_player == 1, "the by-player bucket is untouched");
@@ -131,20 +129,20 @@ int main() {
 	// --- 4. SinglePlayerRespawn (attrib 0x40): the dead player respawns, no auto-lose. ---
 	world.mission_attrib_flags = 0x40;
 	push_death(world, player, red_person);
-	for (int i = 0; i < 63; ++i) np::Server_TickUpdate(ctx, anchor); // past a 1 Hz check
+	for (int i = 0; i < 63; ++i) np::Server_TickUpdate(ctx); // past a 1 Hz check
 	expect(!world.round_end.ended, "death with SP-respawn never auto-loses");
-	for (int i = 0; i < 621; ++i) np::Server_TickUpdate(ctx, anchor);
+	for (int i = 0; i < 621; ++i) np::Server_TickUpdate(ctx);
 	expect(world.registry.get(player)->alive, "the player respawned after the timer");
 
 	// --- 5. No SP-respawn: the 1 Hz check ends the round, winner 2 (lose); the
 	// respawn queue holds and the latch never double-fires. ---
 	world.mission_attrib_flags = 0;
 	push_death(world, player, red_person);
-	for (int i = 0; i < 63; ++i) np::Server_TickUpdate(ctx, anchor);
+	for (int i = 0; i < 63; ++i) np::Server_TickUpdate(ctx);
 	expect(world.round_end.ended, "dead player without SP-respawn -> round over");
 	expect(world.round_end.winner_team == 2, "auto-lose winner is team 2 (red)");
 	expect(world.effects.count("round_end") == 1, "one round_end host effect");
-	for (int i = 0; i < 700; ++i) np::Server_TickUpdate(ctx, anchor);
+	for (int i = 0; i < 700; ++i) np::Server_TickUpdate(ctx);
 	expect(!world.registry.get(player)->alive,
 	       "respawns hold once the round is over [orig: the gate check @0x519af6]");
 	world.process_round_end(1);

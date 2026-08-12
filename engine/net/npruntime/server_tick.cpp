@@ -790,8 +790,7 @@ bool Server_StageHostPunt(
 	return stage_host_punt(connection, mismatch_type);
 }
 
-void Server_TickUpdate(NapiNPServerCtx &ctx,
-		const PlayerReplicationState &fallback_anchor) {
+void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// A joiner is a pure non-authority client (its frame is P5's Client_ProcessNetworkFrame); the
 	// pre-World P2 unit-test path has no simulation to drive. Either way: no host frame. The host
 	// tick runs under is_authority [orig: Game_ProcessMainFrame @0x5263f0 gates the call
@@ -1035,7 +1034,10 @@ void Server_TickUpdate(NapiNPServerCtx &ctx,
 	// so Server_TickUpdate (the SP/host driver) fans it a per-frame 0x0A — its local view is no longer
 	// starved (the gap the legacy net-ISystem emit filled by emitting to every transport-bearing
 	// connection). Its 0x0A anchors to its owned_entity (the host player, bound by
-	// Server_BuildPlayerInfoAndAdd), NOT the D-NET-121 dvxi5 fallback_anchor.
+	// Server_BuildPlayerInfoAndAdd). An absent, freed, or lifetime-stale owner
+	// emits nothing and cannot advance per-recipient frame state.
+	// [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 gate, recipient
+	// eye stores @0x517BF5..0x517C13, phase increment @0x517BE8]
 	if (ctx.is_in_session) {
 		const std::vector<GameEntitySnapshot> ents = netsim::snapshot_world(world);
 		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
@@ -1045,7 +1047,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx,
 			// their configured S2C send boundary opens; queuing all intervening
 			// snapshots would burst stale frames at that boundary.
 			if (conn.type == 1 && !conn.s2c_send_boundary_open) continue;
-			netsim::emit_connection_s2c(world, conn.link, ents, fallback_anchor,
+			netsim::emit_connection_s2c(world, conn.link, ents,
 			                            ctx.config.game_type,
 			                            conn.type == 1
 						? kMaxFrameUpdateBodyBytes

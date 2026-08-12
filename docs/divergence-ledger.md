@@ -78,7 +78,6 @@ record splits a divergence into facets (e.g. D-NET-133), the facets get separate
 | D-NET-64 | Guided-weapon record: structural port done, 0x0C-dispatch wiring deferred, wire-unvalidated (no capture carries guided traffic) | B | WITNESSED-READY-DEFERRED + NEEDS-RE (capture) | PAR-NET |
 | D-NET-97 | Host pool routing still follows BMS `EntityKind`; retail's `Pool_Alloc` caller and exact item-definition allocation predicate remain unwitnessed. `ItemReplicationCatalog` now keeps raw type/attrib/attrib2/capability inputs on an independent `StoragePool::Unresolved` axis, so wire codec, motion family, and BMS kind can no longer silently masquerade as allocation evidence. The pool-1 trailer crash remains fixed; allocation parity remains open. | A | OPEN + NEEDS-RE | PAR-NET |
 | D-NET-116 | Pending-spawn load-complete gate (`dword_24D1DE0`) not modeled; latent for a driver that wires `ctx.world` during load | A | WITNESSED-READY-DEFERRED (latent) | PAR-NET |
-| D-NET-121 | The dvxi5 `fallback_anchor` still bites the no-owned-entity edge (a mid-match despawn); mostly resolved at P5 | A | OPEN (narrow residual) | PAR-NET |
 | D-NET-123 | `Server_TickUpdate` owns the logic tick; the double-tick guardrail is comment-only | A | WITNESSED-READY-DEFERRED (latent) | PAR-NET |
 | D-NET-124 | Drain/emit fan assumes type-1 (remote-joiner) nodes stay resident across a mid-match `configure_session_runtime()` | A | WITNESSED-READY-DEFERRED (latent) | PAR-NET |
 | D-NET-125 | The single-drain / single-tick invariant is comment-only (nothing blocks a `NetSystem` + `Server_TickUpdate` double-owner) | A | WITNESSED-READY-DEFERRED (latent) | PAR-NET |
@@ -119,6 +118,13 @@ receive drain, and `client_session_loopback_test` pins no synchronous 0x82 reply
 Closed 2026-07-24: **D-NET-131** -> `FIXED`
 (`start_host_session` selects mode 1 / `HostOnly` when `serve_and_play=false`, creates
 no type-2 loopback and therefore no phantom local player; serve-and-play retains mode 3).
+
+Closed 2026-08-12: **D-NET-121** -> `FIXED` — the S2C 0x0A writer no longer accepts a
+dvxi5 fallback anchor. It validates the connection's live owner allocation before any phase,
+visibility-cache, or round-watermark mutation; an unbound, despawned, or packed-slot-reused owner
+emits nothing until explicitly rebound. `[orig: Server_SendEntityStateToPlayer @0x517BA0 state==6
+gate; recipient entity eye reads @0x517BF5..0x517C13; phase increment @0x517BE8]` (full detail:
+net/novaworld-net-re.md P4/§5.44).
 
 Closed 2026-07-20: **D-NET-135** -> `FIXED` (the four world pools now use retail's
 650-B post-write guards with margins 0x10=40, 0x0D=110, 0x0C=100, and 0x20=30;
@@ -338,7 +344,6 @@ Closed 2026-07-10: **env #35** -> `FIXED` — Water sine LUT provenance: the run
 | D-THROW-4 | Stick pose uses geometric normal decomposition and parent-follow applies translation/yaw only; retail uses exact `Entity_OrientToSurfaceNormal` plus full-Euler `Entity_InterpolateFromParentDelta` (world-wac-ai-re §27.8) | A | OPEN (port exact Euler decomposition and full parent basis interpolation) | PAR-WORLD |
 | D-THROW-6 | `lndm` minefield items remain unported: `Entity_LandmineThink @0x441A40` is witnessed, but the def ammo-slot writers for +692/+696 (`SMALLLANDMINE`/`LARGELANDMINE`) are not (world-wac-ai-re §27.6/§27.8) | B | NEEDS-RE (resolve the def wiring, then port the witnessed think) | PAR-WORLD / research starter |
 | D-THROW-7 | Clients now consume decoded tag-2 round events through a visual-only `RoundSim`, so flying throwable presentation is no longer host-only. The placed-device S2C 0x59 spawn/0x12 removal path remains unwired, so the persisted-device replacement still does not reach remote clients (world-wac-ai-re §27.8; net-re §5.36) | A | OPEN (client tag-2 visual flight landed 2026-07-22; placed-device 0x59/0x12 fold and host emit remain) | PAR-WORLD / npruntime |
-| D-THROW-8 | Placed devices use a shootable 0.5-unit fallback sphere; retail registers the item model's CFAC collision instance, so face/shape-accurate hits remain open (world-wac-ai-re §27.8) | A | OPEN (register deployed-item graphics/collision and retain the sphere only as fallback) | PAR-WORLD |
 
 Closed 2026-07-05: **D-INF-4** → `FIXED` (the direction-table generator witnessed —
 `[orig: Math_BuildSinTable @ 0x613050]`, an accumulating 1281-entry sin table at 2^22
@@ -379,6 +384,12 @@ Closed 2026-07-22: **D-ITEM-20** -> `FIXED` — Building Static/collapse now gat
 Closed 2026-08-12: **D-THROW-1** -> `FIXED` — Throwable item sweeps now exclude terrain, water, and persons at the query boundary, leaving the witnessed pool-2/pool-1 arbitration so a nearer excluded domain cannot mask a farther entity (full detail: world-wac-ai-re.md §27.8).
 Closed 2026-07-22: **D-THROW-3** -> `FIXED` — Placed-device LOS now routes through the full terrain-plus-sector collision ray, excluding the device and candidate (full detail: world-wac-ai-re.md + git history).
 Closed 2026-07-21: **D-THROW-5** -> `FIXED` — The PowerThrow HUDPOWERBAR outline/fill/percent presentation and windup-state feed now match `HUD_DrawPowerThrowChargeBar @0x599830` (world-wac-ai-re §27.3/§27.8) (full detail: world-wac-ai-re.md + git history).
+Closed 2026-08-12: **D-THROW-8** -> `FIXED` — the pool-1 projectile walk demand-resolves
+late placed-item collision assets before choosing narrow phase, so resolved devices use their CFAC
+and only genuinely model-less items retain the bounded sphere. Packed-slot reuse is guarded by the
+registry allocation serial. `[orig: Entity_CloneFromTemplateByType @0x4398A0 ->
+Entity_InitFromModel @0x40DC30; Projectile_RaycastProximitySlots @0x4E53D4 ->
+Physics_RaycastAgainstBoneCollision @0x4E4CB0]` (full detail: world-wac-ai-re.md §27.8).
 Closed: **D-THROW-9** -> `FIXED` — Ported devices are pool-1 entities and already decrement arm delay once per tick, matching retail (full detail: world-wac-ai-re.md + git history).
 Closed 2026-07-22: **D-WPN-4** -> `FIXED` — The heat model, witnessed and ported 2026-07-22: heat is not a stored accumulator but a DEADLINE (full detail: world-wac-ai-re.md + git history).
 Closed 2026-07-10: **D-WPN-10** -> `FIXED` — Reimpl clip-key lookup was case-SENSITIVE (`SkeletalAnim::find_clip` exact ==) where the original resolves anim names with stricmp (`AnimMap_FindSlotByName @0x40cfa0`, name+5 `anim_` skip) ... (full detail: world-wac-ai-re.md + git history).
@@ -519,7 +530,6 @@ witness: [mission/mis-format-re.md](mission/mis-format-re.md).
 | D-3DILW-1 | v8 branch deferred (v10-only parser; the NovalogicTools v8 layout is unvalidated against the 3 local v8 files) | B | NEEDS-RE | rides an LW-import revival |
 | D-3DILW-2 | Textures deferred (geometry + one-weight skinning parsed; material textures not ported) | A | WITNESSED-READY-DEFERRED | rides an LW-import revival |
 | D-3DILW-3 | SAF/KSA playback intentionally not applied (`parsed_not_applied_pending_re`; the pose recipe is pinned, end-to-end validation pending) | B | NEEDS-RE | rides an LW-import revival |
-| D-PTL-7 | Scripted effect initial orientation starts at world-up instead of the retail terrain surface normal; attached fx2ssn groups subsequently follow the live entity basis | A | OPEN (terrain-normal lookup) | PAR-WORLD/runtime |
 | D-PTL-21 | Retail recursively partitions emitter AABBs, then globally particle-sorts each overlapping leaf; the reimpl globally particle-sorts the entire selected domain | A | OPEN (overlapping-emitter interleaving fixed; exact recursive leaf/tie order remains) | PR #237 adversarial review |
 
 The LW `.3di` record is unlanded overall (PR #45 closed); its rows ride whenever an LW
@@ -534,6 +544,12 @@ Closed 2026-07-14: **D-PTL-3** -> `FIXED` — `mod2x` approximated `DESTCOLOR`/`
 Closed 2026-07-14: **D-PTL-4** -> `FIXED` — `bump`/`bumpadd` used the wrong rotation axis and saturated encoded light bytes (full detail: ptl-format-re.md + git history).
 Closed 2026-07-14: **D-PTL-5** -> `FIXED` — `distort` used an arbitrary fixed-strength screen-texture offset (full detail: ptl-format-re.md + git history).
 Closed 2026-07-14: **D-PTL-6** -> `FIXED` — Atlas registrar, allocator, type preprocessing, and inset were approximated by per-emitter shelf packing (full detail: ptl-format-re.md + git history).
+Closed 2026-08-12: **D-PTL-7** -> `FIXED` — fx2ssn initial orientation now comes from a
+portable world-to-heightfield normal query sharing the generated terrain normal map's centered
+raw16 differences, 1/256 height scale, unit-up normalization, and quadrant-lock tap policy; the
+Godot boundary maps `{x,z,up}` once to `{x,y,z}`. `[orig: WacScript_SpawnEffectAtSsnEntity
+@0x4F23A0; Terrain_GenerateNormalMap @0x603210; scale @0x7C6950]` (full detail:
+particles/ptl-format-re.md §4/§8).
 Closed: **D-PTL-13** -> `FIXED` — Parser hard-failed a whole .ptl on any unrecognized top-level or `=`-less line where retail ignores unclaimed lines (full detail: ptl-format-re.md + git history).
 Closed 2026-07-14: **D-PTL-14** -> `FIXED` — Flipbook frame naming was guessed, causing missing shipped frames and procedural-fallback strobing (full detail: ptl-format-re.md + git history).
 Closed 2026-07-14: **D-PTL-15** -> `FIXED` — Static-batch buildings/decorations/no-anim vehicles formerly lost ITEMS.DEF `particlefx` because they had no per-entity Node/model handle (full detail: correspondence.md + git history).
