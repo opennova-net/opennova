@@ -3054,8 +3054,12 @@ round+0x1B4 `[orig: @ 0x4ec8da]`. The MP `NoTracers` rules bit (`dword_24D1E34 &
 1`, net-re §6.8 mp_attributes 0x001) kills the visual unless forcetracer.
 **Non-tracer rounds get `graphicModel` (+0x30) zeroed — invisible in flight**
 `[orig: @ 0x4ec900]`. Port (fully witnessed + rebuilt 2026-07-18, §24):
-`LiveRound.tracer/team/trail_slot` + the witnessed counter on the shooter entity
-(one weapon per NPC — the per-slot delta in D-AI-8a); the trail pool =
+`LiveRound.tracer/team/trail_slot` + the witnessed per-SLOT cadence byte
+(retail `weaponSlot+0x80`; D-AI-8a CLOSED 2026-08-12 — the local player's fire
+passes its active `WeaponSlotState::tracer_shot_counter` through
+`RoundSpawnParams::tracer_counter`, so each weapon keeps its own phase across
+switches; slot-less NPC fire keeps the shooter-entity byte, exactly one
+modeled weapon per NPC under D-AI-5); the trail pool =
 `world/tracer_trails.{h,cpp}`, the spawn-time style select + NoTracers gate =
 `RoundSim::spawn`, the ribbons = `fire_present_pass.gd` via
 `get_tracer_trails()`; the round graphic / glow / smoke-anim residuals are
@@ -4823,7 +4827,7 @@ FrameFX leg]`. The normal-pass geometry:
 
 | Component | Verdict | Evidence |
 |---|---|---|
-| Tracer decision (cadence/forcetracer/team) | MATCHING (re-verified this session; the per-slot counter delta stays D-AI-8a) | `round_sim.cpp` spawn; `npruntime_round_sim` section 6 |
+| Tracer decision (cadence/forcetracer/team) | MATCHING (per-slot cadence byte landed 2026-08-12 — D-AI-8a closed; NPC fire keeps the entity stand-in byte, one modeled weapon per NPC under D-AI-5) | `round_sim.cpp` spawn; `npruntime_round_sim` section 6 incl. the per-slot phase pin |
 | Trail channel lifecycle (alloc/append/drain/free) | MATCHING | `TracerTrailPool` [orig cites inline]; `npruntime_round_sim` section 7 |
 | Spawn-time friendly/enemy style select + NoTracers gate | MATCHING (the rules bit itself = the D-AI-8e net seam, sim field `no_tracers_rule`) | `round_sim.cpp` spawn at the 0x4ec740 cite; ctest section 7 |
 | Per-tick pre-move append + death append | MATCHING | `RoundSim::tick`; ctest section 7 |

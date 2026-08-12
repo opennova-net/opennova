@@ -223,6 +223,11 @@ struct WeaponSlotState {
     // derived from what is left of it (weapon_slot_accumulated_heat). 0 = cold.
     // [orig: MountSlot+0x14; stamp @ 0x542fa0/@ 0x542fb4, clear @ 0x54125f]
     int32_t heat_window_end_tick = 0;
+    // The tracer cadence byte: every tracer_rate-th round fired FROM THIS SLOT
+    // is a tracer, so each weapon keeps its own phase across switches.
+    // [orig: MountSlot+0x80; ++/wrap/test in RoundData_SpawnRound
+    // @ 0x4ec199..0x4ec1bb]
+    uint8_t tracer_shot_counter = 0;
 };
 
 // The accumulated heat on a slot, 0..~kCeiling — 0 when the def authors no heat model

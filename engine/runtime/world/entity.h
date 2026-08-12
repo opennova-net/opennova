@@ -297,11 +297,13 @@ struct Entity {
     // gate (<=16) and score decay. [orig: Entity_SetAITarget @0x45d760 maintains it;
     // AI_FindBestTargetB @0x466f60 consumes; world-wac-ai-re §16.3]
     int16_t ai_target_refcount = 0;
-    // Per-shooter tracer cadence counter: ++ per fired round, wraps at the ammo
-    // tracer_rate, tracer on wrap. Stands in for the original's per-WEAPON-SLOT byte
-    // (weaponSlot+0x80) — one weapon per NPC today, so behavior is identical; the
-    // counter surviving a player weapon swap is the tracked delta.
-    // [orig: RoundData_SpawnRound @0x4ec199-0x4ec1bb]
+    // Tracer cadence byte for SLOT-LESS producers (NPC fire): ++ per fired round,
+    // wraps at the ammo tracer_rate, tracer on wrap. Stands in for the original's
+    // per-WEAPON-SLOT byte (weaponSlot+0x80) on rows without per-slot weapon
+    // state — one modeled weapon per NPC (D-AI-5), so behavior is identical. The
+    // local player's fire passes its ACTIVE slot's WeaponSlotState byte instead
+    // (RoundSpawnParams::tracer_counter), so each weapon keeps its own phase
+    // across switches. [orig: RoundData_SpawnRound @0x4ec199-0x4ec1bb]
     uint8_t tracer_shot_counter = 0;
     // Per-player replicated damage class, indexed by AmmoDef file index. C2S
     // loadout entry byte 4 writes it; 1 = x0.9, 2 = x1.1, other = x1.

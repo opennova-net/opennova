@@ -689,17 +689,26 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params,
     r.max_age_ticks = ((ammo->flags & kAmmoFlagNoAge) != 0) ? INT32_MAX : ammo->max_age_ticks;
 
     // The tracer decision [orig: RoundData_SpawnRound @0x4ec184-0x4ec1e5]: every
-    // tracer_rate-th round per shooter is a tracer (the counter lives on the weapon
-    // slot +0x80 in the original — ours rides the shooter entity, one weapon per NPC
-    // today); rate 0 = never; no shooter = every round; the FORCETRACER ammo flag
-    // (0x8000) rides every round. Team = the shooter team byte [orig: round+0x162
-    // copy @0x4ec705; the slot+4 & 0x200 0xFF override is unmodeled].
+    // tracer_rate-th round FROM THE FIRING WEAPON SLOT is a tracer — the counter is
+    // the slot's +0x80 byte, so each weapon keeps its own phase across switches.
+    // Producers with per-slot state pass that byte (params.tracer_counter); the
+    // owner-entity byte stands in for producers without one (NPCs — one modeled
+    // weapon per NPC, D-AI-5). Rate 0 = never; no shooter = every round; the
+    // FORCETRACER ammo flag (0x8000) rides every round. Team = the shooter team
+    // byte [orig: round+0x162 copy @0x4ec705; the slot+4 & 0x200 0xFF override is
+    // unmodeled].
     bool tracer = true;                    // [orig: var init @0x4ec15a]
     Entity *owner_ent = world.registry.get(params.owner);
     if (ammo->tracer_rate == 0) {
         tracer = false;                    // [orig: @0x4ec18a]
+    } else if (params.tracer_counter != nullptr) {
+        // [orig: @0x4ec199-0x4ec1bb: ++slot->0x80, wrap to 0 at >= rate, tracer on
+        //  wrap]
+        if (++(*params.tracer_counter) >= ammo->tracer_rate)
+            *params.tracer_counter = 0;
+        tracer = (*params.tracer_counter == 0);
     } else if (owner_ent != nullptr) {
-        // [orig: @0x4ec199-0x4ec1bb: ++counter, wrap to 0 at >= rate, tracer on wrap]
+        // The slot-less producer stand-in (same recurrence on the entity byte).
         if (++owner_ent->tracer_shot_counter >= ammo->tracer_rate)
             owner_ent->tracer_shot_counter = 0;
         tracer = (owner_ent->tracer_shot_counter == 0);
