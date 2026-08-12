@@ -395,14 +395,35 @@ int AiSystem::infantry_resolve_state(int adm_id, int state) const {
 // @0x4b7356-0x4b7396, identical in the org1 selector dump 3693-3710]: an
 // uninterruptible current (bit 0x4) queues the target to pending; an exit-gated
 // current (0x20) commits only a movement-flagged (bit 0) target; else commit now.
-static void commit_body_state(InfantryState &inf, int resolved) {
+// The channel retarget with the gait->stance transition insert [orig:
+// AnimMap_UpdateEntity @0x40b662..0x40b737]: with no deferral armed, a forward
+// gait committing to its crouch/prone walk plays the 169-172 transition clip
+// first and re-arms the real target as pending for the clip-end promotion,
+// gated on the adm actually carrying the clip. The netsim replica channel runs
+// the same insert through the shared pair map (D-NET-209 / D-INF-23).
+static void begin_body_transition_with_insert(InfantryState &inf, int resolved,
+                                              const IRootMotionSource *root_motion) {
+    if (inf.anim_pending == 0) {
+        const int trans = gait_stance_transition_clip(inf.anim_state, resolved);
+        if (trans >= 0 && root_motion != nullptr &&
+            root_motion->has_clip(inf.adm_id, trans)) {
+            inf.begin_body_transition(trans);
+            inf.anim_pending = resolved; // deferred to the clip end [orig: @0x40b737]
+            return;
+        }
+    }
+    inf.begin_body_transition(resolved);
+}
+
+static void commit_body_state(InfantryState &inf, int resolved,
+                              const IRootMotionSource *root_motion) {
     if (resolved < 0) return; // no clips at all: hold the current state
     if (resolved == inf.anim_state) { inf.anim_pending = 0; return; }
     const uint32_t curf = infantry_anim_flags(inf.anim_state);
     if ((curf & 0x4u) != 0) {
         inf.anim_pending = resolved;
     } else if ((curf & 0x20u) == 0 || (infantry_anim_flags(resolved) & 0x1u) != 0) {
-        inf.begin_body_transition(resolved);
+        begin_body_transition_with_insert(inf, resolved, root_motion);
     } else {
         inf.anim_pending = resolved;
     }
@@ -449,7 +470,7 @@ void AiSystem::infantry_select(AiEntity &e) {
             target = anim_state::kWoundedWalk;
     }
 
-    commit_body_state(inf, infantry_resolve_state(inf.adm_id, target));
+    commit_body_state(inf, infantry_resolve_state(inf.adm_id, target), root_motion);
 }
 
 // The witnessed org2 player-body selection — see the ai.h declaration. One function
@@ -515,7 +536,7 @@ void AiSystem::player_body_select(AiEntity &e) {
         if (inf.lean_right) target = anim_state::kRollRight; // [orig: @0x4b734c]
     }
 
-    commit_body_state(inf, infantry_resolve_state(inf.adm_id, target));
+    commit_body_state(inf, infantry_resolve_state(inf.adm_id, target), root_motion);
 }
 
 // The physical recoil accumulator's per-body decay and orientation drift.
@@ -1262,7 +1283,11 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         const int32_t len = root_motion->clip_length_ticks(inf.adm_id, inf.anim_state);
         if (len >= 0 && inf.clip_phase >= len) {
             const int next = inf.anim_pending;
-            inf.begin_body_transition(next);
+            // Consume the deferral first: the promoted retarget runs the same
+            // gait->stance insert, which may re-arm it behind the 169-172 clip
+            // [orig: promotion @0x40b795/@0x40b7c3 re-enters the @0x40b662 insert].
+            inf.anim_pending = 0;
+            begin_body_transition_with_insert(inf, next, root_motion);
         }
     }
 
@@ -1831,7 +1856,7 @@ void AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
         const int64_t ddy = static_cast<int64_t>(tent->position.y * 65536.0f) - e.pos[1];
         if (ddx * ddx + ddy * ddy < static_cast<int64_t>(196608) * 196608 &&
             avail(anim_state::kPostAttack)) {
-            commit_body_state(inf, anim_state::kPostAttack);
+            commit_body_state(inf, anim_state::kPostAttack, root_motion);
             inf.ai_focus = EntityHandle{};
         }
         inf.combat_target = EntityHandle{};
@@ -1876,7 +1901,7 @@ void AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
             inf.combat_move_timer = slot.f[22] >> 4; // [orig: moveTimer = slot[22]>>4]
             inf.move_mode = 7;                       // hold + fight
             inf.target_dist = 0;
-            commit_body_state(inf, infantry_resolve_state(inf.adm_id, reaction));
+            commit_body_state(inf, infantry_resolve_state(inf.adm_id, reaction), root_motion);
         } else if (slot.f[16] < slot.f[17] && dist16 > slot.f[16]) {
             // Approach the target. [orig: moveMode 1, arrive 10 u]
             inf.move_mode = 1;
@@ -1890,7 +1915,7 @@ void AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
             // Hold in the combat pose. [orig: anim 49 + moveMode 7]
             inf.move_mode = 7;
             inf.target_dist = 0;
-            commit_body_state(inf, anim_state::kIdle3);
+            commit_body_state(inf, anim_state::kIdle3, root_motion);
         }
         inf.was_hit = false; // [orig: LABEL_721 wasHit = 0 once the response is chosen]
     }
@@ -1904,7 +1929,7 @@ void AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
         } else if (inf.magazine <= 0 && avail(anim_state::kReload)) {
             inf.move_mode = 0;
             inf.target_dist = 0;
-            commit_body_state(inf, anim_state::kReload);
+            commit_body_state(inf, anim_state::kReload, root_motion);
         }
     }
 
@@ -2341,7 +2366,8 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
             const int32_t len = root_motion->clip_length_ticks(inf.adm_id, inf.anim_state);
             if (len >= 0 && inf.clip_phase >= len) {
                 const int next = inf.anim_pending;
-                inf.begin_body_transition(next);
+                inf.anim_pending = 0; // consumed; the insert may re-arm it
+                begin_body_transition_with_insert(inf, next, root_motion);
             }
         }
     } else {

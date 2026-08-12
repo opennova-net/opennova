@@ -548,6 +548,19 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     org1 [orig: `@0x4b7cbf-0x4b7cd9`], which is what the port implements — a dev/admin
     feature, not a gameplay path. (The handler is renamed `NetMsg_HandlePoofToggle`,
     ex the `NetPacket_HandleWeaponSwitch` misnomer.)
+  - **D-INF-23** the authority body channel lacked the gait->stance transition-clip
+    insert — FIXED 2026-08-11. A forward gait {1,2,8,9,10,149} committing to its
+    crouch/prone walk {11,12,18,19} first plays `run2crouch`/`runl2crouch`/
+    `runr2crouch`/`run2prone` (169-172) and defers the real target to the clip's
+    completion boundary, gated on the adm carrying the clip and no deferred armed
+    [orig: `AnimMap_UpdateEntity @0x40b662..0x40b737`; promotion `@0x40b795/@0x40b7c3`].
+    Surfaced by the S11 grill (2026-08-07), which landed the replica-side twin first
+    (D-NET-209, netsim `row_root_motion_tick`); the authority port runs the insert in
+    `commit_body_state`'s direct-commit branch and both clip-end promotion sites, and
+    the pair map is the shared `world::gait_stance_transition_clip` (`infantry.h`)
+    consumed by BOTH channels so they cannot drift. Guarded by
+    `test_gait_stance_transition_insert` (pair map, insert + clip-end promotion,
+    crouch twin, no-clip direct commit) and the unchanged netsim arbitration suite.
   Everything else is structurally translated with per-mechanic dump citations and byte-pinned
   constants, unit-tested in tests/world/infantry_test.cpp and end-to-end in promote_test.
 - **Root-motion data path** (`AnimMap_UpdateEntity @ 0x40b5f0` → engine `InfantryRootMotion`):

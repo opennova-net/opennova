@@ -1733,6 +1733,96 @@ void test_remote_body_state_queue_gate() {
             infantry_anim_flags(111) & ~0x1u));
 }
 
+// The gait->stance transition insert on the authority body channel [orig:
+// AnimMap_UpdateEntity @0x40b662..0x40b737]: a forward gait committing to its
+// crouch/prone walk first plays the matching 169-172 one-shot and defers the
+// walk to the clip end; a model without the clip commits directly (D-INF-23).
+void test_gait_stance_transition_insert() {
+    // The shared pair map — the same function the netsim replica channel uses,
+    // so the two sides cannot drift (D-NET-209).
+    CHECK(gait_stance_transition_clip(anim_state::kWalkForward,
+                                      anim_state::kWalkCrouchForward) == anim_state::kRun2Crouch);
+    CHECK(gait_stance_transition_clip(anim_state::kRun2,
+                                      anim_state::kWalkCrouchForward) == anim_state::kRun2Crouch);
+    CHECK(gait_stance_transition_clip(anim_state::kRun3,
+                                      anim_state::kWalkProneForward) == anim_state::kRun2Prone);
+    CHECK(gait_stance_transition_clip(anim_state::kRunForward,
+                                      anim_state::kWalkProneForward) == anim_state::kRun2Prone);
+    CHECK(gait_stance_transition_clip(anim_state::kWalkForwardRight,
+                                      anim_state::kWalkCrouchForwardRight) == anim_state::kRunR2Crouch);
+    CHECK(gait_stance_transition_clip(anim_state::kWalkForwardLeft,
+                                      anim_state::kWalkCrouchForwardLeft) == anim_state::kRunL2Crouch);
+    CHECK(gait_stance_transition_clip(anim_state::kWalkForward,
+                                      anim_state::kWalkCrouchForwardRight) == -1);
+    CHECK(gait_stance_transition_clip(anim_state::kIdle, anim_state::kIdleCrouch) == -1);
+    CHECK(gait_stance_transition_clip(anim_state::kWalkCrouchForward,
+                                      anim_state::kWalkForward) == -1); // stand-up: no insert
+
+    // walk-forward -> prone with the clip authored: the insert plays run2prone
+    // with the walk deferred, and the clip-end promotion lands it.
+    {
+        World w;
+        AiSystem ai;
+        TestSource src;
+        src.clips = {anim_state::kWalkForward, anim_state::kIdle, anim_state::kStop,
+                     anim_state::kWalkCrouchForward, anim_state::kWalkProneForward,
+                     anim_state::kIdleCrouch, anim_state::kIdleProne,
+                     anim_state::kRun2Prone, anim_state::kRun2Crouch};
+        src.lengths[anim_state::kRun2Prone] = 6;
+        src.lengths[anim_state::kRun2Crouch] = 6;
+        ai.root_motion = &src;
+        AiEntity *e = soldier(ai);
+        e->inf.is_local_player = true;
+        e->health = 100;
+        e->inf.player_moving = true;
+        run_ticks(ai, w, 0, 4);
+        CHECK(e->inf.anim_state == anim_state::kWalkForward);
+
+        e->inf.stance = InfantryState::Stance::kProne;
+        run_ticks(ai, w, 4, 8);
+        CHECK(e->inf.anim_state == anim_state::kRun2Prone); // the insert plays first
+        CHECK(e->inf.anim_pending == anim_state::kWalkProneForward);
+
+        run_ticks(ai, w, 8, 24); // past the 6-tick one-shot: promotion lands 19
+        CHECK(e->inf.anim_state == anim_state::kWalkProneForward);
+        CHECK(e->inf.anim_pending == 0);
+
+        // Back up and drop to crouch: the crouch twin plays 169 first.
+        e->inf.stance = InfantryState::Stance::kStand;
+        run_ticks(ai, w, 24, 28);
+        CHECK(e->inf.anim_state == anim_state::kWalkForward);
+        e->inf.stance = InfantryState::Stance::kCrouch;
+        run_ticks(ai, w, 28, 32);
+        CHECK(e->inf.anim_state == anim_state::kRun2Crouch);
+        CHECK(e->inf.anim_pending == anim_state::kWalkCrouchForward);
+        run_ticks(ai, w, 32, 48);
+        CHECK(e->inf.anim_state == anim_state::kWalkCrouchForward);
+        CHECK(e->inf.anim_pending == 0);
+    }
+
+    // The adm gate: a model without the transition clips commits directly, the
+    // pre-insert behavior [orig: the table-entry != entry-0 gate @0x40b6a4].
+    {
+        World w;
+        AiSystem ai;
+        TestSource src;
+        src.clips = {anim_state::kWalkForward, anim_state::kIdle, anim_state::kStop,
+                     anim_state::kWalkCrouchForward, anim_state::kWalkProneForward,
+                     anim_state::kIdleCrouch, anim_state::kIdleProne};
+        ai.root_motion = &src;
+        AiEntity *e = soldier(ai);
+        e->inf.is_local_player = true;
+        e->health = 100;
+        e->inf.player_moving = true;
+        run_ticks(ai, w, 0, 4);
+        CHECK(e->inf.anim_state == anim_state::kWalkForward);
+        e->inf.stance = InfantryState::Stance::kProne;
+        run_ticks(ai, w, 4, 8);
+        CHECK(e->inf.anim_state == anim_state::kWalkProneForward); // direct commit
+        CHECK(e->inf.anim_pending == 0);
+    }
+}
+
 // The eye-offset restamp (entity+0x74): each body tick stores the anim capsule
 // extent, floored/capped per body, and mirrors it to the registry entity the
 // friendly-tag gather walks (anchor z = z + eye + 0x4000).
@@ -1781,6 +1871,7 @@ void test_eye_offset_restamp() {
 }
 
 int main() {
+    test_gait_stance_transition_insert();
     test_eye_offset_restamp();
     test_slope_standing_camera_stays_level();
     test_slope_prone_body_conforms_org2();
