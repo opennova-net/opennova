@@ -384,6 +384,13 @@ public:
 	MouseClaim pump_popup_mouse(MenuFrameState &io_state, int index,
 			float mouse_x, float mouse_y, bool button_down, float scale_x,
 			float scale_y);
+	// One wheel tick (steps > 0 scrolls rows down, < 0 up): the open popup
+	// exclusively, else the front-most row owner under the point. Deliberate
+	// divergence D-MNU-18 — retail ships no functioning menu wheel scroll
+	// (see menu_frame_scrollbar.cpp for the witness map).
+	bool pump_mouse_wheel(MenuFrameState &io_state, float mouse_x,
+			float mouse_y, int steps, float scale_x, float scale_y,
+			MouseClaim *claim);
 
 private:
 	struct WidgetNode;

@@ -349,8 +349,9 @@ CMEditWnd_UpdateScrollRange @ 0x661180; CScrollWnd_SetPageSize @ 0x64CE10;
 CScrollWnd_SetRangeAndClamp @ 0x64D490]`. Child-button hover/press and the
 multiline edit's own arrow/shuttle interaction remain D-MNU-13 residue (the
 pump's row owners are List/Multi/LanList/Table and the open combo popup;
-the multiline edit is not wired in), and no wheel policy exists on either
-side (retail wheel behavior is unwitnessed). The block-alignment leg
+the multiline edit is not wired into scrollbar or wheel interaction — see
+"Mouse wheel" below for the witnessed retail wheel dead-end and the
+D-MNU-18 reimpl divergence). The block-alignment leg
 (the whole-unwrapped-text measure gating v-center/bottom) is not compiled —
 no shipped multiline edit authors it.
 
@@ -488,10 +489,41 @@ is the ONE menu path (the MnuMenu Control tree is deleted). Pinned by
   dispatch_mouse_event @ 0x63ab00 g_ui_open_popup_wnd; CListWnd child walk
   @ 0x643f30]`). Remaining scrollbar residue is the constructed child
   BUTTONs' independent hover/selected/pressed states and named scroll
-  events; whether retail scrolls menu lists with the mouse WHEEL is
-  unwitnessed, and no reimpl surface handles it. Spin arrows compile with
-  their default-state art (their independent hover states are separate
-  child-widget state the compiled path does not yet model).
+  events. Spin arrows compile with their default-state art (their
+  independent hover states are separate child-widget state the compiled
+  path does not yet model).
+
+  **Mouse wheel (witnessed dead-end; D-MNU-18 divergence, 2026-08-12).**
+  Retail JO ships NO functioning menu wheel scroll. The full plumbing:
+  `Game_WindowProc` routes `WM_MOUSEWHEEL` (0x20A) into the input layer,
+  which accumulates the signed HIWORD delta in `scroll_delta` and fires
+  every registered mouse callback once per full ±120 with direction masks
+  `0x100` (up tick) / `0x200` (down tick), remainder persisting
+  `[orig: Input_DispatchMouseEvent @ 0x761571..0x7615d0]`. The shell-menu
+  callback maps BOTH tick masks to the same `WM 0x20A`, discarding the
+  direction `[orig: Menu_ShellMouseCallback @ 0x54b8c6]`; the scene
+  dispatcher turns that into widget event `0x100000B`
+  `[orig: dispatch_mouse_event @ 0x63ab72]`, and NO handler consumes it —
+  exhaustive image scans for direct and relative event-id compares find
+  only move/L-down/L-up/dblclk decoding in every named handler (list
+  @ 0x643cb0, table @ 0x642400 `CTableWnd_HandleNamedEvent` — defined
+  2026-08-12 from an unfunctionized gap — scroll @ 0x64d050, combo
+  @ 0x65c190, checkbox/button/spin/medit/edit, plus the 0x54xxxx screen
+  handlers). The in-game menu callback (pre.mnu scene and the in-world
+  weapon.mnu armory) has no wheel case at all — ticks return unhandled
+  `[orig: Menu_InGameMouseCallback @ 0x568760, registered @ 0x5687e5 /
+  0x569424]`. The wheel's only functioning menu-adjacent consumer is the
+  CONTROLS remap capture, mapping tick masks to binding masks
+  0x100→0x400 / 0x200→0x800 `[orig: @ 0x55c7bb..0x55c7d5]`.
+
+  Reimpl (D-MNU-18, kept divergence by the 2026-08-12 maintainer
+  decision): `MenuFrameCompiler::pump_mouse_wheel` scrolls one row per
+  tick (the CScrollWnd arrow step), routed the way the witnessed dispatch
+  routes every mouse event — the open popup exclusively, else the
+  front-most row owner (List/Multi/LanList/Table) under the point;
+  `MenuShell`/`ArmoryPresenter` feed Godot wheel notches as ticks. The
+  multiline edit stays unwired (D-MNU-13 residue). Pinned by
+  `menu_frame_compiler_test` and `menu_driver_test.gd`.
 
 ## The menu backdrop (Bink underlay) `[orig: UI_CreateMenuBinkVideos @ 0x54b590; BinkVideo_UpdateAllSlots @ 0x5676f0]` (grilled 2026-08-10)
 

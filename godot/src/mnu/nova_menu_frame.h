@@ -185,6 +185,12 @@ public:
 	bool process_popup_mouse(int p_index, const Vector2 &p_position,
 			bool p_button_down);
 
+	// One wheel tick (steps > 0 = rows scroll down): the open popup
+	// exclusively, else the front-most row owner under the point. True when
+	// a scrollable target claimed the tick; value changes arrive on
+	// "scroll_value_changed".
+	bool process_mouse_wheel(const Vector2 &p_position, int p_steps);
+
 	// The companions' name->pre-order-index seam (case-insensitive authored
 	// widget NAME; -1 = absent). Valid after configure().
 	int widget_index(const String &p_name) const;

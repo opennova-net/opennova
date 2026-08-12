@@ -593,6 +593,32 @@ func test_combo_popup_scrollbar_scrolls_rows() -> void:
 	assert_false(driver.is_combo_popup_open(combo), "the row pick closes the popup")
 
 
+func test_wheel_ticks_scroll_open_popup_rows() -> void:
+	# D-MNU-18 deliberate divergence: one wheel notch = one row; the open
+	# popup consumes the tick exclusively (retail ships no functioning menu
+	# wheel scroll — the witness lives at the engine pump).
+	var frame := MenuFrame.new()
+	add_child_autofree(frame)
+	frame.size = Vector2(800, 600)
+	var driver := MenuDriver.new()
+	driver.attach(frame, null)
+	assert_true(driver.open_document(_doc(COMBO_SCROLL_XML), null, null, null,
+			"weapon.mnu"), "document opens on the frame")
+	var combo := driver.widget_id("SCROLLY")
+	_click(driver, Vector2(250, 10))
+	assert_true(driver.is_combo_popup_open(combo), "the popup is open")
+	assert_true(driver.process_wheel(Vector2(240, 30), 1),
+			"the wheel tick claims the open popup")
+	assert_true(driver.is_combo_popup_open(combo),
+			"the wheel keeps the popup open")
+	# One down tick made absolute row 1 the top visible row.
+	_click(driver, Vector2(240, 30))
+	assert_eq(driver.selected_row(combo), 1,
+			"the wheel-scrolled top row picks its absolute index")
+	assert_false(driver.process_wheel(Vector2(240, 30), 1),
+			"with the popup closed, a tick over nothing scrollable is unclaimed")
+
+
 func test_combo_outside_click_dismisses_and_is_consumed() -> void:
 	var driver := _framed_driver(BOARD_XML)
 	var combo := driver.widget_id("MODE")

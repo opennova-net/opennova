@@ -703,6 +703,26 @@ func process_mouse(position: Vector2, button_down: bool) -> void:
 	_apply_cursor(_frame.get_cursor_texture())
 
 
+## One wheel tick (steps: +1 rows-down, -1 rows-up) in frame-local
+## coordinates. Deliberate divergence D-MNU-18 — retail ships no functioning
+## menu wheel scroll (the witness lives at the engine pump); the open popup
+## consumes the tick exclusively, else the front-most row owner under the
+## point. Returns true when a scrollable target claimed it.
+func process_wheel(position: Vector2, steps: int) -> bool:
+	if _frame == null or not _frame.is_configured():
+		return false
+	if not _frame.process_mouse_wheel(position, steps):
+		return false
+	if _open_combo_id >= 0:
+		var combo_index := _frame_index(_open_combo_id)
+		if combo_index >= 0:
+			# Keep the popup row hover matching the rows that just moved
+			# under the still cursor.
+			_frame.set_widget_hover_item(combo_index,
+					_frame.combo_popup_row_at(combo_index, position))
+	return true
+
+
 func _on_claim_changed(previous: int, current: int) -> void:
 	# The hover sound edges ride the visual-state transitions
 	# [orig: widget_process_mouse_event @ 0x647a00 — MOUSEIN on entering
