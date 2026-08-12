@@ -1129,7 +1129,9 @@ func render_terrain_frame() -> void:
 	# The engine compiles the terrain patch draw list for this frame's camera and
 	# Terrain applies it (ADR 0033 R2). Runs before the foliage leg, whose
 	# dispatcher consumes the draw list's fresh detail-cell handoff — the old
-	# self-driven _process walk left foliage reading a stale cell list.
+	# self-driven _process walk left foliage reading a stale cell list. The frame
+	# pipeline places the local view first, and Terrain samples that live viewport
+	# camera inside render_frame (D-RORD-8).
 	if _world_ready and _terrain != null:
 		_terrain.render_frame()
 
@@ -1149,7 +1151,7 @@ func render_foliage_frame() -> void:
 			if anchor_sim != null:
 				silhouette_anchors = anchor_sim.get_foliage_mask_anchor_positions()
 		_dispatcher.silhouette_anchors = silhouette_anchors
-		_dispatcher.render_frame(_frame_camera_xform)
+		_dispatcher.render_frame(_render_camera_xform())
 		_perf_foliage_us = Time.get_ticks_usec() - foliage_start
 
 

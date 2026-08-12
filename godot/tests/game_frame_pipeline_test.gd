@@ -26,15 +26,24 @@ class FakeWorld:
 	var trace: Array[String] = []
 	var network_ok := true
 	var presentation := FakePresentation.new(trace)
+	var camera_generation := 0
+	var terrain_camera_generation := -1
+	var foliage_camera_generation := -1
 
 	func begin_device_frame(_camera_pos: Vector3, _camera_xform: Transform3D,
 			_delta: float) -> void:
 		trace.append("begin")
 
-	func render_terrain_frame() -> void: trace.append("terrain")
-	func render_foliage_frame() -> void: trace.append("foliage")
+	func render_terrain_frame() -> void:
+		terrain_camera_generation = camera_generation
+		trace.append("terrain")
+	func render_foliage_frame() -> void:
+		foliage_camera_generation = camera_generation
+		trace.append("foliage")
 	func get_runtime() -> FakePresentation: return presentation
-	func present_local_view_frame() -> void: trace.append("local_view")
+	func present_local_view_frame() -> void:
+		camera_generation += 1
+		trace.append("local_view")
 	func drive_network_frame() -> bool:
 		trace.append("network")
 		return network_ok
@@ -66,10 +75,14 @@ func test_pipeline_orders_one_typed_session_call_between_concrete_devices() -> v
 			"the one sampled input object crosses the pipeline unchanged")
 	assert_almost_eq(input.delta_seconds, 0.0125, 0.000001)
 	assert_eq(world.trace, [
-		"begin", "terrain", "foliage", "session", "local_view", "network",
+		"begin", "session", "local_view", "terrain", "foliage", "network",
 		"weather", "occlusion", "iris", "materials", "particles", "audio:0",
 		"clear", "finish",
 	])
+	assert_eq(world.terrain_camera_generation, 1,
+			"terrain samples the post-present camera generation")
+	assert_eq(world.foliage_camera_generation, 1,
+			"foliage samples the post-present camera generation")
 
 
 func test_network_install_failure_suppresses_every_later_device_phase() -> void:
@@ -83,4 +96,4 @@ func test_network_install_failure_suppresses_every_later_device_phase() -> void:
 			MissionFrameInput.new())
 
 	assert_eq(world.trace,
-			["begin", "terrain", "foliage", "session", "local_view", "network"])
+			["begin", "session", "local_view", "terrain", "foliage", "network"])

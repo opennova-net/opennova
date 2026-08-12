@@ -5200,8 +5200,8 @@ Binary: retail `Jointops.exe` (kong IDB, imagebase 0x400000). ctest `throwables`
 |---|---|---|
 | PowerThrow charge (press gate, release curve, speed scale, remote C2S byte) | MATCHING | §27.3; ctest `throwables` test_power_throw_charge / test_charge_scales_spawn_speed; `npruntime_client_fire_test` |
 | PowerThrow HUDPOWERBAR | MATCHING (including 15 output-pixel text offset) | §27.3; D-THROW-5 |
-| Grenade motor (drag/gravity/spin/bounce/water/fuse) | ported core; exact no-water sentinel, lifetime-head/fuse timing, and sound-only first-five-bounces presentation fixed in PR #282; query/PRNG/parent-Euler residuals remain | §27.4; D-THROW-1/-2/-4; test_grenade_bounce_and_fuse, test_ballistic_expiry_is_silent |
-| Satchel/claymore motors + rest conversion | ported core; face-normal stick predicate and full placed pose/item/health carry fixed in PR #282 | §27.5; D-THROW-1/-2/-4; test_satchel_places_device |
+| Grenade motor (drag/gravity/spin/bounce/water/fuse) | ported core; exact no-water sentinel, lifetime-head/fuse timing, sound-only first-five-bounces presentation, and pool-only item sweep are live; PRNG/parent-Euler residuals remain | §27.4; D-THROW-2/-4; test_grenade_bounce_and_fuse, test_motor_sweep_ignores_non_pool_domains, test_ballistic_expiry_is_silent |
+| Satchel/claymore motors + rest conversion | ported core; face-normal stick predicate, full placed pose/item/health carry, and pool-only item sweep are live | §27.5; D-THROW-2/-4; test_satchel_places_device, test_motor_sweep_ignores_non_pool_domains |
 | Placed-device think/detonate chain (satchel/claymore/AV mine) | ported core; exact pool-1 order/cadence, wrapped cone angle, and full terrain-plus-sector LOS are live; placed-model collision remains | §27.6; D-THROW-2/-8; device lifecycle/cone tests incl. test_claymore_sector_los_blocks_trigger |
 | Owner-death cleanup | matching observable, with generation-checked sim-side owner poll standing in for the death hook | §27.6; test_owner_death_removes_devices |
 | items.def class binding (ai_function/move_function) | MATCHING | §27.2; the resolve_item_traits feed |
@@ -5214,10 +5214,13 @@ This is not a blanket MATCHING classification. The audit closes D-THROW-5 and
 D-THROW-9 and fixes the fuse, dry-water, face-normal, cone, and lifecycle bugs
 described below. The 2026-07-21 follow-up also restores the grenade descriptor's
 sound/particle leg mask so a bounce cannot submit the detonation particle;
-D-THROW-1/-2/-4 and D-THROW-6..8 remain explicit fidelity gaps. The
+D-THROW-2/-4 and D-THROW-6..8 remain explicit fidelity gaps. The
 2026-07-22 follow-up closes D-THROW-3 by routing placed-device cone LOS through
 the shared terrain-plus-sector collision query; a type-1 building wall now
-blocks the trigger until removed.
+blocks the trigger until removed. The 2026-08-12 follow-up closes D-THROW-1:
+the shared projectile query gained explicit terrain/water/person domain gates,
+and each throwable motor sweep disables all three before nearest-hit arbitration,
+leaving exactly the witnessed pool-2 then pool-1 candidate passes.
 
 ### 27.2 The class architecture — items.def tags drive everything
 
@@ -5485,7 +5488,7 @@ death hook).
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-THROW-1 | motors sweep via `trace_projectile` and drop person/terrain/water hits | pools 2/1 broad+face walk only | a person standing between a grenade and a wall can mask the wall hit for that tick; rare, self-corrects next tick |
+| D-THROW-1 | CLOSED 2026-08-12: `ProjectileTrace` carries terrain/water/person walk gates and `motor_item_sweep` disables all three, so excluded domains never enter nearest-hit arbitration | pools 2/1 broad+face walk only (`Projectile_RaycastProximitySlots(2/1) @0x444619..0x444667`) | `collision_test::test_projectile_trace_domain_switches_preserve_farther_pool_hit` walks water → terrain → person → pool-1 as gates close; `throwables::test_motor_sweep_ignores_non_pool_domains` pins the live motor reaching the farther item in all three masking cases |
 | D-THROW-2 | world-local PRNG streams (the retail generator shape) | shared globals @ 0x31BFBB0/B8 | bounce kicks / fan angles distribution-faithful, not sequence-identical (the destruction-port precedent) |
 | D-THROW-3 | CLOSED 2026-07-22: device LOS uses the shared full terrain-plus-sector query, excluding the device and candidate (`CollisionWorld::raycast_clear`) | `Physics_RaycastSegment @ 0x415550` (terrain + sectors) | `test_claymore_sector_los_blocks_trigger` pins a type-1 building wall blocking the cone and removal exposing the same target |
 | D-THROW-4 | stick pose derived geometrically from the face normal; parent-follow = translation + yaw orbit | `Entity_OrientToSurfaceNormal @ 0x445fa0` exact euler decomposition; `Entity_InterpolateFromParentDelta @ 0x4a8d60` full euler | presentation-only pose deltas on steep faces / pitching vehicles; the cone axis (yaw) is exact |

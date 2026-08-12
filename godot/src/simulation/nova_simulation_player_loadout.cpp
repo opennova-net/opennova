@@ -394,6 +394,7 @@ void Simulation::push_joiner_loadout_kit() {
 	opennova::np::build_joiner_loadout_kit(*world_, weapon_profile_,
 			runtime_->assigned_team(), local_loadout_,
 			local_inventory_valid_ ? local_inventory_.equipped_combo : -1,
+			local_inventory_valid_ ? &local_inventory_ : nullptr,
 			wire_kit);
 	runtime_->set_loadout_kit(std::move(wire_kit));
 	pushing_joiner_loadout_kit_ = false;

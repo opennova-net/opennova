@@ -3748,6 +3748,61 @@ void test_projectile_trace_world_ordering() {
     CHECK(!water_collision.trace_projectile(water, wet).hit());
 }
 
+// A restricted query must remove excluded domains before nearest-hit
+// arbitration. This is the contract used by throwable motors: their pool-2/1
+// walk must still reach a farther item behind water, terrain, and a person.
+// [orig: Projectile_RaycastProximitySlots(2/1) @0x444619..0x444667]
+void test_projectile_trace_domain_switches_preserve_farther_pool_hit() {
+    World world;
+    world.registry.configure_pool(0, 8);
+    world.registry.configure_pool(1, 8);
+
+    Entity owner;
+    owner.kind = EntityKind::Organic;
+    owner.position = {0.0f, 100.0f, 0.0f};
+    const EntityHandle owner_h = world.registry.spawn(0, owner);
+
+    // The ray is z = 4 - x: water crosses at x=2, terrain at x=4,
+    // the person's torso at x=6, then the pool-1 item at x=8.
+    Entity person;
+    person.kind = EntityKind::Organic;
+    person.position = {6.0f, 0.0f, -2.9f};
+    const EntityHandle person_h = world.registry.spawn(0, person);
+    Entity item;
+    item.kind = EntityKind::Item;
+    item.position = {8.0f, 0.0f, -4.0f};
+    item.bound_radius = 0.4f;
+    const EntityHandle item_h = world.registry.spawn(1, item);
+
+    Field flat(0);
+    CollisionWorld collision;
+    collision.terrain = &flat.field;
+    world.env.water_z = fx(2.0);
+    collision.build_tick_tables(world);
+
+    ProjectileTrace trace;
+    trace.owner = owner_h;
+    trace.start = FixedVec3{0, 0, fx(4.0)};
+    trace.end = FixedVec3{fx(10.0), 0, fx(-6.0)};
+
+    ProjectileHit hit = collision.trace_projectile(world, trace);
+    CHECK(hit.hit_class == ProjectileHitClass::Water);
+
+    trace.walk_water = false;
+    hit = collision.trace_projectile(world, trace);
+    CHECK(hit.hit_class == ProjectileHitClass::Terrain);
+
+    trace.walk_terrain = false;
+    hit = collision.trace_projectile(world, trace);
+    CHECK(hit.hit_class == ProjectileHitClass::Person);
+    CHECK(hit.geometry_entity == person_h);
+
+    trace.walk_persons = false;
+    hit = collision.trace_projectile(world, trace);
+    CHECK(hit.hit_class == ProjectileHitClass::DynamicEntity);
+    CHECK(hit.geometry_entity == item_h);
+}
+
 void test_idle_round_tick_clears_stale_terrain() {
     World world;
     CollisionWorld collision;
@@ -3826,6 +3881,7 @@ int main() {
     test_published_person_bone_pose();
     test_person_mesh_row_keeps_authored_zero_sphere();
     test_projectile_trace_world_ordering();
+    test_projectile_trace_domain_switches_preserve_farther_pool_hit();
     test_idle_round_tick_clears_stale_terrain();
     if (failures == 0) std::printf("collision_test: all checks passed\n");
     return failures == 0 ? 0 : 1;

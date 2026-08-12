@@ -394,6 +394,57 @@ void test_charge_stick_surface_gate() {
     CHECK(!throwable_surface_accepts_stick(FixedVec3{0, 0, -65536}));
 }
 
+// The useownmove sweep is a pool-2 then pool-1 query, not the generic
+// projectile domain stack. A nearer water plane, terrain crossing, or person
+// must not hide the farther pool-1 item contact.
+// [orig: Projectile_RaycastProximitySlots(2/1) @0x444619..0x444667]
+void test_motor_sweep_ignores_non_pool_domains() {
+    const auto run_case = [](bool terrain_occluder, bool water_occluder,
+                             bool person_occluder) {
+        Rig rig(0);
+        // Keep the grenade motor's separate ground-clamp leg out of this
+        // sweep-only regression. Pre-fix motor_item_sweep overwrote this flag
+        // and still let generic trace terrain win.
+        rig.w.ammo.entries[kAmmoGrenade].flags |= 0x80u;
+        if (water_occluder) rig.w.env.water_z = to_fixed(2.0);
+
+        if (person_occluder) {
+            Entity person;
+            person.kind = EntityKind::Organic;
+            person.health = 100;
+            // The test ray is z = 4 - (x - 10): torso center lies at x=16.
+            person.position = Vec3{16.0f, 10.0f, -2.9f};
+            rig.w.registry.spawn(0, person);
+        }
+
+        Entity item;
+        item.kind = EntityKind::Item;
+        item.alive = true;
+        item.position = Vec3{18.0f, 10.0f, -4.0f};
+        item.bound_radius = 0.4f;
+        const EntityHandle item_h = rig.w.registry.spawn(1, item);
+        CHECK(item_h.valid());
+
+        CollisionWorld collision;
+        collision.build_tick_tables(rig.w);
+        const int slot = rig.throw_ammo(
+                kAmmoGrenade, Vec3{10.0f, 10.0f, 4.0f}, 0, 0);
+        CHECK(slot >= 0);
+        if (slot < 0) return;
+        LiveRound &round = rig.w.round_sim.rounds[size_t(slot)];
+        round.vel = Vec3{10.0f, 0.0f, -10.0f};
+
+        rig.w.round_sim.tick(
+                rig.w, terrain_occluder ? &rig.flat.field : nullptr, &collision);
+        CHECK(round.bounce_count == 1);
+        CHECK(round.pos.x > 17.0f && round.pos.x < 19.0f);
+    };
+
+    run_case(false, true, false);  // water at x≈12 used to mask the item
+    run_case(true, false, false);  // terrain at x≈14 used to mask the item
+    run_case(false, false, true);  // person at x≈16 used to mask the item
+}
+
 // Retail's grenade-bounce spin and the host's retained S2C 0x39 seed both call
 // PRNG_Next16 over the one process-global dword_31BFBB0. A network control draw
 // must therefore advance the exact stream consumed by the next bounce kick.
@@ -1000,6 +1051,7 @@ int main() {
     test_tracer_item_binding_fallbacks();
     test_zero_water_is_dry_below_altitude_zero();
     test_charge_stick_surface_gate();
+    test_motor_sweep_ignores_non_pool_domains();
     test_control_and_bounce_share_prng16_stream();
     test_grenade_bounce_and_fuse();
     test_grenade_bounce_samples_charmap_surface();

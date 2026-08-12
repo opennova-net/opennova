@@ -32,8 +32,6 @@ MainGame._process
   GameWorld.tick(camera, delta, MissionFrameInput)
     GameFramePipeline.advance
       begin device frame
-      Terrain.render_frame                  compiled TerrainDrawList
-      FoliageDispatcher.render_frame        compiled FoliageDrawList
       MissionPresentation.advance_session_frame
         Simulation.advance_session_frame
           MissionSession.advance            state + bank + input retention
@@ -42,6 +40,8 @@ MainGame._process
           per-tick Godot presentation sink  effects + fixed-tick listeners
         present entity/effect rows once
       present local view                    camera/viewmodel placement (D-RORD-8)
+      Terrain.render_frame                  compiled TerrainDrawList
+      FoliageDispatcher.render_frame        compiled FoliageDrawList
       drive network session edges
       advance weather
       apply blink gates when a tick ran
@@ -151,15 +151,14 @@ per-model advance is one static driver over a shared awake set
 ONED drive that same static advance from their one process loop for portrait/
 preview models outside a live mission.
 
-D-RORD-8 (fixed 2026-08-11): the one-frame visibility lag was the CAMERA, not
+D-RORD-8 (fixed 2026-08-12): the one-frame visibility lag was the CAMERA, not
 the occlusion-after-present order. The local-player camera/viewmodel placement
 is now the `present_local_view_frame` leg, run inside the pipeline right after
-the session tick and BEFORE occlusion, so the occlusion/iris/material/particle
-legs read the render camera THIS frame's tick produced (`GameWorld` reads the
-live camera, not the frame-entry stash). Occlusion staying after present is the
+the session tick and before terrain/foliage, so every camera-driven render leg
+reads the render camera this frame's tick produced (`GameWorld` reads the live
+camera, not the frame-entry stash). Occlusion staying after present is the
 correct ownership order — present re-asserts base visibility, occlusion layers
-hides, Godot renders after both. The residue is the pre-batch terrain/foliage
-legs still consuming the frame-entry camera.
+hides, Godot renders after both.
 
 ADR 0033 R3 remains closed not taken: visual parity did not justify an abstract
 seven-pass render-command stream.

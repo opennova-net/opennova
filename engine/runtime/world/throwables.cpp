@@ -218,9 +218,11 @@ bool motor_item_sweep(World &world, CollisionWorld *collision, const LiveRound &
     trace.owner = r.owner;
     trace.radius_q16 = 0;
     trace.ammo_flags = 0; // foliage/material gates ride the caller ammo below
-    // Pools 2/1 only: no person walk, so a bystander cannot mask the vehicle
-    // behind them (the post-trace class filter below cannot recover a farther
-    // hit the nearest-person result already consumed).
+    // Pools 2/1 only. Disable every earlier trace domain at the query boundary:
+    // a nearer terrain, water, or person hit cannot mask the farther pool-2/1
+    // entity that retail's two dedicated walks would find.
+    trace.walk_terrain = false;
+    trace.walk_water = false;
     trace.walk_persons = false;
     // A visual client's decoded remote throwable sweeps the wire-keyed dyn
     // proxies exactly like the bullet walk (round_sim.cpp): on a retail client
@@ -233,7 +235,7 @@ bool motor_item_sweep(World &world, CollisionWorld *collision, const LiveRound &
     if (!hit.hit()) return false;
     if (hit.hit_class != ProjectileHitClass::StaticEntity &&
         hit.hit_class != ProjectileHitClass::DynamicEntity)
-        return false; // terrain/water legs are not part of the motor sweep
+        return false; // defensive: the motor query contains only pools 2/1
     out = hit;
     return true;
 }
