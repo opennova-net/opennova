@@ -9,6 +9,7 @@ extends DebugPage
 ## the player root.
 
 const BAM_TO_DEG := 360.0 / 4294967296.0
+const FIXED16_TO_UNITS := 1.0 / 65536.0
 
 var _player_mission_label: Label
 var _player_position_label: Label
@@ -329,7 +330,7 @@ func _refresh_player_details() -> void:
 			float(weapon.get("recoil_pitch_bam", 0)) * BAM_TO_DEG,
 			float(weapon.get("weapon_weight_spread_bam", 0)) * BAM_TO_DEG,
 			spread_row,
-			float(weapon.get("hud_spread_fp16", 0)) / 65536.0])
+			float(weapon.get("hud_spread_fp16", 0)) * FIXED16_TO_UNITS])
 	_append_body_details(sim, combat)
 	_set_optional_text(_player_combat_label, "\n".join(combat))
 
