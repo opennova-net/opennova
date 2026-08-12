@@ -668,6 +668,14 @@ func process_mouse(position: Vector2, button_down: bool) -> void:
 			_open_combo_id = -1
 		else:
 			_frame.set_cursor_state(false, position)
+			# The popup's scrollbar child sees the sample ahead of row picking
+			# [orig: CListWnd child walk @ 0x643f30 — the scrollbar child
+			# claims first; parts = CScrollWnd_HandleEvent @ 0x64d050]. Its
+			# scroll_row changes arrive on scroll_value_changed like the
+			# main pump's.
+			if _frame.process_popup_mouse(combo_index, position, button_down):
+				_frame.set_widget_hover_item(combo_index, -1)
+				return
 			# The popup-exclusive pump hovers the row under the mouse (style 2)
 			# [orig: the per-frame pump runs ONLY on the popup while open —
 			# scene_end_frame @ 0x63e600 gate @ 0x63e691; the row mouseover

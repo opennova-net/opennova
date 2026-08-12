@@ -685,13 +685,33 @@ int MenuFrame::process_mouse(const Vector2 &p_position, bool p_button_down) {
 	mouse_button_down_ = p_button_down;
 	mouse_claim_ = claim.hovered;
 	if (claim.scroll_value_changed) {
-		// Standalone Scroll: the authored-range value; embedded row owners:
-		// the new first-visible row.
 		emit_signal("scroll_value_changed", claim.scroll_index,
 				claim.scroll_value);
 	}
 	queue_redraw();
 	return claim.hovered;
+}
+
+bool MenuFrame::process_popup_mouse(int p_index, const Vector2 &p_position,
+		bool p_button_down) {
+	if (!is_configured()) {
+		return false;
+	}
+	const Vector2 scale = design_scale_();
+	const opennova::menu::MenuFrameCompiler::MouseClaim claim =
+			compiler_.pump_popup_mouse(state_, p_index, p_position.x,
+					p_position.y, p_button_down, scale.x, scale.y);
+	state_.cursor_x = p_position.x;
+	state_.cursor_y = p_position.y;
+	if (claim.scroll_value_changed) {
+		// The popup row window moved: the new first-visible row.
+		emit_signal("scroll_value_changed", claim.scroll_index,
+				claim.scroll_value);
+	}
+	if (claim.scroll_index >= 0) {
+		queue_redraw();
+	}
+	return claim.scroll_index >= 0;
 }
 
 void MenuFrame::set_cursor_state(bool p_visible, const Vector2 &p_position) {
@@ -917,6 +937,9 @@ void MenuFrame::_bind_methods() {
 			&MenuFrame::set_time_ms);
 	ClassDB::bind_method(D_METHOD("process_mouse", "position", "button_down"),
 			&MenuFrame::process_mouse);
+	ClassDB::bind_method(D_METHOD("process_popup_mouse", "index", "position",
+								 "button_down"),
+			&MenuFrame::process_popup_mouse);
 	ClassDB::bind_method(D_METHOD("widget_index", "name"),
 			&MenuFrame::widget_index);
 	ADD_SIGNAL(MethodInfo("widget_pressed",

@@ -346,9 +346,11 @@ direct `<SCROLLBAR>` child; a missing/zero-width child rect uses the witnessed
 rightmost 22px/full-height fallback and the child stays hidden while all lines
 fit `[orig: CMEditWnd_CreateScrollChild @ 0x661260;
 CMEditWnd_UpdateScrollRange @ 0x661180; CScrollWnd_SetPageSize @ 0x64CE10;
-CScrollWnd_SetRangeAndClamp @ 0x64D490]`. Child-button hover/press and
-arrow/shuttle interaction remain D-MNU-13 residue, while wheel/scroll policy
-is shell-side over `multiline_line_counts`. The block-alignment leg
+CScrollWnd_SetRangeAndClamp @ 0x64D490]`. Child-button hover/press and the
+multiline edit's own arrow/shuttle interaction remain D-MNU-13 residue (the
+pump's row owners are List/Multi/LanList/Table and the open combo popup;
+the multiline edit is not wired in), and no wheel policy exists on either
+side (retail wheel behavior is unwitnessed). The block-alignment leg
 (the whole-unwrapped-text measure gating v-center/bottom) is not compiled —
 no shipped multiline edit authors it.
 
@@ -479,11 +481,16 @@ is the ONE menu path (the MnuMenu Control tree is deleted). Pinned by
   the compiler's mouse pump (2026-08-11 — the pump claims the pressed part
   until release, standalone sliders change their range value, embedded
   owners change `scroll_row`, and `MenuFrame.scroll_value_changed` relays
-  the result `[orig: CScrollWnd_HandleEvent @ 0x64d050]`). Remaining
-  scrollbar residue is the constructed child BUTTONs' independent
-  hover/selected/pressed states and named scroll events; wheel scrolling
-  continues to ride `scroll_row` shell-side. Spin arrows compile with their
-  default-state art (their independent hover states are separate
+  the result `[orig: CScrollWnd_HandleEvent @ 0x64d050]`). An OPEN combo's
+  popup scrollbar joins the same pump (2026-08-11 — `pump_popup_mouse`
+  restricted to the open combo mirrors the popup-exclusive dispatch, and
+  the popup's scrollbar child sees the sample ahead of row picking `[orig:
+  dispatch_mouse_event @ 0x63ab00 g_ui_open_popup_wnd; CListWnd child walk
+  @ 0x643f30]`). Remaining scrollbar residue is the constructed child
+  BUTTONs' independent hover/selected/pressed states and named scroll
+  events; whether retail scrolls menu lists with the mouse WHEEL is
+  unwitnessed, and no reimpl surface handles it. Spin arrows compile with
+  their default-state art (their independent hover states are separate
   child-widget state the compiled path does not yet model).
 
 ## The menu backdrop (Bink underlay) `[orig: UI_CreateMenuBinkVideos @ 0x54b590; BinkVideo_UpdateAllSlots @ 0x5676f0]` (grilled 2026-08-10)
