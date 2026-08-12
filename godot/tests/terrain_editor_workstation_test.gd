@@ -1345,7 +1345,7 @@ func test_export_confirm_and_progress_target_the_initiating_workspace_after_tab_
 
 	stub.export_running = false
 	workstation.on_export_completed(OK, "Exported terrain.")
-	var progress_hidden := await wait_until(
+	var progress_hidden: bool = await wait_until(
 		func() -> bool: return not progress_backdrop.visible,
 		1.0,
 		"export progress fade-out"
