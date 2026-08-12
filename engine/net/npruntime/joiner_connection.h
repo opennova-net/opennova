@@ -281,6 +281,17 @@ public:
 	void set_character_join_vars(CharacterJoinVars vars) {
 		character_join_vars_ = vars;
 	}
+
+	// The install root the JOIN VERSIONCRCSTRING checksum is computed from
+	// (D-NET-166): at JOIN-build time the joiner CRCs the loose
+	// expansion/<SUS2>/version.txt under this root, exactly the file retail's
+	// pre-connect expansion switch had already checksummed into
+	// g_expansion_checksum [orig: Expansion_LoadAssets @0x4a4885;
+	// NapiNP_WriteClientAuthPayload @0x42a287]. Unset (empty) keeps the golden
+	// "0" — the no-version.txt install every capture used.
+	void set_expansion_version_root(std::string game_root) {
+		expansion_version_root_ = std::move(game_root);
+	}
 	const CharacterJoinVars &character_join_vars() const {
 		return character_join_vars_;
 	}
@@ -550,6 +561,7 @@ private:
 	// payload reaches gameplay dispatch.
 	ProtocolReassemblyState s2c_reassembly_;
 	std::string advertised_expansion_; // ServerHello.SUS2, echoed as C2S JOIN EXP
+	std::string expansion_version_root_; // install root for the JOIN checksum (D-NET-166)
 
 	uint32_t server_hk_ = 0;    // ServerHello.hk — echoed in ClientAuth.hk (transient)
 	// Pre-session UDP legs are reliable-by-retransmit in retail. Cache the already-framed bytes so
