@@ -9,7 +9,6 @@ var desired_value: Variant
 var available := false
 var writable := false
 var authoritative := false
-var suspended := false
 var reason: String
 
 
@@ -23,7 +22,6 @@ func to_json_value() -> Variant:
 		"available": available,
 		"writable": writable,
 		"authoritative": authoritative,
-		"suspended": suspended,
 		"reason": reason,
 	}
 

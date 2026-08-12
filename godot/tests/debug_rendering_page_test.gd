@@ -97,7 +97,6 @@ func _make_page() -> Dictionary:
 			func(): return world,
 			Callable(),
 			func(): return viewport)
-	session.set_presented(true)
 	var ctx := DebugContext.new()
 	ctx.session = session
 	ctx.options = DebugOptionState.new()

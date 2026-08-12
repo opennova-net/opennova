@@ -186,9 +186,8 @@ func _tool_game_menu(args: Dictionary, _ctx: McpToolContext) -> Variant:
 func _tool_game_screenshot(args: Dictionary, ctx: McpToolContext) -> Variant:
 	if adapter == null:
 		return McpToolResult.error("The game shell is not ready.")
-	# Validate argument types before acquiring the presentation lease: a script
-	# error between acquire and release would leak the lease and pin expensive
-	# debug views on for the rest of the run.
+	# Validate argument types up front: int()/float() on a non-numeric Variant
+	# is a script error that would abort the handler mid-capture.
 	var max_dim: Variant = _integer_number(
 			args.get("max_dim", McpScreenshot.DEFAULT_MAX_DIM))
 	var format: Variant = args.get("format", "webp")
@@ -198,17 +197,12 @@ func _tool_game_screenshot(args: Dictionary, ctx: McpToolContext) -> Variant:
 		return McpToolResult.error(
 				"game_screenshot requires an integer max_dim, a string format, "
 				+ "and a numeric quality.")
-	var debug_session := adapter.get_debug_session()
-	if debug_session != null:
-		debug_session.acquire_presentation_source(&"mcp_screenshot")
 	var viewport := adapter.get_viewport()
 	var outcome: Dictionary = await McpScreenshot.capture(viewport, {
 		"max_dim": int(max_dim),
 		"format": String(format),
 		"quality": float(quality),
 	}, func() -> bool: return ctx.cancelled)
-	if debug_session != null:
-		debug_session.release_presentation_source(&"mcp_screenshot")
 	if ctx.cancelled:
 		return McpToolResult.error(
 				"Game screenshot was cancelled after its request timed out.")

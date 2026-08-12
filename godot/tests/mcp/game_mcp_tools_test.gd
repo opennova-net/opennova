@@ -13,8 +13,6 @@ class DebugSessionStub:
 	var list_authority := false
 	var read_authority := false
 	var snapshot_authority := false
-	var presentation_acquires := 0
-	var presentation_releases := 0
 
 	func list_controls(
 			_page: StringName = &"",
@@ -76,12 +74,6 @@ class DebugSessionStub:
 			allow_authority: bool = false) -> Dictionary:
 		snapshot_authority = allow_authority
 		return {"filter": filter, "controls": []}
-
-	func acquire_presentation_source(_source: StringName) -> void:
-		presentation_acquires += 1
-
-	func release_presentation_source(_source: StringName) -> void:
-		presentation_releases += 1
 
 
 class AdapterStub:
@@ -417,18 +409,15 @@ func test_snapshot_filter_reaches_shared_session() -> void:
 	assert_eq(result.structured["filter"], "terrain")
 
 
-func test_cancelled_screenshot_releases_its_presentation_lease() -> void:
+func test_cancelled_screenshot_reports_the_cancellation() -> void:
 	ctx.cancelled = true
 	var result := await _call("game_screenshot")
 	assert_true(result.is_error)
-	assert_eq(adapter.debug.presentation_acquires, 1)
-	assert_eq(adapter.debug.presentation_releases, 1,
-			"cooperative cancellation drops expensive debug views immediately")
 
 
-func test_wrong_typed_screenshot_args_error_before_the_lease_is_acquired() -> void:
-	# int()/float() on a non-numeric Variant is a script error; raised after
-	# acquire it would abort the handler and leak the presentation lease.
+func test_wrong_typed_screenshot_args_error_cleanly() -> void:
+	# int()/float() on a non-numeric Variant is a script error; each wrong
+	# shape must be rejected by validation instead.
 	for args in [
 		{"max_dim": [1280]},
 		{"max_dim": "wide"},
@@ -437,6 +426,3 @@ func test_wrong_typed_screenshot_args_error_before_the_lease_is_acquired() -> vo
 	]:
 		var result := await _call("game_screenshot", args)
 		assert_true(result.is_error, "wrong-typed %s errors" % [args])
-	assert_eq(adapter.debug.presentation_acquires, 0,
-			"invalid args never touch the presentation lease")
-	assert_eq(adapter.debug.presentation_releases, 0)
