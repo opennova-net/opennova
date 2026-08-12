@@ -23,6 +23,9 @@ struct FriendlyTagSource {
     Vec3 position;       // raw entity position; the presenter lifts + projects
     std::string name;    // authored display name; empty -> the compiled-in table
     int32_t health_ratio_fp16 = 0x10000;
+    // The entity's eye-offset z (entity+0x74, 16.16): the anchor is
+    // position.z + this + 0x4000 [orig: HUD_DrawEntityLabel @0x5a3a84..0x5a3a98].
+    int32_t eye_offset_z = 0;
     bool player = false;
 };
 

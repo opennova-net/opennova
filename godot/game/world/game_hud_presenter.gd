@@ -442,11 +442,11 @@ func _apply_attach_labels() -> void:
 	_game_hud.set_attach_labels(screens, texts, nearest)
 
 
-# The overhead-anchor lift: the entity position raised by the standing model
-# height + the witnessed 0.25 u [orig: anchor z = z + entity[+116] + 0x4000
-# @0x5a3a98 — +116 is the display-height field (writer unwalked); the standing
-# infantry constant stands in for it, docs/interface/hud-re.md D-HUD-20].
-const FRIENDLY_TAG_LIFT := 2.15
+# The overhead-anchor addend above the entity's eye offset: 0x4000 = 0.25 u
+# [orig: anchor z = z + entity[+116] + 0x4000 @0x5a3a84..0x5a3a98 — +116 is the
+# stance-driven eye offset the sim restamps per body tick and feeds per tag;
+# docs/interface/hud-re.md D-HUD-20].
+const FRIENDLY_TAG_LIFT := 0.25
 
 
 # The overhead friendly tags (D-HUD-20): the sim's pool-0 gather projected
@@ -477,7 +477,7 @@ func _apply_friendly_tags() -> void:
 				var tag: Dictionary = raw
 				var world_pos := MissionObjectPlacer.bms_to_godot_position(
 						Vector3(tag.get("position", Vector3.ZERO)))
-				world_pos.y += FRIENDLY_TAG_LIFT
+				world_pos.y += float(tag.get("eye_height", 0.0)) + FRIENDLY_TAG_LIFT
 				if camera.is_position_behind(world_pos):
 					continue # [orig: the nonzero-clip bail @0x5a3b80]
 				screens.append(camera.unproject_position(world_pos))

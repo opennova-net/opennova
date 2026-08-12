@@ -31,6 +31,9 @@ void collect_friendly_tags(World &world, const Entity &local,
         src.entity = e.handle;
         src.net_id = e.net_id;
         src.position = e.position;
+        // The anchor's eye lift rides along: z + entity[+116] + 0x4000
+        // [orig: HUD_DrawEntityLabel @0x5a3a84..0x5a3a98].
+        src.eye_offset_z = e.eye_offset_z;
         src.name = e.display_name;
         src.player = false;
         // health<<16 / max, clamped to 1.0 — the difficulty-scaled max

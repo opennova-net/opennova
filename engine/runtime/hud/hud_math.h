@@ -213,4 +213,18 @@ uint32_t friendly_tag_speaking_blend(uint32_t argb, int level255);
 // g_fallbackPeopleNames @0x840a78, count @0x840a0c].
 std::string friendly_tag_fallback_name(uint16_t encoded_entity_id);
 
+// The overlay label-font selection by surface width: the Arial pair and the
+// slot scale the friendly-tag / attach-label draws ride
+// [orig: HUD_InitAllFonts @0x51ee20 — width <= 640: Arial14n/Arial12b over
+// 640; <= 800: Arial14n/Arial14b over 800; > 800: Arial16n/Arial16b over
+// 1024; scale = (screenWidth<<16)/divisor @0x51ef26, stored as the slot's
+// float pair by HUD_LoadFontIntoSlot @0x580400].
+struct HudLabelFontChoice {
+	const char *normal_fnt;
+	const char *bold_fnt;
+	float scale;
+	int tier; // 0 <= 640 / 1 <= 800 / 2 > 800 — stable id for reload checks
+};
+HudLabelFontChoice hud_label_font_choice(int surface_w);
+
 } // namespace opennova::hud

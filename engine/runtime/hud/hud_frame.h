@@ -201,8 +201,9 @@ struct HudAttachLabel {
 
 // One projected friendly tag (D-HUD-20) [orig: HUD_DrawEntityLabel @ 0x5a39b0
 // via HUD_DrawFriendlyTagsPass @ 0x5a4480]. The presenter projects the anchor
-// (entity position + display height + 0.25 u) and supplies the view distance;
-// the compiler owns every witnessed draw rule.
+// (entity position + the per-tick eye offset + 0.25 u [orig: @ 0x5a3a84..
+// 0x5a3a98]) and supplies the view distance; the compiler owns every
+// witnessed draw rule.
 struct HudFriendlyTag {
 	float screen_x = 0.0f;
 	float screen_y = 0.0f;
@@ -264,12 +265,31 @@ struct HudDrawList {
 	int64_t elements_drawn = 0;
 };
 
+// Draw-list font-page namespaces: each compiler font emits glyph pages at
+// slot * FNT_MAX_PAGES, so one flat draw list mixes faces and the device leg
+// indexes its page-texture table the same way.
+inline constexpr int kHudFontSlotHud = 0;       // the hudpos-named HUD font
+inline constexpr int kHudFontSlotLabel = 1;     // g_hudLabelFont (Arial normal)
+inline constexpr int kHudFontSlotLabelBold = 2; // the bold slot (fontObj @ 0xB4C394)
+inline constexpr int kHudFontSlotCount = 3;
+
 // Deep in-process module: the whole witnessed element walk, stance cross-fade
 // state, the clip-indicator flash state, and the triggered-text message ring
 // live here; compile() emits everything for one frame in retail's order.
 class HudFrameCompiler {
 public:
 	void configure(const HudLayout &layout, const fnt_font_t *font);
+
+	// The overlay label fonts + their resolution scale — the Arial pair retail
+	// loads beside the hudpos HUD font [orig: HUD_InitAllFonts @ 0x51ee20:
+	// g_hudLabelFont = Arial14n/16n, the bold slot (fontObj @ 0xB4C394) =
+	// Arial12b/14b/16b, both at scale (screenW<<16)/{640,800,1024}; the slot
+	// carries {font, scale_x, scale_y} @ 0x580453..0x580468]. Friendly tags
+	// draw with the normal face [orig: @ 0x5a3a0c], attach labels with the
+	// bold face [orig: @ 0x5a3680/@ 0x5a38a1]. Null fonts fall back to the
+	// hudpos font at scale 1 (layout-only embedders keep drawing).
+	void configure_label_fonts(const fnt_font_t *normal, const fnt_font_t *bold,
+			float scale);
 
 	// Swap the layout WITHOUT resetting runtime state (stance fade, clip
 	// flash, the message ring) — the texture-table refresh path, e.g. the
@@ -322,6 +342,10 @@ private:
 
 	HudLayout layout_{};
 	GameFont font_;
+	// The Arial label pair + slot scale (see configure_label_fonts).
+	GameFont label_font_;
+	GameFont label_font_bold_;
+	float label_scale_ = 1.0f;
 	HudDrawList draw_list_;
 	StanceFade stance_;
 	// The clip-indicator flash latch [orig: draw_hud_ammo_indicator flash

@@ -1733,7 +1733,55 @@ void test_remote_body_state_queue_gate() {
             infantry_anim_flags(111) & ~0x1u));
 }
 
+// The eye-offset restamp (entity+0x74): each body tick stores the anim capsule
+// extent, floored/capped per body, and mirrors it to the registry entity the
+// friendly-tag gather walks (anchor z = z + eye + 0x4000).
+// [orig: Entity_UpdateInfantryAI @0x4bf078..0x4bf14c — NPC max(top - bottom,
+//  0x9000) * cosQ22(lean); Entity_UpdateInfantryPlayerBody @0x4b6984..0x4b68f5
+//  — player min(top - bottom, 0xD000), floor 0x2000; anchor HUD_DrawEntityLabel
+//  @0x5a3a84..0x5a3a98]
+void test_eye_offset_restamp() {
+    World w;
+    AiSystem ai;
+    struct CapsuleSource : IRootMotionSource {
+        int32_t bottom = 0;
+        int32_t top = 0;
+        bool has_clip(int, int) const override { return true; }
+        int32_t clip_length_ticks(int, int) const override { return -1; }
+        bool advance(int, int, int32_t &phase, RootMotionFrame &out) override {
+            ++phase;
+            out = RootMotionFrame{};
+            out.capsule_bottom = bottom;
+            out.capsule_top = top;
+            return true;
+        }
+    } src;
+    src.top = fx(1) + fx(1) / 2; // a 1.5 u standing capsule
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    w.registry.configure_pool(0, 4);
+    Entity ent;
+    ent.kind = EntityKind::Organic;
+    w.registry.spawn(0, ent);
+
+    run_ticks(ai, w, 0, 2);
+    Entity *reg = w.registry.get(e->handle);
+    CHECK(reg != nullptr);
+    if (reg == nullptr) return;
+    CHECK(reg->eye_offset_z == src.top); // above the NPC floor: passes through
+
+    src.top = 0x4000; // shrunk (prone-family) capsule -> the NPC 0x9000 floor
+    run_ticks(ai, w, 2, 4);
+    CHECK(reg->eye_offset_z == 0x9000);
+
+    e->inf.is_local_player = true; // the player body caps the extent at 0xD000
+    src.top = fx(2);
+    run_ticks(ai, w, 4, 6);
+    CHECK(reg->eye_offset_z == 0xD000);
+}
+
 int main() {
+    test_eye_offset_restamp();
     test_slope_standing_camera_stays_level();
     test_slope_prone_body_conforms_org2();
     test_slope_pass_org1_selector_and_chase();

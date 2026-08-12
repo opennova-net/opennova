@@ -81,6 +81,13 @@ public:
 	void set_font(const fnt_font_t *font) { font_ = font; }
 	const fnt_font_t *font() const { return font_; }
 
+	// Emitted glyph quads carry page indices offset by this base, giving each
+	// font its own page namespace inside one mixed draw list (the compiler
+	// assigns slot * FNT_MAX_PAGES; the device leg indexes its page-texture
+	// table the same way).
+	void set_page_base(uint32_t base) { page_base_ = base; }
+	uint32_t page_base() const { return page_base_; }
+
 	// Pixel measurement [orig: CGameFont_MeasureText @ 0x674e70]: byte-indexed
 	// glyphs (controls < 0x20 and 0x7F/0x80/0x81 skipped), '\\' escapes,
 	// '<' tags via the shared parser, '\t' to the next tab stop, '\n' folds
@@ -121,6 +128,7 @@ private:
 	float glyph_advance(const fnt_glyph_t *glyph, float scaled_x) const;
 
 	const fnt_font_t *font_ = nullptr;
+	uint32_t page_base_ = 0;
 };
 
 } // namespace opennova::hud

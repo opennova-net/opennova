@@ -1211,6 +1211,27 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     }
     inf.last_events = have_clip ? frame.events : 0;
 
+    // 3'. The eye-offset restamp (entity+0x74 z; the +0x6C/+0x70 lateral lean
+    // shift is unmodeled): the anim capsule extent, floored/capped per body,
+    // tilted by the lean angle at the retail Q22 precision. The friendly-tag
+    // anchor reads the mirrored value. [orig: org1 delta = max(top - bottom,
+    // 0x9000), z = delta * cosQ22(lean) >> 22 @0x4bf078..0x4bf14c; org2
+    // delta = min(top - bottom, 0xD000), tilt, floor 0x2000 at the store
+    // @0x4b6984..0x4b68f5; the local head-bone exact leg @0x4b6908..0x4b696c
+    // is the tracked D-HUD-20 residue]
+    if (have_clip) {
+        const int32_t extent = frame.capsule_top - frame.capsule_bottom;
+        const int32_t delta = inf.is_local_player ? std::min(extent, 0xD000)
+                                                  : std::max(extent, 0x9000);
+        const double lean_rad = static_cast<double>(inf.lean_angle) *
+                                (3.14159265358979323846 / 2147483648.0);
+        const int32_t lean_cos = static_cast<int32_t>(std::cos(lean_rad) * 4194304.0);
+        int32_t eye_z =
+            static_cast<int32_t>((static_cast<int64_t>(delta) * lean_cos) >> 22);
+        if (inf.is_local_player && eye_z < 0x2000) eye_z = 0x2000;
+        inf.eye_offset_z = eye_z;
+    }
+
     // 3a. The anim-event consumers, in the witnessed order: the sound block
     // (foley + footsteps) precedes the fire bits inside the same consume
     // [orig: @0x4bf169-0x4bf2b0 before the 0x4 test @0x4bf322]. The sound pass
@@ -2136,6 +2157,10 @@ void AiSystem::mirror_wire_anim(AiEntity &e, World &world) {
     const InfantryState &inf = e.inf;
     ent->net_anim_state = static_cast<uint8_t>(inf.anim_state);
     ent->net_anim_pending = static_cast<uint8_t>(inf.anim_pending);
+    // The eye-offset mirror (entity+0x74): the body tick's restamp reaches the
+    // registry entity the friendly-tag gather walks [orig: the same entity field
+    // both writers and HUD_DrawEntityLabel @0x5a3a84 share].
+    ent->eye_offset_z = inf.eye_offset_z;
     ent->net_anim_phase =
         static_cast<uint8_t>(inf.clip_phase < 0 ? 0 : (inf.clip_phase > 255 ? 255 : inf.clip_phase));
     if (inf.is_local_player) {
@@ -2298,8 +2323,17 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
     if (root_motion != nullptr) {
         if (reset_capsule_bottom_state(inf.anim_state)) inf.prev_capsule_bottom = 0;
         RootMotionFrame discard;
-        if (advance_primary_channel(inf, *root_motion, discard))
+        if (advance_primary_channel(inf, *root_motion, discard)) {
             inf.prev_capsule_bottom = discard.capsule_bottom;
+            // The remote-player eye-offset restamp: retail runs the same body
+            // updater for net-snapped peers, and the +0x74 store persists while
+            // the pose work is inert — the org2 non-local formula, lean at rest.
+            // [orig: Entity_UpdateInfantryPlayerBody @0x4b6984..0x4b68f5]
+            const int32_t extent = discard.capsule_top - discard.capsule_bottom;
+            int32_t eye_z = std::min(extent, 0xD000);
+            if (eye_z < 0x2000) eye_z = 0x2000;
+            inf.eye_offset_z = eye_z;
+        }
         // The end-flag pending promotion, as on the local path [orig: @0x40b77b].
         if (death_transition >= 0) {
             inf.begin_body_transition(death_transition);

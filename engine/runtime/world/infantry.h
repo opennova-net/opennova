@@ -406,6 +406,14 @@ struct InfantryState {
     bool wpn_force_crouch = false;
     uint32_t last_events = 0;
     int32_t prev_capsule_bottom = 0;      // anim_slot[19]
+    // The eye-offset z (entity+0x74, 16.16), restamped after every clip advance
+    // from the capsule extents tilted by the lean angle; mirrored onto the world
+    // Entity by mirror_wire_anim. NPC leg: max(top - bottom, 0x9000) * cos(lean)
+    // [orig: Entity_UpdateInfantryAI @0x4bf078..0x4bf14c]. Player leg:
+    // min(top - bottom, 0xD000) * cos(lean), floored 0x2000 at the store [orig:
+    // Entity_UpdateInfantryPlayerBody @0x4b6984..0x4b68f5; the local head-bone
+    // exact leg @0x4b6908..0x4b696c is the tracked residue, D-HUD-20].
+    int32_t eye_offset_z = 0;
     int32_t adm_id = 0;
 
     int32_t body_heading = 0;
