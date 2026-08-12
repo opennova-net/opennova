@@ -143,6 +143,13 @@ struct GameConfig {
 	std::string mission_file = "ASH_I5A.BMS";               // [orig g_map_file_name @0x24D1F3E]
 	std::string custom_text = "Put your message here.";     // [orig g_sessionvar_custom_text @0x522123]
 	std::string expansion = "jox01";                        // [orig g_ExpansionName @0xB4C584] (0x7B)
+	// The active expansion's version checksum — retail's g_expansion_checksum
+	// @0xB4C5A4: 0 unless a loose expansion/<name>/version.txt exists, else its
+	// CRC (vfs_expansion_version_checksum ports the producer
+	// [orig: Expansion_LoadAssets @0x4a4781/@0x4a4885]). The join gate compares
+	// it against the client's VERSIONCRCSTRING only while `expansion` is
+	// non-empty [orig: @0x51231e..0x512349, reject DPC=48] (D-NET-166).
+	int32_t expansion_version_checksum = 0;
 	// Optional exact retail resource corpus used to validate the host's inbound
 	// C2S 0x20/0x21 integrity replies. Empty (or an unknown id at the adapter
 	// boundary) disables validation: a host must never compare against guessed

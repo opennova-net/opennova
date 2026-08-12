@@ -216,6 +216,12 @@ public:
 	void set_character_join_vars(CharacterJoinVars vars) {
 		if (joiner_) joiner_->set_character_join_vars(vars);
 	}
+	// The install root the JOIN VERSIONCRCSTRING checksum reads its loose
+	// expansion/<name>/version.txt from (D-NET-166; see
+	// JoinerConnection::set_expansion_version_root). Joiner only.
+	void set_expansion_version_root(std::string game_root) {
+		if (joiner_) joiner_->set_expansion_version_root(std::move(game_root));
+	}
 	void set_charattr_challenge_table(CharAttrChallengeTable table) {
 		if (joiner_) joiner_->set_charattr_challenge_table(std::move(table));
 	}

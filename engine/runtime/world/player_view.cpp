@@ -8,6 +8,7 @@
 
 #include <io/bam.h>
 
+#include "terrain_query/height_field.h"
 #include "world/angle.h"
 
 namespace opennova::world {
@@ -235,9 +236,35 @@ void view_axes_mission(double yaw_deg, double pitch_deg, float fwd[3],
 
 } // namespace
 
+void player_view_floor_eye_to_terrain(const terrain::TerrainHeightField *terrain,
+                                      bool indoors, float eye[3]) {
+    // [orig: Entity_UpdateInfantryPlayerBody — the Flags & 0x800000 INDOORS
+    //  skip @ 0x4b6c08/@ 0x4b6c16 (the heightmap has no interiors)]
+    if (terrain == nullptr || !terrain->valid() || indoors) return;
+    // Engine ground plane is (x, y); the renderer-loaded atlas samples in
+    // Godot coords (x, -y) — the calc_average_ground_height mapping.
+    const auto sample = [&](float x, float y) {
+        return terrain::height_field_height_world_bilinear(*terrain, x, -y) +
+               kEyeTerrainClearance; // [orig: each sample + 0x1000 @ 0x4b6c2d]
+    };
+    // The eye column, then ±0x4000 along each ground axis, max-folded
+    // [orig: @ 0x4b6c1e / @ 0x4b6c33 / @ 0x4b6c4e / @ 0x4b6c69 / @ 0x4b6c84].
+    float floor_z = sample(eye[0], eye[1]);
+    const float r = kEyeTerrainProbeRadius;
+    const float probes[4][2] = {{r, 0.0f}, {-r, 0.0f}, {0.0f, r}, {0.0f, -r}};
+    for (const float *p : probes) {
+        const float h = sample(eye[0] + p[0], eye[1] + p[1]);
+        if (h > floor_z) floor_z = h;
+    }
+    // [orig: the eye-Z max @ 0x4b6c9e..0x4b6ca2]
+    if (eye[2] < floor_z) eye[2] = floor_z;
+}
+
 void player_view_compose_camera(const PlayerViewState &v,
                                 const float position[3],
                                 const float anchor_eye[3], bool anchor_valid,
+                                const terrain::TerrainHeightField *terrain,
+                                bool indoors,
                                 float aim_yaw_deg, float aim_pitch_deg,
                                 int32_t recoil_pitch_bam,
                                 int32_t torso_roll_bam, int32_t lean_bam,
@@ -252,6 +279,10 @@ void player_view_compose_camera(const PlayerViewState &v,
         eye[2] = anchor_eye[2] < position[2] + kEyeMinAbovePosition
                 ? position[2] + kEyeMinAbovePosition
                 : anchor_eye[2];
+        // The D-INF-18 terrain floor rides only the head-bone eye path
+        // [orig: @ 0x4b6c08..0x4b6ca4 — the fallback branch @ 0x4b6b92 has no
+        //  terrain leg].
+        player_view_floor_eye_to_terrain(terrain, indoors, eye);
     } else {
         eye[0] = position[0];
         eye[1] = position[1];

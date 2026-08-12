@@ -183,11 +183,19 @@ bool validates_join_request(
 		if (name == "EXP" && !saw_expansion && !config.expansion.empty() &&
 		    value == config.expansion) {
 			saw_expansion = true;
-		} else if (name == "VERSIONCRCSTRING" && !saw_version_crc &&
-		           value == "0") {
-			// The runtime currently models the captured no-version.txt case: the host checksum is 0.
-			// A real expansion version CRC remains D-NET-166; accepting any value here would be less
-			// faithful than the modeled host data.
+		} else if (name == "VERSIONCRCSTRING" && !saw_version_crc) {
+			// Retail compares atol(value) against its own g_expansion_checksum ONLY
+			// while an expansion is active; a base-game host stores the TLV without
+			// looking at it [orig: Server_ValidatePlayerJoinRequest — the
+			// g_ExpansionName[0] gate @0x51231e, the atol compare @0x512331, reject
+			// DPC=48 @0x512341]. The checksum is CRC-32/MPEG-2 of the loose
+			// expansion/<name>/version.txt, formatted "%ld" by the client — signed
+			// decimal, so strtol matches retail's 32-bit atol on real inputs.
+			if (!config.expansion.empty() &&
+			    static_cast<int32_t>(std::strtol(value.c_str(), nullptr, 10)) !=
+			            config.expansion_version_checksum) {
+				return false;
+			}
 			saw_version_crc = true;
 		} else {
 			return false;

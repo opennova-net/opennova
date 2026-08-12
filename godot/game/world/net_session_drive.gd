@@ -263,6 +263,9 @@ func load_as_joiner(target: JoinTarget) -> int:
 		_world.load_failed.emit("join: could not open the LAN session socket")
 		return ERR_CANT_CONNECT
 	_join_preload_sim.set_join_world_ready(false)
+	# The JOIN VERSIONCRCSTRING checksum reads the loose
+	# expansion/<name>/version.txt under this install root (D-NET-166).
+	_join_preload_sim.set_join_expansion_version_root(resource_root.get_root_dir())
 	_join_preload_root = resource_root
 	_policy.arm_preload(Time.get_ticks_msec())
 	set_process(true)

@@ -12,6 +12,7 @@
 #include <npwire/ingame_decode.h> // kRoundEventFlag* (the fire-mode byte)
 #include <npwire/ingame_message_id.h>
 #include <npwire/net_ports.h> // lan_host_bind_ports (the D-NET-210 bind scan)
+#include <vfs/vfs.h> // vfs_expansion_version_checksum (the D-NET-166 JOIN CRC)
 #include <npwire/wire_handle.h>  // pool()/kPoolItem/kInvalid (the wire handle home)
 #include <world/infantry.h>      // kAnimStanceFlag* (the witnessed stance bits)
 #include <world/spawn_select.h>  // kDeployPickNone/AutoTeam (C2S 0x2C sentinels)
@@ -781,6 +782,17 @@ void Simulation::configure_host_session(Dictionary p_options) {
 	apply_dictionary_string(p_options, "custom_text", config.custom_text);
 	apply_dictionary_string(p_options, "player_name", config.player_name);
 	apply_dictionary_string(p_options, "expansion", config.expansion);
+	// D-NET-166: the host's g_expansion_checksum analog. When the caller names
+	// its install root, compute the CRC of the loose
+	// expansion/<name>/version.txt so the join gate can run retail's compare
+	// (the witnessed producer/gate live in vfs_expansion_version_checksum and
+	// validates_join_request).
+	if (p_options.has("game_root")) {
+		const String root = p_options["game_root"];
+		config.expansion_version_checksum =
+				opennova::vfs_expansion_version_checksum(
+						std::string(root.utf8().get_data()), config.expansion);
+	}
 	if (p_options.has("integrity_profile")) {
 		const String requested = String(p_options["integrity_profile"]).strip_edges();
 		const std::string id(requested.utf8().get_data());
@@ -966,6 +978,14 @@ bool Simulation::set_join_integrity_profile(const String &p_profile_id) {
 	return true;
 }
 
+void Simulation::set_join_expansion_version_root(const String &p_game_root) {
+	// D-NET-166: the JOIN VERSIONCRCSTRING checksum source. The runtime CRCs
+	// the loose expansion/<SUS2>/version.txt under this root at JOIN-build
+	// time (see JoinerConnection::set_expansion_version_root).
+	join_expansion_version_root_ = std::string(p_game_root.utf8().get_data());
+	install_expansion_version_root();
+}
+
 // ---- co-op LAN joiner (D.2) -------------------------------------------------
 
 bool Simulation::enable_join(const String &p_host_ip, int p_port, const String &p_player_name) {
@@ -993,6 +1013,7 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port, const String &
 	install_charattr_challenge_table();
 	install_character_join_vars();
 	install_join_integrity_profile();
+	install_expansion_version_root();
 	install_item_class_resolver();
 	joiner_ = true;
 	if (world_) {

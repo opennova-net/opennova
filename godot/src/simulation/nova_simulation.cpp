@@ -417,6 +417,7 @@ void Simulation::finish_load(const opennova::bms::File &file) {
 			install_charattr_challenge_table();
 			install_character_join_vars();
 			install_join_integrity_profile();
+			install_expansion_version_root();
 		}
 		runtime_->set_world_ready(true);
 		// The shell owns the deploy-map screen: a pick-required join parks at the

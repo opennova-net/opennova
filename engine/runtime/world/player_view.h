@@ -19,6 +19,10 @@
 
 #include <cstdint>
 
+namespace opennova::terrain {
+struct TerrainHeightField;
+}
+
 namespace opennova::world {
 
 // The per-toggle ease lengths [orig: CNetPlayerInterp_Setup call sites in
@@ -50,6 +54,11 @@ constexpr float kFpEyePullback = 0.1875f;
 // [orig: the 0x2000 floor @ 0x4b6b98; the +0x10000 bump @ 0x437e8f]
 constexpr float kEyeMinAbovePosition = 0.125f;
 constexpr float kNonPersonEyeBump = 1.0f;
+// The head-bone eye's terrain floor (the D-INF-18 residual, ported): the probe
+// offset (0x4000 = 0.25 u) and the per-sample clearance (0x1000 = 0.0625 u).
+// [orig: Entity_UpdateInfantryPlayerBody @ 0x4b6c23 / @ 0x4b6c2d]
+constexpr float kEyeTerrainProbeRadius = 0.25f;
+constexpr float kEyeTerrainClearance = 0.0625f;
 // The head bone the person eye reads (".bad row BN15", model bone table
 // index 14) and the aim-projection ray length (65536000 q16 = 1000 units).
 constexpr int kHeadBoneIndex = 14;
@@ -208,11 +217,22 @@ float player_view_fp_roll_deg(int32_t torso_roll_bam, int32_t lean_bam);
 // stay a tracked deferral (net-re §5.39).
 float player_view_tp_effective_distance(float distance);
 
+// The head-bone eye's FIVE-SAMPLE terrain floor [orig:
+// Entity_UpdateInfantryPlayerBody @ 0x4b6c08..0x4b6ca4]: the eye Z is floored
+// at the MAX of the bilinear terrain height at the eye column and at
+// ±kEyeTerrainProbeRadius along each ground axis, each raised
+// kEyeTerrainClearance — skipped INDOORS (Flags & 0x800000
+// kEntityFlagIndoors: the heightmap has no interiors, @ 0x4b6c08/@ 0x4b6c16).
+// Mission-space floats; a null/invalid field leaves the eye untouched.
+void player_view_floor_eye_to_terrain(const terrain::TerrainHeightField *terrain,
+                                      bool indoors, float eye[3]);
+
 // The composed local camera for one presented frame, mission space — the
 // witnessed pose math; the presenting shell converts frames and stamps the
 // Camera3D node. `anchor_eye` is the shell-fed head-bone eye (the permanent
 // D-INF-18 write-back; pass valid=false for the non-person +1.0 bump over
-// `position`), `aim_yaw/pitch_deg` the post-binocular aim angles.
+// `position`), `aim_yaw/pitch_deg` the post-binocular aim angles. `terrain` +
+// `indoors` feed the head-bone eye's terrain floor (above; null skips it).
 // First person [orig: Camera_ComputeThirdPersonView @ 0x437d10 mode 0, the
 // on-foot person leg @ 0x437f9c..0x438031]: eye = the floored anchor pulled
 // back kFpEyePullback along the view forward; pitch adds the doubled recoil;
@@ -231,6 +251,8 @@ struct PlayerCameraPose {
 void player_view_compose_camera(const PlayerViewState &v,
                                 const float position[3],
                                 const float anchor_eye[3], bool anchor_valid,
+                                const terrain::TerrainHeightField *terrain,
+                                bool indoors,
                                 float aim_yaw_deg, float aim_pitch_deg,
                                 int32_t recoil_pitch_bam,
                                 int32_t torso_roll_bam, int32_t lean_bam,

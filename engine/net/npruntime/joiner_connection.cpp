@@ -7,6 +7,7 @@
 #include <npwire/session_hello.h>
 #include <npwire/session_keys.h>
 #include <novacrypto/crc32.h>
+#include <vfs/vfs.h>
 
 #include <algorithm>
 #include <chrono>
@@ -95,7 +96,8 @@ std::vector<uint8_t> build_join_padding_echo(
 // Retail NapiNP_WriteClientAuthPayload @0x42a180 writes EXP when an expansion
 // is active, followed by VERSIONCRCSTRING. Base-game captures therefore contain
 // only the latter; expansion hosts require both.
-std::vector<uint8_t> build_join_request(std::string_view expansion) {
+std::vector<uint8_t> build_join_request(
+		std::string_view expansion, int32_t expansion_version_checksum) {
 	std::vector<uint8_t> body;
 	auto append_string_tlv = [&](std::string_view name, std::string_view value) {
 		body.insert(body.end(), name.begin(), name.end());
@@ -107,10 +109,13 @@ std::vector<uint8_t> build_join_request(std::string_view expansion) {
 		body.push_back(0);
 	};
 	if (!expansion.empty()) append_string_tlv("EXP", expansion);
-	// The active retail revx02 install has no loose expansion/<name>/version.txt,
-	// so retail's CRC-32/MPEG-2 accumulator remains zero. Nonzero expansion
-	// version checksums still need runtime resource-path plumbing.
-	append_string_tlv("VERSIONCRCSTRING", "0");
+	// The checksum rides as SIGNED decimal — retail formats its
+	// g_expansion_checksum with "%ld", so a CRC with bit 31 set goes out
+	// negative [orig: the sprintf @0x42a287, format "%ld" @0x7c3818]. A
+	// checksum-less caller (no game root / base game / no loose version.txt)
+	// keeps the golden "0" byte-for-byte (D-NET-166).
+	append_string_tlv("VERSIONCRCSTRING",
+			std::to_string(expansion_version_checksum));
 	return body;
 }
 
@@ -795,13 +800,23 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 		out.outbound.push_back(frame_session({}));
 		// The EXP claim is the host's own SUS2 echoed back, sent BEFORE anything has verified
 		// that this install can mount that expansion — the host's string compare therefore
-		// always passes, and its CRC gate passes too while VERSIONCRCSTRING stays "0"
-		// (D-NET-166). Neither host gate can catch a mismatched client, so the claim is made
-		// good on OUR side: the preload re-mounts the resource root onto this expansion and
-		// ABORTS the join when it is not installed, rather than entering the world with a
-		// different ADM index space than the host (D-NET-178).
+		// always passes, and its CRC gate only fires when the two installs' loose
+		// version.txt files differ (D-NET-166: VERSIONCRCSTRING carries our real
+		// checksum now). The claim is still made good on OUR side: the preload re-mounts
+		// the resource root onto this expansion and ABORTS the join when it is not
+		// installed, rather than entering the world with a different ADM index space
+		// than the host (D-NET-178).
+		// Retail switched the ONE global mount onto the host's expansion BEFORE
+		// connecting, so its Expansion_LoadAssets pass has already stamped
+		// g_expansion_checksum for exactly this name; computing it here from the
+		// binding-supplied install root and the latched SUS2 name reads the same
+		// loose file at the same point in the exchange [orig: Expansion_SwitchTo
+		// @0x5688c0 -> Expansion_LoadAssets @0x4a4885; the JOIN write @0x42a2b4].
 		out.outbound.push_back(frame_inner_pending(
-				0x00, build_join_request(advertised_expansion_)));
+				0x00, build_join_request(advertised_expansion_,
+						vfs_expansion_version_checksum(
+								expansion_version_root_,
+								advertised_expansion_))));
 		post_auth_stage_ = PostAuthStage::AwaitJoinAck;
 	}
 	std::size_t message_index = 0;

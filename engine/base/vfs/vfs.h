@@ -130,6 +130,28 @@ private:
 // (i.e. the expansions mount_game accepts). Returns the bare expansion names.
 std::vector<std::string> vfs_list_expansions(const std::string &game_root);
 
+// The expansion version-file CRC [orig: CRC_ComputeCustomTable @ 0x53c820]:
+// MSB-first CRC-32, polynomial 0x04C11DB7, init -1, no reflection, no final
+// xor ("CRC-32/MPEG-2"; the 256-entry table @ 0x830780 — entries [1]
+// 0x04C11DB7 / [31] 0x745E66CD verified against the generated table). Retail's
+// do-while consumes one byte even at length 0 (an out-of-bounds read no live
+// caller reaches); this port loops size times and returns the -1 init for an
+// empty buffer.
+int32_t vfs_version_crc(const uint8_t *data, size_t size);
+
+// g_expansion_checksum's producer [orig: Expansion_LoadAssets — the reset to 0
+// @ 0x4a4781, the loose expansion\<name>\version.txt size/load/CRC
+// @ 0x4a4858..0x4a488a]. Returns 0 when the expansion is empty or the loose
+// file is absent/unreadable; an EMPTY version.txt also returns 0 (retail would
+// run its one-byte do-while off the end of a zero-length allocation — a
+// degenerate original path with no stable value to reproduce). The joiner
+// formats this value as signed decimal into the JOIN `VERSIONCRCSTRING` TLV
+// and an expansion host compares it against its own [orig: the "%ld" sprintf
+// @ 0x42a287; the atol compare @ 0x512331, reject DPC=48 @ 0x512341]
+// (D-NET-166).
+int32_t vfs_expansion_version_checksum(const std::string &game_root,
+                                       const std::string &expansion);
+
 } // namespace opennova
 
 #endif // OPENNOVA_VFS_H
