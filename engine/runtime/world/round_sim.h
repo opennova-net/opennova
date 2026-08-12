@@ -180,6 +180,13 @@ struct RoundSpawnParams {
     // Immediate-only source override for a decoded remote shooter that has no
     // Entity/AiEntity in this World. Never retained by RoundSim.
     RoundSourceState *source_state = nullptr;
+    // The firing weapon slot's tracer cadence byte (retail MountSlot+0x80) —
+    // set by producers that model per-slot weapon state (the local player's
+    // inventory/mounted slots). Null falls back to the owner entity's byte
+    // (the NPC single-weapon stand-in, D-AI-5) or the remote wire-identity
+    // map. [orig: RoundData_SpawnRound @ 0x4ec199..0x4ec1bb reads the passed
+    // weaponSlot's +0x80]
+    uint8_t *tracer_counter = nullptr;
 };
 
 // One in-flight round. [orig: 780-B record; the fields we simulate: pos, velocity

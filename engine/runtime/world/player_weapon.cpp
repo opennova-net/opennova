@@ -927,6 +927,14 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 				round.shot_seq = shot_seq;
 				round.subtype = round_event.subtype;
 				round.charge = w.pending_throw_charge;
+				// The firing slot's tracer cadence byte (MountSlot+0x80) — the
+				// resolved ACTIVE slot, so a mounted redirect advances the
+				// parent slot's phase exactly like retail's passed weaponSlot
+				// [orig: RoundData_SpawnRound @ 0x4ec199 on the fire
+				//  descriptor's slot].
+				if (WeaponSlotState *fire_slot =
+								active_local_weapon_slot(world, w))
+					round.tracer_counter = &fire_slot->tracer_shot_counter;
 				if (!io.is_authority && io.carrier_exclusion)
 					// The joiner's OWN predicted round runs the wire-proxy walk with
 					// the local mount exclusion dead, so resolve the carrier gate from

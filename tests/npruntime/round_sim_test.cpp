@@ -845,6 +845,41 @@ int main() {
 		            "every spawn records a FireEvent for the present drain"))
 			return 1;
 		world.round_sim.fired.clear();
+
+		// The cadence byte belongs to the FIRING SLOT (MountSlot+0x80): a
+		// producer that supplies its slot byte advances THAT byte, two slots
+		// keep independent phases across an interleaved switch, and the
+		// owner-entity stand-in byte stays untouched [orig: RoundData_SpawnRound
+		// @0x4ec199..0x4ec1bb on the passed weaponSlot].
+		world.ammo.entries[1].tracer_rate = 3;
+		shooter->tracer_shot_counter = 0;
+		uint8_t slot_a = 0;
+		uint8_t slot_b = 0;
+		w::RoundSpawnParams rp_slot = rp;
+		rp_slot.tracer_counter = &slot_a;
+		const int a1 = world.round_sim.spawn(world, rp_slot);
+		const int a2 = world.round_sim.spawn(world, rp_slot);
+		rp_slot.tracer_counter = &slot_b;
+		const int b1 = world.round_sim.spawn(world, rp_slot);
+		rp_slot.tracer_counter = &slot_a;
+		const int a3 = world.round_sim.spawn(world, rp_slot);
+		if (!expect(a1 >= 0 && a2 >= 0 && b1 >= 0 && a3 >= 0,
+		            "per-slot cadence rounds spawned"))
+			return 1;
+		if (!expect(!world.round_sim.rounds[size_t(a1)].tracer &&
+		                    !world.round_sim.rounds[size_t(a2)].tracer &&
+		                    world.round_sim.rounds[size_t(a3)].tracer,
+		            "slot A's third round is the tracer despite the interleaved "
+		            "slot-B shot"))
+			return 1;
+		if (!expect(!world.round_sim.rounds[size_t(b1)].tracer && slot_b == 1,
+		            "slot B keeps its own phase"))
+			return 1;
+		if (!expect(shooter->tracer_shot_counter == 0,
+		            "the owner-entity stand-in byte is untouched while a slot "
+		            "byte is supplied"))
+			return 1;
+		world.round_sim.fired.clear();
 	}
 
 	// --- 7. The tracer trail channels [orig: g_TracerEmitterPool @ 0x2BF5270 — alloc
