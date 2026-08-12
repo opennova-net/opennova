@@ -16,6 +16,7 @@
 #include <world/spawn_select.h>  // kDeployPickNone/AutoTeam (C2S 0x2C sentinels)
 #include <world/vehicle_motor.h> // carrier_pose_fixed (the deck-ride pose reader)
 #include <rtxt/rtxt.h>
+#include <til/til_io.h> // load_til (the D-SND-15 placed-tile surface array)
 #include <world/destruction.h>  // destruction_notify_item_damage (S2C 0x13 net kill)
 #include <world/entity_spawn.h> // entity_reset_to_spawn_state (redeploy release)
 #include <godot_cpp/classes/display_server.hpp>
@@ -617,6 +618,22 @@ void Simulation::enable_listen_server(bool p_enable) {
 
 void Simulation::set_terrain_til_data(const PackedByteArray &p_til_bytes) {
 	terrain_til_data_.assign(p_til_bytes.ptr(), p_til_bytes.ptr() + p_til_bytes.size());
+	// The same bytes are the sim's placed-tile array for the surface-type
+	// override (D-SND-15) — retail keeps ONE shared g_TerrainTileArray for
+	// the network stream, the render overlay, and the surface walk
+	// [orig: PolyTrn_LoadTileData @ 0x6081d0 -> the @ 0x6065cc walk].
+	surface_tiles_.clear();
+	if (!terrain_til_data_.empty()) {
+		opennova::TilFile til;
+		std::string til_error;
+		if (opennova::load_til(terrain_til_data_.data(), terrain_til_data_.size(),
+		                       til, til_error)) {
+			surface_tiles_.reserve(til.entries.size());
+			for (const opennova::TilOverlayEntry &e : til.entries)
+				surface_tiles_.push_back({e.x_fixed, e.z_fixed, e.tile_index});
+		}
+	}
+	apply_terrain_to_ai();
 }
 
 void Simulation::set_mission_text_data(const PackedByteArray &p_rtxt_bytes) {

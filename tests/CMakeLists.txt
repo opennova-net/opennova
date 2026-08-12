@@ -704,6 +704,11 @@ target_link_libraries(til_foliage_blocker_test PRIVATE opennova_formats)
 target_include_directories(til_foliage_blocker_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME til_foliage_blocker COMMAND til_foliage_blocker_test)
 
+add_executable(til_tsd_test til/til_tsd_test.cpp)
+target_link_libraries(til_tsd_test PRIVATE opennova_formats)
+target_include_directories(til_tsd_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME til_tsd COMMAND til_tsd_test)
+
 add_executable(til_tile_atlas_test til/til_tile_atlas_test.cpp)
 target_link_libraries(til_tile_atlas_test PRIVATE opennova_formats)
 target_include_directories(til_tile_atlas_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

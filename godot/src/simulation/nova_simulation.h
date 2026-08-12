@@ -25,6 +25,8 @@
 
 #include <mission/event_runtime.h>
 #include <mission/promote.h>
+#include <mission/runtime_boot.h> // BootFileSource (the .TSD probe, D-SND-15)
+#include <til/til_tsd.h> // TilSurfaceTable (the placed-tile surface override)
 #include <playersav/weapon_sav.h> // weapon.sav: the per-side profile class + kit pages
 #include <terrain_query/height_field.h>
 #include <terrain_query/surface_type_map.h>
@@ -887,6 +889,18 @@ private:
 	// @ 0x606510]. Shares terrain_sector_grid_/origins with the height field.
 	std::vector<uint8_t> surface_indices_;
 	opennova::terrain::SurfaceTypeMap surface_map_;
+	// The placed-tile surface override (D-SND-15): the mission .til entries
+	// (parsed from the same bytes the S2C 0x45 stream carries) plus the
+	// tileset's .TSD-fed tile-index -> surface table. Owned here like the
+	// heightmap so world.surface_map's raw pointers survive reset_world;
+	// the zero table is retail's no-.TSD default (every tile TSD_NULL)
+	// [orig: g_TerrainTileArray @ 0x319f7a4; byte_319F7D8 @ 0x319f7d8].
+	std::vector<opennova::terrain::SurfaceTileEntry> surface_tiles_;
+	opennova::TilSurfaceTable tile_surface_table_;
+	// The <tilestrip base>.TSD probe at terrain install [orig: the
+	// PolyTrn_InitTextures probe @ 0x60c5d3 -> sub_604C00 rows].
+	void install_tileset_surface_defs(const Ref<TerrainData> &p_terrain,
+			const opennova::mission::BootFileSource &files);
 	// SndProf.def text + water plane held for (re)application on reset_world.
 	std::vector<uint8_t> sndprof_text_;
 	int32_t env_water_z_q16_ = 0;
