@@ -284,6 +284,53 @@ void test_death_scream_day_and_night() {
     CHECK(saw_night);
 }
 
+void test_local_player_death_scream_composite() {
+    // The prefix map + composite builder [orig: Entity_GetBodyModelPrefix
+    // @0x5280F0; SoundProfile_FindByEntityAndType @0x528180 "%s_%s" over the
+    // {suffix, type} table @0x82F548].
+    char buf[24];
+    CHECK(std::string(slot::compose_entity_sound_set(
+                  0, slot::kEntitySoundDeath, buf, sizeof(buf))) == "BM1_DEATH");
+    CHECK(std::string(slot::compose_entity_sound_set(
+                  1, slot::kEntitySoundDeathNight, buf, sizeof(buf))) == "BM1_DEATH_K");
+    CHECK(std::string(slot::compose_entity_sound_set(
+                  7, slot::kEntitySoundDeath, buf, sizeof(buf))) == "BF1_DEATH");
+    CHECK(std::string(slot::compose_entity_sound_set(
+                  9, slot::kEntitySoundDeath, buf, sizeof(buf))) == "BM6_DEATH");
+    CHECK(std::string(slot::compose_entity_sound_set(
+                  11, slot::kEntitySoundDeathNight, buf, sizeof(buf))) == "RF1_DEATH_K");
+    CHECK(std::string(slot::compose_entity_sound_set(3, 99, buf, sizeof(buf))).empty());
+
+    // Day: the local player's death edge emits the body-model composite — not
+    // the T_DEATH the profile authors in slot 7 (the org2 leg never reads the
+    // profile slots) [orig: @0x4b4c4a-0x4b4c6a].
+    Rig rig(true);
+    if (Entity *ent = rig.world.registry.get(rig.e->handle)) {
+        ent->health = 0;
+        ent->anim_slot = 2; // BM2
+    }
+    rig.run(1, 2);
+    auto evs = rig.take();
+    bool saw = false;
+    for (const auto &ev : evs)
+        if (ev.slot == slot::kSlotDeath && std::string(ev.set_name) == "BM2_DEATH")
+            saw = true;
+    CHECK(saw);
+
+    // Night: the _K composite through the same EnableNVG gate; the default
+    // anim-slot 0 resolves BM1 [orig: the null/zero -> type-1 default @0x5280F8].
+    Rig rig2(true);
+    rig2.world.mission_attrib_flags = 0x100000;
+    if (Entity *ent = rig2.world.registry.get(rig2.e->handle)) ent->health = 0;
+    rig2.run(1, 2);
+    auto evs2 = rig2.take();
+    bool saw_night = false;
+    for (const auto &ev : evs2)
+        if (ev.slot == slot::kSlotNightDeath && std::string(ev.set_name) == "BM1_DEATH_K")
+            saw_night = true;
+    CHECK(saw_night);
+}
+
 void test_surface_sampler_defaults() {
     using opennova::terrain::SurfaceTypeMap;
     using opennova::terrain::surface_type_at_fixed;
@@ -312,6 +359,7 @@ int main() {
     test_default_profile_fallback();
     test_landing_pair_alive_and_dead();
     test_death_scream_day_and_night();
+    test_local_player_death_scream_composite();
     test_surface_sampler_defaults();
     if (failures == 0) std::printf("slot_sound_test OK\n");
     return failures == 0 ? 0 : 1;

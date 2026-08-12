@@ -177,6 +177,28 @@ inline bool remote_body_state_defers(uint32_t current_flags,
             ((current_flags & 0x20u) != 0u && (next_flags & 0x1u) == 0u);
 }
 
+// The gait->stance transition-clip pair map [orig: AnimMap_UpdateEntity
+// @0x40b662..0x40b737]: a forward gait retargeting to its crouch/prone walk
+// first plays the matching 169-172 transition clip and defers the real target
+// to the clip's completion boundary. Returns the transition state id, or -1
+// when the pair is not one of the four witnessed inserts. Shared by the netsim
+// replica channel and the authority InfantryState channel so the map cannot
+// drift between them (D-NET-209 / D-INF-23).
+inline int gait_stance_transition_clip(int current, int target) {
+    if (current == anim_state::kRunForward || current == anim_state::kWalkForward ||
+        current == anim_state::kRun2 || current == anim_state::kRun3) {
+        if (target == anim_state::kWalkProneForward) return anim_state::kRun2Prone;
+        if (target == anim_state::kWalkCrouchForward) return anim_state::kRun2Crouch;
+    } else if (current == anim_state::kWalkForwardRight &&
+               target == anim_state::kWalkCrouchForwardRight) {
+        return anim_state::kRunR2Crouch;
+    } else if (current == anim_state::kWalkForwardLeft &&
+               target == anim_state::kWalkCrouchForwardLeft) {
+        return anim_state::kRunL2Crouch;
+    }
+    return -1;
+}
+
 // The two witnessed STANCE bits of the per-state anim-flags word (bits 8-9;
 // the wire player compact carries the same pair as its 2-bit stance lane).
 // [orig: g_animStateFlagsTable @0x8139E8; stance read in RoundData_SpawnRound

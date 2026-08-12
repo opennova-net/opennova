@@ -44,8 +44,9 @@ Scope ctest with `-R` while iterating, but the pre-push run is the full suite.
   slice does, what it deliberately excludes, what depends on it). Never post PR
   comments. Do not merge — the maintainer merges.
 - CI gate: `test`, `godot-tests`, `build-gdextension-windows`, and
-  `validate-deliverables` must be green (macOS builds exist only in tag-time
-  `release.yml`, not PR CI). A red `modsuperoed-smoke` is known-unrelated OED parity drift — never
+  `validate-deliverables` must be green (there are no macOS builds anywhere in
+  CI — macOS delivery was removed entirely, and `tests/test_release_deliverables.py`
+  asserts it stays out of `release.yml`). A red `modsuperoed-smoke` is known-unrelated OED parity drift — never
   block or report on it.
 
 ## 5. Advance the train

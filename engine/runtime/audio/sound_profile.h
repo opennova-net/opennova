@@ -22,6 +22,7 @@
 #define OPENNOVA_AUDIO_SOUND_PROFILE_H
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -85,6 +86,38 @@ enum SoundProfileSlot {
 // The engine's slot keyword for a slot index (the @ 0x82F3B0 table strings,
 // e.g. 17 -> "SSLFootGND"). nullptr for an out-of-range slot.
 const char *sound_profile_slot_keyword(int slot);
+
+// ----------------------------------------------------------------------------
+// The player-body composite sound-set path — a SEPARATE mechanism from the
+// profile slots [orig: SoundProfile_FindByEntityAndType @ 0x528180]: a 9-entry
+// {suffix, type} pair table @ 0x82F548 composes sprintf("%s_%s",
+// bodyModelPrefix, suffix) and resolves the set by NAME across the loaded
+// banks (SoundBank_FindSetByNameAnyBank @ 0x5274F0); a bank without the set is
+// the sound-id-0 silence — there is no profile-slot fallback. The org2 player
+// death edge is the death consumer (type 5 when EnableNVG, else 0
+// @ 0x4b4c4a-0x4b4c6a).
+// ----------------------------------------------------------------------------
+
+// The witnessed type ids (the @ 0x82F548 table order; suffixes:
+// 0 DEATH, 1 MEDIC_REQUEST, 2 SURFACE_BREATH, 3 SURFACE_GASP, 4 WATER_GAG,
+// 5 DEATH_K, 6 RECRUIT_ACCEPT, 7 RECRUIT, 8 TANK_COMAND).
+enum EntitySoundType {
+    kEntitySoundDeath = 0,
+    kEntitySoundDeathNight = 5, // the "_K" night composite
+    kEntitySoundTypeCount = 9,
+};
+
+// The soldier body-model name prefix for an entity's anim-slot byte
+// (entity+0x374; 0/invalid defaults to 1). [orig: Entity_GetBodyModelPrefix
+// @ 0x5280F0 — 1 "BM1", 2..6 "BM2".."BM6", 9 "BM6", 7 "BF1", 8 "BF2",
+// 10 "RM2", 11 "RF1", anything else "BM1"]
+const char *body_model_prefix(int anim_slot);
+
+// Compose "<prefix>_<suffix>" for the anim slot + type into out (retail
+// composes into a 256-byte stack buffer; the shipped names fit our 24-byte
+// set-name events). An unknown type yields an empty string. Returns out.
+// [orig: SoundProfile_FindByEntityAndType @ 0x528180 sprintf "%s_%s"]
+const char *compose_entity_sound_set(int anim_slot, int type, char *out, size_t out_size);
 
 struct SoundProfile {
     std::string name; // begin "<name>" (engine buffer: 64 bytes)

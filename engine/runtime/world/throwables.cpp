@@ -162,6 +162,15 @@ int32_t horizontal_speed_q16(const MotorFrame &f) {
     return static_cast<int32_t>(m);
 }
 
+// Charmap surface material under a motor frame, bounded to the impact-effect
+// table the bounce presentation indexes with material + 4 (no charmap -> 1 ->
+// dirt, the sampler's own default). [orig: Terrain_GetSurfaceTypeAtPosition
+// @ 0x606510; consumed as material + 4 by the bounce presentation @ 0x4447c3]
+int32_t sampled_ground_surface(const World &world, const MotorFrame &f) {
+    const int32_t surface = terrain::surface_type_at_fixed(world.surface_map, f.px, f.py);
+    return (surface >= 0 && surface + 4 < kImpactEffectTagCount) ? surface : 1;
+}
+
 int32_t speed3_q16(const MotorFrame &f) {
     const double vx = double(f.vx), vy = double(f.vy), vz = double(f.vz);
     double m = std::sqrt(vx * vx + vy * vy + vz * vz);
@@ -415,9 +424,10 @@ static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
                 ++r.bounce_count;
                 f.vz = qmul(f.vz, -13107);
                 ground_hit = true;
-                ground_surface = 1; // no-charmap default material: dirt (tag 5,
-                                    // the ballistic terrain default); the
-                                    // surface-map override remains D-WPN-15
+                // Charmap surface at the bounce point (no charmap -> 1 -> dirt)
+                // [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510; the
+                // bounce presentation applies material + 4 @ 0x4447c3]
+                ground_surface = sampled_ground_surface(world, f);
                 const int32_t kick_yaw =
                         (world.next_prng16() % 10) - 5; // [orig: %10-5]
                 const int32_t kick_pitch = world.next_prng16() % 10;
@@ -582,7 +592,8 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
             f.vz = 0;
             speed = 0;
             ground_hit = true;
-            ground_surface = 1; // no-charmap default material: dirt (D-WPN-15)
+            // [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510 at the stop point]
+            ground_surface = sampled_ground_surface(world, f);
             r.parent = EntityHandle{};
             r.parent_spawn_id = 0;
             r.parent_tracking = false;

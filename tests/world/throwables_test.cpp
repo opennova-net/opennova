@@ -452,6 +452,25 @@ void test_grenade_bounce_and_fuse() {
     CHECK(saw_obj);
 }
 
+// With a charmap wired, the grenade bounce presentation reports the sampled
+// surface material + 4 instead of the no-map dirt default. [orig:
+// Terrain_GetSurfaceTypeAtPosition @ 0x606510; bounce material + 4 @ 0x4447c3]
+void test_grenade_bounce_samples_charmap_surface() {
+    static const uint8_t raster[4] = {6, 6, 6, 6}; // charmap type 6 = grass
+    static const int mapped_grid[256] = {1};
+    Rig rig(0);
+    rig.w.surface_map.data = raster;
+    rig.w.surface_map.width = 2;
+    rig.w.surface_map.height = 2;
+    rig.w.surface_map.sector_grid = mapped_grid;
+    const int slot = rig.throw_ammo(kAmmoGrenade, Vec3{10, 10, 2}, 0, 0);
+    CHECK(slot >= 0);
+    rig.tick(80);
+    CHECK(!rig.w.round_sim.impacts.empty());
+    for (const RoundImpact &bounce : rig.w.round_sim.impacts)
+        CHECK(bounce.effect_tag == 10); // grass, not the dirt default
+}
+
 void test_grenade_fuse_tick_boundaries() {
     {
         Rig rig(0);
@@ -983,6 +1002,7 @@ int main() {
     test_charge_stick_surface_gate();
     test_control_and_bounce_share_prng16_stream();
     test_grenade_bounce_and_fuse();
+    test_grenade_bounce_samples_charmap_surface();
     test_grenade_fuse_tick_boundaries();
     test_ballistic_expiry_is_silent();
     test_round_slot_reuse_clears_throwable_state();

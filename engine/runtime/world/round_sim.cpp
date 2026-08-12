@@ -1181,7 +1181,16 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         imp.direction = flight_direction(r.vel);
         imp.ammo_index = impact_ammo_index;
         if (collision.hit_class == ProjectileHitClass::Terrain) {
-            imp.effect_tag = 5; // no-charmap retail default: dirt
+            // Terrain hits sample the charmap surface type at the impact point,
+            // shifted into the impact-effect table (no charmap -> 1 -> 5 dirt;
+            // unmapped sector -> 7 -> 11 water). [orig:
+            // Terrain_GetSurfaceTypeAtPosition @ 0x606510 result + 4; the
+            // terrain leg of the @ 0x4ea6a7 hit switch in
+            // Projectile_UpdatePhysics @ 0x4e9d70]
+            const int32_t surface =
+                terrain::surface_type_at_fixed(world.surface_map, impact_q16.x, impact_q16.y);
+            imp.effect_tag =
+                (surface >= 0 && surface + 4 < kImpactEffectTagCount) ? surface + 4 : 5;
         } else if (collision.hit_class == ProjectileHitClass::Water) {
             imp.effect_tag = 11;
         } else if (person_collision) {

@@ -548,6 +548,19 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     org1 [orig: `@0x4b7cbf-0x4b7cd9`], which is what the port implements — a dev/admin
     feature, not a gameplay path. (The handler is renamed `NetMsg_HandlePoofToggle`,
     ex the `NetPacket_HandleWeaponSwitch` misnomer.)
+  - **D-INF-23** the authority body channel lacked the gait->stance transition-clip
+    insert — FIXED 2026-08-11. A forward gait {1,2,8,9,10,149} committing to its
+    crouch/prone walk {11,12,18,19} first plays `run2crouch`/`runl2crouch`/
+    `runr2crouch`/`run2prone` (169-172) and defers the real target to the clip's
+    completion boundary, gated on the adm carrying the clip and no deferred armed
+    [orig: `AnimMap_UpdateEntity @0x40b662..0x40b737`; promotion `@0x40b795/@0x40b7c3`].
+    Surfaced by the S11 grill (2026-08-07), which landed the replica-side twin first
+    (D-NET-209, netsim `row_root_motion_tick`); the authority port runs the insert in
+    `commit_body_state`'s direct-commit branch and both clip-end promotion sites, and
+    the pair map is the shared `world::gait_stance_transition_clip` (`infantry.h`)
+    consumed by BOTH channels so they cannot drift. Guarded by
+    `test_gait_stance_transition_insert` (pair map, insert + clip-end promotion,
+    crouch twin, no-clip direct commit) and the unchanged netsim arbitration suite.
   Everything else is structurally translated with per-mechanic dump citations and byte-pinned
   constants, unit-tested in tests/world/infantry_test.cpp and end-to-end in promote_test.
 - **Root-motion data path** (`AnimMap_UpdateEntity @ 0x40b5f0` → engine `InfantryRootMotion`):
@@ -2780,9 +2793,15 @@ D-SND-10..15). All plays go through `Entity_GetProfileSlotSound @ 0x528300`
   §19.7 "what authors 0x100000" open item closes: the dfx2med encoder writes
   it as the NVG checkbox, and the runtime reuses it as the night gate). The
   `byte+0x134`-bit0 silent-cleanup variant skips the scream (unchanged,
-  D-AI-9). The org2 player edge instead plays the composite
-  `SoundProfile_FindByEntityAndType(def, night ? 5 : 0)` name
-  `@ 0x4b4c4a-0x4b4c6a` — unported (D-SND-14).
+  D-AI-9). The org2 player edge instead plays the BODY-MODEL composite
+  `SoundProfile_FindByEntityAndType(entity, night ? 5 : 0)` name
+  `@ 0x4b4c4a-0x4b4c6a` — `"%s_%s"` of `Entity_GetBodyModelPrefix @ 0x5280F0`
+  (the anim-slot byte +0x374 -> `BM1`..`BM6`/`BF1`/`BF2`/`RM2`/`RF1`, 0 -> 1 ->
+  `BM1`) and the `g_entity_sound_type_table @ 0x82F548` suffix (0 `DEATH`,
+  5 `DEATH_K`), resolved by name across the loaded banks
+  (`SoundBank_FindSetByNameAnyBank @ 0x5274F0`); a miss plays id 0 = silence,
+  no profile-slot fallback — ported (D-SND-14 FIXED 2026-08-11,
+  `audio::compose_entity_sound_set` + the `is_local_player` death-edge branch).
 - **The org2 airborne family** (outside the tick-parity gate — every body
   tick): the chute edge on `Flags & 0x20` vs its `+0x2C` mirror bit
   (`@ 0x4b7b1e-0x4b7b75`): open -> slot 41 `ChuteOpen` + zero the two

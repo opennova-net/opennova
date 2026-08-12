@@ -64,7 +64,7 @@ export conventions and the two-Python-mirror rule).
 ## 2. Nothing to register twice — but the ABI ritual still applies
 
 Both CMake roots share `engine/CMakeLists.txt`; the group target is already
-linked by the DLL, the adapter, and the tests. Two things still matter:
+linked by the DLL, `godot/src`, and the tests. Two things still matter:
 
 - A new C ABI export is a deliberate Model-A decision: annotate it AND bump
   `scripts/lint/abi_exports_baseline.txt` in the same commit, logged in
@@ -103,7 +103,7 @@ Run loop:
 ## 5. Optional: engine binding and editor surface
 
 - Binding: `godot/src/<name>/nova_<name>*.{h,cpp}`, `GDREGISTER_CLASS` in
-  `godot/src/register_types.cpp` (the adapter already links the group —
+  `godot/src/register_types.cpp` (`godot/src` already links the group —
   no CMake link edit), then `bash scripts/build_godot.sh` and fully restart
   any open editor (no hot-reload). Add a GDScript smoke test
   `godot/tests/<name>_data_test.gd` using the fixture-skip pattern; run it via

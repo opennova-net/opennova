@@ -808,23 +808,8 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 	// resolves a track).
 	if (es.net_anim_pending == 0 && es.rm_state >= 0 &&
 			es.net_anim_current >= 0 && target_state != es.rm_state) {
-		const int cur = es.rm_state;
-		int trans = -1;
-		if (cur == world::anim_state::kRunForward ||
-				cur == world::anim_state::kWalkForward ||
-				cur == world::anim_state::kRun2 ||
-				cur == world::anim_state::kRun3) {
-			if (target_state == world::anim_state::kWalkProneForward)
-				trans = world::anim_state::kRun2Prone;
-			else if (target_state == world::anim_state::kWalkCrouchForward)
-				trans = world::anim_state::kRun2Crouch;
-		} else if (cur == world::anim_state::kWalkForwardRight &&
-				target_state == world::anim_state::kWalkCrouchForwardRight) {
-			trans = world::anim_state::kRunR2Crouch;
-		} else if (cur == world::anim_state::kWalkForwardLeft &&
-				target_state == world::anim_state::kWalkCrouchForwardLeft) {
-			trans = world::anim_state::kRunL2Crouch;
-		}
+		const int trans =
+				world::gait_stance_transition_clip(es.rm_state, target_state);
 		if (trans >= 0 && src.clip_length_ticks(es.rm_adm_id, trans) >= 0) {
 			es.net_anim_pending = static_cast<int16_t>(target_state);
 			es.net_anim_pending_boundary = -1;

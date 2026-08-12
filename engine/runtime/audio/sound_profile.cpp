@@ -2,6 +2,7 @@
 
 #include "io/strutil.h"
 
+#include <cstdio>
 #include <cstdlib>
 
 namespace opennova::audio {
@@ -83,6 +84,43 @@ int32_t parse_pct(std::string_view v) {
 const char *sound_profile_slot_keyword(int slot) {
     if (slot < 0 || slot >= kSoundProfileSlotCount) return nullptr;
     return kSlotKeywords[slot];
+}
+
+const char *body_model_prefix(int anim_slot) {
+    // [orig: Entity_GetBodyModelPrefix @ 0x5280F0 — a null entity or a zero
+    // +0x374 byte defaults to type 1; the switch maps the prefix strings
+    // @ 0x7D0970-0x7D0994]
+    switch (anim_slot == 0 ? 1 : anim_slot) {
+        case 2: return "BM2";
+        case 3: return "BM3";
+        case 4: return "BM4";
+        case 5: return "BM5";
+        case 6:
+        case 9: return "BM6";
+        case 7: return "BF1";
+        case 8: return "BF2";
+        case 10: return "RM2";
+        case 11: return "RF1";
+        default: return "BM1"; // type 1 and every out-of-table value
+    }
+}
+
+const char *compose_entity_sound_set(int anim_slot, int type, char *out, size_t out_size) {
+    // The {suffix, type} pair table [orig: @ 0x82F548-0x82F58C; the walk
+    // compares the type column and composes "%s_%s" @ 0x5281CC].
+    static const char *const kTypeSuffixes[kEntitySoundTypeCount] = {
+        "DEATH",          "MEDIC_REQUEST", "SURFACE_BREATH",
+        "SURFACE_GASP",   "WATER_GAG",     "DEATH_K",
+        "RECRUIT_ACCEPT", "RECRUIT",       "TANK_COMAND",
+    };
+    if (out == nullptr || out_size == 0) return out;
+    if (type < 0 || type >= kEntitySoundTypeCount) {
+        out[0] = '\0';
+        return out;
+    }
+    std::snprintf(out, out_size, "%s_%s", body_model_prefix(anim_slot),
+                  kTypeSuffixes[type]);
+    return out;
 }
 
 size_t SoundProfileTable::parse(const char *text, size_t len) {

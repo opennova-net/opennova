@@ -1536,6 +1536,77 @@ void test_consumed_hit_skips_post_sweep_forces() {
 
 } // namespace
 
+// Terrain impact rows sample the charmap surface at the impact point and shift
+// it into the effects table: no charmap -> sampler default 1 -> tag 5 dirt, a
+// mapped cell reports its authored type + 4, an unmapped sector -> ocean 7 ->
+// tag 11 water. [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510 result + 4
+// in the terrain leg of the @ 0x4ea6a7 hit switch]
+void test_terrain_impact_samples_charmap_surface() {
+    static const uint8_t raster[4] = {6, 6, 6, 6}; // charmap type 6 = grass
+    static const int mapped_grid[256] = {1};       // cell (0,0) -> quadrant 0
+    static const int unmapped_grid[256] = {0};     // every cell unmapped
+
+    struct Variant {
+        const uint8_t *data;
+        const int *grid;
+        int expected_tag;
+    };
+    const Variant variants[] = {
+        {nullptr, nullptr, 5},           // no charmap: default 1 -> dirt
+        {raster, mapped_grid, 10},       // authored type 6 -> grass
+        {raster, unmapped_grid, 11},     // unmapped sector: 7 -> water
+    };
+    for (const Variant &v : variants) {
+        World world;
+        world.registry.configure_pool(0, 4);
+        Entity s;
+        s.kind = EntityKind::Organic;
+        s.item_type = 3;
+        s.position = {0.0f, 0.0f, 10.0f};
+        const EntityHandle shooter = world.registry.spawn(0, s);
+
+        AmmoTableEntry ammo;
+        ammo.name = "TRN";
+        ammo.valid = true;
+        ammo.velocity = 620;
+        ammo.max_age_ticks = 20;
+        ammo.weight_in_grains = 875;
+        world.ammo.entries.push_back(ammo);
+
+        std::vector<uint16_t> heights(512u * 512u, 0);
+        std::vector<int> sectors(256u, 1);
+        opennova::terrain::TerrainHeightField flat;
+        flat.heightmap = heights.data();
+        flat.dim = 512;
+        flat.layout.sector_grid = sectors.data();
+        CollisionWorld cw;
+        cw.terrain = &flat;
+        cw.build_tick_tables(world);
+        world.collision = &cw;
+
+        world.surface_map.data = v.data;
+        world.surface_map.width = v.data != nullptr ? 2 : 0;
+        world.surface_map.height = v.data != nullptr ? 2 : 0;
+        world.surface_map.sector_grid = v.grid;
+
+        RoundSpawnParams p;
+        p.owner = shooter;
+        p.shooter_handle = shooter.packed;
+        p.origin = {10.0f, -10.0f, 2.0f};
+        p.ammo_index = 0;
+        const int slot =
+            world.round_sim.spawn(world, p, RoundConsequenceMode::Authoritative);
+        CHECK(slot >= 0);
+        if (slot < 0) continue;
+        world.round_sim.rounds[static_cast<size_t>(slot)].vel =
+            Vec3{0.0f, 0.0f, -10.0f};
+        world.round_sim.tick(world, &flat, &cw);
+        CHECK(world.round_sim.impacts.size() == 1);
+        if (!world.round_sim.impacts.empty())
+            CHECK(world.round_sim.impacts[0].effect_tag == v.expected_tag);
+    }
+}
+
 int main() {
     test_arming_dud_and_armed_damage();
     test_missing_item_def_consumes_round_without_damage();
@@ -1547,6 +1618,7 @@ int main() {
     test_network_oneshot_authority_and_session_gate();
     test_visual_only_rounds_have_no_gameplay_consequences();
     test_visual_person_proxy_keeps_wire_identity_out_of_authority();
+    test_terrain_impact_samples_charmap_surface();
     test_visual_dynamic_proxy_projects_decoded_pose_geometry();
     test_visual_dynamic_proxy_carrier_gate_and_sphere_standin();
     test_visual_dynamic_proxy_excludes_shooter_self_slot();

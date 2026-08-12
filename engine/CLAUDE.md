@@ -65,7 +65,8 @@
   pcapio, refs), `opennova_runtime` (the rest of runtime/), `opennova_net` (novacrypto,
   napi, npwire, netsim, npruntime + novaworld session/gate), and
   `opennova_novaworld_service` (the service alone — the ONLY target linking
-  `opennova_sqlite`; the adapter links `opennova_net`, never the service).
+  `opennova_sqlite`; the Godot layer (`godot/src`) links `opennova_net`, never the
+  service).
   `opennova_io`/`opennova_oned_edit` stay header-only INTERFACE. PUBLIC chain: formats
   links io, base links formats (base deliberately sits ABOVE formats — vfs and refs
   PARSE formats: pff/scr/bfc1, env/cbin/def/avatars/threedi/mnu/mission_format),
@@ -97,9 +98,9 @@
   is a real migration needing a CPT-corpus byte diff, not a swap. The byte diff is
   available: `tests/terrain/parametric_parity_test` asserts byte-identical CPT output
   across four fixtures (it is registered but DISABLED in CI for runtime, so run the
-  built exe directly whenever you touch the CPT encoder). `engine/runtime/mission`'s BMS `Reader`
-  is still its own class; its `has_bytes`/`skip` overflow was fixed in place (2026-07-28,
-  W2-7) by phrasing the bound as `count <= size_ - pos_`, so what remains is a mechanical
+  built exe directly whenever you touch the CPT encoder). The BMS `Reader`
+  (`engine/formats/mission/bms.cpp` since the mission-format move) is still its own
+  class with a safe bound (`count <= remaining()`), so what remains is a mechanical
   migration, not a hardening one.
 - Ports are faithful structural translations of the original engine — implementing "our
   own version" of engine behavior is never allowed unless a tracked decision (ADR or an
