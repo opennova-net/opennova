@@ -121,6 +121,15 @@ struct RoundSourceState {
     const int32_t *weapon_weight_spread = nullptr; // entity+0x384
 };
 
+// The witnessed below-water EYE projection, shared by the round-source
+// classifier and the shell's aimed-shot/HUD-crosshair gates so they cannot
+// drift: Position.Z plus the per-tick eye offset (entity+0x74), strictly
+// below the water plane; env.water_z == 0 (no authored water) is never
+// below. [orig: RoundData_SpawnRound stance leg @0x4ec2de..0x4ec2ea; the
+// recoil x4 legs @0x4ec34e..0x4ec35a / @0x4ec879..0x4ec885]
+bool entity_eye_below_water(const World &world, int32_t body_z_q16,
+                            int32_t eye_offset_z);
+
 struct RandomSpreadOffset {
     int32_t yaw_bam = 0;
     int32_t pitch_bam = 0;

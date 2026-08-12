@@ -79,14 +79,12 @@ void Simulation::apply_player_input_pre_tick() {
 				active_slot.current != opennova::world::weapon_action::kSwitchFrom;
 		const bool in_air = p->inf.airborne ||
 				(entity_flags & opennova::world::kEntityFlagInAir) != 0;
-		// Retail tests Position.Z + CameraOffset.Z (entity+0x74) against the
-		// water plane; eye_offset_z is that ported channel
-		// [orig: RoundData_SpawnRound @0x4ec2de..0x4ec2ea].
+		// The shared witnessed eye-projection classifier (world/round_sim.h
+		// entity_eye_below_water) plus the drowning flag.
 		const bool submerged =
 				(entity_flags & opennova::world::kEntityFlagDrowning) != 0 ||
-				(world_->env.water_z != 0 &&
-						p->pos[2] + (local != nullptr ? local->eye_offset_z : 0) <
-								world_->env.water_z);
+				opennova::world::entity_eye_below_water(*world_, p->pos[2],
+						local != nullptr ? local->eye_offset_z : 0);
 		const bool ordinary_aimed_shot = !in_air &&
 				(sighted_aimed_shot ||
 						(scoped_aimed_shot && !p->inf.player_moving)) &&
