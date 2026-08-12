@@ -2864,20 +2864,31 @@ in one add; `brain[8] += step` accumulates and every ≥16 fires a **processed t
 delay), `brain[42] += 16` (the §16.3 retarget timer — its incrementer), and while
 `brain[9] > 0` the flare dispenser runs (§16.5 item 5). `profile+100` mode bits:
 
-- **0x80 stationary** (emplacements): fire only while byte `brain+785` ("aligned",
-  written by the solver) is set; primary = profile byte `+148`, interval `+124` vs
-  cooldown word +208, ammo `brain[53]`, turret state `brain[55]/brain+224`, def block
-  `profile+120`; secondary = `+180/+156`/word +210/`brain[54]`/`brain[72]/brain+292`/
-  `profile+152`. Each shot: `Entity_ComputeWeaponFireTransform_0 @ 0x455b30` solves the
-  fire pose (arg 7 = 0 solve / 1 track-only; §17.7 item 2) → `Weapon_FireProcess
-  @ 0x53f5b0` → ammo−−, cooldown word = 0, `brain[106]` = which (1/2), bone-flag byte
-  784 |= 0x40. Not aligned ≥ 620 → pending = fallback. Every processed tick
-  `Entity_SetAITarget(entity, 0)` (stationary mode keeps no brain[38] target) and
+- **0x80 stationary** (.aip `RC_FIRE`, emplacements): fire only while byte
+  `brain+785` is set — CORRECTED 2026-08-12: that byte is NOT solver-written; it is
+  the commanded weapons-free gate (the WAC AI command case 0x15 `@ 0x4659a7` writes
+  it — arg 0 clears, nonzero pushes the type's combat state (GROUND → 17, HELO → 8)
+  into pending then sets 1 — and the savegame restore `@ 0x45ddba` reloads it; spawn
+  default 0). Primary = profile byte `+148`, interval `+124` vs cooldown word +208,
+  ammo `brain[53]`, list count `brain[55]`/list `brain+224`, def block `profile+120`;
+  secondary = `+180/+156`/word +210/`brain[54]`/`brain[72]/brain+292`/`profile+152`.
+  Each shot: `Entity_ComputeWeaponFireTransform_0 @ 0x456980` (CORRECTED — the old
+  `0x455b30` cite was a transcription slip; full digest §17.9) solves the fire pose
+  (arg 7 = the ctx 0x8000 defer-LOS bit, 0 at the stationary/continuation sites, 1
+  at the mobile sites — NOT a track-only switch) → `Weapon_FireProcess @ 0x53f5b0`
+  → ammo−−, cooldown word = 0, `brain[106]` = which (1/2), bone-flag byte 784 |=
+  0x40 `@ 0x47306f`. Not aligned ≥ 620 → pending = fallback. Every processed tick
+  `Entity_SetAITarget(entity, 0)` (stationary mode keeps no brain[38] target — so in
+  practice only the WEAPON_PITCHLOCKED* solver legs, which need no target, fire) and
   `profile+100 & 1` → `AI_UpdateMovementTarget @ 0x460e40`.
-- **0x40 burst**: `brain[181]` = the window (armed to 1 by each targeted shot, +step
-  while ≤ 186, else 0); while armed, the continuation branches re-fire the SAVED fire
-  solution — deltas `brain[182..184]` pos / `[185..187]` angles (primary; `[188..193]`
-  secondary) captured at each solve — cooldown-gated, without re-solving.
+- **0x40 burst** (.aip `ATEAM_LOCK`): `brain[181]` = the window (armed to 1 by each
+  targeted shot, +step while ≤ 186, else 0). CORRECTED 2026-08-12: the between-ticks
+  `brain[106]` continuation sites (`@ 0x473d57` primary / `@ 0x473e44` secondary) DO
+  re-solve — same solver, arg 7 = 0 (LOS on), fresh aim offset, then scatter — the
+  old "re-fires the saved solution without re-solving" gloss was wrong. The saved
+  deltas `brain[182..187]` (primary) / `[188..193]` (secondary) = out-transform minus
+  entity pos/angles, captured at each mobile/continuation solve `@ 0x4735f9..0x47363a`
+  (their consumer is elsewhere — presentation/suspension, unwalked).
 - **0x20 sweep**: each shot `brain[180] += 10918` (1/6 u), passed as the transform's
   lateral bias; on > 196608 (3.0) reset to −196608 AND `brain[38] = 0` (drop target →
   rescan) — the strafing-MG walk.
@@ -2894,30 +2905,52 @@ process flag, writer unwitnessed): `brain[41]` nonzero → move only;
 `AIEntity_TryAcquireTarget @ 0x4716b0` may retarget; chase = approach cap
 `profile+76`, min range `+188`, match the target's speed inside `+184` (target
 `brain[136]` or |velocity|), give-up > 620 beyond the cap; **fire gate** = folded
-|targetHeading − yaw| ≤ `((profile+67 | 1) | 2) >> 1` (the secondary-FOV arc); weapon
-select as stationary (+ the anti-building swap: target `Flags & 0x100` →
-`byte_AE076E/F` via `sub_545930`, §17.7 item 4); solve with the sweep/burst bias
-(`0x20` → `brain[180]`, `0x40` → −196608) then **scatter**: two LCG_31BFBB8 draws,
-each `(u16 % (6 − brain[43])) · flt_7C6F60` (≈ 0.75° BAM per step; `brain[43]` =
-accuracy 0–5), sign = the scaled value's parity, applied to yaw then pitch →
-`Weapon_FireProcess`. Between processed ticks the `brain[106]` continuation keeps the
-volley running cooldown-gated (pitch base 0, track-only pose), and `profile+136/+168`
-bit 0 refreshes the turret solution without firing.
+|targetHeading − yaw| ≤ `((profile+67 | 1) | 2) >> 1` (the secondary-FOV arc — byte
++67 is the top byte of the +64 `view_fov` BAM dword, §17.9c); weapon select as
+stationary (+ the anti-building swap: target `Flags & 0x100` → `byte_AE076E/F` via
+`sub_545930`, §17.7 item 4); solve with the aim offset passed through the
+`distance` global `@ 0xB21F8C` (written at every mobile/continuation site
+`@ 0x473367..0x47337e`: `0x20` ATEAM → `brain[180]`, `0x40` ATEAM_LOCK → −196608
+(−3.0 u), else 0) then **scatter** `@ 0x473640..0x473716`: two `dword_31BFBB8`
+rol-LCG draws (`x' = rol(rol(x,11)+x,4) ^ 1`, value = low u16), each
+`(u16 % (6 − brain[43])) · 8947848.0f` (`flt_7C6F60` = 0x888888 ≈ 0.75°;
+`brain[43]` = accuracy 0–5), the scaled value's parity picks the sign (odd adds,
+even subtracts), applied to yaw then pitch → `Weapon_FireProcess`. Between
+processed ticks the `brain[106]` continuation keeps the volley running
+cooldown-gated through the same solver (§17.6 burst bullet), and
+`profile+136/+168` bit 0 (`WEAPON_TURRET`) stages/refreshes the turret solution
+without firing.
 
 ### 17.7 Open follow-ups (this session's unknowns)
 
 1. The block-copy writer of the anim-fire weapon bytes `entity+0x358..0x35B` + bones
    `+0x365..0x367` (no per-field instruction writes them; §17.4 pins the def source).
-2. `Entity_ComputeWeaponFireTransform_0 @ 0x455b30` internals — the turret/gun fire
-   solver (aligned-flag byte `brain+785` writer, elevation/lead solve, the def block
-   `profile+120/+152` layout) — gates VEHICLE/emplacement fire fidelity only.
+   The SM sibling — the spawn writer of `brain[53]/[54]` (live ammo, seeded from the
+   `.aip` `primary/secondary_ammo` capacities) and of `brain[43]` (accuracy; the
+   0..4-clamped `aim_skill` at profile+28 is the PROBABLE source) — is the same
+   unwitnessed copy family (the only found +785/+0x311 writers are the command and
+   the savegame restore, so the plain spawn path is a block/memset).
+2. RESOLVED 2026-08-12 → §17.9: `Entity_ComputeWeaponFireTransform_0 @ 0x456980`
+   (the old `0x455b30` cite was wrong) witnessed in full and ported (D-AI-2).
 3. `brain[48]` (the forced-process flag read by the state-17 tick) writer.
 4. The anti-building weapon swap (`sub_545930` + `byte_AE076E/F` selection).
-5. `compute_relative_position_metrics @ 0x545710` exact frame math (consumed via the
-   off-axis/forward split in §17.2).
-6. `Entity_GetWeaponFirePosition @ 0x53a2e0`-family vs `Entity_ComputeWeaponFireOrigin`
-   overlap (FindTargets tries the former, falls back to the latter).
+5. RESOLVED 2026-08-12 → §17.9b: `compute_relative_position_metrics @ 0x545710`
+   witnessed in full (the metrics ARE the SM aim solve's angle source).
+6. RESOLVED 2026-08-12 → §17.9b: `Entity_GetWeaponFirePosition @ 0x43b630` (the old
+   `0x53a2e0` cite was off) — quality 1 = def+1351 muzzle bone through the current
+   matrix (persons route the type-3 seat/userpoint legs), quality 2 = pos + 49152
+   (0.75 u) when a model exists but no muzzle bone, quality 3 = raw pos; callers
+   fall back to `Entity_ComputeWeaponFireOrigin @ 0x43b4b0` when quality != 1.
 7. The scripted-idle aim leg's `Flags & 0x80000` gate writer (aim-at-player poses).
+8. NEW: the saved continuation-delta blocks' (`brain[182..193]`) consumer (captured
+   at every mobile/continuation solve; nothing in the fire pump reads them back).
+9. NEW: `Weapon_FireProcess @ 0x53f5b0`'s composition of the out-transform with the
+   weapon mount/bone rest frame — with an authored nonzero `primary_facing` the
+   solver's world compose alone lands at (bearing − bias); whether the spawn re-adds
+   the mount facing is unwalked. Corpus check (JOX, 2026-08-12): no shipped `.aip`
+   resolves a nonzero facing — the GROUND files omit the key entirely and the helo
+   files author `0` or the `WEAPON_TURRET` token typo (atof → 0) — so the port's
+   `heading + rel_yaw` is exact for shipped data.
 
 ### 17.8 IDB write-backs (2026-07-16 session 2, saved)
 
@@ -2930,6 +2963,111 @@ Entry/site comments: `@ 0xA2ED08` (trigger-bit map), `@ 0x4b0990` (two callers �
 reseed), `@ 0x4418a5` (+0x2B4/+0x2B8 hardpoint ammo), `@ 0x53f440` (AI fire entry).
 Rename proposal pending maintainer OK (curated name): `Entity_ComputeWeaponFirePositions
 @ 0x455ef0` → `AIEntity_ReleaseFlareCountermeasures`.
+
+### 17.9 The SM/turret fire-transform solver — `Entity_ComputeWeaponFireTransform_0 @ 0x456980` (engine-research 2026-08-12; the D-AI-2 core, PORTED)
+
+Cdecl, SEVEN args (the IDB's 12-arg prototype over-decompiles the frame):
+`(entity, outTransform6, boneListCount, boneListPtr, weaponDefBlock, seed, deferLOS)`.
+`outTransform6` = `{pos xyz 16.16, yaw, pitch, roll BAM}`, pre-seeded by every caller
+from the entity's live pos/angles; `weaponDefBlock` = the `.aip` block at
+`profile+120`/`+152` (§17.9c); `seed` = the live ammo count (`brain[53]/[54]`);
+`deferLOS` ORs the §17.2 ctx `0x8000` defer-LOS bit (1 at the mobile sites, 0 at
+stationary/continuation). Callers: the 8 sites in `AIEntity_ProcessWeaponFire
+@ 0x472e00` + 8 in `Entity_ProcessInfantryWeaponFire @ 0x4716b0`-family.
+
+- **Head gate** `@ 0x4569b2`: no target (`brain[38]` null) and `!(block+16 & 0x18)`
+  → return 0. Bone-flag byte `brain+0x310` cleared `@ 0x4569d5`.
+- **Muzzle origin**: with a bone list, slot = `seed % count` (seed > 0) or the
+  round-robin counter `brain+0x1AC` (0 reseeds to −1, then `ctr-- % count`)
+  `@ 0x4569f1`; byte `+0x310` = slot | 0x80; the bone/userpoint local position
+  (block+16 bit 0 picks the skeleton row's rest position at bone-row `+0x38` over
+  the authored point) transforms through the entity euler matrix. With an EMPTY
+  list `@ 0x456ae4`: pos + 0x20000 Z (2.0 u). Then `out[3] += block+20` (the yaw
+  facing bias) `@ 0x456b1c`.
+- **WEAPON_PITCHLOCKED legs** `@ 0x45705d` (block+16 & 0x18, no aim solve, no cone,
+  no slew, always return 1): `0x10` → pitch += 0xE0000020 (−45°-ish); `0x8` →
+  pitch += `brain+0x314` (the commanded elevation — the WAC AI command case 0x16
+  writes `arg × 11930464` deg→BAM `@ 0x4659ef`). Bit 0 additionally stages the
+  pose (below) and, with a model, re-transforms the muzzle through the CURRENT pose
+  (`Model_TransformBoneMatrices`, bone row ×0x40) `@ 0x4571ae`.
+- **Aim solve** (via the `sub_53afc0` wrapper `@ 0x456c84`): the frame matrix is
+  built from the OUT transform (muzzle pos + biased angles); the shooter fire
+  position (`Entity_GetWeaponFirePosition @ 0x43b630`, fallback
+  `Entity_ComputeWeaponFireOrigin @ 0x43b4b0`) is the LOS start; the target's own
+  fire origin is the aim point, plus the `distance`-global lateral offset =
+  `R_yaw(entity yaw)·(d, 0, 0)` via `sub_6158f0` (added to the target pos, restored
+  after) `@ 0x456bee..0x456c73`. `compute_relative_position_metrics @ 0x545710`
+  then yields `{hdist = √(Σ((v>>8)²>>16, +0x8000 rounding)) << 16, ?, dist, yaw =
+  atan2(local_y, local_x)·2³¹/π, pitch = atan2(local_z, hdist)·2³¹/π, ?}` — the
+  RELATIVE angles in that frame. `Entity_ValidateWeaponTarget @ 0x53a400` applies
+  the §17.2 ctx range legs + LOS (unless deferred).
+- **Cone gate** `@ 0x456d17`: fold each relative angle to |top byte| (≥ 0x80 →
+  256−); limit = `(block+8 | 0x2000000) >> 25` (a floor of 1); over → return 0.
+- **World compose** `@ 0x456ce5`: `Math_BuildFixedPointRotationMatrixYXZ` multiplies
+  `R(rel_yaw, rel_pitch)` INTO the entity frame matrix (identity-seeded semantics
+  witnessed at `sub_6158f0`), euler re-extract → `out[3..5]` world angles.
+- **WEAPON_TURRET staging + slew** (block+16 bit 0) `@ 0x456d7b`: staging block
+  `brain+0x1E4..0x1F8` = `{hdist, ?, dist, −1 − rel_yaw − block+20, rel_pitch, ?}`;
+  no SLOW/FAST → snap to the active block `brain+0x1CC..0x1E0` and return 1. SLOW
+  (bit 1) `@ 0x456e52`: |staged − active(brain+0x1D8)| < `step·0x18C6318` → snap +
+  return 1, else active ± 0x2108421 and return 0. FAST (bit 2) `@ 0x456ef9`:
+  exactly double (`step·0x318C631`, ±0x4210842). On every snap the per-type turret
+  diagnostic globals get the active yaw/pitch high words (`profile+16` == 2 GROUND →
+  `dword_83FEE0/83FEE8`, == 1 HELO → `dword_83FE88/83FE90`) `@ 0x456e33/0x456f9c`.
+- `AI_GetSuspensionFirePoint @ 0x456860` reads the active yaw (`brain[118]`) +
+  `profile+140` for the suspension fire point — the D-AI-2 adjacency consumer.
+
+**PORT** (2026-08-12): `AiSystem::solve_weapon_fire_transform`
+(engine/runtime/world/ai_combat.cpp) + the three `h_ground_combat_tick` fire legs
+(stationary/continuation/mobile, ai_handlers.cpp `sm_weapon_fire`) + the WAC AI
+commands 0x15/0x16 (`ai_handle_command`). Bounded deviations, cited at the port
+sites: no SM muzzle bone lists in the world model (the empty-list leg always runs —
+muzzle = pos + 2.0 u Z; the bone-list/current-pose refine rides the skeletal-pose
+seam like D-AI-6), the solve frame is yaw-only (AiEntity carries no pitch/roll —
+level shooters identical), the §17.2 ctx range legs stay with the acquire-time
+gates, and the CTRL diagnostic globals are unported (D-3DI-2 owns the bus). The
+`ai` ctest `test_sm_turret_fire` pins the mobile solve/fire, the SLOW slew hold,
+and the RC_FIRE + PITCHLOCKED_MINUS45 stationary leg behind the guard byte.
+
+### 17.9b The aim-solve callee family (witnessed 2026-08-12)
+
+`sub_53afc0 @ 0x53afc0` (the solve wrapper): frame matrix ← *ctx[0] (the OUT
+transform), fire position ← `Entity_GetWeaponFirePosition(ctx[1])` (quality != 1 →
+`Entity_ComputeWeaponFireOrigin`), then `Entity_ValidateWeaponTarget(target, ctx,
+&out6, frame, firePos)`; out6 copied to the caller `@ 0x53b047`.
+`compute_relative_position_metrics @ 0x545710`: full digest in §17.9 (the fpatan
+operand order and the `dbl_7C19D8` = 683565275.5764316 = 2³¹/π scale are exact in
+the disasm; the decompiler's tail for out[3] is wrong).
+
+### 17.9c The .aip GROUND property set — `AIProfile_ParseProperty @ 0x45de70` (witnessed 2026-08-12)
+
+Dispatch is gated on the profile `type` (+16: HELO 1 / GROUND 2 / ORGANIC 3);
+ORGANIC returns before any key dispatch (organic .aip files carry data for
+NOTHING; their keys are dead), and the HELO set remains unwitnessed. GROUND keys
+(offset ← conversion): `rank`→+60 atol; `default_state`→+24
+(`AIState_LookupByName`); `view_fov`→+64 and `radar_fov`→+72 (atof ×
+`dbl_7C6E18` = 11930464.0, deg→BAM32, x87-chopped — profile bytes +67/+75 read by
+the FOV gates are these dwords' top bytes); `view_dist`→+68, `radar_dist`→+76,
+`tether_dist`→+116, `primary_range`→+132, `secondary_range`→+164 (atol << 16);
+`priority_air/ground/organics/decorations`→+80/+84/+88/+92 (atol — the §16.2
+class-enable words, closing D-AI-1's data-supply witness); `react_time`→+104 and
+`primary/secondary_rate`→+124/+156 (atof × `dbl_7C3B48` = 62.5, seconds→ticks);
+`aim_skill`→+28 (atol clamped 0..4); `check_six_rate`→+108, `target_eval_rate`→
++112 (atof × dbl_7C6AC0); `primary/secondary_ammo`→+120/+152 (atol);
+`primary/secondary_weap`→ byte +148/+180 (`AmmoDef_LookupByName`);
+`primary/secondary_facing`→+140/+172 and `_pitch`→+144/+176 (deg→BAM32);
+`min/max_chase_dist`→+188/+184 (atof × 65536); `patrol/combat_speed`→+192/+196
+(the D-AI-11 pair). Flag token loops: `primary/secondary_flags`→+136/+168 —
+`WEAPON_TURRET` 0x1, `WEAPON_SLOW` 0x2, `WEAPON_FAST` 0x4, `WEAPON_PITCHLOCKED`
+0x8, `WEAPON_PITCHLOCKED_MINUS45` 0x10; `EVADE_FLAGS`→+96 / `COMBAT_FLAGS`→+100 —
+`FOLLOW_WP` 0x1, `NO_ACTION` 0x2, `FLEE` 0x4, `NO_CAP` 0x8, `COUNTER` 0x10, plus
+COMBAT-only `ATEAM` 0x20, `ATEAM_LOCK` 0x40, `RC_FIRE` 0x80 (the §17.6 mode bits'
+authored names). PORT: `aip::parse_profile` (engine/formats/aip), resolved per
+mission ai_textfile by `mission::resolve_ai_profiles` and seeded at promote
+(weapon blocks + ammo counts + COMBAT_FLAGS; the ammo NAMES resolve against the
+loaded table at the item-traits sweep). Corpus notes (JOX): all four GROUND
+transports author `primary_weap AI_STINGER` with priorities 0 (they carry an armed
+block but never acquire), and no shipped file resolves a nonzero facing.
 
 ## 18. Appendix: fire presentation + the LOS raycast internals (engine-research, 2026-07-16 session 4)
 

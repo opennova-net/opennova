@@ -158,9 +158,11 @@ bool BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
                 case bms::SingleTriggerType::SingleIsWithinArea:
                     return cmds.ssn_in_area(static_cast<uint16_t>(t.param1), t.param2);
                 default:
-                    // Cat-2 alert/count subs (3/6/9/11/12/14) and the distance/
-                    // LOS family (42-45) stay unwitnessed for singles — false
-                    // until a grill pins them (record §3a residuals).
+                    // Cat-2 alert/count subs (3/6/9/12/14) and the distance/
+                    // LOS family (42-45) stay unwitnessed for singles; sub 11
+                    // (SingleHoldingGroup) is the held-object sibling of the
+                    // cat-1 sub 11 — all false until a grill pins them
+                    // (record §3a residuals).
                     return false;
             }
         }

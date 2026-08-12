@@ -247,11 +247,13 @@ Dispositions after the 2026-07-05 grill (§3a carries the witnesses):
   channel mover and the shared SM/vehicle route mover now apply the witnessed
   SetBitB(group) then SetBitA(SSN) pair to those live visited matrices, so
   GroupAtWaypoint/SingleAtWaypoint can advance missions from actual NPC motion.
-  **Residuals (WITNESSED-READY-DEFERRED):** the remaining write-sites — AI
-  target-acquisition SEES quads and fire-time SEES+TARGETED ride the combat
-  pass; cat-1 sub 11 needs the
-  held-object link (entity +616); the cat-2 alert/count subs (3/6/9/12/14) and
-  the 42-45 distance/LOS family stay unwitnessed. Cat 7's input/view family
+  **Residuals:** cat-1 sub 11 needs the held-object link (entity +616; its
+  cat-2 sibling SingleHoldingGroup shares it); the cat-2 alert/count subs
+  (3/6/9/12/14) and the 42-45 distance/LOS family stay unwitnessed. (The
+  acquisition/fire-time SEES+TARGETED quads LANDED 2026-07-16 with D-AI-3 —
+  `AiSystem::apply_engage_relations`, live at the state-16/17 engage and
+  infantry perception sites — the older "ride the combat pass" clause here
+  was stale; corrected 2026-08-12.) Cat 7's input/view family
   rides its owning subsystems. Cat 5 "SecondTimeThrough" = the raw session load-parity word
   (`dword_815174`: static image value 1, XOR'd once per BMS load at the end of
   `EventTrigger_LoadAllData @0x454029`, read raw @0x453b24 — first session

@@ -164,6 +164,126 @@ static void test_fire_pass_uses_embedder_fed_muzzle() {
     CHECK(near_f(w->round_sim.rounds[2].pos.z, 5.9f));
 }
 
+// The D-AI-2 turret solver (solve_weapon_fire_transform — Entity_
+// ComputeWeaponFireTransform_0 @0x456980) through the state-17 tick's three
+// fire legs: mobile solve+fire, WEAPON_SLOW slew hold, and the RC_FIRE
+// stationary PITCHLOCKED_MINUS45 leg behind the commanded guard byte.
+static void test_sm_turret_fire() {
+    auto setup = [](std::unique_ptr<World> &w, AiSystem &sys, AiEntity *&e,
+                    EntityHandle &tgt_h) {
+        w = std::make_unique<World>();
+        w->registry.configure_pool(0, 8);
+        w->registry.configure_pool(1, 8);
+        w->ammo.entries.resize(2);
+        w->ammo.entries[1].valid = true;
+        w->ammo.entries[1].velocity = 620;
+        w->ammo.entries[1].max_age_ticks = 100;
+        Entity shooter{};
+        shooter.alive = true;
+        shooter.health = 100;
+        EntityHandle sh = w->registry.spawn(1, shooter);
+        Entity target{};
+        target.alive = true;
+        target.health = 100;
+        target.position = {100.0f, 0.0f, 0.0f};
+        tgt_h = w->registry.spawn(0, target);
+        sys.is_authority = true;
+        int idx = sys.attach(sh);
+        e = sys.at(idx);
+        e->pos[0] = 0;
+        e->pos[1] = 0;
+        e->pos[2] = 0;
+        e->heading = 0; // facing +X = the bearing to the target
+        e->brain.f[AiBrain::kCurState] = kAiGroundCombat;
+        e->brain.f[AiBrain::kStep] = 16;
+        e->brain.f[AiBrain::kTickAccum] = 16; // one processed tick immediately
+        e->brain.f[AiBrain::kTargetSlot] = tgt_h.packed + 1;
+        e->brain.f[AiBrain::kAmmoA] = 5;
+        e->brain.f[AiBrain::kAccuracy] = 5; // modulus 6-5=1 -> zero scatter
+        e->profile.flags96 = 2;             // combat-capable shape
+        e->profile.fov_secondary = 0xFF;    // wide-open hull fire gate
+        e->profile.fire_interval_a = 1;
+        e->profile.fire_a.ammo_index = 1;
+        e->profile.fire_a.cone_bam = 0x7FFFFFFF; // limit 63/256 turns
+        e->profile.approach_cap = 0;             // no chase cap leg
+    };
+
+    // Mobile leg: solve + fire. Origin = pos + 2.0u Z (the empty-bone-list
+    // leg); acc 5 -> deterministic direction at the exact bearing (0).
+    {
+        std::unique_ptr<World> w;
+        AiSystem sys;
+        AiEntity *e = nullptr;
+        EntityHandle tgt_h;
+        setup(w, sys, e, tgt_h);
+        AiThinkCtx ctx{&sys, e, w.get(), nullptr};
+        sys.row(kAiGroundCombat).tick(ctx);
+        CHECK(w->rounds.count == 1);
+        if (w->rounds.count == 1) {
+            CHECK(w->rounds.records[0].origin_z == 0x20000);
+            CHECK(w->rounds.records[0].dir_yaw == 0); // bearing 0, no scatter
+        }
+        CHECK(e->brain.f[AiBrain::kLastWeapon] == 1);
+        CHECK(e->brain.f[AiBrain::kAmmoA] == 4);
+        // The primary cooldown word cleared on fire [orig: §17.6].
+        CHECK((static_cast<uint32_t>(e->brain.f[AiBrain::kCooldownPair]) & 0xFFFFu) == 0);
+        CHECK((e->brain.bytes()[AiBrain::kBoneFlagByte] & 0x40) != 0);
+    }
+
+    // WEAPON_SLOW turret: a 45-degree offset target holds fire and slews the
+    // active yaw by the witnessed step; pre-aligning the active yaw fires.
+    {
+        std::unique_ptr<World> w;
+        AiSystem sys;
+        AiEntity *e = nullptr;
+        EntityHandle tgt_h;
+        setup(w, sys, e, tgt_h);
+        e->heading = -0x20000000; // target sits 45 deg off the frame
+        e->profile.fire_a.flags = 0x1 | 0x2; // WEAPON_TURRET | WEAPON_SLOW
+        AiThinkCtx ctx{&sys, e, w.get(), nullptr};
+        sys.row(kAiGroundCombat).tick(ctx);
+        CHECK(w->rounds.count == 0); // slewing, fire held
+        // active yaw advanced one slew step toward the staged mirror
+        // [orig: @0x456EC3 +-0x2108421].
+        CHECK(e->brain.f[AiBrain::kActiveYaw] != 0);
+        // Snap the active yaw onto the staged solution -> aligned -> fires.
+        e->brain.f[AiBrain::kActiveYaw] = e->brain.f[AiBrain::kStagingBlock + 3];
+        e->brain.f[AiBrain::kTickAccum] = 16;
+        e->brain.f[AiBrain::kCooldownPair] = 0;
+        sys.row(kAiGroundCombat).tick(ctx);
+        CHECK(w->rounds.count == 1);
+    }
+
+    // RC_FIRE stationary + WEAPON_PITCHLOCKED_MINUS45: no target needed, but
+    // only behind the commanded guard byte (AI command case 0x15).
+    {
+        std::unique_ptr<World> w;
+        AiSystem sys;
+        AiEntity *e = nullptr;
+        EntityHandle tgt_h;
+        setup(w, sys, e, tgt_h);
+        e->brain.f[AiBrain::kTargetSlot] = 0; // the stationary leg clears targets anyway
+        e->profile.flags100 = 0x80;           // RC_FIRE
+        e->profile.fire_a.flags = 0x10;       // WEAPON_PITCHLOCKED_MINUS45
+        AiThinkCtx ctx{&sys, e, w.get(), nullptr};
+        sys.row(kAiGroundCombat).tick(ctx);
+        CHECK(w->rounds.count == 0); // guard byte clear -> weapons hold
+        AiEventEntry cmd{};
+        cmd.f[0] = 0x15;
+        cmd.f[3] = 1;
+        CHECK(sys.ai_handle_command(*e, cmd));
+        CHECK(e->brain.bytes()[AiBrain::kGuardFireByte] == 1);
+        e->brain.f[AiBrain::kTickAccum] = 16;
+        e->brain.f[AiBrain::kCooldownPair] = 0x10001;
+        sys.row(kAiGroundCombat).tick(ctx);
+        CHECK(w->rounds.count == 1);
+        if (w->rounds.count == 1) {
+            // pitch = -0x1FFFFFE0 [orig: @0x457061 add 0xE0000020].
+            CHECK(w->rounds.records[0].dir_pitch == static_cast<int32_t>(0xE0000020u));
+        }
+    }
+}
+
 // Compact attack-animation source for the behavioral regressions below. Retail
 // infantry fires from .bad event bit 0x4, so these drive the actual attack path.
 struct AttackEventSource final : IRootMotionSource {
@@ -1977,6 +2097,7 @@ int main() {
     test_mounted_collision_tail_uses_retail_eight_tick_phase_without_models();
     test_joiner_evaluates_vehicle_idle_without_integrating_motor();
     test_lethal_hit_blends_into_death_animation_without_position_jump();
+    test_sm_turret_fire();
 
     if (failures == 0) std::printf("ai: all tests passed\n");
     return failures ? 1 : 0;

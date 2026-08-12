@@ -412,14 +412,14 @@ int main() {
     mission::PromoteOptions opts;
     opts.arrival_radius = 1000;
     opts.default_speed = 20;
-    mission::PromoteOptions::AiProfileSpeeds zode;
+    mission::PromoteOptions::AiProfileRow zode;
     zode.profile = "d_zode";
     // ASYMMETRIC on purpose (h_ah6b_z.aip-shaped): the witnessed seeding is
     // CROSSED — brain[49]=kSpeedA <- +0xC4 combat, brain[50]=kSpeedB <- +0xC0
     // patrol — and a symmetric pair cannot detect a swapped wiring.
-    zode.patrol_speed = 70;
-    zode.combat_speed = 150;
-    opts.ai_profile_speeds.push_back(zode);
+    zode.data.patrol_speed = 70;
+    zode.data.combat_speed = 150;
+    opts.ai_profiles.push_back(zode);
     mission::PromoteResult r = mission::promote_mission(m, world, ai, opts);
 
     // ---- promotion populated entities + brains + nav ----

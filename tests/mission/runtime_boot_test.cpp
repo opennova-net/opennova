@@ -48,7 +48,7 @@ struct StepRecorder {
 	ms::BootSteps steps() {
 		ms::BootSteps s;
 		s.install_seat_specs = [this] { calls.push_back("seat_specs"); };
-		s.install_ai_profile_speeds = [this] { calls.push_back("aip"); };
+		s.install_ai_profiles = [this] { calls.push_back("aip"); };
 		s.install_terrain_til = [this] { calls.push_back("til"); };
 		s.install_mission_text = [this] { calls.push_back("text"); };
 		s.load_mission = [this] {
@@ -209,25 +209,72 @@ bool run_text_fallback() {
 	return true;
 }
 
-// .aip parse (engine/formats/aip): the two witnessed keys, tabs,
-// case-insensitive keys, junk lines.
+// .aip parse (engine/formats/aip): the witnessed GROUND key set — speeds,
+// tabs, case-insensitive keys, junk lines, the type gate, and the weapon
+// blocks with their exact conversions [orig: AIProfile_ParseProperty
+// @0x45de70].
 bool run_aip_parse() {
 	const std::string text =
 			"; comment line\n"
+			"type GROUND\n"
 			"PATROL_speed\t5\r\n"
 			"combat_speed 12 trailing junk\n"
-			"unrelated 99\n";
+			"unrelated 99\n"
+			"aim_skill 9\n"
+			"react_time 2\n"
+			"primary_weap 50cal\n"
+			"primary_ammo 200\n"
+			"primary_rate 0.5\n"
+			"primary_fov 45\n"
+			"primary_range 300\n"
+			"primary_facing 180\n"
+			"primary_flags WEAPON_TURRET WEAPON_SLOW\n"
+			"secondary_flags WEAPON_PITCHLOCKED_MINUS45\n"
+			"COMBAT_FLAGS FOLLOW_WP RC_FIRE\n";
 	std::vector<uint8_t> bytes(text.begin(), text.end());
-	const opennova::aip::ProfileSpeeds row =
-			opennova::aip::parse_profile_speeds(bytes.data(), bytes.size());
+	const opennova::aip::Profile row =
+			opennova::aip::parse_profile(bytes.data(), bytes.size());
+	if (!expect(row.type == 2, "aip: type GROUND")) return false;
 	if (!expect(row.patrol_speed == 5, "aip: patrol via tab + mixed case")) return false;
 	if (!expect(row.combat_speed == 12, "aip: combat, extra tokens ignored")) return false;
+	if (!expect(row.aim_skill == 4, "aip: aim_skill clamps to 4")) return false;
+	if (!expect(row.react_ticks == 125, "aip: react_time 2s -> 125 ticks (x62.5)"))
+		return false;
+	if (!expect(row.primary.weapon == "50cal", "aip: primary_weap name kept")) return false;
+	if (!expect(row.primary.ammo == 200, "aip: primary_ammo atol")) return false;
+	if (!expect(row.primary.rate_ticks == 31, "aip: primary_rate 0.5s -> 31 (chop)"))
+		return false;
+	// 45 deg * 11930464 = 536870880 = 0x1FFFFFE0.
+	if (!expect(row.primary.cone_bam == 536870880, "aip: primary_fov deg->BAM")) return false;
+	if (!expect(row.primary.range == 300 << 16, "aip: primary_range <<16")) return false;
+	// 180 deg * 11930464 = 2147483520.
+	if (!expect(row.primary.facing_bam == 2147483520, "aip: primary_facing deg->BAM"))
+		return false;
+	if (!expect(row.primary.flags == (opennova::aip::kWeaponTurret | opennova::aip::kWeaponSlow),
+				"aip: primary_flags tokens"))
+		return false;
+	if (!expect(row.secondary.flags == opennova::aip::kWeaponPitchLockedMinus45,
+				"aip: secondary_flags token"))
+		return false;
+	if (!expect(row.combat_flags == 0x81u, "aip: COMBAT_FLAGS FOLLOW_WP|RC_FIRE")) return false;
 
-	std::vector<uint8_t> junk{'h', 'i', '\n'};
-	const opennova::aip::ProfileSpeeds none =
-			opennova::aip::parse_profile_speeds(junk.data(), junk.size());
-	return expect(none.patrol_speed == -1 && none.combat_speed == -1,
-			"aip: unauthored keys stay -1");
+	// Keys BEFORE a type line (or with no type at all) are ignored — the
+	// dispatch is type-gated exactly like retail's +16 branch.
+	const std::string untyped = "patrol_speed 7\n";
+	std::vector<uint8_t> ub(untyped.begin(), untyped.end());
+	const opennova::aip::Profile none =
+			opennova::aip::parse_profile(ub.data(), ub.size());
+	if (!expect(none.type == 0 && none.patrol_speed == -1,
+				"aip: untyped file parses nothing"))
+		return false;
+
+	// ORGANIC parses nothing beyond type [orig: the type-3 early return].
+	const std::string organic = "type ORGANIC\npatrol_speed 7\n";
+	std::vector<uint8_t> ob(organic.begin(), organic.end());
+	const opennova::aip::Profile org =
+			opennova::aip::parse_profile(ob.data(), ob.size());
+	return expect(org.type == 3 && org.patrol_speed == -1,
+			"aip: ORGANIC keys ignored");
 }
 
 // The mission-profile resolve: entity-walk order (markers first), first
@@ -248,20 +295,20 @@ bool run_aip_resolve() {
 	mission.organics.push_back(with_profile("empty"));  // keyless .aip
 
 	std::map<std::string, std::string> files;
-	files["helo1.aip"] = "patrol_speed 7\ncombat_speed 9\n";
-	files["truck2.aip"] = "combat_speed 3\n";
+	files["helo1.aip"] = "type GROUND\npatrol_speed 7\ncombat_speed 9\n";
+	files["truck2.aip"] = "type GROUND\ncombat_speed 3\n";
 	files["empty.aip"] = "nothing_relevant 1\n";
 	const ms::BootFileSource src = source_over(&files);
 
-	const std::vector<ms::PromoteOptions::AiProfileSpeeds> rows =
-			ms::resolve_ai_profile_speeds(src, mission);
+	const std::vector<ms::PromoteOptions::AiProfileRow> rows =
+			ms::resolve_ai_profiles(src, mission);
 	if (!expect(rows.size() == 2, "resolve: two authored rows")) return false;
-	if (!expect(rows[0].profile == "helo1" && rows[0].patrol_speed == 7 &&
-					rows[0].combat_speed == 9,
+	if (!expect(rows[0].profile == "helo1" && rows[0].data.patrol_speed == 7 &&
+					rows[0].data.combat_speed == 9,
 			"resolve: helo1 parsed once, first occurrence"))
 		return false;
-	return expect(rows[1].profile == "truck2" && rows[1].patrol_speed == -1 &&
-					rows[1].combat_speed == 3,
+	return expect(rows[1].profile == "truck2" && rows[1].data.patrol_speed == -1 &&
+					rows[1].data.combat_speed == 3,
 			"resolve: truck2 keeps unauthored patrol");
 }
 

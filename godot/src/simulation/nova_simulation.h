@@ -460,7 +460,7 @@ private:
 		int32_t text_source = 0; // mission::MissionTextSource
 		int64_t text_size = 0;
 		std::string infantry_adm;
-		std::vector<opennova::mission::PromoteOptions::AiProfileSpeeds> aip_rows;
+		std::vector<opennova::mission::PromoteOptions::AiProfileRow> aip_rows;
 	};
 	MissionBootDebug boot_debug_;
 	// Resource-install invariant only. Public lifecycle is
@@ -926,8 +926,8 @@ private:
 	static void resolve_infantry_adm_before_server_tick(void *p_context);
 	std::vector<opennova::mission::ItemSeatSpec> item_seat_specs_;
 	// The two witnessed .aip profile speeds per ai_textfile, fed to
-	// PromoteOptions before promotion (see promote.h AiProfileSpeeds).
-	std::vector<opennova::mission::PromoteOptions::AiProfileSpeeds> ai_profile_speeds_;
+	// PromoteOptions before promotion (see promote.h AiProfileRow).
+	std::vector<opennova::mission::PromoteOptions::AiProfileRow> ai_profiles_;
 	// The shared install tail (both install orders): sort for the per-frame
 	// binary search, stamp turret clamps, refresh live pool-1 rows, and re-sync
 	// the header-only materializer image.
