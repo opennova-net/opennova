@@ -1288,6 +1288,13 @@ public:
 	// entity+300 flags 0x200=crouch -> 1, 0x100=prone -> 2]. The witnessed
 	// source is the body state, never the anim clip name.
 	int get_local_player_stance() const;
+	// Read-only F3 card: the local player's water/eye classification — the
+	// exact terms the recoil/spread/aimed-shot gates consume. Dictionary:
+	//   body_z, eye_height, eye_z, water_z: float mission units
+	//   water_authored, drowning, eye_below_water, submerged, in_air: bool
+	//   stance: int (0 stand / 1 crouch / 2 prone)
+	// Empty while no local player resolves.
+	Dictionary get_local_player_body_debug() const;
 	int get_local_player_anim_phase_ticks() const;
 	String get_local_player_anim_source_key() const;
 	int get_local_player_anim_source_phase_ticks() const;
@@ -1940,6 +1947,10 @@ public:
 	// first, capped at RoundSim::kDebugTrailCap. Covers every resolved outcome
 	// including face-miss fly-ons (the "why didn't that register" case).
 	Dictionary get_round_debug() const;
+	// Read-only F3 rows for the placed throwable devices: entity_handle,
+	// item_id, team, pos (mission units), yaw/pitch/roll_deg (the exact stick
+	// pose), parent_handle + parent_live, arm_delay_ticks, think, health.
+	Array get_throwable_debug() const;
 	// Per-frame visual snapshot of item-modeled throwables: tracer-cadence flying
 	// rounds with a TrcrID model plus placed devices. Entries: {key, item_id, pos (godot),
 	// rotation_deg (pitch, yaw, roll — placer convention)}; the enemy-team item
