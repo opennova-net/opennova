@@ -121,12 +121,19 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 		// max(gpm[5], husk gpm[5]) + 0x1000; the authored def scale factor is
 		// not yet applied (tracked, D-COL-3)].
 		float entity_bound = state.radius_by_graphic[key];
-		// Platform probe boxes (vehicle-client-movers-re.md §3 §3): the union of the
-		// authored per-subobject collision AABBs — exact 16.16 values in the
-		// 3di's own model space, the space the retail modelData boxes
-		// [0x28..0x4C] live in. The box1-vs-footprint provenance (and the
-		// axis-pair naming) is the spec's tracked unknown: both map to this
-		// union here, verified against hull proportions at the solve's bench.
+		// Platform probe boxes (vehicle-client-movers-re.md §3, D-VEH-1):
+		// retail's load-time derivation, ported as threedi_3di3_collision_probe_boxes —
+		// box Z = the CMDL header bbox Z pair, box X/Y = the lower-half
+		// type-1 BVOL fold, footprint = the bottom-eighth fold with the
+		// q+0x2000 minimum-extent clamps [orig:
+		// Threedi_BuildCollisionModelFromChunks @ 0x5b3bf0, tail
+		// @ 0x5b4455..0x5b45db]. The CMDL floor sits at the wheel-contact
+		// origin (~0 for wheeled hulls), so the solve rests the ORIGIN on the
+		// terrain; the earlier per-COBJ AABB union stand-in floated every
+		// hull by its below-origin wheel depth. A model the derivation
+		// rejects keeps zeroed boxes and therefore the solves'
+		// terrain-clamp stand-in, matching retail's observable for a
+		// sentinel-boxed hull (its solve-active test also fails).
 		if (h.pool() == 1) {
 			world::VehicleTraits *vt =
 					world.vehicle_traits.get_mutable(e->item_id);
@@ -134,31 +141,20 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 				const Threedi3di3 *vm3 = deps.models.has_index()
 						? deps.models.model_for(key)
 						: nullptr;
-				if (vm3 != nullptr) {
-					const ThreediCollisionModel *col = vm3->collision;
-					if (col != nullptr && col->objects != nullptr &&
-							col->object_count > 0) {
-						int32_t lo[3] = {INT32_MAX, INT32_MAX, INT32_MAX};
-						int32_t hi[3] = {INT32_MIN, INT32_MIN, INT32_MIN};
-						for (size_t o = 0; o < col->object_count; ++o) {
-							const auto &obj = col->objects[o];
-							for (int a = 0; a < 3; ++a) {
-								lo[a] = std::min(lo[a], obj.offset[a] + obj.min[a]);
-								hi[a] = std::max(hi[a], obj.offset[a] + obj.max[a]);
-							}
-						}
-						if (hi[0] > lo[0] && hi[1] > lo[1] && hi[2] > lo[2]) {
-							vt->box_x_lo = lo[0];
-							vt->box_x_hi = hi[0];
-							vt->box_y_lo = lo[1];
-							vt->box_y_hi = hi[1];
-							vt->box_z_lo = lo[2];
-							vt->box_z_hi = hi[2];
-							vt->foot_x_lo = lo[0];
-							vt->foot_x_hi = hi[0];
-							vt->foot_y_lo = lo[1];
-							vt->foot_y_hi = hi[1];
-						}
+				if (vm3 != nullptr && vm3->collision != nullptr) {
+					ThreediCollisionProbeBoxes boxes;
+					if (threedi_3di3_collision_probe_boxes(vm3->collision,
+							&boxes) != 0) {
+						vt->box_x_lo = boxes.box_x_lo;
+						vt->box_x_hi = boxes.box_x_hi;
+						vt->box_y_lo = boxes.box_y_lo;
+						vt->box_y_hi = boxes.box_y_hi;
+						vt->box_z_lo = boxes.box_z_lo;
+						vt->box_z_hi = boxes.box_z_hi;
+						vt->foot_x_lo = boxes.foot_x_lo;
+						vt->foot_x_hi = boxes.foot_x_hi;
+						vt->foot_y_lo = boxes.foot_y_lo;
+						vt->foot_y_hi = boxes.foot_y_hi;
 					}
 				}
 			}

@@ -126,6 +126,112 @@ static void test_charmodel_cobj_preserves_exact_bone_sphere() {
     threedi_3di3_free(&model);
 }
 
+static void test_collision_probe_boxes_follow_the_witnessed_folds() {
+    // The vehicle platform-solve probe boxes [orig:
+    // Threedi_BuildCollisionModelFromChunks @ 0x5b3bf0, tail
+    // @ 0x5b4455..0x5b45db]: box Z = the CMDL header bbox Z pair; box X/Y
+    // folds type-1 BVOLs whose min-Z is below CMDL minZ + zspan/2; the
+    // footprint folds those below minZ + zspan/8 and clamps each side to at
+    // least q + 0x2000, q = (box Y span) >> 2. Shaped after the DTruck1
+    // witness: the CMDL floor sits at wheel contact (+0.01) while wheel
+    // volumes dip below the origin.
+    ThreediBoundingVolume volumes[5] = {};
+    // [0] wheels: bottom-eighth, folds into BOTH boxes.
+    volumes[0].collidable_type = 1;
+    volumes[0].min_x_fp16 = -(8 << 16);
+    volumes[0].max_x_fp16 = 3 << 16;
+    volumes[0].min_y_fp16 = -((3 << 16) / 2);
+    volumes[0].max_y_fp16 = (3 << 16) / 2;
+    volumes[0].min_z_fp16 = -21889; // -0.334 — below the CMDL floor
+    volumes[0].max_z_fp16 = 2 << 16;
+    // [1] cab: lower half only (min-Z above the eighth threshold).
+    volumes[1].collidable_type = 1;
+    volumes[1].min_x_fp16 = -(9 << 16);
+    volumes[1].max_x_fp16 = 4 << 16;
+    volumes[1].min_y_fp16 = -(2 << 16);
+    volumes[1].max_y_fp16 = 2 << 16;
+    volumes[1].min_z_fp16 = 1 << 16;
+    volumes[1].max_z_fp16 = 3 << 16;
+    // [2] canopy: upper half, folds into NEITHER box.
+    volumes[2].collidable_type = 1;
+    volumes[2].min_x_fp16 = -(12 << 16);
+    volumes[2].max_x_fp16 = 6 << 16;
+    volumes[2].min_y_fp16 = -(3 << 16);
+    volumes[2].max_y_fp16 = 3 << 16;
+    volumes[2].min_z_fp16 = 3 << 16;
+    volumes[2].max_z_fp16 = 5 << 16;
+    // [3] a non-type-1 volume at the very bottom: ignored by both folds.
+    volumes[3].collidable_type = 7;
+    volumes[3].min_x_fp16 = -(20 << 16);
+    volumes[3].max_x_fp16 = 20 << 16;
+    volumes[3].min_y_fp16 = -(20 << 16);
+    volumes[3].max_y_fp16 = 20 << 16;
+    volumes[3].min_z_fp16 = -(2 << 16);
+    volumes[3].max_z_fp16 = 0;
+    // [4] unowned trailing type-1 BVOL at the bottom: dead data, ignored.
+    volumes[4].collidable_type = 1;
+    volumes[4].min_x_fp16 = -(30 << 16);
+    volumes[4].max_x_fp16 = 30 << 16;
+    volumes[4].min_y_fp16 = -(30 << 16);
+    volumes[4].max_y_fp16 = 30 << 16;
+    volumes[4].min_z_fp16 = -(1 << 16);
+    volumes[4].max_z_fp16 = 0;
+    ThreediCollisionObject objects[2] = {};
+    objects[0].num_bounding_volumes = 3;
+    objects[1].num_bounding_volumes = 1;
+    ThreediCollisionModel collision = {};
+    collision.volumes = volumes;
+    collision.volume_count = 5;
+    collision.objects = objects;
+    collision.object_count = 2;
+    // CMDL floor at +0.01, deck at +4.65 (the DTruck1 pair): thresholds are
+    // 655 + (304198 >> 1) = 152754 (~2.33) and 655 + (304198 >> 3) = 38679
+    // (~0.59).
+    collision.model_data.bbox[2] = 655.0f / 65536.0f;
+    collision.model_data.bbox[5] = 304853.0f / 65536.0f;
+
+    ThreediCollisionProbeBoxes boxes = {};
+    check(threedi_3di3_collision_probe_boxes(&collision, &boxes) == 1,
+          "probe boxes derive from a wheeled-hull collision block");
+    check(boxes.box_z_lo == 655 && boxes.box_z_hi == 304853,
+          "box Z pair is the CMDL header bbox Z pair, not the deepest vertex");
+    check(boxes.box_x_lo == -(9 << 16) && boxes.box_x_hi == 4 << 16,
+          "box X folds only the lower-half type-1 volumes");
+    check(boxes.box_y_lo == -(2 << 16) && boxes.box_y_hi == 2 << 16,
+          "box Y folds only the lower-half type-1 volumes");
+    check(boxes.foot_x_lo == -(8 << 16) && boxes.foot_x_hi == 3 << 16,
+          "footprint X folds only the bottom-eighth type-1 volumes");
+    check(boxes.foot_y_lo == -((3 << 16) / 2) && boxes.foot_y_hi == (3 << 16) / 2,
+          "footprint Y folds only the bottom-eighth type-1 volumes");
+
+    // The footprint minimum-extent clamps: shrink the wheel volume so each
+    // side lands inside q + 0x2000 of the origin. q = (4 << 16) >> 2.
+    volumes[0].min_x_fp16 = -0x1000;
+    volumes[0].max_x_fp16 = 0x1000;
+    volumes[0].min_y_fp16 = -0x1000;
+    volumes[0].max_y_fp16 = 0x1000;
+    check(threedi_3di3_collision_probe_boxes(&collision, &boxes) == 1,
+          "probe boxes derive with a narrow wheel volume");
+    const int32_t q = ((2 << 16) - (-(2 << 16))) >> 2;
+    check(boxes.foot_x_lo == -0x2000 - q && boxes.foot_x_hi == q + 0x2000,
+          "footprint X clamps to at least q + 0x2000 from the origin");
+    check(boxes.foot_y_lo == -0x2000 - q && boxes.foot_y_hi == q + 0x2000,
+          "footprint Y clamps to at least q + 0x2000 from the origin");
+    check(boxes.box_x_lo == -(9 << 16) && boxes.box_x_hi == 4 << 16,
+          "the half box is stored unclamped");
+
+    // Degenerate rejections: no CMDL Z span, and no type-1 volume in the
+    // lower half.
+    collision.model_data.bbox[5] = collision.model_data.bbox[2];
+    check(threedi_3di3_collision_probe_boxes(&collision, &boxes) == 0,
+          "a zero CMDL Z span keeps the caller's degenerate fallback");
+    collision.model_data.bbox[5] = 304853.0f / 65536.0f;
+    volumes[0].collidable_type = 7;
+    volumes[1].collidable_type = 7;
+    check(threedi_3di3_collision_probe_boxes(&collision, &boxes) == 0,
+          "no lower-half type-1 volume keeps the caller's degenerate fallback");
+}
+
 int main() {
     // Packed struct layout pins: the Python ctypes mirrors and the 44-B
     // runtime CFAC record shape depend on these staying exact.
@@ -198,6 +304,7 @@ int main() {
 
     test_cxlt_is_preserved_metadata_not_a_vertex_offset();
     test_charmodel_cobj_preserves_exact_bone_sphere();
+    test_collision_probe_boxes_follow_the_witnessed_folds();
 
     // Retail models (Zodiacs, mounted weapons, large buildings) author
     // TRAILING BVOLs owned by no COBJ. Every retail walker consumes volumes

@@ -486,6 +486,102 @@ static inline int threedi_3di3_collision_is_runtime_safe(const ThreediCollisionM
     return 1;
 }
 
+/* The two vehicle platform-solve probe boxes retail derives at collision-model
+   build time and stores in the runtime collision block (the "modelData
+   [0x28..0x4C]" pair every vehicle contact solve reads). All values 16.16
+   model space.
+   [orig: Threedi_BuildCollisionModelFromChunks @ 0x5b3bf0, tail
+   @ 0x5b4455..0x5b45db]:
+   - box Z pair    = the CMDL header bbox Z pair, verbatim.
+   - box X/Y pairs = the fold of type-1 (solid) BVOL X/Y extents over volumes
+     whose min-Z lies below CMDL minZ + zspan/2 (the model's lower HALF).
+   - footprint X/Y = the same fold over volumes whose min-Z lies below
+     CMDL minZ + zspan/8 (the bottom EIGHTH - the wheel/skid volumes), then
+     each side clamped to at least q + 0x2000 from the origin, with
+     q = (box Y span) >> 2 (the solve's pad radius).
+   The Z bottom is the header bbox floor, NOT the deepest collision vertex:
+   wheeled hulls author their origin at wheel contact with the CMDL floor at
+   ~0, so a solve resting pads at boxZlo + q puts the ORIGIN on the terrain.
+   Folding raw per-COBJ AABBs instead floats every hull by the below-origin
+   wheel depth. */
+typedef struct ThreediCollisionProbeBoxes {
+    int32_t box_x_lo, box_x_hi;
+    int32_t box_y_lo, box_y_hi;
+    int32_t box_z_lo, box_z_hi;
+    int32_t foot_x_lo, foot_x_hi;
+    int32_t foot_y_lo, foot_y_hi;
+} ThreediCollisionProbeBoxes;
+
+/* Returns 1 when the witnessed derivation produced a live box set: a CMDL
+   with nonzero Z span and at least one type-1 volume folded into the half
+   box. Returns 0 otherwise (callers keep their degenerate-model fallback;
+   retail carries the raw +-0x40000000 fold sentinels through in that case,
+   which its solves never meet on shipped vehicles). Volumes are walked
+   through the per-COBJ runs exactly like every retail consumer, so unowned
+   trailing BVOLs stay dead. The CMDL floats were parsed from 16.16 disk
+   words (parse_cmdl); the round-trip back is exact for any |value| < 128
+   units and 1-LSB at worst beyond that. */
+static inline int threedi_3di3_collision_probe_boxes(const ThreediCollisionModel *col,
+                                                     ThreediCollisionProbeBoxes *out) {
+    if (!col || !out || !col->objects || !col->volumes) return 0;
+    const int32_t z_lo = (int32_t)lround((double)col->model_data.bbox[2] * 65536.0);
+    const int32_t z_hi = (int32_t)lround((double)col->model_data.bbox[5] * 65536.0);
+    if (z_hi == z_lo) return 0;
+    /* [orig: @ 0x5b446e/@ 0x5b4477] */
+    const int32_t thr_eighth = z_lo + ((z_hi - z_lo) >> 3);
+    const int32_t thr_half = z_lo + ((z_hi - z_lo) >> 1);
+    const int32_t kSentinel = 0x40000000;
+    int32_t half_x_lo = kSentinel, half_x_hi = -kSentinel;
+    int32_t half_y_lo = kSentinel, half_y_hi = -kSentinel;
+    int32_t eighth_x_lo = kSentinel, eighth_x_hi = -kSentinel;
+    int32_t eighth_y_lo = kSentinel, eighth_y_hi = -kSentinel;
+    int folded_half = 0;
+    size_t volume_cursor = 0;
+    for (size_t oi = 0; oi < col->object_count; ++oi) {
+        const ThreediCollisionObject *object = &col->objects[oi];
+        if (object->num_bounding_volumes < 0) return 0;
+        const size_t nb = (size_t)object->num_bounding_volumes;
+        if (nb > col->volume_count - volume_cursor) return 0;
+        for (size_t bi = 0; bi < nb; ++bi) {
+            const ThreediBoundingVolume *v = &col->volumes[volume_cursor + bi];
+            if (v->collidable_type != 1) continue; /* [orig: @ 0x5b44c4] */
+            if (v->min_z_fp16 < thr_half) {
+                if (v->min_x_fp16 < half_x_lo) half_x_lo = v->min_x_fp16;
+                if (v->max_x_fp16 > half_x_hi) half_x_hi = v->max_x_fp16;
+                if (v->min_y_fp16 < half_y_lo) half_y_lo = v->min_y_fp16;
+                if (v->max_y_fp16 > half_y_hi) half_y_hi = v->max_y_fp16;
+                folded_half = 1;
+            }
+            if (v->min_z_fp16 < thr_eighth) {
+                if (v->min_x_fp16 < eighth_x_lo) eighth_x_lo = v->min_x_fp16;
+                if (v->max_x_fp16 > eighth_x_hi) eighth_x_hi = v->max_x_fp16;
+                if (v->min_y_fp16 < eighth_y_lo) eighth_y_lo = v->min_y_fp16;
+                if (v->max_y_fp16 > eighth_y_hi) eighth_y_hi = v->max_y_fp16;
+            }
+        }
+        volume_cursor += nb;
+    }
+    if (!folded_half) return 0;
+    /* The footprint minimum-extent clamps [orig: @ 0x5b4563..0x5b45b0]; the
+       half box is stored unclamped. */
+    const int32_t q = (half_y_hi - half_y_lo) >> 2;
+    if (q + eighth_x_lo + 0x2000 > 0) eighth_x_lo = -0x2000 - q;
+    if (q + eighth_y_lo + 0x2000 > 0) eighth_y_lo = -0x2000 - q;
+    if (eighth_x_hi - q - 0x2000 < 0) eighth_x_hi = q + 0x2000;
+    if (eighth_y_hi - q - 0x2000 < 0) eighth_y_hi = q + 0x2000;
+    out->box_x_lo = half_x_lo;
+    out->box_x_hi = half_x_hi;
+    out->box_y_lo = half_y_lo;
+    out->box_y_hi = half_y_hi;
+    out->box_z_lo = z_lo;
+    out->box_z_hi = z_hi;
+    out->foot_x_lo = eighth_x_lo;
+    out->foot_x_hi = eighth_x_hi;
+    out->foot_y_lo = eighth_y_lo;
+    out->foot_y_hi = eighth_y_hi;
+    return 1;
+}
+
 typedef struct ThreediOcclusionVertex {
     float position[3];
 } ThreediOcclusionVertex;
