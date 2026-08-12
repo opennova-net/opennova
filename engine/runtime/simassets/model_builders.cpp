@@ -121,6 +121,7 @@ bool collision_model_from_3di(const ThreediCollisionModel *col,
 	for (size_t i = 0; i < col->plane_count; ++i) {
 		const ThreediBoundingPlane &sp = col->planes[i];
 		opennova::world::CollisionPlane p;
+		p.flags = sp.flags;
 		p.nx = static_cast<int16_t>(std::lround(sp.normal[0] * 16384.0f));
 		p.ny = static_cast<int16_t>(std::lround(sp.normal[1] * 16384.0f));
 		p.nz = static_cast<int16_t>(std::lround(sp.normal[2] * 16384.0f));

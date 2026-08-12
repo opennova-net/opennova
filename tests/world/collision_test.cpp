@@ -2077,6 +2077,50 @@ void test_sound_los_prefilters_candidates_before_section_matrices() {
         CHECK(provider.calls_for(h) == 0);
 }
 
+void test_sound_occlusion_flagged_planes_ignore_thin_ray_shrink() {
+    // D-SND-9: ray 2 of the occlusion probe passes radius -0x8000, so planes read
+    // 0.5u THINNER and the ray clears thin/near-miss volumes — but only on flag-0
+    // planes. A nonzero BPLN flags word substitutes the max(radius, 0) clamp, so
+    // flagged geometry keeps its true extent on ray 2.
+    // [orig: raycast_against_entity_pool @ 0x538720, flag branch @ 0x538bd8-0x538e1b]
+    for (int flagged = 0; flagged <= 1; ++flagged) {
+        World world;
+        world.registry.configure_pool(0, 4);
+        world.registry.configure_pool(1, 16);
+        world.registry.configure_pool(2, 8);
+        CollisionWorld collision;
+        CollisionModel thin = box_model(1, 0, 1.0, 0.2, 2.0);
+        if (flagged)
+            for (auto &p : thin.planes) p.flags = 1;
+        const int32_t model_id = collision.add_model(std::move(thin));
+
+        Entity listener_seed;
+        listener_seed.kind = EntityKind::Organic;
+        listener_seed.alive = true;
+        const EntityHandle listener = world.registry.spawn(0, listener_seed);
+        CHECK(listener.valid());
+
+        Entity wall_seed;
+        wall_seed.kind = EntityKind::Building;
+        wall_seed.position = Vec3{0.0f, 5.0f, 0.0f};
+        wall_seed.alive = true;
+        const EntityHandle wall = world.registry.spawn(2, wall_seed);
+        collision.assign_entity(wall, model_id);
+        for (int i = 0; i < 17; ++i) collision.build_tick_tables(world);
+
+        const int32_t start[3] = {0, 0, fx(1.0)};
+        const int32_t end[3] = {0, fx(10.0), fx(1.0)};
+        const int32_t inflated = collision.sound_occlusion_inflate(
+                world, listener, EntityHandle{}, start, end, fx(10.0));
+        // base = min(10u / 8, 10u) = 1.25u; ray 1 (radius 0) is blocked by the
+        // 0.4u slab either way -> base compounds to 2 * 1.25 + 5 = 7.5u. Flag-0
+        // planes let ray 2 shrink the slab away (+7.5u total); flagged planes
+        // keep it solid, compounding again (+ 2 * 7.5 + 5 = +20u).
+        const int32_t want = flagged ? fx(10.0) + fx(20.0) : fx(10.0) + fx(7.5);
+        CHECK(inflated == want);
+    }
+}
+
 void test_late_person_instance_is_demand_resolved_for_rounds_and_debug() {
     World world;
     world.registry.configure_pool(0, 4);
@@ -3756,6 +3800,7 @@ int main() {
     test_f3_debug_prefilters_before_building_section_matrices();
     test_iris_static_rays_prefilter_before_section_matrices();
     test_sound_los_prefilters_candidates_before_section_matrices();
+    test_sound_occlusion_flagged_planes_ignore_thin_ray_shrink();
     test_late_person_instance_is_demand_resolved_for_rounds_and_debug();
     test_projectile_person_broad_gate_skips_far_provider();
     test_projectile_trace_view_cache_is_tick_scoped();
