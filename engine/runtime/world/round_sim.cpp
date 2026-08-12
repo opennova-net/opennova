@@ -455,16 +455,14 @@ RoundSourceState resolve_round_source(World &world,
     AiEntity *body = world.ai != nullptr ? world.ai->for_handle(params.owner) : nullptr;
     const int32_t source_z =
             body != nullptr ? body->pos[2] : to_fixed(entity->position.z);
-    // The below-water classifier projects the per-tick EYE height: retail
-    // compares Position.Z + CameraOffset.Z (entity+0x74) with
-    // Env_WaterHeightFixed, strictly below, wherever the drowning bit is clear
-    // [orig: RoundData_SpawnRound stance leg @0x4ec2d5..0x4ec2ea (Flags &
-    // 0x108020 folds the ladder/parachute bits); the recoil x4 legs
-    // @0x4ec342..0x4ec35a / @0x4ec86d..0x4ec885]. eye_offset_z is the ported
-    // +0x74 channel (0 when never stamped, the retail spawn value).
+    // The below-water classifier projects the per-tick EYE height (the shared
+    // entity_eye_below_water witness) wherever the drowning bit is clear;
+    // retail's stance leg folds the ladder/parachute bits with it (Flags &
+    // 0x108020 [orig: @0x4ec2d5]). eye_offset_z is the ported +0x74 channel
+    // (0 when never stamped, the retail spawn value).
     source.underwater = source.underwater ||
-                        (world.env.water_z != 0 &&
-                         source_z + entity->eye_offset_z < world.env.water_z);
+                        entity_eye_below_water(world, source_z,
+                                               entity->eye_offset_z);
     if (body == nullptr) {
         source.stance_category = entity->mounted ? 1 : 2;
         return source;
@@ -519,6 +517,12 @@ void record_round_fire(World &world, RoundSim &sim,
 }
 
 } // namespace
+
+bool entity_eye_below_water(const World &world, int32_t body_z_q16,
+                            int32_t eye_offset_z) {
+    return world.env.water_z != 0 &&
+           body_z_q16 + eye_offset_z < world.env.water_z;
+}
 
 void RoundSim::reset() noexcept {
 	rounds.assign(kCapacity, LiveRound{});
