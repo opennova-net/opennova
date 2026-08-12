@@ -1344,9 +1344,9 @@ func test_export_confirm_and_progress_target_the_initiating_workspace_after_tab_
 
 	stub.export_running = false
 	workstation.on_export_completed(OK, "Exported terrain.")
-	assert_false(workstation._export_progress._active, "completion clears the active progress state")
-	assert_null(workstation._export_progress._export_workspace,
-		"completion releases the initiating workspace")
+	await get_tree().create_timer(0.2).timeout
+	assert_false((workstation.get_node("%ProgressBackdrop") as ColorRect).visible,
+		"completion hides progress after its fade-out")
 
 
 func test_asset_dock_builds_preview_cards_for_shared_maps() -> void:
