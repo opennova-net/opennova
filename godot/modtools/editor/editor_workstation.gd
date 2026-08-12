@@ -174,7 +174,6 @@ func _ready() -> void:
 		_progress_message_label,
 		_progress_bar,
 		_progress_counts_label,
-		active_workspace_supplier,
 		show_status_message,
 		func() -> void: _refresh_shell_state()
 	)
@@ -1585,9 +1584,9 @@ func prompt_cdep_violations(count: int, on_fix_callback: Callable) -> void:
 	_save_export.prompt_cdep_violations(count, on_fix_callback)
 
 
-## Export lifecycle, called by exporting workspaces' domain editors.
-func on_export_started(dir_path: String) -> void:
-	_export_progress.on_export_started(dir_path)
+## Export lifecycle, bound to the workspace that initiated the export.
+func on_export_started(workspace: EditorWorkspace, dir_path: String) -> void:
+	_export_progress.on_export_started(workspace, dir_path)
 
 
 func on_export_completed(err: Error, message: String) -> void:

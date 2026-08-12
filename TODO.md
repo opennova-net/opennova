@@ -7,10 +7,6 @@ hardening, and project health. Divergences from the original engine belong in
 
 ## General Mission
 
-- [ ] Waypoint type is still a raw number in the UI: the trigger/action "Waypoint type"
-      params (`mission_schema.cpp`) need an enum param kind — the values are already
-      witnessed (`world/ai.h` `kWpType`: 1 nav-node, 3 literal coord); the waypoint-path
-      fields are dropdowns already
 - [ ] Zones are awkward to create
 - [ ] AI class and AI script: should be a selection, not a free input, if we can pull the options from a loadable resource (def, etc)
 - [ ] Group record semantics: the field WIDTHS are grilled (`bms.h`,
@@ -28,7 +24,6 @@ hardening, and project health. Divergences from the original engine belong in
 - [ ] "PlayWavList" needs deeper editor integration: the dialog/wav id param is a raw
       number, and the runtime resolution chain through the co-named `.DBF` is in
       (`nova_mission_audio.gd`), so a dialog-name picker with preview is feasible now
-- [ ] If there is no "sub-type" for an action (ie: only Null), just disable the box
 - [ ] MisvarChange/Set etc need better editor integration
 
 ## Cleanup & verification backlog
@@ -75,7 +70,6 @@ hardening, and project health. Divergences from the original engine belong in
 - [ ] `opennova::io` adoption continuation: migrate remaining per-lib byte readers on-touch (policy in engine/CLAUDE.md); excluded: mus/wac VM cursors (faithful-port surface) and cpt (a real migration, tracked as its own row below)
 - [ ] Mission workspace rail conversion: with the inspector decomposed into section components, moving Mission onto `_build_inspector_defs()` workflow rows is a small step, but it swaps the in-panel mode tabs for the shell's workflow rail (visible layout change) - needs a deliberate UX pass
 - [ ] NovaWorld disconnect-state reset (owner: `godot/game/novaworld_panel.gd`): clear all connection-derived rows, login/join state, pending mission/player data, and disable Host/Join/Login on disconnect or error. Acceptance (`godot/tests/novaworld_panel_test.gd`): a populated, logged-in, pending-join panel returns to a clean disconnected state and cannot submit a stale row. Coordinate with the unlanded novaworld_panel rework held in the `gsb` worktree (WIP commit 0fd58850b on `worktree-gsb`; the branch's earlier commits landed via #300) before landing.
-- [ ] Export-progress overlay initiator awareness (owner: `godot/modtools/editor/shell/export_progress_overlay.gd`): the overlay polls the ACTIVE workspace, so an export running on a non-active workspace — reachable now that the flavor confirm exports the initiator — shows no progress UI. Route the overlay through the exporting workspace instead.
 - [ ] Converge `engine/formats/cpt`'s bit codec on `io/bit_stream.h` (owner: `engine/formats/cpt/cpt_io.cpp`): the two have diverged (cpt's writer carries a normalizing `set_position` and a `write_to_file`; its reader now carries `remaining_bits`), so this is a real migration, not a swap — the reason it is tracked separately in `engine/CLAUDE.md`. Acceptance: `parametric_parity_test` still reports byte-identical CPT output for all four fixtures after cpt drops its private copy.
 - [ ] Vehicle-drive slice start (retail-join-0a): the `game-server` worktree holds WIP commit a6bf98a30 on `worktree-game-server` — VehicleTraits `ground_family`/`is_eweap` groundwork (6 files; based pre-#403, snapshot-committed 2026-08-04). Reconcile onto current master when the local vehicle-drive slice runs (#403's `VehicleTraits` since gained the items.def-derived family tag + air/water params, so this is a rebase-and-rethink, not an apply).
 - [ ] W5 consolidations + push-downs (the 2026-07 quality campaign's last wave;

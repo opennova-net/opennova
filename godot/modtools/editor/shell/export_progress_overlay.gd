@@ -2,7 +2,7 @@ class_name ShellExportProgress
 extends RefCounted
 
 ## The modal export-progress overlay (backdrop + panel + bar + counts), driven
-## by the ACTIVE workspace's is_busy/export-progress capability hooks from the
+## by the initiating workspace's is_busy/export-progress capability hooks from
 ## shell's per-frame poll, with fade tweens on state flips.
 
 var _shell: Control
@@ -12,14 +12,13 @@ var _title_label: Label
 var _message_label: Label
 var _bar: ProgressBar
 var _counts_label: Label
-# func() -> EditorWorkspace: the active workspace.
-var _active_workspace: Callable
 # func(text, duration): the shell's status toast.
 var _show_status: Callable
 # func(): busy modulation refresh after an export completes.
 var _refresh_shell_state: Callable
 
 var _active: bool = false
+var _export_workspace: EditorWorkspace = null
 var _tween: Tween
 
 
@@ -31,7 +30,6 @@ func setup(
 	message_label: Label,
 	bar: ProgressBar,
 	counts_label: Label,
-	active_workspace: Callable,
 	show_status: Callable,
 	refresh_shell_state: Callable
 ) -> void:
@@ -42,16 +40,15 @@ func setup(
 	_message_label = message_label
 	_bar = bar
 	_counts_label = counts_label
-	_active_workspace = active_workspace
 	_show_status = show_status
 	_refresh_shell_state = refresh_shell_state
 
 
-func on_export_started(_dir_path: String) -> void:
+func on_export_started(workspace: EditorWorkspace, _dir_path: String) -> void:
 	# The workspace hook, not a hard-coded "Exporting terrain..." — any
 	# exporting workspace announces itself (the same title the progress
 	# overlay shows).
-	var workspace: EditorWorkspace = _active_workspace.call()
+	_export_workspace = workspace
 	_show_status.call(workspace.get_export_progress_title() if workspace != null else "Exporting...", 30.0)
 	_set_active(true)
 	sync()
@@ -59,6 +56,7 @@ func on_export_started(_dir_path: String) -> void:
 
 func on_export_completed(err: Error, message: String) -> void:
 	_set_active(false)
+	_export_workspace = null
 	if not message.is_empty():
 		_show_status.call(message, 6.0)
 	else:
@@ -67,7 +65,7 @@ func on_export_completed(err: Error, message: String) -> void:
 
 
 func sync() -> void:
-	var workspace: EditorWorkspace = _active_workspace.call()
+	var workspace := _export_workspace
 	if workspace == null:
 		_set_active(false)
 		return
@@ -76,6 +74,7 @@ func sync() -> void:
 	if export_running != _active:
 		_set_active(export_running)
 	if not export_running:
+		_export_workspace = null
 		return
 
 	var phase: String = workspace.get_export_progress_phase()

@@ -266,6 +266,13 @@ func _populate_sc_option(option: OptionButton, entries: Array, selected_value: i
 		option.select(option.item_count - 1)
 
 
+func _is_null_only_sub_type(entries: Array) -> bool:
+	if entries.size() != 1:
+		return false
+	var only := entries[0] as Dictionary
+	return int(only.get("value", -1)) == 0 and String(only.get("name", "")).nocasecmp_to("Null") == 0
+
+
 func _refresh_scripting_panel() -> void:
 	if _sc_box == null:
 		return
@@ -522,7 +529,11 @@ func _refresh_sc_action_section(actions: Array) -> void:
 	var action_type := int(act.get("action_type", 0))
 	var action_sub := int(act.get("action_sub_type", 0))
 	_populate_sc_option(_sc_action_type, _inspector._controller.get_action_types(), action_type)
-	_populate_sc_option(_sc_action_sub, _inspector._controller.get_action_sub_types(action_type), action_sub)
+	var sub_types: Array = _inspector._controller.get_action_sub_types(action_type)
+	_populate_sc_option(_sc_action_sub, sub_types, action_sub)
+	# Most actions have only the inert Null sub-type. Keep that value visible (including an
+	# imported unknown fallback row) but do not present a dropdown that has no legal choice.
+	_sc_action_sub.disabled = _is_null_only_sub_type(sub_types)
 	var params := [int(act.get("param1", 0)), int(act.get("param2", 0)), int(act.get("param3", 0)), int(act.get("param4", 0))]
 	var schema := MissionParamSchema.action_slots(action_type, action_sub)
 	_sc_action_desc.text = schema.desc if schema.desc != "" else "No description yet for this action type; parameters are raw values."

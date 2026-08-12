@@ -510,7 +510,13 @@ class FakeController:
 	func get_action_types() -> Array:
 		return [{"value": 0, "name": "Null"}, {"value": 6, "name": "OutputText"}, {"value": 34, "name": "ResetEvent"}]
 
-	func get_action_sub_types(_action_type: int) -> Array:
+	func get_action_sub_types(action_type: int) -> Array:
+		if action_type == 3 or action_type == 21:
+			return [
+				{"value": 0, "name": "Null"},
+				{"value": 8, "name": "Accuracy"},
+				{"value": 34, "name": "PlayPartAnim"},
+			]
 		return [{"value": 0, "name": "Null"}]
 
 	func can_preview_part_anim(_action: Dictionary) -> bool:
@@ -1954,6 +1960,28 @@ func test_scripting_trigger_editor_typed_pickers() -> void:
 	assert_true(ctx.inspector._scripting._sc_trigger_desc.text.to_lower().find("zone") != -1, "the type description mentions the zone")
 
 
+func test_scripting_waypoint_type_uses_named_enum_and_preserves_unknown_values() -> void:
+	var event := _sc_event(0, 0, 0, 0, 1, 0)
+	var named_chain := _sc_chain_dict(event, [_sc_trig(1, "Group", 7, "GroupReachesWaypoint", [0, 1, 2, 0])], [])
+	var named_ctx := _scripting_ctx([event], 0, named_chain)
+	named_ctx.inspector._scripting._sc_trigger_list.item_selected.emit(0)
+	var named_slot: MissionParamSlot = named_ctx.inspector._scripting._sc_trigger_params[1]
+	assert_true(named_slot.is_picker(), "waypoint type renders as a named enum")
+	assert_eq(named_slot.read_value(), 1, "the navigation-node value round-trips")
+	var named_option := named_slot.get_option()
+	assert_eq(named_option.get_item_text(named_option.selected), "Navigation node",
+		"the editor names waypoint type 1")
+
+	var unknown_chain := _sc_chain_dict(event, [_sc_trig(1, "Group", 7, "GroupReachesWaypoint", [0, 9, 2, 0])], [])
+	var unknown_ctx := _scripting_ctx([event], 0, unknown_chain)
+	unknown_ctx.inspector._scripting._sc_trigger_list.item_selected.emit(0)
+	var unknown_slot: MissionParamSlot = unknown_ctx.inspector._scripting._sc_trigger_params[1]
+	assert_eq(unknown_slot.read_value(), 9, "an imported unknown waypoint type round-trips")
+	var unknown_option := unknown_slot.get_option()
+	assert_eq(unknown_option.get_item_text(unknown_option.selected), "Value 9",
+		"an imported unknown waypoint type stays visible")
+
+
 func test_scripting_subselection_resets_when_event_changes_without_a_click() -> void:
 	# Regression: the trigger/action sub-selection is reset by the event-list click handler, but the
 	# controller can also switch events without a click (set_mode auto-focus, add_event). A stale
@@ -2059,6 +2087,23 @@ func test_scripting_action_disables_unused_param_slots() -> void:
 	assert_false(ctx.inspector._scripting._sc_action_params[1].is_editable(), "unused param 2 is disabled")
 	assert_false(ctx.inspector._scripting._sc_action_params[2].is_editable(), "unused param 3 is disabled")
 	assert_false(ctx.inspector._scripting._sc_action_params[3].is_editable(), "unused param 4 is disabled")
+
+
+func test_scripting_action_disables_null_only_sub_type_and_enables_real_choices() -> void:
+	var event := _sc_event(0, 0, 0, 0, 0, 1)
+	var null_chain := _sc_chain_dict(event, [], [_sc_act(34, "ResetEvent", 77, "Value 77", [0, 0, 0, 0])])
+	var null_ctx := _scripting_ctx([event], 0, null_chain)
+	null_ctx.inspector._scripting._sc_action_list.item_selected.emit(0)
+	assert_true(null_ctx.inspector._scripting._sc_action_sub.disabled,
+		"a Null-only action does not offer a meaningless sub-type choice")
+	assert_eq(null_ctx.inspector._scripting._sc_action_sub.get_selected_id(), 77,
+		"an imported unknown sub-type remains visible while the control is disabled")
+
+	var ai_chain := _sc_chain_dict(event, [], [_sc_act(21, "ChangeSingleAI", 8, "Accuracy", [1, 90, 0, 0])])
+	var ai_ctx := _scripting_ctx([event], 0, ai_chain)
+	ai_ctx.inspector._scripting._sc_action_list.item_selected.emit(0)
+	assert_false(ai_ctx.inspector._scripting._sc_action_sub.disabled,
+		"an action with real sub-type choices keeps the dropdown enabled")
 
 
 func test_scripting_zero_param_action_disables_all_slots() -> void:

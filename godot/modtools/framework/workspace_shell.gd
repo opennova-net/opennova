@@ -98,8 +98,9 @@ func prompt_cdep_violations(_count: int, _on_fix_callback: Callable) -> void:
 	pass
 
 
-## Export lifecycle, called by exporting workspaces' domain editors.
-func on_export_started(_dir_path: String) -> void:
+## Export lifecycle. The initiating workspace is explicit so progress remains
+## attached to it if the user changes tabs while the export runs.
+func on_export_started(_workspace: EditorWorkspace, _dir_path: String) -> void:
 	pass
 
 
