@@ -512,6 +512,15 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     (terrain_query seam), applied inside `player_view_compose_camera`'s head-bone path
     AND on the third-person anchor-chase feed (retail floors the one CameraOffset both
     consumers read), pinned by `player_view_test::test_compose_camera_terrain_floor`.
+    The world-side below-water classifier's `CameraOffset.Z` projection FIXED
+    2026-08-12: the round-source stance/recoil classifier and both Godot-side
+    aimed-shot/HUD-crosshair rows compare `Position.Z + eye_offset_z` (the ported
+    `entity+0x74`) with `Env_WaterHeightFixed`, strictly below, wherever the drowning
+    bit is clear [orig: `RoundData_SpawnRound` stance leg `@0x4ec2d5..0x4ec2ea`
+    (`Flags & 0x108020` folds the ladder/parachute bits); the recoil x4 legs
+    `@0x4ec342..0x4ec35a` / `@0x4ec86d..0x4ec885`], pinned by `npruntime_round_sim`'s
+    eyes-dry/eyes-wet split; decoded wire rows keep their documented bounded
+    projection (no CameraOffset carrier on the wire).
     Remote players still take the capsule-height trig path [orig: `@0x4b6984`]. The
     camera's `torsoRoll(+0x2DC)` and `2·pitchBlend(+0x380)` terms are also unported
     (their producers are open). `local_player_presenter.gd`.

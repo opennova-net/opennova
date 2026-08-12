@@ -371,10 +371,11 @@ Port: `hud_clip_indicator.gd` (restamp key proxy: D-HUD-5).
   0.05 0.2 0.25 0.05 0.1 0.15`). `engine/formats/def` and the runtime weapon table now
   retain those exact integers; no float round-trip sits on the parity path.
   The two live terms are likewise carried as signed BAM/fixed-point integers
-  through the sim and HUD. The port's below-water row gate compares body
-  position rather than retail's `Position.Z + CameraOffset.Z`; the missing
-  world-side eye-height projection remains under D-INF-18 and is outside the
-  accumulator closure. D-HUD-7 is closed.
+  through the sim and HUD. The below-water row gate compares retail's
+  `Position.Z + CameraOffset.Z` since 2026-08-12: `eye_offset_z` (the ported
+  `entity+0x74`) projects the eye height in the round-source classifier and
+  the crosshair row selector (the D-INF-18 water leg, closed there).
+  D-HUD-7 is closed.
 
 #### Recoil and movement-spread terms (witnessed and ported 2026-07-31)
 

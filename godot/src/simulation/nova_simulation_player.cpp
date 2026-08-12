@@ -79,11 +79,14 @@ void Simulation::apply_player_input_pre_tick() {
 				active_slot.current != opennova::world::weapon_action::kSwitchFrom;
 		const bool in_air = p->inf.airborne ||
 				(entity_flags & opennova::world::kEntityFlagInAir) != 0;
-		// Retail adds CameraOffset.Z to this test. That offset is not represented,
-		// so the fixed body Z plus the Drowning flag is the bounded projection.
+		// Retail tests Position.Z + CameraOffset.Z (entity+0x74) against the
+		// water plane; eye_offset_z is that ported channel
+		// [orig: RoundData_SpawnRound @0x4ec2de..0x4ec2ea].
 		const bool submerged =
 				(entity_flags & opennova::world::kEntityFlagDrowning) != 0 ||
-				(world_->env.water_z != 0 && p->pos[2] < world_->env.water_z);
+				(world_->env.water_z != 0 &&
+						p->pos[2] + (local != nullptr ? local->eye_offset_z : 0) <
+								world_->env.water_z);
 		const bool ordinary_aimed_shot = !in_air &&
 				(sighted_aimed_shot ||
 						(scoped_aimed_shot && !p->inf.player_moving)) &&
