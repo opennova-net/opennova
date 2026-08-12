@@ -24,8 +24,7 @@ const CHANGE_DIR_KEY := KEY_F9
 # 0xFF]; the authored default binding rides the unported input-binding layer
 # (D-CTRL-3), so the key itself is a reimpl mapping.
 const OBJECTIVES_KEY := KEY_O
-# Base-game retail default; N remains reserved for night vision (D-CTRL-3).
-const FRIENDLY_TAGS_KEY := KEY_F  # retail action 30 @0x49b573
+const FRIENDLY_TAGS_KEY := KEY_F  # base retail default; N is NVG [orig: action 30 @0x49b573] (D-CTRL-3)
 # The armory key — the USE-ITEM key (input action 177 "useitem"; retail default =
 # SHIFT on the shipped KeyChart, labeled "USE ITEM/ATTACH/ARMORY"). Zone-gated: it
 # opens weapon.mnu's WEAPON screen only while the player stands inside a type-6
