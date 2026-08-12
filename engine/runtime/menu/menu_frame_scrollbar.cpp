@@ -214,9 +214,10 @@ bool MenuFrameCompiler::solve_scroll_parts_(const WidgetNode &node,
 
 // Dispatch by widget type: a standalone Scroll widget scrolls its authored
 // range; a Table/List embedded scrollbar scrolls first-visible ROWS (range
-// 0..rows-visible, page = visible - 1, value = scroll_row) [orig: the table
+// 0..rows-visible, page = visible - 1, value = scroll_row); an OPEN combo's
+// popup scrollbar scrolls the popup rows the same way [orig: the table
 // SCROLLBAR delegate @ 0x643b22; CMEditWnd page = visibleLines - 1;
-// CScrollWnd_SetRangeAndClamp @ 0x64d490].
+// CScrollWnd_SetRangeAndClamp @ 0x64d490; CListWnd child walk @ 0x643f30].
 bool MenuFrameCompiler::solve_scroll_for_widget_(int index,
 		const MenuFrameState &state, ScrollParts *out) const {
 	if (index < 0 || index >= static_cast<int>(nodes_.size())) {
@@ -241,6 +242,33 @@ bool MenuFrameCompiler::solve_scroll_for_widget_(int index,
 		const int value = ws != nullptr && ws->has_scroll_range ? ws->scroll_value : 0;
 		return solve_scroll_parts_(node, ScrollbarKind::Standalone, rect,
 				range_min, range_max, page, value, out);
+	}
+	if (type == mnu::WindowType::Combo) {
+		// The popup's scrollbar child exists only while the dropdown is open
+		// (retail's child lives on the popup CListWnd) — geometry identical
+		// to emit_combo_popup's so hits land on the drawn parts.
+		if (ws == nullptr || !ws->popup_open || !node.popup_scrollbar.present) {
+			return false;
+		}
+		int rows = 0;
+		int visible = 0;
+		if (!scroll_row_span_(index, state, &rows, &visible) ||
+				rows <= visible) {
+			return false;
+		}
+		mnu::RectEdges popup;
+		if (!combo_popup_rect(index, state, &popup)) {
+			return false;
+		}
+		mnu::RectEdges scrollbar_rect;
+		if (!resolve_scrollbar_rect(node, ScrollbarKind::Popup, popup, 0,
+					popup.bottom - popup.top, 22, &scrollbar_rect)) {
+			return false;
+		}
+		const int value = std::max(ws->scroll_row, 0);
+		return solve_scroll_parts_(node, ScrollbarKind::Popup, scrollbar_rect,
+				0, std::max(rows - visible, 0), std::max(visible - 1, 0),
+				value, out);
 	}
 	if (!node.embedded_scrollbar.present) {
 		return false;
@@ -295,6 +323,25 @@ bool MenuFrameCompiler::scroll_row_span_(int index, const MenuFrameState &state,
 		case mnu::WindowType::LanList: {
 			*rows = item_count(index, state);
 			*visible = std::max(list_visible_rows(index, state), 1);
+			return true;
+		}
+		case mnu::WindowType::Combo: {
+			// Rows of the OPEN dropdown (the popup CListWnd): the same
+			// row/visible model against the authored LIST_BOX rect, matching
+			// emit_combo_popup's draw gate.
+			if (ws == nullptr || !ws->popup_open) {
+				return false;
+			}
+			mnu::RectEdges popup;
+			if (!combo_popup_rect(index, state, &popup)) {
+				return false;
+			}
+			const int row_h = row_height_(node);
+			if (row_h <= 0) {
+				return false;
+			}
+			*rows = item_count(index, state);
+			*visible = std::max((popup.bottom - popup.top) / row_h, 0);
 			return true;
 		}
 		default:
@@ -459,7 +506,7 @@ void MenuFrameCompiler::emit_row_scrollbar_(int index, const WidgetNode &node,
 // change their authored-range value; embedded row owners change scroll_row.
 bool MenuFrameCompiler::scroll_pump_mouse_(MenuFrameState &io_state,
 		float mouse_x, float mouse_y, bool button_down, float scale_x,
-		float scale_y, MouseClaim *claim) {
+		float scale_y, MouseClaim *claim, int restrict_index) {
 	const bool press_edge = button_down && !scroll_pump_.button_was_down;
 	scroll_pump_.button_was_down = button_down;
 	if (!button_down) {
@@ -514,8 +561,14 @@ bool MenuFrameCompiler::scroll_pump_mouse_(MenuFrameState &io_state,
 		const int index = scroll_pump_.captured_index;
 		claim->hovered = index;
 		claim->scroll_index = index;
-		apply(index, scroll_drag_value(index, io_state, mouse_x, mouse_y,
-				scale_x, scale_y, scroll_pump_.drag_anchor));
+		// A capture whose owner stopped solving (its popup closed under the
+		// held mouse) keeps the claim but moves nothing — retail's capture
+		// dies with the child window and the held press goes nowhere.
+		ScrollParts parts;
+		if (solve_scroll_for_widget_(index, io_state, &parts)) {
+			apply(index, scroll_drag_value(index, io_state, mouse_x, mouse_y,
+					scale_x, scale_y, scroll_pump_.drag_anchor));
+		}
 		return true;
 	}
 	if (scroll_pump_.latched_index >= 0) {
@@ -526,8 +579,15 @@ bool MenuFrameCompiler::scroll_pump_mouse_(MenuFrameState &io_state,
 	if (!press_edge) {
 		return false;
 	}
-	const int index =
-			scroll_owner_at(io_state, mouse_x, mouse_y, scale_x, scale_y);
+	// A popup-exclusive pump restricts owner resolution to the open combo
+	// [orig: dispatch_mouse_event @ 0x63ab00 g_ui_open_popup_wnd — while a
+	// popup is open only the popup window sees the event].
+	const int index = restrict_index >= 0
+			? (scroll_hit_at(restrict_index, io_state, mouse_x, mouse_y,
+					   scale_x, scale_y) != kScrollHitNone
+							  ? restrict_index
+							  : -1)
+			: scroll_owner_at(io_state, mouse_x, mouse_y, scale_x, scale_y);
 	if (index < 0) {
 		return false;
 	}
@@ -575,6 +635,27 @@ bool MenuFrameCompiler::scroll_pump_mouse_(MenuFrameState &io_state,
 			break;
 	}
 	return true;
+}
+
+// The open-dropdown pump: the popup's scrollbar child sees the sample ahead
+// of row picking, restricted to the open combo — while a popup is open only
+// the popup window receives events, and its scrollbar child claims before
+// the row strip [orig: dispatch_mouse_event @ 0x63ab00 g_ui_open_popup_wnd
+// gate; CListWnd child walk @ 0x643f30; CScrollWnd_HandleEvent @ 0x64d050].
+// The claim reports whether the scrollbar owns the sample; row hover/pick
+// stays with the caller when it does not.
+MenuFrameCompiler::MouseClaim MenuFrameCompiler::pump_popup_mouse(
+		MenuFrameState &io_state, int index, float mouse_x, float mouse_y,
+		bool button_down, float scale_x, float scale_y) {
+	MouseClaim claim;
+	if (screen_ == nullptr || index < 0 ||
+			index >= static_cast<int>(nodes_.size())) {
+		return claim;
+	}
+	claim.cursor = screen_cursor_;
+	scroll_pump_mouse_(io_state, mouse_x, mouse_y, button_down, scale_x,
+			scale_y, &claim, index);
+	return claim;
 }
 
 // [orig: CComboWnd_Render @ 0x65c05b..0x65c083 — this[183] = row_text(list,

@@ -2174,6 +2174,110 @@ void test_scroll_pump_owns_press_capture_and_value(const fnt_font_t *font) {
 	c.pump_mouse(state, 295.0f, 80.0f, false, 1.0f, 1.0f);
 }
 
+// An OPEN combo popup's scrollbar child is interactive through the same
+// pump: arrows step scroll_row, the shuttle captures and drags, and the
+// pressed part owns the sample so it can never become a popup row pick.
+// [orig: dispatch_mouse_event @ 0x63ab00 g_ui_open_popup_wnd gate routes to
+//  the popup; CListWnd child walk @ 0x643f30 gives its scrollbar the event
+//  first; CScrollWnd_HandleEvent @ 0x64d050 is the part interaction]
+void test_combo_popup_scrollbar_scrolls_through_pump(const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>COMBO_POPUP_SCROLL</NAME>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <FONT><NAME>f.fnt</NAME><DEFAULT_FG>FFFFFF</DEFAULT_FG></FONT>
+    <WINDOW type="combo" name="COMBO">
+      <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>20</BOTTOM></POSITION>
+      <ITEMS>
+        <ITEM type="ID" value="0">ZERO</ITEM><ITEM type="ID" value="1">ONE</ITEM>
+        <ITEM type="ID" value="2">TWO</ITEM><ITEM type="ID" value="3">THREE</ITEM>
+        <ITEM type="ID" value="4">FOUR</ITEM><ITEM type="ID" value="5">FIVE</ITEM>
+      </ITEMS>
+      <LIST_BOX>
+        <POSITION><LEFT>0</LEFT><TOP>20</TOP><RIGHT>100</RIGHT><BOTTOM>100</BOTTOM></POSITION>
+        <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+        <SCROLLBAR>
+          <POSITION><LEFT>80</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>80</BOTTOM></POSITION>
+          <APPEARANCE type="color" state="default">303030</APPEARANCE>
+          <SHUTTLE type="color" state="default">80FF0000</SHUTTLE>
+          <SCROLLUP type="color" state="default">505050</SCROLLUP>
+          <SCROLLDOWN type="color" state="default">505050</SCROLLDOWN>
+        </SCROLLBAR>
+      </LIST_BOX>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	c.configure(doc.first_screen(), font);
+	MenuWidgetState combo;
+	combo.index = 1;
+	combo.popup_open = true;
+	combo.scroll_row = 0;
+	MenuFrameState state;
+	state.widgets.push_back(combo);
+
+	// Popup (0,20)-(100,100): 6 rows, 4 visible, range 0..2, page 3. The
+	// authored scrollbar sits absolute (80,20)-(100,100): up arrow to y 40,
+	// track to y 80, down arrow below.
+	auto claim = c.pump_mouse(state, 90.0f, 90.0f, true, 1.0f, 1.0f);
+	CHECK(claim.hovered == 1 && claim.scroll_index == 1,
+			"the popup down-arrow press claims the combo through the pump");
+	CHECK(claim.scroll_value_changed && claim.scroll_value == 1,
+			"the popup down arrow steps scroll_row +1");
+	CHECK(state.widgets[0].scroll_row == 1,
+			"the pump applies the popup scroll into the widget state");
+	// Held drift onto the row strip: the latch keeps the claim — a scrollbar
+	// press can never become a popup row pick.
+	claim = c.pump_mouse(state, 50.0f, 55.0f, true, 1.0f, 1.0f);
+	CHECK(claim.scroll_index == 1 && !claim.scroll_value_changed,
+			"the latched popup arrow keeps the mouse without repeating");
+	c.pump_mouse(state, 50.0f, 55.0f, false, 1.0f, 1.0f);
+
+	// Up arrow steps back.
+	claim = c.pump_mouse(state, 90.0f, 30.0f, true, 1.0f, 1.0f);
+	CHECK(claim.scroll_value_changed && claim.scroll_value == 0 &&
+					state.widgets[0].scroll_row == 0,
+			"the popup up arrow steps scroll_row -1");
+	c.pump_mouse(state, 90.0f, 30.0f, false, 1.0f, 1.0f);
+
+	// Shuttle drag: at scroll_row 0 the 26px shuttle tops the track (y 40).
+	// Capture there, drag past the track end: the ratio lands the max row.
+	claim = c.pump_mouse(state, 90.0f, 50.0f, true, 1.0f, 1.0f);
+	CHECK(claim.scroll_index == 1 && !claim.scroll_value_changed,
+			"the popup shuttle press captures without a value step");
+	claim = c.pump_mouse(state, 90.0f, 100.0f, true, 1.0f, 1.0f);
+	CHECK(claim.scroll_value_changed && claim.scroll_value == 2 &&
+					state.widgets[0].scroll_row == 2,
+			"the captured popup drag lands the clamped last first-row");
+	c.pump_mouse(state, 90.0f, 100.0f, false, 1.0f, 1.0f);
+
+	// The popup-exclusive entry: restricted to the open combo, it claims the
+	// scrollbar parts and nothing else — a press on the row strip flows back
+	// to the caller's row picking, and other widgets can never claim.
+	state.widgets[0].scroll_row = 0;
+	claim = c.pump_popup_mouse(state, 1, 90.0f, 90.0f, true, 1.0f, 1.0f);
+	CHECK(claim.scroll_index == 1 && claim.scroll_value_changed &&
+					claim.scroll_value == 1 && state.widgets[0].scroll_row == 1,
+			"pump_popup_mouse steps the popup down arrow");
+	c.pump_popup_mouse(state, 1, 90.0f, 90.0f, false, 1.0f, 1.0f);
+	claim = c.pump_popup_mouse(state, 1, 50.0f, 55.0f, true, 1.0f, 1.0f);
+	CHECK(claim.scroll_index == -1,
+			"a row-strip press flows past the popup pump to row picking");
+	c.pump_popup_mouse(state, 1, 50.0f, 55.0f, false, 1.0f, 1.0f);
+
+	// A CLOSED combo exposes no scroll parts to the pump.
+	state.widgets[0].popup_open = false;
+	CHECK(c.scroll_owner_at(state, 90.0f, 90.0f, 1.0f, 1.0f) == -1,
+			"a closed combo's popup scrollbar is not claimable");
+	claim = c.pump_popup_mouse(state, 1, 90.0f, 90.0f, true, 1.0f, 1.0f);
+	CHECK(claim.scroll_index == -1,
+			"the popup pump refuses a closed combo's scrollbar strip");
+	c.pump_popup_mouse(state, 1, 90.0f, 90.0f, false, 1.0f, 1.0f);
+}
+
 // A list shorter than one full row holding a single item must not draw a
 // scrollbar its own interaction refuses to hit: the draw walk and the
 // interaction solve share scroll_row_span_'s min-1 visible clamp.
@@ -2249,6 +2353,7 @@ int main() {
 	test_draw_list_preserves_interleaved_primitive_order(&font);
 	test_scroll_interaction_hits_and_drag(&font);
 	test_scroll_pump_owns_press_capture_and_value(&font);
+	test_combo_popup_scrollbar_scrolls_through_pump(&font);
 	test_degenerate_list_draws_no_dead_scrollbar(&font);
 	test_table_embedded_scrollbar_scrolls_rows(&font);
 	test_combo_face_shows_list_box_selection(&font);

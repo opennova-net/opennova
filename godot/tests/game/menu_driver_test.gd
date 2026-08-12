@@ -527,6 +527,72 @@ func test_combo_popup_row_hover_tracks_mouse() -> void:
 			"the dismissed popup leaves no hover row")
 
 
+const COMBO_SCROLL_XML := """
+<SCREEN>
+  <NAME>ARMORY</NAME>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <WINDOW type="combo" name="SCROLLY">
+      <POSITION><LEFT>200</LEFT><TOP>0</TOP><RIGHT>300</RIGHT><BOTTOM>20</BOTTOM></POSITION>
+      <ITEMS>
+        <ITEM value="0">ZERO</ITEM><ITEM value="1">ONE</ITEM>
+        <ITEM value="2">TWO</ITEM><ITEM value="3">THREE</ITEM>
+        <ITEM value="4">FOUR</ITEM><ITEM value="5">FIVE</ITEM>
+      </ITEMS>
+      <LIST_BOX>
+        <POSITION><LEFT>0</LEFT><TOP>20</TOP><RIGHT>100</RIGHT><BOTTOM>100</BOTTOM></POSITION>
+        <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+        <SCROLLBAR>
+          <POSITION><LEFT>80</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>80</BOTTOM></POSITION>
+          <APPEARANCE type="color" state="default">303030</APPEARANCE>
+          <SHUTTLE type="color" state="default">80FF0000</SHUTTLE>
+          <SCROLLUP type="color" state="default">505050</SCROLLUP>
+          <SCROLLDOWN type="color" state="default">505050</SCROLLDOWN>
+        </SCROLLBAR>
+      </LIST_BOX>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+"""
+
+
+func test_combo_popup_scrollbar_scrolls_rows() -> void:
+	# The open dropdown's scrollbar child sees the sample ahead of row picking
+	# [orig: CListWnd child walk @ 0x643f30; CScrollWnd_HandleEvent
+	# @ 0x64d050]: arrows step the row window, the press neither picks a row
+	# nor dismisses, and the scrolled top row picks its absolute index.
+	var frame := MenuFrame.new()
+	add_child_autofree(frame)
+	frame.size = Vector2(800, 600)
+	var driver := MenuDriver.new()
+	driver.attach(frame, null)
+	assert_true(driver.open_document(_doc(COMBO_SCROLL_XML), null, null, null,
+			"weapon.mnu"), "document opens on the frame")
+	var combo := driver.widget_id("SCROLLY")
+	var index := frame.widget_index("SCROLLY")
+	_click(driver, Vector2(250, 10))
+	assert_true(driver.is_combo_popup_open(combo), "the popup is open")
+	var selected_before := driver.selected_row(combo)
+	# Popup (200,20)-(300,100), scrollbar (280,20)-(300,100): down arrow at
+	# the bottom 20px.
+	driver.process_mouse(Vector2(290, 90), true)
+	assert_true(driver.is_combo_popup_open(combo),
+			"the scrollbar press keeps the popup open")
+	assert_eq(driver.selected_row(combo), selected_before,
+			"the scrollbar press picks no row")
+	assert_eq(frame.get_widget_hover_item(index), -1,
+			"the claimed scrollbar clears the row hover")
+	driver.process_mouse(Vector2(290, 90), false)
+	assert_true(driver.is_combo_popup_open(combo),
+			"release on the scrollbar keeps the popup open")
+	# 6 rows, 4 visible: one down-arrow step made absolute row 1 the top
+	# visible row — picking the top row proves the window moved.
+	_click(driver, Vector2(240, 30))
+	assert_eq(driver.selected_row(combo), 1,
+			"the scrolled top row picks its absolute index")
+	assert_false(driver.is_combo_popup_open(combo), "the row pick closes the popup")
+
+
 func test_combo_outside_click_dismisses_and_is_consumed() -> void:
 	var driver := _framed_driver(BOARD_XML)
 	var combo := driver.widget_id("MODE")

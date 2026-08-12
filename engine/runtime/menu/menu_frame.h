@@ -377,6 +377,13 @@ public:
 	};
 	MouseClaim pump_mouse(MenuFrameState &io_state, float mouse_x,
 			float mouse_y, bool button_down, float scale_x, float scale_y);
+	// The open-dropdown sample: the popup's scrollbar interaction only,
+	// restricted to the open combo `index` (the popup-exclusive dispatch
+	// gate). scroll_index >= 0 in the result means the scrollbar owns the
+	// sample and the caller must not treat it as a row hover/pick.
+	MouseClaim pump_popup_mouse(MenuFrameState &io_state, int index,
+			float mouse_x, float mouse_y, bool button_down, float scale_x,
+			float scale_y);
 
 private:
 	struct WidgetNode;
@@ -556,7 +563,7 @@ private:
 	ScrollPump scroll_pump_;
 	bool scroll_pump_mouse_(MenuFrameState &io_state, float mouse_x,
 			float mouse_y, bool button_down, float scale_x, float scale_y,
-			MouseClaim *claim);
+			MouseClaim *claim, int restrict_index = -1);
 	void emit_scrollbar(const WidgetNode &node, ScrollbarKind kind,
 			const mnu::RectEdges &rect, const WalkScale &s,
 			int range_min, int range_max, int page, int value,

@@ -1751,9 +1751,9 @@ int MenuFrameCompiler::combo_popup_row_at(int index,
 			mx < emit_x(scrollbar_rect.right, sx) &&
 			my >= emit_x(scrollbar_rect.top, sy) &&
 			my < emit_x(scrollbar_rect.bottom, sy)) {
-		// The original routes the child scrollbar before the list rows.
-		// Part interaction is deferred, but the covered strip must not select
-		// a row. [orig: CListWnd child walk @ 0x643f30]
+		// The original routes the child scrollbar before the list rows: the
+		// covered strip never selects a row (part interaction lives in
+		// pump_popup_mouse). [orig: CListWnd child walk @ 0x643f30]
 		return -1;
 	}
 	int y = popup.top;

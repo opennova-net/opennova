@@ -178,6 +178,13 @@ public:
 	// Local control coordinates; the pump scales by this control's size.
 	int process_mouse(const Vector2 &p_position, bool p_button_down);
 
+	// The open-dropdown sample: only the popup's scrollbar interaction runs,
+	// restricted to the open combo. True when the scrollbar owns the sample
+	// (the caller skips row hover/pick); value changes arrive on
+	// "scroll_value_changed" like the main pump's.
+	bool process_popup_mouse(int p_index, const Vector2 &p_position,
+			bool p_button_down);
+
 	// The companions' name->pre-order-index seam (case-insensitive authored
 	// widget NAME; -1 = absent). Valid after configure().
 	int widget_index(const String &p_name) const;
