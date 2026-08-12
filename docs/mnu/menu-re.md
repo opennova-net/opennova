@@ -516,8 +516,8 @@ is the ONE menu path (the MnuMenu Control tree is deleted). Pinned by
   CONTROLS remap capture, mapping tick masks to binding masks
   0x100→0x400 / 0x200→0x800 `[orig: @ 0x55c7bb..0x55c7d5]`.
 
-  Reimpl (D-MNU-18, kept divergence by the 2026-08-12 maintainer
-  decision): `MenuFrameCompiler::pump_mouse_wheel` scrolls one row per
+  Reimpl (D-MNU-18, ratified `PERMANENT` 2026-08-12 by maintainer
+  decision — ADR 0022 / ledger register): `MenuFrameCompiler::pump_mouse_wheel` scrolls one row per
   tick (the CScrollWnd arrow step), routed the way the witnessed dispatch
   routes every mouse event — the open popup exclusively, else the
   front-most row owner (List/Multi/LanList/Table) under the point;
