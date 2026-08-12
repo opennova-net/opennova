@@ -257,6 +257,83 @@ int main(void) {
     }
 
     def_free_ammo(&ammo);
+
+    /* The 16.16 decimal keys ride the engine's digit walker (Math_ParseFixedPoint16
+       @0x6131f0 — per-digit scale 419430/2^22, a hair UNDER 1/10, accumulator seeded
+       127, closing >> 8), NOT a clean round-half-up conversion. The two disagree by
+       one LSB on ~4% of decimal forms; pin a divergent form on every migrated key:
+       "0.07" -> 4587 where round-half-up says 4588 (the D-WPN-30 closure). A leading
+       '-' terminates the walker's integer scan and yields 0, exactly like retail. */
+    {
+        static const char kWalkerBlock[] =
+            "ammo AMMO_WALKER_PIN\n"
+            "  error 0.07\n"
+            "  drag 0.07\n"
+            "  bullet_radius 0.07\n"
+            "  kz_minradius 0.07\n"
+            "  kz_maxradius 0.07\n"
+            "  tumble_error 0.07\n"
+            "  light_move 0.07 128 120 80\n"
+            "  max_age 0.07\n"
+            "end\n"
+            "ammo AMMO_WALKER_NEG\n"
+            "  drag -1.5\n"
+            "end\n"
+            /* The two forms the retail JO corpus actually shifts on (the
+               2026-08-12 sweep: 1038 key values, 8 one-LSB shifts, all these
+               two decimals): bullet_radius 0.00277 -> 181 (round-half-up 182),
+               drag 0.292 -> 19136 (19137). */
+            "ammo AMMO_WALKER_CORPUS\n"
+            "  bullet_radius 0.00277\n"
+            "  drag 0.292\n"
+            "end\n";
+        DefAmmoFile pin;
+        if (def_parse_ammo_memory((const uint8_t *)kWalkerBlock, sizeof(kWalkerBlock) - 1,
+                                  &pin) != 0 || pin.count != 3) {
+            fprintf(stderr, "FAIL: walker pin block did not parse\n");
+            return 1;
+        }
+        const DefAmmoDef *w = &pin.entries[0];
+        struct { const char *what; long got; } walker_checks[] = {
+            {"error_fp16", w->error_fp16},
+            {"drag_fp16", w->drag_fp16},
+            {"bullet_radius_fp16", w->bullet_radius_fp16},
+            {"kz_minradius_fp16", w->kz_minradius_fp16},
+            {"kz_maxradius_fp16", w->kz_maxradius_fp16},
+            {"tumble_error_fp16", w->tumble_error_fp16},
+            {"light_move_radius_fp16", w->light_move_radius_fp16},
+        };
+        for (size_t i = 0; i < sizeof(walker_checks) / sizeof(walker_checks[0]); ++i) {
+            if (walker_checks[i].got != 4587) {
+                fprintf(stderr, "FAIL: walker pin %s: got %ld want 4587\n",
+                        walker_checks[i].what, walker_checks[i].got);
+                def_free_ammo(&pin);
+                return 1;
+            }
+        }
+        /* 0.07 s -> (62 * 4587 + 0x8000) >> 16 = 4 ticks (round-half-up would land
+           the same tick here; the age pin guards the walker feed, not the divide). */
+        if (w->max_age_ticks != 4) {
+            fprintf(stderr, "FAIL: walker pin max_age_ticks: got %d want 4\n",
+                    w->max_age_ticks);
+            def_free_ammo(&pin);
+            return 1;
+        }
+        if (pin.entries[1].drag_fp16 != 0) {
+            fprintf(stderr, "FAIL: negative drag should walk to 0, got %d\n",
+                    pin.entries[1].drag_fp16);
+            def_free_ammo(&pin);
+            return 1;
+        }
+        if (pin.entries[2].bullet_radius_fp16 != 181 || pin.entries[2].drag_fp16 != 19136) {
+            fprintf(stderr, "FAIL: corpus forms want 181/19136 got %d/%d\n",
+                    pin.entries[2].bullet_radius_fp16, pin.entries[2].drag_fp16);
+            def_free_ammo(&pin);
+            return 1;
+        }
+        def_free_ammo(&pin);
+    }
+
     printf("PASS: ammo parsing OK\n");
     return 0;
 }

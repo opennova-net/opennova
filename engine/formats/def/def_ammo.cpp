@@ -68,44 +68,22 @@ static int ammo_tracer_type_from_name(const char *s, size_t len) {
     return parse_int_n(s, len); /* atol fallback [orig: AmmoDef_ParseTypeName tail] */
 }
 
-/* Decimal string -> 16.16 fixed point (integer math; matches the values ammo.def uses:
- * "1", "0.5", ".04"). [orig: Math_ParseFixedPoint16 @0x6131f0] */
-static int parse_fixed16_n(const char *s, size_t len) {
-    size_t i = 0;
-    int neg = 0;
-    long long ip = 0, fp = 0, scale = 1;
-    if (i < len && (s[i] == '-' || s[i] == '+')) neg = (s[i] == '-'), ++i;
-    for (; i < len && s[i] >= '0' && s[i] <= '9'; ++i) ip = ip * 10 + (s[i] - '0');
-    if (i < len && s[i] == '.') {
-        for (++i; i < len && s[i] >= '0' && s[i] <= '9' && scale < 1000000; ++i) {
-            fp = fp * 10 + (s[i] - '0');
-            scale *= 10;
-        }
-    }
-    long long v = (ip << 16) + (fp * 65536 + scale / 2) / scale;
-    return (int)(neg ? -v : v);
-}
-
-/* The engine's decimal -> 16.16 digit walker, translated exactly rather than
-   re-derived. It accumulates the integer part by digits, then walks the fractional
-   digits with a scale that starts at 2^24 and is repeatedly multiplied by 419430/2^22
-   (0.09999990 — a hair UNDER 1/10), seeding the accumulator with 127 so the closing
-   >> 8 rounds to nearest. No sign and no exponent: a leading '-' terminates the
-   integer scan and yields 0, exactly as the original does.
-
-   This is deliberately NOT parse_fixed16_n above. That helper is a clean round-half-up
-   conversion, and the two disagree by one 16.16 LSB on roughly 4% of decimal forms
-   (e.g. "0.07" -> 4587 here, 4588 there) because the original's per-digit scale drifts
-   low. Callers whose value is consumed as a magnitude can live with a 1-LSB shift;
-   callers who divide two parsed values against each other cannot, which is why the
-   heat keys use this one. The same 1-LSB gap in parse_fixed16_n's own callers (the
-   ammo.def magnitudes) is tracked as D-WPN-30.
-   [orig: Math_ParseFixedPoint16 @ 0x6131f0] */
+/* Decimal string -> 16.16 fixed point through the engine's digit walker
+   (defscan::parse_fixed16_digits_n — the exact structural translation shared with
+   the weapon.def keys): integer part by digits, then fractional digits at a scale
+   that starts at 2^24 and is repeatedly multiplied by 419430/2^22 (a hair UNDER
+   1/10), accumulator seeded 127 so the closing >> 8 rounds to nearest. No sign and
+   no exponent: a leading '-' terminates the integer scan and yields 0, exactly as
+   the original does. Every fixed-point ammo key routes through it: error @0x40aaf6,
+   drag @0x40aac8, bullet_radius @0x40a865, kz_minradius @0x40acfe, kz_maxradius
+   @0x40ad2c, tumble_error @0x40ab24, light_move @0x40af3a (all in
+   AmmoDef_ParseProperty @0x40a2d0), closing D-WPN-30's round-half-up stand-in.
+   [orig: Math_ParseFixedPoint16 @0x6131f0] */
 
 /* Parsed 16.16 seconds -> 62 Hz ticks with rounding. [orig: sub_40A0F0 @0x40a0f0 —
  * (62 * fp16 + 0x8000) >> 16] */
 static int parse_age_ticks_n(const char *s, size_t len) {
-    return (int)(((long long)62 * parse_fixed16_n(s, len) + 0x8000) >> 16);
+    return (int)(((long long)62 * parse_fixed16_digits_n(s, len) + 0x8000) >> 16);
 }
 
 static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out);
@@ -252,15 +230,15 @@ static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out) {
             parsed = 1;
         } else if (lower_starts_with(lower, ll, "error", 5)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 5, &vl);
-            current.error_fp16 = parse_fixed16_n(v, vl);
+            current.error_fp16 = parse_fixed16_digits_n(v, vl);
             parsed = 1;
         } else if (lower_starts_with(lower, ll, "drag", 4)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 4, &vl);
-            current.drag_fp16 = parse_fixed16_n(v, vl);
+            current.drag_fp16 = parse_fixed16_digits_n(v, vl);
             parsed = 1;
         } else if (lower_starts_with(lower, ll, "bullet_radius", 13)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 13, &vl);
-            current.bullet_radius_fp16 = parse_fixed16_n(v, vl);
+            current.bullet_radius_fp16 = parse_fixed16_digits_n(v, vl);
             parsed = 1;
         } else if (lower_starts_with(lower, ll, "spread_count", 12)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
@@ -290,11 +268,11 @@ static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out) {
             parsed = 1;
         } else if (lower_starts_with(lower, ll, "kz_minradius", 12)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
-            current.kz_minradius_fp16 = parse_fixed16_n(v, vl); /* +52 [orig: §5.60 map] */
+            current.kz_minradius_fp16 = parse_fixed16_digits_n(v, vl); /* +52 [orig: §5.60 map] */
             parsed = 1;
         } else if (lower_starts_with(lower, ll, "kz_maxradius", 12)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
-            current.kz_maxradius_fp16 = parse_fixed16_n(v, vl); /* +56 */
+            current.kz_maxradius_fp16 = parse_fixed16_digits_n(v, vl); /* +56 */
             parsed = 1;
         } else if (lower_starts_with(lower, ll, "kz_pieslice", 11)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 11, &vl);
@@ -309,7 +287,7 @@ static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out) {
             parsed = 1;
         } else if (lower_starts_with(lower, ll, "tumble_error", 12)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
-            current.tumble_error_fp16 = parse_fixed16_n(v, vl);
+            current.tumble_error_fp16 = parse_fixed16_digits_n(v, vl);
             parsed = 1;
         } else if (lower_starts_with(lower, ll, "weight_in_grains", 16)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 16, &vl);
@@ -383,7 +361,7 @@ static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
             Token tok[4];
             int tn = tokenize(v, vl, tok, 4);
-            if (tn >= 1) current.light_move_radius_fp16 = parse_fixed16_n(tok[0].s, tok[0].len);
+            if (tn >= 1) current.light_move_radius_fp16 = parse_fixed16_digits_n(tok[0].s, tok[0].len);
             if (tn >= 4) {
                 /* No range clamps — the original's shifted adds bleed out-of-range
                    components upward [orig: ((r<<8)+g)<<8 + b @0x40a2d0]. */
