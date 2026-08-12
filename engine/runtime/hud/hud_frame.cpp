@@ -604,58 +604,102 @@ void HudFrameCompiler::element_waypoint(const HudFrameState &state, float w,
 
 void HudFrameCompiler::element_objectives(const HudFrameState &state, float w,
 		float h) {
-	// [orig: HUD_DrawWinConditions @ 0x5ba940 — anchor (15, 240), the header,
-	// checkbox rows, the gray done fold]
+	// [orig: HUD_DrawWinConditions @ 0x5ba940 — full geometry witnessed
+	// 2026-08-12: measure pass, HUD_DrawLabelBox rect, 16x16 checkbox outline
+	// (4 lines, 0xFFE0E0E0), the done-mark red X (6 lines, 0xFFFF0000 — both
+	// diagonals tripled for thickness), and the alpha/gray color folds. The
+	// panel alpha byte dword_24C18CC rides every draw color's top byte.]
 	if (state.objectives.empty() || font_.font() == nullptr) {
 		return;
 	}
+	const uint32_t alpha = state.objectives_alpha;
+	if (alpha == 0) {
+		return; // retail draws with alpha 0 folded into every color — invisible
+	}
+	const uint32_t a24 = alpha << 24;
 	// The header string is the gametext Overlays/STROVER_MISSIONOBJECTIVES
 	// line, resolved by the embedder; the literal is the miss fallback
 	// [orig: header @ 0x5ba986].
 	const char *header = state.objectives_header.empty()
 			? "MISSION OBJECTIVES"
 			: state.objectives_header.c_str();
-	const float row_h = text_line_h() * kDesignH / std::max(h, 1.0f);
+	// Anchor: the caller's arguments [orig: x = 15, y = dword_24C1900 + 0xF0
+	// at the @ 0x5be163 site].
 	const float x = 15.0f;
 	const float y = 240.0f;
+	// The measure pass [orig: @ 0x5ba9c9 — per-row text height scaled by the
+	// overlay divisor ((h<<10)/overlayCtx) accumulates into the panel height;
+	// the max width runs over the rows AND the header]. Rows here are
+	// single-line, so the scaled line height stands for HUD_MeasureTextWH's
+	// height. Retail measures with g_hudLabelFontLarge and draws the header
+	// with g_hudLabelFontBold; the compiler's single HUD font stands in for
+	// both (font-slot plumb = the remaining D-HUD-18 presentation residual).
+	const float row_h = text_line_h() * kDesignH / std::max(h, 1.0f);
 	float max_w = measure_text_w(header) * kDesignW / std::max(w, 1.0f);
 	for (const HudObjectiveRow &row : state.objectives) {
 		max_w = std::max(max_w, measure_text_w(row.text.c_str()) * kDesignW /
 				std::max(w, 1.0f));
 	}
-	const float panel_x1 = x + max_w + 72.0f;
-	const float panel_y1 = y - 6.0f +
-			static_cast<float>(state.objectives.size() + 1) * (row_h + 4.0f) +
-			48.0f;
-	emit_rect(sx(x, w), sy(y - 6.0f, h), sx(panel_x1, w), sy(panel_y1, h),
-			0x80000000u, true);
-	emit_wire_rect(sx(x, w), sy(y - 6.0f, h), sx(panel_x1, w), sy(panel_y1, h),
-			0xFFFFFFFFu);
-	emit_text(header, x + 24.0f, y, w, h, 0xFFFFFFFFu, 0u);
-	float row_y = y + row_h + 10.0f;
+	const float total_h = row_h * static_cast<float>(state.objectives.size());
+	// The backing box [orig: HUD_DrawLabelBox(ctx, x, y-0x18, x+scaledW+0x48,
+	// y+totalH+0x30, 0, (alpha<<24)+0xFFFFFF) @ 0x5baaba]. The box-shader
+	// styling inside HUD_DrawLabelBox is unwitnessed — the fill+wire pair
+	// stands in at the witnessed rect, with the panel alpha folded in.
+	const float box_x1 = x + max_w + 72.0f;
+	const float box_y0 = y - 24.0f;
+	const float box_y1 = y + total_h + 48.0f;
+	emit_rect(sx(x, w), sy(box_y0, h), sx(box_x1, w), sy(box_y1, h),
+			(alpha / 2) << 24, true);
+	emit_wire_rect(sx(x, w), sy(box_y0, h), sx(box_x1, w), sy(box_y1, h),
+			a24 | 0x00FFFFFFu);
+	// Header at x+24 [orig: Render_DrawTextScaled(ctx, x+0x18, y, ...,
+	// g_hudLabelFontBold, (alpha<<24)+0xFFFFFF) @ 0x5baae4].
+	emit_text(header, x + 24.0f, y, w, h, a24 | 0x00FFFFFFu, 0u);
+	// Rows: y advances by the header's 0x18 first, then by each row's own
+	// measured (scaled) text height [orig: esi += 0x18 @ 0x5baaf5; esi +=
+	// heights[slot] @ 0x5bacc1].
+	const float bx = x + 24.0f; // the checkbox x [orig: edi stays x + 0x18]
+	float row_y = y + 24.0f;
+	const auto line = [&](float x0, float y0, float x1, float y1,
+			uint32_t color) {
+		HudLine seg;
+		seg.color = color;
+		seg.width = 1.0f;
+		seg.x0 = sx(x0, w);
+		seg.y0 = sy(y0, h);
+		seg.x1 = sx(x1, w);
+		seg.y1 = sy(y1, h);
+		draw_list_.lines.push_back(seg);
+	};
 	for (const HudObjectiveRow &row : state.objectives) {
-		emit_wire_rect(sx(x + 26.0f, w), sy(row_y + 2.0f, h),
-				sx(x + 38.0f, w), sy(row_y + 14.0f, h), 0xFFFFFFFFu);
+		// The 16x16 checkbox outline, light gray [orig: the four
+		// draw_clipped_2d_line calls @ 0x5bab47..0x5bab9a, color 0xFFE0E0E0
+		// with the panel alpha as the separate modulate arg].
+		const uint32_t box_c = a24 | 0x00E0E0E0u;
+		line(bx, row_y, bx + 16.0f, row_y, box_c);
+		line(bx + 16.0f, row_y, bx + 16.0f, row_y + 16.0f, box_c);
+		line(bx + 16.0f, row_y + 16.0f, bx, row_y + 16.0f, box_c);
+		line(bx, row_y + 16.0f, bx, row_y, box_c);
 		if (row.done) {
-			HudLine seg;
-			seg.color = 0xFFFFFFFFu;
-			seg.width = 2.0f;
-			seg.x0 = sx(x + 28.0f, w);
-			seg.y0 = sy(row_y + 8.0f, h);
-			seg.x1 = sx(x + 31.0f, w);
-			seg.y1 = sy(row_y + 12.0f, h);
-			draw_list_.lines.push_back(seg);
-			seg.x0 = seg.x1;
-			seg.y0 = seg.y1;
-			seg.x1 = sx(x + 40.0f, w);
-			seg.y1 = sy(row_y + 2.0f, h);
-			draw_list_.lines.push_back(seg);
+			// The done mark is a RED X — both diagonals, each tripled with
+			// one-pixel offsets for thickness [orig: the six calls
+			// @ 0x5babc1..0x5bac5b, color 0xFFFF0000].
+			const uint32_t x_c = a24 | 0x00FF0000u;
+			line(bx, row_y, bx + 16.0f, row_y + 16.0f, x_c);
+			line(bx + 1.0f, row_y, bx + 16.0f, row_y + 15.0f, x_c);
+			line(bx, row_y + 1.0f, bx + 15.0f, row_y + 16.0f, x_c);
+			line(bx + 16.0f, row_y, bx, row_y + 16.0f, x_c);
+			line(bx + 15.0f, row_y, bx, row_y + 15.0f, x_c);
+			line(bx + 16.0f, row_y + 1.0f, bx + 1.0f, row_y + 16.0f, x_c);
 		}
-		// The witnessed +0xFF808081 fold collapses white -> gray on done
-		// [orig: @ 0x5bac86].
-		const uint32_t color = row.done ? 0xFF808080u : 0xFFFFFFFFu;
+		// The row color fold, exact arithmetic [orig: @ 0x5bac8c —
+		// (done ? 0xFF808081 : 0) + 0xFFFFFF + (alpha<<24), wrapping to the
+		// gray 0x808080 at any alpha].
+		const uint32_t color = (row.done ? 0xFF808081u : 0u) + 0x00FFFFFFu + a24;
+		// Text at x+0x30, one pixel above the checkbox top [orig: (edi+0x18,
+		// esi-2) with g_hudLabelFontLarge @ 0x5bacb5].
 		emit_text(row.text.c_str(), x + 48.0f, row_y - 2.0f, w, h, color, 0u);
-		row_y += row_h + 4.0f;
+		row_y += row_h;
 	}
 	++draw_list_.elements_drawn;
 }

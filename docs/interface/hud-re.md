@@ -990,12 +990,36 @@ behind it.
   (`(g & 0xFFFDFFFF) == 0x10020 || g & 0x20000`); header = gametext
   `Overlays/STROVER_MISSIONOBJECTIVES`; rows = slots 1..8 until win id 0/255,
   each drawn only while its show-win bit holds; text = mission
-  `WinConditions/STRWINCOND%03i(win_id)`; a checkbox (4 lines) gains a
-  checkmark (6 lines) when won, and the row color folds
-  `0xFFFFFF + alpha·0x1000000 + 0xFF808081` → **gray at full alpha** for
-  completed rows; anchor x=15, y=+0xF0 off `dword_24C1900`; backing box =
-  `HUD_DrawLabelBox @0x5baaba`. (KOTH's separate directive list =
-  `draw_koth_win_lose_directives @0x5ba370`, unported with KOTH.)
+  `WinConditions/STRWINCOND%03i(win_id)`. FULL GEOMETRY (disasm 2026-08-12 —
+  the previously elided operands; x/y are the CALLER's arguments, x=15,
+  y=+0xF0 off `dword_24C1900` at the `@0x5be163` site):
+  - Measure pass `@0x5ba9c9`: per shown row, `HUD_MeasureTextWH` with
+    `g_hudLabelFontLarge`, height scaled `(h<<10)/overlayCtx` accumulates the
+    panel height; max width over the rows AND the header (header measured with
+    fontLarge but DRAWN with `g_hudLabelFontBold` — a witnessed asymmetry).
+  - Backing box `@0x5baaba`: `HUD_DrawLabelBox(ctx, x, y−0x18,
+    x+scaledMaxW+0x48, y+totalTextH+0x30, 0, (alpha<<24)+0xFFFFFF)`.
+  - Header `@0x5baae4`: `Render_DrawTextScaled` at (x+0x18, y), fontBold,
+    `(alpha<<24)+0xFFFFFF`; rows start at y+0x18 and each advances by ITS OWN
+    scaled measured height (`esi += heights[slot]` `@0x5bacc1`), not a constant.
+  - Checkbox `@0x5bab47..0x5bab9a`: a 16×16 outline at (x+0x18, rowY), four
+    `draw_clipped_2d_line` calls, color `0xFFE0E0E0` with the panel alpha as
+    the separate modulate arg.
+  - The done mark `@0x5babc1..0x5bac5b` is a **RED X** (color `0xFFFF0000`),
+    NOT a checkmark: both diagonals of the box, each drawn three times with
+    one-pixel offsets for thickness — six lines total.
+  - Row text `@0x5bacb5`: (x+0x30, rowY−2), fontLarge, color =
+    `(won ? 0xFF808081 : 0) + 0xFFFFFF + alpha·0x1000000` (wraps to the
+    **gray 0x808080** for completed rows at any alpha).
+  (KOTH's separate directive list = `draw_koth_win_lose_directives @0x5ba370`,
+  unported with KOTH.) PORT (2026-08-12): `HudFrameCompiler::element_objectives`
+  carries the witnessed rect/checkbox/red-X geometry, the exact color folds,
+  and the panel alpha byte (`HudFrameState::objectives_alpha`, folded into
+  every draw color); the presenter's show/hide toggle stands in for the input
+  binding row (alpha 0 ≡ hidden), `HUD_DrawLabelBox`'s internal box-shader
+  styling keeps the fill+wire stand-in at the witnessed rect, and the
+  fontLarge/fontBold slots ride the compiler's single HUD font until the font
+  plumb lands.
 
 ## Divergence catalog (D-HUD)
 
@@ -1018,7 +1042,7 @@ behind it.
 | D-HUD-15 | **CLOSED 2026-07-22.** The drawer was already parity-complete; the missing half was the source. The accumulator is now witnessed and ported (D-WPN-4, net-re §5.62): heat is a DEADLINE on the slot, `def+880 × (slot+0x14 − tick)`, stamped once per shot by the recoil arbiter | heat = `WeaponSlot_CalcAccumulatedHeat @0x53f780` per frame, clamped to `0xFFFF` into `hudInfo+60` `[orig: HUD_BuildEntityInfo @0x4b852e, clamp @0x4b854d]` | Fed sim → weapon view → HUD with the clamp applied where the original's info builder applies it. The bar fills on the thirteen emplaced/vehicle guns that author `heat_values` and stays hidden on foot, because no infantry weapon authors heat in retail either. |
 | D-HUD-16 | the SP waypoint track is built sim-side at mission load from the BMS nav channel (`flags & 2`) + pool-3 markers — no 0x0F wire leg in the loop | retail always routes the list through the S2C 0x0F apply, even in SP mode 3 (the local server serializes, the local client applies) | Same data, same selection rule, no serialization round-trip. The npwire 0x0F waypoint block already decodes (net-re §5.29); wire-parity for MP join is the npwire follow-up, not a HUD divergence. |
 | D-HUD-17 | proximity advance ports the distance/last-entry/skip-done legs; `SpawnPoint_CheckWeaponRestrictions @0x4dbe80` (the AAS spawn-point weapon-restriction pass gate) is modeled as always-pass; the MP POI list (`Entity_BuildMapPoiLists @0x42de40`) and spectate reuse are unported | the restriction check reads the 4 weapon slots vs the event-system restriction mask and can force-advance | SP missions author no weapon restrictions on route markers; port the check with the AAS/MP HUD phase. |
-| D-HUD-18 | the objectives panel draws Godot rects/polylines for the checkbox + backing box, a full-alpha toggle, and skips the win-score add, the "New Objective" toast, and the header unknown5[2]/[3] team-banner legs; the toggle key is a reimpl mapping (KEY_O) | checkbox/checkmark = ten `draw_clipped_2d_line` calls (operands elided by the decompiler), box = `HUD_DrawLabelBox @0x5baaba`, toggle alpha ramps the row color, score add `@0x454526`, toast `HUD_ShowObjectiveNotification`, banner masks `byte_A762D6/D7`, binding row = the input layer | The state machine, row walk, gray completed fold, chat/banner announcements are exact; the residuals are presentation polish + the unported input-binding/score/notification systems. |
+| D-HUD-18 | GEOMETRY CLOSED 2026-08-12: the checkbox (16×16, 4 lines, 0xFFE0E0E0), the done-mark RED X (6 lines, 0xFFFF0000 — the old "checkmark" gloss was wrong), the `HUD_DrawLabelBox` rect (y−0x18 / +0x48 / +0x30), the measured-height row advance, and the exact alpha/gray color folds are ported into `element_objectives` with the panel alpha byte carried in the frame state. Remaining: the win-score add `@0x454526` (no score system), the "New Objective" toast `HUD_ShowObjectiveNotification @0x5ba2e0` (internals unwalked), the header unknown5[2]/[3] team-banner legs (`byte_A762D6/D7`), the KEY_O reimpl binding (input layer), `HUD_DrawLabelBox`'s internal box-shader styling (fill+wire stand-in at the witnessed rect), and the fontLarge/fontBold slot plumb (single HUD font stand-in) | disasm 2026-08-12 (the full drawer); score add `@0x454526`, toast `@0x4546e2` call site, banner masks `byte_A762D6/D7`, binding row = the input layer | The state machine, row walk, geometry, color folds, and chat/banner announcements are exact; the residuals each ride an unported system (score / notification / banner / input binding) plus the two cited drawer stand-ins. |
 | D-HUD-19 | the DEATH deploy screen (`DeployScreenPresenter`, death.mnu) ships the authored chrome, the witnessed SPAWNPOINTS_LIST populate, and the pick flow — its MAP window renders no map image | the MAP window's render pass draws the windowed map view `MapOverlay_DrawView @0x5a58e0` (terrain layers + blips + labels; pan/zoom via `command_map_overlay_input_handler @0x554310`), the sibling of the fullscreen `HUD_DrawMapOverlay @0x5a5f40` | The pick behavior is complete without the image (the list is the pick surface); the map draw internals are the tracked next map-phase witness — port `MapOverlay_DrawView` and feed both the CMAP and DEATH windows from it. |
 | D-HUD-20 | **FIXED 2026-08-10** (core). The friendly tags (overhead name labels) are ported end to end for the SP/AI path: `world::collect_friendly_tags` → `Simulation::get_friendly_tags` → presenter projection/fog/KEY_F cycle → `HudFrameCompiler::element_friendly_tags` — the witnessed gates, health-tier colors, distance alpha, centered alpha-preserving half-bright text, the `'^'`+36-name fallback, the BMS→`[PeopleNames]` authored names, the BRIEF ticks, and the medic cross plate (feed pending) | the drawer is `HUD_DrawEntityLabel @ 0x5a39b0` off `HUD_DrawFriendlyTagsPass @ 0x5a4480` (full witness: the element map section). The 2026-08-10 hunt's dead ends stay recorded: `hud_draw_target_entity_overlay @ 0x59a5d0` = the targeted-GEAR overlay, `sub_599C20 @ 0x599c20` = the scope quad | Residues, each with its owning system: (a) the player-slot walk legs — callsign labels ride our MP roster, plus squad colors `@0x83B450` (middle × 0.7), the flag-2 `"%s: %ld"` slot+16 count, the `<ch>`channel`<co>` wrap, and the slot+44 pulse; (b) the enemy magenta leg behind the server-granted `g_enemyTagsVisible @0x24D1DF4` (spectator/S2C 0x00A); (c) the medic-plate FEED — charattr.def `ATTRIBUTES` Medic(0x8) by `playerClass` (`CharAttr_LoadFromDef @0x412140`; AI classes unmodeled sim-side); (d) the wounded icon — `entity+885` writer unwitnessed (texture id 0x17); (e) the `hud_color_index` scheme swap for the good tier (default 2 modeled; D-HUD-13); (f) the speaking-pulse LEVEL feed (formula ported; the dialog-channel amplitude is a device follow-up); (g) `entity+116` display height (writer unwalked; standing-constant stand-in) and the difficulty term of `Entity_GetMaxHealthWithDifficulty`; (h) the death-screen recolor/center-pin legs and the `0x27233DC/E0` latch bits (consumers unwitnessed). |
 
