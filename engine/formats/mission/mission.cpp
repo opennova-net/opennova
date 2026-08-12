@@ -78,7 +78,7 @@ bool MissionDocument::load_bms_header_bytes(const uint8_t *data, size_t size) {
 	return true;
 }
 
-bool MissionDocument::load_mis_file(const std::string &path) {
+bool MissionDocument::load_mis_file(const std::string &path, const MisItemTypeResolver &resolve_item_type) {
 	clear();
 	if (path.empty()) {
 		impl_->last_error = "No MIS path provided";
@@ -94,21 +94,21 @@ bool MissionDocument::load_mis_file(const std::string &path) {
 		impl_->last_error = "Failed reading MIS file: " + path;
 		return false;
 	}
-	if (!load_mis_text(text)) {
+	if (!load_mis_text(text, resolve_item_type)) {
 		return false;
 	}
 	impl_->source_path = path;
 	return true;
 }
 
-bool MissionDocument::load_mis_text(const std::string &text) {
+bool MissionDocument::load_mis_text(const std::string &text, const MisItemTypeResolver &resolve_item_type) {
 	clear();
 	if (text.empty()) {
 		impl_->last_error = "No MIS text provided";
 		return false;
 	}
 	std::string error;
-	if (!parse_mis_text_to_bms(text, impl_->file, error)) {
+	if (!parse_mis_text_to_bms(text, resolve_item_type, impl_->file, error)) {
 		impl_->last_error = error;
 		return false;
 	}

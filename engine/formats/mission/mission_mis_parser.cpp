@@ -9,6 +9,8 @@
 #include "mission_detail.h"
 #include "mission_records.h"
 
+#include "mission/authoring.h" // entity_kind_for_item_type: items.def TYPE -> BMS pool
+
 #include <cstdint>
 #include <cstdlib>
 #include <sstream>
@@ -541,7 +543,9 @@ bool parse_mis_event(const std::vector<MisLine> &lines, size_t &pos, bms::File &
 
 // (next_entity_id used to be forward-declared here; it now comes from mission_records.h.)
 
-bool parse_mis_item(const std::vector<MisLine> &lines, size_t &pos, bms::File &file, std::string &error) {
+bool parse_mis_item(const std::vector<MisLine> &lines, size_t &pos,
+                    const MisItemTypeResolver &resolve_item_type, bms::File &file,
+                    std::string &error) {
 	bms::Entity entity = {};
 	entity.type = bms::ItemType::Item;
 	entity.perception2 = 100;
@@ -560,7 +564,21 @@ bool parse_mis_item(const std::vector<MisLine> &lines, size_t &pos, bms::File &f
 			if (entity.id == 0) {
 				entity.id = next_entity_id(file);
 			}
-			file.items.push_back(entity);
+			// Pool-kind classification: the .mis text does not carry the BMS pool, so
+			// the record's kind is derived from the items.def TYPE of its item id,
+			// exactly like the Nile importer classifies each record into its scene
+			// branch [orig: MisLdr_WriteNileProjectXml @ 0x10004930, misldr.dll]. The
+			// TYPE -> pool mapping is authoring::entity_kind_for_item_type (1:1 across
+			// 185,325 entities in 114 shipping JO missions). With no resolver — no
+			// items.def loaded — or an id the table does not carry, the record stays in
+			// the generic item pool (the kind is unknowable without the item table).
+			EntityKind kind = EntityKind::Item;
+			if (resolve_item_type) {
+				kind = authoring::entity_kind_for_item_type(
+						resolve_item_type(bms_type_id_to_item_id(entity.type_id)));
+			}
+			entity.type = to_bms_type(kind);
+			entities_for(file, kind)->push_back(entity);
 			++pos;
 			return true;
 		}
@@ -715,7 +733,8 @@ bool parse_mis_item(const std::vector<MisLine> &lines, size_t &pos, bms::File &f
 }
 } // namespace
 
-bool parse_mis_text_to_bms(const std::string &text, bms::File &out, std::string &error) {
+bool parse_mis_text_to_bms(const std::string &text, const MisItemTypeResolver &resolve_item_type,
+                           bms::File &out, std::string &error) {
 	initialize_mis_file(out);
 	const std::vector<MisLine> lines = tokenize_mis_text(text);
 	for (size_t pos = 0; pos < lines.size();) {
@@ -742,7 +761,7 @@ bool parse_mis_text_to_bms(const std::string &text, bms::File &out, std::string 
 		} else if (section == "event") {
 			if (!parse_mis_event(lines, pos, out, error)) return false;
 		} else if (section == "item") {
-			if (!parse_mis_item(lines, pos, out, error)) return false;
+			if (!parse_mis_item(lines, pos, resolve_item_type, out, error)) return false;
 		} else {
 			error = "Unsupported MIS section '" + section + "' in line " + std::to_string(lines[pos].line_no);
 			return false;

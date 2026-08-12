@@ -101,7 +101,9 @@ int main() {
 	TEST_EXPECT(text.find("begin item 0\r\n") != std::string::npos);
 
 	MissionDocument parsed;
-	TEST_EXPECT(parsed.load_mis_file(mis_path));
+	// No items.def in this authored-fixture test: the empty resolver keeps every
+	// record in the item pool (classification is pinned by the idempotency test).
+	TEST_EXPECT(parsed.load_mis_file(mis_path, {}));
 	TEST_EXPECT(parsed.source_path() == mis_path);
 	TEST_EXPECT(parsed.info().mission_name == "MIS Roundtrip");
 	TEST_EXPECT(parsed.info().designer == "OpenNova");
@@ -184,7 +186,7 @@ int main() {
 		TEST_EXPECT(authored.bms_file().items[0].mis_extra_bheight == 0);
 
 		MissionDocument baked;
-		TEST_EXPECT(baked.load_mis_file(baked_path));
+		TEST_EXPECT(baked.load_mis_file(baked_path, {}));
 		TEST_EXPECT(baked.bms_file().items.size() == 1);
 		TEST_EXPECT(baked.bms_file().items[0].mis_extra_bheight == 25 * 65536);
 		TEST_EXPECT(baked.bms_file().items[0].mis_height_lock == 1);
@@ -213,7 +215,8 @@ int main() {
 		TEST_EXPECT(hand.load_mis_text(
 				"begin general_information\r\n"
 				"  minutes_per_day 0120\r\n"
-				"end general_information\r\n"));
+				"end general_information\r\n",
+				{}));
 		TEST_EXPECT(hand.info().minutes_per_day == 120);
 	}
 
@@ -241,7 +244,7 @@ int main() {
 		TEST_EXPECT(sym_text.find("  gen_def_val4 44\r\n") != std::string::npos);
 
 		MissionDocument sym_back;
-		TEST_EXPECT(sym_back.load_mis_text(sym_text));
+		TEST_EXPECT(sym_back.load_mis_text(sym_text, {}));
 		const bms::Header &back = sym_back.bms_file().header;
 		TEST_EXPECT(back.water_override == 21);
 		TEST_EXPECT(back.fog_override == 700);
