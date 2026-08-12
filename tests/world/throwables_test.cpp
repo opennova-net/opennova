@@ -14,6 +14,7 @@
 #include "world/destruction.h"
 #include "world/round_sim.h"
 #include "world/throwables.h"
+#include "world/vehicle_motor.h"
 #include "world/world.h"
 
 using namespace opennova::world;
@@ -394,6 +395,40 @@ void test_charge_stick_surface_gate() {
     CHECK(!throwable_surface_accepts_stick(FixedVec3{0, 0, -65536}));
 }
 
+// The exact stick pose [orig: Entity_OrientToSurfaceNormal @ 0x445fa0]: yaw
+// is kept, the yaw-local atan2 legs write pitch/roll off the caller biases.
+// BAM expectations allow the +/-2 LSB envelope of the double-trig port
+// (~1e-7 degrees).
+void test_stick_pose_exact() {
+    const auto near_bam = [](int32_t got, uint32_t want) {
+        const int32_t d = static_cast<int32_t>(static_cast<uint32_t>(got) - want);
+        return d >= -2 && d <= 2;
+    };
+    int32_t pitch = 0, roll = 0;
+    // Flat ground, satchel biases: pitch bias 0xC0000040 passes through
+    // (lies flat), roll 0 — for ANY kept yaw.
+    const int32_t flat[3] = {0, 0, 65536};
+    throwable_stick_pose(flat, 0x12345678, static_cast<int32_t>(0xC0000040), 0,
+                         pitch, roll);
+    CHECK(near_bam(pitch, 0xC0000040u));
+    CHECK(near_bam(roll, 0u));
+    // Flat ground, claymore biases: stands upright.
+    throwable_stick_pose(flat, 0, 0, 0, pitch, roll);
+    CHECK(near_bam(pitch, 0u));
+    CHECK(near_bam(roll, 0u));
+    // A 45-degree east-facing slope, yaw 0, claymore: the roll leg reads
+    // atan2(z, x) and leans the device -45 degrees; pitch stays 0.
+    const int32_t slope[3] = {46341, 0, 46341};
+    throwable_stick_pose(slope, 0, 0, 0, pitch, roll);
+    CHECK(near_bam(pitch, 0u));
+    CHECK(near_bam(roll, 0xE0000000u));
+    // The same face with yaw 90 degrees: the normal lands in the yaw-local
+    // -y half, so the PITCH leg carries the +45-degree lean instead.
+    throwable_stick_pose(slope, 0x40000000, 0, 0, pitch, roll);
+    CHECK(near_bam(pitch, 0x20000000u));
+    CHECK(near_bam(roll, 0u));
+}
+
 // The useownmove sweep is a pool-2 then pool-1 query, not the generic
 // projectile domain stack. A nearer water plane, terrain crossing, or person
 // must not hide the farther pool-1 item contact.
@@ -693,6 +728,9 @@ void test_parented_device_follows_parent_yaw() {
     if (rig.w.throwables.devices.empty()) return;
     Entity *carrier = rig.w.registry.get(parent);
     CHECK(carrier != nullptr);
+    // The mover-prologue savedLivePose stamp the follow's delta channel reads
+    // [orig: the +0x80..+0x94 prologue stamps every mover carries].
+    stamp_saved_live_pose(*carrier);
     carrier->position = Vec3{20, 30, 3};
     carrier->yaw = 0; // +90 degrees of mission-heading rotation
     rig.w.throwables.tick(rig.w, nullptr, nullptr);
@@ -704,6 +742,45 @@ void test_parented_device_follows_parent_yaw() {
     const Entity *entity = rig.w.registry.get(device.entity);
     CHECK(entity != nullptr && entity->yaw == 0);
     CHECK(entity != nullptr && entity->ground_target == parent);
+}
+
+// The full-Euler follow [orig: Entity_InterpolateFromParentDelta @ 0x4a8d60]:
+// a PITCHING carrier rotates the stuck offset out of plane and the device
+// adopts the pitch/roll delta pair rotated by the relative yaw — the old
+// translation+yaw orbit kept the offset rigid and the device level.
+void test_parented_device_adopts_parent_pitch() {
+    Rig rig(0);
+    Entity parent_seed;
+    parent_seed.kind = EntityKind::Item;
+    parent_seed.position = Vec3{10, 10, 1};
+    parent_seed.yaw = 90; // mission heading zero
+    const EntityHandle parent = rig.w.registry.spawn(1, parent_seed);
+    LiveRound round = make_satchel_round(rig, Vec3{11, 10, 1}, parent);
+    round.yaw_bam = 0;
+    CHECK(rig.w.throwables.place_from_round(rig.w, round,
+                                            rig.w.ammo.entries[kAmmoSatchel]));
+    Entity *carrier = rig.w.registry.get(parent);
+    CHECK(carrier != nullptr);
+    stamp_saved_live_pose(*carrier);
+    carrier->pitch = 45;
+    rig.w.throwables.tick(rig.w, nullptr, nullptr);
+    CHECK(rig.w.throwables.devices.size() == 1);
+    const PlacedDevice &device = rig.w.throwables.devices[0];
+    // rel yaw is zero, so the device adopts the raw +45-degree pitch delta.
+    const int32_t pitch_err = static_cast<int32_t>(
+            static_cast<uint32_t>(device.pitch_bam) - 0x20000000u);
+    CHECK(pitch_err >= -0x1000 && pitch_err <= 0x1000);
+    const int32_t roll_err = static_cast<int32_t>(static_cast<uint32_t>(device.roll_bam));
+    CHECK(roll_err >= -0x1000 && roll_err <= 0x1000);
+    CHECK(device.yaw_bam == 0);
+    // The rotation preserves the offset length: the device orbits, it does
+    // not translate rigidly.
+    const double dx = device.pos.x - carrier->position.x;
+    const double dy = device.pos.y - carrier->position.y;
+    const double dz = device.pos.z - carrier->position.z;
+    CHECK(std::fabs(std::sqrt(dx * dx + dy * dy + dz * dz) - 1.0) < 0.01);
+    // The engine pitch stage lifts the +x offset out of plane.
+    CHECK(std::fabs(dz) > 0.5);
 }
 
 void test_device_and_owner_handle_reuse() {
@@ -1051,6 +1128,7 @@ int main() {
     test_tracer_item_binding_fallbacks();
     test_zero_water_is_dry_below_altitude_zero();
     test_charge_stick_surface_gate();
+    test_stick_pose_exact();
     test_motor_sweep_ignores_non_pool_domains();
     test_control_and_bounce_share_prng16_stream();
     test_grenade_bounce_and_fuse();
@@ -1061,6 +1139,7 @@ int main() {
     test_satchel_places_device();
     test_placed_device_pose_and_ballistic_damage();
     test_parented_device_follows_parent_yaw();
+    test_parented_device_adopts_parent_pitch();
     test_device_and_owner_handle_reuse();
     test_parent_handle_reuse_detaches_device();
     test_world_tick_uses_retail_device_order();

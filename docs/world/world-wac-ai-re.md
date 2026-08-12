@@ -5389,9 +5389,11 @@ terrain = full stop (velocity zeroed, no bounce) + surface effect. An object
 hit reflects; the independent retail stick predicate reads the **face normal**:
 `nz > 0 && nz > 0.5 × hypot(nx, ny)`
 `[orig: schl @ 0x448858..0x4488c4; clym @ 0x447802..0x4478a7]`. Accepted
-faces take the `Entity_OrientToSurfaceNormal @ 0x445fa0` pose (satchel roll
-−90°, claymore keeps yaw), zero spins, and parent to the hit entity
-(satchel-on-vehicle rides it). REST (height over ground ≤ 0xFF, not rising):
+faces take the `Entity_OrientToSurfaceNormal @ 0x445fa0` pose — BOTH keep
+their own yaw (`entity+0x10` passed through); the satchel biases the PITCH
+slot 0xC0000040 (~−90°, lies flat) and the claymore 0 (stands upright), roll
+bias 0 on both — zero spins, and parent to the hit entity (satchel-on-vehicle
+rides it). REST (height over ground ≤ 0xFF, not rising):
 +4096 z lift when
 unparented, then on the authority `Entity_CloneFromTemplateByType @ 0x4398a0`
 (pool by items.def type: Person→0, Vehicle/object→1, Building/Decoration→2)
@@ -5406,8 +5408,9 @@ The audited host mirror now carries the complete placed pose, selected TrcrID
 item, item-def health/armor, owner/team/ammo/think data, and parent link into
 the pool-1 entity. Device, owner, and parent references retain registry
 generation ids so a recycled handle cannot be mistaken for the original
-object. Parent follow updates the registry pose and yaw; exact full-Euler
-interpolation remains D-THROW-4.
+object. Parent follow runs the exact full-Euler
+`Entity_InterpolateFromParentDelta @ 0x4a8d60` port for both the stuck round
+and the placed device (D-THROW-4 CLOSED 2026-08-12 — catalog entry below).
 
 ### 27.6 The placed-device think chain
 
@@ -5497,7 +5500,7 @@ death hook).
 | D-THROW-1 | CLOSED 2026-08-12: `ProjectileTrace` carries terrain/water/person walk gates and `motor_item_sweep` disables all three, so excluded domains never enter nearest-hit arbitration | pools 2/1 broad+face walk only (`Projectile_RaycastProximitySlots(2/1) @0x444619..0x444667`) | `collision_test::test_projectile_trace_domain_switches_preserve_farther_pool_hit` walks water → terrain → person → pool-1 as gates close; `throwables::test_motor_sweep_ignores_non_pool_domains` pins the live motor reaching the farther item in all three masking cases |
 | D-THROW-2 | world-local PRNG streams (the retail generator shape) | shared globals @ 0x31BFBB0/B8 | bounce kicks / fan angles distribution-faithful, not sequence-identical (the destruction-port precedent) |
 | D-THROW-3 | CLOSED 2026-07-22: device LOS uses the shared full terrain-plus-sector query, excluding the device and candidate (`CollisionWorld::raycast_clear`) | `Physics_RaycastSegment @ 0x415550` (terrain + sectors) | `test_claymore_sector_los_blocks_trigger` pins a type-1 building wall blocking the cone and removal exposing the same target |
-| D-THROW-4 | stick pose derived geometrically from the face normal; parent-follow = translation + yaw orbit | `Entity_OrientToSurfaceNormal @ 0x445fa0` exact euler decomposition; `Entity_InterpolateFromParentDelta @ 0x4a8d60` full euler | presentation-only pose deltas on steep faces / pitching vehicles; the cone axis (yaw) is exact |
+| D-THROW-4 | CLOSED 2026-08-12: `throwable_stick_pose` is the exact orient port — the normal rotated into the yaw-local frame by the transposed yaw-only Q22 matrix (+0x200000 rounding), pitch = bias + bam(atan2(z,y)) − 0x40000000, roll = bias + bam(atan2(z,x)) − 0x40000000, yaw KEPT (satchel pitch bias 0xC0000040, claymore 0 — the callers pass the entity's own +0x10); `parent_delta_follow` is the exact full-Euler follow shared by the round motors and the placed-device ride, reading the parent's `saved_live_*` channel (netsim `row_deck_ride` ports the inlined org twins of the same math) | `Entity_OrientToSurfaceNormal @ 0x445fa0` (via `Math_BuildFixedPointRotationMatrixYXZ @ 0x615400` yaw-only + `Matrix_Transpose3x3WithNegateCol3 @ 0x6136d0` + `Math_TransformPointFixedPoint22 @ 0x412e90`, atan2 scale dbl_7C57B8 = −2^31/π); `Entity_InterpolateFromParentDelta @ 0x4a8d60` (code calls from all four round motors @ 0x44443b/0x444e8b/0x4475d1/0x44861f; installed as the placed motor +452 @ 0x5455fd) | `throwables::test_stick_pose_exact` pins the four pose legs; `test_parented_device_adopts_parent_pitch` pins the out-of-plane orbit + pitch adoption. Residue: a parent that never stamps `saved_live_*` (statics — faithful zero delta; joiner wire-materialized rows lack the stamp, tracked with device-on-decoded-vehicle under D-THROW-7/D-WPN-8). The double-trig port carries the established ±2 BAM LSB envelope |
 | D-THROW-5 | CLOSED 2026-07-21: the charge bar is ported (now `HudFrameCompiler::element_power`, originally `game_hud.gd _draw_power_bar` — the hudpos HUDPOWERBAR x,y,w,h rect, witnessed fill curve + percent text at an exact 15-output-pixel lift + 0xFF800000 half-red) | `HUD_DrawPowerThrowChargeBar @ 0x599830` (ex "HUD_DrawWeaponReloadBar" misnomer, renamed) | §27.3 windup meter entry; throwable_repro_test windup-state pin |
 | D-THROW-6 | landmine items (`lndm`) unported | `Entity_LandmineThink @ 0x441A40` witnessed in full | the def wiring for ammo slots +692/+696 (`SMALLLANDMINE`/`LARGELANDMINE` names) is unwitnessed; no lndm items found in JO:CA missions so far |
 | D-THROW-7 | clients consume decoded tag-2 round events through a visual-only `RoundSim`; placed-device 0x59/0x12 host emit and client fold remain unwired | retail re-simulates tag-2 rounds, then applies S2C 0x59 (net-re §5.36) + 0x12 removal | remote clients see flying throwables and their move effects, but not the persisted-device replacement |

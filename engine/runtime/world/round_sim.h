@@ -237,13 +237,11 @@ struct LiveRound {
     // [orig: itemDef updateCallback -> +452, deathCallback -> +456].
     ThrowClass motor{};
     ThrowClass think{};
-    // Landed-on / stuck-to entity [orig: +40 groundEntity; the motors parent
-    // and follow it].
+    // Landed-on / stuck-to entity [orig: +40 groundEntity; the motors follow
+    // it through the parent's own (live − savedLivePose) delta channel —
+    // Entity_InterpolateFromParentDelta @ 0x4a8d60 keeps no rider-side copy].
     EntityHandle parent;
     uint64_t parent_spawn_id = 0;
-    Vec3 parent_prev_pos;
-    int32_t parent_prev_yaw_bam = 0;
-    bool parent_tracking = false;
     // Armed at 2 ticks remaining above water; the expiry queues the kill zone
     // [orig: the runtime 0x1000 flag @ 0x444a29 consumed by the update head].
     bool det_at_expiry = false;
