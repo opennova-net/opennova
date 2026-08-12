@@ -4,6 +4,7 @@
 #include "simulation/nova_simulation_internal.h"
 
 #include <mission/runtime_boot.h> // the S9 boot order + file-resolution policy
+#include <terrain_query/surface_tiles.h> // the D-SND-15 placed-tile resolvers
 
 using namespace novasim;
 
@@ -229,7 +230,7 @@ void Simulation::apply_terrain_to_ai() {
 		world_->surface_map.tiles =
 				surface_tiles_.empty() ? nullptr : surface_tiles_.data();
 		world_->surface_map.tile_count = static_cast<int32_t>(surface_tiles_.size());
-		world_->surface_map.tile_surface = tile_surface_table_.map;
+		world_->surface_map.tile_surface = tile_surface_table_.data();
 	}
 	apply_sound_state_to_world();
 	if (!ai_) return;
@@ -320,37 +321,6 @@ void Simulation::set_terrain_height_field(const Ref<TerrainData> &p_terrain) {
 				surface_map_.origin_y = trn.origin_y;
 			}
 		}
-	}
-	apply_terrain_to_ai();
-}
-
-// The tileset's companion surface-definition file: `<tilestrip base>.TSD`,
-// probed at terrain install and parsed into the 256-entry tile-index ->
-// surface table (D-SND-15). Absent — every shipped JO install — the table
-// stays zeroed, so placed tiles read TSD_NULL. The retail BMS tile-set-name
-// override of the tilestrip pair (`Bms_TileSetName @ 0xa762e8`, applied
-// @ 0x6109ce before the probe) is not modeled: the reimpl BMS document does
-// not carry a tileset field yet, so the .trn's authored tilestrip names the
-// pair (recorded as the D-SND-15 residue).
-// [orig: PolyTrn_InitTextures — memset @ 0x60c5c9, exists probe @ 0x60c5d3,
-// File_ParseASCIIFile @ 0x60c5ef with sub_604C00; the .TSD extension pairing
-// @ 0x610a1c (Terrain_LoadEnvironmentConfig) off the polytrn_tilestrip copy]
-void Simulation::install_tileset_surface_defs(const Ref<TerrainData> &p_terrain,
-		const opennova::mission::BootFileSource &files) {
-	tile_surface_table_ = opennova::TilSurfaceTable{};
-	if (!p_terrain.is_valid() || !p_terrain->is_loaded() || !files.valid()) {
-		apply_terrain_to_ai();
-		return;
-	}
-	std::string name = p_terrain->get_trn().tilestrip;
-	const size_t dot = name.find_last_of('.');
-	if (dot != std::string::npos) name.resize(dot);
-	if (!name.empty()) {
-		name += ".tsd";
-		std::vector<uint8_t> text;
-		if (files.has_file(name) && files.read_file(name, text) && !text.empty())
-			opennova::til_tsd_parse(reinterpret_cast<const char *>(text.data()),
-			                        text.size(), tile_surface_table_);
 	}
 	apply_terrain_to_ai();
 }
@@ -609,10 +579,17 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	};
 	steps.install_terrain_field = [&] {
 		set_terrain_height_field(p_terrain);
-		// Retail fills the placed-tile surface table from the tileset's
-		// companion .TSD at terrain texture init (D-SND-15); shipped JO
-		// carries none, leaving the memset-0 table.
-		install_tileset_surface_defs(p_terrain, files);
+		// The D-SND-15 placed-tile surface table: the .TSD probe/parse policy
+		// is engine-side (terrain_query resolve_tileset_surface_table).
+		tile_surface_table_.fill(0);
+		if (p_terrain.is_valid() && p_terrain->is_loaded()) {
+			opennova::terrain::SurfaceTileFileSource tile_files;
+			tile_files.has_file = files.has_file;
+			tile_files.read_file = files.read_file;
+			opennova::terrain::resolve_tileset_surface_table(tile_files,
+					p_terrain->get_trn().tilestrip, tile_surface_table_.data());
+		}
+		apply_terrain_to_ai();
 	};
 	steps.install_sound_profiles = [&] {
 		if (!files.valid() || !files.has_file("SndProf.def")) return;

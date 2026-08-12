@@ -12,7 +12,10 @@
 #include <vector>
 
 #include "terrain_query/height_field.h"
+#include "terrain_query/surface_tiles.h"
 #include "terrain_query/surface_type_map.h"
+#include <til/til.h>
+#include <til/til_io.h>
 #include "world/ai.h"
 #include "world/world.h"
 
@@ -394,6 +397,41 @@ void test_surface_sampler_placed_tile_override() {
     CHECK(surface_type_at_fixed(m, fx(600.0), fx(20.0)) == 7);
 }
 
+void test_surface_tile_resolvers() {
+    // The engine-side D-SND-15 resolvers (terrain_query/surface_tiles.h):
+    // the .TSD probe derives `<tilestrip base>.tsd` and fills the table; an
+    // absent file leaves retail's zeroed default.
+    opennova::terrain::SurfaceTileFileSource files;
+    files.has_file = [](const std::string &n) { return n == "trntile10.tsd"; };
+    files.read_file = [](const std::string &n, std::vector<uint8_t> &out) {
+        if (n != "trntile10.tsd") return false;
+        static const char text[] = "INDEX_12 TSD_SNOW\r\n";
+        out.assign(text, text + sizeof(text) - 1);
+        return true;
+    };
+    uint8_t table[256];
+    opennova::terrain::resolve_tileset_surface_table(files, "trntile10.tga", table);
+    CHECK(table[12] == 3); // TSD_SNOW
+    CHECK(table[0] == 0);
+    opennova::terrain::resolve_tileset_surface_table(files, "other.tga", table);
+    CHECK(table[12] == 0); // no .TSD -> the memset default
+
+    // The til0 fold keeps exactly the three walk fields per entry.
+    opennova::TilFile til;
+    til.entries.push_back(opennova::make_til_overlay_entry(1, 2, 12, 0));
+    std::vector<uint8_t> bytes;
+    std::string err;
+    CHECK(opennova::save_til(til, bytes, err));
+    const auto tiles = opennova::terrain::surface_tiles_from_til_bytes(bytes);
+    CHECK(tiles.size() == 1);
+    if (tiles.size() == 1) {
+        CHECK(tiles[0].x_fixed == til.entries[0].x_fixed);
+        CHECK(tiles[0].z_fixed == til.entries[0].z_fixed);
+        CHECK(tiles[0].tile_index == 12);
+    }
+    CHECK(opennova::terrain::surface_tiles_from_til_bytes({}).empty());
+}
+
 } // namespace
 
 int main() {
@@ -407,6 +445,7 @@ int main() {
     test_local_player_death_scream_composite();
     test_surface_sampler_defaults();
     test_surface_sampler_placed_tile_override();
+    test_surface_tile_resolvers();
     if (failures == 0) std::printf("slot_sound_test OK\n");
     return failures == 0 ? 0 : 1;
 }
