@@ -95,7 +95,7 @@ func refresh() -> void:
 
 ## Placed satchels/claymores/mines: the live device records the think chain
 ## runs — stick pose, what they ride, and the arm countdown.
-func _refresh_devices(sim: Object) -> void:
+func _refresh_devices(sim: Simulation) -> void:
 	if _device_label == null:
 		return
 	var devices: Array = sim.get_throwable_debug()
