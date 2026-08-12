@@ -423,9 +423,9 @@ public:
     const terrain::TerrainHeightField *terrain = nullptr;
 
     // Host-wired charmap (surface-type) sampler data for the infantry footstep
-    // surface pick (surface 3 = the snow slots) and, later, the ammo impact
-    // table. Null = surface 1 everywhere, the sampler's no-charmap default.
-    // [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510]
+    // surface pick (surface 3 = the snow slots) and the ammo impact table
+    // (surface + 4). Null = surface 1 everywhere, the sampler's no-charmap
+    // default. [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510]
     terrain::SurfaceTypeMap surface_map;
 
     // The mission's SndProf.def profile table (parsed once at load; empty on a

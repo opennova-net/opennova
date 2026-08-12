@@ -7177,11 +7177,12 @@ D-NET-176 (FIXED 2026-07-25; §5.16).
 Deployed throwables still lack the 0x59/0x12
 runtime path (D-WPN-8/D-THROW-7; §5.36). Three ledger rows record the audit:
 **D-WPN-14 is resolved as a false reading** (ballistic arrival timing already matches),
-**D-WPN-15** carries selection legs:
-charmap sampler + `.TIL` overrides unported → terrain always takes the retail no-map dirt
-default; person hits take tag 2; CFAC static/dynamic hits now carry `poly_type + 4`;
-water-plane hits take tag 11. The remaining object-tag gap is the building
-material-1→23 special case; and
+**D-WPN-15** (FIXED 2026-08-11) — the selection legs are live:
+terrain samples the charmap (`Terrain_GetSurfaceTypeAtPosition @0x606510` result + 4 at the
+impact point, for the ballistic terrain leg and the grenade bounce/full-stop material + 4
+@0x4447c3); person hits take tag 2; CFAC static/dynamic hits carry `poly_type + 4` with the
+building material-1→23 remap; water-plane hits take tag 11. Only the placed-tile `.TIL`
+override remap remains open (D-SND-15); and
 **D-WPN-16** tracks the genuinely unported Knife/instant-kill-zone family. Pinned by
 `nova_simulation_test.gd` (the local FIRE→impact route) and `npruntime_round_sim`
 (the bake rules + the tag-2 impact row).
