@@ -513,12 +513,12 @@ Dictionary Simulation::get_local_player_weapon_state() const {
 			recoil_pitch = body->inf.recoil_pitch;
 			weapon_weight_spread = body->inf.weapon_weight_spread;
 			aimed_shot_available = body->inf.aimed_shot_available;
-			// Retail tests Position.Z + CameraOffset.Z here. CameraOffset.Z is
-			// not represented in the current world model, so raw fixed body Z
-			// plus the independently mirrored Drowning flag is our bounded projection.
-			// [orig: HUD_DrawCrosshair @0x592b35; source gate @0x4ec2de]
-			const bool below_water = world_->env.water_z != 0 &&
-					body->pos[2] < world_->env.water_z;
+			// The shared witnessed eye-projection classifier
+			// (world/round_sim.h entity_eye_below_water)
+			// [orig: HUD_DrawCrosshair @0x592b35]
+			const bool below_water = opennova::world::entity_eye_below_water(
+					*world_, body->pos[2],
+					local != nullptr ? local->eye_offset_z : 0);
 			if (body->inf.stance ==
 					opennova::world::InfantryState::Stance::kProne)
 				category = 0;

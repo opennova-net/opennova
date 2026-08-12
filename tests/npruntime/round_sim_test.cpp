@@ -334,6 +334,26 @@ bool test_spawn_spread_then_recoil() {
 	            "submerged source uses standing-row recoil at the underwater shift"))
 		return false;
 
+	// The classifier projects the per-tick EYE height, not the body origin:
+	// retail compares Position.Z + CameraOffset.Z (entity+0x74) with the water
+	// plane [orig: RoundData_SpawnRound @0x4ec342..0x4ec35a]. A body chest-deep
+	// in water with its eyes above the plane takes ordinary recoil.
+	world.round_sim.reset();
+	body->inf.recoil_pitch = 0;
+	world.registry.get(shooter)->eye_offset_z = 2 << 16; // eye at z=3 > water 2
+	const int eyes_dry = world.round_sim.spawn(world, params);
+	if (!expect(eyes_dry >= 0 && body->inf.recoil_pitch == (3 << 18),
+	            "an above-water eye keeps the ordinary recoil shift"))
+		return false;
+
+	world.round_sim.reset();
+	body->inf.recoil_pitch = 0;
+	world.registry.get(shooter)->eye_offset_z = 0x4000; // eye at 1.25 < water 2
+	const int eyes_wet = world.round_sim.spawn(world, params);
+	if (!expect(eyes_wet >= 0 && body->inf.recoil_pitch == (3 << 20),
+	            "a below-water eye keeps the underwater shift"))
+		return false;
+
 	return true;
 }
 

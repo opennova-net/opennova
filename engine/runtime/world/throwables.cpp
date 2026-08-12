@@ -12,6 +12,7 @@
 #include "world/ammo_table.h"
 #include "world/collision.h"
 #include "world/round_sim.h"
+#include "world/vehicle_motor.h"
 #include "world/world.h"
 
 namespace opennova::world {
@@ -56,6 +57,34 @@ bool throwable_surface_accepts_stick(const FixedVec3 &normal_q16) {
     if (normal_q16.z <= 0) return false;
     const double horizontal = std::hypot(double(normal_q16.x), double(normal_q16.y));
     return double(normal_q16.z) > horizontal * 0.5;
+}
+
+// [orig: Entity_OrientToSurfaceNormal @ 0x445fa0]. The normal is rotated into
+// the yaw-local frame by the transposed yaw-only Q22 matrix with the witnessed
+// +0x200000 rounding [orig: Math_BuildFixedPointRotationMatrixYXZ @ 0x615400
+// (yaw, 0, 0); Matrix_Transpose3x3WithNegateCol3 @ 0x6136d0;
+// Math_TransformPointFixedPoint22 @ 0x412e90], then each atan2 leg scales by
+// dbl_7C57B8 = -2^31/pi (truncated) and folds -0x40000000 off the caller bias.
+// Yaw is written back verbatim; pitch reads atan2(z, y), roll atan2(z, x).
+void throwable_stick_pose(const int32_t normal_q16[3], int32_t yaw_bam,
+                          int32_t pitch_bias_bam, int32_t roll_bias_bam,
+                          int32_t &pitch_bam, int32_t &roll_bam) {
+    const double a = static_cast<double>(yaw_bam) / kBamPerRad;
+    const int32_t c = static_cast<int32_t>(std::cos(a) * 4194304.0);
+    const int32_t s = static_cast<int32_t>(std::sin(a) * 4194304.0);
+    const int64_t nx = normal_q16[0], ny = normal_q16[1];
+    const int32_t lx = static_cast<int32_t>((ny * s + nx * c + 0x200000) >> 22);
+    const int32_t ly = static_cast<int32_t>((ny * c + nx * -s + 0x200000) >> 22);
+    const int32_t lz = normal_q16[2];
+    constexpr double kNegBamPerRad = -683565275.5764316; // dbl_7C57B8
+    const int32_t roll_leg = static_cast<int32_t>(
+            std::atan2(static_cast<double>(lz), static_cast<double>(lx)) * kNegBamPerRad);
+    const int32_t pitch_leg = static_cast<int32_t>(
+            std::atan2(static_cast<double>(lz), static_cast<double>(ly)) * kNegBamPerRad);
+    roll_bam = static_cast<int32_t>(static_cast<uint32_t>(roll_bias_bam) -
+                                    static_cast<uint32_t>(roll_leg) - 0x40000000u);
+    pitch_bam = static_cast<int32_t>(static_cast<uint32_t>(pitch_bias_bam) -
+                                     static_cast<uint32_t>(pitch_leg) - 0x40000000u);
 }
 
 ThrowClass throw_class_from_tag(const char *tag) {
@@ -281,65 +310,136 @@ void reflect_velocity(MotorFrame &f, const int32_t normal_q16[3]) {
     f.vz = to_fixed(rz);
 }
 
-// Stick pose: align the device against the hit face [orig:
-// Entity_OrientToSurfaceNormal @ 0x445fa0 — pitch/roll derived from the
-// surface normal (the exact euler decomposition is decompiler-mangled;
-// this port derives the same aligned pose geometrically, D-THROW-4)].
-void stick_pose_from_normal(const int32_t normal_q16[3], bool keep_yaw,
-                            int32_t &yaw_bam, int32_t &pitch_bam, int32_t &roll_bam) {
-    const double nx = from_fixed(normal_q16[0]);
-    const double ny = from_fixed(normal_q16[1]);
-    const double nz = from_fixed(normal_q16[2]);
-    if (!keep_yaw) {
-        // face the normal: yaw along the outward normal
-        if (std::fabs(nx) > 1e-6 || std::fabs(ny) > 1e-6)
-            yaw_bam = static_cast<int32_t>(
-                    static_cast<int64_t>(std::llround(std::atan2(ny, nx) * kBamPerRad)));
-    }
-    const double horiz = std::sqrt(nx * nx + ny * ny);
-    pitch_bam = static_cast<int32_t>(
-            static_cast<int64_t>(std::llround(std::atan2(horiz, nz) * kBamPerRad)));
-    roll_bam = 0;
+// One followed pose (16.16 position, BAM32 attitude).
+struct FollowPose {
+    int32_t pos[3] = {};
+    int32_t yaw_bam = 0;
+    int32_t pitch_bam = 0;
+    int32_t roll_bam = 0;
+};
+
+inline int32_t bam_sub_u(int32_t a, int32_t b) {
+    return static_cast<int32_t>(static_cast<uint32_t>(a) - static_cast<uint32_t>(b));
+}
+inline int32_t bam_add_u(int32_t a, int32_t b) {
+    return static_cast<int32_t>(static_cast<uint32_t>(a) + static_cast<uint32_t>(b));
 }
 
-// The parent-follow leg: translate with the stuck-to entity, orbiting its yaw
-// [orig: Entity_InterpolateFromParentDelta @ 0x4a8d60 applies the parent's
-// position delta + rotation delta through the 22-bit trig; the pitch/roll legs
-// stay open (D-THROW-4)].
+// The standalone parent-delta follow every throwable motor shares [orig:
+// Entity_InterpolateFromParentDelta @ 0x4a8d60 — code calls from the nade
+// @ 0x44443b / projectile @ 0x444e8b / clym @ 0x4475d1 / schl @ 0x44861f
+// motors, and installed as the placed motor +452 by
+// Entity_ConvertRoundToPlacedEntity @ 0x5455fd]. Translate by the parent's
+// (live − savedLivePose) per-tick delta, then on any attitude delta full-Euler
+// rotate the child's offset about the parent — un-rotate by the SAVED attitude
+// with negated sines, re-rotate by the CURRENT attitude with positive sines
+// (Q22 trig, <<8 +127 bias, no capsule bias — the org deck rides inline the
+// same twins with the capsule term; netsim row_deck_ride is the ported
+// sibling) — and finally yaw += dyaw with the pitch/roll delta pair rotated by
+// the pre-add parent-vs-child relative yaw. The delta reads the parent's own
+// saved channel (Entity::saved_live_* — retail +0x80..+0x94), no rider-side
+// copy; a never-stamped parent (statics) reads as zero delta.
+void parent_delta_follow(const Entity &parent, FollowPose &p) {
+    if (!parent.saved_live_valid) return;
+    int32_t cur[3];
+    int32_t cyaw, cpitch, croll;
+    carrier_pose_fixed(parent, cur, cyaw, cpitch, croll);
+    const int32_t dpx = cur[0] - parent.saved_live_pos[0];
+    const int32_t dpy = cur[1] - parent.saved_live_pos[1];
+    const int32_t dpz = cur[2] - parent.saved_live_pos[2];
+    const int32_t dyaw = bam_sub_u(cyaw, parent.saved_live_yaw);
+    const int32_t dpitch = bam_sub_u(cpitch, parent.saved_live_pitch);
+    const int32_t droll = bam_sub_u(croll, parent.saved_live_roll);
+    // Translation delta [orig: @ 0x4a8e0f..0x4a8e18].
+    p.pos[0] += dpx;
+    p.pos[1] += dpy;
+    p.pos[2] += dpz;
+    if (dyaw == 0 && dpitch == 0 && droll == 0) return;
+    const auto q22c = [](int32_t bam) {
+        return static_cast<int32_t>(
+                std::cos(static_cast<double>(bam) / kBamPerRad) * 4194304.0);
+    };
+    const auto q22s = [](int32_t bam) {
+        return static_cast<int32_t>(
+                std::sin(static_cast<double>(bam) / kBamPerRad) * 4194304.0);
+    };
+    const auto q22s_neg = [](int32_t bam) {
+        return static_cast<int32_t>(
+                std::sin(static_cast<double>(bam) / kBamPerRad) * -4194304.0);
+    };
+    const auto m22 = [](int32_t a, int32_t b) {
+        return static_cast<int32_t>((static_cast<int64_t>(a) * b) >> 22);
+    };
+    // Retail's SHLs wrap in 32-bit registers; shift through unsigned so a
+    // negative offset is not C++ UB.
+    const auto shl8 = [](int32_t v) {
+        return static_cast<int32_t>(static_cast<uint32_t>(v) << 8);
+    };
+    const int32_t rel_x = shl8(p.pos[0] - cur[0]) + 127;
+    const int32_t rel_y = shl8(p.pos[1] - cur[1]) + 127;
+    const int32_t rel_z = shl8(p.pos[2] - cur[2]) + 127;
+    // Un-rotate by the saved attitude (negated sines = the inverse)
+    // [orig: @ 0x4a8e33..0x4a8fa0, dbl_7C57B0 = -4194304.0].
+    const int32_t cys = q22c(parent.saved_live_yaw), sys = q22s_neg(parent.saved_live_yaw);
+    const int32_t cps = q22c(parent.saved_live_pitch), sps = q22s_neg(parent.saved_live_pitch);
+    const int32_t crs = q22c(parent.saved_live_roll), srs = q22s_neg(parent.saved_live_roll);
+    const int32_t rot_yaw_x = m22(rel_x, cys) - m22(rel_y, sys);
+    const int32_t rot_yaw_y = m22(rel_x, sys) + m22(rel_y, cys);
+    const int32_t rot_pitch_x = m22(rot_yaw_x, cps);
+    const int32_t rot_pitch_cross = m22(rel_z, sps);
+    const int32_t rot_pitch_z = m22(rot_yaw_x, sps) + m22(rel_z, cps);
+    const int32_t rot_roll_x = m22(rot_yaw_y, crs) - m22(rot_pitch_z, srs);
+    const int32_t rot_roll_z = m22(rot_yaw_y, srs) + m22(rot_pitch_z, crs);
+    const int32_t unrot_xz = rot_pitch_x - rot_pitch_cross;
+    // Re-rotate by the current attitude (positive sines), roll -> pitch -> yaw
+    // [orig: @ 0x4a8fab..0x4a90fb].
+    const int32_t cyc = q22c(cyaw), syc = q22s(cyaw);
+    const int32_t cpc = q22c(cpitch), spc = q22s(cpitch);
+    const int32_t crc = q22c(croll), src = q22s(croll);
+    const int32_t a = m22(rot_roll_x, src) + m22(rot_roll_z, crc);
+    const int32_t b = m22(rot_roll_x, crc) - m22(rot_roll_z, src);
+    const int32_t pp = m22(unrot_xz, cpc) - m22(a, spc);
+    const int32_t zp = m22(unrot_xz, spc) + m22(a, cpc);
+    p.pos[0] = cur[0] + ((m22(pp, cyc) - m22(b, syc)) >> 8);
+    p.pos[1] = cur[1] + ((m22(pp, syc) + m22(b, cyc)) >> 8);
+    p.pos[2] = cur[2] + (zp >> 8);
+    // Attitude adoption: yaw += dyaw; the pitch/roll delta pair rotated by the
+    // parent-vs-child relative yaw taken BEFORE the yaw add
+    // [orig: @ 0x4a90fe..0x4a9170].
+    const int32_t rel_yaw = bam_sub_u(cyaw, p.yaw_bam);
+    const int32_t rc = q22c(rel_yaw), rs = q22s(rel_yaw);
+    const int32_t pitch_d = m22(dpitch, rc) - m22(droll, rs);
+    const int32_t roll_d = m22(dpitch, rs) + m22(droll, rc);
+    p.yaw_bam = bam_add_u(p.yaw_bam, dyaw);
+    p.pitch_bam = bam_add_u(p.pitch_bam, pitch_d);
+    p.roll_bam = bam_add_u(p.roll_bam, roll_d);
+}
+
+// The flying-phase wrapper: a LiveRound has no registry entity, so the
+// function's own savedLivePose backup has nothing to stamp; the placed-device
+// leg stamps its registry entity instead. Lifetime/flag detach semantics are
+// the reimpl handle-reuse guards.
 void follow_parent(World &world, LiveRound &r) {
     Entity *parent = entity_for_lifetime(world, r.parent, r.parent_spawn_id);
     if (parent == nullptr || (parent->engine_flags & 0x02000001u) != 0) {
         r.parent = EntityHandle{};
         r.parent_spawn_id = 0;
-        r.parent_tracking = false;
         return;
     }
-    if (!r.parent_tracking) {
-        r.parent_prev_pos = parent->position;
-        r.parent_prev_yaw_bam = bam_heading_from_mission_yaw_deg(parent->yaw);
-        r.parent_tracking = true;
-        return;
-    }
-    const Vec3 dp{parent->position.x - r.parent_prev_pos.x,
-                  parent->position.y - r.parent_prev_pos.y,
-                  parent->position.z - r.parent_prev_pos.z};
-    const int32_t yaw_now = bam_heading_from_mission_yaw_deg(parent->yaw);
-    const int32_t dyaw = static_cast<int32_t>(
-            static_cast<uint32_t>(yaw_now) - static_cast<uint32_t>(r.parent_prev_yaw_bam));
-    // rotate the offset from the parent by the yaw delta
-    const double lx = double(r.pos.x - r.parent_prev_pos.x);
-    const double ly = double(r.pos.y - r.parent_prev_pos.y);
-    const double a = double(dyaw) / kBamPerRad;
-    const double ca = std::cos(a), sa = std::sin(a);
-    r.pos.x = r.parent_prev_pos.x + static_cast<float>(lx * ca - ly * sa) +
-              static_cast<float>(dp.x);
-    r.pos.y = r.parent_prev_pos.y + static_cast<float>(lx * sa + ly * ca) +
-              static_cast<float>(dp.y);
-    r.pos.z += static_cast<float>(dp.z);
-    r.yaw_bam = static_cast<int32_t>(static_cast<uint32_t>(r.yaw_bam) +
-                                     static_cast<uint32_t>(dyaw));
-    r.parent_prev_pos = parent->position;
-    r.parent_prev_yaw_bam = yaw_now;
+    FollowPose p;
+    p.pos[0] = to_fixed(r.pos.x);
+    p.pos[1] = to_fixed(r.pos.y);
+    p.pos[2] = to_fixed(r.pos.z);
+    p.yaw_bam = r.yaw_bam;
+    p.pitch_bam = r.pitch_bam;
+    p.roll_bam = r.roll_bam;
+    parent_delta_follow(*parent, p);
+    r.pos.x = static_cast<float>(from_fixed(p.pos[0]));
+    r.pos.y = static_cast<float>(from_fixed(p.pos[1]));
+    r.pos.z = static_cast<float>(from_fixed(p.pos[2]));
+    r.yaw_bam = p.yaw_bam;
+    r.pitch_bam = p.pitch_bam;
+    r.roll_bam = p.roll_bam;
 }
 
 } // namespace
@@ -598,7 +698,6 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
             ground_surface = sampled_ground_surface(world, f);
             r.parent = EntityHandle{};
             r.parent_spawn_id = 0;
-            r.parent_tracking = false;
         }
     }
     // The swept item raycast + stick [orig: reflect; reflected z-speed above
@@ -619,10 +718,13 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
                 // tracking is the D-THROW-7/D-WPN-8 residual.
                 if (hit.geometry_entity.valid() &&
                     throwable_surface_accepts_stick(hit.normal_q16)) {
-                    // stick to the face
-                    stick_pose_from_normal(n, claymore, r.yaw_bam, r.pitch_bam,
-                                           r.roll_bam);
-                    if (!claymore) r.roll_bam = -0x3FFFFFC0; // [orig: schl -90 deg]
+                    // Stick to the face: yaw kept, satchel pitch bias
+                    // 0xC0000040 (~-90 deg), claymore 0; roll bias 0 on both
+                    // [orig: schl @ 0x448898..0x4488aa; clym @ 0x447842..].
+                    throwable_stick_pose(
+                            n, r.yaw_bam,
+                            claymore ? 0 : static_cast<int32_t>(0xC0000040), 0,
+                            r.pitch_bam, r.roll_bam);
                     r.spin_yaw = 0;
                     r.spin_pitch = 0;
                     r.spin_roll = 0;
@@ -632,7 +734,6 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
                     r.parent = hit.geometry_entity;
                     if (const Entity *parent = world.registry.get(r.parent))
                         r.parent_spawn_id = parent->registry_spawn_id;
-                    r.parent_tracking = false;
                     rest = true;
                 }
             }
@@ -770,13 +871,6 @@ bool ThrowableSim::place_from_round(World &world, const LiveRound &round,
     // so the clone's +684 still holds ~max_age; Entity_UpdatePool1Slot then
     // counts it down 1/tick and thinks at <= 0].
     d.think_delay_ticks = ammo.max_age_ticks;
-    if (parent_entity != nullptr) {
-        d.parent_offset = Vec3{round.pos.x - parent_entity->position.x,
-                               round.pos.y - parent_entity->position.y,
-                               round.pos.z - parent_entity->position.z};
-        d.parent_yaw_at_stick = bam_heading_from_mission_yaw_deg(parent_entity->yaw);
-        d.device_yaw_at_stick = round.yaw_bam;
-    }
     devices.push_back(d);
 
     ThrowableEvents::DeviceSpawn ev;
@@ -937,26 +1031,29 @@ void ThrowableSim::tick(World &world, CollisionWorld *collision,
                 continue;
             }
         }
-        // ride the stuck-to parent
+        // Ride the stuck-to parent [orig: the placed motor +452 =
+        // Entity_InterpolateFromParentDelta @ 0x4a8d60, installed by
+        // Entity_ConvertRoundToPlacedEntity @ 0x5455fd].
         if (d.parent.valid()) {
             Entity *parent = entity_for_lifetime(world, d.parent, d.parent_spawn_id);
             if (parent != nullptr) {
-                const int32_t parent_yaw = bam_heading_from_mission_yaw_deg(parent->yaw);
-                const int32_t dyaw = static_cast<int32_t>(
-                        static_cast<uint32_t>(parent_yaw) -
-                        static_cast<uint32_t>(d.parent_yaw_at_stick));
-                const double a = double(dyaw) / kBamPerRad;
-                const double ca = std::cos(a), sa = std::sin(a);
-                d.pos.x = parent->position.x +
-                          static_cast<float>(double(d.parent_offset.x) * ca -
-                                             double(d.parent_offset.y) * sa);
-                d.pos.y = parent->position.y +
-                          static_cast<float>(double(d.parent_offset.x) * sa +
-                                             double(d.parent_offset.y) * ca);
-                d.pos.z = parent->position.z + d.parent_offset.z;
-                d.yaw_bam = static_cast<int32_t>(
-                        static_cast<uint32_t>(d.device_yaw_at_stick) +
-                        static_cast<uint32_t>(dyaw));
+                // The child's own pre-move savedLivePose backup
+                // [orig: @ 0x4a8d7d..0x4a8db4].
+                stamp_saved_live_pose(*e);
+                FollowPose p;
+                p.pos[0] = to_fixed(d.pos.x);
+                p.pos[1] = to_fixed(d.pos.y);
+                p.pos[2] = to_fixed(d.pos.z);
+                p.yaw_bam = d.yaw_bam;
+                p.pitch_bam = d.pitch_bam;
+                p.roll_bam = d.roll_bam;
+                parent_delta_follow(*parent, p);
+                d.pos = Vec3{static_cast<float>(from_fixed(p.pos[0])),
+                             static_cast<float>(from_fixed(p.pos[1])),
+                             static_cast<float>(from_fixed(p.pos[2]))};
+                d.yaw_bam = p.yaw_bam;
+                d.pitch_bam = p.pitch_bam;
+                d.roll_bam = p.roll_bam;
                 e->position = d.pos;
                 e->yaw = static_cast<int16_t>(
                         std::lround(mission_yaw_deg_from_bam_heading(d.yaw_bam)));

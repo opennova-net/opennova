@@ -121,6 +121,15 @@ struct RoundSourceState {
     const int32_t *weapon_weight_spread = nullptr; // entity+0x384
 };
 
+// The witnessed below-water EYE projection, shared by the round-source
+// classifier and the shell's aimed-shot/HUD-crosshair gates so they cannot
+// drift: Position.Z plus the per-tick eye offset (entity+0x74), strictly
+// below the water plane; env.water_z == 0 (no authored water) is never
+// below. [orig: RoundData_SpawnRound stance leg @0x4ec2de..0x4ec2ea; the
+// recoil x4 legs @0x4ec34e..0x4ec35a / @0x4ec879..0x4ec885]
+bool entity_eye_below_water(const World &world, int32_t body_z_q16,
+                            int32_t eye_offset_z);
+
 struct RandomSpreadOffset {
     int32_t yaw_bam = 0;
     int32_t pitch_bam = 0;
@@ -237,13 +246,11 @@ struct LiveRound {
     // [orig: itemDef updateCallback -> +452, deathCallback -> +456].
     ThrowClass motor{};
     ThrowClass think{};
-    // Landed-on / stuck-to entity [orig: +40 groundEntity; the motors parent
-    // and follow it].
+    // Landed-on / stuck-to entity [orig: +40 groundEntity; the motors follow
+    // it through the parent's own (live − savedLivePose) delta channel —
+    // Entity_InterpolateFromParentDelta @ 0x4a8d60 keeps no rider-side copy].
     EntityHandle parent;
     uint64_t parent_spawn_id = 0;
-    Vec3 parent_prev_pos;
-    int32_t parent_prev_yaw_bam = 0;
-    bool parent_tracking = false;
     // Armed at 2 ticks remaining above water; the expiry queues the kill zone
     // [orig: the runtime 0x1000 flag @ 0x444a29 consumed by the update head].
     bool det_at_expiry = false;
