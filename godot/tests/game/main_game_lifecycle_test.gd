@@ -851,20 +851,17 @@ func test_debug_overlay_suspends_input_without_stopping_the_world() -> void:
 	assert_false(_shell.is_debug_overlay_open())
 	assert_null(world.get_node_or_null("PickClickCatcher"),
 			"Escape removes the click picker through the same visibility edge")
-	assert_false(overlay.get_debug_session().is_presented())
 
 	menu_shell.return_to_menu_requested.emit()
 	await get_tree().process_frame
 	await get_tree().process_frame
 	assert_false(_shell.is_debug_overlay_open(),
 			"returning to the menu cannot blanket-show a closed F3 layer")
-	assert_false(overlay.get_debug_session().is_presented())
 	menu_shell.start_requested.emit("mnml.bms")
 	await _wait_for_world_load(world)
 	await _wait_for_visible_terrain(terrain)
 	assert_false(_shell.is_debug_overlay_open(),
 			"the next mission keeps the overlay's own closed lifecycle")
-	assert_false(overlay.get_debug_session().is_presented())
 
 
 func test_player_info_loadout_is_equipped_on_initial_spawn() -> void:

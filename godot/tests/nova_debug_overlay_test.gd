@@ -920,6 +920,16 @@ func test_player_tab_displays_and_dumps_a_fresh_authoritative_pose() -> void:
 			"the live view roll rides the label (0 at rest)")
 	assert_string_contains(orientation_label.text, "third person")
 
+	# The water/eye classification rides the combat card — the same verdict
+	# the recoil, spread, and aimed-shot gates consume.
+	var combat_label := overlay.get_node_or_null(
+			PAGES + "/Player/PlayerCombat") as Label
+	assert_not_null(combat_label)
+	assert_string_contains(combat_label.text, "Posture:")
+	assert_string_contains(combat_label.text, "eye height")
+	assert_string_contains(combat_label.text, "fire counts as underwater: no",
+			"a dry mission classifies the shooter above water")
+
 	# The click must resample NOW rather than serialize the 0.25-Hz label cache.
 	var displayed_yaw := sim.get_local_player_yaw_deg()
 	assert_eq(sim.debug_teleport_local_player(

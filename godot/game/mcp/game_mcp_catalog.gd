@@ -120,8 +120,8 @@ static func definitions() -> Array[McpToolDef]:
 				"target_screen": {"type": "string", "default": ""},
 			}, ["op"]),
 		McpToolDef.make("game_screenshot",
-			"Capture the real game window, including F3 when it is open. Requested expensive "
-			+ "debug views are activated for this capture, then suspended again.",
+			"Capture the real game window, including F3 when it is open and any "
+			+ "debug views that are toggled on.",
 			{
 				"max_dim": {"type": "integer", "minimum": 64, "maximum": 4096, "default": 1280},
 				"format": {"type": "string", "enum": ["webp", "png"], "default": "webp"},

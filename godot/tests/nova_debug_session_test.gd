@@ -117,7 +117,6 @@ func test_writes_validate_and_re_resolve_replaced_targets() -> void:
 	var first := FakeTarget.new()
 	var target_box: Array = [first]
 	var session := _catalog(target_box)
-	session.set_presented(true)
 
 	assert_eq(session.set_control_value(&"enabled", true), OK)
 	assert_true(first.enabled)
@@ -195,73 +194,24 @@ func test_authoritative_replay_waits_for_current_authority_and_unlock() -> void:
 	assert_true(locked_replacement.enabled)
 
 
-func test_expensive_checks_suspend_and_restore_without_losing_intent() -> void:
+func test_debug_views_apply_immediately_and_persist_without_presentation() -> void:
+	# Debug visualizers stay live whether or not the F3 overlay (or an
+	# automation capture) is open: toggling applies immediately, nothing
+	# resets it on hide, and only an explicit toggle turns it back off.
 	var target := FakeTarget.new()
 	var session := _catalog([target])
-	var definition := session.definition(&"enabled")
-	definition.expensive = true
-	session.set_presented(true)
 	assert_eq(session.set_control_value(&"enabled", true), OK)
-	assert_true(target.enabled)
-
-	session.set_presented(false)
-	assert_false(target.enabled, "hiding physically disables the expensive view")
-	var hidden := session.get_control_state(&"enabled")
-	assert_true(hidden.suspended)
-	assert_true(hidden.desired_value, "the session still remembers the user's intent")
-
-	session.set_presented(true)
-	assert_true(target.enabled, "showing restores intent against the live target")
-	assert_false(session.get_control_state(&"enabled").suspended)
-
-
-func test_expensive_enum_resets_to_default_while_hidden() -> void:
-	var target := FakeTarget.new()
-	var session := _catalog([target])
-	session.definition(&"mode").expensive = true
-	session.set_presented(true)
+	assert_true(target.enabled,
+			"a view toggled with no debug presentation open applies immediately")
 	assert_eq(session.set_control_value(&"mode", 2), OK)
 	assert_eq(target.mode, 2)
 
-	session.set_presented(false)
-	assert_eq(target.mode, 0)
-	assert_eq(session.get_control_state(&"mode").desired_value, 2)
-	assert_true(session.get_control_state(&"mode").suspended)
-
-	session.set_presented(true)
+	session.sync()
+	assert_true(target.enabled, "a refresh does not reset live views")
 	assert_eq(target.mode, 2)
 
-
-func test_overlay_and_capture_presentation_sources_compose() -> void:
-	var target := FakeTarget.new()
-	var session := _catalog([target])
-	session.definition(&"enabled").expensive = true
-	assert_eq(session.set_control_value(&"enabled", true), OK)
-	assert_false(target.enabled)
-
-	session.set_presentation_source(&"mcp_screenshot", true)
-	assert_true(target.enabled)
-	session.set_presented(true)
-	session.set_presentation_source(&"mcp_screenshot", false)
-	assert_true(target.enabled, "open F3 retains the view after capture releases")
-	session.set_presented(false)
-	assert_false(target.enabled)
-
-
-func test_overlapping_async_presentation_leases_release_independently() -> void:
-	var target := FakeTarget.new()
-	var session := _catalog([target])
-	session.definition(&"enabled").expensive = true
-	assert_eq(session.set_control_value(&"enabled", true), OK)
-
-	session.acquire_presentation_source(&"mcp_screenshot")
-	session.acquire_presentation_source(&"mcp_screenshot")
-	assert_true(target.enabled)
-	session.release_presentation_source(&"mcp_screenshot")
-	assert_true(target.enabled,
-			"an older capture cannot release a newer capture's lease")
-	session.release_presentation_source(&"mcp_screenshot")
-	assert_false(target.enabled)
+	assert_eq(session.set_control_value(&"enabled", false), OK)
+	assert_false(target.enabled, "only an explicit toggle turns the view off")
 
 
 func test_edit_confirmation_and_host_authority_are_distinct_gates() -> void:

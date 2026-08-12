@@ -42,7 +42,6 @@ var minimum := 0.0
 var maximum := 1.0
 var step := 0.1
 var choices: Array[String] = []
-var expensive := false
 var requires_unlock := false
 var authority := Authority.ANY
 ## Transitional seam for controls whose current host still owns the target.
@@ -155,7 +154,6 @@ func to_json_value() -> Variant:
 		"maximum": maximum,
 		"step": step,
 		"choices": choices.duplicate(),
-		"expensive": expensive,
 		"requires_unlock": requires_unlock,
 		"authority": "host" if authority == Authority.HOST_ONLY else "any",
 	}

@@ -28,7 +28,6 @@ func _make_page(world: GameWorld = null) -> DebugTerrainPage:
 	DebugCatalog.install(ctx.session)
 	DebugCatalog.bind_runtime_targets(
 			ctx.session, func(): return null, ctx.world_source)
-	ctx.session.set_presented(true)
 	var page: DebugTerrainPage = PageScript.new()
 	page.setup(ctx)
 	add_child_autofree(page)

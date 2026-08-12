@@ -1296,6 +1296,7 @@ func test_export_flavor_opens_native_dialog_with_format_toggles() -> void:
 
 func test_export_confirm_and_progress_target_the_initiating_workspace_after_tab_switch() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
+	var progress_backdrop := workstation.get_node("%ProgressBackdrop") as ColorRect
 	var stub: ExportRecordingTerrainStub = autofree(ExportRecordingTerrainStub.new())
 	# Bind only the terrain workspace — activating it would push the stub into
 	# the typed asset dock/inspector set_editor calls (the dirty-open precedent).
@@ -1331,7 +1332,7 @@ func test_export_confirm_and_progress_target_the_initiating_workspace_after_tab_
 			"the export receives the dialog's selected flavor")
 	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.OBJECT,
 		"the tab remains switched away from the exporter")
-	assert_true((workstation.get_node("%ProgressBackdrop") as ColorRect).visible,
+	assert_true(progress_backdrop.visible,
 		"progress remains visible for the non-active exporting workspace")
 	assert_eq((workstation.get_node("%ProgressTitleLabel") as Label).text, "Exporting terrain...",
 		"progress reads the initiating workspace title")
@@ -1344,8 +1345,12 @@ func test_export_confirm_and_progress_target_the_initiating_workspace_after_tab_
 
 	stub.export_running = false
 	workstation.on_export_completed(OK, "Exported terrain.")
-	await get_tree().create_timer(0.2).timeout
-	assert_false((workstation.get_node("%ProgressBackdrop") as ColorRect).visible,
+	var progress_hidden: bool = await wait_until(
+		func() -> bool: return not progress_backdrop.visible,
+		1.0,
+		"export progress fade-out"
+	)
+	assert_true(progress_hidden,
 		"completion hides progress after its fade-out")
 
 

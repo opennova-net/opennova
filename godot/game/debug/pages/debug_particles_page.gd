@@ -14,6 +14,7 @@ var _ptl_detail: Label
 var _catalog_status: Label
 var _catalog_issues: ItemList
 var _ptl_peak := 0
+var _draw_list_label: Label
 var _selected_group_id := -1
 var _has_selected_group := false
 var _groups_by_id: Dictionary = {}
@@ -68,6 +69,13 @@ func _build() -> void:
 	var boxes_check := add_option_check(&"show_effect_boxes")
 	boxes_check.text = "Show live effect bounds"
 
+	_draw_list_label = Label.new()
+	_draw_list_label.name = "ParticleDrawLists"
+	_draw_list_label.text = ""
+	_draw_list_label.visible = false
+	_draw_list_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	add_child(_draw_list_label)
+
 
 func refresh() -> void:
 	var world := _ctx.effect_world()
@@ -110,6 +118,42 @@ func refresh() -> void:
 			% [live_effects, _ptl_peak, alive_particles, drawn_quads])
 	_refresh_groups(groups)
 	_refresh_catalog(world.effect_count(), unresolved)
+	_refresh_draw_lists(world)
+
+
+## The renderer's draw-list diagnostics: what each render domain actually
+## compiled and drew this frame, plus the texture atlas occupancy.
+func _refresh_draw_lists(world: EffectWorld) -> void:
+	if _draw_list_label == null:
+		return
+	var report: Dictionary = world.get_debug_draw_list_report()
+	if report.is_empty():
+		_draw_list_label.visible = false
+		return
+	var lines := PackedStringArray()
+	for domain in [["world", "World"], ["first_person", "First person"]]:
+		var d: Dictionary = report.get(domain[0], {})
+		if d.is_empty():
+			lines.append("%s draw list: idle" % domain[1])
+			continue
+		lines.append("%s draw list: %d draws | %d quads | %d of %d emitters" % [
+			domain[1],
+			int(d.get("draw_command_count", 0)),
+			int(d.get("rendered_quad_count", 0)),
+			int(d.get("selected_emitters", 0)),
+			int(d.get("input_emitters", 0))])
+	var backend: Dictionary = report.get("world_backend", {})
+	lines.append("Backend: %s" % String(backend.get("backend", "unavailable")))
+	var entry_count := int(report.get("atlas_entry_count", 0))
+	var resolved := int(report.get("atlas_resolved_entry_count", 0))
+	var rejected := int(report.get("atlas_rejected_entry_count", 0))
+	var atlas_line := "Atlas: %d pages | %d of %d textures placed" % [
+		int(report.get("atlas_page_count", 0)), resolved, entry_count]
+	if rejected > 0:
+		atlas_line += " | %d rejected" % rejected
+	lines.append(atlas_line)
+	_draw_list_label.text = "\n".join(lines)
+	_draw_list_label.visible = true
 
 
 func _particles_hidden() -> bool:
@@ -242,6 +286,8 @@ func _clear_live_data() -> void:
 	_ptl_detail.text = "No effect world is available."
 	_catalog_status.text = "Catalog unavailable."
 	_catalog_issues.clear()
+	if _draw_list_label != null:
+		_draw_list_label.visible = false
 	_catalog_issues.visible = false
 
 

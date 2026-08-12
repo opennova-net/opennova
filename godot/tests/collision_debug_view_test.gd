@@ -77,6 +77,26 @@ func test_draws_hulls_capsule_and_gap_label() -> void:
 	assert_string_contains(label.text, "ground gap 0.05")
 
 
+func test_probe_boxes_draw_without_bvol_instances() -> void:
+	# The vehicle platform probe boxes ride their own list — a mission whose
+	# nearby set has no BVOL volumes must still draw them, and they count as
+	# drawables.
+	var view := _make_view()
+	view.render_report({
+		"instances": [],
+		"probe_boxes": [
+			{ "entity_handle": 9, "kind": "probe", "corners": _unit_box_corners() },
+			{ "entity_handle": 9, "kind": "footprint", "corners": _shifted_box_corners() },
+		],
+		"player": { "valid": false },
+	})
+	var hull := view.get_node("CollisionHullLines") as MeshInstance3D
+	assert_gt((hull.mesh as ImmediateMesh).get_surface_count(), 0,
+			"probe wireframes drawn with no BVOL volumes present")
+	assert_eq(view.get_debug_drawable_count(), 2,
+			"both the probe box and its footprint count as drawables")
+
+
 func test_missing_sim_clears_instead_of_erroring() -> void:
 	var view := _make_view()
 	view.render_report(_debug_payload())

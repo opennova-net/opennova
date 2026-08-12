@@ -355,6 +355,13 @@ func render_now() -> int:
 	return int(_renderer.get_draw_command_count())
 
 
+## The renderer's full draw-list diagnostics (world + first-person lists,
+## backends, atlas pages/entries) for the F3 Particles page.
+func get_debug_draw_list_report() -> Dictionary:
+	_ensure_renderer()
+	return _renderer.get_debug_draw_list_report()
+
+
 func spawn_effect_transient(name: String, position: Vector3,
 		orientation: Vector3 = Vector3.ZERO, initial_age_ticks: int = 0,
 		render_domain: int = RENDER_DOMAIN_WORLD, source_tick: int = 0,

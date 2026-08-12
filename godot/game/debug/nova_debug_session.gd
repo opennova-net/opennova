@@ -3,9 +3,10 @@ extends RefCounted
 ## UI-free catalog and execution module shared by F3 and runtime automation.
 ##
 ## Callers bind re-resolving targets and register typed control definitions.
-## This module validates writes, enforces edit/authority policy, reads back the
-## public owner every time, and suspends expensive visualizers while no debug
-## presentation is open.
+## This module validates writes, enforces edit/authority policy, and reads back
+## the public owner every time. A toggled debug visualizer stays live whether
+## or not any debug presentation (the F3 overlay, an automation capture) is
+## open — views persist until turned off or the mission unloads.
 
 signal catalog_changed
 signal control_changed(id: StringName, state: DebugControlState)
@@ -13,20 +14,15 @@ signal control_changed(id: StringName, state: DebugControlState)
 ## presentation-neutral.
 signal control_invoked(id: StringName, value: Variant)
 signal edit_unlock_changed(unlocked: bool)
-signal presented_changed(presented: bool)
 
 var _definitions: Dictionary = {}
 var _definition_order: Array[StringName] = []
 var _targets: Dictionary = {}
 var _desired_values: Dictionary = {}
 var _explicit_values: Dictionary = {}
-var _suspended: Dictionary = {}
 var _pending_replays: Dictionary = {}
 var _last_target_ids: Dictionary = {}
 var _edit_unlocked := false
-var _presented := false
-var _presentation_sources: Dictionary = {}
-var _presentation_leases: Dictionary = {}
 var _authority_source := Callable()
 var _status_source := Callable()
 
@@ -101,7 +97,6 @@ func read_control_state(
 		return state
 	state.kind = control.kind
 	state.desired_value = _desired_values.get(id, control.default_value)
-	state.suspended = _suspended.has(id)
 
 	var target := _resolve_target(control.target_id)
 	if target == null:
@@ -125,9 +120,6 @@ func read_control_state(
 		state.reason = _policy_reason(control)
 
 	if control.kind == DebugControlDef.Kind.ACTION:
-		return state
-	if state.suspended:
-		state.value = state.desired_value
 		return state
 	var read := _read_value(control, target)
 	if bool(read["ok"]):
@@ -165,18 +157,9 @@ func set_control_value(
 	if not _write_allowed(control, allow_authority):
 		return ERR_UNAUTHORIZED
 	var current := read_control_state(id)
-	if not current.suspended and current.desired_value == normalized["value"] \
+	if current.desired_value == normalized["value"] \
 			and (not current.authoritative or current.value == normalized["value"]):
 		return OK
-	if control.expensive and not _presented \
-			and _is_expensive_active(control, normalized["value"]):
-		_desired_values[id] = normalized["value"]
-		_explicit_values[id] = true
-		_pending_replays.erase(id)
-		_suspended[id] = true
-		control_changed.emit(id, read_control_state(id))
-		return OK
-	_suspended.erase(id)
 	var applied := _apply(control, normalized["value"])
 	if applied != OK:
 		return applied
@@ -243,92 +226,6 @@ func is_edit_unlocked() -> bool:
 	return _edit_unlocked
 
 
-## Presentation lifecycle. Expensive non-default controls are physically reset
-## on hide but keep their desired session value, then restore against the
-## freshly resolved target on show.
-func set_presented(presented: bool) -> void:
-	set_presentation_source(&"overlay", presented)
-
-
-## Presentation sources compose: F3 and a transient automation capture can
-## overlap without one source hiding expensive views out from under the other.
-func set_presentation_source(source: StringName, presented: bool) -> void:
-	if source == &"":
-		return
-	if presented:
-		_presentation_sources[source] = true
-	else:
-		_presentation_sources.erase(source)
-	_update_presented_aggregate()
-
-
-## Ref-counted counterpart for overlapping asynchronous work. A timed-out MCP
-## handler may finish after a newer capture has acquired the same source; one
-## release must not hide expensive views out from under the newer capture.
-func acquire_presentation_source(source: StringName) -> void:
-	if source == &"":
-		return
-	_presentation_leases[source] = int(_presentation_leases.get(source, 0)) + 1
-	_update_presented_aggregate()
-
-
-func release_presentation_source(source: StringName) -> void:
-	if source == &"" or not _presentation_leases.has(source):
-		return
-	var remaining := int(_presentation_leases[source]) - 1
-	if remaining > 0:
-		_presentation_leases[source] = remaining
-	else:
-		_presentation_leases.erase(source)
-	_update_presented_aggregate()
-
-
-func _update_presented_aggregate() -> void:
-	var aggregate := not _presentation_sources.is_empty() \
-			or not _presentation_leases.is_empty()
-	if aggregate == _presented:
-		return
-	_set_presented_state(aggregate)
-
-
-func _set_presented_state(presented: bool) -> void:
-	if _presented == presented:
-		return
-	sync()
-	_presented = presented
-	for id in _definition_order:
-		var control := definition(id)
-		if not control.expensive or control.kind == DebugControlDef.Kind.ACTION:
-			continue
-		var desired: Variant = _desired_values.get(id, control.default_value)
-		if not presented and _is_expensive_active(control, desired):
-			_suspended[id] = true
-			if _apply(control, control.default_value) == OK:
-				control_invoked.emit(id, control.default_value)
-			elif control.allow_unresolved_intent:
-				control_invoked.emit(id, control.default_value)
-			control_changed.emit(id, read_control_state(id))
-		elif presented and _suspended.has(id):
-			_suspended.erase(id)
-			if _is_expensive_active(control, desired):
-				if _apply(control, desired) == OK:
-					control_invoked.emit(id, desired)
-				elif control.allow_unresolved_intent:
-					control_invoked.emit(id, desired)
-			control_changed.emit(id, read_control_state(id))
-	presented_changed.emit(presented)
-
-
-func _is_expensive_active(
-		control: DebugControlDef,
-		value: Variant) -> bool:
-	return value != control.default_value
-
-
-func is_presented() -> bool:
-	return _presented
-
-
 func set_authority_source(source: Callable) -> void:
 	_authority_source = source
 
@@ -363,7 +260,6 @@ func capture_snapshot(
 	return {
 		"runtime": runtime_status(),
 		"edit_unlocked": _edit_unlocked,
-		"presented": _presented,
 		"controls": list_controls(&"", filter_text, allow_authority),
 	}
 
@@ -384,8 +280,7 @@ func sync() -> void:
 		for id in _definition_order:
 			var control := definition(id)
 			if control.target_id != target_id \
-					or control.kind == DebugControlDef.Kind.ACTION \
-					or _suspended.has(id):
+					or control.kind == DebugControlDef.Kind.ACTION:
 				continue
 			if bool(_explicit_values.get(id, false)):
 				_replay_or_defer(control)
@@ -397,7 +292,7 @@ func sync() -> void:
 	for id_v in _pending_replays.keys():
 		var id := StringName(id_v)
 		var control := definition(id)
-		if control != null and not _suspended.has(id):
+		if control != null:
 			_replay_or_defer(control)
 
 
