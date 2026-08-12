@@ -299,9 +299,6 @@ func begin_export_terrain(output_dir: String, flavor: int) -> Error:
 	_te._brush_session.reset_stroke_tracking()
 	_te._remember_export_dir(output_dir)
 
-	if _te.workstation != null:
-		_te.workstation.on_export_started(output_dir)
-
 	return OK
 
 

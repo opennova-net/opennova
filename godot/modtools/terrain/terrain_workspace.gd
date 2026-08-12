@@ -458,7 +458,10 @@ func get_export_action_label() -> String:
 func begin_export(dir_path: String, flavor: int) -> Error:
 	if terrain_editor == null:
 		return ERR_UNAVAILABLE
-	return terrain_editor.begin_export_terrain(dir_path, flavor)
+	var err := terrain_editor.begin_export_terrain(dir_path, flavor)
+	if err == OK and editor_shell != null:
+		editor_shell.on_export_started(self, dir_path)
+	return err
 
 
 func get_save_dialog_title() -> String:

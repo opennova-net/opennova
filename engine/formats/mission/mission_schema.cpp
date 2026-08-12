@@ -40,6 +40,18 @@ const std::vector<MissionParamEnumEntry> &subgoal_enum() {
 	return values;
 }
 
+// Waypoint selector mode stored beside Redirect*/reaches-waypoint records. The runtime
+// consumes 1 as a navigation-node/path reference and 3 as a literal coordinate target
+// (AiBrain::kWpType); keeping the values here makes the editor name the witnessed domain
+// instead of asking mission authors to memorize its raw integers.
+const std::vector<MissionParamEnumEntry> &waypoint_type_enum() {
+	static const std::vector<MissionParamEnumEntry> values = {
+		enum_entry(1, "Navigation node"),
+		enum_entry(3, "Literal coordinates"),
+	};
+	return values;
+}
+
 // PLAYPARTANIM play type. [orig: dfx2med Med_ParamAnimPlayType @0x449f20, "Fsm" config
 // section, table @0x5e64f8 — FSMANIMPLAY=1 / FSMANIMSTOP=0 / FSMANIMREV=-1.]
 const std::vector<MissionParamEnumEntry> &anim_play_type_enum() {
@@ -192,7 +204,7 @@ MissionParamSpec trigger_param_schema(int main_type, int sub_type) {
 				case 4: return spec("Group {p1} is destroyed (no units left).", { slot("Group", Kind::Group) });
 				case 5: return spec("Group {p1} is alive (at least one unit).", { slot("Group", Kind::Group) });
 				case 6: return spec("Group {p1} has lost {p2} or more units.", { slot("Group", Kind::Group), slot("Units lost", Kind::Raw, "Trigger passes once this many of the group's units are gone.") });
-				case 7: return spec("Group {p1} reaches waypoint {p3} (type {p2}).", { slot("Group", Kind::Group), slot("Waypoint type"), slot("Waypoint", Kind::Waypoint) });
+				case 7: return spec("Group {p1} reaches waypoint {p3} (type {p2}).", { slot("Group", Kind::Group), slot("Waypoint type", Kind::Enum, "How the waypoint target is interpreted.", waypoint_type_enum()), slot("Waypoint", Kind::Waypoint) });
 				case 9: return spec("Group {p1} is intact (no losses).", { slot("Group", Kind::Group) });
 				case 10: return spec("Group {p1} is inside zone {p2}.", { slot("Group", Kind::Group), slot("Zone", Kind::Zone) });
 				case 11: return spec("Group {p1} is holding group {p2}.", { slot("Group", Kind::Group), slot("Item group", Kind::Group) });
@@ -212,7 +224,7 @@ MissionParamSpec trigger_param_schema(int main_type, int sub_type) {
 				case 4: return spec("Unit {p1} is destroyed.", { slot("Unit", Kind::Entity) });
 				case 5: return spec("Unit {p1} is alive.", { slot("Unit", Kind::Entity) });
 				case 6: return spec("Unit {p1} has taken {p2}+ damage.", { slot("Unit", Kind::Entity), slot("Hits / damage") });
-				case 7: return spec("Unit {p1} reaches waypoint {p3} (type {p2}).", { slot("Unit", Kind::Entity), slot("Waypoint type"), slot("Waypoint", Kind::Waypoint) });
+				case 7: return spec("Unit {p1} reaches waypoint {p3} (type {p2}).", { slot("Unit", Kind::Entity), slot("Waypoint type", Kind::Enum, "How the waypoint target is interpreted.", waypoint_type_enum()), slot("Waypoint", Kind::Waypoint) });
 				case 9: return spec("Unit {p1} is at full health.", { slot("Unit", Kind::Entity) });
 				case 10: return spec("Unit {p1} is inside zone {p2}.", { slot("Unit", Kind::Entity), slot("Zone", Kind::Zone) });
 				case 11: return spec("Unit {p1} is holding group {p2}.", { slot("Unit", Kind::Entity), slot("Item group", Kind::Group) });
@@ -253,7 +265,7 @@ MissionParamSpec trigger_param_schema(int main_type, int sub_type) {
 
 MissionParamSpec action_param_schema(int action_type, int action_sub_type) {
 	switch (static_cast<bms::ActionType>(action_type)) {
-		case bms::ActionType::RedirectGroupTo: return spec("Send group {p1} to a waypoint.", { slot("Group", Kind::Group), slot("Waypoint type"), slot("Waypoint", Kind::Waypoint, "-1 = nearest of that type.") });
+		case bms::ActionType::RedirectGroupTo: return spec("Send group {p1} to a waypoint.", { slot("Group", Kind::Group), slot("Waypoint type", Kind::Enum, "How the waypoint target is interpreted.", waypoint_type_enum()), slot("Waypoint", Kind::Waypoint, "-1 = nearest of that type.") });
 		case bms::ActionType::KillGroup: return spec("Kill group {p1}.", { slot("Group", Kind::Group) });
 		case bms::ActionType::ChangeGroupAI: return ai_change_spec("Change group {p1} AI (see sub-type).", slot("Group", Kind::Group), action_sub_type);
 		// AREA_AI_RED/BLUE apply an AI sub-type to the team's units within a zone. [target kind = Zone: verify in P5]
@@ -272,7 +284,7 @@ MissionParamSpec action_param_schema(int action_type, int action_sub_type) {
 		case bms::ActionType::ChangeGTeamAction: return spec("Change group {p1} team to {p2}.", { slot("Group", Kind::Group), slot("Team", Kind::Enum, "", team_enum()) });
 		case bms::ActionType::ChangeGroupAction: return spec("Change group {p1}'s action to group {p2}.", { slot("Group", Kind::Group), slot("Group", Kind::Group) });
 		case bms::ActionType::GroupTeleportAction: return spec("Teleport group {p1} to teleport target {p2}.", { slot("Group", Kind::Group), slot("Teleport target") });
-		case bms::ActionType::RedirectSingleTo: return spec("Send unit {p1} to a waypoint.", { slot("Unit", Kind::Entity), slot("Waypoint type"), slot("Waypoint", Kind::Waypoint) });
+		case bms::ActionType::RedirectSingleTo: return spec("Send unit {p1} to a waypoint.", { slot("Unit", Kind::Entity), slot("Waypoint type", Kind::Enum, "How the waypoint target is interpreted.", waypoint_type_enum()), slot("Waypoint", Kind::Waypoint) });
 		case bms::ActionType::KillSingle: return spec("Kill unit {p1}.", { slot("Unit", Kind::Entity) });
 		case bms::ActionType::ChangeSingleAI: return ai_change_spec("Change unit {p1} AI (see sub-type).", slot("Unit", Kind::Entity), action_sub_type);
 		case bms::ActionType::VaporizeSingle: return spec("Vaporize unit {p1}.", { slot("Unit", Kind::Entity) });

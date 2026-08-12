@@ -63,10 +63,30 @@ class DirtyTerrainStub:
 class ExportRecordingTerrainStub:
 	extends TerrainEditorBase
 	var exports: Array = []  # [dir_path, flavor] per call
+	var export_running := false
 
 	func begin_export_terrain(dir_path: String, flavor: int = ExportFlavor.DFX_JO) -> Error:
 		exports.append([dir_path, flavor])
+		export_running = true
 		return OK
+
+	func is_export_running() -> bool:
+		return export_running
+
+	func get_export_progress_ratio() -> float:
+		return 0.25
+
+	func get_export_progress_current() -> int:
+		return 3
+
+	func get_export_progress_total() -> int:
+		return 12
+
+	func get_export_progress_message() -> String:
+		return "Writing tiles"
+
+	func get_export_progress_phase() -> String:
+		return "build"
 
 	func has_current_project_dir() -> bool:
 		return false
@@ -1274,7 +1294,7 @@ func test_export_flavor_opens_native_dialog_with_format_toggles() -> void:
 	assert_eq(dialog.theme, workstation.theme, "The dialog should resolve the shell theme explicitly.")
 
 
-func test_export_confirm_targets_the_initiating_workspace_after_tab_switch() -> void:
+func test_export_confirm_and_progress_target_the_initiating_workspace_after_tab_switch() -> void:
 	var workstation = add_child_autofree(EditorWorkstationScene.instantiate())
 	var stub: ExportRecordingTerrainStub = autofree(ExportRecordingTerrainStub.new())
 	# Bind only the terrain workspace — activating it would push the stub into
@@ -1309,6 +1329,24 @@ func test_export_confirm_targets_the_initiating_workspace_after_tab_switch() -> 
 			"the export receives the directory picked from the initiating workspace")
 		assert_eq(stub.exports[0][1], ExportFlavorDialog.FLAVOR_DFX_JO,
 			"the export receives the dialog's selected flavor")
+	assert_eq(workstation.get_active_workspace_id(), EditorWorkstationScript.Workspace.OBJECT,
+		"the tab remains switched away from the exporter")
+	assert_true((workstation.get_node("%ProgressBackdrop") as ColorRect).visible,
+		"progress remains visible for the non-active exporting workspace")
+	assert_eq((workstation.get_node("%ProgressTitleLabel") as Label).text, "Exporting terrain...",
+		"progress reads the initiating workspace title")
+	assert_eq((workstation.get_node("%ProgressMessageLabel") as Label).text, "Build: Writing tiles",
+		"progress reads the initiating workspace phase and message")
+	assert_eq((workstation.get_node("%ProgressCountsLabel") as Label).text, "3 / 12",
+		"progress reads the initiating workspace counts")
+	assert_eq((workstation.get_node("%ProgressBar") as ProgressBar).value, 25.0,
+		"progress reads the initiating workspace ratio")
+
+	stub.export_running = false
+	workstation.on_export_completed(OK, "Exported terrain.")
+	await get_tree().create_timer(0.2).timeout
+	assert_false((workstation.get_node("%ProgressBackdrop") as ColorRect).visible,
+		"completion hides progress after its fade-out")
 
 
 func test_asset_dock_builds_preview_cards_for_shared_maps() -> void:

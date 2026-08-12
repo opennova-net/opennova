@@ -77,6 +77,28 @@ int main() {
 	TEST_EXPECT(event_trigger.known);
 	TEST_EXPECT(event_trigger.params[0].kind == MissionParamKind::Event);
 
+	// Every waypoint-type field exposes the same witnessed two-value enum instead of a raw integer.
+	const auto waypoint_type_is_named = [](const MissionParamSlot &slot) {
+		return slot.kind == MissionParamKind::Enum &&
+		       slot.enum_values.size() == 2 &&
+		       slot.enum_values[0].value == 1 &&
+		       slot.enum_values[0].label == "Navigation node" &&
+		       slot.enum_values[1].value == 3 &&
+		       slot.enum_values[1].label == "Literal coordinates";
+	};
+	const MissionParamSpec group_reaches = trigger_param_schema(
+		static_cast<int>(opennova::bms::TriggerMainType::Group), 7);
+	const MissionParamSpec single_reaches = trigger_param_schema(
+		static_cast<int>(opennova::bms::TriggerMainType::Single), 7);
+	const MissionParamSpec redirect_group = action_param_schema(
+		static_cast<int>(opennova::bms::ActionType::RedirectGroupTo));
+	const MissionParamSpec redirect_single = action_param_schema(
+		static_cast<int>(opennova::bms::ActionType::RedirectSingleTo));
+	TEST_EXPECT(waypoint_type_is_named(group_reaches.params[1]));
+	TEST_EXPECT(waypoint_type_is_named(single_reaches.params[1]));
+	TEST_EXPECT(waypoint_type_is_named(redirect_group.params[1]));
+	TEST_EXPECT(waypoint_type_is_named(redirect_single.params[1]));
+
 	// MissionDocument integrity: a malformed trigger_index must block remove_event without corrupting counts.
 	MissionDocument malformed;
 	malformed.create_default();
