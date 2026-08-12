@@ -7066,8 +7066,11 @@ that gates `weapon.mnu`. VC/type 7 is selected as solid geometry by the vehicle 
 query when a section authors a VC/VK run; without one, that query falls back to CB/default
 solids. BB/type 8 drives indoor/section visibility. For a resolved static/dynamic collision
 instance, bullet narrow phase touches none of these BVOLs and requires CFAC triangles. An
-entity with no resolved collision instance may still use the separately documented
-compatibility sphere.
+unresolved pool-1 collision binding is fatal rather than substitute geometry:
+retail initializes the client entity's model before its ordinary proximity-table
+CFAC walk `[orig: Entity_InitFromModel @0x40DC30;
+Projectile_RaycastProximitySlots @0x4E5340 ->
+Physics_RaycastAgainstBoneCollision @0x4E4CB0]`.
 
 Persons use the separate recovered COBJ bone-sphere path. When a live section pose is
 published, bones are tested descending; extra radius starts at bullet radius + 0.05 u;

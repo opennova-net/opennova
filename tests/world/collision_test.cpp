@@ -3074,6 +3074,7 @@ void test_round_equal_distance_uses_retail_pool_order() {
     seed.kind = EntityKind::Item;
     seed.health = 100;
     seed.position = Vec3{5.0f, 0.0f, 0.9f};
+    seed.yaw = 90; // identity model placement [orig: entity matrix @0x613F40]
     seed.bound_radius = kOrganicStandInRadius;
     const EntityHandle dynamic = world.registry.spawn(1, seed);
     const EntityHandle statik = world.registry.spawn(2, seed);
@@ -3083,13 +3084,30 @@ void test_round_equal_distance_uses_retail_pool_order() {
     const EntityHandle organic = world.registry.spawn(0, organic_seed);
     CHECK(dynamic.valid() && statik.valid() && organic.valid());
 
+    // Every pool-table item has its initialized CFAC before the witnessed
+    // static -> dynamic -> person arbitration.
+    // [orig: Entity_InitFromModel @0x40DC30;
+    // Projectile_RaycastProximitySlots @0x4E53D4 ->
+    // Physics_RaycastAgainstBoneCollision @0x4E4CB0]
+    CollisionWorld collision;
+    CollisionModel equal_distance_model = axis_triangle_model(0);
+    for (CollisionVertex &vertex : equal_distance_model.vertices)
+        vertex.p[0] = -fx(kOrganicStandInRadius);
+    equal_distance_model.faces[0].min[0] = -fx(kOrganicStandInRadius);
+    equal_distance_model.faces[0].max[0] = -fx(kOrganicStandInRadius);
+    equal_distance_model.faces[0].plane_dist = -fx(kOrganicStandInRadius);
+    const int32_t model_id = collision.add_model(std::move(equal_distance_model));
+    collision.assign_entity(dynamic, model_id);
+    collision.assign_entity(statik, model_id);
+    collision.build_tick_tables(world);
+
     LiveRound &round = world.round_sim.rounds[0];
     round.active = true;
     world.round_sim.active_count = 1;
     round.pos = Vec3{0.0f, 0.0f, 0.9f};
     round.vel = Vec3{10.0f, 0.0f, 0.0f};
     round.max_age_ticks = 100;
-    world.round_sim.tick(world, nullptr, nullptr);
+    world.round_sim.tick(world, nullptr, &collision);
 
     CHECK(world.round_sim.debug_trail_count == 1);
     CHECK(world.round_sim.debug_trail[0].entity == statik.packed);
@@ -3112,9 +3130,18 @@ void test_round_item_skip_mask() {
 
     Entity hit_seed = skipped_seed;
     hit_seed.position = Vec3{8.0f, 0.0f, 0.0f};
+    hit_seed.yaw = 90; // identity model placement [orig: entity matrix @0x613F40]
     hit_seed.engine_flags = 0;
     const EntityHandle eligible = world.registry.spawn(1, hit_seed);
     CHECK(skipped.valid() && eligible.valid());
+
+    // The eligible item reaches its authored CFAC after the flags filter.
+    // [orig: Projectile_RaycastProximitySlots @0x4E53D4 ->
+    // Physics_RaycastAgainstBoneCollision @0x4E4CB0]
+    CollisionWorld collision;
+    collision.assign_entity(
+        eligible, collision.add_model(axis_triangle_model(0)));
+    collision.build_tick_tables(world);
 
     LiveRound &round = world.round_sim.rounds[0];
     round.active = true;
@@ -3122,7 +3149,7 @@ void test_round_item_skip_mask() {
     round.pos = Vec3{};
     round.vel = Vec3{12.0f, 0.0f, 0.0f};
     round.max_age_ticks = 100;
-    world.round_sim.tick(world, nullptr, nullptr);
+    world.round_sim.tick(world, nullptr, &collision);
 
     CHECK(world.round_sim.debug_trail_count == 1);
     CHECK(world.round_sim.debug_trail[0].entity == eligible.packed);
@@ -3185,7 +3212,7 @@ void test_refnum_group_immunity() {
     // runtime item, never substitute sphere geometry.
     // [orig: Entity_InitFromModel @0x40DC30;
     // Physics_RaycastAgainstBoneCollision @0x4E4CB0]
-    cw.assign_entity(plate, cw.add_model(wall_triangle_model()));
+    cw.assign_entity(plate, cw.add_model(axis_triangle_model(0)));
     world.registry.get(person)->position = Vec3{100.0f, 0.0f, 0.0f}; // off the ray
     cw.build_tick_tables(world);
 

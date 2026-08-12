@@ -111,6 +111,44 @@ CollisionModel solid_box_model(double half_extent, double height) {
     return model;
 }
 
+// One authored CFAC face for projectile fixtures. Pool-1 items reach this
+// polygon walk only after their model is initialized.
+// [orig: Entity_InitFromModel @0x40DC30;
+// Physics_RaycastAgainstBoneCollision @0x4E4CB0]
+CollisionModel projectile_wall_model(double half_extent) {
+    CollisionModel model;
+    auto vertex = [&](double y, double z) {
+        CollisionVertex value;
+        value.p[1] = fixed16(y);
+        value.p[2] = fixed16(z);
+        model.vertices.push_back(value);
+    };
+    vertex(-half_extent, -half_extent);
+    vertex(half_extent, -half_extent);
+    vertex(0.0, half_extent);
+
+    CollisionNormal normal;
+    normal.n[0] = -16384;
+    normal.dominant_axis = 4;
+    model.normals.push_back(normal);
+
+    CollisionFace face;
+    face.vertex_index[0] = 0;
+    face.vertex_index[1] = 1;
+    face.vertex_index[2] = 2;
+    face.normal_index = 0;
+    face.min[1] = face.min[2] = fixed16(-half_extent);
+    face.max[1] = face.max[2] = fixed16(half_extent);
+    model.faces.push_back(face);
+
+    CollisionSection section;
+    section.vertex_count = 3;
+    section.normal_count = 1;
+    section.face_count = 1;
+    model.sections.push_back(section);
+    return model;
+}
+
 } // namespace
 
 // The AoE damage applicator gates [orig: Entity_ApplyWeaponDamage @0x4e6820].
@@ -1240,9 +1278,16 @@ void test_round_destroys_item() {
     barrel_seed.has_item_def = true; // retail damage gate: geometry + ItemDef
     barrel_seed.health = 40;
     barrel_seed.position = Vec3{6.0f, 0.0f, 1.0f};
+    barrel_seed.yaw = 90; // identity model placement [orig: entity matrix @0x613F40]
     barrel_seed.bound_radius = 1.0f;
     const EntityHandle barrel = w.registry.spawn(1, barrel_seed);
     w.item_death_traits.set(500, barrel_traits());
+
+    CollisionWorld collision;
+    collision.assign_entity(
+        barrel, collision.add_model(projectile_wall_model(1.0)));
+    collision.build_tick_tables(w);
+    w.collision = &collision;
 
     RoundSpawnParams p;
     p.owner = shooter;

@@ -1,6 +1,7 @@
 // Observable projectile consequence tests through RoundSim's public seam:
 // arming/dud substitution, NoDie, and geometric dead/indestructible blockers.
 #include <cstdio>
+#include <stdexcept>
 #include <vector>
 
 #include "terrain_query/height_field.h"
@@ -915,8 +916,12 @@ void test_visual_dynamic_proxy_projects_decoded_pose_geometry() {
 
 // The decoded shooter's own carrier is excluded exactly like the retail
 // ray[18] mount exclusion; an unrelated proxy behind it still stops the round.
-// An unresolvable graphic keeps the bounded sphere stand-in.
-void test_visual_dynamic_proxy_carrier_gate_and_sphere_standin() {
+// A pool-1 proxy without its initialized model is an impossible client-entity
+// state and raises instead of acquiring replacement collision geometry.
+// [orig: Entity_InitFromModel @0x40DC30;
+// Projectile_RaycastProximitySlots @0x4E5340 ->
+// Physics_RaycastAgainstBoneCollision @0x4E4CB0]
+void test_visual_dynamic_proxy_carrier_gate_and_unresolved_model_raises() {
     World world;
     world.registry.configure_pool(0, 4);
     world.mp_session = true;
@@ -961,18 +966,20 @@ void test_visual_dynamic_proxy_carrier_gate_and_sphere_standin() {
     CHECK(hit.position_q16.x > 8 * 65536);
     CHECK(hit.position_q16.x < 12 * 65536);
 
-    // Unresolved graphic: the bounded compatibility sphere still stops rounds
-    // (the D-ITEM-1 stand-in rule, applied wire-side).
+    // Retail cannot enter the ordinary pool-1 face walk with this state.
     ProjectileDynamicProxy unresolved;
     unresolved.wire_handle = 0x1009;
     unresolved.model_id = -1;
     unresolved.position_q16 = FixedVec3{5 * 65536, 0, 0};
     unresolved.bound_radius_q16 = 0x18000; // 1.5 u
     collision.replace_projectile_dynamic_proxies({unresolved});
-    const ProjectileHit sphere_hit = collision.trace_projectile(world, trace);
-    CHECK(sphere_hit.hit_class == ProjectileHitClass::DynamicEntity);
-    CHECK(!sphere_hit.geometry_entity.valid());
-    CHECK(sphere_hit.position_q16.x <= 5 * 65536);
+    bool raised = false;
+    try {
+        (void)collision.trace_projectile(world, trace);
+    } catch (const std::logic_error &) {
+        raised = true;
+    }
+    CHECK(raised);
 }
 
 // A decoded vehicle/item shooter never clips its own wire slot: the dyn-proxy
@@ -1620,7 +1627,7 @@ int main() {
     test_visual_person_proxy_keeps_wire_identity_out_of_authority();
     test_terrain_impact_samples_charmap_surface();
     test_visual_dynamic_proxy_projects_decoded_pose_geometry();
-    test_visual_dynamic_proxy_carrier_gate_and_sphere_standin();
+    test_visual_dynamic_proxy_carrier_gate_and_unresolved_model_raises();
     test_visual_dynamic_proxy_excludes_shooter_self_slot();
     test_visual_throwable_motor_sweeps_wire_proxies();
     test_visual_infantry_proxy_joins_person_walk();
