@@ -123,8 +123,12 @@ struct VehicleTraits {
     int32_t bob = 0;           // itemDef+0x93C — porpoise exit fold
     int32_t flip = 0;          // itemDef+0x948 — ground movers' tip threshold (*0.01)
     // Platform probe geometry from the model bound boxes (16.16 model space;
-    // modelData [0x28..0x3C] + the [0x40..0x4C] footprint — our source is the
-    // 3di collision AABB; box1-vs-box2 provenance is a tracked spec unknown):
+    // modelData [0x28..0x3C] + the [0x40..0x4C] footprint). Provenance
+    // witnessed 2026-08-12: box Z = the CMDL header bbox Z pair, box X/Y =
+    // the lower-half type-1 BVOL fold, footprint = the bottom-eighth fold
+    // with the q+0x2000 clamps [orig: Threedi_BuildCollisionModelFromChunks
+    // @ 0x5b3bf0 tail @ 0x5b4455..0x5b45db]; filled from
+    // threedi_3di3_collision_probe_boxes at collision resolve:
     int32_t box_z_lo = 0, box_z_hi = 0; // keel/deck Z pair
     int32_t box_x_lo = 0, box_x_hi = 0; // length pair
     int32_t box_y_lo = 0, box_y_hi = 0; // beam pair

@@ -1342,10 +1342,45 @@ If graphicModel == NULL: only the byte+0x2F2 / authority-0x10 updates run; retur
 
 ### 3. Probe geometry — 7 points from the model boxes [orig: 0x481CB4..0x48209D]
 
-`modelData = *(graphicModel + 0xB0)`. Two boxes read (16.16 model space; axis
-interpretation inferred from use — pairs are (lo,hi)):
+`modelData = *(graphicModel + 0xB0)`. Two boxes read (16.16 model space;
+pairs are (lo,hi)):
 box1: Z = ([0x28],[0x2C]), X = ([0x30],[0x34]), Y = ([0x38],[0x3C]);
 box2 (footprint): X = ([0x40],[0x44]), Y = ([0x48],[0x4C]).
+
+**Provenance WITNESSED 2026-08-12** — `modelData` IS the runtime collision
+block (the same `gpm_model[44]` pointer `Entity_InitFromModel @ 0x40dc30`
+reads as collision data), and the collision-model builder derives both boxes
+at load time [orig: `Threedi_BuildCollisionModelFromChunks @ 0x5b3bf0`, tail
+@ 0x5b4455..0x5b45db]:
+
+- The box1 **Z pair ([0x28]/[0x2C]) is the CMDL header bbox Z pair verbatim**
+  (runtime dwords [10]/[11], copied raw from the chunk @ 0x5b3d06/@ 0x5b3d18)
+  — NOT the deepest collision vertex. Wheeled hulls author their origin at
+  wheel contact with the CMDL floor at ~0 (DTruck1: `+0.01`, while its wheel
+  COBJ volumes dip to `−0.334`), so a solve resting pads at `[0x28] + q`
+  puts the ORIGIN on the terrain.
+- The box1 **X/Y pairs fold the type-1 (solid) BVOL extents** of every volume
+  whose min-Z lies below `CMDL minZ + zspan/2` (the lower HALF; type filter
+  @ 0x5b44c4, thresholds @ 0x5b446e/@ 0x5b4477). Volumes walk through the
+  per-COBJ runs only — unowned trailing BVOLs stay dead.
+- The box2 **footprint X/Y pairs fold the same extents** over volumes whose
+  min-Z lies below `CMDL minZ + zspan/8` (the bottom EIGHTH — the wheel/skid
+  volumes), then clamp each side to at least `q + 0x2000` from the origin
+  with `q = (box1 Y span) >> 2` (@ 0x5b4563..0x5b45b0). The half box stores
+  unclamped; both folds start from ±0x40000000 sentinels that survive when
+  nothing qualifies.
+
+Port: `threedi_3di3_collision_probe_boxes` (engine/formats/threedi/
+threedi_3di3.h), consumed by the simassets collision resolve into
+`VehicleTraits`; pinned by ctest `threedi_collision_3di`
+(`test_collision_probe_boxes_follow_the_witnessed_folds`). The earlier
+stand-in (union of per-COBJ AABBs on all axes) floated every wheeled hull by
+its below-origin wheel depth — the user-visible SP parked-truck float on
+00TRa (~0.33 u for DTruck1/2). Ledgered **D-VEH-1**, minted-and-closed
+2026-08-12. A model the derivation rejects (no CMDL Z span / no lower-half
+type-1 volume) keeps zeroed traits boxes and therefore the solves'
+terrain-clamp stand-in — the same observable as retail's sentinel-boxed hull,
+whose solve-active test also fails.
 
 ```c
 q  = (m[0x3C] - m[0x38]) >> 2;              // beam/4 — corner probe radius [0x481CF4]
@@ -1749,8 +1784,6 @@ free-runs stale (both flags are produced only here).
   family — grill once for both).
 - The writer of the per-corner probe springs +0x2D4..+0x2E0 (read-only here).
 - `Vehicle_UpdateTurretRotation` interior (cosmetic heading-accel at planing speed).
-- modelData axis naming ([0x28..0x4C] pair assignment) is inferred from use; the
-  box1-vs-box2 provenance (render vs collision box) untraced.
 - The lateral sign of row1 vs model +Y (pairing k↔k is verified; the world-side
   handedness note in §9 is interpretive).
 - The dead yaw-kick block (§6) — witnessed dead; do not port.
@@ -3512,8 +3545,7 @@ ground-family shared deferrals (the contact-direction slope-velocity feed,
 the park/wreck/crash latch machine, spring sinks/oscillators — D-NET-161),
 the bike lean smoother (`Entity_SmoothHeadingToTarget @ 0x45B2C0` —
 FPU-garbled, disasm-pinned), the analog collective channel, the tank
-track-scroll/turret-slew presentation, the modelData box-pair provenance
-(the platform probe boxes — §3's tracked unknown), the
+track-scroll/turret-slew presentation, the
 `Math_FixedPointMatrixToEulerAngles` interior
 (`@ 0x613310`), the `Transform_ComparePartial` field scope (§6.15 — ported as
 planar XY by structural argument), and the HOST-side platform scope (authority
