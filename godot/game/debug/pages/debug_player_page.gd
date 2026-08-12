@@ -162,7 +162,7 @@ func _clear_live() -> void:
 ## The local player's stance and water classification — the same facts the
 ## recoil, spread, and aimed-shot gates read, so the panel explains what the
 ## sim decided rather than re-deriving its own verdict.
-func _append_body_details(sim: Object, combat: PackedStringArray) -> void:
+func _append_body_details(sim: Simulation, combat: PackedStringArray) -> void:
 	var body: Dictionary = sim.get_local_player_body_debug()
 	if body.is_empty():
 		return

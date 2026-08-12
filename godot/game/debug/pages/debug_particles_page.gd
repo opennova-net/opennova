@@ -123,7 +123,7 @@ func refresh() -> void:
 
 ## The renderer's draw-list diagnostics: what each render domain actually
 ## compiled and drew this frame, plus the texture atlas occupancy.
-func _refresh_draw_lists(world: Object) -> void:
+func _refresh_draw_lists(world: EffectWorld) -> void:
 	if _draw_list_label == null:
 		return
 	var report: Dictionary = world.get_debug_draw_list_report()
