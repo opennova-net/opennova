@@ -13,6 +13,7 @@
 //     the local player's LocalResolveDebug capture).
 #include <cstdint>
 #include <cstdio>
+#include <stdexcept>
 #include <vector>
 
 #include "terrain_query/height_field.h"
@@ -3175,10 +3176,16 @@ void test_refnum_group_immunity() {
     Entity plate_seed;
     plate_seed.kind = EntityKind::Item;
     plate_seed.position = Vec3{4.0f, 0.0f, 0.9f};
-    plate_seed.bound_radius = 1.0f; // compatibility sphere, no resolved model
+    plate_seed.yaw = 90;
+    plate_seed.bound_radius = 1.0f;
     plate_seed.ref_num = 9;
     const EntityHandle plate = world.registry.spawn(1, plate_seed);
     CHECK(gun.valid() && plate.valid());
+    // The self-site gate is tested with the same required CFAC path as a
+    // runtime item, never substitute sphere geometry.
+    // [orig: Entity_InitFromModel @0x40DC30;
+    // Physics_RaycastAgainstBoneCollision @0x4E4CB0]
+    cw.assign_entity(plate, cw.add_model(wall_triangle_model()));
     world.registry.get(person)->position = Vec3{100.0f, 0.0f, 0.0f}; // off the ray
     cw.build_tick_tables(world);
 
@@ -3469,11 +3476,12 @@ void test_projectile_polygon_raycast() {
 // A placed throwable is cloned into pool 1 after the mission-start asset sweep,
 // but retail initializes that clone's item model before the ordinary pool-1
 // projectile CFAC walk. The reimpl must demand-resolve the late collision
-// instance before its unresolved 0.5-unit sphere can decide the hit.
+// instance; an unresolved clone/model state is fatal rather than replacement
+// collision geometry.
 // [orig: Entity_CloneFromTemplateByType @0x4398A0 -> Entity_InitFromModel
 // @0x40DC30; Projectile_RaycastProximitySlots @0x4E53D4 ->
 // Physics_RaycastAgainstBoneCollision @0x4E4CB0]
-void test_late_pool1_item_resolves_cfac_before_sphere_fallback() {
+void test_late_pool1_item_resolves_cfac_or_raises() {
     World world;
     world.registry.configure_pool(0, 2);
     world.registry.configure_pool(1, 2);
@@ -3548,8 +3556,12 @@ void test_late_pool1_item_resolves_cfac_before_sphere_fallback() {
     CHECK(replacement_hit.material_flags == 0x0034u);
     CHECK(provider.ensure_calls == 2);
 
-    // A genuinely model-less late item still receives the bounded compatibility
-    // sphere, preserving the existing unresolved-item rule.
+    // Retail cannot reach the projectile walk with a model-less placed clone:
+    // model initialization is part of the clone path. Raise the broken invariant
+    // instead of concealing it with proximity-sphere collision.
+    // [orig: Entity_CloneFromTemplateByType @0x4398A0 ->
+    // Entity_InitFromModel @0x40DC30; the resulting model feeds
+    // Physics_RaycastAgainstBoneCollision @0x4E4CB0]
     Entity unresolved = placed;
     unresolved.position = {8.0f, 0.0f, 0.0f};
     unresolved.uniform_scale_q16 = 0;
@@ -3561,10 +3573,13 @@ void test_late_pool1_item_resolves_cfac_before_sphere_fallback() {
     sphere.extra_ignore = replacement;
     sphere.start = FixedVec3{fx(6.0), 0, 0};
     sphere.end = FixedVec3{fx(10.0), 0, 0};
-    const ProjectileHit sphere_hit = collision.trace_projectile(world, sphere);
-    CHECK(sphere_hit.hit_class == ProjectileHitClass::DynamicEntity);
-    CHECK(sphere_hit.geometry_entity == unresolved_h);
-    CHECK(sphere_hit.section_index == -1);
+    bool raised = false;
+    try {
+        (void)collision.trace_projectile(world, sphere);
+    } catch (const std::logic_error &) {
+        raised = true;
+    }
+    CHECK(raised);
 }
 
 void test_projectile_trace_authority_radius_and_damage_gates() {
@@ -3763,8 +3778,8 @@ void test_projectile_trace_world_ordering() {
 
     // A resolved BVOL-only model is not substituted for projectile CFAC in retail.
     // This covers every named gameplay family in this pass: CB, CL, CA, VC, BB,
-    // CD, CT, CF, DH/DM/DL, and CP. Unresolved entities retain the separately
-    // tested compatibility-sphere fallback.
+    // CD, CT, CF, DH/DM/DL, and CP. This is a resolved-model property; dynamic
+    // items without their required model fail the invariant tested above.
     for (const int type : {1, 4, 6, 7, 8, 9, 10, 13, 16, 17, 18, 19}) {
         Rig bvol_only(box_model(type, 0, 1.0, 1.0, 2.0), 5.0, 0.0);
         q.owner = bvol_only.soldier;
@@ -3902,12 +3917,17 @@ void test_projectile_trace_domain_switches_preserve_farther_pool_hit() {
     Entity item;
     item.kind = EntityKind::Item;
     item.position = {8.0f, 0.0f, -4.0f};
+    item.yaw = 90;
     item.bound_radius = 0.4f;
     const EntityHandle item_h = world.registry.spawn(1, item);
 
     Field flat(0);
     CollisionWorld collision;
     collision.terrain = &flat.field;
+    // The farther pool-1 witness uses its authored-model narrow phase.
+    // [orig: Projectile_RaycastProximitySlots @0x4E53D4 ->
+    // Physics_RaycastAgainstBoneCollision @0x4E4CB0]
+    collision.assign_entity(item_h, collision.add_model(wall_triangle_model()));
     world.env.water_z = fx(2.0);
     collision.build_tick_tables(world);
 
@@ -4008,7 +4028,7 @@ int main() {
     test_round_indestructible_organic_still_collides();
     test_round_person_sections_drive_hit_and_death_animation();
     test_projectile_polygon_raycast();
-    test_late_pool1_item_resolves_cfac_before_sphere_fallback();
+    test_late_pool1_item_resolves_cfac_or_raises();
     test_projectile_trace_authority_radius_and_damage_gates();
     test_published_person_bone_pose();
     test_person_mesh_row_keeps_authored_zero_sphere();

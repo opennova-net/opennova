@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <stdexcept>
 #include <terrain_query/height_field.h>
 
 #include "collision_detail.h"
@@ -520,13 +521,19 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
                 // their model initialization precedes the same CFAC projectile
                 // walk as mission-start items. Give the retained host asset
                 // provider one idempotent chance to attach that late allocation
-                // before choosing the unresolved compatibility sphere.
+                // before the polygon walk. Failure is an impossible clone/model
+                // state, not alternate collision geometry: surface it instead of
+                // silently widening the item to its proximity sphere.
                 // [orig: Entity_CloneFromTemplateByType @0x4398A0 ->
                 // Entity_InitFromModel @0x40DC30; Projectile_RaycastProximitySlots
                 // @0x4E53D4 -> Physics_RaycastAgainstBoneCollision @0x4E4CB0]
                 const_cast<CollisionWorld *>(this)->ensure_entity_instance(
                     const_cast<World &>(world), h);
                 target = trace_target_view(world, h);
+                if (target == nullptr) {
+                    throw std::logic_error(
+                        "CollisionWorld::trace_projectile: pool-1 item has no live collision model");
+                }
             }
             if (profile_trace && target != nullptr && target->model != nullptr) {
                 const int64_t faces =

@@ -385,9 +385,10 @@ Closed 2026-08-12: **D-THROW-1** -> `FIXED` — Throwable item sweeps now exclud
 Closed 2026-07-22: **D-THROW-3** -> `FIXED` — Placed-device LOS now routes through the full terrain-plus-sector collision ray, excluding the device and candidate (full detail: world-wac-ai-re.md + git history).
 Closed 2026-07-21: **D-THROW-5** -> `FIXED` — The PowerThrow HUDPOWERBAR outline/fill/percent presentation and windup-state feed now match `HUD_DrawPowerThrowChargeBar @0x599830` (world-wac-ai-re §27.3/§27.8) (full detail: world-wac-ai-re.md + git history).
 Closed 2026-08-12: **D-THROW-8** -> `FIXED` — the pool-1 projectile walk demand-resolves
-late placed-item collision assets before choosing narrow phase, so resolved devices use their CFAC
-and only genuinely model-less items retain the bounded sphere. Packed-slot reuse is guarded by the
-registry allocation serial. `[orig: Entity_CloneFromTemplateByType @0x4398A0 ->
+late placed-item collision assets before narrow phase, so devices use their authored CFAC. A clone
+that still has no live collision model raises a fatal invariant instead of acquiring substitute
+sphere geometry. Packed-slot reuse is guarded by the registry allocation serial.
+`[orig: Entity_CloneFromTemplateByType @0x4398A0 ->
 Entity_InitFromModel @0x40DC30; Projectile_RaycastProximitySlots @0x4E53D4 ->
 Physics_RaycastAgainstBoneCollision @0x4E4CB0]` (full detail: world-wac-ai-re.md §27.8).
 Closed: **D-THROW-9** -> `FIXED` — Ported devices are pool-1 entities and already decrement arm delay once per tick, matching retail (full detail: world-wac-ai-re.md + git history).
@@ -907,13 +908,13 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 
 | Domain | OPEN | NEEDS-RE | WITNESSED-READY-DEFERRED | Domain open total | Closed rows still tabled |
 |---|---|---|---|---|---|
-| Net | 18 | 0 | 7 | 25 | 1 |
+| Net | 17 | 0 | 7 | 24 | 1 |
 | Environment | 0 | 0 | 3 | 3 | 0 |
-| World / AI + events | 53 | 4 | 6 | 63 | 3 |
+| World / AI + events | 52 | 4 | 6 | 62 | 3 |
 | UI (menu/ctrl/sound/playerinfo/HUD) | 37 | 1 | 3 | 41 | 9 |
 | Mission `.mis` | 0 | 2 | 1 | 3 | 0 |
 | LW `.3di` | 0 | 2 | 1 | 3 | 0 |
-| Particles `.ptl` | 2 | 0 | 0 | 2 | 0 |
+| Particles `.ptl` | 1 | 0 | 0 | 1 | 0 |
 | 3DI `.3di` (GP) | 0 | 1 | 0 | 1 | 0 |
 | VFS / PFF mount stack | 0 | 1 | 0 | 1 | 0 |
 | Credits (CBIN) | 0 | 1 | 0 | 1 | 0 |
@@ -923,7 +924,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Render — materials/state | 0 | 0 | 1 | 1 | 0 |
 | Render — draw order | 2 | 0 | 1 | 3 | 0 |
 | Render — lighting | 3 | 0 | 2 | 5 | 0 |
-| **Total** | **121** | **13** | **25** | **159** | 13 |
+| **Total** | **118** | **13** | **25** | **156** | 13 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-EVT-3, D-INF-20, D-NET-136, D-NET-169, D-NET-179, D-NET-64, D-NET-97.
 

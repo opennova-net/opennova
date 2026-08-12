@@ -1495,10 +1495,8 @@ Vector3 TerrainData::get_surface_normal_world(const Vector3 &p_world_pos) const 
 	const opennova::terrain::TerrainSurfaceNormal normal =
 			opennova::terrain::height_field_surface_normal_world(
 					height_field_from(cpt, trn), p_world_pos.x, p_world_pos.z);
-	// The portable texture basis is {source X, source Z, height}; map that
-	// once at the Godot boundary to {X, Y-up, Z}.
-	// [orig: Terrain_GenerateNormalMap @0x603210; WAC fx2ssn consumes the
-	// terrain table at WacScript_SpawnEffectAtSsnEntity @0x4F23A0]
+	// The cited portable contract owns the recovered behavior. This device leg
+	// only maps its {source X, source Z, height} basis to Godot {X, Y-up, Z}.
 	return Vector3(static_cast<float>(normal.x),
 	               static_cast<float>(normal.up),
 	               static_cast<float>(normal.z));
