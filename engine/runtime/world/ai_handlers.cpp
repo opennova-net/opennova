@@ -309,11 +309,90 @@ void h_enter_ground_evade(AiThinkCtx &ctx) {
     ctx.sys->queue_death_event(e);             // dead: crash(3)/still(4) by |vel|
 }
 
+// The per-site aim offset retail passes to the solver through the `distance`
+// global [orig: @0x473367..0x47337E, repeated at every mobile/continuation
+// site — ATEAM (0x20) rides the sweep phase, ATEAM_LOCK (0x40) a fixed -3.0u,
+// else 0].
+static int32_t sm_aim_offset(const AiEntity &e) {
+    if ((e.profile.flags100 & 0x20) != 0) return e.brain.f[AiBrain::kSweepPhase];
+    if ((e.profile.flags100 & 0x40) != 0) return static_cast<int32_t>(0xFFFD0000u);
+    return 0;
+}
+
+// One SM weapon chain — the per-weapon block repeated at the eight
+// AIEntity_ProcessWeaponFire solver sites [orig: stationary @0x472F6E/0x472FF8,
+// mobile @0x4733A4/0x473488/0x4735C9/0x47386B, continuation @0x473D57/0x473E44]:
+// ammo + cooldown gate, solve, the two-draw scatter (mobile/continuation only),
+// fire through the authoritative round path, then ammo--/cooldown-reset/
+// last-weapon/bone-flag bookkeeping (§17.6).
+static bool sm_weapon_fire(AiThinkCtx &ctx, AiEntity &e, int which, const Entity *tent,
+                           int32_t aim_offset, bool skip_los, bool scatter) {
+    AiBrain &b = e.brain;
+    World &world = *ctx.world;
+    const AiProfile::WeaponFire &wb = (which == 1) ? e.profile.fire_a : e.profile.fire_b;
+    const int32_t interval =
+            (which == 1) ? e.profile.fire_interval_a : e.profile.fire_interval_b;
+    const int ammo_idx = (which == 1) ? AiBrain::kAmmoA : AiBrain::kAmmoB;
+    if (wb.ammo_index < 0) return false; // unarmed block (no "*_weap" resolved)
+    if (b.f[ammo_idx] == 0) return false; // [orig: the ammo dword gate @0x472F7E]
+    // The packed cooldown words: low u16 = primary (+208), high = secondary
+    // (+210), vs the .aip rate [orig: @0x472F0B cmp word +208, profile+124].
+    const uint32_t pair = static_cast<uint32_t>(b.f[AiBrain::kCooldownPair]);
+    const uint32_t cd = (which == 1) ? (pair & 0xFFFFu) : (pair >> 16);
+    if (static_cast<int32_t>(cd) < interval) return false;
+
+    int32_t out[6];
+    if (!ctx.sys->solve_weapon_fire_transform(world, e, tent, wb, aim_offset, skip_los, out))
+        return false;
+
+    if (scatter) {
+        // Saved continuation deltas, captured before the scatter draws
+        // [orig: @0x4735F9..0x47363A — out minus entity pos/angles; primary
+        // +0x2D8, secondary +0x2F0].
+        const int base = (which == 1) ? AiBrain::kSavedDeltaA : AiBrain::kSavedDeltaB;
+        b.f[base + 0] = out[0] - e.pos[0];
+        b.f[base + 1] = out[1] - e.pos[1];
+        b.f[base + 2] = out[2] - e.pos[2];
+        b.f[base + 3] = out[3] - e.heading;
+        b.f[base + 4] = out[4];
+        b.f[base + 5] = out[5];
+        // Two draws of the shared rotate-LCG, yaw then pitch: mag = (u16 %
+        // (6 - brain[43])) scaled by 8947848.0f (~0.75 deg BAM); odd scaled
+        // value adds, even subtracts [orig: @0x473640..0x473716 —
+        // dword_31BFBB8 rol-LCG, flt_7C6F60, the &0x80000001 parity fold].
+        const int32_t mod = 6 - b.f[AiBrain::kAccuracy];
+        for (int angle = 3; angle <= 4 && mod > 0; ++angle) {
+            const uint16_t draw = static_cast<uint16_t>(ctx.sys->prng_step_a());
+            const int32_t scaled = static_cast<int32_t>(
+                    static_cast<double>(static_cast<int32_t>(draw) % mod) * 8947848.0f);
+            if ((scaled & 1) != 0)
+                out[angle] += scaled;
+            else
+                out[angle] -= scaled;
+        }
+    }
+
+    if (!ctx.sys->fire_ai_round(world, e, out, out[3], out[4], wb.ammo_index))
+        return false;
+
+    // Fire bookkeeping [orig: §17.6 — ammo--, cooldown word = 0, brain[106] =
+    // which, bone-flag |= 0x40 @0x47306F; the burst window arms on fire].
+    if (b.f[ammo_idx] > 0) --b.f[ammo_idx]; // [orig: @0x473008 dec only when > 0]
+    b.f[AiBrain::kCooldownPair] = static_cast<int32_t>(
+            (which == 1) ? (pair & 0xFFFF0000u) : (pair & 0x0000FFFFu));
+    b.f[AiBrain::kLastWeapon] = which;
+    b.bytes()[AiBrain::kBoneFlagByte] |= 0x40;
+    if ((e.profile.flags100 & 0x40) != 0 && b.f[AiBrain::kBurstWindow] == 0)
+        b.f[AiBrain::kBurstWindow] = 1;
+    return true;
+}
+
 // [orig: AIEntity_ProcessWeaponFire @0x472e00] the state-17 GROUND_COMBAT tick — the
-// vehicle/emplacement fire+combat routine (full digest world-wac-ai-re §17.6). Ported
-// structurally; the fire-transform solver (Entity_ComputeWeaponFireTransform_0
-// @0x455b30, §17.7 item 2) is a visible stub, so no SM-layer round spawns yet — the
-// D-AI-2 residual. Riflemen fire through the infantry pass instead (§17.4).
+// vehicle/emplacement fire+combat routine (full digest world-wac-ai-re §17.6). The
+// fire-transform solver is ported (solve_weapon_fire_transform — Entity_
+// ComputeWeaponFireTransform_0 @0x456980), so SM vehicles and emplacements spawn
+// rounds through the same authoritative path as infantry. Riflemen still fire
+// through the infantry pass (§17.4).
 void h_ground_combat_tick(AiThinkCtx &ctx) {
     AiEntity &e = *ctx.self;
     AiBrain &b = e.brain;
@@ -350,10 +429,24 @@ void h_ground_combat_tick(AiThinkCtx &ctx) {
         b.f[AiBrain::kRetargetTimer] += 16; // the §16.3 retarget cadence incrementer
     }
 
-    // Stationary mode (profile+100 & 0x80): fire rides the turret solver's aligned flag —
-    // unported (the D-AI-2 residual), so only the give-up + bookkeeping run.
+    const int32_t tgt_packed = b.f[AiBrain::kTargetSlot];
+    Entity *tent = (tgt_packed != 0)
+                       ? world.registry.get(EntityHandle{static_cast<uint16_t>(tgt_packed - 1)})
+                       : nullptr;
+
+    // Stationary mode (RC_FIRE, profile+100 & 0x80): fire only while the
+    // commanded weapons-free byte is set [orig: @0x472EDE cmp brain+0x311 —
+    // written by the WAC AI command, case 0x15]. The per-processed-tick
+    // SetAITarget(0) below means the solver usually holds no target here, so
+    // in practice only the WEAPON_PITCHLOCKED* legs fire (artillery at the
+    // commanded elevation). No scatter on this path (the LCG draws appear only
+    // at the mobile/continuation sites).
     if ((e.profile.flags100 & 0x80) != 0) {
-        ++ctx.sys->unported_calls;
+        if (b.bytes()[AiBrain::kGuardFireByte] != 0) {
+            if (!sm_weapon_fire(ctx, e, 1, tent, 0, false, false) &&
+                !sm_weapon_fire(ctx, e, 2, tent, 0, false, false))
+                b.bytes()[AiBrain::kBoneFlagByte] = 0; // both held [orig: @0x47308B]
+        }
         if (b.f[AiBrain::kCombatTimer] > 620)
             b.set_pend(b.f[AiBrain::kFallback]); // [orig: pending = fallback past 620]
         if (processed) {
@@ -362,11 +455,6 @@ void h_ground_combat_tick(AiThinkCtx &ctx) {
         }
         return;
     }
-
-    const int32_t tgt_packed = b.f[AiBrain::kTargetSlot];
-    Entity *tent = (tgt_packed != 0)
-                       ? world.registry.get(EntityHandle{static_cast<uint16_t>(tgt_packed - 1)})
-                       : nullptr;
 
     if (tent == nullptr) { // no target: sweep-search + acquire [orig: the brain[38]==0 leg]
         b.f[AiBrain::kSweepPhase] = -196608;
@@ -416,7 +504,18 @@ void h_ground_combat_tick(AiThinkCtx &ctx) {
         return;
     }
 
-    if (!processed) return; // continuation volleys ride the solver — stubbed (D-AI-2)
+    if (!processed) {
+        // Continuation volleys between processed ticks: the last-fired weapon
+        // keeps the volley running, cooldown-gated, re-solved WITH LOS (those
+        // sites pass arg7 = 0) and with a fresh aim offset [orig: the
+        // @0x473D57 (primary) / @0x473E44 (secondary) sites; brain[106] routes
+        // which]. Only sub-16-tick rates ever pass the cooldown gate here.
+        const int32_t which = b.f[AiBrain::kLastWeapon];
+        if (which == 1 || which == 2)
+            (void)sm_weapon_fire(ctx, e, static_cast<int>(which), tent, sm_aim_offset(e),
+                                 /*skip_los=*/false, /*scatter=*/true);
+        return;
+    }
 
     if (b.f[AiBrain::kFireDelay] != 0) { // the engage fire delay: move only
         if ((e.profile.flags100 & 1) != 0) ctx.sys->update_waypoint_movement(e, *ctx.world);
@@ -463,13 +562,30 @@ void h_ground_combat_tick(AiThinkCtx &ctx) {
         b.f[AiBrain::kOutSpeed] = b.f[AiBrain::kSpeedA];
     }
 
-    // The fire gate + weapon legs [orig: heading delta <= (profile+67|1|2)>>1, then the
-    // per-weapon cooldown/ammo/transform/scatter chain] ride the fire-transform solver —
-    // the visible D-AI-2 stub until Entity_ComputeWeaponFireTransform_0 is witnessed.
+    // The sweep advance (ATEAM, per processed tick with a live target): phase
+    // += 10918 until +3.0u, then reset to -3.0u and drop the target
+    // [orig: §17.6 sweep — brain[180] += 10918, > 196608 -> -196608 + clear].
+    if ((e.profile.flags100 & 0x20) != 0) {
+        b.f[AiBrain::kSweepPhase] += 10918;
+        if (b.f[AiBrain::kSweepPhase] > 196608) {
+            b.f[AiBrain::kSweepPhase] = -196608;
+            ctx.sys->ai_set_target(world, e, EntityHandle{});
+            return;
+        }
+    }
+
+    // The fire gate + weapon legs [orig: heading delta <= (profile+67|1|2)>>1
+    // folded to 1/256 turns, then the per-weapon ammo/cooldown/solve/scatter
+    // chain — the mobile sites solve with LOS deferred (arg7 = 1)].
     const uint32_t hd = static_cast<uint32_t>(bearing - e.heading) >> 24;
     const uint32_t folded = hd >= 0x80 ? 256 - hd : hd;
-    if (folded <= static_cast<uint32_t>(((e.profile.fov_secondary | 1) | 2) >> 1))
-        ++ctx.sys->unported_calls;
+    if (folded <= static_cast<uint32_t>(((e.profile.fov_secondary | 1) | 2) >> 1)) {
+        if (!sm_weapon_fire(ctx, e, 1, tent, sm_aim_offset(e), /*skip_los=*/true,
+                            /*scatter=*/true) &&
+            !sm_weapon_fire(ctx, e, 2, tent, sm_aim_offset(e), /*skip_los=*/true,
+                            /*scatter=*/true))
+            b.bytes()[AiBrain::kBoneFlagByte] = 0; // both held [orig: @0x473402]
+    }
 }
 
 // The shared alert block every death-family enter runs: alert cur/prev = 2, the command

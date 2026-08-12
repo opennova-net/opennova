@@ -1,7 +1,7 @@
 #pragma once
 
 #include "mission/bms.h"
-#include "mission/promote.h" // PromoteOptions::AiProfileSpeeds (the install row)
+#include "mission/promote.h" // PromoteOptions::AiProfileRow (the install row)
 
 #include <cstdint>
 #include <functional>
@@ -43,19 +43,18 @@ enum class MissionTextSource { kNone, kMission, kFallback };
 MissionTextSource resolve_mission_text(const BootFileSource &files,
 		const std::string &mission_file_basename, std::vector<uint8_t> &out);
 
-// The .aip PARSE lives in engine/formats/aip (aip::parse_profile_speeds — the
-// two witnessed fields, partial-port documented there; the remainder is the
-// tracked D-AI-11 (h) gap). This resolver keeps the profile walk and the
-// install row: absent keys stay -1 (unauthored — the promote-time brain seed
-// then keeps the default_speed stand-in)
+// The .aip PARSE lives in engine/formats/aip (aip::parse_profile — the
+// witnessed GROUND-type set; the HELO set is the remaining tracked gap).
+// This resolver keeps the profile walk and the install row: absent keys keep
+// their sentinels (the promote-time brain seed then keeps its stand-ins)
 // [orig: Entity_InitVehicleAIFromDef seeds brain[50]/brain[49]
 //  @0x4688D3/@0x4688C7].
 
 // The mission's distinct ai_textfile profile set, lowercase, in entity order
-// (first occurrence wins), and each profile's resolved .aip speeds. Profiles
-// whose .aip is absent or carries neither key contribute no row, exactly like
-// the shell resolver this replaces.
-std::vector<PromoteOptions::AiProfileSpeeds> resolve_ai_profile_speeds(
+// (first occurrence wins), and each profile's parsed .aip row. Files that
+// parse no witnessed field contribute no row, exactly like the speeds-only
+// resolver this extends.
+std::vector<PromoteOptions::AiProfileRow> resolve_ai_profiles(
 		const BootFileSource &files, const bms::File &mission);
 
 // What the embedder supplied, gating which steps run. The flags mirror the
@@ -78,9 +77,9 @@ struct BootParams {
 struct BootSteps {
 	// Seat/mount specs install before promotion (they persist across resets).
 	std::function<void()> install_seat_specs; // root && item_db
-	// The .aip profile default speeds per mission ai_textfile — without them,
-	// unscripted AI vehicles crawl at the promote stand-in speed.
-	std::function<void()> install_ai_profile_speeds; // root
+	// The .aip profiles per mission ai_textfile — without them, unscripted AI
+	// vehicles crawl at the promote stand-in speed and SM weapons stay unarmed.
+	std::function<void()> install_ai_profiles; // root
 	// The mission's raw .til bytes BEFORE load so the host bring-up streams
 	// the S2C 0x45 terrain-tile load to joiners (net-re §5.37).
 	std::function<void()> install_terrain_til; // has_terrain_til

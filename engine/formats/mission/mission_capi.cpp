@@ -224,7 +224,10 @@ MISSION_EXPORT int opennova_mission_load_path(OpenNovaMissionDocument *document,
 	}
 	const std::string path_string(path);
 	if (extension_lower(path_string) == "mis") {
-		return document->document.load_mis_file(path_string) ? 1 : 0;
+		// The flat C ABI carries no items.def channel, so FFI callers load .mis
+		// without pool classification: every record lands in the generic item pool
+		// (mission.h MisItemTypeResolver — explicit empty resolver).
+		return document->document.load_mis_file(path_string, {}) ? 1 : 0;
 	}
 	return document->document.load_bms_file(path_string) ? 1 : 0;
 }

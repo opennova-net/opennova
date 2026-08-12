@@ -242,6 +242,11 @@ struct HudFrameState {
 	// (Overlays/STROVER_MISSIONOBJECTIVES); empty falls back to the literal
 	// [orig: header STROVER_MISSIONOBJECTIVES @ 0x5ba986].
 	std::string objectives_header;
+	// The objectives-panel alpha byte, folded into every panel draw color's
+	// top byte [orig: dword_24C18CC — 0/255, flipped ^= 0xFF by the co-op
+	// input action @ 0x49b68b]. The presenter's show/hide toggle stands in
+	// for the input binding row (identical visually: alpha 0 draws nothing).
+	uint32_t objectives_alpha = 0xFF;
 	HudWeaponState weapon;
 	HudWaypointState waypoint;
 	std::vector<HudObjectiveRow> objectives;

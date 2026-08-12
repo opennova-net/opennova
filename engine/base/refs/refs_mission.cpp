@@ -27,7 +27,10 @@ bool parse_mission_file(const std::string& source_path, const uint8_t* data, siz
     if (ext_of_source(source_path) == "mis") {
         opennova::mission::MissionDocument document;
         const std::string text(reinterpret_cast<const char*>(data), size);
-        if (!document.load_mis_text(text)) {
+        // No items.def is loaded here, so the empty resolver leaves every record in
+        // the generic item pool (mission.h MisItemTypeResolver) — irrelevant for
+        // reference extraction, which only counts entities across all four pools.
+        if (!document.load_mis_text(text, {})) {
             error = document.last_error();
             if (error.empty()) {
                 error = "failed to parse mission metafile";

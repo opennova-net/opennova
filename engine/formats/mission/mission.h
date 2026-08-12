@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -21,6 +22,17 @@ enum class EntityKind : int {
 	Building = 2,
 	Organic = 3,
 };
+
+// items.def TYPE resolver for the .mis text reader: maps an items.def id
+// (bms type_id + kItemIdOffset) to its items.def TYPE (the DefItemType value —
+// the domain of authoring::entity_kind_for_item_type), or any negative value
+// when the id is not in the loaded item table. The mission format lib stays
+// def-free, so the EMBEDDER builds this over its own parsed items.def
+// (engine/formats/def). An EMPTY resolver means no items.def is loaded: every
+// parsed `begin item` record then lands in the generic item pool — the pool
+// kind is unknowable without the item table, and each call site states that
+// explicitly by passing {}.
+using MisItemTypeResolver = std::function<int(int def_item_id)>;
 
 struct MissionInfo {
 	std::string mission_name;
@@ -272,8 +284,11 @@ public:
 	// document is a read-only metadata view for a network join and intentionally
 	// contains no locally-authored entities, events, or other BMS body sections.
 	bool load_bms_header_bytes(const uint8_t *data, size_t size);
-	bool load_mis_file(const std::string &path);
-	bool load_mis_text(const std::string &text);
+	// Load the .mis text form. `resolve_item_type` classifies each `begin item`
+	// record into its BMS pool by items.def TYPE (see MisItemTypeResolver above);
+	// pass {} when no items.def is loaded (all records land in the item pool).
+	bool load_mis_file(const std::string &path, const MisItemTypeResolver &resolve_item_type);
+	bool load_mis_text(const std::string &text, const MisItemTypeResolver &resolve_item_type);
 	bool save_bms_file(const std::string &path);
 	bool write_bms_bytes(std::vector<uint8_t> &out);
 	// The .mis writer. `base_heights` (optional): editor-sampled terrain heights under each entity,

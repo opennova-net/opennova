@@ -17,6 +17,10 @@ namespace opennova::mission::detail {
 bool write_mis_text(const bms::File &file, std::string &out, std::string &error,
                     const std::vector<int32_t> *base_heights = nullptr);
 
-bool parse_mis_text_to_bms(const std::string &text, bms::File &out, std::string &error);
+// `resolve_item_type` classifies each `begin item` record into its BMS pool by
+// items.def TYPE (mission.h MisItemTypeResolver); empty = all records land in
+// the generic item pool.
+bool parse_mis_text_to_bms(const std::string &text, const MisItemTypeResolver &resolve_item_type,
+                           bms::File &out, std::string &error);
 
 } // namespace opennova::mission::detail

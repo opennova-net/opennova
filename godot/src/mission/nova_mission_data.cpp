@@ -260,8 +260,12 @@ Error MissionData::open_file(const String &path) {
 	last_error = String();
 	mis_base_heights = PackedInt32Array(); // staged heights never apply to a different document
 	const String ext = path.get_extension().to_lower();
+	// .mis loads pass the empty items.def-TYPE resolver: MissionData holds no
+	// ItemDatabase (the placer's is built after parse), so the pool kind is
+	// unknowable here and every record lands in the generic item pool
+	// (mission.h MisItemTypeResolver keeps that explicit).
 	const bool ok = ext == "mis"
-			? document.load_mis_file(path.utf8().get_data())
+			? document.load_mis_file(path.utf8().get_data(), {})
 			: document.load_bms_file(path.utf8().get_data());
 	if (!ok) {
 		last_error = String(document.last_error().c_str());
@@ -328,7 +332,8 @@ Error MissionData::open_from_resource_root(const Ref<ResourceRoot> &p_resource_r
 	bool ok = false;
 	if (ext == "mis") {
 		const std::string text(reinterpret_cast<const char *>(bytes.ptr()), static_cast<size_t>(bytes.size()));
-		ok = document.load_mis_text(text);
+		// Empty items.def-TYPE resolver: same rationale as open_file above.
+		ok = document.load_mis_text(text, {});
 	} else {
 		ok = document.load_bms_bytes(bytes.ptr(), static_cast<size_t>(bytes.size()));
 	}
