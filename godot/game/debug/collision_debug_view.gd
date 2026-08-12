@@ -43,6 +43,8 @@ static func type_color(volume_type: int) -> Color:
 		_:
 			return COLOR_OTHER
 const COLOR_OTHER := Color(1.0, 0.55, 0.15)   # any other type - orange
+const COLOR_PROBE_BOX := Color(1.0, 0.4, 0.9)       # vehicle platform probe box
+const COLOR_PROBE_FOOTPRINT := Color(0.6, 0.25, 0.55) # its ground footprint
 const COLOR_CAPSULE := Color(0.2, 1.0, 1.0)   # player test points / capsule span
 const COLOR_GROUNDED := Color(0.3, 1.0, 0.5)  # foot ray while standing
 const COLOR_AIRBORNE := Color(1.0, 0.45, 0.3) # foot ray while off the ground
@@ -82,9 +84,10 @@ func _refresh_from_sim(sim: Simulation) -> void:
 ## report data directly.
 func render_report(debug: Dictionary) -> void:
 	var instances: Array = debug.get("instances", [])
+	var probe_boxes: Array = debug.get("probe_boxes", [])
 	var player: Dictionary = debug.get("player", {})
-	_drawable_count = _count_drawables(instances, player)
-	_update_hulls(instances)
+	_drawable_count = _count_drawables(instances, player) + probe_boxes.size()
+	_update_hulls(instances, probe_boxes)
 	_update_player(player)
 
 
@@ -117,7 +120,7 @@ func _count_drawables(instances: Array, player: Dictionary) -> int:
 
 # --- Hull volumes -------------------------------------------------------------
 
-func _update_hulls(instances: Array) -> void:
+func _update_hulls(instances: Array, probe_boxes: Array = []) -> void:
 	# Rebuild only when the nearby set, a member's full pose, or its emitted
 	# geometry changed. Vehicles can rotate without translating, and mission
 	# reloads can reuse entity handles at the same pose with different hulls.
@@ -127,8 +130,12 @@ func _update_hulls(instances: Array) -> void:
 		sig_parts.append(inst.get("pos", Vector3.ZERO))
 		sig_parts.append(inst.get("heading", 0.0))
 		sig_parts.append(hash(inst.get("volumes", [])))
+	for box in probe_boxes:
+		sig_parts.append(box.get("entity_handle", -1))
+		sig_parts.append(hash(box.get("corners", PackedVector3Array())))
 	var sig := hash(sig_parts)
-	if sig == _hull_signature and _hull_has_surface == (not instances.is_empty()):
+	var has_geometry := not instances.is_empty() or not probe_boxes.is_empty()
+	if sig == _hull_signature and _hull_has_surface == has_geometry:
 		return
 	_hull_signature = sig
 	_hull_mesh.clear_surfaces()
@@ -142,6 +149,17 @@ func _update_hulls(instances: Array) -> void:
 			var color: Color = type_color(int(vol.get("type", 0)))
 			for edge in BOX_EDGES:
 				segments.append({ "a": corners[edge[0]], "b": corners[edge[1]], "color": color })
+	# The vehicle platform probe boxes — where the solver rests wheels, not a
+	# BVOL family; drawn in their own colors so a floating hull reads at a
+	# glance (probe pair magenta, ground footprint dimmed).
+	for box in probe_boxes:
+		var corners: PackedVector3Array = box.get("corners", PackedVector3Array())
+		if corners.size() != 8:
+			continue
+		var color := COLOR_PROBE_FOOTPRINT \
+				if String(box.get("kind", "")) == "footprint" else COLOR_PROBE_BOX
+		for edge in BOX_EDGES:
+			segments.append({ "a": corners[edge[0]], "b": corners[edge[1]], "color": color })
 	if segments.is_empty():
 		return
 	MissionOverlayUtil.emit_line_segments(_hull_mesh, segments)

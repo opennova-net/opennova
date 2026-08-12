@@ -4,6 +4,7 @@
 #include "simulation/nova_simulation_internal.h"
 
 #include <netsim/connection_fan.h>
+#include <world/vehicle_motor.h> // carrier_pose_fixed + VehicleTraits probe boxes
 
 using namespace novasim;
 
@@ -415,6 +416,71 @@ Dictionary Simulation::get_collision_debug() const {
 		instances.push_back(d);
 	}
 
+	// The D-VEH-1 platform probe boxes (threedi_3di3_collision_probe_boxes ->
+	// VehicleTraits): the CMDL Z pair + lower-half BVOL length/beam fold the
+	// platform solve rests wheels on, plus the bottom-eighth footprint. These
+	// never enter the BVOL volume table above, so the collision view draws
+	// them from this dedicated list, posed by the vehicle's live full-Euler
+	// placement — the same matrix family every collision query uses.
+	Array probe_boxes;
+	out["probe_boxes"] = probe_boxes;
+	{
+		const size_t cap = world_->registry.pool_capacity(1);
+		for (size_t s = 0; s < cap; ++s) {
+			const opennova::world::Entity *e = world_->registry.get(
+			    opennova::world::EntityHandle::make(1, static_cast<int>(s)));
+			if (e == nullptr) continue;
+			const opennova::world::VehicleTraits *traits =
+			    world_->vehicle_traits.get(e->item_id);
+			if (traits == nullptr) continue;
+			if (traits->box_z_lo == 0 && traits->box_z_hi == 0 &&
+			    traits->box_x_lo == 0 && traits->box_x_hi == 0)
+				continue;
+			int32_t pose_pos[3];
+			int32_t yaw_bam = 0, pitch_bam = 0, roll_bam = 0;
+			opennova::world::carrier_pose_fixed(*e, pose_pos, yaw_bam,
+			                                    pitch_bam, roll_bam);
+			if (range >= 0) {
+				const int64_t dx = int64_t{pose_pos[0]} - anchor[0];
+				const int64_t dy = int64_t{pose_pos[1]} - anchor[1];
+				if (dx > range || dx < -range || dy > range || dy < -range)
+					continue;
+			}
+			const opennova::world::CollisionMatrix m =
+			    opennova::world::collision_matrix_from_euler(
+			        yaw_bam, pitch_bam, roll_bam, pose_pos);
+			const auto emit_box = [&](const char *kind, int32_t x_lo,
+			                          int32_t x_hi, int32_t y_lo, int32_t y_hi,
+			                          int32_t z_lo, int32_t z_hi) {
+				Dictionary bd;
+				bd["entity_handle"] = static_cast<int>(e->handle.packed);
+				bd["kind"] = kind;
+				PackedVector3Array corners;
+				corners.resize(8);
+				Vector3 *cw = corners.ptrw();
+				int c = 0;
+				for (const int32_t z : {z_lo, z_hi})
+					for (const int32_t y : {y_lo, y_hi})
+						for (const int32_t x : {x_lo, x_hi}) {
+							const int32_t local[3] = {x, y, z};
+							int32_t world_pt[3];
+							m.transform_point(local, world_pt);
+							cw[c++] = godot_from_fixed3(world_pt);
+						}
+				bd["corners"] = corners;
+				probe_boxes.push_back(bd);
+			};
+			emit_box("probe", traits->box_x_lo, traits->box_x_hi,
+			         traits->box_y_lo, traits->box_y_hi, traits->box_z_lo,
+			         traits->box_z_hi);
+			if (traits->foot_x_lo != 0 || traits->foot_x_hi != 0 ||
+			    traits->foot_y_lo != 0 || traits->foot_y_hi != 0)
+				emit_box("footprint", traits->foot_x_lo, traits->foot_x_hi,
+				         traits->foot_y_lo, traits->foot_y_hi,
+				         traits->box_z_lo, traits->box_z_lo);
+		}
+	}
+
 	// The local player's last full resolve: the capsule test points the resolver
 	// queried and the returned foot clearance (CollisionWorld::LocalResolveDebug).
 	const opennova::world::CollisionWorld::LocalResolveDebug &lrd =
@@ -707,6 +773,45 @@ Dictionary Simulation::debug_pick_entity(const Vector3 &p_from_godot,
 	out["name"] = String(ent->name.c_str());
 	out["position_godot"] = godot_from_mission_vec3(ent->position);
 	out["bound_radius"] = ent->bound_radius;
+	return out;
+}
+
+Array Simulation::get_throwable_debug() const {
+	// Read-only F3 rows for the placed devices (satchels/claymores/AV mines):
+	// the exact stick pose, the parent ride, and the arm-delay countdown the
+	// think chain runs — ThrowableSim's own records, no present-pass detour.
+	Array out;
+	if (!world_) return out;
+	for (const opennova::world::PlacedDevice &dev : world_->throwables.devices) {
+		if (!dev.active) continue;
+		Dictionary d;
+		d["entity_handle"] = static_cast<int>(dev.entity.packed);
+		d["item_id"] = dev.item_friendly;
+		d["team"] = static_cast<int>(dev.team);
+		d["pos"] = Vector3(dev.pos.x, dev.pos.y, dev.pos.z);
+		d["yaw_deg"] = static_cast<double>(dev.yaw_bam) * (360.0 / 4294967296.0);
+		d["pitch_deg"] =
+		    static_cast<double>(dev.pitch_bam) * (360.0 / 4294967296.0);
+		d["roll_deg"] =
+		    static_cast<double>(dev.roll_bam) * (360.0 / 4294967296.0);
+		d["parent_handle"] = static_cast<int>(dev.parent.packed);
+		d["parent_live"] =
+		    dev.parent.valid() &&
+		    world_->registry.get(dev.parent) != nullptr;
+		d["arm_delay_ticks"] = dev.think_delay_ticks;
+		const char *think = "none";
+		switch (dev.think) {
+			case opennova::world::ThrowClass::kSatchel: think = "satchel"; break;
+			case opennova::world::ThrowClass::kClaymore: think = "claymore"; break;
+			case opennova::world::ThrowClass::kAVMine: think = "AT mine"; break;
+			case opennova::world::ThrowClass::kLandmine: think = "landmine"; break;
+			default: break;
+		}
+		d["think"] = think;
+		const opennova::world::Entity *e = world_->registry.get(dev.entity);
+		d["health"] = e != nullptr ? e->health : 0;
+		out.push_back(d);
+	}
 	return out;
 }
 
