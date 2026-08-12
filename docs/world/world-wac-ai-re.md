@@ -2793,9 +2793,15 @@ D-SND-10..15). All plays go through `Entity_GetProfileSlotSound @ 0x528300`
   §19.7 "what authors 0x100000" open item closes: the dfx2med encoder writes
   it as the NVG checkbox, and the runtime reuses it as the night gate). The
   `byte+0x134`-bit0 silent-cleanup variant skips the scream (unchanged,
-  D-AI-9). The org2 player edge instead plays the composite
-  `SoundProfile_FindByEntityAndType(def, night ? 5 : 0)` name
-  `@ 0x4b4c4a-0x4b4c6a` — unported (D-SND-14).
+  D-AI-9). The org2 player edge instead plays the BODY-MODEL composite
+  `SoundProfile_FindByEntityAndType(entity, night ? 5 : 0)` name
+  `@ 0x4b4c4a-0x4b4c6a` — `"%s_%s"` of `Entity_GetBodyModelPrefix @ 0x5280F0`
+  (the anim-slot byte +0x374 -> `BM1`..`BM6`/`BF1`/`BF2`/`RM2`/`RF1`, 0 -> 1 ->
+  `BM1`) and the `g_entity_sound_type_table @ 0x82F548` suffix (0 `DEATH`,
+  5 `DEATH_K`), resolved by name across the loaded banks
+  (`SoundBank_FindSetByNameAnyBank @ 0x5274F0`); a miss plays id 0 = silence,
+  no profile-slot fallback — ported (D-SND-14 FIXED 2026-08-11,
+  `audio::compose_entity_sound_set` + the `is_local_player` death-edge branch).
 - **The org2 airborne family** (outside the tick-parity gate — every body
   tick): the chute edge on `Flags & 0x20` vs its `+0x2C` mirror bit
   (`@ 0x4b7b1e-0x4b7b75`): open -> slot 41 `ChuteOpen` + zero the two

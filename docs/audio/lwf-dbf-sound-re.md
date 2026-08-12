@@ -296,10 +296,22 @@ updaters (all slots 7-29 + 15/16, witnessed in
 30-50 are read by the vehicle-physics family through def+0x864 directly
 (`Entity_ProcessVehicleSuspension`, air/wheeled/light/tracked physics,
 `Entity_ProcessInfantryPhysics` tumble legs) and ride the vehicle-sound grill.
-`SoundProfile_FindByEntityAndType @ 0x528180` (the `"<DefName>_<Type>"`
-composite path, §items.def above) is a SEPARATE mechanism; the org2 player
-death edge uses it with type 5 (night) / 0 `@ 0x4b4c4a-0x4b4c6a` — unported
-(D-SND-14).
+`SoundProfile_FindByEntityAndType @ 0x528180` is a SEPARATE mechanism —
+and NOT def-name-keyed (the earlier `"<DefName>_<Type>"` gloss was wrong,
+corrected by the 2026-08-11 decompile): it walks the 9-entry {suffix, type}
+pair table `g_entity_sound_type_table @ 0x82F548` (0 `DEATH`,
+1 `MEDIC_REQUEST`, 2 `SURFACE_BREATH`, 3 `SURFACE_GASP`, 4 `WATER_GAG`,
+5 `DEATH_K`, 6 `RECRUIT_ACCEPT`, 7 `RECRUIT`, 8 `TANK_COMAND`) and composes
+`sprintf("%s_%s", Entity_GetBodyModelPrefix(entity), suffix)` — the prefix is
+the entity's anim-slot byte (+0x374) through the body-model name switch
+`@ 0x5280F0` (1→`BM1` [the 0/null default], 2..6→`BM2`..`BM6`, 9→`BM6`,
+7→`BF1`, 8→`BF2`, 10→`RM2`, 11→`RF1`) — then resolves the set by NAME across
+the loaded banks (`SoundBank_FindSetByNameAnyBank @ 0x5274F0`); a miss returns
+0 and the caller plays sound id 0 = silence (no profile-slot fallback). The
+org2 player death edge is the death consumer, type 5 (night) / 0
+`@ 0x4b4c4a-0x4b4c6a` — ported (D-SND-14): `audio::body_model_prefix` /
+`audio::compose_entity_sound_set` (`engine/runtime/audio/sound_profile.cpp`),
+consumed by the death edge's `is_local_player` branch.
 
 ### Divergences
 
@@ -309,7 +321,7 @@ death edge uses it with type 5 (night) / 0 `@ 0x4b4c4a-0x4b4c6a` — unported
 | D-SND-11 | footstep OBJ slots 21/22 never picked — the pick falls through to the terrain surface | `entity+0x28 groundEntity` (written by the ground probes, e.g. `Entity_RaycastGroundHeightAndObject @ 0x525fd0`) selects `SS*FootOBJ` when standing on an entity | the platform link is unmodeled in the sim (`InfantryState::standing_on_entity` is wired but never set); lands with the platform slice |
 | D-SND-12 | the female profile (def+2152) is never selected — primary always | the character entity's female byte picks it `@ 0x52831c` | avatar gender is unmodeled sim-side; JO NPC female defs author their own `sound_profile`, so only the shared player defs are affected |
 | D-SND-13 | SndProf.def parses per mission load off the mission resource root | one boot-time load + expansion reloads | same file, same table; no observable difference |
-| D-SND-14 | the local player's death scream rides the NPC slot-7/8 leg | org2 plays the composite `SoundProfile_FindByEntityAndType(def, 5/0)` name `@ 0x4b4c61` | the composite-name chain is unported (P2b player-death presentation); the profile scream is the same authored voice family |
+| D-SND-14 | FIXED 2026-08-11: the local player's death edge emits the body-model composite (`"<prefix>_DEATH"` / `"_DEATH_K"` from the entity anim-slot byte) as a named `SoundSlotEvent`; NPCs keep slots 7/8 | org2 plays `SoundProfile_FindByEntityAndType(entity, 5/0)` `@ 0x4b4c61` — `Entity_GetBodyModelPrefix @ 0x5280F0` + the `@ 0x82F548` suffix table, bank-name lookup, miss = id-0 silence with no slot fallback | ported as `audio::compose_entity_sound_set` + the death-edge `is_local_player` branch; the by-name drain reproduces the miss-silence (ctest `slot_sound`) |
 | D-SND-15 | `Terrain_GetSurfaceTypeAtPosition`'s placed-tile override leg is not modeled (`terrain_query/surface_type_map.h` samples the charmap only) | `.til` placements remap the surface through `byte_319F7D8` `@ 0x6065ca-0x60660c` | placed-tile data is not sim-plumbed; feet on roads/runways read the underlying charmap class |
 
 ## Ground vehicle movement sounds (grilled 2026-07-29)
