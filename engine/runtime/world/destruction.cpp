@@ -8,6 +8,7 @@
 #include "world/angle.h"
 #include "world/collision.h"
 #include "world/infantry.h"
+#include "world/vehicle_motor.h"
 #include "world/world.h"
 
 namespace opennova::world {
@@ -730,6 +731,24 @@ int32_t item_bullet_damage_gate(const World &world, const Entity &target,
     return damage;
 }
 
+// The settle transition [orig: Entity_TransitionToGroundDeath @ 0x493080]:
+// play the authored `particlefinale` ground-impact effect once at the entity
+// position (the def name +0x4E4, interned to the +0x4E2 handle at mission
+// start; read @ 0x493088) and back the now-grounded pose into savedLivePose
+// (@ 0x4930dd..0x493104). The adjacent periodic-sound clear
+// (@ 0x4930aa -> 0x57b3e0) is a witnessed NO-OP in retail JO: the 256x20-B
+// pool at 0x26B8050 has no producer (its allocator @ 0x57b380 and reset
+// @ 0x57b360 are unreferenced), so clearing nothing is faithful and no pool
+// is modeled. The four wreck emitter-handle releases stay with the D-ITEM-15
+// bone-bank residual.
+static void transition_to_ground_death(Entity &e, const ItemDeathTraits *traits,
+                                       DestructionEvents &events) {
+    if (traits != nullptr && !traits->particlefinale.empty())
+        events.effects.push_back(DestructionEffectEvent{
+                traits->particlefinale, e.position, Vec3{0.0f, 0.0f, 1.0f}});
+    stamp_saved_live_pose(e);
+}
+
 void destruction_tick_dead_items(World &world,
                                  const terrain::TerrainHeightField *terrain,
                                  float water_height,
@@ -798,6 +817,8 @@ void destruction_tick_dead_items(World &world,
                 if (water_above_ground < 0.0f) {
                     e->position.z = ground;
                     e->death_motion = DeathMotionMode::Generic;
+                    // [orig: Entity_UpdateStaticDeathPhysics call @ 0x4942c6]
+                    transition_to_ground_death(*e, traits, events);
                 }
                 const float landing_line = water_above_ground > 10.0f
                         ? ground - 25.0f
@@ -820,6 +841,8 @@ void destruction_tick_dead_items(World &world,
                     if (e->position.z < landing_line) {
                         e->position.z = ground;
                         e->death_motion = DeathMotionMode::Generic;
+                        // [orig: Entity_UpdateStaticDeathPhysics call @ 0x4943da]
+                        transition_to_ground_death(*e, traits, events);
                     }
                 }
                 continue;
@@ -875,6 +898,8 @@ void destruction_tick_dead_items(World &world,
                 if (routed_falling) {
                     e->position.z = ground;
                     e->death_motion = DeathMotionMode::Generic;
+                    // [orig: Entity_UpdateFallingDeathPhysics call @ 0x494113]
+                    transition_to_ground_death(*e, traits, events);
                 } else {
                     e->position = old_position;
                     e->veh.slide_z = 0;

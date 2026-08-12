@@ -887,6 +887,7 @@ void test_dead_item_landing_split() {
     // pose. Contact clears slide_z while horizontal velocity remains live.
     ItemDeathTraits t = barrel_traits();
     t.husk_rest_min_z = -0.25f;
+    t.particlefinale = "Effect_VehDrtPuftrk";
     Entity *item = drop(700, t);
     const Vec3 item_before = item->position;
     destruction_tick_dead_items(w, &flat.field, -1.0e9f, w.destruction);
@@ -900,10 +901,15 @@ void test_dead_item_landing_split() {
         if (s.sound == "IMP_VCL_DROP") clunked = true;
     CHECK(!clunked);
     CHECK(w.explosions.queue.empty()); // no landing kz for the generic leg
+    // The generic leg never runs Entity_TransitionToGroundDeath, so its
+    // authored particlefinale stays silent [orig: 0x461d30 has no call].
+    for (const DestructionEffectEvent &fx : w.destruction.effects)
+        CHECK(fx.effect != "Effect_VehDrtPuftrk");
     item->engine_flags &= ~kEntityFlagHusk; // retire from the pass
     // A unitType-routed row (1): the clunk + the landing kz.
     ItemDeathTraits tv = barrel_traits();
     tv.unit_type = 1;
+    tv.particlefinale = "Effect_VehDrtPuftrk";
     Entity *wreck = drop(701, tv);
     destruction_tick_dead_items(w, &flat.field, -1.0e9f, w.destruction);
     const float routed_new_z = ground + 0.5f +
@@ -923,6 +929,19 @@ void test_dead_item_landing_split() {
     CHECK(std::abs(w.explosions.queue.back().pos.x - 8.0f) < 1.0e-6f);
     CHECK(std::abs(w.explosions.queue.back().pos.z - ground) < 1.0e-3f);
     CHECK(wreck->position.x > 8.0f);
+    // The routed contact runs the transition: the authored particlefinale
+    // plays once at the ground pose [orig: Entity_TransitionToGroundDeath
+    // @0x493080 read @0x493088; called @0x494113] and the grounded pose is
+    // backed into savedLivePose (@0x4930dd..0x493104).
+    bool finale = false;
+    for (const DestructionEffectEvent &fx : w.destruction.effects) {
+        if (fx.effect != "Effect_VehDrtPuftrk") continue;
+        finale = true;
+        CHECK(std::abs(fx.pos.x - 8.0f) < 1.0e-6f);
+        CHECK(std::abs(fx.pos.z - ground) < 1.0e-3f);
+    }
+    CHECK(finale);
+    CHECK(wreck->saved_live_valid);
 }
 
 // Building-family rows install Entity_UpdateStaticDeathPhysics only after the

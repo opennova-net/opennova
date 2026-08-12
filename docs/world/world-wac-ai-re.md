@@ -4542,12 +4542,21 @@ the `Entity_UpdateMuzzleFlashAndEffects` misnomer) follows the husk bones per
 tick, rolls the fire crackle (PRNG < 16/65536 = `g_fx_BoatExpSec` +
 `g_snd_EXPLO_SHIP_SM_b`), and steams a bone out when it dips underwater
 (`g_fx_Boat01Steam`). Ground contact (`Entity_TransitionToGroundDeath
-@ 0x493080`) spawns the def +0x4E0 ground-impact pair, calls
-`PeriodicSound_ClearByEntity @ 0x57b3e0`, and installs the settle physics.
-That clear scans the 256x20-B periodic-sound pool at `0x26B8050` and clears
-slots whose entity pointer matches. It does NOT touch the 256x180-B
-`g_death_piece_pool @ 0x26BAC58`: death-piece slots carry no owner pointer,
-and `Entity_SpawnDeathPieces` writes none.
+@ 0x493080`) spawns the item's authored `particlefinale` effect once at the
+entity position (the +0x4E2 interned handle, name +0x4E4 — resolved by
+`resolve_item_materials_and_spawn_bone_trails @ 0x5231cb`; the earlier
+"+0x4E0 impact pair" gloss was wrong: only the one +0x4E2 word is read
+`@ 0x493088`), calls `PeriodicSound_ClearByEntity @ 0x57b3e0`, backs the
+grounded pose into savedLivePose (`@ 0x4930dd..0x493104`), and installs the
+settle physics. The clear scans the 256x20-B periodic-sound pool at
+`g_periodic_sound_pool @ 0x26B8050` — **witnessed a NO-OP in retail JO
+(2026-08-12)**: the pool's allocator (`@ 0x57b380` — slot = {min_s, max_s,
+countdown, entity, soundDef}, reload `(min + PRNG%(max−min))·62` ticks) and
+its memset reset (`@ 0x57b360`) have ZERO xrefs, so nothing ever fills the
+pool the per-frame `PeriodicSound_TickAll @ 0x57b450` walks, and the
+entity-matched clear always clears nothing. It also does NOT touch the
+256x180-B `g_death_piece_pool @ 0x26BAC58`: death-piece slots carry no owner
+pointer, and `Entity_SpawnDeathPieces` writes none.
 
 Port status: the reimpl creates at most one origin-anchored group for each
 authored Dead/water, Fire, and Other family and performs one crackle roll per
@@ -4565,8 +4574,12 @@ independently. It
 also does not sample fire-bone submersion or emit `g_fx_Boat01Steam`: the
 effect world's kill plane merely culls particles at a plane, so it cannot
 substitute for the retail steam spawn or per-bone bank release (D-ITEM-15).
-The settle transition is ported, but the authored +0x4E0 ground-impact pair
-and periodic-sound-slot clear are not (D-ITEM-14). DeathPiece slots remain
+The settle transition is ported, and D-ITEM-14 CLOSED 2026-08-12: the three
+ported transition sites (`destruction.cpp transition_to_ground_death` — the
+routed-falling contact `@ 0x494113` and both static-death legs
+`@ 0x4942c6`/`@ 0x4943da`) play the authored `particlefinale` once at the
+grounded pose and stamp savedLivePose; the periodic-sound clear closed as
+faithful-nothing (the pool has no producer — above). DeathPiece slots remain
 ownerless and untouched, matching retail. The debris-type trail column rides
 the one native `kDeathPieceTypes` table onto the piece drain
 (`death_piece_trail_effect`; the shell table died with S12b).
@@ -4650,7 +4663,7 @@ the FFI structs.
 | D-ITEM-11 | The round exclusion set skips shooter + mount (Controller/Gunner/Driver seats only — a Passenger's rounds can hit their own vehicle) + the Gunner mount's standing-on carrier, PORTED 2026-07-18 (§15.8a); the FOURTH slot — `projectile+388` ← the fire request's dword +40 — is consumed by every prox walk but its fill is an uninitialized extra on the client fire path, provenance OPEN (the server path `Server_ClientFiredRound @ 0x50baa0` unwalked) | `ray[17..20] @ 0x4ea2a5-0x4ea2f8`; `RoundData_SpawnRound @ 0x4ec0d0` ([97] ← hitData+40); compares `@ 0x4e5572/@ 0x4e5782/@ 0x4e5983/@ 0x4e4c4e` | firing from Controller/Gunner/Driver seats no longer self-hits the hull; walk 0x50baa0's cmd[21]→spawn plumbing to close the +388 slot |
 | D-ITEM-12 | Round BALLISTICS are absent: no gravity, drag, wind, water. Original: velZ −= 167/tick for non-thruster rounds without ammo flag 0x100 (`@ 0x4eaa5a`; the 0x100 class takes −167 inside the slow regime instead `@ 0x4e6329`); per-tick drag force = `g_ProjectileDragTable[62·speed>>16, clamp 1219]` scaled by ammo drag (+28) — the 4000-entry table is generated at init by a piecewise power-law over ~40 speed regimes (transonic bands 1025..1360 ft/s) — direction −vel normalized, WIND-relative (`@ 0x2C059E4..EC`), 25× underwater, a velocity-reversal zero clamp, and a one-shot random TUMBLE kick when the speed index first drops below ammo+176 (spread ammo+180, seeded by ownerConnectionId); water: hitType-4 splash at the plane + rounds continue submerged, killed when speed < 0x4000 below water (`@ 0x4ea13e`) | `Entity_ApplyDragAndBounceForce @ 0x4e5ec0`; `Projectile_InitDragTable @ 0x4e78d0`; `g_ProjectileDragTable @ 0xB7B300`; gravity `@ 0x4eaa5a`; water `@ 0x4ea4e0` | our rounds fly straight forever — no drop, no slowdown, crosshair-perfect at any range, no water interaction; port = extract the ~40 (exponent, scale) double pairs + the two scale constants off 0x4e78d0 and the wind source |
 | D-ITEM-13 | Hit-resolution residuals: (a) the terrain leg sub-steps the bilinear column at 2-u intervals with a crossing refinement — the original raycasts the hi-res heightmap (`Terrain_RaycastHeightmapHiRes_Thunk @ 0x610890`) with a proportional end-below-ground fallback (`@ 0x4ea42b-0x4ea4af`), so thin crests can tunnel in ours (the strict-less tie-break itself was FIXED 2026-07-18); (b) the person effect point is FIXED 2026-07-18 (`ray[29] - 0x800`), but generic item/terrain effect backoff and retail's post-hit round parking at hit+0x800 (+victim boundRadius for persons) remain absent `@ 0x4ea603-0x4ea7d5`; (c) ~~the pool-0 person path used one body cylinder~~ FIXED 2026-07-18: `Physics_RaycastAgainstBoneSections @ 0x4e4670` now walks the current posed COBJ spheres with strict `COBJ[i]` ↔ `boneMatrix[i]` pairing (COBJ parent/offset/CXLT ignored), exact radius scaling/caps, section mask, split `ray[31]` reaction/death and `ray[32]` normal-infantry damage semantics, ammo bullet radius, and first-person-entity termination; the bounded torso sphere is only used when graphic resolution cannot supply a usable COBJ model; (d) ~~our sphere gate was segment-vs-sphere (a boundary-crossing requirement: a tick segment entirely INSIDE a big bound sphere skipped the entity — the in-play shoot-through-building-walls report)~~ FIXED 2026-07-18b: the item-leg gate is now the witnessed per-axis AABB + UNCLAMPED perpendicular line distance (`round_broad_phase`, round_sim.cpp), the face-less stand-in hits at t=0 from inside, and the ctest `collision` `test_round_inside_bound_sphere_hits_wall` pins both the inside-sphere wall stop and the past-the-edge fly-on | as cited; person path §15.8b; the gate `@ 0x4e53d4-0x4e554a` / `@ 0x4e5492`; the dispatch order `@ 0x4ea3b4-0x4ea5f2` | posed reaction/death bones and normal-infantry damage zones are live; remaining drift is thin terrain crests, generic effect/parking offsets, the optional FatBullets floor, and the attrib-0x200 seat x6 branch |
-| D-ITEM-14 | Ground contact enters the correct settle leg, but emits no authored +0x4E0 ground-impact pair and does not clear the matching periodic-sound slots. DeathPiece slots remain ownerless and untouched, matching retail | `Entity_TransitionToGroundDeath @ 0x493080`; `PeriodicSound_ClearByEntity @ 0x57b3e0` scans 256x20-B slots at `0x26B8050`; the separate DeathPiece pool is 256x180 B at `0x26BAC58` | periodic wreck sounds can outlive ground transition, and the authored final ground effect is absent |
+| D-ITEM-14 | CLOSED 2026-08-12: the three ported transition sites (`transition_to_ground_death` — routed-falling `@ 0x494113`, static legs `@ 0x4942c6`/`@ 0x4943da`) play the item's authored `particlefinale` once at the grounded pose and stamp savedLivePose; the periodic-sound clear closed as FAITHFUL-NOTHING — the pool has no producer in retail JO (allocator `@ 0x57b380` + reset `@ 0x57b360` have zero xrefs; `PeriodicSound_TickAll @ 0x57b450` walks an always-empty pool), so the entity-matched clear never clears anything and no pool is modeled. The old "+0x4E0 impact pair" gloss corrected: only the +0x4E2 `particlefinale` handle is read `@ 0x493088` | `Entity_TransitionToGroundDeath @ 0x493080`; intern site `resolve_item_materials_and_spawn_bone_trails @ 0x5231cb` (name +0x4E4 → handle +0x4E2); `PeriodicSound_ClearByEntity @ 0x57b3e0` over `g_periodic_sound_pool @ 0x26B8050`; the separate DeathPiece pool is 256x180 B at `0x26BAC58` | `destruction_test::test_dead_item_landing_split` pins the routed-leg finale effect + savedLivePose stamp and the generic leg's silence |
 | D-ITEM-15 | Wreck effects are one origin-anchored group per authored family plus one fire-crackle roll per wreck; there are no four-slot Dead/water/Fire/Other bone banks, per-slot bone follow, or underwater `g_fx_Boat01Steam` transition. The effect kill plane is particle culling only and cannot substitute for spawning steam | `Entity_InitDeathSounds @ 0x4939b0`; `Entity_UpdateDeadWreckEffects @ 0x493140` | large/multi-bone wreck effects originate and roll at one point, and burning bones entering water neither steam nor retire like retail |
 | D-ITEM-16 | Section debris is six randomized radial `TreeWoodExp` spawns at the entity; the presenter never walks collision faces, samples triangle centroids at `(scale<<8)/150`, transforms them by section bones, or switches material 17 to `TreeFoliageExp` | `Entity_SpawnSectionDebris @ 0x43f580` | the burst is readable but its count, positions, directions, and material family are presentation stand-ins rather than triangle-faithful |
 | D-ITEM-17 | The sim records a building glass-break event and the presenter increments a diagnostic count only; it does not resolve `GLASS1..GLASS4` model user points, range-filter them against the blast, or spawn the retail shatter effects | `@ 0x4eb814-0x4eb85d` | blast-adjacent windows do not visibly shatter; a statistic is not a presentation implementation |
