@@ -25,7 +25,6 @@ class ScreenshotBackend:
         return BackendCapabilities(
             name="Screenshot",
             supports_blend=True,
-            supports_max=True,
             supports_parallel=True,
         )
 
@@ -74,8 +73,6 @@ def build_importer_screenshot_dialog(*, version: str = ""):
     dialog.loose_output_edit.setText(r"C:\OpenNova\exports")
     dialog._set_loose_paths([r"C:\Games\Joint Operations\objects\MH53.3di"])
 
-    if dialog.max_check is not None:
-        dialog.max_check.setChecked(True)
     if dialog.glb_check is not None:
         dialog.glb_check.setChecked(True)
 

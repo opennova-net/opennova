@@ -61,7 +61,6 @@ def test_build_importer_screenshot_dialog_populates_demo_state(qt_app, tmp_path,
         assert dialog.windowTitle() == "OpenNova Importer v0.test"
         assert dialog.resource_table.rowCount() >= 5
         assert dialog.resource_table.item(0, 1).text()
-        assert dialog.max_check is not None
         assert "done" in dialog.queue_summary_label.text()
         assert "failed" in dialog.queue_summary_label.text()
     finally:

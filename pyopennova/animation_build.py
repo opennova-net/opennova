@@ -1,8 +1,7 @@
-"""DCC-neutral BAD animation sampling.
+"""BAD animation sampling shared by the Blender importer and tests.
 
-This module contains the BAD/ADM frame math shared by DCC importers.  It
-intentionally uses only plain tuples and Python math so it can run in Blender,
-3ds Max's bundled Python, and normal CI.
+This module intentionally uses only plain tuples and Python math so it can run
+in Blender and normal CI.
 """
 from __future__ import annotations
 
@@ -40,7 +39,6 @@ class SampledFrame:
     frame: int
     bones: tuple[SampledBoneFrame, ...]
     root_motion_position: Vec3 = ZERO_VEC3
-    max_root_motion_position: Vec3 = ZERO_VEC3
 
 
 @dataclass(frozen=True)
@@ -74,7 +72,7 @@ def sample_bad_clip(
     is_reset: bool = False,
     world_rot_corrections: Sequence[Quat] | None = None,
 ) -> SampledClip:
-    """Sample one parsed BAD file into DCC-neutral frame data."""
+    """Sample one parsed BAD file into plain frame data."""
 
     frame_count = max(0, int(getattr(bad_file, "frame_count", 0)))
     bad_flags = int(getattr(bad_file, "flags", 0) if flags is None else flags)
@@ -87,8 +85,6 @@ def sample_bad_clip(
 
     frames: list[SampledFrame] = []
     root_motion = ZERO_VEC3
-    max_root_xy = ZERO_VEC3
-    max_root_motion = ZERO_VEC3
     for frame_idx in range(frame_count):
         world_rots: list[Quat] = [IDENTITY_QUAT] * bone_count
         world_positions: list[Vec3] = [ZERO_VEC3] * bone_count
@@ -143,15 +139,12 @@ def sample_bad_clip(
             evt = bad_file.events[frame_idx]
             event_velocity = coords.bone_space(evt.velocity)
             root_motion = vec_add(root_motion, event_velocity)
-            max_root_xy = vec_add(max_root_xy, (event_velocity[0], event_velocity[1], 0.0))
-            max_root_motion = (max_root_xy[0], max_root_xy[1], float(getattr(evt, "bottom", 0.0)))
 
         frames.append(SampledFrame(
             frame_index=frame_idx,
             frame=start_frame + frame_idx,
             bones=tuple(bone_frames),
             root_motion_position=root_motion,
-            max_root_motion_position=max_root_motion,
         ))
 
     end_frame = start_frame + max(frame_count - 1, 0)

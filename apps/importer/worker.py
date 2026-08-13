@@ -51,14 +51,6 @@ def run_one(request: ImportRequest) -> ImportResult:
             error=" ".join(errors),
             elapsed_seconds=time.monotonic() - started_at,
         )
-    if request.options.write_max:
-        return ImportResult.failure(
-            request,
-            error=".max output must be routed through the standalone backend.",
-            output_path=output_path,
-            elapsed_seconds=time.monotonic() - started_at,
-        )
-
     try:
         from . import bpy_session
         bpy_session.init_headless()

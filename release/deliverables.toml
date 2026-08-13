@@ -5,7 +5,7 @@ public = "opennova-asset-importer-windows-{release_version}.exe"
 kind = "exe"
 platform = "Windows"
 title = "OpenNova Asset Importer"
-purpose = "Standalone Windows importer for converting NovaLogic game assets to Blender, ASE, 3ds Max, and OpenNova project files."
+purpose = "Standalone Windows importer for converting NovaLogic game assets to Blender, ASE, and OpenNova project files."
 install = "Download the exe and run it directly; no separate installer is required."
 use = "Launch it, point it at a game directory, choose assets, and select the output formats to write."
 
@@ -24,29 +24,6 @@ required_entries = [
     "__init__.py",
     "lib/windows-x64/opennova.dll",
     "lib/linux-x64/libopennova.so",
-]
-
-[[deliverables]]
-id = "max-ase-exporter"
-source = "opennova_max-v{python_version}.mzp"
-public = "opennova-3ds-max-ase-exporter-windows-{release_version}.mzp"
-kind = "mzp"
-platform = "Windows / 3ds Max 2021-2026"
-title = "OpenNova 3ds Max ASE Exporter"
-purpose = "3ds Max plugin installer that adds NovaLogic ASE export."
-install = "Run the MZP in 3ds Max; it installs an Autodesk ApplicationPlugins bundle under your user profile."
-use = "Restart 3ds Max, then use File > Export > Novalogic ASE (.ase)."
-required_entries = [
-    "mzp.run",
-    "install.ms",
-    "install.ds",
-    "install.py",
-    "OpenNovaMax-{python_version}.bundle/PackageContents.xml",
-    "OpenNovaMax-{python_version}.bundle/Contents/macroscripts/OpenNovaExport.mcr",
-    "OpenNovaMax-{python_version}.bundle/Contents/startup/opennova_max_startup.ms",
-    "OpenNovaMax-{python_version}.bundle/Contents/startup/opennova_max_startup.py",
-    "OpenNovaMax-{python_version}.bundle/Contents/python/opennova_max/__init__.py",
-    "OpenNovaMax-{python_version}.bundle/Contents/python/pyopennova/lib/windows-x64/opennova.dll",
 ]
 
 [[deliverables]]
@@ -78,4 +55,3 @@ required_entries = [
     "opennova.exe",
     "libopennova.windows.template_release.x86_64.dll",
 ]
-

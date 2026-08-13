@@ -11,7 +11,6 @@ from opennova_jobs import ImportRequest, ImportResult, ScanResult
 class BackendCapabilities:
     name: str
     supports_blend: bool
-    supports_max: bool
     supports_parallel: bool
 
 

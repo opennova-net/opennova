@@ -134,7 +134,7 @@ def _validate_source(path: Path, item: dict) -> None:
     kind = item["kind"]
     if kind == "exe":
         _validate_exe(path)
-    elif kind in {"zip", "mzp"}:
+    elif kind == "zip":
         _validate_archive(path, item.get("required_entries", []))
     else:
         raise DeliverableValidationError(f"Unknown deliverable kind for {item['id']}: {kind}")
@@ -195,7 +195,7 @@ def _release_body(items: list[dict], context: dict[str, str]) -> str:
             "|---|---|",
             f"| Release assets | {context['release_version']} |",
             f"| Blender addon | {context['blender_version']} |",
-            f"| Python tools / importer / Max exporter | {context['python_version']} |",
+            f"| Python tools / importer | {context['python_version']} |",
             f"| Godot apps | {context['godot_version']} |",
             "",
         ]

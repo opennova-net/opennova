@@ -1,10 +1,9 @@
 """Coordinate-space converters and 3x3 matrix helpers (DCC-agnostic).
 
-Engine source coordinates are Y-up. Both Blender and 3ds Max are Z-up
-right-handed, so the source-side transforms here apply unchanged for
-either DCC. Inputs accept any 3-element sequence (tuple, list,
-mathutils.Vector, pymxs Point3) since all of them support index access.
-Outputs are tuples; DCC-side wrappers re-wrap into native types.
+Engine source coordinates are Y-up and Blender is Z-up right-handed. Inputs
+accept any 3-element sequence (tuple, list, or mathutils.Vector) since they all
+support index access. Outputs are tuples; Blender-side wrappers re-wrap them
+into native types.
 """
 from __future__ import annotations
 

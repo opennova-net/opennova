@@ -2,7 +2,7 @@
 
 OpenNova is a faithful reimplementation of NovaLogic's game engine, aiming for feature and visual parity with the originals. The engine is data driven: it runs off the same asset data the games shipped, which is what made the NovaLogic engine so moddable. The portable core is C++; Godot is the chosen shell for rendering, tooling, and the editor. Joint Operations (JO) is the first game we are bringing up.
 
-This repo is the full toolchain: extract and edit assets with the importer, the Blender and 3ds Max plugins, and the OpenNova Editor (ONED), then load them in the Godot-based engine runtime. See [GOALS.md](GOALS.md) for the full vision.
+This repo is the full toolchain: extract and edit assets with the importer, the Blender addon, and the OpenNova Editor (ONED), then load them in the Godot-based engine runtime. See [GOALS.md](GOALS.md) for the full vision.
 
 ## Screenshots
 
@@ -40,9 +40,8 @@ Pre-built binaries are available on the [Releases](../../releases) page:
 
 | Asset | What it is for | Install and use |
 |---|---|---|
-| **`opennova-asset-importer-windows-v<version>.exe`** | Standalone Windows importer for converting models to `.blend`, `.ase`, `.max`, and NovaLogic-compatible project files for tools like OED. | Run the exe directly, point it at your game directory, and select what to export. |
+| **`opennova-asset-importer-windows-v<version>.exe`** | Standalone Windows importer for converting models to `.blend`, `.ase`, and NovaLogic-compatible project files for tools like OED. | Run the exe directly, point it at your game directory, and select what to export. |
 | **`opennova-blender-ase-exporter-v<version>.zip`** | Blender 5.x ASE exporter addon with pre-built native libraries for Windows and Linux. | Install from Blender with `Edit > Preferences > Add-ons > Install`, then use `File > Export > Novalogic ASE (.ase)`. |
-| **`opennova-3ds-max-ase-exporter-windows-v<version>.mzp`** | 3ds Max plugin installer that adds NovaLogic ASE export. | Run the MZP in 3ds Max, restart 3ds Max, then use `File > Export > Novalogic ASE (.ase)`. |
 | **`opennova-modding-editor-windows-v<version>.zip`** | Standalone OpenNova Editor (ONED) for authoring terrain, object, mission, interface, audio, and environment mod data. | Extract the zip, then run `opennova-modtools.exe`. |
 | **`opennova-game-runtime-windows-v<version>.zip`** | Godot-based OpenNova runtime for loading exported scenes and runtime systems. | Extract the zip, then run `opennova.exe`. |
 
@@ -52,8 +51,7 @@ Extract models from game files. Reads directly from PFF archives with automatic 
 
 Each import can write one or more selected output files:
 - `.blend` - Blender project with the full scene hierarchy
-- `.ase` - 3DS Max ASCII Scene Export
-- `.max` - 3ds Max scene, when the external Max backend is available
+- `.ase` - ASCII Scene Export
 - `.3dp` - Object project metadata for round-trip editing
 
 Imported scenes include meshes, materials, textures, LODs, skeletal armatures, collision volumes, occlusion geometry, lights, and user points.
@@ -62,13 +60,13 @@ Imported scenes include meshes, materials, textures, LODs, skeletal armatures, c
 
 Requires Python 3.11, uv, bpy 5.0.0, and PySide6. Build the shared library (see [Building](#building)) and copy `build/Release/opennova.dll` into `blender/lib/windows-x64/`, then `uv sync && uv run onimport`.
 
-## DCC ASE Export Plugins
+## Blender ASE Export Addon
 
-Blender and 3ds Max both expose the same author-facing export target:
+Blender exposes the author-facing export target:
 
 `File > Export > Novalogic ASE (.ase)`
 
-Install the Blender 5.x addon via the zip from [Releases](../../releases) or point Blender at the `blender/` directory for development. Install the 3ds Max plugin by running the MZP from [Releases](../../releases); it copies an Autodesk ApplicationPlugins bundle under your user profile.
+Install the Blender 5.x addon via the zip from [Releases](../../releases) or point Blender at the `blender/` directory for development.
 
 ### ASE Export
 
@@ -93,10 +91,9 @@ Each workspace reads and writes the game's canonical formats directly. The packa
 | `docs/` | Tracked architecture and reverse-engineering records; start at [`docs/README.md`](docs/README.md). |
 | `apps/` | Native and Python tools: the `onimport` importer CLI, the NovaWorld service (`novaworld_server`), a dev/golden-harness in-match host (`nw_server`, never shipped), the packet pretty-printer (`nw_pp`), and shared socket/pcap helpers (`common/`). |
 | `pyopennova/` | Python ctypes FFI layer over the shared `opennova` library, used by the importer and the Python tests. |
-| `opennova_jobs/` | DCC-neutral import request/result/job models and validation. |
-| `opennova_qt_ui/` | DCC-agnostic PySide6 importer dialog and pure UI helpers. |
+| `opennova_jobs/` | Import request/result/job models and validation. |
+| `opennova_qt_ui/` | PySide6 importer dialog and pure UI helpers. |
 | `opennova_blender/` | Standalone Blender-backed importer backend for the Qt UI. |
-| `opennova_max/` | External 3ds Max batch helpers and Max-side export hooks. |
 | `blender/` | Blender 5.x addon (export side of the pipeline). |
 | `godot/` | The Godot 4.6.1 project. `adapter/` (the shell adapter: GDExtension bindings to `engine/` plus the shared shell-neutral GDScript layer both shells run on), `modtools/` (the [OpenNova Editor](godot/modtools/README.md)), `game/` (runtime shell), `server/` (vestigial; dedicated hosting will be a serve mode of the game runtime, see [ADR 0015](docs/adr/0015-two-products-serve-mode.md)), `tests/` (GUT suite). |
 | `web/` | NovaWorld web portal (Vue 3 + TypeScript): landing, lobbies, admin, downloads. Built in CI and deployed with the service stack. |
@@ -118,7 +115,7 @@ Modular libraries for the NovaLogic formats and runtime systems. The format pars
 | Library | Format | Description |
 |---------|--------|-------------|
 | **threedi** | `.3di` | 3D models: geometry, materials, part animations, collision, occlusion. GP and 3DI3 formats. |
-| **ase** | `.ase` | ASCII Scene Export: read/write 3DS Max scene files. |
+| **ase** | `.ase` | ASCII Scene Export: read/write scene files used by the object pipeline. |
 | **tdp** | `.3dp` | Object projects: material definitions, LOD settings, part-animation metadata. |
 | **bad** | `.bad` | Skeletal animation: bone hierarchies, quaternion keyframes, events. |
 | **adm** | `.adm` | Animation definition maps: anim slots bound to `.bad` clip names, with multi-clip variant rings. |

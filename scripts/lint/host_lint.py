@@ -57,7 +57,7 @@ CODE_SUFFIXES = (
 )
 SCAN_PREFIXES = (
     "godot/", "engine/", "apps/", "scripts/", "web/src/", "pyopennova/",
-    "tests/", "launcher/", "backend/", "blender/", "opennova_max/",
+    "tests/", "launcher/", "backend/", "blender/",
     "opennova_qt_ui/", "opennova_jobs/", "opennova_blender/", "release/",
     "tools/", "deploy/", "infra/", "fixtures/",
 )

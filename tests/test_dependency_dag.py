@@ -8,11 +8,11 @@ import pytest
 
 
 _FORBIDDEN = {
-    "opennova_jobs": {"bpy", "pymxs", "PySide6", "PySide2", "opennova_blender", "opennova_qt_ui"},
-    "opennova_qt_ui.backend": {"bpy", "pymxs", "opennova_blender", "apps.importer"},
-    "opennova_qt_ui.collisions": {"bpy", "pymxs", "opennova_blender", "PySide6", "PySide2"},
-    "opennova_qt_ui.filtering": {"bpy", "pymxs", "opennova_blender", "PySide6", "PySide2"},
-    "opennova_qt_ui.preferences": {"bpy", "pymxs", "opennova_blender", "PySide6", "PySide2"},
+    "opennova_jobs": {"bpy", "PySide6", "PySide2", "opennova_blender", "opennova_qt_ui"},
+    "opennova_qt_ui.backend": {"bpy", "opennova_blender", "apps.importer"},
+    "opennova_qt_ui.collisions": {"bpy", "opennova_blender", "PySide6", "PySide2"},
+    "opennova_qt_ui.filtering": {"bpy", "opennova_blender", "PySide6", "PySide2"},
+    "opennova_qt_ui.preferences": {"bpy", "opennova_blender", "PySide6", "PySide2"},
 }
 
 

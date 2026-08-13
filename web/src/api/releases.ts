@@ -34,7 +34,6 @@ function classifyAsset(name: string): Omit<ToolAsset, 'filename' | 'sizeBytes' |
     { re: /^opennova-game-runtime-windows-/, meta: { product: 'Game Runtime', os: 'windows', kind: 'app' } },
     { re: /^opennova-game-runtime-macos-/, meta: { product: 'Game Runtime', os: 'macos', kind: 'app' } },
     { re: /^opennova-asset-importer-windows-/, meta: { product: 'Asset Importer', os: 'windows', kind: 'tool' } },
-    { re: /^opennova-3ds-max-ase-exporter-windows-/, meta: { product: '3ds Max ASE Exporter', os: 'windows', kind: 'plugin' } },
     { re: /^opennova-blender-ase-exporter-/, meta: { product: 'Blender ASE Exporter', os: 'any', kind: 'plugin' } },
   ];
   for (const { re, meta } of rules) {

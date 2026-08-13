@@ -22,7 +22,6 @@ _OPTION_FIELDS = (
     "write_ase",
     "write_glb",
     "write_fbx",
-    "write_max",
 )
 
 
@@ -47,7 +46,6 @@ def _add_import_options(parser: argparse.ArgumentParser, *, include_def_only: bo
         write_ase=None,
         write_glb=None,
         write_fbx=None,
-        write_max=None,
     )
     if include_def_only:
         parser.add_argument("--no-animations", dest="import_animations", action="store_false",
@@ -73,10 +71,6 @@ def _add_import_options(parser: argparse.ArgumentParser, *, include_def_only: bo
                         help="Write .glb files via Blender")
     parser.add_argument("--fbx", dest="write_fbx", action="store_true",
                         help="Write .fbx files via Blender")
-    parser.add_argument("--max", dest="write_max", action="store_true",
-                        help="Write .max scene files via 3ds Max")
-    parser.add_argument("--no-max", dest="write_max", action="store_false",
-                        help="Do not write .max scene files")
 
 
 def cmd_scan(args: argparse.Namespace) -> int:
@@ -96,7 +90,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
 
 
 def cmd_import(args: argparse.Namespace) -> int:
-    from opennova_blender import StandaloneBackend
+    from opennova_blender import BlenderBackend
 
     request = ImportRequest.for_definition(
         base_dir=args.dir,
@@ -105,7 +99,7 @@ def cmd_import(args: argparse.Namespace) -> int:
         output_root=args.output,
         options=options_from_args(args),
     )
-    backend = StandaloneBackend()
+    backend = BlenderBackend()
     try:
         result = backend.execute(request)
     finally:
@@ -118,7 +112,7 @@ def cmd_import(args: argparse.Namespace) -> int:
 
 
 def cmd_import_loose(args: argparse.Namespace) -> int:
-    from opennova_blender import StandaloneBackend
+    from opennova_blender import BlenderBackend
 
     request = ImportRequest.for_loose(
         threedi_path=args.file,
@@ -127,7 +121,7 @@ def cmd_import_loose(args: argparse.Namespace) -> int:
         base_dir=args.asset_dir or "",
         options=options_from_args(args),
     )
-    backend = StandaloneBackend()
+    backend = BlenderBackend()
     try:
         result = backend.execute(request)
     finally:
@@ -141,7 +135,7 @@ def cmd_import_loose(args: argparse.Namespace) -> int:
 
 def cmd_export_all(args: argparse.Namespace) -> int:
     from apps.importer.import_runner import scan_directory_result
-    from opennova_blender import StandaloneBackend
+    from opennova_blender import BlenderBackend
 
     scan = scan_directory_result(args.dir)
     if not scan.ok:
@@ -170,7 +164,7 @@ def cmd_export_all(args: argparse.Namespace) -> int:
 
     success = 0
     failed = 0
-    backend = StandaloneBackend()
+    backend = BlenderBackend()
     try:
         log.info(
             "Dispatching %d jobs across %d Blender worker(s)...",

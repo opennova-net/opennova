@@ -1,7 +1,7 @@
-"""DCC-neutral OpenNova scene naming and visualization color tables.
+"""OpenNova scene naming and visualization color tables.
 
-Shared by the DCC scene builders (Blender, 3ds Max). Adding a new
-collision/occlusion type or changing a name format is a one-file change here.
+Shared by the Blender scene builders. Adding a new collision/occlusion type or
+changing a name format is a one-file change here.
 """
 from __future__ import annotations
 

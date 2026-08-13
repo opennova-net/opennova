@@ -16,8 +16,8 @@ fixed editor lighting. The mode rail switches between five workflows:
 - **LODs**: bind an ASE scene to each level of detail and edit the per-LOD
   threshold, attributes, and the project's collision LOD.
 
-The model geometry itself is authored in a DCC tool (Blender or 3ds Max) and
-brought in as ASE. The Environment popup is available here too, so you can preview
+The model geometry itself is authored in Blender and brought in as ASE. The
+Environment popup is available here too, so you can preview
 the object under different lighting.
 
 ## Formats
@@ -30,9 +30,9 @@ the object under different lighting.
 
 The `.3di` export session itself is driven by [`engine/formats/oed`](../../../engine/formats/oed).
 
-## Authoring geometry in a DCC: naming conventions
+## Authoring geometry in Blender: naming conventions
 
-Object meshes are authored in Blender or 3ds Max and exchanged as ASE. Each
+Object meshes are authored in Blender and exchanged as ASE. Each
 object's 3DI role is encoded in its **scene-object name**: the importer assigns
 these names when it brings a model in
 ([`apps/importer/scene_builder/`](../../../apps/importer/scene_builder/)), and
