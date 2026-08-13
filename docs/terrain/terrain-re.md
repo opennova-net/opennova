@@ -20,9 +20,10 @@ old `PSShadow*` interpretation.
 `UNAUDITED` systems; this record establishes the tracked surface — the module
 map and the mixed-binary witness basis. The data/build path is byte-identical,
 and the top-tier base-surface texture derivation and shader math are now closed.
-The bounded runtime gaps are the tile-composition render-target/update details
-(including the exact static projected-shadow cache mechanics) and the separate
-underwater water-noise modulation, plus CDEP/traversal documentation depth.
+The bounded runtime gap is the tile-composition render-target/update details
+(including the exact static projected-shadow cache mechanics), plus
+CDEP/traversal documentation depth (the underwater water-noise modulation
+FIXED 2026-08-13).
 Like [mission/mis-format-re.md](../mission/mis-format-re.md), this remains a
 partial; it converts terrain from `UNAUDITED` to *tracked (partial)*.
 
@@ -707,7 +708,7 @@ as `terrain_raycast_los_clear` on the occlusion slice (the AI LOS
 | D-TERRAIN-5 | A | **FIXED (2026-07-13)** | **Top-tier texture/shader source mismatch**: the reimpl incorrectly used its heightmap normal as the t3 detail coefficient, camera-crossfaded near/far textures, float-normalized DBlend, and multiplied an extra terrain tint. the separate heightfield-normal atlas feeds cached-tile alpha; DBlend, paired mip chains, and literal t0..t5 ps.1.4 math are ported. **Corrected 2026-07-15**: the fix's own first reading (t3 = the generated authored-detail B-channel coefficient) was also wrong — t3 is the authored second detail pair (`polytrn_detailmap2` ⊕ `dist2`) at density2; the generated coefficient belongs to the ps.1.1 tiers at stage 7 [`orig: Texture_GenerateNormalMap @ 0x58c070`; `Terrain_GenerateNormalMap @ 0x603210`; `PolyTrn_InitTextures @ 0x60aaa0`; `GTexture_CreateFromPixelDataWithAlphaBlend @ 0x687270`; `PolyTrn_PS14SplatNormalMap @ 0x7dece0`]. |
 | D-TERRAIN-6 | A | **FIXED (2026-07-13)** | **LOD/fog/overlay base-pass semantics**: both raw `lod_sub / 2` sites now use the exact clamped eight-family selector; exponential fog uses eye-space depth while linear types use radial distance; tile-overlay RGB is composed before terrain lighting without replacing the cached heightfield/light DOT3 alpha [`orig: render_terrain_sector_batch @ 0x6096f0`; `Render_SetFogState @ 0x58a950`; `PolyTrn_RenderTile @ 0x60da70`]. |
 | D-TERRAIN-7 | A | **OPEN (bounded)** | **Tile-composition RT/update parity**: the bare t0 producer, quadrant CLAMP behavior, alpha math, static `.til` composition, and static model-shadow eligibility/ROBJ/receiver policy are closed. The reimpl uses a terrain-receiver-only directional-shadow approximation and preserves caster eligibility through destruction-to-husk swaps and editor transforms. Retail's alpha-aware foliage projection, exact temporary-RT projection/composite, tile-cache allocation/dirty cadence, general patch/page c7/c8 projection, remaining ordered depth-alpha contributions, and final RT mip behavior remain open `[orig: Terrain_CollectAndRenderTileModels @ 0x60D250; PolyTrn_RenderTile @ 0x60DA70]`. |
-| D-TERRAIN-8 | A | **OPEN (bounded)** | **Underwater terrain water-noise modulation**: the reimpl does not select the below-water `PolyTrn_PSShadowBasic/NormalMap` variants or sample `Water_NoiseColorTexture` as t3 (`4·t3²·t0.a`). This is unrelated to scene/model shadows `[orig: below-water flag @ 0x60FEE0 → dword_319FB3C @ 0x60915F; stage-3 bind @ 0x6043C2..0x6043F2; shader select @ 0x6044B1]`; see [render/render-lighting-re.md](../render/render-lighting-re.md). |
+| D-TERRAIN-8 | A | **FIXED (2026-08-13)** | **Underwater terrain water-noise modulation**: the engine terrain frame stamps `below_water` from the render eye vs the live water height (strict `<`, 0 sentinel), and the shared surface include swaps the ps.1.4 stage-3 dp3 INPUT to the water module's per-frame regenerated noise texture at the swapped `colormap_uv × 8` texcoord — the witnessed TOP-TIER behavior (the 2026-08-13 selector decode above): the noise rides the PS14SplatNormalMap dp3 on detail2-authored maps, detail2-less splat maps faithfully render NO underwater modulation, and the `saturate(4·t3²)·t0.a` PSShadow pair belongs to the unported ps.1.1 tiers `[orig: below-water flag @ 0x60FEE0 → dword_319FB3C @ 0x60915F; live t3 slot swap @ 0x6043f2; selector @ 0x6044b1..0x604556; texcoord @ 0x609786..0x6097D6]`. Tests: ctest `terrain_frame_compiler` (flag pins), GUT `terrain_shader_contract_test` (formula pins) + `terrain_underwater_modulation_test` (the Dvxi5 flip drive). |
 | D-TERRAIN-9 | B | **OPEN (editor-preview-only)** | **Derived input preprocessing**: runtime binds integer-normalized DBlend and paired base/far C1/C2/C3 mip chains, including an explicit 4x4 terminal-LOD clamp. The live editor preview binds raw DBlend and raw detail textures; its authored-B coefficient fallback is exact, but minified detail/blend can differ from play. |
 | D-TERRAIN-10 | A | **FIXED (2026-07-14)** | **Terrain light-vector coordinate basis**: EnvFile preserves the direct retail getter tuple `g`, not Godot/world XYZ. Retail's D3DCOLOR pack writes GPU diffuse RGB `(g2,g0,g1)`, matching normal-map RGB `(grid X slope, grid Y slope, up)`; the old reimpl `(x,z,y)` pack swapped the horizontal DOT3 axes. Terrain and analytic foliage now pack `(z,x,y)`. Flat 06:00/12:00/18:00 checks could not distinguish the swap, so a non-flat 08:00 oracle pins light bytes `(231,83,187)` and slope alphas `0.8987774/0.0794002` [`orig: Environment_GetLightDirectionFloat @ 0x57d870; Terrain_GenerateNormalMap pack @ 0x603470..0x6034eb; PolyTrn light pack @ 0x60e201..0x60e331; PolyTrn_TileBakeDot3LightPass @ 0x60e385..0x60e39e`]. |
 
@@ -733,18 +734,15 @@ remains for a *full* (vs partial) R1 record:
   depth-alpha draws, and the final RT's sampling/edge/mip policy. The bare
   producer's TrnNMap filter/address behavior, hosted static `.til`
   composition, and static-shadow admission/receiver policy are closed.
-- **Underwater water-noise modulation** — close D-TERRAIN-8 independently by
-  feeding the generated water-noise color texture through the below-water
-  terrain variants described in
-  [render/render-lighting-re.md](../render/render-lighting-re.md).
 - **Editor derived-input parity** — close D-TERRAIN-9 by routing the live
   preview through the runtime integer DBlend normalization and paired custom
   mip-chain builder without replacing its live-sculpt geometry path.
 
 The CDEP/traversal item is documentation depth; D-TERRAIN-7's exact
-tile-shadow/cache mechanics and D-TERRAIN-8's underwater modulation are the two
-bounded open runtime parity surfaces, while D-TERRAIN-9 is limited to the
-editor preview. D-TERRAIN-1 remains the deliberate editor/runtime split.
+tile-shadow/cache mechanics are the one bounded open runtime parity surface
+(D-TERRAIN-8's underwater modulation FIXED 2026-08-13), while D-TERRAIN-9 is
+limited to the editor preview. D-TERRAIN-1 remains the deliberate
+editor/runtime split.
 
 ## Cross-references
 
