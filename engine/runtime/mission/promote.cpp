@@ -351,7 +351,7 @@ void init_infantry(AiEntity &ae, const bms::Entity &e) {
     s.f[20] = 62 * static_cast<int32_t>(e.shoot_timer);
     s.f[22] = 62 * e.advancetimer;
     // [orig: slot byte+136 = alert_state]
-    s.bytes()[AiSlot::kMoveFlagByte] = e.alert_state;
+    s.bytes()[AiSlot::kAlertByte] = e.alert_state;
     // [orig: slot+140 = 1 (has-route), +148 = waypoint_id, +152 = wp_number (START node)]
     if (e.waypoint_id != 0) {
         s.f[35] = 1;

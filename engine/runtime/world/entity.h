@@ -641,6 +641,18 @@ struct Entity {
     // it (mount wins over ground [orig: NetPacket_SerializePlayerState op1 @0x4c0a08]).
     EntityHandle ground_target;         // kInvalid = free-standing
 
+    // Carried-object link (entity+0x268 mountedChild): the object this entity
+    // is CARRYING (a picked-up flag/carryable), distinct from the seat-mount
+    // family above. Read by the GroupHoldingGroup/SingleHoldingGroup trigger
+    // conditions against the held object's command group. Every witnessed
+    // producer is the CTF/carryable pickup-drop-capture family or the savegame
+    // restore (bms-event-runtime-re §3b item 4) — none of those systems are
+    // ported yet, so the link stays kInvalid in our sim until the carry system
+    // lands; the conditions themselves are live. [orig: set
+    // Entity_AttachToVehicle @0x43c130; cleared Entity_DropCarriedObject
+    // @0x439df0, the capture-zone clear @0x4ada07, Entity_Destroy @0x43ea03]
+    EntityHandle mounted_child;         // kInvalid = carrying nothing
+
     // The shooter's last claimed fire target (entity+104 -> +12): stamped per accepted
     // C2S 0x06 [orig: Server_ClientFiredRound @0x50c2ad stores the resolved target ptr],
     // read LIVE at 0x0A tag-2 serialize time — a set handle adds the wire 0x40 flag +

@@ -216,7 +216,14 @@ struct AiSlot {
         kAttackRange = 15, // max attack range [byte +60]
         kSightRange = 17,  // perception/sight range [byte +68]
     };
-    enum { kMoveFlagByte = 136 };
+    // The per-entity ALERT byte at controller+0x88 (0 green / 1 yellow / 2
+    // red) — the state the SingleAtRed/YellowAlert triggers read and the
+    // ChangeAI command family writes; the AI reset/patrol enters clear it
+    // because they reset alert. Renamed 2026-08-13 from the kMoveFlagByte
+    // misnomer with the writer census (bms-event-runtime-re §3b item 1).
+    // [orig: read Entity_IsSsnAtAlertLevel @0x43e780; command writes
+    //  Entity_ApplyCommand @0x43ac2d/=2, @0x43ac8d/=1, @0x43acfd/=0]
+    enum { kAlertByte = 136 };
 };
 static_assert(sizeof(AiSlot) == 172, "AiSlot must match unk_A34B90 172-byte stride");
 
@@ -535,8 +542,10 @@ int ai_waypoint_update_target(AiBrain &b, const int32_t pos[3], const NavNodeTab
 // PLAYPARTANIM (sub-type 0x22) is ported: it writes the part-anim channel's sweep direction
 // (comp+436) and rate (comp+444), computed from ANIMTIME via the verified FPU constants
 // (1/65536, 0.016, 65536). p2=channel(1/2), p3=play_type(-1/0/+1), p4=time(16.16 seconds).
-// Other sub-types (alert/accuracy/state/speed/...) are tracked-TODO no-ops; see
-// notes/mission/anim-ai-grill-2026-06-07.md.
+// The alert subs (5/22/6) are handled at the EntityCommands seam (the
+// controller alert byte, bms-event-runtime-re §3b item 1) before this brain
+// dispatch; the remaining sub-types (accuracy/state/speed/...) stay
+// tracked-TODO no-ops; see notes/mission/anim-ai-grill-2026-06-07.md.
 void ai_apply_command(AiBrain &comp, int sub_type, int32_t p2, int32_t p3, int32_t p4);
 
 // The PLAYPARTANIM rate from ANIMTIME seconds: (0.016 / seconds) * 65536

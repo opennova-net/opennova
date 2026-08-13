@@ -315,7 +315,7 @@ bool AiSystem::line_of_sight_clear(World &world, const int32_t a[3], const int32
 // covers every brained entity (pool 0 organics included) — values written are identical.
 void AiSystem::alert_nearby_allies(World &world, AiEntity &e, int32_t radius) {
     (void)world;
-    e.slot.bytes()[AiSlot::kMoveFlagByte] = 2;
+    e.slot.bytes()[AiSlot::kAlertByte] = 2;
     const int64_t r = radius;
     for (AiEntity &ally : entities_) {
         if (&ally == &e || ally.team != e.team || ally.health <= 0) continue;

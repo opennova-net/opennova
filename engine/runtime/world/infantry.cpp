@@ -433,7 +433,7 @@ void AiSystem::infantry_select(AiEntity &e) {
     InfantryState &inf = e.inf;
     // [orig: alerted = entity[190] || slot byte +136 || combat-reaction byte +875]
     const bool alerted =
-        inf.alert_timer != 0 || e.slot.bytes()[AiSlot::kMoveFlagByte] != 0 || inf.combat_reaction;
+        inf.alert_timer != 0 || e.slot.bytes()[AiSlot::kAlertByte] != 0 || inf.combat_reaction;
 
     int target = anim_state::kIdle; // [orig: targetAnimState seeds 43]
     const bool moving = inf.move_mode != 0 && inf.target_dist > 0;
@@ -1817,7 +1817,7 @@ void AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
     if ((key & 0x1Fu) == 0) {
         int32_t range = slot.f[17]; // sight range, 16.16 [orig: slot+68]
         const bool calm = inf.damage_timer == 0 &&
-                          slot.bytes()[AiSlot::kMoveFlagByte] == 0 && !inf.was_hit;
+                          slot.bytes()[AiSlot::kAlertByte] == 0 && !inf.was_hit;
         if (calm) range >>= 1; // calm NPCs see half as far
         // The 4-phase range schedule by (tick>>5)&3: full / 6u / half / 6u.
         const uint32_t phase = (key >> 5) & 3u;

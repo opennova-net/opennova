@@ -585,7 +585,7 @@ static void test_damage_hit_sets_retail_alert_state() {
     ctx.logic_tick = 1; // not a 32-tick perception scan: preserve lastAttacker
     ai.tick(*w, ctx);
 
-    CHECK(npc.slot.bytes()[AiSlot::kMoveFlagByte] == 2);
+    CHECK(npc.slot.bytes()[AiSlot::kAlertByte] == 2);
     CHECK(w->relations.group(1).alert == TriggerRelations::kAlertRed);
     CHECK(npc.inf.damage_timer == 9); // +10 on hit, then the body tick decays once
     CHECK(npc.inf.was_hit);
@@ -640,7 +640,7 @@ static void test_remote_player_hit_skips_npc_group_alert() {
     ctx.logic_tick = 1;
     ai.tick(*w, ctx);
 
-    CHECK(player.slot.bytes()[AiSlot::kMoveFlagByte] == 0);
+    CHECK(player.slot.bytes()[AiSlot::kAlertByte] == 0);
     CHECK(w->relations.group(3).alert != TriggerRelations::kAlertRed);
     CHECK(player.inf.was_hit);
     CHECK(player.inf.last_attacker == shooter_h);

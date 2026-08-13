@@ -98,7 +98,7 @@ void h_set_state_idle(AiThinkCtx &ctx) { ctx.self->brain.f[AiBrain::kStep] = 16;
 void h_reset_to_idle(AiThinkCtx &ctx) {
     AiEntity &e = *ctx.self;
     e.brain.f[AiBrain::kStep] = 16;
-    e.slot.bytes()[AiSlot::kMoveFlagByte] = 0;
+    e.slot.bytes()[AiSlot::kAlertByte] = 0;
     e.brain.f[AiBrain::kPrevAlert] = 0;
     e.brain.f[AiBrain::kAlert] = 0;
 }
@@ -107,7 +107,7 @@ void h_reset_to_idle(AiThinkCtx &ctx) {
 void h_reset_to_patrol(AiThinkCtx &ctx) {
     AiEntity &e = *ctx.self;
     e.brain.f[AiBrain::kStep] = 64;
-    e.slot.bytes()[AiSlot::kMoveFlagByte] = 0;
+    e.slot.bytes()[AiSlot::kAlertByte] = 0;
     e.brain.f[AiBrain::kPrevAlert] = 0;
     e.brain.f[AiBrain::kAlert] = 0;
 }
@@ -115,7 +115,7 @@ void h_reset_to_patrol(AiThinkCtx &ctx) {
 // [orig: AI_FullResetToIdle @0x457f20] same as reset-to-idle (null-safe in orig).
 void h_full_reset_to_idle(AiThinkCtx &ctx) {
     AiEntity &e = *ctx.self;
-    e.slot.bytes()[AiSlot::kMoveFlagByte] = 0;
+    e.slot.bytes()[AiSlot::kAlertByte] = 0;
     e.brain.f[AiBrain::kPrevAlert] = 0;
     e.brain.f[AiBrain::kAlert] = 0;
     e.brain.f[AiBrain::kStep] = 16;
@@ -124,7 +124,7 @@ void h_full_reset_to_idle(AiThinkCtx &ctx) {
 // [orig: AI_FullResetToPatrol @0x458090] step=64.
 void h_full_reset_to_patrol(AiThinkCtx &ctx) {
     AiEntity &e = *ctx.self;
-    e.slot.bytes()[AiSlot::kMoveFlagByte] = 0;
+    e.slot.bytes()[AiSlot::kAlertByte] = 0;
     e.brain.f[AiBrain::kPrevAlert] = 0;
     e.brain.f[AiBrain::kAlert] = 0;
     e.brain.f[AiBrain::kStep] = 64;
@@ -260,7 +260,7 @@ void h_enter_ground_combat(AiThinkCtx &ctx) {
             ctx.world->relations.group(se->group_id).alert = TriggerRelations::kAlertRed;
         ctx.sys->alert_nearby_allies(*ctx.world, e, 0x640000); // sets slot+136 = 2 too
     } else {
-        e.slot.bytes()[AiSlot::kMoveFlagByte] = 2;
+        e.slot.bytes()[AiSlot::kAlertByte] = 2;
     }
     b.f[AiBrain::kStep] = 1;
 }
@@ -281,7 +281,7 @@ void h_enter_ground_evade(AiThinkCtx &ctx) {
             ctx.world->relations.group(se->group_id).alert = TriggerRelations::kAlertRed;
         ctx.sys->alert_nearby_allies(*ctx.world, e, 0x640000);
     } else {
-        e.slot.bytes()[AiSlot::kMoveFlagByte] = 2;
+        e.slot.bytes()[AiSlot::kAlertByte] = 2;
     }
     if ((e.profile.flags96 & 1) != 0) {        // organic class
         const int32_t next = (b.f[AiBrain::kTargetSlot] != 0) ? kAiGroundCombat
@@ -600,7 +600,7 @@ void death_alert_block(AiThinkCtx &ctx, AiEntity &e) {
             ctx.world->relations.group(se->group_id).alert = TriggerRelations::kAlertRed;
         ctx.sys->alert_nearby_allies(*ctx.world, e, 0x640000); // sets slot+136 = 2 too
     } else {
-        e.slot.bytes()[AiSlot::kMoveFlagByte] = 2;
+        e.slot.bytes()[AiSlot::kAlertByte] = 2;
     }
 }
 

@@ -327,7 +327,7 @@ void AiSystem::tick(World &world, const TickContext &ctx) {
             const Entity *victim_entity = world.registry.get(victim->handle);
             if (victim_entity != nullptr &&
                 (victim_entity->engine_flags & kEntityFlagPlayer) == 0) {
-                victim->slot.bytes()[AiSlot::kMoveFlagByte] = 2;
+                victim->slot.bytes()[AiSlot::kAlertByte] = 2;
                 world.relations.group(victim_entity->group_id).alert =
                         TriggerRelations::kAlertRed;
             }
