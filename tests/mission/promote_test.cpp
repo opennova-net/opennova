@@ -419,6 +419,14 @@ int main() {
     // patrol — and a symmetric pair cannot detect a swapped wiring.
     zode.data.patrol_speed = 70;
     zode.data.combat_speed = 150;
+    // Class-walk data (D-AI-1): distinct priorities pin the +40..+52 sort —
+    // GROUND type loads the sort keys, walk order priority-descending
+    // [orig: AIProfile_LoadOrFind @0x45fd80 qsort + reversed store].
+    zode.data.type = 2;
+    zode.data.priority_air = 10;
+    zode.data.priority_ground = 200;
+    zode.data.priority_organics = 100;
+    zode.data.priority_decorations = 0;
     opts.ai_profiles.push_back(zode);
     mission::PromoteResult r = mission::promote_mission(m, world, ai, opts);
 
@@ -463,6 +471,22 @@ int main() {
     CHECK(e1 != nullptr);
     CHECK(e1->brain.f[AiBrain::kSpeedB] == 20388);
     CHECK(e1->brain.f[AiBrain::kSpeedA] == 43690);
+    // The class-walk seed (D-AI-1): priorities copied verbatim; the +40..+52
+    // order sorts priority-descending for the keyed GROUND type — 200 ground,
+    // 100 organics, 10 air, 0 decorations [orig: AIProfile_LoadOrFind @0x45fd80].
+    CHECK(e1->profile.type == 2);
+    CHECK(e1->profile.class_priority[0] == 10);
+    CHECK(e1->profile.class_priority[1] == 200);
+    CHECK(e1->profile.class_priority[2] == 100);
+    CHECK(e1->profile.class_priority[3] == 0);
+    CHECK(e1->profile.slot_class[0] == 1); // ground first
+    CHECK(e1->profile.slot_class[1] == 2); // organics
+    CHECK(e1->profile.slot_class[2] == 0); // air
+    CHECK(e1->profile.slot_class[3] == 3); // decorations last
+    // Organic 0 resolved no profile: retail's memset-0 record — zero priorities,
+    // tie order {3,2,1,0} (insertion-stable ascending, stored reversed).
+    CHECK(e0->profile.class_priority[1] == 0);
+    CHECK(e0->profile.slot_class[0] == 3);
     CHECK(e0->pos[0] == 0);               // spawned at origin
     CHECK(e0->net_id == 1);               // the AUTHORED record id, copied verbatim
     CHECK((e0->slot.f[1] & 0x209) == 0x209);

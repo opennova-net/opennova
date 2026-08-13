@@ -140,6 +140,8 @@ def test_item_air_family_params_present_in_both_mirrors():
     expected_run = ["slip_slope", "climb_speed", "turn_roll", "speed_pitch", "turn_rate"]
     platform_run = ["torque", "mass", "lean", "lean_velocity", "pitch",
                     "pitch_velocity", "bob", "flip", "critical_hp"]
+    # The AI engage-cap pair inserted 2026-08-13 (def+0x178/+0x17A radarsig/heatsig).
+    sig_run = ["critical_hp", "critical_drain", "radar_sig", "heat_sig", "unit_type"]
     blender = _load_blender_def_ffi()
     for item_cls in (py_def.DefItemDef, blender.DefItemDef):
         names = [name for name, _ctype in item_cls._fields_]
@@ -149,6 +151,10 @@ def test_item_air_family_params_present_in_both_mirrors():
             assert getattr(item_cls, field).size == ctypes.sizeof(ctypes.c_int)
         start = names.index("torque")
         assert names[start:start + len(platform_run)] == platform_run
+        start = names.index("critical_hp")
+        assert names[start:start + len(sig_run)] == sig_run
+        for field in ("radar_sig", "heat_sig"):
+            assert getattr(item_cls, field).size == ctypes.sizeof(ctypes.c_int)
 
 
 def _skip_without_native():
@@ -178,6 +184,10 @@ def test_pyopennova_items_stride_reads_every_entry():
         fx = ifl.entries[0].particlefx
         assert fx.effect.decode() == "Effect_whiteExhaust"
         assert fx.userpoint.decode() == "FX00"
+        # The AI engage-cap pair rides mid-stride (def+0x178/+0x17A): the Dune
+        # Buggy's authored signatures are the canary.
+        assert ifl.entries[0].radar_sig == 500
+        assert ifl.entries[0].heat_sig == 650
         # The appended launchups_closeattack field rides the far end of the
         # stride: the wire rifleman's authored AI muzzle name is the canary.
         launchups = {

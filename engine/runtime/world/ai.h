@@ -114,6 +114,11 @@ struct AiBrain {
         kWpExtra = 24,     // node payload f[4] (type1) / 0 (type3) [byte +96]
         kAnimFlag = 32,    // cleared on node advance [byte +128]
         kStoredKeyTime = 35, // stored node-val on advance [byte +140]
+        kPriorityTarget = 37, // priority target (orig: entity ptr; same packed+1 rebase as
+                           // kTargetSlot). acquire's LOS-only bypass compares it per
+                           // candidate [orig: brain+148 read @0x467350; restored from the
+                           // savegame handle record+476 @0x45dbb3 — no live gameplay
+                           // producer witnessed, see world-wac-ai-re §16.2a] [byte +148]
         kTargetSlot = 38,  // current target (orig: entity ptr; container rebase stores
                            // EntityHandle.packed + 1 so 0 keeps the orig null meaning) [byte +152]
         kDamageInfo = 39,  // damage source/info copied from a damage event's extra [byte +156]
@@ -273,6 +278,19 @@ struct AiProfile {
     // fallback at emit). The female-variant select (def+2152 via the character
     // entity's female byte [orig: @ 0x52831c]) is unmodeled — primary always.
     int16_t sound_profile = -1;
+    // ---- the §16.2 class-driven pool walk (D-AI-1) ----
+    // The four class-priority words and the derived walk order. An unresolved
+    // profile keeps all-zero priorities — retail's memset-0 record — so its
+    // brain acquires nothing; that IS the witnessed behavior for entities whose
+    // .aip is missing. [orig: AIProfile_ParseProperty @0x45de70 writes
+    // priority_air/ground/organics/decorations -> +80..+92; AIProfile_LoadOrFind
+    // @0x45fd80 memsets the 248-byte record then sorts the four class ids by
+    // their priority words (qsort CompareFunction @0x455d90 ascending, stored
+    // REVERSED into +40..+52 @0x45fed9-0x45ff04 -> the walk runs
+    // priority-descending; only type 1/2 profiles load the sort keys).]
+    int32_t class_priority[4] = {}; // +80/+84/+88/+92: air/ground/organics/decorations
+    int8_t slot_class[4] = {3, 2, 1, 0}; // +40..+52: class ids, priority-descending
+    int32_t type = 0; // +16: HELO 1 / GROUND 2 / ORGANIC 3 (0 = unresolved)
 };
 
 // AiScheduler — brain[2], the shared per-frame budget accumulator (the +16 field).
@@ -425,11 +443,10 @@ struct AiTarget {
     EntityHandle handle;         // container rebase: the world handle (orig: the entity ptr)
 };
 
-// A perception candidate for acquire_target. [orig: AI_FindBestTargetB @0x466f60 scans the
-// g_pool_list pools; we scan an injected eligible-candidate list — the weapon-slot pool
-// selection + vehicle/building sub-filter (profile+40 slot config) and the relation-matrix
-// team filter are deferred to the weapon/relation phase. The per-candidate perception gates +
-// FOV/range/stealth scoring + LOS + priority bypass are faithful.]
+// A perception candidate for acquire_target. [orig: AI_FindBestTargetB @0x466f60. The live
+// feed (acquire_target) runs the witnessed class-driven pool walk; the scoring core
+// (acquire_target_from) runs the per-candidate perception gates + FOV/range/stealth scoring
+// + LOS + priority bypass over an explicit list — the tests' injection seam.]
 struct AiCandidate {
     EntityHandle handle;
     int32_t pos[3] = {};        // candidate+4/+8/+12 (X/Y/Z, 16.16 fixed)
@@ -442,8 +459,12 @@ struct AiCandidate {
     int32_t relmat_id = 0;      // candidate+284
     int32_t net_id = 0;         // candidate+124 (DcbId)
     bool has_controller = false;// candidate pad3_pre[48]
-    bool is_priority = false;   // == profile+148 priority target -> LOS-only bypass
-    bool los_blocked = false;   // Entity_CheckMutualLineOfSight @0x539be0 (default: clear)
+    bool is_priority = false;   // == brain+148 priority target -> LOS-only bypass
+    // Preset LOS verdict for injected lists (default: clear). The live feed passes a
+    // lazy evaluator instead — LOS runs only for a would-be best / the priority
+    // bypass, never per candidate [orig: Entity_CheckMutualLineOfSight @0x539be0
+    // called only at 0x467363/0x46738b].
+    bool los_blocked = false;
 };
 
 class AiSystem; // fwd
@@ -695,17 +716,26 @@ public:
     // still(4) AIEvent by horizontal speed (sqrt(vx^2+vz^2), >=1057 -> 3 else 4; channel 0).
     void queue_death_event(AiEntity &e);
 
-    // [orig: AI_FindBestTargetB @0x466f60] the candidate FEED (D-AI-1): scan the registry
-    // pools with the witnessed gates (team/see-all, flags 2/0x8000000, health, +530 refcount
-    // saturation, per-candidate range caps) into a scratch list, then run the scoring core.
-    // Deviations tracked in the ledger: the profile weapon-slot class table (+40+4i, ai.def)
-    // is unparsed -> pools 0 and 1 scan unconditionally; LOS = line_of_sight_clear.
+    // [orig: AI_FindBestTargetB @0x466f60] the candidate FEED (D-AI-1): the class-driven
+    // pool walk — four profile weapon-slot classes (+40+4i), each gated by its class-
+    // priority word (+80+4*class), each selecting its pools + sub-filter legs (class 0 =
+    // pool 1 helo-brained then pool 0 players; 1 = pool 1 non-helo; 2 = pool 0 non-player;
+    // 3 = pool 2) — into a scratch list, then the scoring core with the lazy LOS probe.
+    // Entry gates: teamless-without-see-all and the round-end latch [orig:
+    // g_spawn_success_gate @0x24C1928] return null.
     bool acquire_target(World &world, AiEntity &e, AiTarget &out);
+
+    // Lazy LOS seam for the scoring core: null -> each candidate's preset los_blocked
+    // (the injected-list tests); the live feed supplies the evaluator so the ray runs
+    // only for a would-be best / the priority bypass, exactly where the original calls
+    // Entity_CheckMutualLineOfSight [orig: @0x467363/@0x46738b — never per candidate].
+    using LosBlockedFn = bool (*)(void *ctx, const AiCandidate &c);
 
     // The byte-exact scoring core over an explicit candidate list (the P2 port; tests pin
     // it directly). [orig: AI_FindBestTargetB @0x466f60 scoring walk]
     bool acquire_target_from(AiEntity &e, const std::vector<AiCandidate> &candidates,
-                             AiTarget &out);
+                             AiTarget &out, LosBlockedFn los_fn = nullptr,
+                             void *los_ctx = nullptr);
 
     // [orig: the engagement block @0x4677b3..0x4678b2] APPLY the sees+targeted quads to
     // world.relations (D-AI-3 closed) + record the trace, Entity_SetAITarget, reset the

@@ -54,6 +54,8 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     seed.armor_kz = retail_signed_i16(world.player_armor_kz);
     seed.damage_reduc_pp = world.player_damage_reduc_pp;
     seed.damage_reduc_max = world.player_damage_reduc_max;
+    seed.radar_sig = world.player_radar_sig; // AI engage caps [orig: @0x40e136]
+    seed.heat_sig = world.player_heat_sig;
     seed.player_class = spawn.player_class; // entity+0x294 (host-diag 2026-07-01: was left 0)
     seed.position = spawn.position;
     seed.yaw = spawn.yaw;

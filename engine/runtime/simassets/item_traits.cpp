@@ -100,6 +100,8 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
             player_def != nullptr ? player_def->damage_reduc_pp : 0.0f;
     world.player_damage_reduc_max =
             player_def != nullptr ? player_def->damage_reduc_max : 0.0f;
+    world.player_radar_sig = player_def != nullptr ? (player_def->radar_sig & 0xFFFF) : 0;
+    world.player_heat_sig = player_def != nullptr ? (player_def->heat_sig & 0xFFFF) : 0;
     std::vector<world::EntityHandle> handles;
     world.registry.for_each(
             [&](const world::Entity &e) { handles.push_back(e.handle); });
@@ -128,6 +130,11 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
                 def != nullptr ? def->armor_kz : 0);
         e->damage_reduc_pp = def != nullptr ? def->damage_reduc_pp : 0.0f;
         e->damage_reduc_max = def != nullptr ? def->damage_reduc_max : 0.0f;
+        // items.def radarsig/heatsig -> the AI acquisition per-candidate engage caps
+        // [orig: Entity_InitFromModel @0x40e136-0x40e15d — entity+422 = def+376
+        // radarSig (primary-FOV cap), entity+420 = def+378 heatSig (secondary)].
+        e->radar_sig = def != nullptr ? (def->radar_sig & 0xFFFF) : 0;
+        e->heat_sig = def != nullptr ? (def->heat_sig & 0xFFFF) : 0;
         if (hp != 0) {
             e->health_max = hp;
             if (e->health == 100) e->health = hp; // still at the promotion default

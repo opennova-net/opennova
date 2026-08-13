@@ -45,19 +45,27 @@ void AiSystem::queue_death_event(AiEntity &e) {
     events.queue(ev);
 }
 
-// The candidate FEED (D-AI-1, witnessed world-wac-ai-re §16.2): build the eligible list
-// from the registry pools with the witnessed gates, then run the byte-exact scoring core.
-// [orig: AI_FindBestTargetB @0x466f60 iterates g_pool_list in-function per profile
-// weapon-slot class (+40+4i -> pools 0/1/2 with the building sub-filter).] Tracked
-// deviations (ledger D-AI-1): the class table comes from the unparsed ai.def profile, so
-// pools 0 and 1 scan unconditionally; the priority target (profile+148) and the building
-// class remain unmodeled; LOS = line_of_sight_clear (terrain leg, D-AI-7).
+// The candidate FEED (D-AI-1, witnessed world-wac-ai-re §16.2): the class-driven pool
+// walk into the scratch list, then the byte-exact scoring core with the lazy LOS probe.
+// [orig: AI_FindBestTargetB @0x466f60 — the outer do/while over the four profile
+// weapon-slot classes (+40+4*slot), each gated by its class-priority word (+80+4*class),
+// each selecting pools 0/1/2 with the helo-brain / Player-flag sub-filters.]
 bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out) {
     scan_candidates_.clear();
-    // The teamless entry gate lives in the scoring core (it is part of @0x466f60);
-    // mirrored here only to skip the wasted pool walk.
+    // Entry gates [orig: 0x466f60 head]. The round-end latch nulls acquisition outright
+    // [orig: g_spawn_success_gate @0x24C1928 nonzero -> return null @0x466fba]; the
+    // teamless gate is mirrored in the scoring core (it is part of @0x466f60) — here it
+    // only skips the wasted pool walk.
+    if (world.round_end.ended) return false;
     if (e.team == 0 && !e.see_all) return acquire_target_from(e, scan_candidates_, out);
-    for (int pool = 0; pool <= 1; ++pool) {
+
+    const int32_t prio_packed = e.brain.f[AiBrain::kPriorityTarget];
+
+    // One pool leg of the walk: the common perception pre-gates + the class sub-filter,
+    // eligible candidates pushed onto the scratch list [orig: the inner while loop
+    // @0x467070-0x4673a7]. The remaining per-candidate gates (flags 2/0x8000000, the
+    // +530 refcount saturation, FOV/range caps) live in the scoring core.
+    const auto scan_pool = [&](int pool, bool target_vehicles, bool check_player_flag) {
         const size_t cap = world.registry.pool_capacity(pool);
         for (size_t s = 0; s < cap; ++s) {
             const EntityHandle h = EntityHandle::make(pool, static_cast<int>(s));
@@ -68,6 +76,30 @@ bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out) {
             // Team gate [orig: teamless candidates need the attacker's 0x200; same-team
             // skipped unless 0x200].
             if ((c->team == 0 || c->team == e.team) && !e.see_all) continue;
+            // The class sub-filter [orig: 0x46711f-0x46717e; "parent" there is the
+            // candidate's BRAIN (+100), *(brain+4)+16 the profile type word].
+            const AiEntity *cand_ai = for_handle(h);
+            const bool helo_brained = cand_ai != nullptr && cand_ai->profile.type == 1;
+            if (target_vehicles) {
+                if (check_player_flag) {
+                    // The class-0 pool-0 leg: Player-flagged only; the LOCAL player is
+                    // excluded under the MP rules bit [orig: flags & 0x100 @0x46714b;
+                    // candidate == g_local_player_entity && dword_24C1930 & 0x800
+                    // @0x467155].
+                    if ((c->engine_flags & kEntityFlagPlayer) == 0) continue;
+                    if (h == world.cached.local_player && world.ai_rules_skip_local_player)
+                        continue;
+                } else {
+                    // The class-0 pool-1 leg (and an inherited case-3 walk): unbrained
+                    // or helo-typed [orig: !parent || profile+16 == 1 @0x46715d].
+                    if (cand_ai != nullptr && cand_ai->profile.type != 1) continue;
+                }
+            } else {
+                // Classes 1/2: never Player-flagged, never helo-brained
+                // [orig: the else-leg @0x467169-0x46717e].
+                if ((c->engine_flags & kEntityFlagPlayer) != 0) continue;
+                if (helo_brained) continue;
+            }
             AiCandidate cand;
             cand.handle = h;
             cand.pos[0] = static_cast<int32_t>(c->position.x * 65536.0f);
@@ -77,27 +109,86 @@ bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out) {
             cand.flags = static_cast<int32_t>(c->engine_flags); // &2/&0x8000000 skip, &0x4000 prio x6
             cand.health = static_cast<int16_t>(std::min<int32_t>(c->health, INT16_MAX));
             cand.visibility = c->ai_target_refcount;       // [orig: +530 refcount saturation]
-            // Per-candidate engage-range caps [orig: words +422/+420] — def fields, not yet
-            // modeled on Entity: uncapped (the profile's own range still gates).
-            cand.range_primary = INT32_MAX / 2;
-            cand.range_secondary = INT32_MAX / 2;
+            // Per-candidate engage-range caps: the candidate's items.def signatures,
+            // stamped at the item-traits sweep [orig: uint16 words +422/+420 read
+            // @0x46723e/@0x467277; written entity+422 = def+376 radarSig, entity+420 =
+            // def+378 heatSig by Entity_InitFromModel @0x40e136-0x40e15d].
+            cand.range_primary = c->radar_sig;
+            cand.range_secondary = c->heat_sig;
             cand.relmat_id = c->group_id;                  // group key (+0x11C commandGroup)
             cand.net_id = c->net_id;                       // single key (+0x7C SSN)
             cand.has_controller = (c->owner_connection_id != 0);
-            cand.is_priority = false;                      // [orig: profile+148 — unmodeled]
-            cand.los_blocked = !line_of_sight_clear(world, e.pos, cand.pos, e.handle, h);
+            // The scanner's brain+148 priority target [orig: read @0x467350; the same
+            // packed+1 null rebase as kTargetSlot].
+            cand.is_priority =
+                    prio_packed != 0 && prio_packed == static_cast<int32_t>(h.packed) + 1;
             scan_candidates_.push_back(cand);
         }
+    };
+
+    // The class walk [orig: the switch @0x466fe9 + the two-leg continuation @0x4673ac].
+    // target_vehicles deliberately persists across slots — case 3 never assigns it and
+    // inherits the previous slot's value (function-entry 0), the witnessed quirk.
+    bool target_vehicles = false;
+    for (int slot = 0; slot < 4; ++slot) {
+        int pool;
+        int pools_remaining;
+        bool check_player_flag;
+        switch (e.profile.slot_class[slot]) {
+        case 0: // air: pool 1 helo-brained, then pool 0 players [orig: case 0 @0x466ff3]
+            if (e.profile.class_priority[0] == 0) continue;
+            pool = 1; target_vehicles = true; check_player_flag = false; pools_remaining = 2;
+            break;
+        case 1: // ground: pool 1 non-helo [orig: case 1 @0x467012]
+            if (e.profile.class_priority[1] == 0) continue;
+            pool = 1; check_player_flag = false; target_vehicles = false; pools_remaining = 1;
+            break;
+        case 2: // organics: pool 0 non-player [orig: case 2 @0x46702d]
+            if (e.profile.class_priority[2] == 0) continue;
+            pool = 0; check_player_flag = false; target_vehicles = false; pools_remaining = 1;
+            break;
+        case 3: // decorations: pool 2 (buildings) [orig: case 3 @0x467048]
+            if (e.profile.class_priority[3] == 0) continue;
+            pool = 2; check_player_flag = false; pools_remaining = 1;
+            break;
+        default: // [orig: default -> next slot]
+            continue;
+        }
+        scan_pool(pool, target_vehicles, check_player_flag);
+        // The case-0 second leg [orig: 0x4673ac-0x4673be: pool 0, building/player
+        // filter armed, target_vehicles re-set].
+        while (--pools_remaining > 0) {
+            target_vehicles = true;
+            scan_pool(/*pool*/ 0, /*target_vehicles*/ true, /*check_player_flag*/ true);
+        }
     }
-    return acquire_target_from(e, scan_candidates_, out);
+    // The live feed's lazy LOS probe [orig: Entity_CheckMutualLineOfSight @0x539be0,
+    // called only at the priority bypass / would-be-best sites].
+    struct LosCtx {
+        AiSystem *sys;
+        World *world;
+        const AiEntity *scanner;
+    } los_ctx{this, &world, &e};
+    const LosBlockedFn probe = [](void *ctx, const AiCandidate &c) -> bool {
+        LosCtx *lc = static_cast<LosCtx *>(ctx);
+        return !lc->sys->line_of_sight_clear(*lc->world, lc->scanner->pos, c.pos,
+                                             lc->scanner->handle, c.handle);
+    };
+    return acquire_target_from(e, scan_candidates_, out, probe, &los_ctx);
 }
 
 // [orig: AI_FindBestTargetB @0x466f60 scoring walk] over an explicit candidate list.
 // Per-candidate perception gates (team, flags, health, self, refcount saturation) then
 // FOV/range/stealth scoring + LOS; the priority target bypasses scoring on clear LOS.
 bool AiSystem::acquire_target_from(AiEntity &e, const std::vector<AiCandidate> &candidates,
-                                   AiTarget &out) {
+                                   AiTarget &out, LosBlockedFn los_fn, void *los_ctx) {
     ++find_target_calls;
+    // LOS verdict per candidate: the lazy probe when supplied (the live feed), else the
+    // preset flag (injected lists). Evaluated ONLY at the priority-bypass / would-be-best
+    // sites below [orig: Entity_CheckMutualLineOfSight called at @0x467363/@0x46738b].
+    const auto los_blocked = [&](const AiCandidate &c) {
+        return los_fn != nullptr ? los_fn(los_ctx, c) : c.los_blocked;
+    };
     // Entry gate [orig: 0x466f60 head]: teamless scanners need the 0x200 see-all flag.
     if (e.team == 0 && !e.see_all) return false;
     const int primary_fov = e.profile.fov_primary | 1;     // [orig: (def+75)|1]
@@ -129,13 +220,13 @@ bool AiSystem::acquire_target_from(AiEntity &e, const std::vector<AiCandidate> &
         if (score < 0) continue;
 
         if (c.is_priority) { // [orig: 0x467350 — reached only past the gate] priority -> LOS-only bypass
-            if (!c.los_blocked) { // Entity_CheckMutualLineOfSight @0x539be0
+            if (!los_blocked(c)) { // Entity_CheckMutualLineOfSight @0x539be0
                 out = AiTarget{c.relmat_id, c.net_id, c.has_controller, c.handle};
                 return true;
             }
             continue; // priority but LOS blocked -> skip (no best-of, matches the orig else-if)
         }
-        if (score > best_score && !c.los_blocked) { // [orig: else if (score > best_score) + LOS]
+        if (score > best_score && !los_blocked(c)) { // [orig: else if (score > best_score) + LOS]
             best_score = score;
             best = &c;
         }

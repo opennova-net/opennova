@@ -1717,6 +1717,188 @@ int main() {
         CHECK(gout.net_id == 0x999);         // out-of-gate priority skipped; in-range enemy chosen
     }
 
+    // ---- acquire_target: the class-driven pool walk (D-AI-1, §16.2) ----
+    {
+        const auto make_world = [](World &w) {
+            w.registry.configure_pool(0, 8);
+            w.registry.configure_pool(1, 8);
+            w.registry.configure_pool(2, 8);
+            const auto spawn = [&w](int pool, uint16_t net_id, uint32_t flags = 0) {
+                Entity c;
+                c.team = 2;
+                c.health = 100;
+                c.position = Vec3{100.0f, 0.0f, 0.0f};
+                c.net_id = net_id;
+                c.radar_sig = 1000;
+                c.heat_sig = 1000;
+                c.engine_flags = flags;
+                return w.registry.spawn(pool, c);
+            };
+            spawn(0, 0x10);                      // organic
+            spawn(0, 0x11, kEntityFlagPlayer);   // player-flagged organic
+            spawn(1, 0x20);                      // ground vehicle (no brain)
+            spawn(2, 0x30);                      // building
+        };
+        const auto make_scanner = [](AiSystem &sys, EntityHandle h) -> AiEntity & {
+            AiEntity &e = *sys.at(sys.attach(h));
+            e.team = 1;
+            e.heading = 0;
+            e.profile.fov_primary = 0x40;
+            e.profile.fov_secondary = 0x40;
+            e.profile.range_primary = 1000;
+            e.profile.range_secondary = 1000;
+            return e;
+        };
+
+        // All-zero priorities (retail's memset-0 / unresolved-.aip profile) -> no scan.
+        // [orig: every case gates on the +80+4*class word @0x466ff3/0x467012/0x46702d/0x467048]
+        {
+            World w;
+            make_world(w);
+            AiSystem sys;
+            AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
+            AiTarget out{};
+            CHECK(sys.acquire_target(w, e, out) == false);
+        }
+
+        // priority_ground alone: pool 1 scanned (class 1); pool-0 organics and pool-2
+        // buildings unseen. [orig: case 1 -> pool 1 only @0x467018-0x467024]
+        {
+            World w;
+            make_world(w);
+            AiSystem sys;
+            AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
+            e.profile.class_priority[1] = 100;
+            AiTarget out{};
+            CHECK(sys.acquire_target(w, e, out) == true);
+            CHECK(out.net_id == 0x20);
+        }
+
+        // priority_organics alone: pool 0, the Player-flagged candidate excluded
+        // [orig: case 2 -> pool 0, else-leg flags & 0x100 reject @0x467169].
+        {
+            World w;
+            make_world(w);
+            AiSystem sys;
+            AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
+            e.profile.class_priority[2] = 100;
+            AiTarget out{};
+            CHECK(sys.acquire_target(w, e, out) == true);
+            CHECK(out.net_id == 0x10);
+        }
+
+        // priority_air alone: pool 1 (unbrained accepted), then pool 0 PLAYERS only
+        // [orig: case 0 two-leg walk @0x466ff9-0x467005 + @0x4673ac-0x4673be]. With the
+        // vehicle removed, only the player-flagged organic remains visible.
+        {
+            World w;
+            make_world(w);
+            AiSystem sys;
+            AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
+            e.profile.class_priority[0] = 100;
+            // Kill the pool-1 vehicle so the pool-0 player leg decides.
+            w.registry.get(EntityHandle::make(1, 0))->health = 0;
+            AiTarget out{};
+            CHECK(sys.acquire_target(w, e, out) == true);
+            CHECK(out.net_id == 0x11);
+            // The MP rules bit excludes the LOCAL player from that leg
+            // [orig: dword_24C1930 & 0x800 @0x467155].
+            w.cached.local_player = EntityHandle::make(0, 1);
+            w.ai_rules_skip_local_player = true;
+            AiTarget out2{};
+            CHECK(sys.acquire_target(w, e, out2) == false);
+        }
+
+        // priority_decorations alone: pool 2 buildings become targetable
+        // [orig: case 3 -> pool 2 @0x46704e].
+        {
+            World w;
+            make_world(w);
+            AiSystem sys;
+            AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
+            e.profile.class_priority[3] = 100;
+            AiTarget out{};
+            CHECK(sys.acquire_target(w, e, out) == true);
+            CHECK(out.net_id == 0x30);
+        }
+
+        // Zero-signature candidate: the per-candidate caps reject it (an unauthored
+        // radarsig/heatsig makes the entity undetectable, exactly like retail)
+        // [orig: dist > uint16 +422/+420 @0x46723e/@0x467277].
+        {
+            World w;
+            make_world(w);
+            AiSystem sys;
+            AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
+            e.profile.class_priority[1] = 100;
+            w.registry.get(EntityHandle::make(1, 0))->radar_sig = 0;
+            w.registry.get(EntityHandle::make(1, 0))->heat_sig = 0;
+            AiTarget out{};
+            CHECK(sys.acquire_target(w, e, out) == false);
+        }
+
+        // The round-end latch nulls acquisition [orig: g_spawn_success_gate @0x24C1928].
+        {
+            World w;
+            make_world(w);
+            AiSystem sys;
+            AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
+            e.profile.class_priority[1] = 100;
+            w.round_end.ended = true;
+            AiTarget out{};
+            CHECK(sys.acquire_target(w, e, out) == false);
+        }
+
+        // The brain+148 priority feed: the marked candidate wins via the LOS-only
+        // bypass over a better-scoring nearer enemy [orig: brain+148 read @0x467350].
+        {
+            World w;
+            make_world(w);
+            AiSystem sys;
+            AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
+            e.profile.class_priority[1] = 100;
+            Entity far_vehicle;
+            far_vehicle.team = 2;
+            far_vehicle.health = 100;
+            far_vehicle.position = Vec3{900.0f, 0.0f, 0.0f};
+            far_vehicle.net_id = 0x21;
+            far_vehicle.radar_sig = 1000;
+            far_vehicle.heat_sig = 1000;
+            const EntityHandle prio_h = w.registry.spawn(1, far_vehicle);
+            e.brain.f[AiBrain::kPriorityTarget] = static_cast<int32_t>(prio_h.packed) + 1;
+            AiTarget out{};
+            CHECK(sys.acquire_target(w, e, out) == true);
+            CHECK(out.net_id == 0x21); // priority beats the nearer 0x20
+        }
+
+        // LOS runs LAST, only for a would-be best: the lazy probe is consulted at
+        // most once per improving candidate, never for gate-failed ones
+        // [orig: Entity_CheckMutualLineOfSight only @0x467363/@0x46738b].
+        {
+            AiSystem sys;
+            AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
+            AiCandidate a{};
+            a.handle = EntityHandle::make(1, 1);
+            a.team = 2; a.pos[0] = 500 << 16; a.health = 100;
+            a.range_primary = 1000; a.range_secondary = 1000; a.net_id = 0x51;
+            AiCandidate b = a;
+            b.handle = EntityHandle::make(1, 2);
+            b.pos[0] = 100 << 16; b.net_id = 0x52;
+            AiCandidate gated = a; // out of range -> gate-fails before any LOS
+            gated.handle = EntityHandle::make(1, 3);
+            gated.pos[0] = 5000 << 16; gated.net_id = 0x53;
+            int los_calls = 0;
+            const AiSystem::LosBlockedFn count_fn = [](void *ctx, const AiCandidate &) {
+                ++*static_cast<int *>(ctx);
+                return false;
+            };
+            AiTarget out{};
+            CHECK(sys.acquire_target_from(e, {a, b, gated}, out, count_fn, &los_calls) == true);
+            CHECK(out.net_id == 0x52);
+            CHECK(los_calls == 2); // a (first best), b (improves) — never the gated one
+        }
+    }
+
     // ---- death event on a non-authority in-session client zeroes health before the death tick ----
     {
         World w;
@@ -1813,6 +1995,8 @@ int main() {
         enemy_seed.position = Vec3{100.0f, 0.0f, 0.0f};
         enemy_seed.net_id = 0x77; // single key (SSN)
         enemy_seed.group_id = 3;
+        enemy_seed.radar_sig = 1000; // per-candidate engage caps (def+376/+378)
+        enemy_seed.heat_sig = 1000;
         EntityHandle enemy_h = w.registry.spawn(1, enemy_seed);
         CHECK(enemy_h.valid());
 
@@ -1825,6 +2009,9 @@ int main() {
         e.profile.fov_secondary = 0x40;
         e.profile.range_primary = 1000;
         e.profile.range_secondary = 1000;
+        // The class walk gates the feed (D-AI-1): a ground priority admits the
+        // pool-1 non-helo enemy [orig: profile+84 -> case 1 @0x467012].
+        e.profile.class_priority[1] = 100;
         AiThinkCtx ctx{&sys, &e, &w, nullptr};
         sys.row(kAiGroundFollowWp).tick(ctx);
         CHECK(e.brain.f[AiBrain::kPendState] == 17);     // engaged
