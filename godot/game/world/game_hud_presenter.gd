@@ -51,10 +51,35 @@ var _friendly_tag_mode := 2
 # to the live index @0x55152f; cycled 0..5 by input action case 10 @0x49afc7]
 const HUD_COLOR_CONFIG_PATH := "user://settings.cfg"
 const HUD_COLOR_SECTION := "hud"
-const HUD_COLOR_KEY := "hud_color_index"
+const HUD_COLOR_CONFIG_KEY := "hud_color_index"
 var _hud_color_index: int = clampi(
 		int(ConfigStore.read(HUD_COLOR_CONFIG_PATH, HUD_COLOR_SECTION,
-				HUD_COLOR_KEY, 2)), 0, 5)
+				HUD_COLOR_CONFIG_KEY, 2)), 0, 5)
+
+# The gameplay key bindings the shell routes here via handle_gameplay_key. Each
+# action is witnessed; the authored default binding rows ride the unported
+# input-binding layer (D-CTRL-3), so the keys themselves are reimpl mappings.
+# Objectives = the co-op alpha toggle [orig: @0x49b68b ->
+# HUD_DrawWinConditions @0x5be163]; friendly tags KEY_F, N is NVG [orig:
+# action 30 @0x49b573]; color-scheme cycle [orig: input case 10 @0x49afc7].
+const OBJECTIVES_KEY := KEY_O
+const FRIENDLY_TAGS_KEY := KEY_F
+const HUD_COLOR_KEY := KEY_H
+
+
+## Route one gameplay keycode to its HUD action; false = not a HUD key (the
+## shell lets it fall through to the other handlers).
+func handle_gameplay_key(keycode: int) -> bool:
+	match keycode:
+		OBJECTIVES_KEY:
+			toggle_objectives()
+		FRIENDLY_TAGS_KEY:
+			cycle_friendly_tags()
+		HUD_COLOR_KEY:
+			cycle_hud_color()
+		_:
+			return false
+	return true
 
 
 func setup(world, player_presenter_in, ui_parent: Node) -> void:
@@ -654,8 +679,8 @@ func cycle_friendly_tags() -> void:
 ## idx+1, >5 wraps to 0, g_hudActiveColor = table[idx]]
 func cycle_hud_color() -> void:
 	_hud_color_index = (_hud_color_index + 1) % 6
-	ConfigStore.write(HUD_COLOR_CONFIG_PATH, HUD_COLOR_SECTION, HUD_COLOR_KEY,
-			_hud_color_index)
+	ConfigStore.write(HUD_COLOR_CONFIG_PATH, HUD_COLOR_SECTION,
+			HUD_COLOR_CONFIG_KEY, _hud_color_index)
 	if _game_hud != null:
 		_game_hud.set_hud_color_index(_hud_color_index)
 

@@ -529,8 +529,8 @@ int HudOverlay::get_friendly_tag_mode() const {
 }
 
 void HudOverlay::set_hud_color_index(int p_index) {
-	// 0..5 like the retail cycle [orig: input action case 10 @0x49afc7 wraps
-	// past 5 to 0; config token "hud_color_index" default 2 @0x54d2a6].
+	// 0..5 like the retail cycle's wrap range; the witness lives with the
+	// engine consumer (hud-re.md "The hud_color_index scheme").
 	state_.hud_color_index = CLAMP(p_index, 0, 5);
 	queue_redraw();
 }
