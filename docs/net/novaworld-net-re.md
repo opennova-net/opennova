@@ -5770,16 +5770,19 @@ world stays non-null) would keep fanning 0x0A. Fixed: step (3) (snapshot + emit)
 structure. The whole tick is gated at its call site by `is_authority`, not `is_in_session`. `[orig:
 Server_TickUpdate @0x51d7e0; Game_ProcessMainFrame @0x5266b4]`
 
-**D-NET-121** [reimpl deferral, DOCUMENTED] **`fallback_anchor = {}` is a non-zero (dvxi5) anchor.**
-`PlayerReplicationState` default-constructs `spawn_x/y/z` to the hardcoded dvxi5 map-center coords
-(`0xfe56f854/0x0049f5f0/0x003a5e6a`), team=1, mi=0x3CDE — not origin. A spawned connection that reaches
-the emit step with no resolvable owned entity (the host's own loopback, or a peer despawned mid-match)
-anchors its 0x0A there, so a receiver decompresses every entity offset by the gap to the real local
-position. Today the only caller is the golden test (which binds an owned entity); revisit before a
-production driver fans to an owned-entity-less connection. `[orig: replication_model.h dvxi5 defaults]`
-**RESOLVED (P5, §5.44):** the host's own loopback binds `owned_entity` to the host player
-(`Server_BuildPlayerInfoAndAdd`), so it never anchors on the dvxi5 fallback; the fallback now bites only
-the no-owned-entity edge (a despawn mid-match), still deferred.
+**D-NET-121** [behavior, reimpl divergence **FIXED 2026-08-12**] **An unbound, freed, or
+lifetime-stale connection emits no S2C 0x0A.** Retail enters the per-player writer only when the
+player slot is deployed (`state == 6`), then immediately reads that recipient entity's eye/reference
+position; its phase counter increments only inside that writer. `[orig:
+Server_SendEntityStateToPlayer @0x517BA0; recipient eye stores @0x517BF5..0x517C13; counter increment
+@0x517BE8]` The reimpl removed `fallback_anchor` from `emit_connection_s2c` and
+`Server_TickUpdate`: it resolves the live `owned_entity` plus its registry-allocation serial before
+incrementing phase, aging visibility, mutating priority caches, or advancing the round watermark.
+A miss returns without transport output or replication-state mutation. Production player-spawn paths
+stamp the serial; the World-less status-reply binding leaves it zero for the first live authoritative
+emit to stamp. A packed-slot reuse is rejected until the connection is explicitly rebound to the new
+allocation. `netsim_two_peer_fanout` pins ownerless silence, state immutability, despawn/reuse refusal,
+and resumed emission after rebind.
 
 **D-NET-122** [reimpl divergence, DOCUMENTED] **The 0x0A fan is gated on `burst.spawned`.** This narrows
 the legacy `NetSystem::emit_s2c`, which emits to every transport-bearing connection (its host loopback
@@ -5929,17 +5932,17 @@ drain). A new `netsim::ISessionTransport::deliver_c2s(tag,body)` (impl on `Loopb
 stages OUTBOUND and never reaches `host_recv`). `[orig: NapiNPServerMsg_0x00C @0x501c30 →
 dispatch_entity_packet_callback @0x4d6a80]`
 
-**D-NET-121** and **D-NET-122 — RESOLVED (P5).** The two P4 deferrals about the host's own loopback are
-closed together. `Server_TickUpdate`'s C2S drain and S2C `0x0A` fan now both gate on the single
+**D-NET-122 — RESOLVED (P5); D-NET-121 follow-up — FIXED 2026-08-12.**
+`Server_TickUpdate`'s C2S drain and S2C `0x0A` fan both gate on the single
 `is_in_match(conn)` predicate (`napi_np_connection.h`; == `burst.spawned`) instead of an inline
 `burst.spawned` in each (the D-NET-122 ask). The host's own type-2 loopback latches `burst.spawned` the
 SAME way a remote joiner does — `tick_connections` drives its §5.2a initial-state burst to completion
 (D-NET-114) — so it is no longer starved of its per-frame `0x0A`. Its `0x0A` anchors to its
-`owned_entity` (the host player, bound by `Server_BuildPlayerInfoAndAdd @0x51d560`, §5.43), NOT the
-D-NET-121 dvxi5 `fallback_anchor` (which is reached only by an in-match connection with no resolvable
-owned entity — a deferred edge that no longer includes the host loopback). Verified by the host-as-client
-section of `npruntime_client_runtime` (anchor == host player position, explicitly `!=` the dvxi5
-fallback).
+`owned_entity` (the host player, bound by `Server_BuildPlayerInfoAndAdd @0x51d560`, §5.43).
+The later D-NET-121 closure removes the fallback entirely: a missing/despawned/lifetime-stale owner
+does not enter the writer, matching the original `state == 6` gate before its recipient-entity reads
+`[orig: Server_SendEntityStateToPlayer @0x517BA0..0x517C13]`. Verified by the host-as-client section
+of `npruntime_client_runtime` plus `netsim_two_peer_fanout`'s no-owner and packed-slot-reuse cases.
 
 **Evidence.** `npruntime_client_runtime` (always-on): the full in-process round-trip — `ClientRuntime`
 ↔ the real np server legs ↔ `Server_TickUpdate` + `apply_in_match_c2s` + the `ClientReplicaPipeline` fold
@@ -7063,8 +7066,11 @@ that gates `weapon.mnu`. VC/type 7 is selected as solid geometry by the vehicle 
 query when a section authors a VC/VK run; without one, that query falls back to CB/default
 solids. BB/type 8 drives indoor/section visibility. For a resolved static/dynamic collision
 instance, bullet narrow phase touches none of these BVOLs and requires CFAC triangles. An
-entity with no resolved collision instance may still use the separately documented
-compatibility sphere.
+unresolved pool-1 collision binding is fatal rather than substitute geometry:
+retail initializes the client entity's model before its ordinary proximity-table
+CFAC walk `[orig: Entity_InitFromModel @0x40DC30;
+Projectile_RaycastProximitySlots @0x4E5340 ->
+Physics_RaycastAgainstBoneCollision @0x4E4CB0]`.
 
 Persons use the separate recovered COBJ bone-sphere path. When a live section pose is
 published, bones are tested descending; extra radius starts at bullet radius + 0.05 u;

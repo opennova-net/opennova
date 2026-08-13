@@ -526,6 +526,18 @@ func _stage_building_fixture(name: String) -> String:
 	return root_dir
 
 
+# Dvxi5 supplies the witnessed terrain-normal table inputs and House.3di keeps
+# the SSN owner on the real placed-object path used by the routing assertion.
+# [orig: WacScript_SpawnEffectAtSsnEntity @0x4F23A0 resolves the SSN entity,
+# then reads the terrain normal for its grid cell before creating the emitter.]
+func _stage_building_terrain_fixture(name: String) -> String:
+	var root_dir := _stage_impact_fixture(name)
+	assert_eq(DirAccess.copy_absolute(
+			ProjectSettings.globalize_path("res://../fixtures/threedi/3di3/House.3di"),
+			root_dir.path_join("GuardTwr1.3di")), OK)
+	return root_dir
+
+
 func test_manual_perf_probe_routes_through_the_public_runtime_gate() -> void:
 	var world := _make_world()
 	add_child_autofree(world)
@@ -686,13 +698,14 @@ func test_fixed_tick_orders_weapon_and_impact_before_particle_advance() -> void:
 				"a physical collision is visible in its production frame without catch-up aging")
 
 
-func test_fx2ssn_routes_position_owner_and_up_orientation() -> void:
-	var root_dir := _stage_building_fixture("fx2ssn")
+func test_fx2ssn_routes_position_owner_and_terrain_orientation() -> void:
+	var root_dir := _stage_building_terrain_fixture("fx2ssn")
 	var world := ImpactGameWorldHarness.new()
 	_add_engine_children(world)
 	add_child_autofree(world)
 	var placed := {}  # mutated (merge), never reassigned: lambda captures copy locals
 	_load_minimal_mission(world, root_dir, func(mission: MissionData) -> void:
+		assert_true(mission.set_header_string("terrain", "Dvxi5"))
 		placed.merge(mission.add_entity(
 				MissionData.KIND_BUILDING, 102001, Vector3(6, 4, 5), Vector3.ZERO)))
 	var ssn := int(placed.get("bms_id", 0))
@@ -712,8 +725,23 @@ func test_fx2ssn_routes_position_owner_and_up_orientation() -> void:
 			"the SSN resolves to the real registry entity's Godot-space position")
 	assert_almost_eq(spawn_pos.z, -4.0, 0.01,
 			"mission (x, north, up) maps through the canonical frame")
-	assert_eq(effects.spawns[0].orientation, Vector3.UP,
-			"the documented terrain-normal placeholder must actually reach the emitter")
+	var terrain := world.get_terrain_data()
+	assert_not_null(terrain)
+	# This independently spells out the recovered centered raw-height
+	# difference at the real, non-flat Dvxi5 cell (source 518,508).
+	# [orig: Terrain_GenerateNormalMap @0x603210, diff scale @0x7C6950;
+	# WacScript_SpawnEffectAtSsnEntity consumes that cell normal @0x4F23A0.]
+	var expected := Vector3(
+			terrain.get_height_world(spawn_pos + Vector3(-1, 0, 0))
+					- terrain.get_height_world(spawn_pos + Vector3(1, 0, 0)),
+			1.0,
+			terrain.get_height_world(spawn_pos + Vector3(0, 0, -1))
+					- terrain.get_height_world(spawn_pos + Vector3(0, 0, 1))).normalized()
+	var orientation: Vector3 = effects.spawns[0].orientation
+	assert_lt(orientation.distance_to(expected), 0.00001,
+			"fx2ssn receives the terrain cell's recovered surface normal")
+	assert_gt(orientation.distance_to(Vector3.UP), 0.01,
+			"the non-flat Dvxi5 witness cannot regress to the old UP placeholder")
 
 
 func test_round_outcome_effects_pass_through_to_hud_consumers() -> void:

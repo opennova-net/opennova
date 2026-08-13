@@ -456,6 +456,7 @@ void TerrainData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_height", "world_pos"), &TerrainData::get_height);
 	ClassDB::bind_method(D_METHOD("get_height_world", "world_pos"), &TerrainData::get_height_world);
 	ClassDB::bind_method(D_METHOD("get_height_world_bilinear", "world_pos"), &TerrainData::get_height_world_bilinear);
+	ClassDB::bind_method(D_METHOD("get_surface_normal_world", "world_pos"), &TerrainData::get_surface_normal_world);
 	ClassDB::bind_method(D_METHOD("get_colormap_color_world", "world_x", "world_z"), &TerrainData::get_colormap_color_world);
 	ClassDB::bind_method(D_METHOD("get_modulated_colormap_color_world", "world_x", "world_z", "light_color"),
 	                     &TerrainData::get_modulated_colormap_color_world);
@@ -1487,6 +1488,20 @@ float TerrainData::get_height_world_bilinear(const Vector3 &p_world_pos) const {
 	if (!loaded || cpt.depth_buffer.empty()) return 0.0f;
 	return opennova::terrain::height_field_height_world_bilinear(height_field_from(cpt, trn),
 	                                                              p_world_pos.x, p_world_pos.z);
+}
+
+Vector3 TerrainData::get_surface_normal_world(const Vector3 &p_world_pos) const {
+	if (!loaded || cpt.depth_buffer.empty()) return Vector3(0.0f, 1.0f, 0.0f);
+	const opennova::terrain::TerrainSurfaceNormal normal =
+			opennova::terrain::height_field_surface_normal_world(
+					height_field_from(cpt, trn), p_world_pos.x, p_world_pos.z);
+	// The portable contract owns the recovered query. This device leg maps its
+	// {source X, source Z, height} basis to Godot {X, Y-up, Z}.
+	// [orig: Terrain_GenerateNormalMap @0x603210; WAC fx2ssn consumes the
+	// terrain table at WacScript_SpawnEffectAtSsnEntity @0x4F23A0]
+	return Vector3(static_cast<float>(normal.x),
+	               static_cast<float>(normal.up),
+	               static_cast<float>(normal.z));
 }
 
 Color TerrainData::get_colormap_color_world(float world_x, float world_z) const {

@@ -42,6 +42,16 @@ struct TerrainHeightField {
 	bool valid() const { return heightmap != nullptr && dim > 0; }
 };
 
+// Normalized terrain basis used by portable queries. `x` and `z` are the two
+// horizontal slope components and `up` is the height axis; the Godot boundary
+// maps this once to Vector3(x, up, z).
+// [orig: Terrain_GenerateNormalMap @0x603210 keeps this two-slope/unit-up basis]
+struct TerrainSurfaceNormal {
+	double x = 0.0;
+	double z = 0.0;
+	double up = 1.0;
+};
+
 namespace detail {
 // The same layout minus the locks. They are free only if they fit its padding.
 struct TerrainHeightFieldNoLocks {
@@ -71,5 +81,21 @@ float height_field_height_world(const TerrainHeightField &f, float world_x, floa
 // column height the AI grounds on. [orig: TerrainData::get_height_world_bilinear /
 // Terrain_SampleHeightBilinear @0x6067B0.] World units.
 float height_field_height_world_bilinear(const TerrainHeightField &f, float world_x, float world_z);
+
+// The one per-cell normal kernel shared by the generated terrain normal atlas
+// and runtime surface queries. Inputs are the raw16 neighbours around the cell.
+// [orig: Terrain_GenerateNormalMap @0x603210: (left-right)/256,
+// (back-forward)/256, unit up, then normalize]
+TerrainSurfaceNormal height_field_normal_from_raw16(
+		uint16_t x_minus, uint16_t x_plus,
+		uint16_t z_minus, uint16_t z_plus);
+
+// Resolve a world position through the runtime sector/quadrant mapping, floor
+// to its terrain grid cell, and return the exact generated normal for that
+// cell. Invalid fields and empty sectors return canonical up.
+// [orig: WacScript_SpawnEffectAtSsnEntity @0x4F23A0 reads the terrain surface
+// normal at the entity grid cell; Terrain_GenerateNormalMap @0x603210]
+TerrainSurfaceNormal height_field_surface_normal_world(
+		const TerrainHeightField &f, float world_x, float world_z);
 
 } // namespace opennova::terrain

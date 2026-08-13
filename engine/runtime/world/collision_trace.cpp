@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <stdexcept>
 #include <terrain_query/height_field.h>
 
 #include "collision_detail.h"
@@ -513,6 +514,27 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
                 continue;
             CollisionPolygonHit model_hit;
             const CollisionTargetView *target = trace_target_view(world, h);
+            if (target == nullptr &&
+                hit_class == ProjectileHitClass::DynamicEntity &&
+                entity->kind == EntityKind::Item) {
+                // Runtime-placed satchels/mines are ordinary pool-1 item clones:
+                // their model initialization precedes the same CFAC projectile
+                // walk as mission-start items. Give the retained host asset
+                // provider one idempotent chance to attach that late allocation
+                // before the polygon walk. Failure is an impossible clone/model
+                // state, not alternate collision geometry: surface it instead of
+                // silently widening the item to its proximity sphere.
+                // [orig: Entity_CloneFromTemplateByType @0x4398A0 ->
+                // Entity_InitFromModel @0x40DC30; Projectile_RaycastProximitySlots
+                // @0x4E53D4 -> Physics_RaycastAgainstBoneCollision @0x4E4CB0]
+                const_cast<CollisionWorld *>(this)->ensure_entity_instance(
+                    const_cast<World &>(world), h);
+                target = trace_target_view(world, h);
+                if (target == nullptr) {
+                    throw std::logic_error(
+                        "CollisionWorld::trace_projectile: pool-1 item has no live collision model");
+                }
+            }
             if (profile_trace && target != nullptr && target->model != nullptr) {
                 const int64_t faces =
                     static_cast<int64_t>(target->model->faces.size());
@@ -646,22 +668,16 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
                 view.pool_index = proxy.wire_handle & 0xFFF;
                 view.live_section_pose = false;
                 if (!narrow_phase(view, model_hit)) continue;
-            } else if (proxy.bound_radius_q16 > 0) {
-                // The bounded compatibility stand-in for an unresolvable
-                // graphic, matching the local-table rule (D-ITEM-1 family).
-                const int32_t center[3] = {proxy.position_q16.x,
-                                           proxy.position_q16.y,
-                                           proxy.position_q16.z};
-                if (!sphere_distance(center, proxy.bound_radius_q16,
-                                     model_hit.distance_q16))
-                    continue;
-                const int32_t t = t_for_distance(model_hit.distance_q16);
-                const FixedVec3 p = point_at(t);
-                model_hit.position_q16[0] = p.x;
-                model_hit.position_q16[1] = p.y;
-                model_hit.position_q16[2] = p.z;
             } else {
-                continue;
+                // Retail's pool-1 projectile pass walks client entities only
+                // after model initialization has supplied their authored CFAC.
+                // An unresolved wire projection is therefore a broken binding
+                // invariant, never alternate sphere collision.
+                // [orig: Entity_InitFromModel @0x40DC30;
+                // Projectile_RaycastProximitySlots @0x4E5340 ->
+                // Physics_RaycastAgainstBoneCollision @0x4E4CB0]
+                throw std::logic_error(
+                    "CollisionWorld::trace_projectile: pool-1 wire proxy has no live collision model");
             }
             if (!table_found || model_hit.distance_q16 <= table_hit.distance_q16) {
                 table_found = true;

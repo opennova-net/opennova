@@ -929,7 +929,15 @@ bool check_host_s2c_holdoff_and_frame_envelope() {
 	opennova::np::configure_session_runtime(owner.ctx);
 
 	opennova::world::World world;
+	world.registry.configure_pool(0, 2);
 	world.registry.configure_pool(1, 80);
+	opennova::world::Entity recipient;
+	recipient.kind = opennova::world::EntityKind::Organic;
+	recipient.item_type = 3;
+	recipient.health = 150;
+	const opennova::world::EntityHandle recipient_h =
+			world.registry.spawn(0, recipient);
+	if (!expect(recipient_h.valid(), "frame-envelope recipient spawned")) return false;
 	for (int i = 0; i < 70; ++i) {
 		opennova::world::Entity vehicle;
 		vehicle.kind = opennova::world::EntityKind::Item;
@@ -961,6 +969,13 @@ bool check_host_s2c_holdoff_and_frame_envelope() {
 	conn.client_ck = 0x10203040u;
 	conn.link.transport = peer_link.transport.get();
 	conn.link.mode = opennova::netsim::TransportMode::Client;
+	conn.link.owned_entity = recipient_h;
+	conn.link.owned_entity_spawn_id =
+			world.registry.get(recipient_h)->registry_spawn_id;
+	// The per-frame writer needs the deployed recipient allocation before it
+	// can derive the compression reference used by this envelope test.
+	// [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 gate and
+	// recipient eye/reference reads @0x517BF5..0x517C13]
 	owner.ctx.np_protocol.connection_list.push_back(std::move(conn));
 	auto &remote = owner.ctx.np_protocol.connection_list.front();
 	opennova::np::arm_s2c_send_holdoff(remote, 3);
@@ -1220,7 +1235,22 @@ bool check_host_loopback_does_not_inherit_udp_envelope() {
 	ctx.np_protocol.connection_list.front().burst.spawned = true;
 
 	opennova::world::World world;
+	world.registry.configure_pool(0, 2);
 	world.registry.configure_pool(1, 80);
+	opennova::world::Entity recipient;
+	recipient.kind = opennova::world::EntityKind::Organic;
+	recipient.item_type = 3;
+	recipient.health = 150;
+	const opennova::world::EntityHandle recipient_h =
+			world.registry.spawn(0, recipient);
+	if (!expect(recipient_h.valid(), "loopback envelope recipient spawned")) return false;
+	auto &loopback_conn = ctx.np_protocol.connection_list.front().link;
+	loopback_conn.owned_entity = recipient_h;
+	loopback_conn.owned_entity_spawn_id =
+			world.registry.get(recipient_h)->registry_spawn_id;
+	// Host loopback follows the same deployed-player writer gate as a peer.
+	// [orig: Server_BuildPlayerInfoAndAdd @0x51D560 ->
+	// Server_SendEntityStateToPlayer @0x517BA0]
 	for (int i = 0; i < 70; ++i) {
 		opennova::world::Entity vehicle;
 		vehicle.kind = opennova::world::EntityKind::Item;

@@ -1,4 +1,5 @@
 #include <terrain/texture_preprocess.h>
+#include <terrain_query/height_field.h>
 
 #include <algorithm>
 #include <cmath>
@@ -112,7 +113,6 @@ Rgba8Image build_heightfield_normal_map(
 	const uint32_t quadrant_height = height >> 1;
 	const uint32_t quadrant_x_mask = quadrant_width - 1;
 	const uint32_t quadrant_y_mask = quadrant_height - 1;
-	constexpr double height_scale = 1.0 / 256.0;
 
 	for (uint32_t y = 0; y < height; ++y) {
 		for (uint32_t x = 0; x < width; ++x) {
@@ -132,29 +132,21 @@ Rgba8Image build_heightfield_normal_map(
 					? y_offset + (sample_y & quadrant_y_mask)
 					: sample_y & y_mask;
 			};
-			const auto height_at = [&](uint32_t sample_x, uint32_t sample_y) {
-				return static_cast<double>(
-					depth[static_cast<size_t>(sample_y) * width + sample_x]) *
-					height_scale;
-			};
-			const double nx =
-				height_at(resolve_x(x - 1), y) -
-				height_at(resolve_x(x + 1), y);
-			const double ny =
-				height_at(x, resolve_y(y - 1)) -
-				height_at(x, resolve_y(y + 1));
-			// Retail's third component is the fld1 unit Z (@ 0x603248), giving
-			// twice the slope response of a nz=2 normalization.
+			// One recovered kernel now serves both this texture atlas and the
+			// WAC runtime surface-normal lookup, preventing either copy from
+			// drifting in scale, axis order, or normalization.
 			// [orig: Terrain_GenerateNormalMap @ 0x603210; diff scale 1/256
 			// @ 0x7C6950; encode 127.5 @ 0x7D8B48; alpha 0x80 @ 0x6034eb]
-			constexpr double nz = 1.0;
-			const double inverse_length =
-				1.0 / std::sqrt(nx * nx + ny * ny + nz * nz);
+			const TerrainSurfaceNormal normal = height_field_normal_from_raw16(
+					depth[static_cast<size_t>(y) * width + resolve_x(x - 1)],
+					depth[static_cast<size_t>(y) * width + resolve_x(x + 1)],
+					depth[static_cast<size_t>(resolve_y(y - 1)) * width + x],
+					depth[static_cast<size_t>(resolve_y(y + 1)) * width + x]);
 
 			const size_t dst = (static_cast<size_t>(y) * width + x) * 4;
-			result.pixels[dst] = encode_coefficient(nx * inverse_length);
-			result.pixels[dst + 1] = encode_coefficient(ny * inverse_length);
-			result.pixels[dst + 2] = encode_coefficient(nz * inverse_length);
+			result.pixels[dst] = encode_coefficient(normal.x);
+			result.pixels[dst + 1] = encode_coefficient(normal.z);
+			result.pixels[dst + 2] = encode_coefficient(normal.up);
 			result.pixels[dst + 3] = 128;
 		}
 	}

@@ -1962,13 +1962,18 @@ func _route_mission_effects(effects: Array) -> void:
 			# [orig: WacScript_SpawnEffectAtSsnEntity @ 0x4f23a0 — renamed from the
 			# kong "sound" misnomer, it spawns a particle emitter]. The original
 			# orients the emitter to the terrain surface normal at the entity's
-			# grid cell; ported as up-vector until the terrain-normal read lands
-			# (ptl-format-re.md §8, D-PTL-7).
+			# grid cell, using the same recovered normal-map kernel as terrain.
+			# [orig: WacScript_SpawnEffectAtSsnEntity @0x4f23a0 reads
+			# outMillis/off_849934 after resolving the entity grid cell.]
 			if _effect_world != null and _runtime != null:
 				var ssn := int(eff.get("b", 0))
 				var pos = _runtime.entity_position_for_ssn(ssn)
 				if pos != null:
-					_effect_world.spawn_effect_owned(ssn, String(eff.get("str", "")), pos, Vector3.UP)
+					var orientation := Vector3.UP
+					if _terrain_data != null:
+						orientation = _terrain_data.get_surface_normal_world(pos)
+					_effect_world.spawn_effect_owned(
+							ssn, String(eff.get("str", "")), pos, orientation)
 		# fx2tgt (spawn at a placed type-6088 target marker
 		# [orig: WacScript_SpawnEffectAtTargetMarker @ 0x4f7fd0 — same misnomer
 		# family]) stays unrouted: which .bms record field carries the 1..99

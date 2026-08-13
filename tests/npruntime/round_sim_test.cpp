@@ -497,7 +497,6 @@ int main() {
 	roster.push_back(make_conn(3, 1, &udp_b, ns::TransportMode::Client, hb, true));
 	roster.push_back(make_conn(4, 1, &udp_c, ns::TransportMode::Client, hc, true));
 
-	const PlayerReplicationState anchor{};
 
 	// --- 1. Fire spawns one live round with the witnessed velocity step. ---
 	// Wire yaw BAM 0 -> mission bearing 0 = +X: the 0x06 yaw IS the mission bearing
@@ -520,7 +519,7 @@ int main() {
 
 	// --- 2. Three ticks reach the victim at x=30; the hit applies the kinetic number:
 	// min(62*13.77, 1219)=854 -> 854*62/875 = 60. ---
-	for (int i = 0; i < 3; ++i) np::Server_TickUpdate(ctx, anchor);
+	for (int i = 0; i < 3; ++i) np::Server_TickUpdate(ctx);
 	if (!expect(world.round_sim.active_count == 0, "round consumed by the hit")) return 1;
 	if (!expect(world.registry.get(hc)->health == 90, "150 - 60 kinetic damage = 90")) return 1;
 	// The hit queued ONE impact for the presenting host: tag 2 'player' (pool-0
@@ -611,7 +610,7 @@ int main() {
 	for (int shot = 0; shot < 2; ++shot) {
 		dispatch_fire(roster[1], roster, world,
 		              fire_body(hb.packed, 5, 0, 0, muzzle_z, 0, 0));
-		for (int i = 0; i < 4; ++i) np::Server_TickUpdate(ctx, anchor);
+		for (int i = 0; i < 4; ++i) np::Server_TickUpdate(ctx);
 	}
 	if (!expect(world.registry.get(hc)->health == 0, "victim dead at 0 hp (clamped)")) return 1;
 	const Drained after_kill_b = drain_all(udp_b);
@@ -679,7 +678,7 @@ int main() {
 	for (int shot = 0; shot < 3; ++shot) {
 		dispatch_fire(roster[1], roster, world,
 		              fire_body(hb.packed, 5, 0, 0, muzzle_z, 0, 0));
-		for (int i = 0; i < 6; ++i) np::Server_TickUpdate(ctx, anchor);
+		for (int i = 0; i < 6; ++i) np::Server_TickUpdate(ctx);
 	}
 	if (!expect(world.registry.get(ha)->health == 0, "host player dead")) return 1;
 	if (!expect(ctx.respawn_queue.size() == 1, "host player queued for respawn")) return 1;
@@ -698,7 +697,7 @@ int main() {
 		            "the host player is motor-simulated")) return 1;
 		host_ae->pos[0] = w::to_fixed(12.0);
 		host_ae->inf.stance = w::InfantryState::Stance::kProne;
-		for (int i = 0; i < 621; ++i) np::Server_TickUpdate(ctx, anchor);
+		for (int i = 0; i < 621; ++i) np::Server_TickUpdate(ctx);
 		if (!expect(ctx.respawn_queue.empty(), "respawn released after the timer")) return 1;
 		host = world.registry.get(ha);
 		if (!expect(host->health == 150, "respawn restores template health")) return 1;

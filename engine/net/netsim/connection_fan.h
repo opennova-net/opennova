@@ -54,14 +54,17 @@ int entity_send_budget();
 void set_view_distance_units(int units);
 int view_distance_units();
 
-// Serialize the live world into ONE S2C 0x0A frame for `conn`, anchored to its owned entity (or
-// `fallback_anchor` when it has none), and host_send it onto that connection's transport. `ents`
-// is the world snapshot built ONCE by the caller [orig: NapiNPServer_SendToConn @0x4c4f20 per node].
-// `conn` is non-const because each send ADVANCES the connection's 0x0A sub-block phase counter
-// [orig: ++playerSlot+100566 in Server_SendEntityStateToPlayer @0x517be8].
-void emit_connection_s2c(const world::World &w, Connection &conn,
+// Serialize the live world into ONE S2C 0x0A frame for `conn`, anchored to its
+// live owned entity, and host_send it onto that connection's transport. A
+// missing, despawned, or lifetime-stale owner returns false WITHOUT advancing
+// phase/age/cache/watermark state. `ents` is the world snapshot built ONCE by
+// the caller [orig: NapiNPServer_SendToConn @0x4C4F20 per node]. Retail calls
+// the writer only for a deployed player slot and derives its reference from
+// that slot's live entity; there is no pre-spawn/map fallback frame.
+// [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 gate, recipient eye
+// reference @0x517BF5..0x517C13, ++playerSlot+100566 @0x517BE8]
+bool emit_connection_s2c(const world::World &w, Connection &conn,
                          const std::vector<GameEntitySnapshot> &ents,
-                         const PlayerReplicationState &fallback_anchor,
                          uint32_t game_type = 0,
                          std::size_t max_frame_body_bytes = 0);
 

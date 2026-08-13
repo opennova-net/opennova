@@ -1863,6 +1863,9 @@ bool bind_session_reply_player(NapiNPConnection &conn, std::string player_name, 
 	// D-NET-132: the bare wire handle IS the binding — stamp it onto owned_entity (the single source the
 	// reply builders read the handle/team through). player_name/slot stay on conn.reply.
 	conn.link.owned_entity.packed = entity_handle;
+	conn.link.owned_entity_spawn_id = 0; // no World exists to stamp the allocation yet
+	// [orig: CAdminServer_HandleStatus @0x402E30 supplies the bare handle; the
+	// live Server_BuildPlayerInfoAndAdd binding follows when the World exists]
 	conn.reply.player_name = std::move(player_name);
 	conn.reply.player_slot = player_slot;
 	conn.reply.player_slot_reserved = false;

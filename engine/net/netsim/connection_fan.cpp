@@ -337,20 +337,30 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 	return encode_frame_update(fu);
 }
 
-// The S2C 0x0A anchor for one connection: its owned entity's live position (so the compact
-// records compress small deltas around that client's own player), or the passed fallback when
-// the connection has no owned entity yet (the host's own loopback, or a pre-spawn joiner).
+// Resolve the one legal S2C 0x0A anchor: this connection's live player
+// allocation. Retail's wrapper is state==6 gated and immediately reads that
+// player's eye/reference position; an unbound/freed slot never enters the
+// writer and therefore never emits a map-centre fallback frame.
+// [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 gate and recipient
+// eye stores @0x517BF5..0x517C13]
 // [orig: the per-player send descriptor / 12-byte frame anchor = player.spawn_x/y/z, §5.2a.]
-PlayerReplicationState anchor_for_connection(const world::World &w, const Connection &conn,
-                                             const PlayerReplicationState &fallback) {
-	if (!conn.owned_entity.valid()) return fallback;
-	const world::Entity *e = w.registry.get(conn.owned_entity);
-	if (e == nullptr) return fallback;
-	PlayerReplicationState a = fallback; // keep the non-position fields
-	a.spawn_x = static_cast<uint32_t>(world::to_fixed(e->position.x));
-	a.spawn_y = static_cast<uint32_t>(world::to_fixed(e->position.y));
-	a.spawn_z = static_cast<uint32_t>(world::to_fixed(e->position.z));
-	return a;
+const world::Entity *owned_entity_for_emit(const world::World &w,
+                                           const Connection &conn) {
+	if (!conn.owned_entity.valid()) return nullptr;
+	const world::Entity *entity = w.registry.get(conn.owned_entity);
+	if (entity == nullptr) return nullptr;
+	if (conn.owned_entity_spawn_id != 0 &&
+	    entity->registry_spawn_id != conn.owned_entity_spawn_id)
+		return nullptr;
+	return entity;
+}
+
+PlayerReplicationState anchor_for_owned_entity(const world::Entity &entity) {
+	PlayerReplicationState anchor;
+	anchor.spawn_x = static_cast<uint32_t>(world::to_fixed(entity.position.x));
+	anchor.spawn_y = static_cast<uint32_t>(world::to_fixed(entity.position.y));
+	anchor.spawn_z = static_cast<uint32_t>(world::to_fixed(entity.position.z));
+	return anchor;
 }
 
 // ---------------------------------------------------------------------------
@@ -858,13 +868,19 @@ void drain_connection_c2s(world::World &world, const Connection &conn) {
 // Serialize the live world into one S2C 0x0A frame for `conn` and host_send it. anchor_for_connection
 // is file-static; the per-connection emit body is shared by the legacy listen-server binding and
 // npruntime's Server_TickUpdate fan over connection_list.
-void emit_connection_s2c(const world::World &w, Connection &conn,
+bool emit_connection_s2c(const world::World &w, Connection &conn,
                          const std::vector<GameEntitySnapshot> &ents,
-                         const PlayerReplicationState &fallback_anchor,
                          uint32_t game_type,
                          std::size_t max_frame_body_bytes) {
-	if (conn.transport == nullptr) return;
-	const PlayerReplicationState anchor = anchor_for_connection(w, conn, fallback_anchor);
+	if (conn.transport == nullptr) return false;
+	const world::Entity *owned = owned_entity_for_emit(w, conn);
+	if (owned == nullptr) return false;
+	// A pre-World reply can bind only the bare wire handle. Stamp its live
+	// allocation before retaining any per-recipient frame state.
+	// [orig: Server_SendEntityStateToPlayer @0x517BA0 reads the deployed
+	// recipient entity before ++playerSlot+100566 @0x517BE8]
+	conn.owned_entity_spawn_id = owned->registry_spawn_id;
+	const PlayerReplicationState anchor = anchor_for_owned_entity(*owned);
 
 	// Advance the per-connection 0x0A sub-block phase and select this frame's header sub-block
 	// [orig: ++playerSlot+100566 then NetPacket_WritePlayerState writes it as flags2, phase&3 =
@@ -953,6 +969,7 @@ void emit_connection_s2c(const world::World &w, Connection &conn,
 	                          build_0a_frame(anchor, selected, flags2, hs, game_type, w.subgoals,
 	                                         std::move(rounds)),
 	                          /*reliable=*/false);
+	return true;
 }
 
 } // namespace opennova::netsim

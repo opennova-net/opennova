@@ -86,6 +86,44 @@ CollisionModel solid_box_model(double half_x, double half_y, double height) {
     return model;
 }
 
+// One authored CFAC face for projectile fixtures. Pool-1 items reach this
+// polygon walk only after their model is initialized.
+// [orig: Entity_InitFromModel @0x40DC30;
+// Physics_RaycastAgainstBoneCollision @0x4E4CB0]
+CollisionModel projectile_wall_model(double half_extent) {
+    CollisionModel model;
+    auto vertex = [&](double y, double z) {
+        CollisionVertex value;
+        value.p[1] = to_fixed(static_cast<float>(y));
+        value.p[2] = to_fixed(static_cast<float>(z));
+        model.vertices.push_back(value);
+    };
+    vertex(-half_extent, -half_extent);
+    vertex(half_extent, -half_extent);
+    vertex(0.0, half_extent);
+
+    CollisionNormal normal;
+    normal.n[0] = -16384;
+    normal.dominant_axis = 4;
+    model.normals.push_back(normal);
+
+    CollisionFace face;
+    face.vertex_index[0] = 0;
+    face.vertex_index[1] = 1;
+    face.vertex_index[2] = 2;
+    face.normal_index = 0;
+    face.min[1] = face.min[2] = to_fixed(static_cast<float>(-half_extent));
+    face.max[1] = face.max[2] = to_fixed(static_cast<float>(half_extent));
+    model.faces.push_back(face);
+
+    CollisionSection section;
+    section.vertex_count = 3;
+    section.normal_count = 1;
+    section.face_count = 1;
+    model.sections.push_back(section);
+    return model;
+}
+
 // The JO throwable ammo family, minimally: indices are stable for the checks.
 enum : int {
     kAmmoNull = 0,
@@ -456,11 +494,14 @@ void test_motor_sweep_ignores_non_pool_domains() {
         item.kind = EntityKind::Item;
         item.alive = true;
         item.position = Vec3{18.0f, 10.0f, -4.0f};
+        item.yaw = 90; // identity model placement [orig: entity matrix @0x613F40]
         item.bound_radius = 0.4f;
         const EntityHandle item_h = rig.w.registry.spawn(1, item);
         CHECK(item_h.valid());
 
         CollisionWorld collision;
+        collision.assign_entity(
+            item_h, collision.add_model(projectile_wall_model(0.4)));
         collision.build_tick_tables(rig.w);
         const int slot = rig.throw_ammo(
                 kAmmoGrenade, Vec3{10.0f, 10.0f, 4.0f}, 0, 0);
@@ -691,9 +732,16 @@ void test_placed_device_pose_and_ballistic_damage() {
     const Entity *owner = rig.w.registry.get(rig.thrower);
     CHECK(owner != nullptr && device.owner_spawn_id == owner->registry_spawn_id);
 
-    // The bounded collision fallback consumes a real ballistic hit and the
+    // The device's initialized CFAC consumes a real ballistic hit and the
     // armed think then follows the normal damage-trigger detonation path.
+    // [orig: Entity_CloneFromTemplateByType @0x4398A0 ->
+    // Entity_InitFromModel @0x40DC30; Physics_RaycastAgainstBoneCollision
+    // @0x4E4CB0]
     device.think_delay_ticks = 0;
+    CollisionWorld collision;
+    collision.assign_entity(
+        device.entity, collision.add_model(projectile_wall_model(0.5)));
+    collision.build_tick_tables(rig.w);
     RoundSpawnParams bullet;
     bullet.owner = rig.thrower;
     bullet.shooter_handle = rig.thrower.packed;
@@ -701,7 +749,7 @@ void test_placed_device_pose_and_ballistic_damage() {
     bullet.dir_yaw_bam = 0;
     bullet.ammo_index = kAmmoBullet;
     CHECK(rig.w.round_sim.spawn(rig.w, bullet) >= 0);
-    rig.w.round_sim.tick(rig.w, nullptr, nullptr);
+    rig.w.round_sim.tick(rig.w, nullptr, &collision);
     entity = rig.w.registry.get(device.entity);
     CHECK(entity != nullptr && entity->health <= 0);
     rig.w.throwables.tick(rig.w, nullptr, nullptr);

@@ -66,14 +66,20 @@ public:
 	std::filesystem::path path;
 };
 
-nw::FrameUpdate emit_phase2(const w::World &world) {
+nw::FrameUpdate emit_phase2(w::World &world) {
+	world.registry.configure_pool(0, 1);
+	w::Entity recipient;
+	recipient.kind = w::EntityKind::Organic;
+	recipient.health = 150;
+	const w::EntityHandle recipient_h = world.registry.spawn(0, recipient);
+	// The server environment projection rides a real deployed player's 0x0A.
+	// [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 gate]
 	ns::LoopbackChannel channel;
 	std::vector<ns::Connection> connections;
 	connections.push_back(ns::Connection{
-			&channel, ns::TransportMode::Loopback, w::EntityHandle{}, 0});
+			&channel, ns::TransportMode::Loopback, recipient_h, 0});
 	connections.back().s2c_phase = 1;
-	nw::PlayerReplicationState fallback;
-	ns::test::emit_all(world, connections, fallback);
+	ns::test::emit_all(world, connections);
 
 	ns::Datagram datagram;
 	CHECK(channel.client_recv(datagram));
