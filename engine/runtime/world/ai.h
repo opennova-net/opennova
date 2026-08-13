@@ -390,8 +390,9 @@ struct AiEntity {
     // Entity_GetAttachmentWorldPosition @0x4b2670 (userpoint local pos x posed bone
     // matrix, model userpoint table @model+0xC0) from the fire block @0x4bf326..0x4bf425;
     // engine/runtime/world carries no skeletal pose, so the embedder feeds the result back.]
-    // muzzle_tick stamps the world logic tick of the push; the fire pass consumes the
-    // value only while FRESH and otherwise falls back to the chest-lift stand-in.
+    // muzzle_tick stamps the world logic tick of the push; the consumers (the fire
+    // pass, the LOS endpoints, and the aim-solution eye — AiSystem::weapon_fire_origin)
+    // use the value only while FRESH and otherwise fall back to the chest-lift stand-in.
     int32_t muzzle_world[3] = {};
     uint32_t muzzle_tick = 0;
     bool muzzle_valid = false;
@@ -762,13 +763,33 @@ public:
     // bases g_SeesMatrix*/g_TargetedMatrix* — world-wac-ai-re §16.4/§17.2]
     void apply_engage_relations(World &world, const Entity &self, const Entity &target);
 
-    // LOS between two 16.16 fire-origin points, true = clear: the terrain leg (ported
-    // heightmap raycast) + the sector leg (pool-2/pool-1 collision-model clip via
-    // CollisionWorld::raycast_clear — the D-AI-7 leg). `from`/`to` are the sighting
-    // pair, excluded from the sector walk with anything standing on them. No terrain
-    // wired = clear (the headless-test default); no collision world wired = terrain
-    // leg only. [orig: Entity_CheckMutualLineOfSight @0x539be0 ->
-    // Physics_RaycastTerrainAndSectors @0x539910, ray radius 0, 1 = clear]
+    // The stamp freshness window shared by every muzzle-seam consumer: the present
+    // layer stamps once per rendered frame, so anything older means the pose stopped
+    // flowing (render-skipped rows, out-of-replication-range NPCs — D-AI-6 facet c).
+    static constexpr uint32_t kMuzzleFreshTicks = 4;
+
+    // The aim/LOS fire origin [orig: Entity_ComputeWeaponFireOrigin @0x43b4b0 —
+    // person leg pos + (entity+0x6C)/2 + jitter (the +0x6C writer is unwalked,
+    // D-AI-6 facet d); non-person leg = the def "TARGET" userpoint by the entity
+    // euler matrix, fallback entity+0x1FC or the raw position]. Our binding seam
+    // substitutes the POSED gun-flash stamp while fresh; the 0.9 u chest lift
+    // stays the stampless fallback. The aim EYE use is exact: retail's combat-pass
+    // aim anchor IS the posed bone the stamp carries
+    // [orig: Entity_GetAttachmentWorldPosition @0x4b2670 on bone +0x366 —
+    // world-wac-ai-re §21.1/§21.4].
+    static void weapon_fire_origin(const AiEntity &e, uint32_t logic_tick, int32_t out[3]);
+    static void weapon_fire_origin(const Entity &e, uint32_t logic_tick, int32_t out[3]);
+
+    // LOS between two EXACT 16.16 endpoints, true = clear — callers supply the
+    // fire origins (weapon_fire_origin) or their own witnessed endpoints: the
+    // terrain leg (ported heightmap raycast) + the sector leg (pool-2/pool-1
+    // collision-model clip via CollisionWorld::raycast_clear — the D-AI-7 leg).
+    // `from`/`to` are the sighting pair, excluded from the sector walk with
+    // anything standing on them. No terrain wired = clear (the headless-test
+    // default); no collision world wired = terrain leg only.
+    // [orig: Entity_CheckMutualLineOfSight @0x539be0 feeds two
+    // Entity_ComputeWeaponFireOrigin results into Physics_RaycastTerrainAndSectors
+    // @0x539910, ray radius 0, 1 = clear]
     bool line_of_sight_clear(World &world, const int32_t a[3], const int32_t b[3],
                              EntityHandle from, EntityHandle to) const;
 

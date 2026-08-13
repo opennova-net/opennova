@@ -669,12 +669,12 @@ bool EntityCommands::ssn_los_clear_within(uint16_t ssn, uint16_t target_ssn,
         return false;
     if (dist > static_cast<float>(meters)) return false;
     if (!world_.ai) return true; // no AI/physics wired: the clear-ray default
-    const int32_t pa[3] = {static_cast<int32_t>(a->position.x * 65536.0f),
-                           static_cast<int32_t>(a->position.y * 65536.0f),
-                           static_cast<int32_t>(a->position.z * 65536.0f)};
-    const int32_t pb[3] = {static_cast<int32_t>(b->position.x * 65536.0f),
-                           static_cast<int32_t>(b->position.y * 65536.0f),
-                           static_cast<int32_t>(b->position.z * 65536.0f)};
+    // Retail rays between the +0x1FC offset points (unwalked); the modeled
+    // fire origin (muzzle stamp / chest lift) is our tracked endpoint stand-in.
+    int32_t pa[3];
+    AiSystem::weapon_fire_origin(*a, world_.logic_tick, pa);
+    int32_t pb[3];
+    AiSystem::weapon_fire_origin(*b, world_.logic_tick, pb);
     return world_.ai->line_of_sight_clear(world_, pa, pb,
                                           resolve_ssn(ssn), resolve_ssn(target_ssn));
 }

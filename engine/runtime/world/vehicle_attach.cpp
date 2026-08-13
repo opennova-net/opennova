@@ -248,14 +248,18 @@ namespace {
 // LOS between the player position and a candidate point, excluding both entities
 // [orig: Entity_CheckLineOfSightTerrainAndEntities @0x436183 in the scan; the label draw's
 // Physics_RaycastTerrainAndSectors @0x5a3609 — both cast from the player POSITION].
+// The 0.9 u lift both ends is today's eye stand-in (the D-AI-11 CameraOffset
+// residual), kept at the call site now that line_of_sight_clear takes exact
+// endpoints — deliberately not the muzzle seam: a USE scan is not a fire origin.
 bool point_los_clear(World &world, const Entity &player, const Entity &cand, const Vec3 &sp) {
     if (world.ai == nullptr) return true;
+    constexpr int32_t kEyeLift = 0xE666; // 0.9 u
     const int32_t a[3] = {static_cast<int32_t>(player.position.x * 65536.0f),
                           static_cast<int32_t>(player.position.y * 65536.0f),
-                          static_cast<int32_t>(player.position.z * 65536.0f)};
+                          static_cast<int32_t>(player.position.z * 65536.0f) + kEyeLift};
     const int32_t b[3] = {static_cast<int32_t>(sp.x * 65536.0f),
                           static_cast<int32_t>(sp.y * 65536.0f),
-                          static_cast<int32_t>(sp.z * 65536.0f)};
+                          static_cast<int32_t>(sp.z * 65536.0f) + kEyeLift};
     return world.ai->line_of_sight_clear(world, a, b, player.handle, cand.handle);
 }
 

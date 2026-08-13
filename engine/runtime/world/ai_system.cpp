@@ -635,22 +635,19 @@ void AiSystem::pump_mounted_weapon_slots(World &world, uint32_t logic_tick) {
         if (!weapon_events.fired || !is_authority) continue;
 
         // The slot owner is the gunner, while its def/ammo live on the parent.
-        // Use the live chased look and the freshest posed muzzle available; the
-        // fallback is the mounted occupant's chest/seat origin.
+        // Use the live chased look and the freshest posed muzzle available: the
+        // MOUNT's stamp first, then the gunner's own seam origin (stamp or the
+        // chest/seat fallback).
         // [orig: slot owner path in WeaponAction_Fire @0x542b10;
         //  Entity_CalcWeaponFirePosition parentSlot 3]
-        int32_t origin[3] = {gunner->pos[0], gunner->pos[1],
-                             gunner->pos[2] + 0xE666};
+        int32_t origin[3];
         if (mount->posed_muzzle_valid &&
-            logic_tick - mount->posed_muzzle_tick <= 4u) {
+            logic_tick - mount->posed_muzzle_tick <= AiSystem::kMuzzleFreshTicks) {
             origin[0] = mount->posed_muzzle_world[0];
             origin[1] = mount->posed_muzzle_world[1];
             origin[2] = mount->posed_muzzle_world[2];
-        } else if (gunner->muzzle_valid &&
-                   logic_tick - gunner->muzzle_tick <= 4u) {
-            origin[0] = gunner->muzzle_world[0];
-            origin[1] = gunner->muzzle_world[1];
-            origin[2] = gunner->muzzle_world[2];
+        } else {
+            AiSystem::weapon_fire_origin(*gunner, logic_tick, origin);
         }
         if (fire_ai_round(world, *gunner, origin, gunner->heading,
                           io::bam_add(gunner->pitch, gunner->inf.recoil_pitch),
