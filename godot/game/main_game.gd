@@ -19,16 +19,8 @@ const WorldLoadCoordinatorScript := preload("res://game/world_load_coordinator.g
 # control (the game *is* its install folder); this is an OpenNova convenience so a
 # wrong / menu-less folder can be re-picked without restarting. Front-end only.
 const CHANGE_DIR_KEY := KEY_F9
-# The objectives-panel toggle. The retail action toggles the panel's alpha byte
-# in co-op [orig: Input_HandleActionBinding case @0x49b68b — dword_24C18CC ^=
-# 0xFF]; the authored default binding rides the unported input-binding layer
-# (D-CTRL-3), so the key itself is a reimpl mapping.
-const OBJECTIVES_KEY := KEY_O
-const FRIENDLY_TAGS_KEY := KEY_F  # base retail default; N is NVG [orig: action 30 @0x49b573] (D-CTRL-3)
-# The HUD color-scheme cycle. The action itself is witnessed (input action
-# case 10 @0x49afc7); its authored default binding row rides the unported
-# input-binding layer (D-CTRL-3), so the key is a reimpl mapping.
-const HUD_COLOR_KEY := KEY_H
+# The HUD presenter's gameplay keys (objectives/friendly-tags/color-scheme)
+# live with the presenter — GameHudPresenter.handle_gameplay_key.
 # The armory key — the USE-ITEM key (input action 177 "useitem"; retail default =
 # SHIFT on the shipped KeyChart, labeled "USE ITEM/ATTACH/ARMORY"). Zone-gated: it
 # opens weapon.mnu's WEAPON screen only while the player stands inside a type-6
@@ -334,20 +326,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		pick_at_crosshair()
 		get_viewport().set_input_as_handled()
 		return
-	# The MISSION OBJECTIVES panel toggle, in-world only.
-	# [orig: the co-op action toggle @0x49b68b -> HUD_DrawWinConditions @0x5be163]
-	if key.keycode == OBJECTIVES_KEY and is_gameplay_input_active() and _hud_presenter != null:
-		_hud_presenter.toggle_objectives()
-		get_viewport().set_input_as_handled()
-		return
-	if key.keycode == FRIENDLY_TAGS_KEY and is_gameplay_input_active() and _hud_presenter != null:
-		_hud_presenter.cycle_friendly_tags()
-		get_viewport().set_input_as_handled()
-		return
-	# The HUD color-scheme cycle, in-world only. [orig: input action case 10
-	# @0x49afc7 — idx wraps 0..5, restamps the master overlay color]
-	if key.keycode == HUD_COLOR_KEY and is_gameplay_input_active() and _hud_presenter != null:
-		_hud_presenter.cycle_hud_color()
+	# The HUD presenter's gameplay keys (objectives toggle / friendly-tags cycle /
+	# color-scheme cycle), in-world only — bindings + orig cites at the presenter.
+	if is_gameplay_input_active() and _hud_presenter != null \
+			and _hud_presenter.handle_gameplay_key(key.keycode):
 		get_viewport().set_input_as_handled()
 		return
 	# The USE-ITEM key: in-world only. Zone legs first — the armory volume opens
