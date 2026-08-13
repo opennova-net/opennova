@@ -11,10 +11,26 @@ from mathutils import Vector
 
 from blender.math_utils import render_space
 from blender.mesh_primitives import create_cube_mesh
-from pyopennova.mesh_build import primitive_part_indices
 from pyopennova.threedi_ffi import THREEDI_MESH_SKINNED
 
 from .helpers import _mtrx_to_center_rotation
+
+
+def _primitive_part_indices(lod) -> list[int]:
+    """Map each 3DI3 strip index to its owning render object."""
+    count = int(lod.strip_count)
+    out = [-1] * count
+    cursor = 0
+    parts = lod.render_objects
+    for part_idx in range(int(lod.render_object_count)):
+        part = parts[part_idx]
+        strip_count = int(part.num_strips) + int(part.num_alpha_strips)
+        for _ in range(max(0, strip_count)):
+            if cursor >= count:
+                return out
+            out[cursor] = part_idx
+            cursor += 1
+    return out
 
 
 def _compute_smoothing_groups(faces, normals, epsilon=1e-4):
@@ -217,12 +233,12 @@ class MeshesMixin:
 
         # Group strips by their owning render object.  Strips are stored
         # sequentially per render object (num_strips opaque then
-        # num_alpha_strips alpha); primitive_part_indices resolves the runs.
+        # num_alpha_strips alpha); the mapping resolves the runs.
         # Creating one mesh per part (not per part+material) ensures that
         # normal smoothing crosses material boundaries within a part,
         # matching the reference tool's per-subobject smoothing behaviour.
         from collections import defaultdict, OrderedDict
-        strip_part_indices = primitive_part_indices(lod)
+        strip_part_indices = _primitive_part_indices(lod)
         part_prims = defaultdict(list)
         for prim_idx in range(num_primitives):
             part_idx = (int(strip_part_indices[prim_idx])

@@ -30,7 +30,7 @@ OPTION_CASES: dict[str, ImportOptions] = {
     "blend_only": ImportOptions(write_3dp=False, write_ase=False),
 }
 
-ALL_FORMAT_SUFFIXES = {".blend", ".3dp", ".ase", ".max"}
+ALL_FORMAT_SUFFIXES = {".blend", ".3dp", ".ase"}
 
 
 def _expected_files(options: ImportOptions, stem: str) -> set[str]:
@@ -41,8 +41,6 @@ def _expected_files(options: ImportOptions, stem: str) -> set[str]:
         expected.add(f"{stem}.3dp")
     if options.write_ase:
         expected.add(f"{stem}.ase")
-    if options.write_max:
-        expected.add(f"{stem}.max")
     return expected
 
 

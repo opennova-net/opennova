@@ -90,7 +90,7 @@ class MaterialsMixin:
                 mat["ase_normal_bitmap"] = tex_name
                 mat["ase_normal_type"] = int(tex.type)  # 0=diffuse, 4=MDT, 5=TGA alpha
 
-        # Default diffuse matching 3ds Max Standard material (0.588)
+        # Default diffuse matching retail ASE materials (0.588)
         mat.diffuse_color = (0.588, 0.588, 0.588, 1.0)
 
         if mtrl.material_flags & 0x04:  # TWO_SIDED

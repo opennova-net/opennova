@@ -26,8 +26,6 @@ JOB_DONE = "done"
 JOB_ERROR = "error"
 
 ACTIVE_JOB_STATUSES = {JOB_PENDING, JOB_RUNNING}
-ASE_OWNER_BLENDER = "blender"
-ASE_OWNER_MAX = "max"
 
 
 def _norm_path(value: str) -> str:
@@ -48,7 +46,6 @@ class ImportOptions:
     write_ase: bool = True
     write_glb: bool = False
     write_fbx: bool = False
-    write_max: bool = False
 
     def writes_any_output_file(self) -> bool:
         return any(
@@ -58,7 +55,6 @@ class ImportOptions:
                 self.write_ase,
                 self.write_glb,
                 self.write_fbx,
-                self.write_max,
             )
         )
 
@@ -70,18 +66,8 @@ class ImportOptions:
                 self.write_ase,
                 self.write_glb,
                 self.write_fbx,
-                self.write_max,
             )
         )
-
-    def ase_export_owner(self) -> str:
-        if not self.write_ase:
-            return ""
-        if self.write_blend:
-            return ASE_OWNER_BLENDER
-        if self.write_max:
-            return ASE_OWNER_MAX
-        return ""
 
     def as_def_kwargs(self) -> dict[str, bool]:
         return {
@@ -121,7 +107,6 @@ class ImportOptions:
             self.write_ase,
             self.write_glb,
             self.write_fbx,
-            self.write_max,
         )
 
 
@@ -400,8 +385,8 @@ def validate_import_request(
 
     if not request.options.writes_any_output_file():
         errors.append("Select at least one file to write.")
-    if request.options.write_ase and not request.options.ase_export_owner():
-        errors.append("ASE export requires .blend or .max output.")
+    if request.options.write_ase and not request.options.write_blend:
+        errors.append("ASE export requires .blend output.")
     if (request.options.write_glb or request.options.write_fbx) and not request.options.write_blend:
         errors.append("GLB/FBX export requires .blend output.")
 

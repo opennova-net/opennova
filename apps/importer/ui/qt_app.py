@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import sys
 
-from opennova_blender import StandaloneBackend
+from opennova_blender import BlenderBackend
 from opennova_qt_ui import OpenNovaImporterDialog
 
 
@@ -15,7 +15,7 @@ def run_gui() -> None:
     from PySide6 import QtWidgets
 
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
-    backend = StandaloneBackend()
+    backend = BlenderBackend()
     try:
         dialog = OpenNovaImporterDialog(backend=backend, version=_version_string())
         dialog.show()

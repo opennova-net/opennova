@@ -4,8 +4,8 @@ How to build and run OpenNova locally: the C++ core, the Godot GDExtension, the
 Godot editor/game, and the NovaWorld servers, including how to test the servers
 against both retail Joint Operations and our own Godot client.
 
-For the asset pipeline and packaging (Blender addon, 3ds Max plugin, standalone
-importer, Godot exports) see the [Building](README.md#building) section of the
+For the asset pipeline and packaging (Blender addon, standalone importer, Godot
+exports) see the [Building](README.md#building) section of the
 README. For deploying your own instance to the cloud see [DEPLOY.md](DEPLOY.md).
 
 ## Prerequisites

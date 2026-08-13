@@ -15,7 +15,7 @@
         <p class="mt-4 max-w-3xl mx-auto text-lg text-ink-muted">
           Everything is pre-1.0, open source, and under active development. Editor and
           runtime builds for Windows and macOS are published from CI on every release.
-          The same repository carries the Blender and 3ds Max exchange tools and the
+          The same repository carries the Blender exchange tools and the
           Python utilities used to take assets apart and put them back together. Start
           with the README and the docs folder for current workflows and known limits.
         </p>

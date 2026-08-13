@@ -19,7 +19,7 @@ easier to relay than to rediscover.
   world, wac, mission, anim, audio, particle, renderer, controls, terrain,
   terrain_query, environment, hud, menu, simassets),
   `net/` (novacrypto, napi, npwire, novaworld, netsim, npruntime). Consumed via the
-  flat C ABI by Python and the DCC plugins, by direct static link everywhere else.
+  flat C ABI by Python and the Blender addon, by direct static link everywhere else.
   See `engine/CLAUDE.md`.
 - `godot/` — the Godot 4.6.1 project: `src/` (pure C++ GDExtension bindings —
   part of the core engine, ADR 0034 d6; see `godot/src/CLAUDE.md`),
@@ -32,9 +32,9 @@ easier to relay than to rediscover.
   in-match host; never shipped), `nw_lan_probe/` (LAN readiness probe),
   `nw_pp/` (NovaWorld in-game packet pretty-printer/decoder), `common/` (shared
   socket helpers, deliberately app-layer; pcap I/O lives in `engine/base/pcapio`),
-  `modsuperoed.py` (the OED automation smoke driver). Top-level `blender/` and
-  `opennova_max/` are the DCC export plugins, `pyopennova/` the Python ctypes FFI
-  layer, `opennova_blender/` the standalone Blender importer backend.
+  `modsuperoed.py` (the OED automation smoke driver). Top-level `blender/` is the
+  export addon, `pyopennova/` the Python ctypes FFI layer, and `opennova_blender/`
+  the standalone Blender importer backend.
 - `web/` — NovaWorld web portal (Vue 3 + TS); `launcher/` — Windows tray app pointing a
   stock install at our servers; `backend/` + `deploy/` + `infra/` — service data and
   deployment stack (DEPLOY.md).

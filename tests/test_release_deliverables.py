@@ -13,7 +13,6 @@ ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_SOURCES = {
     "asset-importer": "onimport-v0.1.5.exe",
     "blender-ase-exporter": "opennova_blender-v0.0.5.zip",
-    "max-ase-exporter": "opennova_max-v0.1.5.mzp",
     "modding-editor": "opennova-modtools-windows-v0.0.10.zip",
     "game-runtime": "opennova-runtime-windows-v0.0.10.zip",
 }
@@ -58,21 +57,6 @@ def _write_deliverable_fixtures(dist: Path) -> None:
         ],
     )
     _write_zip(
-        dist / "opennova_max-v0.1.5.mzp",
-        [
-            "mzp.run",
-            "install.ms",
-            "install.ds",
-            "install.py",
-            "OpenNovaMax-0.1.5.bundle/PackageContents.xml",
-            "OpenNovaMax-0.1.5.bundle/Contents/macroscripts/OpenNovaExport.mcr",
-            "OpenNovaMax-0.1.5.bundle/Contents/startup/opennova_max_startup.ms",
-            "OpenNovaMax-0.1.5.bundle/Contents/startup/opennova_max_startup.py",
-            "OpenNovaMax-0.1.5.bundle/Contents/python/opennova_max/__init__.py",
-            "OpenNovaMax-0.1.5.bundle/Contents/python/pyopennova/lib/windows-x64/opennova.dll",
-        ],
-    )
-    _write_zip(
         dist / "opennova-modtools-windows-v0.0.10.zip",
         [
             "opennova-modtools.exe",
@@ -112,7 +96,6 @@ def test_release_validator_stages_public_assets_and_release_body(tmp_path: Path)
 
     public_names = sorted(path.name for path in stage.iterdir())
     assert public_names == [
-        "opennova-3ds-max-ase-exporter-windows-v0.0.10.mzp",
         "opennova-asset-importer-windows-v0.0.10.exe",
         "opennova-blender-ase-exporter-v0.0.10.zip",
         "opennova-game-runtime-windows-v0.0.10.zip",
@@ -126,7 +109,6 @@ def test_release_validator_stages_public_assets_and_release_body(tmp_path: Path)
     assert "Install:" in text
     assert "Use:" in text
     assert "Blender" in text
-    assert "3ds Max" in text
 
 
 def test_release_validator_selects_manifest_deliverables_in_manifest_order(
@@ -286,7 +268,6 @@ def test_release_workflow_validates_and_publishes_staged_assets() -> None:
     release_step = workflow.split("- name: Create GitHub Release", 1)[1]
     package_jobs = [
         "package-addon",
-        "package-max-mzp",
         "package-importer",
         "package-godot-windows-editor",
         "package-godot-windows-runtime",
@@ -296,7 +277,6 @@ def test_release_workflow_validates_and_publishes_staged_assets() -> None:
     assert "GITHUB_REF_NAME" in workflow
     assert "dist/release-assets/*" in release_step
     assert "dist/*.zip" not in release_step
-    assert "dist/opennova_max-v*.mzp" not in release_step
     assert "dist/onimport-v*.exe" not in release_step
 
     for package_job in package_jobs:
@@ -315,12 +295,11 @@ def test_ci_validates_windows_package_artifacts_and_uses_versioned_upload_globs(
     workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     package_jobs = [
         "package-addon",
-        "package-max-mzp",
         "package-importer",
         "package-godot-windows-editor",
         "package-godot-windows-runtime",
     ]
-    deferred_pr_jobs = ["package-addon", "package-max-mzp", "package-importer"]
+    deferred_pr_jobs = ["package-addon", "package-importer"]
     godot_package_jobs = ["package-godot-windows-editor", "package-godot-windows-runtime"]
 
     assert "validate-deliverables:" in workflow
@@ -355,7 +334,7 @@ def test_ci_validates_windows_package_artifacts_and_uses_versioned_upload_globs(
 
     validate_job = _workflow_job(workflow, "validate-deliverables")
     assert (
-        "needs: [test, godot-tests, package-addon, package-max-mzp, package-importer, "
+        "needs: [test, godot-tests, package-addon, package-importer, "
         "package-godot-windows-editor, package-godot-windows-runtime]"
     ) in validate_job
     assert "always()" in validate_job
@@ -366,7 +345,6 @@ def test_ci_validates_windows_package_artifacts_and_uses_versioned_upload_globs(
     assert "--release-version 0.0.0-ci" in validate_job
     assert "--only-id asset-importer" in validate_job
     assert "--only-id blender-ase-exporter" in validate_job
-    assert "--only-id max-ase-exporter" in validate_job
     assert validate_job.count("--only-id modding-editor") == 2
     assert validate_job.count("--only-id game-runtime") == 2
 
@@ -434,7 +412,6 @@ def test_ci_builds_windows_gdextension_once_and_caches_with_sccache() -> None:
 
     for job in [
         "package-addon",
-        "package-max-mzp",
         "package-importer",
         "package-godot-windows-editor",
         "package-godot-windows-runtime",
@@ -477,7 +454,6 @@ def test_release_splits_godot_editor_and_runtime_package_jobs() -> None:
     workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     package_jobs = [
         "package-addon",
-        "package-max-mzp",
         "package-importer",
         "package-godot-windows-editor",
         "package-godot-windows-runtime",
@@ -501,7 +477,7 @@ def test_release_splits_godot_editor_and_runtime_package_jobs() -> None:
     for package_job in package_jobs:
         assert "needs:" not in _workflow_job(workflow, package_job)
     assert (
-        "needs: [test, package-addon, package-max-mzp, package-importer, "
+        "needs: [test, package-addon, package-importer, "
         "package-godot-windows-editor, package-godot-windows-runtime]"
     ) in _workflow_job(workflow, "release")
     for package_job in godot_package_jobs:
@@ -526,13 +502,11 @@ def test_readme_lists_public_asset_names_and_install_hints() -> None:
     for name in [
         "opennova-asset-importer-windows-v<version>.exe",
         "opennova-blender-ase-exporter-v<version>.zip",
-        "opennova-3ds-max-ase-exporter-windows-v<version>.mzp",
         "opennova-modding-editor-windows-v<version>.zip",
         "opennova-game-runtime-windows-v<version>.zip",
     ]:
         assert name in readme
     assert "Install from Blender" in readme
-    assert "Run the MZP" in readme
     assert "Extract the zip" in readme
 
 

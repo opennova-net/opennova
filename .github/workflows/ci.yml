@@ -408,39 +408,6 @@ jobs:
           archive: false
           if-no-files-found: error
 
-  package-max-mzp:
-    if: github.event_name != 'pull_request'
-    runs-on: windows-latest
-    outputs:
-      artifact_id: ${{ steps.upload_max.outputs.artifact-id }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          lfs: true
-
-      - name: Pull Git LFS assets
-        shell: bash
-        run: |
-          git lfs install --local
-          git lfs pull
-          git lfs fsck --objects
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Package Max MZP
-        shell: pwsh
-        run: scripts/package_max_mzp.ps1
-
-      - name: Upload 3ds Max package
-        id: upload_max
-        uses: actions/upload-artifact@v7
-        with:
-          path: dist/opennova_max-v*.mzp
-          archive: false
-          if-no-files-found: error
-
   package-importer:
     if: github.event_name != 'pull_request'
     runs-on: windows-latest
@@ -580,7 +547,7 @@ jobs:
 
   validate-deliverables:
     runs-on: ubuntu-latest
-    needs: [test, godot-tests, package-addon, package-max-mzp, package-importer, package-godot-windows-editor, package-godot-windows-runtime]
+    needs: [test, godot-tests, package-addon, package-importer, package-godot-windows-editor, package-godot-windows-runtime]
     # Tool-package jobs are skipped on PRs. always() avoids implicit skip
     # propagation; the explicit result checks still block failed dependencies.
     if: >-
@@ -594,7 +561,6 @@ jobs:
           github.event_name == 'pull_request' ||
           (
             needs.package-addon.result == 'success' &&
-            needs.package-max-mzp.result == 'success' &&
             needs.package-importer.result == 'success'
           )
         )
@@ -624,7 +590,6 @@ jobs:
           path: dist
           artifact-ids: >-
             ${{ needs.package-addon.outputs.artifact_id }},
-            ${{ needs.package-max-mzp.outputs.artifact_id }},
             ${{ needs.package-importer.outputs.artifact_id }},
             ${{ needs.package-godot-windows-editor.outputs.artifact_id }},
             ${{ needs.package-godot-windows-runtime.outputs.artifact_id }}
@@ -651,7 +616,6 @@ jobs:
           --release-version 0.0.0-ci
           --only-id asset-importer
           --only-id blender-ase-exporter
-          --only-id max-ase-exporter
           --only-id modding-editor
           --only-id game-runtime
 
