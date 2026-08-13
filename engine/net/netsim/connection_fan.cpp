@@ -572,8 +572,13 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 			if (angle > 128 && g_view_distance_units > 0 &&
 					distance_tiles < g_view_distance_units && w.ai != nullptr &&
 					self != nullptr) {
-				const int32_t a3[3] = {int32_t(ax), int32_t(ay), int32_t(az)};
-				const int32_t b3[3] = {e.x, e.y, e.z};
+				// The 0.9 u lift both ends keeps this ray off the ground plane
+				// (@0x53b130's own endpoint recipe is the tracked follow-up above)
+				// — explicit at the call site since line_of_sight_clear takes
+				// exact endpoints (2026-08-13).
+				constexpr int32_t kSightLift = 0xE666; // 0.9 u
+				const int32_t a3[3] = {int32_t(ax), int32_t(ay), int32_t(az) + kSightLift};
+				const int32_t b3[3] = {e.x, e.y, e.z + kSightLift};
 				// The ray's collision scratch is write-only bookkeeping; the world is
 				// otherwise untouched (the AiSystem method itself is const).
 				los = w.ai->line_of_sight_clear(const_cast<world::World &>(w), a3, b3,

@@ -1166,12 +1166,15 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 if (const Entity *lp = world.registry.get(world.cached.local_player)) {
                     // The local-player visibility watch [orig: Physics_RaycastTerrain-
                     // AndSectors(corpse, player) @0x4b9f77 on the entity origins; ours
-                    // rides line_of_sight_clear's chest-lift endpoints (D-AI-6/-7 —
-                    // ground-hugging feet rays false-block on the heightfield leg)].
-                    const int32_t cpos[3] = {e.pos[0], e.pos[1], e.pos[2]};
+                    // lifts both endpoints 0.9 u explicitly — the D-AI-9 feet-ray
+                    // stand-in (ground-hugging rays false-block on the heightfield
+                    // leg), deliberately NOT the muzzle seam: a corpse has no live
+                    // pose and the watcher's eye is not a fire origin].
+                    constexpr int32_t kWatchLift = 0xE666; // 0.9 u
+                    const int32_t cpos[3] = {e.pos[0], e.pos[1], e.pos[2] + kWatchLift};
                     const int32_t ppos[3] = {to_fixed(lp->position.x),
                                              to_fixed(lp->position.y),
-                                             to_fixed(lp->position.z)};
+                                             to_fixed(lp->position.z) + kWatchLift};
                     watched = line_of_sight_clear(world, cpos, ppos, e.handle,
                                                   world.cached.local_player);
                 }
@@ -1790,7 +1793,13 @@ EntityHandle infantry_scan_nearest_threat(AiSystem &sys, World &world, AiEntity 
             const int64_t ddy = static_cast<int64_t>(cpos[1]) - e.pos[1];
             const int64_t d2 = ddx * ddx + ddy * ddy;
             if (d2 >= best_d2) continue; // nearest-first [orig: -fwd_dist descending sort]
-            if (!sys.line_of_sight_clear(world, e.pos, cpos, e.handle, h))
+            // Fire-origin -> fire-origin endpoints via the muzzle seam
+            // [orig: Entity_CheckMutualLineOfSight @0x539be0].
+            int32_t sa[3];
+            AiSystem::weapon_fire_origin(e, world.logic_tick, sa);
+            int32_t sb[3];
+            AiSystem::weapon_fire_origin(*c, world.logic_tick, sb);
+            if (!sys.line_of_sight_clear(world, sa, sb, e.handle, h))
                 continue; // LOS last, in order
             best = h;
             best_d2 = d2;
@@ -1833,10 +1842,13 @@ void AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
             inf.last_attacker.valid() && (slot.f[1] & 1) == 0) {
             if (const Entity *att = world.registry.get(inf.last_attacker)) {
                 if (att->health > 0 && att->team != e.team) {
-                    const int32_t apos[3] = {static_cast<int32_t>(att->position.x * 65536.0f),
-                                             static_cast<int32_t>(att->position.y * 65536.0f),
-                                             static_cast<int32_t>(att->position.z * 65536.0f)};
-                    if (line_of_sight_clear(world, e.pos, apos, e.handle, inf.last_attacker))
+                    // The mutual-LOS fire-origin endpoints stand in here too —
+                    // @0x53b130's own endpoint recipe is unwitnessed.
+                    int32_t sa[3];
+                    weapon_fire_origin(e, world.logic_tick, sa);
+                    int32_t sb[3];
+                    weapon_fire_origin(*att, world.logic_tick, sb);
+                    if (line_of_sight_clear(world, sa, sb, e.handle, inf.last_attacker))
                         found = inf.last_attacker;
                 }
             }
@@ -1997,10 +2009,21 @@ void AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
     const int32_t err_b = static_cast<int32_t>(
         err_unit * (32 - static_cast<int32_t>((key >> 2) & 0x3Fu)));
 
-    const int32_t eye = 0xE666; // chest/eye lift, 0.9 u — the fire-origin stand-in (D-AI-6)
-    const double adx = static_cast<double>(led[0]) - e.pos[0];
-    const double ady = static_cast<double>(led[1]) - e.pos[1];
-    const double adz = static_cast<double>(led[2]) - (static_cast<double>(e.pos[2]) + eye);
+    // The aim EYE rides the muzzle seam — retail's combat-pass aim anchor IS
+    // the posed bone the stamp carries [orig: Entity_GetAttachmentWorldPosition
+    // @0x4b2670 on bone +0x366, §21.1]; stampless rows keep the chest lift.
+    // The horizontal eye components shift with the pose too, as retail's do.
+    int32_t eye[3];
+    AiSystem::weapon_fire_origin(e, world.logic_tick, eye);
+    // The aim TARGET point is the target's fire origin, not its ground origin
+    // [orig: §17.5 — target chest point via Entity_ComputeWeaponFireOrigin
+    // @0x43b4b0]. The lead stays computed over the raw positions (inf.aim_point
+    // is also the movement sample); the origin offset is added on top.
+    int32_t t_origin[3];
+    AiSystem::weapon_fire_origin(*tent, world.logic_tick, t_origin);
+    const double adx = static_cast<double>(led[0]) + (t_origin[0] - tpos[0]) - eye[0];
+    const double ady = static_cast<double>(led[1]) + (t_origin[1] - tpos[1]) - eye[1];
+    const double adz = static_cast<double>(led[2]) + (t_origin[2] - tpos[2]) - eye[2];
     const double horiz = std::sqrt(adx * adx + ady * ady);
     inf.aim_heading = bearing_to(static_cast<int32_t>(adx), static_cast<int32_t>(ady)) + err_a;
     inf.aim_pitch = static_cast<int32_t>(std::atan2(adz, horiz) * kBamPerRadian) + err_b;
@@ -2110,19 +2133,13 @@ void AiSystem::infantry_fire_pass(AiEntity &e, World &world, uint32_t logic_tick
     if ((ev & 0x8u) != 0) inf.fire_secondary_latch = true;
     if (!fire_primary && !fire_c && !inf.fire_secondary_latch) return;
 
-    // The muzzle origin: the embedder-fed posed gun-flash userpoint when FRESH (the
-    // D-AI-6 seam — [orig: Entity_GetAttachmentWorldPosition @0x4b2670 transforms
-    // the fire-bone userpoint's local position by the ANIMATED bone matrix, called
-    // from the anim-event fire block @0x4bf326..0x4bf425]); the chest-lift stand-in
-    // remains the fallback (no embedder pose pushed yet — headless ctests, the spawn
-    // frame, a render-skipped entity). Freshness window 4 ticks: the present layer
-    // stamps every rendered frame, so a stale stamp means the pose stopped flowing.
-    int32_t origin[3] = {e.pos[0], e.pos[1], e.pos[2] + 0xE666};
-    if (e.muzzle_valid && logic_tick - e.muzzle_tick <= 4u) {
-        origin[0] = e.muzzle_world[0];
-        origin[1] = e.muzzle_world[1];
-        origin[2] = e.muzzle_world[2];
-    }
+    // The muzzle origin: the embedder-fed posed gun-flash userpoint when FRESH,
+    // chest lift otherwise — the shared seam helper (the D-AI-6 seam — [orig:
+    // Entity_GetAttachmentWorldPosition @0x4b2670 transforms the fire-bone
+    // userpoint's local position by the ANIMATED bone matrix, called from the
+    // anim-event fire block @0x4bf326..0x4bf425]).
+    int32_t origin[3];
+    AiSystem::weapon_fire_origin(e, logic_tick, origin);
     const int32_t yaw = inf.aim_valid ? inf.aim_heading : e.heading;
     const int32_t pitch = io::bam_add(
             inf.aim_valid ? inf.aim_pitch : 0, inf.recoil_pitch);

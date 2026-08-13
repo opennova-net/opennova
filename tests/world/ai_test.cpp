@@ -4,7 +4,9 @@
 #include <cstdio>
 #include <memory>
 #include <cstring>
+#include <vector>
 
+#include "terrain_query/height_field.h"
 #include "world/ai.h"
 #include "world/body_anim.h"
 #include "world/world.h"
@@ -162,6 +164,217 @@ static void test_fire_pass_uses_embedder_fed_muzzle() {
     sys.infantry_fire_pass(e, *w, 9); // 9 - 2 = 7 ticks stale
     CHECK(w->round_sim.active_count == 3);
     CHECK(near_f(w->round_sim.rounds[2].pos.z, 5.9f));
+}
+
+// D-AI-6a: the shared fire-origin helper — a FRESH stamp verbatim, else the
+// 0.9 u chest lift; both overloads (AiEntity muzzle_* / Entity posed_muzzle_*).
+// [orig: Entity_ComputeWeaponFireOrigin @0x43b4b0 stand-in;
+//  Entity_GetAttachmentWorldPosition @0x4b2670 for the exact aim-eye leg]
+static void test_weapon_fire_origin_fallback_chain() {
+    AiSystem sys;
+    EntityHandle h = EntityHandle::make(0, 1);
+    int idx = sys.attach(h);
+    AiEntity &e = *sys.at(idx);
+    e.pos[0] = 10 << 16;
+    e.pos[1] = 20 << 16;
+    e.pos[2] = 5 << 16;
+
+    int32_t out[3];
+    AiSystem::weapon_fire_origin(e, /*logic_tick=*/5, out);
+    CHECK(out[0] == (10 << 16) && out[1] == (20 << 16));
+    CHECK(out[2] == (5 << 16) + 0xE666); // stampless -> chest lift
+
+    const int32_t muz[3] = {(10 << 16) + 7, (20 << 16) - 9, (5 << 16) + 0x8000};
+    sys.set_entity_muzzle(h, muz, /*logic_tick=*/4);
+    AiSystem::weapon_fire_origin(e, 5, out); // 1 tick old -> fresh
+    CHECK(out[0] == muz[0] && out[1] == muz[1] && out[2] == muz[2]);
+    AiSystem::weapon_fire_origin(e, 8, out); // exactly the window edge -> fresh
+    CHECK(out[2] == muz[2]);
+    AiSystem::weapon_fire_origin(e, 11, out); // 7 ticks -> stale, fallback
+    CHECK(out[2] == (5 << 16) + 0xE666);
+
+    Entity ent{};
+    ent.position = Vec3{10.0f, 20.0f, 5.0f};
+    AiSystem::weapon_fire_origin(ent, 5, out);
+    CHECK(out[0] == (10 << 16) && out[2] == (5 << 16) + 0xE666);
+    ent.posed_muzzle_world[0] = 111;
+    ent.posed_muzzle_world[1] = 222;
+    ent.posed_muzzle_world[2] = 333;
+    ent.posed_muzzle_tick = 4;
+    ent.posed_muzzle_valid = true;
+    AiSystem::weapon_fire_origin(ent, 5, out);
+    CHECK(out[0] == 111 && out[1] == 222 && out[2] == 333);
+    AiSystem::weapon_fire_origin(ent, 20, out); // stale again
+    CHECK(out[2] == (5 << 16) + 0xE666);
+}
+
+// D-AI-6a: the LOS endpoints ride the muzzle seam. A 1.2 u ridge band between
+// the pair blocks the stampless chest-lift (0.9 u) ray; posing both muzzles at
+// 1.5 u clears it; letting the stamps go stale re-blocks. The heightfield is
+// uniform across rows so the engine->field row mapping can't skew the band.
+static void test_los_endpoints_use_muzzle_stamp() {
+    struct BandField {
+        enum { kDim = 512 };
+        std::vector<uint16_t> heightmap;
+        std::vector<int> sector_grid;
+        opennova::terrain::TerrainHeightField field;
+        BandField() : heightmap(kDim * kDim, 0), sector_grid(256, 1) {
+            for (int z = 0; z < kDim; ++z)
+                for (int x = 8; x <= 12; ++x)
+                    heightmap[z * kDim + x] = static_cast<uint16_t>(1.2 * 256.0); // 1.2 u
+            field.heightmap = heightmap.data();
+            field.dim = kDim;
+            field.layout.sector_grid = sector_grid.data();
+            field.layout.origin_x = 0;
+            field.layout.origin_y = 0;
+        }
+    };
+    static BandField band;
+
+    World w;
+    w.registry.configure_pool(0, 4);
+    AiSystem sys;
+    sys.terrain = &band.field;
+    EntityHandle ha = EntityHandle::make(0, 0);
+    EntityHandle hb = EntityHandle::make(0, 1);
+    int ia = sys.attach(ha);
+    AiEntity &a = *sys.at(ia);
+    a.pos[0] = 2 << 16;
+    a.pos[1] = 100 << 16;
+    a.pos[2] = 0;
+
+    Entity target{};
+    target.position = Vec3{20.0f, 100.0f, 0.0f};
+
+    auto clear_between = [&]() {
+        int32_t sa[3];
+        AiSystem::weapon_fire_origin(a, w.logic_tick, sa);
+        int32_t sb[3];
+        AiSystem::weapon_fire_origin(target, w.logic_tick, sb);
+        return sys.line_of_sight_clear(w, sa, sb, ha, hb);
+    };
+
+    w.logic_tick = 10;
+    CHECK(!clear_between()); // chest-lift rays (0.9 u) hit the 1.2 u band
+
+    const int32_t muz_a[3] = {2 << 16, 100 << 16, static_cast<int32_t>(1.5 * 65536.0)};
+    sys.set_entity_muzzle(ha, muz_a, /*logic_tick=*/9);
+    target.posed_muzzle_world[0] = 20 << 16;
+    target.posed_muzzle_world[1] = 100 << 16;
+    target.posed_muzzle_world[2] = static_cast<int32_t>(1.5 * 65536.0);
+    target.posed_muzzle_tick = 9;
+    target.posed_muzzle_valid = true;
+    CHECK(clear_between()); // posed muzzles ride above the band
+
+    w.logic_tick = 30; // both stamps stale -> the fallback holds
+    CHECK(!clear_between());
+}
+
+// D-AI-6a: the aim solution's EYE and TARGET point ride the seam. Stampless,
+// both ends sit at the 0.9 u chest stand-in -> a level shot (pitch exactly 0;
+// the old code aimed down at the pelvis). A fresh NPC muzzle stamp 0.5 u up
+// tilts the pitch positive (aiming up at the target's chest); stamping the
+// TARGET's posed muzzle at 0.5 u too levels it again.
+// [orig: the combat-pass aim anchor Entity_GetAttachmentWorldPosition
+//  @0x4b2670 (+0x366); target chest via Entity_ComputeWeaponFireOrigin
+//  @0x43b4b0 — world-wac-ai-re §17.5/§21.4]
+static void test_aim_solution_uses_muzzle_stamp() {
+    struct AttackSource : IRootMotionSource {
+        bool has_clip(int, int id) const override {
+            return id == anim_state::kIdle || id == anim_state::kAttack;
+        }
+        int32_t clip_length_ticks(int, int) const override { return -1; }
+        bool advance(int, int id, int32_t &phase, RootMotionFrame &out) override {
+            if (!has_clip(0, id)) return false;
+            ++phase;
+            out = RootMotionFrame{}; // zero displacement: everyone stays put
+            return true;
+        }
+    };
+    static AttackSource src;
+
+    World w;
+    w.registry.configure_pool(0, 8);
+    Entity player_seed;
+    player_seed.kind = EntityKind::Organic;
+    player_seed.has_item_def = true;
+    player_seed.item_type = 3;
+    player_seed.team = 2;
+    player_seed.health = 100;
+    player_seed.net_id = 0x21;
+    player_seed.group_id = 2;
+    player_seed.position = Vec3{20.0f, 0.0f, 0.0f};
+    EntityHandle player_h = w.registry.spawn(0, player_seed);
+
+    Entity npc_seed;
+    npc_seed.kind = EntityKind::Organic;
+    npc_seed.team = 1;
+    npc_seed.health = 100;
+    npc_seed.net_id = 0x11;
+    npc_seed.group_id = 1;
+    npc_seed.position = Vec3{0.0f, 0.0f, 0.0f};
+    EntityHandle npc_h = w.registry.spawn(0, npc_seed);
+
+    AiSystem sys;
+    sys.is_authority = true;
+    sys.root_motion = &src;
+    int idx = sys.attach(npc_h);
+    AiEntity &npc = *sys.at(idx);
+    npc.inf.active = true;
+    npc.team = 1;
+    npc.net_id = 0x11;
+    npc.pos[0] = 0; npc.pos[1] = 0; npc.pos[2] = 0;
+    npc.slot.f[10] = 0; // zero aim error: the pitch pin is exact
+    npc.slot.f[11] = 0;
+    npc.slot.f[15] = 60 << 16;
+    npc.slot.f[16] = 10 << 16;
+    npc.slot.f[17] = 100 << 16;
+    npc.slot.f[22] = 62;
+
+    TickContext tctx;
+    tctx.world = &w;
+    tctx.is_authority = true;
+    uint32_t t = 0;
+    for (; t < 500 && !npc.inf.aim_valid; ++t) {
+        tctx.logic_tick = t;
+        w.logic_tick = t; // production's run_logic_tick keeps these in step
+        sys.tick(w, tctx);
+    }
+    CHECK(npc.inf.aim_valid);
+    CHECK(npc.inf.aim_pitch == 0); // chest-to-chest: a level shot
+
+    // A fresh muzzle stamp 0.5 u up: eye 0.5, target chest 0.9 -> pitch up.
+    // The combat FSM oscillates through non-aim anims, so run stamped ticks
+    // until the aim re-asserts (a few dozen suffice) before pinning.
+    const int32_t muz[3] = {0, 0, static_cast<int32_t>(0.5 * 65536.0)};
+    npc.inf.aim_valid = false;
+    for (uint32_t end = t + 500; t < end; ++t) {
+        tctx.logic_tick = t;
+        w.logic_tick = t;
+        sys.set_entity_muzzle(npc_h, muz, t);
+        sys.tick(w, tctx);
+        if (npc.inf.aim_valid) break;
+    }
+    CHECK(npc.inf.aim_valid);
+    CHECK(npc.inf.aim_pitch > 0);
+
+    // The TARGET's posed muzzle at 0.5 u too: both ends level again.
+    npc.inf.aim_valid = false;
+    for (uint32_t end = t + 500; t < end; ++t) {
+        tctx.logic_tick = t;
+        w.logic_tick = t;
+        sys.set_entity_muzzle(npc_h, muz, t);
+        Entity *pl = w.registry.get(player_h);
+        pl->posed_muzzle_world[0] = 20 << 16;
+        pl->posed_muzzle_world[1] = 0;
+        pl->posed_muzzle_world[2] = static_cast<int32_t>(0.5 * 65536.0);
+        pl->posed_muzzle_tick = t;
+        pl->posed_muzzle_valid = true;
+        sys.tick(w, tctx);
+        if (npc.inf.aim_valid) break;
+    }
+    CHECK(npc.inf.aim_valid);
+    CHECK(npc.inf.aim_pitch == 0);
 }
 
 // The D-AI-2 turret solver (solve_weapon_fire_transform — Entity_
@@ -2273,6 +2486,9 @@ int main() {
 
     test_vehicle_death_rows();
     test_fire_pass_uses_embedder_fed_muzzle();
+    test_weapon_fire_origin_fallback_chain();
+    test_los_endpoints_use_muzzle_stamp();
+    test_aim_solution_uses_muzzle_stamp();
     test_world_feed_never_engages_same_team();
     test_berserk_candidate_is_intentional_team_exception();
     test_damage_hit_sets_retail_alert_state();

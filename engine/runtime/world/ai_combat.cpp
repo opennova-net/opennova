@@ -19,6 +19,12 @@ namespace opennova::world {
 
 using namespace detail; // the shared AI helpers, unqualified as before
 
+// The stampless fire-origin fallback: 0.9 u above the entity origin — the
+// chest-height stand-in for retail's person-leg/userpoint vectors while their
+// writers stay unwalked (D-AI-6 facet d). [orig: the def+1350 muzzle bone /
+// entity+0x6C person-leg stand-in]
+constexpr int32_t kChestLift = 0xE666; // 0.9 u, 16.16
+
 // ----------------------------------------------------------------------------
 // P2: GROUND combat + targeting.
 // ----------------------------------------------------------------------------
@@ -162,8 +168,10 @@ bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out) {
             scan_pool(/*pool*/ 0, /*target_vehicles*/ true, /*check_player_flag*/ true);
         }
     }
-    // The live feed's lazy LOS probe [orig: Entity_CheckMutualLineOfSight @0x539be0,
-    // called only at the priority bypass / would-be-best sites].
+    // The live feed's lazy LOS probe [orig: Entity_CheckMutualLineOfSight @0x539be0 —
+    // fire-origin -> fire-origin, called only at the priority bypass / would-be-best
+    // sites]. Endpoints ride the muzzle seam (weapon_fire_origin); an injected
+    // candidate with no live entity keeps the list's raw pos + chest lift.
     struct LosCtx {
         AiSystem *sys;
         World *world;
@@ -171,7 +179,18 @@ bool AiSystem::acquire_target(World &world, AiEntity &e, AiTarget &out) {
     } los_ctx{this, &world, &e};
     const LosBlockedFn probe = [](void *ctx, const AiCandidate &c) -> bool {
         LosCtx *lc = static_cast<LosCtx *>(ctx);
-        return !lc->sys->line_of_sight_clear(*lc->world, lc->scanner->pos, c.pos,
+        const uint32_t tick = lc->world->logic_tick;
+        int32_t sa[3];
+        weapon_fire_origin(*lc->scanner, tick, sa);
+        int32_t sb[3];
+        if (const Entity *te = lc->world->registry.get(c.handle)) {
+            weapon_fire_origin(*te, tick, sb);
+        } else {
+            sb[0] = c.pos[0];
+            sb[1] = c.pos[1];
+            sb[2] = c.pos[2] + kChestLift;
+        }
+        return !lc->sys->line_of_sight_clear(*lc->world, sa, sb,
                                              lc->scanner->handle, c.handle);
     };
     return acquire_target_from(e, scan_candidates_, out, probe, &los_ctx);
@@ -288,25 +307,48 @@ void AiSystem::ai_set_target(World &world, AiEntity &e, EntityHandle target) {
     }
 }
 
-// LOS between two 16.16 fire-origin points — true = clear. The terrain leg is the
-// ported heightmap segment raycast; the sector leg clips the ray against pool-2 /
-// pool-1 collision models (the D-AI-7 leg). [orig: Entity_CheckMutualLineOfSight
-// @0x539be0 -> Physics_RaycastTerrainAndSectors @0x539910, ray radius 0, 1 = clear.]
-// No terrain wired -> clear, the headless-test default; no collision world wired
-// (terrain-only unit tests) -> terrain leg alone.
+// The aim/LOS fire origin (the header carries the witness): the fresh posed
+// muzzle stamp when the seam fed one, else the 0.9 u chest lift both the fire
+// pass and the LOS endpoints historically used. One helper, both jobs — the
+// LOS endpoints and the aim-solution eye share it (D-AI-6 residual (a)).
+void AiSystem::weapon_fire_origin(const AiEntity &e, uint32_t logic_tick, int32_t out[3]) {
+    if (e.muzzle_valid && logic_tick - e.muzzle_tick <= kMuzzleFreshTicks) {
+        out[0] = e.muzzle_world[0];
+        out[1] = e.muzzle_world[1];
+        out[2] = e.muzzle_world[2];
+        return;
+    }
+    out[0] = e.pos[0];
+    out[1] = e.pos[1];
+    out[2] = e.pos[2] + kChestLift;
+}
+
+void AiSystem::weapon_fire_origin(const Entity &e, uint32_t logic_tick, int32_t out[3]) {
+    if (e.posed_muzzle_valid && logic_tick - e.posed_muzzle_tick <= kMuzzleFreshTicks) {
+        out[0] = e.posed_muzzle_world[0];
+        out[1] = e.posed_muzzle_world[1];
+        out[2] = e.posed_muzzle_world[2];
+        return;
+    }
+    out[0] = static_cast<int32_t>(e.position.x * 65536.0f);
+    out[1] = static_cast<int32_t>(e.position.y * 65536.0f);
+    out[2] = static_cast<int32_t>(e.position.z * 65536.0f) + kChestLift;
+}
+
+// LOS between two EXACT 16.16 endpoints — true = clear. Callers supply the fire
+// origins via weapon_fire_origin (or their own witnessed endpoints: the corpse
+// watch and USE scan keep their explicit lifts at the call sites). The terrain
+// leg is the ported heightmap segment raycast; the sector leg clips the ray
+// against pool-2/pool-1 collision models (the D-AI-7 leg).
+// [orig: Entity_CheckMutualLineOfSight @0x539be0 = two Entity_ComputeWeaponFireOrigin
+// @0x43b4b0 results into Physics_RaycastTerrainAndSectors @0x539910, radius 0,
+// 1 = clear.] No terrain wired -> clear, the headless-test default; no collision
+// world wired (terrain-only unit tests) -> terrain leg alone.
 bool AiSystem::line_of_sight_clear(World &world, const int32_t a[3], const int32_t b[3],
                                    EntityHandle from, EntityHandle to) const {
     if (terrain == nullptr || !terrain->valid()) return true;
-    // The original tests the segment between the two FIRE ORIGINS — Entity_CheckMutual-
-    // LineOfSight @0x539be0 feeds two Entity_ComputeWeaponFireOrigin @0x43b4b0 results
-    // into the ray — never the ground-level entity origins (feet-to-feet sampling
-    // false-blocks on the very ground both stand on). Until the bone seam lands, lift
-    // both endpoints by the same 0.9 u chest stand-in the fire pass uses (D-AI-6/-7).
-    constexpr int32_t kChestLift = 0xE666; // 0.9 u [orig: the def+1350 muzzle bone stand-in]
-    const int32_t la[3] = {a[0], a[1], a[2] + kChestLift};
-    const int32_t lb[3] = {b[0], b[1], b[2] + kChestLift};
-    if (collision != nullptr) return collision->raycast_clear(world, la, lb, from, to);
-    return !los_terrain_blocked(*terrain, la, lb);
+    if (collision != nullptr) return collision->raycast_clear(world, a, b, from, to);
+    return !los_terrain_blocked(*terrain, a, b);
 }
 
 // [orig: Entity_AlertNearbyAllies @0x4654b0] same-team, alive, non-building entities
@@ -461,7 +503,9 @@ bool AiSystem::solve_weapon_fire_transform(World &world, AiEntity &e, const Enti
 
     // LOS unless the caller defers it [orig: the ctx 0x8000 defer-LOS bit from
     // arg 7 @0x456BD5; Entity_ValidateWeaponTarget's Physics_RaycastTerrainAndSectors
-    // leg @0x53a400 tail].
+    // leg @0x53a400 tail]. Endpoints are the solver's own out/aim pair exactly
+    // (the pre-2026-08-13 hidden +0.9 both-ends lift is gone with the
+    // exact-endpoint LOS; the SM source/target stand-ins stay D-AI-2's).
     if (!skip_los && !line_of_sight_clear(world, out, aim, e.handle, target->handle))
         return false;
 
