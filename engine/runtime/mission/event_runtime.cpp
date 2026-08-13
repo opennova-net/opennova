@@ -157,12 +157,54 @@ bool BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
                     return cmds.ssn_alive(static_cast<uint16_t>(t.param1));
                 case bms::SingleTriggerType::SingleIsWithinArea:
                     return cmds.ssn_in_area(static_cast<uint16_t>(t.param1), t.param2);
+                // The 2026-08-13 grill closed the rest of the cat-2 switch
+                // (record §3b): every helper's RAW sense is positive — the
+                // negated flavor of these enum names is authoring-display
+                // convention, and the chain-negation bit does the flipping.
+                case bms::SingleTriggerType::SingleAtRedAlert:
+                    // [orig: @0x453965 -> Entity_IsSsnAtAlertLevel(p1, 2)]
+                    return cmds.ssn_at_alert(static_cast<uint16_t>(t.param1), 2);
+                case bms::SingleTriggerType::SingleAtYellowAlert:
+                    // [orig: @0x453978 -> Entity_IsSsnAtAlertLevel(p1, 1)]
+                    return cmds.ssn_at_alert(static_cast<uint16_t>(t.param1), 1);
+                case bms::SingleTriggerType::SingleHasLostMoreUnits:
+                    // Health, not unit counts [orig: @0x4539b6 ->
+                    // Entity_HasDamageCapacity(p1, p2)].
+                    return cmds.ssn_damage_taken_at_least(
+                            static_cast<uint16_t>(t.param1), t.param2);
+                case bms::SingleTriggerType::SingleIntact:
+                    // [orig: @0x4539e0 -> Entity_HasFullHealth(p1)]
+                    return cmds.ssn_full_health(static_cast<uint16_t>(t.param1));
+                case bms::SingleTriggerType::SingleHasMoreUnits:
+                    // [orig: @0x453a18 -> Entity_HasHealthAboveThreshold(p1, p2)]
+                    return cmds.ssn_health_at_least(
+                            static_cast<uint16_t>(t.param1), t.param2);
+                case bms::SingleTriggerType::SingleHoldingGroup:
+                    // [orig: @0x453a03 -> Entity_IsSsnHoldingItemGroup(p1, p2)]
+                    return cmds.ssn_holding_group(
+                            static_cast<uint16_t>(t.param1), t.param2);
+                case bms::SingleTriggerType::SingleOnTopOf:
+                    // [orig: @0x453835 -> Entity_IsOnTopOfChain over the
+                    // FindByNetId handles]
+                    return cmds.ssn_on_chain_of(static_cast<uint16_t>(t.param1),
+                            static_cast<uint16_t>(t.param2));
+                case bms::SingleTriggerType::SingleFartherThan:
+                    // RAW = "within" [orig: @0x45387f ->
+                    // Entity_CheckProximity(hA, hB, p3<<16)].
+                    return cmds.ssn_within_distance(static_cast<uint16_t>(t.param1),
+                            static_cast<uint16_t>(t.param2), t.param3);
+                case bms::SingleTriggerType::SingleHasNoLOS:
+                    // RAW = "in range AND ray clear" [orig: @0x4538c9 ->
+                    // Entity_CheckLineOfSightInRange(hA, hB, p3<<16)].
+                    return cmds.ssn_los_clear_within(static_cast<uint16_t>(t.param1),
+                            static_cast<uint16_t>(t.param2), t.param3);
+                case bms::SingleTriggerType::SingleDoesNotSeeOrFarther:
+                    // RAW = "sees": range + ray + the ±30° facing cone
+                    // [orig: @0x453913 -> Entity_CheckLineOfSight(hA, hB, p3<<16)].
+                    return cmds.ssn_sees_within(static_cast<uint16_t>(t.param1),
+                            static_cast<uint16_t>(t.param2), t.param3);
                 default:
-                    // Cat-2 alert/count subs (3/6/9/12/14) and the distance/
-                    // LOS family (42-45) stay unwitnessed for singles; sub 11
-                    // (SingleHoldingGroup) is the held-object sibling of the
-                    // cat-1 sub 11 — all false until a grill pins them
-                    // (record §3a residuals).
+                    // Sub 8 is absent from the retail jump table too (§3b).
                     return false;
             }
         }
@@ -222,10 +264,11 @@ bool BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
                     return false;
                 }
                 case bms::GroupTriggerType::GroupHoldingGroup:
-                    // Needs the held-object link (entity +616) our model does
-                    // not carry yet [orig: sub_43C870 @ 0x43c870] — record §3a
-                    // residual; false until that link lands.
-                    return false;
+                    // Any pool-0 member of group p1 carrying an object of
+                    // group p2 via the mounted_child link; the link's
+                    // producers ride the carry/CTF system port (§3b item 4).
+                    // [orig: @0x453778 -> TriggerGroup_AnyMemberHoldingItemGroup]
+                    return cmds.group_holding_group(t.param1, t.param2);
                 default:
                     return false;
             }

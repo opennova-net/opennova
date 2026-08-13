@@ -972,6 +972,259 @@ static void test_trigger_relations_matrices_and_visited() {
     CHECK(!sys.evaluate_trigger_for_test(w, group_trigger(bms::GroupTriggerType::GroupSeesGroup, 2, 5)));
 }
 
+// The 2026-08-13 cat-2 close-out (record §3b): the single-state family.
+static bms::Trigger single_trigger(bms::SingleTriggerType sub, int p1, int p2 = 0, int p3 = 0) {
+    bms::Trigger t{};
+    t.main_type = bms::TriggerMainType::Single;
+    t.sub_type = static_cast<int32_t>(sub);
+    t.param1 = p1;
+    t.param2 = p2;
+    t.param3 = p3;
+    return t;
+}
+
+// Subs 3/14 read the per-entity controller alert byte; the ChangeAI command
+// family writes it per-SSN and per-member [orig: Entity_IsSsnAtAlertLevel
+// @0x43e780; Entity_ApplyCommand cases 5/22/6].
+static void test_single_alert_triggers() {
+    World w;
+    w.registry.configure_pool(0, 8);
+    world::Entity org;
+    org.net_id = 42;
+    org.alive = true;
+    org.group_id = 3;
+    world::EntityHandle h = w.registry.spawn(0, org);
+    org.net_id = 43; // second member, no AI component
+    w.registry.spawn(0, org);
+
+    world::AiSystem ai;
+    ai.attach(h);
+    w.ai = &ai;
+    mission::BmsEventSystem sys;
+    sys.load({}, {}, {});
+    w.add_system(&sys);
+    w.load_systems();
+
+    using S = bms::SingleTriggerType;
+    // Spawn default = green: neither level satisfied.
+    CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleAtRedAlert, 42)));
+    CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleAtYellowAlert, 42)));
+
+    // ChangeSingleAI red (sub 5) writes the byte per-SSN.
+    w.commands.apply_ai_command(42, 5, 0, 0, 0);
+    CHECK(sys.evaluate_trigger_for_test(w, single_trigger(S::SingleAtRedAlert, 42)));
+    CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleAtYellowAlert, 42)));
+
+    // The group fan reaches members' bytes (and the group record) too.
+    w.commands.apply_group_ai_command(3, 22, 0, 0, 0);
+    CHECK(sys.evaluate_trigger_for_test(w, single_trigger(S::SingleAtYellowAlert, 42)));
+    CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleAtRedAlert, 42)));
+
+    // Green (sub 6) clears both levels.
+    w.commands.apply_ai_command(42, 6, 0, 0, 0);
+    CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleAtRedAlert, 42)));
+    CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleAtYellowAlert, 42)));
+
+    // No AI component (retail aiRuntime null) and unresolved SSNs read false.
+    CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleAtRedAlert, 43)));
+    CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleAtRedAlert, 99)));
+}
+
+// Subs 6/9/12 are HEALTH thresholds, not unit counts [orig:
+// Entity_HasDamageCapacity @0x43e3d0 / HasFullHealth @0x43e470 /
+// HasHealthAboveThreshold @0x43e350 — pools 0-1, signed, no alive gate].
+static void test_single_health_triggers() {
+    World w;
+    w.registry.configure_pool(0, 8);
+    w.registry.configure_pool(2, 4);
+    world::Entity org;
+    org.net_id = 42;
+    org.alive = true;
+    org.health = 100;
+    org.health_max = 100;
+    w.registry.spawn(0, org);
+    org.net_id = 44; // a pool-2 sibling: outside the retail scan set
+    w.registry.spawn(2, org);
+    org.net_id = 45; // unresolved def: health_max 0
+    org.health_max = 0;
+    w.registry.spawn(0, org);
+
+    mission::BmsEventSystem sys;
+    sys.load({}, {}, {});
+    w.add_system(&sys);
+    w.load_systems();
+
+    using S = bms::SingleTriggerType;
+    CHECK(sys.evaluate_trigger_for_test(w, single_trigger(S::SingleIntact, 42)));
+    CHECK(sys.evaluate_trigger_for_test(w, single_trigger(S::SingleHasMoreUnits, 42, 100)));
+    CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleHasMoreUnits, 42, 101)));
+    // p2 = 0 is trivially satisfied (health <= max - 0); p2 = 1 is not.
+    CHECK(sys.evaluate_trigger_for_test(w, single_trigger(S::SingleHasLostMoreUnits, 42, 0)));
+    CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleHasLostMoreUnits, 42, 1)));
+
+    w.commands.add_ssn_hp(42, -30);
+    CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleIntact, 42)));
+    CHECK(sys.evaluate_trigger_for_test(w, single_trigger(S::SingleHasLostMoreUnits, 42, 30)));
+    CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleHasLostMoreUnits, 42, 31)));
+    CHECK(sys.evaluate_trigger_for_test(w, single_trigger(S::SingleHasMoreUnits, 42, 70)));
+    CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleHasMoreUnits, 42, 71)));
+
+    // A corpse keeps satisfying the damage form (no alive gate).
+    w.commands.kill_ssn(42);
+    CHECK(sys.evaluate_trigger_for_test(w, single_trigger(S::SingleHasLostMoreUnits, 42, 100)));
+    CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleIntact, 42)));
+
+    // Unresolved def (health_max 0; retail null itemDef) fails Intact.
+    CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleIntact, 45)));
+    // Pool 2 sits outside the retail pools-0/1 scan; unresolved SSNs false.
+    CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleIntact, 44)));
+    CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleHasMoreUnits, 44, 1)));
+    CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleHasLostMoreUnits, 99, 1)));
+}
+
+// Sub 11 both cats over the carried-object link [orig:
+// TriggerGroup_AnyMemberHoldingItemGroup @0x43c870 (pool-0 walk, ItemTypeIndex
+// gate) / Entity_IsSsnHoldingItemGroup @0x43e2f0].
+static void test_holding_triggers() {
+    World w;
+    w.registry.configure_pool(0, 8);
+    w.registry.configure_pool(1, 8);
+    world::Entity holder;
+    holder.net_id = 50;
+    holder.alive = true;
+    holder.group_id = 2;
+    holder.item_id = 1001;
+    world::EntityHandle holder_h = w.registry.spawn(0, holder);
+    world::Entity item;
+    item.net_id = 60;
+    item.alive = true;
+    item.group_id = 9;
+    item.item_id = 4095;
+    world::EntityHandle item_h = w.registry.spawn(1, item);
+    // A pool-1 "holder" with the same group: outside the retail pool-0 walk.
+    holder.net_id = 51;
+    world::EntityHandle wrong_pool_h = w.registry.spawn(1, holder);
+    // A pool-0 member with no resolved item (ItemTypeIndex 0): gated out.
+    holder.net_id = 52;
+    holder.item_id = 0;
+    world::EntityHandle ungated_h = w.registry.spawn(0, holder);
+
+    mission::BmsEventSystem sys;
+    sys.load({}, {}, {});
+    w.add_system(&sys);
+    w.load_systems();
+
+    using S = bms::SingleTriggerType;
+    using G = bms::GroupTriggerType;
+    CHECK(!sys.evaluate_trigger_for_test(w, group_trigger(G::GroupHoldingGroup, 2, 9)));
+    CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleHoldingGroup, 50, 9)));
+
+    w.registry.get(holder_h)->mounted_child = item_h;
+    CHECK(sys.evaluate_trigger_for_test(w, group_trigger(G::GroupHoldingGroup, 2, 9)));
+    CHECK(!sys.evaluate_trigger_for_test(w, group_trigger(G::GroupHoldingGroup, 2, 8)));
+    CHECK(!sys.evaluate_trigger_for_test(w, group_trigger(G::GroupHoldingGroup, 3, 9)));
+    CHECK(sys.evaluate_trigger_for_test(w, single_trigger(S::SingleHoldingGroup, 50, 9)));
+    CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleHoldingGroup, 50, 8)));
+
+    // Clearing the link clears both conditions.
+    w.registry.get(holder_h)->mounted_child = world::EntityHandle{};
+    CHECK(!sys.evaluate_trigger_for_test(w, group_trigger(G::GroupHoldingGroup, 2, 9)));
+    CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleHoldingGroup, 50, 9)));
+
+    // A wrong-pool member holding the item does NOT satisfy either walk
+    // (retail scans pool 0 only), and the ItemTypeIndex gate holds.
+    w.registry.get(wrong_pool_h)->mounted_child = item_h;
+    CHECK(!sys.evaluate_trigger_for_test(w, group_trigger(G::GroupHoldingGroup, 2, 9)));
+    CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleHoldingGroup, 51, 9)));
+    w.registry.get(wrong_pool_h)->mounted_child = world::EntityHandle{};
+    w.registry.get(ungated_h)->mounted_child = item_h;
+    CHECK(!sys.evaluate_trigger_for_test(w, group_trigger(G::GroupHoldingGroup, 2, 9)));
+}
+
+// Subs 42-45: the chain/distance/LOS family — RAW-positive senses; the
+// authored negation bit is the flipper [orig: Entity_IsOnTopOfChain @0x4f19a0;
+// Entity_CheckProximity @0x4f14c0; Entity_CheckLineOfSightInRange @0x4f15e0;
+// Entity_CheckLineOfSight @0x4f17c0 (the ±30° facing cone)].
+static void test_single_distance_los_chain() {
+    World w;
+    w.registry.configure_pool(0, 8);
+    world::Entity org;
+    org.alive = true;
+    org.item_id = 1001;
+    org.net_id = 70;
+    org.position = {0.0f, 0.0f, 0.0f};
+    org.yaw = 90; // mission 90 deg = engine BAM 0 = facing +X
+    world::EntityHandle a_h = w.registry.spawn(0, org);
+    org.net_id = 71;
+    org.position = {30.0f, 0.0f, 0.0f};
+    world::EntityHandle b_h = w.registry.spawn(0, org);
+    org.net_id = 72;
+    org.position = {15.0f, 0.0f, 0.0f};
+    world::EntityHandle mid_h = w.registry.spawn(0, org);
+
+    // The system carries one authored NEGATED event from the start (the
+    // add-a-system-mid-test route never ticks): a negated within-40 trigger
+    // ("farther than 40") that sets V7 once the pair separates.
+    bms::Event e{};
+    e.trigger_index = 0;
+    e.trigger_count = 1;
+    e.action_index = 0;
+    e.action_count = 1;
+    bms::Trigger negated = single_trigger(bms::SingleTriggerType::SingleFartherThan, 70, 71, 40);
+    negated.condition_flags = bms::Trigger::kConditionNegated;
+    mission::BmsEventSystem sys;
+    sys.load({e}, {negated}, {misvar(bms::MissionVariableActionSubType::Set, 7, 1)});
+    w.add_system(&sys);
+    w.load_systems();
+
+    using S = bms::SingleTriggerType;
+    // Sub 43 RAW = "within p3 meters" (inclusive).
+    CHECK(sys.evaluate_trigger_for_test(w, single_trigger(S::SingleFartherThan, 70, 71, 40)));
+    CHECK(sys.evaluate_trigger_for_test(w, single_trigger(S::SingleFartherThan, 70, 71, 30)));
+    CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleFartherThan, 70, 71, 20)));
+    CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleFartherThan, 70, 99, 40)));
+
+    // Sub 44 RAW = "in range AND ray clear" — terrain-less default = clear,
+    // so only the range gate discriminates here (the blocked-ray leg lives in
+    // the ai ctest with a wired heightfield).
+    CHECK(sys.evaluate_trigger_for_test(w, single_trigger(S::SingleHasNoLOS, 70, 71, 40)));
+    CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleHasNoLOS, 70, 71, 20)));
+
+    // Sub 45 RAW = "sees": adds the ±30° facing cone over the shooter yaw.
+    CHECK(sys.evaluate_trigger_for_test(w, single_trigger(S::SingleDoesNotSeeOrFarther, 70, 71, 40)));
+    // 71 faces +Y (mission yaw 0), 70 lies due -X of it: 90 deg off-cone.
+    // (Exactly 180 deg astern would PASS via retail's abs INT_MIN overflow
+    // quirk — carried in the port, so the test avoids the degenerate angle.)
+    w.registry.get(b_h)->yaw = 0;
+    CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleDoesNotSeeOrFarther, 71, 70, 40)));
+    // Rotate the shooter 45 deg away: outside the 30-deg cone.
+    w.registry.get(a_h)->yaw = 45;
+    CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleDoesNotSeeOrFarther, 70, 71, 40)));
+    // 20 deg off: inside the cone.
+    w.registry.get(a_h)->yaw = 70;
+    CHECK(sys.evaluate_trigger_for_test(w, single_trigger(S::SingleDoesNotSeeOrFarther, 70, 71, 40)));
+
+    // Sub 42: the groundEntity chain, up to 3 hops, first-match.
+    CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleOnTopOf, 70, 71)));
+    w.registry.get(a_h)->ground_target = b_h;
+    CHECK(sys.evaluate_trigger_for_test(w, single_trigger(S::SingleOnTopOf, 70, 71)));
+    CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleOnTopOf, 71, 70)));
+    // Two hops through the middle carrier.
+    w.registry.get(a_h)->ground_target = mid_h;
+    w.registry.get(mid_h)->ground_target = b_h;
+    CHECK(sys.evaluate_trigger_for_test(w, single_trigger(S::SingleOnTopOf, 70, 71)));
+
+    // The authored negation bit flips the RAW sense end to end (the loaded
+    // event from the fixture head): within 40 -> authored condition false,
+    // separated -> "farther than 40" latches on its processing pass and fires
+    // at the next 64-tick delay-expiry slot (the witnessed cadence).
+    tick_n(w, kPass);
+    CHECK(w.vars.get_mission(7) == 0);
+    w.registry.get(b_h)->position = {80.0f, 0.0f, 0.0f};
+    tick_n(w, kPass + kCycle);
+    CHECK(w.vars.get_mission(7) == 1);
+}
+
 // Zone refs in the FILE carry the authored zone ID; the load-time resolver
 // rewrites them to the zone-array INDEX (dangling/degenerate refs neuter the
 // trigger). The 04TR shape: a NEGATED not-in-area trigger -> RedWin must stay
@@ -1091,6 +1344,10 @@ int main() {
     test_post_pass_is_a_one_shot();
     test_trigger_relations_group_records();
     test_trigger_relations_matrices_and_visited();
+    test_single_alert_triggers();
+    test_single_health_triggers();
+    test_holding_triggers();
+    test_single_distance_los_chain();
     test_zone_refs_resolve_by_id();
     test_dangling_zone_ref_neuters_trigger();
     test_bluewin_ends_round();

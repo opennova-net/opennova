@@ -63,6 +63,51 @@ public:
     // BMS player-AWOL counter. [orig: Entity_IsLocalPlayerOutOfBounds @0x439d40]
     bool local_player_out_of_bounds() const;
 
+    // --- the cat-2 single-state trigger queries (EventTrigger cat 2;
+    // bms-event-runtime-re §3b — every helper's RAW sense is POSITIVE, the
+    // authored chain-negation bit does the flipping) ---
+    // [orig: Entity_IsSsnAtAlertLevel @0x43e780] No AI component (aiRuntime
+    // null) -> false; else the per-entity controller alert byte == level
+    // (2 red / 1 yellow / 0 green).
+    bool ssn_at_alert(uint16_t ssn, int level) const;
+    // [orig: Entity_HasDamageCapacity @0x43e3d0] health <= healthMax - points,
+    // signed — "has lost at least points HP". No alive gate (a corpse keeps
+    // satisfying it), mirroring the original expression.
+    bool ssn_damage_taken_at_least(uint16_t ssn, int32_t points) const;
+    // [orig: Entity_HasFullHealth @0x43e470] health >= healthMax; an
+    // unresolved def (our health_max == 0 marker; retail's null itemDef) -> false.
+    bool ssn_full_health(uint16_t ssn) const;
+    // [orig: Entity_HasHealthAboveThreshold @0x43e350] health >= threshold
+    // (the def is not involved).
+    bool ssn_health_at_least(uint16_t ssn, int32_t threshold) const;
+    // [orig: Entity_IsSsnHoldingItemGroup @0x43e2f0] The carried-object link
+    // (mounted_child) is set and the held object's command group == group.
+    bool ssn_holding_group(uint16_t ssn, int group) const;
+    // [orig: TriggerGroup_AnyMemberHoldingItemGroup @0x43c870] Any resolved
+    // (item_id != 0, the retail ItemTypeIndex +0x1C gate) member of
+    // holder_group holding an object of held_group; first match wins.
+    bool group_holding_group(int holder_group, int held_group) const;
+    // [orig: Entity_IsOnTopOfChain @0x4f19a0] target reachable from ssn's
+    // groundEntity chain (ground_target) within 3 hops; both entities gated
+    // on item_id != 0.
+    bool ssn_on_chain_of(uint16_t ssn, uint16_t target_ssn) const;
+    // [orig: Entity_CheckProximity @0x4f14c0] Euclidean center distance
+    // <= meters (retail computes in float over the 16.16 centers with a
+    // 0x7FFF0000 overflow clamp before ftol — our float math needs no clamp).
+    bool ssn_within_distance(uint16_t ssn, uint16_t target_ssn, int32_t meters) const;
+    // [orig: Entity_CheckLineOfSightInRange @0x4f15e0] Center distance
+    // <= meters AND a radius-0 LOS ray between the two entities is clear.
+    // Retail rays between the +0x1FC offset points (unwalked) and picks the
+    // entity-aware walker at <= 20 u vs terrain/sectors above — our port rays
+    // through the one modeled LOS seam; both stand-ins tracked in §3b.
+    bool ssn_los_clear_within(uint16_t ssn, uint16_t target_ssn, int32_t meters) const;
+    // [orig: Entity_CheckLineOfSight @0x4f17c0] ssn_los_clear_within PLUS the
+    // facing gate: |wrap32(heading_bam - atan2(dy, dx)·(2^31/pi))| <= 30.0
+    // deg (0x15555540 BAM), int32 wrap = shortest arc. Retail's cdq/xor/sub
+    // abs leaves INT_MIN negative, so a target EXACTLY 180.0 deg astern
+    // passes the signed compare — the quirk is carried bit-exactly.
+    bool ssn_sees_within(uint16_t ssn, uint16_t target_ssn, int32_t meters) const;
+
     // --- group (by group id) ---
     int kill_group(int group);          // returns members affected
     // `node < 0` selects the nearest node on the list; BMS RedirectGroupTo passes

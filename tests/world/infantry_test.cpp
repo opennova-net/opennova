@@ -1955,11 +1955,11 @@ int main() {
         CHECK(e->inf.anim_state == anim_state::kRunForward);
 
         e->inf.alert_timer = 0;
-        e->slot.bytes()[AiSlot::kMoveFlagByte] = 1; // alert source 2: slot byte +136
+        e->slot.bytes()[AiSlot::kAlertByte] = 1; // alert source 2: slot byte +136
         run_ticks(ai, w, 17, 33);
         CHECK(e->inf.anim_state == anim_state::kRunForward);
 
-        e->slot.bytes()[AiSlot::kMoveFlagByte] = 0;
+        e->slot.bytes()[AiSlot::kAlertByte] = 0;
         e->inf.combat_reaction = true; // alert source 3: byte entity+875
         run_ticks(ai, w, 33, 49);
         CHECK(e->inf.anim_state == anim_state::kRunForward);

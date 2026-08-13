@@ -526,6 +526,186 @@ bool EntityCommands::local_player_out_of_bounds() const {
     return any_active;
 }
 
+// --- the cat-2 single-state trigger queries (bms-event-runtime-re §3b) -------
+
+namespace {
+
+// Retail's per-helper pool breadth: the alert/health scanners walk pools 0-1,
+// the holding walks pool 0 only, the 42-45 family resolves through
+// EntityPool_FindByNetId (pools 0-3). Our resolve is registry-wide, so each
+// query re-applies its helper's pool gate from the handle's pool bits.
+bool in_pools_01(EntityHandle h) { return h.valid() && h.pool() <= 1; }
+
+} // namespace
+
+bool EntityCommands::ssn_at_alert(uint16_t ssn, int level) const {
+    // [orig: Entity_IsSsnAtAlertLevel @0x43e780 — pools 0-1; aiRuntime
+    // (entity+0x68) null -> 0; byte +0x88 == level]
+    if (!world_.ai) return false;
+    EntityHandle h = resolve_ssn(ssn);
+    if (!in_pools_01(h)) return false;
+    AiEntity *ae = world_.ai->for_handle(h);
+    if (!ae) return false;
+    return ae->slot.bytes()[AiSlot::kAlertByte] == level;
+}
+
+bool EntityCommands::ssn_damage_taken_at_least(uint16_t ssn, int32_t points) const {
+    // [orig: Entity_HasDamageCapacity @0x43e3d0 — pools 0-1; signed
+    // health(+0x11E) <= healthMax(def+0x17C) - points; no null-def guard, no
+    // alive gate]
+    EntityHandle h = resolve_ssn(ssn);
+    if (!in_pools_01(h)) return false;
+    const Entity *e = world_.registry.get(h);
+    if (!e) return false;
+    return e->health <= e->health_max - points;
+}
+
+bool EntityCommands::ssn_full_health(uint16_t ssn) const {
+    // [orig: Entity_HasFullHealth @0x43e470 — pools 0-1; null itemDef -> 0
+    // (our health_max == 0 unresolved marker); health >= healthMax]
+    EntityHandle h = resolve_ssn(ssn);
+    if (!in_pools_01(h)) return false;
+    const Entity *e = world_.registry.get(h);
+    if (!e || e->health_max == 0) return false;
+    return e->health >= e->health_max;
+}
+
+bool EntityCommands::ssn_health_at_least(uint16_t ssn, int32_t threshold) const {
+    // [orig: Entity_HasHealthAboveThreshold @0x43e350 — pools 0-1;
+    // health >= threshold, def-free]
+    EntityHandle h = resolve_ssn(ssn);
+    if (!in_pools_01(h)) return false;
+    const Entity *e = world_.registry.get(h);
+    if (!e) return false;
+    return e->health >= threshold;
+}
+
+bool EntityCommands::ssn_holding_group(uint16_t ssn, int group) const {
+    // [orig: Entity_IsSsnHoldingItemGroup @0x43e2f0 — pool 0 only;
+    // mountedChild(+0x268) null -> 0; held->commandGroup(+0x11C) == group]
+    EntityHandle h = resolve_ssn(ssn);
+    if (!h.valid() || h.pool() != 0) return false;
+    const Entity *e = world_.registry.get(h);
+    if (!e) return false;
+    const Entity *held = world_.registry.get(e->mounted_child);
+    if (!held) return false;
+    return held->group_id == group;
+}
+
+bool EntityCommands::group_holding_group(int holder_group, int held_group) const {
+    // [orig: TriggerGroup_AnyMemberHoldingItemGroup @0x43c870 — walk pool 0,
+    // gate ItemTypeIndex(+0x1C) != 0, first member of holder_group whose
+    // mountedChild's commandGroup == held_group]
+    std::vector<EntityHandle> members;
+    world_.registry.by_group(static_cast<uint8_t>(holder_group), members);
+    for (EntityHandle h : members) {
+        if (h.pool() != 0) continue;
+        const Entity *e = world_.registry.get(h);
+        if (!e || e->item_id == 0) continue;
+        const Entity *held = world_.registry.get(e->mounted_child);
+        if (held && held->group_id == held_group) return true;
+    }
+    return false;
+}
+
+bool EntityCommands::ssn_on_chain_of(uint16_t ssn, uint16_t target_ssn) const {
+    // [orig: Entity_IsOnTopOfChain @0x4f19a0 — both resolved + ItemTypeIndex
+    // gates; A's groundEntity(+0x28) chain, up to 3 hops, == B]
+    const Entity *a = world_.registry.get(resolve_ssn(ssn));
+    const Entity *b_probe = world_.registry.get(resolve_ssn(target_ssn));
+    if (!a || !b_probe || a->item_id == 0 || b_probe->item_id == 0) return false;
+    const Entity *hop = world_.registry.get(a->ground_target);
+    for (int i = 0; i < 3 && hop != nullptr; ++i) {
+        if (hop == b_probe) return true;
+        hop = world_.registry.get(hop->ground_target);
+    }
+    return false;
+}
+
+namespace {
+
+// Shared resolve + gates + center distance for the 42-45 trigger family
+// [orig: both entities resolved via EntityPool_FindByNetId @0x4f0a20, gated
+// on ItemTypeIndex(+0x1C) != 0; float euclidean over the 16.16 centers with
+// the 0x7FFF0000 overflow clamp — our float positions need no clamp].
+bool trigger_pair_distance(const World &w, const EntityCommands &cmds,
+                           uint16_t ssn_a, uint16_t ssn_b,
+                           const Entity *&a, const Entity *&b, float &dist) {
+    a = w.registry.get(cmds.resolve_ssn(ssn_a));
+    b = w.registry.get(cmds.resolve_ssn(ssn_b));
+    if (a == nullptr || b == nullptr || a->item_id == 0 || b->item_id == 0)
+        return false;
+    const float dx = a->position.x - b->position.x;
+    const float dy = a->position.y - b->position.y;
+    const float dz = a->position.z - b->position.z;
+    dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+    return true;
+}
+
+} // namespace
+
+bool EntityCommands::ssn_within_distance(uint16_t ssn, uint16_t target_ssn,
+                                         int32_t meters) const {
+    // [orig: Entity_CheckProximity @0x4f14c0 — dist <= p3, RAW positive]
+    const Entity *a = nullptr;
+    const Entity *b = nullptr;
+    float dist = 0.0f;
+    if (!trigger_pair_distance(world_, *this, ssn, target_ssn, a, b, dist))
+        return false;
+    return dist <= static_cast<float>(meters);
+}
+
+bool EntityCommands::ssn_los_clear_within(uint16_t ssn, uint16_t target_ssn,
+                                          int32_t meters) const {
+    // [orig: Entity_CheckLineOfSightInRange @0x4f15e0 — center distance gate,
+    // then a radius-0 ray between the +0x1FC offset points; <= 20 u uses the
+    // entity-aware walker @0x53b130, above it terrain/sectors @0x539910. Our
+    // port rays through the one modeled LOS seam with its chest-lift endpoint
+    // stand-in (D-AI-6); both deltas tracked in §3b.]
+    const Entity *a = nullptr;
+    const Entity *b = nullptr;
+    float dist = 0.0f;
+    if (!trigger_pair_distance(world_, *this, ssn, target_ssn, a, b, dist))
+        return false;
+    if (dist > static_cast<float>(meters)) return false;
+    if (!world_.ai) return true; // no AI/physics wired: the clear-ray default
+    const int32_t pa[3] = {static_cast<int32_t>(a->position.x * 65536.0f),
+                           static_cast<int32_t>(a->position.y * 65536.0f),
+                           static_cast<int32_t>(a->position.z * 65536.0f)};
+    const int32_t pb[3] = {static_cast<int32_t>(b->position.x * 65536.0f),
+                           static_cast<int32_t>(b->position.y * 65536.0f),
+                           static_cast<int32_t>(b->position.z * 65536.0f)};
+    return world_.ai->line_of_sight_clear(world_, pa, pb,
+                                          resolve_ssn(ssn), resolve_ssn(target_ssn));
+}
+
+bool EntityCommands::ssn_sees_within(uint16_t ssn, uint16_t target_ssn,
+                                     int32_t meters) const {
+    // [orig: Entity_CheckLineOfSight @0x4f17c0 — the sub-44 gates plus the
+    // facing cone: |wrap32(-yaw(+0x10) - int(atan2(dy, dx) * -(2^31/pi)))|
+    // <= 0x15555540 (30.0 deg), int32 wrap = shortest arc]
+    if (!ssn_los_clear_within(ssn, target_ssn, meters)) return false;
+    const Entity *a = world_.registry.get(resolve_ssn(ssn));
+    const Entity *b_ent = world_.registry.get(resolve_ssn(target_ssn));
+    if (a == nullptr || b_ent == nullptr) return false;
+    const double fdx = static_cast<double>(b_ent->position.x) - a->position.x;
+    const double fdy = static_cast<double>(b_ent->position.y) - a->position.y;
+    // The same BAM32 bearing scale the waypoint mover uses (2^31/pi).
+    const int32_t bearing = static_cast<int32_t>(
+            std::llround(std::atan2(fdy, fdx) * 683565275.5764316));
+    const int32_t heading = a->veh.yaw_seeded
+            ? a->veh.yaw_bam
+            : bam_heading_from_mission_yaw_deg(static_cast<double>(a->yaw));
+    const int32_t diff = static_cast<int32_t>(
+            static_cast<uint32_t>(heading) - static_cast<uint32_t>(bearing));
+    // Retail's cdq/xor/sub abs: INT_MIN stays negative, so a target EXACTLY
+    // 180.0 deg astern satisfies the signed <= — a witnessed quirk, carried.
+    const uint32_t mask = static_cast<uint32_t>(diff >> 31);
+    const int32_t adiff =
+            static_cast<int32_t>((static_cast<uint32_t>(diff) ^ mask) - mask);
+    return adiff <= 0x15555540; // 30.0000 deg in BAM32
+}
+
 int EntityCommands::kill_group(int group) {
     std::vector<EntityHandle> members;
     world_.registry.by_group(static_cast<uint8_t>(group), members);
@@ -832,10 +1012,30 @@ bool EntityCommands::local_player_on_gun_of_ssn(uint16_t ssn) const {
 // [orig: Entity_ApplyCommand @0x43ab60.] Resolve the target's brain through World::ai and
 // apply the sub-type command in-engine. No AI system / no brain -> no-op.
 
+namespace {
+
+// The ChangeAI command family's per-entity alert-byte arms: sub 5 -> red(2),
+// 22 -> yellow(1), 6 -> green(0) on the controller alert byte the
+// SingleAtRed/YellowAlert triggers read. Reached per-SSN from ChangeSingleAI
+// and per-member from the group/area fans, exactly like the original's
+// per-entity dispatch. [orig: Entity_ApplyCommand @0x43ab60 cases 5/22/6
+// @0x43ac2d/0x43ac8d/0x43acfd]
+void apply_alert_command_byte(AiEntity &ae, int sub_type) {
+    switch (sub_type) {
+        case 5: ae.slot.bytes()[AiSlot::kAlertByte] = 2; break;
+        case 22: ae.slot.bytes()[AiSlot::kAlertByte] = 1; break;
+        case 6: ae.slot.bytes()[AiSlot::kAlertByte] = 0; break;
+        default: break;
+    }
+}
+
+} // namespace
+
 bool EntityCommands::apply_ai_command(uint16_t ssn, int sub_type, int32_t p2, int32_t p3, int32_t p4) {
     if (!world_.ai) return false;
     AiEntity *ae = world_.ai->for_handle(resolve_ssn(ssn));
     if (!ae) return false;
+    apply_alert_command_byte(*ae, sub_type);
     ai_apply_command(ae->brain, sub_type, p2, p3, p4);
     return true;
 }
@@ -856,7 +1056,11 @@ int EntityCommands::apply_group_ai_command(int group, int sub_type, int32_t p2, 
     int n = 0;
     for (EntityHandle h : members) {
         AiEntity *ae = world_.ai->for_handle(h);
-        if (ae) { ai_apply_command(ae->brain, sub_type, p2, p3, p4); ++n; }
+        if (ae) {
+            apply_alert_command_byte(*ae, sub_type);
+            ai_apply_command(ae->brain, sub_type, p2, p3, p4);
+            ++n;
+        }
     }
     return n;
 }
@@ -875,7 +1079,11 @@ int EntityCommands::apply_area_ai_command(int zone_area_id, int team, int sub_ty
         const Entity *e = world_.registry.get(h);
         if (!e || e->team != static_cast<uint8_t>(team)) continue;
         AiEntity *ae = world_.ai->for_handle(h);
-        if (ae) { ai_apply_command(ae->brain, sub_type, p2, p3, p4); ++n; }
+        if (ae) {
+            apply_alert_command_byte(*ae, sub_type);
+            ai_apply_command(ae->brain, sub_type, p2, p3, p4);
+            ++n;
+        }
     }
     return n;
 }
