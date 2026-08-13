@@ -259,6 +259,13 @@ struct HudFrameState {
 	int friendly_tag_mode = 2;
 	int32_t fog_dist_q16 = INT32_MAX;
 	int speaking_level255 = 0;
+	// The HUD color scheme index (0 white / 1 green / 2 hudpos hud_textcolor /
+	// 3 light blue / 4 yellow / 5 salmon). Selects the master overlay color the
+	// text elements draw with and the friendly-tag good-tier source [orig:
+	// cfg_hud_color_index, config token "hud_color_index" default 2 @0x54d2a6;
+	// applied to the live index @0x55152f; cycled 0..5 by input action case 10
+	// @0x49afc7].
+	int hud_color_index = 2;
 };
 
 struct HudDrawList {
@@ -321,6 +328,10 @@ private:
 
 	float sx(float design_x, float surface_w) const;
 	float sy(float design_y, float surface_h) const;
+	// The master overlay color for the frame: the scheme table entry at the
+	// state's hud_color_index, with entry 2 sourced live from the hudpos
+	// hud_textcolor (see the table in hud_frame.cpp).
+	uint32_t active_color(const HudFrameState &state) const;
 	void emit_rect(float x0, float y0, float x1, float y1, uint32_t color,
 			bool filled, int32_t texture = kHudTexNone, bool additive = false);
 	void emit_wire_rect(float x0, float y0, float x1, float y1, uint32_t color);

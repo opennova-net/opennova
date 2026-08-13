@@ -408,6 +408,20 @@ func test_friendly_tags_draw_modes() -> void:
 	assert_true(is_instance_valid(hud), "friendly tags draw safely")
 
 
+# The HUD color-scheme index round-trips and clamps to the retail cycle range
+# 0..5. [orig: input action case 10 @0x49afc7 wraps past 5; config token
+# "hud_color_index" default 2 @0x54d2a6]
+func test_hud_color_index_round_trips_and_clamps() -> void:
+	var hud := _make_overlay()
+	assert_eq(hud.get_hud_color_index(), 2, "boot default is scheme 2 (hudpos)")
+	hud.set_hud_color_index(5)
+	assert_eq(hud.get_hud_color_index(), 5, "the index round-trips")
+	hud.set_hud_color_index(99)
+	assert_eq(hud.get_hud_color_index(), 5, "the setter clamps to 0..5")
+	hud.set_hud_color_index(-3)
+	assert_eq(hud.get_hud_color_index(), 0, "the setter clamps negatives")
+
+
 # The weapon heat bar draws at nonzero heat inside the HUDHEAT rect and stays
 # hidden (draw-safe) at zero — the original's hudInfo+60 gate.
 # [orig: HUD_DrawWeaponHeatBar @0x599700 gate @0x59970a]

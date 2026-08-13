@@ -361,6 +361,84 @@ void test_compiler_label_fonts(const fnt_font_t *font) {
 	CHECK(all_page0, "absent label fonts fall back to the hudpos font");
 }
 
+// The hud_color_index scheme swap (the D-HUD-20 good-tier residue + the
+// master overlay color). [orig: HUD_InitTeamColorTable @ 0x51f240 table
+// immediates; the good-tier index test @ 0x5a3c9e (== 2 -> tagcolor_good,
+// else g_hudColorTable[index]); the attach labels' g_hudActiveColor reads
+// @ 0x5a362d; table[2] sourced per frame from the hudpos hud_textcolor
+// @ 0x5a8100]
+void test_compiler_hud_color_schemes(const fnt_font_t *font) {
+	HudFrameCompiler compiler;
+	HudLayout layout;
+	compiler.configure(layout, font);
+
+	HudFrameState state;
+	opennova::hud::HudFriendlyTag tag;
+	tag.screen_x = 200.0f;
+	tag.screen_y = 100.0f;
+	tag.dist_q16 = 100 << 16;
+	tag.entity_id = 24;
+	state.friendly_tags.push_back(tag);
+
+	// Scheme 1 (green): the GOOD tier swaps off tagcolor_good onto table[1].
+	state.hud_color_index = 1;
+	const HudDrawList &green = compiler.compile(state, 1024.0f, 768.0f);
+	const uint32_t green_tier = (217u << 24) | (0xFF00FF00u & 0xFFFFFFu);
+	CHECK(!green.glyphs.empty() &&
+					green.glyphs[0].color ==
+							opennova::hud::half_bright_keep_alpha(green_tier),
+			"scheme 1 puts the good tier on the table green");
+
+	// The middle tier never scheme-swaps.
+	state.friendly_tags[0].health_ratio_fp16 = 0x8000;
+	const HudDrawList &mid = compiler.compile(state, 1024.0f, 768.0f);
+	const uint32_t middle = (217u << 24) | (layout.tag_middle & 0xFFFFFFu);
+	CHECK(!mid.glyphs.empty() &&
+					mid.glyphs[0].color ==
+							opennova::hud::half_bright_keep_alpha(middle),
+			"the middle tier ignores the scheme");
+	state.friendly_tags[0].health_ratio_fp16 = 0x10000;
+
+	// Scheme 2 (the default) keeps tagcolor_good — the retail identity.
+	state.hud_color_index = 2;
+	const HudDrawList &def = compiler.compile(state, 1024.0f, 768.0f);
+	const uint32_t good = (217u << 24) | (layout.tag_good & 0xFFFFFFu);
+	CHECK(!def.glyphs.empty() &&
+					def.glyphs[0].color ==
+							opennova::hud::half_bright_keep_alpha(good),
+			"scheme 2 keeps the hudpos tagcolor_good");
+
+	// The attach labels ride the master overlay color: the wire box frames at
+	// the raw scheme color (light blue, scheme 3).
+	state.friendly_tags.clear();
+	opennova::hud::HudAttachLabel label;
+	label.screen_x = 300.0f;
+	label.screen_y = 60.0f;
+	label.text = "Sit";
+	label.nearest = true;
+	state.attach_labels.push_back(label);
+	state.hud_color_index = 3;
+	const HudDrawList &blue = compiler.compile(state, 1024.0f, 768.0f);
+	bool saw_blue_box = false;
+	for (const opennova::hud::HudQuad &q : blue.quads) {
+		saw_blue_box = saw_blue_box || q.color == 0xFF80A0FFu;
+	}
+	CHECK(saw_blue_box, "scheme 3 draws the attach box light blue");
+
+	// Scheme 2 tracks the LIVE hudpos hud_textcolor (the per-frame table[2]
+	// refresh), alpha forced FF like the init path.
+	HudLayout tinted = layout;
+	tinted.hud_text = 0x00123456u;
+	compiler.configure(tinted, font);
+	state.hud_color_index = 2;
+	const HudDrawList &track = compiler.compile(state, 1024.0f, 768.0f);
+	bool saw_tinted_box = false;
+	for (const opennova::hud::HudQuad &q : track.quads) {
+		saw_tinted_box = saw_tinted_box || q.color == 0xFF123456u;
+	}
+	CHECK(saw_tinted_box, "scheme 2 sources hud_textcolor live, alpha-forced");
+}
+
 } // namespace
 
 int main() {
@@ -372,6 +450,7 @@ int main() {
 	test_compiler_crosshair(&font);
 	test_compiler_friendly_tags(&font);
 	test_compiler_label_fonts(&font);
+	test_compiler_hud_color_schemes(&font);
 	fnt_free(&font);
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);

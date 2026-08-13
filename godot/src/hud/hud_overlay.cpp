@@ -103,6 +103,10 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::get_friendly_tag_mode);
 	ClassDB::bind_method(D_METHOD("set_friendly_tag_env", "fog_dist_q16", "speaking_level"),
 			&HudOverlay::set_friendly_tag_env);
+	ClassDB::bind_method(D_METHOD("set_hud_color_index", "index"),
+			&HudOverlay::set_hud_color_index);
+	ClassDB::bind_method(D_METHOD("get_hud_color_index"),
+			&HudOverlay::get_hud_color_index);
 	ClassDB::bind_method(D_METHOD("get_draw_list_stats"), &HudOverlay::get_draw_list_stats);
 
 	BIND_CONSTANT(MIN_CROSSHAIR_STYLE);
@@ -522,6 +526,17 @@ void HudOverlay::set_friendly_tag_mode(int p_mode) {
 
 int HudOverlay::get_friendly_tag_mode() const {
 	return state_.friendly_tag_mode;
+}
+
+void HudOverlay::set_hud_color_index(int p_index) {
+	// 0..5 like the retail cycle [orig: input action case 10 @0x49afc7 wraps
+	// past 5 to 0; config token "hud_color_index" default 2 @0x54d2a6].
+	state_.hud_color_index = CLAMP(p_index, 0, 5);
+	queue_redraw();
+}
+
+int HudOverlay::get_hud_color_index() const {
+	return state_.hud_color_index;
 }
 
 void HudOverlay::set_friendly_tag_env(int p_fog_dist_q16,
