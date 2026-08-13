@@ -2499,16 +2499,21 @@ The fire routine IS the state-17 tick. Corrections to prior session notes: `0x46
 
 ### 16.2 Target acquisition — the candidate feed is inside `AI_FindBestTargetB @ 0x466f60`
 
-P2 ported the scoring core over an injected candidate list; the feed is now witnessed —
-the function iterates `g_pool_list @ 0xA892E0` directly. Outer loop = the profile's four
-weapon-slot target classes (`profile+40+4*i` ∈ 0..3), each gated by a per-class enable:
+P2 ported the scoring core over an injected candidate list; the feed — the class-driven
+pool walk over `g_pool_list @ 0xA892E0` — is witnessed and PORTED 2026-08-13
+(`AiSystem::acquire_target`, `engine/runtime/world/ai_combat.cpp`; ctests `ai`,
+`promote`). Outer loop = the profile's four weapon-slot class slots (`profile+40+4*i`,
+each holding a class id 0..3), each class gated by its priority word (`+80+4*class`,
+zero → skip via `LABEL_73`), each selecting pools + sub-filter legs
+(the sub-filter reads corrected 2026-08-13 from the full decompile — the earlier
+table had class 0's helo leg attributed to class 1):
 
-| class | enable | pools scanned |
+| class | gate | pools + sub-filter |
 |---|---|---|
-| 0 | `profile+80` | pool 1, then pool 0 with the building filter (`flags & 0x100`; local player excluded when `dword_24C1930 & 0x800`) |
-| 1 | `profile+84` | pool 1 (vehicles; brained candidates only if their `profile+16 == 1`) |
-| 2 | `profile+88` | pool 0 (organics; requires `!flags & 0x100`, no brain or `profile+16 != 1`) |
-| 3 | `profile+92` | pool 2 |
+| 0 (air) | `profile+80` | pool 1 accepting no-brain OR brain-profile `+16 == 1` (HELO) `@ 0x46715d`; then pool 0 accepting `flags & 0x100` (the Player class bit, §28) with the LOCAL player excluded when `dword_24C1930 & 0x800` `@ 0x46714b-0x467155` |
+| 1 (ground) | `profile+84` | pool 1, else-leg filter: `!(flags & 0x100)` AND (no brain or brain-profile `+16 != 1`) `@ 0x467169-0x46717e` |
+| 2 (organics) | `profile+88` | pool 0, the same else-leg filter |
+| 3 (decorations) | `profile+92` | pool 2; case 3 never assigns `target_vehicles` — it INHERITS the previous slot's value (function-entry 0), so a prior class-0 slot flips its filter to the helo leg (inert for brainless, non-Player buildings, but the quirk is real and the port carries it) `@ 0x467048-0x46705a` |
 
 Entry gates: no brain → null; own team byte (`+354`) == 0 requires `AiSlot[1] & 0x200`;
 `g_spawn_success_gate @ 0x24C1928` nonzero → null. Per-candidate gates, in order:
@@ -2525,6 +2530,50 @@ refcount-decay, each stage 16.16 with `+0x8000` rounding (as ported); range base
 `Entity_CheckMutualLineOfSight @ 0x539be0` = `Entity_ComputeWeaponFireOrigin @ 0x43b4b0`
 × 2 + `Physics_RaycastTerrainAndSectors @ 0x539910` (terrain + sector raycast, flag 0;
 internals = open item, §16.5).
+
+### 16.2a The class walk's data supply (witnessed 2026-08-13, ported with the feed)
+
+- **The `+40..+52` slot-class writer** `[orig: AIProfile_LoadOrFind @ 0x45fd80]`: the
+  248-byte profile record is memset-0 on allocation (128-record table `byte_AE577C`,
+  count `dword_AED37C`), the name copied in, `File_ParseASCIIFile` runs
+  `AIProfile_ParseProperty @ 0x45de70` over the `.aip`, then the four class ids
+  {0,1,2,3} are qsorted by their priority words (`CompareFunction @ 0x455d90` =
+  `a[1] - b[1]`, ascending; MSVC qsort insertion-sorts ≤ 8 entries — stable) and stored
+  REVERSED into `+40/+44/+48/+52` `@ 0x45fed9-0x45ff04` — the walk runs
+  priority-DESCENDING. The sort keys load only for `profile+16` (type) ∈ {1 HELO,
+  2 GROUND} `@ 0x45fe7f/0x45fe9a`; other types keep all-zero keys → tie order
+  {3,2,1,0}. **A missing `.aip` therefore leaves an all-zero record: zero priorities
+  gate every class off, and the brain acquires nothing — witnessed retail behavior for
+  unresolved profiles** (the shipped drivable transports author `priority_* 0`
+  explicitly, same outcome).
+- **The profile is never null**: `Entity_InitVehicleAI @ 0x460200` allocates the brain
+  from the 812-byte pool (`unk_AED380`), stores `brain+4 = AIProfile_LoadOrFind(name)`
+  unconditionally, and scans the model's userpoints for `prim`/`bullet01`/`bullet02`/
+  `flare` bone lists (§17.9's muzzle tables).
+- **The `+422/+420` per-candidate cap writer** `[orig: Entity_InitFromModel @ 0x40dc30,
+  the word copies @ 0x40e136-0x40e15d]`: `entity+422 = itemDef+376` (**radarSig**,
+  the primary-FOV cap) and `entity+420 = itemDef+378` (**heatSig**, secondary) —
+  the items.def `radarsig`/`heatsig` u16 keys (itemdef-re.md +0x178/+0x17A; the JOX
+  corpus authors them on 38/39 persons and 39/39 vehicles). An unauthored (0)
+  signature makes the entity undetectable to this feed. Ported: `engine/formats/def`
+  parses the pair, the item-traits sweep stamps `Entity::radar_sig/heat_sig`
+  (`engine/runtime/simassets/item_traits.cpp`), the feed supplies them as the caps.
+- **brain[37] (`+148`) priority-target producers**: the only witnessed writers are the
+  savegame/record restore `Entity_CopyVehicleDefToAIComp @ 0x45db30` (`brain+148 =
+  EntityPool_GetPtrFromHandle(record+476)`, beside `+152 = handle(record+480)`
+  `@ 0x45dbb3-0x45dbc5`) and the release/clear walkers (`Entity_ClearAllReferences
+  @ 0x4656bd`-family nulls). A flat-displacement sweep of every `[reg+94h]` store
+  found NO live gameplay producer — an indexed-store writer may exist unswept
+  (open follow-up below). The consumer is ported (packed+1 rebase in
+  `AiBrain::kPriorityTarget`); with no producer the slot stays null, as today.
+  (The `Entity_SetWaypointByTeam @ 0x43cd20` `+0x94` writes are the CONTROLLER
+  struct at `entity+0x68` — waypoint type/index at controller `+0x8C..+0x98` —
+  not the brain; the two structs were disambiguated this session.)
+- **Open follow-ups**: the brain[37] live producer (indexed-store sweep; check the
+  WAC `ai` command family); the `dword_24C1930` bit `0x800` writer (an MP-rules
+  word — the reimpl seam `World::ai_rules_skip_local_player` defaults clear and the
+  net wire into it is pending); variant A `AI_FindBestTarget @ 0x465a50` remains
+  unwitnessed (§16.5 item 7).
 
 ### 16.3 Target bookkeeping
 
@@ -2796,7 +2845,9 @@ D-SND-10..15). All plays go through `Entity_GetProfileSlotSound @ 0x528300`
   the "dip" is TO FOOT LEVEL, not a water constant; restored after the play).
   Slot pick in order: `Env_WaterHeightFixed != 0 && dipped z < it` -> 23; the
   `entity+0x28 groundEntity` link -> 21/22; `Terrain_GetSurfaceTypeAtPosition
-  @ 0x606510 == 3` -> 19/20 (snow); else 17/18.
+  @ 0x606510 == 3` -> 19/20 (snow); else 17/18. The OBJ leg is wired to the
+  live `Entity::ground_target` as of 2026-08-13 (D-SND-11 FIXED,
+  lwf-dbf-sound-re.md).
 - **Landing** (org1 `@ 0x4bf87f-0x4bf89f`, org2 `@ 0x4b7f7c-0x4b7fa1`): on the
   airborne-flag(0x2000)-clear edge, dead (Flags&2) -> slot 15 `SSFallDead`
   else 16 `SSFallAlive`, at the entity origin — the pair the earlier
