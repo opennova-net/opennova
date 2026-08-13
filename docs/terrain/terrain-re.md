@@ -276,7 +276,8 @@ sampled at t1 by samplers 1/4/5, blended by the t2 blendmap's RGB — the
 3-way splat — then the colormap lighting chain ×4),
 `PolyTrn_PS14SplatNormalMap` (splat + dp3), `PolyTrn_PSShadowBasic` /
 `PolyTrn_PSShadowNormalMap` (the legacy name is misleading: for an underwater
-camera, t3 = `Water_NoiseColorTexture`; light scale `4·t3²·t0.a`),
+camera, t3 = `Water_NoiseColorTexture`; light scale
+`saturate(4·t3²)·t0.a` — full sources transcribed 2026-08-13, below),
 `PolyTrn_PSDepthAlpha` (alpha = t0.b via `dp3 c5=(0,0,1)`, rgb = 0 — the
 depth/alpha extract pass). The c0/c1 lighting constants are CLOSED (REN-5):
 **c0 = the SKY block, c1 = the LIGHT block** (both `[0]` render colors ÷255)
@@ -383,6 +384,26 @@ selects `PolyTrn_PSShadowBasic` / `PolyTrn_PSShadowNormalMap`
 (`render_terrain_sector_batch @ 0x609786..0x6097D6`). These are therefore
 underwater animated water-noise/wave-shadow variants, not receivers for static
 or dynamic model shadows.
+
+**PSShadow\* sources transcribed (2026-08-13; strcpy sites @ 0x605315 /
+@ 0x605329 inside `compile_terrain_pixel_shaders @ 0x605260`).** Both are
+ps.1.1, `tex t0..t3`. `PolyTrn_PSShadowBasic` in instruction order:
+`mul_x4 r1.rgb, t3, t3` (the noise squared, ×4, **saturated by the ps.1.1
+register clamp** — white noise caps at 1.0, mid-gray 0.5² × 4 = the neutral
+1.0), `mul r1.rgb, r1, t0.a` (× the tile DOT3 alpha), `mad_d2 r0.rgb, r1, c1,
+c0` (the family light chain with X = that scale), then `mul_x2 r0.rgb, r0, t1`
+and `mul_x4 r0.rgb, r0, t0`, `+mov r0.a, t0.a`.
+`PolyTrn_PSShadowNormalMap` is identical plus `dp3 r1.rgb, t1, t2` /
+`mul_x2 r0.rgb, r0, r1` between the light chain and the t0 multiply (the
+normal-map factor survives underwater). Two consequences the one-line formula
+hid: (1) the ×4 SATURATES — the faithful scale is `min(4·t3², 1)·t0.a`,
+not an unclamped 4·t3²; (2) underwater the ps.1.4 three-way splat COLLAPSES —
+stage/sampler 1 supplies the single detail multiply (`t1` in both Shadow
+variants) and samplers 4/5 plus the t2 blend weights drop out entirely
+(the t2 slot feeds only the NM dp3). The Shadow tail also multiplies t1 (×2)
+before t0 (×4) — the reverse of `PSBasic` — same product, different
+intermediate clamp points; not visually significant for ≤1 operands but
+transcribed for the letter.
 
 `dword_319FB8C` is also not shadow state. Its complete writer set stores one:
 `sub_6040A0 @ 0x6040DD`, `terrain_render_visible_sectors @ 0x60910C`,

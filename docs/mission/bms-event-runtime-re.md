@@ -247,9 +247,19 @@ Dispositions after the 2026-07-05 grill (§3a carries the witnesses):
   channel mover and the shared SM/vehicle route mover now apply the witnessed
   SetBitB(group) then SetBitA(SSN) pair to those live visited matrices, so
   GroupAtWaypoint/SingleAtWaypoint can advance missions from actual NPC motion.
-  **Residuals:** cat-1 sub 11 needs the held-object link (entity +616; its
-  cat-2 sibling SingleHoldingGroup shares it); the cat-2 alert/count subs
-  (3/6/9/12/14) and the 42-45 distance/LOS family stay unwitnessed. (The
+  **Cat-2 close-out grilled 2026-08-13 (§3b carries the witnesses) and PORTED:**
+  the alert pair (subs 3/14, the per-entity `aiRuntime+0x88` byte), the health
+  family (6/9/12 — health thresholds, not unit counts), the holding pair
+  (cat-1/cat-2 sub 11 over the carried-object link `mountedChild` entity
+  +0x268), and the 42-45 chain/distance/LOS family (all raw-positive senses;
+  the authored negation bit does the flipping). **Residuals:** the
+  `mounted_child` PRODUCERS ride their owning-system ports — every witnessed
+  writer is the CTF/carryable pickup-drop-capture family
+  (`Entity_ProcessWaypointInteraction @0x4ad820`), the joiner-side net appliers
+  (msgs 0x0A/0x2F), or the savegame restore (§3b item 4) — so the holding
+  conditions are condition-complete but producer-less in our sim until the
+  carry system lands; the sub-45 facing cone reads entity yaw, exact only for
+  entities whose yaw our sim advances. (The
   acquisition/fire-time SEES+TARGETED quads LANDED 2026-07-16 with D-AI-3 —
   `AiSystem::apply_engage_relations`, live at the state-16/17 engage and
   infantry perception sites — the older "ride the combat pass" clause here
@@ -335,7 +345,105 @@ transposed G→S rows; sub 3/14 = alert == red/yellow; sub 4 `live <= 0`;
 sub 5 `live > 0`; sub 6 `init - live >= p2`; sub 9 `init == live`;
 sub 12 `live >= p2`; sub 7 = visited-B bit [p1][p2] bit p3; sub 10 = the live
 zone AABB test (@0x453763, already ported); sub 11 = exists pool-0 entity of
-group p1 holding an object with type word p2 (`sub_43C870 @0x43c870`).
+group p1 holding an object of group p2 (`TriggerGroup_AnyMemberHoldingItemGroup
+@ 0x43c870` — the compared word on the HELD object is its commandGroup +0x11C,
+not a "type word"; corrected by the 2026-08-13 grill, §3b).
+
+## 3b. 2026-08-13 grill — the cat-2 single-state family + the held-object link
+
+Closes every unwitnessed cat-2 sub. The full cat-2 switch (@0x4537f8, the
+Single mirror of @0x45364a) was decompiled end to end: subs 1/2/13/15/16/17 =
+the S-family matrix tests (§3a, keyed by raw SSN), 4/5 = `Entity_IsAliveByBmsRef
+@ 0x43e640` (already ported), 7 = visited-A, 10 = the zone test, and the rest
+below. Sub 8 is ABSENT from the jump table (default → false). **No case
+negates its helper — each raw helper result IS the trigger truth**; the
+negated flavor of our enum names (`SingleFartherThan`, `SingleHasNoLOS`,
+`SingleDoesNotSeeOrFarther`) is authoring-display convention only (§8.2), and
+the port must store the RAW positive sense and let the authored chain-negation
+bit flip it.
+
+1. **Alert pair — subs 3/14** = `Entity_IsSsnAtAlertLevel @ 0x43e780` (renamed
+   this session from sub_43E780) with level 2/1: scan pools 0-1 for entity
+   `+0x7C == ssn`; `aiRuntime` (entity +0x68) null → false; else the
+   per-entity alert byte `aiRuntime+0x88 == level` (2 red / 1 yellow /
+   0 green). This is a THIRD alert store beside the group record (§3a) and the
+   brain alert (world record §17): a full writer sweep of `+0x88` byte stores
+   found the producers — BMS spawn seed (`Entity_SpawnFromBMSRecord
+   @ 0x40eea4`, the authored alert), the ChangeAI command arms
+   (`Entity_ApplyCommand @ 0x43ab60`: case 5 → 2 @0x43ac2d, case 22 → 1
+   @0x43ac8d, case 6 → 0 @0x43acfd; reached per-SSN from ChangeSingleAI and
+   fanned per-member over pools 2/0/1 by commandGroup from ChangeGroupAI
+   `Entity_HandleAlertCommand @ 0x43cff7`, which then also stamps the group
+   record), the alert-state event handler (`Entity_HandleAlertStateEvent
+   @ 0x43dee0`: 2/0/1 @0x43df8e/0x43dfa1/0x43dfb2), damage triggers → 2
+   (@0x4073db, @0x40775e), `Entity_AlertNearbyAllies @ 0x46558a` → 2, the AI
+   death/destruction transitions → 2 (@0x465f7e, @0x466b4c and the
+   AI_TransitionToDeath family), the ground combat/evade state enters
+   (@0x467665, @0x46741f), the idle/patrol resets (@0x4578f3, @0x457a83,
+   @0x457f30, @0x4580a0), and HeliLift pickup → 2 (@0x45269e, @0x4526e4).
+2. **Health family — subs 6/9/12** (health, not unit counts; signed i16
+   `health` at entity +0x11E, `healthMax` at itemDef +0x17C, def ptr at entity
+   +0x20; scans pools 0-1 by +0x7C; SSN 0 or not found → false):
+   sub 6 `Entity_HasDamageCapacity @ 0x43e3d0` = `health <= healthMax - p2`
+   ("has lost ≥ p2 HP"; NO null-def guard — reads def+0x17C unconditionally;
+   no alive gate, so a corpse keeps satisfying it); sub 9 `Entity_HasFullHealth
+   @ 0x43e470` = `health >= healthMax` (null def → false); sub 12
+   `Entity_HasHealthAboveThreshold @ 0x43e350` = `health >= p2` (def not
+   involved).
+3. **Holding pair — sub 11 both cats** over the carried-object link
+   `mountedChild` (entity +0x268) and its +0x11C commandGroup compare:
+   cat-2 `Entity_IsSsnHoldingItemGroup @ 0x43e2f0` (renamed from sub_43E2F0) =
+   pool-0 scan by +0x7C, `mountedChild` null → false, else
+   `mountedChild->commandGroup == p2`; cat-1
+   `TriggerGroup_AnyMemberHoldingItemGroup @ 0x43c870` (renamed from
+   sub_43C870) = walk pool 0, gate `ItemTypeIndex` (+0x1C) nonzero, first
+   entity with `commandGroup == p1 && mountedChild->commandGroup == p2` → true.
+4. **The +0x268 writer/clear census** (re-verifying the ledger's "write-sites
+   CLOSED"): set by `Entity_AttachToVehicle @ 0x43c130` (parent+0x268 = child,
+   child Flags |= 1 @0x43c14a, child back-link +0x170 = parent; flag defs
+   4091/4093/4095 additionally take the CTF return-timer/death-broadcast leg;
+   other defs draw the carry progress bar) — callers: the authority pickup
+   `Entity_ProcessWaypointInteraction @ 0x4ad820` (via `Entity_TryAttachToVehicle
+   @ 0x43c1f0`; requires `Flags & 0x100`, no current child, and target def
+   `attrib & 0x2000` carryable — also the flag-return and capture-zone logic
+   for marker defs 0xFFB/0xFFD/0xFFF/0x1002/0x1004/0x1006/0x1007), and the
+   joiner-side net appliers `NapiNPClientMsg_0x00A @ 0x42fec0` /
+   `NapiNPClientMsg_0x02F @ 0x430e10`. Cleared by `Entity_DropCarriedObject
+   @ 0x439df0` (renamed from the misnomer Entity_InitSpawnedChild — nulls the
+   link and back-link, clears child Flags bit0/0x800000, terrain-snaps, tosses
+   with the dropper's yaw, plays the def-name drop sound, authority broadcasts),
+   the capture-zone clear @0x4ada07, and `Entity_Destroy @ 0x43ea03`. The
+   savegame restore `SaveFile_ApplyEntityRecord @ 0x4abb00` (renamed from
+   sub_4ABB00; caller `SaveFile_ReadOrWriteEntityRecord @ 0x4ac0c0`) resolves
+   the serialized handle back into +0x268. Non-entity `+0x268` hits in the
+   sweep (NapiNPProtocol_Create, CPreProcessor_*, the 0x4aab30 SetFilePointer
+   orphan blob) are other structs.
+5. **Chain/distance/LOS family — subs 42-45.** All four resolve BOTH params
+   SSN → packed handle via `EntityPool_FindByNetId @ 0x4f0a20` (pools 0-3,
+   low-16-bit compare of +0x7C, 0xFFFF when absent), then gate BOTH entities
+   on `ItemTypeIndex` (+0x1C) nonzero; any failure → false. p3 is whole
+   meters, shifted `<< 16` at the call sites (@0x45387f, @0x4538c9,
+   @0x453913).
+   - sub 42 `Entity_IsOnTopOfChain @ 0x4f19a0` (renamed from the misnomer
+     Entity_IsInVehicleChain): follows A's groundEntity chain (+0x28 — the
+     D-SND-11 `ground_target` link) up to 3 hops; true iff any hop == B.
+   - sub 43 `Entity_CheckProximity @ 0x4f14c0`: float euclidean over the raw
+     16.16 center deltas, clamped to ≤ 0x7FFF0000 (`flt_7C19E0` — the 16.16
+     max, an ftol overflow guard, NOT a min-distance clamp), truncated;
+     true iff `dist <= p3`.
+   - sub 44 `Entity_CheckLineOfSightInRange @ 0x4f15e0` (renamed from the
+     misnomer Entity_DrawConnectionLine): center distance > p3 → false (all
+     failure paths `xor eax`); else a radius-0 ray between the two entities'
+     `+0x1FC/+0x200/+0x204` offset points — `p3 <= 20 u` uses the
+     entity-aware `Entity_CheckLineOfSightTerrainAndEntities @ 0x53b130`,
+     `> 20 u` the terrain/sector-only `Physics_RaycastTerrainAndSectors
+     @ 0x539910` — returning the ray's clear flag.
+   - sub 45 `Entity_CheckLineOfSight @ 0x4f17c0` ("sees") = sub 44 with the
+     distance measured over the OFFSET points instead of the centers, plus a
+     facing gate after the ray: true iff
+     `|int32(-yaw - int(atan2(dy, dx) * -(2^31/pi)))| <= 0x15555540` (±30.0°,
+     int32 wrap = shortest arc; yaw = entity +0x10, the binary-angle heading;
+     dy/dx = the offset-point deltas; scale `dbl_7C57B8 = -(2^31/pi)`).
 
 ## 4. Correspondence map
 
@@ -570,7 +678,7 @@ now with the witnessed neuter semantics rather than an OOB read.
 | 7 | GroupAtWaypoint | `RelationMatrix_TestBitB(p1,p2,p3)` | GROUP | GROUP/? | BIT/wp | low |
 | 9 | GroupIntact | `init[p1]==count[p1]` | GROUP | — | — | high |
 | 10 | GroupIsWithinArea | bounds, zone=`[p2]`, team=p1 | GROUP | **ZONE_REF (index)** | — | high |
-| 11 | GroupHoldingGroup | `sub_43C870(p1,p2)` | GROUP | GROUP | — | med |
+| 11 | GroupHoldingGroup | `TriggerGroup_AnyMemberHoldingItemGroup(p1,p2) @ 0x43c870` — pool-0 member of group p1 with mountedChild->commandGroup == p2 (§3b) | GROUP | GROUP | — | high |
 | 12 | GroupHasMoreUnits | `count[p1]>=p2` | GROUP | COUNT | — | high |
 | 13 | GroupHasShotGroup | `TeamMatrix_TestCanSee(p1,p2)` | GROUP | GROUP | — | med |
 | 14 | GroupAtYellowAlert | `alert[p1]==1` | GROUP | — | — | high |
@@ -584,24 +692,28 @@ now with the witnessed neuter semantics rather than an OOB read.
 |---|---|---|---|---|---|---|
 | 1 | SingleSeesGroup | `TeamMatrix_TestEnemyBit(p1,p2)` | ENTITY/team | GROUP | — | low |
 | 2 | SingleHasTargetedGroup | `TeamMatrix_TestDead(p1,p2)` | ENTITY/team | GROUP | — | low |
-| 3 | SingleAtRedAlert | `sub_43E780(p1,2)` | ENTITY | — | — | high |
-| 4 | SingleDestroyed | `!Entity_IsAliveByBmsRef(p1)` | ENTITY | — | — | high |
-| 5 | SingleAlive | `Entity_IsAliveByBmsRef(p1)` | ENTITY | — | — | high |
-| 6 | SingleHasLostMoreUnits | `Entity_HasDamageCapacity(p1,p2)` | ENTITY | THRESHOLD | — | high |
+| 3 | SingleAtRedAlert | `Entity_IsSsnAtAlertLevel(p1,2) @ 0x43e780` — aiRuntime+0x88 == 2 (§3b) | ENTITY | — | — | high |
+| 4 | SingleDestroyed | `!Entity_IsAliveByBmsRef(p1)` @0x453995 | ENTITY | — | — | high |
+| 5 | SingleAlive | `Entity_IsAliveByBmsRef(p1)` @0x4539a1 | ENTITY | — | — | high |
+| 6 | SingleHasLostMoreUnits | `Entity_HasDamageCapacity(p1,p2) @ 0x43e3d0` — `health <= max - p2` (§3b) | ENTITY | HP LOST | — | high |
 | 7 | SingleAtWaypoint | `RelationMatrix_TestBitA(p1,p2,p3)` | ENTITY/team | ? | BIT | low |
-| 9 | SingleIntact | `Entity_HasFullHealth(p1)` | ENTITY | — | — | high |
+| 9 | SingleIntact | `Entity_HasFullHealth(p1) @ 0x43e470` — `health >= max` (§3b) | ENTITY | — | — | high |
 | 10 | SingleIsWithinArea | bounds, bmsRef=p1, zone=`[p2]` | ENTITY | **ZONE_REF (index)** | — | high |
-| 11 | SingleHoldingGroup | `sub_43E2F0(p1,p2)` | ENTITY | GROUP | — | med |
-| 12 | SingleHasMoreUnits | `Entity_HasHealthAboveThreshold(p1,p2)` | ENTITY | THRESHOLD (health) | — | high |
+| 11 | SingleHoldingGroup | `Entity_IsSsnHoldingItemGroup(p1,p2) @ 0x43e2f0` — mountedChild(+0x268)->commandGroup == p2 (§3b) | ENTITY | GROUP | — | high |
+| 12 | SingleHasMoreUnits | `Entity_HasHealthAboveThreshold(p1,p2) @ 0x43e350` — `health >= p2` (§3b) | ENTITY | HP | — | high |
 | 13 | SingleHasShotGroup | `TeamMatrix_TestAlive(p1,p2)` | ENTITY/team | GROUP | — | low |
-| 14 | SingleAtYellowAlert | `sub_43E780(p1,1)` | ENTITY | — | — | high |
+| 14 | SingleAtYellowAlert | `Entity_IsSsnAtAlertLevel(p1,1) @ 0x43e780` — aiRuntime+0x88 == 1 (§3b) | ENTITY | — | — | high |
 | 15 | SingleHasTargetedSingle | `TeamMatrix_TestSpottedBy(p1,p2)` | ENTITY | ENTITY | — | low |
 | 16 | SingleSeesSingle | `TeamMatrix_TestEnemy(p1,p2)` | ENTITY | ENTITY | — | low |
 | 17 | SingleHasShotSingle | `TeamMatrix_TestAttackedBy(p1,p2)` | ENTITY | ENTITY | — | low |
-| 42 | SingleOnTopOf | `Entity_IsInVehicleChain(p1,p2)` | ENTITY | ENTITY | — | high |
-| 43 | SingleFartherThan | `Entity_CheckProximity(p1,p2,p3<<16)` | ENTITY | ENTITY | **DISTANCE_M** | high |
-| 44 | SingleHasNoLOS | `Entity_DrawConnectionLine(p1,p2,p3<<16)` | ENTITY | ENTITY | DISTANCE_M | high |
-| 45 | SingleDoesNotSeeOrFarther | `Entity_CheckLineOfSight(p1,p2,p3<<16)` | ENTITY | ENTITY | DISTANCE_M | high |
+| 42 | SingleOnTopOf | `Entity_IsOnTopOfChain(hA,hB) @ 0x4f19a0` — groundEntity(+0x28) chain ≤3 hops (§3b) | ENTITY | ENTITY | — | high |
+| 43 | SingleFartherThan | `Entity_CheckProximity(hA,hB,p3<<16) @ 0x4f14c0` — RAW true iff dist <= p3 (§3b) | ENTITY | ENTITY | **DISTANCE_M** | high |
+| 44 | SingleHasNoLOS | `Entity_CheckLineOfSightInRange(hA,hB,p3<<16) @ 0x4f15e0` — RAW true iff in range AND ray clear (§3b) | ENTITY | ENTITY | DISTANCE_M | high |
+| 45 | SingleDoesNotSeeOrFarther | `Entity_CheckLineOfSight(hA,hB,p3<<16) @ 0x4f17c0` — RAW true iff sub-44 AND ±30° facing cone (§3b) | ENTITY | ENTITY | DISTANCE_M | high |
+
+Subs 42-45 resolve p1/p2 SSN → handle via `EntityPool_FindByNetId @ 0x4f0a20`
+first; the raw senses are POSITIVE (the negated enum names are display
+convention — §3b, §8.2).
 
 **main_type 3 = Event**: `events[p1]` latch window (byte +20 set && word +16 == 0,
 §1.4 cat 3). param1 = **EVENT_REF**. High confidence.
@@ -805,6 +917,20 @@ bits are complete and correct** (two-binary agreement with the JO-derived enum).
 Option bits share the SAME dword: 0x1 water, 0x40 SP-respawn, 0x100000 NVG,
 0x400000 StartNVG (the latter two written as sub-byte ORs at +0x1D6,
 @0x403255/@0x403272).
+
+## 8b. IDA write-backs (2026-08-13 grill — APPLIED and saved in-session)
+
+Renames landed in `Jointops.exe.kong.i64` (all vibe-confidence, behavior-derived):
+`sub_43E780` → `Entity_IsSsnAtAlertLevel`; `sub_43C870` →
+`TriggerGroup_AnyMemberHoldingItemGroup`; `sub_43E2F0` →
+`Entity_IsSsnHoldingItemGroup`; `Entity_DrawConnectionLine` (misnomer — it
+draws nothing) → `Entity_CheckLineOfSightInRange`; `Entity_IsInVehicleChain`
+(misnomer — it walks the groundEntity chain) → `Entity_IsOnTopOfChain`;
+`Entity_InitSpawnedChild` (misnomer — it DROPS the carried child) →
+`Entity_DropCarriedObject`; `sub_4ABB00` → `SaveFile_ApplyEntityRecord`.
+Witness comments appended at each function head plus the ApplyCommand case-22
+line (@0x43ac8d) and the two PSShadow strcpy sites (the terrain record's
+underwater grill, same session).
 
 ## 9. Appendix: IDA write-backs (2026-06-10)
 
