@@ -3446,8 +3446,10 @@ a linked dragger's hand-bone world delta moves the corpse each tick and forces a
 The port maps despawn to `Entity::hidden` (our registry keeps the slot; the health
 store already gates every consumer) and runs the watch-check whenever a local player
 exists — our SP listen-server equivalence for the retail `!is_in_session` gate; the
-chest-lift LOS endpoints stand in for the entity-origin ray (D-AI-6/-7 feet-ray
-false-block). Both are D-AI-9 residual notes.
+watch ray lifts both endpoints 0.9 u explicitly at the call site (since 2026-08-13
+`line_of_sight_clear` takes exact endpoints), standing in for the entity-origin ray
+(the feet-ray false-block on the heightfield leg; deliberately NOT the muzzle seam —
+a corpse has no live pose). Both are D-AI-9 residual notes.
 
 ### 19.5 The def side — `deathtime`, `particledeath`
 
@@ -3899,14 +3901,24 @@ pose lives and feeds back (the binding-fed input pattern, like the terrain sampl
   bone). No authored name = no AI muzzle (civilians). The model exposes
   `get_muzzle_world_position()` = `skeleton.global * bone_pose * bone_rest⁻¹ *
   model_pos` — the same attachment transform the userpoint debug overlay uses.
-- `mission_present_pass._push_muzzle` pushes it per presented row, keyed by
+- The NATIVE present applier pushes it per presented row with `has_muzzle`
+  (`nova_present_applier.cpp` → `Simulation::set_ai_muzzle_world`; the earlier
+  `mission_present_pass._push_muzzle` GDScript leg was rewritten native —
+  wording corrected 2026-08-13), keyed by
   **PF_NET_ID** (the authored SSN — the wire handle is 0-ambiguous for pool-0 slot 0,
   and the present rows render the client WIRE VIEW, whose row order is not the AI
   index and whose population is replication-range-gated).
 - `Simulation::set_ai_muzzle_world(net_id, pos)` converts Godot→mission 16.16
-  and stamps `AiSystem::set_entity_muzzle(handle, pos, logic_tick)`.
-- `AiSystem::infantry_fire_pass` spawns rounds from the stamp while FRESH
-  (≤ 4 ticks), else the chest-lift stand-in (headless ctests, out-of-view NPCs).
+  and stamps BOTH `Entity::posed_muzzle_*` and
+  `AiSystem::set_entity_muzzle(handle, pos, logic_tick)`.
+- The consumers share `AiSystem::weapon_fire_origin` (2026-08-13, the D-AI-6a
+  slice): the fire pass spawns rounds from it, the LOS endpoints (mutual-LOS
+  acquire probe, threat scan, lastAttacker, the D-EVT-3 sub-44/45 trigger rays)
+  ray between two of them, and the aim solution reads it for the EYE and the
+  target chest point — stamp while FRESH (≤ `kMuzzleFreshTicks` = 4), else the
+  chest-lift stand-in (headless ctests, out-of-view NPCs). The corpse watch
+  (D-AI-9c), the USE-scan eye (D-AI-11), and the netsim priority ray keep
+  explicit 0.9 u lifts at their call sites — deliberately not fire origins.
 
 Evidence: `ai` ctest `test_fire_pass_uses_embedder_fed_muzzle` (stamp used when fresh,
 fallback when absent/stale); in-game `godot/tests/ai_muzzle_probe.gd` on CP01 —
@@ -3916,8 +3928,14 @@ PASS: a posed EIndo muzzle at +0.51 u up / 0.93 u out from the entity origin
 ### 21.4 Divergences + open follow-ups
 
 D-AI-6 (ledger) updated: the FIRE-ORIGIN clause is LANDED via the binding seam.
-Residuals: (a) the LOS endpoints and the aim-solution eye point still use the
-chest-lift stand-in (the originals are the muzzle/person-leg vectors above);
+Residuals: (a) **LANDED 2026-08-13 with an approximation**: the LOS endpoints
+and the aim-solution eye point ride the binding muzzle stamp while fresh
+(`AiSystem::weapon_fire_origin`, chest-lift fallback — facet c). The aim EYE
+now matches the original exactly (the combat-pass aim anchor
+`Entity_GetAttachmentWorldPosition @ 0x4b2670` on bone +0x366, one frame
+stale); the LOS/aim-target endpoints substitute the posed muzzle for the
+person-leg vector (`Entity_ComputeWeaponFireOrigin @ 0x43b4b0` — the +0x6C
+writer stays unwalked, facet d), chest lift when stampless;
 (b) the def-authored userpoint NAME is plumbed for the closeattack family
 (2026-08-09: `launchups_closeattack` parse → ItemDatabase → placer →
 `set_muzzle_point_name`; the old flash-name preference is deleted) — the
