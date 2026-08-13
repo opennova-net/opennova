@@ -546,6 +546,32 @@ void HudFrameCompiler::element_power(const HudFrameState &state, float w,
 	++draw_list_.elements_drawn;
 }
 
+uint32_t HudFrameCompiler::active_color(const HudFrameState &state) const {
+	// The hud_color_index scheme table + the derived master overlay color.
+	// [orig: HUD_InitTeamColorTable @0x51f240 — the 16-dword g_hudColorTable
+	// @0x24C1838 immediates (entries 0..5 are the cycled schemes); per frame
+	// HUD_RenderAllOverlays @0x5a8100-0x5a8125 refreshes table[2] from the
+	// hudpos hud_textcolor (g_hudposTextColor) and restamps the frame overlay
+	// color (g_hudFrameOverlayColor @0x840B1C) = table[index]; the snapshot
+	// twin g_hudActiveColor @0x24C1868 = table[index] | 0xFF000000 at init and
+	// table[index] at the cycle @0x49afe0. Both twins carry the same value for
+	// every authored scheme (all entries ship alpha FF); the compiler derives
+	// ONE per-frame color and forces the init path's FF alpha.]
+	static constexpr uint32_t kSchemeTable[6] = {
+			0xFFFFFFFFu, // 0 white
+			0xFF00FF00u, // 1 green
+			0xFF010101u, // 2 init placeholder — sourced live from hud_textcolor
+			0xFF80A0FFu, // 3 light blue
+			0xFFF0F000u, // 4 yellow
+			0xFFFF5050u, // 5 salmon
+	};
+	const int idx = state.hud_color_index >= 0 && state.hud_color_index <= 5
+			? state.hud_color_index
+			: 2;
+	const uint32_t rgb = idx == 2 ? layout_.hud_text : kSchemeTable[idx];
+	return rgb | 0xFF000000u;
+}
+
 void HudFrameCompiler::element_waypoint(const HudFrameState &state, float w,
 		float h) {
 	// [orig: HUD_DrawWaypointNameAndDistance @ 0x5947a0 — align routing, the
@@ -559,7 +585,9 @@ void HudFrameCompiler::element_waypoint(const HudFrameState &state, float w,
 	}
 	char dist[16];
 	std::snprintf(dist, sizeof(dist), "%d", state.waypoint.distance_m);
-	const uint32_t color = layout_.hud_text;
+	// The frame overlay color [orig: the g_hudFrameOverlayColor reads
+	// @0x5949dd..0x594c9d in the waypoint pair].
+	const uint32_t color = active_color(state);
 	const float ax = static_cast<float>(gp.x);
 	const float ay = static_cast<float>(gp.y);
 	// Measures in font pixels, folded to design via the surface ratio — the
@@ -720,7 +748,10 @@ void HudFrameCompiler::element_attach_labels(const HudFrameState &state,
 		return;
 	}
 	for (const HudAttachLabel &label : state.attach_labels) {
-		uint32_t color = layout_.hud_text;
+		// The snapshot overlay color [orig: g_hudActiveColor reads
+		// @0x5a362d/@0x5a3851; identical to hud_textcolor under the default
+		// scheme 2 — D-HUD-13].
+		uint32_t color = active_color(state);
 		if (!label.nearest) {
 			color = ((color & 0xFEFEFEu) | 0xFE000001u) >> 1;
 		}
@@ -777,15 +808,17 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state,
 		if (tag.dist_q16 > state.fog_dist_q16) {
 			continue;
 		}
-		// Health tier -> the hudpos tag colors; the good tier reads
-		// tagcolor_good under the retail default hud_color_index == 2 (the
-		// scheme table swap for other indices is the documented residue)
-		// [orig: HUD_ClassifyHealthBand @ 0x5a3c2b; colors @ 0x5a3ca5..0x5a3cf5;
-		// cfg default 2 @ 0x54d28b].
+		// Health tier -> the hudpos tag colors. The GOOD tier is scheme-
+		// swapped: tagcolor_good only under hud_color_index == 2, else the
+		// scheme table entry; middle/bad never swap [orig:
+		// HUD_ClassifyHealthBand @ 0x5a3c2b; the index test + colors
+		// @ 0x5a3c9e..0x5a3cf5; cfg default 2 @ 0x54d2a6].
 		const int band = health_color_band_fp16(tag.health_ratio_fp16);
-		uint32_t rgb = band == 0 ? layout_.tag_good
-				: band == 1        ? layout_.tag_middle
-									: layout_.tag_bad;
+		uint32_t rgb = band == 0
+				? (state.hud_color_index == 2 ? layout_.tag_good
+											  : active_color(state))
+				: band == 1 ? layout_.tag_middle
+							: layout_.tag_bad;
 		// The speaking pulse rides the voice output level [orig: @ 0x5a3e8f].
 		if (tag.speaking) {
 			rgb = friendly_tag_speaking_blend(rgb, state.speaking_level255);
@@ -880,8 +913,10 @@ void HudFrameCompiler::element_objective_line(const HudFrameState &state,
 	const uint32_t align_flags = gp.align == 1
 			? kFontAlignRight
 			: (gp.align == 2 ? kFontAlignCenter : 0u);
+	// The objective drawer reads both overlay-color twins (frame @0x59aa4c,
+	// snapshot @0x59ab0e) — one derived color here.
 	emit_text(state.objective_text.c_str(), static_cast<float>(gx),
-			static_cast<float>(gy), w, h, layout_.hud_text, align_flags);
+			static_cast<float>(gy), w, h, active_color(state), align_flags);
 	++draw_list_.elements_drawn;
 }
 
@@ -911,8 +946,10 @@ void HudFrameCompiler::element_messages(const HudFrameState &state, float w,
 	const float row_h = text_line_h() * kDesignH / std::max(h, 1.0f);
 	float row_y = ay;
 	for (int i = static_cast<int>(live.size()) - 1; i >= start; --i) {
+		// The message feed rides the snapshot overlay color like the chat
+		// drawer [orig: the g_hudActiveColor read @0x5930e0].
 		emit_text(live[static_cast<size_t>(i)]->text.c_str(), ax, row_y, w, h,
-				layout_.hud_text, 0u);
+				active_color(state), 0u);
 		row_y -= row_h;
 	}
 	++draw_list_.elements_drawn;

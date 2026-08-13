@@ -106,6 +106,8 @@ public:
 	// (retail g_friendlyTagsMode; the witnessed rules live in hud_math).
 	void set_friendly_tag_mode(int p_mode);
 	int get_friendly_tag_mode() const;
+	void set_hud_color_index(int p_index);
+	int get_hud_color_index() const;
 	// Per-frame environment feed: the fog cull distance (16.16; <= 0 disables)
 	// and the speaking entity's voice level 0..255.
 	void set_friendly_tag_env(int p_fog_dist_q16, int p_speaking_level255);

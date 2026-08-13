@@ -45,6 +45,17 @@ var _objectives_visible := false
 # [orig: g_friendlyTagsMode @0x24C18C4; default @0x4a7fed]
 var _friendly_tag_mode := 2
 
+# The HUD color-scheme index, persisted like retail's config token (read at
+# boot, written back on cycle). Default 2 = the hudpos hud_textcolor scheme.
+# [orig: config token "hud_color_index" @0x5502eb, default 2 @0x54d2a6; applied
+# to the live index @0x55152f; cycled 0..5 by input action case 10 @0x49afc7]
+const HUD_COLOR_CONFIG_PATH := "user://settings.cfg"
+const HUD_COLOR_SECTION := "hud"
+const HUD_COLOR_KEY := "hud_color_index"
+var _hud_color_index: int = clampi(
+		int(ConfigStore.read(HUD_COLOR_CONFIG_PATH, HUD_COLOR_SECTION,
+				HUD_COLOR_KEY, 2)), 0, 5)
+
 
 func setup(world, player_presenter_in, ui_parent: Node) -> void:
 	_world = world
@@ -140,6 +151,7 @@ func _ensure_game_hud() -> void:
 	# The presenter-held friendly-tags mode survives the per-mission rebuild
 	# like retail's process-lifetime global [orig: g_friendlyTagsMode @0x24C18C4].
 	_game_hud.set_friendly_tag_mode(_friendly_tag_mode)
+	_game_hud.set_hud_color_index(_hud_color_index)
 
 
 # The string tables the HUD resolves against: the current root's gametext table
@@ -634,6 +646,18 @@ func cycle_friendly_tags() -> void:
 	var key := FRIENDLY_TAG_TOAST_KEYS[_friendly_tag_mode]
 	if t != null and t.has_string_in_section("Misc", key):
 		_game_hud.push_message(t.get_string_in_section("Misc", key))
+
+
+## The HUD color-scheme cycle 0..5 with wrap, written back to the config like
+## retail's token round trip. Deliberately NO toast — the retail case only
+## cycles and restamps the color. [orig: input action case 10 @0x49afc7 —
+## idx+1, >5 wraps to 0, g_hudActiveColor = table[idx]]
+func cycle_hud_color() -> void:
+	_hud_color_index = (_hud_color_index + 1) % 6
+	ConfigStore.write(HUD_COLOR_CONFIG_PATH, HUD_COLOR_SECTION, HUD_COLOR_KEY,
+			_hud_color_index)
+	if _game_hud != null:
+		_game_hud.set_hud_color_index(_hud_color_index)
 
 
 # The panel's resolved rows: shown win-condition slots with mission-text lines

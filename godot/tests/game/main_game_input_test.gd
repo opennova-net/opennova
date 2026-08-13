@@ -27,9 +27,13 @@ class WorldInputHarness:
 class CaptureHudPresenter:
 	extends GameHudPresenter
 	var friendly_tag_cycles := 0
+	var hud_color_cycles := 0
 
 	func cycle_friendly_tags() -> void:
 		friendly_tag_cycles += 1
+
+	func cycle_hud_color() -> void:
+		hud_color_cycles += 1
 
 
 class CapturePlayerPresenter:
@@ -91,3 +95,21 @@ func test_friendly_tags_use_f_while_n_reaches_the_nvg_router() -> void:
 	assert_eq(hud.friendly_tag_cycles, 1, "N does not cycle friendly tags")
 	assert_eq(player.handled_keys, PackedInt32Array([KEY_N]),
 			"N reaches the local-player router for NVG")
+
+
+func test_hud_color_key_cycles_the_scheme_once_per_press() -> void:
+	var game := _make_input_harness()
+	var hud := CaptureHudPresenter.new()
+	var player := CapturePlayerPresenter.new()
+	game.add_child(hud)
+	game.add_child(player)
+	game.configure_input_targets(hud, player)
+
+	# [orig: input action case 10 @0x49afc7 — one cycle per action fire; the
+	# key itself is a reimpl mapping pending the binding-row witness (D-CTRL-3)]
+	game.dispatch_key(_pressed_key(KEY_H))
+	assert_eq(hud.hud_color_cycles, 1, "H cycles the HUD color scheme")
+	assert_true(player.handled_keys.is_empty(), "the shell consumes the color key")
+
+	game.dispatch_key(_pressed_key(KEY_H))
+	assert_eq(hud.hud_color_cycles, 2, "each press cycles once")

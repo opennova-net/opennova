@@ -25,6 +25,10 @@ const CHANGE_DIR_KEY := KEY_F9
 # (D-CTRL-3), so the key itself is a reimpl mapping.
 const OBJECTIVES_KEY := KEY_O
 const FRIENDLY_TAGS_KEY := KEY_F  # base retail default; N is NVG [orig: action 30 @0x49b573] (D-CTRL-3)
+# The HUD color-scheme cycle. The action itself is witnessed (input action
+# case 10 @0x49afc7); its authored default binding row rides the unported
+# input-binding layer (D-CTRL-3), so the key is a reimpl mapping.
+const HUD_COLOR_KEY := KEY_H
 # The armory key — the USE-ITEM key (input action 177 "useitem"; retail default =
 # SHIFT on the shipped KeyChart, labeled "USE ITEM/ATTACH/ARMORY"). Zone-gated: it
 # opens weapon.mnu's WEAPON screen only while the player stands inside a type-6
@@ -338,6 +342,12 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		return
 	if key.keycode == FRIENDLY_TAGS_KEY and is_gameplay_input_active() and _hud_presenter != null:
 		_hud_presenter.cycle_friendly_tags()
+		get_viewport().set_input_as_handled()
+		return
+	# The HUD color-scheme cycle, in-world only. [orig: input action case 10
+	# @0x49afc7 — idx wraps 0..5, restamps the master overlay color]
+	if key.keycode == HUD_COLOR_KEY and is_gameplay_input_active() and _hud_presenter != null:
+		_hud_presenter.cycle_hud_color()
 		get_viewport().set_input_as_handled()
 		return
 	# The USE-ITEM key: in-world only. Zone legs first — the armory volume opens
