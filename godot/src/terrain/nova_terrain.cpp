@@ -3,6 +3,7 @@
 #include "nova_terrain.h"
 #include "nova_terrain_surface_inputs.h"
 #include "nova_terrain_tile_info.h"
+#include "env/nova_water.h"
 
 // Engine: Jointops.exe Terrain_RenderSectorTile@0x5CDAA0,
 // Terrain_TraverseQuadTreeNode@0x5C89C0, Terrain_CollectVisibleSectors@0x5C9120
@@ -51,6 +52,12 @@ void Terrain::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_weather_path"), &Terrain::get_weather_path);
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "weather_path"),
 		"set_weather_path", "get_weather_path");
+	ClassDB::bind_method(D_METHOD("set_water_path", "path"), &Terrain::set_water_path);
+	ClassDB::bind_method(D_METHOD("get_water_path"), &Terrain::get_water_path);
+	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "water_path"),
+		"set_water_path", "get_water_path");
+	ClassDB::bind_method(D_METHOD("get_terrain_material"),
+		&Terrain::get_terrain_material);
 
 	ClassDB::bind_method(D_METHOD("build"), &Terrain::build);
 	ClassDB::bind_method(D_METHOD("render_frame"), &Terrain::render_frame);
@@ -185,6 +192,15 @@ NodePath Terrain::get_weather_path() const {
 	return weather_path;
 }
 
+void Terrain::set_water_path(const NodePath& p_path) {
+	water_path = p_path;
+	terrain_node_cache_valid = false;
+}
+
+NodePath Terrain::get_water_path() const {
+	return water_path;
+}
+
 
 // ---------------------------------------------------------------------------
 // Notifications
@@ -212,6 +228,7 @@ void Terrain::_notification(int p_what) {
 		_clear_patch_pool();
 		cached_env_node = nullptr;
 		cached_weather_node = nullptr;
+		cached_water_node = nullptr;
 		terrain_node_cache_valid = false;
 	}
 }
@@ -242,14 +259,30 @@ void Terrain::render_frame() {
 		return;
 	}
 
-	const Vector3 cam_pos = cam->get_global_position();
-	const Transform3D view = cam->get_global_transform().affine_inverse();
+	// The RENDER eye (get_camera_transform includes h/v offsets), so the
+	// below-water classification stays coherent with Water's surface flip and
+	// the frame clear — the same eye those classifiers sample. Offsets are
+	// zero for common cameras, so traversal is unchanged in practice.
+	const Transform3D cam_xform = cam->get_camera_transform();
+	const Vector3 cam_pos = cam_xform.origin;
+	const Transform3D view = cam_xform.affine_inverse();
 	const Projection proj = cam->get_camera_projection();
+
+	if (!terrain_node_cache_valid)
+		_cache_env_weather_nodes();
 
 	opennova::TerrainViewInput view_input;
 	view_input.cam_x = static_cast<float>(cam_pos.x);
 	view_input.cam_y = static_cast<float>(cam_pos.y);
 	view_input.cam_z = static_cast<float>(cam_pos.z);
+	// 0 = no water (the engine-side sentinel); gate on render-active so a
+	// retained-but-disabled water node reads as dry, matching the existing
+	// underwater classifiers (D-TERRAIN-8).
+	view_input.water_height =
+			(cached_water_node != nullptr &&
+					cached_water_node->is_water_render_active())
+			? cached_water_node->get_water_height()
+			: 0.0f;
 
 	// Column-major view matrix from the camera's inverse transform.
 	const Basis& b = view.basis;
@@ -341,12 +374,27 @@ void Terrain::render_frame() {
 		terrain_material->set_shader_parameter("u_debug_mode", debug_mode);
 	}
 
+	// The below-water modulation inputs (D-TERRAIN-8,
+	// docs/terrain/terrain-re.md underwater section): the engine-compiled
+	// flag plus the water module's live noise texture. The shared ImageTexture
+	// updates in place per frame, so the bind sticks until the node changes.
+	if (terrain_material.is_valid()) {
+		terrain_material->set_shader_parameter(
+				"u_below_water", draw_list.below_water);
+		Ref<Texture2D> noise;
+		if (cached_water_node != nullptr &&
+				cached_water_node->is_water_render_active()) {
+			noise = cached_water_node->get_noise_color_texture();
+		}
+		if (noise != bound_water_noise) {
+			terrain_material->set_shader_parameter("u_water_noise", noise);
+			bound_water_noise = noise;
+		}
+	}
+
 	// Update lighting from MissionEnvironment, prefer smoothed colors from
 	// Weather — both native now, direct typed calls (ADR 0034 d6).
 	if (terrain_material.is_valid()) {
-		if (!terrain_node_cache_valid)
-			_cache_env_weather_nodes();
-
 		if (cached_env_node && cached_env_node->is_loaded()) {
 			// Base env -> terrain-uniform push, shared with the editor preview
 			// (MissionEnvironment.apply_terrain_uniforms drives both shaders' uniforms).
@@ -373,6 +421,7 @@ void Terrain::_cache_env_weather_nodes() {
 	terrain_node_cache_valid = true;
 	cached_env_node = nullptr;
 	cached_weather_node = nullptr;
+	cached_water_node = nullptr;
 
 	if (!environment_path.is_empty())
 		cached_env_node = Object::cast_to<MissionEnvironment>(
@@ -380,6 +429,9 @@ void Terrain::_cache_env_weather_nodes() {
 	if (cached_env_node && !weather_path.is_empty())
 		cached_weather_node =
 				Object::cast_to<Weather>(get_node_or_null(weather_path));
+	if (!water_path.is_empty())
+		cached_water_node =
+				Object::cast_to<Water>(get_node_or_null(water_path));
 }
 
 // ---------------------------------------------------------------------------

@@ -23,6 +23,7 @@ namespace godot {
 
 class TerrainTileInfo;
 class TerrainSurfaceInputs;
+class Water;
 
 using FoliageDetailPatch = opennova::FoliageDetailPatch;
 
@@ -34,6 +35,7 @@ private:
 	Ref<TerrainTileInfo> tile_info_override;
 	NodePath environment_path;
 	NodePath weather_path;
+	NodePath water_path;
 	float lod_quality = 1.0f;
 	bool tile_overlay_enabled = true;
 
@@ -74,7 +76,12 @@ private:
 	// Cached typed node pointers — avoids per-frame get_node_or_null()
 	MissionEnvironment *cached_env_node = nullptr;
 	Weather *cached_weather_node = nullptr;
+	Water *cached_water_node = nullptr;
 	bool terrain_node_cache_valid = false;
+	// The noise texture currently bound to u_water_noise: the shared
+	// ImageTexture updates in place each frame, so one bind suffices
+	// (D-TERRAIN-8, docs/terrain/terrain-re.md underwater section).
+	Ref<Texture2D> bound_water_noise;
 
 	void _cache_env_weather_nodes();
 
@@ -129,6 +136,13 @@ public:
 
 	void set_weather_path(const NodePath& p_path);
 	NodePath get_weather_path() const;
+
+	void set_water_path(const NodePath& p_path);
+	NodePath get_water_path() const;
+
+	// The single shared surface material (GUT seam; precedent
+	// Water::get_water_material).
+	Ref<ShaderMaterial> get_terrain_material() const { return terrain_material; }
 
 	void build();
 

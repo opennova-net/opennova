@@ -105,6 +105,11 @@ public:
 	void build();
 	bool is_built() const { return built_; }
 	Ref<ShaderMaterial> get_water_material() const { return water_material_; }
+	// The live per-frame-regenerated noise color texture, pulled by the terrain
+	// material for the below-water modulation (D-TERRAIN-8,
+	// docs/terrain/terrain-re.md underwater section — terrain pulls from the
+	// water module, matching the retail data direction). Null before build().
+	Ref<Texture2D> get_noise_color_texture() const { return noise_color_tex_; }
 	MeshInstance3D *get_mesh_instance() const { return mesh_instance_; }
 	SubViewport *get_reflection_viewport() const { return reflection_viewport_; }
 	Camera3D *get_reflection_camera() const { return reflection_camera_; }

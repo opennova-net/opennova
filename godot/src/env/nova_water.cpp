@@ -63,6 +63,8 @@ void Water::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_built"), &Water::is_built);
 	ClassDB::bind_method(D_METHOD("get_water_material"),
 			&Water::get_water_material);
+	ClassDB::bind_method(D_METHOD("get_noise_color_texture"),
+			&Water::get_noise_color_texture);
 	ClassDB::bind_method(D_METHOD("get_mesh_instance"),
 			&Water::get_mesh_instance);
 	ClassDB::bind_method(D_METHOD("get_reflection_viewport"),

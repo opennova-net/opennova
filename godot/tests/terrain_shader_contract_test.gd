@@ -106,12 +106,35 @@ func test_splat_modulation_is_the_second_detail_dp3() -> void:
 	var terrain := _source("res://shaders/terrain_lighting.gdshaderinc")
 	assert_true(terrain.contains("u_detail2, colormap_uv * u_detail2_density"),
 		"The second detail must sample at its own authored density.")
-	assert_true(terrain.contains("normal_factor = dot(detail2, blend) * 2.0;"),
-		"The stage-3 modulation is dot(second detail, normalized blend) doubled.")
+	assert_true(terrain.contains("normal_factor = dot(modulator, blend) * 2.0;"),
+		"The stage-3 modulation is dot(stage-3 input, normalized blend) doubled.")
 	assert_true(terrain.contains("float normal_factor = 1.0;"),
 		"Maps without a second detail must run the PS14Splat variant (factor 1).")
 	assert_false(terrain.contains("sample_detail_coefficient"),
 		"The generated coefficient map must not modulate the ps.1.4 splat.")
+
+
+func test_below_water_swaps_the_stage3_input_to_the_water_noise() -> void:
+	# D-TERRAIN-8: underwater the LIVE stage-3 bind is the water noise at the
+	# swapped 8/density texcoord (colormap_uv * 8 after the density cancel);
+	# the dp3 modulation is then the caustic term. Detail2-less maps run
+	# PS14Splat (no t3 consumer) and faithfully get NO underwater modulation.
+	# [orig: live t3 slot swap @ 0x6043f2; selector @ 0x6044b1..0x604556;
+	# 8/density texcoord @ 0x609786..0x6097D6]
+	var terrain := _source("res://shaders/terrain_lighting.gdshaderinc")
+	var compact := _compact(terrain)
+	assert_true(compact.contains("uniformsampler2Du_water_noise"),
+		"The live water noise texture must be a shared-include uniform.")
+	assert_true(compact.contains("uniformboolu_below_water=false;"),
+		"The below-water flag must default dry.")
+	assert_true(compact.contains("texture(u_water_noise,colormap_uv*8.0)"),
+		"The underwater stage-3 input samples the noise at colormap_uv * 8.")
+	assert_true(compact.contains("vec3modulator=u_below_water"),
+		"The underwater swap must replace the dp3 INPUT, inside the detail2 gate.")
+	# The swap lives inside the u_has_detail2 branch: no detail2, no modulation.
+	var gate := terrain.find("if (u_has_detail2)")
+	var swap := terrain.find("u_below_water\n\t\t\t? texture(u_water_noise")
+	assert_gt(swap, gate, "The noise swap must sit inside the detail2 gate.")
 
 
 func test_runtime_and_oned_share_tile_overlay_composition() -> void:
