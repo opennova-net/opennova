@@ -275,9 +275,11 @@ dp3 bump terms ×2/×4), `PolyTrn_PS14Splat` (ps.1.4: three detail textures
 sampled at t1 by samplers 1/4/5, blended by the t2 blendmap's RGB — the
 3-way splat — then the colormap lighting chain ×4),
 `PolyTrn_PS14SplatNormalMap` (splat + dp3), `PolyTrn_PSShadowBasic` /
-`PolyTrn_PSShadowNormalMap` (the legacy name is misleading: for an underwater
-camera, t3 = `Water_NoiseColorTexture`; light scale
-`saturate(4·t3²)·t0.a` — full sources transcribed 2026-08-13, below),
+`PolyTrn_PSShadowNormalMap` (the legacy name is misleading: underwater
+variants for the PARTIALLY-authored stage sets — light scale
+`saturate(4·t3²)·t0.a` with t3 = `Water_NoiseColorTexture`; on the full
+splat tier the underwater noise rides the PS14 dp3 slot instead — full
+sources + selector decode 2026-08-13, below),
 `PolyTrn_PSDepthAlpha` (alpha = t0.b via `dp3 c5=(0,0,1)`, rgb = 0 — the
 depth/alpha extract pass). The c0/c1 lighting constants are CLOSED (REN-5):
 **c0 = the SKY block, c1 = the LIGHT block** (both `[0]` render colors ÷255)
@@ -313,8 +315,10 @@ Terrain_ParseConfigCallback @ 0x60f993/0x60f9bf)`]. The earlier reading of
 t3 as the generated detailmap-B coefficient map is RETRACTED for this tier:
 that generated map binds at stage 7 for the ps.1.1 tiers, and on the ps.1.4
 splat it produced blend-weighted darkening spots retail does not render.
-When the shadow pass is active, stage 3 swaps to the projected-shadow
-texture with an `8/density` transform [`orig: 0x6043f2; 0x6097ca`].
+When the camera is below water, the LIVE stage-3 slot swaps to the water
+noise texture with an `8/density` transform (the underwater section below;
+the pre-2026-08-13 "projected-shadow texture" reading of `0x6043f2` was
+stale) [`orig: 0x6043f2; 0x6097ca`].
 The detail splat is `t1×t2.r + t4×t2.g + t5×t2.b`; the `mul_x2` modulation
 is `2×dot(t3.rgb, t2.rgb)` — with the normalized blend this is a
 blend-weighted scalar of the second detail — and it exists ONLY in
@@ -385,25 +389,38 @@ selects `PolyTrn_PSShadowBasic` / `PolyTrn_PSShadowNormalMap`
 underwater animated water-noise/wave-shadow variants, not receivers for static
 or dynamic model shadows.
 
-**PSShadow\* sources transcribed (2026-08-13; strcpy sites @ 0x605315 /
-@ 0x605329 inside `compile_terrain_pixel_shaders @ 0x605260`).** Both are
-ps.1.1, `tex t0..t3`. `PolyTrn_PSShadowBasic` in instruction order:
-`mul_x4 r1.rgb, t3, t3` (the noise squared, ×4, **saturated by the ps.1.1
-register clamp** — white noise caps at 1.0, mid-gray 0.5² × 4 = the neutral
-1.0), `mul r1.rgb, r1, t0.a` (× the tile DOT3 alpha), `mad_d2 r0.rgb, r1, c1,
-c0` (the family light chain with X = that scale), then `mul_x2 r0.rgb, r0, t1`
-and `mul_x4 r0.rgb, r0, t0`, `+mov r0.a, t0.a`.
-`PolyTrn_PSShadowNormalMap` is identical plus `dp3 r1.rgb, t1, t2` /
-`mul_x2 r0.rgb, r0, r1` between the light chain and the t0 multiply (the
-normal-map factor survives underwater). Two consequences the one-line formula
-hid: (1) the ×4 SATURATES — the faithful scale is `min(4·t3², 1)·t0.a`,
-not an unclamped 4·t3²; (2) underwater the ps.1.4 three-way splat COLLAPSES —
-stage/sampler 1 supplies the single detail multiply (`t1` in both Shadow
-variants) and samplers 4/5 plus the t2 blend weights drop out entirely
-(the t2 slot feeds only the NM dp3). The Shadow tail also multiplies t1 (×2)
-before t0 (×4) — the reverse of `PSBasic` — same product, different
-intermediate clamp points; not visually significant for ≤1 operands but
-transcribed for the letter.
+**PSShadow\* sources + the full underwater selector decode (2026-08-13;
+strcpy sites @ 0x605315 / @ 0x605329 inside `compile_terrain_pixel_shaders
+@ 0x605260`; selector disasm @ 0x6044b1..0x604556).** The earlier "the flag
+selects PSShadowBasic/PSShadowNormalMap" one-liner was an oversimplification.
+The selector keys on the AUTHORED stage handles (`dword_319F998` detail2 /
+`dword_319F99C`+`dword_319F9A0` splat layers 2-3), while the BINDER swaps only
+the LIVE stage-3 slot (`dword_3266E98` ← `sub_5C0190()` =
+`Water_NoiseColorTexture` when `dword_319FB3C` is set @ 0x6043f2, else the
+authored `dword_319F998` @ 0x6043ff). Full table (blendmap present and
+shader tier ≥ 1; otherwise PSBasic above / PSShadowBasic below):
+
+| authored stages | above water | below water |
+|---|---|---|
+| splat 2+3 + detail2 | PS14SplatNormalMap | PS14SplatNormalMap — **t3 = the noise** |
+| splat 2+3, no detail2 | PS14Splat | PS14Splat — **no t3 consumer, NO underwater modulation** |
+| partial splat + detail2 | PSDualNormalMap | PSDualNormalMap — its t3 dp3 reads the noise |
+| partial splat, no detail2 | PSNormalMap | **PSShadowNormalMap** |
+| no blendmap / tier < 1 | PSBasic | **PSShadowBasic** |
+
+So on the TOP-TIER (ps.1.4 splat) path the underwater effect is the stage-3
+dp3 modulation reading the live noise at the swapped `8/density` texcoord
+(`colormap_uv × 8` after the density cancel) — `2·dot(noise, blend)`,
+neutral at mid-gray noise — and detail2-less splat maps faithfully render
+NO underwater terrain modulation. The PSShadow pair serves only the
+partially-authored stage sets. Their transcribed ps.1.1 sources:
+`PolyTrn_PSShadowBasic` = `mul_x4 r1.rgb, t3, t3` (noise², ×4, **saturated
+by the ps.1.1 register clamp** — the faithful scale is `min(4·t3², 1)`,
+mid-gray neutral), `mul r1.rgb, r1, t0.a`, `mad_d2 r0.rgb, r1, c1, c0`,
+`mul_x2 r0.rgb, r0, t1`, `mul_x4 r0.rgb, r0, t0`, `+mov r0.a, t0.a`;
+`PolyTrn_PSShadowNormalMap` inserts `dp3 r1.rgb, t1, t2` / `mul_x2 r0.rgb,
+r0, r1` before the t0 multiply. (Their tail multiplies t1 ×2 then t0 ×4 —
+the reverse of PSBasic; same product, different intermediate clamp points.)
 
 `dword_319FB8C` is also not shadow state. Its complete writer set stores one:
 `sub_6040A0 @ 0x6040DD`, `terrain_render_visible_sectors @ 0x60910C`,

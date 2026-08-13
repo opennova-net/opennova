@@ -46,6 +46,22 @@ uniform sampler2D u_blendmap : filter_linear_mipmap_anisotropic, repeat_disable;
 uniform sampler2D u_detail2 : filter_linear_mipmap_anisotropic, repeat_enable;
 uniform bool u_has_detail2 = false;
 uniform float u_detail2_density = 8.0;
+// D-TERRAIN-8: camera-below-water swaps the LIVE stage-3 input from the
+// authored second detail to the per-frame regenerated water noise color
+// texture, and the stage-3 texcoord matrix becomes 8/density — colormap_uv*8
+// after the mesh detail-UV scale cancels. The animation rides the texture
+// CONTENT (the 128x128 pair regenerates every frame), not a UV scroll. The
+// selector keeps PS14SplatNormalMap on full-splat+detail2 maps (the noise
+// rides its dp3), and detail2-less splat maps faithfully render NO underwater
+// modulation; the PSShadowBasic/NormalMap light-scale pair serves only the
+// partially-authored stage sets our top-tier chain does not model
+// (docs/terrain/terrain-re.md, underwater section).
+// [orig: below-water flag @ 0x60FEE0 -> dword_319FB3C @ 0x60915F; live t3
+//  slot swap @ 0x6043f2 (dword_3266E98 <- Water_NoiseColorTexture, authored
+//  dword_319F998 otherwise); shader select @ 0x6044b1..0x604556; 8/density
+//  texcoord @ 0x609786..0x6097D6]
+uniform sampler2D u_water_noise : filter_linear, repeat_enable;
+uniform bool u_below_water = false;
 // Retail creates a mip chain but the TileBakeDot3 pass explicitly uses
 // base-level bilinear sampling with quadrant CLAMP.
 uniform sampler2D u_heightfield_normal : filter_linear, repeat_disable;
@@ -168,9 +184,16 @@ vec3 terrain_surface_color_from_colormap(vec4 cm, vec2 colormap_uv,
 	// detailmap2 presence @ 0x604544/0x6044e8; stage-3 bind @ 0x6043ff]
 	float normal_factor = 1.0;
 	if (u_has_detail2) {
-		vec3 detail2 = sample_retail_detail_mips(
-			u_detail2, colormap_uv * u_detail2_density).rgb;
-		normal_factor = dot(detail2, blend) * 2.0;
+		// Below water the live stage-3 bind is the water noise at the swapped
+		// 8/density coord (see the u_water_noise uniform block); the dp3
+		// modulation then IS the underwater caustic term, neutral at mid-gray.
+		// The noise pair is a per-frame mipless dynamic texture — plain
+		// bilinear, no retail mip chain to emulate.
+		vec3 modulator = u_below_water
+			? texture(u_water_noise, colormap_uv * 8.0).rgb
+			: sample_retail_detail_mips(
+				u_detail2, colormap_uv * u_detail2_density).rgb;
+		normal_factor = dot(modulator, blend) * 2.0;
 	}
 
 	// mad_d2: light = (tile.a * c1 + c0) / 2 with the WITNESSED constants.

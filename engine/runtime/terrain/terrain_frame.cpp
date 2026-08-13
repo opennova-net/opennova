@@ -227,6 +227,10 @@ const TerrainDrawList &TerrainFrameCompiler::compile(
 	draw_list_.detail_cells.clear();
 	draw_list_.debug = TerrainFrameDebugCounters{};
 	draw_list_.debug.compile_index = compile_index_;
+	// Strict <, and height 0 is the no-water sentinel [orig: cameraY <
+	// Env_WaterHeightFixed @ 0x60FEE0 -> dword_319FB3C @ 0x60915F].
+	draw_list_.below_water =
+			view.water_height != 0.0f && view.cam_y < view.water_height;
 	visible_.clear();
 
 	if (!scene.valid()) {

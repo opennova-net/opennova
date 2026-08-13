@@ -69,6 +69,9 @@ struct TerrainViewInput {
 	float cam_z = 0.0f;
 	float view[16] = {};
 	float proj[16] = {};
+	// Live water height in world units; 0 = no water this mission (the retail
+	// Env_WaterHeightFixed == 0 sentinel). Feeds the below-water terrain flag.
+	float water_height = 0.0f;
 	TraversalConfig config{};
 };
 
@@ -104,6 +107,12 @@ struct TerrainDrawList {
 	// The frustum-surviving 16-unit foliage detail cells handed off by the
 	// traversal — the input the foliage frame leg consumes this same frame.
 	std::vector<FoliageDetailPatch> detail_cells;
+	// Camera below the live water surface: the terrain surface swaps its
+	// stage-3 modulation input to the water noise (D-TERRAIN-8) [orig:
+	// terrain_setup_view_and_lighting @ 0x60FE40 stores
+	// cameraY < Env_WaterHeightFixed @ 0x60FEE0; terrain_render_visible_sectors
+	// copies it to dword_319FB3C @ 0x60915F].
+	bool below_water = false;
 	TerrainFrameDebugCounters debug{};
 };
 
