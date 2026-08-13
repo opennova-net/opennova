@@ -315,6 +315,16 @@ struct Entity {
     // to hp for entities still at their spawn default. Feeds the §5.10 field-17 tier
     // denominator and the §5.13 vehicle health word.
     int32_t health_max = 0;   // signed i16 retail storage carried sign-extended
+
+    // items.def radarsig/heatsig (def+0x178/+0x17A u16), stamped by the host's
+    // item-traits sweep. The AI acquisition feed reads them as the candidate's
+    // per-candidate engage-range caps: primary-FOV leg capped by radar_sig,
+    // secondary by heat_sig — an unauthored (0) signature makes the entity
+    // undetectable to the SM class walk, exactly like retail. [orig: the copy
+    // entity+422 = def+376 / entity+420 = def+378 in Entity_InitFromModel
+    // @0x40e136-0x40e15d; the uint16 cap reads @0x46723e/@0x467277]
+    int32_t radar_sig = 0;    // u16 world-unit cap (primary FOV leg)
+    int32_t heat_sig = 0;     // u16 world-unit cap (secondary FOV leg)
     // Raw items.def ItemDefAttrib dword (itemDef+84), stamped by the host trait
     // sweep. Combat keeps this value on the entity because damage targets are
     // not necessarily AI entities. In particular bit 0x40000000 is NoDie:

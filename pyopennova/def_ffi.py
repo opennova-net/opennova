@@ -208,6 +208,8 @@ class DefItemDef(ctypes.Structure):
         ("flip", ctypes.c_int),
         ("critical_hp", ctypes.c_int),
         ("critical_drain", ctypes.c_int),
+        ("radar_sig", ctypes.c_int),
+        ("heat_sig", ctypes.c_int),
         ("unit_type", ctypes.c_int),
         # Per-item particle-effect keys (mirror def.h; ItemDef_ParseProperty
         # @ 0x49eb00 particlefx family).

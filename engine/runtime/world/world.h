@@ -325,6 +325,11 @@ public:
     int32_t player_armor_kz = 0;
     float player_damage_reduc_pp = 0.0f;
     float player_damage_reduc_max = 0.0f;
+    // The Player template's radarsig/heatsig — the AI acquisition engage caps a
+    // late-joiner spawn seeds (same cache family as the hp above; the sweep
+    // stamps live entities directly) [orig: Entity_InitFromModel @0x40e136].
+    int32_t player_radar_sig = 0;
+    int32_t player_heat_sig = 0;
 
     // The weapon.def armory table (empty until the host feeds it — Simulation::
     // load_weapon_table). Read by the 0x2F/0x5A loadout service, the extended-uplink
@@ -365,6 +370,11 @@ public:
     // End-of-round outcome + the SP kill-stat buckets (see the struct docs above).
     RoundEndState round_end;
     MissionKillStats kill_stats;
+
+    // MP-rules bit: the AI class-0 player leg skips the LOCAL player when set
+    // [orig: dword_24C1930 & 0x800 read @0x467155]. The net wire into it is a
+    // tracked D-AI-1 residual; defaults clear (SP).
+    bool ai_rules_skip_local_player = false;
 
     // The mission header's attribute flags, stamped by the host at mission load
     // (bms::AttribFlags as a raw dword; 0x40 = SinglePlayerRespawn). Read by the

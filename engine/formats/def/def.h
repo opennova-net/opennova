@@ -571,6 +571,11 @@ typedef struct DefItemDef {
     int critical_hp;    /* +0x180 i16 raw ("criticalhp") — the burn threshold the vehicle
                            health state machine reads [docs/world/itemdef-re.md +0x180] */
     int critical_drain; /* +0x182 i16 raw ("criticaldrain") — burn drain per 64 ticks */
+    int radar_sig;      /* +0x178 u16 raw ("radarsig") — copied to entity+422 as the AI
+                           acquisition primary-FOV engage cap [orig: Entity_InitFromModel
+                           @0x40e136; AI_FindBestTargetB cap read @0x467277] */
+    int heat_sig;       /* +0x17A u16 raw ("heatsig") — entity+420, the secondary-FOV cap
+                           [orig: @0x40e144; cap read @0x46723e] */
     int unit_type;      /* "unit_type" raw — the minimap icon class selector on vehicles
                            (5..8 helo, 3/4 boat, 12 special, else ground)
                            [orig: Entity_ClassifyForMinimap @0x50FA70 reads itemDef->unitType] */

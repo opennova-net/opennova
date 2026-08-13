@@ -5,8 +5,10 @@
 #include "world/world.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdlib>
+#include <utility>
 #include <vector>
 
 namespace opennova::mission {
@@ -209,6 +211,29 @@ void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, 
             if (ps.data.patrol_speed >= 0)
                 b.f[AiBrain::kSpeedB] = static_cast<int32_t>(
                         (static_cast<int64_t>(ps.data.patrol_speed) << 16) / 225);
+            // The §16.2 class walk data: the four class-priority words and the
+            // derived +40..+52 walk order. The parse is already type-gated like
+            // retail's, so the words carry exactly what AIProfile_ParseProperty
+            // wrote; the sort loads its keys only for HELO/GROUND profiles
+            // [orig: AIProfile_ParseProperty @0x45de70 +80..+92;
+            // AIProfile_LoadOrFind @0x45fd80 qsort (CompareFunction @0x455d90,
+            // ascending, insertion-stable at 4 entries) stored REVERSED
+            // @0x45fed9-0x45ff04].
+            ae.profile.type = ps.data.type;
+            ae.profile.class_priority[0] = ps.data.priority_air;
+            ae.profile.class_priority[1] = ps.data.priority_ground;
+            ae.profile.class_priority[2] = ps.data.priority_organics;
+            ae.profile.class_priority[3] = ps.data.priority_decorations;
+            {
+                const bool keyed = ps.data.type == 1 || ps.data.type == 2;
+                std::array<std::pair<int32_t, int8_t>, 4> ents{};
+                for (int8_t i = 0; i < 4; ++i)
+                    ents[i] = {keyed ? ae.profile.class_priority[i] : 0, i};
+                std::stable_sort(ents.begin(), ents.end(),
+                                 [](const auto &a, const auto &b) { return a.first < b.first; });
+                for (int i = 0; i < 4; ++i)
+                    ae.profile.slot_class[i] = ents[3 - i].second;
+            }
             // The GROUND weapon def blocks (profile+120/+152) + their brain
             // seeds. The ammo COUNT seed rides the same unwitnessed spawn
             // block-copy family as D-AI-5 (no per-field writer exists; the
@@ -275,13 +300,10 @@ void init_brain(AiEntity &ae, const bms::Entity &e, const PromoteOptions &opts, 
     if (kind == EntityKind::Item) {
         b.f[AiBrain::kCurState] = 16;
         b.f[AiBrain::kPendState] = 16;
-        // No target acquisition for transport brains: the shipped drivable-transport
-        // profiles author zero target priorities (d_5ton/d_buggy/G_Jeep priority_air/
-        // ground/organics 0), and the D-AI-1 feed scans unconditionally where retail's
-        // class table would reject — 13 per-tick pool scans + LOS rays stall the mission
-        // load. flags100 bit1 is the witnessed acquire skip in the state-16 tick
-        // [orig: the profile+100 & 2 gate @0x46775c]; lift with the .aip parse (D-AI-11).
-        ae.profile.flags100 |= 2;
+        // (The former flags100 |= 2 no-acquire stand-in is gone: the class walk now
+        // gates on the profile's priority words, and the shipped drivable-transport
+        // profiles author them zero (d_5ton/d_buggy/G_Jeep priority_* 0) — the same
+        // no-scan outcome, now via the witnessed path.)
     }
 }
 
