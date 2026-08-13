@@ -863,7 +863,6 @@ void infantry_respawn_snap(AiEntity &e, const int32_t pos[3], int32_t heading,
     inf.leg_target[0] = inf.leg_target[1] = heading;
     inf.vel[0] = inf.vel[1] = inf.vel[2] = 0;
     inf.stance = InfantryState::Stance::kStand;
-    inf.standing_on_entity = false;
     inf.airborne = false;
     inf.jump_requested = false;
     inf.jump_cooldown = 0;
@@ -1576,6 +1575,12 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 infantry_anim_flags(inf.anim_state), e.health);
         } else {
             foot_clearance = e.pos[2] - frame.capsule_bottom - inf.ground_cache;
+            // No probe ran this tick; the probe's +0x28 store is unconditional
+            // (null on a miss), and this fallback IS the probe over an empty
+            // candidate set — clear the link so the footstep pick cannot read
+            // a stale platform. [orig: the unconditional store in
+            // Entity_RaycastGroundHeightAndObject @ 0x414370]
+            if (Entity *self = world.registry.get(e.handle)) self->ground_target = EntityHandle{};
         }
         if (foot_clearance > kInfantryAirborneGap) {
             // org2 includes DEAD in the gate that owns the airborne-bit write;
@@ -2066,15 +2071,21 @@ void AiSystem::infantry_anim_sound_pass(AiEntity &e, World &world, uint32_t logi
     // plane -> standing on an entity -> terrain surface 3 (snow) -> ground.
     // [orig: org1 @0x4bf23e-0x4bf2b0; org2 @0x4b77c6-0x4b78a8; the dip slot is
     // the AnimMap out[3] stack cell both bodies pass to the anim update]
+    const Entity *went = world.registry.get(e.handle);
     for (int foot = 0; foot < 2; ++foot) {
         if ((ev & (foot == 0 ? 0x1u : 0x2u)) == 0) continue;
         const int32_t pos[3] = {e.pos[0], e.pos[1], e.pos[2] - capsule_bottom};
         int slot;
         if (world.env.water_z != 0 && pos[2] < world.env.water_z) {
             slot = audio::kSlotFootWater; // one slot for both feet
-        } else if (inf.standing_on_entity) {
-            // [orig: the entity+0x28 groundEntity test — written by the ground
-            // probe variant Entity_RaycastGroundHeightAndObject @0x525fd0]
+        } else if (went != nullptr && went->ground_target.valid()) {
+            // [orig: the entity+0x28 groundEntity test — stored unconditionally
+            // (null on a miss) by the resolve's ground probe,
+            // Entity_RaycastGroundHeightAndObject @0x525fd0 / the +0x28 store
+            // @0x414370. This pass runs BEFORE this tick's resolve, so the read
+            // is last tick's link — same order as org1 (sound block @0x4bf23e
+            // precedes the resolve tail @0x4bf7b8+). Mounted bodies never get
+            // here: seat clips author no foot-event bits.]
             slot = foot == 0 ? audio::kSlotFootLObject : audio::kSlotFootRObject;
         } else if (terrain::surface_type_at_fixed(world.surface_map, pos[0], pos[1]) == 3) {
             slot = foot == 0 ? audio::kSlotFootLSnow : audio::kSlotFootRSnow;

@@ -2,8 +2,8 @@
 // blocks — Entity_UpdateInfantryAI @0x4bf169-0x4bf2b0, Entity_UpdateInfantryPlayerBody
 // @0x4b76f1-0x4b78a8 — plus the landing pair @0x4bf87f/@0x4b7f7c and the death
 // scream @0x4b9ca3]: tick parity per body, the foot-level Z dip, the
-// water/surface-3/ground slot pick, the SSAudio foley bits, empty-slot no-ops,
-// the "default" profile fallback, and the night scream gate.
+// water/groundEntity-OBJ/surface-3/ground slot pick, the SSAudio foley bits,
+// empty-slot no-ops, the "default" profile fallback, and the night scream gate.
 #include <cstdint>
 #include <cstdio>
 #include <map>
@@ -80,6 +80,8 @@ const char kProfiles[] =
     "     SSRFootGND     T_DIRT_R\n"
     "     SSLFootSnow    T_SNOW_L\n"
     "     SSRFootSnow    T_SNOW_R\n"
+    "     SSLFootOBJ     T_OBJ_L\n"
+    "     SSRFootOBJ     T_OBJ_R\n"
     "     SSFootWater    T_WATER\n"
     "     SSAudio1       T_AUD1\n"
     "     SSAudio6       T_AUD6\n"
@@ -201,6 +203,74 @@ void test_foot_dip_water_and_surface_picks() {
     if (evs.size() == 2) {
         CHECK(evs[0].slot == slot::kSlotFootLSnow);
         CHECK(evs[1].slot == slot::kSlotFootRSnow);
+    }
+}
+
+void test_foot_obj_pick() {
+    // D-SND-11: a live entity+0x28 groundEntity link picks the OBJ pair. The
+    // pass reads LAST tick's link (the sound block precedes the resolve), and
+    // with no collision world the terrain-cache fallback clears it each tick —
+    // the probe's store is unconditional, null on a miss [orig: the +0x28 store
+    // in Entity_RaycastGroundHeightAndObject @ 0x414370].
+    Rig rig;
+    rig.src.events = 0x3; // both feet
+    rig.src.capsule_bottom = fx(0.5);
+    rig.e->pos[2] = fx(2.0);
+    Entity plat;
+    plat.health = 100;
+    plat.alive = true;
+    const EntityHandle ph = rig.world.registry.spawn(0, plat);
+
+    // Standing on the platform (the link as the probe left it last tick).
+    rig.world.registry.get(rig.e->handle)->ground_target = ph;
+    rig.run(1, 2);
+    auto evs = rig.take();
+    CHECK(evs.size() == 2);
+    if (evs.size() == 2) {
+        CHECK(evs[0].slot == slot::kSlotFootLObject);
+        CHECK(evs[1].slot == slot::kSlotFootRObject);
+        CHECK(std::string(evs[0].set_name) == "T_OBJ_L");
+        CHECK(std::string(evs[1].set_name) == "T_OBJ_R");
+    }
+
+    // Staleness: tick 1's fallback (no collision world) cleared the link, so
+    // the next pair falls through to ground without any reseed.
+    rig.run(3, 4);
+    evs = rig.take();
+    CHECK(evs.size() == 2);
+    if (evs.size() == 2) {
+        CHECK(evs[0].slot == slot::kSlotFootLGround);
+        CHECK(evs[1].slot == slot::kSlotFootRGround);
+    }
+
+    // Water outranks the link: feet under the plane -> the single water slot.
+    rig.world.registry.get(rig.e->handle)->ground_target = ph;
+    rig.world.env.water_z = fx(1.75);
+    rig.run(5, 6);
+    evs = rig.take();
+    CHECK(evs.size() == 2);
+    if (evs.size() == 2) {
+        CHECK(evs[0].slot == slot::kSlotFootWater);
+        CHECK(evs[1].slot == slot::kSlotFootWater);
+    }
+    rig.world.env.water_z = 0;
+
+    // The link outranks snow: surface 3 under the feet, link live -> still OBJ.
+    static const uint8_t snow[16] = {3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3};
+    static const int grid[256] = {1};
+    rig.world.surface_map.data = snow;
+    rig.world.surface_map.width = 4;
+    rig.world.surface_map.height = 4;
+    rig.world.surface_map.sector_grid = grid;
+    rig.e->pos[0] = fx(10.0);
+    rig.e->pos[1] = -fx(10.0);
+    rig.world.registry.get(rig.e->handle)->ground_target = ph;
+    rig.run(7, 8);
+    evs = rig.take();
+    CHECK(evs.size() == 2);
+    if (evs.size() == 2) {
+        CHECK(evs[0].slot == slot::kSlotFootLObject);
+        CHECK(evs[1].slot == slot::kSlotFootRObject);
     }
 }
 
@@ -438,6 +508,7 @@ int main() {
     test_npc_feet_odd_ticks_only();
     test_player_feet_even_ticks_only();
     test_foot_dip_water_and_surface_picks();
+    test_foot_obj_pick();
     test_foley_bits_and_empty_slot_noop();
     test_default_profile_fallback();
     test_landing_pair_alive_and_dead();
