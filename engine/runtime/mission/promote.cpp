@@ -378,6 +378,18 @@ PromoteResult promote_mission(const bms::File &m, World &world, AiSystem &ai,
     // our container rebase keeps a separate node array).
     ai.nav.nodes.clear();
     ai.nav.nodes.reserve(m.markers.size());
+    // The map grid-label origin: the FIRST type-2043 marker ("Map
+    // Centerpoint, helps align commander map grid" — items.def id 102043).
+    // [orig: HUD_InitOverlaySystem @0x5a4999 pool-3 scan for
+    //  entity+80 == 2043 -> dword_2723EB4]
+    world.map_grid_origin_present = false;
+    for (const bms::Entity &mk : m.markers) {
+        if (mk.type_id == 2043 && !world.map_grid_origin_present) {
+            world.map_grid_origin_present = true;
+            world.map_grid_origin_x = mk.x;
+            world.map_grid_origin_y = mk.y;
+        }
+    }
     for (const bms::Entity &mk : m.markers) {
         NavEntry n;
         // Arrival radius from the marker's wp_distance, default 0.5u. [orig:

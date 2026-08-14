@@ -395,7 +395,7 @@ sweep; blank = not yet characterized.
 | 0x67 | 0x42D570 | `_0x067` | |
 | 0x68 | 0x42DAA0 | `_0x068` | loaded-model snapshot page request `[u32 startIdx]` → C2S 0x3D (§5.34; “entity-index” is the retired provisional name) |
 | 0x6A | 0x432510 | `_0x06A` | |
-| 0x6B | 0x425520 | `_0x06B` | minimap overlay batch `[u8 count]`+count×12B (handle@+0; blip rebuilt from entity state, 10 trailing B unused) (§5.35) |
+| 0x6B | 0x425520 | `_0x06B` | minimap overlay batch `[u8 count]`+count×12B, fully consumed: handle + wire s16 pos + lifetime_s + type + ring height (§5.35) |
 | 0x6C | 0x428FC0 | `_0x06C` | zone presence count (3 B): [u16 zoneHandle][u8 count 1..32] — players inside an active timed capture, emitted on change (`CaptureCtx_UpdateActiveCaptureRate @0x53B600` → `NetPacket_WriteZonePresenceCount @0x506DE0`). §5.61 |
 | 0x6D | 0x430C50 | `_HandleEntityDeath` | |
 | 0x6E | 0x429880 | `_0x06E` | spawn-wave / deploy-screen status (§5.31's "squad roster"): `[u8 groupCount]` + per group `{u16 zoneHandle, u16 zoneIdx, u8 queuedCount, u16 waveCountdown, u16 members[]}` — sent on wave-queue join + 1 Hz to dead/deploying players (`NetPacket_WriteSpawnWaveStatus @0x507490`). Client map **§5.31**, producer §5.61 |
@@ -2960,10 +2960,37 @@ spawn points → icon 0; vehicles by `itemDef->unitType` (5..8 → 15, 3/4 → 1
 4/12 color 8; supply crates 16/17/29 color 15; `attrib & 0x20000000` nohud skips — and
 stages 6-byte entries into a 16-slot buffer flushed per-recipient as one 0x40
 (`sub_50FEA0` stage → `Server_SendPendingOverlayState @ 0x50FE20`, send-mask 32 targeted
-at that slot; the golden's `count=16` chunks). Reimpl (D-NET-162): the npruntime 1 Hz
-block emits per-recipient zone entries (icon 0, flags 0x10) + vehicle blips (flags 0x00,
-icon by the items.def `unit_type` now parsed into `world::VehicleTraits`); the
-player/emplacement/crate entries and the resumable budget walk are deferred.
+at that slot; the golden's `count=16` chunks). Reimpl (updated 2026-08-13):
+`emit_minimap_overlay_state` is an independent per-recipient 14-tick producer,
+including the HostClient loopback. It performs the initial persistent pool-2
+scan, refreshes persistent spawn markers, advances one of 128 pool-1 residue
+classes, classifies through the portable `world::classify_minimap_overlay`, and
+flushes in 16-entry chunks. The classifier now covers the change-team/FARP,
+unit-11, armory, model-marked building, vehicle, generic live marker, EWEAP,
+person, and spawn branches with NoHud/dead gates. Remaining table tails are the
+vehicle-bay group variants, supply-crate variants, and medic-revivable person
+icon. The exact pool-0 producer phase remains deferred; the separate retail
+0x6B active-player feed is live on the client path.
+
+The client side is now live too, grilled against the retail retention
+machinery 2026-08-13: `ClientReplicaPipeline` routes 0x40 rows by flags into
+the witnessed contiguous banks (transient 328 @`0x28E5620` → persistent 328
+@`0x28E7F20` → special 504 @`0x28EA820`; alloc routing `flags&0x40` special /
+`&0x10` persistent / else transient, free = handle `0xFFFF` OR lifetime 0, a
+full bank DROPS with no eviction [orig: `sub_5BE970 @0x5BE970`]), accepts any
+pool-0..4 handle whether or not the entity is decoded (retail reads the raw
+pool slot [orig: `MapOverlay_UpdateOrCreateSlot @0x5beac0`]), resolves colors
+through the full 32-entry table + the 33..42→[16..25] alias with the alpha-0
+reject [orig: `g_minimap_overlay_color_table @0x840A10`, `@0x5beb16..0x5beb3e`],
+ages the transient bank to a clear and the special bank to a floored-zero
+lifetime (handle kept until reuse), never ages the persistent bank, and runs
+the 251-entry 0x6B link table (slot lifetime refresh, wire-pose markers,
+expiry clears the slot) [orig: `update_map_overlay_timers @0x5BFCE0`]. Regular
+(non-special) markers re-read the live decoded entity each tick, mirroring
+retail's draw-time pool read + `entity[538]` gate. Applies retain source
+packet order with world/0x0A/0x6B/lifecycle messages. These rows feed the
+normal gameplay `HUDSPINMAP*` pass through the versioned Simulation snapshot
+(v2); command/deploy map windows remain outside this slice.
 
 **Witness:** the A&S probe "ON RE Probe AS dvxi5" (two human players, 699 0x40 records) has two
 capture points — Rebel HQ (handle 0x1000, bms(0,0)) and JO Tent (handle 0x1001, bms(0,-40)), both
@@ -3843,13 +3870,28 @@ per-frame message cadence without producing a separate reply datagram every fram
 The per-entity HUD / lifecycle notifications the host streams alongside the 0x0A frame. All were
 dispatch-table one-liners (no field map) until probe3_again carried enough of each to witness.
 
-**S2C `0x6B` — minimap overlay batch.** `[u8 count]` + `count × 12-B records`. The handler reads only the
-`[u16 handle]` at each record's offset 0 (resolved via the pool table) and **rebuilds that entity's
-minimap blip from its own engine-side state** — position, type, and team @ `entity+354` (the same team
-byte as D-NET-58) → icon + team color. The 10 trailing bytes per record are *not* consumed by the handler,
-so the decoder keeps them raw. [orig: `NapiNPClientMsg_0x06B @ 0x425520` → `update_minimap_overlay_entity @ 0x5BEC10`].
-(The census guess "objective/HUD countdown" was wrong — the `1e→1d` byte is inside a per-record blob the
-handler ignores, not a global timer.)
+**S2C `0x6B` — minimap overlay batch.** `[u8 count]` + `count × 12-B records`,
+**fully consumed** (the 2026-06-19 "10 trailing bytes unread" gloss was a
+decompiler artifact — the call-site marshalling `@0x42559f..0x4255dd` reads
+every field): `[u16 handle][s16 x][s16 y][s16 z][u16 lifetime][u8 type]
+[u8 height]`. The handle is pool-resolved (invalid pool/slot skips the
+record); the marker POSITION is the wire s16 whole-unit triple shifted to
+16.16 (NOT the live entity pose); `lifetime` is SECONDS ×62 to ticks for the
+251-entry linked keep-alive table `@0x28E1B28`; `type` 3 selects pulse icon
+24, everything else 253; `height` <<16 is the map ring radius (slot+28). Only
+the team color comes from the entity (`entity+354`: 1 → color-table[10],
+2 → [9], else [12], applied when nonzero) and the slot's flags byte is stamped
+`0xC4`. The gate is RANGE-ONLY — handle ≠ 0xFFFF, pool < 5, index <
+capacity `@0x425573..0x42558c` — the fixed pool-slot pointer is read
+whether or not an entity lives there (a zeroed slot's team byte gives the
+neutral color), and the link timer walk never consults the entity either:
+links die solely on their own lifetime, re-arming the slot's 1984-tick
+life while alive and freeing it (`flags |= 0x20`, lifetime 0, handle −1)
+on expiry [orig: `NapiNPClientMsg_0x06B @ 0x425520` →
+`update_minimap_overlay_entity @ 0x5BEC10`; alloc `sub_5BE970 @0x5BE970`;
+timers `update_map_overlay_timers @0x5bfd3a..0x5bfe21`].
+(The census guess "objective/HUD countdown" was wrong — the `1e→1d` byte is
+the lifetime field's low byte counting down across resends.)
 
 **S2C `0x49` — weapon-reload notification.** `[u16 entityHandle][u16 reloadParam]` (4 B). Resolves the
 entity, then takes ONE of three arms. The **local player** is tested FIRST `[orig: @0x42c0f2 / @0x42c0f8]` and goes straight to the refill, before the item type is ever read. Otherwise the handler reads the ITEM TYPE: a remote **PERSON** gets `entity+0x371 = 80` (the arms-dip window, world-wac-ai-re §14.8.5) and RETURNS immediately `[orig: @0x42c105 / @0x42c10b / @0x42c113]` — it never reaches `WeaponSlot_ReloadAmmo`, whose `@0x54173c` is the only site that SEEDS the `entity+0x372` third-person reload-clip pose window. Every **NON-person** (vehicle / emplaced) weapon falls through to the real refill `[orig: @0x42c109 -> @0x42c116]`. **Corrected 2026-07-27: the earlier "a vehicle entity instead arms an 80-tick timer" had the two arms INVERTED** — it is the remote PERSON that gets the timer and the vehicle that gets the refill. Consequence: a pure client never plays a peer's reload clip; only a host does, via its own-copy refill `@0x514f03`. See D-NET-189.
@@ -10432,7 +10474,7 @@ Controlled-capture validation (probe mission "ON RE Probe COOP Dvxc1", probe 3 /
 
 Controlled-capture validation (probe mission "ON RE Probe COOP Dvxc1" re-run — `probe3_again`, **3 human players** + 15 ballistic weapons + more movement + a second client; host + 2 client `/PROFILE` recordings, 2026-06-19):
 - **D-NET-76** [MED, DOC+CODE, CORRECTED 2026-08-02] **The high-volume transport / anti-cheat control pings are decoded — the largest former hex-only hole in the §4 catalog (§5.34).** The richer 2-client session field-mapped them. **RTT ping/pong S2C `0x57` ⇄ C2S `0x2C`** (×10,679 each): identical 5-B `[u32 timestamp][u8 echoFlag]`; bidirectional — `echoFlag != 0` bounces the stamp with the flag cleared, while zero measures RTT (the server also enforces `g_MinPing`/`g_MaxPing`). The historical capture carried S2C `0x68`/`0x43`/`0x39` ×141 each; its “~335 frames” spacing and seed `0x3D5D` described that run only and are **superseded as scheduler/constant claims**. The retail producer first observes its completed 1,860-tick age on call 1,861 and then runs every 744 mature gate calls: reliable retained-seed `0x39`, transient packed-input `0x42`, reliable baseline/timing-validated `0x43`, and non-dedicated-host-only transient viewport cursor `0x68`. The target-slot path includes the listen host. Landed decoders/printers/catalog coverage remain valid. **`0x2C` is direction-overloaded** — S2C `0x2C` (`@ 0x427E10`) is chat history; only C2S is RTT. [orig: `Server_UpdateAllActivePlayerSlots @0x518820` / `NapiNPClientMsg_0x057_RTT @0x432210` / `NapiNPServerMsg_HandlePingResponse @0x515070` / `NapiNPClientMsg_0x068 @0x42DAA0` / `NapiNPClientMsg_0x043 @0x42FA90` / `NapiNPClientMsg_HandleChecksumChallenge @0x42E6D0`]
-- **D-NET-77** [MED, DOC+CODE] **S2C `0x6B` is a minimap-overlay batch, not the objective/HUD timer the census guessed (§5.35).** `[u8 count]` + `count × 12-B records`; the handler reads only the `[u16 handle]` at each record+0 (pool-resolved) and **rebuilds that entity's minimap blip from its own engine-side state** (position, type, team @ `entity+354` → icon + team color via `update_minimap_overlay_entity @ 0x5BEC10`). The 10 trailing bytes per record are not consumed by the handler — so the `1e→1d` "countdown" the census flagged is just a byte inside a per-record blob the engine ignores, not a global timer. Landed `decode_minimap_overlay_batch` + printer + catalog + coverage. probe3_again ×266 (`count=1`, blip = the active player), full-consume. [orig: NapiNPClientMsg_0x06B @ 0x425520 → update_minimap_overlay_entity @ 0x5BEC10]
+- **D-NET-77** [MED, DOC+CODE, RUNTIME PORTED 2026-08-13] **S2C `0x6B` is a minimap-overlay batch, not the objective/HUD timer the census guessed (§5.35).** `[u8 count]` + `count × 12-B records`, fully consumed: `[u16 handle][s16 x][s16 y][s16 z][u16 lifetime_s][u8 type][u8 height]` — the 2026-06-19 "10 trailing bytes unread" gloss is corrected by the call-site marshalling `@0x42559f..0x4255dd` (the `1e→1d` byte the census flagged is the lifetime low byte). Marker pose comes from the WIRE; the entity supplies only the team color; lifetime is seconds ×62 for the 251-link keep-alive; flags stamp `0xC4`. `ClientReplicaPipeline::apply_minimap_overlay_batch` retains the witnessed banks/links and the ordered reducer keeps each apply at its wire position. probe3_again ×266 (`count=1`, blip = the active player), full-consume. [orig: NapiNPClientMsg_0x06B @ 0x425520 → update_minimap_overlay_entity @ 0x5BEC10]
 - **D-NET-78** [MED, DOC+CODE] **Weapon-reload / second death path / entity-checksum + misc client scalars decoded (§5.35).** **S2C `0x49`** weapon-reload `[u16 handle][u16 reloadParam]` → `WeaponSlot_ReloadAmmo` — and the **IDB name `handle_camera_sync_packet_0x049` is WRONG** (no camera code; reloads ammo). **S2C `0x13`** is a SECOND entity-death path beside `0x26`: `[u16 handle][i16 killerSource]` acts directly on the entity (`Health=0` + death cb), where `0x26` routes through `Entity_KillBySlotId`. **S2C `0x30`** entity-checksum request `[u8 entityId][u16 checksum]` replies **C2S `0x20`** — correcting the §4 catalog row that read "→ C2S 0x21" (0x21 is the *0x31* weapon-loadout CRC reply; the census confirms the 0x30↔0x20 pairing, ×174 each). Plus the misc scalars **`0x42`** input-state flags `[u16]`, **`0x79`** host network-quality `[u8]`, and **`0x2A`** chat history `[i32][i32][i16]`. Landed `decode_weapon_reload`/`decode_entity_death`/`decode_entity_checksum_request`/`decode_input_state_flags`/`decode_network_quality`/`decode_chat_history_entry` + printers + catalog + coverage (**37 Decoded tags**). `0x79` was re-grilled on 2026-08-02: `NapiNPClientMsg_NetworkQuality @0x429B00` stores into `CNetQuality+0x0C`; `CNetQuality_UpdateMetrics @0x4C52C0` derives it from frame pressure/ping/loss; the host broadcasts every `0x136` ticks. probe3_again carries ×355; PR #403 run 12 carries ×44, all value 1 on a healthy LAN, with zero decode failures. [orig: handle_camera_sync_packet_0x049 @ 0x42C0A0 (misnamed) / NapiNPClientMsg_EntityDeath @ 0x42EB50 / NapiNPClientMsg_HandleChecksumRequest @ 0x431170 / NapiNPClientMsg_0x042 @ 0x4281A0 / NapiNPClientMsg_NetworkQuality @ 0x429B00 / CNetQuality_UpdateMetrics @ 0x4C52C0 / _0x02A @ 0x425BA0]
 - **D-NET-79** [MED, DOC+CODE] **Deployed-item spawn 0x59 + entity-routed sub-packet 0x44 (§5.36).** **S2C `0x59`** is the deployed-item / weapon-overlay channel — a fixed 32-B record (item ids + owner + slot + parent + 3×i32 16.16 pos + 3×u16 Euler) the host streams for placeables a player drops; one record carries a friend/foe item-id pair so the same deployable shows a different model per team (owner team @ `+354` vs local player). Witnessed in probe3_again as a `Rifle-sized Crate` (`itemId=0x0362`) dropped by player slot 5; landed `decode_deployed_item_spawn` (→ Decoded, **38 Decoded tags**). **S2C `0x44`** is an entity-routed sub-packet: a 5-B sub-header `[u16][i16 netId][u8 subtype]` whose class-dependent body the dispatcher routes to the entity's per-class `def+356` callback — the same per-class path as the C2S `0x0C` uplink (§5.10b), with `subtype` playing the field-group role. Decoded the sub-header (PrinterOnly; body left raw — class-specific, same deferral as the §5.15 guided record). `nw_pp` decodes the whole capture with zero failures. [orig: Entity_SpawnOrUpdateFromSlotPacket @ 0x546770 / NetPacket_DispatchToEntityByNetId @ 0x4D6960]
 - **D-NET-80** [INFO, VALIDATED] **Multi-client lifecycle cross-validated against the `/PROFILE` .sph value-oracle.** probe3_again ran 3 Blue players (TestPlayer / TestPlayer1 / FooPlayer) through a full play session with deaths and clean leaves. The new `nw_probe3again_lifecycle_test` decodes the wire and cross-checks it against the host `.sph` (`decode_server_log`): the `.sph` reports a **3-player roster + 7 DEATH + 2 DISCONNECT** (frames 7186 / 7228), and on the wire the **2 clean disconnects coincide with the 2× S2C `0x5D`** (entity destroy-list `[i16 slot]×N` → `Entity_Destroy` + `PlayerSlot_ClearAndUnlink`) — the clean-leave channel distinct from the death-driven 0x26/0x4E despawn of D-NET-66. (The `0x5D` bodies were *empty* in this capture. **Corrected 2026-07-25 — the earlier reading that "the per-entity removal itself rides the `0x46` player-sync `0x8000` removal bit" is REFUTED by the handlers.** `0x46` bit 15 carries NO entity byte and `PlayerSlot_ClearAndUnlink @0x434730` clears BOOKKEEPING ONLY — the active flag, names, team and entity ref (@0x431411..0x43144c); the entity-field wipes @0x431437 are dead code on that leg because `entitySlotPtr` is null there, so **the entity is never destroyed by `0x46`**. Entity destruction happens ONLY in the `0x5D` sweep, whose sole witnessed trigger is a client C2S `0x32` request (`NapiNPServerMsg_SendEmptySlots @0x51a600`) — an empty body simply means the host had no empty pool-0 slots at that moment. See D-NET-176.) The wire death tags (0x26 ×18 + 0x13 ×18) cover the `.sph` death count. The test also pins the high-volume transport channels (RTT `0x57`==`0x2C`==10,679; trio `0x68`/`0x43`/`0x39` ×141 each ⇄ replies `0x3D`/`0x08`/`0x1C` ×141), the weapon-heavy session (260 C2S `0x06` across **15 distinct adm indices**, both shooters `0x0006`/`0x0007`), the `0x59` deployed-item channel (×12), AND the confirmed negatives **as assertions** (every C2S `0x0C` sub_op `0x0A` → no guided; S2C `0x20`=2 load-batch only → AI static; `0x6E` groupCount==0 → no queued spawn wave). Gated on `NW_PROBE3AGAIN_PCAP` / `NW_PROBE3AGAIN_HOST_SPH`; skips clean when absent. [orig: CServerLog_WriteDeathMarker @ 0x4e1e00 / CServerLog_WriteDisconnectMarker @ 0x4e1c50 / NapiNPClientMsg_DestroyEntityList @ 0x429730]
@@ -11036,18 +11078,21 @@ Server_UpdateCaptureZones @ 0x53B8F0 drain; GameEvent_FlagCapture @ 0x50F6F0;
 Server_EnforceZoneEntityTeams @ 0x519600]` — plus the npruntime 1 Hz wire block
 (server_tick.cpp): 0x6F (15 B, change-gated to all + the full set to deploy-pending/dead
 recipients), the 0x1E zone events (0x3B/0x3C edges; flips 50/51/52/53 team-filtered + the
-56/57 banner), 0x53 on flips, and the 0x40 minimap-overlay feed (persistent zone entries
-icon 0 + transient vehicle blips by items.def `unit_type`, chunked ×16
-`[orig: Server_BuildOverlayStateForPlayer @ 0x517FC0 → Entity_ClassifyForMinimap
-@ 0x50FA70 → the staging flush @ 0x50FE20]`). Pinned by `zone_chain_test`
+56/57 banner), and 0x53 on flips. The 0x40 producer runs on its own witnessed 14-tick
+cadence (this section's earlier "1 Hz-coupled" prose was stale against the
+shipped code) per §5.19 (`Server_BuildOverlayStateForPlayer @0x517FC0` →
+`Entity_ClassifyForMinimap @0x50FA70` → staging flush `@0x50FE20`); 2026-08-13
+adds HostClient loopback delivery and moves the classifier into the portable
+`world/minimap_overlay.*`. Pinned by `zone_chain_test`
 (control-delta formula pins; the full flip→secure→contest→neutralize→retake cycle).
 Tracked divergences: our flip-request source is the same 1 Hz proximity sample the drain
 consumes (retail queues per-touch through the physics pass); the 0x1E attacker byte uses
 the chain-vector index (retail: `SpawnZoneList_IndexOf @ 0x43B990` over the client-sorted
 registry); 0x6F is change-gated (the golden's 268 non-periodic emits refute a steady
-per-second stream; the exact retail emit filter is unwitnessed); the 0x40 walk covers
-zones + vehicle blips only (players/emplacements/CTF-flag entries + the resumable
-per-slot budget walk deferred); the timed-capture engine's ACTIVE entries + 0x6C presence
+per-second stream; the exact retail emit filter is unwitnessed); 0x40 classifier
+residuals are now limited to the vehicle-bay group, supply-crate, medic-revivable,
+and exact pool-0 producer tails (ordinary active-player refresh separately rides 0x6B);
+the timed-capture engine's ACTIVE entries + 0x6C presence
 counts (un-numbered flag zones — none authored on ASH_I5A), spawn-wave resets, the
 underdog catch-up term (needs the round clock), proximity scoring/0x81, and the
 `def+88 & 2` in-radius team conversion are all deferred.

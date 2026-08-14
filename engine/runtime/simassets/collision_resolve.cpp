@@ -59,6 +59,7 @@ int32_t collision_model_for_graphic(CollisionResolveState &state,
 	int32_t model_id = -1;
 	int32_t occlusion_id = -1;
 	float bound_radius = 0.0f;
+	std::pair<float, float> half_xy{0.0f, 0.0f};
 	if (deps.models.has_index()) {
 		// ADR 0028: the sim reads its own parse-once cache. The placer
 		// now supplies only the render-side pose sources (live-PANM
@@ -80,11 +81,26 @@ int32_t collision_model_for_graphic(CollisionResolveState &state,
 			if (occlusion_model_from_3di(*m3, occ))
 				occlusion_id = deps.occlusion.add_model(std::move(occ));
 			bound_radius = model_bound_radius_from_3di(*m3);
+			// The minimap blip-size source: the CMDL bound-block ground-axis
+			// half extents. [orig: draw_minimap_blip @0x5979a2..0x5979b8 —
+			//  model+176: half = (max - min) >> 1 per ground axis]
+			if (m3->collision != nullptr) {
+				const ThreediCollisionModelData &bd =
+						m3->collision->model_data;
+				// File ground axes -> mission plane: mission X rides file Y,
+				// mission Y rides file X (the threedi position swizzle);
+				// extents are sign-agnostic.
+				half_xy.first = (bd.bbox[4] - bd.bbox[1]) * 0.5f;
+				half_xy.second = (bd.bbox[3] - bd.bbox[0]) * 0.5f;
+				if (half_xy.first < 0.0f) half_xy.first = 0.0f;
+				if (half_xy.second < 0.0f) half_xy.second = 0.0f;
+			}
 		}
 	}
 	state.model_by_graphic.emplace(graphic_key, model_id);
 	state.occlusion_by_graphic.emplace(graphic_key, occlusion_id);
 	state.radius_by_graphic.emplace(graphic_key, bound_radius);
+	state.half_xy_by_graphic.emplace(graphic_key, half_xy);
 	return model_id;
 }
 
@@ -352,6 +368,10 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 		// and the collision/occlusion resolver are the portable ownership seam
 		// for that otherwise renderer-private fact.
 		e->has_minimap_model_marker = occ_id >= 0;
+		// The blip drawer's model half-extent feed rides the same seam.
+		const std::pair<float, float> &half_xy = state.half_xy_by_graphic[key];
+		e->minimap_half_x_q16 = static_cast<int32_t>(half_xy.first * 65536.0f);
+		e->minimap_half_y_q16 = static_cast<int32_t>(half_xy.second * 65536.0f);
 		if (occ_id >= 0 && e->kind == world::EntityKind::Building) {
 			// The def bits the occlusion engine reads: attrib2 bit 6 "weldable"
 			// [orig: itemDef+88 >> 6 @ 0x5c5cce], attrib bit 27 recurse-windows

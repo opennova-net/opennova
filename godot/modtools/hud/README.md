@@ -22,14 +22,16 @@ read the same data (`HudPos`) and draw with the same shell-neutral helpers
 
 The element model is the witnessed original — see
 [`docs/interface/hud-re.md`](../../../docs/interface/hud-re.md). Notably the
-"spinmap" widget is the **stance indicator** (discrete `HUDSTANCE` frames), not a
-compass (D-HUD-1); the design space is a fixed 1024x768
+IDB-misnamed "spinmap" function is the **stance indicator** (discrete
+`HUDSTANCE` frames), while the separately authored `HUDSPINMAP*` rectangle is
+the real heading-up gameplay map (D-HUD-1/-2); the design space is a fixed 1024x768
 (`Viewport_ScaleToVirtualCoords @0x5d2b20`); and HUD text uses the original `.fnt`
 bitmap fonts via `FntResource`. The weapon-coupled elements (ammo, weapon
 name, dynamic crosshair spread) are follow-ups for the preview; they are live in
-the game HUD. There is no in-HUD radar to preview: the 2026-07-18 grill resolved
-the old "minimap `@0x599700`" misnomer as the weapon heat bar, and JO:CA has no
-in-HUD radar (`docs/interface/hud-re.md` §Waypoint HUD).
+the game HUD. The preview shows only the gameplay spinmap's authored bounds;
+the live HUD now compiles its terrain, retained 0x40/0x6B blips, pulse markers,
+waypoint tether/distance, and the counter-rotating compass ring. The old
+"minimap `@0x599700`" name remains a separate heat-bar misnomer.
 
 The workspace is registered in the shell — a `WorkspaceDef` row in
 `editor_workstation.gd` (`_workspace_defs()`), the `Workspace.HUD` enum entry, and

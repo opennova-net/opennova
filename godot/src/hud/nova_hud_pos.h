@@ -177,6 +177,11 @@ public:
 	Dictionary get_parachute_icon() const;
 	Dictionary get_armor_icon() const;
 	Rect2i get_spinmap_bounds() const;
+	int get_spinmap_wp_dist_off() const;
+	// MAPCOORDS x, y, suppressor (-1 when unauthored = label suppressed).
+	Vector3i get_map_coords() const;
+	// Four visibility bytes for one HUDDECLUT_* row. Empty means absent.
+	PackedByteArray get_declutter_flags(const String &p_name) const;
 	// Named HUD colors (Godot Color, RGBA normalized): health_border, hud_textcolor,
 	// stancecolor_good/middle/bad, tagcolor_*, etc.
 	Dictionary get_colors() const;

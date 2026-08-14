@@ -84,6 +84,7 @@ private:
 	Ref<Texture2D> bound_water_noise;
 
 	void _cache_env_weather_nodes();
+	void _render_frame_with_camera(Camera3D *cam);
 
 	// Debug state (the toggles feed the compiler's TraversalConfig input)
 	opennova::TraversalConfig traversal_config;
@@ -151,6 +152,11 @@ public:
 	// by GameFramePipeline through the concrete terrain leg — this node
 	// no longer self-processes.
 	void render_frame();
+	// The minimap-bake compile: the same pool recompiled for an arbitrary
+	// camera. Bake-only — the pool holds this draw list until the next live
+	// compile, so callers confine it to the covered load window.
+	bool render_frame_for_camera(Camera3D *p_camera);
+	bool is_built() const { return built; }
 
 	// Debug API
 	Dictionary get_traversal_stats() const;

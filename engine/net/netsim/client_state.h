@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -404,6 +405,53 @@ struct ClientMountedAmmoState {
 	std::uint32_t revision = 0;
 };
 
+// Client-retained map-overlay banks. The capacities and routing bits are the
+// original fixed tables; keeping them bounded makes refresh, clear, and expiry
+// behavior independent from presentation.
+// [orig: MapOverlay_UpdateOrCreateSlot @0x5BEA60; sub_5BE970 @0x5BE970;
+//  update_map_overlay_timers @0x5BFCE0]
+inline constexpr std::size_t kMinimapTransientCapacity = 328;
+inline constexpr std::size_t kMinimapPersistentCapacity = 328;
+inline constexpr std::size_t kMinimapSpecialCapacity = 504;
+inline constexpr std::size_t kMinimapLinkedCapacity = 251;
+inline constexpr uint16_t kMinimapOverlayLifetimeTicks = 1984;
+
+struct ClientMinimapOverlaySlot {
+	bool active = false;
+	uint16_t handle = 0xFFFF;
+	uint8_t param = 0;      // icon byte (wire +2 on 0x40; 253/24 on 0x6B)
+	uint8_t icon_color = 0; // wire color-table index (+3 on 0x40)
+	uint8_t flags = 0;      // 0x10 persistent, 0x20 clear, 0x40 special, 0x6B writes 0xC4
+	uint8_t source = 0;
+	uint32_t argb = 0xFFFFFFFFu;
+	int32_t x = 0;
+	int32_t y = 0;
+	int32_t z = 0;          // 0x6B slots: the ring height (16.16)
+	int32_t heading_bam = 0;
+	uint16_t remaining_ticks = 0;
+	// Regular (non-special) markers draw from the live decoded entity; this
+	// mirrors retail's entity[538] draw gate and is refreshed each tick.
+	// [orig: render_minimap_slot_blip @0x5be4b8]
+	bool entity_known = false;
+};
+
+// One 0x6B keep-alive link: while it lives it refreshes its special slot's
+// lifetime and handle each tick; its expiry clears the slot.
+// [orig: linked table @0x28E1B28, update_map_overlay_timers @0x5bfd3a..]
+struct ClientMinimapLinkedSlot {
+	bool active = false;
+	uint16_t handle = 0xFFFF;
+	uint32_t remaining_ticks = 0; // wire seconds x62 [orig: @0x4255c9..0x4255d6]
+};
+
+struct ClientMinimapState {
+	std::array<ClientMinimapOverlaySlot, kMinimapTransientCapacity> transient{};
+	std::array<ClientMinimapOverlaySlot, kMinimapPersistentCapacity> persistent{};
+	std::array<ClientMinimapOverlaySlot, kMinimapSpecialCapacity> special{};
+	std::array<ClientMinimapLinkedSlot, kMinimapLinkedCapacity> linked{};
+	std::uint64_t revision = 0;
+};
+
 // The decoded world the client holds after pumping the loopback. Positions are
 // post-compression (lossy, ~|v|>>11 quantization) — exactly what the original
 // client renders for its decoded peers. Callers must NOT "correct" them toward the
@@ -438,6 +486,7 @@ struct ClientState {
 	std::uint32_t objective_updates_applied = 0;
 	ClientEnvironmentState environment;
 	ClientMountedAmmoState mounted_ammo;
+	ClientMinimapState minimap;
 	std::vector<ClientEntityState> entities;
 	std::uint32_t frames_applied = 0;
 
@@ -453,5 +502,15 @@ struct ClientState {
 	// frame (see ClientEntityState::anim_state_pulse).
 	void clear_anim_pulses();
 };
+
+// The joiner-side map grid-origin resolve: the first decoded pool-3 entity
+// of type 2043, the same client pool scan retail's HUD init runs. The host
+// resolves the same rule from the mission doc at promotion
+// (World::map_grid_origin_*); this is the ONE decoded-view home so the
+// selection rule cannot fork per embedder. Returns false when no origin
+// entity has decoded yet.
+// [orig: HUD_InitOverlaySystem @0x5a4999 pool scan (entity+80 == 2043)]
+bool client_minimap_grid_origin(const ClientState &state, int32_t &out_x_q16,
+		int32_t &out_y_q16);
 
 } // namespace opennova::netsim

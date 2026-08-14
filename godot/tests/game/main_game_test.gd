@@ -22,6 +22,7 @@ var _shell: Node = null
 class FakeGameHud:
 	extends RefCounted
 	var crosshair_style := -1
+	var visible := true
 
 	func set_crosshair_style(style: int) -> void:
 		crosshair_style = style

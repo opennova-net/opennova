@@ -233,6 +233,13 @@ struct Entity {
     // a resolved entity trait because engine/runtime/world deliberately does not own .3di
     // assets. Armory/zone/etc. classifiers do not require it.
     bool has_minimap_model_marker = false;
+    // The graphic model's XY half-extents (mission axes, 16.16), stamped by
+    // the same model-resolve seam. The minimap blip drawer sizes footprint-
+    // class blips from these; 0 = unstamped (the 10-wu class fallback).
+    // [orig: draw_minimap_blip @0x5979a2..0x5979b8 — model+176 bound block,
+    //  half = (max - min) >> 1 per axis; fallback 655360 @0x5979cb]
+    int32_t minimap_half_x_q16 = 0;
+    int32_t minimap_half_y_q16 = 0;
     int32_t item_unit_type = 0; // raw ItemDef unit_type; vehicle minimap icon selector
     bool is_ai_capable = false; // items.def ItemDefAttrib & 0x100000 (AIData / §5.6 AI class). Gates the
                                 // 0x0D AI-trailer (D-NET-97). Distinct from ai_flags (BMS). [docs/world/itemdef-re.md]

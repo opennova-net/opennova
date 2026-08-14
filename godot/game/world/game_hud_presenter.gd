@@ -44,27 +44,44 @@ var _objectives_visible := false
 # like retail's process-lifetime global. Boot default 2 = FULL.
 # [orig: g_friendlyTagsMode @0x24C18C4; default @0x4a7fed]
 var _friendly_tag_mode := 2
-
 # The HUD color-scheme index, persisted like retail's config token (read at
 # boot, written back on cycle). Default 2 = the hudpos hud_textcolor scheme.
 # [orig: config token "hud_color_index" @0x5502eb, default 2 @0x54d2a6; applied
-# to the live index @0x55152f; cycled 0..5 by input action case 10 @0x49afc7]
+# to the live index @0x55152f; cycled 0..5 by the `hudcolor` action
+# (catalog row 76 -> dispatch code 10) @0x49afc7]
 const HUD_COLOR_CONFIG_PATH := "user://settings.cfg"
 const HUD_COLOR_SECTION := "hud"
 const HUD_COLOR_CONFIG_KEY := "hud_color_index"
 var _hud_color_index: int = clampi(
 		int(ConfigStore.read(HUD_COLOR_CONFIG_PATH, HUD_COLOR_SECTION,
 				HUD_COLOR_CONFIG_KEY, 2)), 0, 5)
+var _hud_color_was_down := false
+# Whether the map grid origin (the type-2043 marker) has been resolved onto
+# the HUD. A joiner's origin entity decodes from the world stream AFTER the
+# HUD builds, so tick() keeps querying until it appears.
+var _map_grid_origin_present := false
+# Whether the static building/zone footprint feed reached the HUD (baked
+# once per mission; re-queried until non-empty for joiners whose statics
+# decode after the HUD builds). The retry is throttled to ~1 Hz: the query
+# walks the whole entity registry and slices collision models, so an empty
+# feed (a mission with no footprint statics) must not re-run it every frame.
+var _map_footprints_fed := false
+var _map_footprints_next_query_ticks := 0
+var _map_grid_origin_next_query_ticks := 0
+const MAP_FOOTPRINT_QUERY_INTERVAL_TICKS := 62
 
 # The gameplay key bindings the shell routes here via handle_gameplay_key. Each
 # action is witnessed; the authored default binding rows ride the unported
 # input-binding layer (D-CTRL-3), so the keys themselves are reimpl mappings.
 # Objectives = the co-op alpha toggle [orig: @0x49b68b ->
 # HUD_DrawWinConditions @0x5be163]; friendly tags KEY_F, N is NVG [orig:
-# action 30 @0x49b573]; color-scheme cycle [orig: input case 10 @0x49afc7].
+# action 30 @0x49b573]. Retail has NO HUD-visibility key: H is only the
+# secondary `pause` binding (SP-only), and the boot /NOHUD switch is the sole
+# visibility control [orig: catalog row 70 vk2 0x48; case 25 @0x49b520;
+# /NOHUD @0x4a7a09]. The color cycle rides the polled `hudcolor` binding row
+# in tick() instead of a shell key.
 const OBJECTIVES_KEY := KEY_O
 const FRIENDLY_TAGS_KEY := KEY_F
-const HUD_COLOR_KEY := KEY_H
 
 
 ## Route one gameplay keycode to its HUD action; false = not a HUD key (the
@@ -75,8 +92,6 @@ func handle_gameplay_key(keycode: int) -> bool:
 			toggle_objectives()
 		FRIENDLY_TAGS_KEY:
 			cycle_friendly_tags()
-		HUD_COLOR_KEY:
-			cycle_hud_color()
 		_:
 			return false
 	return true
@@ -165,6 +180,28 @@ func _ensure_game_hud() -> void:
 		push_warning("GameHud: hudpos.def did not load: %s" % hudpos.get_last_error())
 	_game_hud.set_crosshair_style(ResourceDirSettings.get_crosshair_style())
 	_game_hud.configure(hudpos, root)
+	# TerrainData owns the TRN 16x16 sector routing table and the colormap
+	# texture; the native overlay copies only the portable routing scalars.
+	# The baked top-down atlas (the D-TERRAIN-7 tile-cache surrogate render)
+	# replaces the raw colormap when the load-time bake produced one.
+	_game_hud.set_minimap_terrain(
+			_world.get_terrain_data() if _world != null else null,
+			_world.get_minimap_terrain_texture() if _world != null else null)
+	# The grid-label origin marker (mission type-2043 entity), resolved once
+	# per world. [orig: HUD_InitOverlaySystem @0x5a4999 pool scan]
+	var sim_for_origin := _world.get_sim() if _world != null else null
+	_map_footprints_fed = false
+	_map_footprints_next_query_ticks = 0
+	_map_grid_origin_next_query_ticks = 0
+	if sim_for_origin != null:
+		var origin: Dictionary = sim_for_origin.get_hud_map_grid_origin()
+		var origin_pos: Vector3 = origin.get("position", Vector3.ZERO)
+		_map_grid_origin_present = bool(origin.get("present", false))
+		_game_hud.set_minimap_grid_origin(
+				Vector2(origin_pos.x, -origin_pos.z), _map_grid_origin_present)
+	else:
+		_map_grid_origin_present = false
+		_game_hud.set_minimap_grid_origin(Vector2.ZERO, false)
 	_view_effects.set_resource_root(root)
 	_load_hud_text_tables(root)
 	# The objectives-panel header, resolved once against the freshly registered
@@ -243,7 +280,7 @@ func set_perf_probe_enabled(enabled: bool) -> void:
 	_perf_probe_spans.clear()
 
 
-func tick() -> void:
+func tick(gameplay_input_active: bool = false) -> void:
 	var probe_enabled := _perf_probe_enabled
 	var stats_on := _frame_stats != null and _frame_stats.is_capture_active()
 	var timing := probe_enabled or stats_on
@@ -331,6 +368,58 @@ func tick() -> void:
 	# rebuilding its 576-byte HUD info struct each frame.
 	# [orig: HUD_BuildEntityInfo @0x4b8440]
 	_game_hud.set_player_state(_hud_ticks(), clampf(frac, 0.0, 1.0), stance, fov_deg)
+	var player_pos: Vector3 = sim.get_local_player_position()
+	_game_hud.set_minimap_state(Vector2(player_pos.x, -player_pos.z),
+			player_pos.y, sim.get_local_player_heading_bam(),
+			sim.get_hud_radar_zoom_q16(), sim.get_hud_big_zoom_q16(),
+			sim.get_hud_map_mode(), sim.get_hud_map_flip_180(),
+			sim.get_hud_minimap_snapshot())
+	# A joiner's type-2043 origin entity decodes from the world stream after
+	# the HUD builds — keep querying until it appears (the host resolves the
+	# origin at promotion, so this latches immediately there). Throttled to
+	# ~1 Hz like the footprint retry: the query scans the decoded entity
+	# rows, and a mission with no origin marker must not pay that scan every
+	# display frame forever.
+	if not _map_grid_origin_present:
+		var origin_ticks := _hud_ticks()
+		if origin_ticks >= _map_grid_origin_next_query_ticks:
+			_map_grid_origin_next_query_ticks = \
+					origin_ticks + MAP_FOOTPRINT_QUERY_INTERVAL_TICKS
+			var origin: Dictionary = sim.get_hud_map_grid_origin()
+			if bool(origin.get("present", false)):
+				var origin_pos: Vector3 = origin.get("position", Vector3.ZERO)
+				_map_grid_origin_present = true
+				_game_hud.set_minimap_grid_origin(
+						Vector2(origin_pos.x, -origin_pos.z), true)
+	# The static footprint polygons bake once per mission; latch on the
+	# first non-empty feed (joiner statics can decode after the HUD builds),
+	# retrying at most once a second.
+	if not _map_footprints_fed:
+		var hud_ticks := _hud_ticks()
+		if hud_ticks >= _map_footprints_next_query_ticks:
+			_map_footprints_next_query_ticks = \
+					hud_ticks + MAP_FOOTPRINT_QUERY_INTERVAL_TICKS
+			var footprints: PackedInt32Array = sim.get_hud_minimap_footprints()
+			if footprints.size() >= 2 and footprints[1] > 0:
+				_map_footprints_fed = true
+				_game_hud.set_minimap_footprints(footprints)
+	# The color cycle rides the real `hudcolor` binding row (catalog row 76,
+	# default F6). Retail's default F6 is shadowed by the earlier huddetail
+	# row (a dispatcher no-op), leaving the cycle dormant; making the row
+	# reachable is the tracked reimpl divergence on this action (D-CTRL-4).
+	# Two reimpl guards on the poll: (1) the raw key edge latches from the
+	# UNGATED key state, so a press held across an armory/F3 window cannot
+	# re-fire when the gate reopens; (2) a chorded press (Shift/Ctrl/Alt —
+	# our debug picks ride Shift+F6) never cycles — the retail row binds the
+	# bare key.
+	# [orig: first-match key scan @0x49d42f; cycle @0x49afc7]
+	var color_down: bool = ControlsBindings.pressed("hudcolor")
+	var color_chorded: bool = Input.is_key_pressed(KEY_SHIFT) \
+			or Input.is_key_pressed(KEY_CTRL) or Input.is_key_pressed(KEY_ALT)
+	if color_down and not _hud_color_was_down \
+			and gameplay_input_active and not color_chorded:
+		cycle_hud_color()
+	_hud_color_was_down = color_down
 	# Weapon-cluster state: clip/reserve as the info struct carried them, heat
 	# 0..0xFFFF (only emplaced/vehicle heavy guns author heat_values, so 0 on
 	# foot [orig: hudInfo+60 = WeaponSlot_CalcAccumulatedHeat @0x53f780,
@@ -357,7 +446,8 @@ func tick() -> void:
 			_player_presenter.aim_screen_point() \
 					if _player_presenter != null else Vector2.INF)
 	if waypoint != null:
-		_game_hud.set_waypoint(waypoint.text_name, waypoint.distance_m)
+		_game_hud.set_waypoint(waypoint.text_name, waypoint.distance_m,
+				waypoint.mission_position, waypoint.altitude_wu)
 	else:
 		_game_hud.clear_waypoint()
 	_apply_objectives()
@@ -420,6 +510,8 @@ func _build_waypoint_entry() -> WaypointHudEntry:
 	var player: Vector3 = sim.get_local_player_position()
 	var entry := WaypointHudEntry.new()
 	entry.text_name = _resolve_waypoint_name(int(wp.get("name_id", 0)))
+	entry.mission_position = Vector2(pos.x, -pos.z)
+	entry.altitude_wu = pos.y
 	# Horizontal-only (mission X/Y deltas = the Godot ground plane), truncated
 	# to whole meters natively. [orig: @0x594836 sar 16]
 	entry.distance_m = HudPos.waypoint_distance_m(
@@ -675,8 +767,8 @@ func cycle_friendly_tags() -> void:
 
 ## The HUD color-scheme cycle 0..5 with wrap, written back to the config like
 ## retail's token round trip. Deliberately NO toast — the retail case only
-## cycles and restamps the color. [orig: input action case 10 @0x49afc7 —
-## idx+1, >5 wraps to 0, g_hudActiveColor = table[idx]]
+## cycles and restamps the color. [orig: the `hudcolor` action, dispatch code
+## 10 @0x49afc7 — idx+1, >5 wraps to 0, g_hudActiveColor = table[idx]]
 func cycle_hud_color() -> void:
 	_hud_color_index = (_hud_color_index + 1) % 6
 	ConfigStore.write(HUD_COLOR_CONFIG_PATH, HUD_COLOR_SECTION,

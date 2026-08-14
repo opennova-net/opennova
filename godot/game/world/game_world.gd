@@ -535,6 +535,7 @@ func _load_mission_internal(mission: MissionData, bms_name: String,
 	_loaded_mission_file = bms_name
 	_world_ready = true
 	_set_water_world_rendering_enabled(true)
+	_bake_minimap_terrain_atlas()
 	load_progress.emit(100)
 	_debug_views.on_loaded()
 	world_loaded.emit()
@@ -635,6 +636,7 @@ func get_mission_stats() -> Dictionary:
 ## Safe to call when nothing is loaded.
 func unload() -> void:
 	_world_ready = false
+	_minimap_terrain_texture = null
 	_join_wire_assets_pending = false
 	_join_wire_til_applied = false
 	_join_wire_assets_failed = false
@@ -2259,6 +2261,28 @@ func _start_mission_audio(mission: MissionData, bms_name: String) -> void:
 # material/pipeline draws once (no coroutine — the load path stays callable
 # without await), then clear the warm spawns exactly like the sim-restart
 # path (reset + re-register the persistent item effects). Returns the count.
+# The baked minimap terrain atlas (the D-TERRAIN-7 tile-cache surrogate,
+# rendered top-down at load). Null = the HUD binds the raw colormap.
+var _minimap_terrain_texture: ImageTexture = null
+
+
+func get_minimap_terrain_texture() -> ImageTexture:
+	return _minimap_terrain_texture
+
+
+# Compose the map's per-cell tile atlas: a pure-CPU compose on TerrainData
+# (retail's map binds the PolyTrn per-cell tile cache, whose content is base
+# colormap + the water quads — no lighting, no detail splat — so no render
+# pass is involved; see TerrainData.build_minimap_tile_atlas).
+func _bake_minimap_terrain_atlas() -> void:
+	_minimap_terrain_texture = null
+	var terrain_data := get_terrain_data()
+	if terrain_data == null or Engine.is_editor_hint():
+		return
+	var live_water := float(_water.water_height) if _water != null else NAN
+	_minimap_terrain_texture = terrain_data.build_minimap_tile_atlas(live_water)
+
+
 func _warm_effect_world_catalog() -> int:
 	if _effect_world == null:
 		return 0

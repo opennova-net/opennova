@@ -41,8 +41,9 @@ void HudFrameCompiler::configure(const HudLayout &layout,
 }
 
 void HudFrameCompiler::configure_label_fonts(const fnt_font_t *normal,
-		const fnt_font_t *bold, float scale) {
-	// [orig: HUD_InitAllFonts @ 0x51ee20 stores each pair through the
+		const fnt_font_t *bold, const fnt_font_t *large, float scale,
+		float large_scale) {
+	// [orig: HUD_InitAllFonts @ 0x51ee20 stores each slot through the
 	// {font, scale_x, scale_y} slot writer @ 0x580453..0x580468]
 	label_font_.set_font(normal);
 	label_font_.set_page_base(
@@ -50,7 +51,11 @@ void HudFrameCompiler::configure_label_fonts(const fnt_font_t *normal,
 	label_font_bold_.set_font(bold);
 	label_font_bold_.set_page_base(
 			static_cast<uint32_t>(kHudFontSlotLabelBold * FNT_MAX_PAGES));
+	label_font_large_.set_font(large);
+	label_font_large_.set_page_base(
+			static_cast<uint32_t>(kHudFontSlotLabelLarge * FNT_MAX_PAGES));
 	label_scale_ = scale > 0.0f ? scale : 1.0f;
+	label_large_scale_ = large_scale > 0.0f ? large_scale : 1.0f;
 }
 
 void HudFrameCompiler::update_layout(const HudLayout &layout) {
@@ -135,6 +140,10 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	draw_list_.lines.clear();
 	draw_list_.glyphs.clear();
 	draw_list_.underlines.clear();
+	draw_list_.map.visible = false;
+	draw_list_.big_map.visible = false;
+	draw_list_.map_glyphs.clear();
+	draw_list_.big_map_glyphs.clear();
 	draw_list_.elements_drawn = 0;
 
 	// The stance cross-fade restamp [orig: @ 0x599f8a].
@@ -155,6 +164,7 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	element_heat(state, surface_w, surface_h);
 	element_power(state, surface_w, surface_h);
 	element_waypoint(state, surface_w, surface_h);
+	element_spinmap(state, surface_w, surface_h);
 	element_objectives(state, surface_w, surface_h);
 	element_attach_labels(state, surface_w, surface_h);
 	element_objective_line(state, surface_w, surface_h);
@@ -164,6 +174,77 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	element_friendly_tags(state, surface_w, surface_h);
 	element_messages(state, surface_w, surface_h);
 	return draw_list_;
+}
+
+void HudFrameCompiler::element_spinmap(const HudFrameState &state, float w,
+		float h) {
+	// The gameplay pass draws whenever the HUDSPINMAP rect is authored — the
+	// retail master switch is a compiled-in constant true and only /NOHUD
+	// suppresses the overlay set. [orig: HUD_RenderAllOverlays @0x5a86e8 gate
+	//  dword_2723CC4 (static -1); /NOHUD mask @0x4a7a09/@0x840B18]
+	// The big-map pass runs regardless of the authored corner rect.
+	if (!layout_.spinmap_rect.present && state.minimap.map_mode == 0) return;
+	HudMinimapInput input = state.minimap;
+	input.footprints = &state.map_footprints;
+	input.rect_x1 = layout_.spinmap_rect.x;
+	input.rect_y1 = layout_.spinmap_rect.y;
+	input.rect_x2 = layout_.spinmap_rect.x + layout_.spinmap_rect.w;
+	input.rect_y2 = layout_.spinmap_rect.y + layout_.spinmap_rect.h;
+	input.surface_w = w;
+	input.surface_h = h;
+	input.ticks = state.ticks;
+	input.waypoint_present = state.waypoint.present;
+	input.waypoint_x = state.waypoint.world_x;
+	input.waypoint_y = state.waypoint.world_y;
+	input.waypoint_z = state.waypoint.world_z;
+	input.waypoint_distance_m = state.waypoint.distance_m;
+	input.waypoint_distance_offset = layout_.spinmap_wp_dist_off;
+	input.map_coords_x = layout_.map_coords_x;
+	input.map_coords_y = layout_.map_coords_y;
+	input.map_coords_off = layout_.map_coords_off;
+	input.overlay_color = active_color(state);
+	// The corner spinmap always compiles as mode 0; an active M-cycle mode
+	// compiles the big map as a second pass over it (retail draws both).
+	// [orig: HUD_RenderAllOverlays spinmap ctx + the mode-gated
+	//  HUD_BuildMapOverlayView pass @0x5cac50]
+	const int map_mode = input.map_mode;
+	input.map_mode = 0;
+	minimap_compiler_.compile(input, draw_list_.map);
+	if (map_mode != 0) {
+		input.map_mode = map_mode;
+		minimap_compiler_.compile(input, draw_list_.big_map);
+	}
+	// Map text: the corner-map distance/MAPCOORDS labels ride the bold label
+	// font, the grid letters/numbers and the big map's player readout the
+	// LARGE slot — every one through the half-bright drawer.
+	// [orig: HUD_DrawTextCentered_HalfBright((int)&g_hudLabelFontBold, ...)
+	//  @0x5a7ab5; HUD_DrawTextRightAligned_HalfBright @0x59cc47;
+	//  HUD_DrawTextCentered_HalfBright(g_hudLabelFontLarge, ...) in the
+	//  @0x5a5f40 grid branch]. Each pass keeps its own glyph list so the
+	//  device leg can layer them inside that pass's sandwich.
+	const bool have_bold = label_font_bold_.font() != nullptr;
+	const GameFont &bold_font = have_bold ? label_font_bold_ : font_;
+	const float bold_scale = have_bold ? label_scale_ : 1.0f;
+	const bool have_large = label_font_large_.font() != nullptr;
+	const GameFont &large_font = have_large ? label_font_large_ : bold_font;
+	const float large_scale = have_large ? label_large_scale_ : bold_scale;
+	const auto layout_pass = [&](const HudMapPass &pass,
+			std::vector<GameFontQuad> &out) {
+		for (const HudMapLabel &label : pass.labels) {
+			const GameFont &lf = label.font == 1 ? large_font : bold_font;
+			const float ls = label.font == 1 ? large_scale : bold_scale;
+			if (lf.font() == nullptr) continue;
+			const GameFontRun run = lf.layout(label.text, label.x,
+					label.y, ls, ls,
+					label.align == 1 ? kFontAlignRight : kFontAlignCenter,
+					half_bright_argb(label.color));
+			out.insert(out.end(), run.quads.begin(), run.quads.end());
+		}
+	};
+	layout_pass(draw_list_.map, draw_list_.map_glyphs);
+	layout_pass(draw_list_.big_map, draw_list_.big_map_glyphs);
+	if (draw_list_.map.visible) ++draw_list_.elements_drawn;
+	if (draw_list_.big_map.visible) ++draw_list_.elements_drawn;
 }
 
 void HudFrameCompiler::element_sights_card(const HudFrameState &state,
@@ -554,7 +635,7 @@ uint32_t HudFrameCompiler::active_color(const HudFrameState &state) const {
 	// hudpos hud_textcolor (g_hudposTextColor) and restamps the frame overlay
 	// color (g_hudFrameOverlayColor @0x840B1C) = table[index]; the snapshot
 	// twin g_hudActiveColor @0x24C1868 = table[index] | 0xFF000000 at init and
-	// table[index] at the cycle @0x49afe0. Both twins carry the same value for
+	// table[index] at the cycle @0x49afc7. Both twins carry the same value for
 	// every authored scheme (all entries ship alpha FF); the compiler derives
 	// ONE per-frame color and forces the init path's FF alpha.]
 	static constexpr uint32_t kSchemeTable[6] = {
@@ -947,7 +1028,7 @@ void HudFrameCompiler::element_messages(const HudFrameState &state, float w,
 	float row_y = ay;
 	for (int i = static_cast<int>(live.size()) - 1; i >= start; --i) {
 		// The message feed rides the snapshot overlay color like the chat
-		// drawer [orig: the g_hudActiveColor read @0x5930e0].
+		// drawer [orig: the g_hudActiveColor read @0x5930e0 (inline data ref)].
 		emit_text(live[static_cast<size_t>(i)]->text.c_str(), ax, row_y, w, h,
 				active_color(state), 0u);
 		row_y -= row_h;

@@ -300,6 +300,63 @@ Vector3 Simulation::get_local_player_position() const {
 	return Vector3(e->position.x, e->position.z, -e->position.y);
 }
 
+int64_t Simulation::get_local_player_heading_bam() const {
+	if (!world_ || !world_->ai || !world_->cached.local_player.valid()) return 0;
+	const AiEntity *player = world_->ai->for_handle(world_->cached.local_player);
+	return player != nullptr ? static_cast<int64_t>(player->heading) : 0;
+}
+
+int Simulation::request_hud_radar_zoom(int p_direction) {
+	// The engine control routes the step to the big-map pair while a mode
+	// is up (witness at hud::HudMapControl::zoom_step).
+	const int step = p_direction < 0 ? -1 : (p_direction > 0 ? 1 : 0);
+	return hud_map_control_.zoom_step(step);
+}
+
+int Simulation::get_hud_radar_zoom_q16() const {
+	return hud_map_control_.zoom_q16;
+}
+
+int Simulation::request_hud_map_cycle() {
+	// The map_toggle action's three-state cycle (witness at
+	// hud::HudMapControl::cycle).
+	return hud_map_control_.cycle();
+}
+
+int Simulation::get_hud_map_mode() const {
+	return hud_map_control_.mode;
+}
+
+int Simulation::get_hud_big_zoom_q16() const {
+	return hud_map_control_.big_zoom_q16;
+}
+
+void Simulation::tick_hud_map_death_gate() {
+	// The render gate zeroes the mode whenever the local player is dead;
+	// respawn re-opens nothing — only the M key does (witness at
+	// hud::HudMapControl::on_local_player_dead).
+	if (hud_map_control_.mode == 0) return;
+	bool dead = false;
+	if (joiner_) {
+		// The recipient-specific 0x0A tail is the joiner's authoritative
+		// local health channel (the same read run_frame's death edge uses).
+		dead = runtime_ != nullptr && runtime_->state().local_health <= 0;
+	} else if (world_ && world_->cached.local_player.valid()) {
+		const opennova::world::Entity *e =
+				world_->registry.get(world_->cached.local_player);
+		dead = e != nullptr &&
+				((e->flags | e->engine_flags) &
+						opennova::world::kEntityFlagDead) != 0;
+	}
+	if (dead) hud_map_control_.on_local_player_dead();
+}
+
+bool Simulation::get_hud_map_flip_180() const {
+	// AttribFlags::RotateMap180; the map-side witness is
+	// HudMinimapInput::flip_180 (hud/hud_minimap.h).
+	return world_ && (world_->mission_attrib_flags & 0x20u) != 0;
+}
+
 float Simulation::get_local_player_yaw_deg() const {
 	if (!world_ || !world_->ai || !world_->cached.local_player.valid()) return 0.0f;
 	const AiEntity *p = world_->ai->for_handle(world_->cached.local_player);

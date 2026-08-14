@@ -26,6 +26,7 @@
 
 #include <mission/event_runtime.h>
 #include <mission/promote.h>
+#include <hud/hud_minimap.h>
 #include <playersav/weapon_sav.h> // weapon.sav: the per-side profile class + kit pages
 #include <terrain_query/height_field.h>
 #include <terrain_query/surface_type_map.h>
@@ -312,6 +313,12 @@ public:
 		// kPlayerCameraFovHDeg; the static_assert in the bind TU pins the
 		// integral mirror against the engine float).
 		DEFAULT_PLAYER_FOV_H_DEG = 80,
+		// Header {version, stride, row_count} for the retained minimap rows.
+		// v3 appends the client-resolved draw policy: {policy_flags (bit0
+		// rotate, bit1 footprint), half_x_q16, half_y_q16, floor_px}.
+		HUD_MINIMAP_SNAPSHOT_VERSION = 3,
+		HUD_MINIMAP_HEADER_SIZE = 3,
+		HUD_MINIMAP_STRIDE = 16,
 	};
 
 	// Spawn-origin provenance (world/entity.h): (kind << 24) | (index &
@@ -650,6 +657,11 @@ private:
 	// Carry the sub-pixel remainder between frames so slow motion is not lost.
 	float look_px_accum_x_ = 0.0f;
 	float look_px_accum_y_ = 0.0f;
+	// The M-cycle map mode + the two radar zooms — the engine-side state
+	// machine carries the retail lifecycle (cycle, zoom routing, spawn
+	// reset, the dead-player clear); this class only routes requests and
+	// tick edges into it (witness at hud::HudMapControl).
+	opennova::hud::HudMapControl hud_map_control_;
 
 	// --- the local player's equipped-weapon action FSM (net-re §5.62) ------------------
 	// The 12-state action queue on the equipped slot, pumped once per logic tick after the
@@ -816,6 +828,9 @@ private:
 	void reset_local_player_view_effects();
 	void refresh_local_player_view_effects();
 	void tick_local_player_view();
+	// The dead-player map-mode clear, run once per advanced tick (witness at
+	// hud::HudMapControl::on_local_player_dead).
+	void tick_hud_map_death_gate();
 
 	// --- P7: the in-match runtime as a THIN ADAPTER over engine/net/npruntime ----------------
 	// One in-match runtime funnels every live path: the host/SP game is the §5.0 mode-3
@@ -1260,6 +1275,20 @@ public:
 	// The local player's authoritative position in Godot world space (for the follow camera);
 	// Vector3() when no player is spawned.
 	Vector3 get_local_player_position() const;
+	// Raw engine heading (BAM32) for the heading-up spinmap.
+	int64_t get_local_player_heading_bam() const;
+	// Radar zoom: positive = radarout (x1.15 toward 0x100000), negative =
+	// radarin (x0.85 toward 4096), zero = the spawn reset (the witnessed step
+	// lives in hud::spinmap_zoom_step).
+	int request_hud_radar_zoom(int p_direction);
+	int get_hud_radar_zoom_q16() const;
+	// map_toggle's 0->2->3->0 cycle (witness at HudMinimapInput::map_mode).
+	int request_hud_map_cycle();
+	int get_hud_map_mode() const;
+	int get_hud_big_zoom_q16() const;
+	// Mission attrib bit5 (AttribFlags::RotateMap180) rotates the gameplay
+	// map 180 degrees; the witness rides HudMinimapInput::flip_180.
+	bool get_hud_map_flip_180() const;
 	// The local player's authoritative look yaw / pitch in mission degrees (for the first-person
 	// camera). yaw = 90 - heading; pitch up positive. 0 when no player is spawned.
 	float get_local_player_yaw_deg() const;
@@ -1384,6 +1413,21 @@ public:
 	// list index + 1 @ 0x4b88e8]. Read-only; the track advances in the world
 	// tick. (docs/interface/hud-re.md §Waypoint HUD)
 	Dictionary get_waypoint_hud_view() const;
+	// Header {version, stride, row_count}, followed by rows {bank, handle, x,
+	// y, z, heading_bam, icon, argb, flags, source, remaining_ticks,
+	// entity_known, policy_flags, half_x_q16, half_y_q16, floor_px}.
+	// Coordinates are mission 16.16; the policy tail is resolved from the
+	// LOCAL entity's def class exactly where retail resolves it (witness at
+	// world::minimap_blip_draw_policy). No native pointers escape.
+	PackedInt32Array get_hud_minimap_snapshot() const;
+	// Static footprint polygons for footprint-class markers (buildings/zones
+	// with marker models): {version=1, count} then per row {handle,
+	// fill_argb, fill_value_count, xy_q16..., edge_value_count, xy_q16...}.
+	// Baked once per world from the collision ground-slice mesh transformed
+	// by the entity pose (witness at world::minimap_footprint_from_collision).
+	PackedInt32Array get_hud_minimap_footprints() const;
+	// { present: bool, position: Vector3 } — the type-2043 grid-origin marker.
+	Dictionary get_hud_map_grid_origin() const;
 	// The objectives-panel rows: an Array of {slot, text_id, shown, done} for
 	// header slots 1..8, terminated at the first 0/255 win-condition id —
 	// exactly the panel's row walk [orig: HUD_DrawWinConditions @0x5ba9e0..;

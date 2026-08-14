@@ -177,6 +177,12 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 	case s2c::POOL3_SYNC: // pool-3 marker/waypoint sync batch (§5.12)
 		apply_pool3_batch(body);
 		break;
+	case s2c::CAPTURE_ZONE_STATE:
+		apply_capture_zone_overlay(body);
+		break;
+	case s2c::MINIMAP_OVERLAY:
+		apply_minimap_overlay_batch(body);
+		break;
 	default:
 		// Game-start scalars / world-state-load and other non-entity tags.
 		++unknown_tags_;

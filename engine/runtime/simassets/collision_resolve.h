@@ -51,6 +51,10 @@ struct CollisionResolveState {
 	std::unordered_map<std::string, int32_t> model_by_graphic;
 	std::unordered_map<std::string, int32_t> occlusion_by_graphic;
 	std::unordered_map<std::string, float> radius_by_graphic;
+	// The graphic's CMDL bound-block XY half-extents (wu; the minimap blip
+	// size source). first = ground X, second = ground Y; {0,0} = no bound.
+	// [orig: draw_minimap_blip @0x5979a2..0x5979b8 model+176 pairs]
+	std::unordered_map<std::string, std::pair<float, float>> half_xy_by_graphic;
 	// First-stage husk KZ points in mission-local axes. Kept independently
 	// from the collision-model cache because a husk graphic may already have
 	// been registered as another entity's main graphic.

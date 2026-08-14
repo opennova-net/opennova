@@ -258,16 +258,19 @@ std::string friendly_tag_fallback_name(uint16_t encoded_entity_id) {
 // slot as a float @0x58045d, so the float division is the same value modulo
 // the 16.16 truncation]
 HudLabelFontChoice hud_label_font_choice(int surface_w) {
+	// The large slot is one file at the over-800 divisor for every width
+	// [orig: g_hudLabelFontLarge = Impac22b.fnt "over 800" @0x51ee20].
+	const float large_scale = static_cast<float>(surface_w) / 800.0f;
 	if (surface_w > 800) {
-		return {"Arial16n.fnt", "Arial16b.fnt",
-				static_cast<float>(surface_w) / 1024.0f, 2};
+		return {"Arial16n.fnt", "Arial16b.fnt", "Impac22b.fnt",
+				static_cast<float>(surface_w) / 1024.0f, large_scale, 2};
 	}
 	if (surface_w > 640) {
-		return {"Arial14n.fnt", "Arial14b.fnt",
-				static_cast<float>(surface_w) / 800.0f, 1};
+		return {"Arial14n.fnt", "Arial14b.fnt", "Impac22b.fnt",
+				static_cast<float>(surface_w) / 800.0f, large_scale, 1};
 	}
-	return {"Arial14n.fnt", "Arial12b.fnt",
-			static_cast<float>(surface_w) / 640.0f, 0};
+	return {"Arial14n.fnt", "Arial12b.fnt", "Impac22b.fnt",
+			static_cast<float>(surface_w) / 640.0f, large_scale, 0};
 }
 
 } // namespace opennova::hud

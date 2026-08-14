@@ -53,6 +53,7 @@ add_library(opennova_runtime STATIC
     # hud — the retail game-font text engine + element frame math
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/game_font.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_minimap.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_runtime.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/material_eval.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/material_classify.cpp
@@ -124,6 +125,8 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_tables.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/entity_spawn.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/minimap_footprint.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/minimap_overlay.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_input.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_loadout.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_look.cpp

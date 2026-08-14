@@ -22,6 +22,19 @@ using namespace defscan; // the shared .def scanner, unqualified as before
    points (mirrors parse_items_buf). Assumes `out` was zeroed by the caller. */
 static int parse_hudpos_buf(const char *buf, size_t file_len, DefHudPosFile *out) {
     DefHudPosDef *hud = &out->hud;
+    // Both spinmap label suppressors initialize -1 (suppressed) in retail's
+    // .data and only the authored token value can clear them; the sole
+    // consumers are ==0 tests. [orig: dword_27237C0/dword_27236FC static
+    //  0xFFFFFFFF; writes HUD_ParseHudposToken @0x59fc1f ("SPINMAPWPDISTOFF")
+    //  / @0x5a0920 ("mapcoords" 3rd value); reads @0x5a7a6a / @0x5a7a2f]
+    // BSS-zero in retail: the waypoint distance label is LIVE unless the
+    // token authors a nonzero suppressor. [orig: dword_27237C0 — .data with
+    // no file bytes; parse @0x59fc1f]
+    hud->spinmap_wp_dist_off = 0;
+    // Same BSS-zero polarity as the waypoint suppressor: the grid label is
+    // LIVE unless MAPCOORDS' 3rd value authors a nonzero suppressor.
+    // [orig: dword_27236FC — .data with no file bytes]
+    hud->map_coords[2] = 0;
     /* Set default alpha for all colors */
     hud->health_border.a = 255;
     hud->heat_border.a = 255;
@@ -197,6 +210,9 @@ static int parse_hudpos_buf(const char *buf, size_t file_len, DefHudPosFile *out
         } else if (lower_starts_with(lower, ll, "hudspinmapy2", 12)) {
             if (nvals >= 1) hud->spinmap_y2 = parse_int_n(vals[0].s, vals[0].len);
             parsed = 1;
+        } else if (lower_starts_with(lower, ll, "spinmapwpdistoff", 16)) {
+            if (nvals >= 1) hud->spinmap_wp_dist_off = parse_int_n(vals[0].s, vals[0].len);
+            parsed = 1;
         }
         /* Positioned text with alignment */
         else if (lower_starts_with(lower, ll, "hudflagcarrier", 14)) {
@@ -231,6 +247,11 @@ static int parse_hudpos_buf(const char *buf, size_t file_len, DefHudPosFile *out
             parsed = 1;
         } else if (lower_starts_with(lower, ll, "mapcoords", 9)) {
             parse_pos_aligned(vals, nvals, hud->map_coords);
+            // The authored 3rd value is the grid-label suppressor; retail
+            // atof()s a missing/word token to 0 (shown) — "center" in the
+            // wild parses 0 too. [orig: @0x5a0920 mapcoords -> screenX/
+            //  screenY/dword_27236FC]
+            if (nvals < 3) hud->map_coords[2] = 0;
             parsed = 1;
         } else if (lower_starts_with(lower, ll, "hudtimeclock", 12)) {
             parse_pos_aligned(vals, nvals, hud->time_clock);

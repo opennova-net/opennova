@@ -98,14 +98,23 @@ public:
 		// from this receive boundary first, then places these behind the shared send-holdoff gate
 		// so they batch with same-frame housekeeping/gameplay at PumpClientProtocolSend.
 		std::vector<ProtocolMessage> queued_send_messages;
-		std::vector<std::vector<uint8_t>> inbound_0a; // raw S2C 0x0A bodies (for ClientReplicaPipeline)
-		// Raw S2C world-stream spawn/static bodies the host sends during load, as (tag, body):
-		// 0x0C organics, 0x0D pool-1, 0x10 statics, 0x20 markers.
+		// DIAGNOSTIC VIEW ONLY: raw S2C 0x0A bodies. ClientRuntime applies
+		// nothing from this vector — the reducer stream below is the sole
+		// applied stream; per-family tests assert against these views.
+		std::vector<std::vector<uint8_t>> inbound_0a;
+		// DIAGNOSTIC VIEW ONLY: raw S2C world-stream spawn/static bodies the
+		// host sends during load, as (tag, body): 0x0C organics, 0x0D pool-1,
+		// 0x10 statics, 0x20 markers.
 		std::vector<std::pair<uint8_t, std::vector<uint8_t>>> inbound_world;
-		// Validated live S2C gameplay bodies consumed by ClientReplicaPipeline:
-		// reload echoes and entity lifecycle updates. 0x0A tag-2 rounds remain
+		// DIAGNOSTIC VIEW ONLY: validated live S2C gameplay bodies (reload
+		// echoes and entity lifecycle updates). 0x0A tag-2 rounds remain
 		// embedded in inbound_0a.
 		std::vector<std::pair<uint8_t, std::vector<uint8_t>>> inbound_gameplay;
+		// The canonical client-reducer stream in original packet order. The
+		// legacy per-family vectors above remain diagnostic views only; applying
+		// them separately reorders 0x0A/world/map/gameplay records that shared a
+		// protocol packet.
+		std::vector<std::pair<uint8_t, std::vector<uint8_t>>> inbound_reducer;
 		bool reached_in_match = false;                // applicable deployment edge once self H is known
 		// Every successfully decoded S2C 0x5A runs retail's unconditional
 		// dword_81474C clear, independently from whether it is the causal

@@ -1286,6 +1286,45 @@ bool run_duplicate_s2c_session_one_shot_is_not_replayed() {
 	return expect(ack_hdr.ack_count == 2, "joiner echoes the highest contiguous S2C sequence");
 }
 
+bool run_client_reducer_preserves_packet_message_order() {
+	const std::string client_scrk = "CLIENT-REDUCER-ORDER";
+	const std::string server_scrk = "SERVER-REDUCER-ORDER";
+	np::JoinerConnection joiner("ReducerOrder");
+	joiner.seed_in_match(0x10203040u, 1u, client_scrk, server_scrk,
+			1, 0, 0x0001, w::kPlayerInfantryTypeId);
+
+	WeaponReload reload;
+	reload.entity_handle = 0x0001;
+	reload.reload_param = 3;
+	FrameUpdate frame;
+	frame.mount_handle = 0xFFFF;
+	frame.health = 100;
+	SessionSequencing server_tx{1, 0};
+	const std::vector<uint8_t> datagram = frame_server_session(
+			server_tx, server_scrk, 1u, {
+					make_protocol_message(0x49, encode_weapon_reload(reload)),
+					make_protocol_message(0x0A, encode_frame_update(frame)),
+					make_protocol_message(0x40, {0}),
+					make_protocol_message(0x6B, {0}),
+			});
+	if (!expect(!datagram.empty(), "frame mixed reducer-order packet"))
+		return false;
+	const np::JoinerConnection::PollResult poll =
+			joiner.handle_datagram(datagram.data(), datagram.size());
+	const std::array<uint8_t, 4> expected{{0x49, 0x0A, 0x40, 0x6B}};
+	if (!expect(poll.inbound_reducer.size() == expected.size(),
+			"every validated reducer message enters the canonical stream"))
+		return false;
+	for (std::size_t i = 0; i < expected.size(); ++i) {
+		if (!expect(poll.inbound_reducer[i].first == expected[i],
+				"canonical reducer stream preserves inner packet order"))
+			return false;
+	}
+	return expect(poll.inbound_0a.size() == 1 &&
+				poll.inbound_gameplay.size() == 3,
+			"legacy family vectors remain diagnostic views of the same packet");
+}
+
 struct NullDatagramSocket final : ns::IDatagramSocket {
 	int recv_from(uint8_t *, std::size_t, PeerAddr &) override { return 0; }
 	void send_to(const PeerAddr &, const uint8_t *, std::size_t) override {}
@@ -1821,6 +1860,97 @@ bool run_roundtrip() {
 
 	// Exactly one SNAP per 0x0C: a second tick with no new uplink drained nothing more.
 	if (!expect(udp_host.inbound_pending() == 0, "the connection's C2S queue is drained")) return false;
+
+	// A deployment release and a fresh dead 0x0A tail can share ONE datagram
+	// (the same-tick spawn-kill / resend window). The wire-position death
+	// edge must hold the spawn latch closed against the poll's batched
+	// release flags — only the deploy flow reopens it.
+	{
+		// Capture a dead 0x0A inner while the victim is still down.
+		np::Server_TickUpdate(ctx);
+		std::vector<uint8_t> dead_inner;
+		while (udp_host.pop_outbound(raw)) {
+			if (!raw.empty() && raw[0] == 0x0A)
+				dead_inner.assign(raw.begin() + 1, raw.end());
+		}
+		if (!expect(!dead_inner.empty(),
+				"host emitted a dead 0x0A inner for the crafted datagram")) return false;
+		// Queue and ship an INVALID re-pick (pool-2 slot 0xFFE resolves no
+		// entity — the host's resolve-miss break drops it silently, zones
+		// leg above): the client reaches AwaitDeployRelease with the pick
+		// acked while NO natural release ever races the crafted datagram,
+		// and every host reply is delivered so the session stream stays
+		// gap-free.
+		if (!expect(client.queue_deployment_pick(0x2FFE),
+				"the dead client queues the invalid re-pick")) return false;
+		int repick_on_wire = 0;
+		for (int frame = 0; frame < 60 && repick_on_wire == 0; ++frame) {
+			for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) {
+				uint8_t opcode = 0;
+				std::vector<uint8_t> session_body;
+				if (nw_decode_inbound(d.data(), d.size(), opcode, session_body) &&
+						opcode == SESSION_OPCODE_PROTOCOL_MESSAGE) {
+					for (const np::NapiNPConnection &conn :
+							ctx.np_protocol.connection_list) {
+						if (!(conn.peer == peer)) continue;
+						SessionSequencing seq = conn.seq;
+						ProtocolPacketHeader hdr;
+						std::vector<ProtocolMessage> messages;
+						if (deframe_session_packet(seq,
+								SessionCrypto{{}, conn.client_scrk, 0},
+								session_body.data(), session_body.size(), hdr,
+								messages)) {
+							for (const ProtocolMessage &message : messages)
+								if (message.tag == 0x0E) ++repick_on_wire;
+						}
+						break;
+					}
+				}
+				np::HandleResult r = np::handle_server_datagram(
+						ctx, peer, d.data(), d.size(), tick++);
+				for (const std::vector<uint8_t> &o : r.outbound)
+					client.receive(o.data(), o.size());
+			}
+			// The client's send boundary opens on receive: keep the host's
+			// keepalive stream flowing (the invalid pick produces no release
+			// on this path — the resolve-miss break drops it host-side).
+			for (np::TickOut &t : np::tick_connections(ctx, 300, tick++)) {
+				for (const std::vector<uint8_t> &o : t.outbound)
+					client.receive(o.data(), o.size());
+			}
+		}
+		if (!expect(repick_on_wire == 1,
+				"the invalid re-pick reached the wire exactly once")) return false;
+		const np::NapiNPConnection *jc = nullptr;
+		for (const np::NapiNPConnection &conn : ctx.np_protocol.connection_list)
+			if (conn.peer == peer) jc = &conn;
+		if (!expect(jc != nullptr && !jc->reply.last_loadout_reply.empty(),
+				"host retains the last 0x5A grant body")) return false;
+		if (!expect(!client.in_match(),
+				"the dead client sits outside InMatch before the crafted release")) return false;
+		const uint64_t release_revision_before =
+				client.deployment_release_revision();
+		std::vector<uint8_t> dg;
+		if (!expect(np::frame_in_match_s2c_batch(ctx, peer,
+				{make_protocol_message(0x5A, jc->reply.last_loadout_reply),
+				 make_protocol_message(0x0A, dead_inner)}, dg),
+				"host frames the release + dead tail into one datagram")) return false;
+		client.receive(dg.data(), dg.size());
+		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick++))
+			(void)d; // receive-only: nothing may race the assertions below
+		// The release leg ran (the revision edge fired) AND the same
+		// datagram's dead tail re-entered redeployment at its wire position —
+		// so the spawn latch must end CLOSED, not re-opened by the batched
+		// release flags.
+		if (!expect(client.deployment_release_revision() ==
+						release_revision_before + 1,
+				"the crafted release fired its revision edge")) return false;
+		if (!expect(!client.in_match() && client.deployment_pick_pending(),
+				"the same-datagram death edge re-entered the deploy flow")) return false;
+		if (!expect(!client.authoritative_spawn_released(),
+				"a same-datagram death edge outlasts the batched release latch"))
+			return false;
+	}
 	return true;
 }
 
@@ -2508,6 +2638,7 @@ bool run_host_as_client() {
 
 	w::World world;
 	world.registry.configure_pool(0, 16);
+	world.registry.configure_pool(2, 16);
 	w::AiSystem ai;
 	world.ai = &ai;
 	ctx.world = &world;
@@ -2537,10 +2668,24 @@ bool run_host_as_client() {
 	he->position = w::Vec3{static_cast<float>(w::from_fixed(w::to_fixed(420.0))),
 	                       static_cast<float>(w::from_fixed(w::to_fixed(-37.0))),
 	                       static_cast<float>(w::from_fixed(w::to_fixed(910.0)))};
+	w::Entity map_entity;
+	map_entity.kind = w::EntityKind::Building;
+	map_entity.item_type = 5;
+	map_entity.has_item_def = true;
+	map_entity.has_minimap_model_marker = true;
+	map_entity.position = {64.0f, 96.0f, 0.0f};
+	const w::EntityHandle map_handle = world.registry.spawn_from(2, 0, map_entity);
+	if (!expect(map_handle.valid(), "host map fixture occupies a pool-2 slot"))
+		return false;
+
+	np::ClientRuntime host_view(host_loop); // HostClient recv-fold only
+	ns::ClientEntityState &decoded_map = host_view.state().upsert(map_handle.packed);
+	decoded_map.x = w::to_fixed(map_entity.position.x);
+	decoded_map.y = w::to_fixed(map_entity.position.y);
+	decoded_map.z = w::to_fixed(map_entity.position.z);
 
 	np::Server_TickUpdate(ctx); // fans a per-frame 0x0A to the host loopback (is_in_match), anchored to hp
 
-	np::ClientRuntime host_view(host_loop); // HostClient role: recv-fold only, 0x0C suppressed
 	if (!expect(host_view.is_authority(), "host-as-client runtime is authority (no 0x0C)")) return false;
 	std::vector<std::vector<uint8_t>> out = host_view.Client_ProcessNetworkFrame();
 	if (!expect(out.empty(), "host-as-client emits no C2S (is_authority gate)")) return false;
@@ -2555,6 +2700,17 @@ bool run_host_as_client() {
 	// Explicitly assert it is NOT the dvxi5 fallback (the bug D-NET-121 guards).
 	if (!expect(host_view.state().anchor_x != static_cast<int32_t>(0xfe56f854u),
 	            "host-as-client anchor is not the dvxi5 fallback")) return false;
+	bool found_map_overlay = false;
+	for (const ns::ClientMinimapOverlaySlot &slot :
+			host_view.state().minimap.persistent) {
+		if (slot.active && slot.handle == map_handle.packed) {
+			found_map_overlay = true;
+			break;
+		}
+	}
+	if (!expect(found_map_overlay,
+			"host loopback receives and retains the same initial minimap stream"))
+		return false;
 	return true;
 }
 
@@ -4504,6 +4660,7 @@ int main() {
 	                run_fire_queue_stamps_runtime_tick() &&
 	                run_retail_post_auth_prelude() &&
 	                run_early_sync_tail_latch() &&
+	                run_client_reducer_preserves_packet_message_order() &&
 	                run_duplicate_s2c_session_one_shot_is_not_replayed() &&
 	                run_roundtrip() &&
 	                run_roundtrip_with_spawn_zones(/*player_paced=*/false) &&

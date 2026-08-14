@@ -161,6 +161,11 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_parachute_icon"), &HudPos::get_parachute_icon);
 	ClassDB::bind_method(D_METHOD("get_armor_icon"), &HudPos::get_armor_icon);
 	ClassDB::bind_method(D_METHOD("get_spinmap_bounds"), &HudPos::get_spinmap_bounds);
+	ClassDB::bind_method(D_METHOD("get_spinmap_wp_dist_off"),
+			&HudPos::get_spinmap_wp_dist_off);
+	ClassDB::bind_method(D_METHOD("get_map_coords"), &HudPos::get_map_coords);
+	ClassDB::bind_method(D_METHOD("get_declutter_flags", "name"),
+			&HudPos::get_declutter_flags);
 	ClassDB::bind_method(D_METHOD("get_colors"), &HudPos::get_colors);
 	ClassDB::bind_method(D_METHOD("to_dictionary"), &HudPos::to_dictionary);
 
@@ -356,6 +361,34 @@ Rect2i HudPos::get_spinmap_bounds() const {
 	return Rect2i(h.spinmap_x1, h.spinmap_y1, h.spinmap_x2 - h.spinmap_x1, h.spinmap_y2 - h.spinmap_y1);
 }
 
+int HudPos::get_spinmap_wp_dist_off() const {
+	// 0 = live (the retail BSS-zero default); authored nonzero suppresses.
+	return loaded_ ? file_.hud.spinmap_wp_dist_off : 0;
+}
+
+Vector3i HudPos::get_map_coords() const {
+	// x, y, suppressor (0 = live, the retail BSS-zero default).
+	if (!loaded_) {
+		return Vector3i(0, 0, 0);
+	}
+	const DefHudPosDef &h = file_.hud;
+	return Vector3i(h.map_coords[0], h.map_coords[1], h.map_coords[2]);
+}
+
+PackedByteArray HudPos::get_declutter_flags(const String &p_name) const {
+	PackedByteArray out;
+	if (!loaded_ || p_name.is_empty()) return out;
+	const String wanted = p_name.to_upper();
+	for (size_t i = 0; i < file_.hud.declutter_count; ++i) {
+		if (String(file_.hud.declutter[i].name).to_upper() != wanted) continue;
+		out.resize(4);
+		for (int f = 0; f < 4; ++f)
+			out.set(f, static_cast<uint8_t>(file_.hud.declutter[i].flags[f] != 0));
+		break;
+	}
+	return out;
+}
+
 Dictionary HudPos::get_colors() const {
 	Dictionary out;
 	if (!loaded_) {
@@ -465,6 +498,7 @@ Dictionary HudPos::to_dictionary() const {
 	// consumers do that conversion. [orig: alphafade parse @0x5a0882..0x5a08c2
 	// -> 0x2723614/18/1C]
 	misc["alpha_fade"] = Vector3(h.alpha_fade[0], h.alpha_fade[1], h.alpha_fade[2]);
+	misc["spinmap_wp_dist_off"] = h.spinmap_wp_dist_off;
 	out["misc"] = misc;
 
 	return out;

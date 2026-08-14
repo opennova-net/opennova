@@ -35,6 +35,9 @@ const _WEAPON_CATEGORY_TOKENS: Array[String] = ["Knife", "Secondary",
 var _category_was_down := 0
 var _cycle_prev_was_down := false
 var _cycle_next_was_down := false
+var _radar_out_was_down := false
+var _radar_in_was_down := false
+var _map_toggle_was_down := false
 
 
 func setup(world: GameWorld, presenter: LocalPlayerPresenter) -> void:
@@ -101,6 +104,7 @@ func before_world_tick(delta: float, capture_mouse: bool = false,
 		sim.set_local_player_eye(head if head != Vector3.INF else Vector3.ZERO,
 				head != Vector3.INF)
 	_sample_weapon_input(frame_input, gameplay_input_active)
+	_sample_hud_input(gameplay_input_active)
 	return frame_input
 
 
@@ -152,6 +156,34 @@ func _send_weapon_switch_input(captured: bool) -> void:
 	if next_down and not _cycle_next_was_down and sim != null:
 		sim.request_local_player_weapon_cycle(1)
 	_cycle_next_was_down = next_down
+
+
+# The retail radar-zoom bindings are ordinary configurable key rows applying
+# one multiplicative step on the down edge: radarout GROWS the world-extent
+# value (x1.15 toward 0x100000) and radarin shrinks it (x0.85 toward 4096).
+# huddetail (dispatch code 19) is a retail dispatcher no-op and gets no
+# sampler. [orig: Input_HandleActionBinding @0x49AD40 — radarout row 48 =
+#  case 361 @0x49beaf, radarin row 49 = case 360 @0x49bcb0; code 19 -> the
+#  default arm @0x49c27d]
+func _sample_hud_input(active: bool) -> void:
+	var sim = _sim()
+	var radar_out_down := active and ControlsBindings.pressed("radarout")
+	if radar_out_down and not _radar_out_was_down and sim != null:
+		sim.request_hud_radar_zoom(1)
+	_radar_out_was_down = radar_out_down
+	var radar_in_down := active and ControlsBindings.pressed("radarin")
+	if radar_in_down and not _radar_in_was_down and sim != null:
+		sim.request_hud_radar_zoom(-1)
+	_radar_in_was_down = radar_in_down
+	# map_toggle (row 98, default M) cycles the big-map mode: off -> the
+	# north-up window -> fullscreen -> off. The retail arm lives in the
+	# IN-GAME dispatcher, not the menu-context one.
+	# [orig: row 98 code 28 -> the @0x4e0662 arm -> HUD_CycleMapMode
+	#  @0x520bc0 (0->2->3->0)]
+	var map_down := active and ControlsBindings.pressed("map_toggle")
+	if map_down and not _map_toggle_was_down and sim != null:
+		sim.request_hud_map_cycle()
+	_map_toggle_was_down = map_down
 
 
 # Edge-triggered gameplay keys. F4 toggles first/third person [orig: g_camera_mode

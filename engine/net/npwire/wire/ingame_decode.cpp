@@ -1319,7 +1319,12 @@ bool decode_minimap_overlay_batch(const uint8_t *body, size_t len,
 	for (uint8_t i = 0; i < count; ++i) {
 		MinimapOverlayBatch::Entry e;
 		e.handle = c.u16();
-		for (int j = 0; j < 10; ++j) e.extra[j] = c.u8();
+		e.x = static_cast<int16_t>(c.u16());
+		e.y = static_cast<int16_t>(c.u16());
+		e.z = static_cast<int16_t>(c.u16());
+		e.lifetime_s = c.u16();
+		e.type = c.u8();
+		e.height = c.u8();
 		if (!c.ok) return false;
 		out.entries.push_back(e);
 	}

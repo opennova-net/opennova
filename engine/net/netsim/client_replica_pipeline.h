@@ -40,10 +40,12 @@ public:
 	void pump(ISessionTransport &channel);
 
 	// Fold ONE already-decoded inner S2C body (tag + body, no NWU/SCRK framing) into the
-	// ClientState. The remote-joiner path calls this for each body JoinerConnection surfaces off
-	// its 0x83 SESSION decode (inbound_0a / inbound_world); pump() is the thin loopback loop over
-	// it. Exactly ONE of {pump, apply-per-body} drives a given ClientState per frame (one fold
-	// path per role) so frames_applied / seen_this_frame stay coherent.
+	// ClientState. The remote-joiner path calls this for each record of
+	// JoinerConnection's inbound_reducer stream — the canonical, packet-ordered
+	// applied stream (the per-family vectors are diagnostic views only);
+	// pump() is the thin loopback loop over it. Exactly ONE of {pump,
+	// apply-per-body} drives a given ClientState per frame (one fold path per
+	// role) so frames_applied / seen_this_frame stay coherent.
 	void apply(uint8_t tag, const std::vector<uint8_t> &body);
 
 	// Advance the remote lean integrator one body tick (called once per client
@@ -55,6 +57,15 @@ public:
 	// embedding runtime drains and sends them once per frame.
 	std::vector<uint16_t> drain_carrier_repair_requests();
 	void tick_recoil();
+	// Advance the retained 0x40/0x6B banks once per client tick. Persistent
+	// 0x10 slots do not age; the transient bank clears on expiry while the
+	// special bank floors its lifetime at zero keeping the handle; live links
+	// keep their slot's lifetime refreshed and clear it when they lapse.
+	// Regular (non-special) markers refresh pose/known from the decoded
+	// entity, mirroring retail's draw-time pool read.
+	// [orig: update_map_overlay_timers @0x5BFCE0;
+	//  render_minimap_slot_blip @0x5be4ac]
+	void tick_minimap_overlays();
 
 	// JOINER role only (net-re §5.38e, D-NET-196): switch the 0x0A fold from
 	// live-pose snap to smooth-target STAGING, and enable tick_remote_motion.
@@ -191,6 +202,9 @@ public:
 		return state_.topology_revision;
 	}
 	std::size_t unknown_tags() const { return unknown_tags_; }
+	// Bodies whose tag IS handled but whose payload failed to decode; kept
+	// apart from unknown_tags() so malformed known traffic is visible.
+	std::size_t malformed_bodies() const { return malformed_bodies_; }
 
 	// One-shot gameplay notifications surfaced by apply(). Draining keeps the
 	// decoded ClientState persistent while preventing event replay on later frames.
@@ -249,6 +263,8 @@ private:
 	// surfaced record). [orig: NapiNPClientMsg_EntityDeath @0x42EB50 /
 	// Entity_KillBySlotId @0x42BCE0]
 	void apply_entity_death(uint16_t handle_packed, int16_t killer_source);
+	void apply_capture_zone_overlay(const std::vector<uint8_t> &body);
+	void apply_minimap_overlay_batch(const std::vector<uint8_t> &body);
 	void apply_frame_update(const std::vector<uint8_t> &body);
 	// Load-time world-stream spawn/static batches (§5.2a) -> ClientState upsert. Each carries
 	// ABSOLUTE world positions (no anchor) + the entity identity/type, so spawn-only entities
@@ -292,6 +308,7 @@ private:
 	std::vector<WeaponReload> pending_weapon_reloads_;
 	std::vector<EntityDeathRecord> pending_entity_deaths_;
 	std::size_t unknown_tags_ = 0;
+	std::size_t malformed_bodies_ = 0;
 	uint32_t game_type_ = 0;
 	// Mission-seeded PRNG_Next16 stand-in shared by every decoded row in this
 	// view. The body consumes one draw per person per tick even when recoil is

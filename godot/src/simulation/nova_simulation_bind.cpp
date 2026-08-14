@@ -140,7 +140,27 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_local_player_mouse", "sensitivity", "invert_y"), &Simulation::set_local_player_mouse);
 	ClassDB::bind_method(D_METHOD("request_local_player_stance", "stance"), &Simulation::request_local_player_stance);
 	ClassDB::bind_method(D_METHOD("get_local_player_position"), &Simulation::get_local_player_position);
+	ClassDB::bind_method(D_METHOD("get_local_player_heading_bam"),
+	                     &Simulation::get_local_player_heading_bam);
+	ClassDB::bind_method(D_METHOD("request_hud_radar_zoom", "direction"),
+	                     &Simulation::request_hud_radar_zoom);
+	ClassDB::bind_method(D_METHOD("request_hud_map_cycle"),
+	                     &Simulation::request_hud_map_cycle);
+	ClassDB::bind_method(D_METHOD("get_hud_map_mode"),
+	                     &Simulation::get_hud_map_mode);
+	ClassDB::bind_method(D_METHOD("get_hud_big_zoom_q16"),
+	                     &Simulation::get_hud_big_zoom_q16);
+	ClassDB::bind_method(D_METHOD("get_hud_radar_zoom_q16"),
+	                     &Simulation::get_hud_radar_zoom_q16);
+	ClassDB::bind_method(D_METHOD("get_hud_map_flip_180"),
+	                     &Simulation::get_hud_map_flip_180);
 	ClassDB::bind_method(D_METHOD("get_waypoint_hud_view"), &Simulation::get_waypoint_hud_view);
+	ClassDB::bind_method(D_METHOD("get_hud_minimap_snapshot"),
+	                     &Simulation::get_hud_minimap_snapshot);
+	ClassDB::bind_method(D_METHOD("get_hud_minimap_footprints"),
+	                     &Simulation::get_hud_minimap_footprints);
+	ClassDB::bind_method(D_METHOD("get_hud_map_grid_origin"),
+	                     &Simulation::get_hud_map_grid_origin);
 	ClassDB::bind_method(D_METHOD("get_objectives_view"), &Simulation::get_objectives_view);
 	ClassDB::bind_method(D_METHOD("get_local_player_yaw_deg"), &Simulation::get_local_player_yaw_deg);
 	ClassDB::bind_method(D_METHOD("get_local_player_pitch_deg"), &Simulation::get_local_player_pitch_deg);
@@ -601,6 +621,9 @@ void Simulation::_bind_methods() {
 	BIND_CONSTANT(ENTITY_HEALTH_MIN);
 	BIND_CONSTANT(ENTITY_HEALTH_MAX);
 	BIND_CONSTANT(DEFAULT_PLAYER_FOV_H_DEG);
+	BIND_CONSTANT(HUD_MINIMAP_SNAPSHOT_VERSION);
+	BIND_CONSTANT(HUD_MINIMAP_HEADER_SIZE);
+	BIND_CONSTANT(HUD_MINIMAP_STRIDE);
 
 	BIND_CONSTANT(SPAWN_ORIGIN_NONE);
 	BIND_CONSTANT(SPAWN_ORIGIN_KIND_NONE);

@@ -11,6 +11,7 @@
 
 #include "hud/game_font.h"
 #include "hud/hud_math.h"
+#include "hud/hud_minimap.h"
 
 #include <array>
 #include <cstdint>
@@ -33,6 +34,11 @@ enum HudTexture : int32_t {
 	kHudTexStance3,
 	kHudTexStance4,
 	kHudTexStance5,
+	kHudTexMapTerrain,
+	kHudTexMapIcons,
+	kHudTexMapCompass,
+	kHudTexMapRadar,
+	kHudTexMapWpIndicator, // WPIndctr.tga [orig: HUD_LoadAllTextures @0x59e079]
 	kHudTexSightsBase, // authored SIGHTS rows: kHudTexSightsBase + row index
 };
 
@@ -118,6 +124,20 @@ struct HudLayout {
 	HudRectRecord health_rect;
 	HudRectRecord heat_rect;
 	HudRectRecord power_rect;
+	HudRectRecord spinmap_rect;
+	// SPINMAPWPDISTOFF: a NONZERO authored value suppresses the waypoint
+	// distance text; the retail global is BSS (no file bytes -> inits 0 =
+	// label LIVE) and the sole read is ==0. The earlier "static -1" gloss
+	// mis-read an undefined-bytes dump — re-adjudicated 2026-08-14 against
+	// the segment map. [orig: dword_27237C0 (.data, uninitialized);
+	//  parse @0x59fc1f; read @0x5a7a6a]
+	int spinmap_wp_dist_off = 0;
+	// MAPCOORDS: the player grid label position + its suppressor (same
+	// BSS-zero live-by-default polarity). [orig:
+	//  screenX/screenY/dword_27236FC (.data, uninitialized), parse @0x5a0920]
+	float map_coords_x = 0.0f;
+	float map_coords_y = 0.0f;
+	int map_coords_off = 0;
 	// The six stance frames' authored per-frame offsets + frame-0 dims.
 	std::array<int, 6> stance_offset_x{};
 	std::array<int, 6> stance_offset_y{};
@@ -185,6 +205,11 @@ struct HudWaypointState {
 	bool present = false;
 	std::string name;
 	int distance_m = 0;
+	int32_t world_x = 0;
+	int32_t world_y = 0;
+	// Altitude, Q16. Drives the spinmap state-line tricolor and the
+	// WPIndctr frame. [orig: dword_2723520 read by sub_590970]
+	int32_t world_z = 0;
 };
 
 struct HudObjectiveRow {
@@ -263,9 +288,14 @@ struct HudFrameState {
 	// 3 light blue / 4 yellow / 5 salmon). Selects the master overlay color the
 	// text elements draw with and the friendly-tag good-tier source [orig:
 	// cfg_hud_color_index, config token "hud_color_index" default 2 @0x54d2a6;
-	// applied to the live index @0x55152f; cycled 0..5 by input action case 10
-	// @0x49afc7].
+	// applied to the live index @0x55152f; cycled 0..5 by input action
+	// `hudcolor` (record row 76, dispatch code 10) @0x49afc7].
 	int hud_color_index = 2;
+	HudMinimapInput minimap;
+	// The mission's static footprint polygons (baked once per feed); the
+	// spinmap element lends them to the compile input by pointer — the
+	// per-frame input copy must never clone the triangle set.
+	std::vector<HudMinimapFootprint> map_footprints;
 };
 
 struct HudDrawList {
@@ -274,6 +304,19 @@ struct HudDrawList {
 	std::vector<HudLine> lines;
 	std::vector<GameFontQuad> glyphs;
 	std::vector<GameFontUnderline> underlines;
+	HudMapPass map;
+	// The M-cycle big map (mode 2 window / mode 3 fullscreen) renders as a
+	// second pass over the corner spinmap — retail draws both.
+	// [orig: Render_ProcessMainSceneFrame @0x5cac50 -> HUD_BuildMapOverlayView
+	//  @0x5a7e10 in addition to the HUD_RenderAllOverlays spinmap ctx]
+	HudMapPass big_map;
+	// Per-pass spinmap label glyphs: each pass's device leg layers its own
+	// glyphs above that pass's additive terrain, after its sprites/lines —
+	// not with the flat HUD text, and never across passes (the big map's
+	// letters must not render under its own grid rules or over the corner
+	// map from the wrong item).
+	std::vector<GameFontQuad> map_glyphs;
+	std::vector<GameFontQuad> big_map_glyphs;
 	int64_t elements_drawn = 0;
 };
 
@@ -283,7 +326,8 @@ struct HudDrawList {
 inline constexpr int kHudFontSlotHud = 0;       // the hudpos-named HUD font
 inline constexpr int kHudFontSlotLabel = 1;     // g_hudLabelFont (Arial normal)
 inline constexpr int kHudFontSlotLabelBold = 2; // the bold slot (fontObj @ 0xB4C394)
-inline constexpr int kHudFontSlotCount = 3;
+inline constexpr int kHudFontSlotLabelLarge = 3; // g_hudLabelFontLarge (Impac22b)
+inline constexpr int kHudFontSlotCount = 4;
 
 // Deep in-process module: the whole witnessed element walk, stance cross-fade
 // state, the clip-indicator flash state, and the triggered-text message ring
@@ -292,16 +336,19 @@ class HudFrameCompiler {
 public:
 	void configure(const HudLayout &layout, const fnt_font_t *font);
 
-	// The overlay label fonts + their resolution scale — the Arial pair retail
-	// loads beside the hudpos HUD font [orig: HUD_InitAllFonts @ 0x51ee20:
-	// g_hudLabelFont = Arial14n/16n, the bold slot (fontObj @ 0xB4C394) =
-	// Arial12b/14b/16b, both at scale (screenW<<16)/{640,800,1024}; the slot
-	// carries {font, scale_x, scale_y} @ 0x580453..0x580468]. Friendly tags
-	// draw with the normal face [orig: @ 0x5a3a0c], attach labels with the
-	// bold face [orig: @ 0x5a3680/@ 0x5a38a1]. Null fonts fall back to the
-	// hudpos font at scale 1 (layout-only embedders keep drawing).
+	// The overlay label fonts + their resolution scales — the Arial pair and
+	// the large slot retail loads beside the hudpos HUD font
+	// [orig: HUD_InitAllFonts @ 0x51ee20: g_hudLabelFont = Arial14n/16n, the
+	// bold slot (fontObj @ 0xB4C394) = Arial12b/14b/16b at scale
+	// (screenW<<16)/{640,800,1024}; g_hudLabelFontLarge @0xB4C3A0 =
+	// Impac22b.fnt at the over-800 scale; the slot carries
+	// {font, scale_x, scale_y} @ 0x580453..0x580468]. Friendly tags draw
+	// with the normal face [orig: @ 0x5a3a0c], attach labels with the bold
+	// face [orig: @ 0x5a3680/@ 0x5a38a1], the big-map grid labels with the
+	// large face. Null fonts fall back to the hudpos font at scale 1
+	// (layout-only embedders keep drawing).
 	void configure_label_fonts(const fnt_font_t *normal, const fnt_font_t *bold,
-			float scale);
+			const fnt_font_t *large, float scale, float large_scale);
 
 	// Swap the layout WITHOUT resetting runtime state (stance fade, clip
 	// flash, the message ring) — the texture-table refresh path, e.g. the
@@ -347,6 +394,7 @@ private:
 	void element_heat(const HudFrameState &state, float w, float h);
 	void element_power(const HudFrameState &state, float w, float h);
 	void element_waypoint(const HudFrameState &state, float w, float h);
+	void element_spinmap(const HudFrameState &state, float w, float h);
 	void element_objectives(const HudFrameState &state, float w, float h);
 	void element_attach_labels(const HudFrameState &state, float w, float h);
 	void element_friendly_tags(const HudFrameState &state, float w, float h);
@@ -358,11 +406,16 @@ private:
 
 	HudLayout layout_{};
 	GameFont font_;
-	// The Arial label pair + slot scale (see configure_label_fonts).
+	// The Arial label pair + the large slot + scales (configure_label_fonts).
 	GameFont label_font_;
 	GameFont label_font_bold_;
+	GameFont label_font_large_;
 	float label_scale_ = 1.0f;
+	float label_large_scale_ = 1.0f;
 	HudDrawList draw_list_;
+	// Lives across frames so the map pass vectors and clip scratch keep
+	// their capacity (the per-frame spinmap compile is allocation-free).
+	HudMinimapCompiler minimap_compiler_;
 	StanceFade stance_;
 	// The clip-indicator flash latch [orig: draw_hud_ammo_indicator flash
 	// @ 0x599af9]: the round count drop stamps the flash start.

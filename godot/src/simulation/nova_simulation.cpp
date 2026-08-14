@@ -117,6 +117,10 @@ void Simulation::reset_world() {
 	// the previous mission's copy still stands.
 	weapon_profile_seeded_side_ = -1;
 	player_view_ = opennova::world::PlayerViewState{};
+	// Round init clears the map mode and the zooms return to the spawn
+	// defaults (witness at hud::HudMapControl — Game_InitNewRound /
+	// Player_InitPlayer lifecycle).
+	hud_map_control_.reset_spawn();
 	local_weapon_.nvg_scope_restore = false;
 	binocular_yaw_offset_deg_ = 0.0f;
 	binocular_pitch_offset_deg_ = 0.0f;
@@ -387,6 +391,10 @@ void Simulation::finish_load(const opennova::bms::File &file) {
 	// death auto-lose in check_win_conditions). [orig: Bms_AttribFlags @0xa76258,
 	// read by Server_CheckWinConditions @0x51ad6f]
 	world_->mission_attrib_flags = static_cast<uint32_t>(file.header.attrib_flags);
+	// The mission's authored map_zoom scales BOTH radar-zoom spawn defaults
+	// (witness at hud::HudMapControl::set_mission_map_zoom — the
+	// Player_InitPlayer derivation off the BMS header float).
+	hud_map_control_.set_mission_map_zoom(file.header.map_zoom);
 	// The mission's loadout/availability chunks wait for the weapon catalog —
 	// load_weapon_table promotes them through the engine's SP-vs-net gate.
 	stash_mission_loadout_rules(file);

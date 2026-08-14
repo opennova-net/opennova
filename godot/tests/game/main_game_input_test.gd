@@ -23,17 +23,16 @@ class WorldInputHarness:
 	func _ready() -> void:
 		pass
 
+	func is_loaded() -> bool:
+		return true
+
 
 class CaptureHudPresenter:
 	extends GameHudPresenter
 	var friendly_tag_cycles := 0
-	var hud_color_cycles := 0
 
 	func cycle_friendly_tags() -> void:
 		friendly_tag_cycles += 1
-
-	func cycle_hud_color() -> void:
-		hud_color_cycles += 1
 
 
 class CapturePlayerPresenter:
@@ -47,11 +46,12 @@ class CapturePlayerPresenter:
 		return false
 
 
-func _pressed_key(keycode: Key) -> InputEventKey:
+func _pressed_key(keycode: Key, shift_pressed := false) -> InputEventKey:
 	var event := InputEventKey.new()
 	event.keycode = keycode
 	event.physical_keycode = keycode
 	event.pressed = true
+	event.shift_pressed = shift_pressed
 	return event
 
 
@@ -97,7 +97,10 @@ func test_friendly_tags_use_f_while_n_reaches_the_nvg_router() -> void:
 			"N reaches the local-player router for NVG")
 
 
-func test_hud_color_key_cycles_the_scheme_once_per_press() -> void:
+func test_h_is_not_a_hud_key_and_reaches_the_player_router() -> void:
+	# Retail H is only the secondary `pause` binding (SP-only); there is no
+	# HUD-visibility toggle and no H color mapping.
+	# [orig: catalog row 70 vk2 0x48; case 25 @0x49b520]
 	var game := _make_input_harness()
 	var hud := CaptureHudPresenter.new()
 	var player := CapturePlayerPresenter.new()
@@ -105,11 +108,23 @@ func test_hud_color_key_cycles_the_scheme_once_per_press() -> void:
 	game.add_child(player)
 	game.configure_input_targets(hud, player)
 
-	# [orig: input action case 10 @0x49afc7 — one cycle per action fire; the
-	# key itself is a reimpl mapping pending the binding-row witness (D-CTRL-3)]
 	game.dispatch_key(_pressed_key(KEY_H))
-	assert_eq(hud.hud_color_cycles, 1, "H cycles the HUD color scheme")
-	assert_true(player.handled_keys.is_empty(), "the shell consumes the color key")
+	assert_eq(hud.friendly_tag_cycles, 0, "H drives no HUD presenter action")
+	assert_eq(player.handled_keys, PackedInt32Array([KEY_H]),
+			"H falls through the shell to the player router")
 
-	game.dispatch_key(_pressed_key(KEY_H))
-	assert_eq(hud.hud_color_cycles, 2, "each press cycles once")
+
+func test_plain_f6_reaches_the_binding_rows_while_shift_f6_is_debug_pick() -> void:
+	var game := _make_input_harness()
+	var hud := CaptureHudPresenter.new()
+	var player := CapturePlayerPresenter.new()
+	game.add_child(hud)
+	game.add_child(player)
+	game.configure_input_targets(hud, player)
+
+	game.dispatch_key(_pressed_key(KEY_F6))
+	assert_eq(player.handled_keys, PackedInt32Array([KEY_F6]),
+			"Plain F6 remains available to the gameplay HUDDETAIL router.")
+	game.dispatch_key(_pressed_key(KEY_F6, true))
+	assert_eq(player.handled_keys, PackedInt32Array([KEY_F6]),
+			"Shift+F6 is consumed by the shell's debug picker.")
