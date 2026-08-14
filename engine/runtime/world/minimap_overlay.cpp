@@ -139,7 +139,7 @@ MinimapBlipDrawPolicy minimap_blip_draw_policy(const Entity &entity,
 	if (entity.item_type == 5 && (entity.item_attrib & kItemAttribSpawnPoint) == 0 &&
 			(entity.item_attrib2 & 1u) == 0) {
 		// Building with the marker model: the icon path is skipped entirely —
-		// the collision ground-slice footprint draws instead.
+		// the OOBJ occlusion ground-slice footprint draws instead.
 		// [orig: @0x597a84..0x597b3f -> render_collision_wireframe @0x596800]
 		if (entity.has_minimap_model_marker) {
 			out.footprint = true;

@@ -107,6 +107,9 @@ func setup(world, player_presenter_in, ui_parent: Node) -> void:
 	# presenter's lifetime — teardown only resets per-mission state.
 	if _world != null and not _world.mission_effects.is_connected(apply_mission_effects):
 		_world.mission_effects.connect(apply_mission_effects)
+	if _world != null and not _world.minimap_terrain_changed.is_connected(
+			_on_minimap_terrain_changed):
+		_world.minimap_terrain_changed.connect(_on_minimap_terrain_changed)
 
 
 ## Undo everything a mission built: the HUD node (its card/effects children go
@@ -129,6 +132,13 @@ func teardown() -> void:
 
 func get_hud():
 	return _game_hud
+
+
+func _on_minimap_terrain_changed(texture: ImageTexture) -> void:
+	if _game_hud == null:
+		return
+	_game_hud.set_minimap_terrain(
+			_world.get_terrain_data() if _world != null else null, texture)
 
 
 ## The USER crosshair style (Options); applied to a built HUD immediately, else

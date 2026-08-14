@@ -63,6 +63,9 @@ signal load_progress(percent: int)
 # Player text is consumed by the HUD; debug_text remains a distinct unrouted channel.
 # "dialog" is also routed straight to mission audio below.
 signal mission_effects(effects: Array)
+## The CPU-baked gameplay-map terrain changed. Streamed join .til data arrives
+## after the HUD can already exist, so consumers refresh through this edge.
+signal minimap_terrain_changed(texture: ImageTexture)
 
 # A mission (.bms) to boot into. When set, the mission's header selects the
 # terrain + environment (terrain_file/env_file below are ignored) and its placed
@@ -637,6 +640,7 @@ func get_mission_stats() -> Dictionary:
 func unload() -> void:
 	_world_ready = false
 	_minimap_terrain_texture = null
+	minimap_terrain_changed.emit(null)
 	_join_wire_assets_pending = false
 	_join_wire_til_applied = false
 	_join_wire_assets_failed = false
@@ -888,6 +892,7 @@ func _apply_join_wire_til_if_ready() -> bool:
 		_terrain.tile_info_override = tile_info
 	if _dispatcher != null:
 		_dispatcher.tile_info = tile_info
+	_bake_minimap_terrain_atlas()
 	return true
 
 
@@ -2272,15 +2277,18 @@ func get_minimap_terrain_texture() -> ImageTexture:
 
 # Compose the map's per-cell tile atlas: a pure-CPU compose on TerrainData
 # (retail's map binds the PolyTrn per-cell tile cache, whose content is base
-# colormap + the water quads — no lighting, no detail splat — so no render
-# pass is involved; see TerrainData.build_minimap_tile_atlas).
+# colormap + authored .til quads + depth-tested water — no lighting or detail
+# splat — so no render pass is involved; see build_minimap_tile_atlas).
 func _bake_minimap_terrain_atlas() -> void:
 	_minimap_terrain_texture = null
 	var terrain_data := get_terrain_data()
-	if terrain_data == null or Engine.is_editor_hint():
-		return
-	var live_water := float(_water.water_height) if _water != null else NAN
-	_minimap_terrain_texture = terrain_data.build_minimap_tile_atlas(live_water)
+	if terrain_data != null and not Engine.is_editor_hint():
+		var live_water := float(_water.water_height) if _water != null else NAN
+		var overlay: Texture2D = _terrain.get_tile_overlay_texture() \
+				if _terrain != null else null
+		_minimap_terrain_texture = terrain_data.build_minimap_tile_atlas(
+				live_water, overlay)
+	minimap_terrain_changed.emit(_minimap_terrain_texture)
 
 
 func _warm_effect_world_catalog() -> int:

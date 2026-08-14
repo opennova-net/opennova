@@ -30,7 +30,7 @@ bool minimap_overlay_entity_enabled(const Entity &entity);
 // Rotation: only the rotated classes take the live heading — the upright
 // classes (armory, non-vehicle EWEAPs, cells 6/2, the attrib2-bit0 class,
 // dead persons) draw axis-aligned badges. Buildings with a marker model
-// leave the icon path entirely (footprint = the collision ground-slice
+// leave the icon path entirely (footprint = the OOBJ occlusion ground-slice
 // polygons, drawn by the footprint feed).
 // [orig: draw_minimap_blip @0x597890 — branch heads @0x5979e4 (armory
 //  0x40000 = 4 wu, upright; re-adjudicated 2026-08-14 — the branch pushes

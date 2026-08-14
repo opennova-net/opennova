@@ -10,7 +10,7 @@
 #include <vector>
 
 #include <npwire/ingame_decode.h> // kRoundEventFlag* (the fire-mode byte)
-#include <world/minimap_footprint.h> // the collision ground-slice footprint mesh
+#include <world/minimap_footprint.h> // the OOBJ occlusion ground-slice footprint mesh
 #include <world/minimap_overlay.h>   // classifier + the blip draw policy
 #include <renderer/tracer_frame.h> // the styled tracer-ribbon compile
 #include <world/entity.h> // kEntityFlag* (the wire state_flags byte IS entity+36 low)
@@ -211,9 +211,9 @@ PackedInt32Array Simulation::get_hud_minimap_snapshot() const {
 
 PackedInt32Array Simulation::get_hud_minimap_footprints() const {
 	// Static footprint polygons for every visible footprint-class entity:
-	// the collision ground-slice mesh transformed by the entity pose, in
+	// the OOBJ occlusion ground-slice mesh transformed by the entity pose, in
 	// the witnessed fill colors and the overlay ctx alpha (witness at
-	// world::minimap_footprint_fill_argb) with the collision ground-slice
+	// world::minimap_footprint_fill_argb) with the occlusion ground-slice
 	// mesh placed by the entity pose (world::minimap_footprint_place).
 	PackedInt32Array out;
 	out.push_back(1); // feed version
@@ -229,16 +229,16 @@ PackedInt32Array Simulation::get_hud_minimap_footprints() const {
 		const opennova::world::MinimapBlipDrawPolicy policy =
 				opennova::world::minimap_blip_draw_policy(entity, row.icon);
 		if (!policy.footprint) return;
-		const int32_t model_id = collision_world_.entity_model_id(
-				*world_, entity.handle);
+		const int32_t model_id = occlusion_world_.instance_model_id(
+				entity.handle);
 		if (model_id < 0) return;
 		auto mesh_it = meshes.find(model_id);
 		if (mesh_it == meshes.end()) {
-			const opennova::world::CollisionModel *model =
-					collision_world_.model(model_id);
+			const opennova::world::OcclusionModel *model =
+					occlusion_world_.model(model_id);
 			if (model == nullptr) return;
 			mesh_it = meshes.emplace(model_id,
-					opennova::world::minimap_footprint_from_collision(
+					opennova::world::minimap_footprint_from_occlusion(
 							*model)).first;
 		}
 		const opennova::world::MinimapFootprintMesh &mesh = mesh_it->second;

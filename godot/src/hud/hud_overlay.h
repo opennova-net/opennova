@@ -129,7 +129,7 @@ public:
 	void set_minimap_grid_origin(const Vector2 &p_mission_position,
 			bool p_present);
 	// Static building/zone footprint polygons (the sim feed, baked once per
-	// mission; witness at world::minimap_footprint_from_collision).
+	// mission; witness at world::minimap_footprint_from_occlusion).
 	void set_minimap_footprints(const PackedInt32Array &p_feed);
 
 	// Debug/test accessor: compile at the current surface size and report the

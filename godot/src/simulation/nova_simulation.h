@@ -1423,8 +1423,8 @@ public:
 	// Static footprint polygons for footprint-class markers (buildings/zones
 	// with marker models): {version=1, count} then per row {handle,
 	// fill_argb, fill_value_count, xy_q16..., edge_value_count, xy_q16...}.
-	// Baked once per world from the collision ground-slice mesh transformed
-	// by the entity pose (witness at world::minimap_footprint_from_collision).
+	// Baked once per world from the OOBJ occlusion ground-slice mesh transformed
+	// by the entity pose (witness at world::minimap_footprint_from_occlusion).
 	PackedInt32Array get_hud_minimap_footprints() const;
 	// { present: bool, position: Vector3 } — the type-2043 grid-origin marker.
 	Dictionary get_hud_map_grid_origin() const;

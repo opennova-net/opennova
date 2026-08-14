@@ -295,14 +295,12 @@ void test_spinmap_projection_zoom_and_clip() {
 	CHECK(std::fabs(ly - 657.0f) < 0.01f &&
 			std::fabs(lx - (915.0f - 100.0f / scale)) < 0.01f,
 			"mission +Y draws on the player's left, not mirrored");
-	// The stencil disc clips at the band outer: 0.9275 x the half-height
-	// base — 105 x 0.9275 = 97.3875 px on this square rect (the base rides
-	// the byte-read half-height; the 0.9275 band-outer stencil is
-	// capture-true, its byte source open).
+	// The backing/stencil fan sits four physical pixels inside the scaled
+	// half-height: 105 - 4 = 101 px on this square authored rect.
 	CHECK(!opennova::hud::project_spinmap_point(input, 200 << 16, 0,
 			false, x, y), "a point past the stencil's world radius is clipped");
 	CHECK(!opennova::hud::project_spinmap_point(input, 200 << 16, 0,
-			true, x, y) && std::fabs(y - (657.0f - 97.3875f)) < 0.01f,
+			true, x, y) && std::fabs(y - (657.0f - 101.0f)) < 0.01f,
 			"edge clamp lands on the stencil circle");
 	// Zoom OUT grows the world-extent value x1.15 toward 0x100000; IN shrinks
 	// x0.85 toward 4096. [orig: cases 361/360 @0x49beaf/@0x49bcb0]
@@ -314,6 +312,49 @@ void test_spinmap_projection_zoom_and_clip() {
 			"zoom clamps at 4096");
 	CHECK(opennova::hud::spinmap_zoom_step(0x100000, 1) == 0x100000,
 			"zoom clamps at 0x100000");
+
+	// The live retail probe observes 00TRa's authored 0.61 as the
+	// complementary 0.39 Q16 value. The per-frame scale divides that value
+	// by the independently scaled rect HEIGHT (281 px at 1920x1080), not its
+	// 375 px width.
+	opennova::hud::HudMapControl control;
+	control.set_mission_map_zoom(0.61f);
+	CHECK(control.spawn_zoom_q16 == 25559 && control.zoom_q16 == 25559,
+			"00TRa map_zoom initializes the retail complementary Q16 zoom");
+	CHECK(control.spawn_big_zoom_q16 == 204472 &&
+			control.big_zoom_q16 == 204472,
+			"the big-map spawn zoom uses the same complementary factor");
+
+	HudMinimapInput widescreen;
+	widescreen.rect_x1 = 840.0f;
+	widescreen.rect_y1 = 20.0f;
+	widescreen.rect_x2 = 1040.0f;
+	widescreen.rect_y2 = 220.0f;
+	widescreen.surface_w = 1920.0f;
+	widescreen.surface_h = 1080.0f;
+	widescreen.zoom_q16 = 25559;
+	float center_x = 0.0f;
+	float center_y = 0.0f;
+	float ahead_x = 0.0f;
+	float ahead_y = 0.0f;
+	CHECK(opennova::hud::project_spinmap_point(
+			widescreen, 0, 0, false, center_x, center_y),
+			"the widescreen player center remains visible");
+	CHECK(opennova::hud::project_spinmap_point(
+			widescreen, 50 << 16, 0, false, ahead_x, ahead_y),
+			"a retail-probe comparison point remains visible");
+	const float retail_scale = 25559.0f / (281.0f * 200.0f);
+	CHECK(std::fabs(ahead_x - center_x) < 0.01f &&
+			std::fabs((center_y - ahead_y) - 50.0f / retail_scale) < 0.01f,
+			"widescreen projection uses the retail 281px-height scale");
+	float edge_x = 0.0f;
+	float edge_y = 0.0f;
+	CHECK(!opennova::hud::project_spinmap_point(
+			widescreen, 1000 << 16, 0, true, edge_x, edge_y),
+			"a distant widescreen point clamps to the spinmap edge");
+	CHECK(std::fabs(std::hypot(edge_x - center_x, edge_y - center_y) -
+			136.5f) < 0.05f,
+			"the corner stencil reaches the probed retail backing-ring radius");
 }
 
 void test_spinmap_mesh_layers_and_waypoint(const fnt_font_t *font) {
@@ -556,9 +597,9 @@ void test_spinmap_mesh_layers_and_waypoint(const fnt_font_t *font) {
 		for (const auto &line : fp_list.map.lines_under) {
 			if (line.color == 0x80000000u) found_edge = true;
 		}
-		CHECK(found_edge,
-				"the footprint boundary edge draws under the icon layer in "
-				"translucent black");
+		CHECK(!found_edge,
+				"the completed retail footprint pass leaves no observable "
+				"black silhouette stroke");
 	}
 
 	// The grid label compiles at the authored MAPCOORDS position once its

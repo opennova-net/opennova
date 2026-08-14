@@ -2,6 +2,7 @@
 #include <world/entity.h>
 #include <world/minimap_footprint.h>
 #include <world/minimap_overlay.h>
+#include <world/occlusion.h>
 
 #include <cstdio>
 
@@ -149,54 +150,137 @@ int main() {
 				"a marked building leaves the icon path for its footprint");
 	}
 
-	// The footprint mesh: a unit box roof (two up-facing tris) keeps its
-	// fills and only the outer boundary edges survive the parity toggle.
-	// [orig: render_collision_wireframe @0x596800]
+	// The map-overlay caller passes a zero color-alpha override, which the
+	// wireframe renderer promotes to 0xFF before emitting its fill vertices.
+	// The screenshot's large exact 0xA0A0A0 runs are the pixel witness.
+	// [orig: MapOverlay_DrawView @0x5a5abc pushes 0; the zero -> 0xFF branch
+	//  in render_collision_wireframe @0x596884..0x596891]
 	{
-		world::CollisionModel model;
-		world::CollisionSection section;
-		section.vertex_start = 0;
-		section.vertex_count = 4;
-		section.normal_start = 0;
-		section.normal_count = 2;
-		section.face_start = 0;
-		section.face_count = 4;
-		model.sections.push_back(section);
-		const int32_t k = 0x10000;
-		model.vertices.push_back({{-k, -k, k}});
-		model.vertices.push_back({{k, -k, k}});
-		model.vertices.push_back({{k, k, k}});
-		model.vertices.push_back({{-k, k, k}});
-		world::CollisionNormal up;
-		up.n[0] = 0;
-		up.n[1] = 0;
-		up.n[2] = 16384; // +1.0 in Q14
-		world::CollisionNormal side;
-		side.n[0] = 16384;
-		side.n[1] = 0;
-		side.n[2] = 0;
-		model.normals.push_back(up);
-		model.normals.push_back(side);
-		world::CollisionFace face;
-		face.vertex_index[0] = 0;
-		face.vertex_index[1] = 1;
-		face.vertex_index[2] = 2;
-		face.normal_index = 0;
+		world::Entity e = base_entity();
+		e.team = 0;
+		CHECK(world::minimap_footprint_fill_argb(e) == 0xFFA0A0A0u,
+				"neutral footprints are opaque gray");
+		e.team = 1;
+		CHECK(world::minimap_footprint_fill_argb(e) == 0xFF4050A0u,
+				"team-one footprints are opaque blue");
+		e.team = 2;
+		CHECK(world::minimap_footprint_fill_argb(e) == 0xFFA05040u,
+				"team-two footprints are opaque red");
+		e.team = 0;
+		e.item_attrib = world::kItemAttribChangeTeam;
+		CHECK(world::minimap_footprint_fill_argb(e) == 0xFF609F60u,
+				"change-team footprints are opaque green");
+	}
+
+	// The footprint mesh comes from the model's OOBJ/OVRT/OPLN/OFAC arena,
+	// not CDTA collision. An asymmetric roof (two up-facing tris) keeps its
+	// fills and only the outer boundary edges survive the authored edge-word
+	// parity toggle. OOBJ position is portal metadata and is not applied.
+	// [orig: render_collision_wireframe @0x596800: model +0xDC/+0xE0,
+	//  record +24/+32/+36/+40]
+	{
+		world::OcclusionModel model;
+		world::OcclusionPortalFace record;
+		record.type = world::kOccRecOccluder;
+		record.pos[0] = 100.0f;
+		record.pos[1] = 200.0f;
+		record.pos[2] = 300.0f;
+		record.vert_count = 4;
+		record.plane_count = 2;
+		record.face_count = 4;
+		model.records.push_back(record);
+		model.vertices.push_back({{-1.0f, 3.0f, -2.0f}});
+		model.vertices.push_back({{1.0f, 3.0f, -2.0f}});
+		model.vertices.push_back({{1.0f, 3.0f, 2.0f}});
+		model.vertices.push_back({{-1.0f, 3.0f, 2.0f}});
+		world::OcclusionPlane up;
+		up.normal[1] = 1.0f;
+		world::OcclusionPlane side;
+		side.normal[2] = 1.0f;
+		model.planes.push_back(up);
+		model.planes.push_back(side);
+		world::OcclusionFaceRec face;
+		face.v[0] = 0;
+		face.v[1] = 1;
+		face.v[2] = 2;
+		face.plane = 0;
+		face.edge[0] = 0x0100;
+		face.edge[1] = 0x0201;
+		face.edge[2] = 0x8200;
 		model.faces.push_back(face);
-		face.vertex_index[0] = 0;
-		face.vertex_index[1] = 2;
-		face.vertex_index[2] = 3;
+		face.v[0] = 0;
+		face.v[1] = 2;
+		face.v[2] = 3;
+		face.edge[0] = 0x0200;
+		face.edge[1] = 0x0302;
+		face.edge[2] = 0x8300;
 		model.faces.push_back(face);
 		// Two side faces that must be filtered out entirely.
-		face.normal_index = 1;
+		face.plane = 1;
 		model.faces.push_back(face);
 		model.faces.push_back(face);
 		const world::MinimapFootprintMesh mesh =
-				world::minimap_footprint_from_collision(model);
+				world::minimap_footprint_from_occlusion(model);
+		const int32_t k = 0x10000;
 		CHECK(mesh.fill_xy_q16.size() == 12,
 				"two up-facing faces emit two footprint triangles");
+		CHECK(mesh.fill_xy_q16.size() >= 6 &&
+				mesh.fill_xy_q16[0] == -k &&
+				mesh.fill_xy_q16[1] == -2 * k &&
+				mesh.fill_xy_q16[2] == k &&
+				mesh.fill_xy_q16[3] == -2 * k &&
+				mesh.fill_xy_q16[4] == k &&
+				mesh.fill_xy_q16[5] == 2 * k,
+				"footprints project OVRT X/Z without applying OOBJ position");
 		CHECK(mesh.edge_xy_q16.size() == 16,
 				"the shared diagonal cancels; four boundary edges remain");
+	}
+
+	// Retail owns the edge parity list per OOBJ record and suppresses a
+	// record with fewer than four survivors. Two independent triangular
+	// sections therefore keep their fills but must not combine into a
+	// six-edge outline. [orig: render_collision_wireframe @0x596800]
+	{
+		world::OcclusionModel model;
+		world::OcclusionPlane up;
+		up.normal[1] = 1.0f;
+		model.planes.push_back(up);
+		model.planes.push_back(up);
+		model.vertices.push_back({{0.0f, 1.0f, 0.0f}});
+		model.vertices.push_back({{1.0f, 1.0f, 0.0f}});
+		model.vertices.push_back({{0.0f, 1.0f, 1.0f}});
+		model.vertices.push_back({{2.0f, 1.0f, 0.0f}});
+		model.vertices.push_back({{3.0f, 1.0f, 0.0f}});
+		model.vertices.push_back({{2.0f, 1.0f, 1.0f}});
+
+		for (int record_index = 0; record_index < 2; ++record_index) {
+			world::OcclusionPortalFace record;
+			record.type = world::kOccRecOccluder;
+			record.vert_start = record_index * 3;
+			record.vert_count = 3;
+			record.plane_start = record_index;
+			record.plane_count = 1;
+			record.face_start = record_index;
+			record.face_count = 1;
+			model.records.push_back(record);
+
+			world::OcclusionFaceRec face;
+			face.v[0] = 0;
+			face.v[1] = 1;
+			face.v[2] = 2;
+			face.plane = 0;
+			face.edge[0] = 0x0100;
+			face.edge[1] = 0x0201;
+			face.edge[2] = 0x8200;
+			model.faces.push_back(face);
+		}
+
+		const world::MinimapFootprintMesh mesh =
+				world::minimap_footprint_from_occlusion(model);
+		CHECK(mesh.fill_xy_q16.size() == 12,
+				"independent triangular sections retain both fills");
+		CHECK(mesh.edge_xy_q16.empty(),
+				"independent three-edge sections do not combine into an outline");
 	}
 
 	if (failures != 0) return 1;

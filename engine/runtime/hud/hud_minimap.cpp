@@ -16,7 +16,7 @@ constexpr double kPi = 3.14159265358979323846;
 constexpr double kBam16ToRadians = (2.0 * kPi) / 65536.0;
 constexpr int kCircleSegments = 32; // [orig: ring step 0x8000000 BAM @0x5a5f40 vertex loop]
 // World-per-pixel divisor [orig: flt_7D2290 = 200.0 @0x5a5f40 scale setup]
-constexpr float kZoomWidthDivisor = 200.0f;
+constexpr float kZoomHeightDivisor = 200.0f;
 // Terrain tile cover bound factor [orig: flt_7C6F9C = 0.8 @0x6071C0 head]
 constexpr float kTerrainBoundFactor = 0.8f;
 // Terrain tint: the map pass hands 0xD0606060 to the decal renderer, which
@@ -59,22 +59,15 @@ constexpr int32_t kGridHalfCellQ16 = 0x960000;
 // division. [orig: flt_7D93B4 = 5.0862631e-08f @0x59cbc3/@0x5a6c67]
 constexpr double kGridCellReciprocal =
 		static_cast<double>(1.0f / 19660800.0f);
-// Base radius = the SCALED RECT HALF-HEIGHT, byte-read: the ring vertex
-// loop multiplies (y2_px - y1_px) by the same 0.5 the centers use, then
-// the Q22 table unit — while the world scale divides by the rect WIDTH,
-// so the world coverage is aspect-dependent. The TERRAIN/MARKER stencil
-// clips at 0.9275 x base = the compring band's OUTER art edge (the live
-// RevX02 compring.tga band spans 0.564..0.742 of its half-width; quad =
-// base x 1.25; 0.742 x 1.25 = 0.9275): the pose-matched retail captures
-// show the terrain ending under the bezel with no rim, while a
-// full-half-height stencil pokes ~7% past the band. The half-height
-// ring-loop radius is therefore the hidden BACKING fan's; the stencil's
-// own byte source stays open (D-HUD-21).
+// The compass size base is the SCALED RECT HALF-HEIGHT. The completed-pass
+// retail probe observes the backing/stencil fan four physical pixels inside
+// that base: 136.5 versus 140.5 at 1920x1080. The independently submitted
+// compass quad remains base x1.25 (175.625 px), resolving the two operands.
 // [orig: the @0x5a5f40 rect block — fld flt_7C3B94 (0.5), centers
 //  (x1+x2)*0.5/(y1+y2)*0.5, radius (y2-y1)*0.5 into the ring vertex loop
 //  with flt_7C3610 = 2^-22; rect scaled per axis by
 //  Viewport_ScaleToVirtualCoords @0x5d2b20 (x*w/1024, y*h/768, rounded)]
-constexpr float kDiscRadiusFactor = 0.9275f;
+constexpr float kDiscInsetPx = 4.0f;
 // TSDicon.tga is a 16x480 vertical strip of 30 16px icon cells (witnessed
 // asset; consumed per-index by render_tiled_image_strip @0x67b540).
 constexpr int kIconStripCells = 30;
@@ -127,9 +120,9 @@ void format_grid_column(char *buffer, size_t size, int32_t grid_value_q16) {
 struct MapView {
 	float center_x = 0.0f;
 	float center_y = 0.0f;
-	// The map is a TRUE PIXEL CIRCLE on any surface: both radii are the
-	// scaled rect HALF-HEIGHT (the byte-witnessed ring rule — see the
-	// make_view constants note), with the compass quad hanging off x1.25.
+	// The map is a TRUE PIXEL CIRCLE on any surface. The backing/stencil fan
+	// is four physical pixels inside the scaled rect half-height; the compass
+	// quad uses the uninset base at x1.25.
 	float base_radius = 0.0f;
 	float disc_radius = 0.0f;
 	float rect_w = 0.0f;
@@ -194,28 +187,20 @@ MapView make_view(const HudMinimapInput &input) {
 	view.px_y2 = y2;
 	view.center_x = static_cast<float>(static_cast<int>((x1 + x2) * 0.5f));
 	view.center_y = static_cast<float>(static_cast<int>((y1 + y2) * 0.5f));
-	// Base radius = the scaled rect HALF-HEIGHT (byte-read from the ring
-	// vertex loop); the compass quad hangs off it x1.25. The TERRAIN/MARKER
-	// stencil clips at the compring band's OUTER art edge — 0.742 x 1.25 =
-	// 0.9275 of the base — which is where retail's terrain visibly ends
-	// (the pose-matched pair shows no rim outside the bezel; a full
-	// half-height stencil pokes ~7% past the band and ringed the map in
-	// terrain). The half-height ring-loop radius therefore belongs to the
-	// hidden BACKING fan, and the stencil's own byte source stays the open
-	// D-HUD-21 witness.
+	// The backing and terrain stencil share the observed four-pixel inset;
+	// the compass texture quad hangs off the uninset half-height at x1.25.
 	view.base_radius = std::max(0.0f, view.rect_h * 0.5f);
-	view.disc_radius = view.base_radius * kDiscRadiusFactor;
+	view.disc_radius = std::max(0.0f, view.base_radius - kDiscInsetPx);
 	// Modes 2/3 zoom from the big-map value the radar keys adjust while a
 	// map mode is up. [orig: dword_B76490 read @0x5a804b]
 	const int32_t zoom = std::clamp(
 			input.map_mode != 0 ? input.big_zoom_q16 : input.zoom_q16,
 			kSpinmapZoomMin, kSpinmapZoomMax);
-	// World-per-pixel = zoom / (rect_width_px x 200) — the witnessed
-	// formula rides the SCALED RECT WIDTH (the capture comparison showed
-	// the mean-diameter variant ~14% more zoomed out than retail on
-	// widescreen). [orig: flt_7D2290 setup @0x5a5f40]
+	// World-per-pixel = zoom / (rect_height_px x 200). The live completed-pass
+	// probe observes 25559 / (281 * 200) = 0.45478648 on 00TRa at 1920x1080.
+	// [orig: flt_7D2290 setup @0x5a6501]
 	view.scale = static_cast<float>(zoom) /
-			std::max(1.0f, view.rect_w * kZoomWidthDivisor);
+			std::max(1.0f, view.rect_h * kZoomHeightDivisor);
 	// Modes 2/3 rotate from the fixed 0x40000000 base — north-up after the
 	// -90 fold — instead of the player heading.
 	// [orig: HUD_BuildMapOverlayView entity_ref = 0x40000000]
@@ -398,10 +383,12 @@ bool clip_map_segment(const MapView &view, float &x0, float &y0,
 	return true;
 }
 
-// The footprint draw: fills in the entity team color, silhouette edges in
-// translucent black, both clipped by the pass stencil like the terrain.
-// [orig: render_collision_wireframe @0x596800 — tri fans in the team color,
-//  boundary lines in 0x80000000]
+// The footprint draw submits the entity-team-color fills clipped by the map
+// stencil. Retail also builds 0x80000000 boundary vertices inside
+// render_collision_wireframe, but completed-pass captures show those lines
+// contribute no visible stroke; submitting them through Godot's ordinary
+// alpha line pass produced the black outlines absent from retail.
+// [orig: render_collision_wireframe @0x596800; flush @0x596780]
 void emit_footprint(const MapView &view, const HudMinimapInput &input,
 		const HudMinimapFootprint &footprint, Polygon &poly, Polygon &scratch,
 		HudMapPass &pass) {
@@ -441,15 +428,6 @@ void emit_footprint(const MapView &view, const HudMinimapInput &input,
 					view.disc_radius, view.disc_radius);
 		}
 		emit_fan(poly, footprint.fill_argb, pass.overlays);
-	}
-	const size_t edge_count = footprint.edge_xy_q16.size() / 4;
-	for (size_t e = 0; e < edge_count; ++e) {
-		const int32_t *xy = footprint.edge_xy_q16.data() + e * 4;
-		float x0 = 0.0f, y0 = 0.0f, x1 = 0.0f, y1 = 0.0f;
-		view_project(view, input, xy[0], xy[1], x0, y0);
-		view_project(view, input, xy[2], xy[3], x1, y1);
-		if (!clip_map_segment(view, x0, y0, x1, y1)) continue;
-		pass.lines_under.push_back({x0, y0, x1, y1, 0x80000000u});
 	}
 }
 
@@ -869,7 +847,7 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 			//  slots are passed over]
 			if (special && marker.remaining_ticks == 0) continue;
 			// Footprint-class entities (buildings/zones with marker models)
-			// never draw an icon quad — their collision ground-slice
+			// never draw an icon quad — their OOBJ occlusion ground-slice
 			// polygons draw instead, clipped like the terrain tiles.
 			// [orig: the Building leg @0x597a84 ->
 			//  render_collision_wireframe @0x596800]
@@ -1176,12 +1154,9 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 		HudMapSprite compass;
 		compass.center_x = view.center_x;
 		compass.center_y = view.center_y;
-		// Compass quad = base x1.25 (witnessed constant); the LIVE RevX02
-		// compring.tga band art spans 0.564..0.742 of its half-width
-		// (measured from the extracted texture 2026-08-14), so the bezel
-		// lands at 0.705..0.9275 of the disc radius and a thin terrain rim
-		// shows past the band outer on both engines — the pose-matched pair
-		// corroborates the same ring-to-disc proportion.
+		// Compass quad = the uninset rect half-height x1.25. The completed-pass
+		// retail probe observes 175.625 px while the backing fan is 136.5 px
+		// at 1920x1080, so these are deliberately distinct operands.
 		compass.half_w = view.base_radius * kCompassScale;
 		compass.half_h = view.base_radius * kCompassScale;
 		const uint32_t rot_bam = 0x3FFFFFC0u -

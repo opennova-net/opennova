@@ -24,6 +24,8 @@ void Terrain::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_terrain_data", "data"), &Terrain::set_terrain_data);
 	ClassDB::bind_method(D_METHOD("get_terrain_data"), &Terrain::get_terrain_data);
 	ClassDB::bind_method(D_METHOD("get_surface_inputs"), &Terrain::get_surface_inputs);
+	ClassDB::bind_method(D_METHOD("get_tile_overlay_texture"),
+		&Terrain::get_tile_overlay_texture);
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "terrain_data", PROPERTY_HINT_RESOURCE_TYPE, "TerrainData"),
 		"set_terrain_data", "get_terrain_data");
 

@@ -1024,7 +1024,7 @@ current waypoint/POI **entity pointer**), reset by
 - `[orig: HUD_DrawCompassStrip @0x595470]` — the heading strip with waypoint
   carets (reads `g_showWaypoints @0x595c9f`): **no callers** in JO:CA.
 
-## Gameplay spinmap — `HUD_RenderAllOverlays @0x5a8070` → `HUD_DrawMapOverlay @0x5a5f40` (grilled + ported 2026-08-13)
+## Gameplay spinmap — `HUD_RenderAllOverlays @0x5a8070` → `HUD_DrawMapOverlay @0x5a5f40` (grilled + ported 2026-08-14)
 
 The normal in-world map was previously conflated with both the dead compass
 strip and the command/deploy map. Retail does have a gameplay spinmap: the
@@ -1126,28 +1126,27 @@ detail cycle** in the dispatcher: catalog codes 14 (`showhud`), 19
   vertical strip — up-triangle/down-triangle/circle/blank) drawn as a
   20×20-design quad ending at `y1 − rect_h/32`, x = center ∓10 shifted
   ±8 by `extra`, frame = `extra`, in the tricolor.
-- **Ring/disc radius (partial witness + OPEN)**: the @0x5a5f40 rect
-  block loads the four scaled rect corners, forms the centers with
-  `flt_7C3B94 = 0.5`, and feeds the 33-vertex ring loop a radius of
-  `(y2 − y1) × 0.5` (the scaled rect HALF-HEIGHT) through the Q22
-  tables (`flt_7C3610 = 2^-22`); the rect scales per axis via
-  `Viewport_ScaleToVirtualCoords @0x5d2b20` (x·w/1024, y·h/768,
-  rounded). Adjudicated 2026-08-14 against the pose-matched pairs:
-  that half-height radius belongs to the hidden BACKING fan; the
-  TERRAIN/MARKER stencil clips at 0.9275 × base — the compring
-  band's OUTER art edge (the live RevX02 compring.tga band spans
-  0.564..0.742 of its half-width; quad = base × 1.25) — retail shows
-  no terrain rim outside the bezel, while a full-half-height stencil
-  rings the map in terrain. OPEN: the stencil's own byte source, the
-  exact operand of the ×1.25 inside `draw_compass_indicator
-  @0x59c900`, and the overall widget pixel size (ours renders ~10%
-  smaller than retail at 1080p on the authored-spawn pair).
+- **Ring/disc radius (capture-closed 2026-08-14)**: the `@0x5a5f40`
+  rect block loads the four scaled rect corners, forms the truncated
+  centers with `flt_7C3B94 = 0.5`, and uses the scaled rect
+  **half-height** as the base radius. The backing and terrain/marker
+  stencil share the observed four-physical-pixel inset
+  (`disc = half-height − 4`), while `draw_compass_indicator @0x59c900`
+  uses the uninset half-height times the witnessed `1.25`. The rect
+  scales per axis through `Viewport_ScaleToVirtualCoords @0x5d2b20`
+  (x·w/1024, y·h/768, rounded), but all circular radii come from its
+  height. The completed-pass 1920×1080 probe pins the authored rect at
+  `(1575,28)..(1950,309)`, center `(1762,168)`, stencil radius `136.5`
+  before rasterization, and compass half-extent `175.625`. This closes
+  the earlier `0.9275 × base`, mean-half-extent, and “10% smaller”
+  hypotheses.
 - **View transform** (`render_terrain_decal`'s tail `@0x607ac1..0x607b13`
   writes the shared globals `0x319A278..294`; the unreferenced twin is
   `MapView_SetTransform @0x607130`, defined + named this session): screen
   centers = truncated midpoints of the `Viewport_ScaleToVirtualCoords`-scaled
-  rect; world-per-pixel scale = `zoom / (rect_width_px × 200.0)`
-  (`flt_7D2290`), so the default zoom `0x10000` shows a 163.84-unit radius;
+  rect; world-per-pixel scale = `zoom / (rect_height_px × 200.0)`
+  (`flt_7D2290`). The completed-pass probe pins 00TRa to
+  `25559 / (281 × 200) = 0.45478648` wu/px;
   rotation angle = `yaw + g_mapYaw180 − 0x40000000` folded to BAM16 × 2π/65536
   (`flt_7C7988`), where `g_mapYaw180 @0x2723EB0` = `0x80000000` iff
   `Bms_AttribFlags & 0x20` (the mission's RotateMap180 attribute,
@@ -1158,20 +1157,18 @@ detail cycle** in the dispatcher: catalog codes 14 (`showhud`), 19
   `radarout` (row 48 → case 361 `@0x49beaf`) multiplies by `dbl_7C7AA8 = 1.15`
   clamped ≤ `0x100000`; `radarin` (row 49 → case 360 `@0x49bcb0`) by
   `dbl_7C7AB0 = 0.85` clamped ≥ `4096`; the value resets to
-  `65536 × clamp(Bms_MapZoom, 0.0625, 1.0)` at
+  `65536 × clamp(1 − Bms_MapZoom, 0.0625, 1.0)` at
   `Player_InitPlayer @0x4e1741..0x4e1763` — `flt_A7640C` is NOT a
   static zero: it is the BMS HEADER's `map_zoom` float
   (`g_BmsHeaderBlock @0xA761D0` + 0x23C, bulk fread, no per-field
   xref — the field our `bms.h` already parses), so the spawn zoom is
-  MISSION-SCALED: 00TRa authors 0.61 → spawn spin zoom 39977, big
-  zoom `524288 × X` the same way. X = f (not 1 − f) is
-  MEASUREMENT-adjudicated: the static FPU max/min dance decompiles
-  ambiguously (a plain trace reads 1 − f), but the 2026-08-14
-  pose-matched colormap registration (both engines pinned to
-  1035,-180,33 on 00TRa) measures retail at 0.555 wu/px ==
-  65536×0.61/(375 px × 200) within the method's validated ~5% bias,
-  while 1 − f (25559) misses by 1.63x; the exact FPU ordering (one
-  fxch decides it) stays open. Ported as
+  MISSION-SCALED: 00TRa authors 0.61 → `X = 0.39`, spawn spin zoom
+  `25559`, and big zoom `524288 × X` the same way. The live completed
+  pass closes the ambiguous FPU ordering in favor of `1 − f`; the
+  pose-matched atlas registration then finds global terrain scale
+  `1.00`, independently rejecting the former width-denominator/
+  direct-`f` pairing. A zero/unauthored value retains the retail
+  default `X = 1`. Ported as
   `HudMapControl::set_mission_map_zoom`; a wire-only joiner has no
   header and keeps X = 1, a D-NET-194-shaped residual (the
   deploy/cine mode flags `0x24C18B8/BC` swap the pair onto the
@@ -1223,37 +1220,42 @@ detail cycle** in the dispatcher: catalog codes 14 (`showhud`), 19
   CPU at load — one 256-px slot per 16x16 grid cell (2 wu/texel, the
   retail tile RTs' own sampling density — 128 px measurably blurred the
   roads; retail's cache is per-cell), each cell = its quadrant colormap
-  content + the water
-  carve against the TRN water plane via the shared height field, in
-  the capture-calibrated water tone (retail map water (23,70,107)
-  back through the x4 stage) — `TerrainData::build_minimap_tile_atlas`
-  (the 2026-08-13 ortho-render bake and its covered-load-window
+  content, the baked RGBA `.til` overlay produced by
+  `TerrainSurfaceInputs`, then the water carve against the live resolved
+  water plane via the shared height field. The water test uses
+  `height < plane + 1.0 wu`; pose-matched 00TRa registration samples
+  the height field at an effective `(+5.25,+4.25)` wu from the integer
+  atlas origin (the 2-wu texel center supplies `+1,+1`, followed by the
+  explicit `+4.25,+3.25`). The calibrated source tone `(15,46,71)`
+  lands at OpenNova `(22,70,106)` beside retail `(22,71,107)` after the
+  map passes. `Env_WaterHeightFixed == 0` remains the no-water sentinel.
+  This is `TerrainData::build_minimap_tile_atlas`; `GameWorld` rebakes
+  it when streamed `.til` data arrives and emits
+  `minimap_terrain_changed`, so an already-built HUD receives the final
+  atlas. The 2026-08-13 ortho-render bake and its covered-load-window
   machinery are deleted; raw-colormap quadrant fallback remains for
-  headless/editor). Remaining under D-HUD-21: the faint water-overlay
-  redraw above and the .til water-tile bitmap sampling (the carve uses
+  headless/editor. Remaining under D-HUD-21: the faint water-overlay
+  redraw above and authored water-tile bitmap sampling (the carve uses
   a calibrated flat tone) stay unported.
 - **Marker banks** (net-re §5.19/§5.35 carries the wire/retention story):
   draw order per layer is persistent (buildings with interior models first,
   via `render_collision_wireframe @0x596800` footprints — PORTED
-  (`engine/runtime/world/minimap_footprint.*`): ordinary hull sections
-  only (the runtime-COBJ type byte `<= 1` gate `@0x596803`; COBJ+0 =
-  the authored file dword, copied `@0x5b3bf0`), the up-facing
-  collision-face slice at the Q14 0.5 normal threshold, filled fans in
-  the team colors (t1 0x4050A0 / t2 0xA05040 / attrib-bit17 ChangeTeam
-  0x609F60 / else 0xA0A0A0 `@0x596848..0x596880`) under the overlay ctx
-  alpha (0xD0 — the same alpha the 0xD0606060 tint carries; the byte-547
-  zone-state recolor under caps flag 0x20 is an unported residual),
-  parity-toggle boundary edges over the face records' EDGE WORDS masked
-  0x7FFF (lo byte / hi 7 bits = the vertex pair, bit15 a flag; the list
-  resets per section, and fewer than 4 survivors emit nothing
-  `@0x596b3f`) at 0x80000000. The fills submit on the PLAIN pass, and in the ported
-  base+additive decomposition of the x4 stage they must ride the TOP
-  canvas item — anything on the base item gets the additive terrain
-  resubmission summed over it, which is exactly the near-white fills
-  (and the terrain-tinted "green" clusters) the 2026-08-14 pair
-  fixed; retail's fill band measures ~147..158/channel over ground.
-  Placement rides the same mission-yaw-degrees -> BAM heading matrix the
-  collision instance uses (`world::minimap_footprint_place`), persistent rest,
+  (`engine/runtime/world/minimap_footprint.*`): the model's 60-byte
+  **OOBJ occlusion records** at `model+0xDC/+0xE0`, not COBJ collision
+  sections. Records with type byte `<= 1` pass `@0x596803`; faces whose
+  OPLN Y-up normal exceeds `0.5` emit OVRT X/Z triangles. The record
+  position is portal metadata and is not added to the already-model-local
+  vertices. Fills use opaque team colors (t1 `0x4050A0`, t2 `0xA05040`,
+  attrib-bit17 ChangeTeam `0x609F60`, else `0xA0A0A0`): the map caller's
+  zero alpha override is promoted to `0xFF` at `@0x596884..0x596891`,
+  matching the retail capture's exact `0xA0A0A0` runs. OFAC edge words
+  toggle by their low 15 bits per OOBJ record (low byte / high 7 bits =
+  vertex pair, bit15 winding), and fewer than four survivors suppress the
+  outline. Retail builds `0x80000000` boundary vertices, but completed-pass
+  captures show no observable stroke; OpenNova therefore retains the
+  parity result in the feed but does not submit black lines. Placement
+  rides the same mission-yaw-degrees -> BAM heading matrix
+  (`world::minimap_footprint_place`), persistent rest,
   transient, special [orig: `MapOverlay_RenderAllByLayer @0x5be590`]. The
   icon→layer table `{10,11,15,18,25}→1, {2,4,12,13,16,17,29}→2,
   {3,8,14,23,24}→3, else 0` is byte-witnessed (`@0x5be681`), and the special
@@ -1288,26 +1290,15 @@ detail cycle** in the dispatcher: catalog codes 14 (`showhud`), 19
   `compring.tga` quad at ×1.25 the map radius (`flt_7C6F18`),
   counter-rotated `(0x3FFFFFC0 − yaw) >> 16` × 2π/65536 so its north marker
   points at world north.
-- **Pixel-circle geometry** (retail captures, JOTAC 00TRa @1280×720, both
-  headings): the drawn map is a TRUE CIRCLE in screen pixels on a
-  widescreen surface — bezel band at 82..97 px and terrain edge at 81 px on
-  BOTH axes despite the 200×200-design rect scaling to 250×187.5 px. With
-  the RevX02 `compring` art band at 0.619..0.742 of its half-size, the
-  measurements fit base radius ≈ 105 px with the witnessed ×1.25 quad
-  (predicted band 0.774..0.928 × base ✓) and the stencil disc (backing +
-  terrain clip + marker clamp) reaching the band's OUTER edge (≈ 0.9275 ×
-  base = 1.25 × 0.742) — the band's semi-transparent art overlays the
-  terrain, so terrain shows through its inner half and sky starts right at
-  the band outer. OpenNova uses the mean of the scaled half-extents as the
-  uniform base radius (measured-base within 4%), the single stencil disc at
-  0.9275 × base, and the witnessed width-based world-per-pixel
-  `zoom / (rect_width_px × 200)` — the capture comparison confirms the two
-  engines then agree exactly in world-per-normalized-pixel (a mean-diameter
-  variant read ~14% more zoomed out on widescreen and was reverted). The
-  compass ring bakes the FF MODULATE2X into its texture (white-modulated
-  static sprite; the band/letters read ~2× ours before, luma 27 vs 29
-  after). The exact retail radius rule (the scaler feeding the ctx rect)
-  is an open witness under D-HUD-21.
+- **Pixel-circle geometry** (retail captures, JOTAC 00TRa, both headings):
+  the map is a true circle in screen pixels on a widescreen surface because
+  radius and world-per-pixel both use the scaled rect **height**, never its
+  wider X extent. The backing/terrain/marker disc is
+  `half-height − 4 px`; the compass quad is `half-height × 1.25`. This exact
+  rule replaces the former mean-radius/`0.9275 × base` approximation and
+  closes the apparent ~10% widget-size and zoom deltas. The compass ring
+  bakes the FF MODULATE2X into its texture (white-modulated static sprite;
+  the band/letters read ~2× ours before, luma 27 vs 29 after).
 - **Presentation ABI.** `Simulation.get_hud_minimap_snapshot()` returns a
   versioned packed array `{version=3, stride=16, count}` with rows
   `{bank, handle, x, y, z, heading, icon, argb, flags, source,
@@ -1317,9 +1308,11 @@ detail cycle** in the dispatcher: catalog codes 14 (`showhud`), 19
   entity at snapshot build, retail's own client-side resolve site;
   `HudOverlay` rejects unknown versions/short strides atomically. Static
   footprint polygons ride the separate once-per-mission
-  `get_hud_minimap_footprints()` feed (version 1: per-entity fill fans +
-  boundary edges in mission Q16, team-colored), and the baked terrain
-  atlas rides `set_minimap_terrain`'s second argument. The engine compiler emits the disc,
+  `get_hud_minimap_footprints()` feed (version 1: per-entity OOBJ fill fans +
+  retained boundary edges in mission Q16, opaque team-colored fills), and
+  the baked terrain atlas rides `set_minimap_terrain`'s second argument;
+  `minimap_terrain_changed` refreshes that binding after streamed `.til`
+  data arrives. The engine compiler emits the disc,
   terrain, ordered marker sprites/rings, the waypoint state line + anchor
   dot/tip chevron cells + the altitude nub, the labels (per-pass glyph
   lists — bold slot for the corner map's distance/MAPCOORDS labels, the

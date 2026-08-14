@@ -124,8 +124,8 @@ struct HudMinimapMarker {
 
 // One footprint-class entity's baked WORLD-SPACE polygon set (static
 // entities; baked once per mission by the embedder's feed).
-// [orig: render_collision_wireframe @0x596800 — fills in the team color,
-//  silhouette edges in translucent black]
+// [orig: render_collision_wireframe @0x596800 — fills in the team color and
+//  builds boundary vertices; the completed pass leaves no observable stroke]
 struct HudMinimapFootprint {
 	uint16_t handle = 0xFFFF;
 	uint32_t fill_argb = 0xFFA0A0A0u;
@@ -285,9 +285,10 @@ struct HudMapPass {
 	// icon sprites like retail's buildings-first walk).
 	std::vector<HudMapTri> overlays;
 	std::vector<HudMapSprite> sprites;
-	// Two line layers, matching the retail pass order: grid rules and
-	// footprint silhouette edges draw BEFORE the marker walk (under the icon
-	// sprites); the waypoint tether and the pulse-ring segments draw after.
+	// Two line layers, matching the retail pass order: grid rules draw BEFORE
+	// the marker walk (under the icon sprites); the waypoint tether and the
+	// pulse-ring segments draw after. Footprint boundary vertices are retained
+	// in the parsed feed but are visually inert in retail's completed pass.
 	// [orig: the @0x5a5f40 grid branch precedes the bank walk; the bit8
 	//  pointer leg follows it]
 	std::vector<HudMapLine> lines_under;
@@ -343,19 +344,11 @@ struct HudMapControl {
 	int32_t zoom_q16 = kSpinmapZoomDefault;
 	int32_t big_zoom_q16 = kBigMapZoomDefault;
 	// The MISSION-scaled spawn defaults: Player_InitPlayer derives both zoom
-	// resets from the BMS header's map_zoom float —
-	// X = clamp(map_zoom, 0.0625, 1.0), spin = 65536*X, big = 524288*X (a
-	// zero/unauthored header floors to X = 0.0625... in the raw math, but
-	// stock headers author it explicitly; 00TRa authors 0.61 -> spawn spin
-	// zoom 39977). The X = f (not 1 - f) reading is MEASUREMENT-adjudicated:
-	// the static FPU max/min dance at the reset decompiles ambiguously (a
-	// plain trace reads 1 - f), but the 2026-08-14 pose-matched colormap
-	// registration on 00TRa (both engines pinned to 1035,-180,33) measures
-	// retail at 0.555 wu/px == 65536*0.61/(375 px * 200) within the method's
-	// validated ~5% bias — 1 - f (25559) is off by 1.63x. Re-witnessing the
-	// exact FPU ordering (a single fxch decides it) stays on the D-HUD-21
-	// open list. Zero-map_zoom safety: treat <= 0 as X = 1 (no authored
-	// scale), matching the unauthored-header behavior a joiner sees.
+	// resets from the BMS header's map_zoom float: X = clamp(1-map_zoom,
+	// 0.0625, 1.0), spin = 65536*X, big = 524288*X. The completed-pass retail
+	// probe resolves the ambiguous FPU ordering directly: 00TRa authors 0.61
+	// and retail submits zoom 25559 (0.39 Q16). Zero/unauthored map_zoom keeps
+	// X = 1, matching the plain defaults a joiner sees.
 	// [orig: Player_InitPlayer @0x4e1693..0x4e1763 — Bms_MapZoom @0xA7640C
 	//  (g_BmsHeaderBlock+0x23C, bulk fread), floor flt_7C486C = 0.0625,
 	//  x flt_7CD424 = 524288 -> g_bigMapZoom, x flt_7C32BC = 65536 ->
@@ -366,8 +359,7 @@ struct HudMapControl {
 	// Stamp the mission's authored map_zoom (BMS header float) at promotion;
 	// the current values snap to the new spawn defaults like the player init.
 	void set_mission_map_zoom(float map_zoom) {
-		float x = map_zoom;
-		if (x <= 0.0f) x = 1.0f; // unauthored header -> the plain defaults
+		float x = map_zoom <= 0.0f ? 1.0f : 1.0f - map_zoom;
 		if (x > 1.0f) x = 1.0f;
 		if (x < 0.0625f) x = 0.0625f;
 		spawn_zoom_q16 = static_cast<int32_t>(65536.0f * x);
