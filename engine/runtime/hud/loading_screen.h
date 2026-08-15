@@ -88,4 +88,44 @@ inline constexpr uint32_t kLoadingBarFillArgb = 0xFFEB0000u;
 // Redraw throttle [orig: GetTickCount() - last >= 100 @ 0x586c24].
 inline constexpr int kLoadingPresentIntervalMs = 100;
 
+// The SP start-mission splash at the end of a single-player load with a
+// custom (sidecar) background: the held loading-screen background stays up,
+// a blinking "press any key" line replaces the finished bar, and the mouse
+// cursor arrow is drawn by the splash itself while any fresh key event or a
+// mouse button dismisses it (the key queue is flushed at entry so presses
+// made during the blocking load do not skip it; the START_MISSION sound is
+// fire-and-forget and never dismisses)
+// [orig: show_start_mission_splash @ 0x520820 — queue flush
+//  Input_ResetKeyQueue @ 0x760e00, exit test input_mask/@ 0x520a2d +
+//  Input_DequeueKeyEvent @ 0x520a36; caller gate @ 0x525d38].
+
+// The arrow quad is the menu cursor art, top-left at the live cursor
+// position, sized tga_dims * (backbuffer / 800x600)
+// [orig: "newarow1.tga" @ 0x520871; quad size @ 0x52089d/0x5208ae].
+inline constexpr const char *kSplashArrowImage = "newarow1.tga";
+inline constexpr int kSplashArrowScaleBaseW = 800;
+inline constexpr int kSplashArrowScaleBaseH = 600;
+
+// The one-shot sound set [orig: SoundBank_FindSetByNameAnyBank("START_MISSION")
+// @ 0x5208f7].
+inline constexpr const char *kSplashSoundSet = "START_MISSION";
+
+// The continue line: gametext LoadingText/LT_Continue, drawn CENTERED at
+// virtual (512, 730) of the 1024x768 overlay space in the large HUD label
+// font (Impac22b.fnt at the (screen_w << 16) / 800 slot scale), through the
+// half-bright text fold (hud_math.h half_bright_argb), color alternating on
+// GetTickCount() bit 0x200 — a 512 ms two-color pulse, white / light red
+// [orig: fetch @ 0x520975; HUD_DrawTextAtVirtualPos(ctx, 512, 730, 0, text,
+//  g_hudLabelFontLarge, color, mode=2 centered) @ 0x5209da; blink select
+//  @ 0x5209b0-0x5209be; font slot Impac22b.fnt @ HUD_InitAllFonts 0x51ef4e;
+//  centered dispatch HUD_DrawTextCentered_HalfBright @ 0x580680].
+inline constexpr const char *kSplashContinueTextKey = "LT_Continue";
+inline constexpr const char *kSplashContinueFont = "Impac22b.fnt";
+inline constexpr int kSplashContinueFontScaleBaseW = 800;
+inline constexpr int kSplashContinueX = 512;
+inline constexpr int kSplashContinueY = 730;
+inline constexpr uint32_t kSplashContinueColorOn = 0xFFFFFFFFu;
+inline constexpr uint32_t kSplashContinueColorOff = 0xFFFF8080u;
+inline constexpr int kSplashBlinkMaskMs = 0x200;
+
 } // namespace opennova::hud
