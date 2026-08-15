@@ -32,12 +32,10 @@ const CHANGE_DIR_KEY := KEY_F9
 const ARMORY_KEY := KEY_SHIFT
 # The mission debug overlay (entities / sim transport / script variables).
 const DEBUG_OVERLAY_KEY := KEY_F3
-# Shift+F6: pick the entity under the crosshair into the debug pick list (the F3
-# Entities page renders it; snapshots embed it). Works while playing, no
-# overlay needed; a brief toast confirms what was picked. Unmodified F6 stays
+# Shift+F6: pick the entity under the crosshair into the debug pick list
+# (DebugPickFlow). Works while playing, no overlay needed. Unmodified F6 stays
 # with the retail-configurable binding rows (hudcolor's default).
 const PICK_KEY := KEY_F6
-const PICK_TOAST_SECONDS := 1.6
 # ARMORY = the WEAPON screen over LIVE play: the world keeps ticking (the witnessed
 # armory runs with no world-stop leg — and under the listen-server model a pausing
 # host would freeze every peer), only the mouse is released and player input idles.
@@ -64,7 +62,7 @@ var _debug_adapter: GameDebugAdapter
 # The debug pick list: SHELL-owned so F6 picks work before F3 ever opens and
 # the set survives overlay toggles; cleared on every world load.
 var _pick_list := DebugPickList.new()
-var _pick_toast: Label = null
+var _pick_flow := DebugPickFlow.new()
 var _net: NetSessionController  # every net-session entry (LAN/NovaWorld + env hooks)
 # The in-game HUD rides GameHudPresenter. It owns the lazy GameHud build, the
 # per-frame info rebuild, and the
@@ -400,50 +398,11 @@ func is_debug_overlay_open() -> bool:
 
 
 ## Shift+F6 (and the probe/test seam): pick whatever the crosshair is on into the
-## debug pick list, with a brief on-screen confirmation.
+## debug pick list, with a brief on-screen confirmation (DebugPickFlow).
 func pick_at_crosshair() -> void:
 	var sim = _world.get_sim() if _world != null else null
-	var pick := DebugEntityPicker.pick_at_crosshair(sim, _camera)
-	if pick.is_empty():
-		return
-	if not bool(pick.get("hit", false)):
-		var blocked := String(pick.get("blocked", ""))
-		if blocked.is_empty():
-			_show_pick_toast("No entity in range.")
-		else:
-			_show_pick_toast("No entity (%s, %.0fu)." % [
-					blocked, float(pick.get("distance_units", 0.0))])
-		return
-	var row := _pick_list.add(pick)
-	if row < 0:
-		_show_pick_toast("Pick list full (%d) — remove one on the F3 Entities page." %
-				DebugPickList.MAX_PICKS)
-		return
-	var pick_name := String(pick.get("name", ""))
-	if pick_name.is_empty():
-		pick_name = String(pick.get("hit_class", "entity"))
-	_show_pick_toast("Picked: %s #%d  (%.0fu)" % [
-			pick_name, int(pick.get("bms_id", 0)),
-			float(pick.get("distance_units", 0.0))])
-
-
-func _show_pick_toast(text: String) -> void:
-	if _pick_toast != null and is_instance_valid(_pick_toast):
-		_pick_toast.queue_free()
-	var label := Label.new()
-	label.name = "PickToast"
-	label.text = text
-	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	label.offset_top = 96.0
-	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var mount: Node = _hud if _hud != null else self
-	mount.add_child(label)
-	_pick_toast = label
-	var tween := label.create_tween()
-	tween.tween_interval(PICK_TOAST_SECONDS)
-	tween.tween_property(label, "modulate:a", 0.0, 0.4)
-	tween.tween_callback(label.queue_free)
+	_pick_flow.pick_at_crosshair(sim, _camera, _pick_list,
+			_hud if _hud != null else self)
 
 
 func get_debug_overlay() -> DebugOverlay:
