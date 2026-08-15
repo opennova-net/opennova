@@ -685,6 +685,12 @@ bool Server_StageHostPunt(
 	return stage_host_punt(connection, mismatch_type);
 }
 
+void Server_RearmMinimapInitialScan(NapiNPServerCtx &ctx) {
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		conn.reply.minimap_initial_scan_pending = true;
+	}
+}
+
 void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// A joiner is a pure non-authority client (its frame is P5's Client_ProcessNetworkFrame); the
 	// pre-World P2 unit-test path has no simulation to drive. Either way: no host frame. The host

@@ -178,7 +178,9 @@ public:
 	Dictionary get_armor_icon() const;
 	Rect2i get_spinmap_bounds() const;
 	int get_spinmap_wp_dist_off() const;
-	// MAPCOORDS x, y, suppressor (-1 when unauthored = label suppressed).
+	// MAPCOORDS x, y, suppressor. The suppressor is 0 when unauthored (the
+	// retail global is BSS-zero) = the grid label draws; an authored NONZERO
+	// third token suppresses it.
 	Vector3i get_map_coords() const;
 	// Four visibility bytes for one HUDDECLUT_* row. Empty means absent.
 	PackedByteArray get_declutter_flags(const String &p_name) const;

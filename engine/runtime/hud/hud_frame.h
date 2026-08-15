@@ -417,6 +417,10 @@ private:
 	// Lives across frames so the map pass vectors and clip scratch keep
 	// their capacity (the per-frame spinmap compile is allocation-free).
 	HudMinimapCompiler minimap_compiler_;
+	// The per-frame compile input also persists: copy-assigning the frame
+	// state into it reuses the markers vector's capacity instead of
+	// heap-cloning it every frame.
+	HudMinimapInput minimap_input_;
 	StanceFade stance_;
 	// The clip-indicator flash latch [orig: draw_hud_ammo_indicator flash
 	// @ 0x599af9]: the round count drop stamps the flash start.

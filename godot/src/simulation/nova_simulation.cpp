@@ -4,6 +4,7 @@
 #include "simulation/nova_simulation_internal.h"
 
 #include <mission/runtime_boot.h> // the S9 boot order + file-resolution policy
+#include <npruntime/server_tick.h> // Server_RearmMinimapInitialScan (restart)
 #include <terrain_query/surface_tiles.h> // the D-SND-15 placed-tile resolvers
 
 using namespace novasim;
@@ -793,6 +794,9 @@ void Simulation::restore_world_baseline() {
 	local_weapon_.switch_deferred_action = -1;
 	world_->restore(baseline_); // rewinds registry/vars/env/clock + re-inits systems (incl. AI;
 	                            // WacSystem::on_load also resets its 62-tick accumulator)
+	// The logic tick rewinds and the runtime may be recreated below — a cached
+	// minimap snapshot keyed on (revision, tick) could collide across epochs.
+	minimap_snapshot_valid_ = false;
 	if (have_wac_baseline_ && wac_) {
 		wac_->restore_runtime_state(wac_baseline_);
 	}
@@ -828,6 +832,13 @@ void Simulation::restore_world_baseline() {
 						*world_, world_->cached.local_player)));
 		view.apply(0x20, opennova::encode_pool3_sync_batch(
 				opennova::netsim::build_pool3_marker_batch(*world_)));
+		// The restart resets every client view to EMPTY retained map banks,
+		// but each connection's minimap initial scan is a one-shot latch the
+		// first epoch already consumed. Re-arm it so the producer re-sends
+		// the persistent pool-2 building/zone markers to every in-match
+		// connection (the loopback view above and remote joiners alike);
+		// SpawnPoint rows and the pool-1 phase walk re-cover the rest.
+		opennova::np::Server_RearmMinimapInitialScan(ctx_);
 	}
 	reset_infantry_adm_ids();
 	resolve_new_infantry_adm_ids();

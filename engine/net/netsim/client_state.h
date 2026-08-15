@@ -442,6 +442,12 @@ struct ClientMinimapLinkedSlot {
 	bool active = false;
 	uint16_t handle = 0xFFFF;
 	uint32_t remaining_ticks = 0; // wire seconds x62 [orig: @0x4255c9..0x4255d6]
+	// The link's STORED special-bank slot (retail keeps a raw slot pointer at
+	// link+24 and consults ONLY it — never a handle search — so a coexisting
+	// 0x40 special badge for the same handle keeps its own slot). -1 = none
+	// (allocation failed while the special bank was full).
+	// [orig: overlay_obj = link[6] @0x5bece4; fresh-link alloc @0x5bed39]
+	int16_t slot_index = -1;
 };
 
 struct ClientMinimapState {

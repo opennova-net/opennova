@@ -198,7 +198,10 @@ void HudFrameCompiler::element_spinmap(const HudFrameState &state, float w,
 	//  dword_2723CC4 (static -1); /NOHUD mask @0x4a7a09/@0x840B18]
 	// The big-map pass runs regardless of the authored corner rect.
 	if (!layout_.spinmap_rect.present && state.minimap.map_mode == 0) return;
-	HudMinimapInput input = state.minimap;
+	// Copy-assign into the persistent input so the markers vector reuses its
+	// capacity — a fresh local re-allocated it every frame.
+	HudMinimapInput &input = minimap_input_;
+	input = state.minimap;
 	input.footprints = &state.map_footprints;
 	input.rect_x1 = layout_.spinmap_rect.x;
 	input.rect_y1 = layout_.spinmap_rect.y;
@@ -257,8 +260,13 @@ void HudFrameCompiler::element_spinmap(const HudFrameState &state, float w,
 			out.insert(out.end(), run.quads.begin(), run.quads.end());
 		}
 	};
-	layout_pass(draw_list_.map, draw_list_.map_glyphs);
-	layout_pass(draw_list_.big_map, draw_list_.big_map_glyphs);
+	// An invisible pass keeps its last-compiled label rows (only compile()
+	// resets a pass) — the device discards it whole, so skip the glyph
+	// layout instead of rebuilding quads for a closed map every frame.
+	if (draw_list_.map.visible)
+		layout_pass(draw_list_.map, draw_list_.map_glyphs);
+	if (draw_list_.big_map.visible)
+		layout_pass(draw_list_.big_map, draw_list_.big_map_glyphs);
 	if (draw_list_.map.visible) ++draw_list_.elements_drawn;
 	if (draw_list_.big_map.visible) ++draw_list_.elements_drawn;
 }

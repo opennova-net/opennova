@@ -134,13 +134,26 @@ Dictionary Simulation::get_hud_map_grid_origin() const {
 }
 
 PackedInt32Array Simulation::get_hud_minimap_snapshot() const {
-	PackedInt32Array out;
 	const opennova::world::Entity *local_player = world_ != nullptr
 			? world_->registry.get(world_->cached.local_player)
 			: nullptr;
 	const uint16_t local_marker_handle = local_player != nullptr
 			? static_cast<uint16_t>(get_local_player_wire_handle())
 			: opennova::world::EntityHandle::kInvalid;
+	// Between 62 Hz logic ticks every input is unchanged (the retained banks
+	// bump ClientMinimapState::revision; entity resolves, policies, and the
+	// local row advance only with the tick), so display frames reuse the
+	// built array. The baseline restore invalidates across epochs.
+	const uint64_t revision =
+			runtime_ ? runtime_->state().minimap.revision : 0;
+	const uint64_t tick = world_ != nullptr
+			? static_cast<uint64_t>(world_->logic_tick) : 0;
+	if (minimap_snapshot_valid_ && revision == minimap_snapshot_revision_ &&
+			tick == minimap_snapshot_tick_ &&
+			local_marker_handle == minimap_snapshot_local_handle_) {
+		return minimap_snapshot_cache_;
+	}
+	PackedInt32Array out;
 	bool retained_local_player = false;
 	int count = 0;
 	if (runtime_) {
@@ -254,6 +267,11 @@ PackedInt32Array Simulation::get_hud_minimap_snapshot() const {
 		dst[14] = policy.half_y_q16;
 		dst[15] = policy.floor_px;
 	}
+	minimap_snapshot_cache_ = out;
+	minimap_snapshot_revision_ = revision;
+	minimap_snapshot_tick_ = tick;
+	minimap_snapshot_local_handle_ = local_marker_handle;
+	minimap_snapshot_valid_ = true;
 	return out;
 }
 

@@ -1370,21 +1370,10 @@ void HudOverlay::render_map_(const opennova::hud::HudMapPass &p_map,
 		push_map_tri(tri);
 	flush_tris(water_item, water_texture);
 
-	// Footprint fills draw in the MARKER-WALK slot: retail's building fills
-	// blend their ctx alpha over the terrain AFTER the decal's x4 output
-	// stage completes, so here they must ride the TOP item — anything on
-	// the base item gets the additive child's terrain resubmission summed
-	// on top of it (that ordering mistake read near-white; the reference
-	// capture measures retail's fill band at ~147..158 per channel over
-	// ground, i.e. the 0xD0-alpha gray over the finished doubled terrain).
-	// They still paint before the lines/sprites, like retail's
-	// buildings-first walk (witness at world::minimap_footprint_fill_argb).
-	for (const opennova::hud::HudMapTri &tri : p_map.overlays)
-		push_map_tri(tri);
-	flush_tris(top_item, empty_texture);
-
-	// The under-layer lines (grid rules, footprint silhouette edges) draw
-	// before the marker sprites, like retail's pass order.
+	// The under-layer lines (the 300-wu grid rules) draw FIRST on the top
+	// item: retail's grid branch runs before the marker walk, so the
+	// buildings-first footprint fills paint OVER the rules (witness at
+	// hud_minimap.h HudMapPass::lines_under).
 	const auto submit_lines = [&](const std::vector<opennova::hud::HudMapLine>
 			&lines) {
 		if (lines.empty()) return;
@@ -1402,6 +1391,20 @@ void HudOverlay::render_map_(const opennova::hud::HudMapPass &p_map,
 		rs->canvas_item_add_multiline(top_item, line_points, line_colors, 1.0f);
 	};
 	submit_lines(p_map.lines_under);
+
+	// Footprint fills draw in the MARKER-WALK slot: retail's building fills
+	// blend their ctx alpha over the terrain AFTER the decal's x4 output
+	// stage completes, so here they must ride the TOP item — anything on
+	// the base item gets the additive child's terrain resubmission summed
+	// on top of it (that ordering mistake read near-white; the reference
+	// capture measures retail's fill band at ~147..158 per channel over
+	// ground, i.e. the 0xD0-alpha gray over the finished doubled terrain).
+	// They paint over the grid rules and before the icon sprites, like
+	// retail's grid-branch-then-buildings-first walk (witness at
+	// world::minimap_footprint_fill_argb).
+	for (const opennova::hud::HudMapTri &tri : p_map.overlays)
+		push_map_tri(tri);
+	flush_tris(top_item, empty_texture);
 
 	// Sprites batch by consecutive texture slot (insertion order is the
 	// compiler layer order, so only same-texture runs may merge).

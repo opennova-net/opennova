@@ -166,13 +166,18 @@ func _send_weapon_switch_input(captured: bool) -> void:
 #  case 361 @0x49beaf, radarin row 49 = case 360 @0x49bcb0; code 19 -> the
 #  default arm @0x49c27d]
 func _sample_hud_input(active: bool) -> void:
+	# The down-edge latches ride the RAW key state — retail's key scan
+	# latches the device state and the context only gates which dispatcher
+	# arm runs, so a key held across an armory/F3 window must NOT re-fire
+	# when the gate reopens (the same rule the hudcolor poll follows).
+	# [orig: the @0x49d1f0 scan's per-row down latch reads raw key state]
 	var sim = _sim()
-	var radar_out_down := active and ControlsBindings.pressed("radarout")
-	if radar_out_down and not _radar_out_was_down and sim != null:
+	var radar_out_down := ControlsBindings.pressed("radarout")
+	if active and radar_out_down and not _radar_out_was_down and sim != null:
 		sim.request_hud_radar_zoom(1)
 	_radar_out_was_down = radar_out_down
-	var radar_in_down := active and ControlsBindings.pressed("radarin")
-	if radar_in_down and not _radar_in_was_down and sim != null:
+	var radar_in_down := ControlsBindings.pressed("radarin")
+	if active and radar_in_down and not _radar_in_was_down and sim != null:
 		sim.request_hud_radar_zoom(-1)
 	_radar_in_was_down = radar_in_down
 	# map_toggle (row 98, default M) cycles the big-map mode: off -> the
@@ -180,8 +185,8 @@ func _sample_hud_input(active: bool) -> void:
 	# IN-GAME dispatcher, not the menu-context one.
 	# [orig: row 98 code 28 -> the @0x4e0662 arm -> HUD_CycleMapMode
 	#  @0x520bc0 (0->2->3->0)]
-	var map_down := active and ControlsBindings.pressed("map_toggle")
-	if map_down and not _map_toggle_was_down and sim != null:
+	var map_down := ControlsBindings.pressed("map_toggle")
+	if active and map_down and not _map_toggle_was_down and sim != null:
 		sim.request_hud_map_cycle()
 	_map_toggle_was_down = map_down
 

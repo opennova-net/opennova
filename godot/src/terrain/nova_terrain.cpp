@@ -63,8 +63,6 @@ void Terrain::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("build"), &Terrain::build);
 	ClassDB::bind_method(D_METHOD("render_frame"), &Terrain::render_frame);
-	ClassDB::bind_method(D_METHOD("render_frame_for_camera", "camera"),
-			&Terrain::render_frame_for_camera);
 	ClassDB::bind_method(D_METHOD("is_built"), &Terrain::is_built);
 
 	// Debug API
@@ -247,6 +245,10 @@ void Terrain::_notification(int p_what) {
 // ---------------------------------------------------------------------------
 
 void Terrain::render_frame() {
+	// Invalidate up front: a frame with no usable camera must report no
+	// cells rather than leaving a prior camera's draw list live for the
+	// foliage dispatcher.
+	frame_draw_list_live = false;
 	if (!is_visible_in_tree()) {
 		_hide_visible_patches();
 		return;
@@ -264,20 +266,7 @@ void Terrain::render_frame() {
 	_render_frame_with_camera(cam);
 }
 
-bool Terrain::render_frame_for_camera(Camera3D *p_camera) {
-	// The minimap-bake compile: recompiles the single shared patch pool for
-	// an arbitrary camera. Callers own the render window — the pool holds
-	// this draw list until the next live-frame compile, so bake only while
-	// nothing else is watching (the covered load window).
-	if (!built || p_camera == nullptr || !p_camera->is_inside_tree()) {
-		return false;
-	}
-	_render_frame_with_camera(p_camera);
-	return true;
-}
-
 void Terrain::_render_frame_with_camera(Camera3D *cam) {
-	frame_draw_list_live = false;
 
 	// The RENDER eye (get_camera_transform includes h/v offsets), so the
 	// below-water classification stays coherent with Water's surface flip and

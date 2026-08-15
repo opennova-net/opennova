@@ -8,6 +8,8 @@
 #include "netsim/client_replica_pipeline.h"
 
 #include <npwire/ingame_decode.h>
+#include <world/entity.h>          // retail_pool_capacity (the handle gates)
+#include <world/minimap_overlay.h> // minimap_team_color (the ONE index home)
 
 #include <unordered_map>
 
@@ -67,18 +69,6 @@ ClientMinimapOverlaySlot *allocate_overlay(Bank &bank) {
 	return nullptr;
 }
 
-template <typename Bank>
-bool clear_overlay(Bank &bank, uint16_t handle) {
-	bool changed = false;
-	for (ClientMinimapOverlaySlot &slot : bank) {
-		if (slot.active && slot.handle == handle) {
-			slot = ClientMinimapOverlaySlot{};
-			changed = true;
-		}
-	}
-	return changed;
-}
-
 } // namespace
 
 void ClientReplicaPipeline::apply_capture_zone_overlay(
@@ -90,45 +80,64 @@ void ClientReplicaPipeline::apply_capture_zone_overlay(
 	}
 	bool changed = false;
 	for (const CaptureZoneOverlay &entry : batch.entries) {
-		if ((entry.flags & kZoneOverlayFlagClearSlot) != 0) {
-			// [orig: @0x5beb4b — lifetime 0, handle -1 on the found slot]
-			changed |= clear_overlay(state_.minimap.transient, entry.handle);
-			changed |= clear_overlay(state_.minimap.persistent, entry.handle);
-			changed |= clear_overlay(state_.minimap.special, entry.handle);
-			for (ClientMinimapLinkedSlot &linked : state_.minimap.linked) {
-				if (linked.active && linked.handle == entry.handle) {
-					linked = ClientMinimapLinkedSlot{};
-					changed = true;
-				}
-			}
-			continue;
-		}
-		// Retail accepts any pool 0..4 handle and reads the pool slot bytes
-		// whether or not an entity currently lives there; only out-of-range
-		// handles drop. [orig: @0x5beac0 — handle != 0xFFFF && pool < 5]
+		// Retail gates BOTH arms — refresh and the 0x20 clear — on the same
+		// validity chain before touching any slot: a real handle, a live pool,
+		// a slot index inside that pool's capacity, and a table-valid color
+		// byte. Any pool 0..4 handle passing those is accepted whether or not
+		// an entity currently lives there.
+		// [orig: @0x5beac0 handle != 0xFFFF && pool < 5; @0x5beade
+		//  (handle & 0xFFF) < g_pool_list[pool].capacity; color resolve
+		//  @0x5beb16..0x5beb3e ahead of the flags-0x20 branch @0x5beb4b]
 		if (entry.handle == 0xFFFF || (entry.handle & 0xF000u) >= 0x5000u)
+			continue;
+		if (static_cast<size_t>(entry.handle & 0xFFFu) >=
+				world::retail_pool_capacity(entry.handle >> 12))
 			continue;
 		uint32_t argb = 0;
 		if (!minimap_color(entry.icon_color, argb)) continue;
 
-		ClientMinimapOverlaySlot *slot = nullptr;
-		// Alloc routing: 0x40 special, 0x10 persistent, else transient.
-		// [orig: sub_5BE970 @0x5be97d..0x5be99f]
-		if ((entry.flags & 0x40u) != 0) {
-			changed |= clear_overlay(state_.minimap.transient, entry.handle);
-			changed |= clear_overlay(state_.minimap.persistent, entry.handle);
-			slot = find_overlay(state_.minimap.special, entry.handle);
-			if (slot == nullptr) slot = allocate_overlay(state_.minimap.special);
-		} else if ((entry.flags & kZoneOverlayFlagPersistent) != 0) {
-			changed |= clear_overlay(state_.minimap.transient, entry.handle);
-			changed |= clear_overlay(state_.minimap.special, entry.handle);
-			slot = find_overlay(state_.minimap.persistent, entry.handle);
-			if (slot == nullptr) slot = allocate_overlay(state_.minimap.persistent);
-		} else {
-			changed |= clear_overlay(state_.minimap.persistent, entry.handle);
-			changed |= clear_overlay(state_.minimap.special, entry.handle);
+		// The slot search is the witnessed walk: the special bank first, then
+		// the contiguous transient -> persistent sweep. The FIRST match wins.
+		// [orig: the 0x1F8 special walk @0x5bea68, then the 0x488-slot
+		//  contiguous walk from the transient base @0x5bea83]
+		ClientMinimapOverlaySlot *slot =
+				find_overlay(state_.minimap.special, entry.handle);
+		if (slot == nullptr)
 			slot = find_overlay(state_.minimap.transient, entry.handle);
-			if (slot == nullptr) slot = allocate_overlay(state_.minimap.transient);
+		if (slot == nullptr)
+			slot = find_overlay(state_.minimap.persistent, entry.handle);
+
+		if ((entry.flags & kZoneOverlayFlagClearSlot) != 0) {
+			// The clear arm writes ONLY lifetime 0 + handle -1 on the found
+			// slot — pose/color/icon fields SURVIVE — and never touches the
+			// 0x6B link table: a surviving link re-arms the slot's lifetime
+			// on the next timer tick and the marker keeps drawing (the
+			// special draw walk gates on lifetime alone, no handle test).
+			// A clear for an absent handle allocates nothing.
+			// [orig: @0x5beb4b..0x5beb56 lifetime 0 + handle -1; the special
+			//  draw gate @0x5be794 reads slot+24 only; sub_5BE970 @0x5be978
+			//  returns 0 for flags & 0x20]
+			if (slot != nullptr) {
+				slot->remaining_ticks = 0;
+				slot->handle = 0xFFFF;
+				changed = true;
+			}
+			continue;
+		}
+		// A found slot refreshes IN PLACE wherever it lives — the bank (and
+		// with it the aging class) is fixed at first allocation; a refresh
+		// never migrates or cross-clears banks. Only a miss reaches the
+		// flags-routed allocator: 0x40 special, 0x10 persistent, else
+		// transient. [orig: the found path @0x5beb60..0x5beb7f writes
+		//  pos/color/flags/param/source/lifetime only; sub_5BE970
+		//  @0x5be97d..0x5be99f routes the fresh allocation]
+		if (slot == nullptr) {
+			if ((entry.flags & 0x40u) != 0)
+				slot = allocate_overlay(state_.minimap.special);
+			else if ((entry.flags & kZoneOverlayFlagPersistent) != 0)
+				slot = allocate_overlay(state_.minimap.persistent);
+			else
+				slot = allocate_overlay(state_.minimap.transient);
 		}
 		if (slot == nullptr) continue; // bank full drops, no eviction [orig: @0x5be9ba]
 		const ClientEntityState *entity = state_.find(entry.handle);
@@ -172,6 +181,9 @@ void ClientReplicaPipeline::apply_minimap_overlay_batch(
 		//  entity+354 unconditionally]
 		if (entry.handle == 0xFFFF || (entry.handle & 0xF000u) >= 0x5000u)
 			continue;
+		if (static_cast<size_t>(entry.handle & 0xFFFu) >=
+				world::retail_pool_capacity(entry.handle >> 12))
+			continue;
 		const ClientEntityState *entity = state_.find(entry.handle);
 		ClientMinimapLinkedSlot *linked = nullptr;
 		for (ClientMinimapLinkedSlot &candidate : state_.minimap.linked) {
@@ -182,33 +194,59 @@ void ClientReplicaPipeline::apply_minimap_overlay_batch(
 			if (!candidate.active && linked == nullptr) linked = &candidate;
 		}
 		if (linked == nullptr) continue; // 251-link table full [orig: @0x5bec52]
+		const bool fresh_link = !linked->active;
 		linked->active = true;
 		linked->handle = entry.handle;
 		// Wire lifetime is seconds; x62 to ticks. [orig: @0x4255c9..0x4255d6]
 		linked->remaining_ticks =
 				static_cast<uint32_t>(entry.lifetime_s) * 62u;
 
-		ClientMinimapOverlaySlot *slot =
-				find_overlay(state_.minimap.special, entry.handle);
-		if (slot == nullptr) slot = allocate_overlay(state_.minimap.special);
-		if (slot == nullptr) continue;
+		// The link's STORED SLOT is the only key retail consults: an existing
+		// link updates its own slot in place; a fresh link ALWAYS allocates a
+		// new special slot, so a coexisting 0x40 special badge for the same
+		// handle keeps its own slot and both markers draw.
+		// [orig: overlay_obj = link[6] @0x5bece4 — in-place update
+		//  @0x5bed63..0x5bed80; fresh-link alloc sub_5BE970 @0x5bed39]
+		ClientMinimapOverlaySlot *slot = nullptr;
+		if (!fresh_link && linked->slot_index >= 0 &&
+				static_cast<size_t>(linked->slot_index) <
+						state_.minimap.special.size()) {
+			slot = &state_.minimap.special[
+					static_cast<size_t>(linked->slot_index)];
+		}
+		bool fresh_slot = false;
+		if (slot == nullptr) {
+			slot = allocate_overlay(state_.minimap.special);
+			linked->slot_index = slot != nullptr
+					? static_cast<int16_t>(slot - state_.minimap.special.data())
+					: static_cast<int16_t>(-1);
+			fresh_slot = slot != nullptr;
+		}
+		if (slot == nullptr) continue; // special bank full [orig: @0x5be9ba]
 		// Icon: type 3 -> 24, everything else (incl. type 1) -> 253.
 		// [orig: @0x5bec59..0x5bec7e]
 		const uint8_t icon = entry.type == 3 ? 24u : 253u;
-		// Team color from the slot's team byte: 1 -> table[10], 2 -> table[9],
-		// else (including a not-yet-decoded slot) table[12] neutral; applied
+		// Team color from the slot's team byte through the classifier's index
+		// mapping (world::minimap_team_color — 1 -> table[10], 2 -> table[9],
+		// else, including a not-yet-decoded slot, table[12] neutral); applied
 		// only when nonzero. [orig: @0x5becb8..0x5bece4, @0x5bed71]
 		const uint8_t team = entity != nullptr ? entity->team : 0;
-		const uint8_t color_index = team == 1 ? 0x0A :
-				(team == 2 ? 0x09 : 0x0C);
-		uint32_t argb = slot->active ? slot->argb : 0xFFFFFFFFu;
+		const uint8_t color_index = world::minimap_team_color(team);
+		uint32_t argb = fresh_slot ? 0xFFFFFFFFu : slot->argb;
 		minimap_color(color_index, argb);
-		slot->active = true;
-		slot->handle = entry.handle;
+		if (fresh_slot) {
+			// Only the fresh allocation stamps identity; the in-place update
+			// writes lifetime/icon/flags/color/pose alone (an aliased slot —
+			// the allocator reusing an expired special slot a live link still
+			// points at — keeps the other marker's identity, as retail does).
+			// [orig: sub_5BE970 writes the handle; @0x5bed63.. writes none]
+			slot->active = true;
+			slot->handle = entry.handle;
+			slot->source = 0;
+		}
 		slot->param = icon;
 		slot->icon_color = color_index;
 		slot->flags = 0xC4u; // [orig: @0x5bed2b / @0x5bed6d]
-		slot->source = 0;
 		slot->argb = argb;
 		// Marker pose comes from the WIRE (whole units -> 16.16); the height
 		// byte is the map ring radius. [orig: @0x42559f..0x4255bc, slot+28
@@ -247,24 +285,38 @@ void ClientReplicaPipeline::tick_minimap_overlays() {
 	}
 	// The persistent bank is not aged. [orig: timers skip slot_data]
 	// Links live purely on their own lifetime — retail's timer walk never
-	// consults the entity — re-arming their slot's lifetime each tick and
-	// freeing the slot when they lapse. [orig: @0x5bfd3a..0x5bfe21 —
+	// consults the entity — re-arming THEIR STORED SLOT's lifetime each tick
+	// (through the link's slot pointer, never a handle search) and freeing
+	// that slot when they lapse. [orig: @0x5bfd3a..0x5bfe21 —
 	//  slot+24 = 1984 while linked @0x5bfd61; on expiry slot flags |= 0x20,
 	//  lifetime 0, handle -1, link zeroed @0x5bfddb..0x5bfe15]
 	for (ClientMinimapLinkedSlot &linked : state_.minimap.linked) {
 		if (!linked.active) continue;
 		if (linked.remaining_ticks > 0) --linked.remaining_ticks;
-		ClientMinimapOverlaySlot *slot =
-				find_overlay(state_.minimap.special, linked.handle);
+		ClientMinimapOverlaySlot *slot = linked.slot_index >= 0 &&
+						static_cast<size_t>(linked.slot_index) <
+								state_.minimap.special.size()
+				? &state_.minimap.special[
+						static_cast<size_t>(linked.slot_index)]
+				: nullptr;
 		if (linked.remaining_ticks == 0) {
-			if (slot != nullptr) clear_overlay(state_.minimap.special,
-					linked.handle);
+			// The lapse writes flags |= 0x20, lifetime 0, handle -1 through
+			// the stored pointer — the other slot fields survive here too.
+			// [orig: @0x5bfddb..0x5bfe15]
+			if (slot != nullptr && slot->active) {
+				slot->flags |= 0x20u;
+				slot->remaining_ticks = 0;
+				slot->handle = 0xFFFF;
+			}
 			linked = ClientMinimapLinkedSlot{};
 			changed = true;
 			continue;
 		}
-		if (slot != nullptr &&
+		if (slot != nullptr && slot->active &&
 				slot->remaining_ticks != kMinimapOverlayLifetimeTicks) {
+			// A 0x40-cleared slot crossing 0 -> 1984 here is the witnessed
+			// link RESURRECT — a visibility change, so bump the revision.
+			if (slot->remaining_ticks == 0) changed = true;
 			slot->remaining_ticks = kMinimapOverlayLifetimeTicks;
 		}
 	}
@@ -326,11 +378,10 @@ bool client_minimap_grid_origin(const ClientState &state, int32_t &out_x_q16,
 }
 
 uint32_t minimap_team_argb(uint8_t team) {
+	// The classifier's index mapping over the wire color table.
 	// [orig: team -> index @0x5becb8..0x5bece4; table @0x840A10]
-	const uint8_t color_index = team == 1 ? 0x0A :
-			(team == 2 ? 0x09 : 0x0C);
 	uint32_t argb = 0xFFFFFFFFu;
-	minimap_color(color_index, argb);
+	minimap_color(world::minimap_team_color(team), argb);
 	return argb;
 }
 

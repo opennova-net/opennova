@@ -152,10 +152,6 @@ public:
 	// by GameFramePipeline through the concrete terrain leg — this node
 	// no longer self-processes.
 	void render_frame();
-	// The minimap-bake compile: the same pool recompiled for an arbitrary
-	// camera. Bake-only — the pool holds this draw list until the next live
-	// compile, so callers confine it to the covered load window.
-	bool render_frame_for_camera(Camera3D *p_camera);
 	bool is_built() const { return built; }
 
 	// Debug API

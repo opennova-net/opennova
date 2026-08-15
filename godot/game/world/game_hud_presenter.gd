@@ -416,19 +416,10 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# default F6). Retail's default F6 is shadowed by the earlier huddetail
 	# row (a dispatcher no-op), leaving the cycle dormant; making the row
 	# reachable is the tracked reimpl divergence on this action (D-CTRL-4).
-	# Two reimpl guards on the poll: (1) the raw key edge latches from the
-	# UNGATED key state, so a press held across an armory/F3 window cannot
-	# re-fire when the gate reopens; (2) a chorded press (Shift/Ctrl/Alt —
-	# our debug picks ride Shift+F6) never cycles — the retail row binds the
-	# bare key.
-	# [orig: first-match key scan @0x49d42f; cycle @0x49afc7]
-	var color_down: bool = ControlsBindings.pressed("hudcolor")
-	var color_chorded: bool = Input.is_key_pressed(KEY_SHIFT) \
-			or Input.is_key_pressed(KEY_CTRL) or Input.is_key_pressed(KEY_ALT)
-	if color_down and not _hud_color_was_down \
-			and gameplay_input_active and not color_chorded:
-		cycle_hud_color()
-	_hud_color_was_down = color_down
+	poll_hud_color_edge(ControlsBindings.pressed("hudcolor"),
+			Input.is_key_pressed(KEY_SHIFT) or Input.is_key_pressed(KEY_CTRL) \
+					or Input.is_key_pressed(KEY_ALT),
+			gameplay_input_active)
 	# Weapon-cluster state: clip/reserve as the info struct carried them, heat
 	# 0..0xFFFF (only emplaced/vehicle heavy guns author heat_values, so 0 on
 	# foot [orig: hudInfo+60 = WeaponSlot_CalcAccumulatedHeat @0x53f780,
@@ -778,6 +769,18 @@ func cycle_friendly_tags() -> void:
 ## retail's token round trip. Deliberately NO toast — the retail case only
 ## cycles and restamps the color. [orig: the `hudcolor` action, dispatch code
 ## 10 @0x49afc7 — idx+1, >5 wraps to 0, g_hudActiveColor = table[idx]]
+## One hudcolor poll step over pre-sampled device state (the seam the tests
+## drive). Two reimpl guards: (1) the edge latches from the UNGATED key state,
+## so a press held across an armory/F3 window cannot re-fire when the gate
+## reopens; (2) a chorded press (Shift/Ctrl/Alt — our debug picks ride
+## Shift+F6) never cycles — the retail row binds the bare key.
+## [orig: first-match key scan @0x49d42f; cycle @0x49afc7]
+func poll_hud_color_edge(color_down: bool, chorded: bool, active: bool) -> void:
+	if color_down and not _hud_color_was_down and active and not chorded:
+		cycle_hud_color()
+	_hud_color_was_down = color_down
+
+
 func cycle_hud_color() -> void:
 	_hud_color_index = (_hud_color_index + 1) % 6
 	ConfigStore.write(HUD_COLOR_CONFIG_PATH, HUD_COLOR_SECTION,

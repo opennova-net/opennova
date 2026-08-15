@@ -85,11 +85,31 @@ int main() {
 	CHECK(find_slot(view.state().minimap, entity.handle)->x == (20 << 16),
 			"regular marker follows the live entity like retail's draw-time "
 			"pool read");
+	// A refresh updates the FOUND slot in place: the bank — and with it the
+	// aging class — is fixed at first allocation, so a 0x10-flagged refresh
+	// of a transient marker stays transient and still ages out.
+	// [orig: MapOverlay_UpdateOrCreateSlot @0x5beb60..0x5beb7f]
 	view.apply(opennova::s2c::CAPTURE_ZONE_STATE,
 			zone(entity.handle, 3, 0x09, 0x10));
-	slot = find_slot(view.state().minimap, entity.handle);
-	CHECK(slot != nullptr && slot->x == entity.x && slot->param == 3,
-			"refresh moves the slot across banks");
+	{
+		bool in_transient = false;
+		for (const auto &s : view.state().minimap.transient)
+			in_transient |= s.active && s.handle == entity.handle &&
+					s.param == 3 && s.x == entity.x;
+		bool in_persistent = false;
+		for (const auto &s : view.state().minimap.persistent)
+			in_persistent |= s.active && s.handle == entity.handle;
+		CHECK(in_transient && !in_persistent,
+				"a flags refresh updates the slot in place, never migrating banks");
+	}
+	for (int i = 0; i < ns::kMinimapOverlayLifetimeTicks + 2; ++i)
+		view.tick_minimap_overlays();
+	CHECK(find_slot(view.state().minimap, entity.handle) == nullptr,
+			"the refreshed slot keeps its transient aging class and expires");
+	// A marker ALLOCATED with 0x10 lands in the persistent bank and never
+	// ages. [orig: sub_5BE970 @0x5be98e..0x5be998; timers skip slot_data]
+	view.apply(opennova::s2c::CAPTURE_ZONE_STATE,
+			zone(entity.handle, 3, 0x09, 0x10));
 	for (int i = 0; i < ns::kMinimapOverlayLifetimeTicks + 2; ++i)
 		view.tick_minimap_overlays();
 	CHECK(find_slot(view.state().minimap, entity.handle) != nullptr,
@@ -97,7 +117,7 @@ int main() {
 	view.apply(opennova::s2c::CAPTURE_ZONE_STATE,
 			zone(entity.handle, 0, 0, 0x20));
 	CHECK(find_slot(view.state().minimap, entity.handle) == nullptr,
-			"0x20 clears marker from every bank");
+			"0x20 frees the found slot (lifetime 0, handle -1)");
 
 	// The full 32-entry color table is live: index 8 is the witnessed
 	// 0xFF907000, and the alpha-0 tail entries reject the marker.
@@ -180,6 +200,56 @@ int main() {
 	for (int i = 0; i < 2; ++i) view.tick_minimap_overlays();
 	CHECK(find_slot(view.state().minimap, 0x2044) == nullptr,
 			"link lifetime expiry still frees the slot");
+
+	// A 0x40 special badge and a 0x6B pulse for the SAME handle coexist: the
+	// link keys strictly off its STORED slot, and a fresh link allocates a
+	// second special slot rather than stamping the badge (the allocator's
+	// free test skips active slots).
+	// [orig: link[6] @0x5bece4; sub_5BE970 free test @0x5be9b0]
+	view.state().upsert(0x2005).team = 2;
+	view.apply(opennova::s2c::CAPTURE_ZONE_STATE, zone(0x2005, 12, 8, 0x40));
+	view.apply(opennova::s2c::MINIMAP_OVERLAY,
+			linked_record(0x2005, 9, 9, 0, 5, 1, 16));
+	{
+		int badge = 0, pulse = 0;
+		for (const auto &s : view.state().minimap.special) {
+			if (!s.active || s.handle != 0x2005 || s.remaining_ticks == 0)
+				continue;
+			if (s.param == 12) ++badge;
+			if (s.param == 253) ++pulse;
+		}
+		CHECK(badge == 1 && pulse == 1,
+				"a 0x40 badge and a 0x6B pulse hold separate special slots");
+	}
+
+	// A 0x20 clear writes ONLY lifetime + handle on the first found slot and
+	// never touches the link table; the surviving link re-arms the slot on
+	// the next timer tick and the marker RESURRECTS (the special draw walk
+	// gates on lifetime alone — no handle test).
+	// [orig: @0x5beb4b..0x5beb56; re-arm @0x5bfd61; draw gate @0x5be794]
+	view.apply(opennova::s2c::MINIMAP_OVERLAY,
+			linked_record(0x2006, 4, 4, 0, 30, 1, 8));
+	const auto *probe = find_slot(view.state().minimap, 0x2006);
+	CHECK(probe != nullptr, "the resurrect probe pulse is up");
+	view.apply(opennova::s2c::CAPTURE_ZONE_STATE, zone(0x2006, 0, 0, 0x20));
+	CHECK(probe != nullptr && probe->remaining_ticks == 0 &&
+			probe->handle == 0xFFFF && probe->x == (4 << 16),
+			"the clear zeroes lifetime + handle and keeps the pose fields");
+	view.tick_minimap_overlays();
+	CHECK(probe != nullptr && probe->remaining_ticks > 0,
+			"the surviving 0x6B link re-arms its slot — the marker resurrects");
+
+	// Handle gates include the witnessed per-pool capacity (pool 2 holds
+	// 1200 slots): index 0xFFE drops in BOTH appliers before any write.
+	// [orig: @0x5beade (0x40); the 0x6B decoder gate @0x425573..0x42559d;
+	//  capacities EntityPool_Allocate @0x442168]
+	view.apply(opennova::s2c::CAPTURE_ZONE_STATE, zone(0x2FFE, 10, 0x0A, 0));
+	CHECK(find_slot(view.state().minimap, 0x2FFE) == nullptr,
+			"an out-of-capacity 0x40 handle is dropped");
+	view.apply(opennova::s2c::MINIMAP_OVERLAY,
+			linked_record(0x2FFE, 1, 1, 0, 5, 1, 4));
+	CHECK(find_slot(view.state().minimap, 0x2FFE) == nullptr,
+			"an out-of-capacity 0x6B handle is dropped");
 
 	const auto before = view.state().minimap.revision;
 	const auto malformed_before = view.malformed_bodies();

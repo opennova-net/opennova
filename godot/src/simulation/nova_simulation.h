@@ -1426,6 +1426,20 @@ public:
 	// Baked once per world from the OOBJ occlusion ground-slice mesh transformed
 	// by the entity pose (witness at world::minimap_footprint_from_occlusion).
 	PackedInt32Array get_hud_minimap_footprints() const;
+
+private:
+	// get_hud_minimap_snapshot cache: the retained banks bump
+	// ClientMinimapState::revision, and every other input — entity resolves,
+	// per-row draw policies, the restored local row — advances only with the
+	// world logic tick, so the display frames between 62 Hz ticks reuse the
+	// built array instead of re-walking the 1160 retained slots.
+	mutable PackedInt32Array minimap_snapshot_cache_;
+	mutable uint64_t minimap_snapshot_revision_ = 0;
+	mutable uint64_t minimap_snapshot_tick_ = 0;
+	mutable uint16_t minimap_snapshot_local_handle_ = 0xFFFF;
+	mutable bool minimap_snapshot_valid_ = false;
+
+public:
 	// { present: bool, position: Vector3 } — the type-2043 grid-origin marker.
 	Dictionary get_hud_map_grid_origin() const;
 	// The objectives-panel rows: an Array of {slot, text_id, shown, done} for

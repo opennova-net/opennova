@@ -2754,6 +2754,29 @@ bool run_host_as_client() {
 	if (!expect(has_vehicle_overlay(),
 			"late-phase vehicle arrives and is retained on phase-127 tick 1779"))
 		return false;
+
+	// A mission restart recreates the client view with EMPTY retained banks
+	// while the server connections persist; the host re-arms each
+	// connection's one-shot initial scan so the producer re-sends the
+	// persistent pool-2 markers to the fresh epoch (without the re-arm the
+	// building/zone markers would be missing for the rest of the session).
+	np::ClientRuntime restart_view(host_loop);
+	np::Server_RearmMinimapInitialScan(ctx);
+	bool restart_map_overlay = false;
+	for (int tick = 0; tick < 16 && !restart_map_overlay; ++tick) {
+		np::Server_TickUpdate(ctx);
+		(void)restart_view.Client_ProcessNetworkFrame();
+		for (const ns::ClientMinimapOverlaySlot &slot :
+				restart_view.state().minimap.persistent) {
+			if (slot.active && slot.handle == map_handle.packed) {
+				restart_map_overlay = true;
+				break;
+			}
+		}
+	}
+	if (!expect(restart_map_overlay,
+			"the re-armed initial scan repopulates a fresh client view"))
+		return false;
 	return true;
 }
 
