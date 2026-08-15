@@ -494,6 +494,9 @@ public:
 	uint8_t local_player_slot() const { return local_player_slot_; }
 	const SelfSpawn &spawn_pose() const { return spawn_; }
 	uint32_t game_type() const { return game_type_; }
+	// Authoritative mission-session attributes retained from the fixed 180-byte
+	// S2C 0x64 block (little-endian dword at offset 44).
+	uint32_t mp_attributes() const { return mp_attributes_; }
 	const std::string &server_name() const { return server_name_; }
 	const std::string &mission_name() const { return mission_name_; }
 	const std::string &map_file() const { return map_file_; }
@@ -552,6 +555,7 @@ private:
 	void on_server_auth(const std::vector<uint8_t> &body, PollResult &out);
 	void on_server_session(const std::vector<uint8_t> &body, PollResult &out);
 	void on_server_resend_list(const std::vector<uint8_t> &body, PollResult &out);
+	void retain_mission_metadata_chunk(const FileTransferChunk &chunk);
 	void retain_terrain_load_page(const std::vector<uint8_t> &body);
 	void reset_terrain_load();
 	void invalidate_terrain_load();
@@ -646,6 +650,11 @@ private:
 	uint16_t self_handle_ = 0;  // wire handle H, learned via the name-match (pool<<12|slot)
 	SelfSpawn spawn_;
 	uint32_t game_type_ = 0;    // authoritative g_GameType learned from S2C 0x08 field 3 / 0x7B extra
+	uint32_t mp_attributes_ = 0; // S2C 0x64 fixed session block, offset 44
+	uint32_t mission_metadata_transfer_id_ = 0;
+	uint32_t mission_metadata_total_size_ = 0;
+	std::array<uint8_t, 4> mission_metadata_mp_bytes_{};
+	uint8_t mission_metadata_mp_byte_mask_ = 0;
 	std::string server_name_;   // authoritative S2C 0x7B field 3
 	std::string mission_name_;  // authoritative S2C 0x7B field 4 (title or waypoint filename)
 	std::string map_file_;      // authoritative S2C 0x7B field 5

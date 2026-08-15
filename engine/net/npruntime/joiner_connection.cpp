@@ -302,6 +302,11 @@ std::vector<uint8_t> JoinerConnection::start() {
 	expansion_.clear();
 	advertised_expansion_.clear();
 	game_type_ = 0;
+	mp_attributes_ = 0;
+	mission_metadata_transfer_id_ = 0;
+	mission_metadata_total_size_ = 0;
+	mission_metadata_mp_bytes_.fill(0);
+	mission_metadata_mp_byte_mask_ = 0;
 	last_error_.clear();
 	host_disconnect_reason_.clear();
 	in_match_session_established_ = false;
@@ -665,6 +670,41 @@ void JoinerConnection::retain_terrain_load_page(
 	}
 }
 
+void JoinerConnection::retain_mission_metadata_chunk(
+		const FileTransferChunk &chunk) {
+	constexpr uint32_t kMpAttributesOffset = 44;
+	constexpr uint32_t kMpAttributesSize = 4;
+	const uint64_t chunk_end = uint64_t(chunk.chunk_offset) + chunk.chunk_size;
+	if (chunk.total_size < kMpAttributesOffset + kMpAttributesSize ||
+			chunk.chunk_offset > chunk.total_size ||
+			chunk_end > chunk.total_size)
+		return;
+
+	const bool new_transfer =
+			chunk.transfer_id != mission_metadata_transfer_id_ ||
+			chunk.total_size != mission_metadata_total_size_;
+	if (new_transfer || chunk.chunk_offset == 0) {
+		mission_metadata_transfer_id_ = chunk.transfer_id;
+		mission_metadata_total_size_ = chunk.total_size;
+		mission_metadata_mp_bytes_.fill(0);
+		mission_metadata_mp_byte_mask_ = 0;
+	}
+
+	for (uint32_t i = 0; i < kMpAttributesSize; ++i) {
+		const uint32_t absolute = kMpAttributesOffset + i;
+		if (absolute < chunk.chunk_offset || absolute >= chunk_end) continue;
+		mission_metadata_mp_bytes_[i] =
+				chunk.chunk_data[absolute - chunk.chunk_offset];
+		mission_metadata_mp_byte_mask_ |= static_cast<uint8_t>(1u << i);
+	}
+	if (mission_metadata_mp_byte_mask_ == 0x0Fu) {
+		mp_attributes_ = static_cast<uint32_t>(mission_metadata_mp_bytes_[0]) |
+				(static_cast<uint32_t>(mission_metadata_mp_bytes_[1]) << 8) |
+				(static_cast<uint32_t>(mission_metadata_mp_bytes_[2]) << 16) |
+				(static_cast<uint32_t>(mission_metadata_mp_bytes_[3]) << 24);
+	}
+}
+
 void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollResult &out) {
 	// Joiner recv: decrypt inbound 0x83 with the server's SCRK; deframe latches conn_.seq.last_inbound_seq.
 	ProtocolPacketHeader hdr;
@@ -914,6 +954,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			FileTransferChunk chunk;
 			if (decode_file_transfer_chunk(
 					m.payload.data(), m.payload.size(), chunk)) {
+				retain_mission_metadata_chunk(chunk);
 				if (!chunk.is_final()) {
 					const uint32_t next_offset = static_cast<uint32_t>(
 							uint64_t(chunk.chunk_offset) + chunk.chunk_size);
@@ -1467,6 +1508,20 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			    packet_ack >= deployment_pick_sequence_) {
 				release_deployment(/*deployment_complete=*/true);
 			}
+		} else if (m.tag == s2c::DEPLOYED_ITEM) {
+			DeployedItemSpawn spawn;
+			std::size_t consumed = 0;
+			if (decode_deployed_item_spawn(
+					m.payload.data(), m.payload.size(), spawn, consumed) &&
+					consumed == m.payload.size())
+				out.inbound_gameplay.emplace_back(m.tag, m.payload);
+		} else if (m.tag == s2c::ENTITY_REMOVE) {
+			EntityRemove removal;
+			std::size_t consumed = 0;
+			if (decode_entity_remove(
+					m.payload.data(), m.payload.size(), removal, consumed) &&
+					consumed == m.payload.size())
+				out.inbound_gameplay.emplace_back(m.tag, m.payload);
 		} else if (m.tag == s2c::WEAPON_RELOAD) {
 			// The host echoes the same four-byte C2S 0x25 reload body as S2C 0x49.
 			// Surface it once through the decoded client-view event path.
@@ -1851,6 +1906,11 @@ void JoinerConnection::seed_in_match(uint32_t session_id, uint32_t client_key,
 	has_self_handle_ = true;
 	spawn_.item_type_id = self_type;
 	game_type_ = game_type;
+	mp_attributes_ = 0;
+	mission_metadata_transfer_id_ = 0;
+	mission_metadata_total_size_ = 0;
+	mission_metadata_mp_bytes_.fill(0);
+	mission_metadata_mp_byte_mask_ = 0;
 	mission_header_bytes_.clear();
 	reset_terrain_load();
 	class_allow_mask_ = 0x03FFu;

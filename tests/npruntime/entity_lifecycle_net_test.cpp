@@ -37,6 +37,7 @@
 
 #include <npwire/ingame_decode.h>
 #include <npwire/ingame_encode.h>
+#include <npwire/ingame_message_id.h>
 #include <npwire/nw_session_framing.h>
 #include <npwire/protocol_message.h>
 #include <npwire/session_keys.h>
@@ -469,6 +470,42 @@ bool run_empty_slot_sweep_surfaces_raw_gameplay() {
 			"0x5D-poll: the validated raw record reaches the replica pipeline");
 }
 
+bool run_deployed_item_lifecycle_surfaces_raw_gameplay() {
+	np::JoinerConnection joiner("PlacedDevicePollJoiner", [] { return uint64_t(0); });
+	joiner.seed_in_match(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                     1, 0, 0x0005, w::kPlayerInfantryTypeId);
+	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
+
+	DeployedItemSpawn spawn;
+	spawn.item_id = 0x0361;
+	spawn.owner_handle = 0x0005;
+	spawn.friendly_item_id = 0x0362;
+	spawn.enemy_item_id = 0x0363;
+	spawn.slot_handle = 0x1003;
+	spawn.parent_handle = 0xFFFF;
+	spawn.pos_x = w::to_fixed(4.0);
+	spawn.pos_y = w::to_fixed(5.0);
+	spawn.pos_z = w::to_fixed(1.0);
+	const std::vector<uint8_t> spawn_payload =
+			encode_deployed_item_spawn(spawn);
+	EntityRemove removal;
+	removal.entity_handle = spawn.slot_handle;
+	const std::vector<uint8_t> removal_payload = encode_entity_remove(removal);
+	const std::vector<uint8_t> dg = frame_server_session(server_tx, {
+			make_protocol_message(s2c::DEPLOYED_ITEM, spawn_payload),
+			make_protocol_message(s2c::ENTITY_REMOVE, removal_payload),
+	});
+	const np::JoinerConnection::PollResult poll =
+			joiner.handle_datagram(dg.data(), dg.size());
+
+	return expect(poll.inbound_gameplay.size() == 2 &&
+			poll.inbound_gameplay[0].first == s2c::DEPLOYED_ITEM &&
+			poll.inbound_gameplay[0].second == spawn_payload &&
+			poll.inbound_gameplay[1].first == s2c::ENTITY_REMOVE &&
+			poll.inbound_gameplay[1].second == removal_payload,
+			"validated 0x59/0x12 placed-device lifecycle reaches the replica pipeline");
+}
+
 bool run_empty_slot_sweep_retires_the_row() {
 	constexpr uint16_t kSelf = 0x0005;
 	constexpr uint16_t kGhost = 0x0003;
@@ -882,6 +919,7 @@ int main() {
 	if (!run_team_assign_reselects_the_new_sides_profile()) return 1;
 	if (!run_team_assign_default_kit_stays_byte_identical()) return 1;
 	if (!run_empty_slot_sweep_surfaces_raw_gameplay()) return 1;
+	if (!run_deployed_item_lifecycle_surfaces_raw_gameplay()) return 1;
 	if (!run_empty_slot_sweep_retires_the_row()) return 1;
 	if (!run_entity_death_notify_reaches_the_sim()) return 1;
 	if (!run_player_sync_removal_keeps_the_entity()) return 1;

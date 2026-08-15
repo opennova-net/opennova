@@ -822,6 +822,175 @@ CollisionModel proxy_face_quad_model(uint8_t material) {
     return m;
 }
 
+// The Knife leaf uses a person's authored CFAC mesh rather than the ordinary
+// projectile bone spheres. This vertical quad is centered at the entity pose;
+// a +X ray meets it exactly at the target's X coordinate.
+CollisionModel knife_person_face_model(uint8_t material) {
+    CollisionModel m;
+    m.face_vertices = {{0, -256, 0}, {0, 256, 0}, {0, 256, 512},
+                       {0, -256, 512}}; // Q8: x=0, y=+-1, z=0..2
+    auto face = [&](int a, int b, int c) {
+        CollisionFace f;
+        f.v[0] = static_cast<int16_t>(a);
+        f.v[1] = static_cast<int16_t>(b);
+        f.v[2] = static_cast<int16_t>(c);
+        f.normal[0] = -16384;
+        f.normal[1] = 0;
+        f.normal[2] = 0;
+        f.axis = 4; // YZ projection
+        f.plane_dist = 0;
+        f.min[0] = 0;          f.max[0] = 0;
+        f.min[1] = -0x10000;   f.max[1] = 0x10000;
+        f.min[2] = 0;          f.max[2] = 0x20000;
+        f.material = material;
+        m.faces.push_back(f);
+    };
+    face(0, 1, 2);
+    face(0, 2, 3);
+    m.sections.assign(1, {});
+    m.sections[0].face_start = 0;
+    m.sections[0].face_count = 2;
+    m.sections[0].face_vertex_start = 0;
+    m.sections[0].face_vertex_count = 4;
+    return m;
+}
+
+void test_knife_instant_kill_zone_raycast() {
+    World world;
+    world.registry.configure_pool(0, 8);
+    world.registry.configure_pool(1, 8);
+
+    Entity shooter;
+    shooter.kind = EntityKind::Organic;
+    shooter.item_type = 3;
+    const EntityHandle sh = world.registry.spawn(0, shooter);
+
+    Entity target;
+    target.kind = EntityKind::Organic;
+    target.has_item_def = true;
+    target.item_type = 3;
+    target.position = {2.0f, 0.0f, 0.0f};
+    target.health = 100;
+    const EntityHandle th = world.registry.spawn(0, target);
+
+    CollisionWorld collision;
+    const int32_t model_id = collision.add_model(
+        knife_person_face_model(/*material=*/7));
+    collision.assign_entity(th, model_id);
+    const int32_t target_pose[3] = {2 * 65536, 0, 0};
+    CHECK(collision.publish_entity_section_matrices(
+        th, {collision_matrix_from_heading(0, target_pose)}));
+    collision.build_tick_tables(world);
+    world.collision = &collision;
+
+    AmmoTableEntry knife;
+    knife.name = "KNIFE";
+    knife.valid = true;
+    knife.flags = kAmmoFlagInstantKillZone;
+    knife.kztype = ammo_kz::kKnife;
+    knife.kz_maxradius = 3.0f;
+    world.ammo.entries.push_back(knife);
+
+    RoundSpawnParams params;
+    params.owner = sh;
+    params.shooter_handle = sh.packed;
+    params.origin = {0.0f, 0.0f, 1.0f};
+    params.dir_yaw_bam = 0;
+    params.dir_pitch_bam = 0;
+    params.ammo_index = 0;
+
+    CHECK(world.round_sim.spawn(world, params) < 0);
+    CHECK(world.round_sim.active_count == 0);
+    CHECK(world.explosions.queue.size() == 1);
+    CHECK(world.round_sim.hits.empty());
+    CHECK(world.registry.get(th)->health == 100);
+    CHECK(world.round_sim.impacts.size() == 1);
+    if (!world.round_sim.impacts.empty()) {
+        const RoundImpact &impact = world.round_sim.impacts[0];
+        const int32_t impact_x = to_fixed(impact.position.x);
+        CHECK(impact_x >= 2 * 65536 - 2 && impact_x <= 2 * 65536);
+        CHECK(to_fixed(impact.position.y) == 0);
+        CHECK(to_fixed(impact.position.z) == 65536);
+        CHECK(to_fixed(impact.direction.x) == 65536);
+        CHECK(to_fixed(impact.direction.y) == 0);
+        CHECK(to_fixed(impact.direction.z) == 0);
+        CHECK(impact.effect_tag == 11); // CFAC material 7 + 4
+    }
+
+    // Moving the same face beyond the authored extent leaves the presenter
+    // silent while the instant-kill-zone explosion remains queued at the hand.
+    world.registry.get(th)->position.x = 4.0f;
+    const int32_t far_pose[3] = {4 * 65536, 0, 0};
+    CHECK(collision.publish_entity_section_matrices(
+        th, {collision_matrix_from_heading(0, far_pose)}));
+    collision.build_tick_tables(world);
+    world.round_sim.impacts.clear();
+    world.explosions.queue.clear();
+    CHECK(world.round_sim.spawn(world, params) < 0);
+    CHECK(world.round_sim.active_count == 0);
+    CHECK(world.explosions.queue.size() == 1);
+    CHECK(world.round_sim.impacts.empty());
+
+    // The PERSON leg remaps CFAC material 1 to the flesh row (23): hit type 3
+    // is Projectile_RaycastProximitySlots' default (person) slot walk
+    // [orig: Weapon_RaycastAndSpawnImpact @0x4e8880..0x4e8888].
+    Entity flesh_target;
+    flesh_target.kind = EntityKind::Organic;
+    flesh_target.has_item_def = true;
+    flesh_target.item_type = 3;
+    flesh_target.position = {1.0f, 0.0f, 0.0f};
+    flesh_target.health = 100;
+    const EntityHandle fh = world.registry.spawn(0, flesh_target);
+    const int32_t flesh_model_id = collision.add_model(
+        knife_person_face_model(/*material=*/1));
+    collision.assign_entity(fh, flesh_model_id);
+    const int32_t flesh_pose[3] = {1 * 65536, 0, 0};
+    CHECK(collision.publish_entity_section_matrices(
+        fh, {collision_matrix_from_heading(0, flesh_pose)}));
+    collision.build_tick_tables(world);
+    world.round_sim.impacts.clear();
+    world.explosions.queue.clear();
+    CHECK(world.round_sim.spawn(world, params) < 0);
+    CHECK(world.explosions.queue.size() == 1);
+    CHECK(world.registry.get(fh)->health == 100);
+    CHECK(world.round_sim.impacts.size() == 1);
+    if (!world.round_sim.impacts.empty()) {
+        const RoundImpact &impact = world.round_sim.impacts[0];
+        const int32_t impact_x = to_fixed(impact.position.x);
+        CHECK(impact_x >= 1 * 65536 - 2 && impact_x <= 1 * 65536);
+        CHECK(impact.effect_tag == 23);
+    }
+
+    // The ITEM leg (hit type 2) is plain material + 4 — a pool-1 item's
+    // material 1 is NOT flesh — and, being closer, it wins the strict
+    // arbitration over the person behind it
+    // [orig: @0x4e87cb item leg (<); @0x4e8867 material + 4].
+    Entity item;
+    item.kind = EntityKind::Item;
+    item.has_item_def = true;
+    item.item_type = 3;
+    item.position = {0.5f, 0.0f, 0.0f};
+    item.bound_radius = 1.0f;
+    const EntityHandle ih = world.registry.spawn(1, item);
+    const int32_t item_model_id = collision.add_model(
+        knife_person_face_model(/*material=*/1));
+    collision.assign_entity(ih, item_model_id);
+    const int32_t item_pose[3] = {32768, 0, 0};
+    CHECK(collision.publish_entity_section_matrices(
+        ih, {collision_matrix_from_heading(0, item_pose)}));
+    collision.build_tick_tables(world);
+    world.round_sim.impacts.clear();
+    world.explosions.queue.clear();
+    CHECK(world.round_sim.spawn(world, params) < 0);
+    CHECK(world.round_sim.impacts.size() == 1);
+    if (!world.round_sim.impacts.empty()) {
+        const RoundImpact &impact = world.round_sim.impacts[0];
+        const int32_t impact_x = to_fixed(impact.position.x);
+        CHECK(impact_x >= 32768 - 2 && impact_x <= 32768);
+        CHECK(impact.effect_tag == 5);
+    }
+}
+
 // Moving decoded pool-1 movers collide through their wire-keyed authored
 // geometry at the DECODED pose, while a synthetic duplicate native row does
 // not serve projectile collision on a visual client.
@@ -1625,6 +1794,7 @@ int main() {
     test_network_oneshot_authority_and_session_gate();
     test_visual_only_rounds_have_no_gameplay_consequences();
     test_visual_person_proxy_keeps_wire_identity_out_of_authority();
+    test_knife_instant_kill_zone_raycast();
     test_terrain_impact_samples_charmap_surface();
     test_visual_dynamic_proxy_projects_decoded_pose_geometry();
     test_visual_dynamic_proxy_carrier_gate_and_unresolved_model_raises();

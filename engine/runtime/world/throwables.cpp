@@ -875,8 +875,15 @@ bool ThrowableSim::place_from_round(World &world, const LiveRound &round,
 
     ThrowableEvents::DeviceSpawn ev;
     ev.entity = handle.packed;
+    ev.item_id = item_id;
+    ev.owner_handle = d.owner_handle != EntityHandle::kInvalid
+                              ? d.owner_handle
+                              : d.owner.packed;
     ev.item_friendly = d.item_friendly;
     ev.item_enemy = d.item_enemy;
+    ev.parent_handle = d.parent.valid()
+                               ? d.parent.packed
+                               : EntityHandle::kInvalid;
     ev.team = d.team;
     ev.pos = d.pos;
     ev.yaw_bam = d.yaw_bam;

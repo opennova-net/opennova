@@ -256,6 +256,14 @@ public:
 	void set_game_type(uint32_t game_type) { game_type_ = game_type; }
 	uint32_t game_type() const { return game_type_; }
 
+	// Recipient context for S2C 0x59's friend/foe item selection. Retail
+	// compares the placing owner's team with the local player's team and lets
+	// multiplayer attribute 0x8000 force the enemy presentation variant.
+	void set_viewer_handle(uint16_t handle) { viewer_handle_ = handle; }
+	uint16_t viewer_handle() const { return viewer_handle_; }
+	void set_mp_attributes(uint32_t attributes) { mp_attributes_ = attributes; }
+	uint32_t mp_attributes() const { return mp_attributes_; }
+
 private:
 	void queue_carrier_repair(uint16_t handle);
 	std::vector<uint16_t> carrier_repair_requests_;
@@ -273,6 +281,9 @@ private:
 	void apply_pool_spawn(const std::vector<uint8_t> &body);    // 0x0D pool-1
 	void apply_static_batch(const std::vector<uint8_t> &body);  // 0x10 pool-2
 	void apply_pool3_batch(const std::vector<uint8_t> &body);   // 0x20 pool-3
+	// The live placed-device lifecycle (client_replica_placed_device.cpp).
+	void apply_deployed_item(const std::vector<uint8_t> &body); // 0x59 pool-1
+	void apply_entity_remove(const std::vector<uint8_t> &body);  // 0x12
 	void erase_entity_tree(uint16_t root_handle);
 	// Land one decoded compact world sample on a row: live snap in snap mode /
 	// on the forced edges (respawn, vehicle dead-pose); smooth-target staging +
@@ -310,6 +321,8 @@ private:
 	std::size_t unknown_tags_ = 0;
 	std::size_t malformed_bodies_ = 0;
 	uint32_t game_type_ = 0;
+	uint16_t viewer_handle_ = 0xFFFF;
+	uint32_t mp_attributes_ = 0;
 	// Mission-seeded PRNG_Next16 stand-in shared by every decoded row in this
 	// view. The body consumes one draw per person per tick even when recoil is
 	// zero. Retail also has unrelated process-global consumers that this decoded

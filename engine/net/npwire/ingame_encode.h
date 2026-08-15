@@ -332,6 +332,12 @@ std::vector<uint8_t> encode_weapon_reload(const WeaponReload &reload);
 std::vector<uint8_t> encode_mounted_weapon_slot_selection(
 		const MountedWeaponSlotSelection &selection);
 
+// Fixed placed-device lifecycle bodies: S2C 0x59 is 32 bytes and S2C 0x12 is
+// one packed handle. [orig: Entity_SpawnOrUpdateFromSlotPacket @0x546770;
+// Server_RemoveEntityAndNotify @0x50A270]
+std::vector<uint8_t> encode_deployed_item_spawn(const DeployedItemSpawn &spawn);
+std::vector<uint8_t> encode_entity_remove(const EntityRemove &removal);
+
 // S2C 0x5D EMPTY-SLOT SWEEP — the inverse of decode_destroy_entity_list: a bare
 // `[u16 pool0Index] × N` run with no count word. Retail's builder walks pool 0
 // and appends the index of every entry whose occupancy dword is zero, then the

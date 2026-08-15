@@ -481,6 +481,10 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 			// S2C 0x7B may have updated the wire-invisible phase-3 layout hint
 			// before this datagram's 0x0A bodies are folded.
 			view_.set_game_type(joiner_->game_type());
+			view_.set_viewer_handle(joiner_->has_self_handle()
+					? joiner_->self_handle()
+					: 0xFFFFu);
+			view_.set_mp_attributes(joiner_->mp_attributes());
 			// JoinerConnection has already allocated sequence numbers for exact
 			// admission packets and retained-session reconstruction. They still
 			// leave through PumpClientProtocolSend: queue their wire images so a

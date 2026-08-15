@@ -790,6 +790,14 @@ void test_parented_device_follows_parent_yaw() {
     const Entity *entity = rig.w.registry.get(device.entity);
     CHECK(entity != nullptr && entity->yaw == 0);
     CHECK(entity != nullptr && entity->ground_target == parent);
+    CHECK(rig.w.throwables.events.spawns.size() == 1);
+    if (!rig.w.throwables.events.spawns.empty()) {
+        const ThrowableEvents::DeviceSpawn &spawn =
+            rig.w.throwables.events.spawns.front();
+        CHECK(spawn.item_id == kItemSatchel);
+        CHECK(spawn.owner_handle == rig.thrower.packed);
+        CHECK(spawn.parent_handle == parent.packed);
+    }
 }
 
 // The full-Euler follow [orig: Entity_InterpolateFromParentDelta @ 0x4a8d60]:

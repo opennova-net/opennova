@@ -17,6 +17,7 @@
 #include <npruntime/loadout_submit.h>
 
 #include <def/def.h>
+#include <resource_index/resource_index.h>
 #include <vfs/vfs.h>
 
 #include <cstdio>
@@ -290,6 +291,61 @@ int main(void) {
 		CHECK(t2.index_of("WPN_A") == 1 && t2.index_of("WPN_B") == 2);
 		CHECK(t2.by_index(1)->category == 3); // overwritten by the second WPN_A block
 		def_free_weapons(&mini);
+	}
+
+	// --- D-WPN-26: the production table bake reads authored automatic action
+	// durations from the weapon's ADM instead of collapsing them to zero. The
+	// committed soldier fixture maps anim_idle to a 0.266667-second BAD, which
+	// Anim_GetDurationTicks converts to the independently pinned literal 18.
+	{
+		static const char kAutomatic[] =
+				"weapon \"WPN_AUTO_FIXTURE\"\n"
+				"\tanimadm soldier\n"
+				"\taction \"fire\"\n"
+				"\t\tdelaystart auto\n"
+				"\t\tdelayend auto\n"
+				"\t\tanim anim_idle\n"
+				"\t\tfunction wpn_std_fire\n"
+				"\tend\n"
+				"end\n";
+		DefWeaponsFile automatic{};
+		CHECK(def_parse_weapons_memory(
+				reinterpret_cast<const uint8_t *>(kAutomatic),
+				sizeof(kAutomatic) - 1, &automatic) == 0);
+
+		opennova::ResourceIndex index;
+		CHECK(index.scan(std::string(repo_root) + "/fixtures/anim"));
+		const world::WeaponTable unresolved = np::build_weapon_table(automatic);
+		const world::WeaponTable resolved = np::build_weapon_table(automatic, &index);
+		const world::WeaponFsmAction &unresolved_fire =
+				unresolved.by_index(1)->action_fsm.actions[world::weapon_action::kFire];
+		const world::WeaponFsmAction &resolved_fire =
+				resolved.by_index(1)->action_fsm.actions[world::weapon_action::kFire];
+		CHECK(unresolved_fire.delay_start == 0 && unresolved_fire.delay_end == 0);
+		CHECK(resolved_fire.delay_start == 18 && resolved_fire.delay_end == 18);
+		def_free_weapons(&automatic);
+
+		// A definition with NO animadm has no anim object, so its 'auto' fields
+		// collapse to zero even with the resource index mounted
+		// [orig: Anim_InitActions @0x542180 "Error, need to define a anim adm"].
+		static const char kNoAdm[] =
+				"weapon \"WPN_AUTO_NOADM\"\n"
+				"\taction \"fire\"\n"
+				"\t\tdelaystart auto\n"
+				"\t\tdelayend auto\n"
+				"\t\tanim anim_idle\n"
+				"\t\tfunction wpn_std_fire\n"
+				"\tend\n"
+				"end\n";
+		DefWeaponsFile no_adm{};
+		CHECK(def_parse_weapons_memory(
+				reinterpret_cast<const uint8_t *>(kNoAdm),
+				sizeof(kNoAdm) - 1, &no_adm) == 0);
+		const world::WeaponTable no_adm_table = np::build_weapon_table(no_adm, &index);
+		const world::WeaponFsmAction &no_adm_fire =
+				no_adm_table.by_index(1)->action_fsm.actions[world::weapon_action::kFire];
+		CHECK(no_adm_fire.delay_start == 0 && no_adm_fire.delay_end == 0);
+		def_free_weapons(&no_adm);
 	}
 
 	std::printf("weapon_table: %s\n", failures == 0 ? "OK" : "FAILED");

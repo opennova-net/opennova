@@ -213,6 +213,17 @@ const CollisionTargetView *CollisionWorld::trace_target_view(const World &world,
 
 ProjectileHit CollisionWorld::trace_projectile(const World &world,
                                                const ProjectileTrace &trace) const {
+    return trace_projectile_impl(world, trace, false);
+}
+
+ProjectileHit CollisionWorld::trace_knife_impact(
+        const World &world, const ProjectileTrace &trace) const {
+    return trace_projectile_impl(world, trace, true);
+}
+
+ProjectileHit CollisionWorld::trace_projectile_impl(
+        const World &world, const ProjectileTrace &trace,
+        bool person_faces_only) const {
     // [orig: Projectile_UpdatePhysics @0x4e9d70] Candidate passes are ordered
     // terrain, water, static CFAC, dynamic CFAC, then person bone proxies.
     // A later pass replaces only when strictly closer.
@@ -259,9 +270,14 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
         if (t > 0x10000) t = 0x10000;
         return static_cast<int32_t>(t);
     };
-    auto consider = [&](ProjectileHit candidate, int32_t distance) {
+    // Cross-pass arbitration is strict (a later pass replaces only when
+    // closer); `tie_wins` is the one witnessed exception, the Knife
+    // presenter's person leg (below).
+    auto consider = [&](ProjectileHit candidate, int32_t distance,
+                        bool tie_wins = false) {
         if (!candidate.hit()) return;
-        if (!best.hit() || distance < best_distance) {
+        if (!best.hit() || distance < best_distance ||
+            (tie_wins && distance == best_distance)) {
             best = candidate;
             best_distance = distance;
         }
@@ -475,7 +491,8 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
     // (their +1.707u radius pad absorbs the rounding [orig: the u16 tables
     // built @ 0x4b94cb]); dynamic slots store signed full 16.16.
     auto trace_polygon_table = [&](const auto &slots, ProjectileHitClass hit_class,
-                                   float slot_to_units, bool signed_word_coords) {
+                                   float slot_to_units, bool signed_word_coords,
+                                   bool tie_wins = false) {
         CollisionPolygonHit table_hit;
         EntityHandle table_entity;
         bool table_found = false;
@@ -500,8 +517,10 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
             if (profile_trace) {
                 if (hit_class == ProjectileHitClass::StaticEntity)
                     trace_profile_.static_survivors++;
-                else
+                else if (hit_class == ProjectileHitClass::DynamicEntity)
                     trace_profile_.dynamic_survivors++;
+                else
+                    trace_profile_.person_survivors++;
             }
             const Entity *entity = world.registry.get(h);
             if (entity == nullptr || entity->hidden ||
@@ -540,10 +559,16 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
                     static_cast<int64_t>(target->model->faces.size());
                 if (hit_class == ProjectileHitClass::StaticEntity)
                     trace_profile_.static_faces += faces;
-                else
+                else if (hit_class == ProjectileHitClass::DynamicEntity)
                     trace_profile_.dynamic_faces += faces;
             }
             if (target == nullptr) {
+                // Weapon_RaycastAndSpawnImpact feeds every pool through the
+                // CFAC walker. A model-less person/item is a miss here, never
+                // the bounded sphere compatibility used by ordinary bullets.
+                // [orig: Weapon_RaycastAndSpawnImpact @0x4e8460;
+                // Physics_RaycastAgainstBoneCollision @0x4e4cb0]
+                if (person_faces_only) continue;
                 const int32_t center[3] = {to_fixed(entity->position.x),
                                            to_fixed(entity->position.y),
                                            to_fixed(entity->position.z)};
@@ -579,7 +604,7 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
         eh.face_index = table_hit.section_face_index;
         eh.surface_type = table_hit.poly_type;
         eh.material_flags = table_hit.material_flags;
-        consider(eh, table_hit.distance_q16);
+        consider(eh, table_hit.distance_q16, tie_wins);
     };
     // A visual-only MP client (mp_session && !projectile_authority) uses decoded
     // wire projections for pose-bearing projectile contacts. Pools 1-3 are
@@ -593,6 +618,17 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
     if (profile_trace) {
         const int64_t prof_n = prof_now();
         prof_t = prof_n; // owner/exclusion setup charged to neither pass
+    }
+    // The Knife presenter's entity legs run in retail's own order: the PERSON
+    // prox table FIRST (Projectile_RaycastProximitySlots' default slot type),
+    // replacing a terrain/water hit on `candidateDist <= closestDist` — the one
+    // non-strict compare in the family; the building (2) and item (1) legs that
+    // follow are strict, exactly like an ordinary round.
+    // [orig: Weapon_RaycastAndSpawnImpact @0x4e86ad (person, <=), @0x4e873f
+    //  (building, <), @0x4e87cb (item, <)]
+    if (person_faces_only && trace.walk_persons) {
+        trace_polygon_table(persons_, ProjectileHitClass::Person,
+                            1.0f / 65536.0f, false, /*tie_wins=*/true);
     }
     trace_polygon_table(statics_, ProjectileHitClass::StaticEntity, 1.0f, true);
     if (profile_trace) {
@@ -782,7 +818,7 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
         uint32_t index = 0;
     };
     std::vector<PersonWalkEntry> person_walk;
-    if (trace.walk_persons) {
+    if (trace.walk_persons && !person_faces_only) {
         const bool merge_proxies =
             trace.include_wire_proxies && !projectile_person_proxies_.empty();
         person_walk.reserve(persons_.size() +
