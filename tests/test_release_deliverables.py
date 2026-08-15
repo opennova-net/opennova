@@ -524,7 +524,11 @@ def test_ci_builds_windows_gdextension_per_flavour_and_caches_with_sccache() -> 
         "|| fromJSON('[\"template_debug\",\"template_release\"]') }}"
     ) in win_build
     assert "\n        include:" not in win_build
-    assert 'template_debug = "RelWithDebInfo"; template_release = "Release"' in win_build
+    # Build dirs keep their historical names: sccache keys embed the absolute
+    # paths of godot-cpp's generated headers under the build dir, so a rename
+    # invalidates every cached godot-cpp object.
+    assert 'template_debug   = @{ config = "RelWithDebInfo"; dir = "build-godot-debug" }' in win_build
+    assert 'template_release = @{ config = "Release"; dir = "build-godot-release" }' in win_build
     assert '"Debug"' not in win_build
     assert "name: gdext_windows_${{ matrix.target }}" in win_build
 

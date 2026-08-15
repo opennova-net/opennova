@@ -304,11 +304,19 @@ jobs:
           Write-Host "cl: $((Get-Command cl -ErrorAction SilentlyContinue).Source)"
           # template_debug is built RelWithDebInfo: optimized native code plus
           # symbols, the same flavour scripts/build_godot.sh Dev produces for the
-          # editor. template_release is a plain Release.
-          $buildTypes = @{ template_debug = "RelWithDebInfo"; template_release = "Release" }
-          $buildType = $buildTypes[$env:GODOTCPP_TARGET]
-          if (-not $buildType) { throw "unknown GODOTCPP_TARGET: $env:GODOTCPP_TARGET" }
-          $buildDir = "build-godot-$env:GODOTCPP_TARGET"
+          # editor. template_release is a plain Release. The build dirs keep their
+          # historical names on purpose: sccache keys embed the absolute paths of
+          # godot-cpp's generated headers under the build dir, so renaming a dir
+          # invalidates every cached godot-cpp object (one cold ~28 min leg per
+          # cache scope).
+          $flavours = @{
+            template_debug   = @{ config = "RelWithDebInfo"; dir = "build-godot-debug" }
+            template_release = @{ config = "Release"; dir = "build-godot-release" }
+          }
+          $flavour = $flavours[$env:GODOTCPP_TARGET]
+          if (-not $flavour) { throw "unknown GODOTCPP_TARGET: $env:GODOTCPP_TARGET" }
+          $buildType = $flavour.config
+          $buildDir = $flavour.dir
           # -G Ninja so the sccache compiler launcher is honored. /Z7 (embedded
           # debug info via CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded) makes the
           # RelWithDebInfo objects cacheable; the default /Zi separate-PDB is not.
