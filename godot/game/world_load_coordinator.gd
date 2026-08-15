@@ -10,6 +10,11 @@ extends RefCounted
 
 signal load_failed(reason: String)
 
+## Forwarded from the screen when the SP start-mission splash finishes its
+## final background-only frame [orig: show_start_mission_splash returns ->
+## LoadingScreen_ReleaseEffect @ 0x525d45].
+signal splash_dismissed
+
 var _owner: Node = null
 var _root: ResourceRoot = null
 var _world: GameWorld = null
@@ -17,6 +22,7 @@ var _layer: CanvasLayer = null
 var _screen: LoadingScreen = null
 var _operation: WorldLoadOperation = null
 var _presentation_active := false
+var _load_info: Dictionary = {}
 
 
 func can_start() -> bool:
@@ -30,6 +36,7 @@ func start(owner: Node, root: ResourceRoot, world: GameWorld,
 	_owner = owner
 	_root = root
 	_world = world
+	_load_info = load_info
 	_operation = WorldLoadOperation.new()
 	_presentation_active = true
 	_show_screen(load_info)
@@ -68,6 +75,68 @@ func dismiss() -> void:
 
 func has_background() -> bool:
 	return _screen != null and _screen.has_background()
+
+
+## Whether this load carries an MP session (host or joiner) — the SP splash
+## gate's session half; SP `load_info` never sets `in_session`
+## [orig: the !is_in_session leg of the splash gate @ 0x525d38].
+func is_session_load() -> bool:
+	return bool(_load_info.get("in_session", false))
+
+
+## The screen's custom-background flag (the retail g_loadscreen_has_custom_bg
+## analog); false once the presentation is down.
+func has_custom_background() -> bool:
+	return _screen != null and _screen.has_custom_background()
+
+
+func is_splash_active() -> bool:
+	return _screen != null and _screen.is_splash_active()
+
+
+## Raise the SP start-mission splash on the held screen. The screen's
+## dismissal edge is forwarded on `splash_dismissed`; a torn-down screen
+## drops the pending edge with it.
+func begin_start_mission_splash() -> bool:
+	if _screen == null or not _presentation_active:
+		return false
+	if not _screen.begin_start_mission_splash(_root):
+		return false
+	_screen.splash_dismissed.connect(
+			func() -> void: splash_dismissed.emit(),
+			CONNECT_ONE_SHOT)
+	return true
+
+
+## The shell-policy wrapper the load-complete path calls: gate on a
+## single-player load with a custom (sidecar) background, raise the splash,
+## and run its device legs — hide the OS cursor (the splash draws the cursor
+## art itself [orig: Mouse_SetCallback(0) @ 0x520862], restored on the
+## dismissal edge) and fire the one-shot START_MISSION (fire-and-forget;
+## playback never gates dismissal [orig: play @ 0x5208fd; the exit tests
+## read only the input state @ 0x520a2d/0x520a36])
+## [orig: show_start_mission_splash @ 0x520820, called @ 0x525d42, gated
+## @ 0x525d38 on g_loadscreen_has_custom_bg + single player]. The headless
+## skip is deliberate shell policy, not witnessed behavior: fixture SP loads
+## resolve a sidecar image and would otherwise hold the presentation forever
+## with no input to dismiss it.
+func maybe_begin_start_mission_splash(audio: MissionAudio) -> bool:
+	if is_session_load() or not has_custom_background() \
+			or DisplayServer.get_name() == "headless":
+		return false
+	if not begin_start_mission_splash():
+		return false
+	Input.set_mouse_mode(Input.MOUSE_MODE_HIDDEN)
+	# The restore rides the SCREEN's edge so an aborted presentation drops the
+	# pending restore with the freed screen instead of arming a stale one-shot
+	# on this long-lived coordinator. It runs after the forwarded reveal in
+	# the same emission — same frame, order immaterial.
+	_screen.splash_dismissed.connect(func() -> void:
+			Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE),
+			CONNECT_ONE_SHOT)
+	if audio != null:
+		audio.ui_soundset(HudPos.loading_splash_sound_set())
+	return true
 
 
 func _run(operation: WorldLoadOperation, loader: Callable) -> void:
