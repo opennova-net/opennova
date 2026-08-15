@@ -1162,6 +1162,14 @@ Error Simulation::debug_teleport_local_player(const Vector3 &p_mission_pos,
 	p->heading = opennova::world::bam_heading_from_mission_yaw_deg(p_yaw_deg);
 	p->pitch = static_cast<int32_t>(
 			static_cast<double>(p_pitch_deg) / opennova::world::kDegreesPerBam);
+	// The view is INPUT-owned: without mirroring the stated yaw/pitch into the
+	// motor's input channels AND the host mouse record, the next pre-tick input
+	// apply snaps the look straight back — the teleported view silently never
+	// held (the ladder probe's entry gate saw pitch 0 forever).
+	p->inf.target_heading = p->heading;
+	p->inf.look_pitch = p->pitch;
+	player_input_.look_heading = p->heading;
+	player_input_.look_pitch = p->pitch;
 	return OK;
 }
 

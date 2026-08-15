@@ -1174,10 +1174,10 @@ void test_pool1_item_is_one_collision_candidate() {
 
 // ---------------------------------------------------------------------------
 void test_ladder_contact_bookkeeping_is_not_ground() {
-    // A CL/type-4 touch records the ladder frame and raw 0x100000 flag even
-    // though it produces no push force. This is low-level retail bookkeeping,
-    // not a claim that climb locomotion is implemented. A CL is ray-invisible,
-    // so the ground-settle tail must not turn it into an ordinary floor.
+    // A CL/type-4 touch on the latch-only channel (no LadderResolveIO — the
+    // replica/harness path) records the raw 0x100000 flag even though it
+    // produces no push force. A CL is ray-invisible, so the ground-settle tail
+    // must not turn it into an ordinary floor.
     Rig rig(box_model(4, 0, 0.25, 2.0, 3.0));
     rig.move_soldier(10.0, 10.0, 1.0);
     int32_t pos[3] = {fx(10.0), fx(10.0), fx(1.0)};
@@ -1206,6 +1206,232 @@ void test_cb_ground_probe_sets_ground_target() {
     const Entity *s = rig.world.registry.get(rig.soldier);
     CHECK((s->flags & kEntityFlagLadderContact) == 0);
     CHECK(s->ground_target == rig.building);
+}
+
+// ---------------------------------------------------------------------------
+// The D-COL-5 climb legs, resolver side. The rig's CL slab: type-4 volume
+// 0.5 x 2.0 x 4.0 at (10,10,0), plane 0 = +X ⇒ the extracted frame yaw is the
+// -X facing (BAM 0x80000000) and the anchor pulls 0.375u toward the +X climber
+// side: anchor = (10.375, 10.0, 3.0 = maxZ - 1.0). The section carries authored
+// bounds wider than the volume, as a real ladder's whole-object section does —
+// a tight synthesized box would reject the +0.5u recontact inflation at the
+// section broad phase before the volume test could apply it.
+CollisionModel ladder_slab() {
+    CollisionModel m = box_model(4, 0, 0.25, 1.0, 4.0);
+    CollisionSection &s = m.sections[0];
+    s.authored_bounds = true;
+    s.min_x = fx(-2.0);
+    s.max_x = fx(2.0);
+    s.min_y = fx(-2.0);
+    s.max_y = fx(2.0);
+    s.min_z = fx(-1.0);
+    s.max_z = fx(5.0);
+    s.radius = fx(5.0);
+    return m;
+}
+
+struct LadderIo {
+    int32_t view_yaw = static_cast<int32_t>(0x80000000u);
+    int32_t view_pitch = 0x8000000; // looking up
+    int32_t body_heading = static_cast<int32_t>(0x80000000u);
+    int32_t body_pitch = 0;
+    bool restore_active = false;
+    int32_t restore_target = 0;
+    int32_t restore_prev = 0;
+    LadderResolveIO io;
+
+    explicit LadderIo(int32_t tick_start_z) {
+        io.tick_start_z = tick_start_z;
+        io.is_local_player = true;
+        io.view_yaw = &view_yaw;
+        io.view_pitch = &view_pitch;
+        io.body_heading = &body_heading;
+        io.body_pitch = &body_pitch;
+        io.pitch_restore_active = &restore_active;
+        io.pitch_restore_target = &restore_target;
+        io.pitch_restore_prev = &restore_prev;
+    }
+};
+
+void test_ladder_entry_gate_snap_and_chase() {
+    // A player below the anchor, facing the slab (view within 60° of the frame
+    // yaw), looking up: the fresh entry latches, snaps X/Y onto the anchor,
+    // bumps Z by the standing +20480 (breaking the grounded state), copies the
+    // frame pitch, and runs the facing press + anchor chase.
+    // [orig: @ 0x4b32a5-0x4b334b + the chase @ 0x4b33a4-0x4b3495]
+    Rig rig(ladder_slab());
+    rig.move_soldier(10.6, 10.0, 0.0);
+    int32_t pos[3] = {fx(10.6), fx(10.0), 0};
+    int32_t vel[3] = {0, 0, 0};
+    int16_t health = 100;
+    CollisionWorld::ResolveState state;
+    LadderIo lio(/*tick_start_z=*/0);
+    rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0, fx(1.8), 0, 0,
+                          /*is_player=*/true, true, 0, 32, 0x1u, health, nullptr, &lio.io);
+    Entity *s = rig.world.registry.get(rig.soldier);
+    CHECK((s->flags & kEntityFlagLadderContact) != 0);
+    CHECK(rig.cw.last_ladder_frame.valid);
+    CHECK(rig.cw.last_ladder_frame.anchor[0] == fx(10.375));
+    CHECK(rig.cw.last_ladder_frame.anchor[1] == fx(10.0));
+    CHECK(rig.cw.last_ladder_frame.anchor[2] == fx(3.0));
+    CHECK(rig.cw.last_ladder_frame.yaw == static_cast<int32_t>(0x80000000u));
+    // Snap + press(−4096 along +X via cos 180°) + chase((4096+32)>>6 = 64).
+    CHECK(pos[0] == fx(10.375) - 4096 + 64);
+    CHECK(pos[1] == fx(10.0));
+    CHECK(pos[2] == 20480); // the standing entry bump
+    CHECK(lio.body_pitch == rig.cw.last_ladder_frame.pitch);
+    CHECK(!lio.restore_active); // the chase disarms the restore latch
+
+    // Facing ~90° off: the gate rejects (no latch, no snap).
+    Rig away(ladder_slab());
+    away.move_soldier(10.6, 10.0, 0.0);
+    int32_t apos[3] = {fx(10.6), fx(10.0), 0};
+    int32_t avel[3] = {0, 0, 0};
+    CollisionWorld::ResolveState astate;
+    LadderIo alio(0);
+    alio.view_yaw = static_cast<int32_t>(0xC0000000u);
+    away.cw.resolve_entity(away.world, away.soldier, astate, apos, avel, avel[2], 0, fx(1.8),
+                           0, 0, true, true, 0, 32, 0x1u, health, nullptr, &alio.io);
+    CHECK((away.world.registry.get(away.soldier)->flags & kEntityFlagLadderContact) == 0);
+    CHECK(apos[2] == 0);
+
+    // Looking DOWN from below the anchor: the pitch-sign gate rejects.
+    Rig down(ladder_slab());
+    down.move_soldier(10.6, 10.0, 0.0);
+    int32_t dpos[3] = {fx(10.6), fx(10.0), 0};
+    int32_t dvel[3] = {0, 0, 0};
+    CollisionWorld::ResolveState dstate;
+    LadderIo dlio(0);
+    dlio.view_pitch = -0x8000000;
+    down.cw.resolve_entity(down.world, down.soldier, dstate, dpos, dvel, dvel[2], 0, fx(1.8),
+                           0, 0, true, true, 0, 32, 0x1u, health, nullptr, &dlio.io);
+    CHECK((down.world.registry.get(down.soldier)->flags & kEntityFlagLadderContact) == 0);
+
+    // Stance-selected entry bumps: crouch +39936, prone +60416.
+    // [orig: MoveOrder 0x200 @ 0x4b3342 / 0x100 @ 0x4b3332]
+    Rig crouch(ladder_slab());
+    crouch.move_soldier(10.6, 10.0, 0.0);
+    int32_t cpos[3] = {fx(10.6), fx(10.0), 0};
+    int32_t cvel[3] = {0, 0, 0};
+    CollisionWorld::ResolveState cstate;
+    LadderIo clio(0);
+    clio.io.crouch = true;
+    crouch.cw.resolve_entity(crouch.world, crouch.soldier, cstate, cpos, cvel, cvel[2], 0,
+                             fx(1.8), 0, 0, true, true, 0, 32, 0x1u, health, nullptr, &clio.io);
+    CHECK(cpos[2] == 39936);
+    Rig prone(ladder_slab());
+    prone.move_soldier(10.6, 10.0, 0.0);
+    int32_t ppos[3] = {fx(10.6), fx(10.0), 0};
+    int32_t pvel[3] = {0, 0, 0};
+    CollisionWorld::ResolveState pstate;
+    LadderIo plio(0);
+    plio.io.prone = true;
+    prone.cw.resolve_entity(prone.world, prone.soldier, pstate, ppos, pvel, pvel[2], 0,
+                            fx(1.8), 0, 0, true, true, 0, 32, 0x1u, health, nullptr, &plio.io);
+    CHECK(ppos[2] == 60416);
+}
+
+// ---------------------------------------------------------------------------
+void test_ladder_recontact_inflated_and_relatch() {
+    // Once latched, the recontact query (mask bit 0x1, +0.5u inflated CL test
+    // over the on-ladder 25088 capsule) keeps the latch at an offset the fresh
+    // 3-point containment would drop, and the re-latch path chases without
+    // re-snapping Z. Capsule bottom 0.9 shrinks the fresh head radius to
+    // ~0.506, so at local 0.9 the fresh reach (0.25+0.506) misses while the
+    // recontact reach (0.25+0.3828+0.5) holds.
+    // [orig: recontact @ 0x4ae611-0x4ae6cf; re-latch @ 0x4b3287-0x4b329a]
+    Rig rig(ladder_slab());
+    rig.move_soldier(10.6, 10.0, 0.0);
+    int32_t pos[3] = {fx(10.6), fx(10.0), 0};
+    int32_t vel[3] = {0, 0, 0};
+    int16_t health = 100;
+    CollisionWorld::ResolveState state;
+    LadderIo lio(0);
+    rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], fx(0.9), fx(1.8),
+                          0, 0, true, true, 0, 32, 0x1u, health, nullptr, &lio.io);
+    Entity *s = rig.world.registry.get(rig.soldier);
+    CHECK((s->flags & kEntityFlagLadderContact) != 0);
+
+    pos[0] = fx(10.9);
+    pos[1] = fx(10.0);
+    const int32_t z_before = pos[2];
+    s->position.x = 10.9f;
+    rig.rebuild();
+    LadderIo rlio(z_before);
+    rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], fx(0.9), fx(1.8),
+                          0, 0, true, true, 1, 32, 0x1u, health, nullptr, &rlio.io);
+    CHECK((s->flags & kEntityFlagLadderContact) != 0);
+    CHECK(pos[0] < fx(10.9));       // chased back toward the anchor column
+    CHECK(pos[2] == z_before);      // re-latch never re-bumps Z
+
+    // Control: the same offset WITHOUT a previous latch takes the ordinary
+    // containment test and stays unlatched.
+    Rig fresh(ladder_slab());
+    fresh.move_soldier(10.9, 10.0, 0.0);
+    int32_t fpos[3] = {fx(10.9), fx(10.0), 0};
+    int32_t fvel[3] = {0, 0, 0};
+    CollisionWorld::ResolveState fstate;
+    LadderIo flio(0);
+    fresh.cw.resolve_entity(fresh.world, fresh.soldier, fstate, fpos, fvel, fvel[2], fx(0.9),
+                            fx(1.8), 0, 0, true, true, 0, 32, 0x1u, health, nullptr, &flio.io);
+    CHECK((fresh.world.registry.get(fresh.soldier)->flags & kEntityFlagLadderContact) == 0);
+}
+
+// ---------------------------------------------------------------------------
+void test_ladder_exit_push_and_pitch_restore() {
+    // Leaving the ladder (latched at resolve start, nothing re-latched, a live
+    // player): 0.375u along +bodyHeading, then the local pitch-restore chase
+    // eases the view back to 4096 and disarms; a user pitch-up past the last
+    // written value cancels it. [orig: @ 0x4b3c5c-0x4b3d55]
+    Rig rig(ladder_slab());
+    rig.move_soldier(10.6, 10.0, 0.0);
+    int32_t pos[3] = {fx(10.6), fx(10.0), 0};
+    int32_t vel[3] = {0, 0, 0};
+    int16_t health = 100;
+    CollisionWorld::ResolveState state;
+    LadderIo lio(0);
+    rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0, fx(1.8), 0, 0,
+                          true, true, 0, 32, 0x1u, health, nullptr, &lio.io);
+    Entity *s = rig.world.registry.get(rig.soldier);
+    CHECK((s->flags & kEntityFlagLadderContact) != 0);
+
+    // Teleport clear of the slab: the exit leg fires once.
+    pos[0] = fx(14.0);
+    pos[2] = fx(0.0);
+    s->position.x = 14.0f;
+    rig.rebuild();
+    const int32_t x_before = pos[0];
+    rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0, fx(1.8), 0, 0,
+                          true, true, 1, 32, 0x1u, health, nullptr, &lio.io);
+    CHECK((s->flags & kEntityFlagLadderContact) == 0);
+    // bodyHeading 180° ⇒ the +bodyHeading push is 0.375u toward -X.
+    CHECK(pos[0] == x_before - 24576);
+    CHECK(lio.restore_active);
+    CHECK(lio.restore_target == 4096);
+    // The chase runs in the SAME resolve right after the arm (retail's flow):
+    // its first step is clamped to −0x1E00000 and tracked in prev.
+    CHECK(lio.view_pitch == 0x8000000 - 0x1E00000);
+    CHECK(lio.restore_prev == 0x8000000 - 0x1E00000);
+
+    // The chase converges to the 4096 target and disarms.
+    for (int t = 2; t < 92 && lio.restore_active; ++t) {
+        rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0, fx(1.8),
+                              0, 0, true, true, static_cast<uint32_t>(t), 32, 0x1u, health,
+                              nullptr, &lio.io);
+    }
+    CHECK(!lio.restore_active);
+    CHECK(lio.view_pitch == 4096);
+
+    // Cancel: re-arm, then raise the view pitch past the last written value —
+    // the guard clears the latch without writing the pitch.
+    lio.restore_active = true;
+    lio.restore_target = 4096;
+    lio.restore_prev = 0x4000000;
+    lio.view_pitch = 0x5000000; // the user pulled up past prev
+    rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0, fx(1.8), 0, 0,
+                          true, true, 50, 32, 0x1u, health, nullptr, &lio.io);
+    CHECK(!lio.restore_active);
+    CHECK(lio.view_pitch == 0x5000000);
 }
 
 // ---------------------------------------------------------------------------
@@ -4014,6 +4240,9 @@ int main() {
     test_pool1_item_is_one_collision_candidate();
     test_ladder_contact_bookkeeping_is_not_ground();
     test_cb_ground_probe_sets_ground_target();
+    test_ladder_entry_gate_snap_and_chase();
+    test_ladder_recontact_inflated_and_relatch();
+    test_ladder_exit_push_and_pitch_restore();
     test_replica_resolve_candidates_ground_and_peers();
     test_debug_seams();
     test_raycast_clear_los();

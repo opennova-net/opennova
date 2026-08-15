@@ -328,6 +328,288 @@ void test_hurt_volume_updates_registry_health() {
     CHECK(!observed->alive);
 }
 
+// ---- D-COL-5: the climb motor over a CL slab --------------------------------
+// The ladder: a type-4 CL volume 0.5 x 2.0 x 4.0 at (10,10,0) with a CB solid
+// slab right behind its far face — the authored shape of a real ladder (the CL
+// hugs the rungs, the structure behind is solid). The resolver's facing press
+// leans the climber INTO the face each tick; without the solid behind it a bare
+// CL volume lets the body drift through, exactly as retail geometry implies.
+// Plane 0 of the CL = +X ⇒ the extracted frame yaw is the -X facing (BAM
+// 0x80000000) and the anchor sits at (10.375, 10.0, 3.0); the climber
+// approaches from +X facing -X.
+CollisionModel ladder_slab_model() {
+    CollisionModel model;
+    auto plane = [&](int nx, int ny, int nz, double distance) {
+        CollisionPlane p;
+        p.nx = static_cast<int16_t>(nx);
+        p.ny = static_cast<int16_t>(ny);
+        p.nz = static_cast<int16_t>(nz);
+        p.dist = fx(distance);
+        model.planes.push_back(p);
+    };
+    auto box = [&](int32_t type, double x0, double x1) {
+        plane(16384, 0, 0, -x1);
+        plane(-16384, 0, 0, x0);
+        plane(0, 16384, 0, -1.0);
+        plane(0, -16384, 0, -1.0);
+        plane(0, 0, 16384, -4.0);
+        plane(0, 0, -16384, 0.0);
+        CollisionVolume v;
+        v.type = type;
+        v.min_x = fx(x0);
+        v.max_x = fx(x1);
+        v.min_y = fx(-1.0);
+        v.max_y = fx(1.0);
+        v.min_z = 0;
+        v.max_z = fx(4.0);
+        v.plane_start = static_cast<int32_t>(model.planes.size()) - 6;
+        v.plane_count = 6;
+        model.volumes.push_back(v);
+    };
+    box(4, -0.25, 0.25); // the CL — plane 0 is its +X face
+    box(1, -0.6, -0.1);  // the CB structure behind the rungs
+    CollisionSection section;
+    section.volume_count = 2;
+    // Authored whole-object section bounds (a real ladder's section spans the
+    // full model): the recontact inflation must survive the section broad phase.
+    section.authored_bounds = true;
+    section.min_x = fx(-2.0);
+    section.max_x = fx(2.0);
+    section.min_y = fx(-2.0);
+    section.max_y = fx(2.0);
+    section.min_z = fx(-1.0);
+    section.max_z = fx(5.0);
+    section.radius = fx(5.0);
+    model.sections.push_back(section);
+    return model;
+}
+
+// Climb clips carry ONLY the vertical root lane (the horizontal pair is zeroed
+// on a latch anyway); gaits walk forward.
+struct ClimbSource : IRootMotionSource {
+    std::set<int> clips;
+    bool has_clip(int, int id) const override { return clips.count(id) != 0; }
+    int32_t clip_length_ticks(int, int) const override { return -1; }
+    bool advance(int, int id, int32_t &phase, RootMotionFrame &out) override {
+        if (clips.count(id) == 0) return false;
+        ++phase;
+        out = RootMotionFrame{};
+        if (id == anim_state::kClimbUp) out.dz = 0x2000;
+        if (id == anim_state::kClimbDown) out.dz = -0x2000;
+        if (TestSource::gait(id)) out.dx = 0x2000;
+        return true;
+    }
+};
+
+struct ClimbRig {
+    Field flat{[](int) { return static_cast<uint16_t>(0); }};
+    World world;
+    CollisionWorld collision;
+    AiSystem ai;
+    ClimbSource src;
+    EntityHandle ladder_h;
+    EntityHandle player_h;
+    AiEntity *m = nullptr;
+
+    explicit ClimbRig(bool local_player = true) {
+        world.registry.configure_pool(0, 4);
+        world.registry.configure_pool(2, 4);
+        Entity ladder;
+        ladder.kind = EntityKind::Building;
+        ladder.position = {10.0f, 10.0f, 0.0f};
+        ladder.yaw = 90; // engine heading 0 (identity)
+        ladder.alive = true;
+        ladder_h = world.registry.spawn(2, ladder);
+        Entity body;
+        body.kind = EntityKind::Organic;
+        body.position = {10.6f, 10.0f, 0.0f};
+        body.health = 100;
+        body.alive = true;
+        player_h = world.registry.spawn(0, body);
+
+        collision.terrain = &flat.field;
+        const int32_t mid = collision.add_model(ladder_slab_model());
+        collision.assign_entity(ladder_h, mid);
+        ai.terrain = &flat.field;
+        ai.collision = &collision;
+        src.clips = {anim_state::kIdle,      anim_state::kIdle2,
+                     anim_state::kWalkForward, anim_state::kJumpStart,
+                     anim_state::kJumpLoop,  anim_state::kClimbIdle,
+                     anim_state::kClimbUp,   anim_state::kClimbDown,
+                     anim_state::kClimbTop};
+        ai.root_motion = &src;
+        m = ai.at(ai.attach(player_h));
+        m->inf.active = true;
+        m->inf.is_local_player = local_player;
+        m->inf.target_heading = static_cast<int32_t>(0x80000000u);
+        m->inf.body_heading = static_cast<int32_t>(0x80000000u);
+        m->inf.leg_yaw[0] = m->inf.leg_yaw[1] = static_cast<int32_t>(0x80000000u);
+        m->inf.leg_target[0] = m->inf.leg_target[1] = static_cast<int32_t>(0x80000000u);
+        m->inf.look_pitch = 0x8000000; // looking up
+        m->heading = static_cast<int32_t>(0x80000000u);
+        m->pos[0] = fx(10.6);
+        m->pos[1] = fx(10.0);
+        m->pos[2] = 0;
+        // Mature the candidate slices before the first motor tick.
+        for (int i = 0; i < 17; ++i) collision.build_tick_tables(world);
+    }
+};
+
+void test_player_ladder_climb_cycle() {
+    ClimbRig rig;
+    AiEntity *m = rig.m;
+    m->inf.player_moving = true;
+    m->inf.player_move_dir_index = 0; // forward
+
+    // t0: the walk step reaches the slab and the resolver latches + snaps.
+    // Gravity already applied its −208 this tick (the latch skips it from the
+    // NEXT tick), so the standing entry bump lands on top of it.
+    run_ticks(rig.ai, rig.world, 0, 1);
+    Entity *pe = rig.world.registry.get(rig.player_h);
+    CHECK((pe->flags & kEntityFlagLadderContact) != 0);
+    CHECK(m->pos[2] == 20480 - 208);
+
+    // t1..: the climb block owns the state — forward + looking up = climb_up,
+    // never airborne, vertical velocity pinned, the clip's dz lane climbs while
+    // the body holds the anchor column against the backing solid (horizontal
+    // root zeroed; the 15-tick 0x400 crossfade ramps the dz lane in).
+    run_ticks(rig.ai, rig.world, 1, 2);
+    CHECK(m->inf.anim_state == anim_state::kClimbUp);
+    CHECK(!m->inf.airborne);
+    CHECK(m->inf.vel[2] == 0);
+    const int32_t z_mark = m->pos[2];
+    run_ticks(rig.ai, rig.world, 2, 21);
+    CHECK(m->pos[2] > z_mark + fx(1.0));
+    // The facing press settles against the anchor chase + the backing solid:
+    // the body stays pinned to the ladder column (no drift-through, no
+    // runaway), at an equilibrium x the synthetic geometry sets.
+    CHECK(std::abs(m->pos[0] - fx(10.0)) < fx(0.5));
+    CHECK(std::abs(m->pos[1] - fx(10.0)) < fx(0.1));
+    CHECK((pe->flags & kEntityFlagInAir) == 0);
+
+    // Look down ⇒ climb_down; release the stick ⇒ climb_idle holds.
+    m->inf.look_pitch = -0x8000000;
+    run_ticks(rig.ai, rig.world, 21, 22);
+    CHECK(m->inf.anim_state == anim_state::kClimbDown);
+    m->inf.player_moving = false;
+    run_ticks(rig.ai, rig.world, 22, 23);
+    CHECK(m->inf.anim_state == anim_state::kClimbIdle);
+    // Drain the crossfade into the idle clip (the outgoing climb clip's dz
+    // lane blends out over the 10-tick window), then the height must hold
+    // EXACTLY — gravity is off while latched.
+    run_ticks(rig.ai, rig.world, 23, 35);
+    const int32_t hold_z = m->pos[2];
+    run_ticks(rig.ai, rig.world, 35, 39);
+    CHECK(m->pos[2] == hold_z);
+
+    // The back fan steps off the +X face and drops the latch (looking down
+    // keeps the entry gate from instantly re-latching).
+    m->inf.player_moving = true;
+    m->inf.player_move_dir_index = 4;
+    const int32_t x_before = m->pos[0];
+    run_ticks(rig.ai, rig.world, 39, 40);
+    CHECK((pe->flags & kEntityFlagLadderContact) == 0);
+    CHECK(m->pos[0] > x_before); // pushed away from the -X-facing ladder
+}
+
+void test_player_ladder_bottom_exit_and_jump_off() {
+    // Climbing down to the ground auto-releases with the 0.5u back-step
+    // [orig: @ 0x4b7fba-0x4b8019]; jumping off a ladder rides the jump commit
+    // with the same push [orig: @ 0x4b7f0c].
+    ClimbRig rig;
+    AiEntity *m = rig.m;
+    m->inf.player_moving = true;
+    m->inf.player_move_dir_index = 0;
+    run_ticks(rig.ai, rig.world, 0, 6); // latch + a few climb ticks
+    Entity *pe = rig.world.registry.get(rig.player_h);
+    CHECK((pe->flags & kEntityFlagLadderContact) != 0);
+
+    // Descend: the grounded leg lands the feet, then the bottom dismount
+    // releases (the anchor at 3.0 sits above the ground pose).
+    m->inf.look_pitch = -0x8000000;
+    for (int t = 6; t < 40 && (pe->flags & kEntityFlagLadderContact) != 0; ++t)
+        run_ticks(rig.ai, rig.world, static_cast<uint32_t>(t),
+                  static_cast<uint32_t>(t + 1));
+    CHECK((pe->flags & kEntityFlagLadderContact) == 0);
+    CHECK(m->pos[2] == 0);            // grounded at the terrain floor
+    CHECK(m->pos[0] > fx(10.375));    // stepped back off the face (+X)
+
+    // Jump-off: re-enter (look up), then jump — the commit pushes back and
+    // unlatches in the same tick.
+    ClimbRig jump_rig;
+    AiEntity *j = jump_rig.m;
+    j->inf.player_moving = true;
+    j->inf.player_move_dir_index = 0;
+    run_ticks(jump_rig.ai, jump_rig.world, 0, 6);
+    Entity *je = jump_rig.world.registry.get(jump_rig.player_h);
+    CHECK((je->flags & kEntityFlagLadderContact) != 0);
+    j->inf.player_moving = false;
+    j->inf.jump_requested = true;
+    const int32_t jx_before = j->pos[0];
+    run_ticks(jump_rig.ai, jump_rig.world, 6, 7);
+    CHECK((je->flags & kEntityFlagLadderContact) == 0);
+    CHECK(j->inf.airborne);
+    CHECK(j->inf.anim_state == anim_state::kJumpStart);
+    CHECK(j->pos[0] > jx_before);
+}
+
+void test_org1_ladder_hold_press_and_top_select() {
+    // The org1 on-ladder legs [orig: @ 0x4bf907-0x4bfad8]: the AI hard-set
+    // aligns the body to the frame yaw, climb_up below the anchor band and
+    // climb_top inside it, a person ahead on the ladder holds climb_idle, and
+    // the 0x80 climb order replaces gravity with the Z chase to the AI move
+    // target. Entry rides the injected latch (the AI order writer is a
+    // separate slice).
+    ClimbRig rig(/*local_player=*/false);
+    AiEntity *m = rig.m;
+    m->pos[0] = fx(10.5);
+    m->pos[2] = fx(1.5);
+    // Start misaligned: the AI hard-set snaps every heading channel to the
+    // frame yaw on the first latched resolve. [orig: @ 0x4b33da-0x4b33fa]
+    m->heading = 0x40000000;
+    m->inf.target_heading = 0x40000000;
+    m->inf.body_heading = 0x40000000;
+    Entity *pe = rig.world.registry.get(rig.player_h);
+    pe->position.z = 1.5f;
+    pe->flags |= kEntityFlagLadderContact; // injected latch (re-latch sustains)
+    for (int i = 0; i < 17; ++i) rig.collision.build_tick_tables(rig.world);
+
+    run_ticks(rig.ai, rig.world, 0, 1);
+    CHECK((pe->flags & kEntityFlagLadderContact) != 0);
+    CHECK(m->heading == rig.collision.last_ladder_frame.yaw); // AI hard-set
+    CHECK(m->inf.body_heading == rig.collision.last_ladder_frame.yaw);
+    CHECK(m->inf.anim_state == anim_state::kClimbUp);         // below anchor-0.75
+
+    // Inside the anchor band the select promotes to climb_top.
+    m->pos[2] = fx(2.5);
+    run_ticks(rig.ai, rig.world, 1, 2);
+    CHECK(m->inf.anim_state == anim_state::kClimbTop);
+
+    // A live person at the probe point (1.25u along the body heading) with an
+    // overlapping Z band holds the climb at climb_idle.
+    m->pos[2] = fx(1.5);
+    run_ticks(rig.ai, rig.world, 2, 3); // resettle into climb_up first
+    CHECK(m->inf.anim_state == anim_state::kClimbUp);
+    Entity blocker;
+    blocker.kind = EntityKind::Organic;
+    blocker.position = {10.0f, 10.0f, 1.9f};
+    blocker.health = 100;
+    blocker.alive = true;
+    rig.world.registry.spawn(0, blocker);
+    for (int i = 0; i < 17; ++i) rig.collision.build_tick_tables(rig.world);
+    run_ticks(rig.ai, rig.world, 3, 4);
+    CHECK(m->inf.anim_state == anim_state::kClimbIdle);
+
+    // The 0x80 climb order: gravity becomes the capped sixteenth-step Z chase
+    // to the move target. [orig: @ 0x4bf6d2-0x4bf6e5]
+    pe->flags |= kEntityFlagAiClimb;
+    m->inf.move_target[2] = fx(5.0);
+    const int32_t z_before = m->pos[2];
+    run_ticks(rig.ai, rig.world, 4, 5);
+    CHECK(m->pos[2] > z_before);
+    CHECK(m->inf.vel[2] <= 0x4000);
+}
+
 void test_registry_max_health_drives_wounded_gait() {
     World world;
     world.registry.configure_pool(0, 4);
@@ -1872,6 +2154,9 @@ void test_eye_offset_restamp() {
 
 int main() {
     test_gait_stance_transition_insert();
+    test_player_ladder_climb_cycle();
+    test_player_ladder_bottom_exit_and_jump_off();
+    test_org1_ladder_hold_press_and_top_select();
     test_eye_offset_restamp();
     test_slope_standing_camera_stays_level();
     test_slope_prone_body_conforms_org2();

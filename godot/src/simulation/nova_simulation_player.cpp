@@ -112,15 +112,24 @@ void Simulation::sync_local_mounted_input_heading() {
 	const opennova::world::Entity *player =
 			world_->registry.get(world_->cached.local_player);
 	const AiEntity *body = world_->ai->for_handle(world_->cached.local_player);
-	if (player == nullptr || !player->mounted || body == nullptr ||
-			!body->inf.is_local_player)
+	if (player == nullptr || body == nullptr || !body->inf.is_local_player)
 		return;
 
-	// Entity_RequestVehicleAttach writes one retail Yaw before the relationship.
-	// The core mirrors that snap into target_heading; carry it through our extra
-	// host input record so apply_player_input_pre_tick cannot undo it next frame.
-	// Pitch remains untouched because the retail request snap is yaw-only.
-	player_input_.look_heading = body->inf.target_heading;
+	// Retail has ONE input-owned view: the mouse accumulators ARE the entity
+	// yaw/pitch (dword_B75FCC / dword_B7900C ride along with every sim-side
+	// write). Our split keeps the accumulator in this host input record, so any
+	// view value the core wrote during the tick must be mirrored back before
+	// the next pre-tick input write can undo it. The sim-side writers:
+	//  - the mount-attach yaw snap (Entity_RequestVehicleAttach; yaw-only)
+	//  - the ladder alignment chase [orig: @ 0x4b33bc-0x4b33d2]
+	//  - the on-ladder ±120° view clamp [orig: @ 0x4b4b04-0x4b4b42]
+	//  - the post-ladder pitch restore [orig: @ 0x4b3d04-0x4b3d55]
+	// A post-tick difference from the pre-tick input copy is exactly "the sim
+	// wrote the view this tick".
+	if (body->inf.target_heading != player_input_.look_heading)
+		player_input_.look_heading = body->inf.target_heading;
+	if (body->inf.look_pitch != player_input_.look_pitch)
+		player_input_.look_pitch = body->inf.look_pitch;
 }
 
 bool Simulation::spawn_local_player(Vector3 p_position, float p_yaw_deg, int p_team) {

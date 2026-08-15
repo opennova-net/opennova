@@ -178,7 +178,7 @@ inline constexpr uint8_t kAdmSlotNone = 0xFF;
 // low-byte legacy `flags` mirror; entity+36). ONE home for every bit with a
 // witnessed meaning; the consolidated per-bit table is
 // docs/world/world-wac-ai-re.md § "The entity Flags dword". Known-but-unnamed
-// bits stay raw at use sites — do not name: 0x1, 0x80, 0x10000, 0x2000000,
+// bits stay raw at use sites — do not name: 0x1, 0x10000, 0x2000000,
 // 0x8000000, and vehicle_motor's Flags-dword 0x8/0x20 writes (vehicle-context
 // meanings unwitnessed).
 inline constexpr uint32_t kEntityFlagDead = 0x2;              // [orig: kill writes Flags |= 6 @0x43fbf6]
@@ -188,6 +188,10 @@ inline constexpr uint32_t kEntityFlagNVGWorn = 0x4;           // organics: NVG d
 inline constexpr uint32_t kEntityFlagBinoculars = 0x8;        // [orig: draw @0x4e3c04; g_binocularsRaised refresh]
 inline constexpr uint32_t kEntityFlagScopeRaised = 0x10;      // [orig: g_weaponScopeActive refresh; test @0x4b5deb]
 inline constexpr uint32_t kEntityFlagParachute = 0x20;        // deployed chute (D-INF-20) [orig: radius leg @0x4b3aac]
+inline constexpr uint32_t kEntityFlagAiClimb = 0x80;          // org1 ladder-climb chase mode: gravity becomes the
+                                                              // sixteenth-step Z chase to the AI move target (floor
+                                                              // -16384); the AI-order writer rides its own slice
+                                                              // [orig: test @0x4bf6c1; chase @0x4bf6d2-0x4bf6e5]
 inline constexpr uint32_t kEntityFlagMounted = 0x40;          // carried/mounted; the AI guard family reads it too
                                                               // [orig: @0x494752; guard @0x4bf5a5-family]
 inline constexpr uint32_t kEntityFlagPlayer = 0x100;          // the wire Player class bit; gates held-weapon draws

@@ -988,9 +988,11 @@ public:
     void player_body_select(AiEntity &e);
     // The lean-angle producer, every body tick: decay lean -= (lean+8)>>4, then the
     // on-foot ramp -0x3000000 (left) / +0x3000000 (right) per held lean bit, gated
-    // alive + not prone. [orig: decay @0x4b5c97; ramp @0x4b7dbf/@0x4b7dd6; the seated
-    // (+0x168==1) +-0x1400000 variant and the Flags 0x20/0x100000 gate legs unported]
-    void infantry_lean_tick(AiEntity &e);
+    // alive + not prone + not latched on a ladder (entity_flags carries the retail
+    // Flags view for the 0x100020 gate; the parachute half rides D-INF-20).
+    // [orig: decay @0x4b5c97; ramp @0x4b7dbf/@0x4b7dd6 under the (Flags & 0x100020)
+    // gate @0x4b7dad; the seated (+0x168==1) +-0x1400000 variant unported]
+    void infantry_lean_tick(AiEntity &e, uint32_t entity_flags);
     // The torso-roll producer (entity+0x2DC), every body tick: prone idle 48 decays it
     // toward level (torso -= (torso+8)>>4); the combat rolls 41/42 RAMP it
     // -/+0x4000000 (5.625 deg) per tick — the FP barrel-roll view; otherwise it

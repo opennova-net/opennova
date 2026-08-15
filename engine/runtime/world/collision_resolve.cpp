@@ -9,6 +9,10 @@
 #include "world/angle.h"
 #include "world/dir_table.h"
 #include <cmath>
+#include <cstdio>  // temp ladder trace
+#include <cstdlib> // temp ladder trace
+
+#include <io/bam.h>
 
 #include "collision_detail.h"
 
@@ -112,9 +116,13 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                                        int32_t heading, int32_t body_pitch, bool is_player,
                                        bool is_authority, uint32_t tick, int32_t anim_state_id,
                                        uint32_t anim_state_flags, int16_t &health,
-                                       EntityHandle *out_ground) {
+                                       EntityHandle *out_ground,
+                                       const LadderResolveIO *ladder_io) {
     // [orig: movement collision resolver @ 0x4b2bd0]
-    (void)heading;    // consumed by retail's on-ladder 2-point variant (D-COL-5)
+    // heading/body_pitch feed the on-ladder 2-point capsule's body-axis sincos
+    // chain — which retail multiplies by a constant-zero length (see the capsule
+    // build below), so the values are witnessed-dead here.
+    (void)heading;
     (void)body_pitch;
     Entity *ent = world.registry.get(source);
 
@@ -183,9 +191,20 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     }
     const bool is_local = ent != nullptr && local_player.valid() && source == local_player;
     if (is_local) local_player_blink_flags = 0;
-    if (ent != nullptr)
+    // The previous-tick CL latch, read BEFORE the per-resolve clear: it selects
+    // the on-ladder capsule variant, arms the recontact query mask bit, takes
+    // the re-latch fast path, and drives the exit leg when nothing re-latches.
+    // [orig: the resolver's v137/onPlatform local, loaded ahead of the clear]
+    const bool was_on_ladder =
+        (ent != nullptr && ((ent->flags | ent->engine_flags) & kEntityFlagLadderContact) != 0) ||
+        (replica_flags_ != nullptr && (*replica_flags_ & kEntityFlagLadderContact) != 0);
+    bool on_ladder = was_on_ladder; // v137 — flips true on a fresh entry mid-loop
+    if (ent != nullptr) {
         ent->flags &= ~(kEntityFlagIndoors | kEntityFlagLadderContact | kEntityFlagArmoryZone |
                         kEntityFlagVehicleLoadoutZone);
+        ent->engine_flags &= ~(kEntityFlagIndoors | kEntityFlagLadderContact |
+                               kEntityFlagArmoryZone | kEntityFlagVehicleLoadoutZone);
+    }
     if (replica_flags_ != nullptr)
         *replica_flags_ &= ~(kEntityFlagIndoors | kEntityFlagLadderContact | kEntityFlagArmoryZone |
                              kEntityFlagVehicleLoadoutZone);
@@ -211,13 +230,30 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     CollisionPoint points[3];
     int32_t radii[3];
     const int32_t head_lift = collision_radius - half_radius + 4096;
-    points[0] = {pos[0], pos[1], pos[2] + head_lift, 0};
-    points[1] = {pos[0], pos[1], pos[2] + head_lift, 0}; // eye stand-in (D-COL-4)
-    points[2] = {pos[0], pos[1], pos[2], 0};
-    radii[0] = collision_radius;
-    radii[1] = 20480;
-    radii[2] = outer_radius;
-    const int32_t num_points = 3;
+    int32_t num_points;
+    if (was_on_ladder) {
+        // On-ladder recontact capsule: TWO points — head and feet — radii 25088
+        // both. Retail also computes sincos(bodyPitch)/sincos(bodyHeading) here
+        // and multiplies them into the second point's offsets, but the length
+        // operand is a constant zero in the shipped image, so the chain is
+        // arithmetically dead and both points sit on the entity column.
+        // [orig: @ 0x4b2e1c-0x4b2ed7 — var_34 = 0 feeds every imul]
+        points[0] = {pos[0], pos[1], pos[2] + head_lift, 0};
+        points[1] = {pos[0], pos[1], pos[2], 0};
+        points[2] = {pos[0], pos[1], pos[2], 0}; // unused slot (debug capture)
+        radii[0] = 25088;
+        radii[1] = 25088;
+        radii[2] = 25088;
+        num_points = 2;
+    } else {
+        points[0] = {pos[0], pos[1], pos[2] + head_lift, 0};
+        points[1] = {pos[0], pos[1], pos[2] + head_lift, 0}; // eye stand-in (D-COL-4)
+        points[2] = {pos[0], pos[1], pos[2], 0};
+        radii[0] = collision_radius;
+        radii[1] = 20480;
+        radii[2] = outer_radius;
+        num_points = 3;
+    }
 
     // Debug capture (local player, full resolves only): the untouched test
     // points — the pass-2 relaxation shifts `points` in place below.
@@ -241,12 +277,16 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     q.prev_pos[1] = state.prev_pos[1];
     q.prev_pos[2] = state.prev_pos[2];
     q.source_bound_radius = 0x10000; // [orig: entity boundRadius] (D-COL-3)
-    q.mask = static_cast<uint8_t>((is_player ? 2 : 0));
+    // Mask bit 0x1 arms the inflated CL recontact test while the ladder latch
+    // rides; retail recomputes the arg per query, so a mid-loop fresh entry
+    // upgrades the remaining candidates. [orig: v137 + 2*v130 @ 0x4b2f7c/0x4b35af]
+    q.mask = static_cast<uint8_t>((on_ladder ? 1 : 0) | (is_player ? 2 : 0));
     q.query_is_player = is_player;
 
     int32_t total_force[3] = {0, 0, 0};
     LadderContact ladder;
     EntityHandle ladder_entity;
+    second_pass_contact_latch = false; // [orig: collisionFlags = 0 @ 0x4b3585]
 
     auto it = candidates_.find(source.packed);
     if (it != candidates_.end()) {
@@ -270,43 +310,180 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                     CollisionTargetView &mut = view;
                     mut.is_ground_of_source = (ent->ground_target == ch);
                 }
+                // Retail recomputes the mask argument at every query, so a fresh
+                // entry upgrades the remaining candidates to recontact mode.
+                // [orig: v137 + 2*v130 @ 0x4b2f7c / @ 0x4b35af]
+                q.mask = static_cast<uint8_t>((on_ladder ? 1 : 0) | (is_player ? 2 : 0));
                 ContactResult res;
                 const bool contact = collision_contact_force(*tv, q, blink, ladder, res);
+                // The force fold PRECEDES the flag dispatch — a fresh CL entry
+                // below then zeroes the accumulated force, this candidate's
+                // included. Down-force suppression: a mostly-vertical negative
+                // force is dropped (standing pressure, not a wall).
+                // [orig: fold @ 0x4b3002-0x4b30af / @ 0x4b3603-0x4b36b9 before
+                //  the dispatch @ 0x4b30b7; the f[2]<0 gate @ 0x4b3010]
+                if (contact && !suppress_model_force) {
+                    int32_t f[3] = {res.force[0], res.force[1], res.force[2]};
+                    if (f[2] < 0) {
+                        if (abs32(f[0]) + abs32(f[1]) < abs32(f[2])) {
+                            f[0] = 0;
+                            f[1] = 0;
+                        }
+                        f[2] = 0;
+                    }
+                    pass_force[0] -= f[0];
+                    pass_force[1] -= f[1];
+                    if (pass == 0) pass_force[2] -= f[2];
+                    pass_contact = true;
+                }
                 if (pass == 0) {
                     // The contact-flag dispatch runs whether or not the query
                     // produced force — a pure ladder/zone touch still latches.
                     // [orig: the goto LABEL_67 on a zero return @ 0x4b2fa5]
-                    if ((res.flags & 0x1u) != 0 && ladder.valid) ladder_entity = ch;
+                    if ((res.flags & 0x1u) != 0 && ladder.valid) {
+                        if (ladder_io == nullptr) {
+                            // Latch-only channel (replica rows / harness callers):
+                            // the raw 0x100000 + groundEntity bookkeeping, no
+                            // entry gate or chase — a remote row's climb pose is
+                            // owned by its authority.
+                            ladder_entity = ch;
+                        } else {
+                            // The CL latch + climb alignment, inline per
+                            // contacting candidate. [orig: @ 0x4b3245-0x4b3495]
+                            const uint32_t cur_flags =
+                                ent != nullptr
+                                    ? (ent->flags | ent->engine_flags)
+                                    : (replica_flags_ != nullptr ? *replica_flags_ : 0u);
+                            // Dead bodies never latch; a fresh entry needs the
+                            // player class bit or the AI climb order besides a
+                            // previous latch. [orig: @ 0x4b3271 / @ 0x4b325d]
+                            if ((cur_flags & kEntityFlagDead) == 0 &&
+                                (on_ladder || is_player || ladder_io->ai_wants_climb)) {
+                                const int32_t height_diff =
+                                    ladder.anchor[2] - ladder_io->tick_start_z; // [orig: @ 0x4b327d]
+                                bool latched = false;
+                                if (on_ladder) {
+                                    latched = true; // re-latch [orig: @ 0x4b3287-0x4b329a]
+                                } else {
+                                    // Player entry gate: (already above the anchor
+                                    // OR facing within 60° of the authored yaw) AND
+                                    // the look-pitch sign agrees with the anchor
+                                    // side — look up to mount from below, down to
+                                    // step on from the top. AI entry has no gate.
+                                    // [orig: @ 0x4b32a5-0x4b32c0; 715827840 = 60°]
+                                    const int32_t facing_err =
+                                        ladder_io->view_yaw != nullptr
+                                            ? abs32(io::bam_sub(*ladder_io->view_yaw,
+                                                                ladder.yaw))
+                                            : 0;
+                                    const int32_t view_pitch =
+                                        ladder_io->view_pitch != nullptr
+                                            ? *ladder_io->view_pitch
+                                            : 0;
+                                    const bool player_gate =
+                                        (height_diff < 0 || facing_err < 715827840) &&
+                                        (height_diff > 0) == (view_pitch > 0);
+                                    if (!is_player || player_gate) {
+                                        latched = true;
+                                        // Snap onto the anchor column. Below the
+                                        // anchor the stance-picked Z bump breaks
+                                        // the grounded state so the climb can
+                                        // start; from above, snap just under the
+                                        // anchor (over the lip onto the ladder).
+                                        // [orig: @ 0x4b32f7-0x4b334b / @ 0x4b3319]
+                                        pos[0] = ladder.anchor[0];
+                                        pos[1] = ladder.anchor[1];
+                                        if (height_diff >= 0) {
+                                            if (!ladder_io->prone || suppress_model_force)
+                                                pos[2] += ladder_io->crouch ? 39936 : 20480;
+                                            else
+                                                pos[2] += 60416;
+                                        } else {
+                                            pos[2] = ladder.anchor[2] - 4096;
+                                        }
+                                        // Restage the on-ladder capsule pair at the
+                                        // anchor and drop this pass's accumulated
+                                        // force. [orig: @ 0x4b335a-0x4b3392]
+                                        pass_force[0] = 0;
+                                        pass_force[1] = 0;
+                                        pass_force[2] = 0;
+                                        points[0].x = ladder.anchor[0];
+                                        points[0].y = ladder.anchor[1];
+                                        points[1].x = ladder.anchor[0];
+                                        points[1].y = ladder.anchor[1];
+                                        radii[0] = 25088;
+                                        radii[1] = 25088;
+                                        q.num_points = 2;
+                                        on_ladder = true; // v137 = 1 [orig: @ 0x4b3300]
+                                    }
+                                }
+                                if (latched) {
+                                    ladder_entity = ch;
+                                    if (ent != nullptr)
+                                        ent->flags |= kEntityFlagLadderContact;
+                                    if (replica_flags_ != nullptr)
+                                        *replica_flags_ |= kEntityFlagLadderContact;
+                                    last_ladder_frame = ladder; // the persisting globals
+                                    // The per-tick alignment chase.
+                                    // [orig: @ 0x4b33a4-0x4b3495]
+                                    if (is_player) {
+                                        // Players ease: one sixteenth of the yaw
+                                        // error moves the view yaw AND the body
+                                        // heading; the local mouse accumulator
+                                        // inherits it through the embedder
+                                        // write-back. [orig: (delta+8)>>4
+                                        // @ 0x4b33bc; dword_B75FCC @ 0x4b33d2]
+                                        if (ladder_io->body_heading != nullptr) {
+                                            const int32_t step = io::bam_sar(
+                                                io::bam_add(
+                                                    io::bam_sub(ladder.yaw,
+                                                                *ladder_io->body_heading),
+                                                    8),
+                                                4);
+                                            if (ladder_io->view_yaw != nullptr)
+                                                *ladder_io->view_yaw = io::bam_add(
+                                                    *ladder_io->view_yaw, step);
+                                            *ladder_io->body_heading = io::bam_add(
+                                                *ladder_io->body_heading, step);
+                                        }
+                                    } else {
+                                        // AI hard-set. [orig: @ 0x4b33da-0x4b33fa]
+                                        if (ladder_io->ai_aim_heading != nullptr)
+                                            *ladder_io->ai_aim_heading = ladder.yaw;
+                                        if (ladder_io->ai_target_heading != nullptr)
+                                            *ladder_io->ai_target_heading = ladder.yaw;
+                                        if (ladder_io->view_yaw != nullptr)
+                                            *ladder_io->view_yaw = ladder.yaw;
+                                        if (ladder_io->body_heading != nullptr)
+                                            *ladder_io->body_heading = ladder.yaw;
+                                    }
+                                    if (ladder_io->pitch_restore_active != nullptr)
+                                        *ladder_io->pitch_restore_active =
+                                            false; // [orig: +0x2C &= ~4 @ 0x4b3405]
+                                    if (ladder_io->body_pitch != nullptr)
+                                        *ladder_io->body_pitch =
+                                            ladder.pitch; // [orig: @ 0x4b3409]
+                                    // The facing press (0.0625u along the authored
+                                    // yaw) plus the sixty-fourth-step anchor chase.
+                                    // [orig: @ 0x4b340f-0x4b3495]
+                                    const double rad =
+                                        static_cast<double>(ladder.yaw) *
+                                        (3.14159265358979323846 / 2147483648.0);
+                                    const int32_t c = static_cast<int32_t>(
+                                        std::cos(rad) * 4194304.0);
+                                    const int32_t s = static_cast<int32_t>(
+                                        std::sin(rad) * 4194304.0);
+                                    pos[0] += static_cast<int32_t>(
+                                        (static_cast<int64_t>(c) << 12) >> 22);
+                                    pos[1] += static_cast<int32_t>(
+                                        (static_cast<int64_t>(s) << 12) >> 22);
+                                    pos[0] += (ladder.anchor[0] - pos[0] + 32) >> 6;
+                                    pos[1] += (ladder.anchor[1] - pos[1] + 32) >> 6;
+                                }
+                            }
+                        }
+                    }
                     apply_touch_flags(ent, res.flags, health, is_authority);
-                }
-                if (!contact || suppress_model_force) continue;
-                if (pass == 0) {
-                    // Down-force suppression: a mostly-vertical negative force is
-                    // dropped (standing pressure, not a wall). [orig: @ 0x4b3010]
-                    int32_t f[3] = {res.force[0], res.force[1], res.force[2]};
-                    if (f[2] < 0) {
-                        if (abs32(f[0]) + abs32(f[1]) < abs32(f[2])) {
-                            f[0] = 0;
-                            f[1] = 0;
-                        }
-                        f[2] = 0;
-                    }
-                    pass_force[0] -= f[0];
-                    pass_force[1] -= f[1];
-                    pass_force[2] -= f[2];
-                    pass_contact = true;
-                } else {
-                    int32_t f[3] = {res.force[0], res.force[1], res.force[2]};
-                    if (f[2] < 0) {
-                        if (abs32(f[0]) + abs32(f[1]) < abs32(f[2])) {
-                            f[0] = 0;
-                            f[1] = 0;
-                        }
-                        f[2] = 0;
-                    }
-                    pass_force[0] -= f[0];
-                    pass_force[1] -= f[1];
-                    pass_contact = true;
                 }
             }
             if (pass == 0) {
@@ -321,10 +498,16 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                     points[pi].x += total_force[0];
                     points[pi].y += total_force[1];
                 }
-            } else if (pass_contact && !ladder_entity.valid()) {
-                // [orig: @ 0x4b36da — second-pass half force only without a CL contact]
-                total_force[0] += pass_force[0] >> 1; // [orig: @ 0x4b36e2]
-                total_force[1] += pass_force[1] >> 1;
+            } else {
+                // The pass-2 contact flag persists past the resolve — org1's
+                // on-ladder facing press gates on it. [orig: dword_B57C8C
+                // stored @ 0x4b3a5c from the flag set @ 0x4b36b1]
+                second_pass_contact_latch = pass_contact;
+                if (pass_contact && !ladder_entity.valid()) {
+                    // [orig: @ 0x4b36da — second-pass half force only without a CL contact]
+                    total_force[0] += pass_force[0] >> 1; // [orig: @ 0x4b36e2]
+                    total_force[1] += pass_force[1] >> 1;
+                }
             }
         }
     }
@@ -337,9 +520,10 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     pos[1] += total_force[1];
     pos[2] += total_force[2];
 
-    // Low-level CL bookkeeping only. Retail's full climb state transitions,
-    // alignment chase, root motion, and top exit remain D-COL-5.
-    // [orig: @ 0x4b3291-0x4b3297 — Flags |= 0x100000 + groundEntity = ladder]
+    // The CL latch bookkeeping (motor callers already set the flag inline at
+    // the latch site; this keeps the replica/harness channel and the transient
+    // groundEntity store). [orig: @ 0x4b3291-0x4b3297 — Flags |= 0x100000 +
+    // groundEntity = ladder]
     if (ladder_entity.valid() && ent != nullptr) {
         ent->flags |= kEntityFlagLadderContact;
         ent->ground_target = ladder_entity;
@@ -442,6 +626,57 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
             const int32_t cs = t.sin22[(idx & 1023) + 256];
             pos[0] += static_cast<int32_t>((static_cast<int64_t>(amount) * cs) >> 22);
             pos[1] += static_cast<int32_t>((static_cast<int64_t>(amount) * sn) >> 22);
+        }
+    }
+
+    // Leaving the ladder: latched at resolve start, nothing re-latched, a live
+    // player body — push 0.375u along +bodyHeading (over the lip on a natural
+    // top-out) and arm the local pitch restore. [orig: @ 0x4b3c5c-0x4b3cf9]
+    if (ladder_io != nullptr && was_on_ladder && !ladder_entity.valid() && is_player &&
+        (ent == nullptr || ((ent->flags | ent->engine_flags) & kEntityFlagDead) == 0) &&
+        ladder_io->body_heading != nullptr) {
+        const double rad = static_cast<double>(*ladder_io->body_heading) *
+                           (3.14159265358979323846 / 2147483648.0);
+        const int32_t c = static_cast<int32_t>(std::cos(rad) * 4194304.0);
+        const int32_t s = static_cast<int32_t>(std::sin(rad) * 4194304.0);
+        pos[0] += static_cast<int32_t>((24576LL * c) >> 22);
+        pos[1] += static_cast<int32_t>((24576LL * s) >> 22);
+        if (ladder_io->is_local_player && ladder_io->pitch_restore_active != nullptr &&
+            ladder_io->pitch_restore_target != nullptr &&
+            ladder_io->pitch_restore_prev != nullptr &&
+            ladder_io->view_pitch != nullptr) {
+            *ladder_io->pitch_restore_active = true;          // [orig: +0x2C |= 4]
+            *ladder_io->pitch_restore_target = 4096;          // [orig: aimPitch = 4096]
+            *ladder_io->pitch_restore_prev = *ladder_io->view_pitch; // [orig: dword_B7900C]
+        }
+    }
+    // The local-player pitch-restore chase, each resolve while armed: quarter-step
+    // toward the target, per-tick step clamped ±0x1E00000, done inside +16 of the
+    // target; a user pitch-up past the last written value cancels it.
+    // [orig: @ 0x4b3d04-0x4b3d55]
+    if (ladder_io != nullptr && ladder_io->is_local_player &&
+        ladder_io->pitch_restore_active != nullptr && *ladder_io->pitch_restore_active &&
+        ladder_io->pitch_restore_target != nullptr &&
+        ladder_io->pitch_restore_prev != nullptr && ladder_io->view_pitch != nullptr) {
+        const int32_t target = *ladder_io->pitch_restore_target;
+        int32_t step = io::bam_sar(
+            io::bam_add(io::bam_sub(target, *ladder_io->view_pitch), 2), 2);
+        if (step > 0x1E00000) step = 0x1E00000;
+        if (step < -0x1E00000) step = -0x1E00000;
+        const int32_t next = io::bam_add(*ladder_io->view_pitch, step);
+        if (next > io::bam_add(target, 16)) {
+            if (on_ladder || *ladder_io->view_pitch <= *ladder_io->pitch_restore_prev) {
+                *ladder_io->view_pitch = next;
+                *ladder_io->pitch_restore_prev = next;
+            } else {
+                // The user pulled the view up past the chase — cancel.
+                *ladder_io->pitch_restore_active = false;
+                *ladder_io->pitch_restore_target = 0;
+            }
+        } else {
+            *ladder_io->view_pitch = target; // arrived: snap + disarm
+            *ladder_io->pitch_restore_active = false;
+            *ladder_io->pitch_restore_target = 0;
         }
     }
 
@@ -719,6 +954,34 @@ CollisionWorld::debug_person_sections(World &world, const int32_t anchor[3],
         if (any) ++entity_count;
     });
     return out;
+}
+
+// See collision.h — the org1 on-ladder person probe: a live pool-0 person near
+// the point 1.25u ahead of the climber holds the climb. Coarse box 1.125u on
+// both axes, then the Z band: my feet + half my bound reach above their feet
+// minus half their bound, while my feet stay at or below theirs (someone on the
+// ladder above me). The person set is the same staged pool-0 slice repulsion
+// walks; positions re-read live, as retail reads the pool entity directly.
+// [orig: the g_pool_list[0] scan @ 0x4bf9b7-0x4bfa2b — live (ItemTypeIndex),
+//  not dead (Flags & 2), not self; |Δ| <= 73728 per axis; the band
+//  @ 0x4bfa08-0x4bfa29]
+bool CollisionWorld::ladder_person_ahead(World &world, EntityHandle self,
+                                         int32_t probe_x, int32_t probe_y,
+                                         int32_t self_z, int32_t self_bound) {
+    for (const PersonSlot &p : persons_) {
+        if (p.h == self) continue;
+        const Entity *peer = world.registry.get(p.h);
+        if (peer == nullptr ||
+            ((peer->flags | peer->engine_flags) & kEntityFlagDead) != 0)
+            continue;
+        int32_t live[3];
+        entity_pos_fixed(*peer, live);
+        if (abs32(probe_x - live[0]) > 73728 || abs32(probe_y - live[1]) > 73728)
+            continue;
+        if (self_z + (self_bound >> 1) >= live[2] - (p.radius >> 1) && self_z <= live[2])
+            return true;
+    }
+    return false;
 }
 
 // Contact-flag side effects shared by both passes. [orig: the flag dispatch inside
