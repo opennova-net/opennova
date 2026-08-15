@@ -1,6 +1,6 @@
 extends GutTest
 
-## The SP start-mission splash hosted by LoadingScreen: raise/degrade rules,
+## The SP start-mission splash mode of LoadingScreen: raise/degrade rules,
 ## the dismissal edges (fresh key, mouse button, held-button mask — never the
 ## sound), input consumption, the closing background-only frame, and the
 ## coordinator's gate seams + dismissal forward
@@ -211,7 +211,7 @@ func test_coordinator_session_load_reports_the_session_flag() -> void:
 	assert_not_null(operation)
 	await _pump_frames(4)
 	assert_true(coordinator.is_session_load(),
-		"host/joiner load_info carries in_session -> the shell gate skips")
+		"session load_info carries in_session -> the shell gate skips")
 	coordinator.finish_presentation()
 
 

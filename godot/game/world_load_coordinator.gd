@@ -77,8 +77,8 @@ func has_background() -> bool:
 	return _screen != null and _screen.has_background()
 
 
-## Whether this load carries an MP session (host or joiner) — the SP splash
-## gate's session half; SP `load_info` never sets `in_session`
+## Whether this load carries an MP session — the SP splash gate's session
+## half; SP `load_info` never sets `in_session`
 ## [orig: the !is_in_session leg of the splash gate @ 0x525d38].
 func is_session_load() -> bool:
 	return bool(_load_info.get("in_session", false))
