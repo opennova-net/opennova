@@ -146,6 +146,12 @@ struct CollisionSection {
     int32_t offset[3] = {};         // exact COBJ section offset (16.16)
     int32_t center[3] = {};         // bound-sphere center (section-local 16.16)
     int32_t radius = 0;             // bound-sphere radius (16.16); negative = absent synthetic row
+    // The authored COBJ type dword (file +0, runtime record +0). The minimap
+    // footprint slice walks only sections whose LOW BYTE is <= 1 — higher
+    // codes are the special/interior section families it skips.
+    // [orig: the runtime-COBJ copy @0x5b3bf0 (+0 = file dword 0);
+    //  render_collision_wireframe @0x596800 gate *(BYTE*)cobj <= 1]
+    int32_t type_code = 0;
     // Hierarchy metadata copied from COBJ::parent_subobject_index. This is NOT
     // the section-matrix selector: retail pairs callback matrix i with COBJ i
     // strictly by ordinal, even when several COBJ rows share one parent.
@@ -700,6 +706,12 @@ public:
     bool has_instance(const World &world, EntityHandle h) const;
     bool has_instance(EntityHandle h) const;
     size_t instance_count() const { return instances_.size(); }
+    // The assigned intact model id for a live entity (-1 = none). The minimap
+    // footprint feed resolves each building's collision mesh through this.
+    int32_t entity_model_id(const World &world, EntityHandle h) const {
+        const Instance *inst = live_instance(world, h);
+        return inst != nullptr ? inst->model_id : -1;
+    }
 
     // --- per-tick snapshots ---
     // [orig: Entity_BuildProximityLists_Pool2 @ 0x4b9430] statics (pool-2 style):

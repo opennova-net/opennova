@@ -96,7 +96,15 @@ func sync() -> void:
 
 
 func _set_active(active: bool) -> void:
-	if _active == active and _backdrop.visible == active:
+	# Idempotent while a tween is already driving toward the requested state:
+	# the shell polls sync() every frame after completion, and re-entering
+	# here killed and restarted the fade-out each poll — under a slow runner
+	# the finished callback that hides the backdrop could be starved forever
+	# (the lingering-overlay flake that had master's godot-tests red). The
+	# visible check alone is not enough because the backdrop stays visible
+	# for the whole fade-out.
+	if _active == active and (_backdrop.visible == active \
+			or (_tween != null and _tween.is_valid())):
 		return
 	_active = active
 	if _tween:

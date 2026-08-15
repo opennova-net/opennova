@@ -24,6 +24,8 @@ void Terrain::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_terrain_data", "data"), &Terrain::set_terrain_data);
 	ClassDB::bind_method(D_METHOD("get_terrain_data"), &Terrain::get_terrain_data);
 	ClassDB::bind_method(D_METHOD("get_surface_inputs"), &Terrain::get_surface_inputs);
+	ClassDB::bind_method(D_METHOD("get_tile_overlay_texture"),
+		&Terrain::get_tile_overlay_texture);
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "terrain_data", PROPERTY_HINT_RESOURCE_TYPE, "TerrainData"),
 		"set_terrain_data", "get_terrain_data");
 
@@ -61,6 +63,7 @@ void Terrain::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("build"), &Terrain::build);
 	ClassDB::bind_method(D_METHOD("render_frame"), &Terrain::render_frame);
+	ClassDB::bind_method(D_METHOD("is_built"), &Terrain::is_built);
 
 	// Debug API
 	ClassDB::bind_method(D_METHOD("get_traversal_stats"), &Terrain::get_traversal_stats);
@@ -242,6 +245,10 @@ void Terrain::_notification(int p_what) {
 // ---------------------------------------------------------------------------
 
 void Terrain::render_frame() {
+	// Invalidate up front: a frame with no usable camera must report no
+	// cells rather than leaving a prior camera's draw list live for the
+	// foliage dispatcher.
+	frame_draw_list_live = false;
 	if (!is_visible_in_tree()) {
 		_hide_visible_patches();
 		return;
@@ -249,8 +256,6 @@ void Terrain::render_frame() {
 	if (!built) {
 		return;
 	}
-	frame_draw_list_live = false;
-
 	// Sample the scene camera — the one device input the compiler needs.
 	Camera3D* cam = nullptr;
 	Viewport* vp = get_viewport();
@@ -258,6 +263,10 @@ void Terrain::render_frame() {
 	if (!cam || !cam->is_inside_tree()) {
 		return;
 	}
+	_render_frame_with_camera(cam);
+}
+
+void Terrain::_render_frame_with_camera(Camera3D *cam) {
 
 	// The RENDER eye (get_camera_transform includes h/v offsets), so the
 	// below-water classification stays coherent with Water's surface flip and

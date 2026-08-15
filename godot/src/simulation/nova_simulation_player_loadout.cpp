@@ -323,6 +323,10 @@ void Simulation::respawn_local_player_loadout() {
 	// Player_InitPlayer clears both view effects and seeds NVG from the mission
 	// StartWithNVGOn bit on every respawn.
 	reset_local_player_view_effects();
+	// The respawn edge also returns the map state to its spawn defaults
+	// (witness at hud::HudMapControl — Game_InitRespawnState +
+	// Player_InitPlayer zoom seeds).
+	hud_map_control_.reset_spawn();
 }
 
 void Simulation::sync_local_player_damage_classes() {

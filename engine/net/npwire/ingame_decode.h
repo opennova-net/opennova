@@ -1500,17 +1500,24 @@ bool decode_u32_scalar(const uint8_t *body, size_t len,
 // the host streams alongside the 0x0A frame.
 // ===========================================================================
 
-// S2C 0x6B — minimap overlay batch. `[u8 count]` + `count × 12-B records`; the
-// handler reads only the `[u16 handle]` at each record's offset 0 (resolved via
-// the pool table) and rebuilds that entity's minimap blip from its OWN state
-// (position, type, team @ entity+354 → icon / team color). The 10 trailing bytes
-// per record are NOT consumed by the handler — the blip is recomputed
-// engine-side, not taken from the wire — so the decoder keeps them raw.
-// [orig: NapiNPClientMsg_0x06B @ 0x425520 → update_minimap_overlay_entity @ 0x5BEC10]
+// S2C 0x6B — minimap overlay batch. `[u8 count]` + `count × 12-B records`.
+// The handler consumes ALL 12 bytes of each record: the handle is resolved via
+// the pool table (invalid pool/slot skips the record), the marker POSITION
+// comes from the wire as whole-unit s16s shifted to 16.16, the u16 field is
+// the linked-marker lifetime in SECONDS (x62 to ticks), the type byte selects
+// the pulse icon (3 -> 24, else 253), and the height byte (shifted to 16.16)
+// is the map ring radius. Only the team color is taken from the entity
+// (+354). [orig: NapiNPClientMsg_0x06B @ 0x425520 marshalling
+//  @0x42559f..0x4255dd → update_minimap_overlay_entity @ 0x5BEC10]
 struct MinimapOverlayBatch {
 	struct Entry {
-		uint16_t handle = 0;        // (pool<<12)|slot of the overlaid entity
-		uint8_t  extra[10] = {};    // server-side blip state; NOT read by the handler
+		uint16_t handle = 0;      // +0  (pool<<12)|slot of the overlaid entity
+		int16_t x = 0;            // +2  marker X, whole world units
+		int16_t y = 0;            // +4  marker Y, whole world units
+		int16_t z = 0;            // +6  marker Z, whole world units
+		uint16_t lifetime_s = 0;  // +8  linked-marker lifetime, seconds (x62 ticks)
+		uint8_t type = 0;         // +10 blip type: 3 person -> icon 24, else 253
+		uint8_t height = 0;       // +11 ring radius, whole world units
 	};
 	std::vector<Entry> entries;
 };

@@ -836,6 +836,11 @@ target_link_libraries(hud_frame_compiler_test PRIVATE opennova_runtime)
 target_include_directories(hud_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME hud_frame_compiler COMMAND hud_frame_compiler_test)
 
+add_executable(client_minimap_overlay_test netsim/client_minimap_overlay_test.cpp)
+target_link_libraries(client_minimap_overlay_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(client_minimap_overlay_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME client_minimap_overlay COMMAND client_minimap_overlay_test)
+
 # The menu draw-list compiler (engine/runtime/menu, ADR 0033 R2): the
 # witnessed .mnu widget draw walk — order, state-driven appearance/color
 # selection, text placement/truncation, the edit caret, frame pieces, and the
@@ -1072,6 +1077,14 @@ target_link_libraries(waypoint_track_test PRIVATE opennova_runtime)
 target_include_directories(waypoint_track_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(waypoint_track_test PRIVATE cxx_std_17)
 add_test(NAME waypoint_track COMMAND waypoint_track_test)
+
+# Entity_ClassifyForMinimap: definition/entity marker classification shared by
+# every server producer before packet cadence/recipient policy.
+add_executable(minimap_overlay_test world/minimap_overlay_test.cpp)
+target_link_libraries(minimap_overlay_test PRIVATE opennova_runtime)
+target_include_directories(minimap_overlay_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(minimap_overlay_test PRIVATE cxx_std_17)
+add_test(NAME minimap_overlay COMMAND minimap_overlay_test)
 
 # AI subsystem (byte-exact foundation): state enum + struct layout, AIEvent ring,
 # budget gate (AI_BeginUpdate), the infantry state-machine dispatcher + transitions,

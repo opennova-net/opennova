@@ -765,6 +765,12 @@ typedef struct DefHudPosDef {
 
     int spinmap_x1, spinmap_x2;
     int spinmap_y1, spinmap_y2;
+    /* The spinmap waypoint-distance-label SUPPRESSOR. 0 when unauthored —
+       the retail global is BSS-zero, so the label draws by default; an
+       authored NONZERO value suppresses it. [orig: HUD_ParseHudposToken
+       @0x59F370 -> g_spinmapWpDistLabelOff @0x27237C0 (.data, no file
+       bytes); sole read @0x5a7a6a] */
+    int spinmap_wp_dist_off;
 
     /* Positioned text tokens carry FOUR fields in the original's global layout:
        x, y, hidden (0 = draw; the element draws only when this is 0), then the

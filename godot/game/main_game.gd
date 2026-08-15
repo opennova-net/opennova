@@ -19,8 +19,8 @@ const WorldLoadCoordinatorScript := preload("res://game/world_load_coordinator.g
 # control (the game *is* its install folder); this is an OpenNova convenience so a
 # wrong / menu-less folder can be re-picked without restarting. Front-end only.
 const CHANGE_DIR_KEY := KEY_F9
-# The HUD presenter's gameplay keys (objectives/friendly-tags/color-scheme)
-# live with the presenter — GameHudPresenter.handle_gameplay_key.
+# The HUD presenter's gameplay keys (objectives/friendly-tags) live with the
+# presenter — GameHudPresenter.handle_gameplay_key.
 # The armory key — the USE-ITEM key (input action 177 "useitem"; retail default =
 # SHIFT on the shipped KeyChart, labeled "USE ITEM/ATTACH/ARMORY"). Zone-gated: it
 # opens weapon.mnu's WEAPON screen only while the player stands inside a type-6
@@ -32,11 +32,10 @@ const CHANGE_DIR_KEY := KEY_F9
 const ARMORY_KEY := KEY_SHIFT
 # The mission debug overlay (entities / sim transport / script variables).
 const DEBUG_OVERLAY_KEY := KEY_F3
-# F6: pick the entity under the crosshair into the debug pick list (the F3
-# Entities page renders it; snapshots embed it). Works while playing, no
-# overlay needed; a brief toast confirms what was picked.
+# Shift+F6: pick the entity under the crosshair into the debug pick list
+# (DebugPickFlow). Works while playing, no overlay needed. Unmodified F6 stays
+# with the retail-configurable binding rows (hudcolor's default).
 const PICK_KEY := KEY_F6
-const PICK_TOAST_SECONDS := 1.6
 # ARMORY = the WEAPON screen over LIVE play: the world keeps ticking (the witnessed
 # armory runs with no world-stop leg — and under the listen-server model a pausing
 # host would freeze every peer), only the mouse is released and player input idles.
@@ -63,7 +62,7 @@ var _debug_adapter: GameDebugAdapter
 # The debug pick list: SHELL-owned so F6 picks work before F3 ever opens and
 # the set survives overlay toggles; cleared on every world load.
 var _pick_list := DebugPickList.new()
-var _pick_toast: Label = null
+var _pick_flow := DebugPickFlow.new()
 var _net: NetSessionController  # every net-session entry (LAN/NovaWorld + env hooks)
 # The in-game HUD rides GameHudPresenter. It owns the lazy GameHud build, the
 # per-frame info rebuild, and the
@@ -93,6 +92,8 @@ var _world_load_pending := false
 # player input idles once the round is over [orig: the post-round input gate —
 # the client input uplinks stop against g_spawn_success_gate @0x42c410].
 var _round_ended := false
+# Pending NW_SP_DEBUG_POSE teleport (see DebugPoseEnv).
+var _debug_pose_env := OS.get_environment("NW_SP_DEBUG_POSE")
 var _end_winner := 0
 var _end_screen_delay := 0.0
 var _end_screen: MissionEndScreen = null
@@ -267,7 +268,8 @@ func _ready() -> void:
 		return
 	# Dev/headless convenience: NW_SP_MISSION=<name.bms> boots straight into a single-player
 	# mission via the same path as the menu's Start button, so the runtime (and its HUD) can be
-	# exercised without menu navigation. Off by default.
+	# exercised without menu navigation. Off by default. NW_SP_DEBUG_POSE rides
+	# beside it (one-shot post-spawn teleport; see DebugPoseEnv).
 	var sp_mission := OS.get_environment("NW_SP_MISSION")
 	if not sp_mission.is_empty():
 		_on_start_requested(sp_mission)
@@ -321,13 +323,13 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		toggle_debug_overlay()
 		get_viewport().set_input_as_handled()
 		return
-	if key.keycode == PICK_KEY and is_gameplay_input_active() \
+	if key.keycode == PICK_KEY and key.shift_pressed and is_gameplay_input_active() \
 			and _world != null and _world.is_loaded():
 		pick_at_crosshair()
 		get_viewport().set_input_as_handled()
 		return
-	# The HUD presenter's gameplay keys (objectives toggle / friendly-tags cycle /
-	# color-scheme cycle), in-world only — bindings + orig cites at the presenter.
+	# The HUD presenter's gameplay keys (objectives toggle / friendly-tags
+	# cycle), in-world only — bindings + orig cites at the presenter.
 	if is_gameplay_input_active() and _hud_presenter != null \
 			and _hud_presenter.handle_gameplay_key(key.keycode):
 		get_viewport().set_input_as_handled()
@@ -395,51 +397,12 @@ func is_debug_overlay_open() -> bool:
 			and _debug_overlay.visible
 
 
-## F6 (and the probe/test seam): pick whatever the crosshair is on into the
-## debug pick list, with a brief on-screen confirmation.
+## Shift+F6 (and the probe/test seam): pick whatever the crosshair is on into the
+## debug pick list, with a brief on-screen confirmation (DebugPickFlow).
 func pick_at_crosshair() -> void:
 	var sim = _world.get_sim() if _world != null else null
-	var pick := DebugEntityPicker.pick_at_crosshair(sim, _camera)
-	if pick.is_empty():
-		return
-	if not bool(pick.get("hit", false)):
-		var blocked := String(pick.get("blocked", ""))
-		if blocked.is_empty():
-			_show_pick_toast("No entity in range.")
-		else:
-			_show_pick_toast("No entity (%s, %.0fu)." % [
-					blocked, float(pick.get("distance_units", 0.0))])
-		return
-	var row := _pick_list.add(pick)
-	if row < 0:
-		_show_pick_toast("Pick list full (%d) — remove one on the F3 Entities page." %
-				DebugPickList.MAX_PICKS)
-		return
-	var pick_name := String(pick.get("name", ""))
-	if pick_name.is_empty():
-		pick_name = String(pick.get("hit_class", "entity"))
-	_show_pick_toast("Picked: %s #%d  (%.0fu)" % [
-			pick_name, int(pick.get("bms_id", 0)),
-			float(pick.get("distance_units", 0.0))])
-
-
-func _show_pick_toast(text: String) -> void:
-	if _pick_toast != null and is_instance_valid(_pick_toast):
-		_pick_toast.queue_free()
-	var label := Label.new()
-	label.name = "PickToast"
-	label.text = text
-	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	label.offset_top = 96.0
-	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var mount: Node = _hud if _hud != null else self
-	mount.add_child(label)
-	_pick_toast = label
-	var tween := label.create_tween()
-	tween.tween_interval(PICK_TOAST_SECONDS)
-	tween.tween_property(label, "modulate:a", 0.0, 0.4)
-	tween.tween_callback(label.queue_free)
+	_pick_flow.pick_at_crosshair(sim, _camera, _pick_list,
+			_hud if _hud != null else self)
 
 
 func get_debug_overlay() -> DebugOverlay:
@@ -1113,6 +1076,9 @@ func set_perf_probe_enabled(enabled: bool) -> void:
 func _process(delta: float) -> void:
 	if _shutdown_prepared:
 		return
+	if not _debug_pose_env.is_empty() and _state == State.WORLD:
+		_debug_pose_env = DebugPoseEnv.apply(_debug_pose_env,
+				_world.get_sim() if _world != null else null)
 	var probe_enabled := _perf_probe_enabled
 	var stats_on := _frame_stats.is_capture_active()
 	# One shared gate for the frame-leg clock reads: the manual A/B probe and
@@ -1174,7 +1140,7 @@ func _process(delta: float) -> void:
 	var skip_hud := probe_enabled and _perf_probe_skip_hud
 	if _hud_presenter != null and (_state == State.WORLD or _state == State.ARMORY \
 			or _state == State.DEPLOY) and not skip_hud:
-		_hud_presenter.tick()
+		_hud_presenter.tick(is_gameplay_input_active())
 	if timing:
 		var probe_t4 := Time.get_ticks_usec()
 		if probe_enabled:

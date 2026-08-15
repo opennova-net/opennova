@@ -46,6 +46,10 @@ func test_spinmap_bounds() -> void:
 	var hud := _load()
 	# spinmap x1=810,x2=1020,y1=552,y2=762 -> Rect2i(810,552,210,210).
 	assert_eq(hud.get_spinmap_bounds(), Rect2i(810, 552, 210, 210), "Spinmap bounds rect.")
+	assert_eq(hud.get_spinmap_wp_dist_off(), 0,
+			"An absent SPINMAPWPDISTOFF keeps the retail BSS-zero default (label live).")
+	assert_eq(hud.get_declutter_flags("SPINMAP"), PackedByteArray([0, 1, 1, 0]),
+			"Spinmap retains its authored four HUDDETAIL visibility gates.")
 
 
 func test_stances() -> void:
@@ -76,11 +80,17 @@ func test_to_dictionary_shape() -> void:
 	# ALPHAFADE 30 50 3 raw file fields (base %, max %, seconds) — floats, since the
 	# original's atof keeps fractions for the x2.55/x62 converts [orig: @0x5a0882].
 	assert_eq(misc["alpha_fade"], Vector3(30, 50, 3), "alpha_fade raw triple exposed in misc.")
+	assert_eq(int(misc["spinmap_wp_dist_off"]), 0,
+			"to_dictionary preserves the absent-token BSS-zero default.")
 
 
 func test_not_loaded_is_safe() -> void:
 	var hud := HudPos.new()
 	assert_false(hud.is_loaded(), "Fresh instance is not loaded.")
 	assert_eq(hud.get_health_rect(), Rect2i(), "Unloaded getters return empty.")
+	assert_eq(hud.get_spinmap_wp_dist_off(), 0,
+			"An unloaded layout reports the live-by-default zero.")
+	assert_true(hud.get_declutter_flags("SPINMAP").is_empty(),
+			"An unloaded layout has no authored declutter row.")
 	assert_eq(hud.get_stances().size(), 0, "Unloaded stances empty.")
 	assert_eq(hud.to_dictionary().size(), 0, "Unloaded to_dictionary empty.")

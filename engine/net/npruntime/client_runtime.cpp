@@ -488,10 +488,24 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 			// the whole frame's send boundary without reframing them.
 			for (std::vector<uint8_t> &reply : pr.outbound)
 				framed_send_queue_.push_back(std::move(reply));
-			for (const auto &tb : pr.inbound_world) view_.apply(tb.first, tb.second); // 0x0C/0x0D/0x10/0x20
-			// Reload, team, and destroy bodies all cross the same canonical entity
-			// reducer; PollResult's decoded lifecycle vectors are diagnostics only.
-			for (const auto &tb : pr.inbound_gameplay) view_.apply(tb.first, tb.second);
+			// World, live-frame, map, and gameplay bodies cross one reducer stream
+			// in wire order. The family vectors on PollResult are diagnostics only.
+			bool death_edge_in_poll = false;
+			for (const auto &tb : pr.inbound_reducer) {
+				const uint32_t health_before =
+						tb.first == s2c::PER_FRAME_UPDATE
+						? view_.state().health_updates_applied : 0;
+				view_.apply(tb.first, tb.second);
+				// Evaluate every 0x0A tail at its original position. A later
+				// positive sample cannot erase an earlier death edge.
+				if (tb.first == s2c::PER_FRAME_UPDATE &&
+						view_.state().health_updates_applied != health_before &&
+						view_.state().local_health <= 0) {
+					death_edge_in_poll = true;
+					authoritative_spawn_released_ = false;
+					joiner_->begin_redeployment();
+				}
+			}
 			// The host's tick seed anchors our whole network-role clock. A seed of ZERO is a
 			// real, witnessed value (the round-end disarm form), so it is applied like any
 			// other — it parks the tick, which is exactly what retail does.
@@ -544,17 +558,13 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 				}
 			}
 			if (pr.gameplay_hold_rearmed) deployed_ = false;
-			for (const std::vector<uint8_t> &a : pr.inbound_0a) {
-				const uint32_t health_before = view_.state().health_updates_applied;
-				view_.apply(0x0A, a); // per-frame 0x0A
-				// Evaluate each decoded tail in receive order. A later positive
-				// sample in the same pump cannot erase an earlier death edge.
-				if (view_.state().health_updates_applied != health_before &&
-				    view_.state().local_health <= 0) {
-					authoritative_spawn_released_ = false;
-					joiner_->begin_redeployment();
-				}
-			}
+			// A death edge decoded in THIS poll keeps the spawn latch closed even
+			// when the same datagram carried a (re)covering deployment release:
+			// the joiner was just reset into redeployment, and only the deploy
+			// flow reopens the latch. The release edges above are batched per
+			// poll, so without this hold they would out-order the wire-position
+			// 0x0A tail that closed the latch inside the reducer loop.
+			if (death_edge_in_poll) authoritative_spawn_released_ = false;
 			// Periodic replies are produced by the receive handlers, but retail does not
 			// frame them until PumpClientProtocolSend. Defer them behind the shared holdoff
 			// gate. In particular, C2S 0x3D already pages the renderer-finalized loaded-model
@@ -574,6 +584,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 	// including on the authority's HostClient loopback path.
 	// [orig: Client_ProcessNetworkFrame @0x42C2E1..0x42C2E6]
 	advance_zone_timers();
+	view_.tick_minimap_overlays();
 
 	// The remote lean integrator runs once per client frame regardless of role —
 	// the body tick that owns it in retail. [orig: decay @0x4b5c97, then the ramp

@@ -1041,10 +1041,12 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 				}
 			}
 			out.inbound_world.emplace_back(m.tag, m.payload);
+			out.inbound_reducer.emplace_back(m.tag, m.payload);
 		} else if (m.tag == s2c::POOL_SPAWN || m.tag == s2c::STATIC_ENTITY_BATCH || m.tag == s2c::POOL3_SYNC) {
 			// The rest of the load-time world stream (§5.2a): pool-1 spawns / pool-2 statics /
 			// pool-3 markers. Surface raw for the caller's ClientReplicaPipeline to upsert.
 			out.inbound_world.emplace_back(m.tag, m.payload);
+			out.inbound_reducer.emplace_back(m.tag, m.payload);
 		} else if (m.tag == s2c::SESSION_SLOT_CONFIG) {
 			// S2C 0x04 slot assignment: the tail byte is this joiner's server-assigned team —
 			// retail's byte_A85B48, the 0x2F loadout-submit header byte 0. A retail host always
@@ -1089,6 +1091,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			    world::EntityHandle{assign.entity_handle}.valid() &&
 			    world::EntityHandle{assign.entity_handle}.pool() < world::kEntityPoolCount) {
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
+				out.inbound_reducer.emplace_back(m.tag, m.payload);
 				// Retail's header gates: not the 0xFFFF sentinel, and the pool
 				// nibble must address one of the five entity pools.
 				out.entity_team_assigns.emplace_back(
@@ -1136,6 +1139,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			if (decode_destroy_entity_list(
 					m.payload.data(), m.payload.size(), destroy_list)) {
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
+				out.inbound_reducer.emplace_back(m.tag, m.payload);
 				for (uint16_t index : destroy_list.pool0_indices)
 					out.destroyed_pool0_slots.push_back(index);
 			}
@@ -1444,6 +1448,19 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 		} else if (m.tag == s2c::PER_FRAME_UPDATE) {
 			// Per-frame world snapshot — surface for the caller's ClientReplicaPipeline.
 			out.inbound_0a.push_back(m.payload);
+			out.inbound_reducer.emplace_back(m.tag, m.payload);
+		} else if (m.tag == s2c::CAPTURE_ZONE_STATE) {
+			CaptureZoneOverlayBatch batch;
+			if (decode_capture_zone_overlay(m.payload.data(), m.payload.size(), batch)) {
+				out.inbound_gameplay.emplace_back(m.tag, m.payload);
+				out.inbound_reducer.emplace_back(m.tag, m.payload);
+			}
+		} else if (m.tag == s2c::MINIMAP_OVERLAY) {
+			MinimapOverlayBatch batch;
+			if (decode_minimap_overlay_batch(m.payload.data(), m.payload.size(), batch)) {
+				out.inbound_gameplay.emplace_back(m.tag, m.payload);
+				out.inbound_reducer.emplace_back(m.tag, m.payload);
+			}
 		} else if (m.tag == s2c::WEAPON_LOADOUT && valid_weapon_loadout &&
 		           post_auth_stage_ == PostAuthStage::AwaitDeployment) {
 			// Every valid retail 0x5A apply clears dword_81474C immediately,
@@ -1466,6 +1483,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// The host echoes the same four-byte C2S 0x25 reload body as S2C 0x49.
 			// Surface it once through the decoded client-view event path.
 			out.inbound_gameplay.emplace_back(m.tag, m.payload);
+			out.inbound_reducer.emplace_back(m.tag, m.payload);
 		} else if (m.tag == s2c::ENTITY_DEATH) {
 			// S2C 0x13 ENTITY DEATH — the host's per-death notify for every
 			// non-player victim (the AI/item leg of Entity_CheckAndProcessDeath).
@@ -1479,8 +1497,10 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			EntityDeathRecord death;
 			std::size_t death_consumed = 0;
 			if (decode_entity_death(
-					m.payload.data(), m.payload.size(), death, death_consumed))
+					m.payload.data(), m.payload.size(), death, death_consumed)) {
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
+				out.inbound_reducer.emplace_back(m.tag, m.payload);
+			}
 		} else if (m.tag == s2c::KILL_SYNC) {
 			// S2C 0x26 KILL SYNC — the second death route (the destructible
 			// deathCallback's own authority resend among its senders); the
@@ -1492,8 +1512,10 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			KillRecord kill;
 			std::size_t kill_consumed = 0;
 			if (decode_kill_record(
-					m.payload.data(), m.payload.size(), kill, kill_consumed))
+					m.payload.data(), m.payload.size(), kill, kill_consumed)) {
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
+				out.inbound_reducer.emplace_back(m.tag, m.payload);
+			}
 		} else if (m.tag == s2c::ZONE_TIMER_VALUE) {
 			ZoneTimerValue value;
 			std::size_t consumed = 0;

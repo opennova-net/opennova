@@ -222,7 +222,12 @@ std::string friendly_tag_fallback_name(uint16_t encoded_entity_id);
 struct HudLabelFontChoice {
 	const char *normal_fnt;
 	const char *bold_fnt;
+	// The single-file large slot the big-map grid labels ride
+	// [orig: HUD_InitAllFonts — g_hudLabelFontLarge @0xB4C3A0 = Impac22b.fnt
+	//  at the over-800 scale for every width].
+	const char *large_fnt;
 	float scale;
+	float large_scale;
 	int tier; // 0 <= 640 / 1 <= 800 / 2 > 800 — stable id for reload checks
 };
 HudLabelFontChoice hud_label_font_choice(int surface_w);

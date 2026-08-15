@@ -168,6 +168,132 @@ func test_overlay_draws_health_from_fixture_layout() -> void:
 	assert_true(is_instance_valid(hud), "HUD survives a draw with the fixture layout.")
 
 
+func test_spinmap_compiles_terrain_retained_markers_and_waypoint() -> void:
+	var fixture := _load_temp_layout(PackedStringArray([
+		"HUDSPINMAPX1 810",
+		"HUDSPINMAPX2 1020",
+		"HUDSPINMAPY1 552",
+		"HUDSPINMAPY2 762",
+	]), PackedStringArray(["TSDicon.tga", "compring.tga", "dmgslice.tga"]), {
+		"TSDicon.tga": Vector2i(64, 1920),
+	})
+	var hud := _make_overlay()
+	hud.configure(fixture["layout"], fixture["root"])
+
+	var terrain := TerrainData.new()
+	terrain.set_sector_count(16)
+	terrain.set_sector_rows(16)
+	terrain.set_origin_x(0)
+	terrain.set_origin_y(0)
+	var sectors := PackedInt32Array()
+	sectors.resize(256)
+	sectors.fill(1)
+	terrain.set_sector_grid(sectors)
+	hud.set_minimap_terrain(terrain)
+	# Waypoint 100 mission units ahead, 20 wu above -> the state line draws
+	# with its tip cell, and the altitude nub frame is "above".
+	hud.set_waypoint("Target", 1024, Vector2(100, 0), 20.0)
+
+	# {version, stride, count}, then one retained overlay row:
+	# {bank, handle, x, y, z, heading, icon, argb, flags, source,
+	#  remaining_ticks, entity_known, policy_flags, half_x, half_y, floor}.
+	var snapshot := PackedInt32Array([
+		3, 16, 1,
+		0, 0x1001, 64 << 16, 0, 0, 0, 10, -16711936, 0, 0, 1984, 1,
+		1, 0, 0, 6,
+	])
+	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false, snapshot)
+	var stats: Dictionary = hud.get_draw_list_stats()
+	assert_true(bool(stats["map_visible"]),
+			"An authored HUDSPINMAP rect enables the gameplay spinmap.")
+	assert_eq(int(stats["map_backing_tris"]), 32,
+			"The circular backing is the portable 32-sided fan.")
+	assert_gt(int(stats["map_terrain_tris"]), 0,
+			"TerrainData's 16x16 sector routing reaches the minimap compiler.")
+	assert_eq(int(stats["map_sprites"]), 3,
+			"One live retained marker, the single waypoint tip cell, and the compass ring compile.")
+	assert_eq(int(stats["map_lines"]), 1,
+			"The waypoint state line reaches the draw list.")
+	# Both label suppressors are BSS-zero in retail (LIVE by default): the
+	# ring-edge distance label and the MAPCOORDS grid label compile with no
+	# authored suppressor token.
+	assert_eq(int(stats["map_labels"]), 2,
+			"The distance + grid labels compile by default (BSS-zero suppressors).")
+	await get_tree().process_frame
+	assert_true(is_instance_valid(hud), "The complete minimap pass renders safely.")
+	stats = hud.get_draw_list_stats()
+	assert_eq(int(stats["map_texture_filter"]), 4,
+			"The spinmap icon strip uses explicit linear mip filtering.")
+	assert_eq(int(stats["map_texture_repeat"]), 1,
+			"The spinmap icon strip clamps past its half texel.")
+	assert_true(bool(stats["map_icon_mipmaps"]),
+			"The 64px TSDicon cells retain retail's box-filtered mip chain.")
+	assert_eq(int(stats["map_icon_width"]), 64)
+	assert_eq(int(stats["map_icon_height"]), 1920)
+	assert_eq(int(stats["map_water_texture_filter"]), 2,
+			"The spinmap thresholds the linearly sampled depthspin field.")
+	assert_eq(int(stats["map_water_texture_repeat"]), 1,
+			"The spinmap water field clamps at its authored edge.")
+
+	# Unknown versions are rejected as a whole instead of partially walking a
+	# stale or shorter row layout. The waypoint tip and compass sprites remain.
+	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false,
+			PackedInt32Array([99, 16, 1]))
+	stats = hud.get_draw_list_stats()
+	assert_eq(int(stats["map_sprites"]), 2,
+			"A malformed snapshot contributes no retained marker rows.")
+	await get_tree().process_frame
+
+	# A footprint-class marker skips its icon quad and fills the static
+	# polygon feed instead (the building/zone collision ground slice).
+	hud.set_minimap_footprints(PackedInt32Array([
+		1, 1,
+		0x2042, -6250336, 6,
+		20 << 16, -(4 << 16), 24 << 16, -(4 << 16), 22 << 16, 4 << 16,
+		4,
+		20 << 16, -(4 << 16), 24 << 16, -(4 << 16),
+	]))
+	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false,
+			PackedInt32Array([
+				3, 16, 1,
+				0, 0x2042, 0, 0, 0, 0, 0, -6250336, 0, 0, 1984, 1,
+				2, 0, 0, 6,
+			]))
+	stats = hud.get_draw_list_stats()
+	assert_gt(int(stats["map_footprint_tris"]), 0,
+			"The footprint feed reaches the compiler's overlay list.")
+	assert_eq(int(stats["map_sprites"]), 2,
+			"The footprint marker draws no icon sprite.")
+	await get_tree().process_frame
+
+	# The M-cycle pass owns a separate canvas sandwich and carries the same
+	# sampler contract as the corner spinmap.
+	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 3, false,
+			PackedInt32Array([3, 16, 0]))
+	await get_tree().process_frame
+	stats = hud.get_draw_list_stats()
+	assert_eq(int(stats["big_map_texture_filter"]), 4,
+			"The enlarged map icon strip uses explicit linear mip filtering.")
+	assert_eq(int(stats["big_map_texture_repeat"]), 1,
+			"The enlarged map icon strip clamps at cell boundaries.")
+	assert_eq(int(stats["big_map_water_texture_filter"]), 2,
+			"The enlarged map thresholds the linearly sampled depthspin field.")
+	assert_eq(int(stats["big_map_water_texture_repeat"]), 1,
+			"The enlarged map water field clamps at its authored edge.")
+
+
+func test_hud_color_index_round_trips_and_clamps() -> void:
+	var hud := _make_overlay()
+	assert_eq(hud.get_hud_color_index(), 2,
+			"The retail config default is scheme 2 (hudpos hud_textcolor).")
+	hud.set_hud_color_index(5)
+	assert_eq(hud.get_hud_color_index(), 5, "Scheme 5 round-trips.")
+	hud.set_hud_color_index(9)
+	assert_eq(hud.get_hud_color_index(), 5, "Indexes clamp to the 0..5 table.")
+	hud.set_hud_color_index(-3)
+	assert_eq(hud.get_hud_color_index(), 0, "Negative indexes clamp to zero.")
+
+
 func test_overlay_unconfigured_draws_nothing() -> void:
 	var hud := HudOverlay.new()
 	hud.size = Vector2(800, 600)
@@ -406,20 +532,6 @@ func test_friendly_tags_draw_modes() -> void:
 	hud.set_friendly_tag_mode(99)
 	assert_eq(hud.get_friendly_tag_mode(), 3, "the mode setter clamps to 0..3")
 	assert_true(is_instance_valid(hud), "friendly tags draw safely")
-
-
-# The HUD color-scheme index round-trips and clamps to the retail cycle range
-# 0..5. [orig: input action case 10 @0x49afc7 wraps past 5; config token
-# "hud_color_index" default 2 @0x54d2a6]
-func test_hud_color_index_round_trips_and_clamps() -> void:
-	var hud := _make_overlay()
-	assert_eq(hud.get_hud_color_index(), 2, "boot default is scheme 2 (hudpos)")
-	hud.set_hud_color_index(5)
-	assert_eq(hud.get_hud_color_index(), 5, "the index round-trips")
-	hud.set_hud_color_index(99)
-	assert_eq(hud.get_hud_color_index(), 5, "the setter clamps to 0..5")
-	hud.set_hud_color_index(-3)
-	assert_eq(hud.get_hud_color_index(), 0, "the setter clamps negatives")
 
 
 # The weapon heat bar draws at nonzero heat inside the HUDHEAT rect and stays

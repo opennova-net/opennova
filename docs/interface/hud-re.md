@@ -32,7 +32,10 @@ session witnessed the **waypoint HUD chain** end to end (list build, current
 selection + auto-advance, name resolve, the HUDWPDINFO label, the
 show-waypoints mission gate) and resolved the `@0x599700` "minimap" misnomer —
 it is the **weapon heat bar**; the real map element is
-`HUD_DrawMapOverlay @0x5a5f40` (located + structured, port deferred).
+`HUD_DrawMapOverlay @0x5a5f40`. The 2026-08-12 follow-up then recovered and
+ported the normal-gameplay call: `HUD_RenderAllOverlays @0x5a8070` supplies the
+authored `HUDSPINMAP*` rectangle and flags `0x000D07FF`; this is distinct from
+the still-deferred fullscreen/CMAP/DEATH map surfaces.
 The 2026-07-31 recoil/spread grill then closed the write side behind the
 crosshair's two dynamic terms: the round-spawn impulse, the infantry-body
 decay/drift, the local movement/weapon-weight accumulator, and their distinct
@@ -62,7 +65,8 @@ projectile-versus-HUD shifts are now witnessed and ported (D-HUD-7).
 | Weapon heat bar (HUDHEAT) | **ported** (`HudFrameCompiler::element_heat`, D-HUD-15) | `[orig: HUD_DrawWeaponHeatBar @0x599700]` (ex kong "draw_minimap_overlay" — a misnomer; there is no radar here) full witness: border + proportional fill in the HUDHEAT rect |
 | Waypoint HUD label (HUDWPDINFO) | **ported** (`HudFrameCompiler::element_waypoint` + `game_hud_presenter.gd`, D-HUD-16/17) | `[orig: HUD_DrawWaypointNameAndDistance @0x5947a0]` + `[orig: get_waypoint_name @0x594630]` full witness; gates `[orig: @0x5a7daf]` |
 | Waypoint track (list/current/advance/mission gate) | **ported** (`engine/runtime/world` waypoint track + `Simulation`, D-HUD-16/17) | list `[orig: NetPacket_WriteWorldStateLoad0x0F @0x502d10 @0x502e41]` (nav channel `flags&2`); BMS marker fields `[orig: Entity_SpawnFromBMSRecord @0x40f0aa]`; advance `[orig: Player_UpdatePerFrame @0x4de5f7]`; done-mark `[orig: EventTrigger_MarkLinkedSpawnPoints @0x452ce0]`; cycle `[orig: Spectator_CycleTarget @0x4dc1d0]` + input case 23 `[orig: @0x49b3de]`; `ShowWaypoints` `[orig: Game_SetShowWaypoints @0x58fb50]` |
-| Map overlay (fullscreen map: terrain, grid, blips, waypoints) | confirm-only — located + structured, follow-up | `[orig: HUD_DrawMapOverlay @0x5a5f40]` (7278 B): grid coords, `minimap_draw_ring_blip`, `update_radar_contacts`, `draw_compass_indicator`, WPNames labels, `%01.2fk` distances |
+| Gameplay spinmap (`HUDSPINMAP*`: heading-up terrain, blips, pulse markers, waypoint tether/distance, compass ring) | **ported** (`HudMinimapCompiler` → `HudFrameCompiler::element_spinmap` → `HudOverlay`; retained 0x40/0x6B state in `ClientReplicaPipeline`; in-map indicator/label legs = D-HUD-21) | `[orig: HUD_RenderAllOverlays @0x5a8070 (gate @0x5a86e8, mask 0xD07FF @0x5a86f0)]` → `[orig: HUD_DrawMapOverlay @0x5a5f40]`; transform `[orig: Terrain_FixedPointToWorldFloat @0x607060]`; terrain `[orig: render_terrain_decal @0x6071C0]`; blips `[orig: MapOverlay_RenderAllByLayer @0x5be590 → render_minimap_slot_blip @0x5be240]`; compass `[orig: draw_compass_indicator @0x59c900]`; ctests `hud_frame_compiler`/`client_minimap_overlay`/`minimap_overlay` + GUT `hud_overlay_test.gd` |
+| Fullscreen / CMAP / DEATH map surfaces | witnessed — deferred (D-HUD-19) | shared fullscreen `HUD_DrawMapOverlay @0x5a5f40` legs plus windowed `MapOverlay_DrawView @0x5a58e0`: pan/zoom, grid coordinates, command/deploy labels and window hosting |
 | Objectives panel + subgoal state (MISSION OBJECTIVES) | **ported** (`World::SubgoalState` + `HudFrameCompiler::element_objectives` + `game_hud_presenter.gd`, D-HUD-18) | `[orig: HUD_DrawWinConditions @0x5ba940]` full witness; actions 14/15/35/36 `[orig: EventAction_Dispatch @0x454500/@0x4545e0/@0x4546af/@0x454724]`; toggle `[orig: @0x49b68b]`; ctest `event_runtime_bms` subgoal block |
 
 ## Render pipeline — the two-struct model
@@ -694,11 +698,11 @@ walk 2 = the player-slot table (`g_playerSlotPtrTable @0xA822D0`, entries
 - **Colors**: health tier by the health bar's exact bands
   (`HUD_ClassifyHealthBand @0x59c1f0` — good > 0xC000, middle > 0x6FFF, both
   callers pass health ratios; the "distance LOD" name was a misnomer) →
-  hudpos `tagcolor_good/middle/bad`; the good tier reads `tagcolor_good` only
-  when `cfg_hud_color_index == 2` (the config DEFAULT `[orig: @0x54d28b]`),
-  else `g_hudColorTable[index]` (`HUD_InitTeamColorTable @0x51f240`: 0 white,
-  1 green, 2 = per-frame hudpos `hud_textcolor`, 3 light blue, 4 yellow,
-  5 salmon; input case 10 cycles `[orig: @0x49afc7]`). Enemy team = `0xFF00FF`
+  hudpos `tagcolor_good/middle/bad`. A non-default `cfg_hud_color_index`
+  replaces the good tier with `g_hudColorTable[index]` (`@0x5a3c9e`); the
+  index's real producer is the `hudcolor` action row — code 10, default F6,
+  retail-shadowed by `huddetail` (see "The hud_color_index scheme"; both
+  earlier H mappings are refuted by the catalog walk). Enemy team = `0xFF00FF`
   drawn only under the server-granted `g_enemyTagsVisible @0x24D1DF4`
   (spectator-mode / S2C 0x00A writers). Death screen: team 1
   `tagcolor_blueteam`, team 2 `tagcolor_redteam`, else `0xFF208020`
@@ -826,12 +830,12 @@ A `_stricmp` token-dispatch; each token reads decimal fields via `atof → ftol`
 | `tagcolor_blueteam`/`redteam`/`good`/`middle`/`bad` | `g_hudposTagcolor* @0x2723AC8/ACC/AD0/AD4/AD8` — packed `(r<<16)\|(g<<8)\|b` from three decimal fields `[orig: @0x5a1040..0x5a11d1]`; the friendly-tag health tiers + death-screen team colors (D-HUD-20) |
 | `HUDTIMECLOCK`, `mapcoords`, `HUDPOWERBAR` | recon-confirmed token set (timer/map — witness when those elements land) |
 
-## The hud_color_index scheme (witnessed + ported 2026-08-13)
+## The hud_color_index scheme (witnessed + ported; binding adjudicated 2026-08-13)
 
-The master overlay color is a two-global pair over one 16-dword table
-(`g_hudColorTable @0x24C1838`, filled by `HUD_InitTeamColorTable @0x51f240`):
+The binary has a two-global pair over one 16-dword table
+(`g_hudColorTable @0x24C1838`, filled by `HUD_InitTeamColorTable @0x51f240`).
 
-- **Scheme entries (the cycled 0..5)**: 0 white `FFFFFFFF`, 1 green `FF00FF00`,
+- **Entries 0..5**: 0 white `FFFFFFFF`, 1 green `FF00FF00`,
   2 `FF010101` (an init placeholder — refreshed per frame from the hudpos
   `hud_textcolor`), 3 light blue `FF80A0FF`, 4 yellow `FFF0F000`,
   5 salmon `FFFF5050`. (The tail entries 6..15 are the team/status colors —
@@ -839,38 +843,57 @@ The master overlay color is a two-global pair over one 16-dword table
   13 `0000FF00`, 14 `41018101`, 15 `1E093309`; slot 12 IS `g_hudActiveColor`'s
   own cell.)
 - **The snapshot global** `g_hudActiveColor @0x24C1868` =
-  `table[cfg_hud_color_index] | 0xFF000000` at init `@0x51f2de`, restamped
-  WITHOUT the OR at the cycle `@0x49afe0`. Read by the label/chat drawer
-  family (`draw_vehicle_seat_and_armory_labels @0x5a362d/@0x5a3851`,
+  `table[cfg_hud_color_index] | 0xFF000000` at init `@0x51f2de` (and again by
+  `HUD_InitOverlaySystem @0x5a4970`), restamped WITHOUT the OR at the cycle
+  `@0x49afe0`. Read by the label/chat drawer family
+  (`draw_vehicle_seat_and_armory_labels @0x5a362d/@0x5a3851`,
   `HUD_DrawEntityLabel @0x5a3cb1`, the chat text `@0x5930e0`, score/kill-list,
-  gameplay overlays).
-- **The per-frame global** `g_hudFrameOverlayColor @0x840B1C` (ex `unused2`,
-  renamed this session): `HUD_RenderAllOverlays @0x5a8100-0x5a8125` refreshes
+  the spinmap's current-waypoint tether `@0x5a77fe`).
+- **The per-frame global** `g_hudFrameOverlayColor @0x840B1C` (ex `unused2`):
+  `HUD_RenderAllOverlays @0x5a8100-0x5a8125` refreshes
   `table[2] = g_hudposTextColor` then stamps `= table[index]` every frame.
   Read by the 0x593xxx-0x596xxx drawer family (waypoint pair
-  `HUD_DrawWaypointNameAndDistance @0x5949dd..`, compass, reticles,
-  `draw_objective_status_text @0x59aa4c`).
-  Every authored scheme entry carries FF alpha, so the twins agree in
-  practice; the reimpl derives ONE per-compile color
-  (`HudFrameCompiler::active_color`, alpha-forced like the init path).
-- **Cycle**: input action case 10 `@0x49afc7` — `idx+1`, `> 5` wraps to 0,
-  no toast. The action's authored default binding row rides the unported
-  input-binding layer (D-CTRL-3); the reimpl maps it to `KEY_H`
-  (`main_game.gd HUD_COLOR_KEY`).
+  `HUD_DrawWaypointNameAndDistance @0x5949dd..`, reticles,
+  `draw_objective_status_text @0x59aa4c`, the `STROVER_DIST` readout, the
+  spinmap grid label and at-marker distance).
+  Every initialized entry 0..11 carries FF alpha, so the twins agree for those
+  entries.
+- **The cycle's real producer — adjudicated against the binary 2026-08-13.**
+  The action catalog (108-byte records at `0x8159A8`; the byte-witnessed
+  `aAbsoluteTurnLe @0x8159cb` block) ships row 76 `hudcolor` ("Hud Color"),
+  whose record layout is `+0x00` dispatch code, `+0x04` flags, `+0x08`
+  context mask, `+0x0c` class, `+0x10` sort key, `+0x14/+0x16` the keyboard
+  VK pair. `hudcolor` = dispatch code **10**, flags `0x04000000`, default
+  VK `0x75` (**F6**). Dispatch code 10 is the cycle case `@0x49afc7`
+  (idx+1, >5 wraps 0, no toast) — the action IS real and reachable by
+  dispatch. Two gates make it dormant on stock installs: the D-CTRL-2 flag
+  test hides it from the rebind UI (no `0x800`), and the keyboard scan
+  (`Input_ProcessKeyboardEvents @0x49d1f0`) dispatches only the FIRST
+  matching row `@0x49d42f` — `huddetail` (row 50, also VK `0x75`, dispatch
+  code 19 = the default no-op arm `@0x49c27d`) precedes it, so stock F6
+  enqueues a no-op and the cycle never fires without a keyfile rebind.
+- **H does not touch this system — or any HUD toggle.** VK `0x48` (H)
+  appears in the catalog only as `pause`'s secondary (row 70, code 25:
+  SP-only pause + audio mute `@0x49b520`; nothing in-session).
+  `showhud`/"Hide Gun" (row 27, code 14) is unbound and dispatches the
+  no-op arm. The only HUD-visibility control is the boot `/NOHUD` switch
+  (`@0x4a7a09` → mask `@0x840B18`). Both prior key mappings — #491's KEY_H
+  cycle stand-in and #492's H visibility toggle — are refuted by this
+  catalog walk.
 - **Config**: token `hud_color_index` `@0x5502eb` (cfg cell `@0x2550BCC`),
   default 2 `Config_SetDefaults @0x54d2a6`, applied to the live index
-  `dword_24D20B8` by `apply_session_settings_to_globals @0x55152f`. The reimpl
-  persists via `ConfigStore` (`user://settings.cfg [hud] hud_color_index`,
-  write-back on cycle).
+  `dword_24D20B8` by `apply_session_settings_to_globals @0x55152f`.
 - **The friendly-tag good tier** (`HUD_DrawEntityLabel @0x5a3c9e..0x5a3cf5`):
   `tagcolor_good` only when the index == 2, else `table[index]`; the
   middle/bad tiers never swap.
 
-Ported: `HudFrameCompiler::active_color` + the witnessed consumer swaps
-(attach labels, waypoint, objective line, messages, the tag good tier),
-`HudOverlay::set_hud_color_index`, the presenter token + `cycle_hud_color`.
-Ctest `hud_frame_compiler` (`test_compiler_hud_color_schemes`); GUT
-`main_game_input_test` / `hud_overlay_test`.
+Ported: `HudFrameCompiler::active_color` derives the one per-frame color
+(entry 2 sourced live from `hud_textcolor`); `HudOverlay.set_hud_color_index`;
+the presenter persists the index like the retail config token and cycles it on
+the polled `hudcolor` binding row (default F6). Making the retail-shadowed row
+reachable is the tracked divergence D-CTRL-4; ctest
+`test_compiler_hud_color_schemes` + GUT `hud_overlay_test` pin the schemes.
+
 
 ## Weapon heat bar — `HUD_DrawWeaponHeatBar @0x599700` (witnessed 2026-07-18)
 
@@ -1001,6 +1024,448 @@ current waypoint/POI **entity pointer**), reset by
 - `[orig: HUD_DrawCompassStrip @0x595470]` — the heading strip with waypoint
   carets (reads `g_showWaypoints @0x595c9f`): **no callers** in JO:CA.
 
+## Gameplay spinmap — `HUD_RenderAllOverlays @0x5a8070` → `HUD_DrawMapOverlay @0x5a5f40` (grilled + ported through 2026-08-15)
+
+The normal in-world map was previously conflated with both the dead compass
+strip and the command/deploy map. Retail does have a gameplay spinmap: the
+overlay pass builds a parameter struct {mask `0xD07FF` @`0x5a86f0`, player pos,
+focus pos, the raw authored `HUDSPINMAPX1/X2/Y1/Y2` rect
+(`@0x27235C8/CC/D0/D4`, parsed `@0x59f7f1..0x59f87b`; JO:CA authors
+`810/1020/552/762`), yaw, RGBA `255×4`, the spinmap zoom float} and calls the
+shared map renderer. The pass is gated by `g_FpWeaponViewFlags & 2`, the
+`/NOHUD` mask (`@0x840B18`, boot init 3, bit1 gates all overlays `@0x5a81ce`;
+set only by the command-line switch `@0x4a7a09`), and the compiled-in master
+switch `dword_2723CC4` — a `.data` constant `-1` (always true; the July
+"element master switches" family). There is **no HUD-visibility key and no
+detail cycle** in the dispatcher: catalog codes 14 (`showhud`), 19
+(`huddetail`), and 28 (`map_toggle`) all resolve to the default no-op arm
+(index table `byte_49C384` → `@0x49c27d`).
+
+- **The mask is a content selector, not a gate.** Witnessed bits: 0 backing
+  disc, 1 marker banks, 2 objective tether lines (`source & 0xC0` markers,
+  team-colored, suppressing the bit-8 line), 5 entity labels
+  (`draw_entity_labels_and_markers @0x5a49e0`), 6 compass ring (paired —
+  the gate is bit9 && bit6, with the bit10 legs nested inside), 7
+  tracked-target pointer in `g_hudActiveColor` (`@0x5a77fe`, ctx
+  `g_trackedTargetPos @0x272350C`, drawer args no-line/tip-when-ahead), 8
+  the waypoint state line in `g_waypointAltitudeColor @0x2723D7C` (ctx
+  `g_waypointPosXY @0x2723518`; drawer args line+tip), 9 pairs into the
+  compass gate, selects `render_terrain_decal`'s enable_fog_pass
+  water-overlay variant (the TILES themselves draw UNMASKED — the decal
+  call is unconditional, bit9 only picks its argument form), and gates
+  the player grid-coordinate label with !bit12
+  (`HUD_DrawPlayerGridLabel @0x59cb40`:
+  `"(%s,%d)"` right-aligned half-bright at the authored `mapcoords` position
+  `g_mapCoordsLabelX/Y @0x27236F4/F8`, gated `g_mapCoordsLabelOff
+  @0x27236FC == 0` — the token's 3rd value, initializer −1 = suppressed;
+  300-unit cells = `19660800` Q16, column letters from
+  `x − 0x960000 − origin_x` via `HUD_FormatGridCoordinate @0x598600`
+  (base-26 A..Z/AA.., negatives folding back from ZZ), row =
+  `y/300 − origin_y/300 − 1.0` (+1 above zero); origin = the cached
+  item-2043 (`0x7FB`) pool-3 entity `@0x5a4980..0x5a4999`, position snapped
+  to whole cells), 10 radar-contact tick + weapon-direction indicators +
+  round-timer box (inside the compass pair gate), 12 the 300-wu GRID leg
+  (rules + letters/numbers + the on-map large-font player readout run
+  before the marker walk when set and ctx+48 ≠ 1 — NOT marker
+  suppression; the grid branch falls through into the bank walk; the
+  2026-08-13 "marker-bank suppress" gloss is corrected), 15 KOTH route
+  lines (GameType `0x10010`), 16 fullscreen centering, 17 pool-4 location
+  labels (`g_location_names`, `0x9F9F9F`), 18 ring-edge waypoint distance
+  (`"%03dm"`/`"%01.2fk"`, `flt_7C69E8 = 0.001`, position/distance from the
+  slot fields the pointer drawer stores — see the pointer bullet; drawn only
+  when `g_spinmapWpDistLabelOff @0x27237C0 == 0`: the global is BSS
+  (uninitialized .data, no file bytes -> ZERO = label LIVE; the earlier
+  "static 0xFFFFFFFF" gloss read undefined bytes — re-adjudicated
+  2026-08-14 against the segment map) and only an authored NONZERO
+  `SPINMAPWPDISTOFF` value
+  replaces it `@0x59fc1f` — neither JO:CA nor JOTAC authors the token, so
+  retail never suppresses this label), 19 tracked-target distance at the
+  `0x2721ED0/ED8/EDC/EE4` slot (written by
+  `render_laser_sight_effect`/`HUD_SetTrackedEntityTarget`; the sibling
+  `HUD_DrawTrackedTargetDistance @0x594b60` element draws the gametext
+  `hud_farp` label + `"%d"` distance to `g_trackedTargetPos` in a wireframe
+  box at `0x2723628/262C`), 20 the waypoint altitude nub above the rect (see
+  the pointer bullet; NO witnessed caller mask carries bit20 — `0xD07FF`
+  and `0xAF937` both lack it, so the leg ships dormant in retail JO; the
+  earlier "big-map mask" attribution is corrected). The spinmap's
+  `0xD07FF` sets bits 0-10 and 16/18/19.
+- **Waypoint/tracked pointer** [orig: `HUD_DrawMapTargetPointer @0x599220`
+  (ex "CTerrainTile_UpdateShadowState"), call sites `@0x5a7835` (bit 7,
+  args `0,0,1`, color `g_hudActiveColor`) and `@0x5a7894` (bit 8, args
+  `1,1,1`, color `g_waypointAltitudeColor`)]: computes the bearing from the
+  slot entity to the ctx position through the Q22 BAM tables, draws a
+  2-vertex line from the entity's map position along the bearing (bit 8
+  only — the first bool arg), and a `TSDicon` strip cell via
+  `Render_DrawIconStripCell_Debug @0x67bae0 → render_tiled_image_strip
+  @0x67b540`: ONE strip cell per call, index = the `lodLevel` local —
+  default **7 (chevron)** at the clamped tip while the target projects
+  OUTSIDE the clip, switched to **1 (dot)** drawn AT the target once the
+  inside branch takes (`@0x59935e` replaces the clamped endpoint with
+  the raw target position). There is NO second cell at the player — the
+  2026-08-13 "anchor dot" gloss over-read the two cell constants; the
+  32-m 00TRa capture (dot at the waypoint, nothing at center) plus the
+  single `Render_DrawIconStripCell_Debug` submit `@0x59953d` settle it.
+  **Color path**: when the device caps carry the 2X-modulate flag
+  (`dword_A87064 & 0x20`), the submit color is PRE-HALVED
+  (`(c >> 1) & 0x7F7F7F` `@0x599397`) and the per-channel vertex double
+  (`c >= 0x80 ? 0xFF : 2c` `@0x5993c6..0x5993f8`) restores it — NET RAW
+  through the 2X pipeline (capture: the tether measures raw `0x007000`
+  over grass, not a doubled `0x00E000`). The strip cell takes the same
+  halved color `@0x59953d`. The drawer stores a FIXED-LENGTH radial
+  anchor along the bearing. Its exact radius is
+  `baseRadius - scaleX((flags >> 8) & 2) + scaleY(10) + floor(scaleY(10)/2)`:
+  the map setup subtracts the bit-9 compass inset at `@0x5a64c0..0x5a650d`,
+  then the pointer adds the scaled span and its integer half at
+  `@0x5995c7..0x5995d8`. At 1920x1080 this is
+  `baseRadius - 4 + 14 + 7 = baseRadius + 17`, matching the synchronized
+  00TRa label's 11-pixel outward delta from the former `baseRadius + 6`
+  approximation. The result is stored to `slot[17]/[18]`
+  (`@0x5995c7..0x599616`, gated on
+  the min-relative-bearing race `slot[21]`) and the clamped distance to
+  `slot[20]` — the bit-18 label's inputs (so the "032m" label rides the
+  ring edge along the bearing, NOT the tether tip; the 32-m capture pins
+  it there while the tip dot sits mid-disc). The bit-18 wrapper halves the
+  overlay color in `HUD_DrawTextCentered_HalfBright @0x580680`; the active
+  fixed-function map/font stage then doubles RGB, making the final diffuse
+  `2 * half(color)` (for example `0xFFFFD000 -> 0xFFFED000`). OpenNova folds
+  both stages into its Canvas glyph color.
+  **Altitude tricolor** [orig: `HUD_UpdateWaypointAltitudeColor @0x590970`]:
+  `wp_z − player_z` vs ±`0x20000` (2.0 wu) → level `0xFF007000`
+  (`extra = 2`), above `0xFF7F5000` (`extra = 0`), below `0xFF20407F`
+  (`extra = 1`). **Altitude nub** (bit 20): `WPIndctr.tga`
+  (`g_texWpIndicator`, loaded `HUD_LoadAllTextures @0x59e079`; a 4-frame
+  vertical strip — up-triangle/down-triangle/circle/blank) drawn as a
+  20×20-design quad ending at `y1 − rect_h/32`, x = center ∓10 shifted
+  ±8 by `extra`, frame = `extra`, in the tricolor.
+- **Ring/disc radius (capture-closed 2026-08-14)**: the `@0x5a5f40`
+  rect block loads the four scaled rect corners, forms the truncated
+  centers with `flt_7C3B94 = 0.5`, and uses the scaled rect
+  **half-height** as the base radius. The backing and terrain/marker
+  stencil share the observed four-physical-pixel inset
+  (`disc = half-height − 4`), while `draw_compass_indicator @0x59c900`
+  uses the uninset half-height times the witnessed `1.25`. The rect
+  scales per axis through `Viewport_ScaleToVirtualCoords @0x5d2b20`
+  (x·w/1024, y·h/768, rounded), but all circular radii come from its
+  height. The completed-pass 1920×1080 probe pins the authored rect at
+  `(1575,28)..(1950,309)`, center `(1762,168)`, stencil radius `136.5`
+  before rasterization, and compass half-extent `175.625`. This closes
+  the earlier `0.9275 × base`, mean-half-extent, and “10% smaller”
+  hypotheses.
+- **View transform** (`render_terrain_decal`'s tail `@0x607ac1..0x607b13`
+  writes the shared globals `0x319A278..294`; the unreferenced twin is
+  `MapView_SetTransform @0x607130`, defined + named this session): screen
+  centers = truncated midpoints of the `Viewport_ScaleToVirtualCoords`-scaled
+  rect; world-per-pixel scale = `zoom / (rect_height_px × 200.0)`
+  (`flt_7D2290`). The completed-pass probe pins 00TRa to
+  `25559 / (281 × 200) = 0.45478648` wu/px;
+  rotation angle = `yaw + g_mapYaw180 − 0x40000000` folded to BAM16 × 2π/65536
+  (`flt_7C7988`), where `g_mapYaw180 @0x2723EB0` = `0x80000000` iff
+  `Bms_AttribFlags & 0x20` (the mission's RotateMap180 attribute,
+  `@0x5a49bc`). Projection [orig: `Terrain_FixedPointToWorldFloat @0x607060`]:
+  `lx = (x−px)·inv/65536`, `ly = (y−py)·inv·(−1/65536)` — mission +Y is
+  NEGATED into screen space — then `sx = ctr_x + lx·cos − ly·sin`,
+  `sy = ctr_y + lx·sin + ly·cos`. Zoom steps are dispatcher cases:
+  `radarout` (row 48 → case 361 `@0x49beaf`) multiplies by `dbl_7C7AA8 = 1.15`
+  clamped ≤ `0x100000`; `radarin` (row 49 → case 360 `@0x49bcb0`) by
+  `dbl_7C7AB0 = 0.85` clamped ≥ `4096`; the value resets to
+  `65536 × clamp(1 − Bms_MapZoom, 0.0625, 1.0)` at
+  `Player_InitPlayer @0x4e1741..0x4e1763` — `flt_A7640C` is NOT a
+  static zero: it is the BMS HEADER's `map_zoom` float
+  (`g_BmsHeaderBlock @0xA761D0` + 0x23C, bulk fread, no per-field
+  xref — the field our `bms.h` already parses), so the spawn zoom is
+  MISSION-SCALED: 00TRa authors 0.61 → `X = 0.39`, spawn spin zoom
+  `25559`, and big zoom `524288 × X` the same way. The live completed
+  pass closes the ambiguous FPU ordering in favor of `1 − f`; the
+  pose-matched atlas registration then finds global terrain scale
+  `1.00`, independently rejecting the former width-denominator/
+  direct-`f` pairing. A zero/unauthored value retains the retail
+  default `X = 1`. Ported as
+  `HudMapControl::set_mission_map_zoom`; a wire-only joiner has no
+  header and keeps X = 1, a D-NET-194-shaped residual (the
+  deploy/cine mode flags `0x24C18B8/BC` swap the pair onto the
+  big-map zoom `@0xB76490`).
+- **Backing disc**: a 33-vertex/96-index fan (indices built inline), ring
+  vertices from the Q22 BAM sin/cos tables starting at BAM `0x200000` in
+  `0x8000000` steps — exactly 32 uniform segments (the offset vanishes below
+  the table resolution). The disc pass lays the stencil that crops every later
+  leg; the triangles themselves clip only against the rect
+  (`clip_triangle_and_emit_vertices @0x688e30` is a min/max box clip). The
+  OpenNova compiler clips the terrain quads against the same 32-gon instead —
+  the software equivalent of that stencil.
+- **Terrain** [orig: `render_terrain_decal @0x6071C0`]: cover bound =
+  `diag(rect_px) × 0.8 (flt_7C6F9C) × scale` world units; 512-unit tiles
+  (`0x2000000` Q16 snap); the row index derives from **negated mission Y**
+  (`(−0x1000000 − y) >> 25`) and the column from `x >> 25`, offset by
+  `Terrain_SectorOrigin*` with OOB clamp masks, then
+  `Terrain_SectorGrid[16×(row & 0xF) + (col & 0xF)] − 1` — the shared TRN
+  routing table. The base pass selects the corresponding one of the four
+  original 512×512 `Colormap0..3` textures — it does **not** sample the
+  PolyTrn per-cell render-target cache. OpenNova packs those four independent
+  clamp textures into one 1024×1024 atlas and applies a half-texel quadrant
+  inset so filtering cannot cross their seams. The tile color: the
+  map pass hands `0xD0606060`, the decal renderer FORCES the alpha opaque
+  (`color | 0xFF000000` `@0x6071C4` head), the fixed-function output stage
+  QUADRUPLES texture × diffuse for this pipeline — the reference captures
+  measure the map interior at exactly 2.00×/2.02×/2.04× (R/G/B) a single
+  MODULATE2X 0.7529-pass, i.e. `tex × 0x60×4 = tex × 1.5058`, saturating.
+  OpenNova emits the doubled vertex color (`0xFFC0C0C0`, canvas modulates
+  1×) and draws the terrain a second time on an additive child item —
+  per-pixel identical to the ×4 stage under saturation. The
+  `enable_fog_pass = 1` both call sites pass (`@0x5a59c8`/`@0x5a6677`) is
+  the separate WATER pass, not the brightness. `PolyTrn_InitTextures
+  @0x60BA20` builds the 256×256 `depthspin` texture directly from the raw
+  1024×1024 CPT height words: output `(x,z)` averages the four taps
+  `(4x,4z)`, `(+2,0)`, `(0,+2)`, and `(+2,+2)`, then uses `sum >> 10` as
+  the integer terrain height. The redraw selects one of its four 128px
+  quadrants with literal UV scale `127/256` and second-half offset `130/256`
+  (`@0x6077A2..0x6077E6`). Bilinear filtering is followed by the fixed-function
+  stage's UNORM8 writeback; its ADDSIGNED/ADD alpha chain plus alpha-ref 192
+  therefore reduces to `round(sampled_terrain_height) <= water_height_int`.
+  Comparing the unquantized sample instead incorrectly makes the fractional
+  band from `water_height` through `water_height + 0.5` dry. Zero water
+  suppresses the pass and the plane clamps at 254. The passing texels replace
+  the completed terrain pixel with the synchronized-capture water tone
+  `0xFF16476B`. OpenNova implements the same four-tap reduction as
+  `TerrainData::build_minimap_water_mask`, retaining reduced terrain height
+  and integer water height in an RG8 data texture. A dedicated linearly
+  filtered Canvas shader performs the height comparison after sampling, at
+  the same raster stage as retail; a pre-thresholded binary mask is not
+  equivalent at shoreline texels and produced the observed broad halo. The
+  water pass redraws the same clipped sector fans after both Canvas brightness
+  legs. `GameWorld` emits
+  `minimap_water_changed` when that mask is rebuilt. Streamed/authored `.til`
+  art and the PolyTrn per-cell cache do not participate in the gameplay
+  spinmap. The 2026-08-13 per-cell/ortho atlas surrogate and its registration
+  offsets are therefore deleted. The synchronized 00TRa comparison now has
+  the same shoreline footprint while retaining the source colormap detail.
+- **Marker banks** (net-re §5.19/§5.35 carries the wire/retention story):
+  draw order per layer is persistent (buildings with interior models first,
+  via `render_collision_wireframe @0x596800` footprints — PORTED
+  (`engine/runtime/world/minimap_footprint.*`): the model's 60-byte
+  **OOBJ occlusion records** at `model+0xDC/+0xE0`, not COBJ collision
+  sections. Records with type byte `<= 1` pass `@0x596803`; faces whose
+  OPLN Y-up normal exceeds `0.5` emit OVRT X/Z triangles. The record
+  position is portal metadata and is not added to the already-model-local
+  vertices. Fills use opaque team colors (t1 `0x4050A0`, t2 `0xA05040`,
+  attrib-bit17 ChangeTeam `0x609F60`, else `0xA0A0A0`): the map caller's
+  zero alpha override is promoted to `0xFF` at `@0x596884..0x596891`,
+  matching the retail capture's exact `0xA0A0A0` runs. OFAC edge words
+  toggle by their low 15 bits per OOBJ record (low byte / high 7 bits =
+  vertex pair, bit15 winding), and fewer than four survivors suppress the
+  outline. Retail builds `0x80000000` boundary vertices, but completed-pass
+  captures show no observable stroke; OpenNova therefore retains the
+  parity result in the feed but does not submit black lines. Retail hands the
+  unfurled `map_heading - entity_heading` directly to
+  `render_collision_wireframe` (`@0x5a636e`, `@0x5be55b..0x5be57b`), whose
+  local screen formula is reflected (`@0x596844..0x596bbb`). OpenNova places
+  the outline in mission space first, so it subtracts 90 degrees from the
+  entity heading to compensate for the map projection's separate -90-degree
+  fold; that projection then supplies retail's one screen-Y reflection. Then
+  come persistent rest,
+  transient, special [orig: `MapOverlay_RenderAllByLayer @0x5be590`]. The
+  icon→layer table `{10,11,15,18,25}→1, {2,4,12,13,16,17,29}→2,
+  {3,8,14,23,24}→3, else 0` is byte-witnessed (`@0x5be681`), and the special
+  bank routes by flags bit7 instead. The special-bank walk SKIPS slots
+  whose lifetime floored to zero — expired-but-claimed slots stay in the
+  bank but never draw [orig: `@0x5be794` — `!slot[+24] → skip`]; ported as
+  the compiler's expired-special gate. (Two witnessed quirks stay
+  unported under D-HUD-21: the persistent bank walks twice with a
+  building/non-building split across two layer functions, and layers 1/2
+  re-draw every live special slot `@0x5be7ad`.) `render_minimap_slot_blip @0x5be240`:
+  special icons 253/254 draw pulse rings — the 64-frame triangle wave
+  `phase = (frame − 8) & 0x3F` folded at `0x20`, each channel
+  `c += phase·(255−c) >> 5` (toward white) — with the ring radius = the
+  projected slot height (`minimap_draw_ring_blip @0x597320` takes
+  `max(min_radius, height_px)`), and 254 adds a shrinking `×0.75` ring stack
+  (`49152` Q16 steps); other special icons draw **unrotated 6-px half-extent**
+  billboards (`draw_billboard_decal @0x5975f0`, `size_override = 6.0`,
+  BAM16 rotation × 2π/65536 when nonzero, alpha rule
+  `a ? rgb|a<<24 : rgb|FF000000`). Regular (non-special) markers draw from
+  the LIVE pool entity gated on `entity[538]`
+  (`draw_minimap_blip @0x597890`): team colors from the HUD globals
+  (`g_hudColorLightBlue @0x24C1844` / `@0x24C184C` / `@0x24C183C`), sizes
+  from the model footprint with class fallbacks (generic 10.0 wu = `655360`,
+  person 2.0 wu, def-flag overrides 4/8 wu) and pixel floors (6.0 default,
+  4/8/12/16 by class), icon 9 × 1.2, spectate icons 26/27 at ×2. The ordinary
+  icon-strip call submits those raw colors into TSDicon's `MODULATE2X`
+  texture stage; OpenNova bakes that saturating RGB doubling into the sprite
+  diffuse while leaving alpha unchanged. The waypoint-pointer path is
+  distinct: its pre-half and the same stage cancel, so its altitude color
+  remains net-raw. A live call-site capture at the map center identifies the
+  disputed blue glyph as the local deployed player — regular-bank source,
+  live Person reclassification to cell 3, raw team-1 `0xFF304080`, and
+  6×6px half extent — not an armory, objective, waypoint, or tracked target.
+  `Simulation.get_hud_minimap_snapshot()` restores that client-local retained
+  row only when the loopback feed does not already contain the same handle.
+  The synchronized green-marker peak is retail `(88,255,65)` versus OpenNova
+  `(86,255,64)`; apparent shade changes between captures come from filtering,
+  blending, and live state rather than a different configured base color. The
+  `TSDicon.tga` sheet is a **30-cell vertical strip of square cells at its
+  authored physical resolution** — stock JO ships 16×480, JOTAC's RevX02
+  authors 64×1920 — indexed by `render_tiled_image_strip @0x67b540`, whose
+  half-texel cell insets are derived from the loaded tile's stored physical
+  dimensions (`0.5 / tile_dim`; the right/bottom bounds intentionally reach
+  half a texel past the cell under the clamp sampler). `Texture_LoadFromFile_0
+  @0x59e060` leaves that physical resolution intact;
+  `GTexture_CreateFromPixelData_0 @0x6877ba..0x6878be` allocates the full mip
+  chain and fills it with `D3DXFilterTexture` filter 5 (box), while
+  `CGfxDevice_ApplyRenderStates @0x67e3e1..0x67e421` selects linear mip
+  filtering. OpenNova generates the same mip chain, stamps the loaded strip's
+  measured physical dimensions into the compiler for those endpoints
+  (`HudMinimapInput::icon_strip_*`), and linearly mip-filters with clamp on
+  both map canvas items. Treating the logical ~16px badge size as the source
+  dimensions and uploading the strip without mips caused the visibly aliased
+  armory glyphs.
+  The per-class hide/rotate gates
+  `0x2723D0C..D34` are unwritten statics (always pass). Capture-zone def ids
+  6027/6028 add team rings (`0xFF2020`/`0x4060FF`, alpha pair `0x50/0x40`,
+  min radius 64 wu `@0x5a7027..0x5a7061`).
+- **Compass ring** [orig: `draw_compass_indicator @0x59c900`]: the
+  `compring.tga` quad at ×1.25 the map radius (`flt_7C6F18`),
+  counter-rotated `(0x3FFFFFC0 − yaw) >> 16` × 2π/65536 so its north marker
+  points at world north. Its UVs are centered at 0.5 with ±0.45 extent
+  (`flt_7D93A8`), so retail samples only `0.05..0.95` of the texture. Cropping
+  that authored transparent padding makes the visible ring `1/0.9` larger on
+  the unchanged quad; this is why the same eastern and northwest landmarks
+  touch the ring in the retail capture.
+- **Pixel-circle geometry** (retail captures, JOTAC 00TRa, both headings):
+  the map is a true circle in screen pixels on a widescreen surface because
+  radius and world-per-pixel both use the scaled rect **height**, never its
+  wider X extent. The backing/terrain/marker disc is
+  `half-height − 4 px`; the compass quad is `half-height × 1.25`, with the
+  centered-90% UV crop above. This exact
+  rule replaces the former mean-radius/`0.9275 × base` approximation and
+  closes the apparent ~10% widget-size and zoom deltas. The compass ring
+  bakes the FF MODULATE2X into its texture (white-modulated static sprite;
+  the band/letters read ~2× ours before, luma 27 vs 29 after).
+- **Presentation ABI.** `Simulation.get_hud_minimap_snapshot()` returns a
+  versioned packed array `{version=3, stride=16, count}` with rows
+  `{bank, handle, x, y, z, heading, icon, argb, flags, source,
+  remaining_ticks, entity_known, policy_flags (bit0 rotate / bit1
+  footprint), half_x_q16, half_y_q16, floor_px}` — the policy tail is the
+  `draw_minimap_blip @0x597890` per-class table resolved against the local
+  entity at snapshot build, retail's own client-side resolve site;
+  `HudOverlay` rejects unknown versions/short strides atomically. Static
+  footprint polygons ride the separate once-per-mission
+  `get_hud_minimap_footprints()` feed (version 1: per-entity OOBJ fill fans +
+  retained boundary edges in mission Q16, opaque team-colored fills), and
+  the depthspin-equivalent water mask rides `set_minimap_terrain`'s second
+  argument; `minimap_water_changed` refreshes that binding. The engine
+  compiler emits the disc,
+  terrain, ordered marker sprites/rings, the waypoint state line + anchor
+  dot/tip chevron cells + the altitude nub, the labels (per-pass glyph
+  lists — bold slot for the corner map's distance/MAPCOORDS labels, the
+  `Impac22b` LARGE slot for the grid letters/numbers and the big-map
+  player readout, all CPU-half-bright then restored by the map/font
+  MODULATE2X stage), and the compass sprite. The grid
+  origin rides `Simulation.get_hud_map_grid_origin()` — the promotion
+  stash on a host, the replicated pool-3 type-2043 entity on a joiner
+  (D-NET-194 wire-header missions carry no markers) — the waypoint
+  altitude rides `set_waypoint`, and the player altitude rides
+  `set_minimap_state`. The device leg draws the corner map's base under
+  the flat HUD with its additive/top children just above it, and the
+  whole big-map trio ABOVE the flat pass (the witnessed frame order).
+
+Unported in-map legs, each witnessed above and tracked under D-HUD-21:
+the in-map weapon-direction indicators (`draw_weapon_direction_indicators
+@0x59c350`) + round-timer box (`draw_timer_overlay_box @0x59c7b0`) +
+radar-contact state (producers `Radar_AddBlip @0x59b280` ← damage
+`@0x4dd8ee` / tracer `@0x4e5cb1`; consumer `update_radar_contacts @0x59a7e0`
+building the 12/24-sector rings at `0x2721EF4..0x2721F3B` and the 4-quadrant
+damage flashes `@0x2721EEC`), the objective tether lines (bit 2), entity
+labels (bit 5), location labels (bit 17), the tracked-target legs (bits
+7/19 — no tracked-target source exists in this runtime yet), the remaining
+model-extent size feed and pointer line length, and the sibling out-of-map
+consumers (`draw_radar_blips @0x5a2c00`
+in-world markers, `draw_damage_direction_indicators @0x59a300`,
+`draw_directional_indicator_ring @0x598180`). The JOTAC data also authors
+`HUDDECLUT_SPINMAP 1 0 0 0` — the HUDDECLUT_* consumer is an open witness
+(the huddetail INPUT is a dispatcher no-op, but the parsed table may gate
+elements by the cfg `hud_detail` level).
+
+### The M-cycle map modes (witnessed + ported 2026-08-13)
+
+The `map_toggle` action (catalog row 98, code 28, default `M`) cycles the
+map overlay mode **0 → 2 → 3 → 0** [orig: `HUD_CycleMapMode @0x520bc0`
+(ex "UI_CycleAmmoDisplayMode" misname), dispatched from the IN-GAME binding
+arm `@0x4e0662` — the earlier "code 28 is a dispatcher no-op" adjudication
+read the MENU-context switch and is corrected]. `g_mapOverlayMode
+@0x24C18BC` clears on round init [orig: `Game_InitNewRound @0x42275a`],
+respawn-state init [orig: `Game_InitRespawnState @0x499395`], and every
+render frame while the local player is dead [orig: `@0x5cac67..0x5cac6d —
+Flags & 2 → g_mapOverlayMode = 0`]. Frame order [orig:
+`Render_ProcessMainSceneFrame @0x5ca0f0`]: `HUD_RenderAllOverlays
+@0x5cad04` (bars, crosshair, messages, tags, the corner spinmap) → the
+mode-gated `HUD_BuildMapOverlayView @0x5cad15` (the big map draws ABOVE
+the whole overlay set) → `HUD_DrawGameplayOverlays @0x5cae0b`
+(objectives/timer/ping draw above the big map).
+
+`HUD_BuildMapOverlayView @0x5a7e10` (ex "render_glow_effect" misname)
+builds the mode's ctx and calls the same `HUD_DrawMapOverlay`:
+
+- masks [orig: `@0x5a7e8a..0x5a7ed0`]: the default (glow_params = 0)
+  M-cycle call takes `719159 = 0xAF937` for BOTH modes 2 and 3;
+  `715063 = 0xAE937` belongs to the PARAMETERIZED variant
+  (`BYTE1(params+4)` clear — its callers are unwalked), NOT to a mode.
+  `|0x10000` (bit16) applies then modes 3/4 clear it — windowed-only.
+  mode 2: the 400×400 design window at (20,20)..(419,419); mode 3: the
+  fullscreen 0,0..1023,767 map. The mask has NO bit9 and NO bit6 (no
+  compass — the compass gate is bit9 && bit6 `@0x5cab..512-region`), and
+  NO bit18 label. mode 1 exists for a caller-supplied entity (rotating,
+  entity_ref = entity heading; ctx+48 carries the mode and exempts the
+  grid leg) and mode 4 for a caller rect (the DEATH-window sibling).
+- bit12 (set in 0xAF937) selects the GRID leg, not marker suppression:
+  `(ctx & 0x1000) == 0 || ctx+48 == 1` routes straight to the bank walk,
+  else the grid loops run FIRST and fall through into the same walk
+  [orig: the `@0x5a5f40` grid-branch gate → `goto` into
+  `MapOverlay_RenderAllLayers`]. The big map DOES draw the retained
+  banks.
+- rotation base `entity_ref = 0x40000000` for modes 2/3 — NORTH-UP after
+  the transform's −90 fold. Blip sprites rotate against the VIEW base
+  (world-stable facing on the north-up modes), not the player heading.
+- zoom = `g_bigMapZoom @0xB76490`, spawn default **524288** (0x80000 =
+  8× the spinmap's world extent) [orig: `Player_InitPlayer
+  @0x4e1741..0x4e1754 — flt_7CD424 = 524288.0`]; the radar keys step IT
+  while a mode is up [orig: the mode-gated case reads
+  `@0x49bc98`/`@0x49be97`].
+- the big map clips to its RECT (the box clip
+  `clip_triangle_and_emit_vertices @0x688e30`); the circular stencil
+  belongs to the corner spinmap alone. The corner spinmap keeps drawing
+  under an active mode (both passes run per frame).
+- the grid leg [orig: the `@0x5a5f40` grid loops off the bit12 branch]:
+  vertical rules on the ABSOLUTE −150-wu lattice
+  (`19660800·(center/19660800 − half) − 0x960000` start), horizontal
+  rules on the plain 300 lattice, in pale yellow `unk_FFFF7F` + ctx
+  alpha. The column letter is `HUD_FormatGridCoordinate(line_x −
+  origin_snap)` drawn centered in the FOLLOWING gap — because the −150
+  fold rides the lattice, every gap's letter agrees with the player
+  MAPCOORDS formula everywhere inside it. Row numbers are a plain
+  sequential counter seeded `(start − origin)/300 − 1` (no zero skip).
+  The leg CLOSES with an on-map player readout `"(%s,%d)"` — the
+  MAPCOORDS column fold + the zero-skip row — at the projected player
+  point −(50,25) px. Letters, numbers, and the readout all draw with
+  `HUD_DrawTextCentered_HalfBright` on **`g_hudLabelFontLarge`**. The
+  exact label pixel anchors are capture-derived pending a retail M-map
+  reference; the values and lattices are byte-witnessed.
+- OpenNova: `Simulation.request_hud_map_cycle/get_hud_map_mode/
+  get_hud_big_zoom_q16` over the engine `hud::HudMapControl` (mode
+  lifecycle incl. the dead-player clear), the router's `map_toggle`
+  edge, the second `HudMapPass` (`HudDrawList::big_map` + its own glyph
+  list and raised canvas sandwich), and the mode legs in
+  `HudMinimapCompiler`. The map-material alpha stage ignores texture
+  alpha (the colormap binds as RGB). Witnessed-unported: the pan/drag
+  input handlers (`sub_5432D0`/`sub_543360`/`@0x5434e0` family), the
+  0xAF937 bits 11/13/14/15 semantics, mode 1, the mode-4 DEATH window
+  (D-HUD-19), and the objectives-family draws retail layers above the
+  big map (ours ride the flat pass).
+
+Scope boundary: this ports only the normal gameplay spinmap. The fullscreen
+command map and the windowed CMAP/DEATH `MapOverlay_DrawView` remain D-HUD-19
+(both share the banks above plus the §5.59 `MinimapSlot_*` player registry —
+`MinimapSlot_FindOrAllocByEntityId @0x57b1e0`, fed by the player wire
+messages).
+
+
 ## Objectives panel — `HUD_DrawWinConditions @0x5ba940` + the subgoal state (witnessed 2026-07-18)
 
 The SP/co-op **MISSION OBJECTIVES** overlay and the subgoal state machine
@@ -1072,7 +1537,7 @@ behind it.
 | ID | Ours / reference | Original (Jointops.exe) | Why / consequence |
 |---|---|---|---|
 | D-HUD-1 | IDB curated name `draw_minimap_compass_overlay`; the oscarmike reference models a "spinmap" compass | `HUD_DrawStanceIndicator @0x599f10` renders the **stance** indicator, keyed by `byte_27235C0` = `hudInfo+568` stance index | The function is mis-named in the IDB and mis-modeled in oscarmike. The OpenNova stance widget must be the discrete cross-faded `HUDSTANCE` frames, not a compass. Rename proposed (held). |
-| D-HUD-2 | oscarmike `spinmap.gd` = a single rotating compass-ring texture | the stance widget is discrete pre-rendered frames cross-faded on stance change. 2026-07-18 correction: the "`@0x599700` radar" this row pointed at is the **weapon heat bar** (`HUD_DrawWeaponHeatBar`); JO:CA has **no in-HUD radar or compass** — the compass strip (`@0x595470`) is dead code, and heading/map display lives only in the map overlay (`HUD_DrawMapOverlay @0x5a5f40`) | Do not port a rotating ring, and do not port any always-on radar element. Stance = frame swap with fade; map/heading = the map overlay (follow-up). |
+| D-HUD-2 | oscarmike `spinmap.gd` conflated the IDB-misnamed stance function with a rotating compass-ring texture | the stance widget is discrete pre-rendered frames cross-faded on stance change. The `@0x599700` "radar" is separately the weapon heat bar, while the actual normal gameplay spinmap is `HUD_RenderAllOverlays @0x5a8070` → `HUD_DrawMapOverlay @0x5a5f40` in the authored HUDSPINMAP rect, live behind the compiled-in-true master switch `dword_2723CC4` (the 2026-07-18 "no in-HUD radar" gloss overstated: only the compass STRIP `@0x595470` and `draw_entity_labels @0x593820` are dead) | **FIXED 2026-08-13.** Stance and gameplay map are separate elements: discrete `HUDSTANCE` frames plus the heading-up terrain/blip spinmap with its counter-rotating `compring` overlay. The dead `HUD_DrawCompassStrip @0x595470` remains unported. |
 | D-HUD-3 | — | Design space is fixed **1024×768**, scaled with round-to-nearest (`Viewport_ScaleToVirtualCoords @0x5d2b20`) | OpenNova authors HUD positions in 1024×768 and scales to the actual surface with the `(p*s+½s)/dim` rounding. |
 | D-HUD-4 | — | Health bar *fill width* uses the capped `+92` ratio; *fill color* uses an uncapped recomputed ratio (`HUD_DrawHealthBar @0x5a2e50`) | Equivalent over `[0,1]`; recorded so the port matches both reads rather than collapsing to one. |
 | D-HUD-5 | `hud_clip_indicator.gd` restamps its flash on (`round_type`, reserve) change | restamp keys are (`weapondef+220` ammo class, reserve, `weapondef+216` pool id) `[orig: @0x599ab2]` | Our weapon model runs a single ammo pool (net-re D-WPN-2), so the ammo-class/pool ids aren't distinct state yet; the proxy fires on the same reload/switch transitions. Revisit with per-class pools. |
@@ -1083,32 +1548,34 @@ behind it.
 | D-HUD-10 | the crosshair anchors at the fixed design center (512, 384) | the anchor is the projected aim point through `Viewport_ScreenToVirtual`: the literal screen center only for the on-foot local player with no camera mode `[orig: @0x5928a0]`; spectate / `g_camera_mode` (external/3P) project `Entity_BuildCameraView` (far point 65536000 q16 = 1000.0) `[orig: @0x592910..0x59295e]` | FIXED 2026-07-11 (weapon round): `LocalPlayerPresenter.aim_screen_point()` — `Vector2.INF` in first person (the HUD pins the exact center, matching `@0x5928a0`), the projected aim in third person; `GameHudPresenter` feeds it to both shells. |
 | D-HUD-11 | the label nearest-only gate models `equipped_adm_index != 0xFF` + not-in-a-ctrl/drvr-seat (`Simulation::get_attach_labels`) | `Player_CanFireWeapon @0x5cf780` additionally requires no camera mode (`g_camera_mode`), not underwater (`Position.Z + CameraOffset.Z < Env_WaterHeightFixed` with the 0x8000 flag), and the settled-scope legs | The extra legs are presentation/render state the sim doesn't carry; on foot with a weapon the observable difference is the underwater/camera cases. Wire when those states reach the sim. |
 | D-HUD-12 | **FIXED 2026-08-11.** Attach labels lay out through the ported CGameFont engine with the witnessed BOLD Arial label font at the slot scale (`HudFrameCompiler::element_attach_labels` + `configure_label_fonts`) | `HUD_MeasureTextWH @0x580ab0` measures through the bold slot's (`g_hudLabelFontBold @0xB4C394`, ex "fontObj") `{handle, scale_x, scale_y}` pair (`CGameFont_MeasureText @0x674e70`); labels draw at raw screen pixels | Same glyph walk, same font file, same scale; box arithmetic `(x−w/2,y−2)..(x+w/2+5,y+h+1)` ported verbatim. Pinned by ctest `hud_frame_compiler` (label-font faces/scale). |
-| D-HUD-13 | **CLOSED 2026-08-10.** The label color base is the hudpos `hud_textcolor` | the master overlay color `g_hudActiveColor @0x24c1868` — writer NOW WITNESSED: `= g_hudColorTable[cfg_hud_color_index] \| 0xFF000000` (`HUD_InitTeamColorTable @0x51f240`; the input case 10 cycle `@0x49afc7`; config token `hud_color_index`, default **2** `@0x54d28b`), and table slot 2 is refreshed per frame from hudpos `hud_textcolor` (`@0x5a8100`) | **The reimpl base was already exact**: under the retail default scheme the master color IS `hud_textcolor`. The dim transform stays ported (`HudAttachLabels.dim`). The non-default schemes LANDED 2026-08-13 — the scheme table, the config token, and the cycle are ported (see "The hud_color_index scheme" below); the cycle's default KEY stays a reimpl mapping (D-CTRL-3). |
+| D-HUD-13 | **CLOSED 2026-08-10.** The label color base is the hudpos `hud_textcolor` | the master overlay color `g_hudActiveColor @0x24c1868`; table slot 2 is refreshed per frame from hudpos `hud_textcolor` (`@0x5a8100`) and is the observed/default source | **The reimpl base is exact for the shipped observable path** and the dim transform stays ported (`HudAttachLabels.dim`). The scheme port (see "The hud_color_index scheme") is restored 2026-08-13 with the byte-witnessed producer: the `hudcolor` action row (code 10, default F6, retail-shadowed by `huddetail`) — neither of the earlier H mappings survives the catalog walk. |
 | D-HUD-14 | no bottom prompts | `HUD_DrawGameplayOverlays @0x5bde60`: the preround armory prompt (`STROVER_ARMORY_INFO`, S2C-0x0A-fed `dword_A85B64`; SP never draws it), the vehicle-bay prompt (`Flags & 0x800` + team-gated groundEntity), the FARP wait/reload overlays (`attrib2 & 0x2000` + unlock mask) | Witnessed, deferred: each rides an unported system (MP preround state / vehicle.mnu / FARP rearm). The `STROVER_ARMORY_WAIT` leg is dead code in retail (the impossible `@0x5bdef8` recheck). |
 | D-HUD-15 | **CLOSED 2026-07-22.** The drawer was already parity-complete; the missing half was the source. The accumulator is now witnessed and ported (D-WPN-4, net-re §5.62): heat is a DEADLINE on the slot, `def+880 × (slot+0x14 − tick)`, stamped once per shot by the recoil arbiter | heat = `WeaponSlot_CalcAccumulatedHeat @0x53f780` per frame, clamped to `0xFFFF` into `hudInfo+60` `[orig: HUD_BuildEntityInfo @0x4b852e, clamp @0x4b854d]` | Fed sim → weapon view → HUD with the clamp applied where the original's info builder applies it. The bar fills on the thirteen emplaced/vehicle guns that author `heat_values` and stays hidden on foot, because no infantry weapon authors heat in retail either. |
 | D-HUD-16 | the SP waypoint track is built sim-side at mission load from the BMS nav channel (`flags & 2`) + pool-3 markers — no 0x0F wire leg in the loop | retail always routes the list through the S2C 0x0F apply, even in SP mode 3 (the local server serializes, the local client applies) | Same data, same selection rule, no serialization round-trip. The npwire 0x0F waypoint block already decodes (net-re §5.29); wire-parity for MP join is the npwire follow-up, not a HUD divergence. |
 | D-HUD-17 | proximity advance ports the distance/last-entry/skip-done legs; `SpawnPoint_CheckWeaponRestrictions @0x4dbe80` (the AAS spawn-point weapon-restriction pass gate) is modeled as always-pass; the MP POI list (`Entity_BuildMapPoiLists @0x42de40`) and spectate reuse are unported | the restriction check reads the 4 weapon slots vs the event-system restriction mask and can force-advance | SP missions author no weapon restrictions on route markers; port the check with the AAS/MP HUD phase. |
 | D-HUD-18 | GEOMETRY CLOSED 2026-08-12: the checkbox (16×16, 4 lines, 0xFFE0E0E0), the done-mark RED X (6 lines, 0xFFFF0000 — the old "checkmark" gloss was wrong), the `HUD_DrawLabelBox` rect (y−0x18 / +0x48 / +0x30), the measured-height row advance, and the exact alpha/gray color folds are ported into `element_objectives` with the panel alpha byte carried in the frame state. Remaining: the win-score add `@0x454526` (no score system), the "New Objective" toast `HUD_ShowObjectiveNotification @0x5ba2e0` (internals unwalked), the header unknown5[2]/[3] team-banner legs (`byte_A762D6/D7`), the KEY_O reimpl binding (input layer), `HUD_DrawLabelBox`'s internal box-shader styling (fill+wire stand-in at the witnessed rect), and the fontLarge/fontBold slot plumb (single HUD font stand-in) | disasm 2026-08-12 (the full drawer); score add `@0x454526`, toast `@0x4546e2` call site, banner masks `byte_A762D6/D7`, binding row = the input layer | The state machine, row walk, geometry, color folds, and chat/banner announcements are exact; the residuals each ride an unported system (score / notification / banner / input binding) plus the two cited drawer stand-ins. |
-| D-HUD-19 | the DEATH deploy screen (`DeployScreenPresenter`, death.mnu) ships the authored chrome, the witnessed SPAWNPOINTS_LIST populate, and the pick flow — its MAP window renders no map image | the MAP window's render pass draws the windowed map view `MapOverlay_DrawView @0x5a58e0` (terrain layers + blips + labels; pan/zoom via `command_map_overlay_input_handler @0x554310`), the sibling of the fullscreen `HUD_DrawMapOverlay @0x5a5f40` | The pick behavior is complete without the image (the list is the pick surface); the map draw internals are the tracked next map-phase witness — port `MapOverlay_DrawView` and feed both the CMAP and DEATH windows from it. |
-| D-HUD-20 | **FIXED 2026-08-10** (core). The friendly tags (overhead name labels) are ported end to end for the SP/AI path: `world::collect_friendly_tags` → `Simulation::get_friendly_tags` → presenter projection/fog/KEY_F cycle → `HudFrameCompiler::element_friendly_tags` — the witnessed gates, health-tier colors, distance alpha, centered alpha-preserving half-bright text, the `'^'`+36-name fallback, the BMS→`[PeopleNames]` authored names, the BRIEF ticks, and the medic cross plate (feed pending) | the drawer is `HUD_DrawEntityLabel @ 0x5a39b0` off `HUD_DrawFriendlyTagsPass @ 0x5a4480` (full witness: the element map section). The 2026-08-10 hunt's dead ends stay recorded: `hud_draw_target_entity_overlay @ 0x59a5d0` = the targeted-GEAR overlay, `sub_599C20 @ 0x599c20` = the scope quad | Residues, each with its owning system: (a) the player-slot walk legs — callsign labels ride our MP roster, plus squad colors `@0x83B450` (middle × 0.7), the flag-2 `"%s: %ld"` slot+16 count, the `<ch>`channel`<co>` wrap, and the slot+44 pulse; (b) the enemy magenta leg behind the server-granted `g_enemyTagsVisible @0x24D1DF4` (spectator/S2C 0x00A); (c) the medic-plate FEED — charattr.def `ATTRIBUTES` Medic(0x8) by `playerClass` (`CharAttr_LoadFromDef @0x412140`; AI classes unmodeled sim-side); (d) the wounded icon — `entity+885` writer unwitnessed (texture id 0x17); (e) FIXED 2026-08-13 — the `hud_color_index` scheme swap landed (the good tier reads `tagcolor_good` only at index 2, else the scheme table; the scheme details below); (f) the speaking-pulse LEVEL feed (formula ported; the dialog-channel amplitude is a device follow-up); (g) `entity+116` display height (writer unwalked; standing-constant stand-in) and the difficulty term of `Entity_GetMaxHealthWithDifficulty`; (h) the death-screen recolor/center-pin legs and the `0x27233DC/E0` latch bits (consumers unwitnessed). |
+| D-HUD-19 | the DEATH deploy screen (`DeployScreenPresenter`, death.mnu) ships the authored chrome, the witnessed SPAWNPOINTS_LIST populate, and the pick flow — its MAP window renders no map image | the MAP window's render pass draws the windowed map view `MapOverlay_DrawView @0x5a58e0` (terrain layers + blips + labels; pan/zoom via `command_map_overlay_input_handler @0x554310`), the sibling of the fullscreen `HUD_DrawMapOverlay @0x5a5f40` | The pick behavior is complete without the image (the list is the pick surface); the map draw internals are the tracked next map-phase witness — port `MapOverlay_DrawView` and feed both the CMAP and DEATH windows from it; the 2026-08-13 gameplay-spinmap port (D-HUD-21) supplies the reusable compiler and banks to host there. |
+| D-HUD-20 | **FIXED 2026-08-10** (core). The friendly tags (overhead name labels) are ported end to end for the SP/AI path: `world::collect_friendly_tags` → `Simulation::get_friendly_tags` → presenter projection/fog/KEY_F cycle → `HudFrameCompiler::element_friendly_tags` — the witnessed gates, health-tier colors, distance alpha, centered alpha-preserving half-bright text, the `'^'`+36-name fallback, the BMS→`[PeopleNames]` authored names, the BRIEF ticks, and the medic cross plate (feed pending) | the drawer is `HUD_DrawEntityLabel @ 0x5a39b0` off `HUD_DrawFriendlyTagsPass @ 0x5a4480` (full witness: the element map section). The 2026-08-10 hunt's dead ends stay recorded: `hud_draw_target_entity_overlay @ 0x59a5d0` = the targeted-GEAR overlay, `sub_599C20 @ 0x599c20` = the scope quad | Residues, each with its owning system: (a) the player-slot walk legs — callsign labels ride our MP roster, plus squad colors `@0x83B450` (middle × 0.7), the flag-2 `"%s: %ld"` slot+16 count, the `<ch>`channel`<co>` wrap, and the slot+44 pulse; (b) the enemy magenta leg behind the server-granted `g_enemyTagsVisible @0x24D1DF4` (spectator/S2C 0x00A); (c) the medic-plate FEED — charattr.def `ATTRIBUTES` Medic(0x8) by `playerClass` (`CharAttr_LoadFromDef @0x412140`; AI classes unmodeled sim-side); (d) the wounded icon — `entity+885` writer unwitnessed (texture id 0x17); (e) the good-tier scheme swap is live again with the witnessed `hudcolor` producer (D-CTRL-4 tracks the reachability divergence); (f) the speaking-pulse LEVEL feed (formula ported; the dialog-channel amplitude is a device follow-up); (g) `entity+116` display height (writer unwalked; standing-constant stand-in) and the difficulty term of `Entity_GetMaxHealthWithDifficulty`; (h) the death-screen recolor/center-pin legs and the `0x27233DC/E0` latch bits (consumers unwitnessed). |
 
 ## Follow-ups (not yet witnessed / deferred)
 
-- **Map overlay** `[orig: HUD_DrawMapOverlay @0x5a5f40]` (7278 B, called from
-  `HUD_RenderAllOverlays @0x5a87bb`) — the fullscreen/deploy map: terrain
-  render, grid coordinates (`HUD_FormatGridCoordinate`), ring blips
-  (`minimap_draw_ring_blip`, `update_radar_contacts` — the §5.19/§5.59
-  MinimapSlot tables), `draw_compass_indicator`, waypoint labels
-  (`WPNames/STRWPNAME%03d`, `STROVER_OBJECTIVEPOINT_SHORT`,
-  `STROVER_DEFENSIVEPOSITION`), `%01.2fk` distances, `MapOverlay_RenderAllLayers`.
-  Structured this session; the draw internals are the next map-phase witness.
-  (The old "radar/minimap @0x599700" pointer was the heat-bar misnomer —
-  resolved 2026-07-18, see D-HUD-2.) 2026-07-24 addition: the WINDOWED sibling
+- **Command/deploy map surfaces.** The normal `HUDSPINMAP*` call into
+  `HUD_DrawMapOverlay @0x5a5f40` is now ported above. Still deferred are its
+  fullscreen command-map legs (mask bits 12/16/17/20; the 300-unit grid +
+  `HUD_FormatGridCoordinate @0x598600` coordinate labels, command labels,
+  pan/zoom/input hosting) and the WINDOWED sibling
   `MapOverlay_DrawView @0x5a58e0` (ex-sub_5A58E0; `(rect, centerX, centerY,
-  scale)`) is the map view the CMAP command-map screen and the DEATH deploy
-  screen draw inside their .mnu MAP windows (net-re §5.61's screen witness);
-  the ported deploy screen ships chrome-only until this draw is witnessed —
-  D-HUD-19.
+  scale)`) used by the CMAP command-map and DEATH deploy `.mnu` MAP windows.
+  Their marker sources are the same 0x40/0x6B banks plus the §5.19/§5.59
+  `MinimapSlot_*` player registry (`MinimapSlot_FindOrAllocByEntityId
+  @0x57b1e0`, `MinimapSlot_InitBlipFromPackedId @0x57b080`; fed by
+  `NapiNPClientMsg_CharMinimapUpdate`/TeamAssign/HandlePlayerSpawn/
+  FullEntitySpawn). Supporting inventory for those legs:
+  `minimap_draw_ring_blip @0x597320`, `draw_billboard_decal @0x5975f0`,
+  `draw_minimap_blip @0x597890`, `WPNames/STRWPNAME%03d`,
+  `STROVER_OBJECTIVEPOINT_SHORT`/`STROVER_DEFENSIVEPOSITION`, `%01.2fk`.
+  The gameplay compiler is reusable substrate, but those surfaces require
+  their distinct view state and UI orchestration — D-HUD-19.
 - **Chat channel geometry** — the `dword_28E4DF8` table (rows 1/2 chat, 3/4
   system/debug) that `Chat_RebuildDisplayBuffers @0x498bd0` wraps against and
   the drawer anchors with; its writer is unwitnessed (D-HUD-6).
@@ -1160,6 +1627,17 @@ behind it.
   net views surface it.
 
 ## IDB changes
+
+Applied 2026-08-13 (the gameplay-spinmap grill; HTTP-fallback session):
+`MapView_SetTransform @0x607130` defined (`add_func 0x607130..0x6071c0` —
+the region was undefined) and named — the unreferenced twin of
+`render_terrain_decal`'s transform-global tail. Read-only elsewhere; the
+kong misnomers spotted this session (`render_glow_effect` = the big-map
+renderer at `0x5a7d??`, `CTerrainTile_UpdateShadowState @0x599220` = the
+map line/tether drawer, `qt_register_signal_spy_callbacks @0x5891b0` = a
+FLIRT false positive on a 4-dword copy, `Server_DumpPuntLogToFile` as the
+code-48 dispatcher arm is correct) are recorded here for the next session
+rather than renamed, pending curated-name review.
 
 Applied 2026-08-11 (the D-HUD-20 eye-offset + label-font hunt; anchored
 renames; IDB saved):

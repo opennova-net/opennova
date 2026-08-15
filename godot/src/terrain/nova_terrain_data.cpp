@@ -458,6 +458,8 @@ void TerrainData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_height_world_bilinear", "world_pos"), &TerrainData::get_height_world_bilinear);
 	ClassDB::bind_method(D_METHOD("get_surface_normal_world", "world_pos"), &TerrainData::get_surface_normal_world);
 	ClassDB::bind_method(D_METHOD("get_colormap_color_world", "world_x", "world_z"), &TerrainData::get_colormap_color_world);
+	ClassDB::bind_method(D_METHOD("build_minimap_water_mask", "water_height_wu"),
+			&TerrainData::build_minimap_water_mask, DEFVAL(NAN));
 	ClassDB::bind_method(D_METHOD("get_modulated_colormap_color_world", "world_x", "world_z", "light_color"),
 	                     &TerrainData::get_modulated_colormap_color_world);
 	ClassDB::bind_method(D_METHOD("get_detail_foliage_index_world", "world_x", "world_z"),
@@ -1502,6 +1504,70 @@ Vector3 TerrainData::get_surface_normal_world(const Vector3 &p_world_pos) const 
 	return Vector3(static_cast<float>(normal.x),
 	               static_cast<float>(normal.up),
 	               static_cast<float>(normal.z));
+}
+
+
+Ref<ImageTexture> TerrainData::build_minimap_water_mask(
+		float p_water_height_wu) const {
+	// depthspin is built directly from the 1024x1024 raw16 height atlas. Each
+	// output texel averages the four source taps at (4x,4z), (+2,0), (0,+2),
+	// and (+2,+2), then keeps the integer world-height byte (sum >> 10).
+	// Retail witness: PolyTrn_InitTextures @0x60BA20..0x60BB3B; the exact
+	// address-level contract is recorded in hud_minimap.cpp and hud-re.md.
+	constexpr int kSourcePx = 1024;
+	constexpr int kMaskPx = 256;
+	constexpr int kStep = 4;
+	constexpr int kHalfStep = 2;
+	if (!loaded || cpt.depth_buffer.size() !=
+			static_cast<size_t>(kSourcePx) * kSourcePx) {
+		return Ref<ImageTexture>();
+	}
+	const float water_wu = std::isnan(p_water_height_wu)
+			? static_cast<float>(water_height) * 0.5f
+			: p_water_height_wu;
+	if (!std::isfinite(water_wu)) {
+		return Ref<ImageTexture>();
+	}
+	// Env_WaterHeightFixed == 0 suppresses the entire pass. Positive SHIWORD
+	// conversion truncates to the integer plane; retail clamps it at 254.
+	const int water_int = std::clamp(
+			static_cast<int>(std::floor(water_wu)), 0, 254);
+	if (water_int <= 0) {
+		return Ref<ImageTexture>();
+	}
+
+	PackedByteArray bytes;
+	bytes.resize(static_cast<int64_t>(kMaskPx) * kMaskPx * 2);
+	bytes.fill(0);
+	uint8_t *dst = bytes.ptrw();
+	const uint16_t *height = cpt.depth_buffer.data();
+	for (int z = 0; z < kMaskPx; ++z) {
+		const int source_z = z * kStep;
+		for (int x = 0; x < kMaskPx; ++x) {
+			const int source_x = x * kStep;
+			uint8_t *pixel = dst +
+					(static_cast<int64_t>(z) * kMaskPx + x) * 2;
+			const uint32_t sum =
+					height[source_z * kSourcePx + source_x] +
+					height[source_z * kSourcePx + source_x + kHalfStep] +
+					height[(source_z + kHalfStep) * kSourcePx + source_x] +
+					height[(source_z + kHalfStep) * kSourcePx +
+							source_x + kHalfStep];
+			const int terrain_height_int = static_cast<int>(sum >> 10);
+			// Keep both operands until raster time: retail linearly samples the
+			// height-alpha field and only THEN alpha-tests it against the water
+			// plane. Thresholding these texels to a binary mask first changes the
+			// contour and produces a broad filtered halo. RG8 is a linear data
+			// texture; the map-water shader compares sampled R (terrain) to the
+			// constant sampled G (water).
+			pixel[0] = static_cast<uint8_t>(terrain_height_int);
+			pixel[1] = static_cast<uint8_t>(water_int);
+		}
+	}
+	const Ref<Image> mask = Image::create_from_data(kMaskPx, kMaskPx, false,
+			Image::FORMAT_RG8, bytes);
+	return mask.is_valid() ? ImageTexture::create_from_image(mask)
+			: Ref<ImageTexture>();
 }
 
 Color TerrainData::get_colormap_color_world(float world_x, float world_z) const {

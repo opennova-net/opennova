@@ -199,6 +199,13 @@ static func _install_edit_actions(session: DebugSession) -> void:
 	teleport.action_returns_error = true
 	session.register_control(teleport)
 
+	var map_cycle := DebugControlDef.action_control(
+			&"cycle_map_mode", &"Player", "Cycle map mode",
+			"Step the M-key map cycle: off -> window -> fullscreen -> off.",
+			TARGET_SIM, &"request_hud_map_cycle")
+	map_cycle.requires_unlock = true
+	session.register_control(map_cycle)
+
 	var health := DebugControlDef.action_control(
 			&"set_entity_health", &"Entities", "Set health",
 			"Set the selected simulation entity's health.",

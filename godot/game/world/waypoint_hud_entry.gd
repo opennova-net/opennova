@@ -10,3 +10,5 @@ extends RefCounted
 
 var text_name := ""   # resolved WPNames display name
 var distance_m := 0   # whole meters, the fixed >>16 truncation
+var mission_position := Vector2.ZERO  # mission ground plane (x, y)
+var altitude_wu := 0.0  # world-unit altitude; the spinmap tricolor input

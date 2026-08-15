@@ -2,12 +2,15 @@
 
 #include <godot_cpp/classes/canvas_item_material.hpp>
 #include <godot_cpp/classes/control.hpp>
+#include <godot_cpp/classes/shader.hpp>
+#include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/rid.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/vector2.hpp>
@@ -22,6 +25,7 @@ namespace godot {
 
 class HudPos;
 class ResourceRoot;
+class TerrainData;
 
 // The runtime in-game HUD overlay — the ADR 0033 device leg over the engine's
 // HudFrameCompiler (engine/runtime/hud). The engine owns the whole witnessed
@@ -89,7 +93,9 @@ public:
 	void set_objective_line(const String &p_text);
 	// The resolved gametext Overlays/STROVER_MISSIONOBJECTIVES header line.
 	void set_objectives_header(const String &p_text);
-	void set_waypoint(const String &p_name, int p_distance_m);
+	void set_waypoint(const String &p_name, int p_distance_m,
+			const Vector2 &p_mission_position = Vector2(),
+			float p_altitude_wu = 0.0f);
 	void clear_waypoint();
 	void set_objectives(const PackedStringArray &p_texts,
 			const PackedByteArray &p_done);
@@ -111,6 +117,22 @@ public:
 	// Per-frame environment feed: the fog cull distance (16.16; <= 0 disables)
 	// and the speaking entity's voice level 0..255.
 	void set_friendly_tag_env(int p_fog_dist_q16, int p_speaking_level255);
+	// Device-facing minimap feeds. TerrainData is sampled once into the
+	// portable sector layout; snapshot is Simulation's versioned fixed-stride
+	// retained overlay buffer.
+	void set_minimap_terrain(const Ref<TerrainData> &p_terrain,
+			const Ref<Texture2D> &p_water_mask = Ref<Texture2D>());
+	void set_minimap_state(const Vector2 &p_mission_position,
+			float p_altitude_wu, int64_t p_heading_bam, int p_zoom_q16,
+			int p_big_zoom_q16, int p_map_mode, bool p_flip_180,
+			const PackedInt32Array &p_snapshot);
+	// The mission's type-2043 marker entity anchors the grid labels
+	// (witness at HudMinimapInput::grid_origin_x).
+	void set_minimap_grid_origin(const Vector2 &p_mission_position,
+			bool p_present);
+	// Static building/zone footprint polygons (the sim feed, baked once per
+	// mission; witness at world::minimap_footprint_from_occlusion).
+	void set_minimap_footprints(const PackedInt32Array &p_feed);
 
 	// Debug/test accessor: compile at the current surface size and report the
 	// draw list's element counts.
@@ -145,6 +167,8 @@ private:
 	bool label_font_valid_ = false;
 	fnt_font_t label_font_bold_ = {};
 	bool label_font_bold_valid_ = false;
+	fnt_font_t label_font_large_ = {};
+	bool label_font_large_valid_ = false;
 	int label_tier_ = -1; // -1 = not loaded; 0 <=640 / 1 <=800 / 2 >800
 	bool configured_ = false;
 	int crosshair_style_ = MIN_CROSSHAIR_STYLE;
@@ -152,9 +176,35 @@ private:
 	// child RenderingServer canvas item carrying a BLEND_MODE_ADD material.
 	Ref<CanvasItemMaterial> additive_material_;
 	RID additive_item_;
+	// Retail thresholds the linearly sampled depthspin height field against
+	// the water plane. This material keeps that comparison in the raster pass.
+	Ref<Shader> minimap_water_shader_;
+	Ref<ShaderMaterial> minimap_water_material_;
+	// The spinmap sandwich: the retail terrain draws twice (base + additive
+	// x4-stage resubmission), so the second pass and everything the map
+	// layers above it ride pinned-order child items. The M-cycle big map
+	// gets its OWN trio ABOVE the flat HUD and the corner map — retail
+	// draws it as a second pass over the whole overlay set, under only the
+	// objectives-family legs (witness at hud_frame.h HudDrawList::big_map).
+	RID map_base_item_;
+	RID map_add_item_;
+	RID map_water_item_;
+	bool map_water_sampling_configured_ = false;
+	RID map_top_item_;
+	bool map_top_sampling_configured_ = false;
+	RID big_map_base_item_;
+	RID big_map_add_item_;
+	RID big_map_water_item_;
+	bool big_map_water_sampling_configured_ = false;
+	RID big_map_top_item_;
+	bool big_map_top_sampling_configured_ = false;
 
 	Vector2 draw_surface_() const;
-	Ref<Texture2D> load_hud_texture_(const String &p_name) const;
+	Ref<Texture2D> load_hud_texture_(const String &p_name,
+			bool p_generate_mipmaps = false) const;
+	// MODULATE2X equivalence for a white-modulated static sprite: RGB x2
+	// saturated, alpha unchanged (the compass ring's pipeline).
+	Ref<Texture2D> double_saturate_texture_(const Ref<Texture2D> &p_texture) const;
 	void load_crosshair_texture_();
 	void clear_font_();
 	// Parse one .fnt through the VFS and upload its pages into the slot's
@@ -164,7 +214,16 @@ private:
 	// breakpoint, and hand the compiler the pair + the witnessed slot scale.
 	void ensure_label_fonts_(float p_surface_w);
 	void ensure_additive_item_();
+	void ensure_minimap_water_material_();
+	void ensure_map_items_();
+	void ensure_big_map_items_();
 	void render_list_(const opennova::hud::HudDrawList &p_list);
+	// p_big selects the sandwich: the corner map's base rides the control's
+	// own item (under the flat HUD) with its add/top children just above the
+	// flat pass; the big map's whole trio sits above everything flat.
+	void render_map_(const opennova::hud::HudMapPass &p_map,
+			const std::vector<opennova::hud::GameFontQuad> &p_map_glyphs,
+			bool p_big);
 };
 
 } // namespace godot

@@ -318,6 +318,89 @@ func test_host_integrity_profile_is_explicit_and_roundtrips() -> void:
 			"the independently witnessed corpus is an explicit host-session input")
 	sim.free()
 
+
+func test_hud_minimap_snapshot_and_controls_have_a_stable_contract() -> void:
+	var sim: Simulation = autofree(Simulation.new())
+	var snapshot: PackedInt32Array = sim.get_hud_minimap_snapshot()
+	assert_eq(snapshot.size(), int(Simulation.HUD_MINIMAP_HEADER_SIZE),
+			"A fresh Simulation publishes an empty minimap snapshot.")
+	assert_eq(snapshot[0], int(Simulation.HUD_MINIMAP_SNAPSHOT_VERSION),
+			"Snapshot version leads the header.")
+	assert_eq(int(Simulation.HUD_MINIMAP_SNAPSHOT_VERSION), 3,
+			"Row layout v3: the client-resolved draw policy tail rides each row.")
+	assert_eq(snapshot[1], int(Simulation.HUD_MINIMAP_STRIDE))
+	assert_eq(snapshot[2], 0, "No retained rows without a mission.")
+	assert_eq(int(Simulation.HUD_MINIMAP_HEADER_SIZE), 3)
+	assert_eq(int(Simulation.HUD_MINIMAP_STRIDE), 16)
+	assert_eq(sim.get_local_player_heading_bam(), 0,
+			"No local player -> heading zero.")
+	assert_eq(sim.get_hud_radar_zoom_q16(), 65536,
+			"The radar zoom boots at the retail Q16 default.")
+	# Zoom OUT grows the world-extent value x1.15; IN shrinks x0.85.
+	# [orig: Input_HandleActionBinding cases 361/360 @0x49beaf/@0x49bcb0]
+	assert_eq(sim.request_hud_radar_zoom(1), 75366,
+			"radarout applies the retail x1.15 truncation.")
+	assert_eq(sim.request_hud_radar_zoom(0), 65536,
+			"Direction zero restores the spawn value.")
+	assert_eq(sim.request_hud_radar_zoom(-1), 55705,
+			"radarin applies the retail x0.85 truncation.")
+	assert_false(sim.get_hud_map_flip_180(),
+			"No mission -> no RotateMap180 attribute.")
+	sim.request_hud_radar_zoom(-1)
+	sim.build_demo_mission()
+	assert_eq(sim.get_hud_radar_zoom_q16(), 65536,
+			"A world reset restores the spawn zoom like Player_InitPlayer.")
+	# The M cycle and the mode-gated zoom routing (witnessed in the engine's
+	# HudMapControl: HUD_CycleMapMode 0->2->3->0; the radar keys step the
+	# big-map zoom while a mode is up).
+	assert_eq(sim.get_hud_map_mode(), 0, "The map boots off.")
+	assert_eq(sim.request_hud_map_cycle(), 2, "M cycles 0 -> 2.")
+	assert_eq(sim.request_hud_radar_zoom(1), 602931,
+			"While a mode is up the radar keys step the big-map zoom.")
+	assert_eq(sim.get_hud_radar_zoom_q16(), 65536,
+			"The corner zoom is untouched by big-map stepping.")
+	assert_eq(sim.request_hud_map_cycle(), 3, "M cycles 2 -> 3.")
+	assert_eq(sim.request_hud_map_cycle(), 0, "M cycles 3 -> 0.")
+	assert_eq(sim.get_hud_big_zoom_q16(), 602931,
+			"The big-map zoom persists across the cycle until a respawn.")
+
+
+func test_hud_minimap_snapshot_restores_the_local_deploy_marker() -> void:
+	var sim: Simulation = autofree(Simulation.new())
+	sim.build_demo_mission()
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+
+	var snapshot: PackedInt32Array = sim.get_hud_minimap_snapshot()
+	var stride := int(Simulation.HUD_MINIMAP_STRIDE)
+	var header := int(Simulation.HUD_MINIMAP_HEADER_SIZE)
+	assert_eq(snapshot.size(), header + int(snapshot[2]) * stride)
+	var local_handle := sim.get_local_player_wire_handle()
+	var matches := 0
+	for row in range(int(snapshot[2])):
+		var base := header + row * stride
+		if int(snapshot[base + 1]) != local_handle:
+			continue
+		matches += 1
+		assert_eq(int(snapshot[base + 0]), 0,
+				"the local deploy row occupies retail's regular persistent bank")
+		assert_eq(int(snapshot[base + 6]), 3,
+				"a live Person resolves to TSDicon cell 3")
+		assert_eq(int(snapshot[base + 7]) & 0xFFFFFFFF, 0xFF304080,
+				"team 1 uses the raw retail blue before MODULATE2X")
+		assert_eq(int(snapshot[base + 8]), 0x10)
+		assert_eq(int(snapshot[base + 10]), 0,
+				"regular local rows remain drawable at zero lifetime")
+		assert_eq(int(snapshot[base + 11]), 1)
+		assert_eq(int(snapshot[base + 12]) & 1, 1,
+				"the live-player glyph rotates with its heading")
+		assert_eq(int(snapshot[base + 13]), 0x20000)
+		assert_eq(int(snapshot[base + 14]), 0x20000)
+		assert_eq(int(snapshot[base + 15]), 6,
+				"the 2-world-unit Person class still floors at six pixels")
+	assert_eq(matches, 1,
+			"the local deploy contributes exactly one ordinary player marker")
+
+
 func test_demo_mission_promotes() -> void:
 	var sim := Simulation.new()
 	sim.build_demo_mission()

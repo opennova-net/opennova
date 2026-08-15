@@ -4,10 +4,15 @@
 #include "simulation/nova_simulation_internal.h"
 #include <npruntime/client_replica_present_projection.h> // the canonical decoded-client projection (ADR 0031)
 
+#include <cmath>
 #include <cstring>
+#include <unordered_map>
 #include <vector>
 
+#include <netsim/client_state.h> // minimap_team_argb (the ONE palette home)
 #include <npwire/ingame_decode.h> // kRoundEventFlag* (the fire-mode byte)
+#include <world/minimap_footprint.h> // the OOBJ occlusion ground-slice footprint mesh
+#include <world/minimap_overlay.h>   // classifier + the blip draw policy
 #include <renderer/tracer_frame.h> // the styled tracer-ribbon compile
 #include <world/entity.h> // kEntityFlag* (the wire state_flags byte IS entity+36 low)
 
@@ -103,6 +108,224 @@ Dictionary Simulation::get_waypoint_hud_view() const {
 	out["position"] = cur ? Vector3(cur->x / 65536.0f, cur->z / 65536.0f, -(cur->y / 65536.0f))
 						  : Vector3();
 	out["done"] = cur != nullptr && cur->done;
+	return out;
+}
+
+Dictionary Simulation::get_hud_map_grid_origin() const {
+	// The map grid-label origin: the mission's first type-2043 marker. The
+	// host stashes it at promotion from the mission doc; a JOINER promotes a
+	// marker-less wire-header BMS (D-NET-194), so its origin resolves from
+	// the replicated pool-3 entity in the decoded view instead — the same
+	// client-side pool scan retail's HUD init runs (witness at
+	// World::map_grid_origin_x / HudMinimapInput::grid_origin_x).
+	Dictionary out;
+	bool present = world_ != nullptr && world_->map_grid_origin_present;
+	int32_t x_q16 = present ? world_->map_grid_origin_x : 0;
+	int32_t y_q16 = present ? world_->map_grid_origin_y : 0;
+	if (!present && runtime_ != nullptr) {
+		present = opennova::netsim::client_minimap_grid_origin(
+				runtime_->state(), x_q16, y_q16);
+	}
+	out["present"] = present;
+	out["position"] = present
+			? Vector3(x_q16 / 65536.0f, 0.0f, -(y_q16 / 65536.0f))
+			: Vector3();
+	return out;
+}
+
+PackedInt32Array Simulation::get_hud_minimap_snapshot() const {
+	const opennova::world::Entity *local_player = world_ != nullptr
+			? world_->registry.get(world_->cached.local_player)
+			: nullptr;
+	const uint16_t local_marker_handle = local_player != nullptr
+			? static_cast<uint16_t>(get_local_player_wire_handle())
+			: opennova::world::EntityHandle::kInvalid;
+	// Between 62 Hz logic ticks every input is unchanged (the retained banks
+	// bump ClientMinimapState::revision; entity resolves, policies, and the
+	// local row advance only with the tick), so display frames reuse the
+	// built array. The baseline restore invalidates across epochs.
+	const uint64_t revision =
+			runtime_ ? runtime_->state().minimap.revision : 0;
+	const uint64_t tick = world_ != nullptr
+			? static_cast<uint64_t>(world_->logic_tick) : 0;
+	if (minimap_snapshot_valid_ && revision == minimap_snapshot_revision_ &&
+			tick == minimap_snapshot_tick_ &&
+			local_marker_handle == minimap_snapshot_local_handle_) {
+		return minimap_snapshot_cache_;
+	}
+	PackedInt32Array out;
+	bool retained_local_player = false;
+	int count = 0;
+	if (runtime_) {
+		const opennova::netsim::ClientMinimapState &map =
+				runtime_->state().minimap;
+		auto count_bank = [&](const auto &bank, bool regular) {
+			for (const auto &slot : bank) {
+				if (!slot.active) continue;
+				++count;
+				if (regular && slot.entity_known &&
+						slot.handle == local_marker_handle)
+					retained_local_player = true;
+			}
+		};
+		count_bank(map.transient, true);
+		count_bank(map.persistent, true);
+		count_bank(map.special, false);
+	}
+	// Retail registers the locally deployed player in a regular retained bank.
+	// The loopback client does not receive that client-local registration, so
+	// restore it here unless a decoded regular row already covers the same wire
+	// handle. The draw-call probe confirms cell 3, team-table blue, and the
+	// ordinary 6px-floor path at map center.
+	// Retail witness: render_minimap_slot_blip @0x5BE240 ->
+	// draw_minimap_blip, regular TSDicon submit @0x597F73. See hud-re.md.
+	const bool append_local_player = local_player != nullptr &&
+			local_marker_handle != opennova::world::EntityHandle::kInvalid &&
+			!retained_local_player;
+	if (append_local_player) ++count;
+
+	out.resize(HUD_MINIMAP_HEADER_SIZE + count * HUD_MINIMAP_STRIDE);
+	int32_t *write = out.ptrw();
+	write[0] = HUD_MINIMAP_SNAPSHOT_VERSION;
+	write[1] = HUD_MINIMAP_STRIDE;
+	write[2] = count;
+
+	int row = 0;
+	auto append_overlay_bank = [&](const auto &bank, int bank_id) {
+		for (const opennova::netsim::ClientMinimapOverlaySlot &slot : bank) {
+			if (!slot.active) continue;
+			int32_t *dst = write + HUD_MINIMAP_HEADER_SIZE +
+					row++ * HUD_MINIMAP_STRIDE;
+			dst[0] = bank_id;
+			dst[1] = slot.handle;
+			dst[2] = slot.x;
+			dst[3] = slot.y;
+			dst[4] = slot.z;
+			dst[5] = slot.heading_bam;
+			dst[6] = slot.param;
+			dst[7] = static_cast<int32_t>(slot.argb);
+			dst[8] = slot.flags;
+			dst[9] = slot.source;
+			dst[10] = slot.remaining_ticks;
+			dst[11] = slot.entity_known ? 1 : 0;
+			// The draw policy resolves against the LOCAL entity (host: the
+			// live registry; joiner: the materialized twin) — retail reads
+			// the pool slot's def at draw time the same way (witness at
+			// world::minimap_blip_draw_policy). Absent entity -> the
+			// rotated fallback on the class table.
+			opennova::world::MinimapBlipDrawPolicy policy;
+			if (world_) {
+				const opennova::world::Entity *entity = world_->registry.get(
+						opennova::world::EntityHandle{slot.handle});
+				if (entity != nullptr) {
+					policy = opennova::world::minimap_blip_draw_policy(
+							*entity, slot.param);
+				} else {
+					policy.half_x_q16 = 0;
+					policy.half_y_q16 = 0;
+				}
+			} else {
+				policy.half_x_q16 = 0;
+				policy.half_y_q16 = 0;
+			}
+			dst[12] = (policy.rotate ? 1 : 0) | (policy.footprint ? 2 : 0);
+			dst[13] = policy.half_x_q16;
+			dst[14] = policy.half_y_q16;
+			dst[15] = policy.floor_px;
+		}
+	};
+	if (runtime_) {
+		const opennova::netsim::ClientMinimapState &map = runtime_->state().minimap;
+		append_overlay_bank(map.transient,
+				static_cast<int>(opennova::hud::HudMinimapBank::kTransient));
+		append_overlay_bank(map.persistent,
+				static_cast<int>(opennova::hud::HudMinimapBank::kPersistent));
+		append_overlay_bank(map.special,
+				static_cast<int>(opennova::hud::HudMinimapBank::kSpecial));
+	}
+	if (append_local_player) {
+		int32_t *dst = write + HUD_MINIMAP_HEADER_SIZE +
+				row++ * HUD_MINIMAP_STRIDE;
+		const opennova::world::MinimapBlipDrawPolicy policy =
+				opennova::world::minimap_blip_draw_policy(*local_player, 3);
+		dst[0] = static_cast<int>(
+				opennova::hud::HudMinimapBank::kPersistent);
+		dst[1] = local_marker_handle;
+		dst[2] = opennova::world::to_fixed(local_player->position.x);
+		dst[3] = opennova::world::to_fixed(local_player->position.y);
+		dst[4] = opennova::world::to_fixed(local_player->position.z);
+		dst[5] = static_cast<int32_t>(get_local_player_heading_bam());
+		dst[6] = 3; // live Person classification -> TSDicon cell 3
+		dst[7] = static_cast<int32_t>(
+				opennova::netsim::minimap_team_argb(local_player->team));
+		dst[8] = 0x10; // regular persistent bank
+		dst[9] = local_player->zone_number;
+		dst[10] = 0; // regular slots draw at zero lifetime
+		dst[11] = 1; // the local entity is necessarily resolved
+		dst[12] = (policy.rotate ? 1 : 0) | (policy.footprint ? 2 : 0);
+		dst[13] = policy.half_x_q16;
+		dst[14] = policy.half_y_q16;
+		dst[15] = policy.floor_px;
+	}
+	minimap_snapshot_cache_ = out;
+	minimap_snapshot_revision_ = revision;
+	minimap_snapshot_tick_ = tick;
+	minimap_snapshot_local_handle_ = local_marker_handle;
+	minimap_snapshot_valid_ = true;
+	return out;
+}
+
+PackedInt32Array Simulation::get_hud_minimap_footprints() const {
+	// Static footprint polygons for every visible footprint-class entity:
+	// the OOBJ occlusion ground-slice mesh transformed by the entity pose, in
+	// the witnessed fill colors and the overlay ctx alpha (witness at
+	// world::minimap_footprint_fill_argb) with the occlusion ground-slice
+	// mesh placed by the entity pose (world::minimap_footprint_place).
+	PackedInt32Array out;
+	out.push_back(1); // feed version
+	out.push_back(0); // row count, patched below
+	if (!world_) return out;
+	int count = 0;
+	std::unordered_map<int32_t, opennova::world::MinimapFootprintMesh> meshes;
+	world_->registry.for_each([&](const opennova::world::Entity &entity) {
+		if (!opennova::world::minimap_overlay_entity_enabled(entity)) return;
+		const opennova::world::MinimapOverlayClassification row =
+				opennova::world::classify_minimap_overlay(entity);
+		if (!row.visible) return;
+		const opennova::world::MinimapBlipDrawPolicy policy =
+				opennova::world::minimap_blip_draw_policy(entity, row.icon);
+		if (!policy.footprint) return;
+		const int32_t model_id = occlusion_world_.instance_model_id(
+				entity.handle);
+		if (model_id < 0) return;
+		auto mesh_it = meshes.find(model_id);
+		if (mesh_it == meshes.end()) {
+			const opennova::world::OcclusionModel *model =
+					occlusion_world_.model(model_id);
+			if (model == nullptr) return;
+			mesh_it = meshes.emplace(model_id,
+					opennova::world::minimap_footprint_from_occlusion(
+							*model)).first;
+		}
+		const opennova::world::MinimapFootprintMesh &mesh = mesh_it->second;
+		if (mesh.empty()) return;
+		// Color + placement live engine-side (world::minimap_footprint_*):
+		// the same yaw-degree -> BAM placement matrix the collision instance
+		// uses, so footprint, model, and shell agree.
+		std::vector<int32_t> fill_xy;
+		std::vector<int32_t> edge_xy;
+		opennova::world::minimap_footprint_place(mesh, entity, fill_xy,
+				edge_xy);
+		out.push_back(entity.handle.packed);
+		out.push_back(static_cast<int32_t>(
+				opennova::world::minimap_footprint_fill_argb(entity)));
+		out.push_back(static_cast<int32_t>(fill_xy.size()));
+		for (const int32_t value : fill_xy) out.push_back(value);
+		out.push_back(static_cast<int32_t>(edge_xy.size()));
+		for (const int32_t value : edge_xy) out.push_back(value);
+		++count;
+	});
+	out.set(1, count);
 	return out;
 }
 

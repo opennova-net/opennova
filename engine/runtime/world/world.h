@@ -387,6 +387,12 @@ public:
     static constexpr uint32_t kMissionAttribSinglePlayerRespawn = 0x40u;
     static constexpr uint32_t kMissionAttribEnableNVG = 0x100000u;
     uint32_t mission_attrib_flags = 0;
+    // The map grid-label origin: the mission's first type-2043 marker
+    // ("Map Centerpoint" items.def 102043), Q16 mission x/y.
+    // [orig: HUD_InitOverlaySystem @0x5a4999 -> dword_2723EB4]
+    bool map_grid_origin_present = false;
+    int32_t map_grid_origin_x = 0;
+    int32_t map_grid_origin_y = 0;
 
     // The Advance & Secure zone-slot chain (empty until the host builds it after the
     // item-traits sweep — zone registration needs Entity::is_capture_trigger). Feeds

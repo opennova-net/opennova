@@ -65,6 +65,77 @@ int main(void) {
     }
     printf("Spinmap bounds OK\n");
 
+    /* The spinmap waypoint-distance suppressor parses its value; an absent
+       token keeps the retail BSS-zero initializer (label LIVE) — the sole consumer
+       is an ==0 test. [orig: dword_27237C0 (.data, no file
+       bytes); parse @0x59fc1f; read @0x5a7a6a] */
+    {
+        static const char spinmap_text[] = "SPINMAPWPDISTOFF 17\n";
+        DefHudPosFile sf;
+        memset(&sf, 0, sizeof(sf));
+        if (def_parse_hudpos_memory((const unsigned char *)spinmap_text,
+                                    sizeof(spinmap_text) - 1, &sf) != 0 ||
+            sf.hud.spinmap_wp_dist_off != 17) {
+            fprintf(stderr, "FAIL: SPINMAPWPDISTOFF mismatch: %d\n",
+                    sf.hud.spinmap_wp_dist_off);
+            def_free_hudpos(&sf);
+            def_free_hudpos(&hudpos);
+            return 1;
+        }
+        def_free_hudpos(&sf);
+    }
+    if (hud->spinmap_wp_dist_off != 0) {
+        fprintf(stderr, "FAIL: absent SPINMAPWPDISTOFF did not retain 0\n");
+        def_free_hudpos(&hudpos);
+        return 1;
+    }
+
+    /* MAPCOORDS: x, y, suppressor. A word 3rd token parses 0 (shown, the
+       retail atof), a missing 3rd token writes 0, and an absent key keeps
+       the BSS-zero initializer (label LIVE). [orig: mapcoords parse @0x5a0920 ->
+       screenX/screenY/dword_27236FC (.data, no file bytes)] */
+    {
+        static const char mc_text[] = "MAPCOORDS 530,720,center\n";
+        static const char mc_short[] = "MAPCOORDS 10,20\n";
+        static const char mc_none[] = "HUDTIMECLOCK 98,32\n";
+        DefHudPosFile sf;
+        memset(&sf, 0, sizeof(sf));
+        if (def_parse_hudpos_memory((const unsigned char *)mc_text,
+                                    sizeof(mc_text) - 1, &sf) != 0 ||
+            sf.hud.map_coords[0] != 530 || sf.hud.map_coords[1] != 720 ||
+            sf.hud.map_coords[2] != 0) {
+            fprintf(stderr, "FAIL: MAPCOORDS word-suppressor mismatch: %d,%d,%d\n",
+                    sf.hud.map_coords[0], sf.hud.map_coords[1],
+                    sf.hud.map_coords[2]);
+            def_free_hudpos(&sf);
+            def_free_hudpos(&hudpos);
+            return 1;
+        }
+        def_free_hudpos(&sf);
+        memset(&sf, 0, sizeof(sf));
+        if (def_parse_hudpos_memory((const unsigned char *)mc_short,
+                                    sizeof(mc_short) - 1, &sf) != 0 ||
+            sf.hud.map_coords[2] != 0) {
+            fprintf(stderr, "FAIL: 2-value MAPCOORDS suppressor: %d\n",
+                    sf.hud.map_coords[2]);
+            def_free_hudpos(&sf);
+            def_free_hudpos(&hudpos);
+            return 1;
+        }
+        def_free_hudpos(&sf);
+        memset(&sf, 0, sizeof(sf));
+        if (def_parse_hudpos_memory((const unsigned char *)mc_none,
+                                    sizeof(mc_none) - 1, &sf) != 0 ||
+            sf.hud.map_coords[2] != 0) {
+            fprintf(stderr, "FAIL: absent MAPCOORDS did not retain 0: %d\n",
+                    sf.hud.map_coords[2]);
+            def_free_hudpos(&sf);
+            def_free_hudpos(&hudpos);
+            return 1;
+        }
+        def_free_hudpos(&sf);
+    }
+
     /* Test stances — should have 5 */
     if (hud->stances_count != 5) {
         fprintf(stderr, "FAIL: stances count mismatch: %zu\n", hud->stances_count);

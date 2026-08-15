@@ -4,6 +4,7 @@
 #include "simulation/nova_simulation_internal.h"
 
 #include <mission/runtime_boot.h> // the S9 boot order + file-resolution policy
+#include <npruntime/server_tick.h> // Server_RearmMinimapInitialScan (restart)
 #include <terrain_query/surface_tiles.h> // the D-SND-15 placed-tile resolvers
 
 using namespace novasim;
@@ -117,6 +118,10 @@ void Simulation::reset_world() {
 	// the previous mission's copy still stands.
 	weapon_profile_seeded_side_ = -1;
 	player_view_ = opennova::world::PlayerViewState{};
+	// Round init clears the map mode and the zooms return to the spawn
+	// defaults (witness at hud::HudMapControl — Game_InitNewRound /
+	// Player_InitPlayer lifecycle).
+	hud_map_control_.reset_spawn();
 	local_weapon_.nvg_scope_restore = false;
 	binocular_yaw_offset_deg_ = 0.0f;
 	binocular_pitch_offset_deg_ = 0.0f;
@@ -387,6 +392,10 @@ void Simulation::finish_load(const opennova::bms::File &file) {
 	// death auto-lose in check_win_conditions). [orig: Bms_AttribFlags @0xa76258,
 	// read by Server_CheckWinConditions @0x51ad6f]
 	world_->mission_attrib_flags = static_cast<uint32_t>(file.header.attrib_flags);
+	// The mission's authored map_zoom scales BOTH radar-zoom spawn defaults
+	// (witness at hud::HudMapControl::set_mission_map_zoom — the
+	// Player_InitPlayer derivation off the BMS header float).
+	hud_map_control_.set_mission_map_zoom(file.header.map_zoom);
 	// The mission's loadout/availability chunks wait for the weapon catalog —
 	// load_weapon_table promotes them through the engine's SP-vs-net gate.
 	stash_mission_loadout_rules(file);
@@ -785,6 +794,9 @@ void Simulation::restore_world_baseline() {
 	local_weapon_.switch_deferred_action = -1;
 	world_->restore(baseline_); // rewinds registry/vars/env/clock + re-inits systems (incl. AI;
 	                            // WacSystem::on_load also resets its 62-tick accumulator)
+	// The logic tick rewinds and the runtime may be recreated below — a cached
+	// minimap snapshot keyed on (revision, tick) could collide across epochs.
+	minimap_snapshot_valid_ = false;
 	if (have_wac_baseline_ && wac_) {
 		wac_->restore_runtime_state(wac_baseline_);
 	}
@@ -820,6 +832,13 @@ void Simulation::restore_world_baseline() {
 						*world_, world_->cached.local_player)));
 		view.apply(0x20, opennova::encode_pool3_sync_batch(
 				opennova::netsim::build_pool3_marker_batch(*world_)));
+		// The restart resets every client view to EMPTY retained map banks,
+		// but each connection's minimap initial scan is a one-shot latch the
+		// first epoch already consumed. Re-arm it so the producer re-sends
+		// the persistent pool-2 building/zone markers to every in-match
+		// connection (the loopback view above and remote joiners alike);
+		// SpawnPoint rows and the pool-1 phase walk re-cover the rest.
+		opennova::np::Server_RearmMinimapInitialScan(ctx_);
 	}
 	reset_infantry_adm_ids();
 	resolve_new_infantry_adm_ids();

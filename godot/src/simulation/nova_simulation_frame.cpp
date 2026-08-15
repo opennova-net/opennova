@@ -139,6 +139,9 @@ opennova::np::TickOutcome Simulation::advance_mission_tick(
 	frame_sim_us_ += Time::get_singleton()->get_ticks_usec() - sim_start;
 	frame_net_us_ += static_cast<int64_t>(get_last_net_tick_us());
 	if (!did_tick) return {};
+	// The dead-player map-mode clear rides every advanced tick — retail's
+	// render-frame gate, observed before the presenters read the mode.
+	tick_hud_map_death_gate();
 	if (is_session_lost()) {
 		return {opennova::np::TickStatus::SessionLost,
 				static_cast<int32_t>(get_logic_tick()),

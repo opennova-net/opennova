@@ -57,4 +57,13 @@ bool Server_StageHostPunt(
 // from here over connection_list; the legacy NetSystem-as-ISystem was retired at P8.
 void Server_TickUpdate(NapiNPServerCtx &ctx);
 
+// Re-arm every connection's ONE-SHOT minimap initial scan (the pool-2
+// non-spawn-point sweep emit_minimap_overlay_state runs once per client
+// epoch, then leaves to the SpawnPoint refresh + the 14-tick pool-1 phase
+// walk). A mission restart resets each client view to empty retained map
+// banks, so the host calls this alongside the baseline restore — the next
+// producer invocation then re-sends the full persistent building/zone
+// marker set to every in-match connection, loopback and remote alike.
+void Server_RearmMinimapInitialScan(NapiNPServerCtx &ctx);
+
 } // namespace opennova::np

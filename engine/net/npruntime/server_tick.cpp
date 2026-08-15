@@ -15,6 +15,7 @@
 #include <world/entity_spawn.h>        // entity_reset_to_spawn_state (respawn release)
 #include <world/geom.h>                // to_fixed
 #include <world/infantry.h>            // infantry_respawn_snap (the motor half of a respawn)
+#include <world/minimap_overlay.h>      // portable Entity_ClassifyForMinimap result
 #include <world/vehicle_motor.h>       // VehicleTraits (the 0x40 vehicle-blip icons)
 #include <world/world.h>               // World::run_logic_tick
 #include <world/zone_capture.h>        // the 1 Hz AS capture pass (slice 2)
@@ -89,125 +90,17 @@ bool stage_host_punt(NapiNPConnection &conn, uint32_t mismatch_type) {
 	return true;
 }
 
-struct MinimapOverlayEntry {
-	uint16_t handle = 0;
-	uint8_t param = 0;
-	uint8_t color = 0;
-	uint8_t flags = 0;
-	uint8_t source = 0;
-	bool visible = false;
-};
-
-uint8_t minimap_team_color(uint8_t team) {
-	// [orig: Entity_ClassifyForMinimap @0x50FA70 — team 1 -> 0x0A
-	// (Blue), team 2 -> 0x09 (Red), other -> 0x0C (neutral).]
-	if (team == 1) return 0x0A;
-	return team == 2 ? 0x09 : 0x0C;
-}
-
-// The definition/entity half of Entity_ClassifyForMinimap @0x50FA70. The
-// original writes five small outputs and the producer supplies the packed
-// handle. Keeping this pure makes the packet cadence independent from the
-// classification table and, importantly, keeps ordinary Building visibility
-// tied to the resolved model+0xE0 marker instead of guessing by item type.
-MinimapOverlayEntry classify_minimap_overlay(const world::Entity &e) {
-	MinimapOverlayEntry out;
-	out.handle = e.handle.packed;
-	out.flags = ((e.flags | e.engine_flags) & world::kEntityFlagDead) != 0 ? 1 : 0;
-	out.source = e.zone_number; // entity+538 / BMS lfp_group
-	if (!e.has_item_def || (e.item_attrib & world::kItemAttribNoHud) != 0)
-		return out;
-
-	out.color = minimap_team_color(e.team);
-	const bool dead = out.flags != 0;
-
-	// ChangeTeam/capture objects are map markers irrespective of their model.
-	if ((e.item_attrib & world::kItemAttribChangeTeam) != 0) {
-		out.param = 0;
-		out.visible = true;
-		return out;
-	}
-	// ItemDefAttrib2 FARP. VehicleBay's groupFlags-dependent 19..22 selector
-	// remains definition-data-gated; it is deliberately not approximated.
-	if ((e.item_attrib2 & 0x00002000u) != 0) {
-		out.param = 5;
-		out.visible = true;
-		return out;
-	}
-	if (e.item_unit_type == 11 && !dead) {
-		out.param = 9;
-		out.visible = true;
-		return out;
-	}
-	if ((e.item_attrib & world::kItemAttribArmory) != 0) {
-		out.param = 13;
-		out.visible = true;
-		return out;
-	}
-	if (e.item_type == 5) { // Building
-		if (!e.has_minimap_model_marker) return out;
-		out.param = 0;
-		// Retail uses color 0 for an ordinary neutral Building, while Armory
-		// (classified above) retains neutral color 0x0C.
-		if (e.team != 1 && e.team != 2) out.color = 0;
-		out.visible = true;
-		return out;
-	}
-	if (e.item_type == 1 && !dead) { // Vehicle
-		out.param = 10; // ground/other
-		if (e.item_unit_type >= 5 && e.item_unit_type <= 8)
-			out.param = 15;
-		else if (e.item_unit_type == 3 || e.item_unit_type == 4)
-			out.param = 11;
-		else if (e.item_unit_type == 12)
-			out.param = 25;
-		out.visible = true;
-		return out;
-	}
-	// Raw attrib 0x8000 is a witnessed generic live-marker branch but its
-	// token name is not yet recovered.
-	if ((e.item_attrib & 0x00008000u) != 0 && !dead) {
-		out.param = 0;
-		out.visible = true;
-		return out;
-	}
-	if ((e.item_attrib & world::kItemAttribEweap) != 0 && !dead) {
-		// Two shipped emplacement definitions use the alternate icon 12;
-		// all other EWEAPs (including 00TRg's wire id 1902) use icon 4.
-		out.param = (e.item_id == 1869 || e.item_id == 1886) ? 12 : 4;
-		out.color = 8;
-		out.visible = true;
-		return out;
-	}
-	if (e.item_type == 3) { // Person
-		out.param = dead ? 8 : 3;
-		out.visible = true;
-		return out;
-	}
-	if ((e.item_attrib & world::kItemAttribSpawnPoint) != 0) {
-		out.param = 0;
-		out.visible = true;
-	}
-	return out;
-}
-
-bool overlay_entity_enabled(const world::Entity &e) {
-	// Producer-side entity+36 bit 0 is the hidden/disabled gate. Dead is not
-	// excluded here: the classifier has distinct dead Person icon/flag bytes.
-	return e.has_item_def && ((e.flags | e.engine_flags) & 1u) == 0;
-}
-
 void send_minimap_overlay_batches(NapiNPConnection &conn,
-		const std::vector<MinimapOverlayEntry> &entries) {
+		const std::vector<world::MinimapOverlayClassification> &entries) {
 	for (size_t first = 0; first < entries.size(); first += 16) {
 		const size_t count = std::min<size_t>(16, entries.size() - first);
 		std::vector<uint8_t> body;
 		body.reserve(1 + count * 6);
 		body.push_back(static_cast<uint8_t>(count));
 		for (size_t i = 0; i < count; ++i) {
-			const MinimapOverlayEntry &entry = entries[first + i];
+			const world::MinimapOverlayClassification &entry = entries[first + i];
 			put_u16le(body, entry.handle);
-			body.push_back(entry.param);
+			body.push_back(entry.icon);
 			body.push_back(entry.color);
 			body.push_back(entry.flags);
 			body.push_back(entry.source);
@@ -224,9 +117,10 @@ void send_minimap_overlay_batches(NapiNPConnection &conn,
 void emit_minimap_overlay_state(NapiNPServerCtx &ctx, world::World &world) {
 	if (!ctx.is_in_session) return;
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		if (conn.type != 1 || !is_in_match(conn) || conn.link.transport == nullptr)
+		if ((conn.type != 1 &&
+				conn.link.mode != netsim::TransportMode::Loopback) ||
+				!is_in_match(conn) || conn.link.transport == nullptr)
 			continue;
-		if (conn.link.mode == netsim::TransportMode::Loopback) continue;
 
 		SessionReplyState &reply = conn.reply;
 		if (reply.minimap_overlay_cooldown != 0) {
@@ -234,9 +128,10 @@ void emit_minimap_overlay_state(NapiNPServerCtx &ctx, world::World &world) {
 			continue;
 		}
 
-		std::vector<MinimapOverlayEntry> entries;
+		std::vector<world::MinimapOverlayClassification> entries;
 		auto append = [&](const world::Entity &e, bool persistent) {
-			MinimapOverlayEntry entry = classify_minimap_overlay(e);
+			world::MinimapOverlayClassification entry =
+					world::classify_minimap_overlay(e);
 			if (!entry.visible) return;
 			if (persistent) entry.flags |= 0x10;
 			entries.push_back(entry);
@@ -247,7 +142,7 @@ void emit_minimap_overlay_state(NapiNPServerCtx &ctx, world::World &world) {
 			for (size_t slot = 0; slot < capacity; ++slot) {
 				const world::Entity *e = world.registry.get(
 						world::EntityHandle::make(2, static_cast<int>(slot)));
-				if (e == nullptr || !overlay_entity_enabled(*e) ||
+				if (e == nullptr || !world::minimap_overlay_entity_enabled(*e) ||
 						(e->item_attrib & world::kItemAttribSpawnPoint) != 0)
 					continue;
 				append(*e, true);
@@ -262,7 +157,7 @@ void emit_minimap_overlay_state(NapiNPServerCtx &ctx, world::World &world) {
 			for (size_t slot = 0; slot < capacity; ++slot) {
 				const world::Entity *e = world.registry.get(
 						world::EntityHandle::make(pool, static_cast<int>(slot)));
-				if (e == nullptr || !overlay_entity_enabled(*e) ||
+				if (e == nullptr || !world::minimap_overlay_entity_enabled(*e) ||
 						(e->item_attrib & world::kItemAttribSpawnPoint) == 0)
 					continue;
 				append(*e, true);
@@ -278,7 +173,7 @@ void emit_minimap_overlay_state(NapiNPServerCtx &ctx, world::World &world) {
 				slot < pool1_capacity; slot += 128) {
 			const world::Entity *e = world.registry.get(
 					world::EntityHandle::make(1, static_cast<int>(slot)));
-			if (e == nullptr || !overlay_entity_enabled(*e) ||
+			if (e == nullptr || !world::minimap_overlay_entity_enabled(*e) ||
 					(e->item_attrib & world::kItemAttribSpawnPoint) != 0)
 				continue;
 			// In a live MP session retail suppresses occupied enemy vehicles.
@@ -788,6 +683,12 @@ bool Server_StageHostDisconnect(
 bool Server_StageHostPunt(
 		NapiNPConnection &connection, uint32_t mismatch_type) {
 	return stage_host_punt(connection, mismatch_type);
+}
+
+void Server_RearmMinimapInitialScan(NapiNPServerCtx &ctx) {
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		conn.reply.minimap_initial_scan_pending = true;
+	}
 }
 
 void Server_TickUpdate(NapiNPServerCtx &ctx) {
