@@ -1024,7 +1024,7 @@ current waypoint/POI **entity pointer**), reset by
 - `[orig: HUD_DrawCompassStrip @0x595470]` — the heading strip with waypoint
   carets (reads `g_showWaypoints @0x595c9f`): **no callers** in JO:CA.
 
-## Gameplay spinmap — `HUD_RenderAllOverlays @0x5a8070` → `HUD_DrawMapOverlay @0x5a5f40` (grilled + ported 2026-08-14)
+## Gameplay spinmap — `HUD_RenderAllOverlays @0x5a8070` → `HUD_DrawMapOverlay @0x5a5f40` (grilled + ported through 2026-08-15)
 
 The normal in-world map was previously conflated with both the dead compass
 strip and the command/deploy map. Retail does have a gameplay spinmap: the
@@ -1187,9 +1187,11 @@ detail cycle** in the dispatcher: catalog codes 14 (`showhud`), 19
   (`(−0x1000000 − y) >> 25`) and the column from `x >> 25`, offset by
   `Terrain_SectorOrigin*` with OOB clamp masks, then
   `Terrain_SectorGrid[16×(row & 0xF) + (col & 0xF)] − 1` — the shared TRN
-  routing table. Per-sector textures ride the handle table
-  `dword_319F940[sector]` with UV insets `×127/256` + `0.5078125` sub-cell
-  offsets (anti-bleed); water rows clamp at height 254. The tile color: the
+  routing table. The base pass selects the corresponding one of the four
+  original 512×512 `Colormap0..3` textures — it does **not** sample the
+  PolyTrn per-cell render-target cache. OpenNova packs those four independent
+  clamp textures into one 1024×1024 atlas and applies a half-texel quadrant
+  inset so filtering cannot cross their seams. The tile color: the
   map pass hands `0xD0606060`, the decal renderer FORCES the alpha opaque
   (`color | 0xFF000000` `@0x6071C4` head), the fixed-function output stage
   QUADRUPLES texture × diffuse for this pipeline — the reference captures
@@ -1199,44 +1201,25 @@ detail cycle** in the dispatcher: catalog codes 14 (`showhud`), 19
   1×) and draws the terrain a second time on an additive child item —
   per-pixel identical to the ×4 stage under saturation. The
   `enable_fog_pass = 1` both call sites pass (`@0x5a59c8`/`@0x5a6677`) is
-  the WATER OVERLAY, not the brightness: the `@0x607834` LABEL_43 block
-  redraws each clipped tile in water blue `0x003F7F` at alpha
-  `water_height_int + 1` (`v55 = SHIWORD(Env_WaterHeightFixed)` clamped
-  254) — about 2/255 at JO water heights, below the 8-bit floor on the
-  reference map; witnessed, unported (D-HUD-21). The textures retail binds
-  are the PolyTrn TILE-CACHE render targets (`PolyTrn_RenderTile @0x60DA70`:
-  a 128-slot LRU over the `dword_319F940` handle table; each tile renders
-  terrain polys plus water quads sampled from the .til water tile bitmaps
-  under an opaque-black diffuse via `render_water_quad @0x604700` — TrnGen
-  bakes GEOMETRY, never images; terrain-re.md D-TERRAIN-7 owns the cache
-  story). The tile RTs hold only the BASE tile content — the colormap pass
-  (diffuse `0x00808080` MODULATE2X ~= raw RGB) plus those water quads:
-  the DOT3 light term lands in tile ALPHA and the detail splat
-  multiplies only in the world pixel shader
-  (`PolyTrn_PS14SplatNormalMap @0x7dece0`), so neither reaches the map
-  (the 2026-08-14 capture measurements agree: retail map grass =
-  colormap x 1.5058, flat, no sun shading or detail mottling).
-  OpenNova's D-TERRAIN-7 surrogate therefore COMPOSES the atlas on the
-  CPU at load — one 256-px slot per 16x16 grid cell (2 wu/texel, the
-  retail tile RTs' own sampling density — 128 px measurably blurred the
-  roads; retail's cache is per-cell), each cell = its quadrant colormap
-  content, the baked RGBA `.til` overlay produced by
-  `TerrainSurfaceInputs`, then the water carve against the live resolved
-  water plane via the shared height field. The water test uses
-  `height < plane + 1.0 wu`; pose-matched 00TRa registration samples
-  the height field at an effective `(+5.25,+4.25)` wu from the integer
-  atlas origin (the 2-wu texel center supplies `+1,+1`, followed by the
-  explicit `+4.25,+3.25`). The calibrated source tone `(15,46,71)`
-  lands at OpenNova `(22,70,106)` beside retail `(22,71,107)` after the
-  map passes. `Env_WaterHeightFixed == 0` remains the no-water sentinel.
-  This is `TerrainData::build_minimap_tile_atlas`; `GameWorld` rebakes
-  it when streamed `.til` data arrives and emits
-  `minimap_terrain_changed`, so an already-built HUD receives the final
-  atlas. The 2026-08-13 ortho-render bake and its covered-load-window
-  machinery are deleted; raw-colormap quadrant fallback remains for
-  headless/editor. Remaining under D-HUD-21: the faint water-overlay
-  redraw above and authored water-tile bitmap sampling (the carve uses
-  a calibrated flat tone) stay unported.
+  the separate WATER pass, not the brightness. `PolyTrn_InitTextures
+  @0x60BA20` builds the 256×256 `depthspin` texture directly from the raw
+  1024×1024 CPT height words: output `(x,z)` averages the four taps
+  `(4x,4z)`, `(+2,0)`, `(0,+2)`, and `(+2,+2)`, then uses `sum >> 10` as
+  the integer terrain height. The redraw selects one of its four 128px
+  quadrants with literal UV scale `127/256` and second-half offset `130/256`
+  (`@0x6077A2..0x6077E6`). Its ADDSIGNED/ADD alpha chain plus alpha-ref 192
+  reduces to `terrain_height_int <= floor(water_height_wu)`; zero water
+  suppresses the pass and the plane clamps at 254. The passing texels replace
+  the completed terrain pixel with the synchronized-capture water tone
+  `0xFF16476B`. OpenNova implements the same four-tap reduction as
+  `TerrainData::build_minimap_water_mask`, binds the transparent/binary
+  equivalent separately from the sharp colormap, and redraws the same clipped
+  sector fans after both Canvas brightness legs. `GameWorld` emits
+  `minimap_water_changed` when that mask is rebuilt. Streamed/authored `.til`
+  art and the PolyTrn per-cell cache do not participate in the gameplay
+  spinmap. The 2026-08-13 per-cell/ortho atlas surrogate and its registration
+  offsets are therefore deleted. The synchronized 00TRa comparison now has
+  the same shoreline footprint while retaining the source colormap detail.
 - **Marker banks** (net-re §5.19/§5.35 carries the wire/retention story):
   draw order per layer is persistent (buildings with interior models first,
   via `render_collision_wireframe @0x596800` footprints — PORTED
@@ -1280,7 +1263,20 @@ detail cycle** in the dispatcher: catalog codes 14 (`showhud`), 19
   (`g_hudColorLightBlue @0x24C1844` / `@0x24C184C` / `@0x24C183C`), sizes
   from the model footprint with class fallbacks (generic 10.0 wu = `655360`,
   person 2.0 wu, def-flag overrides 4/8 wu) and pixel floors (6.0 default,
-  4/8/12/16 by class), icon 9 × 1.2, spectate icons 26/27 at ×2. The
+  4/8/12/16 by class), icon 9 × 1.2, spectate icons 26/27 at ×2. The ordinary
+  icon-strip call submits those raw colors into TSDicon's `MODULATE2X`
+  texture stage; OpenNova bakes that saturating RGB doubling into the sprite
+  diffuse while leaving alpha unchanged. The waypoint-pointer path is
+  distinct: its pre-half and the same stage cancel, so its altitude color
+  remains net-raw. A live call-site capture at the map center identifies the
+  disputed blue glyph as the local deployed player — regular-bank source,
+  live Person reclassification to cell 3, raw team-1 `0xFF304080`, and
+  6×6px half extent — not an armory, objective, waypoint, or tracked target.
+  `Simulation.get_hud_minimap_snapshot()` restores that client-local retained
+  row only when the loopback feed does not already contain the same handle.
+  The synchronized green-marker peak is retail `(88,255,65)` versus OpenNova
+  `(86,255,64)`; apparent shade changes between captures come from filtering,
+  blending, and live state rather than a different configured base color. The
   `TSDicon.tga` sheet is a **16×480 vertical strip of 30 cells** (indexed by
   `render_tiled_image_strip @0x67b540`); the per-class hide/rotate gates
   `0x2723D0C..D34` are unwritten statics (always pass). Capture-zone def ids
@@ -1289,12 +1285,17 @@ detail cycle** in the dispatcher: catalog codes 14 (`showhud`), 19
 - **Compass ring** [orig: `draw_compass_indicator @0x59c900`]: the
   `compring.tga` quad at ×1.25 the map radius (`flt_7C6F18`),
   counter-rotated `(0x3FFFFFC0 − yaw) >> 16` × 2π/65536 so its north marker
-  points at world north.
+  points at world north. Its UVs are centered at 0.5 with ±0.45 extent
+  (`flt_7D93A8`), so retail samples only `0.05..0.95` of the texture. Cropping
+  that authored transparent padding makes the visible ring `1/0.9` larger on
+  the unchanged quad; this is why the same eastern and northwest landmarks
+  touch the ring in the retail capture.
 - **Pixel-circle geometry** (retail captures, JOTAC 00TRa, both headings):
   the map is a true circle in screen pixels on a widescreen surface because
   radius and world-per-pixel both use the scaled rect **height**, never its
   wider X extent. The backing/terrain/marker disc is
-  `half-height − 4 px`; the compass quad is `half-height × 1.25`. This exact
+  `half-height − 4 px`; the compass quad is `half-height × 1.25`, with the
+  centered-90% UV crop above. This exact
   rule replaces the former mean-radius/`0.9275 × base` approximation and
   closes the apparent ~10% widget-size and zoom deltas. The compass ring
   bakes the FF MODULATE2X into its texture (white-modulated static sprite;
@@ -1310,9 +1311,9 @@ detail cycle** in the dispatcher: catalog codes 14 (`showhud`), 19
   footprint polygons ride the separate once-per-mission
   `get_hud_minimap_footprints()` feed (version 1: per-entity OOBJ fill fans +
   retained boundary edges in mission Q16, opaque team-colored fills), and
-  the baked terrain atlas rides `set_minimap_terrain`'s second argument;
-  `minimap_terrain_changed` refreshes that binding after streamed `.til`
-  data arrives. The engine compiler emits the disc,
+  the depthspin-equivalent water mask rides `set_minimap_terrain`'s second
+  argument; `minimap_water_changed` refreshes that binding. The engine
+  compiler emits the disc,
   terrain, ordered marker sprites/rings, the waypoint state line + anchor
   dot/tip chevron cells + the altitude nub, the labels (per-pass glyph
   lists — bold slot for the corner map's distance/MAPCOORDS labels, the
@@ -1334,11 +1335,9 @@ radar-contact state (producers `Radar_AddBlip @0x59b280` ← damage
 building the 12/24-sector rings at `0x2721EF4..0x2721F3B` and the 4-quadrant
 damage flashes `@0x2721EEC`), the objective tether lines (bit 2), entity
 labels (bit 5), location labels (bit 17), the tracked-target legs (bits
-7/19 — no tracked-target source exists in this runtime yet), building
-outlines, the model-extent size feed, the exact pixel-radius rule and
-pointer line length (both visually pinned above), the live TrnGen sector
-textures behind the map tiles (OpenNova samples the raw colormap atlas),
-and the sibling out-of-map consumers (`draw_radar_blips @0x5a2c00`
+7/19 — no tracked-target source exists in this runtime yet), the remaining
+model-extent size feed and pointer line length, and the sibling out-of-map
+consumers (`draw_radar_blips @0x5a2c00`
 in-world markers, `draw_damage_direction_indicators @0x59a300`,
 `draw_directional_indicator_ring @0x598180`). The JOTAC data also authors
 `HUDDECLUT_SPINMAP 1 0 0 0` — the HUDDECLUT_* consumer is an open witness

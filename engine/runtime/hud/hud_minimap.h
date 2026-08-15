@@ -74,15 +74,18 @@ struct HudMinimapTerrain {
 	int sector_count = 0;
 	int sector_rows = 0;
 	bool present = false;
-	// Atlas layout. Default: the raw TRN colormap's 2x2 per-quadrant-id sheet
-	// (1024 px, 512 px quadrants). When the device composes the per-CELL tile
-	// atlas (one slot per 16x16 grid cell — the retail tile cache is keyed
-	// per cell), it flips per_cell_atlas and stamps the composed dimensions.
-	// [orig: the per-cell tile RT cache PolyTrn_RenderTile fills; the map
-	//  decal binds those per-cell targets @0x6071C0]
-	bool per_cell_atlas = false;
+	// The base pass samples the original 1024x1024 colormap atlas through its
+	// four 512x512 quadrant ids. Retail binds Colormap0..3 directly; the device
+	// keeps one atlas and clamps each quadrant with a half-texel inset.
+	// [orig: PolyTrn_InitTextures @0x60B91D; render_terrain_decal @0x607761]
 	int atlas_px = 1024;
 	int cell_px = 512;
+	// Retail redraws the same terrain geometry through the separate 256x256
+	// `depthspin` shore texture. Its four 128x128 quadrants are selected from
+	// the sector id; dry texels are transparent in the device-side equivalent.
+	// [orig: depthspin build @0x60BA20; water UV transform @0x6077A2;
+	//  alpha-tested redraw @0x60780A]
+	bool water_present = false;
 };
 
 // Which retention bank a marker came from. Draw order within a layer is
@@ -280,6 +283,10 @@ struct HudMapPass {
 	float radius_y = 0.0f;
 	std::vector<HudMapTri> backing;
 	std::vector<HudMapTri> terrain;
+	// Same clipped sector geometry as `terrain`, with depthspin's independent
+	// 2x2-quadrant UV transform. The device submits this opaque cutout after
+	// both legs of Canvas's split terrain-brightness equivalent.
+	std::vector<HudMapTri> terrain_water;
 	// Untextured filled polygons layered with the markers (the building/zone
 	// footprints — they draw first in the marker walk, so they sit under the
 	// icon sprites like retail's buildings-first walk).

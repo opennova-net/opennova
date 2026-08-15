@@ -124,7 +124,7 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::set_hud_color_index);
 	ClassDB::bind_method(D_METHOD("get_hud_color_index"),
 			&HudOverlay::get_hud_color_index);
-	ClassDB::bind_method(D_METHOD("set_minimap_terrain", "terrain", "baked_atlas"),
+	ClassDB::bind_method(D_METHOD("set_minimap_terrain", "terrain", "water_mask"),
 			&HudOverlay::set_minimap_terrain, DEFVAL(Ref<Texture2D>()));
 	ClassDB::bind_method(D_METHOD("set_minimap_state", "mission_position",
 			"altitude_wu", "heading_bam", "zoom_q16", "big_zoom_q16",
@@ -646,9 +646,10 @@ void HudOverlay::set_friendly_tag_env(int p_fog_dist_q16,
 }
 
 void HudOverlay::set_minimap_terrain(const Ref<TerrainData> &p_terrain,
-		const Ref<Texture2D> &p_baked_atlas) {
+		const Ref<Texture2D> &p_water_mask) {
 	state_.minimap.terrain = opennova::hud::HudMinimapTerrain{};
 	textures_[opennova::hud::kHudTexMapTerrain].unref();
+	textures_[opennova::hud::kHudTexMapWater].unref();
 	if (p_terrain.is_null()) {
 		queue_redraw();
 		return;
@@ -667,25 +668,10 @@ void HudOverlay::set_minimap_terrain(const Ref<TerrainData> &p_terrain,
 	terrain.sector_rows = p_terrain->get_sector_rows();
 	terrain.present = copy_count == static_cast<int64_t>(terrain.sector_grid.size()) &&
 			terrain.sector_count > 0 && terrain.sector_rows > 0;
-	// The map decal pipeline ignores the texture's alpha channel (the
-	// vertex alpha is forced opaque and the alpha stage rides diffuse) —
-	// bind an RGB copy so water/low colormap texels cannot ghost the world
-	// through the map (witness at hud_minimap.cpp kTerrainTint). A composed
-	// per-CELL tile atlas (the retail tile-cache surrogate,
-	// TerrainData::build_minimap_tile_atlas) replaces the raw colormap's
-	// per-quadrant sheet when the device supplies one; the compile derives
-	// the layout from the stamped fields.
-	Ref<Texture2D> colormap = p_baked_atlas.is_valid()
-			? p_baked_atlas
-			: p_terrain->get_colormap();
-	if (p_baked_atlas.is_valid()) {
-		const int atlas_px = std::max(1,
-				static_cast<int>(p_baked_atlas->get_width()));
-		terrain.per_cell_atlas = true;
-		terrain.atlas_px = atlas_px;
-		terrain.cell_px = std::max(1,
-				atlas_px / opennova::terrain::COORDS_SECTOR_GRID_DIM);
-	}
+	// Retail's base pass samples the original 512x512 colormap quadrants
+	// directly. Bind an RGB copy so authored alpha cannot ghost the backing,
+	// then keep depthspin's transparent shore cutout in its own texture slot.
+	Ref<Texture2D> colormap = p_terrain->get_colormap();
 	if (colormap.is_valid()) {
 		Ref<Image> image = colormap->get_image();
 		if (image.is_valid()) {
@@ -697,6 +683,8 @@ void HudOverlay::set_minimap_terrain(const Ref<TerrainData> &p_terrain,
 		}
 	}
 	textures_[opennova::hud::kHudTexMapTerrain] = colormap;
+	textures_[opennova::hud::kHudTexMapWater] = p_water_mask;
+	terrain.water_present = p_water_mask.is_valid();
 	queue_redraw();
 }
 
@@ -1213,6 +1201,16 @@ void HudOverlay::render_map_(const opennova::hud::HudMapPass &p_map,
 						: RID());
 	}
 	flush_tris(base_item, terrain_texture);
+
+	// Retail's alpha-tested depthspin draw is opaque and follows the completed
+	// terrain output. Canvas splits that output across base/additive items, so
+	// the equivalent cutout must ride the top item after both; putting it in
+	// either terrain item lets the later leg add terrain back over the water.
+	const Ref<Texture2D> water_texture =
+			textures_[opennova::hud::kHudTexMapWater];
+	for (const opennova::hud::HudMapTri &tri : p_map.terrain_water)
+		push_map_tri(tri);
+	flush_tris(top_item, water_texture);
 
 	// Footprint fills draw in the MARKER-WALK slot: retail's building fills
 	// blend their ctx alpha over the terrain AFTER the decal's x4 output

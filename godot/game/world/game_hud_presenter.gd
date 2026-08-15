@@ -107,9 +107,9 @@ func setup(world, player_presenter_in, ui_parent: Node) -> void:
 	# presenter's lifetime — teardown only resets per-mission state.
 	if _world != null and not _world.mission_effects.is_connected(apply_mission_effects):
 		_world.mission_effects.connect(apply_mission_effects)
-	if _world != null and not _world.minimap_terrain_changed.is_connected(
-			_on_minimap_terrain_changed):
-		_world.minimap_terrain_changed.connect(_on_minimap_terrain_changed)
+	if _world != null and not _world.minimap_water_changed.is_connected(
+			_on_minimap_water_changed):
+		_world.minimap_water_changed.connect(_on_minimap_water_changed)
 
 
 ## Undo everything a mission built: the HUD node (its card/effects children go
@@ -134,11 +134,11 @@ func get_hud():
 	return _game_hud
 
 
-func _on_minimap_terrain_changed(texture: ImageTexture) -> void:
+func _on_minimap_water_changed(mask: ImageTexture) -> void:
 	if _game_hud == null:
 		return
 	_game_hud.set_minimap_terrain(
-			_world.get_terrain_data() if _world != null else null, texture)
+			_world.get_terrain_data() if _world != null else null, mask)
 
 
 ## The USER crosshair style (Options); applied to a built HUD immediately, else
@@ -192,11 +192,10 @@ func _ensure_game_hud() -> void:
 	_game_hud.configure(hudpos, root)
 	# TerrainData owns the TRN 16x16 sector routing table and the colormap
 	# texture; the native overlay copies only the portable routing scalars.
-	# The baked top-down atlas (the D-TERRAIN-7 tile-cache surrogate render)
-	# replaces the raw colormap when the load-time bake produced one.
+	# The raw colormap remains the sharp base; depthspin supplies water only.
 	_game_hud.set_minimap_terrain(
 			_world.get_terrain_data() if _world != null else null,
-			_world.get_minimap_terrain_texture() if _world != null else null)
+			_world.get_minimap_water_mask() if _world != null else null)
 	# The grid-label origin marker (mission type-2043 entity), resolved once
 	# per world. [orig: HUD_InitOverlaySystem @0x5a4999 pool scan]
 	var sim_for_origin := _world.get_sim() if _world != null else null

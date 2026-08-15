@@ -63,9 +63,8 @@ signal load_progress(percent: int)
 # Player text is consumed by the HUD; debug_text remains a distinct unrouted channel.
 # "dialog" is also routed straight to mission audio below.
 signal mission_effects(effects: Array)
-## The CPU-baked gameplay-map terrain changed. Streamed join .til data arrives
-## after the HUD can already exist, so consumers refresh through this edge.
-signal minimap_terrain_changed(texture: ImageTexture)
+## The CPU-built gameplay-map depthspin water mask changed.
+signal minimap_water_changed(mask: ImageTexture)
 
 # A mission (.bms) to boot into. When set, the mission's header selects the
 # terrain + environment (terrain_file/env_file below are ignored) and its placed
@@ -538,7 +537,7 @@ func _load_mission_internal(mission: MissionData, bms_name: String,
 	_loaded_mission_file = bms_name
 	_world_ready = true
 	_set_water_world_rendering_enabled(true)
-	_bake_minimap_terrain_atlas()
+	_build_minimap_water_mask()
 	load_progress.emit(100)
 	_debug_views.on_loaded()
 	world_loaded.emit()
@@ -639,8 +638,8 @@ func get_mission_stats() -> Dictionary:
 ## Safe to call when nothing is loaded.
 func unload() -> void:
 	_world_ready = false
-	_minimap_terrain_texture = null
-	minimap_terrain_changed.emit(null)
+	_minimap_water_mask = null
+	minimap_water_changed.emit(null)
 	_join_wire_assets_pending = false
 	_join_wire_til_applied = false
 	_join_wire_assets_failed = false
@@ -892,7 +891,7 @@ func _apply_join_wire_til_if_ready() -> bool:
 		_terrain.tile_info_override = tile_info
 	if _dispatcher != null:
 		_dispatcher.tile_info = tile_info
-	_bake_minimap_terrain_atlas()
+	_build_minimap_water_mask()
 	return true
 
 
@@ -2266,29 +2265,25 @@ func _start_mission_audio(mission: MissionData, bms_name: String) -> void:
 # material/pipeline draws once (no coroutine — the load path stays callable
 # without await), then clear the warm spawns exactly like the sim-restart
 # path (reset + re-register the persistent item effects). Returns the count.
-# The baked minimap terrain atlas (the D-TERRAIN-7 tile-cache surrogate,
-# rendered top-down at load). Null = the HUD binds the raw colormap.
-var _minimap_terrain_texture: ImageTexture = null
+# The 256x256 depthspin-equivalent shore mask. The base map always binds the
+# original sharp colormap; this texture carries only transparent/blue water.
+var _minimap_water_mask: ImageTexture = null
 
 
-func get_minimap_terrain_texture() -> ImageTexture:
-	return _minimap_terrain_texture
+func get_minimap_water_mask() -> ImageTexture:
+	return _minimap_water_mask
 
 
-# Compose the map's per-cell tile atlas: a pure-CPU compose on TerrainData
-# (retail's map binds the PolyTrn per-cell tile cache, whose content is base
-# colormap + authored .til quads + depth-tested water — no lighting or detail
-# splat — so no render pass is involved; see build_minimap_tile_atlas).
-func _bake_minimap_terrain_atlas() -> void:
-	_minimap_terrain_texture = null
+# Build retail's depthspin shore mask directly from the raw CPT height atlas.
+# Streamed .til art does not participate in either the sharp colormap base or
+# this independent water pass.
+func _build_minimap_water_mask() -> void:
+	_minimap_water_mask = null
 	var terrain_data := get_terrain_data()
 	if terrain_data != null and not Engine.is_editor_hint():
 		var live_water := float(_water.water_height) if _water != null else NAN
-		var overlay: Texture2D = _terrain.get_tile_overlay_texture() \
-				if _terrain != null else null
-		_minimap_terrain_texture = terrain_data.build_minimap_tile_atlas(
-				live_water, overlay)
-	minimap_terrain_changed.emit(_minimap_terrain_texture)
+		_minimap_water_mask = terrain_data.build_minimap_water_mask(live_water)
+	minimap_water_changed.emit(_minimap_water_mask)
 
 
 func _warm_effect_world_catalog() -> int:

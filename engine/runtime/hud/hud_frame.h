@@ -35,6 +35,7 @@ enum HudTexture : int32_t {
 	kHudTexStance4,
 	kHudTexStance5,
 	kHudTexMapTerrain,
+	kHudTexMapWater,
 	kHudTexMapIcons,
 	kHudTexMapCompass,
 	kHudTexMapRadar,

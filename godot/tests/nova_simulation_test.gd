@@ -364,6 +364,43 @@ func test_hud_minimap_snapshot_and_controls_have_a_stable_contract() -> void:
 	assert_eq(sim.get_hud_big_zoom_q16(), 602931,
 			"The big-map zoom persists across the cycle until a respawn.")
 
+
+func test_hud_minimap_snapshot_restores_the_local_deploy_marker() -> void:
+	var sim: Simulation = autofree(Simulation.new())
+	sim.build_demo_mission()
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+
+	var snapshot: PackedInt32Array = sim.get_hud_minimap_snapshot()
+	var stride := int(Simulation.HUD_MINIMAP_STRIDE)
+	var header := int(Simulation.HUD_MINIMAP_HEADER_SIZE)
+	assert_eq(snapshot.size(), header + int(snapshot[2]) * stride)
+	var local_handle := sim.get_local_player_wire_handle()
+	var matches := 0
+	for row in range(int(snapshot[2])):
+		var base := header + row * stride
+		if int(snapshot[base + 1]) != local_handle:
+			continue
+		matches += 1
+		assert_eq(int(snapshot[base + 0]), 0,
+				"the local deploy row occupies retail's regular persistent bank")
+		assert_eq(int(snapshot[base + 6]), 3,
+				"a live Person resolves to TSDicon cell 3")
+		assert_eq(int(snapshot[base + 7]) & 0xFFFFFFFF, 0xFF304080,
+				"team 1 uses the raw retail blue before MODULATE2X")
+		assert_eq(int(snapshot[base + 8]), 0x10)
+		assert_eq(int(snapshot[base + 10]), 0,
+				"regular local rows remain drawable at zero lifetime")
+		assert_eq(int(snapshot[base + 11]), 1)
+		assert_eq(int(snapshot[base + 12]) & 1, 1,
+				"the live-player glyph rotates with its heading")
+		assert_eq(int(snapshot[base + 13]), 0x20000)
+		assert_eq(int(snapshot[base + 14]), 0x20000)
+		assert_eq(int(snapshot[base + 15]), 6,
+				"the 2-world-unit Person class still floors at six pixels")
+	assert_eq(matches, 1,
+			"the local deploy contributes exactly one ordinary player marker")
+
+
 func test_demo_mission_promotes() -> void:
 	var sim := Simulation.new()
 	sim.build_demo_mission()

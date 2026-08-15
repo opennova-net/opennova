@@ -458,9 +458,8 @@ void TerrainData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_height_world_bilinear", "world_pos"), &TerrainData::get_height_world_bilinear);
 	ClassDB::bind_method(D_METHOD("get_surface_normal_world", "world_pos"), &TerrainData::get_surface_normal_world);
 	ClassDB::bind_method(D_METHOD("get_colormap_color_world", "world_x", "world_z"), &TerrainData::get_colormap_color_world);
-	ClassDB::bind_method(D_METHOD("build_minimap_tile_atlas", "water_height_wu", "tile_overlay"),
-			&TerrainData::build_minimap_tile_atlas, DEFVAL(NAN),
-			DEFVAL(Ref<Texture2D>()));
+	ClassDB::bind_method(D_METHOD("build_minimap_water_mask", "water_height_wu"),
+			&TerrainData::build_minimap_water_mask, DEFVAL(NAN));
 	ClassDB::bind_method(D_METHOD("get_modulated_colormap_color_world", "world_x", "world_z", "light_color"),
 	                     &TerrainData::get_modulated_colormap_color_world);
 	ClassDB::bind_method(D_METHOD("get_detail_foliage_index_world", "world_x", "world_z"),
@@ -1507,199 +1506,73 @@ Vector3 TerrainData::get_surface_normal_world(const Vector3 &p_world_pos) const 
 	               static_cast<float>(normal.z));
 }
 
-Ref<ImageTexture> TerrainData::build_minimap_tile_atlas(
-		float p_water_height_wu,
-		const Ref<Texture2D> &p_tile_overlay) const {
-	// The gameplay map's terrain source. Retail's map decal binds the PolyTrn
-	// per-CELL tile render targets, and those targets hold only the BASE tile
-	// content: the colormap pass (diffuse 0x00808080 MODULATE2X ~= raw RGB)
-	// plus the authored .til quads and the water plane — the DOT3 light term
-	// rides tile ALPHA
-	// and the detail splat multiplies later in the world pixel shader, so
-	// neither ever reaches the map. Composing that content on the CPU (one
-	// 256 px slot per 16x16 grid cell) both matches the retail look the
-	// reference captures measure and preserves the exact per-cell water shapes
-	// the per-quadrant colormap cannot carry. The tile-pass and tile-quad
-	// addresses live with the engine layout policy (hud_minimap.h
-	// HudMinimapTerrain, terrain_lighting.gdshaderinc) and hud-re.md.
-	// 256 px per 512-wu cell = 2 wu/texel — the same sampling density as
-	// retail's ~256 px tile render targets (the 127/256 UV insets), and the
-	// pose-matched pair shows the 128 px version blurring the roads the
-	// retail map keeps crisp. 4096x4096 RGB8. The caller supplies the same
-	// baked RGBA .til overlay and live resolved water height that the world
-	// terrain consumes.
-	constexpr int kCellPx = 256;
-	constexpr int kCells = opennova::terrain::COORDS_SECTOR_GRID_DIM;
-	constexpr int kAtlasPx = kCellPx * kCells;
-	constexpr int kSectorWu = opennova::terrain::COORDS_SECTOR_SIZE;
-	constexpr int kWuPerTexel = kSectorWu / kCellPx;
-	// Pose-matched 00TRa registration against the decoded height field puts
-	// retail's lake boundary at 26.03 wu for the mission's 25.0-wu plane. The
-	// one-world-unit cutoff bias captures the tile-cache raster/sample
-	// convention without moving the terrain or the map camera.
-	constexpr float kRetailWaterCutoffBiasWu = 1.0f;
-	// Register the cached water pass to retail's decoded 00TRa shoreline. The
-	// texel-center sample below already contributes (+1,+1) wu relative to the
-	// integer atlas origin, making the measured effective offset (+5.25,+4.25).
-	constexpr float kRetailWaterSampleOffsetXWu = 4.25f;
-	constexpr float kRetailWaterSampleOffsetZWu = 3.25f;
-	constexpr float kWaterR = 0.060f;
-	constexpr float kWaterG = 0.182f;
-	constexpr float kWaterB = 0.279f;
-	if (!loaded || sector_grid.size() < kCells * kCells) {
+
+Ref<ImageTexture> TerrainData::build_minimap_water_mask(
+		float p_water_height_wu) const {
+	// depthspin is built directly from the 1024x1024 raw16 height atlas. Each
+	// output texel averages the four source taps at (4x,4z), (+2,0), (0,+2),
+	// and (+2,+2), then keeps the integer world-height byte (sum >> 10).
+	// [orig: PolyTrn_InitTextures @0x60BA20..0x60BB3B]
+	constexpr int kSourcePx = 1024;
+	constexpr int kMaskPx = 256;
+	constexpr int kStep = 4;
+	constexpr int kHalfStep = 2;
+	if (!loaded || cpt.depth_buffer.size() !=
+			static_cast<size_t>(kSourcePx) * kSourcePx) {
 		return Ref<ImageTexture>();
 	}
-	if (!_ensure_colormap_cpu_cache() || colormap_cpu_width < 1024 ||
-			colormap_cpu_height < 1024) {
-		return Ref<ImageTexture>();
-	}
-	const PackedByteArray src_bytes = colormap_cpu_image->get_data();
-	if (src_bytes.size() < static_cast<int64_t>(colormap_cpu_width) *
-			colormap_cpu_height * 4) {
-		return Ref<ImageTexture>();
-	}
-	const uint8_t *src = src_bytes.ptr();
-	const int src_w = colormap_cpu_width;
-	const opennova::terrain::TerrainHeightField field = height_field_from(cpt, trn);
 	const float water_wu = std::isnan(p_water_height_wu)
 			? static_cast<float>(water_height) * 0.5f
 			: p_water_height_wu;
-	// Env_WaterHeightFixed == 0 is retail's no-water sentinel.
-	const bool carve_water = field.heightmap != nullptr &&
-			std::isfinite(water_wu) && water_wu != 0.0f;
-	const float water_cutoff_wu = water_wu + kRetailWaterCutoffBiasWu;
-	const uint8_t water_r = static_cast<uint8_t>(kWaterR * 255.0f + 0.5f);
-	const uint8_t water_g = static_cast<uint8_t>(kWaterG * 255.0f + 0.5f);
-	const uint8_t water_b = static_cast<uint8_t>(kWaterB * 255.0f + 0.5f);
-
-	PackedByteArray overlay_bytes;
-	const uint8_t *overlay = nullptr;
-	int overlay_w = 0;
-	int overlay_h = 0;
-	if (p_tile_overlay.is_valid()) {
-		Ref<Image> overlay_image = p_tile_overlay->get_image();
-		if (overlay_image.is_valid() &&
-				(!overlay_image->is_compressed() || overlay_image->decompress() == OK)) {
-			overlay_image->convert(Image::FORMAT_RGBA8);
-			overlay_w = overlay_image->get_width();
-			overlay_h = overlay_image->get_height();
-			overlay_bytes = overlay_image->get_data();
-			if (overlay_w > 0 && overlay_h > 0 &&
-					overlay_bytes.size() >= static_cast<int64_t>(overlay_w) *
-							overlay_h * 4) {
-				overlay = overlay_bytes.ptr();
-			}
-		}
-	}
-	const auto wrap = [](int value, int size) {
-		const int remainder = value % size;
-		return remainder < 0 ? remainder + size : remainder;
-	};
-
-	PackedByteArray out_bytes;
-	out_bytes.resize(static_cast<int64_t>(kAtlasPx) * kAtlasPx * 3);
-	uint8_t *dst = out_bytes.ptrw();
-
-	for (int row = 0; row < kCells; ++row) {
-		for (int col = 0; col < kCells; ++col) {
-			const int id = sector_grid[row * kCells + col];
-			const int cell_x0 = (col * kCellPx);
-			const int cell_y0 = (row * kCellPx);
-			if (id < 1 || id > opennova::terrain::COORDS_SECTOR_ID_MAX) {
-				continue;
-			}
-			const int qx = opennova::terrain::coords_quadrant_offset_x(id);
-			const int qz = opennova::terrain::coords_quadrant_offset_z(id);
-			// This world cell's origin (world x east, world z = the colormap's
-			// row axis; mission y = -world z everywhere else in the HUD).
-			const int wx0 = (origin_x + col) * kSectorWu;
-			const int wz0 = (origin_y + row) * kSectorWu;
-			// Avoid the per-texel height walk for cells well clear of the plane.
-			// The generous two-unit margin keeps shoreline cells on the exact path.
-			bool cell_may_have_water = false;
-			if (carve_water) {
-				for (int pz = 0; pz <= 4 && !cell_may_have_water; ++pz) {
-					for (int px = 0; px <= 4; ++px) {
-						const float h = opennova::terrain::height_field_height_world_bilinear(
-								field,
-								wx0 + px * (kSectorWu / 4.0f) + kRetailWaterSampleOffsetXWu,
-								wz0 + pz * (kSectorWu / 4.0f) + kRetailWaterSampleOffsetZWu);
-						if (h < water_cutoff_wu + 2.0f) {
-							cell_may_have_water = true;
-							break;
-						}
-					}
-				}
-			}
-			for (int ty = 0; ty < kCellPx; ++ty) {
-				uint8_t *out_row = dst +
-						(static_cast<int64_t>(cell_y0 + ty) * kAtlasPx +
-								cell_x0) * 3;
-				const int src_z = qz + ty * kWuPerTexel;
-				for (int tx = 0; tx < kCellPx; ++tx) {
-					// 2x2 box over the quadrant's 1 px/wu texels. Composite
-					// each authored .til sample before downsampling, matching
-					// the world shader's source-over ordering.
-					const int src_x = qx + tx * kWuPerTexel;
-					int acc_r = 0, acc_g = 0, acc_b = 0;
-					for (int by = 0; by < kWuPerTexel; ++by) {
-						const uint8_t *sp = src +
-								(static_cast<int64_t>(src_z + by) * src_w +
-									src_x) * 4;
-						for (int bx = 0; bx < kWuPerTexel; ++bx) {
-							const uint8_t *base = sp + bx * 4;
-							if (overlay == nullptr) {
-								acc_r += base[0];
-								acc_g += base[1];
-								acc_b += base[2];
-								continue;
-							}
-							const int world_x = wx0 + tx * kWuPerTexel + bx;
-							const int world_z = wz0 + ty * kWuPerTexel + by;
-							const int overlay_x = wrap(world_x, overlay_w);
-							// The bake samples world_z + 0.5 then floors its
-							// negation, so integer world row z maps to -z-1.
-							const int overlay_y = wrap(-world_z - 1, overlay_h);
-							const uint8_t *over = overlay +
-									(static_cast<int64_t>(overlay_y) * overlay_w +
-											overlay_x) * 4;
-							const int alpha = over[3];
-							const int inverse_alpha = 255 - alpha;
-							acc_r += (over[0] * alpha + base[0] * inverse_alpha + 127) / 255;
-							acc_g += (over[1] * alpha + base[1] * inverse_alpha + 127) / 255;
-							acc_b += (over[2] * alpha + base[2] * inverse_alpha + 127) / 255;
-						}
-					}
-					constexpr int kBoxDiv = kWuPerTexel * kWuPerTexel;
-					int r = acc_r / kBoxDiv;
-					int g = acc_g / kBoxDiv;
-					int b = acc_b / kBoxDiv;
-					if (cell_may_have_water) {
-						const float h = opennova::terrain::height_field_height_world_bilinear(
-								field,
-								wx0 + (tx + 0.5f) * kWuPerTexel + kRetailWaterSampleOffsetXWu,
-								wz0 + (ty + 0.5f) * kWuPerTexel + kRetailWaterSampleOffsetZWu);
-						// Retail's tile render target gets a depth-tested water
-						// sample here; screen filtering supplies the shoreline edge.
-						if (h < water_cutoff_wu) {
-							r = water_r;
-							g = water_g;
-							b = water_b;
-						}
-					}
-					out_row[tx * 3 + 0] = static_cast<uint8_t>(r);
-					out_row[tx * 3 + 1] = static_cast<uint8_t>(g);
-					out_row[tx * 3 + 2] = static_cast<uint8_t>(b);
-				}
-			}
-		}
-	}
-	const Ref<Image> atlas = Image::create_from_data(kAtlasPx, kAtlasPx, false,
-			Image::FORMAT_RGB8, out_bytes);
-	if (atlas.is_null()) {
+	if (!std::isfinite(water_wu)) {
 		return Ref<ImageTexture>();
 	}
-	return ImageTexture::create_from_image(atlas);
+	// Env_WaterHeightFixed == 0 suppresses the entire pass. Positive SHIWORD
+	// conversion truncates to the integer plane; retail clamps it at 254.
+	const int water_int = std::clamp(
+			static_cast<int>(std::floor(water_wu)), 0, 254);
+	if (water_int <= 0) {
+		return Ref<ImageTexture>();
+	}
+
+	PackedByteArray bytes;
+	bytes.resize(static_cast<int64_t>(kMaskPx) * kMaskPx * 4);
+	bytes.fill(0);
+	uint8_t *dst = bytes.ptrw();
+	const uint16_t *height = cpt.depth_buffer.data();
+	for (int z = 0; z < kMaskPx; ++z) {
+		const int source_z = z * kStep;
+		for (int x = 0; x < kMaskPx; ++x) {
+			const int source_x = x * kStep;
+			uint8_t *pixel = dst +
+					(static_cast<int64_t>(z) * kMaskPx + x) * 4;
+			// depthspin is white at every texel; alpha alone carries height.
+			// Keeping transparent texels white also preserves straight-alpha
+			// filtering at the shore instead of darkening RGB and alpha together.
+			pixel[0] = 255;
+			pixel[1] = 255;
+			pixel[2] = 255;
+			const uint32_t sum =
+					height[source_z * kSourcePx + source_x] +
+					height[source_z * kSourcePx + source_x + kHalfStep] +
+					height[(source_z + kHalfStep) * kSourcePx + source_x] +
+					height[(source_z + kHalfStep) * kSourcePx +
+							source_x + kHalfStep];
+			const int terrain_height_int = static_cast<int>(sum >> 10);
+			// Stage 0 ADDSIGNED(COMPLEMENT texture.a, diffuse.a), then
+			// stage 1 ADD(TFACTOR.a=64, current) with alpha-ref 192 reduces
+			// exactly to terrain_height_int <= water_int.
+			// [orig: dword_319F904 descriptor @0x60BB5C; ref @0x607834]
+			if (terrain_height_int > water_int) {
+				continue;
+			}
+			pixel[3] = 255;
+		}
+	}
+	const Ref<Image> mask = Image::create_from_data(kMaskPx, kMaskPx, false,
+			Image::FORMAT_RGBA8, bytes);
+	return mask.is_valid() ? ImageTexture::create_from_image(mask)
+			: Ref<ImageTexture>();
 }
 
 Color TerrainData::get_colormap_color_world(float world_x, float world_z) const {

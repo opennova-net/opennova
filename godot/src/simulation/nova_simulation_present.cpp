@@ -17,6 +17,18 @@
 
 using namespace novasim;
 
+namespace {
+
+uint32_t local_player_minimap_argb(uint8_t team) {
+	// Ordinary entity blips resolve the live team through the retail overlay
+	// color table before TSDicon's later MODULATE2X stage.
+	// [orig: draw_minimap_blip @0x597890; color table @0x840A10]
+	if (team == 1) return 0xFF304080u;
+	return team == 2 ? 0xFF802020u : 0xFF208020u;
+}
+
+} // namespace
+
 Array Simulation::get_throwable_visuals() const {
 	Array out;
 	if (!world_) return out;
@@ -134,26 +146,47 @@ Dictionary Simulation::get_hud_map_grid_origin() const {
 
 PackedInt32Array Simulation::get_hud_minimap_snapshot() const {
 	PackedInt32Array out;
+	const opennova::world::Entity *local_player = world_ != nullptr
+			? world_->registry.get(world_->cached.local_player)
+			: nullptr;
+	const uint16_t local_marker_handle = local_player != nullptr
+			? static_cast<uint16_t>(get_local_player_wire_handle())
+			: opennova::world::EntityHandle::kInvalid;
+	bool retained_local_player = false;
 	int count = 0;
 	if (runtime_) {
 		const opennova::netsim::ClientMinimapState &map =
 				runtime_->state().minimap;
-		auto count_bank = [&count](const auto &bank) {
+		auto count_bank = [&](const auto &bank, bool regular) {
 			for (const auto &slot : bank) {
-				if (slot.active) ++count;
+				if (!slot.active) continue;
+				++count;
+				if (regular && slot.entity_known &&
+						slot.handle == local_marker_handle)
+					retained_local_player = true;
 			}
 		};
-		count_bank(map.transient);
-		count_bank(map.persistent);
-		count_bank(map.special);
+		count_bank(map.transient, true);
+		count_bank(map.persistent, true);
+		count_bank(map.special, false);
 	}
+	// Retail registers the locally deployed player in a regular retained bank.
+	// The loopback client does not receive that client-local registration, so
+	// restore it here unless a decoded regular row already covers the same wire
+	// handle. The draw-call probe confirms cell 3, team-table blue, and the
+	// ordinary 6px-floor path at map center.
+	// [orig: render_minimap_slot_blip @0x5BE240 -> draw_minimap_blip;
+	//  regular TSDicon submit @0x597F73]
+	const bool append_local_player = local_player != nullptr &&
+			local_marker_handle != opennova::world::EntityHandle::kInvalid &&
+			!retained_local_player;
+	if (append_local_player) ++count;
 
 	out.resize(HUD_MINIMAP_HEADER_SIZE + count * HUD_MINIMAP_STRIDE);
 	int32_t *write = out.ptrw();
 	write[0] = HUD_MINIMAP_SNAPSHOT_VERSION;
 	write[1] = HUD_MINIMAP_STRIDE;
 	write[2] = count;
-	if (!runtime_) return out;
 
 	int row = 0;
 	auto append_overlay_bank = [&](const auto &bank, int bank_id) {
@@ -199,13 +232,39 @@ PackedInt32Array Simulation::get_hud_minimap_snapshot() const {
 			dst[15] = policy.floor_px;
 		}
 	};
-	const opennova::netsim::ClientMinimapState &map = runtime_->state().minimap;
-	append_overlay_bank(map.transient,
-			static_cast<int>(opennova::hud::HudMinimapBank::kTransient));
-	append_overlay_bank(map.persistent,
-			static_cast<int>(opennova::hud::HudMinimapBank::kPersistent));
-	append_overlay_bank(map.special,
-			static_cast<int>(opennova::hud::HudMinimapBank::kSpecial));
+	if (runtime_) {
+		const opennova::netsim::ClientMinimapState &map = runtime_->state().minimap;
+		append_overlay_bank(map.transient,
+				static_cast<int>(opennova::hud::HudMinimapBank::kTransient));
+		append_overlay_bank(map.persistent,
+				static_cast<int>(opennova::hud::HudMinimapBank::kPersistent));
+		append_overlay_bank(map.special,
+				static_cast<int>(opennova::hud::HudMinimapBank::kSpecial));
+	}
+	if (append_local_player) {
+		int32_t *dst = write + HUD_MINIMAP_HEADER_SIZE +
+				row++ * HUD_MINIMAP_STRIDE;
+		const opennova::world::MinimapBlipDrawPolicy policy =
+				opennova::world::minimap_blip_draw_policy(*local_player, 3);
+		dst[0] = static_cast<int>(
+				opennova::hud::HudMinimapBank::kPersistent);
+		dst[1] = local_marker_handle;
+		dst[2] = opennova::world::to_fixed(local_player->position.x);
+		dst[3] = opennova::world::to_fixed(local_player->position.y);
+		dst[4] = opennova::world::to_fixed(local_player->position.z);
+		dst[5] = static_cast<int32_t>(get_local_player_heading_bam());
+		dst[6] = 3; // live Person classification -> TSDicon cell 3
+		dst[7] = static_cast<int32_t>(
+				local_player_minimap_argb(local_player->team));
+		dst[8] = 0x10; // regular persistent bank
+		dst[9] = local_player->zone_number;
+		dst[10] = 0; // regular slots draw at zero lifetime
+		dst[11] = 1; // the local entity is necessarily resolved
+		dst[12] = (policy.rotate ? 1 : 0) | (policy.footprint ? 2 : 0);
+		dst[13] = policy.half_x_q16;
+		dst[14] = policy.half_y_q16;
+		dst[15] = policy.floor_px;
+	}
 	return out;
 }
 

@@ -361,12 +361,14 @@ void test_spinmap_mesh_layers_and_waypoint(const fnt_font_t *font) {
 	HudFrameCompiler compiler;
 	HudLayout layout;
 	layout.spinmap_rect = {810.0f, 552.0f, 210.0f, 210.0f, true};
+	layout.hud_text = 0xFF6080FFu;
 	compiler.configure(layout, font);
 	HudFrameState state;
 	state.minimap.terrain.present = true;
 	state.minimap.terrain.sector_count = 16;
 	state.minimap.terrain.sector_rows = 16;
 	state.minimap.terrain.sector_grid.fill(1);
+	state.minimap.terrain.water_present = true;
 	opennova::hud::HudMinimapMarker high;
 	high.icon = 3;
 	high.x = 32 << 16;
@@ -390,12 +392,23 @@ void test_spinmap_mesh_layers_and_waypoint(const fnt_font_t *font) {
 	CHECK(list.map.visible, "an authored HUDSPINMAP rect compiles the spinmap");
 	CHECK(list.map.backing.size() == 32, "spinmap backing is a 32-sided fan");
 	CHECK(!list.map.terrain.empty(), "sector routing emits clipped terrain triangles");
+	CHECK(list.map.terrain_water.size() == list.map.terrain.size(),
+			"depthspin redraws the same clipped sector geometry as the colormap");
 	// The terrain tint bakes the forced-opaque alpha and the fixed-function
 	// MODULATE2X doubling. [orig: color|0xFF000000 @0x6071C0; _FFP.fx
 	//  TSSColor MODULATE2X]
 	CHECK(!list.map.terrain.empty() &&
 			list.map.terrain[0].color == 0xFFC0C0C0u,
 			"terrain tiles carry the doubled opaque tint");
+	for (const auto &tri : list.map.terrain_water) {
+		CHECK(tri.color == 0xFF16476Bu,
+				"depthspin carries the capture-matched opaque shore color");
+		for (const auto *v : {&tri.a, &tri.b, &tri.c}) {
+			CHECK(v->u >= -1e-6f && v->u <= 127.0f / 256.0f + 1e-6f &&
+					v->v >= -1e-6f && v->v <= 127.0f / 256.0f + 1e-6f,
+					"sector id 1 selects depthspin's exact 127px top-left quadrant");
+		}
+	}
 	// Two live markers + ONE waypoint tip cell + the compass ring sprite;
 	// the unknown-entity marker is culled. The far waypoint clamps at the
 	// disc, so the tip is the rotated chevron (cell 7).
@@ -404,8 +417,19 @@ void test_spinmap_mesh_layers_and_waypoint(const fnt_font_t *font) {
 			"two live markers, the waypoint tip cell, and the compass ring");
 	CHECK(list.map.sprites[0].layer <= list.map.sprites[1].layer,
 			"marker sprites retain four-layer ordering");
+	CHECK(list.map.sprites[0].color == 0xFF6080FFu &&
+			list.map.sprites[1].color == 0xFF6080FFu,
+			"ordinary TSDicon markers bake the saturating MODULATE2X RGB stage");
+	CHECK(list.map.sprites[2].color == 0xFF7F5000u,
+			"the waypoint tip stays net-raw after retail's halve/double cancellation");
 	CHECK(list.map.sprites.back().texture == 1,
 			"the compass ring rides texture slot 1");
+	const auto &compass = list.map.sprites.back();
+	CHECK(std::fabs(compass.u0 - 0.05f) < 1e-6f &&
+			std::fabs(compass.v0 - 0.05f) < 1e-6f &&
+			std::fabs(compass.u1 - 0.95f) < 1e-6f &&
+			std::fabs(compass.v1 - 0.95f) < 1e-6f,
+			"the compass crops five-percent texture padding like retail");
 	CHECK(list.map.lines.size() == 1, "the waypoint state line is compiled");
 	// Above-player waypoint: the orange state color, NET-RAW at submit (the
 	// halve under the 2X-caps flag and the vertex re-double cancel).

@@ -26,16 +26,22 @@ constexpr float kTerrainBoundFactor = 0.8f;
 // A 1x canvas cannot express a >1 modulate, so the port emits the doubled
 // color (0xC0 per channel) and the device leg draws the terrain a second
 // time on an additive child item: min(2 x 0.7529t, 1) == min(1.5058t, 1).
-// The enable_fog_pass resubmission at these call sites is the faint water
-// overlay, not the brightness source (see the water-pass note below).
+// The enable_fog_pass resubmission at these call sites is the separate
+// depthspin shore pass, not the brightness source (see below).
 // [orig: 0xD0606060 @0x5a59c8/@0x5a6677; color | 0xFF000000 @0x6071C0;
 //  capture-measured 2.00/2.02/2.04 vs a single 0.7529 pass]
 constexpr uint32_t kTerrainTint = 0xFFC0C0C0u;
-// The witnessed-but-unported water overlay: with enable_fog_pass the decal
-// redraws each clipped tile in water blue 0x003F7F at alpha
-// (water_height_int + 1) — ~2/255 at JO water heights, below the 8-bit
-// visibility floor here. [orig: @0x607834 LABEL_43 block — vert color
-// 0x01003F7F + (v55 << 24), v55 = SHIWORD(Env_WaterHeightFixed) clamped 254]
+// The shore pass remaps each sector's local 0..1 UV into one of depthspin's
+// four 128px quadrants. The 127/256 scale and 130/256 second-half offset are
+// literal float constants in the post-base-draw vertex loop.
+// [orig: flt_7DF19C / flt_7DF198 @0x6077A2..0x6077E6]
+constexpr float kDepthspinUvScale = 127.0f / 256.0f;
+constexpr float kDepthspinUvOffset = 130.0f / 256.0f;
+// The alpha-tested shore material replaces the completed terrain pixel. The
+// Canvas device splits retail's terrain x1.5058 output across two items, so
+// this is the capture-measured final color submitted above both of them.
+// [orig: fog-pass diffuse @0x607834; JOTAC 00TRa synchronized capture]
+constexpr uint32_t kDepthspinColor = 0xFF16476Bu;
 // Backing disc color: the disc pass modulates the struct RGBA through a
 // dedicated effect pass; the exact constant is not byte-witnessed, but the
 // retail capture corroborates ~75% black (the backing-only zone just past
@@ -47,6 +53,13 @@ constexpr uint32_t kBackingColor = 0xC0000000u;
 constexpr float kSpecialIconHalfPx = 6.0f;
 // Compass ring spans the map radius x1.25 [orig: flt_7C6F18 @0x59c9df]
 constexpr float kCompassScale = 1.25f;
+// Retail samples only the centered 90% of COMPRING. Cropping five percent
+// from each edge removes authored transparent padding, so the visible ring
+// reaches 1/0.9 farther than a full-texture sample on the same quad.
+// [orig: draw_compass_indicator @0x59ca8a — UV center 0.5 +/-
+//  flt_7D93A8 (0.45)]
+constexpr float kCompassUvMin = 0.05f;
+constexpr float kCompassUvMax = 0.95f;
 // The 300-wu grid cell and its half, Q16. Column rules sit on the -150
 // lattice (cells span [k*300-150, k*300+150) — the same fold the player
 // grid formula carries), rows on the plain 300 lattice.
@@ -332,6 +345,21 @@ void marker_uv(uint8_t icon, float &u0, float &v0, float &u1, float &v1) {
 	v1 = static_cast<float>(cell + 1) / kIconStripCells;
 }
 
+// Ordinary TSDicon blips submit the raw team color to the strip renderer,
+// whose texture stage is MODULATE2X. Canvas modulates only once, so fold the
+// missing output stage into the diffuse RGB. Alpha is not doubled.
+// [orig: draw_minimap_blip @0x597f48..0x597f73 ->
+//  Render_DrawIconStripCell_Debug @0x67bae0; TSS MODULATE2X]
+uint32_t marker_modulate2x_color(uint32_t argb) {
+	const auto doubled = [](uint32_t channel) {
+		return std::min(channel * 2u, 255u);
+	};
+	return (argb & 0xFF000000u) |
+			(doubled((argb >> 16) & 0xFFu) << 16) |
+			(doubled((argb >> 8) & 0xFFu) << 8) |
+			doubled(argb & 0xFFu);
+}
+
 // Clip a segment to the view (rect modes: Liang-Barsky; disc modes: the
 // circle intersection). Returns false when fully outside.
 bool clip_map_segment(const MapView &view, float &x0, float &y0,
@@ -499,6 +527,7 @@ void reset_pass(HudMapPass &pass) {
 	pass.radius_y = 0.0f;
 	pass.backing.clear();
 	pass.terrain.clear();
+	pass.terrain_water.clear();
 	pass.overlays.clear();
 	pass.sprites.clear();
 	pass.lines_under.clear();
@@ -605,7 +634,7 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 	// Terrain: 512-unit sector tiles over the covered disc, sampled through
 	// the TRN routing table. Terrain rows run on NEGATED mission Y. The tile
 	// pass is UNMASKED — every mode draws it; bit9 only selects the
-	// enable_fog_pass water-overlay variant (witnessed-unported).
+	// enable_fog_pass depthspin water variant.
 	// [orig: render_terrain_decal @0x6071C0 called unconditionally from the
 	//  @0x5a5f40 walk (the bit9 test at the call site picks the fog-pass
 	//  argument); bound = diag*0.8*scale, tile snap 0x2000000 Q16, row index
@@ -654,23 +683,16 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 				view_project(view, input, q16(wx1), q16(wy0), x[1], y[1]);
 				view_project(view, input, q16(wx1), q16(wy1), x[2], y[2]);
 				view_project(view, input, q16(wx0), q16(wy1), x[3], y[3]);
-				// The atlas rect for this cell: the composed per-cell tile
-				// atlas when the device baked one (retail's tile cache is
-				// keyed per cell), the raw colormap's per-quadrant-id sheet
-				// otherwise. The sub-cell inset mirrors retail's 127/256-style
-				// anti-bleed on its per-tile textures [orig: UV scale
-				// 0.49609375 + offset 0.5078125 @0x6071C0].
+				// Retail binds Colormap0..3 as independent clamp textures. The
+				// device stores them in one atlas, so a half-texel inset reproduces
+				// the independent edge clamp without sampling the next quadrant.
 				const float atlas_px =
 						static_cast<float>(std::max(1, input.terrain.atlas_px));
 				const float cell_px =
 						static_cast<float>(std::max(1, input.terrain.cell_px));
-				const float inset = std::max(0.25f, cell_px / 512.0f);
-				const float rect_u = input.terrain.per_cell_atlas
-						? sector.cell_col * cell_px
-						: static_cast<float>(sector.quadrant_x);
-				const float rect_v = input.terrain.per_cell_atlas
-						? sector.cell_row * cell_px
-						: static_cast<float>(sector.quadrant_z);
+				constexpr float inset = 0.5f;
+				const float rect_u = static_cast<float>(sector.quadrant_x);
+				const float rect_v = static_cast<float>(sector.quadrant_z);
 				const float u0 = (rect_u + inset) / atlas_px;
 				const float v0 = (rect_v + inset) / atlas_px;
 				const float u1 = (rect_u + cell_px - inset) / atlas_px;
@@ -686,6 +708,32 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 							view.disc_radius);
 				}
 				emit_fan(clip_a_, kTerrainTint, out.terrain);
+
+				// The bit9 fog-pass leg redraws the identical clipped tile with
+				// depthspin UVs. Sector ids 2/4 select the lower half; 3/4 the
+				// right half. The transparent mask texture replaces retail's
+				// ADDSIGNED/alpha-test cutout while preserving the same shoreline.
+				if (input.terrain.water_present && (flags & 0x200u) != 0) {
+					const float water_u0 = sector.quadrant_x != 0
+							? kDepthspinUvOffset : 0.0f;
+					const float water_v0 = sector.quadrant_z != 0
+							? kDepthspinUvOffset : 0.0f;
+					const float water_u1 = water_u0 + kDepthspinUvScale;
+					const float water_v1 = water_v0 + kDepthspinUvScale;
+					clip_a_.assign({{x[0], y[0], water_u0, water_v0},
+							{x[1], y[1], water_u1, water_v0},
+							{x[2], y[2], water_u1, water_v1},
+							{x[3], y[3], water_u0, water_v1}});
+					if (view.rect_clip) {
+						clip_rect(clip_a_, clip_b_, view.px_x1, view.px_y1,
+								view.px_x2, view.px_y2);
+					} else {
+						clip_circle32(clip_a_, clip_b_, view.center_x,
+								view.center_y, view.disc_radius,
+								view.disc_radius);
+					}
+					emit_fan(clip_a_, kDepthspinColor, out.terrain_water);
+				}
 			}
 		}
 	}
@@ -963,7 +1011,9 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 					sprite.rotation_rad = 0.0f;
 				}
 			}
-			sprite.color = marker.color;
+			// Unlike HUD_DrawMapTargetPointer below, this path does not
+			// pre-halve the diffuse before TSDicon's MODULATE2X stage.
+			sprite.color = marker_modulate2x_color(marker.color);
 			sprite.layer = static_cast<uint8_t>(keyed.key >> 2);
 			marker_uv(marker.icon, sprite.u0, sprite.v0, sprite.u1, sprite.v1);
 			out.sprites.push_back(sprite);
@@ -1163,10 +1213,10 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 				static_cast<uint32_t>(input.player_heading_bam);
 		compass.rotation_rad = static_cast<float>(
 				static_cast<double>(rot_bam >> 16) * kBam16ToRadians);
-		compass.u0 = 0.0f;
-		compass.v0 = 0.0f;
-		compass.u1 = 1.0f;
-		compass.v1 = 1.0f;
+		compass.u0 = kCompassUvMin;
+		compass.v0 = kCompassUvMin;
+		compass.u1 = kCompassUvMax;
+		compass.v1 = kCompassUvMax;
 		compass.color = 0xFFFFFFFFu;
 		compass.texture = 1;
 		compass.layer = 5;
