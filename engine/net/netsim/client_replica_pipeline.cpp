@@ -979,16 +979,17 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 	}
 
 	// Root suppression flag channels: the float bit zeroes the vertical
-	// channel, CL/ladder-platform contact the horizontal pair. org2 writes
-	// the literal 1 — keeping the resolver's moving discriminant true — and
-	// org1 writes true zeros. [orig: org2 @0x4b7ab0..0x4b7ac4 (the ebp =
-	// 0x8000 load @0x4b7979); org1 @0x4bf667..0x4bf680]
-	const int32_t suppressed =
-			es.cls == EntityClass::Player ? 1 : 0;
-	if ((es.rm_entity_flags & 0x8000u) != 0) dz_eff = suppressed;
+	// channel, CL/ladder contact the horizontal pair. BOTH motors store true
+	// zeros — the earlier "org2 writes the literal 1" reading mistook the
+	// 0x8000 TEST-MASK load (`mov ebp, 8000h @0x4b7979`) for the stored
+	// operand; the stores use the xor-zeroed scratch registers.
+	// [orig: org2 stores edi, `xor edi, edi` @0x4b797e/@0x4b79b7,
+	//  stores @0x4b7ab5/@0x4b7ac0-0x4b7ac4; org1 stores ebx,
+	//  `xor ebx, ebx` @0x4bf600, stores @0x4bf671/@0x4bf67c-0x4bf680]
+	if ((es.rm_entity_flags & 0x8000u) != 0) dz_eff = 0;
 	if ((es.rm_entity_flags & 0x100000u) != 0) {
-		wx = suppressed;
-		wy = suppressed;
+		wx = 0;
+		wy = 0;
 	}
 	// Integrate: position takes momentum + root together [orig: org2
 	// @0x4b7cbf..0x4b7cd2; org1 @0x4bf684..0x4bf6a2].

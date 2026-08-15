@@ -336,8 +336,10 @@ void test_hurt_volume_updates_registry_health() {
 // CL volume lets the body drift through, exactly as retail geometry implies.
 // Plane 0 of the CL = +X ⇒ the extracted frame yaw is the -X facing (BAM
 // 0x80000000) and the anchor sits at (10.375, 10.0, 3.0); the climber
-// approaches from +X facing -X.
-CollisionModel ladder_slab_model() {
+// approaches from +X facing -X. `with_backing=false` builds a bare CL (no
+// solid behind the rungs) — the org1 facing-press drift test needs a rig with
+// no CB contact so the resolver's pass-2 latch stays clear.
+CollisionModel ladder_slab_model(bool with_backing = true) {
     CollisionModel model;
     auto plane = [&](int nx, int ny, int nz, double distance) {
         CollisionPlane p;
@@ -367,9 +369,9 @@ CollisionModel ladder_slab_model() {
         model.volumes.push_back(v);
     };
     box(4, -0.25, 0.25); // the CL — plane 0 is its +X face
-    box(1, -0.6, -0.1);  // the CB structure behind the rungs
+    if (with_backing) box(1, -0.6, -0.1); // the CB structure behind the rungs
     CollisionSection section;
-    section.volume_count = 2;
+    section.volume_count = with_backing ? 2 : 1;
     // Authored whole-object section bounds (a real ladder's section spans the
     // full model): the recontact inflation must survive the section broad phase.
     section.authored_bounds = true;
@@ -384,8 +386,10 @@ CollisionModel ladder_slab_model() {
     return model;
 }
 
-// Climb clips carry ONLY the vertical root lane (the horizontal pair is zeroed
-// on a latch anyway); gaits walk forward.
+// Climb clips carry the vertical root lane AND a deliberate forward (dx) lane:
+// the on-ladder integrate must zero the horizontal pair, so any dx leak walks
+// the climber off the anchor column and out of the cycle test's X band —
+// a direct pin on the 0x100000 root suppression. Gaits walk forward.
 struct ClimbSource : IRootMotionSource {
     std::set<int> clips;
     bool has_clip(int, int id) const override { return clips.count(id) != 0; }
@@ -396,6 +400,8 @@ struct ClimbSource : IRootMotionSource {
         out = RootMotionFrame{};
         if (id == anim_state::kClimbUp) out.dz = 0x2000;
         if (id == anim_state::kClimbDown) out.dz = -0x2000;
+        if (id >= anim_state::kClimbIdle && id <= anim_state::kClimbTop)
+            out.dx = 0x2000; // must be suppressed while latched
         if (TestSource::gait(id)) out.dx = 0x2000;
         return true;
     }
@@ -411,7 +417,7 @@ struct ClimbRig {
     EntityHandle player_h;
     AiEntity *m = nullptr;
 
-    explicit ClimbRig(bool local_player = true) {
+    explicit ClimbRig(bool local_player = true, bool with_backing = true) {
         world.registry.configure_pool(0, 4);
         world.registry.configure_pool(2, 4);
         Entity ladder;
@@ -428,7 +434,7 @@ struct ClimbRig {
         player_h = world.registry.spawn(0, body);
 
         collision.terrain = &flat.field;
-        const int32_t mid = collision.add_model(ladder_slab_model());
+        const int32_t mid = collision.add_model(ladder_slab_model(with_backing));
         collision.assign_entity(ladder_h, mid);
         ai.terrain = &flat.field;
         ai.collision = &collision;
@@ -593,6 +599,9 @@ void test_org1_ladder_hold_press_and_top_select() {
     Entity blocker;
     blocker.kind = EntityKind::Organic;
     blocker.position = {10.0f, 10.0f, 1.9f};
+    blocker.bound_radius = 1.0f; // the probe's z-band reads the peer ENTITY
+                                 // bound (persons carry ~1u), not the staged
+                                 // pose-widened prox radius
     blocker.health = 100;
     blocker.alive = true;
     rig.world.registry.spawn(0, blocker);
@@ -608,6 +617,96 @@ void test_org1_ladder_hold_press_and_top_select() {
     run_ticks(rig.ai, rig.world, 4, 5);
     CHECK(m->pos[2] > z_before);
     CHECK(m->inf.vel[2] <= 0x4000);
+}
+
+void test_player_ladder_side_dismounts_and_view_clamp() {
+    // The side dismounts, both mirror cases [orig: case 2 @ 0x4b752a (yaw −90°)
+    // / case 6 @ 0x4b75dc (yaw +90°)]: with the frame yaw at 180°, the 0.875u
+    // lateral rides sin(±90°) = ∓1 on Y (opposite directions), the 0.5u face
+    // push rides cos(180°) = −1 on X (+X, away), the hop is +0x4000, and the
+    // latch drops. Looking down keeps the entry gate from re-latching.
+    for (int dir = 2; dir <= 6; dir += 4) {
+        ClimbRig rig;
+        AiEntity *m = rig.m;
+        m->inf.player_moving = true;
+        m->inf.player_move_dir_index = 0;
+        run_ticks(rig.ai, rig.world, 0, 4);
+        Entity *pe = rig.world.registry.get(rig.player_h);
+        CHECK((pe->flags & kEntityFlagLadderContact) != 0);
+        m->inf.look_pitch = -0x8000000;
+        run_ticks(rig.ai, rig.world, 4, 5); // settle into climb_down, still latched
+        const int32_t x0 = m->pos[0];
+        const int32_t y0 = m->pos[1];
+        m->inf.player_move_dir_index = dir;
+        run_ticks(rig.ai, rig.world, 5, 6);
+        CHECK((pe->flags & kEntityFlagLadderContact) == 0);
+        CHECK(m->pos[0] > x0 + fx(0.3)); // the 0.5u face push, away from -X
+        if (dir == 2)
+            CHECK(m->pos[1] < y0 - fx(0.6)); // sin(90°) lateral, one way
+        else
+            CHECK(m->pos[1] > y0 + fx(0.6)); // sin(−90°) lateral, mirrored
+    }
+
+    // The ±120° view clamp while latched [orig: gate @ 0x4b4978; clamp
+    // ±0x55555500 @ 0x4b4b04-0x4b4b42]: a 135°-off view is pulled to the
+    // limit. Measure vs the PRE-tick body — the clamp runs before the leg
+    // model, whose ±0x30000000 twist limit then drags the body itself most of
+    // the way onto the yaw within the same tick (org2's normal idle turn).
+    ClimbRig crig;
+    AiEntity *cm = crig.m;
+    crig.m->inf.player_moving = false;
+    run_ticks(crig.ai, crig.world, 0, 4); // idle latch at the slab
+    Entity *ce = crig.world.registry.get(crig.player_h);
+    CHECK((ce->flags & kEntityFlagLadderContact) != 0);
+    const int32_t body_pre = cm->inf.body_heading;
+    cm->inf.target_heading = opennova::io::bam_add(body_pre, 0x60000000);
+    run_ticks(crig.ai, crig.world, 4, 5);
+    const int32_t clamped =
+        opennova::io::bam_sub(cm->inf.target_heading, body_pre);
+    CHECK(clamped <= 1431655680 + 0x2000000); // at/near the +120° limit
+    CHECK(clamped > 0x40000000); // clamped, not collapsed (resolver chase
+                                 // pulls ~7.5°/tick past the clamp)
+
+    // Unlatched control: teleport clear of the slab; the same offset survives
+    // untouched (no clamp, no resolver view chase).
+    cm->pos[0] = fx(30.0);
+    ce->position.x = 30.0f;
+    for (int i = 0; i < 17; ++i) crig.collision.build_tick_tables(crig.world);
+    run_ticks(crig.ai, crig.world, 5, 6); // the latch drops (no contact)
+    CHECK((ce->flags & kEntityFlagLadderContact) == 0);
+    const int32_t body_pre2 = cm->inf.body_heading;
+    cm->inf.target_heading = opennova::io::bam_add(body_pre2, 0x60000000);
+    run_ticks(crig.ai, crig.world, 6, 7);
+    const int32_t free_delta =
+        opennova::io::bam_sub(cm->inf.target_heading, body_pre2);
+    CHECK(free_delta > 1431655680); // no clamp off the ladder
+}
+
+void test_org1_bare_cl_facing_press_drift() {
+    // The org1 facing press [orig: @ 0x4bfa47-0x4bfaa3] executes only while the
+    // resolver's pass-2 contact latch is clear — a bare CL (no backing solid)
+    // keeps it clear, and the press + the resolver's own press then drift the
+    // latched NPC into the face measurably faster than the resolver press
+    // alone. Deleting the org1 press drops the 3-tick drift under the bound.
+    ClimbRig rig(/*local_player=*/false, /*with_backing=*/false);
+    AiEntity *m = rig.m;
+    m->pos[0] = fx(10.4);
+    m->pos[2] = fx(1.5);
+    Entity *pe = rig.world.registry.get(rig.player_h);
+    pe->position.x = 10.4f;
+    pe->position.z = 1.5f;
+    pe->flags |= kEntityFlagLadderContact; // injected latch (re-latch sustains)
+    for (int i = 0; i < 17; ++i) rig.collision.build_tick_tables(rig.world);
+    run_ticks(rig.ai, rig.world, 0, 1);
+    CHECK((pe->flags & kEntityFlagLadderContact) != 0);
+    CHECK(!rig.collision.second_pass_contact_latch); // bare CL: no pass-2 contact
+    const int32_t x0 = m->pos[0];
+    run_ticks(rig.ai, rig.world, 1, 4);
+    CHECK((pe->flags & kEntityFlagLadderContact) != 0);
+    // 3 ticks of resolver press (−0.0625) + org1 press (−0.03125) less the
+    // anchor chase-back: comfortably past 0.22u; without the org1 press the
+    // same window moves under 0.19u.
+    CHECK(m->pos[0] < x0 - fx(0.22));
 }
 
 void test_registry_max_health_drives_wounded_gait() {
@@ -2156,7 +2255,9 @@ int main() {
     test_gait_stance_transition_insert();
     test_player_ladder_climb_cycle();
     test_player_ladder_bottom_exit_and_jump_off();
+    test_player_ladder_side_dismounts_and_view_clamp();
     test_org1_ladder_hold_press_and_top_select();
+    test_org1_bare_cl_facing_press_drift();
     test_eye_offset_restamp();
     test_slope_standing_camera_stays_level();
     test_slope_prone_body_conforms_org2();

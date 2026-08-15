@@ -10,12 +10,12 @@ extends SceneTree
 #     looking up — the witnessed entry gate needs the view within 60 deg of the
 #     authored facing with the look-pitch sign agreeing with the anchor side
 #     [orig: @ 0x4b32a5-0x4b32c0],
-#   * HOLD FORWARD: the climb block stamps climb_up and the clip's vertical
-#     root lane rises the body [orig: @ 0x4b7484-0x4b750a],
+#   * HOLD FORWARD after a mouse-look up: the climb block stamps climb_up and
+#     the clip's vertical root lane rises the body [orig: @ 0x4b7484-0x4b750a],
 #   * release: climb_idle holds height (gravity skipped while latched
-#     [orig: @ 0x4b7acd]),
-#   * BACK: the dismount pushes off the face and the body falls/grounds
-#     [orig: @ 0x4b7681-0x4b76cc].
+#     [orig: @ 0x4b7acd]); a natural top-out hands over to the exit leg.
+#   The dismount family (side/back fans, jump-off, the grounded bottom exit)
+#   is pinned deterministically by the `collision`/`infantry` ctests instead.
 #
 #   NW_SP_MISSION=00TRa.bms NW_RESOURCE_DIR=<retail install> "$GODOT_BIN" \
 #       --headless --path godot -s res://tests/ladder_climb_probe.gd
@@ -28,11 +28,66 @@ const SWEEP_STEP := 100.0
 const SWEEP_RADIUS := 400.0
 
 var _forward := false
-var _back := false
+# Action-shot mode: NW_PROBE_SHOTS=<dir> + a NON-headless run saves PNGs at
+# the latch / mid-climb / top-out beats. A dedicated probe camera frames the
+# third-person body from the climber's back quarter (the presenter's own chase
+# cam sits inside the tower foliage here).
+var _shots_dir := ""
+var _shot_vp: SubViewport = null
+var _shot_cam: Camera3D = null
+var _shot_dir3 := Vector3.ZERO
 
 
 func _initialize() -> void:
+	_shots_dir = OS.get_environment("NW_PROBE_SHOTS")
 	call_deferred("_run")
+
+
+# The presenter re-asserts its own camera every frame, so the shot camera
+# renders through a dedicated SubViewport sharing the game's World3D — no
+# `current` competition, and no HUD overlay in the capture.
+func _frame_shot(sim, ladder_center: Vector3, extra_up := 0.0) -> void:
+	if _shot_cam == null:
+		_shot_vp = SubViewport.new()
+		_shot_vp.size = Vector2i(1280, 720)
+		_shot_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+		root.add_child(_shot_vp)
+		_shot_vp.world_3d = root.world_3d
+		_shot_cam = Camera3D.new()
+		_shot_cam.fov = 55.0
+		_shot_vp.add_child(_shot_cam)
+		var away: Vector3 = sim.get_local_player_position() - ladder_center
+		away.y = 0.0
+		_shot_dir3 = away.normalized() if away.length() > 0.01 else Vector3.RIGHT
+		# Swing off the face normal so a ladder support post cannot sit dead
+		# between the camera and the climber.
+		_shot_dir3 = _shot_dir3.rotated(Vector3.UP, 0.6)
+	var player: Vector3 = sim.get_local_player_position()
+	var side := _shot_dir3.cross(Vector3.UP)
+	_shot_cam.position = player + _shot_dir3 * 4.2 + side * 1.6 \
+			+ Vector3.UP * (1.3 + extra_up)
+	_shot_cam.look_at(player + Vector3.UP * 0.8)
+	_shot_cam.make_current()
+
+
+func _shot(name: String) -> void:
+	if _shots_dir.is_empty():
+		return
+	# Freeze the sim clock for the capture — the settle frames below still
+	# render, but the body cannot walk out of the framed shot at probe
+	# timescale. Two full rendered frames so the subviewport target holds a
+	# settled image.
+	Engine.time_scale = 0.0
+	await RenderingServer.frame_post_draw
+	await RenderingServer.frame_post_draw
+	var src: Viewport = _shot_vp if _shot_vp != null else root
+	var img := src.get_texture().get_image()
+	Engine.time_scale = TIME_SCALE
+	if img == null:
+		return
+	var path := _shots_dir.path_join("ladder_%s.png" % name)
+	img.save_png(path)
+	print("PROBE shot saved: %s" % path)
 
 
 func _mission_wait(seconds: float) -> void:
@@ -107,7 +162,7 @@ func _run() -> void:
 			return
 	var sim = world.get_sim()
 	presenter.set_input_source(func() -> Dictionary:
-		return {"forward": _forward, "back": _back})
+		return {"forward": _forward})
 	await _mission_wait(1.0)
 
 	# --- Sweep for a CL volume: the debug view is player-anchored (150u), so
@@ -170,6 +225,23 @@ func _run() -> void:
 	if not latched:
 		_fail("no entry latched — the CL entry gate or the gravity skip is dead")
 		return
+	var shot1_z := hold_z
+	if not _shots_dir.is_empty():
+		presenter.set_third_person(true)
+		await _mission_wait(0.4)
+		# The 00TRa anchor at latch height sits behind the mound crest, so the
+		# latch beat is shot one step up the ladder where the body clears the
+		# terrain — the held height IS the mechanic (climb_idle, gravity off).
+		for i in 8:
+			sim.add_local_player_look(0.0, -600.0)
+			await process_frame
+		_forward = true
+		await _mission_wait(0.5)
+		_forward = false
+		await _mission_wait(0.3)
+		shot1_z = sim.get_local_player_position().y
+		_frame_shot(sim, center, 0.6)
+		await _shot("1_latched")
 
 	# --- Climb: mouse-look UP (the forward fan picks climb_up by the look-pitch
 	# sign), hold forward, and the climb clip's vertical lane must rise the body.
@@ -178,14 +250,28 @@ func _run() -> void:
 		await process_frame
 	_forward = true
 	var max_z := hold_z
+	var mid_shot_taken := false
 	for i in 30:
 		await _mission_wait(0.1)
 		max_z = maxf(max_z, sim.get_local_player_position().y)
+		if not mid_shot_taken and max_z > shot1_z + 1.0:
+			mid_shot_taken = true
+			if _shot_cam != null:
+				# Freeze mid-climb (climb_idle holds the height exactly) so the
+				# body cannot outrun the framing at probe frame rates.
+				_forward = false
+				await _mission_wait(0.3)
+				_frame_shot(sim, center)
+				await _shot("2_climbing")
+				_forward = true
 	_forward = false
 	if max_z <= hold_z + 0.4:
 		_fail("forward + look-up did not climb (held %.2f, max %.2f)" % [hold_z, max_z])
 		return
 	print("PROBE CLIMB OK: %.2f -> %.2f (climb_up root motion)" % [hold_z, max_z])
+	if _shot_cam != null:
+		_frame_shot(sim, center)
+	await _shot("3_top")
 
 	# --- Hold again: release the stick — climb_idle keeps the height (gravity
 	# stays off while latched). A natural top-out above the volume falls instead,

@@ -5897,13 +5897,17 @@ splash effect + type-0x34 overlay broadcast on the not-yet-latched edge
   quarter-step tail through `+0xAC` @ 0x4bfc65-0x4bfc86]` — gravity's and the
   resolver's z contributions are DISCARDED while afloat. org1 never sets the
   dive bit (clears it on exit only).
-- **Motion couplings**: `0x8000` suppresses the vertical root channel (org2
-  writes the literal 1 — keeping the resolver's moving discriminant true —
-  org1 a true 0) and `0x100000` the horizontal pair, same literals
-  `[orig: org2 @ 0x4b7ab0-0x4b7ac4, the `ebp = 0x8000` load @ 0x4b7979;
-  org1 @ 0x4bf667-0x4bf680]`; gravity skips while `Flags & 0x108000`
-  `[orig: org2 @ 0x4b7ac8; org1 @ 0x4bf7b8]` — the position-add itself is
-  unconditional (org2 folds vel into the one root store `@ 0x4b7cef`).
+- **Motion couplings**: `0x8000` suppresses the vertical root channel and
+  `0x100000` the horizontal pair — BOTH motors store true ZEROS (CORRECTED
+  2026-08-15: the earlier "org2 writes the literal 1" reading mistook the
+  0x8000 TEST-MASK load `mov ebp, 8000h @ 0x4b7979` for the stored operand;
+  the stores use xor-zeroed scratch — org2 `xor edi, edi @ 0x4b797e/@ 0x4b79b7`
+  with stores `@ 0x4b7ab5/@ 0x4b7ac0-0x4b7ac4`, org1 `xor ebx, ebx @ 0x4bf600`
+  with stores `@ 0x4bf671/@ 0x4bf67c-0x4bf680`; the netsim replica port's
+  Player-row `1` was a misport of this and is fixed); gravity skips while
+  `Flags & 0x108000` `[orig: org2 @ 0x4b7ac8; org1 @ 0x4bf7b8]` — the
+  position-add itself is unconditional (org2 folds vel into the one root
+  store `@ 0x4b7cef`).
 - **Port notes**: the replica port carries the org2 REMOTE arm (flat base,
   no pitch term) and the org1 snap form verbatim; the full velocity-triplet
   drags run against the row velocity pair + `rm_vel_z`; and the `+0x74` eye
@@ -6139,9 +6143,48 @@ next pre-tick input write cannot undo it
    legs, 0x100020 lean legs, the chute-cancel `@ 0x4b7b10`) ride D-INF-20 /
    the mount slice.
 4. Retail runs the org2 stance selection and lets the climb block overwrite
-   the field in the same tick; our port skips the selection while latched
-   (same net state per tick). If a witnessed selection side effect on a
-   ladder ever matters (idle-counter drift), revisit.
+   the field in the same tick; our port skips the selection while latched and
+   mirrors its one persistent side effect (the standing-idle counter's
+   advance/reset) so the net state cannot drift.
+5. The 3P held-weapon presentation follows the aim channels rather than the
+   posed hand bones, so a climber's rifle floats beside the body instead of
+   riding the rung-hand (retail's weapon attach consumes the arms-locked
+   pose; `Entity_CanFireWeapon @ 0x4dcb10` carries no ladder gate, so the
+   weapon stays drawn). Presentation-seam residual.
+
+### 30.3a Adversarial review disposition (2026-08-15, three-lens pass)
+
+- **The pitch-up movement-dismount cycle is AUTHENTIC**: pressing the back
+  fan while looking up mid-ladder dismounts and the SAME tick's resolver
+  passes the fresh-entry gate again (below the anchor + pitch-up + facing
+  eased onto the frame), snapping back to the anchor with the stance Z bump
+  each tick until the pose crosses the anchor — the witnessed arithmetic
+  produces this cycle verbatim, and the port keeps it (decision: copy
+  retail). Getting off mid-ladder is look-down + back, a side fan clear of
+  the volume, or a jump — as in retail.
+- **The one-sided pitch-restore arrival is AUTHENTIC**: the witnessed check
+  is `next > target + 16` only, so a restore approaching from BELOW the 4096
+  target lands in one resolve (`the else leg @ 0x4b3d45`), pinned by
+  `test_ladder_pitch_restore_from_below_snaps`.
+- **Fixed from the review**: the mounted 8th-tick resolve now carries the
+  ladder IO (retail has ONE resolver — the latch-only channel there latched a
+  carried body on any CL touch with no entry gate); `infantry_respawn_snap`
+  clears the pitch-restore trio (the host-respawn twin of reset_for_spawn);
+  the airborne-edge suppression carries the masks' 0x8000 half; the
+  congestion probe reads the peer's ENTITY bound (the staged prox radius is
+  pose-widened); the org1 stamps save/restore `anim_pending` (retail's raw
+  stores leave the slot untouched); the netsim replica root-suppression
+  literal (see §29.2a's correction); `debug_teleport_local_player` drops a
+  live latch + restore and invalidates the prev-position gate.
+- **Latent, single-writer today**: `last_ladder_frame` is one world-level
+  slot read a tick later by the motor legs (dismount yaw, the bottom-exit
+  anchor compare, the org1 press); two concurrent climbers would cross-read
+  frames once a second writer exists (the AI order slice) — revisit with
+  item 1.
+- **Replica rows carrying wire 0x100000 now resolve with the on-ladder
+  2-point capsule + recontact mask** (the `was_on_ladder` read includes the
+  staged flags mirror) — more faithful than master's always-3-point, noted
+  as a D-NET-196-adjacent behavior change.
 
 ### 30.4 IDB write-backs (2026-08-15 session, saved)
 

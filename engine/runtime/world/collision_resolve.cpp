@@ -9,8 +9,6 @@
 #include "world/angle.h"
 #include "world/dir_table.h"
 #include <cmath>
-#include <cstdio>  // temp ladder trace
-#include <cstdlib> // temp ladder trace
 
 #include <io/bam.h>
 
@@ -978,7 +976,13 @@ bool CollisionWorld::ladder_person_ahead(World &world, EntityHandle self,
         entity_pos_fixed(*peer, live);
         if (abs32(probe_x - live[0]) > 73728 || abs32(probe_y - live[1]) > 73728)
             continue;
-        if (self_z + (self_bound >> 1) >= live[2] - (p.radius >> 1) && self_z <= live[2])
+        // Both bounds read the row's ENTITY bound radius — the staged prox slot
+        // radius is pose-widened for the projectile gate and would deepen the
+        // band. [orig: other->boundRadius @ 0x4bfa29]
+        const int32_t peer_bound =
+            peer->bound_radius > 0.0f ? to_fixed(peer->bound_radius) : 0;
+        if (self_z + (self_bound >> 1) >= live[2] - (peer_bound >> 1) &&
+            self_z <= live[2])
             return true;
     }
     return false;

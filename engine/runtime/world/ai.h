@@ -993,6 +993,16 @@ public:
     // [orig: decay @0x4b5c97; ramp @0x4b7dbf/@0x4b7dd6 under the (Flags & 0x100020)
     // gate @0x4b7dad; the seated (+0x168==1) +-0x1400000 variant unported]
     void infantry_lean_tick(AiEntity &e, uint32_t entity_flags);
+    // The D-COL-5 climb legs (infantry_ladder.cpp; record world-wac-ai-re.md §30).
+    // org2, EVERY tick: the on-ladder state override (32/33/34 by the dir fan +
+    // look-pitch sign) and the side/back dismounts.
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4b7484-0x4b76d8]
+    void infantry_ladder_override(AiEntity &e, Entity *tick_entity);
+    // org1, post-resolve: the congestion hold, the facing press (gated on the
+    // resolver's pass-2 contact latch), and the climb_up/climb_top anchor-band
+    // select. Dormant in game until the AI climb-order writer lands.
+    // [orig: Entity_UpdateInfantryAI @0x4bf907-0x4bfad8]
+    void infantry_ladder_org1_block(AiEntity &e, World &world, Entity *tick_entity);
     // The torso-roll producer (entity+0x2DC), every body tick: prone idle 48 decays it
     // toward level (torso -= (torso+8)>>4); the combat rolls 41/42 RAMP it
     // -/+0x4000000 (5.625 deg) per tick — the FP barrel-roll view; otherwise it

@@ -1170,6 +1170,16 @@ Error Simulation::debug_teleport_local_player(const Vector3 &p_mission_pos,
 	p->inf.look_pitch = p->pitch;
 	player_input_.look_heading = p->heading;
 	player_input_.look_pitch = p->pitch;
+	// A teleport is not a ladder exit: drop any live CL latch (else the next
+	// resolve runs the exit push + arms the pitch restore at the destination),
+	// disarm a pending restore, and invalidate the resolver's prev-position
+	// gate so the first resolve does not plane-test against a cross-map pose.
+	e->flags &= ~opennova::world::kEntityFlagLadderContact;
+	e->engine_flags &= ~opennova::world::kEntityFlagLadderContact;
+	p->inf.pitch_restore_active = false;
+	p->inf.pitch_restore_target = 0;
+	p->inf.pitch_restore_prev = 0;
+	p->collide_state = {};
 	return OK;
 }
 

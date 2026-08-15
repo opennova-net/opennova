@@ -1332,6 +1332,124 @@ void test_ladder_entry_gate_snap_and_chase() {
 }
 
 // ---------------------------------------------------------------------------
+void test_ladder_from_above_entry_and_sin_lane() {
+    // The from-above entry arm: tick-start above the anchor short-circuits the
+    // facing gate entirely (a 90°-off view still latches) but demands the
+    // look-DOWN pitch sign, and snaps Z to exactly anchor − 4096 (over the lip
+    // onto the ladder). [orig: @ 0x4b32a5-0x4b32c0 + @ 0x4b3319]
+    Rig rig(ladder_slab());
+    rig.move_soldier(10.6, 10.0, 3.4);
+    int32_t pos[3] = {fx(10.6), fx(10.0), fx(3.4)};
+    int32_t vel[3] = {0, 0, 0};
+    int16_t health = 100;
+    CollisionWorld::ResolveState state;
+    LadderIo lio(/*tick_start_z=*/fx(3.4)); // above the 3.0 anchor
+    lio.view_yaw = static_cast<int32_t>(0xC0000000u); // 90° off — must not matter
+    lio.view_pitch = -0x8000000;                      // looking down
+    rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0, fx(0.5),
+                          0, 0, true, true, 0, 32, 0x1u, health, nullptr, &lio.io);
+    Entity *s = rig.world.registry.get(rig.soldier);
+    CHECK((s->flags & kEntityFlagLadderContact) != 0);
+    CHECK(pos[2] == fx(3.0) - 4096); // the top-entry under-snap, exact
+
+    // Control: the same drop looking UP fails the pitch-sign arm.
+    Rig up(ladder_slab());
+    up.move_soldier(10.6, 10.0, 3.4);
+    int32_t upos[3] = {fx(10.6), fx(10.0), fx(3.4)};
+    int32_t uvel[3] = {0, 0, 0};
+    CollisionWorld::ResolveState ustate;
+    LadderIo ulio(fx(3.4));
+    ulio.view_yaw = static_cast<int32_t>(0xC0000000u);
+    ulio.view_pitch = 0x8000000;
+    up.cw.resolve_entity(up.world, up.soldier, ustate, upos, uvel, uvel[2], 0, fx(0.5),
+                         0, 0, true, true, 0, 32, 0x1u, health, nullptr, &ulio.io);
+    CHECK((up.world.registry.get(up.soldier)->flags & kEntityFlagLadderContact) == 0);
+
+    // The SIN lane: a slab whose plane 0 is +Y ⇒ frame yaw −0x40000000 (the −Y
+    // facing), anchor pulled to (10.0, 10.375), the press/chase running on Y
+    // with X untouched — a sin-sign flip or an axis swap fails these exactly.
+    CollisionModel ym;
+    {
+        auto plane = [&](int nx, int ny, int nz, double d) {
+            CollisionPlane p;
+            p.nx = static_cast<int16_t>(nx);
+            p.ny = static_cast<int16_t>(ny);
+            p.nz = static_cast<int16_t>(nz);
+            p.dist = fx(d);
+            ym.planes.push_back(p);
+        };
+        plane(0, 16384, 0, -0.25); // plane 0 = +Y — the authored facing
+        plane(0, -16384, 0, -0.25);
+        plane(16384, 0, 0, -1.0);
+        plane(-16384, 0, 0, -1.0);
+        plane(0, 0, 16384, -4.0);
+        plane(0, 0, -16384, 0.0);
+        CollisionVolume v;
+        v.type = 4;
+        v.min_x = fx(-1.0);
+        v.max_x = fx(1.0);
+        v.min_y = fx(-0.25);
+        v.max_y = fx(0.25);
+        v.min_z = 0;
+        v.max_z = fx(4.0);
+        v.plane_count = 6;
+        ym.volumes.push_back(v);
+        CollisionSection sec;
+        sec.volume_count = 1;
+        sec.authored_bounds = true;
+        sec.min_x = fx(-2.0);
+        sec.max_x = fx(2.0);
+        sec.min_y = fx(-2.0);
+        sec.max_y = fx(2.0);
+        sec.min_z = fx(-1.0);
+        sec.max_z = fx(5.0);
+        sec.radius = fx(5.0);
+        ym.sections.push_back(sec);
+    }
+    Rig yrig(std::move(ym));
+    yrig.move_soldier(10.0, 10.6, 0.0);
+    int32_t ypos[3] = {fx(10.0), fx(10.6), 0};
+    int32_t yvel[3] = {0, 0, 0};
+    CollisionWorld::ResolveState ystate;
+    LadderIo ylio(0);
+    ylio.view_yaw = -0x40000000; // facing −Y, onto the frame yaw
+    ylio.body_heading = -0x40000000;
+    yrig.cw.resolve_entity(yrig.world, yrig.soldier, ystate, ypos, yvel, yvel[2], 0,
+                           fx(1.8), 0, 0, true, true, 0, 32, 0x1u, health, nullptr,
+                           &ylio.io);
+    CHECK((yrig.world.registry.get(yrig.soldier)->flags & kEntityFlagLadderContact) != 0);
+    CHECK(yrig.cw.last_ladder_frame.yaw == -0x40000000);
+    CHECK(yrig.cw.last_ladder_frame.anchor[0] == fx(10.0));
+    CHECK(yrig.cw.last_ladder_frame.anchor[1] == fx(10.375));
+    // The press rides sin(−90°) = −1 on Y; cos ≈ 0 leaves X at the snap.
+    CHECK(ypos[1] == fx(10.375) - 4096 + 64);
+    CHECK(ypos[0] == fx(10.0));
+    CHECK(ypos[2] == 20480);
+}
+
+// ---------------------------------------------------------------------------
+void test_ladder_pitch_restore_from_below_snaps() {
+    // The witnessed arrival check is one-sided: restoring from BELOW the 4096
+    // target (looking down at exit) lands in a single resolve — Pitch = 4096
+    // exactly, disarmed. [orig: the else leg @ 0x4b3d45-0x4b3d55]
+    Rig rig(ladder_slab());
+    rig.move_soldier(20.0, 20.0, 0.0); // far from the slab: no contact at all
+    int32_t pos[3] = {fx(20.0), fx(20.0), 0};
+    int32_t vel[3] = {0, 0, 0};
+    int16_t health = 100;
+    CollisionWorld::ResolveState state;
+    LadderIo lio(0);
+    lio.restore_active = true;
+    lio.restore_target = 4096;
+    lio.restore_prev = -0x2000000;
+    lio.view_pitch = -0x2000000; // below the target
+    rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0, fx(1.8),
+                          0, 0, true, true, 0, 32, 0x1u, health, nullptr, &lio.io);
+    CHECK(lio.view_pitch == 4096);
+    CHECK(!lio.restore_active);
+}
+
+// ---------------------------------------------------------------------------
 void test_ladder_recontact_inflated_and_relatch() {
     // Once latched, the recontact query (mask bit 0x1, +0.5u inflated CL test
     // over the on-ladder 25088 capsule) keeps the latch at an offset the fresh
@@ -4241,6 +4359,8 @@ int main() {
     test_ladder_contact_bookkeeping_is_not_ground();
     test_cb_ground_probe_sets_ground_target();
     test_ladder_entry_gate_snap_and_chase();
+    test_ladder_from_above_entry_and_sin_lane();
+    test_ladder_pitch_restore_from_below_snaps();
     test_ladder_recontact_inflated_and_relatch();
     test_ladder_exit_push_and_pitch_restore();
     test_replica_resolve_candidates_ground_and_peers();

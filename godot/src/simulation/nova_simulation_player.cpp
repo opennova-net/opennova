@@ -116,16 +116,15 @@ void Simulation::sync_local_mounted_input_heading() {
 		return;
 
 	// Retail has ONE input-owned view: the mouse accumulators ARE the entity
-	// yaw/pitch (dword_B75FCC / dword_B7900C ride along with every sim-side
-	// write). Our split keeps the accumulator in this host input record, so any
-	// view value the core wrote during the tick must be mirrored back before
-	// the next pre-tick input write can undo it. The sim-side writers:
-	//  - the mount-attach yaw snap (Entity_RequestVehicleAttach; yaw-only)
-	//  - the ladder alignment chase [orig: @ 0x4b33bc-0x4b33d2]
-	//  - the on-ladder ±120° view clamp [orig: @ 0x4b4b04-0x4b4b42]
-	//  - the post-ladder pitch restore [orig: @ 0x4b3d04-0x4b3d55]
-	// A post-tick difference from the pre-tick input copy is exactly "the sim
-	// wrote the view this tick".
+	// yaw/pitch (g_LocalPlayerLookYaw / g_LadderPitchRestorePrev ride along
+	// with every sim-side write). Our split keeps the accumulator in this host
+	// input record, so any view value the core wrote during the tick must be
+	// mirrored back before the next pre-tick input write can undo it. The
+	// sim-side writers (all engine-side, cited at their port sites): the
+	// mount-attach yaw snap, and the ladder legs — the alignment chase, the
+	// ±120° view clamp, the post-ladder pitch restore
+	// (docs/world/world-wac-ai-re.md §30). A post-tick difference from the
+	// pre-tick input copy is exactly "the sim wrote the view this tick".
 	if (body->inf.target_heading != player_input_.look_heading)
 		player_input_.look_heading = body->inf.target_heading;
 	if (body->inf.look_pitch != player_input_.look_pitch)

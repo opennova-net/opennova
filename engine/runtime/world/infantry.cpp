@@ -54,6 +54,7 @@
 #include "world/angle.h"
 #include "world/collision.h"
 #include "world/dir_table.h"
+#include "world/infantry_ladder.h"
 #include "world/vehicle_attach.h"
 #include "world/world.h" // registry.get for the local-player AiEntity->Entity mirror
 
@@ -125,28 +126,6 @@ int32_t abs_bam(int32_t v) { return opennova::io::bam_abs(v); } // x86 neg: INT3
 
 bool reset_capsule_bottom_state(int state) {
     return (state >= 32 && state <= 35) || (state >= 176 && state <= 179);
-}
-
-// The 0.5u push off the ladder face along -yaw, shared by the back/side
-// dismounts, the on-ladder jump, and the grounded bottom exit. Full-precision
-// x87-style sincos at 2^22, truncated, then the (<<15)>>22 pair.
-// [orig: @ 0x4b75b4-0x4b75c7 / 0x4b7666-0x4b7679 / 0x4b76b3-0x4b76c6 /
-//  0x4b7f49-0x4b7f68 / 0x4b7ff3-0x4b8016]
-void ladder_push_back(int32_t pos[3], int32_t yaw_bam) {
-    const double rad =
-        static_cast<double>(yaw_bam) * (3.14159265358979323846 / 2147483648.0);
-    const int32_t c = static_cast<int32_t>(std::cos(rad) * 4194304.0);
-    const int32_t s = static_cast<int32_t>(std::sin(rad) * 4194304.0);
-    pos[0] -= static_cast<int32_t>((static_cast<int64_t>(c) << 15) >> 22);
-    pos[1] -= static_cast<int32_t>((static_cast<int64_t>(s) << 15) >> 22);
-}
-
-// The shared dismount tail. [orig: Flags &= ~0x100000 @ 0x4b75ca/0x4b767c/
-//  0x4b76c9/0x4b8019]
-void ladder_unlatch(Entity *ent) {
-    if (ent == nullptr) return;
-    ent->flags &= ~kEntityFlagLadderContact;
-    ent->engine_flags &= ~kEntityFlagLadderContact;
 }
 
 bool primary_blend_active(const InfantryState &inf) {
@@ -659,185 +638,6 @@ void AiSystem::infantry_torso_roll_tick(AiEntity &e) {
     if (delta < -0x0E38E380) inf.torso_roll = io::bam_add(e.roll, -0x0E38E380); // [orig: @0x4b5d61]
 }
 
-// ----------------------------------------------------------------------------
-// The upper-body weapon channel — the entity's SECONDARY AnimMap channel.
-// [orig: Entity_UpdateInfantryPlayerBody @0x4b5cab..0x4b5ea9 (selection + commit)
-//  + AnimMap_UpdateDualChannels @0x40b8c0 (advance; deferred promotion at clip end
-//  via AnimMap_UpdateEntity @0x40b77b); witness world-wac-ai-re.md §14.8]
-// ----------------------------------------------------------------------------
-void AiSystem::infantry_weapon_channel(AiEntity &e, World &world, uint32_t logic_tick) {
-    InfantryState &inf = e.inf;
-
-    // The arms-dip / pitch-kick block [orig: @0x4b5cab..0x4b5ce7]: while the dip
-    // window runs, the decay term drops 0x2800000 per tick BEFORE the eighth-step ease;
-    // the window byte decrements in BOTH branches — twice per tick — so the 20-tick
-    // weapon-switch stamp dips for 10 ticks (the 0x49 remote-reload 80 for 40).
-    if (inf.arms_dip_ticks > 0) {
-        --inf.arms_dip_ticks;             // [orig: @0x4b5cb5]
-        inf.pitch_kick_accum -= 0x2800000; // [orig: @0x4b5cb7 += 0xFD800000]
-    }
-    inf.pitch_kick_accum -=
-        io::bam_sar(io::bam_add(inf.pitch_kick_accum, 4), 3); // [orig: @0x4b5cc7..0x4b5cd5]
-    if (inf.arms_dip_ticks > 0) --inf.arms_dip_ticks;        // [orig: @0x4b5cdb..0x4b5ce7]
-
-    // The 3P reload-anim window counts down once per tick [orig: @0x4b5cf9].
-    if (inf.reload_anim_ticks > 0) --inf.reload_anim_ticks;
-
-    // The SELECTION + COMMIT run only on retail's 16-tick slow pass, not every tick
-    // [orig: gate @0x4b5d6d/@0x4b5d71, key `current_tick & 0xF` stored @0x4b4e79]. The
-    // key is the RAW tick — unstaggered, unlike the org1 `logic_tick + 36*net_id`
-    // idiom a few lines up — so every body selects on the same phase. Consequences are
-    // witnessed behavior, not approximation: a hold-pose change lands 0-15 ticks late,
-    // and the 80-tick reload window is sampled by five passes rather than eighty.
-    // Everything below this block (deferred promotion, playhead advance) stays per-tick
-    // because in the original it lives in AnimMap_UpdateDualChannels @0x40b8c0, ahead
-    // of the gate. Retail's slow pass carries much more than the weapon channel (the
-    // slot timer, threat scan, damage and the music gamescript block, @0x4b5d77..
-    // @0x4b637b); this ports the weapon-channel tenant only.
-    if ((logic_tick & 0xFu) == 0u) {
-        // The hold kind is re-read from the ADM table EVERY selection pass, keyed by
-        // this entity's OWN equipped index — the original keeps no per-player copy
-        // (`dword_24E8084[280 * entityData->equippedAdmIndex]`). That is precisely what
-        // lets any observer derive a REMOTE player's hold pose from the single wire
-        // byte at entity+0x2B0, so resolving it here rather than from a local-player
-        // scalar is what makes the non-local case work at all.
-        // [orig: @0x4b5dba]
-        inf.wpn_hold_kind = 0;
-        if (const Entity *owner = world.registry.get(e.handle)) {
-            if (const WeaponTableEntry *held =
-                        world.weapons.by_index(owner->equipped_adm_index))
-                inf.wpn_hold_kind = held->special_hold;
-        }
-        infantry_weapon_channel_select(e);
-    }
-
-    // Deferred promotion when the playing clip reaches its end — the channel end-flag
-    // path [orig: AnimMap_UpdateEntity @0x40b77b, reached through the @0x40b8c0 swap].
-    if (inf.wpn_deferred != 0 && root_motion != nullptr) {
-        const int32_t len = root_motion->clip_length_ticks(inf.adm_id, inf.wpn_state);
-        if (len >= 0 && inf.wpn_clip_phase >= len) {
-            inf.wpn_state = inf.wpn_deferred;
-            inf.wpn_deferred = 0;
-            inf.wpn_clip_phase = 0;
-        }
-    }
-
-    // Advance the secondary playhead every tick; root motion is DISCARDED — the weapon
-    // layer never feeds the parent transform [orig: parentEntity=0 @0x40b8f3].
-    if (root_motion != nullptr) {
-        RootMotionFrame discard;
-        root_motion->advance(inf.adm_id, inf.wpn_state, inf.wpn_clip_phase, discard);
-    }
-}
-
-// The pose ladder itself — see the infantry.h contract. Pure so both the motor-driven
-// path (local player, and wire peers on the authority) and the decode-only path (a
-// joiner's view of its peers, which has no motor entity to run) resolve the SAME
-// selection from the same four inputs, instead of two ladders drifting apart.
-// [orig: Entity_UpdateInfantryPlayerBody @0x4b5dad..0x4b5e6f]
-int infantry_weapon_hold_state(int hold_kind, int primary_anim_state, bool scope_raised,
-                               bool binoculars_raised, bool reloading) {
-    // Desired state [orig: @0x4b5dad..0x4b5e6f]: the held weapon's hold kind (the
-    // AdmDefs dword @0x24E8084 + 0x460*idx = the def's special_hold key) selects the
-    // pose ladder; the default (rifles, kind 0) MIRRORS the primary state.
-    int desired;
-    switch (hold_kind) {
-        case 1: // knife family -> 50 [orig: @0x4b5dc0 lea eax,[ecx+31h]]
-            desired = anim_state::kHoldKnife;
-            break;
-        case 2: // pistol -> 51 [orig: @0x4b5dcd]
-            desired = anim_state::kHoldPistol;
-            break;
-        case 3: // grenade -> 52 [orig: @0x4b5dd7]
-            desired = anim_state::kHoldGrenade;
-            break;
-        case 4: // stinger/AT4/RPG -> 53 [orig: @0x4b5de1]
-            desired = anim_state::kHoldStinger;
-            break;
-        case 5: // designator -> 54, scoped 55 [orig: @0x4b5deb test Flags&0x10]
-            desired = scope_raised ? anim_state::kHoldDesignatorScoped
-                                   : anim_state::kHoldDesignator;
-            break;
-        case 6: // P90 -> 56, scoped 57 [orig: @0x4b5dfe]
-            desired = scope_raised ? anim_state::kHoldP90Scoped : anim_state::kHoldP90;
-            break;
-        case 7: // MP7 -> 58, scoped 59 [orig: @0x4b5e11]
-            desired = scope_raised ? anim_state::kHoldMP7Scoped : anim_state::kHoldMP7;
-            break;
-        case 8: // javelin -> 60, scoped 61 [orig: @0x4b5e24]
-            desired = scope_raised ? anim_state::kHoldJavelinScoped
-                                   : anim_state::kHoldJavelin;
-            break;
-        default:
-            // MIRROR the primary state — 43 idle when the primary is locked (flag 4);
-            // 49 idle_3 when scoped [orig: @0x4b5e37..0x4b5e4e].
-            desired = (infantry_anim_flags(primary_anim_state) & 0x4u) != 0
-                              ? anim_state::kIdle
-                              : primary_anim_state;
-            if (scope_raised) desired = anim_state::kIdle3;
-            break;
-    }
-    // Overrides, strongest last [orig: @0x4b5e53..0x4b5e6f]: binoculars 64, then the
-    // reload window — 66 reload2 when the hold kind is 2 (pistol), else 65 reload.
-    if (binoculars_raised) desired = anim_state::kBinoculars; // [orig: @0x4b5e53]
-    if (reloading)
-        desired = hold_kind == 2 ? anim_state::kReload2
-                                 : anim_state::kReload; // [orig: @0x4b5e5e..0x4b5e6f]
-    return desired;
-}
-
-// The selection + commit half of the weapon channel, behind the 16-tick gate above.
-// [orig: Entity_UpdateInfantryPlayerBody @0x4b5dad..0x4b5ea3]
-void AiSystem::infantry_weapon_channel_select(AiEntity &e) {
-    InfantryState &inf = e.inf;
-    const int desired = infantry_weapon_hold_state(
-            inf.wpn_hold_kind, inf.anim_state, inf.scope_raised, inf.binoculars_raised,
-            inf.reload_anim_ticks > 0);
-
-    // Commit [orig: @0x4b5e72]: same -> skip; a locked (flag 4: attacks 62/63, reloads
-    // 65/66) or emote (0x20) current defers the change to clip end; else stamp now.
-    if (desired != inf.wpn_state) {
-        const uint32_t curf = infantry_anim_flags(inf.wpn_state);
-        if ((curf & 0x4u) != 0 || (curf & 0x20u) != 0) {
-            inf.wpn_deferred = desired; // [orig: @0x4b5e88/@0x4b5e95]
-        } else {
-            inf.wpn_state = desired;    // [orig: @0x4b5e9d]
-            inf.wpn_deferred = 0;       // [orig: @0x4b5ea3]
-            inf.wpn_clip_phase = 0;     // channel re-init (D-INF-1: no blend window)
-        }
-    }
-}
-
-// The fire-path attack stamp — see the infantry.h declaration. Unlike the per-tick
-// selection this writes the target immediately, whatever the current state's flags.
-// [orig: WeaponAction_Fire @0x542bbc..0x542bea; ebx = 0 from @0x542b22]
-void infantry_weapon_attack_stamp(InfantryState &inf, int attack_kind) {
-    int state;
-    if (attack_kind == 1)
-        state = anim_state::kKnifeAttack;   // 62 [orig: @0x542bcb]
-    else if (attack_kind == 2)
-        state = anim_state::kGrenadeAttack; // 63 [orig: @0x542be0]
-    else
-        return; // rifle fire stamps NO body state [orig: only the 1/2 compares]
-    // The channel re-inits only on a target CHANGE [orig: AnimMap_UpdateEntity @0x40b5f0
-    // pulls a new clip only when target differs] — a repeat stamp of the same attack
-    // state mid-clip does not restart the playing clip.
-    if (inf.wpn_state != state) inf.wpn_clip_phase = 0; // (D-INF-1: no blend window)
-    inf.wpn_state = state;
-    inf.wpn_deferred = 0;
-}
-
-void infantry_weapon_switch_stamp(InfantryState &inf, uint64_t anim_map_serial) {
-    if (anim_map_serial == 0 || inf.wpn_anim_map_serial == anim_map_serial) return;
-    inf.wpn_anim_map_serial = anim_map_serial;
-    inf.arms_dip_ticks = 20;
-}
-
-bool infantry_weapon_channel_visible(const InfantryState &inf, bool weapon_in_hands,
-                                     bool mount_blocks_channel) {
-    return inf.active && weapon_in_hands && !mount_blocks_channel &&
-           (infantry_anim_flags(inf.anim_state) & 0x40u) != 0;
-}
 
 // See the infantry.h contract: the motor store is the writer of the two-store pair, so a
 // redeploy that only writes the registry Entity is undone by finish_infantry_tick.
@@ -893,6 +693,12 @@ void infantry_respawn_snap(AiEntity &e, const int32_t pos[3], int32_t heading,
     inf.airborne = false;
     inf.jump_requested = false;
     inf.jump_cooldown = 0;
+    // A restore armed by a pre-death ladder exit must not chase the fresh
+    // spawn's view pitch (this snap is the host-respawn twin of
+    // reset_for_spawn's clear).
+    inf.pitch_restore_active = false;
+    inf.pitch_restore_target = 0;
+    inf.pitch_restore_prev = 0;
     inf.ground_cache_valid = false;
 }
 
@@ -1240,19 +1046,31 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // tick. Retail still runs the selection and overwrites the field in the
         // same tick (its anim layer reads only the final value); our
         // begin_body_transition machinery would restart the crossfade on each
-        // intermediate stamp, so the selection is skipped instead — the per-tick
-        // NET state is identical.
+        // intermediate stamp, so the selection is skipped instead. The one
+        // selection side effect that matters is mirrored so the net state stays
+        // identical: retail's standing-idle counter keeps advancing while
+        // hanging idle (the fidget arrives right after a dismount) and resets
+        // on movement. [orig: ++entity[0x148] @0x4b727b / reset @0x4b719b run
+        // inside the overwritten selection]
         const bool ladder_latched = ent != nullptr &&
                 ((ent->flags | ent->engine_flags) & kEntityFlagLadderContact) != 0;
-        if ((logic_tick & 3u) == 0 && !inf.airborne && !carried && !ladder_latched)
-            player_body_select(e);
+        if ((logic_tick & 3u) == 0 && !inf.airborne && !carried) {
+            if (!ladder_latched) {
+                player_body_select(e);
+            } else if (inf.player_moving) {
+                inf.idle_counter = 0;
+            } else {
+                ++inf.idle_counter;
+            }
+        }
     } else if (is_authority && (key & 15u) == 0) {
         // 2. Think + selection (every 16 ticks). [orig: gate (tick & 0xF) | !authority]
         infantry_think(e, world);
-        // On a ladder the NPC's gait/speed selection is suppressed — the org1
+        // On a ladder the NPC's gait selection is suppressed — the org1
         // on-ladder block after the resolve owns states 32-35 (the same-tick
-        // overwrite mapping as the player selection skip above).
-        // [orig: @ 0x4bd18d — moveMode/speed zeroed on Flags 0x100000]
+        // overwrite mapping as the player selection skip above; retail also
+        // zeroes a speed local our selector has no carrier for).
+        // [orig: @ 0x4bd18d — moveMode + the speed local zeroed on Flags 0x100000]
         if (tick_entity != nullptr &&
             ((tick_entity->flags | tick_entity->engine_flags) &
              kEntityFlagLadderContact) != 0)
@@ -1262,79 +1080,9 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     }
 
     // 2c. The on-ladder override + player dismounts (org2; EVERY tick — the
-    // 4th-tick gate above covers only the stance selection, whose pick the climb
-    // stamp then overrides). While latched the body is never airborne and
-    // carries no vertical velocity; idle holds climb_idle, the forward fan
-    // climbs by the look-pitch sign, and the strafe/back fans step off the
-    // ladder and drop the latch. Climb MOTION is the climb clip's vertical root
-    // lane — the integrate below zeroes only the horizontal pair.
-    // [orig: Entity_UpdateInfantryPlayerBody @ 0x4b7484-0x4b76d8]
-    if (inf.is_local_player && tick_entity != nullptr && collision != nullptr &&
-        e.health > 0 &&
-        ((tick_entity->flags | tick_entity->engine_flags) &
-         kEntityFlagLadderContact) != 0 &&
-        ((tick_entity->flags | tick_entity->engine_flags) & kEntityFlagDead) == 0) {
-        const LadderContact &lf = collision->last_ladder_frame;
-        tick_entity->flags &= ~kEntityFlagInAir; // [orig: & 0xFFFFDFFF @ 0x4b74ad]
-        tick_entity->engine_flags &= ~kEntityFlagInAir;
-        inf.airborne = false;
-        inf.vel[2] = 0; // [orig: slideDecay = 0 @ 0x4b74b0]
-        // STRAIGHT stamps like the jump block; the has_clip guard is the same
-        // reimpl stripped-set guard the jump stamps carry.
-        auto stamp = [&](int state) {
-            if (root_motion == nullptr || !root_motion->has_clip(inf.adm_id, state))
-                return;
-            inf.begin_body_transition(state);
-            inf.anim_pending = 0;
-        };
-        if (!inf.player_moving) {
-            stamp(anim_state::kClimbIdle); // [orig: @ 0x4b76ce]
-        } else {
-            switch (inf.player_move_dir_index) {
-                case 0:
-                case 1:
-                case 7:
-                    // The forward fan climbs; the look-pitch sign picks the
-                    // direction. [orig: cases 0/1/7 @ 0x4b74eb-0x4b750a —
-                    // sign(Pitch) < 0 -> 34, else 33]
-                    stamp(inf.look_pitch < 0 ? anim_state::kClimbDown
-                                             : anim_state::kClimbUp);
-                    break;
-                case 2:
-                case 6: {
-                    // Side dismount: 0.875u at the authored yaw -/+90°, a 0.25u
-                    // hop, then the 0.5u push off the face + unlatch.
-                    // [orig: case 2 @ 0x4b752a-0x4b75cd (yaw - 1073741760) /
-                    //  case 6 @ 0x4b75dc-0x4b767f (yaw + 1073741760)]
-                    const int32_t side_yaw = io::bam_add(
-                        lf.yaw, inf.player_move_dir_index == 2 ? -1073741760
-                                                               : 1073741760);
-                    const double rad = static_cast<double>(side_yaw) *
-                                       (3.14159265358979323846 / 2147483648.0);
-                    const int32_t c =
-                        static_cast<int32_t>(std::cos(rad) * 4194304.0);
-                    const int32_t s =
-                        static_cast<int32_t>(std::sin(rad) * 4194304.0);
-                    e.pos[0] -= static_cast<int32_t>((57344LL * c) >> 22);
-                    e.pos[1] -= static_cast<int32_t>((57344LL * s) >> 22);
-                    e.pos[2] += 0x4000;
-                    ladder_push_back(e.pos, lf.yaw);
-                    ladder_unlatch(tick_entity);
-                    break;
-                }
-                case 3:
-                case 4:
-                case 5:
-                    // The back fan steps straight off the face.
-                    // [orig: cases 3-5 @ 0x4b7681-0x4b76cc]
-                    ladder_push_back(e.pos, lf.yaw);
-                    ladder_unlatch(tick_entity);
-                    break;
-                default:
-                    break;
-            }
-        }
-    }
+    // 4th-tick gate above covers only the stance selection). Body in
+    // infantry_ladder.cpp. [orig: @ 0x4b7484-0x4b76d8]
+    infantry_ladder_override(e, tick_entity);
 
     // 2b. The combat pass (NPCs, authority, alive): perception every 32 ticks, the
     // reaction/approach/aim layer per tick — its commits override the 16-tick gait pick,
@@ -1449,13 +1197,18 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // The live mounted tail invokes the movement resolver on its exact
         // eight-tick entity phase. Contact/trigger work remains live while the
         // mounted source latch suppresses push-out, preserving the parent pose.
+        // The ladder IO rides along — retail has ONE resolver, so a mounted
+        // resolve runs the same gated CL block (the latch-only channel here
+        // would latch a carried body on any CL touch with no entry gate).
         // [orig: phase8 gate/call @0x4bf5a5..0x4bf5c3]
         if ((key & 7u) == 0 && collision != nullptr) {
+            const LadderResolveIO mounted_lio = make_ladder_resolve_io(e, tick_start_z);
             collision->resolve_entity(
                     world, e.handle, e.collide_state, e.pos, inf.vel, inf.vel[2],
                     frame.capsule_bottom, frame.capsule_top, e.heading, e.pitch,
                     inf.is_local_player, is_authority, logic_tick, inf.anim_state,
-                    infantry_anim_flags(inf.anim_state), e.health);
+                    infantry_anim_flags(inf.anim_state), e.health, nullptr,
+                    &mounted_lio);
         }
         finish_infantry_tick(e, world);
         return;
@@ -1482,22 +1235,13 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // (Flags 0x20) sixteenth-step body chase @0x4b494d and the seat-bone
         // follow @0x4b654e ride the parachute/mount slices.
         //
-        // While latched on a ladder the view yaw is clamped to ±120° of the body
-        // heading — the mouse cannot spin the aim behind the climber; the
-        // clamped value reaches the mouse accumulator through the embedder
-        // write-back. The parachute/carried legs of the same 0x100060 gate and
-        // its carried-parent exemptions ride their slices.
-        // [orig: gate @ 0x4b4978; clamp ±0x55555500 @ 0x4b4b04-0x4b4b42;
-        //  dword_B75FCC mirror @ 0x4b4b2a]
-        if (tick_entity != nullptr &&
-            ((tick_entity->flags | tick_entity->engine_flags) &
-             kEntityFlagLadderContact) != 0) {
-            const int32_t d = io::bam_sub(inf.target_heading, inf.body_heading);
-            if (d > 1431655680)
-                inf.target_heading = io::bam_add(inf.body_heading, 1431655680);
-            else if (d < -1431655680)
-                inf.target_heading = io::bam_sub(inf.body_heading, 1431655680);
-        }
+        // While latched on a ladder the view yaw is clamped to ±120° of the
+        // body heading (infantry_ladder.cpp). [orig: gate @ 0x4b4978; clamp
+        // @ 0x4b4b04-0x4b4b42]
+        infantry_ladder_view_clamp(
+            inf, tick_entity != nullptr
+                     ? (tick_entity->flags | tick_entity->engine_flags)
+                     : 0u);
         e.heading = inf.target_heading; // mouse-instant render/aim yaw [orig:
                                         // Input_HandleActionBinding @0x49ad40 writes +0x10]
         const int32_t yaw = e.heading;
@@ -1693,9 +1437,9 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     // Entity_UpdateInfantryPlayerBody @0x4b40e0 callers; resolver @0x4b2bd0]
     if (terrain != nullptr && inf.ground_cache_valid && inf.ground_cache != INT32_MIN) {
         // Gravity, per tick, asymmetric by motor (D-INF-10 CLOSED for both legs).
-        // NPC org1: vel_z -= 416 then pos.z += 2*vel [orig: gate @0x4bf7b8 (the
-        // ladder/drowning 0x108000 skip, unmodeled), step @0x4bf7bf, clamp
-        // @0x4bf7c9, pos @0x4bf7ec]. Player org2: vel_z -= 208 then pos.z += vel
+        // NPC org1: vel_z -= 416 then pos.z += 2*vel [orig: 0x108000 gate
+        // @0x4bf7b8 (modeled below), step @0x4bf7bf, clamp @0x4bf7c9, pos
+        // @0x4bf7ec]. Player org2: vel_z -= 208 then pos.z += vel
         // once [orig: gate @0x4b7ac8, step @0x4b7acf, clamp @0x4b7c77, pos @0x4b7cef
         // — folded into the root-dz store there; split here like org1's shape].
         // The gravity skip while drowning or latched on a ladder (Flags
@@ -1748,30 +1492,11 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         int32_t foot_clearance;
         if (collision != nullptr && collision->instance_count() != 0) {
             // The climb-motor channels the resolver's CL legs read and write:
-            // the entry gate (tick-start Z, facing, look pitch, stance bump),
-            // the per-tick alignment chase (view/body yaw, body pitch), and the
-            // exit push / pitch restore. [orig: the resolver reads the same
-            // entity fields inline @ 0x4b3245-0x4b3495 / @ 0x4b3c5c-0x4b3d55]
-            LadderResolveIO lio;
-            lio.tick_start_z = tick_start_z;
-            lio.prone = inf.stance == InfantryState::Stance::kProne;   // MoveOrder 0x100
-            lio.crouch = inf.stance == InfantryState::Stance::kCrouch; // MoveOrder 0x200
-            lio.ai_wants_climb = false; // the AI move-order writer rides its slice
-            lio.is_local_player = inf.is_local_player;
-            if (inf.is_local_player) {
-                lio.view_yaw = &inf.target_heading; // entity+0x10 = the mouse yaw
-                lio.view_pitch = &inf.look_pitch;   // entity+0x14
-                lio.pitch_restore_active = &inf.pitch_restore_active;
-                lio.pitch_restore_target = &inf.pitch_restore_target;
-                lio.pitch_restore_prev = &inf.pitch_restore_prev;
-            } else {
-                lio.view_yaw = &e.heading;
-                lio.view_pitch = &e.pitch;
-                lio.ai_target_heading = &inf.target_heading;
-                lio.ai_aim_heading = &inf.aim_heading;
-            }
-            lio.body_heading = &inf.body_heading;
-            lio.body_pitch = &e.body_pitch;
+            // the entry gate, the per-tick alignment chase, and the exit push /
+            // pitch restore (infantry_ladder.cpp). [orig: the resolver reads
+            // the same entity fields inline @ 0x4b3245-0x4b3495 /
+            // @ 0x4b3c5c-0x4b3d55]
+            const LadderResolveIO lio = make_ladder_resolve_io(e, tick_start_z);
             foot_clearance = collision->resolve_entity(
                 world, e.handle, e.collide_state, e.pos, inf.vel, inf.vel[2],
                 frame.capsule_bottom, frame.capsule_top, e.heading, e.pitch,
@@ -1803,12 +1528,16 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             // org2 includes DEAD in the gate that owns the airborne-bit write;
             // a dead player that was not already airborne stays that way. org1's
             // corresponding gate omits DEAD and sets airborne before its later
-            // dead/carried animation gates. A ladder latch suppresses the edge
-            // AND the airborne set for both motors — mid-climb clearance is
-            // always deep. [orig: org2 test 0x10A002 @0x4b7e22-0x4b7e3c; org1
-            // test 0x10A000 + write @0x4bf8b5-0x4bf8cf]
+            // dead/carried animation gates. A ladder latch OR drowning
+            // suppresses the edge AND the airborne set for both motors (the
+            // masks' 0x108000 half) — mid-climb clearance is always deep.
+            // [orig: org2 test 0x10A002 @0x4b7e22-0x4b7e3c; org1 test 0x10A000
+            // + write @0x4bf8b5-0x4bf8cf]
             const bool fall_edge_allowed =
-                (!inf.is_local_player || e.health > 0) && !on_ladder_now;
+                (!inf.is_local_player || e.health > 0) && !on_ladder_now &&
+                (tick_entity == nullptr ||
+                 ((tick_entity->flags | tick_entity->engine_flags) &
+                  kEntityFlagDrowning) == 0);
             if (fall_edge_allowed && !inf.airborne) {
                 // The airborne EDGE (was grounded; the already-in-air 0x2000 test
                 // skips it). The two motors differ in kind here:
@@ -1927,69 +1656,10 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             }
         }
 
-        // org1 on-ladder (NPC, post-resolve): hold behind a climber ahead,
-        // press into the face, and select climb_up vs climb_top by the anchor
-        // band. Dormant until the AI-order slice writes the entry order (the
-        // fresh-entry gate needs aiRuntime 0x400); live in tests via the latch.
+        // org1 on-ladder (NPC, post-resolve): the congestion hold, the facing
+        // press, the climb_up/climb_top select. Body in infantry_ladder.cpp.
         // [orig: Entity_UpdateInfantryAI @ 0x4bf907-0x4bfad8]
-        if (!inf.is_local_player && tick_entity != nullptr && collision != nullptr &&
-            ((tick_entity->flags | tick_entity->engine_flags) &
-             kEntityFlagLadderContact) != 0 &&
-            ((tick_entity->flags | tick_entity->engine_flags) & kEntityFlagDead) ==
-                0) {
-            inf.vel[2] = 0; // [orig: slideDecay = 0 @ 0x4bf93a]
-            const LadderContact &lf = collision->last_ladder_frame;
-            const double rad = static_cast<double>(inf.body_heading) *
-                               (3.14159265358979323846 / 2147483648.0);
-            const int32_t c = static_cast<int32_t>(std::cos(rad) * 4194304.0);
-            const int32_t s = static_cast<int32_t>(std::sin(rad) * 4194304.0);
-            const int32_t probe_x =
-                e.pos[0] + static_cast<int32_t>((81920LL * c) >> 22);
-            const int32_t probe_y =
-                e.pos[1] + static_cast<int32_t>((81920LL * s) >> 22);
-            bool held = false;
-            if (inf.anim_state != anim_state::kClimbTop) {
-                // The congestion hold: a live person near the probe point at or
-                // above this climber freezes the climb at climb_idle.
-                // [orig: the pool-0 scan @ 0x4bf9ac-0x4bfa39 -> state 32]
-                const int32_t bound = tick_entity->bound_radius > 0.0f
-                                          ? to_fixed(tick_entity->bound_radius)
-                                          : 0;
-                held = collision->ladder_person_ahead(world, e.handle, probe_x,
-                                                      probe_y, e.pos[2], bound);
-                if (held && root_motion != nullptr &&
-                    root_motion->has_clip(inf.adm_id, anim_state::kClimbIdle))
-                    inf.begin_body_transition(anim_state::kClimbIdle);
-            }
-            if (!held) {
-                if (!collision->second_pass_contact_latch) {
-                    // The 0.03125u facing press.
-                    // [orig: @ 0x4bfa47-0x4bfaa3, gated on dword_B57C8C == 0]
-                    const double lrad = static_cast<double>(lf.yaw) *
-                                        (3.14159265358979323846 / 2147483648.0);
-                    const int32_t lc =
-                        static_cast<int32_t>(std::cos(lrad) * 4194304.0);
-                    const int32_t ls =
-                        static_cast<int32_t>(std::sin(lrad) * 4194304.0);
-                    e.pos[0] +=
-                        static_cast<int32_t>((static_cast<int64_t>(lc) << 11) >> 22);
-                    e.pos[1] +=
-                        static_cast<int32_t>((static_cast<int64_t>(ls) << 11) >> 22);
-                }
-                // climb_up below (anchor - 0.75u) or when climb_top has no
-                // clip; climb_top inside the anchor band.
-                // [orig: @ 0x4bfaca-0x4bfad8 — 49152 = 0.75u]
-                const bool top_available =
-                    root_motion != nullptr &&
-                    root_motion->has_clip(inf.adm_id, anim_state::kClimbTop);
-                const int next =
-                    (!top_available || e.pos[2] <= lf.anchor[2] - 49152)
-                        ? anim_state::kClimbUp
-                        : anim_state::kClimbTop;
-                if (root_motion != nullptr && root_motion->has_clip(inf.adm_id, next))
-                    inf.begin_body_transition(next);
-            }
-        }
+        infantry_ladder_org1_block(e, world, tick_entity);
     }
 
     finish_infantry_tick(e, world);
