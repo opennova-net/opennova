@@ -155,6 +155,7 @@ func _cl_volumes(sim) -> Array:
 				"top": top,
 				"lean": lean,
 				"top_xy": top_xy,
+				"corners": corners,
 				"entity_handle": int(inst.get("entity_handle", -1)),
 				"inst_pos": inst.get("pos", Vector3.INF),
 			})
@@ -238,6 +239,20 @@ func _run() -> void:
 	var center: Vector3 = ladder["center"]
 	var base: float = ladder["base"]
 	var top: float = ladder["top"]
+	# The prism footprint — the re-latch reach question needs its depth.
+	var pc: PackedVector3Array = ladder.get("corners", PackedVector3Array())
+	if pc.size() == 8:
+		var pxmin := INF
+		var pxmax := -INF
+		var pzmin := INF
+		var pzmax := -INF
+		for c in pc:
+			pxmin = minf(pxmin, c.x)
+			pxmax = maxf(pxmax, c.x)
+			pzmin = minf(pzmin, c.z)
+			pzmax = maxf(pzmax, c.z)
+		print("PROBE PRISM footprint: x[%.3f..%.3f] (%.2fu) z[%.3f..%.3f] (%.2fu)" %
+				[pxmin, pxmax, pxmax - pxmin, pzmin, pzmax, pzmax - pzmin])
 	print("PROBE ladder CL chosen at godot %s (base %.1f top %.1f lean %.2f), %d in field; owner handle=%d inst_pos=%s" %
 			[str(center), base, top, float(ladder["lean"]), ladders.size(),
 			int(ladder["entity_handle"]), str(ladder["inst_pos"])])
