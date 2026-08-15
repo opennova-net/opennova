@@ -242,6 +242,123 @@ func _run() -> void:
 			[str(center), base, top, float(ladder["lean"]), ladders.size(),
 			int(ladder["entity_handle"]), str(ladder["inst_pos"])])
 
+	# --- NW_PROBE_BOTTOM: full-span diagnostic — enter at the BASE like a
+	# player walks up to a ladder (from-below arm: facing within 60° + pitch
+	# UP), then climb the whole span with a per-beat log. Reproduces the
+	# "pushed off halfway up" report; prints where and in what state the
+	# latch drops.
+	if not OS.get_environment("NW_PROBE_BOTTOM").is_empty():
+		var bface: Vector3 = ladder["top_xy"]
+		var blatched := false
+		for k in 8:
+			var a := TAU * float(k) / 8.0
+			var hx := bface.x + 0.45 * cos(a)
+			var hy := bface.z + 0.45 * sin(a)
+			for yaw_deg in [0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0]:
+				sim.debug_teleport_local_player(Vector3(hx, -hy, base + 0.6), yaw_deg, 30.0)
+				await _mission_wait(0.6)
+				if String(sim.get_local_player_anim_key()).contains("climb"):
+					blatched = true
+					var blp: Vector3 = sim.get_local_player_position()
+					print("PROBE BOTTOM LATCH: offset k=%d yaw %.0f -> %s at %s" %
+							[k, yaw_deg, sim.get_local_player_anim_key(), str(blp)])
+					break
+			if blatched:
+				break
+		if not blatched:
+			_fail("bottom entry never latched (from-below arm)")
+			return
+		# Static geometry census: every volume whose footprint spans the
+		# latched column, tops between base-0.5 and base+3 — the candidate
+		# "ground" surfaces a mid-span probe could hit.
+		var col: Vector3 = sim.get_local_player_position()
+		var cd0: Dictionary = sim.get_collision_debug()
+		for inst in cd0.get("instances", []):
+			for vd in inst.get("volumes", []):
+				var cs0: PackedVector3Array = vd.get("corners", PackedVector3Array())
+				if cs0.size() != 8:
+					continue
+				var vt0 := -INF
+				var vb0 := INF
+				var xmin0 := INF
+				var xmax0 := -INF
+				var zmin0 := INF
+				var zmax0 := -INF
+				for c in cs0:
+					vt0 = maxf(vt0, c.y)
+					vb0 = minf(vb0, c.y)
+					xmin0 = minf(xmin0, c.x)
+					xmax0 = maxf(xmax0, c.x)
+					zmin0 = minf(zmin0, c.z)
+					zmax0 = maxf(zmax0, c.z)
+				if vt0 > base - 0.5 and vt0 < base + 3.0 \
+						and col.x > xmin0 - 0.2 and col.x < xmax0 + 0.2 \
+						and col.z > zmin0 - 0.2 and col.z < zmax0 + 0.2:
+					print("PROBE COLUMN VOLUME: type %d z[%.2f..%.2f] x[%.2f..%.2f] zz[%.2f..%.2f] owner=%d" %
+							[int(vd.get("type", -1)), vb0, vt0, xmin0, xmax0,
+							zmin0, zmax0, int(inst.get("entity_handle", -1))])
+		for i in 8:
+			sim.add_local_player_look(0.0, -600.0)
+			await process_frame
+		_forward = true
+		var bz_max: float = sim.get_local_player_position().y
+		var drop_seen := false
+		for i in 60:
+			await _mission_wait(0.12)
+			var lp2: Vector3 = sim.get_local_player_position()
+			var akey: String = sim.get_local_player_anim_key()
+			var drift := Vector2(lp2.x - bface.x, lp2.z - bface.z).length()
+			var pd: Dictionary = sim.get_collision_debug().get("player", {})
+			print("PROBE TICKLOG: z %.2f (max %.2f) anim %s drift %.2f in_air=%s clearance %.2f cb %.2f ph %d" %
+					[lp2.y, bz_max, akey, drift,
+					str(sim.get_local_player_body_debug().get("in_air", "?")),
+					float(pd.get("foot_clearance", NAN)),
+					float(pd.get("capsule_bottom", NAN)),
+					sim.get_local_player_anim_phase_ticks()])
+			bz_max = maxf(bz_max, lp2.y)
+			if not akey.contains("climb") or lp2.y < bz_max - 0.4:
+				drop_seen = true
+				print("PROBE DROP: at z %.2f (reached %.2f of top %.1f) anim %s drift %.2f" %
+						[lp2.y, bz_max, top, akey, drift])
+				# What solid sits under the body? Every volume whose top face is
+				# within 1.5u below the body and whose footprint spans it.
+				var cd2: Dictionary = sim.get_collision_debug()
+				for inst in cd2.get("instances", []):
+					for vd in inst.get("volumes", []):
+						var cs: PackedVector3Array = vd.get("corners", PackedVector3Array())
+						if cs.size() != 8:
+							continue
+						var vt := -INF
+						var vb := INF
+						var xmin := INF
+						var xmax := -INF
+						var zmin := INF
+						var zmax := -INF
+						for c in cs:
+							vt = maxf(vt, c.y)
+							vb = minf(vb, c.y)
+							xmin = minf(xmin, c.x)
+							xmax = maxf(xmax, c.x)
+							zmin = minf(zmin, c.z)
+							zmax = maxf(zmax, c.z)
+						if vt < lp2.y + 0.3 and vt > lp2.y - 1.5 \
+								and lp2.x > xmin - 0.4 and lp2.x < xmax + 0.4 \
+								and lp2.z > zmin - 0.4 and lp2.z < zmax + 0.4:
+							print("PROBE UNDERFOOT: type %d top %.2f span x[%.1f..%.1f] z[%.1f..%.1f] owner=%d" %
+									[int(vd.get("type", -1)), vt, xmin, xmax,
+									zmin, zmax, int(inst.get("entity_handle", -1))])
+				break
+			if lp2.y >= top - 0.2:
+				break
+		_forward = false
+		if drop_seen:
+			print("PROBE BOTTOM RESULT: DROPPED before the top")
+		else:
+			print("PROBE BOTTOM RESULT: full span climbed %.2f -> %.2f" %
+					[base + 0.6, bz_max])
+		quit(0)
+		return
+
 	# --- Mount: drop in just ABOVE the anchor (anchorZ = top − 1.0), LOOKING
 	# DOWN — the from-above entry arm has no facing requirement (heightDiff < 0
 	# short-circuits the 60° gate; the pitch sign must agree). A slanted CL
