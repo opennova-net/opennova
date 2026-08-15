@@ -659,6 +659,31 @@ void test_spinmap_mesh_layers_and_waypoint(const fnt_font_t *font) {
 		CHECK(!found_edge,
 				"the completed retail footprint pass leaves no observable "
 				"black silhouette stroke");
+		// The half-texel insets ride the loaded strip's PHYSICAL size: a
+		// stock JO install mounts the 16x480 strip, and the same cell must
+		// derive its bounds from those dimensions. (compile() reuses the
+		// internal list, so this re-compile ends fp_list's scope of use.)
+		// [orig: render_tiled_image_strip @0x67b540 — 0.5 / tile_dim]
+		fp_state.minimap.icon_strip_w_px = 16.0f;
+		fp_state.minimap.icon_strip_h_px = 480.0f;
+		const HudDrawList &stock_list = compiler.compile(fp_state, 1024.0f,
+				768.0f);
+		bool found_stock_upright = false;
+		for (const auto &sprite : stock_list.map.sprites) {
+			if (sprite.texture == 0 &&
+					std::fabs(sprite.rotation_rad) < 1e-4f) {
+				found_stock_upright = true;
+				CHECK(std::fabs(sprite.u0 - 0.5f / 16.0f) < 1e-6f &&
+						std::fabs(sprite.u1 - 16.5f / 16.0f) < 1e-6f &&
+						std::fabs(sprite.v0 - (13.0f * 16.0f + 0.5f) /
+								480.0f) < 1e-6f &&
+						std::fabs(sprite.v1 - (14.0f * 16.0f + 0.5f) /
+								480.0f) < 1e-6f,
+						"the stock 16x480 strip derives its own half-texel UVs");
+			}
+		}
+		CHECK(found_stock_upright,
+				"the stock-dimension compile keeps the upright badge");
 	}
 
 	// The grid label compiles at the authored MAPCOORDS position once its

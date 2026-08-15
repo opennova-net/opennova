@@ -81,16 +81,17 @@ constexpr double kGridCellReciprocal =
 //  with flt_7C3610 = 2^-22; rect scaled per axis by
 //  Viewport_ScaleToVirtualCoords @0x5d2b20 (x*w/1024, y*h/768, rounded)]
 constexpr float kDiscInsetPx = 4.0f;
-// TSDicon.tga is a 64x1920 vertical strip of 30 64px icon cells. Retail
-// uploads the source at that resolution, box-generates its mip chain, and
-// render_tiled_image_strip derives the half-texel inset from these physical
-// dimensions. The badges are commonly drawn near the 16px mip level.
+// TSDicon.tga is a 30-cell vertical strip of square icon cells. Retail
+// uploads the source at its authored resolution (stock JO ships 16x480,
+// JOTAC's RevX02 authors 64x1920), box-generates its mip chain, and
+// render_tiled_image_strip derives the half-texel inset from the loaded
+// tile's PHYSICAL dimensions — so the input carries the device-measured
+// size (HudMinimapInput::icon_strip_*). The badges commonly draw near the
+// 16px mip level.
 // [orig: Texture_LoadFromFile_0 @0x59e060 -> GTexture_CreateFromPixelData_0
-//  @0x6876c0; render_tiled_image_strip @0x67b540]
+//  @0x6876c0; render_tiled_image_strip @0x67b540 — uv_half_texel =
+//  0.5 / (double)tile_dim]
 constexpr int kIconStripCells = 30;
-constexpr float kIconStripWidthPx = 64.0f;
-constexpr float kIconStripHeightPx = 1920.0f;
-constexpr float kIconStripCellPx = 64.0f;
 // WPIndctr.tga is a 4-cell vertical strip: 0 up-triangle (waypoint above),
 // 1 down-triangle (below), 2 circle (level), 3 blank. The altitude state
 // picks the frame. [orig: HUD_LoadAllTextures WPIndctr.tga -> 0x27231A8;
@@ -346,19 +347,24 @@ void emit_fan(const Polygon &poly, uint32_t color,
 	}
 }
 
-// Icon cell in the TSDicon vertical strip (64x1920 = 30 cells).
-void marker_uv(uint8_t icon, float &u0, float &v0, float &u1, float &v1) {
+// Icon cell in the TSDicon vertical strip (30 square cells; physical size
+// from the loaded asset).
+void marker_uv(const HudMinimapInput &input, uint8_t icon, float &u0,
+		float &v0, float &u1, float &v1) {
 	const int cell = std::min<int>(icon, kIconStripCells - 1);
-	// Retail offsets both strip endpoints by half a source texel. The right
-	// and bottom coordinates intentionally reach half a texel past the cell;
-	// the device's clamp sampler holds the final edge texel.
-	// [orig: render_tiled_image_strip @0x67b540]
-	u0 = 0.5f / kIconStripWidthPx;
-	u1 = (kIconStripWidthPx + 0.5f) / kIconStripWidthPx;
-	v0 = (static_cast<float>(cell) * kIconStripCellPx + 0.5f) /
-			kIconStripHeightPx;
-	v1 = (static_cast<float>(cell + 1) * kIconStripCellPx + 0.5f) /
-			kIconStripHeightPx;
+	// Retail offsets both strip endpoints by half a source texel of the
+	// tile's stored PHYSICAL dimensions. The right and bottom coordinates
+	// intentionally reach half a texel past the cell; the device's clamp
+	// sampler holds the final edge texel.
+	// [orig: render_tiled_image_strip @0x67b540 — 0.5 / tile_dim insets,
+	//  uv_right = w/w + 0.5/w, rows in source pixels]
+	const float strip_w = std::max(1.0f, input.icon_strip_w_px);
+	const float strip_h = std::max(1.0f, input.icon_strip_h_px);
+	const float cell_px = strip_h / kIconStripCells;
+	u0 = 0.5f / strip_w;
+	u1 = (strip_w + 0.5f) / strip_w;
+	v0 = (static_cast<float>(cell) * cell_px + 0.5f) / strip_h;
+	v1 = (static_cast<float>(cell + 1) * cell_px + 0.5f) / strip_h;
 }
 
 // Ordinary TSDicon blips submit the raw team color to the strip renderer,
@@ -1031,7 +1037,8 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 			// pre-halve the diffuse before TSDicon's MODULATE2X stage.
 			sprite.color = marker_modulate2x_color(marker.color);
 			sprite.layer = static_cast<uint8_t>(keyed.key >> 2);
-			marker_uv(marker.icon, sprite.u0, sprite.v0, sprite.u1, sprite.v1);
+			marker_uv(input, marker.icon, sprite.u0, sprite.v0, sprite.u1,
+					sprite.v1);
 			out.sprites.push_back(sprite);
 		}
 	}
@@ -1114,8 +1121,8 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 			tip.rotation_rad = inside ? 0.0f
 					: std::atan2(uy, ux) + static_cast<float>(kPi * 0.5);
 			tip.color = waypoint_state_color;
-			marker_uv(static_cast<uint8_t>(inside ? kWaypointTipCellInside
-					: kWaypointTipCellClamped),
+			marker_uv(input, static_cast<uint8_t>(inside
+					? kWaypointTipCellInside : kWaypointTipCellClamped),
 					tip.u0, tip.v0, tip.u1, tip.v1);
 			tip.texture = 0;
 			tip.layer = 4;

@@ -465,11 +465,25 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	layout_.stance_frame0_h = frame0.is_valid() ? frame0->get_height() : 0;
 
 	load_crosshair_texture_();
-	// Retail uploads the 64x1920 strip with its full box-filtered mip chain;
-	// the default spinmap badges then sample near the 16px level. A mipless
-	// upload aliases the 64px source into a visibly broken armory "A".
-	textures_[opennova::hud::kHudTexMapIcons] =
-			load_hud_texture_("TSDicon.tga", true);
+	// Retail uploads the strip at its authored resolution with its full
+	// box-filtered mip chain; the default spinmap badges then sample near the
+	// 16px level. A mipless upload aliases the source into a visibly broken
+	// armory "A". The compiler's half-texel cell insets ride the PHYSICAL
+	// dimensions of whatever strip this install mounts (stock 16x480,
+	// RevX02 64x1920), so stamp the measured size.
+	const Ref<Texture2D> map_icons = load_hud_texture_("TSDicon.tga", true);
+	textures_[opennova::hud::kHudTexMapIcons] = map_icons;
+	if (map_icons.is_valid()) {
+		state_.minimap.icon_strip_w_px =
+				static_cast<float>(map_icons->get_width());
+		state_.minimap.icon_strip_h_px =
+				static_cast<float>(map_icons->get_height());
+	} else {
+		state_.minimap.icon_strip_w_px =
+				opennova::hud::HudMinimapInput{}.icon_strip_w_px;
+		state_.minimap.icon_strip_h_px =
+				opennova::hud::HudMinimapInput{}.icon_strip_h_px;
+	}
 	// The compass ring draws white-modulated through the fixed-function HUD
 	// pipeline, whose output stage is MODULATE2X — for a static sprite that
 	// is exactly a pre-doubled texture (the retail capture's band/letters

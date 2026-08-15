@@ -255,10 +255,13 @@ public:
 	Vector3 get_surface_normal_world(const Vector3 &p_world_pos) const;
 	Color get_colormap_color_world(float world_x, float world_z) const;
 	// Exact gameplay-map shore mask. Retail builds a 256x256 `depthspin`
-	// texture by reducing the raw 1024x1024 CPT heights 4:1, then alpha-tests
-	// each 128px quadrant against the integer water plane. This equivalent
-	// emits white RGB with a binary wet/dry alpha cutout; the HUD pass supplies
-	// the witnessed shore-material color.
+	// texture by reducing the raw 1024x1024 CPT heights 4:1 (four taps,
+	// sum >> 10), then linearly samples it and alpha-tests the UNORM8 result
+	// against the integer water plane at raster time. This equivalent keeps
+	// BOTH operands in an RG8 data texture (R = reduced terrain height,
+	// G = integer water plane); the HUD's map-water shader performs the same
+	// sample-then-quantize comparison, so shoreline texels resolve exactly —
+	// a pre-thresholded binary mask is NOT equivalent there.
 	Ref<ImageTexture> build_minimap_water_mask(
 			float p_water_height_wu = NAN) const;
 	Color get_modulated_colormap_color_world(float world_x, float world_z, const Color &light_color) const;

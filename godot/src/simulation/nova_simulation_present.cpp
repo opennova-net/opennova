@@ -9,6 +9,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <netsim/client_state.h> // minimap_team_argb (the ONE palette home)
 #include <npwire/ingame_decode.h> // kRoundEventFlag* (the fire-mode byte)
 #include <world/minimap_footprint.h> // the OOBJ occlusion ground-slice footprint mesh
 #include <world/minimap_overlay.h>   // classifier + the blip draw policy
@@ -16,19 +17,6 @@
 #include <world/entity.h> // kEntityFlag* (the wire state_flags byte IS entity+36 low)
 
 using namespace novasim;
-
-namespace {
-
-uint32_t local_player_minimap_argb(uint8_t team) {
-	// Ordinary entity blips resolve the live team through the retail overlay
-	// color table before TSDicon's later MODULATE2X stage.
-	// Retail witness: draw_minimap_blip @0x597890 and color table @0x840A10;
-	// the engine/docs seam carries the authoritative address-level citation.
-	if (team == 1) return 0xFF304080u;
-	return team == 2 ? 0xFF802020u : 0xFF208020u;
-}
-
-} // namespace
 
 Array Simulation::get_throwable_visuals() const {
 	Array out;
@@ -256,7 +244,7 @@ PackedInt32Array Simulation::get_hud_minimap_snapshot() const {
 		dst[5] = static_cast<int32_t>(get_local_player_heading_bam());
 		dst[6] = 3; // live Person classification -> TSDicon cell 3
 		dst[7] = static_cast<int32_t>(
-				local_player_minimap_argb(local_player->team));
+				opennova::netsim::minimap_team_argb(local_player->team));
 		dst[8] = 0x10; // regular persistent bank
 		dst[9] = local_player->zone_number;
 		dst[10] = 0; // regular slots draw at zero lifetime

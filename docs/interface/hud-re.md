@@ -1300,17 +1300,22 @@ detail cycle** in the dispatcher: catalog codes 14 (`showhud`), 19
   The synchronized green-marker peak is retail `(88,255,65)` versus OpenNova
   `(86,255,64)`; apparent shade changes between captures come from filtering,
   blending, and live state rather than a different configured base color. The
-  `TSDicon.tga` sheet is a **64×1920 vertical strip of 30 64×64 cells**
-  (indexed by `render_tiled_image_strip @0x67b540`). `Texture_LoadFromFile_0
+  `TSDicon.tga` sheet is a **30-cell vertical strip of square cells at its
+  authored physical resolution** — stock JO ships 16×480, JOTAC's RevX02
+  authors 64×1920 — indexed by `render_tiled_image_strip @0x67b540`, whose
+  half-texel cell insets are derived from the loaded tile's stored physical
+  dimensions (`0.5 / tile_dim`; the right/bottom bounds intentionally reach
+  half a texel past the cell under the clamp sampler). `Texture_LoadFromFile_0
   @0x59e060` leaves that physical resolution intact;
   `GTexture_CreateFromPixelData_0 @0x6877ba..0x6878be` allocates the full mip
   chain and fills it with `D3DXFilterTexture` filter 5 (box), while
   `CGfxDevice_ApplyRenderStates @0x67e3e1..0x67e421` selects linear mip
-  filtering. The helper offsets both cell bounds by half a **physical** source
-  texel. OpenNova generates the same mip chain, uses the 64/1920 dimensions for
-  those endpoints, and linearly mip-filters with clamp on both map canvas
-  items. Treating the logical ~16px badge size as the source dimensions and
-  uploading the strip without mips caused the visibly aliased armory glyphs.
+  filtering. OpenNova generates the same mip chain, stamps the loaded strip's
+  measured physical dimensions into the compiler for those endpoints
+  (`HudMinimapInput::icon_strip_*`), and linearly mip-filters with clamp on
+  both map canvas items. Treating the logical ~16px badge size as the source
+  dimensions and uploading the strip without mips caused the visibly aliased
+  armory glyphs.
   The per-class hide/rotate gates
   `0x2723D0C..D34` are unwritten statics (always pass). Capture-zone def ids
   6027/6028 add team rings (`0xFF2020`/`0x4060FF`, alpha pair `0x50/0x40`,

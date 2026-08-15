@@ -207,6 +207,14 @@ struct HudMinimapInput {
 	bool grid_origin_present = false;
 	int32_t grid_origin_x = 0;
 	int32_t grid_origin_y = 0;
+	// The loaded TSDicon strip's PHYSICAL dimensions. Retail derives the
+	// half-texel cell inset from the loaded tile's stored source size, so
+	// the device stamps whatever asset it actually mounted — stock JO ships
+	// 16x480, JOTAC's RevX02 authors 64x1920, both 30 square cells.
+	// [orig: render_tiled_image_strip @0x67b540 — uv_half_texel =
+	//  0.5 / (double)tile_dim]
+	float icon_strip_w_px = 64.0f;
+	float icon_strip_h_px = 1920.0f;
 	HudMinimapTerrain terrain;
 	std::vector<HudMinimapMarker> markers;
 	// Static footprint polygons for footprint-class markers, joined by

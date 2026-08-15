@@ -513,4 +513,13 @@ struct ClientState {
 bool client_minimap_grid_origin(const ClientState &state, int32_t &out_x_q16,
 		int32_t &out_y_q16);
 
+// The retail team-byte -> overlay-color resolve for a live regular marker
+// row: team 1 -> table[0x0A] blue, team 2 -> table[0x09] red, anything else
+// (including undecoded) -> table[0x0C] neutral green. The ONE home for the
+// mapping so an embedder restoring a client-local row (the deployed local
+// player) cannot fork the palette.
+// [orig: the team switch @0x5becb8..0x5bece4 over
+//  g_minimap_overlay_color_table @0x840A10]
+uint32_t minimap_team_argb(uint8_t team);
+
 } // namespace opennova::netsim

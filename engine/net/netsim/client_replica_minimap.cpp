@@ -325,4 +325,13 @@ bool client_minimap_grid_origin(const ClientState &state, int32_t &out_x_q16,
 	return false;
 }
 
+uint32_t minimap_team_argb(uint8_t team) {
+	// [orig: team -> index @0x5becb8..0x5bece4; table @0x840A10]
+	const uint8_t color_index = team == 1 ? 0x0A :
+			(team == 2 ? 0x09 : 0x0C);
+	uint32_t argb = 0xFFFFFFFFu;
+	minimap_color(color_index, argb);
+	return argb;
+}
+
 } // namespace opennova::netsim
