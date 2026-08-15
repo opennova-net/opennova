@@ -871,11 +871,6 @@ func _on_world_loaded() -> void:
 	# call @ 0x525d45]. For SP/host this fires at true load completion. For a
 	# joiner this is only wire-header world construction completion; keep pumping the hidden runtime
 	# under the loading presentation until the separate authoritative edge.
-	# The SP start-mission arrow splash (newarow1.tga +
-	# START_MISSION), gated !is_multiplayer_session && g_loadscreen_has_custom_bg
-	# && !is_in_session, is a follow-up [orig: show_start_mission_splash
-	# @ 0x520820, called @ 0x525d42] (docs/interface/loading-screen-re.md
-	# D-LOADSCR-4, the load-flow case matrix).
 	# A fresh mission gets a fresh pick set (stale handles never cross
 	# sessions); the world renders/curates the shell-owned list from here on.
 	_pick_list.clear()
@@ -884,6 +879,14 @@ func _on_world_loaded() -> void:
 	var sim := _world.get_sim()
 	if sim != null and bool(sim.is_joiner()) \
 			and not bool(sim.is_joined_in_match()):
+		return
+	# The SP start-mission splash holds the reveal until its dismissal edge;
+	# the gate + device legs live on the coordinator
+	# [orig: show_start_mission_splash @ 0x520820 precedes the release @ 0x525d45].
+	if _world_load.maybe_begin_start_mission_splash(_world.get_mission_audio()):
+		if not _world_load.splash_dismissed.is_connected(
+				_finish_world_load_presentation):
+			_world_load.splash_dismissed.connect(_finish_world_load_presentation)
 		return
 	_finish_world_load_presentation()
 
@@ -1147,6 +1150,11 @@ func _process(delta: float) -> void:
 	# timeout [orig: cs_dir0.timeout_ms = 120000, CNapiNetwork_Init @0x4ca4a0] and a
 	# frozen listen host does the same to every joiner.
 	if not _world.is_loaded():
+		return
+	# The start-mission splash holds the world un-ticked (retail has not yet
+	# returned from Game_StartMission [orig: @ 0x525d42 precedes the first
+	# tick]); session loads never splash, so the joiner pump is untouched.
+	if _world_load.is_splash_active():
 		return
 	if _state == State.PAUSED and not _world.is_net_session():
 		return

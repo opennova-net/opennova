@@ -31,6 +31,18 @@ static_assert(godot::HudPos::LOADING_BAND_BOTTOM ==
 		opennova::hud::kLoadingBandBottom);
 static_assert(godot::HudPos::LOADING_PRESENT_INTERVAL_MS ==
 		opennova::hud::kLoadingPresentIntervalMs);
+static_assert(godot::HudPos::SPLASH_CONTINUE_X ==
+		opennova::hud::kSplashContinueX);
+static_assert(godot::HudPos::SPLASH_CONTINUE_Y ==
+		opennova::hud::kSplashContinueY);
+static_assert(godot::HudPos::SPLASH_BLINK_MASK_MS ==
+		opennova::hud::kSplashBlinkMaskMs);
+static_assert(godot::HudPos::SPLASH_ARROW_SCALE_BASE_W ==
+		opennova::hud::kSplashArrowScaleBaseW);
+static_assert(godot::HudPos::SPLASH_ARROW_SCALE_BASE_H ==
+		opennova::hud::kSplashArrowScaleBaseH);
+static_assert(godot::HudPos::SPLASH_FONT_SCALE_BASE_W ==
+		opennova::hud::kSplashContinueFontScaleBaseW);
 static_assert(godot::HudPos::BINOCULAR_DIGIT_STEP ==
 		opennova::hud::kBinocularDigitStep);
 static_assert(godot::HudPos::VIEW_DIGIT_CELL ==
@@ -131,6 +143,11 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_bar_size"), &HudPos::loading_bar_size);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_bar_border_gray"), &HudPos::loading_bar_border_gray);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_bar_fill_color"), &HudPos::loading_bar_fill_color);
+	ClassDB::bind_static_method("HudPos", D_METHOD("loading_splash_arrow_image"), &HudPos::loading_splash_arrow_image);
+	ClassDB::bind_static_method("HudPos", D_METHOD("loading_splash_sound_set"), &HudPos::loading_splash_sound_set);
+	ClassDB::bind_static_method("HudPos", D_METHOD("loading_splash_continue_key"), &HudPos::loading_splash_continue_key);
+	ClassDB::bind_static_method("HudPos", D_METHOD("loading_splash_continue_font"), &HudPos::loading_splash_continue_font);
+	ClassDB::bind_static_method("HudPos", D_METHOD("loading_splash_continue_color", "phase_on"), &HudPos::loading_splash_continue_color);
 	ClassDB::bind_static_method("HudPos", D_METHOD("binocular_crosshair_rect"), &HudPos::binocular_crosshair_rect);
 	ClassDB::bind_static_method("HudPos", D_METHOD("binocular_digit_pos"), &HudPos::binocular_digit_pos);
 	ClassDB::bind_static_method("HudPos", D_METHOD("nvg_scale_rect"), &HudPos::nvg_scale_rect);
@@ -181,6 +198,12 @@ void HudPos::_bind_methods() {
 	BIND_CONSTANT(LOADING_BAND_RIGHT_STOCK);
 	BIND_CONSTANT(LOADING_BAND_BOTTOM);
 	BIND_CONSTANT(LOADING_PRESENT_INTERVAL_MS);
+	BIND_CONSTANT(SPLASH_CONTINUE_X);
+	BIND_CONSTANT(SPLASH_CONTINUE_Y);
+	BIND_CONSTANT(SPLASH_BLINK_MASK_MS);
+	BIND_CONSTANT(SPLASH_ARROW_SCALE_BASE_W);
+	BIND_CONSTANT(SPLASH_ARROW_SCALE_BASE_H);
+	BIND_CONSTANT(SPLASH_FONT_SCALE_BASE_W);
 	BIND_CONSTANT(BINOCULAR_DIGIT_STEP);
 	BIND_CONSTANT(VIEW_DIGIT_CELL);
 	ClassDB::bind_static_method("HudPos", D_METHOD("percent_to_alpha"),
@@ -698,6 +721,31 @@ Color HudPos::loading_bar_border_gray() {
 
 Color HudPos::loading_bar_fill_color() {
 	const uint32_t argb = opennova::hud::kLoadingBarFillArgb;
+	return Color(((argb >> 16) & 0xFFu) / 255.0f,
+			((argb >> 8) & 0xFFu) / 255.0f, (argb & 0xFFu) / 255.0f,
+			((argb >> 24) & 0xFFu) / 255.0f);
+}
+
+String HudPos::loading_splash_arrow_image() {
+	return String(opennova::hud::kSplashArrowImage);
+}
+
+String HudPos::loading_splash_sound_set() {
+	return String(opennova::hud::kSplashSoundSet);
+}
+
+String HudPos::loading_splash_continue_key() {
+	return String(opennova::hud::kSplashContinueTextKey);
+}
+
+String HudPos::loading_splash_continue_font() {
+	return String(opennova::hud::kSplashContinueFont);
+}
+
+Color HudPos::loading_splash_continue_color(bool p_phase_on) {
+	const uint32_t argb = opennova::hud::half_bright_argb(p_phase_on
+			? opennova::hud::kSplashContinueColorOn
+			: opennova::hud::kSplashContinueColorOff);
 	return Color(((argb >> 16) & 0xFFu) / 255.0f,
 			((argb >> 8) & 0xFFu) / 255.0f, (argb & 0xFFu) / 255.0f,
 			((argb >> 24) & 0xFFu) / 255.0f);

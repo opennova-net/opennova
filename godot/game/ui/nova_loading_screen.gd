@@ -3,7 +3,11 @@ extends Control
 
 ## The mission loading screen: the per-mission sidecar image (or the stock
 ## loadscrn.pcx) stretched over the whole display, the MP session text
-## composited over it, and the red progress bar near the bottom.
+## composited over it, and the red progress bar near the bottom. After a
+## single-player load with a custom background it also carries the
+## start-mission splash: the same background with a blinking centered
+## continue line and the cursor arrow, dismissed by any fresh key or mouse
+## button.
 ##
 ## Structural translation of the witnessed originals:
 ##  - background + text compositing  [orig: render_loading_screen @ 0x521d10]
@@ -11,6 +15,7 @@ extends Control
 ##  - fullscreen stretch present     [orig: LoadingScreen_DrawEffectFullscreen @ 0x586ba0]
 ##  - throttle + creep + bar draw    [orig: LoadingScreen_UpdateAndPresent @ 0x586be0]
 ##  - bar primitive                  [orig: draw_progress_bar_0 @ 0x5d4c40]
+##  - SP start-mission splash        [orig: show_start_mission_splash @ 0x520820]
 ##
 ## The original composites text INTO the 800x600 background surface with the
 ## CGameFont bitmap fonts, then stretches the composite to the backbuffer with
@@ -50,6 +55,21 @@ var _reported := 0        # last progress input [orig: this[8] @ 0x586c32]
 var _displayed := 0       # smoothed bar value [orig: this[9] @ 0x586c2f]
 var _last_drawn_reported := -1
 var _last_present_ms := -HudPos.LOADING_PRESENT_INTERVAL_MS
+
+## Emitted when the start-mission splash has been dismissed AND its final
+## background-only frame has had a frame to render [orig: the post-loop
+## present @ 0x520a48-0x520a79 precedes the caller's effect release @ 0x525d45].
+signal splash_dismissed
+
+enum SplashState { NONE, ACTIVE, CLOSING }
+
+var _splash_state := SplashState.NONE
+var _splash_arrow: Texture2D = null      # newarow1.tga, the menu cursor art
+var _splash_font: FontFile = null        # Impac22b.fnt (the large HUD label slot)
+var _splash_text := ""                   # LoadingText/LT_Continue ("" -> no line)
+var _splash_arrow_anchor := Vector2.ZERO # live cursor pos, viewport px
+var _splash_blink_on := true
+var _splash_frames_until_emit := 0
 
 
 ## <mission>.bms -> <mission>.pcx: the sidecar image name for a mission file
@@ -246,6 +266,131 @@ func has_background() -> bool:
 	return _texture != null
 
 
+## Whether setup resolved the per-mission sidecar art rather than the stock
+## fallback — the retail custom-background flag the SP splash gate reads
+## [orig: g_loadscreen_has_custom_bg @ 0x24d4dfd, set @ 0x521e94, splash gate
+## @ 0x525d38].
+func has_custom_background() -> bool:
+	return _has_custom_bg
+
+
+## Public ADR-0018 read seam: the start-mission splash is raised (taking
+## input, or presenting its final background-only frame).
+func is_splash_active() -> bool:
+	return _splash_state != SplashState.NONE
+
+
+## Public ADR-0018 read seam: the cursor-arrow art decoded (a miss degrades
+## to an arrowless splash, mirroring the original's unguarded TGA load).
+func has_splash_arrow() -> bool:
+	return _splash_arrow != null
+
+
+func _ready() -> void:
+	# The splash handlers below enable per-frame callbacks by existing; keep
+	# both off until the splash actually raises.
+	set_process(false)
+	set_process_input(false)
+
+
+## Raise the start-mission splash over the held background: the cursor-arrow
+## art, the large HUD label font, and the LoadingText/LT_Continue line, each
+## degrading to "element skipped" on a miss exactly like the original's
+## unguarded loads [orig: show_start_mission_splash @ 0x520820 — TGA
+## @ 0x520871, font slot Impac22b.fnt @ HUD_InitAllFonts 0x51ef4e, text fetch
+## @ 0x520975]. Keys pressed DURING the blocking load never dismiss it — the
+## original flushes its key queue at entry [orig: Input_ResetKeyQueue
+## @ 0x52085b] and Godot delivers no stale press events; held-key autorepeat
+## echoes DO dismiss, matching the re-queued autorepeat WM_KEYDOWNs.
+## The START_MISSION sound is the owner's to fire; it never gates dismissal
+## [orig: the exit tests read only input_mask + the key queue @ 0x520a2d].
+## Returns false when no background is held (retail draws no splash without
+## the loading-screen effect).
+func begin_start_mission_splash(root: ResourceRoot) -> bool:
+	if _texture == null or _splash_state != SplashState.NONE:
+		return false
+	if root != null:
+		_splash_arrow = _load_tga_texture(root, HudPos.loading_splash_arrow_image())
+		_splash_font = _load_font(root, HudPos.loading_splash_continue_font())
+	_splash_text = _lookup_loading_text(HudPos.loading_splash_continue_key(), "")
+	_splash_state = SplashState.ACTIVE
+	_splash_blink_on = _splash_blink_phase()
+	if is_inside_tree():
+		_splash_arrow_anchor = get_viewport().get_mouse_position()
+	set_process_input(true)
+	set_process(true)
+	queue_redraw()
+	return true
+
+
+func _input(event: InputEvent) -> void:
+	if _splash_state != SplashState.ACTIVE:
+		return
+	var motion := event as InputEventMouseMotion
+	if motion != null:
+		# The arrow tracks the live cursor [orig: xLeft/yTop @ 0x3342e48/
+		# 0x3342e4c ARE the cursor position, written by
+		# Input_DispatchMouseEvent @ 0x761470]. Motion never dismisses.
+		_splash_arrow_anchor = motion.position
+		queue_redraw()
+		return
+	var key := event as InputEventKey
+	if key != null and key.pressed:
+		# Echo (autorepeat) presses dismiss too — the original's autorepeat
+		# WM_KEYDOWNs land in the same dequeued queue
+		# [orig: Input_QueueKeyEvent @ 0x760c10 -> dequeue @ 0x520a36].
+		accept_event()
+		_splash_exit_edge()
+		return
+	var button := event as InputEventMouseButton
+	if button != null and button.pressed:
+		accept_event()
+		_splash_exit_edge()
+
+
+func _process(_delta: float) -> void:
+	if _splash_state == SplashState.ACTIVE:
+		# A held mouse button dismisses without a fresh press — the original
+		# exit reads the live button mask each frame [orig: input_mask
+		# @ 0x3342e50 (WindowProc button bits), test @ 0x520a2d].
+		if Input.get_mouse_button_mask() != 0:
+			_splash_exit_edge()
+			return
+		var phase := _splash_blink_phase()
+		if phase != _splash_blink_on:
+			_splash_blink_on = phase
+			queue_redraw()
+		return
+	if _splash_state == SplashState.CLOSING:
+		if _splash_frames_until_emit > 0:
+			_splash_frames_until_emit -= 1
+			return
+		_splash_state = SplashState.NONE
+		set_process(false)
+		splash_dismissed.emit()
+
+
+# The 512 ms two-phase pulse the continue line rides
+# [orig: GetTickCount() & 0x200 selects the color @ 0x5209b0-0x5209be].
+func _splash_blink_phase() -> bool:
+	return (Time.get_ticks_msec() & HudPos.SPLASH_BLINK_MASK_MS) != 0
+
+
+func _splash_exit_edge() -> void:
+	if _splash_state != SplashState.ACTIVE:
+		return
+	_splash_state = SplashState.CLOSING
+	set_process_input(false)
+	# One background-only frame before releasing to the owner [orig: the
+	# post-loop present without text or arrow @ 0x520a48-0x520a79, ahead of
+	# the caller's effect release @ 0x525d45].
+	_splash_frames_until_emit = 1
+	queue_redraw()
+	if not is_inside_tree() or DisplayServer.get_name() == "headless":
+		# No live renderer to wait on: finish on the next process tick.
+		_splash_frames_until_emit = 0
+
+
 func _draw() -> void:
 	if _texture == null:
 		return
@@ -254,9 +399,58 @@ func _draw() -> void:
 	# neutral (docs/interface/loading-screen-re.md D-LOADSCR-6)
 	# [orig: LoadingScreen_DrawEffectFullscreen rect (0,0,width,height) @ 0x586ba0].
 	draw_texture_rect(_texture, Rect2(Vector2.ZERO, size), false)
+	if _splash_state != SplashState.NONE:
+		# Splash frames carry the background plus (while taking input) the
+		# continue line and the arrow — no bar, no session text; the closing
+		# frame is the original's final background-only present
+		# [orig: loop draw @ 0x520993-0x520a28; final @ 0x520a48-0x520a79].
+		if _splash_state == SplashState.ACTIVE:
+			_draw_splash_overlay()
+		return
 	if _in_session:
 		_draw_session_text()
 	_draw_progress_bar()
+
+
+# The blinking centered continue line + the cursor arrow
+# [orig: show_start_mission_splash @ 0x520820].
+func _draw_splash_overlay() -> void:
+	if _splash_font != null and not _splash_text.is_empty():
+		# Centered at virtual (512, 730) of the 1024x768 overlay space, in
+		# the large HUD label font at its width/800 slot scale, half-bright,
+		# color pulsing on the 512 ms tick bit. Top-anchored like the block
+		# draws; glyph metrics ride the FontFile view (D-LOADSCR-2)
+		# [orig: HUD_DrawTextAtVirtualPos(ctx, 512, 730, 0, text,
+		# g_hudLabelFontLarge, color, mode=2 centered) @ 0x5209da; centered
+		# dispatch HUD_DrawTextCentered_HalfBright @ 0x580680; slot scale
+		# (w << 16) / 800 @ 0x51ef62].
+		var s := size / Vector2(HudPos.DESIGN_WIDTH, HudPos.DESIGN_HEIGHT)
+		var pos := Vector2(HudPos.SPLASH_CONTINUE_X * s.x,
+				HudPos.SPLASH_CONTINUE_Y * s.y)
+		var fscale := size.x / float(HudPos.SPLASH_FONT_SCALE_BASE_W)
+		var fs := _splash_font.get_fixed_size()
+		if fs <= 0:
+			fs = 16
+		var color := HudPos.loading_splash_continue_color(_splash_blink_on)
+		var text_w := _splash_font.get_string_size(_splash_text,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		draw_set_transform(pos, 0.0, Vector2(fscale, fscale))
+		draw_string(_splash_font,
+				Vector2(-text_w * 0.5, _splash_font.get_ascent(fs)),
+				_splash_text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, color)
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	if _splash_arrow != null:
+		# The arrow is the cursor art, top-left at the live cursor position
+		# (identity in viewport px — the original keeps the cursor in 640x480
+		# space and scales by w/640, h/480 to the same point), sized
+		# tga_dims * (viewport / 800x600) [orig: pos @ 0x520920-0x520942;
+		# size @ 0x52089d/0x5208ae].
+		var asize := Vector2(
+				_splash_arrow.get_width() * size.x
+					/ float(HudPos.SPLASH_ARROW_SCALE_BASE_W),
+				_splash_arrow.get_height() * size.y
+					/ float(HudPos.SPLASH_ARROW_SCALE_BASE_H))
+		draw_texture_rect(_splash_arrow, Rect2(_splash_arrow_anchor, asize), false)
 
 
 # The MP text overlay, drawn in image space under the image's stretch scale
@@ -361,3 +555,16 @@ func _load_font(root: ResourceRoot, name: String) -> FontFile:
 	if res == null:
 		return null
 	return res.to_font_file()
+
+
+# TGA art rides the raw VFS read + Godot's TGA decoder (ResourceRoot's
+# load_texture is the PCX path), like the view-effect masks
+# [orig: CTerrainTileData_LoadTGAFromArchive @ 0x520871].
+static func _load_tga_texture(root: ResourceRoot, name: String) -> Texture2D:
+	var bytes := root.read_file(name)
+	if bytes.is_empty():
+		return null
+	var image := Image.new()
+	if image.load_tga_from_buffer(bytes) != OK:
+		return null
+	return ImageTexture.create_from_image(image)

@@ -70,6 +70,15 @@ public:
 		LOADING_BAND_RIGHT_STOCK = 782,
 		LOADING_BAND_BOTTOM = 500,
 		LOADING_PRESENT_INTERVAL_MS = 100,
+		// The SP start-mission splash (hud/loading_screen.h kSplash*; same
+		// pinning): the centered continue-line virtual position, the 512 ms
+		// blink phase bit, and the 800x600/800 scale bases.
+		SPLASH_CONTINUE_X = 512,
+		SPLASH_CONTINUE_Y = 730,
+		SPLASH_BLINK_MASK_MS = 0x200,
+		SPLASH_ARROW_SCALE_BASE_W = 800,
+		SPLASH_ARROW_SCALE_BASE_H = 600,
+		SPLASH_FONT_SCALE_BASE_W = 800,
 		// The first-person view effects (hud/view_effects.h; same pinning):
 		// the rangefinder digit advance and the 16px digit-strip cell.
 		BINOCULAR_DIGIT_STEP = 10,
@@ -131,6 +140,13 @@ public:
 	static Vector2i loading_bar_size();
 	static Color loading_bar_border_gray();
 	static Color loading_bar_fill_color();
+	// The SP start-mission splash strings and the phase-selected continue-line
+	// color, already through the witnessed half-bright fold.
+	static String loading_splash_arrow_image();
+	static String loading_splash_sound_set();
+	static String loading_splash_continue_key();
+	static String loading_splash_continue_font();
+	static Color loading_splash_continue_color(bool p_phase_on);
 
 	// The first-person view-effect spec (hud/view_effects.h carries the
 	// values and witnesses): binocular/NVG overlay rects in the 1024x768

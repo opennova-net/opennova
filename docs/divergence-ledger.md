@@ -474,7 +474,8 @@ Sources: [mnu/menu-re.md](mnu/menu-re.md), [audio/lwf-dbf-sound-re.md](audio/lwf
 | D-SND-17 | Ground-vehicle engine-sound lanes PORTED 2026-07-29; remote compact vehicle rows do not yet restore `veh.speed`/collision contact (moving remote gain/pitch + collision refresh open); aircraft slot-30 and other families unclaimed | A | OPEN (narrowed) | PAR-UI |
 | D-LOADSCR-1 | Load-progress pump granularity: 8 stage-boundary values + per-model pulses vs ~30 retail call sites with per-subsystem slot++ ticks — value set and mechanism match, granularity doesn't | C | OPEN (cosmetic-only; permanent-register candidate — ADR 0022) | PAR-UI |
 | D-LOADSCR-2 | Loading-screen text renders via the Godot FontFile view + line metrics, not CGameFont glyph compositing (spacing params unwitnessed) | A | OPEN (shared CGameFont follow-up with hud-re.md) | PAR-UI |
-| D-LOADSCR-4 | SP start-mission splash (`show_start_mission_splash @ 0x520820` — arrow + START_MISSION + LT_Continue) not ported | A | OPEN | PAR-UI |
+| D-LOADSCR-4 | FIXED 2026-08-15: the SP start-mission splash is ported as a `LoadingScreen` mode — the held background, the blinking centered LT_Continue line (Impac22b.fnt half-bright, 512 ms white/`0xFF8080` pulse @ tick bit 0x200), the cursor-arrow quad at the live mouse position, key-queue-flush entry, any-key/any-mouse-button dismissal (the old "or the sound completes" gloss was refuted — the exit reads only input state), the final background-only frame, and the fire-and-forget START_MISSION one-shot; gate + device legs on `WorldLoadCoordinator`, reveal hold + world-tick hold in `main_game.gd` `[orig: show_start_mission_splash @ 0x520820, gate @ 0x525d38, release @ 0x525d45]`. The epilog-stage re-show entry split off as D-LOADSCR-8. GUT `loading_screen_splash_test.gd` | A | FIXED | PAR-UI |
+| D-LOADSCR-8 | The epilog-stage splash re-show (the start key at the SP post-spawn stage re-runs the splash then queues the deploy event) not ported — rides the unported SP epilog/respawn flow + the configurable start-key binding (D-CTRL-1 territory) `[orig: Input_HandleSpecialKeys @ 0x49c5c0, branch @ 0x49c887]` | A | WITNESSED-READY-DEFERRED (with the epilog/respawn flow) | PAR-UI |
 | D-LOADSCR-5 | Seven-segment numeric load percentage (drawn only under `g_ShowLoadBarCommandLineArg`) not ported | B | OPEN (debug-only; revisit with launch-flag work) | PAR-UI |
 | D-LOADSCR-6 | Background drawn unmodulated vs retail's MODULATE2X-neutral `0xFF7F7F7F` effect modulate — net-identical color, recorded so nobody "fixes" it | C | OPEN (documented no-diff; permanent-register candidate — ADR 0022) | PAR-UI |
 | D-LOADSCR-7 | ESC/disconnect cannot abort the synchronous SP/host MAP LOAD (no reachable interruption window; both joiner waits are coroutines and honour ESC) vs retail's four-point poll `@ 0x520270` | C | OPEN (scope-corrected 2026-07-25; permanent-register candidate — ADR 0022) | PAR-UI |
@@ -496,6 +497,7 @@ Sources: [mnu/menu-re.md](mnu/menu-re.md), [audio/lwf-dbf-sound-re.md](audio/lwf
 De-tabled 2026-08-06 (the closed-row compaction — the table above holds
 OPEN work only; full detail in the named record + git history):
 
+Closed 2026-07-24: **D-LOADSCR-3** -> `FIXED` — joiner spawn-gate hold: `world_loaded` no longer releases a joiner's loading presentation; the authoritative `join_admission_ready` / `join_deploy_pick_required` edges do, matching retail's two blocking waits to the S2C 0x1D spawn gate (full entry: interface/loading-screen-re.md; this row was omitted from the ledger when fixed — repaired 2026-08-15).
 Closed 2026-07-09: **D-HUD-1** -> `FIXED` — Stance indicator = discrete cross-faded `HUDSTANCE` frames (IDB was `draw_minimap_compass_overlay` + oscarmike model it as a compass) (full detail: hud-re.md + git history).
 Closed 2026-08-13: **D-HUD-2** -> `FIXED` — the IDB-misnamed stance widget remains frame-swap + fade, while the separately witnessed normal `HUDSPINMAP*` call is a real heading-up terrain/blip map live behind a compiled-in-true master switch (the July "no in-HUD radar" gloss corrected); the two are no longer conflated (full detail: hud-re.md + git history).
 Closed: **D-HUD-3** -> `FIXED` — HUD design space is fixed 1024×768, scaled round-to-nearest (`Viewport_ScaleToVirtualCoords`) (full detail: hud-re.md + git history).
@@ -931,7 +933,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Net | 17 | 0 | 7 | 24 | 1 |
 | Environment | 0 | 0 | 3 | 3 | 0 |
 | World / AI + events | 51 | 4 | 5 | 60 | 3 |
-| UI (menu/ctrl/sound/playerinfo/HUD) | 38 | 1 | 3 | 42 | 11 |
+| UI (menu/ctrl/sound/playerinfo/HUD) | 35 | 1 | 4 | 40 | 11 |
 | Mission `.mis` | 0 | 1 | 1 | 2 | 1 |
 | LW `.3di` | 0 | 2 | 1 | 3 | 0 |
 | Particles `.ptl` | 1 | 0 | 0 | 1 | 0 |
@@ -944,7 +946,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Render — materials/state | 0 | 0 | 1 | 1 | 0 |
 | Render — draw order | 2 | 0 | 1 | 3 | 0 |
 | Render — lighting | 3 | 0 | 2 | 5 | 0 |
-| **Total** | **117** | **12** | **24** | **153** | 16 |
+| **Total** | **114** | **12** | **25** | **151** | 16 |
 
 Dual-flagged rows (also carry a NEEDS-RE facet): D-INF-20, D-NET-136, D-NET-169, D-NET-179, D-NET-64, D-NET-97.
 
