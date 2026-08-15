@@ -42,12 +42,12 @@ MinimapFootprintMesh minimap_footprint_from_occlusion(
 //  each | 0xFF << 24]
 uint32_t minimap_footprint_fill_argb(const Entity &entity);
 
-// Place the model-local mesh at the entity's pose: the SAME yaw-only
-// placement matrix the collision instance uses (mission yaw degrees ->
-// BAM heading), so the footprint, the model, and the collision shell agree.
+// Place model-local X/Z in mission X/Y with entityHeading-90 degrees. That
+// compensates for the minimap projection's separate quarter-turn; its mission-Y
+// reflection then completes retail's direct screen-space footprint matrix.
 // Appends world-space Q16 pairs to the two out vectors.
-// [orig: the wireframe transforms each vertex by the entity sin/cos + pos
-//  @0x596b42..0x596bbb — the entity placement collision also reads]
+// [orig: map heading @0x5a636e; relative-angle handoff @0x5be55b;
+//  wireframe @0x596844..0x596bbb]
 void minimap_footprint_place(const MinimapFootprintMesh &mesh,
 		const Entity &entity, std::vector<int32_t> &out_fill_xy_q16,
 		std::vector<int32_t> &out_edge_xy_q16);

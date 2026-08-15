@@ -2638,6 +2638,7 @@ bool run_host_as_client() {
 
 	w::World world;
 	world.registry.configure_pool(0, 16);
+	world.registry.configure_pool(1, 128);
 	world.registry.configure_pool(2, 16);
 	w::AiSystem ai;
 	world.ai = &ai;
@@ -2677,6 +2678,19 @@ bool run_host_as_client() {
 	const w::EntityHandle map_handle = world.registry.spawn_from(2, 0, map_entity);
 	if (!expect(map_handle.valid(), "host map fixture occupies a pool-2 slot"))
 		return false;
+	w::Entity late_vehicle;
+	late_vehicle.kind = w::EntityKind::Item;
+	late_vehicle.item_type = 1;
+	late_vehicle.item_unit_type = 3;
+	late_vehicle.has_item_def = true;
+	late_vehicle.team = he->team;
+	late_vehicle.net_class_code = static_cast<uint8_t>(EntityClass::Vehicle);
+	late_vehicle.position = {128.0f, 96.0f, 0.0f};
+	const w::EntityHandle vehicle_handle =
+			world.registry.spawn_from(1, 127, late_vehicle);
+	if (!expect(vehicle_handle.valid() && vehicle_handle.packed == 0x107Fu,
+			"vehicle fixture occupies the last retail minimap phase"))
+		return false;
 
 	np::ClientRuntime host_view(host_loop); // HostClient recv-fold only
 	ns::ClientEntityState &decoded_map = host_view.state().upsert(map_handle.packed);
@@ -2710,6 +2724,35 @@ bool run_host_as_client() {
 	}
 	if (!expect(found_map_overlay,
 			"host loopback receives and retains the same initial minimap stream"))
+		return false;
+
+	// Pool-1 markers bubble into retail one phase every fourteen server ticks.
+	// Slot 127 therefore must remain absent through tick 1778, then arrive on
+	// tick 1779 (phase 0 ran on the first tick above). This keeps screenshot
+	// readiness honest without changing the witnessed 14x128 cadence.
+	const auto has_vehicle_overlay = [&] {
+		for (const ns::ClientMinimapOverlaySlot &slot :
+				host_view.state().minimap.transient) {
+			if (slot.active && slot.handle == vehicle_handle.packed &&
+					slot.param == 11)
+				return true;
+		}
+		return false;
+	};
+	if (!expect(!has_vehicle_overlay(),
+			"late-phase vehicle is absent before its dynamic scan"))
+		return false;
+	for (int tick = 2; tick <= 1778; ++tick) {
+		np::Server_TickUpdate(ctx);
+		(void)host_view.Client_ProcessNetworkFrame();
+	}
+	if (!expect(!has_vehicle_overlay(),
+			"late-phase vehicle remains absent through tick 1778"))
+		return false;
+	np::Server_TickUpdate(ctx);
+	(void)host_view.Client_ProcessNetworkFrame();
+	if (!expect(has_vehicle_overlay(),
+			"late-phase vehicle arrives and is retained on phase-127 tick 1779"))
 		return false;
 	return true;
 }

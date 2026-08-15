@@ -81,9 +81,16 @@ constexpr double kGridCellReciprocal =
 //  with flt_7C3610 = 2^-22; rect scaled per axis by
 //  Viewport_ScaleToVirtualCoords @0x5d2b20 (x*w/1024, y*h/768, rounded)]
 constexpr float kDiscInsetPx = 4.0f;
-// TSDicon.tga is a 16x480 vertical strip of 30 16px icon cells (witnessed
-// asset; consumed per-index by render_tiled_image_strip @0x67b540).
+// TSDicon.tga is a 64x1920 vertical strip of 30 64px icon cells. Retail
+// uploads the source at that resolution, box-generates its mip chain, and
+// render_tiled_image_strip derives the half-texel inset from these physical
+// dimensions. The badges are commonly drawn near the 16px mip level.
+// [orig: Texture_LoadFromFile_0 @0x59e060 -> GTexture_CreateFromPixelData_0
+//  @0x6876c0; render_tiled_image_strip @0x67b540]
 constexpr int kIconStripCells = 30;
+constexpr float kIconStripWidthPx = 64.0f;
+constexpr float kIconStripHeightPx = 1920.0f;
+constexpr float kIconStripCellPx = 64.0f;
 // WPIndctr.tga is a 4-cell vertical strip: 0 up-triangle (waypoint above),
 // 1 down-triangle (below), 2 circle (level), 3 blank. The altitude state
 // picks the frame. [orig: HUD_LoadAllTextures WPIndctr.tga -> 0x27231A8;
@@ -336,13 +343,19 @@ void emit_fan(const Polygon &poly, uint32_t color,
 	}
 }
 
-// Icon cell in the TSDicon vertical strip (16x480 = 30 cells).
+// Icon cell in the TSDicon vertical strip (64x1920 = 30 cells).
 void marker_uv(uint8_t icon, float &u0, float &v0, float &u1, float &v1) {
 	const int cell = std::min<int>(icon, kIconStripCells - 1);
-	u0 = 0.0f;
-	u1 = 1.0f;
-	v0 = static_cast<float>(cell) / kIconStripCells;
-	v1 = static_cast<float>(cell + 1) / kIconStripCells;
+	// Retail offsets both strip endpoints by half a source texel. The right
+	// and bottom coordinates intentionally reach half a texel past the cell;
+	// the device's clamp sampler holds the final edge texel.
+	// [orig: render_tiled_image_strip @0x67b540]
+	u0 = 0.5f / kIconStripWidthPx;
+	u1 = (kIconStripWidthPx + 0.5f) / kIconStripWidthPx;
+	v0 = (static_cast<float>(cell) * kIconStripCellPx + 0.5f) /
+			kIconStripHeightPx;
+	v1 = (static_cast<float>(cell + 1) * kIconStripCellPx + 0.5f) /
+			kIconStripHeightPx;
 }
 
 // Ordinary TSDicon blips submit the raw team color to the strip renderer,

@@ -2,6 +2,8 @@
 
 #include <godot_cpp/classes/canvas_item_material.hpp>
 #include <godot_cpp/classes/control.hpp>
+#include <godot_cpp/classes/shader.hpp>
+#include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
@@ -174,6 +176,10 @@ private:
 	// child RenderingServer canvas item carrying a BLEND_MODE_ADD material.
 	Ref<CanvasItemMaterial> additive_material_;
 	RID additive_item_;
+	// Retail thresholds the linearly sampled depthspin height field against
+	// the water plane. This material keeps that comparison in the raster pass.
+	Ref<Shader> minimap_water_shader_;
+	Ref<ShaderMaterial> minimap_water_material_;
 	// The spinmap sandwich: the retail terrain draws twice (base + additive
 	// x4-stage resubmission), so the second pass and everything the map
 	// layers above it ride pinned-order child items. The M-cycle big map
@@ -182,13 +188,20 @@ private:
 	// objectives-family legs (witness at hud_frame.h HudDrawList::big_map).
 	RID map_base_item_;
 	RID map_add_item_;
+	RID map_water_item_;
+	bool map_water_sampling_configured_ = false;
 	RID map_top_item_;
+	bool map_top_sampling_configured_ = false;
 	RID big_map_base_item_;
 	RID big_map_add_item_;
+	RID big_map_water_item_;
+	bool big_map_water_sampling_configured_ = false;
 	RID big_map_top_item_;
+	bool big_map_top_sampling_configured_ = false;
 
 	Vector2 draw_surface_() const;
-	Ref<Texture2D> load_hud_texture_(const String &p_name) const;
+	Ref<Texture2D> load_hud_texture_(const String &p_name,
+			bool p_generate_mipmaps = false) const;
 	// MODULATE2X equivalence for a white-modulated static sprite: RGB x2
 	// saturated, alpha unchanged (the compass ring's pipeline).
 	Ref<Texture2D> double_saturate_texture_(const Ref<Texture2D> &p_texture) const;
@@ -201,6 +214,7 @@ private:
 	// breakpoint, and hand the compiler the pair + the witnessed slot scale.
 	void ensure_label_fonts_(float p_surface_w);
 	void ensure_additive_item_();
+	void ensure_minimap_water_material_();
 	void ensure_map_items_();
 	void ensure_big_map_items_();
 	void render_list_(const opennova::hud::HudDrawList &p_list);

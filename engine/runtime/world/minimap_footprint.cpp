@@ -108,19 +108,25 @@ uint32_t minimap_footprint_fill_argb(const Entity &entity) {
 void minimap_footprint_place(const MinimapFootprintMesh &mesh,
 		const Entity &entity, std::vector<int32_t> &out_fill_xy_q16,
 		std::vector<int32_t> &out_edge_xy_q16) {
-	// Entity::yaw holds mission DEGREES; the placement heading is the same
-	// BAM conversion the collision instance runs, so the footprint rotates
-	// exactly with the collision shell and the render model.
-	// [orig: bam_heading_from_mission_yaw_deg — the collision placement's
-	//  heading source; the wireframe's sin/cos ride the same entity heading]
+	// Retail rotates OOBJ X/Z directly in screen space by
+	// mapHeading-entityHeading. OpenNova first places the outline in mission
+	// space, then view_project applies its own mapHeading-90 fold and reflects
+	// mission Y. Subtracting one quarter turn here makes those two stages reduce
+	// to retail's reflected screen matrix instead of leaving every asymmetric
+	// silhouette 90 degrees out of phase.
+	// [orig: HUD_DrawMapOverlay @0x5a636e passes the unfurled map heading;
+	//  render_minimap_slot_blip @0x5be55b subtracts entity[0x10];
+	//  render_collision_wireframe @0x596844..0x596bbb]
 	const int32_t pos_q16[3] = {
 		static_cast<int32_t>(entity.position.x * 65536.0f),
 		static_cast<int32_t>(entity.position.y * 65536.0f),
 		static_cast<int32_t>(entity.position.z * 65536.0f),
 	};
+	const int32_t footprint_heading = static_cast<int32_t>(
+			static_cast<uint32_t>(bam_heading_from_mission_yaw_deg(
+					static_cast<double>(entity.yaw))) - 0x40000000u);
 	const CollisionMatrix matrix = collision_matrix_from_heading(
-			bam_heading_from_mission_yaw_deg(
-					static_cast<double>(entity.yaw)), pos_q16);
+			footprint_heading, pos_q16);
 	const auto place_pairs = [&](const std::vector<int32_t> &local,
 			std::vector<int32_t> &out) {
 		out.reserve(out.size() + local.size());

@@ -1207,14 +1207,21 @@ detail cycle** in the dispatcher: catalog codes 14 (`showhud`), 19
   `(4x,4z)`, `(+2,0)`, `(0,+2)`, and `(+2,+2)`, then uses `sum >> 10` as
   the integer terrain height. The redraw selects one of its four 128px
   quadrants with literal UV scale `127/256` and second-half offset `130/256`
-  (`@0x6077A2..0x6077E6`). Its ADDSIGNED/ADD alpha chain plus alpha-ref 192
-  reduces to `terrain_height_int <= floor(water_height_wu)`; zero water
+  (`@0x6077A2..0x6077E6`). Bilinear filtering is followed by the fixed-function
+  stage's UNORM8 writeback; its ADDSIGNED/ADD alpha chain plus alpha-ref 192
+  therefore reduces to `round(sampled_terrain_height) <= water_height_int`.
+  Comparing the unquantized sample instead incorrectly makes the fractional
+  band from `water_height` through `water_height + 0.5` dry. Zero water
   suppresses the pass and the plane clamps at 254. The passing texels replace
   the completed terrain pixel with the synchronized-capture water tone
   `0xFF16476B`. OpenNova implements the same four-tap reduction as
-  `TerrainData::build_minimap_water_mask`, binds the transparent/binary
-  equivalent separately from the sharp colormap, and redraws the same clipped
-  sector fans after both Canvas brightness legs. `GameWorld` emits
+  `TerrainData::build_minimap_water_mask`, retaining reduced terrain height
+  and integer water height in an RG8 data texture. A dedicated linearly
+  filtered Canvas shader performs the height comparison after sampling, at
+  the same raster stage as retail; a pre-thresholded binary mask is not
+  equivalent at shoreline texels and produced the observed broad halo. The
+  water pass redraws the same clipped sector fans after both Canvas brightness
+  legs. `GameWorld` emits
   `minimap_water_changed` when that mask is rebuilt. Streamed/authored `.til`
   art and the PolyTrn per-cell cache do not participate in the gameplay
   spinmap. The 2026-08-13 per-cell/ortho atlas surrogate and its registration
@@ -1236,9 +1243,14 @@ detail cycle** in the dispatcher: catalog codes 14 (`showhud`), 19
   vertex pair, bit15 winding), and fewer than four survivors suppress the
   outline. Retail builds `0x80000000` boundary vertices, but completed-pass
   captures show no observable stroke; OpenNova therefore retains the
-  parity result in the feed but does not submit black lines. Placement
-  rides the same mission-yaw-degrees -> BAM heading matrix
-  (`world::minimap_footprint_place`), persistent rest,
+  parity result in the feed but does not submit black lines. Retail hands the
+  unfurled `map_heading - entity_heading` directly to
+  `render_collision_wireframe` (`@0x5a636e`, `@0x5be55b..0x5be57b`), whose
+  local screen formula is reflected (`@0x596844..0x596bbb`). OpenNova places
+  the outline in mission space first, so it subtracts 90 degrees from the
+  entity heading to compensate for the map projection's separate -90-degree
+  fold; that projection then supplies retail's one screen-Y reflection. Then
+  come persistent rest,
   transient, special [orig: `MapOverlay_RenderAllByLayer @0x5be590`]. The
   icon→layer table `{10,11,15,18,25}→1, {2,4,12,13,16,17,29}→2,
   {3,8,14,23,24}→3, else 0` is byte-witnessed (`@0x5be681`), and the special
@@ -1277,8 +1289,18 @@ detail cycle** in the dispatcher: catalog codes 14 (`showhud`), 19
   The synchronized green-marker peak is retail `(88,255,65)` versus OpenNova
   `(86,255,64)`; apparent shade changes between captures come from filtering,
   blending, and live state rather than a different configured base color. The
-  `TSDicon.tga` sheet is a **16×480 vertical strip of 30 cells** (indexed by
-  `render_tiled_image_strip @0x67b540`); the per-class hide/rotate gates
+  `TSDicon.tga` sheet is a **64×1920 vertical strip of 30 64×64 cells**
+  (indexed by `render_tiled_image_strip @0x67b540`). `Texture_LoadFromFile_0
+  @0x59e060` leaves that physical resolution intact;
+  `GTexture_CreateFromPixelData_0 @0x6877ba..0x6878be` allocates the full mip
+  chain and fills it with `D3DXFilterTexture` filter 5 (box), while
+  `CGfxDevice_ApplyRenderStates @0x67e3e1..0x67e421` selects linear mip
+  filtering. The helper offsets both cell bounds by half a **physical** source
+  texel. OpenNova generates the same mip chain, uses the 64/1920 dimensions for
+  those endpoints, and linearly mip-filters with clamp on both map canvas
+  items. Treating the logical ~16px badge size as the source dimensions and
+  uploading the strip without mips caused the visibly aliased armory glyphs.
+  The per-class hide/rotate gates
   `0x2723D0C..D34` are unwritten statics (always pass). Capture-zone def ids
   6027/6028 add team rings (`0xFF2020`/`0x4060FF`, alpha pair `0x50/0x40`,
   min radius 64 wu `@0x5a7027..0x5a7061`).

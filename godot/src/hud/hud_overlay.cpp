@@ -32,6 +32,44 @@ constexpr int kMinimapSnapshotHeaderSize = 3;
 constexpr int kMinimapSnapshotMinStride = 16;
 constexpr int kMinimapFootprintFeedVersion = 1;
 
+constexpr const char *kMinimapWaterShader = R"(
+shader_type canvas_item;
+render_mode unshaded, blend_mix;
+
+varying vec4 map_color;
+
+void vertex() {
+	map_color = COLOR;
+}
+
+void fragment() {
+	// The RG8 atlas is data, not color. Canvas sampler state can still resolve
+	// TEXTURE with nearest filtering on some renderers, so reproduce retail's
+	// four-tap linear sample explicitly before comparing the two height fields.
+	ivec2 texture_size = textureSize(TEXTURE, 0);
+	ivec2 max_cell = texture_size - ivec2(1);
+	vec2 texel_position = UV * vec2(texture_size) - vec2(0.5);
+	ivec2 cell = ivec2(floor(texel_position));
+	vec2 fraction = fract(texel_position);
+	vec2 h00 = texelFetch(TEXTURE, clamp(cell, ivec2(0), max_cell), 0).rg;
+	vec2 h10 = texelFetch(TEXTURE, clamp(cell + ivec2(1, 0), ivec2(0), max_cell), 0).rg;
+	vec2 h01 = texelFetch(TEXTURE, clamp(cell + ivec2(0, 1), ivec2(0), max_cell), 0).rg;
+	vec2 h11 = texelFetch(TEXTURE, clamp(cell + ivec2(1, 1), ivec2(0), max_cell), 0).rg;
+	vec2 height_and_water = mix(
+			mix(h00, h10, fraction.x),
+			mix(h01, h11, fraction.x), fraction.y);
+	// Retail's fixed-function texture stage writes the filtered UNORM sample
+	// back to an 8-bit channel before its ADDSIGNED/alpha-test chain. Comparing
+	// the unquantized float makes every fractional shoreline height dry. Round
+	// both operands to the same UNORM8 lattice before applying the cutoff.
+	vec2 quantized_height_and_water = floor(height_and_water * 255.0 + vec2(0.5));
+	if (quantized_height_and_water.r > quantized_height_and_water.g) {
+		discard;
+	}
+	COLOR = map_color;
+}
+)";
+
 int32_t q16_from_world(real_t value) {
 	const double scaled = static_cast<double>(value) * 65536.0;
 	return static_cast<int32_t>(std::clamp(scaled,
@@ -153,18 +191,26 @@ HudOverlay::~HudOverlay() {
 		if (additive_item_.is_valid()) rs->free_rid(additive_item_);
 		if (map_base_item_.is_valid()) rs->free_rid(map_base_item_);
 		if (map_add_item_.is_valid()) rs->free_rid(map_add_item_);
+		if (map_water_item_.is_valid()) rs->free_rid(map_water_item_);
 		if (map_top_item_.is_valid()) rs->free_rid(map_top_item_);
 		if (big_map_base_item_.is_valid()) rs->free_rid(big_map_base_item_);
 		if (big_map_add_item_.is_valid()) rs->free_rid(big_map_add_item_);
+		if (big_map_water_item_.is_valid()) rs->free_rid(big_map_water_item_);
 		if (big_map_top_item_.is_valid()) rs->free_rid(big_map_top_item_);
 	}
 	additive_item_ = RID();
 	map_base_item_ = RID();
 	map_add_item_ = RID();
+	map_water_item_ = RID();
 	map_top_item_ = RID();
 	big_map_base_item_ = RID();
 	big_map_add_item_ = RID();
+	big_map_water_item_ = RID();
 	big_map_top_item_ = RID();
+	map_water_sampling_configured_ = false;
+	map_top_sampling_configured_ = false;
+	big_map_water_sampling_configured_ = false;
+	big_map_top_sampling_configured_ = false;
 	clear_font_();
 }
 
@@ -291,7 +337,8 @@ Ref<Texture2D> HudOverlay::double_saturate_texture_(
 	return ImageTexture::create_from_image(doubled);
 }
 
-Ref<Texture2D> HudOverlay::load_hud_texture_(const String &p_name) const {
+Ref<Texture2D> HudOverlay::load_hud_texture_(const String &p_name,
+		bool p_generate_mipmaps) const {
 	// HUD art ships as .tga; loaded by flat name through the mounted VFS.
 	if (root_.is_null() || p_name.is_empty()) {
 		return Ref<Texture2D>();
@@ -303,6 +350,9 @@ Ref<Texture2D> HudOverlay::load_hud_texture_(const String &p_name) const {
 	Ref<Image> image;
 	image.instantiate();
 	if (image->load_tga_from_buffer(bytes) != OK) {
+		return Ref<Texture2D>();
+	}
+	if (p_generate_mipmaps && image->generate_mipmaps() != OK) {
 		return Ref<Texture2D>();
 	}
 	return ImageTexture::create_from_image(image);
@@ -415,7 +465,12 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	layout_.stance_frame0_h = frame0.is_valid() ? frame0->get_height() : 0;
 
 	load_crosshair_texture_();
-	textures_[opennova::hud::kHudTexMapIcons] = load_hud_texture_("TSDicon.tga");
+	// Retail uploads the 64x1920 strip with its full box-filtered mip chain;
+	// the default spinmap badges then sample near the 16px level. A mipless
+	// upload aliases the 64px source into a visibly broken armory "A".
+	// [orig: GTexture_CreateFromPixelData_0 @0x6877ba..0x6878be]
+	textures_[opennova::hud::kHudTexMapIcons] =
+			load_hud_texture_("TSDicon.tga", true);
 	// The compass ring draws white-modulated through the fixed-function HUD
 	// pipeline, whose output stage is MODULATE2X — for a static sprite that
 	// is exactly a pre-doubled texture (the retail capture's band/letters
@@ -874,6 +929,41 @@ Dictionary HudOverlay::get_draw_list_stats() {
 	out["map_lines_under"] = map_lines_under;
 	out["map_lines"] = map_lines;
 	out["map_labels"] = map_labels;
+	const Ref<Texture2D> map_icons = textures_[opennova::hud::kHudTexMapIcons];
+	const Ref<Image> map_icon_image =
+			map_icons.is_valid() ? map_icons->get_image() : Ref<Image>();
+	out["map_icon_mipmaps"] =
+			map_icon_image.is_valid() && map_icon_image->has_mipmaps();
+	out["map_icon_width"] =
+			map_icon_image.is_valid() ? map_icon_image->get_width() : 0;
+	out["map_icon_height"] =
+			map_icon_image.is_valid() ? map_icon_image->get_height() : 0;
+	out["map_texture_filter"] = map_top_sampling_configured_
+			? static_cast<int64_t>(
+					RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_LINEAR_WITH_MIPMAPS)
+			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_DEFAULT);
+	out["map_texture_repeat"] = map_top_sampling_configured_
+			? static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED)
+			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DEFAULT);
+	out["map_water_texture_filter"] = map_water_sampling_configured_
+			? static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_LINEAR)
+			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_DEFAULT);
+	out["map_water_texture_repeat"] = map_water_sampling_configured_
+			? static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED)
+			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DEFAULT);
+	out["big_map_texture_filter"] = big_map_top_sampling_configured_
+			? static_cast<int64_t>(
+					RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_LINEAR_WITH_MIPMAPS)
+			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_DEFAULT);
+	out["big_map_texture_repeat"] = big_map_top_sampling_configured_
+			? static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED)
+			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DEFAULT);
+	out["big_map_water_texture_filter"] = big_map_water_sampling_configured_
+			? static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_LINEAR)
+			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_DEFAULT);
+	out["big_map_water_texture_repeat"] = big_map_water_sampling_configured_
+			? static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED)
+			: static_cast<int64_t>(RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DEFAULT);
 	return out;
 }
 
@@ -889,19 +979,30 @@ void HudOverlay::ensure_additive_item_() {
 	additive_item_ = rs->canvas_item_create();
 	rs->canvas_item_set_parent(additive_item_, get_canvas_item());
 	rs->canvas_item_set_material(additive_item_, additive_material_->get_rid());
-	// Above the map sandwich (indexes 0/1) like every non-map additive row.
-	rs->canvas_item_set_draw_index(additive_item_, 2);
+	// Above the four-layer corner-map sandwich like every non-map additive row.
+	rs->canvas_item_set_draw_index(additive_item_, 4);
+}
+
+void HudOverlay::ensure_minimap_water_material_() {
+	if (minimap_water_material_.is_valid()) {
+		return;
+	}
+	minimap_water_shader_.instantiate();
+	minimap_water_shader_->set_code(kMinimapWaterShader);
+	minimap_water_material_.instantiate();
+	minimap_water_material_->set_shader(minimap_water_shader_);
 }
 
 void HudOverlay::ensure_map_items_() {
 	if (map_base_item_.is_valid() && map_add_item_.is_valid() &&
-			map_top_item_.is_valid()) {
+			map_water_item_.is_valid() && map_top_item_.is_valid()) {
 		return;
 	}
 	if (additive_material_.is_null()) {
 		additive_material_.instantiate();
 		additive_material_->set_blend_mode(CanvasItemMaterial::BLEND_MODE_ADD);
 	}
+	ensure_minimap_water_material_();
 	RenderingServer *rs = RenderingServer::get_singleton();
 	// The retail map decal pipeline quadruples texture x diffuse (the
 	// captures measure exactly 0x60 x 4 = 1.5058 x texture). A 1x canvas
@@ -928,23 +1029,42 @@ void HudOverlay::ensure_map_items_() {
 		rs->canvas_item_set_draw_behind_parent(map_add_item_, true);
 		rs->canvas_item_set_draw_index(map_add_item_, 1);
 	}
+	if (!map_water_item_.is_valid()) {
+		map_water_item_ = rs->canvas_item_create();
+		rs->canvas_item_set_parent(map_water_item_, get_canvas_item());
+		rs->canvas_item_set_material(map_water_item_,
+				minimap_water_material_->get_rid());
+		rs->canvas_item_set_draw_behind_parent(map_water_item_, true);
+		rs->canvas_item_set_draw_index(map_water_item_, 2);
+		rs->canvas_item_set_default_texture_filter(map_water_item_,
+				RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_LINEAR);
+		rs->canvas_item_set_default_texture_repeat(map_water_item_,
+				RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
+		map_water_sampling_configured_ = true;
+	}
 	if (!map_top_item_.is_valid()) {
 		map_top_item_ = rs->canvas_item_create();
 		rs->canvas_item_set_parent(map_top_item_, get_canvas_item());
 		rs->canvas_item_set_draw_behind_parent(map_top_item_, true);
-		rs->canvas_item_set_draw_index(map_top_item_, 2);
+		rs->canvas_item_set_draw_index(map_top_item_, 3);
+		rs->canvas_item_set_default_texture_filter(map_top_item_,
+				RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_LINEAR_WITH_MIPMAPS);
+		rs->canvas_item_set_default_texture_repeat(map_top_item_,
+				RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
+		map_top_sampling_configured_ = true;
 	}
 }
 
 void HudOverlay::ensure_big_map_items_() {
 	if (big_map_base_item_.is_valid() && big_map_add_item_.is_valid() &&
-			big_map_top_item_.is_valid()) {
+			big_map_water_item_.is_valid() && big_map_top_item_.is_valid()) {
 		return;
 	}
 	if (additive_material_.is_null()) {
 		additive_material_.instantiate();
 		additive_material_->set_blend_mode(CanvasItemMaterial::BLEND_MODE_ADD);
 	}
+	ensure_minimap_water_material_();
 	RenderingServer *rs = RenderingServer::get_singleton();
 	// The whole big-map sandwich sits ABOVE the flat HUD and the corner
 	// map: retail draws the M map after the full overlay pass, so bars,
@@ -954,19 +1074,36 @@ void HudOverlay::ensure_big_map_items_() {
 	if (!big_map_base_item_.is_valid()) {
 		big_map_base_item_ = rs->canvas_item_create();
 		rs->canvas_item_set_parent(big_map_base_item_, get_canvas_item());
-		rs->canvas_item_set_draw_index(big_map_base_item_, 3);
+		rs->canvas_item_set_draw_index(big_map_base_item_, 5);
 	}
 	if (!big_map_add_item_.is_valid()) {
 		big_map_add_item_ = rs->canvas_item_create();
 		rs->canvas_item_set_parent(big_map_add_item_, get_canvas_item());
 		rs->canvas_item_set_material(big_map_add_item_,
 				additive_material_->get_rid());
-		rs->canvas_item_set_draw_index(big_map_add_item_, 4);
+		rs->canvas_item_set_draw_index(big_map_add_item_, 6);
+	}
+	if (!big_map_water_item_.is_valid()) {
+		big_map_water_item_ = rs->canvas_item_create();
+		rs->canvas_item_set_parent(big_map_water_item_, get_canvas_item());
+		rs->canvas_item_set_material(big_map_water_item_,
+				minimap_water_material_->get_rid());
+		rs->canvas_item_set_draw_index(big_map_water_item_, 7);
+		rs->canvas_item_set_default_texture_filter(big_map_water_item_,
+				RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_LINEAR);
+		rs->canvas_item_set_default_texture_repeat(big_map_water_item_,
+				RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
+		big_map_water_sampling_configured_ = true;
 	}
 	if (!big_map_top_item_.is_valid()) {
 		big_map_top_item_ = rs->canvas_item_create();
 		rs->canvas_item_set_parent(big_map_top_item_, get_canvas_item());
-		rs->canvas_item_set_draw_index(big_map_top_item_, 5);
+		rs->canvas_item_set_draw_index(big_map_top_item_, 8);
+		rs->canvas_item_set_default_texture_filter(big_map_top_item_,
+				RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_LINEAR_WITH_MIPMAPS);
+		rs->canvas_item_set_default_texture_repeat(big_map_top_item_,
+				RenderingServer::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
+		big_map_top_sampling_configured_ = true;
 	}
 }
 
@@ -987,6 +1124,9 @@ void HudOverlay::_draw() {
 	if (map_add_item_.is_valid()) {
 		rs->canvas_item_clear(map_add_item_);
 	}
+	if (map_water_item_.is_valid()) {
+		rs->canvas_item_clear(map_water_item_);
+	}
 	if (map_top_item_.is_valid()) {
 		rs->canvas_item_clear(map_top_item_);
 	}
@@ -995,6 +1135,9 @@ void HudOverlay::_draw() {
 	}
 	if (big_map_add_item_.is_valid()) {
 		rs->canvas_item_clear(big_map_add_item_);
+	}
+	if (big_map_water_item_.is_valid()) {
+		rs->canvas_item_clear(big_map_water_item_);
 	}
 	if (big_map_top_item_.is_valid()) {
 		rs->canvas_item_clear(big_map_top_item_);
@@ -1117,11 +1260,12 @@ void HudOverlay::render_map_(const opennova::hud::HudMapPass &p_map,
 		const std::vector<opennova::hud::GameFontQuad> &p_map_glyphs,
 		bool p_big) {
 	if (!p_map.visible) return;
-	RID base_item, add_item, top_item;
+	RID base_item, add_item, water_item, top_item;
 	if (p_big) {
 		ensure_big_map_items_();
 		base_item = big_map_base_item_;
 		add_item = big_map_add_item_;
+		water_item = big_map_water_item_;
 		top_item = big_map_top_item_;
 	} else {
 		ensure_map_items_();
@@ -1129,6 +1273,7 @@ void HudOverlay::render_map_(const opennova::hud::HudMapPass &p_map,
 		// (retail pushes the map before the tag/message passes).
 		base_item = map_base_item_;
 		add_item = map_add_item_;
+		water_item = map_water_item_;
 		top_item = map_top_item_;
 	}
 	RenderingServer *rs = RenderingServer::get_singleton();
@@ -1204,13 +1349,13 @@ void HudOverlay::render_map_(const opennova::hud::HudMapPass &p_map,
 
 	// Retail's alpha-tested depthspin draw is opaque and follows the completed
 	// terrain output. Canvas splits that output across base/additive items, so
-	// the equivalent cutout must ride the top item after both; putting it in
-	// either terrain item lets the later leg add terrain back over the water.
+	// the sampled height cutoff rides its own shader item after both; putting
+	// it in either terrain item lets the later leg add terrain back over water.
 	const Ref<Texture2D> water_texture =
 			textures_[opennova::hud::kHudTexMapWater];
 	for (const opennova::hud::HudMapTri &tri : p_map.terrain_water)
 		push_map_tri(tri);
-	flush_tris(top_item, water_texture);
+	flush_tris(water_item, water_texture);
 
 	// Footprint fills draw in the MARKER-WALK slot: retail's building fills
 	// blend their ctx alpha over the terrain AFTER the decal's x4 output

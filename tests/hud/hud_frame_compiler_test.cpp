@@ -614,6 +614,15 @@ void test_spinmap_mesh_layers_and_waypoint(const fnt_font_t *font) {
 			if (sprite.texture == 0 &&
 					std::fabs(sprite.rotation_rad) < 1e-4f) {
 				found_upright = true;
+				const float strip_w = 64.0f;
+				const float strip_h = 1920.0f;
+				CHECK(std::fabs(sprite.u0 - 0.5f / strip_w) < 1e-6f &&
+						std::fabs(sprite.u1 - 64.5f / strip_w) < 1e-6f &&
+						std::fabs(sprite.v0 - (13.0f * 64.0f + 0.5f) /
+								strip_h) < 1e-6f &&
+						std::fabs(sprite.v1 - (14.0f * 64.0f + 0.5f) /
+								strip_h) < 1e-6f,
+						"armory cell 13 uses retail's half-texel strip UVs");
 			}
 		}
 		CHECK(found_upright, "an upright-policy marker holds angle zero");

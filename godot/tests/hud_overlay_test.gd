@@ -174,7 +174,9 @@ func test_spinmap_compiles_terrain_retained_markers_and_waypoint() -> void:
 		"HUDSPINMAPX2 1020",
 		"HUDSPINMAPY1 552",
 		"HUDSPINMAPY2 762",
-	]), PackedStringArray(["TSDicon.tga", "compring.tga", "dmgslice.tga"]))
+	]), PackedStringArray(["TSDicon.tga", "compring.tga", "dmgslice.tga"]), {
+		"TSDicon.tga": Vector2i(64, 1920),
+	})
 	var hud := _make_overlay()
 	hud.configure(fixture["layout"], fixture["root"])
 
@@ -219,6 +221,19 @@ func test_spinmap_compiles_terrain_retained_markers_and_waypoint() -> void:
 			"The distance + grid labels compile by default (BSS-zero suppressors).")
 	await get_tree().process_frame
 	assert_true(is_instance_valid(hud), "The complete minimap pass renders safely.")
+	stats = hud.get_draw_list_stats()
+	assert_eq(int(stats["map_texture_filter"]), 4,
+			"The spinmap icon strip uses explicit linear mip filtering.")
+	assert_eq(int(stats["map_texture_repeat"]), 1,
+			"The spinmap icon strip clamps past its half texel.")
+	assert_true(bool(stats["map_icon_mipmaps"]),
+			"The 64px TSDicon cells retain retail's box-filtered mip chain.")
+	assert_eq(int(stats["map_icon_width"]), 64)
+	assert_eq(int(stats["map_icon_height"]), 1920)
+	assert_eq(int(stats["map_water_texture_filter"]), 2,
+			"The spinmap thresholds the linearly sampled depthspin field.")
+	assert_eq(int(stats["map_water_texture_repeat"]), 1,
+			"The spinmap water field clamps at its authored edge.")
 
 	# Unknown versions are rejected as a whole instead of partially walking a
 	# stale or shorter row layout. The waypoint tip and compass sprites remain.
@@ -250,6 +265,21 @@ func test_spinmap_compiles_terrain_retained_markers_and_waypoint() -> void:
 	assert_eq(int(stats["map_sprites"]), 2,
 			"The footprint marker draws no icon sprite.")
 	await get_tree().process_frame
+
+	# The M-cycle pass owns a separate canvas sandwich and carries the same
+	# sampler contract as the corner spinmap.
+	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 3, false,
+			PackedInt32Array([3, 16, 0]))
+	await get_tree().process_frame
+	stats = hud.get_draw_list_stats()
+	assert_eq(int(stats["big_map_texture_filter"]), 4,
+			"The enlarged map icon strip uses explicit linear mip filtering.")
+	assert_eq(int(stats["big_map_texture_repeat"]), 1,
+			"The enlarged map icon strip clamps at cell boundaries.")
+	assert_eq(int(stats["big_map_water_texture_filter"]), 2,
+			"The enlarged map thresholds the linearly sampled depthspin field.")
+	assert_eq(int(stats["big_map_water_texture_repeat"]), 1,
+			"The enlarged map water field clamps at its authored edge.")
 
 
 func test_hud_color_index_round_trips_and_clamps() -> void:

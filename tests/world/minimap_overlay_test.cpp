@@ -283,6 +283,40 @@ int main() {
 				"independent three-edge sections do not combine into an outline");
 	}
 
+	// Retail gives its wireframe the UNFOLDED map-heading/entity-heading delta.
+	// OpenNova's map projection applies a separate -90-degree fold, so footprint
+	// world placement compensates by subtracting that quarter turn. Together
+	// with the projection's mission-Y reflection this is retail's screen matrix.
+	// [orig: map heading @0x5a636e; relative angle @0x5be55b;
+	//  wireframe @0x596844..0x596bbb]
+	{
+		const int32_t k = 0x10000;
+		world::MinimapFootprintMesh mesh;
+		mesh.fill_xy_q16 = {k, 2 * k, 3 * k, 5 * k, -2 * k, 7 * k};
+		mesh.edge_xy_q16 = {k, 2 * k, 3 * k, 5 * k};
+		world::Entity placed = base_entity();
+		placed.position = {10.0f, 20.0f, 0.0f};
+
+		std::vector<int32_t> fill;
+		std::vector<int32_t> edges;
+		placed.yaw = 90.0f; // entity heading 0, placement heading -90
+		world::minimap_footprint_place(mesh, placed, fill, edges);
+		CHECK(fill == std::vector<int32_t>({12 * k, 19 * k,
+				15 * k, 17 * k, 17 * k, 22 * k}),
+				"yaw 90 footprint compensates for the map quarter-turn");
+		CHECK(edges == std::vector<int32_t>({12 * k, 19 * k,
+				15 * k, 17 * k}),
+				"footprint edges use the same entity placement as fills");
+
+		fill.clear();
+		edges.clear();
+		placed.yaw = 0.0f; // entity heading 90, placement heading 0
+		world::minimap_footprint_place(mesh, placed, fill, edges);
+		CHECK(fill == std::vector<int32_t>({11 * k, 22 * k,
+				13 * k, 25 * k, 8 * k, 27 * k}),
+				"yaw 0 footprint uses the compensated entity basis");
+	}
+
 	if (failures != 0) return 1;
 	std::printf("minimap_overlay_test OK\n");
 	return 0;

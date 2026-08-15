@@ -46,11 +46,17 @@ func test_minimap_water_mask_reproduces_retail_depthspin_reduction() -> void:
 		return
 	var image := mask.get_image()
 	assert_eq(mask.get_size(), Vector2(256, 256))
+	assert_eq(image.get_format(), Image.FORMAT_RG8,
+			"The shoreline keeps sampled height and water operands in a linear data texture.")
 	assert_false(image.has_mipmaps(),
 			"The magnified depthspin mask must stay on its authored mip level.")
-	assert_eq(image.get_pixelv(wet_at), Color8(255, 255, 255, 255),
-			"A height equal to the integer water plane passes retail's alpha test.")
-	assert_eq(image.get_pixelv(dry_at), Color8(255, 255, 255, 0),
-			"Terrain above the integer water plane remains transparent.")
+	var wet_sample := image.get_pixelv(wet_at)
+	var dry_sample := image.get_pixelv(dry_at)
+	assert_eq(int(round(wet_sample.r * 255.0)), wet_height,
+			"Depthspin R retains the reduced integer terrain height.")
+	assert_eq(int(round(wet_sample.g * 255.0)), wet_height,
+			"Depthspin G carries the integer water plane for the sampled cutoff.")
+	assert_gt(dry_sample.r, dry_sample.g,
+			"Terrain above the water plane remains available for post-sample rejection.")
 	assert_null(data.build_minimap_water_mask(0.0),
 			"Env_WaterHeightFixed zero suppresses the shore pass.")

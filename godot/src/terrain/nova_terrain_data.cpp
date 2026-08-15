@@ -1537,7 +1537,7 @@ Ref<ImageTexture> TerrainData::build_minimap_water_mask(
 	}
 
 	PackedByteArray bytes;
-	bytes.resize(static_cast<int64_t>(kMaskPx) * kMaskPx * 4);
+	bytes.resize(static_cast<int64_t>(kMaskPx) * kMaskPx * 2);
 	bytes.fill(0);
 	uint8_t *dst = bytes.ptrw();
 	const uint16_t *height = cpt.depth_buffer.data();
@@ -1546,13 +1546,7 @@ Ref<ImageTexture> TerrainData::build_minimap_water_mask(
 		for (int x = 0; x < kMaskPx; ++x) {
 			const int source_x = x * kStep;
 			uint8_t *pixel = dst +
-					(static_cast<int64_t>(z) * kMaskPx + x) * 4;
-			// depthspin is white at every texel; alpha alone carries height.
-			// Keeping transparent texels white also preserves straight-alpha
-			// filtering at the shore instead of darkening RGB and alpha together.
-			pixel[0] = 255;
-			pixel[1] = 255;
-			pixel[2] = 255;
+					(static_cast<int64_t>(z) * kMaskPx + x) * 2;
 			const uint32_t sum =
 					height[source_z * kSourcePx + source_x] +
 					height[source_z * kSourcePx + source_x + kHalfStep] +
@@ -1560,18 +1554,20 @@ Ref<ImageTexture> TerrainData::build_minimap_water_mask(
 					height[(source_z + kHalfStep) * kSourcePx +
 							source_x + kHalfStep];
 			const int terrain_height_int = static_cast<int>(sum >> 10);
-			// Stage 0 ADDSIGNED(COMPLEMENT texture.a, diffuse.a), then
-			// stage 1 ADD(TFACTOR.a=64, current) with alpha-ref 192 reduces
-			// exactly to terrain_height_int <= water_int.
-			// Retail descriptor @0x60BB5C and alpha ref @0x607834; see hud-re.md.
-			if (terrain_height_int > water_int) {
-				continue;
-			}
-			pixel[3] = 255;
+			// Keep both operands until raster time: retail linearly samples the
+			// height-alpha field and only THEN alpha-tests it against the water
+			// plane. Thresholding these texels to a binary mask first changes the
+			// contour and produces a broad filtered halo. RG8 is a linear data
+			// texture; the map-water shader compares sampled R (terrain) to the
+			// constant sampled G (water).
+			// [orig: depthspin alpha build @0x60BA30..0x60BB05;
+			//  sampled alpha-test pass @0x6077A2..0x60787B]
+			pixel[0] = static_cast<uint8_t>(terrain_height_int);
+			pixel[1] = static_cast<uint8_t>(water_int);
 		}
 	}
 	const Ref<Image> mask = Image::create_from_data(kMaskPx, kMaskPx, false,
-			Image::FORMAT_RGBA8, bytes);
+			Image::FORMAT_RG8, bytes);
 	return mask.is_valid() ? ImageTexture::create_from_image(mask)
 			: Ref<ImageTexture>();
 }
