@@ -55,6 +55,7 @@ inline const MsgCatalogEntry *ingame_message_catalog(size_t *count) {
 		{'S', s2c::WORLD_STATE_LOAD,          "world-state-load",        MsgCoverage::Decoded,     "§5.29 decode_world_state_load"},
 		{'S', s2c::STATIC_ENTITY_BATCH,       "static-entity-batch",     MsgCoverage::Decoded,     "§5.9 decode_static_entity_batch"},
 		{'S', s2c::DISCONNECT_UNLOCK,         "disconnect-unlock",       MsgCoverage::PrinterOnly, "len 0; dword_A82358=1 (WaitForDisconnect) @0x4226E0"},
+		{'S', s2c::ENTITY_REMOVE,              "entity-expiry",           MsgCoverage::Decoded,     "decode_entity_remove: [u16 handle], sent before Server_RemoveEntityAndNotify destroys the row @0x50A270"},
 		{'S', s2c::ENTITY_DEATH,              "entity-death",            MsgCoverage::Decoded,     "§5.35 decode_entity_death"},
 		{'S', s2c::CHAT_BROADCAST,            "chat-broadcast",          MsgCoverage::Decoded,     "§5.52 decode_chat_broadcast (fan-out of C2S 0x0D)"},
 		{'S', s2c::PLAYER_LIST,               "player-list",             MsgCoverage::Decoded,     "§5.20 decode_player_list"},

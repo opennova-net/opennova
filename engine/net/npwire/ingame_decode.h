@@ -1623,6 +1623,15 @@ bool decode_chat_history_entry(const uint8_t *body, size_t len,
 // (selected by the owner's team @ +354 vs the local player); `itemId` is the
 // fallback. The handler reads 15 u16s (30 B); the 2 trailing bytes are unread.
 // [orig: NapiNPClientMsg_0x059 @ 0x4228E0 → Entity_SpawnOrUpdateFromSlotPacket @ 0x546770]
+// S2C 0x12 — destroy one entity by packed pool/slot handle. The host emits the
+// record before releasing the authoritative row; the client clears the entity
+// tree rooted at that handle. [orig: Server_RemoveEntityAndNotify @0x50A270]
+struct EntityRemove {
+	uint16_t entity_handle = 0xFFFF;
+};
+bool decode_entity_remove(const uint8_t *body, size_t len,
+	                      EntityRemove &out, size_t &consumed);
+
 struct DeployedItemSpawn {
 	uint16_t item_id = 0;          // packet[0] — fallback / base item id
 	uint16_t owner_handle = 0;     // packet[1] — the placing entity
@@ -1631,7 +1640,11 @@ struct DeployedItemSpawn {
 	uint16_t slot_handle = 0;      // packet[4] — the spawned entity (pool<<12)|slot
 	uint16_t parent_handle = 0xFFFF; // packet[5] — attach parent (0xFFFF = none)
 	int32_t  pos_x = 0, pos_y = 0, pos_z = 0;       // i32 16.16 world position
-	uint16_t angle_x = 0, angle_y = 0, angle_z = 0; // Euler; the engine shifts << 16
+	// packet[12..14]: the high halves of entity+16/+20/+24 = the eulerZ/eulerX/
+	// eulerY triple (yaw heading, pitch, roll); the handler stores each << 16
+	// [orig: @ 0x5468cb..0x5468df; emitters Entity_UpdateSatchelPhysics
+	//  @ 0x448aeb..0x448b09 / Entity_UpdateClaymorePhysics @ 0x447a6c..0x447a8a]
+	uint16_t angle_x = 0, angle_y = 0, angle_z = 0;
 	uint16_t reserved = 0;         // 2 trailing bytes (not read by the handler)
 };
 bool decode_deployed_item_spawn(const uint8_t *body, size_t len,

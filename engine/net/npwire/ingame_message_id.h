@@ -34,6 +34,7 @@ inline constexpr uint8_t POOL_SPAWN = 0x0D;                 // §5.11 pool-1 ent
 inline constexpr uint8_t WORLD_STATE_LOAD = 0x0F;           // §5.29 world-state load
 inline constexpr uint8_t STATIC_ENTITY_BATCH = 0x10;        // §5.9 pool-2 static entity batch
 inline constexpr uint8_t DISCONNECT_UNLOCK = 0x11;          // len 0; WaitForDisconnect unlock
+inline constexpr uint8_t ENTITY_REMOVE = 0x12;              // entity expiry/removal
 inline constexpr uint8_t ENTITY_DEATH = 0x13;               // §5.35 entity death
 inline constexpr uint8_t CHAT_BROADCAST = 0x14;             // §5.52 fan-out of c2s::CHAT_MESSAGE
 inline constexpr uint8_t PLAYER_LIST = 0x16;                // §5.20 player list

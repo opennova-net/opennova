@@ -2105,6 +2105,12 @@ add_executable(npruntime_reload_relay_test npruntime/reload_relay_test.cpp)
 target_link_libraries(npruntime_reload_relay_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_reload_relay COMMAND npruntime_reload_relay_test)
 
+# D-THROW-7: placed-device conversion/removal broadcasts exact typed S2C
+# 0x59/0x12 records to every in-match remote and skips the host loopback.
+add_executable(npruntime_placed_device_relay_test npruntime/placed_device_relay_test.cpp)
+target_link_libraries(npruntime_placed_device_relay_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_placed_device_relay COMMAND npruntime_placed_device_relay_test)
+
 # D-NET-152: the C2S 0x06 client-fired-round pipeline — anti-spoof, clip authority (+ the 0x25
 # refill), and the g_round_ring append behind the §5.9.1 tag-2 echo
 # [orig: @0x513310 -> Server_ClientFiredRound @0x50baa0 -> RoundData_AddRound @0x4fdb40].

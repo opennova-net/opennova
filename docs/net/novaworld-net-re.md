@@ -313,7 +313,7 @@ sweep; blank = not yet characterized.
 | 0x0F | 0x42E200 | `_0x00F` | **WORLD-STATE-LOAD** (no descriptive Kong name; any "game-start" label is misleading): i32 sessionTick + 3×i32 spawn pos, 3×i16 angles, u8 flags, **fixed 128-i32 score block**, then waypoint records (off-wire gametype gate) + team names; sets `dword_81474C=0` (load-bearing input/heartbeat gate); client replies with the C2S burst 0x22 0x23 0x28 0x29 0x2D 0x32; ~624 B. Full field map **§5.29** (decoded) |
 | 0x10 | 0x433400 | `_0x010` | static entity batch (pool 2): u16 start_idx, u16 count, flag-driven per-entity records; 612-644 B in retail, every frame; **full field map §5.9** |
 | 0x11 | 0x4226E0 | `_0x011` | one-line stub: `dword_A82358=1` (unblocks WaitForDisconnect); retail only ever ships it bundled last with 0x0B (§5.5) |
-| 0x12 | 0x425EE0 | `_0x012` | |
+| 0x12 | 0x425EE0 | `_0x012` | **entity removal (decoded + PORTED 2026-08-15, `decode_entity_remove`)** — body `[u16 handle]` (a short body reads 0); gated `!is_authority`; `0xFFFF` ignored, pool must be `< 5` and slot `< capacity`, then `Entity_Destroy @0x43e810` (KOTH/flag types first re-pick the waypoint when the removed base point was `g_currentWaypoint`). Sender `Server_RemoveEntityAndNotify @0x50A270`: writes the handle, `send_mask 0x90` (alive + not-host), msgClass 1, then removes a PLAYER's placed devices (`Entity_RemovePlacedDevicesByOwner @0x546e00`, itself recursing here) and destroys the row; also reached from the per-owner same-type device cap `Server_EnforcePlacedDeviceCapByOwner @0x5119E0` (surplus → oldest armed, D-THROW-10), player disconnect/death sweeps, and pool-1 slot expiry `Entity_UpdatePool1Slot @0x4b8dd0` (§5.36) |
 | 0x13 | 0x42EB50 | `_EntityDeath` | entity death (2nd path, beside 0x26) `[u16 handle][i16 killerSource]`, gated `!is_authority`: handle gates (≠0xFFFF, pool<5, slot < that pool's capacity) → Health=0 @0x42ebd6, deathAnimStateId=killerSource @0x42ebdf, **deathCallback(entity, 4, 0)** @0x42ebf5 — for a destructible that cb IS the local husk/explosion chain (@0x440210); local-player leg = camera lerp + scope drop. Sender: `Entity_CheckAndProcessDeath @0x51b550` (msg 19, mask 0x90) for every non-player death. Ported: JoinerConnection surfaces it, `ClientReplicaPipeline::apply_entity_death` folds it, the sim runs `destruction_notify_item_damage(…, 4)` on the world twin (D-NET-208) (§5.35) |
 | 0x14 | 0x42F240 | `_ChatMessage` | CHAT broadcast [u8 senderSlot][u8 channel][cstr formatted] → Chat_DispatchToChannel; the fan-out of C2S 0x0D. Field map §5.52 (decoded) |
 | 0x16 | 0x42FAE0 | `_0x016` | PLAYER-LIST — full layout verified §5.20 (controlled capture 2026-06-17) |
@@ -3960,20 +3960,44 @@ bytes are unread.
 | 8 | slotHandle | u16 | the spawned entity `(pool<<12)|slot` |
 | 10 | parentHandle | u16 | attach parent (`0xFFFF` = none) |
 | 12 | posX/Y/Z | 3×i32 | world position (16.16) |
-| 24 | angX/Y/Z | 3×u16 | Euler; engine shifts `<< 16` |
+| 24 | angX/Y/Z | 3×u16 | the high halves of entity+16/+20/+24 = the eulerZ/eulerX/eulerY triple (**yaw heading, pitch, roll** — the same order every spawn record carries); the handler stores each `<< 16` back into +16/+20/+24 [orig: @0x5468cb..0x5468df; emitters read `[esi+12h]/[esi+16h]/[esi+1Ah]` into words 12/13/14 @0x448aeb..0x448b09 / @0x447a6c..0x447a8a] |
 | 30 | reserved | u16 | not read by the handler |
 
 The friend/foe item pair lets one deployable look different to each side, selected by the owner's team @
 `+354` vs the local player (`enemyItemId` also chosen under the `dword_24D1E34 & 0x8000` no-friendly-fire
 flag). [orig: `NapiNPClientMsg_0x059 @ 0x4228E0` → `Entity_SpawnOrUpdateFromSlotPacket @ 0x546770`].
+**The 512-slot search is the client's ROUND pool** (`unk_B7E1A8`, 780-B slots — the same table
+`CEntityManager_AllocateSlot` / `Weapon_UpdateAllProjectiles` walk): a live round whose item type
+(+28, the viewer-selected TrcrID) equals `friendlyItemId` (any owner), or equals `enemyItemId`
+with the packet's owner at +368, is the client's own tag-2 visual throwable; when it carries a
+def (+32) it is COPIED into the pool-1 entity at `slotHandle` (the client-side twin of
+`Entity_ConvertRoundToPlacedEntity @0x5455B0`), its noage flag (+276 & 0x4000) cleared and its
+lifetime (+684) set to 1 so the source round expires next tick, then the new entity is re-posed
+from the packet. No such round → the entity is memset,
+typed by the friend/foe pick, `Entity_InitFromItemDef` + `Entity_InitFromModel`, parented and
+posed. **Host emitters (2026-08-15):** the two device motors send it ONCE when the round comes to
+rest on the authority — `Entity_UpdateSatchelPhysics @0x448bd5` and `Entity_UpdateClaymorePhysics
+@0x447b56` (`Entity_CloneFromTemplateByType` → `Entity_ConvertRoundToPlacedEntity`, then
+`[clone ItemTypeIndex][clone occupant handle][def+16 friendly][def+20 enemy][clone handle]
+[clone groundEntity handle | 0xFFFF][round pos +4/+8/+12][+16/+20/+24 high halves][junk]`,
+`send_mask 0x90`, msgClass 1), followed by the per-owner same-type cap
+`Server_EnforcePlacedDeviceCapByOwner @0x5119E0` (ex `sub_5119E0`; owner, pool 1, `itemDef->id`,
+max 3 satchel / 4 claymore — a surplus removes the oldest ARMED device, most negative +684, via
+S2C 0x12; unported, ledger D-THROW-10). No other 0x59 sender exists.
 **Witness:** probe3_again ×12 — a `Rifle-sized Crate` (`itemId=0x0362`) dropped by player slot 5 at world
 `(53.5, -27.9, 11.6)`, `parent=none`; byte-exact full-consume via `decode_deployed_item_spawn`.
-That is **codec coverage, not production client consumption**: the reimpl
-`ClientReplicaPipeline` does not fold decoded 0x59 rows into live placed entities,
-and the throwable host path emits neither 0x59 spawn nor 0x12 removal. Together
-with that missing placed-device path, remote clients do not receive the
-persisted-device replacement. The tag-2 round-event → visual-only client
-`RoundSim` fold now presents the flying throwable itself (D-THROW-7).
+Production consumption and authority relay are live as of 2026-08-15 (D-THROW-7
+closed). Throwable conversion/removal events encode exact 0x59/0x12 records and fan
+reliably to every in-match remote while skipping host loopback. The joiner validates and
+surfaces both records; `ClientReplicaPipeline` selects the base/friendly/enemy item from
+owner/local teams plus mission MP attribute `0x8000`, maps the structural parent, preserves
+same-item updates as one lifetime, and advances the materializer stream revision. The
+materializer uses the exact pool-1 wire handle, updates pose in place, and retires it on
+0x12. The 0x64 mission block retains `mp_attributes` at offset 44 for that selection.
+`nw_ingame_encode`, `netsim_client_world_materializer`,
+`npruntime_entity_lifecycle_net`, `npruntime_client_runtime`,
+`npruntime_placed_device_relay`, and `throwables` pin the path end to end; tag-2
+`RoundSim` remains the preceding flying-throwable presentation.
 
 **S2C `0x44` — entity-routed sub-packet.** A 5-B sub-header `[u16 field0][i16 netId][u8 subtype]` then a
 class-dependent body the dispatcher routes to the target entity's per-class serialize callback (`entity
@@ -7229,8 +7253,10 @@ authority/SP walk keeps registry (= retail pool) order byte for byte. Per-weapon
 still not retained in the client state — shooter TEAM is (`ClientEntityState::team`, retained and
 consumed 2026-07-25) — and clean 0x46/0x5D disconnect retirement of the proxy set landed with
 D-NET-176 (FIXED 2026-07-25; §5.16).
-Deployed throwables still lack the 0x59/0x12
-runtime path (D-WPN-8/D-THROW-7; §5.36). Three ledger rows record the audit:
+Deployed throwables now complete the 0x59/0x12 runtime path (D-THROW-7 fixed;
+§5.36): reliable authority fanout feeds the joiner replica fold, exact-handle pool-1
+materialization, in-place updates, structural parenting, and retirement. Three ledger
+rows record the impact audit:
 **D-WPN-14 is resolved as a false reading** (ballistic arrival timing already matches),
 **D-WPN-15** (FIXED 2026-08-11) — the selection legs are live:
 terrain samples the charmap (`Terrain_GetSurfaceTypeAtPosition @0x606510` result + 4 at the
@@ -7238,9 +7264,12 @@ impact point, for the ballistic terrain leg and the grenade bounce/full-stop mat
 @0x4447c3); person hits take tag 2; CFAC static/dynamic hits carry `poly_type + 4` with the
 building material-1→23 remap; water-plane hits take tag 11. The placed-tile `.TSD`
 override remap closed with D-SND-15 (2026-08-12, lwf-dbf-sound-re.md); and
-**D-WPN-16** tracks the genuinely unported Knife/instant-kill-zone family. Pinned by
-`nova_simulation_test.gd` (the local FIRE→impact route) and `npruntime_round_sim`
-(the bake rules + the tag-2 impact row).
+**D-WPN-16 is fixed (2026-08-15)** — every `instantkillzone` round takes the
+immediate authority explosion path, while Knife additionally traces an effects-only ray
+to `kz_maxradius`. That ray arbitrates terrain, water, static/dynamic CFAC, and the
+retail default person-CFAC leg without the bullet sphere fallback; it selects the hit
+material row but applies no direct ray damage. `projectile_combat_test` pins the person
+face hit, staged material effect, authority kill-zone queue, and bounded miss.
 
 **v29 LIVE (2026-07-03, two retail clients + the host player,
 `.scratch/retail_join_v29_game.pcapng`):** the pipeline worked end-to-end — 35 C 0x06
@@ -7891,13 +7920,18 @@ reload/one-shot forced unscope + the pump's rescope. Live-verified (fp_clean_pro
 recoil clip), reload refill 24→30 with reserve 300→294 (the §5.58 refund math),
 mid-reload RMB refused, ADS engage fraction→1 with cam fov 80h→40h, disengage clean.
 
-**Divergences** (ledger D-WPN-1..15 plus the D-WPN-26 runtime-builder addendum): the FUNCTION registry unported (std-only in all
+D-WPN-26 is closed (2026-08-15): the production table builder now resolves each
+weapon's ADM through the mounted `ResourceIndex`, gives `weapon_fsm_bake`
+definition-local consuming clip rings, and converts authored automatic start/end fields
+to the retail 62.5 Hz clip duration. `npruntime_weapon_table_test` pins the committed
+`soldier` `anim_idle` clip at 18 ticks plus the intentional assetless zero fallback.
+
+**Divergences** (ledger D-WPN-1..15): the FUNCTION registry unported (std-only in all
 shipped data, D-WPN-1); single-pool ammo vs per-class pools (D-WPN-2); CanFire's
 busy-child/underwater/score-lock legs + kick sound gate (D-WPN-3); the heat model
 (`WeaponSlot_CalcAccumulatedHeat @ 0x53f780` internals unwitnessed, D-WPN-4); the
 weapon-switch machinery seams (D-WPN-5); local-player + occupied mounted-parent pump,
-with general non-local/unmounted coverage still open (D-WPN-6); production runtime
-action-table bake lacks the ADM-duration source for authored `auto` delays (D-WPN-26); interim
+with general non-local/unmounted coverage still open (D-WPN-6); interim
 ammo seed clipsize/startrounds (D-WPN-7); FSM↔net integration now carries joiner C2S 0x06
 fire, the payload-addressed C2S 0x25 → S2C 0x49 reload round-trip, and decoded S2C tag-2
 events into a visual-only client `RoundSim`; authority/SP fire continues to append the primary

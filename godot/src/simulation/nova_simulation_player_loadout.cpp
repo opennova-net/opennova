@@ -618,7 +618,8 @@ Error Simulation::load_weapon_table(const Ref<ResourceRoot> &p_resource_root,
 	DefWeaponsFile file = {};
 	if (def_parse_weapons_memory(bytes.ptr(), static_cast<size_t>(bytes.size()), &file) != 0)
 		return ERR_CANT_OPEN;
-	world_->weapons = opennova::np::build_weapon_table(file);
+	world_->weapons = opennova::np::build_weapon_table(
+			file, &p_resource_root->native_index());
 	// Retain the parse (S6b): the by-name FSM install reads its full rows —
 	// the ACCEPT chain rebuilds the slot table with no shell dictionary and no
 	// render dependency [orig: WeaponSlotTable_LoadAllFromDefs @ 0x5414e0].

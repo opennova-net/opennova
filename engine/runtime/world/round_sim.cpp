@@ -439,6 +439,22 @@ Vec3 flight_direction(const Vec3 &vel) {
     return Vec3{vel.x / len, vel.y / len, vel.z / len};
 }
 
+// The fire descriptor's engine-frame BAM pair projected into mission axes.
+// Knife consumes this before the ballistic spread/recoil branch, while an
+// ordinary round uses the same mapping after its final angle is selected.
+// [orig: RoundData_SpawnRound @0x4ec5e9;
+// Weapon_RaycastAndSpawnImpact @0x4e8460]
+Vec3 fire_direction(int32_t yaw_bam, int32_t pitch_bam) {
+    const double bearing = double(yaw_bam) * kRadPerBam;
+    const double pitch = double(pitch_bam) * kRadPerBam;
+    const double cp = std::cos(pitch);
+    return Vec3{
+        static_cast<float>(std::cos(bearing) * cp),
+        static_cast<float>(std::sin(bearing) * cp),
+        static_cast<float>(std::sin(pitch)),
+    };
+}
+
 RoundSourceState resolve_round_source(World &world,
                                       const RoundSpawnParams &params) {
     if (params.source_state != nullptr) return *params.source_state;
@@ -552,9 +568,8 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params,
     // 0x4ec2a5]: instantkillzone -> Detonatesatchels -> designator -> claymore
     // fan -> shotgun -> the ballistic default.
     if ((ammo->flags & kAmmoFlagInstantKillZone) != 0) {
-        // instantkillzone: the kill zone queues at the spawn point, no round
-        // flies [orig: @ 0x4ec1f3 -> WeaponEffect_PushExplosionQueueEntry; the
-        // kztype==1 knife raycast leaf stays with the FSM knife path].
+        // instantkillzone: the kill zone queues at the spawn point and no round
+        // flies [orig: @0x4ec1f3 -> WeaponEffect_PushExplosionQueueEntry].
         ExplosionEntry explosion;
         explosion.pos = params.origin;
         explosion.dir_bam = params.dir_yaw_bam;
@@ -563,7 +578,71 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params,
         explosion.owner = params.owner;
         explosion.hit_word = params.shot_seq;
         if (authoritative) world.explosions.queue_explosion(world, explosion);
-        if (impacts.size() < kMaxPendingImpacts) {
+
+        if (ammo->kztype == ammo_kz::kKnife) {
+            // Knife alone adds the bounded, effects-only ray. It is not a
+            // damage path: authority remains in the queued kill zone above.
+            // Every entity table uses CFAC, including persons; ordinary bullet
+            // bone spheres are intentionally excluded.
+            // [orig: Weapon_RaycastAndSpawnImpact @0x4e8460]
+            if (world.collision != nullptr && ammo->kz_maxradius > 0.0f &&
+                impacts.size() < kMaxPendingImpacts) {
+                const Vec3 direction = fire_direction(
+                    params.dir_yaw_bam, params.dir_pitch_bam);
+                ProjectileTrace trace;
+                trace.start = FixedVec3{to_fixed(params.origin.x),
+                                        to_fixed(params.origin.y),
+                                        to_fixed(params.origin.z)};
+                trace.end = FixedVec3{
+                    trace.start.x + to_fixed(direction.x * ammo->kz_maxradius),
+                    trace.start.y + to_fixed(direction.y * ammo->kz_maxradius),
+                    trace.start.z + to_fixed(direction.z * ammo->kz_maxradius),
+                };
+                trace.owner = params.owner;
+                trace.ammo_flags = ammo->flags;
+                trace.include_wire_proxies =
+                    mode == RoundConsequenceMode::VisualOnly;
+                trace.shooter_wire_handle = params.shooter_handle;
+                trace.shooter_carrier_wire_handle =
+                    params.shooter_carrier_handle;
+                const ProjectileHit hit =
+                    world.collision->trace_knife_impact(world, trace);
+                if (hit.hit()) {
+                    RoundImpact imp;
+                    imp.position = vec_from_fixed(hit.position_q16);
+                    imp.direction = direction;
+                    imp.ammo_index = params.ammo_index;
+                    if (hit.hit_class == ProjectileHitClass::Terrain) {
+                        const int32_t surface = terrain::surface_type_at_fixed(
+                            world.surface_map, hit.position_q16.x,
+                            hit.position_q16.y);
+                        imp.effect_tag =
+                            (surface >= 0 && surface + 4 < kImpactEffectTagCount)
+                                ? surface + 4
+                                : 5;
+                    } else if (hit.hit_class == ProjectileHitClass::Water) {
+                        imp.effect_tag = 11;
+                    } else if (hit.hit_class == ProjectileHitClass::Person &&
+                               hit.surface_type == 1) {
+                        // The PERSON leg (hit type 3 = the default slot-type
+                        // walk of Projectile_RaycastProximitySlots) remaps CFAC
+                        // material 1 to the flesh row; buildings (hit type 1)
+                        // and items (hit type 2) are plain material + 4.
+                        // [orig: Weapon_RaycastAndSpawnImpact @0x4e8880..0x4e8888
+                        //  vs @0x4e8867]
+                        imp.effect_tag = 23;
+                    } else if (hit.surface_type >= 0 &&
+                               hit.surface_type + 4 < kImpactEffectTagCount) {
+                        imp.effect_tag = hit.surface_type + 4;
+                    } else {
+                        imp.effect_tag = 4;
+                    }
+                    imp.tick = world.logic_tick;
+                    imp.source_order = next_impact_order++;
+                    impacts.push_back(imp);
+                }
+            }
+        } else if (impacts.size() < kMaxPendingImpacts) {
             // the detonation's obj-row effect [orig: AmmoDef_ProcessImpactEffect
             // tag 4 at the descriptor position in every think handler]
             RoundImpact imp;

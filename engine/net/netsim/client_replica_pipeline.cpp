@@ -183,6 +183,12 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 	case s2c::MINIMAP_OVERLAY:
 		apply_minimap_overlay_batch(body);
 		break;
+	case s2c::DEPLOYED_ITEM: // live pool-1 placed-device spawn/update (§5.36)
+		apply_deployed_item(body);
+		break;
+	case s2c::ENTITY_REMOVE: // live packed-handle retirement (0x12)
+		apply_entity_remove(body);
+		break;
 	default:
 		// Game-start scalars / world-state-load and other non-entity tags.
 		++unknown_tags_;

@@ -743,17 +743,25 @@ bool run_retail_post_auth_prelude() {
 	// player list. The client carries the pending ACK into ONE grouped 0x09+0x22
 	// packet instead of manufacturing an intervening header-only sequence.
 	server_seq.last_inbound_seq = 9;
+	constexpr uint32_t kMissionMpAttributes = 0x80003A06u;
+	std::vector<uint8_t> mission_data_chunk =
+			retail_transfer_chunk(1, 180, 0x5A);
+	for (int shift = 0; shift < 32; shift += 8) {
+		mission_data_chunk[12 + 44 + static_cast<std::size_t>(shift / 8)] =
+				static_cast<uint8_t>(kMissionMpAttributes >> shift);
+	}
 	const std::vector<uint8_t> mission_data_datagram = frame_server_session(
 			server_seq, server_scrk, client_auth.ck,
 			{
 					make_protocol_message(0x75, {0x00, 0x02}),
 					make_protocol_message(
-							0x64, retail_transfer_chunk(1, 180, 0x5A)),
+							0x64, std::move(mission_data_chunk)),
 			});
 	const np::JoinerConnection::PollResult mission_data_result =
 			joiner.handle_datagram(
 					mission_data_datagram.data(), mission_data_datagram.size());
-	if (!expect(mission_data_result.outbound.empty(),
+	if (!expect(mission_data_result.outbound.empty() &&
+			joiner.mp_attributes() == kMissionMpAttributes,
 			"final mission-data chunk waits for the player-list boundary")) {
 		return false;
 	}

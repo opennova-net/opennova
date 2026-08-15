@@ -1,5 +1,6 @@
 #include "netsim/client_world_materializer.h"
 
+#include <npwire/ingame_message_id.h>
 #include <world/angle.h>
 #include <world/world.h>
 
@@ -71,6 +72,23 @@ world::Entity seed_from(const ClientEntityState &row) {
 	return seed;
 }
 
+bool update_deployed_item_pose(
+		const ClientEntityState &row, world::Entity &entity) {
+	const world::Entity seed = seed_from(row);
+	const bool changed = entity.position.x != seed.position.x ||
+			entity.position.y != seed.position.y ||
+			entity.position.z != seed.position.z || entity.yaw != seed.yaw ||
+			entity.pitch != seed.pitch || entity.roll != seed.roll ||
+			entity.team != seed.team;
+	if (!changed) return false;
+	entity.position = seed.position;
+	entity.yaw = seed.yaw;
+	entity.pitch = seed.pitch;
+	entity.roll = seed.roll;
+	entity.team = seed.team;
+	return true;
+}
+
 } // namespace
 
 world::Entity *ClientWorldMaterializer::owned(
@@ -128,8 +146,12 @@ ClientWorldSyncResult ClientWorldMaterializer::sync(
 					handle, tracked->second.registry_spawn_id};
 			world::Entity *owned_row = world.registry.get(lifetime);
 			if (owned_row != nullptr) {
-				if (tracked->second.spawn_revision == row->spawn_revision)
+				if (tracked->second.spawn_revision == row->spawn_revision) {
+					if (row->spawn_tag == s2c::DEPLOYED_ITEM &&
+							update_deployed_item_pose(*row, *owned_row))
+						result.updated.push_back(lifetime);
 					continue;
+				}
 				// Each accepted 0x0D/0x10/0x20 load record starts with a
 				// retail memset of the complete slot. A new wire generation is
 				// therefore a new native lifetime even when item_type is the same;

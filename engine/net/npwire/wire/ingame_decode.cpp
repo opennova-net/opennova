@@ -1440,6 +1440,16 @@ bool decode_chat_history_entry(const uint8_t *body, size_t len,
 // S2C 0x59 deployed-item / weapon-overlay spawn — fixed 32-B record (the handler
 // reads 15 u16s = 30 B; 2 trailing reserved). pos = 3×i32 16.16; angles 3×u16.
 // [orig: Entity_SpawnOrUpdateFromSlotPacket @ 0x546770]
+bool decode_entity_remove(const uint8_t *body, size_t len,
+	                      EntityRemove &out, size_t &consumed) {
+	consumed = 0;
+	Cursor c{body, body + len, true};
+	out.entity_handle = c.u16();
+	if (!c.ok) return false;
+	consumed = size_t(c.p - body);
+	return consumed == 2;
+}
+
 bool decode_deployed_item_spawn(const uint8_t *body, size_t len,
                                 DeployedItemSpawn &out, size_t &consumed) {
 	consumed = 0;

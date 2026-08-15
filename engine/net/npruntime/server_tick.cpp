@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <vector>
 
+#include <npwire/ingame_encode.h>
 #include <npwire/ingame_message_id.h>
 #include <npwire/protocol_message.h>
 #include <npwire/session_hello.h>
@@ -209,6 +210,59 @@ void emit_minimap_overlay_state(NapiNPServerCtx &ctx, world::World &world) {
 // Deferred (§5.60): 0x52 kill stats, 0x54 death/wounded markers, 0x32 name broadcast,
 // scoring. A dead HOST player (the loopback's own entity) is queued for the respawn
 // release; a joiner's respawn rides its own deploy request instead.
+// Route placed-device lifetimes created or retired by this authoritative tick.
+// Retail's filtered send excludes the host itself (mask 0x90): the listen
+// client's native World already owns the row, while every remote client needs
+// the 0x59 spawn/update and the preceding-to-destroy 0x12 removal record.
+// [orig: Entity_ConvertRoundToPlacedEntity @0x5455B0 -> S2C 0x59;
+// Server_RemoveEntityAndNotify @0x50A270 -> S2C 0x12]
+void route_throwable_events(NapiNPServerCtx &ctx, const world::World &world) {
+	if (!ctx.is_in_session) return;
+	auto fan_remote = [&](uint8_t tag, const std::vector<uint8_t> &body) {
+		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+			if (!is_in_match(conn) || conn.link.transport == nullptr ||
+					conn.link.mode == netsim::TransportMode::Loopback)
+				continue;
+			conn.link.transport->host_send(tag, body);
+		}
+	};
+
+	for (const world::ThrowableEvents::DeviceSpawn &event :
+			world.throwables.events.spawns) {
+		DeployedItemSpawn spawn;
+		spawn.item_id = static_cast<uint16_t>(event.item_id);
+		spawn.owner_handle = event.owner_handle;
+		spawn.friendly_item_id = static_cast<uint16_t>(event.item_friendly);
+		spawn.enemy_item_id = static_cast<uint16_t>(event.item_enemy);
+		spawn.slot_handle = event.entity;
+		spawn.parent_handle = event.parent_handle;
+		spawn.pos_x = world::to_fixed(event.pos.x);
+		spawn.pos_y = world::to_fixed(event.pos.y);
+		spawn.pos_z = world::to_fixed(event.pos.z);
+		// Words 12/13/14 are the high halves of the resting round's
+		// entity+16/+20/+24 = the eulerZ/eulerX/eulerY triple (yaw heading,
+		// pitch, roll) — the same order every spawn record carries; the client
+		// stores them straight back into +16/+20/+24 [orig: the word reads
+		// [esi+12h]/[esi+16h]/[esi+1Ah] into record words 12/13/14,
+		// Entity_UpdateSatchelPhysics @0x448aeb..0x448b09 and
+		// Entity_UpdateClaymorePhysics @0x447a6c..0x447a8a;
+		// Entity_SpawnOrUpdateFromSlotPacket @0x5468cb..0x5468df].
+		spawn.angle_x = static_cast<uint16_t>(
+				static_cast<uint32_t>(event.yaw_bam) >> 16);
+		spawn.angle_y = static_cast<uint16_t>(
+				static_cast<uint32_t>(event.pitch_bam) >> 16);
+		spawn.angle_z = static_cast<uint16_t>(
+				static_cast<uint32_t>(event.roll_bam) >> 16);
+		fan_remote(s2c::DEPLOYED_ITEM, encode_deployed_item_spawn(spawn));
+	}
+	for (const world::ThrowableEvents::DeviceRemove &event :
+			world.throwables.events.removes) {
+		EntityRemove removal;
+		removal.entity_handle = event.entity;
+		fan_remote(s2c::ENTITY_REMOVE, encode_entity_remove(removal));
+	}
+}
+
 void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
 	if (world.round_sim.deaths.empty()) return;
 	for (const world::RoundDeath &d : world.round_sim.deaths) {
@@ -756,6 +810,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// (2b) Death routing + respawn release — the deaths the round sim raised inside the
 	// tick get their broadcasts staged before this frame's 0x0A fan (§5.60; the 0x0A
 	// health byte carries the same-frame damage regardless).
+	route_throwable_events(ctx, world);
 	route_round_deaths(ctx, world);
 	release_due_respawns(ctx, world);
 
