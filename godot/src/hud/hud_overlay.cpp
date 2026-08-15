@@ -468,7 +468,7 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	// Retail uploads the 64x1920 strip with its full box-filtered mip chain;
 	// the default spinmap badges then sample near the 16px level. A mipless
 	// upload aliases the 64px source into a visibly broken armory "A".
-	// [orig: GTexture_CreateFromPixelData_0 @0x6877ba..0x6878be]
+	// Retail device path: GTexture_CreateFromPixelData_0 @0x6877ba..0x6878be.
 	textures_[opennova::hud::kHudTexMapIcons] =
 			load_hud_texture_("TSDicon.tga", true);
 	// The compass ring draws white-modulated through the fixed-function HUD

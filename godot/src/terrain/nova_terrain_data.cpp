@@ -1560,7 +1560,7 @@ Ref<ImageTexture> TerrainData::build_minimap_water_mask(
 			// contour and produces a broad filtered halo. RG8 is a linear data
 			// texture; the map-water shader compares sampled R (terrain) to the
 			// constant sampled G (water).
-			// [orig: depthspin alpha build @0x60BA30..0x60BB05;
+			// Retail path: depthspin alpha build @0x60BA30..0x60BB05;
 			//  sampled alpha-test pass @0x6077A2..0x60787B]
 			pixel[0] = static_cast<uint8_t>(terrain_height_int);
 			pixel[1] = static_cast<uint8_t>(water_int);
