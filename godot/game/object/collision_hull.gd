@@ -19,7 +19,7 @@ extends RefCounted
 # Collidable-type abbreviations (from the reference exporter's map_collidable_type).
 # The LETTER CODES are exporter-side naming; the RUNTIME semantics are now witnessed
 # (docs/world/world-wac-ai-re.md §15.4): 1 generic CB solid (the only BVOL type
-# generic rays clip), 4 CL ladder contact/alignment (climb motor not ported),
+# generic rays clip), 4 CL ladder contact/alignment (the climb motor rides it),
 # 5 contact-no-force, 6 CA armory zone (Flags 0x400000 gates weapon.mnu),
 # 7 VC vehicle-collision solid (vehicle mask), 8 BB blink box (indoors),
 # 9 CD door activation touch, 10 CT change-team box, 11 vehicle-loadout zone

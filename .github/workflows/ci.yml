@@ -19,12 +19,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The C++ engine + ctest suite. Built with Ninja + sccache (GitHub Actions
+  # cache backend): the Visual Studio generator ignores CMAKE_*_COMPILER_LAUNCHER,
+  # so the ~640-TU engine compile used to run uncached (~16 min) on every push.
+  # scripts/build.sh is untouched — CMake reads CMAKE_GENERATOR and the launcher
+  # variables from the environment on a fresh configure — and Release carries no
+  # PDB flags, so every object is cacheable as-is. First run after a cache miss
+  # is cold; after that only changed sources recompile.
   test:
     strategy:
       fail-fast: false
       matrix:
         os: [windows-latest]
     runs-on: ${{ matrix.os }}
+    # Job-scoped on purpose: package-importer reads build-pkg\Release\ and
+    # modsuperoed-smoke passes -A Win32/x64, both of which a workflow-level Ninja
+    # default would break.
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      CMAKE_GENERATOR: Ninja
+      CMAKE_CXX_COMPILER_LAUNCHER: sccache
+      CMAKE_C_COMPILER_LAUNCHER: sccache
     steps:
       - uses: actions/checkout@v4
         with:
@@ -71,11 +86,35 @@ jobs:
           # the KEEP taxonomy lives in scripts/lint/host_allowlist.json.
           python scripts/lint/host_lint.py --enforce
 
+      # cl/link on PATH for the Ninja generator (the VS generator found them by
+      # itself; vcvars prepends the VC bin dir, and CMake's Ninja compiler search
+      # takes the first compiler in PATH order); sccache in front of cl for the
+      # compiler-launcher cache.
+      - name: Set up MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Set up sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Toolchain sanity (Ninja + cl on PATH)
+        shell: bash
+        run: |
+          cmake --version
+          ninja --version
+          command -v cl
+
       - name: Build and test
         shell: bash
         env:
           BUILD_GODOT: "0"
         run: scripts/build.sh
+
+      - name: sccache stats
+        if: always()
+        shell: bash
+        run: sccache --show-stats
 
   # Linux build of the standalone novaworld server with the Crow HTTP layer ON,
   # plus the net-scoped ctests. This mirrors what the deploy image builds; the
@@ -211,12 +250,29 @@ jobs:
           path: web/dist
 
   # Compile the GDExtension (godot/src + engine/ + the pinned third_party/godot-cpp)
-  # once. godot-tests and the two Windows package jobs download these DLLs instead
-  # of recompiling. sccache caches godot-cpp's objects across runs, so after one
-  # warm-up only changed engine/libs sources recompile. Windows must use Ninja:
-  # the Visual Studio generator ignores CMAKE_*_COMPILER_LAUNCHER.
+  # once per flavour; godot-tests and the two Windows package jobs download the
+  # DLLs instead of recompiling. Flavours are godot-cpp targets and name the DLL:
+  #   template_debug   -> what the Godot EDITOR loads (godot-tests, and the export
+  #                       step's script scan) and what a --export-debug exe loads.
+  #   template_release -> what a --export-release exe loads (the release zips).
+  # A pull request builds only template_debug and packages in debug export mode
+  # (~4.7 min per flavour on a warm cache, mostly MSVC preprocessing on sccache
+  # hits — halving the legs halves the wall-clock in front of godot-tests and the
+  # PR build links). Master pushes and manual runs also build template_release,
+  # in parallel, so the release flavour and release-mode packaging stay
+  # continuously verified. sccache caches godot-cpp's objects across runs, so
+  # after one warm-up only changed engine/libs sources recompile. Windows must
+  # use Ninja: the Visual Studio generator ignores CMAKE_*_COMPILER_LAUNCHER.
   build-gdextension-windows:
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Per-key fromJSON is the documented matrix form. The target -> CMake
+        # config mapping lives in the build step, NOT in matrix.include: an
+        # include entry whose target is absent from this list would be added as
+        # an extra combination and resurrect the release leg on PRs.
+        target: ${{ github.event_name == 'pull_request' && fromJSON('["template_debug"]') || fromJSON('["template_debug","template_release"]') }}
     env:
       SCCACHE_GHA_ENABLED: "true"
       CMAKE_CXX_COMPILER_LAUNCHER: sccache
@@ -235,8 +291,10 @@ jobs:
       - name: Set up sccache
         uses: mozilla-actions/sccache-action@v0.0.10
 
-      - name: Build GDExtension (debug + release)
+      - name: Build GDExtension (${{ matrix.target }})
         shell: pwsh
+        env:
+          GODOTCPP_TARGET: ${{ matrix.target }}
         run: |
           $ErrorActionPreference = "Stop"
           # First-run toolchain sanity: CMake must be >= 3.25 for the /Z7 flag, and
@@ -244,30 +302,36 @@ jobs:
           cmake --version
           ninja --version
           Write-Host "cl: $((Get-Command cl -ErrorAction SilentlyContinue).Source)"
-          foreach ($c in @(
-            @{ t = "template_debug";   d = "build-godot-debug";   b = "RelWithDebInfo" },
-            @{ t = "template_release"; d = "build-godot-release"; b = "Release" }
-          )) {
-            # -G Ninja so the sccache compiler launcher is honored. /Z7 (embedded
-            # debug info via CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded) makes the
-            # RelWithDebInfo objects cacheable; the default /Zi separate-PDB is not.
-            # CMP0141=NEW forces that policy into godot-cpp (its CMake policy ceiling
-            # is < 3.25).
-            cmake -S godot/src -B $c.d -G Ninja `
-              "-DGODOTCPP_TARGET=$($c.t)" `
-              "-DCMAKE_BUILD_TYPE=$($c.b)" `
-              "-DCMAKE_POLICY_DEFAULT_CMP0141=NEW" `
-              "-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded"
-            if ($LASTEXITCODE -ne 0) { throw "configure $($c.t) failed" }
-            cmake --build $c.d --target opennova
-            if ($LASTEXITCODE -ne 0) { throw "build $($c.t) failed" }
+          # template_debug is built RelWithDebInfo: optimized native code plus
+          # symbols, the same flavour scripts/build_godot.sh Dev produces for the
+          # editor. template_release is a plain Release. The build dirs keep their
+          # historical names on purpose: sccache keys embed the absolute paths of
+          # godot-cpp's generated headers under the build dir, so renaming a dir
+          # invalidates every cached godot-cpp object (one cold ~28 min leg per
+          # cache scope).
+          $flavours = @{
+            template_debug   = @{ config = "RelWithDebInfo"; dir = "build-godot-debug" }
+            template_release = @{ config = "Release"; dir = "build-godot-release" }
           }
-          foreach ($f in @(
-            "godot/bin/libopennova.windows.template_debug.x86_64.dll",
-            "godot/bin/libopennova.windows.template_release.x86_64.dll"
-          )) {
-            if (-not (Test-Path $f)) { throw "missing GDExtension DLL: $f" }
-          }
+          $flavour = $flavours[$env:GODOTCPP_TARGET]
+          if (-not $flavour) { throw "unknown GODOTCPP_TARGET: $env:GODOTCPP_TARGET" }
+          $buildType = $flavour.config
+          $buildDir = $flavour.dir
+          # -G Ninja so the sccache compiler launcher is honored. /Z7 (embedded
+          # debug info via CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded) makes the
+          # RelWithDebInfo objects cacheable; the default /Zi separate-PDB is not.
+          # CMP0141=NEW forces that policy into godot-cpp (its CMake policy ceiling
+          # is < 3.25).
+          cmake -S godot/src -B $buildDir -G Ninja `
+            "-DGODOTCPP_TARGET=$env:GODOTCPP_TARGET" `
+            "-DCMAKE_BUILD_TYPE=$buildType" `
+            "-DCMAKE_POLICY_DEFAULT_CMP0141=NEW" `
+            "-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded"
+          if ($LASTEXITCODE -ne 0) { throw "configure $env:GODOTCPP_TARGET failed" }
+          cmake --build $buildDir --target opennova
+          if ($LASTEXITCODE -ne 0) { throw "build $env:GODOTCPP_TARGET failed" }
+          $dll = "godot/bin/libopennova.windows.$env:GODOTCPP_TARGET.x86_64.dll"
+          if (-not (Test-Path $dll)) { throw "missing GDExtension DLL: $dll" }
 
       - name: sccache stats
         shell: bash
@@ -276,11 +340,9 @@ jobs:
       - name: Upload Windows GDExtension
         uses: actions/upload-artifact@v4
         with:
-          name: gdext_windows
+          name: gdext_windows_${{ matrix.target }}
           if-no-files-found: error
-          path: |
-            godot/bin/libopennova.windows.template_debug.x86_64.dll
-            godot/bin/libopennova.windows.template_release.x86_64.dll
+          path: godot/bin/libopennova.windows.${{ matrix.target }}.x86_64.dll
 
   godot-tests:
     strategy:
@@ -337,11 +399,12 @@ jobs:
             Expand-Archive -Path .godot-bin/godot.zip -DestinationPath .godot-bin -Force
           }
 
+      # The editor binary that runs GUT loads the template_debug flavour only.
       - name: Download GDExtension (Windows)
         if: matrix.os == 'windows-latest'
         uses: actions/download-artifact@v4
         with:
-          name: gdext_windows
+          name: gdext_windows_template_debug
           path: godot/bin
 
       - name: Prime Godot import cache
@@ -475,15 +538,20 @@ jobs:
           path: ~\AppData\Roaming\Godot\export_templates\${{ env.GODOT_VERSION_PLAIN }}.stable
           key: godot-export-templates-${{ runner.os }}-${{ env.GODOT_VERSION }}
 
+      # Every flavour this run built (template_debug only on a PR).
       - name: Download GDExtension
         uses: actions/download-artifact@v4
         with:
-          name: gdext_windows
+          pattern: gdext_windows_*
+          merge-multiple: true
           path: godot/bin
 
+      # PRs export in debug mode (debug export template + the template_debug DLL,
+      # the flavour every editor session runs); master/manual runs export in
+      # release mode like the release workflow.
       - name: Package Godot Windows editor export
         shell: pwsh
-        run: scripts/package_godot_editor_windows.ps1 -SkipBuild
+        run: scripts/package_godot_editor_windows.ps1 -SkipBuild -ExportMode ${{ github.event_name == 'pull_request' && 'debug' || 'release' }}
 
       - name: Upload opennova-modtools Windows zip
         id: upload_modtools
@@ -527,15 +595,20 @@ jobs:
           path: ~\AppData\Roaming\Godot\export_templates\${{ env.GODOT_VERSION_PLAIN }}.stable
           key: godot-export-templates-${{ runner.os }}-${{ env.GODOT_VERSION }}
 
+      # Every flavour this run built (template_debug only on a PR).
       - name: Download GDExtension
         uses: actions/download-artifact@v4
         with:
-          name: gdext_windows
+          pattern: gdext_windows_*
+          merge-multiple: true
           path: godot/bin
 
+      # PRs export in debug mode (debug export template + the template_debug DLL,
+      # the flavour every editor session runs); master/manual runs export in
+      # release mode like the release workflow.
       - name: Package Godot Windows runtime export
         shell: pwsh
-        run: scripts/package_godot_runtime_windows.ps1 -SkipBuild
+        run: scripts/package_godot_runtime_windows.ps1 -SkipBuild -ExportMode ${{ github.event_name == 'pull_request' && 'debug' || 'release' }}
 
       - name: Upload opennova runtime Windows zip
         id: upload_runtime
@@ -601,11 +674,15 @@ jobs:
           # validation fails. skip-decompress keeps each artifact as its raw file.
           skip-decompress: true
 
+      # PR packages are debug-mode exports, so the zips carry the template_debug
+      # GDExtension (see the package jobs); the manifest's {gdextension_target}
+      # placeholder resolves accordingly.
       - name: Validate pull request deliverables
         if: github.event_name == 'pull_request'
         run: >-
           python scripts/validate_release_deliverables.py
           --release-version 0.0.0-ci
+          --gdextension-target template_debug
           --only-id modding-editor
           --only-id game-runtime
 
@@ -614,6 +691,7 @@ jobs:
         run: >-
           python scripts/validate_release_deliverables.py
           --release-version 0.0.0-ci
+          --gdextension-target template_release
           --only-id asset-importer
           --only-id blender-ase-exporter
           --only-id modding-editor
@@ -649,7 +727,7 @@ jobs:
               marker,
               '### OpenNova CI builds',
               '',
-              `Windows builds for this PR (commit \`${sha}\`, run [#${context.runNumber}](${runUrl})):`,
+              `Windows debug-mode builds for this PR (commit \`${sha}\`, run [#${context.runNumber}](${runUrl})): debug export template plus the template_debug GDExtension, the flavour every editor session runs. Release-mode builds come from the release workflow.`,
               '',
               '| Build | Download |',
               '| --- | --- |',

@@ -179,8 +179,9 @@ int main() {
 	// --- The flag channel round-trip (D-NET-196 replica tails): the resolve's
 	// latched bits persist on the row and gate the NEXT tick's gravity and
 	// root channels. A CL/ladder-platform latch (0x100000) skips the gravity
-	// step and writes the org2 literal 1 into the horizontal roots
-	// [orig: gate @0x4b7ac8; the ebp=0x8000/edi=1 stores @0x4b7ab0..0x4b7ac4].
+	// step and zeroes the horizontal root channels — both motors store true
+	// zeros [orig: gate @0x4b7ac8; xor edi,edi @0x4b797e/@0x4b79b7 (org2),
+	// xor ebx,ebx @0x4bf600 (org1)].
 	cap.return_clearance = 1000;
 	cap.ground = 0xFFFF;
 	cap.or_flags = 0x100000u;
@@ -195,8 +196,8 @@ int main() {
 	             "the next resolve sees the persisted flags word");
 	ok &= expect(row_a->rm_vel_z == vel_before_gate,
 	             "the 0x108000 gate skips the gravity step");
-	ok &= expect(row_a->x == x_before_gate + 1,
-	             "CL contact writes the org2 literal 1 into the root x");
+	ok &= expect(row_a->x == x_before_gate,
+	             "CL contact zeroes the horizontal root channels (no drift)");
 
 	// --- The airborne edge pair: clearance > 0xF000 latches 0x2000 (gated on
 	// !(Flags & 0x10A002)); a grounded return clears it with the landing.

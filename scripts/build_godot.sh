@@ -22,7 +22,11 @@
 #   DebugFull -> same template_debug artifact, true Debug (/Od, runtime checks,
 #                asserts live). Use when stepping through native code or chasing
 #                memory corruption; do not judge performance on it.
-#   Release   -> libopennova.<platform>.template_release.x86_64.<dll|so> (export)
+#   Release   -> same template_debug artifact, plain Release (/O2, no symbols).
+#                GODOTCPP_TARGET is never passed here, so no flavor of this
+#                script produces the template_release-named DLL an
+#                --export-release exe loads; scripts/package_godot_windows.ps1
+#                (-ExportMode release) is the only producer of that one.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

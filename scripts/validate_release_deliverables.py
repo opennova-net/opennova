@@ -14,6 +14,14 @@ class DeliverableValidationError(RuntimeError):
     pass
 
 
+# godot-cpp flavours a packaged exe can load; the manifest's {gdextension_target}
+# placeholder names the DLL inside the Godot zips. Release-mode exports (what a
+# release ships) load template_release; the debug-mode exports pull-request CI
+# packages load template_debug.
+GDEXTENSION_TARGETS = ("template_release", "template_debug")
+DEFAULT_GDEXTENSION_TARGET = "template_release"
+
+
 class DeliverableItem:
     def __init__(
         self,
@@ -66,6 +74,14 @@ def _version_context(repo_root: Path, release_version: str) -> dict[str, str]:
         "blender_version": blender_manifest["version"],
         "godot_version": godot_version,
     }
+
+
+def _gdextension_target(value: str) -> str:
+    if value not in GDEXTENSION_TARGETS:
+        raise DeliverableValidationError(
+            f"Unknown GDExtension target {value!r}; expected one of {', '.join(GDEXTENSION_TARGETS)}"
+        )
+    return value
 
 
 def _format_template(value: str, context: dict[str, str]) -> str:
@@ -212,6 +228,7 @@ def validate_release_deliverables(
     release_version: str,
     manifest_path: str | Path | None = None,
     deliverable_ids: Collection[str] | None = None,
+    gdextension_target: str = DEFAULT_GDEXTENSION_TARGET,
 ) -> DeliverableValidationResult:
     root = Path(repo_root)
     dist = Path(dist_dir)
@@ -223,6 +240,7 @@ def validate_release_deliverables(
         raise DeliverableValidationError(f"dist directory does not exist: {dist}")
 
     context = _version_context(root, release_version)
+    context["gdextension_target"] = _gdextension_target(gdextension_target)
     deliverables = _manifest_deliverables(manifest, context)
 
     if deliverable_ids is not None:
@@ -293,6 +311,15 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--release-version", required=True)
     parser.add_argument("--manifest", default=None)
     parser.add_argument(
+        "--gdextension-target",
+        choices=GDEXTENSION_TARGETS,
+        default=DEFAULT_GDEXTENSION_TARGET,
+        help=(
+            "godot-cpp flavour the packaged Godot exes load; fills the manifest's "
+            "{gdextension_target} placeholder (default: %(default)s)."
+        ),
+    )
+    parser.add_argument(
         "--only-id",
         action="append",
         dest="deliverable_ids",
@@ -313,6 +340,7 @@ def main(argv: list[str] | None = None) -> int:
             release_version=args.release_version,
             manifest_path=Path(args.manifest) if args.manifest else None,
             deliverable_ids=args.deliverable_ids,
+            gdextension_target=args.gdextension_target,
         )
     except DeliverableValidationError as exc:
         print(f"release deliverable validation failed: {exc}", file=sys.stderr)
