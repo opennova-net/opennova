@@ -115,6 +115,9 @@ void ObjectModel::play_body_clip(const String &p_key) {
 // owner's ring serves the index and playback follows that latch until the next
 // play. [orig: AnimMap_PlayAnimBySlot @0x40bda0 latches the served ring entry]
 void ObjectModel::play_body_clip_variant(const String &p_key, int p_variant) {
+	for (ObjectModel *linked : live_presentation_links()) {
+		linked->play_body_clip_variant(p_key, p_variant);
+	}
 	wake_runtime_frame();
 	String key = p_key;
 	if (p_variant == 0) {
@@ -143,6 +146,9 @@ void ObjectModel::play_body_clip_variant(const String &p_key, int p_variant) {
 // _process(delta) never advances the playhead afterwards.
 void ObjectModel::play_body_clip_variant_at_time(const String &p_key,
 		int p_variant, double p_seconds) {
+	for (ObjectModel *linked : live_presentation_links()) {
+		linked->play_body_clip_variant_at_time(p_key, p_variant, p_seconds);
+	}
 	wake_runtime_frame();
 	if (skeletal_.is_null() || !skeletal_->has_clip(p_key)) {
 		return;
@@ -165,6 +171,9 @@ void ObjectModel::play_body_clip_variant_at_time(const String &p_key,
 // Pose a main-body clip at the authoritative infantry motor playhead. IDA's
 // AnimMap phase advances in half-frame ticks: seconds = ticks / (2 * clip_fps).
 void ObjectModel::play_body_clip_at(const String &p_key, int p_phase_ticks) {
+	for (ObjectModel *linked : live_presentation_links()) {
+		linked->play_body_clip_at(p_key, p_phase_ticks);
+	}
 	wake_runtime_frame();
 	const String key = resolve_body_clip_key(p_key);
 	if (key.is_empty()) {
@@ -208,6 +217,10 @@ void ObjectModel::play_body_clip_at(const String &p_key, int p_phase_ticks) {
 void ObjectModel::play_body_blend_at(const String &p_source_key,
 		int p_source_phase_ticks, const String &p_target_key,
 		int p_target_phase_ticks, double p_weight) {
+	for (ObjectModel *linked : live_presentation_links()) {
+		linked->play_body_blend_at(p_source_key, p_source_phase_ticks,
+				p_target_key, p_target_phase_ticks, p_weight);
+	}
 	wake_runtime_frame();
 	if (skeletal_.is_null()) {
 		return;
@@ -253,6 +266,9 @@ void ObjectModel::pose_body_blend_at_times(const String &p_source_key,
 // Seed a main-body clip from retail half-frame ticks, pose it immediately, and
 // leave it free-running.
 void ObjectModel::play_body_clip_seeded(const String &p_key, int p_phase_ticks) {
+	for (ObjectModel *linked : live_presentation_links()) {
+		linked->play_body_clip_seeded(p_key, p_phase_ticks);
+	}
 	wake_runtime_frame();
 	if (select_body_clip_seeded(p_key, p_phase_ticks)) {
 		advance_body_animation(0.0);
@@ -280,6 +296,10 @@ bool ObjectModel::select_body_clip_seeded(const String &p_key, int p_phase_ticks
 // clip reaches its completion boundary.
 bool ObjectModel::apply_remote_body_state(int p_state_id, const String &p_key,
 		int p_flags, int p_phase_ticks) {
+	for (ObjectModel *linked : live_presentation_links()) {
+		linked->apply_remote_body_state(
+				p_state_id, p_key, p_flags, p_phase_ticks);
+	}
 	wake_runtime_frame();
 	if (p_state_id < 0 || resolve_body_clip_key(p_key).is_empty()) {
 		return remote_body_needs_fixed_tick();
@@ -305,6 +325,9 @@ bool ObjectModel::apply_remote_body_state(int p_state_id, const String &p_key,
 }
 
 void ObjectModel::reset_remote_body_state() {
+	for (ObjectModel *linked : live_presentation_links()) {
+		linked->reset_remote_body_state();
+	}
 	remote_state_ = -1;
 	remote_flags_ = 0;
 	clear_remote_body_pending();
@@ -418,6 +441,9 @@ void ObjectModel::start_remote_body_blend(const String &p_target_key,
 // Advance one receive-side simulation tick for an already accepted target.
 // Both channels advance before the float32 target weight increments.
 bool ObjectModel::advance_remote_body_blend_tick(int p_state_id) {
+	for (ObjectModel *linked : live_presentation_links()) {
+		linked->advance_remote_body_blend_tick(p_state_id);
+	}
 	wake_runtime_frame();
 	if (!remote_blend_active_) {
 		if (remote_pending_state_ >= 0) {
@@ -451,7 +477,15 @@ bool ObjectModel::advance_remote_body_blend_tick(int p_state_id) {
 }
 
 bool ObjectModel::remote_body_needs_fixed_tick() const {
-	return remote_blend_active_ || remote_pending_state_ >= 0;
+	if (remote_blend_active_ || remote_pending_state_ >= 0) {
+		return true;
+	}
+	for (ObjectModel *linked : live_presentation_links()) {
+		if (linked->remote_body_needs_fixed_tick()) {
+			return true;
+		}
+	}
+	return false;
 }
 
 bool ObjectModel::promote_remote_body_pending_if_due() {
@@ -474,6 +508,9 @@ bool ObjectModel::promote_remote_body_pending_if_due() {
 }
 
 void ObjectModel::stop_body_clip() {
+	for (ObjectModel *linked : live_presentation_links()) {
+		linked->stop_body_clip();
+	}
 	wake_runtime_frame();
 	anim_playing_ = false;
 	anim_external_phase_ = false;
@@ -518,6 +555,9 @@ void ObjectModel::play_body_anim_at(int p_slot, int p_phase_ticks) {
 // Scrub the active body clip's playhead and pose IMMEDIATELY, even while
 // paused. Looping clips wrap over the clip length, one-shots clamp.
 void ObjectModel::set_animation_time(double p_seconds) {
+	for (ObjectModel *linked : live_presentation_links()) {
+		linked->set_animation_time(p_seconds);
+	}
 	wake_runtime_frame();
 	if (skeletal_.is_null() || anim_key_.is_empty()) {
 		return;
@@ -625,6 +665,9 @@ String ObjectModel::resolve_anim_channel_owner(int p_slot) const {
 // The authoritative runtime integrates the same fields in AiSystem and
 // presents them through set_part_phase().
 void ObjectModel::play_part_anim(int p_channel, int p_play_type, double p_time_s) {
+	for (ObjectModel *linked : live_presentation_links()) {
+		linked->play_part_anim(p_channel, p_play_type, p_time_s);
+	}
 	wake_runtime_frame();
 	const int slot = p_channel - 1;
 	if (slot < 0 || slot > 1) {
@@ -654,6 +697,9 @@ void ObjectModel::play_part_anim(int p_channel, int p_play_type, double p_time_s
 // Editor-preview convenience: seed the channel at its rest start (0 forward /
 // max reverse) then play. Stop must freeze the part where it is (no reseed).
 void ObjectModel::restart_part_anim(int p_channel, int p_play_type, double p_time_s) {
+	for (ObjectModel *linked : live_presentation_links()) {
+		linked->restart_part_anim(p_channel, p_play_type, p_time_s);
+	}
 	wake_runtime_frame();
 	const int slot = p_channel - 1;
 	if (slot < 0 || slot > 1 || p_play_type < -1 || p_play_type > 1) {
@@ -703,6 +749,9 @@ void ObjectModel::clear_part_phase(int p_channel) {
 }
 
 void ObjectModel::clear_part_anims() {
+	for (ObjectModel *linked : live_presentation_links()) {
+		linked->clear_part_anims();
+	}
 	wake_runtime_frame();
 	part_anims_.clear();
 	part_anim_tick_accum_s_ = 0.0;
@@ -767,6 +816,9 @@ bool ObjectModel::advance_part_anims(double p_delta) {
 }
 
 void ObjectModel::set_weapon_channel(const String &p_key, int p_phase_ticks) {
+	for (ObjectModel *linked : live_presentation_links()) {
+		linked->set_weapon_channel(p_key, p_phase_ticks);
+	}
 	wake_runtime_frame();
 	if (p_key == wpn_key_ && p_phase_ticks == wpn_phase_ticks_) {
 		return;
@@ -787,6 +839,9 @@ Dictionary ObjectModel::get_weapon_channel() const {
 }
 
 void ObjectModel::set_aim_overlay(const Array &p_deltas) {
+	for (ObjectModel *linked : live_presentation_links()) {
+		linked->set_aim_overlay(p_deltas);
+	}
 	wake_runtime_frame();
 	const bool overlay_changed = p_deltas != aim_overlay_deltas_;
 	bool classes_changed = false;
@@ -814,6 +869,9 @@ Dictionary ObjectModel::get_body_blend() const {
 }
 
 void ObjectModel::set_right_hand_collapsed(bool p_collapsed) {
+	for (ObjectModel *linked : live_presentation_links()) {
+		linked->set_right_hand_collapsed(p_collapsed);
+	}
 	wake_runtime_frame();
 	if (p_collapsed == collapse_right_hand_) {
 		return;

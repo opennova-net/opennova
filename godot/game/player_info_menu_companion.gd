@@ -39,6 +39,8 @@ const VOICE_PREVIEW_TRIGGER_FORMAT := "VOICE_%d"
 # ONED Avatars workspace. Mounted over the PLAYER_PREVIEW widget rect and fed the
 # resolved combo; it plays the witnessed raw-.bad idle when those assets resolve.
 const AvatarPreviewScript := preload("res://game/avatar/avatar_preview.gd")
+const PlayerCharacterSelectionStateScript := preload(
+		"res://game/player_character_selection_state.gd")
 
 const PARENT_SLOTS := {
 	"PRIMARY": WeaponDatabase.SLOT_PRIMARY,
@@ -70,31 +72,33 @@ var _sel_div := -1
 var _populating := false                # guards the cascade against programmatic-fill re-entry
 var _preview                            # AvatarPreview mounted over PLAYER_PREVIEW (null until wired)
 var _preview_id := -1                   # PLAYER_PREVIEW doc id, for the hover-zoom filter
-# NAME (upper) -> Callable(row, value), dispatched off the driver's aggregate
-# widget_value_changed with kind == "combo" (the item_selected successor).
+# NAME (upper) -> Callable(row, value), dispatched by combo value changes.
 var _combo_handlers: Dictionary = {}
 # The icon TextureRects mounted as frame children ("PRIMARY"/... -> TextureRect);
 # freed and rebuilt on each on_menu_built.
 var _icon_mounts: Dictionary = {}
-
-# The current selection, for the ACCEPT/commit seam (Phase 5). main_game persists it.
+var _character_state = PlayerCharacterSelectionStateScript.new()
 signal avatar_chosen(profile: Dictionary)
 
 
-# True when this is the JO PLAYER_INFO screen, so the shell delegates to us. Keyed on
-# the NATIONALITY + COMBO_LIST controls unique to player.mnu's AVATARS block.
+## Install the active + per-side weapon.sav character snapshot before the next build.
+func set_persisted_profile(profile: Dictionary) -> void:
+	_character_state.set_persisted_profile(profile)
+
+
+# True for the JO PLAYER_INFO screen's unique avatar controls.
 func owns_menu(driver: MenuDriver) -> bool:
 	if driver == null:
 		return false
 	return driver.has_widget("NATIONALITY") and driver.has_widget("COMBO_LIST")
 
 
-# The document is re-opened on each (re)build, so we wire and populate from scratch
-# each time.
+# Wire and populate from scratch for each document build.
 func _wire(_file: String, _screen: String) -> void:
 	_combo_handlers.clear()
 	_clear_mounts()
 	_ensure_db()
+	_character_state.set_database(_db)
 	# Combo selections relay through the driver's aggregate value-changed signal.
 	if not _driver.widget_value_changed.is_connected(_on_widget_value_changed):
 		_driver.widget_value_changed.connect(_on_widget_value_changed)
@@ -102,8 +106,7 @@ func _wire(_file: String, _screen: String) -> void:
 	# [orig: update_player_preview_animation active test @ 0x55dba0].
 	if not _driver.widget_hover_changed.is_connected(_on_widget_hover_changed):
 		_driver.widget_hover_changed.connect(_on_widget_hover_changed)
-	# The frame shows one screen at a time and scales the 800x600 design space to
-	# its own size, so the icon/preview mounts re-place on screen and size changes.
+	# Re-place icon/preview mounts when the 800x600 design surface changes.
 	if not _driver.screen_changed.is_connected(_on_screen_changed):
 		_driver.screen_changed.connect(_on_screen_changed)
 	var frame := _driver.get_frame()
@@ -114,9 +117,17 @@ func _wire(_file: String, _screen: String) -> void:
 	_connect_combo("DIVISION", _on_div_selected)
 	_connect_combo("COMBO_LIST", _on_combo_selected)
 	_connect_pressed(VOICE_PREVIEW_CONTROL, _preview_voice)
-	# SIDE_BLUE is CHECKED in player.mnu; team follows whichever radio is set.
-	_team = 1 if _radio_checked("SIDE_RED") else 0
+	# Prefer persisted team; otherwise retain player.mnu's authored SIDE_BLUE default.
+	var authored_team := 1 if _radio_checked("SIDE_RED") else 0
+	_team = _character_state.initial_team(authored_team)
+	var blue_radio := _id("SIDE_BLUE")
+	var red_radio := _id("SIDE_RED")
+	if blue_radio >= 0:
+		_driver.set_widget_checked(blue_radio, _team == 0)
+	if red_radio >= 0:
+		_driver.set_widget_checked(red_radio, _team == 1)
 	_populate_nationalities()  # cascades into divisions -> combos -> voice
+	_restore_character_selection(_team)
 	_wire_preview()
 	# Loadout: PLAYERCLASS drives the class mask, the team radios the team mask; both
 	# filter the weapon slot lists [orig: populate_weapon_slot_lists @ 0x560430].
@@ -133,7 +144,12 @@ func _wire(_file: String, _screen: String) -> void:
 		_connect_combo(control + "_AMMO1_TYPE", _on_type_selected.bind(control))
 	for i in GRENADE_CONTROLS.size():
 		_connect_combo(GRENADE_CONTROLS[i], _on_grenade_selected.bind(i))
+	_restore_player_class()
 	_populate_loadout()
+	var saved_name := _character_state.persisted_name()
+	var name_edit := _id("PLAYERNAME")
+	if name_edit >= 0 and not saved_name.is_empty():
+		_driver.set_widget_text(name_edit, saved_name)
 	# OK saves the chosen avatar; the .mnu's own ACTION still navigates back to main.mnu.
 	_connect_pressed("ACCEPT", commit)  # [orig: save_player_info_from_dialog @ 0x55ee10]
 
@@ -148,6 +164,54 @@ func _ensure_db() -> void:
 		push_warning("PlayerInfoMenuCompanion: Avatars.def not loaded (%s); avatar combos stay empty"
 			% _db.get_last_error())
 		_db = null
+
+
+func _restore_character_selection(side: int) -> void:
+	if _db == null or side < 0 or side > 1:
+		return
+	var saved := _character_state.side_selection(side)
+	if saved == null:
+		return
+	var nat_index := saved.nationality
+	var visible_nat_row := _nat_db_index.find(nat_index)
+	var nat_combo := _id("NATIONALITY")
+	if visible_nat_row < 0 or nat_combo < 0:
+		return
+	_driver.select_row(nat_combo, visible_nat_row, false)
+	_sel_nat = nat_index
+	_populate_divisions()
+	var div_index := saved.division
+	var div_combo := _id("DIVISION")
+	if div_index < 0 or div_index >= _db.get_division_count(nat_index) or div_combo < 0:
+		return
+	_driver.select_row(div_combo, div_index, false)
+	_sel_div = div_index
+	_populate_combos()
+	var combo_index := saved.combo
+	var combo := _id("COMBO_LIST")
+	if combo_index < 0 or combo_index >= _db.get_combo_count(nat_index, div_index) \
+			or combo < 0:
+		return
+	_driver.select_row(combo, combo_index, false)
+	_populate_voices()
+	_refresh_preview()
+
+
+func _restore_player_class() -> void:
+	var combo := _id("PLAYERCLASS")
+	if combo < 0:
+		return
+	# The remembered per-side class (weapon.sav's side block, or an edit made
+	# before a team switch); nothing remembered keeps player.mnu's authored row
+	# [orig: PlayerInfo_PopulateAllControls @0x5606f0 selects PLAYERCLASS from
+	# g_charSelClass].
+	var player_class := _character_state.player_class(_team)
+	if player_class < 5 or player_class > 9:
+		return
+	for row in _driver.item_count(combo):
+		if _driver.item_value(combo, row) == str(player_class):
+			_driver.select_row(combo, row, false)
+			return
 
 
 # Resolve a nationality/division/combo display key against the gametext table's "Avatars"
@@ -264,6 +328,19 @@ func _selected_class_mask() -> int:
 	var val := _driver.item_value(combo, row) if row >= 0 else ""
 	var cls := int(val) if val.is_valid_int() else 0
 	return WeaponDatabase.player_info_class_mask(cls)
+
+
+func _selected_player_class() -> int:
+	var combo := _id("PLAYERCLASS")
+	if combo >= 0:
+		var row := _driver.selected_row(combo)
+		var value := _driver.item_value(combo, row) if row >= 0 else ""
+		if value.is_valid_int():
+			var selected := int(value)
+			if selected >= 5 and selected <= 9:
+				return selected
+	var fallback := _character_state.player_class(_team)
+	return fallback if fallback >= 5 and fallback <= 9 else 8
 
 
 func _on_class_selected(_row: int, _value: String) -> void:
@@ -670,7 +747,6 @@ func _wire_preview() -> void:
 	_preview_id = preview_id
 	_preview = AvatarPreviewScript.new()
 	_preview.name = "PlayerInfoAvatarPreview"
-	_preview.mouse_filter = Control.MOUSE_FILTER_IGNORE  # let the frame pump keep its clicks
 	frame.add_child(_preview)
 	_place_mount(_preview, preview_id)
 	# Locked menu portrait: no grid/axes, camera fixed, character facing the viewer.
@@ -802,33 +878,46 @@ func _on_side_red() -> void:
 func _set_team(team: int) -> void:
 	if team == _team:
 		return
+	_remember_current_character_selection()
 	_team = team
+	var blue_radio := _id("SIDE_BLUE")
+	var red_radio := _id("SIDE_RED")
+	if blue_radio >= 0:
+		_driver.set_widget_checked(blue_radio, team == 0)
+	if red_radio >= 0:
+		_driver.set_widget_checked(red_radio, team == 1)
 	_populate_nationalities()
+	_restore_character_selection(team)
+	_restore_player_class()
 	_populate_loadout()  # the team mask re-filters the weapon slot lists
 
 
 # --- ACCEPT seam (Phase 5) ----------------------------------------------------
 
-# The current selection, for main_game to persist on ACCEPT. The in-world avatar
-# (D-PLAYERINFO-1) and on-disk profile format are later phases; this does not invent
-# one, it just reports the chosen indices + name.
+func _current_character_selection():
+	return _character_state.make_selection(_team, _sel_nat, _sel_div,
+			_selected_combo_index(), _selected_player_class())
+
+
+func _remember_current_character_selection() -> void:
+	var current = _current_character_selection()
+	if current != null:
+		_character_state.remember(current)
+
+
+# The current selection, including both side records, for main_game to persist
+# on ACCEPT. Class is stamped across both side snapshots because retail's dialog
+# walks both 0x8006 blocks before serializing; character bytes remain per-side
+# [orig: save_player_info_from_dialog @0x55EE3F-0x55EF38].
 func snapshot() -> Dictionary:
 	var combo := _id("COMBO_LIST")
 	var voice := _id("PLAYERVOICE")
-	var profile := {
-		"name": _edit_text("PLAYERNAME"),
-		"team": _team,
-		"nationality": _sel_nat,
-		"division": _sel_div,
-		"combo": _driver.selected_row(combo) if combo >= 0 else -1,
-		"voice": _driver.selected_row(voice) if voice >= 0 else -1,
-	}
-	var class_combo := _id("PLAYERCLASS")
-	if class_combo >= 0:
-		var class_row := _driver.selected_row(class_combo)
-		var class_value := _driver.item_value(class_combo, class_row) \
-				if class_row >= 0 else ""
-		profile["player_class"] = int(class_value) if class_value.is_valid_int() else 0
+	var player_class := _selected_player_class()
+	var profile := _character_state.snapshot(
+			_team, _sel_nat, _sel_div,
+			_driver.selected_row(combo) if combo >= 0 else -1,
+			player_class, _edit_text("PLAYERNAME"),
+			_driver.selected_row(voice) if voice >= 0 else -1)
 	# Missing weapon.def means there was no loadout choice to commit. Keep that
 	# distinct from a loaded screen whose three selected rows are explicitly NONE.
 	if _weapons != null and _weapons.is_loaded():

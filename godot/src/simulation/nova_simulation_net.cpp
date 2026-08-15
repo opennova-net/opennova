@@ -30,6 +30,38 @@
 
 using namespace novasim;
 
+namespace {
+
+bool character_vars_from_profile(const Dictionary &p_profile,
+		opennova::np::CharacterJoinVars &r_vars) {
+	const Array ids = p_profile.get("character_ids", Array());
+	const Array classes = p_profile.get("player_classes", Array());
+	const Array avatars = p_profile.get("avatars", Array());
+	if (ids.size() < 2 || classes.size() < 2 || avatars.size() < 2) {
+		return false;
+	}
+
+	opennova::np::CharacterJoinVars vars{};
+	for (int side = 0; side < 2; ++side) {
+		vars.char_id[side] = static_cast<uint16_t>(std::clamp(
+				static_cast<int>(ids[side]), 0, 0xFFFF));
+		vars.char_class[side] = static_cast<uint8_t>(std::clamp(
+				static_cast<int>(classes[side]), 0, 0xFF));
+		vars.avatar[side] = static_cast<uint8_t>(std::clamp(
+				static_cast<int>(avatars[side]), 0, 0xFF));
+	}
+	const int requested_team =
+			static_cast<int>(p_profile.get("team_request", -1));
+	vars.team_request =
+			(requested_team == 0 || requested_team == 1)
+			? static_cast<uint8_t>(requested_team)
+			: 0xFF;
+	r_vars = vars;
+	return true;
+}
+
+} // namespace
+
 // P7: per-load host bring-up — the faithful §5.0 mode-3 in-process listen server
 // [orig: SinglePlayer_StartMission @0x561af0], mirroring apps/nw_server/main.cpp. The host's own
 // player AUTO-spawns through the real pipeline (Server_ProcessPendingPlayerSpawns ->
@@ -114,6 +146,11 @@ void Simulation::bringup_host_runtime(const opennova::bms::File &file) {
 	host_cfg.config = host_config;
 	host_cfg.socket_mode = host_listen_ ? np::SocketMode::Lan : np::SocketMode::Socketless;
 	host_cfg.serve_and_play = serve_and_play;
+	// The shell's resolved PLAYER_INFO selection for the host's own player; the
+	// HostConfig default is the stock fresh-profile seed until one is installed.
+	if (local_character_vars_set_) {
+		host_cfg.local_character_vars = local_character_vars_;
+	}
 	np::start_host_session(host_owner_, host_cfg);
 	if (serve_and_play) {
 		// The host's own replica pipeline (HostClient role: recv-fold only, 0x0C suppressed). Folds host_loop_
@@ -936,29 +973,18 @@ Dictionary Simulation::get_host_session_config() const {
 }
 
 void Simulation::set_join_character_profile(const Dictionary &p_profile) {
-	const Array ids = p_profile.get("character_ids", Array());
-	const Array classes = p_profile.get("player_classes", Array());
-	const Array avatars = p_profile.get("avatars", Array());
-	if (ids.size() < 2 || classes.size() < 2 || avatars.size() < 2) return;
-
 	opennova::np::CharacterJoinVars vars{};
-	for (int side = 0; side < 2; ++side) {
-		vars.char_id[side] = static_cast<uint16_t>(std::clamp(
-				static_cast<int>(ids[side]), 0, 0xFFFF));
-		vars.char_class[side] = static_cast<uint8_t>(std::clamp(
-				static_cast<int>(classes[side]), 0, 0xFF));
-		vars.avatar[side] = static_cast<uint8_t>(std::clamp(
-				static_cast<int>(avatars[side]), 0, 0xFF));
-	}
-	const int requested_team =
-			static_cast<int>(p_profile.get("team_request", -1));
-	vars.team_request =
-			(requested_team == 0 || requested_team == 1)
-			? static_cast<uint8_t>(requested_team)
-			: 0xFF;
+	if (!character_vars_from_profile(p_profile, vars)) return;
 	join_character_vars_ = vars;
 	join_character_vars_set_ = true;
 	install_character_join_vars();
+}
+
+void Simulation::set_local_character_profile(const Dictionary &p_profile) {
+	opennova::np::CharacterJoinVars vars{};
+	if (!character_vars_from_profile(p_profile, vars)) return;
+	local_character_vars_ = vars;
+	local_character_vars_set_ = true;
 }
 
 bool Simulation::set_join_integrity_profile(const String &p_profile_id) {

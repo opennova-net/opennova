@@ -102,6 +102,10 @@ void MissionObjectPlacer::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "item_db",
 						 PROPERTY_HINT_RESOURCE_TYPE, "ItemDatabase"),
 			"set_item_db", "get_item_db_property");
+	ClassDB::bind_method(D_METHOD("set_avatar_db", "db"),
+			&MissionObjectPlacer::set_avatar_db);
+	ClassDB::bind_method(D_METHOD("get_avatar_db"),
+			&MissionObjectPlacer::get_avatar_db);
 	ClassDB::bind_method(D_METHOD("set_panm_clock", "clock"),
 			&MissionObjectPlacer::set_panm_clock);
 	ClassDB::bind_method(D_METHOD("set_environment_state", "state"),
@@ -147,8 +151,13 @@ void MissionObjectPlacer::_bind_methods() {
 			D_METHOD("resolve_player_visual_item_id", "runtime_type_id"),
 			&MissionObjectPlacer::resolve_player_visual_item_id);
 	ClassDB::bind_method(
-			D_METHOD("build_player_animated_model", "runtime_type_id", "parent"),
-			&MissionObjectPlacer::build_player_animated_model);
+			D_METHOD("resolve_player_visual_spec", "runtime_type_id",
+					"character_id"),
+			&MissionObjectPlacer::resolve_player_visual_spec);
+	ClassDB::bind_method(
+			D_METHOD("build_player_animated_model", "runtime_type_id", "parent",
+					"character_id"),
+			&MissionObjectPlacer::build_player_animated_model, DEFVAL(0));
 	ClassDB::bind_method(
 			D_METHOD("build_model_from_graphic", "graphic", "adm_name",
 					"parent", "clip_key", "rig_graphic"),
@@ -233,10 +242,15 @@ void MissionObjectPlacer::_bind_methods() {
 
 void MissionObjectPlacer::set_resource_root(const Ref<ResourceRoot> &p_root) {
 	resource_root_ = p_root;
+	avatar_db_.unref();
 }
 
 void MissionObjectPlacer::set_item_db(const Ref<ItemDatabase> &p_db) {
 	item_db_ = p_db;
+}
+
+void MissionObjectPlacer::set_avatar_db(const Ref<AvatarDatabase> &p_db) {
+	avatar_db_ = p_db;
 }
 
 void MissionObjectPlacer::set_panm_clock(const Ref<PanmClock> &p_clock) {
@@ -253,6 +267,11 @@ Ref<ItemDatabase> MissionObjectPlacer::get_item_db() {
 	return item_db_;
 }
 
+Ref<AvatarDatabase> MissionObjectPlacer::get_avatar_db() {
+	_ensure_avatar_db();
+	return avatar_db_;
+}
+
 void MissionObjectPlacer::_ensure_item_db() {
 	if (item_db_.is_valid() || resource_root_.is_null()) {
 		return;
@@ -261,6 +280,17 @@ void MissionObjectPlacer::_ensure_item_db() {
 	db.instantiate();
 	if (db->load_from_resource_root(resource_root_, "items.def") == OK) {
 		item_db_ = db;
+	}
+}
+
+void MissionObjectPlacer::_ensure_avatar_db() {
+	if (avatar_db_.is_valid() || resource_root_.is_null()) {
+		return;
+	}
+	Ref<AvatarDatabase> db;
+	db.instantiate();
+	if (db->load_from_resource_root(resource_root_, "Avatars.def") == OK) {
+		avatar_db_ = db;
 	}
 }
 
@@ -943,10 +973,117 @@ int MissionObjectPlacer::resolve_player_visual_item_id(int p_runtime_type_id) {
 	return p_runtime_type_id;
 }
 
+// The player's visual = the combo its packed character id resolves to: head +
+// body models in the world (retail draws BOTH with the entity's skeleton, each
+// after its own camo store (retail: Terrain_RenderSectorEntitiesBySide
+// @0x5c7fea..0x5c8020: CharacterEntity blip +4 head then +0 body, see docs/playerinfo/avatars-re.md)) and the arms
+// model in first person. `fallback` = no combo resolved: with an EMPTY registry
+// retail draws the entity's own item model @0x5c8039 (blip handles 0), which is
+// what this returns. Divergence, tracked in avatars-re D-PLAYERINFO-1: with a
+// populated registry retail's client 0x0C fold re-stamps an UNKNOWN id to the
+// first combo of the entity's team side (NapiNPClientMsg 0x0C @0x42eae4..
+// @0x42eb03 -> lookup_entity_slot_and_pack_entry side = team != 1) — the
+// reimpl has no registry validation yet (D-NET-137) and shows the item model.
+Dictionary MissionObjectPlacer::resolve_player_visual_spec(
+		int p_runtime_type_id, int p_character_id) {
+	_ensure_item_db();
+	_ensure_avatar_db();
+	if (avatar_db_.is_valid()) {
+		const Dictionary resolved = avatar_db_->resolve_character_id(
+				p_character_id);
+		if (!resolved.is_empty()) {
+			const Dictionary head = resolved.get("head", Dictionary());
+			const Dictionary body = resolved.get("body", Dictionary());
+			const Dictionary arms = resolved.get("arms", Dictionary());
+			Dictionary out;
+			out["character_id"] = p_character_id & 0xffff;
+			out["item_id"] = resolve_player_visual_item_id(
+					p_runtime_type_id);
+			out["head"] = head.get("graphic", String());
+			out["head_camo"] = head.get("camo", Array());
+			out["body"] = body.get("graphic", String());
+			out["body_camo"] = body.get("camo", Array());
+			out["arms"] = arms.get("graphic", String());
+			out["arms_camo"] = arms.get("camo", Array());
+			out["avatar"] = head.get("voice", 1);
+			out["sex"] = head.get("sex", 0);
+			out["nationality_index"] = resolved.get(
+					"nationality_index", -1);
+			out["division_index"] = resolved.get("division_index", -1);
+			out["combo_index"] = resolved.get("combo_index", -1);
+			out["fallback"] = false;
+			return out;
+		}
+	}
+	Dictionary out;
+	const int item_id = resolve_player_visual_item_id(p_runtime_type_id);
+	out["character_id"] = p_character_id;
+	out["item_id"] = item_id;
+	out["head"] = String();
+	out["body"] = item_db_.is_valid() ? item_db_->get_graphic(item_id) : String();
+	out["arms"] = String();
+	out["fallback"] = true;
+	return out;
+}
+
 ObjectModel *MissionObjectPlacer::build_player_animated_model(
-		int p_runtime_type_id, Node3D *p_parent) {
-	return build_animated_model(
-			resolve_player_visual_item_id(p_runtime_type_id), p_parent);
+		int p_runtime_type_id, Node3D *p_parent, int p_character_id) {
+	const int item_id = resolve_player_visual_item_id(p_runtime_type_id);
+	const Dictionary spec = resolve_player_visual_spec(
+			p_runtime_type_id, p_character_id);
+	if (bool(spec.get("fallback", true))) {
+		return build_animated_model(item_id, p_parent);
+	}
+	const String body_graphic = spec.get("body", String());
+	if (body_graphic.is_empty()) {
+		return build_animated_model(item_id, p_parent);
+	}
+	const String adm_name = item_db_.is_valid()
+			? item_db_->get_anim_def(item_id)
+			: String();
+	ObjectModel *body = build_model_from_graphic(body_graphic, adm_name,
+			p_parent, String(), body_graphic);
+	if (body == nullptr) {
+		return build_animated_model(item_id, p_parent);
+	}
+	// Same node naming as the item-model path (PlayerAvatar_<graphic>): the
+	// composed body IS the player's avatar node; the head rides under it.
+	body->set_name(vformat("PlayerAvatar_%s", body_graphic.get_file().get_basename()));
+	body->set_meta("avatar_part", "body");
+	body->set_meta("character_id", p_character_id & 0xffff);
+	body->set_meta("player_visual_spec", spec);
+	// (retail: Avatar_SetBodyCamoCtrl @0x57a390 immediately before the body submit
+	// @0x5c800f, see docs/playerinfo/avatars-re.md)
+	AvatarDatabase::apply_part_camo(body, spec.get("body_camo", Array()),
+			"player_avatar:body_camo");
+	body->set_mirror_reflected(_item_is_mirror_reflected(item_id));
+	body->set_muzzle_point_name(item_db_.is_valid()
+			? item_db_->get_launchups_closeattack(item_id)
+			: String());
+	_configure_item_shadow(body, item_id);
+
+	const String head_graphic = spec.get("head", String());
+	if (!head_graphic.is_empty()) {
+		ObjectModel *head = build_model_from_graphic(head_graphic, adm_name,
+				body, String(), body_graphic);
+		if (head != nullptr) {
+			head->set_name(vformat("PlayerAvatarHead_%s",
+					head_graphic.get_file().get_basename()));
+			head->set_meta("avatar_part", "head");
+			head->set_meta("character_id", p_character_id & 0xffff);
+			// (retail: Avatar_SetHeadCamoCtrl @0x57a370 immediately before the
+			// head submit @0x5c7fec, see docs/playerinfo/avatars-re.md)
+			AvatarDatabase::apply_part_camo(head, spec.get("head_camo", Array()),
+					"player_avatar:head_camo");
+			head->set_mirror_reflected(_item_is_mirror_reflected(item_id));
+			_configure_item_shadow(head, item_id);
+			// The head follows every body presentation call (one entity, one
+			// skeleton, one CTRL bus) except the per-part camo triplet.
+			body->add_presentation_link(head,
+					AvatarDatabase::part_camo_registers());
+		}
+	}
+	return body;
 }
 
 ObjectModel *MissionObjectPlacer::build_model_from_graphic(

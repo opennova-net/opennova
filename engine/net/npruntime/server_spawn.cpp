@@ -194,13 +194,19 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	        ? 0
 	        : 1;
 	if (is_host_own) {
-		// The host's own player never uploads CU vars — retail stamps its animSlot on the LOCAL
-		// path from the profile avatar byte, default-resolved to 1 when the profile carries none
-		// (the golden host record). Its NetId comes from local deploy, not this record -> keep 0
-		// (the encoder shim emits the golden 0x0200). [orig: Player_InitPlayer @0x4e15f0
-		// (@0x4e1843) <- g_avatarTeam1/2 <- apply_session_settings_to_globals @0x551500 with the
-		// sub_57AE60 not-found default 1]
-		spawn.anim_slot = 1;
+		// The host's own player never uploads CU vars — start_host_session installs the
+		// mounted profile's per-side selection on the type-2 loopback (stock fresh-profile
+		// seed when nothing is saved: side A 0x0200/avatar 1 = the golden host record). Retail
+		// stamps the SAME profile fields on its LOCAL path, picked by the assigned team's side:
+		// animSlot <- g_avatarTeam1/2, the packed character/minimap id from the validated
+		// profile ids, playerClass <- g_charClassTeam1/2 (clamped [5,9] at session start).
+		// [orig: Player_InitPlayer @0x4e15f0 (@0x4e1843) <- g_avatarTeam1/2 + g_charClassTeam1/2
+		// <- apply_session_settings_to_globals @0x551500 (class clamp @0x5516ab..0x5516ec, avatar
+		// via sub_57AE60); ids validated + stored by PlayerSession_InitFromProfile @0x50ca80]
+		spawn.anim_slot = conn.char_vars.avatar[side];
+		spawn.minimap_net_id = conn.char_vars.char_id[side];
+		const uint8_t cls = conn.char_vars.char_class[side];
+		spawn.player_class = (cls >= 5 && cls <= 9) ? cls : 8;
 	} else {
 		spawn.anim_slot = conn.char_vars.avatar[side];       // raw echo; 0 = tag absent (retail)
 		spawn.minimap_net_id = conn.char_vars.char_id[side]; // 0 -> encoder shim

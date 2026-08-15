@@ -104,12 +104,17 @@ func test_join_auth_profile_uses_retail_avatar_packing_and_defaults() -> void:
 
 func test_join_auth_profile_packs_the_selected_character_for_its_side() -> void:
 	var db := _load_db()
+	# The ACCEPT snapshot shape: the chosen side's tree indices in its
+	# side_profiles slot, class 6 stamped on both sides (retail's two-block
+	# class loop), the other side untouched (empty = retail default).
 	var selected := {
 		"team": 0,
-		"nationality": 0,
-		"division": 0,
-		"combo": 1,
 		"player_class": 6,
+		"side_profiles": [
+			{"team": 0, "nationality": 0, "division": 0, "combo": 1,
+					"player_class": 6},
+			{"player_class": 6},
+		],
 	}
 	var profile := NetSessionDrive.character_join_profile_from_database(db, selected)
 	var ids: Array = profile.get("character_ids", [])
@@ -125,6 +130,38 @@ func test_join_auth_profile_packs_the_selected_character_for_its_side() -> void:
 			"the selected combo supplies its retail avatar byte")
 	assert_eq(profile.get("player_classes", []), [6, 6],
 			"retail commits the chosen class to both side blocks")
+
+
+func test_join_auth_profile_carries_both_persisted_side_characters() -> void:
+	var db := _load_db()
+	var blue: Dictionary = db.resolve_character_id(0x0400, 0)
+	var red: Dictionary = db.resolve_character_id(0x8407, 1)
+	assert_false(blue.is_empty())
+	assert_false(red.is_empty())
+	var selected := {
+		"team": 0,
+		"side_profiles": [
+			{
+				"team": 0,
+				"nationality": int(blue.get("nationality_index", -1)),
+				"division": int(blue.get("division_index", -1)),
+				"combo": int(blue.get("combo_index", -1)),
+				"player_class": 5,
+			},
+			{
+				"team": 1,
+				"nationality": int(red.get("nationality_index", -1)),
+				"division": int(red.get("division_index", -1)),
+				"combo": int(red.get("combo_index", -1)),
+				"player_class": 9,
+			},
+		],
+	}
+	var profile := NetSessionDrive.character_join_profile_from_database(db, selected)
+	assert_eq(profile.get("character_ids", []), [0x0400, 0x8407],
+			"assignment to either team receives that side's persisted character")
+	assert_eq(profile.get("player_classes", []), [5, 9],
+			"an untouched loaded profile retains its two retail class bytes")
 
 
 func test_owns_menu_detects_player_info() -> void:
@@ -275,6 +312,15 @@ func test_mounts_3d_preview_when_widget_present() -> void:
 	if preview != null:
 		assert_true(preview.visible and preview.size.x > 0.0,
 			"the mount is placed over the PLAYER_PREVIEW widget_frame_rect")
+		# The three character dropdowns author their LIST_BOX rows over this very
+		# rect: the mount and every Control under it must stay mouse-transparent
+		# after _ready(), or real clicks on the rows die in the mount instead of
+		# reaching the frame pump.
+		assert_eq(preview.mouse_filter, Control.MOUSE_FILTER_IGNORE,
+			"the menu portrait never intercepts the frame's mouse")
+		for child in preview.find_children("*", "Control", true, false):
+			assert_eq((child as Control).mouse_filter, Control.MOUSE_FILTER_IGNORE,
+				"%s under the portrait is mouse-transparent too" % child.name)
 
 
 func test_snapshot_reports_current_selection() -> void:
@@ -287,6 +333,64 @@ func test_snapshot_reports_current_selection() -> void:
 	assert_eq(String(snap.get("name", "")), "Ghost", "snapshot carries the player name")
 	assert_eq(int(snap.get("team", -1)), 0, "snapshot carries the team")
 	assert_eq(int(snap.get("nationality", -1)), 0, "snapshot carries the selected nationality index")
+	var sides: Array = snap.get("side_profiles", [])
+	assert_eq(sides.size(), 2, "snapshot carries both retail side records")
+	assert_eq(int((sides[0] as Dictionary).get("avatar_packed", -1)), 0x0200,
+			"the active side stores the exact packed Avatars.def identity")
+	assert_eq(int((sides[1] as Dictionary).get("avatar_packed", -1)), 0x8207,
+			"the opposite side is initialized to retail's resolved default")
+
+
+func test_persisted_side_profiles_restore_each_team_cascade() -> void:
+	var db := _load_db()
+	var blue: Dictionary = db.resolve_character_id(0x0400, 0)
+	var red: Dictionary = db.resolve_character_id(0x8407, 1)
+	var companion := PlayerInfoMenuCompanion.new()
+	companion.set_persisted_profile({
+		"name": "Persistent",
+		"team": 0,
+		"side_profiles": [
+			{
+				"team": 0,
+				"nationality": int(blue.get("nationality_index", -1)),
+				"division": int(blue.get("division_index", -1)),
+				"combo": int(blue.get("combo_index", -1)),
+				"player_class": 8,
+				"avatar_a": 0, "avatar_b": 0, "avatar_packed": 0x0400,
+			},
+			{
+				"team": 1,
+				"nationality": int(red.get("nationality_index", -1)),
+				"division": int(red.get("division_index", -1)),
+				"combo": int(red.get("combo_index", -1)),
+				"player_class": 8,
+				"avatar_a": 7, "avatar_b": 0, "avatar_packed": 0x8407,
+			},
+		],
+	})
+	var driver := _make_avatar_driver()
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(
+			ProjectSettings.globalize_path("res://../fixtures/avatars")), OK)
+	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", root)
+	assert_eq(driver.selected_row(driver.widget_id("COMBO_LIST")),
+			int(blue.get("combo_index", -1)))
+	assert_eq(driver.get_widget_text(driver.widget_id("PLAYERNAME")), "Persistent")
+	var red_radio := driver.widget_id("SIDE_RED")
+	driver.set_widget_checked(red_radio, true)
+	driver.set_widget_checked(driver.widget_id("SIDE_BLUE"), false)
+	driver.widget_activated.emit(red_radio, "SIDE_RED")
+	var red_snapshot := companion.snapshot()
+	assert_eq(int(red_snapshot.get("nationality", -1)),
+			int(red.get("nationality_index", -1)))
+	assert_eq(int(red_snapshot.get("division", -1)),
+			int(red.get("division_index", -1)))
+	assert_eq(driver.selected_row(driver.widget_id("COMBO_LIST")),
+			int(red.get("combo_index", -1)),
+			"switching side restores that side's persisted combo")
+	var saved_sides: Array = companion.snapshot().get("side_profiles", [])
+	assert_eq(int((saved_sides[0] as Dictionary).get("avatar_packed", -1)), 0x0400)
+	assert_eq(int((saved_sides[1] as Dictionary).get("avatar_packed", -1)), 0x8407)
 
 
 func test_accept_emits_avatar_chosen() -> void:

@@ -83,13 +83,15 @@ var _part_models: Dictionary = {}
 # resolvable; _skeletal_tried gates the one-time build so a missing-asset mount reads once.
 var _skeletal  # SkeletalAnim or null
 var _skeletal_tried := false
-# Camo tint requested per combo, applied to all part models (see apply_camo).
-var _camo := Vector3.ONE
 var _missing_parts := PackedStringArray()
 
 
 func _ready() -> void:
-	mouse_filter = Control.MOUSE_FILTER_STOP
+	# The ONED workspace preview owns its mouse (orbit / pan / fly); the menu
+	# portrait must be transparent to it -- the frame pump owns hover and every
+	# click, including the dropdown rows retail authors over the preview rect.
+	mouse_filter = (Control.MOUSE_FILTER_IGNORE if _menu_preview
+			else Control.MOUSE_FILTER_STOP)
 	clip_contents = true
 	_build_viewport()
 
@@ -118,6 +120,11 @@ func set_menu_preview(enabled: bool) -> void:
 	set_axes_visible(false)
 	if _camera != null:
 		_camera.set_gameplay_locked(true)
+	# Mouse-transparent as a whole (this Control AND the SubViewportContainer):
+	# the PLAYER_INFO combos drop their LIST_BOX rows over this very rect, and
+	# _ready() would otherwise re-arm the workspace STOP filter after the
+	# companion mounted the preview.
+	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	if _viewport_container != null:
 		_viewport_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	if _viewport != null:
@@ -240,15 +247,9 @@ func load_combo(combo: Dictionary) -> void:
 		var part: Variant = combo.get(slot, null)
 		if part == null or not (part is Dictionary):
 			continue
-		var graphic := String((part as Dictionary).get("graphic", "")).strip_edges()
-		_load_part(slot, graphic)
-	# Pull the camo from the head part if present (the menu's per-combo tint sits
-	# on the head); apply it across all loaded models.
-	var head: Variant = combo.get("head", null)
-	if head is Dictionary:
-		var camo: Array = (head as Dictionary).get("camo", [])
-		if camo.size() == 3:
-			apply_camo(Vector3(float(camo[0]), float(camo[1]), float(camo[2])) / 255.0)
+		var part_dict := part as Dictionary
+		var graphic := String(part_dict.get("graphic", "")).strip_edges()
+		_load_part(slot, graphic, part_dict.get("camo", []))
 	_refresh_status_label()
 	_refresh_preview_guides()
 
@@ -277,7 +278,7 @@ func _ensure_preview_skeletal():
 
 # Load one part .3di by basename into a sibling ObjectModel under the root.
 # No resource root, an empty name, or a load failure leaves the slot empty.
-func _load_part(slot: String, graphic: String) -> void:
+func _load_part(slot: String, graphic: String, camo: Array = []) -> void:
 	if graphic.is_empty():
 		_missing_parts.append("%s: empty graphic" % slot)
 		return
@@ -293,6 +294,11 @@ func _load_part(slot: String, graphic: String) -> void:
 	_model_root.add_child(model)
 	model.set_environment_state(_environment.get_light_state())
 	model.set_object_data(data)
+	# Each part carries its own authored camo triplet, stored immediately before
+	# that part's preview submit [orig: Avatar_SetHeadCamoCtrl @0x57a370 /
+	# Avatar_SetBodyCamoCtrl @0x57a390 at PlayerInfo_RenderPlayerPreview3D
+	# @0x56113c/@0x56110b].
+	AvatarDatabase.apply_part_camo(model, camo, "avatar_preview:camo")
 	model.set_active_lod(0)  # always the finest LOD in the portrait (defensive; 0 is the default)
 	# Bind the shared skeletal idle so the skinned part plays PI_Idle.BAD on the Dt1rst skeleton,
 	# like the original PLAYER_INFO preview [orig: PlayerInfo_InitPreviewModel @ 0x5600d0 ->
@@ -304,17 +310,6 @@ func _load_part(slot: String, graphic: String) -> void:
 		model.set_skeletal_anim(sk)
 		model.play_body_clip(PREVIEW_IDLE_KEY)
 	_part_models[slot] = model
-
-
-# Push the combo's camo color into each part model. The original menu tints the
-# character with the part camo triple; the reimpl's per-material modulation hook
-# is u_rgb_mod, but it is driven by the engine's eval_material_runtime (animated
-# UV / rgb), not a free editor override — there is no witnessed editor camo path
-# yet, so this stores the value and is otherwise a no-op.
-# TODO camo tint: wire to a material modulation parameter once the original
-# combo-camo application is witnessed (docs/playerinfo/avatars-re.md D-PLAYERINFO-1).
-func apply_camo(rgb: Vector3) -> void:
-	_camo = rgb
 
 
 func get_part_model(slot: String):
@@ -331,7 +326,6 @@ func clear() -> void:
 			_model_root.remove_child(model)
 			model.queue_free()
 	_part_models.clear()
-	_camo = Vector3.ONE
 	_has_framed = false
 	_missing_parts = PackedStringArray()
 	_refresh_status_label()

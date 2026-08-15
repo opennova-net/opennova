@@ -26,6 +26,7 @@
   "dict_contract_allowlist": [
     "link_payload.gd|func to_drag_data()",
     "link_payload.gd|func from_drag_data(",
+    "player_profile.gd|static func load_character_profile(",
     "armory_menu_companion.gd|func selected_weapon(",
     "document_tab_row.gd|func to_dict()",
     "mcp_tool_def.gd|var input_schema",

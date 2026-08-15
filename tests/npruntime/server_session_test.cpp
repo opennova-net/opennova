@@ -346,6 +346,39 @@ bool check_create_session_brings_up_host() {
 	return true;
 }
 
+// A listen host has no ClientAuth upload. Its resolved PLAYER_INFO fields must
+// therefore reach the type-2 loopback before Server_ProcessPendingPlayerSpawns
+// consumes them [orig: local profile path into player_ServerAdd @0x51CBC0].
+bool check_listen_host_installs_local_character_profile() {
+	opennova::netsim::LoopbackChannel local_client;
+	opennova::np::HostOwner owner;
+	owner.host_loopback = &local_client;
+	opennova::np::HostConfig config;
+	config.socket_mode = SocketMode::Socketless;
+	config.serve_and_play = true;
+	config.local_character_vars.char_id[0] = 0x0400;
+	config.local_character_vars.char_id[1] = 0x8407;
+	config.local_character_vars.char_class[0] = 6;
+	config.local_character_vars.char_class[1] = 7;
+	config.local_character_vars.avatar[0] = 3;
+	config.local_character_vars.avatar[1] = 9;
+
+	opennova::np::start_host_session(owner, config);
+	if (!expect(owner.ctx.np_protocol.connection_list.size() == 1,
+			"listen host owns one type-2 local connection"))
+		return false;
+	const opennova::np::NapiNPConnection &connection =
+			owner.ctx.np_protocol.connection_list.front();
+	return expect(connection.type == 2 &&
+			connection.char_vars.char_id[0] == 0x0400 &&
+			connection.char_vars.char_id[1] == 0x8407 &&
+			connection.char_vars.char_class[0] == 6 &&
+			connection.char_vars.char_class[1] == 7 &&
+			connection.char_vars.avatar[0] == 3 &&
+			connection.char_vars.avatar[1] == 9,
+			"listen-host type-2 connection receives both selected characters");
+}
+
 // A dedicated host (mode 1) starts the server but registers no local client connection.
 bool check_dedicated_host_has_no_local_client() {
 	NapiNPServerCtx ctx;
@@ -2631,6 +2664,7 @@ int main() {
 	ok = check_retail_rate_defaults() && ok;
 	ok = check_pre_dictation_holdoff_keeps_initial_settings_open() && ok;
 	ok = check_create_session_brings_up_host() && ok;
+	ok = check_listen_host_installs_local_character_profile() && ok;
 	ok = check_dedicated_host_has_no_local_client() && ok;
 	ok = check_production_serve_mode_has_no_phantom_and_mints_startup() && ok;
 	ok = check_host_pump_batches_one_send_boundary() && ok;

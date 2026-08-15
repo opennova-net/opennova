@@ -208,6 +208,12 @@ func mcp_game_menu(args: Dictionary) -> Variant:
 			var out := shell.menu_snapshot(false)
 			out["hit_index"] = hit
 			return out
+		"click_at":
+			if not args.has("x") or not args.has("y"):
+				return {"error": "click_at requires x and y (design coords)"}
+			if not shell.menu_click_at(Vector2(float(args["x"]), float(args["y"]))):
+				return {"error": "menu not visible"}
+			return shell.menu_snapshot(false)
 		"key":
 			if not args.has("keycode"):
 				return {"error": "key requires keycode"}

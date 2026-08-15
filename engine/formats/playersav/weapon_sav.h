@@ -132,6 +132,17 @@ std::vector<uint8_t> write(const File &in);
 // weapon name per class page, "WPN_M4AUTO" in the single-player page.
 File make_defaults();
 
+// Apply the PLAYER_INFO ACCEPT header edits to one profile slot. Retail writes
+// the selected class to BOTH side blocks, then writes nationality/division and
+// the packed character id only to the currently selected side
+// [orig: save_player_info_from_dialog @0x55EE3F-0x55EE6D (class loop),
+//  @0x55EE93-0x55EF38 (selected-side bytes +1/+2/+4)]. The caller owns file
+// persistence; untouched slots, kit pages, and the other side's avatar remain
+// unchanged. Returns false for an out-of-range slot.
+bool update_avatar_selection(File &file, size_t slot, SideId selected_side,
+        uint8_t player_class, uint8_t avatar_a, uint8_t avatar_b,
+        uint16_t avatar_packed);
+
 // Clamp every side's class byte into [5,9], per side independently
 // [orig: apply_session_settings_to_globals @0x5516d0-@0x5516ec].
 void clamp_classes(File &f);

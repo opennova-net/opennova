@@ -104,6 +104,12 @@ struct MenuDrawList {
 		int32_t index = 0;
 	};
 	std::vector<DrawOp> draw_ops;
+	// The first op of the menu-top overlay: the open dropdown popups (the
+	// D-MNU-12 post-walk pass) and the cursor, which retail paints after every
+	// screen widget [orig: CUIScene_DrawScreensAndCursor @ 0x63bf60]. An
+	// embedder that mounts its own controls over the frame (the PLAYER_INFO
+	// preview and icon mounts) must draw ops from here on ABOVE those mounts.
+	int32_t overlay_op_start = 0;
 	int64_t widgets_drawn = 0;
 };
 

@@ -66,6 +66,10 @@ enum PresentField : int {
 	PF_RESPAWN_REVISION, // decoded organic dead->alive epoch; resets remote body state
 	PF_TYPE_ID,    // items.def runtime type id from the wire (0 = none); keys the joiner's wire avatars
 	PF_WIRE_HANDLE,// (pool<<12)|slot wire handle; zero is a valid pool-0 identity
+	// The packed character id (entity+0x15C: nationality|division|combo|side) the
+	// 0x0C spawn echoes for a player; 0 when not a player. Keys the composed
+	// head/body the joiner presents for that row.
+	PF_CHARACTER_ID,
 	// Final output of anim::compute_aim_overlay_angles. Presentation consumes
 	// this result; it never repeats the mounted config selector.
 	PF_AIM_OVERLAY_VALID,

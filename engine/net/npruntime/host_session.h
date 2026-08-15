@@ -115,6 +115,15 @@ struct HostConfig {
 	uint32_t host_start_tick = 0;
 	uint32_t session_seed_id = 0;
 	bool serve_and_play = false; // true: HostClient + local player; false: HostOnly, no local player
+	// The listen host's OWN per-side character selection (weapon.sav / PLAYER_INFO),
+	// installed on its type-2 loopback connection before the local player add — the
+	// same fields a joiner uploads in ClientAuth. Retail fills its local player
+	// record from the profile the same way [orig: PlayerSession_InitFromProfile
+	// @0x50ca80 validates + stores both side ids; Player_InitPlayer @0x4e15f0 <-
+	// g_avatarTeam1/2, g_charClassTeam1/2 <- apply_session_settings_to_globals
+	// @0x551500]. Defaults to the stock fresh-profile seed; the shell replaces it
+	// from the mounted Avatars.def + weapon.sav.
+	CharacterJoinVars local_character_vars = retail_fresh_profile_character_vars();
 };
 
 // Stand `owner` up through the shared in-match host bring-up used by apps/nw_server and the Godot

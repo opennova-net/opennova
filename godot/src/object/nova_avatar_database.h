@@ -21,6 +21,8 @@ class ResourceRoot;
 // runtime PLAYER_INFO menu (read + resolve). Witnessed format/behavior:
 // docs/playerinfo/avatars-re.md. The combo -> 3D-model load is the open
 // D-PLAYERINFO-1 seam; resolve_combo() stops at the resolved part graphic names.
+class ObjectModel;
+
 class AvatarDatabase : public RefCounted {
 	GDCLASS(AvatarDatabase, RefCounted)
 
@@ -114,6 +116,20 @@ public:
 	enum { PREVIEW_INITIAL_YAW_RANGE_DEG =
 			opennova::avatars::kPreviewInitialYawRangeDeg };
 
+	// The three CTRL registers a combo part's authored `camo` bytes drive
+	// (TEX_CAMO1..3 = .3di control-catalog ordinals 93..95). Retail zero-extends
+	// the bytes into the shared CTRL bus immediately before submitting THAT
+	// part, so head, body and arms each carry their own triplet — no scaling, no
+	// tint: the bytes are texture-variant selectors (retail: Avatar_SetHeadCamoCtrl
+	// @0x57a370 / Avatar_SetBodyCamoCtrl @0x57a390 / Avatar_SetArmsCamoCtrl
+	// @0x57a3b0 -> CTRL slots 0x83FFD0/D8/E0; world submits @0x5c7fec/@0x5c800f,
+	// preview @0x56113c/@0x56110b, first-person arms @0x4df008/@0x4df070, see docs/playerinfo/avatars-re.md).
+	static PackedStringArray part_camo_registers();
+	// Store one part's raw camo bytes ([r, g, b] as parsed) on `p_model` under
+	// `p_owner`. Fewer than three bytes stores nothing.
+	static void apply_part_camo(ObjectModel *p_model, const Array &p_camo,
+			const String &p_owner);
+
 	// Load Avatars.def from an absolute/res path (decrypts if needed) or via the
 	// mounted resource root (VFS/PFF). Both emit "changed".
 	Error load(const String &path);
@@ -150,6 +166,19 @@ public:
 	// voice, sex), the surface the menu/preview consume. Stops before any .3di load
 	// (D-PLAYERINFO-1). Missing part references resolve to empty entries.
 	Dictionary resolve_combo(int nat_index, int div_index, int combo_index) const;
+	// Resolve the packed character identity (npwire/character_id.h: authored
+	// nationality bits 0..4, division 5..8, combo 9..14, alignment 15) the
+	// ClientAuth CI0/CI1, the entity+0x15C wire NetId, and the weapon.sav header
+	// all carry. Returns the resolved combo plus its tree indices, or an empty
+	// Dictionary when no combo matches (or the alignment bit contradicts
+	// `expected_alignment` when that is ALIGN_GOOD/ALIGN_EVIL)
+	// (retail: MinimapSlot_FindByPackedId @0x57a270, see docs/playerinfo/avatars-re.md).
+	Dictionary resolve_character_id(int character_id,
+			int expected_alignment = -1) const;
+	// Retail's per-side default character: the packed id of the first combo (file
+	// order) whose nationality alignment matches; no match -> the first combo of
+	// all; empty -> 0 (retail: lookup_entity_slot_and_pack_entry @0x57ad40, see docs/playerinfo/avatars-re.md).
+	int first_character_id(int alignment) const;
 
 	// Whole-model bridge for the editor: read the full nested model, edit it in
 	// GDScript, set it back, then save_to_path(). set_model() emits "changed".

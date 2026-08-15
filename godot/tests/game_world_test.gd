@@ -20,10 +20,41 @@ func after_each() -> void:
 class ViewmodelPlacerStub:
 	extends RefCounted
 	var graphics: Array[String] = []
+	func resolve_player_visual_spec(_runtime_type_id: int,
+			_character_id: int = 0) -> Dictionary:
+		return {"fallback": true}
 	func build_model_from_graphic(graphic: String, _adm_name: String,
 			_parent: Node3D, _clip_key: String, _env_node, _rig_graphic: String):
 		graphics.append(graphic)
 		return null
+
+
+class SelectedAvatarViewmodelPlacerStub:
+	extends RefCounted
+	var graphics: Array[String] = []
+	func resolve_player_visual_spec(_runtime_type_id: int,
+			_character_id: int = 0) -> Dictionary:
+		return {
+			"fallback": false,
+			"arms": "SelectedArms",
+			"arms_camo": [17, 34, 51],
+		}
+	func build_model_from_graphic(graphic: String, _adm_name: String,
+			parent: Node3D, _clip_key: String, _rig_graphic: String):
+		graphics.append(graphic)
+		var model := ObjectModel.new()
+		model.name = graphic
+		parent.add_child(model)
+		return model
+
+
+# A local player whose packed character id resolves to no combo (empty
+# registry): retail submits the gun alone -- there is no weapon.def arms field.
+class NoCharacterViewmodelPlacerStub:
+	extends SelectedAvatarViewmodelPlacerStub
+	func resolve_player_visual_spec(_runtime_type_id: int,
+			_character_id: int = 0) -> Dictionary:
+		return {"fallback": true}
 
 
 class ViewmodelWorldHarness:
@@ -42,6 +73,11 @@ class ViewmodelWorldHarness:
 class ChallengePrewarmPlacerStub:
 	extends RefCounted
 	var loaded: Array[String] = []
+	# The joiner's resolved character: its arms are the ONLY first-person arms
+	# source (retail discards weapon.def gfx1a).
+	func resolve_player_visual_spec(_runtime_type_id: int,
+			_character_id: int = 0) -> Dictionary:
+		return {"fallback": false, "arms": "test_arms", "arms_camo": [0, 0, 0]}
 	func resolve_player_visual_item_id(_runtime_type_id: int) -> int:
 		return 101001
 	func graphic_for(_item_id: int) -> String:
@@ -1842,6 +1878,52 @@ func test_valid_emplaced_def_without_gfx1_builds_no_fallback_gun() -> void:
 			"the render gate observes that no first-person gun model resolved")
 
 
+func test_first_person_uses_selected_arms_and_raw_part_local_camo() -> void:
+	var world: ViewmodelWorldHarness = autofree(ViewmodelWorldHarness.new())
+	var placer := SelectedAvatarViewmodelPlacerStub.new()
+	world.install_viewmodel_fixture(PlayerViewmodelDef.from_weapon_dict({
+		"name": "WPN_TEST",
+		"gfx1": "TestGun",
+		"gfx1a": "WeaponDefaultArms",  # a retail-discarded token; never an arms source
+		"flags": 0,
+	}), placer)
+	var container := world.build_local_player_viewmodel()
+	assert_not_null(container)
+	assert_eq(placer.graphics, ["SelectedArms", "TestGun"],
+			"the first-person arms are the selected character's combo arms")
+	var parts := world.local_player_viewmodel_parts()
+	assert_eq(parts.size(), 2)
+	var arms: ObjectModel = parts[0]
+	var gun: ObjectModel = parts[1]
+	# The arms carry their authored raw triplet for the rig's per-submit FP
+	# writer (Avatar_SetArmsCamoCtrl runs before each arms submit, never at
+	# load); the gun part is never a camo target.
+	assert_eq(String(arms.get_meta("avatar_part", "")), "arms")
+	assert_eq(Array(arms.get_meta("avatar_camo", [])), [17, 34, 51],
+			"first-person arms carry the authored raw CTRL bytes")
+	assert_false(gun.has_meta("avatar_part"),
+			"the arms' per-draw TEX_CAMO state does not leak into the gun")
+	assert_true(arms.get_ctrl_values().is_empty(),
+			"no FP CTRL writer runs at build time")
+
+
+func test_first_person_without_character_arms_submits_the_gun_alone() -> void:
+	var world: ViewmodelWorldHarness = autofree(ViewmodelWorldHarness.new())
+	var placer := NoCharacterViewmodelPlacerStub.new()
+	world.install_viewmodel_fixture(PlayerViewmodelDef.from_weapon_dict({
+		"name": "WPN_TEST",
+		"gfx1": "TestGun",
+		"gfx1a": "WeaponDefaultArms",
+		"flags": 0,
+	}), placer)
+	var container := world.build_local_player_viewmodel()
+	assert_not_null(container)
+	assert_eq(placer.graphics, ["TestGun"],
+			"no resolved character arms means no arms submit -- gfx1a is not a fallback "
+			+ "[orig: Player_RenderFirstPersonViewModel @0x4df064/@0x4df06b]")
+	assert_eq(world.local_player_viewmodel_parts().size(), 1)
+
+
 func test_joiner_challenge_prewarm_loads_player_and_current_viewmodels_before_freeze() -> void:
 	var world: ChallengePrewarmWorldHarness = autofree(
 			ChallengePrewarmWorldHarness.new())
@@ -1856,7 +1938,8 @@ func test_joiner_challenge_prewarm_loads_player_and_current_viewmodels_before_fr
 	world.prewarm_challenge_models()
 
 	assert_eq(placer.loaded, ["player_body", "test_gun", "test_arms"],
-		"the frozen 0x3D source includes every .3DI the first player frame would load")
+		"the frozen 0x3D source includes every .3DI the first player frame would load "
+		+ "(the character's arms, not a weapon.def field)")
 
 
 func test_joiner_accepts_novaworld_advertised_mission_basename() -> void:

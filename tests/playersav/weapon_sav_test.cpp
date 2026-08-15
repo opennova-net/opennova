@@ -363,6 +363,38 @@ int test_clamp_classes()
     return 0;
 }
 
+// --- 6b. PLAYER_INFO avatar header update ----------------------------------
+
+int test_update_avatar_selection()
+{
+    File f = make_defaults();
+    f.slots[0].blue.avatar_a = 1;
+    f.slots[0].blue.avatar_b = 2;
+    f.slots[0].blue.avatar_packed = 0x0200;
+    f.slots[0].red.avatar_a = 7;
+    f.slots[0].red.avatar_b = 4;
+    f.slots[0].red.avatar_packed = 0x8207;
+    f.slots[1].blue.avatar_packed = 0x1234;
+
+    // Retail commits class to both side headers but character selection only
+    // to g_playerInfoTeam's block [orig: save_player_info_from_dialog
+    // @0x55EE3F-0x55EE6D, @0x55EE93-0x55EF38].
+    TEST_EXPECT(update_avatar_selection(
+        f, 0, SideId::Blue, 6, 3, 5, 0x0A63));
+    TEST_EXPECT(f.slots[0].blue.player_class == 6);
+    TEST_EXPECT(f.slots[0].red.player_class == 6);
+    TEST_EXPECT(f.slots[0].blue.avatar_a == 3);
+    TEST_EXPECT(f.slots[0].blue.avatar_b == 5);
+    TEST_EXPECT(f.slots[0].blue.avatar_packed == 0x0A63);
+    TEST_EXPECT(f.slots[0].red.avatar_a == 7);
+    TEST_EXPECT(f.slots[0].red.avatar_b == 4);
+    TEST_EXPECT(f.slots[0].red.avatar_packed == 0x8207);
+    TEST_EXPECT(f.slots[1].blue.avatar_packed == 0x1234);
+    TEST_EXPECT(!update_avatar_selection(
+        f, kProfileSlots, SideId::Red, 8, 0, 0, 0));
+    return 0;
+}
+
 // --- 7. encode -> decode -> encode is byte-stable ---------------------------
 
 int test_page_codec_roundtrip()
@@ -474,6 +506,7 @@ int main()
         {"side_for_team", test_side_for_team},
         {"weapon_sav_relpath", test_weapon_sav_relpath},
         {"clamp_classes", test_clamp_classes},
+        {"update_avatar_selection", test_update_avatar_selection},
         {"page_codec_roundtrip", test_page_codec_roundtrip},
         {"retail_file", test_retail_file},
     };

@@ -5,9 +5,11 @@
 // preexisting replica state is untouched by the failure.
 
 #include "netsim/client_replica_pipeline.h"
+#include "npruntime/client_replica_present_projection.h"
 
 #include <npwire/ingame_encode.h>
 #include <npwire/ingame_message_id.h>
+#include <world/present_rows.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -123,6 +125,34 @@ bool test_organic_page_applies_complete_prefix() {
 			nw::s2c::ENTITY_SPAWN_BATCH, trailing, {0x0012u}, {},
 			"0x0C trailing") && ok;
 	return ok;
+}
+
+bool test_player_character_identity_reaches_present_row() {
+	ns::ClientReplicaPipeline pipeline;
+	nw::OrganicSpawnBatch batch;
+	nw::OrganicSpawnRecord rec = organic_record(0x0014u, 0x14B9u, "custom");
+	rec.anim_slot = 3;
+	rec.net_id = 0x0400u;
+	batch.records.push_back(rec);
+	batch.entity_count = 1;
+	pipeline.apply(nw::s2c::ENTITY_SPAWN_BATCH,
+			nw::encode_organic_spawn_batch(batch));
+
+	const ns::ClientEntityState *row = pipeline.state().find(rec.slot_id);
+	if (!expect(row != nullptr && row->net_id == rec.net_id,
+			"0x0C packed character id was dropped by the replica fold",
+			"player identity"))
+		return false;
+
+	float present[nw::world::PF_STRIDE];
+	nw::np::initialize_client_replica_present_row(present);
+	nw::np::ClientReplicaPresentContext context;
+	nw::np::project_client_replica_present_row(
+			present, *row, pipeline.state(), context);
+	return expect(
+			static_cast<int>(present[nw::world::PF_CHARACTER_ID]) == rec.net_id,
+			"player character identity was dropped before presentation",
+			"player identity");
 }
 
 nw::PoolSpawnRecord pool_spawn_record(
@@ -384,6 +414,7 @@ bool test_repeated_load_records_reset_complete_replica_rows() {
 int main() {
 	bool ok = true;
 	ok = test_organic_page_applies_complete_prefix() && ok;
+	ok = test_player_character_identity_reaches_present_row() && ok;
 	ok = test_pool_spawn_page_applies_complete_prefix() && ok;
 	ok = test_static_page_applies_complete_prefix() && ok;
 	ok = test_pool3_page_applies_complete_prefix() && ok;

@@ -203,6 +203,18 @@ private:
 	// (Dictionary: ObjectData's PANM/material evaluators consume it).
 	Dictionary ctrl_values_;
 	HashMap<String, String> ctrl_value_owners_;
+	// Optional visual parts (a player body's selected head) driven by this
+	// model's presentation calls: every animation/body/part call and every CTRL
+	// register store is forwarded, EXCEPT the registers the composer declared
+	// part-local for that link (retail rewrites the head/body/arms TEX_CAMO
+	// triplet on the shared CTRL bus immediately before each part's own
+	// submit, so a retained composition keeps those per part). ObjectIDs make
+	// teardown safe when a child is queued.
+	struct PresentationLink {
+		ObjectID id;
+		HashSet<String> part_local_registers; // canonical register names
+	};
+	Vector<PresentationLink> presentation_links_;
 	int ctrl_batch_depth_ = 0;
 	bool ctrl_batch_dirty_ = false;
 	HashMap<String, PartAnimChannel> part_anims_;
@@ -313,6 +325,9 @@ private:
 	void publish_submission_state();
 	void set_model_bounds(const AABB &p_bounds);
 	static bool aabb_equal_approx(const AABB &p_a, const AABB &p_b);
+	Vector<ObjectModel *> live_presentation_links() const;
+	Vector<ObjectModel *> live_presentation_links_sharing(
+			const String &p_register) const;
 
 	// --- body/part animation (nova_object_model_anim.cpp) ---
 	void resolve_muzzle_userpoint();
@@ -383,6 +398,11 @@ public:
 	// --- data / configuration ---
 	void set_object_data(const Ref<ObjectData> &p_data);
 	Ref<ObjectData> get_object_data() const { return object_data_; }
+	// Compose `p_model` as a linked visual part; `p_part_local_registers` names
+	// the CTRL registers that stay per part (not forwarded).
+	void add_presentation_link(ObjectModel *p_model,
+			const PackedStringArray &p_part_local_registers = PackedStringArray());
+	int get_presentation_link_count() const;
 	void set_mirror_reflected(bool p_reflected) { mirror_reflected_ = p_reflected; }
 	bool get_mirror_reflected() const { return mirror_reflected_; }
 	void set_native_frame(bool p_native) { native_frame_ = p_native; }

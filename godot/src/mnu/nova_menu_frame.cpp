@@ -6,6 +6,7 @@
 
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
+#include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_color_array.hpp>
@@ -43,7 +44,23 @@ std::string to_std(const String &s) {
 
 MenuFrame::MenuFrame() = default;
 
-MenuFrame::~MenuFrame() = default;
+MenuFrame::~MenuFrame() {
+	if (overlay_canvas_item_.is_valid()) {
+		RenderingServer::get_singleton()->free_rid(overlay_canvas_item_);
+	}
+}
+
+void MenuFrame::ensure_overlay_canvas_item_() {
+	if (overlay_canvas_item_.is_valid()) {
+		return;
+	}
+	RenderingServer *rs = RenderingServer::get_singleton();
+	overlay_canvas_item_ = rs->canvas_item_create();
+	rs->canvas_item_set_parent(overlay_canvas_item_, get_canvas_item());
+	// One z above the frame and every sibling child it draws in front of.
+	rs->canvas_item_set_z_as_relative_to_parent(overlay_canvas_item_, true);
+	rs->canvas_item_set_z_index(overlay_canvas_item_, 1);
+}
 
 void MenuFrame::free_fonts_() {
 	fonts_.clear();
@@ -787,6 +804,9 @@ void MenuFrame::_notification(int p_what) {
 }
 
 void MenuFrame::_draw() {
+	ensure_overlay_canvas_item_();
+	RenderingServer *rs = RenderingServer::get_singleton();
+	rs->canvas_item_clear(overlay_canvas_item_);
 	if (!configured_) {
 		return;
 	}
@@ -803,6 +823,10 @@ void MenuFrame::_draw() {
 	// glyphs after all quads lets later backgrounds leak earlier text through.
 	// The engine-side MenuDrawList witness record in docs/mnu/menu-re.md owns
 	// the original address correspondence; this adapter only replays it.
+	// Ops before overlay_op_start paint on this Control's own canvas item; the
+	// menu-top overlay (open popups + cursor) paints on the z-above child item
+	// so frame-child mounts never cover it.
+	RID target = get_canvas_item();
 	const auto apply_quad = [&](const opennova::menu::MenuQuad &quad) {
 		const Rect2 rect(quad.x0, quad.y0, quad.x1 - quad.x0, quad.y1 - quad.y0);
 		const Color color = argb_to_color(quad.color);
@@ -813,29 +837,31 @@ void MenuFrame::_draw() {
 		}
 		if (tex.is_null()) {
 			if (quad.texture == opennova::menu::kMenuTexNone) {
-				draw_rect(rect, color, true);
+				rs->canvas_item_add_rect(target, rect, color);
 			}
 			// An unresolved texture draws nothing [orig: every draw is gated
 			// on a successful texture load].
 			return;
 		}
 		if (quad.tiled) {
-			draw_texture_rect(tex, rect, true, color);
+			rs->canvas_item_add_texture_rect(target, rect, tex->get_rid(), true,
+					color);
 		} else if (quad.u0 != 0.0f || quad.v0 != 0.0f || quad.u1 != 1.0f ||
 				quad.v1 != 1.0f) {
 			const Vector2 tex_size = tex->get_size();
-			draw_texture_rect_region(tex, rect,
+			rs->canvas_item_add_texture_rect_region(target, rect, tex->get_rid(),
 					Rect2(quad.u0 * tex_size.x, quad.v0 * tex_size.y,
 							(quad.u1 - quad.u0) * tex_size.x,
 							(quad.v1 - quad.v0) * tex_size.y),
 					color);
 		} else {
-			draw_texture_rect(tex, rect, false, color);
+			rs->canvas_item_add_texture_rect(target, rect, tex->get_rid(), false,
+					color);
 		}
 	};
 	const auto apply_line = [&](const opennova::menu::MenuLine &line) {
-		this->draw_line(Vector2(line.x0, line.y0), Vector2(line.x1, line.y1),
-				argb_to_color(line.color), 1.0f);
+		rs->canvas_item_add_line(target, Vector2(line.x0, line.y0),
+				Vector2(line.x1, line.y1), argb_to_color(line.color), 1.0f);
 	};
 	const auto apply_font_run =
 			[&](const opennova::menu::MenuDrawList::FontRun &run) {
@@ -872,7 +898,8 @@ void MenuFrame::_draw() {
 					uvs.set(3, Vector2(glyph.u0, glyph.v1));
 					PackedColorArray colors;
 					colors.push_back(argb_to_color(glyph.color));
-					draw_polygon(points, colors, uvs, page);
+					rs->canvas_item_add_polygon(target, points, colors, uvs,
+							page->get_rid());
 				}
 				const int32_t underline_end = run.underline_first + run.underline_count;
 				for (int32_t i = run.underline_first;
@@ -881,12 +908,16 @@ void MenuFrame::_draw() {
 						++i) {
 					const opennova::hud::GameFontUnderline &underline =
 							list.underlines[static_cast<size_t>(i)];
-					this->draw_line(Vector2(underline.x0, underline.y),
+					rs->canvas_item_add_line(target, Vector2(underline.x0, underline.y),
 							Vector2(underline.x1, underline.y),
 							argb_to_color(underline.color), 1.0f);
 				}
 			};
-	for (const opennova::menu::MenuDrawList::DrawOp &op : list.draw_ops) {
+	for (size_t op_index = 0; op_index < list.draw_ops.size(); ++op_index) {
+		if (static_cast<int32_t>(op_index) == list.overlay_op_start) {
+			target = overlay_canvas_item_;
+		}
+		const opennova::menu::MenuDrawList::DrawOp &op = list.draw_ops[op_index];
 		switch (op.kind) {
 			case opennova::menu::MenuDrawList::DrawOp::Kind::Quad:
 				if (op.index >= 0 && op.index < static_cast<int32_t>(list.quads.size())) {

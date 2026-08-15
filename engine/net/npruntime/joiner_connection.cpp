@@ -238,22 +238,10 @@ JoinerConnection::JoinerConnection(std::string player_name,
 		: player_name_(std::move(player_name)),
 		  monotonic_milliseconds_(std::move(monotonic_milliseconds)) {
 	if (!monotonic_milliseconds_) monotonic_milliseconds_ = &steady_milliseconds;
-	// Stock-Avatars.def fallback for socket-free/headless callers. Retail initializes
-	// each side from the first AvatarDefs entry of the matching alignment:
-	// packed {nat=0,div=0,combo=1,good}=0x0200 and
-	// {nat=7,div=0,combo=1,evil}=0x8207. The Godot binding replaces these from
-	// the mounted Avatars.def before start(), so a user's real selection wins.
-	// With JO's stock table, the two selected heads carry voice/avatar bytes 1/10.
-	// The witnessed VCB=4 is a saved profile override, not the fresh default.
-	// [orig: PlayerProfile_InitDefaults @0x54bbe0..0x54bc24 ->
-	//  lookup_entity_slot_and_pack_entry @0x57ad40; wire: retail join f=199140]
-	character_join_vars_.char_id[0] = 0x0200;
-	character_join_vars_.char_id[1] = 0x8207;
-	character_join_vars_.team_request = 0xFF;
-	character_join_vars_.char_class[0] = 8;
-	character_join_vars_.char_class[1] = 8;
-	character_join_vars_.avatar[0] = 1;
-	character_join_vars_.avatar[1] = 10;
+	// Stock-Avatars.def fresh-profile seed for socket-free/headless callers; the
+	// Godot binding replaces it from the mounted Avatars.def + weapon.sav before
+	// start(), so a user's real selection wins (retail_fresh_profile_character_vars).
+	character_join_vars_ = retail_fresh_profile_character_vars();
 	conn_.type = 2;                  // client-side connection (the joiner's view of the host)
 	conn_.player_name = player_name_;
 }

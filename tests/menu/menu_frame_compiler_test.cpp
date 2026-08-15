@@ -575,6 +575,33 @@ void test_combo_scrollbar_offsets_rows_and_hit(const fnt_font_t *font) {
 			"the popup's top hit maps to its first scrolled absolute row");
 	CHECK(c.combo_popup_row_at(1, state, 90.0f, 21.0f, 1.0f, 1.0f) == -1,
 			"the popup scrollbar strip does not select a row");
+	// The open popup is menu-top overlay: every op from overlay_op_start on is
+	// the popup (+ cursor), and the scrollbar track quad is one of them, so a
+	// shell can paint that tail above any Control it mounts over the frame.
+	CHECK(dl.overlay_op_start > 0 &&
+					dl.overlay_op_start < static_cast<int32_t>(dl.draw_ops.size()),
+			"the open popup starts the draw list's overlay tail");
+	{
+		bool track_in_overlay = false;
+		const int32_t track = slot_of(c, "combo_track.tga");
+		for (size_t i = static_cast<size_t>(dl.overlay_op_start);
+				i < dl.draw_ops.size(); ++i) {
+			const MenuDrawList::DrawOp &op = dl.draw_ops[i];
+			if (op.kind == MenuDrawList::DrawOp::Kind::Quad &&
+					dl.quads[static_cast<size_t>(op.index)].texture == track) {
+				track_in_overlay = true;
+			}
+		}
+		CHECK(track_in_overlay, "the popup's own quads sit in the overlay tail");
+	}
+	MenuWidgetState closed = combo;
+	closed.popup_open = false;
+	MenuFrameState closed_state;
+	closed_state.widgets.push_back(closed);
+	const MenuDrawList &closed_dl = c.compile(closed_state, 1.0f, 1.0f);
+	CHECK(closed_dl.overlay_op_start ==
+					static_cast<int32_t>(closed_dl.draw_ops.size()),
+			"with no popup and no cursor the overlay tail is empty");
 }
 
 // TABLE has two independent heights: the FONT "W" measure owns the header,

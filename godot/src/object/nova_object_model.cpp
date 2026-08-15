@@ -148,6 +148,64 @@ void ObjectModel::set_object_data(const Ref<ObjectData> &p_data) {
 	rebuild();
 }
 
+Vector<ObjectModel *> ObjectModel::live_presentation_links() const {
+	Vector<ObjectModel *> out;
+	for (const PresentationLink &link : presentation_links_) {
+		ObjectModel *model = link.id.is_valid()
+				? Object::cast_to<ObjectModel>(ObjectDB::get_instance(link.id))
+				: nullptr;
+		if (model != nullptr) {
+			out.push_back(model);
+		}
+	}
+	return out;
+}
+
+// The linked parts that share `p_register` with this model — every link except
+// those whose composer declared the register part-local.
+Vector<ObjectModel *> ObjectModel::live_presentation_links_sharing(
+		const String &p_register) const {
+	Vector<ObjectModel *> out;
+	for (const PresentationLink &link : presentation_links_) {
+		if (link.part_local_registers.has(p_register)) {
+			continue;
+		}
+		ObjectModel *model = link.id.is_valid()
+				? Object::cast_to<ObjectModel>(ObjectDB::get_instance(link.id))
+				: nullptr;
+		if (model != nullptr) {
+			out.push_back(model);
+		}
+	}
+	return out;
+}
+
+void ObjectModel::add_presentation_link(ObjectModel *p_model,
+		const PackedStringArray &p_part_local_registers) {
+	if (p_model == nullptr || p_model == this) {
+		return;
+	}
+	const ObjectID id(p_model->get_instance_id());
+	for (const PresentationLink &existing : presentation_links_) {
+		if (existing.id == id) {
+			return;
+		}
+	}
+	PresentationLink link;
+	link.id = id;
+	for (const String &name : p_part_local_registers) {
+		const String reg = ObjectData::canonical_control_register_name(name);
+		if (!reg.is_empty()) {
+			link.part_local_registers.insert(reg);
+		}
+	}
+	presentation_links_.push_back(link);
+}
+
+int ObjectModel::get_presentation_link_count() const {
+	return live_presentation_links().size();
+}
+
 void ObjectModel::set_model_light_preview_enabled(bool p_enabled) {
 	if (model_light_preview_enabled_ == p_enabled) {
 		return;
@@ -372,6 +430,9 @@ void ObjectModel::finish_ctrl_change(bool p_apply_now) {
 // Batch the ordered register stores that precede one retained-model sample.
 // [see the GDScript origin's rationale — one shared waveform/random advance]
 void ObjectModel::begin_ctrl_update() {
+	for (ObjectModel *linked : live_presentation_links()) {
+		linked->begin_ctrl_update();
+	}
 	++ctrl_batch_depth_;
 }
 
@@ -384,12 +445,18 @@ void ObjectModel::end_ctrl_update() {
 		ctrl_batch_dirty_ = false;
 		apply_runtime_state(0.0);
 	}
+	for (ObjectModel *linked : live_presentation_links()) {
+		linked->end_ctrl_update();
+	}
 }
 
 void ObjectModel::set_ctrl_value(const String &p_name, int64_t p_value) {
 	const String reg = ObjectData::canonical_control_register_name(p_name);
 	if (reg.is_empty()) {
 		return;
+	}
+	for (ObjectModel *linked : live_presentation_links_sharing(reg)) {
+		linked->set_ctrl_value(reg, p_value);
 	}
 	const int64_t next_value = ctrl_dword(p_value);
 	if (ctrl_values_.has(reg) && int64_t(ctrl_values_[reg]) == next_value &&
@@ -403,6 +470,9 @@ void ObjectModel::set_ctrl_value(const String &p_name, int64_t p_value) {
 
 void ObjectModel::clear_ctrl_value(const String &p_name) {
 	const String reg = ObjectData::canonical_control_register_name(p_name);
+	for (ObjectModel *linked : live_presentation_links_sharing(reg)) {
+		linked->clear_ctrl_value(reg);
+	}
 	if (reg.is_empty() || !ctrl_values_.has(reg)) {
 		return;
 	}
@@ -421,6 +491,9 @@ void ObjectModel::set_ctrl_override(const String &p_owner, const String &p_name,
 	if (p_owner.is_empty() || reg.is_empty()) {
 		return;
 	}
+	for (ObjectModel *linked : live_presentation_links_sharing(reg)) {
+		linked->set_ctrl_override(p_owner, reg, p_value);
+	}
 	const int64_t next_value = ctrl_dword(p_value);
 	const String *current_owner = ctrl_value_owners_.getptr(reg);
 	if (ctrl_values_.has(reg) && int64_t(ctrl_values_[reg]) == next_value &&
@@ -436,6 +509,9 @@ void ObjectModel::clear_ctrl_override(const String &p_owner, const String &p_nam
 	const String reg = ObjectData::canonical_control_register_name(p_name);
 	if (p_owner.is_empty() || reg.is_empty()) {
 		return;
+	}
+	for (ObjectModel *linked : live_presentation_links_sharing(reg)) {
+		linked->clear_ctrl_override(p_owner, reg);
 	}
 	const String *current_owner = ctrl_value_owners_.getptr(reg);
 	if (current_owner == nullptr || *current_owner != p_owner) {
@@ -841,6 +917,11 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::wake_runtime_frame);
 	ClassDB::bind_method(D_METHOD("set_object_data", "data"), &ObjectModel::set_object_data);
 	ClassDB::bind_method(D_METHOD("get_object_data"), &ObjectModel::get_object_data);
+	ClassDB::bind_method(D_METHOD("add_presentation_link", "model",
+			"part_local_registers"), &ObjectModel::add_presentation_link,
+			DEFVAL(PackedStringArray()));
+	ClassDB::bind_method(D_METHOD("get_presentation_link_count"),
+			&ObjectModel::get_presentation_link_count);
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "object_data",
 						 PROPERTY_HINT_RESOURCE_TYPE, "ObjectData"),
 			"set_object_data", "get_object_data");
