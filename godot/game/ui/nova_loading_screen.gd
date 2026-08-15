@@ -4,7 +4,7 @@ extends Control
 ## The mission loading screen: the per-mission sidecar image (or the stock
 ## loadscrn.pcx) stretched over the whole display, the MP session text
 ## composited over it, and the red progress bar near the bottom. After a
-## single-player load with a custom background it also hosts the
+## single-player load with a custom background it also carries the
 ## start-mission splash: the same background with a blinking centered
 ## continue line and the cursor arrow, dismissed by any fresh key or mouse
 ## button.
