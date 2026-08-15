@@ -1512,7 +1512,8 @@ Ref<ImageTexture> TerrainData::build_minimap_water_mask(
 	// depthspin is built directly from the 1024x1024 raw16 height atlas. Each
 	// output texel averages the four source taps at (4x,4z), (+2,0), (0,+2),
 	// and (+2,+2), then keeps the integer world-height byte (sum >> 10).
-	// [orig: PolyTrn_InitTextures @0x60BA20..0x60BB3B]
+	// Retail witness: PolyTrn_InitTextures @0x60BA20..0x60BB3B; the exact
+	// address-level contract is recorded in hud_minimap.cpp and hud-re.md.
 	constexpr int kSourcePx = 1024;
 	constexpr int kMaskPx = 256;
 	constexpr int kStep = 4;
@@ -1562,7 +1563,7 @@ Ref<ImageTexture> TerrainData::build_minimap_water_mask(
 			// Stage 0 ADDSIGNED(COMPLEMENT texture.a, diffuse.a), then
 			// stage 1 ADD(TFACTOR.a=64, current) with alpha-ref 192 reduces
 			// exactly to terrain_height_int <= water_int.
-			// [orig: dword_319F904 descriptor @0x60BB5C; ref @0x607834]
+			// Retail descriptor @0x60BB5C and alpha ref @0x607834; see hud-re.md.
 			if (terrain_height_int > water_int) {
 				continue;
 			}

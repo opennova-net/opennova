@@ -22,7 +22,8 @@ namespace {
 uint32_t local_player_minimap_argb(uint8_t team) {
 	// Ordinary entity blips resolve the live team through the retail overlay
 	// color table before TSDicon's later MODULATE2X stage.
-	// [orig: draw_minimap_blip @0x597890; color table @0x840A10]
+	// Retail witness: draw_minimap_blip @0x597890 and color table @0x840A10;
+	// the engine/docs seam carries the authoritative address-level citation.
 	if (team == 1) return 0xFF304080u;
 	return team == 2 ? 0xFF802020u : 0xFF208020u;
 }
@@ -175,8 +176,8 @@ PackedInt32Array Simulation::get_hud_minimap_snapshot() const {
 	// restore it here unless a decoded regular row already covers the same wire
 	// handle. The draw-call probe confirms cell 3, team-table blue, and the
 	// ordinary 6px-floor path at map center.
-	// [orig: render_minimap_slot_blip @0x5BE240 -> draw_minimap_blip;
-	//  regular TSDicon submit @0x597F73]
+	// Retail witness: render_minimap_slot_blip @0x5BE240 ->
+	// draw_minimap_blip, regular TSDicon submit @0x597F73. See hud-re.md.
 	const bool append_local_player = local_player != nullptr &&
 			local_marker_handle != opennova::world::EntityHandle::kInvalid &&
 			!retained_local_player;
