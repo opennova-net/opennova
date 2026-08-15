@@ -24,6 +24,12 @@ inline void bring_up_host(NapiNPServerCtx &ctx, ConnectionMode mode, SocketMode 
 	SessionStartup startup;
 	startup.host_key = host_key;
 	create_session(ctx, config, startup, local_client); // P1: is_in_session=1, host_running=1
+	// start_host_session installs the host's own per-side character selection on the
+	// type-2 loopback right after create_session; the tests carry the stock fresh-profile
+	// seed (side A 0x0200 / avatar 1 = the golden host record) unless a test overrides it.
+	for (NapiNPConnection &connection : ctx.np_protocol.connection_list) {
+		if (connection.type == 2) connection.char_vars = retail_fresh_profile_character_vars();
+	}
 	configure_session_runtime(ctx);                     // P2: drops type-1 joiners, keeps the loopback
 }
 

@@ -166,6 +166,27 @@ struct CharacterJoinVars {
 	uint8_t avatar[2] = {0, 0};     // VCA / VCB -> jsp[63] / ci0 low byte
 };
 
+// The stock-Avatars.def FRESH-PROFILE character vars — what a retail client with
+// no saved selection uploads, and what the listen host's own local player carries
+// before the shell installs the mounted profile: each side's first AvatarDefs entry
+// of the matching alignment, packed {nat=0,div=0,combo=1,good}=0x0200 and
+// {nat=7,div=0,combo=1,evil}=0x8207, class 8 (rifleman) on both sides, the two
+// selected heads' voice/avatar bytes 1/10, and no side request (TR 0xFF).
+// [orig: PlayerProfile_InitDefaults @0x54bbe0..0x54bc24 -> lookup_entity_slot_and_pack_entry
+//  @0x57ad40; the avatar byte via sub_57AE60 @0x57ae60; wire: retail join f=199140 (the
+//  captured VCB=4 is a saved profile override, not the fresh default)]
+inline CharacterJoinVars retail_fresh_profile_character_vars() {
+	CharacterJoinVars vars;
+	vars.char_id[0] = 0x0200;
+	vars.char_id[1] = 0x8207;
+	vars.team_request = 0xFF;
+	vars.char_class[0] = 8;
+	vars.char_class[1] = 8;
+	vars.avatar[0] = 1;
+	vars.avatar[1] = 10;
+	return vars;
+}
+
 // Host-side fire state for ONE of this player's weapon slots — the clip the C2S 0x06 fire
 // pipeline checks + decrements and the C2S 0x25 reload relay refills. Keyed (in the map
 // below) by the weapon-slot combo = category*65 + rank [orig: the per-player 100-B

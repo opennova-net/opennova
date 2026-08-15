@@ -198,9 +198,10 @@ func test_character_save_refuses_to_replace_a_corrupt_existing_profile() -> void
 	var profile := {
 		"team": 0,
 		"player_class": 8,
-		"avatar_a": 0,
-		"avatar_b": 0,
-		"avatar_packed": 0x0200,
+		"side_profiles": [
+			{"avatar_a": 0, "avatar_b": 0, "avatar_packed": 0x0200},
+			{},
+		],
 	}
 	assert_eq(Simulation.save_weapon_profile_selection(path, profile), ERR_FILE_CORRUPT)
 	assert_eq(FileAccess.get_file_as_bytes(path), original,

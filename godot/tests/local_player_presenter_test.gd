@@ -103,6 +103,38 @@ begin "Player Character"
 end
 """)
 	items.close()
+	# The player's character registry: retail's ONLY first-person arms source is
+	# the selected combo's arms part (weapon.def gfx1a is a discarded token), so
+	# one good-side combo binds the staged CharModel head/body + the armsG arms.
+	var avatars := FileAccess.open(root_dir.path_join("Avatars.def"), FileAccess.WRITE)
+	assert_not_null(avatars, "staged Avatars.def is writable")
+	avatars.store_string("""define head STAGED_HEAD
+{
+	graphic CharModel.3di
+	camo 0 0 0
+	voice 1
+	sex m
+}
+define body STAGED_BODY
+{
+	graphic CharModel.3di
+	camo 0 0 0
+}
+define arms STAGED_ARMS
+{
+	graphic armsG.3di
+	camo 4 2 0
+}
+nationality 0 STAGED_NAT
+{
+	alignment good
+	division 0 STAGED_DIV
+	{
+		combo 1 STAGED_HEAD STAGED_BODY STAGED_ARMS
+	}
+}
+""")
+	avatars.close()
 	for pair in [
 		["CharModel.3di", CHARMODEL_FIXTURE],
 		["M4_1st.3di", CHARMODEL_FIXTURE],
@@ -675,6 +707,19 @@ func test_viewmodel_ctrl_registers_follow_visibility_and_team() -> void:
 				"the visible FP submit stores the sim's team byte")
 		assert_eq(int(ctrl.get("HEAT_GLOW", -999)), int(weapon_view.heat_glow),
 				"the FP writer publishes the FSM's literal heat value (cold zero)")
+	# The arms part alone carries the character's raw camo triplet, stored by
+	# the same per-submit writer family (Avatar_SetArmsCamoCtrl before the arms
+	# submit); the gun part never does.
+	var arms_part := presenter.vm_parts()[0] as ObjectModel
+	var gun_part := presenter.vm_parts()[1] as ObjectModel
+	assert_eq(String(arms_part.get_meta("avatar_part", "")), "arms",
+			"the first viewmodel part is the character's arms")
+	assert_eq(int(arms_part.get_ctrl_values().get("TEX_CAMO1", -1)), 4)
+	assert_eq(int(arms_part.get_ctrl_values().get("TEX_CAMO2", -1)), 2)
+	assert_eq(int(arms_part.get_ctrl_values().get("TEX_CAMO3", -1)), 0,
+			"the visible FP submit stores the staged combo's raw arms camo bytes")
+	assert_false(gun_part.get_ctrl_values().has("TEX_CAMO1"),
+			"the arms camo never lands on the gun part")
 
 	presenter.set_third_person(true)
 	_frame(world, presenter, camera, 1)

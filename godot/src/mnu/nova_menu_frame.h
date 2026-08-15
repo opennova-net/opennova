@@ -243,6 +243,14 @@ private:
 	std::vector<std::unique_ptr<LoadedFont>> owned_fonts_;
 	// fonts_[i] backs the compiler's font slot i (slot 0 = the default).
 	std::vector<LoadedFont *> fonts_;
+	// The menu-top overlay: a child canvas item one z above this Control, so
+	// the compiled draw list's popup + cursor ops (MenuDrawList
+	// overlay_op_start) paint over any Control a companion mounts as a frame child
+	// (the PLAYER_INFO preview / icon mounts) — retail draws the open dropdown
+	// and the cursor after every screen widget (CUIScene_DrawScreensAndCursor
+	// @ 0x63bf60; D-MNU-12 in docs/mnu/menu-re.md).
+	RID overlay_canvas_item_;
+	void ensure_overlay_canvas_item_();
 };
 
 } // namespace godot

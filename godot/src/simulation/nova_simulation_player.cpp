@@ -507,6 +507,26 @@ int Simulation::get_local_player_team() const {
 	return e ? static_cast<int>(e->team) : 0;
 }
 
+int Simulation::get_local_player_character_id() const {
+	// The packed character id the AUTHORITY stamped on the local player
+	// (entity+0x15C): the host's own spawn from its installed per-side profile
+	// vars, a joiner's from its named 0x0C record — the one word every observer
+	// keys the composed head/body (and the local first-person arms) on, so the
+	// shell never re-derives side-by-team itself (the stamp's witness lives at
+	// server_spawn.cpp / joiner_world_bridge.cpp; the reader side is
+	// docs/playerinfo/avatars-re.md, TEX_CAMO section).
+	if (world_ && world_->cached.local_player.valid()) {
+		const opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
+		if (e) return static_cast<int>(e->minimap_net_id);
+	}
+	// A joiner that has learned its record but not yet materialized L (the
+	// deploy-screen hold, the challenge prewarm) reads the record itself.
+	if (joiner_ && runtime_ && runtime_->has_self_handle()) {
+		return static_cast<int>(runtime_->spawn_pose().net_id);
+	}
+	return 0;
+}
+
 int Simulation::get_local_player_class() const {
 	if (!world_ || !world_->cached.local_player.valid()) return 0;
 	const opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);

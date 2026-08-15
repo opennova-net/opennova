@@ -3,8 +3,11 @@ extends RefCounted
 
 ## The weapon.def slice driving the first-person viewmodel — the typed record behind
 ## `WeaponDatabase.get_weapon()`'s transport Dictionary (ADR 0017: the record is
-## the contract, the dict is its C++-binding encoding). Model names resolve the gun,
-## arms, and shared animation set; `pos_units`/`tpos_units` are the RAW def units
+## the contract, the dict is its C++-binding encoding). Model names resolve the gun
+## and the shared animation set (the first-person ARMS are the local player's
+## character arms, never a weapon.def field: retail parses-and-discards gfx1a/gfx1b
+## [orig: WeaponDefs_ParseLineCallback @0x5448d0/@0x5448e6 -> loc_545098]);
+## `pos_units`/`tpos_units` are the RAW def units
 ## (/256 = world; the hip and ADS view biases), `rot_bias_deg` the def's yaw/pitch/roll
 ## degrees added to the view angles, `renderfov_h_deg` the FP projection's HORIZONTAL
 ## fov (record default 80.0 — no shipped JO def sets the key).
@@ -13,8 +16,6 @@ extends RefCounted
 
 var weapon_name := ""
 var gfx1 := ""       # the FP gun model (.3di basename)
-var gfx1a := ""      # the character arms riding the gun's skeleton
-var gfx1b := ""      # alternate arm skin (unused until team/skin selection)
 var gfx3 := ""       # the THIRD-person world gun, drawn in the soldier's hands
                      # [orig: WeaponDef.tpModel +0x170, read @0x4e3cd3. NOTE the IDB
                      #  locals in WeaponDef_ResolveAllReferences @0x54042c are swapped:
@@ -47,8 +48,6 @@ static func from_weapon_dict(d: Dictionary) -> PlayerViewmodelDef:
 	var out := PlayerViewmodelDef.new()
 	out.weapon_name = String(d.get("name", ""))
 	out.gfx1 = String(d.get("gfx1", ""))
-	out.gfx1a = String(d.get("gfx1a", ""))
-	out.gfx1b = String(d.get("gfx1b", ""))
 	out.gfx3 = String(d.get("gfx3", ""))
 	out.animadm = String(d.get("animadm", ""))
 	var pos: PackedFloat32Array = d.get("pos", PackedFloat32Array())

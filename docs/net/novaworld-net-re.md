@@ -5025,6 +5025,14 @@ unused), load failures now warn, `pos` corrected to the def line (−19.46, 21.1
 (the old (10, 0, −201) matched no def line), and the facing derives from
 `bms_to_godot_basis` on the camera's engine orientation (model space == view space
 `[orig: Player_RenderFirstPersonViewModel @ 0x4ded60]`) instead of a hand-tuned rotation.
+**§5.40 arms-source correction (2026-08-15, D-PLAYERINFO-1):** the `gfx1a armsG` reading
+above was wrong about WHERE the arms come from: `gfx1a`/`gfx1b` are recognized-and-discarded
+weapon.def tokens (`WeaponDefs_ParseLineCallback @0x5448d0/@0x5448e6 → loc_545098 = return
+0`); the first-person arms model is the local player's CharacterEntity arms (blip +8 = the
+Avatars.def combo arms graphic, `Player_RenderFirstPersonViewModel @0x4df05f/@0x4deff4`),
+submitted after `Avatar_SetArmsCamoCtrl @0x4df008/@0x4df070`, and a character without an arms
+model submits no arms. `simassets::fp_viewmodel_spec` now takes the character arms; the
+`armsG` default it carried was a misreading and is retired.
 **Open (the §5.40 refinement grill):** the FP rig is its OWN pre-posed skeleton —
 `ak47_RST.bad` is 39 bones (BN01 Pelvis, arms, 26 fingers, gun bones; BN## tags do NOT match
 the body rig) — and the rendered hold pose is still visibly mis-framed. Pinning the rig's

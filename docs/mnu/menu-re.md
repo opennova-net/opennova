@@ -844,6 +844,33 @@ remains unwalked** (2026-08-11 sweep ruled out: a scene/frame overlay pass
 reader)). The reimpl defers open popups to a post-walk overlay pass — the D-MNU-12
 menu-top decision the Control-tree overlay carried.
 
+**Menu-top overlay vs host mounts (regression fixed 2026-08-15, in the D-PLAYERINFO-1
+train):** the compiled draw list is painted by one `MenuFrame` Control, and companions
+mount their own Controls as frame CHILDREN (the PLAYER_INFO `AvatarPreview` over
+`PLAYER_PREVIEW`, the loadout icon `TextureRect`s) — Godot draws later children over
+the parent, so since the #476 cutover every popup whose LIST_BOX rect overlapped a mount
+was painted UNDER it (all three `player.mnu` character dropdowns author `(0,65)-(214,306)`,
+exactly the preview rect: they opened, took the click, and were invisible), and the
+frame-drawn cursor vanished over the mounts. The compiler now marks where the overlay
+tail begins (`MenuDrawList.overlay_op_start` = the ops after the widget walk: popups,
+then the cursor — retail paints both after every screen widget,
+`CUIScene_DrawScreensAndCursor @ 0x63bf60`) and `MenuFrame::_draw` paints that tail on
+a child canvas item one z above the frame, so it draws over any companion mount. Pinned by
+`menu_frame_compiler_test` (the overlay tail holds the popup quads; empty with no popup
+and no cursor).
+
+**Activation vs scripted ACTION order (fixed 2026-08-15, same train):** retail runs a
+button's ACTION list first and its registered control callback last
+(`CUIWidget_HandleScriptedAction @ 0x6497f0` walks the list, then calls
+`widget[63]->vtable+32`), but its scene keeps every loaded screen alive, so PLAYER_INFO's
+ACCEPT callback (`save_player_info_from_dialog @ 0x55ee10`) still reads its controls after
+the OK button's cross-.mnu jump to `main.mnu`. The reimpl shell REPLACES the document on a
+cross-file ACTION, and the companion guard (`get_menu_file() != wired file`) then dropped
+the activation — ACCEPT never reached `commit`, so nothing was ever saved from the live
+screen. `MenuDriver._activate_widget` now emits `widget_activated` before dispatching the
+ACTION list: observers read the same still-live control values retail's callback reads,
+and the jump follows.
+
 Reimpl: the exclusivity is hosted as a full-menu transparent catcher overlay
 (`ComboPopupOverlay`) added as the owning `MnuMenu`'s **last child** on open, with the
 styled popup box inside it — last-in-tree wins Godot mouse picking and draw order, which

@@ -243,11 +243,12 @@ int main() {
 	}
 
 	// --- D-NET-146: the character stamp — per-side CU vars picked by ASSIGNED team. ---
-	// A team-based session (golden ASH_I5A gameType 0x10010): the host's own player takes the
-	// local-path default animSlot 1 [orig: Player_InitPlayer @0x4e15f0 <- sub_57AE60 default 1];
-	// the team-2 joiner takes its uploaded SIDE-B values (VCB/CI1) and its playerClass from the
-	// TR pick [orig: Server_PlayerAdd @0x51cbc0 @0x51cff7/@0x51d0b1]. The 0x0C organic batch
-	// echoes entity+0x374 / entity+0x15C raw [orig: serialize_entity_states_to_buffer @0x5030a0].
+	// A team-based session (golden ASH_I5A gameType 0x10010): the host's own player takes its
+	// installed profile's side-A values on the local path [orig: Player_InitPlayer @0x4e15f0 <-
+	// g_avatarTeam1/2 + g_charClassTeam1/2; PlayerSession_InitFromProfile @0x50ca80]; the team-2
+	// joiner takes its uploaded SIDE-B values (VCB/CI1) and its playerClass from the TR pick
+	// [orig: Server_PlayerAdd @0x51cbc0 @0x51cff7/@0x51d0b1]. The 0x0C organic batch echoes
+	// entity+0x374 / entity+0x15C raw [orig: serialize_entity_states_to_buffer @0x5030a0].
 	{
 		w::World cw;
 		w::AiSystem cai;
@@ -261,9 +262,10 @@ int main() {
 		np::test::bring_up_host(cctx, np::ConnectionMode::HostClient, np::SocketMode::Socketless,
 		                        /*host_key=*/0, &cloop, settings);
 		cctx.world = &cw;
-		// A non-default local profile is already resolved before host bring-up. The
-		// type-2 loopback must consume the same per-side vars as a remote joiner;
-		// otherwise the listen host is permanently the default US01 character.
+		// A non-default local profile is installed on the type-2 loopback before the
+		// spawn (start_host_session does it from HostConfig.local_character_vars); the
+		// host's own player is stamped from it by ASSIGNED side like a joiner's upload —
+		// otherwise the listen host would always be the stock 0x0200 character.
 		np::NapiNPConnection &host_conn = cctx.np_protocol.connection_list.front();
 		host_conn.char_vars.char_id[0] = 0x0400;
 		host_conn.char_vars.char_id[1] = 0x8407;
@@ -301,6 +303,8 @@ int main() {
 		if (!expect(chost->anim_slot == 3, "host animSlot = selected side-A avatar")) return 1;
 		if (!expect(chost->minimap_net_id == 0x0400,
 		            "host NetId = selected side-A packed character id")) return 1;
+		if (!expect(chost->player_class == 6,
+		            "host playerClass = the assigned side's class byte (g_charClassTeam1)")) return 1;
 		if (!expect(cjoin->anim_slot == 4, "team-2 joiner animSlot = side-B avatar (VCB=4, golden)")) return 1;
 		if (!expect(cjoin->minimap_net_id == 0x8207, "team-2 joiner NetId = side-B char id (CI1=0x8207)")) return 1;
 		if (!expect(cjoin->player_class == 5, "joiner playerClass = TR-picked CTB (in [5,9], kept)")) return 1;

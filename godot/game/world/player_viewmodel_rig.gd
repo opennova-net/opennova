@@ -63,6 +63,7 @@ var PLAYER_VIEWMODEL_RENDERFOV_H_DEG := 80.0
 const CTRL_OWNER_FP_HEAT := "first_person:heat"
 const CTRL_OWNER_FP_EMPLACED := "first_person:emplaced"
 const CTRL_OWNER_FP_TEAM := "first_person:team"
+const CTRL_OWNER_FP_ARMS_CAMO := "first_person:arms_camo"
 
 # The world serves the viewmodel builder + def; the presenter serves the weapon
 # effects (play-serial resync on rebuild). Untyped for the same reason as the
@@ -304,6 +305,16 @@ func _apply_viewmodel_control_registers(submit_viewmodel: bool,
 					"EWEAP_GUNYAW")
 			visual.clear_ctrl_override(CTRL_OWNER_FP_EMPLACED,
 					"EWEAP_GUNPITCH")
+		# The character arms' own raw camo triplet is stored immediately before
+		# each arms submit -- the same per-submit writer family, arms part only.
+		# [orig: Avatar_SetArmsCamoCtrl @0x57a3b0 at @0x4df008/@0x4df070]
+		if String(visual.get_meta("avatar_part", "")) == "arms":
+			if submit_viewmodel:
+				AvatarDatabase.apply_part_camo(visual,
+						visual.get_meta("avatar_camo", []), CTRL_OWNER_FP_ARMS_CAMO)
+			else:
+				for register in AvatarDatabase.part_camo_registers():
+					visual.clear_ctrl_override(CTRL_OWNER_FP_ARMS_CAMO, register)
 		visual.end_ctrl_update()
 
 

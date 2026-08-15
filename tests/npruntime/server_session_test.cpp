@@ -356,7 +356,6 @@ bool check_listen_host_installs_local_character_profile() {
 	opennova::np::HostConfig config;
 	config.socket_mode = SocketMode::Socketless;
 	config.serve_and_play = true;
-	config.local_character_vars_set = true;
 	config.local_character_vars.char_id[0] = 0x0400;
 	config.local_character_vars.char_id[1] = 0x8407;
 	config.local_character_vars.char_class[0] = 6;

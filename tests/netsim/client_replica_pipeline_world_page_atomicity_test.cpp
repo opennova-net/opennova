@@ -139,8 +139,8 @@ bool test_player_character_identity_reaches_present_row() {
 			nw::encode_organic_spawn_batch(batch));
 
 	const ns::ClientEntityState *row = pipeline.state().find(rec.slot_id);
-	if (!expect(row != nullptr && row->character_anim_slot == rec.anim_slot,
-			"0x0C character avatar selector was dropped by the replica fold",
+	if (!expect(row != nullptr && row->net_id == rec.net_id,
+			"0x0C packed character id was dropped by the replica fold",
 			"player identity"))
 		return false;
 
@@ -150,8 +150,6 @@ bool test_player_character_identity_reaches_present_row() {
 	nw::np::project_client_replica_present_row(
 			present, *row, pipeline.state(), context);
 	return expect(
-			static_cast<int>(present[nw::world::PF_CHARACTER_ANIM_SLOT]) ==
-					rec.anim_slot &&
 			static_cast<int>(present[nw::world::PF_CHARACTER_ID]) == rec.net_id,
 			"player character identity was dropped before presentation",
 			"player identity");

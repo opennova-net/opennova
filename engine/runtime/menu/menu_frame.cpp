@@ -2280,6 +2280,7 @@ const MenuDrawList &MenuFrameCompiler::compile(const MenuFrameState &state,
 	draw_list_.underlines.clear();
 	draw_list_.font_runs.clear();
 	draw_list_.draw_ops.clear();
+	draw_list_.overlay_op_start = 0;
 	draw_list_.widgets_drawn = 0;
 	if (screen_ == nullptr || nodes_.empty()) {
 		return draw_list_;
@@ -2289,6 +2290,8 @@ const MenuDrawList &MenuFrameCompiler::compile(const MenuFrameState &state,
 	s.y = scale_y;
 	deferred_popups_.clear();
 	walk_widget(0, 0, 0, state, s);
+	// Everything from here on is the menu-top overlay (popups, then cursor).
+	draw_list_.overlay_op_start = static_cast<int32_t>(draw_list_.draw_ops.size());
 	// The open-dropdown overlay pass (D-MNU-12): popups collected during the
 	// walk paint after every widget, before the cursor.
 	for (int index : deferred_popups_) {

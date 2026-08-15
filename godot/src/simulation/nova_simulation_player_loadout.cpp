@@ -531,13 +531,16 @@ String Simulation::weapon_profile_relpath(const String &p_expansion_name) {
 
 Dictionary Simulation::read_weapon_profile_summary(const String &p_path) {
 	opennova::playersav::File profile = opennova::playersav::make_defaults();
-	const Error error = read_weapon_profile_file(p_path, profile, true);
+	// Raw bytes for the menu: the PLAYER_INFO screen selects its rows straight
+	// from the profile globals; the [5,9] class clamp is a SESSION-START step
+	// (apply_session_settings_to_globals) that load_weapon_profile applies.
+	const Error error = read_weapon_profile_file(p_path, profile);
 	Dictionary out;
 	out["error"] = int(error);
 	out["loaded"] = error == OK;
 	// OpenNova's active profile is slot 0. Retail indexes the same five-record
-	// array by g_playerProfileIndex before reading/writing its 0x1080C record;
-	// see the profile-layout evidence in docs/playerinfo/avatars-re.md.
+	// array by g_curProfileSlot @0x25506B8 (0x1080C stride) before reading or
+	// writing its record; see docs/playerinfo/avatars-re.md.
 	out["blue"] = weapon_profile_side_summary(profile.slots[0].blue, false);
 	out["red"] = weapon_profile_side_summary(profile.slots[0].red, false);
 	return out;
@@ -548,18 +551,14 @@ Error Simulation::save_weapon_profile_selection(const String &p_path,
 	if (p_path.is_empty() || p_profile.is_empty())
 		return ERR_INVALID_PARAMETER;
 
-	int player_class = p_profile.get("player_class", -1);
-	const Array side_profiles = p_profile.get("side_profiles", Array());
-	if ((player_class < opennova::playersav::kMinPlayerClass ||
-			player_class > opennova::playersav::kMaxPlayerClass) &&
-			!side_profiles.is_empty() &&
-			side_profiles[0].get_type() == Variant::DICTIONARY) {
-		const Dictionary first = side_profiles[0];
-		player_class = first.get("player_class", -1);
-	}
+	// The ACCEPT snapshot (PlayerCharacterSelectionState.snapshot): the shared
+	// PLAYERCLASS value plus side_profiles[blue, red], each carrying the side's
+	// authored nationality/division ids and packed character id.
+	const int player_class = p_profile.get("player_class", -1);
 	if (player_class < opennova::playersav::kMinPlayerClass ||
 			player_class > opennova::playersav::kMaxPlayerClass)
 		return ERR_INVALID_PARAMETER;
+	const Array side_profiles = p_profile.get("side_profiles", Array());
 
 	opennova::playersav::File profile;
 	if (FileAccess::file_exists(p_path)) {
@@ -591,23 +590,7 @@ Error Simulation::save_weapon_profile_selection(const String &p_path,
 				avatar_packed);
 		updated = true;
 	}
-
-	// Compatibility with the original single active-side snapshot shape.
-	if (!updated) {
-		const int side = p_profile.get("team", -1);
-		uint8_t avatar_a = 0;
-		uint8_t avatar_b = 0;
-		uint16_t avatar_packed = 0;
-		if ((side != 0 && side != 1) ||
-				!avatar_selection_from_dictionary(p_profile, side,
-						avatar_a, avatar_b, avatar_packed))
-			return ERR_INVALID_PARAMETER;
-		opennova::playersav::update_avatar_selection(profile, 0,
-				side == 0 ? opennova::playersav::SideId::Blue
-				          : opennova::playersav::SideId::Red,
-				static_cast<uint8_t>(player_class), avatar_a, avatar_b,
-				avatar_packed);
-	}
+	if (!updated) return ERR_INVALID_PARAMETER;
 
 	// `write()` recreates every modeled record, while the temp + same-volume
 	// replace keeps the previous file intact until the new one is complete.
@@ -642,11 +625,11 @@ String Simulation::viewmodel_bringup_fallback_weapon() {
 }
 
 Dictionary Simulation::fp_viewmodel_spec(bool p_has_def, const String &p_gfx1,
-		const String &p_gfx1a, const String &p_animadm, int p_flags) {
+		const String &p_character_arms, const String &p_animadm, int p_flags) {
 	const opennova::simassets::FpViewmodelSpec spec =
 			opennova::simassets::fp_viewmodel_spec(p_has_def,
 					std::string(p_gfx1.utf8().get_data()),
-					std::string(p_gfx1a.utf8().get_data()),
+					std::string(p_character_arms.utf8().get_data()),
 					std::string(p_animadm.utf8().get_data()),
 					static_cast<uint32_t>(p_flags));
 	Dictionary out;

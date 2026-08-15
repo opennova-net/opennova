@@ -37,8 +37,7 @@ void project_client_replica_present_row(
 	row[world::PF_TYPE_ID] = static_cast<float>(entity.type_id);
 	row[world::PF_WIRE_HANDLE] = static_cast<float>(entity.handle);
 	if (entity.cls == EntityClass::Player) {
-		row[world::PF_CHARACTER_ANIM_SLOT] =
-				static_cast<float>(entity.character_anim_slot);
+		// A player's wire net_id IS its packed character id (entity+0x15C).
 		row[world::PF_CHARACTER_ID] = static_cast<float>(entity.net_id);
 	}
 	// Decoded wire position is mission (x,y,z) 16.16 -> present (x, z, -y)

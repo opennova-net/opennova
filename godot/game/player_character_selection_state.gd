@@ -1,9 +1,19 @@
 class_name PlayerCharacterSelectionState
 extends RefCounted
 
-# Canonical in-process PLAYER_INFO character memory for OpenNova's active
-# profile slot. It hides authored-id packing, blue/red defaults, persisted-id
-# recovery, and ACCEPT's shared-class rule behind the menu-facing interface.
+# The in-process PLAYER_INFO character memory for OpenNova's active profile
+# slot: retail's per-(slot, team) selection globals (g_charSelClass /
+# g_charSelNationality / g_charSelDivision / g_charSelCombo @0x2551130.., strides
+# 67596 per slot and 32774 per team) collapsed to slot 0 with both team sides
+# kept. It hides authored-id packing, the per-side retail default, and ACCEPT's
+# shared-class rule behind the menu-facing interface.
+#
+# The profile Dictionary shape (the ACCEPT snapshot, PlayerProfile's load, and
+# MainGame's set_local_player_profile all speak it):
+#   name, team (the side shown/committed), player_class (5..9), voice,
+#   nationality/division/combo (the active side's tree indices),
+#   side_profiles: [blue, red] -- each Selection.to_dict() or {} when unknown,
+#   plus the loadout keys the companion appends.
 
 class Selection extends RefCounted:
 	var team := -1
@@ -60,20 +70,13 @@ func set_persisted_profile(profile: Dictionary) -> void:
 	for side in mini(saved_sides.size(), 2):
 		if saved_sides[side] is Dictionary:
 			_side_profiles[side] = Selection.from_dict(saved_sides[side])
-	var active_side := int(profile.get("team", -1))
-	if (active_side == 0 or active_side == 1) and _side_profiles[active_side] == null:
-		_side_profiles[active_side] = Selection.from_dict(profile)
 
 
+# Bind the mounted Avatars.def and validate both remembered sides against it.
 func set_database(db: AvatarDatabase) -> void:
 	_db = db
-	var persisted_sides: Array = _persisted_profile.get("side_profiles", [])
 	for side in 2:
-		var source: Selection = _side_profiles[side]
-		if source == null and side < persisted_sides.size() \
-				and persisted_sides[side] is Dictionary:
-			source = Selection.from_dict(persisted_sides[side])
-		_side_profiles[side] = _normalize_side(side, source)
+		_side_profiles[side] = _normalize_side(side, _side_profiles[side])
 
 
 func initial_team(authored_team: int) -> int:
@@ -165,18 +168,25 @@ func snapshot(team: int, nat_index: int, div_index: int, combo_index: int,
 	return profile
 
 
+# Retail's per-side default: the first Avatars.def combo of the side's alignment
+# [orig: lookup_entity_slot_and_pack_entry @0x57AD40 -- PlayerProfile_InitDefaults
+# @0x54BB40 seeds it, and PlayerSession_InitFromProfile @0x50ca80 reallocates a
+# saved id the registry no longer resolves to it].
 func _first_selection(side: int, selected_class: int) -> Selection:
 	if _db == null:
 		return null
-	for nat_index in _db.get_nationality_count():
-		if int(_db.get_nationality(nat_index).get("alignment", -1)) != side:
-			continue
-		for div_index in _db.get_division_count(nat_index):
-			if _db.get_combo_count(nat_index, div_index) > 0:
-				return make_selection(side, nat_index, div_index, 0, selected_class)
-	return null
+	var resolved: Dictionary = _db.resolve_character_id(
+			_db.first_character_id(side), side)
+	if resolved.is_empty():
+		return null
+	return make_selection(side,
+			int(resolved.get("nationality_index", -1)),
+			int(resolved.get("division_index", -1)),
+			int(resolved.get("combo_index", -1)), selected_class)
 
 
+# A saved side that still resolves against the mounted Avatars.def is kept as
+# saved; a stale or absent one takes the retail per-side default.
 func _normalize_side(side: int, saved: Selection) -> Selection:
 	var selected_class := (saved.player_class if saved != null
 			else int(_persisted_profile.get("player_class", 8)))
@@ -188,12 +198,4 @@ func _normalize_side(side: int, saved: Selection) -> Selection:
 			saved.combo if saved != null else -1, selected_class)
 	if selection != null:
 		return selection
-	if saved != null and _db != null:
-		var resolved: Dictionary = _db.resolve_character_id(
-				saved.avatar_packed, side)
-		if not resolved.is_empty():
-			return make_selection(side,
-					int(resolved.get("nationality_index", -1)),
-					int(resolved.get("division_index", -1)),
-					int(resolved.get("combo_index", -1)), selected_class)
 	return _first_selection(side, selected_class)

@@ -17,27 +17,6 @@ namespace {
 
 constexpr const char *kContainerName = "MissionObjects";
 
-void apply_avatar_camo_controls(ObjectModel *p_model, const Array &p_camo,
-		const String &p_owner) {
-	if (p_model == nullptr || p_camo.size() < 3) {
-		return;
-	}
-	static const char *kRegisters[3] = {
-		"TEX_CAMO1", "TEX_CAMO2", "TEX_CAMO3"
-	};
-	p_model->begin_ctrl_update();
-	for (int i = 0; i < 3; ++i) {
-		// Retail zero-extends the selected part's three authored bytes and
-		// writes them directly to global CTRL slots 93..95: no 16.16 shift,
-		// normalization, or RGB shader tint. The retained model keeps the same
-		// raw dwords per submitted part. See the per-part TEX_CAMO evidence in
-		// docs/playerinfo/avatars-re.md.
-		p_model->set_ctrl_override(p_owner, kRegisters[i],
-				int(p_camo[i]) & 0xff);
-	}
-	p_model->end_ctrl_update();
-}
-
 // Convex hull points (Godot model-local) for one parsed collision volume:
 // the volume's bounding planes form a closed convex polytope, so the hull is
 // exactly their half-space intersection (never clamped to the AABB — that
@@ -994,6 +973,17 @@ int MissionObjectPlacer::resolve_player_visual_item_id(int p_runtime_type_id) {
 	return p_runtime_type_id;
 }
 
+// The player's visual = the combo its packed character id resolves to: head +
+// body models in the world (retail draws BOTH with the entity's skeleton, each
+// after its own camo store (retail: Terrain_RenderSectorEntitiesBySide
+// @0x5c7fea..0x5c8020: CharacterEntity blip +4 head then +0 body, see docs/playerinfo/avatars-re.md)) and the arms
+// model in first person. `fallback` = no combo resolved: with an EMPTY registry
+// retail draws the entity's own item model @0x5c8039 (blip handles 0), which is
+// what this returns. Divergence, tracked in avatars-re D-PLAYERINFO-1: with a
+// populated registry retail's client 0x0C fold re-stamps an UNKNOWN id to the
+// first combo of the entity's team side (NapiNPClientMsg 0x0C @0x42eae4..
+// @0x42eb03 -> lookup_entity_slot_and_pack_entry side = team != 1) — the
+// reimpl has no registry validation yet (D-NET-137) and shows the item model.
 Dictionary MissionObjectPlacer::resolve_player_visual_spec(
 		int p_runtime_type_id, int p_character_id) {
 	_ensure_item_db();
@@ -1056,11 +1046,15 @@ ObjectModel *MissionObjectPlacer::build_player_animated_model(
 	if (body == nullptr) {
 		return build_animated_model(item_id, p_parent);
 	}
-	body->set_name("AvatarBody");
+	// Same node naming as the item-model path (PlayerAvatar_<graphic>): the
+	// composed body IS the player's avatar node; the head rides under it.
+	body->set_name(vformat("PlayerAvatar_%s", body_graphic.get_file().get_basename()));
 	body->set_meta("avatar_part", "body");
 	body->set_meta("character_id", p_character_id & 0xffff);
 	body->set_meta("player_visual_spec", spec);
-	apply_avatar_camo_controls(body, spec.get("body_camo", Array()),
+	// (retail: Avatar_SetBodyCamoCtrl @0x57a390 immediately before the body submit
+	// @0x5c800f, see docs/playerinfo/avatars-re.md)
+	AvatarDatabase::apply_part_camo(body, spec.get("body_camo", Array()),
 			"player_avatar:body_camo");
 	body->set_mirror_reflected(_item_is_mirror_reflected(item_id));
 	body->set_muzzle_point_name(item_db_.is_valid()
@@ -1073,15 +1067,20 @@ ObjectModel *MissionObjectPlacer::build_player_animated_model(
 		ObjectModel *head = build_model_from_graphic(head_graphic, adm_name,
 				body, String(), body_graphic);
 		if (head != nullptr) {
-			head->set_name("AvatarHead");
+			head->set_name(vformat("PlayerAvatarHead_%s",
+					head_graphic.get_file().get_basename()));
 			head->set_meta("avatar_part", "head");
 			head->set_meta("character_id", p_character_id & 0xffff);
-			apply_avatar_camo_controls(head,
-					spec.get("head_camo", Array()),
+			// (retail: Avatar_SetHeadCamoCtrl @0x57a370 immediately before the
+			// head submit @0x5c7fec, see docs/playerinfo/avatars-re.md)
+			AvatarDatabase::apply_part_camo(head, spec.get("head_camo", Array()),
 					"player_avatar:head_camo");
 			head->set_mirror_reflected(_item_is_mirror_reflected(item_id));
 			_configure_item_shadow(head, item_id);
-			body->add_presentation_link(head);
+			// The head follows every body presentation call (one entity, one
+			// skeleton, one CTRL bus) except the per-part camo triplet.
+			body->add_presentation_link(head,
+					AvatarDatabase::part_camo_registers());
 		}
 	}
 	return body;

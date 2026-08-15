@@ -153,9 +153,9 @@ var _debug_views: DebugViewSet
 # harnesses may swap in a director double (see game_world_test.gd).
 var _item_fx: ItemEffectDirector
 var _local_player_spawn_loadout: Dictionary = {}
-var _avatar_db: AvatarDatabase = null
+# The local player's two per-side character selections + classes projected for
+# the sim (the listen host's own type-2 connection / a joiner's ClientAuth).
 var _local_character_profile: Dictionary = {}
-var _preferred_character_side := 0
 var _perf_tick_us: int = 0
 var _perf_foliage_us: int = 0
 var _perf_runtime_us: int = 0
@@ -175,7 +175,6 @@ func set_resource_root(root: ResourceRoot) -> void:
 ## a profile carrying empty slot names explicitly requests an all-NONE kit.
 func set_local_player_spawn_loadout(loadout: Dictionary) -> void:
 	_local_player_spawn_loadout = loadout.duplicate(true)
-	_preferred_character_side = clampi(int(loadout.get("team", 0)), 0, 1)
 
 
 func set_playable(enabled: bool) -> void:
@@ -572,16 +571,14 @@ func _place_mission_objects(mission: MissionData, timeline: PerfTimeline = null)
 	if _resource_root == null or mission == null:
 		return
 	_placer = MissionObjectPlacer.create(_resource_root, null)
-	_avatar_db = AvatarDatabase.new()
-	if _avatar_db.load_from_resource_root(_resource_root, "Avatars.def") == OK \
-			and _avatar_db.is_loaded():
-		_placer.set_avatar_db(_avatar_db)
+	# The placer's Avatars.def is the one registry every player visual resolves
+	# against; the same table projects the local profile the sim stamps.
+	var avatar_db: AvatarDatabase = _placer.get_avatar_db()
+	if avatar_db != null:
 		_local_character_profile = NetSessionDrive.character_join_profile_from_database(
-				_avatar_db, _local_player_spawn_loadout)
+				avatar_db, _local_player_spawn_loadout)
 	else:
-		push_warning("GameWorld: Avatars.def unavailable (%s); player visuals use the item fallback"
-				% _avatar_db.get_last_error())
-		_avatar_db = null
+		push_warning("GameWorld: Avatars.def unavailable; players draw their item model")
 		_local_character_profile = {}
 	_panm_clock.sample_frame()
 	_placer.set_panm_clock(_panm_clock)
@@ -667,7 +664,6 @@ func unload() -> void:
 	_set_water_world_rendering_enabled(false)
 	_local_player_spawn_loadout = {}
 	_local_character_profile = {}
-	_avatar_db = null
 	_clear_mission_tile_info()
 	_restore_idle_frame_clear_color()
 	var container := get_node_or_null(NodePath("MissionObjects"))
@@ -1507,17 +1503,13 @@ func build_local_player_avatar() -> Node3D:
 			local_player_character_id())
 
 
+## The packed character id the authority stamped on the local player (the
+## host's own spawn from its installed profile, a joiner's named 0x0C record) --
+## the one word its third-person body/head and first-person arms key on, read
+## from the sim rather than re-derived from team + profile here.
 func local_player_character_id() -> int:
-	var ids: Array = _local_character_profile.get("character_ids", [])
-	if ids.size() < 2:
-		return 0
-	var side := _preferred_character_side
 	var sim := get_sim()
-	if sim != null and sim.has_local_player():
-		var bms_team := int(sim.get_local_player_team())
-		if bms_team == 1 or bms_team == 2:
-			side = bms_team - 1
-	return int(ids[side]) & 0xffff
+	return int(sim.get_local_player_character_id()) if sim != null else 0
 
 
 func _local_player_visual_spec() -> Dictionary:
@@ -1526,21 +1518,6 @@ func _local_player_visual_spec() -> Dictionary:
 	return _placer.resolve_player_visual_spec(
 			MissionObjectPlacer.PLAYER_RUNTIME_TYPE_ID,
 			local_player_character_id())
-
-
-func _apply_avatar_camo_controls(model: ObjectModel, camo: Array,
-		owner: String) -> void:
-	if model == null or camo.size() < 3:
-		return
-	model.begin_ctrl_update()
-	for i in 3:
-		# The selected arms' raw bytes are stored immediately before each FP
-		# arms submission; no fixed-point conversion is performed.
-		# [orig: Avatar_SetArmsCamoCtrl @0x57A3B0;
-		#  Player_RenderFirstPersonViewModel calls @0x4DF008/@0x4DF070]
-		model.set_ctrl_override(owner, "TEX_CAMO%d" % (i + 1),
-				int(camo[i]) & 0xff)
-	model.end_ctrl_update()
 
 
 # Resolve the .3DI definitions that LocalPlayerPresenter would otherwise load only on
@@ -1603,14 +1580,11 @@ func _prewarm_loaded_model_challenge_definitions() -> void:
 		return
 	var def := local_player_viewmodel_def()
 	var spec: Dictionary = Simulation.fp_viewmodel_spec(def != null,
-			def.gfx1 if def != null else "", def.gfx1a if def != null else "",
+			def.gfx1 if def != null else "",
+			String(_local_player_visual_spec().get("arms", "")),
 			def.animadm if def != null else "", def.flags if def != null else 0)
 	var gun_name := String(spec.get("gun", ""))
 	var arms_name := String(spec.get("arms", ""))
-	var character_spec := _local_player_visual_spec()
-	if not bool(character_spec.get("fallback", true)) and \
-			not String(character_spec.get("arms", "")).is_empty():
-		arms_name = String(character_spec.get("arms", ""))
 	if not gun_name.is_empty():
 		_placer.object_data_for(gun_name)
 	if bool(spec.get("show_arms", true)) and not arms_name.is_empty():
@@ -1619,14 +1593,14 @@ func _prewarm_loaded_model_challenge_definitions() -> void:
 
 ## Build a GameWorld-managed FIRST-PERSON weapon viewmodel for the local player (shown in 1st person; the
 ## inverse of the 3rd-person avatar). Faithful composition: the equipped weapon's FP gun model PLUS
-## the character arms, sharing one skeleton [orig: Player_RenderFirstPersonViewModel @0x4ded60 draws
-## the weapon FP model + arms with shared bone matrices]. The models come from the mounted root's
-## weapon.def — gfx1 (gun), gfx1a (arms; gfx1b alternate skin unused until team/skin selection),
-## animadm (the shared animation set) [orig: WeaponDef_ParseProperty @0x54d730 rows] — for the
-## bring-up fallback weapon entry until the player's equipped weapon resolves it per-weapon
-## (NOVA_VM_WEAPON overrides the name for rig A/B checks). The witnessed JOX values stay as the
-## no-def fallback. Camera sway / fire-kick / ADS [orig: Player_UpdateFirstPersonCamera @0x4dd380]
-## are follow-ups. Null when the placer or both models fail to resolve.
+## the local player's CHARACTER arms, sharing one skeleton [orig: Player_RenderFirstPersonViewModel
+## @0x4ded60 draws the weapon FP model, then the CharacterEntity's arms model (blip+8, the Avatars.def
+## combo arms graphic @0x4df05f/@0x4deff4) with the same bone matrices, after Avatar_SetArmsCamoCtrl
+## @0x4df008/@0x4df070]. The gun + animadm come from the mounted root's weapon.def (gfx1 / animadm
+## [orig: WeaponDef_ParseProperty @0x54d730]; the file's gfx1a/gfx1b tokens are parsed-and-discarded
+## by retail and never name the arms), the arms from the resolved character. Camera sway / fire-kick /
+## ADS [orig: Player_UpdateFirstPersonCamera @0x4dd380] are follow-ups. Null when the placer or both
+## models fail to resolve.
 
 # The armory-equipped weapon name; overrides the bring-up fallback/env once the
 # player accepts a loadout [orig: the equipped AdmDef drives the FP model pick,
@@ -1764,19 +1738,16 @@ func build_local_player_viewmodel() -> Node3D:
 	# natively in simassets; the AK set is only the no-definition bring-up
 	# fallback and a resolved def with no fpModel intentionally submits no gun.
 	# [orig: Player_RenderFirstPersonViewModel @0x4ded60; @0x4dedc7]
+	var character_spec := _local_player_visual_spec()
 	var spec: Dictionary = Simulation.fp_viewmodel_spec(def != null,
 			def.gfx1 if def != null else "",
-			def.gfx1a if def != null else "",
+			String(character_spec.get("arms", "")),
 			def.animadm if def != null else "",
 			def.flags if def != null else 0)
 	var gun_name := String(spec.get("gun", ""))
 	var arms_name := String(spec.get("arms", ""))
 	var adm_name := String(spec.get("adm", ""))
 	var show_arms := bool(spec.get("show_arms", true))
-	var character_spec := _local_player_visual_spec()
-	if not bool(character_spec.get("fallback", true)) and \
-			not String(character_spec.get("arms", "")).is_empty():
-		arms_name = String(character_spec.get("arms", ""))
 	# Both submits reuse the equipped GUN's model table, while `adm_name` supplies the clips.
 	# Some valid retail sets differ (M21B_1st: 42 parts, M21_1st: 40); sizing from the ADM
 	# basename truncates late animated parts such as the M14 magazine. [orig: @0x4ded60]
@@ -1786,9 +1757,11 @@ func build_local_player_viewmodel() -> Node3D:
 			adm_name, container, "anim_wpn_idle", gun_name) 			if not gun_name.is_empty() else null
 	_local_viewmodel_parts.clear()
 	if arms != null:
-		_apply_avatar_camo_controls(arms,
-				character_spec.get("arms_camo", []),
-				"player_avatar:arms_camo")
+		# The arms' own raw camo triplet, stored by the rig's per-submit FP writer
+		# alongside TEX_TEAM/HEAT_GLOW [orig: Avatar_SetArmsCamoCtrl @0x57a3b0
+		# immediately before each FP arms submit @0x4df008/@0x4df070].
+		arms.set_meta("avatar_part", "arms")
+		arms.set_meta("avatar_camo", character_spec.get("arms_camo", []))
 		_local_viewmodel_parts.append(arms)
 	if gun != null:
 		_local_viewmodel_parts.append(gun)

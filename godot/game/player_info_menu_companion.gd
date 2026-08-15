@@ -201,12 +201,11 @@ func _restore_player_class() -> void:
 	var combo := _id("PLAYERCLASS")
 	if combo < 0:
 		return
+	# The remembered per-side class (weapon.sav's side block, or an edit made
+	# before a team switch); nothing remembered keeps player.mnu's authored row
+	# [orig: PlayerInfo_PopulateAllControls @0x5606f0 selects PLAYERCLASS from
+	# g_charSelClass].
 	var player_class := _character_state.player_class(_team)
-	# Once Avatars.def has produced a side selection, this is the retail-style
-	# per-team class memory (including edits remembered during a team switch).
-	# A class-only fixture has no such selection and retains the authored row.
-	# With no disk/in-memory class, retain player.mnu's authored selection. This
-	# also keeps a class-only/loadout-only screen independent of Avatars.def.
 	if player_class < 5 or player_class > 9:
 		return
 	for row in _driver.item_count(combo):

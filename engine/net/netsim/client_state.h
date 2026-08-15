@@ -48,10 +48,6 @@ struct ClientEntityState {
 	// batches twice.
 	std::string name;
 	uint16_t net_id = 0xFFFF;
-	// Player character-model selector echoed by the pool-0 0x0C spawn. Keep it
-	// separate from body animation state: this is the selected Avatars.def
-	// combo/avatar identity at entity+0x374, not a locomotion clip.
-	uint8_t character_anim_slot = 0;
 	uint8_t spawn_tag = 0;
 	int32_t x = 0;                                // world i32 16.16 (decompressed
 	int32_t y = 0;                                // compact position + the frame anchor)

@@ -66,8 +66,6 @@ class Snapshot:
 			var base := i * stride
 			out[base + Simulation.PF_TYPE_ID] = float(entity.get("type_id", 0))
 			out[base + Simulation.PF_WIRE_HANDLE] = float(entity.get("handle", 0))
-			out[base + Simulation.PF_CHARACTER_ANIM_SLOT] = float(
-					entity.get("character_anim_slot", 0))
 			out[base + Simulation.PF_CHARACTER_ID] = float(
 					entity.get("character_id", 0))
 			out[base + Simulation.PF_KIND] = float(entity.get("kind", -1))
@@ -389,7 +387,6 @@ func test_live_player_character_id_change_rebuilds_the_visual() -> void:
 	snap.entities = [{
 		"type_id": TYPE_RIFLEMAN,
 		"handle": 0x0004,
-		"character_anim_slot": 3,
 		"character_id": 0x0400,
 	}]
 	_present(p, snap)
@@ -398,7 +395,6 @@ func test_live_player_character_id_change_rebuilds_the_visual() -> void:
 	assert_eq(int(first.get_meta("entity_ref", {}).get("character_id", 0)),
 			0x0400)
 
-	snap.entities[0]["character_anim_slot"] = 4
 	snap.entities[0]["character_id"] = 0x0600
 	_present(p, snap, 2)
 	var second: ObjectModel = p.resolve_wire_handle(0x0004)

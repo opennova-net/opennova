@@ -119,7 +119,7 @@ func _clear_pending_session() -> void:
 
 # Retail's ClientAuth does not invent a network-only player id: it uploads the
 # two profile character selections packed from Avatars.def. The bit-pack lives
-# at the engine home, engine/net/npwire session_hello.h character_id (bound as
+# at the engine home, engine/net/npwire/character_id.h (bound as
 # NetProtocol.pack_character_id), and the companion avatar byte is the selected
 # combo's head voice unless the profile has an explicit override.
 # [orig: PlayerProfile_InitDefaults @0x54BB40,
@@ -151,23 +151,32 @@ static func _join_character_selection(
 	}
 
 
+# Retail's per-side default: the first Avatars.def combo of the side's alignment
+# [orig: lookup_entity_slot_and_pack_entry @0x57AD40 <- PlayerProfile_InitDefaults
+# @0x54BB40; a saved id the registry no longer resolves is reallocated to the
+# same default by PlayerSession_InitFromProfile @0x50ca80].
 static func _first_join_character_selection(
 		db: AvatarDatabase, alignment: int) -> Dictionary:
 	if db == null:
 		return {}
-	for nat_index in db.get_nationality_count():
-		var nat: Dictionary = db.get_nationality(nat_index)
-		if int(nat.get("alignment", -1)) != alignment:
-			continue
-		for div_index in db.get_division_count(nat_index):
-			if db.get_combo_count(nat_index, div_index) > 0:
-				return _join_character_selection(
-						db, nat_index, div_index, 0, alignment)
-	return {}
+	var resolved: Dictionary = db.resolve_character_id(
+			db.first_character_id(alignment), alignment)
+	if resolved.is_empty():
+		return {}
+	return _join_character_selection(db,
+			int(resolved.get("nationality_index", -1)),
+			int(resolved.get("division_index", -1)),
+			int(resolved.get("combo_index", -1)), alignment)
 
 
-# Public test seam over the exact profile-to-wire projection. `selection` is the
-# PLAYER_INFO snapshot; its chosen side replaces that side's retail default.
+# The profile-to-wire projection (a public test seam). `selection` is the
+# PLAYER_INFO profile (PlayerCharacterSelectionState's shape): side_profiles
+# [blue, red] each carrying that side's nationality/division/combo tree indices
+# and player_class -- the two side blocks retail uploads as CI0/CI1, CTA/CTB and
+# VCA/VCB [orig: CNapiServerInfo_SerializeToSession @0x4C3650 <- the profile's two
+# 0x8006 side blocks; PlayerProfile_InitDefaults @0x54BB40 for a fresh profile].
+# A side that is absent or no longer resolves takes the retail default: the first
+# combo of its alignment, class 8.
 static func character_join_profile_from_database(
 		db: AvatarDatabase, selection: Dictionary = {}) -> Dictionary:
 	var side_selections: Array[Dictionary] = [
@@ -176,14 +185,12 @@ static func character_join_profile_from_database(
 	]
 	var player_classes := [8, 8]
 	var saved_sides: Array = selection.get("side_profiles", [])
-	var has_saved_sides := false
 	for side in mini(saved_sides.size(), 2):
 		if not (saved_sides[side] is Dictionary):
 			continue
 		var saved: Dictionary = saved_sides[side]
 		if saved.is_empty():
 			continue
-		has_saved_sides = true
 		var saved_character := _join_character_selection(db,
 				int(saved.get("nationality", -1)),
 				int(saved.get("division", -1)),
@@ -193,26 +200,6 @@ static func character_join_profile_from_database(
 		var saved_class := int(saved.get("player_class", 8))
 		if saved_class >= 5 and saved_class <= 9:
 			player_classes[side] = saved_class
-	var selected_side := int(selection.get("team", -1))
-	if selected_side == 0 or selected_side == 1:
-		var chosen := _join_character_selection(
-				db,
-				int(selection.get("nationality", -1)),
-				int(selection.get("division", -1)),
-				int(selection.get("combo", -1)),
-				selected_side)
-		if not chosen.is_empty():
-			side_selections[selected_side] = chosen
-
-	var player_class := int(selection.get("player_class", 8))
-	if player_class < 5 or player_class > 9:
-		player_class = 8
-	# A legacy/one-side snapshot is an ACCEPT result, whose class is written to
-	# both blocks. A canonical per-side snapshot already carries the two bytes
-	# loaded from weapon.sav (the UI stamps both when ACCEPT commits).
-	# [orig: save_player_info_from_dialog @0x55EE3F-0x55EE6D]
-	if not has_saved_sides:
-		player_classes = [player_class, player_class]
 	return {
 		"character_ids": [
 			int(side_selections[0].get("character_id", 0)),

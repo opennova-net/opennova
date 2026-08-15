@@ -154,7 +154,6 @@ public:
 		PF_RESPAWN_REVISION = opennova::world::PF_RESPAWN_REVISION,
 		PF_TYPE_ID = opennova::world::PF_TYPE_ID,
 		PF_WIRE_HANDLE = opennova::world::PF_WIRE_HANDLE,
-		PF_CHARACTER_ANIM_SLOT = opennova::world::PF_CHARACTER_ANIM_SLOT,
 		PF_CHARACTER_ID = opennova::world::PF_CHARACTER_ID,
 		PF_AIM_OVERLAY_VALID = opennova::world::PF_AIM_OVERLAY_VALID,
 		PF_AIM_BODY_PITCH_DEG = opennova::world::PF_AIM_BODY_PITCH_DEG,
@@ -1307,6 +1306,10 @@ public:
 	// The gamemus Var7 projection (world/music_vars.h carries the witness).
 	int get_local_player_health_percent() const;
 	int get_local_player_team() const;
+	// The packed Avatars.def character id (npwire/character_id.h) the authority
+	// stamped on the local player — entity+0x15C on the host's own spawn, the
+	// named 0x0C record's id on a joiner (also before L exists); 0 = none yet.
+	int get_local_player_character_id() const;
 	// Authoritative armory on-show state from the spawned entity. The class is
 	// playerClass +0x294; the name resolves equipped AdmDef index +0x2B0.
 	// [orig: Armory_ResolveSelectedClass @0x5642f0; Player_MountWeaponSlot @0x4dfa40]
@@ -1506,16 +1509,19 @@ public:
 	// "expansion\\<g_ExpansionName>\\weapon.sav" path build @0x54f68c..@0x54f6b7);
 	// the session-start clamp apply_session_settings_to_globals @0x5516ab]
 	Error load_weapon_profile(const String &p_path);
-	// Read slot 0's two character headers without requiring a live Simulation.
-	// Returns {error, loaded, blue, red}; each side carries player_class,
-	// avatar_a, avatar_b, and avatar_packed. This is the menu boot seam over the
-	// same five-record file as load_weapon_profile().
+	// Read slot 0's two character headers (raw bytes, no session clamp) without
+	// requiring a live Simulation. Returns {error, loaded, blue, red}; each side
+	// carries player_class, avatar_a (nationality id), avatar_b (division id),
+	// and avatar_packed. This is the menu boot seam over the same five-record
+	// file as load_weapon_profile().
 	static Dictionary read_weapon_profile_summary(const String &p_path);
-	// Persist PLAYER_INFO's character selection into active profile slot 0.
-	// `profile` may carry side_profiles[blue, red]; its player_class is committed
-	// to both sides exactly as retail ACCEPT does. Existing slots and kit pages
-	// survive, and the final pathname is replaced atomically. See the save-dialog
-	// evidence in docs/playerinfo/avatars-re.md.
+	// Persist PLAYER_INFO's ACCEPT snapshot into active profile slot 0:
+	// `profile.player_class` (5..9) is written to BOTH side blocks and each
+	// non-empty `profile.side_profiles[side]` {avatar_a, avatar_b, avatar_packed}
+	// to its own block — playersav::update_avatar_selection carries the
+	// save_player_info_from_dialog witness. The other four slots and every kit
+	// page survive; the file is replaced atomically.
+	// ERR_INVALID_PARAMETER when the snapshot carries no committable side.
 	static Error save_weapon_profile_selection(const String &p_path,
 			const Dictionary &p_profile);
 	// The profile file's path RULE relative to the mount root (playersav
@@ -1525,8 +1531,11 @@ public:
 	static String weapon_profile_relpath(const String &p_expansion_name);
 	// The FP viewmodel submit spec {gun, arms, adm, show_arms} (simassets
 	// fp_viewmodel_spec [orig: Player_RenderFirstPersonViewModel @0x4ded60;
-	// the emplaced arms omission @0x4dedc7]). has_def=false is the bring-up
-	// path; an empty gun on a resolved def means submit no FP gun.
+	// the emplaced arms omission @0x4dedc7]). `character_arms` is the local
+	// player's resolved combo arms graphic (retail's CharacterEntity arms model,
+	// the ONLY arms source — weapon.def gfx1a/gfx1b are discarded tokens);
+	// has_def=false is the bring-up path; an empty gun on a resolved def means
+	// submit no FP gun.
 	// The witnessed viewmodel placement units, re-exported from engine
 	// simassets/fp_viewmodel_spec.h.
 	static double weapon_def_pos_scale();
@@ -1563,7 +1572,7 @@ public:
 		return opennova::world::kMissionCoordMaxUnits;
 	}
 	static Dictionary fp_viewmodel_spec(bool p_has_def, const String &p_gfx1,
-			const String &p_gfx1a, const String &p_animadm, int p_flags);
+			const String &p_character_arms, const String &p_animadm, int p_flags);
 	// Read-only view of the active profile record for the shell's status copy:
 	// {loaded, blue: {player_class, avatar_a, avatar_b, avatar_packed, kit: [names]},
 	//  red: {...}}. The kit array is the SELECTED page — the one the class byte picks.

@@ -104,12 +104,17 @@ func test_join_auth_profile_uses_retail_avatar_packing_and_defaults() -> void:
 
 func test_join_auth_profile_packs_the_selected_character_for_its_side() -> void:
 	var db := _load_db()
+	# The ACCEPT snapshot shape: the chosen side's tree indices in its
+	# side_profiles slot, class 6 stamped on both sides (retail's two-block
+	# class loop), the other side untouched (empty = retail default).
 	var selected := {
 		"team": 0,
-		"nationality": 0,
-		"division": 0,
-		"combo": 1,
 		"player_class": 6,
+		"side_profiles": [
+			{"team": 0, "nationality": 0, "division": 0, "combo": 1,
+					"player_class": 6},
+			{"player_class": 6},
+		],
 	}
 	var profile := NetSessionDrive.character_join_profile_from_database(db, selected)
 	var ids: Array = profile.get("character_ids", [])

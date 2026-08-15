@@ -45,8 +45,6 @@ const MENU_DESIGN_SIZE := Vector2(800.0, 600.0)
 # The idle clip registers under the canonical idle key so
 # play_body_clip / slot_to_key resolve it.
 const PREVIEW_IDLE_KEY := "anim_idle"
-# TEX_CAMO fields are zero-extended bytes at the retail part-submit sites.
-const CTRL_BYTE_MAX := 255.0
 
 var _resource_root  # ResourceRoot, or null (headless / no shell)
 
@@ -85,8 +83,6 @@ var _part_models: Dictionary = {}
 # resolvable; _skeletal_tried gates the one-time build so a missing-asset mount reads once.
 var _skeletal  # SkeletalAnim or null
 var _skeletal_tried := false
-# Camo tint requested per combo, applied to all part models (see apply_camo).
-var _camo := Vector3.ONE
 var _missing_parts := PackedStringArray()
 
 
@@ -245,13 +241,6 @@ func load_combo(combo: Dictionary) -> void:
 		var part_dict := part as Dictionary
 		var graphic := String(part_dict.get("graphic", "")).strip_edges()
 		_load_part(slot, graphic, part_dict.get("camo", []))
-	# Retain the head triplet for preview-state readback. Each submitted part
-	# already received its own authored triplet in _load_part.
-	var head: Variant = combo.get("head", null)
-	if head is Dictionary:
-		var camo: Array = (head as Dictionary).get("camo", [])
-		if camo.size() == 3:
-			_camo = Vector3(float(camo[0]), float(camo[1]), float(camo[2])) / 255.0
 	_refresh_status_label()
 	_refresh_preview_guides()
 
@@ -296,16 +285,11 @@ func _load_part(slot: String, graphic: String, camo: Array = []) -> void:
 	_model_root.add_child(model)
 	model.set_environment_state(_environment.get_light_state())
 	model.set_object_data(data)
-	if camo.size() >= 3:
-		model.begin_ctrl_update()
-		for i in 3:
-			# Retail writes each authored byte directly to CTRL 93..95 before
-			# submitting this part; these are raw selectors, not normalized tint.
-			# [orig: head @0x57A370, body @0x57A390;
-			#  preview submission @0x56110B/@0x56113C]
-			model.set_ctrl_override("avatar_preview:camo",
-					"TEX_CAMO%d" % (i + 1), int(camo[i]) & 0xff)
-		model.end_ctrl_update()
+	# Each part carries its own authored camo triplet, stored immediately before
+	# that part's preview submit [orig: Avatar_SetHeadCamoCtrl @0x57a370 /
+	# Avatar_SetBodyCamoCtrl @0x57a390 at PlayerInfo_RenderPlayerPreview3D
+	# @0x56113c/@0x56110b].
+	AvatarDatabase.apply_part_camo(model, camo, "avatar_preview:camo")
 	model.set_active_lod(0)  # always the finest LOD in the portrait (defensive; 0 is the default)
 	# Bind the shared skeletal idle so the skinned part plays PI_Idle.BAD on the Dt1rst skeleton,
 	# like the original PLAYER_INFO preview [orig: PlayerInfo_InitPreviewModel @ 0x5600d0 ->
@@ -317,23 +301,6 @@ func _load_part(slot: String, graphic: String, camo: Array = []) -> void:
 		model.set_skeletal_anim(sk)
 		model.play_body_clip(PREVIEW_IDLE_KEY)
 	_part_models[slot] = model
-
-
-# Compatibility/editor override: publish one raw triplet to every loaded part.
-# Normal combo loading preserves the distinct head/body triplets above.
-# The values remain raw CTRL bytes; material evaluation owns their meaning.
-func apply_camo(rgb: Vector3) -> void:
-	_camo = rgb
-	var raw := [roundi(rgb.x * CTRL_BYTE_MAX), roundi(rgb.y * CTRL_BYTE_MAX),
-			roundi(rgb.z * CTRL_BYTE_MAX)]
-	for model in _part_models.values():
-		if model == null or not is_instance_valid(model):
-			continue
-		model.begin_ctrl_update()
-		for i in 3:
-			model.set_ctrl_override("avatar_preview:camo",
-					"TEX_CAMO%d" % (i + 1), raw[i] & 0xff)
-		model.end_ctrl_update()
 
 
 func get_part_model(slot: String):
@@ -350,7 +317,6 @@ func clear() -> void:
 			_model_root.remove_child(model)
 			model.queue_free()
 	_part_models.clear()
-	_camo = Vector3.ONE
 	_has_framed = false
 	_missing_parts = PackedStringArray()
 	_refresh_status_label()

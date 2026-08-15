@@ -146,8 +146,11 @@ void Simulation::bringup_host_runtime(const opennova::bms::File &file) {
 	host_cfg.config = host_config;
 	host_cfg.socket_mode = host_listen_ ? np::SocketMode::Lan : np::SocketMode::Socketless;
 	host_cfg.serve_and_play = serve_and_play;
-	host_cfg.local_character_vars = local_character_vars_;
-	host_cfg.local_character_vars_set = local_character_vars_set_;
+	// The shell's resolved PLAYER_INFO selection for the host's own player; the
+	// HostConfig default is the stock fresh-profile seed until one is installed.
+	if (local_character_vars_set_) {
+		host_cfg.local_character_vars = local_character_vars_;
+	}
 	np::start_host_session(host_owner_, host_cfg);
 	if (serve_and_play) {
 		// The host's own replica pipeline (HostClient role: recv-fold only, 0x0C suppressed). Folds host_loop_

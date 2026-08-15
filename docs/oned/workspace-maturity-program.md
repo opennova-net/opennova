@@ -63,7 +63,7 @@ decision (ADR / RE-record entry) saying why not:
 | Music | ✓ (headerless form excluded by pinned decision, D-SCR-1/2) | ✓ | ✓ (live director runs the VM) | — | G + usability (see MUS-D) |
 | Menus | ✓ (.mnu/.mns) | ✓ | ✓ (canvas hosts the compiled `MenuFrame` preview) | partial (no flow run; actions authored blind) | G |
 | HUD | ✓ (`HudPos`, read-only getters) | — | — (hand-drawn `HudLayoutPreview._draw()`) | — | everything but R |
-| Avatars | ✓ | ✓ (from-scratch writer, ADR 0021) | ✓ (workspace + 3D preview) | ✓ (runtime `player.mnu`, selected world/first-person appearance, networking, active-slot avatar/class persistence; D-PLAYERINFO-1/-12 fixed 2026-08-15) | G |
+| Avatars | ✓ | ✓ (from-scratch writer, ADR 0021) | ✓ (workspace + 3D preview) | ✓ (runtime `player.mnu`, selected world/first-person appearance, networking, active-slot avatar/class persistence; D-PLAYERINFO-1 fixed 2026-08-15, -12's per-team memory ported; the five-slot selector stays open) | G |
 
 Two corrections to earlier working assumptions, verified: environment/water
 unification is DONE (editor-runtime-parity.md: "water is fully unified

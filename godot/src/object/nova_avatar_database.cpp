@@ -5,6 +5,10 @@
 
 #include <avatars/avatars.h>
 #include <avatars/preview_animation.h>
+#include <npwire/character_id.h>
+#include <threedi/threedi_ctrl_catalog.h>
+
+#include "object/nova_object_model.h"
 
 #include <godot_cpp/classes/file_access.hpp>
 
@@ -55,6 +59,28 @@ String AvatarDatabase::preview_idle_bad() {
 	return String(opennova::avatars::kPreviewIdleBad);
 }
 
+PackedStringArray AvatarDatabase::part_camo_registers() {
+	PackedStringArray out;
+	out.push_back(threedi_ctrl_register_name(THREEDI_CTRL_TEX_CAMO1));
+	out.push_back(threedi_ctrl_register_name(THREEDI_CTRL_TEX_CAMO2));
+	out.push_back(threedi_ctrl_register_name(THREEDI_CTRL_TEX_CAMO3));
+	return out;
+}
+
+void AvatarDatabase::apply_part_camo(ObjectModel *p_model, const Array &p_camo,
+		const String &p_owner) {
+	if (p_model == nullptr || p_camo.size() < 3) {
+		return;
+	}
+	const PackedStringArray registers = part_camo_registers();
+	p_model->begin_ctrl_update();
+	for (int i = 0; i < 3; ++i) {
+		// A zero-extended byte store, exactly the retail movzx + mov dword.
+		p_model->set_ctrl_override(p_owner, registers[i], int(p_camo[i]) & 0xff);
+	}
+	p_model->end_ctrl_update();
+}
+
 void AvatarDatabase::_bind_methods() {
 	ClassDB::bind_static_method("AvatarDatabase",
 			D_METHOD("preview_zoom_damp_per_tick"),
@@ -76,6 +102,12 @@ void AvatarDatabase::_bind_methods() {
 			&AvatarDatabase::preview_skeleton_bad);
 	ClassDB::bind_static_method("AvatarDatabase",
 			D_METHOD("preview_idle_bad"), &AvatarDatabase::preview_idle_bad);
+	ClassDB::bind_static_method("AvatarDatabase",
+			D_METHOD("part_camo_registers"),
+			&AvatarDatabase::part_camo_registers);
+	ClassDB::bind_static_method("AvatarDatabase",
+			D_METHOD("apply_part_camo", "model", "camo", "owner"),
+			&AvatarDatabase::apply_part_camo);
 	ClassDB::bind_method(D_METHOD("load", "path"), &AvatarDatabase::load);
 	ClassDB::bind_method(D_METHOD("load_from_resource_root", "resource_root", "name"), &AvatarDatabase::load_from_resource_root);
 	ClassDB::bind_method(D_METHOD("save_to_path", "path"), &AvatarDatabase::save_to_path);
@@ -98,6 +130,8 @@ void AvatarDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("resolve_character_id", "character_id",
 			"expected_alignment"), &AvatarDatabase::resolve_character_id,
 			DEFVAL(-1));
+	ClassDB::bind_method(D_METHOD("first_character_id", "alignment"),
+			&AvatarDatabase::first_character_id);
 	ClassDB::bind_method(D_METHOD("get_model"), &AvatarDatabase::get_model);
 	ClassDB::bind_method(D_METHOD("set_model", "model"), &AvatarDatabase::set_model);
 
@@ -577,13 +611,16 @@ Dictionary AvatarDatabase::resolve_combo(int nat_index, int div_index, int combo
 
 Dictionary AvatarDatabase::resolve_character_id(
 		int character_id, int expected_alignment) const {
-	// The authored ids, not UI row indices, occupy the packed identity; see
-	// docs/playerinfo/avatars-re.md for the retail resolver evidence.
-	const int packed = character_id & 0xffff;
-	const int nationality_id = packed & 0x1f;
-	const int division_id = (packed >> 5) & 0x0f;
-	const int combo_id = (packed >> 9) & 0x3f;
-	const int alignment = (packed >> 15) & 0x01;
+	// The packed word carries the AUTHORED nationality/division/combo numbers
+	// plus the alignment bit; the registry decoder matches all four against the
+	// combo entry (+0/+4/+8/+276) — a side-B id never matches a good entry and
+	// vice versa (retail: MinimapSlot_FindByPackedId @0x57a270; packer
+	// lookup_entity_slot_and_pack_entry @0x57ad40 (@0x57ae47), see docs/playerinfo/avatars-re.md).
+	const uint16_t packed = static_cast<uint16_t>(character_id & 0xffff);
+	const int nationality_id = opennova::character_id::nationality(packed);
+	const int division_id = opennova::character_id::division(packed);
+	const int combo_id = opennova::character_id::combo(packed);
+	const int alignment = opennova::character_id::alignment(packed);
 	if ((expected_alignment == ALIGN_GOOD ||
 			expected_alignment == ALIGN_EVIL) &&
 		alignment != expected_alignment) {
@@ -605,7 +642,7 @@ Dictionary AvatarDatabase::resolve_character_id(
 					continue;
 				}
 				Dictionary out = resolve_combo(ni, di, ci);
-				out["character_id"] = packed;
+				out["character_id"] = static_cast<int>(packed);
 				out["nationality_index"] = ni;
 				out["division_index"] = di;
 				out["combo_index"] = ci;
@@ -614,6 +651,35 @@ Dictionary AvatarDatabase::resolve_character_id(
 		}
 	}
 	return Dictionary();
+}
+
+int AvatarDatabase::first_character_id(int alignment) const {
+	// Retail's per-side default: walk the combo registry in file order and pack
+	// the first entry whose alignment matches the side; no side match packs
+	// entry 0; an empty registry packs 0. This is the fresh-profile seed
+	// (PlayerProfile_InitDefaults) AND the reallocation an unknown id gets at
+	// session start / on the client 0x0C fold (retail:
+	// lookup_entity_slot_and_pack_entry @0x57ad40 (loop @0x57ad6b..0x57ad80,
+	// entry-0 fallback @0x57ad84..0x57adda); callers PlayerSession_InitFromProfile
+	// @0x50cada/@0x50cb08, NapiNPClientMsg 0x0C @0x42eafb, see docs/playerinfo/avatars-re.md).
+	int first_any = 0;
+	bool have_any = false;
+	for (const Nationality &nat : nationalities) {
+		for (const Division &div : nat.divisions) {
+			for (const Combo &combo : div.combos) {
+				const int packed = opennova::character_id::pack(
+						nat.id, div.id, combo.id, nat.alignment);
+				if (nat.alignment == alignment) {
+					return packed;
+				}
+				if (!have_any) {
+					first_any = packed;
+					have_any = true;
+				}
+			}
+		}
+	}
+	return first_any;
 }
 
 Dictionary AvatarDatabase::get_model() const {
