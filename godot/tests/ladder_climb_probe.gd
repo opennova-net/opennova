@@ -36,6 +36,9 @@ var _shots_dir := ""
 var _shot_vp: SubViewport = null
 var _shot_cam: Camera3D = null
 var _shot_dir3 := Vector3.ZERO
+# The open-air side of the ladder face (godot horizontal), learned from the
+# hover offset that latched — the camera shoots from open air at the rungs.
+var _shot_open_dir := Vector3.ZERO
 
 
 func _initialize() -> void:
@@ -56,12 +59,16 @@ func _frame_shot(sim, ladder_center: Vector3, extra_up := 0.0) -> void:
 		_shot_cam = Camera3D.new()
 		_shot_cam.fov = 55.0
 		_shot_vp.add_child(_shot_cam)
-		var away: Vector3 = sim.get_local_player_position() - ladder_center
-		away.y = 0.0
-		_shot_dir3 = away.normalized() if away.length() > 0.01 else Vector3.RIGHT
-		# Swing off the face normal so a ladder support post cannot sit dead
-		# between the camera and the climber.
-		_shot_dir3 = _shot_dir3.rotated(Vector3.UP, 0.6)
+		if _shot_open_dir.length() > 0.01:
+			# Small swing only — keep the rungs facing the lens.
+			_shot_dir3 = _shot_open_dir.normalized().rotated(Vector3.UP, 0.25)
+		else:
+			var away: Vector3 = sim.get_local_player_position() - ladder_center
+			away.y = 0.0
+			_shot_dir3 = away.normalized() if away.length() > 0.01 else Vector3.RIGHT
+			# Swing off the face normal so a ladder support post cannot sit
+			# dead between the camera and the climber.
+			_shot_dir3 = _shot_dir3.rotated(Vector3.UP, 0.6)
 	var player: Vector3 = sim.get_local_player_position()
 	var side := _shot_dir3.cross(Vector3.UP)
 	_shot_cam.position = player + _shot_dir3 * 4.2 + side * 1.6 \
@@ -102,7 +109,9 @@ func _fail(msg: String) -> void:
 
 
 # All CL volumes among the collision instances currently in range (godot-space
-# volume center + base height from the transformed corners).
+# volume center + base height from the transformed corners). "lean" is the
+# horizontal distance between the top-face and bottom-face corner centroids —
+# ~0 for a true vertical rung ladder, large for a climbable staircase/gangway.
 func _cl_volumes(sim) -> Array:
 	var found: Array = []
 	var cd: Dictionary = sim.get_collision_debug()
@@ -121,10 +130,31 @@ func _cl_volumes(sim) -> Array:
 				base = minf(base, c.y)
 				top = maxf(top, c.y)
 			center /= 8.0
+			var mid := (base + top) * 0.5
+			var lo := Vector3.ZERO
+			var hi := Vector3.ZERO
+			var nlo := 0
+			var nhi := 0
+			for c in corners:
+				if c.y <= mid:
+					lo += c
+					nlo += 1
+				else:
+					hi += c
+					nhi += 1
+			var lean := INF
+			var top_xy := Vector3(center.x, 0.0, center.z)
+			if nlo > 0 and nhi > 0:
+				lo /= float(nlo)
+				hi /= float(nhi)
+				lean = Vector2(hi.x - lo.x, hi.z - lo.z).length()
+				top_xy = Vector3(hi.x, 0.0, hi.z)
 			found.append({
 				"center": center,
 				"base": base,
 				"top": top,
+				"lean": lean,
+				"top_xy": top_xy,
 				"entity_handle": int(inst.get("entity_handle", -1)),
 				"inst_pos": inst.get("pos", Vector3.INF),
 			})
@@ -165,10 +195,13 @@ func _run() -> void:
 		return {"forward": _forward})
 	await _mission_wait(1.0)
 
-	# --- Sweep for a CL volume: the debug view is player-anchored (150u), so
-	# hop a teleport grid around the spawn until one shows up.
+	# --- Sweep for CL volumes: the debug view is player-anchored (150u), so
+	# hop a teleport grid around the spawn and ACCUMULATE every CL in range.
+	# 00TRa's tutorial area marks both the stilt-village staircases and the
+	# market rung ladders climbable — rank by lean and climb a true vertical
+	# ladder, not a gangway.
 	var spawn: Vector3 = sim.get_local_player_position() # godot space
-	var ladders: Array = []
+	var by_key: Dictionary = {}
 	var gx := spawn.x
 	var gz := spawn.z
 	var step := SWEEP_STEP
@@ -183,19 +216,31 @@ func _run() -> void:
 	for p in probe_points:
 		sim.debug_teleport_local_player(Vector3(p.x, -p.y, 60.0), 0.0, 0.0)
 		await _mission_wait(0.12)
-		ladders = _cl_volumes(sim)
-		if not ladders.is_empty():
-			break
+		for v in _cl_volumes(sim):
+			var c: Vector3 = v["center"]
+			var key := "%d_%d_%d" % [roundi(c.x * 4.0), roundi(c.y * 4.0), roundi(c.z * 4.0)]
+			if not by_key.has(key):
+				by_key[key] = v
+	var ladders: Array = by_key.values()
 	if ladders.is_empty():
 		_fail("no CL/type-4 volume within %.0fu of the spawn" % SWEEP_RADIUS)
 		return
+	# Vertical first (lean, then taller); report the whole candidate field.
+	ladders.sort_custom(func(a, b):
+		if absf(float(a["lean"]) - float(b["lean"])) > 0.25:
+			return float(a["lean"]) < float(b["lean"])
+		return float(a["top"]) - float(a["base"]) > float(b["top"]) - float(b["base"]))
+	for v in ladders:
+		print("PROBE CL candidate: center %s h %.1f lean %.2f owner=%d" %
+				[str(v["center"]), float(v["top"]) - float(v["base"]),
+				float(v["lean"]), int(v["entity_handle"])])
 	var ladder: Dictionary = ladders[0]
 	var center: Vector3 = ladder["center"]
 	var base: float = ladder["base"]
 	var top: float = ladder["top"]
-	print("PROBE ladder CL at godot %s (base %.1f top %.1f), %d found; owner handle=%d inst_pos=%s" %
-			[str(center), base, top, ladders.size(), int(ladder["entity_handle"]),
-			str(ladder["inst_pos"])])
+	print("PROBE ladder CL chosen at godot %s (base %.1f top %.1f lean %.2f), %d in field; owner handle=%d inst_pos=%s" %
+			[str(center), base, top, float(ladder["lean"]), ladders.size(),
+			int(ladder["entity_handle"]), str(ladder["inst_pos"])])
 
 	# --- Mount: drop in just ABOVE the anchor (anchorZ = top − 1.0), LOOKING
 	# DOWN — the from-above entry arm has no facing requirement (heightDiff < 0
@@ -204,24 +249,36 @@ func _run() -> void:
 	# band is also where contact is guaranteed. The latch detector is the
 	# witnessed gravity skip: an idle latched body holds Z exactly — nothing
 	# else holds a body mid-air.
-	var mx := center.x
-	var my := -center.z
+	# Hover points: the prism column itself, then a ring of 0.45u offsets — a
+	# thin rung-ladder prism embeds against its wall, and the wall's solid push
+	# can slide the capsule off the column before fresh entry sees the contact;
+	# the open-air side of the ring stays in front of the rungs. A real latch
+	# stamps the climb clip family (anim_climb_*) — a Z-hold alone can be a
+	# deck stand and is not proof.
+	var face: Vector3 = ladder["top_xy"]
+	var hovers: Array = [Vector2(face.x, face.z)]
+	for k in 8:
+		var a := TAU * float(k) / 8.0
+		hovers.append(Vector2(face.x + 0.45 * cos(a), face.z + 0.45 * sin(a)))
 	var latched := false
 	var hold_z := 0.0
-	for k in 8:
-		var yaw_deg := 45.0 * float(k)
-		sim.debug_teleport_local_player(Vector3(mx, my, top - 0.3), yaw_deg, -30.0)
+	for h in hovers:
+		sim.debug_teleport_local_player(Vector3(h.x, -h.y, top - 0.3), 0.0, -30.0)
 		await _mission_wait(0.8)
 		var z0: float = sim.get_local_player_position().y
 		await _mission_wait(0.5)
 		var z1: float = sim.get_local_player_position().y
-		if absf(z1 - z0) < 0.05 and z1 > base:
+		var key: String = sim.get_local_player_anim_key()
+		if absf(z1 - z0) < 0.05 and z1 > base and key.contains("climb"):
 			latched = true
 			hold_z = z1
-			print("PROBE LATCHED: yaw %.0f holds z %.2f (volume %.1f..%.1f)" %
-					[yaw_deg, z1, base, top])
+			_shot_open_dir = Vector3(h.x - face.x, 0.0, h.y - face.z)
+			var lp: Vector3 = sim.get_local_player_position()
+			print("PROBE LATCHED: hover %s holds z %.2f as %s (volume %.1f..%.1f); body %s, %.2fu off the top-face column" %
+					[str(h), z1, key, base, top, str(lp),
+					Vector2(lp.x - face.x, lp.z - face.z).length()])
 			break
-		print("PROBE yaw %.0f no latch (z %.2f -> %.2f)" % [yaw_deg, z0, z1])
+		print("PROBE hover %s no latch (z %.2f -> %.2f, anim %s)" % [str(h), z0, z1, key])
 	if not latched:
 		_fail("no entry latched — the CL entry gate or the gravity skip is dead")
 		return
@@ -229,14 +286,14 @@ func _run() -> void:
 	if not _shots_dir.is_empty():
 		presenter.set_third_person(true)
 		await _mission_wait(0.4)
-		# The 00TRa anchor at latch height sits behind the mound crest, so the
-		# latch beat is shot one step up the ladder where the body clears the
-		# terrain — the held height IS the mechanic (climb_idle, gravity off).
+		# The from-above latch lands one rung under the top — climb DOWN to
+		# mid-ladder for the latch beat so the body hangs clear on the rungs
+		# (the held height IS the mechanic: climb_idle, gravity off).
 		for i in 8:
-			sim.add_local_player_look(0.0, -600.0)
+			sim.add_local_player_look(0.0, 600.0)
 			await process_frame
 		_forward = true
-		await _mission_wait(0.5)
+		await _mission_wait(0.8)
 		_forward = false
 		await _mission_wait(0.3)
 		shot1_z = sim.get_local_player_position().y
@@ -251,6 +308,7 @@ func _run() -> void:
 	_forward = true
 	var max_z := hold_z
 	var mid_shot_taken := false
+	var top_shot_taken := false
 	for i in 30:
 		await _mission_wait(0.1)
 		max_z = maxf(max_z, sim.get_local_player_position().y)
@@ -264,14 +322,35 @@ func _run() -> void:
 				_frame_shot(sim, center)
 				await _shot("2_climbing")
 				_forward = true
+		if mid_shot_taken and not top_shot_taken and \
+				sim.get_local_player_position().y > top - 0.6:
+			# Cresting — catch the body at the lip BEFORE the exit leg carries
+			# it over (a freestanding wall has no floor beyond).
+			top_shot_taken = true
+			if _shot_cam != null:
+				_forward = false
+				await _mission_wait(0.25)
+				_frame_shot(sim, center, 0.4)
+				await _shot("3_top")
+				_forward = true
 	_forward = false
 	if max_z <= hold_z + 0.4:
+		# Diagnostic burst before failing: what did the motor actually stamp?
+		_forward = true
+		for i in 6:
+			await _mission_wait(0.2)
+			var lp: Vector3 = sim.get_local_player_position()
+			print("PROBE STALL: anim=%s pos %s pitch %.1f yaw %.1f in_air=%s" %
+					[sim.get_local_player_anim_key(), str(lp),
+					sim.get_local_player_pitch_deg(), sim.get_local_player_yaw_deg(),
+					str(sim.get_local_player_body_debug().get("in_air", "?"))])
+		_forward = false
 		_fail("forward + look-up did not climb (held %.2f, max %.2f)" % [hold_z, max_z])
 		return
 	print("PROBE CLIMB OK: %.2f -> %.2f (climb_up root motion)" % [hold_z, max_z])
-	if _shot_cam != null:
+	if _shot_cam != null and not top_shot_taken:
 		_frame_shot(sim, center)
-	await _shot("3_top")
+		await _shot("3_top")
 
 	# --- Hold again: release the stick — climb_idle keeps the height (gravity
 	# stays off while latched). A natural top-out above the volume falls instead,
