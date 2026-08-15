@@ -747,7 +747,6 @@ func _wire_preview() -> void:
 	_preview_id = preview_id
 	_preview = AvatarPreviewScript.new()
 	_preview.name = "PlayerInfoAvatarPreview"
-	_preview.mouse_filter = Control.MOUSE_FILTER_IGNORE  # let the frame pump keep its clicks
 	frame.add_child(_preview)
 	_place_mount(_preview, preview_id)
 	# Locked menu portrait: no grid/axes, camera fixed, character facing the viewer.

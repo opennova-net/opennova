@@ -99,13 +99,14 @@ static func definitions() -> Array[McpToolDef]:
 			"Drive the compiled menu. op=state returns the current file/screen + widget rows "
 			+ "(design-space rects); press activates a named widget through the real mouse pump "
 			+ "(press+release at its center); press_at pumps at design coords x,y (list rows, "
-			+ "combo popups, spin arrows) and returns the hit widget index; key feeds one key "
-			+ "event (keycode + optional unicode); screen jumps within the open .mnu; open loads "
-			+ "another .mnu file.",
+			+ "combo popups, spin arrows) and returns the hit widget index; click_at feeds a REAL "
+			+ "left click at design coords through Godot input dispatch (mouse filters and mounts "
+			+ "apply; lands next frame); key feeds one key event (keycode + optional unicode); "
+			+ "screen jumps within the open .mnu; open loads another .mnu file.",
 			{
 				"op": {
 					"type": "string",
-					"enum": ["state", "press", "press_at", "key", "screen", "open"],
+					"enum": ["state", "press", "press_at", "click_at", "key", "screen", "open"],
 				},
 				"name": {
 					"type": "string",

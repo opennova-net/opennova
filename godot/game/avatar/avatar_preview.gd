@@ -87,7 +87,11 @@ var _missing_parts := PackedStringArray()
 
 
 func _ready() -> void:
-	mouse_filter = Control.MOUSE_FILTER_STOP
+	# The ONED workspace preview owns its mouse (orbit / pan / fly); the menu
+	# portrait must be transparent to it -- the frame pump owns hover and every
+	# click, including the dropdown rows retail authors over the preview rect.
+	mouse_filter = (Control.MOUSE_FILTER_IGNORE if _menu_preview
+			else Control.MOUSE_FILTER_STOP)
 	clip_contents = true
 	_build_viewport()
 
@@ -116,6 +120,11 @@ func set_menu_preview(enabled: bool) -> void:
 	set_axes_visible(false)
 	if _camera != null:
 		_camera.set_gameplay_locked(true)
+	# Mouse-transparent as a whole (this Control AND the SubViewportContainer):
+	# the PLAYER_INFO combos drop their LIST_BOX rows over this very rect, and
+	# _ready() would otherwise re-arm the workspace STOP filter after the
+	# companion mounted the preview.
+	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	if _viewport_container != null:
 		_viewport_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	if _viewport != null:

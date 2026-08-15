@@ -312,6 +312,15 @@ func test_mounts_3d_preview_when_widget_present() -> void:
 	if preview != null:
 		assert_true(preview.visible and preview.size.x > 0.0,
 			"the mount is placed over the PLAYER_PREVIEW widget_frame_rect")
+		# The three character dropdowns author their LIST_BOX rows over this very
+		# rect: the mount and every Control under it must stay mouse-transparent
+		# after _ready(), or real clicks on the rows die in the mount instead of
+		# reaching the frame pump.
+		assert_eq(preview.mouse_filter, Control.MOUSE_FILTER_IGNORE,
+			"the menu portrait never intercepts the frame's mouse")
+		for child in preview.find_children("*", "Control", true, false):
+			assert_eq((child as Control).mouse_filter, Control.MOUSE_FILTER_IGNORE,
+				"%s under the portrait is mouse-transparent too" % child.name)
 
 
 func test_snapshot_reports_current_selection() -> void:

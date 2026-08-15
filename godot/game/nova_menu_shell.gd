@@ -1094,6 +1094,25 @@ func menu_press_at(design_pos: Vector2) -> int:
 	return hit
 
 
+# A REAL left click at design coords: press + release fed through Godot's input
+# dispatch (mouse filters, companion mounts, GUI focus all apply), unlike the
+# pump-direct press ops -- the seam that observes whether a mounted Control
+# steals a click from the frame. The events are buffered and land on the next
+# frame; callers re-read the menu state after a frame.
+func menu_click_at(design_pos: Vector2) -> bool:
+	if _driver == null or _frame == null or not is_visible_in_tree():
+		return false
+	var window_pos := get_global_transform_with_canvas() * _design_to_local(design_pos)
+	for pressed in [true, false]:
+		var click := InputEventMouseButton.new()
+		click.button_index = MOUSE_BUTTON_LEFT
+		click.pressed = pressed
+		click.position = window_pos
+		click.global_position = window_pos
+		Input.parse_input_event(click)
+	return true
+
+
 func menu_key(keycode: int, unicode: int = 0) -> bool:
 	# The same guard as the real input paths: a hidden menu (a world is up)
 	# must not receive synthetic menu input either.
