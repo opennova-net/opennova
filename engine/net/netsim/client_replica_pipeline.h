@@ -281,7 +281,9 @@ private:
 	void apply_pool_spawn(const std::vector<uint8_t> &body);    // 0x0D pool-1
 	void apply_static_batch(const std::vector<uint8_t> &body);  // 0x10 pool-2
 	void apply_pool3_batch(const std::vector<uint8_t> &body);   // 0x20 pool-3
+	// The live placed-device lifecycle (client_replica_placed_device.cpp).
 	void apply_deployed_item(const std::vector<uint8_t> &body); // 0x59 pool-1
+	void apply_entity_remove(const std::vector<uint8_t> &body);  // 0x12
 	void erase_entity_tree(uint16_t root_handle);
 	// Land one decoded compact world sample on a row: live snap in snap mode /
 	// on the forced edges (respawn, vehicle dead-pose); smooth-target staging +

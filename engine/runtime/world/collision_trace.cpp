@@ -270,9 +270,14 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
         if (t > 0x10000) t = 0x10000;
         return static_cast<int32_t>(t);
     };
-    auto consider = [&](ProjectileHit candidate, int32_t distance) {
+    // Cross-pass arbitration is strict (a later pass replaces only when
+    // closer); `tie_wins` is the one witnessed exception, the Knife
+    // presenter's person leg (below).
+    auto consider = [&](ProjectileHit candidate, int32_t distance,
+                        bool tie_wins = false) {
         if (!candidate.hit()) return;
-        if (!best.hit() || distance < best_distance) {
+        if (!best.hit() || distance < best_distance ||
+            (tie_wins && distance == best_distance)) {
             best = candidate;
             best_distance = distance;
         }
@@ -486,7 +491,8 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
     // (their +1.707u radius pad absorbs the rounding [orig: the u16 tables
     // built @ 0x4b94cb]); dynamic slots store signed full 16.16.
     auto trace_polygon_table = [&](const auto &slots, ProjectileHitClass hit_class,
-                                   float slot_to_units, bool signed_word_coords) {
+                                   float slot_to_units, bool signed_word_coords,
+                                   bool tie_wins = false) {
         CollisionPolygonHit table_hit;
         EntityHandle table_entity;
         bool table_found = false;
@@ -598,7 +604,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
         eh.face_index = table_hit.section_face_index;
         eh.surface_type = table_hit.poly_type;
         eh.material_flags = table_hit.material_flags;
-        consider(eh, table_hit.distance_q16);
+        consider(eh, table_hit.distance_q16, tie_wins);
     };
     // A visual-only MP client (mp_session && !projectile_authority) uses decoded
     // wire projections for pose-bearing projectile contacts. Pools 1-3 are
@@ -612,6 +618,17 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
     if (profile_trace) {
         const int64_t prof_n = prof_now();
         prof_t = prof_n; // owner/exclusion setup charged to neither pass
+    }
+    // The Knife presenter's entity legs run in retail's own order: the PERSON
+    // prox table FIRST (Projectile_RaycastProximitySlots' default slot type),
+    // replacing a terrain/water hit on `candidateDist <= closestDist` — the one
+    // non-strict compare in the family; the building (2) and item (1) legs that
+    // follow are strict, exactly like an ordinary round.
+    // [orig: Weapon_RaycastAndSpawnImpact @0x4e86ad (person, <=), @0x4e873f
+    //  (building, <), @0x4e87cb (item, <)]
+    if (person_faces_only && trace.walk_persons) {
+        trace_polygon_table(persons_, ProjectileHitClass::Person,
+                            1.0f / 65536.0f, false, /*tie_wins=*/true);
     }
     trace_polygon_table(statics_, ProjectileHitClass::StaticEntity, 1.0f, true);
     if (profile_trace) {
@@ -726,11 +743,6 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
         const int64_t prof_n = prof_now();
         trace_profile_.dynamic_us += prof_n - prof_t;
         prof_t = prof_n;
-    }
-
-    if (person_faces_only && trace.walk_persons) {
-        trace_polygon_table(persons_, ProjectileHitClass::Person,
-                            1.0f / 65536.0f, false);
     }
 
     // Consume the pose owner's COBJ matrices when available. The bounded torso

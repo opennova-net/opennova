@@ -378,11 +378,12 @@ bool deployed_item_spawn_update_and_remove_materialize() {
 			row->parent_handle == 0xFFFFu && row->team_known && row->team == 2 &&
 			row->x == spawn.pos_x && row->y == spawn.pos_y &&
 			row->z == spawn.pos_z &&
-			row->pitch_bam == static_cast<int32_t>(
-					static_cast<uint32_t>(spawn.angle_x) << 16) &&
-			row->roll_bam == static_cast<int32_t>(
-					static_cast<uint32_t>(spawn.angle_y) << 16) &&
+			// angle words = entity+16/+20/+24 high halves = yaw/pitch/roll
 			row->heading_bam == static_cast<int32_t>(
+					static_cast<uint32_t>(spawn.angle_x) << 16) &&
+			row->pitch_bam == static_cast<int32_t>(
+					static_cast<uint32_t>(spawn.angle_y) << 16) &&
+			row->roll_bam == static_cast<int32_t>(
 					static_cast<uint32_t>(spawn.angle_z) << 16) &&
 			row->spawn_revision == 1,
 			"0x59 selects the friendly item and folds the placed-device pose/carrier"))

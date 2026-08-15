@@ -95,9 +95,14 @@ float table_clip_seconds(void *opaque, const char *key) {
 void build_clip_context(const DefWeaponDef &def, const ResourceIndex *resources,
 		WeaponTableClipContext &out) {
 	if (resources == nullptr) return;
+	// No authored animadm = no anim object at Def+372, so every 'auto' field
+	// collapses to zero through the empty-context lookup below ("Error, need
+	// to define a anim adm") [orig: Anim_InitActions @0x542180..0x542198;
+	// the per-block animadm buffer is consumed then cleared at each weapon
+	// `end` by WeaponDefs_ResetParseState @0x53ff90].
+	if (def.animadm[0] == '\0') return;
 	simassets::AdmClipIndex clips;
-	const char *adm = def.animadm[0] != '\0' ? def.animadm : "ak47_1st";
-	clips.load(resources, adm);
+	clips.load(resources, def.animadm);
 	for (size_t i = 0; i < def.actions_count; ++i) {
 		const char *key = def.actions[i].anim;
 		if (key[0] == '\0') continue;

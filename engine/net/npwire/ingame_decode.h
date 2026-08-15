@@ -1640,7 +1640,11 @@ struct DeployedItemSpawn {
 	uint16_t slot_handle = 0;      // packet[4] — the spawned entity (pool<<12)|slot
 	uint16_t parent_handle = 0xFFFF; // packet[5] — attach parent (0xFFFF = none)
 	int32_t  pos_x = 0, pos_y = 0, pos_z = 0;       // i32 16.16 world position
-	uint16_t angle_x = 0, angle_y = 0, angle_z = 0; // Euler; the engine shifts << 16
+	// packet[12..14]: the high halves of entity+16/+20/+24 = the eulerZ/eulerX/
+	// eulerY triple (yaw heading, pitch, roll); the handler stores each << 16
+	// [orig: @ 0x5468cb..0x5468df; emitters Entity_UpdateSatchelPhysics
+	//  @ 0x448aeb..0x448b09 / Entity_UpdateClaymorePhysics @ 0x447a6c..0x447a8a]
+	uint16_t angle_x = 0, angle_y = 0, angle_z = 0;
 	uint16_t reserved = 0;         // 2 trailing bytes (not read by the handler)
 };
 bool decode_deployed_item_spawn(const uint8_t *body, size_t len,

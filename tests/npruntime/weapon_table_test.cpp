@@ -324,6 +324,28 @@ int main(void) {
 		CHECK(unresolved_fire.delay_start == 0 && unresolved_fire.delay_end == 0);
 		CHECK(resolved_fire.delay_start == 18 && resolved_fire.delay_end == 18);
 		def_free_weapons(&automatic);
+
+		// A definition with NO animadm has no anim object, so its 'auto' fields
+		// collapse to zero even with the resource index mounted
+		// [orig: Anim_InitActions @0x542180 "Error, need to define a anim adm"].
+		static const char kNoAdm[] =
+				"weapon \"WPN_AUTO_NOADM\"\n"
+				"\taction \"fire\"\n"
+				"\t\tdelaystart auto\n"
+				"\t\tdelayend auto\n"
+				"\t\tanim anim_idle\n"
+				"\t\tfunction wpn_std_fire\n"
+				"\tend\n"
+				"end\n";
+		DefWeaponsFile no_adm{};
+		CHECK(def_parse_weapons_memory(
+				reinterpret_cast<const uint8_t *>(kNoAdm),
+				sizeof(kNoAdm) - 1, &no_adm) == 0);
+		const world::WeaponTable no_adm_table = np::build_weapon_table(no_adm, &index);
+		const world::WeaponFsmAction &no_adm_fire =
+				no_adm_table.by_index(1)->action_fsm.actions[world::weapon_action::kFire];
+		CHECK(no_adm_fire.delay_start == 0 && no_adm_fire.delay_end == 0);
+		def_free_weapons(&no_adm);
 	}
 
 	std::printf("weapon_table: %s\n", failures == 0 ? "OK" : "FAILED");

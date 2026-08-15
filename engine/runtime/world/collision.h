@@ -786,12 +786,14 @@ public:
     ProjectileHit trace_projectile(const World &world,
                                    const ProjectileTrace &trace) const;
 
-    // The instant Knife presenter walks the same terrain/water and pool-2/1/0
-    // arbitration as a projectile ray, but every entity pool uses authored
-    // CFAC geometry. In particular, pool-0 persons do not use the ballistic
-    // bone-sphere path and unresolved models do not gain a sphere substitute.
-    // [orig: Weapon_RaycastAndSpawnImpact @0x4e8460 ->
-    // Projectile_RaycastProximitySlots @0x4e5340]
+    // The instant Knife presenter walks terrain, water, then the PERSON prox
+    // table (replacing on a distance tie), then buildings and items (strict),
+    // and every entity pool uses authored CFAC geometry. In particular, pool-0
+    // persons do not use the ballistic bone-sphere path and unresolved models
+    // do not gain a sphere substitute. The hit's `surface_type` is the CFAC
+    // material; the caller maps it to the effect row (person material 1 =
+    // flesh). [orig: Weapon_RaycastAndSpawnImpact @0x4e8460 ->
+    // Projectile_RaycastProximitySlots @0x4e5340 slot types 0/2/1]
     ProjectileHit trace_knife_impact(const World &world,
                                      const ProjectileTrace &trace) const;
 

@@ -4891,7 +4891,7 @@ the FFI structs.
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-ITEM-1 | The bullet item hit-test now runs the witnessed shape: bound-sphere broad phase over pools 1/2 (model-less entities excluded as the proximity-residency equivalence) + the collision-model CFAC FACE narrow phase (husk-aware; a sphere graze that misses every face lets the round fly on) with the face material feeding the impact tag (material + 4; building material 1 → 23 flesh). A dynamic item that survives broad phase without its required live collision model is a fatal binding invariant, not substitute geometry. Residuals: the `+533` refNum self-hit exclusion and the retail prox-slot tables (we scan the pools directly) are unmodeled; the blast pool-2 leg still uses the bound sphere, not the AABB-face refinement | `Projectile_RaycastProximitySlots @ 0x4e5340` → `Physics_RaycastAgainstBoneCollision @ 0x4e4cb0` (see §15.8); the AABB refinement `@ 0x4eb700`; material + 4 `@ 0x4e982b` / `@ 0x4e9b80` | shots beside a prop no longer stop midair on the invisible bound sphere, impact effects pick the surface material row (metal barrels spark as metal), and hit points land on real faces; ctest `collision` face-raycast set |
+| D-ITEM-1 | The bullet item hit-test now runs the witnessed shape: bound-sphere broad phase over pools 1/2 (model-less entities excluded as the proximity-residency equivalence) + the collision-model CFAC FACE narrow phase (husk-aware; a sphere graze that misses every face lets the round fly on) with the face material feeding the impact tag (material + 4 — NB re-witnessed 2026-08-15: `Projectile_HandleEntityImpact` passes `ray[22] + 4` unconditionally, so the port's extra "building material 1 → 23 flesh" remap in `RoundSim` is unwitnessed here; that remap belongs to the Knife presenter's PERSON leg, `Weapon_RaycastAndSpawnImpact @0x4e8880`, and is a residual to remove from the bullet path). A dynamic item that survives broad phase without its required live collision model is a fatal binding invariant, not substitute geometry. Residuals: the `+533` refNum self-hit exclusion and the retail prox-slot tables (we scan the pools directly) are unmodeled; the blast pool-2 leg still uses the bound sphere, not the AABB-face refinement | `Projectile_RaycastProximitySlots @ 0x4e5340` → `Physics_RaycastAgainstBoneCollision @ 0x4e4cb0` (see §15.8); the AABB refinement `@ 0x4eb700`; material + 4 `@ 0x4e982b` / `@ 0x4e9b80` | shots beside a prop no longer stop midair on the invisible bound sphere, impact effects pick the surface material row (metal barrels spark as metal), and hit points land on real faces; ctest `collision` face-raycast set |
 | D-ITEM-2 | `husk_swap_at`/`_sec` parsed for format fidelity only — the runtime consumer is unwitnessed (no +0x19C/+0x1A0 reader found this session) | fields written `@ 0x49f1ce-0x49f2c2` | no behavior port yet; find the reader (a progressive damage-stage swap is the hypothesis) |
 | D-ITEM-3 | The mid-life breakable-section sweep (a blast marks collision sections with byte flag & 2 into sectionMask) is a cited stub — our CollisionModel carries no per-section flag byte | `@ 0x4e6c5e-0x4e6e6b` | partial visual damage (windows/panels before death) missing; needs the section-flag plumb in the collision build |
 | D-ITEM-4 | Death pieces present only as their row's TRAIL effect following the sim piece: the single-section husk mesh, its render spin, and the explosion glow light are absent; one world-local PRNG stream stands in for the three retail streams | pieces render one husk section w/ spin `@ 0x493400`; `LightPool_SpawnGlowEffect @ 0x49351a`; PRNG_Next16/_B/_C | the debris trajectory is pinned, but the visible chunks do not match retail; mesh pieces need section-ordinal render instancing. `CollisionSection::parent_part_index` preserves COBJ hierarchy metadata and is not that selector |
@@ -5654,9 +5654,12 @@ unparented, then on the authority `Entity_CloneFromTemplateByType @ 0x4398a0`
 + `Entity_ConvertRoundToPlacedEntity @ 0x5455B0` (memcpy of the round's first
 0x2B4 bytes — pos/angles/team/owner/ammo/health/callbacks all carry; source
 round expires next tick; placed motor +452 = parent-interp or null) + **S2C
-0x59** (32 B, mask 0x90 — net-re §5.36) + the stat op (`sub_5119E0`, op 3
-satchel / 4 claymore); a non-authority round instead clears noage and
-self-expires in 248 ticks.
+0x59** (32 B, mask 0x90 — net-re §5.36) + the per-owner same-type device cap
+(`Server_EnforcePlacedDeviceCapByOwner @ 0x5119E0`, ex `sub_5119E0` — walked
+2026-08-15, NOT a stat op: max 3 satchels / 4 claymores of one item def per
+owner; a surplus removes the oldest ARMED device, most negative +684, via
+`Server_RemoveEntityAndNotify` = S2C 0x12; unported, D-THROW-10); a
+non-authority round instead clears noage and self-expires in 248 ticks.
 
 The audited host mirror now carries the complete placed pose, selected TrcrID
 item, item-def health/armor, owner/team/ammo/think data, and parent link into
@@ -5769,6 +5772,7 @@ death hook).
 | D-THROW-7 | CLOSED 2026-08-15: authoritative conversion/removal events encode exact S2C 0x59/0x12 records and fan reliably to in-match remotes while skipping host loopback; joiners validate both, select the base/friendly/enemy item from owner/local teams plus MP attribute 0x8000, preserve same-type updates as one lifetime, attach the structural parent, materialize at the exact pool-1 wire handle, and retire it on 0x12 | retail re-simulates tag-2 rounds, then applies S2C 0x59 (net-re §5.36) + 0x12 removal | `nw_ingame_encode`, `netsim_client_world_materializer`, `npruntime_entity_lifecycle_net`, `npruntime_client_runtime`, `npruntime_placed_device_relay`, and `throwables` |
 | D-THROW-8 | CLOSED 2026-08-12: the pool-1 projectile walk demand-resolves a late placed item's retained host collision asset before narrow phase; the model uses CFAC, while failure to bind the clone's required collision model raises a fatal invariant rather than substituting sphere geometry | the item clone is initialized from its model before the ordinary pool-1 CFAC walk `[orig: Entity_CloneFromTemplateByType @0x4398A0 -> Entity_InitFromModel @0x40DC30; Projectile_RaycastProximitySlots @0x4E53D4 -> Physics_RaycastAgainstBoneCollision @0x4E4CB0]` | `collision_test::test_late_pool1_item_resolves_cfac_or_raises` pins a sphere-only graze miss, face metadata, allocation-serial-safe packed-slot reuse, and the fatal unresolved-model branch |
 | D-THROW-9 | CLOSED: ported devices are pool 1, run before projectiles, and decrement arm delay once per tick | pool-1 age −1/tick; the pool-2/3 −8/−64 cadence is outside the ported-device scope | no divergence for satchel/claymore/AV-mine devices; unported lndm cadence remains under D-THROW-6 |
+| D-THROW-10 | `ThrowableSim::place_from_round` keeps every converted device — no per-owner cap | `Server_EnforcePlacedDeviceCapByOwner @ 0x5119E0` (ex `sub_5119E0`, walked 2026-08-15) runs after each motor's 0x59 send: same owner (+368) + same `itemDef->id` in pool 1, max 3 satchels / 4 claymores; a surplus removes the oldest ARMED device (most negative +684) via `Server_RemoveEntityAndNotify` (S2C 0x12) | a 4th satchel / 5th claymore persists for the owner on the authority and on every joiner; port = count after `place_from_round` and retire the oldest armed device through `remove_device`, whose event already rides the 0x12 relay |
 
 ### 27.9 Open follow-ups
 
@@ -5779,7 +5783,8 @@ death hook).
    landmine uses) — skimmed only.
 4. The AI grenade-throw think (body anims 159–162 exist, §8/§14 tables) — the
    AI never throws in our port yet.
-5. `sub_5119E0` (the stat op) — cited, unwalked.
+5. `Server_EnforcePlacedDeviceCapByOwner @ 0x5119E0` (ex `sub_5119E0`) — walked
+   2026-08-15 (the per-owner device cap, D-THROW-10); its port is open.
 
 ### 27.10 IDB write-backs (2026-07-20 session, saved)
 

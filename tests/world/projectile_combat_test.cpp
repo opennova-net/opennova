@@ -858,6 +858,7 @@ CollisionModel knife_person_face_model(uint8_t material) {
 void test_knife_instant_kill_zone_raycast() {
     World world;
     world.registry.configure_pool(0, 8);
+    world.registry.configure_pool(1, 8);
 
     Entity shooter;
     shooter.kind = EntityKind::Organic;
@@ -929,6 +930,65 @@ void test_knife_instant_kill_zone_raycast() {
     CHECK(world.round_sim.active_count == 0);
     CHECK(world.explosions.queue.size() == 1);
     CHECK(world.round_sim.impacts.empty());
+
+    // The PERSON leg remaps CFAC material 1 to the flesh row (23): hit type 3
+    // is Projectile_RaycastProximitySlots' default (person) slot walk
+    // [orig: Weapon_RaycastAndSpawnImpact @0x4e8880..0x4e8888].
+    Entity flesh_target;
+    flesh_target.kind = EntityKind::Organic;
+    flesh_target.has_item_def = true;
+    flesh_target.item_type = 3;
+    flesh_target.position = {1.0f, 0.0f, 0.0f};
+    flesh_target.health = 100;
+    const EntityHandle fh = world.registry.spawn(0, flesh_target);
+    const int32_t flesh_model_id = collision.add_model(
+        knife_person_face_model(/*material=*/1));
+    collision.assign_entity(fh, flesh_model_id);
+    const int32_t flesh_pose[3] = {1 * 65536, 0, 0};
+    CHECK(collision.publish_entity_section_matrices(
+        fh, {collision_matrix_from_heading(0, flesh_pose)}));
+    collision.build_tick_tables(world);
+    world.round_sim.impacts.clear();
+    world.explosions.queue.clear();
+    CHECK(world.round_sim.spawn(world, params) < 0);
+    CHECK(world.explosions.queue.size() == 1);
+    CHECK(world.registry.get(fh)->health == 100);
+    CHECK(world.round_sim.impacts.size() == 1);
+    if (!world.round_sim.impacts.empty()) {
+        const RoundImpact &impact = world.round_sim.impacts[0];
+        const int32_t impact_x = to_fixed(impact.position.x);
+        CHECK(impact_x >= 1 * 65536 - 2 && impact_x <= 1 * 65536);
+        CHECK(impact.effect_tag == 23);
+    }
+
+    // The ITEM leg (hit type 2) is plain material + 4 — a pool-1 item's
+    // material 1 is NOT flesh — and, being closer, it wins the strict
+    // arbitration over the person behind it
+    // [orig: @0x4e87cb item leg (<); @0x4e8867 material + 4].
+    Entity item;
+    item.kind = EntityKind::Item;
+    item.has_item_def = true;
+    item.item_type = 3;
+    item.position = {0.5f, 0.0f, 0.0f};
+    item.bound_radius = 1.0f;
+    const EntityHandle ih = world.registry.spawn(1, item);
+    const int32_t item_model_id = collision.add_model(
+        knife_person_face_model(/*material=*/1));
+    collision.assign_entity(ih, item_model_id);
+    const int32_t item_pose[3] = {32768, 0, 0};
+    CHECK(collision.publish_entity_section_matrices(
+        ih, {collision_matrix_from_heading(0, item_pose)}));
+    collision.build_tick_tables(world);
+    world.round_sim.impacts.clear();
+    world.explosions.queue.clear();
+    CHECK(world.round_sim.spawn(world, params) < 0);
+    CHECK(world.round_sim.impacts.size() == 1);
+    if (!world.round_sim.impacts.empty()) {
+        const RoundImpact &impact = world.round_sim.impacts[0];
+        const int32_t impact_x = to_fixed(impact.position.x);
+        CHECK(impact_x >= 32768 - 2 && impact_x <= 32768);
+        CHECK(impact.effect_tag == 5);
+    }
 }
 
 // Moving decoded pool-1 movers collide through their wire-keyed authored

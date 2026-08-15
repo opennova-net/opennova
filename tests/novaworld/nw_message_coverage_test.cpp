@@ -636,6 +636,27 @@ int check_S_13_entity_death() {
 	return 0;
 }
 
+// S2C 0x12 — entity removal: [u16 handle] (2 B). The client ignores 0xFFFF and
+// destroys the packed pool/slot otherwise; the host emits it before it releases
+// the row [orig: NapiNPClientMsg_0x012 @0x425EE0; Server_RemoveEntityAndNotify
+// @0x50A270].
+int check_S_12_entity_remove() {
+	LE w;
+	w.u16(0x1007);
+	EXPECT(w.b.size() == 2);
+	EntityRemove r;
+	size_t consumed = 0;
+	EXPECT(decode_entity_remove(w.b.data(), w.b.size(), r, consumed));
+	EXPECT(consumed == 2);
+	EXPECT(r.entity_handle == 0x1007);
+	// A short body is a decode failure here (retail reads a zero handle from it
+	// and would destroy pool-0 slot 0 — never emitted by any sender).
+	EntityRemove bad;
+	EXPECT(!decode_entity_remove(w.b.data(), 1, bad, consumed));
+	cover('S', 0x12);
+	return 0;
+}
+
 // S2C 0x30 — entity-checksum request: [u8 entityId][u16 checksum] (3 B).
 int check_S_30_checksum_request() {
 	LE w;
@@ -1162,6 +1183,7 @@ int main() {
 	if (check_S_6B_minimap()) return 1;
 	if (check_S_49_weapon_reload()) return 1;
 	if (check_C_25_reload_request()) return 1;
+	if (check_S_12_entity_remove()) return 1;
 	if (check_S_13_entity_death()) return 1;
 	if (check_S_30_checksum_request()) return 1;
 	if (check_S_31_loadout_crc_request()) return 1;

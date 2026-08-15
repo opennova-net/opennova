@@ -62,6 +62,7 @@ add_library(opennova_net STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/netsim/client_replica_body_arbitration.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/netsim/client_replica_minimap.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/netsim/client_replica_pipeline.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/netsim/client_replica_placed_device.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/netsim/client_world_materializer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/netsim/connection_fan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/netsim/udp_session_transport.cpp

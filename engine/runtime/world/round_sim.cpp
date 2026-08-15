@@ -622,20 +622,20 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params,
                                 : 5;
                     } else if (hit.hit_class == ProjectileHitClass::Water) {
                         imp.effect_tag = 11;
+                    } else if (hit.hit_class == ProjectileHitClass::Person &&
+                               hit.surface_type == 1) {
+                        // The PERSON leg (hit type 3 = the default slot-type
+                        // walk of Projectile_RaycastProximitySlots) remaps CFAC
+                        // material 1 to the flesh row; buildings (hit type 1)
+                        // and items (hit type 2) are plain material + 4.
+                        // [orig: Weapon_RaycastAndSpawnImpact @0x4e8880..0x4e8888
+                        //  vs @0x4e8867]
+                        imp.effect_tag = 23;
+                    } else if (hit.surface_type >= 0 &&
+                               hit.surface_type + 4 < kImpactEffectTagCount) {
+                        imp.effect_tag = hit.surface_type + 4;
                     } else {
-                        const Entity *target =
-                            world.registry.get(hit.geometry_entity);
-                        if (target != nullptr &&
-                            target->kind == EntityKind::Building &&
-                            hit.surface_type == 1) {
-                            imp.effect_tag = 23;
-                        } else if (hit.surface_type >= 0 &&
-                                   hit.surface_type + 4 <
-                                       kImpactEffectTagCount) {
-                            imp.effect_tag = hit.surface_type + 4;
-                        } else {
-                            imp.effect_tag = 4;
-                        }
+                        imp.effect_tag = 4;
                     }
                     imp.tick = world.logic_tick;
                     imp.source_order = next_impact_order++;

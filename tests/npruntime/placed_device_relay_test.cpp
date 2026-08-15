@@ -223,12 +223,13 @@ bool run_placed_device_spawn_and_remove_fanout() {
 			decoded_spawn.pos_x == w::to_fixed(device.pos.x) &&
 			decoded_spawn.pos_y == w::to_fixed(device.pos.y) &&
 			decoded_spawn.pos_z == w::to_fixed(device.pos.z) &&
+			// words 12/13/14 = entity+16/+20/+24 high halves = yaw/pitch/roll
 			decoded_spawn.angle_x == static_cast<uint16_t>(
-					static_cast<uint32_t>(device.pitch_bam) >> 16) &&
+					static_cast<uint32_t>(device.yaw_bam) >> 16) &&
 			decoded_spawn.angle_y == static_cast<uint16_t>(
-					static_cast<uint32_t>(device.roll_bam) >> 16) &&
+					static_cast<uint32_t>(device.pitch_bam) >> 16) &&
 			decoded_spawn.angle_z == static_cast<uint16_t>(
-					static_cast<uint32_t>(device.yaw_bam) >> 16),
+					static_cast<uint32_t>(device.roll_bam) >> 16),
 			"0x59 carries base/friend/foe ids, owner, parent, pose, and exact slot"))
 		return false;
 

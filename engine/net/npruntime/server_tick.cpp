@@ -239,12 +239,20 @@ void route_throwable_events(NapiNPServerCtx &ctx, const world::World &world) {
 		spawn.pos_x = world::to_fixed(event.pos.x);
 		spawn.pos_y = world::to_fixed(event.pos.y);
 		spawn.pos_z = world::to_fixed(event.pos.z);
+		// Words 12/13/14 are the high halves of the resting round's
+		// entity+16/+20/+24 = the eulerZ/eulerX/eulerY triple (yaw heading,
+		// pitch, roll) — the same order every spawn record carries; the client
+		// stores them straight back into +16/+20/+24 [orig: the word reads
+		// [esi+12h]/[esi+16h]/[esi+1Ah] into record words 12/13/14,
+		// Entity_UpdateSatchelPhysics @0x448aeb..0x448b09 and
+		// Entity_UpdateClaymorePhysics @0x447a6c..0x447a8a;
+		// Entity_SpawnOrUpdateFromSlotPacket @0x5468cb..0x5468df].
 		spawn.angle_x = static_cast<uint16_t>(
-				static_cast<uint32_t>(event.pitch_bam) >> 16);
-		spawn.angle_y = static_cast<uint16_t>(
-				static_cast<uint32_t>(event.roll_bam) >> 16);
-		spawn.angle_z = static_cast<uint16_t>(
 				static_cast<uint32_t>(event.yaw_bam) >> 16);
+		spawn.angle_y = static_cast<uint16_t>(
+				static_cast<uint32_t>(event.pitch_bam) >> 16);
+		spawn.angle_z = static_cast<uint16_t>(
+				static_cast<uint32_t>(event.roll_bam) >> 16);
 		fan_remote(s2c::DEPLOYED_ITEM, encode_deployed_item_spawn(spawn));
 	}
 	for (const world::ThrowableEvents::DeviceRemove &event :
