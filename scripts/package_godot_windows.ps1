@@ -10,14 +10,25 @@
 #
 # Usage:
 #   pwsh -File scripts\package_godot_windows.ps1 [-Target all|editor|runtime]
+#                                                [-ExportMode release|debug] [-SkipBuild]
 
 param(
     [ValidateSet("all", "editor", "runtime")]
     [string]$Target = "all",
-    # CI builds the GDExtension once (the build-gdextension-windows job) and downloads
-    # the DLLs into godot\bin; -SkipBuild then skips the per-job rebuild. Local runs
-    # omit it and build normally. See .github/workflows/ci.yml build-gdextension-windows.
-    [switch]$SkipBuild
+    # CI builds the GDExtension once per flavour (the build-gdextension-windows job)
+    # and downloads the DLLs into godot\bin; -SkipBuild then skips the per-job
+    # rebuild. Local runs omit it and build normally. See
+    # .github/workflows/ci.yml build-gdextension-windows.
+    [switch]$SkipBuild,
+    # Godot export mode. "release" (default; what the release workflow ships):
+    # --export-release, and the packaged exe loads the template_release
+    # GDExtension. "debug" (pull-request CI): --export-debug, and the packaged exe
+    # loads the template_debug GDExtension — the flavour every editor session
+    # runs — so a PR only has to compile one flavour. The Godot editor itself
+    # always loads template_debug while it scans scripts for the export, so that
+    # DLL is required in both modes.
+    [ValidateSet("debug", "release")]
+    [string]$ExportMode = "release"
 )
 
 $ErrorActionPreference = "Stop"
@@ -118,26 +129,41 @@ function Invoke-GDExtensionBuild {
 $DEBUG_DLL = "$ROOT\godot\bin\libopennova.windows.template_debug.x86_64.dll"
 $RELEASE_DLL = "$ROOT\godot\bin\libopennova.windows.template_release.x86_64.dll"
 
-# The Godot editor loads the debug/editor library while scanning scripts for an
-# export. The release export template then needs the release library for the
-# packaged app. Fresh CI runners must have both.
+# Two DLL roles. The Godot editor loads the debug/editor library (template_debug)
+# while scanning scripts for ANY export, so it is always required. The packaged
+# exe loads the library matching its export mode — a --export-release exe
+# resolves the .gdextension windows.release entry (template_release), a
+# --export-debug exe the windows.debug entry (template_debug) — and only that
+# shipped library is boot-smoked and zipped.
+$EDITOR_DLL = $DEBUG_DLL
+if ($ExportMode -eq "debug") { $SHIPPED_DLL = $DEBUG_DLL } else { $SHIPPED_DLL = $RELEASE_DLL }
+$NeedsReleaseDll = ($ExportMode -eq "release")
+Write-Host "=== Export mode: $ExportMode (ships $(Split-Path $SHIPPED_DLL -Leaf)) ==="
+
 if ($SkipBuild) {
     Write-Host "=== -SkipBuild: using prebuilt GDExtension DLLs in godot\bin ==="
-    if (-not (Test-Path $DEBUG_DLL))   { throw "Expected prebuilt debug DLL missing: $DEBUG_DLL" }
-    if (-not (Test-Path $RELEASE_DLL)) { throw "Expected prebuilt release DLL missing: $RELEASE_DLL" }
+    if (-not (Test-Path $EDITOR_DLL)) { throw "Expected prebuilt debug DLL missing: $EDITOR_DLL" }
+    if ($NeedsReleaseDll -and -not (Test-Path $RELEASE_DLL)) {
+        throw "Expected prebuilt release DLL missing: $RELEASE_DLL"
+    }
 }
 else {
+    # RelWithDebInfo, not Debug: the same optimized-plus-symbols flavour
+    # scripts/build_godot.sh Dev and CI produce, so a debug-mode package ships
+    # the DLL every editor session runs rather than an /Od build.
     Invoke-GDExtensionBuild `
         -GodotCppTarget "template_debug" `
         -BuildDir "build-godot-debug" `
-        -Config "Debug" `
+        -Config "RelWithDebInfo" `
         -ExpectedDll $DEBUG_DLL
 
-    Invoke-GDExtensionBuild `
-        -GodotCppTarget "template_release" `
-        -BuildDir "build-godot-release" `
-        -Config "Release" `
-        -ExpectedDll $RELEASE_DLL
+    if ($NeedsReleaseDll) {
+        Invoke-GDExtensionBuild `
+            -GodotCppTarget "template_release" `
+            -BuildDir "build-godot-release" `
+            -Config "Release" `
+            -ExpectedDll $RELEASE_DLL
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -156,7 +182,9 @@ function Invoke-GodotExport {
     # Pass as a single command-line string so spaces in $PresetName survive.
     # Start-Process -Wait blocks until Godot exits; plain `&` has shown to return
     # before Godot finishes writing the .exe under some output-redirection setups.
-    $arguments = "--headless --path godot --export-release `"$PresetName`" `"$OutputPath`""
+    # --export-release / --export-debug picks the export template and, through
+    # the .gdextension feature tags, which GDExtension flavour the exe loads.
+    $arguments = "--headless --path godot --export-$ExportMode `"$PresetName`" `"$OutputPath`""
     $stdoutLog = [System.IO.Path]::GetTempFileName()
     $stderrLog = [System.IO.Path]::GetTempFileName()
 
@@ -205,9 +233,9 @@ function Test-GodotAppBoot {
 
     Write-Host "=== Boot smoke: $PackageName ==="
     $exeDir = Split-Path $ExePath -Parent
-    $dllBeside = Join-Path $exeDir (Split-Path $RELEASE_DLL -Leaf)
+    $dllBeside = Join-Path $exeDir (Split-Path $SHIPPED_DLL -Leaf)
     if (-not (Test-Path $dllBeside)) {
-        Copy-Item -LiteralPath $RELEASE_DLL -Destination $dllBeside -Force
+        Copy-Item -LiteralPath $SHIPPED_DLL -Destination $dllBeside -Force
     }
 
     $stdoutLog = [System.IO.Path]::GetTempFileName()
@@ -260,8 +288,8 @@ function New-GodotAppZip {
     if (-not (Test-Path $ExePath)) {
         throw "Cannot package '$PackageName'; exe is missing: $ExePath"
     }
-    if (-not (Test-Path $RELEASE_DLL)) {
-        throw "Cannot package '$PackageName'; release DLL is missing: $RELEASE_DLL"
+    if (-not (Test-Path $SHIPPED_DLL)) {
+        throw "Cannot package '$PackageName'; shipped GDExtension DLL is missing: $SHIPPED_DLL"
     }
 
     $stageDir = Join-Path $DIST ".stage-$PackageName"
@@ -271,7 +299,7 @@ function New-GodotAppZip {
     New-Item -ItemType Directory -Force -Path $stageDir | Out-Null
 
     Copy-Item -LiteralPath $ExePath -Destination (Join-Path $stageDir (Split-Path $ExePath -Leaf)) -Force
-    Copy-Item -LiteralPath $RELEASE_DLL -Destination (Join-Path $stageDir (Split-Path $RELEASE_DLL -Leaf)) -Force
+    Copy-Item -LiteralPath $SHIPPED_DLL -Destination (Join-Path $stageDir (Split-Path $SHIPPED_DLL -Leaf)) -Force
 
     Remove-Item -LiteralPath $ZipPath -Force -ErrorAction SilentlyContinue
     Compress-Archive -Path (Join-Path $stageDir "*") -DestinationPath $ZipPath -Force

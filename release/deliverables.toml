@@ -26,6 +26,10 @@ required_entries = [
     "lib/linux-x64/libopennova.so",
 ]
 
+# {gdextension_target} is the godot-cpp flavour the packaged exe loads:
+# template_release for release-mode exports (the default, what a release ships)
+# and template_debug for the debug-mode exports pull-request CI packages. The
+# validator's --gdextension-target selects it.
 [[deliverables]]
 id = "modding-editor"
 source = "opennova-modtools-windows-v{godot_version}.zip"
@@ -38,7 +42,7 @@ install = "Extract the zip to a writable folder."
 use = "Run opennova-modtools.exe to launch the editor."
 required_entries = [
     "opennova-modtools.exe",
-    "libopennova.windows.template_release.x86_64.dll",
+    "libopennova.windows.{gdextension_target}.x86_64.dll",
 ]
 
 [[deliverables]]
@@ -53,5 +57,5 @@ install = "Extract the zip to a writable folder."
 use = "Run opennova.exe to launch the runtime."
 required_entries = [
     "opennova.exe",
-    "libopennova.windows.template_release.x86_64.dll",
+    "libopennova.windows.{gdextension_target}.x86_64.dll",
 ]
