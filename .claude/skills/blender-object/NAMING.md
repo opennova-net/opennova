@@ -80,7 +80,7 @@ base-26 letter suffix (`CB01`, `CB01a`, `CB01b`, …).
 > behavior is separately witnessed** (docs/world/world-wac-ai-re.md §15.4 [orig:
 > Entity_ComputeBoneCollisionForce @0x4ae150 dispatch]): 1 `CB` generic solid (the only
 > BVOL type generic rays clip), 4 `CL` ladder contact/alignment (the reimpl decodes the
-> frame but has no climb motor), 5 contact-no-force, 6 `CA` armory zone (gates the
+> frame and drives the climb motor), 5 contact-no-force, 6 `CA` armory zone (gates the
 > in-game weapon.mnu armory), 7 `VC` vehicle-collision solid on the vehicle mask,
 > 8 `BB` blink box (interior detection — accum bit 2 sets entity flag 0x800000),
 > 9 `CD` door activation (section-touch callback), 10 `CT` change-team touch,

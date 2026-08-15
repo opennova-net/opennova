@@ -60,6 +60,12 @@ inline anim::AimOverlayInputs aim_overlay_inputs_for(
 	in.rolling =
 			entity.inf.anim_state == world::anim_state::kRollLeft ||
 			entity.inf.anim_state == world::anim_state::kRollRight;
+	// The ladder latch locks the arms onto the body animation — both hands on
+	// the rungs. [orig: Entity_BuildBoneTransformMatrices @ 0x4b1cf1 tests
+	// Flags & 0x100000]
+	in.arms_locked =
+			((world_entity.flags | world_entity.engine_flags) &
+			 world::kEntityFlagLadderContact) != 0;
 	in.mount_mode = mount_mode_for(world_entity);
 	if (in.mount_mode != anim::MountMode::OnFoot) {
 		in.mount_config_valid = world_entity.mounted_config_valid;

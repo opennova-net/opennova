@@ -42,7 +42,13 @@ enum : int {
     kWalkProneForward = 19,  // 19..26: prone walk directional block
     kJumpStart = 30,
     kJumpLoop = 31,
+    // The climb family (D-COL-5): idle holds on the ladder, up/down by the
+    // look-pitch sign, top near the anchor (org1 select). [orig: the org2 climb
+    // block @0x4b7484-0x4b76d8; org1 33/35 select @0x4bfaca-0x4bfad8]
     kClimbIdle = 32,
+    kClimbUp = 33,
+    kClimbDown = 34,
+    kClimbTop = 35,
     kSwimIdle = 36,
     kSwimForward = 37,
     kRollLeft = 41,  // prone lean, MoveOrder bit 6 [orig: @0x4b7335]
@@ -347,6 +353,9 @@ struct InfantryState {
         airborne = false;
         jump_requested = false;
         jump_cooldown = 0;
+        pitch_restore_active = false;
+        pitch_restore_target = 0;
+        pitch_restore_prev = 0;
         ground_cache_valid = false;
     }
     // The SECONDARY (upper-body weapon) AnimMap channel's state pair + playhead:
@@ -469,6 +478,18 @@ struct InfantryState {
     // down, held-at-1 until the jump key releases, jump only from 0; a jump reloads
     // 32. [orig: Entity_UpdateInfantryPlayerBody @0x4b7de0-0x4b7e15 + @0x4b7f06]
     int32_t jump_cooldown = 0;
+
+    // The post-ladder view-pitch restore (local player only): the resolver's exit
+    // leg arms it and saves the current pitch; each resolve then eases the view
+    // pitch back toward 4096 at quarter-step (per-tick step clamp ±0x1E00000,
+    // done inside +16), canceling if the user pitches up past the last written
+    // value; the on-ladder chase disarms it. Retail keeps these in the +0x2C
+    // bit-4 latch, an aimPitch-slot reuse, and the dword_B7900C global — all
+    // local-player-only, so per-state fields carry them faithfully.
+    // [orig: arm @0x4b3ce8-0x4b3cf9; chase @0x4b3d04-0x4b3d55]
+    bool pitch_restore_active = false;
+    int32_t pitch_restore_target = 0;
+    int32_t pitch_restore_prev = 0;
 
     int32_t wait_cooldown = 0;            // entity[74]
     int32_t alert_timer = 0;              // entity[190]

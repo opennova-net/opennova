@@ -643,9 +643,12 @@ private:
 	// Retail's held-weapon draw gate, local-player branch — the weapon model is shown
 	// iff the soldier may fire it. [orig: Entity_CanFireWeapon @ 0x4dcb10]
 	bool local_held_weapon_visible(const opennova::world::Entity &p_entity) const;
-	// Retail has one input-owned entity yaw. An authoritative attach can snap the
-	// split world/AI copy during the logic tick, so mirror it back into the host
-	// latch before the next pre-tick input write can restore the old look.
+	// Retail has one input-owned entity view (the mouse accumulators ARE the
+	// entity yaw/pitch). An authoritative attach snap or the ladder legs (the
+	// CL alignment chase, the ±120° clamp, the post-ladder pitch restore) can
+	// write the split world/AI copy during the logic tick, so mirror any
+	// sim-written view value back into the host latch before the next pre-tick
+	// input write can restore the old look.
 	void sync_local_mounted_input_heading();
 	// The mouse options + the sim-owned stance latches (the dword_B76484/dword_B76480
 	// equivalents the 0x1D apply writes) — the host sends key EDGES and pixel deltas;
@@ -1930,9 +1933,9 @@ public:
 	// ObjectData cache), register one runtime model per graphic on the sim
 	// collision world, and attach the per-entity instance. From then on the infantry
 	// motor resolves against placed objects — CB wall push-out, standing on roofs,
-	// hurt/CA/BB triggers, and CL contact-frame extraction (climb locomotion remains
-	// unported) [orig: collision resolver @0x4b2bd0 + the query set;
-	// docs/world/world-wac-ai-re.md §15; D-INF-3].
+	// hurt/CA/BB triggers, and the CL ladder legs (frame extraction, entry gate,
+	// alignment chase, climb states, exits) [orig: collision resolver @0x4b2bd0
+	// + the query set; docs/world/world-wac-ai-re.md §15; D-INF-3].
 	// Returns the instance count. Also attaches the render-occlusion portal
 	// models (buildings whose graphic carries OVRT/OPLN/OFAC/OOBJ records)
 	// with their def bits. Idempotent per load. Model extraction reads the

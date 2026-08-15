@@ -501,12 +501,50 @@ bool collision_raycast_person_sections(const CollisionTargetView &target,
 // ----------------------------------------------------------------------------
 struct LadderContact {
     // [orig: globals @ 0xB5AB70..80 — written by the CL/type-4 hit. Plane 0
-    // supplies the authored ladder facing; the frame is consumed by retail's
-    // climb alignment/motion, which is not ported yet.]
+    // supplies the authored ladder facing; the frame feeds the resolver's climb
+    // alignment/entry legs and the motors' dismount/exit pushes.]
     int32_t anchor[3] = {};
     int32_t yaw = 0;
     int32_t pitch = 0;
     bool valid = false;
+};
+
+// The climb-motor channels the resolver's CL/type-4 legs read and write
+// (the D-COL-5 port). Motor callers pass their InfantryState-backed fields;
+// the replica seam and harness callers pass nullptr and keep the latch-only
+// behavior (a remote row's climb pose is owned by its authority).
+struct LadderResolveIO {
+    // Position Z captured at the motor tick's head — the fresh-entry gate
+    // measures the anchor against the tick-start pose, not the integrated one.
+    // [orig: entity+0x88 savedLivePose.Z, captured @ 0x4b4190-0x4b419c; read
+    //  @ 0x4b327d]
+    int32_t tick_start_z = 0;
+    bool prone = false;  // MoveOrder 0x100 [orig: entry-bump pick @ 0x4b3330]
+    bool crouch = false; // MoveOrder 0x200 [orig: @ 0x4b3340]
+    // The AI climb order — the third fresh-entry qualifier besides previous
+    // contact and the player class bit. No reimpl writer yet (the AI move-order
+    // layer rides its own slice). [orig: aiRuntime word1 & 0x400 @ 0x4b325d]
+    bool ai_wants_climb = false;
+    bool is_local_player = false;
+    // View + body pose channels (BAM32). view_yaw/view_pitch are entity
+    // +0x10/+0x14; for the local player the embedder's mouse accumulator must
+    // inherit any resolver write-back (retail drags dword_B75FCC / dword_B7900C
+    // alongside the entity fields).
+    int32_t *view_yaw = nullptr;
+    int32_t *view_pitch = nullptr;
+    int32_t *body_heading = nullptr; // entity+0x8C
+    int32_t *body_pitch = nullptr;   // entity+0x90
+    // The AI hard-set channels — the (Flags & 0x100)==0 leg only; players keep
+    // these null (retail's +0x1A8 slot is the player jump cooldown reuse).
+    // [orig: @ 0x4b33da-0x4b33fa]
+    int32_t *ai_target_heading = nullptr;
+    int32_t *ai_aim_heading = nullptr;
+    // The local-player post-ladder pitch restore: the exit leg arms it, the
+    // on-ladder chase disarms it, the per-resolve chase eases the view pitch
+    // back. [orig: +0x2C bit 4 latch; the aimPitch slot reuse; dword_B7900C]
+    bool *pitch_restore_active = nullptr;
+    int32_t *pitch_restore_target = nullptr;
+    int32_t *pitch_restore_prev = nullptr;
 };
 
 struct ContactQuery {
@@ -853,13 +891,18 @@ public:
     // full update; the id itself picks the repulsion-exempt states).
     // out_ground (optional) receives the ground probe's hit entity — the same
     // value the resolver stores into a registered source's groundEntity.
+    // ladder_io (optional) wires the D-COL-5 climb legs: the CL entry gate +
+    // anchor snap, the per-tick alignment chase, and the exit push / pitch
+    // restore. Without it only the raw latch/bookkeeping runs (replica rows,
+    // harness callers).
     int32_t resolve_entity(World &world, EntityHandle source, ResolveState &state,
                            int32_t pos[3], int32_t vel_xy[2], int32_t &vel_z,
                            int32_t capsule_bottom, int32_t capsule_top,
                            int32_t heading, int32_t body_pitch, bool is_player,
                            bool is_authority, uint32_t tick, int32_t anim_state_id,
                            uint32_t anim_state_flags, int16_t &health,
-                           EntityHandle *out_ground = nullptr);
+                           EntityHandle *out_ground = nullptr,
+                           const LadderResolveIO *ladder_io = nullptr);
 
     // The REPLICA seam (net-re §5.38e, D-NET-196): the same resolver for a
     // decoded remote row that has NO world entity — retail runs remote
@@ -916,6 +959,25 @@ public:
     // [orig: g_LocalPlayerBlinkFlags @ 0x24C1934]
     uint32_t local_player_blink_flags = 0;
     EntityHandle local_player;
+
+    // The last CL latch's alignment frame. Retail keeps these as globals that
+    // persist across resolves — every consumer (the motors' dismount pushes,
+    // the bottom-exit compare, org1's 33/35 select) is Flags-0x100000-gated, so
+    // one world-level frame is the faithful carrier.
+    // [orig: g_LadderContact{Pitch,Yaw,X,Y,Z} @ 0xB5AB70..80]
+    LadderContact last_ladder_frame;
+    // Whether the last resolve's second relaxation pass produced a contact —
+    // org1's on-ladder facing press runs only while this is clear.
+    // [orig: dword_B57C8C, latched from the pass-2 contact flag @ 0x4b3a5c;
+    //  read @ 0x4bfa45]
+    bool second_pass_contact_latch = false;
+
+    // The witnessed on-ladder person probe: 1.25u ahead of the climber, a live
+    // pool-0 person within 1.125u on both axes whose Z band overlaps holds the
+    // climb (org1 stamps climb_idle 32 and skips the press/select).
+    // [orig: the g_pool_list[0] scan @ 0x4bf9b7-0x4bfa2b]
+    bool ladder_person_ahead(World &world, EntityHandle self, int32_t probe_x,
+                             int32_t probe_y, int32_t self_z, int32_t self_bound);
 
     // Read-only capture of the local player's last FULL resolve (skip-throttled
     // ticks keep the previous capture): the capsule test points/radii the

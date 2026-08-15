@@ -7102,8 +7102,8 @@ The bundled **Super OED Manual v1.1 §1.1.3.4** supplies the canonical BVOL name
 for Armory, **VC** is Collision for Vehicles, and **BB** is Blink Box. They are gameplay
 volumes, not aliases for the projectile face mesh. CB/type 1 is the ordinary solid convex
 volume used by generic LOS/ground/contact rays. CL/type 4 extracts a ladder alignment
-frame (anchor plus authored yaw/pitch); the reimplementation has that low-level contact
-path but not climb states/input/root motion/top exit. CA/type 6 sets the armory-zone flag
+frame (anchor plus authored yaw/pitch); the reimplementation carries the full climb motor
+on it since 2026-08-15 (world-wac-ai-re §30). CA/type 6 sets the armory-zone flag
 that gates `weapon.mnu`. VC/type 7 is selected as solid geometry by the vehicle collision
 query when a section authors a VC/VK run; without one, that query falls back to CB/default
 solids. BB/type 8 drives indoor/section visibility. For a resolved static/dynamic collision

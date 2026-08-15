@@ -126,8 +126,11 @@ struct AimOverlayInputs {
     // animStateId 41/42 (roll_left/right): the clip owns the whole body -- roll overlays
     // zeroed. [orig: @ 0x4b17d3]
     bool rolling = false;
-    // entity Flags & 0x100000: the non-aim branch keeps even the arms on the body
-    // matrix. Semantics unconfirmed (swim-family suspected); embedders pass false.
+    // entity Flags & 0x100000 — the LADDER latch (semantics anchored 2026-08-15:
+    // the pose builder tests exactly kEntityFlagLadderContact): while climbing,
+    // the non-aim branch keeps even the arms on the body matrix — both hands on
+    // the rungs. Fed by pose_inputs from the entity flags.
+    // [orig: Entity_BuildBoneTransformMatrices @ 0x4b1cf1 test / @ 0x4b1d48 branch]
     bool arms_locked = false;
     // The target item definition's authored phrase_set dword (+0x86c).  Validity is
     // independent of its value because zero is a witnessed gunner configuration;

@@ -230,13 +230,17 @@ Everything below was decompiled and read this session (pseudocode dumps:
    player bodies.
 3. Every tick (the "every 2 ticks" first reading corrected by D-INF-10; both legs
    byte-witnessed 2026-07-16 §22): **gravity `vel_z(entity[40]) −= 416`** skipped while
-   `Flags & 0x108000` (ladder/drowning) [orig: `@ 0x4bf7b8`] (terminal −32768; ladder/climb
-   chases `entity[193]` target at 1/16-step, cap 0x4000); `pos.z += 2·vel_z`;
+   `Flags & 0x108000` (ladder/drowning) [orig: `@ 0x4bf7b8`] (terminal −32768; the
+   `Flags 0x80` org1 CLIMB mode replaces gravity with the 1/16-step chase to the
+   AI move-target Z `entity[193]`/+0x304, cap 0x4000, floor −16384 — §30);
+   `pos.z += 2·vel_z`;
    `movement collision resolver @ 0x4b2bd0 (entity, root_drop, height)`:
    ≤0 ⇒ ground push-out (`pos.z -= ret`), vel_z = 0, water-exit sounds (15/16),
    **fall damage** when `vel_z ≤ −1057·dword_C6EAE4`: `health −= (excess)>>4`;
    >61440 ⇒ set swim (flag 0x2000, states 47/31 hmm 47=tread/31 per anim availability).
-   Water-edge climb-out: probe ahead 81920·dir for pool-0 entity with z-overlap → state 32.
+   The 81920·dir pool-0 probe → state 32 sits in the ON-LADDER block, not a
+   water-edge climb-out: it is the ladder CONGESTION hold (someone climbing
+   ahead of you) — corrected 2026-08-15, witness §30.
 4. Every 8 ticks: **the slope pass** — the CONFORM SELECTOR first [orig: `@0x4ba10f`]:
    `def+84 & 0x200 || g_animStateFlagsTable[state] & 2 || (Flags&2 && !(Flags & 0x10A000))`
    (the flag-2 states = the low-to-ground family: prone crawls 19–26 `0x603`, rolls 41/42
@@ -304,7 +308,8 @@ and the vehicle rows 21/23) — ported 2026-07-16.
 4. `Entity_RaycastGroundHeight @ 0x4142c0` (0x59 bytes — ground probe at offset; exact param semantics 0x4000/0x20000).
 5. `movement collision resolver @ 0x4b2bd0` internals (0x11e3 — ground/water/BVOL
    resolver). Type-4 bookkeeping was initially decoded under the incorrect platform reading;
-   the manual pins CL as ladder, and the remaining counter/entry semantics ride D-COL-5.
+   the manual pins CL as ladder, and the entry/chase/exit semantics landed with the
+   D-COL-5 port 2026-08-15 (§30).
 6. ~~Marker wait/facing **BMS field mapping**~~ CLOSED (spawn map ported into promote; see §3.2).
 7. Perception scan fn (called at dump line 2377, kong-misnamed `Entity_SpawnProjectile`) + LOS `Entity_CheckLineOfSightTerrainAndEntities`.
 8. `dword_C6EAE4` (fall-damage gravity scale) value/source. ~~1024-entry sin/cos table
@@ -389,7 +394,7 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     child-seat traversal, true bone-transform follow for non-UseGun seats, and driver-lean poses.
   - **D-INF-3** movement resolver now includes the horizontal CB capsule, object/terrain
     ground probes, triggers, and landing. Water/swim transitions remain; CL climb locomotion
-    is tracked separately in **D-COL-5**. The vertical capsule-bottom settle is **D-INF-6**
+    LANDED with the **D-COL-5** port 2026-08-15 (§30). The vertical capsule-bottom settle is **D-INF-6**
     (`movement collision resolver @ 0x4b2bd0`); horizontal slide velocity zeroes on contact.
   - **D-INF-4** — **CLOSED 2026-07-05**: the generator is witnessed and ported —
     `Math_BuildSinTable @ 0x613050` builds ONE 1281-entry sin table at 2^22 by an
@@ -1946,8 +1951,11 @@ D-INF-10/§22):
    halfRadius + 4096), eye (pos + CameraOffset), feet — radii {collisionRadius,
    20480, outerRadius} where halfRadius = capsuleBottom>>4, collisionRadius =
    halfRadius + |capsuleTop - capsuleBottom|/2 (floor 57344 - 2*cr, min 4096;
-   both radii floored at 6144). On-ladder recontact: 2 ladder-oriented points,
-   radii 25088.
+   both radii floored at 6144). On-ladder recontact: 2 points — head (z + the
+   same lift) and feet — radii 25088 both `[orig: @ 0x4b2e1c-0x4b2ed7]`; the
+   bodyPitch/bodyHeading sincos chain built alongside multiplies a constant-zero
+   length operand (var_34 = 0), so the "orientation" is arithmetically dead in
+   the shipped image and both points sit on the entity column (§30).
 4. **Candidate loop** over the entity slice: `@ 0x4ae150` per candidate; the
    contact-flag dispatch runs EVEN ON A ZERO-FORCE RETURN (`the goto @ 0x4b2fa5`
    — a pure CL/zone touch still latches; `collision` ctest ladder-contact pin);
@@ -1959,11 +1967,22 @@ D-INF-10/§22):
    skipped entirely for Flags 0x4000000 sources `@ 0x4b3148`; each hit also
    stamps the damage-source attribution); 0x200 CT change-team/capture touch ->
    `Server_OnPlayerTouchCaptureZone @ 0x500ba0` (def attrib 0x20000, spawn gates);
-   0x1 CL ladder (entry-gated: not Flags 2, and previous ladder contact OR player OR
-   MoveOrder 0x400): Flags |= 0x100000 + groundEntity = candidate (`@ 0x4b3291`),
-   then the ladder-frame chase `(target-pos+32)>>6`, yaw `(delta+8)>>4` for
-   players / hard-set for AI, pitch copy, vertical offsets +20480 / +39936
-   (MoveOrder 0x200) / +60416 (0x100), and 24576*sincos>>22 facing offset;
+   0x1 CL ladder (entry-gated: not Flags 2 = not DEAD, and previous ladder
+   contact OR the player class bit 0x100 OR the AI climb order aiRuntime[1] &
+   0x400; a fresh PLAYER entry additionally needs (above the anchor OR facing
+   within 60°/0x2AAAAAA0 of the frame yaw) AND (heightDiff>0)==(Pitch>0) vs
+   savedLivePose.Z `@ 0x4b32a5-0x4b32c0`): Flags |= 0x100000 + groundEntity =
+   candidate (`@ 0x4b3291`); a fresh entry SNAPS X/Y to the anchor and bumps Z
+   +20480 / +39936 (crouch, MoveOrder 0x200) / +60416 (prone 0x100 && !savedPosY)
+   below the anchor — breaking the grounded state so the climb can start — or
+   snaps to anchorZ − 4096 from above, then re-stages the 2-point capsule at
+   the anchor and ZEROES the accumulated force (`@ 0x4b32f7-0x4b3392`); the
+   per-tick chase (re-latch and entry alike, `@ 0x4b33a4-0x4b3495`): player yaw
+   eases `(delta+8)>>4` into Yaw + bodyHeading (+ g_LocalPlayerLookYaw), AI
+   hard-sets aimHeading/targetHeading/Yaw/bodyHeading, bodyPitch = frame pitch,
+   +0x2C bit 4 disarmed, the 0.0625u facing press (sincos·4096, `<<12>>22`) plus
+   the `(anchor-pos+32)>>6` X/Y chase — PORTED 2026-08-15, §30 (the earlier
+   "24576*sincos>>22 facing offset" gloss conflated the extraction pull-back);
    0x4 -> Flags 0x400000
    (armory zone); 0x400 -> Flags 0x800 (vehicle-loadout zone); 0x800 -> the
    `+0x2c` aux 0x40 latch (CF/type 13, D-COL-9); 0x10 blink apply —
@@ -1989,9 +2008,14 @@ D-INF-10/§22):
    position for the second distance + the push (dead/hidden peers Flags 2
    skipped `@ 0x4b3b8d`), threshold 30% of summed radii, push (thr - dist)/4
    along the `(0x200000 - atan2BAM)>>22`-indexed sin/cos pair
-   (`@ 0x4b3a5c-0x4b3c52`). Leaving a ladder (previous CL flag, not relatched,
-   player) nudges 24576*sincos(bodyHeading)>>22 and runs the local-player
-   pitch-restore chase (`@ 0x4b3c5c-0x4b3d69` — D-COL-5's exit leg).
+   (`@ 0x4b3a5c-0x4b3c52`); the pass-2 contact flag latches into
+   `g_ResolverSecondPassContact` here and doubles as the org1 on-ladder press
+   gate. Leaving a ladder (previous CL flag, not relatched, live player) pushes
+   0.375u ALONG +bodyHeading — over the lip on a natural top-out — and arms the
+   local pitch restore (+0x2C bit 4, target 4096, g_LadderPitchRestorePrev =
+   Pitch); the chase then eases Pitch back at quarter-step, per-tick clamp
+   ±0x1E00000, done at target+16, canceled by a user pitch-up past prev
+   (`@ 0x4b3c5c-0x4b3d69` — PORTED 2026-08-15, §30).
 8. **Ground settle tail**: quantize Z up to the 6144 grid (`(z+6143) & ~0x17FF`),
    probe `@ 0x414320 (entity,0,0,0,0x20000)` (2.0u drop), restore Z, return
    feetZ - groundZ (`@ 0x4b3d6e-0x4b3da9`); the probe's hit lands in
@@ -2040,7 +2064,7 @@ the CVRT/CNRM/CFAC polygon mesh used by ordinary bullets.
 | Type | Runtime behavior | Witness |
 |---|---|---|
 | 1 (`CB`) (and unlisted) | generic collision solid — SAT push-out; the ONLY BVOL type generic rays clip | `@ 0x413298`, `@ 0x4aebdd` |
-| 4 (`CL`) | ladder contact 0x1 + authored alignment anchor/yaw/pitch; low-level extraction is ported, climb locomotion is not | `@ 0x4ae894-0x4aea30`; manual §1.1.3.4 |
+| 4 (`CL`) | ladder contact 0x1 + authored alignment anchor/yaw/pitch; the climb motor rides it (entry gate, alignment chase, states 32–35, dismount/exit legs — §30) | `@ 0x4ae894-0x4aea30`; manual §1.1.3.4 |
 | 5 | contact marker, no force | `@ 0x4ae874` |
 | 6 (`CA`) | armory volume — Flags 0x400000, gates weapon.mnu on action 218 | `@ 0x4aea45`, `@ 0x49b848`; manual §1.1.3.4 |
 | 7 (`VC`) | vehicle-collision solid, selected by vehicle mask 8 | `@ 0x4ae558`; manual §1.1.3.4 |
@@ -2070,7 +2094,7 @@ and a 0.5 m player detection sphere (§1.2.2.7).
 | D-COL-2 | building destroyed/animated section skip not modeled | itemDef+2192/2193 bone map + the `dword_A8A418` state table skips sections (gated !player) | destroyed-wall pass-through pending the destruction system |
 | D-COL-3 | bound radius recomputed as the .3di LOD-0 part-bound-sphere union (primitive boxes as the degenerate fallback), raised to the husk model's bound, +0.0625 pad (persons 1.0u) | entity+0 boundRadius = max(model gpm[5], husk gpm[5]) × def scale + 0x1000, stamped only when the model carries collision data [orig: `Entity_InitFromModel @ 0x40dc30`] | the recomputed union tracks the stored header bound; the authored def `scale` factor is not applied (unparsed), and we stamp collision-less models too so every item stays hittable — conservative |
 | D-COL-4 | eye test point reuses the head column | eye point = pos + CameraOffset | CameraOffset unmodeled; head/eye share a column until the camera entity fields land |
-| D-COL-5 | CL/type-4 decoding, convex containment, contact flag 0x1, and the target-relative ladder anchor/yaw/pitch are ported; the raw 0x100000/groundEntity bookkeeping is retained | full ladder entry/recontact state, states 32–35, two-point ladder capsule, anchor/yaw/pitch chase, climb input/root motion, top/exit handling, and gravity suppression | ladders do not climb yet. The earlier “platform/seat/deck carry” description was a terminology error corrected from the Super OED manual. Generic type-1 ground probes still support static roofs; moving-carrier follow is a separate vehicle integration concern |
+| D-COL-5 | PORTED 2026-08-15 (§30): entry gate + anchor snap/bump, recontact mask 0x1 + the 2-point capsule, the per-tick alignment chase, states 32–35 selection (org2 every-tick override; org1 33/35 select + congestion hold), gravity suppression + horizontal-root zeroing, the ±120° view clamp, the arms lock, the side/back dismounts, the on-ladder jump push, the grounded bottom dismount, the exit push + pitch restore, and the org1 `Flags 0x80` Z-chase gravity variant. Evidence: `collision` ctest (entry/recontact/exit trio) + `infantry` ctest (climb cycle, bottom exit + jump-off, org1 hold/top/0x80) | the same legs `@ 0x4b3245-0x4b3495 / 0x4b3c5c-0x4b3d69 / 0x4b7484-0x4b76d8 / 0x4b7f0c / 0x4b7fba-0x4b8019 / 0x4bf6c1-0x4bf6e5 / 0x4bf917-0x4bfad8` | residuals: the AI move-order WRITER (aiRuntime 0x400 entry orders, `attachParent==self` + `+0x2FC/+0x300` X/Y direct-move chase, MoveOrder 0x100/0x200 AI bump variants) rides the AI-order slice — the org1 legs are dormant until it lands; the carried/parachute halves of the shared 0x100060/0x100020 gates ride their slices; an authority does not resolve wire-snapped remote players, so a remote climber's authority-side anim derivation shows gait states (MP display residual). The earlier "platform/seat/deck carry" description was a terminology error corrected from the Super OED manual |
 | D-COL-6 | CT Change Team Box touch (0x200) is detected but not forwarded | `Server_OnPlayerTouchCaptureZone @ 0x500ba0` consumes the CT touch for capture/team-change requests | zone capture rides its own 1 Hz radius path today (zone_capture.cpp), so authored CT shape and touch timing are ignored; reconcile when contact-driven requests land |
 | D-COL-7 | vertical ground probe = bilinear column height | `Terrain_RaycastHeightmapHiRes_0 @ 0x60e710` march + bisect | equal for vertical rays on a heightfield (the terrain-re B1 note); oblique rays use terrain_raycast_refined |
 | D-COL-8 | run-over kill / crush sound / walk-over-body sound / waypoint + collision callbacks (attrib 1/2) / the CD 0x20 door-section vtbl callback / the blocked-push AI latch (pad_368[1]) not ported | steps 4/5/6 above | CD containment and its section mask are detected, but doors/lifts remain operationally inert; needs the animated-object callback plus Score/net + sound + destruction hooks |
@@ -2079,9 +2103,9 @@ and a 0.5 m player detection sphere (§1.2.2.7).
 | D-COL-11 | `LiveRound` has no BB/indoors state; projectile terrain arbitration only has the ammo-flag bypass | retail refreshes each projectile's blink state per tick and skips the terrain clamp while the round is indoors (`Projectile_UpdatePhysics @ 0x4e9d70`, refresh call `@ 0x4e9f21`, terrain gate `@ 0x413785`) | a shot inside an underground/interior BB can falsely hit the terrain heightfield. Port after the projectile probe radius/state lifetime is pinned; do not guess from the player’s 0.5 m BB sphere |
 
 **D-INF-3 status**: the horizontal capsule + object standing now land through
-this port (walls push out, roofs carry via the model-aware ground probe); the
-remaining D-INF-3 tail is water (the swim transitions) — ladder locomotion is
-tracked in D-COL-5.
+this port (walls push out, roofs carry via the model-aware ground probe), and
+the ladder locomotion tail landed with the D-COL-5 port 2026-08-15 (§30); the
+remaining D-INF-3 tail is water (the swim transitions).
 
 ### 15.6 The armory / loadout-zone flow (cross-record pointer)
 
@@ -3967,14 +3991,14 @@ the gravity-cadence case, and the player-jump case in
 | Finding | Witness |
 |---|---|
 | Parachute (Flags 0x20): bodyHeading(+0x8C) sixteenth-steps toward the render yaw(+0x10) `(yaw−body+8)>>4`, both leg re-plant targets snap to the result | `[orig: @ 0x4b494d-0x4b496c]` |
-| Any of Flags 0x100060 (parachute/carried/ladder): the yaw is clamped to ±0x55555500 (120°) of bodyHeading (mount seat-cfg 3 and an active-parent carried byte skip the clamp), the local player's camera-yaw mirror `dword_B75FCC` moves with it, legs snap to the body | `[orig: @ 0x4b4ac6-0x4b4b6b]` |
+| Any of Flags 0x100060 (parachute/carried/ladder): the yaw is clamped to ±0x55555500 (120°) of bodyHeading (mount seat-cfg 3 and an active-parent carried byte skip the clamp), the local player's camera-yaw mirror `g_LocalPlayerLookYaw` (ex `dword_B75FCC`, renamed 2026-08-15) moves with it, legs snap to the body. The LADDER leg is PORTED (§30 — the sim writes the view, the embedder's mouse accumulator inherits it through the post-tick write-back); the parachute/carried legs and their exemptions ride those slices | `[orig: @ 0x4b4ac6-0x4b4b6b]` |
 | ON FOOT — movement state (flag-table bit 0): both leg targets = the yaw EVERY tick | `[orig: @ 0x4b4984 → @ 0x4b49dd/@ 0x4b49e3]` |
 | ON FOOT — idle: per-leg re-plant, drift measured vs the CURRENT LEG YAW (org1 measures vs the target), 5°/30° hysteresis, 64-tick windows staggered 32 apart (L `(tick−32)&0x3F`, R `tick&0x3F` via ebp set at function head) | `[orig: L @ 0x4b4993/@ 0x4b49ad-0x4b49bc; R @ 0x4b499b/@ 0x4b49d0-0x4b49e3; ebp @ 0x4b4680]` |
 | Leg chase: quarter-step `(Δ+2)>>2`, rate clamp ±0x3000000 (~4.2°/tick — 3/5 the org1 0x5000000), twist limit ±0x30000000 (67.5°) measured vs the YAW (org1: ±0x20000000 vs the body); no def+84&0x200 1/16 variant in the org2 block | `[orig: R @ 0x4b49e9-0x4b4a43; L @ 0x4b4a49-0x4b4aa9]` |
 | **bodyHeading = legYawL + (legYawR − legYawL)/2** — the body follows the FEET; the §14 torso twist is (yaw − midpoint), so small aim moves twist the torso while the feet and body hold | `[orig: @ 0x4b4aa9-0x4b4abb]` |
 | UseGun live root follow: slot 3 calls `Entity_AttachToBoneAndUpdateTransform @ 0x5463d0` from the player body at `0x4b63c7` and AI body at `0x4bec23`; the posed parent matrix transforms the authored UseGun point into the child Position. The port matches this root-position result only. | `[orig: @ 0x5463d0; callers @ 0x4b63c7 / @ 0x4bec23]` |
 | Generic-seat basis follow: ordinary mounted seats write Position from the seat bone and +0x8C/both leg targets = bone yaw, bodyPitch/Roll = bone pitch/roll (rides D-INF-2). | `[orig: Entity_GetBoneTransformAndOrientation @ 0x4b0c50 → @ 0x4b654e-0x4b6575]` |
-| Ladder yaw alignment: CL target rotation adds one delta to +0x8C, both leg yaws, both leg targets (+ the yaw and `dword_B75FCC` unless the def's +0x58 & 0x1000) — rides D-COL-5 | `[orig: @ 0x4b5690-0x4b56d9]` |
+| Carrier rotation follow (RE-ROUTED 2026-08-15, ex "ladder yaw alignment"): the block sits in the PARENT-CARRY positioning region — the delta is the CARRIER entity's yaw change this tick, added to +0x8C, both leg yaws, both leg targets (+ the yaw and `g_LocalPlayerLookYaw` unless the parent def's +0x58 & 0x1000). A static ladder contributes zero; the leg rides the mount/carry slice (D-INF-2), not D-COL-5 | `[orig: @ 0x4b5690-0x4b56d9; the carry region upstream @ 0x4b562e-0x4b5683]` |
 
 ### 22.2 Gravity / jump / edges (closes D-INF-10's player leg)
 
@@ -3985,7 +4009,7 @@ the gravity-cadence case, and the player-jump case in
 | The horizontal integrate is 1× (rotated root delta + vel) for BOTH motors in normal play; the org2 local-player 2× branch is gated on `g_localPlayerPoofMode` — see D-INF-21 | `[orig: org1 @ 0x4bf684-0x4bf6a2; org2 1× @ 0x4b7cbf-0x4b7cd9; 2× gate @ 0x4b7c8d]` |
 | Jump cooldown lives in the REUSED +0x1A8 slot (org1's targetHeading): clamp [0,32], >1 counts down, parks at 1 while the jump key (MoveOrder bit 5) is held, key release → 0 — no auto-repeat on a held key | `[orig: @ 0x4b7de0-0x4b7e15; release edge @ 0x4b7e78-0x4b7e82]` |
 | Jump gates: cooldown 0 + key held + not prone (the cached prone local, also the freelook-pitch-halving and lean-skip selector) + `!(Flags & 0x1A002)` (in-air/dead/the water pair) + not carried (0x40) | `[orig: @ 0x4b7e8c-0x4b7ebd]` |
-| Jump impulse: `vel.xy += 3/4 · (this tick's ROTATED root step)` — running momentum — then `vel_z = 0x1600`, Flags |= 0x2000 (no 0x40 clear here — carried was gated out @0x4b7ebb), anim 30 jump_start NOW + 31 jump_loop PENDING (straight stamps, no availability check), cooldown = 32; on-ladder jumps additionally take the CL exit-offset leg (D-COL-5) | `[orig: @ 0x4b7ec3-0x4b7f0c]` |
+| Jump impulse: `vel.xy += 3/4 · (this tick's ROTATED root step)` — running momentum — then `vel_z = 0x1600`, Flags |= 0x2000 (no 0x40 clear here — carried was gated out @0x4b7ebb), anim 30 jump_start NOW + 31 jump_loop PENDING (straight stamps, no availability check), cooldown = 32; an on-ladder jump additionally pushes 0.5u along −bodyHeading and unlatches (PORTED §30) | `[orig: @ 0x4b7ec3-0x4b7f0c]` |
 | The ledge-fall edge, org2 (resolver return > 0xF000; gate `!(Flags & 0x10A002)` — the 0x2000 bit is the was-grounded test and DEAD skips the whole edge, carry included): carried 0x40 is force-CLEARED (not skipped), Flags |= 0x2000, the 3/4 momentum carry, pending cleared, then anim = 31 (+0x10 while parachuting) stamped STRAIGHT — no availability check. org1 (gate `!(Flags & 0x10A000)`, no dead bit): NO carry; 0x2000 sets and pending clears for live non-carried bodies (dead skips the stamp AND the pending-clear, carried skips the stamp only), and the 47→31 availability ladder (`animMap[id] != animMap[0]`) runs ONLY while parachuting — a plain NPC ledge fall keeps its current clip | `[orig: org2 @ 0x4b7e17-0x4b7e73; org1 @ 0x4bf8ae-0x4bf901, parachute gate @ 0x4bf8d8]` |
 | The 4th-tick org2 body-anim SELECTION is skipped while airborne(0x2000)/dead(0x2)/carried(0x40) — the jump/fall edges own the in-air clip; selection resumes on landing | `[orig: @ 0x4b70b8-0x4b70d3]` |
 | org1 landing: fall damage gates on WAS-airborne + authority + !0x4000000 + NOT DEAD (`test dl,2` — ours previously lacked the dead skip: a hard-landing corpse's health rounded back toward 0 through the clamp; fixed), damage `(threshold − vel_z) >> 4` clamped to health, a damaging landing STAGES the fall death-anim (+0x2C0 ← selector cause 4 → 174, equal to our generic-death fallback), landing sound = weapon slot 16 (15 when dead), then Flags &= ~0x2000 | `[orig: @ 0x4bf802-0x4bf89f]` |
@@ -4045,7 +4069,8 @@ the org2 2× local integrate (§22.2). Unported by decision — dev/admin featur
 2. The mounted ±120° look clamp and true per-tick transform for generic non-UseGun seats remain;
    the host-fed seat frame synchronizes body/legs/pitch/roll while preserving the local look.
    UseGun root position now follows the live control-posed userpoint, but its full matrix basis is
-   not claimed. The ladder yaw-alignment/exit legs remain under D-INF-2 / D-COL-5.
+   not claimed. The ladder exit legs landed with the D-COL-5 port (§30); the
+   0x4b5690 block is the carrier rotation follow and rides D-INF-2 (§22.1).
 3. `remote_player_body_anim` (the authority's wire-snapped peer selection) has
    no airborne gate — the wire does not carry the peer's in-air flag to the
    host today; rides the D-NET-159 anim-byte work.
@@ -5812,7 +5837,7 @@ code keeps raw hex at these sites; do not name without a new witness):
 | Bit | Where it appears | Note |
 |---|---|---|
 | 0x1 | destruction sweeps skip `engine_flags & 0x1` targets; part of the `0x2000001`/`0x43` composites | reads as an "inactive/exempt" family; unpinned |
-| 0x80 | org1 ladder-CLIMB mode: gates the eighth-step x/y chase to +0x2FC/+0x300 and the capped sixteenth-step z chase to +0x304 with gravity bypassed (`[orig: test al,al @ 0x4bf6b8; the chase @ 0x4bf625-0x4bf6ea]`, §29.3) | witnessed in use (the climb SM that sets it rides D-COL-5); unnamed until a reimpl consumer exists |
+| 0x80 | NAMED 2026-08-15: `kEntityFlagAiClimb` — org1 ladder-CLIMB order mode. Two legs: the capped sixteenth-step Z chase to +0x304 replacing gravity (floor −16384) — PORTED §30 — and the eighth-step x/y chase to +0x2FC/+0x300 gated on `attachParent == self` (the AI direct-move mover; unported, rides the AI-order slice with the bit's WRITER) (`[orig: test @ 0x4bf6c1; z chase @ 0x4bf6d2-0x4bf6e5; x/y chase @ 0x4bf651-0x4bf664]`) | consumer landed (infantry.cpp gravity leg); moved out of the unnamed set |
 | 0x10000 | `!(Flags & 0x112002)` comment-only gate (§3) | unpinned |
 | 0x2000000 | the `0x2000001` skip composite (collision/throwables/LOS) | unpinned |
 | 0x8000000 | AI combat candidate skip; `0x8000001` composite | unpinned |
@@ -5872,13 +5897,17 @@ splash effect + type-0x34 overlay broadcast on the not-yet-latched edge
   quarter-step tail through `+0xAC` @ 0x4bfc65-0x4bfc86]` — gravity's and the
   resolver's z contributions are DISCARDED while afloat. org1 never sets the
   dive bit (clears it on exit only).
-- **Motion couplings**: `0x8000` suppresses the vertical root channel (org2
-  writes the literal 1 — keeping the resolver's moving discriminant true —
-  org1 a true 0) and `0x100000` the horizontal pair, same literals
-  `[orig: org2 @ 0x4b7ab0-0x4b7ac4, the `ebp = 0x8000` load @ 0x4b7979;
-  org1 @ 0x4bf667-0x4bf680]`; gravity skips while `Flags & 0x108000`
-  `[orig: org2 @ 0x4b7ac8; org1 @ 0x4bf7b8]` — the position-add itself is
-  unconditional (org2 folds vel into the one root store `@ 0x4b7cef`).
+- **Motion couplings**: `0x8000` suppresses the vertical root channel and
+  `0x100000` the horizontal pair — BOTH motors store true ZEROS (CORRECTED
+  2026-08-15: the earlier "org2 writes the literal 1" reading mistook the
+  0x8000 TEST-MASK load `mov ebp, 8000h @ 0x4b7979` for the stored operand;
+  the stores use xor-zeroed scratch — org2 `xor edi, edi @ 0x4b797e/@ 0x4b79b7`
+  with stores `@ 0x4b7ab5/@ 0x4b7ac0-0x4b7ac4`, org1 `xor ebx, ebx @ 0x4bf600`
+  with stores `@ 0x4bf671/@ 0x4bf67c-0x4bf680`; the netsim replica port's
+  Player-row `1` was a misport of this and is fixed); gravity skips while
+  `Flags & 0x108000` `[orig: org2 @ 0x4b7ac8; org1 @ 0x4bf7b8]` — the
+  position-add itself is unconditional (org2 folds vel into the one root
+  store `@ 0x4b7cef`).
 - **Port notes**: the replica port carries the org2 REMOTE arm (flat base,
   no pitch term) and the org1 snap form verbatim; the full velocity-triplet
   drags run against the row velocity pair + `rm_vel_z`; and the `+0x74` eye
@@ -5976,13 +6005,13 @@ movers and ported as `ClientEntityState::rm_vel_xy`:
 
 ### 29.3 Follow-ups
 
-1. The local infantry motor's water block (D-INF-3) and ladder-climb chase
-   (`Flags 0x80` org1 mode: eighth-step x/y to +0x2FC/+0x300, sixteenth-step
-   z to +0x304 capped, gravity bypassed `[orig: @ 0x4bf625-0x4bf6ea]`;
-   the org2 ladder-top exit push `[orig: @ 0x4b7fa8-0x4b8019, 0.5 u along
-   -bodyHeading when g_LadderContactZ > pos.z, then Flags &= ~0x100000]`)
-   stay D-COL-5/D-INF-3 scope — witnessed here, unported for the local
-   motor.
+1. The local infantry motor's water block stays D-INF-3 scope. The ladder
+   half of this item LANDED 2026-08-15 (§30): the `Flags 0x80` Z-chase
+   gravity variant is ported (its x/y `attachParent==self` leg rides the
+   AI-order slice with the bit's writer), and the `@ 0x4b7fa8-0x4b8019` push
+   is the grounded BOTTOM dismount (clearance ≤ 0, below the anchor), not a
+   top exit — the earlier gloss read it backwards; the natural top-out is
+   the resolver EXIT leg's +bodyHeading push.
 2. The vehicle-side 0x8000 writers (`Entity_ProcessVehicleSuspension`/the
    family solves) are that family's in-water flag — same bit, vehicle
    context; already ported in the contact solves.
@@ -5992,6 +6021,180 @@ movers and ported as `ClientEntityState::rm_vel_xy`:
    approach quadrant, killer = carrier occupant +0x170, groundEntity-riders
    exempt) is witnessed for the D-NET-161/00TRg authority arc — not a
    client-subset item.
+
+## 30. The ladder climb state machine — the D-COL-5 port (engine-research + port, 2026-08-15)
+
+The climb motor over the CL/type-4 frame the earlier sessions extracted. The
+consumer census is closed: exactly four functions touch the
+`g_LadderContact{Pitch,Yaw,X,Y,Z}` globals (`@ 0xB5AB70..80`) —
+`Entity_ComputeBoneCollisionForce @ 0x4ae150` (writes them),
+`Entity_MovementCollisionResolver @ 0x4b2bd0` (entry/chase/exit),
+`Entity_UpdateInfantryPlayerBody @ 0x4b40e0` (org2 dismounts + bottom exit),
+`Entity_UpdateInfantryAI @ 0x4b9910` (org1 press + 33/35 select). Reimpl:
+`engine/runtime/world/collision_resolve.cpp` (`LadderResolveIO` + the CL block),
+`engine/runtime/world/infantry.cpp` (the climb block + exits + the org1 legs),
+`engine/runtime/simassets/pose_inputs.h` (the arms lock), and the view
+write-back seam in `godot/src/simulation/nova_simulation_player.cpp`
+(`sync_local_mounted_input_heading`).
+
+### 30.1 Verdicts
+
+| Component | Verdict | Evidence |
+|---|---|---|
+| Resolver CL legs (entry gate, snap/bump, recontact, chase, exit + pitch restore) | MATCHING | 3 `collision` ctest cases (`test_ladder_entry_gate_snap_and_chase`, `test_ladder_recontact_inflated_and_relatch`, `test_ladder_exit_push_and_pitch_restore`); 20+ inline citations |
+| org2 climb block (states 32–34, dismounts, jump-off, bottom exit, gravity/root gates, view clamp) | MATCHING | 2 `infantry` ctest cases (`test_player_ladder_climb_cycle`, `test_player_ladder_bottom_exit_and_jump_off`) |
+| org1 on-ladder legs (congestion hold, press, 33/35 select, the `0x80` Z chase) | MATCHING (dormant in game until the AI-order writer lands) | `infantry` ctest `test_org1_ladder_hold_press_and_top_select` |
+| The arms lock (`Flags 0x100000` → aim overlay bypass) | MATCHING (read-only grill) | `@ 0x4b1cf1` anchors the bit as the LADDER latch; wired via `pose_inputs.h` |
+
+### 30.2 The witnessed machine
+
+**Entry** (`Entity_MovementCollisionResolver @ 0x4b3245-0x4b334b`, per CL
+contact in the candidate loop, after the force fold): dead never latches; a
+previous latch re-latches unconditionally; a FRESH entry needs the player
+class bit 0x100 or the AI order `aiRuntime[1] & 0x400`, and a player must
+satisfy `(heightDiff < 0 || |Yaw − frameYaw| < 0x2AAAAAA0 (60°)) &&
+(heightDiff > 0) == (Pitch > 0)` with `heightDiff = anchorZ −
+savedLivePose.Z` (the tick-start pose captured `@ 0x4b4190`). A fresh entry
+SNAPS X/Y to the anchor, bumps Z by stance (+20480 stand / +39936 crouch
+MoveOrder 0x200 / +60416 prone 0x100 && !savedPosY) below the anchor — the
+bump breaks the grounded state so the climb can start — or snaps to
+`anchorZ − 4096` from above (over the lip onto the ladder), then re-stages
+the capsule as the on-ladder pair at the anchor and ZEROES the accumulated
+force (`@ 0x4b335a-0x4b3392`).
+
+**While latched** — the per-tick alignment (`@ 0x4b33a4-0x4b3495`): player
+yaw eases `(frameYaw − bodyHeading + 8) >> 4` into Yaw AND bodyHeading (the
+local player's `g_LocalPlayerLookYaw` dragged along); AI hard-sets
+aimHeading/targetHeading/Yaw/bodyHeading; bodyPitch = frame pitch; the
+pitch-restore latch (+0x2C bit 4) disarms; the 0.0625u facing press
+(full-precision sincos·2^22, `<<12>>22`) plus the `(anchor − pos + 32) >> 6`
+X/Y chase. The recontact query arms mask bit 0x1 (the +0.5u inflated CL
+test over the 2-point capsule, radii 25088 — the body-axis sincos chain in
+the capsule build multiplies a constant-zero length and is dead in the
+image, `@ 0x4b2e1c-0x4b2ed7`). Gravity skips on `0x108000`; the horizontal
+root pair zeroes on `0x100000` (climb MOTION is the climb clip's vertical
+root lane — the 32–35 rows in the capsule-bottom reset list exist exactly
+so the dz lane rules); the airborne edge and its `0x2000` write are
+suppressed (`0x10A002`/`0x10A000` masks); the view yaw clamps to ±120° of
+bodyHeading (§22.1); lean is blocked (`0x100020 @ 0x4b7dad`); the pose
+builder keeps the arms on the body matrix (`@ 0x4b1cf1` — hands on the
+rungs); water entry is exempt (`@ 0x4b8042`); a CL latch also clears the
+parachute bit in the org2 authority leg (`@ 0x4b7b10`, noted for D-INF-20).
+
+**org2 state selection** (`@ 0x4b7484-0x4b76d8`, EVERY tick — the 4th-tick
+stance selection's pick is overwritten; our port skips the selection instead,
+since our transition machinery would restart the crossfade on the
+intermediate stamp — the per-tick net state is identical): on-ladder && not
+dead → clear `0x2000` + `slideDecay = 0`; idle → 32 `climb_idle`; the
+forward fan (dir 0/1/7) → 33 `climb_up` / 34 `climb_down` by `sign(Pitch)`;
+dir 2/6 side-dismount: 0.875u at `frameYaw ∓ 0x3FFFFFC0 (90°)`, +0.25u hop,
+the 0.5u off-face push, unlatch; dir 3/4/5 back-dismount: the 0.5u push +
+unlatch.
+
+**Exits**: (a) natural top-out — climbing above the volume stops the
+re-latch; the resolver exit leg (`@ 0x4b3c5c-0x4b3d69`) pushes 0.375u along
++bodyHeading (over the lip) and arms the local pitch restore (target 4096,
+`g_LadderPitchRestorePrev` = Pitch), which then eases the view pitch back at
+quarter-step, per-tick clamp ±0x1E00000, done at target+16, canceled by a
+user pitch-up past prev (the chase runs in the same resolve, so the first
+step lands with the arm); (b) the grounded BOTTOM dismount
+(`@ 0x4b7fba-0x4b8019` — clearance ≤ 0, latched, `g_LadderContactZ > pos.z`):
+0.5u along −bodyHeading + unlatch — how climbing down ends (the earlier
+"ladder-top exit push" gloss read this leg backwards); (c) jump-off
+(`@ 0x4b7f0c`): the jump commit adds the same 0.5u back-push + unlatch;
+(d) the side/back dismounts above.
+
+**org1 on-ladder** (`@ 0x4bf917-0x4bfad8`, post-resolve, not dead):
+`slideDecay = 0`; the congestion probe — 1.25u along bodyHeading, a live
+pool-0 person within 73728 (1.125u) per axis whose Z band overlaps
+(`selfZ + bound/2 ≥ otherZ − otherBound/2 && selfZ ≤ otherZ`) holds the
+climb at 32 (the record's old "water-edge climb-out" gloss misfiled this);
+otherwise the 0.03125u facing press (gated on
+`g_ResolverSecondPassContact == 0` — the resolver's pass-2 contact flag,
+latched `@ 0x4b3a5c`), then 33 `climb_up` below `anchorZ − 49152 (0.75u)`
+(or when the 35 clip is unavailable) else 35 `climb_top`. The
+`Flags 0x80` = `kEntityFlagAiClimb` order mode replaces gravity with the
+sixteenth-step Z chase to the AI move target `+0x304` (cap 0x4000, floor
+−16384, `@ 0x4bf6c1-0x4bf6e5`); its eighth-step x/y chase to
+`+0x2FC/+0x300` is gated on `attachParent == self` (`@ 0x4bf651-0x4bf664`)
+— the AI direct-move mover that rides the order slice with the bit's
+writer. NPC gait selection is suppressed while latched
+(`@ 0x4bd18d`).
+
+**The view write-back seam**: retail's mouse accumulators
+(`g_LocalPlayerLookYaw` / `g_LadderPitchRestorePrev` beside entity
+Yaw/Pitch) are our host input record — any sim-side view write (the chase,
+the clamp, the pitch restore, the mount snap) mirrors back post-tick so the
+next pre-tick input write cannot undo it
+(`Simulation::sync_local_mounted_input_heading`).
+
+### 30.3 Follow-ups
+
+1. The AI move-order WRITER — what sets `aiRuntime[1] & 0x400`,
+   `kEntityFlagAiClimb`, `attachParent = self`, and the `+0x2FC..+0x304`
+   move target (AI pathing onto ladders/rooftops) — rides the AI-order
+   slice; the org1 legs here are live in tests via the latch and dormant in
+   game until it lands.
+2. An authority does not resolve wire-snapped remote players, so a remote
+   climber's authority-side anim derivation (`remote_player_body_anim`)
+   shows gait states while the owner climbs — an MP display residual on the
+   D-NET-159 arc.
+3. The parachute/carried halves of the shared gates (the 0x100060 clamp
+   legs, 0x100020 lean legs, the chute-cancel `@ 0x4b7b10`) ride D-INF-20 /
+   the mount slice.
+4. Retail runs the org2 stance selection and lets the climb block overwrite
+   the field in the same tick; our port skips the selection while latched and
+   mirrors its one persistent side effect (the standing-idle counter's
+   advance/reset) so the net state cannot drift.
+5. The 3P held-weapon presentation follows the aim channels rather than the
+   posed hand bones, so a climber's rifle floats beside the body instead of
+   riding the rung-hand (retail's weapon attach consumes the arms-locked
+   pose; `Entity_CanFireWeapon @ 0x4dcb10` carries no ladder gate, so the
+   weapon stays drawn). Presentation-seam residual.
+
+### 30.3a Adversarial review disposition (2026-08-15, three-lens pass)
+
+- **The pitch-up movement-dismount cycle is AUTHENTIC**: pressing the back
+  fan while looking up mid-ladder dismounts and the SAME tick's resolver
+  passes the fresh-entry gate again (below the anchor + pitch-up + facing
+  eased onto the frame), snapping back to the anchor with the stance Z bump
+  each tick until the pose crosses the anchor — the witnessed arithmetic
+  produces this cycle verbatim, and the port keeps it (decision: copy
+  retail). Getting off mid-ladder is look-down + back, a side fan clear of
+  the volume, or a jump — as in retail.
+- **The one-sided pitch-restore arrival is AUTHENTIC**: the witnessed check
+  is `next > target + 16` only, so a restore approaching from BELOW the 4096
+  target lands in one resolve (`the else leg @ 0x4b3d45`), pinned by
+  `test_ladder_pitch_restore_from_below_snaps`.
+- **Fixed from the review**: the mounted 8th-tick resolve now carries the
+  ladder IO (retail has ONE resolver — the latch-only channel there latched a
+  carried body on any CL touch with no entry gate); `infantry_respawn_snap`
+  clears the pitch-restore trio (the host-respawn twin of reset_for_spawn);
+  the airborne-edge suppression carries the masks' 0x8000 half; the
+  congestion probe reads the peer's ENTITY bound (the staged prox radius is
+  pose-widened); the org1 stamps save/restore `anim_pending` (retail's raw
+  stores leave the slot untouched); the netsim replica root-suppression
+  literal (see §29.2a's correction); `debug_teleport_local_player` drops a
+  live latch + restore and invalidates the prev-position gate.
+- **Latent, single-writer today**: `last_ladder_frame` is one world-level
+  slot read a tick later by the motor legs (dismount yaw, the bottom-exit
+  anchor compare, the org1 press); two concurrent climbers would cross-read
+  frames once a second writer exists (the AI order slice) — revisit with
+  item 1.
+- **Replica rows carrying wire 0x100000 now resolve with the on-ladder
+  2-point capsule + recontact mask** (the `was_on_ladder` read includes the
+  staged flags mirror) — more faithful than master's always-3-point, noted
+  as a D-NET-196-adjacent behavior change.
+
+### 30.4 IDB write-backs (2026-08-15 session, saved)
+
+- Renames (anchored, ex auto-names): `dword_B57C8C` →
+  `g_ResolverSecondPassContact`; `dword_B7900C` → `g_LadderPitchRestorePrev`;
+  `dword_B75FCC` → `g_LocalPlayerLookYaw`.
+- 13 comments: the climb-SM sites (`@ 0x4b7484`, `@ 0x4b32e5`, `@ 0x4b33af`,
+  `@ 0x4b3c5c`, `@ 0x4bf917`, `@ 0x4bf6c1`, `@ 0x4b7fba`, `@ 0x4b7f0c`,
+  `@ 0x4b1cf1`, `@ 0x4b2e1c`, `@ 0x4b4978`, `@ 0x4bf9ac`, `@ 0x4b3a5c`) with
+  reimpl reverse links.
 
 ## IDB type-sync session (2026-07-30)
 
