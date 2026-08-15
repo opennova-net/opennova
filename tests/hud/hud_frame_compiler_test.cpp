@@ -439,12 +439,23 @@ void test_spinmap_mesh_layers_and_waypoint(const fnt_font_t *font) {
 	// The distance label is LIVE by default — the retail global is BSS
 	// (zero) and only an authored NONZERO SPINMAPWPDISTOFF suppresses it.
 	// [orig: dword_27237C0 (.data, no file bytes); read @0x5a7a6a]
-	bool default_distance_label = false;
+	const opennova::hud::HudMapLabel *distance_label = nullptr;
 	for (const auto &lab : list.map.labels) {
-		if (std::string(lab.text) == "1.02k") default_distance_label = true;
+		if (std::string(lab.text) == "1.02k") distance_label = &lab;
 	}
-	CHECK(default_distance_label,
+	CHECK(distance_label != nullptr,
 			"the ring-edge distance label compiles by default");
+	if (distance_label != nullptr) {
+		// At design resolution: base 105 - compass inset 2 + scaled pointer
+		// span 10 + integer half-span 5 = 118 pixels due north.
+		CHECK(std::fabs(distance_label->x - list.map.center_x) < 0.01f &&
+				std::fabs(distance_label->y -
+						(list.map.center_y - 118.0f)) < 0.01f,
+				"the distance label uses the retail pointer-slot anchor");
+	}
+	CHECK(!list.map_glyphs.empty() &&
+			list.map_glyphs.front().color == 0xFF6080FEu,
+			"map labels fold retail's half-bright then MODULATE2X color path");
 	for (const auto &tri : list.map.terrain) {
 		for (const auto *v : {&tri.a, &tri.b, &tri.c}) {
 			const float nx = (v->x - list.map.center_x) / list.map.radius_x;
@@ -452,6 +463,21 @@ void test_spinmap_mesh_layers_and_waypoint(const fnt_font_t *font) {
 			CHECK(nx * nx + ny * ny <= 1.02f,
 					"terrain vertices stay inside the 32-sided clip");
 		}
+	}
+	// Pin the nonuniform widescreen scaling that exposed the old radius+6
+	// approximation: base - scaleX(2) + scaleY(10) + half(scaleY(10))
+	// becomes base + 17 at 1920x1080, or disc radius + 21.
+	{
+		const HudDrawList &wide = compiler.compile(state, 1920.0f, 1080.0f);
+		const opennova::hud::HudMapLabel *wide_label = nullptr;
+		for (const auto &lab : wide.map.labels) {
+			if (std::string(lab.text) == "1.02k") wide_label = &lab;
+		}
+		CHECK(wide_label != nullptr &&
+				std::fabs(std::hypot(wide_label->x - wide.map.center_x,
+						wide_label->y - wide.map.center_y) -
+						(wide.map.radius_y + 21.0f)) < 0.01f,
+				"the widescreen label lands 17 pixels beyond the base radius");
 	}
 	// An authored NONZERO SPINMAPWPDISTOFF suppresses the distance text.
 	layout.spinmap_wp_dist_off = 17;

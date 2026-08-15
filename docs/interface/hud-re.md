@@ -1079,7 +1079,7 @@ detail cycle** in the dispatcher: catalog codes 14 (`showhud`), 19
   2026-08-14 against the segment map) and only an authored NONZERO
   `SPINMAPWPDISTOFF` value
   replaces it `@0x59fc1f` — neither JO:CA nor JOTAC authors the token, so
-  retail never shows this label), 19 tracked-target distance at the
+  retail never suppresses this label), 19 tracked-target distance at the
   `0x2721ED0/ED8/EDC/EE4` slot (written by
   `render_laser_sight_effect`/`HUD_SetTrackedEntityTarget`; the sibling
   `HUD_DrawTrackedTargetDistance @0x594b60` element draws the gametext
@@ -1112,12 +1112,23 @@ detail cycle** in the dispatcher: catalog codes 14 (`showhud`), 19
   through the 2X pipeline (capture: the tether measures raw `0x007000`
   over grass, not a doubled `0x00E000`). The strip cell takes the same
   halved color `@0x59953d`. The drawer stores a FIXED-LENGTH radial
-  anchor along the bearing — `center + (arg sum + half-cell) * bearing`,
-  ~ the ring edge — to `slot[17]/[18]` (`@0x5995c7..0x599616`, gated on
+  anchor along the bearing. Its exact radius is
+  `baseRadius - scaleX((flags >> 8) & 2) + scaleY(10) + floor(scaleY(10)/2)`:
+  the map setup subtracts the bit-9 compass inset at `@0x5a64c0..0x5a650d`,
+  then the pointer adds the scaled span and its integer half at
+  `@0x5995c7..0x5995d8`. At 1920x1080 this is
+  `baseRadius - 4 + 14 + 7 = baseRadius + 17`, matching the synchronized
+  00TRa label's 11-pixel outward delta from the former `baseRadius + 6`
+  approximation. The result is stored to `slot[17]/[18]`
+  (`@0x5995c7..0x599616`, gated on
   the min-relative-bearing race `slot[21]`) and the clamped distance to
   `slot[20]` — the bit-18 label's inputs (so the "032m" label rides the
   ring edge along the bearing, NOT the tether tip; the 32-m capture pins
-  it there while the tip dot sits mid-disc).
+  it there while the tip dot sits mid-disc). The bit-18 wrapper halves the
+  overlay color in `HUD_DrawTextCentered_HalfBright @0x580680`; the active
+  fixed-function map/font stage then doubles RGB, making the final diffuse
+  `2 * half(color)` (for example `0xFFFFD000 -> 0xFFFED000`). OpenNova folds
+  both stages into its Canvas glyph color.
   **Altitude tricolor** [orig: `HUD_UpdateWaypointAltitudeColor @0x590970`]:
   `wp_z − player_z` vs ±`0x20000` (2.0 wu) → level `0xFF007000`
   (`extra = 2`), above `0xFF7F5000` (`extra = 0`), below `0xFF20407F`
@@ -1340,7 +1351,8 @@ detail cycle** in the dispatcher: catalog codes 14 (`showhud`), 19
   dot/tip chevron cells + the altitude nub, the labels (per-pass glyph
   lists — bold slot for the corner map's distance/MAPCOORDS labels, the
   `Impac22b` LARGE slot for the grid letters/numbers and the big-map
-  player readout, all half-bright), and the compass sprite. The grid
+  player readout, all CPU-half-bright then restored by the map/font
+  MODULATE2X stage), and the compass sprite. The grid
   origin rides `Simulation.get_hud_map_grid_origin()` — the promotion
   stash on a host, the replicated pool-3 type-2043 entity on a joiner
   (D-NET-194 wire-header missions carry no markers) — the waypoint

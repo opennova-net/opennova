@@ -23,6 +23,20 @@ uint32_t with_alpha(uint32_t argb, int alpha) {
 			(argb & 0xFFFFFFu);
 }
 
+uint32_t map_label_output_argb(uint32_t argb) {
+	// Retail's map-label wrapper halves the diffuse RGB before the active
+	// fixed-function map/font stage doubles it. Fold both operations into the
+	// Canvas glyph color, retaining the one-bit loss on odd input channels.
+	const uint32_t half = half_bright_argb(argb);
+	const auto doubled = [](uint32_t channel) {
+		return std::min(channel * 2u, 255u);
+	};
+	return (half & 0xFF000000u) |
+			(doubled((half >> 16) & 0xFFu) << 16) |
+			(doubled((half >> 8) & 0xFFu) << 8) |
+			doubled(half & 0xFFu);
+}
+
 } // namespace
 
 float HudFrameCompiler::sx(float design_x, float surface_w) const {
@@ -216,7 +230,9 @@ void HudFrameCompiler::element_spinmap(const HudFrameState &state, float w,
 	}
 	// Map text: the corner-map distance/MAPCOORDS labels ride the bold label
 	// font, the grid letters/numbers and the big map's player readout the
-	// LARGE slot — every one through the half-bright drawer.
+	// LARGE slot — every one through the CPU half-bright drawer. The active
+	// fixed-function map/font stage then applies MODULATE2X, so the Canvas
+	// compiler folds that second operation into the final glyph diffuse.
 	// [orig: HUD_DrawTextCentered_HalfBright((int)&g_hudLabelFontBold, ...)
 	//  @0x5a7ab5; HUD_DrawTextRightAligned_HalfBright @0x59cc47;
 	//  HUD_DrawTextCentered_HalfBright(g_hudLabelFontLarge, ...) in the
@@ -237,7 +253,7 @@ void HudFrameCompiler::element_spinmap(const HudFrameState &state, float w,
 			const GameFontRun run = lf.layout(label.text, label.x,
 					label.y, ls, ls,
 					label.align == 1 ? kFontAlignRight : kFontAlignCenter,
-					half_bright_argb(label.color));
+					map_label_output_argb(label.color));
 			out.insert(out.end(), run.quads.begin(), run.quads.end());
 		}
 	};

@@ -99,11 +99,14 @@ constexpr int kWpIndicatorCells = 4;
 // TSDicon cells the waypoint state line borrows for its tip: the chevron
 // (cell 7) at the clamped edge point while the waypoint projects OUTSIDE
 // the clip, the dot (cell 1) at the waypoint itself once inside.
+// The same drawer receives a 10-design-pixel span after Y-axis viewport
+// scaling; that span also participates in its retained distance-label slot.
 // [orig: HUD_DrawMapTargetPointer @0x599220 — cell arg = lodLevel, default
 //  7, switched to 1 on the inside branch @0x59935e; single strip-cell
-//  submit @0x59953d]
+//  submit @0x59953d; scaled span arg at @0x5a64df/@0x5a7885]
 constexpr int kWaypointTipCellClamped = 7;
 constexpr int kWaypointTipCellInside = 1;
+constexpr int kWaypointPointerSpanDesignPx = 10;
 
 // Base-26 grid column letters, A..Z then AA..ZZ, negatives folding back
 // from ZZ. [orig: HUD_FormatGridCoordinate @0x598600; 19660800 = 300 wu Q16]
@@ -1036,8 +1039,8 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 	// Waypoint state line: a fixed-length bearing pointer from the player
 	// (map center) toward the current waypoint, colored by the altitude
 	// tricolor and channel-doubled at submit, tipped with a TSDicon cell
-	// (chevron ahead, dot behind). The at-tip distance label draws only when
-	// SPINMAPWPDISTOFF authored it on.
+	// (chevron ahead, dot behind). The at-tip distance label draws unless a
+	// nonzero SPINMAPWPDISTOFF value suppresses it.
 	// [orig: bit8 leg @0x5a7850..0x5a78a0 -> drawer @0x599220 (line +
 	//  sub_67BAE0 tip cell, tip stored to slot[17]/[18], distance to
 	//  slot[20]); tricolor sub_590970; bit18 label gate @0x5a7a51..0x5a7ab5]
@@ -1119,18 +1122,27 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 			out.sprites.push_back(tip);
 			if ((flags & 0x40000u) &&
 					input.waypoint_distance_offset == 0) {
-				// The distance label rides a FIXED radial slot along the
-				// bearing — the drawer stores center + a constant length
-				// into the ctx tip slots and the bit18 leg draws there
-				// centered on the BOLD label font in the overlay color (the
-				// reference capture puts the slot just past the compass
-				// band, ~1.04 x the base radius).
-				// [orig: slot store @0x5995c7..0x599616 (ctx[17]/[18]);
-				//  label draw @0x5a7a51..0x5a7ab5 ->
+				// The distance label rides the drawer's FIXED radial slot:
+				// base radius, minus the scaled compass inset selected by
+				// flags bit 9, plus the scaled pointer span and its integer
+				// half. At 1920x1080 this is radius - 4 + 14 + 7, exactly
+				// the observed radius + 17 placement.
+				// [orig: inset setup @0x5a64c0..0x5a650d; slot sum/store
+				//  @0x5995c7..0x599616 (ctx[17]/[18]); label draw
+				//  @0x5a7a51..0x5a7ab5 ->
 				//  HUD_DrawTextCentered_HalfBright(g_hudLabelFontBold)]
+				const int pointer_span_px = static_cast<int>(scale_axis(
+						kWaypointPointerSpanDesignPx, input.surface_h,
+						kDesignHeight));
+				const int compass_inset_px = static_cast<int>(scale_axis(
+						static_cast<double>((flags >> 8) & 2u), input.surface_w,
+						kDesignWidth));
+				const float label_radius = view.base_radius -
+						static_cast<float>(compass_inset_px) +
+						static_cast<float>(pointer_span_px + pointer_span_px / 2);
 				HudMapLabel label;
-				label.x = view.center_x + ux * (view.base_radius + 6.0f);
-				label.y = view.center_y + uy * (view.base_radius + 6.0f);
+				label.x = view.center_x + ux * label_radius;
+				label.y = view.center_y + uy * label_radius;
 				label.color = input.overlay_color;
 				label.align = 0;
 				if (input.waypoint_distance_m <= 1000) {
