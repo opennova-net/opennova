@@ -261,6 +261,16 @@ int main() {
 		np::test::bring_up_host(cctx, np::ConnectionMode::HostClient, np::SocketMode::Socketless,
 		                        /*host_key=*/0, &cloop, settings);
 		cctx.world = &cw;
+		// A non-default local profile is already resolved before host bring-up. The
+		// type-2 loopback must consume the same per-side vars as a remote joiner;
+		// otherwise the listen host is permanently the default US01 character.
+		np::NapiNPConnection &host_conn = cctx.np_protocol.connection_list.front();
+		host_conn.char_vars.char_id[0] = 0x0400;
+		host_conn.char_vars.char_id[1] = 0x8407;
+		host_conn.char_vars.char_class[0] = 6;
+		host_conn.char_vars.char_class[1] = 7;
+		host_conn.char_vars.avatar[0] = 3;
+		host_conn.char_vars.avatar[1] = 9;
 
 		// Host own player first (team 1 by autobalance).
 		np::Server_InitNewRoundState(cctx);
@@ -288,7 +298,9 @@ int main() {
 		const w::Entity *cjoin = pool0_player(cw, np::kFirstJoinerDcb);
 		if (!expect(chost != nullptr && cjoin != nullptr, "char-stamp: both players resolvable")) return 1;
 		if (!expect(chost->team == 1 && cjoin->team == 2, "char-stamp: host team 1, joiner team 2")) return 1;
-		if (!expect(chost->anim_slot == 1, "host animSlot = 1 (the local-path profile default)")) return 1;
+		if (!expect(chost->anim_slot == 3, "host animSlot = selected side-A avatar")) return 1;
+		if (!expect(chost->minimap_net_id == 0x0400,
+		            "host NetId = selected side-A packed character id")) return 1;
 		if (!expect(cjoin->anim_slot == 4, "team-2 joiner animSlot = side-B avatar (VCB=4, golden)")) return 1;
 		if (!expect(cjoin->minimap_net_id == 0x8207, "team-2 joiner NetId = side-B char id (CI1=0x8207)")) return 1;
 		if (!expect(cjoin->player_class == 5, "joiner playerClass = TR-picked CTB (in [5,9], kept)")) return 1;
@@ -298,11 +310,11 @@ int main() {
 		bool host_rec_ok = false, join_rec_ok = false;
 		for (const opennova::OrganicSpawnRecord &r : cbatch.records) {
 			if (r.entity_flags == np::kHostPlayerDcb)
-				host_rec_ok = (r.anim_slot == 1 && r.net_id == 0x0200); // shim fallback == golden host id
+				host_rec_ok = (r.anim_slot == 3 && r.net_id == 0x0400);
 			if (r.entity_flags == np::kFirstJoinerDcb)
 				join_rec_ok = (r.anim_slot == 4 && r.net_id == 0x8207 && r.player_class == 5);
 		}
-		if (!expect(host_rec_ok, "0x0C host record: animSlot 1 + netId 0x0200 (golden)")) return 1;
+		if (!expect(host_rec_ok, "0x0C host record echoes the selected local character")) return 1;
 		if (!expect(join_rec_ok, "0x0C joiner record: animSlot 4 + netId 0x8207 + class 5 (golden shape)")) return 1;
 
 		// A var-less joiner (no CU tags): animSlot stays the retail raw 0, class defaults to 8,

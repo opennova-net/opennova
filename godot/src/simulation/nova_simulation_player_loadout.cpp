@@ -11,9 +11,128 @@
 #include <simassets/fp_viewmodel_spec.h> // the FP viewmodel submit rule
 #include <world/friendly_tags.h> // the D-HUD-20 tag gather
 
+#include <cstdio>
+
+#include <godot_cpp/classes/dir_access.hpp>
 #include <godot_cpp/classes/file_access.hpp> // weapon.sav lives on the filesystem, not a mount
+#include <godot_cpp/classes/os.hpp>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
 
 using namespace novasim;
+
+namespace {
+
+Dictionary weapon_profile_side_summary(const opennova::playersav::Side &side,
+		bool include_kit) {
+	Dictionary out;
+	out["player_class"] = int(side.player_class);
+	out["avatar_a"] = int(side.avatar_a);
+	out["avatar_b"] = int(side.avatar_b);
+	out["avatar_packed"] = int(side.avatar_packed);
+	if (include_kit) {
+		Array names;
+		if (const opennova::playersav::KitPage *page = side.selected_page()) {
+			for (const opennova::playersav::KitEntry &entry : page->entries)
+				names.push_back(String::utf8(entry.name.c_str()));
+		}
+		out["kit"] = names;
+	}
+	return out;
+}
+
+Error read_weapon_profile_file(const String &path,
+		opennova::playersav::File &out, bool p_clamp_classes = false) {
+	if (path.is_empty()) return ERR_INVALID_PARAMETER;
+	Ref<FileAccess> file = FileAccess::open(path, FileAccess::READ);
+	if (file.is_null()) return FileAccess::get_open_error();
+	const PackedByteArray bytes =
+			file->get_buffer(static_cast<int64_t>(file->get_length()));
+	file->close();
+	if (!opennova::playersav::read(bytes.ptr(),
+			static_cast<std::size_t>(bytes.size()), out))
+		return ERR_FILE_CORRUPT;
+	if (p_clamp_classes)
+		opennova::playersav::clamp_classes(out);
+	return OK;
+}
+
+Error replace_file_atomic(const String &temp_path, const String &target_path) {
+#ifdef _WIN32
+	const CharWideString temp = temp_path.wide_string();
+	const CharWideString target = target_path.wide_string();
+	// MoveFileExW with REPLACE_EXISTING is the Windows atomic same-volume rename
+	// primitive; WRITE_THROUGH keeps ACCEPT from returning before metadata lands.
+	if (::MoveFileExW(temp.get_data(), target.get_data(),
+			MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) == 0)
+		return ERR_FILE_CANT_WRITE;
+#else
+	const CharString temp = temp_path.utf8();
+	const CharString target = target_path.utf8();
+	if (std::rename(temp.get_data(), target.get_data()) != 0)
+		return ERR_FILE_CANT_WRITE;
+#endif
+	return OK;
+}
+
+Error write_weapon_profile_atomic(const String &path,
+		const opennova::playersav::File &profile) {
+	if (path.is_empty()) return ERR_INVALID_PARAMETER;
+	const String base_dir = path.get_base_dir();
+	if (!base_dir.is_empty()) {
+		const Error dir_error = DirAccess::make_dir_recursive_absolute(base_dir);
+		if (dir_error != OK) return dir_error;
+	}
+	const String temp_path = vformat("%s.tmp.%d", path,
+			OS::get_singleton()->get_process_id());
+	Ref<FileAccess> file = FileAccess::open(temp_path, FileAccess::WRITE);
+	if (file.is_null()) return FileAccess::get_open_error();
+	const std::vector<uint8_t> encoded = opennova::playersav::write(profile);
+	PackedByteArray bytes;
+	bytes.resize(static_cast<int64_t>(encoded.size()));
+	if (!encoded.empty())
+		std::memcpy(bytes.ptrw(), encoded.data(), encoded.size());
+	file->store_buffer(bytes);
+	file->flush();
+	const Error write_error = file->get_error();
+	file->close();
+	if (write_error != OK) {
+		DirAccess::remove_absolute(temp_path);
+		return write_error;
+	}
+	const Error rename_error = replace_file_atomic(temp_path, path);
+	if (rename_error != OK)
+		DirAccess::remove_absolute(temp_path);
+	return rename_error;
+}
+
+bool avatar_selection_from_dictionary(const Dictionary &profile, int side,
+		uint8_t &avatar_a, uint8_t &avatar_b, uint16_t &avatar_packed) {
+	if (profile.is_empty() || !profile.has("avatar_a") ||
+			!profile.has("avatar_b") || !profile.has("avatar_packed"))
+		return false;
+	const int a = profile.get("avatar_a", -1);
+	const int b = profile.get("avatar_b", -1);
+	const int packed = profile.get("avatar_packed", -1);
+	if (a < 0 || a > 0xff || b < 0 || b > 0xff ||
+			packed < 0 || packed > 0xffff ||
+			((packed >> 15) & 1) != side)
+		return false;
+	avatar_a = static_cast<uint8_t>(a);
+	avatar_b = static_cast<uint8_t>(b);
+	avatar_packed = static_cast<uint16_t>(packed);
+	return true;
+}
+
+} // namespace
 
 bool Simulation::local_player_in_armory_zone() const {
 	if (!world_) return false;
@@ -410,6 +529,91 @@ String Simulation::weapon_profile_relpath(const String &p_expansion_name) {
 					.c_str());
 }
 
+Dictionary Simulation::read_weapon_profile_summary(const String &p_path) {
+	opennova::playersav::File profile = opennova::playersav::make_defaults();
+	const Error error = read_weapon_profile_file(p_path, profile, true);
+	Dictionary out;
+	out["error"] = int(error);
+	out["loaded"] = error == OK;
+	// OpenNova's active profile is slot 0. Retail indexes the same five-record
+	// array by g_playerProfileIndex before reading/writing its 0x1080C record;
+	// see the profile-layout evidence in docs/playerinfo/avatars-re.md.
+	out["blue"] = weapon_profile_side_summary(profile.slots[0].blue, false);
+	out["red"] = weapon_profile_side_summary(profile.slots[0].red, false);
+	return out;
+}
+
+Error Simulation::save_weapon_profile_selection(const String &p_path,
+		const Dictionary &p_profile) {
+	if (p_path.is_empty() || p_profile.is_empty())
+		return ERR_INVALID_PARAMETER;
+
+	int player_class = p_profile.get("player_class", -1);
+	const Array side_profiles = p_profile.get("side_profiles", Array());
+	if ((player_class < opennova::playersav::kMinPlayerClass ||
+			player_class > opennova::playersav::kMaxPlayerClass) &&
+			!side_profiles.is_empty() &&
+			side_profiles[0].get_type() == Variant::DICTIONARY) {
+		const Dictionary first = side_profiles[0];
+		player_class = first.get("player_class", -1);
+	}
+	if (player_class < opennova::playersav::kMinPlayerClass ||
+			player_class > opennova::playersav::kMaxPlayerClass)
+		return ERR_INVALID_PARAMETER;
+
+	opennova::playersav::File profile;
+	if (FileAccess::file_exists(p_path)) {
+		const Error read_error = read_weapon_profile_file(p_path, profile);
+		// Never replace an unrecognized/short existing file. ACCEPT must be
+		// recoverable even when the user's profile needs manual repair.
+		if (read_error != OK) return read_error;
+	} else {
+		profile = opennova::playersav::make_defaults();
+	}
+
+	bool updated = false;
+	for (int side = 0; side < 2; ++side) {
+		Dictionary selected;
+		if (side < side_profiles.size() &&
+				side_profiles[side].get_type() == Variant::DICTIONARY)
+			selected = side_profiles[side];
+		if (selected.is_empty()) continue;
+		uint8_t avatar_a = 0;
+		uint8_t avatar_b = 0;
+		uint16_t avatar_packed = 0;
+		if (!avatar_selection_from_dictionary(selected, side,
+				avatar_a, avatar_b, avatar_packed))
+			return ERR_INVALID_PARAMETER;
+		opennova::playersav::update_avatar_selection(profile, 0,
+				side == 0 ? opennova::playersav::SideId::Blue
+				          : opennova::playersav::SideId::Red,
+				static_cast<uint8_t>(player_class), avatar_a, avatar_b,
+				avatar_packed);
+		updated = true;
+	}
+
+	// Compatibility with the original single active-side snapshot shape.
+	if (!updated) {
+		const int side = p_profile.get("team", -1);
+		uint8_t avatar_a = 0;
+		uint8_t avatar_b = 0;
+		uint16_t avatar_packed = 0;
+		if ((side != 0 && side != 1) ||
+				!avatar_selection_from_dictionary(p_profile, side,
+						avatar_a, avatar_b, avatar_packed))
+			return ERR_INVALID_PARAMETER;
+		opennova::playersav::update_avatar_selection(profile, 0,
+				side == 0 ? opennova::playersav::SideId::Blue
+				          : opennova::playersav::SideId::Red,
+				static_cast<uint8_t>(player_class), avatar_a, avatar_b,
+				avatar_packed);
+	}
+
+	// `write()` recreates every modeled record, while the temp + same-volume
+	// replace keeps the previous file intact until the new one is complete.
+	return write_weapon_profile_atomic(p_path, profile);
+}
+
 double Simulation::weapon_def_pos_scale() {
 	return opennova::simassets::kWeaponDefPosScale;
 }
@@ -512,24 +716,10 @@ Error Simulation::load_weapon_profile(const String &p_path) {
 }
 
 Dictionary Simulation::get_weapon_profile_summary() const {
-	const auto side_summary = [](const opennova::playersav::Side &s) {
-		Dictionary d;
-		d["player_class"] = int(s.player_class);
-		d["avatar_a"] = int(s.avatar_a);
-		d["avatar_b"] = int(s.avatar_b);
-		d["avatar_packed"] = int(s.avatar_packed);
-		Array names;
-		if (const opennova::playersav::KitPage *page = s.selected_page()) {
-			for (const opennova::playersav::KitEntry &entry : page->entries)
-				names.push_back(String::utf8(entry.name.c_str()));
-		}
-		d["kit"] = names;
-		return d;
-	};
 	Dictionary out;
 	out["loaded"] = weapon_profile_loaded_;
-	out["blue"] = side_summary(weapon_profile_.blue);
-	out["red"] = side_summary(weapon_profile_.red);
+	out["blue"] = weapon_profile_side_summary(weapon_profile_.blue, true);
+	out["red"] = weapon_profile_side_summary(weapon_profile_.red, true);
 	return out;
 }
 

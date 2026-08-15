@@ -283,6 +283,27 @@ File make_defaults()
     return f;
 }
 
+bool update_avatar_selection(File &file, size_t slot, SideId selected_side,
+        uint8_t player_class, uint8_t avatar_a, uint8_t avatar_b,
+        uint16_t avatar_packed)
+{
+    if (slot >= file.slots.size())
+        return false;
+
+    Record &record = file.slots[slot];
+    // The dialog walks the two 0x8006-byte side blocks for PLAYERCLASS, then
+    // indexes only g_playerInfoTeam for the avatar fields.
+    // [orig: save_player_info_from_dialog @0x55EE3F-0x55EE6D,
+    //  @0x55EE93-0x55EF38]
+    record.blue.player_class = player_class;
+    record.red.player_class = player_class;
+    Side &side = record.side(selected_side);
+    side.avatar_a = avatar_a;
+    side.avatar_b = avatar_b;
+    side.avatar_packed = avatar_packed;
+    return true;
+}
+
 void clamp_classes(File &f)
 {
     // [orig: apply_session_settings_to_globals @0x5516d0-@0x5516ec —

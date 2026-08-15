@@ -115,6 +115,10 @@ struct HostConfig {
 	uint32_t host_start_tick = 0;
 	uint32_t session_seed_id = 0;
 	bool serve_and_play = false; // true: HostClient + local player; false: HostOnly, no local player
+	// The listen host has no ClientAuth upload, so install its resolved
+	// PLAYER_INFO fields directly on the type-2 connection before player add.
+	CharacterJoinVars local_character_vars{};
+	bool local_character_vars_set = false;
 };
 
 // Stand `owner` up through the shared in-match host bring-up used by apps/nw_server and the Godot

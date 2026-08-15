@@ -83,7 +83,8 @@ var _player_info_companion  # PlayerInfoMenuCompanion: drives the PLAYER_INFO (p
 var _armory_presenter: ArmoryPresenter  # the SHARED in-world armory surface (weapon.mnu WEAPON)
 var _deploy_presenter: DeployScreenPresenter  # the joiner's deploy-map screen (death.mnu DEATH)
 var _use_latched := false  # USE-ITEM press latch; the mount toggle runs on RELEASE
-var _chosen_avatar: Dictionary = {}  # last avatar/name picked on PLAYER_INFO (the persistence seam)
+var _chosen_avatar: Dictionary = {}  # canonical active + per-side PLAYER_INFO selection
+var _profile_root_key := ""  # reload weapon.sav only when the mounted game/expansion changes
 var _world_load := WorldLoadCoordinatorScript.new()
 var _world_load_pending := false
 # End-of-mission flow (SP): set by the sim's "round_end" effect [orig:
@@ -551,6 +552,11 @@ func _enter_menu(dir: String) -> bool:
 			_request_resource_dir()
 			return false
 		_root = root
+	var profile_root_key := "%s|%s" % [String(_root.get_root_dir()),
+			String(_root.get_expansion()).to_lower()]
+	if profile_root_key != _profile_root_key:
+		_chosen_avatar = PlayerProfile.load_character_profile(_root)
+		_profile_root_key = profile_root_key
 	# The menu, loading screen, and world are one runtime resource session.
 	# GameWorld must not remount from mutable persisted settings after boot.
 	_world.set_resource_root(_root)
@@ -558,6 +564,8 @@ func _enter_menu(dir: String) -> bool:
 	_world.visible = false
 	_set_hud_visible(false)
 	_wire_shell()
+	if _player_info_companion != null:
+		_player_info_companion.set_persisted_profile(_chosen_avatar)
 	if not _menu_shell.setup(_root):
 		push_warning("MainGame: no menu found in resource dir (looked for %s)" % _menu_shell.main_menu_file)
 	_menu_shell.show_menu()
@@ -574,8 +582,7 @@ func _wire_shell() -> void:
 	_menu_shell.resume_requested.connect(_on_resume)
 	_menu_shell.novaworld_requested.connect(_net.open_novaworld_panel)
 	_menu_shell.crosshair_style_changed.connect(_on_crosshair_style_changed)
-	# The multiplayer menu (mp.mnu) and the PLAYER_INFO character screen (player.mnu) are
-	# each driven by a companion the shell delegates to (whichever owns the loaded menu).
+	# Delegate mp.mnu and player.mnu to their respective companions.
 	_mp_companion = MpMenuCompanion.new()
 	_player_info_companion = PlayerInfoMenuCompanion.new()
 	_lan_session = LanSession.new()
@@ -585,27 +592,28 @@ func _wire_shell() -> void:
 	_menu_shell.add_companion(_mp_companion)
 	_menu_shell.add_companion(_player_info_companion)
 	_net.wire_menu_companions(_mp_companion)
+	_player_info_companion.set_persisted_profile(_chosen_avatar)
 	_player_info_companion.avatar_chosen.connect(_on_avatar_chosen)
 
 
-# Install the in-memory local-player profile used by the next mission spawn. This
-# public seam keeps lifecycle tests and future persistence adapters out of shell
-# internals.
+# Install the in-memory local-player profile used by the next mission spawn.
 func set_local_player_profile(profile: Dictionary) -> void:
 	_chosen_avatar = profile.duplicate(true)
+	if _player_info_companion != null:
+		_player_info_companion.set_persisted_profile(_chosen_avatar)
 
 
-# The player pressed OK on the PLAYER_INFO screen. The in-world soldier appearance
-# remains a later phase; the selected loadout travels through the existing
-# spawn-kit seam, and the PLAYERNAME field persists as the callsign every session
-# leg rides (ClientAuth.NA) — without this the profile default could never be
-# changed in-product and two GUI instances on one machine would collide into the
-# duplicate-callsign fail-fast.
+# PLAYER_INFO ACCEPT persists both side records and the shared callsign, while
+# the selected loadout continues through the existing spawn-kit seam.
 func _on_avatar_chosen(profile: Dictionary) -> void:
 	set_local_player_profile(profile)
 	var typed_name := String(profile.get("name", "")).strip_edges()
 	if not typed_name.is_empty():
 		PlayerProfile.save_callsign(typed_name)
+	if _root != null:
+		var save_error := PlayerProfile.save_character_profile(_root, profile)
+		if save_error != OK:
+			push_warning("MainGame: could not save PLAYER_INFO profile (error %d)" % save_error)
 
 
 func _on_crosshair_style_changed(style: int) -> void:

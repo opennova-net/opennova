@@ -105,12 +105,13 @@ decided it needs answered. Get the current list straight from the ledger:
 grep -n 'NEEDS-RE' docs/divergence-ledger.md
 ```
 
-Three rows across the ledger are explicitly tagged **`research starter`** in their
-Slice column — two `NEEDS-RE` (D-THROW-6, D-PLAYERINFO-1) and one `OPEN` row
-waiting on a specific witness (D-HUD-6). D-HUD-7 closed with the 2026-07-31
-recoil/spread grill; D-NET-49 closed pre-2026-08-01 (its stale ledger row was
-reconciled in #403). The remaining three are scoped small enough to be somebody's
-first grill.
+Two rows across the ledger are explicitly tagged **`research starter`** in their
+Slice column — one `NEEDS-RE` row (D-THROW-6) and one `OPEN` row waiting on a
+specific witness (D-HUD-6). D-PLAYERINFO-1 closed on 2026-08-15 after the packed
+character-id, world/first-person submit, and per-part `TEX_CAMO` paths were
+witnessed and ported. D-HUD-7 closed with the 2026-07-31 recoil/spread grill;
+D-NET-49 closed pre-2026-08-01 (its stale ledger row was reconciled in #403).
+The remaining two are scoped small enough to be somebody's first grill.
 
 ## The instruments that keep this honest
 

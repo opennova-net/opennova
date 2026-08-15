@@ -85,6 +85,8 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_joiner"), &Simulation::is_joiner);
 	ClassDB::bind_method(D_METHOD("set_join_character_profile", "profile"),
 	                     &Simulation::set_join_character_profile);
+	ClassDB::bind_method(D_METHOD("set_local_character_profile", "profile"),
+	                     &Simulation::set_local_character_profile);
 	ClassDB::bind_method(D_METHOD("set_join_integrity_profile", "profile_id"),
 	                     &Simulation::set_join_integrity_profile);
 	ClassDB::bind_method(D_METHOD("load_charattr_challenge", "resource_root"),
@@ -414,6 +416,12 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("load_weapon_profile", "path"),
 	                     &Simulation::load_weapon_profile);
 	ClassDB::bind_static_method("Simulation",
+			D_METHOD("read_weapon_profile_summary", "path"),
+			&Simulation::read_weapon_profile_summary);
+	ClassDB::bind_static_method("Simulation",
+			D_METHOD("save_weapon_profile_selection", "path", "profile"),
+			&Simulation::save_weapon_profile_selection);
+	ClassDB::bind_static_method("Simulation",
 			D_METHOD("weapon_profile_relpath", "expansion_name"),
 			&Simulation::weapon_profile_relpath);
 	ClassDB::bind_static_method("Simulation",
@@ -530,6 +538,8 @@ void Simulation::_bind_methods() {
 	BIND_ENUM_CONSTANT(PF_RESPAWN_REVISION);
 	BIND_ENUM_CONSTANT(PF_TYPE_ID);
 	BIND_ENUM_CONSTANT(PF_WIRE_HANDLE);
+	BIND_ENUM_CONSTANT(PF_CHARACTER_ANIM_SLOT);
+	BIND_ENUM_CONSTANT(PF_CHARACTER_ID);
 	BIND_ENUM_CONSTANT(PF_AIM_OVERLAY_VALID);
 	BIND_ENUM_CONSTANT(PF_AIM_BODY_PITCH_DEG);
 	BIND_ENUM_CONSTANT(PF_AIM_BODY_YAW_DEG);

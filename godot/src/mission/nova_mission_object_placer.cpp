@@ -17,6 +17,27 @@ namespace {
 
 constexpr const char *kContainerName = "MissionObjects";
 
+void apply_avatar_camo_controls(ObjectModel *p_model, const Array &p_camo,
+		const String &p_owner) {
+	if (p_model == nullptr || p_camo.size() < 3) {
+		return;
+	}
+	static const char *kRegisters[3] = {
+		"TEX_CAMO1", "TEX_CAMO2", "TEX_CAMO3"
+	};
+	p_model->begin_ctrl_update();
+	for (int i = 0; i < 3; ++i) {
+		// Retail zero-extends the selected part's three authored bytes and
+		// writes them directly to global CTRL slots 93..95: no 16.16 shift,
+		// normalization, or RGB shader tint. The retained model keeps the same
+		// raw dwords per submitted part. See the per-part TEX_CAMO evidence in
+		// docs/playerinfo/avatars-re.md.
+		p_model->set_ctrl_override(p_owner, kRegisters[i],
+				int(p_camo[i]) & 0xff);
+	}
+	p_model->end_ctrl_update();
+}
+
 // Convex hull points (Godot model-local) for one parsed collision volume:
 // the volume's bounding planes form a closed convex polytope, so the hull is
 // exactly their half-space intersection (never clamped to the AABB — that
@@ -102,6 +123,10 @@ void MissionObjectPlacer::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "item_db",
 						 PROPERTY_HINT_RESOURCE_TYPE, "ItemDatabase"),
 			"set_item_db", "get_item_db_property");
+	ClassDB::bind_method(D_METHOD("set_avatar_db", "db"),
+			&MissionObjectPlacer::set_avatar_db);
+	ClassDB::bind_method(D_METHOD("get_avatar_db"),
+			&MissionObjectPlacer::get_avatar_db);
 	ClassDB::bind_method(D_METHOD("set_panm_clock", "clock"),
 			&MissionObjectPlacer::set_panm_clock);
 	ClassDB::bind_method(D_METHOD("set_environment_state", "state"),
@@ -147,8 +172,13 @@ void MissionObjectPlacer::_bind_methods() {
 			D_METHOD("resolve_player_visual_item_id", "runtime_type_id"),
 			&MissionObjectPlacer::resolve_player_visual_item_id);
 	ClassDB::bind_method(
-			D_METHOD("build_player_animated_model", "runtime_type_id", "parent"),
-			&MissionObjectPlacer::build_player_animated_model);
+			D_METHOD("resolve_player_visual_spec", "runtime_type_id",
+					"character_id"),
+			&MissionObjectPlacer::resolve_player_visual_spec);
+	ClassDB::bind_method(
+			D_METHOD("build_player_animated_model", "runtime_type_id", "parent",
+					"character_id"),
+			&MissionObjectPlacer::build_player_animated_model, DEFVAL(0));
 	ClassDB::bind_method(
 			D_METHOD("build_model_from_graphic", "graphic", "adm_name",
 					"parent", "clip_key", "rig_graphic"),
@@ -233,10 +263,15 @@ void MissionObjectPlacer::_bind_methods() {
 
 void MissionObjectPlacer::set_resource_root(const Ref<ResourceRoot> &p_root) {
 	resource_root_ = p_root;
+	avatar_db_.unref();
 }
 
 void MissionObjectPlacer::set_item_db(const Ref<ItemDatabase> &p_db) {
 	item_db_ = p_db;
+}
+
+void MissionObjectPlacer::set_avatar_db(const Ref<AvatarDatabase> &p_db) {
+	avatar_db_ = p_db;
 }
 
 void MissionObjectPlacer::set_panm_clock(const Ref<PanmClock> &p_clock) {
@@ -253,6 +288,11 @@ Ref<ItemDatabase> MissionObjectPlacer::get_item_db() {
 	return item_db_;
 }
 
+Ref<AvatarDatabase> MissionObjectPlacer::get_avatar_db() {
+	_ensure_avatar_db();
+	return avatar_db_;
+}
+
 void MissionObjectPlacer::_ensure_item_db() {
 	if (item_db_.is_valid() || resource_root_.is_null()) {
 		return;
@@ -261,6 +301,17 @@ void MissionObjectPlacer::_ensure_item_db() {
 	db.instantiate();
 	if (db->load_from_resource_root(resource_root_, "items.def") == OK) {
 		item_db_ = db;
+	}
+}
+
+void MissionObjectPlacer::_ensure_avatar_db() {
+	if (avatar_db_.is_valid() || resource_root_.is_null()) {
+		return;
+	}
+	Ref<AvatarDatabase> db;
+	db.instantiate();
+	if (db->load_from_resource_root(resource_root_, "Avatars.def") == OK) {
+		avatar_db_ = db;
 	}
 }
 
@@ -943,10 +994,97 @@ int MissionObjectPlacer::resolve_player_visual_item_id(int p_runtime_type_id) {
 	return p_runtime_type_id;
 }
 
+Dictionary MissionObjectPlacer::resolve_player_visual_spec(
+		int p_runtime_type_id, int p_character_id) {
+	_ensure_item_db();
+	_ensure_avatar_db();
+	if (avatar_db_.is_valid()) {
+		const Dictionary resolved = avatar_db_->resolve_character_id(
+				p_character_id);
+		if (!resolved.is_empty()) {
+			const Dictionary head = resolved.get("head", Dictionary());
+			const Dictionary body = resolved.get("body", Dictionary());
+			const Dictionary arms = resolved.get("arms", Dictionary());
+			Dictionary out;
+			out["character_id"] = p_character_id & 0xffff;
+			out["item_id"] = resolve_player_visual_item_id(
+					p_runtime_type_id);
+			out["head"] = head.get("graphic", String());
+			out["head_camo"] = head.get("camo", Array());
+			out["body"] = body.get("graphic", String());
+			out["body_camo"] = body.get("camo", Array());
+			out["arms"] = arms.get("graphic", String());
+			out["arms_camo"] = arms.get("camo", Array());
+			out["avatar"] = head.get("voice", 1);
+			out["sex"] = head.get("sex", 0);
+			out["nationality_index"] = resolved.get(
+					"nationality_index", -1);
+			out["division_index"] = resolved.get("division_index", -1);
+			out["combo_index"] = resolved.get("combo_index", -1);
+			out["fallback"] = false;
+			return out;
+		}
+	}
+	Dictionary out;
+	const int item_id = resolve_player_visual_item_id(p_runtime_type_id);
+	out["character_id"] = p_character_id;
+	out["item_id"] = item_id;
+	out["head"] = String();
+	out["body"] = item_db_.is_valid() ? item_db_->get_graphic(item_id) : String();
+	out["arms"] = String();
+	out["fallback"] = true;
+	return out;
+}
+
 ObjectModel *MissionObjectPlacer::build_player_animated_model(
-		int p_runtime_type_id, Node3D *p_parent) {
-	return build_animated_model(
-			resolve_player_visual_item_id(p_runtime_type_id), p_parent);
+		int p_runtime_type_id, Node3D *p_parent, int p_character_id) {
+	const int item_id = resolve_player_visual_item_id(p_runtime_type_id);
+	const Dictionary spec = resolve_player_visual_spec(
+			p_runtime_type_id, p_character_id);
+	if (bool(spec.get("fallback", true))) {
+		return build_animated_model(item_id, p_parent);
+	}
+	const String body_graphic = spec.get("body", String());
+	if (body_graphic.is_empty()) {
+		return build_animated_model(item_id, p_parent);
+	}
+	const String adm_name = item_db_.is_valid()
+			? item_db_->get_anim_def(item_id)
+			: String();
+	ObjectModel *body = build_model_from_graphic(body_graphic, adm_name,
+			p_parent, String(), body_graphic);
+	if (body == nullptr) {
+		return build_animated_model(item_id, p_parent);
+	}
+	body->set_name("AvatarBody");
+	body->set_meta("avatar_part", "body");
+	body->set_meta("character_id", p_character_id & 0xffff);
+	body->set_meta("player_visual_spec", spec);
+	apply_avatar_camo_controls(body, spec.get("body_camo", Array()),
+			"player_avatar:body_camo");
+	body->set_mirror_reflected(_item_is_mirror_reflected(item_id));
+	body->set_muzzle_point_name(item_db_.is_valid()
+			? item_db_->get_launchups_closeattack(item_id)
+			: String());
+	_configure_item_shadow(body, item_id);
+
+	const String head_graphic = spec.get("head", String());
+	if (!head_graphic.is_empty()) {
+		ObjectModel *head = build_model_from_graphic(head_graphic, adm_name,
+				body, String(), body_graphic);
+		if (head != nullptr) {
+			head->set_name("AvatarHead");
+			head->set_meta("avatar_part", "head");
+			head->set_meta("character_id", p_character_id & 0xffff);
+			apply_avatar_camo_controls(head,
+					spec.get("head_camo", Array()),
+					"player_avatar:head_camo");
+			head->set_mirror_reflected(_item_is_mirror_reflected(item_id));
+			_configure_item_shadow(head, item_id);
+			body->add_presentation_link(head);
+		}
+	}
+	return body;
 }
 
 ObjectModel *MissionObjectPlacer::build_model_from_graphic(

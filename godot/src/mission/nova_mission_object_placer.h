@@ -14,6 +14,7 @@
 #include <mission/placement_traits.h>
 
 #include "object/nova_item_database.h"
+#include "object/nova_avatar_database.h"
 #include "object/nova_object_data.h"
 #include "object/nova_object_model.h"
 #include "object/nova_skeletal_anim.h"
@@ -63,6 +64,8 @@ public:
 	Ref<ResourceRoot> get_resource_root() const { return resource_root_; }
 	void set_item_db(const Ref<ItemDatabase> &p_db);
 	Ref<ItemDatabase> get_item_db_property() const { return item_db_; }
+	void set_avatar_db(const Ref<AvatarDatabase> &p_db);
+	Ref<AvatarDatabase> get_avatar_db();
 	void set_panm_clock(const Ref<PanmClock> &p_clock);
 	// The typed environment light channel (published by MissionEnvironment).
 	// Set once by the owner; every model built here holds the same record,
@@ -112,8 +115,10 @@ public:
 	// owner-managed entity with no BMS placement (the local-player avatar).
 	ObjectModel *build_animated_model(int p_item_id, Node3D *p_parent);
 	int resolve_player_visual_item_id(int p_runtime_type_id);
+	Dictionary resolve_player_visual_spec(int p_runtime_type_id,
+			int p_character_id);
 	ObjectModel *build_player_animated_model(int p_runtime_type_id,
-			Node3D *p_parent);
+			Node3D *p_parent, int p_character_id = 0);
 	// Build ONE animated ObjectModel from an EXPLICIT graphic + .adm name
 	// (the first-person weapon viewmodel path; the arms + gun share the
 	// equipped gun's rig table — witness: placement_traits.h ledger).
@@ -200,6 +205,7 @@ private:
 
 	void _check_epoch();
 	void _ensure_item_db();
+	void _ensure_avatar_db();
 	String _graphic_for(int p_item_id) const;
 	Ref<ObjectData> _load_object_data(const String &p_graphic);
 	String _model_name_for(const String &p_graphic) const;
@@ -238,6 +244,7 @@ private:
 
 	Ref<ResourceRoot> resource_root_;
 	Ref<ItemDatabase> item_db_;
+	Ref<AvatarDatabase> avatar_db_;
 	Ref<PanmClock> panm_clock_;
 	Ref<EnvLightState> env_state_;
 	bool edit_mode_ = false;

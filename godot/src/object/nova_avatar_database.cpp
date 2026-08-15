@@ -95,6 +95,9 @@ void AvatarDatabase::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_combo_count", "nat_index", "div_index"), &AvatarDatabase::get_combo_count);
 	ClassDB::bind_method(D_METHOD("get_combo", "nat_index", "div_index", "combo_index"), &AvatarDatabase::get_combo);
 	ClassDB::bind_method(D_METHOD("resolve_combo", "nat_index", "div_index", "combo_index"), &AvatarDatabase::resolve_combo);
+	ClassDB::bind_method(D_METHOD("resolve_character_id", "character_id",
+			"expected_alignment"), &AvatarDatabase::resolve_character_id,
+			DEFVAL(-1));
 	ClassDB::bind_method(D_METHOD("get_model"), &AvatarDatabase::get_model);
 	ClassDB::bind_method(D_METHOD("set_model", "model"), &AvatarDatabase::set_model);
 
@@ -570,6 +573,47 @@ Dictionary AvatarDatabase::resolve_combo(int nat_index, int div_index, int combo
 		out["alignment"] = nat["alignment"];
 	}
 	return out;
+}
+
+Dictionary AvatarDatabase::resolve_character_id(
+		int character_id, int expected_alignment) const {
+	// The authored ids, not UI row indices, occupy the packed identity; see
+	// docs/playerinfo/avatars-re.md for the retail resolver evidence.
+	const int packed = character_id & 0xffff;
+	const int nationality_id = packed & 0x1f;
+	const int division_id = (packed >> 5) & 0x0f;
+	const int combo_id = (packed >> 9) & 0x3f;
+	const int alignment = (packed >> 15) & 0x01;
+	if ((expected_alignment == ALIGN_GOOD ||
+			expected_alignment == ALIGN_EVIL) &&
+		alignment != expected_alignment) {
+		return Dictionary();
+	}
+
+	for (int ni = 0; ni < static_cast<int>(nationalities.size()); ++ni) {
+		const Nationality &nat = nationalities[ni];
+		if (nat.id != nationality_id || nat.alignment != alignment) {
+			continue;
+		}
+		for (int di = 0; di < static_cast<int>(nat.divisions.size()); ++di) {
+			const Division &div = nat.divisions[di];
+			if (div.id != division_id) {
+				continue;
+			}
+			for (int ci = 0; ci < static_cast<int>(div.combos.size()); ++ci) {
+				if (div.combos[ci].id != combo_id) {
+					continue;
+				}
+				Dictionary out = resolve_combo(ni, di, ci);
+				out["character_id"] = packed;
+				out["nationality_index"] = ni;
+				out["division_index"] = di;
+				out["combo_index"] = ci;
+				return out;
+			}
+		}
+	}
+	return Dictionary();
 }
 
 Dictionary AvatarDatabase::get_model() const {

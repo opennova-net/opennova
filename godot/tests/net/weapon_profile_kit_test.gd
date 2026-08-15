@@ -136,6 +136,77 @@ func test_a_malformed_profile_keeps_the_shipped_defaults() -> void:
 	sim.free()
 
 
+func test_player_info_character_save_is_per_side_and_preserves_other_slots() -> void:
+	var path := ProjectSettings.globalize_path("user://weapon_profile_kit_test.sav")
+	var bytes := _make_weapon_sav()
+	# Sentinel fields in slot 1: active slot-0 ACCEPT must not touch them.
+	var slot1 := HEADER_BYTES + SLOT_BYTES
+	bytes[slot1] = 0x44
+	bytes[slot1 + 1] = 0x55
+	bytes[slot1 + 2] = 0x66
+	bytes.encode_u16(slot1 + 4, 0x9234)
+	bytes[slot1 + SIDE_BYTES] = 0x33
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	assert_not_null(file)
+	file.store_buffer(bytes)
+	file.close()
+	_sav_path = path
+
+	var profile := {
+		"team": 0,
+		"player_class": 9,
+		"side_profiles": [
+			{"avatar_a": 0, "avatar_b": 0, "avatar_packed": 0x0400},
+			{"avatar_a": 7, "avatar_b": 0, "avatar_packed": 0x8407},
+		],
+	}
+	assert_eq(Simulation.save_weapon_profile_selection(path, profile), OK,
+			"PLAYER_INFO ACCEPT atomically rewrites the active profile")
+	var summary: Dictionary = Simulation.read_weapon_profile_summary(path)
+	assert_true(bool(summary.get("loaded", false)))
+	var blue: Dictionary = summary.get("blue", {})
+	var red: Dictionary = summary.get("red", {})
+	assert_eq(int(blue.get("player_class", -1)), 9)
+	assert_eq(int(red.get("player_class", -1)), 9,
+			"retail ACCEPT writes the class to both 0x8006 side blocks")
+	assert_eq(int(blue.get("avatar_packed", -1)), 0x0400)
+	assert_eq(int(red.get("avatar_packed", -1)), 0x8407,
+			"the two side-specific packed character ids survive together")
+
+	var rewritten := FileAccess.get_file_as_bytes(path)
+	assert_eq(int(rewritten[slot1]), 0x44)
+	assert_eq(int(rewritten[slot1 + 1]), 0x55)
+	assert_eq(int(rewritten[slot1 + 2]), 0x66)
+	assert_eq(int(rewritten.decode_u16(slot1 + 4)), 0x9234,
+			"the other four profile slots are preserved")
+	assert_eq(int(rewritten[slot1 + SIDE_BYTES]), 0x33,
+			"saving slot 0 does not normalize another slot's class bytes")
+	assert_false(FileAccess.file_exists("%s.tmp.%d" % [path, OS.get_process_id()]),
+			"the atomic temp sibling is renamed away")
+	# [orig: save_player_info_from_dialog @0x55EE3F-0x55EE6D class loop,
+	#  @0x55EE93-0x55EF38 selected-side avatar fields]
+
+
+func test_character_save_refuses_to_replace_a_corrupt_existing_profile() -> void:
+	var path := ProjectSettings.globalize_path("user://weapon_profile_kit_test.sav")
+	var original := "NOTAPROFILE".to_ascii_buffer()
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	assert_not_null(file)
+	file.store_buffer(original)
+	file.close()
+	_sav_path = path
+	var profile := {
+		"team": 0,
+		"player_class": 8,
+		"avatar_a": 0,
+		"avatar_b": 0,
+		"avatar_packed": 0x0200,
+	}
+	assert_eq(Simulation.save_weapon_profile_selection(path, profile), ERR_FILE_CORRUPT)
+	assert_eq(FileAccess.get_file_as_bytes(path), original,
+			"a rejected profile remains recoverable and byte-identical")
+
+
 func test_an_unlatched_team_commits_no_page() -> void:
 	# The side selector is the S2C 0x04 tail byte [orig: byte_A85B48 @0x425499], and
 	# side_for_team maps anything that is not 1 or 3 to the RED block [orig: @0x525798].

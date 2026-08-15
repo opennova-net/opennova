@@ -66,6 +66,10 @@ class Snapshot:
 			var base := i * stride
 			out[base + Simulation.PF_TYPE_ID] = float(entity.get("type_id", 0))
 			out[base + Simulation.PF_WIRE_HANDLE] = float(entity.get("handle", 0))
+			out[base + Simulation.PF_CHARACTER_ANIM_SLOT] = float(
+					entity.get("character_anim_slot", 0))
+			out[base + Simulation.PF_CHARACTER_ID] = float(
+					entity.get("character_id", 0))
 			out[base + Simulation.PF_KIND] = float(entity.get("kind", -1))
 			out[base + Simulation.PF_INDEX] = float(entity.get("index", -1))
 			out[base + Simulation.PF_BMS_ID] = float(entity.get("bms_id", 0))
@@ -376,6 +380,32 @@ func test_live_slot_type_change_rebuilds_the_visual() -> void:
 	assert_ne(second, first, "recycled handle cannot keep the prior type model")
 	assert_eq(int(second.get_meta("entity_ref", {}).get("runtime_type_id", 0)),
 			TYPE_ARMORY)
+
+
+func test_live_player_character_id_change_rebuilds_the_visual() -> void:
+	var container := _container()
+	var p := _wire_pass(_sim(), _placer(), container)
+	var snap := Snapshot.new()
+	snap.entities = [{
+		"type_id": TYPE_RIFLEMAN,
+		"handle": 0x0004,
+		"character_anim_slot": 3,
+		"character_id": 0x0400,
+	}]
+	_present(p, snap)
+	var first: ObjectModel = p.resolve_wire_handle(0x0004)
+	assert_not_null(first)
+	assert_eq(int(first.get_meta("entity_ref", {}).get("character_id", 0)),
+			0x0400)
+
+	snap.entities[0]["character_anim_slot"] = 4
+	snap.entities[0]["character_id"] = 0x0600
+	_present(p, snap, 2)
+	var second: ObjectModel = p.resolve_wire_handle(0x0004)
+	assert_ne(second, first,
+			"a reused player slot cannot retain the prior selected character")
+	assert_eq(int(second.get_meta("entity_ref", {}).get("character_id", 0)),
+			0x0600, "the packed 0x0C identity keys remote presentation")
 
 
 func test_placed_identity_rows_defer_even_without_a_resolvable_node() -> void:

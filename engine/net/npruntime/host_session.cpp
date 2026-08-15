@@ -554,6 +554,14 @@ void start_host_session(HostOwner &owner, const HostConfig &cfg) {
 	create_session(
 			owner.ctx, cfg.config, startup,
 			cfg.serve_and_play ? owner.host_loopback : nullptr); // also runs Server_InitNewRoundState
+	if (cfg.local_character_vars_set) {
+		for (NapiNPConnection &connection :
+				owner.ctx.np_protocol.connection_list) {
+			if (connection.type == 2) {
+				connection.char_vars = cfg.local_character_vars;
+			}
+		}
+	}
 	if (owner.ctx.world != nullptr) {
 		// [orig: dword_24D1E34 & 0x8000, "TeamTriggerClaymore" admin set @ 0x405f16]
 		owner.ctx.world->throwables.team_trigger_claymore =

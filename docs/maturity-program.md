@@ -440,11 +440,10 @@ env closures land **libs/env-first** so ENG-2 does not pay twice.
 - **PAR-R1..R7** (S/M each; **R7 landed 2026-07-05** — [vfs/vfs-pff-mount-re.md](vfs/vfs-pff-mount-re.md), D-VFS-1..9) the UNAUDITED-system audits (engine-research /
   grill-ida): terrain, foliage, tiles, fonts, credits, importer pipeline, VFS/PFF mount
   stack — each lands an RE record **with a D-catalog**.
-- **Class-B research starters** (freeze-exempt engine-research): the HUD radar/crosshair
-  (radar resolved 2026-07-18 — JO:CA ships no in-HUD radar element, D-HUD-2 closed),
-  D-NET-49 (in-match PG; closed pre-2026-08-01, ledger reconciled in #403), the in-world
-  avatar binding (D-PLAYERINFO-1), and the full `.mis`
-  grammar grill (`dfx2med.exe`, D-MIS-1/-3).
+- **Class-B research starters** (freeze-exempt engine-research): the full `.mis`
+  grammar grill (`dfx2med.exe`, D-MIS-1/-3). Earlier starters are closed: the HUD
+  radar/crosshair question (D-HUD-2), D-NET-49, and the in-world avatar binding
+  (D-PLAYERINFO-1, packed-id/world/FP/`TEX_CAMO` path ported 2026-08-15).
 
 ### REN — render visual parity (materials, draw order, shaders, lighting)
 

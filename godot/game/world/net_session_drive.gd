@@ -174,6 +174,25 @@ static func character_join_profile_from_database(
 		_first_join_character_selection(db, 0),
 		_first_join_character_selection(db, 1),
 	]
+	var player_classes := [8, 8]
+	var saved_sides: Array = selection.get("side_profiles", [])
+	var has_saved_sides := false
+	for side in mini(saved_sides.size(), 2):
+		if not (saved_sides[side] is Dictionary):
+			continue
+		var saved: Dictionary = saved_sides[side]
+		if saved.is_empty():
+			continue
+		has_saved_sides = true
+		var saved_character := _join_character_selection(db,
+				int(saved.get("nationality", -1)),
+				int(saved.get("division", -1)),
+				int(saved.get("combo", -1)), side)
+		if not saved_character.is_empty():
+			side_selections[side] = saved_character
+		var saved_class := int(saved.get("player_class", 8))
+		if saved_class >= 5 and saved_class <= 9:
+			player_classes[side] = saved_class
 	var selected_side := int(selection.get("team", -1))
 	if selected_side == 0 or selected_side == 1:
 		var chosen := _join_character_selection(
@@ -188,12 +207,18 @@ static func character_join_profile_from_database(
 	var player_class := int(selection.get("player_class", 8))
 	if player_class < 5 or player_class > 9:
 		player_class = 8
+	# A legacy/one-side snapshot is an ACCEPT result, whose class is written to
+	# both blocks. A canonical per-side snapshot already carries the two bytes
+	# loaded from weapon.sav (the UI stamps both when ACCEPT commits).
+	# [orig: save_player_info_from_dialog @0x55EE3F-0x55EE6D]
+	if not has_saved_sides:
+		player_classes = [player_class, player_class]
 	return {
 		"character_ids": [
 			int(side_selections[0].get("character_id", 0)),
 			int(side_selections[1].get("character_id", 0)),
 		],
-		"player_classes": [player_class, player_class],
+		"player_classes": player_classes,
 		"avatars": [
 			int(side_selections[0].get("avatar", 1)),
 			int(side_selections[1].get("avatar", 1)),

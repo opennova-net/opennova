@@ -99,6 +99,13 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 
 	if options.has("loco_scale"):
 		_sim.set_loco_scale(int(options["loco_scale"]))
+	# The listen host stamps its own type-2 connection during role bring-up, so
+	# its two per-side character selections must already be present here. The
+	# same profile is what a joiner uploads through ClientAuth.
+	# [orig: apply_session_settings_to_globals @0x551500;
+	#  Server_PlayerAdd @0x51CBC0 -> packed id @0x51D0B1]
+	if options.has("local_character_profile"):
+		_sim.set_local_character_profile(options["local_character_profile"])
 	# P7 / ADR 0011: every authoritative live mission is an in-process listen server, stood up BEFORE
 	# load; the host player auto-spawns at bring-up (faithful §5.0 mode-3). MainGame/GameWorld is the
 	# sole live runtime owner (ADR 0025); F5/F6 launch that standalone path. Isolated tests/tooling previews may

@@ -193,7 +193,12 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	                  (ctx.config.game_type & 0x10000u) == 0)
 	        ? 0
 	        : 1;
-	if (is_host_own) {
+	const bool has_character_profile =
+			conn.char_vars.char_id[0] != 0 || conn.char_vars.char_id[1] != 0 ||
+			conn.char_vars.avatar[0] != 0 || conn.char_vars.avatar[1] != 0 ||
+			conn.char_vars.char_class[0] != 0 ||
+			conn.char_vars.char_class[1] != 0;
+	if (is_host_own && !has_character_profile) {
 		// The host's own player never uploads CU vars — retail stamps its animSlot on the LOCAL
 		// path from the profile avatar byte, default-resolved to 1 when the profile carries none
 		// (the golden host record). Its NetId comes from local deploy, not this record -> keep 0

@@ -15,6 +15,7 @@
 namespace godot {
 
 using opennova::world::PF_BMS_ID;
+using opennova::world::PF_CHARACTER_ID;
 using opennova::world::PF_INDEX;
 using opennova::world::PF_KIND;
 using opennova::world::PF_STRIDE;
@@ -224,6 +225,9 @@ void WirePresentPass::present_snapshot(const PackedFloat32Array &p_snap,
 		const int base = i * p_stride;
 		const int type_id = int(snap[base + PF_TYPE_ID]);
 		const int handle = int(snap[base + PF_WIRE_HANDLE]);
+		const int character_id = int(snap[base + PF_CHARACTER_ID]) & 0xffff;
+		const int32_t visual_identity = int32_t(
+				(uint32_t(type_id) << 16) | uint32_t(character_id));
 		// A zero type row is the joiner's self-filtered echo (H) or an
 		// unresolved record; the local player handle is drawn by
 		// LocalPlayerPresenter.
@@ -262,8 +266,8 @@ void WirePresentPass::present_snapshot(const PackedFloat32Array &p_snap,
 			}
 		}
 		live[handle] = true;
-		if (const int32_t *failed_type = unresolved_.getptr(handle)) {
-			if (*failed_type == type_id) {
+		if (const int32_t *failed_identity = unresolved_.getptr(handle)) {
+			if (*failed_identity == visual_identity) {
 				continue;
 			}
 			unresolved_.erase(handle);
@@ -289,10 +293,11 @@ void WirePresentPass::present_snapshot(const PackedFloat32Array &p_snap,
 			// build_player_animated_model maps the player runtime type to its
 			// visual item and passes other organics through — the SAME chain
 			// the host uses for the local avatar and placed NPCs.
-			node = placer_->build_player_animated_model(type_id, parent);
+			node = placer_->build_player_animated_model(
+					type_id, parent, character_id);
 			trace_cold_build("end", handle, type_id, visual_item_id);
 			if (node == nullptr) {
-				unresolved_[handle] = type_id;
+				unresolved_[handle] = visual_identity;
 				++stat_unresolved_;
 				continue;
 			}
@@ -305,6 +310,7 @@ void WirePresentPass::present_snapshot(const PackedFloat32Array &p_snap,
 			ref["wire_handle"] = handle;
 			ref["item_id"] = visual_item_id;
 			ref["runtime_type_id"] = type_id;
+			ref["character_id"] = character_id;
 			node->set_meta("entity_ref", ref);
 			nodes_[handle] = node->get_instance_id();
 			++stat_spawned_;
@@ -427,6 +433,8 @@ bool WirePresentPass::wire_node_matches_row(ObjectModel *p_node,
 	const float *snap = p_snap.ptr();
 	Dictionary ref = p_node->get_meta("entity_ref", Dictionary());
 	return int(ref.get("runtime_type_id", 0)) == p_type_id &&
+			int(ref.get("character_id", 0)) ==
+					(int(snap[p_base + PF_CHARACTER_ID]) & 0xffff) &&
 			int(ref.get("origin_kind", -1)) == int(snap[p_base + PF_KIND]) &&
 			int(ref.get("index", -1)) == int(snap[p_base + PF_INDEX]) &&
 			int(ref.get("bms_id", 0)) == int(snap[p_base + PF_BMS_ID]);

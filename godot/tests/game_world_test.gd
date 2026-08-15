@@ -20,10 +20,32 @@ func after_each() -> void:
 class ViewmodelPlacerStub:
 	extends RefCounted
 	var graphics: Array[String] = []
+	func resolve_player_visual_spec(_runtime_type_id: int,
+			_character_id: int = 0) -> Dictionary:
+		return {"fallback": true}
 	func build_model_from_graphic(graphic: String, _adm_name: String,
 			_parent: Node3D, _clip_key: String, _env_node, _rig_graphic: String):
 		graphics.append(graphic)
 		return null
+
+
+class SelectedAvatarViewmodelPlacerStub:
+	extends RefCounted
+	var graphics: Array[String] = []
+	func resolve_player_visual_spec(_runtime_type_id: int,
+			_character_id: int = 0) -> Dictionary:
+		return {
+			"fallback": false,
+			"arms": "SelectedArms",
+			"arms_camo": [17, 34, 51],
+		}
+	func build_model_from_graphic(graphic: String, _adm_name: String,
+			parent: Node3D, _clip_key: String, _rig_graphic: String):
+		graphics.append(graphic)
+		var model := ObjectModel.new()
+		model.name = graphic
+		parent.add_child(model)
+		return model
 
 
 class ViewmodelWorldHarness:
@@ -42,6 +64,9 @@ class ViewmodelWorldHarness:
 class ChallengePrewarmPlacerStub:
 	extends RefCounted
 	var loaded: Array[String] = []
+	func resolve_player_visual_spec(_runtime_type_id: int,
+			_character_id: int = 0) -> Dictionary:
+		return {"fallback": true}
 	func resolve_player_visual_item_id(_runtime_type_id: int) -> int:
 		return 101001
 	func graphic_for(_item_id: int) -> String:
@@ -1840,6 +1865,31 @@ func test_valid_emplaced_def_without_gfx1_builds_no_fallback_gun() -> void:
 			"a missing authored gfx1 must not substitute the AK first-person gun")
 	assert_eq(world.model_availability, [false],
 			"the render gate observes that no first-person gun model resolved")
+
+
+func test_first_person_uses_selected_arms_and_raw_part_local_camo() -> void:
+	var world: ViewmodelWorldHarness = autofree(ViewmodelWorldHarness.new())
+	var placer := SelectedAvatarViewmodelPlacerStub.new()
+	world.install_viewmodel_fixture(PlayerViewmodelDef.from_weapon_dict({
+		"name": "WPN_TEST",
+		"gfx1": "TestGun",
+		"gfx1a": "WeaponDefaultArms",
+		"flags": 0,
+	}), placer)
+	var container := world.build_local_player_viewmodel()
+	assert_not_null(container)
+	assert_eq(placer.graphics, ["SelectedArms", "TestGun"],
+			"the selected character's arms replace the weapon fallback")
+	var parts := world.local_player_viewmodel_parts()
+	assert_eq(parts.size(), 2)
+	var arms: ObjectModel = parts[0]
+	var gun: ObjectModel = parts[1]
+	assert_eq(int(arms.get_ctrl_values().get("TEX_CAMO1", -1)), 17)
+	assert_eq(int(arms.get_ctrl_values().get("TEX_CAMO2", -1)), 34)
+	assert_eq(int(arms.get_ctrl_values().get("TEX_CAMO3", -1)), 51,
+			"first-person arms receive the authored raw CTRL bytes")
+	assert_false(gun.get_ctrl_values().has("TEX_CAMO1"),
+			"the arms' per-draw TEX_CAMO state does not leak into the gun")
 
 
 func test_joiner_challenge_prewarm_loads_player_and_current_viewmodels_before_freeze() -> void:

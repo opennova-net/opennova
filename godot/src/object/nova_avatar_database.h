@@ -150,6 +150,11 @@ public:
 	// voice, sex), the surface the menu/preview consume. Stops before any .3di load
 	// (D-PLAYERINFO-1). Missing part references resolve to empty entries.
 	Dictionary resolve_combo(int nat_index, int div_index, int combo_index) const;
+	// Resolve the packed character identity carried by ClientAuth/entity spawn:
+	// nationality bits 0..4, division 5..8, combo 9..14, side 15.
+	// Returns the resolved combo plus its tree indices, or an empty Dictionary.
+	Dictionary resolve_character_id(int character_id,
+			int expected_alignment = -1) const;
 
 	// Whole-model bridge for the editor: read the full nested model, edit it in
 	// GDScript, set it back, then save_to_path(). set_model() emits "changed".

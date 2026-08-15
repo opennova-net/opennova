@@ -32,6 +32,73 @@ static func save_callsign(callsign: String) -> void:
 	ConfigStore.write(CONFIG_PATH, SECTION, "callsign", callsign)
 
 
+# Retail keeps the five PLAYER_INFO/weapon records in weapon.sav beside the
+# active game or expansion, not under user:// [orig: PlayerProfile_LoadAllFromDisk
+# path build @0x54F68C-0x54F6B7]. OpenNova uses retail profile slot 0 as its
+# active slot; the native reader/writer preserves the other four slots.
+static func weapon_profile_path(root: ResourceRoot) -> String:
+	if root == null:
+		return ""
+	var dir := String(root.get_root_dir())
+	if dir.is_empty():
+		return ""
+	return dir.path_join(Simulation.weapon_profile_relpath(
+			String(root.get_expansion())))
+
+
+# Restore both side-specific character selections and expose the blue side as
+# the initially active PLAYER_INFO page (SIDE_BLUE is authored CHECKED). Packed
+# ids are resolved back through Avatars.def because their bit fields contain
+# authored ids, not UI row indices [orig: lookup_entity_slot_and_pack_entry
+# @0x57AD40, packed write @0x57AE47].
+static func load_character_profile(root: ResourceRoot) -> Dictionary:
+	var profile := {
+		"name": load_callsign(),
+		"team": 0,
+		"side_profiles": [{}, {}],
+	}
+	var path := weapon_profile_path(root)
+	if path.is_empty() or not FileAccess.file_exists(path):
+		return profile
+	var summary: Dictionary = Simulation.read_weapon_profile_summary(path)
+	if not bool(summary.get("loaded", false)):
+		return profile
+	var db := AvatarDatabase.new()
+	if db.load_from_resource_root(root, "Avatars.def") != OK or not db.is_loaded():
+		return profile
+	var sides: Array[Dictionary] = [{}, {}]
+	for side in 2:
+		var raw: Dictionary = summary.get("blue" if side == 0 else "red", {})
+		var packed := int(raw.get("avatar_packed", -1))
+		var resolved: Dictionary = db.resolve_character_id(packed, side)
+		if resolved.is_empty():
+			continue
+		sides[side] = {
+			"team": side,
+			"nationality": int(resolved.get("nationality_index", -1)),
+			"division": int(resolved.get("division_index", -1)),
+			"combo": int(resolved.get("combo_index", -1)),
+			"player_class": int(raw.get("player_class", 8)),
+			"avatar_a": int(raw.get("avatar_a", 0)),
+			"avatar_b": int(raw.get("avatar_b", 0)),
+			"avatar_packed": packed,
+		}
+	profile["side_profiles"] = sides
+	if not sides[0].is_empty():
+		var name := String(profile.get("name", ""))
+		profile = sides[0].duplicate(true)
+		profile["name"] = name
+		profile["side_profiles"] = sides
+	return profile
+
+
+static func save_character_profile(root: ResourceRoot, profile: Dictionary) -> int:
+	var path := weapon_profile_path(root)
+	if path.is_empty():
+		return ERR_INVALID_PARAMETER
+	return int(Simulation.save_weapon_profile_selection(path, profile))
+
+
 # Per-machine stable suffix: with name-match self-ID, a shared default (the old literal
 # "Player") cross-wired any two default-named clients in one session. The two-instance
 # same-machine demo still overrides via NW_LAN_NAME.

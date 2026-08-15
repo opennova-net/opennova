@@ -154,6 +154,8 @@ public:
 		PF_RESPAWN_REVISION = opennova::world::PF_RESPAWN_REVISION,
 		PF_TYPE_ID = opennova::world::PF_TYPE_ID,
 		PF_WIRE_HANDLE = opennova::world::PF_WIRE_HANDLE,
+		PF_CHARACTER_ANIM_SLOT = opennova::world::PF_CHARACTER_ANIM_SLOT,
+		PF_CHARACTER_ID = opennova::world::PF_CHARACTER_ID,
 		PF_AIM_OVERLAY_VALID = opennova::world::PF_AIM_OVERLAY_VALID,
 		PF_AIM_BODY_PITCH_DEG = opennova::world::PF_AIM_BODY_PITCH_DEG,
 		PF_AIM_BODY_YAW_DEG = opennova::world::PF_AIM_BODY_YAW_DEG,
@@ -610,6 +612,10 @@ private:
 	// because a direct-loaded join rebuilds ClientRuntime in finish_load.
 	opennova::np::CharacterJoinVars join_character_vars_{};
 	bool join_character_vars_set_ = false;
+	// The listen host's own type-2 connection consumes the same profile shape,
+	// installed before its authoritative player spawn.
+	opennova::np::CharacterJoinVars local_character_vars_{};
+	bool local_character_vars_set_ = false;
 	// Explicit resource-corpus identity for the retail anti-cheat 0x30/0x31
 	// sources. Empty keeps safe silence. Retained across direct-load runtime
 	// rebuilds just like the character and charattr profile data.
@@ -1133,6 +1139,7 @@ public:
 	// Set the per-side character ids/classes/avatar bytes carried by ClientAuth.
 	// Must be called before enable_join; later runtime rebuilds retain the values.
 	void set_join_character_profile(const Dictionary &p_profile);
+	void set_local_character_profile(const Dictionary &p_profile);
 	// Select a registered retail resource-corpus profile for S2C 0x30/0x31.
 	// Empty clears it; an unknown id also clears it and returns false.
 	bool set_join_integrity_profile(const String &p_profile_id);
@@ -1499,6 +1506,18 @@ public:
 	// "expansion\\<g_ExpansionName>\\weapon.sav" path build @0x54f68c..@0x54f6b7);
 	// the session-start clamp apply_session_settings_to_globals @0x5516ab]
 	Error load_weapon_profile(const String &p_path);
+	// Read slot 0's two character headers without requiring a live Simulation.
+	// Returns {error, loaded, blue, red}; each side carries player_class,
+	// avatar_a, avatar_b, and avatar_packed. This is the menu boot seam over the
+	// same five-record file as load_weapon_profile().
+	static Dictionary read_weapon_profile_summary(const String &p_path);
+	// Persist PLAYER_INFO's character selection into active profile slot 0.
+	// `profile` may carry side_profiles[blue, red]; its player_class is committed
+	// to both sides exactly as retail ACCEPT does. Existing slots and kit pages
+	// survive, and the final pathname is replaced atomically. See the save-dialog
+	// evidence in docs/playerinfo/avatars-re.md.
+	static Error save_weapon_profile_selection(const String &p_path,
+			const Dictionary &p_profile);
 	// The profile file's path RULE relative to the mount root (playersav
 	// weapon_sav_relpath): with an active expansion retail looks ONLY under
 	// "expansion/<name>/", never the root [orig: the path build

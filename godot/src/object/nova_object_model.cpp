@@ -15,6 +15,19 @@
 
 namespace godot {
 
+namespace {
+
+bool is_part_local_ctrl(const String &p_register) {
+	// Retail reuses one global CTRL bus, but rewrites 93..95 separately just
+	// before each head/body/arms submit. A retained composed model therefore
+	// keeps these three values local to each submitted part. See the submit-site
+	// evidence in docs/playerinfo/avatars-re.md.
+	return p_register == "TEX_CAMO1" || p_register == "TEX_CAMO2" ||
+			p_register == "TEX_CAMO3";
+}
+
+} // namespace
+
 void EnvLightValues::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("equals", "other"), &EnvLightValues::equals);
 	ClassDB::bind_static_method("EnvLightValues", D_METHOD("retail_noon_defaults"),
@@ -146,6 +159,36 @@ void ObjectModel::set_object_data(const Ref<ObjectData> &p_data) {
 		object_data_->connect("object_changed", changed, CONNECT_DEFERRED);
 	}
 	rebuild();
+}
+
+Vector<ObjectModel *> ObjectModel::live_presentation_links() const {
+	Vector<ObjectModel *> out;
+	for (const ObjectID id : presentation_links_) {
+		ObjectModel *model = id.is_valid()
+				? Object::cast_to<ObjectModel>(ObjectDB::get_instance(id))
+				: nullptr;
+		if (model != nullptr) {
+			out.push_back(model);
+		}
+	}
+	return out;
+}
+
+void ObjectModel::add_presentation_link(ObjectModel *p_model) {
+	if (p_model == nullptr || p_model == this) {
+		return;
+	}
+	const ObjectID id(p_model->get_instance_id());
+	for (const ObjectID existing : presentation_links_) {
+		if (existing == id) {
+			return;
+		}
+	}
+	presentation_links_.push_back(id);
+}
+
+int ObjectModel::get_presentation_link_count() const {
+	return live_presentation_links().size();
 }
 
 void ObjectModel::set_model_light_preview_enabled(bool p_enabled) {
@@ -372,6 +415,9 @@ void ObjectModel::finish_ctrl_change(bool p_apply_now) {
 // Batch the ordered register stores that precede one retained-model sample.
 // [see the GDScript origin's rationale — one shared waveform/random advance]
 void ObjectModel::begin_ctrl_update() {
+	for (ObjectModel *linked : live_presentation_links()) {
+		linked->begin_ctrl_update();
+	}
 	++ctrl_batch_depth_;
 }
 
@@ -384,12 +430,20 @@ void ObjectModel::end_ctrl_update() {
 		ctrl_batch_dirty_ = false;
 		apply_runtime_state(0.0);
 	}
+	for (ObjectModel *linked : live_presentation_links()) {
+		linked->end_ctrl_update();
+	}
 }
 
 void ObjectModel::set_ctrl_value(const String &p_name, int64_t p_value) {
 	const String reg = ObjectData::canonical_control_register_name(p_name);
 	if (reg.is_empty()) {
 		return;
+	}
+	if (!is_part_local_ctrl(reg)) {
+		for (ObjectModel *linked : live_presentation_links()) {
+			linked->set_ctrl_value(reg, p_value);
+		}
 	}
 	const int64_t next_value = ctrl_dword(p_value);
 	if (ctrl_values_.has(reg) && int64_t(ctrl_values_[reg]) == next_value &&
@@ -403,6 +457,11 @@ void ObjectModel::set_ctrl_value(const String &p_name, int64_t p_value) {
 
 void ObjectModel::clear_ctrl_value(const String &p_name) {
 	const String reg = ObjectData::canonical_control_register_name(p_name);
+	if (!is_part_local_ctrl(reg)) {
+		for (ObjectModel *linked : live_presentation_links()) {
+			linked->clear_ctrl_value(reg);
+		}
+	}
 	if (reg.is_empty() || !ctrl_values_.has(reg)) {
 		return;
 	}
@@ -421,6 +480,11 @@ void ObjectModel::set_ctrl_override(const String &p_owner, const String &p_name,
 	if (p_owner.is_empty() || reg.is_empty()) {
 		return;
 	}
+	if (!is_part_local_ctrl(reg)) {
+		for (ObjectModel *linked : live_presentation_links()) {
+			linked->set_ctrl_override(p_owner, reg, p_value);
+		}
+	}
 	const int64_t next_value = ctrl_dword(p_value);
 	const String *current_owner = ctrl_value_owners_.getptr(reg);
 	if (ctrl_values_.has(reg) && int64_t(ctrl_values_[reg]) == next_value &&
@@ -436,6 +500,11 @@ void ObjectModel::clear_ctrl_override(const String &p_owner, const String &p_nam
 	const String reg = ObjectData::canonical_control_register_name(p_name);
 	if (p_owner.is_empty() || reg.is_empty()) {
 		return;
+	}
+	if (!is_part_local_ctrl(reg)) {
+		for (ObjectModel *linked : live_presentation_links()) {
+			linked->clear_ctrl_override(p_owner, reg);
+		}
 	}
 	const String *current_owner = ctrl_value_owners_.getptr(reg);
 	if (current_owner == nullptr || *current_owner != p_owner) {
@@ -841,6 +910,10 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::wake_runtime_frame);
 	ClassDB::bind_method(D_METHOD("set_object_data", "data"), &ObjectModel::set_object_data);
 	ClassDB::bind_method(D_METHOD("get_object_data"), &ObjectModel::get_object_data);
+	ClassDB::bind_method(D_METHOD("add_presentation_link", "model"),
+			&ObjectModel::add_presentation_link);
+	ClassDB::bind_method(D_METHOD("get_presentation_link_count"),
+			&ObjectModel::get_presentation_link_count);
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "object_data",
 						 PROPERTY_HINT_RESOURCE_TYPE, "ObjectData"),
 			"set_object_data", "get_object_data");
