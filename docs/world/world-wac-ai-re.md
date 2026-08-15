@@ -5163,7 +5163,7 @@ would therefore diverge from JO:CA. All addresses below are retail `Jointops.exe
 | live UseGun root position | **MATCHING** relationship/root-position core | §23.5/§26.5a; asset-gated 00TRc E50triB GUT; joiner authoritative relationship confirmation landed; generic seats and full matrix basis remain open |
 | mounted collision cadence + model-force suppression | **MATCHING** core | §26.7; `collision` and `ai` ctests; D-COL-9 narrowed |
 | mounted death detach + directional death animation | **MATCHING** (behavioral proof) | §26.7 and §19; `ai` ctest |
-| automatic ADM-derived action duration in the runtime table builder | **DIVERGENT** (bounded) | §26.8; D-WPN-26 |
+| automatic ADM-derived action duration in the runtime table builder | **MATCHING** | §26.8; D-WPN-26 fixed; `npruntime_weapon_table` |
 
 ### 26.2 Spawn allegiance and mission combat flags
 
@@ -5387,13 +5387,13 @@ D-WPN-6 is narrowed, not closed. Mounted parent slots now participate in the glo
 post-entity action phase, but other non-local pool-0 equipped slots and eligible unmounted
 pool-1 weapons still need the general pump coverage described by the original row.
 
-D-WPN-26 records the separate runtime-table gap: the builder has no ADM-duration
-callback/source when it bakes the action FSM. An authored `delayend auto` can therefore
-resolve to zero even though explicit delays, state transitions, recoil, automatic/burst
-flags, clip capacity, and mounted infinite-ammo behavior are live. This is the explicit
-remaining cadence-fidelity
-gap; it must be closed by feeding production ADM clip durations into the bake, not by
-guessing a delay.
+D-WPN-26 is closed (2026-08-15). The production builder now accepts the mounted
+`ResourceIndex`, resolves each weapon ADM, and builds a definition-local `AdmClipIndex`
+whose variant rings are consumed by the bake callbacks. Each authored automatic start/end
+field therefore consumes one matching clip and resolves its 62.5 Hz duration, matching the
+two independent retail reads in `Anim_InitActions`; assetless callers retain the explicit
+zero-duration fallback. `npruntime_weapon_table_test` pins committed `soldier`
+`anim_idle` data at 18 ticks and separately pins that fallback.
 
 Regression coverage is split by contract: `mission_promote` pins all four BMS flag mappings;
 `player_spawn` pins the player classifier; `ai` pins ordinary friendly exclusion, the
@@ -5468,13 +5468,13 @@ Binary: retail `Jointops.exe` (kong IDB, imagebase 0x400000). ctest `throwables`
 | ammo.def `kz_pieslice` HALF-angle | MATCHING (fixed this slice — was full-angle) | def_parse_ammo claymore row |
 | Host and remote flying item-model presentation | ported; decoded tag-2 events feed a visual-only client `RoundSim`; procedural TRACER_SCALE/WIDTH remains D-AI-12d | §25.4/§27.2; `throwable_present_pass.gd` |
 | Landmine items (`lndm`) | witnessed, unported | D-THROW-6 |
-| MP round/device presentation (tag 2 + S2C 0x59/0x12) | tag-2 client flight is live; placed-device 0x59/0x12 host emit and client fold remain unwired | D-THROW-7; net-re §5.36 |
+| MP round/device presentation (tag 2 + S2C 0x59/0x12) | MATCHING: tag-2 client flight plus reliable placed-device spawn/update/removal are live | D-THROW-7 fixed; net-re §5.36; `npruntime_placed_device_relay` |
 
 This is not a blanket MATCHING classification. The audit closes D-THROW-5 and
 D-THROW-9 and fixes the fuse, dry-water, face-normal, cone, and lifecycle bugs
 described below. The 2026-07-21 follow-up also restores the grenade descriptor's
 sound/particle leg mask so a bounce cannot submit the detonation particle;
-D-THROW-2/-4 and D-THROW-6..8 remain explicit fidelity gaps. The
+D-THROW-2 and D-THROW-6 remain explicit fidelity gaps. The
 2026-07-22 follow-up closes D-THROW-3 by routing placed-device cone LOS through
 the shared terrain-plus-sector collision query; a type-1 building wall now
 blocks the trigger until removed. The 2026-08-12 follow-up closes D-THROW-1:
@@ -5565,7 +5565,7 @@ AV_Minekillzone @ 0x24E7DD8/D4/D0/CC/C8/C0/C4`.
   `NetPacket_DeserializeRoundEvent` restores it into slot+0x5C
   `[orig: @ 0x42f769/@ 0x42f935]`. The reimpl's C2S 0x06 authority dispatch
   now preserves that byte into `RoundSpawnParams::charge`; tag-2 visual flight
-  is live, but this does not close placed-device 0x59/0x12 replication (D-THROW-7).
+  is followed by the authoritative placed-device 0x59/0x12 lifecycle (D-THROW-7 fixed).
 - The HUD windup meter is `HUD_DrawPowerThrowChargeBar @ 0x599830` (renamed
   2026-07-21, ex kong "HUD_DrawWeaponReloadBar" — a misnomer: the function only
   draws this bar). Gates: local player, HUD element enabled, equipped def+8
@@ -5666,6 +5666,15 @@ object. Parent follow runs the exact full-Euler
 `Entity_InterpolateFromParentDelta @ 0x4a8d60` port for both the stuck round
 and the placed device (D-THROW-4 CLOSED 2026-08-12 — catalog entry below).
 
+The 2026-08-15 network port closes the lifecycle around that mirror. Conversion emits an
+exact S2C 0x59 row and removal emits S2C 0x12; the server reliably fans both to in-match
+remote peers while excluding its loopback. The client selects base/friendly/enemy TrcrID
+variants from the owner/local teams and mission MP attribute `0x8000`, materializes the
+pool-1 row at the wire handle, preserves same-item updates as one lifetime, attaches its
+structural parent, and retires it on 0x12. `npruntime_placed_device_relay`,
+`npruntime_entity_lifecycle_net`, `npruntime_client_runtime`, and
+`netsim_client_world_materializer` pin the production path.
+
 ### 27.6 The placed-device think chain
 
 `Entity_UpdatePool1Slot @ 0x4b8dd0` (defined this session) per pool-1 entity
@@ -5757,7 +5766,7 @@ death hook).
 | D-THROW-4 | CLOSED 2026-08-12: `throwable_stick_pose` is the exact orient port — the normal rotated into the yaw-local frame by the transposed yaw-only Q22 matrix (+0x200000 rounding), pitch = bias + bam(atan2(z,y)) − 0x40000000, roll = bias + bam(atan2(z,x)) − 0x40000000, yaw KEPT (satchel pitch bias 0xC0000040, claymore 0 — the callers pass the entity's own +0x10); `parent_delta_follow` is the exact full-Euler follow shared by the round motors and the placed-device ride, reading the parent's `saved_live_*` channel (netsim `row_deck_ride` ports the inlined org twins of the same math) | `Entity_OrientToSurfaceNormal @ 0x445fa0` (via `Math_BuildFixedPointRotationMatrixYXZ @ 0x615400` yaw-only + `Matrix_Transpose3x3WithNegateCol3 @ 0x6136d0` + `Math_TransformPointFixedPoint22 @ 0x412e90`, atan2 scale dbl_7C57B8 = −2^31/π); `Entity_InterpolateFromParentDelta @ 0x4a8d60` (code calls from all four round motors @ 0x44443b/0x444e8b/0x4475d1/0x44861f; installed as the placed motor +452 @ 0x5455fd) | `throwables::test_stick_pose_exact` pins the four pose legs; `test_parented_device_adopts_parent_pitch` pins the out-of-plane orbit + pitch adoption. Residue: a parent that never stamps `saved_live_*` (statics — faithful zero delta; joiner wire-materialized rows lack the stamp, tracked with device-on-decoded-vehicle under D-THROW-7/D-WPN-8). The double-trig port carries the established ±2 BAM LSB envelope |
 | D-THROW-5 | CLOSED 2026-07-21: the charge bar is ported (now `HudFrameCompiler::element_power`, originally `game_hud.gd _draw_power_bar` — the hudpos HUDPOWERBAR x,y,w,h rect, witnessed fill curve + percent text at an exact 15-output-pixel lift + 0xFF800000 half-red) | `HUD_DrawPowerThrowChargeBar @ 0x599830` (ex "HUD_DrawWeaponReloadBar" misnomer, renamed) | §27.3 windup meter entry; throwable_repro_test windup-state pin |
 | D-THROW-6 | landmine items (`lndm`) unported | `Entity_LandmineThink @ 0x441A40` witnessed in full | the def wiring for ammo slots +692/+696 (`SMALLLANDMINE`/`LARGELANDMINE` names) is unwitnessed; no lndm items found in JO:CA missions so far |
-| D-THROW-7 | clients consume decoded tag-2 round events through a visual-only `RoundSim`; placed-device 0x59/0x12 host emit and client fold remain unwired | retail re-simulates tag-2 rounds, then applies S2C 0x59 (net-re §5.36) + 0x12 removal | remote clients see flying throwables and their move effects, but not the persisted-device replacement |
+| D-THROW-7 | CLOSED 2026-08-15: authoritative conversion/removal events encode exact S2C 0x59/0x12 records and fan reliably to in-match remotes while skipping host loopback; joiners validate both, select the base/friendly/enemy item from owner/local teams plus MP attribute 0x8000, preserve same-type updates as one lifetime, attach the structural parent, materialize at the exact pool-1 wire handle, and retire it on 0x12 | retail re-simulates tag-2 rounds, then applies S2C 0x59 (net-re §5.36) + 0x12 removal | `nw_ingame_encode`, `netsim_client_world_materializer`, `npruntime_entity_lifecycle_net`, `npruntime_client_runtime`, `npruntime_placed_device_relay`, and `throwables` |
 | D-THROW-8 | CLOSED 2026-08-12: the pool-1 projectile walk demand-resolves a late placed item's retained host collision asset before narrow phase; the model uses CFAC, while failure to bind the clone's required collision model raises a fatal invariant rather than substituting sphere geometry | the item clone is initialized from its model before the ordinary pool-1 CFAC walk `[orig: Entity_CloneFromTemplateByType @0x4398A0 -> Entity_InitFromModel @0x40DC30; Projectile_RaycastProximitySlots @0x4E53D4 -> Physics_RaycastAgainstBoneCollision @0x4E4CB0]` | `collision_test::test_late_pool1_item_resolves_cfac_or_raises` pins a sphere-only graze miss, face metadata, allocation-serial-safe packed-slot reuse, and the fatal unresolved-model branch |
 | D-THROW-9 | CLOSED: ported devices are pool 1, run before projectiles, and decrement arm delay once per tick | pool-1 age −1/tick; the pool-2/3 −8/−64 cadence is outside the ported-device scope | no divergence for satchel/claymore/AV-mine devices; unported lndm cadence remains under D-THROW-6 |
 
@@ -5771,8 +5780,6 @@ death hook).
 4. The AI grenade-throw think (body anims 159–162 exist, §8/§14 tables) — the
    AI never throws in our port yet.
 5. `sub_5119E0` (the stat op) — cited, unwalked.
-6. The 0x59 payload's angle words vs our BAM halves — verify at MP wiring time
-   (D-THROW-7).
 
 ### 27.10 IDB write-backs (2026-07-20 session, saved)
 

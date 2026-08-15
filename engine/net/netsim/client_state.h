@@ -469,9 +469,9 @@ struct ClientState {
 	// decision to optional history/event journaling.
 	std::uint64_t revision = 0;
 	std::uint64_t topology_revision = 0;
-	// Advances only for accepted 0x0D/0x10/0x20 load records. Unlike revision,
-	// per-frame compacts do not touch it; world materializers can therefore fold
-	// repeated spawn rows without rebuilding an O(n) handle map every frame.
+	// Advances only for accepted 0x0D/0x10/0x20 load records and live 0x59/0x12
+	// placed-device lifecycle records. Unlike revision, per-frame compacts do not
+	// touch it; world materializers can therefore skip ordinary 0x0A traffic.
 	std::uint64_t world_stream_revision = 0;
 	int32_t anchor_x = 0;                         // latest 0x0A frame anchor
 	int32_t anchor_y = 0;

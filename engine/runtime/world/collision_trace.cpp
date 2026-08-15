@@ -213,6 +213,17 @@ const CollisionTargetView *CollisionWorld::trace_target_view(const World &world,
 
 ProjectileHit CollisionWorld::trace_projectile(const World &world,
                                                const ProjectileTrace &trace) const {
+    return trace_projectile_impl(world, trace, false);
+}
+
+ProjectileHit CollisionWorld::trace_knife_impact(
+        const World &world, const ProjectileTrace &trace) const {
+    return trace_projectile_impl(world, trace, true);
+}
+
+ProjectileHit CollisionWorld::trace_projectile_impl(
+        const World &world, const ProjectileTrace &trace,
+        bool person_faces_only) const {
     // [orig: Projectile_UpdatePhysics @0x4e9d70] Candidate passes are ordered
     // terrain, water, static CFAC, dynamic CFAC, then person bone proxies.
     // A later pass replaces only when strictly closer.
@@ -500,8 +511,10 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
             if (profile_trace) {
                 if (hit_class == ProjectileHitClass::StaticEntity)
                     trace_profile_.static_survivors++;
-                else
+                else if (hit_class == ProjectileHitClass::DynamicEntity)
                     trace_profile_.dynamic_survivors++;
+                else
+                    trace_profile_.person_survivors++;
             }
             const Entity *entity = world.registry.get(h);
             if (entity == nullptr || entity->hidden ||
@@ -540,10 +553,16 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
                     static_cast<int64_t>(target->model->faces.size());
                 if (hit_class == ProjectileHitClass::StaticEntity)
                     trace_profile_.static_faces += faces;
-                else
+                else if (hit_class == ProjectileHitClass::DynamicEntity)
                     trace_profile_.dynamic_faces += faces;
             }
             if (target == nullptr) {
+                // Weapon_RaycastAndSpawnImpact feeds every pool through the
+                // CFAC walker. A model-less person/item is a miss here, never
+                // the bounded sphere compatibility used by ordinary bullets.
+                // [orig: Weapon_RaycastAndSpawnImpact @0x4e8460;
+                // Physics_RaycastAgainstBoneCollision @0x4e4cb0]
+                if (person_faces_only) continue;
                 const int32_t center[3] = {to_fixed(entity->position.x),
                                            to_fixed(entity->position.y),
                                            to_fixed(entity->position.z)};
@@ -709,6 +728,11 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
         prof_t = prof_n;
     }
 
+    if (person_faces_only && trace.walk_persons) {
+        trace_polygon_table(persons_, ProjectileHitClass::Person,
+                            1.0f / 65536.0f, false);
+    }
+
     // Consume the pose owner's COBJ matrices when available. The bounded torso
     // fallback is only for entities whose production pose has not been
     // published; both paths preserve retail's first-qualifying-person table
@@ -782,7 +806,7 @@ ProjectileHit CollisionWorld::trace_projectile(const World &world,
         uint32_t index = 0;
     };
     std::vector<PersonWalkEntry> person_walk;
-    if (trace.walk_persons) {
+    if (trace.walk_persons && !person_faces_only) {
         const bool merge_proxies =
             trace.include_wire_proxies && !projectile_person_proxies_.empty();
         person_walk.reserve(persons_.size() +

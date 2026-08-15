@@ -156,8 +156,11 @@ struct PlacedDevice {
 struct ThrowableEvents {
     struct DeviceSpawn {
         uint16_t entity = 0xFFFF;  // packed registry handle
+        int32_t item_id = 0;       // base/fallback TrcrID (packet word 0)
+        uint16_t owner_handle = 0xFFFF;
         int32_t item_friendly = 0; // the viewer picks by team [orig: S2C 0x59
         int32_t item_enemy = 0;    //  carries both TrcrID words]
+        uint16_t parent_handle = 0xFFFF;
         uint8_t team = 0xFF;
         Vec3 pos;
         int32_t yaw_bam = 0;

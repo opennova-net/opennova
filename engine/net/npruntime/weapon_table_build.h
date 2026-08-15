@@ -9,6 +9,10 @@
 #include <def/def.h>
 #include <world/weapon_table.h>
 
+namespace opennova {
+class ResourceIndex;
+}
+
 namespace opennova::np {
 
 // charfilter token -> bit: medic=1 sniper=2 gunner=4 rifleman=8 engineer=0x10
@@ -46,7 +50,11 @@ LoadoutAmmoBytes resolve_loadout_ammo(const world::WeaponTable &table, uint8_t a
 // existing same-name entry (case-insensitive) else takes the lowest free slot [orig:
 // WeaponDefs_ParseLineCallback @0x5436e1 -> AdmDef_FindFreeSlot @0x53FC50] — pure file order
 // for one parse into a fresh table. Absent clipsize/startrounds keys read the engine defaults
-// (1 / -1) [orig: AdmDef_InitEntryDefaults @0x53ff13/@0x53ff19].
-world::WeaponTable build_weapon_table(const DefWeaponsFile &weapons);
+// (1 / -1) [orig: AdmDef_InitEntryDefaults @0x53ff13/@0x53ff19]. When resources
+// is present, each definition's animadm supplies the consuming clip-duration
+// rings for authored automatic action delays; a null/missing source preserves
+// retail's unresolved-clip zero fallback [orig: Anim_InitActions @0x541fa0].
+world::WeaponTable build_weapon_table(
+		const DefWeaponsFile &weapons, const ResourceIndex *resources = nullptr);
 
 } // namespace opennova::np

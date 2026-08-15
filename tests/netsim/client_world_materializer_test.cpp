@@ -6,6 +6,7 @@
 #include <netsim/client_world_materializer.h>
 
 #include <npwire/ingame_encode.h>
+#include <npwire/ingame_message_id.h>
 #include <world/angle.h>
 #include <world/world.h>
 
@@ -333,6 +334,138 @@ bool wire_target_authors_ground_separately_from_parent() {
 			"a foreign replacement lifetime cannot inherit the wire target relation");
 }
 
+bool deployed_item_spawn_update_and_remove_materialize() {
+	ns::ClientReplicaPipeline pipeline;
+	constexpr uint16_t viewer_handle = 0x0001;
+	constexpr uint16_t owner_handle = 0x0002;
+	ns::ClientEntityState &viewer = pipeline.state().upsert(viewer_handle);
+	viewer.team = 2;
+	viewer.team_known = true;
+	ns::ClientEntityState &owner = pipeline.state().upsert(owner_handle);
+	owner.team = 2;
+	owner.team_known = true;
+	pipeline.set_viewer_handle(viewer_handle);
+	pipeline.set_mp_attributes(0);
+
+	nw::PoolSpawnRecord carrier;
+	carrier.slot_id = 0x1002;
+	carrier.item_type_id = 5008;
+	nw::PoolSpawnBatch carriers;
+	carriers.records.push_back(carrier);
+	pipeline.apply(nw::s2c::POOL_SPAWN,
+			nw::encode_pool_spawn_batch(carriers));
+
+	nw::DeployedItemSpawn spawn;
+	spawn.item_id = 0x0361;
+	spawn.owner_handle = owner_handle;
+	spawn.friendly_item_id = 0x0362;
+	spawn.enemy_item_id = 0x0363;
+	spawn.slot_handle = 0x1003;
+	spawn.parent_handle = carrier.slot_id;
+	spawn.pos_x = 10 * 65536;
+	spawn.pos_y = -4 * 65536;
+	spawn.pos_z = 3 * 65536;
+	spawn.angle_x = 0x1000;
+	spawn.angle_y = 0xE000;
+	spawn.angle_z = 0x4000;
+	pipeline.apply(nw::s2c::DEPLOYED_ITEM,
+			nw::encode_deployed_item_spawn(spawn));
+
+	const ns::ClientEntityState *row = pipeline.state().find(spawn.slot_handle);
+	if (!expect(row != nullptr && row->type_id == spawn.friendly_item_id &&
+			row->spawn_tag == nw::s2c::DEPLOYED_ITEM &&
+			row->target_handle == carrier.slot_id &&
+			row->parent_handle == 0xFFFFu && row->team_known && row->team == 2 &&
+			row->x == spawn.pos_x && row->y == spawn.pos_y &&
+			row->z == spawn.pos_z &&
+			row->pitch_bam == static_cast<int32_t>(
+					static_cast<uint32_t>(spawn.angle_x) << 16) &&
+			row->roll_bam == static_cast<int32_t>(
+					static_cast<uint32_t>(spawn.angle_y) << 16) &&
+			row->heading_bam == static_cast<int32_t>(
+					static_cast<uint32_t>(spawn.angle_z) << 16) &&
+			row->spawn_revision == 1,
+			"0x59 selects the friendly item and folds the placed-device pose/carrier"))
+		return false;
+
+	w::World world;
+	world.registry.configure_pool(1, 8);
+	ns::ClientWorldMaterializer materializer;
+	const ns::ClientWorldSyncResult first =
+			materializer.sync(pipeline.state(), world);
+	w::Entity *placed = world.registry.get(w::EntityHandle{spawn.slot_handle});
+	if (!expect(first.spawned.size() == 2 && placed != nullptr &&
+			placed->item_id == spawn.friendly_item_id &&
+			placed->position.x == 10.0f && placed->position.y == -4.0f &&
+			placed->position.z == 3.0f &&
+			placed->ground_target == w::EntityHandle{carrier.slot_id},
+			"the folded 0x59 row materializes at its exact pool-1 handle"))
+		return false;
+	const uint64_t friendly_lifetime = placed->registry_spawn_id;
+	const uint32_t friendly_revision = row->spawn_revision;
+
+	spawn.pos_x = 12 * 65536;
+	spawn.pos_y = -6 * 65536;
+	spawn.angle_z = 0x6000;
+	pipeline.apply(nw::s2c::DEPLOYED_ITEM,
+			nw::encode_deployed_item_spawn(spawn));
+	row = pipeline.state().find(spawn.slot_handle);
+	const ns::ClientWorldSyncResult moved =
+			materializer.sync(pipeline.state(), world);
+	placed = world.registry.get(w::EntityHandle{spawn.slot_handle});
+	if (!expect(row != nullptr && row->spawn_revision == friendly_revision &&
+			moved.spawned.empty() && moved.retired.empty() &&
+			moved.updated.size() == 1 && placed != nullptr &&
+			placed->registry_spawn_id == friendly_lifetime &&
+			placed->position.x == 12.0f && placed->position.y == -6.0f,
+			"a same-item 0x59 update mutates pose without replacing the lifetime"))
+		return false;
+
+	pipeline.apply_team_assign(owner_handle, 3);
+	pipeline.apply(nw::s2c::DEPLOYED_ITEM,
+			nw::encode_deployed_item_spawn(spawn));
+	row = pipeline.state().find(spawn.slot_handle);
+	const ns::ClientWorldSyncResult hostile =
+			materializer.sync(pipeline.state(), world);
+	placed = world.registry.get(w::EntityHandle{spawn.slot_handle});
+	if (!expect(row != nullptr && row->type_id == spawn.enemy_item_id &&
+			row->spawn_revision == friendly_revision + 1 &&
+			hostile.retired.size() == 1 && hostile.spawned.size() == 1 &&
+			placed != nullptr && placed->registry_spawn_id != friendly_lifetime,
+			"a friend-to-foe variant change replaces the native device lifetime"))
+		return false;
+
+	pipeline.apply_team_assign(owner_handle, 2);
+	pipeline.set_mp_attributes(0x8000u);
+	pipeline.apply(nw::s2c::DEPLOYED_ITEM,
+			nw::encode_deployed_item_spawn(spawn));
+	row = pipeline.state().find(spawn.slot_handle);
+	if (!expect(row != nullptr && row->type_id == spawn.enemy_item_id,
+			"mp_attributes bit 0x8000 forces the enemy deployed-item variant"))
+		return false;
+
+	pipeline.set_mp_attributes(0);
+	spawn.owner_handle = 0x0BAD;
+	spawn.friendly_item_id = 0;
+	pipeline.apply(nw::s2c::DEPLOYED_ITEM,
+			nw::encode_deployed_item_spawn(spawn));
+	row = pipeline.state().find(spawn.slot_handle);
+	if (!expect(row != nullptr && row->type_id == spawn.item_id,
+			"an unresolved owner or zero variant falls back to the base item"))
+		return false;
+
+	nw::EntityRemove removal;
+	removal.entity_handle = spawn.slot_handle;
+	pipeline.apply(nw::s2c::ENTITY_REMOVE, nw::encode_entity_remove(removal));
+	const ns::ClientWorldSyncResult removed =
+			materializer.sync(pipeline.state(), world);
+	return expect(pipeline.state().find(spawn.slot_handle) == nullptr &&
+			removed.retired.size() == 1 &&
+			world.registry.get(w::EntityHandle{spawn.slot_handle}) == nullptr &&
+			world.registry.get(w::EntityHandle{carrier.slot_id}) != nullptr,
+			"0x12 retires the placed device without removing its carrier");
+}
+
 bool decoded_world_stream_materializes_exact_rows() {
 	ns::ClientReplicaPipeline pipeline;
 
@@ -649,6 +782,7 @@ int main() {
 	if (!external_same_type_reuse_is_never_mutated_or_retired()) return 1;
 	if (!preoccupied_exact_slot_requires_a_fresh_wire_generation()) return 1;
 	if (!wire_target_authors_ground_separately_from_parent()) return 1;
+	if (!deployed_item_spawn_update_and_remove_materialize()) return 1;
 	if (!decoded_world_stream_materializes_exact_rows()) return 1;
 	if (!pool2_tail_beyond_1024_materializes()) return 1;
 	std::puts("client_world_materializer_test: PASS");

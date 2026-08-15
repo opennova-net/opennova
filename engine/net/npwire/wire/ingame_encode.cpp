@@ -828,6 +828,33 @@ std::vector<uint8_t> encode_mounted_weapon_slot_selection(
 	return out;
 }
 
+std::vector<uint8_t> encode_deployed_item_spawn(
+		const DeployedItemSpawn &spawn) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u16(spawn.item_id);
+	w.u16(spawn.owner_handle);
+	w.u16(spawn.friendly_item_id);
+	w.u16(spawn.enemy_item_id);
+	w.u16(spawn.slot_handle);
+	w.u16(spawn.parent_handle);
+	w.u32(static_cast<uint32_t>(spawn.pos_x));
+	w.u32(static_cast<uint32_t>(spawn.pos_y));
+	w.u32(static_cast<uint32_t>(spawn.pos_z));
+	w.u16(spawn.angle_x);
+	w.u16(spawn.angle_y);
+	w.u16(spawn.angle_z);
+	w.u16(spawn.reserved);
+	return out;
+}
+
+std::vector<uint8_t> encode_entity_remove(const EntityRemove &removal) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u16(removal.entity_handle);
+	return out;
+}
+
 // [orig: NapiNPServerMsg_SendEmptySlots @ 0x51a600 -> the pool-0 walk + append
 //  builder @ 0x5160f0 — a bare index run, no count word]
 std::vector<uint8_t> encode_destroy_entity_list(const DestroyEntityList &list) {

@@ -3968,12 +3968,18 @@ The friend/foe item pair lets one deployable look different to each side, select
 flag). [orig: `NapiNPClientMsg_0x059 @ 0x4228E0` → `Entity_SpawnOrUpdateFromSlotPacket @ 0x546770`].
 **Witness:** probe3_again ×12 — a `Rifle-sized Crate` (`itemId=0x0362`) dropped by player slot 5 at world
 `(53.5, -27.9, 11.6)`, `parent=none`; byte-exact full-consume via `decode_deployed_item_spawn`.
-That is **codec coverage, not production client consumption**: the reimpl
-`ClientReplicaPipeline` does not fold decoded 0x59 rows into live placed entities,
-and the throwable host path emits neither 0x59 spawn nor 0x12 removal. Together
-with that missing placed-device path, remote clients do not receive the
-persisted-device replacement. The tag-2 round-event → visual-only client
-`RoundSim` fold now presents the flying throwable itself (D-THROW-7).
+Production consumption and authority relay are live as of 2026-08-15 (D-THROW-7
+closed). Throwable conversion/removal events encode exact 0x59/0x12 records and fan
+reliably to every in-match remote while skipping host loopback. The joiner validates and
+surfaces both records; `ClientReplicaPipeline` selects the base/friendly/enemy item from
+owner/local teams plus mission MP attribute `0x8000`, maps the structural parent, preserves
+same-item updates as one lifetime, and advances the materializer stream revision. The
+materializer uses the exact pool-1 wire handle, updates pose in place, and retires it on
+0x12. The 0x64 mission block retains `mp_attributes` at offset 44 for that selection.
+`nw_ingame_encode`, `netsim_client_world_materializer`,
+`npruntime_entity_lifecycle_net`, `npruntime_client_runtime`,
+`npruntime_placed_device_relay`, and `throwables` pin the path end to end; tag-2
+`RoundSim` remains the preceding flying-throwable presentation.
 
 **S2C `0x44` — entity-routed sub-packet.** A 5-B sub-header `[u16 field0][i16 netId][u8 subtype]` then a
 class-dependent body the dispatcher routes to the target entity's per-class serialize callback (`entity
@@ -7229,8 +7235,10 @@ authority/SP walk keeps registry (= retail pool) order byte for byte. Per-weapon
 still not retained in the client state — shooter TEAM is (`ClientEntityState::team`, retained and
 consumed 2026-07-25) — and clean 0x46/0x5D disconnect retirement of the proxy set landed with
 D-NET-176 (FIXED 2026-07-25; §5.16).
-Deployed throwables still lack the 0x59/0x12
-runtime path (D-WPN-8/D-THROW-7; §5.36). Three ledger rows record the audit:
+Deployed throwables now complete the 0x59/0x12 runtime path (D-THROW-7 fixed;
+§5.36): reliable authority fanout feeds the joiner replica fold, exact-handle pool-1
+materialization, in-place updates, structural parenting, and retirement. Three ledger
+rows record the impact audit:
 **D-WPN-14 is resolved as a false reading** (ballistic arrival timing already matches),
 **D-WPN-15** (FIXED 2026-08-11) — the selection legs are live:
 terrain samples the charmap (`Terrain_GetSurfaceTypeAtPosition @0x606510` result + 4 at the
@@ -7238,9 +7246,12 @@ impact point, for the ballistic terrain leg and the grenade bounce/full-stop mat
 @0x4447c3); person hits take tag 2; CFAC static/dynamic hits carry `poly_type + 4` with the
 building material-1→23 remap; water-plane hits take tag 11. The placed-tile `.TSD`
 override remap closed with D-SND-15 (2026-08-12, lwf-dbf-sound-re.md); and
-**D-WPN-16** tracks the genuinely unported Knife/instant-kill-zone family. Pinned by
-`nova_simulation_test.gd` (the local FIRE→impact route) and `npruntime_round_sim`
-(the bake rules + the tag-2 impact row).
+**D-WPN-16 is fixed (2026-08-15)** — every `instantkillzone` round takes the
+immediate authority explosion path, while Knife additionally traces an effects-only ray
+to `kz_maxradius`. That ray arbitrates terrain, water, static/dynamic CFAC, and the
+retail default person-CFAC leg without the bullet sphere fallback; it selects the hit
+material row but applies no direct ray damage. `projectile_combat_test` pins the person
+face hit, staged material effect, authority kill-zone queue, and bounded miss.
 
 **v29 LIVE (2026-07-03, two retail clients + the host player,
 `.scratch/retail_join_v29_game.pcapng`):** the pipeline worked end-to-end — 35 C 0x06
@@ -7891,13 +7902,18 @@ reload/one-shot forced unscope + the pump's rescope. Live-verified (fp_clean_pro
 recoil clip), reload refill 24→30 with reserve 300→294 (the §5.58 refund math),
 mid-reload RMB refused, ADS engage fraction→1 with cam fov 80h→40h, disengage clean.
 
-**Divergences** (ledger D-WPN-1..15 plus the D-WPN-26 runtime-builder addendum): the FUNCTION registry unported (std-only in all
+D-WPN-26 is closed (2026-08-15): the production table builder now resolves each
+weapon's ADM through the mounted `ResourceIndex`, gives `weapon_fsm_bake`
+definition-local consuming clip rings, and converts authored automatic start/end fields
+to the retail 62.5 Hz clip duration. `npruntime_weapon_table_test` pins the committed
+`soldier` `anim_idle` clip at 18 ticks plus the intentional assetless zero fallback.
+
+**Divergences** (ledger D-WPN-1..15): the FUNCTION registry unported (std-only in all
 shipped data, D-WPN-1); single-pool ammo vs per-class pools (D-WPN-2); CanFire's
 busy-child/underwater/score-lock legs + kick sound gate (D-WPN-3); the heat model
 (`WeaponSlot_CalcAccumulatedHeat @ 0x53f780` internals unwitnessed, D-WPN-4); the
 weapon-switch machinery seams (D-WPN-5); local-player + occupied mounted-parent pump,
-with general non-local/unmounted coverage still open (D-WPN-6); production runtime
-action-table bake lacks the ADM-duration source for authored `auto` delays (D-WPN-26); interim
+with general non-local/unmounted coverage still open (D-WPN-6); interim
 ammo seed clipsize/startrounds (D-WPN-7); FSM↔net integration now carries joiner C2S 0x06
 fire, the payload-addressed C2S 0x25 → S2C 0x49 reload round-trip, and decoded S2C tag-2
 events into a visual-only client `RoundSim`; authority/SP fire continues to append the primary

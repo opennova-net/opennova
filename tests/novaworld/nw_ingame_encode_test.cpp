@@ -1035,6 +1035,58 @@ static int test_full_entity_spawn_empty_slot_record() {
 	return 0;
 }
 
+// D-THROW-7: the placed-device lifecycle has one fixed spawn/update record and
+// one fixed removal record. These bytes are independently pinned to the retail
+// writer/reader pair rather than inferred from the runtime event structs.
+static int test_deployed_item_lifecycle_roundtrip() {
+	DeployedItemSpawn in{};
+	in.item_id = 0x0361;
+	in.owner_handle = 0x0005;
+	in.friendly_item_id = 0x0362;
+	in.enemy_item_id = 0x0363;
+	in.slot_handle = 0x100B;
+	in.parent_handle = 0x2007;
+	in.pos_x = 0x00357A0F;
+	in.pos_y = static_cast<int32_t>(0xFFE41A76u);
+	in.pos_z = 0x000B9705;
+	in.angle_x = 0xAF58;
+	in.angle_y = 0xCBBA;
+	in.angle_z = 0x1357;
+	in.reserved = 0;
+
+	const std::vector<uint8_t> spawn_wire = encode_deployed_item_spawn(in);
+	EXPECT(spawn_wire.size() == 32);
+	EXPECT(spawn_wire[0] == 0x61 && spawn_wire[1] == 0x03);
+	EXPECT(spawn_wire[8] == 0x0B && spawn_wire[9] == 0x10);
+	EXPECT(spawn_wire[28] == 0x57 && spawn_wire[29] == 0x13);
+	DeployedItemSpawn out{};
+	size_t consumed = 0;
+	EXPECT(decode_deployed_item_spawn(
+		spawn_wire.data(), spawn_wire.size(), out, consumed));
+	EXPECT(consumed == 32);
+	EXPECT(out.item_id == in.item_id && out.owner_handle == in.owner_handle);
+	EXPECT(out.friendly_item_id == in.friendly_item_id &&
+	       out.enemy_item_id == in.enemy_item_id);
+	EXPECT(out.slot_handle == in.slot_handle &&
+	       out.parent_handle == in.parent_handle);
+	EXPECT(out.pos_x == in.pos_x && out.pos_y == in.pos_y && out.pos_z == in.pos_z);
+	EXPECT(out.angle_x == in.angle_x && out.angle_y == in.angle_y &&
+	       out.angle_z == in.angle_z && out.reserved == 0);
+
+	EntityRemove removal{};
+	removal.entity_handle = 0x100B;
+	const std::vector<uint8_t> remove_wire = encode_entity_remove(removal);
+	EXPECT(remove_wire.size() == 2);
+	EXPECT(remove_wire[0] == 0x0B && remove_wire[1] == 0x10);
+	EntityRemove removal_out{};
+	consumed = 0;
+	EXPECT(decode_entity_remove(
+		remove_wire.data(), remove_wire.size(), removal_out, consumed));
+	EXPECT(consumed == 2 && removal_out.entity_handle == removal.entity_handle);
+	std::printf("PASS deployed_item_lifecycle_roundtrip\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -1069,6 +1121,7 @@ int main() {
 	rc |= test_full_entity_spawn_player_layout();
 	rc |= test_full_entity_spawn_seat_block_roundtrip();
 	rc |= test_full_entity_spawn_empty_slot_record();
+	rc |= test_deployed_item_lifecycle_roundtrip();
 	if (rc == 0) std::printf("ALL nw_ingame_encode tests passed\n");
 	return rc;
 }

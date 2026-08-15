@@ -786,6 +786,15 @@ public:
     ProjectileHit trace_projectile(const World &world,
                                    const ProjectileTrace &trace) const;
 
+    // The instant Knife presenter walks the same terrain/water and pool-2/1/0
+    // arbitration as a projectile ray, but every entity pool uses authored
+    // CFAC geometry. In particular, pool-0 persons do not use the ballistic
+    // bone-sphere path and unresolved models do not gain a sphere substitute.
+    // [orig: Weapon_RaycastAndSpawnImpact @0x4e8460 ->
+    // Projectile_RaycastProximitySlots @0x4e5340]
+    ProjectileHit trace_knife_impact(const World &world,
+                                     const ProjectileTrace &trace) const;
+
     // Per-entity blink refresh: test the entity position (one point, radius 0.5u)
     // against nearby buildings' blink volumes; stamp Entity.blink_hits + the
     // indoors flag; accumulate the local player's flags word.
@@ -1165,6 +1174,9 @@ private:
     // so entries never outlive either their tick or their source identity.
     mutable std::unordered_map<uint16_t, TraceViewCacheEntry> trace_view_cache_;
     const CollisionTargetView *trace_target_view(const World &world, EntityHandle h) const;
+    ProjectileHit trace_projectile_impl(const World &world,
+                                        const ProjectileTrace &trace,
+                                        bool person_faces_only) const;
 
     bool trace_profile_enabled_ = false;
     mutable TraceProfile trace_profile_;

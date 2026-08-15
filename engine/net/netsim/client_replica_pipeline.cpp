@@ -183,6 +183,25 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 	case s2c::MINIMAP_OVERLAY:
 		apply_minimap_overlay_batch(body);
 		break;
+	case s2c::DEPLOYED_ITEM: // live pool-1 placed-device spawn/update (§5.36)
+		apply_deployed_item(body);
+		break;
+	case s2c::ENTITY_REMOVE: { // live packed-handle retirement
+		EntityRemove removal;
+		size_t consumed = 0;
+		if (!decode_entity_remove(body.data(), body.size(), removal, consumed) ||
+				consumed != body.size()) {
+			++unknown_tags_;
+			break;
+		}
+		const std::size_t before = state_.entities.size();
+		erase_entity_tree(removal.entity_handle);
+		if (state_.entities.size() != before) {
+			++state_.world_stream_revision;
+			state_.mark_changed();
+		}
+		break;
+	}
 	default:
 		// Game-start scalars / world-state-load and other non-entity tags.
 		++unknown_tags_;
@@ -1587,6 +1606,93 @@ void ClientReplicaPipeline::apply_pool_spawn(const std::vector<uint8_t> &body) {
 	// not a hidden requirement.
 	refresh_carried_entities();
 	if (changed) state_.mark_changed();
+}
+
+void ClientReplicaPipeline::apply_deployed_item(
+		const std::vector<uint8_t> &body) {
+	DeployedItemSpawn spawn;
+	size_t consumed = 0;
+	if (!decode_deployed_item_spawn(
+			body.data(), body.size(), spawn, consumed) ||
+			consumed != body.size()) {
+		++unknown_tags_;
+		return;
+	}
+
+	const world::EntityHandle handle{spawn.slot_handle};
+	if (!handle.valid() || handle.pool() != 1 ||
+			static_cast<std::size_t>(handle.slot()) >=
+					world::retail_pool_capacity(1))
+		return;
+
+	uint16_t selected_type = spawn.item_id;
+	const ClientEntityState *owner = state_.find(spawn.owner_handle);
+	const ClientEntityState *viewer = state_.find(viewer_handle_);
+	if (owner != nullptr && viewer != nullptr && owner->team_known &&
+			viewer->team_known) {
+		const bool enemy = (mp_attributes_ & 0x8000u) != 0 ||
+				owner->team != viewer->team;
+		const uint16_t variant = enemy
+				? spawn.enemy_item_id
+				: spawn.friendly_item_id;
+		if (variant != 0) selected_type = variant;
+	}
+	if (selected_type == 0) return;
+
+	ClientEntityState *existing = state_.find(spawn.slot_handle);
+	const bool type_changed = existing != nullptr &&
+			existing->type_id != selected_type;
+	uint32_t next_spawn_revision = 1;
+	if (existing != nullptr) {
+		next_spawn_revision = existing->spawn_revision;
+		if (type_changed || next_spawn_revision == 0) {
+			++next_spawn_revision;
+			if (next_spawn_revision == 0) next_spawn_revision = 1;
+		}
+	}
+
+	ClientEntityState &row = state_.upsert(spawn.slot_handle);
+	if (type_changed) state_.mark_topology_changed();
+	if (existing == nullptr || type_changed) {
+		row = ClientEntityState{};
+		row.handle = spawn.slot_handle;
+		row.type_id = selected_type;
+		row.cls = classify(selected_type);
+		row.net_id = 0;
+		row.spawn_revision = next_spawn_revision;
+	} else if (row.spawn_revision == 0) {
+		row.spawn_revision = next_spawn_revision;
+	}
+
+	row.spawn_tag = s2c::DEPLOYED_ITEM;
+	row.x = spawn.pos_x;
+	row.y = spawn.pos_y;
+	row.z = spawn.pos_z;
+	row.pitch_bam = static_cast<int32_t>(
+			static_cast<uint32_t>(spawn.angle_x) << 16);
+	row.roll_bam = static_cast<int32_t>(
+			static_cast<uint32_t>(spawn.angle_y) << 16);
+	row.heading_bam = static_cast<int32_t>(
+			static_cast<uint32_t>(spawn.angle_z) << 16);
+	row.net_smooth_heading = row.heading_bam;
+	row.net_target_heading_bam = row.heading_bam;
+	row.yaw_byte = yaw_byte_from_bam(row.heading_bam);
+	row.heading_known = true;
+	// 0x59's parent is the structural support/groundEntity used when the
+	// placed row follows a carrier. It is distinct from 0x0D's occupant
+	// back-reference, which lives in parent_handle.
+	row.parent_handle = wire_handle::kInvalid;
+	row.target_handle = spawn.parent_handle;
+	row.parent_pose_valid = false;
+	if (owner != nullptr && owner->team_known) {
+		row.team = owner->team;
+		row.team_known = true;
+	} else {
+		row.team = 0xFF;
+		row.team_known = false;
+	}
+	++state_.world_stream_revision;
+	state_.mark_changed();
 }
 
 void ClientReplicaPipeline::erase_entity_tree(uint16_t root_handle) {

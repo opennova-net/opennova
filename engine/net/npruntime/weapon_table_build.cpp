@@ -1,5 +1,7 @@
 #include "npruntime/weapon_table_build.h"
 
+#include <io/strutil.h>
+#include <simassets/adm_clip_index.h>
 #include <world/ammo_table.h>
 #include <world/entity.h>
 
@@ -52,6 +54,66 @@ bool ci_equal(const char *a, const char *b) {
 	               std::tolower(static_cast<unsigned char>(*b)))
 		++a, ++b;
 	return *a == '\0' && *b == '\0';
+}
+
+// One definition-local copy of the AnimMap slot heads. The action bake probes
+// without advancing, then each automatic field serves and advances the named
+// ring [orig: AnimMap_FindSlotByName @0x40cfa0; Anim_GetDurationTicks
+// @0x53ee10]. Keeping this context inside one weapon iteration prevents an
+// earlier definition's reads from rotating a later definition's slots.
+struct WeaponTableClipRing {
+	std::string key;
+	std::vector<float> lengths;
+	size_t head = 0;
+};
+
+struct WeaponTableClipContext {
+	std::vector<WeaponTableClipRing> rings;
+};
+
+WeaponTableClipRing *find_clip_ring(
+		WeaponTableClipContext &ctx, const char *key) {
+	const std::string lower = strutil::to_lower(key != nullptr ? key : "");
+	for (WeaponTableClipRing &ring : ctx.rings)
+		if (ring.key == lower) return &ring;
+	return nullptr;
+}
+
+int table_clip_resolves(void *opaque, const char *key) {
+	return find_clip_ring(*static_cast<WeaponTableClipContext *>(opaque), key) != nullptr;
+}
+
+float table_clip_seconds(void *opaque, const char *key) {
+	WeaponTableClipRing *ring = find_clip_ring(
+			*static_cast<WeaponTableClipContext *>(opaque), key);
+	if (ring == nullptr || ring->lengths.empty()) return -1.0f;
+	const float seconds = ring->lengths[ring->head];
+	ring->head = (ring->head + 1u) % ring->lengths.size();
+	return seconds;
+}
+
+void build_clip_context(const DefWeaponDef &def, const ResourceIndex *resources,
+		WeaponTableClipContext &out) {
+	if (resources == nullptr) return;
+	simassets::AdmClipIndex clips;
+	const char *adm = def.animadm[0] != '\0' ? def.animadm : "ak47_1st";
+	clips.load(resources, adm);
+	for (size_t i = 0; i < def.actions_count; ++i) {
+		const char *key = def.actions[i].anim;
+		if (key[0] == '\0') continue;
+		const std::string lower = strutil::to_lower(key);
+		bool duplicate = false;
+		for (const WeaponTableClipRing &ring : out.rings) {
+			if (ring.key == lower) {
+				duplicate = true;
+				break;
+			}
+		}
+		if (duplicate) continue;
+		const std::vector<float> *lengths = clips.lengths_for(key);
+		if (lengths == nullptr || lengths->empty()) continue;
+		out.rings.push_back(WeaponTableClipRing{lower, *lengths, 0});
+	}
 }
 
 // The slot's TOTAL AMMO IN CLIPS [orig: WeaponSlot_GetTotalClips @0x5425F0]. The pool a fresh
@@ -141,7 +203,8 @@ LoadoutAmmoBytes resolve_loadout_ammo(const world::WeaponTable &table, uint8_t a
 	return out;
 }
 
-world::WeaponTable build_weapon_table(const DefWeaponsFile &weapons) {
+world::WeaponTable build_weapon_table(
+		const DefWeaponsFile &weapons, const ResourceIndex *resources) {
 	world::WeaponTable table;
 
 	// Ammo classes share the engine's score-slot registry. Before weapon.def parses,
@@ -233,9 +296,9 @@ world::WeaponTable build_weapon_table(const DefWeaponsFile &weapons) {
 		e.has_first_person_model_reference = d.gfx1[0] != '\0';
 		e.third_person_model = d.gfx3; // the held 3P gun [orig: tpModel +0x170]
 		// Bind this weapon's ACTION rows into the same 12-state descriptor table
-		// consumed by a MountSlot. The resource-only table has no ADM duration ring,
-		// so auto fields take the original unresolved-clip zero fallback here; hosts
-		// with clip metadata may rebake later.
+		// consumed by a MountSlot. The production path supplies this definition's
+		// ADM duration rings; assetless callers retain the witnessed unresolved-zero
+		// fallback.
 		// [orig: Anim_InitActions @0x541fa0; WeaponAction_ProcessFrame @0x540e60]
 		std::vector<world::WeaponFsmActionRow> action_rows(d.actions_count);
 		for (size_t a = 0; a < d.actions_count; ++a) {
@@ -252,8 +315,13 @@ world::WeaponTable build_weapon_table(const DefWeaponsFile &weapons) {
 			std::memcpy(dst.particleuserpoint, src.particleuserpoint,
 			            sizeof(dst.particleuserpoint));
 		}
-		world::weapon_fsm_bake(action_rows.data(), action_rows.size(), nullptr, nullptr,
-		                       nullptr, e.action_fsm);
+		WeaponTableClipContext clip_ctx;
+		build_clip_context(d, resources, clip_ctx);
+		world::weapon_fsm_bake(
+				action_rows.data(), action_rows.size(),
+				resources != nullptr ? table_clip_resolves : nullptr,
+				resources != nullptr ? table_clip_seconds : nullptr,
+				resources != nullptr ? &clip_ctx : nullptr, e.action_fsm);
 		e.action_fsm.auto_fire = (d.flags & DEF_WEAPON_FLAG_AUTO) != 0;
 		e.action_fsm.burst3 = (d.flags & DEF_WEAPON_FLAG_BURST) != 0;
 		e.action_fsm.clip_capacity = e.clipsize;
