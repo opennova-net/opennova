@@ -63,6 +63,9 @@ func test_begin_raises_over_the_held_background() -> void:
 		"the sidecar resolution feeds the retail custom-bg flag")
 	assert_true(screen.begin_start_mission_splash(_root_for(screen)))
 	assert_true(screen.is_splash_active())
+	assert_true(screen.has_splash_arrow(),
+		"the fixture newarow1.tga DECODES — TGA rides read_file + the TGA "
+		+ "decoder, not the PCX load_texture path")
 	assert_false(screen.begin_start_mission_splash(_root_for(screen)),
 		"a raised splash never re-raises")
 
@@ -91,6 +94,7 @@ func test_missing_arrow_and_text_degrade_to_skipped_elements() -> void:
 	screen.setup(root, {"mission_file": "00TRg.bms"})
 	add_child(screen)
 	assert_true(screen.begin_start_mission_splash(root))
+	assert_false(screen.has_splash_arrow(), "no arrow art -> arrowless splash")
 	watch_signals(screen)
 	_push_key(KEY_SPACE)
 	await _pump_frames(3)
