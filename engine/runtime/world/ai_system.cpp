@@ -172,6 +172,36 @@ int AiSystem::attach(EntityHandle h) {
     return index;
 }
 
+int AiSystem::attach_dismemberment_piece(
+        EntityHandle h, const AiEntity &source, const int32_t impulse_q16[3]) {
+    AiEntity piece = source;
+    piece.handle = h;
+    piece.brain = AiBrain{};
+    piece.brain.f[AiBrain::kOwner] = 1;
+    piece.slot = AiSlot{};
+    piece.health = 0;
+    piece.net_id = 0;
+    piece.relmat_id = 0;
+    piece.net_is_remote_peer = false;
+    piece.net_interp_progress = 0;
+    piece.net_interp_steps = 0;
+    piece.muzzle_valid = false;
+    piece.inf.is_local_player = false;
+    piece.inf.player_moving = false;
+    piece.inf.move_mode = 0;
+    piece.inf.target_dist = 0;
+    piece.inf.combat_target = EntityHandle{};
+    piece.inf.last_attacker = EntityHandle{};
+    piece.inf.was_hit = false;
+    piece.inf.vel[0] += impulse_q16 != nullptr ? impulse_q16[0] : 0;
+    piece.inf.vel[1] += impulse_q16 != nullptr ? impulse_q16[1] : 0;
+    piece.inf.vel[2] += impulse_q16 != nullptr ? impulse_q16[2] : 0;
+    entities_.push_back(std::move(piece));
+    const int index = static_cast<int>(entities_.size()) - 1;
+    if (h.valid()) handle_to_ai_index_[h.packed] = index;
+    return index;
+}
+
 AiEntity *AiSystem::at(int ai_index) {
     if (ai_index < 0 || ai_index >= static_cast<int>(entities_.size())) return nullptr;
     return &entities_[ai_index];

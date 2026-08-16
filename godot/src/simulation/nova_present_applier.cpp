@@ -943,6 +943,22 @@ void PresentApplier::present_snapshot(const PackedFloat32Array &snap,
 			row.present_visible = present_visible_int;
 		}
 		if ((output_channels_ & OUTPUT_VISIBILITY) != 0) {
+			int64_t section_visibility_mask = -1;
+			if (field_i(p, base,
+						Simulation::PF_SECTION_MASK_VALID) != 0) {
+				const uint32_t hidden_mask =
+						static_cast<uint32_t>(field_i(
+								p, base, Simulation::PF_SECTION_MASK_LO)) |
+						(static_cast<uint32_t>(field_i(
+								p, base, Simulation::PF_SECTION_MASK_HI))
+								<< 16);
+				section_visibility_mask = static_cast<int64_t>(
+						hidden_mask ^ 0xffffffffu);
+			}
+			if (section_visibility_mask != row.section_visibility_mask) {
+				model->set_section_visibility_mask(section_visibility_mask);
+				row.section_visibility_mask = section_visibility_mask;
+			}
 			// Death is not disappearance (corpses and husks keep rendering until
 			// the sim despawns via PF_HIDDEN); the local first-person UseGun
 			// parent's own world model is presentation-suppressed. Semantics and

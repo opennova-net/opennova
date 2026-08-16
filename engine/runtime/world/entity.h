@@ -167,6 +167,7 @@ inline constexpr uint32_t kItemAttribChangeTeam = 0x20000u;
 inline constexpr uint32_t kItemAttribSpawnPoint = 0x40000u;
 inline constexpr uint32_t kItemAttribArmory = 0x80000u;
 inline constexpr uint32_t kItemAttribAIData = 0x100000u; // §5.6 AI class — gates the 0x0D AI-trailer
+inline constexpr uint32_t kItemAttribNoDismember = 0x800000u;
 inline constexpr uint32_t kItemAttribNoHud = 0x20000000u;
 inline constexpr uint32_t kItemAttribNoDie = 0x40000000u;
 
@@ -513,6 +514,10 @@ struct Entity {
     // the matching ordinal bone from person collision and presentation.
     // Distinct from spawned_piece_mask at +0x138.
     uint32_t section_mask = 0;
+    // Host-only marker for the pool-0 corpse clone created by the person damage
+    // callback's dismemberment leg. It has ordinary Entity/AiEntity motion and
+    // presentation, but no independent score/network identity.
+    bool dismemberment_piece = false;
     // Husk sections that left as death pieces (entity+0x138): the husk renders
     // and collides WITHOUT these sections. Bit 0 (the hull) never sets.
     // [orig: Entity_SpawnDeathPieces @ 0x493983]

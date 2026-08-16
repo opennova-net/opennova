@@ -106,6 +106,27 @@ constexpr double seat_hit_bone_damage_multiplier(int32_t hit_bone) {
     return seat_hit_bone_is_critical(hit_bone) ? 6.0 : 1.0;
 }
 
+// Hidden-section mask selected by Entity_HandleDamageTrigger's dismemberment
+// switch. Zero means the section is not dismemberable. [orig: @0x4075f6]
+constexpr uint32_t dismemberment_mask_for_bone(int32_t bone) {
+    switch (bone) {
+        case 1: return 0x1E67Cu;
+        case 2: return 0x1E678u;
+        case 3: return 0x1E670u;
+        case 4: return 0x1E668u;
+        case 5: return 0x10200u;
+        case 6: return 0x08400u;
+        case 7: return 0x20800u;
+        case 8: return 0x41000u;
+        case 9: return 0x10000u;
+        case 10: return 0x08000u;
+        case 11: return 0x20000u;
+        case 12: return 0x40000u;
+        case 13: return 0x04000u;
+        default: return 0u;
+    }
+}
+
 // The shooter fields RoundData_SpawnRound reads while applying weapon ERROR and
 // ammo recoil. Ordinary authoritative shots resolve these from the World owner;
 // a pure client has no World entity for a decoded peer, so its persistent wire

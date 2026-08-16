@@ -198,6 +198,14 @@ static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 14, &vl);
             current.penetration_kz = parse_int_n(v, vl);
             parsed = 1;
+        } else if (lower_starts_with(lower, ll, "secondary_anim", 14)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 14, &vl);
+            current.secondary_anim = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "kz_physics", 10)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+            current.kz_physics = parse_int_n(v, vl);
+            parsed = 1;
         } else if (lower_starts_with(lower, ll, "recoil", 6)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 6, &vl);
             parse_ints(v, vl, current.recoil, 3);

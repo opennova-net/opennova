@@ -652,6 +652,11 @@ public:
     // Attach a brain to a world entity; returns its AI index (faithful to the
     // unk_AED380 array index used by AIEvent entity_index).
     int attach(EntityHandle h);
+    // Attach the synthetic half-corpse produced by dismemberment. The body
+    // keeps the source pose/AnimMap state and corpse motor, while all active
+    // combat/network inputs are cleared. impulse_q16 is round velocity >> 8.
+    int attach_dismemberment_piece(EntityHandle h, const AiEntity &source,
+                                   const int32_t impulse_q16[3]);
     AiEntity *at(int ai_index);
     AiEntity *for_handle(EntityHandle h);
     int count() const { return static_cast<int>(entities_.size()); }

@@ -170,6 +170,24 @@ int main(void) {
         return 1;
     }
 
+    /* The two byte selectors consumed by Entity_ApplyCollisionForce live at
+       AmmoDef +224/+225. The shipped flashbang is the one JO row authoring
+       both keys. [orig: AmmoDef_ParseProperty @0x40a2d0] */
+    const DefAmmoDef *flashbang = NULL;
+    for (size_t i = 0; i < ammo.count; ++i) {
+        if (strcmp(ammo.entries[i].name, "grenadefb") == 0) {
+            flashbang = &ammo.entries[i];
+            break;
+        }
+    }
+    if (!flashbang || flashbang->secondary_anim != 2 || flashbang->kz_physics != 3) {
+        fprintf(stderr, "FAIL: grenadefb secondary_anim/kz_physics want 2/3 got %d/%d\n",
+                flashbang ? flashbang->secondary_anim : -1,
+                flashbang ? flashbang->kz_physics : -1);
+        def_free_ammo(&ammo);
+        return 1;
+    }
+
     /* The smoke row, pinned against the BASE JO ammo.def this fixture is a
        byte-exact copy of: TrcrID 1875, 30-second fuse, five-second pour
        boundary, 30 units/s throw speed. The revx02 expansion overrides the

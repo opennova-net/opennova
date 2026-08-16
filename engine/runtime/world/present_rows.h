@@ -158,6 +158,13 @@ enum PresentField : int {
 	// case. Zero (the default) means the entity-triple frame, which is what an
 	// unarmed or hidden body should report anyway.
 	PF_HELD_WEAPON_HAND_FRAME,
+	// Entity::section_mask is a hidden-section uint32. Float32 cannot carry it
+	// losslessly as one scalar, so publish two exact u16 halves plus ownership.
+	// Presentation reconstructs it and sends ~hidden to ObjectModel's visible
+	// section mask. Compact LAN rows leave VALID clear; this is host/SP state.
+	PF_SECTION_MASK_VALID,
+	PF_SECTION_MASK_LO,
+	PF_SECTION_MASK_HI,
 	PF_STRIDE
 };
 

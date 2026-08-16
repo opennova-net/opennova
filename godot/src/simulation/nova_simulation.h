@@ -188,6 +188,9 @@ public:
 		PF_HELD_WEAPON_YAW_DEG = opennova::world::PF_HELD_WEAPON_YAW_DEG,
 		PF_HELD_WEAPON_ROLL_DEG = opennova::world::PF_HELD_WEAPON_ROLL_DEG,
 		PF_HELD_WEAPON_HAND_FRAME = opennova::world::PF_HELD_WEAPON_HAND_FRAME,
+		PF_SECTION_MASK_VALID = opennova::world::PF_SECTION_MASK_VALID,
+		PF_SECTION_MASK_LO = opennova::world::PF_SECTION_MASK_LO,
+		PF_SECTION_MASK_HI = opennova::world::PF_SECTION_MASK_HI,
 		PF_STRIDE = opennova::world::PF_STRIDE
 	};
 

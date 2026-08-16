@@ -148,6 +148,12 @@ class Snapshot:
 					entity.get("wpn_variant", 0))
 			out[base + Simulation.PF_WPN_SOURCE_VARIANT] = float(
 					entity.get("wpn_source_variant", 0))
+			var section_mask := int(entity.get("section_mask", 0)) & 0xFFFFFFFF
+			out[base + Simulation.PF_SECTION_MASK_VALID] = float(
+					entity.get("section_mask_valid", 0))
+			out[base + Simulation.PF_SECTION_MASK_LO] = float(section_mask & 0xFFFF)
+			out[base + Simulation.PF_SECTION_MASK_HI] = float(
+					(section_mask >> 16) & 0xFFFF)
 			var angles: PackedVector3Array = entity.get(
 					"aim_angles", PackedVector3Array())
 			for cls in range(mini(angles.size(), 9)):
@@ -669,6 +675,8 @@ func test_synthetic_attachment_uses_panm_and_hidden_visibility_contract() -> voi
 		"kind": 255,
 		"index": 0xFFFFFF,
 		"alive": 0,
+		"section_mask_valid": 1,
+		"section_mask": 0b00010,
 		"active1": 1,
 		"phase1": 0x2345,
 		"active2": 1,
@@ -676,16 +684,25 @@ func test_synthetic_attachment_uses_panm_and_hidden_visibility_contract() -> voi
 	}]
 	_present(p, snap)
 	var model: ObjectModel = p.resolve_wire_handle(0x1005)
+	var parts: Dictionary = model.get_render_part_nodes()
+	assert_eq(parts.size(), 5, "the synthetic model exposes all fixture sections")
+	assert_true((parts[0] as Node3D).visible)
+	assert_false((parts[1] as Node3D).visible,
+			"a severed-piece row hides the original half of its model")
+	assert_true((parts[2] as Node3D).visible)
 	assert_eq(_ctrl(model, "VEHICLE_SPECIAL1"), 0x2345,
 			"attached items consume the same two PANM channels as placed items")
 	assert_eq(_ctrl(model, "VEHICLE_SPECIAL2"), 0x6789)
 	snap.entities[0]["active1"] = 0
 	snap.entities[0]["phase2"] = 0
+	snap.entities[0]["section_mask"] = 0
 	_present(p, snap)
 	assert_false(model.get_ctrl_values().has("VEHICLE_SPECIAL1"),
 			"wire presentation releases a no-longer-owned SPECIAL1 value")
 	assert_eq(_ctrl(model, "VEHICLE_SPECIAL2"), 0,
 			"wire presentation submits an owned zero endpoint")
+	assert_true((parts[1] as Node3D).visible,
+			"a changed severed-piece mask restores the matching model part")
 	assert_true(model.visible,
 			"a dead attached item retains its graphic or husk until explicitly hidden")
 	snap.entities[0]["hidden"] = 1

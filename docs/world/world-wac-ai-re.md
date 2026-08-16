@@ -3493,6 +3493,26 @@ selects inline instead: bone hardcoded 1 (torso), quadrant from the IMPACT-to-vi
 position delta, cause 2 — with a 25% fire roll in the 4..8 u band and cause 4 for
 ammo type 7 — then `deathCallback(entity, 2, 0)`.
 
+#### Port status (2026-08-15)
+
+The authoritative bullet/person path now ports the witnessed torso-roll and
+dismemberment legs. `RoundSim` applies the exact quadrant-0/2 `bodyRoll` nudge,
+the 13-entry bone-mask table and every gate above; it allocates a pool-0 corpse
+clone before committing the victim mask, so pool exhaustion leaves the original
+body intact. The victim hides `oldMask | cutMask`; the clone hides
+`oldMask | ~cutMask`, starts at health zero, inherits the current corpse pose and
+animation state, and adds the witnessed `roundVel >> 8` velocity. The clone has
+no score, authored-origin, or LAN identity. Host/standalone presentation appends
+it as a synthetic row, while both halves transport the 32-bit hidden-section
+mask as exact 16-bit words into `ObjectModel` part visibility.
+
+Ammo properties `secondary_anim` and `kz_physics` now parse and bake into their
+witnessed +224/+225 byte slots. They are deliberately not interpreted yet: the
+interior arithmetic of `Entity_ApplyCollisionForce` remains unwitnessed. The
+ammo-dword +72 authoring/load source is likewise still unresolved, so the
+incendiary emitter and death-state-173 override remain open rather than being
+guessed.
+
 ### 19.3 The infantry death edge — `Entity_UpdateInfantryAI @ 0x4b9c40` (health ≤ 0, once)
 
 Guards: word `entity+0x11E > 0` skips the edge (writer unwalked); `Flags & 2`

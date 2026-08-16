@@ -189,6 +189,7 @@ private:
 		int32_t aim_valid = -1;
 		int32_t rhc = -1;
 		int32_t present_visible = -1;
+		int64_t section_visibility_mask = -2;
 		bool transform_stamp_valid = false;
 		std::array<float, 6> transform_stamp = {};
 		bool aim_payload_valid = false;
@@ -216,6 +217,7 @@ private:
 		// Last-applied edge state (-1 = unknown, first hot frame applies).
 		int32_t aim_valid = -1;
 		int32_t rhc = -1;
+		int64_t section_visibility_mask = -2;
 		// The remote body-transition scalars (re-seeded from the per-handle
 		// cache on every plan build).
 		int32_t anim_state = -2;
