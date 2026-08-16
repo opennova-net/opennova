@@ -35,7 +35,7 @@ scalar function in this record; the GUT env vectors
 | Terrain surface c0/c1 | MATCHING (ported) | c0 = SKY block, c1 = LIGHT block (both [0] ÷255): `renderer::terrain_surface_light`, `terrain_lighting.gdshaderinc` corrected from the gobj-era combined/fill guess `[orig: terrain_setup_lighting_and_shader @ 0x604420; init_terrain_lighting_color_ramps @ 0x604ee0 ← Render_TerrainScene @ 0x610c80]` |
 | Dynamic projected entity shadows | WITNESSED / reimpl-native approximation | Retail allocates the independent projected render-slot path for people (and the local player) or ItemDef `DynamicShadow`; attached third-person weapons join their entity, while the first-person viewmodel does not cast. ItemDef `NoShadow` does not gate this path. Mission placement carries that admission policy (the aspirational streamed-model resolver twin was deleted 2026-08-11 — unreferenced since birth) `[orig: Entity_InitFromModel @ 0x40E1BC..0x40E1F7; GUT: mission_object_placer_test, nova_object_model_runtime_gate_test]` |
 | Static sector/model sun shadows onto terrain/foliage | WITNESSED / terrain-only reimpl approximation | pool-2 buildings cast unless `NoShadow`; pool-1 items additionally require `StaticShadow`; every ROBJ in the selected LOD enters a black PROJSHAD temporary RT which is composited into the terrain tile cache, not back onto sector models `[orig: Terrain_CollectAndRenderTileModels @ 0x60D250; Render_SubmitEntity @ 0x60D971; PolyTrn_RenderTile composite @ 0x60E0C6..0x60E19D]` — exact retail RT projection/cache mechanics, including alpha-aware foliage reception, remain D-TERRAIN-7 |
-| Foliage/sector-model lighting constants | MATCHING (witnessed; values pinned) | the blend PS inherits the terrain's device c0/c1 (no foliage-side write) `[orig: Foliage_SetupFarSlotDraw @ 0x6007c0]`; the lightmap-tile pass `[orig: render_terrain_lightmaps @ 0x609de0]`; foliage.gdshader header updated |
+| Foliage/sector-model lighting constants | MATCHING (witnessed; values pinned) | the blend PS inherits the terrain's device c0/c1 (no foliage-side write) `[orig: Foliage_SetupFarSlotDraw @ 0x6007c0]`; the lightmap-tile pass `[orig: Foliage_RenderFarPatches @ 0x609de0]` (renamed 2026-08-15, ex render_terrain_lightmaps); foliage.gdshader header updated |
 | Lighting textures + DOT3 dynamic-light shader | witnessed / reimpl-native equivalent | procedural falloff set + the last embedded PS outside FrameFX `[orig: Lighting_InitTextures @ 0x5a94f0]` — the ps.1.1 DOT3 per-pixel light is the fixed-function era's OmniLight; the reimpl's real per-pixel lights serve the intent (D-RLIT-6 note) |
 | Cubemap sources (CubeEnvironment / CubeRotSpecular / CubeNormalize) | witnessed (the D-RORD-5 specular-cube question CLOSED) | live scene cube re-rendered 6 faces per 128 frames `[orig: update_environment_cubemap @ 0x6106a0]`; the static sun-glint cube (white pow-800 + warm pow-40 along −Z, rotated by MatRotSpecular) `[orig: Render_FillStaticCubemaps @ 0x58f290 → generate_cubemap_lighting @ 0x685bb0]`; normalization cube `[orig: generate_normalmap_cubemap @ 0x685570]`; the analytic 5-light sky fill is caller-less dead code |
 | Render-slot (character shadow) lighting | witnessed / out of REN port scope | dominant-light pick + terrain shadow-anchor march `[orig: RenderSlot_UpdateEntityLight @ 0x5d6a30]`, slot render lighting (D3D light 4, NTSC-weighted negated colors into PS c21-23) `[orig: RenderSlot_SetupNextLighting @ 0x5d7250]` — the Shadow_/Scar_ family exclusion (ADR 0023) |
@@ -227,9 +227,12 @@ modulator (`@ 0x610d28..0x610e36`), the vehicle scope forces
 and the packed sun/blend ratio `PolyTrn_SunToBlendRatioColor @ 0x849930`
 (consumed by the tile renderers). `terrain_setup_lighting_and_shader
 @ 0x604420` pushes c0/c1 as PS constants and picks the PS variant
-(camera below `Env_WaterHeightFixed` → the misleadingly named PSShadow*
-water-noise variants, tier ≥1 + normal map → NM variants, splat textures →
-PS14Splat*); all eight terrain PS share
+(camera below `Env_WaterHeightFixed` swaps the stage-3 dp3 INPUT to the
+water-noise texture — the top tier KEEPS `PS14SplatNormalMap` with t3 = the
+water noise, and the misleadingly named PSShadow* pair serves only the
+partially authored ps.1.1 tiers (the 2026-08-13 selector decode; full
+section in [terrain-re.md](../terrain/terrain-re.md)); tier ≥1 + normal
+map → NM variants, splat textures → PS14Splat*); all eight terrain PS share
 `r0 = ((t0.a·c1 + c0)/2) ×2 …` — **terrain light = tileAlpha × light +
 sky** (the ÷2 and MODULATE2X cancel). `t0` is the cached tile render target,
 not raw colormap RGBA. `PolyTrn_RenderTile @ 0x60da70` clears authored
@@ -253,7 +256,7 @@ does not repack this light: its blend PS consumes the already-composed cached
 (`rgb = t0 × (t1 × (t1.a·c1 + c0)) × v0 × 8`) **inherits the same device
 c0/c1** — `Foliage_SetupFarSlotDraw @ 0x6007c0` binds the PS without
 touching the constants. The sector-model lightmap pass
-(`render_terrain_lightmaps @ 0x609de0`) bubble-sorts visible sectors
+(`Foliage_RenderFarPatches @ 0x609de0` — renamed 2026-08-15, ex render_terrain_lightmaps) bubble-sorts visible sectors
 back-to-front, sets **D3D light 4 as a pure-ambient injector** (ambient =
 detail-average × ramp — ×2 combined on the non-multitexture path — diffuse
 0), and draws 4 quadrants per sector through the lightmap TILE cache
@@ -278,8 +281,12 @@ stores `cameraY < Env_WaterHeightFixed` in view field `+0x74`
 `PolyTrn_BindStageTextures @ 0x604330` calls `sub_5C0190 @ 0x6043ED` and
 binds its result, `Water_NoiseColorTexture @ 0x28EE8B8`, at t3; shader
 selection occurs at `terrain_setup_lighting_and_shader @ 0x6044B1`.
-`PolyTrn_PSShadowBasic` / `PolyTrn_PSShadowNormalMap` then form the direct
-coefficient `4·t3²·t0.a`. They are underwater animated wave-shadow/noise
+Amended by the 2026-08-13 selector decode (the full section lives in
+[terrain-re.md](../terrain/terrain-re.md)): the TOP tier keeps
+`PS14SplatNormalMap` and merely swaps its stage-3 dp3 input to the water
+noise; `PolyTrn_PSShadowBasic` / `PolyTrn_PSShadowNormalMap` (the
+`4·t3²·t0.a` coefficient) serve only the partially authored ps.1.1 tiers.
+Either way they are underwater animated wave-shadow/noise
 variants, not geometry shadow-map receivers. `dword_319FB8C` is likewise not
 shadow state: all four writers store one (`@ 0x6040DD`, `0x60910C`,
 `0x60E89B`, `0x60EB25`), and `render_terrain_sector_batch` reasserts it at

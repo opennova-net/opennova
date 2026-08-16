@@ -52,6 +52,10 @@ automation only:
 - `NOVA_RESOURCE_DIR` — screenshot driver's asset dir (falls back to the
   persisted root). See `scripts/capture_screenshots.sh` header for contents.
 - `JO_ASSETS_DIR` — retail loose-asset dir for the headless perf probes.
+- `NW_RESOURCE_DIR` — the retail install a `NW_SP_MISSION=<bms>` boot mounts
+  (the standalone-game recipe below).
+- `NW_SP_DEBUG_POSE="x,y,z[,yaw_deg]"` — pins the local player at boot for
+  pose-matched retail side-by-sides.
 
 These point at copyrighted retail assets and are machine-specific: if unset and
 needed, ask the user for the path; never guess or commit one.
@@ -75,6 +79,11 @@ needed, ask the user for the path; never guess or commit one.
   `*_probe.gd` under `godot/tests/` (not collected by GUT), e.g.
   `"$GODOT_BIN" --headless --path godot -s res://tests/runtime_scene_probe.gd`.
   For a new one-off check, copy an existing probe's shape.
+- Standalone game against retail data: `NW_SP_MISSION=<bms>` +
+  `NW_RESOURCE_DIR=<retail install>` boots straight into the mission with that
+  install mounted; add `NW_SP_DEBUG_POSE="x,y,z[,yaw_deg]"` to pin the local
+  player for retail side-by-sides. The headless-game exemplar is
+  `godot/tests/ladder_climb_probe.gd`.
 - README screenshots: `bash scripts/capture_screenshots.sh` (desktop session,
   NOT headless; validates every PNG was rewritten).
 - `mcp__godot__launch_editor` only when you need the Godot editor UI itself

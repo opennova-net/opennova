@@ -67,17 +67,17 @@ Every recent slice ran this same shape, and a new one should too:
 
 Counts come from the ledger's generated scoreboard — read them there, not here,
 because `scripts/lint/ledger_check.py --check` keeps that table honest and
-nothing keeps this sentence honest. As of the 2026-08-11 regeneration the shape was:
-**World/AI** carries the largest share (68 of 170 domain-open), **UI** (45 — swollen
+nothing keeps this sentence honest. As of the 2026-08-15 regeneration the shape was:
+**World/AI** carries the largest share (63 of 154 domain-open), **UI** (40 — swollen
 by the 2026-08-04 D-SND/D-MNU/D-LOADSCR catalog tabling; most of those rows are
-small or permanent-register candidates) and **Net** (26) the next largest, and every
+small or permanent-register candidates) and **Net** (24) the next largest, and every
 other domain is in single digits.
 
 Each domain's next step is named in its own record, not centrally:
 
 | Domain | Open rows live in | The record that names the next step |
 |---|---|---|
-| World / AI + gameplay | ledger § World | [world/world-wac-ai-re.md](world/world-wac-ai-re.md) (§14–§28); the #403 client mover/prediction record is [world/vehicle-client-movers-re.md](world/vehicle-client-movers-re.md) (ADR 0026 topology) |
+| World / AI + gameplay | ledger § World | [world/world-wac-ai-re.md](world/world-wac-ai-re.md) (§14–§30); the #403 client mover/prediction record is [world/vehicle-client-movers-re.md](world/vehicle-client-movers-re.md) (ADR 0026 topology) |
 | Net (in-match + matchmaking) | ledger § Net (`PAR-NET`) | [net/novaworld-net-re.md](net/novaworld-net-re.md) §8; the build record behind it is `engine/net/npruntime/ROADMAP.md` |
 | UI (HUD, menus, sound, player info) | ledger § UI | [interface/hud-re.md](interface/hud-re.md), [interface/loading-screen-re.md](interface/loading-screen-re.md), [mnu/menu-re.md](mnu/menu-re.md), [playerinfo/avatars-re.md](playerinfo/avatars-re.md), [audio/lwf-dbf-sound-re.md](audio/lwf-dbf-sound-re.md) |
 | Render (materials, order, lighting, occlusion) | ledger § Render ×3 | [render/README.md](render/README.md) |

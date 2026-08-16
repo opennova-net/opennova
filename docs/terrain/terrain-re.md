@@ -34,12 +34,12 @@ partial; it converts terrain from `UNAUDITED` to *tracked (partial)*.
 | `builder` | heightmap → terrain mesh (the build pipeline entry) | the TrnGen byte-identical data path (canonical reference) |
 | `quadtree` / `build_quadtree` / `lod` | quadtree LOD traversal, frustum culling, height mipchain, final mesh-family selection | **jodemo** `Terrain_TraverseQuadTreeNode @ 0x5C89C0`, `Terrain_CollectVisibleSectors @ 0x5C9120`, `Terrain_BuildHeightMipChain @ 0x5C5310`; **retail** `render_terrain_sector_batch @ 0x6096f0` (eight families, `clamp(lod_sub, 0, 15) / 2`) |
 | `cdep_constraint` | quantized [min,max] of the 256 pixels of a block (CDEP depth constraint) | documented in-code; full CDEP bitstream grill pending |
-| `lighting` | terrain lighting colors + per-position modulation | **retail** `Terrain_SetLightingColors @ 0x5C4B10`, `Terrain_GetModulatedColorAtPos @ 0x5C5FE0`; fog via `Render_SetFogState @ 0x58a950` → `CD3DDevice_SetFogParameters @ 0x677960` |
+| `lighting` | terrain lighting colors + per-position modulation | **retail** `terrain_sector_compute_lighting @ 0x5c7550`; `Terrain_SetLightingColors @ 0x5C4B10` / `Terrain_GetModulatedColorAtPos @ 0x5C5FE0` are jodemo-era names with no kong function at those addresses (unverified — env-tod-re's VERIFY-pending); fog via `Render_SetFogState @ 0x58a950` → `CD3DDevice_SetFogParameters @ 0x677960` |
 | `texture_preprocess` | byte-faithful detail coefficient map, DBlend normalization, and paired near/far mip chains | **retail** `Texture_GenerateNormalMap @ 0x58c070`, `PolyTrn_InitTextures @ 0x60aaa0`, `GTexture_Downsample2x2_RGBA8 @ 0x687000`, `GTexture_CreateFromPixelDataWithAlphaBlend @ 0x687270` |
 | `mesh_simp` | mesh simplification (edge-collapse) | **BYTE-IDENTICAL — verified**: `dvd4_parity` (canonical `.cpt`) + `parametric_parity` (Sample/Gradient/Checker64/Perlin, 4.6–6.8 MB CPTs each) all produce byte-identical output. The in-code "divergence point / vertex 1223" logging is leftover debug scaffolding from when parity was being achieved, now inert. `parametric_parity` is ctest-`DISABLED` only for CI runtime cost (~5 min), not for any correctness gap |
-| `tpm` (`engine/formats/tpm`, ex `mesh_data` here) | the TPM1 tile-mesh container (.tml/.tms) read/write | **retail** `MeshData_LoadFromFile @ 0x404100`, `MeshData_WriteToFile @ 0x403FE0`; §The TPM1 tile-mesh format below |
-| `packing` (`engine/formats/tpm/src`, ex here) | the TPM1 on-disk index codecs | **retail** `pack_words_to_bytes @ 0x403CD0` (low byte of each u16, 3 bytes/group) + the unpack/10-bit pair `@ 0x403DD0/0x403E70/0x403EF0` |
-| `tristrip` (incl. the ex-`mesh_data` remap pass) | strip conversion + the cache-order vertex remap the bake runs before writing .tms | **retail** `sub_4068E0` (strips), `sub_404480` via thunk `sub_404610` (remap) |
+| `tpm` (`engine/formats/tpm`, ex `mesh_data` here) | the TPM1 tile-mesh container (.tml/.tms) read/write | **TrnGen.exe** `MeshData_LoadFromFile @ 0x404100`, `MeshData_WriteToFile @ 0x403FE0` (the addresses are TrnGen's — kong retail holds `CAdminServer_*` there); §The TPM1 tile-mesh format below |
+| `packing` (`engine/formats/tpm/src`, ex here) | the TPM1 on-disk index codecs | **TrnGen.exe** `pack_words_to_bytes @ 0x403CD0` (low byte of each u16, 3 bytes/group) + the unpack/10-bit pair `@ 0x403DD0/0x403E70/0x403EF0` |
+| `tristrip` (incl. the ex-`mesh_data` remap pass) | strip conversion + the cache-order vertex remap the bake runs before writing .tms | **TrnGen.exe** `sub_4068E0` (strips), `sub_404480` via thunk `sub_404610` (remap) |
 | `depthmap` | depth/height map storage (the raw `.dep` intermediate's read/write lives in `engine/formats/dep`) | in-code |
 | `terrain_query` raycast (ENG-3 B1, ported with #209) | world-space height samplers + the segment raycast the editor/celestial hosts adopt | **retail** §Runtime terrain queries below (`Terrain_SampleHeightBilinear @ 0x6067b0`, `Terrain_RaycastHeightmapLoRes @ 0x60cb80`, `Terrain_RaycastHeightmapHiRes_0 @ 0x60e710`) |
 
@@ -50,7 +50,7 @@ now-landed records: [tiles/til-re.md](../tiles/til-re.md) (PAR-R3),
 live top-tier terrain shader has no terrain-tint multiplier
 ([env/env-tod-re.md](../env/env-tod-re.md) #19).
 
-## The TPM1 tile-mesh format (.tml/.tms — retail Jointops.exe witness map)
+## The TPM1 tile-mesh format (.tml/.tms — TrnGen.exe witness map)
 
 The tile-mesh container the bake writes and the CPT export re-reads. Reimpl:
 `engine/formats/tpm` (read/write + the index codecs; magic-shaped lib name,
@@ -59,7 +59,7 @@ strip/remap bake pass staying in `engine/runtime/terrain` (`tristrip`).
 Fixture: `fixtures/terrain/sample/S0_00_00.tml`; byte gate: ctest
 `tpm1_roundtrip`.
 
-- **Header (12 bytes)** [orig: `MeshData_LoadFromFile @ 0x404100`]: magic
+- **Header (12 bytes)** [orig: `MeshData_LoadFromFile @ 0x404100`, TrnGen.exe]: magic
   `TPM1` (0x314D5054), `tile_x u16`, `tile_y u16`, `vertex_count u16`,
   `reserved u16`. Vertex data follows: 4 bytes per vertex (packed x,y
   offsets), rotate-crypted.
@@ -372,8 +372,8 @@ materials (`dword_319f938/930`, tier-2 3-stage with the
 sampler params, opaque + additive variants; the four texture slot ids 1-4
 = the terrain's dynamic texture registry) and the framebuffer-mod2x overlay
 (`dword_319f934`, mode 0x628 — DESTCOLOR/SRCCOLOR). Draw-time consumers:
-`render_terrain_sector_batch @ 0x6092a0`, `render_terrain_lightmaps
-@ 0x609de0` (REN-5), `Terrain_CollectAndRenderTileModels @ 0x60d250`,
+`render_terrain_sector_batch @ 0x6092a0`, `Foliage_RenderFarPatches
+@ 0x609de0` (renamed 2026-08-15, ex render_terrain_lightmaps; REN-5), `Terrain_CollectAndRenderTileModels @ 0x60d250`,
 `PolyTrn_RenderTile @ 0x60da70`.
 
 **Underwater selector correction (2026-07-29).** `dword_319FB3C` is not a
@@ -503,12 +503,13 @@ not. Dynamic person/`DynamicShadow` render slots are a separate system
   open
   [`orig: Terrain_CollectAndRenderTileModels @ 0x60d250`;
   `PolyTrn_RenderTile @ 0x60da70`].
-- **Underwater water-noise modulation gap (separate)** — the reimpl does not
-  feed `Water_NoiseColorTexture` into terrain when the camera is below water.
-  Retail's misleadingly named `PolyTrn_PSShadowBasic` /
-  `PolyTrn_PSShadowNormalMap` apply the t3 water-noise scale
-  `4×t3²×t0.a`. This is unrelated to the static tile shadow above and does not
-  reopen top-tier above-water base-pass parity; the wider record is
+- **Underwater water-noise modulation — CLOSED 2026-08-13** (D-TERRAIN-8
+  FIXED; see the underwater selector section above): the reimpl feeds the
+  water module's noise texture into the top-tier ps.1.4 dp3 when the camera
+  is below water; the misleadingly named `PolyTrn_PSShadowBasic` /
+  `PolyTrn_PSShadowNormalMap` (`4×t3²×t0.a`) serve only the partially
+  authored ps.1.1 tiers. Unrelated to the static tile shadow above; the
+  wider record is
   [render/render-lighting-re.md](../render/render-lighting-re.md).
 
 **Foliage / sector models** (the four terrain-attached model slots):
@@ -708,7 +709,7 @@ as `terrain_raycast_los_clear` on the occlusion slice (the AI LOS
 | D-TERRAIN-5 | A | **FIXED (2026-07-13)** | **Top-tier texture/shader source mismatch**: the reimpl incorrectly used its heightmap normal as the t3 detail coefficient, camera-crossfaded near/far textures, float-normalized DBlend, and multiplied an extra terrain tint. the separate heightfield-normal atlas feeds cached-tile alpha; DBlend, paired mip chains, and literal t0..t5 ps.1.4 math are ported. **Corrected 2026-07-15**: the fix's own first reading (t3 = the generated authored-detail B-channel coefficient) was also wrong — t3 is the authored second detail pair (`polytrn_detailmap2` ⊕ `dist2`) at density2; the generated coefficient belongs to the ps.1.1 tiers at stage 7 [`orig: Texture_GenerateNormalMap @ 0x58c070`; `Terrain_GenerateNormalMap @ 0x603210`; `PolyTrn_InitTextures @ 0x60aaa0`; `GTexture_CreateFromPixelDataWithAlphaBlend @ 0x687270`; `PolyTrn_PS14SplatNormalMap @ 0x7dece0`]. |
 | D-TERRAIN-6 | A | **FIXED (2026-07-13)** | **LOD/fog/overlay base-pass semantics**: both raw `lod_sub / 2` sites now use the exact clamped eight-family selector; exponential fog uses eye-space depth while linear types use radial distance; tile-overlay RGB is composed before terrain lighting without replacing the cached heightfield/light DOT3 alpha [`orig: render_terrain_sector_batch @ 0x6096f0`; `Render_SetFogState @ 0x58a950`; `PolyTrn_RenderTile @ 0x60da70`]. |
 | D-TERRAIN-7 | A | **OPEN (bounded)** | **Tile-composition RT/update parity**: the bare t0 producer, quadrant CLAMP behavior, alpha math, static `.til` composition, and static model-shadow eligibility/ROBJ/receiver policy are closed. The reimpl uses a terrain-receiver-only directional-shadow approximation and preserves caster eligibility through destruction-to-husk swaps and editor transforms. Retail's alpha-aware foliage projection, exact temporary-RT projection/composite, tile-cache allocation/dirty cadence, general patch/page c7/c8 projection, remaining ordered depth-alpha contributions, and final RT mip behavior remain open `[orig: Terrain_CollectAndRenderTileModels @ 0x60D250; PolyTrn_RenderTile @ 0x60DA70]`. |
-| D-TERRAIN-8 | A | **FIXED (2026-08-13)** | **Underwater terrain water-noise modulation**: the engine terrain frame stamps `below_water` from the render eye vs the live water height (strict `<`, 0 sentinel), and the shared surface include swaps the ps.1.4 stage-3 dp3 INPUT to the water module's per-frame regenerated noise texture at the swapped `colormap_uv × 8` texcoord — the witnessed TOP-TIER behavior (the 2026-08-13 selector decode above): the noise rides the PS14SplatNormalMap dp3 on detail2-authored maps, detail2-less splat maps faithfully render NO underwater modulation, and the `saturate(4·t3²)·t0.a` PSShadow pair belongs to the unported ps.1.1 tiers `[orig: below-water flag @ 0x60FEE0 → dword_319FB3C @ 0x60915F; live t3 slot swap @ 0x6043f2; selector @ 0x6044b1..0x604556; texcoord @ 0x609786..0x6097D6]`. Tests: ctest `terrain_frame_compiler` (flag pins), GUT `terrain_shader_contract_test` (formula pins) + `terrain_underwater_modulation_test` (the Dvxi5 flip drive). |
+| D-TERRAIN-8 | A | **FIXED (2026-08-13)** | **Underwater terrain water-noise modulation**: the engine terrain frame stamps `below_water` from the render eye vs the live water height (the bare unguarded strict `<` `@ 0x60fea5` — NO zero sentinel; the water height is plumbed unconditionally), and the shared surface include swaps the ps.1.4 stage-3 dp3 INPUT to the water module's per-frame regenerated noise texture at the swapped `colormap_uv × 8` texcoord — the witnessed TOP-TIER behavior (the 2026-08-13 selector decode above): the noise rides the PS14SplatNormalMap dp3 on detail2-authored maps, detail2-less splat maps faithfully render NO underwater modulation, and the `saturate(4·t3²)·t0.a` PSShadow pair belongs to the unported ps.1.1 tiers `[orig: below-water flag @ 0x60FEE0 → dword_319FB3C @ 0x60915F; live t3 slot swap @ 0x6043f2; selector @ 0x6044b1..0x604556; texcoord @ 0x609786..0x6097D6]`. Tests: ctest `terrain_frame_compiler` (flag pins), GUT `terrain_shader_contract_test` (formula pins) + `terrain_underwater_modulation_test` (the Dvxi5 flip drive). |
 | D-TERRAIN-9 | B | **OPEN (editor-preview-only)** | **Derived input preprocessing**: runtime binds integer-normalized DBlend and paired base/far C1/C2/C3 mip chains, including an explicit 4x4 terminal-LOD clamp. The live editor preview binds raw DBlend and raw detail textures; its authored-B coefficient fallback is exact, but minified detail/blend can differ from play. |
 | D-TERRAIN-10 | A | **FIXED (2026-07-14)** | **Terrain light-vector coordinate basis**: EnvFile preserves the direct retail getter tuple `g`, not Godot/world XYZ. Retail's D3DCOLOR pack writes GPU diffuse RGB `(g2,g0,g1)`, matching normal-map RGB `(grid X slope, grid Y slope, up)`; the old reimpl `(x,z,y)` pack swapped the horizontal DOT3 axes. Terrain and analytic foliage now pack `(z,x,y)`. Flat 06:00/12:00/18:00 checks could not distinguish the swap, so a non-flat 08:00 oracle pins light bytes `(231,83,187)` and slope alphas `0.8987774/0.0794002` [`orig: Environment_GetLightDirectionFloat @ 0x57d870; Terrain_GenerateNormalMap pack @ 0x603470..0x6034eb; PolyTrn light pack @ 0x60e201..0x60e331; PolyTrn_TileBakeDot3LightPass @ 0x60e385..0x60e39e`]. |
 

@@ -43,10 +43,14 @@ Scope ctest with `-R` while iterating, but the pre-push run is the full suite.
 - Push, then `gh pr create` with the context in the PR description (what the
   slice does, what it deliberately excludes, what depends on it). Never post PR
   comments. Do not merge — the maintainer merges.
-- CI gate: `test`, `godot-tests`, `build-gdextension-windows`, and
-  `validate-deliverables` must be green (there are no macOS builds anywhere in
-  CI — macOS delivery was removed entirely, and `tests/test_release_deliverables.py`
-  asserts it stays out of `release.yml`). A red `modsuperoed-smoke` is known-unrelated OED parity drift — never
+- CI gate: branch protection requires `test (windows-latest)`,
+  `godot-tests (windows-latest)`, `package-addon`, and `package-importer`; also
+  expect `build-gdextension-windows (template_debug)` (PRs build the debug
+  flavour only; master adds `(template_release)`) and `validate-deliverables`
+  (`--gdextension-target template_debug` on PRs) green. There are no macOS
+  builds anywhere in CI — macOS delivery was removed entirely, and
+  `tests/test_release_deliverables.py` asserts it stays out of `release.yml`.
+  A red `modsuperoed-smoke` is known-unrelated OED parity drift — never
   block or report on it.
 
 ## 5. Advance the train

@@ -37,6 +37,12 @@ appear in tracked docs:
 | `ModSuperOed.exe` | NovaLogic's original mod-tools OED, the 3DI exporter (32-bit PE) | the 3DI3 wire format and its writers: [3di-gp-format-re.md](threedi/3di-gp-format-re.md); also the ground-truth comparator (§5 below) |
 | `dfvas.exe` | Delta Force: Black Hawk Down affiliate build | GP-era runtime `.3di` loaders: [3di-gp-format-re.md](threedi/3di-gp-format-re.md) |
 | `jodemo.exe` | the JO demo | historical citations only — the env grill re-anchored every jodemo-era address to retail ([env-tod-re.md](env/env-tod-re.md), atmosphere-parity appendix) |
+| `TrnGen.exe` | NovaLogic's terrain build tool (heightmap → `.trn`/`.tml`/`.tms`) | the byte-identical terrain-build ports: [terrain-re.md](terrain/terrain-re.md), `engine/formats/tpm` + the terrain builder |
+| `ParticleEdit_v1_1.exe` | NovaLogic's `.ptl` particle editor | `.ptl` semantics: [ptl-format-re.md](particles/ptl-format-re.md) (`engine/formats/particle`) |
+| `Dflw.exe` | the Delta Force: Land Warrior executable | LW-era `.3di` loaders: [3di-lw-format-re.md](threedi/3di-lw-format-re.md) |
+
+Addresses cited from `TrnGen.exe`, `ParticleEdit_v1_1.exe`, and `Dflw.exe` are
+labeled at their citation sites; an unlabeled address is retail `Jointops.exe`.
 
 **Cross-title portability: none, unless grilled.** An address is valid only in the
 binary it was witnessed in — the env appendix exists because jodemo addresses
@@ -151,9 +157,9 @@ is authoritative, and each record owns the rationale and the stable `D-…` dive
 | String tables (RTXT) | `engine/formats/rtxt`, Strings | [interface/rtxt-strings-re.md](interface/rtxt-strings-re.md) | matching at byte level (98/98) |
 | Mission loader (`.bms`) | `engine/formats/mission` | [correspondence.md §3](correspondence.md) | per function |
 | BMS event runtime + promotion | `engine/runtime/mission` | [mission/bms-event-runtime-re.md](mission/bms-event-runtime-re.md) | matching (D-EVT-1..5) |
-| World / WAC VM / AI / gameplay systems | `engine/runtime/world`, `engine/runtime/wac` | [world/world-wac-ai-re.md](world/world-wac-ai-re.md) | matching core, largest live surface: §14–§28 carry the infantry motor, collision + blink boxes, ground-AI combat, fire/death presentation, the round-outcome loop, player-body physics, the vehicle pass, item destruction, tracers, allegiance/mounted weapons, and throwables. Catalogs D-INF / D-COL / D-AI / D-ITEM / D-WPN / D-THROW; open rows in the [ledger](divergence-ledger.md) |
+| World / WAC VM / AI / gameplay systems | `engine/runtime/world`, `engine/runtime/wac` | [world/world-wac-ai-re.md](world/world-wac-ai-re.md) | matching core, largest live surface: §14–§30 carry the infantry motor, collision + blink boxes, ground-AI combat, fire/death presentation, the round-outcome loop, player-body physics, the vehicle pass, item destruction, tracers, allegiance/mounted weapons, throwables, the water/deck-ride channel, and the ladder climb state machine. Catalogs D-INF / D-COL / D-AI / D-ITEM / D-WPN / D-THROW / D-VEH; open rows in the [ledger](divergence-ledger.md) |
 | Items (items.def entity defs) | `engine/formats/def`, `ItemDatabase` | [world/itemdef-re.md](world/itemdef-re.md) | landed |
-| HUD + interface overlays | `engine/runtime/hud` (`HudFrameCompiler` + `hud_math`), `godot/src/hud` (`HudOverlay`/`HudPos`) | [interface/hud-re.md](interface/hud-re.md) | ported (weapon-coupled elements, waypoint track, heat bar, objectives panel, attach labels; D-HUD-1..18) |
+| HUD + interface overlays | `engine/runtime/hud` (`HudFrameCompiler` + `hud_math`; `hud_minimap` — `HudMinimapCompiler`/`HudMapControl`; the `hud_declutter` module), `engine/runtime/world` `minimap_overlay`/`minimap_footprint`, `engine/net/netsim` `client_replica_minimap`, `godot/src/hud` (`HudOverlay`/`HudPos`) | [interface/hud-re.md](interface/hud-re.md) | ported (weapon-coupled elements, waypoint track, heat bar, objectives panel, attach labels, friendly tags, the gameplay spinmap + M-map, the HUDDECLUT declutter system; D-HUD-1..22 — open rows in the ledger) |
 | Mission loading screen | `godot/game/ui/nova_loading_screen.gd` | [interface/loading-screen-re.md](interface/loading-screen-re.md) | matching for sidecar rule / MP text / bar / SP splash (D-LOADSCR-1..8; re-verified 2026-08-15) |
 | Player info / avatars | `engine/formats/avatars`, `AvatarDatabase`, `player_info_menu_companion.gd`, `MissionObjectPlacer` | [playerinfo/avatars-re.md](playerinfo/avatars-re.md) | matching for parser, screen orchestration, active-slot per-side persistence/network identity, selected world/first-person composition, raw per-part `TEX_CAMO` controls, and packed-id head-sex projection into player sound profiles (D-PLAYERINFO-1 and D-SND-12 FIXED 2026-08-15; -12's per-team memory ported; open: -12's five-slot selector, -9's edited kit pages + `player.sav` options) |
 | Render — materials / state | `engine/formats/oed` tag registry, `engine/runtime/renderer`, `ObjectShaderCache` | [render/render-material-re.md](render/render-material-re.md) | matching (REN-2; D-RMAT catalog) |
@@ -222,8 +228,7 @@ Order of operations when you need an engine truth:
      and the mission/global/music variable snapshots.
    - PerfTimeline ring (`godot/game/util/perf_timeline.gd`), rendered in the
      overlay's Perf pane; recorded baselines in `docs/perf/`.
-   - Headless probes `godot/tests/*_probe.gd` (menu_shell, mission_load_perf,
-     mission_reground_perf, runtime_scene, trn_project_roundtrip).
+   - Headless probes `godot/tests/*_probe.gd` (see `godot/tests/CLAUDE.md`).
 
 ## 6. Evidence and landing rules
 

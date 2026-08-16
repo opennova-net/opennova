@@ -17,6 +17,16 @@ particle/, network/, ...) is the retail-D3D→Godot device-leg mappings ADR
 0035 sanctions — it must not grow, but its floor is NON-ZERO BY DESIGN:
 deleting a device citation is a documentation regression, not a win.
 
+Citation convention (adjudicated): a witness note in `godot/src` is written as
+`(retail: Name @0xADDR, see docs/<record>)` — NEVER the literal `[orig:`
+marker, which the `adapter_cpp_orig_cites_*` ratchets count. The
+`(retail: ...)` form is for device-leg cross-references pointing at a
+record-owned witness; genuinely witnessed engine behavior belongs in `engine/`
+with a real `[orig:]` cite.
+
+Size ratchets: no `.cpp` here past 2500 lines, no shipping `.gd` past 1200 —
+split first; `scripts/lint/ratchet_counts.py` fails on any increase.
+
 The game-level GDScript runtime (world, debug, mission, object, terrain,
 ui, avatar, mcp, resource_index, strings, util) lives in `godot/game/` (ADR 0034 d6) — anything
 there that is really engine behavior is the C++ rewrite queue.

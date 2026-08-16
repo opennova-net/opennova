@@ -34,10 +34,11 @@ Launcher variables:
 - `ONLAUNCHER_NW_ANCHOR_HOST`
 - `ONLAUNCHER_UPDATE_MANIFEST_URL`
 
-Godot direct-launch variables:
+Godot direct-launch variables (the full registry is
+[docs/dev-env-vars.md](../docs/dev-env-vars.md)):
 
-- Host: `NW_LAN_HOST`, `NW_LAN_PORT`, `NW_GATE_HOST`, `NW_GATE_PORT`,
-  `NW_LAN_NAME`
+- Host: `NW_LAN_HOST`, `NW_LAN_PORT`, `NW_LAN_NAME`, `NW_LAN_GAMETYPE`,
+  `NW_LAN_MODE`, `NW_LAN_MAX_PLAYERS`
 - Joiner: `NW_LAN_JOIN`, `NW_LAN_MISSION`, `NW_LAN_NAME`
 
 ## What Can Be Automated Today

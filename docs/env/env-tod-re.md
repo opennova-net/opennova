@@ -262,7 +262,7 @@ are the same mechanism; the full curve is in §Iris auto-exposure below.
   `[orig: Render_ProcessMainSceneFrame @ 0x5ca776-0x5ca7bf; terrain_scene_render
   @ 0x5d065a-0x5d0699; device Clear @ 0x677100 (IDB-misnamed CGfxTextOverlay_Draw)]`,
   the Clear halving the color `(c>>1)&0x7F7F7F7F` on non-modulate2x devices
-  `[@ 0x67715d; cap dword_32656AC, cf. decode_blend_state_extended @ 0x681080]`; the
+  `[@ 0x67715d; cap dword_32656AC, cf. decode_mode_color_stage @ 0x681080]`; the
   sky-dome pass additionally sets the device FOG color to skyfog while drawing the dome
   and restores fog for the world `[orig: sub_579CB0 @ 0x579cb0]`. Reimpl: tick and
   horizon-blend in undoubled block space using the smoothed (pre-overcast) fog
