@@ -891,14 +891,19 @@ bool ThrowableSim::place_from_round(World &world, const LiveRound &round,
     ev.pitch_bam = d.pitch_bam;
     ev.roll_bam = d.roll_bam;
     events.spawns.push_back(ev);
-    // Both authority conversion motors enforce the cap AFTER their 0x59 send.
-    // Count same-owner + same itemDef rows; a surplus retires the oldest ARMED
-    // device (most-negative age). Positive/zero arm countdowns never qualify.
-    // [orig: Server_EnforcePlacedDeviceCapByOwner @0x5119e0;
-    //  satchel caller @0x448bd5 max 3; claymore caller @0x447b56 max 4]
-    if (d.think == ThrowClass::kSatchel)
+    // Both authority conversion motors enforce the cap AFTER their 0x59
+    // send; the MOTOR keys it (AT mines author move_function schl and ride
+    // the satchel motor's max-3 call with their own def id). A device still
+    // arming (age >= 0) never qualifies as the eviction candidate, so an
+    // all-arming surplus persists -- the retail null no-op.
+    // [orig: Server_EnforcePlacedDeviceCapByOwner @0x5119e0 -- owner +368 +
+    //  itemDef+80 match, min over +684 seeded 0 with strict < @0x511a42-44,
+    //  count > max -> Server_RemoveEntityAndNotify @0x50a270 (null-safe);
+    //  satchel motor caller @0x448be6 max 3; claymore @0x447b67 max 4]
+    if (round.motor == ThrowClass::kSatchel ||
+        round.motor == ThrowClass::kAVMine)
         enforce_device_cap(world, devices.back(), 3);
-    else if (d.think == ThrowClass::kClaymore)
+    else if (round.motor == ThrowClass::kClaymore)
         enforce_device_cap(world, devices.back(), 4);
     return true;
 }
@@ -1107,12 +1112,16 @@ void ThrowableSim::tick(World &world, CollisionWorld *collision,
                 e->ground_target = EntityHandle{};
             }
         }
-        // The pool-1 age dword decrements EVERY tick, wrapping like x86. Its
-        // negative value is also the retail oldest-armed ordering key.
-        // [orig: Entity_UpdatePool1Slot @0x4b8dd0]
+        // ARM delay / age: retail gates the think on the PRE-decrement value
+        // (think while <= 0) and then decrements EVERY tick, wrapping like
+        // x86 -- the ever-falling negative value is the oldest-armed
+        // ordering key the device cap reads.
+        // [orig: Entity_UpdatePool1Slot think gate @0x4b8e1b (cmp/jg BEFORE
+        //  the decrement), unconditional dec @0x4b8ea0]
+        const bool arming = d.think_delay_ticks > 0;
         d.think_delay_ticks = static_cast<int32_t>(
                 static_cast<uint32_t>(d.think_delay_ticks) - 1u);
-        if (d.think_delay_ticks > 0) continue;
+        if (arming) continue;
         const AmmoTableEntry *ammo = world.ammo.by_index(d.ammo_index);
         if (ammo == nullptr) continue;
         const bool dead = e->health <= 0;

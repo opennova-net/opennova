@@ -20,7 +20,9 @@ tracked files. Capture files default to `${CMAKE_SOURCE_DIR}/.scratch/…`
 |---|---|---|---|
 | `OPENNOVA_JO_DIR` | ctest `rtxt_jo_install_sweep`, `env_jo_install` | retail JO install dir (packed `.pff`) | never (copyright, ~1.5 GB) |
 | `OPENNOVA_MISSION_CORPUS` | ctest `mission_corpus`; GUT `mission_corpus_binding_test.gd` | dir of retail `.bms` missions | never (copyright) |
-| `OPENNOVA_JO_ASSETS` (+ opt `OPENNOVA_PARITY_WEAPON`) | ctest `occlusion_armry`; pytest `test_anim_dcc_parity.py`, `test_bad_pos_derivation.py` (corpus legs; its synthetic tests run ungated) | extracted retail assets with `weapon.def` + models | never (copyright) |
+| `OPENNOVA_JO_ASSETS` | ctest `occlusion_armry`, `root_motion`, the `wac_corpus` sweep; GUT `sound_dialog_test.gd`, `sound_integration_test.gd`; pytest `test_bad_pos_derivation.py` (corpus legs; its synthetic tests run ungated) | extracted retail assets with `weapon.def` + models | never (copyright) |
+| `OPENNOVA_WAC_CORPUS_DIRS` | ctest `wac_corpus` extra corpus dirs (semicolon list, beside the `OPENNOVA_JO_ASSETS` sweep) | dirs of retail `.wac` scripts | never (copyright) |
+| `OPENNOVA_MNU_EXTRA` | ctest `mnu_compat` developer-only loose menu leg | a single loose `.mnu` | never (developer-local) |
 | `NW_INGAME_HEXCAP` | ctest `nw_ingame_histogram`, `nw_ingame_pool_records` | focused in-match hexcap dump | possible: policy allows a small *sanitized* `.hexcap` via LFS (user-gated follow-up) |
 | `NW_PROFILE_SPH_DIR` | ctest `nw_serverlog_decode` | dir with `host.sph` + `client.sph` `/profile` recordings | never (retail run output; can embed account identity) |
 | `NW_DVXI5_PCAP` / `NW_DVXI3_PCAP` / `NW_DVXC1_PCAP` | ctest `nw_pool_groundtruth`, `nw_dvxi3_groundtruth`, `nw_dvxc1_groundtruth` | authored probe captures (`.pcapng`) | never (raw-capture policy) |
@@ -35,10 +37,13 @@ tracked files. Capture files default to `${CMAKE_SOURCE_DIR}/.scratch/…`
 | `OPENNOVA_MODSUPEROED_DIR` | pytest modsuperoed automation smoke | third-party OED pack | already in CI (LFS submodule; the `modsuperoed-smoke` job) |
 
 Manual probes/tools share the gating pattern but are not CI-collected (see
-`godot/tests/CLAUDE.md`: `*_probe.gd` are uncollected): `JO_ASSETS_DIR` +
-`JO_PROBE_MISSIONS` (mission load/re-ground perf probes), `JO_RESOURCE_DIR` /
-`JO_EXPANSION` / `JO_MISSION` (mount diagnostics), `NOVA_RESOURCE_DIR` /
-`NOVA_MISSION_BMS` (the modtools screenshot driver).
+`godot/tests/CLAUDE.md`: `*_probe.gd` are uncollected): `NW_SP_MISSION` +
+`NW_RESOURCE_DIR` (the standalone-game probe pattern — boot straight into a
+mission with a retail install mounted, e.g. `ladder_climb_probe.gd`),
+`OPENNOVA_JO_DIR` + `SPLASH_CAPTURE_DIR` (the splash render probe),
+`JO_ASSETS_DIR` + `JO_PROBE_MISSIONS` (mission load/re-ground perf probes),
+`JO_RESOURCE_DIR` / `JO_EXPANSION` / `JO_MISSION` (mount diagnostics),
+`NOVA_RESOURCE_DIR` / `NOVA_MISSION_BMS` (the modtools screenshot driver).
 
 ## Local setup
 

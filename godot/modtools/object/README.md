@@ -71,7 +71,7 @@ Notes (all from the importer/exporter above):
 
 A material's shader tag selects a NovaLogic shader; OpenNova keeps a canonical
 shader-tag table rather than parsing `.fx` files. The full ASE export options live
-in the DCC plugins; see the top-level [README](../../../README.md).
+in the Blender addon; see the top-level [README](../../../README.md).
 
 ## How it is built
 
@@ -91,4 +91,4 @@ manages the preview viewport.
 
 - Editor framework: [`../README.md`](../README.md); contract in
   [`../framework/editor_workspace.gd`](../framework/editor_workspace.gd).
-- DCC export pipeline and project overview: [top-level README](../../../README.md).
+- Blender ASE export pipeline and project overview: [top-level README](../../../README.md).

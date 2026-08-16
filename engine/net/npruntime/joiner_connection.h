@@ -139,7 +139,7 @@ public:
 		std::vector<ZoneTimerUpdate> zone_timer_updates;
 		// S2C 0x50 leg 1: this poll re-latched OUR OWN team (the same byte_A85B48
 		// latch the S2C 0x04 tail writes). The binding re-styles friend/foe from it.
-		// [orig: NapiNPClientMsg_0x050 @0x431910 — byte_A85B48 store @0x4319db]
+		// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910 — byte_A85B48 store @0x4319db]
 		bool self_team_changed = false;
 		uint8_t self_team = 0;
 		// Diagnostic summary of S2C 0x50; entity state is folded only from the
@@ -412,7 +412,7 @@ public:
 	// the non-authority joiner's mission identity source; no canonical encode or
 	// local .bms read may replace its bytes. A body is retained only at the
 	// witnessed exact 616-byte width.
-	// [orig: NapiNPClientMsg_0x00B @0x422660]
+	// [orig: NapiNPClientMsg_HandleBMSHeader (0x0B) @0x422660]
 	bool has_mission_header() const { return !mission_header_bytes_.empty(); }
 	const std::vector<uint8_t> &mission_header_bytes() const {
 		return mission_header_bytes_;
@@ -601,7 +601,7 @@ private:
 	bool world_ready_ = true;   // binding-controlled: the wire-header world/assets are staged
 	bool mission_known_ = false; // structurally valid authoritative S2C 0x7B received
 	// The joiner's server-assigned team, latched from the S2C 0x04 slot-assignment tail byte —
-	// the 0x2F loadout-submit header byte 0 source [orig: NapiNPClientMsg_0x004 @0x425410 ->
+	// the 0x2F loadout-submit header byte 0 source [orig: NapiNPClientMsg_SessionSlotConfig (0x04) @0x425410 ->
 	// byte_A85B48 @0x425499]. Zero-initialized like retail's global: 0x04 always precedes the
 	// 0x1A submission trigger in a real admission, so harnesses must feed the 0x04 they expect.
 	uint8_t assigned_team_ = 0;

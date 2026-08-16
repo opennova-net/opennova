@@ -11,7 +11,7 @@ namespace mns {
 // Lossless document model for .mns menu stylesheets. The format specification
 // is NovaLogic's own comment header in the shipped menu_style.mns ("The style
 // sheet basically relies on macro name and value pairs..."); the loader is
-// referenced from [orig: UIScene_LoadAndParseContent @ 0x63c830 via sub_552500].
+// referenced from [orig: UIScene_LoadAndParseContent @ 0x63c830 via Menu_InitShellResources].
 //
 // Every node stores typed fields that exactly partition the line's bytes
 // (no opaque raw-span replay; see ADR 0014), so parse() -> serialize() is

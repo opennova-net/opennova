@@ -34,7 +34,8 @@ const ARMORY_KEY := KEY_SHIFT
 const DEBUG_OVERLAY_KEY := KEY_F3
 # Shift+F6: pick the entity under the crosshair into the debug pick list
 # (DebugPickFlow). Works while playing, no overlay needed. Unmodified F6 stays
-# with the retail-configurable binding rows (hudcolor's default).
+# with the retail-configurable binding rows (huddetail's default, shadowing
+# hudcolor's — the retail first-match order, D-CTRL-4).
 const PICK_KEY := KEY_F6
 # ARMORY = the WEAPON screen over LIVE play: the world keeps ticking (the witnessed
 # armory runs with no world-stop leg — and under the listen-server model a pausing
@@ -875,6 +876,13 @@ func _on_join_deploy_pick_required() -> void:
 	# Initial admission transitions from loading to the player-paced DEATH screen;
 	# on a later death the presentation is already down and the same screen simply
 	# reopens on the new pending edge.
+	# The DEATH-screen edge forces the declutter level to max through the same
+	# seam the huddetail cycle uses (it writes the persisted global like
+	# retail; the death.mnu screen itself draws outside the blanked gameplay
+	# overlay pass). [orig: NapiNPClientMsg_0x00F @0x42E410..0x42E41C —
+	# level = 3 -> CRenderState_SetLayerVisibility @0x59B0F0]
+	if _hud_presenter != null:
+		_hud_presenter.apply_death_screen_hud_detail()
 	_finish_world_load_presentation()
 	if _deploy_presenter.open():
 		return

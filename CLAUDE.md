@@ -150,6 +150,11 @@ scripts/test_godot.sh     # GUT GDScript suite, headless
   merge PRs; the maintainer merges.
 - CI: ignore the `modsuperoed-smoke` job — known unrelated OED parity drift; never gate
   or report on it.
+- PR CI builds only the `template_debug` GDExtension and packages debug-mode exports
+  (`-ExportMode debug`); `template_release` + release-mode packaging run on master
+  pushes/manual runs, so a release-flavour breakage surfaces after merge — build via
+  `scripts/package_godot_windows.ps1` when touching `godot/src` build glue. The engine
+  test job runs Ninja + sccache (the VS generator is local-only).
 
 ## Deeper docs
 

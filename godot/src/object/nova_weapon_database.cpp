@@ -148,8 +148,6 @@ void WeaponDatabase::append_entry(const DefWeaponDef &e) {
 	w.maxclips = e.maxclips;
 	w.animadm = String(e.animadm);
 	w.gfx1 = String(e.gfx1);
-	w.gfx1a = String(e.gfx1a);
-	w.gfx1b = String(e.gfx1b);
 	w.gfx3 = String(e.gfx3);
 	for (int k = 0; k < 6; ++k) {
 		w.pos[k] = e.pos[k];
@@ -259,8 +257,6 @@ Dictionary WeaponDatabase::weapon_dict(int index) const {
 	d["maxclips"] = w.maxclips;
 	d["animadm"] = w.animadm;
 	d["gfx1"] = w.gfx1;
-	d["gfx1a"] = w.gfx1a;
-	d["gfx1b"] = w.gfx1b;
 	d["gfx3"] = w.gfx3;
 	PackedFloat32Array pos;
 	PackedFloat32Array tpos;

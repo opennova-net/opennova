@@ -27,7 +27,7 @@ struct PlayerReplicationState {
 	uint8_t team = 1;                    // entity+354 / tag=0x46 team field. 0 = "no team / spectator"
 	                                     // (player can shoot but not move). 1 = blue, 2 = red. Default
 	                                     // 1 = playable.
-	uint32_t mi = 0x3CDEu;               // Server-side MI from ServerAuth — `sub_4E0090@0x4E0090`
+	uint32_t mi = 0x3CDEu;               // Server-side MI from ServerAuth — `Player_FindLocalPlayerEntity@0x4E0090`
 	                                     // matches it against entity[120].
 	// Spawn coordinates for the player on the joining map (dvxi5 by default). Engine units are signed
 	// 32-bit ints; the values below land near the dvxi5 map center (the retail capture's tag=0x0C spawn).

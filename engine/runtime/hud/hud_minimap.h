@@ -192,7 +192,7 @@ struct HudMinimapInput {
 	// distance and grid labels; the waypoint state line uses the altitude
 	// tricolor instead. [orig: bit18 label + grid label color
 	//  g_hudFrameOverlayColor @0x5a7ab5/@0x5a7a3a; bit8 line color
-	//  dword_2723D7C @0x5a7878]
+	//  g_waypointAltitudeColor @0x5a7878]
 	uint32_t overlay_color = 0xFFFFFFFFu;
 	// Player grid label: authored MAPCOORDS position (design px) and its
 	// suppressor (BSS-zero -> LIVE by default; authored nonzero suppresses).

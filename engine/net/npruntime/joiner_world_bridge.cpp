@@ -284,7 +284,7 @@ JoinerWorldBridge::FrameSignals JoinerWorldBridge::run_client_net_frame(
 	// entity's Team and the round sim's presenting-client team, or friend/foe styling
 	// keeps rendering the old side. Retail does the same two writes: byte_A85B48 for
 	// the latch and entity->Team for the entity itself.
-	// [orig: NapiNPClientMsg_0x050 @0x431910 — @0x4319db / @0x4319ee; the round-spawn
+	// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910 — @0x4319db / @0x4319ee; the round-spawn
 	//  style select reads the local player's Team @0x4ec740]
 	{
 		const uint64_t self_team_revision = ctx.runtime.self_team_revision();

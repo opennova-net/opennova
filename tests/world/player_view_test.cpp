@@ -286,7 +286,7 @@ void test_toggle_latch_refusal_and_inset() {
 
 void test_unscope_on_move_and_up_refusal() {
     // The movement-held latch legs [orig: Player_PackInputStateToEntity @ 0x4df450]:
-    // byte_B7653B blocks scope-UP on Scoped weapons (@ 0x4df29c) and, while SETTLED
+    // g_movementKeyHeld blocks scope-UP on Scoped weapons (@ 0x4df29c) and, while SETTLED
     // at scope on a Scoped (flags 1) weapon, forces the toggle (@ 0x4df4c9..0x4df4ec).
     const int32_t kScoped = 1;         // weapon.def flags: Scoped
     const int32_t kSighted = 2;        // Sighted (no auto-unscope leg of its own)

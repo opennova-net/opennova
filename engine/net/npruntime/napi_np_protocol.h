@@ -167,7 +167,7 @@ bool bind_connection_player(NapiNPServerCtx &ctx, const PeerAddr &peer, uint8_t 
 // handle_client_goodbye's complete player/entity/roster teardown without emitting
 // an event — the owner already knows it is dropping. The owner is responsible for releasing its own
 // (non-owning) transport for that peer. Returns true if a node was dropped. [orig: the timeout sweep
-// under NapiNPProtocol_DrainTimers feeds Nwu_HandleDisconnect @0x624250 the same teardown.]
+// under NapiNPProtocol_DrainTimers feeds Nwu_HandleClientGoodbye @0x624250 -> Nwu_HandleDisconnect @0x623ce0 the same teardown.]
 bool drop_connection(NapiNPServerCtx &ctx, const PeerAddr &peer);
 
 std::size_t connection_count(const NapiNPServerCtx &ctx);

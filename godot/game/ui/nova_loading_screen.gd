@@ -288,9 +288,12 @@ func has_splash_arrow() -> bool:
 
 func _ready() -> void:
 	# The splash handlers below enable per-frame callbacks by existing; keep
-	# both off until the splash actually raises.
-	set_process(false)
-	set_process_input(false)
+	# both off until the splash actually raises. Guarded: a splash raised
+	# before the screen entered the tree must not be silently disarmed here
+	# (it could then never dismiss).
+	if _splash_state == SplashState.NONE:
+		set_process(false)
+		set_process_input(false)
 
 
 ## Raise the start-mission splash over the held background: the cursor-arrow

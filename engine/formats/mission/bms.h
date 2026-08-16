@@ -714,7 +714,7 @@ struct Trigger {
     int32_t unknown7;                  // [orig: evaluator reads +12..+24 only (EventTrigger_EvaluateCondition
                                        //  @0x453620); no +28 access in the trigger path => pad/reserved]
 
-    // [orig: condition fold sub_454050 @0x454050] Each trigger's result is negated by ITS bit0; the combine
+    // [orig: condition fold EventTrigger_EvaluateChain @0x454050] Each trigger's result is negated by ITS bit0; the combine
     // operator (or/xor/else and) is taken from the PREVIOUS trigger, i.e. these bits control how the NEXT
     // trigger joins. Last trigger's or/xor bits are unused; zero triggers => TRUE.
     static constexpr int32_t kConditionNegated = 0x1;

@@ -21,7 +21,7 @@ stack — UNAUDITED); this record pins only the *names* and the boot contract.
 
 | Component | Verdict | Evidence |
 | --- | --- | --- |
-| Boot chain (WinMain → menu) resource order | **witnessed** | `Game_Run @ 0x4a7fb0` → `Game_InitSubsystems @ 0x4a6cd0` → MainMenu enter `sub_552500 @ 0x552500`; ordered sequence below |
+| Boot chain (WinMain → menu) resource order | **witnessed** | `Game_Run @ 0x4a7fb0` → `Game_InitSubsystems @ 0x4a6cd0` → MainMenu enter `Menu_InitShellResources @ 0x552500` (renamed 2026-08-15, ex sub_552500); ordered sequence below |
 | The fatal set (boot refuses without them) | **witnessed** | PFF set (all-missing) `@ 0x4a6f44`; `gametext.bin @ 0x4a6fed`; `vmacros.bin @ 0x4a702f`; `keyhelp.bin @ 0x4a7072`; `items.def @ 0x4a71a3` (fatal wired; see Not-witnessed) |
 | Mission-start resource set | **witnessed** | `Game_StartMission @ 0x524360` chain below |
 | Host conformance | **one divergence minted** | D-BOOT-1 (music-bank name resolution); hudpos/main.mnu literals match |
@@ -35,7 +35,7 @@ stack — UNAUDITED); this record pins only the *names* and the boot contract.
 | `vmacros.bin` | "Unable to load voice macro strings" MessageBox + **exit** [orig: @ 0x4a702f] |
 | `keyhelp.bin` | "Unable to load keyboard map strings" MessageBox + **exit** [orig: @ 0x4a7072] |
 | `items.def` | fatal "Unable to load items.def" wired at the callsite [orig: @ 0x4a71a3 → Game_FatalErrorWithMessageBox @ 0x4a5160] — but see Not-witnessed: the loader as decompiled always returns success |
-| `main.mnu` (node `"Startup"`) | menu never appears (no dialog) [orig: sub_552500 @ 0x552651 → UIScene_LoadAndParseContent @ 0x63c830 → CUIScene_SelectNodeByName @ 0x63b6b0] |
+| `main.mnu` (node `"Startup"`) | menu never appears (no dialog) [orig: Menu_InitShellResources @ 0x552651 → UIScene_LoadAndParseContent @ 0x63c830 → CUIScene_SelectNodeByName @ 0x63b6b0] |
 
 `gameerr.bin` sits just below fatal: missing → `earlyerr.txt` line-4 dialog,
 then boot **continues** [orig: @ 0x4a6fc8]. `earlyerr.txt` itself is the
@@ -67,7 +67,7 @@ degrades to "Error: Unable to open EARLYERR.TXT"
 | `*.npj` + `*.npz` (wildcard scan) | boot (mission list) | [orig: MissionList_ScanAndBuildFromFiles @ 0x563170] | none found → empty mission list (the only wildcard scan at boot) |
 | `hiscore.txt` | optional-fallback | [orig: HUD_LoadHighScoreText @ 0x5630e5] | silent skip |
 
-### Main menu (sub_552500 enter)
+### Main menu (Menu_InitShellResources enter)
 
 | Resource (literal) | Category | Consumer [orig] | Failure behavior |
 |---|---|---|---|
@@ -80,7 +80,7 @@ degrades to "Error: Unable to open EARLYERR.TXT"
 | `nw_cdata.coo` | menu-required | [orig: @ 0x55262b → sub_63A500] | HRESULT ignored |
 | `main.mnu` (`"Startup"`) | **the entry screen** | see fatal set | menu dead-ends silently |
 | `menutxt.bin` | menu (lazy) | [orig: UIStringTable_LookupAndDup @ 0x63b290; e.g. @ 0x55840e, @ 0x5561b7] | fallback literals used (`nw_error.mnx` hardcoded @ 0x558449) |
-| `Arial12b/14n/14b/16n/16b.fnt`, `Impac22b.fnt`, `Impac38b.fnt` | menu+HUD fonts | [orig: HUD_InitAllFonts @ 0x51ee20 → sub_580400] | missing → null font slot, scale 1.0, no crash (width breakpoints 640/800/1024) |
+| `Arial12b/14n/14b/16n/16b.fnt`, `Impac22b.fnt`, `Impac38b.fnt` | menu+HUD fonts | [orig: HUD_InitAllFonts @ 0x51ee20 → HUD_LoadFontIntoSlot @ 0x580400] | missing → null font slot, scale 1.0, no crash (width breakpoints 640/800/1024) |
 | `menu.lwf` | menu (player screen) | [orig: PlayerInfo_InitProfileSelector @ 0x5613ba] | graceful |
 | `PI_Idle.BAD` (+ `PI_actv/PI_LookR/PI_lookL.BAD` table @ 0x83c830), `Dt1rst.bad`, `HwmCube.dds` | menu (player preview) | [orig: PlayerInfo_InitPreviewModel @ 0x5600d0 (@ 0x560107/@ 0x560138)] | graceful |
 | `epass.bin`, `passgen.bin` | optional-fallback | [orig: load_stored_credentials @ 0x450b20 / EPass_LoadCredentials @ 0x450eb0] | silent skip |
@@ -123,7 +123,7 @@ Write-side / debug outputs (not boot inputs): `SS%0.5d.tga`, `_errlog.txt`,
    `hiscore.txt` → `admin.cfg`.
 3. `Game_Run` cont.: `charattr.def` → `Game_MainLoop @ 0x52b630`, state 2 =
    "MainMenu" (state record @ 0x83b400).
-4. MainMenu enter (`sub_552500`): `game.bin` → `game.cfg` →
+4. MainMenu enter (`Menu_InitShellResources`): `game.bin` → `game.cfg` →
    `player.sav`/`weapon.sav` → intro BIKs → menu music
    (`MENUMUS.SBF`/`.BIN`) → `CUIManager_Create` → `menu_style.mns` →
    `brand.mns` → menu BIKs → `nw_cdata.coo` → **`main.mnu`** ("Startup") →

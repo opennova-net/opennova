@@ -17,6 +17,7 @@
    structure, which is the achievable form of "loads as-is" for this format
    (the same standard the MUS text round-trip test holds itself to). */
 
+#include <cstdlib>
 #include <cstdio>
 #include <fstream>
 #include <sstream>
@@ -108,8 +109,10 @@ int main(void) {
     if (!try_menu(p, true)) ++fail;
 
   /* Developer-only: a menu not yet committed (e.g. PRE.MNU) still sweeps when
-     present on disk, without failing CI. */
-  try_menu("C:/Users/taylor/Desktop/revx02/PRE.MNU", false);
+     the env gate points at one, without failing CI (machine paths live in
+     .claude/settings.local.json env, never tracked). */
+  if (const char *extra = getenv("OPENNOVA_MNU_EXTRA"))
+    try_menu(extra, false);
 
   if (fail > 0) {
     fprintf(stderr, "\n%d required MNU fixture(s) FAILED\n", fail);

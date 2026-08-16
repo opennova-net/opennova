@@ -6,7 +6,7 @@
 // two wire request records; everything else runs here.
 // [orig: the per-entity pump WeaponAction_ProcessAllEntities @ 0x542690; the
 //  local player's action handlers WeaponAction_Fire @ 0x542bb0 /
-//  WeaponAction_Reload @ 0x543080 / WeaponAction_Recoil @ 0x542dd0]
+//  WeaponAction_Reload @ 0x5430b0 / WeaponAction_Recoil @ 0x542dd0]
 #pragma once
 
 #include "world/player_view.h"

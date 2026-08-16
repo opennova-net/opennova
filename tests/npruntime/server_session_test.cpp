@@ -348,7 +348,7 @@ bool check_create_session_brings_up_host() {
 
 // A listen host has no ClientAuth upload. Its resolved PLAYER_INFO fields must
 // therefore reach the type-2 loopback before Server_ProcessPendingPlayerSpawns
-// consumes them [orig: local profile path into player_ServerAdd @0x51CBC0].
+// consumes them [orig: local profile path into Server_PlayerAdd @0x51CBC0].
 bool check_listen_host_installs_local_character_profile() {
 	opennova::netsim::LoopbackChannel local_client;
 	opennova::np::HostOwner owner;

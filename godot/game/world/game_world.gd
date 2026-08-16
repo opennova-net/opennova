@@ -2174,16 +2174,6 @@ func _start_runtime(mission: MissionData, bms_name: String) -> int:
 # "weapon.sav"]. The mount is the authority on both halves — for a joiner it has
 # already been reconciled to the HOST's expansion (D-NET-178), which is what makes
 # the profile's ADM index space agree with the host's.
-func _weapon_profile_path(resource_root: ResourceRoot) -> String:
-	if resource_root == null:
-		return ""
-	var dir := String(resource_root.get_root_dir())
-	if dir.is_empty():
-		return ""
-	return dir.path_join(Simulation.weapon_profile_relpath(
-			String(resource_root.get_expansion())))
-
-
 # Load weapon.sav onto the sim: five profile-slot records, each carrying a per-side
 # class byte and the five 2048-byte class kit pages the MP loadout submit indexes BY
 # that class byte [orig: PlayerProfile_LoadAllFromDisk @ 0x54f4d0 — header check
@@ -2196,7 +2186,7 @@ func _load_player_weapon_profile() -> void:
 	var sim := get_sim()
 	if sim == null:
 		return
-	var path := _weapon_profile_path(_resource_root)
+	var path := PlayerProfile.weapon_profile_path(_resource_root)
 	if path.is_empty():
 		return
 	if not FileAccess.file_exists(path):

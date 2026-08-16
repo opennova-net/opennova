@@ -264,7 +264,7 @@ void handler_fire(const WeaponFsmDef &def, const WeaponFsmAction &desc,
                                                //  soundsetend = the per-shot gunshot]
 }
 
-// [orig: WpnAction_Recoil @ 0x542dd0] THE ARBITER: when the recoil clip ends, decide
+// [orig: WeaponAction_Recoil @ 0x542dd0] THE ARBITER: when the recoil clip ends, decide
 // refire (burst), idle, auto-reload, or emptyidle; the held-trigger auto refire is the
 // deferred re-queue of input binding 149 in the window below [orig: @ 0x542e9d].
 void handler_recoil(const WeaponFsmDef &def, const WeaponFsmAction &desc,

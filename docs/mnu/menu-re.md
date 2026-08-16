@@ -716,7 +716,7 @@ overlapping" video-options dropdowns).
 The FONT parser stores four foreground/background pairs (default, mouseover,
 selected, and disabled) at element offsets `+0x7c..+0x98`
 `[orig: CUIElement_ParseXMLDefinition @ 0x648d14..0x648e64]`, and inherited
-fonts copy all eight values `[orig: sub_646A70 @ 0x646a70]`.
+fonts copy all eight values `[orig: CWnd_GetFontAndColors @ 0x646a70]`.
 `draw_text_with_cursor @ 0x6533b0` selects the pair for the active state, but
 the common `font_cache_draw_text_scaled @ 0x653170` path consumes only the
 foreground member and never reads the paired background. Shipped JO menus
@@ -756,7 +756,7 @@ the combo (`player.mnu` PLAYERVOICE authors a negative `TOP` to open upward).
 The list render `[orig: CListWnd_DrawItems @ 0x643f30]` lays rows out inside `row_rect =
 this+13`, advancing by `row_height` per row and truncating each row's text to the rect
 width, with a `<SCROLLBAR>` child for overflow. The row height is the font "W" glyph
-height `[orig: sub_653680 @ 0x653680]`, overridden by `this+201` (the `<MI>` /
+height `[orig: font_cache_measure_text_default @ 0x653680]`, overridden by `this+201` (the `<MI>` /
 `<MIN_ITEM_HEIGHT>` value; ctor default `-1` `[orig: CListWnd ctor @ 0x643bb0]`) only when
 `>= 0`.
 
@@ -859,7 +859,7 @@ a child canvas item one z above the frame, so it draws over any companion mount.
 `menu_frame_compiler_test` (the overlay tail holds the popup quads; empty with no popup
 and no cursor).
 
-**Activation vs scripted ACTION order (fixed 2026-08-15, same train):** retail runs a
+**Activation vs scripted ACTION order (fixed 2026-08-15, same train; cataloged as D-MNU-19 — kept divergence, reimpl-structural):** retail runs a
 button's ACTION list first and its registered control callback last
 (`CUIWidget_HandleScriptedAction @ 0x6497f0` walks the list, then calls
 `widget[63]->vtable+32`), but its scene keeps every loaded screen alive, so PLAYER_INFO's
@@ -1265,7 +1265,7 @@ Accepted/divergent (each a documented decision, not a defect):
   rect when present (which also gives PLAYERVOICE its upward open), else the below-combo
   fallback for shell-built combos.
 - **D-MNU-8 (combo row-height default) — FIXED 2026-06-23c:** the list row height is the
-  font "W" glyph height `[orig: CListWnd_DrawItems @ 0x643f30 -> sub_653680 @ 0x653680]`,
+  font "W" glyph height `[orig: CListWnd_DrawItems @ 0x643f30 -> font_cache_measure_text_default @ 0x653680]`,
   overridden by `this+201` (the `<MI>`/`<MIN_ITEM_HEIGHT>` value; ctor default `-1`
   `[orig: CListWnd ctor @ 0x643bb0]`) only when `>= 0`. The reimpl defaulted to a hardcoded
   16px. Fixed: `MnuCombo::effective_item_height` returns the authored MIN_ITEM_HEIGHT,
@@ -1409,6 +1409,14 @@ Accepted/divergent (each a documented decision, not a defect):
   of the child-window claim retail gets for free; the driver's existing
   press routing then cycles. Pinned by the `menu_frame_compiler`
   outside-rect claim case.
+- **D-MNU-19 (activation vs scripted ACTION order — KEPT, reimpl-structural):**
+  retail runs a widget's ACTION list first and its registered callback last
+  (`CUIWidget_HandleScriptedAction @ 0x6497f0` walks the list, then calls the
+  callback `@ 0x649c7d`); the reimpl deliberately inverts — `widget_activated`
+  emits first — because its shell REPLACES the document on a cross-`.mnu`
+  jump, and it guards the dispatch against a document swap during the emit
+  (`menu_driver.gd _emit_activated_then_dispatch`). The full story is the
+  "Activation vs scripted ACTION order" paragraph in the popup section above.
 
 **IDB changes (2026-08-10, the D-MNU-17 host-dialog walk; saved):** repaired
 the function boundaries at `0x557c10..0x557f6a` (an unowned tail chunk shared
@@ -1588,7 +1596,7 @@ applied (the IDB is shared state — apply manually via `set_comments`, reversib
 | `CWnd_EmitEventToNamedHandlerAndCallbacks @ 0x646970` (+28 sink -> +32 with own name + callback chain by `1<<HIBYTE(event)`; was `sub_646970`) | Godot signals (`pressed`/`gui_input`) replace the named-event plumbing — reimpl code / not grillable |
 | `CWnd_SetParentAndAttach @ 0x6480a0` (parent ptr `+252` + child-array attach; was `sub_6480A0`) | Godot `add_child` — reimpl code / not grillable |
 | `CMarqueeWnd_Construct @ 0x65c430` + `CMarqueeWnd_ParseXMLDefinition @ 0x65ceb0` + `marquee_load_credits_from_ini @ 0x65c5a0` | `build_marquee` -> `CreditsPlayer` + `CbinCreditsResource::from_cbin_bytes` (CBIN datasource); `MnuMarquee` (plain text) |
-| `CUIWidget_HandleScriptedAction @ 0x649790` | `MenuDriver._dispatch_widget_actions` + the shell action signals — `godot/game/menu_driver.gd` |
+| `CUIWidget_HandleScriptedAction @ 0x6497f0` | `MenuDriver._dispatch_widget_actions` + the shell action signals — `godot/game/menu_driver.gd` |
 | `UI_PopulateControlMappingList @ 0x55c0c0` + `refresh_control_mapping_list @ 0x55b320` | `opennova::controls::build_rows` (`engine/runtime/controls/src/controls.cpp`) + `nova_menu_shell.gd::_fill_control_mapping` |
 | `UI_BuildKeyBindingLoadoutTable @ 0x559e50` (catalog `aAbsoluteTurnLe @ 0x8159cb`) | `engine/runtime/controls` `k_catalog` — `controls.cpp` |
 | `KeyBinding_BuildCategoryPages @ 0x4966c0` (Class id -> name) | `controls::action_class_name` |
@@ -1609,7 +1617,7 @@ CUIScene_SetScreenScale`, `sub_6465E0 -> CWnd_AccumulateAncestorOffset`, `CUISce
 CUIScene_GetActiveScreenName`, `sub_647E40 -> CUIElement_DrawTextureNative`, `CTextureManager_DrawScaledRect
 -> CTextureManager_DrawScaledRect`, `sub_65BE40 -> CComboWnd_Construct`, and `CMarqueeWnd_ParseXMLDefinition
 -> CMarqueeWnd_ParseXMLDefinition` (all anchored). `0x64ad90` is still unnamed
-(`sub_64AD90`) and `0x649790` folds into the `0x648120` body (vtable-reached, no direct
+(`sub_64AD90`) and `0x6497f0` folds into the `0x648120` body (vtable-reached, no direct
 xrefs); naming/splitting them remains a proposed edit.
 
 IDB state note (2026-06-23c combo-dropdown grill): renamed `sub_65C0D0 ->

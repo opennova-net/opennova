@@ -9,7 +9,7 @@ extends Node
 ## zone, and a list select queues the pick — re-picks stay possible because a
 ## host silently drops an invalid/contested pick and the screen only closes when
 ## the server-side respawn-pending flag falls (the deployment release).
-## [orig: death.mnu <NAME>DEATH</NAME>; sub_554730 @0x554730 (shroud reveal:
+## [orig: death.mnu <NAME>DEATH</NAME>; DeathScreen_UpdateShroudReveal @0x554730 (shroud reveal:
 ##  immediate on g_deploy_screen_active, 240 ticks after death; content refresh
 ##  every 16 ticks); UI_UpdateDeathScreenContent @0x5536a0 (list populate:
 ##  row 0 "'<DEFAULT_SPAWN_KEY>' <HOME>" node 0, then per zone
@@ -20,7 +20,7 @@ extends Node
 ##  in the TDM family)]
 ##
 ## The MAP window's terrain/zone/blip draw (the windowed map renderer
-## sub_5A58E0 @0x5a58e0, sibling of HUD_DrawMapOverlay @0x5a5f40) is the tracked
+## MapOverlay_DrawView @0x5a58e0, sibling of HUD_DrawMapOverlay @0x5a5f40) is the tracked
 ## next map-phase witness (docs/interface/hud-re.md follow-ups); until it lands
 ## the authored window chrome renders without the map image.
 

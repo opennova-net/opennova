@@ -45,7 +45,7 @@ playback, which the host does not reproduce. Full record: `docs/audio/lwf-dbf-so
 ## IDA anchors
 
 `SoundBank_PlayTriggerEntries @0x75ccd0` / `SoundBank_SelectTriggerEntryFromBank @0x75bf20`
-(member pick), `PRNG_ScaledRandom @0x75be50` (RNG), `SoundProfile_FindLoadedByName @0x5274f0` and
+(member pick), `PRNG_ScaledRandom @0x75be50` (RNG), `SoundBank_FindSetByNameAnyBank @0x5274f0` and
 `SoundBank_FindTriggerByName @0x75be90` (name-keyed set lookup). Seams left in GDScript: reverb
 table `Audio_LoadReverbDefs @0x766d80`, MUS music `AudioVM_OpenMusicContext @0x6722a0`.
 

@@ -16,10 +16,10 @@ Coordinate conventions mirror animation_build.py / coords.py exactly:
 from __future__ import annotations
 
 import ctypes
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Sequence, Tuple
 
-from . import adm_ffi, bad_ffi, coords
+from . import adm_ffi, bad_ffi
 from .animation_build import (
     Mat3,
     Quat,

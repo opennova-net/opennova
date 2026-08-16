@@ -865,7 +865,7 @@ std::vector<uint8_t> encode_destroy_entity_list(const DestroyEntityList &list) {
 }
 
 // [orig: Server_ChangeEntityTeam @ 0x518D70; the client field order is the read
-//  order of NapiNPClientMsg_0x050 @ 0x431910]
+//  order of NapiNPClientMsg_TeamAssign (0x50) @ 0x431910]
 std::vector<uint8_t> encode_team_assign(const TeamAssign &assign) {
 	std::vector<uint8_t> out;
 	Writer w{out};

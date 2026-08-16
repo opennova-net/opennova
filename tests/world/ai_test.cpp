@@ -1441,6 +1441,89 @@ int main() {
         CHECK(e.brain.f[AiBrain::kCurState] == 15);
     }
 
+    // ---- ChangeAI alert brain leg: AIEvent {6, level} through the command
+    // dispatch [orig: Entity_ApplyCommand queue @0x43ac59/@0x43acc4/@0x43ad34
+    // -> AI_HandleCommand case 6 @0x4657a6..0x465816] ----
+    {
+        World w;
+        AiSystem sys;
+        sys.is_authority = true;
+        const auto alert_event = [](int idx, int32_t level) {
+            AiEventEntry ev{};
+            ev.f[0] = 6;
+            ev.f[1] = 9 | (idx << 16);
+            ev.set_timer(0.0f);
+            ev.f[3] = level;
+            return ev;
+        };
+        // Type-2 (ground) brain at FOLLOWWP: a change to red pushes pend 18
+        // and stores 2 in both alert words.
+        int idx = sys.attach(EntityHandle::make(0, 0));
+        AiEntity &e = *sys.at(idx);
+        e.profile.type = 2;
+        e.profile.flags96 = 0;
+        e.brain.f[AiBrain::kCurState] = 16;
+        e.brain.f[AiBrain::kPendState] = 16;
+        sys.events.queue(alert_event(idx, 2));
+        sys.events.process_timed(sys, w);
+        CHECK(e.brain.f[AiBrain::kAlert] == 2);
+        CHECK(e.brain.f[AiBrain::kPrevAlert] == 2);
+        CHECK(e.brain.f[AiBrain::kCurState] == 18); // GROUND_EVADE push
+        // The forced-2 quirk: a GREEN command onto a differing brain still
+        // stores 2 in both words [orig: mov eax, ebx @0x4657cd runs
+        // unconditionally inside the changed branch].
+        e.brain.f[AiBrain::kCurState] = 16;
+        e.brain.f[AiBrain::kPendState] = 16;
+        sys.events.queue(alert_event(idx, 0));
+        sys.events.process_timed(sys, w);
+        CHECK(e.brain.f[AiBrain::kAlert] == 2);
+        CHECK(e.brain.f[AiBrain::kPrevAlert] == 2);
+        // Unchanged level: the same-value rewrite is a no-op (no pend push,
+        // the clamped param stores as-is).
+        e.brain.f[AiBrain::kCurState] = 16;
+        e.brain.f[AiBrain::kPendState] = 16;
+        sys.events.queue(alert_event(idx, 2));
+        sys.events.process_timed(sys, w);
+        CHECK(e.brain.f[AiBrain::kCurState] == 16);
+        CHECK(e.brain.f[AiBrain::kAlert] == 2);
+        // The flags96 bit-1 gate suppresses the state push but not the store.
+        int idx2 = sys.attach(EntityHandle::make(0, 1));
+        AiEntity &cap = *sys.at(idx2);
+        cap.profile.type = 2;
+        cap.profile.flags96 = 2;
+        cap.brain.f[AiBrain::kCurState] = 16;
+        cap.brain.f[AiBrain::kPendState] = 16;
+        sys.events.queue(alert_event(idx2, 1));
+        sys.events.process_timed(sys, w);
+        CHECK(cap.brain.f[AiBrain::kCurState] == 16);
+        CHECK(cap.brain.f[AiBrain::kAlert] == 2); // forced-2 on change
+        // The state-22 exclusion: a type-2 brain already at GROUND_PRETTY
+        // keeps its state. (State 22's own event column is unported, so the
+        // exclusion is pinned through the dispatch-capable state 17 by
+        // pre-seeding pend.)
+        int idx3 = sys.attach(EntityHandle::make(0, 2));
+        AiEntity &excl = *sys.at(idx3);
+        excl.profile.type = 2;
+        excl.profile.flags96 = 0;
+        excl.brain.f[AiBrain::kCurState] = 17;
+        excl.brain.f[AiBrain::kPendState] = 17;
+        sys.events.queue(alert_event(idx3, 1));
+        sys.events.process_timed(sys, w);
+        CHECK(excl.brain.f[AiBrain::kCurState] == 18); // 17 != 22 -> push runs
+        // An out-of-range level clamps to 0..2 before the compare.
+        int idx4 = sys.attach(EntityHandle::make(0, 3));
+        AiEntity &cl = *sys.at(idx4);
+        cl.profile.type = 2;
+        cl.brain.f[AiBrain::kCurState] = 16;
+        cl.brain.f[AiBrain::kPendState] = 16;
+        cl.brain.f[AiBrain::kAlert] = 2;
+        cl.brain.f[AiBrain::kPrevAlert] = 2;
+        sys.events.queue(alert_event(idx4, 9)); // clamps to 2 = unchanged
+        sys.events.process_timed(sys, w);
+        CHECK(cl.brain.f[AiBrain::kCurState] == 16);
+        CHECK(cl.brain.f[AiBrain::kAlert] == 2);
+    }
+
     // ---- not_yet_ported coverage counter via full tick ----
     {
         World w;

@@ -150,7 +150,7 @@ ClientAuth make_client_auth(const ClientSession::Config &cfg, std::string_view c
 	// Identity block — the real server re-validates NVS/PN/PG/PV1 (+PV2 in its is_server branch) on the
 	// 0x42 join exactly as on the 0x41 hello (HandleClientJoin @0x62B750); without it real NW silently
 	// drops the join (return 0, no ServerAuth -> session_join timeout). Retail's 0x42 builder
-	// (NapiNPConnection_SendClientHello @0x61fe20) emits the SAME identity block as the hello.
+	// (CNapiNPConnection_SendClientJoin @0x61fe20) emits the SAME identity block as the hello.
 	auth.nvs  = cfg.nvs;
 	auth.co   = std::string(co);
 	auth.ap   = cfg.ap;

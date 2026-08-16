@@ -1297,10 +1297,6 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             // A decoded remote-player proxy intentionally has no registry
             // target, but it is still the retail person collision class.
             imp.effect_tag = 2;
-        } else if (impact_target != nullptr &&
-                   impact_target->kind == EntityKind::Building &&
-                   collision.surface_type == 1) {
-            imp.effect_tag = 23; // building material 1 uses the flesh bank
         } else if (collision.surface_type >= 0 &&
                    collision.surface_type + 4 < kImpactEffectTagCount) {
             imp.effect_tag = collision.surface_type + 4;

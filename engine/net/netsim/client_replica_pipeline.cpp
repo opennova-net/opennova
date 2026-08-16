@@ -1596,31 +1596,28 @@ void ClientReplicaPipeline::apply_pool_spawn(const std::vector<uint8_t> &body) {
 }
 
 void ClientReplicaPipeline::erase_entity_tree(uint16_t root_handle) {
-	std::vector<uint16_t> retired{root_handle};
-	// Promotion caps attachment lineage at eight. Discover descendants before
-	// erasing so nested children cannot retain a dangling parent row.
-	for (int depth = 0; depth < 8; ++depth) {
-		const std::size_t before = retired.size();
-		for (const ClientEntityState &entity : state_.entities) {
-			if (entity.parent_handle == wire_handle::kInvalid) continue;
-			if (std::find(retired.begin(), retired.end(), entity.parent_handle) ==
-					retired.end())
-				continue;
-			if (std::find(retired.begin(), retired.end(), entity.handle) ==
-					retired.end())
-				retired.push_back(entity.handle);
-		}
-		if (retired.size() == before) break;
+	// Retail destroys ONE row and DETACHES its dependents: Entity_Destroy
+	// walks the occupant + mount handles through the vehicle detach and then
+	// memsets only the target entity — a child attached to the removed row
+	// survives with its parent link cleared until its own remove arrives.
+	// [orig: Entity_Destroy @0x43e810 — occupant detach @0x43e9e9, per-mount
+	//  detach loop @0x43ea38..0x43ea59, memset(entity, 0, 0x2B4) @0x43ea70]
+	bool detached = false;
+	for (ClientEntityState &entity : state_.entities) {
+		if (entity.parent_handle != root_handle) continue;
+		entity.parent_handle = wire_handle::kInvalid;
+		entity.parent_pose_valid = false;
+		detached = true;
 	}
 	const std::size_t before = state_.entities.size();
 	state_.entities.erase(
 			std::remove_if(state_.entities.begin(), state_.entities.end(),
 					[&](const ClientEntityState &entity) {
-						return std::find(retired.begin(), retired.end(), entity.handle) !=
-								retired.end();
+						return entity.handle == root_handle;
 					}),
 			state_.entities.end());
-	if (state_.entities.size() != before) state_.mark_topology_changed();
+	if (detached || state_.entities.size() != before)
+		state_.mark_topology_changed();
 }
 
 // [orig: NapiNPClientMsg_DestroyEntityList @0x429730 — the body carries RAW pool-0
@@ -1632,7 +1629,7 @@ void ClientReplicaPipeline::destroy_pool0_slot(uint16_t pool0_index) {
 	erase_entity_tree(pool0_index);
 }
 
-// [orig: NapiNPClientMsg_0x050 @0x431910 — the non-authority entity team store @0x4319ee]
+// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910 — the non-authority entity team store @0x4319ee]
 void ClientReplicaPipeline::apply_team_assign(uint16_t handle, uint8_t team) {
 	// Retail's gates: not the 0xFFFF sentinel, and the pool nibble must address one
 	// of the five entity pools (@0x431910 header checks).

@@ -83,7 +83,8 @@ ticking; case 0x25 AttachToEmplaced = `EntityPool_FindByNetId(param1)` →
 `WacScript_TryMountEntityToVehicle @0x4f70f0`.
 
 On every dispatch the original also activates linked spawn points:
-`@0x452ce0` (kong-misnamed "EventTrigger_NotifyEntityDeath") computes the FIRED EVENT's
+`EventTrigger_MarkLinkedSpawnPoints @0x452ce0` (renamed 2026-08-15, ex the kong
+misnomer "EventTrigger_NotifyEntityDeath") computes the FIRED EVENT's
 own index (`(entry - g_Events)/24`), scans the spawn-point table (`dword_B76570`,
 count `dword_B76568`) for records whose word +528 references that event, sets their
 pending byte +536 (backward-chaining via byte +535), then `SpawnPoint_SkipBlocked
@@ -213,12 +214,13 @@ site, where this repo keeps such citations.
 Dispositions after the 2026-07-05 grill (§3a carries the witnesses):
 
 - **D-EVT-1 — spawn-point activation on fire: WITNESSED-READY-DEFERRED** (was
-  OPEN-unwitnessed). The marker is `EventTrigger_NotifyEntityDeath @0x452ce0`
-  (misnomer — the arg is the fired EVENT entry), called from both dispatch
+  OPEN-unwitnessed). The marker is `EventTrigger_MarkLinkedSpawnPoints @0x452ce0`
+  (renamed 2026-08-15, ex the "EventTrigger_NotifyEntityDeath" misnomer — the
+  arg is the fired EVENT entry), called from both dispatch
   paths of UpdateEntry (@0x454cbd delay-expiry, @0x454d25 immediate),
   authority-gated. The "spawn-point table" is the map POI / deploy-and-spectate
   list (`0xB76570` ptrs / `0xB76568` count / `0xB7656C` selection, rebuilt by
-  `Entity_BuildSpawnPointList @0x42de40`); marking walks entries whose
+  `Entity_BuildMapPoiLists @0x42de40` (renamed 2026-08-15, ex Entity_BuildSpawnPointList)); marking walks entries whose
   `word[e+0x210] == eventIndex` (strict `> 0` — event 0 can never be
   referenced), sets `byte[e+0x218] = 1`, then back-chains while
   `byte[prev+0x217] == 0`; `SpawnPoint_SkipBlocked @0x4de310` then cycles the
@@ -228,7 +230,7 @@ Dispositions after the 2026-07-05 grill (§3a carries the witnesses):
   subsystem (not yet in engine/runtime/world).
 - **D-EVT-2 — quarter-pass piggyback: FIXED 2026-07-05.** The earlier
   "unrelated entity bookkeeping" dismissal was wrong: when the quarter cursor
-  is 0 (once per 64 ticks) the pass calls `Entity_UpdateStuckCounter @0x439dc0`
+  is 0 (once per 64 ticks) the pass calls `Entity_UpdatePlayerAwolCounter @0x439dc0` (renamed 2026-08-15, ex Entity_UpdateStuckCounter)
   — the player-AWOL counter `dword_A89160` (`++` while
   `Entity_IsLocalPlayerOutOfBounds @0x439d40`, else reset) whose ONLY consumer
   is trigger cat-7 sub 36 PlayerAwol (`getter @0x439de0 >= param1`, @0x453d40),
@@ -374,7 +376,16 @@ bit flip it.
    @0x43ac8d, case 6 → 0 @0x43acfd; reached per-SSN from ChangeSingleAI and
    fanned per-member over pools 2/0/1 by commandGroup from ChangeGroupAI
    `Entity_HandleAlertCommand @ 0x43cff7`, which then also stamps the group
-   record), the alert-state event handler (`Entity_HandleAlertStateEvent
+   record). The ChangeAI arms carry a SECOND half beyond the controller byte:
+   each ALSO queues the brain `AIEvent {6, level}` → `AI_HandleCommand
+   @ 0x465770` case 6, whose dispatch clamps the level 0..2, FORCES the
+   stored level to 2 on any change (@0x4657cd), pushes pend state 10
+   (ai-def type 1, current state not in {14, 6}) / pend state 18 (type 2,
+   current != 22) — both behind `!(profile+96 & 2)` — then stores
+   kPrevAlert+kAlert (@0x465803/@0x465809). PORTED 2026-08-15, both halves;
+   commands reach brains through the state rows that route events (16/17/18)
+   — the other rows' event handlers remain unported stand-ins. Other +0x88
+   writers: the alert-state event handler (`Entity_HandleAlertStateEvent
    @ 0x43dee0`: 2/0/1 @0x43df8e/0x43dfa1/0x43dfb2), damage triggers → 2
    (@0x4073db, @0x40775e), `Entity_AlertNearbyAllies @ 0x46558a` → 2, the AI
    death/destruction transitions → 2 (@0x465f7e, @0x466b4c and the
@@ -434,13 +445,18 @@ bit flip it.
    - sub 44 `Entity_CheckLineOfSightInRange @ 0x4f15e0` (renamed from the
      misnomer Entity_DrawConnectionLine): center distance > p3 → false (all
      failure paths `xor eax`); else a radius-0 ray between the two entities'
-     `+0x1FC/+0x200/+0x204` offset points — `p3 <= 20 u` uses the
+     `+0x1FC/+0x200/+0x204` offset points — pos + the host-stamped model
+     collision-bbox CENTER, `Entity_InitFromModel` min+((max−min)>>1)
+     `@ 0x40df1e..0x40df4a` (powerup zero rule: `attrib & 0x20` && type 6
+     `@ 0x40df0a`; the def scale is left unapplied like `bound_radius` —
+     rides D-COL-3), stamped and used by the port — `p3 <= 20 u` uses the
      entity-aware `Entity_CheckLineOfSightTerrainAndEntities @ 0x53b130`,
      `> 20 u` the terrain/sector-only `Physics_RaycastTerrainAndSectors
      @ 0x539910` — returning the ray's clear flag.
    - sub 45 `Entity_CheckLineOfSight @ 0x4f17c0` ("sees") = sub 44 with the
-     distance measured over the OFFSET points instead of the centers, plus a
-     facing gate after the ray: true iff
+     distance measured over the OFFSET points instead of the centers
+     (`@ 0x4f18cd..0x4f18dd` — the range AND the bearing both ride the
+     offset points), plus a facing gate after the ray: true iff
      `|int32(-yaw - int(atan2(dy, dx) * -(2^31/pi)))| <= 0x15555540` (±30.0°,
      int32 wrap = shortest arc; yaw = entity +0x10, the binary-angle heading;
      dy/dx = the offset-point deltas; scale `dbl_7C57B8 = -(2^31/pi)`).
@@ -468,7 +484,7 @@ bit flip it.
 Renames (dry-run validated 13/13):
 - `sub_454050` → `EventTrigger_EvaluateChain` (anchored)
 - `Entity_SetStateWreckage @0x454d50` → `EventTrigger_UpdateQuarterRoundRobin` (anchored) — **APPLIED 2026-06-25** (during the GamePlayerEntity grill: it was a kong-misnomer in the `Entity_*` namespace; verified callee `EventTrigger_UpdateEntry` + caller `Server_TickUpdate`)
-- `EventTrigger_NotifyEntityDeath @0x452ce0` → `Event_OnEventFired_MarkLinkedSpawnEntries` (probable)
+- `EventTrigger_NotifyEntityDeath @0x452ce0` → **APPLIED 2026-08-15 as `EventTrigger_MarkLinkedSpawnPoints`**
 - `WacScript_AdvanceTick` → `WacScript_TickEvery62` (anchored)
 - globals: `trigger @0xae0704`→`g_Events`, `dword_AE0700`→`g_EventCount`,
   `dword_AE070C`→`g_EventTriggers`, `dword_AE0708`→`g_EventTriggerCount`,
@@ -948,7 +964,7 @@ correspondence made explicit.
 |---|---|---|---|
 | 0x454050 | sub_454050 | EventTrigger_EvaluateChain | anchored |
 | 0x454d50 | EventTrigger_UpdateQuarterRoundRobin | (applied) | **APPLIED 2026-06-25** (was kong-misnomer `Entity_SetStateWreckage`) |
-| 0x452ce0 | EventTrigger_NotifyEntityDeath | Event_OnEventFired_MarkLinkedSpawnEntries | probable (arg is the EVENT entry, not an entity) |
+| 0x452ce0 | EventTrigger_MarkLinkedSpawnPoints | (applied) | **APPLIED 2026-08-15** (ex kong misnomer `EventTrigger_NotifyEntityDeath`; arg is the EVENT entry, not an entity) |
 | 0x4f81a0 | WacScript_AdvanceTick | WacScript_TickEvery62 | anchored |
 | 0xae0704 | trigger | g_Events | anchored |
 | 0xae0700 | dword_AE0700 | g_EventCount | anchored |

@@ -193,9 +193,10 @@ void AiSystem::infantry_ladder_org1_block(AiEntity &e, World &world,
             stamp_keep_pending(anim_state::kClimbIdle);
     }
     if (held) return;
-    if (!collision->second_pass_contact_latch) {
-        // The 0.03125u facing press.
-        // [orig: @ 0x4bfa47-0x4bfaa3, gated on g_ResolverSecondPassContact == 0]
+    if (!collision->resolver_applied_push) {
+        // The 0.03125u facing press, gated on "the resolver applied no push
+        // this resolve". [orig: @ 0x4bfa47-0x4bfaa3, gate @ 0x4bfa3e-0x4bfa45
+        // on dword_B57C8C == 0 (the applied-push latch, not pass-2 contact)]
         const double lrad = static_cast<double>(lf.yaw) *
                             (3.14159265358979323846 / 2147483648.0);
         const int32_t lc = static_cast<int32_t>(std::cos(lrad) * 4194304.0);

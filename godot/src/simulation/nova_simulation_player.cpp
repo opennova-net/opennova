@@ -225,7 +225,7 @@ void Simulation::set_player_input(bool p_forward, bool p_back, bool p_left, bool
 	player_input_.prone = (stance_latch_ == 2);
 	// The movement-held latch and the unscope-on-move [orig:
 	// Player_PackInputStateToEntity @ 0x4df450 — any of the four direction keys
-	// sets byte_B7653B (blocks scope-UP on Scoped weapons @ 0x4df29c) and, while
+	// sets g_movementKeyHeld (blocks scope-UP on Scoped weapons @ 0x4df29c) and, while
 	// SETTLED at scope on a Scoped (flags 1) weapon, routes through
 	// Player_ToggleWeaponScope @ 0x4df4c9..0x4df4ec = the full unscope. The
 	// toggle's ForceScoped pin (@ 0x4df12d) keeps pinned sights raised].

@@ -24,7 +24,7 @@ static World make_world() {
 }
 
 // Run a program for `executions` VM executions. The VM self-gates to every 62nd
-// logic tick [orig: sub_4F81A0 @0x4f81b1], so one execution = 62 ticks; WAC time
+// logic tick [orig: WacScript_AdvanceTick @0x4f81b1], so one execution = 62 ticks; WAC time
 // units (past/elapse/Ticks) count executions, so the tests below keep reading in
 // "script steps".
 static void run(World &w, WacSystem &sys, int executions) {

@@ -51,8 +51,8 @@
   `opennova_shared` (`opennova.dll` / `libopennova.so`) whole-archives the
   `OPENNOVA_CORE_TARGETS` list — the ADR 0029 group targets now — and exports ONLY
   `OPENNOVA_API`-annotated symbols, the surface pinned by the `abi_export_identity`
-  ctest baseline. Consumers: the Python FFI (`pyopennova`, `apps/importer`) and the DCC
-  plugins. **Model B — C++ static link**: `godot/src`, the apps, the ctest suite,
+  ctest baseline. Consumers: the Python FFI (`pyopennova`, `apps/importer`) and the Blender
+  addon (`blender/opennova/*_ffi.py` mirrors). **Model B — C++ static link**: `godot/src`, the apps, the ctest suite,
   and the entire net stack link the group targets directly; no export macro involved.
   The net/protocol libs are Model B ONLY — formally outside the C ABI (ADR 0019; NET-4's
   forbidden-family guard). A lib may mix models: only its annotated functions are
@@ -116,6 +116,9 @@
   held to wire compatibility: encoders produce bytes a stock client/server accepts,
   decoders read what a stock client/server emits, and opennova↔opennova requires
   encoder/decoder self-consistency. The witness record is docs/net/novaworld-net-re.md.
+- Size ratchet: no `engine/`/`apps/`/`godot/src` `.cpp` past 2500 lines — split by leg
+  into a sibling TU first (precedent: `world/infantry.cpp` -> `infantry_ladder.cpp`),
+  never bump the baseline.
 - Tests for this code live in `/tests/<domain>/` (ctest), not `godot/tests/`.
 - 3DI models: 3DI3 only, consumed directly (ADR 0027). `threedi_3di3_read` produces
   `Threedi3di3` (engine/formats/threedi/threedi_3di3.h) and that parsed struct IS

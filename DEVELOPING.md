@@ -62,16 +62,19 @@ This is the native library that registers our C++ classes (`NovaWorldClient`,
 `Terrain`, `ResourceRoot`, ...) with Godot:
 
 ```bash
-scripts/build_godot.sh            # Dev       -> the editor (optimized + symbols)
-scripts/build_godot.sh DebugFull  # DebugFull -> the editor (/Od, for native debugging)
-scripts/build_godot.sh Release    # Release   -> exports
+scripts/build_godot.sh            # Dev       -> optimized + symbols (the default)
+scripts/build_godot.sh DebugFull  # DebugFull -> /Od, for native debugging
+scripts/build_godot.sh Release    # Release   -> plain /O2, no symbols
 ```
 
-`Dev` and `DebugFull` produce the same `template_debug`-named artifact — the one loaded
-by the Godot editor and by standalone game runs launched from ONED (F5/F6) — differing
+All three flavors produce the same `template_debug`-named artifact, the one loaded by
+the Godot editor and by standalone game runs launched from ONED (F5/F6); they differ
 only in compiler flags. Build `DebugFull` when you need to step through native code;
 expect roughly 1.5x whole-frame cost in-game while it is installed, so never profile
-against it.
+against it. The `template_release` DLL that a release export loads is not produced by
+this script at all: build it with `scripts/package_godot_windows.ps1`
+(`-ExportMode release`, without `-SkipBuild`) locally, or rely on CI's
+`build-gdextension-windows` `template_release` leg (master pushes and manual runs).
 
 The artifacts land in `godot/bin/` alongside `godot/bin/opennova.gdextension`. **After a
 rebuild, fully restart the Godot editor.** GDExtension class registration does not

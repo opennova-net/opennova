@@ -244,6 +244,17 @@ struct Entity {
     //  half = (max - min) >> 1 per axis; fallback 655360 @0x5979cb]
     int32_t minimap_half_x_q16 = 0;
     int32_t minimap_half_y_q16 = 0;
+    // Model collision-bbox CENTER (entity+0x1FC/+0x200/+0x204), host-stamped
+    // from the placed CMDL bounds in MODEL-LOCAL axes and added RAW
+    // (unrotated) wherever retail offsets a ray endpoint by it — the cat-2
+    // trigger LOS endpoints. Zero when unstamped (no collision block, or the
+    // retail powerup rule attrib&0x20 && type 6) — the ray then leaves the
+    // raw position, matching retail's zeroed pool memory. The authored def
+    // scale is not yet applied here, like bound_radius (rides D-COL-3).
+    // [orig: Entity_InitFromModel center @0x40df1e..0x40df4a, powerup zero
+    //  @0x40df0a, scale @0x40dfd6..0x40e018; the LOS reads
+    //  @0x4f1880..0x4f18c5 (sub 45) and @0x4f1728..0x4f176f (sub 44)]
+    Vec3 bbox_center;
     int32_t item_unit_type = 0; // raw ItemDef unit_type; vehicle minimap icon selector
     bool is_ai_capable = false; // items.def ItemDefAttrib & 0x100000 (AIData / §5.6 AI class). Gates the
                                 // 0x0D AI-trailer (D-NET-97). Distinct from ai_flags (BMS). [docs/world/itemdef-re.md]
@@ -415,7 +426,7 @@ struct Entity {
     // The wire movement-INPUT byte (entity+0x12C low): the owning client uplinks it every frame
     // (§5.10 extended C2S 0x0C) and the host echoes it in that player's 0x0A compact record —
     // remote players are motor-driven from replicated input, NOT from an anim slot [orig: case-2
-    // apply @0x4c11ec; consumers Entity_UpdatePlayerInfantryMovement @0x48496d,
+    // apply @0x4c11ec; consumers Entity_UpdateLightVehiclePhysics @0x483fe0 (leg @0x48496d),
     // check_bone_ground_contact @0x441ba4 (stance bits 8-9)]. Written by apply_player_intent for
     // remote peers; mirrored from the packed local input for the host's own player (bits 0-2 =
     // 8-way move_direction_index, bit 3 = moving [orig: Player_PackInputStateToEntity @0x4df68f]).

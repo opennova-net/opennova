@@ -6,7 +6,7 @@
 // normal events are processed in QUARTER-LIST slices every 16th tick
 // [orig: Server_TickUpdate @0x51d7e0 -> @0x454d50], so an event at index i of n is
 // touched once per 64 ticks, on pass p where (p-1)&3 == i/ceil(n/4); the WAC VM
-// executes every 62nd tick [orig: sub_4F81A0 @0x4f81b1].
+// executes every 62nd tick [orig: WacScript_AdvanceTick @0x4f81b1].
 #include <cstdio>
 
 #include "mission/event_runtime.h"
@@ -1080,6 +1080,20 @@ static void test_single_health_triggers() {
     CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleIntact, 44)));
     CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleHasMoreUnits, 44, 1)));
     CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleHasLostMoreUnits, 99, 1)));
+
+    // SSN 0 reads FALSE even though registry rows with net_id 0 exist (every
+    // helper head-guards the zero SSN; the pool finder itself does not).
+    // [orig: 'if (!netId) return 0' @0x43e787 / @0x43e2f7 and the heads of
+    //  @0x43e3d0/@0x43e470/@0x43e350]
+    world::Entity anon;
+    anon.net_id = 0;
+    anon.alive = true;
+    anon.health = 100;
+    anon.health_max = 100;
+    w.registry.spawn(0, anon);
+    CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleIntact, 0)));
+    CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleHasMoreUnits, 0, 1)));
+    CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleHasLostMoreUnits, 0, 0)));
 }
 
 // Sub 11 both cats over the carried-object link [orig:
@@ -1203,6 +1217,30 @@ static void test_single_distance_los_chain() {
     // 20 deg off: inside the cone.
     w.registry.get(a_h)->yaw = 70;
     CHECK(sys.evaluate_trigger_for_test(w, single_trigger(S::SingleDoesNotSeeOrFarther, 70, 71, 40)));
+
+    // Sub 45's range AND bearing ride the +0x1FC bbox-center offset points
+    // (position + the host-stamped model bbox center, added unrotated)
+    // [orig: the deltas over the offset sums @0x4f18cd..0x4f18dd; center
+    //  writer Entity_InitFromModel @0x40df1e..0x40df4a].
+    w.registry.get(a_h)->yaw = 90;
+    w.registry.get(b_h)->bbox_center = {15.0f, 0.0f, 0.0f};
+    CHECK(!sys.evaluate_trigger_for_test(w,
+            single_trigger(S::SingleDoesNotSeeOrFarther, 70, 71, 40)));
+    // 45 u over the offsets > 40, though the centers sit 30 u apart.
+    w.registry.get(b_h)->bbox_center = {0.0f, 20.0f, 0.0f};
+    CHECK(!sys.evaluate_trigger_for_test(w,
+            single_trigger(S::SingleDoesNotSeeOrFarther, 70, 71, 40)));
+    // atan2(20, 30) = 33.7 deg: the offset point falls outside the cone.
+    w.registry.get(b_h)->bbox_center = {0.0f, 10.0f, 0.0f};
+    CHECK(sys.evaluate_trigger_for_test(w,
+            single_trigger(S::SingleDoesNotSeeOrFarther, 70, 71, 40)));
+    // atan2(10, 30) = 18.4 deg: inside again.
+    // Sub 44's DISTANCE gate stays center-based: the same 15 u offset that
+    // fails sub 45's range leaves sub 44 in range (its ray, not its range,
+    // rides the offset points).
+    w.registry.get(b_h)->bbox_center = {15.0f, 0.0f, 0.0f};
+    CHECK(sys.evaluate_trigger_for_test(w, single_trigger(S::SingleHasNoLOS, 70, 71, 40)));
+    w.registry.get(b_h)->bbox_center = {};
 
     // Sub 42: the groundEntity chain, up to 3 hops, first-match.
     CHECK(!sys.evaluate_trigger_for_test(w, single_trigger(S::SingleOnTopOf, 70, 71)));

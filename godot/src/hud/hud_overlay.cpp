@@ -162,6 +162,14 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::set_hud_color_index);
 	ClassDB::bind_method(D_METHOD("get_hud_color_index"),
 			&HudOverlay::get_hud_color_index);
+	ClassDB::bind_method(D_METHOD("set_hud_detail_level", "level"),
+			&HudOverlay::set_hud_detail_level);
+	ClassDB::bind_method(D_METHOD("get_hud_detail_level"),
+			&HudOverlay::get_hud_detail_level);
+	ClassDB::bind_method(D_METHOD("set_showhud_flags", "flags"),
+			&HudOverlay::set_showhud_flags);
+	ClassDB::bind_method(D_METHOD("get_showhud_flags"),
+			&HudOverlay::get_showhud_flags);
 	ClassDB::bind_method(D_METHOD("set_minimap_terrain", "terrain", "water_mask"),
 			&HudOverlay::set_minimap_terrain, DEFVAL(Ref<Texture2D>()));
 	ClassDB::bind_method(D_METHOD("set_minimap_state", "mission_position",
@@ -379,6 +387,12 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	compiler_.configure_label_fonts(nullptr, nullptr, nullptr, 1.0f, 1.0f);
 	configured_ = false;
 	if (p_hudpos.is_null() || !p_hudpos->is_loaded()) {
+		// No hudpos -> the declutter module's all-visible default (the level
+		// itself persists across rebuilds like retail's global).
+		const int level = declutter_.level();
+		declutter_ = opennova::hud::HudDeclutter();
+		declutter_.set_level(level);
+		apply_declutter_();
 		queue_redraw();
 		return;
 	}
@@ -401,6 +415,41 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	layout_.map_coords_x = static_cast<float>(map_coords.x);
 	layout_.map_coords_y = static_cast<float>(map_coords.y);
 	layout_.map_coords_off = map_coords.z;
+
+	// The HUDDECLUT mask table from the parsed rows (retail:
+	// HUD_ParseHudposToken @0x59F370 -> byte_2723CE0, see
+	// docs/interface/hud-re.md). A file that authors ANY known row is applied
+	// faithfully — an unauthored slot then stays hidden at every level, like
+	// retail's zeroed table. A file with NO declutter rows at all (the test
+	// harness's minimal layouts; retail never ships one) keeps the module's
+	// all-visible default instead of blanking the whole HUD.
+	{
+		opennova::hud::HudDeclutter authored;
+		authored.begin_authoring();
+		bool any_row = false;
+		for (int slot = 0; slot < opennova::hud::kDeclutterSlotCount; ++slot) {
+			const PackedByteArray row = p_hudpos->get_declutter_flags(
+					String(opennova::hud::declutter_token_name(slot)));
+			if (row.size() < 4) {
+				continue;
+			}
+			int flags[4];
+			for (int i = 0; i < 4; ++i) {
+				flags[i] = row[i] != 0 ? 1 : 0;
+			}
+			authored.set_mask(slot,
+					opennova::hud::HudDeclutter::mask_from_flags(flags));
+			any_row = true;
+		}
+		const int level = declutter_.level();
+		if (any_row) {
+			declutter_ = authored;
+		} else {
+			declutter_ = opennova::hud::HudDeclutter();
+		}
+		declutter_.set_level(level);
+		apply_declutter_();
+	}
 
 	const Dictionary colors = p_hudpos->get_colors();
 	const auto color_of = [&colors](const char *key, uint32_t fallback) {
@@ -705,6 +754,37 @@ void HudOverlay::set_hud_color_index(int p_index) {
 
 int HudOverlay::get_hud_color_index() const {
 	return state_.hud_color_index;
+}
+
+void HudOverlay::apply_declutter_() {
+	state_.declutter_visible = declutter_.visible();
+	state_.hud_detail_level = declutter_.level();
+}
+
+void HudOverlay::set_hud_detail_level(int p_level) {
+	// The level write + visibility rebuild (retail: the hud_detail global
+	// @0x24D20BC -> CRenderState_SetLayerVisibility @0x59B0F0, see
+	// docs/interface/hud-re.md). The presenter owns the persistence and the
+	// cycle/death-force policy.
+	declutter_.set_level(CLAMP(p_level, 0, opennova::hud::kDeclutterLevelMax));
+	apply_declutter_();
+	queue_redraw();
+}
+
+int HudOverlay::get_hud_detail_level() const {
+	return declutter_.level();
+}
+
+void HudOverlay::set_showhud_flags(int p_flags) {
+	// (retail: g_FpWeaponViewFlags — the compiler consumes bit 1 for the
+	// corner spinmap block @0x5A8635; bit 0 is the viewmodel rig's, see
+	// docs/interface/hud-re.md)
+	state_.showhud_flags = static_cast<uint32_t>(p_flags) & 3u;
+	queue_redraw();
+}
+
+int HudOverlay::get_showhud_flags() const {
+	return static_cast<int>(state_.showhud_flags);
 }
 
 void HudOverlay::set_friendly_tag_env(int p_fog_dist_q16,

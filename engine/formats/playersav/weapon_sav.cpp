@@ -292,7 +292,7 @@ bool update_avatar_selection(File &file, size_t slot, SideId selected_side,
 
     Record &record = file.slots[slot];
     // The dialog walks the two 0x8006-byte side blocks for PLAYERCLASS, then
-    // indexes only g_playerInfoTeam for the avatar fields.
+    // indexes only teamIndex (@0x25dc548) for the avatar fields.
     // [orig: save_player_info_from_dialog @0x55EE3F-0x55EE6D,
     //  @0x55EE93-0x55EF38]
     record.blue.player_class = player_class;

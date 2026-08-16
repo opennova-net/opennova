@@ -2,6 +2,7 @@
 // crashes. Directories come from argv (or a built-in default list of the dev
 // corpus). Missing directories are skipped, so CI without the copyrighted assets
 // still passes.
+#include <cstdlib>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -32,11 +33,24 @@ int main(int argc, char **argv) {
     std::vector<std::string> dirs;
     for (int i = 1; i < argc; ++i) dirs.push_back(argv[i]);
     if (dirs.empty()) {
-        dirs = {
-            "C:/Users/taylor/Desktop/JOX",
-            "C:/Users/taylor/Desktop/archive/BHD_STock2",
-            "C:/Users/taylor/Desktop/archive/revx02",
-        };
+        // Machine corpus roots come from the documented env gates
+        // (docs/asset-gated-tests.md), never tracked paths; absent vars
+        // skip-as-pass like every asset-gated sweep.
+        if (const char *jox = std::getenv("OPENNOVA_JO_ASSETS"))
+            dirs.push_back(jox);
+        if (const char *extra = std::getenv("OPENNOVA_WAC_CORPUS_DIRS")) {
+            std::string list(extra);
+            size_t start = 0;
+            while (start <= list.size()) {
+                const size_t sep = list.find(';', start);
+                const std::string dir = list.substr(start,
+                        sep == std::string::npos ? std::string::npos
+                                                 : sep - start);
+                if (!dir.empty()) dirs.push_back(dir);
+                if (sep == std::string::npos) break;
+                start = sep + 1;
+            }
+        }
     }
 
     int files = 0;

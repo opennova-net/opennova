@@ -20,7 +20,10 @@ namespace opennova::world {
 // pairs scanned from index 1 ('null' at 0 is never matchable, scan @ 0x40a46a);
 // consumers: Projectile_SpawnImpactEffect @ 0x4e9b80 for ballistic impacts and the
 // Knife-only Weapon_RaycastAndSpawnImpact @ 0x4e8460 leaf — terrain surface + 4,
-// entity/building material + 4 (building material 1 -> 23 flesh), water = 11].
+// entity/building material + 4 unconditionally on the bullet path
+// (AmmoDef_ProcessImpactEffect @ 0x40a170 only clamps >= 28 to 4 @ 0x40a1bf);
+// the material 1 -> 23 flesh remap exists ONLY on the knife's PERSON leg
+// (case 3 @ 0x4e8880..0x4e8888), water = 11].
 inline constexpr int kImpactEffectTagCount = 28;
 inline const char *const kImpactEffectTagNames[kImpactEffectTagCount] = {
     "null", "move", "player", "zip", "obj", "dirt", "grass", "snow", "cement", "sand",

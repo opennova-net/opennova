@@ -10,6 +10,7 @@
 // hud/hud_math.h and stays the single source.
 
 #include "hud/game_font.h"
+#include "hud/hud_declutter.h"
 #include "hud/hud_math.h"
 #include "hud/hud_minimap.h"
 
@@ -292,6 +293,24 @@ struct HudFrameState {
 	// applied to the live index @0x55152f; cycled 0..5 by input action
 	// `hudcolor` (record row 76, dispatch code 10) @0x49afc7].
 	int hud_color_index = 2;
+	// The HUD declutter feed (hud_declutter.h carries the witness map): the
+	// per-slot visibility table and the persisted hud_detail level, rebuilt by
+	// HudDeclutter from the hudpos HUDDECLUT masks. Defaults all-visible at
+	// level 0 so a declutter-less embedder (and the layout-only tests) draw
+	// everything; a real hudpos feed replaces the table with the authored
+	// masks (unauthored slot = hidden). The level itself rides along for the
+	// two draw sites that read it directly: the level-3 whole-pass early-out
+	// [orig: @ 0x5A80C4] and the chat hard cull [orig: level >= 2 @ 0x59AD66].
+	std::array<bool, kDeclutterSlotCount> declutter_visible =
+			declutter_all_visible();
+	int hud_detail_level = 0;
+	// The showhud 2-bit FP-view flags [orig: g_FpWeaponViewFlags — cycle
+	// (flags + 1) & 3 @ 0x4E0561]: bit 0 gates the FP gun/viewmodel draw
+	// (consumed device-side where the viewmodel submits), bit 1 gates the
+	// FP-weapon sub-pass + the corner spinmap block [orig: test 2 @ 0x5A8635].
+	// Default 3 = gun + spinmap (the cfg gun-visible option writes 3/2
+	// [orig: @ 0x5521CB/@ 0x5521D7]).
+	uint32_t showhud_flags = 3;
 	HudMinimapInput minimap;
 	// The mission's static footprint polygons (baked once per feed); the
 	// spinmap element lends them to the compile input by pointer — the

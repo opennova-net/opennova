@@ -178,7 +178,7 @@ after the optional SP splash. Every case:
 
 - **Single-player / host** (the straight-line path): load terrain, models,
   weapons, anims, HUD, subsystems, spawn the player, then the final release
-  `@ 0x525d45` (decompiler line ~1045). The world is built entirely behind the
+  `@ 0x525d52` (decompiler line ~1045). The world is built entirely behind the
   loading screen; nothing is presented until the release. Host is a session
   (`g_napi_np_ctx.is_in_session`), single-player is not.
 - **Joiner** (the `else` sub-path `@ 0x524..`, decompiler lines ~620–654): after
@@ -220,8 +220,9 @@ after the optional SP splash. Every case:
 ### SP start-mission splash — show_start_mission_splash @ 0x520820 (ported 2026-08-15)
 
 At the end of a **single-player** load with a custom background
-(`g_loadscreen_has_custom_bg` gate @ 0x525d38, call @ 0x525d42), before the effect
-release @ 0x525d45. The complete witnessed behavior (2026-08-15 session):
+(`g_loadscreen_has_custom_bg` gate @ 0x525d38, call @ 0x525d48), before the effect
+release @ 0x525d52 (0x525d42/0x525d45 are mid-instruction inside the cmp
+@ 0x525d40). The complete witnessed behavior (2026-08-15 session):
 
 - **Entry**: flushes the key event ring (`Input_ResetKeyQueue @ 0x760e00`, called
   @ 0x52085b — head 0x3342A30 = tail 0x3342A34; the ring's sole producer is
@@ -259,7 +260,7 @@ release @ 0x525d45. The complete witnessed behavior (2026-08-15 session):
     or any key (autorepeat WM_KEYDOWNs re-queue and count) dismisses.
 - **Exit** (@ 0x520a48-0x520a8b): ONE final frame with the background only — no
   text, no arrow — then the quad effect is destroyed. The caller then releases the
-  loading-screen effect @ 0x525d45 and the game reveals.
+  loading-screen effect @ 0x525d52 and the game reveals.
 
 **The text-suppression flag `dword_24C1930`**: every gametext/missiontext getter
 (`GameText_GetString* @ 0x51eb90..`, `HUD_GetLoadingScreenTextByGameType`'s
@@ -270,10 +271,11 @@ table presence in the shared text layer.
 
 **Second entry — the epilog-stage re-show (D-LOADSCR-8, not ported)**: from
 `Input_HandleSpecialKeys @ 0x49c5c0`, the `g_spawn_success_gate` branch
-@ 0x49c871: the start key (`dword_B3B744`) with
+(the jnz @ 0x49c871): the start key (`dword_B3B744`) with
 `g_loadscreen_has_custom_bg && !is_in_session` clears `g_epilog_screen_active`,
 recomposites (`render_loading_screen`), re-runs the splash, releases the effect
-(@ 0x49c887-0x49c899), then queues deploy event 12 and sets
+(re-show @ 0x49c88f, release @ 0x49c899; 0x49c887 is the `render_loading_screen`
+call), then queues deploy event 12 and sets
 `g_mission_exit_reason = 4`. This leg rides the SP epilog/respawn flow, which is
 not ported; recorded as a residual rather than blocking the load-end port.
 
@@ -317,7 +319,7 @@ Impac22b.fnt under D-LOADSCR-2's standing CGameFont approximation.
 | D-LOADSCR-2 | Godot FontFile view of the .fnt fonts, drawn under the image scale transform; Godot line metrics + word wrap | CGameFont glyph composite into the texture, `sub_674740`/`sub_6741C0` spacing params (120 small / 0 large, semantics unwitnessed) | glyph-exact spacing is the standing CGameFont follow-up shared with [hud-re.md](hud-re.md); positions/alignments/colors/wrap box are witnessed and ported |
 | D-LOADSCR-3 — **FIXED 2026-07-24** | `world_loaded` completes the wire-header world and available shared assets but does not release a joiner's presentation. `ClientRuntime` continues the real session under the hidden world; `Simulation::is_joined_in_match` / `is_join_deploy_pick_pending` feed edge-triggered `GameWorld.join_admission_ready` / `join_deploy_pick_required`, and `MainGame` releases only at one of those authoritative boundaries. The same deploy edge rearms after death without replaying the loading screen | retail holds through TWO blocking waits bracketing its header-driven terrain/assets load — `NapiClient_WaitForDisconnect @ 0x42cb20` (connect handshake) then `NapiClient_WaitForGameStart @ 0x42cc10` (spawn gate `g_spawn_success_gate @ 0x24c1928`, S2C 0x1D — net-re §5.2) — revealing on the spawn leg or entering the DEATH picker when a spawn choice is owed | real-UDP `main_game_lifecycle_test.gd::test_join_loading_stays_raised_until_authoritative_admission` proves the old early-reveal boundary and the fixed release |
 | D-LOADSCR-4 — **FIXED 2026-08-15** | The SP start-mission splash is ported as a `LoadingScreen` mode: same held background, the blinking centered LT_Continue line (Impac22b.fnt, half-bright, 512 ms white/`0xFF8080` pulse), the cursor-arrow quad at the live mouse position, key-queue-flush entry semantics, any-key/any-mouse-button dismissal, the final background-only frame, and the fire-and-forget START_MISSION one-shot; shell gate + world-tick hold in `main_game.gd` | `show_start_mission_splash @ 0x520820` (the full witness set above) | GUT `loading_screen_splash_test.gd`; the epilog-stage re-show entry split off as D-LOADSCR-8; the 2026-08-15 xref walk corrected the old "or the sound completes" gloss (input-only dismissal) |
-| D-LOADSCR-8 | The epilog-stage splash re-show — the start key at the SP post-spawn stage re-runs the splash then queues the deploy event (@ 0x49c871-0x49c8ad) — is not ported | `Input_HandleSpecialKeys @ 0x49c5c0` branch @ 0x49c887 | rides the unported SP epilog/respawn flow (and the configurable start-key binding, D-CTRL-1 territory); witnessed 2026-08-15, deferred with that flow |
+| D-LOADSCR-8 | The epilog-stage splash re-show — the start key at the SP post-spawn stage re-runs the splash then queues the deploy event (branch jnz @ 0x49c871; recomposite @ 0x49c887, splash re-run @ 0x49c88f, release @ 0x49c899) — is not ported | `Input_HandleSpecialKeys @ 0x49c5c0` branch @ 0x49c871 | rides the unported SP epilog/respawn flow (and the configurable start-key binding, D-CTRL-1 territory); witnessed 2026-08-15, deferred with that flow |
 | D-LOADSCR-5 | seven-segment numeric percentage not ported | drawn only under the `g_ShowLoadBarCommandLineArg` command-line flag | debug-only surface; revisit if the launch-flag work wants it |
 | D-LOADSCR-6 | background drawn unmodulated | effect draw modulate `0xFF7F7F7F` = MODULATE2X neutral | net-identical color; documented so nobody "fixes" a half-bright that isn't there |
 | D-LOADSCR-7 | ESC / disconnect during the SP/host **map load** cannot abort it — that load is a single synchronous `operation.call()` the SceneTree cannot interrupt; ESC is swallowed for its duration | `Client_CheckDisconnectOrEscDuringLoad @ 0x520270` polls at four asset points and aborts to `Post Menu` (`reason = 1`, `g_loading_cancel_flag = 1`) on ESC/disconnect | no reachable interruption window on a synchronous host load — the original's blocking `.bms`/model load is likewise uninterruptible except at its network-wait points. Scope corrected 2026-07-25: this row covers ONLY the synchronous map load. Both joiner waits are frame-polled state machines (one step per frame/tick), so both are interruptible and both honour ESC — the pre-load connect/session wait via `GameWorld.cancel_join_preload()` and the post-load admission tail via `GameWorld.cancel_join_admission()` (previously ESC was consumed and did nothing there for up to the 60 s ConnectOrHost window). Since S10b (2026-08-07) both windows, the abort legs, and their reason texts live in `np::JoinSessionPolicy` (`engine/net/npruntime`); the drive node executes the returned edges. Revisit if the map load is ever chunked across frames. |
@@ -336,7 +338,10 @@ Impac22b.fnt under D-LOADSCR-2's standing CGameFont approximation.
   with the `"&"` substitute): writer untraced; bit 0x100's toggle is
   `Server_ToggleDedicatedFlag @ 0x4dc9c0`.
 - The centered splash text's vertical anchor (top vs baseline at y=730) rides the
-  D-LOADSCR-2 CGameFont approximation; confirm against retail with the visual probe.
+  D-LOADSCR-2 CGameFont approximation; confirm against retail with the visual
+  probes — `godot/tests/game/loading_screen_probe.gd` (splash phase) and
+  `godot/tests/game/loading_screen_splash_render_probe.gd` (windowed
+  self-readback; `OPENNOVA_JO_DIR` + `SPLASH_CAPTURE_DIR`).
 - D-LOADSCR-8 (the epilog-stage splash re-show) above.
 
 ## IDB changes made during the session
@@ -360,3 +365,9 @@ sole head=tail reset of the key ring whose producer is `Input_QueueKeyEvent
 mislabel in its comment; the neighbor name `AudioMixer_ClearState @ 0x760d90`
 looks equally suspect but is human-curated-shaped and was left for a future
 input-cluster pass), and 0x760e00 (the flush semantics). IDB saved.
+
+2026-08-15 post-merge review pass: rewrote the stale primary comment at 0x520820
+and the line comment at 0x52099c — the refuted "sound completion also dismisses"
+gloss had survived in both — and retrimmed the truncated repeatable comment;
+corrected the splash caller cites (call @ 0x525d48, release @ 0x525d52 — the old
+0x525d42/0x525d45 were mid-instruction inside the cmp @ 0x525d40). IDB saved.

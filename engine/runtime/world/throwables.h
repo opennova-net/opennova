@@ -145,9 +145,12 @@ struct PlacedDevice {
     int32_t roll_bam = 0;
     EntityHandle parent;          // stuck-to entity [orig: +40 groundEntity]
     uint64_t parent_spawn_id = 0;
-    // Remaining ticks until the think starts — the ARM DELAY. [orig: the clone
-    // keeps the round's un-aged +684 (noage skipped aging) = ammo max_age, and
-    // Entity_UpdatePool1Slot decrements 1/tick, thinking every tick at <= 0.]
+    // Remaining ticks until the think starts — the ARM DELAY — and, once
+    // armed, the ever-falling AGE (the decrement never stops, so the most
+    // negative value marks the oldest armed device; the per-owner cap keys
+    // its eviction on it). [orig: the clone keeps the round's un-aged +684
+    // (noage skipped aging) = ammo max_age; Entity_UpdatePool1Slot decrements
+    // 1/tick unconditionally @0x4b8ea0, thinking every tick at <= 0.]
     int32_t think_delay_ticks = 0;
 };
 

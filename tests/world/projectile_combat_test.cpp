@@ -1783,6 +1783,65 @@ void test_terrain_impact_samples_charmap_surface() {
     }
 }
 
+// The ordinary BULLET path never remaps a building's CFAC material 1 to the
+// flesh bank: retail's ballistic entity impact passes material + 4
+// unconditionally; the 1 -> 23 remap belongs to the knife's PERSON leg alone.
+// [orig: Projectile_HandleEntityImpact passes ray[22] + 4 @0x4e982b;
+//  AmmoDef_ProcessImpactEffect @0x40a170 clamps only >= 28 to 4 @0x40a1bf;
+//  the remap lives in Weapon_RaycastAndSpawnImpact case 3 @0x4e8880..0x4e8888]
+void test_bullet_building_material_is_plain_plus_four() {
+    World world;
+    world.registry.configure_pool(0, 4);
+    world.registry.configure_pool(2, 4);
+
+    Entity shooter;
+    shooter.kind = EntityKind::Organic;
+    shooter.has_item_def = true;
+    shooter.item_type = 3;
+    shooter.position = {0.0f, 0.0f, 0.0f};
+    const EntityHandle owner = world.registry.spawn(0, shooter);
+
+    Entity building;
+    building.kind = EntityKind::Building;
+    building.has_item_def = true;
+    building.item_type = 3;
+    building.position = {4.0f, 0.0f, 0.0f};
+    building.health = 1000;
+    const EntityHandle bh = world.registry.spawn(2, building);
+
+    CollisionWorld collision;
+    const int32_t model_id = collision.add_model(
+        knife_person_face_model(/*material=*/1));
+    collision.assign_entity(bh, model_id);
+    const int32_t pose[3] = {4 * 65536, 0, 0};
+    CHECK(collision.publish_entity_section_matrices(
+        bh, {collision_matrix_from_heading(0, pose)}));
+    collision.build_tick_tables(world);
+    world.collision = &collision;
+
+    AmmoTableEntry ammo;
+    ammo.name = "BULLET";
+    ammo.valid = true;
+    ammo.velocity = 620;
+    ammo.max_age_ticks = 20;
+    ammo.weight_in_grains = 875;
+    ammo.max_damage = 25;
+    world.ammo.entries.push_back(ammo);
+
+    RoundSpawnParams params;
+    params.owner = owner;
+    params.shooter_handle = owner.packed;
+    params.origin = {0.0f, 0.0f, 1.0f};
+    params.ammo_index = 0;
+    CHECK(world.round_sim.spawn(
+              world, params, RoundConsequenceMode::Authoritative) >= 0);
+    world.round_sim.tick(world, nullptr, &collision);
+
+    CHECK(world.round_sim.impacts.size() == 1);
+    if (!world.round_sim.impacts.empty())
+        CHECK(world.round_sim.impacts[0].effect_tag == 5); // material 1 + 4
+}
+
 int main() {
     test_arming_dud_and_armed_damage();
     test_missing_item_def_consumes_round_without_damage();
@@ -1795,6 +1854,7 @@ int main() {
     test_visual_only_rounds_have_no_gameplay_consequences();
     test_visual_person_proxy_keeps_wire_identity_out_of_authority();
     test_knife_instant_kill_zone_raycast();
+    test_bullet_building_material_is_plain_plus_four();
     test_terrain_impact_samples_charmap_surface();
     test_visual_dynamic_proxy_projects_decoded_pose_geometry();
     test_visual_dynamic_proxy_carrier_gate_and_unresolved_model_raises();

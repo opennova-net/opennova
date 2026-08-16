@@ -571,17 +571,30 @@ int check_u32_scalar_trio() {
 	return 0;
 }
 
-// S2C 0x6B — minimap overlay: [u8 count=1] + one 12-B record (handle + 10 raw).
+// S2C 0x6B — minimap overlay: [u8 count=1] + one FULL 12-B record. Every
+// field is consumed by the handler (the old "10 raw trailing bytes" gloss was
+// a decompile artifact — D-NET-77), so the coverage check pins all seven.
 int check_S_6B_minimap() {
 	LE w;
-	w.u8(1);            // count
-	w.u16(0x0005);      // record handle
-	w.zeros(10);        // 10 raw trailing bytes (unused by the handler)
+	w.u8(1);                                  // count
+	w.u16(0x0005);                            // record handle
+	w.u16(static_cast<uint16_t>(-3));         // x (whole units, s16)
+	w.u16(7);                                 // y
+	w.u16(100);                               // z
+	w.u16(30);                                // lifetime SECONDS
+	w.u8(3);                                  // type (person icon fan)
+	w.u8(12);                                 // height = ring radius source
 	EXPECT(w.b.size() == 13);
 	MinimapOverlayBatch out;
 	EXPECT(decode_minimap_overlay_batch(w.b.data(), w.b.size(), out));
 	EXPECT(out.entries.size() == 1);
 	EXPECT(out.entries[0].handle == 0x0005);
+	EXPECT(out.entries[0].x == -3);
+	EXPECT(out.entries[0].y == 7);
+	EXPECT(out.entries[0].z == 100);
+	EXPECT(out.entries[0].lifetime_s == 30);
+	EXPECT(out.entries[0].type == 3);
+	EXPECT(out.entries[0].height == 12);
 	cover('S', 0x6B);
 	return 0;
 }
@@ -1063,7 +1076,7 @@ int check_C_2F_loadout_submit() {
 
 // S2C 0x50 — team assign (§5.62): 6 B, round-tripped through the real encoder,
 // plus the witnessed short-body default-to-zero tail.
-// [orig: NapiNPClientMsg_0x050 @0x431910]
+// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910]
 int check_S_50_team_assign() {
 	TeamAssign in;
 	in.entity_handle = 0x0007;

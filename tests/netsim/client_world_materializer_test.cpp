@@ -390,7 +390,7 @@ bool deployed_item_spawn_update_and_remove_materialize() {
 		return false;
 
 	w::World world;
-	world.registry.configure_pool(1, 8);
+	world.registry.configure_pool(1, 16);
 	ns::ClientWorldMaterializer materializer;
 	const ns::ClientWorldSyncResult first =
 			materializer.sync(pipeline.state(), world);
@@ -422,6 +422,10 @@ bool deployed_item_spawn_update_and_remove_materialize() {
 			"a same-item 0x59 update mutates pose without replacing the lifetime"))
 		return false;
 
+	// The team-variant pick runs only at FRESH SPAWN: retail's found/update
+	// path never touches the item id, so a later team change (or a re-send
+	// after one) leaves the materialized type and lifetime alone.
+	// [orig: the found path @0x546828..0x54697a; pick @0x5469db fresh only]
 	pipeline.apply_team_assign(owner_handle, 3);
 	pipeline.apply(nw::s2c::DEPLOYED_ITEM,
 			nw::encode_deployed_item_spawn(spawn));
@@ -429,30 +433,66 @@ bool deployed_item_spawn_update_and_remove_materialize() {
 	const ns::ClientWorldSyncResult hostile =
 			materializer.sync(pipeline.state(), world);
 	placed = world.registry.get(w::EntityHandle{spawn.slot_handle});
-	if (!expect(row != nullptr && row->type_id == spawn.enemy_item_id &&
-			row->spawn_revision == friendly_revision + 1 &&
-			hostile.retired.size() == 1 && hostile.spawned.size() == 1 &&
-			placed != nullptr && placed->registry_spawn_id != friendly_lifetime,
-			"a friend-to-foe variant change replaces the native device lifetime"))
+	if (!expect(row != nullptr && row->type_id == spawn.friendly_item_id &&
+			row->spawn_revision == friendly_revision &&
+			hostile.retired.empty() && hostile.spawned.empty() &&
+			placed != nullptr && placed->registry_spawn_id == friendly_lifetime,
+			"a 0x59 update after a team change keeps the spawned type and lifetime"))
+		return false;
+
+	// A fresh spawn while the owner reads hostile picks the enemy variant.
+	nw::DeployedItemSpawn enemy_spawn = spawn;
+	enemy_spawn.slot_handle = 0x1004;
+	pipeline.apply(nw::s2c::DEPLOYED_ITEM,
+			nw::encode_deployed_item_spawn(enemy_spawn));
+	row = pipeline.state().find(enemy_spawn.slot_handle);
+	if (!expect(row != nullptr && row->type_id == spawn.enemy_item_id,
+			"a fresh 0x59 spawn from a hostile owner picks the enemy variant"))
 		return false;
 
 	pipeline.apply_team_assign(owner_handle, 2);
 	pipeline.set_mp_attributes(0x8000u);
+	nw::DeployedItemSpawn forced_spawn = spawn;
+	forced_spawn.slot_handle = 0x1005;
 	pipeline.apply(nw::s2c::DEPLOYED_ITEM,
-			nw::encode_deployed_item_spawn(spawn));
-	row = pipeline.state().find(spawn.slot_handle);
+			nw::encode_deployed_item_spawn(forced_spawn));
+	row = pipeline.state().find(forced_spawn.slot_handle);
 	if (!expect(row != nullptr && row->type_id == spawn.enemy_item_id,
 			"mp_attributes bit 0x8000 forces the enemy deployed-item variant"))
 		return false;
 
+	// The variant pair gate: retail uses friendly/enemy only when BOTH are
+	// nonzero — a one-sided pair shows every client the base item id, even
+	// on the side whose variant IS authored. [orig: @0x5469db..0x546a11]
 	pipeline.set_mp_attributes(0);
-	spawn.owner_handle = 0x0BAD;
-	spawn.friendly_item_id = 0;
+	nw::DeployedItemSpawn one_sided = spawn;
+	one_sided.slot_handle = 0x1006;
+	one_sided.friendly_item_id = 0;
 	pipeline.apply(nw::s2c::DEPLOYED_ITEM,
-			nw::encode_deployed_item_spawn(spawn));
-	row = pipeline.state().find(spawn.slot_handle);
+			nw::encode_deployed_item_spawn(one_sided));
+	row = pipeline.state().find(one_sided.slot_handle);
 	if (!expect(row != nullptr && row->type_id == spawn.item_id,
-			"an unresolved owner or zero variant falls back to the base item"))
+			"a one-sided variant pair falls back to the base item on a friendly viewer"))
+		return false;
+	pipeline.apply_team_assign(owner_handle, 3);
+	nw::DeployedItemSpawn one_sided_foe = one_sided;
+	one_sided_foe.slot_handle = 0x1007;
+	pipeline.apply(nw::s2c::DEPLOYED_ITEM,
+			nw::encode_deployed_item_spawn(one_sided_foe));
+	row = pipeline.state().find(one_sided_foe.slot_handle);
+	if (!expect(row != nullptr && row->type_id == spawn.item_id,
+			"a one-sided variant pair falls back to the base item on a hostile viewer too"))
+		return false;
+	pipeline.apply_team_assign(owner_handle, 2);
+
+	nw::DeployedItemSpawn orphan = spawn;
+	orphan.slot_handle = 0x1008;
+	orphan.owner_handle = 0x0BAD;
+	pipeline.apply(nw::s2c::DEPLOYED_ITEM,
+			nw::encode_deployed_item_spawn(orphan));
+	row = pipeline.state().find(orphan.slot_handle);
+	if (!expect(row != nullptr && row->type_id == spawn.item_id,
+			"an unresolved owner falls back to the base item"))
 		return false;
 
 	nw::EntityRemove removal;
@@ -776,6 +816,40 @@ bool pool2_tail_beyond_1024_materializes() {
 			"the final streamed pool-2 slot (1156) exists at its exact handle");
 }
 
+// S2C 0x12 destroys ONE row and detaches dependents; a child attached to the
+// removed handle survives with its parent link cleared until its own remove.
+// [orig: Entity_Destroy @0x43e810 — occupant/mount detach @0x43e9e9/
+//  @0x43ea38..0x43ea59, memset of the one row @0x43ea70]
+bool entity_remove_detaches_children_in_place() {
+	ns::ClientReplicaPipeline pipeline;
+	nw::PoolSpawnRecord parent;
+	parent.slot_id = 0x1002;
+	parent.item_type_id = 5008;
+	nw::PoolSpawnRecord child;
+	child.slot_id = 0x1003;
+	child.item_type_id = 5009;
+	child.parent_handle = parent.slot_id;
+	nw::PoolSpawnBatch batch;
+	batch.records = {parent, child};
+	pipeline.apply(0x0D, nw::encode_pool_spawn_batch(batch));
+	const ns::ClientEntityState *decoded_child =
+			pipeline.state().find(child.slot_id);
+	if (!expect(decoded_child != nullptr &&
+			decoded_child->parent_handle == parent.slot_id,
+			"the 0x0D child row carries its parent handle"))
+		return false;
+
+	nw::EntityRemove removal;
+	removal.entity_handle = parent.slot_id;
+	pipeline.apply(nw::s2c::ENTITY_REMOVE, nw::encode_entity_remove(removal));
+	decoded_child = pipeline.state().find(child.slot_id);
+	return expect(pipeline.state().find(parent.slot_id) == nullptr &&
+			decoded_child != nullptr &&
+			decoded_child->parent_handle == 0xFFFFu &&
+			!decoded_child->parent_pose_valid,
+			"0x12 removes only the named row; the child survives detached");
+}
+
 int main() {
 	if (!exact_registry_slot_contract()) return 1;
 	if (!registry_lifetime_rejects_handle_reuse()) return 1;
@@ -784,6 +858,7 @@ int main() {
 	if (!preoccupied_exact_slot_requires_a_fresh_wire_generation()) return 1;
 	if (!wire_target_authors_ground_separately_from_parent()) return 1;
 	if (!deployed_item_spawn_update_and_remove_materialize()) return 1;
+	if (!entity_remove_detaches_children_in_place()) return 1;
 	if (!decoded_world_stream_materializes_exact_rows()) return 1;
 	if (!pool2_tail_beyond_1024_materializes()) return 1;
 	std::puts("client_world_materializer_test: PASS");

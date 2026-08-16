@@ -1059,7 +1059,7 @@ bool decode_destroy_entity_list(const uint8_t *body, size_t len,
 
 // S2C 0x50 team assign. A short body leaves every REMAINING field at zero — the
 // handler reads what arrived and never fails on a truncated tail.
-// [orig: NapiNPClientMsg_0x050 @ 0x431910]
+// [orig: NapiNPClientMsg_TeamAssign (0x50) @ 0x431910]
 bool decode_team_assign(const uint8_t *body, size_t len, TeamAssign &out,
                         size_t &consumed) {
 	out = TeamAssign{};
@@ -1305,10 +1305,12 @@ bool decode_u32_scalar(const uint8_t *body, size_t len,
 // Minimap / reload / lifecycle scalars (§5.35).
 // ---------------------------------------------------------------------------
 
-// S2C 0x6B minimap overlay batch — [u8 count] + count × 12-B records. Only the
-// [u16 handle] at each record+0 drives the engine (the blip is rebuilt from the
-// entity's own state); the 10 trailing bytes are kept raw, unused by the handler.
-// [orig: NapiNPClientMsg_0x06B @ 0x425520]
+// S2C 0x6B minimap overlay batch — [u8 count] + count × 12-B records. The
+// handler consumes ALL 12 bytes of each record: handle, whole-unit s16 x/y/z
+// (<<16 at fold), lifetime in SECONDS (x62 at fold), the type byte, and the
+// height byte (the ring radius source). The old "10 trailing bytes unread"
+// gloss was a decompile artifact (D-NET-77, corrected 2026-08-13).
+// [orig: NapiNPClientMsg_0x06B @ 0x425520 marshalling @0x42559f..0x4255dd]
 bool decode_minimap_overlay_batch(const uint8_t *body, size_t len,
                                   MinimapOverlayBatch &out) {
 	out = MinimapOverlayBatch{};
@@ -1437,9 +1439,8 @@ bool decode_chat_history_entry(const uint8_t *body, size_t len,
 // Deployed-item spawn (0x59) + entity-routed sub-packet (0x44) (§5.36).
 // ---------------------------------------------------------------------------
 
-// S2C 0x59 deployed-item / weapon-overlay spawn — fixed 32-B record (the handler
-// reads 15 u16s = 30 B; 2 trailing reserved). pos = 3×i32 16.16; angles 3×u16.
-// [orig: Entity_SpawnOrUpdateFromSlotPacket @ 0x546770]
+// S2C 0x12 destroy-one-entity — [u16 packed handle].
+// [orig: NapiNPClientMsg_0x012 @ 0x425EE0 -> Entity_Destroy @ 0x43E810]
 bool decode_entity_remove(const uint8_t *body, size_t len,
 	                      EntityRemove &out, size_t &consumed) {
 	consumed = 0;
@@ -1450,6 +1451,10 @@ bool decode_entity_remove(const uint8_t *body, size_t len,
 	return consumed == 2;
 }
 
+// S2C 0x59 deployed-item spawn-or-update — fixed 32-B record (the handler
+// reads 15 u16s = 30 B; 2 trailing reserved). pos = 3×i32 16.16; angles 3×u16
+// (the yaw/pitch/roll high halves). [orig: NapiNPClientMsg_0x059 @ 0x4228E0
+//  -> Entity_SpawnOrUpdateFromSlotPacket @ 0x546770]
 bool decode_deployed_item_spawn(const uint8_t *body, size_t len,
                                 DeployedItemSpawn &out, size_t &consumed) {
 	consumed = 0;

@@ -280,7 +280,7 @@ struct InfantryState {
     // changes. The target channel is anim_state/clip_phase; anim_prev owns this
     // independent old-channel phase. The float32 weight is accumulated by 0.1
     // normally, or 1/15 when the target state has flag 0x400.
-    // [orig: AnimMap_UpdateEntity @0x40b5f0; AnimMap_InitFromParams @0x410640]
+    // [orig: AnimMap_UpdateEntity @0x40b5f0; AnimChannel_InitFromParams @0x410640]
     int32_t anim_prev_clip_phase = 0;
     float anim_blend_weight = 1.0f;
     float anim_blend_step = 0.0f;

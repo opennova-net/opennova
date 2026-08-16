@@ -43,6 +43,7 @@ DOMAIN_ORDER: list[tuple[str, str]] = [
     ("WPN", "World / AI + events"),
     ("ITEM", "World / AI + events"),
     ("THROW", "World / AI + events"),
+    ("COL", "World / AI + events"),
     ("ITEMDEF", "Item def"),
     ("MNU", "UI (menu/ctrl/sound/playerinfo/HUD)"),
     ("CTRL", "UI (menu/ctrl/sound/playerinfo/HUD)"),
@@ -71,7 +72,7 @@ DOMAIN_ORDER: list[tuple[str, str]] = [
 ROW_ID = re.compile(r"^(D-([A-Z0-9]+)-\d+|env #\d+)$")
 
 OPEN_TAGS = ("OPEN", "NEEDS-RE", "WITNESSED-READY-DEFERRED")
-CLOSED_TAGS = ("FIXED", "RESOLVED", "PERMANENT")
+CLOSED_TAGS = ("FIXED", "PERMANENT")
 
 
 def parse_rows(section: str) -> list[tuple[str, str, str]]:

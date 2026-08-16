@@ -4,7 +4,7 @@
 // AnimMap_* names are misnomers -- this is charattr.def data, not .adm animation data.
 // [orig: CharAttr_LoadFromDef @0x412140 (the loader this file reproduces),
 //  AnimMap_GetSlotChecksum @0x412aa0 (row select + hash),
-//  CharAttr_SetSlotProperty @0x412890 (the property clear)]
+//  AnimMap_SetSlotProperty @0x412890 (the property clear)]
 #include "npruntime/charattr_challenge.h"
 
 #include <algorithm>
@@ -285,7 +285,7 @@ const CharAttrChallengeRow *find_charattr_challenge_row(
 // own row select anyway; the per-property disable latch (AnimMap_SetSlotDisabled @0x4125c0,
 // called @0x42550d) sets dword_A79508[property] = 1, short-circuiting later sets of that
 // property at @0x4128b3 -- which can only skip a write of zero over zero.
-// [orig: CharAttr_SetSlotProperty @0x412890 -- the nine live cases @0x4128ef (0),
+// [orig: AnimMap_SetSlotProperty @0x412890 -- the nine live cases @0x4128ef (0),
 //  @0x41290b (2), @0x41291e (3), @0x412931 (4), @0x412944 (5), @0x412957 (6),
 //  @0x41297d (7), @0x41296a (8), @0x412990 (9), plus the `default: return 0` arm that
 //  ids 1 and >= 10 fall to; reached from NapiNPClientMsg_ClearAnimSlot @0x4254c0

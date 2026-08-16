@@ -160,17 +160,34 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	draw_list_.big_map_glyphs.clear();
 	draw_list_.elements_drawn = 0;
 
-	// The stance cross-fade restamp [orig: @ 0x599f8a].
+	// The SIGHTS card draws first — the HUD overlays land on top of it
+	// [orig: draw_weapon_sight_overlays @ 0x4dce00 runs at scene end;
+	//  HUD_RenderAllOverlays later in the frame]. It rides the scene pass,
+	//  not the overlay pass, so the level-3 early-out below never covers it.
+	element_sights_card(state, surface_w, surface_h);
+
+	// hud_detail level 3 blanks the ENTIRE gameplay overlay pass — the walk
+	// below never runs [orig: the early-out @ 0x5A80C4..0x5A80DB; the
+	// death-screen "exception" arm calls a spectate-label fn whose own
+	// `level < 2` guard makes it a structural no-op, so the early-out carries
+	// with no exception]. Only the M-cycle big map still compiles: it rides
+	// Render_ProcessMainSceneFrame, not this pass [orig: @ 0x5cac50 ->
+	// HUD_BuildMapOverlayView @ 0x5a7e10] — element_spinmap's own gates
+	// suppress the corner map at this level.
+	if (state.hud_detail_level >= 3) {
+		element_spinmap(state, surface_w, surface_h);
+		return draw_list_;
+	}
+
+	// The stance cross-fade restamp [orig: @ 0x599f8a; it lives inside the
+	// stance drawer, so a blanked level-3 pass never restamps — matched by
+	// placing it under the early-out].
 	if (state.stance != stance_.cur) {
 		stance_.prev = stance_.cur;
 		stance_.cur = state.stance;
 		stance_.stamp = state.ticks;
 	}
 
-	// The SIGHTS card draws first — the HUD overlays land on top of it
-	// [orig: draw_weapon_sight_overlays @ 0x4dce00 runs at scene end;
-	//  HUD_RenderAllOverlays later in the frame].
-	element_sights_card(state, surface_w, surface_h);
 	element_frame(state, surface_w, surface_h);
 	element_health(state, surface_w, surface_h);
 	element_stance(state, surface_w, surface_h);
@@ -197,7 +214,19 @@ void HudFrameCompiler::element_spinmap(const HudFrameState &state, float w,
 	// suppresses the overlay set. [orig: HUD_RenderAllOverlays @0x5a86e8 gate
 	//  dword_2723CC4 (static -1); /NOHUD mask @0x4a7a09/@0x840B18]
 	// The big-map pass runs regardless of the authored corner rect.
-	if (!layout_.spinmap_rect.present && state.minimap.map_mode == 0) return;
+	//
+	// The corner map's declutter gates: the whole spinmap block sits inside
+	// the showhud bit-1 test, with the HUDDECLUT slot-17 cmp nested inside it
+	// (and the level-3 early-out blanks the pass wholesale — compile()'s arm
+	// re-enters here for the big map only). The big-map pass rides
+	// Render_ProcessMainSceneFrame and none of these gates.
+	// [orig: showhud test 2 @0x5A8635; slot-17 cmp @0x5A86E8; level early-out
+	//  @0x5A80C4; big map @0x5cac50]
+	const bool corner_visible = layout_.spinmap_rect.present &&
+			state.hud_detail_level < 3 &&
+			state.declutter_visible[kDeclutterSpinmap] &&
+			(state.showhud_flags & 2u) != 0u;
+	if (!corner_visible && state.minimap.map_mode == 0) return;
 	// Copy-assign into the persistent input so the markers vector reuses its
 	// capacity — a fresh local re-allocated it every frame.
 	HudMinimapInput &input = minimap_input_;
@@ -220,13 +249,15 @@ void HudFrameCompiler::element_spinmap(const HudFrameState &state, float w,
 	input.map_coords_y = layout_.map_coords_y;
 	input.map_coords_off = layout_.map_coords_off;
 	input.overlay_color = active_color(state);
-	// The corner spinmap always compiles as mode 0; an active M-cycle mode
-	// compiles the big map as a second pass over it (retail draws both).
-	// [orig: HUD_RenderAllOverlays spinmap ctx + the mode-gated
-	//  HUD_BuildMapOverlayView pass @0x5cac50]
+	// The corner spinmap compiles as mode 0 (when its gates above pass); an
+	// active M-cycle mode compiles the big map as a second pass over it
+	// (retail draws both). [orig: HUD_RenderAllOverlays spinmap ctx + the
+	//  mode-gated HUD_BuildMapOverlayView pass @0x5cac50]
 	const int map_mode = input.map_mode;
-	input.map_mode = 0;
-	minimap_compiler_.compile(input, draw_list_.map);
+	if (corner_visible) {
+		input.map_mode = 0;
+		minimap_compiler_.compile(input, draw_list_.map);
+	}
 	if (map_mode != 0) {
 		input.map_mode = map_mode;
 		minimap_compiler_.compile(input, draw_list_.big_map);
@@ -309,6 +340,10 @@ void HudFrameCompiler::element_health(const HudFrameState &state, float w,
 		float h) {
 	// [orig: HUD_DrawHealthBar @ 0x5a2e50 — fill (x1+1, y1+1)..(x1+fill, y2),
 	// wireframe border on top, threshold colors]
+	// The DMGBAR declutter gate [orig: the slot-7 cmp @ 0x5A7C99].
+	if (!state.declutter_visible[kDeclutterDmgBar]) {
+		return;
+	}
 	const HudRectRecord &r = layout_.health_rect;
 	if (!r.present || (r.x == 0.0f && r.y == 0.0f && r.w == 0.0f && r.h == 0.0f)) {
 		return;
@@ -393,12 +428,17 @@ void HudFrameCompiler::element_weapon_cluster(const HudFrameState &state,
 	if (!state.weapon.active) {
 		return;
 	}
+	// The WPNGRP declutter gate covers the ammo count, the weapon name, and
+	// the clip indicator [orig: the slot-8 cmps @ 0x5A7CC8 / @ 0x5A7D04 /
+	// @ 0x5A7D42]; the crosshair rides its OWN XHAIRS slot inside
+	// element_crosshair.
+	const bool wpngrp_visible = state.declutter_visible[kDeclutterWpnGrp];
 	const uint32_t wc = half_bright_argb(layout_.weapon_text);
 	char ammo[64];
 	const std::string ammo_text = format_ammo(state.weapon.clip,
 			state.weapon.reserve, state.weapon.capacity);
 	(void)ammo;
-	if (!ammo_text.empty() && layout_.ammo_count.hidden == 0) {
+	if (wpngrp_visible && !ammo_text.empty() && layout_.ammo_count.hidden == 0) {
 		const uint32_t align_flags = layout_.ammo_count.align == 1
 				? kFontAlignRight
 				: (layout_.ammo_count.align == 2 ? kFontAlignCenter : 0u);
@@ -407,7 +447,8 @@ void HudFrameCompiler::element_weapon_cluster(const HudFrameState &state,
 				static_cast<float>(layout_.ammo_count.y), w, h, wc,
 				align_flags);
 	}
-	if (!state.weapon.display_name.empty() && layout_.weapon_name.hidden == 0) {
+	if (wpngrp_visible && !state.weapon.display_name.empty() &&
+			layout_.weapon_name.hidden == 0) {
 		// [orig: @ 0x593b36..0x593bf5 — the 640-wide x nudge]
 		const int nudge =
 				weapon_name_x_nudge(w <= 640.0f, layout_.weapon_name.align);
@@ -419,7 +460,9 @@ void HudFrameCompiler::element_weapon_cluster(const HudFrameState &state,
 				static_cast<float>(layout_.weapon_name.y), w, h, wc,
 				align_flags);
 	}
-	element_clip_indicator(state, w, h);
+	if (wpngrp_visible) {
+		element_clip_indicator(state, w, h);
+	}
 	element_crosshair(state, w, h);
 	++draw_list_.elements_drawn;
 }
@@ -484,6 +527,11 @@ void HudFrameCompiler::element_crosshair(const HudFrameState &state, float w,
 		float h) {
 	// [orig: HUD_DrawCrosshair @ 0x592640 — the !CanFire gate, the spread
 	// projection, the five tapered regions via @ 0x590f50]
+	// The XHAIRS declutter gate covers the whole crosshair complex, AND'd
+	// with the binocular suppression [orig: the slot-13 cmp @ 0x592757].
+	if (!state.declutter_visible[kDeclutterXhairs]) {
+		return;
+	}
 	if (state.binoculars_view_active) {
 		return;
 	}
@@ -619,6 +667,10 @@ void HudFrameCompiler::element_power(const HudFrameState &state, float w,
 		float h) {
 	// [orig: HUD_DrawPowerThrowChargeBar @ 0x599830 — outline + inset fill +
 	// "%d%" 15 output pixels above, all in the flat 0xFF800000 half-red]
+	// The PWRBAR declutter gate [orig: the slot-20 cmp @ 0x5A7DD2].
+	if (!state.declutter_visible[kDeclutterPwrBar]) {
+		return;
+	}
 	if (!state.windup_active) {
 		return;
 	}
@@ -681,6 +733,10 @@ void HudFrameCompiler::element_waypoint(const HudFrameState &state, float w,
 		float h) {
 	// [orig: HUD_DrawWaypointNameAndDistance @ 0x5947a0 — align routing, the
 	// wireframe distance box (field 3 hides only the box)]
+	// The WAYPOINT declutter gate [orig: the slot-3 cmp @ 0x5A7DB8].
+	if (!state.declutter_visible[kDeclutterWaypoint]) {
+		return;
+	}
 	if (!state.waypoint.present || font_.font() == nullptr) {
 		return;
 	}
@@ -1029,6 +1085,14 @@ void HudFrameCompiler::element_messages(const HudFrameState &state, float w,
 		float h) {
 	// [orig: Chat_AddDebugMessage @ 0x4987f0 display — newest at the anchor,
 	// scrolling upward, the HUDCHLINE cap]
+	// The CHAT declutter gate carries a SECOND hard-coded cull on top of the
+	// slot bit: any level >= 2 hides the feed even with slot 23 authored
+	// visible [orig: both tests at the one site @ 0x59AD66]. The message
+	// ring itself keeps aging — only the draw is skipped.
+	if (!state.declutter_visible[kDeclutterChat] ||
+			state.hud_detail_level >= 2) {
+		return;
+	}
 	if (font_.font() == nullptr) {
 		return;
 	}

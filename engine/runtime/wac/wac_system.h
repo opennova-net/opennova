@@ -50,7 +50,7 @@ public:
 	// WacScript_InitAndLoad executes the freshly loaded bytecode once before
 	// the environment's 255-tick startup settle. This does not consume a logic
 	// tick or the normal 62-tick divider.
-	// [orig: call WacScript_ExecuteBytecode @0x4F976B, ++dword_C6EAD8 @0x4F9770]
+	// [orig: call WacScript_ExecuteBytecode @0x4F976B, ++wac_var_ticks @0x4F9770]
 	bool execute_initial(opennova::world::World &world) {
 		if (!vm_.loaded() || initial_executed_ || runs_ != 0) return false;
 		vm_.execute(world);
@@ -67,11 +67,11 @@ public:
         if (++accum_ < kTicksPerExecution) return; // [orig: dword_C6EAD4 ++ / cmp 0x3E]
         accum_ = 0;
         vm_.execute(world);
-        ++runs_; // completed-executions counter [orig: dword_C6EAD8 @0x4f81d3]
+        ++runs_; // completed-executions counter [orig: wac_var_ticks @0x4f81d3]
     }
 
     // Completed VM executions since load (the original's "script has run" flag is
-    // this counter being nonzero). [orig: dword_C6EAD8]
+    // this counter being nonzero). [orig: wac_var_ticks]
     uint32_t runs() const { return runs_; }
 
 	RuntimeState capture_runtime_state() const {
@@ -92,7 +92,7 @@ private:
     Program prog_;
     WacVm vm_;
     int accum_ = 0;     // tick accumulator toward the next execution [orig: dword_C6EAD4]
-    uint32_t runs_ = 0; // [orig: dword_C6EAD8]
+    uint32_t runs_ = 0; // [orig: wac_var_ticks]
 	bool initial_executed_ = false;
 };
 

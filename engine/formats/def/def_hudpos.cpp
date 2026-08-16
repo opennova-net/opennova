@@ -391,7 +391,17 @@ static int parse_hudpos_buf(const char *buf, size_t file_len, DefHudPosFile *out
             }
             parsed = 1;
         }
-        /* HUDDECLUT_ */
+        /* HUDDECLUT_<TOKEN> v0 v1 v2 v3 — the declutter table rows. Retail
+           parses one arm per known token and builds a mask byte where bit i
+           (1/2/4/8 for hud_detail level 0..3) is set iff value i != 0, stored
+           into the 24-slot table; a token WITHOUT an arm authors nothing (the
+           retail JOX file ships a 25th row, HUDDECLUT_CTAPE, that is exactly
+           such a dead token — the binary has no arm for it).
+           [orig: HUD_ParseHudposToken @0x59F370 -> byte_2723CE0[slot]]
+           This parser keeps every row generically (flags normalized to 0/1);
+           the consumer resolves token -> slot and drops unknown tokens
+           (engine/runtime/hud/hud_declutter.cpp), which reproduces the
+           no-arm behavior. */
         else if (lower_starts_with(lower, ll, "huddeclut_", 10)) {
             /* Extract name between _ and first whitespace */
             size_t name_start = 10;

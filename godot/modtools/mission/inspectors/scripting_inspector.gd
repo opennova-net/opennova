@@ -180,7 +180,7 @@ func _build_scripting_panel() -> void:
 	_sc_trigger_xor = InspectorForms.add_checkbox(trig_flags, "MissionScTrigXor", "XOR")
 	_sc_trigger_negate.tooltip_text = "Invert this condition (condition_flags bit 0)."
 	# The engine takes the combine operator from THIS trigger's flags to join the NEXT condition in the
-	# chain (left to right). The last trigger's OR/XOR bits are unused. [orig: sub_454050 @0x454050]
+	# chain (left to right). The last trigger's OR/XOR bits are unused. [orig: EventTrigger_EvaluateChain @0x454050]
 	_sc_trigger_or.tooltip_text = "Join the NEXT condition with OR instead of AND (bit 1)."
 	_sc_trigger_xor.tooltip_text = "Join the NEXT condition with XOR (bit 2)."
 	_sc_trigger_negate.toggled.connect(_on_sc_trigger_flag_toggled)
@@ -364,7 +364,7 @@ func _refresh_scripting_panel() -> void:
 
 # Compose the event's plain-language summary. Each trigger phrase comes from the schema description with its
 # raw params substituted; triggers are joined left-to-right by THIS trigger's operator (engine semantics,
-# sub_454050) and prefixed NOT when negated. Actions are listed in order.
+# EventTrigger_EvaluateChain) and prefixed NOT when negated. Actions are listed in order.
 func _sc_summary_text(triggers: Array, actions: Array) -> String:
 	var when_part := ""
 	if triggers.is_empty():

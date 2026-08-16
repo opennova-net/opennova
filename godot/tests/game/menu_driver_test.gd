@@ -109,6 +109,23 @@ const BOARD_XML := """
 </SCREEN>
 """
 
+const ACTION_BUTTON_XML := """
+<SCREEN>
+  <NAME>MAIN</NAME>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <WINDOW type="window" name="POPUP" HIDDEN>
+      <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>100</BOTTOM></POSITION>
+    </WINDOW>
+    <WINDOW type="button" name="GO">
+      <POSITION><LEFT>200</LEFT><TOP>200</TOP><RIGHT>300</RIGHT><BOTTOM>230</BOTTOM></POSITION>
+      <HOTKEY VIRTUAL>VK_RETURN</HOTKEY>
+      <ACTION type="window" state="SHOW">POPUP</ACTION>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+"""
+
 const HIDDEN_ONLY_XML := """
 <SCREEN>
   <NAME>S</NAME>
@@ -288,6 +305,47 @@ func test_action_dispatched_emits_first() -> void:
 	assert_eq(order, ["dispatched:lan_search", "shell:lan_search",
 			"dispatched:screen", "screen:SUB"],
 			"action_dispatched precedes every effect signal")
+
+
+# The deliberate retail-order inversion (menu-re.md): widget_activated fires
+# BEFORE the scripted ACTION list, so an observer reads pre-action state.
+func test_widget_activated_precedes_action_dispatch() -> void:
+	var driver := _framed_driver(ACTION_BUTTON_XML)
+	var order: Array = []
+	var popup_shown_at_emit: Array = []
+	driver.widget_activated.connect(
+			func(_id: int, name: String) -> void:
+				order.append("activated:" + name)
+				popup_shown_at_emit.append(
+						driver.is_widget_shown(driver.widget_id("POPUP"))))
+	driver.action_dispatched.connect(
+			func(type: String, _target: String) -> void:
+				order.append("dispatched:" + type))
+	assert_true(driver.handle_key_input(_key(KEY_ENTER)), "GO consumed")
+	assert_eq(order, ["activated:GO", "dispatched:window"],
+			"widget_activated precedes the ACTION dispatch")
+	assert_eq(popup_shown_at_emit, [false],
+			"the observer runs before the ACTION list mutates the screen")
+	assert_true(driver.is_widget_shown(driver.widget_id("POPUP")),
+			"the ACTION still ran after the observer")
+
+
+# The inversion's guard: an observer that synchronously swaps the document
+# (the game.mnu ABORT -> teardown -> main.mnu chain) must not have the OLD
+# widget id's ACTION list dispatched against the NEW document.
+func test_document_swap_during_activation_blocks_stale_dispatch() -> void:
+	var driver := _framed_driver(ACTION_BUTTON_XML)
+	driver.widget_activated.connect(
+			func(_id: int, _name: String) -> void:
+				assert_true(driver.open_document(
+						_doc(ACTIONS_XML), null, null, null, "other.mnu"),
+						"observer swaps the document mid-activation"))
+	watch_signals(driver)
+	assert_true(driver.handle_key_input(_key(KEY_ENTER)), "GO consumed")
+	assert_signal_emitted(driver, "widget_activated")
+	assert_signal_not_emitted(driver, "action_dispatched")
+	assert_eq(driver.get_current_screen(), "MAIN",
+			"the new document is live and untouched by the stale ACTION list")
 
 
 # --- (b) screen_changed + music_changed -----------------------------------------

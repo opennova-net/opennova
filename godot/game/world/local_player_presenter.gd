@@ -82,6 +82,14 @@ func set_debug_force_viewmodel(enabled: bool) -> void:
 	debug_force_viewmodel = enabled
 
 
+## The showhud bit-0 FP-gun gate, forwarded to the rig's visibility decision.
+## GameHudPresenter owns the showhud flag cycle and pushes the bit here.
+## [orig: g_FpWeaponViewFlags bit 0 read by Player_RenderFirstPersonViewModel
+##  @0x4DEDEA]
+func set_fp_gun_visible(visible: bool) -> void:
+	_viewmodel_rig.set_fp_gun_visible(visible)
+
+
 func is_debug_force_viewmodel() -> bool:
 	return debug_force_viewmodel
 

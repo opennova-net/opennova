@@ -131,10 +131,21 @@ int main() {
 		view.tick_minimap_overlays();
 	CHECK(find_slot(view.state().minimap, entity.handle) == nullptr,
 			"special unlinked marker expires after 1984 ticks");
+	// The alpha-0 reject lives ONLY on the 33..42 alias branch: a DIRECT
+	// index < 0x20 takes the table entry straight (the draw path forces
+	// alpha 0xFF), while an alias resolving to an alpha-0 entry rejects.
+	// [orig: direct @0x5beb16..0x5beb1b (no test); alias gate @0x5beb3e]
 	view.apply(opennova::s2c::CAPTURE_ZONE_STATE,
 			zone(entity.handle, 12, 25, 0x40));
+	slot = find_slot(view.state().minimap, entity.handle);
+	CHECK(slot != nullptr && slot->argb == 0x00000000u,
+			"a direct alpha-0 table index still creates the slot");
+	view.apply(opennova::s2c::CAPTURE_ZONE_STATE,
+			zone(entity.handle, 0, 0, 0x20));
+	view.apply(opennova::s2c::CAPTURE_ZONE_STATE,
+			zone(entity.handle, 12, 42, 0x40));
 	CHECK(find_slot(view.state().minimap, entity.handle) == nullptr,
-			"an alpha-0 color entry rejects the marker");
+			"an alias index onto an alpha-0 entry rejects the marker");
 
 	// Unknown-but-valid pool handles are retained with a zero pose, matching
 	// retail's unconditional pool-slot read. [orig: @0x5beac0]
@@ -238,6 +249,19 @@ int main() {
 	view.tick_minimap_overlays();
 	CHECK(probe != nullptr && probe->remaining_ticks > 0,
 			"the surviving 0x6B link re-arms its slot — the marker resurrects");
+	CHECK(probe != nullptr && probe->handle == 0x2006,
+			"the link walk restores the slot's handle each tick "
+			"[orig: @0x5bfd95..0x5bfdc8]");
+	// With the handle restored, a later 0x40 record for that handle updates
+	// THIS slot in place instead of allocating a twin.
+	view.apply(opennova::s2c::CAPTURE_ZONE_STATE, zone(0x2006, 12, 8, 0x40));
+	{
+		int slots_for_handle = 0;
+		for (const auto &s2 : view.state().minimap.special)
+			if (s2.active && s2.handle == 0x2006) ++slots_for_handle;
+		CHECK(slots_for_handle == 1,
+				"a repeat 0x40 after the clear finds the restored slot (one slot)");
+	}
 
 	// Handle gates include the witnessed per-pool capacity (pool 2 holds
 	// 1200 slots): index 0xFFE drops in BOTH appliers before any write.

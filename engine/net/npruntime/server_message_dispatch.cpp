@@ -315,7 +315,7 @@ std::vector<uint8_t> build_tag60_server_info(const GameConfig &cfg) {
 	return reply;
 }
 
-// tag=0x64 chunked mission-metadata transfer. [orig: NapiNPClientMsg_0x064 @0x432410]
+// tag=0x64 chunked mission-metadata transfer. [orig: NapiNPClientMsg_HandleMissionDataChunk (0x64) @0x432410]
 std::vector<uint8_t> build_tag64_mission_metadata(
 		const GameConfig &cfg, const MissionMetadataBlob *session_blob) {
 	MissionMetadataBlob fallback{};
@@ -994,7 +994,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// index to signed char before the live AmmoDef-capacity gate.
 				// The retail client commonly appends the echoed four-byte request
 				// key; the host consumes only index+CRC and ignores that tail.
-				// [orig: NapiNPServerMsg_0x021 @0x502050]
+				// [orig: handle_anti_cheat_crc_check (0x21) @0x502050]
 				if (integrity_profile == nullptr) break;
 				const uint8_t raw_index =
 						msg.payload.empty() ? 0 : msg.payload[0];
@@ -1087,7 +1087,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						s2c::SPECTATOR_FLAGS,
 						build_tag75_player_state(conn, world)));
 				break;
-			case c2s::FILE_CHUNK_REQUEST: // server-info request -> 0x60 chunk [orig: NapiNPServerMsg_0x033 @0x515230]
+			case c2s::FILE_CHUNK_REQUEST: // server-info request -> 0x60 chunk [orig: NapiNPServerMsg_HandleReplayRequest (0x33) @0x515230]
 				replies.push_back(make_protocol_message(s2c::FILE_TRANSFER_CHUNK, build_tag60_server_info(config)));
 				break;
 			case c2s::MISSION_CHUNK_REQUEST: // mission-file request -> 0x64 chunk only [orig: NapiNPServerMsg_0x037_SendCircularBuffer @0x5152E0]
@@ -1106,7 +1106,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					conn.reply.roster_completed_tick = now_tick;
 				}
 				break;
-			case c2s::LOADOUT_SUBMIT: { // loadout request -> 0x5A [orig: NapiNPServerMsg_0x02F @0x515790]
+			case c2s::LOADOUT_SUBMIT: { // loadout request -> 0x5A [orig: NapiNPServerMsg_HandlePlayerLoadout (0x2F) @0x515790]
 				// Golden (f317-318): C 0x2F -> S 0x5A + game-start bundle. The 0x5A populates
 				// the joiner's weapon slots BEFORE the first 0x0A; without it every 0x0A triggers
 				// the weapon-slot mismatch -> C2S 0x0F flood. Also unlatches the burst's phase 8

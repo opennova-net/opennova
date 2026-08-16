@@ -16,8 +16,9 @@ the strays, and new hooks land here in the same PR that adds them.
 | `NW_LAN_PORT=<port>` | host bind-port override (default: the retail LAN range head, `npwire/net_ports.h`) |
 | `NW_LAN_GAMETYPE=<n>` | numeric g_GameType override (default Co-op `HostSessionConfig.GAME_TYPE_COOP`) |
 | `NW_LAN_NAME=<callsign>` | callsign override for two-instance same-machine demos (15-char wire clamp applies) |
-| `NW_REPLAY=<host:port>` | boot straight into the replay/spectate view dialing that source |
-| `NW_REPLAY_DIR` / `NW_REPLAY_LOOSE` / `NW_REPLAY_ITEMS` | spectate resource dir / flat-extract flag / items.def override |
+| `NW_LAN_MODE=<1..4>` | host LAN rate-mode override (the witnessed holdoffs 12/6/4/3; out-of-range values keep the default) |
+| `NW_LAN_MAX_PLAYERS=<1..64>` | listen-host capacity override for the env-boot path |
+| `NW_SP_DEBUG_POSE="x,y,z[,yaw_deg]"` | one-shot teleport of the local player beside `NW_SP_MISSION` — pose-matched retail captures |
 
 ## Diagnostics (all off by default)
 
@@ -34,12 +35,20 @@ the strays, and new hooks land here in the same PR that adds them.
 |---|---|
 | `NOVA_VM_WEAPON=<WPN_*>` | viewmodel weapon override — the `body_holds_probe` / `game_world_test` A/B seam |
 | `GODOT_BIN=<path>` | which Godot binary the sh scripts use (else `scripts/godot_bin.sh` resolves `.godot-bin/`) |
+| `NW_RESOURCE_DIR=<dir>` | the retail install an `NW_SP_MISSION` probe mounts |
+| `NW_PROBE_SHOTS=<dir>` | ladder probe: save action-shot PNGs there (non-headless run) |
+| `NW_PROBE_BOTTOM=1` | ladder probe: full-span diagnostic — enter at the base |
+| `SPLASH_CAPTURE_DIR=<dir>` + `OPENNOVA_JO_DIR` | the splash render probe: capture output dir + the retail install it mounts |
+| `OPENNOVA_WAC_CORPUS_DIRS=<dir;dir;...>` | `wac_corpus_test`: extra corpus dirs (semicolon list) |
+| `OPENNOVA_MNU_EXTRA=<path.mnu>` | `mnu_compat_test`: a developer-only loose menu to include |
 
 ## Test-data gates
 
 Owned entirely by [asset-gated-tests.md](asset-gated-tests.md) (`OPENNOVA_JO_DIR`,
 `OPENNOVA_MODSUPEROED_DIR`, `NW_GOLDEN_*`, …) — machine paths go in
-`.claude/settings.local.json` `env`, never tracked.
+`.claude/settings.local.json` `env`, never tracked. `OPENNOVA_JO_ASSETS` now also
+gates ctest `root_motion` and the two sound GUT tests
+(`sound_dialog_test.gd`, `sound_integration_test.gd`).
 
 ## Known debt (recorded, not yet unified)
 

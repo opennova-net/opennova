@@ -241,6 +241,51 @@ func test_maybe_begin_never_raises_headless() -> void:
 	coordinator.finish_presentation()
 
 
+func test_maybe_begin_positive_leg_raises_and_restores_the_cursor() -> void:
+	# The same wrapper with the headless policy injected off: the gate passes,
+	# the splash raises, the OS cursor hides for the splash's own arrow
+	# [orig: Mouse_SetCallback(0) @ 0x520862], and the dismissal edge
+	# restores it.
+	var owner: Node = add_child_autofree(Node.new())
+	var root := _art_root()
+	var world: GameWorld = autofree(GameWorld.new())
+	var coordinator := WorldLoadCoordinator.new()
+	var operation := coordinator.start(owner, root, world,
+			{"mission_file": "00TRg.bms"}, func() -> int: return OK)
+	assert_not_null(operation)
+	await _pump_frames(4)
+	watch_signals(coordinator)
+	assert_true(coordinator.maybe_begin_start_mission_splash(
+			null, false), "the positive leg raises with the skip injected off")
+	assert_true(coordinator.is_splash_active())
+	# The OS mouse-mode set is a no-op under the headless display server, so
+	# the cursor hide/restore device leg cannot be asserted here; the raise +
+	# the forwarded dismissal edge are the observable positive-leg contract.
+	_push_key(KEY_SPACE)
+	await _pump_frames(3)
+	assert_signal_emitted(coordinator, "splash_dismissed")
+	assert_false(coordinator.is_splash_active(),
+			"the dismissal edge tears the splash down")
+	coordinator.finish_presentation()
+
+
+func test_splash_survives_ready_after_pre_tree_begin() -> void:
+	# begin before add_child: _ready()'s callback disarm must not neuter an
+	# already-ACTIVE splash (the guard on _splash_state).
+	var root := _art_root()
+	var screen: LoadingScreen = LoadingScreen.new()
+	screen.setup(root, {"mission_file": "00TRg.bms"})
+	assert_true(screen.begin_start_mission_splash(root))
+	add_child_autofree(screen)
+	assert_true(screen.is_splash_active())
+	assert_true(screen.is_processing_input(),
+			"_ready leaves an active splash armed")
+	_push_key(KEY_SPACE)
+	await _pump_frames(3)
+	assert_false(screen.is_splash_active(),
+			"the pre-tree-raised splash still dismisses")
+
+
 # --- helpers -------------------------------------------------------------------
 
 var _roots := {}

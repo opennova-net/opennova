@@ -140,7 +140,7 @@ constexpr int host_filter_category(uint32_t g) {
 }
 
 // The SELECTED_MISSIONS type cell's gametext key in the GateTypeAbbrev
-// section [orig: get_game_type_abbreviation @ 0x520fc0 host arm — the DM/TDM/
+// section [orig: get_game_type_abbreviation @ 0x520fd0 host arm — the DM/TDM/
 // KOTH/TKOTH/CTF/SD/AD/FB/FM/AAS/CAC literals + COOP for the waypoint family].
 constexpr const char *host_abbreviation_key(uint32_t g) {
 	if (is_waypoint_family(g)) return "COOP";

@@ -146,12 +146,6 @@ struct CollisionSection {
     int32_t offset[3] = {};         // exact COBJ section offset (16.16)
     int32_t center[3] = {};         // bound-sphere center (section-local 16.16)
     int32_t radius = 0;             // bound-sphere radius (16.16); negative = absent synthetic row
-    // The authored COBJ type dword (file +0, runtime record +0). The minimap
-    // footprint slice walks only sections whose LOW BYTE is <= 1 — higher
-    // codes are the special/interior section families it skips.
-    // [orig: the runtime-COBJ copy @0x5b3bf0 (+0 = file dword 0);
-    //  render_collision_wireframe @0x596800 gate *(BYTE*)cobj <= 1]
-    int32_t type_code = 0;
     // Hierarchy metadata copied from COBJ::parent_subobject_index. This is NOT
     // the section-matrix selector: retail pairs callback matrix i with COBJ i
     // strictly by ordinal, even when several COBJ rows share one parent.
@@ -528,7 +522,7 @@ struct LadderResolveIO {
     bool is_local_player = false;
     // View + body pose channels (BAM32). view_yaw/view_pitch are entity
     // +0x10/+0x14; for the local player the embedder's mouse accumulator must
-    // inherit any resolver write-back (retail drags dword_B75FCC / dword_B7900C
+    // inherit any resolver write-back (retail drags g_LocalPlayerLookYaw / dword_B7900C
     // alongside the entity fields).
     int32_t *view_yaw = nullptr;
     int32_t *view_pitch = nullptr;
@@ -744,12 +738,6 @@ public:
     bool has_instance(const World &world, EntityHandle h) const;
     bool has_instance(EntityHandle h) const;
     size_t instance_count() const { return instances_.size(); }
-    // The assigned intact model id for a live entity (-1 = none). The minimap
-    // footprint feed resolves each building's collision mesh through this.
-    int32_t entity_model_id(const World &world, EntityHandle h) const {
-        const Instance *inst = live_instance(world, h);
-        return inst != nullptr ? inst->model_id : -1;
-    }
 
     // --- per-tick snapshots ---
     // [orig: Entity_BuildProximityLists_Pool2 @ 0x4b9430] statics (pool-2 style):
@@ -977,11 +965,14 @@ public:
     // one world-level frame is the faithful carrier.
     // [orig: g_LadderContact{Pitch,Yaw,X,Y,Z} @ 0xB5AB70..80]
     LadderContact last_ladder_frame;
-    // Whether the last resolve's second relaxation pass produced a contact —
-    // org1's on-ladder facing press runs only while this is clear.
-    // [orig: dword_B57C8C, latched from the pass-2 contact flag @ 0x4b3a5c;
-    //  read @ 0x4bfa45]
-    bool second_pass_contact_latch = false;
+    // Whether the last resolve APPLIED a nonzero net push — org1's on-ladder
+    // facing press runs only while this is clear. (NOT the pass-2 contact
+    // flag: retail re-zeroes that stack slot after both passes and re-sets it
+    // only when the accumulated total force is nonzero, so the global latches
+    // "the resolver moved the entity this resolve".)
+    // [orig: dword_B57C8C — slot re-zero @ 0x4b3734, set on nonzero total
+    //  @ 0x4b3767, stored @ 0x4b3a5c-0x4b3a62; read @ 0x4bfa3e-0x4bfa45]
+    bool resolver_applied_push = false;
 
     // The witnessed on-ladder person probe: 1.25u ahead of the climber, a live
     // pool-0 person within 1.125u on both axes whose Z band overlaps holds the

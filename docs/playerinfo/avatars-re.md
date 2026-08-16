@@ -239,7 +239,7 @@ pointer).
 avatar data it also holds an unrelated **HUD minimap-entity table** at
 `this + 14153` dwords (≈ +56612), 256 × 36 B slots, managed by
 `[orig: MinimapSlot_FindOrAllocByEntityId @ 0x57b1e0]` /
-`HUD_DrawAllMinimapEntities @ 0x57b080`. That region is *not* part of
+`MinimapSlot_InitBlipFromPackedId @ 0x57b080` (renamed 2026-08-15, ex HUD_DrawAllMinimapEntities). That region is *not* part of
 `Avatars.def`; it only shares the base address. This co-location is why several
 avatar accessors carry auto-names prefixed `MinimapSlot_*` (see proposed
 corrections below) — `MinimapSlot_GetFieldByIndex @ 0x579e70` is in fact the
@@ -422,9 +422,12 @@ The stores also pin the `weapon.sav` side header: selected control values land
 at side `+0` class, `+1` nationality id, `+2` division id, and `+4` packed u16.
 The class loop advances by `0x8006` and updates both sides
 `[orig: @0x55EE3F..0x55EE6D]`; nationality/division/packed add
-`0x8006*g_playerInfoTeam` and update only the selected side
+`0x8006*teamIndex` (`@0x25dc548`) and update only the selected side
 `[orig: @0x55EE93..0x55EF38]`. The enclosing active-record index uses the
-`0x1080C` stride (`g_curProfileSlot @0x25506B8`).
+`0x1080C` stride (`g_curProfileSlot @0x25506B8`). One recorded, bounded
+divergence: retail writes only the SELECTED side's avatar bytes, while the
+port rewrites both sides from memory — normalizing a stale other side to
+the retail default.
 
 ### Loadout population (D-PLAYERINFO-11)
 `[orig: populate_weapon_slot_lists @ 0x560430]` fills PRIMARY/SECONDARY/ACCESSORY
@@ -590,7 +593,7 @@ stable.
 | D-PLAYERINFO-6 | `nationality`/`division` id token: `if (*idStr > '9') ++idStr;` then `atol` | a single leading non-digit character is skipped before parsing the numeric id. The reimpl parser must mirror this lenient id read. |
 | D-PLAYERINFO-7 | screen = init (`PlayerInfo_InitProfileSelector @ 0x5611b0`) → `PlayerInfo_PopulateAllControls(team)` + 28 per-control handlers registered via `sub_63C060`; the nat→div→combo cascade (`@ 0x560600`/`@ 0x560690`, notify `0x5000001`) repopulates dependents and **resets the division on a nationality change** | the reimpl port reproduces the populate order and the cascade: selecting a nationality resets the division selection and refills division+combo; selecting a division refills combo. |
 | D-PLAYERINFO-8 | PLAYERCLASS byte 5..9 → power-of-two class mask `g_playerInfoClassMask` (1/2/4/8/16); team → `g_playerInfoTeamMask = 2-(team!=0)` (`PlayerInfo_SetTeamAndClassMask @ 0x55de60`) | **implemented**: `player_info_menu_companion._selected_class_mask` (5..9→1/2/4/8/16) + team mask `2-(team!=0)` gate the weapon slot lists; repopulate on class/team change. |
-| D-PLAYERINFO-9 | ACCEPT/commit (`save_player_info_from_dialog @ 0x55EE10`) writes class (both teams), nat/div/combo, autoreload→`profile+1524`, automedic→`profile+1660` (**inverted**), name→`profile+4` (whitespace-rejected), then `serialize_weapon_loadout` | **avatar/class slice FIXED 2026-08-15:** both per-side selections restore from and atomically save to active `weapon.sav` slot 0; class is written to both side blocks (`@0x55EE3F..0x55EE6D`) while avatar bytes remain per-side (`@0x55EE93..0x55EF38`), and other slots/pages are preserved. Remaining: serialize newly edited kit tuples and the `player.sav`-level option fields. |
+| D-PLAYERINFO-9 | ACCEPT/commit (`save_player_info_from_dialog @ 0x55EE10`) writes class (both teams), nat/div/combo, autoreload→`profile+1524`, automedic→`profile+1660` (**inverted**), name→`profile+4` (whitespace-rejected), then `serialize_weapon_loadout` | **avatar/class slice FIXED 2026-08-15:** both per-side selections restore from and atomically save to active `weapon.sav` slot 0; class is written to both side blocks (`@0x55EE3F..0x55EE6D`) while avatar bytes remain per-side (`@0x55EE93..0x55EF38`), and other slots/pages are preserved. Recorded, bounded divergence: retail writes only the selected side's avatar bytes; the port rewrites both sides from memory, normalizing a stale other side to the retail default. Remaining: serialize newly edited kit tuples and the `player.sav`-level option fields. |
 | D-PLAYERINFO-10 | TESTPLAYERVOICE previews `"VOICE_%d"` from `g_MenuSoundBank` (`menu.lwf`); voice index = profile override `profile+1532+team` else the avatar combo's voice; PLAYERVOICE list = DEFAULT_VOICE + per-character `CHARVOICE_%d` | **implemented**: the named button requests the selected avatar fallback as `VOICE_%d` through `menu.lwf`, and the avatar-derived list remains populated by `PlayerInfoMenuCompanion`; `test_voice_preview_requests_selected_avatar_voice` pins the public request. Persisted profile overrides ride D-PLAYERINFO-9. |
 | D-PLAYERINFO-11 | loadout combos from the weapon table `@ 0x2540D08` (192 B), filtered by class+team mask, slot-routed by `weapon_class +108` (1/2/0 = PRIMARY/SECONDARY/ACCESSORY), `"NONE"` first; ammo `@ 0x55e8b0`; weight `@ 0x55f480`. Producer `WeaponDef_ParseProperty @ 0x54d730` grilled — full `weapon.def` field map (above). | **FIXED 2026-07-30:** weapon lists, ammo combos, weight math/readout, and icons are ported through `engine/formats/def`, `WeaponDatabase`, and `PlayerInfoMenuCompanion`; `def_loadout_weight_test` and `player_info_menu_seam_test` pin the rules and UI host wiring. Persisting newly edited kit tuples is tracked separately by D-PLAYERINFO-9. |
 | D-PLAYERINFO-12 | selection state lives in per-slot/per-team globals keyed `[67596*slot + 32774*team]` (`g_charSelClass/Nationality/Division/Combo @ 0x2551130/1/2/4`), distinct from the 15488-B profile object (`profile @ 0x252de58`: name`+4`, autoreload`+1524`, voice`+1532`, automedic`+1660`) | **per-team memory FIXED 2026-08-15; the profile-slot dimension stays OPEN.** `PlayerCharacterSelectionState` keeps both team sides for slot 0 (restore on entry, survive a team switch, ClientAuth/host spawn, 0x0C decode, presentation) and the writer preserves the other four `weapon.sav` records; retail's five-slot `PLAYER` selector (`PlayerInfo_InitProfileSelector @0x5611b0`, `g_curProfileSlot @0x25506B8`) is not ported — the ledger row tracks that residual, it is not a "kept" decision. |
@@ -614,8 +617,16 @@ The following axes are now pinned by native tests and surfaced through
   matching `0x57a456`. The 128-combo allocator cap at `0x579e10` is retained as a
   safe parse error rather than reproducing the original null/overflow hazard.
 
-IDB changes made during this fix pass: none. The IDB remained read-only; proposed
-renames/types below still await maintainer approval.
+IDB changes made during the parser fix pass itself: none — that pass kept the
+IDB read-only; proposed renames/types below still await maintainer approval.
+
+## IDB changes made (2026-08-15 customization review, saved)
+
+- **Functions:** `sub_57A370 → Avatar_SetHeadCamoCtrl`,
+  `RenderState_SetEntityColor_Alt → Avatar_SetBodyCamoCtrl @ 0x57A390`,
+  `RenderState_SetEntityColor_Primary → Avatar_SetArmsCamoCtrl @ 0x57A3B0`
+  (the "entity color" names were misnomers — they store the per-part
+  TEX_CAMO1/2/3 triplet).
 
 ## IDB changes made (2026-06-23 orchestration grill)
 

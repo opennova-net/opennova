@@ -114,6 +114,18 @@ public:
 	int get_friendly_tag_mode() const;
 	void set_hud_color_index(int p_index);
 	int get_hud_color_index() const;
+	// The HUD declutter level 0..3 (retail: the persisted cfg int
+	// "hud_detail" @0x24D20BC driving CRenderState_SetLayerVisibility
+	// @0x59B0F0, see docs/interface/hud-re.md). The overlay owns the
+	// HUDDECLUT mask table (fed from the parsed hudpos in configure) and
+	// rebuilds the compiler's per-slot visibility here.
+	void set_hud_detail_level(int p_level);
+	int get_hud_detail_level() const;
+	// The showhud 2-bit FP-view flags (retail: g_FpWeaponViewFlags cycle
+	// @0x4E0561): bit 0 = the FP gun (consumed by the viewmodel rig, not
+	// here), bit 1 = the corner spinmap block.
+	void set_showhud_flags(int p_flags);
+	int get_showhud_flags() const;
 	// Per-frame environment feed: the fog cull distance (16.16; <= 0 disables)
 	// and the speaking entity's voice level 0..255.
 	void set_friendly_tag_env(int p_fog_dist_q16, int p_speaking_level255);
@@ -152,6 +164,10 @@ private:
 	opennova::hud::HudFrameCompiler compiler_;
 	opennova::hud::HudLayout layout_;
 	opennova::hud::HudFrameState state_;
+	// The HUDDECLUT mask table + level (engine hud_declutter carries the
+	// witness map); apply_declutter_() restamps the compiler input's
+	// visibility table after any mask or level change.
+	opennova::hud::HudDeclutter declutter_;
 	Ref<ResourceRoot> root_;
 	std::array<Ref<Texture2D>, kTextureSlots> textures_;
 	// Font glyph pages, one namespace per compiler font slot
@@ -200,6 +216,8 @@ private:
 	bool big_map_top_sampling_configured_ = false;
 
 	Vector2 draw_surface_() const;
+	// Restamp state_'s declutter visibility/level from declutter_.
+	void apply_declutter_();
 	Ref<Texture2D> load_hud_texture_(const String &p_name,
 			bool p_generate_mipmaps = false) const;
 	// MODULATE2X equivalence for a white-modulated static sprite: RGB x2

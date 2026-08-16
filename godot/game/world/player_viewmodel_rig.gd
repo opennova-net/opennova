@@ -77,6 +77,15 @@ var _vm_pass_layer: CanvasLayer = null
 var _vm_viewport: SubViewport = null
 var _vm_camera: Camera3D = null
 var _vm_parts: Array[ObjectModel] = []  # the builder's typed viewmodel models
+# The showhud bit-0 FP-gun gate (GameHudPresenter cycles the flags and pushes
+# the bit through LocalPlayerPresenter.set_fp_gun_visible). Default on = the
+# boot flags value 3. [orig: g_FpWeaponViewFlags bit 0, tested by
+# Player_RenderFirstPersonViewModel @0x4DEDEA before the FP submit]
+var _fp_gun_visible := true
+
+
+func set_fp_gun_visible(visible: bool) -> void:
+	_fp_gun_visible = visible
 
 
 func setup(world, presenter, camera: Camera3D) -> void:
@@ -257,7 +266,11 @@ func update_viewmodel(view: PlayerLocalView, weapon_view: PlayerWeaponView,
 	# the card path @0x5caaf3..0x5cab15 and the viewmodel candidate @0x5ca32c].
 	var carded := view != null and view.scope_card_active
 	var binoculars := view != null and view.binoculars_view_active
-	var retail_submit := not third_person and not carded and not binoculars
+	# The showhud bit-0 gate ANDs into the retail submission decision [orig:
+	# Player_RenderFirstPersonViewModel @0x4DEDEA — test g_FpWeaponViewFlags, 1
+	# before the FP pass].
+	var retail_submit := not third_person and not carded and not binoculars \
+			and _fp_gun_visible
 	# The debug override intentionally extends retail's submission scope, but a
 	# model made visible by that probe still needs a coherent CTRL snapshot.
 	var submit_viewmodel := retail_submit or force_visible

@@ -402,7 +402,6 @@ public:
 	// the CTRL registers that stay per part (not forwarded).
 	void add_presentation_link(ObjectModel *p_model,
 			const PackedStringArray &p_part_local_registers = PackedStringArray());
-	int get_presentation_link_count() const;
 	void set_mirror_reflected(bool p_reflected) { mirror_reflected_ = p_reflected; }
 	bool get_mirror_reflected() const { return mirror_reflected_; }
 	void set_native_frame(bool p_native) { native_frame_ = p_native; }

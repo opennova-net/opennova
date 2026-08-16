@@ -13,7 +13,7 @@ converts the **Importer pipeline** from `UNAUDITED` to *tracked-by-composition*
 `onimport.exe` = `apps/importer/` (the CLI, dispatcher, job runner, and Blender
 `scene_builder`) over `pyopennova/` (the Python FFI layer to the native `libs`).
 The dispatcher (`dispatcher.py`) is a worker pool; `import_runner.py` /
-`jobs.py` / the `scene_builder/` package orchestrate reading an asset and
+the `opennova_jobs/` package / the `scene_builder/` package orchestrate reading an asset and
 building a Blender scene / glTF component.
 
 ## Parity surface = the composed format readers (each already RE'd)
@@ -28,7 +28,7 @@ the importer inherits their parity, it does not re-derive it:
 | `bad_ffi` (skeletal anim) | `engine/runtime/anim` | `.bad`/`.adm` skeletal runtime record |
 | `def_ffi` (item defs) | `engine/formats/def` | [world/itemdef-re.md](../world/itemdef-re.md) (D-ITEMDEF) |
 | `vfs_ffi` (PFF mount / SCR / BFC1 — inside the native VFS) | `engine/base/vfs` (`engine/formats/pff`, `engine/formats/scr`) | [vfs/vfs-pff-mount-re.md](../vfs/vfs-pff-mount-re.md) (D-VFS); D-SCR register (ledger PERMANENT) |
-| `ase_ffi` / `ase_material_writer` | `engine/formats/threedi` ASE path | 3DI material-pipeline record |
+| `ase_ffi` | `engine/formats/ase` | 3DI material-pipeline record |
 
 ## Where the importer's own choices live — and why they are NOT parity divergences
 
@@ -51,7 +51,7 @@ DCC spec's tracking, not a `D-IMPORTER` catalog.
 
 Behavior is pinned by `tests/test_importer_entrypoint.py`,
 `test_importer_integration.py`, `test_importer_jobs.py`,
-`test_importer_screenshot_capture.py`, and `test_max_import_runner.py` (plus the
+`test_importer_screenshot_capture.py`, and `test_qt_ui_backend.py` (plus the
 `pyopennova` FFI unit tests). Asset-gated integration paths follow the
 [asset-gated-tests.md](../asset-gated-tests.md) policy.
 

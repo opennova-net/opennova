@@ -182,6 +182,14 @@ _Avoid_: player vehicle, mounted player (when the carrier Entity is meant)
 The Player's selected loadout role, such as medic, sniper, gunner, rifleman, or engineer.
 _Avoid_: player class, replication class, character identity
 
+**Character id**:
+The packed `Avatars.def` nat|div|combo|side word the wire and world/FP composition key on (`npwire/character_id.h`).
+_Avoid_: avatar id, skin id, character index
+
+**Placed device**:
+A thrown or emplaced explosive converted to its own pool-1 Entity (satchel, claymore, AV mine), replicated via S2C `0x59`/`0x12`.
+_Avoid_: deployable, planted explosive
+
 **Controller Kind**:
 Whether an Entity's decisions come from the local human, a remote human, AI, or no controller.
 _Avoid_: local-player flag, remote flag, infantry type
@@ -313,6 +321,17 @@ _Avoid_: tab, tool, mode
 The in-game heads-up display, laid out by `hudpos.def`; also the read-only ONED workspace
 that previews that layout. RE record: `docs/interface/hud-re.md`.
 _Avoid_: overlay (that is the debug overlay), UI (too broad)
+
+**Spinmap**:
+The heading-up gameplay map element in the authored `HUDSPINMAP*` rect (retail
+`HUD_DrawMapOverlay`); our code says minimap (`HudMinimapCompiler`, `minimap_overlay`,
+`client_replica_minimap`) — one thing, two words.
+_Avoid_: radar, compass (the compring overlay), map overlay (the windowed command map, D-HUD-19)
+
+**HUD declutter**:
+The `hud_detail` 0..3 level × hudpos `HUDDECLUT_*` masks visibility system (`huddetail`
+cycles it; level 3 blanks the HUD).
+_Avoid_: showhud (that cycles the FP-weapon view flags, not the detail level)
 
 **Present pass**:
 The per-frame apply step that projects simulation state onto scene nodes

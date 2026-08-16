@@ -191,11 +191,6 @@ struct CoordsSectorResolve {
 	int sector_id = 0;
 	int quadrant_x = 0;
 	int quadrant_z = 0;
-	// The wrapped 16x16 grid cell the resolve landed in — the retail tile
-	// cache keys its per-cell render targets on exactly this pair.
-	// [orig: Terrain_SectorGrid[16*(row&0xF)+(col&0xF)] @0x6071C0 family]
-	int cell_col = 0; // grid x
-	int cell_row = 0; // grid z
 };
 
 inline CoordsSectorResolve coords_resolve_sector(const SectorLayout &layout, int sector_sx,
@@ -231,8 +226,6 @@ inline CoordsSectorResolve coords_resolve_sector(const SectorLayout &layout, int
 	out.sector_id = sector_id;
 	out.quadrant_x = coords_quadrant_offset_x(sector_id);
 	out.quadrant_z = coords_quadrant_offset_z(sector_id);
-	out.cell_col = cell_x;
-	out.cell_row = cell_z;
 	return out;
 }
 

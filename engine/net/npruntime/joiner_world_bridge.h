@@ -296,7 +296,7 @@ private:
 	uint64_t deployment_release_revision_seen_ = 0;
 	// S2C 0x50 re-latched OUR OWN team (the second byte_A85B48 writer). The
 	// join-time team arrives through the spawn, so only later edges apply here.
-	// [orig: NapiNPClientMsg_0x050 @0x431910 — the latch @0x4319db]
+	// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910 — the latch @0x4319db]
 	uint64_t self_team_revision_seen_ = 0;
 	// Receive-once cursor for the conditional flags2&0x0f==8 mounted-ammo
 	// record. A stale net sample must not refill a locally firing gun each tick.

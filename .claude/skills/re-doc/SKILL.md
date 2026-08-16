@@ -32,14 +32,20 @@ when a policy decision crystallised: `docs/adr/0008-pff-writer-policy.md`.
 
 1. `docs/README.md` — add/refresh the "RE records by domain" row and status
    (landed / unlanded with PR reference / in flight).
-2. `docs/correspondence.md` — add the grilled functions to the parity matrix
+2. `docs/divergence-ledger.md` — close/open the D-rows in the same PR;
+   `python scripts/lint/ledger_check.py --write` regenerates the scoreboard.
+   A D-id born in the ledger must ALSO get its full row in the record's
+   catalog — the ledger mirrors, the record owns.
+3. `docs/engine-primer.md` — the domain's subsystem row — and
+   `docs/current-state.md` — the domain's routing row.
+4. `docs/correspondence.md` — add the grilled functions to the parity matrix
    with verdicts.
-3. Code↔doc sync — source comments cite `docs/<domain>/<x>-re.md (D-...)`;
+5. Code↔doc sync — source comments cite `docs/<domain>/<x>-re.md (D-...)`;
    grep the repo for the doc's D-IDs and confirm every cited ID exists in the
    doc and vice versa.
-4. New ADR if a policy decision emerged: next number in `docs/adr/`, linked
+6. New ADR if a policy decision emerged: next number in `docs/adr/`, linked
    from the docs README ADR table.
-5. Open questions survive only as the record's explicit unknown/follow-up
+7. Open questions survive only as the record's explicit unknown/follow-up
    entries — there is no scratch directory; what isn't landed is lost. The
    record stays pristine: the best current understanding, no drafts, no raw
    decompilation, no session chatter.

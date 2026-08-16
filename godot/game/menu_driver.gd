@@ -762,31 +762,35 @@ func _on_frame_widget_clicked(index: int) -> void:
 	_activate_widget(id, index, _last_mouse)
 
 
-# widget_activated fires BEFORE the scripted ACTION list. Retail orders them the
-# other way [orig: CUIWidget_HandleScriptedAction @0x6497f0: ACTION walk, then
-# widget[63]->vtable+32] but keeps every loaded screen alive, so PLAYER_INFO's
-# ACCEPT callback (save_player_info_from_dialog @0x55ee10) still reads its own
-# controls after the OK's cross-.mnu jump; this shell REPLACES the document on
-# such a jump, so observers read the same still-live values first (menu-re.md).
+# widget_activated fires BEFORE the scripted ACTION list. Retail runs ACTIONs
+# first [orig: CUIWidget_HandleScriptedAction @0x6497f0: ACTION walk, then
+# widget[63]->vtable+32] but keeps every screen alive; this shell replaces the
+# document on a cross-.mnu jump, so observers (PLAYER_INFO ACCEPT) read their
+# still-live controls first, and the dispatch is skipped when an observer
+# swapped the document under the emit (game.mnu ABORT -> main.mnu; menu-re.md).
+func _emit_activated_then_dispatch(id: int) -> void:
+	var doc_at_emit := _doc
+	widget_activated.emit(id, widget_name_of(id))
+	if _doc == doc_at_emit:
+		_dispatch_widget_actions(id)
+
+
 func _activate_widget(id: int, index: int, position: Vector2) -> void:
 	var kind := widget_kind_of(id)
 	match kind:
 		MnuDocument.TYPE_BUTTON, MnuDocument.TYPE_GOTO, MnuDocument.TYPE_STATIC, \
 		MnuDocument.TYPE_LABEL:
 			_play_widget_sound_state(id, "SELECTED")
-			widget_activated.emit(id, widget_name_of(id))
-			_dispatch_widget_actions(id)
+			_emit_activated_then_dispatch(id)
 		MnuDocument.TYPE_CHECKBOX:
 			var next := not is_widget_checked(id)
 			set_widget_checked(id, next)
 			_play_widget_sound_state(id, "SELECTED")
-			widget_activated.emit(id, widget_name_of(id))
-			_dispatch_widget_actions(id)
+			_emit_activated_then_dispatch(id)
 		MnuDocument.TYPE_RADIO:
 			_select_radio(id)
 			_play_widget_sound_state(id, "SELECTED")
-			widget_activated.emit(id, widget_name_of(id))
-			_dispatch_widget_actions(id)
+			_emit_activated_then_dispatch(id)
 		MnuDocument.TYPE_COMBO:
 			_play_widget_sound_state(id, "SELECTED")
 			if _open_combo_id == id:
@@ -814,8 +818,7 @@ func _activate_widget(id: int, index: int, position: Vector2) -> void:
 			# widgets carry SCREEN jumps in shipped menus).
 			if _doc.get_widget_actions(id).size() > 0:
 				_play_widget_sound_state(id, "SELECTED")
-				widget_activated.emit(id, widget_name_of(id))
-				_dispatch_widget_actions(id)
+				_emit_activated_then_dispatch(id)
 
 
 func _list_click(id: int, kind: int, row: int) -> void:

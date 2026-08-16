@@ -22,7 +22,7 @@ in place.
 | Component | Verdict | Evidence |
 |---|---|---|
 | `.adm` grammar (rows, comments, variant rings) | MATCHING | ctests `adm_parse`, `adm_comment`, `adm_trim_value`, `adm_variants`; 3 `[orig]` cites in `adm/adm.h` |
-| `.adm` writer | MATCHING (canonical form, parse-equality) | ctests `adm_write`, `adm_variants`; cross-DCC parity `tests/test_anim_dcc_parity.py` (asset-gated) |
+| `.adm` writer | MATCHING (canonical form, parse-equality) | ctests `adm_write`, `adm_variants` |
 | `.bad` container read/write | MATCHING (byte-exact roundtrip) | ctests `bad_parse`, `bad_roundtrip` (parse→write→parse equality + self byte-stability); `tests/test_bad_write_ffi.py` |
 | `.bad` runtime consumption — FP viewmodel rig | MATCHING (model-table composition) | ctest `anim_sample` (`sample_clip(model_bind)`); ledger D-INF-14 (mechanism witnessed + ported) |
 | `.bad` runtime consumption — world/body rigs | divergent, OPEN | ledger D-INF-13 (bodies still consume channels as absolute orientations; the 108-byte entity-bone-table port pending) |

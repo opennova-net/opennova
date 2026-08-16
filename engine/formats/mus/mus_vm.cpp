@@ -1,7 +1,7 @@
 /* MUS bytecode VM (interpreter).
 
    Witnessed dispatch loop: Jointops.exe!AudioVM_DispatchLoop @ 0x00672720.
-   Witnessed opcode table: Jointops.exe!g_vm_opcode_dispatch_table @ 0x0084F220
+   Witnessed opcode table: Jointops.exe!AudioVM_OpcodeDispatchTable @ 0x0084F220
    (65 entries, 0x00..0x40). Stack element size = 4 bytes (int32).
    Two stacks: data (EBP-tracked, 256 entries here) + call (EDI-tracked,
    64 frames here). 32-instruction budget per dispatch loop call.
