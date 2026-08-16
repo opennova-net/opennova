@@ -141,7 +141,7 @@ const std::vector<uint8_t> &retail_full_player_info() {
 // The S2C 0x04 slot assignment in its witnessed 24-byte shape: the tail byte is the
 // joiner's server-assigned team — the client's byte_A85B48 latch, and therefore the
 // 0x2F loadout-submit header byte 0. [orig: NetPacket_WriteSlotAssignment @0x502b30;
-// NapiNPClientMsg_0x004 @0x425410 -> byte_A85B48 @0x425499]
+// NapiNPClientMsg_SessionSlotConfig (0x04) @0x425410 -> byte_A85B48 @0x425499]
 std::vector<uint8_t> retail_slot_assignment(uint8_t team = 0x02) {
 	std::vector<uint8_t> body(24, 0);
 	body[17] = 0x01; // the joiner's slot index
@@ -3131,7 +3131,7 @@ bool run_charattr_challenge_table_matches_retail() {
 		return false;
 	}
 	// The nine live property ids and the row offsets they zero.
-	// [orig: CharAttr_SetSlotProperty @0x412890 -- cases 0/2/3/4/5/6/7/8/9]
+	// [orig: AnimMap_SetSlotProperty @0x412890 -- cases 0/2/3/4/5/6/7/8/9]
 	struct ClearCase {
 		uint8_t property_id;
 		std::size_t offset;
@@ -4357,7 +4357,7 @@ bool run_joiner_correlates_handshake_echoes() {
 // the admission team; S2C 0x75 byte 1 refreshes it when the server broadcasts
 // this player's live slot state. Read the result through frame_loadout_resubmit
 // — the same assigned_team_ source the 0x1A pair uses.
-// [orig: NapiNPClientMsg_0x004 @0x425410 -> byte_A85B48 @0x425499;
+// [orig: NapiNPClientMsg_SessionSlotConfig (0x04) @0x425410 -> byte_A85B48 @0x425499;
 // NapiNPClientMsg_SetSpectatorMode @0x4259E0 -> byte_A85B48 @0x425A32]
 bool run_team_latch_is_falsifiable() {
 	const std::string client_scrk = "CLIENT-TEAM-LATCH-SCRK";

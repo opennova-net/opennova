@@ -995,7 +995,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// remain authoritative inputs to the later terrain/environment load.
 			// Short or long bodies are not a complete header and cannot replace a
 			// previously accepted one.
-			// [orig: NapiNPClientMsg_0x00B @0x422660]
+			// [orig: NapiNPClientMsg_HandleBMSHeader (0x0B) @0x422660]
 			if (m.payload.size() == opennova::bms::kHeaderSize)
 				mission_header_bytes_ = m.payload;
 		} else if (m.tag == s2c::SESSION_CONFIG) {
@@ -1081,7 +1081,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// retail's byte_A85B48, the 0x2F loadout-submit header byte 0. A retail host always
 			// writes the full 24-byte body [orig: NetPacket_WriteSlotAssignment @0x502b30];
 			// latch only that witnessed shape and keep the golden default otherwise.
-			// [orig: NapiNPClientMsg_0x004 @0x425410 -> byte_A85B48 @0x425499]
+			// [orig: NapiNPClientMsg_SessionSlotConfig (0x04) @0x425410 -> byte_A85B48 @0x425499]
 			// Byte 17 is this joiner's OWN roster slot id — retail's
 			// g_local_player_slot_id, and the same value the host keeps at its
 			// per-player record slot+20 [orig: the write side
@@ -1112,7 +1112,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			//   (4) player (Flags & 0x100) + self -> per-side profile reselect and ONE
 			//       C2S 0x2F re-submission @0x431a9e carrying the NEW team and slot 195
 			//       RAW (the pre-Player_InitPlayer form, NOT g_currentWeaponSlot).
-			// [orig: NapiNPClientMsg_0x050 @0x431910]
+			// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910]
 			TeamAssign assign;
 			std::size_t assign_consumed = 0;
 			if (decode_team_assign(m.payload.data(), m.payload.size(), assign,
@@ -1280,7 +1280,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// defaults to property 0; trailing bytes are ignored. Every row is
 			// touched before the next inner message dispatches.
 			// [orig: NapiNPClientMsg_ClearAnimSlot @0x4254C0 (misnamed) ->
-			//  CharAttr_SetSlotProperty @0x412890]
+			//  AnimMap_SetSlotProperty @0x412890]
 			const uint8_t property_id =
 					m.payload.empty() ? uint8_t{0} : m.payload[0];
 			clear_charattr_challenge_property(

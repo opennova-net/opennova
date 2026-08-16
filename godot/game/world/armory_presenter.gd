@@ -25,7 +25,7 @@ const STYLESHEET_FILE := "menu_style.mns"  # the canonical name (MenuShell's def
 # row's runtime keys (retail default: the Shifts — the same row 177 the shells'
 # open key mirrors) as ACCEPT accelerators on the ACCEPT control
 # [orig: UI_InitTeamClassSelection @0x567370 finds control "ACCEPT" (@0x7C7650)
-#  and adds word_81A468/word_81A46A @0x5674a8/@0x5674c0].
+#  and adds word_81A468/g_useItemBindingKey1 @0x5674a8/@0x5674c0].
 const ACCEPT_HOTKEY := KEY_SHIFT
 
 signal opened

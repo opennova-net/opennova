@@ -1059,7 +1059,7 @@ bool decode_destroy_entity_list(const uint8_t *body, size_t len,
 //       Player_InitPlayer(1) @0x431b14, then the identity stores
 //       `entity->animSlot = animSlot` @0x431b3a / `entity->NetId = netId` @0x431b46
 //       and the minimap maintenance they feed (@0x431b4d..0x431b91).
-// [orig: NapiNPClientMsg_0x050 @ 0x431910; host producer Server_ChangeEntityTeam
+// [orig: NapiNPClientMsg_TeamAssign (0x50) @ 0x431910; host producer Server_ChangeEntityTeam
 //  @ 0x518D70 — it retargets ANY entity, including capture zones (§5.61)]
 struct TeamAssign {
 	uint16_t entity_handle = 0xFFFF; // (pool<<12)|slot

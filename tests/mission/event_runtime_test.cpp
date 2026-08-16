@@ -6,7 +6,7 @@
 // normal events are processed in QUARTER-LIST slices every 16th tick
 // [orig: Server_TickUpdate @0x51d7e0 -> @0x454d50], so an event at index i of n is
 // touched once per 64 ticks, on pass p where (p-1)&3 == i/ceil(n/4); the WAC VM
-// executes every 62nd tick [orig: sub_4F81A0 @0x4f81b1].
+// executes every 62nd tick [orig: WacScript_AdvanceTick @0x4f81b1].
 #include <cstdio>
 
 #include "mission/event_runtime.h"

@@ -377,7 +377,7 @@ int test_update_avatar_selection()
     f.slots[1].blue.avatar_packed = 0x1234;
 
     // Retail commits class to both side headers but character selection only
-    // to g_playerInfoTeam's block [orig: save_player_info_from_dialog
+    // to teamIndex (@0x25dc548)'s block [orig: save_player_info_from_dialog
     // @0x55EE3F-0x55EE6D, @0x55EE93-0x55EF38].
     TEST_EXPECT(update_avatar_selection(
         f, 0, SideId::Blue, 6, 3, 5, 0x0A63));

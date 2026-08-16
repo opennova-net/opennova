@@ -96,7 +96,7 @@ bool Simulation::request_local_player_scope_toggle() {
 	if (!opennova::world::weapon_fsm_scope_toggle_allowed(
 			local_weapon_.def, *active_slot)) return false;
 	// Scope-UP is refused while a movement key is held on a Scoped weapon
-	// [orig: byte_B7653B && (flags & 1) -> return @ 0x4df29c].
+	// [orig: g_movementKeyHeld && (flags & 1) -> return @ 0x4df29c].
 	if (!player_view_.scope_engaged &&
 			opennova::world::player_view_scope_up_blocked(player_view_, local_weapon_.def.flags))
 		return false;

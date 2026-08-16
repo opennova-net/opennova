@@ -38,7 +38,7 @@ constexpr float kPlayerCameraFovHDeg = 80.0f;
 constexpr float kBinocularCameraFovHDeg = 20.0f;
 // The fixed radius of the one random aim displacement a binocular raise seeds
 // (2.8125 deg = 0x02000000 BAM32). The displacement survives movement/death/
-// third-person suppression until the raw toggle (byte_B76539) drops.
+// third-person suppression until the raw toggle (g_binocularsToggle) drops.
 // [orig: the binocular-raise aim offset seeded with the input action 26 toggle]
 constexpr float kBinocularAimOffsetDeg = 2.8125f;
 // [orig: the five NVG gain positions selected by actions 56/57]
@@ -83,11 +83,11 @@ struct PlayerViewState {
     int32_t scope_step = 0;       // 0 (hip) .. ease_steps (sighted), of the CURRENT ease
     int32_t ease_steps = kScopeEaseSteps; // latched per toggle [orig: the Setup steps arg]
     bool scope_hipfire = true;    // [orig: g_scopeHipfire @ 0x82CE98, init/reset 1]
-    bool move_held = false;       // [orig: the movement-held latch byte_B7653B @ 0xB7653B]
+    bool move_held = false;       // [orig: the movement-held latch g_movementKeyHeld @ 0xB7653B]
     bool third_person = false;    // [orig: g_camera_mode @ 0xA890C8]
-    bool binoculars_requested = false;   // [orig: raw toggle byte_B76539 @ 0xB76539]
-    bool binoculars_raised = false;      // [orig: body-pose byte_B7653A @ 0xB7653A]
-    bool binoculars_view_active = false; // [orig: first-person view byte_B76538 @ 0xB76538]
+    bool binoculars_requested = false;   // [orig: raw toggle g_binocularsToggle @ 0xB76539]
+    bool binoculars_raised = false;      // [orig: body-pose g_binocularsRaised @ 0xB7653A]
+    bool binoculars_view_active = false; // [orig: first-person view g_binocularsViewActive @ 0xB76538]
     bool nvg_active = false;
     int32_t nvg_gain = kNvgGainMin;
     bool tp_anchor_valid = false;
@@ -116,7 +116,7 @@ float player_view_scope_fraction(const PlayerViewState &v);
 
 // The per-tick movement input and its settled-scope leg [orig:
 // Player_PackInputStateToEntity @ 0x4df450]. Latches `move_held` (any of the
-// four movement-direction keys [orig: byte_B7653B set @ 0x4df4bb, cleared
+// four movement-direction keys [orig: g_movementKeyHeld set @ 0x4df4bb, cleared
 // @ 0x4df4f9]) and returns true when the SETTLED-at-scope auto-unscope must
 // fire: movement while fully sighted on a Scoped (flags 1) weapon routes
 // through the normal scope toggle [orig: g_weaponScopeActive && Def->Flags & 1
@@ -130,19 +130,19 @@ bool player_view_move_input(PlayerViewState &v, bool move_held, int32_t def_flag
 
 // Whether a scope-UP toggle is refused by the movement-held latch: engaging a
 // Scoped (flags 1) weapon is blocked while a movement key is down
-// [orig: byte_B7653B && (flags & 1) -> return @ 0x4df29c].
+// [orig: g_movementKeyHeld && (flags & 1) -> return @ 0x4df29c].
 bool player_view_scope_up_blocked(const PlayerViewState &v, int32_t def_flags);
 
 // Toggle the persistent binocular request. Raising is resolved separately so
 // movement/death/round-end/camera suppression never destroys the request.
 // Turning the request off clears both derived states immediately. Returns the
-// new requested state. [orig: input action 26; byte_B76539]
+// new requested state. [orig: input action 26; g_binocularsToggle]
 bool player_view_toggle_binoculars(PlayerViewState &v);
 
 // The one random fixed-radius aim displacement a binocular raise seeds:
 // `unit_random` in [0, 1) picks the angle around the kBinocularAimOffsetDeg
 // circle; the yaw/pitch offsets persist until the request drops (the caller
-// zeroes them then). [orig: the binocular-raise offset beside byte_B76539]
+// zeroes them then). [orig: the binocular-raise offset beside g_binocularsToggle]
 void player_view_binocular_sway_offset(float unit_random,
                                        float &yaw_offset_deg,
                                        float &pitch_offset_deg);
@@ -150,7 +150,7 @@ void player_view_binocular_sway_offset(float unit_random,
 // Recompute the binocular body pose and first-person view. The raised pose is
 // suppressed by movement, death, and round end, but survives third person;
 // the optical view additionally requires first person. [orig: per-frame
-// binocular state update around byte_B76538..byte_B7653B]
+// binocular state update around g_binocularsViewActive..g_movementKeyHeld]
 void player_view_update_effective_modes(PlayerViewState &v, bool alive, bool round_ended);
 
 // Toggle NVG and return its new active state. Gain is independent of the

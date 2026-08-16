@@ -717,7 +717,7 @@ bool run_reactive_replies() {
 		send_session({make_protocol_message(0x02, std::vector<uint8_t>(8, 0))}, 100, msgs);
 		// no assertion on reply content — the burst was already sent with the 0x82 ServerAuth
 	}
-	// 0x33 -> 0x60 server-info chunk. [orig: NapiNPServerMsg_0x033 @0x515230]
+	// 0x33 -> 0x60 server-info chunk. [orig: NapiNPServerMsg_HandleReplayRequest (0x33) @0x515230]
 	{
 		std::vector<ProtocolMessage> msgs;
 		if (!expect(send_session({make_protocol_message(0x33, {})}, 110, msgs) &&

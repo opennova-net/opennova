@@ -350,7 +350,7 @@ std::vector<uint8_t> encode_destroy_entity_list(const DestroyEntityList &list);
 // entity's identity (entity+0x15C / entity+0x374), which retail's shared handle writer
 // ZEROES for a non-player entity behind the `Flags & 0x100` gate @0x506b3d; the caller
 // owns that gate. [orig: producer Server_ChangeEntityTeam @ 0x518D70 ->
-//  write_entity_handle_packet @ 0x506ad0; client handler NapiNPClientMsg_0x050 @ 0x431910
+//  write_entity_handle_packet @ 0x506ad0; client handler NapiNPClientMsg_TeamAssign (0x50) @ 0x431910
 //  stores them back @0x431b3a / @0x431b46]
 std::vector<uint8_t> encode_team_assign(const TeamAssign &assign);
 

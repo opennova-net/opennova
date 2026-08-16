@@ -433,7 +433,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                                         // heading; the local mouse accumulator
                                         // inherits it through the embedder
                                         // write-back. [orig: (delta+8)>>4
-                                        // @ 0x4b33bc; dword_B75FCC @ 0x4b33d2]
+                                        // @ 0x4b33bc; g_LocalPlayerLookYaw @ 0x4b33d2]
                                         if (ladder_io->body_heading != nullptr) {
                                             const int32_t step = io::bam_sar(
                                                 io::bam_add(

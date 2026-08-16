@@ -54,7 +54,7 @@ public:
 
     // The WAC time base: completed program executions, NOT 62 Hz engine ticks. At
     // the original cadence one execution ~= one second; `past(n)`/`elapse(n)` and
-    // the Ticks builtin count in these units. [orig: dword_C6EAD8 — the run counter
+    // the Ticks builtin count in these units. [orig: wac_var_ticks — the run counter
     // WacScript_AdvanceTick advances after each execution @0x4f81d3]
     uint32_t time() const { return time_; }
 	RuntimeState capture_runtime_state() const;
@@ -66,7 +66,7 @@ private:
     uint32_t rng_seed_ = 0x12333333u; // [orig: WacScript_InitAndLoad @ 0x4f966b — mov dword_C6EA40, 0x12333333]
     int32_t acc_ = 0;
     int cur_event_ = 0;
-    uint32_t time_ = 0; // [orig: dword_C6EAD8]
+    uint32_t time_ = 0; // [orig: wac_var_ticks]
 
     int32_t read(opennova::world::World &w, uint32_t ref) const;
     void write(opennova::world::World &w, uint32_t ref, int32_t v) const;

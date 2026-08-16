@@ -1059,7 +1059,7 @@ bool decode_destroy_entity_list(const uint8_t *body, size_t len,
 
 // S2C 0x50 team assign. A short body leaves every REMAINING field at zero — the
 // handler reads what arrived and never fails on a truncated tail.
-// [orig: NapiNPClientMsg_0x050 @ 0x431910]
+// [orig: NapiNPClientMsg_TeamAssign (0x50) @ 0x431910]
 bool decode_team_assign(const uint8_t *body, size_t len, TeamAssign &out,
                         size_t &consumed) {
 	out = TeamAssign{};

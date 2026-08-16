@@ -147,7 +147,7 @@ struct ClientAuth {
 	// unless NVS == the Milota string && PN == proto+220 && PG == proto+284
 	// (16 B) && PV1 == proto+300; its is_server branch additionally rejects
 	// unless PV2 == proto+364 ("1"). Retail's own 0x42 builder
-	// (NapiNPConnection_SendClientHello @ 0x61fe20 — a Kong misnomer; the
+	// (CNapiNPConnection_SendClientJoin @ 0x61fe20 — a Kong misnomer; the
 	// packet type is 0x42='B', not 0x41) emits this whole identity block
 	// ahead of the auth fields, with the same values as the ClientHello.
 	// [orig: gate @ 0x62b750, builder @ 0x61fe20, identity @ 0x4d3be0]
@@ -259,7 +259,7 @@ bool matches_jointoperations_identity(const ClientAuth &auth);
 // built from CNapiGameSession_ConnectToNovaWorld @ 0x4d4640's var list
 // (Application, BuildDateAndTime, Debug, CountryName, Language,
 // TimeZoneBias, GateTag, MetTag, UdpCode1, UdpCode2, MaxPacketSize) and
-// emitted by NapiNPConnection_SendClientHello @ 0x61fe20. The last codes
+// emitted by CNapiNPConnection_SendClientJoin @ 0x61fe20. The last codes
 // (UdpCode1/UdpCode2) are session-auth tokens the gate issues
 // (gate VAR keys UDPCODE1/UDPCODE2 -> ProcessResponse @ 0x4ced20); the live
 // NW server's join callbacks (cb_server_0/cb_server_1) validate the join

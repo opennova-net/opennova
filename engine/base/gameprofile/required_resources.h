@@ -18,7 +18,7 @@ extern "C" {
    GAMEPROFILE_EXPORT annotation and stay off the DLL surface. */
 
 /* The witnessed load phase [orig: Game_Run @ 0x4a7fb0 -> Game_InitSubsystems
-   @ 0x4a6cd0; MainMenu enter sub_552500 @ 0x552500; Game_StartMission
+   @ 0x4a6cd0; MainMenu enter Menu_InitShellResources @ 0x552500; Game_StartMission
    @ 0x524360]. */
 typedef enum NovaBootPhase {
     NOVA_BOOT_PHASE_BOOT = 0,   /* WinMain -> Game_InitSubsystems            */

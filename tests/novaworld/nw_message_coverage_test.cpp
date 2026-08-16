@@ -1063,7 +1063,7 @@ int check_C_2F_loadout_submit() {
 
 // S2C 0x50 — team assign (§5.62): 6 B, round-tripped through the real encoder,
 // plus the witnessed short-body default-to-zero tail.
-// [orig: NapiNPClientMsg_0x050 @0x431910]
+// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910]
 int check_S_50_team_assign() {
 	TeamAssign in;
 	in.entity_handle = 0x0007;

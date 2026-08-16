@@ -191,7 +191,7 @@ public:
 	// a non-authority client. Upserts so an assignment that precedes the entity's
 	// spawn record is not lost (an unresolved row keeps type_id 0, which the render
 	// and collision passes both skip).
-	// [orig: NapiNPClientMsg_0x050 @0x431910 — the team store @0x4319ee]
+	// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910 — the team store @0x4319ee]
 	void apply_team_assign(uint16_t handle, uint8_t team);
 
 	const ClientState &state() const { return state_; }

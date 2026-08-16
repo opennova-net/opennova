@@ -1629,7 +1629,7 @@ void ClientReplicaPipeline::destroy_pool0_slot(uint16_t pool0_index) {
 	erase_entity_tree(pool0_index);
 }
 
-// [orig: NapiNPClientMsg_0x050 @0x431910 — the non-authority entity team store @0x4319ee]
+// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910 — the non-authority entity team store @0x4319ee]
 void ClientReplicaPipeline::apply_team_assign(uint16_t handle, uint8_t team) {
 	// Retail's gates: not the 0xFFFF sentinel, and the pool nibble must address one
 	// of the five entity pools (@0x431910 header checks).

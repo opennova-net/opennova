@@ -1207,7 +1207,7 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 	// nudged -8/+8 design px for above/below, in the raw state color.
 	// [orig: bit20 leg @0x5a79b1..0x5a7a10 — y_base = y1 - rect_h/32, half
 	//  10 & shift 8 through Viewport_ScaleToVirtualCoords,
-	//  CEffect_Begin_Debug(WPIndctr handle, rect, dword_2723D7C, extra)]
+	//  CEffect_Begin_Debug(WPIndctr handle, rect, g_waypointAltitudeColor, extra)]
 	if (input.waypoint_present && (flags & 0x100000u)) {
 		const float sx = view.rect_w > 0.0f ? view.rect_w /
 				std::max(1.0f, input.rect_x2 - input.rect_x1) : 1.0f;

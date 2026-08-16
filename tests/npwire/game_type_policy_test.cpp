@@ -91,7 +91,7 @@ int main() {
 
 	// The MULTI_PLAYER_HOST dialog rules (D-MNU-17)
 	// [orig: init_host_settings_dialog @ 0x558960; the shared 13-way switch;
-	//  get_game_type_abbreviation @ 0x520fc0; the add branch @ 0x557e79].
+	//  get_game_type_abbreviation @ 0x520fd0; the add branch @ 0x557e79].
 	CHECK(!game_type::host_list_visible(game_type::kCoop),
 			"stock co-op never lists on the host screen");
 	CHECK(game_type::host_list_visible(game_type::kObjectiveCoop),

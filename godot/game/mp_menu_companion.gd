@@ -282,7 +282,7 @@ func _on_remove_missions() -> void:
 
 
 # The localized Type cell: gametext GateTypeAbbrev/<key>, the key itself as
-# the parser-only fallback [orig: get_game_type_abbreviation @0x520fc0].
+# the parser-only fallback [orig: get_game_type_abbreviation @0x520fd0].
 func _abbreviation_text(code: int) -> String:
 	var key := String(NetProtocol.game_type_host_abbreviation_key(code))
 	var t: RtxtStringFile = Strings.get_table("gametext")

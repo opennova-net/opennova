@@ -5,7 +5,7 @@
 //      slot 195 RAW; any valid handle -> the decoded row's team. The re-submission is a
 //      PER-SIDE PROFILE RESELECT: the NEW team byte picks the profile side block, that
 //      block's class byte is the wire class, and the page that class indexes is the kit.
-//      [orig: NapiNPClientMsg_0x050 @0x431910 — latch @0x4319db, entity team @0x4319ee,
+//      [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910 — latch @0x4319db, entity team @0x4319ee,
 //       slot team @0x431a0b, the side pick @0x431a35, the re-submit @0x431a9e]
 //
 //  (B) The ENTITY-REMOVAL fold. C2S 0x32 -> S2C 0x5D is the empty-slot sweep: the host

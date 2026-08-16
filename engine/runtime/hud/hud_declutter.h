@@ -1,0 +1,107 @@
+#pragma once
+
+// The HUD declutter system: hudpos.def HUDDECLUT_* masks x the persisted
+// hud_detail level -> the 24-slot per-element visibility table the overlay
+// walk consults before each gated draw.
+// [orig: masks byte_2723CE0 built by HUD_ParseHudposToken @ 0x59F370; level
+//  @ 0x24D20BC (cfg int "hud_detail", parse @ 0x550339, default 0 @ 0x54d3d8,
+//  apply @ 0x55154d, saved @ 0x54c80d); rebuild
+//  CRenderState_SetLayerVisibility @ 0x59B0F0 -> dword_2723C80]
+// Witness record: docs/interface/hud-re.md.
+
+#include <array>
+#include <cstdint>
+
+namespace opennova::hud {
+
+// The 24 HUDDECLUT slots in retail's parse-arm order. Slots 0/1/5/9/10/11/12/
+// 14/15/16 are parsed but have NO retail draw-site reader — nothing may gate
+// on them. [orig: the HUD_ParseHudposToken arm table @ 0x59F370; the read
+// sites are the per-slot dword_2723C80 cmps cited at each element]
+enum HudDeclutterSlot : int {
+	kDeclutterMsnTitle = 0,
+	kDeclutterFarpInfo = 1,
+	kDeclutterBreathTime = 2,
+	kDeclutterWaypoint = 3,
+	kDeclutterAltGrp = 4,
+	kDeclutterSpeed = 5,
+	kDeclutterCkptCond = 6,
+	kDeclutterDmgBar = 7,
+	kDeclutterWpnGrp = 8,
+	kDeclutterExpPoints = 9,
+	kDeclutterNwStat = 10,
+	kDeclutterCfgDisp = 11,
+	kDeclutterLollis = 12,
+	kDeclutterXhairs = 13,
+	kDeclutterVelVect = 14,
+	kDeclutterFarpInd = 15,
+	kDeclutterTargDmgDisp = 16,
+	kDeclutterSpinmap = 17,
+	kDeclutterTrgtCnt = 18,
+	kDeclutterTeamId = 19,
+	kDeclutterPwrBar = 20,
+	kDeclutterClock = 21,
+	kDeclutterHudLs = 22,
+	kDeclutterChat = 23,
+	kDeclutterSlotCount = 24,
+};
+
+// The declutter level range: 0..3, one visibility bit per level in each mask.
+inline constexpr int kDeclutterLevelMax = 3;
+
+// The authored token suffix for a slot ("MSNTITLE".."CHAT"; nullptr out of
+// range) and the reverse lookup (-1 for an unknown token — retail simply has
+// no parse arm for it, e.g. the dead JOX HUDDECLUT_CTAPE row).
+const char *declutter_token_name(int slot);
+int declutter_slot_from_token(const char *token);
+
+// The all-visible per-slot table HudFrameState defaults to (see the
+// declutter_visible note in hud_frame.h).
+std::array<bool, kDeclutterSlotCount> declutter_all_visible();
+
+// The mask table + level + rebuild rule. Construction leaves every mask
+// all-bits (0xF = visible at every level) — the embedder/test-harness default
+// for a HUD with no hudpos declutter rows; a real hudpos feed starts from
+// begin_authoring(), where retail's zeroed table makes an UNAUTHORED slot
+// hidden at every level. [orig: byte_2723CE0 is BSS-zero; only an authored
+// HUDDECLUT_* arm stores a nonzero mask @ 0x59F370]
+class HudDeclutter {
+public:
+	HudDeclutter();
+
+	// Zero every mask — the parse-start state of retail's table (unauthored
+	// slot = 0 = hidden at every level).
+	void begin_authoring();
+
+	// One authored row's mask byte: bit i (1/2/4/8 for detail level 0..3) set
+	// iff value i is nonzero. [orig: each HUD_ParseHudposToken arm @ 0x59F370
+	//  ors 1/2/4/8 per nonzero atof result into byte_2723CE0[slot]]
+	static uint8_t mask_from_flags(const int flags[4]);
+
+	void set_mask(int slot, uint8_t mask);
+	uint8_t mask(int slot) const;
+
+	// The persisted hud_detail level (clamped 0..3), and the huddetail action
+	// cycle: level + 1, wrapping past 3 to 0; returns the new level.
+	// [orig: level @ 0x24D20BC; Input_HandleActionBinding_0
+	//  @ 0x4E0601..0x4E0624]
+	void set_level(int level);
+	int level() const { return level_; }
+	int cycle_level();
+
+	// visible[slot] = ((1 << level) & mask[slot]) != 0, rebuilt on every mask
+	// or level change. [orig: CRenderState_SetLayerVisibility @ 0x59B0F0 ->
+	//  dword_2723C80]
+	const std::array<bool, kDeclutterSlotCount> &visible() const {
+		return visible_;
+	}
+
+private:
+	void rebuild();
+
+	std::array<uint8_t, kDeclutterSlotCount> masks_;
+	std::array<bool, kDeclutterSlotCount> visible_;
+	int level_ = 0;
+};
+
+} // namespace opennova::hud

@@ -426,7 +426,7 @@ struct Entity {
     // The wire movement-INPUT byte (entity+0x12C low): the owning client uplinks it every frame
     // (§5.10 extended C2S 0x0C) and the host echoes it in that player's 0x0A compact record —
     // remote players are motor-driven from replicated input, NOT from an anim slot [orig: case-2
-    // apply @0x4c11ec; consumers Entity_UpdatePlayerInfantryMovement @0x48496d,
+    // apply @0x4c11ec; consumers Entity_UpdateLightVehiclePhysics @0x483fe0 (leg @0x48496d),
     // check_bone_ground_contact @0x441ba4 (stance bits 8-9)]. Written by apply_player_intent for
     // remote peers; mirrored from the packed local input for the host's own player (bits 0-2 =
     // 8-way move_direction_index, bit 3 = moving [orig: Player_PackInputStateToEntity @0x4df68f]).

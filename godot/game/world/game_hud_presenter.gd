@@ -639,7 +639,7 @@ func _attach_label_text(seat_type: int, attach_text_key: String) -> String:
 	match seat_type:
 		1: # sitex [orig: dword_2723860]
 			return _overlays_string(t, "STROVER_SIT", "!sit")
-		2, 5: # ctrlx/drvrx share the Control label [orig: dword_2723864 @0x5a34db/0x5a34fb]
+		2, 5: # ctrlx/drvrx share the Control label [orig: g_hudLabelTextControl @0x5a34db/0x5a34fb]
 			return _overlays_string(t, "STROVER_CONTROL", "!Control")
 		3: # UseGun [orig: def+0x3A0 else dword_2723868]
 			if attach_text_key.is_empty():

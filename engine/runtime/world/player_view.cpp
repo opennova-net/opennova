@@ -74,7 +74,7 @@ bool player_view_set_engaged(PlayerViewState &v, bool engaged, bool inset_weapon
 }
 
 bool player_view_move_input(PlayerViewState &v, bool move_held, int32_t def_flags) {
-    // [orig: Player_PackInputStateToEntity @ 0x4df450 — byte_B7653B = 1 while any
+    // [orig: Player_PackInputStateToEntity @ 0x4df450 — g_movementKeyHeld = 1 while any
     //  of the four direction keys is down @ 0x4df4bb, = 0 otherwise @ 0x4df4f9]
     v.move_held = move_held;
     if (!move_held) return false;
@@ -87,7 +87,7 @@ bool player_view_move_input(PlayerViewState &v, bool move_held, int32_t def_flag
 
 bool player_view_scope_up_blocked(const PlayerViewState &v, int32_t def_flags) {
     // [orig: the engage leg refuses while the movement latch is held on a
-    //  Scoped weapon — byte_B7653B && (scope_flags & 1) -> return @ 0x4df29c]
+    //  Scoped weapon — g_movementKeyHeld && (scope_flags & 1) -> return @ 0x4df29c]
     return v.move_held && (def_flags & 1) != 0;
 }
 

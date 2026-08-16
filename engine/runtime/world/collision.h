@@ -522,7 +522,7 @@ struct LadderResolveIO {
     bool is_local_player = false;
     // View + body pose channels (BAM32). view_yaw/view_pitch are entity
     // +0x10/+0x14; for the local player the embedder's mouse accumulator must
-    // inherit any resolver write-back (retail drags dword_B75FCC / dword_B7900C
+    // inherit any resolver write-back (retail drags g_LocalPlayerLookYaw / dword_B7900C
     // alongside the entity fields).
     int32_t *view_yaw = nullptr;
     int32_t *view_pitch = nullptr;

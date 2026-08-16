@@ -315,10 +315,10 @@ std::vector<uint8_t> client_auth_to_bytes(const ClientAuth &msg) {
 	if (msg.pg_present)    append_bytes_field(buf, "PG", msg.pg.data(), msg.pg.size());
 	if (!msg.pv1.empty())  append_string_field(buf, "PV1",  msg.pv1);
 	if (!msg.pv2.empty())  append_string_field(buf, "PV2",  msg.pv2);
-	// Auth fields. Retail (NapiNPConnection_SendClientHello @ 0x61fe20) gates
+	// Auth fields. Retail (CNapiNPConnection_SendClientJoin @ 0x61fe20) gates
 	// CI (node+20), HK (node+1488), CK (node+332), SIP (node+48) and SPN
 	// (node+52) each on non-zero — emit only when set, to byte-match the 0x42.
-	// [orig: NapiNPConnection_SendClientHello @ 0x61fe20]. SCRK comes after CU.
+	// [orig: CNapiNPConnection_SendClientJoin @ 0x61fe20]. SCRK comes after CU.
 	if (msg.ci) append_u32_field(buf, "CI", msg.ci);
 	if (msg.hk) append_u32_field(buf, "HK", msg.hk);
 	if (msg.ck) append_u32_field(buf, "CK", msg.ck);

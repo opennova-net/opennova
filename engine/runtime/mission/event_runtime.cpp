@@ -336,7 +336,7 @@ bool BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
 }
 
 bool BmsEventSystem::evaluate_chain(World &w, const std::vector<bms::Trigger> &triggers) {
-    // [orig: sub_454050 @0x454050.] Each trigger negated by its own bit0; the
+    // [orig: EventTrigger_EvaluateChain @0x454050.] Each trigger negated by its own bit0; the
     // join operator (and/or/xor) comes from the PREVIOUS trigger. Empty => true.
     if (triggers.empty()) return true;
     bool acc = evaluate_trigger(w, triggers[0]);
