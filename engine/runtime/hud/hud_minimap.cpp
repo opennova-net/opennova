@@ -499,7 +499,9 @@ uint32_t pulse_color(uint32_t argb, int ticks) {
 } // namespace
 
 int32_t spinmap_zoom_step(int32_t zoom_q16, int direction) {
-	if (direction == 0) return kSpinmapZoomDefault;
+	// direction 0 never reaches here: HudMapControl::zoom_step owns the reset
+	// (the mission-scaled spawn zoom), so a constant-default branch would be
+	// dead — and wrong post mission scaling.
 	// Zoom OUT multiplies the world extent up; IN shrinks it.
 	// [orig: case 361 x1.15 max 0x100000 @0x49beaf; case 360 x0.85 min 4096
 	//  @0x49bcb0]
@@ -772,13 +774,20 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 	//  19660800*(center/19660800 - half) with the unk_960000 column fold;
 	//  letters HUD_FormatGridCoordinate(line_x - origin) / rows "%d" from
 	//  (start - origin)/19660800 - 1, both HUD_DrawTextCentered_HalfBright
-	//  on g_hudLabelFontLarge; line color unk_FFFF7F + ctx alpha]
+	//  on g_hudLabelFontLarge; rule color unk_FFFF7F + ctx[+0x38] alpha
+	//  @0x5a6722, label color unk_FFFF7F + ctx[+0x40] alpha @0x5a68a9 —
+	//  HUD_BuildMapOverlayView seeds the quartet (alpha, +0x38, +0x3C,
+	//  +0x40) = 128/64/96/128 for modes 1-3 and 255/128/255/255 for the
+	//  unported mode 4 @0x5a7e2f..0x5a7e44/@0x5a7f92]
 	if ((flags & 0x1000u) != 0) {
 		const int32_t origin_x = input.grid_origin_present
 				? kGridCellQ16 * (input.grid_origin_x / kGridCellQ16) : 0;
 		const int32_t origin_y = input.grid_origin_present
 				? kGridCellQ16 * (input.grid_origin_y / kGridCellQ16) : 0;
-		const uint32_t grid_color = 0xFFFFFF7Fu;
+		// The grid draws only on the M-map ctx (bit12), whose seeded
+		// alphas are 64 for the rules and 128 for the labels/readout.
+		const uint32_t rule_color = 0x40FFFF7Fu;
+		const uint32_t label_color = 0x80FFFF7Fu;
 		const float half_world_q16 = std::max(view.rect_w, view.rect_h) *
 				0.5f * view.scale * 65536.0f;
 		const int32_t lo_x = input.player_x -
@@ -799,7 +808,7 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 			view_project(view, input, wx, input.player_y, sx, sy);
 			if (sx >= view.px_x1 && sx <= view.px_x2) {
 				out.lines_under.push_back({sx, view.px_y1,
-						sx, view.px_y2, grid_color});
+						sx, view.px_y2, rule_color});
 			}
 			float mx = 0.0f, my = 0.0f;
 			view_project(view, input, wx + kGridCellQ16 / 2, input.player_y,
@@ -811,7 +820,7 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 				std::snprintf(label.text, sizeof(label.text), "%s", column);
 				label.x = mx;
 				label.y = view.px_y1 + 12.0f;
-				label.color = grid_color;
+				label.color = label_color;
 				label.align = 0;
 				label.font = 1;
 				out.labels.push_back(label);
@@ -826,7 +835,7 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 			view_project(view, input, input.player_x, wy, sx, sy);
 			if (sy >= view.px_y1 && sy <= view.px_y2) {
 				out.lines_under.push_back({view.px_x1, sy,
-						view.px_x2, sy, grid_color});
+						view.px_x2, sy, rule_color});
 			}
 			float mx = 0.0f, my = 0.0f;
 			view_project(view, input, input.player_x, wy + kGridCellQ16 / 2,
@@ -837,7 +846,7 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 						wy / kGridCellQ16 - origin_y / kGridCellQ16 - 1);
 				label.x = view.px_x1 + 15.0f;
 				label.y = my;
-				label.color = grid_color;
+				label.color = label_color;
 				label.align = 0;
 				label.font = 1;
 				out.labels.push_back(label);
@@ -864,7 +873,7 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 					static_cast<int>(row));
 			label.x = view.center_x - 50.0f;
 			label.y = view.center_y - 25.0f;
-			label.color = grid_color;
+			label.color = label_color;
 			label.align = 0;
 			label.font = 1;
 			out.labels.push_back(label);
@@ -940,16 +949,25 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 					false, mx, my))
 				continue;
 			if (special && (marker.icon == 253 || marker.icon == 254)) {
-				// Pulse markers: rings sized by the slot height, colors
-				// pulsing toward white. Icon 254 adds a shrinking ring stack
-				// (x0.75 steps). [orig: render_minimap_slot_blip @0x5be25e /
-				//  @0x5be267; ring radius = max(arg, projected height)
-				//  @0x597357; shrink 49152/65536 @0x5be385]
+				// Pulse markers: the MAIN ring sized by the slot height,
+				// colors pulsing toward white; ring colors submit OPAQUE
+				// (minimap_draw_ring_blip ORs 0xFF000000). The secondary
+				// rings draw AFTER retail zeroes the slot z, so their radii
+				// are just the min args at the marker CENTER — icon 254 =
+				// three tiny yellow rings (2/1/0 px), icon 253 = one 1-px
+				// ring in the pulse color. (The 49152/65536 folds multiply
+				// the already-zeroed z — dead code, not a shrink stack.)
+				// [orig: render_minimap_slot_blip 254 arm @0x5be337,
+				//  z := 0 @0x5be34f, rings @0x5be357/@0x5be393/@0x5be3ca;
+				//  253 arm @0x5be46a, z := 0 @0x5be47a, ring @0x5be482;
+				//  radius = max(arg, projected z) @0x597357..0x597366,
+				//  color | 0xFF000000 @0x597392]
 				const float height_wu =
 						static_cast<float>(marker.z) / 65536.0f;
 				const float radius = std::max(4.0f,
 						view_length_px(view, height_wu));
-				const uint32_t pulse = pulse_color(marker.color, input.ticks);
+				const uint32_t pulse =
+						pulse_color(marker.color, input.ticks) | 0xFF000000u;
 				// Rings emit as the retail 32-segment vertex loop, each
 				// segment clipped by the pass stencil like every other map
 				// leg — an off-center ring must crop at the disc/rect, not
@@ -974,11 +992,14 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 				};
 				emit_ring(radius, pulse);
 				if (marker.icon == 254) {
-					float r = radius;
-					for (int i = 0; i < 3; ++i) {
-						r *= 0.75f;
-						emit_ring(r, 0xFFFFFF00u);
-					}
+					// Fixed-radius center rings over the zeroed z; the 0-px
+					// third ring is a degenerate point and draws nothing.
+					emit_ring(2.0f, 0xFFFFFF00u);
+					emit_ring(1.0f, 0xFFFFFF00u);
+				} else {
+					// Icon 253's second pass: a 1-px center ring in the
+					// same pulsed color. [orig: @0x5be482]
+					emit_ring(1.0f, pulse);
 				}
 				continue;
 			}
@@ -1035,7 +1056,13 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 			}
 			// Unlike HUD_DrawMapTargetPointer below, this path does not
 			// pre-halve the diffuse before TSDicon's MODULATE2X stage.
-			sprite.color = marker_modulate2x_color(marker.color);
+			// Special billboards ignore the slot alpha: retail's caller
+			// passes drawMode 0xFF as the final alpha, so table entries
+			// with authored 0x7F alpha still draw opaque.
+			// [orig: draw_billboard_decal @0x597775..0x59778f; drawMode
+			//  0xFF pushed @0x5a6d20/@0x5a5a02]
+			sprite.color = marker_modulate2x_color(
+					special ? (marker.color | 0xFF000000u) : marker.color);
 			sprite.layer = static_cast<uint8_t>(keyed.key >> 2);
 			marker_uv(input, marker.icon, sprite.u0, sprite.v0, sprite.u1,
 					sprite.v1);
@@ -1097,14 +1124,25 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 			const float line_len = std::min(len, clamp_len);
 			const float ex = view.center_x + ux * line_len;
 			const float ey = view.center_y + uy * line_len;
-			// The state color submits NET-RAW: retail pre-halves it when the
-			// device caps carry the 2X-modulate flag, and the vertex submit
-			// re-doubles per channel — identity on this 1x canvas.
-			// [orig: halve (c >> 1) & 0x7F7F7F under dword_A87064 & 0x20
-			//  @0x599397; vertex 2c-saturate @0x5993c6..0x5993f8; the strip
-			//  cell takes the same halved color @0x59953d]
+			// The inside-target branch BLINKS: dword_A87064 is the per-main-
+			// frame HUD counter (not device caps — ++ in Game_ProcessMainFrame
+			// @0x5265d5 via @0x434c23), and the halve fires only when its bit
+			// 5 is set, so the inside dot's line + tip alternate between the
+			// raw color (halve then vertex 2c re-double = identity) and the
+			// 2c-SATURATED color every 32 frames. The outside chevron path
+			// never halves, so it always submits 2c-saturated.
+			// [orig: bit test @0x599353 inside the lodLevel=1 branch only;
+			//  halve (c >> 1) & 0x7F7F7F @0x599397; vertex 2c-saturate
+			//  @0x5993c6..0x5993f8; the strip cell takes the same lightColor
+			//  @0x59953d]
+			const bool halved_phase =
+					(static_cast<uint32_t>(input.ticks) & 0x20u) != 0;
+			const uint32_t submit_color =
+					(inside && halved_phase)
+							? waypoint_state_color
+							: marker_modulate2x_color(waypoint_state_color);
 			out.lines.push_back({view.center_x, view.center_y, ex, ey,
-					waypoint_state_color});
+					submit_color});
 			// ONE strip cell: the dot (cell 1) AT the waypoint while it
 			// projects inside the clip, the chevron (cell 7) at the clamped
 			// tip — rotated along the bearing — once it leaves.
@@ -1120,7 +1158,7 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 			// bearing. The inside dot is round and holds angle zero.
 			tip.rotation_rad = inside ? 0.0f
 					: std::atan2(uy, ux) + static_cast<float>(kPi * 0.5);
-			tip.color = waypoint_state_color;
+			tip.color = submit_color;
 			marker_uv(input, static_cast<uint8_t>(inside
 					? kWaypointTipCellInside : kWaypointTipCellClamped),
 					tip.u0, tip.v0, tip.u1, tip.v1);

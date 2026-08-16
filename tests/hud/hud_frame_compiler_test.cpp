@@ -420,8 +420,8 @@ void test_spinmap_mesh_layers_and_waypoint(const fnt_font_t *font) {
 	CHECK(list.map.sprites[0].color == 0xFF6080FFu &&
 			list.map.sprites[1].color == 0xFF6080FFu,
 			"ordinary TSDicon markers bake the saturating MODULATE2X RGB stage");
-	CHECK(list.map.sprites[2].color == 0xFF7F5000u,
-			"the waypoint tip stays net-raw after retail's halve/double cancellation");
+	CHECK(list.map.sprites[2].color == 0xFFFEA000u,
+			"the clamped chevron submits 2c-saturated (the outside branch never halves)");
 	CHECK(list.map.sprites.back().texture == 1,
 			"the compass ring rides texture slot 1");
 	const auto &compass = list.map.sprites.back();
@@ -431,11 +431,13 @@ void test_spinmap_mesh_layers_and_waypoint(const fnt_font_t *font) {
 			std::fabs(compass.v1 - 0.95f) < 1e-6f,
 			"the compass crops five-percent texture padding like retail");
 	CHECK(list.map.lines.size() == 1, "the waypoint state line is compiled");
-	// Above-player waypoint: the orange state color, NET-RAW at submit (the
-	// halve under the 2X-caps flag and the vertex re-double cancel).
-	// [orig: sub_590970 0xFF7F5000; halve @0x599397 + 2c @0x5993c6]
-	CHECK(list.map.lines[0].color == 0xFF7F5000u,
-			"the state line carries the raw above-tricolor");
+	// Above-player waypoint, clamped OUTSIDE: the orange tricolor rides the
+	// per-channel 2c saturate (the halve fires only in the inside-dot branch
+	// on frames with counter bit 5 set — the 32-frame blink).
+	// [orig: sub_590970 0xFF7F5000; bit test @0x599353 inside-only; halve
+	//  @0x599397; vertex 2c-saturate @0x5993c6]
+	CHECK(list.map.lines[0].color == 0xFFFEA000u,
+			"the state line carries the 2c-saturated above-tricolor");
 	// The distance label is LIVE by default — the retail global is BSS
 	// (zero) and only an authored NONZERO SPINMAPWPDISTOFF suppresses it.
 	// [orig: dword_27237C0 (.data, no file bytes); read @0x5a7a6a]
