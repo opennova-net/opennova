@@ -699,7 +699,11 @@ void test_org1_bare_cl_facing_press_drift() {
     for (int i = 0; i < 17; ++i) rig.collision.build_tick_tables(rig.world);
     run_ticks(rig.ai, rig.world, 0, 1);
     CHECK((pe->flags & kEntityFlagLadderContact) != 0);
-    CHECK(!rig.collision.second_pass_contact_latch); // bare CL: no pass-2 contact
+    // The resolver's own facing press is a direct pos add, never a
+    // total-force push, so the applied-push latch stays clear on a bare CL
+    // and the org1 press below runs. [orig: dword_B57C8C = nonzero-total
+    // store @ 0x4b3a62]
+    CHECK(!rig.collision.resolver_applied_push);
     const int32_t x0 = m->pos[0];
     run_ticks(rig.ai, rig.world, 1, 4);
     CHECK((pe->flags & kEntityFlagLadderContact) != 0);

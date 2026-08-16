@@ -539,9 +539,9 @@ bool in_pools_01(EntityHandle h) { return h.valid() && h.pool() <= 1; }
 } // namespace
 
 bool EntityCommands::ssn_at_alert(uint16_t ssn, int level) const {
-    // [orig: Entity_IsSsnAtAlertLevel @0x43e780 — pools 0-1; aiRuntime
-    // (entity+0x68) null -> 0; byte +0x88 == level]
-    if (!world_.ai) return false;
+    // [orig: Entity_IsSsnAtAlertLevel @0x43e780 — SSN 0 -> 0 @0x43e787;
+    // pools 0-1; aiRuntime (entity+0x68) null -> 0; byte +0x88 == level]
+    if (ssn == 0 || !world_.ai) return false;
     EntityHandle h = resolve_ssn(ssn);
     if (!in_pools_01(h)) return false;
     AiEntity *ae = world_.ai->for_handle(h);
@@ -550,9 +550,11 @@ bool EntityCommands::ssn_at_alert(uint16_t ssn, int level) const {
 }
 
 bool EntityCommands::ssn_damage_taken_at_least(uint16_t ssn, int32_t points) const {
-    // [orig: Entity_HasDamageCapacity @0x43e3d0 — pools 0-1; signed
-    // health(+0x11E) <= healthMax(def+0x17C) - points; no null-def guard, no
-    // alive gate]
+    // [orig: Entity_HasDamageCapacity @0x43e3d0 — SSN 0 -> 0 (the
+    // per-helper head guard; the pool finder itself has none); pools 0-1;
+    // signed health(+0x11E) <= healthMax(def+0x17C) - points; no null-def
+    // guard, no alive gate]
+    if (ssn == 0) return false;
     EntityHandle h = resolve_ssn(ssn);
     if (!in_pools_01(h)) return false;
     const Entity *e = world_.registry.get(h);
@@ -561,8 +563,9 @@ bool EntityCommands::ssn_damage_taken_at_least(uint16_t ssn, int32_t points) con
 }
 
 bool EntityCommands::ssn_full_health(uint16_t ssn) const {
-    // [orig: Entity_HasFullHealth @0x43e470 — pools 0-1; null itemDef -> 0
-    // (our health_max == 0 unresolved marker); health >= healthMax]
+    // [orig: Entity_HasFullHealth @0x43e470 — SSN 0 -> 0; pools 0-1; null
+    // itemDef -> 0 (our health_max == 0 unresolved marker); health >= healthMax]
+    if (ssn == 0) return false;
     EntityHandle h = resolve_ssn(ssn);
     if (!in_pools_01(h)) return false;
     const Entity *e = world_.registry.get(h);
@@ -571,8 +574,9 @@ bool EntityCommands::ssn_full_health(uint16_t ssn) const {
 }
 
 bool EntityCommands::ssn_health_at_least(uint16_t ssn, int32_t threshold) const {
-    // [orig: Entity_HasHealthAboveThreshold @0x43e350 — pools 0-1;
-    // health >= threshold, def-free]
+    // [orig: Entity_HasHealthAboveThreshold @0x43e350 — SSN 0 -> 0;
+    // pools 0-1; health >= threshold, def-free]
+    if (ssn == 0) return false;
     EntityHandle h = resolve_ssn(ssn);
     if (!in_pools_01(h)) return false;
     const Entity *e = world_.registry.get(h);
@@ -581,8 +585,10 @@ bool EntityCommands::ssn_health_at_least(uint16_t ssn, int32_t threshold) const 
 }
 
 bool EntityCommands::ssn_holding_group(uint16_t ssn, int group) const {
-    // [orig: Entity_IsSsnHoldingItemGroup @0x43e2f0 — pool 0 only;
-    // mountedChild(+0x268) null -> 0; held->commandGroup(+0x11C) == group]
+    // [orig: Entity_IsSsnHoldingItemGroup @0x43e2f0 — SSN 0 -> 0
+    // @0x43e2f7; pool 0 only; mountedChild(+0x268) null -> 0;
+    // held->commandGroup(+0x11C) == group]
+    if (ssn == 0) return false;
     EntityHandle h = resolve_ssn(ssn);
     if (!h.valid() || h.pool() != 0) return false;
     const Entity *e = world_.registry.get(h);
@@ -655,13 +661,28 @@ bool EntityCommands::ssn_within_distance(uint16_t ssn, uint16_t target_ssn,
     return dist <= static_cast<float>(meters);
 }
 
+namespace {
+
+// The +0x1FC LOS endpoint: position plus the host-stamped model bbox center,
+// added RAW (unrotated) — an unstamped center leaves the raw position, like
+// retail's zeroed pool memory. [orig: rayStart = entity[1..3] +
+// entity[127..129] @0x4f1880..0x4f18c5 (sub 45) / @0x4f1728..0x4f176f
+// (sub 44); the center writer Entity_InitFromModel @0x40df1e..0x40e018]
+void los_offset_point(const Entity &e, int32_t out[3]) {
+    out[0] = to_fixed(e.position.x + e.bbox_center.x);
+    out[1] = to_fixed(e.position.y + e.bbox_center.y);
+    out[2] = to_fixed(e.position.z + e.bbox_center.z);
+}
+
+} // namespace
+
 bool EntityCommands::ssn_los_clear_within(uint16_t ssn, uint16_t target_ssn,
                                           int32_t meters) const {
     // [orig: Entity_CheckLineOfSightInRange @0x4f15e0 — center distance gate,
-    // then a radius-0 ray between the +0x1FC offset points; <= 20 u uses the
-    // entity-aware walker @0x53b130, above it terrain/sectors @0x539910. Our
-    // port rays through the one modeled LOS seam with its chest-lift endpoint
-    // stand-in (D-AI-6); both deltas tracked in §3b.]
+    // then a radius-0 ray between the +0x1FC bbox-center offset points;
+    // <= 20 u uses the entity-aware walker @0x53b130, above it
+    // terrain/sectors @0x539910. Our port rays through the one modeled LOS
+    // seam (that walker split stays a tracked stand-in, §3b).]
     const Entity *a = nullptr;
     const Entity *b = nullptr;
     float dist = 0.0f;
@@ -669,35 +690,61 @@ bool EntityCommands::ssn_los_clear_within(uint16_t ssn, uint16_t target_ssn,
         return false;
     if (dist > static_cast<float>(meters)) return false;
     if (!world_.ai) return true; // no AI/physics wired: the clear-ray default
-    // Retail rays between the +0x1FC offset points (unwalked); the modeled
-    // fire origin (muzzle stamp / chest lift) is our tracked endpoint stand-in.
     int32_t pa[3];
-    AiSystem::weapon_fire_origin(*a, world_.logic_tick, pa);
+    los_offset_point(*a, pa);
     int32_t pb[3];
-    AiSystem::weapon_fire_origin(*b, world_.logic_tick, pb);
+    los_offset_point(*b, pb);
     return world_.ai->line_of_sight_clear(world_, pa, pb,
                                           resolve_ssn(ssn), resolve_ssn(target_ssn));
 }
 
 bool EntityCommands::ssn_sees_within(uint16_t ssn, uint16_t target_ssn,
                                      int32_t meters) const {
-    // [orig: Entity_CheckLineOfSight @0x4f17c0 — the sub-44 gates plus the
-    // facing cone: |wrap32(-yaw(+0x10) - int(atan2(dy, dx) * -(2^31/pi)))|
-    // <= 0x15555540 (30.0 deg), int32 wrap = shortest arc]
-    if (!ssn_los_clear_within(ssn, target_ssn, meters)) return false;
+    // [orig: Entity_CheckLineOfSight @0x4f17c0 — range, ray, AND bearing all
+    // computed over the +0x1FC bbox-center offset points (deltas
+    // @0x4f18cd..0x4f18dd), then the facing cone:
+    // |wrap32(-yaw(+0x10) - int(atan2(dy, dx) * -(2^31/pi)))| <= 0x15555540
+    // (30.0 deg), int32 wrap = shortest arc]
     const Entity *a = world_.registry.get(resolve_ssn(ssn));
     const Entity *b_ent = world_.registry.get(resolve_ssn(target_ssn));
-    if (a == nullptr || b_ent == nullptr) return false;
-    const double fdx = static_cast<double>(b_ent->position.x) - a->position.x;
-    const double fdy = static_cast<double>(b_ent->position.y) - a->position.y;
-    // The same BAM32 bearing scale the waypoint mover uses (2^31/pi).
-    const int32_t bearing = static_cast<int32_t>(
-            std::llround(std::atan2(fdy, fdx) * 683565275.5764316));
+    if (a == nullptr || b_ent == nullptr ||
+        a->item_id == 0 || b_ent->item_id == 0)
+        return false;
+    const double fdx =
+            (static_cast<double>(b_ent->position.x) + b_ent->bbox_center.x) -
+            (static_cast<double>(a->position.x) + a->bbox_center.x);
+    const double fdy =
+            (static_cast<double>(b_ent->position.y) + b_ent->bbox_center.y) -
+            (static_cast<double>(a->position.y) + a->bbox_center.y);
+    const double fdz =
+            (static_cast<double>(b_ent->position.z) + b_ent->bbox_center.z) -
+            (static_cast<double>(a->position.z) + a->bbox_center.z);
+    if (std::sqrt(fdx * fdx + fdy * fdy + fdz * fdz) >
+        static_cast<double>(meters))
+        return false;
+    if (world_.ai) {
+        int32_t pa[3];
+        los_offset_point(*a, pa);
+        int32_t pb[3];
+        los_offset_point(*b_ent, pb);
+        if (!world_.ai->line_of_sight_clear(world_, pa, pb, resolve_ssn(ssn),
+                                            resolve_ssn(target_ssn)))
+            return false;
+    }
+    // Retail truncates toward zero (_ftol2_sse) over the NEGATED scale
+    // -(2^31/pi); the sign folds out under the cdq-abs below, but the
+    // truncation is load-bearing (llround here would drift 1 BAM32 LSB on
+    // half of all bearings). [orig: fpatan -> fmul dbl_7C57B8
+    // (-683565275.5764316) -> _ftol2_sse @0x4f195f-0x4f196f]
+    const int32_t bearing_neg = static_cast<int32_t>(
+            std::atan2(fdy, fdx) * -683565275.5764316);
     const int32_t heading = a->veh.yaw_seeded
             ? a->veh.yaw_bam
             : bam_heading_from_mission_yaw_deg(static_cast<double>(a->yaw));
+    // diff = wrap32(-yaw - trunc(atan2 * -(2^31/pi))) [orig: neg ecx; sub
+    // ecx, eax @0x4f1977-0x4f1979] == wrap32(bearing - yaw); |.| equalizes.
     const int32_t diff = static_cast<int32_t>(
-            static_cast<uint32_t>(heading) - static_cast<uint32_t>(bearing));
+            static_cast<uint32_t>(-heading) - static_cast<uint32_t>(bearing_neg));
     // Retail's cdq/xor/sub abs: INT_MIN stays negative, so a target EXACTLY
     // 180.0 deg astern satisfies the signed <= — a witnessed quirk, carried.
     const uint32_t mask = static_cast<uint32_t>(diff >> 31);
@@ -1029,6 +1076,29 @@ void apply_alert_command_byte(AiEntity &ae, int sub_type) {
     }
 }
 
+// The BRAIN half of the alert subs: retail queues AIEvent {type 6, level}
+// beside the controller-byte write whenever the entity carries an AI
+// component; the brain applies it at dispatch (ai_handle_command case 6 —
+// the forced-2-on-change store + the combat-state push).
+// [orig: Entity_ApplyCommand case 5 @0x43ac59..0x43ac77 / case 0x16
+//  @0x43acc4..0x43ace2 / case 6 @0x43ad34..0x43ad4e -> AIEvent_QueueEntry
+//  @0x455da0 -> AI_HandleCommand case 6 @0x4657a6..0x465816]
+void queue_alert_brain_event(AiSystem &sys, AiEntity &ae, int sub_type) {
+    int level = 0;
+    switch (sub_type) {
+        case 5: level = 2; break;
+        case 22: level = 1; break;
+        case 6: level = 0; break;
+        default: return;
+    }
+    AiEventEntry ev{};
+    ev.f[0] = 6;
+    ev.f[1] = 9 | (static_cast<int>(&ae - sys.at(0)) << 16);
+    ev.set_timer(0.0f);
+    ev.f[3] = level;
+    sys.events.queue(ev);
+}
+
 } // namespace
 
 bool EntityCommands::apply_ai_command(uint16_t ssn, int sub_type, int32_t p2, int32_t p3, int32_t p4) {
@@ -1036,6 +1106,7 @@ bool EntityCommands::apply_ai_command(uint16_t ssn, int sub_type, int32_t p2, in
     AiEntity *ae = world_.ai->for_handle(resolve_ssn(ssn));
     if (!ae) return false;
     apply_alert_command_byte(*ae, sub_type);
+    queue_alert_brain_event(*world_.ai, *ae, sub_type);
     ai_apply_command(ae->brain, sub_type, p2, p3, p4);
     return true;
 }
@@ -1058,6 +1129,7 @@ int EntityCommands::apply_group_ai_command(int group, int sub_type, int32_t p2, 
         AiEntity *ae = world_.ai->for_handle(h);
         if (ae) {
             apply_alert_command_byte(*ae, sub_type);
+            queue_alert_brain_event(*world_.ai, *ae, sub_type);
             ai_apply_command(ae->brain, sub_type, p2, p3, p4);
             ++n;
         }
@@ -1081,6 +1153,7 @@ int EntityCommands::apply_area_ai_command(int zone_area_id, int team, int sub_ty
         AiEntity *ae = world_.ai->for_handle(h);
         if (ae) {
             apply_alert_command_byte(*ae, sub_type);
+            queue_alert_brain_event(*world_.ai, *ae, sub_type);
             ai_apply_command(ae->brain, sub_type, p2, p3, p4);
             ++n;
         }

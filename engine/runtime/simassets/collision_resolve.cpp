@@ -1,3 +1,4 @@
+#include <array>
 #include "simassets/collision_resolve.h"
 
 #include <simassets/model_builders.h>
@@ -61,6 +62,7 @@ int32_t collision_model_for_graphic(CollisionResolveState &state,
 	int32_t occlusion_id = -1;
 	float bound_radius = 0.0f;
 	std::pair<float, float> half_xy{0.0f, 0.0f};
+	std::array<float, 3> center{0.0f, 0.0f, 0.0f};
 	if (deps.models.has_index()) {
 		// ADR 0028: the sim reads its own parse-once cache. The placer
 		// now supplies only the render-side pose sources (live-PANM
@@ -95,6 +97,13 @@ int32_t collision_model_for_graphic(CollisionResolveState &state,
 				half_xy.second = (bd.bbox[3] - bd.bbox[0]) * 0.5f;
 				if (half_xy.first < 0.0f) half_xy.first = 0.0f;
 				if (half_xy.second < 0.0f) half_xy.second = 0.0f;
+				// The bbox CENTER stays in model-local axes: retail adds
+				// it to the world position unrotated, and its own value is
+				// min + (max - min)/2 over the same collision bounds.
+				// [orig: Entity_InitFromModel @0x40df1e..0x40df4a]
+				center[0] = (bd.bbox[0] + bd.bbox[3]) * 0.5f;
+				center[1] = (bd.bbox[1] + bd.bbox[4]) * 0.5f;
+				center[2] = (bd.bbox[2] + bd.bbox[5]) * 0.5f;
 			}
 		}
 	}
@@ -102,6 +111,7 @@ int32_t collision_model_for_graphic(CollisionResolveState &state,
 	state.occlusion_by_graphic.emplace(graphic_key, occlusion_id);
 	state.radius_by_graphic.emplace(graphic_key, bound_radius);
 	state.half_xy_by_graphic.emplace(graphic_key, half_xy);
+	state.center_by_graphic.emplace(graphic_key, center);
 	return model_id;
 }
 
@@ -404,6 +414,13 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 		const std::pair<float, float> &half_xy = state.half_xy_by_graphic[key];
 		e->minimap_half_x_q16 = static_cast<int32_t>(half_xy.first * 65536.0f);
 		e->minimap_half_y_q16 = static_cast<int32_t>(half_xy.second * 65536.0f);
+		// The +0x1FC LOS ray offset: zeroed for type-6 powerups with attrib
+		// bit 5, like retail; the def scale stays unapplied (D-COL-3, the
+		// bound_radius precedent). [orig: Entity_InitFromModel zero
+		//  @0x40defc..0x40df16, center stores @0x40df2e..0x40df4a]
+		const std::array<float, 3> &bc = state.center_by_graphic[key];
+		if (!(def->type == 6 && (def->attrib & 0x20u) != 0))
+			e->bbox_center = world::Vec3{bc[0], bc[1], bc[2]};
 		if (occ_id >= 0 && e->kind == world::EntityKind::Building) {
 			// The def bits the occlusion engine reads: attrib2 bit 6 "weldable"
 			// [orig: itemDef+88 >> 6 @ 0x5c5cce], attrib bit 27 recurse-windows

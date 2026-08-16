@@ -887,8 +887,10 @@ void ai_apply_command(AiBrain &comp, int sub_type, int32_t p2, int32_t p3, int32
             break;
         }
         default:
-            // Tracked-TODO: alert(5/6/0x16), accuracy(8), AISETSTATE(0x1C),
-            // etc. (notes/mission/anim-ai-grill-2026-06-07.md). No-op so an unported sub-type
+            // Tracked-TODO: accuracy(8), AISETSTATE(0x1C), etc. (the D-AI
+            // rows in docs/world/world-wac-ai-re.md; the alert subs 5/6/0x16
+            // are ported — controller byte + queued brain event at the
+            // EntityCommands seam). No-op so an unported sub-type
             // can't corrupt the AI component.
             break;
     }

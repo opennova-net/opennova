@@ -1281,6 +1281,113 @@ void test_team_trigger_claymore_rule() {
 
 } // namespace
 
+// The per-owner same-type placed-device cap at conversion.
+// [orig: Server_EnforcePlacedDeviceCapByOwner @0x5119e0 (strict-< min seeded
+//  0 -> only armed negative ages qualify; count > max evicts); satchel motor
+//  max 3 @0x448be6, claymore motor max 4 @0x447b67, both right after the
+//  0x59 send]
+void test_placed_device_cap_evicts_oldest_armed() {
+    Rig rig(0);
+    auto place = [&](int extra_age_ticks) -> bool {
+        LiveRound round = make_satchel_round(rig, Vec3{20, 20, 2});
+        if (!rig.w.throwables.place_from_round(
+                    rig.w, round, rig.w.ammo.entries[kAmmoSatchel]))
+            return false;
+        // Age the new device by hand: negative = armed for that many ticks.
+        rig.w.throwables.devices.back().think_delay_ticks = extra_age_ticks;
+        return true;
+    };
+    // Three armed satchels of falling age; the fourth conversion evicts the
+    // most negative (oldest armed) one and emits exactly one DeviceRemove.
+    CHECK(place(-30));
+    CHECK(place(-20));
+    CHECK(place(-10));
+    const uint16_t oldest = rig.w.throwables.devices[0].entity.packed;
+    rig.w.throwables.events.removes.clear();
+    CHECK(place(5)); // the fourth, still arming
+    int live = 0;
+    bool oldest_alive = false;
+    for (const PlacedDevice &d : rig.w.throwables.devices)
+        if (d.active) {
+            ++live;
+            if (d.entity.packed == oldest) oldest_alive = true;
+        }
+    CHECK(live == 3);
+    CHECK(!oldest_alive);
+    CHECK(rig.w.throwables.events.removes.size() == 1);
+    if (!rig.w.throwables.events.removes.empty())
+        CHECK(rig.w.throwables.events.removes[0].entity == oldest);
+
+    // An all-arming surplus persists: no candidate has a negative age, so the
+    // eviction is the retail null no-op.
+    Rig arming(0);
+    auto place_arming = [&]() -> bool {
+        LiveRound round = make_satchel_round(arming, Vec3{20, 20, 2});
+        return arming.w.throwables.place_from_round(
+                arming.w, round, arming.w.ammo.entries[kAmmoSatchel]);
+    };
+    for (int i = 0; i < 4; ++i) CHECK(place_arming());
+    int arming_live = 0;
+    for (const PlacedDevice &d : arming.w.throwables.devices)
+        if (d.active) ++arming_live;
+    CHECK(arming_live == 4);
+    CHECK(arming.w.throwables.events.removes.empty());
+}
+
+// The claymore motor's cap is 4; cross-type devices never count against it.
+void test_placed_device_cap_claymore_is_four_and_type_scoped() {
+    Rig rig(0);
+    auto place_clay = [&](int age) -> bool {
+        LiveRound round = make_satchel_round(rig, Vec3{20, 20, 2});
+        round.ammo_index = kAmmoClaymore;
+        round.think = ThrowClass::kClaymore;
+        round.motor = ThrowClass::kClaymore;
+        if (!rig.w.throwables.place_from_round(
+                    rig.w, round, rig.w.ammo.entries[kAmmoClaymore]))
+            return false;
+        rig.w.throwables.devices.back().think_delay_ticks = age;
+        return true;
+    };
+    for (int i = 0; i < 4; ++i) CHECK(place_clay(-10 * (i + 1)));
+    // A same-owner SATCHEL does not count toward the claymore total.
+    LiveRound satchel = make_satchel_round(rig, Vec3{20, 20, 2});
+    CHECK(rig.w.throwables.place_from_round(
+            rig.w, satchel, rig.w.ammo.entries[kAmmoSatchel]));
+    rig.w.throwables.events.removes.clear();
+    int live_clay = 0;
+    for (const PlacedDevice &d : rig.w.throwables.devices)
+        if (d.active && d.think == ThrowClass::kClaymore) ++live_clay;
+    CHECK(live_clay == 4);
+    // The fifth claymore tips it over.
+    CHECK(place_clay(0));
+    live_clay = 0;
+    for (const PlacedDevice &d : rig.w.throwables.devices)
+        if (d.active && d.think == ThrowClass::kClaymore) ++live_clay;
+    CHECK(live_clay == 4);
+    CHECK(rig.w.throwables.events.removes.size() == 1);
+}
+
+// Once armed, the age keeps counting down past zero every tick.
+// [orig: Entity_UpdatePool1Slot's unconditional decrement @0x4b8ea0]
+void test_armed_device_age_keeps_falling() {
+    Rig rig(0);
+    LiveRound round = make_satchel_round(rig, Vec3{20, 20, 1});
+    CHECK(rig.w.throwables.place_from_round(
+            rig.w, round, rig.w.ammo.entries[kAmmoSatchel]));
+    CHECK(rig.w.throwables.devices.size() == 1);
+    // The tick compacts the vector, so re-fetch the row each step.
+    rig.w.throwables.devices[0].think_delay_ticks = 1;
+    rig.w.throwables.tick(rig.w, nullptr, nullptr); // arming: 1 -> 0
+    CHECK(rig.w.throwables.devices.size() == 1 &&
+          rig.w.throwables.devices[0].think_delay_ticks == 0);
+    rig.w.throwables.tick(rig.w, nullptr, nullptr); // armed think: 0 -> -1
+    CHECK(rig.w.throwables.devices.size() == 1 &&
+          rig.w.throwables.devices[0].think_delay_ticks == -1);
+    rig.w.throwables.tick(rig.w, nullptr, nullptr);
+    CHECK(rig.w.throwables.devices.size() == 1 &&
+          rig.w.throwables.devices[0].think_delay_ticks == -2);
+}
+
 int main() {
     test_power_throw_charge();
     test_charge_scales_spawn_speed();
@@ -1308,6 +1415,9 @@ int main() {
     test_claymore_sector_los_blocks_trigger();
     test_avmine_proximity_is_data_dead();
     test_owner_death_removes_devices();
+    test_placed_device_cap_evicts_oldest_armed();
+    test_placed_device_cap_claymore_is_four_and_type_scoped();
+    test_armed_device_age_keeps_falling();
     test_team_trigger_claymore_rule();
     if (failures == 0) std::printf("throwables tests passed\n");
     return failures == 0 ? 0 : 1;

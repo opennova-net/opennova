@@ -523,6 +523,16 @@ void test_resolver_wall_pushout() {
                           false, true, 0, 43, 0u, health);
     CHECK(pos[0] > before); // pushed back toward +X (out of the wall)
     CHECK(health == 100);   // solid volumes never hurt
+    // The applied-push latch: a resolve that moved the entity stores 1; a
+    // clean resolve stores 0. [orig: dword_B57C8C — outFlags re-zero
+    // @ 0x4b3734, set on nonzero total @ 0x4b3767, stored @ 0x4b3a62]
+    CHECK(rig.cw.resolver_applied_push);
+    pos[0] = fx(12.8);
+    s->position.x = 12.8f;
+    rig.cw.build_tick_tables(rig.world);
+    rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0, fx(1.8), 0, 0,
+                          false, true, 0, 43, 0u, health);
+    CHECK(!rig.cw.resolver_applied_push);
 }
 
 // ---------------------------------------------------------------------------

@@ -17,6 +17,7 @@
 
 #include <cstdint>
 #include <string>
+#include <array>
 #include <unordered_map>
 #include <vector>
 
@@ -55,6 +56,10 @@ struct CollisionResolveState {
 	// size source). first = ground X, second = ground Y; {0,0} = no bound.
 	// [orig: draw_minimap_blip @0x5979a2..0x5979b8 model+176 pairs]
 	std::unordered_map<std::string, std::pair<float, float>> half_xy_by_graphic;
+	// The graphic's CMDL collision-bbox center in MODEL-LOCAL axes (wu) —
+	// the entity +0x1FC LOS ray offset. {0,0,0} = no collision block.
+	// [orig: Entity_InitFromModel @0x40df1e..0x40df4a]
+	std::unordered_map<std::string, std::array<float, 3>> center_by_graphic;
 	// First-stage husk KZ points in mission-local axes. Kept independently
 	// from the collision-model cache because a husk graphic may already have
 	// been registered as another entity's main graphic.

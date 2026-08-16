@@ -178,7 +178,7 @@ int main() {
 				"recompile is deterministic")) return 1;
 	}
 
-	// --- Below-water flag (D-TERRAIN-8): strict <, zero-height sentinel -----
+	// --- Below-water flag (D-TERRAIN-8): the bare strict < ------------------
 	{
 		TerrainViewInput wv = view;
 		wv.water_height = 8.0f;
@@ -193,8 +193,10 @@ int main() {
 				"camera exactly at the height reads dry (strict <)")) return 1;
 		wv.water_height = 0.0f;
 		wv.cam_y = -5.0f;
-		if (!expect(!compiler.compile(scene, wv).below_water,
-				"water height 0 is the no-water sentinel")) return 1;
+		if (!expect(compiler.compile(scene, wv).below_water,
+				"the compare is unguarded: a sub-zero eye on a zero height "
+				"still reads below (retail has no zero sentinel; terrain "
+				"heights keep it unreachable in practice)")) return 1;
 	}
 
 	// --- Compile with the engine-side MVP/frustum path ----------------------

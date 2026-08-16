@@ -284,7 +284,10 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
     int32_t total_force[3] = {0, 0, 0};
     LadderContact ladder;
     EntityHandle ladder_entity;
-    second_pass_contact_latch = false; // [orig: collisionFlags = 0 @ 0x4b3585]
+    // Retail leaves the global stale across SKIPPED resolves (the early ret
+    // @ 0x4b2cfe precedes the store); zeroing at entry only diverges on skip
+    // ticks, where no org1 climber runs anyway.
+    resolver_applied_push = false; // [orig: slot re-zero @ 0x4b3734]
 
     auto it = candidates_.find(source.packed);
     if (it != candidates_.end()) {
@@ -497,10 +500,9 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                     points[pi].y += total_force[1];
                 }
             } else {
-                // The pass-2 contact flag persists past the resolve — org1's
-                // on-ladder facing press gates on it. [orig: dword_B57C8C
-                // stored @ 0x4b3a5c from the flag set @ 0x4b36b1]
-                second_pass_contact_latch = pass_contact;
+                // The pass-2 contact flag stays LOCAL: its only retail
+                // reader is the half-force gate below. [orig: set @ 0x4b36b1,
+                // sole read @ 0x4b36cc-0x4b36da]
                 if (pass_contact && !ladder_entity.valid()) {
                     // [orig: @ 0x4b36da — second-pass half force only without a CL contact]
                     total_force[0] += pass_force[0] >> 1; // [orig: @ 0x4b36e2]
@@ -510,10 +512,14 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
         }
     }
 
-    // Apply the push-out; a net push resets the idle skip counter. [orig:
-    // @ 0x4b3746-0x4b375a; pad_370[3] = 0 @ 0x4b3773]
-    if (total_force[0] != 0 || total_force[1] != 0 || total_force[2] != 0)
+    // Apply the push-out; a net push resets the idle skip counter and latches
+    // the resolver-applied-push global org1's facing press gates on. [orig:
+    // @ 0x4b3746-0x4b375a; pad_370[3] = 0 @ 0x4b3773; the outFlags slot is 1
+    // only when the total is nonzero @ 0x4b3767, stored @ 0x4b3a62]
+    if (total_force[0] != 0 || total_force[1] != 0 || total_force[2] != 0) {
         state.skip_counter = 0;
+        resolver_applied_push = true;
+    }
     pos[0] += total_force[0];
     pos[1] += total_force[1];
     pos[2] += total_force[2];

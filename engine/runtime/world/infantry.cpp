@@ -1048,10 +1048,12 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // begin_body_transition machinery would restart the crossfade on each
         // intermediate stamp, so the selection is skipped instead. The one
         // selection side effect that matters is mirrored so the net state stays
-        // identical: retail's standing-idle counter keeps advancing while
+        // identical: retail's STANDING-idle counter keeps advancing while
         // hanging idle (the fidget arrives right after a dismount) and resets
-        // on movement. [orig: ++entity[0x148] @0x4b727b / reset @0x4b719b run
-        // inside the overwritten selection]
+        // on movement in any stance; the crouch/prone idle branches leave it
+        // untouched. [orig: ++entity[0x148] only in the standing-idle branch
+        // @0x4b727b; crouch @0x4b724b / prone @0x4b722f skip it; reset
+        // @0x4b719b runs stance-independent in the moving branch]
         const bool ladder_latched = ent != nullptr &&
                 ((ent->flags | ent->engine_flags) & kEntityFlagLadderContact) != 0;
         if ((logic_tick & 3u) == 0 && !inf.airborne && !carried) {
@@ -1059,7 +1061,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 player_body_select(e);
             } else if (inf.player_moving) {
                 inf.idle_counter = 0;
-            } else {
+            } else if (inf.stance == InfantryState::Stance::kStand) {
                 ++inf.idle_counter;
             }
         }

@@ -624,6 +624,36 @@ void AiSystem::engage_target(World &world, AiEntity &e, const AiTarget &t) {
 bool AiSystem::ai_handle_command(AiEntity &e, const AiEventEntry &ev) {
     int32_t t = ev.type();
     switch (t) {
+    case 6: { // ChangeAI alert level [orig: AI_HandleCommand case 6
+              //  @0x4657a6..0x465816 <- Entity_ApplyCommand queues {6, level}
+              //  @0x43ac59/@0x43acc4/@0x43ad34 for subs 5/22/6]
+        int32_t level = ev.f[3];
+        if (level < 0) level = 0;
+        if (level > 2) level = 2;
+        if (e.brain.f[AiBrain::kPrevAlert] != level) {
+            // On ANY change the stored level is FORCED to 2: mov eax, ebx
+            // runs unconditionally in the changed branch [orig: @0x4657cd],
+            // so a green/yellow command onto a differing brain still drives
+            // both alert words red — a witnessed retail quirk, carried.
+            level = 2;
+            const int32_t cur = e.brain.f[AiBrain::kCurState];
+            if ((e.profile.flags96 & 2) == 0) {
+                // Raw def+0x10 type words with literal state ids: the kong
+                // auto-comment and our vehicle enum disagree on the 1/2
+                // naming, so neither name is trusted here.
+                // [orig: type 1 -> pend 10 unless cur in {14, 6}
+                //  @0x4657d6..0x4657e6; type 2 -> pend 18 unless cur == 22,
+                //  both behind !(def+0x60 & 2) @0x4657d0/@0x4657f0]
+                if (e.profile.type == 1 && cur != 14 && cur != 6)
+                    e.brain.set_pend(10);
+                else if (e.profile.type == 2 && cur != 22)
+                    e.brain.set_pend(18);
+            }
+        }
+        e.brain.f[AiBrain::kPrevAlert] = level; // [orig: @0x465803]
+        e.brain.f[AiBrain::kAlert] = level;     // [orig: @0x465809]
+        return true;
+    }
     case 0x15: // stationary weapons-free [orig: @0x4659A7 — arg 0 clears byte
                // +785; nonzero pushes the type's combat state (GROUND -> 17,
                // HELO -> 8) into pending when different, then sets it 1]
@@ -641,7 +671,7 @@ bool AiSystem::ai_handle_command(AiEntity &e, const AiEventEntry &ev) {
                 static_cast<int32_t>(ev.f[3] * kBamPerDegreeInt);
         return true;
     default:
-        if (t >= 6 && t <= 0x16) ++unported_calls; // handled by the AI-command phase
+        if (t >= 7 && t <= 0x14) ++unported_calls; // the still-unported command arms
         return false;
     }
 }
