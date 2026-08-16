@@ -258,13 +258,14 @@ func test_maybe_begin_positive_leg_raises_and_restores_the_cursor() -> void:
 	assert_true(coordinator.maybe_begin_start_mission_splash(
 			null, false), "the positive leg raises with the skip injected off")
 	assert_true(coordinator.is_splash_active())
-	assert_eq(Input.get_mouse_mode(), Input.MOUSE_MODE_HIDDEN,
-			"the splash hides the OS cursor while it draws its own arrow")
+	# The OS mouse-mode set is a no-op under the headless display server, so
+	# the cursor hide/restore device leg cannot be asserted here; the raise +
+	# the forwarded dismissal edge are the observable positive-leg contract.
 	_push_key(KEY_SPACE)
 	await _pump_frames(3)
 	assert_signal_emitted(coordinator, "splash_dismissed")
-	assert_eq(Input.get_mouse_mode(), Input.MOUSE_MODE_VISIBLE,
-			"the dismissal edge restores the OS cursor")
+	assert_false(coordinator.is_splash_active(),
+			"the dismissal edge tears the splash down")
 	coordinator.finish_presentation()
 
 

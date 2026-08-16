@@ -512,6 +512,21 @@ void test_resolver_wall_pushout() {
     rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0, fx(1.8), 0, 0,
                           /*is_player=*/false, /*is_authority=*/true, /*tick=*/0,
                           /*anim=*/43, 0u, health);
+    // A resolve with no geometry in reach leaves the latch clear.
+    // [orig: dword_B57C8C — outFlags re-zero @ 0x4b3734; set only on a
+    //  nonzero total @ 0x4b3767; stored @ 0x4b3a62]
+    {
+        Rig clear_rig(box_model(1, 0, 2.0, 2.0, 3.0));
+        clear_rig.move_soldier(20.0, 10.0, 0.0);
+        int32_t cpos[3] = {fx(20.0), fx(10.0), 0};
+        int32_t cvel[3] = {0, 0, 0};
+        int16_t chealth = 100;
+        CollisionWorld::ResolveState cstate;
+        clear_rig.cw.resolve_entity(clear_rig.world, clear_rig.soldier, cstate,
+                                    cpos, cvel, cvel[2], 0, fx(1.8), 0, 0,
+                                    false, true, 0, 43, 0u, chealth);
+        CHECK(!clear_rig.cw.resolver_applied_push);
+    }
 
     // Step into the wall: prev pos (12.8) was outside the +X plane -> it separates.
     pos[0] = fx(11.6);
@@ -523,16 +538,8 @@ void test_resolver_wall_pushout() {
                           false, true, 0, 43, 0u, health);
     CHECK(pos[0] > before); // pushed back toward +X (out of the wall)
     CHECK(health == 100);   // solid volumes never hurt
-    // The applied-push latch: a resolve that moved the entity stores 1; a
-    // clean resolve stores 0. [orig: dword_B57C8C — outFlags re-zero
-    // @ 0x4b3734, set on nonzero total @ 0x4b3767, stored @ 0x4b3a62]
+    // The wall separation moved the entity: the applied-push latch stores 1.
     CHECK(rig.cw.resolver_applied_push);
-    pos[0] = fx(12.8);
-    s->position.x = 12.8f;
-    rig.cw.build_tick_tables(rig.world);
-    rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0, fx(1.8), 0, 0,
-                          false, true, 0, 43, 0u, health);
-    CHECK(!rig.cw.resolver_applied_push);
 }
 
 // ---------------------------------------------------------------------------

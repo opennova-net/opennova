@@ -40,7 +40,7 @@ static int failures = 0;
 namespace {
 
 struct ClipCase {
-    const char *path;
+    std::string path;
     double min_speed; // world units (~m) per second, gait plausibility window
     double max_speed;
 };

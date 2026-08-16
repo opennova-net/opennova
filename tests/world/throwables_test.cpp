@@ -1340,6 +1340,7 @@ void test_placed_device_cap_claymore_is_four_and_type_scoped() {
     auto place_clay = [&](int age) -> bool {
         LiveRound round = make_satchel_round(rig, Vec3{20, 20, 2});
         round.ammo_index = kAmmoClaymore;
+        round.item_type_id = kItemClaymore; // the itemDef+80 cap key
         round.think = ThrowClass::kClaymore;
         round.motor = ThrowClass::kClaymore;
         if (!rig.w.throwables.place_from_round(
