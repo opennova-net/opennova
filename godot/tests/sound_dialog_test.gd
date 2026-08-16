@@ -7,11 +7,13 @@ extends GutTest
 
 const NovaMissionAudioScript = preload("res://game/world/nova_mission_audio.gd")
 
-const JO_DIR := "C:/Users/taylor/Desktop/JOX"
+# The loose JOX dump root rides the documented env gate (docs/asset-gated-tests.md);
+# machine paths go in .claude/settings.local.json env, never tracked.
+var JO_DIR := OS.get_environment("OPENNOVA_JO_ASSETS")
 
 
 func test_00trg_mission_dialog_resolves() -> void:
-	if not DirAccess.dir_exists_absolute(JO_DIR):
+	if JO_DIR.is_empty() or not DirAccess.dir_exists_absolute(JO_DIR):
 		pass_test("JOX not present; skipping dialog probe")
 		return
 	var root := ResourceRoot.new()

@@ -202,9 +202,6 @@ void ObjectModel::add_presentation_link(ObjectModel *p_model,
 	presentation_links_.push_back(link);
 }
 
-int ObjectModel::get_presentation_link_count() const {
-	return live_presentation_links().size();
-}
 
 void ObjectModel::set_model_light_preview_enabled(bool p_enabled) {
 	if (model_light_preview_enabled_ == p_enabled) {
@@ -920,8 +917,6 @@ void ObjectModel::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("add_presentation_link", "model",
 			"part_local_registers"), &ObjectModel::add_presentation_link,
 			DEFVAL(PackedStringArray()));
-	ClassDB::bind_method(D_METHOD("get_presentation_link_count"),
-			&ObjectModel::get_presentation_link_count);
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "object_data",
 						 PROPERTY_HINT_RESOURCE_TYPE, "ObjectData"),
 			"set_object_data", "get_object_data");

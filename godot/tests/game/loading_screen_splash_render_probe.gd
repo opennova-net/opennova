@@ -8,11 +8,10 @@ extends Node
 ##
 ## Run windowed:
 ##   "$GODOT_BIN" --path godot res://tests/game/loading_screen_splash_render_probe.tscn
-## Needs OPENNOVA_JO_DIR (or the default retail install path below). Writes
+## Needs OPENNOVA_JO_DIR = the retail install root (packed .pff). Writes
 ## splash_on.png / splash_off.png / splash_dismissed.png into
 ## SPLASH_CAPTURE_DIR (or user://). Quits by itself.
 
-const DEFAULT_JO_DIR := "C:/Users/taylor/Desktop/Games/Joint Operations Combined Arms"
 const MISSION := "00TRa.bms"
 
 enum Stage { WARMUP, WAIT_ON, WAIT_OFF, DISMISS, WAIT_DISMISSED, DONE }
@@ -26,7 +25,9 @@ var _out_dir := ""
 func _ready() -> void:
 	var dir := OS.get_environment("OPENNOVA_JO_DIR")
 	if dir.is_empty():
-		dir = DEFAULT_JO_DIR
+		push_error("splash_render_probe: set OPENNOVA_JO_DIR=<retail install>")
+		get_tree().quit(1)
+		return
 	_out_dir = OS.get_environment("SPLASH_CAPTURE_DIR")
 	if _out_dir.is_empty():
 		_out_dir = ProjectSettings.globalize_path("user://")

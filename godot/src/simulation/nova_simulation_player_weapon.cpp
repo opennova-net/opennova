@@ -222,13 +222,16 @@ bool Simulation::install_local_player_weapon_by_name(
 		}
 	}
 	if (row == nullptr) return false;
-	// The rig's clip lengths through the sim's own mounted index — the same
-	// animadm chain the FP viewmodel rides ("ak47_1st" when unauthored). A
-	// missing root/rig leaves the rings empty and the 'auto' delays collapse,
-	// exactly the model-never-loads behavior of the shell path.
-	const char *adm = row->animadm[0] != '\0' ? row->animadm : "ak47_1st";
+	// The rig's clip lengths through the sim's own mounted index. An
+	// unauthored animadm loads NOTHING: the rings stay empty and every
+	// 'auto' delay collapses to zero, matching the table-build rule
+	// (retail: no animadm = no anim object at Def+372 = 'auto' reads 0;
+	// see weapon_table_build.cpp — Anim_InitActions, D-WPN-26).
+	// The FP viewmodel MODEL keeps its separate documented bring-up
+	// fallback; the clip rings never substitute another weapon's ADM.
 	weapon_clip_index_.load(
-			asset_root_.is_valid() ? &asset_root_->native_index() : nullptr, adm);
+			asset_root_.is_valid() ? &asset_root_->native_index() : nullptr,
+			row->animadm);
 	opennova::world::WeaponInstallData data;
 	data.name = row->weapon_name;
 	data.animadm = row->animadm;

@@ -24,8 +24,6 @@ void Terrain::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_terrain_data", "data"), &Terrain::set_terrain_data);
 	ClassDB::bind_method(D_METHOD("get_terrain_data"), &Terrain::get_terrain_data);
 	ClassDB::bind_method(D_METHOD("get_surface_inputs"), &Terrain::get_surface_inputs);
-	ClassDB::bind_method(D_METHOD("get_tile_overlay_texture"),
-		&Terrain::get_tile_overlay_texture);
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "terrain_data", PROPERTY_HINT_RESOURCE_TYPE, "TerrainData"),
 		"set_terrain_data", "get_terrain_data");
 
@@ -63,7 +61,6 @@ void Terrain::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("build"), &Terrain::build);
 	ClassDB::bind_method(D_METHOD("render_frame"), &Terrain::render_frame);
-	ClassDB::bind_method(D_METHOD("is_built"), &Terrain::is_built);
 
 	// Debug API
 	ClassDB::bind_method(D_METHOD("get_traversal_stats"), &Terrain::get_traversal_stats);
@@ -263,11 +260,6 @@ void Terrain::render_frame() {
 	if (!cam || !cam->is_inside_tree()) {
 		return;
 	}
-	_render_frame_with_camera(cam);
-}
-
-void Terrain::_render_frame_with_camera(Camera3D *cam) {
-
 	// The RENDER eye (get_camera_transform includes h/v offsets), so the
 	// below-water classification stays coherent with Water's surface flip and
 	// the frame clear — the same eye those classifiers sample. Offsets are
@@ -284,12 +276,13 @@ void Terrain::_render_frame_with_camera(Camera3D *cam) {
 	view_input.cam_x = static_cast<float>(cam_pos.x);
 	view_input.cam_y = static_cast<float>(cam_pos.y);
 	view_input.cam_z = static_cast<float>(cam_pos.z);
-	// 0 = no water (the engine-side sentinel); gate on render-active so a
-	// retained-but-disabled water node reads as dry, matching the existing
-	// underwater classifiers (D-TERRAIN-8).
-	view_input.water_height =
-			(cached_water_node != nullptr &&
-					cached_water_node->is_water_render_active())
+	// The map's live water height, unconditionally: retail's compare reads
+	// Env_WaterHeightFixed with no render gate, so the engine side gets the
+	// authored value whenever a Water node exists (a missing node passes 0,
+	// and non-negative terrain keeps a dry map's compare inert).
+	// (retail: cameraY < Env_WaterHeightFixed @0x60fea5, no zero guard —
+	//  see docs/terrain/terrain-re.md, the underwater selector section)
+	view_input.water_height = cached_water_node != nullptr
 			? cached_water_node->get_water_height()
 			: 0.0f;
 

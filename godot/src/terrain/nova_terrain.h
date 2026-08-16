@@ -84,7 +84,6 @@ private:
 	Ref<Texture2D> bound_water_noise;
 
 	void _cache_env_weather_nodes();
-	void _render_frame_with_camera(Camera3D *cam);
 
 	// Debug state (the toggles feed the compiler's TraversalConfig input)
 	opennova::TraversalConfig traversal_config;
@@ -152,7 +151,6 @@ public:
 	// by GameFramePipeline through the concrete terrain leg — this node
 	// no longer self-processes.
 	void render_frame();
-	bool is_built() const { return built; }
 
 	// Debug API
 	Dictionary get_traversal_stats() const;

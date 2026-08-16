@@ -1035,7 +1035,12 @@ ObjectModel *MissionObjectPlacer::build_player_animated_model(
 		return build_animated_model(item_id, p_parent);
 	}
 	const String body_graphic = spec.get("body", String());
-	if (body_graphic.is_empty()) {
+	const String head_graphic = spec.get("head", String());
+	// Retail composes head + body only when BOTH blip model handles are
+	// nonzero; either missing falls to the entity's own item model.
+	// (retail: Terrain_RenderSectorEntitiesBySide @0x5c7fdf-0x5c7fea —
+	//  jz to the forced_model 0 item path on either zero handle)
+	if (body_graphic.is_empty() || head_graphic.is_empty()) {
 		return build_animated_model(item_id, p_parent);
 	}
 	const String adm_name = item_db_.is_valid()
@@ -1062,27 +1067,29 @@ ObjectModel *MissionObjectPlacer::build_player_animated_model(
 			: String());
 	_configure_item_shadow(body, item_id);
 
-	const String head_graphic = spec.get("head", String());
-	if (!head_graphic.is_empty()) {
-		ObjectModel *head = build_model_from_graphic(head_graphic, adm_name,
-				body, String(), body_graphic);
-		if (head != nullptr) {
-			head->set_name(vformat("PlayerAvatarHead_%s",
-					head_graphic.get_file().get_basename()));
-			head->set_meta("avatar_part", "head");
-			head->set_meta("character_id", p_character_id & 0xffff);
-			// (retail: Avatar_SetHeadCamoCtrl @0x57a370 immediately before the
-			// head submit @0x5c7fec, see docs/playerinfo/avatars-re.md)
-			AvatarDatabase::apply_part_camo(head, spec.get("head_camo", Array()),
-					"player_avatar:head_camo");
-			head->set_mirror_reflected(_item_is_mirror_reflected(item_id));
-			_configure_item_shadow(head, item_id);
-			// The head follows every body presentation call (one entity, one
-			// skeleton, one CTRL bus) except the per-part camo triplet.
-			body->add_presentation_link(head,
-					AvatarDatabase::part_camo_registers());
-		}
+	ObjectModel *head = build_model_from_graphic(head_graphic, adm_name,
+			body, String(), body_graphic);
+	if (head == nullptr) {
+		// A head that fails to build mirrors the zero-handle case: tear the
+		// composed body down and render the plain item model instead of a
+		// headless avatar. (retail: the both-or-neither gate above)
+		body->queue_free();
+		return build_animated_model(item_id, p_parent);
 	}
+	head->set_name(vformat("PlayerAvatarHead_%s",
+			head_graphic.get_file().get_basename()));
+	head->set_meta("avatar_part", "head");
+	head->set_meta("character_id", p_character_id & 0xffff);
+	// (retail: Avatar_SetHeadCamoCtrl @0x57a370 immediately before the
+	// head submit @0x5c7fec, see docs/playerinfo/avatars-re.md)
+	AvatarDatabase::apply_part_camo(head, spec.get("head_camo", Array()),
+			"player_avatar:head_camo");
+	head->set_mirror_reflected(_item_is_mirror_reflected(item_id));
+	_configure_item_shadow(head, item_id);
+	// The head follows every body presentation call (one entity, one
+	// skeleton, one CTRL bus) except the per-part camo triplet.
+	body->add_presentation_link(head,
+			AvatarDatabase::part_camo_registers());
 	return body;
 }
 
