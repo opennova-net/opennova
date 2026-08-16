@@ -2530,6 +2530,65 @@ end
 	sim.free()
 
 
+func test_attach_labels_share_complete_can_fire_verdict() -> void:
+	# The label pass consumes the same live Player_CanFireWeapon verdict as the
+	# body/HUD spread row: owning an equipped slot alone is not sufficient.
+	# [orig: Player_CanFireWeapon @0x5cf780; label branch @0x5a32df]
+	var md := MissionData.new()
+	assert_eq(md.create_default(), OK)
+	assert_false(md.add_entity(MissionData.KIND_ITEM, 101294,
+			Vector3(10, 0, 0), Vector3.ZERO).is_empty())
+	assert_false(md.add_entity(MissionData.KIND_ITEM, 101294,
+			Vector3(14, 0, 0), Vector3.ZERO).is_empty())
+	var sim := Simulation.new()
+	var dir := _native_fixture_dir()
+	var model_bytes := FileAccess.get_file_as_bytes(
+			"res://../fixtures/3dp/B50Cal/B50Cal.3di")
+	_write_fixture_bytes(dir, "labelgun.3di", model_bytes)
+	var item_db := _item_db_from_text(dir, """begin "Labels Gun"
+  id 101294
+  type object
+  graphic labelgun
+  primary_weapon WPN_EMPLCD50
+end
+""")
+	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
+	assert_true(sim.load_from_mission_data(md))
+	assert_true(sim.spawn_local_player(Vector3(12, 0, 0), 0.0, 1))
+	sim.set_local_player_weapon({
+		"name": "WPN_LABEL_SCOPE",
+		"actions": [
+			{"name": "idle", "delaystart": 0, "delayend": 0},
+			{"name": "scopeup", "delaystart": 0, "delayend": 0},
+			{"name": "scopedown", "delaystart": 0, "delayend": 0},
+		],
+		"flags": 0x1,
+		"clipsize": 30,
+		"startrounds": 60,
+	}, {})
+	sim.step()
+	assert_eq(sim.get_attach_labels().size(), 2,
+			"an unraised Scoped weapon cannot fire, so both candidates label")
+
+	assert_true(sim.request_local_player_scope_toggle())
+	for _i in range(16):
+		sim.step()
+	assert_true(_aimed_shot_available(sim))
+	assert_eq(sim.get_attach_labels().size(), 1,
+			"settled first-person aim restricts labels to the nearest candidate")
+
+	sim.set_local_player_camera_third_person(true)
+	assert_eq(sim.get_attach_labels().size(), 2,
+			"the live camera gate applies before another simulation tick")
+	sim.set_local_player_camera_third_person(false)
+	sim.set_water_z(1.0)
+	sim.step()
+	assert_false(_aimed_shot_available(sim))
+	assert_eq(sim.get_attach_labels().size(), 2,
+			"an underwater ordinary scope exposes every attach candidate")
+	sim.free()
+
+
 func test_attach_labels_hide_occupied_and_out_of_range() -> void:
 	var md := MissionData.new()
 	assert_eq(md.create_default(), OK)
@@ -3987,6 +4046,86 @@ func test_first_husk_kz_userpoints_feed_death_blast_traits() -> void:
 	assert_false(bool(missing_debug.get("husk_model_loaded", true)),
 			"missing/corrupt husk assets leave the retail live-model gate clear")
 	missing_sim.free()
+
+
+func test_retail_glass_model_maps_exact_userpoint_into_death_traits() -> void:
+	# Terrain_SpawnEffectsAtUserPoint first selects one hard-coded retail
+	# model/surface pair, then resolves that exact point case-insensitively. Use
+	# a renamed committed model so this exercises the production SimModelCache
+	# and collision-resolution seam rather than a test-only trait setter.
+	var bytes := FileAccess.get_file_as_bytes(
+			"res://../fixtures/3dp/armry01/Armry01.3di")
+	bytes = _bytes_with_renamed_user_point(bytes, "Armory", "gLaSs")
+	var dir := _native_fixture_dir()
+	_write_fixture_bytes(dir, "eurhr2.3di", bytes)
+	var item_db := _item_db_from_text(dir, """begin "Retail glass witness"
+  id 105099
+  type object
+  graphic eurhr2
+  hp 1000
+end
+""")
+	var md := MissionData.new()
+	assert_eq(md.create_default(), OK)
+	var placed := md.add_entity(
+			MissionData.KIND_BUILDING, 105099, Vector3.ZERO, Vector3.ZERO)
+	assert_false(placed.is_empty())
+
+	var source := ObjectData.new()
+	assert_eq(source.open_file(dir.path_join("eurhr2.3di")), OK)
+	var expected_pos := Vector3.INF
+	var expected_dir := Vector3.INF
+	for point_index in range(source.get_user_point_count()):
+		var info: Dictionary = source.get_user_point_info(point_index)
+		if String(info.get("name", "")).nocasecmp_to("GLASS") != 0:
+			continue
+		var model_pos: Vector3 = info.get("position", Vector3.ZERO)
+		var model_dir: Vector3 = info.get("rotation", Vector3.ZERO)
+		expected_pos = Vector3(model_pos.z, model_pos.x, model_pos.y)
+		expected_dir = Vector3(model_dir.z, model_dir.x, model_dir.y)
+	assert_true(expected_pos.is_finite())
+
+	var sim := Simulation.new()
+	assert_true(sim.load_from_mission_data(md))
+	sim.resolve_item_traits(item_db)
+	_native_asset_root(sim, dir)
+	assert_eq(sim.resolve_collision_instances(item_db), 1)
+	var debug := sim.get_destruction_debug(int(placed.get("bms_id", 0)))
+	assert_eq(int(debug.get("glass_point_count", -1)), 1)
+	var positions: PackedVector3Array = debug.get(
+			"glass_point_positions", PackedVector3Array())
+	var directions: PackedVector3Array = debug.get(
+			"glass_point_directions", PackedVector3Array())
+	assert_eq(positions, PackedVector3Array([expected_pos]),
+			"the GLASS1/GLASS mapping preserves mission-local point axes")
+	assert_eq(directions, PackedVector3Array([expected_dir]),
+			"the shatter orientation preserves the authored userpoint direction")
+	sim.free()
+
+	# A near-name is not in retail's static table, even with the same userpoint.
+	var wrong_dir := _native_fixture_dir()
+	_write_fixture_bytes(wrong_dir, "eurhr2x.3di", bytes)
+	var wrong_db := _item_db_from_text(wrong_dir, """begin "Near-name glass witness"
+  id 105098
+  type object
+  graphic eurhr2x
+  hp 1000
+end
+""")
+	var wrong_md := MissionData.new()
+	assert_eq(wrong_md.create_default(), OK)
+	var wrong_placed := wrong_md.add_entity(
+			MissionData.KIND_BUILDING, 105098, Vector3.ZERO, Vector3.ZERO)
+	var wrong_sim := Simulation.new()
+	assert_true(wrong_sim.load_from_mission_data(wrong_md))
+	wrong_sim.resolve_item_traits(wrong_db)
+	_native_asset_root(wrong_sim, wrong_dir)
+	assert_eq(wrong_sim.resolve_collision_instances(wrong_db), 1)
+	var wrong_debug := wrong_sim.get_destruction_debug(
+			int(wrong_placed.get("bms_id", 0)))
+	assert_eq(int(wrong_debug.get("glass_point_count", -1)), 0,
+			"retail's model table is an exact case-insensitive match")
+	wrong_sim.free()
 
 
 func test_face_only_cfac_model_attaches_for_projectile_raycast() -> void:

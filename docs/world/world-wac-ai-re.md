@@ -4586,6 +4586,22 @@ attacker (`@ 0x4eb319/@ 0x4eb593`). Destructible-class victims (deathCallback
 == `Entity_HandleDestructibleDeathEvent @ 0x440210`) get the blast center
 written into +0x80 — the debris launch origin (`@ 0x4eb553-0x4eb569`).
 
+**Glass user-point port (2026-08-16, D-ITEM-17 CLOSED).** Collision asset
+resolution retains the first exact case-insensitive user point selected by
+retail's complete model/key table: `eurhr2/2a/2b` `GLASS1` → `GLASS`,
+`eurhr1/1b/1c/3/3b/3c` `GLASS2` → `GLASS02`, and `atrm2a` `GLASS1` →
+`GLASS1` (`GLASS3/4` have no shipped rows). The pool-2 explosion leg applies
+the entity's full Euler pose, range-tests the point against the AMMO'S authored
+`kz_maxradius` (not the queued radius override), and breaks each point once.
+Every newly broken point consumes two destruction-PRNG draws for each of the
+four ordered slots, then submits `Effect_BldGlassExp`, `Effect_BldPaperExp`,
+`Effect_BldFireExp`, and `Effect_BldDustExp` when the second roll modulo 100 is
+`<= 33/5/5/10`. The presentation drain receives those resolved position,
+direction, and effect rows verbatim. Native `destruction` pins full-pose
+placement, authored-radius selection, effect order, PRNG state, and break-once;
+GUT `nova_simulation_test` pins the real 3DI name/axis resolve and
+`destruction_present_pass_test` pins the transient presentation leg.
+
 `Entity_ApplyWeaponDamage @ 0x4e6820` order: dead flag; in-session building
 gate (`g_destroy_buildings @ 0x24d2164`); same-team immunity when the target
 def authors attrib 0x8000 (`@ 0x4e688d`); indestructible Flags 0x4000000 /
@@ -4643,17 +4659,22 @@ on phase 4. The destruction: per-collision-section
 timer, and a shrunk-bbox invalidation call.
 
 `Entity_SpawnSectionDebris @ 0x43f580`: samples the model's collision faces at
-stride `(scale<<8)/150`, transforms each sampled triangle centroid by the
-section bone matrix, launches AWAY from the +0x80 blast center (else radially
-at pitch ~63.3 deg), and spawns `g_fx_TreeFoliageExp` for material-17
-triangles else `g_fx_TreeWoodExp` (the built-in effect-name pair table
-@ 0x849150).
+8.8 stride `(totalFaceCount<<8)/150`, resets the accumulator for each section,
+forms each triangle centroid with signed divide-by-three truncation, then
+promotes the Q8 result to 16.16. The callback returns a matrix-array base once;
+the retail loop passes that same first matrix to every section transform (it
+does not add the section ordinal). It launches AWAY from the +0x80 blast center
+using retail's planar-distance approximation (else radially at pitch ~63.3
+deg), and spawns `g_fx_TreeFoliageExp` for material-17 triangles else
+`g_fx_TreeWoodExp` (the built-in effect-name pair table @0x849150).
 
-Port status: the event carries the entity position and blast center only.
-`destruction_present_pass.gd` emits six randomized `TreeWoodExp` stand-ins
-around that origin. It does not enumerate CFAC faces, sample triangle
-centroids at the retail stride, or select foliage versus wood by face
-material (D-ITEM-16).
+**Port status (2026-08-16, D-ITEM-16 CLOSED).** `CollisionWorld` performs that
+walk against the intact collision view before the husk flag changes model
+identity. `process_destructible_death` converts every sample directly into its
+material-selected, positioned, directed transient effect row; the Godot pass
+no longer invents a six-spawn radial burst. Native `destruction` pins the
+150-face cadence, signed-centroid edge, transform, launch direction, and
+foliage/wood split; `destruction_present_pass_test` pins verbatim delivery.
 
 **The client fold (witnessed + ported 2026-08-05, D-NET-208).** The "a
 non-authority client destroys on phase 4" leg above is DRIVEN by two S2C
@@ -4909,7 +4930,7 @@ the FFI structs.
 | D-ITEM-3 | The mid-life breakable-section sweep (a blast marks collision sections with byte flag & 2 into sectionMask) is a cited stub — our CollisionModel carries no per-section flag byte | `@ 0x4e6c5e-0x4e6e6b` | partial visual damage (windows/panels before death) missing; needs the section-flag plumb in the collision build |
 | D-ITEM-4 | Death pieces present only as their row's TRAIL effect following the sim piece: the single-section husk mesh, its render spin, and the explosion glow light are absent; one world-local PRNG stream stands in for the three retail streams | pieces render one husk section w/ spin `@ 0x493400`; `LightPool_SpawnGlowEffect @ 0x49351a`; PRNG_Next16/_B/_C | the debris trajectory is pinned, but the visible chunks do not match retail; mesh pieces need section-ordinal render instancing. `CollisionSection::parent_part_index` preserves COBJ hierarchy metadata and is not that selector |
 | D-ITEM-5 | **FIXED 2026-07-20:** the active first-stage husk's exact case-insensitive "KZ" user points feed `ItemDeathTraits::kz_points`; each queues r=5.0 after full authored placement rotation, while a model with no match falls back once at the entity with r = def kz else boundRadius | `Entity_QueueKzBlastAtUserPoints @ 0x4eabf0` | `nova_simulation_test` pins first-husk selection, final-only exclusion, all-match multiplicity, and IR→mission axes; `destruction` pins full-Euler placement and the radius-5 queue. Wreck-bank anchors remain separately D-ITEM-15 |
-| D-ITEM-6 | Blast/damage stubs: organic knockback (`Entity_ApplyCollisionForce`), the victim-attached burn emitter + hit sound (the ammo +72/+76 pair — field source unwitnessed), medic (type 3) + vehicle-ram (type 1) queue legs, the occupant damage scale, `g_destroy_buildings` (an MP rules seam), and the S2C 0x26/0x2F/0x21 wire emits | `@ 0x4eb1d2 / @ 0x4eb292 / @ 0x4eadc6 / @ 0x4e5a50 / @ 0x4e6860`; net-re §5.60 | each cited at its port site; glass presentation is split into D-ITEM-17 and the wire legs stage with the npruntime death broadcasts |
+| D-ITEM-6 | Blast/damage stubs: organic knockback (`Entity_ApplyCollisionForce`), the victim-attached burn emitter + hit sound (the ammo +72/+76 pair — field source unwitnessed), medic (type 3) + vehicle-ram (type 1) queue legs, the occupant damage scale, `g_destroy_buildings` (an MP rules seam), and the S2C 0x26/0x2F/0x21 wire emits | `@ 0x4eb1d2 / @ 0x4eb292 / @ 0x4eadc6 / @ 0x4e5a50 / @ 0x4e6860`; net-re §5.60 | each cited at its port site; glass presentation closed under D-ITEM-17, while the wire legs stage with the npruntime death broadcasts |
 | D-ITEM-7 | Which items take the destructible death path is routed by KIND (non-organic, non-AI-capable) + unit_type; retail routes via the def class resolve (`EntityDef_LoadModelsAndCallbacks @ 0x439f50` callback columns, unwitnessed per class) | deathCallback (+0x1C8) authored per def class | same observable for shipped JO data (destructibles author no ai/move function); witness the class-to-callback table to close |
 | D-ITEM-8 | The crane/water-tower special death (the "scrane" pool walk + the double kz queue `@ 0x43fc70`) and `Entity_ProcessCraneDestruction @ 0x43eee0` are unported; the destructible 992-tick spawnPhase re-notify and the ambient phase-0 shot leg (`Entity_SpawnRegionalEffect @ 0x408290`) are unported | as cited | special-cased content (shipyard cranes, water towers); the ambient shot leg is a separate feature (items firing scheduled time-of-day sounds) |
 | D-ITEM-9 | The Falling/Generic wreck callbacks ground on TERRAIN only, and their ported rest offset uses sec0 z extents synthesized from the piece model's LOD-0 primitive bounds (upright leg only). Static's separate terrain/water thresholds are ported as described in §24.5 | `Entity_RaycastGroundHeightAndObject @ 0x414320` (terrain + objects, mask 0x200000); the section-row +84/+88 extents `@ 0x461e23-0x461e4b` | a Falling/Generic wreck dying on a roof sinks to terrain below; the runtime section-row field provenance (+84/+88 = section bbox z) is probable, not row-walked — verify against the render-model builder to close |
@@ -4919,8 +4940,8 @@ the FFI structs.
 | D-ITEM-13 | Hit-resolution residuals: (a) the terrain leg sub-steps the bilinear column at 2-u intervals with a crossing refinement — the original raycasts the hi-res heightmap (`Terrain_RaycastHeightmapHiRes_Thunk @ 0x610890`) with a proportional end-below-ground fallback (`@ 0x4ea42b-0x4ea4af`), so thin crests can tunnel in ours (the strict-less tie-break itself was FIXED 2026-07-18); (b) the person effect point is FIXED 2026-07-18 (`ray[29] - 0x800`), but generic item/terrain effect backoff and retail's post-hit round parking at hit+0x800 (+victim boundRadius for persons) remain absent `@ 0x4ea603-0x4ea7d5`; (c) ~~the pool-0 person path used one body cylinder~~ FIXED 2026-07-18: `Physics_RaycastAgainstBoneSections @ 0x4e4670` now walks the current posed COBJ spheres with strict `COBJ[i]` ↔ `boneMatrix[i]` pairing (COBJ parent/offset/CXLT ignored), exact radius scaling/caps, section mask, split `ray[31]` reaction/death and `ray[32]` normal-infantry damage semantics, ammo bullet radius, and first-person-entity termination; the bounded torso sphere is only used when graphic resolution cannot supply a usable COBJ model; (d) ~~our sphere gate was segment-vs-sphere (a boundary-crossing requirement: a tick segment entirely INSIDE a big bound sphere skipped the entity — the in-play shoot-through-building-walls report)~~ FIXED 2026-07-18b: the item-leg gate is now the witnessed per-axis AABB + UNCLAMPED perpendicular line distance (`round_broad_phase`, round_sim.cpp), the face-less stand-in hits at t=0 from inside, and the ctest `collision` `test_round_inside_bound_sphere_hits_wall` pins both the inside-sphere wall stop and the past-the-edge fly-on | as cited; person path §15.8b; the gate `@ 0x4e53d4-0x4e554a` / `@ 0x4e5492`; the dispatch order `@ 0x4ea3b4-0x4ea5f2` | posed reaction/death bones and normal-infantry damage zones are live; remaining drift is thin terrain crests, generic effect/parking offsets, the optional FatBullets floor, and the attrib-0x200 seat x6 branch |
 | D-ITEM-14 | CLOSED 2026-08-12: the three ported transition sites (`transition_to_ground_death` — routed-falling `@ 0x494113`, static legs `@ 0x4942c6`/`@ 0x4943da`) play the item's authored `particlefinale` once at the grounded pose and stamp savedLivePose; the periodic-sound clear closed as FAITHFUL-NOTHING — the pool has no producer in retail JO (allocator `@ 0x57b380` + reset `@ 0x57b360` have zero xrefs; `PeriodicSound_TickAll @ 0x57b450` walks an always-empty pool), so the entity-matched clear never clears anything and no pool is modeled. The old "+0x4E0 impact pair" gloss corrected: only the +0x4E2 `particlefinale` handle is read `@ 0x493088` | `Entity_TransitionToGroundDeath @ 0x493080`; intern site `resolve_item_materials_and_spawn_bone_trails @ 0x5231cb` (name +0x4E4 → handle +0x4E2); `PeriodicSound_ClearByEntity @ 0x57b3e0` over `g_periodic_sound_pool @ 0x26B8050`; the separate DeathPiece pool is 256x180 B at `0x26BAC58` | `destruction_test::test_dead_item_landing_split` pins the routed-leg finale effect + savedLivePose stamp and the generic leg's silence |
 | D-ITEM-15 | Wreck effects are one origin-anchored group per authored family plus one fire-crackle roll per wreck; there are no four-slot Dead/water/Fire/Other bone banks, per-slot bone follow, or underwater `g_fx_Boat01Steam` transition. The effect kill plane is particle culling only and cannot substitute for spawning steam | `Entity_InitDeathSounds @ 0x4939b0`; `Entity_UpdateDeadWreckEffects @ 0x493140` | large/multi-bone wreck effects originate and roll at one point, and burning bones entering water neither steam nor retire like retail |
-| D-ITEM-16 | Section debris is six randomized radial `TreeWoodExp` spawns at the entity; the presenter never walks collision faces, samples triangle centroids at `(scale<<8)/150`, transforms them by section bones, or switches material 17 to `TreeFoliageExp` | `Entity_SpawnSectionDebris @ 0x43f580` | the burst is readable but its count, positions, directions, and material family are presentation stand-ins rather than triangle-faithful |
-| D-ITEM-17 | The sim records a building glass-break event and the presenter increments a diagnostic count only; it does not resolve `GLASS1..GLASS4` model user points, range-filter them against the blast, or spawn the retail shatter effects | `@ 0x4eb814-0x4eb85d` | blast-adjacent windows do not visibly shatter; a statistic is not a presentation implementation |
+| D-ITEM-16 | **FIXED 2026-08-16.** The intact `CollisionWorld` view now samples every section at the total-face 8.8 stride, uses retail's signed centroid arithmetic and first callback matrix, derives the witnessed blast/radial direction, and emits material-17 foliage versus wood effects at each sampled triangle | `Entity_SpawnSectionDebris @ 0x43f580` | `destruction_test::test_section_debris_samples_collision_faces` pins 150 samples plus centroid/transform/direction/material; the present-pass test pins the resolved event row |
+| D-ITEM-17 | **FIXED 2026-08-16.** Exact stock graphic→userpoint resolution feeds full-Euler glass points; the pool-2 blast leg uses authored `kz_maxradius`, four ordered probabilistic shatter families, exact PRNG consumption, and a persistent per-point broken bit | `Projectile_ProcessExplosionQueue @0x4eb814-0x4eb85d`; `Terrain_SpawnEffectsAtUserPoint @0x5cee20` | native `destruction` pins range/effects/RNG/break-once; GUT pins real-model name/axis resolution and verbatim presentation |
 | D-ITEM-18 | UnitType 3 spawns normal section pieces and installs an explicit `PiecePhysics` mode, but the shared production pass deliberately skips that mode rather than substituting Generic. Retail runs the specialized main-entity `DeathPiece_PhysicsUpdate` callback | `DeathPiece_PhysicsUpdate @ 0x48f500`: distinct air/water lateral motion, slope force, dual-blast, and landing legs | the unitType-3 husk does not receive its retail main-entity motion/presentation; the explicit sentinel prevents a falsely "matching" generic settle |
 | D-ITEM-19 | **FIXED 2026-08-15.** Collision resolution retains exact case-insensitive `DEAD` points from the first husk only; UnitType 11 transforms each through full Euler and emits one family-0 `Effect_ShockWaterBrdg` at raw water height, first transition only, with no origin fallback | `Entity_SpawnDeathEffectsAtBones @ 0x4944c0` | `destruction_test::test_bridge_dead_points_emit_water_shocks` pins count, full-pose positions, zero water, first-transition gating, no fallback, and non-UnitType-11 silence; `nova_simulation_test` pins real 3DI user-point axes |
 | D-ITEM-20 | **FIXED 2026-07-22.** Building Static/collapse dispatch gates on `ItemDeathTraits::husk_model_loaded`, fed by successful live huskFinal/husk `ObjectData` resolution and kept separate from authored `has_husk` | `Entity_ProcessBuildingDeath @ 0x49442c`; the pointer gate wraps only the callback body | missing/corrupt husk assets receive the matched-row death flags, but no pieces, Static motion, or collapse sound; valid first-stage and final-only models both open the gate |

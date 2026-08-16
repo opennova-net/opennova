@@ -117,6 +117,114 @@ const CollisionTargetView *CollisionWorld::target_view(const World &world, Entit
     return &scratch;
 }
 
+std::vector<SectionDebrisSample> CollisionWorld::sample_section_debris(
+        const World &world, EntityHandle h, const Vec3 &blast_center) const {
+    std::vector<SectionDebrisSample> out;
+    CollisionTargetView scratch;
+    std::vector<CollisionMatrix> matrices;
+    const CollisionTargetView *target = target_view(world, h, scratch, matrices);
+    if (target == nullptr || target->model == nullptr ||
+        target->matrices == nullptr || target->model->faces.empty())
+        return out;
+
+    const CollisionModel &model = *target->model;
+    const int64_t total_faces = static_cast<int64_t>(model.faces.size());
+    // model+0x60 is the total CFAC count. Its 8.8 step is recomputed for
+    // every section and the accumulator begins at zero each time.
+    // [orig: @0x43f5a6..0x43f5d9]
+    const int64_t stride = (total_faces * 256) / 150;
+    if (stride <= 0) return out;
+
+    const int32_t blast_fixed[3] = {
+            to_fixed(blast_center.x), to_fixed(blast_center.y),
+            to_fixed(blast_center.z)};
+    const bool has_blast_center =
+            blast_fixed[0] != 0 || blast_fixed[1] != 0 || blast_fixed[2] != 0;
+    constexpr double kBamPerRad = kBamFullTurn /
+            6.283185307179586476925286766559;
+    constexpr int32_t kRadialFallbackPitchBam = 754974675;
+    auto direction_from_angles = [](double heading, double pitch) {
+        const double cp = std::cos(pitch);
+        return Vec3{static_cast<float>(cp * std::cos(heading)),
+                    static_cast<float>(cp * std::sin(heading)),
+                    static_cast<float>(std::sin(pitch))};
+    };
+
+    // The retail function asks the callback for the matrix array once and
+    // passes its base to every per-section invocation; it does not add the
+    // section ordinal before Math_FixedPointTransformPoint22.
+    // [orig: callback @0x43f5a4; transform @0x43f6b8]
+    const CollisionMatrix &matrix = target->matrices[0];
+    for (const CollisionSection &section : model.sections) {
+        if (section.face_count <= 0) continue;
+        int64_t accumulator = 0;
+        do {
+            const int64_t local_face = accumulator >> 8;
+            if (local_face < 0 || local_face >= section.face_count) break;
+            const int64_t face_index =
+                    static_cast<int64_t>(section.face_start) + local_face;
+            if (face_index < 0 || face_index >= total_faces) break;
+            const CollisionFace &face =
+                    model.faces[static_cast<size_t>(face_index)];
+            int32_t centroid[3] = {};
+            bool valid = true;
+            for (int axis = 0; axis < 3; ++axis) {
+                int32_t sum = 0;
+                for (int corner = 0; corner < 3; ++corner) {
+                    const int64_t vertex_index =
+                            static_cast<int64_t>(section.face_vertex_start) +
+                            face.vertex_index[corner];
+                    if (vertex_index < 0 ||
+                        vertex_index >= static_cast<int64_t>(model.face_vertices.size())) {
+                        valid = false;
+                        break;
+                    }
+                    const CollisionFaceVertex &vertex =
+                            model.face_vertices[static_cast<size_t>(vertex_index)];
+                    sum += axis == 0 ? vertex.x : axis == 1 ? vertex.y : vertex.z;
+                }
+                if (!valid) break;
+                // C++ signed division matches the x86 magic-divide sequence:
+                // truncate toward zero, then promote Q8 to 16.16.
+                centroid[axis] = (sum / 3) * 256;
+            }
+            if (valid) {
+                int32_t world_point[3];
+                matrix.transform_point(centroid, world_point);
+                int64_t dx = 0, dy = 0, dz = 0;
+                double pitch = 0.0;
+                if (has_blast_center) {
+                    dx = static_cast<int64_t>(world_point[0]) - blast_fixed[0];
+                    dy = static_cast<int64_t>(world_point[1]) - blast_fixed[1];
+                    dz = static_cast<int64_t>(world_point[2]) - blast_fixed[2];
+                    const int64_t ax = dx < 0 ? -dx : dx;
+                    const int64_t ay = dy < 0 ? -dy : dy;
+                    const int64_t lesser = ax < ay ? ax : ay;
+                    const int64_t greater = ax < ay ? ay : ax;
+                    const int64_t approx_distance = greater + 5 * (lesser / 16);
+                    pitch = std::atan2(static_cast<double>(dz),
+                                       static_cast<double>(approx_distance));
+                } else {
+                    dx = static_cast<int64_t>(world_point[0]) - target->pos[0];
+                    dy = static_cast<int64_t>(world_point[1]) - target->pos[1];
+                    pitch = static_cast<double>(kRadialFallbackPitchBam) /
+                            kBamPerRad;
+                }
+                const double heading = std::atan2(
+                        static_cast<double>(dy), static_cast<double>(dx));
+                constexpr float kFromFixed = 1.0f / 65536.0f;
+                out.push_back(SectionDebrisSample{
+                        Vec3{world_point[0] * kFromFixed,
+                             world_point[1] * kFromFixed,
+                             world_point[2] * kFromFixed},
+                        direction_from_angles(heading, pitch), face.material});
+            }
+            accumulator += stride;
+        } while ((accumulator >> 8) < section.face_count);
+    }
+    return out;
+}
+
 // The witnessed projectile broad phase over the pools-2/1 proximity slots
 // [orig: Projectile_RaycastProximitySlots @ 0x4e53d4-0x4e554a]: per-axis
 // |slotCenter - segCenter| <= radius + halfExtent, then the UNCLAMPED

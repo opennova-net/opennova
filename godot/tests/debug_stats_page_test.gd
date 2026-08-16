@@ -12,7 +12,8 @@ const MissionPresentation := preload("res://game/world/mission_presentation.gd")
 class DestructionInfoStub:
 	extends RefCounted
 	var husk_swaps := 2
-	var bursts := 4
+	var debris_triangles := 4
+	var glass_points := 1
 
 
 class ThrowableInfoStub:

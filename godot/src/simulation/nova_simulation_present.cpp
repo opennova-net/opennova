@@ -559,38 +559,14 @@ Dictionary Simulation::drain_destruction_events() {
 		d["pos"] = to_godot(h.pos);
 		husks.push_back(d);
 	}
-	Array bursts;
-	for (const opennova::world::SectionDebrisEvent &b : ev.debris_bursts) {
-		Dictionary d;
-		d["net_id"] = static_cast<int>(b.net_id);
-		d["bms_id"] = b.bms_id;
-		d["spawn_origin"] = static_cast<int64_t>(b.spawn_origin);
-		d["item_id"] = b.item_id;
-		d["pos"] = to_godot(b.pos);
-		d["blast_center"] = to_godot(b.blast_center);
-		d["has_blast_center"] = b.blast_center.x != 0.0f || b.blast_center.y != 0.0f ||
-				b.blast_center.z != 0.0f;
-		bursts.push_back(d);
-	}
-	Array glass;
-	for (const opennova::world::GlassBreakEvent &g : ev.glass_breaks) {
-		Dictionary d;
-		d["net_id"] = static_cast<int>(g.net_id);
-		d["bms_id"] = g.bms_id;
-		d["spawn_origin"] = static_cast<int64_t>(g.spawn_origin);
-		d["item_id"] = g.item_id;
-		d["blast_pos"] = to_godot(g.blast_pos);
-		d["radius"] = g.radius;
-		glass.push_back(d);
-	}
 	out["effects"] = effects;
 	out["sounds"] = sounds;
 	out["husk_swaps"] = husks;
-	out["debris_bursts"] = bursts;
-	out["glass_breaks"] = glass;
 	out["explosions_processed"] = ev.explosions_processed;
 	out["items_destroyed"] = ev.items_destroyed;
 	out["crackles"] = ev.crackles; // wreck-fire crackle rolls fired (S12b)
+	out["debris_triangles"] = ev.debris_triangles;
+	out["glass_points"] = ev.glass_points;
 	ev.clear();
 	return out;
 }
@@ -667,6 +643,18 @@ Dictionary Simulation::get_destruction_debug(int p_bms_id) const {
 		out["bridge_dead_point_count"] =
 				static_cast<int64_t>(t->bridge_dead_points.size());
 		out["bridge_dead_points"] = bridge_dead_points;
+		PackedVector3Array glass_positions;
+		PackedVector3Array glass_directions;
+		for (const opennova::world::GlassPointTrait &point : t->glass_points) {
+			glass_positions.push_back(Vector3(
+					point.local_pos.x, point.local_pos.y, point.local_pos.z));
+			glass_directions.push_back(Vector3(
+					point.local_dir.x, point.local_dir.y, point.local_dir.z));
+		}
+		out["glass_point_count"] =
+				static_cast<int64_t>(t->glass_points.size());
+		out["glass_point_positions"] = glass_positions;
+		out["glass_point_directions"] = glass_directions;
 	}
 	out["pos"] = Vector3(found->position.x, found->position.z, -found->position.y);
 	return out;

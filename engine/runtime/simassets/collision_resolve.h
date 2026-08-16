@@ -69,6 +69,10 @@ struct CollisionResolveState {
 	// shock callback. Like KZ, huskFinal is not a source.
 	std::unordered_map<std::string, std::vector<world::Vec3>>
 			husk_dead_points_by_graphic;
+	// Exact intact-model glass surface point selected by retail's static
+	// model/GLASS1..4 table. Empty entries are cached deliberately.
+	std::unordered_map<std::string, std::vector<world::GlassPointTrait>>
+			glass_points_by_graphic;
 	std::unordered_map<std::string, CollisionHuskPieceInfo>
 			husk_pieces_by_graphic;
 	// Negative demand cache: one unresolved entity is attempted at most once

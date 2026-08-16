@@ -643,19 +643,33 @@ func test_batched_husk_and_wreck_anchor_follow_the_live_present_pose() -> void:
 	presenter.teardown()
 
 
-func test_zero_origin_debris_event_is_not_discarded() -> void:
+func test_resolved_debris_and_glass_effects_present_verbatim() -> void:
 	var fx := _make_fx()
 	var anchors := CaptureAnchors.new()
 	var presenter := _make_pass(fx, anchors)
 
 	presenter.present_drained({
-		'debris_bursts': [{
-			'bms_id': 0,
+		'effects': [{
+			'effect': 'Effect_TreeFoliageExp',
 			'pos': Vector3.ZERO,
+			'dir': Vector3.RIGHT,
+		}, {
+			'effect': 'Effect_BldGlassExp',
+			'pos': Vector3(1, 2, 3),
+			'dir': Vector3.UP,
 		}],
+		'debris_triangles': 1,
+		'glass_points': 1,
 	}, [])
 
-	assert_eq(presenter.get_stats().bursts, 1)
-	assert_eq(fx.spawns.size(), DestructionPresentPass.BURST_COUNT,
-			'world origin is a valid authored destruction position')
+	assert_eq(presenter.get_stats().debris_triangles, 1)
+	assert_eq(presenter.get_stats().glass_points, 1)
+	assert_eq(fx.spawns.size(), 2)
+	if fx.spawns.size() == 2:
+		assert_eq(fx.spawns[0]['effect'], 'Effect_TreeFoliageExp')
+		assert_eq(fx.spawns[0]['position'], Vector3.ZERO,
+				'world origin is a valid authored triangle centroid')
+		assert_eq(fx.spawns[0]['orientation'], Vector3.RIGHT)
+		assert_eq(fx.spawns[1]['effect'], 'Effect_BldGlassExp')
+		assert_eq(fx.spawns[1]['orientation'], Vector3.UP)
 	presenter.teardown()
