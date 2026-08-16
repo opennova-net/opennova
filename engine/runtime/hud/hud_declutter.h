@@ -7,6 +7,10 @@
 //  @ 0x24D20BC (cfg int "hud_detail", parse @ 0x550339, default 0 @ 0x54d3d8,
 //  apply @ 0x55154d, saved @ 0x54c80d); rebuild
 //  CRenderState_SetLayerVisibility @ 0x59B0F0 -> dword_2723C80]
+// Unported residual: the WAC/mission event action (type 37) force-applies
+// level 0 through a side path WITHOUT touching the global [orig:
+//  RenderState_SetLayerVisibilityByIndex @ 0x5A3020, flash-timer array
+//  dword_2723CF8] — tracked, not modeled here.
 // Witness record: docs/interface/hud-re.md.
 
 #include <array>

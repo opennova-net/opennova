@@ -667,6 +667,10 @@ void HudFrameCompiler::element_power(const HudFrameState &state, float w,
 		float h) {
 	// [orig: HUD_DrawPowerThrowChargeBar @ 0x599830 — outline + inset fill +
 	// "%d%" 15 output pixels above, all in the flat 0xFF800000 half-red]
+	// The PWRBAR declutter gate [orig: the slot-20 cmp @ 0x5A7DD2].
+	if (!state.declutter_visible[kDeclutterPwrBar]) {
+		return;
+	}
 	if (!state.windup_active) {
 		return;
 	}
@@ -729,6 +733,10 @@ void HudFrameCompiler::element_waypoint(const HudFrameState &state, float w,
 		float h) {
 	// [orig: HUD_DrawWaypointNameAndDistance @ 0x5947a0 — align routing, the
 	// wireframe distance box (field 3 hides only the box)]
+	// The WAYPOINT declutter gate [orig: the slot-3 cmp @ 0x5A7DB8].
+	if (!state.declutter_visible[kDeclutterWaypoint]) {
+		return;
+	}
 	if (!state.waypoint.present || font_.font() == nullptr) {
 		return;
 	}
@@ -1077,6 +1085,14 @@ void HudFrameCompiler::element_messages(const HudFrameState &state, float w,
 		float h) {
 	// [orig: Chat_AddDebugMessage @ 0x4987f0 display — newest at the anchor,
 	// scrolling upward, the HUDCHLINE cap]
+	// The CHAT declutter gate carries a SECOND hard-coded cull on top of the
+	// slot bit: any level >= 2 hides the feed even with slot 23 authored
+	// visible [orig: both tests at the one site @ 0x59AD66]. The message
+	// ring itself keeps aging — only the draw is skipped.
+	if (!state.declutter_visible[kDeclutterChat] ||
+			state.hud_detail_level >= 2) {
+		return;
+	}
 	if (font_.font() == nullptr) {
 		return;
 	}

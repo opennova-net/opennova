@@ -56,6 +56,24 @@ var _hud_color_index: int = clampi(
 		int(ConfigStore.read(HUD_COLOR_CONFIG_PATH, HUD_COLOR_SECTION,
 				HUD_COLOR_CONFIG_KEY, 2)), 0, 5)
 var _hud_color_was_down := false
+# The HUD declutter level, persisted like retail's config token round trip.
+# Default 0 = everything the masks author at level 0. [orig: cfg int
+# "hud_detail" — parse @0x550339, default 0 @0x54d3d8, applied to the live
+# level @0x55154d, saved @0x54c80d; the level drives
+# CRenderState_SetLayerVisibility @0x59B0F0]
+const HUD_DETAIL_CONFIG_KEY := "hud_detail"
+var _hud_detail_level: int = clampi(
+		int(ConfigStore.read(HUD_COLOR_CONFIG_PATH, HUD_COLOR_SECTION,
+				HUD_DETAIL_CONFIG_KEY, 0)), 0, 3)
+var _hud_detail_was_down := false
+# The showhud 2-bit FP-view flags, session state like retail's process-lifetime
+# global. Bit 0 = the FP gun/viewmodel draw, bit 1 = the corner spinmap block;
+# default 3 = both (the cfg gun-visible option writes 3/2). [orig:
+# g_FpWeaponViewFlags — cycle (flags + 1) & 3 @0x4E0561; bit0 read
+# Player_RenderFirstPersonViewModel @0x4DEDEA; bit1 read @0x5A8635; the option
+# writes @0x5521CB/@0x5521D7]
+var _showhud_flags := 3
+var _showhud_was_down := false
 # Whether the map grid origin (the type-2043 marker) has been resolved onto
 # the HUD. A joiner's origin entity decodes from the world stream AFTER the
 # HUD builds, so tick() keeps querying until it appears.
@@ -77,9 +95,10 @@ const MAP_FOOTPRINT_QUERY_INTERVAL_TICKS := 62
 # HUD_DrawWinConditions @0x5be163]; friendly tags KEY_F, N is NVG [orig:
 # action 30 @0x49b573]. Retail has NO HUD-visibility key: H is only the
 # secondary `pause` binding (SP-only), and the boot /NOHUD switch is the sole
-# visibility control [orig: catalog row 70 vk2 0x48; case 25 @0x49b520;
-# /NOHUD @0x4a7a09]. The color cycle rides the polled `hudcolor` binding row
-# in tick() instead of a shell key.
+# whole-overlay master [orig: catalog row 70 vk2 0x48; case 25 @0x49b520;
+# /NOHUD gates dword_840B18 & 2 @0x4a7a09 — a DIFFERENT global from the
+# declutter level]. The huddetail/hudcolor/showhud cycles ride their polled
+# binding rows in tick() instead of shell keys.
 const OBJECTIVES_KEY := KEY_O
 const FRIENDLY_TAGS_KEY := KEY_F
 
@@ -223,6 +242,12 @@ func _ensure_game_hud() -> void:
 	# like retail's process-lifetime global [orig: g_friendlyTagsMode @0x24C18C4].
 	_game_hud.set_friendly_tag_mode(_friendly_tag_mode)
 	_game_hud.set_hud_color_index(_hud_color_index)
+	# The HUD build re-applies the persisted declutter level, mirroring the
+	# round-init HUD reset re-applying the global. [orig: the re-apply
+	# @0x59DD75 from Game_InitNewRound / HUD_InitOverlaySystem]
+	_game_hud.set_hud_detail_level(_hud_detail_level)
+	_game_hud.set_showhud_flags(_showhud_flags)
+	_apply_fp_gun_visible()
 
 
 # The string tables the HUD resolves against: the current root's gametext table
@@ -412,13 +437,19 @@ func tick(gameplay_input_active: bool = false) -> void:
 			if footprints.size() >= 2 and footprints[1] > 0:
 				_map_footprints_fed = true
 				_game_hud.set_minimap_footprints(footprints)
-	# The color cycle rides the real `hudcolor` binding row (catalog row 76,
-	# default F6). Retail's default F6 is shadowed by the earlier huddetail
-	# row (a dispatcher no-op), leaving the cycle dormant; making the row
-	# reachable is the tracked reimpl divergence on this action (D-CTRL-4).
-	poll_hud_color_edge(ControlsBindings.pressed("hudcolor"),
-			Input.is_key_pressed(KEY_SHIFT) or Input.is_key_pressed(KEY_CTRL) \
-					or Input.is_key_pressed(KEY_ALT),
+	# The HUD binding rows, sampled in retail's catalog order: huddetail (row
+	# 50, default F6) precedes hudcolor (row 76, default F6) in the
+	# first-match-wins key scan, so a shared key fires only huddetail —
+	# poll_hud_keys carries that shadowing; hudcolor stays a live row on its
+	# own key (D-CTRL-4). showhud (row 27) ships unbound.
+	# [orig: the key scan @0x49d42f; huddetail dispatch @0x4E0601; showhud
+	#  dispatch @0x4E0561]
+	var hud_keys_chorded := Input.is_key_pressed(KEY_SHIFT) \
+			or Input.is_key_pressed(KEY_CTRL) or Input.is_key_pressed(KEY_ALT)
+	poll_hud_keys(ControlsBindings.pressed("huddetail"),
+			ControlsBindings.pressed("hudcolor"), hud_keys_chorded,
+			gameplay_input_active)
+	poll_showhud_edge(ControlsBindings.pressed("showhud"), hud_keys_chorded,
 			gameplay_input_active)
 	# Weapon-cluster state: clip/reserve as the info struct carried them, heat
 	# 0..0xFFFF (only emplaced/vehicle heavy guns author heat_values, so 0 on
@@ -787,6 +818,100 @@ func cycle_hud_color() -> void:
 			HUD_COLOR_CONFIG_KEY, _hud_color_index)
 	if _game_hud != null:
 		_game_hud.set_hud_color_index(_hud_color_index)
+
+
+## One poll step over the pre-sampled huddetail + hudcolor key states — the
+## seam the tests drive. Retail's key scan is FIRST-MATCH-WINS by catalog row:
+## huddetail (row 50) precedes hudcolor (row 76), so when both rows resolve to
+## the same physical key (both default F6) the huddetail row consumes the edge
+## and hudcolor ships dormant on it; distinct keys leave both rows live — the
+## D-CTRL-4 adjudication keeps hudcolor a reachable row while modeling the
+## retail order. [orig: the first-match key scan @0x49d42f; rows 50 < 76]
+func poll_hud_keys(detail_down: bool, color_down: bool, chorded: bool,
+		active: bool) -> void:
+	poll_hud_detail_edge(detail_down, chorded, active)
+	if detail_down and color_down and _hud_rows_share_key():
+		color_down = false
+	poll_hud_color_edge(color_down, chorded, active)
+
+
+# Whether the huddetail and hudcolor rows currently resolve to a common bound
+# key (the shadowing predicate above; both default F6).
+func _hud_rows_share_key() -> bool:
+	var detail_keys: PackedInt32Array = \
+			ControlsBindings.model().godot_keys_for_token("huddetail")
+	for key in ControlsBindings.model().godot_keys_for_token("hudcolor"):
+		if key != 0 and detail_keys.has(key):
+			return true
+	return false
+
+
+## The huddetail edge poll: same latch/gate/chord rules as the hudcolor poll
+## (the edge latches from the UNGATED key state; a chorded press never fires —
+## our debug picks ride Shift+F6).
+func poll_hud_detail_edge(detail_down: bool, chorded: bool, active: bool) -> void:
+	if detail_down and not _hud_detail_was_down and active and not chorded:
+		cycle_hud_detail()
+	_hud_detail_was_down = detail_down
+
+
+## The huddetail cycle: level + 1, wrapping past 3 to 0, stored to the
+## persisted global, visibility rebuilt. [orig: Input_HandleActionBinding_0
+## @0x4E0601..0x4E0624 -> CRenderState_SetLayerVisibility @0x59B0F0]
+func cycle_hud_detail() -> void:
+	set_hud_detail_level(0 if _hud_detail_level >= 3 else _hud_detail_level + 1)
+
+
+## The one declutter-level write seam: persists the level like retail's config
+## token round trip and restamps a built HUD. The cycle, the round-init
+## re-apply, and the death-screen force all land here.
+func set_hud_detail_level(level: int) -> void:
+	_hud_detail_level = clampi(level, 0, 3)
+	ConfigStore.write(HUD_COLOR_CONFIG_PATH, HUD_COLOR_SECTION,
+			HUD_DETAIL_CONFIG_KEY, _hud_detail_level)
+	if _game_hud != null:
+		_game_hud.set_hud_detail_level(_hud_detail_level)
+
+
+func hud_detail_level() -> int:
+	return _hud_detail_level
+
+
+## The death-screen edge forces the declutter level to max through the same
+## seam the cycle uses, writing the persisted global like retail.
+## [orig: NapiNPClientMsg_0x00F @0x42E410..0x42E41C — level = 3 written to the
+##  global, then the visibility rebuild]
+func apply_death_screen_hud_detail() -> void:
+	set_hud_detail_level(3)
+
+
+## The showhud edge poll (catalog row 27, unbound by default), same
+## latch/gate/chord rules as the other HUD rows.
+func poll_showhud_edge(showhud_down: bool, chorded: bool, active: bool) -> void:
+	if showhud_down and not _showhud_was_down and active and not chorded:
+		cycle_showhud()
+	_showhud_was_down = showhud_down
+
+
+## The showhud cycle: flags = (flags + 1) & 3. Bit 1 feeds the overlay (the
+## corner spinmap block); bit 0 feeds the FP viewmodel rig through the player
+## presenter. States: 0 = no gun + no spinmap, 1 = gun only, 2 = spinmap only,
+## 3 = both; the rest of the HUD is untouched. [orig: g_FpWeaponViewFlags
+## cycle @0x4E0561; bit0 @0x4DEDEA; bit1 @0x5A8635]
+func cycle_showhud() -> void:
+	_showhud_flags = (_showhud_flags + 1) & 3
+	if _game_hud != null:
+		_game_hud.set_showhud_flags(_showhud_flags)
+	_apply_fp_gun_visible()
+
+
+func showhud_flags() -> int:
+	return _showhud_flags
+
+
+func _apply_fp_gun_visible() -> void:
+	if _player_presenter != null:
+		_player_presenter.set_fp_gun_visible((_showhud_flags & 1) != 0)
 
 
 # The panel's resolved rows: shown win-condition slots with mission-text lines

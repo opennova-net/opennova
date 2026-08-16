@@ -159,7 +159,15 @@ func test_overlay_draws_health_from_fixture_layout() -> void:
 	hud.configure(hp, null) # null root -> layout only, no art/font
 	assert_true(hud.is_configured())
 	hud.set_player_state(0, 0.5, 1, 80.0)
+	# The fixture authors HUDDECLUT_DMGBAR 0 1 1 0: the authored mask hides
+	# the health bar at the default hud_detail level 0 and shows it at 1.
+	# (retail: CRenderState_SetLayerVisibility @0x59B0F0; the DMGBAR slot cmp
+	# @0x5A7C99 — see docs/interface/hud-re.md)
 	var stats: Dictionary = hud.get_draw_list_stats()
+	assert_eq(int(stats["quads"]), 0,
+		"the fixture's level-0 declutter mask hides the health bar")
+	hud.set_hud_detail_level(1)
+	stats = hud.get_draw_list_stats()
 	assert_eq(int(stats["quads_filled"]), 1, "0.5 health emits the fill quad")
 	assert_eq(int(stats["quads_wire"]), 1, "and the wireframe border on top")
 	assert_eq(int(stats["tris"]), 0, "no weapon -> no reticle")

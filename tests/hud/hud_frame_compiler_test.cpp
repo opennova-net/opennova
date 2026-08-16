@@ -128,6 +128,224 @@ void test_format_tags(const fnt_font_t *font) {
 	CHECK(w == w2, "tags measure zero width");
 }
 
+// The HUD declutter model: HUDDECLUT masks x hud_detail level -> visible[]
+// [orig: HUD_ParseHudposToken @ 0x59F370 -> byte_2723CE0;
+//  CRenderState_SetLayerVisibility @ 0x59B0F0 -> dword_2723C80; the huddetail
+//  cycle @ 0x4E0601..0x4E0624].
+void test_declutter_rebuild_and_cycle() {
+	using namespace opennova::hud;
+
+	// The token map, including the CTAPE dead token (no retail parse arm).
+	CHECK(declutter_slot_from_token("SPINMAP") == kDeclutterSpinmap,
+			"SPINMAP resolves to slot 17");
+	CHECK(declutter_slot_from_token("chat") == kDeclutterChat,
+			"token lookup is case-insensitive");
+	CHECK(declutter_slot_from_token("CTAPE") == -1,
+			"the dead JOX CTAPE token has no slot (no retail arm)");
+	CHECK(std::string(declutter_token_name(kDeclutterMsnTitle)) == "MSNTITLE",
+			"slot 0 names MSNTITLE");
+
+	// The mask build: bit i set iff value i != 0.
+	const int spinmap_flags[4] = {1, 1, 0, 0};
+	CHECK(HudDeclutter::mask_from_flags(spinmap_flags) == 0x3,
+			"SPINMAP 1 1 0 0 builds mask 0b0011");
+	const int clock_flags[4] = {1, 0, 0, 0};
+	CHECK(HudDeclutter::mask_from_flags(clock_flags) == 0x1,
+			"CLOCK 1 0 0 0 builds mask 0b0001");
+
+	HudDeclutter d;
+	// The construction default (no hudpos): all-bits masks, visible at every
+	// level.
+	for (int level = 0; level <= kDeclutterLevelMax; ++level) {
+		d.set_level(level);
+		CHECK(d.visible()[kDeclutterDmgBar] &&
+						d.visible()[kDeclutterSpinmap],
+				"the harness default is visible at every level");
+	}
+
+	// The authored table: an UNAUTHORED slot is hidden at every level.
+	d.begin_authoring();
+	for (int level = 0; level <= kDeclutterLevelMax; ++level) {
+		d.set_level(level);
+		for (int slot = 0; slot < kDeclutterSlotCount; ++slot) {
+			CHECK(!d.visible()[static_cast<size_t>(slot)],
+					"an unauthored slot never draws");
+		}
+	}
+
+	// The JOX-shaped fixture: SPINMAP `1 1 0 0` is visible at levels 0/1 and
+	// hidden at 2/3; DMGBAR `1 1 1 0` flips only at 3.
+	d.set_mask(kDeclutterSpinmap, 0x3);
+	d.set_mask(kDeclutterDmgBar, 0x7);
+	const bool spinmap_expect[4] = {true, true, false, false};
+	const bool dmgbar_expect[4] = {true, true, true, false};
+	for (int level = 0; level <= kDeclutterLevelMax; ++level) {
+		d.set_level(level);
+		CHECK(d.visible()[kDeclutterSpinmap] == spinmap_expect[level],
+				"SPINMAP 1 1 0 0 follows (1 << level) & mask");
+		CHECK(d.visible()[kDeclutterDmgBar] == dmgbar_expect[level],
+				"DMGBAR 1 1 1 0 follows (1 << level) & mask");
+	}
+
+	// The huddetail cycle: 0 -> 1 -> 2 -> 3 -> 0.
+	d.set_level(0);
+	CHECK(d.cycle_level() == 1 && d.cycle_level() == 2 &&
+					d.cycle_level() == 3 && d.cycle_level() == 0,
+			"the level cycle wraps past 3 to 0");
+}
+
+// The per-element declutter gates at their compile sites, the CHAT double
+// gate, the showhud bit-1 spinmap gate, and the level-3 whole-pass early-out.
+// [orig: the slot cmps @ 0x5A7C99 (DMGBAR) / @ 0x5A7CC8..0x5A7D42 (WPNGRP) /
+//  @ 0x592757 (XHAIRS) / @ 0x5A7DB8 (WAYPOINT) / @ 0x5A7DD2 (PWRBAR) /
+//  @ 0x5A86E8 (SPINMAP, inside the showhud bit-1 test @ 0x5A8635) /
+//  @ 0x59AD66 (CHAT + the hard level >= 2 cull); the early-out @ 0x5A80C4]
+void test_declutter_element_gates(const fnt_font_t *font) {
+	using namespace opennova::hud;
+	HudFrameCompiler compiler;
+	HudLayout layout;
+	layout.health_rect = {10.0f, 20.0f, 100.0f, 8.0f, true};
+	layout.power_rect = {200.0f, 700.0f, 60.0f, 10.0f, true};
+	layout.spinmap_rect = {810.0f, 552.0f, 210.0f, 210.0f, true};
+	layout.crosshair_texture_valid = true;
+	layout.crosshair_tex_w = 64;
+	layout.crosshair_tex_h = 64;
+	layout.ammo_count = {40, 700, 0, 0, true};
+	layout.wpd_info = {512, 60, 1, 0, true};
+	compiler.configure(layout, font);
+
+	HudFrameState state;
+	state.ticks = 10;
+	state.health_fraction = 0.5f;
+	state.weapon.active = true;
+	state.weapon.clip = 12;
+	state.weapon.reserve = 90;
+	state.weapon.capacity = 30;
+	state.windup_active = true;
+	state.windup_held_ticks = 31;
+	state.waypoint.present = true;
+	state.waypoint.name = "Alpha";
+	state.waypoint.distance_m = 120;
+
+	// The default state (all-visible, level 0, showhud 3) draws everything.
+	const HudDrawList &all_on = compiler.compile(state, 1024.0f, 768.0f);
+	CHECK(!all_on.quads.empty() && !all_on.tris.empty() &&
+					!all_on.glyphs.empty() && all_on.map.visible,
+			"the all-visible default draws bars, reticle, text, and spinmap");
+
+	// The JOX-shaped table at level 2: DMGBAR/WPNGRP (1 1 1 0) still draw,
+	// SPINMAP (1 1 0 0) hides, CHAT (1 1 1 0) is slot-visible but the hard
+	// level cull hides the feed anyway.
+	HudDeclutter d;
+	d.begin_authoring();
+	d.set_mask(kDeclutterDmgBar, 0x7);
+	d.set_mask(kDeclutterWpnGrp, 0x7);
+	d.set_mask(kDeclutterXhairs, 0x7);
+	d.set_mask(kDeclutterWaypoint, 0x7);
+	d.set_mask(kDeclutterPwrBar, 0x7);
+	d.set_mask(kDeclutterSpinmap, 0x3);
+	d.set_mask(kDeclutterChat, 0x7);
+	d.set_level(2);
+	compiler.push_message("radio check", 10);
+	state.declutter_visible = d.visible();
+	state.hud_detail_level = d.level();
+	const HudDrawList &level2 = compiler.compile(state, 1024.0f, 768.0f);
+	CHECK(!level2.quads.empty(), "DMGBAR stays visible at level 2 (1 1 1 0)");
+	CHECK(!level2.tris.empty(), "XHAIRS stays visible at level 2");
+	bool saw_ammo_glyphs = !level2.glyphs.empty();
+	CHECK(saw_ammo_glyphs, "WPNGRP text stays visible at level 2");
+	CHECK(!level2.map.visible, "SPINMAP (1 1 0 0) hides at level 2");
+	// The CHAT double gate: hold everything else constant and check that the
+	// live message never lands despite slot 23 being visible at level 2.
+	{
+		HudFrameState quiet = state;
+		quiet.weapon.active = false;
+		quiet.windup_active = false;
+		quiet.waypoint.present = false;
+		quiet.health_fraction = -1.0f;
+		HudDeclutter chat_only;
+		chat_only.begin_authoring();
+		chat_only.set_mask(kDeclutterChat, 0x7);
+		chat_only.set_level(2);
+		quiet.declutter_visible = chat_only.visible();
+		quiet.hud_detail_level = chat_only.level();
+		const HudDrawList &chat2 = compiler.compile(quiet, 1024.0f, 768.0f);
+		CHECK(chat2.glyphs.empty(),
+				"CHAT slot on + level 2 still hides the feed (the hard cull)");
+		chat_only.set_level(1);
+		quiet.declutter_visible = chat_only.visible();
+		quiet.hud_detail_level = chat_only.level();
+		const HudDrawList &chat1 = compiler.compile(quiet, 1024.0f, 768.0f);
+		CHECK(!chat1.glyphs.empty(),
+				"the same slot draws the feed at level 1");
+	}
+
+	// Per-slot isolation at level 2: masking DMGBAR out hides only the bar.
+	{
+		HudDeclutter no_bar = d;
+		no_bar.set_mask(kDeclutterDmgBar, 0x3);
+		state.declutter_visible = no_bar.visible();
+		state.hud_detail_level = no_bar.level();
+		const HudDrawList &bar_off = compiler.compile(state, 1024.0f, 768.0f);
+		bool saw_health_fill = false;
+		for (const HudQuad &q : bar_off.quads) {
+			if (q.filled && q.color == layout.tag_middle) saw_health_fill = true;
+		}
+		CHECK(!saw_health_fill && !bar_off.tris.empty(),
+				"a level-2-masked DMGBAR hides the bar and nothing else");
+	}
+	// WPNGRP off hides the ammo/name text and clip icons but NOT the
+	// crosshair (its own XHAIRS slot stays on).
+	{
+		HudDeclutter no_grp = d;
+		no_grp.set_mask(kDeclutterWpnGrp, 0x3);
+		HudFrameState text_state = state;
+		// Isolate the cluster text: no waypoint label, no power-bar "%d%".
+		text_state.waypoint.present = false;
+		text_state.windup_active = false;
+		text_state.hud_detail_level = no_grp.level();
+		text_state.declutter_visible = no_grp.visible();
+		const HudDrawList &grp_off = compiler.compile(text_state, 1024.0f,
+				768.0f);
+		CHECK(grp_off.glyphs.empty() && !grp_off.tris.empty(),
+				"a masked WPNGRP hides the ammo text while XHAIRS keeps the reticle");
+	}
+
+	// showhud bit 1 off hides the corner spinmap while visible[17] stays on.
+	{
+		HudDeclutter map_on = d;
+		map_on.set_level(0);
+		state.declutter_visible = map_on.visible();
+		state.hud_detail_level = map_on.level();
+		state.showhud_flags = 1; // gun only
+		const HudDrawList &gun_only = compiler.compile(state, 1024.0f, 768.0f);
+		CHECK(!gun_only.map.visible,
+				"showhud bit 1 off hides the spinmap with slot 17 visible");
+		state.showhud_flags = 3;
+		const HudDrawList &both = compiler.compile(state, 1024.0f, 768.0f);
+		CHECK(both.map.visible, "showhud 3 restores the corner spinmap");
+	}
+
+	// Level 3 blanks the whole gameplay overlay pass — nothing draws — while
+	// the M-cycle big map (a separate retail pass) still compiles.
+	{
+		HudDeclutter max_declutter = d;
+		max_declutter.set_level(3);
+		state.declutter_visible = max_declutter.visible();
+		state.hud_detail_level = max_declutter.level();
+		const HudDrawList &blank = compiler.compile(state, 1024.0f, 768.0f);
+		CHECK(blank.quads.empty() && blank.tris.empty() &&
+						blank.lines.empty() && blank.glyphs.empty() &&
+						!blank.map.visible,
+				"level 3 emits nothing for the gameplay pass");
+		HudFrameState mode3 = state;
+		mode3.minimap.map_mode = 3;
+		const HudDrawList &big = compiler.compile(mode3, 1024.0f, 768.0f);
+		CHECK(!big.map.visible && big.big_map.visible,
+				"the M-cycle big map still compiles at level 3");
+	}
+}
+
 void test_compiler_health_and_order(const fnt_font_t *font) {
 	HudFrameCompiler compiler;
 	HudLayout layout;
@@ -898,6 +1116,8 @@ int main() {
 	test_measure_advance_and_trailing_pad(&font);
 	test_layout_pages_bold_underline(&font);
 	test_format_tags(&font);
+	test_declutter_rebuild_and_cycle();
+	test_declutter_element_gates(&font);
 	test_compiler_health_and_order(&font);
 	test_compiler_crosshair(&font);
 	test_compiler_hud_color_schemes(&font);

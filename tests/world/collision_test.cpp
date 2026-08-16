@@ -1342,6 +1342,43 @@ void test_ladder_entry_gate_snap_and_chase() {
 }
 
 // ---------------------------------------------------------------------------
+void test_ladder_ai_entry_arm_bypasses_the_player_gate() {
+    // The dormant AI fresh-entry qualifier: a non-player with ai_wants_climb
+    // set bypasses the player facing/pitch gate entirely and latches with the
+    // anchor snap + entry bump — the seam contract the AI move-order slice
+    // (the tracked D-COL-5 residual writer) will drive.
+    // [orig: aiRuntime[1] & 0x400 @ 0x4b325d; the ungated AI arm @ 0x4b3271]
+    Rig rig(ladder_slab());
+    rig.move_soldier(10.6, 10.0, 0.0);
+    int32_t pos[3] = {fx(10.6), fx(10.0), 0};
+    int32_t vel[3] = {0, 0, 0};
+    int16_t health = 100;
+    CollisionWorld::ResolveState state;
+    LadderIo lio(/*tick_start_z=*/0);
+    lio.view_yaw = static_cast<int32_t>(0xC0000000u); // 90 deg off: the player
+    lio.view_pitch = -0x8000000;                      // gate would reject BOTH
+    lio.io.ai_wants_climb = true;
+    rig.cw.resolve_entity(rig.world, rig.soldier, state, pos, vel, vel[2], 0, fx(1.8), 0, 0,
+                          /*is_player=*/false, true, 0, 32, 0x1u, health, nullptr, &lio.io);
+    Entity *s = rig.world.registry.get(rig.soldier);
+    CHECK((s->flags & kEntityFlagLadderContact) != 0);
+    CHECK(pos[0] == fx(10.375) - 4096 + 64); // snap + press + chase
+    CHECK(pos[2] == 20480);                  // the standing entry bump
+
+    // Without the order bit the same non-player never latches.
+    Rig off(ladder_slab());
+    off.move_soldier(10.6, 10.0, 0.0);
+    int32_t opos[3] = {fx(10.6), fx(10.0), 0};
+    int32_t ovel[3] = {0, 0, 0};
+    CollisionWorld::ResolveState ostate;
+    LadderIo olio(0);
+    off.cw.resolve_entity(off.world, off.soldier, ostate, opos, ovel, ovel[2], 0, fx(1.8),
+                          0, 0, false, true, 0, 32, 0x1u, health, nullptr, &olio.io);
+    CHECK((off.world.registry.get(off.soldier)->flags & kEntityFlagLadderContact) == 0);
+    CHECK(opos[2] == 0);
+}
+
+// ---------------------------------------------------------------------------
 void test_ladder_from_above_entry_and_sin_lane() {
     // The from-above entry arm: tick-start above the anchor short-circuits the
     // facing gate entirely (a 90°-off view still latches) but demands the
@@ -4369,6 +4406,7 @@ int main() {
     test_ladder_contact_bookkeeping_is_not_ground();
     test_cb_ground_probe_sets_ground_target();
     test_ladder_entry_gate_snap_and_chase();
+    test_ladder_ai_entry_arm_bypasses_the_player_gate();
     test_ladder_from_above_entry_and_sin_lane();
     test_ladder_pitch_restore_from_below_snaps();
     test_ladder_recontact_inflated_and_relatch();

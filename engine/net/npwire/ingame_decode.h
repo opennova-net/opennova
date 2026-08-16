@@ -1614,24 +1614,30 @@ bool decode_chat_history_entry(const uint8_t *body, size_t len,
 // (0x44) (§5.36).
 // ===========================================================================
 
-// S2C 0x59 — deployed-item / weapon-overlay spawn-or-update. Fixed 32-B record.
-// The host streams the placeable / weapon-overlay entities a player drops (mines,
-// beacons, satchels, deployed guns…). The handler searches 512 weapon-overlay
-// slots for a matching entity and either updates its transform or allocates a
-// new pool entry initialised from the item def. `itemId` / `friendlyItemId` /
-// `enemyItemId` let one deployable show a different model to friend vs foe
-// (selected by the owner's team @ +354 vs the local player); `itemId` is the
-// fallback. The handler reads 15 u16s (30 B); the 2 trailing bytes are unread.
-// [orig: NapiNPClientMsg_0x059 @ 0x4228E0 → Entity_SpawnOrUpdateFromSlotPacket @ 0x546770]
-// S2C 0x12 — destroy one entity by packed pool/slot handle. The host emits the
-// record before releasing the authoritative row; the client clears the entity
-// tree rooted at that handle. [orig: Server_RemoveEntityAndNotify @0x50A270]
+// S2C 0x12 — destroy ONE entity by packed pool/slot handle. The host emits the
+// record before releasing the authoritative row; the client destroys that one
+// row and DETACHES its dependents (children keep their rows, parent link
+// cleared). [orig: Server_RemoveEntityAndNotify @0x50A270 -> Entity_Destroy
+//  @0x43E810 (occupant/mount detach @0x43e9e9/@0x43ea38, one-row memset
+//  @0x43ea70)]
 struct EntityRemove {
 	uint16_t entity_handle = 0xFFFF;
 };
 bool decode_entity_remove(const uint8_t *body, size_t len,
 	                      EntityRemove &out, size_t &consumed);
 
+// S2C 0x59 — deployed-item spawn-or-update. Fixed 32-B record. The host
+// streams the placeable entities a player drops (mines, beacons, satchels,
+// deployed guns…). The handler searches the 512-entry ROUND pool (the same
+// 780-B records the projectile machinery walks, cursor from unk_B7E1C4) for a
+// matching entity and either updates its transform in place or allocates a
+// new pool entry initialised from the item def. `friendlyItemId`/`enemyItemId`
+// let one deployable show a different model to friend vs foe — applied at
+// FRESH SPAWN only and only when BOTH are nonzero (owner team @ +354 vs the
+// local player); `itemId` is the base/fallback. The handler reads 15 u16s
+// (30 B); the 2 trailing bytes are unread.
+// [orig: NapiNPClientMsg_0x059 @ 0x4228E0 → Entity_SpawnOrUpdateFromSlotPacket
+//  @ 0x546770 (variant pick @0x5469db..0x546a11)]
 struct DeployedItemSpawn {
 	uint16_t item_id = 0;          // packet[0] — fallback / base item id
 	uint16_t owner_handle = 0;     // packet[1] — the placing entity
