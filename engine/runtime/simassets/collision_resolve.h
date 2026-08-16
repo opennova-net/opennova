@@ -60,6 +60,10 @@ struct CollisionResolveState {
 	// been registered as another entity's main graphic.
 	std::unordered_map<std::string, std::vector<world::Vec3>>
 			husk_kz_points_by_graphic;
+	// First-stage husk DEAD points used only by the unitType-11 bridge water
+	// shock callback. Like KZ, huskFinal is not a source.
+	std::unordered_map<std::string, std::vector<world::Vec3>>
+			husk_dead_points_by_graphic;
 	std::unordered_map<std::string, CollisionHuskPieceInfo>
 			husk_pieces_by_graphic;
 	// Negative demand cache: one unresolved entity is attempted at most once

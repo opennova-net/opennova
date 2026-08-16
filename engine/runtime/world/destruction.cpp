@@ -688,9 +688,26 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
         break;
     case 11:
         mask = spawn_death_pieces(world, target);
-        // Effect_ShockWaterBrdg at each husk DEAD user point at water height
-        // [orig: Entity_SpawnDeathEffectsAtBones @ 0x4944c0] — present-pass leg
-        // keyed off the husk swap event (bridge husks are rare; tracked §24).
+        // The callback emits directly in world space: transform every FIRST-
+        // husk DEAD point through the complete authored pose, retain x/y, and
+        // force z to Env_WaterHeightFixed. Zero is a real raw plane here (not
+        // the no-water sentinel used by submerged-death selection), and an
+        // empty point bank has no entity-origin fallback.
+        // [orig: Entity_SpawnDeathEffectsAtBones @0x4944c0]
+        if (!was_husked && traits != nullptr &&
+            !traits->bridge_dead_points.empty()) {
+            const CollisionMatrix orientation = destruction_orientation(target);
+            const float water_z =
+                    static_cast<float>(world.env.water_z) / 65536.0f;
+            for (const Vec3 &point : traits->bridge_dead_points) {
+                const Vec3 offset = rotate_authored_point(orientation, point);
+                world.destruction.effects.push_back(DestructionEffectEvent{
+                        "Effect_ShockWaterBrdg",
+                        Vec3{target.position.x + offset.x,
+                             target.position.y + offset.y, water_z},
+                        Vec3{}});
+            }
+        }
         break;
     default:
         mask = spawn_death_pieces(world, target);

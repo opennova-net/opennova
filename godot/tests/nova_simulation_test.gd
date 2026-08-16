@@ -3890,6 +3890,38 @@ func test_first_husk_kz_userpoints_feed_death_blast_traits() -> void:
 				"KZ point %d preserves retail mission-local axes" % point_index)
 	sim.free()
 
+	# The sibling unitType-11 callback mines exact case-insensitive DEAD points
+	# from this same first husk. Prove the native collision sweep retains that
+	# bank independently of KZ before the world callback consumes it.
+	var dead_bytes := FileAccess.get_file_as_bytes(source_path)
+	dead_bytes = _bytes_with_renamed_user_point(dead_bytes, "Armory", "dEaD")
+	var dead_dir := _native_fixture_dir()
+	_copy_fixture(dead_dir,
+			"res://../fixtures/threedi/3di3/House.3di", "Barrel1.3di")
+	_write_fixture_bytes(dead_dir, "Barrel1X.3di", dead_bytes)
+	var dead_data := ObjectData.new()
+	assert_eq(dead_data.open_file(dead_dir.path_join("Barrel1X.3di")), OK)
+	var expected_dead := PackedVector3Array()
+	for point_index in range(dead_data.get_user_point_count()):
+		var info: Dictionary = dead_data.get_user_point_info(point_index)
+		if String(info.get("name", "")).nocasecmp_to("DEAD") == 0:
+			var model_point: Vector3 = info.get("position", Vector3.ZERO)
+			expected_dead.push_back(Vector3(
+					model_point.z, model_point.x, model_point.y))
+	assert_eq(expected_dead.size(), 1)
+	var dead_sim := Simulation.new()
+	assert_true(dead_sim.load_from_mission_data(md))
+	dead_sim.resolve_item_traits(item_db)
+	_native_asset_root(dead_sim, dead_dir)
+	assert_eq(dead_sim.resolve_collision_instances(item_db), 1)
+	var dead_debug := dead_sim.get_destruction_debug(bms_id)
+	assert_eq(int(dead_debug.get("bridge_dead_point_count", -1)), 1)
+	var actual_dead: PackedVector3Array = dead_debug.get(
+			"bridge_dead_points", PackedVector3Array())
+	assert_eq(actual_dead, expected_dead,
+			"the first-husk DEAD bank preserves retail mission-local axes")
+	dead_sim.free()
+
 	# Retail reads entity+52 huskModel for this walk. A final-only definition may
 	# use huskFinal for pieces (and our legacy collision fallback), but it must not
 	# mine that model for KZ anchors; the empty bank selects the origin fallback.

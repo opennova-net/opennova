@@ -3983,7 +3983,7 @@ rest on the authority — `Entity_UpdateSatchelPhysics @0x448bd5` and `Entity_Up
 `send_mask 0x90`, msgClass 1), followed by the per-owner same-type cap
 `Server_EnforcePlacedDeviceCapByOwner @0x5119E0` (ex `sub_5119E0`; owner, pool 1, `itemDef->id`,
 max 3 satchel / 4 claymore — a surplus removes the oldest ARMED device, most negative +684, via
-S2C 0x12; unported, ledger D-THROW-10). No other 0x59 sender exists.
+S2C 0x12; ported 2026-08-15, ledger D-THROW-10). No other 0x59 sender exists.
 **Witness:** probe3_again ×12 — a `Rifle-sized Crate` (`itemId=0x0362`) dropped by player slot 5 at world
 `(53.5, -27.9, 11.6)`, `parent=none`; byte-exact full-consume via `decode_deployed_item_spawn`.
 Production consumption and authority relay are live as of 2026-08-15 (D-THROW-7
@@ -3997,7 +3997,10 @@ materializer uses the exact pool-1 wire handle, updates pose in place, and retir
 `nw_ingame_encode`, `netsim_client_world_materializer`,
 `npruntime_entity_lifecycle_net`, `npruntime_client_runtime`,
 `npruntime_placed_device_relay`, and `throwables` pin the path end to end; tag-2
-`RoundSim` remains the preceding flying-throwable presentation.
+`RoundSim` remains the preceding flying-throwable presentation. The cap runs
+after the local 0x59 event and retires the most-negative armed row through the
+same removal event, so every remote receives one exact 0x59 plus one exact 0x12
+while the host skips loopback (`npruntime_placed_device_relay`).
 
 **S2C `0x44` — entity-routed sub-packet.** A 5-B sub-header `[u16 field0][i16 netId][u8 subtype]` then a
 class-dependent body the dispatcher routes to the target entity's per-class serialize callback (`entity

@@ -574,6 +574,9 @@ func _place_mission_objects(mission: MissionData, timeline: PerfTimeline = null)
 	# The placer's Avatars.def is the one registry every player visual resolves
 	# against; the same table projects the local profile the sim stamps.
 	var avatar_db: AvatarDatabase = _placer.get_avatar_db()
+	var sim := get_sim()
+	if sim != null:
+		sim.set_character_avatar_database(avatar_db)
 	if avatar_db != null:
 		_local_character_profile = NetSessionDrive.character_join_profile_from_database(
 				avatar_db, _local_player_spawn_loadout)

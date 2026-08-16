@@ -158,6 +158,9 @@ const char kProfiles[] =
     "end\n"
     "begin \"SP_Test\"\n"
     "     SSLFootGND     T_DIRT_L\n"
+    "end\n"
+    "begin \"SP_TestFemale\"\n"
+    "     SSLFootGND     T_DIRT_L_F\n"
     "end\n";
 
 // LAST entry with the id — the same row the fold's last-wins index resolves,
@@ -223,6 +226,7 @@ int main() {
     std::strcpy(tank->soundloops[0], "LP_TANK");
     std::strcpy(rifle->ammo_closeattack, "AT_RIFLE");
     std::strcpy(rifle->sound_profile, "SP_Test");
+    std::strcpy(rifle->sound_profile_female, "SP_TestFemale");
     rifle->attrib |= DEF_ITEM_ATTRIB_LEAVECORPSE;
     bunker->attrib |= DEF_ITEM_ATTRIB_CHANGETEAM | DEF_ITEM_ATTRIB_SPAWNPOINT |
             DEF_ITEM_ATTRIB_NODIE | 0x8000u; // 0x8000 = the unwitnessed team-protect bit
@@ -435,7 +439,7 @@ int main() {
     w.ai = &ai;
     const int rifle_ai = ai.attach(rifle_h);
     const int player_ai = ai.attach(player_h);
-    CHECK(w.sound_profiles.parse(kProfiles, sizeof(kProfiles) - 1) == 2);
+    CHECK(w.sound_profiles.parse(kProfiles, sizeof(kProfiles) - 1) == 3);
     AmmoTableEntry at_null;
     at_null.name = "AT_NULL";
     at_null.valid = true;
@@ -452,6 +456,7 @@ int main() {
         CHECK(rifle_b->profile.clip_size == 30);
         CHECK(rifle_b->inf.magazine == 30);
         CHECK(rifle_b->profile.sound_profile == 1); // SP_Test
+        CHECK(rifle_b->profile.sound_profile_female == 2); // SP_TestFemale
     }
     // The player def authors no anim-fire round and no profile: unarmed, and
     // the profile binding stays at the emit-side "default" fallback (-1).
@@ -460,6 +465,7 @@ int main() {
     if (player_b != nullptr) {
         CHECK(player_b->profile.ammo_primary == -1);
         CHECK(player_b->profile.sound_profile == -1);
+        CHECK(player_b->profile.sound_profile_female == -1);
     }
 
     def_free_items(&file);

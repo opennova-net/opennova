@@ -4701,9 +4701,13 @@ and the building callback reads that runtime bit. D-ITEM-20 closed 2026-07-22.
 For unitType 3 it spawns the pieces and installs an explicit
 `PiecePhysics` mode, but deliberately does not substitute generic falling: the
 specialized `DeathPiece_PhysicsUpdate` body remains D-ITEM-18. UnitType 11's
-common pieces and per-`KZ` blast path run, but its `Effect_ShockWaterBrdg` at
-each "DEAD" user point is D-ITEM-19 (the `KZ` positions were fixed under
-D-ITEM-5 on 2026-07-20).
+common pieces and per-`KZ` blast path run, and as of 2026-08-15 its first husk's
+case-insensitive `DEAD` bank is transformed through the complete entity pose;
+one unowned `Effect_ShockWaterBrdg` is submitted per point at raw water height,
+including zero, with no origin fallback (D-ITEM-19 fixed). The installed retail
+base/RevX02 catalog does not author that exact name, so its faithful output is
+the invisible `stockeffect` clone rather than the different `Effect_ShockWater`.
+The `KZ` positions were fixed separately under D-ITEM-5 on 2026-07-20.
 
 `Entity_SpawnDeathPieces @ 0x493400`: gate = husk model present (huskFinal
 +0x38 else husk +0x34), not already husked, not fully underwater. The
@@ -4909,7 +4913,7 @@ the FFI structs.
 | D-ITEM-16 | Section debris is six randomized radial `TreeWoodExp` spawns at the entity; the presenter never walks collision faces, samples triangle centroids at `(scale<<8)/150`, transforms them by section bones, or switches material 17 to `TreeFoliageExp` | `Entity_SpawnSectionDebris @ 0x43f580` | the burst is readable but its count, positions, directions, and material family are presentation stand-ins rather than triangle-faithful |
 | D-ITEM-17 | The sim records a building glass-break event and the presenter increments a diagnostic count only; it does not resolve `GLASS1..GLASS4` model user points, range-filter them against the blast, or spawn the retail shatter effects | `@ 0x4eb814-0x4eb85d` | blast-adjacent windows do not visibly shatter; a statistic is not a presentation implementation |
 | D-ITEM-18 | UnitType 3 spawns normal section pieces and installs an explicit `PiecePhysics` mode, but the shared production pass deliberately skips that mode rather than substituting Generic. Retail runs the specialized main-entity `DeathPiece_PhysicsUpdate` callback | `DeathPiece_PhysicsUpdate @ 0x48f500`: distinct air/water lateral motion, slope force, dual-blast, and landing legs | the unitType-3 husk does not receive its retail main-entity motion/presentation; the explicit sentinel prevents a falsely "matching" generic settle |
-| D-ITEM-19 | UnitType 11 runs pieces and the common per-`KZ` path, but does not resolve each husk `DEAD` user point or spawn `Effect_ShockWaterBrdg` there at water height | `Entity_SpawnDeathEffectsAtBones @ 0x4944c0` | destroyed bridges lack their authored per-point water-shock presentation; per-`KZ` blast positions were fixed separately by D-ITEM-5 |
+| D-ITEM-19 | **FIXED 2026-08-15.** Collision resolution retains exact case-insensitive `DEAD` points from the first husk only; UnitType 11 transforms each through full Euler and emits one family-0 `Effect_ShockWaterBrdg` at raw water height, first transition only, with no origin fallback | `Entity_SpawnDeathEffectsAtBones @ 0x4944c0` | `destruction_test::test_bridge_dead_points_emit_water_shocks` pins count, full-pose positions, zero water, first-transition gating, no fallback, and non-UnitType-11 silence; `nova_simulation_test` pins real 3DI user-point axes |
 | D-ITEM-20 | **FIXED 2026-07-22.** Building Static/collapse dispatch gates on `ItemDeathTraits::husk_model_loaded`, fed by successful live huskFinal/husk `ObjectData` resolution and kept separate from authored `has_husk` | `Entity_ProcessBuildingDeath @ 0x49442c`; the pointer gate wraps only the callback body | missing/corrupt husk assets receive the matched-row death flags, but no pieces, Static motion, or collapse sound; valid first-stage and final-only models both open the gate |
 
 ### 24.8 IDB write-backs (2026-07-17, saved)
@@ -5658,7 +5662,7 @@ round expires next tick; placed motor +452 = parent-interp or null) + **S2C
 (`Server_EnforcePlacedDeviceCapByOwner @ 0x5119E0`, ex `sub_5119E0` — walked
 2026-08-15, NOT a stat op: max 3 satchels / 4 claymores of one item def per
 owner; a surplus removes the oldest ARMED device, most negative +684, via
-`Server_RemoveEntityAndNotify` = S2C 0x12; unported, D-THROW-10); a
+`Server_RemoveEntityAndNotify` = S2C 0x12; ported 2026-08-15, D-THROW-10); a
 non-authority round instead clears noage and self-expires in 248 ticks.
 
 The audited host mirror now carries the complete placed pose, selected TrcrID
@@ -5772,7 +5776,7 @@ death hook).
 | D-THROW-7 | CLOSED 2026-08-15: authoritative conversion/removal events encode exact S2C 0x59/0x12 records and fan reliably to in-match remotes while skipping host loopback; joiners validate both, select the base/friendly/enemy item from owner/local teams plus MP attribute 0x8000, preserve same-type updates as one lifetime, attach the structural parent, materialize at the exact pool-1 wire handle, and retire it on 0x12 | retail re-simulates tag-2 rounds, then applies S2C 0x59 (net-re §5.36) + 0x12 removal | `nw_ingame_encode`, `netsim_client_world_materializer`, `npruntime_entity_lifecycle_net`, `npruntime_client_runtime`, `npruntime_placed_device_relay`, and `throwables` |
 | D-THROW-8 | CLOSED 2026-08-12: the pool-1 projectile walk demand-resolves a late placed item's retained host collision asset before narrow phase; the model uses CFAC, while failure to bind the clone's required collision model raises a fatal invariant rather than substituting sphere geometry | the item clone is initialized from its model before the ordinary pool-1 CFAC walk `[orig: Entity_CloneFromTemplateByType @0x4398A0 -> Entity_InitFromModel @0x40DC30; Projectile_RaycastProximitySlots @0x4E53D4 -> Physics_RaycastAgainstBoneCollision @0x4E4CB0]` | `collision_test::test_late_pool1_item_resolves_cfac_or_raises` pins a sphere-only graze miss, face metadata, allocation-serial-safe packed-slot reuse, and the fatal unresolved-model branch |
 | D-THROW-9 | CLOSED: ported devices are pool 1, run before projectiles, and decrement arm delay once per tick | pool-1 age −1/tick; the pool-2/3 −8/−64 cadence is outside the ported-device scope | no divergence for satchel/claymore/AV-mine devices; unported lndm cadence remains under D-THROW-6 |
-| D-THROW-10 | `ThrowableSim::place_from_round` keeps every converted device — no per-owner cap | `Server_EnforcePlacedDeviceCapByOwner @ 0x5119E0` (ex `sub_5119E0`, walked 2026-08-15) runs after each motor's 0x59 send: same owner (+368) + same `itemDef->id` in pool 1, max 3 satchels / 4 claymores; a surplus removes the oldest ARMED device (most negative +684) via `Server_RemoveEntityAndNotify` (S2C 0x12) | a 4th satchel / 5th claymore persists for the owner on the authority and on every joiner; port = count after `place_from_round` and retire the oldest armed device through `remove_device`, whose event already rides the 0x12 relay |
+| D-THROW-10 | CLOSED 2026-08-15: after the 0x59 conversion event, `place_from_round` counts live same-owner-generation + same-item devices, caps satchels at 3 and claymores at 4, and removes the armed row with the most-negative age through `remove_device`; nonnegative countdowns are ineligible and ties remain registry-stable | `Server_EnforcePlacedDeviceCapByOwner @ 0x5119E0` (ex `sub_5119E0`) after each motor's 0x59 send; removal through `Server_RemoveEntityAndNotify` (S2C 0x12) | `throwables` pins both limits, most-negative selection, stable ties, transient unarmed over-cap, age evolution, and owner/item isolation; `npruntime_placed_device_relay` pins one exact remote 0x59 + 0x12 pair and no loopback |
 
 ### 27.9 Open follow-ups
 
@@ -5783,8 +5787,6 @@ death hook).
    landmine uses) — skimmed only.
 4. The AI grenade-throw think (body anims 159–162 exist, §8/§14 tables) — the
    AI never throws in our port yet.
-5. `Server_EnforcePlacedDeviceCapByOwner @ 0x5119E0` (ex `sub_5119E0`) — walked
-   2026-08-15 (the per-owner device cap, D-THROW-10); its port is open.
 
 ### 27.10 IDB write-backs (2026-07-20 session, saved)
 

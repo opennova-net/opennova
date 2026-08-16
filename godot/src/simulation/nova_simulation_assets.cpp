@@ -184,6 +184,19 @@ int Simulation::resolve_ai_weapons(const Ref<ItemDatabase> &p_item_db) {
 			*world_, p_item_db->native_items());
 }
 
+int Simulation::set_character_avatar_database(
+		const Ref<AvatarDatabase> &p_avatar_db) {
+	character_sex_rows_.clear();
+	if (p_avatar_db.is_valid()) {
+		for (const AvatarDatabase::CharacterSexRow &row :
+				p_avatar_db->character_sex_rows())
+			character_sex_rows_.push_back(
+					CharacterSexRow{row.character_id, row.female});
+	}
+	apply_character_traits_to_world();
+	return static_cast<int>(character_sex_rows_.size());
+}
+
 void Simulation::apply_collision_to_ai() {
 	collision_world_.terrain = terrain_field_.valid() ? &terrain_field_ : nullptr;
 	collision_world_.set_section_matrix_provider(this);

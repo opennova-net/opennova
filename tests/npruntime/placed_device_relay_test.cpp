@@ -193,7 +193,7 @@ bool run_placed_device_spawn_and_remove_fanout() {
 	if (!expect(world.throwables.devices.size() == 1,
 			"the conversion tick creates one placed-device lifetime"))
 		return false;
-	const w::PlacedDevice &device = world.throwables.devices.front();
+	const w::PlacedDevice device = world.throwables.devices.front();
 	const std::vector<ns::Datagram> owner_spawn = drain(remote_owner);
 	const std::vector<ns::Datagram> observer_spawn = drain(remote_observer);
 	const std::vector<ns::Datagram> loop_spawn = drain(loopback);
@@ -233,20 +233,51 @@ bool run_placed_device_spawn_and_remove_fanout() {
 			"0x59 carries base/friend/foe ids, owner, parent, pose, and exact slot"))
 		return false;
 
-	w::Entity *placed = world.registry.get(device.entity);
-	if (!expect(placed != nullptr, "placed device remains live before removal"))
+	// Seed two more same-owner/same-item rows directly, then make the next
+	// authoritative conversion enforce the cap. Direct-place events are cleared
+	// at the next tick head; only the new 0x59 and oldest-device 0x12 should fan.
+	world.throwables.devices.front().think_delay_ticks = -30;
+	for (int i = 0; i < 2; ++i) {
+		w::LiveRound extra;
+		extra.owner = owner;
+		extra.shooter_handle = owner.packed;
+		extra.ammo_index = 0;
+		extra.item_type_id = kBaseItem;
+		extra.team = 1;
+		extra.think = w::ThrowClass::kSatchel;
+		extra.motor = w::ThrowClass::kSatchel;
+		extra.pos = {12.0f + static_cast<float>(i), 10.0f, 0.1f};
+		if (!expect(world.throwables.place_from_round(world, extra, satchel),
+				"two additional satchels seed the cap witness"))
+			return false;
+		world.throwables.devices.back().think_delay_ticks = -20 + i * 10;
+	}
+	w::RoundSpawnParams cap_params = params;
+	cap_params.origin = {14.0f, 10.0f, 1.0f / 1024.0f};
+	cap_params.shot_seq = 0x5678;
+	if (!expect(world.round_sim.spawn(world, cap_params) >= 0,
+			"the fourth satchel enters the projectile pool"))
 		return false;
-	placed->health = -1;
-	world.throwables.devices.front().think_delay_ticks = 0;
 	np::Server_TickUpdate(ctx);
+	int active_devices = 0;
+	for (const w::PlacedDevice &candidate : world.throwables.devices)
+		if (candidate.active) ++active_devices;
+	if (!expect(world.registry.get(device.entity) == nullptr,
+			"the cap removes the oldest armed authoritative lifetime") ||
+		!expect(active_devices == 3,
+			"the owner retains exactly three same-item satchels"))
+		return false;
 	const std::vector<ns::Datagram> owner_remove = drain(remote_owner);
 	const std::vector<ns::Datagram> observer_remove = drain(remote_observer);
 	const std::vector<ns::Datagram> loop_remove = drain(loopback);
 	const auto owner_12 = tagged(owner_remove, s2c::ENTITY_REMOVE);
 	const auto observer_12 = tagged(observer_remove, s2c::ENTITY_REMOVE);
 	if (!expect(owner_12.size() == 1 && observer_12.size() == 1 &&
-			tagged(loop_remove, s2c::ENTITY_REMOVE).empty(),
-			"0x12 reaches both remotes and skips the authoritative loopback"))
+			tagged(owner_remove, s2c::DEPLOYED_ITEM).size() == 1 &&
+			tagged(observer_remove, s2c::DEPLOYED_ITEM).size() == 1 &&
+			tagged(loop_remove, s2c::ENTITY_REMOVE).empty() &&
+			tagged(loop_remove, s2c::DEPLOYED_ITEM).empty(),
+			"the cap tick fans one 0x59 plus the oldest 0x12 to remotes only"))
 		return false;
 	EntityRemove decoded_remove;
 	consumed = 0;

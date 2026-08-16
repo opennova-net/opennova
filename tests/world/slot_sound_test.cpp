@@ -85,6 +85,9 @@ const char kProfiles[] =
     "     SSFootWater    T_WATER\n"
     "     SSAudio1       T_AUD1\n"
     "     SSAudio6       T_AUD6\n"
+    "end\n"
+    "begin \"SP_TestFemale\"\n"
+    "     SSLFootGND     T_FEMALE_DIRT_L\n"
     "end\n";
 
 struct Rig {
@@ -158,6 +161,40 @@ void test_player_feet_even_ticks_only() {
     auto evs = rig.take();
     CHECK(evs.size() == 1);
     if (!evs.empty()) CHECK(evs[0].slot == slot::kSlotFootRGround);
+}
+
+void test_player_female_profile_selection() {
+    Rig rig(/*local_player=*/true);
+    Entity *player = rig.world.registry.get(rig.e->handle);
+    CHECK(player != nullptr);
+    if (player == nullptr) return;
+    player->player_class = 5;
+    player->minimap_net_id = 0x8407;
+    rig.world.character_traits.set(0x8407, true);
+    rig.e->profile.sound_profile_female = static_cast<int16_t>(
+            rig.world.sound_profiles.index_of("SP_TestFemale"));
+    rig.src.events = 0x1;
+    rig.run(0, 1);
+    auto evs = rig.take();
+    CHECK(evs.size() == 1);
+    if (!evs.empty())
+        CHECK(std::string(evs[0].set_name) == "T_FEMALE_DIRT_L");
+
+    // An unknown packed id stays on the primary profile.
+    player->minimap_net_id = 0x1234;
+    rig.run(2, 3);
+    evs = rig.take();
+    CHECK(evs.size() == 1);
+    if (!evs.empty()) CHECK(std::string(evs[0].set_name) == "T_DIRT_L");
+
+    // NPC defs already author their sex-specific primary profile. A colliding
+    // minimap id cannot redirect a non-player body through the player table.
+    player->player_class = 0;
+    player->minimap_net_id = 0x8407;
+    rig.run(4, 5);
+    evs = rig.take();
+    CHECK(evs.size() == 1);
+    if (!evs.empty()) CHECK(std::string(evs[0].set_name) == "T_DIRT_L");
 }
 
 void test_foot_dip_water_and_surface_picks() {
@@ -507,6 +544,7 @@ void test_surface_tile_resolvers() {
 int main() {
     test_npc_feet_odd_ticks_only();
     test_player_feet_even_ticks_only();
+    test_player_female_profile_selection();
     test_foot_dip_water_and_surface_picks();
     test_foot_obj_pick();
     test_foley_bits_and_empty_slot_noop();

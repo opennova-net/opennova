@@ -682,6 +682,28 @@ int AvatarDatabase::first_character_id(int alignment) const {
 	return first_any;
 }
 
+std::vector<AvatarDatabase::CharacterSexRow>
+AvatarDatabase::character_sex_rows() const {
+	std::vector<CharacterSexRow> rows;
+	for (const Nationality &nat : nationalities) {
+		for (const Division &div : nat.divisions) {
+			for (const Combo &combo : div.combos) {
+				const uint16_t character_id = static_cast<uint16_t>(
+						opennova::character_id::pack(
+								nat.id, div.id, combo.id, nat.alignment));
+				const bool duplicate = std::any_of(rows.begin(), rows.end(),
+						[character_id](const CharacterSexRow &row) {
+							return row.character_id == character_id;
+						});
+				if (!duplicate)
+					rows.push_back(CharacterSexRow{
+							character_id, combo.head.sex == SEX_FEMALE});
+			}
+		}
+	}
+	return rows;
+}
+
 Dictionary AvatarDatabase::get_model() const {
 	Dictionary m;
 	Array parr;
