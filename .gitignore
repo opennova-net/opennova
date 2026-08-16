@@ -12,6 +12,7 @@
 
 # Codex CLI: machine-local state and worktrees, same policy as .claude above
 .codex/
+.worktrees/
 
 # Build artifacts
 build/

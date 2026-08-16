@@ -22,6 +22,7 @@
 // velocity at plausible gait speeds, near-constant standing capsule, footstep bits
 // present, and the 16.16 per-tick quantities the motor consumes. Asset-gated like
 // wac_corpus_test: absent files skip (CI-safe).
+#include <cstdlib>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -44,8 +45,8 @@ struct ClipCase {
     double max_speed;
 };
 
-bool file_exists(const char *p) {
-    if (std::FILE *f = std::fopen(p, "rb")) {
+bool file_exists(const std::string &p) {
+    if (std::FILE *f = std::fopen(p.c_str(), "rb")) {
         std::fclose(f);
         return true;
     }
@@ -58,25 +59,26 @@ int main(int argc, char **argv) {
     std::vector<ClipCase> cases;
     if (argc > 1) {
         for (int i = 1; i < argc; ++i) cases.push_back({argv[i], 0.1, 10.0});
-    } else {
+    } else if (const char *jox = std::getenv("OPENNOVA_JO_ASSETS")) {
+        const std::string base(jox);
         cases = {
-            {"C:/Users/taylor/Desktop/JOX/I_walkf.bad", 0.5, 3.0},
-            {"C:/Users/taylor/Desktop/JOX/E_RUNF.bad", 2.0, 8.0},
+            {base + "/I_walkf.bad", 0.5, 3.0},
+            {base + "/E_RUNF.bad", 2.0, 8.0},
         };
     }
 
     int tested = 0;
     for (const ClipCase &c : cases) {
         if (!file_exists(c.path)) {
-            std::printf("skip (absent): %s\n", c.path);
+            std::printf("skip (absent): %s\n", c.path.c_str());
             continue;
         }
         BadFile bf{};
-        CHECK(bad_parse(c.path, &bf) == 0);
+        CHECK(bad_parse(c.path.c_str(), &bf) == 0);
         if (bf.frame_count == 0) continue;
         ++tested;
 
-        std::printf("%s: fps=%u frames=%u bones=%zu events=%zu flags=0x%x\n", c.path,
+        std::printf("%s: fps=%u frames=%u bones=%zu events=%zu flags=0x%x\n", c.path.c_str(),
                     bf.fps, bf.frame_count, bf.num_bones, bf.num_events, bf.flags);
 
         // Fence-post layout: the interpolator lerps record[frame] -> record[frame+1]
