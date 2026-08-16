@@ -498,12 +498,73 @@ bool run_deployed_item_lifecycle_surfaces_raw_gameplay() {
 	const np::JoinerConnection::PollResult poll =
 			joiner.handle_datagram(dg.data(), dg.size());
 
-	return expect(poll.inbound_gameplay.size() == 2 &&
+	if (!expect(poll.inbound_gameplay.size() == 2 &&
 			poll.inbound_gameplay[0].first == s2c::DEPLOYED_ITEM &&
 			poll.inbound_gameplay[0].second == spawn_payload &&
 			poll.inbound_gameplay[1].first == s2c::ENTITY_REMOVE &&
 			poll.inbound_gameplay[1].second == removal_payload,
-			"validated 0x59/0x12 placed-device lifecycle reaches the replica pipeline");
+			"validated 0x59/0x12 lifecycle surfaces on the diagnostic view"))
+		return false;
+	// ClientRuntime folds ONLY the reducer stream — a record absent there never
+	// reaches ClientReplicaPipeline (the post-#498 review regression: 0x59/0x12
+	// rode the diagnostic vector alone and joiners dropped every placed device).
+	std::vector<std::pair<uint8_t, std::vector<uint8_t>>> lifecycle;
+	for (const auto &tb : poll.inbound_reducer)
+		if (tb.first == s2c::DEPLOYED_ITEM || tb.first == s2c::ENTITY_REMOVE)
+			lifecycle.push_back(tb);
+	return expect(lifecycle.size() == 2 &&
+			lifecycle[0].first == s2c::DEPLOYED_ITEM &&
+			lifecycle[0].second == spawn_payload &&
+			lifecycle[1].first == s2c::ENTITY_REMOVE &&
+			lifecycle[1].second == removal_payload,
+			"validated 0x59/0x12 placed-device lifecycle rides the applied reducer stream in wire order");
+}
+
+// End to end: the datagrams cross ClientRuntime::run_frame and the replica row
+// appears, then retires. [orig: client dispatch table @0x82ae28 — 0x59 ->
+// NapiNPClientMsg_0x059 @0x4228e0 -> Entity_SpawnOrUpdateFromSlotPacket
+// @0x546770; 0x12 -> NapiNPClientMsg_0x012 @0x425ee0 -> Entity_Destroy
+// @0x43e810 — both applied on receipt]
+bool run_deployed_item_lifecycle_folds_into_the_replica() {
+	constexpr uint16_t kSelf = 0x0005;
+	np::ClientRuntime client("PlacedDeviceFoldJoiner", [] { return uint64_t(0); });
+	client.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                    1, 0, kSelf, w::kPlayerInfantryTypeId);
+	SessionSequencing server_tx = np::make_jo_game_session_sequencing();
+
+	DeployedItemSpawn spawn;
+	spawn.item_id = 0x0361;
+	spawn.owner_handle = kSelf;
+	spawn.friendly_item_id = 0x0362;
+	spawn.enemy_item_id = 0x0363;
+	spawn.slot_handle = 0x1003;
+	spawn.parent_handle = 0xFFFF;
+	spawn.pos_x = w::to_fixed(4.0);
+	spawn.pos_y = w::to_fixed(5.0);
+	spawn.pos_z = w::to_fixed(1.0);
+	{
+		const std::vector<uint8_t> dg = frame_server_session(server_tx,
+				{make_protocol_message(s2c::DEPLOYED_ITEM,
+						encode_deployed_item_spawn(spawn))});
+		client.receive(dg.data(), dg.size());
+		(void)client.Client_ProcessNetworkFrame(1);
+	}
+	const ns::ClientEntityState *row = row_for(client.state(), spawn.slot_handle);
+	if (!expect(row != nullptr && row->spawn_tag == s2c::DEPLOYED_ITEM,
+			"0x59 through run_frame materializes the placed-device row"))
+		return false;
+
+	EntityRemove removal;
+	removal.entity_handle = spawn.slot_handle;
+	{
+		const std::vector<uint8_t> dg = frame_server_session(server_tx,
+				{make_protocol_message(s2c::ENTITY_REMOVE,
+						encode_entity_remove(removal))});
+		client.receive(dg.data(), dg.size());
+		(void)client.Client_ProcessNetworkFrame(2);
+	}
+	return expect(row_for(client.state(), spawn.slot_handle) == nullptr,
+			"0x12 through run_frame retires the placed-device row");
 }
 
 bool run_empty_slot_sweep_retires_the_row() {
@@ -920,6 +981,7 @@ int main() {
 	if (!run_team_assign_default_kit_stays_byte_identical()) return 1;
 	if (!run_empty_slot_sweep_surfaces_raw_gameplay()) return 1;
 	if (!run_deployed_item_lifecycle_surfaces_raw_gameplay()) return 1;
+	if (!run_deployed_item_lifecycle_folds_into_the_replica()) return 1;
 	if (!run_empty_slot_sweep_retires_the_row()) return 1;
 	if (!run_entity_death_notify_reaches_the_sim()) return 1;
 	if (!run_player_sync_removal_keeps_the_entity()) return 1;

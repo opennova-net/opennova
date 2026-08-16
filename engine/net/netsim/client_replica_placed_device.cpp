@@ -41,18 +41,27 @@ void ClientReplicaPipeline::apply_deployed_item(
 	uint16_t selected_type = spawn.item_id;
 	const ClientEntityState *owner = state_.find(spawn.owner_handle);
 	const ClientEntityState *viewer = state_.find(viewer_handle_);
-	if (owner != nullptr && viewer != nullptr && owner->team_known &&
-			viewer->team_known) {
+	ClientEntityState *existing = state_.find(spawn.slot_handle);
+	// The team-variant pick runs only on the FRESH-SPAWN leg (retail's
+	// found/update path never touches the item id) and only when BOTH
+	// authored variant ids are nonzero — a one-sided pair shows every
+	// client the base item id.
+	// [orig: Entity_SpawnOrUpdateFromSlotPacket @0x5469db (found &&
+	//  g_local_player_entity && packet[2] != 0 && packet[3] != 0),
+	//  enemy pick @0x5469fb..0x546a08, base id @0x546a11; the found-path
+	//  update @0x546828..0x54697a leaves the type alone]
+	if (existing != nullptr) {
+		selected_type = existing->type_id;
+	} else if (owner != nullptr && viewer != nullptr &&
+			owner->team_known && viewer->team_known &&
+			spawn.friendly_item_id != 0 && spawn.enemy_item_id != 0) {
 		const bool enemy = (mp_attributes_ & 0x8000u) != 0 ||
 				owner->team != viewer->team;
-		const uint16_t variant = enemy
-				? spawn.enemy_item_id
-				: spawn.friendly_item_id;
-		if (variant != 0) selected_type = variant;
+		selected_type = enemy ? spawn.enemy_item_id
+				      : spawn.friendly_item_id;
 	}
 	if (selected_type == 0) return;
 
-	ClientEntityState *existing = state_.find(spawn.slot_handle);
 	const bool type_changed = existing != nullptr &&
 			existing->type_id != selected_type;
 	uint32_t next_spawn_revision = 1;
@@ -119,8 +128,9 @@ void ClientReplicaPipeline::apply_deployed_item(
 }
 
 // S2C 0x12: one packed handle. Retail ignores 0xFFFF and any pool >= 5, then
-// destroys the entity in place; the replica retires the whole attachment tree
-// rooted at that handle so a carried child never outlives its parent row.
+// destroys that one entity in place, DETACHING (not destroying) anything
+// attached to it — the replica mirrors that: the named row goes, children
+// keep their rows with the parent link cleared.
 // [orig: NapiNPClientMsg_0x012 @0x425EE0 (0xFFFF / pool gates
 //  @0x425f05..0x425f36) -> Entity_Destroy @0x43e810]
 void ClientReplicaPipeline::apply_entity_remove(

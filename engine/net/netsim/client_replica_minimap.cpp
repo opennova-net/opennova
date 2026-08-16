@@ -30,18 +30,20 @@ constexpr uint32_t kOverlayColorTable[32] = {
 	0x007D8D74u, 0x007D8D68u, 0x007D8D5Cu, 0x007D8D50u,
 };
 
-// Index < 0x20 reads the table directly; 33..42 alias onto entries 16..25
-// (clamped); an alpha-0 entry rejects the marker outright.
-// [orig: MapOverlay_UpdateOrCreateSlot @0x5beb16..0x5beb3e]
+// Index < 0x20 reads the table directly with NO alpha test; only the 33..42
+// alias branch (clamped onto entries 16..25) rejects an alpha-0 entry — a
+// direct alpha-0 wire byte still creates/refreshes the slot (the draw path
+// forces alpha 0xFF anyway).
+// [orig: MapOverlay_UpdateOrCreateSlot — direct @0x5beb16..0x5beb1b straight,
+//  alias alpha test only @0x5beb31..0x5beb3e]
 bool minimap_color(uint8_t index, uint32_t &out) {
-	uint32_t argb;
 	if (index < 0x20u) {
-		argb = kOverlayColorTable[index];
-	} else {
-		uint8_t alias = static_cast<uint8_t>(index - 33u);
-		if (alias > 9u) alias = 9u;
-		argb = kOverlayColorTable[16u + alias];
+		out = kOverlayColorTable[index];
+		return true;
 	}
+	uint8_t alias = static_cast<uint8_t>(index - 33u);
+	if (alias > 9u) alias = 9u;
+	const uint32_t argb = kOverlayColorTable[16u + alias];
 	if ((argb & 0xFF000000u) == 0) return false;
 	out = argb;
 	return true;
@@ -285,11 +287,15 @@ void ClientReplicaPipeline::tick_minimap_overlays() {
 	}
 	// The persistent bank is not aged. [orig: timers skip slot_data]
 	// Links live purely on their own lifetime — retail's timer walk never
-	// consults the entity — re-arming THEIR STORED SLOT's lifetime each tick
-	// (through the link's slot pointer, never a handle search) and freeing
-	// that slot when they lapse. [orig: @0x5bfd3a..0x5bfe21 —
-	//  slot+24 = 1984 while linked @0x5bfd61; on expiry slot flags |= 0x20,
-	//  lifetime 0, handle -1, link zeroed @0x5bfddb..0x5bfe15]
+	// consults the entity — re-arming THEIR STORED SLOT's lifetime AND handle
+	// each tick (through the link's slot pointer, never a handle search: the
+	// stored entity pointer is folded back to pool<<12|index and written into
+	// the slot, which is what lets a 0x40 flags-0x20 clear be undone next tick
+	// so a later 0x40 for the handle still finds this slot) and freeing that
+	// slot when they lapse. [orig: @0x5bfd3a..0x5bfe21 —
+	//  slot+24 = 1984 while linked @0x5bfd61; handle rewrite
+	//  @0x5bfd95..0x5bfdc8; on expiry slot flags = 0x20 (whole-byte store),
+	//  lifetime 0, handle -1, link zeroed @0x5bfdf3..0x5bfe15]
 	for (ClientMinimapLinkedSlot &linked : state_.minimap.linked) {
 		if (!linked.active) continue;
 		if (linked.remaining_ticks > 0) --linked.remaining_ticks;
@@ -300,11 +306,12 @@ void ClientReplicaPipeline::tick_minimap_overlays() {
 						static_cast<size_t>(linked.slot_index)]
 				: nullptr;
 		if (linked.remaining_ticks == 0) {
-			// The lapse writes flags |= 0x20, lifetime 0, handle -1 through
-			// the stored pointer — the other slot fields survive here too.
-			// [orig: @0x5bfddb..0x5bfe15]
+			// The lapse ASSIGNS flags = 0x20 (a whole-byte store that wipes
+			// the 0x6B 0xC4 bits), lifetime 0, handle -1 through the stored
+			// pointer — the other slot fields survive here too.
+			// [orig: mov byte [eax+3], 20h @0x5bfdf3; @0x5bfdf7..0x5bfe15]
 			if (slot != nullptr && slot->active) {
-				slot->flags |= 0x20u;
+				slot->flags = 0x20u;
 				slot->remaining_ticks = 0;
 				slot->handle = 0xFFFF;
 			}
@@ -312,12 +319,19 @@ void ClientReplicaPipeline::tick_minimap_overlays() {
 			changed = true;
 			continue;
 		}
-		if (slot != nullptr && slot->active &&
-				slot->remaining_ticks != kMinimapOverlayLifetimeTicks) {
-			// A 0x40-cleared slot crossing 0 -> 1984 here is the witnessed
-			// link RESURRECT — a visibility change, so bump the revision.
-			if (slot->remaining_ticks == 0) changed = true;
-			slot->remaining_ticks = kMinimapOverlayLifetimeTicks;
+		if (slot != nullptr && slot->active) {
+			// The per-tick handle restore: retail recovers the packed handle
+			// from the link's stored entity pointer every walk, so a 0x40
+			// flags-0x20 clear (handle -1) on a linked slot is undone here
+			// and a later 0x40 record for that handle updates THIS slot in
+			// place instead of allocating a twin. [orig: @0x5bfd95..0x5bfdc8]
+			slot->handle = linked.handle;
+			if (slot->remaining_ticks != kMinimapOverlayLifetimeTicks) {
+				// A 0x40-cleared slot crossing 0 -> 1984 here is the witnessed
+				// link RESURRECT — a visibility change, so bump the revision.
+				if (slot->remaining_ticks == 0) changed = true;
+				slot->remaining_ticks = kMinimapOverlayLifetimeTicks;
+			}
 		}
 	}
 	// Regular markers render from the live entity; refresh the decoded pose

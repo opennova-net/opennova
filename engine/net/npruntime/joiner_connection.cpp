@@ -1513,15 +1513,19 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			std::size_t consumed = 0;
 			if (decode_deployed_item_spawn(
 					m.payload.data(), m.payload.size(), spawn, consumed) &&
-					consumed == m.payload.size())
+					consumed == m.payload.size()) {
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
+				out.inbound_reducer.emplace_back(m.tag, m.payload);
+			}
 		} else if (m.tag == s2c::ENTITY_REMOVE) {
 			EntityRemove removal;
 			std::size_t consumed = 0;
 			if (decode_entity_remove(
 					m.payload.data(), m.payload.size(), removal, consumed) &&
-					consumed == m.payload.size())
+					consumed == m.payload.size()) {
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
+				out.inbound_reducer.emplace_back(m.tag, m.payload);
+			}
 		} else if (m.tag == s2c::WEAPON_RELOAD) {
 			// The host echoes the same four-byte C2S 0x25 reload body as S2C 0x49.
 			// Surface it once through the decoded client-view event path.
