@@ -23,6 +23,28 @@ bool iends_with_adm(const std::string &name) {
 	return strutil::iequals(name.c_str() + (name.size() - 4), kExt);
 }
 
+const char *glass_userpoint_for_graphic(const std::string &graphic) {
+	struct GlassSurfaceRow {
+		const char *graphic;
+		const char *userpoint;
+	};
+	// Retail's complete Joint Operations table. Projectile_ProcessExplosionQueue
+	// requests GLASS1..GLASS4; Terrain_SpawnEffectsAtUserPoint resolves those
+	// keys through this exact model-name mapping before walking the USRP bank.
+	// GLASS3 and GLASS4 have no shipped rows.
+	// [orig: static rows consumed by Terrain_SpawnEffectsAtUserPoint @0x5cee20]
+	static constexpr GlassSurfaceRow kRows[] = {
+			{"eurhr2", "GLASS"}, {"eurhr2a", "GLASS"},
+			{"eurhr2b", "GLASS"}, {"eurhr1", "GLASS02"},
+			{"eurhr1b", "GLASS02"}, {"eurhr1c", "GLASS02"},
+			{"eurhr3", "GLASS02"}, {"eurhr3b", "GLASS02"},
+			{"eurhr3c", "GLASS02"}, {"atrm2a", "GLASS1"},
+	};
+	for (const GlassSurfaceRow &row : kRows)
+		if (strutil::iequals(graphic.c_str(), row.graphic)) return row.userpoint;
+	return nullptr;
+}
+
 } // namespace
 
 void CollisionResolveState::clear() {
@@ -31,6 +53,7 @@ void CollisionResolveState::clear() {
 	radius_by_graphic.clear();
 	husk_kz_points_by_graphic.clear();
 	husk_dead_points_by_graphic.clear();
+	glass_points_by_graphic.clear();
 	husk_pieces_by_graphic.clear();
 	resolution_attempted.clear();
 }
@@ -140,6 +163,39 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 		if (def == nullptr || def->graphic[0] == '\0') continue;
 		const std::string key(def->graphic);
 		const int32_t resolved_model = collision_model_for_graphic(state, deps, key);
+		// The blast window path resolves from the INTACT graphic. Cache even a
+		// miss so repeated attachment sweeps never reopen or rewalk the model.
+		auto glass_it = state.glass_points_by_graphic.find(key);
+		if (glass_it == state.glass_points_by_graphic.end()) {
+			std::vector<world::GlassPointTrait> points;
+			const char *userpoint_name = glass_userpoint_for_graphic(key);
+			const Threedi3di3 *glass_model =
+					userpoint_name != nullptr && deps.models.has_index()
+					? deps.models.model_for(key)
+					: nullptr;
+			for (size_t up_index = 0;
+					glass_model != nullptr && glass_model->user_points != nullptr &&
+					up_index < glass_model->user_point_count;
+					++up_index) {
+				const ThreediUserPoint &point = glass_model->user_points[up_index];
+				if (!strutil::iequals(point.name, userpoint_name)) continue;
+				float up_pos[3];
+				float up_dir[3];
+				threedi_user_point_position(&point, up_pos);
+				threedi_user_point_direction(&point, up_dir);
+				points.push_back(world::GlassPointTrait{
+						world::Vec3{up_pos[2], -up_pos[0], up_pos[1]},
+						world::Vec3{up_dir[2], -up_dir[0], up_dir[1]}});
+				break; // Terrain's exact userpoint lookup returns the first match.
+			}
+			glass_it = state.glass_points_by_graphic.emplace(
+					key, std::move(points)).first;
+		}
+		if (world::ItemDeathTraits *traits =
+					world.item_death_traits.get_mutable(e->item_id);
+				traits != nullptr && traits->glass_points.empty() &&
+				!glass_it->second.empty())
+			traits->glass_points = glass_it->second;
 		// The bound-sphere radius (entity+0 boundRadius) comes from the .3di
 		// MODEL header bound, not the collision block — every placed item
 		// carries one, so collision-less props are still hittable by rounds and

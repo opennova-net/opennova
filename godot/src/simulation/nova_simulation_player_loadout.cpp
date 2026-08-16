@@ -238,11 +238,12 @@ TypedArray<Dictionary> Simulation::get_attach_labels() const {
 	const bool armory_mode =
 	    (player->flags & opennova::world::kEntityFlagArmoryZone) != 0;
 	// The nearest-only gate [orig: Player_CanFireWeapon @0x5cf780 — EquippedSlot present
-	// and parentSlot not 2/5 (ctrl/drvr); the camera-mode/underwater/scope legs live
-	// shell-side and are unmodeled here: docs/interface/hud-re.md (D-HUD-11)].
-	const bool can_fire =
-	    player->equipped_adm_index != opennova::world::kAdmSlotNone &&
-	    !(player->mounted && opennova::world::is_vehicle_control_seat(player->mount_type));
+	// plus the live mount, camera, scope, movement, air, and water gates. The
+	// query computes it directly so camera changes cannot lag one logic tick.
+	const AiEntity *body = world_->ai != nullptr
+			? world_->ai->for_handle(world_->cached.local_player)
+			: nullptr;
+	const bool can_fire = local_player_can_fire_weapon(body);
 	std::vector<opennova::world::AttachLabel> labels;
 	opennova::world::collect_attach_labels(*world_, *player, armory_mode, can_fire, labels);
 	for (const opennova::world::AttachLabel &l : labels) {

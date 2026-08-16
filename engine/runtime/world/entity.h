@@ -491,6 +491,11 @@ struct Entity {
     // section-debris launch origin (entity+0x80 savedLivePose reuse; only
     // destructible-class entities receive it) [orig: @ 0x4eb553-0x4eb569].
     Vec3 death_blast_center;
+    // Per-intact-model glass userpoint one-shot state. Retail marks the exact
+    // point broken before rolling its four presentation effects; the dynamic
+    // bit bank keeps the state entity-local when one item type has many placed
+    // instances. [orig: Terrain_SpawnEffectsAtUserPoint @0x5cee20]
+    std::vector<uint64_t> broken_glass_point_bits;
     // The death tick (entity+0x1AC, first write wins) [orig:
     // Entity_ProcessDestructibleDeath @ 0x43fc0c / AI_TransitionToDestroyed_Vehicle].
     uint32_t death_tick = 0;

@@ -256,6 +256,62 @@ void entity_apply_weapon_damage(World &world, Entity &target, const ExplosionEnt
     apply_item_blast_damage(world, target, damage, attacker, e.ammo_index);
 }
 
+bool glass_point_is_broken(const Entity &target, size_t point_index) {
+    const size_t word = point_index / 64u;
+    if (word >= target.broken_glass_point_bits.size()) return false;
+    return (target.broken_glass_point_bits[word] &
+            (uint64_t{1} << (point_index & 63u))) != 0;
+}
+
+void mark_glass_point_broken(Entity &target, size_t point_index) {
+    const size_t word = point_index / 64u;
+    if (target.broken_glass_point_bits.size() <= word)
+        target.broken_glass_point_bits.resize(word + 1u, 0);
+    target.broken_glass_point_bits[word] |=
+            uint64_t{1} << (point_index & 63u);
+}
+
+// One exact static-building window point. The containing building was already
+// admitted by the explosion's resolved-radius sweep; each point independently
+// uses the AMMO definition's authored kz_maxradius. Retail marks the point
+// broken before four probability slots, and every slot consumes two PRNG draws
+// even when its effect does not fire.
+// [orig: Projectile_ProcessExplosionQueue @0x4eb814-0x4eb84d;
+// Terrain_SpawnEffectsAtUserPoint @0x5cee20]
+void shatter_glass_points(World &world, Entity &target, const Vec3 &blast_pos,
+                          float authored_radius, DestructionEvents &events) {
+    if (authored_radius <= 0.0f ||
+        (target.engine_flags & kEntityFlagHusk) != 0)
+        return;
+    const ItemDeathTraits *traits =
+            world.item_death_traits.get(target.item_id);
+    if (traits == nullptr || traits->glass_points.empty()) return;
+
+    const CollisionMatrix orientation = destruction_orientation(target);
+    for (size_t point_index = 0;
+         point_index < traits->glass_points.size(); ++point_index) {
+        if (glass_point_is_broken(target, point_index)) continue;
+        const GlassPointTrait &point = traits->glass_points[point_index];
+        const Vec3 offset = rotate_authored_point(orientation, point.local_pos);
+        const Vec3 world_pos{target.position.x + offset.x,
+                             target.position.y + offset.y,
+                             target.position.z + offset.z};
+        if (vec_len(vec_sub(world_pos, blast_pos)) > authored_radius) continue;
+
+        mark_glass_point_broken(target, point_index);
+        ++events.glass_points;
+        const Vec3 world_dir =
+                rotate_authored_point(orientation, point.local_dir);
+        for (size_t effect_index = 0; effect_index < 4; ++effect_index) {
+            (void)death_rand16(world); // retail seeds the intermediate CRT roll
+            const uint16_t roll = death_rand16(world) % 100u;
+            if (roll <= kGlassShatterRollMax[effect_index])
+                events.effects.push_back(DestructionEffectEvent{
+                        kGlassShatterEffects[effect_index], world_pos, world_dir});
+        }
+    }
+}
+
 } // namespace
 
 const DeathPieceType &death_piece_type(int index) {
@@ -392,11 +448,11 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                 if (surface < 0.0f) surface = 0.0f;
                 if (surface > blast_radius) continue;
                 // Window shatter at the GLASS1..4 user points [orig:
-                // Terrain_SpawnEffectsAtUserPoint x4 @ 0x4eb814-0x4eb85d] —
-                // presented by the host from the model user points.
-                events.glass_breaks.push_back(GlassBreakEvent{
-                        t->net_id, t->bms_id, t->spawn_origin, t->item_id, e.pos,
-                        blast_radius});
+                // Terrain_SpawnEffectsAtUserPoint x4 @ 0x4eb814-0x4eb85d].
+                // Collision resolution retained the intact-model point; this
+                // leg emits the already transformed transient effect rows.
+                shatter_glass_points(
+                        world, *t, e.pos, ammo->kz_maxradius, events);
                 if (t->health > 0 && !t->is_ai_capable) t->death_blast_center = e.pos;
                 entity_apply_weapon_damage(world, *t, e, resolved, surface, blast_radius);
                 if (!t->last_attacker.valid()) t->last_attacker = resolved;
@@ -492,12 +548,24 @@ void emit_death_sounds_and_effects(World &world, Entity &target, bool silent) {
 void process_destructible_death(World &world, Entity &target) {
     // [orig: Entity_ProcessDestructibleDeath @ 0x43fbc0]
     DestructionEvents &ev = world.destruction;
-    // Per-section debris burst — sampled by the present pass over the model's
-    // collision faces [orig: the Entity_SpawnSectionDebris loop @ 0x43fbd9].
-    ev.debris_bursts.push_back(SectionDebrisEvent{target.net_id, target.bms_id,
-                                                  target.spawn_origin, target.item_id,
-                                                  target.position,
-                                                  target.death_blast_center});
+    // Per-section debris burst — sample the intact model's collision faces
+    // before the husk flag changes collision identity. [orig: the
+    // Entity_SpawnSectionDebris loop @ 0x43fbd9].
+    if (world.collision != nullptr) {
+        // Resolve from the intact model before Flags|=Husk changes the target
+        // view. The present pass receives fully positioned effect rows.
+        world.collision->ensure_entity_instance(world, target.handle);
+        const std::vector<SectionDebrisSample> samples =
+                world.collision->sample_section_debris(
+                        world, target.handle, target.death_blast_center);
+        for (const SectionDebrisSample &sample : samples) {
+            ev.effects.push_back(DestructionEffectEvent{
+                    sample.material == 17 ? kSectionDebrisFoliageEffect
+                                          : kSectionDebrisWoodEffect,
+                    sample.pos, sample.dir});
+        }
+        ev.debris_triangles += static_cast<int32_t>(samples.size());
+    }
     // Scar/decal clear (Scar_ClearEntriesByEntity @ 0x5ccec0) — no decal
     // system yet; tracked §24.
     target.engine_flags |= (kEntityFlagDead | kEntityFlagHusk); // [orig: Flags |= 6 @ 0x43fbf6]

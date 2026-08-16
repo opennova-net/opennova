@@ -448,8 +448,10 @@ func _refresh_info(sums: PackedInt64Array, counts: PackedInt32Array, frames: int
 	if world != null:
 		var destruction = world.get_destruction_present_stats()
 		if destruction != null:
-			_set_info("destruction", "%d husks · %d bursts" % [
-					int(destruction.husk_swaps), int(destruction.bursts)])
+			_set_info("destruction", "%d husks · %d debris · %d glass" % [
+					int(destruction.husk_swaps),
+					int(destruction.debris_triangles),
+					int(destruction.glass_points)])
 
 	if runtime != null:
 		var throwable = runtime.get_throwable_present_stats()

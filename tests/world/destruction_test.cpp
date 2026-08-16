@@ -149,6 +149,43 @@ CollisionModel projectile_wall_model(double half_extent) {
     return model;
 }
 
+CollisionModel section_debris_model() {
+    CollisionModel model;
+    CollisionSection first;
+    first.face_start = 0;
+    first.face_count = 1;
+    first.face_vertex_start = 0;
+    first.face_vertex_count = 3;
+    model.sections.push_back(first);
+    CollisionSection second;
+    second.face_start = 1;
+    second.face_count = 149;
+    second.face_vertex_start = 3;
+    second.face_vertex_count = 6;
+    model.sections.push_back(second);
+    model.face_vertices = {
+        CollisionFaceVertex{-1, 0, 0},
+        CollisionFaceVertex{0, 0, 0},
+        CollisionFaceVertex{0, 0, 0},
+        CollisionFaceVertex{0, 0, 0},
+        CollisionFaceVertex{768, 0, 0},
+        CollisionFaceVertex{0, 768, 0},
+        CollisionFaceVertex{0, 0, 0},
+        CollisionFaceVertex{1536, 0, 0},
+        CollisionFaceVertex{0, 0, 0},
+    };
+    model.faces.resize(150);
+    for (size_t i = 0; i < model.faces.size(); ++i) {
+        CollisionFace &face = model.faces[i];
+        const int16_t base = i < 2 ? 0 : 3;
+        face.vertex_index[0] = base;
+        face.vertex_index[1] = static_cast<int16_t>(base + 1);
+        face.vertex_index[2] = static_cast<int16_t>(base + 2);
+        face.material = i == 0 ? 17 : 4;
+    }
+    return model;
+}
+
 } // namespace
 
 // The AoE damage applicator gates [orig: Entity_ApplyWeaponDamage @0x4e6820].
@@ -458,7 +495,7 @@ void test_destructible_death_chain() {
     CHECK(!b->alive);
     CHECK(w.destruction.items_destroyed == 1);
     CHECK(w.destruction.husk_swaps.size() == 1);
-    CHECK(w.destruction.debris_bursts.size() == 1);
+    CHECK(w.destruction.debris_triangles == 0);
     bool found_death_sound = false;
     for (const DestructionSoundEvent &s : w.destruction.sounds)
         if (s.sound == "EXPLO_BARREL") found_death_sound = true;
@@ -492,6 +529,145 @@ void test_destructible_death_chain() {
     CHECK(by->health < 100); // organics in range take the death blast
     CHECK(w.registry.get(item2)->health == 100); // M-items are spared by the flag
     CHECK(!w.round_sim.hits.empty()); // the AI reaction stamp fed
+}
+
+// Section debris is resolved in the simulation from the intact collision
+// triangles before the husk flag changes the active model. A 150-face model
+// yields stride 256, so each face appears exactly once. The first centroid's
+// signed -1/3 Q8 coordinate truncates toward zero.
+// [orig: Entity_SpawnSectionDebris @0x43f580]
+void test_section_debris_samples_collision_faces() {
+    auto w_heap = std::make_unique<World>();
+    World &w = *w_heap;
+    w.registry.configure_pool(1, 4);
+
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.item_id = 500;
+    seed.health = 0;
+    seed.position = Vec3{10.0f, 20.0f, 30.0f};
+    seed.yaw = 90.0f; // identity mission placement rotation
+    seed.death_blast_center = Vec3{9.0f, 20.0f, 30.0f};
+    const EntityHandle target = w.registry.spawn(1, seed);
+    w.item_death_traits.set(500, barrel_traits());
+
+    CollisionWorld collision;
+    collision.assign_entity(target,
+            collision.add_model(section_debris_model()));
+    const int32_t entity_pos[3] = {
+            to_fixed(seed.position.x), to_fixed(seed.position.y),
+            to_fixed(seed.position.z)};
+    const CollisionMatrix first_matrix =
+            collision_matrix_from_heading(0, entity_pos);
+    int32_t displaced_pos[3] = {
+            entity_pos[0] + to_fixed(100.0f), entity_pos[1], entity_pos[2]};
+    const CollisionMatrix second_matrix =
+            collision_matrix_from_heading(0, displaced_pos);
+    CHECK(collision.publish_entity_section_matrices(
+            target, {first_matrix, second_matrix}));
+    w.collision = &collision;
+    process_destructible_death(w, *w.registry.get(target));
+
+    std::vector<DestructionEffectEvent> debris;
+    for (const DestructionEffectEvent &effect : w.destruction.effects)
+        if (effect.effect == "Effect_TreeFoliageExp" ||
+                effect.effect == "Effect_TreeWoodExp")
+            debris.push_back(effect);
+    CHECK(debris.size() == 150);
+    CHECK(w.destruction.debris_triangles == 150);
+    if (debris.size() >= 3) {
+        CHECK(debris[0].effect == "Effect_TreeFoliageExp");
+        CHECK(std::abs(debris[0].pos.x - 10.0f) < 1.0e-6f);
+        CHECK(std::abs(debris[0].pos.y - 20.0f) < 1.0e-6f);
+        CHECK(std::abs(debris[0].pos.z - 30.0f) < 1.0e-6f);
+        CHECK(std::abs(debris[0].dir.x - 1.0f) < 1.0e-6f);
+        CHECK(std::abs(debris[0].dir.y) < 1.0e-6f);
+        CHECK(std::abs(debris[0].dir.z) < 1.0e-6f);
+        CHECK(debris[1].effect == "Effect_TreeWoodExp");
+        CHECK(std::abs(debris[1].pos.x - 11.0f) < 1.0e-6f);
+        CHECK(std::abs(debris[1].pos.y - 21.0f) < 1.0e-6f);
+        CHECK(std::abs(debris[1].pos.z - 30.0f) < 1.0e-6f);
+        CHECK(std::abs(debris[1].dir.x - 0.8944272f) < 1.0e-5f);
+        CHECK(std::abs(debris[1].dir.y - 0.4472136f) < 1.0e-5f);
+        CHECK(std::abs(debris[2].pos.x - 12.0f) < 1.0e-6f);
+        CHECK(std::abs(debris[2].pos.y - 20.0f) < 1.0e-6f);
+    }
+}
+
+// Static-building glass is a model-authored point, not a coarse building
+// burst. The point uses the entity's complete placement pose, tests against
+// the AMMO'S authored maximum radius (not the queue override), breaks once,
+// and consumes two retail PRNG draws for each of the four probabilistic effect
+// slots. Seed 0x200 yields visible Glass/Paper/Dust rows and no Fire row.
+// [orig: Projectile_ProcessExplosionQueue @0x4eb814-0x4eb84d;
+// Terrain_SpawnEffectsAtUserPoint @0x5cee20]
+void test_glass_userpoints_shatter_once_at_authored_radius() {
+    auto w_heap = std::make_unique<World>();
+    World &w = *w_heap;
+    seed_ammo(w);
+    w.registry.configure_pool(2, 4);
+
+    ItemDeathTraits traits = barrel_traits();
+    traits.glass_points = {
+            GlassPointTrait{Vec3{1.5f, -0.5f, 0.75f}, Vec3{0.0f, 1.0f, 0.0f}},
+            GlassPointTrait{Vec3{20.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, 1.0f}}};
+    w.item_death_traits.set(900, traits);
+
+    Entity seed;
+    seed.kind = EntityKind::Building;
+    seed.item_id = 900;
+    seed.health = 1000;
+    seed.health_max = 1000;
+    seed.position = Vec3{4.0f, 6.0f, 10.0f};
+    seed.bound_radius = 2.0f;
+    seed.yaw = 0.0f;
+    seed.pitch = 90.0f;
+    seed.roll = 90.0f;
+    const EntityHandle building = w.registry.spawn(2, seed);
+
+    // Rz(90-yaw)*Ry(-pitch)*Rx(roll) maps local (x,y,z) to
+    // (z,-y,x): the first point lands at (4.75,6.5,11.5), and its local +Y
+    // direction becomes world -Y.
+    ExplosionEntry explosion;
+    explosion.pos = Vec3{4.75f, 6.5f, 11.5f};
+    explosion.type = ammo_kz::kStandard;
+    explosion.ammo_index = 1;
+    explosion.radius_override = 30.0f;
+    w.destruction_rng.state = 0x200u;
+    w.explosions.queue_explosion(w, explosion);
+    w.explosions.process(w, nullptr, nullptr, -1.0e9f, w.destruction);
+
+    CHECK(w.destruction.glass_points == 1);
+    CHECK(w.registry.get(building)->broken_glass_point_bits.size() == 1);
+    CHECK((w.registry.get(building)->broken_glass_point_bits[0] & 1u) != 0);
+    CHECK((w.registry.get(building)->broken_glass_point_bits[0] & 2u) == 0);
+    CHECK(w.destruction.effects.size() == 3);
+    if (w.destruction.effects.size() == 3) {
+        CHECK(w.destruction.effects[0].effect == "Effect_BldGlassExp");
+        CHECK(w.destruction.effects[1].effect == "Effect_BldPaperExp");
+        CHECK(w.destruction.effects[2].effect == "Effect_BldDustExp");
+        for (const DestructionEffectEvent &effect : w.destruction.effects) {
+            CHECK(std::abs(effect.pos.x - 4.75f) < 1.0e-4f);
+            CHECK(std::abs(effect.pos.y - 6.5f) < 1.0e-4f);
+            CHECK(std::abs(effect.pos.z - 11.5f) < 1.0e-4f);
+            CHECK(std::abs(effect.dir.x) < 1.0e-4f);
+            CHECK(std::abs(effect.dir.y + 1.0f) < 1.0e-4f);
+            CHECK(std::abs(effect.dir.z) < 1.0e-4f);
+        }
+    }
+    CHECK(w.destruction_rng.state == 0xd8651b5fu);
+
+    // Replaying the same blast neither emits nor advances the stream: the
+    // first exact point is already broken and the second remains outside the
+    // authored kz_maxradius=8 despite radius_override=30.
+    w.destruction.effects.clear();
+    const uint32_t state_after_first = w.destruction_rng.state;
+    w.explosions.queue_explosion(w, explosion);
+    w.explosions.process(w, nullptr, nullptr, -1.0e9f, w.destruction);
+    CHECK(w.destruction.glass_points == 1);
+    CHECK(w.destruction.effects.empty());
+    CHECK(w.destruction_rng.state == state_after_first);
+    CHECK((w.registry.get(building)->broken_glass_point_bits[0] & 2u) == 0);
 }
 
 void test_synthetic_husk_events_preserve_distinct_handles() {
@@ -1597,6 +1773,8 @@ int main() {
     test_explosion_cone_wrap();
     test_explosion_resolves_attacker_chain_for_events();
     test_destructible_death_chain();
+    test_section_debris_samples_collision_faces();
+    test_glass_userpoints_shatter_once_at_authored_radius();
     test_synthetic_husk_events_preserve_distinct_handles();
     test_kz_point_full_euler();
     test_bridge_dead_points_emit_water_shocks();

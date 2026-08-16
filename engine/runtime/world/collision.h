@@ -191,6 +191,14 @@ struct CollisionModel {
     void finalize_sections();
 };
 
+// One fully resolved section-debris particle sampled from the intact CFAC
+// collision mesh. The death chain chooses the effect name from `material`.
+struct SectionDebrisSample {
+    Vec3 pos;
+    Vec3 dir;
+    uint8_t material = 0;
+};
+
 // ----------------------------------------------------------------------------
 // Section transform: 16-dword fixed matrix, Q22 rotation rows + 16.16 translation,
 // m[15] low bit = section disabled. [orig: the per-section matrix array returned
@@ -1033,6 +1041,14 @@ public:
     // The collision model attached to this exact live registry identity
     // (nullptr for an absent or recycled packed slot).
     const CollisionModel *model_for(const World &world, EntityHandle h) const;
+
+    // Retail's per-section collision-triangle debris sampler. The transform
+    // callback is resolved through the same target view as projectile traces;
+    // an absent/invalid model produces no synthetic fallback.
+    // [orig: Entity_SpawnSectionDebris @0x43f580]
+    std::vector<SectionDebrisSample> sample_section_debris(
+            const World &world, EntityHandle h,
+            const Vec3 &blast_center) const;
 
     // Read-only world-space geometry snapshot for a host collision debug view.
     // Each instance's volumes are transformed through the SAME target_view /

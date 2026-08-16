@@ -646,6 +646,12 @@ private:
 	// player then locomotes through the same infantry motor as an NPC. [net-re §5.38]
 	opennova::world::PlayerInput player_input_{};
 	void apply_player_input_pre_tick();
+	// One live verdict for body pose and attach-label selection. The caller
+	// supplies the current local body so the query cannot accidentally consume
+	// the previous tick's aimed_shot_available cache.
+	// Retail witness: Player_CanFireWeapon @0x5cf780.
+	bool local_player_can_fire_weapon(
+			const opennova::world::AiEntity *p_body) const;
 	// Retail's held-weapon draw gate, local-player branch — the weapon model is shown
 	// iff the soldier may fire it. [orig: Entity_CanFireWeapon @ 0x4dcb10]
 	bool local_held_weapon_visible(const opennova::world::Entity &p_entity) const;
@@ -1734,7 +1740,7 @@ public:
 			const Vector3 &camera);
 
 	// The destruction presentation drain (world/destruction.h; world-wac-ai-re
-	// §24): {effects[], sounds[], husk_swaps[], debris_bursts[], glass_breaks[],
+	// §24): {effects[], sounds[], husk_swaps[], debris_triangles, glass_points,
 	// explosions_processed, items_destroyed}, godot-space positions, cleared on
 	// read. Once per present, beside the fire drain.
 	Dictionary drain_destruction_events();
@@ -2169,11 +2175,10 @@ public:
 	// position (mission space, +0.1875 u lift applied), seat_type (world::SeatType,
 	// 4 = armory point), armory (bool), nearest (bool, the full-bright highlight),
 	// attach_text_key (the USEGUN weapon's attachtextid Overlays key, "" = absent ->
-	// the STROVER_USEGUN default). Armory mode rides the zone flag; the can-fire
-	// nearest-only gate models EquippedSlot presence + the ctrl/drvr seat reject.
+	// the STROVER_USEGUN default). Armory mode rides the zone flag; the nearest-only
+	// gate consumes the same complete live fire verdict as body/HUD selection.
 	// [orig: draw_vehicle_seat_and_armory_labels @0x5a3290 selection half;
-	//  Player_CanFireWeapon @0x5cf780 — its camera/underwater legs are shell state,
-	//  unmodeled here: docs/interface/hud-re.md (D-HUD-11)]
+	//  Player_CanFireWeapon @0x5cf780]
 	TypedArray<Dictionary> get_attach_labels() const;
 	TypedArray<Dictionary> get_friendly_tags() const;
 

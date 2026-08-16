@@ -43,6 +43,11 @@ class CollisionWorld;
 // Per-item destruction traits, host-fed from items.def by the item-traits sweep
 // (Simulation::resolve_item_traits) — the def fields the death chain reads.
 // ----------------------------------------------------------------------------
+struct GlassPointTrait {
+    Vec3 local_pos;
+    Vec3 local_dir;
+};
+
 struct ItemDeathTraits {
     bool static_death = false;  // attrib2 & 0x100; generic death motion freezes
     int32_t unit_type = 0;      // def+0x196 — the death-dispatch row key
@@ -101,6 +106,11 @@ struct ItemDeathTraits {
     // the raw mission water plane; an empty bank has no origin fallback.
     // [orig: Entity_SpawnDeathEffectsAtBones @0x4944c0]
     std::vector<Vec3> bridge_dead_points;
+    // Exact intact-model window userpoint selected by retail's static
+    // model/surface table. Positions and directions use mission-local axes;
+    // the explosion sweep applies the entity's complete authored pose.
+    // [orig: Terrain_SpawnEffectsAtUserPoint @0x5cee20]
+    std::vector<GlassPointTrait> glass_points;
 };
 
 struct ItemDeathTraitsTable {
@@ -213,49 +223,35 @@ struct HuskSwapEvent {
                                      // no node — the present pass grafts here)
 };
 
-// A section-debris burst [orig: Entity_SpawnSectionDebris @ 0x43f580] — the
-// per-triangle sampling runs in the PRESENT pass (it needs the render model's
-// collision faces); the world emits the witnessed inputs.
-struct SectionDebrisEvent {
-    uint16_t net_id = 0;
-    int32_t bms_id = 0;
-    uint32_t spawn_origin = 0;
-    int32_t item_id = 0;
-    Vec3 pos;                  // the dying entity position (node-less fallback)
-    Vec3 blast_center;         // entity+0x80 (zero = radial fallback pitch 63.3°)
-};
-
-// Window shatter on a building in blast range [orig: the GLASS1..GLASS4
-// user-point effect spawns @ 0x4eb814-0x4eb85d]. The present pass resolves the
-// model user points and spawns the glass effects within range.
-struct GlassBreakEvent {
-    uint16_t net_id = 0;
-    int32_t bms_id = 0;
-    uint32_t spawn_origin = 0;
-    int32_t item_id = 0;
-    Vec3 blast_pos;
-    float radius = 0.0f;
-};
-
 struct DestructionEvents {
     std::vector<DestructionEffectEvent> effects;
     std::vector<DestructionSoundEvent> sounds;
     std::vector<HuskSwapEvent> husk_swaps;
-    std::vector<SectionDebrisEvent> debris_bursts;
-    std::vector<GlassBreakEvent> glass_breaks;
     // Diagnostic counters (probes assert the legs actually ran).
     int32_t explosions_processed = 0;
     int32_t items_destroyed = 0;
     int32_t crackles = 0; // wreck-fire crackle rolls that fired (S12b)
+    int32_t debris_triangles = 0; // resolved CFAC samples in this drain
+    int32_t glass_points = 0;     // newly broken exact userpoints in this drain
 
     void clear() {
         effects.clear();
         sounds.clear();
         husk_swaps.clear();
-        debris_bursts.clear();
-        glass_breaks.clear();
+        debris_triangles = 0;
+        glass_points = 0;
     }
 };
+
+inline constexpr const char *kSectionDebrisFoliageEffect =
+        "Effect_TreeFoliageExp"; // [orig: g_fx_TreeFoliageExp @0x2C25BF0]
+inline constexpr const char *kSectionDebrisWoodEffect =
+        "Effect_TreeWoodExp"; // [orig: g_fx_TreeWoodExp @0x2C25BF4]
+
+inline constexpr const char *kGlassShatterEffects[4] = {
+        "Effect_BldGlassExp", "Effect_BldPaperExp",
+        "Effect_BldFireExp", "Effect_BldDustExp"};
+inline constexpr uint16_t kGlassShatterRollMax[4] = {33, 5, 5, 10};
 
 // The wreck-fire random crackle, rolled per tick per burning wreck on the
 // world's rol-xor PRNG stand-in stream (the same generator as retail's

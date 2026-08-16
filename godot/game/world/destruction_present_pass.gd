@@ -3,7 +3,8 @@ extends RefCounted
 
 # THE shell destruction-presentation pass: presents the sim's item destruction on
 # the viewing peer — the husk model swap on destroyed items, the death-piece
-# debris (trail effects riding the sim's piece pool), the section-debris bursts,
+# debris (trail effects riding the sim's piece pool), resolved section-triangle
+# debris and glass userpoint effects,
 # the death/fire/other wreck effect families with the random fire crackle, and
 # the destruction sounds. Drains Simulation.drain_destruction_events() +
 # get_death_pieces() once per present, the fire_present_pass precedent.
@@ -23,16 +24,11 @@ extends RefCounted
 #    family's random crackle Effect_BoatExpSec + EXPLO_SHIP_SM, underwater
 #    steam-out Effect_Boat01Steam).]
 #
-# Stand-ins (tracked in the §24 record + D-ITEM ledger rows): pieces draw as
-# their type's trail effect following the sim piece (the single-section husk
-# MESH chunk needs per-part render instancing); the section-debris burst spawns
-# a small radial set at the entity (the per-triangle collision-face sampling
-# needs the CFAC face plumb); effect anchors ride the entity origin, not the
-# husk Dead/Fire/Other user points; the glass user-point shatter is counted but
-# not yet drawn.
-
-const BURST_EFFECT := "Effect_TreeWoodExp"       # [orig: g_fx_TreeWoodExp @ 0x2C25BF4]
-const BURST_COUNT := 6                            # sampling stand-in (see header)
+# Remaining stand-ins (tracked in the §24 record + D-ITEM ledger rows): pieces
+# draw as their type's trail effect following the sim piece (the single-section
+# husk MESH chunk needs per-part render instancing); effect anchors ride the
+# entity origin, not the husk Dead/Fire/Other user points. Section debris and
+# glass already arrive as resolved transient effect rows from the simulation.
 
 
 var _sim: Simulation              # live pose source; null in data-driven tests
@@ -50,10 +46,6 @@ var _burning: Dictionary = {}     # canonical wreck owner key -> live crackle an
 var _wreck_anchor_keys: Dictionary = {} # registered wreck owner keys
 var _piece_pos: Dictionary = {}   # piece slot -> Vector3 (anchor resolver source)
 var _piece_generation: Dictionary = {}  # piece slot -> presented allocation generation
-# Cosmetic scatter for the section-debris burst STAND-IN only (the sampling
-# note in the header); the witnessed wreck-fire crackle roll runs in the SIM
-# on the engine PRNG stream (S12b).
-var _rng := RandomNumberGenerator.new()
 
 
 ## Typed diagnostic counters (ADR 0017: cross-object contracts are typed
@@ -63,10 +55,10 @@ class Stats:
 	var husk_swaps := 0
 	var no_husk := 0
 	var pieces_peak := 0
-	var bursts := 0
+	var debris_triangles := 0
 	var effects := 0
 	var sounds := 0
-	var glass := 0
+	var glass_points := 0
 	var crackles := 0
 
 
@@ -98,7 +90,6 @@ func setup(sim: Simulation, container: Node3D, index: EntityIndex,
 	_dynamic_node_resolver = dynamic_node_resolver
 	_audio_provider = audio_provider
 	_fx_provider = fx_provider
-	_rng.randomize()
 
 
 func teardown() -> void:
@@ -164,13 +155,12 @@ func present_drained(events: Dictionary, pieces: Array) -> void:
 	if not events.is_empty():
 		for husk_v in events.get("husk_swaps", []):
 			_apply_husk_swap(husk_v as Dictionary)
-		for burst_v in events.get("debris_bursts", []):
-			_apply_debris_burst(burst_v as Dictionary)
 		for eff_v in events.get("effects", []):
 			_apply_effect(eff_v as Dictionary)
 		for snd_v in events.get("sounds", []):
 			_apply_sound(snd_v as Dictionary)
-		_stats.glass += (events.get("glass_breaks", []) as Array).size()
+		_stats.debris_triangles += int(events.get("debris_triangles", 0))
+		_stats.glass_points += int(events.get("glass_points", 0))
 		# Sim-side rolls (S12b): the crackle EFFECT rides the ordinary effects
 		# drain above; its sound rides the fire pass's drain_fire_sounds.
 		_stats.crackles += int(events.get("crackles", 0))
@@ -383,40 +373,6 @@ func _sync_static_husks() -> void:
 				int(restore.get('bms_id', 0)), restore.get('spawn_origin'))
 		if live_v is Transform3D:
 			(graft_v as Node3D).transform = live_v as Transform3D
-
-
-# The section-debris burst [orig: Entity_SpawnSectionDebris @ 0x43f580].
-# Sampling stand-in: a small radial set around the entity, directed away from
-# the recorded blast center (or radially when none — the witnessed 63.3° pitch
-# fallback lives in the effect's own emission).
-func _apply_debris_burst(burst: Dictionary) -> void:
-	var fx: EffectWorld = _fx_provider.call() if _fx_provider.is_valid() else null
-	if fx == null:
-		return
-	var node: Node3D = null
-	if _index != null:
-		node = _index.resolve_single(int(burst.get("bms_id", 0)))
-	var origin: Vector3
-	if node != null and is_instance_valid(node):
-		origin = node.global_position
-	else:
-		# Batched statics carry the position on the event.
-		origin = burst.get("pos", Vector3.ZERO)
-	_stats.bursts += 1
-	var blast: Vector3 = burst.get("blast_center", Vector3.ZERO)
-	var away := Vector3.UP
-	if bool(burst.get("has_blast_center", false)):
-		away = (origin - blast)
-		away.y = absf(away.y)
-		if away.length_squared() > 0.0001:
-			away = away.normalized()
-		else:
-			away = Vector3.UP
-	for i in range(BURST_COUNT):
-		var jitter := Vector3(_rng.randf_range(-1.5, 1.5), _rng.randf_range(0.0, 1.5),
-				_rng.randf_range(-1.5, 1.5))
-		fx.spawn_effect(BURST_EFFECT, origin + jitter, away)
-		_stats.effects += 1
 
 
 func _apply_effect(eff: Dictionary) -> void:

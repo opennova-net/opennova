@@ -10,6 +10,59 @@
 
 using namespace novasim;
 
+bool Simulation::local_player_can_fire_weapon(const AiEntity *p_body) const {
+	if (!world_ || p_body == nullptr || !p_body->inf.active) return false;
+	const opennova::world::Entity *local =
+			world_->registry.get(world_->cached.local_player);
+	if (local == nullptr || !local->alive || local->health <= 0 ||
+			!local_weapon_.active)
+		return false;
+	bool mount_allows_aimed_shot = true;
+	if (local->mounted) {
+		mount_allows_aimed_shot =
+				local->mount_type == opennova::world::SeatType::Passenger ||
+				(local->mount_type == opennova::world::SeatType::Gunner &&
+						local_weapon_.usegun_slot_active);
+	}
+	if (!mount_allows_aimed_shot || player_view_.third_person ||
+			player_view_.binoculars_view_active)
+		return false;
+
+	const opennova::world::WeaponSlotState &active_slot =
+			*active_local_weapon_slot();
+	const uint32_t weapon_flags =
+			static_cast<uint32_t>(local_weapon_.def.flags);
+	const bool card_switch_reload =
+			active_slot.current == opennova::world::weapon_action::kReload &&
+			(weapon_flags & DEF_WEAPON_FLAG_NOCARDSWITCH) == 0;
+	if (card_switch_reload) return false;
+
+	// Consume the post-ease promotion already mirrored onto the body.  The view
+	// state can advance again before presentation asks for attach labels; rebuilding
+	// this bit from that later snapshot makes the label pass disagree with the body
+	// and HUD verdict produced for the current simulation tick.
+	const bool scope_promoted = p_body->inf.scope_raised;
+	const bool scoped_aimed_shot = scope_promoted &&
+			(weapon_flags & DEF_WEAPON_FLAG_SCOPED) != 0;
+	const bool sighted_aimed_shot = scope_promoted &&
+			(weapon_flags & DEF_WEAPON_FLAG_SIGHTED) != 0 &&
+			active_slot.current != opennova::world::weapon_action::kSwitchFrom;
+	const uint32_t entity_flags = local->flags | local->engine_flags;
+	const bool in_air = p_body->inf.airborne ||
+			(entity_flags & opennova::world::kEntityFlagInAir) != 0;
+	const bool submerged =
+			(entity_flags & opennova::world::kEntityFlagDrowning) != 0 ||
+			opennova::world::entity_eye_below_water(
+					*world_, p_body->pos[2], local->eye_offset_z);
+	const bool ordinary_aimed_shot = !in_air &&
+			(sighted_aimed_shot ||
+					(scoped_aimed_shot && !p_body->inf.player_moving)) &&
+			(sighted_aimed_shot || !submerged);
+	const bool force_scoped =
+			(weapon_flags & DEF_WEAPON_FLAG_FORCESCOPED) != 0;
+	return force_scoped || ordinary_aimed_shot;
+}
+
 void Simulation::apply_player_input_pre_tick() {
 	if (!world_ || !world_->ai || !world_->cached.local_player.valid()) return;
 	AiEntity *p = world_->ai->for_handle(world_->cached.local_player);
@@ -53,49 +106,7 @@ void Simulation::apply_player_input_pre_tick() {
 		// the earlier card-switch reload or seat rejection.
 		// [orig: @0x5cf7c7..0x5cf886; Scoped helper @0x4dcc80;
 		// Sighted helper @0x4dcd30; HUD row select @0x592b87]
-		const opennova::world::Entity *local =
-				world_->registry.get(world_->cached.local_player);
-		bool mount_allows_aimed_shot = local != nullptr;
-		if (local != nullptr && local->mounted) {
-			mount_allows_aimed_shot =
-					local->mount_type == opennova::world::SeatType::Passenger ||
-					(local->mount_type == opennova::world::SeatType::Gunner &&
-							local_weapon_.usegun_slot_active);
-		}
-		const opennova::world::WeaponSlotState &active_slot =
-				*active_local_weapon_slot();
-		const uint32_t weapon_flags =
-				static_cast<uint32_t>(local_weapon_.def.flags);
-		const uint32_t entity_flags = local != nullptr
-				? local->flags | local->engine_flags
-				: 0;
-		const bool card_switch_reload =
-				active_slot.current == opennova::world::weapon_action::kReload &&
-				(weapon_flags & DEF_WEAPON_FLAG_NOCARDSWITCH) == 0;
-		const bool scoped_aimed_shot = scope_promoted &&
-				(weapon_flags & DEF_WEAPON_FLAG_SCOPED) != 0;
-		const bool sighted_aimed_shot = scope_promoted &&
-				(weapon_flags & DEF_WEAPON_FLAG_SIGHTED) != 0 &&
-				active_slot.current != opennova::world::weapon_action::kSwitchFrom;
-		const bool in_air = p->inf.airborne ||
-				(entity_flags & opennova::world::kEntityFlagInAir) != 0;
-		// The shared witnessed eye-projection classifier (world/round_sim.h
-		// entity_eye_below_water) plus the drowning flag.
-		const bool submerged =
-				(entity_flags & opennova::world::kEntityFlagDrowning) != 0 ||
-				opennova::world::entity_eye_below_water(*world_, p->pos[2],
-						local != nullptr ? local->eye_offset_z : 0);
-		const bool ordinary_aimed_shot = !in_air &&
-				(sighted_aimed_shot ||
-						(scoped_aimed_shot && !p->inf.player_moving)) &&
-				(sighted_aimed_shot || !submerged);
-		const bool force_scoped =
-				(weapon_flags & DEF_WEAPON_FLAG_FORCESCOPED) != 0;
-		p->inf.aimed_shot_available = local != nullptr && local->alive &&
-				local->health > 0 && local_weapon_.active && mount_allows_aimed_shot &&
-				!card_switch_reload && !player_view_.third_person &&
-				!player_view_.binoculars_view_active &&
-				(force_scoped || ordinary_aimed_shot);
+		p->inf.aimed_shot_available = local_player_can_fire_weapon(p);
 	}
 	if (opennova::world::Entity *entity =
 				world_->registry.get(world_->cached.local_player)) {
