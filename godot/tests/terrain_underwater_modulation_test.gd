@@ -2,7 +2,7 @@ extends GutTest
 
 # D-TERRAIN-8: the camera-below-water terrain modulation plumbing. The engine
 # compiler stamps TerrainDrawList.below_water from the RENDER eye vs the live
-# water height (strict <, 0 = the retail no-water sentinel), and the Terrain
+# water height (the bare retail strict < with no zero guard), and the Terrain
 # node pushes the flag plus the water module's live noise texture onto the
 # shared surface material [orig: cameraY < Env_WaterHeightFixed @ 0x60FEE0 ->
 # dword_319FB3C @ 0x60915F; live t3 slot swap @ 0x6043f2]. The shader-side
@@ -74,18 +74,28 @@ func test_render_eye_height_flips_the_below_water_uniform() -> void:
 	cam.v_offset = 0.0
 
 
-func test_zero_height_sentinel_and_missing_water_node_read_dry() -> void:
+func test_zero_height_keeps_the_bare_retail_compare() -> void:
 	var fixture := _make_fixture(0.0)
 	var terrain: Terrain = fixture["terrain"]
 	var cam: Camera3D = fixture["camera"]
 	var material: ShaderMaterial = terrain.get_terrain_material()
 
+	# The retail compare is UNGUARDED (cameraY < Env_WaterHeightFixed, no zero
+	# test on either side [orig: @0x60fea5]): a sub-zero eye reads below even
+	# at height 0. Terrain heights are non-negative, so a dry map never fires
+	# this in practice.
 	cam.global_position = Vector3(64.0, -5.0, 64.0)
 	terrain.render_frame()
-	assert_false(bool(material.get_shader_parameter("u_below_water")),
-			"height 0 is the no-water sentinel even with a sunken camera")
+	assert_true(bool(material.get_shader_parameter("u_below_water")),
+			"the compare is unguarded: a sub-zero eye reads below at height 0")
 
-	# Unwire the water node entirely: the feed reads dry and the noise unbinds.
+	cam.global_position = Vector3(64.0, 5.0, 64.0)
+	terrain.render_frame()
+	assert_false(bool(material.get_shader_parameter("u_below_water")),
+			"an above-zero eye reads dry at height 0")
+
+	# Unwire the water node entirely: the height feed reads 0, an above-zero
+	# eye stays dry, and the noise unbinds.
 	terrain.water_path = NodePath()
 	terrain.render_frame()
 	assert_false(bool(material.get_shader_parameter("u_below_water")))
