@@ -57,6 +57,7 @@
 
 #include "env/nova_weather_core.h" // kIrisSample* classification codes
 #include "object/nova_item_database.h"
+#include "object/nova_avatar_database.h"
 #include "object/nova_object_data.h" // resolve_collision_instances: the .3di collision IR source
 #include "object/nova_skeletal_anim.h"
 #include "resource_index/nova_resource_root.h"

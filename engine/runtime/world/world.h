@@ -55,6 +55,34 @@ struct SoundSlotEvent {
     char set_name[24] = {};
 };
 
+// Packed player-character identity -> the Avatars.def head-sex bit used by
+// Entity_GetProfileSlotSound. The shell installs this immutable mission table;
+// sound selection remains portable and unknown ids deliberately read male.
+// [orig: MinimapSlot_FindByPackedId @0x57a270;
+//  Entity_GetProfileSlotSound female select @0x52831c]
+struct CharacterTraitsTable {
+    struct Row {
+        uint16_t character_id = 0;
+        bool female = false;
+    };
+    std::vector<Row> rows;
+
+    void set(uint16_t character_id, bool female) {
+        for (Row &row : rows) {
+            if (row.character_id != character_id) continue;
+            row.female = female;
+            return;
+        }
+        rows.push_back(Row{character_id, female});
+    }
+    bool is_female(uint16_t character_id) const {
+        for (const Row &row : rows)
+            if (row.character_id == character_id) return row.female;
+        return false;
+    }
+    void clear() { rows.clear(); }
+};
+
 // ----------------------------------------------------------------------------
 // Environment / weather state (targets of the WAC env commands: fog/sky/rain/
 // tod/sun/...). A clean observable model; the renderer consumes it later.
@@ -450,6 +478,7 @@ public:
     // [orig: SoundProfile_LoadAll @ 0x527490; the infantry consumers
     // @ 0x4bf15c-0x4bf2b0 (org1) / @ 0x4b76e0-0x4b78a8 (org2)]
     audio::SoundProfileTable sound_profiles;
+    CharacterTraitsTable character_traits;
     std::vector<SoundSlotEvent> slot_sounds;
     SoundEmitterMailbox sound_emitters;
 

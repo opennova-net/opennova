@@ -968,6 +968,109 @@ void test_world_tick_uses_retail_device_order() {
     }
 }
 
+void test_per_owner_same_item_device_caps() {
+    auto active_count = [](const ThrowableSim &sim) {
+        int count = 0;
+        for (const PlacedDevice &d : sim.devices)
+            if (d.active) ++count;
+        return count;
+    };
+
+    // The fourth satchel removes the most-negative (oldest armed) row. Equal
+    // ages retain pool/vector scan order through the strict comparison.
+    {
+        Rig rig(0);
+        EntityHandle first;
+        for (int i = 0; i < 3; ++i) {
+            LiveRound round = make_satchel_round(
+                    rig, Vec3{20.0f + static_cast<float>(i), 20, 2});
+            CHECK(rig.w.throwables.place_from_round(
+                    rig.w, round, rig.w.ammo.entries[kAmmoSatchel]));
+            PlacedDevice &d = rig.w.throwables.devices.back();
+            d.think_delay_ticks = -10;
+            if (i == 0) first = d.entity;
+        }
+        rig.w.throwables.events.clear();
+        LiveRound fourth = make_satchel_round(rig, Vec3{24, 20, 2});
+        CHECK(rig.w.throwables.place_from_round(
+                rig.w, fourth, rig.w.ammo.entries[kAmmoSatchel]));
+        CHECK(active_count(rig.w.throwables) == 3);
+        CHECK(rig.w.registry.get(first) == nullptr);
+        CHECK(rig.w.throwables.events.spawns.size() == 1);
+        CHECK(rig.w.throwables.events.removes.size() == 1);
+        if (!rig.w.throwables.events.removes.empty())
+            CHECK(rig.w.throwables.events.removes[0].entity == first.packed);
+    }
+
+    // Claymores use max four, so only the fifth conversion retires an armed
+    // row. The newly placed positive-age row is never the candidate.
+    {
+        Rig rig(0);
+        EntityHandle oldest;
+        for (int i = 0; i < 4; ++i) {
+            LiveRound round = make_satchel_round(
+                    rig, Vec3{20.0f + static_cast<float>(i), 24, 2});
+            round.ammo_index = kAmmoClaymore;
+            round.item_type_id = kItemClaymore;
+            round.think = ThrowClass::kClaymore;
+            round.motor = ThrowClass::kClaymore;
+            CHECK(rig.w.throwables.place_from_round(
+                    rig.w, round, rig.w.ammo.entries[kAmmoClaymore]));
+            rig.w.throwables.devices.back().think_delay_ticks = -i - 1;
+            if (i == 3) oldest = rig.w.throwables.devices.back().entity;
+        }
+        CHECK(active_count(rig.w.throwables) == 4);
+        LiveRound fifth = make_satchel_round(rig, Vec3{25, 24, 2});
+        fifth.ammo_index = kAmmoClaymore;
+        fifth.item_type_id = kItemClaymore;
+        fifth.think = ThrowClass::kClaymore;
+        fifth.motor = ThrowClass::kClaymore;
+        CHECK(rig.w.throwables.place_from_round(
+                rig.w, fifth, rig.w.ammo.entries[kAmmoClaymore]));
+        CHECK(active_count(rig.w.throwables) == 4);
+        CHECK(rig.w.registry.get(oldest) == nullptr);
+    }
+
+    // Owner lifetime and itemDef id are both part of the key. An over-cap set
+    // with no negative age is intentionally retained until a later placement
+    // has an armed candidate, matching the strict retail age test.
+    {
+        Rig rig(0);
+        for (int i = 0; i < 4; ++i) {
+            LiveRound round = make_satchel_round(
+                    rig, Vec3{20.0f + static_cast<float>(i), 28, 2});
+            CHECK(rig.w.throwables.place_from_round(
+                    rig.w, round, rig.w.ammo.entries[kAmmoSatchel]));
+        }
+        CHECK(active_count(rig.w.throwables) == 4);
+        CHECK(rig.w.throwables.events.removes.empty());
+
+        Entity other_seed;
+        other_seed.kind = EntityKind::Organic;
+        other_seed.health = 100;
+        const EntityHandle other = rig.w.registry.spawn(0, other_seed);
+        LiveRound other_owner = make_satchel_round(rig, Vec3{30, 28, 2});
+        other_owner.owner = other;
+        other_owner.shooter_handle = other.packed;
+        CHECK(rig.w.throwables.place_from_round(
+                rig.w, other_owner, rig.w.ammo.entries[kAmmoSatchel]));
+        LiveRound other_item = make_satchel_round(rig, Vec3{31, 28, 2});
+        other_item.item_type_id = kItemSatchel + 100;
+        CHECK(rig.w.throwables.place_from_round(
+                rig.w, other_item, rig.w.ammo.entries[kAmmoSatchel]));
+        CHECK(active_count(rig.w.throwables) == 6);
+
+        // Age zero becomes -1 before think and keeps decreasing while armed.
+        PlacedDevice &aged = rig.w.throwables.devices[0];
+        aged.think_delay_ticks = 0;
+        rig.w.throwables.tick(rig.w, nullptr, nullptr);
+        CHECK(!rig.w.throwables.devices.empty());
+        CHECK(rig.w.throwables.devices[0].think_delay_ticks == -1);
+        rig.w.throwables.tick(rig.w, nullptr, nullptr);
+        CHECK(rig.w.throwables.devices[0].think_delay_ticks == -2);
+    }
+}
+
 // The detonator: firing it marks the owner's satchels Health = -1; the armed
 // think then detonates through satchelboom's instantkillzone
 // [orig: @ 0x4ec234 -> @ 0x546ed0; think @ 0x443670].
@@ -1199,6 +1302,7 @@ int main() {
     test_device_and_owner_handle_reuse();
     test_parent_handle_reuse_detaches_device();
     test_world_tick_uses_retail_device_order();
+    test_per_owner_same_item_device_caps();
     test_detonator_chain();
     test_claymore_cone_trigger();
     test_claymore_sector_los_blocks_trigger();

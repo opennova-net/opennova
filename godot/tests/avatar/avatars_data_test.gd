@@ -62,6 +62,18 @@ func test_tree_and_resolve() -> void:
 	assert_eq(int(resolved.get("alignment", -1)), AvatarDatabase.ALIGN_GOOD)
 
 
+func test_simulation_installs_every_avatar_character_sex_row() -> void:
+	var db := _load()
+	var expected := 0
+	for nat_index in range(db.get_nationality_count()):
+		for div_index in range(db.get_division_count(nat_index)):
+			expected += db.get_combo_count(nat_index, div_index)
+	var sim := Simulation.new()
+	assert_eq(sim.set_character_avatar_database(db), expected,
+			"the sim receives one packed sex row per retail avatar combo")
+	sim.free()
+
+
 func test_resolve_combo_uses_parse_time_snapshots() -> void:
 	var path := _write_temp_avatars("avatars_snapshot_test.def",
 		"define head HEAD_A\n{\n\tgraphic old_head.3di\n}\n"

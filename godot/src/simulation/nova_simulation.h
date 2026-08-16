@@ -82,6 +82,7 @@ class TerrainData;
 class ObjectData;
 class SkeletalAnim;
 class ItemDatabase;
+class AvatarDatabase;
 class ResourceRoot;
 
 // The Godot adapter for one portable MissionSession tick target. It owns the
@@ -927,8 +928,14 @@ private:
 	// SndProf.def text + water plane held for (re)application on reset_world.
 	std::vector<uint8_t> sndprof_text_;
 	int32_t env_water_z_q16_ = 0;
+	struct CharacterSexRow {
+		uint16_t character_id = 0;
+		bool female = false;
+	};
+	std::vector<CharacterSexRow> character_sex_rows_;
 	void apply_terrain_to_ai();
 	void apply_sound_state_to_world();
+	void apply_character_traits_to_world();
 
 	// Anim-driven soldier locomotion: the .adm/.bad-backed root-motion source the infantry
 	// motor integrates (world/infantry.h). Owned here so it survives reset_world; the fresh
@@ -1736,7 +1743,8 @@ public:
 	// husk-model section. [orig: DeathPiece_TickAll @0x57b900; §24]
 	Array get_death_pieces() const;
 	// Per-entity destruction diagnostics by bms_id (probe/F3 seam): health,
-	// bound_radius, flags, traits presence, KZ anchors — the damage chain's gate inputs.
+	// bound_radius, flags, traits presence, KZ/bridge-DEAD anchors — the damage
+	// chain's gate inputs.
 	// (get_entity_debug is the AI-pool-index detail card; this one resolves by
 	// the placed bms_id and carries the §24 gate fields.)
 	Dictionary get_destruction_debug(int p_bms_id) const;
@@ -1955,6 +1963,11 @@ public:
 	// table, so call AFTER load_ammo_table; unresolved/absent leaves the NPC unarmed
 	// (ammo_primary -1, the fire pass skips). Idempotent; returns armed-NPC count.
 	int resolve_ai_weapons(const Ref<class ItemDatabase> &p_item_db);
+	// Install the packed Avatars.def character-sex registry used by the
+	// portable sound-profile selector. Retained across reset_world; returns the
+	// number of unique packed character ids installed.
+	int set_character_avatar_database(
+			const Ref<class AvatarDatabase> &p_avatar_db);
 
 	// World-object collision sweep: for each live entity with an items.def graphic,
 	// load its .3di collision block (BVOL volumes + BPLN planes via the placer's

@@ -573,6 +573,85 @@ void test_kz_point_full_euler() {
     }
 }
 
+// UnitType 11 transforms every first-husk DEAD point through the complete
+// authored pose, but retail pins the effect Z to the RAW water plane. These
+// rotations map (x,y,z) -> (z,-y,x), making both axis order and signs visible.
+void test_bridge_dead_points_emit_water_shocks() {
+    auto w_heap = std::make_unique<World>();
+    World &w = *w_heap;
+    w.registry.configure_pool(1, 8);
+    w.env.water_z = fixed16(3.25);
+
+    ItemDeathTraits bridge = barrel_traits();
+    bridge.unit_type = 11;
+    bridge.bridge_dead_points = {
+            Vec3{1.5f, -0.5f, 0.75f}, Vec3{-2.0f, 1.0f, 0.25f}};
+    w.item_death_traits.set(800, bridge);
+    Entity seed;
+    seed.kind = EntityKind::Item;
+    seed.item_id = 800;
+    seed.health = 0;
+    seed.position = Vec3{4.0f, 6.0f, 10.0f};
+    seed.bound_radius = 1.0f;
+    seed.yaw = 0;
+    seed.pitch = 90;
+    seed.roll = 90;
+    const EntityHandle h = w.registry.spawn(1, seed);
+    entity_update_death_transforms(w, *w.registry.get(h), true);
+
+    std::vector<DestructionEffectEvent> shocks;
+    for (const DestructionEffectEvent &effect : w.destruction.effects)
+        if (effect.effect == "Effect_ShockWaterBrdg") shocks.push_back(effect);
+    CHECK(shocks.size() == 2);
+    if (shocks.size() == 2) {
+        CHECK(std::abs(shocks[0].pos.x - 4.75f) < 1.0e-4f);
+        CHECK(std::abs(shocks[0].pos.y - 6.5f) < 1.0e-4f);
+        CHECK(std::abs(shocks[0].pos.z - 3.25f) < 1.0e-6f);
+        CHECK(std::abs(shocks[1].pos.x - 4.25f) < 1.0e-4f);
+        CHECK(std::abs(shocks[1].pos.y - 5.0f) < 1.0e-4f);
+        CHECK(std::abs(shocks[1].pos.z - 3.25f) < 1.0e-6f);
+        CHECK(shocks[0].attach_net_id == 0);
+        CHECK(shocks[0].family == 0);
+    }
+
+    // Zero is still the raw bridge plane, and no DEAD bank means no fallback.
+    w.destruction.effects.clear();
+    w.env.water_z = 0;
+    ItemDeathTraits no_points = bridge;
+    no_points.bridge_dead_points.clear();
+    w.item_death_traits.set(801, no_points);
+    seed.item_id = 801;
+    const EntityHandle empty_h = w.registry.spawn(1, seed);
+    entity_update_death_transforms(w, *w.registry.get(empty_h), true);
+    bool saw_empty_fallback = false;
+    for (const DestructionEffectEvent &effect : w.destruction.effects)
+        if (effect.effect == "Effect_ShockWaterBrdg") saw_empty_fallback = true;
+    CHECK(!saw_empty_fallback);
+
+    // The metadata is inert on every non-bridge dispatch row.
+    w.destruction.effects.clear();
+    ItemDeathTraits non_bridge = bridge;
+    non_bridge.unit_type = 10;
+    w.item_death_traits.set(802, non_bridge);
+    seed.item_id = 802;
+    const EntityHandle other_h = w.registry.spawn(1, seed);
+    entity_update_death_transforms(w, *w.registry.get(other_h), true);
+    bool saw_other = false;
+    for (const DestructionEffectEvent &effect : w.destruction.effects)
+        if (effect.effect == "Effect_ShockWaterBrdg") saw_other = true;
+    CHECK(!saw_other);
+
+    // A bridge point at a raw zero water plane emits at z=0 exactly.
+    w.destruction.effects.clear();
+    w.item_death_traits.set(803, bridge);
+    seed.item_id = 803;
+    const EntityHandle zero_h = w.registry.spawn(1, seed);
+    entity_update_death_transforms(w, *w.registry.get(zero_h), true);
+    CHECK(!w.destruction.effects.empty());
+    if (!w.destruction.effects.empty())
+        CHECK(std::abs(w.destruction.effects[0].pos.z) < 1.0e-6f);
+}
+
 // Death pieces: the per-section spawn distribution + the pool tick
 // [orig: Entity_SpawnDeathPieces @0x493400 / Entity_ProcessDeathPiecePhysics
 // @0x492dd0].
@@ -1520,6 +1599,7 @@ int main() {
     test_destructible_death_chain();
     test_synthetic_husk_events_preserve_distinct_handles();
     test_kz_point_full_euler();
+    test_bridge_dead_points_emit_water_shocks();
     test_death_pieces();
     test_death_piece_ring_generation();
     test_death_piece_launch_and_spin();

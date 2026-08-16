@@ -9,6 +9,7 @@
 
 #include <avatars/preview_animation.h>
 
+#include <cstdint>
 #include <vector>
 
 namespace godot {
@@ -102,6 +103,10 @@ protected:
 	static void _bind_methods();
 
 public:
+	struct CharacterSexRow {
+		uint16_t character_id = 0;
+		bool female = false;
+	};
 	// AvatarPartKind (engine/formats/avatars/avatars.h).
 	enum { PART_HEAD = 0, PART_BODY = 1, PART_ARMS = 2 };
 	// AvatarSex.
@@ -179,6 +184,10 @@ public:
 	// order) whose nationality alignment matches; no match -> the first combo of
 	// all; empty -> 0 (retail: lookup_entity_slot_and_pack_entry @0x57ad40, see docs/playerinfo/avatars-re.md).
 	int first_character_id(int alignment) const;
+	// Native projection consumed by Simulation's portable character-traits
+	// table. File order is retained and duplicate packed ids are first-wins,
+	// matching resolve_character_id's registry walk.
+	std::vector<CharacterSexRow> character_sex_rows() const;
 
 	// Whole-model bridge for the editor: read the full nested model, edit it in
 	// GDScript, set it back, then save_to_path(). set_model() emits "changed".

@@ -280,11 +280,13 @@ struct AiProfile {
     // witnessed. -1 = unarmed (the pass never fires).
     int32_t ammo_primary = -1;    // world.ammo index [orig: items.def ammo_closeattack family]
     int32_t clip_size = 0;        // items.def clipsize (magazine reseed)
-    // Index into world.sound_profiles (the def's sound_profile, resolved at the
-    // host's item-traits sweep; -1 = unresolved -> the table's "default"
-    // fallback at emit). The female-variant select (def+2152 via the character
-    // entity's female byte [orig: @ 0x52831c]) is unmodeled — primary always.
+    // Indices into world.sound_profiles (the def's sound_profile pair, resolved
+    // at the host's item-traits sweep; -1 = unresolved -> the table's
+    // "default" fallback at emit). Player character identity selects the
+    // female variant; NPC defs keep their authored primary profile.
+    // [orig: def+2148/+2152; CharacterEntity[12] select @0x52831c]
     int16_t sound_profile = -1;
+    int16_t sound_profile_female = -1;
     // ---- the §16.2 class-driven pool walk (D-AI-1) ----
     // The four class-priority words and the derived walk order. An unresolved
     // profile keeps all-zero priorities — retail's memset-0 record — so its

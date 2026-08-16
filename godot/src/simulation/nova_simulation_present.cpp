@@ -661,6 +661,12 @@ Dictionary Simulation::get_destruction_debug(int p_bms_id) const {
 			kz_points.push_back(Vector3(point.x, point.y, point.z));
 		out["kz_point_count"] = static_cast<int64_t>(t->kz_points.size());
 		out["kz_points"] = kz_points;
+		PackedVector3Array bridge_dead_points;
+		for (const opennova::world::Vec3 &point : t->bridge_dead_points)
+			bridge_dead_points.push_back(Vector3(point.x, point.y, point.z));
+		out["bridge_dead_point_count"] =
+				static_cast<int64_t>(t->bridge_dead_points.size());
+		out["bridge_dead_points"] = bridge_dead_points;
 	}
 	out["pos"] = Vector3(found->position.x, found->position.z, -found->position.y);
 	return out;

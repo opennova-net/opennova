@@ -2024,10 +2024,18 @@ void AiSystem::emit_slot_sound(World &world, const AiEntity &e, int slot, const 
     // falls back to the first profile when no "default" exists — the alloc-time
     // seed + the find-miss base return [orig: ItemDef_AllocateWithDefaults
     // @0x49e3f5 seeds FindSlotByName("default"); @0x526e30 miss -> base].
+    int16_t profile_index = e.profile.sound_profile;
+    const Entity *source = world.registry.get(e.handle);
+    // Only player entities carry the packed avatar identity. NPC women author
+    // their own primary item profile and must not be reinterpreted through a
+    // coincident minimap/net id. Unknown character ids keep the primary.
+    // [orig: Entity_GetProfileSlotSound @0x528300, female byte @0x52831c]
+    if (source != nullptr && source->player_class != 0 &&
+        world.character_traits.is_female(source->minimap_net_id))
+        profile_index = e.profile.sound_profile_female;
     const audio::SoundProfile *p =
-        (e.profile.sound_profile >= 0 &&
-         static_cast<size_t>(e.profile.sound_profile) < entries.size())
-            ? &entries[e.profile.sound_profile]
+        (profile_index >= 0 && static_cast<size_t>(profile_index) < entries.size())
+            ? &entries[profile_index]
             : world.sound_profiles.find("default");
     if (p == nullptr) return;
     const std::string &set = p->set_names[slot];

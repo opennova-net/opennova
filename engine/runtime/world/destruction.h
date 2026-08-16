@@ -96,6 +96,11 @@ struct ItemDeathTraits {
     // at the entity position
     // with r = kz ?: bound radius. [orig: Entity_QueueKzBlastAtUserPoints @ 0x4eabf0]
     std::vector<Vec3> kz_points;
+    // Bridge husk "DEAD" user points (model-local, mission axes). UnitType 11
+    // emits one un-attached Effect_ShockWaterBrdg at each transformed x/y and
+    // the raw mission water plane; an empty bank has no origin fallback.
+    // [orig: Entity_SpawnDeathEffectsAtBones @0x4944c0]
+    std::vector<Vec3> bridge_dead_points;
 };
 
 struct ItemDeathTraitsTable {

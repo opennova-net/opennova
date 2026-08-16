@@ -327,9 +327,10 @@ int resolve_ai_weapons(world::World &world, const DefItemsFile &items) {
     if (world.ai == nullptr) return 0;
     const std::unordered_map<int, const DefItemDef *> by_id = index_items(items);
     int armed = 0;
-    // Bind every body's sound profile first — persons AND vehicles carry one
-    // (e.g. DBuggy01 -> SP_DuneBuggy), and unarmed defs (the player) must not
-    // skip it. An unauthored key resolves to "default" via the emit-side
+    // Bind every body's sound-profile pair first — persons AND vehicles carry
+    // one (the female slot tracks primary unless explicitly detached by the
+    // parser), and unarmed defs (the player) must not skip it (e.g. DBuggy01
+    // -> SP_DuneBuggy). An unauthored key resolves to "default" via the emit-side
     // fallback (index stays -1). [orig: the def+0x268 parse binding
     // @ 0x49fb0f-0x49fb64; alloc seed @ 0x49e3f5]
     if (!world.sound_profiles.empty()) {
@@ -341,9 +342,13 @@ int resolve_ai_weapons(world::World &world, const DefItemsFile &items) {
             const int def_id =
                     static_cast<int>(e->item_id) + mission::kItemIdOffset;
             const DefItemDef *def = find_item(by_id, def_id);
-            if (def == nullptr || def->sound_profile[0] == '\0') continue;
-            ae->profile.sound_profile = static_cast<int16_t>(
-                    world.sound_profiles.index_of(def->sound_profile));
+            if (def == nullptr) continue;
+            if (def->sound_profile[0] != '\0')
+                ae->profile.sound_profile = static_cast<int16_t>(
+                        world.sound_profiles.index_of(def->sound_profile));
+            if (def->sound_profile_female[0] != '\0')
+                ae->profile.sound_profile_female = static_cast<int16_t>(
+                        world.sound_profiles.index_of(def->sound_profile_female));
         }
     }
     if (world.ammo.empty()) return 0; // no ammo.def loaded — NPCs stay unarmed

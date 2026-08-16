@@ -29,6 +29,7 @@ void CollisionResolveState::clear() {
 	occlusion_by_graphic.clear();
 	radius_by_graphic.clear();
 	husk_kz_points_by_graphic.clear();
+	husk_dead_points_by_graphic.clear();
 	husk_pieces_by_graphic.clear();
 	resolution_attempted.clear();
 }
@@ -287,6 +288,37 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 							world.item_death_traits.get_mutable(e->item_id);
 						t != nullptr && t->kz_points.empty() && !kz_it->second.empty())
 					t->kz_points = kz_it->second;
+
+				// The bridge callback walks the same active FIRST husk for exact,
+				// case-insensitive "DEAD" points. Keep a distinct cache because
+				// these anchors produce presentation effects, not KZ blasts.
+				// [orig: Entity_SpawnDeathEffectsAtBones @0x4944c0]
+				auto dead_it = state.husk_dead_points_by_graphic.find(husk_key);
+				if (dead_it == state.husk_dead_points_by_graphic.end()) {
+					std::vector<world::Vec3> dead_points;
+					if (husk_m3 != nullptr) {
+						const Threedi3di3 &hmodel3di = *husk_m3;
+						for (size_t up_index = 0;
+								hmodel3di.user_points != nullptr &&
+								up_index < hmodel3di.user_point_count;
+								++up_index) {
+							const ThreediUserPoint &point =
+									hmodel3di.user_points[up_index];
+							if (!strutil::iequals(point.name, "DEAD")) continue;
+							float up_pos[3];
+							threedi_user_point_position(&point, up_pos);
+							dead_points.push_back(world::Vec3{
+									up_pos[2], -up_pos[0], up_pos[1]});
+						}
+					}
+					dead_it = state.husk_dead_points_by_graphic.emplace(
+							husk_key, std::move(dead_points)).first;
+				}
+				if (world::ItemDeathTraits *t =
+							world.item_death_traits.get_mutable(e->item_id);
+						t != nullptr && t->bridge_dead_points.empty() &&
+						!dead_it->second.empty())
+					t->bridge_dead_points = dead_it->second;
 			}
 			// The PIECE model is huskFINAL first [orig: @ 0x4934af
 			// huskFinalModel ?: huskModel] — the opposite preference from the

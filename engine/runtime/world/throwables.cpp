@@ -857,6 +857,7 @@ bool ThrowableSim::place_from_round(World &world, const LiveRound &round,
     d.owner_handle = round.shooter_handle;
     d.hit_word = round.shot_seq;
     d.ammo_index = round.ammo_index;
+    d.item_id = item_id;
     d.item_friendly = ammo.tracer_item_friendly;
     d.item_enemy = ammo.tracer_item_enemy;
     d.team = owner_ent != nullptr ? static_cast<uint8_t>(owner_ent->team) : round.team;
@@ -890,7 +891,40 @@ bool ThrowableSim::place_from_round(World &world, const LiveRound &round,
     ev.pitch_bam = d.pitch_bam;
     ev.roll_bam = d.roll_bam;
     events.spawns.push_back(ev);
+    // Both authority conversion motors enforce the cap AFTER their 0x59 send.
+    // Count same-owner + same itemDef rows; a surplus retires the oldest ARMED
+    // device (most-negative age). Positive/zero arm countdowns never qualify.
+    // [orig: Server_EnforcePlacedDeviceCapByOwner @0x5119e0;
+    //  satchel caller @0x448bd5 max 3; claymore caller @0x447b56 max 4]
+    if (d.think == ThrowClass::kSatchel)
+        enforce_device_cap(world, devices.back(), 3);
+    else if (d.think == ThrowClass::kClaymore)
+        enforce_device_cap(world, devices.back(), 4);
     return true;
+}
+
+void ThrowableSim::enforce_device_cap(World &world,
+                                      const PlacedDevice &placed,
+                                      int32_t max_devices) {
+    int32_t same_type_count = 0;
+    PlacedDevice *oldest_armed = nullptr;
+    int32_t oldest_age = 0;
+    for (PlacedDevice &candidate : devices) {
+        if (!candidate.active ||
+            candidate.owner.packed != placed.owner.packed ||
+            candidate.owner_spawn_id != placed.owner_spawn_id ||
+            candidate.item_id != placed.item_id ||
+            entity_for_lifetime(world, candidate.entity,
+                                candidate.entity_spawn_id) == nullptr)
+            continue;
+        ++same_type_count;
+        if (candidate.think_delay_ticks < oldest_age) {
+            oldest_age = candidate.think_delay_ticks;
+            oldest_armed = &candidate;
+        }
+    }
+    if (same_type_count > max_devices && oldest_armed != nullptr)
+        remove_device(world, *oldest_armed);
 }
 
 void ThrowableSim::detonate_satchels_by_owner(World &world, EntityHandle owner) {
@@ -1073,11 +1107,12 @@ void ThrowableSim::tick(World &world, CollisionWorld *collision,
                 e->ground_target = EntityHandle{};
             }
         }
-        // ARM delay [orig: Entity_UpdatePool1Slot age -1/tick, think at <= 0].
-        if (d.think_delay_ticks > 0) {
-            --d.think_delay_ticks;
-            continue;
-        }
+        // The pool-1 age dword decrements EVERY tick, wrapping like x86. Its
+        // negative value is also the retail oldest-armed ordering key.
+        // [orig: Entity_UpdatePool1Slot @0x4b8dd0]
+        d.think_delay_ticks = static_cast<int32_t>(
+                static_cast<uint32_t>(d.think_delay_ticks) - 1u);
+        if (d.think_delay_ticks > 0) continue;
         const AmmoTableEntry *ammo = world.ammo.by_index(d.ammo_index);
         if (ammo == nullptr) continue;
         const bool dead = e->health <= 0;

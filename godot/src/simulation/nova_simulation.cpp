@@ -136,6 +136,7 @@ void Simulation::reset_world() {
 	local_weapon_.usegun_switch_action = -1;
 	local_weapon_.first_person_model_adm = 0xFF;
 	world_ = std::make_unique<World>();
+	apply_character_traits_to_world();
 	world_->external_local_mounted_weapon_pump = true;
 	world_->projectile_authority = !joiner_;
 	world_->mp_session = host_listen_ || joiner_;
@@ -333,6 +334,13 @@ void Simulation::set_terrain_height_field(const Ref<TerrainData> &p_terrain) {
 void Simulation::set_sound_profiles(const PackedByteArray &p_sndprof_text) {
 	sndprof_text_.assign(p_sndprof_text.ptr(), p_sndprof_text.ptr() + p_sndprof_text.size());
 	apply_sound_state_to_world();
+}
+
+void Simulation::apply_character_traits_to_world() {
+	if (!world_) return;
+	world_->character_traits.clear();
+	for (const CharacterSexRow &row : character_sex_rows_)
+		world_->character_traits.set(row.character_id, row.female);
 }
 
 void Simulation::set_water_z(double p_water_y) {
