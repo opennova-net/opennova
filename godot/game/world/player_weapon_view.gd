@@ -78,6 +78,13 @@ var emplaced_gun_pitch := 0
 # [orig: producer @0x4b5dad + gate @0x4b14a7; docs/world/world-wac-ai-re.md §14.8]
 var body_anim_key := ""
 var body_anim_phase := 0   # half-frame ticks, the play_body_clip_at convention
+# The secondary channel's own cross-fade (empty prev = not blending) and the served
+# variant-ring entry per play [orig: AnimMap_UpdateEntity @0x40b5f0; the +68 latch].
+var body_anim_prev_key := ""
+var body_anim_prev_phase := 0
+var body_anim_blend_weight := 1.0
+var body_anim_variant := 0
+var body_anim_prev_variant := 0
 
 
 ## Decode one weapon-state dict; null when the FSM is inactive (no weapon installed).
@@ -121,4 +128,9 @@ static func from_state_dict(d: Dictionary) -> PlayerWeaponView:
 	out.emplaced_gun_pitch = int(d.get("emplaced_gun_pitch", 0))
 	out.body_anim_key = String(d.get("body_anim_key", ""))
 	out.body_anim_phase = int(d.get("body_anim_phase", 0))
+	out.body_anim_prev_key = String(d.get("body_anim_prev_key", ""))
+	out.body_anim_prev_phase = int(d.get("body_anim_prev_phase", 0))
+	out.body_anim_blend_weight = float(d.get("body_anim_blend_weight", 1.0))
+	out.body_anim_variant = int(d.get("body_anim_variant", 0))
+	out.body_anim_prev_variant = int(d.get("body_anim_prev_variant", 0))
 	return out

@@ -815,16 +815,27 @@ bool ObjectModel::advance_part_anims(double p_delta) {
 	return changed;
 }
 
-void ObjectModel::set_weapon_channel(const String &p_key, int p_phase_ticks) {
+void ObjectModel::set_weapon_channel(const String &p_key, int p_phase_ticks,
+		const String &p_prev_key, int p_prev_phase_ticks, float p_blend_weight,
+		int p_variant, int p_prev_variant) {
 	for (ObjectModel *linked : live_presentation_links()) {
-		linked->set_weapon_channel(p_key, p_phase_ticks);
+		linked->set_weapon_channel(p_key, p_phase_ticks, p_prev_key,
+				p_prev_phase_ticks, p_blend_weight, p_variant, p_prev_variant);
 	}
 	wake_runtime_frame();
-	if (p_key == wpn_key_ && p_phase_ticks == wpn_phase_ticks_) {
+	if (p_key == wpn_key_ && p_phase_ticks == wpn_phase_ticks_ &&
+			p_prev_key == wpn_prev_key_ && p_prev_phase_ticks == wpn_prev_phase_ticks_ &&
+			p_blend_weight == wpn_blend_weight_ && p_variant == wpn_variant_ &&
+			p_prev_variant == wpn_prev_variant_) {
 		return;
 	}
 	wpn_key_ = p_key;
 	wpn_phase_ticks_ = p_phase_ticks;
+	wpn_prev_key_ = p_prev_key;
+	wpn_prev_phase_ticks_ = p_prev_phase_ticks;
+	wpn_blend_weight_ = p_blend_weight;
+	wpn_variant_ = p_variant;
+	wpn_prev_variant_ = p_prev_variant;
 	body_pose_dirty_ = true;
 }
 
@@ -835,6 +846,11 @@ Dictionary ObjectModel::get_weapon_channel() const {
 	}
 	out["key"] = wpn_key_;
 	out["phase_ticks"] = wpn_phase_ticks_;
+	out["prev_key"] = wpn_prev_key_;
+	out["prev_phase_ticks"] = wpn_prev_phase_ticks_;
+	out["blend_weight"] = wpn_blend_weight_;
+	out["variant"] = wpn_variant_;
+	out["prev_variant"] = wpn_prev_variant_;
 	return out;
 }
 
@@ -913,12 +929,20 @@ void ObjectModel::advance_body_animation(double p_delta, bool p_write_pose) {
 	const bool use_primary_blend =
 			!body_blend_source_key_.is_empty() && body_blend_weight_ < 1.0f;
 	double wpn_time = 0.0;
+	double wpn_prev_time = 0.0;
 	if (use_overlay && !wpn_key_.is_empty()) {
 		// Weapon-channel playhead: half-frame ticks -> seconds, the
-		// play_body_clip_at convention.
-		const float wfps = skeletal_->get_clip_fps(wpn_key_);
+		// play_body_clip_at convention. The outgoing clip converts against ITS
+		// OWN fps — the two channels keep independent playheads through the blend.
+		const float wfps = skeletal_->get_clip_fps(wpn_key_, wpn_variant_);
 		if (wfps > 0.0f) {
 			wpn_time = double(MAX(wpn_phase_ticks_, 0)) / (2.0 * wfps);
+		}
+		if (!wpn_prev_key_.is_empty()) {
+			const float pfps = skeletal_->get_clip_fps(wpn_prev_key_, wpn_prev_variant_);
+			if (pfps > 0.0f) {
+				wpn_prev_time = double(MAX(wpn_prev_phase_ticks_, 0)) / (2.0 * pfps);
+			}
 		}
 	}
 	static const PackedInt32Array empty_classes;
@@ -928,12 +952,16 @@ void ObjectModel::advance_body_animation(double p_delta, bool p_write_pose) {
 				body_blend_source_time_, anim_key_, anim_time_, body_blend_weight_,
 				use_overlay ? aim_overlay_classes_ : empty_classes,
 				use_overlay ? aim_overlay_deltas_ : empty_deltas,
-				use_overlay ? wpn_key_ : String(), wpn_time, collapse_right_hand_);
+				use_overlay ? wpn_key_ : String(), wpn_time, collapse_right_hand_,
+				use_overlay ? wpn_prev_key_ : String(), wpn_prev_time,
+				wpn_blend_weight_, wpn_variant_, wpn_prev_variant_);
 	} else {
 		skeletal_->pose_skeleton(skeleton_, anim_key_, anim_time_, anim_variant_,
 				use_overlay ? aim_overlay_classes_ : empty_classes,
 				use_overlay ? aim_overlay_deltas_ : empty_deltas,
-				use_overlay ? wpn_key_ : String(), wpn_time, collapse_right_hand_);
+				use_overlay ? wpn_key_ : String(), wpn_time, collapse_right_hand_,
+				use_overlay ? wpn_prev_key_ : String(), wpn_prev_time,
+				wpn_blend_weight_, wpn_variant_, wpn_prev_variant_);
 	}
 	body_pose_dirty_ = false;
 }

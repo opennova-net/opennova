@@ -1720,20 +1720,67 @@ steady `anim_knife`, fire stamps `anim_knife_attack` with an advancing playhead,
 locked exit back to the hold; the rifle `body_reload_probe` re-run green (mirror at
 idle, `anim_reload`, 73.4° mask-bone delta).
 
-Deferred (later slices): the binoculars input toggle
-(case-26 binding + forced-clear rules; the ladder side is ported), **secondary
-weapon-channel** blend windows on channel re-init (the remaining D-INF-1 leg; primary
-body/root blends fixed 2026-07-29), the audio-level pitch kick (needs a mixer level tap —
-§14.3/§14.5), and the per-entity BODY-adm variant rings — multi-clip .adm rows rotate
-round-robin per animState (net-re §5.62 "Multi-clip variant rings", ported for the FP
-weapon adm 2026-07-11); the 3P weapon channel and AI body clips still play variant 0.
-Primary body keys now backfill to RESET as retail does (§14.8.1), including both
-independent channels during a blend. Missing-key behavior for the secondary weapon
-channel is not generalized by that fix.
+**Session 3 (2026-08-17) closed the secondary channel's three tails and threaded the
+shared advance onto AI bodies:**
 
-Follow-ups: `NapiNPClientMsg_0x02D` (+0x2C8 writer) semantics; the org1 AI writer
-`@ 0x4b9a28`; `WeaponSlot_InitFromAvatarDef`'s spawn-time window stamp (does retail
-visibly reload on spawn?).
+1. **Blend window (D-INF-1 CLOSED).** The secondary channel re-inits through the SAME
+   `AnimMap_UpdateEntity` body the dual-channel update routes it through, so it takes
+   the primary's blend-10 window (15 for a target with table flag `0x400`), keeps both
+   playheads advancing while the float32 weight ramps, and a retarget mid-blend keeps
+   the stable outgoing `[orig: AnimMap_UpdateDualChannels @0x40b8c0 →
+   AnimMap_UpdateEntity @0x40b5f0; AnimChannel_InitFromParams @0x410640;
+   AnimChannel_BlendTwoChannels @0x410740]`. Port: `InfantryState::begin_weapon_transition`
+   (mirrors `begin_body_transition`; the `wpn_prev/wpn_prev_clip_phase/wpn_blend_weight/
+   wpn_blend_step` trio), the advance in `AiSystem::infantry_weapon_channel_advance`,
+   and ONE composition seam for both presentation and authoritative collision —
+   `SkeletalAnim::splice_weapon_channel` / `AdmSkeletalClips::splice_weapon_channel`
+   evaluate the outgoing/target weapon clips through `eval_pose_blended` before the
+   mask splice. The `PF_WPN_SOURCE_STATE / _SOURCE_PHASE_TICKS / _BLEND_WEIGHT`
+   present fields mirror the primary's `PF_ANIM_SOURCE_*` trio so wire peers cross-fade
+   too. Note the ladder's own outputs (43–66) never carry `0x400`; the slow window is
+   reachable only through the rifle-mirror default landing a walk state (`0x449`) —
+   pinned exactly by `infantry::test_player_weapon_channel_blend_window`.
+2. **RESET backfill.** A weapon key whose clip is absent now plays RESET instead of
+   no-opping — the same registration rule the primary already honored (§14.8.1
+   `@0x40bc24 / @0x40bd2e`); an EMPTY key (the §14.8.6 gate off) remains the only
+   no-splice case. Both splices route through `eval_pose_blended`, which already owns
+   that fallback, so the two channels share one rule. Pinned by the new
+   `simassets_adm_skeletal_clips_weapon_channel` ctest over the committed BINOC.bad rig
+   with a clip SYNTHESIZED in-test (one mask bone and one leg bone turned 90°) — the
+   healthy-export trap makes a real-retail-only fixture pass for the wrong reason.
+3. **Per-entity BODY-adm variant rings.** `AdmRootMotion` now keeps the RING of tracks
+   per state (every quoted token on the row, file order) and `IRootMotionSource` gained
+   `variant_count` / `advance_variant` (defaulted, so headless/test providers are
+   unchanged) `[orig: AnimMap_ParseConfigLine @0x40cb60; AnimMap_RegisterBoneNode
+   @0x40c2d0]`. The secondary channel serves head-then-advance per play through
+   `InfantryState::wpn_ring_serve` (per-state heads, the `animState+72` cursor analog)
+   and latches the served entry as `wpn_variant` (the `+68` latch), which rides the
+   weapon view (`body_anim_variant`), the present row (`PF_WPN_VARIANT /
+   PF_WPN_SOURCE_VARIANT`), and both composition seams
+   `[orig: AnimMap_PlayAnimBySlot @0x40bda0]`. Pinned by `infantry::
+   test_player_weapon_channel_variant_ring` and the ring block of
+   `simassets_adm_root_motion`. The PRIMARY channel's `eval_pose_blended`s also
+   accept variants now (defaulted 0), so AI body clip rings can ride the same seam
+   once their producer serves them.
+4. **AI (org1) bodies run the shared advance.** Both body updaters pass their out-array
+   to `AnimMap_UpdateDualChannels @0x40b8c0` (§14.8.1, the feet-dip note in §17.4), so
+   the org1 body's secondary channel promotes, steps, and blends like anyone's —
+   `AiSystem::infantry_weapon_channel_advance` is split out of the org2 producer and
+   called for every non-local organic body. What it does NOT do is SELECT: the org1
+   secondary-state writer `@0x4b9a28` is unread, and a placed `.bms` soldier's equipped
+   ADM source is unwitnessed (§13.5), so running the org2 ladder on AI entities would
+   port a different function's behavior. An AI body's channel therefore holds its reset
+   state (idle → RESET-backfilled, the arms following the primary — the observable
+   retail appearance for AI bodies, whose `.adm`s carry `anim_reload` at most). Ledgered
+   **D-INF-24**; pinned by `infantry::test_ai_weapon_channel_advances_without_selection`.
+
+Deferred (later slices): the binoculars input toggle (case-26 binding + forced-clear
+rules; the ladder side is ported), the audio-level pitch kick (needs a mixer level tap —
+§14.3/§14.5), and D-INF-24.
+
+Follow-ups: `NapiNPClientMsg_0x02D` (+0x2C8 writer) semantics; **the org1 AI writer
+`@ 0x4b9a28` + the AI equipped-ADM source (D-INF-24)**; `WeaponSlot_InitFromAvatarDef`'s
+spawn-time window stamp (does retail visibly reload on spawn?).
 
 ### 14.8.8 IDB write-backs (2026-07-09 session, saved)
 

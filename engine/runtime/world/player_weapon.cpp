@@ -836,8 +836,13 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		AiEntity *p = world.ai != nullptr
 				? world.ai->for_handle(world.cached.local_player)
 				: nullptr;
-		if (p != nullptr && p->inf.active)
-			infantry_weapon_attack_stamp(p->inf, w.attack_kind);
+		if (p != nullptr && p->inf.active) {
+			const int stamped = w.attack_kind == 1 ? anim_state::kKnifeAttack
+					: w.attack_kind == 2 ? anim_state::kGrenadeAttack : -1;
+			const int ring = (stamped >= 0 && world.ai->root_motion != nullptr)
+					? world.ai->root_motion->variant_count(p->inf.adm_id, stamped) : 1;
+			infantry_weapon_attack_stamp(p->inf, w.attack_kind, ring);
+		}
 		// Local/SP fire already passed the same FSM/ammo authority that the remote
 		// C2S 0x06 handler validates. Append the host's round-ring record and spawn
 		// the authoritative projectile here; the loopback server handler correctly

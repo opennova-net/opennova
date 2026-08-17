@@ -24,8 +24,8 @@ in place.
 | `.adm` grammar (rows, comments, variant rings) | MATCHING | ctests `adm_parse`, `adm_comment`, `adm_trim_value`, `adm_variants`; 3 `[orig]` cites in `adm/adm.h` |
 | `.adm` writer | MATCHING (canonical form, parse-equality) | ctests `adm_write`, `adm_variants` |
 | `.bad` container read/write | MATCHING (byte-exact roundtrip) | ctests `bad_parse`, `bad_roundtrip` (parse→write→parse equality + self byte-stability); `tests/test_bad_write_ffi.py` |
-| `.bad` runtime consumption — FP viewmodel rig | MATCHING (model-table composition) | ctest `anim_sample` (`sample_clip(model_bind)`); ledger D-INF-14 (mechanism witnessed + ported) |
-| `.bad` runtime consumption — world/body rigs | divergent, OPEN | ledger D-INF-13 (bodies still consume channels as absolute orientations; the 108-byte entity-bone-table port pending) |
+| `.bad` runtime consumption — FP viewmodel rig | MATCHING (model-table rig; rest-carrying composition) | ctest `anim_sample` (`sample_clip(model_bind)` is the reference form; production loaders run the equivalent rest-carrying factorization); ledger D-INF-14 (mechanism witnessed + ported) |
+| `.bad` runtime consumption — world/body rigs | UNGRILLED, OPEN | ledger D-INF-13 — CORRECTED 2026-08-17: bodies and FP rigs run the SAME loader path (`model_bind=true` has no production caller); what is open is the equivalence proof against `build_world_bone_matrices @0x40c770` (its table source, padding loop, frame), not an FP-only path to extend |
 | `BadBone.position` | dead at runtime (original never reads it) | correspondence `BoneAnim_BuildWorldMatrices @ 0x40c400` row; pytest `test_bad_pos_derivation` (asset-gated) |
 
 ## The `.adm` format
@@ -115,7 +115,7 @@ All existing ledger IDs — this record mints none:
 
 | ID | Where tracked | One line |
 |---|---|---|
-| D-INF-13 | ledger (OPEN) | body rigs still consume channels as absolute orientations; the 108-byte entity bone-table port closes it |
+| D-INF-13 | ledger (OPEN) | the world builder `@0x40c770` is ungrilled; the loaders' asserted equivalence with the composed builders (same path for FP and body rigs) awaits an IDA read of its table source, padding loop, and frame — see the ledger row for the four questions and the body-shaped oracle it needs |
 | D-INF-14 | ledger (OPEN, mechanism ported) | FP `model_bind` composition corrected to the skeleton-`.bad` bind; footage confirm of the sense tail pending |
 | D-INF-15 | ledger (PERMANENT) | padded model-table rows: the original's flag-2 translation add reads uninitialized stack floats; ours zeroes them |
 

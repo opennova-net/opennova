@@ -345,7 +345,8 @@ void AdmSkeletalClips::eval_pose(const std::string &key,
 void AdmSkeletalClips::eval_pose_blended(const std::string &p_source_key,
 		double source_seconds, const std::string &p_target_key,
 		double target_seconds, float weight,
-		std::vector<anim::PoseBone> &r_pose) const {
+		std::vector<anim::PoseBone> &r_pose,
+		int source_variant, int target_variant) const {
 	std::string source_key = p_source_key;
 	std::string target_key = p_target_key;
 	const std::string reset_key("anim_reset");
@@ -359,20 +360,20 @@ void AdmSkeletalClips::eval_pose_blended(const std::string &p_source_key,
 	const bool source_valid = find_clip(source_key) != nullptr;
 	const bool target_valid = find_clip(target_key) != nullptr;
 	if (!source_valid) {
-		eval_pose(target_key, target_seconds, 0, r_pose);
+		eval_pose(target_key, target_seconds, target_variant, r_pose);
 		return;
 	}
 	if (!target_valid) {
-		eval_pose(source_key, source_seconds, 0, r_pose);
+		eval_pose(source_key, source_seconds, source_variant, r_pose);
 		return;
 	}
 	const float w = std::clamp(weight, 0.0f, 1.0f);
 	if (w <= 0.0f) {
-		eval_pose(source_key, source_seconds, 0, r_pose);
+		eval_pose(source_key, source_seconds, source_variant, r_pose);
 		return;
 	}
 	if (w >= 1.0f) {
-		eval_pose(target_key, target_seconds, 0, r_pose);
+		eval_pose(target_key, target_seconds, target_variant, r_pose);
 		return;
 	}
 	// Semantic states can map to the same BAD (including missing states that
@@ -381,25 +382,35 @@ void AdmSkeletalClips::eval_pose_blended(const std::string &p_source_key,
 	// shortcut.
 	std::vector<anim::PoseBone> source;
 	std::vector<anim::PoseBone> target;
-	eval_pose(source_key, source_seconds, 0, source);
-	eval_pose(target_key, target_seconds, 0, target);
+	eval_pose(source_key, source_seconds, source_variant, source);
+	eval_pose(target_key, target_seconds, target_variant, target);
 	anim::blend_poses(source, target, w, r_pose);
 }
 
 void AdmSkeletalClips::splice_weapon_channel(std::vector<anim::PoseBone> &pose,
-		const std::string &weapon_key, double weapon_seconds) const {
+		const std::string &weapon_key, double weapon_seconds,
+		const std::string &weapon_prev_key, double weapon_prev_seconds,
+		float weapon_blend_weight, int weapon_variant, int weapon_prev_variant) const {
 	// Hard override of the mask bones' WORLD rotations with the weapon
 	// channel's clip at its own playhead, then re-localize the complete mixed
 	// hierarchy. The primary pose keeps every local origin (the shared
 	// skeleton/model pivots own translation).
 	// [orig: mask @0x4b14db, second AnimChannel_ComputeBoneMatrices @0x4b16a7;
 	//  world-wac-ai-re.md §14.8.6]
-	if (weapon_key.empty() || find_clip(weapon_key) == nullptr ||
-			!any_weapon_mask_) {
+	// Empty key = the §14.8.6 gate is off; that is the ONLY no-splice case. A key
+	// whose clip is absent binds RESET at registration rather than no-opping
+	// [orig: the backfill loops @0x40bc24 / @0x40bd2e; §14.8.1] — eval_pose_blended
+	// owns that fallback, and routing through it also gives the secondary channel
+	// its own cross-fade window, as the shared AnimMap_UpdateEntity body does
+	// [orig: @0x40b8c0 -> @0x40b5f0].
+	if (weapon_key.empty() || !any_weapon_mask_) {
 		return;
 	}
 	std::vector<anim::PoseBone> wpose;
-	eval_pose(weapon_key, weapon_seconds, 0, wpose);
+	eval_pose_blended(weapon_prev_key.empty() ? weapon_key : weapon_prev_key,
+			weapon_prev_seconds, weapon_key, weapon_seconds, weapon_blend_weight,
+			wpose, weapon_prev_key.empty() ? weapon_variant : weapon_prev_variant,
+			weapon_variant);
 	const size_t n = pose.size();
 	if (wpose.size() != n || n != bones_.size()) {
 		return;
@@ -421,17 +432,20 @@ bool AdmSkeletalClips::eval_composed_pose(const std::string &primary_key,
 		double primary_seconds, bool blended, const std::string &source_key,
 		double source_seconds, float blend_weight, const anim::Quat deltas[],
 		const std::string &weapon_key, double weapon_seconds,
-		std::vector<anim::PoseBone> &r_pose) const {
+		std::vector<anim::PoseBone> &r_pose, const std::string &weapon_prev_key,
+		double weapon_prev_seconds, float weapon_blend_weight, int weapon_variant,
+		int weapon_prev_variant, int primary_variant, int source_variant) const {
 	if (blended) {
 		eval_pose_blended(source_key, source_seconds, primary_key,
-				primary_seconds, blend_weight, r_pose);
+				primary_seconds, blend_weight, r_pose, source_variant, primary_variant);
 	} else {
-		eval_pose(primary_key, primary_seconds, 0, r_pose);
+		eval_pose(primary_key, primary_seconds, primary_variant, r_pose);
 	}
 	// The witnessed order: primary sample -> weapon-channel mask override ->
 	// the aim overlay multiplies ON TOP of the composed pose
 	// [orig: @0x4b14a7..@0x4b16a7 run before the per-bone overlay loop].
-	splice_weapon_channel(r_pose, weapon_key, weapon_seconds);
+	splice_weapon_channel(r_pose, weapon_key, weapon_seconds, weapon_prev_key,
+			weapon_prev_seconds, weapon_blend_weight, weapon_variant, weapon_prev_variant);
 	const size_t n = r_pose.size();
 	if (n == 0 || n != bones_.size() || deltas == nullptr) {
 		return !r_pose.empty();

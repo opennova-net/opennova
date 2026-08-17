@@ -1654,6 +1654,16 @@ PackedFloat32Array Simulation::present_snapshot_from_client_replicas() const {
 							static_cast<float>(ae->inf.wpn_state);
 					r[PF_WPN_PHASE_TICKS] =
 							static_cast<float>(ae->inf.wpn_clip_phase);
+					r[PF_WPN_VARIANT] = static_cast<float>(ae->inf.wpn_variant);
+					if (ae->inf.weapon_blend_active()) {
+						r[PF_WPN_SOURCE_STATE] =
+								static_cast<float>(ae->inf.wpn_prev);
+						r[PF_WPN_SOURCE_PHASE_TICKS] =
+								static_cast<float>(ae->inf.wpn_prev_clip_phase);
+						r[PF_WPN_BLEND_WEIGHT] = ae->inf.wpn_blend_weight;
+						r[PF_WPN_SOURCE_VARIANT] =
+								static_cast<float>(ae->inf.wpn_prev_variant);
+					}
 				}
 				if (ent != nullptr) {
 					const opennova::anim::AimOverlayInputs inputs =

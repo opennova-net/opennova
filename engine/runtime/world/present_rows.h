@@ -58,6 +58,16 @@ enum PresentField : int {
 	// zero-filled weapon state would splice the reset clip over every arm.
 	PF_WPN_ANIM_STATE,
 	PF_WPN_PHASE_TICKS, // secondary clip phase in IDA half-frame ticks
+	// The secondary channel's cross-fade + served variants, mirroring the primary's
+	// PF_ANIM_SOURCE_* trio: outgoing state/phase (-1 = not blending), the ramping
+	// weight (1 = settled), and the ring entries latched for target and outgoing.
+	// Same seeding rule as above — ahead of PF_AIM_OVERLAY_VALID.
+	// [orig: AnimMap_UpdateEntity @0x40b5f0 re-init; the +68 play latch]
+	PF_WPN_SOURCE_STATE,
+	PF_WPN_SOURCE_PHASE_TICKS,
+	PF_WPN_BLEND_WEIGHT,
+	PF_WPN_VARIANT,
+	PF_WPN_SOURCE_VARIANT,
 	PF_HIDDEN,     // 1 when the entity is hidden
 	// Local render-only verdict: skip this placed entity's own world model.
 	// Does not mutate Entity.hidden, collision, simulation, or attached actors.

@@ -1445,6 +1445,220 @@ void test_player_weapon_channel() {
     CHECK(e->inf.wpn_deferred == 0);
 }
 
+// The secondary channel's cross-fade. AnimMap_UpdateEntity is the SHARED body both
+// channels re-init through (AnimMap_UpdateDualChannels swaps the secondary pair into
+// the primary's fields and calls it), so a weapon-layer state change takes the same
+// blend-10 window (blend-15 for a target with table flag 0x400), keeps BOTH playheads
+// advancing while the weight ramps, and a retarget mid-blend keeps the stable outgoing.
+// [orig: AnimMap_UpdateDualChannels @0x40b8c0 -> AnimMap_UpdateEntity @0x40b5f0;
+//  AnimChannel_InitFromParams @0x410640; AnimChannel_BlendTwoChannels @0x410740]
+void test_player_weapon_channel_blend_window() {
+    World w;
+    AiSystem ai;
+    TestSource src;
+    src.clips.insert(anim_state::kIdle);
+    src.clips.insert(anim_state::kWalkForward);
+    src.clips.insert(anim_state::kReload);
+    src.clips.insert(anim_state::kKnifeAttack);
+    src.lengths[anim_state::kReload] = 40;
+    src.lengths[anim_state::kKnifeAttack] = 30;
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    e->inf.is_local_player = true;
+    e->health = 100;
+
+    // Settle: idle mirror, no blend in flight.
+    uint32_t t = 1;
+    t = run_to_next_selection(ai, w, t);
+    CHECK(e->inf.wpn_state == anim_state::kIdle);
+    CHECK(!e->inf.weapon_blend_active());
+    CHECK(e->inf.wpn_blend_weight == 1.0f);
+
+    // Reload lands -> the channel re-inits with a blend-10 window (65 lacks 0x400):
+    // outgoing = idle carrying its OWN playhead, target = reload from phase 0. The
+    // commit tick's advance already stepped the weight once (0.1) and both playheads.
+    e->inf.reload_anim_ticks = 80;
+    t = run_to_next_selection(ai, w, t);
+    CHECK(e->inf.wpn_state == anim_state::kReload);
+    CHECK(e->inf.wpn_prev == anim_state::kIdle);
+    CHECK(e->inf.weapon_blend_active());
+    CHECK(e->inf.wpn_blend_weight > 0.05f && e->inf.wpn_blend_weight < 0.15f);
+    CHECK(e->inf.wpn_clip_phase == 1);            // target playhead advanced
+    CHECK(e->inf.wpn_prev_clip_phase > 1);        // outgoing kept its old (nonzero) phase
+    const int32_t prev_at_commit = e->inf.wpn_prev_clip_phase;
+
+    // Nine more ticks complete the 10-tick window; both playheads kept moving.
+    run_ticks(ai, w, t, t + 9);
+    t += 9;
+    CHECK(!e->inf.weapon_blend_active());
+    CHECK(e->inf.wpn_blend_weight == 1.0f);
+    CHECK(e->inf.wpn_blend_step == 0.0f);
+    CHECK(e->inf.wpn_clip_phase == 10);
+    CHECK(e->inf.wpn_prev_clip_phase == prev_at_commit + 9);
+
+    // A target carrying flag 0x400 takes the slow 15-tick window (1/15 per tick). The
+    // rifle default MIRRORS the primary, and the walk states are 0x449 — so start moving
+    // once the locked reload has run out and been promoted back to the mirror.
+    e->inf.reload_anim_ticks = 0;
+    e->inf.player_moving = true;
+    run_ticks(ai, w, t, t + 41); // the 40-tick reload completes -> promotion fires
+    t += 41;
+    // The promoted target is whatever the mirror wanted at defer time. Either way the
+    // NEXT transition into walk (0x449) is what we measure: force a clean baseline.
+    run_ticks(ai, w, t, t + 16);
+    t += 16;
+    CHECK(e->inf.wpn_state == anim_state::kWalkForward);
+    // Now the transition walk -> reload (65, plain 0.1) then reload -> walk (0x449, 1/15).
+    CHECK((infantry_anim_flags(anim_state::kWalkForward) & 0x400u) != 0);
+    CHECK((infantry_anim_flags(anim_state::kReload) & 0x400u) == 0);
+    run_ticks(ai, w, t, t + 16); // let any in-flight blend settle
+    t += 16;
+    CHECK(!e->inf.weapon_blend_active());
+    e->inf.reload_anim_ticks = 80;
+    t = run_to_next_selection(ai, w, t);
+    CHECK(e->inf.wpn_state == anim_state::kReload);
+    CHECK(e->inf.wpn_blend_step > 0.09f && e->inf.wpn_blend_step < 0.11f); // 0.1
+    e->inf.reload_anim_ticks = 0;
+    // The locked reload defers the walk mirror to clip end; the promotion re-inits the
+    // channel onto walk (0x449) with the SLOW window. Step to exactly that tick: the
+    // reload started at phase 1 on its commit tick, so its 40th phase tick lands
+    // 39 ticks later and the promotion fires on the following advance.
+    run_ticks(ai, w, t, t + 39);
+    t += 39;
+    CHECK(e->inf.wpn_state == anim_state::kReload);
+    CHECK(e->inf.wpn_deferred == anim_state::kWalkForward);
+    run_ticks(ai, w, t, t + 1);
+    t += 1;
+    CHECK(e->inf.wpn_state == anim_state::kWalkForward);
+    CHECK(e->inf.wpn_prev == anim_state::kReload);
+    CHECK(e->inf.weapon_blend_active());
+    CHECK(e->inf.wpn_blend_step > 0.06f && e->inf.wpn_blend_step < 0.07f); // 1/15
+    run_ticks(ai, w, t, t + 9);
+    t += 9;
+    CHECK(e->inf.weapon_blend_active()); // 10 ticks in, a 15-tick window is not done
+    run_ticks(ai, w, t, t + 5);
+    t += 5;
+    CHECK(!e->inf.weapon_blend_active());
+
+    // Retarget mid-blend keeps the STABLE outgoing and replaces only the target
+    // [orig: the primary is retained until the weight completes]. Stop moving -> idle
+    // starts a 10-tick blend from walk; a knife attack stamped 3 ticks in (the fire
+    // path writes immediately, no slow pass) must keep WALK as prev, not idle.
+    run_ticks(ai, w, t, t + 16);
+    t += 16;
+    e->inf.player_moving = false;
+    t = run_to_next_selection(ai, w, t);
+    CHECK(e->inf.wpn_state == anim_state::kIdle);
+    CHECK(e->inf.wpn_prev == anim_state::kWalkForward);
+    CHECK(e->inf.weapon_blend_active());
+    run_ticks(ai, w, t, t + 3);
+    t += 3;
+    infantry_weapon_attack_stamp(e->inf, 1); // knife attack 62
+    CHECK(e->inf.wpn_state == anim_state::kKnifeAttack);
+    CHECK(e->inf.wpn_prev == anim_state::kWalkForward); // outgoing NOT replaced by idle
+    CHECK(e->inf.wpn_clip_phase == 0);
+
+    // A repeat stamp of the SAME attack mid-clip does not restart the playhead.
+    run_ticks(ai, w, t, t + 3);
+    t += 3;
+    const int32_t mid = e->inf.wpn_clip_phase;
+    CHECK(mid > 0);
+    infantry_weapon_attack_stamp(e->inf, 1);
+    CHECK(e->inf.wpn_clip_phase == mid);
+    CHECK(e->inf.wpn_state == anim_state::kKnifeAttack);
+}
+
+// The secondary channel's variant ring: a state whose .adm row authors N clips is
+// served head-then-advance on every play, so repeated plays of that state rotate
+// through its clips while the latched wpn_variant follows the SERVED entry
+// [orig: AnimMap_PlayAnimBySlot @0x40bda0: animEntry = slot[i]; slot[i] = next;
+//  animState+68 = animEntry]. Rings are per-state and per-entity; a single-clip
+// row (or a variant-less provider) always serves 0.
+void test_player_weapon_channel_variant_ring() {
+    struct RingSource : TestSource {
+        std::map<int, int> rings;
+        int variant_count(int, int id) const override {
+            auto it = rings.find(id);
+            return it == rings.end() ? 1 : it->second;
+        }
+    };
+    World w;
+    AiSystem ai;
+    RingSource src;
+    src.clips.insert(anim_state::kIdle);
+    src.clips.insert(anim_state::kWalkForward);
+    src.clips.insert(anim_state::kReload);
+    src.clips.insert(anim_state::kKnifeAttack);
+    src.lengths[anim_state::kReload] = 40;
+    src.lengths[anim_state::kKnifeAttack] = 30;
+    src.rings[anim_state::kReload] = 3;      // e.g. "m4_1r" "m4_1r" "m4_1r2"
+    src.rings[anim_state::kKnifeAttack] = 2;
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    e->inf.is_local_player = true;
+    e->health = 100;
+
+    uint32_t t = 1;
+    t = run_to_next_selection(ai, w, t);
+    CHECK(e->inf.wpn_state == anim_state::kIdle);
+    CHECK(e->inf.wpn_variant == 0); // idle: single-clip row
+
+    // Three reloads in a row serve ring entries 0, 1, 2 — then wrap to 0.
+    for (int expected : {0, 1, 2, 0}) {
+        e->inf.reload_anim_ticks = 80;
+        t = run_to_next_selection(ai, w, t);
+        CHECK(e->inf.wpn_state == anim_state::kReload);
+        CHECK(e->inf.wpn_variant == expected);
+        // Run the locked clip out and let the mirror re-land + blend settle.
+        e->inf.reload_anim_ticks = 0;
+        run_ticks(ai, w, t, t + 41);
+        t += 41;
+        CHECK(e->inf.wpn_state == anim_state::kIdle);
+        CHECK(e->inf.wpn_variant == 0); // the mirror's single-clip row
+        run_ticks(ai, w, t, t + 16);
+        t += 16;
+    }
+
+    // Rings are PER STATE: the knife ring is untouched by the reload plays and
+    // starts at 0; the fire-path stamp serves it (its ring size is passed by the
+    // caller, the same way the sim passes it from the equipped .adm).
+    infantry_weapon_attack_stamp(e->inf, 1, src.variant_count(0, anim_state::kKnifeAttack));
+    CHECK(e->inf.wpn_state == anim_state::kKnifeAttack);
+    CHECK(e->inf.wpn_variant == 0);
+    // A repeat stamp of the same state mid-clip does NOT re-serve (no transition).
+    run_ticks(ai, w, t, t + 3);
+    t += 3;
+    infantry_weapon_attack_stamp(e->inf, 1, 2);
+    CHECK(e->inf.wpn_variant == 0);
+    // Let it finish, then the next knife play serves entry 1, and the one after wraps.
+    run_ticks(ai, w, t, t + 31);
+    t += 31;
+    run_ticks(ai, w, t, t + 16);
+    t += 16;
+    CHECK(e->inf.wpn_state == anim_state::kIdle);
+    infantry_weapon_attack_stamp(e->inf, 1, 2);
+    CHECK(e->inf.wpn_variant == 1);
+    run_ticks(ai, w, t, t + 31);
+    t += 31;
+    run_ticks(ai, w, t, t + 16);
+    t += 16;
+    infantry_weapon_attack_stamp(e->inf, 1, 2);
+    CHECK(e->inf.wpn_variant == 0);
+
+    // The outgoing variant is latched too: mid-blend, prev carries the served
+    // entry it was playing.
+    run_ticks(ai, w, t, t + 31);
+    t += 31;
+    run_ticks(ai, w, t, t + 16);
+    t += 16;
+    e->inf.reload_anim_ticks = 80;
+    t = run_to_next_selection(ai, w, t);
+    CHECK(e->inf.wpn_state == anim_state::kReload);
+    CHECK(e->inf.wpn_variant == 1); // the reload ring resumes at head 1
+    CHECK(e->inf.wpn_prev == anim_state::kIdle);
+    CHECK(e->inf.wpn_prev_variant == 0);
+}
+
 // The hold-pose kind ladder (special_hold 1-8 -> states 50-61, the scoped +1 variants),
 // the scoped rifle default (49 idle_3), and the override order — binoculars 64 beats the
 // holds, the reload window beats binoculars, and the pistol kind selects 66 reload2.
@@ -1638,6 +1852,62 @@ void test_player_weapon_channel_ticks_while_dead() {
     CHECK(e->inf.arms_dip_ticks == 2);
     CHECK(e->inf.pitch_kick_accum != -1000);
     CHECK(!infantry_weapon_channel_visible(e->inf, true, false));
+}
+
+// The org1 (AI) body runs the SHARED dual-channel advance on its secondary channel
+// — clip-end deferred promotion, playhead step, blend ramp — but NEVER the org2
+// selection ladder: both bodies pass their out-array to AnimMap_UpdateDualChannels,
+// while the AI's own secondary-state writer @0x4b9a28 is unwitnessed. So an AI body's
+// weapon channel plays and cross-fades whatever state it holds, and holds it.
+// [orig: AnimMap_UpdateDualChannels @0x40b8c0 from both @0x4b40e0 and @0x4b9910;
+//  witness world-wac-ai-re.md §14.8.1]
+void test_ai_weapon_channel_advances_without_selection() {
+    World w;
+    AiSystem ai;
+    ai.is_authority = true;
+    TestSource src;
+    src.clips.insert(anim_state::kIdle);
+    src.clips.insert(anim_state::kReload);
+    src.lengths[anim_state::kReload] = 20;
+    ai.root_motion = &src;
+    AiEntity *e = soldier(ai);
+    e->inf.is_local_player = false;   // org1
+    e->health = 100;
+
+    // A fresh AI body: secondary channel at its reset (idle), playhead stepping.
+    run_ticks(ai, w, 1, 4);
+    CHECK(e->inf.wpn_state == anim_state::kIdle);
+    CHECK(e->inf.wpn_clip_phase > 0);
+
+    // The org2 selection NEVER runs for it: a reload window that would flip a
+    // player's channel to 65 leaves an AI body's state alone through many slow
+    // passes (the ladder is the local/wire producer's; the AI writer is unread).
+    e->inf.reload_anim_ticks = 80;
+    run_ticks(ai, w, 4, 4 + 64);
+    CHECK(e->inf.wpn_state == anim_state::kIdle);
+    // ...and the reload window itself is not decremented for it either — that
+    // countdown lives in the org2 producer's per-tick block [orig: @0x4b5cf9 in
+    // Entity_UpdateInfantryPlayerBody], not in the shared advance.
+    CHECK(e->inf.reload_anim_ticks == 80);
+
+    // But a state placed on the channel (as a future witnessed AI writer, or the
+    // wire, would) DOES play through the shared machinery: it advances, its
+    // deferred exit promotes at clip end, and the promotion cross-fades.
+    e->inf.reload_anim_ticks = 0;
+    e->inf.begin_weapon_transition(anim_state::kReload);
+    e->inf.wpn_deferred = anim_state::kIdle;
+    const int32_t p0 = e->inf.wpn_clip_phase;
+    run_ticks(ai, w, 70, 75);
+    CHECK(e->inf.wpn_state == anim_state::kReload);
+    CHECK(e->inf.wpn_clip_phase > p0);
+    CHECK(e->inf.weapon_blend_active()); // the idle->reload re-init blends
+    run_ticks(ai, w, 75, 75 + 20);       // clip length 20 -> promotion fires
+    CHECK(e->inf.wpn_state == anim_state::kIdle);
+    CHECK(e->inf.wpn_deferred == 0);
+    CHECK(e->inf.wpn_prev == anim_state::kReload);
+    CHECK(e->inf.weapon_blend_active()); // and the promotion re-init blends too
+    run_ticks(ai, w, 95, 95 + 12);
+    CHECK(!e->inf.weapon_blend_active());
 }
 
 void test_weapon_channel_consumer_gate_and_switch_identity() {
@@ -3280,10 +3550,13 @@ int main() {
     test_dead_player_ledge_fall_edge_is_suppressed();
     test_player_idle_skip_throttle_no_bounce();
     test_player_weapon_channel();
+    test_player_weapon_channel_blend_window();
+    test_player_weapon_channel_variant_ring();
     test_player_weapon_hold_kinds();
     test_player_weapon_attack_stamp();
     test_player_arms_dip();
     test_player_weapon_channel_ticks_while_dead();
+    test_ai_weapon_channel_advances_without_selection();
     test_weapon_channel_consumer_gate_and_switch_identity();
     test_death_presentation();
     test_primary_body_blend_windows_keep_independent_playheads();

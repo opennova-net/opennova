@@ -80,7 +80,10 @@ private:
 	Array apply_pose_overlay(Array p_pose,
 			const PackedInt32Array &p_classes, const Array &p_deltas,
 			const String &p_wpn_key, double p_wpn_playhead_seconds,
-			bool p_collapse_right_hand) const;
+			bool p_collapse_right_hand, const String &p_wpn_prev_key = String(),
+			double p_wpn_prev_playhead_seconds = 0.0,
+			float p_wpn_weight = 1.0f, int p_wpn_variant = 0,
+			int p_wpn_prev_variant = 0) const;
 	void write_pose_to_skeleton(Skeleton3D *p_skeleton, const Array &p_pose,
 			bool p_collapse_right_hand) const;
 
@@ -174,18 +177,34 @@ public:
 	// composition. Missing semantic channels use anim_reset when the ADM carries
 	// it; without RESET, a valid remaining channel is retained so an unresolved
 	// key never leaves a stale Skeleton3D pose resident.
+	// p_source_variant / p_target_variant select each channel's served ring entry
+	// (0-based file order, wrapped modulo the count — the +68 play latch).
 	Array eval_pose_blended(const String &p_source_key,
 			double p_source_playhead_seconds, const String &p_target_key,
-			double p_target_playhead_seconds, float p_weight) const;
+			double p_target_playhead_seconds, float p_weight,
+			int p_source_variant = 0, int p_target_variant = 0) const;
 
 	// The upper-body WEAPON channel: sample p_wpn_key at ITS OWN playhead and hard-override
 	// the mask bones' WORLD rotations (clavicles/arms/forearms/neck/head/hands — the
 	// anim::kWeaponChannelMaskBones set by BN## index), then re-localize the complete
 	// mixed hierarchy. Origins keep the primary pose's (the shared skeleton owns the
-	// pivots). No-op when the key is unknown or sizes mismatch. [orig: the mask override in
-	// Entity_BuildBoneTransformMatrices @0x4b14db/@0x4b16a7; world-wac-ai-re.md §14.8.6]
+	// pivots). [orig: the mask override in Entity_BuildBoneTransformMatrices
+	// @0x4b14db/@0x4b16a7; world-wac-ai-re.md §14.8.6]
+	//
+	// An EMPTY p_wpn_key means the §14.8.6 gate is off — no override at all. A key with
+	// no matching clip is DIFFERENT: registration backfills every absent anim_<name>
+	// with entry 0, so a missing key plays the RESET clip rather than no-opping
+	// [orig: the unrolled backfill loops @0x40bc24 / @0x40bd2e; §14.8.1].
+	//
+	// p_wpn_prev_key/playhead/weight carry the secondary channel's own cross-fade — the
+	// weapon layer re-inits through the SAME AnimMap_UpdateEntity body as the primary,
+	// so it takes the same blend window [orig: AnimMap_UpdateDualChannels @0x40b8c0 ->
+	// @0x40b5f0; AnimChannel_BlendTwoChannels @0x410740]. Empty prev = no blend.
 	void splice_weapon_channel(Array &p_pose, const String &p_wpn_key,
-			double p_wpn_playhead_seconds) const;
+			double p_wpn_playhead_seconds, const String &p_wpn_prev_key = String(),
+			double p_wpn_prev_playhead_seconds = 0.0,
+			float p_wpn_weight = 1.0f, int p_wpn_variant = 0,
+			int p_wpn_prev_variant = 0) const;
 
 	// Per-bone overlay class (anim::OverlayClass) parsed from the BN## bone names, for
 	// eval_pose_overlay. Accessory/unparsable bones map to the body class (the original's
@@ -209,14 +228,22 @@ public:
 	Array eval_pose_overlay(const String &p_key, double p_playhead_seconds,
 			const PackedInt32Array &p_classes, const Array &p_deltas,
 			const String &p_wpn_key = String(), double p_wpn_playhead_seconds = 0.0,
-			bool p_collapse_right_hand = false) const;
+			bool p_collapse_right_hand = false,
+			const String &p_wpn_prev_key = String(),
+			double p_wpn_prev_playhead_seconds = 0.0,
+			float p_wpn_weight = 1.0f, int p_wpn_variant = 0,
+			int p_wpn_prev_variant = 0) const;
 	Array eval_pose_blended_overlay(const String &p_source_key,
 			double p_source_playhead_seconds, const String &p_target_key,
 			double p_target_playhead_seconds, float p_weight,
 			const PackedInt32Array &p_classes, const Array &p_deltas,
 			const String &p_wpn_key = String(),
 			double p_wpn_playhead_seconds = 0.0,
-			bool p_collapse_right_hand = false) const;
+			bool p_collapse_right_hand = false,
+			const String &p_wpn_prev_key = String(),
+			double p_wpn_prev_playhead_seconds = 0.0,
+			float p_wpn_weight = 1.0f, int p_wpn_variant = 0,
+			int p_wpn_prev_variant = 0) const;
 
 	// The whole per-frame body-pose write in one call: evaluate the pose
 	// (eval_pose_overlay when classes+deltas are non-empty, eval_pose otherwise)
@@ -229,14 +256,22 @@ public:
 			double p_playhead_seconds, int p_variant,
 			const PackedInt32Array &p_classes, const Array &p_deltas,
 			const String &p_wpn_key = String(), double p_wpn_playhead_seconds = 0.0,
-			bool p_collapse_right_hand = false) const;
+			bool p_collapse_right_hand = false,
+			const String &p_wpn_prev_key = String(),
+			double p_wpn_prev_playhead_seconds = 0.0,
+			float p_wpn_weight = 1.0f, int p_wpn_variant = 0,
+			int p_wpn_prev_variant = 0) const;
 	void pose_skeleton_blended(Skeleton3D *p_skeleton,
 			const String &p_source_key, double p_source_playhead_seconds,
 			const String &p_target_key, double p_target_playhead_seconds,
 			float p_weight, const PackedInt32Array &p_classes,
 			const Array &p_deltas, const String &p_wpn_key = String(),
 			double p_wpn_playhead_seconds = 0.0,
-			bool p_collapse_right_hand = false) const;
+			bool p_collapse_right_hand = false,
+			const String &p_wpn_prev_key = String(),
+			double p_wpn_prev_playhead_seconds = 0.0,
+			float p_wpn_weight = 1.0f, int p_wpn_variant = 0,
+			int p_wpn_prev_variant = 0) const;
 
 	SkeletalAnim() = default;
 };
