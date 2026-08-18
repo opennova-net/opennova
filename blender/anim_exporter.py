@@ -549,8 +549,18 @@ class NovalogicAnimExporter:
         self._reset_rest_origins_bl = [_bad_to_bl_vec(b.position_bad) for b in reset_bones]
         # For bones parented to root_motion, rest origin is the local offset
         # from root_motion (includes height above capsule center).
+        # A parentless root (BN01 with no root_motion) measures its translation channel
+        # against its OWN reset-frame position, not the armature origin: the model table the
+        # runtime pairs these channels with is rebuilt root-relative (row 0 sits at the model
+        # origin, every pivot and vertex is offset from it), so a rig authored with its root
+        # off the armature origin -- a viewmodel with the hips at standing height, say --
+        # must not export that authoring offset as a per-frame root translation (it would
+        # lift the whole rig by that offset in-game; retail viewmodels carry a zero root
+        # translation). Rigs whose root rests at the origin are unaffected.
         for i, pb in enumerate(self.pose_bones):
             if pb.parent and pb.parent.name == "root_motion":
+                self._reset_rest_origins_bl[i] = reset_local_pos[i].copy()
+            elif pb.parent is None:
                 self._reset_rest_origins_bl[i] = reset_local_pos[i].copy()
         self._reset_world_rot_corrections = []
 

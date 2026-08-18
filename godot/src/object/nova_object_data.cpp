@@ -485,7 +485,38 @@ Error ObjectData::_open_ase(const String &p_path) {
 	}
 
 	source_kind = SourceKind::Ase;
+	_seed_project_materials_from_ase_session();
 	return _build_model_from_project_session(nullptr);
+}
+
+void ObjectData::_seed_project_materials_from_ase_session() {
+	// A bare .ase carries its materials only in the scene (`Material_<i>_<shader>` names +
+	// diffuse bitmaps). The OED session seeds its material table from those at conversion,
+	// but every later build/export re-seeds that table from the PROJECT (OED_UPDATE_MTRL),
+	// and a project born from a bare .ase has no material list yet -- the ASE materials
+	// would be dropped and the object would compile with an empty MTRL chunk (untextured).
+	// The original OED populates the project's material list from the ASE at import; do the
+	// same: build once WITHOUT the MTRL re-seed and adopt the ASE-seeded materials.
+	if (oed_session == nullptr || source_project.material_count > 0) {
+		return;
+	}
+	Threedi3di3 seeded = {};
+	const OedStatus build_rc = oed_session_build_model(
+			oed_session, &source_project, static_cast<uint8_t>(OED_UPDATE_LGHT | OED_UPDATE_PANM),
+			nullptr, &seeded);
+	if (build_rc != OED_STATUS_OK) {
+		return;
+	}
+	TdpProject seeded_project = {};
+	tdp_init(&seeded_project);
+	if (tdp_from_3di(&seeded, &seeded_project) == 0 && seeded_project.material_count > 0) {
+		tdp_alloc_materials(&source_project, seeded_project.material_count);
+		for (size_t i = 0; i < seeded_project.material_count; ++i) {
+			source_project.materials[i] = seeded_project.materials[i];
+		}
+	}
+	tdp_free(&seeded_project);
+	threedi_3di3_free(&seeded);
 }
 
 Error ObjectData::_build_model_from_project_session(const char *p_model_name, uint8_t p_dirty_mask) {
