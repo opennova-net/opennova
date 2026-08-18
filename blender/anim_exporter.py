@@ -172,6 +172,7 @@ class NovalogicAnimExporter:
         self._reset_world_rot_corrections = [Quaternion((1.0, 0.0, 0.0, 0.0)) for _ in self.pose_bones]
         self._reset_rest_origins_bl = [Vector((0.0, 0.0, 0.0)) for _ in self.pose_bones]
         self._capsule_offset = 0.0  # ground-to-foot gap, computed from reset clip
+        self._reset_bone_extents = (0.0, 0.0)  # (min, max) BAD-y bone extents at the reset pose
 
     def _set_eval_action(self, action: bpy.types.Action):
         ad = self.armature.animation_data
@@ -284,6 +285,20 @@ class NovalogicAnimExporter:
 
         return bones
 
+    def _bone_extents_bad_y(self):
+        """(min, max) height of every export bone relative to BN01 at the current frame
+        (Blender Z == BAD Y); the source of the .bad event bottom/top values."""
+        bn01_z = self.pose_bones[0].matrix.translation.z
+        min_y = 0.0
+        max_y = 0.0
+        for pb in self.pose_bones:
+            bad_y = pb.matrix.translation.z - bn01_z
+            if bad_y < min_y:
+                min_y = bad_y
+            if bad_y > max_y:
+                max_y = bad_y
+        return (min_y, max_y)
+
     def _extract_channels(self, clip: _ClipData, has_translation: bool):
         frame_total = clip.end_frame - clip.start_frame + 1
         channels = []
@@ -353,6 +368,7 @@ class NovalogicAnimExporter:
         # Legacy convention writes one root velocity event per sampled frame.
         # Each event carries velocity + bottom/top bone extents from ground.
         root_vel_events = []
+        is_viewmodel_clip = clip.action_name.startswith("anim_wpn_")
         if self.pose_bones:
             root_positions = []
             bone_extents = []  # (min_bad_y, max_bad_y) per frame
@@ -364,19 +380,18 @@ class NovalogicAnimExporter:
                     root_positions.append(rm_pb.matrix.translation.copy())
                 else:
                     root_positions.append(self.pose_bones[0].matrix.translation.copy())
-                # Bone Y-extents in BAD space (Y-up) for bottom/top.
-                # Blender Z = BAD Y (height).  Measure relative to BN01 origin
-                # since BAD world positions are relative to skeleton root.
-                bn01_z = self.pose_bones[0].matrix.translation.z
-                min_y = 0.0
-                max_y = 0.0
-                for pb in self.pose_bones:
-                    bad_y = pb.matrix.translation.z - bn01_z
-                    if bad_y < min_y:
-                        min_y = bad_y
-                    if bad_y > max_y:
-                        max_y = bad_y
-                bone_extents.append((min_y, max_y))
+                # Bone Y-extents in BAD space (Y-up) for bottom/top, relative to the
+                # BN01 origin (BAD world positions are relative to the skeleton root).
+                # Body clips carry them per frame (bottom is the ground-settle floor,
+                # crouch/prone lower it). Viewmodel clips (anim_wpn_*) carry the REST
+                # extents on every frame: retail viewmodel .bads are constant
+                # (0.0/0.6 or 1.07/1.07 across every JO *_1st set) and a viewmodel's
+                # parts may be parked far off-screen mid-clip -- those must not read
+                # as a capsule.
+                if is_viewmodel_clip:
+                    bone_extents.append(self._reset_bone_extents)
+                else:
+                    bone_extents.append(self._bone_extents_bad_y())
 
             for i in range(frame_total):
                 if i == 0:
@@ -543,6 +558,7 @@ class NovalogicAnimExporter:
                         reset_local_pos.append((_Y_FLIP @ lmat.translation).copy())
                     else:
                         reset_local_pos.append(pb.matrix.translation.copy())
+            self._reset_bone_extents = self._bone_extents_bad_y()
         finally:
             self._restore_eval_action(old_state)
 

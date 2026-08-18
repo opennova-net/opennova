@@ -52,7 +52,11 @@ def _make_actions(bpy, obj, root_step):
             root.rotation_euler = (0.0, 0.0, 0.0)
             root.keyframe_insert("location", frame=f)
             root.keyframe_insert("rotation_euler", frame=f)
-            obj.pose.bones["BN02 child"].keyframe_insert("rotation_euler", frame=f)
+            child = obj.pose.bones["BN02 child"]
+            child.location = (0.0, 0.0, 0.0)
+            child.rotation_euler = (0.0, 0.0, 0.0)
+            child.keyframe_insert("location", frame=f)
+            child.keyframe_insert("rotation_euler", frame=f)
         act.use_frame_range = True
         act.frame_start = 0
         act.frame_end = last
@@ -108,3 +112,57 @@ def test_root_at_origin_is_unchanged() -> None:
     idle_root, reset_root = _root_translation_track(bpy, obj, reset, idle)
     assert all(_norm(t) < 1e-5 for t in reset_root), reset_root
     assert abs(idle_root[4][0] - 0.1) < 1e-5, idle_root[4]
+
+
+def _dip_child(bpy, obj, action, last, dz):
+    """Key the child bone so its head drops by dz (world) at the clip's last frame
+    (its local +Y runs up the bone, so a negative local Y lowers it)."""
+    ad = obj.animation_data
+    ad.action = action
+    if hasattr(ad, "action_slot") and len(action.slots):
+        ad.action_slot = action.slots[0]
+    child = obj.pose.bones["BN02 child"]
+    for f in range(0, last + 1):
+        child.location = (0.0, -dz * f / last, 0.0)
+        child.keyframe_insert("location", frame=f)
+    ad.action = None
+
+
+def _events(bpy, obj, reset, clip_action, clip_name, last):
+    from blender import anim_exporter as ae
+
+    exporter = ae.NovalogicAnimExporter(bpy.context, obj)
+    reset_clip = ae._ClipData(action=reset, action_name="anim_reset", bad_name="RST", start_frame=0,
+                              end_frame=1, is_reset=True, flags=ae.ANIM_FLAG_TRANSLATION)
+    clip = ae._ClipData(action=clip_action, action_name=clip_name, bad_name="X", start_frame=0,
+                        end_frame=last, is_reset=False, flags=ae.ANIM_FLAG_TRANSLATION)
+    exporter.configure_from_reset_clip(reset_clip)
+    old = exporter._set_eval_action(clip_action)
+    try:
+        _channels, _translations, events = exporter._extract_channels(clip, True)
+    finally:
+        exporter._restore_eval_action(old)
+    return [(round(e[3], 4), round(e[4], 4)) for e in events]
+
+
+def test_viewmodel_clip_events_carry_constant_rest_extents() -> None:
+    """anim_wpn_* clips write the reset-pose bottom/top on every frame -- retail viewmodel .bads
+    are constant and a viewmodel part parked far off-screen mid-clip must not read as a
+    capsule. Body clips keep the per-frame extents (bottom is the ground-settle floor)."""
+    import bpy
+
+    obj = _build_rig(bpy, (0.0, 0.0, 0.0))          # root 0, child head 0.2 above it
+    reset, wpn = _make_actions(bpy, obj, root_step=0.0)
+    _dip_child(bpy, obj, wpn, 4, 1.5)                 # child head ends 1.3 below the root
+    body = bpy.data.actions.new("anim_stand")
+    _dip_child(bpy, obj, body, 4, 1.5)
+    body.use_frame_range = True
+    body.frame_start = 0
+    body.frame_end = 4
+
+    wpn_events = _events(bpy, obj, reset, wpn, "anim_wpn_idle", 4)
+    assert len(set(wpn_events)) == 1 and wpn_events[0] == (0.0, 0.2), wpn_events
+
+    body_events = _events(bpy, obj, reset, body, "anim_stand", 4)
+    assert body_events[0] == (0.0, 0.2), body_events[0]
+    assert body_events[4] == (1.3, 1.3), body_events[4]     # bottom = |min|, top = max + |min|
