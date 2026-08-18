@@ -738,6 +738,26 @@ remains for a *full* (vs partial) R1 record:
 - **Editor derived-input parity** — close D-TERRAIN-9 by routing the live
   preview through the runtime integer DBlend normalization and paired custom
   mip-chain builder without replacing its live-sculpt geometry path.
+- **Single-detail (BHD-era) `.trn` binding** — a pre-JO terrain authors only
+  `polytrn_detailmap` (no `_c1..c3`, no `detailblendmap`, no `detailmapdist`;
+  DPTH depth). The tier table above says the missing blend map selects
+  `PSBasic` (`colormap ×4 t1`), but WHAT `PolyTrn_InitTextures @ 0x60aaa0` /
+  `PolyTrn_BindStageTextures @ 0x604330` put in stage 1 when no splat layer
+  is authored — the single detail, or nothing — is unwitnessed, and the
+  runtime port (`nova_terrain_surface_inputs.cpp`) is splat-only. Until it is
+  witnessed, ONED promotes such a map on open (Detail A/B/C + far target
+  seeded from the single detail, blend map all-A, name from the file stem)
+  so a JO/DFX export resolves to `colormap × detail` on the splat tier
+  regardless (`godot/modtools/terrain/README.md` "Opening older terrains";
+  `terrain_editor_import_export_test.gd::test_legacy_single_detail_trn_promotes_into_splat_slots`).
+  Hazard while this stays open: the shared splat shader has no
+  no-blend-map tier — a null `u_blendmap` samples Godot's WHITE default, so
+  `c1+c2+c3` (×3, then the ×4 stage) blows the terrain out white/yellow. The
+  editor now always seeds an all-A blend map into `TerrainData` for such
+  maps; the RUNTIME (`nova_terrain_surface_inputs.cpp` `get_blend_texture`)
+  still binds null for a raw blend-map-less `.trn`, so loading a BHD terrain
+  straight into the game/mission preview renders the blow-out until the
+  PSBasic tier is witnessed and ported.
 
 The CDEP/traversal item is documentation depth; D-TERRAIN-7's exact
 tile-shadow/cache mechanics are the one bounded open runtime parity surface

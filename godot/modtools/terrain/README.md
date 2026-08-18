@@ -24,6 +24,31 @@ terrain textures and shading maps, and the data maps that drive surface paint,
 foliage placement, and tile placement. Save round-trips through the `.trn` text
 config plus its binary assets; Export bakes the runtime terrain.
 
+## Opening older (Black Hawk Down era) terrains
+
+Terrains from the earlier titles open like any other `.trn`, and Export can
+target either family: **BHD** writes the raw depth format those games read,
+**JO/DFX** writes the compressed depth format Joint Operations and Delta Force
+Xtreme read. Promoting an older map to JO/DFX means three things, and the
+workspace does them for you on open:
+
+- **Steepness.** JO/DFX limit how much height a 256-pixel run of the heightmap
+  may span. The workspace flags any area over the limit when the map opens
+  (with a one-click flatten) and blocks a JO/DFX export until they are fixed;
+  BHD exports have no such limit.
+- **Detail textures.** Older maps carry ONE detail texture drawn over the
+  colormap. JO/DFX draw three blend-layer detail textures (Detail A/B/C) mixed
+  by the blend map, plus a far target, and read the old single-detail key as a
+  shading source instead. When a map has no blend layers authored, the
+  workspace seeds Detail A/B/C and the far target from that single detail
+  (blend map all-A), so the export looks the way the map did before; repaint
+  the layers afterwards if you want a real splat.
+- **Name.** Older maps ship an empty terrain name (the game used the file
+  name). The workspace names the map after the `.trn` file, so the exported
+  set is `<name>.trn/.cpt/_c.tga/...`, which is what missions reference.
+
+The map opens dirty when any of these applied; the status bar says which.
+
 ## Formats
 
 | Format | Backing library | Notes |

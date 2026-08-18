@@ -65,6 +65,7 @@ func open_trn(trn_path: String, timeline: PerfTimeline = null) -> Error:
 	if err != OK:
 		return err
 	PerfTimeline.end_on(timeline)
+	var named: bool = _seed_terrain_name_from_path(trn_path)
 
 	_te.texture_files = {}
 	_apply_default_visual_state(false)
@@ -90,7 +91,7 @@ func open_trn(trn_path: String, timeline: PerfTimeline = null) -> Error:
 	PerfTimeline.end_on(timeline)
 
 	PerfTimeline.span_on(timeline, "textures")
-	_apply_loaded_textures_from_data()
+	var promoted: bool = _apply_loaded_textures_from_data()
 	PerfTimeline.end_on(timeline)
 	PerfTimeline.span_on(timeline, "sectors")
 	var normalized: bool = _te._normalize_sector_layout_if_needed()
@@ -111,10 +112,11 @@ func open_trn(trn_path: String, timeline: PerfTimeline = null) -> Error:
 		_te._document.current_project_dir = ""
 	_te._remember_open_path(trn_path)
 
-	_te.is_dirty = normalized or normalized_tileinfo
+	_te.is_dirty = normalized or normalized_tileinfo or named or promoted
 	_te._mark_foliage_preview_dirty()
 	_te._mark_ui_state_changed()
 	_te._mark_ui_state_changed()
+	_notify_legacy_promotion(promoted)
 	_check_loaded_cdep_violations()
 	return OK
 
@@ -130,6 +132,7 @@ func _open_trn_from_resource_root(resources: ResourceRoot, trn_name: String, tim
 	if err != OK:
 		return err
 	PerfTimeline.end_on(timeline)
+	var named: bool = _seed_terrain_name_from_path(trn_name)
 
 	_te.texture_files = {}
 	_apply_default_visual_state(false)
@@ -143,7 +146,7 @@ func _open_trn_from_resource_root(resources: ResourceRoot, trn_name: String, tim
 	PerfTimeline.end_on(timeline)
 
 	PerfTimeline.span_on(timeline, "textures")
-	_apply_loaded_textures_from_data()
+	var promoted: bool = _apply_loaded_textures_from_data()
 	PerfTimeline.end_on(timeline)
 	PerfTimeline.span_on(timeline, "sectors")
 	var normalized: bool = _te._normalize_sector_layout_if_needed()
@@ -162,12 +165,33 @@ func _open_trn_from_resource_root(resources: ResourceRoot, trn_name: String, tim
 	_te._document.current_project_dir = ""
 	_te._remember_open_path(resources.get_root_dir().path_join(trn_name.get_file()))
 
-	_te.is_dirty = normalized or normalized_tileinfo
+	_te.is_dirty = normalized or normalized_tileinfo or named or promoted
 	_te._mark_foliage_preview_dirty()
 	_te._mark_ui_state_changed()
 	_te._mark_ui_state_changed()
+	_notify_legacy_promotion(promoted)
 	_check_loaded_cdep_violations()
 	return OK
+
+
+# BHD-era .trn files ship `terrain_name ""` — the original engine keys the
+# terrain by file stem, and JO missions reference it the same way (`dvd2`).
+# Left empty, every export/save artifact would be named "untitled". Seed the
+# name from the file stem so the promoted set keeps the identity missions
+# expect. Returns true when the document changed relative to disk.
+func _seed_terrain_name_from_path(trn_path: String) -> bool:
+	if _te._data == null or not String(_te._data.get_terrain_name()).is_empty():
+		return false
+	var stem := trn_path.get_file().get_basename()
+	if stem.is_empty():
+		return false
+	_te._data.set_terrain_name(stem)
+	return true
+
+
+func _notify_legacy_promotion(promoted: bool) -> void:
+	if promoted:
+		_te._notify_status("Single detail texture promoted into Detail A/B/C (and the far target) for Joint Operations / DFX export.")
 
 
 func save_project(dir_path: String) -> Error:
@@ -392,8 +416,8 @@ func _apply_default_visual_state(sync_data: bool = true) -> void:
 	_te._document.apply_default_visual_state(_te._get_material(), sync_data)
 
 
-func _apply_loaded_textures_from_data() -> void:
-	_te._document.apply_loaded_textures_from_data(_te._get_material())
+func _apply_loaded_textures_from_data() -> bool:
+	return _te._document.apply_loaded_textures_from_data(_te._get_material())
 
 
 func _save_texture_assets(output_dir: String, terrain_name: String) -> Error:
