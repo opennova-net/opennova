@@ -1086,6 +1086,15 @@ target_include_directories(minimap_overlay_test PRIVATE ${CMAKE_CURRENT_SOURCE_D
 target_compile_features(minimap_overlay_test PRIVATE cxx_std_17)
 add_test(NAME minimap_overlay COMMAND minimap_overlay_test)
 
+# The dynamic light pool (D-RLIT-4): Light_InstanceTable semantics, the 62 Hz fade
+# tick, the three feed states, the D3D point-light fill, and the nearest-first
+# four-light render selection.
+add_executable(light_pool_test world/light_pool_test.cpp)
+target_link_libraries(light_pool_test PRIVATE opennova_runtime)
+target_include_directories(light_pool_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(light_pool_test PRIVATE cxx_std_17)
+add_test(NAME light_pool COMMAND light_pool_test)
+
 # AI subsystem (byte-exact foundation): state enum + struct layout, AIEvent ring,
 # budget gate (AI_BeginUpdate), the infantry state-machine dispatcher + transitions,
 # and the trivial enter/exit/event handler ports.

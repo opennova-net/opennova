@@ -2,6 +2,7 @@
 // pose cache, the packed present snapshots (AI pool + client replicas), HUD views,
 // and the drains (effects, fire, destruction, round impacts, tracers).
 #include "simulation/nova_simulation_internal.h"
+#include <godot_cpp/classes/rendering_server.hpp> // the dynlight global-parameter publish
 #include <npruntime/client_replica_present_projection.h> // the canonical decoded-client projection (ADR 0031)
 
 #include <cmath>
@@ -367,6 +368,34 @@ Array Simulation::drain_round_impacts() {
 		const bool has_effect = imp.present_effect && !row.effect.empty();
 		const bool has_sound = imp.present_sound && !row.sound.empty();
 		if (!has_effect && !has_sound) continue;
+		// THE IMPACT FLASH — the ammo's `light_impact` glow into the shared light
+		// pool at the stop point, lifted by HALF THE RADIUS on mission up, state 2
+		// = linear fade then free (retail: AmmoDef_ProcessImpactEffect @ 0x40A2B3
+		// — `glowPosition[2] = (radius >> 1) + z; LightPool_SpawnGlowEffect(pos,
+		// ammoDef+132, ammoDef+128, 2, ammoDef+136)`). THE GATE IS RETAIL'S,
+		// VERBATIM: a nonzero authored radius AND a selected surface row carrying
+		// an effect — retail tests `ammoDef+132 && numOverrides[2] &&
+		// (impactData+20 & 0x40000000)`, the same flag that gates the particle
+		// spawn; no authored surface effect for what was struck => no light. The
+		// 0x100 render flag stamped right after the spawn has NO reader anywhere
+		// in jointops.exe's .text — carried so the record matches, gates nothing
+		// (retail: CEffectInstance_ModifyRenderFlags(handle, 256, 0) @ 0x40A2C0).
+		if (has_effect && ammo->light_impact_radius > 0.0f) {
+			opennova::world::LightPool &pool = world_->round_sim.light_pool;
+			const int32_t glow_pos[3] = {
+				opennova::world::to_fixed(imp.position.x),
+				opennova::world::to_fixed(imp.position.y),
+				opennova::world::to_fixed(
+						imp.position.z + ammo->light_impact_radius * 0.5f) };
+			const int glow = pool.spawn(
+					glow_pos, opennova::world::to_fixed(ammo->light_impact_radius),
+					ammo->light_impact_color,
+					opennova::world::LightPool::kStateFadeFree,
+					ammo->light_impact_ticks);
+			if (glow != 0)
+				pool.modify_render_flags(
+						glow, opennova::world::LightPool::kFlagImpactRender, 0);
+		}
 		Dictionary d;
 		// mission (x,y,z) -> Godot (x, z, -y), the get_local_player_position convention.
 		d["position"] = Vector3(imp.position.x, imp.position.z, -imp.position.y);
@@ -1633,4 +1662,59 @@ PackedFloat32Array Simulation::present_snapshot_from_client_replicas() const {
 	// frame (the rows above copied any live pulse into PF_ANIM_STATE_PULSE).
 	runtime_->state().clear_anim_pulses();
 	return out;
+}
+
+// The muzzle glow's per-shot re-arm (retail: Entity_UpdateMuzzleGlowEffect
+// @ 0x56C960). The fire pass hands over the muzzle anchor it already resolved;
+// the witnessed spawn/re-arm constants live engine-side in
+// RoundSim::rearm_muzzle_glow. Godot (x, y, z) -> mission (x, -z, y).
+void Simulation::present_muzzle_glow(int shooter_handle, const Vector3 &muzzle_pos) {
+	if (!world_) return;
+	const opennova::world::Vec3 pos{ muzzle_pos.x, -muzzle_pos.z, muzzle_pos.y };
+	world_->round_sim.rearm_muzzle_glow(static_cast<uint16_t>(shooter_handle), pos);
+}
+
+// Publish the pool's four-light selection as the opennova_dynlight_* global
+// shader parameters the generated object shader reads (retail:
+// update_light_slots @ 0x5ABC50 LightEnables per scene render; the per-frame
+// camera-reference divergence is recorded on world/light_pool.h). The ambient
+// triple passes 1.0 — the EffectWorld_AmbientScale producer is unwitnessed
+// (recorded gap, world/light_pool.cpp tick note). Zero lights publish count 0,
+// keeping an unlit frame bit-identical to the pre-light-pool build.
+void Simulation::publish_dynamic_lights(const Vector3 &camera_pos) {
+	RenderingServer *rs = RenderingServer::get_singleton();
+	if (rs == nullptr) return;
+	static const StringName count_name("opennova_dynlight_count");
+	static const StringName pos_names[4] = {
+		StringName("opennova_dynlight_pos_range_0"),
+		StringName("opennova_dynlight_pos_range_1"),
+		StringName("opennova_dynlight_pos_range_2"),
+		StringName("opennova_dynlight_pos_range_3"),
+	};
+	static const StringName diffuse_names[4] = {
+		StringName("opennova_dynlight_diffuse_0"),
+		StringName("opennova_dynlight_diffuse_1"),
+		StringName("opennova_dynlight_diffuse_2"),
+		StringName("opennova_dynlight_diffuse_3"),
+	};
+	int count = 0;
+	opennova::world::LightPool::PointLight rows[opennova::world::LightPool::kMaxSimultaneous];
+	if (world_) {
+		// Godot camera -> mission space (x, -z, y) for the selection sort.
+		const float cam[3] = { static_cast<float>(camera_pos.x),
+			                   static_cast<float>(-camera_pos.z),
+			                   static_cast<float>(camera_pos.y) };
+		const float ambient[3] = { 1.0f, 1.0f, 1.0f };
+		count = world_->round_sim.light_pool.collect_render_lights(
+				cam, ambient, rows, opennova::world::LightPool::kMaxSimultaneous);
+	}
+	for (int i = 0; i < count; ++i) {
+		const opennova::world::LightPool::PointLight &pl = rows[i];
+		// mission (x, y, z) -> Godot (x, z, -y), the drain_round_impacts convention.
+		rs->global_shader_parameter_set(pos_names[i],
+				Vector4(pl.position[0], pl.position[2], -pl.position[1], pl.range));
+		rs->global_shader_parameter_set(diffuse_names[i],
+				Vector3(pl.diffuse[0], pl.diffuse[1], pl.diffuse[2]));
+	}
+	rs->global_shader_parameter_set(count_name, count);
 }

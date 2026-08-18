@@ -371,6 +371,30 @@ static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out) {
                         parse_int_n(tok[3].s, tok[3].len);
             }
             parsed = 1;
+        } else if (lower_starts_with(lower, ll, "light_impact", 12)) {
+            /* The impact flash: radius (16.16) + packed RGB + lifetime in 62 Hz ticks
+               [orig: AmmoDef_ParseProperty @0x40AF7F-0x40AFE8 -> +132 =
+               Math_ParseFixedPoint16(tok0), +128 = ((atol(r) << 8) + atol(g)) * 256
+               + atol(b), +136 = the seconds->ticks helper sub_40A0F0(tok4); a ZERO
+               result is replaced by 10 @0x40B005]. The same shifted adds as
+               `light_move` — no range clamps. */
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+            Token tok[5];
+            int tn = tokenize(v, vl, tok, 5);
+            if (tn >= 1) current.light_impact_radius_fp16 = parse_fixed16_digits_n(tok[0].s, tok[0].len);
+            if (tn >= 4) {
+                current.light_impact_color =
+                        ((parse_int_n(tok[1].s, tok[1].len) << 8) +
+                         parse_int_n(tok[2].s, tok[2].len)) * 256 +
+                        parse_int_n(tok[3].s, tok[3].len);
+            }
+            /* A missing 5th token yields 0 ticks and therefore the SAME 10-tick default
+               retail applies to an authored 0. Retail's own behaviour on a missing token
+               (it indexes tokens[6] unconditionally) is not witnessed — we do not
+               special-case it. */
+            current.light_impact_ticks = (tn >= 5) ? parse_age_ticks_n(tok[4].s, tok[4].len) : 0;
+            if (current.light_impact_ticks == 0) current.light_impact_ticks = 10;
+            parsed = 1;
         }
 
         if (!parsed) {

@@ -57,6 +57,7 @@
 
 #include "world/entity.h"
 #include "world/geom.h"
+#include "world/light_pool.h"
 #include "world/tracer_trails.h"
 
 namespace opennova::terrain {
@@ -226,6 +227,11 @@ struct LiveRound {
     // The round's trail channel [orig: round+0x2B4 <- CEffectEmitterPool_AllocSlot
     // @ 0x4ec774]; -1 = no visual (non-tracer, NoTracers rules, or pool full).
     int32_t trail_slot = -1;
+    // The round's in-flight `light_move` glow [orig: round+0x1B4 <-
+    // LightPool_SpawnGlowEffect from RoundData_SpawnRound @ 0x4ec8a9..0x4ec8da,
+    // state 1 / ticks -1; cleared by Projectile_ReleaseEffects @ 0x4E8308];
+    // 0 = no glow (ammo authors none, or the pool was full).
+    int32_t light_handle = 0;
 
     // --- throwable state (zeroed on ballistic rounds; world-wac-ai-re §27) ---
     // Orientation + spin [orig: round +16/+20/+24 angles, +164/+168/+172 spin
@@ -419,6 +425,27 @@ public:
     // The tracer trail channels — appended per round tick, drained per pool tick,
     // styled and drawn by the host present pass (world/tracer_trails.h witness map).
     TracerTrailPool trails;
+
+    // The dynamic light pool — retail's `Light_InstanceTable`, ticked once per 62 Hz
+    // logic tick alongside the trail pool [orig: EffectWorld_TickInstancesAndLightScale
+    // @ 0x5AA170 from Game_ProcessMainFrame @ 0x5267A1]. Three data-driven feeds:
+    // the round glow (`light_move`, spawned below), the impact flash (`light_impact`,
+    // spawned by the host present layer where the surface-row effect gate resolves
+    // [orig: AmmoDef_ProcessImpactEffect @ 0x40A2B3]), and the muzzle glow
+    // (rearm_muzzle_glow below). The host reads the render selection per frame via
+    // LightPool::collect_render_lights. Full witness map: world/light_pool.h.
+    LightPool light_pool;
+
+    // The per-shooter muzzle glow [orig: Entity_UpdateMuzzleGlowEffect @ 0x56C960 —
+    // the entity caches one pool handle: spawn state 3 / ticks -1 / radius 0x18000
+    // (1.5 u) / colour 0xFFE0A0 @ 0x56C987, then per shot re-arm to state 4 with
+    // 5 ticks and blend 1.0 @ 0x56C9A2]. State 4 is not in the fade set, so the glow
+    // holds full blend for its 5 ticks (~80 ms) and is then freed; a freed handle
+    // re-spawns on the next shot, exactly as retail's invalid-handle path does.
+    // Gated by the ammo's `MF_Light` presence flag (ammo_table mf_light).
+    void rearm_muzzle_glow(uint16_t shooter_handle, const Vec3 &muzzle_pos);
+    // shooter handle -> cached pool handle (retail keeps this on the entity record).
+    std::unordered_map<uint16_t, int32_t> muzzle_glow_handles;
 
     // The presenting client's identity, for the friendly/enemy style select AT SPAWN
     // [orig: RoundData_SpawnRound @ 0x4ec740 compares the round team byte to

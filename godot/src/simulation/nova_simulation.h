@@ -1484,6 +1484,15 @@ public:
 	// mapped through the ammo effects_table to {position, direction, effect, sound}
 	// [orig: Projectile_SpawnImpactEffect @ 0x4e9b80; world/round_sim.h RoundImpact].
 	Array drain_round_impacts();
+	// The muzzle glow's per-shot re-arm — the fire pass's MF_Light leg, at the
+	// muzzle anchor it already resolved (Godot space)
+	// (retail: Entity_UpdateMuzzleGlowEffect @ 0x56C960; world/round_sim.h).
+	void present_muzzle_glow(int shooter_handle, const Vector3 &muzzle_pos);
+	// Publish the light pool's four-light render selection as the
+	// opennova_dynlight_* global shader parameters, once per render frame
+	// (retail: update_light_slots @ 0x5ABC50 enables per scene render;
+	// selection witness on world/light_pool.h collect_render_lights).
+	void publish_dynamic_lights(const Vector3 &camera_pos);
 
 	// --- the local player's loadout: slot pool, spawn kit, map rules -------------------
 	// (the 2026-07-18 loadout grill; witness map in docs/net/novaworld-net-re.md §5.57)

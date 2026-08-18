@@ -614,6 +614,14 @@ func _present_frame(stats_on: bool) -> void:
 		if stats_on:
 			_frame_stats.add(FrameStatsBoard.PRESENT_FIRE,
 					Time.get_ticks_usec() - fire_start)
+	# The dynamic light pool's four-light publish — after the fire pass so this
+	# frame's muzzle re-arms are included (retail: update_light_slots @ 0x5abc50
+	# LightEnables per scene render). The camera provider is the fire pass's own
+	# listener; a host with no fire presentation (dedicated) never publishes.
+	if _sim != null and _fire_listener.is_valid():
+		var listener = _fire_listener.call()
+		if listener is Vector3:
+			_sim.publish_dynamic_lights(listener)
 	if _destruction_present != null:
 		var destruction_start := Time.get_ticks_usec() if stats_on else 0
 		_destruction_present.present()

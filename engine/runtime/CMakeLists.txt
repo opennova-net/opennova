@@ -139,6 +139,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/destruction.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/fire_sound.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/friendly_tags.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/light_pool.cpp    # the dynamic light pool (D-RLIT-4)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/round_sim.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/sound_emitter_mailbox.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/throwables.cpp

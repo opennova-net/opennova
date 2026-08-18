@@ -118,6 +118,17 @@ typedef struct DefAmmoDef {
      * RoundData_SpawnRound @0x4ec8a9 -> LightPool_SpawnGlowEffect, handle round+0x1B4]. */
     int light_move_radius_fp16; /* +120 */
     int light_move_color;       /* +124: packed 0xRRGGBB */
+    /* The IMPACT flash, 'light_impact <radius> <r> <g> <b> <seconds>' — one light-pool
+     * glow spawned where the round stopped, state 2 (fade-then-free) with the authored
+     * lifetime in 62 Hz ticks. `<seconds>` runs through the SAME seconds->ticks helper
+     * as `max_age` (62 x fp16, round-half-up) and a RESULT of 0 falls back to 10 ticks.
+     * [orig: AmmoDef_ParseProperty @0x40AF7F-0x40AFE8 -> +132 = Math_ParseFixedPoint16,
+     * +128 = ((atol(r)<<8)+atol(g))*256 + atol(b), +136 = sub_40A0F0(seconds);
+     * the 0 -> 10 default @0x40B005. Consumer AmmoDef_ProcessImpactEffect @0x40A2B3
+     * -> LightPool_SpawnGlowEffect(pos + z(radius/2), radius, rgb, state 2, ticks)] */
+    int light_impact_radius_fp16; /* +132 */
+    int light_impact_color;       /* +128: packed 0xRRGGBB */
+    int light_impact_ticks;       /* +136: 62 Hz ticks (0 authored -> 10) */
     DefEffectTableEntry *effects_table;
     size_t effects_table_count;
     char (*raw_lines)[512];

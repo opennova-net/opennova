@@ -245,7 +245,12 @@ func present_fires(events: Array) -> void:
 			# @ 0x5F6DF0; every fire spawns one — no per-shooter guard on this leg].
 			fx.spawn_effect(effect, origin, ev.get("forward", Vector3.FORWARD))
 			_stats.effects += 1
-		# ev["mf_light"]: the muzzle glow light — tracked deferral (no light pool).
+		# ev["mf_light"]: the muzzle glow — one cached light-pool slot per shooter,
+		# re-armed to full blend for 5 ticks on every shot, at the same muzzle
+		# anchor the effect leg resolved (retail: Entity_UpdateMuzzleGlowEffect
+		# @ 0x56C960; the witnessed constants live in RoundSim::rearm_muzzle_glow).
+		if int(ev.get("mf_light", 0)) != 0:
+			_sim.present_muzzle_glow(int(ev.get("shooter_handle", -1)), origin)
 
 
 # The sim's ready fire sounds: immediate near shots, the adm-arm action-row

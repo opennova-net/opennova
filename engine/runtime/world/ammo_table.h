@@ -152,6 +152,11 @@ struct AmmoTableEntry {
     int32_t tracer_item_enemy = 0;    // +20 (raw type id; 0 = none)
     float light_move_radius = 0.0f;   // +120 (16.16 -> float units; 0 = no glow)
     uint32_t light_move_color = 0;    // +124 packed 0xRRGGBB
+    // The impact flash (`light_impact` [orig: +132 radius / +128 RGB / +136 ticks ->
+    // AmmoDef_ProcessImpactEffect @0x40A2B3 spawns state 2 at pos + z(radius/2)]).
+    float light_impact_radius = 0.0f;   // +132 (16.16 -> float units; 0 = no flash)
+    uint32_t light_impact_color = 0;    // +128 packed 0xRRGGBB
+    int32_t light_impact_ticks = 0;     // +136 62 Hz ticks (parser defaults 0 -> 10)
     bool valid = false;
 };
 

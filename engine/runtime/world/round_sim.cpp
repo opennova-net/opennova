@@ -24,6 +24,15 @@ namespace opennova::world {
 
 namespace {
 
+// Free a dying round's `light_move` glow with the round
+// [orig: Projectile_ReleaseEffects @ 0x4E8308 clears the handle at round+0x1B4].
+void release_round_light(LightPool &pool, LiveRound &r) {
+	if (r.light_handle != 0) {
+		pool.release(r.light_handle);
+		r.light_handle = 0;
+	}
+}
+
 constexpr double kPi = 3.14159265358979323846;
 // BAM32 -> radians (full turn = 2^32) [orig: engine-wide BAM convention, angle.h].
 constexpr double kRadPerBam = (2.0 * kPi) / 4294967296.0;
@@ -554,6 +563,8 @@ void RoundSim::reset() noexcept {
 	debug_trail_count = 0;
 	trails.reset(); // [orig: the pool memset in CEffectEmitterPool_ResetAndBuildStyles
 	                //  @ 0x5db3b0, run from Game_StartMission]
+	light_pool.reset();
+	muzzle_glow_handles.clear();
 	remote_visual_tracer_counters_.clear();
 }
 
@@ -840,6 +851,19 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &params,
         if (style != 0) r.trail_slot = trails.alloc(style);
     }
 
+    // The in-flight `light_move` glow rides the round record [orig: RoundData_SpawnRound
+    // @ 0x4ec8a9..0x4ec8da -> LightPool_SpawnGlowEffect(pos, +120 radius, +124 rgb,
+    // state 1, ticks -1) -> round+0x1B4; an unauthored (zero) radius spawns no glow,
+    // and a full pool's 0 answer is retail's own "no light"].
+    r.light_handle = 0;
+    if (ammo->light_move_radius > 0.0f) {
+        const int32_t glow_pos[3] = { to_fixed(r.pos.x), to_fixed(r.pos.y),
+                                      to_fixed(r.pos.z) };
+        r.light_handle = light_pool.spawn(
+                glow_pos, to_fixed(ammo->light_move_radius), ammo->light_move_color,
+                LightPool::kStateConstant, -1);
+    }
+
     // The TrcrID item model + class bind [orig: @ 0x4ec787..0x4ec7b7 —
     // team item selection with a missing-foe -> friendly fallback, independent
     // of the per-shot tracer cadence; global NoTracers still suppresses it].
@@ -959,6 +983,11 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
     if (queries != nullptr) queries->terrain = terrain;
     if (active_count <= 0) {
         trails.tick();
+        // The light pool ticks with the game tick even with no rounds in flight —
+        // the muzzle glow and impact flashes age independently of round count
+        // [orig: EffectWorld_TickInstancesAndLightScale @ 0x5AA170 runs
+        // unconditionally from Game_ProcessMainFrame @ 0x5267A1].
+        light_pool.tick();
         return;
     }
 
@@ -1015,6 +1044,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             event.p1 = r.pos;
             event.hit = r.pos;
             push_round_debug(*this, event);
+            release_round_light(light_pool, r);
             r.active = false;
             --active_count;
             continue;
@@ -1022,6 +1052,13 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         ++r.age_ticks;
 
         if (r.trail_slot >= 0) trails.append(r.trail_slot, r.pos);
+        // The glow follows the round [orig: the round update repositions its cached
+        // handle through CEffectInstance_SetPositionAndBounds @ 0x5A9070].
+        if (r.light_handle != 0) {
+            const int32_t glow_pos[3] = { to_fixed(r.pos.x), to_fixed(r.pos.y),
+                                          to_fixed(r.pos.z) };
+            light_pool.set_position(r.light_handle, glow_pos);
+        }
 
         const AmmoTableEntry *ammo = world.ammo.by_index(r.ammo_index);
         const uint32_t ammo_flags = ammo != nullptr ? ammo->flags : 0;
@@ -1042,6 +1079,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                     trails.append(r.trail_slot, r.pos);
                     trails.request_kill(r.trail_slot);
                 }
+                release_round_light(light_pool, r);
                 r.active = false;
                 --active_count;
             }
@@ -1070,6 +1108,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             r.vel = vec_from_fixed(velocity_q16);
             if (submerged_stall) {
                 if (r.trail_slot >= 0) trails.request_kill(r.trail_slot);
+                release_round_light(light_pool, r);
                 r.active = false;
                 --active_count;
             }
@@ -1106,6 +1145,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             r.vel = vec_from_fixed(velocity_q16);
             if (submerged_stall) {
                 if (r.trail_slot >= 0) trails.request_kill(r.trail_slot);
+                release_round_light(light_pool, r);
                 r.active = false;
                 --active_count;
             }
@@ -1354,12 +1394,40 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         if (has_dud_replacement) {
             r = dud_replacement;
         } else {
+            release_round_light(light_pool, r);
             r.active = false;
             --active_count;
         }
     }
 
     trails.tick();
+    light_pool.tick();   // [orig: EffectWorld_TickInstancesAndLightScale @ 0x5AA170]
+}
+
+void RoundSim::rearm_muzzle_glow(uint16_t shooter_handle, const Vec3 &muzzle_pos) {
+    // [orig: Entity_UpdateMuzzleGlowEffect @ 0x56C960 — the witnessed constants:
+    // spawn state 3 / ticks -1 / radius 0x18000 (1.5 u) / colour 0xFFE0A0 @ 0x56C987;
+    // per shot re-arm to state 4 with 5 ticks and blend 1.0 @ 0x56C9A2. State 4 is
+    // outside the fade set, so the glow holds full blend for its 5 ticks (~80 ms)
+    // and is then freed; the next shot's invalid cached handle re-spawns.]
+    constexpr int32_t kMuzzleRadiusQ16 = 0x18000;
+    constexpr uint32_t kMuzzleColor = 0xFFE0A0u;
+    constexpr int32_t kMuzzleTicks = 5;
+    const int32_t pos[3] = { to_fixed(muzzle_pos.x), to_fixed(muzzle_pos.y),
+                             to_fixed(muzzle_pos.z) };
+    int32_t handle = 0;
+    const auto it = muzzle_glow_handles.find(shooter_handle);
+    if (it != muzzle_glow_handles.end()) handle = it->second;
+    if (light_pool.get(handle) == nullptr) {
+        handle = light_pool.spawn(pos, kMuzzleRadiusQ16, kMuzzleColor,
+                                  LightPool::kStateMuzzleParked, -1);
+        if (handle == 0) return;   // pool full — retail's own "no light"
+        muzzle_glow_handles[shooter_handle] = handle;
+    }
+    light_pool.set_position(handle, pos);
+    light_pool.set_state_and_ticks(handle, LightPool::kStateMuzzleShot, kMuzzleTicks);
+    light_pool.set_group(handle, shooter_handle, 0);
+    light_pool.set_blend(handle, 1.0f);
 }
 
 } // namespace opennova::world

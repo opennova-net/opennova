@@ -71,6 +71,9 @@ world::AmmoTable build_ammo_table(const DefAmmoFile &ammo) {
 		e.tracer_item_enemy = d.foe_trcr_type_id;
 		e.light_move_radius = static_cast<float>(d.light_move_radius_fp16) / 65536.0f;
 		e.light_move_color = static_cast<uint32_t>(d.light_move_color);
+		e.light_impact_radius = static_cast<float>(d.light_impact_radius_fp16) / 65536.0f;
+		e.light_impact_color = static_cast<uint32_t>(d.light_impact_color);
+		e.light_impact_ticks = d.light_impact_ticks;
 		table.entries.push_back(std::move(e));
 	}
 	return table;

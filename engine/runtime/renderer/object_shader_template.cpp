@@ -130,16 +130,85 @@ std::string compose_uniforms(ObjectShaderKey key) {
 	u += "\treturn mix(u_hemi_ground_color, u_hemi_sky_color, up);\n";
 	u += "}\n\n";
 
+	// THE DYNAMIC LIGHT POOL, as D3D point lights (D-RLIT-4). Retail uploads every
+	// live pool slot with SetLight(Light_D3DIndexBase + slot, ...)
+	// (retail: sub_5AA560 @ 0x5aa560 -> IDirect3DDevice9::SetLight (vtbl +204),
+	// params filled by Light_FillD3DPointLight @ 0x5aa450), then per draw collects
+	// the nearby slots sorted NEAREST-FIRST by AABB-centre distance (<=4 candidates
+	// for an entity (retail: @ 0x5d6b00 `push 4` -> collect_nearby_zones_by_aabb
+	// @ 0x5aa250, whose tail bubble-sorts by squared distance)) and LightEnables at
+	// most FOUR (retail: update_light_slots @ 0x5abc50 `if (active_count >= 4) goto
+	// disable`). Those D3D lights sum into the fixed-function VERTEX diffuse, which
+	// saturates before the MODULATE2X output stage — so the term belongs INSIDE
+	// obj_ff_lighting's min(), not added to the finished colour.
+	//
+	// Witnessed per-light values (retail: Light_FillD3DPointLight @ 0x5aa450):
+	//   Diffuse     = rgb x blend x EffectWorld_AmbientScale x 1.5 (published
+	//                 already folded by world::LightPool::fill_point_light)
+	//   Range       = radius_fixed x 0.000019073486 = 1.25 x radius_units
+	//   Attenuation = (A0 1, A1 0, A2 15/Range^2) -> 1/(1 + 15 (d/Range)^2),
+	//                 exactly 1/16 at Range; D3D hard-culls past Range.
+	//
+	// RECORDED DIVERGENCE (D-RLIT catalog): retail evaluates this in the FF VERTEX
+	// pipeline; this combine already runs per fragment (v_world_normal is
+	// interpolated), so the point light rides the same per-pixel stage. Same
+	// formula, finer sample rate.
+	// RECORDED DIVERGENCE: the four lights are selected once per frame against the
+	// CAMERA (LightPool::collect_render_lights), not per draw against each object's
+	// AABB — a global-uniform set has no per-draw seam. The cap (4) and the
+	// nearest-first order are retail's.
+	u += "global uniform int opennova_dynlight_count;\n";
+	u += "global uniform vec4 opennova_dynlight_pos_range_0;\n";
+	u += "global uniform vec4 opennova_dynlight_pos_range_1;\n";
+	u += "global uniform vec4 opennova_dynlight_pos_range_2;\n";
+	u += "global uniform vec4 opennova_dynlight_pos_range_3;\n";
+	u += "global uniform vec3 opennova_dynlight_diffuse_0;\n";
+	u += "global uniform vec3 opennova_dynlight_diffuse_1;\n";
+	u += "global uniform vec3 opennova_dynlight_diffuse_2;\n";
+	u += "global uniform vec3 opennova_dynlight_diffuse_3;\n\n";
+
+	u += "vec3 obj_dynlight_one(vec4 pos_range, vec3 diffuse, vec3 n, vec3 world_pos) {\n";
+	u += "\tvec3 to_light = pos_range.xyz - world_pos;\n";
+	u += "\tfloat d = length(to_light);\n";
+	u += "\tif (d >= pos_range.w) return vec3(0.0);\n";
+	u += "\tfloat k = d / max(pos_range.w, 0.0001);\n";
+	u += "\tfloat atten = 1.0 / (1.0 + 15.0 * k * k);\n";
+	u += "\tfloat ndotl = max(dot(n, to_light / max(d, 0.0001)), 0.0);\n";
+	u += "\treturn diffuse * (atten * ndotl);\n";
+	u += "}\n\n";
+
+	// Zero lights must add EXACTLY vec3(0.0) so an unlit frame is bit-identical
+	// to the pre-light-pool build (the A/B regression surface for this port).
+	u += "vec3 obj_dynlights(vec3 n, vec3 world_pos) {\n";
+	u += "\tvec3 sum = vec3(0.0);\n";
+	u += "\tif (opennova_dynlight_count > 0) sum += obj_dynlight_one(\n";
+	u += "\t\topennova_dynlight_pos_range_0, opennova_dynlight_diffuse_0, n, world_pos);\n";
+	u += "\tif (opennova_dynlight_count > 1) sum += obj_dynlight_one(\n";
+	u += "\t\topennova_dynlight_pos_range_1, opennova_dynlight_diffuse_1, n, world_pos);\n";
+	u += "\tif (opennova_dynlight_count > 2) sum += obj_dynlight_one(\n";
+	u += "\t\topennova_dynlight_pos_range_2, opennova_dynlight_diffuse_2, n, world_pos);\n";
+	u += "\tif (opennova_dynlight_count > 3) sum += obj_dynlight_one(\n";
+	u += "\t\topennova_dynlight_pos_range_3, opennova_dynlight_diffuse_3, n, world_pos);\n";
+	u += "\treturn sum;\n";
+	u += "}\n\n";
+
 	// The fixed-function lit combine: the D3D vertex diffuse saturates
 	// (hemi + directional clamped to 1), then the output stage is
 	// MODULATE2X(Texture, Diffuse) — texture x diffuse x 2
 	// [orig: _FFP.fx TBoringFFP TSSColor(0, Modulate2x, Texture, Diffuse);
 	//  D3D light 0 setup @ 0x5d9ce2..0x5d9d76].
-	u += "vec3 obj_ff_lighting(vec3 base_rgb, vec3 normal_ws) {\n";
+	// The pool's point lights join the SAME saturating vertex-diffuse sum the
+	// hemisphere and the directional light land in (retail: the D3D FF lighting
+	// stage every LightEnable'd slot feeds, @ 0x5abc50 / 0x5aa560); with no pool
+	// light lit obj_dynlights() returns exactly vec3(0.0) and the combine is
+	// unchanged.
+	u += "vec3 obj_ff_lighting(vec3 base_rgb, vec3 normal_ws, vec3 world_pos) {\n";
 	u += "\tvec3 N = normalize(normal_ws);\n";
 	u += "\tvec3 L = normalize(-u_dir_light_dir);\n";
 	u += "\tfloat ndotl = max(dot(N, L), 0.0);\n";
-	u += "\treturn base_rgb * min(obj_hemi(N) + u_dir_light_color * ndotl, vec3(1.0)) * 2.0;\n";
+	u += "\tvec3 diffuse = obj_hemi(N) + u_dir_light_color * ndotl\n";
+	u += "\t\t+ obj_dynlights(N, world_pos);\n";
+	u += "\treturn base_rgb * min(diffuse, vec3(1.0)) * 2.0;\n";
 	u += "}\n\n";
 
 	// Editor-preview LGHT contribution: returns additive RGB from
@@ -318,7 +387,7 @@ std::string compose_fragment(ObjectShaderKey key) {
 		// cull-none FF draw); the lighting model is the standard FF combine.
 		f += "\tvec3 nfacing = surface_normal;\n";
 		f += "\tif (dot(view_dir, geom_normal) < 0.0) nfacing = -nfacing;\n";
-		f += "\tlit = obj_ff_lighting(base.rgb, nfacing);\n";
+		f += "\tlit = obj_ff_lighting(base.rgb, nfacing, v_world_pos);\n";
 	} else if (family == ObjectShaderFamily::Glass) {
 		// Glass NORMAL technique: the FF lit base plus the environment-cube
 		// reflection scaled by ReflectColor. The live scene cube
@@ -327,7 +396,7 @@ std::string compose_fragment(ObjectShaderKey key) {
 		// dominant content — sky above, ground below — stands in via the
 		// hemisphere sampled along the reflected view (tracked, D-RLIT-5).
 		f += "\tvec3 N = surface_normal;\n";
-		f += "\tvec3 ff_lit = obj_ff_lighting(base.rgb, N);\n";
+		f += "\tvec3 ff_lit = obj_ff_lighting(base.rgb, N, v_world_pos);\n";
 		f += "\tvec3 refl_dir = reflect(-view_dir, N);\n";
 		f += "\tvec3 env = obj_hemi(refl_dir) * 2.0;\n";
 		f += "\tfloat fresnel = pow(1.0 - max(dot(N, view_dir), 0.0), 2.0);\n";
@@ -338,7 +407,7 @@ std::string compose_fragment(ObjectShaderKey key) {
 		f += "\tvec3 N = surface_normal;\n";
 		f += "\tvec3 L = normalize(-u_dir_light_dir);\n";
 		f += "\tfloat ndotl = max(dot(N, L), 0.0);\n";
-		f += "\tlit = obj_ff_lighting(base.rgb, N);\n";
+		f += "\tlit = obj_ff_lighting(base.rgb, N, v_world_pos);\n";
 		if (has_flag(key, OSCAP_SPECULAR)) {
 			// The VS_PHONG* specular is a PhongMap texture lookup along the
 			// reflection vector; the lobe content is unwitnessed — a pow-16
@@ -357,9 +426,9 @@ std::string compose_fragment(ObjectShaderKey key) {
 			f += "\tlit = mix(lit, obj_hemi(reflect(-view_dir, N)) * 2.0, fresnel * 0.35);\n";
 		}
 	} else if (family == ObjectShaderFamily::Dot3) {
-		f += "\tlit = obj_ff_lighting(base.rgb, surface_normal);\n";
+		f += "\tlit = obj_ff_lighting(base.rgb, surface_normal, v_world_pos);\n";
 	} else {
-		f += "\tlit = obj_ff_lighting(base.rgb, surface_normal);\n";
+		f += "\tlit = obj_ff_lighting(base.rgb, surface_normal, v_world_pos);\n";
 	}
 
 	// Layer in the opt-in editor LGHT preview before the emissive override

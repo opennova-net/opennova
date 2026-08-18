@@ -85,6 +85,42 @@ opennova_fog_type={
 "type": "int",
 "value": 1
 }
+opennova_dynlight_count={
+"type": "int",
+"value": 0
+}
+opennova_dynlight_pos_range_0={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+opennova_dynlight_pos_range_1={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+opennova_dynlight_pos_range_2={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+opennova_dynlight_pos_range_3={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+opennova_dynlight_diffuse_0={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
+opennova_dynlight_diffuse_1={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
+opennova_dynlight_diffuse_2={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
+opennova_dynlight_diffuse_3={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
 opennova_wind_sway_amount={
 "type": "float",
 "value": 1.0

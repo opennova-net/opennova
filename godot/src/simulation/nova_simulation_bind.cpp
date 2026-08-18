@@ -201,6 +201,10 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_local_player_weapon_state"), &Simulation::get_local_player_weapon_state);
 	ClassDB::bind_method(D_METHOD("drain_local_player_weapon_events"), &Simulation::drain_local_player_weapon_events);
 	ClassDB::bind_method(D_METHOD("drain_round_impacts"), &Simulation::drain_round_impacts);
+	ClassDB::bind_method(D_METHOD("present_muzzle_glow", "shooter_handle", "muzzle_pos"),
+			&Simulation::present_muzzle_glow);
+	ClassDB::bind_method(D_METHOD("publish_dynamic_lights", "camera_pos"),
+			&Simulation::publish_dynamic_lights);
 	ClassDB::bind_method(D_METHOD("get_local_player_health"), &Simulation::get_local_player_health);
 	ClassDB::bind_method(D_METHOD("get_local_player_health_percent"),
 			&Simulation::get_local_player_health_percent);
