@@ -627,7 +627,19 @@ fixture with extra_polys surfaces.
 - 3DI3: all OCCL leaves in Wcrate5 are count-zero; per-record encodings are
   unvalidated against a fixture with real occlusion geometry.
 - 3DI3: `[orig: LoadRenderVertexBuffer @ 0x474380]` was catalogued but not
-  decompiled; the VERT stride/flag-to-writer-variant mapping is unverified.
+  decompiled; the loader side of the VERT stride/flag mapping is unverified.
+  The WRITER-variant selection is pinned on the shipped JO corpus (2409 `.3di`,
+  2026-08-17): skinned LODs carry the SkinnedExtended layout (0x55, 80 B —
+  weights/indices + tangent/bitangent) iff a material's vertex shader reads the
+  TANGENT semantic (the tangent-space skinned bump family; 457/457), and the
+  SkinnedBasic layout (0x41, 56 B) otherwise (VS_SKBASIC / object-space bump only:
+  Bird1, Boonie, ArmsGb — 147/147); static LODs carry Extended (0x15, 64 B) with
+  the tangent-space VS shaders (1005) and Basic (0x01, 40 B) with FF/VS_FLAG
+  (4077/87). Every first-person arms model referenced by `Avatars.def` is 0x55; a
+  0x41 arms model renders as garbage in retail's first-person pass (observed
+  live, 2026-08-17) while the same model is fine in the world skinned pass, so
+  the ONED converter emits SkinnedExtended under the corpus rule
+  (`oed/rdta.cpp build_render_geometry_skinned`, ctest `oed_skinned_tangents`).
 - GP: global-batch flag-bit discrepancy. The subobject probe (and the IDA
   witness at `0x5108e3`) keys the 92 B subobject allocation on `flags & 2`
   (85/639 files), while the Phase-4 metadata probe counts global-batch RModels

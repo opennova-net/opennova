@@ -19,6 +19,7 @@
 
 #include "oed/types.h"
 #include "oed/export_3di.h"
+#include "oed/material_descriptor.h"
 #include <io/log.h>
 
 namespace oed {
@@ -879,6 +880,23 @@ bool build_render_geometry_skinned(const LodHeader &lod,
         (flags & MATERIAL_FLAG_BLENDING) != 0;
   }
 
+  // Skinned-extended layout (WriteVertices_SkinnedExtended: weights/indices AND
+  // tangent/bitangent, stride 80, flags 0x55) whenever a material's vertex shader
+  // reads the TANGENT semantic -- the tangent-space skinned bump family
+  // (VS_SKBUMPDIFFT / VS_SKBUMPPHONGT / VS_SKBUMPDIFFT2). Pinned on the shipped
+  // JO corpus: 457/457 skinned LODs with a tangent-space shader carry 0x55; the
+  // 147 skinned LODs at 0x41 use only VS_SKBASIC or the OBJECT-space bump
+  // shaders (Bird1, Boonie, ArmsGb). Every first-person arms model in
+  // Avatars.def (ArmsG/ArmGlove/ArmsR/IndoArms) is 0x55.
+  bool has_tangents = false;
+  for (int m = 0; m < material_count && !has_tangents; ++m) {
+    const MaterialDescriptorRecord *desc =
+        find_material_descriptor(material_name(m));
+    if (desc && (desc->shader_flags & MATERIAL_FLAG_TANGENT) != 0) {
+      has_tangents = true;
+    }
+  }
+
   std::vector<std::vector<SmoothedFace>> smoothed_per_sub;
   smoothed_per_sub.reserve(static_cast<size_t>(lod.subobjectCount));
   for (int32_t sub_idx = 0; sub_idx < lod.subobjectCount; ++sub_idx) {
@@ -1258,9 +1276,10 @@ bool build_render_geometry_skinned(const LodHeader &lod,
   }
 
   out_lod.vertices.count = static_cast<uint32_t>(final_vertices.size());
-  out_lod.vertices.stride = 56;
-  out_lod.vertices.flags =
-      static_cast<uint32_t>(THREEDI_VERTEX_FLAG_SKINNED | 1u);
+  out_lod.vertices.stride = has_tangents ? 80 : 56;
+  out_lod.vertices.flags = static_cast<uint32_t>(
+      THREEDI_VERTEX_FLAG_SKINNED |
+      (has_tangents ? THREEDI_VERTEX_FLAG_TANGENTS : 0u) | 1u);
 
   if (out_lod.vertices.count > 0) {
     out_lod.vertices.items = static_cast<ThreediVertex *>(
@@ -1290,7 +1309,15 @@ bool build_render_geometry_skinned(const LodHeader &lod,
       tv.uv1[0] = rv.uv1[0];
       tv.uv1[1] = rv.uv1[1];
       tv.flags = out_lod.vertices.flags;
-      tv.has_tangents = 0;
+      tv.has_tangents = has_tangents ? 1 : 0;
+      if (has_tangents) {
+        tv.tangent[0] = rv.tangent[0];
+        tv.tangent[1] = rv.tangent[1];
+        tv.tangent[2] = rv.tangent[2];
+        tv.bitangent[0] = rv.bitangent[0];
+        tv.bitangent[1] = rv.bitangent[1];
+        tv.bitangent[2] = rv.bitangent[2];
+      }
       tv.is_skinned = 1;
     }
   } else {
