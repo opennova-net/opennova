@@ -1122,6 +1122,14 @@ target_include_directories(minimap_overlay_test PRIVATE ${CMAKE_CURRENT_SOURCE_D
 target_compile_features(minimap_overlay_test PRIVATE cxx_std_17)
 add_test(NAME minimap_overlay COMMAND minimap_overlay_test)
 
+# The guided-missile flight integrator (D-NET-64): ignition hold, boost ramp,
+# BAM turn clamp, the three termination tests and their ordering.
+add_executable(guided_missile_flight_test world/guided_missile_flight_test.cpp)
+target_link_libraries(guided_missile_flight_test PRIVATE opennova_runtime)
+target_include_directories(guided_missile_flight_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(guided_missile_flight_test PRIVATE cxx_std_17)
+add_test(NAME guided_missile_flight COMMAND guided_missile_flight_test)
+
 # AI subsystem (byte-exact foundation): state enum + struct layout, AIEvent ring,
 # budget gate (AI_BeginUpdate), the infantry state-machine dispatcher + transitions,
 # and the trivial enter/exit/event handler ports.
@@ -1899,6 +1907,13 @@ add_executable(nw_ingame_guided_test novaworld/nw_ingame_guided_test.cpp)
 target_link_libraries(nw_ingame_guided_test PRIVATE opennova_net)
 target_include_directories(nw_ingame_guided_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME nw_ingame_guided COMMAND nw_ingame_guided_test)
+
+# Wire validation of the guided codec against a real local Karo capture —
+# asset-gated (NW_KARO_GUIDED_PCAP; skips as pass), the D-NET-64 capture leg.
+add_executable(nw_karo_guided_test novaworld/nw_karo_guided_test.cpp)
+target_link_libraries(nw_karo_guided_test PRIVATE opennova_net opennova_base)
+target_include_directories(nw_karo_guided_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME nw_karo_guided COMMAND nw_karo_guided_test)
 
 # Backend schema regression — applies the actual backend/migrations/* and
 # backend/seed/* the standalone server uses, so SQL syntax errors and seed

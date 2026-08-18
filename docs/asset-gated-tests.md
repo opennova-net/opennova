@@ -29,6 +29,7 @@ tracked files. Capture files default to `${CMAKE_SOURCE_DIR}/.scratch/…`
 | `NW_PROBE3AGAIN_PCAP` (+ `NW_PROBE3AGAIN_HOST_SPH`) | ctest `nw_probe3again_lifecycle`, `nw_capture_decoder` extra leg | 3-player co-op capture + host `.sph` oracle | never |
 | `NW_WHITENOISE_PCAP` | ctest `nw_whitenoise_coverage` | stock retail co-op capture | never |
 | `NW_GOLDEN_GAMEPLAY` | ctest `npruntime_golden_gameplay`, `npruntime_golden_client`, `nw_golden_diff` | golden retail↔retail gameplay capture (`.scratch/golden/retail-gameplay-session.pcapng`) | never |
+| `NW_KARO_GUIDED_PCAP` | ctest `nw_karo_guided` | a local retail Karo Highlands capture carrying Stinger guided traffic (S2C 0x44) - the D-NET-64 wire-validation leg | never |
 | `NW_GOLDEN_LAN_JOIN` / `NW_GOLDEN_LAN_JOIN_SESSION` | ctest `npruntime_golden_lan_join`, `npruntime_two_endpoint_socket` cross-check, `npruntime_golden_lan_join_session` | golden retail LAN host/join captures | never |
 | `NW_GOLDEN_OURS` | ctest `nw_golden_diff` ("ours" side) | our own freshly captured join | committable in principle, but the diff needs the retail golden too |
 | `NW_GOLDEN_VEHICLE_SESSION` + `NW_ITEMS_DEF` | ctest `netsim_client_replica_pipeline_capture_parent_follow` (skips clean when either is absent) | golden retail vehicle-session capture (`.scratch/golden/retail-vehicle-session.pcapng`) + an extracted retail `ITEMS.DEF` for compact-record class resolution | never |

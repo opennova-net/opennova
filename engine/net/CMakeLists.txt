@@ -63,6 +63,7 @@ add_library(opennova_net STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/netsim/client_replica_minimap.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/netsim/client_replica_pipeline.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/netsim/client_replica_placed_device.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/netsim/client_replica_guided.cpp  # the 0x44 guidance fold + client flight (D-NET-64)
     ${CMAKE_CURRENT_SOURCE_DIR}/netsim/client_world_materializer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/netsim/connection_fan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/netsim/udp_session_transport.cpp

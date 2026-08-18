@@ -157,6 +157,10 @@ struct AmmoTableEntry {
     float light_impact_radius = 0.0f; // +132 (16.16 -> float units; 0 = no light)
     uint32_t light_impact_color = 0;  // +128 packed 0xRRGGBB
     int32_t light_impact_ticks = 0;   // +136 fade duration in 62 Hz ticks
+    // The guided-pursuit turn clamps in BAM/tick (`turnrate_maxpit`/`maxyaw`
+    // [orig: +0x50/+0x54, deg/tick * 192426]; 0 = the integrator default).
+    int32_t turnrate_maxpit = 0;      // +80
+    int32_t turnrate_maxyaw = 0;      // +84
     bool valid = false;
 };
 
