@@ -240,6 +240,15 @@ private:
 		int32_t wpn_variant = 0;
 		int32_t wpn_src_variant = 0;
 		int32_t wpn_phase = INT32_MIN;
+		// The footstep scan's consumed playhead: the last wire clip phase
+		// whose authored trigger words were queued, and the clip state it
+		// belongs to. foot_state -2 = "no clip seen" — the next armed frame
+		// seeds the cursor through the scan contract's two forms
+		// (adm_root_motion.h): a clip observed at its start scans from -1 so
+		// frame 0 fires; one observed mid-clip seeds at the playhead so
+		// nothing back-fires.
+		int32_t foot_state = -2;
+		int32_t foot_phase = -1;
 	};
 
 	struct RemoteBodyCache {

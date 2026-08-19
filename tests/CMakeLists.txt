@@ -1211,6 +1211,13 @@ target_include_directories(slot_sound_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(slot_sound_test PRIVATE cxx_std_17)
 add_test(NAME slot_sound COMMAND slot_sound_test)
 
+# The wire-fed remote body's footstep/foley consume (the slot-sound sibling).
+add_executable(wire_body_sound_test world/wire_body_sound_test.cpp)
+target_link_libraries(wire_body_sound_test PRIVATE opennova_runtime)
+target_include_directories(wire_body_sound_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(wire_body_sound_test PRIVATE cxx_std_17)
+add_test(NAME wire_body_sound COMMAND wire_body_sound_test)
+
 # World-object collision (Entity_TestCollisionSections @0x4aef90 / _RaycastCollisionModel
 # @0x413060 / _ComputeBoneCollisionForce @0x4ae150 / _ProcessCollisionAndPlatformPhysics
 # @0x4b2bd0): matrix roundtrip, blink type-8 query + flags^6/indoors, type-1 segment

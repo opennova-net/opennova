@@ -4,6 +4,7 @@
 // wins. One implementation serves both body channels (the authority/AI bodies
 // and the wire-fed remote bodies), so a regression here changes both at once.
 #include <cstdio>
+#include <string>
 
 #include <audio/footstep_slot.h>
 
@@ -56,6 +57,61 @@ void test_zero_water_plane_is_disabled_not_sea_level() {
           kSlotFootLGround);
 }
 
+// organic_slot_set — the wire body channel's profile resolve, mirroring the
+// authority path's fallback chain [orig: Entity_GetProfileSlotSound @0x528300;
+// the "default" seed @0x49e3f5; the find-miss base @0x526e30].
+constexpr char kProfiles[] =
+    "begin \"default\"\n"
+    "     SSLFootGND     FSP_DIRT_L\n"
+    "end\n"
+    "begin \"SP_Man\"\n"
+    "     SSLFootGND     FSP_MAN_L\n"
+    "     ssaudio1       RUSTLE_M\n"
+    "end\n"
+    "begin \"SP_Woman\"\n"
+    "     SSLFootGND     FSP_WOMAN_L\n"
+    "end\n";
+
+void test_organic_slot_set_resolve_chain() {
+    SoundProfileTable profiles;
+    CHECK(profiles.parse(kProfiles, sizeof(kProfiles) - 1) == 3);
+    OrganicSoundProfileTable bindings;
+    OrganicSoundProfile bound;
+    bound.primary = 1; // SP_Man
+    bound.female = 2;  // SP_Woman
+    bindings.set(42, bound);
+
+    // The bound primary resolves its authored set.
+    const std::string *set =
+        organic_slot_set(profiles, bindings, 42, /*female=*/false, kSlotFootLGround);
+    CHECK(set != nullptr && *set == "FSP_MAN_L");
+    // The female byte selects the female binding.
+    set = organic_slot_set(profiles, bindings, 42, true, kSlotFootLGround);
+    CHECK(set != nullptr && *set == "FSP_WOMAN_L");
+    // An UNRESOLVED female binding falls to "default", never back to the
+    // primary — the authority path's unconditional select.
+    OrganicSoundProfile detached;
+    detached.primary = 1;
+    detached.female = -1;
+    bindings.set(43, detached);
+    set = organic_slot_set(profiles, bindings, 43, true, kSlotFootLGround);
+    CHECK(set != nullptr && *set == "FSP_DIRT_L");
+    // An unbound item type resolves through "default".
+    set = organic_slot_set(profiles, bindings, 99, false, kSlotFootLGround);
+    CHECK(set != nullptr && *set == "FSP_DIRT_L");
+    // An empty authored slot is the resolved-id-0 no-op: play NOTHING.
+    set = organic_slot_set(profiles, bindings, 99, false, kSlotAudio1);
+    CHECK(set == nullptr);
+    // A bound profile with the slot authored still resolves it.
+    set = organic_slot_set(profiles, bindings, 42, false, kSlotAudio1);
+    CHECK(set != nullptr && *set == "RUSTLE_M");
+    // Out-of-range slots and an empty profile table resolve to nothing.
+    CHECK(organic_slot_set(profiles, bindings, 42, false, -1) == nullptr);
+    CHECK(organic_slot_set(profiles, bindings, 42, false, 1000) == nullptr);
+    SoundProfileTable empty;
+    CHECK(organic_slot_set(empty, bindings, 42, false, kSlotFootLGround) == nullptr);
+}
+
 } // namespace
 
 int main() {
@@ -64,6 +120,7 @@ int main() {
     test_on_entity_beats_snow();
     test_water_beats_everything_and_ignores_foot();
     test_zero_water_plane_is_disabled_not_sea_level();
+    test_organic_slot_set_resolve_chain();
     if (failures == 0) std::printf("footstep_slot_test: all passed\n");
     return failures == 0 ? 0 : 1;
 }

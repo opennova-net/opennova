@@ -50,9 +50,13 @@ inline const std::string *organic_slot_set(const SoundProfileTable &profiles,
                                            int32_t item_id, bool female, int slot) {
 	if (slot < 0 || slot >= kSoundProfileSlotCount) return nullptr;
 	if (profiles.entries().empty()) return nullptr;
+	// The female byte selects the female binding UNCONDITIONALLY — an
+	// unresolved female slot falls through the "default" chain below, exactly
+	// like the authority path (AiSystem::emit_slot_sound), never back to the
+	// primary. (The def parser seeds both names, so in practice both resolve.)
 	int16_t index = -1;
 	if (const OrganicSoundProfile *b = bindings.get(item_id))
-		index = female && b->female >= 0 ? b->female : b->primary;
+		index = female ? b->female : b->primary;
 	const SoundProfile *p =
 			(index >= 0 && static_cast<size_t>(index) < profiles.entries().size())
 					? &profiles.entries()[static_cast<size_t>(index)]

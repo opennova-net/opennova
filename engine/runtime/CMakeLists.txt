@@ -159,6 +159,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_motor.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/vehicle_sound.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/weapon_fsm.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/wire_body_sound.cpp    # the wire-fed remote body's footstep/foley consume
     ${CMAKE_CURRENT_SOURCE_DIR}/world/weapon_inventory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/zone_capture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/zone_chain.cpp

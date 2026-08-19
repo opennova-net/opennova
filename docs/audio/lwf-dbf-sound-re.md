@@ -416,22 +416,36 @@ never coalesced, a fresh clip fires frame 0, a mid-clip attach back-fires
 nothing — alongside `capsule_bottom_at` for the foot-level dip `[orig: the
 AnimMap out[3] cell @0x4b77d3]`. The decoded groundEntity link now reaches
 presentation as `PF_CARRIER_HANDLE`, so the on-entity slot is resolvable off a
-wire row. LEG LANDED 2026-08-19: the profile question is answered the way master already
-answers it for vehicles — the item-traits sweep now retains each ORGANIC item
-type's `sound_profile` / `sound_profile_female` pair in
-`world.organic_sound_profiles` alongside the AiEntity bind, and
-`audio::organic_slot_set` resolves a slot for a body identified only by its
-items.def type id, mirroring the witnessed fallback chain (female byte, the
-"default" profile, and the resolved-id-0 no-op) `[orig: Entity_GetProfileSlotSound
-@0x528300, female @0x52831c; ItemDef_AllocateWithDefaults @0x49e3f5; the
-find-miss base @0x526e30]`. `Simulation::present_wire_body_sounds` walks the
-trigger words a row's WIRE-DRIVEN playhead crossed (the clip identity comes from
-the existing `client_row_adm_by_type_` resolve) and queues `SoundSlotEvent`s
-through the same `drain_slot_sounds` player the authority bodies use — foley
-FIRST at the body origin with no dip or surface pick, then the feet at foot
-level dipped by that frame's capsule bottom `[orig: org1 @0x4bf169-0x4bf23e
-precedes org2 @0x4b76e6-0x4b78a8]`. Residual: the parachute family (41-43) and
-the velocity-gated freefall slot 44 stay out — the wire carries no vertical
+wire row. LEG LANDED 2026-08-19: the profile question is answered per DEF —
+`resolve_ai_weapons` resolves every items.def row's `sound_profile` /
+`sound_profile_female` pair into `world.organic_sound_profiles`, keyed by item
+type, so a joiner (whose world spawns no mission AI) still resolves every
+replicated type `[orig: ItemDef_ResolveAllResources @0x49e5f0 resolves the
+sound region for each def]`. `audio::organic_slot_set` then resolves a slot for
+a body identified only by its items.def type id, mirroring the authority
+path's witnessed fallback chain (the unconditional female select, the
+"default" profile whose find-miss returns the base, and the resolved-id-0
+no-op) `[orig: Entity_GetProfileSlotSound @0x528300, female @0x52831c;
+ItemDef_AllocateWithDefaults @0x49e3f5; the find-miss base @0x526e30]`.
+The consume itself is the portable `world::wire_body_slot_sounds`
+(world/wire_body_sound.cpp, the `infantry_anim_sound_pass` sibling, pinned by
+ctest `wire_body_sound`); `Simulation::present_wire_body_sounds` feeds it the
+words a row's WIRE-DRIVEN playhead crossed (the clip identity comes from the
+existing `client_row_adm_by_type_` resolve; the consume cursor seeds through
+the scan contract's two forms, so a mid-clip enter-range attach back-fires
+nothing) and the result queues through the same `drain_slot_sounds` player the
+authority bodies use. Each drawn body keeps exactly ONE sound source: the
+wire consume runs only for rows the wire pass renders (a joiner's remote
+rows; a listen host's admitted players — authored rows defer to the authority
+presenter), and the authority tick's sound pass never reaches net-snapped
+peers `[orig: the @0x4b9a03 net-snap flag test exits Entity_UpdateInfantryAI
+past the sound block — each machine consumes from the body updater of every
+body it draws]` — foley FIRST at the body origin with no dip or surface
+pick, then the feet at foot level dipped by that frame's capsule bottom
+`[orig: each body's foley block precedes its foot block — org1
+@0x4bf169-0x4bf23e / @0x4bf23e-0x4bf2b0, org2 @0x4b76f1-0x4b77c6 /
+@0x4b77c6-0x4b78a8]`. Residual: the parachute family (41-43) and the
+velocity-gated freefall slot 44 stay out — the wire carries no vertical
 velocity, so freefall has no witnessed equivalent here.
 
 ## Placed ambient markers — the envsnd emitter system (grilled 2026-07-10)
