@@ -569,10 +569,11 @@ void SkeletalAnim::splice_weapon_channel(Array &p_pose, const String &p_wpn_key,
 	// world-wac-ai-re.md §14.8.6]
 	//
 	// Empty key = the gate is off; that is the ONLY no-splice case. A key whose clip is
-	// absent binds RESET at registration instead of no-opping [orig: the backfill loops
-	// @0x40bc24 / @0x40bd2e], and eval_pose_blended already owns that fallback for the
-	// primary channel — routing through it keeps one rule for both channels and gives
-	// the secondary its own cross-fade in the same call.
+	// absent binds RESET at registration instead of no-opping (retail: the backfill
+	// loops @0x40bc24 / @0x40bd2e, see docs/world/world-wac-ai-re.md §14.8.1), and
+	// eval_pose_blended already owns that fallback for the primary channel — routing
+	// through it keeps one rule for both channels and gives the secondary its own
+	// cross-fade in the same call.
 	if (p_wpn_key.is_empty()) {
 		return;
 	}

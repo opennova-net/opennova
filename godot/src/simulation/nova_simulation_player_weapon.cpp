@@ -625,7 +625,8 @@ Dictionary Simulation::get_local_player_weapon_state() const {
 	out["body_anim_phase"] = 0;
 	// The secondary channel's cross-fade + served variant ride beside the key: the
 	// outgoing clip at its own playhead, the ramping weight, and the ring entry each
-	// play latched [orig: AnimMap_UpdateEntity @0x40b5f0 re-init; the +68 latch].
+	// play latched (retail: the AnimMap_UpdateEntity @0x40b5f0 re-init + the +68
+	// latch, see docs/world/world-wac-ai-re.md §14.8.7).
 	out["body_anim_prev_key"] = String();
 	out["body_anim_prev_phase"] = 0;
 	out["body_anim_blend_weight"] = 1.0f;

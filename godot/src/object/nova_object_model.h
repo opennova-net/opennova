@@ -301,7 +301,8 @@ private:
 	int wpn_phase_ticks_ = 0;
 	// The secondary channel's outgoing clip + cross-fade weight (the sim's
 	// wpn_prev / wpn_prev_clip_phase / wpn_blend_weight). Empty prev key = the
-	// channel is not blending. [orig: AnimMap_UpdateEntity @0x40b5f0 re-init]
+	// channel is not blending (retail: the AnimMap_UpdateEntity @0x40b5f0
+	// re-init, see docs/world/world-wac-ai-re.md §14.8.7).
 	String wpn_prev_key_;
 	int wpn_prev_phase_ticks_ = 0;
 	float wpn_blend_weight_ = 1.0f;
