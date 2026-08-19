@@ -468,6 +468,31 @@ int main() {
         CHECK(player_b->profile.sound_profile_female == -1);
     }
 
+    // ---- the per-DEF organic binding (the wire body channel's resolve) ----
+    // Resolved for every def, not per spawned AiEntity — a joiner world with
+    // no mission AI still binds every replicated type; the tank def has no
+    // AiEntity here and still binds. [orig: ItemDef_ResolveAllResources
+    // @ 0x49e5f0 resolves the sound region for each def]
+    const audio::OrganicSoundProfile *rifle_op = w.organic_sound_profiles.get(510);
+    CHECK(rifle_op != nullptr);
+    if (rifle_op != nullptr) {
+        CHECK(rifle_op->primary == 1); // SP_Test
+        CHECK(rifle_op->female == 2);  // SP_TestFemale
+    }
+    const audio::OrganicSoundProfile *tank_op = w.organic_sound_profiles.get(500);
+    CHECK(tank_op != nullptr);
+    // "SP_Tank" is not in the profile table: the witnessed find-miss binds the
+    // array base [orig: SoundProfile_FindSlotByName @ 0x526e30].
+    if (tank_op != nullptr) CHECK(tank_op->primary == 0);
+    // An unauthored pair stays -1 — the emit side falls to "default".
+    const audio::OrganicSoundProfile *player_op =
+            w.organic_sound_profiles.get(5305);
+    CHECK(player_op != nullptr);
+    if (player_op != nullptr) {
+        CHECK(player_op->primary == -1);
+        CHECK(player_op->female == -1);
+    }
+
     def_free_items(&file);
     if (failures == 0) std::printf("simassets_item_traits: OK\n");
     return failures == 0 ? 0 : 1;

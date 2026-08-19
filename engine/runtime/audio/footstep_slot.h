@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 #include "audio/sound_profile.h"
 
@@ -33,6 +34,36 @@ inline int footstep_slot(int32_t feet_z, int32_t water_z, bool on_entity,
 	if (on_entity) return foot == 0 ? kSlotFootLObject : kSlotFootRObject;
 	if (surface_type == 3) return foot == 0 ? kSlotFootLSnow : kSlotFootRSnow;
 	return foot == 0 ? kSlotFootLGround : kSlotFootRGround;
+}
+
+// Resolve one sound-profile SLOT to its authored set name for a body identified
+// only by its items.def type id — the wire body channel's equivalent of the
+// authority path's bound AiProfile index. Mirrors the witnessed fallback chain
+// [orig: Entity_GetProfileSlotSound @0x528300 — the female byte @0x52831c; the
+//  unresolved-binding fallback to "default", itself falling back to the first
+//  profile: ItemDef_AllocateWithDefaults @0x49e3f5 seeds FindSlotByName
+//  ("default"), and the find-miss returns the base @0x526e30].
+// Returns nullptr when the slot resolves to nothing — the id-0 no-op retail
+// treats as "play no sound" rather than a fallback.
+inline const std::string *organic_slot_set(const SoundProfileTable &profiles,
+                                           const OrganicSoundProfileTable &bindings,
+                                           int32_t item_id, bool female, int slot) {
+	if (slot < 0 || slot >= kSoundProfileSlotCount) return nullptr;
+	if (profiles.entries().empty()) return nullptr;
+	// The female byte selects the female binding UNCONDITIONALLY — an
+	// unresolved female slot falls through the "default" chain below, exactly
+	// like the authority path (AiSystem::emit_slot_sound), never back to the
+	// primary. (The def parser seeds both names, so in practice both resolve.)
+	int16_t index = -1;
+	if (const OrganicSoundProfile *b = bindings.get(item_id))
+		index = female ? b->female : b->primary;
+	const SoundProfile *p =
+			(index >= 0 && static_cast<size_t>(index) < profiles.entries().size())
+					? &profiles.entries()[static_cast<size_t>(index)]
+					: profiles.find("default");
+	if (p == nullptr) return nullptr;
+	const std::string &set = p->set_names[static_cast<size_t>(slot)];
+	return set.empty() ? nullptr : &set;   // the resolved-id-0 no-op
 }
 
 } // namespace opennova::audio

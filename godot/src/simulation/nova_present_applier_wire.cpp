@@ -324,6 +324,11 @@ void PresentApplier::present_one_wire_row(WireRow &row, ObjectModel *model,
 		row.wpn_state = INT32_MIN;
 		row.wpn_src_state = INT32_MIN;
 		row.wpn_phase = INT32_MIN;
+		// The fresh life's clip may reuse the old state id with a restarted
+		// playhead; a held foot cursor would compare against the old
+		// monotonic phase and silence the feet until it caught up.
+		row.foot_state = -2;
+		row.foot_phase = -1;
 	}
 	apply_wire_body_anim(row, model, snap, tick_delta);
 	// The upper-body weapon channel: the hold pose this player's held weapon and
@@ -362,6 +367,55 @@ void PresentApplier::present_one_wire_row(WireRow &row, ObjectModel *model,
 			row.wpn_weight = wpn_weight;
 			row.wpn_variant = wpn_variant;
 			row.wpn_src_variant = wpn_src_variant;
+		}
+	}
+	// REMOTE-BODY SOUNDS: walk the authored trigger words this row's clip
+	// playhead just crossed and queue the witnessed footstep/foley slots. The
+	// wire playhead is the authority here (closer to retail than a free-running
+	// clip). A clip change seeds the consume cursor through the scan
+	// contract's two forms (adm_root_motion.h): observed within its first
+	// ticks it is a fresh start — scan from -1 so frame 0 fires; observed
+	// deeper in (an enter-range attach, a ratio-seeded wire retarget, a plan
+	// rebuild) it is a mid-clip landing — seed at the playhead so the crossed
+	// prefix never back-fires as a burst.
+	{
+		// The netsim seeds a retargeted clip at phase 0 and advances once per
+		// tick, so a fresh clip's first observed playhead is a few ticks in at
+		// most; anything past this is a mid-clip landing.
+		constexpr int32_t kFreshClipTicks = 3;
+		Simulation *sim =
+				Object::cast_to<Simulation>(ObjectDB::get_instance(sim_id_));
+		const int32_t foot_state = wfield_i(p, base, Simulation::PF_ANIM_STATE);
+		const int32_t foot_phase =
+				wfield_i(p, base, Simulation::PF_ANIM_PHASE_TICKS);
+		// Armed tuple rows only (PF_ANIM_REMOTE_REQUEST == 0): the request
+		// path publishes a model-FSM ratio in the phase field, not the
+		// simulation playhead this consume walks.
+		const bool foot_armed =
+				wfield_i(p, base, Simulation::PF_ANIM_REMOTE_REQUEST) == 0;
+		if (sim != nullptr && foot_armed && foot_state >= 0 && foot_phase >= 0) {
+			if (foot_state != row.foot_state) {
+				row.foot_state = foot_state;
+				row.foot_phase =
+						foot_phase <= kFreshClipTicks ? -1 : foot_phase;
+			}
+			if (foot_phase > row.foot_phase) {
+				sim->present_wire_body_sounds(
+						wfield_i(p, base, Simulation::PF_TYPE_ID),
+						wfield_i(p, base, Simulation::PF_CHARACTER_ID),
+						wfield_i(p, base, Simulation::PF_WIRE_HANDLE),
+						wfield_i(p, base, Simulation::PF_CARRIER_HANDLE),
+						foot_state, row.foot_phase, foot_phase,
+						Vector3(p[base + Simulation::PF_POS_X],
+								p[base + Simulation::PF_POS_Y],
+								p[base + Simulation::PF_POS_Z]));
+			}
+			row.foot_phase = foot_phase;
+		} else {
+			// No clip this frame: drop the cursor so a re-armed clip re-seeds
+			// instead of comparing against a stale monotonic playhead.
+			row.foot_state = -2;
+			row.foot_phase = -1;
 		}
 	}
 	const bool next_visible =

@@ -334,6 +334,26 @@ int resolve_ai_weapons(world::World &world, const DefItemsFile &items) {
     // fallback (index stays -1). [orig: the def+0x268 parse binding
     // @ 0x49fb0f-0x49fb64; alloc seed @ 0x49e3f5]
     if (!world.sound_profiles.empty()) {
+        // The same pair, resolved PER DEF and retained by item type so a
+        // wire-fed body — which has no AiEntity to carry a bound index — can
+        // resolve its footstep/foley sets at presentation time. Per-def, not
+        // per-spawned-instance: retail resolves every def's sound region at
+        // load, and a joiner (whose world spawns no mission AI) still needs
+        // every replicated type's binding. [orig: ItemDef_ResolveAllResources
+        // @ 0x49e5f0 — the sound-region resolve runs for each def]
+        for (size_t i = 0; i < items.count; ++i) {
+            const DefItemDef &def = items.entries[i];
+            if (def.id < mission::kItemIdOffset) continue;
+            audio::OrganicSoundProfile op;
+            if (def.sound_profile[0] != '\0')
+                op.primary = static_cast<int16_t>(
+                        world.sound_profiles.index_of(def.sound_profile));
+            if (def.sound_profile_female[0] != '\0')
+                op.female = static_cast<int16_t>(
+                        world.sound_profiles.index_of(def.sound_profile_female));
+            world.organic_sound_profiles.set(
+                    def.id - mission::kItemIdOffset, op);
+        }
         for (int i = 0; i < world.ai->count(); ++i) {
             world::AiEntity *ae = world.ai->at(i);
             if (ae == nullptr) continue;

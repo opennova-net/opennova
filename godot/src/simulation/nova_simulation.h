@@ -161,6 +161,7 @@ public:
 		PF_TYPE_ID = opennova::world::PF_TYPE_ID,
 		PF_WIRE_HANDLE = opennova::world::PF_WIRE_HANDLE,
 		PF_CHARACTER_ID = opennova::world::PF_CHARACTER_ID,
+		PF_CARRIER_HANDLE = opennova::world::PF_CARRIER_HANDLE,
 		PF_AIM_OVERLAY_VALID = opennova::world::PF_AIM_OVERLAY_VALID,
 		PF_AIM_BODY_PITCH_DEG = opennova::world::PF_AIM_BODY_PITCH_DEG,
 		PF_AIM_BODY_YAW_DEG = opennova::world::PF_AIM_BODY_YAW_DEG,
@@ -1747,6 +1748,19 @@ public:
 	// slot} — played by the fire present pass at full volume
 	// [orig: Entity_PlaySound3D_FullVolume @ 0x528e20].
 	Array drain_slot_sounds();
+
+	// Queue this frame's REMOTE-body footsteps and foley for one wire row.
+	// Runs only for wire-RENDERED bodies (a joiner's remote rows, a listen
+	// host's admitted players); the authority tick's sound pass never reaches
+	// net-snapped peers, so each drawn body has exactly one source. The
+	// applier supplies the row's identity, the wire-driven clip playhead span
+	// it just crossed, and its world pose; the witnessed consume itself is
+	// the portable world::wire_body_slot_sounds (world/wire_body_sound.h),
+	// fed through the same SoundSlotEvent drain the authority bodies use
+	// (retail: the org1/org2 sound blocks, see docs/audio/lwf-dbf-sound-re.md).
+	void present_wire_body_sounds(int p_type_id, int p_character_id,
+			int p_wire_handle, int p_carrier_handle, int p_anim_state,
+			int p_from_phase, int p_to_phase, const Vector3 &p_pos);
 	// Drain persistent entity-attached emitter registrations. Producers refresh
 	// a keyed (source_spawn_id, lane) intent; the audio layer expands `set` into
 	// LWF layers and owns keep-alive, spatial ranking, and physical voices.

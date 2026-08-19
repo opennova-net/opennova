@@ -12,6 +12,7 @@
 #include <npwire/ingame_decode.h> // kRoundEventFlag* (the fire-mode byte)
 #include <npwire/ingame_message_id.h>
 #include <hud/feed_format.h> // the witnessed feed line/color policy
+#include <world/wire_body_sound.h> // the wire-fed remote body's footstep/foley consume
 #include <npwire/net_ports.h> // lan_host_bind_ports (the D-NET-210 bind scan)
 #include <vfs/vfs.h> // vfs_expansion_version_checksum (the D-NET-166 JOIN CRC)
 #include <npwire/wire_handle.h>  // pool()/kPoolItem/kInvalid (the wire handle home)
@@ -1489,4 +1490,45 @@ String Simulation::format_feed_camp_line(const String &p_template,
 	return String::utf8(opennova::hud::feed_format_camp_line(
 			p_template.utf8().get_data(), p_wpname.utf8().get_data())
 			                    .c_str());
+}
+
+
+// One wire row's REMOTE-body sounds for this frame: resolve the row's clip,
+// scan the trigger words its wire-driven playhead crossed, and hand the
+// witnessed consume to the portable engine leg
+// (world::wire_body_slot_sounds; the witness map lives in
+// world/wire_body_sound.h and docs/audio/lwf-dbf-sound-re.md).
+//
+// Exactly one sound source per drawn body: this consume runs only for rows
+// the wire pass renders (a joiner's remote rows; a listen host's admitted
+// players — authored rows defer to the authority presenter and never enter
+// the wire plan), and the authority tick's sound pass never reaches
+// net-snapped peers (tick_infantry returns at the net-snap gate before the
+// consume — retail: the @0x4b9a03 flag test exits past the sound block, and
+// each machine instead consumes from the body updater of every body it
+// draws; see docs/audio/lwf-dbf-sound-re.md).
+void Simulation::present_wire_body_sounds(int p_type_id, int p_character_id,
+		int p_wire_handle, int p_carrier_handle, int p_anim_state,
+		int p_from_phase, int p_to_phase, const Vector3 &p_pos) {
+	if (!world_installed_ || !world_ || p_anim_state < 0) return;
+	if (p_to_phase <= p_from_phase) return;
+	const auto adm = client_row_adm_by_type_.find(static_cast<uint16_t>(p_type_id));
+	if (adm == client_row_adm_by_type_.end() || adm->second < 0) return;
+
+	uint32_t words[16] = {};
+	const int n = infantry_anim_.scan_triggers(adm->second, p_anim_state,
+			p_from_phase, p_to_phase, words, 16);
+	if (n <= 0) return;
+	// The dip belongs to the frame the playhead ended on (a multi-frame
+	// catch-up dips all its words by the final frame's bottom — the scan
+	// carries no per-word phases).
+	const int32_t capsule_bottom =
+			infantry_anim_.capsule_bottom_at(adm->second, p_anim_state, p_to_phase);
+	// Godot (x, y, z) -> mission (x, -z, y) 16.16, the drain's own convention.
+	const int32_t body[3] = { static_cast<int32_t>(p_pos.x * 65536.0f),
+		                      static_cast<int32_t>(-p_pos.z * 65536.0f),
+		                      static_cast<int32_t>(p_pos.y * 65536.0f) };
+	opennova::world::wire_body_slot_sounds(*world_, words, n, capsule_bottom,
+			p_type_id, static_cast<uint16_t>(p_character_id),
+			static_cast<uint16_t>(p_wire_handle), p_carrier_handle >= 0, body);
 }
