@@ -155,7 +155,7 @@ func test_legacy_single_detail_trn_promotes_into_splat_slots() -> void:
 	var placeholder := TerrainEditorSlots.FAR_DETAIL_PLACEHOLDER_COLOR.to_html(false)
 	assert_ne(expected, placeholder, "Fixture detail must be distinguishable from the export placeholder.")
 	for slot_id in ["detail_c1", "detail_c2", "detail_c3", "detailmapdist"]:
-		var texture: Texture2D = TerrainEditorSlots.get_slot_texture(editor._data, slot_id)
+		var texture: Texture2D = editor.get_slot_texture(slot_id)
 		assert_not_null(texture, "%s should be seeded from the single detail texture." % slot_id)
 		if texture == null:
 			continue
@@ -165,17 +165,18 @@ func test_legacy_single_detail_trn_promotes_into_splat_slots() -> void:
 	# The preview must bind an all-A blend map on TerrainData (not only the
 	# material): a null u_blendmap samples Godot's white default and sums all
 	# three layers into a x3 blow-out on the x4 splat stage.
-	var bound_blend: Texture2D = editor._get_material().get_shader_parameter("u_blendmap")
+	var bound_blend: Texture2D = editor.terrain_mesh.get_material().get_shader_parameter("u_blendmap")
 	assert_not_null(bound_blend, "A blend-map-less terrain still binds a blend map after the surface-inputs rebuild.")
 	if bound_blend != null:
 		assert_eq(bound_blend.get_image().get_pixel(3, 5).to_html(false), Color(1, 0, 0).to_html(false),
 			"The default blend map selects layer A everywhere (retail's no-blend-map outcome).")
-	assert_not_null(editor._data.get_detailblendmap(), "TerrainData carries the default blend map so rebuilds keep it.")
+	assert_not_null(editor.get_data().get_detailblendmap(), "TerrainData carries the default blend map so rebuilds keep it.")
 
-	# The exported splat set bakes that detail, not the gray placeholder.
-	var out_dir := _output_dir().path_join("legacy_out")
-	DirAccess.make_dir_recursive_absolute(out_dir)
-	assert_eq(editor._document.save_texture_assets(editor._get_material(), out_dir, "Oldmap"), OK)
+	# The saved splat set bakes that detail, not the gray placeholder. Project
+	# save writes the texture assets through the same pipeline as export (the
+	# save dir's basename is the terrain name), without needing CPT depth data.
+	var out_dir := _output_dir().path_join("Oldmap")
+	assert_eq(editor.save_project(out_dir), OK)
 	for filename in ["Oldmap_dc1.tga", "Oldmap_dc2.tga", "Oldmap_dc3.tga", "Oldmap_dmd.tga"]:
 		var exported := Image.new()
 		assert_eq(exported.load(out_dir.path_join(filename)), OK, "%s should export." % filename)
@@ -188,7 +189,7 @@ func test_legacy_single_detail_trn_promotes_into_splat_slots() -> void:
 	assert_false(editor.is_dirty, "A fully authored JO terrain must not be promoted or renamed.")
 	var c2 := Image.new()
 	assert_eq(c2.load(_fixture_path("Dvxi5_dc2.tga")), OK)
-	assert_eq(TerrainEditorSlots.get_slot_texture(editor._data, "detail_c2").get_image().get_pixel(3, 5).to_html(false),
+	assert_eq(editor.get_slot_texture("detail_c2").get_image().get_pixel(3, 5).to_html(false),
 		c2.get_pixel(3, 5).to_html(false), "Authored Detail B stays the authored texture.")
 
 	_cleanup_dir(out_dir)
