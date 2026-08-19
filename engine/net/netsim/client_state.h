@@ -457,16 +457,19 @@ struct ClientMinimapLinkedSlot {
 // steer updates [orig: Entity_UpdateGuidedMissile_0 @0x446060 non-authority
 // branch; NapiNPClientMsg_0x044 @0x422710 -> NetPacket_DispatchToEntityByNetId
 // @0x4D6960]. Group semantics (fork-witnessed on the Karo reference wire):
-// 1 = detonate/terminate, 3/4 = lock + steer point, 5 = flare-decoy steer;
-// 2/6 carry no presented surface.
+// 1 = detonate/flight-end (the ONLY terminator — the termination tests are
+// authority-side [orig: gate @0x4463cb]), 3/4 = lock + steer point,
+// 2 = lock lost, 5 = flare-decoy steer (clears the lock); 6 carries no
+// presented surface.
 struct ClientGuidedMissile {
 	bool active = false;
 	uint16_t shooter = 0xFFFF;     // sub-header owner handle (entity+368)
 	int16_t net_id = 0;            // the missile net id (sub-header i16)
-	uint16_t lock_target = 0xFFFF; // group 3/4 target_slot (0xFFFF = none)
+	uint16_t lock_target = 0xFFFF; // group 3/4 target_slot (0xFFFF = none;
+	                               //  cleared by groups 2 and 5)
 	int32_t steer[3] = { 0, 0, 0 }; // latest steer point, 16.16 mission
 	bool has_steer = false;
-	bool terminated = false;       // group 1 (entity+696|=1 detonate-now)
+	bool terminated = false;       // group 1 (entity+696|=1 detonate/dead bit)
 	bool flight_seeded = false;
 	world::GuidedFlightState flight;
 	std::uint64_t revision = 0;    // bumped on every fold touch

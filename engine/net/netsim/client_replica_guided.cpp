@@ -5,11 +5,19 @@
 // [orig: NapiNPClientMsg_0x044 @0x422710 -> NetPacket_DispatchToEntityByNetId
 //  @0x4D6960 -> Entity_SerializeGuidedMissileState @0x447C50 (ReadFull);
 //  flight Entity_UpdateGuidedMissile_0 @0x446060 non-authority branch].
-// Group semantics (fork-witnessed, Karo reference wire — 100% stng):
-//   1 (Status)        detonate/terminate (entity+696|=1, +276|=0x1000)
+// Group semantics (fork-witnessed on the Karo reference wire — 100% stng):
+//   1 (Status)        detonate/flight-end (entity+696|=1, +276|=0x1000) — the
+//                     ONLY thing that ends a client-flown missile: the
+//                     termination tests are authority-side [orig: the
+//                     `!is_in_session || is_authority` gate @0x4463cb]
 //   3/4 (TargetPos/TargetTypePos)  lock acquired: target_slot + steer point
+//   2 (ClearTarget)   lock lost: clears the target [orig: read side clears
+//                     entity+724/+728; authority track-loss send @0x44645a]
 //   5 (Pos)           flare decoy: the flare position becomes the steer point
-//   2/6 (ClearTarget/AttachOffsets) no presented surface — dropped.
+//                     and the entity lock is CLEARED [orig: read side clears
+//                     the target; write site zeroes legChaseYawR @0x4462ec
+//                     before sending group 5 @0x446324]
+//   6 (AttachOffsets) no presented surface — dropped.
 // RESIDUALS (D-NET-64 row): flight velocity/turn clamps use the integrator
 // defaults until the missile's ammo identity resolves through the entity
 // class (the ammo.def turnrate fields are parsed and carried already);
@@ -49,6 +57,7 @@ void ClientReplicaPipeline::apply_entity_routed(const std::vector<uint8_t> &body
 	size_t used = 0;
 	switch (group) {
 		case GuidedFieldGroup::Status:
+		case GuidedFieldGroup::ClearTarget:
 		case GuidedFieldGroup::TargetPos:
 		case GuidedFieldGroup::TargetTypePos:
 		case GuidedFieldGroup::Pos:
@@ -57,15 +66,26 @@ void ClientReplicaPipeline::apply_entity_routed(const std::vector<uint8_t> &body
 				return;
 			break;
 		default:
-			return;   // ClearTarget / AttachOffsets — no presented surface
+			return;   // AttachOffsets — no presented surface
 	}
 
-	// Find or create the missile row, keyed by net id.
+	// Find or create the missile row, keyed by net id. Terminated rows are
+	// reclaimable — the retail equivalent is the entity table freeing the dead
+	// missile's slot, after which its net id can carry a NEW missile.
 	ClientGuidedMissile *m = nullptr;
 	ClientGuidedMissile *free_slot = nullptr;
 	for (ClientGuidedMissile &g : state_.guided) {
 		if (g.active && g.net_id == pkt.net_id) { m = &g; break; }
-		if (!g.active && free_slot == nullptr) free_slot = &g;
+		if ((!g.active || g.terminated) && free_slot == nullptr) free_slot = &g;
+	}
+	if (m != nullptr && m->terminated && group != GuidedFieldGroup::Status) {
+		// A non-Status record on a dead row = the net id was recycled for a
+		// fresh missile; reset the row (repeated group-1 dead-state
+		// rebroadcasts, 110 on the Karo wire, keep matching the dead row).
+		*m = ClientGuidedMissile{};
+		m->active = true;
+		m->net_id = pkt.net_id;
+		m->shooter = pkt.field0;
 	}
 	if (m == nullptr) {
 		if (free_slot == nullptr) return;   // bank full — oldest keeps flying
@@ -83,15 +103,19 @@ void ClientReplicaPipeline::apply_entity_routed(const std::vector<uint8_t> &body
 		case GuidedFieldGroup::Status:
 			m->terminated = true;   // the flight-END marker
 			break;
+		case GuidedFieldGroup::ClearTarget:
+			m->lock_target = 0xFFFF;   // lock lost; the steer point stays
+			break;
 		case GuidedFieldGroup::TargetPos:
 		case GuidedFieldGroup::TargetTypePos:
-			m->lock_target = rec.target_slot;
-			[[fallthrough]];
 		case GuidedFieldGroup::Pos:
-			// Locks carry the steer point; a decoy's flare position becomes
-			// the next steer point (the seeker chases the flare) WITHOUT
-			// touching lock_target [orig: @0x446324; Entity_IsShellProjectile
-			// @0x4E4040].
+			// Locks carry target + steer point; a decoy's flare position
+			// becomes the steer point and CLEARS the entity lock (the seeker
+			// chases the flare) [orig: the group-5 read clears the target;
+			// write site @0x4462ec..0x446324; flare identity via
+			// Entity_IsShellProjectile @0x4E4040].
+			m->lock_target = (group == GuidedFieldGroup::Pos) ? 0xFFFF
+			                                                  : rec.target_slot;
 			if (rec.pos_x || rec.pos_y || rec.pos_z) {
 				m->steer[0] = rec.pos_x;
 				m->steer[1] = rec.pos_y;
@@ -123,13 +147,12 @@ void ClientReplicaPipeline::apply_entity_routed(const std::vector<uint8_t> &body
 void ClientReplicaPipeline::tick_guided_missiles() {
 	for (ClientGuidedMissile &g : state_.guided) {
 		if (!g.active || g.terminated || !g.flight_seeded || !g.has_steer) continue;
-		const world::GuidedDetonate det = world::GuidedFlight::step(
-				g.flight, g.steer, kDefaultVelocity, /*turn_max_pit=*/0,
-				/*turn_max_yaw=*/0);
-		if (det != world::GuidedDetonate::kNone) {
-			g.terminated = true;   // the integrator's own overshoot/guard/proximity
-			g.revision++;
-		}
+		// Non-authority: fly only. The client runs NO termination tests — the
+		// wire's group 1 is what ends the flight [orig: the authority gate
+		// @0x4463cb; dead-bit fold above].
+		world::GuidedFlight::step(g.flight, g.steer, kDefaultVelocity,
+		                          /*turn_max_pit=*/0, /*turn_max_yaw=*/0,
+		                          /*authority=*/false);
 	}
 }
 

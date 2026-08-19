@@ -119,8 +119,9 @@ typedef struct DefAmmoDef {
     int light_move_radius_fp16; /* +120 */
     int light_move_color;       /* +124: packed 0xRRGGBB */
     /* The guided-pursuit turn clamps, 'turnrate_maxpit'/'turnrate_maxyaw'
-     * (deg/tick -> BAM: atol * 192426 [orig: AmmoDef_ParseProperty -> sub_40A130,
-     * stored +0x50/+0x54]; 0 = the flight integrator's 6734910 default —
+     * (deg/s -> BAM/tick: (192426 * fp16 + 0x8000) >> 16 [orig:
+     * AmmoDef_ParseProperty -> sub_40A130 @0x40a130, stored +0x50/+0x54];
+     * 0 = the flight integrator's 6734910 default —
      * world/guided_missile_flight.h). */
     int turnrate_maxpit; /* +80 */
     int turnrate_maxyaw; /* +84 */

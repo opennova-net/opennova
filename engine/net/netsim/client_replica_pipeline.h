@@ -66,8 +66,9 @@ public:
 	// [orig: update_map_overlay_timers @0x5BFCE0;
 	//  render_minimap_slot_blip @0x5be4ac]
 	void tick_minimap_overlays();
-	// Advance every active client-flown guided missile one 62 Hz tick and fold
-	// its terminate state (client_replica_guided.cpp; §5.15, D-NET-64).
+	// Advance every active client-flown guided missile one 62 Hz tick. The
+	// client only flies — termination arrives solely as the wire's group 1
+	// (client_replica_guided.cpp; §5.15, D-NET-64).
 	void tick_guided_missiles();
 
 	// JOINER role only (net-re §5.38e, D-NET-196): switch the 0x0A fold from

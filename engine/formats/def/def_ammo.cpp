@@ -389,15 +389,19 @@ static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out) {
             }
             parsed = 1;
         } else if (lower_starts_with(lower, ll, "turnrate_maxpit", 15)) {
-            /* deg/tick -> BAM: atol * 192426 [orig: sub_40A130 -> +0x50]; the
-               guided pursuit clamp (world/guided_missile_flight.h). */
+            /* deg/s (fractional allowed) -> BAM/tick:
+               (192426 * fp16 + 0x8000) >> 16 [orig: sub_40A130 @0x40a130,
+               stored +0x50 @0x40adf0]; the guided pursuit clamp
+               (world/guided_missile_flight.h). */
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 15, &vl);
-            current.turnrate_maxpit = (int)((long long)parse_int_n(v, vl) * 192426);
+            current.turnrate_maxpit =
+                (int)(((long long)192426 * parse_fixed16_digits_n(v, vl) + 0x8000) >> 16);
             parsed = 1;
         } else if (lower_starts_with(lower, ll, "turnrate_maxyaw", 15)) {
-            /* [orig: sub_40A130 -> +0x54] */
+            /* [orig: sub_40A130 @0x40a130, stored +0x54 @0x40ae1e] */
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 15, &vl);
-            current.turnrate_maxyaw = (int)((long long)parse_int_n(v, vl) * 192426);
+            current.turnrate_maxyaw =
+                (int)(((long long)192426 * parse_fixed16_digits_n(v, vl) + 0x8000) >> 16);
             parsed = 1;
         }
 

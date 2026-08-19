@@ -2721,9 +2721,12 @@ serializer layer.
 `decode_guided_field_group` (`ingame_encode.cpp` / `ingame_decode.cpp`) port the
 write/read switches; `nw_ingame_guided_test` round-trips every (mode, group).
 **Advanced 2026-08-18** (D-NET-64): the S2C 0x44 dispatch is wired —
-`netsim::ClientReplicaPipeline::apply_entity_routed` folds groups 1/3/4/5 into
-typed `ClientGuidedMissile` state and the non-authority flight is hosted
-(`world::GuidedFlight` `[orig: Entity_UpdateGuidedMissile_0 @0x446060]`) — and
+`netsim::ClientReplicaPipeline::apply_entity_routed` folds groups 1/2/3/4/5 into
+typed `ClientGuidedMissile` state and the flight is hosted
+(`world::GuidedFlight` `[orig: Entity_UpdateGuidedMissile_0 @0x446060]`;
+the overshoot/steer-guard detonation and the proximity AI-notify are
+AUTHORITY-only `[orig: the role gate @0x4463cb]` — a non-authority client
+flies until the wire's group 1 sets the dead bit) — and
 the per-group field semantics are validated against a local retail Karo Stinger
 capture (`nw_karo_guided_test`, asset-gated NW_KARO_GUIDED_PCAP; the earlier
 "no capture in hand" blocker is closed by that capture). Still deferred: the
