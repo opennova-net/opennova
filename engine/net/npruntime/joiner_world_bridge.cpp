@@ -821,6 +821,16 @@ void JoinerWorldBridge::mirror_mission_entities(const PumpContext &ctx) {
 					// phase, accumulators, or vertical velocity.
 					m.net_predicted = false;
 					m.net_seen_revision = es.compact_revision;
+					// The motor's speed registers are transients too: the
+					// client pass still runs the movement-sound tail for a
+					// frozen row [world/ai_system.cpp fallback branch ->
+					// update_ground_vehicle_sound], which reads veh.speed
+					// directly, so a row frozen mid-motion would keep playing
+					// its moving engine lane (and hold a reverse latch) on
+					// state nothing advances any more.
+					m.speed = 0;
+					m.speed_accel = 0;
+					m.cmd_speed = 0;
 					m.slide_z = 0;
 					m.plat_acc[0] = m.plat_acc[1] = m.plat_acc[2] =
 							m.plat_acc[3] = 0;
