@@ -1589,6 +1589,20 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
 				out.inbound_reducer.emplace_back(m.tag, m.payload);
 			}
+		} else if (m.tag == s2c::ENTITY_ROUTED) {
+			// S2C 0x44 entity-routed sub-packet — the guided-missile channel
+			// (D-NET-64). The replica pipeline folds the GUIDED subtype into
+			// the ClientState guided bank; before this branch a joiner
+			// silently dropped the lane (the #508 fold only ever fired on the
+			// host's loopback view, which applies every tag — the same gap as
+			// 0x16/0x46/0x1E before it). [orig: NapiNPClientMsg_0x044
+			// @0x422710 → NetPacket_DispatchToEntityByNetId @0x4D6960]
+			EntityRoutedPacket routed;
+			if (decode_entity_routed_packet(
+					m.payload.data(), m.payload.size(), routed)) {
+				out.inbound_gameplay.emplace_back(m.tag, m.payload);
+				out.inbound_reducer.emplace_back(m.tag, m.payload);
+			}
 		} else if (m.tag == s2c::ZONE_TIMER_VALUE) {
 			ZoneTimerValue value;
 			std::size_t consumed = 0;
