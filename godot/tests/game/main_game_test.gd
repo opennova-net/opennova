@@ -157,7 +157,16 @@ func test_world_only_capture_hides_layers_without_overwriting_descendant_state()
 	nested_overlay.name = "DebugOverlay"
 	game.add_child(hud)
 	game.add_child(menu_layer)
-	game.add_child(viewmodel_layer)
+	# The production shape: the rig parents ViewmodelPass to the CAMERA's
+	# viewport (player_viewmodel_rig._build_viewmodel_pass), and the session's
+	# lookup is that viewport — there is no name-search fallback. The camera
+	# must be a FlyCamera: _camera is typed, and set() on a typed property
+	# silently drops a mistyped value.
+	var camera := FlyCamera.new()
+	add_child_autofree(camera)
+	camera.get_viewport().add_child(viewmodel_layer)
+	autofree(viewmodel_layer)
+	game.set("_camera", camera)
 	game.set("_hud", hud)
 	game.set("_menu_layer", menu_layer)
 
