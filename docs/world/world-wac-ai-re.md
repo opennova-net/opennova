@@ -3528,14 +3528,28 @@ edge behaves is unwalked (its copied `Flags` lack bit 2, so the edge would run
 against a recycled-slot `+0x2C0`; whether that doubles the scream is unknown) —
 the port suppresses the clone's scream and seeds its selection explicitly.
 
-Identity: retail severs the connection id, shadow slot, and burn-emitter link
-but memcpy-inherits NetId/Ssn/Team; whether the retail clone reaches the
-compact/spawn wire is an OPEN question (the compact writer's row filter is
-unwalked for it). Our port keeps the clone out of `snapshot_world` and the
-pool-0 organic batches entirely — host/standalone presentation appends it as a
-synthetic row, and both halves transport the 32-bit hidden-section mask as
-exact 16-bit words into `ObjectModel` part visibility. The LAN leg is a
-ledgered D-AI-9 residual either way.
+Identity and the wire (WITNESSED 2026-08-19, closing the LAN question): retail
+severs the connection id, shadow slot, and burn-emitter link but
+memcpy-inherits NetId/Ssn/Team — and the clone reaches every wire channel an
+NPC corpse does. The 0x0A priority walk admits every live pool-0 slot with a
+def and a nonzero ItemDef+356 class tag — no dead/team/connection filter
+`[orig: Server_BuildEntityPriorityList @0x50e590, pool-0 admission
+@0x50e6cb-0x50e6da]`; the join download serializes every pool-0 slot (the
+0x0C batch's single caller is `Server_SendInitialGameStateToPlayer`, call
+@0x51bd24); and a connected joiner that sees compacts for its empty local
+slot self-heals it via C2S 0x0F → S2C 0x18 (net-re §5.46). Crucially, NONE of
+those records carries `sectionMask +0x134` (§5.23 / §5.46 field maps; the
+0x0C decode memsets the entity first), so every REMOTE view renders both
+halves as whole-body corpses — the section-mask split is host-local
+presentation in retail. The port mirrors all of it: the clone rides
+`snapshot_world` and `build_pool0_organic_batch` (the 0x0F→0x18 reply path
+already resolves any registry slot), masks present host/standalone-only
+through the entity-resolved rows (exact 16-bit halves into `ObjectModel`
+part visibility), and the one wire-visible divergence is deliberate: the
+clone's net_id/name are cleared instead of duplicated, because our ascending
+first-match `find_by_net_id`/`find_by_name` could misroute scripted refs to
+a lower-slot clone (retail's backward-scanning allocator makes the dupe
+mostly land above the victim).
 
 Ammo properties `secondary_anim` and `kz_physics` now parse and bake into their
 witnessed +224/+225 byte slots. They are deliberately not interpreted yet: the

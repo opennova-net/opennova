@@ -514,9 +514,12 @@ struct Entity {
     // the matching ordinal bone from person collision and presentation.
     // Distinct from spawned_piece_mask at +0x138.
     uint32_t section_mask = 0;
-    // Host-only marker for the pool-0 corpse clone created by the person damage
-    // callback's dismemberment leg. It has ordinary Entity/AiEntity motion and
-    // presentation, but no independent score/network identity.
+    // Host-local marker for the pool-0 corpse clone created by the person
+    // damage callback's dismemberment leg. The clone is an ordinary wire row
+    // (0x0A compacts / 0x0C join batch / 0x18 self-heal, none carrying the
+    // section mask — world-wac-ai-re §19.2); this flag only suppresses the
+    // clone's own death scream and keeps host bookkeeping honest. net_id and
+    // the names are cleared (D-AI-9 aliasing-safety divergence).
     bool dismemberment_piece = false;
     // Husk sections that left as death pieces (entity+0x138): the husk renders
     // and collides WITHOUT these sections. Bit 0 (the hull) never sets.

@@ -1421,15 +1421,9 @@ PackedFloat32Array Simulation::present_snapshot_from_client_replicas() const {
 			local_player->mounted &&
 			local_player->mount_type == opennova::world::SeatType::Gunner;
 	const int count = static_cast<int>(cs.entities.size());
-	int dismemberment_piece_count = 0;
-	if (!joiner_) {
-		world_->registry.for_each([&](const opennova::world::Entity &entity) {
-			if (entity.dismemberment_piece) ++dismemberment_piece_count;
-		});
-	}
 	const opennova::np::ClientReplicaPresentContext replica_present_context{
 			&item_seat_specs_, &world_->weapons, joiner_};
-	out.resize(static_cast<int64_t>(count + dismemberment_piece_count) * PF_STRIDE);
+	out.resize(static_cast<int64_t>(count) * PF_STRIDE);
 	float *w = out.ptrw();
 	for (int i = 0; i < count; ++i) {
 		float *r = w + static_cast<int64_t>(i) * PF_STRIDE;
@@ -1703,89 +1697,6 @@ PackedFloat32Array Simulation::present_snapshot_from_client_replicas() const {
 				}
 			}
 		}
-	}
-	// Dismemberment clones have no LAN spawn/compact record in this port:
-	// entity_wire_bridge excludes them, and whether the retail clone reaches
-	// the compact/spawn wire is an open D-AI-9 residual (retail memcpy-inherits
-	// NetId/Ssn but severs the connection id). A listen server or standalone
-	// game appends them as synthetic-origin rows, which the existing
-	// runtime-model WirePresentPass owns. Their packed local handle is only a
-	// presenter key.
-	int piece_row = count;
-	if (!joiner_) {
-		world_->registry.for_each([&](const opennova::world::Entity &ent) {
-			if (!ent.dismemberment_piece) return;
-			float *r = w + static_cast<int64_t>(piece_row++) * PF_STRIDE;
-			opennova::np::initialize_client_replica_present_row(r);
-			r[PF_KIND] = static_cast<float>(
-					opennova::world::kSpawnOriginKindNone);
-			r[PF_INDEX] = static_cast<float>(
-					opennova::world::kSpawnOriginIndexNone);
-			r[PF_BMS_ID] = 0.0f;
-			r[PF_NET_ID] = 0.0f;
-			r[PF_TYPE_ID] = static_cast<float>(ent.item_id);
-			r[PF_WIRE_HANDLE] = static_cast<float>(ent.handle.packed);
-			r[PF_BODY_ANIM_SLOT] = static_cast<float>(ent.body_anim_slot);
-			r[PF_HIDDEN] = ent.hidden ? 1.0f : 0.0f;
-			r[PF_ALIVE] = ent.alive ? 1.0f : 0.0f;
-			write_present_section_mask(r, ent.section_mask);
-
-			const AiEntity *ae = world_->ai != nullptr
-					? world_->ai->for_handle(ent.handle)
-					: nullptr;
-			if (ae == nullptr) {
-				r[PF_POS_X] = ent.position.x;
-				r[PF_POS_Y] = ent.position.z;
-				r[PF_POS_Z] = -ent.position.y;
-				r[PF_PITCH_DEG] = static_cast<float>(ent.pitch);
-				r[PF_YAW_DEG] = static_cast<float>(ent.yaw);
-				r[PF_ROLL_DEG] = static_cast<float>(ent.roll);
-				return;
-			}
-
-			constexpr double kFixed16 = 65536.0;
-			r[PF_POS_X] = static_cast<float>(ae->pos[0] / kFixed16);
-			r[PF_POS_Y] = static_cast<float>(ae->pos[2] / kFixed16);
-			r[PF_POS_Z] = static_cast<float>(-ae->pos[1] / kFixed16);
-			r[PF_PITCH_DEG] = static_cast<float>(
-					double(ae->pitch) * opennova::world::kDegreesPerBam);
-			r[PF_YAW_DEG] = static_cast<float>(
-					opennova::world::mission_yaw_deg_from_bam_heading(
-							ae->heading));
-			r[PF_ROLL_DEG] = static_cast<float>(
-					double(ae->roll) * opennova::world::kDegreesPerBam);
-			for (int slot = 0; slot < 2; ++slot) {
-				const int32_t phase =
-						ae->brain.f[AiBrain::kPartAnimPhase0 + slot];
-				const bool publish = slot != 0 ||
-						(ent.item_attrib & 0x1000u) == 0;
-				uint32_t phase_bits = 0;
-				std::memcpy(&phase_bits, &phase, sizeof(phase_bits));
-				r[PF_PHASE1 + slot * 2] =
-						static_cast<float>(phase_bits & 0xFFFFu);
-				r[PF_ACTIVE1 + slot * 2] = publish
-						? static_cast<float>((phase_bits >> 16) + 1u)
-						: 0.0f;
-			}
-			if (ae->inf.active) {
-				r[PF_ANIM_STATE] = static_cast<float>(ae->inf.anim_state);
-				r[PF_ANIM_PHASE_TICKS] =
-						static_cast<float>(ae->inf.clip_phase);
-				if (ae->inf.body_blend_active()) {
-					r[PF_ANIM_SOURCE_STATE] =
-							static_cast<float>(ae->inf.anim_prev);
-					r[PF_ANIM_SOURCE_PHASE_TICKS] =
-							static_cast<float>(ae->inf.anim_prev_clip_phase);
-					r[PF_ANIM_BLEND_WEIGHT] = ae->inf.anim_blend_weight;
-				}
-				const opennova::anim::AimOverlayInputs inputs =
-						aim_overlay_inputs_for(*ae, ent);
-				opennova::anim::AimOverlayAngles
-						angles[opennova::anim::kOverlayClassCount];
-				opennova::anim::compute_aim_overlay_angles(inputs, angles);
-				write_present_overlay(r, angles);
-			}
-		});
 	}
 	// Consume-once: each transition pulse dispatches exactly one presented
 	// frame (the rows above copied any live pulse into PF_ANIM_STATE_PULSE).

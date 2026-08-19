@@ -382,6 +382,11 @@ struct DismembermentRig {
 		victim_seed.has_item_def = true;
 		victim_seed.item_type = 3;
 		victim_seed.item_attrib = victim_attrib;
+		// The items.def *_function class stamp the host's item-traits sweep
+		// applies (ItemDef+356); the wire bridge admits rows by it, and the
+		// clone inherits it through the seed copy.
+		victim_seed.net_class_code =
+				static_cast<uint8_t>(EntityClass::Infantry);
 		victim_seed.position = {5.0f, 0.0f, 0.0f};
 		victim_seed.spawn_position = victim_seed.position;
 		victim_seed.yaw = 90; // engine heading 0; a +X round is rear quadrant 2
@@ -519,19 +524,30 @@ bool test_dismemberment_damage_path() {
 				"clone velocity adds the witnessed horizontal round impulse only"))
 			return false;
 
+		// The clone is an ordinary pool-0 slot on the wire: the 0x0A priority
+		// walk has no dead/connection filter [orig: @0x50e6cb-0x50e6da] and
+		// the join download serializes every pool-0 slot. Its net_id/name are
+		// our cleared stand-ins (D-AI-9); no record carries the section mask.
 		const auto snapshots = ns::snapshot_world(rig.world);
+		const ns::GameEntitySnapshot *piece_snapshot = nullptr;
 		for (const auto &snapshot : snapshots) {
-			if (!expect(snapshot.wire_handle != piece->handle.packed,
-					"corpse clone is absent from live compact snapshots"))
-				return false;
+			if (snapshot.wire_handle == piece->handle.packed)
+				piece_snapshot = &snapshot;
 		}
+		if (!expect(piece_snapshot != nullptr &&
+					piece_snapshot->entity_class == EntityClass::Infantry,
+				"corpse clone streams live compact snapshots like any NPC"))
+			return false;
 		const OrganicSpawnBatch batch =
 				ns::build_pool0_organic_batch(rig.world);
+		const OrganicSpawnRecord *piece_record = nullptr;
 		for (const OrganicSpawnRecord &record : batch.records) {
-			if (!expect(record.slot_id != piece->handle.packed,
-					"corpse clone is absent from initial pool-0 spawn batches"))
-				return false;
+			if (record.slot_id == piece->handle.packed) piece_record = &record;
 		}
+		if (!expect(piece_record != nullptr && piece_record->has_body &&
+					piece_record->net_id == 0,
+				"corpse clone joins the pool-0 spawn batch with a cleared net id"))
+			return false;
 	}
 
 	{

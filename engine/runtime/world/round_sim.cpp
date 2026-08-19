@@ -191,6 +191,12 @@ Entity make_dismemberment_piece_seed(const Entity &victim, uint32_t cut_mask,
     // the authored/model traits and clears every runtime relationship a copied
     // struct would otherwise alias (weapon slots, mounts, emplacement poses) —
     // a superset of the original's sever list, same observable corpse.
+    // Deliberate divergence (D-AI-9): net_id and the names are CLEARED, where
+    // the original's memcpy duplicates the victim's — our forward-scanning
+    // slot allocator could put the clone BELOW the victim, and the ascending
+    // first-match find_by_net_id/find_by_name would then misroute scripted
+    // kill/target refs to the clone. The 0x0C/0x18 wire records carry 0/""
+    // for the clone instead of the duplicate.
     Entity piece = victim;
     piece.net_id = 0;
     piece.bms_id = 0;
