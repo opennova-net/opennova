@@ -903,7 +903,11 @@ func cdep_ranges_valid(image: Image) -> bool:
 		return true
 	var violations := data.cdep_count_violations()
 	if violations > 0:
-		push_error("CDEP per-block range exceeded in %d block(s) (> 32767 raw units)" % violations)
+		# Artist-facing: JO/DFX cap how much height one 256-pixel run of the
+		# heightmap may span (the CDEP per-block raw16 limit).
+		push_error(("Terrain is too steep to export in %d area(s): " +
+				"flatten the marked regions — JO/DFX limit how much height " +
+				"a 256-pixel run of the heightmap may span") % violations)
 		return false
 	return true
 

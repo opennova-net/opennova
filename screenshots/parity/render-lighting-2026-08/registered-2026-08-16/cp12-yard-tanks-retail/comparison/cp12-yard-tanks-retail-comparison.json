@@ -1,3 +1,725 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:0e0ec59dcaf0d3f5ac07023dc74471cfb442e99faf5fcef5454159ea30e9f02a
-size 23842
+{
+  "camera_bms": {
+    "pitch_deg": -5,
+    "position": [
+      -429.701783556709,
+      1539.431518554688,
+      62.234282787589
+    ],
+    "vertical_fov_deg": 53.4468,
+    "yaw_deg": 90
+  },
+  "caption_font": {
+    "bold_sha256": "ff84d6ef4951db182c99c6b8a76c0bae0245c192994a032132b59f5c04392967",
+    "family": "Courier Prime",
+    "regular_sha256": "16c3b24e173a21f23bdab9d50b5a49dc138e2b80789e010c7f29272b23e0634b"
+  },
+  "captions": {
+    "opennova": "HUD hidden - bare arms - M16 Burst 30/270 - terrain",
+    "retail": "Pre-HUD snapshot - bare arms - M16 Burst - terrain - frame-correlated"
+  },
+  "capture_mode": "hud_hidden",
+  "catalog_sha256": "607c7d66d7ce35ac915264fd462565fc262683aed34e4585a48d9093ce1a36d8",
+  "comparison_presentation": {
+    "contract": {
+      "ads_active": false,
+      "arms_camo": [
+        1,
+        0,
+        0
+      ],
+      "arms_graphic": "IndoArms.3di",
+      "big_map_active": false,
+      "capture_mode": "hud_hidden",
+      "character_id": 1026,
+      "equipped_weapon": "WPN_M16BURST",
+      "gameplay_hud_visible": false,
+      "hud_canvas_layer_active": true,
+      "hud_detail_level": 3,
+      "player_pose_source": "retail_player_bms.applied",
+      "player_view_effects_active": true,
+      "terrain_enabled": true,
+      "viewmodel_enabled": true,
+      "weapon_clip": 30,
+      "weapon_reserve": 270
+    },
+    "match_status": "validated",
+    "opennova": {
+      "observed": {
+        "ads_active": false,
+        "arms_camo": [
+          1,
+          0,
+          0
+        ],
+        "arms_graphic": "IndoArms.3di",
+        "big_map_active": false,
+        "character_id": 1026,
+        "equipped_weapon": "WPN_M16BURST",
+        "gameplay_hud_visible": false,
+        "hud_canvas_layer_active": true,
+        "hud_detail_level": 3,
+        "player_view_effects_active": true,
+        "terrain_enabled": true,
+        "viewmodel_enabled": true,
+        "weapon_clip": 30,
+        "weapon_reserve": 270
+      },
+      "source_witness": {
+        "ads_active": false,
+        "arms_camo": [
+          1,
+          0,
+          0
+        ],
+        "arms_graphic": "IndoArms.3di",
+        "big_map_active": false,
+        "capture_mode": "hud_hidden",
+        "character_id": 1026,
+        "equipped_weapon": "WPN_M16BURST",
+        "gameplay_hud_visible": false,
+        "hud_canvas_layer_active": true,
+        "hud_canvas_layer_visible": true,
+        "hud_detail_level": 3,
+        "observed_at": "after_pose_settle_before_fixture_freeze",
+        "player_class": 9,
+        "player_pose_source": "retail_player_bms.applied",
+        "player_position_bms": [
+          -429.856048583984,
+          1539.60729980469,
+          61.3899993896484
+        ],
+        "player_view_effects_active": true,
+        "requested_player_pose_bms": {
+          "pitch_deg": -5.0,
+          "position": [
+            -429.856048583984,
+            1539.60729980469,
+            61.3899993896484
+          ],
+          "yaw_deg": 90.0
+        },
+        "terrain_data_available": true,
+        "terrain_enabled": true,
+        "terrain_node_visible": true,
+        "viewmodel_canvas_layer_visible": true,
+        "viewmodel_enabled": true,
+        "weapon_clip": 30,
+        "weapon_reserve": 270
+      },
+      "verification": {
+        "method": "runtime_capture_witness",
+        "observed_at": "after_pose_settle_before_fixture_freeze",
+        "telemetry_available": true
+      }
+    },
+    "retail": {
+      "contract": {
+        "ads_active": false,
+        "arms_camo": [
+          1,
+          0,
+          0
+        ],
+        "arms_graphic": "IndoArms.3di",
+        "big_map_active": false,
+        "capture_mode": "hud_hidden",
+        "character_id": 1026,
+        "equipped_weapon": "WPN_M16BURST",
+        "gameplay_hud_visible": false,
+        "hud_canvas_layer_active": true,
+        "hud_detail_level": 3,
+        "player_pose_source": "retail_player_bms.applied",
+        "player_view_effects_active": true,
+        "terrain_enabled": true,
+        "viewmodel_enabled": true,
+        "weapon_clip": 30,
+        "weapon_reserve": 270
+      },
+      "observed": {
+        "ads_active": false,
+        "arms_appearance": "bare",
+        "big_map_active": false,
+        "equipped_weapon": "WPN_M16BURST",
+        "gameplay_hud_visible": false,
+        "terrain_enabled": true,
+        "viewmodel_enabled": true
+      },
+      "verification": {
+        "bound_image_sha256": "793a476905db0de8215ae112acc43edcd3d66bb851caf1ecfc18b381cce7e086",
+        "method": "frame_correlated_pre_hud_snapshot",
+        "telemetry_available": true
+      }
+    },
+    "retail_runtime_witness": {
+      "d3d_device": {
+        "adapter": {
+          "guid": "D7B71EE2-55C1-11CF-6374-0273A5C2ED35",
+          "name": "AMD Radeon(TM) Graphics",
+          "ordinal": 0
+        },
+        "backbuffer": {
+          "format": "D3DFMT_X8R8G8B8",
+          "height": 1200,
+          "width": 1920
+        },
+        "depth_format": "D3DFMT_D24S8",
+        "device_generation": 1,
+        "frame_qpc": "2612432027811",
+        "frame_serial": "1942",
+        "multisample": {
+          "hardware_usable": {
+            "highest_samples": 8,
+            "maskable_samples": [
+              2,
+              4,
+              8
+            ],
+            "source": "d3d9_runtime_color_depth_intersection"
+          },
+          "mode_token": 2,
+          "quality": 0,
+          "retail_selectable": {
+            "highest_samples": 4,
+            "is_selected_highest": true,
+            "maskable_samples": [
+              2,
+              4
+            ],
+            "source": "engine_runtime_aa_mode_list"
+          },
+          "samples": 4,
+          "token_semantics": "one_based_ordinal_into_retail_selectable",
+          "type": "D3DMULTISAMPLE_4_SAMPLES"
+        },
+        "reset_generation": 0,
+        "windowed": true
+      },
+      "presentation": {
+        "armed_frame_qpc": "2612431970881",
+        "armed_frame_serial": "1941",
+        "before_retail_hud": true,
+        "boundary": "world_labels",
+        "d3d_scene_split": {
+          "begin_count": 1,
+          "end_count": 1,
+          "restored": true
+        },
+        "generation": 30,
+        "policy": "retail_pre_hud_backbuffer_snapshot.v2",
+        "retail_ui": {
+          "executed_unmodified": true,
+          "original_call_count": 1
+        },
+        "snapshot_count": 1,
+        "target_frame_qpc": "2612432247345",
+        "target_frame_serial": "1942"
+      },
+      "video_settings": {
+        "available": [
+          "terrain_polydetail",
+          "terrain_texdetail",
+          "object_polydetail",
+          "object_texdetail",
+          "water_quality",
+          "shadow_quality",
+          "particle_density",
+          "antialias_mode",
+          "display_16x9",
+          "texfilter_level",
+          "fbeffects_level",
+          "shader_usage_level",
+          "texcompression_level",
+          "NoBlood",
+          "NoCasings",
+          "NoSmoke",
+          "no_anim",
+          "lock_framerate",
+          "force_vsync",
+          "reduce_mouselag",
+          "gamma"
+        ],
+        "profile_id": "retail_reference_highest_retail_selectable_v2",
+        "source": "engine_runtime_global",
+        "unavailable": [],
+        "values": {
+          "NoBlood": 0,
+          "NoCasings": 0,
+          "NoSmoke": 0,
+          "antialias_mode": 2,
+          "display_16x9": 1,
+          "fbeffects_level": 3,
+          "force_vsync": 0,
+          "gamma": 0.800000011920929,
+          "lock_framerate": 0,
+          "no_anim": 0,
+          "object_polydetail": 3,
+          "object_texdetail": 3,
+          "particle_density": 2,
+          "reduce_mouselag": 1,
+          "shader_usage_level": 2,
+          "shadow_quality": 3,
+          "terrain_polydetail": 3,
+          "terrain_texdetail": 3,
+          "texcompression_level": 2,
+          "texfilter_level": 3,
+          "water_quality": 3
+        }
+      }
+    },
+    "retail_stage": {
+      "game_config": {
+        "changed_keys": [
+          "object_texdetail"
+        ],
+        "effective_sha256": "e7bd7d27d6dcb22c8b58e3daa6ef543e2489f0600ffee28ffcb9a53d79806ed3",
+        "effective_values": {
+          "NoBlood": 0,
+          "NoCasings": 0,
+          "NoSmoke": 0,
+          "antialias_mode": 2,
+          "display_16x9": 1,
+          "fbeffects_level": 3,
+          "force_vsync": 0,
+          "gamma": 0.8,
+          "lock_framerate": 0,
+          "no_anim": 0,
+          "object_polydetail": 3,
+          "object_texdetail": 3,
+          "particle_density": 2,
+          "reduce_mouselag": 1,
+          "shader_usage_level": 2,
+          "shadow_quality": 3,
+          "terrain_polydetail": 3,
+          "terrain_texdetail": 3,
+          "texcompression_level": 2,
+          "texfilter_level": 3,
+          "video_res": "1920x1200",
+          "water_quality": 3,
+          "windowed": 0
+        },
+        "file_name": "game.cfg",
+        "hud_detail": {
+          "effective": 0,
+          "original": 0,
+          "unchanged": true
+        },
+        "original_sha256": "556880e9ec85d60021f2ce17d584bde30702a6ae3ecfba6a1e6eb54402c8cad3",
+        "original_values": {
+          "NoBlood": 0,
+          "NoCasings": 0,
+          "NoSmoke": 0,
+          "antialias_mode": 2,
+          "display_16x9": 1,
+          "fbeffects_level": 3,
+          "force_vsync": 0,
+          "gamma": 0.8,
+          "lock_framerate": 0,
+          "no_anim": 0,
+          "object_polydetail": 3,
+          "object_texdetail": 1,
+          "particle_density": 2,
+          "reduce_mouselag": 1,
+          "shader_usage_level": 2,
+          "shadow_quality": 3,
+          "terrain_polydetail": 3,
+          "terrain_texdetail": 3,
+          "texcompression_level": 2,
+          "texfilter_level": 3,
+          "video_res": "1920x1200",
+          "water_quality": 3,
+          "windowed": 0
+        },
+        "preserved_values": {
+          "enable_gameplaytips": 1,
+          "enable_keyboardtips": 1,
+          "hud_detail": 0,
+          "hw3d_deviceno": 0,
+          "hw3d_guid": "D7B71EE2-55C1-11CF-63740273A5C2ED35",
+          "hw3d_name": "AMD Radeon(TM) Graphics"
+        }
+      },
+      "manifest_path": "retail-stage.json",
+      "manifest_sha256": "f586bae467a8e08a2e7a084ed51f50cea982d66167a32520878e0c8581b29e97",
+      "profile": {
+        "id": "retail_reference_highest_retail_selectable_v2",
+        "required_values": {
+          "NoBlood": 0,
+          "NoCasings": 0,
+          "NoSmoke": 0,
+          "antialias_mode": 2,
+          "display_16x9": 1,
+          "fbeffects_level": 3,
+          "force_vsync": 0,
+          "gamma": 0.8,
+          "lock_framerate": 0,
+          "no_anim": 0,
+          "object_polydetail": 3,
+          "object_texdetail": 3,
+          "particle_density": 2,
+          "reduce_mouselag": 1,
+          "shader_usage_level": 2,
+          "shadow_quality": 3,
+          "terrain_polydetail": 3,
+          "terrain_texdetail": 3,
+          "texcompression_level": 2,
+          "texfilter_level": 3,
+          "video_res": "1920x1200",
+          "water_quality": 3,
+          "windowed": 0
+        },
+        "video_option_catalog_id": "joint-operations-revx02-video-options-v1",
+        "video_option_catalog_sha256": "371d95a8caccb85b89ca0e0a10bc87e60ba37f632f9724c7f14036b06a2f8ff4"
+      },
+      "schema": "opennova.retail-presentation-stage.v3",
+      "tool_version": "3.0.0",
+      "weapon_profile": {
+        "blue": {
+          "avatar_a": 2,
+          "avatar_b": 0,
+          "avatar_packed": 1026,
+          "player_class": 9
+        },
+        "blue_selected_kit_contains_wpn_m16burst": true,
+        "file_name": "weapon.sav",
+        "red": {
+          "avatar_a": 7,
+          "avatar_b": 0,
+          "avatar_packed": 33287,
+          "player_class": 9
+        },
+        "sha256": "f4907820a58505a6988f140a27638dae7dbaaea2cc446642f0bc44c868905623",
+        "slot": 0
+      }
+    }
+  },
+  "fixture_id": "cp12-yard-tanks-retail",
+  "inputs": {
+    "opennova": {
+      "dimensions": [
+        2000,
+        1200
+      ],
+      "gdextension_sha256": "b801deacd18802053dd9973e0e4dd4ef1dece55a7afa74e6f5650a2d9be1805c",
+      "godot_executable_sha256": "1e5efe381f62ee1cea6bc18caac71c0c74bd6e68e6af5c6efb3dbe76628f61c7",
+      "manifest_sha256": "d4cd1ddf6f03407aaebd7ec8bdc47a7c22bddadc846d8a6571e8ed5c67b8701f",
+      "sha256": "2210ce4f108a9d3d37a90525a0d6610ae4cd749ac7660758a83627ed3f8766e8",
+      "source_commit": "2cde75ad029be14d1c6e0dd8b034efc5fef017b5",
+      "source_name": "cp12-yard-tanks-retail-m1260-beauty.png",
+      "state_name": "cp12-yard-tanks-retail-m1260-beauty.state.json",
+      "state_sha256": "0ad3cbfe46026594c8adfbc576cbdb92afd113b677018034f3279c7b8cd9cecd"
+    },
+    "retail": {
+      "bundle_sha256": "4fe8fa6ac77aac51b51f26510c8540a83a5938b5f824ea989074ffffa17aa01c",
+      "dimensions": [
+        1920,
+        1200
+      ],
+      "frame_qpc": "2612432027811",
+      "frame_serial": "1942",
+      "install": {
+        "expansion": "revx02",
+        "mounted_archives": [
+          {
+            "path": "expansion/revx02/RevX02L.pff",
+            "sha256": "c379d8a6239d4b885dedb852fda3439532a39c2e6c2834746f2bef53c9e30a18"
+          },
+          {
+            "path": "expansion/revx02/RevX02.pff",
+            "sha256": "e20f2d81d26b82a616772d63f8844613d3fb400b10a0d5ede841d512de52e8a5"
+          },
+          {
+            "path": "language.pff",
+            "sha256": "367423370791eb5b19def74d5094ff97b9ccfde26acc09f0cb7815e7aa28a858"
+          },
+          {
+            "path": "localres.pff",
+            "sha256": "01ec00a6b4483872963c1e8b3490601eb80046925408bbd2826e7b9cfaca5fca"
+          },
+          {
+            "path": "resource.pff",
+            "sha256": "6db5951df1b62d6a8aa3257a06b6d896e05179da19061512fe3d58bac369dedc"
+          }
+        ],
+        "version_marker": {
+          "path": "expansion/revx02/revx02.bin",
+          "sha256": "0bda4c750bd023a8372f0c2558c52f823859d460acdf9de56a47bbaa6cba5205"
+        }
+      },
+      "onhook_forwarder_sha256": "d118512ff119b85e4ba98d8623ff2cc91d426cf4975838f056a7cd87f9979af9",
+      "onhook_mcp_sha256": "e0306c402c21e47e7d87e2344958297634ee74fdce9569923112fc26f6cd8b70",
+      "onhook_proxy_sha256": "928905bffc39d2880dc027f1ae09c3fdbab328c939ae724ff05dab32511708b7",
+      "opennova_source_commit": "2cde75ad029be14d1c6e0dd8b034efc5fef017b5",
+      "presentation_stage": {
+        "game_config": {
+          "changed_keys": [
+            "object_texdetail"
+          ],
+          "effective_sha256": "e7bd7d27d6dcb22c8b58e3daa6ef543e2489f0600ffee28ffcb9a53d79806ed3",
+          "effective_values": {
+            "NoBlood": 0,
+            "NoCasings": 0,
+            "NoSmoke": 0,
+            "antialias_mode": 2,
+            "display_16x9": 1,
+            "fbeffects_level": 3,
+            "force_vsync": 0,
+            "gamma": 0.8,
+            "lock_framerate": 0,
+            "no_anim": 0,
+            "object_polydetail": 3,
+            "object_texdetail": 3,
+            "particle_density": 2,
+            "reduce_mouselag": 1,
+            "shader_usage_level": 2,
+            "shadow_quality": 3,
+            "terrain_polydetail": 3,
+            "terrain_texdetail": 3,
+            "texcompression_level": 2,
+            "texfilter_level": 3,
+            "video_res": "1920x1200",
+            "water_quality": 3,
+            "windowed": 0
+          },
+          "file_name": "game.cfg",
+          "hud_detail": {
+            "effective": 0,
+            "original": 0,
+            "unchanged": true
+          },
+          "original_sha256": "556880e9ec85d60021f2ce17d584bde30702a6ae3ecfba6a1e6eb54402c8cad3",
+          "original_values": {
+            "NoBlood": 0,
+            "NoCasings": 0,
+            "NoSmoke": 0,
+            "antialias_mode": 2,
+            "display_16x9": 1,
+            "fbeffects_level": 3,
+            "force_vsync": 0,
+            "gamma": 0.8,
+            "lock_framerate": 0,
+            "no_anim": 0,
+            "object_polydetail": 3,
+            "object_texdetail": 1,
+            "particle_density": 2,
+            "reduce_mouselag": 1,
+            "shader_usage_level": 2,
+            "shadow_quality": 3,
+            "terrain_polydetail": 3,
+            "terrain_texdetail": 3,
+            "texcompression_level": 2,
+            "texfilter_level": 3,
+            "video_res": "1920x1200",
+            "water_quality": 3,
+            "windowed": 0
+          },
+          "preserved_values": {
+            "enable_gameplaytips": 1,
+            "enable_keyboardtips": 1,
+            "hud_detail": 0,
+            "hw3d_deviceno": 0,
+            "hw3d_guid": "D7B71EE2-55C1-11CF-63740273A5C2ED35",
+            "hw3d_name": "AMD Radeon(TM) Graphics"
+          }
+        },
+        "manifest_path": "retail-stage.json",
+        "manifest_sha256": "f586bae467a8e08a2e7a084ed51f50cea982d66167a32520878e0c8581b29e97",
+        "profile": {
+          "id": "retail_reference_highest_retail_selectable_v2",
+          "required_values": {
+            "NoBlood": 0,
+            "NoCasings": 0,
+            "NoSmoke": 0,
+            "antialias_mode": 2,
+            "display_16x9": 1,
+            "fbeffects_level": 3,
+            "force_vsync": 0,
+            "gamma": 0.8,
+            "lock_framerate": 0,
+            "no_anim": 0,
+            "object_polydetail": 3,
+            "object_texdetail": 3,
+            "particle_density": 2,
+            "reduce_mouselag": 1,
+            "shader_usage_level": 2,
+            "shadow_quality": 3,
+            "terrain_polydetail": 3,
+            "terrain_texdetail": 3,
+            "texcompression_level": 2,
+            "texfilter_level": 3,
+            "video_res": "1920x1200",
+            "water_quality": 3,
+            "windowed": 0
+          },
+          "video_option_catalog_id": "joint-operations-revx02-video-options-v1",
+          "video_option_catalog_sha256": "371d95a8caccb85b89ca0e0a10bc87e60ba37f632f9724c7f14036b06a2f8ff4"
+        },
+        "schema": "opennova.retail-presentation-stage.v3",
+        "tool_version": "3.0.0",
+        "weapon_profile": {
+          "blue": {
+            "avatar_a": 2,
+            "avatar_b": 0,
+            "avatar_packed": 1026,
+            "player_class": 9
+          },
+          "blue_selected_kit_contains_wpn_m16burst": true,
+          "file_name": "weapon.sav",
+          "red": {
+            "avatar_a": 7,
+            "avatar_b": 0,
+            "avatar_packed": 33287,
+            "player_class": 9
+          },
+          "sha256": "f4907820a58505a6988f140a27638dae7dbaaea2cc446642f0bc44c868905623",
+          "slot": 0
+        }
+      },
+      "raw_evidence": {
+        "bridge_version_major": 1,
+        "bridge_version_minor": 4,
+        "capture_bundle_supported": true,
+        "capture_result_name": "capture-result.json",
+        "capture_result_sha256": "2854c5ffc478414b2aa14f054a5b52a3bae9db89a07c93eaea8c1b54b6ab3dde",
+        "fixture_result_name": "fixture-result.json",
+        "fixture_result_sha256": "dc6dde6dbec6f244bbbe6d7159e9a2c22fb3b8189691e0228f85a52015b234ea",
+        "hook_version": "0.5.0",
+        "instance_status_name": "instance-status.json",
+        "instance_status_sha256": "cffa98c3178c4cd4ce06e980c3dcfcb7f3ea7e69a4858e804e34cedec8283e48",
+        "onhook_log_name": "onhook.log",
+        "onhook_log_sha256": "37bacf9890a12bab42a5671f7e4c8379f3a58a826610a754a293756f5700b896",
+        "retail_stage_manifest_name": "retail-stage.json",
+        "retail_stage_manifest_sha256": "f586bae467a8e08a2e7a084ed51f50cea982d66167a32520878e0c8581b29e97",
+        "source_instance_id": "25492-01DD2F6A8DD1D98C",
+        "source_pid": 25492,
+        "state_name": "retail.state.json",
+        "state_sha256": "82749d4ae490e41a4fc4317c8fe5e56a7a44647803737cf2530e057b67f50681"
+      },
+      "retail_executable_sha256": "b9971c8273b7bbb1c8518a738596d669cd7794e9d307ae63a7a9a530eb802fac",
+      "sha256": "793a476905db0de8215ae112acc43edcd3d66bb851caf1ecfc18b381cce7e086",
+      "source_name": "retail.png"
+    }
+  },
+  "metrics": {
+    "full_frame": {
+      "channel_count": 6912000,
+      "max_channel_delta": 113,
+      "mean_abs_channel_delta": 6.089059,
+      "pixel_count": 2304000,
+      "region": [
+        0,
+        0,
+        1920,
+        1200
+      ],
+      "root_mean_square_channel_delta": 8.58987
+    },
+    "regions": [
+      {
+        "channel_count": 1663200,
+        "max_channel_delta": 59,
+        "mean_abs_channel_delta": 4.727967,
+        "name": "world_center",
+        "pixel_count": 554400,
+        "region": [
+          240,
+          180,
+          1320,
+          420
+        ],
+        "root_mean_square_channel_delta": 6.197675,
+        "type": "roi"
+      },
+      {
+        "channel_count": 1350000,
+        "max_channel_delta": 100,
+        "mean_abs_channel_delta": 5.688116,
+        "name": "viewmodel_arms",
+        "pixel_count": 450000,
+        "region": [
+          850,
+          700,
+          900,
+          500
+        ],
+        "root_mean_square_channel_delta": 8.569652,
+        "type": "roi"
+      }
+    ]
+  },
+  "metrics_policy": {
+    "full_frame": "qualitative_only_matched_hud_hidden_cross_engine",
+    "roi_and_mask": "descriptive_explicit_presentation_regions"
+  },
+  "mission": {
+    "file": "CP12.bms",
+    "sha256": "24d498c38f694bcddecfe71567f64a5c12d7164f3566554fc5cde66e42216459"
+  },
+  "outputs": {
+    "absolute_diff": {
+      "dimensions": [
+        1920,
+        1200
+      ],
+      "path": "cp12-yard-tanks-retail-absolute-diff.png",
+      "sha256": "b3e5e0d2e9fa67967a8f0b7e4970c7a60d8a7ad782ee95042ee24150984d075b"
+    },
+    "opennova_normalized": {
+      "dimensions": [
+        1920,
+        1200
+      ],
+      "path": "cp12-yard-tanks-retail-opennova-normalized.png",
+      "sha256": "89191e9f27cb3ca03b9d530fdd5a1c50e8c56de5001730c454815b1f68155bee"
+    },
+    "overlay_50": {
+      "dimensions": [
+        1920,
+        1200
+      ],
+      "path": "cp12-yard-tanks-retail-overlay-50.png",
+      "sha256": "0c4fbffa182e9665e1d3041a87347dce2664007c1e7112461b7685c27f9acc8f"
+    },
+    "side_by_side": {
+      "dimensions": [
+        3840,
+        1272
+      ],
+      "path": "cp12-yard-tanks-retail-side-by-side.png",
+      "sha256": "3100d75e43ceb6b8f20d2e61266d985a35926383a0a6d7355fc5e4dcf99a39e3"
+    }
+  },
+  "presentations": {
+    "onhook_overlay_present": false,
+    "opennova": "hud_hidden",
+    "retail": "game_composite_pre_retail_hud",
+    "retail_gameplay_hud_visible": false,
+    "retail_policy": "retail_pre_hud_backbuffer_snapshot.v2",
+    "retail_video_profile": "retail_reference_highest_retail_selectable_v2"
+  },
+  "schema": "opennova.retail-comparison.v6",
+  "tool": {
+    "create_new": true,
+    "name": "build_retail_side_by_side",
+    "version": "4.0.0"
+  },
+  "transform": {
+    "crop": "none",
+    "destination_rectangle": [
+      0,
+      0,
+      1920,
+      1200
+    ],
+    "implementation": "System.Drawing.Graphics.DrawImage",
+    "interpolation": "HighQualityBicubic",
+    "kind": "horizontal_only",
+    "source_rectangle": [
+      0,
+      0,
+      2000,
+      1200
+    ],
+    "vertical_scale": 1.0
+  }
+}

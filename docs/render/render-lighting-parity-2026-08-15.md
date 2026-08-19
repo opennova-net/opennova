@@ -286,7 +286,10 @@ It replaces the lower-quality material that formerly occupied that path and
 contains all 15 registered pairs, 15 overlays, 15 absolute-difference images,
 15 normalized OpenNova images, and 75 raw OpenNova diagnostic images with
 portable evidence records. All rows bind frozen source
-`2cde75ad029be14d1c6e0dd8b034efc5fef017b5`, fixture catalog v2 at SHA-256
+`2cde75ad029be14d1c6e0dd8b034efc5fef017b5` — a pre-land sibling of master's
+`7fb987951` (the two single-commit squashes differ across ~273 files), kept
+reachable by the tag `render-evidence/2026-08-16` so pruning the side branch
+cannot orphan the provenance — fixture catalog v2 at SHA-256
 `607c7d66d7ce35ac915264fd462565fc262683aed34e4585a48d9093ce1a36d8`,
 stage/restore v3 (tool 3.0.0), raw capture bundle v4 from bridge 1.4/onHook 0.5.0,
 registered capture v5 (tool 4.0.0), and comparison v6 (tool 4.0.0).

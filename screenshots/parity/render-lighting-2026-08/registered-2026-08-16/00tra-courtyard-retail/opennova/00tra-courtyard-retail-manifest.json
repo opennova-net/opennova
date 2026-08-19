@@ -1,3 +1,231 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:0176c8e9b647d7c005cfb1b9d0271282fe6ccb3afe8b567bd26f950719667667
-size 6984
+{
+	"artifacts": [
+		{
+			"height": 1200,
+			"label": "00tra-courtyard-retail-m0900-beauty",
+			"png_path": "00tra-courtyard-retail-m0900-beauty.png",
+			"png_sha256": "c0ddd2a8c8f1cc1472b911523236b133e51a1ae13fad3057a3b4076dfdf3aa36",
+			"source_state_sha256": "01711d968ba01f15bfeb08909dbbaa069ea3fafc3d9f9f2a3e0a31fdeab42eff",
+			"state_path": "00tra-courtyard-retail-m0900-beauty.state.json",
+			"state_sha256": "0e378e61aaee9f71aea6dbd85b98156bc649da668bb6be6b9ea5995846ae386e",
+			"variant": "beauty",
+			"width": 2000
+		},
+		{
+			"height": 1200,
+			"label": "00tra-courtyard-retail-m0900-shadows_off",
+			"png_path": "00tra-courtyard-retail-m0900-shadows_off.png",
+			"png_sha256": "fc5292cd2232d22dd4e82db89803a862d85a837dc81196dccd47c9a873adcd49",
+			"source_state_sha256": "daf142d51dab9e2ff4d15a315c06352092351f19a257a98cba0cc82a5e3c41f1",
+			"state_path": "00tra-courtyard-retail-m0900-shadows_off.state.json",
+			"state_sha256": "c344f794eb16105d3cda44798811b7aa11d2cc844481b9b27615680890f5a6e0",
+			"variant": "shadows_off",
+			"width": 2000
+		},
+		{
+			"height": 1200,
+			"label": "00tra-courtyard-retail-m0900-lighting_only",
+			"png_path": "00tra-courtyard-retail-m0900-lighting_only.png",
+			"png_sha256": "1e1fc349320b1be4a964951abcdbda84116041598c2bce9742d374c47c6ae297",
+			"source_state_sha256": "045ab37b4fd45876e5abb40e2d4a275f93606aff5053b404e7e44aabb53d1490",
+			"state_path": "00tra-courtyard-retail-m0900-lighting_only.state.json",
+			"state_sha256": "c2f4ecb096db300d32d8c2c65fdb9aa86587618af8114b00f11320da52de4cf3",
+			"variant": "lighting_only",
+			"width": 2000
+		},
+		{
+			"height": 1200,
+			"label": "00tra-courtyard-retail-m0900-unshaded",
+			"png_path": "00tra-courtyard-retail-m0900-unshaded.png",
+			"png_sha256": "7fa24076909851d83848e76062a92066c83321d0414773a93534136bc2e786b6",
+			"source_state_sha256": "23028a4396c16532f40e395bf2868804aff247b5f2c1a5d0d9625474c95843fd",
+			"state_path": "00tra-courtyard-retail-m0900-unshaded.state.json",
+			"state_sha256": "c1b4a8d30da0f6a8164c36af4e732884aea3fca9aae40cd37eb73d0a8b6144d8",
+			"variant": "unshaded",
+			"width": 2000
+		},
+		{
+			"height": 1200,
+			"label": "00tra-courtyard-retail-m0900-directional_shadow_atlas",
+			"png_path": "00tra-courtyard-retail-m0900-directional_shadow_atlas.png",
+			"png_sha256": "0724ec5d71f1e703e1f471e002d17c5bf1a40a35cafa3554e7ee8d9dae510168",
+			"source_state_sha256": "1114278f544d980281f1fc521edf32ffe67e917501e4804522f4c5f3df1e4a2d",
+			"state_path": "00tra-courtyard-retail-m0900-directional_shadow_atlas.state.json",
+			"state_sha256": "291cdf05c466fb75624a92fc3000a3d13b63761c55fd6927192a995e58695fa3",
+			"variant": "directional_shadow_atlas",
+			"width": 2000
+		}
+	],
+	"capture": {
+		"camera_basis": [
+			[
+				1.0,
+				0.0,
+				0.0
+			],
+			[
+				0.0,
+				1.0,
+				0.0
+			],
+			[
+				0.0,
+				0.0,
+				1.0
+			]
+		],
+		"camera_bms": {
+			"pitch_deg": 0.0,
+			"position": [
+				297.881214309941,
+				-409.028974271988,
+				28.660125732422
+			],
+			"vertical_fov_deg": 53.4468,
+			"yaw_deg": 0.0
+		},
+		"camera_position_godot": [
+			297.881225585938,
+			28.6601257324219,
+			409.028961181641
+		],
+		"comparison_contract": {
+			"ads_active": false,
+			"arms_camo": [
+				1.0,
+				0.0,
+				0.0
+			],
+			"arms_graphic": "IndoArms.3di",
+			"big_map_active": false,
+			"capture_mode": "hud_hidden",
+			"character_id": 1026.0,
+			"equipped_weapon": "WPN_M16BURST",
+			"gameplay_hud_visible": false,
+			"hud_canvas_layer_active": true,
+			"hud_detail_level": 3.0,
+			"player_pose_source": "retail_player_bms.applied",
+			"player_view_effects_active": true,
+			"terrain_enabled": true,
+			"viewmodel_enabled": true,
+			"weapon_clip": 30.0,
+			"weapon_reserve": 270.0
+		},
+		"comparison_contract_witness": {
+			"ads_active": false,
+			"arms_camo": [
+				1,
+				0,
+				0
+			],
+			"arms_graphic": "IndoArms.3di",
+			"big_map_active": false,
+			"capture_mode": "hud_hidden",
+			"character_id": 1026,
+			"equipped_weapon": "WPN_M16BURST",
+			"gameplay_hud_visible": false,
+			"hud_canvas_layer_active": true,
+			"hud_canvas_layer_visible": true,
+			"hud_detail_level": 3,
+			"observed_at": "after_pose_settle_before_fixture_freeze",
+			"player_class": 9,
+			"player_pose_source": "retail_player_bms.applied",
+			"player_position_bms": [
+				297.697204589844,
+				-409.130493164063,
+				27.8100490570068
+			],
+			"player_view_effects_active": true,
+			"requested_player_pose_bms": {
+				"pitch_deg": 0.0,
+				"position": [
+					297.697204589844,
+					-409.130493164063,
+					27.8100490570068
+				],
+				"yaw_deg": 0.0
+			},
+			"terrain_data_available": true,
+			"terrain_enabled": true,
+			"terrain_node_visible": true,
+			"viewmodel_canvas_layer_visible": true,
+			"viewmodel_enabled": true,
+			"weapon_clip": 30,
+			"weapon_reserve": 270
+		},
+		"fov_deg": 53.4468,
+		"mode": "hud_hidden",
+		"phase_contract": {
+			"particles": "frozen_noncanonical",
+			"pixel_metrics": "within_run_variants_only",
+			"water_noise": "one_pose_refresh_then_frozen_noncanonical",
+			"weather": "canonical_reset_at_requested_tod"
+		},
+		"post_spawn": {
+			"entry": "single_player_auto_spawn_after_splash",
+			"gameplay_camera_current": true,
+			"gameplay_input_active": true,
+			"local_player_spawned": true,
+			"observed_at": "before_fixture_freeze",
+			"runtime_playing": true,
+			"spawn_or_menu_active": false,
+			"world_loaded": true,
+			"world_loading": false
+		},
+		"resolution": [
+			2000,
+			1200
+		],
+		"viewmodel_hidden": false,
+		"world_only": false
+	},
+	"catalog_schema": "opennova.render-fixtures.v2",
+	"catalog_sha256": "607c7d66d7ce35ac915264fd462565fc262683aed34e4585a48d9093ce1a36d8",
+	"fixture": {
+		"camera_bms": {
+			"pitch_deg": 0.0,
+			"position": [
+				297.881214309941,
+				-409.028974271988,
+				28.660125732422
+			],
+			"vertical_fov_deg": 53.4468,
+			"yaw_deg": 0.0
+		},
+		"capture_mode": "hud_hidden",
+		"coverage": [
+			"retail_side_by_side",
+			"directional_shadows",
+			"outdoor_materials"
+		],
+		"id": "00tra-courtyard-retail",
+		"minutes_of_day": [
+			900.0
+		],
+		"mission": "00TRa.bms",
+		"retail_player_bms": {
+			"applied": [
+				297.6972,
+				-409.1305,
+				27.81005
+			],
+			"derivation": "APPLY_POSE request retained from visual calibration; registered inverse view matrix is authoritative for camera_bms",
+			"provenance_status": "required_at_capture"
+		}
+	},
+	"mission": {
+		"expansion": "revx02",
+		"file": "00TRa.bms",
+		"runtime_mount": "packed_game_install",
+		"sha256": "64dd18b3122a6c4ee4e173cac1b9a12d19004c32572bd2f1ad113a475fe57407",
+		"source_kind": "loose_authoring_file"
+	},
+	"provenance": {
+		"gdextension_name": "libopennova.windows.template_debug.x86_64.dll",
+		"gdextension_sha256": "b801deacd18802053dd9973e0e4dd4ef1dece55a7afa74e6f5650a2d9be1805c",
+		"godot_executable_name": "Godot_v4.6.1-stable_win64.exe",
+		"godot_executable_sha256": "1e5efe381f62ee1cea6bc18caac71c0c74bd6e68e6af5c6efb3dbe76628f61c7",
+		"source_commit": "2cde75ad029be14d1c6e0dd8b034efc5fef017b5"
+	},
+	"schema": "opennova.render-fixture-captures.v1"
+}
