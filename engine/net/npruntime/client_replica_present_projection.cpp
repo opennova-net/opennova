@@ -29,6 +29,7 @@ void initialize_client_replica_present_row(float *row) {
 	row[world::PF_WPN_BLEND_WEIGHT] = 1.0f;
 	row[world::PF_WPN_VARIANT] = 0.0f;
 	row[world::PF_WPN_SOURCE_VARIANT] = 0.0f;
+	row[world::PF_CARRIER_HANDLE] = -1.0f;
 	row[world::PF_ALIVE] = 1.0f;
 }
 

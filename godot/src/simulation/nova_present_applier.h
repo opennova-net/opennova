@@ -221,13 +221,6 @@ private:
 		int32_t anim_state = -2;
 		int32_t anim_request = -1;
 		int32_t remote_body_tick = 0;
-		// The footstep scan's consumed playhead: the last clip phase whose
-		// authored trigger word this row has already fired. -1 means "nothing
-		// consumed yet", so a fresh clip fires its frame 0; a mid-clip attach
-		// seeds it to the attach phase so nothing back-fires (retail consumes
-		// one word per authored frame ENTERED, org2 @0x4b76e6-0x4b78a8).
-		int32_t foot_phase = -1;
-		int32_t foot_state = -2;
 		// Per-leg input caches for the measured every-frame legs (the 2026-08-04
 		// joiner profile: ~21us/row ungated over a full streamed world). Each
 		// holds the exact PF fields its leg consumes; an invalid cache forces

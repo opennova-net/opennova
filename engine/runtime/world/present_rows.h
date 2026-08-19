@@ -80,11 +80,14 @@ enum PresentField : int {
 	// 0x0C spawn echoes for a player; 0 when not a player. Keys the composed
 	// head/body the joiner presents for that row.
 	PF_CHARACTER_ID,
-	// The wire `groundEntity` link (entity+0x28): the packed handle of the
-	// entity this body is standing on, or 0xFFFF for none. Presentation reads
-	// it for the on-entity footstep slot; it is the same link the authority
-	// body channel takes from Entity::ground_target
-	// [orig: the +0x28 store by Entity_RaycastGroundHeightAndObject @0x525fd0].
+	// The decoded wire carrier link, -1 for none: for a standing player this
+	// is the groundEntity it stands on (entity+0x28) — the same link the
+	// authority body channel takes from Entity::ground_target for the
+	// on-entity footstep slot [orig: the +0x28 store by
+	// Entity_RaycastGroundHeightAndObject @0x525fd0]. For a SEATED body the
+	// wire reuses the field for the seat carrier (mount_bone distinguishes);
+	// seat clips author no foot-event bits, so the footstep consumer never
+	// reads it in that state.
 	PF_CARRIER_HANDLE,
 	// Final output of anim::compute_aim_overlay_angles. Presentation consumes
 	// this result; it never repeats the mounted config selector.

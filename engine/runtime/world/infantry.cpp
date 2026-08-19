@@ -43,11 +43,11 @@
 //            Rides the combat pass with the rest of the targeting layer.
 
 #include <algorithm>
-#include "audio/footstep_slot.h"
 #include <cmath>
 #include <cstdio>
 #include <limits>
 
+#include "audio/footstep_slot.h"
 #include <io/bam.h>
 #include <terrain_query/height_field.h>
 
