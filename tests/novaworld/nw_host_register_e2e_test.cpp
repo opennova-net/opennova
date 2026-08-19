@@ -45,10 +45,6 @@ void expect(bool cond, const char *what) {
 	}
 }
 
-// A loopback port distinct from the retail 64206 so a real local server (or a
-// concurrent test) doesn't collide. Loopback-only; a bind failure fails loudly.
-constexpr uint16_t kTestNwPort = 46206;
-
 opennova::net::Endpoint loopback_ep(uint16_t port) {
 	opennova::net::Endpoint ep;
 	ep.ip = {127, 0, 0, 1};
@@ -77,11 +73,21 @@ int main() {
 				connection.addr, opennova::drop_reason_name(reason));
 	});
 	opennova::server::ServerConfig config;
-	config.nw_udp_port = kTestNwPort;
+	config.nw_udp_port = 0;
 	if (!listener.start(config)) {
-		std::fprintf(stderr, "FAIL: listener.start (port %u in use?)\n", kTestNwPort);
+		std::fprintf(stderr, "FAIL: listener.start\n");
 		return 1;
 	}
+	const uint16_t test_nw_port = listener.bound_port();
+	if (test_nw_port == 0) {
+		std::fprintf(stderr, "FAIL: listener reports OS-assigned UDP port\n");
+		listener.stop();
+		opennova::net::shutdown();
+		return 1;
+	}
+	// Keep the selected port for the stop/start lifecycle check later in this
+	// test; only the initial allocation needs to be collision-free.
+	config.nw_udp_port = test_nw_port;
 	// Let the worker thread re-bind its socket before the first datagram.
 	std::this_thread::sleep_for(50ms);
 
@@ -95,7 +101,7 @@ int main() {
 	uint16_t client_port = 0;
 	auto client = opennova::net::udp_bind(0, &client_port);
 	expect(client.is_valid(), "client UDP socket bound");
-	const auto server_ep = loopback_ep(kTestNwPort);
+	const auto server_ep = loopback_ep(test_nw_port);
 
 	// ClientAuth is not a stateless entry point for the lobby route. A peer
 	// must first own the exact Handshaking row created by its ClientHello;

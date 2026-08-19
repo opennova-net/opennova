@@ -122,6 +122,9 @@ public:
 	void stop();
 
 	bool running() const { return running_.load(); }
+	// Actual port selected by start(), including an OS-assigned port when the
+	// configured value is zero.
+	uint16_t bound_port() const { return bound_port_; }
 
 	// Snapshot of every connection that has issued a ClientHostRequest
 	// (and therefore appears in the lobby browser). Thread-safe.
