@@ -554,7 +554,9 @@ func _update_model_lighting_context() -> void:
 	# Terrain_RenderSectorEntities stacks it for the world body @0x5c7bff]
 	var body_scale := 1.0
 	if sim != null:
-		body_scale = float(sim.get_local_player_sun_quality()) * 0.25
+		# quality -> effectScale maps engine-side (one owner:
+		# renderer::sun_visibility_factor via sun_quality_factor).
+		body_scale = sim.sun_quality_factor(sim.get_local_player_sun_quality())
 	_set_model_lighting_context(_avatar, interior, transfer, body_scale)
 	_set_model_lighting_context(_held_weapon, interior, transfer, body_scale)
 	for part in vm_parts():

@@ -17,8 +17,11 @@
 
 #include <netsim/client_replica_pipeline.h>
 #include <netsim/client_scoreboard_view.h>
+#include <npwire/game_type.h>
 #include <npwire/ingame_decode.h>
 #include <npwire/ingame_message_id.h>
+
+#include <string>
 
 using namespace opennova;
 using namespace opennova::netsim;
@@ -339,6 +342,21 @@ void test_projection_tracks_live_slot() {
 	CHECK(h.players == 1);
 }
 
+// The Tab header's game-type rung map [orig: HUD_GetGameTypeOverlayLabel
+// @0x5b8680]: the Co-op family shares one rung (the objective bit is
+// forgiven), type 8 shares DM's, unlisted types draw blank.
+void test_overlay_label_key_map() {
+	using namespace opennova::game_type;
+	CHECK(std::string(overlay_label_key(kCoop)) == "STROVER28");
+	CHECK(std::string(overlay_label_key(kObjectiveCoop)) == "STROVER28");
+	CHECK(std::string(overlay_label_key(kDeathmatch)) == "STROVER29");
+	CHECK(std::string(overlay_label_key(8)) == "STROVER29");
+	CHECK(std::string(overlay_label_key(kTeamDeathmatch)) == "STROVER64");
+	CHECK(std::string(overlay_label_key(kTeamKingOfTheHill)) == "STROVER48");
+	CHECK(std::string(overlay_label_key(kConquerAndControl)) == "STROVER93");
+	CHECK(std::string(overlay_label_key(0xDEAD)).empty());
+}
+
 // No 0x16 yet -> unknown header, cleared rows, zero counts.
 void test_projection_unknown_is_empty() {
 	ClientReplicaPipeline view;
@@ -381,6 +399,7 @@ int main() {
 	test_row_team_refreshes_entity();
 	test_projection_joins_and_counts();
 	test_projection_tracks_live_slot();
+	test_overlay_label_key_map();
 	test_projection_unknown_is_empty();
 	test_score_sign_extends();
 	test_malformed_body_is_rejected();

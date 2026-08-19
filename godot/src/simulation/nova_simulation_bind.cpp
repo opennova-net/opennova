@@ -382,6 +382,8 @@ void Simulation::_bind_methods() {
 	                     &Simulation::get_entity_sun_visibility_changes);
 	ClassDB::bind_method(D_METHOD("get_local_player_sun_quality"),
 	                     &Simulation::get_local_player_sun_quality);
+	ClassDB::bind_method(D_METHOD("sun_quality_factor", "quality"),
+	                     &Simulation::sun_quality_factor);
 	ClassDB::bind_method(D_METHOD("entity_present_visible", "bms_id"),
 	                     &Simulation::entity_present_visible);
 	ClassDB::bind_method(D_METHOD("reset_occlusion_apply_baseline"),

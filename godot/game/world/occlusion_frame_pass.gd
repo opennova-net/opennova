@@ -228,8 +228,10 @@ func apply_frame(camera_xform: Transform3D, forces_indoors: bool) -> void:
 		for i in range(0, sun_changes.size(), 2):
 			var sun_node := _occlusion_node(registry, int(sun_changes[i]))
 			if sun_node != null:
+				# quality -> effectScale maps engine-side (one owner:
+				# renderer::sun_visibility_factor via sun_quality_factor).
 				sun_node.set_entity_lighting_context(
-						float(sun_changes[i + 1]) * 0.25, false, 0.0)
+						sim.sun_quality_factor(int(sun_changes[i + 1])), false, 0.0)
 
 	# The g_BlinkWaterVisible override legs the slice-1 gate deferred: with the
 	# authored water letter suppressing (accum bit 0x8), the water still renders

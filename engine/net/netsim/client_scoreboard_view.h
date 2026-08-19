@@ -42,4 +42,7 @@ ClientScoreboardHeader project_scoreboard(
 // The header counts alone (no row materialization).
 ClientScoreboardHeader scoreboard_header(const ClientState &state);
 
+// (The game-type label rung lives with the rest of the game-type key maps:
+// npwire game_type.h overlay_label_key [orig: @0x5b8680].)
+
 } // namespace opennova::netsim

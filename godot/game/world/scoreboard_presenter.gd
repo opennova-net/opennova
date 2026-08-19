@@ -59,7 +59,9 @@ func update(hud, world, chorded: bool, active: bool) -> void:
 	if table != null:
 		if table.has_string_in_section("Overlays", "STROVER_KILLLIST"):
 			strings["title"] = table.get_string_in_section("Overlays", "STROVER_KILLLIST")
-		var label_key := _game_type_label_key(game_type)
+		# The key map is retail's own, engine-owned (npwire game_type.h
+		# overlay_label_key via NetProtocol) — this lane only looks it up.
+		var label_key := NetProtocol.game_type_overlay_label_key(game_type)
 		if label_key != "" and table.has_string_in_section("Overlays", label_key):
 			strings["game_type"] = table.get_string_in_section("Overlays", label_key)
 		# "<label> <count>": the counts are engine-computed — the players
@@ -78,36 +80,3 @@ func update(hud, world, chorded: bool, active: bool) -> void:
 	# The rows never round-trip through script: the overlay pulls them
 	# natively from the sim (HudOverlay.set_scoreboard -> fill_scoreboard_rows).
 	hud.set_scoreboard(true, game_type, strings, sim)
-
-
-## The game-type label row of the header ladder — retail's own key map
-## [orig: HUD_GetGameTypeOverlayLabel @0x5b8680; the co-op mask arm
-## @0x5b8692]. An unlisted type draws no label (the rung stays blank).
-func _game_type_label_key(game_type: int) -> String:
-	# The Co-op family first — the mask forgives the objective bit, so stock
-	# and objective Co-op share the rung (npwire game_type.h is_waypoint_family).
-	if (game_type & ~NetProtocol.GAME_TYPE_OBJECTIVE_BIT) \
-			== NetProtocol.GAME_TYPE_TRAINING_COOP:
-		return "STROVER28"
-	match game_type:
-		NetProtocol.GAME_TYPE_DEATHMATCH, 8:
-			return "STROVER29"  # DM / the unnamed type-8 non-team mode
-		NetProtocol.GAME_TYPE_TEAM_DEATHMATCH:
-			return "STROVER64"
-		NetProtocol.GAME_TYPE_KING_OF_THE_HILL:
-			return "STROVER30"
-		NetProtocol.GAME_TYPE_TEAM_KING_OF_THE_HILL:
-			return "STROVER48"
-		NetProtocol.GAME_TYPE_CAPTURE_THE_FLAG:
-			return "STROVER31"
-		NetProtocol.GAME_TYPE_SEARCH_AND_DESTROY:
-			return "STROVER56"
-		NetProtocol.GAME_TYPE_ATTACK_AND_DEFEND:
-			return "STROVER57"
-		NetProtocol.GAME_TYPE_FLAGBALL:
-			return "STROVER58"
-		NetProtocol.GAME_TYPE_ADVANCE_AND_SECURE:
-			return "STROVER92"
-		NetProtocol.GAME_TYPE_CONQUER_AND_CONTROL:
-			return "STROVER93"
-	return ""
