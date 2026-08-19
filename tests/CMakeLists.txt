@@ -2007,6 +2007,11 @@ target_link_libraries(nw_pcap_stream_test PRIVATE opennova_app_common opennova_b
 target_include_directories(nw_pcap_stream_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME nw_pcap_stream COMMAND nw_pcap_stream_test)
 
+add_executable(nw_pcap_writer_test novaworld/nw_pcap_writer_test.cpp)
+target_link_libraries(nw_pcap_writer_test PRIVATE opennova_app_common opennova_base)
+target_include_directories(nw_pcap_writer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME nw_pcap_writer COMMAND nw_pcap_writer_test)
+
 # Per-entity compact-record decoders — §5.10 player / §5.13 vehicle / §5.14
 # infantry. Hand-built input vectors mirror the wire layout; no capture
 # dependency, so the test runs unconditionally in CI.

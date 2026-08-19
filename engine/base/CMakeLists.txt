@@ -13,6 +13,7 @@ add_library(opennova_base STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/gameprofile/required_resources.c
     # pcapio — pcap/pcapng reading (shared by capture-driven tests and tools)
     ${CMAKE_CURRENT_SOURCE_DIR}/pcapio/pcap_reader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/pcapio/pcap_writer.cpp
     # refs — cross-resource reference extraction + the whole-root RefGraph
     ${CMAKE_CURRENT_SOURCE_DIR}/refs/refs.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/refs/refs_env.cpp
