@@ -16,6 +16,7 @@
 #include <vector>
 
 #include <netsim/client_replica_pipeline.h>
+#include <netsim/client_scoreboard_view.h>
 #include <npwire/ingame_decode.h>
 #include <npwire/ingame_message_id.h>
 
@@ -277,6 +278,88 @@ void test_row_team_refreshes_entity() {
 	CHECK(view.state().revision == rev_after_list + 1);
 }
 
+// ---- the draw-time projection (netsim::project_scoreboard) ----
+
+// The projection joins "clan name" in the parser's order, reads the LIVE
+// slot's quality/entity binding, and computes the header's players count as
+// accepted rows minus the spectator trailer [orig: join @0x42fd46; icon gate
+// @0x4241e2; entity gate @0x423d1b; players subtraction @0x4231dd].
+void test_projection_joins_and_counts() {
+	ClientReplicaPipeline view;
+	view.apply(s2c::PLAYER_SYNC,
+			make_sync(3, 5,
+					kPlayerSyncHasName | kPlayerSyncHasTeamString | kPlayerSyncHasQuality,
+					"SPAGHETTI", "TAG", -1, 2));
+	view.apply(s2c::PLAYER_SYNC, make_sync_name(4, "GHOST", 6));
+	view.apply(s2c::PLAYER_LIST,
+			make_list(0x01, {{3, 0, 7, 0, 0x02}, {4, 0, 0, 0, 0x03}}, 2, 1));
+	std::vector<hud::ScoreboardEntry> rows;
+	const ClientScoreboardHeader h = project_scoreboard(view.state(), rows);
+	CHECK(h.known);
+	CHECK(h.team_mode);
+	CHECK(h.players == 1); // 2 accepted rows - 1 spectator (trailer)
+	CHECK(h.spectators == 1);
+	CHECK(h.in_game == 2);
+	CHECK(rows.size() == 2);
+	if (rows.size() == 2) {
+		CHECK(rows[0].name == "TAG SPAGHETTI"); // clan-first join
+		CHECK(rows[0].quality == 2);            // the LIVE slot read
+		CHECK(rows[0].has_entity);
+		CHECK(rows[0].score1 == 7);
+		CHECK(rows[1].name == "GHOST"); // no clan -> bare name
+	}
+}
+
+// A 0x46 between 0x16s changes the DRAWN board without a new list: quality
+// re-reads live, and a removal flips has_entity while the row's carried
+// strings survive [orig: the wipe @0x434730; the entity gate @0x423d1b].
+void test_projection_tracks_live_slot() {
+	ClientReplicaPipeline view;
+	view.apply(s2c::PLAYER_SYNC,
+			make_sync(3, 5, kPlayerSyncHasName | kPlayerSyncHasQuality,
+					"DRIVER", nullptr, -1, 1));
+	view.apply(s2c::PLAYER_LIST, make_list(0x01, {{3, 0, 0, 0, 0x02}}, 1, 0));
+	std::vector<hud::ScoreboardEntry> rows;
+	project_scoreboard(view.state(), rows);
+	CHECK(rows.size() == 1);
+	if (!rows.empty()) CHECK(rows[0].quality == 1);
+	view.apply(s2c::PLAYER_SYNC,
+			make_sync(3, 5, kPlayerSyncHasQuality, nullptr, nullptr, -1, 3));
+	project_scoreboard(view.state(), rows);
+	CHECK(rows.size() == 1);
+	if (!rows.empty()) CHECK(rows[0].quality == 3); // live re-read, no new 0x16
+	view.apply(s2c::PLAYER_SYNC, make_sync_removal(3));
+	const ClientScoreboardHeader h = project_scoreboard(view.state(), rows);
+	CHECK(rows.size() == 1);
+	if (!rows.empty()) {
+		CHECK(!rows[0].has_entity);      // team boards drop the line
+		CHECK(rows[0].name == "DRIVER"); // the row-carried string survives
+		CHECK(rows[0].quality == 0);     // wiped slot draws no icon
+	}
+	CHECK(h.players == 1);
+}
+
+// No 0x16 yet -> unknown header, cleared rows, zero counts.
+void test_projection_unknown_is_empty() {
+	ClientReplicaPipeline view;
+	std::vector<hud::ScoreboardEntry> rows{hud::ScoreboardEntry{}};
+	const ClientScoreboardHeader h = project_scoreboard(view.state(), rows);
+	CHECK(!h.known);
+	CHECK(rows.empty());
+	CHECK(h.players == 0);
+}
+
+// The wire u16 lands SIGNED in the record — the parser's movsx into rec+0x28
+// [orig: @0x42fb9d]; a -2 own-goal reads -2 from the row, never 65534.
+void test_score_sign_extends() {
+	ClientReplicaPipeline view;
+	view.apply(s2c::PLAYER_SYNC, make_sync_name(3, "OWNGOAL", 5));
+	view.apply(s2c::PLAYER_LIST, make_list(0x00, {{3, 0, 0xFFFE, 0, 0x02}}, 1, 0));
+	CHECK(view.state().scoreboard.rows.size() == 1);
+	if (!view.state().scoreboard.rows.empty())
+		CHECK(view.state().scoreboard.rows[0].score1 == -2);
+}
+
 // A malformed body is counted, not folded.
 void test_malformed_body_is_rejected() {
 	ClientReplicaPipeline view;
@@ -296,6 +379,10 @@ int main() {
 	test_roster_fields_are_last_write_wins_per_bit();
 	test_team_table_fields();
 	test_row_team_refreshes_entity();
+	test_projection_joins_and_counts();
+	test_projection_tracks_live_slot();
+	test_projection_unknown_is_empty();
+	test_score_sign_extends();
 	test_malformed_body_is_rejected();
 	if (failures == 0) std::printf("client_replica_scoreboard_test: all passed\n");
 	return failures == 0 ? 0 : 1;

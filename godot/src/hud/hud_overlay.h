@@ -95,9 +95,12 @@ public:
 	// The resolved gametext Overlays/STROVER_MISSIONOBJECTIVES header line.
 	void set_objectives_header(const String &p_text);
 	// The Tab board: whether it is held open, the strings the shell resolved,
-	// and the rows (each a Dictionary from Simulation::get_scoreboard).
+	// and the Simulation the rows are pulled from natively
+	// (Simulation::fill_scoreboard_rows — no script-side row round-trip).
+	// Typed cross-class args on the bound API follow the set_minimap_terrain
+	// precedent; pass null when hiding.
 	void set_scoreboard(bool p_shown, int64_t p_game_type, const Dictionary &p_strings,
-			const Array &p_rows);
+			Object *p_sim);
 	void set_waypoint(const String &p_name, int p_distance_m,
 			const Vector2 &p_mission_position = Vector2(),
 			float p_altitude_wu = 0.0f);

@@ -96,10 +96,11 @@ inline bool scoreboard_is_non_team(uint32_t game_type) {
 struct ScoreboardEntry {
 	uint8_t slot_id = 0;
 	uint16_t status_flags = 0;
-	// The mode stat, decoded as a SIGNED 16-bit value — the parser movsx's the
-	// wire u16 into its record and "%3i" prints negatives as negatives
-	// [orig: the movsx @0x42fb9d into rec+0x28].
-	uint16_t score1 = 0;
+	// The mode stat — SIGNED, as the parser movsx's the wire u16 into its
+	// record and "%3i" prints negatives as negatives [orig: the movsx
+	// @0x42fb9d into rec+0x28]. The type carries the sign so no consumer can
+	// re-read 65534 for -2.
+	int16_t score1 = 0;
 	uint8_t team = 0;
 	bool spectator = false;
 	// Whether the row's connection slot still binds a live entity. Team modes

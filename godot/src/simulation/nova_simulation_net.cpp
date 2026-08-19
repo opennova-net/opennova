@@ -12,6 +12,7 @@
 #include <npwire/ingame_decode.h> // kRoundEventFlag* (the fire-mode byte)
 #include <npwire/ingame_message_id.h>
 #include <hud/feed_format.h> // the witnessed feed line/color policy
+#include <netsim/client_scoreboard_view.h> // the Tab board's draw-time projection
 #include <world/wire_body_sound.h> // the wire-fed remote body's footstep/foley consume
 #include <npwire/net_ports.h> // lan_host_bind_ports (the D-NET-210 bind scan)
 #include <vfs/vfs.h> // vfs_expansion_version_checksum (the D-NET-166 JOIN CRC)
@@ -1533,51 +1534,37 @@ void Simulation::present_wire_body_sounds(int p_type_id, int p_character_id,
 			static_cast<uint16_t>(p_wire_handle), p_carrier_handle >= 0, body);
 }
 
-// The Tab board as the shell needs it. The row already carries its roster-
-// joined name and clan (the fold does that at apply time), so this only pairs
-// each row with its connection slot for the icon band.
+// The Tab board's header as the shell needs it. Row data no longer rides a
+// script Dictionary: HudOverlay pulls the drawn rows natively through
+// fill_scoreboard_rows, and the counts here come from the same netsim
+// projection (netsim::scoreboard_header — the accepted-rows-minus-spectators
+// players count is the witnessed header arithmetic, retail @0x4231dd).
 Dictionary Simulation::get_scoreboard() const {
 	Dictionary out;
 	if (!runtime_) return out;
-	const opennova::netsim::ClientState &cs = runtime_->state();
-	const opennova::netsim::ClientScoreboard &sb = cs.scoreboard;
-	out["known"] = sb.known;
-	out["team_mode"] = sb.team_mode;
-	out["timed"] = sb.timed;
-	out["in_game"] = sb.in_game_count;
-	out["spectators"] = sb.spectator_count;
+	const opennova::netsim::ClientScoreboardHeader header =
+			opennova::netsim::scoreboard_header(runtime_->state());
+	out["known"] = header.known;
+	out["team_mode"] = header.team_mode;
+	out["timed"] = header.timed;
+	out["players"] = header.players;
+	out["in_game"] = header.in_game;
+	out["spectators"] = header.spectators;
 	// The drawer branches on the session game type (retail reads g_GameType
 	// @0x423acb); the header's session strings ride along — joiner-decoded,
 	// empty on a host until the host sessionvars are plumbed (D-HUD-24).
 	out["game_type"] = static_cast<int64_t>(runtime_->game_type());
 	out["server"] = String::utf8(runtime_->server_name().c_str());
 	out["mission"] = String::utf8(runtime_->mission_name().c_str());
-	Array rows;
-	for (const opennova::netsim::ClientScoreboardRow &r : sb.rows) {
-		const opennova::netsim::ClientRosterSlot &slot = cs.roster[r.slot_id];
-		Dictionary d;
-		d["slot"] = r.slot_id;
-		d["status_flags"] = r.status_flags;
-		d["score"] = r.score1;
-		d["points"] = r.score2;
-		d["team"] = r.team;
-		d["spectator"] = r.spectator;
-		// The board's name is the ROW-carried join in the parser's own order
-		// — "clan name" (retail: sprintf("%s %s", clan, name) @0x42fd46 into
-		// the 56-byte record), which is what keeps a leaver's line readable
-		// after the 0x46 slot wipe.
-		String name = String::utf8(r.name.c_str());
-		if (!r.clan.empty())
-			name = String::utf8(r.clan.c_str()) + " " + name;
-		d["name"] = name;
-		// The connection icon and the team-mode draw gate read the LIVE slot:
-		// a wiped slot's 0 quality draws no icon (retail's own out-of-band
-		// gate @0x4c2ee0), and a row without a live entity vanishes from team
-		// boards (retail: the entity-null fallthrough @0x423d1b).
-		d["quality"] = slot.quality;
-		d["has_entity"] = slot.bound && slot.entity_slot >= 0;
-		rows.push_back(d);
-	}
-	out["rows"] = rows;
 	return out;
+}
+
+bool Simulation::fill_scoreboard_rows(
+		std::vector<opennova::hud::ScoreboardEntry> &r_rows) const {
+	if (!runtime_) {
+		r_rows.clear();
+		return false;
+	}
+	opennova::netsim::project_scoreboard(runtime_->state(), r_rows);
+	return true;
 }
