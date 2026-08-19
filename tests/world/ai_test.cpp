@@ -1321,7 +1321,8 @@ int main() {
 
     // ---- AI_BeginUpdate budget gate ----
     {
-        AiSystem sys;
+        auto sys_heap = std::make_unique<AiSystem>();
+        AiSystem &sys = *sys_heap;
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
         e.brain.f[AiBrain::kStep] = 64;
@@ -1353,7 +1354,8 @@ int main() {
 
     // ---- handle lookup index ----
     {
-        AiSystem sys;
+        auto sys_heap = std::make_unique<AiSystem>();
+        AiSystem &sys = *sys_heap;
         EntityHandle h0 = EntityHandle::make(0, 4);
         EntityHandle h1 = EntityHandle::make(2, 9);
         EntityHandle h2 = EntityHandle::make(3, 7);
@@ -1367,7 +1369,8 @@ int main() {
         sys.capture_spawn_baseline();
         sys.attach(h2);
         CHECK(sys.for_handle(h2) != nullptr);
-        World w;
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
         sys.on_load(w);
         CHECK(sys.for_handle(h0) == sys.at(i0));
         CHECK(sys.for_handle(h1) == sys.at(i1));
@@ -1376,8 +1379,10 @@ int main() {
 
     // ---- state-machine dispatcher transition (authority) ----
     {
-        World w;
-        AiSystem sys;
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
+        auto sys_heap = std::make_unique<AiSystem>();
+        AiSystem &sys = *sys_heap;
         sys.is_authority = true;
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
@@ -1396,8 +1401,10 @@ int main() {
 
     // ---- reset-to-patrol enter handler (byte-exact: step=64, alert cleared) ----
     {
-        World w;
-        AiSystem sys;
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
+        auto sys_heap = std::make_unique<AiSystem>();
+        AiSystem &sys = *sys_heap;
         sys.is_authority = true;
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
@@ -1415,8 +1422,10 @@ int main() {
 
     // ---- AIEvent ring: timer decrement, expiry dispatch, transition, compaction ----
     {
-        World w;
-        AiSystem sys;
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
+        auto sys_heap = std::make_unique<AiSystem>();
+        AiSystem &sys = *sys_heap;
         sys.is_authority = true;
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
@@ -1445,8 +1454,10 @@ int main() {
     // dispatch [orig: Entity_ApplyCommand queue @0x43ac59/@0x43acc4/@0x43ad34
     // -> AI_HandleCommand case 6 @0x4657a6..0x465816] ----
     {
-        World w;
-        AiSystem sys;
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
+        auto sys_heap = std::make_unique<AiSystem>();
+        AiSystem &sys = *sys_heap;
         sys.is_authority = true;
         const auto alert_event = [](int idx, int32_t level) {
             AiEventEntry ev{};
@@ -1526,8 +1537,10 @@ int main() {
 
     // ---- not_yet_ported coverage counter via full tick ----
     {
-        World w;
-        AiSystem sys;
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
+        auto sys_heap = std::make_unique<AiSystem>();
+        AiSystem &sys = *sys_heap;
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
         e.has_physics = false;
@@ -1548,7 +1561,8 @@ int main() {
         CHECK(streq(body_anim_adm_key(kBodyAnimRunForward), "anim_run_forward"));
         CHECK(streq(body_anim_adm_key(-1), ""));
 
-        World w;
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
         w.registry.configure_pool(0, 8);
         Entity seed;
         seed.alive = true;
@@ -1556,7 +1570,8 @@ int main() {
         EntityHandle h = w.registry.spawn(0, seed);
         CHECK(h != EntityHandle{});
 
-        AiSystem sys;
+        auto sys_heap = std::make_unique<AiSystem>();
+        AiSystem &sys = *sys_heap;
         sys.is_authority = true;
         int idx = sys.attach(h);
         AiEntity &e = *sys.at(idx);
@@ -1660,8 +1675,10 @@ int main() {
 
     // ---- path follower: arrival advances the node + records relmat + outputs ----
     {
-        World w;
-        AiSystem sys;
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
+        auto sys_heap = std::make_unique<AiSystem>();
+        AiSystem &sys = *sys_heap;
         sys.nav.channels.resize(2);
         sys.nav.channels[1].count = 3;
         sys.nav.channels[1].loopflag = 0;
@@ -1703,8 +1720,10 @@ int main() {
     // ---- path follower: loop-wrap vs one-shot terminate at path end ----
     {
         for (int loopflag = 0; loopflag <= 1; ++loopflag) {
-            World w;
-            AiSystem sys;
+            auto w_heap = std::make_unique<World>();
+            World &w = *w_heap;
+            auto sys_heap = std::make_unique<AiSystem>();
+            AiSystem &sys = *sys_heap;
             sys.nav.channels.resize(2);
             sys.nav.channels[1].count = 3;
             sys.nav.channels[1].loopflag = loopflag;
@@ -1738,8 +1757,10 @@ int main() {
 
     // ---- state-16 tick: alive + no target -> walks the path ----
     {
-        World w;
-        AiSystem sys;
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
+        auto sys_heap = std::make_unique<AiSystem>();
+        AiSystem &sys = *sys_heap;
         sys.nav.nodes.resize(1);
         sys.nav.nodes[0] = NavEntry{{0, 100, 0, 0, 0}};
         int idx = sys.attach(EntityHandle::make(0, 0));
@@ -1759,8 +1780,10 @@ int main() {
 
     // ---- state-16 tick: death queues crash (3) vs still (4) by speed ----
     {
-        World w;
-        AiSystem sys;
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
+        auto sys_heap = std::make_unique<AiSystem>();
+        AiSystem &sys = *sys_heap;
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
         e.brain.f[AiBrain::kCurState] = kAiGroundFollowWp;
@@ -1780,8 +1803,10 @@ int main() {
 
     // ---- path follower: state-17 uses 16*speed threshold + kSpeedA; un-halved output ----
     {
-        World w;
-        AiSystem sys;
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
+        auto sys_heap = std::make_unique<AiSystem>();
+        AiSystem &sys = *sys_heap;
         sys.nav.channels.resize(2);
         sys.nav.channels[1].count = 3;
         sys.nav.channels[1].entries[0] = 10;
@@ -1805,8 +1830,10 @@ int main() {
 
     // ---- contrast: state-16 with the SAME timeDelta halves (threshold speed*step=1280) ----
     {
-        World w;
-        AiSystem sys;
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
+        auto sys_heap = std::make_unique<AiSystem>();
+        AiSystem &sys = *sys_heap;
         sys.nav.channels.resize(2);
         sys.nav.channels[1].count = 3;
         sys.nav.channels[1].entries[0] = 10;
@@ -1840,8 +1867,10 @@ int main() {
 
     // ---- path follower: unresolvable waypoint -> freeze at current transform ----
     {
-        World w;
-        AiSystem sys;
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
+        auto sys_heap = std::make_unique<AiSystem>();
+        AiSystem &sys = *sys_heap;
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
         e.pos[0] = 11; e.pos[1] = 22; e.pos[2] = 33;
@@ -1879,8 +1908,10 @@ int main() {
 
     // ---- state-16 tick: can-fire + fire timer decrements by step ----
     {
-        World w;
-        AiSystem sys;
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
+        auto sys_heap = std::make_unique<AiSystem>();
+        AiSystem &sys = *sys_heap;
         sys.nav.nodes.resize(1);
         sys.nav.nodes[0] = NavEntry{{0, 0, 0, 0, 0}};
         int idx = sys.attach(EntityHandle::make(0, 0));
@@ -1901,7 +1932,8 @@ int main() {
 
     // ---- PRNG: the rotate-LCG (dword_31BFBB8 / PRNG_Next16) is byte-exact + independent ----
     {
-        AiSystem sys;
+        auto sys_heap = std::make_unique<AiSystem>();
+        AiSystem &sys = *sys_heap;
         sys.prng_a = 1;
         // s = rotl(1+rotl(1,11),4)^1 = rotl(0x801,4)^1 = 0x8010^1 = 0x8011 = 32785.
         CHECK(static_cast<uint32_t>(sys.prng_step_a()) == 0x8011u);
@@ -1909,7 +1941,8 @@ int main() {
         CHECK((0x8011u & 0xFFFFu) % 62 == 49);    // the %62 jitter the engagement adds
 
         // PRNG_Next16 is the same algorithm over a separate stream (dword_31BFBB0).
-        World prng_world;
+        auto prng_world_heap = std::make_unique<World>();
+        World &prng_world = *prng_world_heap;
         prng_world.prng16_state = 1;
         CHECK(prng_world.next_prng16() == 0x8011u);
         CHECK(sys.prng_a == 0x8011u);             // stepping 16 did NOT touch stream a (independent)
@@ -1943,7 +1976,8 @@ int main() {
 
     // ---- acquire_target: best-of, team filter, LOS, priority bypass ----
     {
-        AiSystem sys;
+        auto sys_heap = std::make_unique<AiSystem>();
+        AiSystem &sys = *sys_heap;
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
         e.heading = 0;
@@ -2049,9 +2083,11 @@ int main() {
         // All-zero priorities (retail's memset-0 / unresolved-.aip profile) -> no scan.
         // [orig: every case gates on the +80+4*class word @0x466ff3/0x467012/0x46702d/0x467048]
         {
-            World w;
+            auto w_heap = std::make_unique<World>();
+            World &w = *w_heap;
             make_world(w);
-            AiSystem sys;
+            auto sys_heap = std::make_unique<AiSystem>();
+            AiSystem &sys = *sys_heap;
             AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
             AiTarget out{};
             CHECK(sys.acquire_target(w, e, out) == false);
@@ -2060,9 +2096,11 @@ int main() {
         // priority_ground alone: pool 1 scanned (class 1); pool-0 organics and pool-2
         // buildings unseen. [orig: case 1 -> pool 1 only @0x467018-0x467024]
         {
-            World w;
+            auto w_heap = std::make_unique<World>();
+            World &w = *w_heap;
             make_world(w);
-            AiSystem sys;
+            auto sys_heap = std::make_unique<AiSystem>();
+            AiSystem &sys = *sys_heap;
             AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
             e.profile.class_priority[1] = 100;
             AiTarget out{};
@@ -2073,9 +2111,11 @@ int main() {
         // priority_organics alone: pool 0, the Player-flagged candidate excluded
         // [orig: case 2 -> pool 0, else-leg flags & 0x100 reject @0x467169].
         {
-            World w;
+            auto w_heap = std::make_unique<World>();
+            World &w = *w_heap;
             make_world(w);
-            AiSystem sys;
+            auto sys_heap = std::make_unique<AiSystem>();
+            AiSystem &sys = *sys_heap;
             AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
             e.profile.class_priority[2] = 100;
             AiTarget out{};
@@ -2087,9 +2127,11 @@ int main() {
         // [orig: case 0 two-leg walk @0x466ff9-0x467005 + @0x4673ac-0x4673be]. With the
         // vehicle removed, only the player-flagged organic remains visible.
         {
-            World w;
+            auto w_heap = std::make_unique<World>();
+            World &w = *w_heap;
             make_world(w);
-            AiSystem sys;
+            auto sys_heap = std::make_unique<AiSystem>();
+            AiSystem &sys = *sys_heap;
             AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
             e.profile.class_priority[0] = 100;
             // Kill the pool-1 vehicle so the pool-0 player leg decides.
@@ -2108,9 +2150,11 @@ int main() {
         // priority_decorations alone: pool 2 buildings become targetable
         // [orig: case 3 -> pool 2 @0x46704e].
         {
-            World w;
+            auto w_heap = std::make_unique<World>();
+            World &w = *w_heap;
             make_world(w);
-            AiSystem sys;
+            auto sys_heap = std::make_unique<AiSystem>();
+            AiSystem &sys = *sys_heap;
             AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
             e.profile.class_priority[3] = 100;
             AiTarget out{};
@@ -2122,9 +2166,11 @@ int main() {
         // radarsig/heatsig makes the entity undetectable, exactly like retail)
         // [orig: dist > uint16 +422/+420 @0x46723e/@0x467277].
         {
-            World w;
+            auto w_heap = std::make_unique<World>();
+            World &w = *w_heap;
             make_world(w);
-            AiSystem sys;
+            auto sys_heap = std::make_unique<AiSystem>();
+            AiSystem &sys = *sys_heap;
             AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
             e.profile.class_priority[1] = 100;
             w.registry.get(EntityHandle::make(1, 0))->radar_sig = 0;
@@ -2135,9 +2181,11 @@ int main() {
 
         // The round-end latch nulls acquisition [orig: g_spawn_success_gate @0x24C1928].
         {
-            World w;
+            auto w_heap = std::make_unique<World>();
+            World &w = *w_heap;
             make_world(w);
-            AiSystem sys;
+            auto sys_heap = std::make_unique<AiSystem>();
+            AiSystem &sys = *sys_heap;
             AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
             e.profile.class_priority[1] = 100;
             w.round_end.ended = true;
@@ -2148,9 +2196,11 @@ int main() {
         // The brain+148 priority feed: the marked candidate wins via the LOS-only
         // bypass over a better-scoring nearer enemy [orig: brain+148 read @0x467350].
         {
-            World w;
+            auto w_heap = std::make_unique<World>();
+            World &w = *w_heap;
             make_world(w);
-            AiSystem sys;
+            auto sys_heap = std::make_unique<AiSystem>();
+            AiSystem &sys = *sys_heap;
             AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
             e.profile.class_priority[1] = 100;
             Entity far_vehicle;
@@ -2171,7 +2221,8 @@ int main() {
         // most once per improving candidate, never for gate-failed ones
         // [orig: Entity_CheckMutualLineOfSight only @0x467363/@0x46738b].
         {
-            AiSystem sys;
+            auto sys_heap = std::make_unique<AiSystem>();
+            AiSystem &sys = *sys_heap;
             AiEntity &e = make_scanner(sys, EntityHandle::make(0, 7));
             AiCandidate a{};
             a.handle = EntityHandle::make(1, 1);
@@ -2197,8 +2248,10 @@ int main() {
 
     // ---- death event on a non-authority in-session client zeroes health before the death tick ----
     {
-        World w;
-        AiSystem sys;
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
+        auto sys_heap = std::make_unique<AiSystem>();
+        AiSystem &sys = *sys_heap;
         sys.is_authority = false;
         sys.is_in_session = true;
         int idx = sys.attach(EntityHandle::make(0, 0));
@@ -2220,8 +2273,10 @@ int main() {
 
     // ---- engage_target: 8 relation ops in order, target set, fire-delay jitter, pending 17 ----
     {
-        World w;
-        AiSystem sys;
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
+        auto sys_heap = std::make_unique<AiSystem>();
+        AiSystem &sys = *sys_heap;
         w.prng16_state = 1;
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
@@ -2250,8 +2305,10 @@ int main() {
 
     // ---- engage_target: branch A (has_controller) guards jitter by base-delay; sign-extends relmat ----
     {
-        World w;
-        AiSystem sys;
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
+        auto sys_heap = std::make_unique<AiSystem>();
+        AiSystem &sys = *sys_heap;
         sys.prng_a = 1;
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
@@ -2264,7 +2321,8 @@ int main() {
         CHECK(sys.rel_ops[0].a == -32768);               // movsx of 0x8000
 
         // Now with a base delay: branch A jitters via stream A (49) and advances it.
-        AiSystem sys2;
+        auto sys2_heap = std::make_unique<AiSystem>();
+        AiSystem &sys2 = *sys2_heap;
         sys2.prng_a = 1;
         int i2 = sys2.attach(EntityHandle::make(0, 0));
         AiEntity &e2 = *sys2.at(i2);
@@ -2278,7 +2336,8 @@ int main() {
     // ---- state-16 tick: a visible enemy -> engage (pending 17) instead of walking ----
     // The feed now scans the registry (D-AI-1): spawn a real pool-1 enemy.
     {
-        World w;
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
         w.registry.configure_pool(0, 8);
         w.registry.configure_pool(1, 16);
         Entity self_seed;
@@ -2296,7 +2355,8 @@ int main() {
         EntityHandle enemy_h = w.registry.spawn(1, enemy_seed);
         CHECK(enemy_h.valid());
 
-        AiSystem sys;
+        auto sys_heap = std::make_unique<AiSystem>();
+        AiSystem &sys = *sys_heap;
         int idx = sys.attach(self_h);
         AiEntity &e = *sys.at(idx);
         e.team = 1;
@@ -2324,8 +2384,10 @@ int main() {
 
     // ---- state-18 patrol tick: arrival clears the goal; otherwise fallback vs engage ----
     {
-        World w;
-        AiSystem sys;
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
+        auto sys_heap = std::make_unique<AiSystem>();
+        AiSystem &sys = *sys_heap;
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
         e.brain.f[AiBrain::kCurState] = kAiGroundEvade; // 18
@@ -2362,8 +2424,10 @@ int main() {
 
     // ---- state-18 patrol tick: death queues an event; fire timer decrements ----
     {
-        World w;
-        AiSystem sys;
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
+        auto sys_heap = std::make_unique<AiSystem>();
+        AiSystem &sys = *sys_heap;
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
         e.brain.f[AiBrain::kCurState] = kAiGroundEvade;
@@ -2387,8 +2451,10 @@ int main() {
 
     // ---- combat event handler (states 16/17/18 event): damage/death/destroy transitions ----
     {
-        World w;
-        AiSystem sys;
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
+        auto sys_heap = std::make_unique<AiSystem>();
+        AiSystem &sys = *sys_heap;
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
 
@@ -2429,7 +2495,8 @@ int main() {
 
     // ---- locomotion: apply the mover output (advance toward target, clamp, face heading) ----
     {
-        AiSystem sys;
+        auto sys_heap = std::make_unique<AiSystem>();
+        AiSystem &sys = *sys_heap;
         sys.loco_scale = 65536; // 1.0 in 16.16: out_speed N -> N world-units / tick
         int idx = sys.attach(EntityHandle::make(0, 0));
         AiEntity &e = *sys.at(idx);
@@ -2477,7 +2544,8 @@ int main() {
         };
         static FiringSource fire_src;
 
-        World w;
+        auto w_heap = std::make_unique<World>();
+        World &w = *w_heap;
         w.registry.configure_pool(0, 8);
         w.registry.configure_pool(1, 8);
         // One rifle round in the ammo table (index 0 is the null entry by convention;
@@ -2515,7 +2583,8 @@ int main() {
         EntityHandle npc_h = w.registry.spawn(0, npc_seed);
         CHECK(npc_h.valid());
 
-        AiSystem sys;
+        auto sys_heap = std::make_unique<AiSystem>();
+        AiSystem &sys = *sys_heap;
         sys.is_authority = true;
         sys.root_motion = &fire_src;
         int idx = sys.attach(npc_h);
