@@ -258,7 +258,7 @@ bool NwUdpListener::start(const ServerConfig &config) {
 		return false;
 	}
 	opennova::net::close_socket(sock);
-	bound_port_ = config.nw_udp_port;
+	bound_port_ = bound;
 
 	stop_requested_.store(false);
 	initialize_jo_host();

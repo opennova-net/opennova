@@ -1720,6 +1720,11 @@ if(WIN32)
     target_link_libraries(nw_host_register_e2e_test PRIVATE ws2_32)
 endif()
 add_test(NAME nw_host_register_e2e COMMAND nw_host_register_e2e_test)
+# This is the only test that drives the complete listener lifecycle through
+# real UDP sockets. Its one-second negative/retry receive windows are protocol
+# assertions, not load-test budgets, so CPU-saturated parallel ctest runs can
+# manufacture packet timeouts that never reproduce in isolation.
+set_tests_properties(nw_host_register_e2e PROPERTIES RUN_SERIAL TRUE)
 
 # ADR 0010 Phase 3 — EPASK account-login wire format. Builds the NWLogin.dll
 # credential POST body with the login helpers and decodes it through a copy of
