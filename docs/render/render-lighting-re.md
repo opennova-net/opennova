@@ -8,7 +8,8 @@ lighting texture/cubemap resources — witnessed in retail `Jointops.exe`
 binary's). Implementing code: `engine/runtime/renderer/light_runtime.{h,cpp}` (the
 witnessed chain as pure functions), `engine/formats/env` `env_weather.h`/`env_render.cpp`
 (`ModulatorChain`, `WeatherColorBlock::set_step_deltas`, `iris_gain`),
-`engine/runtime/renderer/object_shader_template.cpp` (the composed FF lighting model),
+`engine/runtime/renderer/object_shader_template.cpp` (the renderer-neutral typed
+object-pipeline descriptor; legacy filename),
 `godot/src/env/nova_weather_core.cpp` (the ticked chain),
 `godot/src/env/{nova_weather,nova_mission_environment}.cpp` +
 `godot/src/object/nova_object_model.cpp` (the uniform feed),
@@ -28,13 +29,13 @@ scalar function in this record; the GUT env vectors
 | Iris auto-exposure sampling | MATCHING (marched port, bounded residuals) | the curve was already ported (env record §Iris); the 3-point camera-ray march is PORTED (2026-07-18): `Simulation::compute_iris_samples` (terrain-clipped 8 u camera ray, thirds march, per-sample blink/indoor classification + 3 sun-occlusion rays) → `WeatherCore::set_exposure_from_iris_samples` (per-sample curve vs ceiling/floor indoors, ×level/8 sun outdoors, INT /3 average) `[orig: compute_ambient_light_along_direction @ 0x5c7a00; terrain_sector_compute_lighting @ 0x5c7550]`; the outdoor sample stays the no-world editor fallback; residuals on D-RLIT-2 |
 | World lighting block (per-pass build + ctx store) | MATCHING (math ported) | `renderer::build_world_lighting` `[orig: CTerrainRenderer_BuildLightingShaderConstants @ 0x5c8090; RenderBatchCtx_StoreLightingConstants @ 0x5d89e0]` incl. the NVG hemi rewrite, vehicle-scope grey, NVG world dim, and the two hemisphere averages; `renderer_state_vectors` section 5 |
 | Per-entity uniforms (slots 227-230) + interior daylight lerp | MATCHING (math ported; reimpl transfer wired) | `renderer::compute_entity_lighting` `[orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0]`; the aux float = the parent interior's daylight openness (model+536), NOT a dual-LOD fade. The reimpl now parses `items.def light_transfer` as a clamped percentage, carries it through `ItemDatabase`, and applies the normalized value to interior ROBJ sections and contained player/viewmodel lighting |
-| FF vertex lighting (ambient + dir + hemisphere delta lights, saturate, ×2) | MATCHING (composed) | `renderer::ff_vertex_light` + the composer rewrite `[orig: Lighting_SetHemisphereD3DLights @ 0x5d8cb0; D3D light 0 @ 0x5d9ce2..0x5d9d76; _FFP.fx TSSColor MODULATE2X]`; D-RMAT-5 FIXED; T2 swatch: 116/120 cells moved, the 4 VS_TRACER (unlit, MODULATE 1×) cells byte-identical |
+| FF vertex lighting (ambient + dir + hemisphere delta lights, saturate, ×2) | MATCHING | `renderer::ff_vertex_light` + the checked-in technique implementation `[orig: Lighting_SetHemisphereD3DLights @ 0x5d8cb0; D3D light 0 @ 0x5d9ce2..0x5d9d76; _FFP.fx TSSColor MODULATE2X]`; D-RMAT-5 FIXED; T2 swatch: 116/120 cells moved, the 4 VS_TRACER (unlit, MODULATE 1×) cells byte-identical |
 | Per-entity sun visibility (effectScale source) | MATCHING (math/API ported; ordinary world-entity feed pending) | `renderer::sun_visibility_factor` `[orig: Entity_ComputeSunVisibility @ 0x5c6800; stack write @ 0x5c7fa5]`; hosted models accept the factor, but the ordinary outdoor entity presenter does not yet drive it from the witnessed 3-ray query (D-RLIT-3) |
-| EffectWorld dynamic point lights (color × modulator, {1,0,15/r²,1}, ≤4 D3D lights, owner/interior groups) | MATCHING (math ported) / group culling witnessed | `renderer::point_light_color/point_light_attenuation` `[orig: Light_GetPointLightParams @ 0x5a9180; Light_FillD3DPointLight @ 0x5aa450]` — attenuation identical in shape to the OED preview (`build_oed_light_attenuation`, PrepareLightParams @ 0x46A500), range ×1.25; these runtime light instances are independent of model-authored `LGHT` chunks (D-RLIT-4) |
-| Model-authored `LGHT` chunks | MATCHING gameplay gate / editor-only approximation | Retail parses and stores the records, but the gameplay renderer has no post-load read of the model light field. Godot likewise keeps parsed `LGHT` inactive (`u_local_light_count = 0`) for runtime models and enables the dominant-light approximation only through the explicit object-editor preview opt-in `[orig: parse_lights_chunk @ 0x5B47B0; model field +0xCC post-load xref audit]` |
+| EffectWorld dynamic point lights (instance pool, spawn/query/select, color × modulator × RgbGen, {1,0,15/r²,1}, ≤4, owner/interior groups, fade/decay lifecycle, transient spawners) | **PARTIAL (2026-08-18 per-draw owner isolation ported; interior groups + terrain/foliage/corona open)** | `renderer::LightScene` (engine/runtime/renderer/light_scene.h carries the witness map) hosts the 4096×176B pool, safe generation leases, the faithful group-gated selection API, target-disable filtering, and a separately named all-overlap camera query `[orig: Light_InstanceTable @ 0x2732e28; collect_nearby_zones_by_aabb @ 0x5aa250; update_light_slots @ 0x5abc50]`. `EffectLightDirector` routes mission-start/late-node model lights and four transient families into object shaders. Per-draw owner isolation is ported (2026-08-18): `LightScene::select_for_draws` runs the witnessed first-64 slot-order collect (hard break at 64 `[orig: @ 0x5aa384]`) plus nearest sort and group-gated select per draw context, object shaders take per-instance light uniforms, and owned lights (muzzle glow, authored model lights) reach exactly their owner's draws; the camera-global all-overlap query survives only as the report/debug census. Interior groups, terrain/foliage/corona, and static-destruction rebinding remain residuals on D-RLIT-4. |
+| Model-authored `LGHT` chunks | **RE-GRADED 2026-08-16**: consumed at spawn via the EffectWorld pool, never via per-material uniforms | The old “no post-load read” claim audited the wrong field: the +0xCC xref audit missed that `Entity_SpawnGlowEffects @ 0x56c7c0` walks the model's light array (count at model dword 49 = +0xC4, records at dword 50 = +0xC8, stride 120) at mission start and spawns one EffectWorld pool instance per record — white spawn color, radius = atten_end × 65536, the record's RGB-gen block attached, subobject/blink-box owner attach, and the three authored disable flags → render flags 512/1024/2048 `[orig: @ 0x56c836..0x56c92c]`. The per-material `u_local_light_*` path stays editor-preview-only (`u_local_light_count = 0` in gameplay — that half of the old row remains true); gameplay illumination flows through `renderer::LightScene` |
 | Terrain surface c0/c1 | MATCHING (ported) | c0 = SKY block, c1 = LIGHT block (both [0] ÷255): `renderer::terrain_surface_light`, `terrain_lighting.gdshaderinc` corrected from the gobj-era combined/fill guess `[orig: terrain_setup_lighting_and_shader @ 0x604420; init_terrain_lighting_color_ramps @ 0x604ee0 ← Render_TerrainScene @ 0x610c80]` |
 | Dynamic projected entity shadows | WITNESSED / reimpl-native approximation | Retail allocates the independent projected render-slot path for people (and the local player) or ItemDef `DynamicShadow`; attached third-person weapons join their entity, while the first-person viewmodel does not cast. ItemDef `NoShadow` does not gate this path. Mission placement carries that admission policy (the aspirational streamed-model resolver twin was deleted 2026-08-11 — unreferenced since birth) `[orig: Entity_InitFromModel @ 0x40E1BC..0x40E1F7; GUT: mission_object_placer_test, nova_object_model_runtime_gate_test]` |
-| Static sector/model sun shadows onto terrain/foliage | WITNESSED / terrain-only reimpl approximation | pool-2 buildings cast unless `NoShadow`; pool-1 items additionally require `StaticShadow`; every ROBJ in the selected LOD enters a black PROJSHAD temporary RT which is composited into the terrain tile cache, not back onto sector models `[orig: Terrain_CollectAndRenderTileModels @ 0x60D250; Render_SubmitEntity @ 0x60D971; PolyTrn_RenderTile composite @ 0x60E0C6..0x60E19D]` — exact retail RT projection/cache mechanics, including alpha-aware foliage reception, remain D-TERRAIN-7 |
+| Static sector/model sun shadows onto terrain/foliage | WITNESSED / hosted page-alpha subset | pool-2 buildings cast unless `NoShadow`; pool-1 items additionally require `StaticShadow`; every ROBJ in the selected LOD enters a black PROJSHAD temporary RT which is composited into terrain-tile alpha, not back onto sector models. Runtime now collects typed static sources, resolves supported LOD/ROBJ and `TEX_TEAM` alpha frames, rasterizes A-only projections into the shared terrain/foliage page, and retires the global directional surrogate `[orig: Terrain_CollectAndRenderTileModels @ 0x60D250; Render_SubmitEntity @ 0x60D971; PolyTrn_RenderTile composite @ 0x60E0C6..0x60E19D]`; unsupported animation/skinning and exact general projection/depth/cache cadence remain D-TERRAIN-7 |
 | Foliage/sector-model lighting constants | MATCHING (witnessed; values pinned) | the blend PS inherits the terrain's device c0/c1 (no foliage-side write) `[orig: Foliage_SetupFarSlotDraw @ 0x6007c0]`; the lightmap-tile pass `[orig: Foliage_RenderFarPatches @ 0x609de0]` (renamed 2026-08-15, ex render_terrain_lightmaps); foliage.gdshader header updated |
 | Lighting textures + DOT3 dynamic-light shader | witnessed / reimpl-native equivalent | procedural falloff set + the last embedded PS outside FrameFX `[orig: Lighting_InitTextures @ 0x5a94f0]` — the ps.1.1 DOT3 per-pixel light is the fixed-function era's OmniLight; the reimpl's real per-pixel lights serve the intent (D-RLIT-6 note) |
 | Cubemap sources (CubeEnvironment / CubeRotSpecular / CubeNormalize) | witnessed (the D-RORD-5 specular-cube question CLOSED) | live scene cube re-rendered 6 faces per 128 frames `[orig: update_environment_cubemap @ 0x6106a0]`; the static sun-glint cube (white pow-800 + warm pow-40 along −Z, rotated by MatRotSpecular) `[orig: Render_FillStaticCubemaps @ 0x58f290 → generate_cubemap_lighting @ 0x685bb0]`; normalization cube `[orig: generate_normalmap_cubemap @ 0x685570]`; the analytic 5-light sky fill is caller-less dead code |
@@ -206,15 +207,93 @@ entity being rendered (`Lighting_SetOwnerLightGroup @ 0x5a9100`);
 (indices offset by `Light_D3DIndexBase @ 0x840b20`), maintaining the active
 list @ 0x2732dfc.
 
-These records are not model `LGHT`. Retail's 3DI loader parses and stores the
-model chunk (`parse_lights_chunk @ 0x5B47B0`, model field `+0xCC`), and its
-CTRL/load/destruction machinery preserves the authored records, but the
-gameplay renderer has no post-load read of that field. The reimpl therefore
-keeps `LGHT` in the IR and object-editor round trip while forcing
-`u_local_light_count = 0` for normal runtime models. Only
-`ObjectPreview.set_model_light_preview_enabled(true)` opts into the existing
-single-dominant-light approximation for authoring inspection; it is not a
-claim that retail gameplay emits the model lights.
+These records ARE fed from model `LGHT` at spawn (2026-08-16 correction; the
+old +0xCC xref audit checked the wrong field): `Entity_SpawnGlowEffects
+@ 0x56c7c0` walks the model's post-load light array (count at +0xC4, records
+at +0xC8, stride 120) and spawns one pool instance per record — the mission
+start walks pools 1..2 (`Game_StartMission @ 0x525d19 → sub_5227B0`), and
+powerup registration spawns late (`@ 0x442ce6`). The flicker chain closes
+RQ-2: reading an instance with a gen block runs `Light_TickGenBlock
+@ 0x5a8ae0`, which hashes the light's fixed position into the weather wave
+ring and writes the GLOBAL FLICKER control register (0x83FD00 = value slot
+0x83FCE8 + 8·ordinal 3), so style-113 records interpolate start→end by a
+position-phased ring sample. The per-material `u_local_light_*` uniforms stay
+editor-preview-only (`ObjectPreview.set_model_light_preview_enabled(true)`);
+gameplay illumination flows through the pool.
+
+**Lifecycle and the transient spawners (2026-08-16, routed; delivery partial).** Record dword
+15 is a FADE MODE, dwords 16/17 the countdown (current/initial), float 14
+the blend the params multiply as `intensity`. The per-frame tick
+(`EffectWorld_TickInstancesAndLightScale @ 0x5aa170`, called from
+`Game_ProcessMainFrame @ 0x5267a1`) decrements a positive counter; at
+expiry, mode 5 hides the slot (flag bit 2 — the query-skip bit;
+`CEffectInstance_SetBlendAmount @ 0x5a8ee0` ≥ 0.001 re-shows it) and every
+other mode memsets the slot dead; while counting, modes 2/5 render
+`blend = d16/d17`. The same tick derives the ambient scale from
+`Env_TerrainColorRecip` bytes ÷ 128 (the reimpl feeds the env light-state
+gain instead — tracked). The instance API around it:
+`LightInstance_SetFadeModeAndDuration @ 0x5a8f80` (d15/d16/d17),
+`LightInstance_SetOwnerGroup @ 0x5a8fb0` (d19/d20),
+`CEffectInstance_SetPositionAndBounds @ 0x5a9070`,
+`CEffectInstance_ClearByHandle @ 0x5a8ea0`,
+`CEffectInstance_ModifyRenderFlags @ 0x5a8f20`. Retail's setters write
+through STALE handles into whatever occupies the slot; the port carries an
+opaque generation lease and rejects every stale mutation even after slot
+reuse (intentional safety divergence). Four transient spawners are routed:
+
+- **Muzzle glow** (`Entity_UpdateMuzzleGlowEffect @ 0x56c960`, from
+  `WeaponSlot_FireAndSpawnEffects @ 0x53f597` — AI/authority fire at the
+  fire position — and `ActionSlot_SpawnEffect @ 0x402080` — the action-row
+  FIRE arm at the action-transform muzzle; both gated on ammo `MF_Light`
+  +36): spawn-once per entity (handle cached at entity+436), radius 1.5,
+  color 0xFFE0A0, re-armed per shot to mode 4 / 5 ticks + blend 1.0, owner
+  = the shooter. In retail, owner ≠ 0 means the glow lights ONLY the shooter's
+  own draws under the per-draw group gate (a self-light) — and once the 5-tick
+  fade kills the slot, the cached handle re-arms a dead slot: that entity
+  never glows again this life (the flash particle masks it).
+- **Impact flash** (`AmmoDef_ProcessImpactEffect @ 0x40a2b3`): ammo
+  `light_impact <radius> <r> <g> <b> <seconds>` (`AmmoDef_ParseProperty
+  @ 0x40af79` → +132 radius fp16, +128 packed RGB, +136 seconds×62 ticks,
+  0 → 10 `@ 0x40b005`), spawned radius/2 above the impact, mode 2, gated on
+  the impact-effect leg actually presenting; render flag 0x100 has no
+  witnessed reader.
+- **Death flash** (`Entity_SpawnDeathPieces @ 0x49351a`): husk deaths above
+  water, non-decorations — 2× the PIECE model's bound radius
+  (huskFinal ?: husk `@ 0x4934af`), color 0xFFC080, mode 2 / 31 ticks,
+  corona disabled (flag 512).
+- **Round glow** (`RoundData_SpawnRound @ 0x4ec8da`): ammo `light_move`,
+  mode 1 / duration −1 (permanent), terrain disabled (flag 1024), handle at
+  round+0x1B4, spawned radius/2 up, per-tick follow at the raw round
+  position (`@ 0x4eaa9f`), cleared in `Projectile_ReleaseEffects`.
+
+The owner-group write in the model-light spawner is conditional
+(`@ 0x56c8ae..0x56c8db`): a record with a nonzero attach bone is owned by
+its entity + section (cabin self-lights); a record inside a blink box is
+owned by the CONTAINING building + section (interior room lights); every
+other record — the fire barrels — spawns unowned and lights the world.
+`Lighting_OwnerGroupEntity`/`InteriorGroup*` are per-DRAW-CONTEXT state, so
+owned lights illuminate only their own entity's draws. The portable
+`LightScene` preserves that gate. The current Godot adapter cannot provide a
+draw context because it publishes process-global shader parameters, so its
+explicit camera-global object fallback admits owned lights unscoped. Muzzle
+and cabin lights are therefore visible, but can bleed onto nearby objects;
+that is an approximation, not owner-group parity.
+
+Mission-start static model lights and late ObjectModel nodes are wired into the pool. Late
+nodes retire their handles on `tree_exiting`; mission reset synchronously
+clears both the pool and published shader count. Static MultiMesh source rows
+still lack a stable BMS identity, so destroying/restoring a batched model does
+not retire/respawn its lights and a grafted husk is not rescanned for `LGHT`.
+That placed-model lifecycle tail remains open.
+
+`LightInstance_IsAliveAndLightsTerrain @ 0x5a8fe0` (valid ∧ ¬flag 0x400) is
+the terrain-projection admission check. The corona/billboard half draws
+instances carrying mark flag 0x10000 through
+`CEffectInstance_RenderShadowVolume @ 0x5a9c60`
+(`CEffectWorld_RenderAllMarkedInstances @ 0x5ab840`) — its writer is
+unwalked (residual). `EffectWorld_ResetPoolAndInitLighting @ 0x5ab890` is
+the mission-start reset (zero pool, identity ambient, `Lighting_InitTextures
+@ 0x5a94f0`).
 
 **Terrain/foliage lighting constants.** `Render_TerrainScene @ 0x610c80`
 (per frame) calls `init_terrain_lighting_color_ramps @ 0x604ee0` with
@@ -316,14 +395,16 @@ Dynamic people/ItemDef `DynamicShadow` render slots remain independent
 (`Entity_InitFromModel @ 0x40E1BC..0x40E1F7`). Full tile-producer record:
 [terrain-re.md](../terrain/terrain-re.md).
 
-The reimpl is deliberately narrower than that retail receiver path. Its
-static directional adapter marks the admitted model/husk population as casters
-but exposes only terrain as a receiver; destruction swaps and editor moves keep
-the corresponding caster eligibility and transform in lockstep. The shared
-black attenuation catcher is attached to one-sided opaque model materials for
-the independent dynamic projection path, but not to alpha-tested/two-sided
-materials or foliage cards. Exact alpha-aware foliage projection therefore
-remains part of D-TERRAIN-7's tile-compositor residual.
+The reimpl now follows that receiver domain directly for its supported subset.
+A typed static-source snapshot follows destruction/husk/editor transforms;
+the page provider selects the retail LOD/ROBJ population, resolves supported
+opaque/alpha-tested materials (including discrete `TEX_TEAM` frames), and
+rasterizes only page A. Terrain and detail foliage then sample the same current-
+frame cache binding, while sector-model floors remain outside the receiver.
+The former terrain-only directional static-shadow light and black next-pass
+catcher are retired. Exact general c7/c8 projection, unsupported animated or
+skinned materials, one-sided/non-opaque overlap behavior, remaining ordered
+contributions, and final cache cadence/edge/mip behavior remain D-TERRAIN-7.
 
 **Lighting textures + the DOT3 light shader.** `Lighting_InitTextures
 @ 0x5a94f0` builds the procedural set: `texlight2d`/`texlightspot2d` (64²
@@ -392,8 +473,8 @@ directional with 0.75 ambient material.
   `get_color_src_gain`; `Weather` re-targets the exposure each tick from
   the env's iris params and writes the gain back to `MissionEnvironment`
   (`opennova_color_src_gain` global + the object-material uniform).
-- The object composer (`object_shader_template.cpp`) now emits the witnessed
-  model: `pixel = tex × min(mix(HemiGround, HemiSky, N.y·0.5+0.5) +
+- The checked-in object technique resources now implement the witnessed model:
+  `pixel = tex × min(mix(HemiGround, HemiSky, N.y·0.5+0.5) +
   DirLightColor·max(0,N·L), 1) × 2`, SELFLUM = `tex ×
   min(ColorSrcGlobalGain,1) × 2`, uniform surface
   `u_hemi_sky_color/u_hemi_ground_color/u_dir_light_dir/u_dir_light_color/
@@ -412,7 +493,7 @@ directional with 0.75 ambient material.
 | D-RLIT-1 | Hosted weather runs the complete 16-block chain: modulator2/modulator plus all 14 color blocks | 16 blocks modulate in witnessed order (including skyfog and the static ceiling/cloud/floor trio) `[orig: @ 0x57ef97..0x57f03c]` | **FIXED (2026-07-21)** — `SkyWeatherColorBlocks` preserves the witnessed order; skyfog gets its lightning additive, horizon blend, and tail double; and `MissionEnvironment` writes every color current back. `SkyDome` and the frame clear share the final doubled skyfog, the flat dome consumes smoothed `cloud_rgb`, and indoor iris samples consume the pre-modulated ceiling/floor currents. |
 | D-RLIT-2 | Iris exposure uses the marched 3-point camera-ray average with per-sample indoor/outdoor classification and sun occlusion | 3-point average marched back from the camera-ray hit, with per-sample interior detection + 3 sun-occlusion raycasts `[orig: compute_ambient_light_along_direction @ 0x5c7a00; terrain_sector_compute_lighting @ 0x5c7550]` | **PORTED (2026-07-18, the marched-iris slice)** — the march, per-sample indoor/no-data classification (ceiling/floor blocks, gain-255 no-data short-circuit), sun level 8−hits (radii −0x2000/−0x5000/−0x8000), and INT /3 average are live in-world (`compute_iris_samples` → `set_exposure_from_iris_samples`; the sniper/aircraft retail A/B was the trigger — the retail hangar frame runs the indoor-dilated gain ≈ 71/64 vs the old outdoor 59/64). Bounded residuals: the camera-ray ENTITY nearest-hit clip (terrain clip only), pool-1 dynamics in the sun rays (statics walk only), the caller-sector entity-count ray gate (rays always run; identical when no statics exist), and the per-sample interior LIGHT-GROUP side effect (`Lighting_SetInteriorLightGroup @ 0x5a90e0` — rides D-RLIT-4's group hosting) |
 | D-RLIT-3 | `items.def light_transfer` is parsed and applied to interior ROBJ sections plus the contained player/viewmodel; eligible outdoor pool-0/pool-1 entities still default to full sun visibility (effectScale = 1.0) | interior-parented entities lerp to floor/ceiling ambience by the parent daylight openness (model+536). Eligible outdoor pool-0/pool-1 entities cast 3 source-slice rays from their scaled collision-AABB center to dim DirLightColor to 0.75/0.5/0.25; zero-candidate sources and pool-2 statics remain at 1.0 `[orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0; Entity_ComputeSunVisibility @ 0x5c6800; Entity_BuildProximityListsFromPools @ 0x4b8eb0]` | WITNESSED-READY-DEFERRED — **interior transfer FIXED 2026-07-29** (def/FFI/database/runtime context, Ihq01 `20` → `0.2`). A faithful outdoor feed spans collision candidate slices and centers, pool-1 MultiMesh per-instance shader data, local-player/first-person separation, wire-held models, and client proxy presenters; an individual-model-only port would leave ordinary items wrong, so it remains a separate tested slice |
-| D-RLIT-4 | EffectWorld dynamic point lights remain unhosted; parsed model `LGHT` is deliberately inactive in gameplay and available only through the explicit single-light object-editor preview | retail enables ≤4 EffectWorld D3D point lights culled by owner/interior groups, colors × modulator × optional RgbGen, atten {1,0,15/r²,1}; its model `LGHT` field has no post-load gameplay-render read `[orig: @ 0x5a9180; @ 0x5abc50; @ 0x5a9120; parse_lights_chunk @ 0x5B47B0]` | WITNESSED-READY-DEFERRED — dynamic EffectWorld hosting remains; the runtime `LGHT` gate is matching, and the preview is explicitly editor-only |
+| D-RLIT-4 | The portable EffectWorld core, decay lifecycle, safe opaque handles, mission-start/late-node model-light spawn, target-disable gates, four transient routes (2026-08-16), and per-draw owner isolation (2026-08-18) are hosted: `LightScene::select_for_draws` snapshots live slots once, then per rendered model runs the witnessed slot-order first-64 collect + nearest sort + group-gated four-light select with the model's entity as owner scope; object shaders consume per-instance light uniforms and owned lights (muzzle glow, authored model lights) light only their owner's draws. The all-overlap camera query survives as the report/debug census only. Placed fire barrels light the night in-world (the CP04 02:00 sheet is qualitative evidence). | Retail spawns model and transient instances, then each draw context queries nearest-64 and enables the first four group-passers `[orig: Entity_SpawnGlowEffects @ 0x56c7c0; collect_nearby_zones_by_aabb @ 0x5aa250 — hard 64 break @ 0x5aa384; update_light_slots @ 0x5abc50]`. | **OPEN / PARTIAL DELIVERY** — owner isolation is per rendered MODEL (retail scopes per draw context, which subobject/interior legs will refine); interior groups (`Lighting_SetInteriorLightGroup @ 0x5a90e0`) still publish zero. Also open: terrain projected-light matrices/textures (`get_light_projection_info @ 0x5aa5c0` → `CRenderBatchQueue_FlushBatches @ 0x5d9f50`), foliage sampling, corona/glow billboards, powerups, blink-box ownership, bone following, static-batch destruction/restore and husk `LGHT` rebinding, and the ambient-scale source. Generation leases intentionally reject retail's stale-handle write-through memory alias. |
 | D-RLIT-5 | Glass/env reflection = the hemisphere sampled along the reflected view; phong specular = a pow-16 lobe in the witnessed light color | glass GLOW samples CubeRotSpecular (the static sun-glint cube) via MatRotSpecular; NORMAL techniques sample the LIVE CubeEnvironment scene cube; VS_PHONG* samples the PhongMap texture `[orig: @ 0x58f290; @ 0x6106a0; Glass.fx]` | OPEN (approximation) — the cube CONTENTS are witnessed (this record); hosting a live scene cube / the glint cube is the D-RORD-5 bloom-wiring residual's substrate |
 | D-RLIT-6 | No baked mission lightmap TGA draped (the below-water terrain water-noise modulation FIXED 2026-08-13 via D-TERRAIN-8 — the top-tier dp3-input swap; terrain-re.md carries the selector decode) | camera-below-water terrain swaps the LIVE stage-3 input to `Water_NoiseColorTexture`; the mission lightmap TGA separately drapes tiles/billboards `[orig: below-water flag @ 0x60FEE0 → dword_319FB3C @ 0x60915F; live t3 slot swap @ 0x6043f2; selector @ 0x6044b1..0x604556; lightmap load @ 0x604A90]` | OPEN — narrowed to mission-lightmap hosting (terrain-record scope); static model sun shadows are the separate D-TERRAIN-7 tile-composition path |
 | D-RLIT-7 | Static mission objects (the placer's MultiMesh batches) froze the env lighting harvested at load — the throwaway template's materials had no live owner, so TOD/weather/iris advances relit animated models but not the static world (the load-time snapshot even carried the pre-first-iris-tick modulator: gain 1.0 vs the settled 60/64) | retail relights EVERY entity from the current lighting block each frame `[orig: setup_entity_lighting_and_shader_constants @ 0x5d98a0 ← CRenderBatchQueue_FlushBatches]` | **FIXED (2026-07-06, the model-parity slice)**: the placer registers every harvested batch ShaderMaterial and re-stamps them from the live env (`mission_object_placer.update_environment`, driven per frame by the container's `mission_batch_env_stamper`, generation-gated like the per-model stamp; values/push single-sourced as `ObjectModel.environment_values_from`/`apply_environment_values`); verified batch uniforms == live-model uniforms after settle (dir 159/255, gain 60/64) |

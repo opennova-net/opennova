@@ -66,8 +66,8 @@ static_assert(AIM_PAYLOAD_FLOATS == 30,
 } // namespace
 
 void PresentApplier::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("setup", "sim", "index"),
-			&PresentApplier::setup);
+	ClassDB::bind_method(D_METHOD("setup", "sim", "index", "placer"),
+			&PresentApplier::setup, DEFVAL(Ref<MissionObjectPlacer>()));
 	ClassDB::bind_method(D_METHOD("set_output_channels", "channels"),
 			&PresentApplier::set_output_channels);
 	ClassDB::bind_method(D_METHOD("get_output_channels"),
@@ -166,13 +166,15 @@ void PresentApplier::_bind_methods() {
 	BIND_ENUM_CONSTANT(OUTPUT_ALL);
 }
 
-void PresentApplier::setup(Object *sim, Object *index) {
+void PresentApplier::setup(Object *sim, Object *index,
+		const Ref<MissionObjectPlacer> &placer) {
 	if ((output_channels_ & OUTPUT_PART_ANIM) != 0) {
 		release_part_anim_outputs();
 	}
 	Simulation *native_sim = Object::cast_to<Simulation>(sim);
 	sim_id_ = native_sim != nullptr ? native_sim->get_instance_id() : ObjectID();
 	index_ = Ref<EntityIndex>(Object::cast_to<EntityIndex>(index));
+	placer_ = placer;
 	plan_revision_ = -1; // force a rebuild against the new wiring
 	plan_dirty_ = true;
 	rows_.clear();
@@ -609,6 +611,8 @@ void PresentApplier::rebuild_row_plan(const float *p, int64_t size, int stride,
 		Row row;
 		row.base = base;
 		row.node_id = model->get_instance_id();
+		row.entity_kind = kind;
+		row.entity_index = idx;
 		row.bms_id = bms_id;
 		row.has_muzzle = model->has_muzzle();
 		// Camera-submission seam: the model publishes its off-screen edges into
@@ -708,6 +712,13 @@ void PresentApplier::present_snapshot(const PackedFloat32Array &snap,
 						model->get_transform() != next) {
 					model->set_transform(next);
 					++stat_moved_;
+				}
+				if (placer_.is_valid()) {
+					// The render node and terrain projection registry consume the
+					// same present pose. The placer owns admission and exact-value
+					// gating, so rejected rows and repeated snapshots remain free.
+					placer_->update_static_terrain_shadow_source_transform(
+							row.entity_kind, row.entity_index, next);
 				}
 				row.transform_stamp = next_stamp;
 				row.transform_stamp_valid = true;

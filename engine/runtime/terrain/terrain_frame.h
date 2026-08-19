@@ -31,6 +31,10 @@ struct TrnConfig;
 struct TerrainTileDrawAttributes {
 	uint8_t quadrant_x = 0; // (tile_x >> 9) & 1
 	uint8_t quadrant_z = 0; // (tile_y >> 9) & 1
+	uint16_t local_page_x = 0;  // tile_x within the routed 512u sector
+	uint16_t local_page_z = 0;  // tile_y within the routed 512u sector
+	uint16_t source_page_x = 0; // exact 0..1023 source-atlas origin
+	uint16_t source_page_z = 0; // exact 0..1023 source-atlas origin
 };
 
 // Everything the per-frame walk reads, built once per loaded terrain. TileMesh
@@ -81,6 +85,16 @@ struct TerrainViewInput {
 struct TerrainPatchDraw {
 	int32_t tile_index = -1;
 	int32_t lod_family = 0;
+	// Tile-composition page identity. The renderer must not reconstruct these
+	// from lod_family: mesh-family selection and quadtree page LOD are
+	// independent decisions.
+	int32_t page_lod_level = 0;
+	int32_t sector_x = 0;
+	int32_t sector_z = 0;
+	int32_t local_page_x = 0;
+	int32_t local_page_z = 0;
+	int32_t source_page_x = 0;
+	int32_t source_page_z = 0;
 	float sector_ox = 0.0f;
 	float sector_oz = 0.0f;
 	float distance = 0.0f;

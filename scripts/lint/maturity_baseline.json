@@ -13,7 +13,7 @@
   ],
   "counters": {
     "adapter_cpp_orig_cites_device": 122,
-    "adapter_cpp_orig_cites_pushdown": 374,
+    "adapter_cpp_orig_cites_pushdown": 372,
     "cpp_binding_console_writes": 0,
     "engine_stdout_prints": 0,
     "engine_uncited_src_files": 50,
@@ -43,6 +43,7 @@
     "item_seat_specs.gd|static func command_rule(",
     "item_seat_specs.gd|static func predict_best_seat(",
     "effect_world.gd|func get_debug_draw_list_report()",
+    "game_render_diagnostics.gd|func to_json_value()",
     "debug_snapshot_writer.gd|static func capture(",
     "debug_snapshot_writer.gd|static func write(",
     "nova_debug_options.gd|static func find(",

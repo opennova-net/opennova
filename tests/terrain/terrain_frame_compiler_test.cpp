@@ -168,6 +168,15 @@ int main() {
 				"near leaves resolve family 0")) return 1;
 		if (!expect(pkt.patches[0].sector_ox == 0.0f && pkt.patches[0].sector_oz == 0.0f,
 				"sector origin rides the patch")) return 1;
+		if (!expect(pkt.patches[0].page_lod_level == 4 &&
+					pkt.patches[0].sector_x == 0 && pkt.patches[0].sector_z == 0 &&
+					pkt.patches[0].local_page_x == 0 && pkt.patches[0].local_page_z == 0 &&
+					pkt.patches[0].source_page_x == 0 && pkt.patches[0].source_page_z == 0,
+				"leaf draw retains its cache-page and source-atlas identity")) return 1;
+		if (!expect(pkt.patches[1].page_lod_level == 4 &&
+					pkt.patches[1].local_page_x == 64 && pkt.patches[1].local_page_z == 0 &&
+					pkt.patches[1].source_page_x == 64 && pkt.patches[1].source_page_z == 0,
+				"adjacent leaf keeps a distinct page origin")) return 1;
 		if (!expect(!pkt.detail_cells.empty(),
 				"leaf emissions hand off detail cells near the camera")) return 1;
 

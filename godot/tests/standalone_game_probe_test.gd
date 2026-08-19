@@ -70,6 +70,14 @@ func test_shared_probe_can_parse_an_exact_saved_bms_against_a_packed_runtime_roo
 		"The two-root parity seam should still load through standalone GameWorld.")
 	assert_false(source.contains("play_" + "controller"),
 		"The saved-file seam must not recreate editor-owned runtime state.")
+	assert_true(source.contains("game.dismiss_start_mission_splash()"),
+		"Rendered probes must leave the player-paced splash through the shell seam.")
+	assert_true(source.contains("while game.is_world_loading():"),
+			"The shared harness must not return a briefing frame as gameplay.")
+	assert_true(source.contains("local_player_profile: Dictionary = {}"),
+			"Rendered comparison probes may stage an exact production spawn profile.")
+	assert_true(source.contains("game.set_local_player_profile(local_player_profile)"),
+			"The optional profile must use MainGame's public pre-spawn seam.")
 
 
 func test_obsolete_pie_only_probes_are_removed() -> void:

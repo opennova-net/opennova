@@ -89,6 +89,9 @@ private:
 	opennova::CptFile cpt;
 	opennova::TrnConfig trn;
 	bool loaded = false;
+	// Monotonic identity for every terrain_changed publication. Zero is kept
+	// as the never-observed sentinel used by dependent page caches.
+	uint64_t change_revision_ = 0;
 	Ref<ResourceRoot> resource_root;
 
 	// Palette + indices for PCX-backed map data (hidden from GDScript;
@@ -211,6 +214,7 @@ public:
 	Error load();
 	Error load_from_resource_root(const Ref<ResourceRoot> &p_resource_root, const String &p_name);
 	bool is_loaded() const;
+	uint64_t get_change_revision() const { return change_revision_; }
 	// Returns the live depth as little-endian raw16 (value = clamp(height*256)).
 	// Reads the editable heightmap_image when present, else the loaded CPT.
 	PackedByteArray get_depth_raw16() const;

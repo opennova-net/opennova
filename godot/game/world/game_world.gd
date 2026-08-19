@@ -22,6 +22,8 @@ const VegAssets := preload("res://game/terrain/veg_assets.gd")
 const GameFramePipelineScript := preload("res://game/world/game_frame_pipeline.gd")
 const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 const MissionPresentation := preload("res://game/world/mission_presentation.gd")
+const FirstPersonArmsWitness := preload(
+		"res://game/world/first_person_arms_witness.gd")
 const NovaDebugViewStatus := preload(
 		"res://game/debug/nova_debug_view_status.gd")
 
@@ -84,7 +86,6 @@ signal minimap_water_changed(mask: ImageTexture)
 var _dispatcher: FoliageDispatcher
 var _tile_overlay: TerrainTileOverlay
 var _sun_shadow: SunShadow
-var _static_sun_shadow: SunShadow
 var _terrain_data: TerrainData
 var _resource_root: ResourceRoot
 var _mission_tile_info: TerrainTileInfo
@@ -152,6 +153,7 @@ var _debug_views: DebugViewSet
 # names on GameWorld. ALSO the sanctioned test-injection seam: like _runtime,
 # harnesses may swap in a director double (see game_world_test.gd).
 var _item_fx: ItemEffectDirector
+var _light_director: EffectLightDirector
 var _local_player_spawn_loadout: Dictionary = {}
 # The local player's two per-side character selections + classes projected for
 # the sim (the listen host's own type-2 connection / a joiner's ClientAuth).
@@ -244,6 +246,10 @@ func _init() -> void:
 				return _placer.get_static_item_effect_sources() if _placer != null else [],
 			func() -> Variant:
 				return _placer.get_item_db() if _placer != null else null)
+	_light_director = EffectLightDirector.new()
+	_light_director.setup(self,
+			func() -> Array:
+				return _placer.get_static_item_effect_sources() if _placer != null else [])
 
 
 func _ready() -> void:
@@ -264,13 +270,8 @@ func _ready() -> void:
 	_sun_shadow.projection_mode = SunShadow.PROJECTION_DYNAMIC
 	add_child(_sun_shadow)
 	_sun_shadow.set_environment_node(_env)
-	_static_sun_shadow = SunShadow.new()
-	_static_sun_shadow.name = "NovaStaticSunShadow"
-	_static_sun_shadow.projection_mode = SunShadow.PROJECTION_STATIC_TERRAIN
-	add_child(_static_sun_shadow)
-	_static_sun_shadow.set_environment_node(_env)
-	# Both retained render systems start dormant until a successful load chooses
-	# their runtime mode. In particular, do not let an authored scene height make
+	# The retained water renderer starts dormant until a successful load chooses
+	# its runtime mode. In particular, do not let an authored scene height make
 	# initial/menu frames look underwater.
 	_set_water_world_rendering_enabled(false)
 	# Freeze the retained weather node until a load selects autonomous bare/net
@@ -285,9 +286,13 @@ func _notification(what: int) -> void:
 	if what != NOTIFICATION_VISIBILITY_CHANGED or not is_node_ready():
 		return
 	if _world_ready and is_visible_in_tree():
+		apply_scene_environment_frame()
 		_clear_env_generation = -1
 		_update_frame_clear_color()
 	else:
+		if _env != null:
+			_env.set_underwater_view(false)
+			_env.set_underwater_overlay_view(false)
 		_restore_idle_frame_clear_color()
 
 
@@ -602,6 +607,11 @@ func _place_mission_objects(mission: MissionData, timeline: PerfTimeline = null)
 	# inside Game_StartMission's model loops @ 0x524d9c/0x524e09, 0x524f32/0x524fe0].
 	options["progress"] = func() -> void: load_progress.emit(26)
 	_mission_stats = _placer.place(mission, self, options)
+	# Static tile shadows are composed from the placer's resolved ObjectData and
+	# exact entity transforms. Attach only after place() has finished building
+	# that immutable mission snapshot; Terrain invalidates any pre-placement
+	# cache pages when the producer becomes live.
+	_terrain.set_static_shadow_placer(_placer)
 	print_verbose("GameWorld: placed %d mission objects (%d batched / %d animated, %d unresolved, %d markers)" % [
 		int(_mission_stats.get("placed", 0)),
 		int(_mission_stats.get("batched", 0)),
@@ -665,10 +675,23 @@ func unload() -> void:
 	_net_drive.reset()
 	_set_weather_world_tick_driven(true)
 	_set_water_world_rendering_enabled(false)
+	if _env != null:
+		_env.set_underwater_view(false)
+		_env.set_underwater_overlay_view(false)
 	_local_player_spawn_loadout = {}
 	_local_character_profile = {}
 	_clear_mission_tile_info()
 	_restore_idle_frame_clear_color()
+	# Point-light output is a RenderingServer global, so retire it before the
+	# placed nodes begin their deferred queue_free teardown. The director also
+	# disconnects its wire-node exit hooks here; those hooks must not race the
+	# whole-world reset or leak a prior mission's pool into the menu frame.
+	if _light_director != null:
+		_light_director.reset()
+	# Release Terrain's Ref before the MissionObjects nodes and owning placer.
+	# This also invalidates pages composed with the departing caster snapshot.
+	if _terrain != null:
+		_terrain.set_static_shadow_placer(null)
 	var container := get_node_or_null(NodePath("MissionObjects"))
 	if container != null:
 		container.queue_free()
@@ -1236,6 +1259,27 @@ func present_local_view_frame() -> void:
 		_local_view_presenter.after_world_tick()
 
 
+# Select the main scene's per-pass fog after the local player has placed the
+# camera, and before every rendered consumer submits. Camera offsets are part
+# of the render transform, so a v_offset-only waterline crossing must flip the
+# same state as Water/Terrain. [orig: Environment_ApplyFogAndAmbient @ 0x57e440]
+func apply_scene_environment_frame() -> void:
+	if _env == null:
+		return
+	# The device leg only samples: the strict-vs-inclusive waterline
+	# comparison semantics live in the engine behind apply_render_eye.
+	var water_active := is_water_render_active() and is_inside_tree()
+	var eye_y := 0.0
+	if water_active:
+		var cam := get_viewport().get_camera_3d()
+		if cam == null:
+			water_active = false
+		else:
+			eye_y = cam.get_camera_transform().origin.y
+	_env.apply_render_eye(eye_y,
+			float(_water.water_height) if water_active else 0.0, water_active)
+
+
 ## One-time handoff from the shell that owns the local-player presenter.
 func set_local_view_presenter(presenter) -> void:
 	_local_view_presenter = presenter
@@ -1363,6 +1407,31 @@ func render_particle_frame() -> void:
 		_effect_world.render_frame()
 
 
+## The EffectWorld point-light device leg: per visible model, select the
+## witnessed <= 4 pool lights for that draw context and write them as
+## per-instance shader parameters (effect_light_director.gd carries the seam
+## notes). The viewmodel parts ride along with the local player as owner so
+## first-person self-lights gate correctly.
+func render_light_frame() -> void:
+	if _light_director == null or not is_inside_tree():
+		return
+	var viewport := get_viewport()
+	var viewmodel_parts: Array[ObjectModel] = []
+	if _local_view_presenter != null:
+		viewmodel_parts = _local_view_presenter.vm_parts()
+	var viewmodel_owner := 0
+	var sim: Simulation = get_sim()
+	if sim != null and sim.has_local_player():
+		viewmodel_owner = sim.get_local_player_wire_handle()
+	_light_director.render_frame(
+			viewport.get_camera_3d() if viewport != null else null,
+			viewmodel_parts, viewmodel_owner)
+
+
+func get_effect_light_report() -> EffectLightReport:
+	return _light_director.get_report() if _light_director != null else null
+
+
 func update_clear_frame() -> void:
 	if not _world_ready or not is_visible_in_tree():
 		_restore_idle_frame_clear_color()
@@ -1472,11 +1541,11 @@ func get_destruction_present_stats() -> RefCounted:
 
 
 ## Build a GameWorld-managed avatar model for the local player (which has no BMS placement of its
-## own). The caller (LocalPlayerPresenter) positions it and swaps its visual layer per first/third
-## person: in first person the body stays renderable on the reflection-only layer, because the
-## witnessed water mirror re-renders the world scene, local body included
-## [orig: Water_ReflectionPrerender @ 0x5c2780 -> render_main_scene @ 0x5c1240]. Null
-## when the resource root / item graphic is unavailable. The player runtime type id is the
+## own). The caller (LocalPlayerPresenter) positions it and swaps its visual/shadow policy per
+## first/third person. In first person the body remains a live SHADOWS_ONLY source, but neither the
+## gameplay beauty camera nor the water mirror renders it: retail's reflected entity collector has
+## no player/person leg [orig: Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0]. Null when
+## the resource root / item graphic is unavailable. The player runtime type id is the
 ## bound MissionObjectPlacer.PLAYER_RUNTIME_TYPE_ID [net-re §5.2b].
 ## The soldier's THIRD-PERSON gun. Built as a SIBLING of the avatar rather than a child:
 ## ObjectModel.rebuild() frees all of its children, so a weapon parented under the
@@ -1764,6 +1833,7 @@ func build_local_player_viewmodel() -> Node3D:
 		# alongside TEX_TEAM/HEAT_GLOW [orig: Avatar_SetArmsCamoCtrl @0x57a3b0
 		# immediately before each FP arms submit @0x4df008/@0x4df070].
 		arms.set_meta("avatar_part", "arms")
+		arms.set_meta("avatar_graphic", arms_name)
 		arms.set_meta("avatar_camo", character_spec.get("arms_camo", []))
 		_local_viewmodel_parts.append(arms)
 	if gun != null:
@@ -1794,6 +1864,35 @@ var _local_viewmodel_parts: Array[ObjectModel] = []
 
 func local_player_viewmodel_parts() -> Array[ObjectModel]:
 	return _local_viewmodel_parts
+
+
+## The actual first-person arms submit bound to the authority-stamped character
+## identity. Capture probes consume this public semantic witness rather than
+## guessing from the profile request or scanning the scene tree.
+func local_player_first_person_arms_witness() -> FirstPersonArmsWitness:
+	var witness := FirstPersonArmsWitness.new()
+	var character_spec := _local_player_visual_spec()
+	var expected_graphic := String(character_spec.get("arms", ""))
+	var expected_camo := Array(character_spec.get("arms_camo", []))
+	for part: ObjectModel in _local_viewmodel_parts:
+		if part == null or not is_instance_valid(part) \
+				or String(part.get_meta("avatar_part", "")) != "arms":
+			continue
+		if not part.is_visible_in_tree():
+			witness.error = "submitted first-person arms are not visible in tree"
+			return witness
+		var actual_graphic := String(part.get_meta("avatar_graphic", ""))
+		var actual_camo := Array(part.get_meta("avatar_camo", []))
+		if actual_graphic != expected_graphic or actual_camo != expected_camo:
+			witness.error = (
+					"submitted first-person arms do not match the resolved character")
+			return witness
+		witness.character_id = local_player_character_id()
+		witness.arms_graphic = actual_graphic
+		witness.arms_camo = PackedInt32Array(actual_camo)
+		return witness
+	witness.error = "no submitted first-person arms are available"
+	return witness
 
 
 ## The installed FP weapon dict's name (empty when none) — the switch-event guard
@@ -2050,6 +2149,14 @@ func _route_round_impacts() -> void:
 		var sound := String(row.get("sound", ""))
 		if _mission_audio != null and not sound.is_empty():
 			_mission_audio.fire_soundset(sound, pos)
+		# The light_impact flash rides the effect leg's own gate (the row only
+		# carries light fields when the ammo authors it and the effect presents)
+		# [orig: AmmoDef_ProcessImpactEffect @ 0x40a2b3].
+		if _light_director != null and row.has("light_radius"):
+			_light_director.on_impact_light(pos,
+					float(row.get("light_radius", 0.0)),
+					row.get("light_color", Color.WHITE),
+					int(row.get("light_ticks", 10)))
 
 
 # Start the shared mission runtime driver: it promotes the mission, builds the present index over the
@@ -2125,6 +2232,11 @@ func _start_runtime(mission: MissionData, bms_name: String) -> int:
 	# (the typed seam; GameWorld's register_effect_anchor delegates to the
 	# same instance).
 	opts["effect_anchors"] = _item_fx
+	# The dynamic light-pool routes (renderer/light_scene.h witness map): the
+	# MF_Light muzzle glow per presented fire, the death flash per husk death.
+	if _light_director != null:
+		opts["muzzle_light"] = Callable(_light_director, "on_muzzle_fire")
+		opts["death_light"] = Callable(_light_director, "on_death_light")
 	_runtime.setup(mission, container, opts)
 	if _runtime.get_sim() == null:
 		var setup_error := int(_runtime.get_setup_error())
@@ -2227,6 +2339,14 @@ func _on_runtime_fixed_tick(_logic_tick: int) -> void:
 	if _local_player_weapon_tick_consumer.is_valid():
 		_local_player_weapon_tick_consumer.call(drain_local_player_weapon_events())
 	_route_round_impacts()
+	# The light-pool lifecycle decay + the light_move round-glow follow, on
+	# the witnessed 62 Hz cadence [orig: EffectWorld_TickInstancesAndLightScale
+	# @ 0x5aa170 from Game_ProcessMainFrame; the round follow @ 0x4eaa9f].
+	if _light_director != null:
+		_light_director.advance_fixed_tick()
+		var glow_sim := get_sim()
+		if glow_sim != null:
+			_light_director.sync_round_glows(glow_sim.get_round_glow_rows())
 	var skip_effect_tick := probe_enabled and _perf_probe_skip_effect_tick
 	if _effect_world != null and not skip_effect_tick:
 		if _frame_stats != null and _frame_stats.is_capture_active():
@@ -2253,6 +2373,8 @@ func _on_runtime_simulation_restarted() -> void:
 	# that was just discarded. Re-register their admission and owner identities;
 	# restore emits fresh controller-start lifecycle events for occupied baselines.
 	_item_fx.reattach()
+	if _light_director != null:
+		_light_director.reattach()
 	_republish_network_environment()
 
 
@@ -2365,6 +2487,8 @@ func _warm_effect_world_catalog() -> int:
 	if restore_particles_hidden:
 		_effect_world.set_particles_hidden(true)
 	_item_fx.reattach()
+	if _light_director != null:
+		_light_director.reattach()
 	var unresolved := PackedStringArray(
 			_effect_world.get_unresolved_texture_names()).size()
 	print_verbose("GameWorld: effect warm pass — %d effect(s) precompiled, %d unresolved texture(s)" % [
@@ -2398,6 +2522,16 @@ func _start_effect_world() -> void:
 	# Item-effect wiring — the owner-pose provider, the persistent per-item
 	# attaches, and the wire-spawn callback — lives in the director.
 	_item_fx.on_effect_world_started()
+	if _light_director != null:
+		_light_director.reattach()
+	# One wire-spawn router for both directors: the runtime callback is
+	# single-subscriber, so the world owns the fan-out.
+	var wire_runtime: MissionPresentation = get_runtime()
+	if wire_runtime != null and _light_director != null:
+		wire_runtime.set_wire_node_spawned_callback(
+				func(node: ObjectModel, kind: int, item_id: int) -> void:
+					_item_fx.on_wire_node_spawned(node, kind, item_id)
+					_light_director.on_wire_node_spawned(node, kind, item_id))
 
 
 func get_effect_world() -> EffectWorld:
@@ -2454,8 +2588,78 @@ func debug_set_mission_minute_of_day(minute_of_day: float) -> Error:
 	return OK
 
 
+## Re-evaluates only camera-dependent production render state for an exact-pose
+## visual capture. The caller must first make camera current and stop its normal
+## presenter. This deliberately does not drive the mission session, weather
+## clock, material animation, particles, or audio.
+func debug_refresh_render_pose(camera: Camera3D) -> Error:
+	if not _world_ready or not is_inside_tree():
+		return ERR_UNAVAILABLE
+	if camera == null or not is_instance_valid(camera) \
+			or not camera.is_inside_tree() or not camera.is_current() \
+			or camera.get_viewport() != get_viewport():
+		return ERR_INVALID_PARAMETER
+
+	_frame_camera_pos = camera.get_camera_transform().origin
+	_frame_camera_xform = camera.global_transform
+	# Keep the same camera-producer order as GameFramePipeline, omitting every
+	# time-owning leg. Terrain publishes the detail-cell handoff consumed by
+	# foliage; occlusion then resolves the world visibility for this exact view.
+	apply_scene_environment_frame()
+	if _placer != null:
+		# Static MultiMesh batches are retained materials rather than ObjectModels;
+		# the frozen path omits Weather's normal relight tail, so restamp them now.
+		_placer.update_environment()
+	render_terrain_frame()
+	render_foliage_frame()
+	apply_occlusion_frame()
+	# A pass transition can precede the moved camera's visibility notification.
+	# Restamp only environment values after the exact-pose collector admits new
+	# models; do not advance PANM, material generators, animation, or clocks.
+	ObjectModel.refresh_awake_environment()
+
+	# These native devices normally self-refresh during a live frame. A fixture
+	# freezes their parent before moving the capture camera, so drive their
+	# public zero-delta frame seams explicitly after that move.
+	var sky := get_node_or_null("SkyDome") as SkyDome
+	if sky != null:
+		sky.advance_frame(0.0)
+	var celestial := get_node_or_null("Celestial") as Celestial
+	if celestial != null:
+		celestial.advance_frame(0.0)
+	if _water != null:
+		# Water's public frame seam retargets the mirror/strip and advances its
+		# render-noise counter exactly once. The fixture freezes immediately after
+		# this call and records that non-canonical phase in its manifest.
+		_water.advance_frame(0.0)
+	# Rebuild the particle draw lists for the moved capture camera. The effect
+	# SIM stays frozen (only fixed ticks advance it, and the runtime is paused);
+	# render_frame re-orients billboards and re-attaches the compositor to the
+	# now-current view. Without this the last pre-freeze draw list — built for
+	# the old camera pose — is all that renders, and captures lose every live
+	# emitter (the 00TRa fire-barrel flame was the exposing case).
+	render_particle_frame()
+	# Reselect the point lights for the fixture camera the same way (the
+	# flicker phase freezes with the weather ring, matching the phase
+	# contract).
+	render_light_frame()
+	update_clear_frame()
+	return OK
+
+
 func get_water_node() -> Water:
 	return _water
+
+
+## One typed read-only renderer snapshot for MCP, visual probes, and comparison
+## tooling. Keeping camera/environment/water/shadow/pass sampling together
+## guarantees every consumer sees the same fields and frame semantics.
+func get_render_diagnostics(
+		camera: Camera3D = null) -> GameRenderDiagnostics:
+	var viewport := get_viewport() if is_inside_tree() else null
+	if camera == null and viewport != null:
+		camera = viewport.get_camera_3d()
+	return GameRenderDiagnostics.from_world(self, camera, viewport)
 
 
 ## A caller registers a live pose resolver for an owner-bound effect group it
@@ -2554,12 +2758,7 @@ func _update_frame_clear_color() -> void:
 			_clear_color.environment.background_color = (
 					_env.frame_clear_color_for(true, true))
 		return
-	var above := true
-	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
-	if cam != null and is_water_render_active():
-		# Camera3D h/v offsets move the rendered eye without changing the node
-		# transform. Classify the same adjusted eye Water marches from.
-		above = cam.get_camera_transform().origin.y > float(_water.water_height)
+	var above := not _env.is_underwater_view()
 	var gen := int(_env.get_light_state().get_generation())
 	if gen == _clear_env_generation and above == _clear_above_water:
 		return

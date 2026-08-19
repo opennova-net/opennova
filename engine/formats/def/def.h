@@ -132,6 +132,16 @@ typedef struct DefAmmoDef {
     int kz_minradius_fp16;   /* +52 */
     int kz_maxradius_fp16;   /* +56 */
     int kz_pieslice_bam;     /* +60 */
+    /* The impact flash light, 'light_impact <radius> <r> <g> <b> <seconds>' —
+     * a fading pool light at the impact point (appended; FFI mirror stability).
+     * [orig: AmmoDef_ParseProperty @0x40af79 -> +132 radius ParseFixedPoint16,
+     * +128 ((r<<8)+g)<<8 + b, +136 seconds -> 62 Hz ticks (sub_40A0F0), 0 -> 10
+     * @0x40b005; consumer AmmoDef_ProcessImpactEffect @0x40a280 ->
+     * LightPool_SpawnGlowEffect(pos + radius/2 up, radius, color, mode 2,
+     * ticks)]. */
+    int light_impact_radius_fp16; /* +132 */
+    int light_impact_color;       /* +128: packed 0xRRGGBB */
+    int light_impact_ticks;       /* +136: authored seconds * 62; 0 -> 10 */
 } DefAmmoDef;
 
 typedef struct DefAmmoFile {

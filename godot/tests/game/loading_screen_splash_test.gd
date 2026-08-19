@@ -175,6 +175,19 @@ func test_echo_press_dismisses_like_retail_autorepeat() -> void:
 	assert_signal_emitted(screen, "splash_dismissed")
 
 
+func test_programmatic_dismissal_uses_the_same_closing_frame() -> void:
+	var screen := _mounted_splash()
+	watch_signals(screen)
+	assert_true(screen.dismiss_start_mission_splash())
+	assert_true(screen.is_splash_active(),
+		"The probe seam must preserve the witnessed background-only closing frame.")
+	await _pump_frames(3)
+	assert_signal_emitted(screen, "splash_dismissed")
+	assert_false(screen.is_splash_active())
+	assert_false(screen.dismiss_start_mission_splash(),
+		"An inactive splash cannot report a second dismissal.")
+
+
 # --- coordinator seams ---------------------------------------------------------
 
 func test_coordinator_gate_seams_and_dismissal_forward() -> void:
@@ -197,6 +210,22 @@ func test_coordinator_gate_seams_and_dismissal_forward() -> void:
 	await _pump_frames(3)
 	assert_signal_emitted(coordinator, "splash_dismissed",
 		"the screen's edge is forwarded to the shell")
+	coordinator.finish_presentation()
+
+
+func test_coordinator_can_dismiss_an_active_splash_without_input_synthesis() -> void:
+	var owner: Node = add_child_autofree(Node.new())
+	var root := _art_root()
+	var world: GameWorld = autofree(GameWorld.new())
+	var coordinator := WorldLoadCoordinator.new()
+	assert_not_null(coordinator.start(owner, root, world,
+			{"mission_file": "00TRg.bms"}, func() -> int: return OK))
+	await _pump_frames(4)
+	watch_signals(coordinator)
+	assert_true(coordinator.begin_start_mission_splash())
+	assert_true(coordinator.dismiss_start_mission_splash())
+	await _pump_frames(3)
+	assert_signal_emitted(coordinator, "splash_dismissed")
 	coordinator.finish_presentation()
 
 

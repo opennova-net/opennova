@@ -3,8 +3,8 @@
 // Walks the full material input matrix — every shader tag in the canonical
 // 45-entry descriptor table (plus unknown-tag probes) x the THREEDI material
 // flag byte x emissive x glass x alpha-test byte — through the
-// classification/composition chain (classify_object_material ->
-// build_object_shader_key -> compose_object_shader_glsl) and compares the
+// classification/pipeline chain (classify_object_material ->
+// build_object_shader_key -> describe_object_shader_pipeline) and compares the
 // canonical text against the committed golden
 // (tests/renderer/render_state_vectors.golden).
 //
@@ -85,13 +85,62 @@ const char *normal_space_name(renderer::ObjectNormalSpace space) {
 	return "?";
 }
 
-uint64_t fnv1a64(const std::string &text) {
-	uint64_t hash = 0xcbf29ce484222325ull;
-	for (unsigned char c : text) {
-		hash ^= c;
-		hash *= 0x100000001b3ull;
+const char *depth_policy_name(renderer::ObjectDepthPolicy depth) {
+	switch (depth) {
+		case renderer::ObjectDepthPolicy::Opaque: return "opaque";
+		case renderer::ObjectDepthPolicy::TransparentNoWrite: return "transparent-no-write";
+		case renderer::ObjectDepthPolicy::AlphaPrepass: return "alpha-prepass";
 	}
-	return hash;
+	return "?";
+}
+
+const char *cull_policy_name(renderer::ObjectCullPolicy cull) {
+	switch (cull) {
+		case renderer::ObjectCullPolicy::Back: return "back";
+		case renderer::ObjectCullPolicy::Disabled: return "disabled";
+	}
+	return "?";
+}
+
+const char *environment_source_name(renderer::ObjectEnvironmentSource source) {
+	switch (source) {
+		case renderer::ObjectEnvironmentSource::None: return "none";
+		case renderer::ObjectEnvironmentSource::HemisphereApproximation: return "hemisphere-approx";
+	}
+	return "?";
+}
+
+const char *specular_source_name(renderer::ObjectSpecularSource source) {
+	switch (source) {
+		case renderer::ObjectSpecularSource::None: return "none";
+		case renderer::ObjectSpecularSource::AnalyticPow16: return "analytic-pow16";
+	}
+	return "?";
+}
+
+const char *technique_name(renderer::ObjectShaderTechnique technique) {
+	switch (technique) {
+		case renderer::ObjectShaderTechnique::Unsupported: return "unsupported";
+		case renderer::ObjectShaderTechnique::Fixed: return "fixed";
+		case renderer::ObjectShaderTechnique::FixedDetail: return "fixed-detail";
+		case renderer::ObjectShaderTechnique::SelfLit: return "self-lit";
+		case renderer::ObjectShaderTechnique::SelfLitDetail: return "self-lit-detail";
+		case renderer::ObjectShaderTechnique::Tracer: return "tracer";
+		case renderer::ObjectShaderTechnique::Flag: return "flag";
+		case renderer::ObjectShaderTechnique::FlagSelfLit: return "flag-self-lit";
+		case renderer::ObjectShaderTechnique::PhongTangentDiffuse: return "phong-tangent-diffuse";
+		case renderer::ObjectShaderTechnique::PhongTangentSpecular: return "phong-tangent-specular";
+		case renderer::ObjectShaderTechnique::PhongObjectDiffuse: return "phong-object-diffuse";
+		case renderer::ObjectShaderTechnique::PhongObjectSpecular: return "phong-object-specular";
+		case renderer::ObjectShaderTechnique::Dot3Tangent: return "dot3-tangent";
+		case renderer::ObjectShaderTechnique::Dot3TangentDetail: return "dot3-tangent-detail";
+		case renderer::ObjectShaderTechnique::Dot3Object: return "dot3-object";
+		case renderer::ObjectShaderTechnique::Dot3ObjectDetail: return "dot3-object-detail";
+		case renderer::ObjectShaderTechnique::EnvironmentTangent: return "environment-tangent";
+		case renderer::ObjectShaderTechnique::EnvironmentTangentSpecular: return "environment-tangent-specular";
+		case renderer::ObjectShaderTechnique::Glass: return "glass";
+	}
+	return "?";
 }
 
 std::string generate() {
@@ -170,16 +219,40 @@ std::string generate() {
 		}
 	}
 
-	// Section 2: every unique shader key's composed GLSL, pinned by hash +
-	// length. A composer change re-hashes exactly the keys whose source
-	// changed; the re-dump carries the citation for the change.
-	out << "# composed-glsl (key -> fnv1a64, length)\n";
+	// Section 2: every unique key's renderer-neutral normal-pass descriptor.
+	// Checked-in backend shaders are integration-tested by their adapter; this
+	// golden pins render-state choices without coupling the engine to one
+	// backend's source language.
+	out << "# object-pipeline-descriptors v1\n";
 	for (uint32_t key : keys) {
-		const std::string glsl = renderer::compose_object_shader_glsl(key);
-		std::snprintf(line, sizeof(line), "key=%08x fnv64=%016llx len=%zu\n",
+		const renderer::ObjectShaderPipelineDescriptor pipeline =
+			renderer::describe_object_shader_pipeline(key);
+		std::snprintf(line, sizeof(line),
+		              "key=%08x fam=%s technique=%s blend=%s depth=%s cull=%s alpha=%d "
+		              "atest=%d atinv=%d two=%d emis=%d lum=%d nmap=%d "
+		              "nuv2=%d nspace=%s detail=%d spec=%d glass=%d vfade=%d "
+		              "envsrc=%s specsrc=%s\n",
 		              key,
-		              static_cast<unsigned long long>(fnv1a64(glsl)),
-		              glsl.size());
+		              renderer::object_shader_family_name(pipeline.family),
+		              technique_name(pipeline.technique),
+		              blend_name(pipeline.blend),
+		              depth_policy_name(pipeline.depth),
+		              cull_policy_name(pipeline.cull),
+		              pipeline.writes_alpha ? 1 : 0,
+		              pipeline.alpha_test ? 1 : 0,
+		              pipeline.alpha_test_invert ? 1 : 0,
+		              pipeline.two_sided ? 1 : 0,
+		              pipeline.emissive ? 1 : 0,
+		              pipeline.luminance ? 1 : 0,
+		              pipeline.uses_normal_map ? 1 : 0,
+		              pipeline.normal_uses_uv2 ? 1 : 0,
+		              normal_space_name(pipeline.normal_space),
+		              pipeline.uses_detail ? 1 : 0,
+		              pipeline.uses_specular ? 1 : 0,
+		              pipeline.glass ? 1 : 0,
+		              pipeline.view_angle_fade ? 1 : 0,
+		              environment_source_name(pipeline.environment_source),
+		              specular_source_name(pipeline.specular_source));
 		out << line;
 	}
 

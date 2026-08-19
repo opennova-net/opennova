@@ -38,6 +38,7 @@
 #include "particle/nova_particle_graphic_layer.h"
 #include "particle/nova_particle_def.h"
 #include "particle/nova_particle_file.h"
+#include "lights/nova_light_scene.h"
 #include "particle/nova_effect_scene.h"
 #include "particle/nova_particle_compositor.h"
 #include "particle/nova_particle_renderer.h"
@@ -173,6 +174,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(ParticleDef);
 	GDREGISTER_CLASS(ParticleFile);
 	GDREGISTER_CLASS(EffectScene);
+	GDREGISTER_CLASS(LightScene);
 	GDREGISTER_CLASS(ParticleCompositorEffect);
 	GDREGISTER_CLASS(ParticleRenderer);
 	GDREGISTER_CLASS(ResourceIndex);

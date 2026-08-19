@@ -17,6 +17,11 @@ namespace {
 
 constexpr const char *kContainerName = "MissionObjects";
 
+uint64_t entity_identity_key(int p_kind, int p_index) noexcept {
+	return (static_cast<uint64_t>(static_cast<uint32_t>(p_kind)) << 32) |
+			static_cast<uint32_t>(p_index);
+}
+
 // Convex hull points (Godot model-local) for one parsed collision volume:
 // the volume's bounding planes form a closed convex polytope, so the hull is
 // exactly their half-space intersection (never clamped to the AABB — that
@@ -182,6 +187,12 @@ void MissionObjectPlacer::_bind_methods() {
 			&MissionObjectPlacer::get_static_user_point_sources);
 	ClassDB::bind_method(D_METHOD("get_static_item_effect_sources"),
 			&MissionObjectPlacer::get_static_item_effect_sources);
+	ClassDB::bind_method(
+			D_METHOD("get_static_terrain_shadow_source_diagnostics"),
+			&MissionObjectPlacer::get_static_terrain_shadow_source_diagnostics);
+	ClassDB::bind_method(
+			D_METHOD("get_static_terrain_shadow_source_revision"),
+			&MissionObjectPlacer::get_static_terrain_shadow_source_revision);
 	ClassDB::bind_method(D_METHOD("graphic_for", "item_id"),
 			&MissionObjectPlacer::graphic_for);
 	ClassDB::bind_method(D_METHOD("object_data_for", "graphic"),
@@ -201,10 +212,15 @@ void MissionObjectPlacer::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("get_static_instance_transform", "bms_id"),
 			&MissionObjectPlacer::get_static_instance_transform);
+	ClassDB::bind_method(D_METHOD("get_static_instance_batch_key", "bms_id"),
+			&MissionObjectPlacer::get_static_instance_batch_key);
+	ClassDB::bind_method(
+			D_METHOD("static_instance_is_mirror_reflected", "bms_id"),
+			&MissionObjectPlacer::static_instance_is_mirror_reflected);
 	ClassDB::bind_method(
 			D_METHOD("register_static_instance", "bms_id", "graphic", "index",
-					"xform", "casts_static_shadow"),
-			&MissionObjectPlacer::register_static_instance);
+					"xform", "casts_static_shadow", "mirror_reflected"),
+			&MissionObjectPlacer::register_static_instance, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("is_static_instance_hidden", "bms_id"),
 			&MissionObjectPlacer::is_static_instance_hidden);
 	ClassDB::bind_method(
@@ -214,6 +230,17 @@ void MissionObjectPlacer::_bind_methods() {
 			&MissionObjectPlacer::hide_static_instance);
 	ClassDB::bind_method(D_METHOD("show_static_instance", "bms_id"),
 			&MissionObjectPlacer::show_static_instance);
+	ClassDB::bind_method(
+			D_METHOD("update_static_terrain_shadow_source_transform", "kind",
+					"index", "xform"),
+			&MissionObjectPlacer::update_static_terrain_shadow_source_transform);
+	ClassDB::bind_method(
+			D_METHOD("set_static_terrain_shadow_replacement", "bms_id",
+					"graphic", "xform", "active"),
+			&MissionObjectPlacer::set_static_terrain_shadow_replacement);
+	ClassDB::bind_method(
+			D_METHOD("clear_static_terrain_shadow_replacement", "bms_id"),
+			&MissionObjectPlacer::clear_static_terrain_shadow_replacement);
 	ClassDB::bind_method(
 			D_METHOD("register_resolved_static_graphic", "graphic", "data",
 					"batches"),
@@ -312,6 +339,11 @@ void MissionObjectPlacer::_check_epoch() {
 	anchor_cache_.clear();
 	collision_shapes_cache_.clear();
 	occlusion_cache_.clear();
+	for (int i = 0; i < static_terrain_shadow_sources_.size(); ++i) {
+		static_terrain_shadow_sources_.write[i].object_data.unref();
+	}
+	static_terrain_shadow_replacements_.clear();
+	_bump_static_terrain_shadow_source_revision();
 }
 
 // --- coordinate conversion ---------------------------------------------------
@@ -368,6 +400,15 @@ bool MissionObjectPlacer::_item_is_mirror_reflected(int p_item_id) const {
 					item_db_->get_item_type(p_item_id));
 }
 
+bool MissionObjectPlacer::_placement_is_mirror_reflected(
+		uint32_t p_entity_attrib, int p_item_id) const {
+	const int item_type = item_db_.is_valid()
+			? item_db_->get_item_type(p_item_id)
+			: -1;
+	return opennova::mission::placement_is_mirror_reflected(
+			p_entity_attrib, item_type);
+}
+
 // --- environment relight -----------------------------------------------------
 
 void MissionObjectPlacer::update_environment() {
@@ -414,8 +455,13 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 	destruction_batches_.clear();
 	destruction_instances_.clear();
 	hidden_destruction_instances_.clear();
+	static_terrain_shadow_replacements_.clear();
 	static_user_point_sources_ = Array();
 	static_item_effect_sources_ = Array();
+	static_terrain_shadow_sources_.clear();
+	static_terrain_shadow_source_rows_.clear();
+	static_terrain_shadow_rows_by_bms_.clear();
+	_bump_static_terrain_shadow_source_revision();
 	placed_entity_records_ = Array();
 	if (p_mission.is_null() || p_parent == nullptr || resource_root_.is_null()) {
 		return stats;
@@ -439,16 +485,32 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 	const Array skip_kinds = p_options.get("skip_kinds", Array());
 	Node3D *container = _ensure_container(p_parent);
 
-	// Bucket entities by graphic, split static vs animated. The parallel
-	// per-slot arrays (shadow eligibility, identity, effect sources, edit
-	// refs) share one slot order per graphic so destruction can carve the
-	// matching shadow slot by the same BMS index.
+	// Bucket entities by graphic and retail reflection population, then split
+	// static vs animated. One graphic may be authored both with and without
+	// the BMS Reflective attribute (CP01 does exactly that); a single
+	// MultiMesh layer cannot express those different mirror policies. The
+	// parallel per-slot arrays (shadow eligibility, identity, effect sources,
+	// edit refs) share one slot order per group so destruction can carve every
+	// matching draw by the same BMS index.
 	struct StaticGroup {
+		String graphic;
+		bool mirror_reflected = false;
 		Vector<Transform3D> xforms;
 		Vector<bool> shadow_slots;
 		Vector<int> bms_ids;
+		Vector<int> item_ids;
+		Vector<int> kinds;
+		Vector<int> entity_indices;
+		Vector<int> teams;
+		Vector<uint32_t> entity_attribs;
+		Vector<uint32_t> attrib2_values;
 		Array effect_sources;
 		Array edit_refs;
+	};
+	const auto static_group_key = [](const String &p_graphic,
+			bool p_mirror_reflected) -> String {
+		return p_graphic +
+				String(p_mirror_reflected ? "::mirror" : "::no_mirror");
 	};
 	HashMap<String, StaticGroup> static_groups;
 	Vector<String> static_order;
@@ -491,17 +553,29 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 			animated.push_back(a);
 			continue;
 		}
-		StaticGroup *group = static_groups.getptr(graphic);
+		const bool mirror_reflected = _placement_is_mirror_reflected(
+				uint32_t(entity.get("ai_flags", 0)), item_id);
+		const String group_key = static_group_key(graphic, mirror_reflected);
+		StaticGroup *group = static_groups.getptr(group_key);
 		if (group == nullptr) {
-			static_groups[graphic] = StaticGroup();
-			group = static_groups.getptr(graphic);
-			static_order.push_back(graphic);
+			static_groups[group_key] = StaticGroup();
+			group = static_groups.getptr(group_key);
+			group->graphic = graphic;
+			group->mirror_reflected = mirror_reflected;
+			static_order.push_back(group_key);
 		}
 		group->xforms.push_back(xform);
 		group->shadow_slots.push_back(item_casts_static_terrain_shadow(kind,
 				uint32_t(entity.get("ai_flags", 0)),
 				item_db_->get_attrib(item_id), item_db_->get_attrib2(item_id)));
 		group->bms_ids.push_back(int(entity.get("bms_id", 0)));
+		group->item_ids.push_back(item_id);
+		group->kinds.push_back(kind);
+		group->entity_indices.push_back(int(entity.get("index", -1)));
+		group->teams.push_back(int(entity.get("team", 0)));
+		group->entity_attribs.push_back(
+				uint32_t(entity.get("ai_flags", 0)));
+		group->attrib2_values.push_back(item_db_->get_attrib2(item_id));
 		Dictionary source;
 		source["kind"] = kind;
 		source["item_id"] = item_id;
@@ -518,17 +592,20 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 	spans["bucket_entities"] = clock->get_ticks_usec() - stage_begin;
 	stage_begin = clock->get_ticks_usec();
 
-	// Static: one MultiMeshInstance3D per (graphic, submesh).
+	// Static: one MultiMeshInstance3D per
+	// (graphic, retail reflection population, submesh).
 	int placed = 0;
 	int batched = 0;
 	int graphics = 0;
 	int batch_count = 0;
 	Vector<String> resolved_graphics;
-	for (const String &graphic : static_order) {
+	Vector<String> resolved_group_keys;
+	for (const String &group_key : static_order) {
 		if (progress.is_valid()) {
 			progress.call();
 		}
-		StaticGroup &group = static_groups[graphic];
+		StaticGroup &group = static_groups[group_key];
+		const String graphic = group.graphic;
 		const int instance_count = group.xforms.size();
 		bool has_static_shadow = false;
 		bool all_static_shadow = instance_count > 0;
@@ -536,24 +613,69 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 			has_static_shadow = has_static_shadow || slot;
 			all_static_shadow = all_static_shadow && slot;
 		}
-		// One graphic = one item type in practice; classify the batch from
-		// its first placed source (env #30: only vehicle entities reflect).
-		int first_item_id = 0;
-		if (!group.effect_sources.is_empty()) {
-			first_item_id = int(
-					Dictionary(group.effect_sources[0]).get("item_id", 0));
-		}
-		const uint32_t batch_world_layer =
-				_item_is_mirror_reflected(first_item_id)
+		const uint32_t batch_world_layer = group.mirror_reflected
 				? uint32_t(Water::VISUAL_LAYER_WORLD)
 				: uint32_t(Water::VISUAL_LAYER_WORLD_NO_MIRROR);
+		const bool graphic_has_split_policy = static_groups.has(
+				static_group_key(graphic, !group.mirror_reflected));
+		const String policy_suffix = graphic_has_split_policy
+				? (group.mirror_reflected ? "_Mirror" : "_NoMirror")
+				: String();
+		Array shadow_bms_ids;
+		Array shadow_item_ids;
+		Array shadow_attrib2;
+		Array shadow_slots;
+		for (int i = 0; i < instance_count; ++i) {
+			shadow_bms_ids.push_back(i < group.bms_ids.size()
+					? group.bms_ids[i]
+					: 0);
+			shadow_item_ids.push_back(i < group.item_ids.size()
+					? group.item_ids[i]
+					: 0);
+			shadow_attrib2.push_back(i < group.attrib2_values.size()
+					? int64_t(group.attrib2_values[i])
+					: int64_t(0));
+			shadow_slots.push_back(i < group.shadow_slots.size() &&
+					group.shadow_slots[i]);
+		}
+		const auto tag_static_shadow_source = [&](MultiMeshInstance3D *p_source) {
+			p_source->set_meta("static_shadow_bms_ids", shadow_bms_ids);
+			p_source->set_meta("static_shadow_item_ids", shadow_item_ids);
+			p_source->set_meta("static_shadow_attrib2", shadow_attrib2);
+			p_source->set_meta("static_shadow_slots", shadow_slots);
+			p_source->set_meta("static_shadow_graphic", graphic);
+			p_source->set_meta("static_shadow_batch_key", group_key);
+		};
 		const Vector<StaticBatch> batches =
 				_get_static_batches(graphic, container);
 		if (batches.is_empty()) {
 			unresolved += instance_count;
 			continue;
 		}
-		resolved_graphics.push_back(graphic);
+		resolved_group_keys.push_back(group_key);
+		if (!resolved_graphics.has(graphic)) {
+			resolved_graphics.push_back(graphic);
+			++graphics;
+		}
+		Ref<ObjectData> shadow_data;
+		if (const Ref<ObjectData> *resolved =
+					object_data_cache_.getptr(graphic)) {
+			shadow_data = *resolved;
+		}
+		for (int i = 0; i < group.xforms.size(); ++i) {
+			_record_static_terrain_shadow_source(
+					i < group.kinds.size() ? group.kinds[i] : -1,
+					i < group.entity_indices.size()
+							? group.entity_indices[i]
+							: -1,
+					i < group.bms_ids.size() ? group.bms_ids[i] : 0,
+					i < group.teams.size() ? group.teams[i] : 0,
+					i < group.entity_attribs.size()
+							? group.entity_attribs[i]
+							: 0,
+					i < group.item_ids.size() ? group.item_ids[i] : 0,
+					graphic, group.xforms[i], shadow_data);
+		}
 		Array xform_array;
 		for (const Transform3D &xform : group.xforms) {
 			xform_array.push_back(xform);
@@ -565,7 +687,6 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 					int(source.get("item_id", 0)), graphic,
 					source.get("world_transform", Transform3D()));
 		}
-		++graphics;
 		for (const StaticBatch &batch : batches) {
 			Ref<MultiMesh> shadow_mm;
 			Ref<MultiMesh> mm;
@@ -595,10 +716,12 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 			if (batch.material.is_valid()) {
 				mmi->set_material_override(batch.material);
 			}
-			mmi->set_name(vformat("Batch_%s_%d", graphic, batch.submesh));
+			mmi->set_name(vformat("Batch_%s%s_%d", graphic, policy_suffix,
+					batch.submesh));
+			tag_static_shadow_source(mmi);
 			container->add_child(mmi);
 			++batch_count;
-			destruction_batches_[graphic].push_back(mm);
+			destruction_batches_[group_key].push_back(mm);
 			if (has_static_shadow && !all_static_shadow) {
 				// Mixed eligibility: a shadows-only twin whose ineligible
 				// slots collapse to zero scale.
@@ -624,10 +747,11 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 				if (batch.material.is_valid()) {
 					shadow_mmi->set_material_override(batch.material);
 				}
-				shadow_mmi->set_name(vformat("StaticShadow_%s_%d", graphic,
-						batch.submesh));
+				shadow_mmi->set_name(vformat("StaticShadow_%s%s_%d", graphic,
+						policy_suffix, batch.submesh));
+				tag_static_shadow_source(shadow_mmi);
 				container->add_child(shadow_mmi);
-				destruction_batches_[graphic].push_back(shadow_mm);
+				destruction_batches_[group_key].push_back(shadow_mm);
 			}
 			if (edit_mode_) {
 				Array shadow_slot_array;
@@ -647,10 +771,12 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 			if (bms_id != 0) {
 				DestructionInstance inst;
 				inst.graphic = graphic;
+				inst.batch_key = group_key;
 				inst.index = i;
 				inst.xform = group.xforms[i];
 				inst.casts_static_shadow = i < group.shadow_slots.size() &&
 						group.shadow_slots[i];
+				inst.mirror_reflected = group.mirror_reflected;
 				destruction_instances_[bms_id] = inst;
 			}
 		}
@@ -668,8 +794,9 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 	// whole-model; pick bodies are addressed by name ("Pick_<kind>_<index>"),
 	// never by child order.
 	if (edit_mode_) {
-		for (const String &graphic : resolved_graphics) {
-			const StaticGroup &group = static_groups[graphic];
+		for (const String &group_key : resolved_group_keys) {
+			const StaticGroup &group = static_groups[group_key];
+			const String graphic = group.graphic;
 			for (int i = 0; i < group.xforms.size(); ++i) {
 				Dictionary ref;
 				if (i < group.edit_refs.size()) {
@@ -701,7 +828,8 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 		ObjectModel *model = memnew(ObjectModel);
 		model->set_panm_clock(panm_clock_);
 		model->set_name(vformat("Anim_%s_%d", graphic, animated_count));
-		model->set_mirror_reflected(_item_is_mirror_reflected(item_id));
+		model->set_mirror_reflected(_placement_is_mirror_reflected(
+				uint32_t(a.get("ai_flags", 0)), item_id));
 		// Render the model origin at the entity's stored position directly:
 		// the engine bakes the Ground userpoint into the stored position at
 		// author-time (place / terrain-drag), not at render (witness:
@@ -744,11 +872,18 @@ Dictionary MissionObjectPlacer::place(const Ref<MissionData> &p_mission,
 		ref["team"] = int(a.get("team", -1));
 		ref["position"] = a.get("position", Vector3());
 		ref["item_id"] = item_id;
+		ref["graphic"] = graphic;
+		ref["attrib2"] = int64_t(item_db_->get_attrib2(item_id));
 		model->set_meta("entity_ref", ref);
 		Dictionary record;
 		record["model"] = model;
 		record["ref"] = ref;
 		placed_entity_records_.push_back(record);
+		_record_static_terrain_shadow_source(kind,
+				int(a.get("index", -1)), int(a.get("bms_id", 0)),
+				int(a.get("team", 0)),
+				uint32_t(a.get("ai_flags", 0)), item_id, graphic,
+				a.get("xform", Transform3D()), data);
 		if (edit_mode_) {
 			Dictionary pick;
 			pick["kind"] = ref["kind"];
@@ -813,7 +948,8 @@ Dictionary MissionObjectPlacer::place_single(const Ref<MissionData> &p_mission,
 		ObjectModel *model = memnew(ObjectModel);
 		model->set_panm_clock(panm_clock_);
 		model->set_name(vformat("Anim_%s_k%d_i%d", graphic, p_kind, p_index));
-		model->set_mirror_reflected(_item_is_mirror_reflected(item_id));
+		model->set_mirror_reflected(_placement_is_mirror_reflected(
+				uint32_t(entity.get("ai_flags", 0)), item_id));
 		model->set_transform(xform);
 		p_container->add_child(model);
 		if (env_state_.is_valid()) {
@@ -839,11 +975,18 @@ Dictionary MissionObjectPlacer::place_single(const Ref<MissionData> &p_mission,
 		ref["team"] = int(entity.get("team", -1));
 		ref["position"] = entity.get("position", Vector3());
 		ref["item_id"] = item_id;
+		ref["graphic"] = graphic;
+		ref["attrib2"] = int64_t(item_db_->get_attrib2(item_id));
 		model->set_meta("entity_ref", ref);
 		Dictionary record;
 		record["model"] = model;
 		record["ref"] = ref;
 		placed_entity_records_.push_back(record);
+		_record_static_terrain_shadow_source(p_kind, p_index,
+				int(entity.get("bms_id", 0)),
+				int(entity.get("team", 0)),
+				uint32_t(entity.get("ai_flags", 0)), item_id, graphic,
+				xform, data);
 		Dictionary pick;
 		pick["kind"] = p_kind;
 		pick["index"] = p_index;
@@ -878,7 +1021,9 @@ Dictionary MissionObjectPlacer::place_single(const Ref<MissionData> &p_mission,
 	const bool casts_static_shadow = item_casts_static_terrain_shadow(p_kind,
 			uint32_t(entity.get("ai_flags", 0)), item_db_->get_attrib(item_id),
 			item_db_->get_attrib2(item_id));
-	const uint32_t single_world_layer = _item_is_mirror_reflected(item_id)
+	const bool single_mirror_reflected = _placement_is_mirror_reflected(
+			uint32_t(entity.get("ai_flags", 0)), item_id);
+	const uint32_t single_world_layer = single_mirror_reflected
 			? uint32_t(Water::VISUAL_LAYER_WORLD)
 			: uint32_t(Water::VISUAL_LAYER_WORLD_NO_MIRROR);
 	int batch_count = 0;
@@ -906,6 +1051,13 @@ Dictionary MissionObjectPlacer::place_single(const Ref<MissionData> &p_mission,
 		}
 		mmi->set_name(vformat("Place_%s_k%d_i%d_s%d", graphic, p_kind,
 				p_index, batch.submesh));
+		mmi->set_meta("static_shadow_bms_ids",
+				Array::make(int(entity.get("bms_id", 0))));
+		mmi->set_meta("static_shadow_item_ids", Array::make(item_id));
+		mmi->set_meta("static_shadow_attrib2",
+				Array::make(int64_t(item_db_->get_attrib2(item_id))));
+		mmi->set_meta("static_shadow_slots", Array::make(casts_static_shadow));
+		mmi->set_meta("static_shadow_graphic", graphic);
 		p_container->add_child(mmi);
 		++batch_count;
 		_record_static_batch(graphic, refs, mm, mmi, batch.offset, batch.mesh);
@@ -913,6 +1065,15 @@ Dictionary MissionObjectPlacer::place_single(const Ref<MissionData> &p_mission,
 	add_pick_collider(p_container, p_kind, p_index, graphic, xform);
 	_append_static_user_point_source(graphic, xform);
 	_append_static_item_effect_source(p_kind, item_id, graphic, xform);
+	Ref<ObjectData> shadow_data;
+	if (const Ref<ObjectData> *resolved = object_data_cache_.getptr(graphic)) {
+		shadow_data = *resolved;
+	}
+	_record_static_terrain_shadow_source(p_kind, p_index,
+			int(entity.get("bms_id", 0)),
+			int(entity.get("team", 0)),
+			uint32_t(entity.get("ai_flags", 0)), item_id, graphic, xform,
+			shadow_data);
 	delta["placed"] = 1;
 	delta["batched"] = 1;
 	delta["batches"] = batch_count;
@@ -1466,6 +1627,141 @@ Array MissionObjectPlacer::get_static_item_effect_sources() {
 	return static_item_effect_sources_.duplicate(true);
 }
 
+void MissionObjectPlacer::_record_static_terrain_shadow_source(int p_kind,
+		int p_index, int p_bms_id, int p_team, uint32_t p_entity_attrib,
+		int p_item_id, const String &p_graphic,
+		const Transform3D &p_xform, const Ref<ObjectData> &p_data) {
+	// The retail collector walks only pool 2 then pool 1. Keeping rejected
+	// records from those pools preserves the exact policy inputs for the
+	// portable admission predicate and its diagnostics.
+	if (p_kind != opennova::mission::kEntityKindBuilding &&
+			p_kind != opennova::mission::kEntityKindItem) {
+		return;
+	}
+	StaticTerrainShadowSource source;
+	source.bms_id = p_bms_id;
+	source.item_id = p_item_id;
+	source.entity_kind = p_kind;
+	source.entity_index = p_index;
+	source.team = p_team;
+	source.entity_attrib = p_entity_attrib;
+	if (item_db_.is_valid()) {
+		source.item_attrib = item_db_->get_attrib(p_item_id);
+		source.item_attrib2 = item_db_->get_attrib2(p_item_id);
+	}
+	source.graphic = p_graphic;
+	source.world_transform = p_xform;
+	source.object_data = p_data;
+	const int row = static_terrain_shadow_sources_.size();
+	static_terrain_shadow_sources_.push_back(source);
+	static_terrain_shadow_source_rows_[entity_identity_key(p_kind, p_index)]
+			.push_back(row);
+	if (source.bms_id != 0) {
+		static_terrain_shadow_rows_by_bms_[source.bms_id].push_back(row);
+	}
+	_bump_static_terrain_shadow_source_revision();
+}
+
+void MissionObjectPlacer::_bump_static_terrain_shadow_source_revision() {
+	++static_terrain_shadow_source_revision_;
+	if (static_terrain_shadow_source_revision_ == 0) {
+		++static_terrain_shadow_source_revision_;
+	}
+}
+
+uint64_t MissionObjectPlacer::get_static_terrain_shadow_source_revision() {
+	_check_epoch();
+	return static_terrain_shadow_source_revision_;
+}
+
+Vector<MissionObjectPlacer::StaticTerrainShadowSource>
+MissionObjectPlacer::get_static_terrain_shadow_sources() {
+	_check_epoch();
+	Vector<StaticTerrainShadowSource> out = static_terrain_shadow_sources_;
+	for (int i = 0; i < out.size(); ++i) {
+		StaticTerrainShadowSource &source = out.write[i];
+		if (source.object_data.is_null() && !source.graphic.is_empty()) {
+			source.object_data = _load_object_data(source.graphic);
+		}
+		if (source.bms_id == 0) continue;
+		if (const DestructionInstance *instance =
+					destruction_instances_.getptr(source.bms_id)) {
+			source.world_transform = instance->xform;
+		}
+		source.active = !hidden_destruction_instances_.has(source.bms_id);
+		if (const StaticTerrainShadowSource *replacement =
+					static_terrain_shadow_replacements_.getptr(source.bms_id)) {
+			source.graphic = replacement->graphic;
+			source.world_transform = replacement->world_transform;
+			source.object_data = replacement->object_data.is_valid()
+					? replacement->object_data
+					: _load_object_data(replacement->graphic);
+			source.active = replacement->active;
+		}
+	}
+
+	// `register_static_instance` is the deterministic construction seam for
+	// already-resolved renderers and asset-free tests. Merge any record not
+	// already published by place()/place_single() as a building-policy source;
+	// casts=false maps to the same authored NoShadow veto the collector owns.
+	for (const KeyValue<int64_t, DestructionInstance> &kv :
+			destruction_instances_) {
+		bool represented = false;
+		for (const StaticTerrainShadowSource &source : out) {
+			if (source.bms_id == static_cast<int>(kv.key)) {
+				represented = true;
+				break;
+			}
+		}
+		if (represented) continue;
+		StaticTerrainShadowSource source;
+		source.bms_id = static_cast<int>(kv.key);
+		source.entity_kind = opennova::mission::kEntityKindBuilding;
+		source.entity_index = kv.value.index;
+		source.entity_attrib = kv.value.casts_static_shadow
+				? 0u
+				: opennova::mission::kEntityAttribNoShadow;
+		source.graphic = kv.value.graphic;
+		source.world_transform = kv.value.xform;
+		source.object_data = _load_object_data(source.graphic);
+		source.active = !hidden_destruction_instances_.has(kv.key);
+		if (const StaticTerrainShadowSource *replacement =
+					static_terrain_shadow_replacements_.getptr(kv.key)) {
+			source.graphic = replacement->graphic;
+			source.world_transform = replacement->world_transform;
+			source.object_data = replacement->object_data.is_valid()
+					? replacement->object_data
+					: _load_object_data(replacement->graphic);
+			source.active = replacement->active;
+		}
+		out.push_back(source);
+	}
+	return out;
+}
+
+Array MissionObjectPlacer::get_static_terrain_shadow_source_diagnostics() {
+	Array out;
+	const Vector<StaticTerrainShadowSource> sources =
+			get_static_terrain_shadow_sources();
+	for (const StaticTerrainShadowSource &source : sources) {
+		Dictionary row;
+		row["bms_id"] = source.bms_id;
+		row["item_id"] = source.item_id;
+		row["entity_kind"] = source.entity_kind;
+		row["entity_index"] = source.entity_index;
+		row["team"] = source.team;
+		row["entity_attrib"] = static_cast<int64_t>(source.entity_attrib);
+		row["item_attrib"] = static_cast<int64_t>(source.item_attrib);
+		row["item_attrib2"] = static_cast<int64_t>(source.item_attrib2);
+		row["graphic"] = source.graphic;
+		row["world_transform"] = source.world_transform;
+		row["object_data"] = source.object_data;
+		row["active"] = source.active;
+		out.push_back(row);
+	}
+	return out;
+}
+
 void MissionObjectPlacer::_record_static_user_point_group(
 		const String &p_graphic, const Array &p_transforms) {
 	const Ref<ObjectData> data = _load_object_data(p_graphic);
@@ -1693,13 +1989,16 @@ Node3D *MissionObjectPlacer::_ensure_container(Node3D *p_parent) {
 
 void MissionObjectPlacer::register_static_instance(int p_bms_id,
 		const String &p_graphic, int p_index, const Transform3D &p_xform,
-		bool p_casts_static_shadow) {
+		bool p_casts_static_shadow, bool p_mirror_reflected) {
 	DestructionInstance inst;
 	inst.graphic = p_graphic;
+	inst.batch_key = p_graphic;
 	inst.index = p_index;
 	inst.xform = p_xform;
 	inst.casts_static_shadow = p_casts_static_shadow;
+	inst.mirror_reflected = p_mirror_reflected;
 	destruction_instances_[p_bms_id] = inst;
+	_bump_static_terrain_shadow_source_revision();
 }
 
 Variant MissionObjectPlacer::get_static_instance_transform(
@@ -1711,15 +2010,29 @@ Variant MissionObjectPlacer::get_static_instance_transform(
 	return rec->xform;
 }
 
+String MissionObjectPlacer::get_static_instance_batch_key(int p_bms_id) const {
+	const DestructionInstance *rec = destruction_instances_.getptr(p_bms_id);
+	if (rec == nullptr) {
+		return String();
+	}
+	return rec->batch_key.is_empty() ? rec->graphic : rec->batch_key;
+}
+
+bool MissionObjectPlacer::static_instance_is_mirror_reflected(
+		int p_bms_id) const {
+	const DestructionInstance *rec = destruction_instances_.getptr(p_bms_id);
+	return rec != nullptr && rec->mirror_reflected;
+}
+
 bool MissionObjectPlacer::static_instance_casts_terrain_shadow(
 		int p_bms_id) const {
 	const DestructionInstance *rec = destruction_instances_.getptr(p_bms_id);
 	return rec != nullptr && rec->casts_static_shadow;
 }
 
-// Hide a destroyed batched static in every batch of its graphic (zero-scale
-// at its own origin — the batch keeps its instance count); returns the
-// instance's placed transform for the husk graft.
+// Hide a destroyed batched static in every batch of its graphic/reflection
+// population (zero-scale at its own origin — the batch keeps its instance
+// count); returns the instance's placed transform for the husk graft.
 Variant MissionObjectPlacer::hide_static_instance(int p_bms_id) {
 	const DestructionInstance *rec = destruction_instances_.getptr(p_bms_id);
 	if (rec == nullptr) {
@@ -1730,8 +2043,11 @@ Variant MissionObjectPlacer::hide_static_instance(int p_bms_id) {
 	}
 	const Transform3D carved(Basis().scaled(Vector3()), rec->xform.origin);
 	Array originals;
+	const String batch_key = rec->batch_key.is_empty()
+			? rec->graphic
+			: rec->batch_key;
 	const Vector<Ref<MultiMesh>> *batches =
-			destruction_batches_.getptr(rec->graphic);
+			destruction_batches_.getptr(batch_key);
 	if (batches != nullptr) {
 		for (const Ref<MultiMesh> &mm : *batches) {
 			if (mm.is_valid() && rec->index >= 0 &&
@@ -1746,6 +2062,7 @@ Variant MissionObjectPlacer::hide_static_instance(int p_bms_id) {
 		}
 	}
 	hidden_destruction_instances_[p_bms_id] = originals;
+	_bump_static_terrain_shadow_source_revision();
 	return rec->xform;
 }
 
@@ -1766,6 +2083,191 @@ bool MissionObjectPlacer::show_static_instance(int p_bms_id) {
 		}
 	}
 	hidden_destruction_instances_.erase(p_bms_id);
+	_bump_static_terrain_shadow_source_revision();
+	return true;
+}
+
+bool MissionObjectPlacer::update_static_terrain_shadow_source_transform(
+		int p_kind, int p_index, const Transform3D &p_xform) {
+	_check_epoch();
+	bool matched = false;
+	bool saw_source_match = false;
+	bool observable_changed = false;
+	const Vector<int> *source_rows = static_terrain_shadow_source_rows_.getptr(
+			entity_identity_key(p_kind, p_index));
+	if (source_rows != nullptr) {
+		for (const int i : *source_rows) {
+			if (i < 0 || i >= static_terrain_shadow_sources_.size()) continue;
+			StaticTerrainShadowSource &source =
+					static_terrain_shadow_sources_.write[i];
+			if (source.entity_kind != p_kind || source.entity_index != p_index) {
+				continue;
+			}
+			saw_source_match = true;
+			matched = true;
+			const bool policy_admitted =
+					opennova::mission::item_casts_static_terrain_shadow(
+					source.entity_kind, source.entity_attrib,
+					source.item_attrib, source.item_attrib2);
+			bool effective_active = source.active &&
+					(source.bms_id == 0 ||
+							!hidden_destruction_instances_.has(source.bms_id));
+			StaticTerrainShadowSource *replacement = source.bms_id != 0
+					? static_terrain_shadow_replacements_.getptr(source.bms_id)
+					: nullptr;
+			if (replacement != nullptr) effective_active = replacement->active;
+			bool value_changed = false;
+			if (source.world_transform != p_xform) {
+				source.world_transform = p_xform;
+				value_changed = true;
+			}
+			if (source.bms_id != 0) {
+				if (DestructionInstance *instance =
+							destruction_instances_.getptr(source.bms_id)) {
+					if (instance->xform != p_xform) {
+						instance->xform = p_xform;
+						value_changed = true;
+					}
+				}
+				if (replacement != nullptr) {
+					if (replacement->world_transform != p_xform) {
+						replacement->world_transform = p_xform;
+						value_changed = true;
+					}
+				}
+			}
+			observable_changed |=
+					policy_admitted && effective_active && value_changed;
+		}
+	}
+	if (!saw_source_match &&
+			p_kind == opennova::mission::kEntityKindBuilding) {
+		for (KeyValue<int64_t, DestructionInstance> &kv :
+				destruction_instances_) {
+			if (kv.value.index != p_index) continue;
+			matched = true;
+			StaticTerrainShadowSource *replacement =
+					static_terrain_shadow_replacements_.getptr(kv.key);
+			const bool effective_active = kv.value.casts_static_shadow &&
+					(replacement != nullptr
+							? replacement->active
+							: !hidden_destruction_instances_.has(kv.key));
+			bool value_changed = false;
+			if (kv.value.xform != p_xform) {
+				kv.value.xform = p_xform;
+				value_changed = true;
+			}
+			if (replacement != nullptr) {
+				if (replacement->world_transform != p_xform) {
+					replacement->world_transform = p_xform;
+					value_changed = true;
+				}
+			}
+			observable_changed |= effective_active && value_changed;
+		}
+	}
+	if (observable_changed) _bump_static_terrain_shadow_source_revision();
+	return matched;
+}
+
+void MissionObjectPlacer::_static_shadow_bms_policy(int p_bms_id,
+		bool &r_represented, bool &r_policy_admitted,
+		bool &r_base_active) const {
+	r_represented = false;
+	r_policy_admitted = false;
+	r_base_active = false;
+	const Vector<int> *rows =
+			static_terrain_shadow_rows_by_bms_.getptr(p_bms_id);
+	if (rows == nullptr) return;
+	for (const int i : *rows) {
+		if (i < 0 || i >= static_terrain_shadow_sources_.size()) continue;
+		const StaticTerrainShadowSource &source =
+				static_terrain_shadow_sources_[i];
+		if (source.bms_id != p_bms_id) continue;
+		r_represented = true;
+		const bool admitted =
+				opennova::mission::item_casts_static_terrain_shadow(
+					source.entity_kind, source.entity_attrib,
+					source.item_attrib, source.item_attrib2);
+		r_policy_admitted |= admitted;
+		r_base_active |= admitted && source.active &&
+				!hidden_destruction_instances_.has(p_bms_id);
+	}
+}
+
+bool MissionObjectPlacer::set_static_terrain_shadow_replacement(
+		int p_bms_id, const String &p_graphic, const Transform3D &p_xform,
+		bool p_active) {
+	_check_epoch();
+	bool policy_admitted = false;
+	bool base_active = false;
+	bool represented = false;
+	_static_shadow_bms_policy(p_bms_id, represented, policy_admitted,
+			base_active);
+	bool source_exists = represented;
+	if (!represented) {
+		if (const DestructionInstance *instance =
+					destruction_instances_.getptr(p_bms_id)) {
+			source_exists = true;
+			policy_admitted = instance->casts_static_shadow;
+			base_active = policy_admitted &&
+					!hidden_destruction_instances_.has(p_bms_id);
+		}
+	}
+	if (p_bms_id == 0 || p_graphic.is_empty() || !source_exists) {
+		return false;
+	}
+	StaticTerrainShadowSource replacement;
+	replacement.bms_id = p_bms_id;
+	replacement.graphic = p_graphic;
+	replacement.world_transform = p_xform;
+	replacement.object_data = _load_object_data(p_graphic);
+	replacement.active = p_active && replacement.object_data.is_valid();
+	const StaticTerrainShadowSource *current =
+			static_terrain_shadow_replacements_.getptr(p_bms_id);
+	if (current != nullptr) {
+		if (current->graphic == replacement.graphic &&
+				current->world_transform == replacement.world_transform &&
+				current->object_data.ptr() == replacement.object_data.ptr() &&
+				current->active == replacement.active) {
+			return replacement.object_data.is_valid();
+		}
+	}
+	const bool was_effective = policy_admitted &&
+			(current != nullptr ? current->active : base_active);
+	const bool becomes_effective = policy_admitted && replacement.active;
+	static_terrain_shadow_replacements_[p_bms_id] = replacement;
+	if (was_effective || becomes_effective) {
+		_bump_static_terrain_shadow_source_revision();
+	}
+	return replacement.object_data.is_valid();
+}
+
+bool MissionObjectPlacer::clear_static_terrain_shadow_replacement(
+		int p_bms_id) {
+	_check_epoch();
+	const StaticTerrainShadowSource *replacement =
+			static_terrain_shadow_replacements_.getptr(p_bms_id);
+	if (replacement == nullptr) return false;
+	bool policy_admitted = false;
+	bool base_active = false;
+	bool represented = false;
+	_static_shadow_bms_policy(p_bms_id, represented, policy_admitted,
+			base_active);
+	if (!represented) {
+		if (const DestructionInstance *instance =
+					destruction_instances_.getptr(p_bms_id)) {
+			policy_admitted = instance->casts_static_shadow;
+			base_active = policy_admitted &&
+					!hidden_destruction_instances_.has(p_bms_id);
+		}
+	}
+	const bool was_effective = policy_admitted && replacement->active;
+	const bool becomes_effective = policy_admitted && base_active;
+	static_terrain_shadow_replacements_.erase(p_bms_id);
+	if (was_effective || becomes_effective) {
+		_bump_static_terrain_shadow_source_revision();
+	}
 	return true;
 }
 
@@ -1776,6 +2278,7 @@ bool MissionObjectPlacer::register_object_data(const String &p_graphic,
 		return false;
 	}
 	object_data_cache_[p_graphic] = p_data;
+	_bump_static_terrain_shadow_source_revision();
 	return true;
 }
 
@@ -1801,6 +2304,10 @@ bool MissionObjectPlacer::register_static_batches(const String &p_graphic,
 		retained_batch.offset = batch.get("offset", Transform3D());
 		retained_batch.submesh = int(batch.get("submesh", 0));
 		retained.push_back(retained_batch);
+		if (retained_batch.material.is_valid() &&
+				batch_materials_.find(retained_batch.material) < 0) {
+			batch_materials_.push_back(retained_batch.material);
+		}
 	}
 	static_batch_cache_[p_graphic] = retained;
 	return true;
@@ -1841,9 +2348,14 @@ bool MissionObjectPlacer::register_resolved_static_graphic(
 		retained_batch.offset = batch.get("offset", Transform3D());
 		retained_batch.submesh = int(batch.get("submesh", 0));
 		retained.push_back(retained_batch);
+		if (retained_batch.material.is_valid() &&
+				batch_materials_.find(retained_batch.material) < 0) {
+			batch_materials_.push_back(retained_batch.material);
+		}
 	}
 	object_data_cache_[p_graphic] = p_data;
 	static_batch_cache_[p_graphic] = retained;
+	_bump_static_terrain_shadow_source_revision();
 	return true;
 }
 

@@ -280,6 +280,16 @@ func is_splash_active() -> bool:
 	return _splash_state != SplashState.NONE
 
 
+## Leave the player-paced splash through the same closing-frame state machine
+## as a witnessed key/button press. Render probes use this public seam so they
+## never synthesize input or mistake the held loading background for gameplay.
+func dismiss_start_mission_splash() -> bool:
+	if _splash_state != SplashState.ACTIVE:
+		return false
+	_splash_exit_edge()
+	return true
+
+
 ## Public ADR-0018 read seam: the cursor-arrow art decoded (a miss degrades
 ## to an arrowless splash, mirroring the original's unguarded TGA load).
 func has_splash_arrow() -> bool:

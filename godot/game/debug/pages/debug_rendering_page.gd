@@ -20,6 +20,9 @@ var _renderer_label: Label
 var _viewport_label: Label
 var _viewport_debug_state: Label
 var _world_overlay_state: Label
+var _shadow_state: Label
+var _water_state: Label
+var _light_state: Label
 
 
 func page_id() -> StringName:
@@ -46,6 +49,30 @@ func _build() -> void:
 	_viewport_label.name = "ViewportInfo"
 	_viewport_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	add_child(_viewport_label)
+
+	var shadow_header := Label.new()
+	shadow_header.text = "Sun shadows"
+	add_child(shadow_header)
+	_shadow_state = Label.new()
+	_shadow_state.name = "ShadowState"
+	_shadow_state.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	add_child(_shadow_state)
+
+	var water_header := Label.new()
+	water_header.text = "Water mirror"
+	add_child(water_header)
+	_water_state = Label.new()
+	_water_state.name = "WaterMirrorState"
+	_water_state.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	add_child(_water_state)
+
+	var light_header := Label.new()
+	light_header.text = "Lights"
+	add_child(light_header)
+	_light_state = Label.new()
+	_light_state.name = "LightState"
+	_light_state.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	add_child(_light_state)
 
 	var view_label := Label.new()
 	view_label.text = "Viewport diagnostic"
@@ -94,6 +121,7 @@ func refresh() -> void:
 	var viewport := get_viewport()
 	if viewport == null:
 		_viewport_label.text = "No viewport."
+		_refresh_render_state()
 		_refresh_diagnostic_state()
 		return
 	var size := viewport.get_visible_rect().size
@@ -101,7 +129,100 @@ func refresh() -> void:
 		int(size.x), int(size.y), viewport.scaling_3d_scale,
 		str(viewport.msaa_3d),
 	]
+	_refresh_render_state()
 	_refresh_diagnostic_state()
+
+
+# One typed snapshot feeds the shadow/water/light readouts so the overlay
+# reports exactly what MCP captures and the fixture sidecars record.
+func _refresh_render_state() -> void:
+	var world := _ctx.world() if _ctx != null else null
+	if world == null or not world.is_loaded():
+		_shadow_state.text = "No loaded world."
+		_water_state.text = "No loaded world."
+		_light_state.text = "No loaded world."
+		return
+	var snapshot: GameRenderDiagnostics = world.get_render_diagnostics()
+	var value := snapshot.to_json_value()
+	var shadows: Dictionary = value.get("shadows", {})
+	var passes: Dictionary = value.get("passes", {})
+	_shadow_state.text = "%s\n%s\nShadow pass: %s" % [
+		_shadow_line("Dynamic", shadows.get("dynamic", {})),
+		_shadow_line("Static terrain", shadows.get("static_terrain", {})),
+		_pass_line(passes.get("root", {}), "shadow"),
+	]
+	var water: Dictionary = value.get("water", {})
+	if not bool(water.get("available", false)):
+		_water_state.text = "No water surface."
+	else:
+		var reflection: Dictionary = water.get("reflection", {})
+		var rtt_size: Vector2i = reflection.get("size", Vector2i.ZERO)
+		var above_v: Variant = water.get("camera_above")
+		var side := "camera above water" if bool(above_v) else (
+				"camera below water" if above_v != null else "no camera")
+		_water_state.text = "%s | RTT %d x %d | %s\nMirror pass: %s\nRoot pass: %s\n%s" % [
+			"Rendering" if bool(water.get("render_active", false))
+					else "Asleep",
+			rtt_size.x, rtt_size.y, side,
+			_pass_line(passes.get("water_reflection", {}), "visible"),
+			_pass_line(passes.get("root", {}), "visible"),
+			_mirror_population_line(world),
+		]
+	var lights: Dictionary = value.get("lights", {})
+	var effectworld: Dictionary = lights.get("effectworld", {})
+	_light_state.text = "%d active of %d (%d directional, %d omni, %d spot; %d shadowed)\nEffectWorld: %d/4 selected of %d queried (%d live)" % [
+		int(lights.get("active", 0)), int(lights.get("total_nodes", 0)),
+		int(lights.get("directional", 0)), int(lights.get("omni", 0)),
+		int(lights.get("spot", 0)), int(lights.get("shadowed", 0)),
+		int(effectworld.get("selected", 0)), int(effectworld.get("last_query", 0)),
+		int(effectworld.get("live", 0)),
+	]
+
+
+func _shadow_line(label: String, state: Dictionary) -> String:
+	if not bool(state.get("available", false)):
+		return "%s: absent" % label
+	if not bool(state.get("shadow_enabled", false)) \
+			or not bool(state.get("visible_in_tree", false)):
+		return "%s: off" % label
+	var direction: Vector3 = state.get("emission_direction", Vector3.ZERO)
+	return "%s: casting | dir (%.2f, %.2f, %.2f) | max %.0f m" % [
+		label, direction.x, direction.y, direction.z,
+		float(state.get("max_distance", 0.0)),
+	]
+
+
+func _pass_line(pass_state: Dictionary, kind: String) -> String:
+	if not bool(pass_state.get("available", false)):
+		return "unavailable"
+	return "%d objects | %d draws | %d prims" % [
+		int(pass_state.get(kind + "_objects", 0)),
+		int(pass_state.get(kind + "_draw_calls", 0)),
+		int(pass_state.get(kind + "_primitives", 0)),
+	]
+
+
+# Count the mission container's top-level draws by reflection population —
+# the placer's authored vehicle/Reflective admission made visible.
+func _mirror_population_line(world: GameWorld) -> String:
+	var container := world.get_node_or_null("MissionObjects")
+	if container == null:
+		return "No mission objects."
+	var mirrored := 0
+	var plain := 0
+	for child in container.get_children():
+		if child is MultiMeshInstance3D:
+			var layers := (child as MultiMeshInstance3D).layers
+			if (layers & Water.VISUAL_LAYER_WORLD) != 0:
+				mirrored += 1
+			elif (layers & Water.VISUAL_LAYER_WORLD_NO_MIRROR) != 0:
+				plain += 1
+		elif child is ObjectModel:
+			if bool((child as ObjectModel).get("mirror_reflected")):
+				mirrored += 1
+			else:
+				plain += 1
+	return "Population: %d reflected / %d plain draws" % [mirrored, plain]
 
 
 func _refresh_diagnostic_state() -> void:

@@ -191,6 +191,12 @@ func test_place_single_static_branch_builds_a_single_instance_batch() -> void:
 	root.set_root_dir(_abs("res://../fixtures/def"))
 	var placer := MissionObjectPlacer.create(root, item_db)
 	placer.edit_mode = true
+	var env_state := EnvLightState.new()
+	var dry_values := EnvLightValues.retail_noon_defaults()
+	var dry_fog := Vector3(0.71, 0.18, 0.33)
+	dry_values.fog_color = dry_fog
+	env_state.publish(dry_values)
+	placer.set_environment_state(env_state)
 	var parent := Node3D.new()
 	add_child_autofree(parent)
 	placer.place(mission, parent)
@@ -199,11 +205,13 @@ func test_place_single_static_branch_builds_a_single_instance_batch() -> void:
 	# Seed the static-batch cache so the static branch has geometry to instance.
 	var mesh := BoxMesh.new()
 	mesh.size = Vector3(2, 2, 2)
+	var batch_material := ShaderMaterial.new()
+	batch_material.shader = load("res://shaders/object/fixed/opaque.gdshader")
 	var offset := Transform3D(Basis(), Vector3(0, 1, 0))
 	var object_data := ObjectData.new()
 	assert_true(placer.register_resolved_static_graphic(
 			"StaticCrate1", object_data, [{
-		"mesh": mesh, "material": null, "offset": offset, "submesh": 0,
+		"mesh": mesh, "material": batch_material, "offset": offset, "submesh": 0,
 	}]))
 
 	var record := mission.add_entity(MissionData.KIND_ITEM, 105004, Vector3(3, 4, 5), Vector3.ZERO)
@@ -225,10 +233,12 @@ func test_place_single_static_branch_builds_a_single_instance_batch() -> void:
 	assert_eq(mmi.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_OFF,
 			"retail static batches receive dynamic silhouettes but never cast them")
 	assert_ne(mmi.layers & Water.VISUAL_LAYER_WORLD_NO_MIRROR, 0,
-			"a type=object entity rides the no-mirror layer (env #30: only "
-			+ "vehicles reflect [orig: Entity_InitFromModel @ 0x40e20a])")
+			"a batched non-vehicle item stays in the separately filtered entity "
+			+ "population [orig: Water_RenderReflectedWorldScene @ 0x5c857b -> "
+			+ "Terrain_RenderSectorEntities; collection wrapper @ 0x5c90a0 -> "
+			+ "collectors @ 0x5c6f20/@0x5c8c60; flag writer @ 0x40e208]")
 	assert_eq(mmi.layers & Water.VISUAL_LAYER_WORLD, 0,
-			"the non-vehicle batch leaves the mirror-visible world layer")
+			"presentation batching does not promote an item into the sector-building pass")
 	var mm: MultiMesh = rec["mm"]
 	assert_eq(mm.instance_count, 1, "the new static gets its own single-instance MultiMesh")
 	assert_true((rec["mmi"] as MultiMeshInstance3D).is_inside_tree(), "the batch instance is in the container")
@@ -241,6 +251,27 @@ func test_place_single_static_branch_builds_a_single_instance_batch() -> void:
 	# record rather than the MultiMesh. Render fidelity is validated against real assets
 	# out-of-band; here the placed entity's position is already pinned by the controller tests.
 	assert_eq(rec["offset"], offset, "the record carries the batch offset the drag path rewrites through")
+	placer.update_environment()
+	var batch_fog: Variant = batch_material.get_shader_parameter("u_fog_color")
+	assert_not_null(batch_fog,
+			"registered production-equivalent batches retain their material for relighting")
+	if batch_fog == null:
+		return
+	assert_true(Vector3(batch_fog)
+			.is_equal_approx(dry_fog),
+			"the retained static-batch material consumes the shared environment")
+	var underwater_values := EnvLightValues.retail_noon_defaults()
+	var underwater_fog := Vector3(0.03, 0.14, 0.08)
+	underwater_values.fog_color = underwater_fog
+	underwater_values.fog_end = 24.0
+	underwater_values.fog_type = 1
+	env_state.publish(underwater_values)
+	placer.update_environment()
+	assert_true(Vector3(batch_material.get_shader_parameter("u_fog_color"))
+			.is_equal_approx(underwater_fog),
+			"pose refresh can restamp a static batch to the selected underwater payload")
+	assert_almost_eq(float(batch_material.get_shader_parameter("u_fog_end")), 24.0, 0.001)
+	assert_eq(int(batch_material.get_shader_parameter("u_fog_type")), 1)
 
 	# The batch has no per-entity Node3D, but mission-start item effects still
 	# receive one immutable value descriptor for the successfully rendered entity.
@@ -333,8 +364,10 @@ func test_place_single_static_caster_reuses_its_visible_instance() -> void:
 	assert_eq(visible_batch.layers,
 			Water.VISUAL_LAYER_WORLD_NO_MIRROR \
 			| Water.VISUAL_LAYER_STATIC_SHADOW_CASTER,
-			"the one visible draw also enters the isolated static-caster pass "
-			+ "(non-vehicle: the no-mirror world layer, env #30)")
+			"the one visible draw also enters the isolated static-caster pass; "
+			+ "a building without the authored Reflective attribute stays out "
+			+ "of the above-water mirror [orig: Entity_SpawnFromBMSRecord "
+			+ "@ 0x40ed1d..0x40ed2b; collector mask @ 0x5c90a0]")
 	assert_eq(visible_batch.cast_shadow,
 			GeometryInstance3D.SHADOW_CASTING_SETTING_ON)
 	assert_null(container.get_node_or_null(
@@ -389,6 +422,10 @@ func test_all_eligible_static_batch_reuses_its_visible_instance_as_caster() -> v
 	assert_false(mission.add_entity(
 			MissionData.KIND_BUILDING, 105004,
 			Vector3(4, 5, 6), Vector3.ZERO).is_empty())
+	assert_true(mission.set_entity_property_int(
+			MissionData.KIND_BUILDING, 0, "team", 1))
+	assert_true(mission.set_entity_property_int(
+			MissionData.KIND_BUILDING, 1, "team", 2))
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
 	var root := ResourceRoot.new()
@@ -413,28 +450,45 @@ func test_all_eligible_static_batch_reuses_its_visible_instance_as_caster() -> v
 		assert_eq(visible_batch.layers,
 				Water.VISUAL_LAYER_WORLD_NO_MIRROR \
 				| Water.VISUAL_LAYER_STATIC_SHADOW_CASTER,
-				"the visible batch joins the isolated static-caster layer "
-				+ "(non-vehicle: the no-mirror world layer, env #30)")
+				"the visible batch joins the isolated static-caster layer; "
+				+ "plain buildings stay out of the above-water mirror "
+				+ "(no authored Reflective attribute)")
 		assert_eq(visible_batch.cast_shadow,
 				GeometryInstance3D.SHADOW_CASTING_SETTING_ON,
 				"the visible batch supplies the static silhouette")
+		var expected_bms_ids: Array = []
+		for index in range(2):
+			expected_bms_ids.append(int(mission.get_entity(
+					MissionData.KIND_BUILDING, index).get("bms_id", 0)))
+		assert_eq(visible_batch.get_meta("static_shadow_bms_ids"),
+				expected_bms_ids,
+				"scratch attribution retains exact slot identity without changing geometry")
+		assert_eq(visible_batch.get_meta("static_shadow_slots"), [true, true])
 	assert_null(container.get_node_or_null("StaticShadow_StaticCrate1_0"),
 			"an all-eligible batch needs no shadow-only duplicate")
+	var shadow_sources := placer.get_static_terrain_shadow_source_diagnostics()
+	assert_eq(shadow_sources.size(), 2)
+	assert_eq(int((shadow_sources[0] as Dictionary).get("team", -1)), 1,
+			"the typed caster snapshot retains TEX_TEAM input for frame selection")
+	assert_eq(int((shadow_sources[1] as Dictionary).get("team", -1)), 2)
 
 
 func test_mixed_static_batch_keeps_a_filtered_shadow_only_duplicate() -> void:
-	# The two mission pools share one graphic here, but only the building is
-	# admitted to retail's terrain-tile shadow pass. A visible batch cannot
-	# express that per-instance difference, so this case still needs a parallel
-	# MultiMesh with the ineligible slot zero-scaled.
+	# Both instances are sector buildings (and therefore share reflection
+	# admission), but the second carries the BMS NoShadow flag. A visible batch
+	# cannot express that per-instance shadow difference, so this case still
+	# needs a parallel MultiMesh with the ineligible slot zero-scaled.
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	assert_false(mission.add_entity(
 			MissionData.KIND_BUILDING, 105004,
 			Vector3(1, 2, 3), Vector3.ZERO).is_empty())
 	assert_false(mission.add_entity(
-			MissionData.KIND_ITEM, 105004,
+			MissionData.KIND_BUILDING, 105004,
 			Vector3(4, 5, 6), Vector3.ZERO).is_empty())
+	assert_true(mission.set_entity_property_int(
+			MissionData.KIND_BUILDING, 1, "ai_flags", 0x01000000),
+			"the second building carries the witnessed BMS NoShadow gate")
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
 	var root := ResourceRoot.new()
@@ -461,7 +515,8 @@ func test_mixed_static_batch_keeps_a_filtered_shadow_only_duplicate() -> void:
 			"mixed admission retains a filtered shadow-only batch")
 	if visible_batch != null:
 		assert_eq(visible_batch.layers, Water.VISUAL_LAYER_WORLD_NO_MIRROR,
-				"non-vehicle: the no-mirror world layer (env #30)")
+				"plain buildings render outside the above-water mirror "
+				+ "(reflection requires the authored Reflective attribute)")
 		assert_eq(visible_batch.cast_shadow,
 				GeometryInstance3D.SHADOW_CASTING_SETTING_OFF)
 	if shadow_batch != null:
@@ -474,22 +529,290 @@ func test_mixed_static_batch_keeps_a_filtered_shadow_only_duplicate() -> void:
 					"the filtered caster owns transforms independent of the visible batch")
 		assert_eq(shadow_batch.multimesh.instance_count, 2,
 				"slot identity stays parallel for destruction updates")
-	var building_record: Dictionary = {}
-	var item_record: Dictionary = {}
+	var eligible_record: Dictionary = {}
+	var ineligible_record: Dictionary = {}
+	for record_v in placer.pickable_records:
+		var record: Dictionary = record_v
+		if int(record.get("kind", -1)) != MissionData.KIND_BUILDING:
+			continue
+		if int(record.get("index", -1)) == 0:
+			eligible_record = record
+		elif int(record.get("index", -1)) == 1:
+			ineligible_record = record
+	var expected_shadow_mm := shadow_batch.multimesh \
+			if shadow_batch != null else null
+	assert_same(eligible_record.get("shadow_mm"), expected_shadow_mm,
+			"editor records move the eligible parallel caster with its visible slot")
+	assert_true(bool(eligible_record.get("casts_static_shadow", false)))
+	assert_same(ineligible_record.get("shadow_mm"), expected_shadow_mm)
+	assert_false(bool(ineligible_record.get("casts_static_shadow", true)),
+			"moving an ineligible peer keeps its parallel slot zero-scaled")
+
+
+func test_shared_graphic_splits_authored_reflective_from_plain_reflection() -> void:
+	# Godot MultiMeshes are grouped by graphic, but retail's above-water mirror
+	# admits exactly the records whose entity carries flag 0x400: vehicles by
+	# item type, otherwise the mission-authored BMS Reflective attribute
+	# (shipped missions author it per record — CP01 has the same building
+	# graphic placed both ways). A plain record that shares a graphic with an
+	# authored-Reflective one must not hitchhike into the RTT.
+	# [orig: Entity_SpawnFromBMSRecord @ 0x40ed1d..0x40ed2b (BMS attrib
+	# 0x800000 -> flags 0x400); Terrain_CollectVisibleEntitiesForReflection
+	# @ 0x5c90a0 mask 0x400 above water -> collect_visible_sector_userpoints
+	# @ 0x5c6c32 + collectors @ 0x5c6f20/@0x5c8c60; vehicle writer @ 0x40e208]
+	var mission := MissionData.new()
+	assert_eq(mission.create_default(), OK)
+	var building_entity := mission.add_entity(
+			MissionData.KIND_BUILDING, 105004,
+			Vector3(1, 2, 3), Vector3.ZERO)
+	var item_entity := mission.add_entity(
+			MissionData.KIND_ITEM, 105004,
+			Vector3(4, 5, 6), Vector3.ZERO)
+	assert_false(building_entity.is_empty())
+	assert_false(item_entity.is_empty())
+	assert_true(mission.set_entity_property_int(
+			MissionData.KIND_BUILDING, 0, "ai_flags", 0x00800000),
+			"the building authors the witnessed BMS Reflective attribute")
+	var building_bms_id := int(building_entity.get("bms_id", 0))
+	var item_bms_id := int(item_entity.get("bms_id", 0))
+	assert_ne(building_bms_id, 0)
+	assert_ne(item_bms_id, 0)
+	var item_db := ItemDatabase.new()
+	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
+	var root := ResourceRoot.new()
+	root.set_root_dir(_abs("res://../fixtures/def"))
+	var placer := MissionObjectPlacer.create(root, item_db)
+	placer.edit_mode = true
+	assert_true(placer.register_resolved_static_graphic(
+			"StaticCrate1", ObjectData.new(), [{
+				"mesh": BoxMesh.new(), "material": null,
+				"offset": Transform3D.IDENTITY, "submesh": 0,
+			}]))
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+
+	placer.place(mission, parent)
+
+	var building_batch: MultiMeshInstance3D = null
+	var item_batch: MultiMeshInstance3D = null
 	for record_v in placer.pickable_records:
 		var record: Dictionary = record_v
 		if int(record.get("kind", -1)) == MissionData.KIND_BUILDING:
-			building_record = record
+			building_batch = record.get("mmi") as MultiMeshInstance3D
 		elif int(record.get("kind", -1)) == MissionData.KIND_ITEM:
-			item_record = record
-	var expected_shadow_mm := shadow_batch.multimesh \
-			if shadow_batch != null else null
-	assert_same(building_record.get("shadow_mm"), expected_shadow_mm,
-			"editor records move the eligible parallel caster with its visible slot")
-	assert_true(bool(building_record.get("casts_static_shadow", false)))
-	assert_same(item_record.get("shadow_mm"), expected_shadow_mm)
-	assert_false(bool(item_record.get("casts_static_shadow", true)),
-			"moving an ineligible peer keeps its parallel slot zero-scaled")
+			item_batch = record.get("mmi") as MultiMeshInstance3D
+	assert_not_null(building_batch)
+	assert_not_null(item_batch)
+	assert_ne(building_batch, item_batch,
+			"opposite retail populations cannot share one layer-masked MultiMesh")
+	if building_batch != null:
+		assert_ne(building_batch.layers & Water.VISUAL_LAYER_WORLD, 0,
+				"the authored-Reflective record enters the mirror population")
+		assert_eq(building_batch.multimesh.instance_count, 1,
+				"only the authored record occupies the mirror-visible batch")
+	if item_batch != null:
+		assert_ne(item_batch.layers & Water.VISUAL_LAYER_WORLD_NO_MIRROR, 0,
+				"the plain record remains outside the above-water RTT")
+		assert_eq(item_batch.layers & Water.VISUAL_LAYER_WORLD, 0)
+		assert_eq(item_batch.multimesh.instance_count, 1,
+				"only the plain record occupies the main-scene-only batch")
+	var building_batch_key := placer.get_static_instance_batch_key(
+			building_bms_id)
+	var item_batch_key := placer.get_static_instance_batch_key(item_bms_id)
+	assert_false(building_batch_key.is_empty())
+	assert_false(item_batch_key.is_empty())
+	assert_ne(building_batch_key, item_batch_key,
+			"destruction routing retains the reflection-population split")
+	assert_false(placer.hide_static_instance(building_bms_id) == null)
+	assert_true(placer.is_static_instance_hidden(building_bms_id))
+	assert_false(placer.is_static_instance_hidden(item_bms_id),
+			"carving the building population leaves its same-graphic item live")
+	assert_true(placer.show_static_instance(building_bms_id))
+	assert_false(placer.hide_static_instance(item_bms_id) == null)
+	assert_true(placer.is_static_instance_hidden(item_bms_id))
+	assert_false(placer.is_static_instance_hidden(building_bms_id),
+			"carving the item population leaves its same-graphic building live")
+	assert_true(placer.show_static_instance(item_bms_id))
+	assert_true(placer.static_instance_is_mirror_reflected(building_bms_id),
+			"destruction bookkeeping carries the authored reflection policy")
+	assert_false(placer.static_instance_is_mirror_reflected(item_bms_id))
+
+
+func test_manual_static_instance_publishes_typed_terrain_shadow_source() -> void:
+	var placer := MissionObjectPlacer.create(null, null)
+	var data := ObjectData.new()
+	assert_true(placer.register_object_data("House", data))
+	var source_revision := placer.get_static_terrain_shadow_source_revision()
+	var xform := Transform3D(Basis.from_euler(Vector3(0.1, 0.2, 0.3)),
+			Vector3(12, 34, -56))
+	placer.register_static_instance(100, "House", 0, xform, true)
+	assert_gt(placer.get_static_terrain_shadow_source_revision(), source_revision)
+	source_revision = placer.get_static_terrain_shadow_source_revision()
+
+	var rows: Array = placer.get_static_terrain_shadow_source_diagnostics()
+	assert_eq(rows.size(), 1,
+			"the deterministic registration seam feeds the page-shadow provider")
+	if rows.is_empty():
+		return
+	var row: Dictionary = rows[0]
+	assert_eq(int(row.get("bms_id", 0)), 100)
+	assert_eq(String(row.get("graphic", "")), "House")
+	assert_eq(int(row.get("entity_kind", -1)), MissionData.KIND_BUILDING,
+			"manual admitted casters use the collector's building policy")
+	assert_eq(row.get("world_transform", Transform3D()), xform)
+	assert_same(row.get("object_data"), data,
+			"geometry resolution retains the injected ObjectData identity")
+	assert_true(bool(row.get("active", false)))
+	var moved := Transform3D(Basis(), Vector3(-4, 8, 16))
+	assert_true(placer.update_static_terrain_shadow_source_transform(
+			MissionData.KIND_BUILDING, 0, moved))
+	assert_gt(placer.get_static_terrain_shadow_source_revision(), source_revision)
+	source_revision = placer.get_static_terrain_shadow_source_revision()
+	assert_true(placer.update_static_terrain_shadow_source_transform(
+			MissionData.KIND_BUILDING, 0, moved),
+			"an admitted source remains addressable when its pose is unchanged")
+	assert_eq(placer.get_static_terrain_shadow_source_revision(), source_revision,
+			"re-presenting an identical transform must not invalidate terrain pages")
+	rows = placer.get_static_terrain_shadow_source_diagnostics()
+	assert_eq((rows[0] as Dictionary).get("world_transform"), moved,
+			"editor/settling writes advance the typed source transform")
+
+	assert_false(placer.hide_static_instance(100) == null)
+	assert_gt(placer.get_static_terrain_shadow_source_revision(), source_revision)
+	source_revision = placer.get_static_terrain_shadow_source_revision()
+	rows = placer.get_static_terrain_shadow_source_diagnostics()
+	assert_false(bool((rows[0] as Dictionary).get("active", true)),
+			"a carved static stops contributing to subsequently composed pages")
+	assert_true(placer.show_static_instance(100))
+	assert_gt(placer.get_static_terrain_shadow_source_revision(), source_revision)
+	source_revision = placer.get_static_terrain_shadow_source_revision()
+	rows = placer.get_static_terrain_shadow_source_diagnostics()
+	assert_true(bool((rows[0] as Dictionary).get("active", false)),
+			"restoring the static re-admits its page projection")
+
+	var husk_data := ObjectData.new()
+	assert_true(placer.register_object_data("HouseHusk", husk_data))
+	var alternate_husk_data := ObjectData.new()
+	assert_true(placer.register_object_data("HouseHuskDamaged", alternate_husk_data))
+	var husk_xform := Transform3D(Basis(), Vector3(7, 9, 11))
+	assert_true(placer.set_static_terrain_shadow_replacement(
+			100, "HouseHusk", husk_xform, true))
+	assert_gt(placer.get_static_terrain_shadow_source_revision(), source_revision)
+	source_revision = placer.get_static_terrain_shadow_source_revision()
+	rows = placer.get_static_terrain_shadow_source_diagnostics()
+	row = rows[0]
+	assert_eq(String(row.get("graphic", "")), "HouseHusk")
+	assert_same(row.get("object_data"), husk_data,
+			"destruction swaps the provider to current husk geometry")
+	assert_eq(row.get("world_transform"), husk_xform)
+	assert_true(placer.set_static_terrain_shadow_replacement(
+			100, "HouseHusk", husk_xform, true))
+	assert_eq(placer.get_static_terrain_shadow_source_revision(), source_revision,
+			"the per-present husk publication is idempotent")
+	var settled_husk := Transform3D(Basis(), Vector3(8, 9, 11))
+	assert_true(placer.update_static_terrain_shadow_source_transform(
+			MissionData.KIND_BUILDING, 0, settled_husk))
+	assert_gt(placer.get_static_terrain_shadow_source_revision(), source_revision,
+			"a real settling transform advances the replacement source")
+	source_revision = placer.get_static_terrain_shadow_source_revision()
+	rows = placer.get_static_terrain_shadow_source_diagnostics()
+	assert_eq((rows[0] as Dictionary).get("world_transform"), settled_husk,
+			"live registry transforms override the original husk-placement snapshot")
+	assert_true(placer.set_static_terrain_shadow_replacement(
+			100, "HouseHuskDamaged", settled_husk, true))
+	assert_gt(placer.get_static_terrain_shadow_source_revision(), source_revision,
+			"a genuine replacement graphic/identity change invalidates pages")
+	source_revision = placer.get_static_terrain_shadow_source_revision()
+	assert_true(placer.set_static_terrain_shadow_replacement(
+			100, "HouseHuskDamaged", settled_husk, false))
+	assert_gt(placer.get_static_terrain_shadow_source_revision(), source_revision,
+			"a genuine caster-admission change invalidates pages")
+	source_revision = placer.get_static_terrain_shadow_source_revision()
+	assert_true(placer.set_static_terrain_shadow_replacement(
+			100, "HouseHuskDamaged", settled_husk, false))
+	assert_eq(placer.get_static_terrain_shadow_source_revision(), source_revision,
+			"repeating the inactive replacement state is idempotent too")
+	var inactive_move := Transform3D(Basis(), Vector3(8, 10, 11))
+	assert_true(placer.update_static_terrain_shadow_source_transform(
+			MissionData.KIND_BUILDING, 0, inactive_move))
+	assert_eq(placer.get_static_terrain_shadow_source_revision(), source_revision,
+			"an inactive replacement tracks pose without invalidating pages")
+	rows = placer.get_static_terrain_shadow_source_diagnostics()
+	assert_eq((rows[0] as Dictionary).get("world_transform"), inactive_move)
+	assert_true(placer.set_static_terrain_shadow_replacement(
+			100, "HouseHuskDamaged", inactive_move, true))
+	assert_gt(placer.get_static_terrain_shadow_source_revision(), source_revision,
+			"re-admitting the current husk pose invalidates pages")
+	source_revision = placer.get_static_terrain_shadow_source_revision()
+	assert_true(placer.set_static_terrain_shadow_replacement(
+			100, "HouseHuskDamaged", inactive_move, false))
+	assert_gt(placer.get_static_terrain_shadow_source_revision(), source_revision)
+	source_revision = placer.get_static_terrain_shadow_source_revision()
+	assert_true(placer.clear_static_terrain_shadow_replacement(100))
+	assert_gt(placer.get_static_terrain_shadow_source_revision(), source_revision)
+	rows = placer.get_static_terrain_shadow_source_diagnostics()
+	assert_eq(String((rows[0] as Dictionary).get("graphic", "")), "House")
+
+
+func test_rejected_static_source_updates_do_not_advance_the_page_revision() -> void:
+	var placer := MissionObjectPlacer.new()
+	assert_true(placer.register_object_data("NoShadow", ObjectData.new()))
+	assert_true(placer.register_object_data("NoShadowHusk", ObjectData.new()))
+	placer.register_static_instance(200, "NoShadow", 3,
+			Transform3D.IDENTITY, false)
+	var revision := placer.get_static_terrain_shadow_source_revision()
+	var moved := Transform3D(Basis.IDENTITY, Vector3(1, 2, 3))
+	assert_true(placer.update_static_terrain_shadow_source_transform(
+			MissionData.KIND_BUILDING, 3, moved))
+	assert_eq(placer.get_static_terrain_shadow_source_revision(), revision,
+			"a rejected source may track pose without dirtying terrain pages")
+	assert_true(placer.set_static_terrain_shadow_replacement(
+			200, "NoShadowHusk", moved, true))
+	assert_eq(placer.get_static_terrain_shadow_source_revision(), revision,
+			"a replacement cannot admit a source vetoed by base policy")
+	assert_true(placer.clear_static_terrain_shadow_replacement(200))
+	assert_eq(placer.get_static_terrain_shadow_source_revision(), revision,
+			"clearing an unobservable replacement is revision-stable")
+
+
+func test_authored_reflective_pool1_item_enters_the_mirror_population() -> void:
+	# CP01 authors Reflective on plain pool-1 items too (five records), so the
+	# attribute path must not be building-specific.
+	# [orig: Entity_SpawnFromBMSRecord @ 0x40ed1d..0x40ed2b maps the record
+	# attribute for every spawned pool]
+	var mission := MissionData.new()
+	assert_eq(mission.create_default(), OK)
+	assert_false(mission.add_entity(
+			MissionData.KIND_ITEM, 105004,
+			Vector3(1, 2, 3), Vector3.ZERO).is_empty())
+	assert_true(mission.set_entity_property_int(
+			MissionData.KIND_ITEM, 0, "ai_flags", 0x00800000))
+	var item_db := ItemDatabase.new()
+	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
+	var root := ResourceRoot.new()
+	root.set_root_dir(_abs("res://../fixtures/def"))
+	var placer := MissionObjectPlacer.create(root, item_db)
+	placer.edit_mode = true
+	assert_true(placer.register_resolved_static_graphic(
+			"StaticCrate1", ObjectData.new(), [{
+				"mesh": BoxMesh.new(), "material": null,
+				"offset": Transform3D.IDENTITY, "submesh": 0,
+			}]))
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+
+	placer.place(mission, parent)
+
+	var batch: MultiMeshInstance3D = null
+	for record_v in placer.pickable_records:
+		var record: Dictionary = record_v
+		if int(record.get("kind", -1)) == MissionData.KIND_ITEM:
+			batch = record.get("mmi") as MultiMeshInstance3D
+	assert_not_null(batch)
+	if batch != null:
+		assert_ne(batch.layers & Water.VISUAL_LAYER_WORLD, 0,
+				"an authored-Reflective pool-1 item reflects above water")
+		assert_eq(batch.layers & Water.VISUAL_LAYER_WORLD_NO_MIRROR, 0)
 
 
 func test_individual_building_gets_an_unmasked_static_shadow_sibling() -> void:
@@ -502,6 +825,9 @@ func test_individual_building_gets_an_unmasked_static_shadow_sibling() -> void:
 	assert_false(mission.add_entity(
 			MissionData.KIND_BUILDING, 102001,
 			Vector3(3, 4, 5), Vector3.ZERO).is_empty())
+	assert_true(mission.set_entity_property_int(
+			MissionData.KIND_BUILDING, 0, "ai_flags", 0x00800000),
+			"this building authors the BMS Reflective attribute")
 	var item_db := ItemDatabase.new()
 	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
 	var root := ResourceRoot.new()
@@ -523,6 +849,11 @@ func test_individual_building_gets_an_unmasked_static_shadow_sibling() -> void:
 	var container := parent.get_node_or_null("MissionObjects")
 	var visible_model := container.get_node_or_null("Anim_GuardTwr1_0")
 	assert_not_null(visible_model)
+	if visible_model != null:
+		assert_true(bool(visible_model.get("mirror_reflected")),
+				"the authored Reflective attribute keeps an individual "
+				+ "building in the mirror population "
+				+ "[orig: Entity_SpawnFromBMSRecord @ 0x40ed1d..0x40ed2b]")
 	var static_shadow := visible_model.get_node_or_null(
 			"StaticShadow_GuardTwr1_live0_0") as MultiMeshInstance3D
 	assert_not_null(static_shadow,

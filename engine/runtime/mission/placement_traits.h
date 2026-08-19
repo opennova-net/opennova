@@ -27,6 +27,9 @@ inline constexpr uint32_t kItemAttribNoShadow = 0x04000000u;
 inline constexpr uint32_t kItemAttrib2DynamicShadow = 0x10u;
 inline constexpr uint32_t kItemAttrib2StaticShadow = 0x20u;
 inline constexpr uint32_t kEntityAttribNoShadow = 0x01000000u;
+// The authored per-record reflect bit (formats/mission
+// bms::BmsiAttributeFlags::Reflective).
+inline constexpr uint32_t kEntityAttribMirrorReflect = 0x00800000u;
 
 // Runtime-only player type id -> the authored items.def visual item. The
 // runtime entity item/type id stays unchanged; this only chooses
@@ -70,12 +73,29 @@ inline bool item_casts_static_terrain_shadow(int entity_kind,
 					(item_attrib2 & kItemAttrib2StaticShadow) != 0);
 }
 
-// Witnessed water-mirror eligibility (env #30): the reflection collects only
-// ItemDefType==vehicle entities above water [orig: Entity_InitFromModel
-// @ 0x40e20a sets entity+36 flag 0x400 iff ItemDefType(+0x5C)==1;
-// Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0 filters on it].
+// Witnessed water-mirror eligibility (env #30): every reflected-world leg —
+// the sector-model (building) pass AND the entity waves — draws only records
+// whose visibility collection passed the above-water filterMask 0x400 against
+// entity+36; a below-water view collects unfiltered. Flag 0x400 has exactly
+// two writers: vehicles by item type, and the mission-authored per-record
+// Reflective attribute (any pool — shipped missions author it on buildings
+// and static items). [orig: Terrain_CollectVisibleEntitiesForReflection
+// @ 0x5c90a0 (mask = below-water ? 0 : 0x400) -> collect_visible_sector_
+// userpoints @ 0x5c6c32..0x5c6c39 + Terrain_CollectVisibleEntities_0
+// @ 0x5c6f20 + collect_visible_entities_for_terrain @ 0x5c8c60 pools 0/1;
+// consumed by Water_RenderReflectedWorldScene @ 0x5c8510 (sector models
+// @ 0x5c8576 -> Terrain_RenderSectorModels @ 0x5c5d30, entity waves
+// @ 0x5c857b/0x5c8590/0x5c8599); writers Entity_InitFromModel
+// @ 0x40e208..0x40e20a (ItemDefType(+0x5C)==1) and Entity_SpawnFromBMSRecord
+// @ 0x40ed1d..0x40ed2b (BMS attrib 0x800000 -> flags 0x400)].
 inline bool item_is_mirror_reflected(int item_type) {
 	return item_type == kItemTypeVehicle;
+}
+
+inline bool placement_is_mirror_reflected(uint32_t entity_attrib,
+		int item_type) {
+	return item_is_mirror_reflected(item_type) ||
+			(entity_attrib & kEntityAttribMirrorReflect) != 0;
 }
 
 

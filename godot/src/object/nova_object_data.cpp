@@ -246,12 +246,17 @@ uint8_t ObjectData::_normalize_oed_update_mask(int p_update_mask) const {
 	return update_mask;
 }
 
+std::atomic<uint64_t> ObjectData::global_change_counter_{0};
+
 void ObjectData::_notify_object_changed(uint8_t p_update_mask) {
 	// Every document mutation (all OED setters, opens, LOD/scene swaps) funnels
 	// through here or _clear() — the memoized submesh builds die with the data
 	// they were built from, and the PANM frame cache re-arms a full re-apply.
 	submesh_cache.clear();
 	_invalidate_panm_cache();
+	++change_revision_;
+	if (change_revision_ == 0) ++change_revision_;
+	global_change_counter_.fetch_add(1, std::memory_order_relaxed);
 	last_oed_update_mask = p_update_mask & UPDATE_ALL;
 	_mark_oed_dirty(p_update_mask);
 	emit_signal("object_changed");

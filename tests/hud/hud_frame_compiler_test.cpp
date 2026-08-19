@@ -575,6 +575,33 @@ void test_spinmap_projection_zoom_and_clip() {
 			"the corner stencil reaches the probed retail backing-ring radius");
 }
 
+// A mission-yaw -90 camera faces west. The registered retail full-frame
+// witness for 00tra-fire-barrel-full-composite-retail (image sha256
+// 6211fe22a5ebb51178ff8253941cfd98795afce370351d407a354015679c6306)
+// consequently places W at twelve o'clock. Engine heading is 90-yaw, hence
+// 0x80000000 here. HudMapSprite::rotation_rad is consumed in screen space
+// (+Y down), so the left-side W glyph reaches the top at +pi/2.
+void test_spinmap_compass_screen_rotation_matches_retail_heading() {
+	HudMinimapInput input;
+	input.rect_x1 = 810.0f;
+	input.rect_y1 = 552.0f;
+	input.rect_x2 = 1020.0f;
+	input.rect_y2 = 762.0f;
+	input.player_heading_bam = static_cast<int32_t>(0x80000000u);
+
+	HudMinimapCompiler compiler;
+	const auto &map = compiler.compile(input);
+	const opennova::hud::HudMapSprite *compass = nullptr;
+	for (const auto &sprite : map.sprites) {
+		if (sprite.texture == 1) compass = &sprite;
+	}
+	CHECK(compass != nullptr, "the corner spinmap compiles its compass ring");
+	CHECK(compass != nullptr &&
+			std::fabs(compass->rotation_rad -
+					static_cast<float>(3.14159265358979323846 / 2.0)) < 1e-4f,
+			"mission yaw -90 puts W at twelve o'clock like retail");
+}
+
 void test_spinmap_mesh_layers_and_waypoint(const fnt_font_t *font) {
 	HudFrameCompiler compiler;
 	HudLayout layout;
@@ -1122,6 +1149,7 @@ int main() {
 	test_compiler_crosshair(&font);
 	test_compiler_hud_color_schemes(&font);
 	test_spinmap_projection_zoom_and_clip();
+	test_spinmap_compass_screen_rotation_matches_retail_heading();
 	test_spinmap_mesh_layers_and_waypoint(&font);
 	test_compiler_friendly_tags(&font);
 	test_compiler_label_fonts(&font);

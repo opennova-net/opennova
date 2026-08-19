@@ -40,8 +40,23 @@ static func capture(
 	var tree := Engine.get_main_loop() as SceneTree
 	if tree == null:
 		return { "ok": false, "error": "No scene tree to await frames on." }
-	var drawn := { "done": false }
-	var on_draw := func() -> void: drawn["done"] = true
+	# Internal callers may provide a read-only frame probe. Sample it inside the
+	# completed-draw signal rather than after process_frame resumes: the latter
+	# can already carry the next process serial even though the texture still
+	# contains the preceding completed draw.
+	var frame_probe: Variant = opts.get("_frame_probe")
+	var drawn := {
+		"done": false,
+		"process_frame": -1,
+		"captured_at_ticks_usec": -1,
+		"probe_value": null,
+	}
+	var on_draw := func() -> void:
+		drawn["done"] = true
+		drawn["process_frame"] = Engine.get_process_frames()
+		drawn["captured_at_ticks_usec"] = Time.get_ticks_usec()
+		if frame_probe is Callable and (frame_probe as Callable).is_valid():
+			drawn["probe_value"] = (frame_probe as Callable).call()
 	RenderingServer.frame_post_draw.connect(on_draw, Object.CONNECT_ONE_SHOT)
 	var frames := 0
 	while not drawn["done"] and frames < DRAW_TIMEOUT_FRAMES \
@@ -64,7 +79,14 @@ static func capture(
 	if region_control is Control and is_instance_valid(region_control):
 		opts = opts.duplicate()
 		opts["region"] = region_for_control(region_control, image.get_size())
-	return encode(image, opts)
+	var encoded := encode(image, opts)
+	if bool(encoded.get("ok", false)):
+		encoded["process_frame"] = int(drawn["process_frame"])
+		encoded["captured_at_ticks_usec"] = int(
+				drawn["captured_at_ticks_usec"])
+		if frame_probe is Callable:
+			encoded["frame_probe_value"] = drawn["probe_value"]
+	return encoded
 
 
 static func _cancel_requested(source: Callable) -> bool:
@@ -86,14 +108,18 @@ static func encode(image: Image, opts := {}) -> Dictionary:
 		# get_region copies; without a crop, duplicate so resize/convert below
 		# never mutate the caller's image.
 		image = image.duplicate()
-	var max_dim := clampi(int(opts.get("max_dim", DEFAULT_MAX_DIM)), MIN_DIM, MAX_DIM)
-	_shrink_to(image, max_dim)
+	var preserve_size := bool(opts.get("preserve_size", false))
+	if not preserve_size:
+		var max_dim := clampi(int(opts.get("max_dim", DEFAULT_MAX_DIM)), MIN_DIM, MAX_DIM)
+		_shrink_to(image, max_dim)
 	if image.get_format() != Image.FORMAT_RGBA8:
 		image.convert(Image.FORMAT_RGBA8)
 	var format := String(opts.get("format", "webp"))
 	var quality := clampf(float(opts.get("quality", DEFAULT_QUALITY)), 0.1, 1.0)
 	var encoded := _compress(image, format, quality)
-	if (encoded["bytes"] as PackedByteArray).size() > SIZE_RETRY_BYTES and format != "png":
+	if not preserve_size \
+			and (encoded["bytes"] as PackedByteArray).size() > SIZE_RETRY_BYTES \
+			and format != "png":
 		_shrink_to(image, maxi(int(image.get_width() * 0.75), MIN_DIM))
 		encoded = _compress(image, format, minf(quality, 0.6))
 	var bytes: PackedByteArray = encoded["bytes"]

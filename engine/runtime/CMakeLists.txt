@@ -56,6 +56,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_minimap.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_runtime.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_scene.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/material_eval.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/material_classify.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/object_shader_template.cpp
@@ -92,6 +93,13 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/quadtree.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_mesh.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_alpha.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_geometry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_planner.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_raster.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_tile_composer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_tile_composition_cache.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/texture_preprocess.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/tristrip.cpp
     # terrain_query — the world->terrain seam leaf (ADR 0020): height query +
@@ -188,6 +196,13 @@ set(_opennova_terrain_fp_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/quadtree.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_mesh.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_alpha.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_geometry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_planner.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_raster.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_tile_composer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_tile_composition_cache.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/texture_preprocess.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/tristrip.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/height_field.cpp

@@ -214,7 +214,12 @@ void SkyDome::advance_frame(double p_delta) {
 				to_vector3(frame.light_dir));
 		sky_material_->set_shader_parameter("u_fog_color",
 				to_vector3(frame.skyfog_color));
-		sky_material_->set_shader_parameter("u_fog_end", frame.fog_end);
+		// The sky wrapper keeps its dedicated skyfog color on both sides of the
+		// water plane, but uses the active pass visibility distance.
+		sky_material_->set_shader_parameter("u_fog_end",
+				env != nullptr && env->is_underwater_view()
+						? env->get_scene_fog_end()
+						: frame.fog_end);
 		sky_material_->set_shader_parameter("u_sky_height", frame.sky_height);
 	}
 

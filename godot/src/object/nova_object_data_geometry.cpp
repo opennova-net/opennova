@@ -584,6 +584,7 @@ Array ObjectData::get_lod_surfaces(int p_lod_index) const {
 			surface["material_index"] = strip.material_index;
 			surface["material_array_index"] = material_array_index_for_id(source_model, strip.material_index);
 			surface["part_index"] = static_cast<int>(part_idx);
+			surface["abs"] = godot_vec3(ro.abs);
 			surface["is_alpha"] = s >= static_cast<size_t>(ro.num_strips);
 			surface["vertex_offset"] = static_cast<int64_t>(vertex_offset);
 			surface["vertices"] = vertices;

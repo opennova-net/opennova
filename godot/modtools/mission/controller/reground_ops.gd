@@ -216,8 +216,13 @@ func _apply_reground_world_update(requests: Array, moved_rows: PackedInt32Array,
 		var kind := int(request.get("kind", -1))
 		if kind == MissionData.KIND_MARKER:
 			any_marker = true
-		moved["%d:%d" % [kind, int(request.get("index", -1))]] = MissionObjectPlacer.entity_transform(
+		var index := int(request.get("index", -1))
+		var moved_xform := MissionObjectPlacer.entity_transform(
 				new_positions_bms[n], request.get("rotation_deg", Vector3.ZERO))
+		moved["%d:%d" % [kind, index]] = moved_xform
+		if kind != MissionData.KIND_MARKER and _c._placer != null:
+			_c._placer.update_static_terrain_shadow_source_transform(
+					kind, index, moved_xform)
 	for r in _c._pickable:
 		var rec: Dictionary = r
 		var key := "%d:%d" % [int(rec["kind"]), int(rec["index"])]

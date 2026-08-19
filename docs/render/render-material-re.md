@@ -5,7 +5,7 @@ byte) to device render state, witnessed in retail `Jointops.exe`
 (imagebase `0x400000`, IDB `Jointops.exe.kong.i64`). Implementing code:
 `engine/formats/oed/include/oed/{types.h,material_descriptor.h}` (the tag registry),
 `engine/runtime/renderer` (`material_classify`, `material_eval`, `uv_anim`,
-`object_shader_template`),
+`object_shader_template` (typed pipeline descriptor; legacy filename)),
 `godot/src/object/{nova_object_shader_cache,nova_object_data_materials,nova_object_data_runtime_eval}.cpp`,
 `godot/src/object/nova_object_model.cpp`. Landed by maturity REN-2
 ([maturity-program.md](../maturity-program.md); standing rules
@@ -21,15 +21,15 @@ this record.
 | Tag resolution + unknown fallback | MATCHING | case-insensitive lookup `[orig: HLSLEffect_FindByName @ 0x5ade70]`; unknown → effect 0 = FF_ST_OP `[orig: convert_material_definition @ 0x5b0670]`; our unknown-family path composes the same single-texture lit-opaque look |
 | Material flag byte → device state (alpha test / invert / two-sided) | MATCHING (after D-RMAT-1/-3 fixes) | `[orig: CRenderBatchQueue_FlushBatches @ 0x5da3a9..0x5da401; CGfxDevice_SetAlphaTestRef @ 0x6770a0]`; `renderer_state_vectors` golden |
 | Blend classification per tag (Opaque/AlphaBlend/Additive) | MATCHING | `RSAlphaMode` pass states per shipped `.fx` (`_FFP.fx` `BLEND_NONE/ALPHA/ADD` = FALSE,ONE,ZERO / SRCALPHA,INVSRCALPHA / ONE,ONE; Glass/SkGlass/Tracer = ONE,ONE only); Multiplicative (DESTCOLOR,SRCCOLOR) appears only in non-NORMAL techniques and no registry row claims it |
-| Depth policy for blended materials | MATCHING | blended FF variants force ZMODE_NOWRITE across technique slots `[orig: @ 0x5afc92..0x5afcaa]`; applied as `D3DRS_ZWRITEENABLE=0` `[orig: @ 0x5da320]` — mirrored by the composer's `depth_draw_never` for non-opaque, non-alpha-test |
+| Depth policy for blended materials | MATCHING | blended FF variants force ZMODE_NOWRITE across technique slots `[orig: @ 0x5afc92..0x5afcaa]`; applied as `D3DRS_ZWRITEENABLE=0` `[orig: @ 0x5da320]` — mirrored by the typed descriptor and checked-in `depth_draw_never` policies for non-opaque, non-alpha-test techniques |
 | Per-effect capability/sort flag words (file effects) | MATCHING (after D-RMAT-4 fixes) | the probe REPLICATED over the shipped localres text (REN-4): booleans are unions over ALL techniques `[orig: technique loop @ 0x5ae690]`; 14/19 tags matched the OED dump, 5 drift rows corrected on the renderer descriptor table (catalog below); `renderer_material_classify` pins the corrected words |
-| Composed lighting math | MATCHING (after D-RMAT-5 fix, REN-5) | the composer emits the witnessed FF model — `tex × min(mix(HemiGround, HemiSky, N.y·0.5+0.5) + DirLightColor·max(0,N·L), 1) × 2`, SELFLUM = `tex × min(ColorSrcGlobalGain,1) × 2` — on the witnessed uniform surface (slots pinned: 225 CameraPos, 226 DirLightVector, 227 DirLightColor, 228 HemiGroundColor, 229 HemiSkyColor, 230 AmbientColor `[orig: handle stores @ 0x5af3fe..0x5af485]`); values engine-fed from the env blocks ([render-lighting-re.md](render-lighting-re.md)); `renderer_state_vectors` section 5 + the 630-hash cited re-dump pin it |
+| Object lighting math | MATCHING (after D-RMAT-5 fix, REN-5) | checked-in technique resources implement the witnessed FF model — `tex × min(mix(HemiGround, HemiSky, N.y·0.5+0.5) + DirLightColor·max(0,N·L), 1) × 2`, SELFLUM = `tex × min(ColorSrcGlobalGain,1) × 2` — on the witnessed uniform surface (slots pinned: 225 CameraPos, 226 DirLightVector, 227 DirLightColor, 228 HemiGroundColor, 229 HemiSkyColor, 230 AmbientColor `[orig: handle stores @ 0x5af3fe..0x5af485]`); values engine-fed from the env blocks ([render-lighting-re.md](render-lighting-re.md)); `renderer_state_vectors` pins 630 typed descriptors and the transitive-source golden pins all 104 checked-in resources |
 | Technique-class pass system (6 classes) | witnessed / reimpl-deferred | class selection + slots + fallbacks witnessed; NORMAL-class state ported; the pass EXECUTION model (pass rules, per-light multiplication, MATCHTERRAIN texture bind) witnessed at REN-4 (§Pass execution); GLOW content witnessed (LUM copy + the glass specular-cube technique) with classification landed — the reimpl bloom wiring rides D-RORD-5's residual (D-RMAT-6) |
 | UV animation (MatTexCoord1) | MATCHING deterministic math, live full-matrix bridge; stochastic lifetime partial | `renderer::uv_anim` structurally ports `[orig: compute_uv_transform_matrix @ 0x5b1990; wave_lookup @ 0x5de6b0]`; `ObjectData` now carries the complete row-vector 2×3 result into two shader `vec3` uniforms, preserving controlled set and shear as well as scroll/scale/rotation. Table/dispatch math is pinned by `renderer_state_vectors` section 4 and `renderer_material_eval`; retail's process-wide CRT RNG lifetime and cross-model submit/flush order remain D-3DI-2 |
-| Controlled flipbook | MATCHING for the reachable retail branch | `[orig: apply_shader_parameters @ 0x58db80]` reads a signed CTRL value and keeps 32-bit `IMUL`'s low product before `SAR 16`; the static-zero adjacent state dword selects the fractional-frame interpretation; `renderer_material_eval` pins exact `0x10000`, negative, and wrap cases |
+| Controlled flipbook | MATCHING for the witnessed fractional and discrete-selector branches | `[orig: apply_shader_parameters @ 0x58db80]` reads a signed CTRL value and keeps 32-bit `IMUL`'s low product before `SAR 16` when the adjacent state is zero; the retail image statically seeds `TEX_TEAM` and `TEX_CAMO1/2/3` state to one, selecting `value % frame_count`; `renderer_material_eval` pins exact generic `0x10000`/negative/wrap cases plus the RevX02 IndoArms selector `0/1/3 -> 0/1/1` |
 | RGB/alpha generators and point-light color | MATCHING deterministic/controlled math, live; stochastic lifetime partial | consumer-specific branches are preserved: RGB/light 113/114 `[orig: RgbGen_EvaluateColor @ 0x5b23d0]`, alpha 113 `[orig: AlphaGen_EvaluateValue @ 0x5b2320]`, and waveform fallback otherwise. The signed/wrapping evaluator and live point-light CTRL feed are pinned by `renderer_material_eval`; noise samples retain D-3DI-2's process-wide RNG/order gap |
 | Tracer soft edge (VS_TRACER look) | MATCHING (after D-RMAT-2 fix) | `OSCAP_VIEW_FADE` composes `color x \|dot(eye, normal)\|^2` `[orig: vsTracer in Tracer.fx]`; `renderer_material_classify` + the vectors golden pin it |
-| Color pipeline (gamma space end to end) | MATCHING (after D-RMAT-7/-9 fixes; D-RMAT-8 blend-space residual permanent) | no-sRGB sampler/render-state/effect-state sweeps + identity display ramp (§Color pipeline witness); reimpl mapping = raw sampling + gamma math + exact-inverse encode, calibrate-mode byte-identity proof 256/256; the composer fog table re-witnessed `[orig: @ 0x58a950 → @ 0x677960]` |
+| Color pipeline (gamma space end to end) | MATCHING (after D-RMAT-7/-9 fixes; D-RMAT-8 blend-space residual permanent) | no-sRGB sampler/render-state/effect-state sweeps + identity display ramp (§Color pipeline witness); reimpl mapping = raw sampling + gamma math + exact-inverse encode, calibrate-mode byte-identity proof 256/256; the shared checked-in fog math follows the re-witnessed table `[orig: @ 0x58a950 → @ 0x677960]` |
 
 ## Witness map
 
@@ -119,11 +119,16 @@ env #17 modulator triple's shader-path consumer — REN-5). A control slot is
 value and the odd state dword at `0x83FCEC + 8·ordinal` selects
 fractional-frame versus modulo-frame interpretation. There is no blanket
 `uint16` clamp: `0x10000` is the exact 16.16 endpoint and negative values are
-preserved for extrapolation. The odd dword has no writer and is zero in the
-retail image, while `[orig: CtrlRegAnimSlot_UpdateAll @ 0x401bf0]` writes only
-the even value. Therefore the live controlled-flipbook behavior is the
-fractional branch; the modulo branch is present but unreachable in retail JO
-`[orig: apply_shader_parameters @ 0x58db80]`.
+preserved for extrapolation. No runtime writer to the odd dword was found, and
+`[orig: CtrlRegAnimSlot_UpdateAll @ 0x401bf0]` writes only the even value, but
+the retail image does not initialize every state to zero: ordinals 0..91 are
+zero while `TEX_TEAM` and `TEX_CAMO1/2/3` (92..95, state dwords
+`0x83FFCC/0x83FFD4/0x83FFDC/0x83FFE4`) are statically one. Those four texture
+selectors therefore take the signed modulo branch at
+`apply_shader_parameters @ 0x58DC36..0x58DC42`; ordinary controls take the
+fractional branch. The 2026-08-17 PR-503 T3 arm comparison exposed the old
+all-zero assumption: RevX02 `IndoArms.3di` has two diffuse frames controlled
+by `TEX_CAMO1`, so raw avatar selector 1 must choose frame 1, not frame 0.
 
 The consumer fields do not index a private per-model value array. The on-disk
 CTRL list is model-local names; `[orig: sub_5B4640 @ 0x5B4640; ordinal store
@@ -142,7 +147,8 @@ For the integer interpolation consumers, retail uses a two-operand 32-bit
 The port deliberately reproduces that wrapping low-product arithmetic rather
 than widening to 64 bits `[orig: AlphaGen_EvaluateValue @ 0x5B234C;
 RgbGen_EvaluateColor @ 0x5B24AC]`. Controlled flipbook uses the same
-low-dword/`SAR 16` rule. Controlled UV instead converts the signed CTRL dword
+low-dword/`SAR 16` rule for state-zero controls and signed modulo for the
+statically state-one texture-selector controls. Controlled UV instead converts the signed CTRL dword
 to a floating fraction; its negative and `0x10000` inputs are likewise not
 clamped.
 
@@ -351,14 +357,12 @@ and the framebuffer byte is the displayed value:
   @ 0x677f91..0x678070; GfxDevice_HandleLostDevice @ 0x678374..0x678453;
   CGfxDevice_ApplyRenderStates @ 0x67e3ec..0x67e4f3]`. Device defaults:
   MAG/MIN LINEAR + **MIP POINT** (bilinear with sharp mip cuts), aniso 2,
-  and reset MIPMAPLODBIAS 0.0. The comparison configuration's
-  `texfilter_level=0` maps to this point-mip register mode; per-stage filters
-  are re-applied by `CGfxDevice_ApplyRenderStates` (trilinear/aniso = modes
-  2/3-4, cf. `HLSLEffect_TextureFilterMode @ 0x27e5698`). Note: the 2026-07-15
-  terrain/foliage grill adjudicated that the reference machine renders the
-  ANISOTROPIC mode despite the cfg-0 register (driver-forced), so hosted
-  terrain/foliage sampling follows the anisotropic reference
-  (terrain-re.md/foliage-re.md).
+  and reset MIPMAPLODBIAS 0.0. The current maximum-video comparison profile
+  uses `texfilter_level=3`, whose per-stage selection is anisotropic with
+  linear mip filtering and the device capability's maximum anisotropy
+  (`CGfxDevice_ApplyRenderStates`; trilinear/aniso = modes 2/3-4, cf.
+  `HLSLEffect_TextureFilterMode @ 0x27e5698`). The older cfg-0/driver-forced
+  explanation described invalidated captures and is not a publication path.
 - **No sRGB framebuffer writes.** The SetRenderState immediate sweep (state
   ids at every `[vtbl+0xE4]`-load site) covers the standard FF set (7, 14,
   15, 19/20, 22-29, 34-38, 48, 53-60, 136-148, 168, 171) —
@@ -405,6 +409,7 @@ ADR 0022 register).
 | D-RMAT-8 | Framebuffer blending happens on blit-encoded (linear) values | blending on gamma bytes (`out = src_g op dst_g` per the blend mode tables `@ 0x680f00`) | PERMANENT (reimpl-structural, ADR 0022 register): the reimpl cannot blend in gamma space without a gamma framebuffer; opaque + alpha-tested surfaces are byte-exact under D-RMAT-7, translucent composites diverge boundedly (alpha mixes shift midtones, additive accumulation runs dimmer); revisit only if a T3 scene shows an objectionable composite |
 | D-RMAT-9 | Object composer fog was a linear ramp with an invented `smoothstep` for type 3 | the device fog table: type 0 exponential `ln(64)/end`, types 1/2/3 linear with start = 0.5 / `(1−density)·end·0.5` / `(1−density)·end·0.25` (`[orig: Render_SetFogState @ 0x58a950 → CD3DDevice_SetFogParameters @ 0x677960]`; env-tod-re.md §Fog policy) | **FIXED (2026-07-06, the model-parity slice)**: the composer emits the witnessed table (one text with `terrain_lighting.gdshaderinc`/`water.gdshader`); covered by the same T1 re-dump |
 | D-RMAT-10 | The `_MT` secondary (detail) stage ran HALF the witnessed combine: the composer emitted `base.rgb *= detail.rgb` — ×1, no alpha touch — so resolved MT surfaces (RckS05's `W_Rck1_o`, gray avg 93/255) modulated ×0.365 where retail runs ×0.73 (MT objects too dark in detail regions, the REN-7 T3 "W_RCK1_O watch item"), and the stage never alpha-modulated; a missing secondary bound a white ×1 fallback (neutral then, a ×2 brightener under the fix) | stage 1 = `TSSColor(1, Modulate2x, Texture, Current)` + `TSSAlpha(1, Modulate, Texture, Current)` (§FF technique tables — "the same on stage 1 vs Current for `_MT`"), and the combine is CORPUS-UNIFORM across every second-diffuse family (REN-7 sweep, the .fx re-derived from retail `localres.pff` via `engine/formats/pff`+`engine/formats/scr`, never committed): `BDiffT2.fx` (`EffectTag "VS_DOT3DIFF2"`) carries the identical stage-1 pair, and `SkBDiffO2.fx` (`EffectTag "VS_SKBUMPDIFFOBJ2"`) applies BOTH diffuses in its NORMAL P3 "post multiply" pass — same TSS pair under `RSAlphaMode(TRUE, DESTCOLOR, SRCCOLOR)` (the ×2-onto-framebuffer form); a NULL-texture stage is dropped; the sample set is the SECOND authored UV channel — the .3di v8 vertex carries TWO UV sets unconditionally (stride 40 = pos+normal+uv0+uv1; RckS05 uv1 distinct on 48/48 verts, FOUNTAIN M4 on 455/455; FVF 0x212 TEX2 corroborates the D3D FF stage-N→texcoord-N default) | **FIXED (REN-7, 2026-07-07)**: composer emits `base.rgb *= detail.rgb * 2.0; base.a *= detail.a;` `[orig: _FFP.fx TECHNIQUE_NORMAL _MT stage 1]`; the reimpl masks `OSCAP_DETAIL` off the composed key when the secondary fails to resolve (exact stage-drop identity, retail-shaped; the white fallback deleted; `classify()` stays pure — 0 classification rows moved). T1 re-dump: exactly the 224 OSCAP_DETAIL composed hashes moved (+27 bytes each = the two text edits), everything else byte-identical; handoff pins unchanged (`FF_MT_OP/base → 0x00001004`) |
+| D-RMAT-11 | Controlled flipbooks treated every CTRL as a state-zero signed 16.16 fraction, so RevX02 `IndoArms.3di` consumed raw `TEX_CAMO1 = 1` as frame zero (`A_Arm1st.tga`, tattooed) | the retail image statically seeds the adjacent state dwords for `TEX_TEAM` and `TEX_CAMO1/2/3` (ordinals 92–95) to one; `apply_shader_parameters` therefore uses signed `value % frame_count` for those four selectors `[orig: @ 0x58DC36..0x58DC42]` | **FIXED (2026-08-17, PR-503 adversarial T3)**: `compute_anim_frame` selects modulo only for exact ordinals 92–95 and preserves the generic 16.16 path; literal pins cover two-frame `IndoArms.3di` and three-frame `APLFP1.3DI` Jflag1/Jflag2/Jflag3, including the signed negative remainder |
 
 ## IDB changes made during the session
 

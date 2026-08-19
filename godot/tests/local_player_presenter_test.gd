@@ -138,6 +138,7 @@ nationality 0 STAGED_NAT
 	for pair in [
 		["CharModel.3di", CHARMODEL_FIXTURE],
 		["M4_1st.3di", CHARMODEL_FIXTURE],
+		["M4_3RD.3di", CHARMODEL_FIXTURE],
 		["armsG.3di", CHARMODEL_FIXTURE],
 		["soldier.adm", SOLDIER_ADM_FIXTURE],
 		["E_STAND.adm", SOLDIER_ADM_FIXTURE],
@@ -499,15 +500,13 @@ func test_camera_stamps_the_sim_composed_pose_and_policy_fov() -> void:
 			"teardown restores the camera's original fov")
 
 
-func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:
-	# The water-reflection player-model pin: retail's mirror re-renders the
-	# world scene, which CONTAINS the local player's body; the first-person
-	# arms/weapon are a separate near-Z overlay that never enters it
-	# [orig: Water_ReflectionPrerender @ 0x5c2780 -> render_main_scene
-	# @ 0x5c1240; Player_RenderFirstPersonViewModel @ 0x4ded60]. World-driven,
-	# that is LAYER plumbing: in first person the body stays visible on the
-	# reflection-only layer (masked off the player camera, kept as a shadow
-	# source) and the viewmodel rides its own mirror-excluded layer.
+func test_gameplay_camera_collects_hidden_player_shadows_without_drawing_fp_models() -> void:
+	# Retail draws the local body/held weapon separately from the near-Z first-person
+	# overlay [orig: Player_RenderFirstPersonViewModel @ 0x4ded60]. In Godot, the
+	# gameplay camera must still admit the marker layers used by the shadow lights:
+	# directional shadow collection intersects camera, instance, and caster masks.
+	# The hidden body and held weapon therefore use SHADOWS_ONLY, while the dedicated
+	# viewmodel pass is explicitly non-casting.
 	var world := _load_player_world()
 	var camera := Camera3D.new()
 	add_child_autofree(camera)
@@ -523,8 +522,9 @@ func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:
 	# projection + flush].
 	assert_eq(camera.cull_mask & Water.VISUAL_LAYER_VIEWMODEL, 0,
 			"setup() masks the viewmodel layer off the player camera (the FP pass draws it)")
-	assert_eq(camera.cull_mask & Water.VISUAL_LAYER_SHADOW_CASTER_MASK, 0,
-			"caster marker layers cannot make the hidden FP body visible to the player")
+	assert_eq(camera.cull_mask & Water.VISUAL_LAYER_SHADOW_CASTER_MASK,
+			Water.VISUAL_LAYER_SHADOW_CASTER_MASK,
+			"the gameplay camera admits both shadow-caster marker layers")
 	var rig: PlayerViewmodelRig = presenter.viewmodel_rig()
 	var pass_cam: Camera3D = rig.get("_vm_camera")
 	assert_not_null(pass_cam, "setup() builds the FP render pass camera")
@@ -543,21 +543,43 @@ func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:
 	assert_not_null(avatar, "the shared presenter built the real 3P avatar")
 	var viewmodel: Node3D = presenter.viewmodel()
 	assert_not_null(viewmodel, "the shared presenter built the real FP viewmodel")
+	var held_weapon: ObjectModel = presenter.held_weapon()
+	assert_not_null(held_weapon, "the shared presenter built the real held weapon")
 	assert_true(avatar.visible,
 			"the body stays VISIBLE in first person - it remains a live shadow source")
 	assert_true(viewmodel.visible, "the FP overlay shows in first person")
 	var body_instances := _visual_instances(avatar)
 	var vm_instances := _visual_instances(viewmodel)
+	var held_instances := _visual_instances(held_weapon) if held_weapon != null else []
 	assert_gt(body_instances.size(), 0, "the real body carries visual instances")
 	assert_gt(vm_instances.size(), 0, "the real viewmodel carries visual instances")
+	assert_gt(held_instances.size(), 0, "the real held weapon carries visual instances")
 	for vi in body_instances:
 		assert_eq(vi.layers & ~Water.VISUAL_LAYER_SHADOW_CASTER_MASK,
 				Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY,
 				"first person: the body's visual instances ride the shadow-only FP layer")
-	for vi in vm_instances:
+		if vi is GeometryInstance3D:
+			assert_ne(vi.layers & Water.VISUAL_LAYER_DYNAMIC_SHADOW_CASTER, 0,
+					"first person: body geometry keeps its dynamic-caster marker")
+			assert_eq(vi.cast_shadow,
+					GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY,
+					"first person: body geometry contributes only to shadow passes")
+	for vi in held_instances:
 		assert_eq(vi.layers & ~Water.VISUAL_LAYER_SHADOW_CASTER_MASK,
-				Water.VISUAL_LAYER_VIEWMODEL,
-				"the viewmodel's visual instances ride the mirror-excluded viewmodel layer")
+				Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY,
+				"first person: the held weapon rides the shadow-only FP layer")
+		if vi is GeometryInstance3D:
+			assert_ne(vi.layers & Water.VISUAL_LAYER_DYNAMIC_SHADOW_CASTER, 0,
+					"first person: held-weapon geometry keeps its dynamic-caster marker")
+			assert_eq(vi.cast_shadow,
+					GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY,
+					"first person: held-weapon geometry contributes only to shadow passes")
+	for vi in vm_instances:
+		assert_eq(vi.layers, Water.VISUAL_LAYER_VIEWMODEL,
+				"the dedicated viewmodel pass clears every shadow-caster marker")
+		if vi is GeometryInstance3D:
+			assert_eq(vi.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_OFF,
+					"the dedicated viewmodel pass never casts into the world")
 
 	presenter.set_third_person(true)
 	_frame(world, presenter, camera, 1)
@@ -565,9 +587,42 @@ func test_first_person_routes_the_body_to_the_water_mirror_by_layer() -> void:
 		assert_eq(vi.layers & ~Water.VISUAL_LAYER_SHADOW_CASTER_MASK,
 				Water.VISUAL_LAYER_WORLD,
 				"third person: the body returns to the normal world layer")
+		if vi is GeometryInstance3D:
+			assert_eq(vi.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_ON,
+					"third person: body geometry renders and casts normally")
+	if held_weapon != null:
+		for vi in _visual_instances(held_weapon):
+			assert_eq(vi.layers & ~Water.VISUAL_LAYER_SHADOW_CASTER_MASK,
+					Water.VISUAL_LAYER_WORLD,
+					"third person: the held weapon returns to the normal world layer")
+			if vi is GeometryInstance3D:
+				assert_eq(vi.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_ON,
+						"third person: held-weapon geometry renders and casts normally")
 	assert_true(avatar.visible, "the body shows in third person")
 	assert_false(presenter.viewmodel().visible,
 			"the FP overlay hides entirely in third person")
+	for vi in _visual_instances(viewmodel):
+		assert_eq(vi.layers, Water.VISUAL_LAYER_VIEWMODEL,
+				"the hidden viewmodel remains outside every shadow-caster layer")
+		if vi is GeometryInstance3D:
+			assert_eq(vi.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_OFF,
+					"the hidden viewmodel remains non-casting")
+
+	presenter.set_third_person(false)
+	presenter.set_debug_body_in_first_person(true)
+	_frame(world, presenter, camera, 1)
+	for vi in _visual_instances(avatar):
+		assert_eq(vi.layers & ~Water.VISUAL_LAYER_SHADOW_CASTER_MASK,
+				Water.VISUAL_LAYER_WORLD,
+				"the debug first-person body uses the visible world layer")
+		if vi is GeometryInstance3D:
+			assert_eq(vi.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_ON,
+					"the debug first-person body renders and casts normally")
+	if held_weapon != null:
+		for vi in _visual_instances(held_weapon):
+			if vi is GeometryInstance3D:
+				assert_eq(vi.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_ON,
+						"the debug first-person held weapon renders and casts normally")
 
 	presenter.teardown()
 	assert_eq(camera.cull_mask, saved_mask,

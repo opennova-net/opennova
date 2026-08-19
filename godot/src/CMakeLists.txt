@@ -26,6 +26,8 @@ add_library(${TARGET_NAME} SHARED
     network/nova_net_session_policy.cpp
     terrain/nova_terrain.cpp
     terrain/nova_terrain_surface_inputs.cpp
+    terrain/nova_terrain_static_shadow_rasterizer.cpp
+    terrain/nova_terrain_tile_cache_device.cpp
     terrain/nova_terrain_build_job.cpp
     terrain/nova_terrain_data.cpp
     terrain/nova_terrain_builder.cpp
@@ -60,6 +62,7 @@ add_library(${TARGET_NAME} SHARED
     particle/nova_particle_graphic_layer.cpp
     particle/nova_particle_def.cpp
     particle/nova_particle_file.cpp
+    lights/nova_light_scene.cpp
     particle/nova_effect_scene.cpp
     particle/nova_particle_compositor.cpp
     particle/nova_particle_renderer.cpp

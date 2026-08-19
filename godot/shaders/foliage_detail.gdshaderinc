@@ -13,10 +13,16 @@ uniform bool u_has_heightfield_normal = false;
 uniform sampler2D u_tile_overlay : filter_linear, repeat_enable;
 uniform bool u_has_tile_overlay = false;
 uniform vec3 u_tile_overlay_tint = vec3(1.0);
+uniform sampler2DArray u_tile_cache : filter_linear, repeat_disable;
+uniform bool u_has_tile_cache = false;
 uniform vec3 u_emitter_color = vec3(0.5019608);
 instance uniform float u_wind_phase = 0.0;
 instance uniform float u_fade = 1.0;
 instance uniform float u_alpha_ref = 0.0;
+instance uniform bool u_instance_tile_cache_ready = false;
+instance uniform float u_instance_tile_cache_layer = 0.0;
+// XY is the page's world origin, Z is reciprocal world span, W is span.
+instance uniform vec4 u_instance_tile_cache_origin_span = vec4(0.0);
 // Nonzero only on the near LOW resubmission: retail selects strict
 // D3DCMP_LESS there, so identical geometry only lands where the preceding
 // HIGH draw rejected alpha and left no depth. Discarding texels the HIGH
@@ -35,6 +41,7 @@ global uniform int opennova_fog_type;
 
 varying vec2 v_tile_uv;
 varying vec2 v_overlay_uv;
+varying vec2 v_tile_cache_uv;
 varying vec3 v_heightfield_normal;
 varying float v_fog_distance;
 
@@ -84,6 +91,9 @@ void vertex() {
 	// triangle (u_tile_overlay is repeat_enable, so unwrapped UV is exact).
 	v_overlay_uv =
 		vec2(pre_wind_world_pos.x, -pre_wind_world_pos.z) * (1.0 / 1024.0);
+	v_tile_cache_uv =
+		(pre_wind_world_pos.xz - u_instance_tile_cache_origin_span.xy) *
+		u_instance_tile_cache_origin_span.z;
 	v_heightfield_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
 	float eye_depth = max(-(VIEW_MATRIX * vec4(world_pos, 1.0)).z, 0.0);
 	v_fog_distance = opennova_fog_type == 0
@@ -109,7 +119,13 @@ void fragment() {
 	}
 
 	vec4 tile = vec4(0.5, 0.5, 0.5, 1.0);
-	if (u_has_colormap) {
+	if (u_has_tile_cache && u_instance_tile_cache_ready) {
+		vec2 page_uv = v_tile_cache_uv;
+		vec2 half_texel = vec2(0.5 / 256.0);
+		page_uv = clamp(page_uv, half_texel, vec2(1.0) - half_texel);
+		tile = texture(u_tile_cache, vec3(
+			page_uv, u_instance_tile_cache_layer));
+	} else if (u_has_colormap) {
 		vec2 colormap_uv = foliage_quadrant_clamped_uv(
 			v_tile_uv, textureSize(u_colormap, 0));
 		vec3 raw_colormap = texture(u_colormap, colormap_uv).rgb;

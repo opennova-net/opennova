@@ -101,6 +101,10 @@ inline constexpr int kMaxTodKeyframes = 16;
 
 Config make_default_config();
 
+// Retail keeps negative authored values and clamps only the upper bound.
+// [orig: TimeOfDay_ParseProperty water_murk @ 0x57cba9]
+float clamp_water_murk_upper(float value);
+
 bool load_env(std::istream &input, Config &out, std::string &error);
 bool save_env(std::ostream &output, const Config &cfg, std::string &error);
 

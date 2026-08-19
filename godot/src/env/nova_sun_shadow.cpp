@@ -36,6 +36,7 @@ void SunShadow::set_environment_node(MissionEnvironment *p_environment) {
 			? ObjectID(p_environment->get_instance_id())
 			: ObjectID();
 	last_emission_direction_ = Vector3(INFINITY, INFINITY, INFINITY);
+	_update_direction();
 }
 
 void SunShadow::_ready() {
@@ -55,6 +56,7 @@ void SunShadow::_ready() {
 	set_param(Light3D::PARAM_VOLUMETRIC_FOG_ENERGY, 0.0f);
 	_apply_projection_masks();
 	set_process(true);
+	_update_direction();
 }
 
 // The retail two-list split as Godot mask pairs: receivers via

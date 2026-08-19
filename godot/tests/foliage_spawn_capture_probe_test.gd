@@ -122,6 +122,8 @@ func test_spawn_capture_requires_runtime_foliage_for_00tre_only() -> void:
 func test_spawn_capture_settles_visibility_changes_before_each_image() -> void:
 	var source := FileAccess.get_file_as_string(PROBE_PATH)
 	assert_false(source.is_empty(), "Spawn capture probe source should be readable.")
+	assert_true(source.contains("_game.process_mode = Node.PROCESS_MODE_DISABLED"),
+		"The shell tick must freeze with the world so presenter camera state stays exact.")
 	assert_true(source.contains("const VISIBILITY_SETTLE_FRAMES := 3"),
 		"The A/B probe should give renderer visibility changes time to reach the viewport.")
 	assert_true(source.contains("world.set_foliage_hidden(false)\n\tawait _settle(VISIBILITY_SETTLE_FRAMES)"),
@@ -139,3 +141,15 @@ func test_spawn_capture_uses_standalone_game_aspect_not_editor_dock_aspect() -> 
 		"The native game window should render at the fixed comparison size.")
 	assert_false(source.contains("PlayViewportContainer"),
 		"The capture must not depend on an editor dock viewport.")
+
+
+func test_spawn_capture_reads_native_sky_through_its_public_interface() -> void:
+	var source := FileAccess.get_file_as_string(PROBE_PATH)
+	assert_true(source.contains("sky.get_sky_material()"),
+		"The capture must use SkyDome's native public material interface.")
+	assert_false(source.contains("sky.sky_material"),
+		"The removed scripted SkyDome field must not break parity captures.")
+	assert_true(source.contains("EXPECTED_VERTICAL_FOV_DEG"),
+		"A loading-screen camera must not be accepted as a gameplay capture.")
+	assert_true(source.contains("transform.origin.distance_to(position)"),
+		"The captured camera must remain attached to the resolved player pose.")

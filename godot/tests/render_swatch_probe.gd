@@ -463,7 +463,7 @@ func _make_swatch_material(cache, cell: Dictionary, diffuse: Texture2D, detail: 
 	# swatch pins the same owner state the runtime binds.
 	var material := ShaderMaterial.new()
 	var key: int = cache.classify(cell["tag"], cell["flags"], cell["em"], cell["gl"], cell["atb"])
-	material.shader = cache.get_shader_for_key(key)
+	cache.configure_material_for_key(material, key)
 	material.set_shader_parameter("u_diffuse", diffuse)
 	material.set_shader_parameter("u_detail", detail)
 	material.set_shader_parameter("u_normal_map", normal)
@@ -479,7 +479,6 @@ func _make_swatch_material(cache, cell: Dictionary, diffuse: Texture2D, detail: 
 	material.set_shader_parameter("u_uv_transform_v", Vector3(0.0, 1.0, 0.0))
 	material.set_shader_parameter("u_rgb_mod", Vector3.ONE)
 	material.set_shader_parameter("u_alpha_mod", 1.0)
-	material.set_shader_parameter("u_emissive", 1.0 if cell["em"] == 2 else 0.0)
 	material.set_shader_parameter("u_local_light_count", 0)
 	# Pin the TIME-driven flag wind sway: A/B captures happen at arbitrary
 	# times, and a swaying vertex displacement is capture noise, not a

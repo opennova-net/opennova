@@ -243,6 +243,10 @@ int main() {
 	if (!expect(water_cfg.water_height_set, "water_height should record authored presence")) return 1;
 	if (!expect(near(water_cfg.water_height, 32.0f), "water_height should parse as world units")) return 1;
 	if (!expect(near(water_cfg.water_murk, 0.99f), "water_murk should clamp at 0.99")) return 1;
+	if (!expect(near(opennova::env::clamp_water_murk_upper(-0.5f), -0.5f),
+	            "water_murk normalization should preserve negative authored values")) return 1;
+	if (!expect(near(opennova::env::clamp_water_murk_upper(1.5f), 0.99f),
+	            "water_murk normalization should clamp only the upper bound")) return 1;
 
 	std::ostringstream water_saved;
 	if (!opennova::env::save_env(water_saved, water_cfg, error)) {

@@ -1449,7 +1449,10 @@ is `screenshots/pr-492/` (the synchronized 00TRa spinmap pair).
 - **Compass ring** [orig: `draw_compass_indicator @0x59c900`]: the
   `compring.tga` quad at ×1.25 the map radius (`flt_7C6F18`),
   counter-rotated `(0x3FFFFFC0 − yaw) >> 16` × 2π/65536 so its north marker
-  points at world north. Its UVs are centered at 0.5 with ±0.45 extent
+  points at world north. OpenNova's draw-list angle negates that numeric delta
+  at the renderer boundary because the Godot canvas is +Y-down; the registered
+  yaw −90° 00TRa frame (retail image SHA-256 `6211fe22a5ebb51178ff8253941cfd98795afce370351d407a354015679c6306`)
+  pins W at twelve o'clock. Its UVs are centered at 0.5 with ±0.45 extent
   (`flt_7D93A8`), so retail samples only `0.05..0.95` of the texture. Cropping
   that authored transparent padding makes the visible ring `1/0.9` larger on
   the unchanged quad; this is why the same eastern and northwest landmarks

@@ -6,6 +6,28 @@ func test_surface_inputs_are_registered_for_runtime_and_oned() -> void:
 		"Runtime terrain preprocessing must be available to ONED through a registered shared object.")
 
 
+func test_cpu_source_image_replacements_invalidate_live_terrain_inputs() -> void:
+	var data := TerrainData.new()
+	var changed_count := [0]
+	data.terrain_changed.connect(func() -> void: changed_count[0] += 1)
+	var revisions := [data.get_change_revision()]
+
+	data.set_heightmap_image(_solid_height_image(4, 2.0))
+	revisions.push_back(data.get_change_revision())
+	data.set_colormap_image(_solid_image(Color8(90, 110, 70, 255), 4))
+	revisions.push_back(data.get_change_revision())
+	data.set_blendmap_image(_solid_image(Color8(128, 64, 64, 200), 4))
+	revisions.push_back(data.get_change_revision())
+
+	assert_eq(changed_count[0], 3,
+		"Every CPU source replacement must invalidate derived inputs and resident tile pages.")
+	assert_gt(revisions[1], revisions[0])
+	assert_gt(revisions[2], revisions[1])
+	assert_gt(revisions[3], revisions[2])
+	assert_ne(revisions[3], 0,
+		"zero remains the never-observed sentinel across terrain revision wrap")
+
+
 func test_full_rebuild_produces_retail_surface_inputs_from_live_data() -> void:
 	var data := _make_surface_data()
 	var inputs := TerrainSurfaceInputs.new()
@@ -35,6 +57,29 @@ func test_full_rebuild_produces_retail_surface_inputs_from_live_data() -> void:
 	assert_true(bool(material.get_shader_parameter("u_has_heightfield_normal")))
 	assert_eq(float(material.get_shader_parameter("u_detail_density")), 73.0)
 	assert_eq(float(material.get_shader_parameter("u_detail2_density")), 9.0)
+
+
+func test_diagnostics_report_live_texture_dimensions_mips_and_densities() -> void:
+	var inputs := TerrainSurfaceInputs.new()
+	assert_true(inputs.rebuild(_make_surface_data()))
+
+	var diagnostics: Dictionary = inputs.get_diagnostics()
+	assert_eq(int(diagnostics["detail_density"]), 73)
+	assert_eq(int(diagnostics["detail2_density"]), 9)
+	var textures := diagnostics["textures"] as Dictionary
+	for name in ["colormap", "blendmap", "detail_c1", "detail_c2", "detail_c3", "detail2"]:
+		var texture := textures[name] as Dictionary
+		assert_true(bool(texture["available"]), "%s is available." % name)
+		assert_eq(texture["size"], Vector2i(4, 4), "%s reports its live dimensions." % name)
+		assert_eq(int(texture["mipmap_count"]), 2,
+			"%s reports the two lower 2x2/1x1 mips." % name)
+		assert_eq(int(texture["level_count"]), 3,
+			"%s reports base plus every lower mip level." % name)
+
+	var heightfield := textures["heightfield_normal"] as Dictionary
+	assert_eq(heightfield["size"], Vector2i(4, 4))
+	assert_eq(int(heightfield["mipmap_count"]), 0)
+	assert_eq(int(heightfield["level_count"]), 1)
 
 
 func test_partial_rebuilds_replace_only_the_changed_allocation_family() -> void:
@@ -111,10 +156,24 @@ func test_tile_overlay_composite_is_shared_and_independently_refreshable() -> vo
 	assert_eq(inputs.get_tile_overlay_texture().get_size(), Vector2(1024, 1024))
 	var overlay_bytes := inputs.get_tile_overlay_texture().get_image().get_data()
 	assert_true(255 in overlay_bytes, "The authored tile must contribute opaque pixels to the composite.")
+	var diagnostics: Dictionary = inputs.get_diagnostics()
+	assert_true(bool(diagnostics["tile_overlay_available"]))
+	assert_true(bool(diagnostics["tile_info_available"]))
+	assert_eq(int(diagnostics["tile_entry_count"]), 1)
+	assert_true(bool(diagnostics["tilestrip_available"]))
+	var overlay_texture := (diagnostics["textures"] as Dictionary)["tile_overlay"] as Dictionary
+	assert_eq(overlay_texture["size"], Vector2i(1024, 1024))
+	assert_eq(int(overlay_texture["mipmap_count"]), 0,
+		"The current composed overlay has no mip chain.")
 
 	inputs.set_tile_overlay_enabled(false)
 	assert_false(inputs.rebuild_tile_overlay())
 	assert_false(inputs.has_tile_overlay())
+	diagnostics = inputs.get_diagnostics()
+	assert_false(bool(diagnostics["tile_overlay_enabled"]))
+	assert_false(bool(diagnostics["tile_overlay_available"]))
+	assert_true(bool(diagnostics["tile_info_available"]),
+		"Disabling composition must not hide the parsed .til source.")
 
 
 func test_nova_terrain_delegates_surface_input_ownership() -> void:

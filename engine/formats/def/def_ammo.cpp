@@ -354,6 +354,23 @@ static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 9, &vl);
             current.foe_trcr_type_id = parse_int_n(v, vl);
             parsed = 1;
+        } else if (lower_starts_with(lower, ll, "light_impact", 12)) {
+            /* The impact flash light: radius (16.16) + packed RGB + fade
+               seconds -> 62 Hz ticks, 0 -> the witnessed 10-tick default
+               [orig: @0x40af79 -> +132/+128/+136; default @0x40b005]. */
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 12, &vl);
+            Token tok[5];
+            int tn = tokenize(v, vl, tok, 5);
+            if (tn >= 1) current.light_impact_radius_fp16 = parse_fixed16_digits_n(tok[0].s, tok[0].len);
+            if (tn >= 4) {
+                current.light_impact_color =
+                        ((parse_int_n(tok[1].s, tok[1].len) << 8) +
+                         parse_int_n(tok[2].s, tok[2].len)) * 256 +
+                        parse_int_n(tok[3].s, tok[3].len);
+            }
+            if (tn >= 5) current.light_impact_ticks = parse_age_ticks_n(tok[4].s, tok[4].len);
+            if (current.light_impact_ticks == 0) current.light_impact_ticks = 10;
+            parsed = 1;
         } else if (lower_starts_with(lower, ll, "light_move", 10)) {
             /* The in-flight round glow: radius (16.16) + packed RGB
                [orig: @0x40a2d0 'light_move' -> +120 = ParseFixedPoint16,

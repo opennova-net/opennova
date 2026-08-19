@@ -2155,637 +2155,637 @@ tag=<empty> flags=07 em=2 gl=0 atb=0 | known=0 fam=unknown blend=opaque lum=0 em
 tag=<empty> flags=07 em=2 gl=0 atb=200 | known=0 fam=unknown blend=opaque lum=0 emis=1 two=1 nmap=0 glass=0 env=0 atest=1 atinv=1 atval=0.784314 det=0 skin=0 spec=0 nuv2=0 nspace=none glow=0 vfade=0 key=000001e0
 tag=<empty> flags=07 em=2 gl=1 atb=0 | known=0 fam=unknown blend=opaque lum=0 emis=1 two=1 nmap=0 glass=1 env=0 atest=1 atinv=1 atval=0.000000 det=0 skin=0 spec=0 nuv2=0 nspace=none glow=0 vfade=0 key=000041e0
 tag=<empty> flags=07 em=2 gl=1 atb=200 | known=0 fam=unknown blend=opaque lum=0 emis=1 two=1 nmap=0 glass=1 env=0 atest=1 atinv=1 atval=0.784314 det=0 skin=0 spec=0 nuv2=0 nspace=none glow=0 vfade=0 key=000041e0
-# composed-glsl (key -> fnv1a64, length)
-key=00000000 fnv64=acd4637db1207d48 len=4140
-key=00000004 fnv64=acd4637db1207d48 len=4140
-key=00000005 fnv64=a368dc8a3845b399 len=4172
-key=00000006 fnv64=1651d608e3619836 len=4139
-key=0000000c fnv64=4f33083c09cbd0c3 len=4440
-key=00000020 fnv64=cacacae9176ebdc7 len=4144
-key=00000024 fnv64=cacacae9176ebdc7 len=4144
-key=00000025 fnv64=1e150d373c0e9d48 len=4176
-key=00000026 fnv64=acea42b5e1104ee1 len=4143
-key=0000002c fnv64=c5ff4e15c4748354 len=4444
-key=00000040 fnv64=f110172ecd5c08e1 len=4390
-key=00000044 fnv64=f110172ecd5c08e1 len=4390
-key=00000045 fnv64=af0621dea0cd22d1 len=4423
-key=00000046 fnv64=3cac24c0824d61b0 len=4390
-key=0000004c fnv64=ae3db872a8ce83b2 len=4690
-key=00000060 fnv64=61a7aa5955d7e21c len=4394
-key=00000064 fnv64=61a7aa5955d7e21c len=4394
-key=00000065 fnv64=28bb97c2cfd56c42 len=4427
-key=00000066 fnv64=356ae5d7c68cd961 len=4394
-key=0000006c fnv64=00c4c17b171282b3 len=4694
-key=00000080 fnv64=acd4637db1207d48 len=4140
-key=00000084 fnv64=acd4637db1207d48 len=4140
-key=00000085 fnv64=a368dc8a3845b399 len=4172
-key=00000086 fnv64=1651d608e3619836 len=4139
-key=0000008c fnv64=4f33083c09cbd0c3 len=4440
-key=000000c0 fnv64=f110172ecd5c08e1 len=4390
-key=000000c4 fnv64=f110172ecd5c08e1 len=4390
-key=000000c5 fnv64=af0621dea0cd22d1 len=4423
-key=000000c6 fnv64=3cac24c0824d61b0 len=4390
-key=000000cc fnv64=ae3db872a8ce83b2 len=4690
-key=000000e0 fnv64=61a7aa5955d7e21c len=4394
-key=000000e4 fnv64=61a7aa5955d7e21c len=4394
-key=000000e5 fnv64=28bb97c2cfd56c42 len=4427
-key=000000e6 fnv64=356ae5d7c68cd961 len=4394
-key=000000ec fnv64=00c4c17b171282b3 len=4694
-key=00000100 fnv64=8e05562d3e4ce19f len=4155
-key=00000104 fnv64=8e05562d3e4ce19f len=4155
-key=00000105 fnv64=a4575dc47360fdd2 len=4187
-key=00000106 fnv64=dab0a0cb5314d4dd len=4154
-key=0000010c fnv64=de59830dc1351159 len=4371
-key=00000120 fnv64=8cdea498af86b612 len=4159
-key=00000124 fnv64=8cdea498af86b612 len=4159
-key=00000125 fnv64=b5f31935882b8f71 len=4191
-key=00000126 fnv64=973bd08186918eb4 len=4158
-key=0000012c fnv64=eaa040d7c13d3e10 len=4375
-key=00000140 fnv64=f3abf1d0e61d6cb4 len=4405
-key=00000144 fnv64=f3abf1d0e61d6cb4 len=4405
-key=00000145 fnv64=994ee770150ccf8a len=4438
-key=00000146 fnv64=0ed71744cdfd2527 len=4405
-key=0000014c fnv64=14ef3ad94e0732ae len=4621
-key=00000160 fnv64=26d67374decfe71b len=4409
-key=00000164 fnv64=26d67374decfe71b len=4409
-key=00000165 fnv64=06bb02b9c3d8275b len=4442
-key=00000166 fnv64=81e630f1b45b7a34 len=4409
-key=0000016c fnv64=4f1e6b103994ce69 len=4625
-key=00000180 fnv64=8e05562d3e4ce19f len=4155
-key=00000184 fnv64=8e05562d3e4ce19f len=4155
-key=00000185 fnv64=a4575dc47360fdd2 len=4187
-key=00000186 fnv64=dab0a0cb5314d4dd len=4154
-key=0000018c fnv64=de59830dc1351159 len=4371
-key=000001c0 fnv64=f3abf1d0e61d6cb4 len=4405
-key=000001c4 fnv64=f3abf1d0e61d6cb4 len=4405
-key=000001c5 fnv64=994ee770150ccf8a len=4438
-key=000001c6 fnv64=0ed71744cdfd2527 len=4405
-key=000001cc fnv64=14ef3ad94e0732ae len=4621
-key=000001e0 fnv64=26d67374decfe71b len=4409
-key=000001e4 fnv64=26d67374decfe71b len=4409
-key=000001e5 fnv64=06bb02b9c3d8275b len=4442
-key=000001e6 fnv64=81e630f1b45b7a34 len=4409
-key=000001ec fnv64=4f1e6b103994ce69 len=4625
-key=00000204 fnv64=8e05562d3e4ce19f len=4155
-key=00000205 fnv64=a4575dc47360fdd2 len=4187
-key=00000206 fnv64=dab0a0cb5314d4dd len=4154
-key=00000224 fnv64=8cdea498af86b612 len=4159
-key=00000225 fnv64=b5f31935882b8f71 len=4191
-key=00000226 fnv64=973bd08186918eb4 len=4158
-key=00000244 fnv64=f3abf1d0e61d6cb4 len=4405
-key=00000245 fnv64=994ee770150ccf8a len=4438
-key=00000246 fnv64=0ed71744cdfd2527 len=4405
-key=00000264 fnv64=26d67374decfe71b len=4409
-key=00000265 fnv64=06bb02b9c3d8275b len=4442
-key=00000266 fnv64=81e630f1b45b7a34 len=4409
-key=00000284 fnv64=8e05562d3e4ce19f len=4155
-key=00000285 fnv64=a4575dc47360fdd2 len=4187
-key=00000286 fnv64=dab0a0cb5314d4dd len=4154
-key=000002c4 fnv64=f3abf1d0e61d6cb4 len=4405
-key=000002c5 fnv64=994ee770150ccf8a len=4438
-key=000002c6 fnv64=0ed71744cdfd2527 len=4405
-key=000002e4 fnv64=26d67374decfe71b len=4409
-key=000002e5 fnv64=06bb02b9c3d8275b len=4442
-key=000002e6 fnv64=81e630f1b45b7a34 len=4409
-key=00000304 fnv64=8e05562d3e4ce19f len=4155
-key=00000305 fnv64=a4575dc47360fdd2 len=4187
-key=00000306 fnv64=dab0a0cb5314d4dd len=4154
-key=00000324 fnv64=8cdea498af86b612 len=4159
-key=00000325 fnv64=b5f31935882b8f71 len=4191
-key=00000326 fnv64=973bd08186918eb4 len=4158
-key=00000344 fnv64=f3abf1d0e61d6cb4 len=4405
-key=00000345 fnv64=994ee770150ccf8a len=4438
-key=00000346 fnv64=0ed71744cdfd2527 len=4405
-key=00000364 fnv64=26d67374decfe71b len=4409
-key=00000365 fnv64=06bb02b9c3d8275b len=4442
-key=00000366 fnv64=81e630f1b45b7a34 len=4409
-key=00000384 fnv64=8e05562d3e4ce19f len=4155
-key=00000385 fnv64=a4575dc47360fdd2 len=4187
-key=00000386 fnv64=dab0a0cb5314d4dd len=4154
-key=000003c4 fnv64=f3abf1d0e61d6cb4 len=4405
-key=000003c5 fnv64=994ee770150ccf8a len=4438
-key=000003c6 fnv64=0ed71744cdfd2527 len=4405
-key=000003e4 fnv64=26d67374decfe71b len=4409
-key=000003e5 fnv64=06bb02b9c3d8275b len=4442
-key=000003e6 fnv64=81e630f1b45b7a34 len=4409
-key=00000408 fnv64=f1cf7b9f9c27b24a len=4701
-key=00000428 fnv64=05bfae22d51ad807 len=4705
-key=00000448 fnv64=dcfb4168a3b3298d len=4951
-key=00000468 fnv64=d096f02283ff2eb2 len=4955
-key=00000488 fnv64=f1cf7b9f9c27b24a len=4701
-key=000004c8 fnv64=dcfb4168a3b3298d len=4951
-key=000004e8 fnv64=d096f02283ff2eb2 len=4955
-key=00000508 fnv64=a1f732d2dfcc2e81 len=4628
-key=00000528 fnv64=9ca73a753f8a8ede len=4632
-key=00000548 fnv64=0f63596dcf217dc0 len=4878
-key=00000568 fnv64=4467c762746327b9 len=4882
-key=00000588 fnv64=a1f732d2dfcc2e81 len=4628
-key=000005c8 fnv64=0f63596dcf217dc0 len=4878
-key=000005e8 fnv64=4467c762746327b9 len=4882
-key=00000c08 fnv64=c9df214435cb3d6d len=4679
-key=00000c28 fnv64=c6973c89f133e860 len=4683
-key=00000c48 fnv64=99ee50b7b74f85aa len=4929
-key=00000c68 fnv64=5f1f4f19d0f69bc5 len=4933
-key=00000c88 fnv64=c9df214435cb3d6d len=4679
-key=00000cc8 fnv64=99ee50b7b74f85aa len=4929
-key=00000ce8 fnv64=5f1f4f19d0f69bc5 len=4933
-key=00000d08 fnv64=d87d73bb2f4a8d60 len=4606
-key=00000d28 fnv64=fe8ed31498c2fbfb len=4610
-key=00000d48 fnv64=35ac4c0f58f70ba1 len=4856
-key=00000d68 fnv64=3039c4d0363ee268 len=4860
-key=00000d88 fnv64=d87d73bb2f4a8d60 len=4606
-key=00000dc8 fnv64=35ac4c0f58f70ba1 len=4856
-key=00000de8 fnv64=3039c4d0363ee268 len=4860
-key=00001004 fnv64=0553e17a5210cf67 len=4299
-key=00001005 fnv64=ed832694d1e29f0e len=4331
-key=00001006 fnv64=6e7da8832d8f50a1 len=4298
-key=00001024 fnv64=83acee9a2c64b7da len=4303
-key=00001025 fnv64=df08d4a4a54bcc45 len=4335
-key=00001026 fnv64=854eccd1fc5babf0 len=4302
-key=00001044 fnv64=08a67378cf3679d8 len=4549
-key=00001045 fnv64=d30767436e3340ae len=4582
-key=00001046 fnv64=0f75a6c22a236e67 len=4549
-key=00001064 fnv64=f5552289ff556b5b len=4553
-key=00001065 fnv64=14c822597fa6a69b len=4586
-key=00001066 fnv64=4d67945f1a56e758 len=4553
-key=00001084 fnv64=0553e17a5210cf67 len=4299
-key=00001085 fnv64=ed832694d1e29f0e len=4331
-key=00001086 fnv64=6e7da8832d8f50a1 len=4298
-key=000010c4 fnv64=08a67378cf3679d8 len=4549
-key=000010c5 fnv64=d30767436e3340ae len=4582
-key=000010c6 fnv64=0f75a6c22a236e67 len=4549
-key=000010e4 fnv64=f5552289ff556b5b len=4553
-key=000010e5 fnv64=14c822597fa6a69b len=4586
-key=000010e6 fnv64=4d67945f1a56e758 len=4553
-key=00001104 fnv64=2bc9edcf8488c572 len=4314
-key=00001105 fnv64=5c2f2ea756e2a31f len=4346
-key=00001106 fnv64=9a88b12ec3d73df4 len=4313
-key=00001124 fnv64=a383f17ad09d4d59 len=4318
-key=00001125 fnv64=6ca087ede5405f06 len=4350
-key=00001126 fnv64=2a87c3af8ae6a0e7 len=4317
-key=00001144 fnv64=c391d9144db3628f len=4564
-key=00001145 fnv64=79b0adca25b4e27f len=4597
-key=00001146 fnv64=bd2c2d755fd76a72 len=4564
-key=00001164 fnv64=44dd6fa2b732975e len=4568
-key=00001165 fnv64=681ea9b62b773234 len=4601
-key=00001166 fnv64=d48a9733ac369f0f len=4568
-key=00001184 fnv64=2bc9edcf8488c572 len=4314
-key=00001185 fnv64=5c2f2ea756e2a31f len=4346
-key=00001186 fnv64=9a88b12ec3d73df4 len=4313
-key=000011c4 fnv64=c391d9144db3628f len=4564
-key=000011c5 fnv64=79b0adca25b4e27f len=4597
-key=000011c6 fnv64=bd2c2d755fd76a72 len=4564
-key=000011e4 fnv64=44dd6fa2b732975e len=4568
-key=000011e5 fnv64=681ea9b62b773234 len=4601
-key=000011e6 fnv64=d48a9733ac369f0f len=4568
-key=00001204 fnv64=2bc9edcf8488c572 len=4314
-key=00001205 fnv64=5c2f2ea756e2a31f len=4346
-key=00001206 fnv64=9a88b12ec3d73df4 len=4313
-key=00001224 fnv64=a383f17ad09d4d59 len=4318
-key=00001225 fnv64=6ca087ede5405f06 len=4350
-key=00001226 fnv64=2a87c3af8ae6a0e7 len=4317
-key=00001244 fnv64=c391d9144db3628f len=4564
-key=00001245 fnv64=79b0adca25b4e27f len=4597
-key=00001246 fnv64=bd2c2d755fd76a72 len=4564
-key=00001264 fnv64=44dd6fa2b732975e len=4568
-key=00001265 fnv64=681ea9b62b773234 len=4601
-key=00001266 fnv64=d48a9733ac369f0f len=4568
-key=00001284 fnv64=2bc9edcf8488c572 len=4314
-key=00001285 fnv64=5c2f2ea756e2a31f len=4346
-key=00001286 fnv64=9a88b12ec3d73df4 len=4313
-key=000012c4 fnv64=c391d9144db3628f len=4564
-key=000012c5 fnv64=79b0adca25b4e27f len=4597
-key=000012c6 fnv64=bd2c2d755fd76a72 len=4564
-key=000012e4 fnv64=44dd6fa2b732975e len=4568
-key=000012e5 fnv64=681ea9b62b773234 len=4601
-key=000012e6 fnv64=d48a9733ac369f0f len=4568
-key=00001304 fnv64=2bc9edcf8488c572 len=4314
-key=00001305 fnv64=5c2f2ea756e2a31f len=4346
-key=00001306 fnv64=9a88b12ec3d73df4 len=4313
-key=00001324 fnv64=a383f17ad09d4d59 len=4318
-key=00001325 fnv64=6ca087ede5405f06 len=4350
-key=00001326 fnv64=2a87c3af8ae6a0e7 len=4317
-key=00001344 fnv64=c391d9144db3628f len=4564
-key=00001345 fnv64=79b0adca25b4e27f len=4597
-key=00001346 fnv64=bd2c2d755fd76a72 len=4564
-key=00001364 fnv64=44dd6fa2b732975e len=4568
-key=00001365 fnv64=681ea9b62b773234 len=4601
-key=00001366 fnv64=d48a9733ac369f0f len=4568
-key=00001384 fnv64=2bc9edcf8488c572 len=4314
-key=00001385 fnv64=5c2f2ea756e2a31f len=4346
-key=00001386 fnv64=9a88b12ec3d73df4 len=4313
-key=000013c4 fnv64=c391d9144db3628f len=4564
-key=000013c5 fnv64=79b0adca25b4e27f len=4597
-key=000013c6 fnv64=bd2c2d755fd76a72 len=4564
-key=000013e4 fnv64=44dd6fa2b732975e len=4568
-key=000013e5 fnv64=681ea9b62b773234 len=4601
-key=000013e6 fnv64=d48a9733ac369f0f len=4568
-key=00001410 fnv64=a6896a943432f6cd len=4772
-key=00001430 fnv64=2c1449b80913a24a len=4776
-key=00001450 fnv64=cf929437afb2800c len=5022
-key=00001470 fnv64=91182932d3b062a9 len=5026
-key=00001490 fnv64=a6896a943432f6cd len=4772
-key=000014d0 fnv64=cf929437afb2800c len=5022
-key=000014f0 fnv64=91182932d3b062a9 len=5026
-key=00001510 fnv64=66e49abf66dd4fd8 len=4787
-key=00001530 fnv64=95830aca957b46a9 len=4791
-key=00001550 fnv64=5d5f2fe6bedd496b len=5037
-key=00001570 fnv64=a40392e1cec1849c len=5041
-key=00001590 fnv64=66e49abf66dd4fd8 len=4787
-key=000015d0 fnv64=5d5f2fe6bedd496b len=5037
-key=000015f0 fnv64=a40392e1cec1849c len=5041
-key=00001c10 fnv64=31e7ff4a3a332eea len=4750
-key=00001c30 fnv64=f7e0721237e3000d len=4754
-key=00001c50 fnv64=9e7c3d605408615b len=5000
-key=00001c70 fnv64=0775b9712ed14606 len=5004
-key=00001c90 fnv64=31e7ff4a3a332eea len=4750
-key=00001cd0 fnv64=9e7c3d605408615b len=5000
-key=00001cf0 fnv64=0775b9712ed14606 len=5004
-key=00001d10 fnv64=aea600067181b609 len=4765
-key=00001d30 fnv64=4f2ac7546fbf4f98 len=4769
-key=00001d50 fnv64=1cfec073cf99495e len=5015
-key=00001d70 fnv64=a52ac09a4e6fd88d len=5019
-key=00001d90 fnv64=aea600067181b609 len=4765
-key=00001dd0 fnv64=1cfec073cf99495e len=5015
-key=00001df0 fnv64=a52ac09a4e6fd88d len=5019
-key=00002408 fnv64=db6e6e328cb8d879 len=4842
-key=00002428 fnv64=17e573b0257cff52 len=4846
-key=00002448 fnv64=34c492c9b263888c len=5092
-key=00002468 fnv64=ee2a5cf0805b3191 len=5096
-key=00002488 fnv64=db6e6e328cb8d879 len=4842
-key=000024c8 fnv64=34c492c9b263888c len=5092
-key=000024e8 fnv64=ee2a5cf0805b3191 len=5096
-key=00002508 fnv64=a1f732d2dfcc2e81 len=4628
-key=00002528 fnv64=9ca73a753f8a8ede len=4632
-key=00002548 fnv64=0f63596dcf217dc0 len=4878
-key=00002568 fnv64=4467c762746327b9 len=4882
-key=00002588 fnv64=a1f732d2dfcc2e81 len=4628
-key=000025c8 fnv64=0f63596dcf217dc0 len=4878
-key=000025e8 fnv64=4467c762746327b9 len=4882
-key=00002c08 fnv64=b655ed758e93aeac len=4820
-key=00002c28 fnv64=68aad9cf2588b1db len=4824
-key=00002c48 fnv64=ee777e4a5edfed99 len=5070
-key=00002c68 fnv64=ff0e6d48dadb7874 len=5074
-key=00002c88 fnv64=b655ed758e93aeac len=4820
-key=00002cc8 fnv64=ee777e4a5edfed99 len=5070
-key=00002ce8 fnv64=ff0e6d48dadb7874 len=5074
-key=00002d08 fnv64=d87d73bb2f4a8d60 len=4606
-key=00002d28 fnv64=fe8ed31498c2fbfb len=4610
-key=00002d48 fnv64=35ac4c0f58f70ba1 len=4856
-key=00002d68 fnv64=3039c4d0363ee268 len=4860
-key=00002d88 fnv64=d87d73bb2f4a8d60 len=4606
-key=00002dc8 fnv64=35ac4c0f58f70ba1 len=4856
-key=00002de8 fnv64=3039c4d0363ee268 len=4860
-key=00004000 fnv64=f4914abc8164b682 len=4198
-key=00004004 fnv64=f4914abc8164b682 len=4198
-key=00004005 fnv64=bfbb2c1772bd022b len=4230
-key=00004006 fnv64=05c11a52771fd1e4 len=4197
-key=0000400c fnv64=48bb3ce23cbef875 len=4498
-key=0000401a fnv64=105084d4cf664d57 len=4523
-key=00004020 fnv64=5921a5423749d245 len=4202
-key=00004024 fnv64=5921a5423749d245 len=4202
-key=00004025 fnv64=449ebb62f51fb0e6 len=4234
-key=00004026 fnv64=d3d2a8f9f209e153 len=4201
-key=0000402c fnv64=98c4936e38947b92 len=4502
-key=0000403a fnv64=e0059c9a130c5ee4 len=4527
-key=00004040 fnv64=a1032f4bc14c5577 len=4448
-key=00004044 fnv64=a1032f4bc14c5577 len=4448
-key=00004045 fnv64=ac19fdf55687fed7 len=4481
-key=00004046 fnv64=f314d06ccbee02e6 len=4448
-key=0000404c fnv64=cb4790b85d025f80 len=4748
-key=0000405a fnv64=ef2ab1c3251871ad len=4774
-key=00004060 fnv64=d863e36fcff5d992 len=4452
-key=00004064 fnv64=d863e36fcff5d992 len=4452
-key=00004065 fnv64=59a2ec9dfb227b78 len=4485
-key=00004066 fnv64=725742f4ff5c29f7 len=4452
-key=0000406c fnv64=3eca00eba83b9379 len=4752
-key=0000407a fnv64=9e9201642fd33dd8 len=4778
-key=00004080 fnv64=f4914abc8164b682 len=4198
-key=00004084 fnv64=f4914abc8164b682 len=4198
-key=00004085 fnv64=bfbb2c1772bd022b len=4230
-key=00004086 fnv64=05c11a52771fd1e4 len=4197
-key=0000408c fnv64=48bb3ce23cbef875 len=4498
-key=0000409a fnv64=105084d4cf664d57 len=4523
-key=000040c0 fnv64=a1032f4bc14c5577 len=4448
-key=000040c4 fnv64=a1032f4bc14c5577 len=4448
-key=000040c5 fnv64=ac19fdf55687fed7 len=4481
-key=000040c6 fnv64=f314d06ccbee02e6 len=4448
-key=000040cc fnv64=cb4790b85d025f80 len=4748
-key=000040da fnv64=ef2ab1c3251871ad len=4774
-key=000040e0 fnv64=d863e36fcff5d992 len=4452
-key=000040e4 fnv64=d863e36fcff5d992 len=4452
-key=000040e5 fnv64=59a2ec9dfb227b78 len=4485
-key=000040e6 fnv64=725742f4ff5c29f7 len=4452
-key=000040ec fnv64=3eca00eba83b9379 len=4752
-key=000040fa fnv64=9e9201642fd33dd8 len=4778
-key=00004100 fnv64=5d0870ab4cc498a1 len=4213
-key=00004104 fnv64=5d0870ab4cc498a1 len=4213
-key=00004105 fnv64=4e207710bccfdea4 len=4245
-key=00004106 fnv64=f014a4a3e186b103 len=4212
-key=0000410c fnv64=2b4a6b2bd8dad2db len=4429
-key=0000411a fnv64=f014a4a3e186b103 len=4212
-key=00004120 fnv64=d36bc450cf77fd30 len=4217
-key=00004124 fnv64=d36bc450cf77fd30 len=4217
-key=00004125 fnv64=a927935fc30ac297 len=4249
-key=00004126 fnv64=5795880a10805c16 len=4216
-key=0000412c fnv64=10fc9abe12434cce len=4433
-key=0000413a fnv64=5795880a10805c16 len=4216
-key=00004140 fnv64=b01036ae28188322 len=4463
-key=00004144 fnv64=b01036ae28188322 len=4463
-key=00004145 fnv64=ae5836688622f908 len=4496
-key=00004146 fnv64=0c8b92426d8b01ad len=4463
-key=0000414c fnv64=6a2c57114824e5e4 len=4679
-key=0000415a fnv64=0c8b92426d8b01ad len=4463
-key=00004160 fnv64=f78d5e0e37562151 len=4467
-key=00004164 fnv64=f78d5e0e37562151 len=4467
-key=00004165 fnv64=d1e5b0de2104b041 len=4500
-key=00004166 fnv64=ca1b1a83b3ac7ca2 len=4467
-key=0000416c fnv64=e79c737f5463c337 len=4683
-key=0000417a fnv64=ca1b1a83b3ac7ca2 len=4467
-key=00004180 fnv64=5d0870ab4cc498a1 len=4213
-key=00004184 fnv64=5d0870ab4cc498a1 len=4213
-key=00004185 fnv64=4e207710bccfdea4 len=4245
-key=00004186 fnv64=f014a4a3e186b103 len=4212
-key=0000418c fnv64=2b4a6b2bd8dad2db len=4429
-key=0000419a fnv64=f014a4a3e186b103 len=4212
-key=000041c0 fnv64=b01036ae28188322 len=4463
-key=000041c4 fnv64=b01036ae28188322 len=4463
-key=000041c5 fnv64=ae5836688622f908 len=4496
-key=000041c6 fnv64=0c8b92426d8b01ad len=4463
-key=000041cc fnv64=6a2c57114824e5e4 len=4679
-key=000041da fnv64=0c8b92426d8b01ad len=4463
-key=000041e0 fnv64=f78d5e0e37562151 len=4467
-key=000041e4 fnv64=f78d5e0e37562151 len=4467
-key=000041e5 fnv64=d1e5b0de2104b041 len=4500
-key=000041e6 fnv64=ca1b1a83b3ac7ca2 len=4467
-key=000041ec fnv64=e79c737f5463c337 len=4683
-key=000041fa fnv64=ca1b1a83b3ac7ca2 len=4467
-key=00004204 fnv64=5d0870ab4cc498a1 len=4213
-key=00004205 fnv64=4e207710bccfdea4 len=4245
-key=00004206 fnv64=f014a4a3e186b103 len=4212
-key=00004224 fnv64=d36bc450cf77fd30 len=4217
-key=00004225 fnv64=a927935fc30ac297 len=4249
-key=00004226 fnv64=5795880a10805c16 len=4216
-key=00004244 fnv64=b01036ae28188322 len=4463
-key=00004245 fnv64=ae5836688622f908 len=4496
-key=00004246 fnv64=0c8b92426d8b01ad len=4463
-key=00004264 fnv64=f78d5e0e37562151 len=4467
-key=00004265 fnv64=d1e5b0de2104b041 len=4500
-key=00004266 fnv64=ca1b1a83b3ac7ca2 len=4467
-key=00004284 fnv64=5d0870ab4cc498a1 len=4213
-key=00004285 fnv64=4e207710bccfdea4 len=4245
-key=00004286 fnv64=f014a4a3e186b103 len=4212
-key=000042c4 fnv64=b01036ae28188322 len=4463
-key=000042c5 fnv64=ae5836688622f908 len=4496
-key=000042c6 fnv64=0c8b92426d8b01ad len=4463
-key=000042e4 fnv64=f78d5e0e37562151 len=4467
-key=000042e5 fnv64=d1e5b0de2104b041 len=4500
-key=000042e6 fnv64=ca1b1a83b3ac7ca2 len=4467
-key=00004304 fnv64=5d0870ab4cc498a1 len=4213
-key=00004305 fnv64=4e207710bccfdea4 len=4245
-key=00004306 fnv64=f014a4a3e186b103 len=4212
-key=00004324 fnv64=d36bc450cf77fd30 len=4217
-key=00004325 fnv64=a927935fc30ac297 len=4249
-key=00004326 fnv64=5795880a10805c16 len=4216
-key=00004344 fnv64=b01036ae28188322 len=4463
-key=00004345 fnv64=ae5836688622f908 len=4496
-key=00004346 fnv64=0c8b92426d8b01ad len=4463
-key=00004364 fnv64=f78d5e0e37562151 len=4467
-key=00004365 fnv64=d1e5b0de2104b041 len=4500
-key=00004366 fnv64=ca1b1a83b3ac7ca2 len=4467
-key=00004384 fnv64=5d0870ab4cc498a1 len=4213
-key=00004385 fnv64=4e207710bccfdea4 len=4245
-key=00004386 fnv64=f014a4a3e186b103 len=4212
-key=000043c4 fnv64=b01036ae28188322 len=4463
-key=000043c5 fnv64=ae5836688622f908 len=4496
-key=000043c6 fnv64=0c8b92426d8b01ad len=4463
-key=000043e4 fnv64=f78d5e0e37562151 len=4467
-key=000043e5 fnv64=d1e5b0de2104b041 len=4500
-key=000043e6 fnv64=ca1b1a83b3ac7ca2 len=4467
-key=00004408 fnv64=f6a36c5c8c8c333c len=4759
-key=00004414 fnv64=2c4911313ce16711 len=4892
-key=00004428 fnv64=2bf419e840eff931 len=4763
-key=00004434 fnv64=0d1fa8a09c932d82 len=4896
-key=00004448 fnv64=b93038c1386c13b7 len=5009
-key=00004454 fnv64=7b08c9ec3a1779e4 len=5142
-key=00004468 fnv64=030ec82eb0ffe260 len=5013
-key=00004474 fnv64=e07b476b23938b3d len=5146
-key=00004488 fnv64=f6a36c5c8c8c333c len=4759
-key=00004494 fnv64=2c4911313ce16711 len=4892
-key=000044c8 fnv64=b93038c1386c13b7 len=5009
-key=000044d4 fnv64=7b08c9ec3a1779e4 len=5142
-key=000044e8 fnv64=030ec82eb0ffe260 len=5013
-key=000044f4 fnv64=e07b476b23938b3d len=5146
-key=00004508 fnv64=130abf900163ab77 len=4686
-key=00004514 fnv64=130abf900163ab77 len=4686
-key=00004528 fnv64=2c483d34f797bbc4 len=4690
-key=00004534 fnv64=2c483d34f797bbc4 len=4690
-key=00004548 fnv64=5508c16bfb0d108e len=4936
-key=00004554 fnv64=5508c16bfb0d108e len=4936
-key=00004568 fnv64=662d91924fd059fb len=4940
-key=00004574 fnv64=662d91924fd059fb len=4940
-key=00004588 fnv64=130abf900163ab77 len=4686
-key=00004594 fnv64=130abf900163ab77 len=4686
-key=000045c8 fnv64=5508c16bfb0d108e len=4936
-key=000045d4 fnv64=5508c16bfb0d108e len=4936
-key=000045e8 fnv64=662d91924fd059fb len=4940
-key=000045f4 fnv64=662d91924fd059fb len=4940
-key=00004c08 fnv64=efb1056d29860d63 len=4737
-key=00004c28 fnv64=f3ddacb0157cb38e len=4741
-key=00004c48 fnv64=087dde38e47b8ad0 len=4987
-key=00004c68 fnv64=8c6886474cdd3c57 len=4991
-key=00004c88 fnv64=efb1056d29860d63 len=4737
-key=00004cc8 fnv64=087dde38e47b8ad0 len=4987
-key=00004ce8 fnv64=8c6886474cdd3c57 len=4991
-key=00004d08 fnv64=ec48c5e5c74ade7a len=4664
-key=00004d28 fnv64=c4a1c46628c01f85 len=4668
-key=00004d48 fnv64=bed2da6502fcc2ab len=4914
-key=00004d68 fnv64=a74852535d48206e len=4918
-key=00004d88 fnv64=ec48c5e5c74ade7a len=4664
-key=00004dc8 fnv64=bed2da6502fcc2ab len=4914
-key=00004de8 fnv64=a74852535d48206e len=4918
-key=00005004 fnv64=a28fe02aff0f6925 len=4357
-key=00005005 fnv64=9d16e229e12c5784 len=4389
-key=00005006 fnv64=ac1250318deadbeb len=4356
-key=00005024 fnv64=0f018a1ccac06c54 len=4361
-key=00005025 fnv64=d4fecae74a8e573f len=4393
-key=00005026 fnv64=764142bd390c0466 len=4360
-key=00005044 fnv64=66c64cc373dfe87a len=4607
-key=00005045 fnv64=4f689c46a43f5030 len=4640
-key=00005046 fnv64=4ebc22fd8fe0f121 len=4607
-key=00005064 fnv64=c49be02abcf24725 len=4611
-key=00005065 fnv64=9214235cb5b52cf5 len=4644
-key=00005066 fnv64=d8de39658bc941fa len=4611
-key=00005084 fnv64=a28fe02aff0f6925 len=4357
-key=00005085 fnv64=9d16e229e12c5784 len=4389
-key=00005086 fnv64=ac1250318deadbeb len=4356
-key=000050c4 fnv64=66c64cc373dfe87a len=4607
-key=000050c5 fnv64=4f689c46a43f5030 len=4640
-key=000050c6 fnv64=4ebc22fd8fe0f121 len=4607
-key=000050e4 fnv64=c49be02abcf24725 len=4611
-key=000050e5 fnv64=9214235cb5b52cf5 len=4644
-key=000050e6 fnv64=d8de39658bc941fa len=4611
-key=00005104 fnv64=fd38cfa20ac3e350 len=4372
-key=00005105 fnv64=c6a33716d564ec05 len=4404
-key=00005106 fnv64=68e4a2ec544d49ce len=4371
-key=00005124 fnv64=e40ce615fd91f813 len=4376
-key=00005125 fnv64=d9035dbdf103e0b0 len=4408
-key=00005126 fnv64=aa7c38c1ad2f5a2d len=4375
-key=00005144 fnv64=3689f8fb61d9d539 len=4622
-key=00005145 fnv64=6a1694c04ee8a979 len=4655
-key=00005146 fnv64=f0874c0291653b74 len=4622
-key=00005164 fnv64=f6d75b9885950d50 len=4626
-key=00005165 fnv64=b177ec717d772516 len=4659
-key=00005166 fnv64=b81898c00cfb75b9 len=4626
-key=00005184 fnv64=fd38cfa20ac3e350 len=4372
-key=00005185 fnv64=c6a33716d564ec05 len=4404
-key=00005186 fnv64=68e4a2ec544d49ce len=4371
-key=000051c4 fnv64=3689f8fb61d9d539 len=4622
-key=000051c5 fnv64=6a1694c04ee8a979 len=4655
-key=000051c6 fnv64=f0874c0291653b74 len=4622
-key=000051e4 fnv64=f6d75b9885950d50 len=4626
-key=000051e5 fnv64=b177ec717d772516 len=4659
-key=000051e6 fnv64=b81898c00cfb75b9 len=4626
-key=00005204 fnv64=fd38cfa20ac3e350 len=4372
-key=00005205 fnv64=c6a33716d564ec05 len=4404
-key=00005206 fnv64=68e4a2ec544d49ce len=4371
-key=00005224 fnv64=e40ce615fd91f813 len=4376
-key=00005225 fnv64=d9035dbdf103e0b0 len=4408
-key=00005226 fnv64=aa7c38c1ad2f5a2d len=4375
-key=00005244 fnv64=3689f8fb61d9d539 len=4622
-key=00005245 fnv64=6a1694c04ee8a979 len=4655
-key=00005246 fnv64=f0874c0291653b74 len=4622
-key=00005264 fnv64=f6d75b9885950d50 len=4626
-key=00005265 fnv64=b177ec717d772516 len=4659
-key=00005266 fnv64=b81898c00cfb75b9 len=4626
-key=00005284 fnv64=fd38cfa20ac3e350 len=4372
-key=00005285 fnv64=c6a33716d564ec05 len=4404
-key=00005286 fnv64=68e4a2ec544d49ce len=4371
-key=000052c4 fnv64=3689f8fb61d9d539 len=4622
-key=000052c5 fnv64=6a1694c04ee8a979 len=4655
-key=000052c6 fnv64=f0874c0291653b74 len=4622
-key=000052e4 fnv64=f6d75b9885950d50 len=4626
-key=000052e5 fnv64=b177ec717d772516 len=4659
-key=000052e6 fnv64=b81898c00cfb75b9 len=4626
-key=00005304 fnv64=fd38cfa20ac3e350 len=4372
-key=00005305 fnv64=c6a33716d564ec05 len=4404
-key=00005306 fnv64=68e4a2ec544d49ce len=4371
-key=00005324 fnv64=e40ce615fd91f813 len=4376
-key=00005325 fnv64=d9035dbdf103e0b0 len=4408
-key=00005326 fnv64=aa7c38c1ad2f5a2d len=4375
-key=00005344 fnv64=3689f8fb61d9d539 len=4622
-key=00005345 fnv64=6a1694c04ee8a979 len=4655
-key=00005346 fnv64=f0874c0291653b74 len=4622
-key=00005364 fnv64=f6d75b9885950d50 len=4626
-key=00005365 fnv64=b177ec717d772516 len=4659
-key=00005366 fnv64=b81898c00cfb75b9 len=4626
-key=00005384 fnv64=fd38cfa20ac3e350 len=4372
-key=00005385 fnv64=c6a33716d564ec05 len=4404
-key=00005386 fnv64=68e4a2ec544d49ce len=4371
-key=000053c4 fnv64=3689f8fb61d9d539 len=4622
-key=000053c5 fnv64=6a1694c04ee8a979 len=4655
-key=000053c6 fnv64=f0874c0291653b74 len=4622
-key=000053e4 fnv64=f6d75b9885950d50 len=4626
-key=000053e5 fnv64=b177ec717d772516 len=4659
-key=000053e6 fnv64=b81898c00cfb75b9 len=4626
-key=00005410 fnv64=29693d8637395a97 len=4830
-key=00005430 fnv64=c54c889512c0513c len=4834
-key=00005450 fnv64=cb00b6ca37932f36 len=5080
-key=00005470 fnv64=c84d74e921cc3f5f len=5084
-key=00005490 fnv64=29693d8637395a97 len=4830
-key=000054d0 fnv64=cb00b6ca37932f36 len=5080
-key=000054f0 fnv64=c84d74e921cc3f5f len=5084
-key=00005510 fnv64=656a9370e315ad82 len=4845
-key=00005530 fnv64=a8bdc9ae21518f7b len=4849
-key=00005550 fnv64=97b0931c19a6a1dd len=5095
-key=00005570 fnv64=db90a155e3ddde2a len=5099
-key=00005590 fnv64=656a9370e315ad82 len=4845
-key=000055d0 fnv64=97b0931c19a6a1dd len=5095
-key=000055f0 fnv64=db90a155e3ddde2a len=5099
-key=00005c10 fnv64=92708698929c2ad8 len=4808
-key=00005c30 fnv64=dc612540173bf3cb len=4812
-key=00005c50 fnv64=6af055111ee56349 len=5058
-key=00005c70 fnv64=8a129979965bd0f0 len=5062
-key=00005c90 fnv64=92708698929c2ad8 len=4808
-key=00005cd0 fnv64=6af055111ee56349 len=5058
-key=00005cf0 fnv64=8a129979965bd0f0 len=5062
-key=00005d10 fnv64=8bd656d66ddf2d8f len=4823
-key=00005d30 fnv64=458beb94419aa1ee len=4827
-key=00005d50 fnv64=2e13116a12610b7c len=5073
-key=00005d70 fnv64=929f20cd68db27e7 len=5077
-key=00005d90 fnv64=8bd656d66ddf2d8f len=4823
-key=00005dd0 fnv64=2e13116a12610b7c len=5073
-key=00005df0 fnv64=929f20cd68db27e7 len=5077
-key=00006408 fnv64=209762dbd9f6c377 len=4900
-key=00006414 fnv64=8d4ecebbef442c24 len=5033
-key=00006428 fnv64=52160ac0702597f0 len=4904
-key=00006434 fnv64=29f26275d32d012d len=5037
-key=00006448 fnv64=15a36781f5474622 len=5150
-key=00006454 fnv64=884c9aef79bf6c4b len=5283
-key=00006468 fnv64=6c9fb6b3e1cc1fdb len=5154
-key=00006474 fnv64=0587bff6bd19a2e0 len=5287
-key=00006488 fnv64=209762dbd9f6c377 len=4900
-key=00006494 fnv64=8d4ecebbef442c24 len=5033
-key=000064c8 fnv64=15a36781f5474622 len=5150
-key=000064d4 fnv64=884c9aef79bf6c4b len=5283
-key=000064e8 fnv64=6c9fb6b3e1cc1fdb len=5154
-key=000064f4 fnv64=0587bff6bd19a2e0 len=5287
-key=00006508 fnv64=130abf900163ab77 len=4686
-key=00006514 fnv64=130abf900163ab77 len=4686
-key=00006528 fnv64=2c483d34f797bbc4 len=4690
-key=00006534 fnv64=2c483d34f797bbc4 len=4690
-key=00006548 fnv64=5508c16bfb0d108e len=4936
-key=00006554 fnv64=5508c16bfb0d108e len=4936
-key=00006568 fnv64=662d91924fd059fb len=4940
-key=00006574 fnv64=662d91924fd059fb len=4940
-key=00006588 fnv64=130abf900163ab77 len=4686
-key=00006594 fnv64=130abf900163ab77 len=4686
-key=000065c8 fnv64=5508c16bfb0d108e len=4936
-key=000065d4 fnv64=5508c16bfb0d108e len=4936
-key=000065e8 fnv64=662d91924fd059fb len=4940
-key=000065f4 fnv64=662d91924fd059fb len=4940
-key=00006c08 fnv64=decb2720ffd03b5e len=4878
-key=00006c28 fnv64=24a72d3cb3a1e93d len=4882
-key=00006c48 fnv64=c982753dcc57ac6b len=5128
-key=00006c68 fnv64=b1d594b008dda202 len=5132
-key=00006c88 fnv64=decb2720ffd03b5e len=4878
-key=00006cc8 fnv64=c982753dcc57ac6b len=5128
-key=00006ce8 fnv64=b1d594b008dda202 len=5132
-key=00006d08 fnv64=ec48c5e5c74ade7a len=4664
-key=00006d28 fnv64=c4a1c46628c01f85 len=4668
-key=00006d48 fnv64=bed2da6502fcc2ab len=4914
-key=00006d68 fnv64=a74852535d48206e len=4918
-key=00006d88 fnv64=ec48c5e5c74ade7a len=4664
-key=00006dc8 fnv64=bed2da6502fcc2ab len=4914
-key=00006de8 fnv64=a74852535d48206e len=4918
-key=00010006 fnv64=f0c375ca06018647 len=4163
-key=00010026 fnv64=437e8a3c1a10cce8 len=4167
-key=00010046 fnv64=b3d4061e32e2db8d len=4414
-key=00010066 fnv64=f54fd3ad335a4768 len=4418
-key=00010086 fnv64=f0c375ca06018647 len=4163
-key=000100c6 fnv64=b3d4061e32e2db8d len=4414
-key=000100e6 fnv64=f54fd3ad335a4768 len=4418
-key=00010106 fnv64=f0c375ca06018647 len=4163
-key=00010126 fnv64=437e8a3c1a10cce8 len=4167
-key=00010146 fnv64=b3d4061e32e2db8d len=4414
-key=00010166 fnv64=f54fd3ad335a4768 len=4418
-key=00010186 fnv64=f0c375ca06018647 len=4163
-key=000101c6 fnv64=b3d4061e32e2db8d len=4414
-key=000101e6 fnv64=f54fd3ad335a4768 len=4418
-key=00014006 fnv64=5be7184ed070c311 len=4221
-key=00014026 fnv64=d48924f2dd920be6 len=4225
-key=00014046 fnv64=d63dce0f143c2df7 len=4472
-key=00014066 fnv64=551061ba47f716da len=4476
-key=00014086 fnv64=5be7184ed070c311 len=4221
-key=000140c6 fnv64=d63dce0f143c2df7 len=4472
-key=000140e6 fnv64=551061ba47f716da len=4476
-key=00014106 fnv64=5be7184ed070c311 len=4221
-key=00014126 fnv64=d48924f2dd920be6 len=4225
-key=00014146 fnv64=d63dce0f143c2df7 len=4472
-key=00014166 fnv64=551061ba47f716da len=4476
-key=00014186 fnv64=5be7184ed070c311 len=4221
-key=000141c6 fnv64=d63dce0f143c2df7 len=4472
-key=000141e6 fnv64=551061ba47f716da len=4476
+# object-pipeline-descriptors v1
+key=00000000 fam=unknown technique=fixed blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000004 fam=fixed_function technique=fixed blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000005 fam=fixed_function technique=fixed blend=alpha_blend depth=transparent-no-write cull=back alpha=1 atest=0 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000006 fam=fixed_function technique=fixed blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=0000000c fam=flag technique=flag blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000020 fam=unknown technique=fixed blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000024 fam=fixed_function technique=fixed blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000025 fam=fixed_function technique=fixed blend=alpha_blend depth=transparent-no-write cull=disabled alpha=1 atest=0 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000026 fam=fixed_function technique=fixed blend=additive depth=transparent-no-write cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=0000002c fam=flag technique=flag blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000040 fam=unknown technique=fixed blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000044 fam=fixed_function technique=fixed blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000045 fam=fixed_function technique=fixed blend=alpha_blend depth=alpha-prepass cull=back alpha=1 atest=1 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000046 fam=fixed_function technique=fixed blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=0000004c fam=flag technique=flag blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000060 fam=unknown technique=fixed blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000064 fam=fixed_function technique=fixed blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000065 fam=fixed_function technique=fixed blend=alpha_blend depth=alpha-prepass cull=disabled alpha=1 atest=1 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000066 fam=fixed_function technique=fixed blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=0000006c fam=flag technique=flag blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000080 fam=unknown technique=fixed blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000084 fam=fixed_function technique=fixed blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000085 fam=fixed_function technique=fixed blend=alpha_blend depth=transparent-no-write cull=back alpha=1 atest=0 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000086 fam=fixed_function technique=fixed blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=0000008c fam=flag technique=flag blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000000c0 fam=unknown technique=fixed blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000000c4 fam=fixed_function technique=fixed blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000000c5 fam=fixed_function technique=fixed blend=alpha_blend depth=alpha-prepass cull=back alpha=1 atest=1 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000000c6 fam=fixed_function technique=fixed blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000000cc fam=flag technique=flag blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000000e0 fam=unknown technique=fixed blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000000e4 fam=fixed_function technique=fixed blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000000e5 fam=fixed_function technique=fixed blend=alpha_blend depth=alpha-prepass cull=disabled alpha=1 atest=1 atinv=1 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000000e6 fam=fixed_function technique=fixed blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000000ec fam=flag technique=flag blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000100 fam=unknown technique=self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000104 fam=fixed_function technique=self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000105 fam=fixed_function technique=self-lit blend=alpha_blend depth=transparent-no-write cull=back alpha=1 atest=0 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000106 fam=fixed_function technique=self-lit blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=0000010c fam=flag technique=flag-self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000120 fam=unknown technique=self-lit blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000124 fam=fixed_function technique=self-lit blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000125 fam=fixed_function technique=self-lit blend=alpha_blend depth=transparent-no-write cull=disabled alpha=1 atest=0 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000126 fam=fixed_function technique=self-lit blend=additive depth=transparent-no-write cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=0000012c fam=flag technique=flag-self-lit blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000140 fam=unknown technique=self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000144 fam=fixed_function technique=self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000145 fam=fixed_function technique=self-lit blend=alpha_blend depth=alpha-prepass cull=back alpha=1 atest=1 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000146 fam=fixed_function technique=self-lit blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=0000014c fam=flag technique=flag-self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000160 fam=unknown technique=self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000164 fam=fixed_function technique=self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000165 fam=fixed_function technique=self-lit blend=alpha_blend depth=alpha-prepass cull=disabled alpha=1 atest=1 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000166 fam=fixed_function technique=self-lit blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=0000016c fam=flag technique=flag-self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000180 fam=unknown technique=self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000184 fam=fixed_function technique=self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000185 fam=fixed_function technique=self-lit blend=alpha_blend depth=transparent-no-write cull=back alpha=1 atest=0 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000186 fam=fixed_function technique=self-lit blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=0000018c fam=flag technique=flag-self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000001c0 fam=unknown technique=self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000001c4 fam=fixed_function technique=self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000001c5 fam=fixed_function technique=self-lit blend=alpha_blend depth=alpha-prepass cull=back alpha=1 atest=1 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000001c6 fam=fixed_function technique=self-lit blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000001cc fam=flag technique=flag-self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000001e0 fam=unknown technique=self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000001e4 fam=fixed_function technique=self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000001e5 fam=fixed_function technique=self-lit blend=alpha_blend depth=alpha-prepass cull=disabled alpha=1 atest=1 atinv=1 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000001e6 fam=fixed_function technique=self-lit blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000001ec fam=flag technique=flag-self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000204 fam=fixed_function technique=self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000205 fam=fixed_function technique=self-lit blend=alpha_blend depth=transparent-no-write cull=back alpha=1 atest=0 atinv=0 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000206 fam=fixed_function technique=self-lit blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000224 fam=fixed_function technique=self-lit blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000225 fam=fixed_function technique=self-lit blend=alpha_blend depth=transparent-no-write cull=disabled alpha=1 atest=0 atinv=0 two=1 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000226 fam=fixed_function technique=self-lit blend=additive depth=transparent-no-write cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000244 fam=fixed_function technique=self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000245 fam=fixed_function technique=self-lit blend=alpha_blend depth=alpha-prepass cull=back alpha=1 atest=1 atinv=0 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000246 fam=fixed_function technique=self-lit blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000264 fam=fixed_function technique=self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000265 fam=fixed_function technique=self-lit blend=alpha_blend depth=alpha-prepass cull=disabled alpha=1 atest=1 atinv=0 two=1 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000266 fam=fixed_function technique=self-lit blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000284 fam=fixed_function technique=self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000285 fam=fixed_function technique=self-lit blend=alpha_blend depth=transparent-no-write cull=back alpha=1 atest=0 atinv=1 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000286 fam=fixed_function technique=self-lit blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000002c4 fam=fixed_function technique=self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000002c5 fam=fixed_function technique=self-lit blend=alpha_blend depth=alpha-prepass cull=back alpha=1 atest=1 atinv=1 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000002c6 fam=fixed_function technique=self-lit blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000002e4 fam=fixed_function technique=self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000002e5 fam=fixed_function technique=self-lit blend=alpha_blend depth=alpha-prepass cull=disabled alpha=1 atest=1 atinv=1 two=1 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000002e6 fam=fixed_function technique=self-lit blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000304 fam=fixed_function technique=self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000305 fam=fixed_function technique=self-lit blend=alpha_blend depth=transparent-no-write cull=back alpha=1 atest=0 atinv=0 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000306 fam=fixed_function technique=self-lit blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000324 fam=fixed_function technique=self-lit blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000325 fam=fixed_function technique=self-lit blend=alpha_blend depth=transparent-no-write cull=disabled alpha=1 atest=0 atinv=0 two=1 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000326 fam=fixed_function technique=self-lit blend=additive depth=transparent-no-write cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000344 fam=fixed_function technique=self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000345 fam=fixed_function technique=self-lit blend=alpha_blend depth=alpha-prepass cull=back alpha=1 atest=1 atinv=0 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000346 fam=fixed_function technique=self-lit blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000364 fam=fixed_function technique=self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000365 fam=fixed_function technique=self-lit blend=alpha_blend depth=alpha-prepass cull=disabled alpha=1 atest=1 atinv=0 two=1 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000366 fam=fixed_function technique=self-lit blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000384 fam=fixed_function technique=self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000385 fam=fixed_function technique=self-lit blend=alpha_blend depth=transparent-no-write cull=back alpha=1 atest=0 atinv=1 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000386 fam=fixed_function technique=self-lit blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000003c4 fam=fixed_function technique=self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000003c5 fam=fixed_function technique=self-lit blend=alpha_blend depth=alpha-prepass cull=back alpha=1 atest=1 atinv=1 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000003c6 fam=fixed_function technique=self-lit blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000003e4 fam=fixed_function technique=self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000003e5 fam=fixed_function technique=self-lit blend=alpha_blend depth=alpha-prepass cull=disabled alpha=1 atest=1 atinv=1 two=1 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000003e6 fam=fixed_function technique=self-lit blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000408 fam=phong technique=phong-tangent-diffuse blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000428 fam=phong technique=phong-tangent-diffuse blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000448 fam=phong technique=phong-tangent-diffuse blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000468 fam=phong technique=phong-tangent-diffuse blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000488 fam=phong technique=phong-tangent-diffuse blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000004c8 fam=phong technique=phong-tangent-diffuse blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000004e8 fam=phong technique=phong-tangent-diffuse blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000508 fam=phong technique=self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000528 fam=phong technique=self-lit blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000548 fam=phong technique=self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000568 fam=phong technique=self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000588 fam=phong technique=self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000005c8 fam=phong technique=self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000005e8 fam=phong technique=self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000c08 fam=phong technique=phong-object-diffuse blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000c28 fam=phong technique=phong-object-diffuse blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000c48 fam=phong technique=phong-object-diffuse blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000c68 fam=phong technique=phong-object-diffuse blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000c88 fam=phong technique=phong-object-diffuse blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000cc8 fam=phong technique=phong-object-diffuse blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000ce8 fam=phong technique=phong-object-diffuse blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000d08 fam=phong technique=self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000d28 fam=phong technique=self-lit blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000d48 fam=phong technique=self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000d68 fam=phong technique=self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000d88 fam=phong technique=self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000dc8 fam=phong technique=self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00000de8 fam=phong technique=self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001004 fam=fixed_function technique=fixed-detail blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001005 fam=fixed_function technique=fixed-detail blend=alpha_blend depth=transparent-no-write cull=back alpha=1 atest=0 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001006 fam=fixed_function technique=fixed-detail blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001024 fam=fixed_function technique=fixed-detail blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001025 fam=fixed_function technique=fixed-detail blend=alpha_blend depth=transparent-no-write cull=disabled alpha=1 atest=0 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001026 fam=fixed_function technique=fixed-detail blend=additive depth=transparent-no-write cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001044 fam=fixed_function technique=fixed-detail blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001045 fam=fixed_function technique=fixed-detail blend=alpha_blend depth=alpha-prepass cull=back alpha=1 atest=1 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001046 fam=fixed_function technique=fixed-detail blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001064 fam=fixed_function technique=fixed-detail blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001065 fam=fixed_function technique=fixed-detail blend=alpha_blend depth=alpha-prepass cull=disabled alpha=1 atest=1 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001066 fam=fixed_function technique=fixed-detail blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001084 fam=fixed_function technique=fixed-detail blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001085 fam=fixed_function technique=fixed-detail blend=alpha_blend depth=transparent-no-write cull=back alpha=1 atest=0 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001086 fam=fixed_function technique=fixed-detail blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000010c4 fam=fixed_function technique=fixed-detail blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000010c5 fam=fixed_function technique=fixed-detail blend=alpha_blend depth=alpha-prepass cull=back alpha=1 atest=1 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000010c6 fam=fixed_function technique=fixed-detail blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000010e4 fam=fixed_function technique=fixed-detail blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000010e5 fam=fixed_function technique=fixed-detail blend=alpha_blend depth=alpha-prepass cull=disabled alpha=1 atest=1 atinv=1 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000010e6 fam=fixed_function technique=fixed-detail blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001104 fam=fixed_function technique=self-lit-detail blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001105 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=transparent-no-write cull=back alpha=1 atest=0 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001106 fam=fixed_function technique=self-lit-detail blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001124 fam=fixed_function technique=self-lit-detail blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001125 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=transparent-no-write cull=disabled alpha=1 atest=0 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001126 fam=fixed_function technique=self-lit-detail blend=additive depth=transparent-no-write cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001144 fam=fixed_function technique=self-lit-detail blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001145 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=alpha-prepass cull=back alpha=1 atest=1 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001146 fam=fixed_function technique=self-lit-detail blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001164 fam=fixed_function technique=self-lit-detail blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001165 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=alpha-prepass cull=disabled alpha=1 atest=1 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001166 fam=fixed_function technique=self-lit-detail blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001184 fam=fixed_function technique=self-lit-detail blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001185 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=transparent-no-write cull=back alpha=1 atest=0 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001186 fam=fixed_function technique=self-lit-detail blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000011c4 fam=fixed_function technique=self-lit-detail blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000011c5 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=alpha-prepass cull=back alpha=1 atest=1 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000011c6 fam=fixed_function technique=self-lit-detail blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000011e4 fam=fixed_function technique=self-lit-detail blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000011e5 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=alpha-prepass cull=disabled alpha=1 atest=1 atinv=1 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000011e6 fam=fixed_function technique=self-lit-detail blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001204 fam=fixed_function technique=self-lit-detail blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001205 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=transparent-no-write cull=back alpha=1 atest=0 atinv=0 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001206 fam=fixed_function technique=self-lit-detail blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001224 fam=fixed_function technique=self-lit-detail blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001225 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=transparent-no-write cull=disabled alpha=1 atest=0 atinv=0 two=1 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001226 fam=fixed_function technique=self-lit-detail blend=additive depth=transparent-no-write cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001244 fam=fixed_function technique=self-lit-detail blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001245 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=alpha-prepass cull=back alpha=1 atest=1 atinv=0 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001246 fam=fixed_function technique=self-lit-detail blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001264 fam=fixed_function technique=self-lit-detail blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001265 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=alpha-prepass cull=disabled alpha=1 atest=1 atinv=0 two=1 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001266 fam=fixed_function technique=self-lit-detail blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001284 fam=fixed_function technique=self-lit-detail blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001285 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=transparent-no-write cull=back alpha=1 atest=0 atinv=1 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001286 fam=fixed_function technique=self-lit-detail blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000012c4 fam=fixed_function technique=self-lit-detail blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000012c5 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=alpha-prepass cull=back alpha=1 atest=1 atinv=1 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000012c6 fam=fixed_function technique=self-lit-detail blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000012e4 fam=fixed_function technique=self-lit-detail blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000012e5 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=alpha-prepass cull=disabled alpha=1 atest=1 atinv=1 two=1 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000012e6 fam=fixed_function technique=self-lit-detail blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001304 fam=fixed_function technique=self-lit-detail blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001305 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=transparent-no-write cull=back alpha=1 atest=0 atinv=0 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001306 fam=fixed_function technique=self-lit-detail blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001324 fam=fixed_function technique=self-lit-detail blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001325 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=transparent-no-write cull=disabled alpha=1 atest=0 atinv=0 two=1 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001326 fam=fixed_function technique=self-lit-detail blend=additive depth=transparent-no-write cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001344 fam=fixed_function technique=self-lit-detail blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001345 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=alpha-prepass cull=back alpha=1 atest=1 atinv=0 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001346 fam=fixed_function technique=self-lit-detail blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001364 fam=fixed_function technique=self-lit-detail blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001365 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=alpha-prepass cull=disabled alpha=1 atest=1 atinv=0 two=1 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001366 fam=fixed_function technique=self-lit-detail blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001384 fam=fixed_function technique=self-lit-detail blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001385 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=transparent-no-write cull=back alpha=1 atest=0 atinv=1 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001386 fam=fixed_function technique=self-lit-detail blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000013c4 fam=fixed_function technique=self-lit-detail blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000013c5 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=alpha-prepass cull=back alpha=1 atest=1 atinv=1 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000013c6 fam=fixed_function technique=self-lit-detail blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000013e4 fam=fixed_function technique=self-lit-detail blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000013e5 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=alpha-prepass cull=disabled alpha=1 atest=1 atinv=1 two=1 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000013e6 fam=fixed_function technique=self-lit-detail blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001410 fam=dot3 technique=dot3-tangent-detail blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001430 fam=dot3 technique=dot3-tangent-detail blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001450 fam=dot3 technique=dot3-tangent-detail blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001470 fam=dot3 technique=dot3-tangent-detail blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001490 fam=dot3 technique=dot3-tangent-detail blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000014d0 fam=dot3 technique=dot3-tangent-detail blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000014f0 fam=dot3 technique=dot3-tangent-detail blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001510 fam=dot3 technique=self-lit-detail blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001530 fam=dot3 technique=self-lit-detail blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001550 fam=dot3 technique=self-lit-detail blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001570 fam=dot3 technique=self-lit-detail blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001590 fam=dot3 technique=self-lit-detail blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000015d0 fam=dot3 technique=self-lit-detail blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=000015f0 fam=dot3 technique=self-lit-detail blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001c10 fam=dot3 technique=dot3-object-detail blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001c30 fam=dot3 technique=dot3-object-detail blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001c50 fam=dot3 technique=dot3-object-detail blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001c70 fam=dot3 technique=dot3-object-detail blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001c90 fam=dot3 technique=dot3-object-detail blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001cd0 fam=dot3 technique=dot3-object-detail blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001cf0 fam=dot3 technique=dot3-object-detail blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001d10 fam=dot3 technique=self-lit-detail blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001d30 fam=dot3 technique=self-lit-detail blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001d50 fam=dot3 technique=self-lit-detail blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001d70 fam=dot3 technique=self-lit-detail blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001d90 fam=dot3 technique=self-lit-detail blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001dd0 fam=dot3 technique=self-lit-detail blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00001df0 fam=dot3 technique=self-lit-detail blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=1 spec=0 glass=0 vfade=0 envsrc=none specsrc=none
+key=00002408 fam=phong technique=phong-tangent-specular blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=0 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00002428 fam=phong technique=phong-tangent-specular blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=0 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00002448 fam=phong technique=phong-tangent-specular blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=0 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00002468 fam=phong technique=phong-tangent-specular blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=0 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00002488 fam=phong technique=phong-tangent-specular blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=0 vfade=0 envsrc=none specsrc=analytic-pow16
+key=000024c8 fam=phong technique=phong-tangent-specular blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=0 vfade=0 envsrc=none specsrc=analytic-pow16
+key=000024e8 fam=phong technique=phong-tangent-specular blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=0 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00002508 fam=phong technique=self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=0 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00002528 fam=phong technique=self-lit blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=0 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00002548 fam=phong technique=self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=0 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00002568 fam=phong technique=self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=0 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00002588 fam=phong technique=self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=0 vfade=0 envsrc=none specsrc=analytic-pow16
+key=000025c8 fam=phong technique=self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=0 vfade=0 envsrc=none specsrc=analytic-pow16
+key=000025e8 fam=phong technique=self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=0 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00002c08 fam=phong technique=phong-object-specular blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=1 glass=0 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00002c28 fam=phong technique=phong-object-specular blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=1 glass=0 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00002c48 fam=phong technique=phong-object-specular blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=1 glass=0 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00002c68 fam=phong technique=phong-object-specular blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=1 glass=0 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00002c88 fam=phong technique=phong-object-specular blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=1 glass=0 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00002cc8 fam=phong technique=phong-object-specular blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=1 glass=0 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00002ce8 fam=phong technique=phong-object-specular blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=1 glass=0 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00002d08 fam=phong technique=self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=1 glass=0 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00002d28 fam=phong technique=self-lit blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=1 glass=0 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00002d48 fam=phong technique=self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=1 glass=0 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00002d68 fam=phong technique=self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=1 glass=0 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00002d88 fam=phong technique=self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=1 glass=0 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00002dc8 fam=phong technique=self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=1 glass=0 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00002de8 fam=phong technique=self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=1 glass=0 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00004000 fam=unknown technique=fixed blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004004 fam=fixed_function technique=fixed blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004005 fam=fixed_function technique=fixed blend=alpha_blend depth=transparent-no-write cull=back alpha=1 atest=0 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004006 fam=fixed_function technique=fixed blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=0000400c fam=flag technique=flag blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=0000401a fam=glass technique=glass blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=none
+key=00004020 fam=unknown technique=fixed blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004024 fam=fixed_function technique=fixed blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004025 fam=fixed_function technique=fixed blend=alpha_blend depth=transparent-no-write cull=disabled alpha=1 atest=0 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004026 fam=fixed_function technique=fixed blend=additive depth=transparent-no-write cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=0000402c fam=flag technique=flag blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=0000403a fam=glass technique=glass blend=additive depth=transparent-no-write cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=none
+key=00004040 fam=unknown technique=fixed blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004044 fam=fixed_function technique=fixed blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004045 fam=fixed_function technique=fixed blend=alpha_blend depth=alpha-prepass cull=back alpha=1 atest=1 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004046 fam=fixed_function technique=fixed blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=0000404c fam=flag technique=flag blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=0000405a fam=glass technique=glass blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=none
+key=00004060 fam=unknown technique=fixed blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004064 fam=fixed_function technique=fixed blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004065 fam=fixed_function technique=fixed blend=alpha_blend depth=alpha-prepass cull=disabled alpha=1 atest=1 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004066 fam=fixed_function technique=fixed blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=0000406c fam=flag technique=flag blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=0000407a fam=glass technique=glass blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=none
+key=00004080 fam=unknown technique=fixed blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004084 fam=fixed_function technique=fixed blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004085 fam=fixed_function technique=fixed blend=alpha_blend depth=transparent-no-write cull=back alpha=1 atest=0 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004086 fam=fixed_function technique=fixed blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=0000408c fam=flag technique=flag blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=0000409a fam=glass technique=glass blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=none
+key=000040c0 fam=unknown technique=fixed blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000040c4 fam=fixed_function technique=fixed blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000040c5 fam=fixed_function technique=fixed blend=alpha_blend depth=alpha-prepass cull=back alpha=1 atest=1 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000040c6 fam=fixed_function technique=fixed blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000040cc fam=flag technique=flag blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000040da fam=glass technique=glass blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=none
+key=000040e0 fam=unknown technique=fixed blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000040e4 fam=fixed_function technique=fixed blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000040e5 fam=fixed_function technique=fixed blend=alpha_blend depth=alpha-prepass cull=disabled alpha=1 atest=1 atinv=1 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000040e6 fam=fixed_function technique=fixed blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000040ec fam=flag technique=flag blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000040fa fam=glass technique=glass blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=none
+key=00004100 fam=unknown technique=self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004104 fam=fixed_function technique=self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004105 fam=fixed_function technique=self-lit blend=alpha_blend depth=transparent-no-write cull=back alpha=1 atest=0 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004106 fam=fixed_function technique=self-lit blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=0000410c fam=flag technique=flag-self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=0000411a fam=glass technique=self-lit blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=none
+key=00004120 fam=unknown technique=self-lit blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004124 fam=fixed_function technique=self-lit blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004125 fam=fixed_function technique=self-lit blend=alpha_blend depth=transparent-no-write cull=disabled alpha=1 atest=0 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004126 fam=fixed_function technique=self-lit blend=additive depth=transparent-no-write cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=0000412c fam=flag technique=flag-self-lit blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=0000413a fam=glass technique=self-lit blend=additive depth=transparent-no-write cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=none
+key=00004140 fam=unknown technique=self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004144 fam=fixed_function technique=self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004145 fam=fixed_function technique=self-lit blend=alpha_blend depth=alpha-prepass cull=back alpha=1 atest=1 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004146 fam=fixed_function technique=self-lit blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=0000414c fam=flag technique=flag-self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=0000415a fam=glass technique=self-lit blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=none
+key=00004160 fam=unknown technique=self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004164 fam=fixed_function technique=self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004165 fam=fixed_function technique=self-lit blend=alpha_blend depth=alpha-prepass cull=disabled alpha=1 atest=1 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004166 fam=fixed_function technique=self-lit blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=0000416c fam=flag technique=flag-self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=0000417a fam=glass technique=self-lit blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=none
+key=00004180 fam=unknown technique=self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004184 fam=fixed_function technique=self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004185 fam=fixed_function technique=self-lit blend=alpha_blend depth=transparent-no-write cull=back alpha=1 atest=0 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004186 fam=fixed_function technique=self-lit blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=0000418c fam=flag technique=flag-self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=0000419a fam=glass technique=self-lit blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=none
+key=000041c0 fam=unknown technique=self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000041c4 fam=fixed_function technique=self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000041c5 fam=fixed_function technique=self-lit blend=alpha_blend depth=alpha-prepass cull=back alpha=1 atest=1 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000041c6 fam=fixed_function technique=self-lit blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000041cc fam=flag technique=flag-self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000041da fam=glass technique=self-lit blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=none
+key=000041e0 fam=unknown technique=self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000041e4 fam=fixed_function technique=self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000041e5 fam=fixed_function technique=self-lit blend=alpha_blend depth=alpha-prepass cull=disabled alpha=1 atest=1 atinv=1 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000041e6 fam=fixed_function technique=self-lit blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000041ec fam=flag technique=flag-self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000041fa fam=glass technique=self-lit blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=none
+key=00004204 fam=fixed_function technique=self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004205 fam=fixed_function technique=self-lit blend=alpha_blend depth=transparent-no-write cull=back alpha=1 atest=0 atinv=0 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004206 fam=fixed_function technique=self-lit blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004224 fam=fixed_function technique=self-lit blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004225 fam=fixed_function technique=self-lit blend=alpha_blend depth=transparent-no-write cull=disabled alpha=1 atest=0 atinv=0 two=1 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004226 fam=fixed_function technique=self-lit blend=additive depth=transparent-no-write cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004244 fam=fixed_function technique=self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004245 fam=fixed_function technique=self-lit blend=alpha_blend depth=alpha-prepass cull=back alpha=1 atest=1 atinv=0 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004246 fam=fixed_function technique=self-lit blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004264 fam=fixed_function technique=self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004265 fam=fixed_function technique=self-lit blend=alpha_blend depth=alpha-prepass cull=disabled alpha=1 atest=1 atinv=0 two=1 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004266 fam=fixed_function technique=self-lit blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004284 fam=fixed_function technique=self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004285 fam=fixed_function technique=self-lit blend=alpha_blend depth=transparent-no-write cull=back alpha=1 atest=0 atinv=1 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004286 fam=fixed_function technique=self-lit blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000042c4 fam=fixed_function technique=self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000042c5 fam=fixed_function technique=self-lit blend=alpha_blend depth=alpha-prepass cull=back alpha=1 atest=1 atinv=1 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000042c6 fam=fixed_function technique=self-lit blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000042e4 fam=fixed_function technique=self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000042e5 fam=fixed_function technique=self-lit blend=alpha_blend depth=alpha-prepass cull=disabled alpha=1 atest=1 atinv=1 two=1 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000042e6 fam=fixed_function technique=self-lit blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004304 fam=fixed_function technique=self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004305 fam=fixed_function technique=self-lit blend=alpha_blend depth=transparent-no-write cull=back alpha=1 atest=0 atinv=0 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004306 fam=fixed_function technique=self-lit blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004324 fam=fixed_function technique=self-lit blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004325 fam=fixed_function technique=self-lit blend=alpha_blend depth=transparent-no-write cull=disabled alpha=1 atest=0 atinv=0 two=1 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004326 fam=fixed_function technique=self-lit blend=additive depth=transparent-no-write cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004344 fam=fixed_function technique=self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004345 fam=fixed_function technique=self-lit blend=alpha_blend depth=alpha-prepass cull=back alpha=1 atest=1 atinv=0 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004346 fam=fixed_function technique=self-lit blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004364 fam=fixed_function technique=self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004365 fam=fixed_function technique=self-lit blend=alpha_blend depth=alpha-prepass cull=disabled alpha=1 atest=1 atinv=0 two=1 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004366 fam=fixed_function technique=self-lit blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004384 fam=fixed_function technique=self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004385 fam=fixed_function technique=self-lit blend=alpha_blend depth=transparent-no-write cull=back alpha=1 atest=0 atinv=1 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004386 fam=fixed_function technique=self-lit blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000043c4 fam=fixed_function technique=self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000043c5 fam=fixed_function technique=self-lit blend=alpha_blend depth=alpha-prepass cull=back alpha=1 atest=1 atinv=1 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000043c6 fam=fixed_function technique=self-lit blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000043e4 fam=fixed_function technique=self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000043e5 fam=fixed_function technique=self-lit blend=alpha_blend depth=alpha-prepass cull=disabled alpha=1 atest=1 atinv=1 two=1 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000043e6 fam=fixed_function technique=self-lit blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004408 fam=phong technique=phong-tangent-diffuse blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004414 fam=environment technique=environment-tangent blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=none
+key=00004428 fam=phong technique=phong-tangent-diffuse blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004434 fam=environment technique=environment-tangent blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=none
+key=00004448 fam=phong technique=phong-tangent-diffuse blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004454 fam=environment technique=environment-tangent blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=none
+key=00004468 fam=phong technique=phong-tangent-diffuse blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004474 fam=environment technique=environment-tangent blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=none
+key=00004488 fam=phong technique=phong-tangent-diffuse blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004494 fam=environment technique=environment-tangent blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=none
+key=000044c8 fam=phong technique=phong-tangent-diffuse blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000044d4 fam=environment technique=environment-tangent blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=none
+key=000044e8 fam=phong technique=phong-tangent-diffuse blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000044f4 fam=environment technique=environment-tangent blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=none
+key=00004508 fam=phong technique=self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004514 fam=environment technique=self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=none
+key=00004528 fam=phong technique=self-lit blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004534 fam=environment technique=self-lit blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=none
+key=00004548 fam=phong technique=self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004554 fam=environment technique=self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=none
+key=00004568 fam=phong technique=self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004574 fam=environment technique=self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=none
+key=00004588 fam=phong technique=self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004594 fam=environment technique=self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=none
+key=000045c8 fam=phong technique=self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000045d4 fam=environment technique=self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=none
+key=000045e8 fam=phong technique=self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000045f4 fam=environment technique=self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=0 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=none
+key=00004c08 fam=phong technique=phong-object-diffuse blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004c28 fam=phong technique=phong-object-diffuse blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004c48 fam=phong technique=phong-object-diffuse blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004c68 fam=phong technique=phong-object-diffuse blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004c88 fam=phong technique=phong-object-diffuse blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004cc8 fam=phong technique=phong-object-diffuse blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004ce8 fam=phong technique=phong-object-diffuse blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004d08 fam=phong technique=self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004d28 fam=phong technique=self-lit blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004d48 fam=phong technique=self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004d68 fam=phong technique=self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004d88 fam=phong technique=self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004dc8 fam=phong technique=self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00004de8 fam=phong technique=self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005004 fam=fixed_function technique=fixed-detail blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005005 fam=fixed_function technique=fixed-detail blend=alpha_blend depth=transparent-no-write cull=back alpha=1 atest=0 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005006 fam=fixed_function technique=fixed-detail blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005024 fam=fixed_function technique=fixed-detail blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005025 fam=fixed_function technique=fixed-detail blend=alpha_blend depth=transparent-no-write cull=disabled alpha=1 atest=0 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005026 fam=fixed_function technique=fixed-detail blend=additive depth=transparent-no-write cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005044 fam=fixed_function technique=fixed-detail blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005045 fam=fixed_function technique=fixed-detail blend=alpha_blend depth=alpha-prepass cull=back alpha=1 atest=1 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005046 fam=fixed_function technique=fixed-detail blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005064 fam=fixed_function technique=fixed-detail blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005065 fam=fixed_function technique=fixed-detail blend=alpha_blend depth=alpha-prepass cull=disabled alpha=1 atest=1 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005066 fam=fixed_function technique=fixed-detail blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005084 fam=fixed_function technique=fixed-detail blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005085 fam=fixed_function technique=fixed-detail blend=alpha_blend depth=transparent-no-write cull=back alpha=1 atest=0 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005086 fam=fixed_function technique=fixed-detail blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000050c4 fam=fixed_function technique=fixed-detail blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000050c5 fam=fixed_function technique=fixed-detail blend=alpha_blend depth=alpha-prepass cull=back alpha=1 atest=1 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000050c6 fam=fixed_function technique=fixed-detail blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000050e4 fam=fixed_function technique=fixed-detail blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000050e5 fam=fixed_function technique=fixed-detail blend=alpha_blend depth=alpha-prepass cull=disabled alpha=1 atest=1 atinv=1 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000050e6 fam=fixed_function technique=fixed-detail blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005104 fam=fixed_function technique=self-lit-detail blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005105 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=transparent-no-write cull=back alpha=1 atest=0 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005106 fam=fixed_function technique=self-lit-detail blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005124 fam=fixed_function technique=self-lit-detail blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005125 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=transparent-no-write cull=disabled alpha=1 atest=0 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005126 fam=fixed_function technique=self-lit-detail blend=additive depth=transparent-no-write cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005144 fam=fixed_function technique=self-lit-detail blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005145 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=alpha-prepass cull=back alpha=1 atest=1 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005146 fam=fixed_function technique=self-lit-detail blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005164 fam=fixed_function technique=self-lit-detail blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005165 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=alpha-prepass cull=disabled alpha=1 atest=1 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005166 fam=fixed_function technique=self-lit-detail blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005184 fam=fixed_function technique=self-lit-detail blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005185 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=transparent-no-write cull=back alpha=1 atest=0 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005186 fam=fixed_function technique=self-lit-detail blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000051c4 fam=fixed_function technique=self-lit-detail blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000051c5 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=alpha-prepass cull=back alpha=1 atest=1 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000051c6 fam=fixed_function technique=self-lit-detail blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000051e4 fam=fixed_function technique=self-lit-detail blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000051e5 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=alpha-prepass cull=disabled alpha=1 atest=1 atinv=1 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000051e6 fam=fixed_function technique=self-lit-detail blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005204 fam=fixed_function technique=self-lit-detail blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005205 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=transparent-no-write cull=back alpha=1 atest=0 atinv=0 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005206 fam=fixed_function technique=self-lit-detail blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005224 fam=fixed_function technique=self-lit-detail blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005225 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=transparent-no-write cull=disabled alpha=1 atest=0 atinv=0 two=1 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005226 fam=fixed_function technique=self-lit-detail blend=additive depth=transparent-no-write cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005244 fam=fixed_function technique=self-lit-detail blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005245 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=alpha-prepass cull=back alpha=1 atest=1 atinv=0 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005246 fam=fixed_function technique=self-lit-detail blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005264 fam=fixed_function technique=self-lit-detail blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005265 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=alpha-prepass cull=disabled alpha=1 atest=1 atinv=0 two=1 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005266 fam=fixed_function technique=self-lit-detail blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005284 fam=fixed_function technique=self-lit-detail blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005285 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=transparent-no-write cull=back alpha=1 atest=0 atinv=1 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005286 fam=fixed_function technique=self-lit-detail blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000052c4 fam=fixed_function technique=self-lit-detail blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000052c5 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=alpha-prepass cull=back alpha=1 atest=1 atinv=1 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000052c6 fam=fixed_function technique=self-lit-detail blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000052e4 fam=fixed_function technique=self-lit-detail blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000052e5 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=alpha-prepass cull=disabled alpha=1 atest=1 atinv=1 two=1 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000052e6 fam=fixed_function technique=self-lit-detail blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005304 fam=fixed_function technique=self-lit-detail blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005305 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=transparent-no-write cull=back alpha=1 atest=0 atinv=0 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005306 fam=fixed_function technique=self-lit-detail blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005324 fam=fixed_function technique=self-lit-detail blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005325 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=transparent-no-write cull=disabled alpha=1 atest=0 atinv=0 two=1 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005326 fam=fixed_function technique=self-lit-detail blend=additive depth=transparent-no-write cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005344 fam=fixed_function technique=self-lit-detail blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005345 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=alpha-prepass cull=back alpha=1 atest=1 atinv=0 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005346 fam=fixed_function technique=self-lit-detail blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005364 fam=fixed_function technique=self-lit-detail blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005365 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=alpha-prepass cull=disabled alpha=1 atest=1 atinv=0 two=1 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005366 fam=fixed_function technique=self-lit-detail blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005384 fam=fixed_function technique=self-lit-detail blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005385 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=transparent-no-write cull=back alpha=1 atest=0 atinv=1 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005386 fam=fixed_function technique=self-lit-detail blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000053c4 fam=fixed_function technique=self-lit-detail blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000053c5 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=alpha-prepass cull=back alpha=1 atest=1 atinv=1 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000053c6 fam=fixed_function technique=self-lit-detail blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000053e4 fam=fixed_function technique=self-lit-detail blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000053e5 fam=fixed_function technique=self-lit-detail blend=alpha_blend depth=alpha-prepass cull=disabled alpha=1 atest=1 atinv=1 two=1 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000053e6 fam=fixed_function technique=self-lit-detail blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=1 nmap=0 nuv2=0 nspace=none detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005410 fam=dot3 technique=dot3-tangent-detail blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005430 fam=dot3 technique=dot3-tangent-detail blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005450 fam=dot3 technique=dot3-tangent-detail blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005470 fam=dot3 technique=dot3-tangent-detail blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005490 fam=dot3 technique=dot3-tangent-detail blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000054d0 fam=dot3 technique=dot3-tangent-detail blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000054f0 fam=dot3 technique=dot3-tangent-detail blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005510 fam=dot3 technique=self-lit-detail blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005530 fam=dot3 technique=self-lit-detail blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005550 fam=dot3 technique=self-lit-detail blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005570 fam=dot3 technique=self-lit-detail blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005590 fam=dot3 technique=self-lit-detail blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000055d0 fam=dot3 technique=self-lit-detail blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=000055f0 fam=dot3 technique=self-lit-detail blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005c10 fam=dot3 technique=dot3-object-detail blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005c30 fam=dot3 technique=dot3-object-detail blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005c50 fam=dot3 technique=dot3-object-detail blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005c70 fam=dot3 technique=dot3-object-detail blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005c90 fam=dot3 technique=dot3-object-detail blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005cd0 fam=dot3 technique=dot3-object-detail blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005cf0 fam=dot3 technique=dot3-object-detail blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005d10 fam=dot3 technique=self-lit-detail blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005d30 fam=dot3 technique=self-lit-detail blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005d50 fam=dot3 technique=self-lit-detail blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005d70 fam=dot3 technique=self-lit-detail blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005d90 fam=dot3 technique=self-lit-detail blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005dd0 fam=dot3 technique=self-lit-detail blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00005df0 fam=dot3 technique=self-lit-detail blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=1 spec=0 glass=1 vfade=0 envsrc=none specsrc=none
+key=00006408 fam=phong technique=phong-tangent-specular blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=1 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00006414 fam=environment technique=environment-tangent-specular blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=analytic-pow16
+key=00006428 fam=phong technique=phong-tangent-specular blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=1 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00006434 fam=environment technique=environment-tangent-specular blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=analytic-pow16
+key=00006448 fam=phong technique=phong-tangent-specular blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=1 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00006454 fam=environment technique=environment-tangent-specular blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=analytic-pow16
+key=00006468 fam=phong technique=phong-tangent-specular blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=1 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00006474 fam=environment technique=environment-tangent-specular blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=analytic-pow16
+key=00006488 fam=phong technique=phong-tangent-specular blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=1 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00006494 fam=environment technique=environment-tangent-specular blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=analytic-pow16
+key=000064c8 fam=phong technique=phong-tangent-specular blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=1 vfade=0 envsrc=none specsrc=analytic-pow16
+key=000064d4 fam=environment technique=environment-tangent-specular blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=analytic-pow16
+key=000064e8 fam=phong technique=phong-tangent-specular blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=1 vfade=0 envsrc=none specsrc=analytic-pow16
+key=000064f4 fam=environment technique=environment-tangent-specular blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=analytic-pow16
+key=00006508 fam=phong technique=self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=1 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00006514 fam=environment technique=self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=analytic-pow16
+key=00006528 fam=phong technique=self-lit blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=1 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00006534 fam=environment technique=self-lit blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=analytic-pow16
+key=00006548 fam=phong technique=self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=1 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00006554 fam=environment technique=self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=analytic-pow16
+key=00006568 fam=phong technique=self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=1 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00006574 fam=environment technique=self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=analytic-pow16
+key=00006588 fam=phong technique=self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=1 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00006594 fam=environment technique=self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=analytic-pow16
+key=000065c8 fam=phong technique=self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=1 vfade=0 envsrc=none specsrc=analytic-pow16
+key=000065d4 fam=environment technique=self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=analytic-pow16
+key=000065e8 fam=phong technique=self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=1 vfade=0 envsrc=none specsrc=analytic-pow16
+key=000065f4 fam=environment technique=self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=tangent detail=0 spec=1 glass=1 vfade=0 envsrc=hemisphere-approx specsrc=analytic-pow16
+key=00006c08 fam=phong technique=phong-object-specular blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=1 glass=1 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00006c28 fam=phong technique=phong-object-specular blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=1 glass=1 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00006c48 fam=phong technique=phong-object-specular blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=1 glass=1 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00006c68 fam=phong technique=phong-object-specular blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=1 glass=1 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00006c88 fam=phong technique=phong-object-specular blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=1 glass=1 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00006cc8 fam=phong technique=phong-object-specular blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=1 glass=1 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00006ce8 fam=phong technique=phong-object-specular blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=1 glass=1 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00006d08 fam=phong technique=self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=1 glass=1 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00006d28 fam=phong technique=self-lit blend=opaque depth=opaque cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=1 glass=1 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00006d48 fam=phong technique=self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=1 glass=1 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00006d68 fam=phong technique=self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=1 glass=1 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00006d88 fam=phong technique=self-lit blend=opaque depth=opaque cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=1 glass=1 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00006dc8 fam=phong technique=self-lit blend=opaque depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=1 glass=1 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00006de8 fam=phong technique=self-lit blend=opaque depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=0 nmap=1 nuv2=0 nspace=object detail=0 spec=1 glass=1 vfade=0 envsrc=none specsrc=analytic-pow16
+key=00010006 fam=fixed_function technique=tracer blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=1 envsrc=none specsrc=none
+key=00010026 fam=fixed_function technique=tracer blend=additive depth=transparent-no-write cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=1 envsrc=none specsrc=none
+key=00010046 fam=fixed_function technique=tracer blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=1 envsrc=none specsrc=none
+key=00010066 fam=fixed_function technique=tracer blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=1 envsrc=none specsrc=none
+key=00010086 fam=fixed_function technique=tracer blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=1 envsrc=none specsrc=none
+key=000100c6 fam=fixed_function technique=tracer blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=1 envsrc=none specsrc=none
+key=000100e6 fam=fixed_function technique=tracer blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=1 envsrc=none specsrc=none
+key=00010106 fam=fixed_function technique=tracer blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=1 envsrc=none specsrc=none
+key=00010126 fam=fixed_function technique=tracer blend=additive depth=transparent-no-write cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=1 envsrc=none specsrc=none
+key=00010146 fam=fixed_function technique=tracer blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=1 envsrc=none specsrc=none
+key=00010166 fam=fixed_function technique=tracer blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=1 envsrc=none specsrc=none
+key=00010186 fam=fixed_function technique=tracer blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=1 envsrc=none specsrc=none
+key=000101c6 fam=fixed_function technique=tracer blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=1 envsrc=none specsrc=none
+key=000101e6 fam=fixed_function technique=tracer blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=0 vfade=1 envsrc=none specsrc=none
+key=00014006 fam=fixed_function technique=tracer blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=1 envsrc=none specsrc=none
+key=00014026 fam=fixed_function technique=tracer blend=additive depth=transparent-no-write cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=1 envsrc=none specsrc=none
+key=00014046 fam=fixed_function technique=tracer blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=1 envsrc=none specsrc=none
+key=00014066 fam=fixed_function technique=tracer blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=1 envsrc=none specsrc=none
+key=00014086 fam=fixed_function technique=tracer blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=1 envsrc=none specsrc=none
+key=000140c6 fam=fixed_function technique=tracer blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=1 envsrc=none specsrc=none
+key=000140e6 fam=fixed_function technique=tracer blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=0 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=1 envsrc=none specsrc=none
+key=00014106 fam=fixed_function technique=tracer blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=1 envsrc=none specsrc=none
+key=00014126 fam=fixed_function technique=tracer blend=additive depth=transparent-no-write cull=disabled alpha=0 atest=0 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=1 envsrc=none specsrc=none
+key=00014146 fam=fixed_function technique=tracer blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=0 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=1 envsrc=none specsrc=none
+key=00014166 fam=fixed_function technique=tracer blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=0 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=1 envsrc=none specsrc=none
+key=00014186 fam=fixed_function technique=tracer blend=additive depth=transparent-no-write cull=back alpha=0 atest=0 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=1 envsrc=none specsrc=none
+key=000141c6 fam=fixed_function technique=tracer blend=additive depth=alpha-prepass cull=back alpha=0 atest=1 atinv=1 two=0 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=1 envsrc=none specsrc=none
+key=000141e6 fam=fixed_function technique=tracer blend=additive depth=alpha-prepass cull=disabled alpha=0 atest=1 atinv=1 two=1 emis=1 lum=0 nmap=0 nuv2=0 nspace=none detail=0 spec=0 glass=1 vfade=1 envsrc=none specsrc=none
 # render-order v1 (REN-3: sort keys, technique classes, water bracket, ladder)
 tclass stack=0 submit=000 cls=0
 tclass stack=0 submit=001 cls=3

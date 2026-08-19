@@ -82,6 +82,8 @@ Landed slices (hash per slice, newest first):
 
 | Slice | Commit | Note |
 |---|---|---|
+| EffectWorld authored-light push-down (2026-08-17) | (this PR) | **`adapter_cpp_orig_cites_pushdown` baseline 373 → 372** — the obsolete Godot object-adapter citation claiming gameplay left model-authored LGHT inactive was removed after the authored-light lifecycle moved into the portable `engine/runtime/renderer` EffectWorld pool; the adapter now only guards the editor-preview-only local-light route against double injection. The decrease is banked per the ratchet contract. |
+| Render-reflection policy push-down (2026-08-16) | (this PR) | **`adapter_cpp_orig_cites_pushdown` baseline 374 → 373** — the pool-2-building/vehicle reflection decision and its retail witnesses moved from the Godot mission/object adapters into `engine/runtime/mission/placement_traits.h`; the adapters now consume the typed policy and only map it to Godot layers. The decrease is banked per the ratchet contract. |
 | Hygiene pass: the cite-ratchet split (2026-08-11) | (this PR) | **`adapter_cpp_orig_cites` (497) split into `adapter_cpp_orig_cites_pushdown` (375: simulation/object/mission — the burn-down class, can reach zero) + `adapter_cpp_orig_cites_device` (122: the ADR 0035 device-leg seam contracts — must not grow, floor NON-ZERO by design)**. Total preserved exactly; ends the chase-to-zero misreading of the single number. Same pass: `maturity_lint` dict-contract scope restored to `godot/game/` (the #460 rename pointed it at the now-C++-only `godot/src/` and silently dropped the game layer), `cpp_binding_console_writes` widened to raw CRT writes, `host_lint` scan gains `tools/`/`deploy/`/`infra/`/`fixtures/`, `include_graph_check` gains `engine/runtime/world`, `abi_exports_check` no longer filters new export families out of the compare set |
 | .wav decode push-down (adapter shape C4, #455) | (this PR) | **`engine_uncited_src_files` baseline 50 → 51** — the new `engine/formats/lwf/src/wav_pcm.cpp` parses PUBLIC formats (RIFF/WAVE + standard IMA-ADPCM; the pcapio precedent), so an `[orig:]` citation is inapplicable by construction; the per-lib allowlist would exempt the witnessed `lwf.cpp` too, hence the bump. MAINTAINER RATIFIES ON MERGE |
 | Loadout 0x2F push-down (ADR 0031 PR E) | (this PR) | **`adapter_cpp_orig_cites` baseline 602 → 580** — the profile-seed / side-change / 0x2F-composition citations moved to `npruntime/loadout_submit`; the S7b note in `joiner_world_bridge.h` rewritten to record both ADR 0031 re-opens |
@@ -458,9 +460,9 @@ triggers a re-grill.
 Background finding (the 2026-07-05 planning grill): the runtime render path is
 the one **reimplemented-but-unwitnessed** subsystem. The 45-entry shader-tag
 table (`libs/oed/include/oed/material_descriptor.h`, static_assert-locked to
-the raw `gMaterialInfoTable` dump) and its chain — `libs/renderer`
+the raw `gMaterialInfoTable` dump) and its historical chain — `libs/renderer`
 `classify_object_material()` → generated GLSL (`object_shader_template.cpp`)
-→ `ObjectShaderCache` → `nova_object_model.gd` ShaderMaterials — carry
+→ `ObjectShaderCache` → `nova_object_model.gd` ShaderMaterials — carried
 only ModSuperOed-side citations; no Jointops runtime render address is cited
 in `libs/` outside `libs/env`, and no record covers the runtime material
 path, batching/draw order, the runtime TSS tables, or lighting application.

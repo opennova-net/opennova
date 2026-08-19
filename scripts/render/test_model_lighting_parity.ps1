@@ -193,19 +193,39 @@ if (-not $SkipCapture) {
         "$_" -match "^\[spawn-capture\] runtime source:"
     })
     if ($sourceLines.Count -lt 3) {
-        throw "Capture did not report all packed winning source entries."
+        throw "Capture did not report the exact mission and packed dependency sources."
     }
+    $expectedMissionPath = (Resolve-Path -LiteralPath (
+        Join-Path $MissionResourceDir $Mission)).Path
+    $sawExactLooseMission = $false
     foreach ($line in $sourceLines) {
-        if ("$line" -notmatch "\ssource_type=pff\sarchive_path=.+") {
-            throw "Capture reported a non-packed or missing winning source: $line"
+        $sourceMatch = [regex]::Match("$line", (
+            '^\[spawn-capture\] runtime source: logical_name=(?<logical>\S+) ' +
+            'source_type=(?<type>\S+) source=(?<source>.+)$'))
+        if (-not $sourceMatch.Success) {
+            throw "Capture reported a malformed winning source: $line"
         }
+        $logicalName = $sourceMatch.Groups['logical'].Value
+        $sourceType = $sourceMatch.Groups['type'].Value
+        $sourcePath = $sourceMatch.Groups['source'].Value
+        if ($sourceType -ieq 'pff') {
+            if (-not $sourcePath.EndsWith('.pff',
+                    [System.StringComparison]::OrdinalIgnoreCase) -or
+                    -not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+                throw "Capture reported a missing packed dependency source: $line"
+            }
+            continue
+        }
+        if ($sourceType -ieq 'loose' -and
+                $logicalName -ieq (Split-Path -Leaf $Mission) -and
+                [System.IO.Path]::GetFullPath($sourcePath) -ieq $expectedMissionPath) {
+            $sawExactLooseMission = $true
+            continue
+        }
+        throw "Capture reported an unexpected loose dependency source: $line"
     }
-    $missionPattern = (
-        "^\[spawn-capture\] runtime source: logical_name={0} " +
-        "source_type=pff archive_path=.+"
-    ) -f [regex]::Escape((Split-Path -Leaf $Mission))
-    if (-not ($sourceLines -match $missionPattern)) {
-        throw "Capture did not report the packed winning source for $Mission."
+    if (-not $sawExactLooseMission) {
+        throw "Capture did not report the exact saved loose mission $expectedMissionPath."
     }
     if ($ExpectedInteriorItemId -gt 0) {
         $interiorPattern = '"local_player_interior_item_id":\s*{0}\b' -f

@@ -94,6 +94,14 @@ func is_splash_active() -> bool:
 	return _screen != null and _screen.is_splash_active()
 
 
+## Programmatic counterpart to a fresh splash input edge. The LoadingScreen
+## still owns the witnessed background-only closing frame and emits the normal
+## `splash_dismissed` signal; this method only removes input synthesis from
+## automation callers.
+func dismiss_start_mission_splash() -> bool:
+	return _screen != null and _screen.dismiss_start_mission_splash()
+
+
 ## Raise the SP start-mission splash on the held screen. The screen's
 ## dismissal edge is forwarded on `splash_dismissed`; a torn-down screen
 ## drops the pending edge with it.

@@ -185,6 +185,14 @@ dword first — render-material-re.md); ordinals 93/94/95 therefore land at
 `0x83FFD0/0x83FFD8/0x83FFE0`. Each writer is a sequence of `movzx` byte loads
 followed by dword stores: there is no shift, fixed-point conversion, or
 normalization — the stock values are 0..4 texture-variant selectors, not RGB.
+The matching adjacent state dwords at `0x83FFD4/0x83FFDC/0x83FFE4` are
+statically one, so a controlled material consumes each raw selector through
+the modulo-frame branch (`selector % frame_count`) rather than the ordinary
+16.16 fractional branch `[orig: apply_shader_parameters @ 0x58DC36..0x58DC42]`.
+RevX02 `IndoArms.3di` is the concrete two-frame witness: `TEX_CAMO1 = 1`
+selects `A_Arm2nd.tga`, the plain retail forearm; treating 1 as 16.16 instead
+selected frame zero `A_Arm1st.tga`, producing the tattoo mismatch caught by
+the PR-503 retail/OpenNova comparison.
 The writers take the entity's **CharacterEntity blip** (entity+0x3C, 36 B, filled
 by `MinimapSlot_InitBlipFromPackedId @0x57b080` from the 288-B combo entry):
 +0 body model, +4 head model, +8 arms model, +12 sex, +13 voice/avatar,

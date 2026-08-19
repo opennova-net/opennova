@@ -40,6 +40,10 @@ var _anchors: ItemEffectDirector  # owner-anchor registry (GameWorld's), or null
 var _dynamic_node_resolver: WirePresentPass  # runtime-only packed handles
 var _audio_provider := Callable() # -> MissionAudio (or null)
 var _fx_provider := Callable()    # -> EffectWorld (or null)
+# (world_pos: Vector3, radius: float) -> the death-flash light route
+# (EffectLightDirector.on_death_light) [orig: the Entity_SpawnDeathPieces
+# glow @ 0x49351a].
+var _death_light := Callable()
 var _husked: Dictionary = {}      # canonical mission identity -> husk Node3D/null
 var _husk_restore: Dictionary = {} # canonical mission identity -> original state
 var _burning: Dictionary = {}     # canonical wreck owner key -> live crackle anchor
@@ -80,7 +84,8 @@ func setup(sim: Simulation, container: Node3D, index: EntityIndex,
 		placer: MissionObjectPlacer, item_db: ItemDatabase,
 		anchors: ItemEffectDirector,
 		audio_provider: Callable, fx_provider: Callable,
-		dynamic_node_resolver: WirePresentPass = null) -> void:
+		dynamic_node_resolver: WirePresentPass = null,
+		death_light := Callable()) -> void:
 	_sim = sim
 	_container = container
 	_index = index
@@ -90,6 +95,7 @@ func setup(sim: Simulation, container: Node3D, index: EntityIndex,
 	_dynamic_node_resolver = dynamic_node_resolver
 	_audio_provider = audio_provider
 	_fx_provider = fx_provider
+	_death_light = death_light
 
 
 func teardown() -> void:
@@ -116,10 +122,12 @@ func reset_runtime_state() -> void:
 		if not (restore_v is Dictionary):
 			continue
 		var restore: Dictionary = restore_v
+		var restored_bms_id := int(restore.get('bms_id', 0))
+		if _placer != null and restored_bms_id != 0:
+			_placer.clear_static_terrain_shadow_replacement(restored_bms_id)
 		if String(restore.get('kind', '')) == 'static':
-			var bms_id := int(restore.get('bms_id', 0))
 			if _placer != null:
-				_placer.show_static_instance(bms_id)
+				_placer.show_static_instance(restored_bms_id)
 			continue
 		var children_v: Variant = restore.get('children', [])
 		if not (children_v is Array):
@@ -159,6 +167,11 @@ func present_drained(events: Dictionary, pieces: Array) -> void:
 			_apply_effect(eff_v as Dictionary)
 		for snd_v in events.get("sounds", []):
 			_apply_sound(snd_v as Dictionary)
+		if _death_light.is_valid():
+			for light_v in events.get("death_lights", []):
+				var light: Dictionary = light_v
+				_death_light.call(light.get("pos", Vector3.ZERO),
+						float(light.get("radius", 0.0)))
 		_stats.debris_triangles += int(events.get("debris_triangles", 0))
 		_stats.glass_points += int(events.get("glass_points", 0))
 		# Sim-side rolls (S12b): the crackle EFFECT rides the ordinary effects
@@ -245,6 +258,8 @@ func _apply_husk_swap(husk: Dictionary) -> void:
 		# A qualifying intact model transfers its static-caster role to the husk.
 		var individual_casts_static_shadow := \
 				_node_has_static_shadow_caster(node)
+		var individual_mirror_reflected := node is ObjectModel \
+				and bool((node as ObjectModel).mirror_reflected)
 		var model: ObjectModel = _placer.build_model_from_graphic(
 				husk_graphic, "", node, "")
 		if model == null:
@@ -253,6 +268,13 @@ func _apply_husk_swap(husk: Dictionary) -> void:
 			return
 		model.name = "HuskModel"
 		_set_husk_static_shadow(model, individual_casts_static_shadow)
+		# The reflect flag belongs to the entity, not its current graphic. The
+		# individual branch must preserve it just like the batched carve branch
+		# below; build_model_from_graphic has already built the replacement, so
+		# apply the layer choice through one rebuild.
+		if individual_mirror_reflected:
+			model.set_mirror_reflected(true)
+			model.rebuild()
 		var child_visibility: Array = []
 		for child in node.get_children():
 			if child is Node3D and child != model:
@@ -269,6 +291,10 @@ func _apply_husk_swap(husk: Dictionary) -> void:
 			'children': child_visibility,
 		}
 		_husked[husk_key] = model
+		if bms_id != 0:
+			_placer.set_static_terrain_shadow_replacement(bms_id,
+					husk_graphic, node.transform,
+					individual_casts_static_shadow)
 		return
 	if _uses_dynamic_husk_identity(bms_id, spawn_origin_v, wire_handle):
 		# The dynamic row may already have retired or failed model resolution.
@@ -285,6 +311,8 @@ func _apply_husk_swap(husk: Dictionary) -> void:
 	# Batched replacements inherit the carved instance's authored eligibility.
 	var batched_casts_static_shadow: bool = \
 			bool(_placer.static_instance_casts_terrain_shadow(bms_id))
+	var batched_mirror_reflected: bool = \
+			bool(_placer.static_instance_is_mirror_reflected(bms_id))
 	var graft: ObjectModel = _placer.build_model_from_graphic(
 			husk_graphic, "", _container, "")
 	if graft == null:
@@ -304,10 +332,21 @@ func _apply_husk_swap(husk: Dictionary) -> void:
 		'bms_id': bms_id,
 		'spawn_origin': spawn_origin_v,
 		'placed_transform': xform_v,
+		'husk_graphic': husk_graphic,
+		'casts_static_shadow': batched_casts_static_shadow,
 	}
 	graft.name = "HuskModel_%d" % bms_id
 	graft.transform = xform_v as Transform3D
 	_set_husk_static_shadow(graft, batched_casts_static_shadow)
+	# Retail's husk swap keeps the entity's reflect flag: the mirror
+	# collectors keep filtering on entity+36 & 0x400, which destruction never
+	# clears [orig: Entity_SpawnFromBMSRecord @ 0x40ed1d..0x40ed2b writer;
+	# husk swap flips only Flags & 4].
+	if batched_mirror_reflected:
+		graft.set_mirror_reflected(true)
+		graft.rebuild()
+	_placer.set_static_terrain_shadow_replacement(bms_id, husk_graphic,
+			graft.transform, batched_casts_static_shadow)
 	_husked[husk_key] = graft
 
 
@@ -372,7 +411,19 @@ func _sync_static_husks() -> void:
 		var live_v: Variant = _present_transform_for_identity(
 				int(restore.get('bms_id', 0)), restore.get('spawn_origin'))
 		if live_v is Transform3D:
-			(graft_v as Node3D).transform = live_v as Transform3D
+			var graft := graft_v as Node3D
+			var live := live_v as Transform3D
+			# The husk registration set the replacement once; this per-frame
+			# sync only re-pushes on an actual transform change.
+			if graft.transform.is_equal_approx(live):
+				continue
+			graft.transform = live
+			if _placer != null:
+				_placer.set_static_terrain_shadow_replacement(
+						int(restore.get('bms_id', 0)),
+						String(restore.get('husk_graphic', '')),
+						live,
+						bool(restore.get('casts_static_shadow', false)))
 
 
 func _apply_effect(eff: Dictionary) -> void:

@@ -131,10 +131,10 @@ func test_live_panm_transforms_rederive_on_the_visible_frame() -> void:
 			"the visible frame re-derives transforms from the absolute clock")
 
 
-func test_retail_runtime_does_not_submit_model_authored_lght() -> void:
-	# Jointops loads LGHT into the model resource but has no gameplay read of
-	# that field after load. Runtime models therefore keep the shader's
-	# count-zero defaults even when the source file carries authored lights.
+func test_gameplay_keeps_the_editor_local_lght_uniforms_disabled() -> void:
+	# Gameplay consumes authored LGHT through the shared EffectWorld pool. The
+	# ObjectModel-local preview path must stay disabled or the same authored
+	# light would be submitted twice through independent shader inputs.
 	var model := ObjectModel.new()
 	add_child_autofree(model)
 	model.set_process(false)
@@ -147,10 +147,10 @@ func test_retail_runtime_does_not_submit_model_authored_lght() -> void:
 		return
 	var material := materials[0] as ShaderMaterial
 	assert_eq(int(material.get_shader_parameter("u_local_light_count")), 0,
-			"gameplay parity leaves parsed LGHT disabled")
+			"gameplay does not duplicate EffectWorld LGHT through preview uniforms")
 	model.advance_runtime_frame(0.0)
 	assert_eq(int(material.get_shader_parameter("u_local_light_count")), 0,
-			"runtime frames do not inject parsed LGHT")
+			"runtime frames keep the editor-only local route disabled")
 
 
 func test_explicit_editor_preview_can_show_model_authored_lght() -> void:
@@ -328,6 +328,27 @@ func test_idle_clocked_model_parks_after_one_runtime_frame() -> void:
 			"a shared-clock model with no live per-frame work parks itself")
 
 
+func test_scene_pass_transition_restamps_visible_model_synchronously() -> void:
+	var model := _clocked_spy_model()
+	var material := _first_material(model)
+	var state := _fresh_env_state(Vector3(0.2, 0.3, 0.4))
+	model.set_environment_state(state)
+	model.advance_runtime_frame(0.0)
+	var underwater_color := Vector3(0.04, 0.16, 0.09)
+	var underwater := EnvLightValues.retail_noon_defaults()
+	underwater.fog_color = underwater_color
+	underwater.fog_end = 25.0
+	underwater.fog_type = 1
+
+	state.publish(underwater, true)
+
+	assert_true(Vector3(material.get_shader_parameter("u_fog_color"))
+			.is_equal_approx(underwater_color),
+			"a pass transition bypasses the 16-frame TOD stagger before capture/draw")
+	assert_almost_eq(float(material.get_shader_parameter("u_fog_end")), 25.0, 0.001)
+	assert_eq(int(material.get_shader_parameter("u_fog_type")), 1)
+
+
 func test_clockless_playing_model_stays_awake() -> void:
 	# The OED-preview carve-out: no shared clock + playing means the private
 	# age accumulates per frame, so the model must keep processing.
@@ -473,3 +494,24 @@ func test_off_screen_model_advances_clocks_but_skips_render_derives() -> void:
 			"the submitted frame re-derives transforms from the absolute clock")
 	assert_eq(material.get_shader_parameter("u_dir_light_color"), offscreen_color,
 			"and catches up the environment restamp")
+
+
+func test_frozen_pose_refresh_restamps_a_model_newly_visible_at_moved_camera() -> void:
+	var model := _clocked_spy_model()
+	var material := _first_material(model)
+	var state := _fresh_env_state(Vector3(0.2, 0.3, 0.4))
+	model.set_environment_state(state)
+	model.advance_runtime_frame(0.0)
+	model.set_on_screen(false)
+	var underwater := EnvLightValues.retail_noon_defaults()
+	underwater.dir_color = Vector3(0.7, 0.15, 0.05)
+	state.publish(underwater, true)
+	assert_ne(material.get_shader_parameter("u_dir_light_color"), underwater.dir_color,
+			"the off-screen pass transition deliberately leaves render derives stale")
+
+	# The exact-pose camera has moved, but VisibleOnScreenNotifier3D has not had
+	# another render to publish its screen-entered edge. The capture path cannot
+	# wait for that edge or advance animation/material time here.
+	ObjectModel.refresh_awake_environment()
+	assert_eq(material.get_shader_parameter("u_dir_light_color"), underwater.dir_color,
+			"the non-time-owning frozen refresh ignores the stale off-screen bit")

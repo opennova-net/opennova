@@ -119,17 +119,21 @@ func setup(world: GameWorld, camera: Camera3D,
 	_camera_saved_cull_mask = camera.cull_mask if camera != null else -1
 	# The player camera never draws the FP body layer: retail renders no local
 	# body in first person, and the water mirror never draws persons either
-	# (the reflection collects only vehicles above water and has no
-	# player-render leg [orig: Terrain_CollectVisibleEntitiesForReflection
+	# (its reflected entity waves collect only vehicles above water and it has
+	# no player-render leg [orig: Terrain_CollectVisibleEntitiesForReflection
 	# @ 0x5c90a0]) — the layer keeps the body a shadow source only. It never
 	# draws the viewmodel layer either — the FP arms/weapon render through the
 	# dedicated renderfov pass the rig builds (deferred; see
-	# PlayerViewmodelRig.setup for the "parent busy" boot shape).
+	# PlayerViewmodelRig.setup for the "parent busy" boot shape). Godot's shadow
+	# collection also intersects the gameplay camera mask, so the two caster
+	# marker layers must remain admitted even though SHADOWS_ONLY geometry on
+	# those layers is absent from the beauty pass.
 	if _camera != null:
-		_camera.cull_mask &= ~(
-				Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY
-				| Water.VISUAL_LAYER_VIEWMODEL
-				| Water.VISUAL_LAYER_SHADOW_CASTER_MASK)
+		_camera.cull_mask = (
+				_camera.cull_mask
+				& ~(Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY
+						| Water.VISUAL_LAYER_VIEWMODEL)
+				) | Water.VISUAL_LAYER_SHADOW_CASTER_MASK
 	_viewmodel_rig.setup(world, self, camera)
 	_reset_state()
 	# Attachment is the adoption boundary: discard presentation history produced
@@ -476,9 +480,12 @@ func _update_held_weapon(overlay: PlayerAimOverlay) -> void:
 	# LAYER while keeping it a shadow source (the witnessed mirror never draws
 	# persons or their held weapons — the reflection collects vehicles only
 	# [orig: Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0]).
+	var draw_held_weapon := _third_person or debug_body_in_first_person
 	PlayerViewmodelRig.set_visual_layers(_held_weapon, Water.VISUAL_LAYER_WORLD
-			if (_third_person or debug_body_in_first_person)
-			else Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY)
+			if draw_held_weapon else Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY)
+	PlayerViewmodelRig.set_shadow_casting(_held_weapon,
+			GeometryInstance3D.SHADOW_CASTING_SETTING_ON if draw_held_weapon
+			else GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY)
 
 
 func _find_skeleton(root: Node) -> Skeleton3D:
@@ -597,17 +604,21 @@ func _update_avatar(pos: Vector3) -> void:
 	# The body renders only in third person; first person hides it from every
 	# camera by LAYER, not by visible = false, so it stays a live shadow
 	# source. The 2026-08-05 witness corrected the earlier mirror-visible
-	# reading: retail's reflection collects only vehicles above water and has
-	# no player-render leg, so no person — the local body included — ever
+	# reading: retail's reflected entity waves collect only vehicles above
+	# water, and the reflected world has no player-render leg, so no person —
+	# the local body included — ever
 	# enters the mirror [orig: Terrain_CollectVisibleEntitiesForReflection
 	# @ 0x5c90a0 filterMask 0x400; Entity_InitFromModel @ 0x40e20a; the
 	# viewmodel pass stays Player_RenderFirstPersonViewModel @ 0x4ded60].
 	# Stamped every frame: ObjectModel.rebuild() recreates its mesh
 	# children on the default layer.
 	_avatar.visible = true
+	var draw_avatar := _third_person or debug_body_in_first_person
 	PlayerViewmodelRig.set_visual_layers(_avatar, Water.VISUAL_LAYER_WORLD
-			if (_third_person or debug_body_in_first_person)
-			else Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY)
+			if draw_avatar else Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY)
+	PlayerViewmodelRig.set_shadow_casting(_avatar,
+			GeometryInstance3D.SHADOW_CASTING_SETTING_ON if draw_avatar
+			else GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY)
 	_update_held_weapon(overlay)
 	var sim = _sim()
 	var anim_key := String(sim.get_local_player_anim_key()) if sim != null else ""

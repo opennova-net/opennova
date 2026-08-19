@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/resource.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
@@ -50,6 +52,11 @@ private:
 	bool has_source_project = false;
 	uint8_t oed_dirty_mask = 0;
 	uint8_t last_oed_update_mask = 0;
+	uint64_t change_revision_ = 0;
+	// Process-wide edit counter bumped alongside every per-document
+	// change_revision_ bump. Per-frame consumers (the static-shadow planner)
+	// compare it once instead of walking every tracked document.
+	static std::atomic<uint64_t> global_change_counter_;
 
 	String source_path;
 	String source_dir;
@@ -229,6 +236,10 @@ public:
 	String get_last_error() const;
 	int get_oed_dirty_mask() const;
 	int get_last_oed_update_mask() const;
+	uint64_t get_change_revision() const { return change_revision_; }
+	static uint64_t get_global_change_counter() {
+		return global_change_counter_.load(std::memory_order_relaxed);
+	}
 	Dictionary get_summary() const;
 	Array get_project_lods() const;
 	bool set_lod_field(int p_lod_index, const String &p_key, const Variant &p_value);

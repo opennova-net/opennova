@@ -3266,8 +3266,11 @@ row position, `RoundSpawnParams::shooter_pos`).
   (ex `sub_56C960`, renamed): ammoDef+36 → a light-pool glow
   (`LightPool_SpawnGlowEffect @ 0x5a8d50`, radius 98304 = 1.5 u, color table
   `@ 0xFFE0A0`) cached per shooter at entity+436, repositioned to the muzzle and
-  re-blended to 1.0 every shot (fade params 4/5). DEFERRED — no light-pool port
-  (D-AI-8); the +40 value's consumer is unwitnessed (not passed at this site).
+  re-blended to 1.0 every shot (fade params 4/5). ROUTED through
+  `EffectLightDirector.on_muzzle_fire`; the Godot object delivery is the
+  camera-global approximation tracked by D-RLIT-4, not retail's self-only
+  per-draw owner isolation. The +40 value's consumer is unwitnessed (not
+  passed at this site).
 
 ### 18.4 The tracer decision — `RoundData_SpawnRound @ 0x4ec0d0`
 
@@ -4595,12 +4598,26 @@ the entity's full Euler pose, range-tests the point against the AMMO'S authored
 `kz_maxradius` (not the queued radius override), and breaks each point once.
 Every newly broken point consumes two destruction-PRNG draws for each of the
 four ordered slots, then submits `Effect_BldGlassExp`, `Effect_BldPaperExp`,
-`Effect_BldFireExp`, and `Effect_BldDustExp` when the second roll modulo 100 is
-`<= 33/5/5/10`. The presentation drain receives those resolved position,
-direction, and effect rows verbatim. Native `destruction` pins full-pose
-placement, authored-radius selection, effect order, PRNG state, and break-once;
-GUT `nova_simulation_test` pins the real 3DI name/axis resolve and
-`destruction_present_pass_test` pins the transient presentation leg.
+`Effect_BldFireExp`, and `Effect_BldDustExp` when the second roll modulo 100
+clears the effect's probability gate. The gate is data-driven
+(decoded 2026-08-18): `Effect_RollSurfaceEffectProbability @ 0x5cc1f0`
+(renamed from `sub_5CC1F0` that session) scans
+`g_SurfaceEffectProbTable @ 0x8418b8` — 40-byte rows
+`{name[32], prob_main f32, prob_alt f32}`, empty-name terminated: Glass
+1.0/0.33, Paper 0.1/0.05, Fire 0.2/0.05, Dust 0.33/0.1 — burns one
+`PRNG_Next16` into `srand`, then accepts when the second
+`PRNG_Next16 % 100 <= ftol(prob * 100.0)` (the ×100 scale `@ 0x7c4654`).
+The glass user-point path passes `useAltProbability = 1`
+(`@ 0x5cf0b3/0x5cf0f4` in `Terrain_SpawnEffectsAtUserPoint`), and the `ftol`
+TRUNCATION makes the Glass gate `32`, not 33 (0.33f × 100 = 32.9999983): the
+reimpl's original `{33,5,5,10}` table was off by one on the glass roll and
+now ports the float×100-truncate structurally
+(`destruction.h kGlassShatterAltProbability`). The presentation drain receives
+those resolved position, direction, and effect rows verbatim. Native
+`destruction` pins full-pose placement, authored-radius selection, effect
+order, PRNG state, and break-once; GUT `nova_simulation_test` pins the real
+3DI name/axis resolve and `destruction_present_pass_test` pins the transient
+presentation leg.
 
 `Entity_ApplyWeaponDamage @ 0x4e6820` order: dead flag; in-session building
 gate (`g_destroy_buildings @ 0x24d2164`); same-team immunity when the target
@@ -5131,14 +5148,14 @@ FrameFX leg]`. The normal-pass geometry:
 | B=1 wave anim + 4-wide cross-section + anim UVs | divergent (single-ribbon stand-in; params recorded 25.3) | D-AI-12a |
 | Distortion pass (+0x828 channels) | not ported (witnessed structurally) | D-AI-12b |
 | Round item graphic + TRACER_SCALE/WIDTH channels | visible TrcrID item model ported (including friendly/enemy fallback and non-tracer suppression); procedural SCALE/WIDTH channels unported | `Simulation::get_throwable_visuals` + `throwable_present_pass.gd`; D-AI-12d |
-| light_move glow | not ported (parse landed; light-pool port pending with the D-AI-8d muzzle glow) | D-AI-12e |
+| light_move glow | ported 2026-08-16 through the D-RLIT-4 light pool (`Simulation::get_round_glow_rows` → `EffectLightDirector.sync_round_glows`) | D-AI-12e (closed leg) |
 | NVG laser beam | not ported (witnessed; needs NVG mode) | D-AI-12f |
 
 ### 25.6 Divergences
 
 | ID | Ours | Original | Why / consequence |
 |---|---|---|---|
-| D-AI-12 | Tracer ribbon residuals: (a) jitter/anim styles (smoke 3/4/5, sniper 9/10, NVG 8) draw the same single camera-facing ribbon as the tracer styles — the witnessed 4-verts-per-point 3-quad cross-section, the GetTickCount wave (+0x81C/+0x820/+0x824 x 0.3/0.2/4e-4), and the animated UVs are unported (params recorded 25.3); (b) the distortion pass (+0x828 styles: rocket/at4/sniper — backbuffer-capture shimmer behind `CEffectEmitterPool_RenderDistortionPass @ 0x5dcb40`) is unported; (c) additive fog-to-black (`SetFogAndBlendMode(dev, 2) @ 0x677740`) approximated by `disable_fog` on the Godot material — an additive streak neither fades nor tints with distance until our fog model lands; (d) the visible round item model selected by `frndlyTrcrID`/`foeTrcrID` is ported through `Simulation::get_throwable_visuals` and `throwable_present_pass.gd`, including the retail non-tracer suppression, but its TRACER_SCALE/TRACER_WIDTH procedural node channels (table `@ 0x83e428`, evaluator in the 0x41bxxx region, unwalked) remain unported; (e) the `light_move` per-round glow (round+0x1B4) is parsed but not presented (no light-pool port — rides with D-AI-8d); (f) the NVG laser beam (`Entity_RenderNVGLaserBeam @ 0x5c6090`, style 8) waits on an NVG mode; (g) the min-screen-width projection divisor (the `fdiv` operand feeding `flt_7DC69C = 1.83e-8`) is unresolved — ported as 0.0012 x distance; (h) the per-point W jitter uses a local LCG, not the shared effect PRNG (`PRNG_Next16_B @ 0x6130f0` stream unwitnessed) — presentation-only randomness; (i) the style blocks' +8/+0xC words have no witnessed consumer; (j) the POOL drain runs per logic tick in our sim — retail drains per FRAME (`Game_ProcessMainFrame`); identical at 62 Hz presentation, faster evaporation during catch-up bursts | 25.1-25.4 above | the visible model and core in-flight look are ported; the remaining procedural/dressing residuals each retain their witness |
+| D-AI-12 | Tracer ribbon residuals: (a) jitter/anim styles (smoke 3/4/5, sniper 9/10, NVG 8) draw the same single camera-facing ribbon as the tracer styles — the witnessed 4-verts-per-point 3-quad cross-section, the GetTickCount wave (+0x81C/+0x820/+0x824 x 0.3/0.2/4e-4), and the animated UVs are unported (params recorded 25.3); (b) the distortion pass (+0x828 styles: rocket/at4/sniper — backbuffer-capture shimmer behind `CEffectEmitterPool_RenderDistortionPass @ 0x5dcb40`) is unported; (c) additive fog-to-black (`SetFogAndBlendMode(dev, 2) @ 0x677740`) approximated by `disable_fog` on the Godot material — an additive streak neither fades nor tints with distance until our fog model lands; (d) the visible round item model selected by `frndlyTrcrID`/`foeTrcrID` is ported through `Simulation::get_throwable_visuals` and `throwable_present_pass.gd`, including the retail non-tracer suppression, but its TRACER_SCALE/TRACER_WIDTH procedural node channels (table `@ 0x83e428`, evaluator in the 0x41bxxx region, unwalked) remain unported; (e) the `light_move` per-round glow (round+0x1B4) presented 2026-08-16 through the D-RLIT-4 light pool (mode 1, radius/2 spawn lift, per-tick follow at the raw position, despawn on drop); (f) the NVG laser beam (`Entity_RenderNVGLaserBeam @ 0x5c6090`, style 8) waits on an NVG mode; (g) the min-screen-width projection divisor (the `fdiv` operand feeding `flt_7DC69C = 1.83e-8`) is unresolved — ported as 0.0012 x distance; (h) the per-point W jitter uses a local LCG, not the shared effect PRNG (`PRNG_Next16_B @ 0x6130f0` stream unwitnessed) — presentation-only randomness; (i) the style blocks' +8/+0xC words have no witnessed consumer; (j) the POOL drain runs per logic tick in our sim — retail drains per FRAME (`Game_ProcessMainFrame`); identical at 62 Hz presentation, faster evaporation during catch-up bursts | 25.1-25.4 above | the visible model and core in-flight look are ported; the remaining procedural/dressing residuals each retain their witness |
 
 ### 25.7 IDB write-backs (2026-07-18 session, saved)
 

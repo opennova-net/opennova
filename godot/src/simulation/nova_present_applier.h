@@ -17,6 +17,7 @@
 
 #include "object/nova_entity_index.h"
 #include "object/nova_object_model.h"
+#include "mission/nova_mission_object_placer.h"
 
 namespace godot {
 
@@ -51,7 +52,8 @@ public:
 	// `sim` feeds the muzzle-origin push back (typed Simulation; converted
 	// once at this boundary). `index` resolves rows to typed models — a real
 	// EntityIndex, in tests too.
-	void setup(Object *sim, Object *index);
+	void setup(Object *sim, Object *index,
+			const Ref<MissionObjectPlacer> &placer = Ref<MissionObjectPlacer>());
 	void set_output_channels(int channels);
 	int get_output_channels() const { return output_channels_; }
 	// Shared BY REFERENCE with the shell (GameWorld mutates the hidden set in
@@ -177,6 +179,8 @@ private:
 	struct Row {
 		int base = 0;
 		ObjectID node_id;
+		int32_t entity_kind = -1;
+		int32_t entity_index = -1;
 		// Plan-time muzzle presence (the D-AI-6 fire-origin seam); re-checked
 		// live before each posed read.
 		bool has_muzzle = false;
@@ -278,6 +282,7 @@ private:
 
 	ObjectID sim_id_;
 	Ref<EntityIndex> index_;
+	Ref<MissionObjectPlacer> placer_;
 	int output_channels_ = OUTPUT_ALL;
 	Dictionary occlusion_hidden_ids_;
 	Dictionary present_visibility_;

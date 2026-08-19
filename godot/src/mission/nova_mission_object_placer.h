@@ -48,6 +48,27 @@ class MissionObjectPlacer : public RefCounted {
 	GDCLASS(MissionObjectPlacer, RefCounted)
 
 public:
+	// Typed shell snapshot consumed by the terrain page-shadow adapter. It
+	// preserves the BMS/item policy inputs instead of flattening eligibility
+	// into a render-layer guess; the engine collector remains the one owner of
+	// admission and ordering.
+	// (retail: Terrain_CollectAndRenderTileModels pool scans/admission
+	// @0x60D421..0x60D450; see docs/terrain/terrain-re.md)
+	struct StaticTerrainShadowSource {
+		int bms_id = 0;
+		int item_id = 0;
+		int entity_kind = -1;
+		int entity_index = -1;
+		int team = 0;
+		uint32_t entity_attrib = 0;
+		uint32_t item_attrib = 0;
+		uint32_t item_attrib2 = 0;
+		String graphic;
+		Transform3D world_transform;
+		Ref<ObjectData> object_data;
+		bool active = true;
+	};
+
 	enum {
 		RENDER_LOD = 0,
 		PLAYER_RUNTIME_TYPE_ID = opennova::mission::kPlayerRuntimeTypeId,
@@ -144,6 +165,11 @@ public:
 	}
 	Array get_static_user_point_sources();
 	Array get_static_item_effect_sources();
+	Vector<StaticTerrainShadowSource> get_static_terrain_shadow_sources();
+	uint64_t get_static_terrain_shadow_source_revision();
+	// Dictionary mirror for focused shell/asset diagnostics. Production
+	// consumers use the typed snapshot above.
+	Array get_static_terrain_shadow_source_diagnostics();
 	String graphic_for(int p_item_id);
 	Ref<ObjectData> object_data_for(const String &p_graphic);
 	Ref<SkeletalAnim> skeletal_anim_for(int p_item_id,
@@ -157,19 +183,33 @@ public:
 
 	// --- destruction support (world-wac-ai-re §24.6) ----------------------
 	Variant get_static_instance_transform(int p_bms_id) const;
+	// Diagnostic/read-back identity for the exact MultiMesh population whose
+	// slot is carved. Distinct policies may share the same authored graphic.
+	String get_static_instance_batch_key(int p_bms_id) const;
+	// The carved instance's authored reflection policy, so the husk graft can
+	// keep reflecting: retail's husk swap flips only the husk-model flag,
+	// never the reflect flag the mirror collectors filter on (witnesses in
+	// engine/runtime/mission/placement_traits.h).
+	bool static_instance_is_mirror_reflected(int p_bms_id) const;
 	// Register one carveable batched-static record directly (the
 	// construction seam matching register_resolved_static_graphic: callers
 	// that own their placement — including asset-free tests — feed the same
 	// carve bookkeeping place() fills).
 	void register_static_instance(int p_bms_id, const String &p_graphic,
 			int p_index, const Transform3D &p_xform,
-			bool p_casts_static_shadow);
+			bool p_casts_static_shadow, bool p_mirror_reflected = false);
 	bool is_static_instance_hidden(int p_bms_id) const {
 		return hidden_destruction_instances_.has(p_bms_id);
 	}
 	bool static_instance_casts_terrain_shadow(int p_bms_id) const;
 	Variant hide_static_instance(int p_bms_id);
 	bool show_static_instance(int p_bms_id);
+	bool update_static_terrain_shadow_source_transform(int p_kind,
+			int p_index, const Transform3D &p_xform);
+	bool set_static_terrain_shadow_replacement(int p_bms_id,
+			const String &p_graphic, const Transform3D &p_xform,
+			bool p_active);
+	bool clear_static_terrain_shadow_replacement(int p_bms_id);
 
 	// Register an already-resolved object plus its static render batches —
 	// the construction seam for callers that already own parsed geometry
@@ -213,6 +253,8 @@ private:
 	bool _graphic_needs_live_panm(const String &p_graphic);
 	bool _has_occlusion_records(int p_item_id);
 	bool _item_is_mirror_reflected(int p_item_id) const;
+	bool _placement_is_mirror_reflected(uint32_t p_entity_attrib,
+			int p_item_id) const;
 	void _configure_item_shadow(ObjectModel *p_model, int p_item_id);
 	void _configure_item_lighting(ObjectModel *p_model, int p_item_id);
 	Ref<SkeletalAnim> _skeletal_from_adm(const String &p_adm_name,
@@ -241,6 +283,11 @@ private:
 			const Transform3D &p_xform);
 	void _append_static_item_effect_source(int p_kind, int p_item_id,
 			const String &p_graphic, const Transform3D &p_xform);
+	void _record_static_terrain_shadow_source(int p_kind, int p_index,
+			int p_bms_id, int p_team, uint32_t p_entity_attrib, int p_item_id,
+			const String &p_graphic, const Transform3D &p_xform,
+			const Ref<ObjectData> &p_data);
+	void _bump_static_terrain_shadow_source_revision();
 
 	Ref<ResourceRoot> resource_root_;
 	Ref<ItemDatabase> item_db_;
@@ -253,6 +300,17 @@ private:
 	Array pickable_records_;
 	Array static_user_point_sources_;
 	Array static_item_effect_sources_;
+	Vector<StaticTerrainShadowSource> static_terrain_shadow_sources_;
+	HashMap<uint64_t, Vector<int>> static_terrain_shadow_source_rows_;
+	HashMap<int, Vector<int>> static_terrain_shadow_rows_by_bms_;
+	uint64_t static_terrain_shadow_source_revision_ = 0;
+
+	// One indexed pass over this bms id's source rows: whether any row
+	// represents it, whether policy admits any row, and whether an admitted
+	// row is base-active (unhidden). Replaces the former full-vector scans in
+	// the replacement set/clear paths.
+	void _static_shadow_bms_policy(int p_bms_id, bool &r_represented,
+			bool &r_policy_admitted, bool &r_base_active) const;
 
 	HashMap<String, Ref<ObjectData>> object_data_cache_;
 	HashMap<String, Ref<SkeletalAnim>> skeletal_cache_;
@@ -267,17 +325,25 @@ private:
 	uint64_t built_epoch_ = 0;
 
 	// Destruction carve state: batched statics have no per-entity node; a
-	// destroyed one is zero-scaled out of its graphic's MultiMesh batches and
-	// the caller grafts the husk model at the returned transform.
+	// destroyed one is zero-scaled out of its graphic/reflection population's
+	// MultiMesh batches and the caller grafts the husk model at the returned
+	// transform.
 	HashMap<String, Vector<Ref<MultiMesh>>> destruction_batches_;
 	struct DestructionInstance {
 		String graphic;
+		// Static rendering can split one graphic into independent retail
+		// reflection populations; this selects the MultiMeshes whose slot index
+		// belongs to this record. Legacy/manual registrations use `graphic`.
+		String batch_key;
 		int index = -1;
 		Transform3D xform;
 		bool casts_static_shadow = false;
+		bool mirror_reflected = false;
 	};
 	HashMap<int64_t, DestructionInstance> destruction_instances_;
 	HashMap<int64_t, Array> hidden_destruction_instances_;
+	HashMap<int64_t, StaticTerrainShadowSource>
+			static_terrain_shadow_replacements_;
 };
 
 } // namespace godot

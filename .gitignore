@@ -96,6 +96,9 @@ CLAUDE.local.md
 
 .scratch/
 
+# Retail capture restore tokens bind machine-local absolute install paths.
+*.restore-token.local.json
+
 # Local-only Windows dev helper: per-machine compose override that moves the NovaWorld UDP
 # port off the Hyper-V/WinNAT reserved range (see DEVELOPING.md). Not for commit.
 deploy/compose/docker-compose.winport.yml

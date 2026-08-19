@@ -84,7 +84,7 @@ void vertex() {
 	}
 
 	v_colormap_uv = source_uv;
-	v_detail_uv = source_uv * u_detail_density;
+	v_detail_uv = retail_detail_uv_from_atlas(source_uv, u_detail_density);
 	v_world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	v_world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
 	v_eye_depth = max(-(MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).z, 0.0);

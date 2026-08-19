@@ -260,7 +260,11 @@ func update_viewmodel(view: PlayerLocalView, weapon_view: PlayerWeaponView,
 	# as its own renderfov/near-Z pass over the finished frame [orig:
 	# Player_RenderFirstPersonViewModel @ 0x4ded60]; in the port, the dedicated layer is drawn
 	# only by the pass camera (and excluded by the mirror camera's cull_mask).
-	set_visual_layers(_viewmodel, Water.VISUAL_LAYER_VIEWMODEL)
+	# The gameplay camera admits the world shadow-caster marker layers. Strip
+	# those markers here rather than preserving ObjectModel's defaults: this
+	# dedicated near-Z pass must never leak its arms/weapon into world shadows.
+	set_visual_layers(_viewmodel, Water.VISUAL_LAYER_VIEWMODEL, false)
+	set_shadow_casting(_viewmodel, GeometryInstance3D.SHADOW_CASTING_SETTING_OFF)
 	# The card switch: while the SIGHTS card is up, the FP model does not draw —
 	# the frame shows one or the other [orig: selectors/clear @0x5ca299..0x5ca304;
 	# the card path @0x5caaf3..0x5cab15 and the viewmodel candidate @0x5ca32c].
@@ -337,13 +341,25 @@ func _apply_viewmodel_control_registers(submit_viewmodel: bool,
 # (mesh instances under Robj/Skeleton3D nodes) whose rebuild() recreates them
 # on the default layer, so the callers (this rig's viewmodel stamp and the
 # presenter's avatar/held-weapon stamps) re-stamp every frame.
-static func set_visual_layers(root: Node, layer_mask: int) -> void:
+static func set_visual_layers(root: Node, layer_mask: int,
+		preserve_shadow_caster_layers: bool = true) -> void:
 	if root is VisualInstance3D:
 		var visual := root as VisualInstance3D
-		visual.layers = layer_mask \
-				| (visual.layers & Water.VISUAL_LAYER_SHADOW_CASTER_MASK)
+		var caster_layers := visual.layers & Water.VISUAL_LAYER_SHADOW_CASTER_MASK \
+				if preserve_shadow_caster_layers else 0
+		visual.layers = layer_mask | caster_layers
 	for child in root.get_children():
-		set_visual_layers(child, layer_mask)
+		set_visual_layers(child, layer_mask, preserve_shadow_caster_layers)
+
+
+# Stamp a Godot shadow-submission policy onto every geometry instance under
+# `root`. Kept beside set_visual_layers because ObjectModel.rebuild() can
+# recreate mesh children between frames, so player presentation reapplies both.
+static func set_shadow_casting(root: Node, setting: int) -> void:
+	if root is GeometryInstance3D:
+		(root as GeometryInstance3D).cast_shadow = setting
+	for child in root.get_children():
+		set_shadow_casting(child, setting)
 
 
 # Pull the resolved weapon.def view record from the world; null when no weapon.def (or the

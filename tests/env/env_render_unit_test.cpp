@@ -289,7 +289,7 @@ int main() {
 		overrides.has_fog_color = true;
 		overrides.fog_color = {50.0f / 255.0f, 60.0f / 255.0f, 70.0f / 255.0f};
 		overrides.has_water_murk = true;
-		overrides.water_murk = 0.5f;
+		overrides.water_murk = 1.5f;
 		overrides.has_start_time = true;
 		overrides.start_time = 330;
 
@@ -298,8 +298,11 @@ int main() {
 		if (!expect(near(config.fog_level, 333.0f), "fog level override applies")) return 1;
 		if (!expect(near(config.keyframes[0].fog.r, 50.0f / 255.0f) && near(config.keyframes[1].fog.r, 50.0f / 255.0f),
 		            "fog color override replaces every keyframe's fog")) return 1;
-		if (!expect(near(config.water_murk, 0.5f), "murk override applies")) return 1;
+		if (!expect(near(config.water_murk, 0.99f), "murk override uses the shared upper-only clamp")) return 1;
 		if (!expect(config.curtime == 330, "start time override applies")) return 1;
+		overrides.water_murk = -0.5f;
+		apply_bms_overrides(config, overrides);
+		if (!expect(near(config.water_murk, -0.5f), "murk override preserves negative values")) return 1;
 
 		Config untouched;
 		const float default_fog = untouched.fog_level;
@@ -1112,6 +1115,53 @@ int main() {
 		            "specular is row-constant")) return 1;
 		if (!expect(near(rows.screen_pos[7], 254.0f, 1e-3f),
 		            "row1 marches 2 px (the stride floor)")) return 1;
+
+		// The texm3x2 row-register constants [orig: @ 0x5c2efd..0x5c3067]:
+		// t1 = right.xz * (-min(rhw, 0.05)/2), t2 = fwd.xz * (-5*min(rhw, 0.05)),
+		// vbase = 1 - min(297*rhw + 0.15, 2)/256, screen V = vbase - sy/H.
+		// These were previously unpinned (env #37's investigation found the gap).
+		{
+			WaterStripView vb = v;
+			vb.cam_right[0] = 1.0f;
+			vb.cam_right[1] = 0.0f;
+			vb.cam_right[2] = 0.0f;
+			vb.cam_forward[0] = 0.6f;
+			vb.cam_forward[1] = 0.0f;
+			vb.cam_forward[2] = 0.8f;
+			WaterStripRows rb;
+			const int nb = water_build_strip_rows(vb, sp, rb);
+			if (!expect(nb >= 2, "basis view emits rows")) return 1;
+			const float rhw0 = rb.rhw[0];
+			const float bump0 = rhw0 > 0.05f ? 0.05f : rhw0;
+			if (!expect(near(rb.t1[0], -0.5f * bump0, 1e-9f) &&
+			            near(rb.t1[1], 0.0f, 1e-9f),
+			            "t1.xy = right.xz * (-min(rhw, 0.05)/2)")) return 1;
+			if (!expect(near(rb.t2[0], -5.0f * bump0 * 0.6f, 1e-8f) &&
+			            near(rb.t2[1], -5.0f * bump0 * 0.8f, 1e-8f),
+			            "t2.xy = forward.xz * (-5 * min(rhw, 0.05))")) return 1;
+			float q0 = 297.0f * rhw0 + 0.15f;
+			if (q0 > 2.0f) q0 = 2.0f;
+			const float vbase0 = 1.0f - (q0 * 0.5f) * 0.0078125f;
+			if (!expect(near(rb.t1[2], rb.screen_pos[0] / 640.0f, 1e-6f),
+			            "screen U normalizes against the viewport width")) return 1;
+			if (!expect(near(rb.t2[2], vbase0 - rb.screen_pos[1] / 480.0f, 1e-5f),
+			            "screen V = vbase - sy/H (the 297/0.15/2/(1/128) chain)")) return 1;
+
+			// A low camera reaches near rows whose rhw exceeds the clamp: the
+			// bump saturates at 0.05 [orig: flt_7C68E8 @ 0x5c2f0d].
+			WaterStripView vn = vb;
+			vn.cam_y_fp = 2 << 16;
+			vn.view[13] = -2.0f;
+			vn.view_inv[13] = 2.0f;
+			WaterStripRows rn;
+			const int nn = water_build_strip_rows(vn, sp, rn);
+			if (!expect(nn >= 2, "low camera emits rows")) return 1;
+			const int last = (nn - 1) * 3;
+			if (!expect(rn.rhw[last] > 0.05f,
+			            "the low view's last row is nearer than the clamp")) return 1;
+			if (!expect(near(rn.t2[(nn - 1) * 9], -5.0f * 0.05f * 0.6f, 1e-6f),
+			            "the near-row bump saturates at 0.05")) return 1;
+		}
 
 		// Every emitted vertex must reproject to the screen coordinate carried
 		// by its texm3x2 row. This pins the reimpl extension of the witnessed

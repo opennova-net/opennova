@@ -1268,8 +1268,10 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 	// north, spanning the rect x1.25. The gate needs bit9 AND bit6 — the
 	// big-map masks carry neither.
 	// [orig: the @0x5a5f40 walk — (ctx & 0x200) && (ctx & 0x40) around
-	//  draw_compass_indicator @0x59c900; rotation (0x3FFFFFC0 - yaw) >> 16,
-	//  size x flt_7C6F18 = 1.25]
+	//  draw_compass_indicator @0x59c900; retail rotation
+	//  (0x3FFFFFC0 - yaw) >> 16, size x flt_7C6F18 = 1.25]. The draw list is
+	//  consumed in a +Y-down canvas, whose positive visual rotation is the
+	//  opposite of retail's matrix convention, so negate that BAM delta here.
 	if ((flags & 0x200u) != 0 && (flags & 0x40u) != 0) {
 		HudMapSprite compass;
 		compass.center_x = view.center_x;
@@ -1279,8 +1281,8 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 		// at 1920x1080, so these are deliberately distinct operands.
 		compass.half_w = view.base_radius * kCompassScale;
 		compass.half_h = view.base_radius * kCompassScale;
-		const uint32_t rot_bam = 0x3FFFFFC0u -
-				static_cast<uint32_t>(input.player_heading_bam);
+		const uint32_t rot_bam =
+				static_cast<uint32_t>(input.player_heading_bam) - 0x3FFFFFC0u;
 		compass.rotation_rad = static_cast<float>(
 				static_cast<double>(rot_bam >> 16) * kBam16ToRadians);
 		compass.u0 = kCompassUvMin;

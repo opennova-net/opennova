@@ -52,17 +52,100 @@ func test_known_shader_tag_table_reaches_gdscript() -> void:
 	assert_false("VS_LEAVESWIND" in tags, "unshipped tags stay out of the table")
 
 
-func test_shader_for_key_composes_real_shaders() -> void:
+func test_shader_for_key_selects_checked_in_resources() -> void:
 	var cache = ObjectShaderCache.get_singleton()
 	var ff_key: int = cache.classify("FF_ST_OP", 0, 0, 0, 128)
 	var shader: Shader = cache.get_shader_for_key(ff_key)
-	assert_not_null(shader, "FF shader composes")
-	assert_true(shader.code.contains("shader_type spatial"), "FF shader is spatial")
-	assert_true(shader.code.contains("obj_ff_lighting"), "FF shader lights via ff helper")
+	assert_not_null(shader, "FF shader resource loads")
+	assert_eq(shader.resource_path, "res://shaders/object/fixed/opaque.gdshader",
+			"opaque FF selects the checked-in opaque resource")
 
 	var glass_key: int = cache.classify("FFP_GLASS", 0, 0, 1, 128)
 	var glass: Shader = cache.get_shader_for_key(glass_key)
-	assert_true(glass.code.contains("blend_add"), "glass shader is additive")
+	assert_eq(glass.resource_path, "res://shaders/object/glass/additive.gdshader",
+			"glass selects the additive resource")
 
 	var same: Shader = cache.get_shader_for_key(ff_key)
 	assert_eq(shader, same, "cache returns the same Shader per key")
+
+
+func test_all_finite_family_and_render_policy_resources_load() -> void:
+	var manifest: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(
+			"res://shaders/object/pipeline_manifest.json"))
+	assert_eq(int(manifest.get("schema", 0)), 1, "known pipeline manifest schema")
+	var count := 0
+	for technique in manifest.get("techniques", []):
+		for policy in technique.get("policies", []):
+			for suffix in ["", "_double_sided"]:
+				var path: String = "res://shaders/object/%s/%s%s.gdshader" % [
+					technique.get("directory", ""), policy, suffix]
+				assert_true(FileAccess.file_exists(path), "%s is checked in" % path)
+				assert_not_null(ResourceLoader.load(path, "Shader"),
+						"%s imports as Shader" % path)
+				count += 1
+	assert_eq(count, int(manifest.get("resource_count", -1)),
+			"manifest covers the bounded resource matrix")
+
+
+func test_configure_material_selects_compile_time_techniques() -> void:
+	var cache = ObjectShaderCache.get_singleton()
+
+	var detail := ShaderMaterial.new()
+	cache.configure_material_for_key(
+			detail, cache.classify("VS_SKBUMPDIFFT2", 0, 0, 0, 128))
+	assert_eq(detail.shader.resource_path,
+			"res://shaders/object/dot3_tangent_detail/opaque.gdshader",
+			"detail + tangent normal topology is selected structurally")
+	var no_detail_key: int = cache.classify("VS_SKBUMPDIFFT2", 0, 0, 0, 128)
+	no_detail_key &= ~ObjectShaderCache.CAP_DETAIL
+	var no_detail := ShaderMaterial.new()
+	cache.configure_material_for_key(no_detail, no_detail_key)
+	assert_eq(no_detail.shader.resource_path,
+			"res://shaders/object/dot3_tangent/opaque.gdshader",
+			"missing detail texture selects the compiled single-stage downgrade")
+
+	var phong := ShaderMaterial.new()
+	cache.configure_material_for_key(phong, cache.classify("VS_PHONGT", 0, 0, 0, 128))
+	assert_eq(phong.shader.resource_path,
+			"res://shaders/object/phong_tangent_specular/opaque.gdshader",
+			"Phong tangent/specular topology is compiled into its resource")
+	var object_normal := ShaderMaterial.new()
+	cache.configure_material_for_key(
+			object_normal, cache.classify("VS_DOT3DIFFOBJ", 0, 0, 0, 128))
+	assert_eq(object_normal.shader.resource_path,
+			"res://shaders/object/phong_object_diffuse/opaque.gdshader",
+			"object-space normal topology is a distinct resource")
+
+	var environment := ShaderMaterial.new()
+	cache.configure_material_for_key(
+			environment, cache.classify("VS_ENVPHONGT", 0, 0, 0, 128))
+	assert_eq(environment.shader.resource_path,
+			"res://shaders/object/environment_tangent_specular/opaque.gdshader",
+			"environment + specular stand-ins are compiled into the technique")
+
+	var luminance := ShaderMaterial.new()
+	cache.configure_material_for_key(
+			luminance, cache.classify("FF_ST_OP_LUM", 0, 2, 0, 128))
+	assert_eq(luminance.shader.resource_path,
+			"res://shaders/object/self_lit/opaque.gdshader",
+			"luminance/emissive selects a dedicated self-lit technique")
+
+	var tracer := ShaderMaterial.new()
+	cache.configure_material_for_key(tracer, cache.classify("VS_TRACER", 0, 0, 0, 128))
+	assert_eq(tracer.shader.resource_path, "res://shaders/object/tracer/additive.gdshader",
+			"tracer selects its branch-free technique resource")
+
+
+func test_every_canonical_classification_resolves_without_fallback() -> void:
+	var cache = ObjectShaderCache.get_singleton()
+	for tag in cache.get_known_shader_tags():
+		for flags in [0, ObjectShaderCache.MATERIAL_FLAG_ALPHA_TEST,
+				ObjectShaderCache.MATERIAL_FLAG_TWO_SIDED,
+				ObjectShaderCache.MATERIAL_FLAG_ALPHA_TEST |
+						ObjectShaderCache.MATERIAL_FLAG_TWO_SIDED]:
+			for emissive_type in [0, 2]:
+				for glass_flag in [0, 1]:
+					var key: int = cache.classify(
+						tag, flags, emissive_type, glass_flag, 128)
+					assert_not_null(cache.get_shader_for_key(key),
+							"%s key %08x resolves exactly" % [tag, key])

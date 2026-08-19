@@ -974,6 +974,15 @@ Dictionary HudOverlay::get_draw_list_stats() {
 	int64_t map_lines_under = 0;
 	int64_t map_lines = 0;
 	int64_t map_labels = 0;
+	bool big_map_visible = false;
+	int64_t big_map_backing_tris = 0;
+	int64_t big_map_terrain_tris = 0;
+	int64_t big_map_footprint_tris = 0;
+	int64_t big_map_sprites = 0;
+	int64_t big_map_lines_under = 0;
+	int64_t big_map_lines = 0;
+	int64_t big_map_labels = 0;
+	int64_t big_map_glyphs = 0;
 	if (configured_) {
 		const Vector2 surface = draw_surface_();
 		const HudDrawList &list = compiler_.compile(state_, surface.x, surface.y);
@@ -1003,6 +1012,15 @@ Dictionary HudOverlay::get_draw_list_stats() {
 		map_lines_under = static_cast<int64_t>(list.map.lines_under.size());
 		map_lines = static_cast<int64_t>(list.map.lines.size());
 		map_labels = static_cast<int64_t>(list.map.labels.size());
+		big_map_visible = list.big_map.visible;
+		big_map_backing_tris = static_cast<int64_t>(list.big_map.backing.size());
+		big_map_terrain_tris = static_cast<int64_t>(list.big_map.terrain.size());
+		big_map_footprint_tris = static_cast<int64_t>(list.big_map.overlays.size());
+		big_map_sprites = static_cast<int64_t>(list.big_map.sprites.size());
+		big_map_lines_under = static_cast<int64_t>(list.big_map.lines_under.size());
+		big_map_lines = static_cast<int64_t>(list.big_map.lines.size());
+		big_map_labels = static_cast<int64_t>(list.big_map.labels.size());
+		big_map_glyphs = static_cast<int64_t>(list.big_map_glyphs.size());
 	}
 	out["quads"] = quads_filled + quads_wire;
 	out["quads_filled"] = quads_filled;
@@ -1022,6 +1040,15 @@ Dictionary HudOverlay::get_draw_list_stats() {
 	out["map_lines_under"] = map_lines_under;
 	out["map_lines"] = map_lines;
 	out["map_labels"] = map_labels;
+	out["big_map_visible"] = big_map_visible;
+	out["big_map_backing_tris"] = big_map_backing_tris;
+	out["big_map_terrain_tris"] = big_map_terrain_tris;
+	out["big_map_footprint_tris"] = big_map_footprint_tris;
+	out["big_map_sprites"] = big_map_sprites;
+	out["big_map_lines_under"] = big_map_lines_under;
+	out["big_map_lines"] = big_map_lines;
+	out["big_map_labels"] = big_map_labels;
+	out["big_map_glyphs"] = big_map_glyphs;
 	const Ref<Texture2D> map_icons = textures_[opennova::hud::kHudTexMapIcons];
 	const Ref<Image> map_icon_image =
 			map_icons.is_valid() ? map_icons->get_image() : Ref<Image>();

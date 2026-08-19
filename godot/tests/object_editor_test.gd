@@ -124,20 +124,21 @@ func test_object_shader_cache_exposes_renderer_depth_and_cull_modes() -> void:
 	assert_not_null(cache, "Object shader cache should be registered with Godot.")
 
 	var opaque_shader: Shader = cache.get_shader_for_key(cache.classify("FF_ST_OP", 0, 0, 0, 128))
-	var opaque_code := opaque_shader.code
-	assert_string_contains(opaque_code, "depth_draw_opaque", "Opaque object shaders should render in the depth-writing path.")
-	assert_string_contains(opaque_code, "cull_back", "Opaque one-sided object shaders should keep backface culling.")
-	assert_false(opaque_code.contains("ALPHA ="), "Opaque object shaders should not write ALPHA and enter transparent sorting.")
+	assert_eq(opaque_shader.resource_path, "res://shaders/object/fixed/opaque.gdshader",
+			"Opaque one-sided objects use the depth-writing, back-culling resource.")
 
 	var skinned_shader: Shader = cache.get_shader_for_key(cache.classify("VS_SKBUMPDIFFT2", 0, 0, 0, 128))
-	assert_string_contains(skinned_shader.code, "depth_draw_opaque", "US01-style skinned bump/detail shaders should render in the opaque path.")
-	assert_false(skinned_shader.code.contains("ALPHA ="), "US01-style skinned bump/detail shaders should not use texture alpha as opacity.")
+	assert_eq(skinned_shader.resource_path,
+			"res://shaders/object/dot3_tangent_detail/opaque.gdshader",
+			"US01-style skinned bump/detail materials stay in the opaque path.")
 
 	var alpha_test_shader: Shader = cache.get_shader_for_key(cache.classify("FF_ST_OP", 0x01, 0, 0, 128))
-	assert_string_contains(alpha_test_shader.code, "depth_prepass_alpha", "Alpha-test object shaders should use the alpha depth prepass.")
+	assert_eq(alpha_test_shader.resource_path, "res://shaders/object/fixed/cutout_mix.gdshader",
+			"Alpha-test objects use the alpha depth-prepass resource.")
 
 	var two_sided_shader: Shader = cache.get_shader_for_key(cache.classify("FF_ST_OP", 0x04, 0, 0, 128))
-	assert_string_contains(two_sided_shader.code, "cull_disabled", "Two-sided object shaders should disable backface culling.")
+	assert_eq(two_sided_shader.resource_path, "res://shaders/object/fixed/opaque_double_sided.gdshader",
+			"Two-sided objects use the cull-disabled resource.")
 
 
 func test_object_preview_surfaces_apply_strip_vertex_offsets() -> void:
@@ -562,11 +563,22 @@ func test_object_preview_applies_diffuse_material_textures() -> void:
 	assert_true(material.get_shader_parameter("u_uv_transform_v") is Vector3,
 			"Preview materials should bind the affine V coefficients.")
 	var shader_code := material.shader.code
-	assert_string_contains(shader_code, "obj_transform_uv(UV2)", "Preview shader should carry secondary UVs into renderer materials.")
-	assert_string_contains(shader_code, "dot(uv1, u_uv_transform_u)",
+	assert_string_contains(shader_code, "object/vertex_standard.gdshaderinc",
+			"Preview shader should select the standard static vertex stage.")
+	assert_string_contains(shader_code, "object/shared.gdshaderinc",
+			"Preview shader should select the shared value/math stage.")
+	var vertex_source := FileAccess.get_file_as_string(
+			"res://shaders/object/vertex_standard.gdshaderinc")
+	var shared_source := FileAccess.get_file_as_string(
+			"res://shaders/object/shared.gdshaderinc")
+	assert_string_contains(vertex_source, "obj_transform_uv(UV2)",
+			"Preview vertex stage should carry secondary UVs into renderer materials.")
+	assert_string_contains(shared_source, "dot(uv1, u_uv_transform_u)",
 			"Preview shader should preserve the full affine UV transform.")
-	assert_false(shader_code.contains("uv_rate"), "Preview shader should not duplicate renderer UV generator evaluation.")
-	assert_false(shader_code.contains("rgb_gen_enabled"), "Preview shader should not duplicate renderer RGB generator evaluation.")
+	assert_false((shader_code + vertex_source + shared_source).contains("uv_rate"),
+			"Preview shader should not duplicate renderer UV generator evaluation.")
+	assert_false((shader_code + vertex_source + shared_source).contains("rgb_gen_enabled"),
+			"Preview shader should not duplicate renderer RGB generator evaluation.")
 	var material_entry := _find_textured_preview_material_entry(preview)
 	var material_index := int(material_entry.get("material_index", -1))
 	var material_info: Dictionary = data.get_material_info(material_index)

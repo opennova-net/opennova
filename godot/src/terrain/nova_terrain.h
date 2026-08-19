@@ -14,9 +14,12 @@
 #include "env/nova_mission_environment.h"
 #include "env/nova_weather.h"
 #include "nova_terrain_data.h"
+#include "nova_terrain_static_shadow_rasterizer.h"
+#include "nova_terrain_tile_cache_device.h"
 #include <terrain/terrain_frame.h>
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace godot {
@@ -66,8 +69,11 @@ private:
 	// Shader
 	Ref<Shader> terrain_shader;
 	Ref<ShaderMaterial> terrain_material;
-	Ref<ShaderMaterial> shadow_receiver_material;
 	Ref<TerrainSurfaceInputs> surface_inputs;
+	// Declared before the device so its non-owning callback target outlives the
+	// device during reverse-order member destruction.
+	TerrainStaticShadowRasterizer static_shadow_rasterizer;
+	TerrainTileCacheDevice tile_cache_device;
 	Vector3 tile_overlay_tint = Vector3(1.0f, 1.0f, 1.0f);
 
 	bool built = false;
@@ -98,6 +104,7 @@ private:
 	void _hide_visible_patches();
 	void _clear_patch_pool();
 	void _on_terrain_changed();
+	void _on_tile_info_changed();
 	Ref<Shader> _load_terrain_shader();
 
 	static void _strip_to_list(const std::vector<uint16_t>& strip,
@@ -116,9 +123,22 @@ public:
 
 	void set_terrain_data(const Ref<TerrainData> &p_data);
 	Ref<TerrainData> get_terrain_data() const;
+	void set_static_shadow_placer(
+			const Ref<MissionObjectPlacer> &p_placer);
+	void set_static_terrain_shadow_enabled(bool p_enabled);
+	bool is_static_terrain_shadow_enabled() const;
+	void set_tile_cache_capture_diagnostics(bool p_enabled);
+	void set_suppressed_static_shadow_bms_ids(
+			const PackedInt32Array &p_bms_ids);
+	PackedInt32Array get_suppressed_static_shadow_bms_ids() const;
 	Ref<TerrainSurfaceInputs> get_surface_inputs() const;
 	Ref<Texture2D> get_heightfield_normal_texture() const;
 	Ref<Texture2D> get_tile_overlay_texture() const;
+	Ref<Texture2DArray> get_tile_cache_texture() const;
+	Dictionary get_tile_cache_diagnostics() const;
+	std::optional<opennova::TerrainTilePageBinding>
+	get_tile_cache_binding_for_world_point_native(
+			float p_world_x, float p_world_z);
 	Vector3 get_tile_overlay_tint() const;
 
 	void set_lod_quality(float p_quality);

@@ -3,6 +3,8 @@ extends GutTest
 const WORLD_TEST_ROOT := "game_world_test"
 const ArmoryPresenter := preload("res://game/world/armory_presenter.gd")
 const MissionPresentation := preload("res://game/world/mission_presentation.gd")
+const FirstPersonArmsWitness := preload(
+		"res://game/world/first_person_arms_witness.gd")
 
 
 func after_each() -> void:
@@ -61,11 +63,14 @@ class ViewmodelWorldHarness:
 	extends GameWorld
 	var requested_def: PlayerViewmodelDef
 	var model_availability: Array[bool] = []
+	var fixture_character_id := 0x1234
 	func install_viewmodel_fixture(def: PlayerViewmodelDef, placer) -> void:
 		requested_def = def
 		_placer = placer
 	func local_player_viewmodel_def() -> PlayerViewmodelDef:
 		return requested_def
+	func local_player_character_id() -> int:
+		return fixture_character_id
 	func _set_local_player_first_person_model_available(available: bool) -> void:
 		model_availability.append(available)
 
@@ -461,6 +466,8 @@ ammo AM_556MM
 	min_damage          25
 	max_damage          40
 	penetration_impact  100
+	light_move          6.0 128 120 80
+	light_impact        10.0 255 192 96 0.2
 	effects_table
 		dirt          Effect_AmHitDirt    imp_bullet_dirt   15
 		grass         Effect_AmHitDirt    imp_bullet_dirt   15
@@ -562,6 +569,14 @@ func _stage_building_fixture(name: String) -> String:
 	return root_dir
 
 
+func _stage_lit_building_fixture(name: String) -> String:
+	var root_dir := _stage_minimal_fixture(name)
+	assert_eq(DirAccess.copy_absolute(
+			ProjectSettings.globalize_path("res://../fixtures/threedi/3di3/Shed.3di"),
+			root_dir.path_join("GuardTwr1.3di")), OK)
+	return root_dir
+
+
 # Dvxi5 supplies the witnessed terrain-normal table inputs and House.3di keeps
 # the SSN owner on the real placed-object path used by the routing assertion.
 # [orig: WacScript_SpawnEffectAtSsnEntity @0x4F23A0 resolves the SSN entity,
@@ -626,6 +641,31 @@ func _tick_until_impact(world: GameWorld, effects: FxWorldStub,
 	return 30
 
 
+func test_round_light_move_rows_reach_world_selected_output() -> void:
+	var root_dir := _stage_impact_fixture("round_light_move")
+	var world := _make_world()
+	add_child_autofree(world)
+	_load_minimal_mission(world, root_dir, func(mission: MissionData) -> void:
+		assert_true(mission.set_header_string("terrain", "Dvxi5")))
+	var camera := Camera3D.new()
+	camera.position = Vector3(16, 300, -16)
+	world.add_child(camera)
+	camera.make_current()
+	assert_gte(int(world.get_sim().debug_spawn_round(
+			camera.position, Vector3.RIGHT, "AM_556MM")), 0)
+	world.tick(camera.position, camera.global_transform, ONE_TICK_DELTA)
+	world.render_light_frame()
+	var report := world.get_effect_light_report()
+	var report_contract: Variant = report
+	assert_true(report_contract is EffectLightReport,
+			"GameWorld preserves the typed effect-light report contract")
+	assert_eq(report.live, 1,
+			"Simulation.get_round_glow_rows creates the in-flight light")
+	assert_eq(report.selected, 1,
+			"the terrain-disabled round glow remains eligible for object output")
+	world.unload()
+
+
 func test_round_impacts_route_generic_transient_and_audio_legs() -> void:
 	var root_dir := _stage_impact_fixture("impact_generic")
 	var world := ImpactGameWorldHarness.new()
@@ -670,6 +710,15 @@ func test_round_impacts_route_generic_transient_and_audio_legs() -> void:
 		assert_eq(audio.fires[0].get("position", Vector3.ZERO),
 				effects.spawns[0].get("position", Vector3.INF),
 				"impact audio shares collision presentation with the visual transient")
+	assert_eq(world.get_effect_light_report().live, 1,
+			"the real light_impact dictionary reaches the EffectLightDirector")
+	var camera := Camera3D.new()
+	camera.position = Vector3(16, 60, -16)
+	world.add_child(camera)
+	camera.make_current()
+	world.render_light_frame()
+	assert_eq(world.get_effect_light_report().selected, 1,
+			"the impact flash reaches camera-global object output")
 
 	# Drained rows cannot accumulate: later frames re-drain an empty queue.
 	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
@@ -677,6 +726,7 @@ func test_round_impacts_route_generic_transient_and_audio_legs() -> void:
 	assert_eq(effects.spawns.size(), 1,
 			"resolved impact rows cannot accumulate between presentation frames")
 	assert_eq(audio.fires.size(), 1)
+	world.unload()
 
 
 func test_round_impacts_route_sound_only_without_a_particle() -> void:
@@ -842,6 +892,23 @@ func test_packaged_scene_instantiates_with_intact_wiring() -> void:
 	water.set_world_rendering_enabled(true)
 	assert_true(world.is_water_render_active())
 	water.set_world_rendering_enabled(false)
+
+
+func test_unload_synchronously_retires_effect_light_state() -> void:
+	var root_dir := _stage_lit_building_fixture("effect_light_unload")
+	var world := _make_world()
+	add_child_autofree(world)
+	_load_minimal_mission(world, root_dir, func(mission: MissionData) -> void:
+		mission.add_entity(MissionData.KIND_BUILDING, 102001,
+				Vector3(6, 4, 5), Vector3.ZERO))
+	assert_eq(world.get_effect_light_report().live, 1,
+			"the loaded authored model hosts its point light")
+	world.unload()
+	var report := world.get_effect_light_report()
+	assert_eq(report.live, 0,
+			"unload retires the prior mission pool before queued node deletion")
+	assert_eq(report.selected, 0,
+			"unload synchronously clears point-light shader output")
 
 
 func test_explicit_bms_zero_water_beats_nonzero_terrain() -> void:
@@ -1040,22 +1107,45 @@ func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear
 	world.tick(camera.global_position, camera.get_global_transform())
 
 	var terrain := world.get_node("Terrain") as Terrain
+	var env := world.get_node("MissionEnvironment") as MissionEnvironment
 	assert_gt(terrain.get_visible_patch_count(), 0,
 		"the loaded fixture presents native RenderingServer terrain patches")
 	var mission_clear := world.get_current_frame_clear_color()
 	assert_ne(mission_clear, idle_clear,
 			"the loaded mission replaces the scene-authored frame clear")
+	var terrain_material: ShaderMaterial = terrain.get_terrain_material()
+	var dry_terrain_fog_color: Vector3 = terrain_material.get_shader_parameter("u_fog_color")
+	var dry_terrain_fog_end := float(terrain_material.get_shader_parameter("u_fog_end"))
+	var dry_terrain_fog_type := int(terrain_material.get_shader_parameter("u_fog_type"))
+	var dry_object_values: EnvLightValues = env.get_light_state().get_values()
+	var dry_object_fog_color := dry_object_values.get_fog_color()
+	var dry_object_fog_end := dry_object_values.get_fog_end()
+	var dry_object_fog_type := dry_object_values.get_fog_type()
+	var particle_renderer := world.get_effect_world().get_node(
+			"ParticleRenderer") as ParticleRenderer
+	assert_not_null(particle_renderer,
+			"the runtime particle compositor is wired to MissionEnvironment")
+	var dry_particle_fog: Dictionary = particle_renderer.get_debug_draw_list_report().get(
+			"environment_fog", {})
 
 	# Camera offsets move the rendered eye independently of global_position.
 	# Cross the waterline with v_offset alone and pin the clear-color branch to
 	# the same adjusted eye used by Water strip classification.
 	var water := world.get_node("Water") as Water
-	var env := world.get_node("MissionEnvironment") as MissionEnvironment
 	water.set_height_override(10.0)
 	camera.position.y = 10.25
+	camera.v_offset = -0.25
+	world.tick(camera.global_position, camera.get_global_transform())
+	assert_false(env.is_underwater_view(),
+			"an eye exactly on the plane stays dry: retail's side test is strict <")
+	assert_true(env.is_underwater_overlay_view(),
+			"the later retail murk scissor includes exact waterline equality")
+	assert_eq(world.get_current_frame_clear_color(), mission_clear,
+			"the frame clear shares the strict waterline equality policy")
 	camera.v_offset = -1.0
 	assert_lt(camera.get_camera_transform().origin.y, water.water_height)
 	world.tick(camera.global_position, camera.get_global_transform())
+	assert_true(env.is_underwater_overlay_view())
 	var combined := EnvFile.combine_terrain_light(
 			Color(env.get_sun_light().x, env.get_sun_light().y, env.get_sun_light().z),
 			Color(env.get_sky_ambient().x, env.get_sky_ambient().y, env.get_sky_ambient().z))
@@ -1064,11 +1154,111 @@ func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear
 			combined)
 	assert_eq(world.get_current_frame_clear_color(), Color(lit.r, lit.g, lit.b),
 			"v_offset below water selects the underwater clear even when the node origin is above")
+	# Environment_ApplyFogAndAmbient selects one pass payload from the same
+	# render-eye classification as the clear: underwater the lit water color,
+	# murk-derived visibility end, and linear fog must reach both the terrain
+	# shader and the shared ObjectModel record (the FP weapon consumes that
+	# record in its dedicated pass). Pin the actual consumers, not merely the
+	# already-correct clear color.
+	var underwater_color := Vector3(lit.r, lit.g, lit.b)
+	var underwater_end := env.get_environment_data().get_fog_end_underwater()
+	assert_true(Vector3(terrain_material.get_shader_parameter("u_fog_color"))
+			.is_equal_approx(underwater_color),
+			"below-water terrain fogs toward Env_WaterColorLit")
+	assert_almost_eq(float(terrain_material.get_shader_parameter("u_fog_end")),
+			underwater_end, 0.001,
+			"below-water terrain visibility follows the water-murk curve")
+	assert_eq(int(terrain_material.get_shader_parameter("u_fog_type")), 1,
+			"below-water terrain uses the witnessed linear fog mode")
+	var object_values: EnvLightValues = env.get_light_state().get_values()
+	assert_true(object_values.get_fog_color().is_equal_approx(underwater_color),
+			"below-water ObjectModel/viewmodel fogs toward Env_WaterColorLit")
+	assert_almost_eq(object_values.get_fog_end(), underwater_end, 0.001,
+			"below-water ObjectModel/viewmodel visibility follows water murk")
+	assert_eq(object_values.get_fog_type(), 1,
+			"below-water ObjectModel/viewmodel uses the witnessed linear fog mode")
+	var particle_fog: Dictionary = particle_renderer.get_debug_draw_list_report().get(
+			"environment_fog", {})
+	assert_true(Vector3(particle_fog.get("color", Vector3.ZERO))
+			.is_equal_approx(underwater_color),
+			"below-water particle submissions fog toward Env_WaterColorLit")
+	assert_almost_eq(float(particle_fog.get("end", 0.0)), underwater_end, 0.001,
+			"below-water particle visibility follows water murk")
+	assert_eq(int(particle_fog.get("type", -1)), 1,
+			"below-water particle submissions use linear fog")
+	# Weather writes shader globals directly after terrain/foliage in a live
+	# frame. Drive that tail explicitly in this paused harness and prove it
+	# cannot replace the selected shared payload with dry fog. The portable
+	# environment_state_test pins the exact pass-aware global block because
+	# RenderingServer global readback is nil under the headless renderer.
+	var weather := world.get_weather_node() as Weather
+	weather.advance_frame(0.0)
+	object_values = env.get_light_state().get_values()
+	assert_true(object_values.get_fog_color().is_equal_approx(underwater_color),
+			"Weather preserves the underwater shared fog color")
+	assert_almost_eq(object_values.get_fog_end(), underwater_end, 0.001,
+			"Weather preserves the underwater shared murk end")
+	assert_eq(object_values.get_fog_type(), 1,
+			"Weather preserves the underwater shared fog type")
+
+	# A hidden loaded world is the menu/loading shell: do not leak its pass fog
+	# through process-global shader parameters or the shared light record. A
+	# synchronous show reclassifies the still-below render eye before drawing.
+	world.visible = false
+	await get_tree().process_frame
+	assert_false(env.is_underwater_view(),
+			"hiding a loaded underwater world retires its scene-pass state")
+	assert_false(env.is_underwater_overlay_view(),
+			"hiding a loaded world retires its pre-HUD murk overlay")
+	object_values = env.get_light_state().get_values()
+	assert_eq(object_values.get_fog_color(), dry_object_fog_color,
+			"hidden/menu state restores the dry shared fog payload")
+	world.visible = true
+	await get_tree().process_frame
+	assert_true(env.is_underwater_view(),
+			"showing the world reclassifies its still-below render eye synchronously")
+	assert_true(env.is_underwater_overlay_view())
+	object_values = env.get_light_state().get_values()
+	assert_true(object_values.get_fog_color().is_equal_approx(underwater_color),
+			"showing the underwater world restores the pass payload before drawing")
+	world.tick(camera.global_position, camera.get_global_transform())
 	camera.v_offset = 0.0
 	camera.position.y = 71.0
 	water.set_height_override(NAN)
 	world.tick(camera.global_position, camera.get_global_transform())
 	assert_eq(world.get_current_frame_clear_color(), mission_clear)
+	assert_false(env.is_underwater_overlay_view(),
+			"surfacing retires the independently gated murk overlay")
+	assert_eq(Vector3(terrain_material.get_shader_parameter("u_fog_color")),
+			dry_terrain_fog_color,
+			"terrain restores the dry pass fog color after surfacing")
+	assert_almost_eq(float(terrain_material.get_shader_parameter("u_fog_end")),
+			dry_terrain_fog_end, 0.001,
+			"terrain restores the dry pass fog end after surfacing")
+	assert_eq(int(terrain_material.get_shader_parameter("u_fog_type")),
+			dry_terrain_fog_type,
+			"terrain restores the dry pass fog type after surfacing")
+	object_values = env.get_light_state().get_values()
+	assert_eq(object_values.get_fog_color(), dry_object_fog_color,
+			"ObjectModel/viewmodel restores the dry pass fog color after surfacing")
+	assert_almost_eq(object_values.get_fog_end(), dry_object_fog_end, 0.001,
+			"ObjectModel/viewmodel restores the dry pass fog end after surfacing")
+	assert_eq(object_values.get_fog_type(), dry_object_fog_type,
+			"ObjectModel/viewmodel restores the dry pass fog type after surfacing")
+	particle_fog = particle_renderer.get_debug_draw_list_report().get(
+			"environment_fog", {})
+	assert_eq(Vector3(particle_fog.get("color", Vector3.ZERO)),
+			dry_particle_fog.get("color", Vector3.ZERO),
+			"particle submissions restore the dry pass fog color after surfacing")
+	assert_almost_eq(float(particle_fog.get("start", 0.0)),
+			float(dry_particle_fog.get("start", 0.0)), 0.001,
+			"particle submissions restore the dry pass fog start after surfacing")
+	assert_almost_eq(float(particle_fog.get("end", 0.0)),
+			float(dry_particle_fog.get("end", 0.0)), 0.001,
+			"particle submissions restore the dry pass fog end after surfacing")
+	assert_eq(int(particle_fog.get("type", -1)),
+			int(dry_particle_fog.get("type", -1)),
+			"particle submissions restore the dry pass fog type after surfacing")
 
 	world.visible = false
 	await get_tree().process_frame
@@ -1091,14 +1281,14 @@ func test_hidden_world_suppresses_retained_terrain_and_restores_idle_frame_clear
 		"an unloaded GameWorld restores the scene-authored frame clear")
 
 
-func test_water_mirror_camera_draws_vehicles_only_and_never_the_body() -> void:
-	# The reflection layer contract (env #30, entity-set witness 2026-08-05):
-	# above water the mirror collects only vehicles — non-vehicle world
-	# entities ride the no-mirror layer the mask excludes — and it never draws
-	# the water surface, the FP overlay, or ANY person including the local
-	# body (the reflection has no player-render leg and persons fail the
-	# vehicle filter) [orig: Terrain_CollectVisibleEntitiesForReflection
+func test_water_mirror_camera_filters_entity_waves_and_never_draws_the_body() -> void:
+	# The reflection layer contract (env #30): above water the mirror draws
+	# exactly the flag-0x400 population — vehicles by item type plus records
+	# whose BMS attribute authors Reflective — and it never draws the water
+	# surface, FP overlay, or any person including the local body (there is
+	# no player-render leg) [orig: Terrain_CollectVisibleEntitiesForReflection
 	# @ 0x5c90a0 filterMask 0x400; Entity_InitFromModel @ 0x40e20a;
+	# Entity_SpawnFromBMSRecord @ 0x40ed1d..0x40ed2b;
 	# Water_ReflectionPrerender @ 0x5c2780 -> render_main_scene @ 0x5c1240;
 	# Player_RenderFirstPersonViewModel @ 0x4ded60].
 	var packed := load("res://game/world/game_world.tscn") as PackedScene
@@ -1122,11 +1312,140 @@ func test_water_mirror_camera_draws_vehicles_only_and_never_the_body() -> void:
 	assert_eq(mirror.cull_mask & Water.VISUAL_LAYER_FP_BODY_SHADOW_ONLY, 0,
 		"no person enters the mirror — the FP body layer stays out")
 	assert_eq(mirror.cull_mask & Water.VISUAL_LAYER_WORLD_NO_MIRROR, 0,
-		"non-vehicle world entities stay out of the above-water mirror")
+		"plain (unflagged) world entities stay out of the above-water mirror")
 	assert_ne(mirror.cull_mask & Water.VISUAL_LAYER_WORLD, 0,
-		"the mirrored scene renders the reflectable world")
+		"the mirrored scene renders vehicles and authored-Reflective records")
 	assert_eq(water.get_mesh_instance().layers, Water.VISUAL_LAYER_WATER,
 		"the water strip rides the water-only layer the mirror excludes")
+
+
+func test_exact_pose_refresh_retargets_a_frozen_water_mirror_without_advancing_tod() -> void:
+	var world := _make_world()
+	var camera := Camera3D.new()
+	world.add_child(camera)
+	add_child_autofree(world)
+	camera.make_current()
+	world.set_playable(false)
+	_load_minimal_mission(world)
+
+	var runtime := world.get_runtime()
+	assert_not_null(runtime)
+	if runtime == null:
+		return
+	runtime.pause()
+	assert_eq(world.debug_set_mission_minute_of_day(720.0), OK)
+	var environment := world.get_environment_node()
+	var fixed24_before: int = environment.get_mission_time_fixed24()
+	var water := world.get_water_node()
+	assert_not_null(water)
+	if water == null:
+		return
+	water.set_height_override(10.0)
+	camera.global_position = Vector3(5.0, 30.0, 7.0)
+	water.advance_frame(0.0)
+
+	world.process_mode = Node.PROCESS_MODE_DISABLED
+	camera.global_position = Vector3(100.0, 30.0, 200.0)
+	camera.make_current()
+	var expected_mirror_position := Vector3(100.0, -10.0, 200.0)
+	assert_false(water.get_reflection_camera().global_position.is_equal_approx(
+			expected_mirror_position),
+			"moving a frozen capture camera leaves the reflection pose stale")
+
+	assert_eq(world.debug_refresh_render_pose(camera), OK)
+	assert_true(water.get_reflection_camera().global_position.is_equal_approx(
+			expected_mirror_position),
+			"the explicit evidence seam refreshes the production mirror camera")
+	assert_eq(environment.get_mission_minute_of_day(), 720.0)
+	assert_eq(environment.get_mission_time_fixed24(), fixed24_before,
+			"render-pose refresh may not tick the mission clock")
+
+
+func test_exact_pose_refresh_rebuilds_the_frozen_particle_draw_list() -> void:
+	var world := _make_world()
+	var camera := Camera3D.new()
+	world.add_child(camera)
+	add_child_autofree(world)
+	camera.make_current()
+	world.set_playable(false)
+	_load_minimal_mission(world)
+	var runtime := world.get_runtime()
+	assert_not_null(runtime)
+	if runtime == null:
+		return
+	runtime.pause()
+
+	# One synthetic renderable effect (the effect_world_test pattern): a live
+	# world-bound emitter whose quads must survive the capture freeze.
+	var effect_world: EffectWorld = world.get_effect_world()
+	assert_not_null(effect_world)
+	if effect_world == null:
+		return
+	var def := ParticleDef.new()
+	def.id = "puff dots"
+	def.emit_dur = 0.5
+	def.emit_rate = 50.0
+	def.emit_burst = 4
+	def.age = 2.0
+	def.alpha = 1.0
+	def.scale_value = 1.0
+	var graphics: Array = def.graphics
+	var layer := graphics[0] as ParticleGraphicLayer
+	layer.present = true
+	layer.texture = "bink.tga"
+	layer.alpha = 1.0
+	layer.scale_value = 1.0
+	def.graphics = graphics
+	var effect := ParticleEffect.new()
+	effect.id = "puff"
+	effect.pdefs = PackedStringArray(["puff dots"])
+	var file := ParticleFile.new()
+	var particles: Array = file.particles
+	particles.append(def)
+	file.particles = particles
+	var effects: Array = file.effects
+	effects.append(effect)
+	file.effects = effects
+	file.source_path = ProjectSettings.globalize_path(
+			"res://../fixtures/cbin/renderable_effect_fixture.ptl")
+	effect_world.load_particle_file(file)
+	# The world's facade wired its texture provider to the minimal fixture root,
+	# which has no bink.tga; the procedural fallback keeps the layer renderable
+	# without adding image fixtures to the shared minimal root.
+	var renderer := effect_world.get_node("ParticleRenderer") as ParticleRenderer
+	assert_not_null(renderer)
+	if renderer != null:
+		renderer.procedural_fallback_enabled = true
+	var receipt: Dictionary = effect_world.spawn_effect_request(
+			"puff", Transform3D(Basis.IDENTITY, Vector3(2.0, 1.0, 3.0)), {
+				"admission": EffectScene.ADMISSION_ALWAYS,
+				"binding": EffectScene.BINDING_WORLD,
+				"render_domain": EffectScene.RENDER_DOMAIN_WORLD,
+			})
+	assert_true(bool(receipt.get("spawned", false)), "the probe effect spawns")
+	for _i in range(3):
+		effect_world.advance_fixed_tick(0.016)
+	camera.global_position = Vector3(2.0, 1.5, 12.0)
+	camera.look_at(Vector3(2.0, 1.0, 3.0))
+	world.render_particle_frame()
+	var before: Dictionary = effect_world.get_debug_draw_list_report().get("world", {})
+	assert_gt(int(before.get("rendered_quad_count", 0)), 0,
+			"the live emitter renders quads before the freeze")
+
+	world.process_mode = Node.PROCESS_MODE_DISABLED
+	camera.global_position = Vector3(6.0, 3.0, 14.0)
+	camera.look_at(Vector3(2.0, 1.0, 3.0))
+	camera.make_current()
+	var stale: Dictionary = effect_world.get_debug_draw_list_report().get("world", {})
+	assert_eq(stale.get("compile_index"), before.get("compile_index"),
+			"a frozen world leaves the particle draw list stale at the old pose")
+
+	assert_eq(world.debug_refresh_render_pose(camera), OK)
+	var after: Dictionary = effect_world.get_debug_draw_list_report().get("world", {})
+	assert_ne(after.get("compile_index"), before.get("compile_index"),
+			"the evidence seam rebuilds the particle draw list for the capture camera")
+	assert_gt(int(after.get("rendered_quad_count", 0)), 0,
+			"frozen-phase particles stay visible after the camera retarget")
 
 
 func test_game_world_is_playable_by_default_without_env_flag() -> void:
@@ -1879,7 +2198,11 @@ func test_valid_emplaced_def_without_gfx1_builds_no_fallback_gun() -> void:
 
 
 func test_first_person_uses_selected_arms_and_raw_part_local_camo() -> void:
-	var world: ViewmodelWorldHarness = autofree(ViewmodelWorldHarness.new())
+	var world := ViewmodelWorldHarness.new()
+	var terrain := Terrain.new()
+	terrain.name = "Terrain"
+	world.add_child(terrain)
+	add_child_autofree(world)
 	var placer := SelectedAvatarViewmodelPlacerStub.new()
 	world.install_viewmodel_fixture(PlayerViewmodelDef.from_weapon_dict({
 		"name": "WPN_TEST",
@@ -1905,6 +2228,19 @@ func test_first_person_uses_selected_arms_and_raw_part_local_camo() -> void:
 			"the arms' per-draw TEX_CAMO state does not leak into the gun")
 	assert_true(arms.get_ctrl_values().is_empty(),
 			"no FP CTRL writer runs at build time")
+	var witness: FirstPersonArmsWitness = \
+			world.local_player_first_person_arms_witness()
+	assert_true(witness.is_valid())
+	assert_eq(witness.character_id, 0x1234)
+	assert_eq(witness.arms_graphic, "SelectedArms")
+	assert_eq(Array(witness.arms_camo), [17, 34, 51])
+	arms.visible = false
+	assert_false(world.local_player_first_person_arms_witness().is_valid(),
+			"a hidden arms submit cannot witness a visible comparison frame")
+	arms.visible = true
+	container.visible = false
+	assert_false(world.local_player_first_person_arms_witness().is_valid(),
+			"arms hidden by their viewmodel ancestor cannot pass the witness")
 
 
 func test_first_person_without_character_arms_submits_the_gun_alone() -> void:

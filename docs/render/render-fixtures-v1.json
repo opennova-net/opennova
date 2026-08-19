@@ -1,0 +1,316 @@
+{
+  "schema": "opennova.render-fixtures.v1",
+  "catalog_sha256": "b16a00b8b1f998c43dcdf28438a8c58d31fc2e77f461d29c221812e159e4b458",
+  "coordinate_space": {
+    "camera": "BMS mission XYZ",
+    "godot_conversion": "(x,y,z) -> (x,z,-y)",
+    "yaw_pitch": "degrees"
+  },
+  "capture": {
+    "resolution": [1600, 900],
+    "load_settle_frames": 132,
+    "visibility_settle_frames": 3,
+    "vertical_fov_deg": 50.534,
+    "freeze_simulation": true,
+    "freeze_weather": true
+  },
+  "diagnostic_variants": [
+    "beauty",
+    "shadows_off",
+    "lighting_only",
+    "unshaded",
+    "directional_shadow_atlas"
+  ],
+  "missions": {
+    "00TRa.bms": "64dd18b3122a6c4ee4e173cac1b9a12d19004c32572bd2f1ad113a475fe57407",
+    "CP01.bms": "476219276170c1b26bcc5c2d9eb5aafdcfaccb583aad843f89867cb1f93b9863",
+    "CP12.bms": "24d498c38f694bcddecfe71567f64a5c12d7164f3566554fc5cde66e42216459"
+  },
+  "fixtures": [
+    {
+      "id": "00tra-courtyard",
+      "mission": "00TRa.bms",
+      "entity": {
+        "bms_record": {
+          "write_order_index": 949,
+          "mission_kind": "marker",
+          "kind_index": 8
+        },
+        "bms_id": 1654,
+        "raw_type": 6001,
+        "item_id": 106001
+      },
+      "camera_bms": {
+        "position": [297.9372, -409.1305, 28.72005],
+        "yaw_deg": 0.0,
+        "pitch_deg": 0.0,
+        "vertical_fov_deg": 50.534
+      },
+      "minutes_of_day": [350, 720, 1125, 1320],
+      "coverage": ["directional_shadows", "outdoor_materials", "exposure"]
+    },
+    {
+      "id": "00tra-armory-glass",
+      "mission": "00TRa.bms",
+      "entity": {
+        "bms_record": {
+          "write_order_index": 35,
+          "mission_kind": "building",
+          "kind_index": 20
+        },
+        "bms_id": 20,
+        "raw_type": 1125,
+        "item_id": 101125,
+        "graphic": "Armry01.3di",
+        "model_sha256": "e410993cfff986ae698054396e16e883d1a38a901a08a588931c349b570647b1",
+        "position": [282.489044, -407.119507, 28.87149],
+        "facing_deg": -90.0,
+        "glass_material_indices": [12, 15, 17]
+      },
+      "camera_bms": {
+        "position": [294.489044, -419.119507, 32.0],
+        "yaw_deg": -45.0,
+        "pitch_deg": -7.5,
+        "vertical_fov_deg": 50.534
+      },
+      "minutes_of_day": [900],
+      "coverage": ["ffp_glass", "lit_unlit_materials", "building_shadows"]
+    },
+    {
+      "id": "00tra-fire-barrel",
+      "mission": "00TRa.bms",
+      "entity": {
+        "bms_record": {
+          "write_order_index": 348,
+          "mission_kind": "building",
+          "kind_index": 333
+        },
+        "bms_id": 1099,
+        "raw_type": 1560,
+        "item_id": 101560,
+        "graphic": "FireBrl3.3di",
+        "model_sha256": "ed15860c3b3178418f9fd6e488ec77842b53cb6a779a9404733053c7e54b827a",
+        "position": [277.129364, -357.799469, 27.0],
+        "lght_count": 1,
+        "lght_local_position": [0.00035, 1.1157, -0.0044],
+        "lght_attenuation": [0.0, 8.0],
+        "lght_style": 113
+      },
+      "camera_bms": {
+        "position": [283.129364, -357.799469, 28.8],
+        "yaw_deg": -90.0,
+        "pitch_deg": -6.5,
+        "vertical_fov_deg": 50.534
+      },
+      "minutes_of_day": [900, 1320],
+      "coverage": ["effectworld_point_light", "particles", "contact_shadow"],
+      "note": "LGHT is an identity anchor; gameplay illumination must come from EffectWorld."
+    },
+    {
+      "id": "cp01-water-wide",
+      "mission": "CP01.bms",
+      "entity": {
+        "bms_record": {
+          "write_order_index": 76,
+          "mission_kind": "building",
+          "kind_index": 62
+        },
+        "bms_id": 3670,
+        "raw_type": 1327,
+        "item_id": 101327,
+        "graphic": "Cboat05.3di",
+        "model_sha256": "7134ecabe82e019c93e5f7188824b4a7ca1a1d445cad79c30741c54f2c5605f0",
+        "position": [-738.844238, -742.754211, 21.0]
+      },
+      "camera_bms": {
+        "position": [-738.844238, -754.754211, 23.2],
+        "yaw_deg": 0.0,
+        "pitch_deg": -8.1,
+        "vertical_fov_deg": 50.534
+      },
+      "minutes_of_day": [350, 720, 1125, 1320],
+      "expected_water_height": 21.0,
+      "coverage": ["water_surface", "reflection_admission", "shoreline", "draw_order"]
+    },
+    {
+      "id": "cp01-waterline-above",
+      "mission": "CP01.bms",
+      "entity": {
+        "bms_record": {
+          "write_order_index": 76,
+          "mission_kind": "building",
+          "kind_index": 62
+        },
+        "bms_id": 3670,
+        "raw_type": 1327,
+        "item_id": 101327,
+        "graphic": "Cboat05.3di",
+        "model_sha256": "7134ecabe82e019c93e5f7188824b4a7ca1a1d445cad79c30741c54f2c5605f0",
+        "position": [-738.844238, -742.754211, 21.0]
+      },
+      "camera_bms": {
+        "position": [-738.844238, -754.754211, 21.25],
+        "yaw_deg": 0.0,
+        "pitch_deg": 0.0,
+        "vertical_fov_deg": 50.534
+      },
+      "minutes_of_day": [720],
+      "expected_water_height": 21.0,
+      "coverage": ["above_water_branch", "waterline"]
+    },
+    {
+      "id": "cp01-waterline-below",
+      "mission": "CP01.bms",
+      "entity": {
+        "bms_record": {
+          "write_order_index": 76,
+          "mission_kind": "building",
+          "kind_index": 62
+        },
+        "bms_id": 3670,
+        "raw_type": 1327,
+        "item_id": 101327,
+        "graphic": "Cboat05.3di",
+        "model_sha256": "7134ecabe82e019c93e5f7188824b4a7ca1a1d445cad79c30741c54f2c5605f0",
+        "position": [-738.844238, -742.754211, 21.0]
+      },
+      "camera_bms": {
+        "position": [-738.844238, -754.754211, 20.75],
+        "yaw_deg": 0.0,
+        "pitch_deg": 0.0,
+        "vertical_fov_deg": 50.534
+      },
+      "minutes_of_day": [720],
+      "expected_water_height": 21.0,
+      "coverage": ["underwater_branch", "waterline", "terrain_modulation"]
+    },
+    {
+      "id": "cp01-suv-glass",
+      "mission": "CP01.bms",
+      "entity": {
+        "bms_record": {
+          "write_order_index": 5,
+          "mission_kind": "item",
+          "kind_index": 5
+        },
+        "bms_id": 1567,
+        "raw_type": 1302,
+        "item_id": 101302,
+        "graphic": "DSuv1.3di",
+        "model_sha256": "d126df929b24d8040cfff6d132722481c13174b05daabc58114f51c1e6b62958",
+        "position": [-351.91272, -484.788177, 25.497955],
+        "facing_deg": 88.0,
+        "glass_material_indices": [2]
+      },
+      "camera_bms": {
+        "position": [-359.91272, -492.788177, 27.8],
+        "yaw_deg": 45.0,
+        "pitch_deg": -6.1,
+        "vertical_fov_deg": 50.534
+      },
+      "minutes_of_day": [720],
+      "coverage": ["ffp_glass", "phong", "transparent_sort", "vehicle_shadow"]
+    },
+    {
+      "id": "cp12-night-wreck",
+      "mission": "CP12.bms",
+      "entity": {
+        "bms_record": {
+          "write_order_index": 28,
+          "mission_kind": "item",
+          "kind_index": 28
+        },
+        "bms_id": 67,
+        "raw_type": 507,
+        "item_id": 100507,
+        "graphic": "Dchnk2.3di",
+        "model_sha256": "3ce142f49246097834a8875f848eb862ec7123bc69fccaf9157832e087b29fc1",
+        "position": [-407.656006, 1756.293198, 312.207031],
+        "facing_deg": -44.0,
+        "glass_material_indices": [1, 9]
+      },
+      "camera_bms": {
+        "position": [-401.656006, 1750.293198, 314.0],
+        "yaw_deg": -45.0,
+        "pitch_deg": -5.4,
+        "vertical_fov_deg": 50.534
+      },
+      "minutes_of_day": [1260],
+      "coverage": ["night_glass", "night_contact_shadow"]
+    },
+    {
+      "id": "cp12-night-sky-up",
+      "mission": "CP12.bms",
+      "entity": {
+        "bms_record": {
+          "write_order_index": 1215,
+          "mission_kind": "marker",
+          "kind_index": 4
+        },
+        "bms_id": 2787,
+        "raw_type": 6001,
+        "item_id": 106001,
+        "position": [-404.759232, 1753.371307, 306.127686],
+        "facing_deg": 136.0
+      },
+      "camera_bms": {
+        "position": [-404.759232, 1753.371307, 320.0],
+        "yaw_deg": 136.0,
+        "pitch_deg": 25.0,
+        "vertical_fov_deg": 50.534
+      },
+      "minutes_of_day": [350, 720, 1125, 1320],
+      "coverage": ["sky_dome", "cloud_layers", "celestials", "horizon", "exposure"]
+    },
+    {
+      "id": "cp12-night-sky-ground",
+      "mission": "CP12.bms",
+      "entity": {
+        "bms_record": {
+          "write_order_index": 1215,
+          "mission_kind": "marker",
+          "kind_index": 4
+        },
+        "bms_id": 2787,
+        "raw_type": 6001,
+        "item_id": 106001,
+        "position": [-404.759232, 1753.371307, 306.127686],
+        "facing_deg": 136.0
+      },
+      "camera_bms": {
+        "position": [-404.759232, 1753.371307, 307.727686],
+        "yaw_deg": 136.0,
+        "pitch_deg": -12.0,
+        "vertical_fov_deg": 50.534
+      },
+      "minutes_of_day": [1260],
+      "coverage": ["night_ground_lighting", "directional_shadow_context"]
+    },
+    {
+      "id": "cp12-truck-material",
+      "mission": "CP12.bms",
+      "entity": {
+        "bms_record": {
+          "write_order_index": 32,
+          "mission_kind": "item",
+          "kind_index": 32
+        },
+        "bms_id": 58,
+        "raw_type": 1294,
+        "item_id": 101294,
+        "graphic": "DTruck1.3di",
+        "model_sha256": "e0d620c3652d520a57efdf124a0945f0f4256bc5dbd87f30facc04f5e1282963",
+        "position": [-421.68634, 1547.43762, 60.0],
+        "facing_deg": -183.0
+      },
+      "camera_bms": {
+        "position": [-429.68634, 1539.43762, 62.3],
+        "yaw_deg": 45.0,
+        "pitch_deg": -5.6,
+        "vertical_fov_deg": 50.534
+      },
+      "minutes_of_day": [1260],
+      "coverage": ["vs_envphongt", "glass", "night_reflection"]
+    }
+  ]
+}

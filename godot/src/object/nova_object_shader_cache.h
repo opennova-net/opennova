@@ -1,9 +1,12 @@
 #pragma once
 
-// Godot wrapper around engine/runtime/renderer shader classification and composition.
+// Godot adapter for engine/runtime/renderer object pipeline descriptors.
+// Selects a finite checked-in Shader resource whose static include graph
+// embodies the descriptor; no runtime shader source is generated.
 
 #include <godot_cpp/classes/object.hpp>
 #include <godot_cpp/classes/shader.hpp>
+#include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
@@ -27,6 +30,7 @@ public:
 	~ObjectShaderCache();
 
 	Ref<Shader> get_shader_for_key(int32_t key);
+	void configure_material_for_key(const Ref<ShaderMaterial> &material, int32_t key);
 
 	int32_t classify(const String &shader_tag,
 			int32_t material_flags,

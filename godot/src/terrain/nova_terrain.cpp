@@ -4,6 +4,7 @@
 #include "nova_terrain_surface_inputs.h"
 #include "nova_terrain_tile_info.h"
 #include "env/nova_water.h"
+#include "mission/nova_mission_object_placer.h"
 
 // Engine: Jointops.exe Terrain_RenderSectorTile@0x5CDAA0,
 // Terrain_TraverseQuadTreeNode@0x5C89C0, Terrain_CollectVisibleSectors@0x5C9120
@@ -14,6 +15,7 @@
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/variant/projection.hpp>
+#include <godot_cpp/variant/vector4.hpp>
 
 #include <cmath>
 #include <utility>
@@ -58,6 +60,23 @@ void Terrain::_bind_methods() {
 		"set_water_path", "get_water_path");
 	ClassDB::bind_method(D_METHOD("get_terrain_material"),
 		&Terrain::get_terrain_material);
+	ClassDB::bind_method(D_METHOD("get_tile_cache_texture"),
+		&Terrain::get_tile_cache_texture);
+	ClassDB::bind_method(D_METHOD("get_tile_cache_diagnostics"),
+		&Terrain::get_tile_cache_diagnostics);
+	ClassDB::bind_method(
+		D_METHOD("set_tile_cache_capture_diagnostics", "enabled"),
+		&Terrain::set_tile_cache_capture_diagnostics);
+	ClassDB::bind_method(D_METHOD("set_static_shadow_placer", "placer"),
+		&Terrain::set_static_shadow_placer);
+	ClassDB::bind_method(D_METHOD("set_static_terrain_shadow_enabled", "enabled"),
+		&Terrain::set_static_terrain_shadow_enabled);
+	ClassDB::bind_method(D_METHOD("is_static_terrain_shadow_enabled"),
+		&Terrain::is_static_terrain_shadow_enabled);
+	ClassDB::bind_method(D_METHOD("set_suppressed_static_shadow_bms_ids", "bms_ids"),
+		&Terrain::set_suppressed_static_shadow_bms_ids);
+	ClassDB::bind_method(D_METHOD("get_suppressed_static_shadow_bms_ids"),
+		&Terrain::get_suppressed_static_shadow_bms_ids);
 
 	ClassDB::bind_method(D_METHOD("build"), &Terrain::build);
 	ClassDB::bind_method(D_METHOD("render_frame"), &Terrain::render_frame);
@@ -101,6 +120,14 @@ Terrain::Terrain() {
 }
 
 Terrain::~Terrain() {
+	tile_cache_device.set_static_shadow_rasterizer(nullptr);
+	static_shadow_rasterizer.set_mission_object_placer({});
+	if (tile_info_override.is_valid()) {
+		const Callable changed = callable_mp(this, &Terrain::_on_tile_info_changed);
+		if (tile_info_override->is_connected("changed", changed)) {
+			tile_info_override->disconnect("changed", changed);
+		}
+	}
 	_clear_patch_pool();
 }
 
@@ -109,10 +136,48 @@ void Terrain::set_terrain_data(const Ref<TerrainData> &p_data) {
 		terrain_data->disconnect("terrain_changed", callable_mp(this, &Terrain::_on_terrain_changed));
 	}
 	terrain_data = p_data;
+	static_shadow_rasterizer.set_terrain_data(p_data);
 	surface_inputs->set_terrain_data(p_data);
 	if (terrain_data.is_valid()) {
 		terrain_data->connect("terrain_changed", callable_mp(this, &Terrain::_on_terrain_changed));
 	}
+}
+
+void Terrain::set_static_shadow_placer(
+		const Ref<MissionObjectPlacer> &p_placer) {
+	static_shadow_rasterizer.set_mission_object_placer(p_placer);
+	tile_cache_device.set_static_shadow_rasterizer(
+			p_placer.is_valid() ? &static_shadow_rasterizer : nullptr);
+	tile_cache_device.invalidate_static_shadow_pages();
+}
+
+void Terrain::set_static_terrain_shadow_enabled(bool p_enabled) {
+	if (static_shadow_rasterizer.is_enabled() == p_enabled) return;
+	static_shadow_rasterizer.set_enabled(p_enabled);
+	tile_cache_device.invalidate_static_shadow_pages();
+}
+
+bool Terrain::is_static_terrain_shadow_enabled() const {
+	return static_shadow_rasterizer.is_enabled();
+}
+
+void Terrain::set_suppressed_static_shadow_bms_ids(
+		const PackedInt32Array &p_bms_ids) {
+	PackedInt32Array normalized = p_bms_ids;
+	normalized.sort();
+	PackedInt32Array unique;
+	for (int index = 0; index < normalized.size(); ++index) {
+		if (index == 0 || normalized[index] != normalized[index - 1]) {
+			unique.push_back(normalized[index]);
+		}
+	}
+	if (static_shadow_rasterizer.get_suppressed_bms_ids() == unique) return;
+	static_shadow_rasterizer.set_suppressed_bms_ids(unique);
+	tile_cache_device.invalidate_static_shadow_pages();
+}
+
+PackedInt32Array Terrain::get_suppressed_static_shadow_bms_ids() const {
+	return static_shadow_rasterizer.get_suppressed_bms_ids();
 }
 
 Ref<TerrainData> Terrain::get_terrain_data() const {
@@ -129,6 +194,44 @@ Ref<Texture2D> Terrain::get_heightfield_normal_texture() const {
 
 Ref<Texture2D> Terrain::get_tile_overlay_texture() const {
 	return surface_inputs->get_tile_overlay_texture();
+}
+
+Ref<Texture2DArray> Terrain::get_tile_cache_texture() const {
+	return tile_cache_device.get_texture();
+}
+
+void Terrain::set_tile_cache_capture_diagnostics(bool p_enabled) {
+	tile_cache_device.set_capture_diagnostics(p_enabled);
+}
+
+Dictionary Terrain::get_tile_cache_diagnostics() const {
+	Dictionary diagnostics = tile_cache_device.get_diagnostics();
+	diagnostics["capture_diagnostics"] =
+			tile_cache_device.is_capture_diagnostics_enabled();
+	const Dictionary provider = static_shadow_rasterizer.get_diagnostics();
+	const Array keys = provider.keys();
+	for (int index = 0; index < keys.size(); ++index) {
+		const Variant key = keys[index];
+		diagnostics[String("shadow_provider_") + String(key)] = provider[key];
+	}
+	return diagnostics;
+}
+
+std::optional<opennova::TerrainTilePageBinding>
+Terrain::get_tile_cache_binding_for_world_point_native(
+		float p_world_x, float p_world_z) {
+	if (!std::isfinite(p_world_x) || !std::isfinite(p_world_z)) {
+		return std::nullopt;
+	}
+	constexpr float SECTOR_SIZE = 512.0f;
+	opennova::TerrainTileResidentPoint point;
+	point.sector_origin_x = static_cast<int32_t>(
+			std::floor(p_world_x / SECTOR_SIZE)) * 512;
+	point.sector_origin_z = static_cast<int32_t>(
+			std::floor(p_world_z / SECTOR_SIZE)) * 512;
+	point.world_x = p_world_x;
+	point.world_z = p_world_z;
+	return tile_cache_device.best_ready(point);
 }
 
 Vector3 Terrain::get_tile_overlay_tint() const {
@@ -159,7 +262,15 @@ bool Terrain::get_tile_overlay_enabled() const {
 }
 
 void Terrain::set_tile_info_override(const Ref<TerrainTileInfo> &p_info) {
+	const Callable changed = callable_mp(this, &Terrain::_on_tile_info_changed);
+	if (tile_info_override.is_valid() &&
+			tile_info_override->is_connected("changed", changed)) {
+		tile_info_override->disconnect("changed", changed);
+	}
 	tile_info_override = p_info;
+	if (tile_info_override.is_valid()) {
+		tile_info_override->connect("changed", changed);
+	}
 	surface_inputs->set_tile_info_override(p_info);
 	if (built) {
 		_rebuild_tile_overlay_texture();
@@ -309,6 +420,19 @@ void Terrain::render_frame() {
 			frame_compiler.compile(scene_snapshot, view_input);
 	frame_draw_list_live = true;
 
+	// The portable cache owns page identity/composition decisions; the device
+	// supplies the environment bytes that are actually baked into each page.
+	// Quantization inside the adapter prevents sub-byte weather drift from
+	// invalidating the whole working set.
+	Vector3 page_tile_tint(1.0f, 1.0f, 1.0f);
+	Vector3 page_light_direction(0.0f, 0.70710678f, 0.70710678f);
+	if (cached_env_node && cached_env_node->is_loaded()) {
+		page_tile_tint = cached_env_node->get_tile_overlay_tint();
+		page_light_direction = cached_env_node->get_light_direction();
+	}
+	static_shadow_rasterizer.begin_frame(page_light_direction);
+	tile_cache_device.begin_frame(draw_list.frame_id);
+
 	// Apply the draw list onto the instance pool: draw-list index == pool slot.
 	RenderingServer* rs = RenderingServer::get_singleton();
 	const int count = static_cast<int>(draw_list.patches.size());
@@ -345,6 +469,28 @@ void Terrain::render_frame() {
 			patch_instances[i], "u_instance_source_quadrant",
 			Vector2(static_cast<float>(draw.quadrant_x),
 				static_cast<float>(draw.quadrant_z)));
+
+		const opennova::TerrainTilePageBinding page =
+				tile_cache_device.request(
+					draw, page_tile_tint, page_light_direction);
+		rs->instance_geometry_set_shader_parameter(
+				patch_instances[i], "u_instance_tile_cache_ready", page.ready);
+		if (page.ready) {
+			const int span = opennova::TerrainTileCompositionCache::page_world_span(
+					page.page.page_lod_level);
+			const float world_x = static_cast<float>(
+					page.page.sector_origin_x + page.page.page_local_x);
+			const float world_z = static_cast<float>(
+					page.page.sector_origin_z + page.page.page_local_z);
+			rs->instance_geometry_set_shader_parameter(
+					patch_instances[i], "u_instance_tile_cache_layer",
+					static_cast<float>(page.layer));
+			rs->instance_geometry_set_shader_parameter(
+					patch_instances[i], "u_instance_tile_cache_origin_span",
+					Vector4(world_x, world_z,
+						span > 0 ? 1.0f / static_cast<float>(span) : 0.0f,
+						static_cast<float>(span)));
+		}
 
 		// Per-instance debug data (only set when a debug mode is active)
 		if (debug_mode > 0) {
@@ -407,7 +553,12 @@ void Terrain::render_frame() {
 			if (cached_weather_node) {
 				terrain_material->set_shader_parameter("u_sun_light", cached_weather_node->get_smooth_sun());
 				terrain_material->set_shader_parameter("u_sky_ambient", cached_weather_node->get_smooth_sky());
-				terrain_material->set_shader_parameter("u_fog_color", cached_weather_node->get_smooth_fog());
+				// The underwater pass replaces the weather fog block with
+				// Env_WaterColorLit. Above water, retain Weather's direct smoothed
+				// color override exactly as before.
+				if (!cached_env_node->is_underwater_view()) {
+					terrain_material->set_shader_parameter("u_fog_color", cached_weather_node->get_smooth_fog());
+				}
 			}
 			// Tile overlay tint: HALF(terrain_rgb) under MODULATE2X folded to
 			// one multiply; the shared runtime/ONED tile path consumes this uniform.
@@ -502,6 +653,12 @@ void Terrain::_load_textures() {
 	surface_inputs->rebuild(
 		terrain_data, tile_info_override, tile_overlay_enabled);
 	surface_inputs->apply_to_material(terrain_material);
+	tile_cache_device.rebuild(terrain_data, surface_inputs,
+			tile_info_override, tile_overlay_enabled);
+	terrain_material->set_shader_parameter(
+			"u_tile_cache", tile_cache_device.get_texture());
+	terrain_material->set_shader_parameter(
+			"u_has_tile_cache", tile_cache_device.is_ready());
 }
 
 void Terrain::_clear_tile_overlay_texture() {
@@ -520,6 +677,12 @@ void Terrain::_rebuild_tile_overlay_texture() {
 	surface_inputs->set_tile_overlay_enabled(tile_overlay_enabled);
 	surface_inputs->rebuild_tile_overlay();
 	surface_inputs->apply_to_material(terrain_material);
+	tile_cache_device.rebuild(terrain_data, surface_inputs,
+			tile_info_override, tile_overlay_enabled);
+	terrain_material->set_shader_parameter(
+			"u_tile_cache", tile_cache_device.get_texture());
+	terrain_material->set_shader_parameter(
+			"u_has_tile_cache", tile_cache_device.is_ready());
 }
 
 // ---------------------------------------------------------------------------
@@ -530,6 +693,11 @@ void Terrain::_on_terrain_changed() {
 	if (!built || terrain_data.is_null()) return;
 	// Rebuild the derived terrain inputs and update shader parameters.
 	_load_textures();
+}
+
+void Terrain::_on_tile_info_changed() {
+	if (!built || terrain_data.is_null()) return;
+	_rebuild_tile_overlay_texture();
 }
 
 void Terrain::_hide_visible_patches() {
@@ -565,6 +733,11 @@ void Terrain::_clear_patch_pool() {
 
 void Terrain::_clear_terrain() {
 	_clear_patch_pool();
+	tile_cache_device.clear();
+	if (terrain_material.is_valid()) {
+		terrain_material->set_shader_parameter("u_tile_cache", Variant());
+		terrain_material->set_shader_parameter("u_has_tile_cache", false);
+	}
 	_clear_tile_overlay_texture();
 	_clear_derived_textures();
 
@@ -604,9 +777,9 @@ void Terrain::build() {
 		RID inst = rs->instance_create();
 		rs->instance_set_scenario(inst, scenario);
 		rs->instance_geometry_set_material_override(inst, mat_rid);
-		// World-visible plus the terrain-only static-shadow receiver marker.
-		// Keep bit assignments mirrored in nova_water.gd.
-		rs->instance_set_layer_mask(inst, (1u << 0) | (1u << 15));
+		// Static terrain silhouettes are already carried in the composed page A;
+		// the terrain participates only in the ordinary world-visible layer.
+		rs->instance_set_layer_mask(inst, 1u << 0);
 		rs->instance_set_visible(inst, false);
 		patch_instances[i] = inst;
 		patch_visible[i] = false;
@@ -646,13 +819,6 @@ bool Terrain::_build_terrain() {
 	terrain_shader = _load_terrain_shader();
 	terrain_material.instantiate();
 	terrain_material->set_shader(terrain_shader);
-	Ref<Shader> shadow_shader = ResourceLoader::get_singleton()->load(
-			"res://shaders/sun_shadow_catcher.gdshader", "Shader");
-	if (shadow_shader.is_valid()) {
-		shadow_receiver_material.instantiate();
-		shadow_receiver_material->set_shader(shadow_shader);
-		terrain_material->set_next_pass(shadow_receiver_material);
-	}
 
 	tile_infos.resize(cpt.tiles.size());
 

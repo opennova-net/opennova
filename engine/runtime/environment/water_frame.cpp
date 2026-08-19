@@ -46,4 +46,10 @@ WaterFrameInputs build_water_frame_inputs(const EnvironmentState *env,
 	return inputs;
 }
 
+uint8_t underwater_murk_overlay_alpha_byte(float murk) {
+	// Do not add a lower clamp: the retail parser constrains only the upper
+	// bound, and the packed ARGB destination takes the resulting low byte.
+	return static_cast<uint8_t>(128 + static_cast<int>(murk * 96.0f));
+}
+
 } // namespace opennova::env

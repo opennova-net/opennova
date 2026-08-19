@@ -416,7 +416,8 @@ WaterUvState WeatherRuntime::water_uv_state(float cam_x, float cam_z,
 }
 
 WeatherShaderGlobals build_weather_shader_globals(
-		const EnvironmentState &env, const WeatherRuntime &weather) {
+		const EnvironmentState &env, const WeatherRuntime &weather,
+		bool underwater_view) {
 	// The env's public hemisphere getters include the camera-gated NVG gain
 	// rewrite; publishing the smoother directly would bypass it each tick.
 	WeatherShaderGlobals globals;
@@ -431,6 +432,13 @@ WeatherShaderGlobals build_weather_shader_globals(
 	globals.base.fog_end = env.fog_end_distance();
 	globals.base.fog_start = env.fog_start();
 	globals.base.fog_type = env.fog_type();
+	if (underwater_view) {
+		const SceneFogValues fog = env.build_scene_fog(true);
+		globals.base.fog_color = fog.color;
+		globals.base.fog_end = fog.end;
+		globals.base.fog_start = fog.start;
+		globals.base.fog_type = fog.type;
+	}
 	globals.base.wind_sway_amount =
 			std::max(0.25f, std::fabs(weather.sway_amount()));
 	globals.base.wind_sway_phase = weather.sway_phase();

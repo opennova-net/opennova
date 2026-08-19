@@ -241,7 +241,7 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 	# world-side consumers, while the wire pass below renders their decoded live state.
 	# Complete-BMS/debug joins still retain authored nodes and the ordinary defer identity.
 	_present = PresentApplier.new()
-	_present.setup(_sim, _index)
+	_present.setup(_sim, _index, registry_placer)
 	_apply_present_options(_present, options.get("present_options", {}))
 	# Co-op renders decoded remote rows WIRE-DIRECT. On a host that principally covers
 	# dynamically admitted players; on a header-only joiner it covers every remote row,
@@ -282,7 +282,8 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 			options.get("fire_fx", Callable()),
 			options.get("fire_listener", Callable()),
 			Callable(_wire_present, "muzzle_world_for") if _wire_present != null
-					else Callable())
+					else Callable(),
+			options.get("muzzle_light", Callable()))
 		# The sim's fire-sound distance gate reads the camera listener at fire
 		# time on the logic clock (world/fire_sound.h) — stamped in each typed
 		# session frame. A host with no fire presentation (dedicated) never
@@ -303,7 +304,8 @@ func setup(mission: MissionData, container: Node, options: Dictionary = {}) -> i
 			options.get("item_db"), options.get("effect_anchors"),
 			options.get("fire_audio", Callable()),
 			options.get("fire_fx", Callable()),
-			_wire_present)
+			_wire_present,
+			options.get("death_light", Callable()))
 		simulation_restarted.connect(
 				Callable(_destruction_present, 'reset_runtime_state'))
 	# The throwable-presentation pass: item models for flying grenades/satchels

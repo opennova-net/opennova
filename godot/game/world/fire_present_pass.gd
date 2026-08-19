@@ -23,9 +23,9 @@ extends RefCounted
 # plays whatever drain_fire_sounds() returns — including the adm-arm action-row
 # sounds, which retail plays immediately at the shooter with no delay. The set's
 # max range still culls at PLAY time in our bank vs fire time in retail (the
-# tracked D-AI-8 delta). The MF_Light muzzle glow leg (+36/+40 ->
-# Entity_UpdateMuzzleGlowEffect @ 0x56C960, a light-pool glow) is a tracked
-# deferral — no light-pool port yet.
+# tracked D-AI-8 delta). The MF_Light muzzle glow leg (+36 ->
+# Entity_UpdateMuzzleGlowEffect @ 0x56C960) routes to the EffectLightDirector's
+# light pool per presented fire (the _muzzle_light Callable).
 #
 # Tracers [orig: RoundData_SpawnRound @ 0x4EC0D0]: every tracer_rate-th round per
 # shooter (forcetracer 0x8000 = every round) is visible in flight — a channel in the
@@ -43,10 +43,11 @@ extends RefCounted
 # (rocket/at4/grenade) draw alpha-blended with scene fog [orig: mode 0]. The 4-wide
 # wave-animated smoke/sniper cross-section and the distortion pass (style +0x828)
 # are tracked in docs/world/world-wac-ai-re.md §24.6 (D-AI-12a/b); the round's item
-# graphic (frndlyTrcrID/foeTrcrID + TRACER_SCALE/TRACER_WIDTH nodes) and the
-# light_move glow (round+0x1B4) are D-AI-12d/e. The SP host shows tracers
-# unconditionally (the MP NoTracers rules bit, dword_24D1E34 & 1, is a net seam
-# wired via RoundSim.no_tracers_rule).
+# graphic (frndlyTrcrID/foeTrcrID + TRACER_SCALE/TRACER_WIDTH nodes) is
+# D-AI-12d; the light_move glow (round+0x1B4) rides the light pool now
+# (Simulation.get_round_glow_rows -> EffectLightDirector.sync_round_glows).
+# The SP host shows tracers unconditionally (the MP NoTracers rules bit,
+# dword_24D1E34 & 1, is a net seam wired via RoundSim.no_tracers_rule).
 
 var _sim: Simulation                  # drain + trail source (null in data-driven tests)
 var _audio_provider := Callable()     # -> MissionAudio (or null)
@@ -56,6 +57,9 @@ var _listener_provider := Callable()  # -> Vector3 listener position (camera)
 # Retail's adm arm spawns at the shooter's own WEAPON, not at the wire position, so
 # presentation needs a way back to that body's held-weapon node.
 var _muzzle_provider := Callable()
+# (shooter_handle: int, world_pos: Vector3) -> the MF_Light muzzle glow route
+# (EffectLightDirector.on_muzzle_fire).
+var _muzzle_light := Callable()
 var _mesh: ImmediateMesh
 var _mesh_instance: MeshInstance3D
 var _mat_additive: StandardMaterial3D  # std/rapid/sniper/df1/NVG [orig: fog-black additive]
@@ -94,12 +98,13 @@ func warm_pipelines(position: Vector3) -> void:
 
 func setup(sim: Simulation, container: Node3D, audio_provider: Callable,
 		fx_provider: Callable, listener_provider: Callable,
-		muzzle_provider := Callable()) -> void:
+		muzzle_provider := Callable(), muzzle_light := Callable()) -> void:
 	_sim = sim
 	_audio_provider = audio_provider
 	_fx_provider = fx_provider
 	_listener_provider = listener_provider
 	_muzzle_provider = muzzle_provider
+	_muzzle_light = muzzle_light
 	if container != null and is_instance_valid(container):
 		_mesh = ImmediateMesh.new()
 		_mesh_instance = MeshInstance3D.new()
@@ -202,6 +207,21 @@ func present_fires(events: Array) -> void:
 	var fx: EffectWorld = _fx_provider.call() if _fx_provider.is_valid() else null
 	for ev_v in events:
 		var ev: Dictionary = ev_v
+		# The MF_Light muzzle glow re-arms per shot for EVERY shooter — retail
+		# spawns it on both fire arms, the local player's included [orig:
+		# WeaponSlot_FireAndSpawnEffects @ 0x53f597 at the fire position;
+		# ActionSlot_SpawnEffect @ 0x402080 at the action-transform muzzle;
+		# both gate on ammo +36 MF_Light]. Owner = shooter, so the witnessed
+		# group gate scopes it to the shooter's own draws.
+		if _muzzle_light.is_valid() and int(ev.get("mf_light", 0)) != 0:
+			var glow_pos: Vector3 = ev.get("origin", Vector3.ZERO)
+			if bool(ev.get("adm_arm", false)) and _muzzle_provider.is_valid():
+				var glow_anchor: Vector3 = _muzzle_provider.call(
+						int(ev.get("shooter_handle", -1)),
+						String(ev.get("action_userpoint", "")))
+				if glow_anchor.is_finite():
+					glow_pos = glow_anchor
+			_muzzle_light.call(int(ev.get("shooter_handle", -1)), glow_pos)
 		# The local player's own fire is presented by the action-slot legs
 		# [orig: ActionSlot_ExecuteActionTick @ 0x541A70 routing]; everyone
 		# else's rides the ammo-def legs below. (The SOUND legs of every arm
@@ -245,7 +265,6 @@ func present_fires(events: Array) -> void:
 			# @ 0x5F6DF0; every fire spawns one — no per-shooter guard on this leg].
 			fx.spawn_effect(effect, origin, ev.get("forward", Vector3.FORWARD))
 			_stats.effects += 1
-		# ev["mf_light"]: the muzzle glow light — tracked deferral (no light pool).
 
 
 # The sim's ready fire sounds: immediate near shots, the adm-arm action-row

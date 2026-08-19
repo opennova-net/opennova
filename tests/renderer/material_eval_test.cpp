@@ -476,6 +476,54 @@ int main() {
                        ctrl_bus({{"lod_frac", 32768}})) == 2,
                "Unknown authored texture CTRL names should alias lowercase LOD_FRAC");
 
+        // RevX02 IndoArms.3di is a two-frame controlled diffuse whose only
+        // local register is TEX_CAMO1.  Avatar_SetArmsCamoCtrl stores the raw
+        // zero-extended selector byte, and the TEX_CAMO adjacent-state dword
+        // is statically 1, selecting retail's modulo-frame branch.
+        // [orig: Avatar_SetArmsCamoCtrl @ 0x57A3B0;
+        //  apply_shader_parameters @ 0x58DC36..0x58DC42]
+        material.animation.num_frames = 2;
+        material.animation.cycle_frame_time = 0;
+        const std::vector<std::string> indo_arms_names = {"TEX_CAMO1"};
+        expect(renderer::compute_anim_frame(
+                       material, 0, 0, indo_arms_names,
+                       ctrl_bus({{"TEX_CAMO1", 0}})) == 0,
+               "IndoArms TEX_CAMO selector zero should choose A_Arm1st");
+        expect(renderer::compute_anim_frame(
+                       material, 0, 0, indo_arms_names,
+                       ctrl_bus({{"TEX_CAMO1", 1}})) == 1,
+               "IndoArms TEX_CAMO selector one should choose A_Arm2nd");
+        expect(renderer::compute_anim_frame(
+                       material, 0, 0, indo_arms_names,
+                       ctrl_bus({{"TEX_CAMO1", 3}})) == 1,
+               "TEX_CAMO selectors should wrap through retail's modulo branch");
+        // RevX02 APLFP1.3DI Jflag1/Jflag2/Jflag3 is a real three-frame
+        // TEX_TEAM-controlled material.  x86 IDIV leaves a signed remainder;
+        // do not normalize negative selectors into the positive frame range.
+        material.animation.num_frames = 3;
+        const std::vector<std::string> team_names = {"TEX_TEAM"};
+        expect(renderer::compute_anim_frame(
+                       material, 0, 0, team_names,
+                       ctrl_bus({{"TEX_TEAM", 0}})) == 0,
+               "TEX_TEAM selector zero should choose the first team frame");
+        expect(renderer::compute_anim_frame(
+                       material, 0, 0, team_names,
+                       ctrl_bus({{"TEX_TEAM", 1}})) == 1,
+               "TEX_TEAM selector one should choose the second team frame");
+        expect(renderer::compute_anim_frame(
+                       material, 0, 0, team_names,
+                       ctrl_bus({{"TEX_TEAM", 2}})) == 2,
+               "TEX_TEAM selector two should choose the third team frame");
+        expect(renderer::compute_anim_frame(
+                       material, 0, 0, team_names,
+                       ctrl_bus({{"TEX_TEAM", 3}})) == 0,
+               "TEX_TEAM selectors should wrap through retail's modulo branch");
+        expect(renderer::compute_anim_frame(
+                       material, 0, 0, team_names,
+                       ctrl_bus({{"TEX_TEAM", -1}})) == -1,
+               "TEX_TEAM should preserve retail's signed IDIV remainder");
+
+        material.animation.num_frames = 4;
         material.animation.cycle_frame_time = 255;
         expect(renderer::compute_anim_frame(
                        material, 0, 0, {}, ctrl_bus({{"LOD_FRAC", 32768}})) == 2,

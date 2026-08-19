@@ -24,6 +24,7 @@
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/variant.hpp>
+#include <godot_cpp/variant/vector4.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -65,6 +66,18 @@ uint32_t pack_preview_detail_key(int p_cell_min_x, int p_cell_min_z) {
                              p_cell_min_z + opennova::kFoliageDetailCellSize) &
                          0x7FFFu;
   return (x << 16u) | z_top;
+}
+
+int32_t decode_foliage_cell_axis(uint32_t p_packed) {
+  const int32_t value = static_cast<int32_t>(p_packed & 0x7FFFu);
+  return (value & 0x4000) != 0 ? value - 0x8000 : value;
+}
+
+Vector2 foliage_detail_cell_center(uint32_t p_cell_key) {
+  const int32_t minimum_x = decode_foliage_cell_axis(p_cell_key >> 16u);
+  const int32_t maximum_z = decode_foliage_cell_axis(p_cell_key);
+  return Vector2(static_cast<float>(minimum_x) + 8.0f,
+                 static_cast<float>(maximum_z) - 8.0f);
 }
 
 } // namespace
@@ -567,6 +580,7 @@ void FoliageDispatcher::_update_materials() {
   const bool has_colormap = colormap.is_valid();
   Ref<Texture2D> heightfield_normal;
   Ref<Texture2D> tile_overlay;
+  Ref<Texture2DArray> tile_cache;
   Vector3 tile_overlay_tint(1.0f, 1.0f, 1.0f);
   if (surface_input_overrides_) {
     heightfield_normal = override_heightfield_normal_;
@@ -576,9 +590,11 @@ void FoliageDispatcher::_update_materials() {
     heightfield_normal = terrain_->get_heightfield_normal_texture();
     tile_overlay = terrain_->get_tile_overlay_texture();
     tile_overlay_tint = terrain_->get_tile_overlay_tint();
+    tile_cache = terrain_->get_tile_cache_texture();
   }
   const bool has_heightfield_normal = heightfield_normal.is_valid();
   const bool has_tile_overlay = tile_overlay.is_valid();
+  const bool has_tile_cache = tile_cache.is_valid();
 
   for (int slot = 0; slot < opennova::FOLIAGE_MAX_DEFS; ++slot) {
     const Ref<Texture2D> fd_texture = fd_textures_[slot];
@@ -604,6 +620,8 @@ void FoliageDispatcher::_update_materials() {
       material->set_shader_parameter("u_has_tile_overlay", has_tile_overlay);
       material->set_shader_parameter("u_tile_overlay_tint",
                                      tile_overlay_tint);
+      material->set_shader_parameter("u_tile_cache", tile_cache);
+      material->set_shader_parameter("u_has_tile_cache", has_tile_cache);
     }
 
     const Ref<ShaderMaterial> silhouette = silhouette_materials_[slot];
@@ -1152,6 +1170,39 @@ void FoliageDispatcher::_apply_draw_list(
     }
     draw->set_instance_shader_parameter(StringName("u_wind_phase"),
                                         command.wind_phase);
+    if (detail) {
+      draw->set_instance_shader_parameter(
+          StringName("u_instance_tile_cache_ready"), false);
+      draw->set_instance_shader_parameter(
+          StringName("u_instance_tile_cache_layer"), 0.0f);
+      draw->set_instance_shader_parameter(
+          StringName("u_instance_tile_cache_origin_span"), Vector4());
+      if (!surface_input_overrides_ && terrain_ != nullptr) {
+        const Vector2 center = foliage_detail_cell_center(command.cell_key);
+        const std::optional<opennova::TerrainTilePageBinding> page =
+            terrain_->get_tile_cache_binding_for_world_point_native(
+                static_cast<float>(center.x), static_cast<float>(center.y));
+        if (page.has_value() && page->ready) {
+          const int span =
+              opennova::TerrainTileCompositionCache::page_world_span(
+                  page->page.page_lod_level);
+          const float world_x = static_cast<float>(
+              page->page.sector_origin_x + page->page.page_local_x);
+          const float world_z = static_cast<float>(
+              page->page.sector_origin_z + page->page.page_local_z);
+          draw->set_instance_shader_parameter(
+              StringName("u_instance_tile_cache_ready"), true);
+          draw->set_instance_shader_parameter(
+              StringName("u_instance_tile_cache_layer"),
+              static_cast<float>(page->layer));
+          draw->set_instance_shader_parameter(
+              StringName("u_instance_tile_cache_origin_span"),
+              Vector4(world_x, world_z,
+                      span > 0 ? 1.0f / static_cast<float>(span) : 0.0f,
+                      static_cast<float>(span)));
+        }
+      }
+    }
     draw->set_visible(true);
   }
 

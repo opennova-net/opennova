@@ -195,6 +195,7 @@ struct WeatherShaderGlobals {
 };
 
 WeatherShaderGlobals build_weather_shader_globals(
-		const EnvironmentState &env, const WeatherRuntime &weather);
+		const EnvironmentState &env, const WeatherRuntime &weather,
+		bool underwater_view = false);
 
 } // namespace opennova::env

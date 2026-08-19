@@ -232,6 +232,38 @@ func test_setup_promotes_and_counts() -> void:
 	assert_eq(rt.entity_count(), 2)
 
 
+func test_setup_wires_presented_building_transforms_to_the_shadow_registry() -> void:
+	var mission := MissionData.new()
+	assert_eq(mission.create_default(), OK)
+	var ref: Dictionary = mission.add_entity(MissionData.KIND_BUILDING, 102001,
+			Vector3(10, 20, 3), Vector3(0, 25, 0))
+	assert_false(ref.is_empty())
+	if ref.is_empty():
+		return
+	var bms_id := int(ref.get("bms_id", 0))
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var model := ObjectModel.new()
+	container.add_child(model)
+	model.set_process(false)
+	var placer := MissionObjectPlacer.new()
+	placer.placed_entity_records.append({ "model": model, "ref": ref })
+	placer.register_static_instance(bms_id, "Caster", 0,
+			Transform3D(Basis.IDENTITY, Vector3(-20, -20, -20)), true)
+	var revision := placer.get_static_terrain_shadow_source_revision()
+	var runtime := MissionPresentation.new()
+	add_child_autofree(runtime)
+	assert_gt(int(runtime.setup(mission, container, { "placer": placer })), 0)
+	assert_true(runtime.tick())
+	assert_gt(placer.get_static_terrain_shadow_source_revision(), revision,
+			"production MissionPresentation passes its placer into PresentApplier")
+	var rows := placer.get_static_terrain_shadow_source_diagnostics()
+	assert_eq(rows.size(), 1)
+	if rows.size() == 1:
+		assert_eq((rows[0] as Dictionary).get("world_transform"), model.transform,
+				"production presentation and the shadow registry share one pose")
+
+
 func test_stats_and_manual_probe_share_one_native_profiling_owner_gate() -> void:
 	var w := _make_world(Transform3D.IDENTITY)
 	var board := FrameStatsBoard.new()

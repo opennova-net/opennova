@@ -6,6 +6,8 @@
 // march and shader. RE record: docs/env/env-tod-re.md (env #28/#29).
 #pragma once
 
+#include <cstdint>
+
 #include "environment/environment_state.h"
 
 namespace opennova::env {
@@ -49,5 +51,11 @@ struct WaterFrameInputs {
 // document supplies water_murk).
 WaterFrameInputs build_water_frame_inputs(const EnvironmentState *env,
 		float murk_default);
+
+// The full-viewport underwater murk scissor drawn after the scene/viewmodel
+// and before HUD: alpha = 0x80 - trunc(murk * -96) = 128 + trunc(96*murk).
+// [orig: Terrain_RenderSceneWithReflection @ 0x5c96c5..0x5c96fa ->
+// Terrain_DrawScissorRect @ 0x5c38e0]
+uint8_t underwater_murk_overlay_alpha_byte(float murk);
 
 } // namespace opennova::env

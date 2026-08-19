@@ -1,21 +1,14 @@
 #pragma once
 
-// GLSL source generator for object materials.  Pure C++ - produces shader
-// strings the runtime/server can also consume (e.g. for headless texture
-// validation, server-side dry-run rendering, or porting to a different
-// engine without depending on Godot's Shader resource type).
+// Renderer-neutral object shader pipeline description.
 //
-// The Godot side (godot/src/object/nova_object_shader_cache.cpp) wraps
-// these strings into Godot Shader resources and caches them per key.
-//
-// Ported from the pre-repo prototype's nova_shader_cache compose_* helpers
-// helpers, simplified to a single Normal-pass (no per-light passes - that
-// belongs to the runtime layer and gets a separate composer when added).
+// The engine classifies authored material facts and returns this typed
+// descriptor. Backend adapters select their own checked-in shader resources
+// and bind the capabilities; the engine never emits backend shader source.
 
 #include "renderer/material_classify.h"
 
 #include <cstdint>
-#include <string>
 
 namespace renderer {
 
@@ -36,26 +29,95 @@ enum ObjectShaderCapBits : uint32_t {
 	OSCAP_NORMAL_UV2   = 0x00008000u,
 	// vsTracer soft edge: unlit color x |dot(eye, normal)|^2
 	// [orig: Tracer.fx vsTracer — D-RMAT-2, ported at REN-4].
-	// (The glow-copy capability — is_glow_capable — is deliberately NOT a key
-	// bit: it selects the Q3/bloom duplicate, not the composed look.)
+	// (The glow-copy capability — is_glow_capable — deliberately is not a key
+	// bit: it selects the Q3/bloom duplicate, not the normal-pass look.)
 	OSCAP_VIEW_FADE    = 0x00010000u,
 };
 
 using ObjectShaderKey = uint32_t;
 
-// Pack a classification into a 32-bit cache key.
+enum class ObjectDepthPolicy : uint8_t {
+	Opaque,
+	TransparentNoWrite,
+	AlphaPrepass,
+};
+
+enum class ObjectCullPolicy : uint8_t {
+	Back,
+	Disabled,
+};
+
+// These names make the two tracked D-RLIT-5 stand-ins explicit. A future
+// cubemap/Phong-map port changes this typed contract instead of searching a
+// generated source string for an implementation detail.
+enum class ObjectEnvironmentSource : uint8_t {
+	None,
+	HemisphereApproximation,
+};
+
+enum class ObjectSpecularSource : uint8_t {
+	None,
+	AnalyticPow16,
+};
+
+// Shader execution topology. These are the combinations reachable from the
+// canonical material descriptor table plus the runtime's missing-detail
+// downgrade. Backend adapters fail closed on Unsupported instead of growing
+// a runtime uber-shader or guessing a fallback.
+enum class ObjectShaderTechnique : uint8_t {
+	Unsupported,
+	Fixed,
+	FixedDetail,
+	SelfLit,
+	SelfLitDetail,
+	Tracer,
+	Flag,
+	FlagSelfLit,
+	PhongTangentDiffuse,
+	PhongTangentSpecular,
+	PhongObjectDiffuse,
+	PhongObjectSpecular,
+	Dot3Tangent,
+	Dot3TangentDetail,
+	Dot3Object,
+	Dot3ObjectDetail,
+	EnvironmentTangent,
+	EnvironmentTangentSpecular,
+	Glass,
+};
+
+struct ObjectShaderPipelineDescriptor {
+	ObjectShaderKey key = 0;
+	ObjectShaderFamily family = ObjectShaderFamily::Unknown;
+	ObjectBlendMode blend = ObjectBlendMode::Opaque;
+	ObjectDepthPolicy depth = ObjectDepthPolicy::Opaque;
+	ObjectCullPolicy cull = ObjectCullPolicy::Back;
+	ObjectEnvironmentSource environment_source = ObjectEnvironmentSource::None;
+	ObjectSpecularSource specular_source = ObjectSpecularSource::None;
+	ObjectShaderTechnique technique = ObjectShaderTechnique::Unsupported;
+	ObjectNormalSpace normal_space = ObjectNormalSpace::None;
+	bool writes_alpha = false;
+	bool alpha_test = false;
+	bool alpha_test_invert = false;
+	bool two_sided = false;
+	bool emissive = false;
+	bool luminance = false;
+	bool uses_normal_map = false;
+	bool normal_uses_uv2 = false;
+	bool uses_detail = false;
+	bool uses_specular = false;
+	bool glass = false;
+	bool view_angle_fade = false;
+};
+
+// Pack a classification into the stable 32-bit material/cache key.
 ObjectShaderKey build_object_shader_key(const ObjectMaterialClassification &cls);
 
-// Decode the family back out of a key (so callers can branch on it without
-// re-classifying).
 ObjectShaderFamily decode_object_shader_family(ObjectShaderKey key);
 ObjectBlendMode decode_object_shader_blend(ObjectShaderKey key);
 
-// Compose the Godot-flavoured GLSL source for a key.  The output uses
-// `shader_type spatial;` and Godot-specific built-ins (CAMERA_POSITION_WORLD,
-// MODEL_MATRIX, ALBEDO, ALPHA, TIME).  The runtime/server uses are expected
-// to be either rendering through Godot or syntactically replacing those
-// built-ins for their target backend.
-std::string compose_object_shader_glsl(ObjectShaderKey key);
+// Describe the complete normal-pass pipeline selected by a key. Pure data;
+// adapters decide how each policy maps to their renderer.
+ObjectShaderPipelineDescriptor describe_object_shader_pipeline(ObjectShaderKey key);
 
 } // namespace renderer

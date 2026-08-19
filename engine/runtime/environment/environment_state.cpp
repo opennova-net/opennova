@@ -521,7 +521,7 @@ void EnvironmentState::set_smoothed_scalars(float fog_distance,
 // --- typed value builders --------------------------------------------------
 
 bool EnvironmentState::build_light_values(const Vec3 &default_dir,
-		WorldLightValues &out) const {
+		WorldLightValues &out, bool underwater_view) const {
 	if (!is_loaded()) {
 		return false;
 	}
@@ -544,35 +544,75 @@ bool EnvironmentState::build_light_values(const Vec3 &default_dir,
 	out.fog_start = fog_start();
 	out.fog_end = fog_level();
 	out.fog_type = fog_type();
+	if (underwater_view) {
+		const SceneFogValues fog = build_scene_fog(true);
+		out.fog_color = fog.color;
+		out.fog_start = fog.start;
+		out.fog_end = fog.end;
+		out.fog_type = fog.type;
+	}
 	return true;
 }
 
-EnvShaderGlobals EnvironmentState::build_shader_globals() const {
+EnvShaderGlobals EnvironmentState::build_shader_globals(
+		bool underwater_view) const {
 	EnvShaderGlobals globals;
 	globals.fill_light = fill_light();
 	globals.sun_light = sun_light_;
 	globals.sky_ambient = sky_ambient();
 	globals.sun_direction = light_dir_;
-	globals.fog_color = fog_color_rt_;
-	globals.fog_end = fog_end_distance();
-	globals.fog_start = fog_start();
-	globals.fog_type = fog_type();
+	const SceneFogValues fog = build_scene_fog(underwater_view);
+	globals.fog_color = fog.color;
+	globals.fog_end = fog.end;
+	globals.fog_start = fog.start;
+	globals.fog_type = fog.type;
 	globals.wind_sway_amount = 1.0f;
 	globals.wind_sway_phase = 0.0f;
 	return globals;
 }
 
-TerrainEnvUniforms EnvironmentState::build_terrain_uniforms() const {
+TerrainEnvUniforms EnvironmentState::build_terrain_uniforms(
+		bool underwater_view) const {
 	TerrainEnvUniforms uniforms;
 	uniforms.sun_light = sun_light();
 	uniforms.sky_ambient = sky_ambient();
 	uniforms.sun_direction = light_direction();
 	uniforms.tile_overlay_tint = tile_overlay_tint();
-	uniforms.fog_color = fog_color();
-	uniforms.fog_end = fog_end_distance();
-	uniforms.fog_start = fog_start();
-	uniforms.fog_type = fog_type();
+	const SceneFogValues fog = build_scene_fog(underwater_view);
+	uniforms.fog_color = fog.color;
+	uniforms.fog_end = fog.end;
+	uniforms.fog_start = fog.start;
+	uniforms.fog_type = fog.type;
 	return uniforms;
+}
+
+float EnvironmentState::water_murk() const {
+	return config_ != nullptr ? config_->water_murk : 0.8f;
+}
+
+SceneFogValues EnvironmentState::build_scene_fog(
+		bool underwater_view) const {
+	SceneFogValues fog;
+	if (!underwater_view) {
+		fog.color = fog_color();
+		fog.start = fog_start();
+		fog.end = fog_end_distance();
+		fog.type = fog_type();
+		return fog;
+	}
+
+	// The underwater pass replaces the weather fog block with lit water and
+	// the murk visibility curve. Type 1 is linear and its retail caller start
+	// is the fixed 0.5 world units encoded by compute_fog_params.
+	// [orig: Environment_ApplyFogAndAmbient @ 0x57E471..0x57E4AD — device fog
+	// color <- Env_WaterColorLit and fog type <- 1 when underwater]
+	const Rgb combined = combine_terrain_light(sun_light(), sky_ambient());
+	fog.color = lit_water_color(water_color(), combined);
+	fog.end = fog_end_underwater(water_murk());
+	fog.type = 1;
+	fog.start = compute_fog_params(
+			fog.type, fog.end, overcast_blend()).start;
+	return fog;
 }
 
 // --- color math ------------------------------------------------------------
