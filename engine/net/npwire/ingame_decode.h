@@ -1660,11 +1660,14 @@ bool decode_deployed_item_spawn(const uint8_t *body, size_t len,
 // [u8 subtype]` followed by a class-dependent body the dispatcher routes to the
 // target entity's per-class serialize callback (entity def+356, source_type=2) —
 // the SAME per-class path the C2S 0x0C entity-uplink uses (§5.10b). We decode the
-// sub-header + expose the body slice; the body's field layout is class-specific
-// (PARTIAL — same deferral as the §5.15 guided record). [orig: NapiNPClientMsg_0x044
+// sub-header + expose the body slice; for the GUIDED class the body is fully
+// mapped and folded (§5.15, netsim `apply_entity_routed`); other classes' bodies
+// remain unmapped. [orig: NapiNPClientMsg_0x044
 //  @ 0x422710 → NetPacket_DispatchToEntityByNetId @ 0x4D6960]
 struct EntityRoutedPacket {
-	uint16_t field0 = 0;            // [0..1] not read by the dispatcher
+	uint16_t field0 = 0;            // [0..1] the shooter handle (entity+368;
+	                                //  fork-witnessed — supersedes the earlier
+	                                //  "not read by the dispatcher" gloss)
 	int16_t  net_id = 0;            // [2..3] EntitySlot_FindByNetId key
 	uint8_t  subtype = 0;           // [4] selects the def+356 callback path
 	const uint8_t *body = nullptr;  // class-dependent body (size = len - 5)
