@@ -27,3 +27,9 @@ deploy/env/*.env text eol=lf
 # rule above (git must read .gitignore as text).
 fixtures/**/*.md text eol=lf filter= diff= merge=
 fixtures/**/.gitignore text eol=lf filter= diff= merge=
+
+# The render-evidence manifests and READMEs under screenshots/ are plain text
+# the docs link into — same exception as fixtures/ above, or GitHub renders
+# three-line LFS pointer stubs where the evidence should be.
+screenshots/**/*.md text eol=lf filter= diff= merge=
+screenshots/**/*.json text eol=lf filter= diff= merge=

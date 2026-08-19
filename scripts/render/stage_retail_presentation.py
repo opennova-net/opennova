@@ -15,15 +15,15 @@ path from ``--manifest`` and requires it, so the command line remains unchanged.
 Production staging::
 
     uv run python scripts/render/stage_retail_presentation.py stage \
-      --game-cfg C:/GAMES/JOTAC/Game/JO/game.cfg \
-      --weapon-sav C:/GAMES/JOTAC/Game/JO/expansion/revx02/weapon.sav \
+      --game-cfg C:/Users/<you>/Games/JOTAC/Game/JO/game.cfg \
+      --weapon-sav C:/Users/<you>/Games/JOTAC/Game/JO/expansion/revx02/weapon.sav \
       --backup .scratch/retail-stage/game.cfg.original \
       --manifest .scratch/retail-stage/retail-presentation.json
 
 Restore immediately after the retail process exits::
 
     uv run python scripts/render/stage_retail_presentation.py restore \
-      --game-cfg C:/GAMES/JOTAC/Game/JO/game.cfg \
+      --game-cfg C:/Users/<you>/Games/JOTAC/Game/JO/game.cfg \
       --backup .scratch/retail-stage/game.cfg.original \
       --manifest .scratch/retail-stage/retail-presentation.json
 """
