@@ -2523,6 +2523,58 @@ void test_eye_offset_restamp() {
     src.top = fx(2);
     run_ticks(ai, w, 4, 6);
     CHECK(reg->eye_offset_z == 0xD000);
+
+    // The local exact leg: a shell-fed head sample replaces the capsule formula
+    // with head - Position, all three lanes, stored UNfloored — the 0x2000
+    // floor belongs to the capsule legs; retail's on-foot leg terrain-floors
+    // the head first (a no-op here: this AiSystem carries no height field).
+    // [orig: Entity_UpdateInfantryPlayerBody on-foot @0x4b6bb3..0x4b6cc8;
+    //  mounted @0x4b6908..0x4b696c]
+    e->pos[0] = fx(10);
+    e->pos[1] = fx(20);
+    e->pos[2] = fx(5);
+    w.cached.local_head = Vec3{10.25f, 19.5f, 6.4f};
+    w.cached.local_head_valid = true;
+    run_ticks(ai, w, 6, 8);
+    CHECK(reg->eye_offset_x == fx(1) / 4);
+    CHECK(reg->eye_offset_y == -fx(1) / 2);
+    CHECK(std::abs(reg->eye_offset_z - (fx(1) + fx(1) * 2 / 5)) <= 2);
+    // A head barely above Position stores the raw 0.05 u offset (no floor).
+    w.cached.local_head = Vec3{10.0f, 20.0f, 5.05f};
+    run_ticks(ai, w, 8, 10);
+    CHECK(reg->eye_offset_x == 0);
+    CHECK(reg->eye_offset_y == 0);
+    CHECK(std::abs(reg->eye_offset_z - 3277) <= 3);
+    w.cached.local_head_valid = false; // sample lost -> capsule formula returns
+    run_ticks(ai, w, 10, 12);
+    CHECK(reg->eye_offset_z == 0xD000);
+    CHECK(reg->eye_offset_x == 0); // stale head laterals reset with the sample
+    CHECK(reg->eye_offset_y == 0);
+
+    // The org1 NPC lateral pair: lat = (delta * sinQ22(lean) * 3) >> 2 rotated
+    // by heading — x = +lat*sin(yaw), y = -lat*cos(yaw); an unleaned NPC stores
+    // zero laterals. [orig: Entity_UpdateInfantryAI @0x4bf078..0x4bf14c]
+    e->inf.is_local_player = false;
+    e->inf.lean_angle = 0;
+    run_ticks(ai, w, 12, 14);
+    CHECK(reg->eye_offset_x == 0);
+    CHECK(reg->eye_offset_y == 0);
+    e->inf.lean_angle = 1 << 29; // lean 45 deg
+    e->heading = 0;              // facing +y: x = +lat*sin(0) = 0
+    run_ticks(ai, w, 14, 16);
+    CHECK(reg->eye_offset_x == 0);
+    const int32_t delta_std = fx(2) > 0x9000 ? fx(2) : 0x9000;
+    const int32_t expect_lat =
+        ((static_cast<int32_t>((static_cast<int64_t>(delta_std) *
+                                static_cast<int32_t>(std::sin(3.14159265358979323846 / 4) *
+                                                     4194304.0)) >> 22)) * 3) >> 2;
+    CHECK(std::abs(reg->eye_offset_y - (-expect_lat)) <= 2);
+    e->heading = 1 << 30; // heading 90 deg: the lateral rotates onto +x
+    e->inf.target_heading = 1 << 30;
+    e->inf.body_heading = 1 << 30;
+    run_ticks(ai, w, 16, 18);
+    CHECK(std::abs(reg->eye_offset_x - expect_lat) <= 2);
+    CHECK(std::abs(reg->eye_offset_y) <= 2);
 }
 
 int main() {

@@ -827,11 +827,41 @@ public:
     // TRUE = some static's type-1 solid clips the segment at `radius`
     // (negative radius reads the planes thinner). The iris sun-occlusion ray
     // primitive — the caller passes allowAllTypes = 1, so no building-kind
-    // gate. [orig: raycast_find_collision_entity @ 0x539a70 (the iris caller
-    // @ 0x5c7784 pushes allowAllTypes 1) -> raycast_against_entity_pool
-    // @ 0x538720; pool-1 dynamics are a tracked D-RLIT-2 residual.]
+    // gate. `exclude` skips one static slot: the query entity never blocks its
+    // own sun ray. [orig: raycast_find_collision_entity @ 0x539a70 (the iris
+    // caller @ 0x5c7784 pushes allowAllTypes 1; the entity walk skips
+    // entry_entity == entity_a) -> raycast_against_entity_pool @ 0x538720;
+    // pool-1 dynamics are a tracked D-RLIT-2 residual.]
     bool segment_hits_static(World &world, const int32_t a[3], const int32_t b[3],
-                             int32_t radius);
+                             int32_t radius, EntityHandle exclude = EntityHandle{});
+
+    // The three sun-occlusion clip radii, most permissive first — the same
+    // segment recast with progressively thinner plane reads; each blocked cast
+    // steps the light quality down one. Shared by the camera iris march and the
+    // per-entity sun-visibility factor. [orig: the -0x2000/-0x5000/-0x8000
+    // pushes @ 0x5c687c/0x5c68a7/0x5c68c8 (Entity_ComputeSunVisibility) and
+    // @ 0x5c7767/0x5c7792/0x5c77ac (the iris march).]
+    static constexpr int32_t kSunOcclusionClipRadii[3] = {-0x2000, -0x5000,
+                                                          -0x8000};
+
+    // Per-entity sun-visibility blocked-ray count for the drawn-entity lighting
+    // factor: one segment from the entity position + raw collision-bbox
+    // midpoint, 200 u along the active light direction, recast at the three
+    // clip radii — against the STATICS IN THE ENTITY'S OWN candidate slice
+    // (the +0x1BC arena block the ray walker iterates; only structures whose
+    // inflated sphere overlaps the entity's bubble can block its sun). An
+    // entity with no slice — statics, unsliced pool-1 rows, the 16 sliceless
+    // mission-start ticks — returns 0, matching retail's +0x1C0 == 0 skip
+    // (quality stays 4, factor 1.0). The caller maps the count through
+    // renderer::sun_visibility_factor ((4 - blocked) * 0.25).
+    // [orig: Entity_ComputeSunVisibility @ 0x5c6800 — the +0x1C0 gate
+    // @ 0x5c6808, origin = position + (entity+0x1FC..+0x204)
+    // @ 0x5c681f..0x5c6847, end = origin + 200*lightdir @ 0x5c6850..0x5c6876,
+    // one decrement per blocked cast @ 0x5c689e..0x5c68ea;
+    // raycast_find_collision_entity @ 0x539a70 walks entity_a's
+    // +0x1BC/+0x1C0 slice]
+    int sun_visibility_blocked_rays(World &world, const Entity &e,
+                                    const int32_t sun_step_q16[3]);
 
     // Ground-column probe through terrain + the entity's candidate models.
     // Builds the ray {x+dx, y+dy, z+z_up} down z_drop, clamps to the terrain
@@ -1157,6 +1187,12 @@ private:
     const CollisionTargetView *target_view(const World &world, EntityHandle h,
                                            CollisionTargetView &scratch,
                                            std::vector<CollisionMatrix> &mat_scratch) const;
+    // One static slot vs one radiused segment: the cheap-metadata broad phase,
+    // then live section matrices for the survivors (the shared walker body of
+    // segment_hits_static and the slice-scoped sun casts).
+    bool static_slot_blocks_segment(World &world, const StaticSlot &s,
+                                    const CollisionRay &ray, int32_t radius,
+                                    int32_t broad_r);
     void invalidate_trace_view(EntityHandle h);
     void invalidate_trace_views();
     // Per-logic-tick cache of projectile target views. Sustained automatic

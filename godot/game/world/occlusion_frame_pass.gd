@@ -214,6 +214,23 @@ func apply_frame(camera_xform: Transform3D, forces_indoors: bool) -> void:
 			if node != null:
 				_set_occlusion_hidden(sim, node, int(culled_changes[i]), false)
 
+	# The per-drawn-entity sun-visibility factor (D-RLIT-3), also applied as
+	# changes: quality 1..4 maps to effectScale quality*0.25, dimming only the
+	# directional term (engine/runtime/renderer/light_runtime.h
+	# sun_visibility_factor owns the witness; the ray walk is
+	# world::CollisionWorld::sun_visibility_blocked_rays). Contained and
+	# zero-source entities never appear here — they hold the 1.0 default.
+	# [orig: setup_terrain_effect_for_entity @ 0x5c74a0, pushed per sector
+	# entity draw @ 0x5c7bff]
+	if env != null:
+		var sun_changes: PackedInt64Array = sim.get_entity_sun_visibility_changes(
+				env.get_light_direction())
+		for i in range(0, sun_changes.size(), 2):
+			var sun_node := _occlusion_node(registry, int(sun_changes[i]))
+			if sun_node != null:
+				sun_node.set_entity_lighting_context(
+						float(sun_changes[i + 1]) * 0.25, false, 0.0)
+
 	# The g_BlinkWaterVisible override legs the slice-1 gate deferred: with the
 	# authored water letter suppressing (accum bit 0x8), the water still renders
 	# when the frame latched the exterior or a camera building straddles the

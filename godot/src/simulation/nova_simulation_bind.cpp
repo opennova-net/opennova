@@ -228,7 +228,7 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("drain_fire_sounds"),
 			&Simulation::drain_fire_sounds);
 	ClassDB::bind_method(D_METHOD("local_player_viewmodel_bias_view_units",
-					"pos_raw_units", "tpos_raw_units"),
+					"pos_raw_units", "tpos_raw_units", "narrow_aspect"),
 			&Simulation::local_player_viewmodel_bias_view_units);
 	ClassDB::bind_method(D_METHOD("get_tracer_trails"), &Simulation::get_tracer_trails);
 	ClassDB::bind_method(D_METHOD("get_round_glow_rows"),
@@ -377,6 +377,10 @@ void Simulation::_bind_methods() {
 	                     &Simulation::get_building_visibility_changes);
 	ClassDB::bind_method(D_METHOD("get_render_culled_changes"),
 	                     &Simulation::get_render_culled_changes);
+	ClassDB::bind_method(D_METHOD("get_entity_sun_visibility_changes", "light_dir"),
+	                     &Simulation::get_entity_sun_visibility_changes);
+	ClassDB::bind_method(D_METHOD("get_local_player_sun_quality"),
+	                     &Simulation::get_local_player_sun_quality);
 	ClassDB::bind_method(D_METHOD("entity_present_visible", "bms_id"),
 	                     &Simulation::entity_present_visible);
 	ClassDB::bind_method(D_METHOD("reset_occlusion_apply_baseline"),

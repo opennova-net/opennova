@@ -508,8 +508,11 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     mounting slice. `infantry_lean_tick` / `player_body_select`.
   - **D-INF-18** the remote CameraOffset approximation unported; the FP eye's terrain
     clamp FIXED 2026-08-12. The local head-bone eye is sampled binding-side from the
-    render skeleton (the structural translation of the `@0x4b6bb3` bone path, floored at
-    Position + 0.125 [orig min `0x2000 @0x4b6b98`]); the original's FIVE-sample terrain
+    render skeleton (the structural translation of the `@0x4b6bb3` bone path; the
+    reimpl's Position + 0.125 eye floor is a DEFENSIVE stand-in — the witnessed `0x2000`
+    floor `@0x4b6b98` belongs to the sample-less on-foot CAPSULE leg, and neither exact
+    head leg floors [witnessed 2026-08-19: on-foot `@0x4b6bb3..0x4b6cc8`, mounted
+    `@0x4b6908..0x4b696c`]); the original's FIVE-sample terrain
     floor — the eye column plus ±0x4000 along each ground axis, each sample + 0x1000,
     max-folded onto the eye Z unless `Flags & 0x800000` (indoors — the heightmap has no
     interiors) [orig: `@0x4b6c08-0x4b6ca4`; sampler `Terrain_SampleHeightBilinear
@@ -526,9 +529,18 @@ and the vehicle rows 21/23) — ported 2026-07-16.
     `@0x4ec342..0x4ec35a` / `@0x4ec86d..0x4ec885`], pinned by `npruntime_round_sim`'s
     eyes-dry/eyes-wet split; decoded wire rows keep their documented bounded
     projection (no CameraOffset carrier on the wire).
-    Remote players still take the capsule-height trig path [orig: `@0x4b6984`]. The
-    camera's `torsoRoll(+0x2DC)` and `2·pitchBlend(+0x380)` terms are also unported
-    (their producers are open). `local_player_presenter.gd`.
+    2026-08-19: the sim-side eye-offset store took the exact local leg — with the
+    shell-fed head sample, `Entity::eye_offset_{x,y,z}` = posed head − Position, the
+    head z first terrain-floored on foot (the same five-tap walk, indoors exempt), no
+    `0x2000` floor on either exact leg [orig: on-foot `@0x4b6bb3..0x4b6cc8`; mounted
+    `@0x4b6908..0x4b696c` — the sites split on the entity+0x16C carrier `@0x4b6386`];
+    NPCs gained the org1 lateral pair; only the sample-less player legs' full 3-angle
+    lateral tilt [orig: on-foot `@0x4b69ab..0x4b6b7c`, mounted `@0x4b66fc..0x4b68e5`]
+    keeps the capsule z-only approximation. The camera's
+    `torsoRoll(+0x2DC)` and `2·pitchBlend(+0x380)` terms are fed live from
+    `InfantryState.torso_roll` / `.recoil_pitch` through
+    `player_view_compose_camera` (the earlier "producers open" note is superseded;
+    residual gate legs stay on D-INF-17). `local_player_presenter.gd`.
   - **D-INF-19** the slope pass's conform selector dropped by the port — FIXED 2026-07-13.
     The dump-based port applied the slope lean+slide to EVERY live body and wrote the look
     pitch (`+0x14`) instead of `bodyPitch(+0x90)`, so a standing local player's Roll chased

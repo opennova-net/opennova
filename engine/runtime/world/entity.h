@@ -271,15 +271,25 @@ struct Entity {
     int16_t yaw = 0;
     int16_t pitch = 0;
     int16_t roll = 0;
-    // The eye/camera-offset z (entity+0x74, 16.16): the stance-driven eye height
-    // above the entity origin, restamped each body tick from the anim capsule
-    // extents tilted by the lean angle (the +0x6C/+0x70 lateral lean shift is
-    // unmodeled). The friendly-tag anchor reads it (anchor z = z + this + 0x4000
-    // [orig: HUD_DrawEntityLabel @0x5a3a84..0x5a3a98]); netsim's water line
-    // derives its own copy. 0 = never stamped (no anim channel), matching the
-    // retail spawn value; the local-player seeds (0xB333 [orig: Player_InitPlayer
+    // The eye/camera-offset triple (entity+0x6C/+0x70/+0x74, 16.16): the
+    // stance-driven eye above the entity origin, restamped each body tick.
+    // NPCs take the capsule extent tilted by lean (lateral = delta*sin(lean)*
+    // 3/4 rotated by heading [orig: Entity_UpdateInfantryAI @0x4bf078..
+    // 0x4bf14c]); the local player takes the exact posed-head-minus-Position
+    // triple when the shell feeds a skeleton sample, the head z terrain-floored
+    // on foot [orig: Entity_UpdateInfantryPlayerBody on-foot
+    // @0x4b6bb3..0x4b6cc8; mounted @0x4b6908..0x4b696c]. The retail camera
+    // adds the triple to the tracked entity's position [orig:
+    // Camera_ComputeThirdPersonView @0x437fa5..0x437fb7]; the friendly-tag
+    // anchor reads z only (anchor z = z + this + 0x4000 [orig:
+    // HUD_DrawEntityLabel @0x5a3a84..0x5a3a98]); netsim's water line derives
+    // its own z copy. 0 = never stamped (no anim channel), matching the retail
+    // spawn value; the local-player seeds (0xB333 [orig: Player_InitPlayer
     // @0x4e18a1], deploy 0xD000 [orig: NapiNPClientMsg_0x00A @0x42ffc9]) are
-    // subsumed by the first body tick. Witness: docs/interface/hud-re.md D-HUD-20.
+    // subsumed by the first body tick. Witness: docs/interface/hud-re.md
+    // D-HUD-20.
+    int32_t eye_offset_x = 0;
+    int32_t eye_offset_y = 0;
     int32_t eye_offset_z = 0;
 
     // Runtime entity flags — the GamePlayerEntity `Flags` at entity+36. Bit 1 is the

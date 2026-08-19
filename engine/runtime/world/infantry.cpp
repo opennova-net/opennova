@@ -55,6 +55,7 @@
 #include "world/collision.h"
 #include "world/dir_table.h"
 #include "world/infantry_ladder.h"
+#include "world/player_view.h" // player_view_floor_eye_to_terrain (the on-foot local eye leg)
 #include "world/vehicle_attach.h"
 #include "world/world.h" // registry.get for the local-player AiEntity->Entity mirror
 
@@ -1137,25 +1138,74 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
     }
     inf.last_events = have_clip ? frame.events : 0;
 
-    // 3'. The eye-offset restamp (entity+0x74 z; the +0x6C/+0x70 lateral lean
-    // shift is unmodeled): the anim capsule extent, floored/capped per body,
-    // tilted by the lean angle at the retail Q22 precision. The friendly-tag
-    // anchor reads the mirrored value. [orig: org1 delta = max(top - bottom,
-    // 0x9000), z = delta * cosQ22(lean) >> 22 @0x4bf078..0x4bf14c; org2
-    // delta = min(top - bottom, 0xD000), tilt, floor 0x2000 at the store
-    // @0x4b6984..0x4b68f5; the local head-bone exact leg @0x4b6908..0x4b696c
-    // is the tracked D-HUD-20 residue]
+    // 3'. The eye-offset restamp (the entity+0x6C/+0x70/+0x74 triple).
+    // Entity_UpdateInfantryPlayerBody restamps org2 bodies at two sites —
+    // on foot vs mounted (the entity+0x16C carrier discriminator @0x4b6386)
+    // — and each site splits local (exact posed head) vs non-local (capsule +
+    // lean tilt). The LOCAL player with a shell-fed skeleton sample takes the
+    // exact posed head minus Position, all three lanes; on foot the head z is
+    // first floored to the five-tap terrain column (indoors exempt), and
+    // NEITHER exact leg carries a 0x2000 floor — that floor belongs to the
+    // capsule legs [orig: on-foot local @0x4b6bb3..0x4b6cc8 (taps
+    // @0x4b6c1e..0x4b6c95, Flags & 0x800000 skip @0x4b6c08); mounted local
+    // @0x4b6908..0x4b696c stores raw]. Everyone else takes the anim capsule
+    // extent tilted by the lean angle at the retail Q22 precision: org1 NPCs
+    // add the witnessed lateral pair — lat = (delta * sinQ22(lean) * 3) >> 2,
+    // x = +lat*sin(yaw), y = -lat*cos(yaw) [orig: Entity_UpdateInfantryAI
+    // @0x4bf078..0x4bf14c, stores @0x4bf141/0x4bf149/0x4bf14c]; the
+    // sample-less player leg keeps z only (delta capped 0xD000 @0x4b698c,
+    // floor 0x2000 @0x4b6b98; the mounted twin @0x4b66d9../@0x4b68e7) — its
+    // full 3-angle lateral tilt (on-foot @0x4b69ab..0x4b6b7c, mounted
+    // @0x4b66fc..0x4b68e5) is the tracked D-HUD-20 residue. The friendly-tag
+    // anchor reads the mirrored z.
     if (have_clip) {
-        const int32_t extent = frame.capsule_top - frame.capsule_bottom;
-        const int32_t delta = inf.is_local_player ? std::min(extent, 0xD000)
-                                                  : std::max(extent, 0x9000);
-        const double lean_rad = static_cast<double>(inf.lean_angle) *
-                                (3.14159265358979323846 / 2147483648.0);
-        const int32_t lean_cos = static_cast<int32_t>(std::cos(lean_rad) * 4194304.0);
-        int32_t eye_z =
-            static_cast<int32_t>((static_cast<int64_t>(delta) * lean_cos) >> 22);
-        if (inf.is_local_player && eye_z < 0x2000) eye_z = 0x2000;
-        inf.eye_offset_z = eye_z;
+        if (inf.is_local_player && world.cached.local_head_valid) {
+            float head[3] = {world.cached.local_head.x,
+                             world.cached.local_head.y,
+                             world.cached.local_head.z};
+            const Entity *reg = world.registry.get(world.cached.local_player);
+            player_view_floor_eye_to_terrain(
+                terrain,
+                reg != nullptr && (reg->flags & kEntityFlagIndoors) != 0, head);
+            inf.eye_offset_x = to_fixed(head[0]) - e.pos[0];
+            inf.eye_offset_y = to_fixed(head[1]) - e.pos[1];
+            inf.eye_offset_z = to_fixed(head[2]) - e.pos[2];
+        } else {
+            const int32_t extent = frame.capsule_top - frame.capsule_bottom;
+            const int32_t delta = inf.is_local_player ? std::min(extent, 0xD000)
+                                                      : std::max(extent, 0x9000);
+            const double lean_rad = static_cast<double>(inf.lean_angle) *
+                                    (3.14159265358979323846 / 2147483648.0);
+            const int32_t lean_cos =
+                static_cast<int32_t>(std::cos(lean_rad) * 4194304.0);
+            int32_t eye_z =
+                static_cast<int32_t>((static_cast<int64_t>(delta) * lean_cos) >> 22);
+            if (inf.is_local_player && eye_z < 0x2000) eye_z = 0x2000;
+            inf.eye_offset_z = eye_z;
+            if (inf.is_local_player) {
+                // A lost sample must not leave a stale head-frame lateral pair
+                // behind: the capsule fallback carries no lateral model (the
+                // 3-angle tilt is the tracked residue), so the lanes reset.
+                inf.eye_offset_x = 0;
+                inf.eye_offset_y = 0;
+            } else {
+                const int32_t lean_sin =
+                    static_cast<int32_t>(std::sin(lean_rad) * 4194304.0);
+                const int32_t lat_raw = static_cast<int32_t>(
+                    (static_cast<int64_t>(delta) * lean_sin) >> 22);
+                const int32_t lat = (lat_raw * 3) >> 2;
+                const double yaw_rad = static_cast<double>(e.heading) *
+                                       (3.14159265358979323846 / 2147483648.0);
+                const int32_t yaw_sin =
+                    static_cast<int32_t>(std::sin(yaw_rad) * 4194304.0);
+                const int32_t yaw_cos =
+                    static_cast<int32_t>(std::cos(yaw_rad) * 4194304.0);
+                inf.eye_offset_x = static_cast<int32_t>(
+                    (static_cast<int64_t>(lat) * yaw_sin) >> 22);
+                inf.eye_offset_y = -static_cast<int32_t>(
+                    (static_cast<int64_t>(lat) * yaw_cos) >> 22);
+            }
+        }
     }
 
     // 3a. The anim-event consumers, in the witnessed order: the sound block
@@ -2220,9 +2270,13 @@ void AiSystem::mirror_wire_anim(AiEntity &e, World &world) {
     const InfantryState &inf = e.inf;
     ent->net_anim_state = static_cast<uint8_t>(inf.anim_state);
     ent->net_anim_pending = static_cast<uint8_t>(inf.anim_pending);
-    // The eye-offset mirror (entity+0x74): the body tick's restamp reaches the
-    // registry entity the friendly-tag gather walks [orig: the same entity field
-    // both writers and HUD_DrawEntityLabel @0x5a3a84 share].
+    // The eye-offset mirror (entity+0x6C/+0x70/+0x74): the body tick's restamp
+    // reaches the registry entity the friendly-tag gather (z) and the retail
+    // camera consumer (full triple) walk [orig: the same entity fields the
+    // writers, HUD_DrawEntityLabel @0x5a3a84, and Camera_ComputeThirdPersonView
+    // @0x437fa5 share].
+    ent->eye_offset_x = inf.eye_offset_x;
+    ent->eye_offset_y = inf.eye_offset_y;
     ent->eye_offset_z = inf.eye_offset_z;
     ent->net_anim_phase =
         static_cast<uint8_t>(inf.clip_phase < 0 ? 0 : (inf.clip_phase > 255 ? 255 : inf.clip_phase));

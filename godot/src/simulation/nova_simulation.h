@@ -461,6 +461,11 @@ private:
 	// re-emit).
 	std::unordered_map<uint32_t, int64_t> occl_apply_building_last_;
 	std::vector<int32_t> occl_apply_culled_last_;
+	// Per-entity sun-visibility quality (bms_id -> 1..4) last emitted to the
+	// shell, plus the local player's current quality for the presenter seam.
+	// Unlisted entities are quality 4 (factor 1.0), the node default.
+	std::unordered_map<int32_t, uint8_t> sun_quality_last_;
+	uint8_t local_sun_quality_ = 4;
 	std::unique_ptr<opennova::mission::BmsEventSystem> bms_;
 	std::unique_ptr<opennova::wac::WacSystem> wac_;
 	// The installed script program. Held as a Ref so it survives reset_world();
@@ -841,6 +846,12 @@ private:
 	// The sim OWNS the engaged bit [orig: g_scopeEngaged @ 0x82CE94]: the host requests
 	// toggles and reads the state; the FSM's unscope/rescope events flip it here.
 	opennova::world::PlayerViewState player_view_{};
+	// The FP viewmodel motion-lead tracker (per render frame) and the local
+	// entity's per-62.5Hz-tick movement delta it samples.
+	opennova::world::PlayerViewMotionLead fp_motion_lead_{};
+	float local_tick_delta_[3] = {0.0f, 0.0f, 0.0f};
+	float local_tick_prev_pos_[3] = {0.0f, 0.0f, 0.0f};
+	bool local_tick_prev_valid_ = false;
 	// The binocular toggle seeds one fixed-radius random aim displacement. It
 	// survives movement/death/third-person suppression until the raw toggle drops.
 	float binocular_yaw_offset_deg_ = 0.0f;
@@ -1714,11 +1725,14 @@ public:
 
 	// The eased FP viewmodel view-offset in VIEW-FRAME world units (X=fwd,
 	// Y=left, Z=up) from raw weapon.def pos/tpos units — the /256 blend +
-	// NoCardSwitch suppression run in world/player_view (S8); the rig maps
+	// NoCardSwitch suppression run in world/player_view (S8), then the
+	// per-frame motion lead (the damped movement-delta tracker) and, when the
+	// rig reports a 4:3-or-narrower viewport, the 0x500 z drop. The rig maps
 	// view axes onto its camera frame. [orig: Player_UpdateFirstPersonCamera
-	// @ 0x4dd380]
+	// @ 0x4dd380 — lead @ 0x4dd4f2..0x4dd56c, narrow-aspect drop @ 0x4dd571]
 	Vector3 local_player_viewmodel_bias_view_units(
-			const Vector3 &p_pos_raw_units, const Vector3 &p_tpos_raw_units);
+			const Vector3 &p_pos_raw_units, const Vector3 &p_tpos_raw_units,
+			bool p_narrow_aspect);
 
 	// The sound-profile chain [orig: SoundProfile_LoadAll @ 0x527490 /
 	// Entity_GetProfileSlotSound @ 0x528300]: feed SndProf.def text (VFS
@@ -2057,6 +2071,15 @@ public:
 	// Delta form of get_render_culled_bms_ids():
 	// [n_added, ids..., n_removed, ids...] since the last call.
 	PackedInt32Array get_render_culled_changes();
+	// Per-entity sun-visibility factor feed (D-RLIT-3): pairs
+	// [bms_id, quality 1..4] whose quality changed since the last call. The
+	// shell maps quality through sun_visibility_factor into
+	// ObjectModel.set_entity_lighting_context. The local player's quality is
+	// computed but never emitted here — the presenter reads it via
+	// get_local_player_sun_quality() so the FP parts can keep their witnessed
+	// exemption while the third-person body dims.
+	PackedInt64Array get_entity_sun_visibility_changes(const Vector3 &p_light_dir);
+	int get_local_player_sun_quality() const { return local_sun_quality_; }
 	// The present pass's visibility intent for one placed entity — the
 	// occlusion release edge lands a node on the sim's CURRENT visibility so a
 	// hidden entity never flashes for a frame.

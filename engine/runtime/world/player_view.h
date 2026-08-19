@@ -78,6 +78,39 @@ constexpr float kTpMarchGate = 8.0f;
 // 16.16 view position — the net world offset is file_value / 256].
 constexpr float kWeaponDefPosScale = 256.0f;
 
+// The FP viewmodel motion lead: a per-render-frame damped tracker of the
+// tracked entity's per-tick movement delta (<<8), whose output >> 7 — clamped
+// ±1024 on x/y and ±4096 on z (16.16) — is added component-wise onto the
+// view-LOCAL camera offset BEFORE the view rotation (the witnessed
+// pre-rotation add takes the world-delta components raw; no frame
+// conversion). Steady velocity decays the lead toward zero — it responds to
+// speed changes, not speed. [orig: the tracker
+// vel += (prev_sample - new_sample - vel + 16) >> 5 @ 0x437bac..0x437c0e in
+// ThirdPersonCamera_Update; the >> 7 + clamps @ 0x4dd4f2..0x4dd54f in
+// Player_UpdateFirstPersonCamera]
+struct PlayerViewMotionLead {
+    int32_t vel[3] = {0, 0, 0};
+    int32_t prev_sample[3] = {0, 0, 0};
+};
+constexpr int32_t kFpLeadClampXy = 1024;
+constexpr int32_t kFpLeadClampZ = 4096;
+// Advances the tracker one render frame from the entity's current per-tick
+// movement delta (world units) and returns the clamped lead (16.16, the same
+// value order the retail camera adds).
+void player_view_motion_lead_update(PlayerViewMotionLead &lead,
+                                    const float tick_delta_units[3],
+                                    int32_t out_lead_q16[3]);
+
+// The 4:3 framing compensation: with the viewport aspect at 4:3 or narrower
+// (3*width <= 4*height), the FP camera offset drops 0x500 (0.0195 u) on the
+// view-local z. Widescreen never takes it. [orig: the 3*dword_A78394 <=
+// 4*dword_A78398 gate @ 0x4dd571 -> cam_offset_z -= 0x500 @ 0x4dd578; the
+// same viewport block HUD_DrawEntityLabel projects with @ 0x5a3b6a]
+constexpr int32_t kFpNarrowAspectDropQ16 = 0x500;
+inline bool player_view_narrow_aspect(int viewport_w, int viewport_h) {
+    return 3 * viewport_w <= 4 * viewport_h;
+}
+
 struct PlayerViewState {
     bool scope_engaged = false;   // [orig: g_scopeEngaged @ 0x82CE94]
     int32_t scope_step = 0;       // 0 (hip) .. ease_steps (sighted), of the CURRENT ease
