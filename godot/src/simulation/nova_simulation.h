@@ -2115,6 +2115,13 @@ public:
 	// exemption while the third-person body dims.
 	PackedInt64Array get_entity_sun_visibility_changes(const Vector3 &p_light_dir);
 	int get_local_player_sun_quality() const { return local_sun_quality_; }
+	// Quality (1..4) -> the effectScale the render-state stack multiplies —
+	// engine-owned so the mapping has ONE writer (renderer::
+	// sun_visibility_factor; retail: Entity_ComputeSunVisibility @0x5c6800,
+	// stack write @0x5c7fa5, see docs/render/render-lighting-re.md). Both
+	// presentation consumers (the occlusion sun feed and the local-player
+	// body) call this instead of re-deriving the 0.25 step.
+	float sun_quality_factor(int p_quality) const;
 	// The present pass's visibility intent for one placed entity — the
 	// occlusion release edge lands a node on the sim's CURRENT visibility so a
 	// hidden entity never flashes for a frame.

@@ -160,6 +160,29 @@ constexpr const char *host_abbreviation_key(uint32_t g) {
 	}
 }
 
+// The Tab board header's game-type rung — the Overlays-section gametext key
+// [orig: HUD_GetGameTypeOverlayLabel @ 0x5b8680; the Co-op family first — the
+// mask arm @ 0x5b8692 forgives the objective bit, so stock and objective
+// Co-op share the rung]. The unnamed type-8 non-team mode shares DM's rung.
+// An unlisted type returns "" and the rung stays blank.
+constexpr const char *overlay_label_key(uint32_t g) {
+	if (is_waypoint_family(g)) return "STROVER28";
+	if (g == 0) return "STROVER29";
+	switch (g) {
+	case kTeamDeathmatch: return "STROVER64";
+	case kKingOfTheHill: return "STROVER30";
+	case kTeamKingOfTheHill: return "STROVER48";
+	case kCaptureTheFlag: return "STROVER31";
+	case kSearchAndDestroy: return "STROVER56";
+	case kAttackDefend: return "STROVER57";
+	case kFlagBall: return "STROVER58";
+	case 8: return "STROVER29";
+	case kAdvanceAndSecure: return "STROVER92";
+	case kConquerAndControl: return "STROVER93";
+	default: return "";
+	}
+}
+
 // A freshly added mission's rotation ("Switch") default: on for team games
 // without the objective bit [orig: the add branch @ 0x557e79..0x557e9f —
 // entry+4416 = (code & 0x10000) && !(code & 0x20000)].

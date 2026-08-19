@@ -4,6 +4,7 @@
 #include "simulation/nova_simulation_internal.h"
 
 #include <netsim/connection_fan.h>
+#include <renderer/light_runtime.h> // sun_visibility_factor — the quality->scale owner
 #include <world/vehicle_motor.h> // carrier_pose_fixed + VehicleTraits probe boxes
 
 #include <unordered_set>
@@ -199,6 +200,11 @@ PackedInt32Array Simulation::get_render_culled_changes() {
 	out.push_back(static_cast<int32_t>(removed.size()));
 	for (const int32_t id : removed) out.push_back(id);
 	return out;
+}
+
+float Simulation::sun_quality_factor(int p_quality) const {
+	// quality = 4 - blocked, so the owner's factor(blocked) inverts cleanly.
+	return ::renderer::sun_visibility_factor(4 - p_quality);
 }
 
 // The per-drawn-entity sun-visibility factor feed (D-RLIT-3). Retail computes
