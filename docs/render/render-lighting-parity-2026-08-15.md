@@ -286,7 +286,7 @@ It replaces the lower-quality material that formerly occupied that path and
 contains all 15 registered pairs, 15 overlays, 15 absolute-difference images,
 15 normalized OpenNova images, and 75 raw OpenNova diagnostic images with
 portable evidence records. All rows bind frozen source
-`c06778f55d7ef660d49f2d2678e9ab9ae05aa607`, fixture catalog v2 at SHA-256
+`2cde75ad029be14d1c6e0dd8b034efc5fef017b5`, fixture catalog v2 at SHA-256
 `607c7d66d7ce35ac915264fd462565fc262683aed34e4585a48d9093ce1a36d8`,
 stage/restore v3 (tool 3.0.0), raw capture bundle v4 from bridge 1.4/onHook 0.5.0,
 registered capture v5 (tool 4.0.0), and comparison v6 (tool 4.0.0).
@@ -295,9 +295,9 @@ Retail frames are copied at the certified pre-HUD backbuffer boundary. The
 capture transaction restores the D3D scene before retail's unmodified UI call,
 so ordinary HUD/FPS remain visible during play while the registered screenshot
 contains the matched HUD-hidden game composite. Across its 15 comparison-v6
-manifests, full-frame MAE spans `6.020889`–`21.961355`, `world_center` MAE spans
-`3.870290`–`32.547584`, and `viewmodel_arms` MAE spans
-`4.133595`–`26.845487`. These are descriptive deltas rather than parity
+manifests, full-frame MAE spans `6.089059`–`21.948388`, `world_center` MAE spans
+`3.870290`–`32.554461`, and `viewmodel_arms` MAE spans
+`4.142536`–`26.971500`. These are descriptive deltas rather than parity
 thresholds; no metric from the superseded set is carried forward as if it
 described these images.
 
