@@ -69,6 +69,12 @@ int health_color_band_fp16(int32_t ratio_fp16);
 
 inline constexpr int kMessageLifeTicks = 930;
 inline constexpr int kMessageExpiryStagger = 186;
+// The SYSTEM feed's witnessed geometry [orig: HUD_DrawConsoleMessages
+// @0x59ad30]: only three ring rows are walked per channel (the system walk
+// @0x59ae5e..0x59aebf) and consecutive lines step 18 DESIGN px (the 0x12
+// store @0x59ad97, scaled through Viewport_ScaleToVirtualCoords @0x5d2b20).
+inline constexpr int kFeedVisibleRows = 3;
+inline constexpr int kFeedLineStepDesign = 18;
 inline constexpr int kMessageTextMax = 119;    // [orig: @0x49884e 120-byte slots]
 inline constexpr int kMessageSlotCount = 40;   // [orig: Chat_RebuildDisplayBuffers @0x498bd0]
 

@@ -78,6 +78,7 @@ public:
 	// A mission triggered-text line for the message feed, stamped at the last
 	// set ticks (the engine ring owns life/stagger policy).
 	void push_message(const String &p_text);
+	void push_feed_line(const String &p_text, int64_t p_argb);
 
 	// Typed per-frame state (the presenter rebuilds these each tick; the
 	// compiler reads them at the next draw).

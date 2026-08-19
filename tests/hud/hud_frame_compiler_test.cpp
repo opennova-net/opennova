@@ -199,7 +199,8 @@ void test_declutter_rebuild_and_cycle() {
 // [orig: the slot cmps @ 0x5A7C99 (DMGBAR) / @ 0x5A7CC8..0x5A7D42 (WPNGRP) /
 //  @ 0x592757 (XHAIRS) / @ 0x5A7DB8 (WAYPOINT) / @ 0x5A7DD2 (PWRBAR) /
 //  @ 0x5A86E8 (SPINMAP, inside the showhud bit-1 test @ 0x5A8635) /
-//  @ 0x59AD66 (CHAT + the hard level >= 2 cull); the early-out @ 0x5A80C4]
+//  @ 0x59AD33 (CHAT) + the hard level >= 2 cull @ 0x59AD43; the early-out
+//  @ 0x5A80C4]
 void test_declutter_element_gates(const fnt_font_t *font) {
 	using namespace opennova::hud;
 	HudFrameCompiler compiler;

@@ -29,6 +29,23 @@ struct ClientRoundEvent {
 	int32_t dir_pitch_bam = 0;
 };
 
+// One folded S2C 0x1E game event — the kill-feed lane. The wire record is
+// carried through verbatim plus the classification the feed needs; string
+// resolution ($A/$B against the roster, the STRCND lookup) happens where the
+// name table lives [orig: NetPacket_HandleGameEvent @0x426270 ->
+// HUD_FormatKillEventMessage @0x422DA0 -> Chat_FormatMessage @0x422C60].
+// `kind` is npwire's GameEventKind carried as its underlying byte so this
+// header stays free of the decoder include.
+struct ClientGameEvent {
+	uint8_t event_type = 0;
+	uint8_t attacker_index = 0xFF;
+	uint8_t victim_index = 0xFF;
+	uint8_t aux_index = 0xFF;
+	int16_t pos_x = 0;
+	int16_t pos_y = 0;
+	uint8_t kind = 0;
+};
+
 // One entity as the local client has DECODED it off the wire. Per ADR 0011 the
 // present pass reads THIS, not the authoritative sim directly — so single-player
 // Vehicle compact flags_byte dead-pose/wreck bit — the vehicle-class analog of

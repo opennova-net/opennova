@@ -132,6 +132,8 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::set_weapon);
 	ClassDB::bind_method(D_METHOD("clear_weapon"), &HudOverlay::clear_weapon);
 	ClassDB::bind_method(D_METHOD("push_message", "text"), &HudOverlay::push_message);
+	ClassDB::bind_method(D_METHOD("push_feed_line", "text", "argb"),
+			&HudOverlay::push_feed_line);
 	ClassDB::bind_method(D_METHOD("set_player_state", "ticks", "health_fraction", "stance", "fov_deg"),
 			&HudOverlay::set_player_state);
 	ClassDB::bind_method(D_METHOD("set_weapon_state", "active", "clip", "reserve", "heat",
@@ -402,6 +404,7 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	layout_.game_info = pos_record4(p_hudpos->get_game_info_pos());
 	layout_.wpd_info = pos_record4(p_hudpos->get_wpd_info_pos());
 	layout_.chat_text = pos_record2(p_hudpos->get_chat_text_pos());
+	layout_.sys_text = pos_record2(p_hudpos->get_sys_text_pos());
 	layout_.clip_pos = pos_record2(p_hudpos->get_clip_pos());
 	layout_.stance_pos = pos_record2(p_hudpos->get_stance_pos());
 	layout_.health_rect = rect_record(p_hudpos->get_health_rect());
@@ -620,6 +623,14 @@ void HudOverlay::clear_weapon() {
 
 void HudOverlay::push_message(const String &p_text) {
 	compiler_.push_message(p_text.utf8().get_data(), state_.ticks);
+	queue_redraw();
+}
+
+void HudOverlay::push_feed_line(const String &p_text, int64_t p_argb) {
+	// The SYSTEM feed sink (kills, joins, system lines) — the packed ARGB is
+	// stored raw and drawn as stored (retail: the stored-color read @0x59ae97).
+	compiler_.push_feed_line(p_text.utf8().get_data(),
+			static_cast<uint32_t>(p_argb), state_.ticks);
 	queue_redraw();
 }
 

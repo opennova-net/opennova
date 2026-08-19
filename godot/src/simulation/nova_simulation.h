@@ -1489,6 +1489,26 @@ public:
 	// mapped through the ammo effects_table to {position, direction, effect, sound}
 	// [orig: Projectile_SpawnImpactEffect @ 0x4e9b80; world/round_sim.h RoundImpact].
 	Array drain_round_impacts();
+	// Drain this frame's folded S2C 0x1E game events as feed rows — one per
+	// line the original would post to its message feed (retail: the 0x426270
+	// handler). Each row carries the actor NAMES (resolved here, where the
+	// decoded roster lives), the canned-message key (plus the camp rows'
+	// WPNames level key), and the witnessed line color; the embedder resolves
+	// the keys against gametext and calls the format helpers below.
+	// Suppressed types (the LFP result set + the tip-only 58) never appear.
+	Array drain_feed_events();
+	// Substitute actor names into a canned template (retail: Chat_FormatMessage
+	// @0x422C60): the STRCND48 bonus re-compose when `extra` names the local
+	// player, then $A/$B sequential case-insensitive replace-all. Exposed so
+	// the string lookup can live with the string table while the substitution
+	// rule stays in engine C++.
+	String format_feed_line(const String &p_template, const String &p_attacker,
+			const String &p_victim, const String &p_extra,
+			const String &p_bonus_template) const;
+	// Compose a camp line — the template's %s takes the level's WPNames string
+	// (retail: the case-59/60 sprintf @0x427327/@0x42736B).
+	String format_feed_camp_line(const String &p_template,
+			const String &p_wpname) const;
 
 	// --- the local player's loadout: slot pool, spawn kit, map rules -------------------
 	// (the 2026-07-18 loadout grill; witness map in docs/net/novaworld-net-re.md §5.57)
