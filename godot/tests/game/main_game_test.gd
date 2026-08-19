@@ -152,8 +152,8 @@ func test_world_only_capture_hides_layers_without_overwriting_descendant_state()
 	# args needs no reach into MainGame's private fields. The MainGame
 	# delegate is covered by the busy/unconfigured tests below.
 	var session := ShellPresentationSessionScript.new()
-	var host := Node.new()
-	add_child_autofree(host)
+	var mount := Node.new()
+	add_child_autofree(mount)
 	var hud := CanvasLayer.new()
 	var menu_layer := CanvasLayer.new()
 	var viewmodel_layer := CanvasLayer.new()
@@ -161,13 +161,13 @@ func test_world_only_capture_hides_layers_without_overwriting_descendant_state()
 	var nested_overlay := CanvasLayer.new()
 	viewmodel_layer.name = "ViewmodelPass"
 	nested_overlay.name = "DebugOverlay"
-	host.add_child(hud)
-	host.add_child(menu_layer)
+	mount.add_child(hud)
+	mount.add_child(menu_layer)
 	# The production shape: the rig parents ViewmodelPass to the CAMERA's
 	# viewport (the build step in player_viewmodel_rig.gd), and the session's
 	# lookup is that viewport — there is no name-search fallback.
 	var camera := Camera3D.new()
-	host.add_child(camera)
+	mount.add_child(camera)
 	camera.get_viewport().add_child(viewmodel_layer)
 	autofree(viewmodel_layer)
 
