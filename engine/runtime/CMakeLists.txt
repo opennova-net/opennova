@@ -55,6 +55,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_declutter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/feed_format.cpp   # the 0x1E feed line/color policy
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_scoreboard.cpp   # the Tab player list's row policy
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_minimap.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_runtime.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_scene.cpp

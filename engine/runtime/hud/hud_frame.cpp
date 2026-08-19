@@ -216,6 +216,7 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	// @ 0x5a87cc, then HUD_DrawConsoleMessages @ 0x5a87d1].
 	element_friendly_tags(state, surface_w, surface_h);
 	element_feed(state, surface_w, surface_h);
+	element_scoreboard(state, surface_w, surface_h);
 	return draw_list_;
 }
 
@@ -1148,6 +1149,109 @@ void HudFrameCompiler::element_feed(const HudFrameState &state, float w,
 		emit_text(line->text.c_str(), ax, row_y, w, h, line->color, 0u);
 		row_y += row_h;
 	}
+	++draw_list_.elements_drawn;
+}
+
+
+void HudFrameCompiler::element_scoreboard(const HudFrameState &state, float w,
+		float h) {
+	// THE TAB PLAYER LIST [orig: rows HUD_DrawKillList @0x423A30; the centred
+	// header block @0x423060]. Held open by the player, so it is drawn last —
+	// above every other overlay.
+	//
+	// NOT DRAWN HERE (recorded residuals, both texture-dependent): the stdbox
+	// panel frame [orig: the call @0x423a72 -> FUN_0051efd0], which needs the
+	// border/boxtile atlas slots, and the 16x16 connection icon [orig:
+	// @0x4241fb + FUN_004c2ee0], which needs the neticon2 atlas. The text
+	// layout below is the witnessed one and lands where retail puts it.
+	if (!state.scoreboard.shown) return;
+	if (font_.font() == nullptr) return;
+
+	const uint32_t hud = active_color(state);
+	// The title rides just inside the panel's top-left corner.
+	if (!state.scoreboard.title.empty())
+		emit_text(state.scoreboard.title.c_str(),
+				static_cast<float>(kBoardX1 + kTitleDx),
+				static_cast<float>(kBoardY1 + kTitleDy), w, h, 0xFFFFFFFFu, 0u);
+
+	// The centred header ladder. Retail draws the server name and mission
+	// title WHITE over the HUD color by prefixing an explicit color run
+	// [orig: the "<cFFFFFF>" prefix @0x51f300]; the rest take the HUD color.
+	float hy = static_cast<float>(kHeaderY);
+	const float hx = static_cast<float>(kHeaderX);
+	if (!state.scoreboard.server_name.empty()) {
+		emit_text(state.scoreboard.server_name.c_str(), hx, hy, w, h,
+				0xFFFFFFFFu, kFontAlignCenter);
+		hy += static_cast<float>(kHeaderStep);
+	}
+	if (!state.scoreboard.mission_title.empty()) {
+		emit_text(state.scoreboard.mission_title.c_str(), hx, hy, w, h,
+				0xFFFFFFFFu, kFontAlignCenter);
+		hy += static_cast<float>(kHeaderStep);
+	}
+	if (!state.scoreboard.game_type_label.empty()) {
+		emit_text(state.scoreboard.game_type_label.c_str(), hx, hy, w, h, hud,
+				kFontAlignCenter);
+		hy += static_cast<float>(kHeaderStep);
+	}
+	if (!state.scoreboard.players_line.empty()) {
+		emit_text(state.scoreboard.players_line.c_str(), hx, hy, w, h, hud,
+				kFontAlignCenter);
+		hy += static_cast<float>(kHeaderStep);
+	}
+	// The spectator line exists only when there ARE spectators [orig: the
+	// nonzero gate in the header block @0x423060].
+	if (!state.scoreboard.spectators_line.empty()) {
+		emit_text(state.scoreboard.spectators_line.c_str(), hx, hy, w, h, hud,
+				kFontAlignCenter);
+		hy += static_cast<float>(kHeaderStep);
+	}
+
+	// The list starts one step below the header's LAST line [orig: the header
+	// block's return value + 0x14 @0x423aad].
+	const float list_top = hy - static_cast<float>(kHeaderStep) +
+			static_cast<float>(kListGap);
+	const bool non_team = scoreboard_is_non_team(state.scoreboard.game_type);
+
+	// Each bucket walks its own column with its own row cursor: the two player
+	// columns and the spectator column advance independently.
+	float y_a = list_top;
+	float y_b = list_top;
+	float y_spec = list_top;
+	int ordinal = 0;
+	int rank_a = 1;
+	int rank_b = 1;
+	for (const ScoreboardEntry &e : state.scoreboard.rows) {
+		const int col = scoreboard_column_x(e, non_team, ordinal);
+		float *cursor = &y_a;
+		if (e.spectator) cursor = &y_spec;
+		else if (col == kColumnBX) cursor = &y_b;
+		// Rows draw only while the cursor stays inside the panel [orig: the
+		// 0x1ea bound @0x423bba].
+		if (*cursor >= static_cast<float>(kListBottom)) {
+			if (!e.spectator) ++ordinal;
+			continue;
+		}
+		const uint32_t color = scoreboard_row_color(e, non_team, hud);
+		// Spectators carry no rank [orig: the rank draw is inside the
+		// non-spectator arm @0x424174].
+		if (!e.spectator) {
+			int &rank = (cursor == &y_b) ? rank_b : rank_a;
+			char rankbuf[16];
+			std::snprintf(rankbuf, sizeof(rankbuf), "%2d.", rank++);
+			emit_text(rankbuf, static_cast<float>(col + kRankDx), *cursor, w, h,
+					kRankColor, 0u);
+		}
+		const std::string text = scoreboard_row_text(e, non_team);
+		emit_text(text.c_str(), static_cast<float>(col), *cursor, w, h, color, 0u);
+		*cursor += static_cast<float>(kRowPitch);
+		if (!e.spectator) ++ordinal;
+	}
+
+	if (!state.scoreboard.footer.empty())
+		emit_text(state.scoreboard.footer.c_str(),
+				static_cast<float>(kFooterX), static_cast<float>(kFooterY), w, h,
+				kRankColor, kFontAlignCenter);
 	++draw_list_.elements_drawn;
 }
 

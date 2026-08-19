@@ -1164,6 +1164,14 @@ target_include_directories(feed_format_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(feed_format_test PRIVATE cxx_std_17)
 add_test(NAME feed_format COMMAND feed_format_test)
 
+# The Tab player list's row policy: the witnessed glyph append order, the
+# team/non-team format + column + color split, and the layout constants.
+add_executable(scoreboard_format_test hud/scoreboard_format_test.cpp)
+target_link_libraries(scoreboard_format_test PRIVATE opennova_runtime)
+target_include_directories(scoreboard_format_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(scoreboard_format_test PRIVATE cxx_std_17)
+add_test(NAME scoreboard_format COMMAND scoreboard_format_test)
+
 # AI subsystem (byte-exact foundation): state enum + struct layout, AIEvent ring,
 # budget gate (AI_BeginUpdate), the infantry state-machine dispatcher + transitions,
 # and the trivial enter/exit/event handler ports.

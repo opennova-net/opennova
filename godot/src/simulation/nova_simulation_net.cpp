@@ -1532,3 +1532,39 @@ void Simulation::present_wire_body_sounds(int p_type_id, int p_character_id,
 			p_type_id, static_cast<uint16_t>(p_character_id),
 			static_cast<uint16_t>(p_wire_handle), p_carrier_handle >= 0, body);
 }
+
+// The Tab board as the shell needs it. The row already carries its roster-
+// joined name and clan (the fold does that at apply time), so this only pairs
+// each row with its connection slot for the icon band.
+Dictionary Simulation::get_scoreboard() const {
+	Dictionary out;
+	if (!runtime_) return out;
+	const opennova::netsim::ClientState &cs = runtime_->state();
+	const opennova::netsim::ClientScoreboard &sb = cs.scoreboard;
+	out["known"] = sb.known;
+	out["team_mode"] = sb.team_mode;
+	out["timed"] = sb.timed;
+	out["in_game"] = sb.in_game_count;
+	out["spectators"] = sb.spectator_count;
+	Array rows;
+	for (const opennova::netsim::ClientScoreboardRow &r : sb.rows) {
+		Dictionary d;
+		d["slot"] = r.slot_id;
+		d["status_flags"] = r.status_flags;
+		d["score"] = r.score1;
+		d["points"] = r.score2;
+		d["team"] = r.team;
+		d["spectator"] = r.spectator;
+		// "<clan> <name>" when the row carries a clan (retail: the sprintf
+		// @0x42fd46).
+		String name = String::utf8(r.name.c_str());
+		if (!r.clan.empty())
+			name = String::utf8(r.clan.c_str()) + " " + name;
+		d["name"] = name;
+		// The connection-icon band still comes off the roster slot.
+		d["quality"] = cs.roster[r.slot_id].quality;
+		rows.push_back(d);
+	}
+	out["rows"] = rows;
+	return out;
+}

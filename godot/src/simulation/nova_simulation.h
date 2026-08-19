@@ -1509,6 +1509,11 @@ public:
 	// the keys against gametext and calls the format helpers below.
 	// Suppressed types (the LFP result set + the tip-only 58) never appear.
 	Array drain_feed_events();
+	// The folded Tab board (netsim ClientScoreboard + the 0x46 roster join):
+	// flags, counts, and one dictionary per row with its name resolved from the
+	// connection-slot roster. Rows stay in WIRE ORDER — the server sorts them
+	// (retail: Player_ComputeScore @0x500A80) and the client never re-sorts.
+	Dictionary get_scoreboard() const;
 	// Substitute actor names into a canned template (retail: Chat_FormatMessage
 	// @0x422C60): the STRCND48 bonus re-compose when `extra` names the local
 	// player, then $A/$B sequential case-insensitive replace-all. Exposed so

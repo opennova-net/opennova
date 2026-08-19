@@ -12,6 +12,7 @@
 #include "hud/game_font.h"
 #include "hud/hud_declutter.h"
 #include "hud/hud_math.h"
+#include "hud/hud_scoreboard.h"
 #include "hud/hud_minimap.h"
 
 #include <array>
@@ -257,6 +258,24 @@ struct HudMessageLine {
 	uint32_t color = 0xFFFFFFFFu;
 };
 
+// The Tab player list's per-frame state. The embedder resolves the header
+// strings (server name, mission title, game-type label) and joins each row's
+// name from the roster, exactly as it already does for the objectives header;
+// the compiler owns the witnessed layout, ordering and colors.
+struct HudScoreboardState {
+	bool shown = false;
+	uint32_t game_type = 0;
+	int page = 0;
+	std::string title;         // Overlays/STROVER_KILLLIST ("Player List")
+	std::string server_name;
+	std::string mission_title;
+	std::string game_type_label;
+	std::string players_line;  // "<Client/STRCLI04> <count>"
+	std::string spectators_line; // "<Client/STRCLI23> <count>", empty when none
+	std::string footer;        // Text/CHANGE_SCREEN paging hint
+	std::vector<ScoreboardEntry> rows;   // wire order; the server sorts
+};
+
 struct HudFrameState {
 	int ticks = 0;
 	float health_fraction = 1.0f;
@@ -286,6 +305,8 @@ struct HudFrameState {
 	HudWeaponState weapon;
 	HudWaypointState waypoint;
 	std::vector<HudObjectiveRow> objectives;
+	// The Tab board (hud/hud_scoreboard.h owns its policy).
+	HudScoreboardState scoreboard;
 	std::vector<HudAttachLabel> attach_labels;
 	// Friendly tags (D-HUD-20). Mode default 2 = FULL [orig: Game_Run
 	// @ 0x4a7fed]; fog cull against the environment's current fog distance
@@ -438,6 +459,7 @@ private:
 	void element_friendly_tags(const HudFrameState &state, float w, float h);
 	void element_objective_line(const HudFrameState &state, float w, float h);
 	void element_feed(const HudFrameState &state, float w, float h);
+	void element_scoreboard(const HudFrameState &state, float w, float h);
 	void element_sights_card(const HudFrameState &state, float w, float h);
 	void element_crosshair(const HudFrameState &state, float w, float h);
 	void element_clip_indicator(const HudFrameState &state, float w, float h);

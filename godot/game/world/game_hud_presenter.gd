@@ -26,6 +26,8 @@ var _ui_parent: Node = null
 const MAX_PENDING_HUD_MESSAGES := 40
 
 var _game_hud = null        # HudOverlay, built on the first frame a mission has a local player
+var _scoreboard_was_shown := false   # so the board clears exactly once on release
+var _scoreboard_game_type := 0       # session gametype; selects the team/non-team row layout
 var _sights_card = null     # HudSightsCard child of the overlay (per-row blend controls)
 var _view_effects = null    # PlayerViewEffects child of the overlay (binocular/NVG stack)
 var _warned_no_player := false
@@ -509,6 +511,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# Flush afterward so GameHud.push_message stamps the current 62 Hz tick.
 	_flush_pending_hud_messages()
 	_flush_feed_events()
+	_update_scoreboard(hud_keys_chorded)
 	if timing:
 		var probe_t5 := Time.get_ticks_usec()
 		if probe_enabled:
@@ -1034,6 +1037,53 @@ func _queue_hud_message(text: String, text_id: int) -> void:
 ## game's own text and never one we compose.
 ## [orig: NetPacket_HandleGameEvent @0x426270 -> HUD_FormatKillEventMessage
 ##  @0x422DA0 -> Chat_FormatMessage @0x422C60 -> Chat_AddDebugMessage @0x4987F0]
+## The Tab player list. Unlike the declutter/color keys this is a LEVEL, not an
+## edge: retail shows the board while the key is HELD [orig: rows
+## HUD_DrawKillList @0x423A30]. The binding already ships in the controls
+## catalog as "playerlist_alt" (vk 0x09), so nothing new is bound here.
+##
+## The shell owns the strings because it owns the string tables: the title and
+## the game-type label come from gametext Overlays, the two count lines from
+## Client, and the paging hint from Text — the same resolve pattern the
+## objectives header already uses.
+func _update_scoreboard(chorded: bool) -> void:
+	if _game_hud == null or _world == null:
+		return
+	var shown := ControlsBindings.pressed("playerlist_alt") and not chorded
+	if not shown:
+		if _scoreboard_was_shown:
+			_game_hud.set_scoreboard(false, 0, {}, [])
+			_scoreboard_was_shown = false
+		return
+	_scoreboard_was_shown = true
+	var sim: Simulation = _world.get_sim()
+	if sim == null:
+		return
+	var board: Dictionary = sim.get_scoreboard()
+	if not bool(board.get("known", false)):
+		return
+	var table: RtxtStringFile = Strings.get_table("gametext")
+	var strings := {}
+	if table != null:
+		if table.has_string_in_section("Overlays", "STROVER_KILLLIST"):
+			strings["title"] = table.get_string_in_section("Overlays", "STROVER_KILLLIST")
+		# "<label> <count>": the HUD count is the accepted rows MINUS the
+		# spectators [orig: the subtraction @0x593E50 / the header @0x423060].
+		var rows: Array = board.get("rows", [])
+		var spectators := int(board.get("spectators", 0))
+		if table.has_string_in_section("Client", "STRCLI04"):
+			strings["players"] = "%s %d" % [
+					table.get_string_in_section("Client", "STRCLI04"),
+					max(0, rows.size() - spectators)]
+		if spectators > 0 and table.has_string_in_section("Client", "STRCLI23"):
+			strings["spectators"] = "%s %d" % [
+					table.get_string_in_section("Client", "STRCLI23"), spectators]
+		if table.has_string_in_section("Text", "CHANGE_SCREEN"):
+			strings["footer"] = table.get_string_in_section("Text", "CHANGE_SCREEN")
+	_game_hud.set_scoreboard(true, _scoreboard_game_type, strings,
+			board.get("rows", []))
+
+
 func _flush_feed_events() -> void:
 	if _game_hud == null or _world == null:
 		return
