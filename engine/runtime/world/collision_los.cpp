@@ -587,20 +587,21 @@ int CollisionWorld::sun_visibility_blocked_rays(World &world, const Entity &e,
     // candidates — retail tests those too (allowAllTypes = 1 passes every
     // solid type), but our casts stay statics-only, the documented D-RLIT-2
     // posture. Slice build already excludes self; the exclude gate mirrors the
-    // walker's entry_entity != entity_a check. [orig: @ 0x539a70]
-    int32_t slot_indices[64];
-    int32_t slot_count = 0;
-    for (int32_t i = 0; i < static_count_ && slot_count < 64; ++i) {
+    // walker's entry_entity != entity_a check. The walk carries no cap of its
+    // own — retail loops to the full +0x1C0 count. [orig: @ 0x539a70]
+    std::vector<int32_t> &slot_indices = sun_slot_scratch_;
+    slot_indices.clear();
+    for (int32_t i = 0; i < static_count_; ++i) {
         const StaticSlot &s = statics_[i];
         if (s.h == e.handle) continue;
         for (int32_t k = 0; k < slice_count; ++k) {
             if (slice[k] == s.h) {
-                slot_indices[slot_count++] = i;
+                slot_indices.push_back(i);
                 break;
             }
         }
     }
-    if (slot_count == 0) return 0;
+    if (slot_indices.empty()) return 0;
 
     CollisionRay ray;
     ray.start[0] = origin[0];
@@ -615,8 +616,8 @@ int CollisionWorld::sun_visibility_blocked_rays(World &world, const Entity &e,
     for (int r = 0; r < 3; ++r) {
         const int32_t radius = kSunOcclusionClipRadii[r];
         const int32_t broad_r = radius > 0 ? radius : 0;
-        for (int32_t i = 0; i < slot_count; ++i) {
-            if (static_slot_blocks_segment(world, statics_[slot_indices[i]], ray,
+        for (const int32_t slot : slot_indices) {
+            if (static_slot_blocks_segment(world, statics_[slot], ray,
                                            radius, broad_r)) {
                 ++blocked;
                 break;

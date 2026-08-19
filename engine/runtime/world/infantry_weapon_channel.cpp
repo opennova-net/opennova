@@ -77,8 +77,12 @@ void AiSystem::infantry_weapon_channel_advance(AiEntity &e) {
 
     // Deferred promotion when the playing clip reaches its end — the channel end-flag
     // path [orig: AnimMap_UpdateEntity @0x40b77b, reached through the @0x40b8c0 swap].
+    // The clock is the SERVED ring entry's length: the state-entry rotate re-inits
+    // the channel from that entry, so the end flag fires on its own frame count
+    // [orig: ring rotate @0x40b740-0x40b749; frame_count read @0x40b25d].
     if (inf.wpn_deferred != 0 && root_motion != nullptr) {
-        const int32_t len = root_motion->clip_length_ticks(inf.adm_id, inf.wpn_state);
+        const int32_t len = root_motion->clip_length_ticks(inf.adm_id, inf.wpn_state,
+                                                           inf.wpn_variant);
         if (len >= 0 && inf.wpn_clip_phase >= len) {
             const int promoted = inf.wpn_deferred;
             inf.wpn_deferred = 0;

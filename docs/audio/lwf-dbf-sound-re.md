@@ -410,11 +410,17 @@ than owned by the authority body channel. The witnessed slot pick (water >
 on-entity > snow > ground, first match wins; one slot for both feet in water)
 moved to `audio::footstep_slot`, with `AiSystem::infantry_anim_sound_pass`
 delegating to it, so both body channels consume ONE implementation.
-`AdmRootMotion::scan_triggers` exposes the per-authored-frame trigger consume
-`[orig: org2 @0x4b76e6-0x4b78a8]` — crossed frames report in order and are
-never coalesced, a fresh clip fires frame 0, a mid-clip attach back-fires
-nothing — alongside `capsule_bottom_at` for the foot-level dip `[orig: the
-AnimMap out[3] cell @0x4b77d3]`. The decoded groundEntity link now reaches
+`AdmRootMotion::scan_triggers` exposes the crossed-frame trigger scan for the
+wire lane — crossed frames report in order and are never coalesced, a fresh
+clip fires frame 0, a mid-clip attach back-fires nothing — alongside
+`capsule_bottom_at` for the foot-level dip `[orig: the AnimMap out[3] cell
+@0x4b77d3]`. (Grilled 2026-08-19: retail's own consume is a per-TICK sample of
+the FLOOR keyframe's word — `g_animEventTriggerBits = out[5]` `[orig:
+@0x40b8a3; unlerped read @0x40b32f]` — gated to alternating ticks `[orig: org1
+odd @0x4bf144 / org2 even @0x4b76e6]`, which at 30fps-authored vs the 62 Hz
+tick fires each entered frame once; that per-tick form IS the authority path.
+The scan reproduces the same per-entered-frame result where a consumed wire
+row jumps the playhead across several authored frames at once.) The decoded groundEntity link now reaches
 presentation as `PF_CARRIER_HANDLE`, so the on-entity slot is resolvable off a
 wire row. LEG LANDED 2026-08-19: the profile question is answered per DEF —
 `resolve_ai_weapons` resolves every items.def row's `sound_profile` /

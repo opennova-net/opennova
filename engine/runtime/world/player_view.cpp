@@ -263,13 +263,17 @@ void player_view_floor_eye_to_terrain(const terrain::TerrainHeightField *terrain
 void player_view_motion_lead_update(PlayerViewMotionLead &lead,
                                     const float tick_delta_units[3],
                                     int32_t out_lead_q16[3]) {
-    // [orig: per lane — diff = prev_sample - vel (x lane folds the fresh
-    // sample: diff - new); prev_sample = (tick position delta) << 8;
-    // vel += (diff - new_sample + 16) >> 5 @ 0x437bac..0x437c0e. The three
-    // lanes share the recurrence vel += (prev - new - vel + 16) >> 5.]
+    // [orig: @0x437bac..0x437c0e — all three lanes compute the SAME recurrence
+    // vel += (prev - new - vel + 16) >> 5 with prev_sample = (tick position
+    // delta) << 8; the x lane merely SCHEDULES it differently (its fresh
+    // sample is computed inline, so the compiler folds `- new` into the final
+    // add) — an instruction-order artifact, not a per-lane asymmetry.]
     for (int i = 0; i < 3; ++i) {
+        // << via uint32: the original's 32-bit shl wraps; signed << would be UB.
         const int32_t sample = static_cast<int32_t>(
-                static_cast<double>(tick_delta_units[i]) * 65536.0) << 8;
+                static_cast<uint32_t>(static_cast<int32_t>(
+                        static_cast<double>(tick_delta_units[i]) * 65536.0))
+                << 8);
         lead.vel[i] +=
                 (lead.prev_sample[i] - sample - lead.vel[i] + 16) >> 5;
         lead.prev_sample[i] = sample;

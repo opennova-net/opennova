@@ -863,6 +863,15 @@ public:
     int sun_visibility_blocked_rays(World &world, const Entity &e,
                                     const int32_t sun_step_q16[3]);
 
+private:
+    // Scratch for sun_visibility_blocked_rays' slice->static-slot resolve —
+    // reused across calls so the walk carries no per-entity cap, matching the
+    // full +0x1C0-count walk [orig: raycast_find_collision_entity @ 0x539a70
+    // loops to entity_a[+0x1C0] with no bound of its own].
+    std::vector<int32_t> sun_slot_scratch_;
+
+public:
+
     // Ground-column probe through terrain + the entity's candidate models.
     // Builds the ray {x+dx, y+dy, z+z_up} down z_drop, clamps to the terrain
     // column, clips against candidate solids; returns the resolved ground Z and

@@ -268,13 +268,16 @@ inline constexpr const char *kGlassShatterEffects[4] = {
         "Effect_BldFireExp", "Effect_BldDustExp"};
 // The glass userpoint path rolls each effect's ALT probability column from the
 // surface-effect table (40 B rows {name[32], prob_main f32, prob_alt f32}) and
-// spawns on rand16 % 100 <= ftol(prob_alt * 100.0f) — float multiply then
-// TRUNCATION, so Glass 0.33f * 100 = 32.99998 gates at 32, not 33.
-// [orig: Effect_RollSurfaceEffectProbability @ 0x5CC1F0 scale @ 0x5CC25A;
-//  g_SurfaceEffectProbTable @ 0x8418B8; useAltProbability=1 pushes @
-//  0x5CF0B3/0x5CF0F4 in Terrain_SpawnEffectsAtUserPoint]
+// spawns on rand16 % 100 <= ftol(prob_alt * 100.0f). Glass's alt cell holds
+// 0x3EA8F5C3 (exactly 0.33f); the product 33.0000013 truncates to 33 in every
+// intermediate precision, so the <= admits rolls 0..33 — 34 of 100.
+// [orig: Effect_RollSurfaceEffectProbability @ 0x5CC1F0 scale flt_7C4654=100.0
+//  @ 0x5CC25A; g_SurfaceEffectProbTable @ 0x8418B8; useAltProbability=1 pushes
+//  @ 0x5CF0B3/0x5CF0F4 in Terrain_SpawnEffectsAtUserPoint]
 inline constexpr float kGlassShatterAltProbability[4] = {
         0.33f, 0.05f, 0.05f, 0.1f};
+static_assert(static_cast<int>(kGlassShatterAltProbability[0] * 100.0f) == 33,
+              "glass gate boundary: ftol(0.33f * 100) is 33, admitting 34 rolls");
 
 // The wreck-fire random crackle, rolled per tick per burning wreck on the
 // world's rol-xor PRNG stand-in stream (the same generator as retail's

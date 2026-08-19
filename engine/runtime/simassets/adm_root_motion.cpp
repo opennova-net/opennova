@@ -200,9 +200,9 @@ uint32_t AdmRootMotion::sample_trigger(const Track &track, int32_t phase_ticks) 
 
 int AdmRootMotion::scan_triggers(int adm_id, int state_id, int32_t from_phase,
                                  int32_t to_phase, uint32_t *out,
-                                 int max_out) const {
+                                 int max_out, int variant) const {
 	if (out == nullptr || max_out <= 0) return 0;
-	const Track *track = resolve_track(adm_id, state_id);
+	const Track *track = resolve_track(adm_id, state_id, variant);
 	if (track == nullptr || track->trigger.empty()) return 0;
 	int written = 0;
 	// Walk the half-frame playhead one tick at a time and emit the authored
@@ -223,8 +223,8 @@ int AdmRootMotion::scan_triggers(int adm_id, int state_id, int32_t from_phase,
 }
 
 int32_t AdmRootMotion::capsule_bottom_at(int adm_id, int state_id,
-                                         int32_t phase_ticks) const {
-	const Track *track = resolve_track(adm_id, state_id);
+                                         int32_t phase_ticks, int variant) const {
+	const Track *track = resolve_track(adm_id, state_id, variant);
 	if (track == nullptr || track->bottom.empty()) return 0;
 	return static_cast<int32_t>(sample(*track, track->bottom, phase_ticks) * 65536.0f);
 }
@@ -307,9 +307,14 @@ bool AdmRootMotion::advance_blended(
 }
 
 int32_t AdmRootMotion::clip_length_ticks(int adm_id, int state_id) const {
+	return clip_length_ticks(adm_id, state_id, 0);
+}
+
+int32_t AdmRootMotion::clip_length_ticks(int adm_id, int state_id,
+                                         int variant) const {
 	// Half-frame ticks, the advance() playhead convention (frame_count * 2). -1 when the
 	// state has no track — the weapon channel's deferred promotion then never length-fires.
-	const Track *track = resolve_track(adm_id, state_id);
+	const Track *track = resolve_track(adm_id, state_id, variant);
 	return track != nullptr ? track->frame_count * 2 : -1;
 }
 

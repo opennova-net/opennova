@@ -27,10 +27,15 @@ bool feed_event_suppressed(uint8_t event_type) {
 bool feed_event_verbose_only(uint8_t event_type) {
 	switch (event_type) {
 		// The grey (not-own) branch returns without posting when the verbose
-		// toggle is off [orig: the 13 g_MpVerbose2 tests @0x426472 (case 1)
-		// .. @0x4267C6 (case 15), @0x42668C/@0x4266DD/@0x42670E (32/33/34)].
-		// The friendly-fire trio 7/8/9, the killer-less deaths 22-26, and
-		// types 24/49 post unconditionally.
+		// toggle is off — 15 event types behind 13 g_MpVerbose2 test sites:
+		// cases 1-6 and 13/14/15 and 32/33/34 each own a test, and the
+		// spotted/heard/lost trio 10/11/12 funnels through ONE shared test at
+		// its common body [orig: @0x426472 (case 1) .. @0x4267C6 (case 15);
+		// the 10/11/12 shared test @0x42664A on the @0x42663C body;
+		// @0x42668C/@0x4266DD/@0x42670E (32/33/34)]. The friendly-fire trio
+		// 7/8/9, the killer-less deaths 22-26, and types 24/49 post
+		// unconditionally; 39/45 jump to their canned post before the gate
+		// [orig: jmp @0x426454/@0x426468].
 		case 1: case 2: case 3:
 		case 4: case 5: case 6:
 		case 10: case 11: case 12:
