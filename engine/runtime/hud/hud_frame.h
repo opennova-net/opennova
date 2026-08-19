@@ -42,6 +42,15 @@ enum HudTexture : int32_t {
 	kHudTexMapCompass,
 	kHudTexMapRadar,
 	kHudTexMapWpIndicator, // WPIndctr.tga [orig: HUD_LoadAllTextures @0x59e079]
+	// The Tab board's stdbox: the 4x4 border stencil atlas and the tiled
+	// interior brush [orig: the panel call @0x423a72 -> FUN_0051efd0 ->
+	// FUN_0056b700, "stdbox" registered @0x51effa]. Inserted BEFORE the sights
+	// sentinel, which sizes the device slot array.
+	kHudTexBoxBorder,
+	kHudTexBoxTile,
+	// The 16x16 connection-quality icon, a 4-row vertical atlas
+	// [orig: the quad @0x4241fb; the atlas load FUN_004c2cf0 @0x4c2cf0].
+	kHudTexNetIcon,
 	kHudTexSightsBase, // authored SIGHTS rows: kHudTexSightsBase + row index
 };
 
@@ -124,6 +133,9 @@ struct HudLayout {
 	// HUDSYSTEXT — the SYSTEM feed anchor (kills, joins, system lines). The
 	// def parser already produces it (def_hudpos.cpp HUDSYSTEXT -> sys_text).
 	HudPosRecord sys_text;
+	// The Tab board's atlases (hud_scoreboard.h).
+	bool box_texture_valid = false;
+	bool net_icon_texture_valid = false;
 	HudPosRecord clip_pos;
 	HudPosRecord stance_pos;
 	HudPosRecord frame_pos;
@@ -440,6 +452,11 @@ private:
 	uint32_t active_color(const HudFrameState &state) const;
 	void emit_rect(float x0, float y0, float x1, float y1, uint32_t color,
 			bool filled, int32_t texture = kHudTexNone, bool additive = false);
+	void emit_rect_uv(float x0, float y0, float x1, float y1, float u0, float v0,
+			float u1, float v1, uint32_t color, int32_t texture);
+	// The retail stdbox panel and the per-row connection icon.
+	void emit_stdbox(float x0, float y0, float x1, float y1, uint32_t color);
+	void emit_net_icon(float x, float y, float size, int quality);
 	void emit_wire_rect(float x0, float y0, float x1, float y1, uint32_t color);
 	void emit_text(const char *text, float design_x, float design_y,
 			float surface_w, float surface_h, uint32_t argb, uint32_t flags);

@@ -115,6 +115,26 @@ void HudFrameCompiler::push_feed_line(const std::string &text, uint32_t argb,
 	}
 }
 
+// One atlas cell. emit_rect covers the whole-texture case; the stdbox border
+// and the connection icon both need a sub-rect, so they push the quad directly.
+void HudFrameCompiler::emit_rect_uv(float x0, float y0, float x1, float y1,
+		float u0, float v0, float u1, float v1, uint32_t color,
+		int32_t texture) {
+	HudQuad q;
+	q.x0 = x0;
+	q.y0 = y0;
+	q.x1 = x1;
+	q.y1 = y1;
+	q.u0 = u0;
+	q.v0 = v0;
+	q.u1 = u1;
+	q.v1 = v1;
+	q.color = color;
+	q.texture = texture;
+	q.filled = true;
+	draw_list_.quads.push_back(q);
+}
+
 void HudFrameCompiler::emit_rect(float x0, float y0, float x1, float y1,
 		uint32_t color, bool filled, int32_t texture, bool additive) {
 	HudQuad quad;
@@ -1153,6 +1173,53 @@ void HudFrameCompiler::element_feed(const HudFrameState &state, float w,
 }
 
 
+// The retail "stdbox" panel: an 8-piece border stencil around a tiled
+// interior [orig: the registered style @0x51effa; the draw FUN_0051efd0 ->
+// FUN_0056b700]. border.tga is a 4x4 grid of 32px cells: row 0 columns 0..2
+// are the top-left/top/top-right pieces, row 1 the left/right sides, row 2 the
+// bottom trio, and cell (3,0) is the interior brush.
+//
+// RECORDED GAP: the border x brush two-texture combine (op 2 @0x676ea0) was
+// never decompiled, so the cells are drawn directly rather than combined.
+void HudFrameCompiler::emit_stdbox(float x0, float y0, float x1, float y1,
+		uint32_t color) {
+	if (!layout_.box_texture_valid) return;
+	constexpr float kCell = 1.0f / 4.0f;   // the 4x4 atlas step in UV
+	// The piece size scales with the surface the same way the fork witnessed
+	// (s = width / 1600 against the 32px cell); clamp so a small surface still
+	// leaves an interior.
+	const float piece = 32.0f;
+	const float pw = std::min(piece, (x1 - x0) * 0.5f);
+	const float ph = std::min(piece, (y1 - y0) * 0.5f);
+	// Interior brush first, tiled from cell (3,0).
+	emit_rect_uv(x0 + pw, y0 + ph, x1 - pw, y1 - ph,
+			3.0f * kCell, 0.0f, 4.0f * kCell, kCell, color, kHudTexBoxTile);
+	// Corners.
+	emit_rect_uv(x0, y0, x0 + pw, y0 + ph, 0.0f, 0.0f, kCell, kCell, color, kHudTexBoxBorder);
+	emit_rect_uv(x1 - pw, y0, x1, y0 + ph, 2.0f * kCell, 0.0f, 3.0f * kCell, kCell, color, kHudTexBoxBorder);
+	emit_rect_uv(x0, y1 - ph, x0 + pw, y1, 0.0f, 2.0f * kCell, kCell, 3.0f * kCell, color, kHudTexBoxBorder);
+	emit_rect_uv(x1 - pw, y1 - ph, x1, y1, 2.0f * kCell, 2.0f * kCell, 3.0f * kCell, 3.0f * kCell, color, kHudTexBoxBorder);
+	// Edges.
+	emit_rect_uv(x0 + pw, y0, x1 - pw, y0 + ph, kCell, 0.0f, 2.0f * kCell, kCell, color, kHudTexBoxBorder);
+	emit_rect_uv(x0 + pw, y1 - ph, x1 - pw, y1, kCell, 2.0f * kCell, 2.0f * kCell, 3.0f * kCell, color, kHudTexBoxBorder);
+	emit_rect_uv(x0, y0 + ph, x0 + pw, y1 - ph, 0.0f, kCell, kCell, 2.0f * kCell, color, kHudTexBoxBorder);
+	emit_rect_uv(x1 - pw, y0 + ph, x1, y1 - ph, 2.0f * kCell, kCell, 3.0f * kCell, 2.0f * kCell, color, kHudTexBoxBorder);
+}
+
+// The per-row connection icon: a 16x16 quad sampling one band of a 4-row
+// vertical atlas, band = quality - 1. A quality outside 1..3 draws NOTHING —
+// retail's own gate, not a fallback [orig: the quad @0x4241fb; the atlas
+// FUN_004c2cf0 @0x4c2cf0; the band pick FUN_004c2ee0 @0x4c2ee0].
+void HudFrameCompiler::emit_net_icon(float x, float y, float size,
+		int quality) {
+	if (!layout_.net_icon_texture_valid) return;
+	if (quality < 1 || quality > 3) return;
+	const float band = 1.0f / 4.0f;
+	const float v0 = static_cast<float>(quality - 1) * band;
+	emit_rect_uv(x, y, x + size, y + size, 0.0f, v0, 1.0f, v0 + band,
+			0xFFFFFFFFu, kHudTexNetIcon);
+}
+
 void HudFrameCompiler::element_scoreboard(const HudFrameState &state, float w,
 		float h) {
 	// THE TAB PLAYER LIST [orig: rows HUD_DrawKillList @0x423A30; the centred
@@ -1168,6 +1235,10 @@ void HudFrameCompiler::element_scoreboard(const HudFrameState &state, float w,
 	if (font_.font() == nullptr) return;
 
 	const uint32_t hud = active_color(state);
+	// The panel frame, behind everything the board draws.
+	emit_stdbox(sx(static_cast<float>(kBoardX1), w), sy(static_cast<float>(kBoardY1), h),
+			sx(static_cast<float>(kBoardX2), w), sy(static_cast<float>(kBoardY2), h),
+			0xFFFFFFFFu);
 	// The title rides just inside the panel's top-left corner.
 	if (!state.scoreboard.title.empty())
 		emit_text(state.scoreboard.title.c_str(),
@@ -1242,6 +1313,10 @@ void HudFrameCompiler::element_scoreboard(const HudFrameState &state, float w,
 			emit_text(rankbuf, static_cast<float>(col + kRankDx), *cursor, w, h,
 					kRankColor, 0u);
 		}
+		// The connection icon sits between the rank and the name.
+		if (!e.spectator)
+			emit_net_icon(sx(static_cast<float>(col + kIconDx), w), *cursor,
+					static_cast<float>(kIconSize), e.quality);
 		const std::string text = scoreboard_row_text(e, non_team);
 		emit_text(text.c_str(), static_cast<float>(col), *cursor, w, h, color, 0u);
 		*cursor += static_cast<float>(kRowPitch);

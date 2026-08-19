@@ -494,6 +494,18 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		layout_.frame_tex_w = tex.is_valid() ? tex->get_width() : 0;
 		layout_.frame_tex_h = tex.is_valid() ? tex->get_height() : 0;
 	}
+	{
+		// The Tab board's stdbox atlases + the connection-icon strip. Absent
+		// files simply leave the board unframed rather than failing the HUD.
+		const Ref<Texture2D> border = load_hud_texture_("border.tga");
+		const Ref<Texture2D> brush = load_hud_texture_("boxtile.tga");
+		const Ref<Texture2D> icon = load_hud_texture_("neticon2.tga");
+		textures_[opennova::hud::kHudTexBoxBorder] = border;
+		textures_[opennova::hud::kHudTexBoxTile] = brush;
+		textures_[opennova::hud::kHudTexNetIcon] = icon;
+		layout_.box_texture_valid = border.is_valid() && brush.is_valid();
+		layout_.net_icon_texture_valid = icon.is_valid();
+	}
 
 	// HUDSTANCE's explicit id addresses the retail slot arrays; file order is
 	// irrelevant and a later record for the same id replaces the earlier one.
@@ -704,6 +716,7 @@ void HudOverlay::set_scoreboard(bool p_shown, int64_t p_game_type,
 			e.team = static_cast<uint8_t>(static_cast<int>(d.get("team", 0)));
 			e.spectator = static_cast<bool>(d.get("spectator", false));
 			e.name = String(d.get("name", "")).utf8().get_data();
+			e.quality = static_cast<uint8_t>(static_cast<int>(d.get("quality", 0)));
 			sb.rows.push_back(e);
 		}
 	}

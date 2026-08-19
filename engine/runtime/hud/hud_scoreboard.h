@@ -44,8 +44,9 @@ inline constexpr int kColumnSpectatorX = 440;
 // The rank number sits left of its column [orig: lea eax,[esi - 0x28] @0x4241a7].
 inline constexpr int kRankDx = -40;
 // The connection icon sits between the rank and the name [orig: add esi,-0x14
-// @0x4241fb; the 16x16 quad @0x4241e4]. Drawing it needs the neticon2 atlas —
-// a texture slot this port does not add yet (recorded residual).
+// @0x4241fb; the 16x16 quad @0x4241e4]. It samples one band of the neticon2
+// 4-row atlas, band = quality - 1; a quality outside 1..3 draws nothing, which
+// is retail's own gate rather than a fallback [orig: FUN_004c2ee0 @0x4c2ee0].
 inline constexpr int kIconDx = -20;
 inline constexpr int kIconSize = 16;
 // The paging hint [orig: push 0x1f6/0x1fe @0x4242b7/@0x4242b2].
@@ -75,6 +76,7 @@ struct ScoreboardEntry {
 	uint8_t team = 0;
 	bool spectator = false;
 	std::string name;   // already joined with the clan prefix by the embedder
+	uint8_t quality = 0;  // 0x46 connection quality, 1..3 draws an icon band
 };
 
 // The status-glyph suffix a row appends when its bitfield is non-zero: `" ["`,
