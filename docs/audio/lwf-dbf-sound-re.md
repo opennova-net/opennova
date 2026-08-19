@@ -405,6 +405,23 @@ needs a replicated contact edge. Remote-client footstep presentation rides the
 client anim path (net seam — the host never emits for net-snapped peers, same
 as retail's per-client body updaters); the chute family 41-43 + the chute
 brake physics ride the parachute slice (witness in world-wac-ai-re §17.4b).
+GROUNDWORK LANDED 2026-08-19: the pieces that leg needs are now shared rather
+than owned by the authority body channel. The witnessed slot pick (water >
+on-entity > snow > ground, first match wins; one slot for both feet in water)
+moved to `audio::footstep_slot`, with `AiSystem::infantry_anim_sound_pass`
+delegating to it, so both body channels consume ONE implementation.
+`AdmRootMotion::scan_triggers` exposes the per-authored-frame trigger consume
+`[orig: org2 @0x4b76e6-0x4b78a8]` — crossed frames report in order and are
+never coalesced, a fresh clip fires frame 0, a mid-clip attach back-fires
+nothing — alongside `capsule_bottom_at` for the foot-level dip `[orig: the
+AnimMap out[3] cell @0x4b77d3]`. The decoded groundEntity link now reaches
+presentation as `PF_CARRIER_HANDLE`, so the on-entity slot is resolvable off a
+wire row. What the leg itself still needs: a wire row's SOUND PROFILE (the
+authority path reads the bound `AiEntity.profile.sound_profile`, which a
+ClientState row has no equivalent of — it wants the items.def `sound_profile`
+published per row, or an engine resolver taking type_id + character_id), then
+the applier scan that walks each remote body's wire-driven playhead and queues
+`SoundSlotEvent`s through the existing `drain_slot_sounds` player.
 
 ## Placed ambient markers — the envsnd emitter system (grilled 2026-07-10)
 

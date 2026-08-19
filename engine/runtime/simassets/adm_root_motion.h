@@ -62,6 +62,27 @@ public:
 	int32_t clip_length_ticks(int adm_id, int state_id) const override;
 	bool clip_loops(int adm_id, int state_id) const override;
 
+	// THE CROSSED-FRAME TRIGGER SCAN — the authored event words a body crossed
+	// between two playhead positions, in order, one entry per authored clip
+	// FRAME [orig: the per-frame consume org2 @0x4b76e6-0x4b78a8; .bad v1
+	// event stride 24, trigger i32 @+20].
+	//
+	// Retail consumes the trigger word once per authored frame the playhead
+	// enters, so a body that crosses two frames in one advance fires both —
+	// this returns them in order rather than coalescing. `from_phase` is
+	// EXCLUSIVE and `to_phase` INCLUSIVE (the frame just entered fires), both
+	// in the same IDA half-frame ticks `advance` uses. A fresh clip start
+	// passes from_phase = -1 so frame 0 fires; a mid-clip attach passes the
+	// attach phase so nothing back-fires. Writes at most `max_out` words and
+	// returns how many were written.
+	int scan_triggers(int adm_id, int state_id, int32_t from_phase,
+	                  int32_t to_phase, uint32_t *out, int max_out) const;
+
+	// The frame's capsule bottom (out[3] = bottom * 65536) at one playhead
+	// position — the dip that puts a footstep at FOOT level rather than the
+	// body origin [orig: the AnimMap out[3] cell @0x4b77d3].
+	int32_t capsule_bottom_at(int adm_id, int state_id, int32_t phase_ticks) const;
+
 	bool empty() const { return sets_.empty(); }
 	int set_count() const { return static_cast<int>(sets_.size()); }
 	// States with a usable track in a given set (default set 0 unless specified).
