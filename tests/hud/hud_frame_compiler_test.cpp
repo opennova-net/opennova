@@ -514,12 +514,18 @@ void test_spinmap_projection_zoom_and_clip() {
 	CHECK(std::fabs(ly - 657.0f) < 0.01f &&
 			std::fabs(lx - (915.0f - 100.0f / scale)) < 0.01f,
 			"mission +Y draws on the player's left, not mirrored");
-	// The backing/stencil fan sits four physical pixels inside the scaled
-	// half-height: 105 - 4 = 101 px on this square authored rect.
+	// The backing/stencil fan sits TWO DESIGN pixels inside the scaled
+	// half-height, taken through the width-axis scaler — the same
+	// scaleX((flags >> 8) & 2) the waypoint-pointer radius subtracts
+	// [orig: the map-setup inset @0x5a64c0..0x5a650d; the literal edi = 2
+	// @0x5a60d8; Viewport_ScaleToVirtualCoords @0x5d2b20]. This input runs at
+	// the DESIGN surface (1024x768), where scaleX(2) = 2: 105 - 2 = 103 px.
+	// (At 1920 the same expression yields 4, which is the value an earlier
+	// live probe read and a constant was written from.)
 	CHECK(!opennova::hud::project_spinmap_point(input, 200 << 16, 0,
 			false, x, y), "a point past the stencil's world radius is clipped");
 	CHECK(!opennova::hud::project_spinmap_point(input, 200 << 16, 0,
-			true, x, y) && std::fabs(y - (657.0f - 101.0f)) < 0.01f,
+			true, x, y) && std::fabs(y - (657.0f - 103.0f)) < 0.01f,
 			"edge clamp lands on the stencil circle");
 	// Zoom OUT grows the world-extent value x1.15 toward 0x100000; IN shrinks
 	// x0.85 toward 4096. [orig: cases 361/360 @0x49beaf/@0x49bcb0]
@@ -574,6 +580,30 @@ void test_spinmap_projection_zoom_and_clip() {
 	CHECK(std::fabs(std::hypot(edge_x - center_x, edge_y - center_y) -
 			136.5f) < 0.05f,
 			"the corner stencil reaches the probed retail backing-ring radius");
+
+	// THE DISC INSET IS WIDTH-DEPENDENT. It is two DESIGN pixels through the
+	// width-axis integer scaler [orig: the literal edi = 2 @0x5a60d8; the apply
+	// @0x5a64cd; Viewport_ScaleToVirtualCoords @0x5d2b20], i.e.
+	// floor((2*W + 512) / 1024) — which is 4 at 1920 (the value an earlier live
+	// probe read, and why a constant looked right) but 3 at 1280. A constant
+	// would put the ring in the wrong place on every non-1920 display.
+	HudMinimapInput narrow = widescreen;
+	narrow.surface_w = 1280.0f;
+	narrow.surface_h = 720.0f;
+	float n_center_x = 0.0f;
+	float n_center_y = 0.0f;
+	float n_edge_x = 0.0f;
+	float n_edge_y = 0.0f;
+	CHECK(opennova::hud::project_spinmap_point(
+			narrow, 0, 0, false, n_center_x, n_center_y),
+			"the 1280-wide player center remains visible");
+	CHECK(!opennova::hud::project_spinmap_point(
+			narrow, 1000 << 16, 0, true, n_edge_x, n_edge_y),
+			"a distant 1280-wide point clamps to the spinmap edge");
+	// rect_h at 720 = 206 - 19 = 187 -> base radius 93.5; inset 3 -> 90.5.
+	CHECK(std::fabs(std::hypot(n_edge_x - n_center_x, n_edge_y - n_center_y) -
+			90.5f) < 0.05f,
+			"the 1280-wide disc insets by three pixels, not four");
 }
 
 // A mission-yaw -90 camera faces west. The registered retail full-frame

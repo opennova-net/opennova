@@ -80,7 +80,17 @@ constexpr double kGridCellReciprocal =
 //  (x1+x2)*0.5/(y1+y2)*0.5, radius (y2-y1)*0.5 into the ring vertex loop
 //  with flt_7C3610 = 2^-22; rect scaled per axis by
 //  Viewport_ScaleToVirtualCoords @0x5d2b20 (x*w/1024, y*h/768, rounded)]
-constexpr float kDiscInsetPx = 4.0f;
+// The spinmap disc sits INSIDE its rect by two DESIGN pixels, taken through
+// the same integer scaler every other hudpos coordinate uses — on the WIDTH
+// axis, even though the radius itself comes from the half-HEIGHT
+// [orig: the literal edi = 2 @0x5a60d8; the inset compute
+//  (mask >> 8) & edi @0x5a64cd..0x5a64d1 scaled through
+//  Viewport_ScaleToVirtualCoords @0x5d2b20; the disc-radius subtract
+//  @0x5a6512..0x5a651d]. At 1920 wide that scales to exactly 4 px, which is why the
+// earlier live probe read it as a constant four; at other widths it is not
+// (1280 -> 3, 2560 -> 5), so the constant only matched the machine it was
+// observed on. kDiscInsetDesignPx is the witnessed literal.
+constexpr float kDiscInsetDesignPx = 2.0f;
 // TSDicon.tga is a 30-cell vertical strip of square icon cells. Retail
 // uploads the source at its authored resolution (stock JO ships 16x480,
 // JOTAC's RevX02 authors 64x1920), box-generates its mip chain, and
@@ -145,8 +155,8 @@ struct MapView {
 	float center_x = 0.0f;
 	float center_y = 0.0f;
 	// The map is a TRUE PIXEL CIRCLE on any surface. The backing/stencil fan
-	// is four physical pixels inside the scaled rect half-height; the compass
-	// quad uses the uninset base at x1.25.
+	// sits two width-scaled DESIGN pixels (kDiscInsetDesignPx) inside the
+	// scaled rect half-height; the compass quad uses the uninset base at x1.25.
 	float base_radius = 0.0f;
 	float disc_radius = 0.0f;
 	float rect_w = 0.0f;
@@ -211,10 +221,13 @@ MapView make_view(const HudMinimapInput &input) {
 	view.px_y2 = y2;
 	view.center_x = static_cast<float>(static_cast<int>((x1 + x2) * 0.5f));
 	view.center_y = static_cast<float>(static_cast<int>((y1 + y2) * 0.5f));
-	// The backing and terrain stencil share the observed four-pixel inset;
-	// the compass texture quad hangs off the uninset half-height at x1.25.
+	// The backing and terrain stencil share the witnessed two-design-pixel
+	// inset (scaled on the WIDTH axis); the compass texture quad hangs off the
+	// uninset half-height at x1.25.
 	view.base_radius = std::max(0.0f, view.rect_h * 0.5f);
-	view.disc_radius = std::max(0.0f, view.base_radius - kDiscInsetPx);
+	view.disc_radius = std::max(0.0f,
+			view.base_radius - static_cast<float>(scale_axis(
+					kDiscInsetDesignPx, input.surface_w, kDesignWidth)));
 	// Modes 2/3 zoom from the big-map value the radar keys adjust while a
 	// map mode is up. [orig: dword_B76490 read @0x5a804b]
 	const int32_t zoom = std::clamp(
