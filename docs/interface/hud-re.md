@@ -1257,8 +1257,14 @@ is `screenshots/pr-492/` (the synchronized 00TRa spinmap pair).
   rect block loads the four scaled rect corners, forms the truncated
   centers with `flt_7C3B94 = 0.5`, and uses the scaled rect
   **half-height** as the base radius. The backing and terrain/marker
-  stencil share the observed four-physical-pixel inset
-  (`disc = half-height − 4`), while `draw_compass_indicator @0x59c900`
+  stencil share the inset the map setup subtracts —
+  `scaleX((flags >> 8) & 2)`, i.e. TWO DESIGN pixels through the
+  width-axis scaler `[orig: @0x5a64c0..0x5a650d; the literal edi = 2
+  @0x5a60d8]`, the same expression the waypoint-pointer radius uses
+  above. The 1920x1080 completed-pass probe reads it as four physical
+  pixels because `scaleX(2)` IS 4 at that width; it is 3 at 1280 and 5
+  at 2560, so a constant only matched the probed display (corrected
+  2026-08-19). While `draw_compass_indicator @0x59c900`
   uses the uninset half-height times the witnessed `1.25`. The rect
   scales per axis through `Viewport_ScaleToVirtualCoords @0x5d2b20`
   (x·w/1024, y·h/768, rounded), but all circular radii come from its
