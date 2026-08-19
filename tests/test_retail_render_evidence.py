@@ -6,7 +6,11 @@ import sys
 from typing import Sequence
 
 import pytest
-from PySide6.QtGui import QColor, QImage
+
+try:
+    from PySide6.QtGui import QColor, QImage
+except ImportError as exc:  # headless box without libGL/Qt
+    pytest.skip(f"PySide6 QtGui is unavailable: {exc}", allow_module_level=True)
 
 from scripts.render import build_retail_side_by_side as evidence_builder
 
@@ -36,6 +40,30 @@ CURRENT_EVIDENCE_ROOT = PUBLISHED_EVIDENCE_ROOT
 CURRENT_CATALOG_SHA256 = (
     "607c7d66d7ce35ac915264fd462565fc262683aed34e4585a48d9093ce1a36d8"
 )
+
+
+def _lfs_pointer_stub(path: Path) -> bool:
+    """True when the checkout holds a git-lfs pointer instead of content."""
+    try:
+        with path.open("rb") as fh:
+            return fh.read(42).startswith(b"version https://git-lfs.github.com/spec/")
+    except OSError:
+        return False
+
+
+# This suite validates the repo's OWN published evidence store, so its gate is
+# LFS materialization rather than an env var: a clone that excluded
+# screenshots/** from LFS fetch (a reasonable local setting) holds 3-line
+# pointer stubs where the PNGs should be, and every hash/decode assertion
+# below would hard-fail on the stub text. Skip-as-pass instead, per
+# docs/asset-gated-tests.md.
+_PROBE_PNG = next(iter(sorted(PUBLISHED_EVIDENCE_ROOT.rglob("*.png"))), None)
+if _PROBE_PNG is not None and _lfs_pointer_stub(_PROBE_PNG):
+    pytest.skip(
+        "render-evidence store holds LFS pointer stubs (run `git lfs pull "
+        "--include=screenshots/**`)",
+        allow_module_level=True,
+    )
 CURRENT_SOURCE_COMMIT = "2cde75ad029be14d1c6e0dd8b034efc5fef017b5"
 PUBLISHED_FIXTURE_IDS = frozenset({
     "00tra-armory-glass-retail",
