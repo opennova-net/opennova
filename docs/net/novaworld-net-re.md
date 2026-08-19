@@ -3019,12 +3019,15 @@ the probe capture decode to a 2-byte trailer remainder.
 
 ```
 [u8 flags][u8 row_count (clamp 252)]
-row_count × { [u8 slot_id][u16 ping LE][u16 score LE][u16 deaths LE][u8 rowFlags] }     // 8 B/row
+row_count × { [u8 slot_id][u16 statusFlags LE][u16 score1 LE][u16 score2 LE][u8 rowFlags] } // 8 B/row
 [u8 team_count]
 (team_count+1) × { [u16 score LE][u16 deaths LE][u8 kothHold][u8 ctfFlag] }             // 6 B/row
 [u8 inGameCount][u8 spectatorCount]                                                      // trailer
 ```
 
+- **The second row u16 is a STATUS BITFIELD, not a ping** (2026-07-28 correction): it lands at scoreboard record+0x36 `[orig: @0x42fdb4]` and its only reader bit-tests it to append the row's glyph suffix `[orig: the read @0x423f1f + the thirteen bit tests @0x423f23-0x4240e0]`; the parser ZEROES it when `DAT_00a85b49` is clear `[orig: @0x42fbfb]`, which a latency value never would be.
+- **The fourth row u16 is score2 = accumulated points/EXP, not deaths** (2026-08-06 correction): `stats[29]` `[orig: encoder @0x50D960 via CRenderState_GetFieldByIndex(stats, 0x1C); sole writer CPlayerStats_RecordEvent case 28 @0x52C8E0]`. Deaths is `stats[7]` and is absent from 0x16 entirely. The retail CLIENT never reads score2 — the SERVER sorts team-mode rows by it `[orig: Player_ComputeScore @0x500A80]`. `score1` is the mode's primary stat `[orig: sub_52C850 @0x52C850]` and is the ONLY score the Tab list draws `[orig: the sole read @0x423E76 in HUD_DrawKillList @0x423A30]`.
+- **Folded on the client since 2026-08-19**: `netsim::ClientReplicaPipeline::apply_player_list` / `apply_player_sync` keep the board and its connection-slot roster in `ClientState`, with two witnessed retention rules — an EMPTY 0x16 never clobbers a populated board (round-end and next-map updates routinely carry zero rows), and a 0x46 REMOVAL keeps the slot's name binding (the roster is the board's name-join table, not a liveness set `[orig: the name/clan join @0x42fd46]`). Rows are kept in WIRE ORDER; the client never re-sorts.
 - **Byte 0 is a FLAGS byte, not max_players** (2026-07-03 correction): bit0 = team-mode, bit1 =
   timed-scores → `g_scoreboard_flags @ 0xA823B8` (renamed 2026-07-03 from the bare dword label).
 - Row flags: **bit0 = SPECTATOR** (from slot+100567; the old "alive" reading was a decode-era

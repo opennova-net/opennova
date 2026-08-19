@@ -14,6 +14,51 @@ namespace opennova::netsim {
 // One decoded S2C 0x0A tag-2 fire descriptor, lifted into absolute fixed-point
 // coordinates. It is a remote ROUND SPAWN, not a hit/impact notification: the
 // receiving client re-simulates it visually and authority remains on the host.
+// One connection-slot roster binding, folded from S2C 0x46 player-sync. This
+// is the scoreboard's NAME-JOIN table, keyed by CONNECTION SLOT — a different
+// key from the entity handle the feed resolves names by. Fields land per-bit
+// last-write-wins, and a removal deliberately KEEPS the binding: retail's
+// board still names a slot whose entity has gone [orig: the per-bit stores in
+// NapiNPClientMsg_PlayerSync @0x431370; the name/clan join @0x42fd46].
+struct ClientRosterSlot {
+	bool bound = false;
+	std::string name;
+	std::string clan;      // 0x0002 (the serializer's "team string"; retail ships "")
+	uint8_t quality = 0;   // 0x0400, clamped 4 — the connection-icon band
+};
+
+// The decoded S2C 0x16 scoreboard. Rows arrive PRE-SORTED by the server and the
+// client never re-sorts [orig: Player_ComputeScore @0x500A80 feeding
+// Server_BuildAndBroadcastScoreboard @0x50D960]; slot_id is authoritative, not
+// row position. An EMPTY update never clobbers a populated board — a round-end
+// 0x16 (and the next map's first) frequently carries zero rows.
+struct ClientScoreboardRow {
+	uint8_t slot_id = 0;
+	uint16_t status_flags = 0;  // the glyph bitfield, NOT a ping
+	uint16_t score1 = 0;        // the mode's primary stat (the only score drawn)
+	uint16_t score2 = 0;        // accumulated points/EXP (server sort key)
+	uint8_t team = 0;           // flags >> 1
+	bool spectator = false;     // flags bit0
+};
+
+struct ClientScoreboardTeam {
+	uint16_t score1 = 0;
+	uint16_t score2 = 0;
+	uint8_t player_count = 0;
+	uint8_t alive_count = 0;
+};
+
+struct ClientScoreboard {
+	bool known = false;
+	bool team_mode = false;   // flags bit0 -> g_scoreboard_flags
+	bool timed = false;       // flags bit1
+	uint8_t in_game_count = 0;
+	uint8_t spectator_count = 0;
+	std::vector<ClientScoreboardRow> rows;
+	std::vector<ClientScoreboardTeam> teams;  // T0 neutral + one per team
+	std::uint64_t revision = 0;
+};
+
 struct ClientRoundEvent {
 	uint8_t flags = 0;
 	uint8_t adm_index = 0;
@@ -537,6 +582,10 @@ struct ClientState {
 	ClientMountedAmmoState mounted_ammo;
 	ClientMinimapState minimap;
 	std::array<ClientGuidedMissile, kGuidedMissileCapacity> guided{};
+	// The Tab board's two folded lanes: the 0x16 scoreboard and the 0x46
+	// connection-slot roster it joins names from.
+	ClientScoreboard scoreboard;
+	std::array<ClientRosterSlot, 256> roster{};
 	std::vector<ClientEntityState> entities;
 	std::uint32_t frames_applied = 0;
 

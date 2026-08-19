@@ -318,7 +318,7 @@ bool decode_player_list(const uint8_t *body, size_t len, PlayerList &out) {
 	for (unsigned i = 0; i < out.player_count; ++i) {
 		PlayerListRow r;
 		r.slot_id = c.u8();
-		r.ping = c.u16();
+		r.status_flags = c.u16();
 		r.score1 = c.u16();
 		r.score2 = c.u16();
 		r.flags = c.u8();

@@ -1312,7 +1312,7 @@ void print_tag_16(const std::vector<uint8_t> &body) {
 	            pl.spectator_count, clean ? "" : " DECODE INCOMPLETE");
 	for (const auto &r : pl.players)
 		std::printf("        player slot=0x%02x ping=%u score=%u/%u flags=0x%02x (team=%u spect=%u)\n",
-		            r.slot_id, r.ping, r.score1, r.score2, r.flags,
+		            r.slot_id, r.status_flags, r.score1, r.score2, r.flags,
 		            r.flags >> 1, r.flags & 1);
 }
 

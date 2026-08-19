@@ -428,9 +428,26 @@ bool decode_full_entity_spawn(const uint8_t *body, size_t len,
 // [orig: NapiNPClientMsg_PlayerList @ 0x42FAE0]
 struct PlayerListRow {
 	uint8_t  slot_id = 0;
-	uint16_t ping = 0;
-	uint16_t score1 = 0;      // score
-	uint16_t score2 = 0;      // deaths
+	// NOT a ping (the decode-era name, refuted 2026-07-28): a STATUS BITFIELD.
+	// It lands at scoreboard record+0x36 [orig: @0x42fdb4] and its only reader
+	// bit-tests it to append the row's glyph suffix [orig: the read
+	// movzx ecx,[ebx+6] @0x423f1f and the thirteen bit tests
+	// @0x423f23-0x4240e0]; the parser ZEROES it when DAT_00a85b49 is clear
+	// [orig: @0x42fbfb] — which a latency number never would be.
+	uint16_t status_flags = 0;
+	// The MODE's primary stat, filled by the server's game-type switch
+	// [orig: sub_52C850 @0x52C850 — DM/TDM stats[5] enemy kills; A&S/TacOps
+	// stats[39] zone takeovers; KOTH a seconds value the client renders mm:ss
+	// under the timed-scores flag]. The ONLY row score the Tab list draws
+	// [orig: the sole score read @0x423E76 in HUD_DrawKillList @0x423A30].
+	uint16_t score1 = 0;
+	// stats[29], the accumulated point/EXP total — NOT deaths (the decode-era
+	// guess, refuted 2026-08-06; deaths is stats[7] and is absent from 0x16)
+	// [orig: encoder @0x50D960 via CRenderState_GetFieldByIndex(stats, 0x1C);
+	// sole writer CPlayerStats_RecordEvent case 28 @0x52C8E0]. The retail
+	// CLIENT never reads it; the server sorts team-mode rows by it
+	// [orig: Player_ComputeScore @0x500A80].
+	uint16_t score2 = 0;
 	uint8_t  flags = 0;       // bit0 = SPECTATOR (subtracted from the HUD count), team = flags >> 1
 	                          // [orig: NapiNPClientMsg_PlayerList @0x42FAE0 row apply]
 };
