@@ -147,7 +147,13 @@ func test_main_game_scene_mounts_the_gameplay_fps_counter() -> void:
 
 
 func test_world_only_capture_hides_layers_without_overwriting_descendant_state() -> void:
-	var game := _make()
+	# Session-direct (the file's ShellPresentationSession pattern): the
+	# capture contract is the session's, and driving it with its own typed
+	# args needs no reach into MainGame's private fields. The MainGame
+	# delegate is covered by the busy/unconfigured tests below.
+	var session := ShellPresentationSessionScript.new()
+	var host := Node.new()
+	add_child_autofree(host)
 	var hud := CanvasLayer.new()
 	var menu_layer := CanvasLayer.new()
 	var viewmodel_layer := CanvasLayer.new()
@@ -155,20 +161,15 @@ func test_world_only_capture_hides_layers_without_overwriting_descendant_state()
 	var nested_overlay := CanvasLayer.new()
 	viewmodel_layer.name = "ViewmodelPass"
 	nested_overlay.name = "DebugOverlay"
-	game.add_child(hud)
-	game.add_child(menu_layer)
+	host.add_child(hud)
+	host.add_child(menu_layer)
 	# The production shape: the rig parents ViewmodelPass to the CAMERA's
-	# viewport (player_viewmodel_rig._build_viewmodel_pass), and the session's
-	# lookup is that viewport — there is no name-search fallback. The camera
-	# must be a FlyCamera: _camera is typed, and set() on a typed property
-	# silently drops a mistyped value.
-	var camera := FlyCamera.new()
-	add_child_autofree(camera)
+	# viewport (the build step in player_viewmodel_rig.gd), and the session's
+	# lookup is that viewport — there is no name-search fallback.
+	var camera := Camera3D.new()
+	host.add_child(camera)
 	camera.get_viewport().add_child(viewmodel_layer)
 	autofree(viewmodel_layer)
-	game.set("_camera", camera)
-	game.set("_hud", hud)
-	game.set("_menu_layer", menu_layer)
 
 	var visible_hud := Control.new()
 	var hidden_hud := Control.new()
@@ -182,7 +183,7 @@ func test_world_only_capture_hides_layers_without_overwriting_descendant_state()
 	menu_layer.add_child(visible_menu)
 	viewmodel_layer.add_child(visible_viewmodel)
 
-	assert_eq(game.mcp_begin_world_only_capture(), OK)
+	assert_eq(session.begin_world_only_capture(hud, menu_layer, camera), OK)
 	assert_false(hud.visible,
 			"the HUD layer hides nested CanvasLayers such as DebugOverlay")
 	assert_false(menu_layer.visible)
@@ -194,13 +195,14 @@ func test_world_only_capture_hides_layers_without_overwriting_descendant_state()
 	assert_false(hidden_hud.visible)
 	assert_true(visible_menu.visible)
 	assert_true(visible_viewmodel.visible)
-	assert_eq(game.mcp_begin_world_only_capture(), ERR_BUSY,
+	assert_eq(session.begin_world_only_capture(hud, menu_layer, camera),
+			ERR_BUSY,
 			"a nested capture cannot overwrite the saved visibility snapshot")
 
 	# A real shell transition may update descendants while the async capture is
 	# settling. Cleanup must reveal that new state, not replay a stale child copy.
 	visible_menu.visible = false
-	game.mcp_end_world_only_capture()
+	session.finish_world_only_capture()
 	assert_true(hud.visible)
 	assert_true(menu_layer.visible)
 	assert_true(viewmodel_layer.visible)
@@ -210,7 +212,7 @@ func test_world_only_capture_hides_layers_without_overwriting_descendant_state()
 	assert_false(visible_menu.visible,
 			"a visibility change made during capture survives cleanup")
 	assert_true(visible_viewmodel.visible)
-	game.mcp_end_world_only_capture() # idempotent cleanup
+	session.finish_world_only_capture() # idempotent cleanup
 
 
 func test_world_only_capture_rejects_an_unconfigured_shell() -> void:
