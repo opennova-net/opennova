@@ -628,18 +628,33 @@ fixture with extra_polys surfaces.
   unvalidated against a fixture with real occlusion geometry.
 - 3DI3: `[orig: LoadRenderVertexBuffer @ 0x474380]` was catalogued but not
   decompiled; the loader side of the VERT stride/flag mapping is unverified.
-  The WRITER-variant selection is pinned on the shipped JO corpus (2409 `.3di`,
-  2026-08-17): skinned LODs carry the SkinnedExtended layout (0x55, 80 B —
-  weights/indices + tangent/bitangent) iff a material's vertex shader reads the
-  TANGENT semantic (the tangent-space skinned bump family; 457/457), and the
-  SkinnedBasic layout (0x41, 56 B) otherwise (VS_SKBASIC / object-space bump only:
-  Bird1, Boonie, ArmsGb — 147/147); static LODs carry Extended (0x15, 64 B) with
-  the tangent-space VS shaders (1005) and Basic (0x01, 40 B) with FF/VS_FLAG
-  (4077/87). Every first-person arms model referenced by `Avatars.def` is 0x55; a
-  0x41 arms model renders as garbage in retail's first-person pass (observed
-  live, 2026-08-17) while the same model is fine in the world skinned pass, so
-  the ONED converter emits SkinnedExtended under the corpus rule
+  The WRITER-variant selection is witnessed (2026-08-19): one flag word drives
+  both writers — `[orig: ComputeVertexFormatFlags @ 0x457a10]` ORs in `0x14`
+  iff ANY scene material slot's `gMaterialInfoTable` row carries the TANGENT
+  bit `0x8000` (the slot's vertex shader reads the TANGENT semantic), the
+  skinned wrapper adds `0x40` `[orig: ComputeVertexFormatFlags_Skinned @
+  0x457ab0]`, and `(word & 0x14) != 0` selects the Extended variant at
+  `[orig: WriteRDTA @ 0x45af4e]` / `[orig: WriteRDTA_Skinned @ 0x45d7cc]`.
+  ModSuperOed's authored table rows for VS_SKBUMPDIFFT/PHONGT/DIFFT2 lack
+  `0x8000` (the D-RMAT-4 drift, docs/render/render-material-re.md), so the
+  tool as shipped would select SkinnedBasic for tangent-space skinned models;
+  the shipped JO corpus (2409 `.3di`, 2026-08-17) proves the production
+  pipeline had the bit: skinned LODs carry SkinnedExtended (0x55, 80 B —
+  weights/indices + tangent/bitangent) iff a material's vertex shader reads
+  the TANGENT semantic (457/457), and SkinnedBasic (0x41, 56 B) otherwise
+  (VS_SKBASIC / object-space bump only: Bird1, Boonie, ArmsGb — 147/147);
+  static LODs carry Extended (0x15, 64 B) with the tangent-space VS shaders
+  (1005) and Basic (0x01, 40 B) with FF/VS_FLAG (4077/87). Every first-person
+  arms model referenced by `Avatars.def` is 0x55; a 0x41 arms model renders as
+  garbage in retail's first-person pass (observed live, 2026-08-17) while the
+  same model is fine in the world skinned pass. The ONED converter implements
+  the witnessed rule over the D-RMAT-4-corrected descriptor rows
   (`oed/rdta.cpp build_render_geometry_skinned`, ctest `oed_skinned_tangents`).
+  Residual: the static path keys on `NORMAL_A|NORMAL_B` of the authored rows —
+  corpus-equivalent, but `VS_DOT3DIFFOBJ` (NORMAL_A set, no `0x8000` in either
+  table) would compile Extended where the original selects Basic; the corpus
+  buckets above contain no static OBJECT-space bump LOD, so no shipped file
+  exercises the difference.
 - GP: global-batch flag-bit discrepancy. The subobject probe (and the IDA
   witness at `0x5108e3`) keys the 92 B subobject allocation on `flags & 2`
   (85/639 files), while the Phase-4 metadata probe counts global-batch RModels

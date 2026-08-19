@@ -511,7 +511,7 @@ void ObjectData::_seed_project_materials_from_ase_session() {
 	tdp_init(&seeded_project);
 	if (tdp_from_3di(&seeded, &seeded_project) == 0 && seeded_project.material_count > 0) {
 		tdp_alloc_materials(&source_project, seeded_project.material_count);
-		for (size_t i = 0; i < seeded_project.material_count; ++i) {
+		for (size_t i = 0; i < source_project.material_count; ++i) {
 			source_project.materials[i] = seeded_project.materials[i];
 		}
 	}

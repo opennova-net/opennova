@@ -880,14 +880,22 @@ bool build_render_geometry_skinned(const LodHeader &lod,
         (flags & MATERIAL_FLAG_BLENDING) != 0;
   }
 
-  // Skinned-extended layout (WriteVertices_SkinnedExtended: weights/indices AND
-  // tangent/bitangent, stride 80, flags 0x55) whenever a material's vertex shader
-  // reads the TANGENT semantic -- the tangent-space skinned bump family
-  // (VS_SKBUMPDIFFT / VS_SKBUMPPHONGT / VS_SKBUMPDIFFT2). Pinned on the shipped
-  // JO corpus: 457/457 skinned LODs with a tangent-space shader carry 0x55; the
-  // 147 skinned LODs at 0x41 use only VS_SKBASIC or the OBJECT-space bump
-  // shaders (Bird1, Boonie, ArmsGb). Every first-person arms model in
-  // Avatars.def (ArmsG/ArmGlove/ArmsR/IndoArms) is 0x55.
+  // Skinned-extended layout selection [orig: WriteRDTA_Skinned @ 0x45d7cc]:
+  // (ComputeVertexFormatFlags_Skinned & 0x14) != 0 selects
+  // WriteVertices_SkinnedExtended [orig @ 0x4581a0] (weights/indices AND
+  // tangent/bitangent, stride 80, flags 0x55), else WriteVertices_SkinnedBasic
+  // [orig @ 0x457f20] (stride 56, flags 0x41). The flag word
+  // [orig: ComputeVertexFormatFlags @ 0x457a10, skinned |0x40 @ 0x457ab0] ORs
+  // in 0x14 iff ANY material slot's info word has the TANGENT bit (0x8000 --
+  // the vertex shader reads the TANGENT semantic). The bit is read from the
+  // D-RMAT-4-corrected descriptor rows, not ModSuperOed's authored
+  // gMaterialInfoTable: the authored VS_SKBUMPDIFFT / VS_SKBUMPPHONGT /
+  // VS_SKBUMPDIFFT2 rows lack 0x8000 (docs/render/render-material-re.md,
+  // D-RMAT-4), and the shipped JO corpus proves the production tool had it --
+  // 457/457 skinned LODs with a tangent-space shader carry 0x55; the 147 at
+  // 0x41 use only VS_SKBASIC or the OBJECT-space bump shaders (Bird1, Boonie,
+  // ArmsGb). Every first-person arms model in Avatars.def
+  // (ArmsG/ArmGlove/ArmsR/IndoArms) is 0x55.
   bool has_tangents = false;
   for (int m = 0; m < material_count && !has_tangents; ++m) {
     const MaterialDescriptorRecord *desc =

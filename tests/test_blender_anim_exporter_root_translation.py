@@ -7,11 +7,14 @@ export that authoring offset as a per-frame root translation: it would lift the 
 that offset in-game (retail viewmodels carry a zero root translation). Only real root motion
 inside a clip is a translation.
 
-In-process ``bpy`` test (see test_scene_builder_blender_context.py for the import caveat).
+In-process ``bpy`` test (see test_scene_builder_blender_context.py for the import caveat;
+conftest.py orders these modules after the worker-spawning suites).
 """
 from __future__ import annotations
 
 import math
+
+USES_INPROCESS_BPY = True
 
 
 def _build_rig(bpy, root_head):
