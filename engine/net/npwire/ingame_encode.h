@@ -291,7 +291,7 @@ struct PlayerListEntry {
 // The dispatcher builds `players` from the roster (the npruntime-side walk that can see
 // NapiNPConnection); this serializes the witnessed wire shape: [u8 flags (bit0 team-mode, bit1
 // timed-scores)][u8 rowCount] then per-player [u8 slot][u16 statusFlags][u16 score1][u16 score2]
-// [u8 (team<<1)|spectator], then [u8 team_count=2] + (team_count+1) × {u16 score, u16 deaths,
+// [u8 (team<<1)|spectator], then [u8 team_count=2] + (team_count+1) × {u16 score1, u16 score2,
 // u8 kothHold, u8 ctfFlag}, then [u8 inGameCount][u8 spectatorCount] — the HUD player count is
 // acceptedRows − spectatorCount (D-NET-158).
 std::vector<uint8_t> encode_player_list(const std::vector<PlayerListEntry> &players);

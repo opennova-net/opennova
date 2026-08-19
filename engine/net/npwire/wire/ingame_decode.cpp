@@ -333,8 +333,8 @@ bool decode_player_list(const uint8_t *body, size_t len, PlayerList &out) {
 		PlayerListTeamRow t;
 		t.score1 = c.u16();
 		t.score2 = c.u16();
-		t.player_count = c.u8();
-		t.alive_count = c.u8();
+		t.koth_hold = c.u8();
+		t.ctf_flag = c.u8();
 		out.teams.push_back(t);
 		if (!c.ok) return false;
 	}

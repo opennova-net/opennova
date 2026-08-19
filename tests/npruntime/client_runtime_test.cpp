@@ -1307,11 +1307,23 @@ bool run_client_reducer_preserves_packet_message_order() {
 	FrameUpdate frame;
 	frame.mount_handle = 0xFFFF;
 	frame.health = 100;
+	// The Tab-board lanes and the feed lane ride the same canonical stream
+	// (D-HUD-23/D-HUD-24): 0x16 and 0x46 fold beyond their connection-level
+	// bookkeeping, and 0x1E folds at all (before this pin, only the host's
+	// loopback view — which applies every tag — ever saw those bodies).
+	PlayerReplicationState sync_rep;
+	sync_rep.player_slot = 3;
+	sync_rep.player_name = "ReducerName";
+	const std::vector<uint8_t> game_event{6, 0x01, 0x02, 0xFF, 0, 0, 0, 0};
 	SessionSequencing server_tx{1, 0};
 	const std::vector<uint8_t> datagram = frame_server_session(
 			server_tx, server_scrk, 1u, {
 					make_protocol_message(0x49, encode_weapon_reload(reload)),
 					make_protocol_message(0x0A, encode_frame_update(frame)),
+					make_protocol_message(0x16, encode_player_list({{3, 1}})),
+					make_protocol_message(
+							0x46, encode_player_sync(sync_rep, kPlayerSyncHasName)),
+					make_protocol_message(0x1E, game_event),
 					make_protocol_message(0x40, {0}),
 					make_protocol_message(0x6B, {0}),
 			});
@@ -1319,7 +1331,7 @@ bool run_client_reducer_preserves_packet_message_order() {
 		return false;
 	const np::JoinerConnection::PollResult poll =
 			joiner.handle_datagram(datagram.data(), datagram.size());
-	const std::array<uint8_t, 4> expected{{0x49, 0x0A, 0x40, 0x6B}};
+	const std::array<uint8_t, 7> expected{{0x49, 0x0A, 0x16, 0x46, 0x1E, 0x40, 0x6B}};
 	if (!expect(poll.inbound_reducer.size() == expected.size(),
 			"every validated reducer message enters the canonical stream"))
 		return false;
@@ -1329,7 +1341,7 @@ bool run_client_reducer_preserves_packet_message_order() {
 			return false;
 	}
 	return expect(poll.inbound_0a.size() == 1 &&
-				poll.inbound_gameplay.size() == 3,
+				poll.inbound_gameplay.size() == 6,
 			"legacy family vectors remain diagnostic views of the same packet");
 }
 

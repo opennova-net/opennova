@@ -3021,13 +3021,13 @@ the probe capture decode to a 2-byte trailer remainder.
 [u8 flags][u8 row_count (clamp 252)]
 row_count × { [u8 slot_id][u16 statusFlags LE][u16 score1 LE][u16 score2 LE][u8 rowFlags] } // 8 B/row
 [u8 team_count]
-(team_count+1) × { [u16 score LE][u16 deaths LE][u8 kothHold][u8 ctfFlag] }             // 6 B/row
+(team_count+1) × { [u16 score1 LE][u16 score2 LE][u8 kothHold][u8 ctfFlag] }           // 6 B/row
 [u8 inGameCount][u8 spectatorCount]                                                      // trailer
 ```
 
-- **The second row u16 is a STATUS BITFIELD, not a ping** (2026-07-28 correction): it lands at scoreboard record+0x36 `[orig: @0x42fdb4]` and its only reader bit-tests it to append the row's glyph suffix `[orig: the read @0x423f1f + the thirteen bit tests @0x423f23-0x4240e0]`; the parser ZEROES it when `DAT_00a85b49` is clear `[orig: @0x42fbfb]`, which a latency value never would be.
-- **The fourth row u16 is score2 = accumulated points/EXP, not deaths** (2026-08-06 correction): `stats[29]` `[orig: encoder @0x50D960 via CRenderState_GetFieldByIndex(stats, 0x1C); sole writer CPlayerStats_RecordEvent case 28 @0x52C8E0]`. Deaths is `stats[7]` and is absent from 0x16 entirely. The retail CLIENT never reads score2 — the SERVER sorts team-mode rows by it `[orig: Player_ComputeScore @0x500A80]`. `score1` is the mode's primary stat `[orig: sub_52C850 @0x52C850]` and is the ONLY score the Tab list draws `[orig: the sole read @0x423E76 in HUD_DrawKillList @0x423A30]`.
-- **Folded on the client since 2026-08-19**: `netsim::ClientReplicaPipeline::apply_player_list` / `apply_player_sync` keep the board and its connection-slot roster in `ClientState`, with two witnessed retention rules — an EMPTY 0x16 never clobbers a populated board (round-end and next-map updates routinely carry zero rows), and a 0x46 REMOVAL keeps the slot's name binding (the roster is the board's name-join table, not a liveness set `[orig: the name/clan join @0x42fd46]`). Rows are kept in WIRE ORDER; the client never re-sorts.
+- **The second row u16 is a STATUS BITFIELD, not a ping** (2026-07-28 correction): it lands at scoreboard record+0x36 `[orig: @0x42fdb4]` and its only reader bit-tests it to append the row's glyph suffix `[orig: the read @0x423f1f + the thirteen bit tests @0x423f23-0x4240e0]`; the parser ZEROES it when `g_scoreboardStatusSuffixEnabled` (set by the server's `SU <n>` text command `[orig: @0x429f71]`) is clear `[orig: @0x42fbfb]` — the serializer has the per-recipient twin gate `slot+96481` `[orig: @0x504bd6]` — which a latency value never would be.
+- **The fourth row u16 is score2 = accumulated points/EXP, not deaths** (2026-08-06 correction): `stats[29]` `[orig: encoder @0x50D960 via CRenderState_GetFieldByIndex(stats, 0x1C); sole writer CPlayerStats_RecordEvent case 28 @0x52C8E0; the accessor reads the raw dword index+1 @0x52d7d6, so field 0x1C IS the case-28 dword]`. Deaths is `stats[7]` (the case-6 counter `[orig: @0x52c9e8]`) and is absent from 0x16 entirely. The retail CLIENT never reads score2 — the SERVER sorts team-mode rows by it `[orig: Player_ComputeScore @0x500A80]`. `score1` is the mode's primary stat `[orig: sub_52C850 @0x52C850]` and is the ONLY score the Tab list draws `[orig: the sole read @0x423E76 in HUD_DrawKillList @0x423A30]`.
+- **Folded on the client since 2026-08-19**: `netsim::ClientReplicaPipeline::apply_player_list` / `apply_player_sync` keep the board and its connection-slot roster in `ClientState`, reproducing the witnessed parser shape: every well-formed 0x16 applies UNCONDITIONALLY (retail zeroes `g_scoreboard_row_count` before the row loop and parses the team table + trailer even for a zero-row list `[orig: @0x42fb46]` — an empty update yields an empty board; the drawer skips the row walk at zero `[orig: @0x423c46]`), rows for roster-unknown slots DROP (`[orig: @0x42fc05]`; the C2S 0x22 retry send is a D-HUD-24 residual), and name/clan join INTO the row at apply time exactly where retail copies them into its 56-B records `[orig: @0x42fd4c..0x42fd8f]` — so a later 0x46 removal (which deactivates and wipes the slot via `PlayerSlot_ClearAndUnlink @0x434730`; a re-bind re-inits every field `@0x4346c0`) never blanks rows already on the board. An accepted row also refreshes the slot's team and its live entity's team `[orig: @0x42fc7c/@0x42fc88]`. Rows are kept in WIRE ORDER; the client never re-sorts `[orig: the record walk in HUD_DrawKillList @0x423A30]`. (The 2026-08-19 draft's “an empty 0x16 never clobbers” / “a removal keeps the name binding” rules were refuted the same day against @0x42fb46/@0x434730.)
 - **Byte 0 is a FLAGS byte, not max_players** (2026-07-03 correction): bit0 = team-mode, bit1 =
   timed-scores → `g_scoreboard_flags @ 0xA823B8` (renamed 2026-07-03 from the bare dword label).
 - Row flags: **bit0 = SPECTATOR** (from slot+100567; the old "alive" reading was a decode-era
@@ -3047,8 +3047,13 @@ row_count × { [u8 slot_id][u16 statusFlags LE][u16 score1 LE][u16 score2 LE][u8
   every client's count (the v31 HUD defect).
 - Cadence: the server broadcast runs every **311 ticks (~5 s)**
   `[orig: Server_BuildAndBroadcastScoreboard @ 0x50D960]`.
-- Team table: `team_count`=2 ⇒ **3 rows** (T0 neutral / T1 Blue / T2 Red); per-player deaths mirror
-  into T1/T2, T0 stays 0. Probe deaths accrue with A&S play (T1 0→47, T2 0→57); ping=0 (loopback).
+- Team table: `team_count`=2 ⇒ **3 rows** (T0 neutral / T1 Blue / T2 Red), T0 all-zero (the
+  staging memset `[orig: @0x50d9c6]`). Each row's u16 pair carries the SAME two accessors as the
+  player rows — the mode stat and the accumulated points, read from the per-team stats objects
+  `[orig: @0x50dcb8/@0x50dce4]` (the probe's accruing values were these, mislabelled “deaths” in
+  the capture-era read). The byte pair is mode-specific: KOTH hold (type 0x10001 `[orig:
+  @0x50dc62]`) and the CTF flag state (types 0x10002/0x90002/0x10004 `[orig: @0x50dd30]`); the
+  4-team variant fills T3/T4 under `g_num_teams_config==4` `[orig: @0x50db5f]`.
 - The server may **re-sort the player rows between frames** — `slot_id` is authoritative, not row
   position.
 

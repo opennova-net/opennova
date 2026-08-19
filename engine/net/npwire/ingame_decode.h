@@ -432,8 +432,10 @@ struct PlayerListRow {
 	// It lands at scoreboard record+0x36 [orig: @0x42fdb4] and its only reader
 	// bit-tests it to append the row's glyph suffix [orig: the read
 	// movzx ecx,[ebx+6] @0x423f1f and the thirteen bit tests
-	// @0x423f23-0x4240e0]; the parser ZEROES it when DAT_00a85b49 is clear
-	// [orig: @0x42fbfb] — which a latency number never would be.
+	// @0x423f23-0x4240e0]; both ends zero it behind a capability gate
+	// (the server per-recipient @0x504bd6; the client when
+	// g_scoreboardStatusSuffixEnabled — the 'SU' text command @0x429f71 —
+	// is clear [orig: @0x42fbfb]) — which a latency number never would be.
 	uint16_t status_flags = 0;
 	// The MODE's primary stat, filled by the server's game-type switch
 	// [orig: sub_52C850 @0x52C850 — DM/TDM stats[5] enemy kills; A&S/TacOps
@@ -451,11 +453,18 @@ struct PlayerListRow {
 	uint8_t  flags = 0;       // bit0 = SPECTATOR (subtracted from the HUD count), team = flags >> 1
 	                          // [orig: NapiNPClientMsg_PlayerList @0x42FAE0 row apply]
 };
+// One team-table row. The u16 pair carries the SAME two stats as the player
+// rows — the mode stat and the accumulated points [orig: the team stores
+// @0x50dcb8/@0x50dce4 in Server_BuildAndBroadcastScoreboard]. The byte pair
+// is mode-specific: the KOTH hold byte (game type 0x10001 [orig: @0x50dc62])
+// and the CTF flag state (types 0x10002/0x90002/0x10004 [orig: @0x50dd30]).
+// The old player_count/alive_count names were decode-era guesses (refuted
+// 2026-08-19 against the serializer's fills).
 struct PlayerListTeamRow {
 	uint16_t score1 = 0;
 	uint16_t score2 = 0;
-	uint8_t  player_count = 0;
-	uint8_t  alive_count = 0;
+	uint8_t  koth_hold = 0;
+	uint8_t  ctf_flag = 0;
 };
 struct PlayerList {
 	uint8_t  flags = 0;        // byte 0 -> g_scoreboard_flags: bit0 team-mode, bit1 timed-scores

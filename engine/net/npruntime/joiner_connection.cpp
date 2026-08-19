@@ -976,6 +976,13 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			PlayerList player_list;
 			if (decode_player_list(
 					m.payload.data(), m.payload.size(), player_list)) {
+				// Beyond the join-gate latch below, the body IS the Tab
+				// board's data (D-HUD-24): surface it on the canonical
+				// reducer stream so ClientReplicaPipeline::apply_player_list
+				// folds it — ClientRuntime applies inbound_reducer alone.
+				// [orig: NapiNPClientMsg_PlayerList @0x42FAE0]
+				out.inbound_gameplay.emplace_back(m.tag, m.payload);
+				out.inbound_reducer.emplace_back(m.tag, m.payload);
 				player_list_seen_ = true;
 				if (post_auth_stage_ == PostAuthStage::AwaitPlayerList) {
 					// Golden frame 23: transition marker and first player-sync request share
@@ -1183,6 +1190,12 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// [orig: NapiNPClientMsg_PlayerSync @0x431370 @0x431411..0x43144c]
 			PlayerSync sync;
 			if (decode_player_sync(m.payload.data(), m.payload.size(), sync)) {
+				// The roster fold (D-HUD-24) lives in the replica pipeline;
+				// surface the validated body on the canonical reducer stream
+				// beside the connection-level bookkeeping below.
+				// [orig: NapiNPClientMsg_PlayerSync @0x431370]
+				out.inbound_gameplay.emplace_back(m.tag, m.payload);
+				out.inbound_reducer.emplace_back(m.tag, m.payload);
 				if (sync.removal)
 					out.cleared_player_slots.push_back(sync.slot_id);
 				// Bit 0x4000 is the ACK-driven roster cursor. Retail advances
@@ -1560,6 +1573,19 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			std::size_t kill_consumed = 0;
 			if (decode_kill_record(
 					m.payload.data(), m.payload.size(), kill, kill_consumed)) {
+				out.inbound_gameplay.emplace_back(m.tag, m.payload);
+				out.inbound_reducer.emplace_back(m.tag, m.payload);
+			}
+		} else if (m.tag == s2c::GAME_EVENT) {
+			// S2C 0x1E kill/objective/medic feed event. The replica pipeline
+			// folds it into ClientState feed events (D-HUD-23) — before this
+			// branch a joiner silently dropped the lane (the #511 fold only
+			// ever fired on the host's loopback view, which applies every
+			// tag). [orig: NetPacket_HandleGameEvent @0x426270]
+			GameEventRecord game_event;
+			std::size_t game_event_consumed = 0;
+			if (decode_game_event(m.payload.data(), m.payload.size(),
+					game_event, game_event_consumed)) {
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
 				out.inbound_reducer.emplace_back(m.tag, m.payload);
 			}
