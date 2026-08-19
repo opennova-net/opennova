@@ -83,9 +83,10 @@ constexpr double kGridCellReciprocal =
 // The spinmap disc sits INSIDE its rect by two DESIGN pixels, taken through
 // the same integer scaler every other hudpos coordinate uses — on the WIDTH
 // axis, even though the radius itself comes from the half-HEIGHT
-// [orig: the literal edi = 2 @0x5a60d8; the inset apply
-//  inset = (mask >> 8) & edi @0x5a64cd; Viewport_ScaleToVirtualCoords
-//  @0x5d2b20]. At 1920 wide that scales to exactly 4 px, which is why the
+// [orig: the literal edi = 2 @0x5a60d8; the inset compute
+//  (mask >> 8) & edi @0x5a64cd..0x5a64d1 scaled through
+//  Viewport_ScaleToVirtualCoords @0x5d2b20; the disc-radius subtract
+//  @0x5a6512..0x5a651d]. At 1920 wide that scales to exactly 4 px, which is why the
 // earlier live probe read it as a constant four; at other widths it is not
 // (1280 -> 3, 2560 -> 5), so the constant only matched the machine it was
 // observed on. kDiscInsetDesignPx is the witnessed literal.
@@ -154,8 +155,8 @@ struct MapView {
 	float center_x = 0.0f;
 	float center_y = 0.0f;
 	// The map is a TRUE PIXEL CIRCLE on any surface. The backing/stencil fan
-	// is four physical pixels inside the scaled rect half-height; the compass
-	// quad uses the uninset base at x1.25.
+	// sits two width-scaled DESIGN pixels (kDiscInsetDesignPx) inside the
+	// scaled rect half-height; the compass quad uses the uninset base at x1.25.
 	float base_radius = 0.0f;
 	float disc_radius = 0.0f;
 	float rect_w = 0.0f;
