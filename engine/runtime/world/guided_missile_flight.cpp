@@ -37,7 +37,7 @@ GuidedStepResult GuidedFlight::step(GuidedFlightState &st, const int32_t steer[3
 
 	// (a) pursuit error to the steer point — elevation/heading angles plus the
 	// horizontal and total distances. Runs every tick, NOT age-gated
-	// [orig: sub_546B30 @0x4463b5 -> compute_relative_position_metrics
+	// [orig: Entity_ComputeGuidedPursuitError @0x4463b5 -> compute_relative_position_metrics
 	//  @0x545710: out = elevation BAM, heading BAM, horizontal dist, total
 	//  dist. Local-frame in retail; world-frame equivalent here — see the
 	//  header's approximation note].

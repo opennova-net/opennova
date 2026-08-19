@@ -12,7 +12,7 @@ namespace opennova::world {
 // tests and broadcasts their outcome as group 1. Host-neutral pure math.
 //
 // [orig: Entity_UpdateGuidedMissile_0 @0x446060 (the stng move_function, class
-//  table @0x82AD24); sub_546B30 @0x546B30 -> compute_relative_position_metrics
+//  table @0x82AD24); Entity_ComputeGuidedPursuitError @0x546B30 -> compute_relative_position_metrics
 //  @0x545710 pursuit error (elevation/heading BAM + horizontal/total distance);
 //  Entity_UpdateTurretAim @0x445CC0 turn-clamp + velocity build; position
 //  advance = the generic entity-move step (velocity +0x98..0xA0 added to

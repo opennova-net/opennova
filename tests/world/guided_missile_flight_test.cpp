@@ -1,5 +1,5 @@
 // Guided-missile flight integrator tests [orig: Entity_UpdateGuidedMissile_0
-// @0x446060; sub_546B30 pursuit error; Entity_UpdateTurretAim @0x445CC0 turn
+// @0x446060; Entity_ComputeGuidedPursuitError pursuit error; Entity_UpdateTurretAim @0x445CC0 turn
 // clamp]. Pins the witnessed semantics: the 31-tick ignition hold, the boost
 // ramp's integer-truncated ((velocity/divisor) << 16) / 62 speed, the per-axis
 // BAM turn clamp (with the <=0 -> 6734910 default), the authority-only role
