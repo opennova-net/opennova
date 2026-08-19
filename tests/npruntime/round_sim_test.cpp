@@ -529,7 +529,7 @@ bool test_dismemberment_damage_path() {
 		// the join download serializes every pool-0 slot. Its net_id/name are
 		// our cleared stand-ins (D-AI-9); no record carries the section mask.
 		const auto snapshots = ns::snapshot_world(rig.world);
-		const ns::GameEntitySnapshot *piece_snapshot = nullptr;
+		const GameEntitySnapshot *piece_snapshot = nullptr;
 		for (const auto &snapshot : snapshots) {
 			if (snapshot.wire_handle == piece->handle.packed)
 				piece_snapshot = &snapshot;
