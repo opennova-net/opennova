@@ -364,6 +364,36 @@ void PresentApplier::present_one_wire_row(WireRow &row, ObjectModel *model,
 			row.wpn_src_variant = wpn_src_variant;
 		}
 	}
+	// REMOTE-BODY SOUNDS: walk the authored trigger words this row's clip
+	// playhead just crossed and queue the witnessed footstep/foley slots. The
+	// wire playhead is the authority here (closer to retail than a free-running
+	// clip); a state change re-seeds the cursor so a fresh clip fires its frame
+	// 0 and a mid-clip switch back-fires nothing.
+	{
+		Simulation *sim =
+				Object::cast_to<Simulation>(ObjectDB::get_instance(sim_id_));
+		const int32_t foot_state = wfield_i(p, base, Simulation::PF_ANIM_STATE);
+		const int32_t foot_phase =
+				wfield_i(p, base, Simulation::PF_ANIM_PHASE_TICKS);
+		if (sim != nullptr && foot_state >= 0 && foot_phase >= 0) {
+			if (foot_state != row.foot_state) {
+				row.foot_state = foot_state;
+				row.foot_phase = -1;   // fresh clip: frame 0 fires
+			}
+			if (foot_phase > row.foot_phase) {
+				sim->present_wire_body_sounds(
+						wfield_i(p, base, Simulation::PF_TYPE_ID),
+						wfield_i(p, base, Simulation::PF_CHARACTER_ID),
+						wfield_i(p, base, Simulation::PF_WIRE_HANDLE),
+						wfield_i(p, base, Simulation::PF_CARRIER_HANDLE),
+						foot_state, row.foot_phase, foot_phase,
+						Vector3(p[base + Simulation::PF_POS_X],
+								p[base + Simulation::PF_POS_Y],
+								p[base + Simulation::PF_POS_Z]));
+			}
+			row.foot_phase = foot_phase;
+		}
+	}
 	const bool next_visible =
 			wfield_i(p, base, Simulation::PF_HIDDEN) == 0 &&
 			wfield_i(p, base, Simulation::PF_LOCAL_VIEW_SUPPRESSED) == 0;

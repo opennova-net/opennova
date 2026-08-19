@@ -349,6 +349,13 @@ int resolve_ai_weapons(world::World &world, const DefItemsFile &items) {
             if (def->sound_profile_female[0] != '\0')
                 ae->profile.sound_profile_female = static_cast<int16_t>(
                         world.sound_profiles.index_of(def->sound_profile_female));
+            // The same pair, retained BY ITEM TYPE so a wire-fed body — which
+            // has no AiEntity to carry the bound index — can resolve its
+            // footstep/foley sets at presentation time.
+            audio::OrganicSoundProfile op;
+            op.primary = ae->profile.sound_profile;
+            op.female = ae->profile.sound_profile_female;
+            world.organic_sound_profiles.set(e->item_id, op);
         }
     }
     if (world.ammo.empty()) return 0; // no ammo.def loaded — NPCs stay unarmed

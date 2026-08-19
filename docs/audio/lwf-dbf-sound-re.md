@@ -416,12 +416,23 @@ never coalesced, a fresh clip fires frame 0, a mid-clip attach back-fires
 nothing — alongside `capsule_bottom_at` for the foot-level dip `[orig: the
 AnimMap out[3] cell @0x4b77d3]`. The decoded groundEntity link now reaches
 presentation as `PF_CARRIER_HANDLE`, so the on-entity slot is resolvable off a
-wire row. What the leg itself still needs: a wire row's SOUND PROFILE (the
-authority path reads the bound `AiEntity.profile.sound_profile`, which a
-ClientState row has no equivalent of — it wants the items.def `sound_profile`
-published per row, or an engine resolver taking type_id + character_id), then
-the applier scan that walks each remote body's wire-driven playhead and queues
-`SoundSlotEvent`s through the existing `drain_slot_sounds` player.
+wire row. LEG LANDED 2026-08-19: the profile question is answered the way master already
+answers it for vehicles — the item-traits sweep now retains each ORGANIC item
+type's `sound_profile` / `sound_profile_female` pair in
+`world.organic_sound_profiles` alongside the AiEntity bind, and
+`audio::organic_slot_set` resolves a slot for a body identified only by its
+items.def type id, mirroring the witnessed fallback chain (female byte, the
+"default" profile, and the resolved-id-0 no-op) `[orig: Entity_GetProfileSlotSound
+@0x528300, female @0x52831c; ItemDef_AllocateWithDefaults @0x49e3f5; the
+find-miss base @0x526e30]`. `Simulation::present_wire_body_sounds` walks the
+trigger words a row's WIRE-DRIVEN playhead crossed (the clip identity comes from
+the existing `client_row_adm_by_type_` resolve) and queues `SoundSlotEvent`s
+through the same `drain_slot_sounds` player the authority bodies use — foley
+FIRST at the body origin with no dip or surface pick, then the feet at foot
+level dipped by that frame's capsule bottom `[orig: org1 @0x4bf169-0x4bf23e
+precedes org2 @0x4b76e6-0x4b78a8]`. Residual: the parachute family (41-43) and
+the velocity-gated freefall slot 44 stay out — the wire carries no vertical
+velocity, so freefall has no witnessed equivalent here.
 
 ## Placed ambient markers — the envsnd emitter system (grilled 2026-07-10)
 

@@ -12,6 +12,7 @@
 #include <npwire/ingame_decode.h> // kRoundEventFlag* (the fire-mode byte)
 #include <npwire/ingame_message_id.h>
 #include <hud/feed_format.h> // the witnessed feed line/color policy
+#include <audio/footstep_slot.h> // the witnessed slot pick + the wire-row profile resolve
 #include <npwire/net_ports.h> // lan_host_bind_ports (the D-NET-210 bind scan)
 #include <vfs/vfs.h> // vfs_expansion_version_checksum (the D-NET-166 JOIN CRC)
 #include <npwire/wire_handle.h>  // pool()/kPoolItem/kInvalid (the wire handle home)
@@ -1489,4 +1490,87 @@ String Simulation::format_feed_camp_line(const String &p_template,
 	return String::utf8(opennova::hud::feed_format_camp_line(
 			p_template.utf8().get_data(), p_wpname.utf8().get_data())
 			                    .c_str());
+}
+
+
+// One wire row's REMOTE-body sounds for this frame. The authority bodies reach
+// the same slots through AiSystem::infantry_anim_sound_pass; a wire-fed body
+// has no AiEntity, so its identity arrives as the items.def type id and its
+// clip playhead is the wire-driven one the applier already tracks.
+//
+// Retail consumes ONE trigger word per authored clip frame entered, foley
+// FIRST and then the feet (retail: org1 @0x4bf169-0x4bf23e precedes the foot
+// block org2 @0x4b76e6-0x4b78a8). Foley plays at the body ORIGIN with no dip
+// and no surface pick; a footstep plays at FOOT level, dipped by that frame's
+// capsule bottom, through the shared slot pick.
+void Simulation::present_wire_body_sounds(int p_type_id, int p_character_id,
+		int p_wire_handle, int p_carrier_handle, int p_anim_state,
+		int p_from_phase, int p_to_phase, const Vector3 &p_pos) {
+	if (!world_installed_ || !world_ || p_anim_state < 0) return;
+	if (p_to_phase <= p_from_phase) return;
+	const auto adm = client_row_adm_by_type_.find(static_cast<uint16_t>(p_type_id));
+	if (adm == client_row_adm_by_type_.end() || adm->second < 0) return;
+
+	// Godot (x, y, z) -> mission (x, -z, y) 16.16, the drain's own convention.
+	const int32_t body[3] = { static_cast<int32_t>(p_pos.x * 65536.0f),
+		                      static_cast<int32_t>(-p_pos.z * 65536.0f),
+		                      static_cast<int32_t>(p_pos.y * 65536.0f) };
+	const bool female =
+			p_character_id != 0 &&
+			world_->character_traits.is_female(static_cast<uint16_t>(p_character_id));
+
+	uint32_t words[16] = {};
+	const int n = infantry_anim_.scan_triggers(adm->second, p_anim_state,
+			p_from_phase, p_to_phase, words, 16);
+	if (n <= 0) return;
+	// The dip belongs to the frame the playhead ended on.
+	const int32_t capsule_bottom =
+			infantry_anim_.capsule_bottom_at(adm->second, p_anim_state, p_to_phase);
+
+	for (int i = 0; i < n; ++i) {
+		const uint32_t ev = words[i];
+		if (ev == 0u) continue;
+		// FOLEY first, at the body origin (retail: the org1 block precedes the
+		// foot block in the same word). Bits 0x20..0x400 -> slots 24..29.
+		for (int b = 0; b < 6; ++b) {
+			if ((ev & (0x20u << b)) == 0u) continue;
+			const int slot = opennova::audio::kSlotAudio1 + b;
+			const std::string *set = opennova::audio::organic_slot_set(
+					world_->sound_profiles, world_->organic_sound_profiles,
+					p_type_id, female, slot);
+			if (set == nullptr) continue;
+			opennova::world::SoundSlotEvent sev;
+			sev.source_handle = static_cast<uint16_t>(p_wire_handle);
+			sev.pos[0] = body[0];
+			sev.pos[1] = body[1];
+			sev.pos[2] = body[2];
+			sev.slot = static_cast<uint8_t>(slot);
+			std::snprintf(sev.set_name, sizeof(sev.set_name), "%s", set->c_str());
+			world_->slot_sounds.push_back(sev);
+		}
+		// Then the feet: bit 0x1 = LEFT, 0x2 = RIGHT, dipped to foot level.
+		for (int foot = 0; foot < 2; ++foot) {
+			if ((ev & (foot == 0 ? 0x1u : 0x2u)) == 0u) continue;
+			const int32_t feet_z = body[2] - capsule_bottom;
+			const int32_t surface = world_->surface_map != nullptr
+					? opennova::terrain::surface_type_at_fixed(
+							world_->surface_map, body[0], body[1])
+					: 0;
+			const int slot = opennova::audio::footstep_slot(
+					feet_z, world_->env.water_z,
+					p_carrier_handle >= 0, surface, foot);
+			const std::string *set = opennova::audio::organic_slot_set(
+					world_->sound_profiles, world_->organic_sound_profiles,
+					p_type_id, female, slot);
+			if (set == nullptr) continue;
+			opennova::world::SoundSlotEvent sev;
+			sev.source_handle = static_cast<uint16_t>(p_wire_handle);
+			sev.pos[0] = body[0];
+			sev.pos[1] = body[1];
+			sev.pos[2] = feet_z;
+			sev.slot = static_cast<uint8_t>(slot);
+			std::snprintf(sev.set_name, sizeof(sev.set_name), "%s", set->c_str());
+			world_->slot_sounds.push_back(sev);
+		}
+	}
 }

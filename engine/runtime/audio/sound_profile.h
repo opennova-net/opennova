@@ -24,6 +24,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <unordered_map>
 #include <string>
 #include <vector>
 
@@ -162,6 +163,32 @@ public:
 
 private:
     std::vector<SoundProfile> entries_;
+};
+
+// items.def sound-profile bindings for one ORGANIC item type, resolved once at
+// the item-traits sweep (the same portable boundary that binds vehicle audio).
+// The authority body channel reads the equivalent indices off its AiEntity;
+// a wire-fed body has no AiEntity, so presentation resolves through this table
+// by the row's items.def type id instead.
+// [orig: ItemDef_ResolveAllResources @0x49e5f0/@0x49e7f0; the female select
+//  Entity_GetProfileSlotSound @0x528300 female byte @0x52831c]
+struct OrganicSoundProfile {
+	int16_t primary = -1;
+	int16_t female = -1;
+};
+
+class OrganicSoundProfileTable {
+public:
+	void set(int32_t item_id, const OrganicSoundProfile &p) { by_item_[item_id] = p; }
+	const OrganicSoundProfile *get(int32_t item_id) const {
+		const auto it = by_item_.find(item_id);
+		return it == by_item_.end() ? nullptr : &it->second;
+	}
+	void clear() { by_item_.clear(); }
+	bool empty() const { return by_item_.empty(); }
+
+private:
+	std::unordered_map<int32_t, OrganicSoundProfile> by_item_;
 };
 
 } // namespace opennova::audio

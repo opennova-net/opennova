@@ -468,6 +468,9 @@ public:
     // selector. [orig: ItemDef_ParsePhysicsProperty @0x49d870 fields consumed by
     // Entity_UpdateVehiclePhysics @0x48af00; vehicle_motor.h]
     VehicleTraitsTable vehicle_traits;
+    // items.def sound profiles per ORGANIC item type — the wire body channel's
+    // equivalent of AiProfile.sound_profile (audio/sound_profile.h).
+    audio::OrganicSoundProfileTable organic_sound_profiles;
 
     // Host-wired terrain sampler for the round sim's ground stop (the AI grounding
     // shares the same field through AiSystem). Null = no terrain impacts.

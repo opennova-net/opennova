@@ -1747,6 +1747,18 @@ public:
 	// slot} — played by the fire present pass at full volume
 	// [orig: Entity_PlaySound3D_FullVolume @ 0x528e20].
 	Array drain_slot_sounds();
+
+	// Queue this frame's REMOTE-body footsteps and foley for one wire row.
+	// The applier supplies the row's identity, the wire-driven clip playhead
+	// span it just crossed, and its world pose; this walks the authored
+	// trigger words across that span and emits the witnessed slot sounds
+	// through the same SoundSlotEvent drain the authority bodies use.
+	// (retail: the per-frame foot consume org2 @0x4b76e6-0x4b78a8; the foley
+	// block org1 @0x4bf169-0x4bf23e runs FIRST in the same event word; the
+	// slot pick and the profile resolve live in audio/footstep_slot.h)
+	void present_wire_body_sounds(int p_type_id, int p_character_id,
+			int p_wire_handle, int p_carrier_handle, int p_anim_state,
+			int p_from_phase, int p_to_phase, const Vector3 &p_pos);
 	// Drain persistent entity-attached emitter registrations. Producers refresh
 	// a keyed (source_spawn_id, lane) intent; the audio layer expands `set` into
 	// LWF layers and owns keep-alive, spatial ranking, and physical voices.
