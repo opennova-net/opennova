@@ -166,6 +166,27 @@ int main() {
             sum += fr.dx;
         }
         TEST_EXPECT(sum == idle_v0);
+
+        // Per-variant queries follow the SERVED ring entry, not entry 0 — the
+        // state-entry rotate re-inits the channel from the served entry, so its
+        // own frame count is the promotion clock and its own bottom is the dip
+        // [orig: ring rotate @0x40b740-0x40b749; frame_count read @0x40b25d].
+        const int32_t idle_len_v0 = rings.clip_length_ticks(rid, kIdle, 0);
+        const int32_t idle_len_v1 = rings.clip_length_ticks(rid, kIdle, 1);
+        const int32_t walk_len = rings.clip_length_ticks(rid, kWalkForward);
+        std::printf("[adm] ring length idle[0]=%d idle[1]=%d walk=%d\n",
+                idle_len_v0, idle_len_v1, walk_len);
+        TEST_EXPECT(idle_len_v0 == rings.clip_length_ticks(rid, kIdle));
+        TEST_EXPECT(idle_len_v1 == walk_len); // variant 1 IS the walk clip
+        TEST_EXPECT(rings.clip_length_ticks(rid, kIdle, 2) == idle_len_v0); // wrap
+        TEST_EXPECT(rings.capsule_bottom_at(rid, kIdle, 4, 1) ==
+                    rings.capsule_bottom_at(rid, kWalkForward, 4));
+        uint32_t ring_words_v1[8] = {};
+        uint32_t walk_words[8] = {};
+        const int n_v1 = rings.scan_triggers(rid, kIdle, -1, 7, ring_words_v1, 8, 1);
+        const int n_walk = rings.scan_triggers(rid, kWalkForward, -1, 7, walk_words, 8);
+        TEST_EXPECT(n_v1 == n_walk);
+        for (int i = 0; i < n_v1; ++i) TEST_EXPECT(ring_words_v1[i] == walk_words[i]);
     }
 
     // THE CROSSED-FRAME TRIGGER SCAN — one entry per authored frame entered,

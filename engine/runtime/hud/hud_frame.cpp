@@ -1123,13 +1123,16 @@ void HudFrameCompiler::element_feed(const HudFrameState &state, float w,
 	// [orig: @0x59ad30; the system walk @0x59ae5e..0x59aebf]. (The FIRST loop
 	// is the player-chat ring at HUDCHATTEXT — its feeder is the unported
 	// S2C 0x14 channel, D-HUD-6/D-NET-215.) Witnessed properties:
-	//   * only THREE ring rows are walked per channel, and since the sink puts
-	//     the NEWEST line in row 0, the OLDEST of the three sits AT the anchor
-	//     and each newer line is 18 design px BELOW it [orig: the 0x12 step
-	//     @0x59ad97, scaled through Viewport_ScaleToVirtualCoords] — the feed
-	//     grows downward. Expiry staggering keeps recency and expiry in the
-	//     same order, so "the newest three slots, live only" equals the last
-	//     three live lines here.
+	//   * only THREE ring rows are walked per channel, and the walk DESCENDS
+	//     from the top slot to slot 0 (msgEntry -= 0x80 down to the base
+	//     [orig: @0x59aebf..0x59aecb]); with the sink putting the NEWEST line
+	//     in row 0, the OLDEST of the three lands AT the anchor and each newer
+	//     line is 18 design px BELOW it [orig: the 0x12 step @0x59ad97, scaled
+	//     through Viewport_ScaleToVirtualCoords] — the feed grows downward.
+	//     Only drawn rows consume a rung (the skip path bypasses the y step
+	//     [orig: @0x59aeb7 runs only on the >0-alpha arm]). Expiry staggering
+	//     keeps recency and expiry in the same order, so "the newest three
+	//     slots, live only" equals the last three live lines here.
 	//   * the stored per-line color is drawn AS STORED [orig: the color read
 	//     @0x59ae97]; the computed `timer * 255 / 186` alpha fold belongs to
 	//     the CHAT loop alone [orig: @0x59adef], so this ring does not fade.

@@ -1773,7 +1773,16 @@ shared advance onto AI bodies:**
    test_player_weapon_channel_variant_ring` and the ring block of
    `simassets_adm_root_motion`. The PRIMARY channel's `eval_pose_blended`s also
    accept variants now (defaulted 0), so AI body clip rings can ride the same seam
-   once their producer serves them.
+   once their producer serves them. Grilled 2026-08-19: the ring rotate replaces the
+   table slot with `entry+36` and re-inits the CHANNEL from the served entry
+   `[orig: @0x40b740-0x40b749]`, so every later frame-count/keyframe/trigger read
+   runs on that entry's own clip `[orig: frame_count read @0x40b25d; unlerped
+   trigger @0x40b32f]` — ring entries may author different lengths, and the served
+   entry's length is the promotion clock. `clip_length_ticks` therefore takes the
+   variant (defaulted overload), `scan_triggers`/`capsule_bottom_at` accept one,
+   and the secondary channel's deferred promotion compares `wpn_clip_phase`
+   against the SERVED entry's length (pinned by the `simassets_adm_root_motion`
+   ring block).
 4. **AI (org1) bodies run the shared advance.** Both body updaters pass their out-array
    to `AnimMap_UpdateDualChannels @0x40b8c0` (§14.8.1, the feet-dip note in §17.4), so
    the org1 body's secondary channel promotes, steps, and blends like anyone's —
@@ -4732,11 +4741,15 @@ clears the effect's probability gate. The gate is data-driven
 `PRNG_Next16` into `srand`, then accepts when the second
 `PRNG_Next16 % 100 <= ftol(prob * 100.0)` (the ×100 scale `@ 0x7c4654`).
 The glass user-point path passes `useAltProbability = 1`
-(`@ 0x5cf0b3/0x5cf0f4` in `Terrain_SpawnEffectsAtUserPoint`), and the `ftol`
-TRUNCATION makes the Glass gate `32`, not 33 (0.33f × 100 = 32.9999983): the
-reimpl's original `{33,5,5,10}` table was off by one on the glass roll and
-now ports the float×100-truncate structurally
-(`destruction.h kGlassShatterAltProbability`). The presentation drain receives
+(`@ 0x5cf0b3/0x5cf0f4` in `Terrain_SpawnEffectsAtUserPoint`). Gate arithmetic
+(re-grilled 2026-08-19 against the raw table bytes): the Glass alt cell is
+`0x3EA8F5C3` — exactly `0.33f` — and `0.33f × 100` is `33.0000013` in every
+intermediate precision, so the `ftol` yields `33` and the `<=` admits rolls
+`0..33`, a 34-of-100 gate. (The 2026-08-18 decode's "truncates to 32" claim
+was arithmetic error — the product sits just above 33, not below.) The reimpl
+ports the float×100-truncate structurally with the bit-exact table floats and
+a compile-time boundary pin (`destruction.h kGlassShatterAltProbability` +
+`static_assert`). The presentation drain receives
 those resolved position, direction, and effect rows verbatim. Native
 `destruction` pins full-pose placement, authored-radius selection, effect
 order, PRNG state, and break-once; GUT `nova_simulation_test` pins the real

@@ -1782,7 +1782,7 @@ The per-case color/policy table of the `@0x426270` switch (jump table
 
 | types | policy | color |
 |---|---|---|
-| 1/2/3 (suicide), 4/5/6 (kill), 10/11/12 (vehicle), 13/14/15 (knife) | own white / other grey; the grey branch returns unless `g_MpVerbose2` `[orig: the 13 tests @0x426472..@0x4267C6]` | `-1` / `-5263441` (0xFFAFAFAF) |
+| 1/2/3 (suicide), 4/5/6 (kill), 10/11/12 (vehicle), 13/14/15 (knife) | own white / other grey; the grey branch returns unless `g_MpVerbose2` `[orig: 13 test sites @0x426472..@0x4267C6 over 15 gated types — 10/11/12 funnel through ONE shared test @0x42664A; 39/45 jump to their canned post before any gate @0x426454/@0x426468]` | `-1` / `-5263441` (0xFFAFAFAF) |
 | 7/8/9 (friendly fire) | always posts | `-1` white |
 | 16/17/18 | always posts | `g_hudColorTable[0]` = `-1` `[orig: HUD_InitTeamColorTable @0x51F245]` |
 | 19/20/21 | team/gametype-keyed strings at runtime, plus sounds/effects/progress bars | `g_hudColorTable[0]` (gametype 65544 team literals in 20) |

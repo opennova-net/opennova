@@ -60,28 +60,39 @@ public:
 	                     float target_weight,
 	                     opennova::world::RootMotionFrame &out) override;
 	int32_t clip_length_ticks(int adm_id, int state_id) const override;
+	// The served ring entry's own length — the promotion clock for ringed rows
+	// [orig: the ring rotate @0x40b740-0x40b749 re-inits the channel from the
+	// served entry; frame_count read @0x40b25d runs on that clip].
+	int32_t clip_length_ticks(int adm_id, int state_id, int variant) const override;
 	bool clip_loops(int adm_id, int state_id) const override;
 
 	// THE CROSSED-FRAME TRIGGER SCAN — the authored event words a body crossed
 	// between two playhead positions, in order, one entry per authored clip
-	// FRAME [orig: the per-frame consume org2 @0x4b76e6-0x4b78a8; .bad v1
-	// event stride 24, trigger i32 @+20].
+	// FRAME [.bad v1 event stride 24, trigger i32 @+20 — sampled unlerped from
+	// the FLOOR keyframe, AnimChannel_InterpolateKeyframe @0x40b32f].
 	//
-	// Retail consumes the trigger word once per authored frame the playhead
-	// enters, so a body that crosses two frames in one advance fires both —
-	// this returns them in order rather than coalescing. `from_phase` is
+	// Retail's own consume is a per-TICK floor-frame sample (out[5] ->
+	// g_animEventTriggerBits @0x40b8a3) parity-gated to every other tick
+	// (org1 odd @0x4bf144 / org2 even @0x4b76e6), which at the authored-30fps
+	// vs 62 Hz ratio fires each entered frame once — that per-tick form is
+	// the authority path (infantry_anim_sound_pass). This scan serves the
+	// WIRE lane, where a consumed row jumps the playhead across several
+	// authored frames at once: emitting each entered frame's word in order
+	// reproduces what the per-tick consume would have fired. `from_phase` is
 	// EXCLUSIVE and `to_phase` INCLUSIVE (the frame just entered fires), both
 	// in the same IDA half-frame ticks `advance` uses. A fresh clip start
 	// passes from_phase = -1 so frame 0 fires; a mid-clip attach passes the
 	// attach phase so nothing back-fires. Writes at most `max_out` words and
 	// returns how many were written.
 	int scan_triggers(int adm_id, int state_id, int32_t from_phase,
-	                  int32_t to_phase, uint32_t *out, int max_out) const;
+	                  int32_t to_phase, uint32_t *out, int max_out,
+	                  int variant = 0) const;
 
 	// The frame's capsule bottom (out[3] = bottom * 65536) at one playhead
 	// position — the dip that puts a footstep at FOOT level rather than the
 	// body origin [orig: the AnimMap out[3] cell @0x4b77d3].
-	int32_t capsule_bottom_at(int adm_id, int state_id, int32_t phase_ticks) const;
+	int32_t capsule_bottom_at(int adm_id, int state_id, int32_t phase_ticks,
+	                          int variant = 0) const;
 
 	bool empty() const { return sets_.empty(); }
 	int set_count() const { return static_cast<int>(sets_.size()); }
