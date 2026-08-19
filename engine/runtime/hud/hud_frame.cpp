@@ -82,34 +82,24 @@ void HudFrameCompiler::reset_runtime_state() {
 	stance_ = StanceFade{};
 	flash_prev_rounds_ = -1;
 	flash_stamp_ = 0;
-	messages_.clear();
 	feed_lines_.clear();
 	draw_list_ = HudDrawList{};
 }
 
 void HudFrameCompiler::push_message(const std::string &text, int now_ticks) {
-	// [orig: HUD_DisplayTriggeredText @ 0x51f190 -> Chat_AddDebugMessage
-	// @ 0x4987f0 — 930-tick life, >= 186-tick stagger vs the previous line]
-	if (text.empty()) {
-		return;
-	}
-	const bool has_prev = !messages_.empty();
-	const int prev_expire = has_prev ? messages_.back().expire_tick : 0;
-	HudMessageLine line;
-	line.text = text.substr(0, static_cast<size_t>(kMessageTextMax));
-	line.expire_tick = message_expire_tick(now_ticks, prev_expire, has_prev);
-	messages_.push_back(line);
-	while (messages_.size() > static_cast<size_t>(kMaxCarriedMessages)) {
-		messages_.erase(messages_.begin());
-	}
+	// Mission triggered text posts into the ONE system ring with the default
+	// white — retail routes it through the same sink as every 0x1E line
+	// [orig: HUD_DisplayTriggeredText @ 0x51f190 ->
+	// Chat_AddDebugMessage(text, -1, 930) @ 0x51f216].
+	push_feed_line(text, 0xFFFFFFFFu, now_ticks);
 }
 
 void HudFrameCompiler::push_feed_line(const std::string &text, uint32_t argb,
 		int now_ticks) {
-	// The SYSTEM ring sink — same slot policy as the chat sink
-	// [orig: Chat_AddDebugMessage @ 0x4987f0 — 930-tick life, >= 186-tick
-	// stagger, 119-char slots], but the caller's packed color is stored RAW
-	// and drawn as stored [orig: @0x59ae97 reads the stored dword].
+	// The SYSTEM ring sink [orig: Chat_AddDebugMessage @ 0x4987f0 — 930-tick
+	// life, >= 186-tick stagger, 119-char slots]. The caller's packed color is
+	// stored RAW and drawn as stored [orig: the second HUD_DrawConsoleMessages
+	// loop passes the stored dword @0x59ae97].
 	if (text.empty()) {
 		return;
 	}
@@ -225,7 +215,6 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	// messages, exactly the retail pass order [orig: HUD_DrawFriendlyTagsPass
 	// @ 0x5a87cc, then HUD_DrawConsoleMessages @ 0x5a87d1].
 	element_friendly_tags(state, surface_w, surface_h);
-	element_messages(state, surface_w, surface_h);
 	element_feed(state, surface_w, surface_h);
 	return draw_list_;
 }
@@ -1104,66 +1093,29 @@ void HudFrameCompiler::element_objective_line(const HudFrameState &state,
 	++draw_list_.elements_drawn;
 }
 
-void HudFrameCompiler::element_messages(const HudFrameState &state, float w,
-		float h) {
-	// [orig: Chat_AddDebugMessage @ 0x4987f0 display — newest at the anchor,
-	// scrolling upward, the HUDCHLINE cap]
-	// The CHAT declutter gate carries a SECOND hard-coded cull on top of the
-	// slot bit: any level >= 2 hides the feed even with slot 23 authored
-	// visible [orig: both tests at the one site @ 0x59AD66]. The message
-	// ring itself keeps aging — only the draw is skipped.
-	if (!state.declutter_visible[kDeclutterChat] ||
-			state.hud_detail_level >= 2) {
-		return;
-	}
-	if (font_.font() == nullptr) {
-		return;
-	}
-	const float ax = static_cast<float>(
-			layout_.chat_text.present ? layout_.chat_text.x : 142);
-	const float ay = static_cast<float>(
-			layout_.chat_text.present ? layout_.chat_text.y : 711);
-	std::vector<const HudMessageLine *> live;
-	for (const HudMessageLine &line : messages_) {
-		if (line.expire_tick > state.ticks) {
-			live.push_back(&line);
-		}
-	}
-	if (live.empty()) {
-		return;
-	}
-	const int max_lines = std::max(layout_.chat_lines, 1);
-	const int start = std::max(0,
-			static_cast<int>(live.size()) - max_lines);
-	const float row_h = text_line_h() * kDesignH / std::max(h, 1.0f);
-	float row_y = ay;
-	for (int i = static_cast<int>(live.size()) - 1; i >= start; --i) {
-		// The message feed rides the snapshot overlay color like the chat
-		// drawer [orig: the g_hudActiveColor read @0x5930e0 (inline data ref)].
-		emit_text(live[static_cast<size_t>(i)]->text.c_str(), ax, row_y, w, h,
-				active_color(state), 0u);
-		row_y -= row_h;
-	}
-	++draw_list_.elements_drawn;
-}
-
 void HudFrameCompiler::element_feed(const HudFrameState &state, float w,
 		float h) {
-	// THE SYSTEM MESSAGE FEED — retail's kill/join/system channel, drawn by the
-	// same routine as the chat ring [orig: HUD_DrawMessageFeeds @ 0x59ad30].
-	// Three witnessed properties this element reproduces:
-	//   * only THREE ring rows are walked per channel [orig: the row walk
-	//     @0x59ae5e..0x59aebf], and since the sink puts the NEWEST line in row
-	//     0, the OLDEST of the three sits AT the anchor and each newer line is
-	//     18 design px BELOW it [orig: local_4 = 0x12 @0x59ad97, scaled through
-	//     Viewport_ScaleToVirtualCoords @0x5d2b20] — the feed grows downward,
-	//     unlike the chat sink's upward scroll.
-	//   * the stored per-line color is drawn AS STORED [orig: @0x59ae97]; the
-	//     computed `timer * 255 / 186` alpha belongs to the CHAT ring alone
-	//     [orig: the fold @0x59adef], so this ring does not fade.
+	// THE SYSTEM MESSAGE FEED — the one ring every Chat_AddDebugMessage line
+	// lands in: the 0x1E kill/objective/medic lines AND mission triggered
+	// text [orig: HUD_DisplayTriggeredText @0x51f190 posts @0x51f216 into the
+	// same sink]. Drawn by the second HUD_DrawConsoleMessages loop
+	// [orig: @0x59ad30; the system walk @0x59ae5e..0x59aebf]. (The FIRST loop
+	// is the player-chat ring at HUDCHATTEXT — its feeder is the unported
+	// S2C 0x14 channel, D-HUD-6/D-NET-215.) Witnessed properties:
+	//   * only THREE ring rows are walked per channel, and since the sink puts
+	//     the NEWEST line in row 0, the OLDEST of the three sits AT the anchor
+	//     and each newer line is 18 design px BELOW it [orig: the 0x12 step
+	//     @0x59ad97, scaled through Viewport_ScaleToVirtualCoords] — the feed
+	//     grows downward. Expiry staggering keeps recency and expiry in the
+	//     same order, so "the newest three slots, live only" equals the last
+	//     three live lines here.
+	//   * the stored per-line color is drawn AS STORED [orig: the color read
+	//     @0x59ae97]; the computed `timer * 255 / 186` alpha fold belongs to
+	//     the CHAT loop alone [orig: @0x59adef], so this ring does not fade.
 	//   * the anchor is HUDSYSTEXT, not HUDCHATTEXT.
-	// The declutter gate is the chat slot's (one site covers both feeds)
-	// [orig: both tests @ 0x59AD66].
+	// The declutter mask and the hard level cull gate BOTH loops at one site
+	// [orig: the slot bit @0x59AD33, level >= 2 @0x59AD43]. The ring itself
+	// keeps aging — only the draw is skipped.
 	if (!state.declutter_visible[kDeclutterChat] ||
 			state.hud_detail_level >= 2) {
 		return;
@@ -1171,10 +1123,11 @@ void HudFrameCompiler::element_feed(const HudFrameState &state, float w,
 	if (font_.font() == nullptr) {
 		return;
 	}
+	// Fallback = the JO-authored HUDSYSTEXT anchor (hudpos.def "5 , 22").
 	const float ax = static_cast<float>(
 			layout_.sys_text.present ? layout_.sys_text.x : 5);
 	const float ay = static_cast<float>(
-			layout_.sys_text.present ? layout_.sys_text.y : 94);
+			layout_.sys_text.present ? layout_.sys_text.y : 22);
 	std::vector<const HudMessageLine *> live;
 	for (const HudMessageLine &line : feed_lines_) {
 		if (line.expire_tick > state.ticks) {

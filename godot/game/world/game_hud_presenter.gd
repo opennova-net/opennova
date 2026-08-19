@@ -1029,7 +1029,7 @@ func _queue_hud_message(text: String, text_id: int) -> void:
 ## The message feed: this frame's folded S2C 0x1E game events, each resolved
 ## into the game's own canned sentence and posted to the SYSTEM ring.
 ## The sim hands over the actor names, the "Canned Msg" key and the witnessed
-## line color; here we look the key up in gametext and run the $A/$B
+## line color; here we look the keys up in gametext and run the witnessed
 ## substitution through the engine formatter, so the sentence is always the
 ## game's own text and never one we compose.
 ## [orig: NetPacket_HandleGameEvent @0x426270 -> HUD_FormatKillEventMessage
@@ -1046,6 +1046,12 @@ func _flush_feed_events() -> void:
 	var table: RtxtStringFile = Strings.get_table("gametext")
 	if table == null:
 		return
+	# A missing actor formats as the Client fallback string
+	# [orig: HUD_FormatKillEventMessage null-entity paths @0x422DDA/@0x422E91
+	#  -> GameText_GetString("Client", "STRCLI01") = "Unknown"].
+	var unknown := ""
+	if table.has_string_in_section("Client", "STRCLI01"):
+		unknown = table.get_string_in_section("Client", "STRCLI01")
 	for row in rows:
 		var key := String(row.get("key", ""))
 		if key.is_empty() or not table.has_string_in_section("Canned Msg", key):
@@ -1053,8 +1059,28 @@ func _flush_feed_events() -> void:
 		var tmpl := table.get_string_in_section("Canned Msg", key)
 		if tmpl.is_empty():
 			continue
-		var line := String(sim.format_feed_line(tmpl,
-				String(row.get("attacker", "")), String(row.get("victim", ""))))
+		var line := ""
+		var wpname_key := String(row.get("wpname_key", ""))
+		if not wpname_key.is_empty():
+			# Camp line: the template's %s takes the level's WPNames string
+			# [orig: sprintf @0x427327/@0x42736B].
+			var wpname := ""
+			if table.has_string_in_section("WPNames", wpname_key):
+				wpname = table.get_string_in_section("WPNames", wpname_key)
+			line = String(sim.format_feed_camp_line(tmpl, wpname))
+		else:
+			var attacker := String(row.get("attacker", ""))
+			var victim := String(row.get("victim", ""))
+			# The bonus re-compose rides STRCND48 ("%s - Bonus for %s") when
+			# the aux actor is the local player [orig: the sprintf @0x422CA2].
+			var extra := String(row.get("extra", ""))
+			var bonus_tmpl := ""
+			if not extra.is_empty() and table.has_string_in_section("Canned Msg", "STRCND48"):
+				bonus_tmpl = table.get_string_in_section("Canned Msg", "STRCND48")
+			line = String(sim.format_feed_line(tmpl,
+					attacker if not attacker.is_empty() else unknown,
+					victim if not victim.is_empty() else unknown,
+					extra, bonus_tmpl))
 		if line.is_empty():
 			continue
 		_game_hud.push_feed_line(line, int(row.get("color", -1)))

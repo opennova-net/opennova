@@ -1007,7 +1007,8 @@ enum class GameEventKind : uint8_t {
 	// ignored for this kind.
 	SelfDeath,
 	// The medic lines, drawn in their own light blue 0xFF008CEE and NOT kills
-	// [orig: 0x426270 cases 38 "$B has revived $A." / 45 "…medical attention…"].
+	// [orig: cases 38 "$B has revived $A." @0x42640F / 45 "…medical
+	// attention…" @0x426442 / the emitterless 39 @0x426456 — one shared post].
 	Medic,
 };
 GameEventKind game_event_kind(uint8_t event_type);

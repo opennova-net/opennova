@@ -12,9 +12,9 @@
 //     normalized to "none" here; reading them charges the death to entity 0
 //     (the host);
 //   * camp events 59/60 reuse the slots with different meaning — attacker is
-//     the LEVEL index (v141) and victim is the TEAM (1 = blue, 2 = red)
-//     [orig: case 59 @0x62165 / case 60 @0x62190], and retail emits for team
-//     1/2 only (no else branch).
+//     the LEVEL index (whose WPNames key is built from index + 1) and victim
+//     is the TEAM (1 = blue, 2 = red) [orig: case 59 @0x4272D7 / case 60
+//     @0x4273DC], and retail emits for team 1/2 only (no else branch).
 // String resolution ($A/$B against the roster, the STRCND lookup, the team
 // suffix) happens in the HUD feed model where the name table lives.
 

@@ -309,7 +309,7 @@ struct HudFrameState {
 	// everything; a real hudpos feed replaces the table with the authored
 	// masks (unauthored slot = hidden). The level itself rides along for the
 	// two draw sites that read it directly: the level-3 whole-pass early-out
-	// [orig: @ 0x5A80C4] and the chat hard cull [orig: level >= 2 @ 0x59AD66].
+	// [orig: @ 0x5A80C4] and the chat hard cull [orig: level >= 2 @ 0x59AD43].
 	std::array<bool, kDeclutterSlotCount> declutter_visible =
 			declutter_all_visible();
 	int hud_detail_level = 0;
@@ -387,12 +387,15 @@ public:
 
 	// The stance cross-fade restamp [orig: @ 0x599f8a] and the message ring
 	// [orig: Chat_AddDebugMessage @ 0x4987f0] are compiler state.
+	// Mission triggered text — posts into the one system ring with the default
+	// white [orig: Chat_AddDebugMessage(text, -1, 930) @0x51f216].
 	void push_message(const std::string &text, int now_ticks);
-	// Post one line to the SYSTEM feed — retail's second message channel, the
-	// one the kill/join/system lines land in [orig: Chat_AddDebugMessage
-	// @0x4987f0 with the system ring; drawn by HUD_DrawMessageFeeds @0x59ad30].
-	// Same 930-tick life and >= 186-tick expiry stagger as the chat sink; the
-	// packed ARGB is stored raw and drawn as stored (no fade on this ring).
+	// Post one line to the SYSTEM feed — the ring every Chat_AddDebugMessage
+	// caller shares (kill/objective/medic lines, triggered text, and later the
+	// join/system lines) [orig: the sink @0x4987f0; drawn by the second
+	// HUD_DrawConsoleMessages loop @0x59ad30]. 930-tick life, >= 186-tick
+	// expiry stagger; the packed ARGB is stored raw and drawn as stored (no
+	// fade on this ring).
 	void push_feed_line(const std::string &text, uint32_t argb, int now_ticks);
 	void reset_runtime_state();
 
@@ -434,7 +437,6 @@ private:
 	void element_attach_labels(const HudFrameState &state, float w, float h);
 	void element_friendly_tags(const HudFrameState &state, float w, float h);
 	void element_objective_line(const HudFrameState &state, float w, float h);
-	void element_messages(const HudFrameState &state, float w, float h);
 	void element_feed(const HudFrameState &state, float w, float h);
 	void element_sights_card(const HudFrameState &state, float w, float h);
 	void element_crosshair(const HudFrameState &state, float w, float h);
@@ -461,7 +463,6 @@ private:
 	// @ 0x599af9]: the round count drop stamps the flash start.
 	int flash_prev_rounds_ = -1;
 	int flash_stamp_ = 0;
-	std::vector<HudMessageLine> messages_;
 	std::vector<HudMessageLine> feed_lines_;   // the SYSTEM ring
 };
 
