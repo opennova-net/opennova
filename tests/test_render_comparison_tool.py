@@ -2,7 +2,12 @@ import json
 import subprocess
 from pathlib import Path
 
-from PySide6.QtGui import QColor, QImage
+import pytest
+
+try:
+    from PySide6.QtGui import QColor, QImage
+except ImportError as exc:  # headless box without libGL/Qt
+    pytest.skip(f"PySide6 QtGui is unavailable: {exc}", allow_module_level=True)
 
 
 ROOT = Path(__file__).resolve().parents[1]

@@ -111,6 +111,21 @@ jobs:
           BUILD_GODOT: "0"
         run: scripts/build.sh
 
+      # Repo-content pytest suites: the shader manifest/topology contract, the
+      # render fixture catalogs, the comparison tooling, and the committed
+      # render-evidence store (LFS is pulled above, so the store is
+      # materialized; on stub checkouts that suite skips as a pass). No retail
+      # assets — the wider asset-gated pytest surface stays local-only per
+      # docs/asset-gated-tests.md.
+      - name: Render/shader pytest suites
+        shell: bash
+        run: |
+          uv run --frozen pytest -q \
+            tests/test_object_shader_resources.py \
+            tests/test_render_fixture_catalog.py \
+            tests/test_render_comparison_tool.py \
+            tests/test_retail_render_evidence.py
+
       - name: sccache stats
         if: always()
         shell: bash

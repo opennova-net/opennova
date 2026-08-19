@@ -6,7 +6,11 @@ import subprocess
 import sys
 
 import pytest
-from PySide6.QtGui import QColor, QImage
+
+try:
+    from PySide6.QtGui import QColor, QImage
+except ImportError as exc:  # headless box without libGL/Qt
+    pytest.skip(f"PySide6 QtGui is unavailable: {exc}", allow_module_level=True)
 
 from scripts.render import build_retail_side_by_side as evidence_builder
 

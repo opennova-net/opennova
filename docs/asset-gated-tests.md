@@ -18,7 +18,7 @@ tracked files. Capture files default to `${CMAKE_SOURCE_DIR}/.scratch/…`
 
 | Env var | Gates | Data | CI-able? |
 |---|---|---|---|
-| `OPENNOVA_JO_DIR` | ctest `rtxt_jo_install_sweep`, `env_jo_install`, `terrain_tile_composer` (CP12 `.til` entries #53/#1013) | retail JO install dir (packed `.pff`); the CP12 oracle additionally needs an install whose packed set carries `CP12.TIL`/`TRNTILEA1.TGA` (JO:CA ships without them — that leg skips) | never (copyright, ~1.5 GB) |
+| `OPENNOVA_JO_DIR` | ctest `rtxt_jo_install_sweep`, `env_jo_install`, `terrain_tile_composer` (CP12 `.til` entries #53/#1013); GUT `terrain_static_shadow_runtime_test.gd` (the Scrate1 shadow witness legs) | retail JO install dir (packed `.pff`); the CP12 oracle additionally needs an install whose packed set carries `CP12.TIL`/`TRNTILEA1.TGA` (JO:CA ships without them — that leg skips) | never (copyright, ~1.5 GB) |
 | `OPENNOVA_MISSION_CORPUS` | ctest `mission_corpus`; GUT `mission_corpus_binding_test.gd` | dir of retail `.bms` missions | never (copyright) |
 | `OPENNOVA_JO_ASSETS` | ctest `occlusion_armry`, `root_motion`, the `wac_corpus` sweep; GUT `sound_dialog_test.gd`, `sound_integration_test.gd`; pytest `test_bad_pos_derivation.py` (corpus legs; its synthetic tests run ungated) | extracted retail assets with `weapon.def` + models | never (copyright) |
 | `OPENNOVA_WAC_CORPUS_DIRS` | ctest `wac_corpus` extra corpus dirs (semicolon list, beside the `OPENNOVA_JO_ASSETS` sweep) | dirs of retail `.wac` scripts | never (copyright) |
@@ -36,6 +36,7 @@ tracked files. Capture files default to `${CMAKE_SOURCE_DIR}/.scratch/…`
 | `NW_LIVE_WEAPON_ROOT` / `NW_LIVE_WEAPON_EXPANSION` | ctest `npruntime_weapon_table` corpus leg (its synthesized cases run ungated; getenv-gated in the test, not CMake) | retail `weapon.def` roots (base + expansion) | never (copyright) |
 | `OPENNOVA_WEAPON_SAV` | ctest `playersav_weapon_sav` (corpus leg only; its synthesized cases run ungated) | a retail `weapon.sav` player profile — `<install>/expansion/<exp>/weapon.sav`, else `<install>/weapon.sav` (net-re §5.66) | never (player profile data, and the file carries the local player's callsign-adjacent selections) |
 | `OPENNOVA_MODSUPEROED_DIR` | pytest modsuperoed automation smoke | third-party OED pack | already in CI (LFS submodule; the `modsuperoed-smoke` job) |
+| (LFS content, no env var) | pytest `test_retail_render_evidence.py` | the committed render-evidence store under `screenshots/parity/render-lighting-2026-08/` — the suite validates the repo's OWN published evidence (hashes, decodable PNGs, manifests), so its gate is LFS materialization, not an install: it skips as a PASS when the store holds LFS pointer stubs (e.g. `lfs.fetchexclude`d clones) | possible in principle (LFS bandwidth), not wired |
 
 Manual probes/tools share the gating pattern but are not CI-collected (see
 `godot/tests/CLAUDE.md`: `*_probe.gd` are uncollected): `NW_SP_MISSION` +
@@ -44,7 +45,14 @@ mission with a retail install mounted, e.g. `ladder_climb_probe.gd`),
 `OPENNOVA_JO_DIR` + `SPLASH_CAPTURE_DIR` (the splash render probe),
 `JO_ASSETS_DIR` + `JO_PROBE_MISSIONS` (mission load/re-ground perf probes),
 `JO_RESOURCE_DIR` / `JO_EXPANSION` / `JO_MISSION` (mount diagnostics),
-`NOVA_RESOURCE_DIR` / `NOVA_MISSION_BMS` (the modtools screenshot driver).
+`NOVA_RESOURCE_DIR` / `NOVA_MISSION_BMS` (the modtools screenshot driver),
+and the render-fixture capture probe family (`render_fixture_capture_probe.gd`
++ `scripts/render/`): `NOVA_RENDER_FIXTURE_ID` / `NOVA_RENDER_FIXTURE_MINUTE` /
+`NOVA_RENDER_FIXTURE_OUTPUT`, `NOVA_RENDER_CAPTURE_MODE` /
+`NOVA_RENDER_CAPTURE_PROFILE`, `NOVA_MISSION_RESOURCE_DIR` /
+`NOVA_RUNTIME_RESOURCE_DIR` / `NOVA_EXPANSION`, `NOVA_EVIDENCE_SOURCE_COMMIT`,
+and `NOVA_RENDER_STATIC_SHADOW_SUPPRESS_BMS_IDS` — documented in detail in
+[docs/render/README.md](render/README.md).
 
 ## Local setup
 
