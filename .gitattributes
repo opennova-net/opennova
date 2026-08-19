@@ -30,6 +30,8 @@ fixtures/**/.gitignore text eol=lf filter= diff= merge=
 
 # The render-evidence manifests and READMEs under screenshots/ are plain text
 # the docs link into — same exception as fixtures/ above, or GitHub renders
-# three-line LFS pointer stubs where the evidence should be.
-screenshots/**/*.md text eol=lf filter= diff= merge=
-screenshots/**/*.json text eol=lf filter= diff= merge=
+# three-line LFS pointer stubs where the evidence should be. NO eol
+# conversion: the evidence records hash each other byte-exactly, and two
+# CRLF-written manifests must keep their bytes (-text, not eol=lf).
+screenshots/**/*.md -text filter= diff= merge=
+screenshots/**/*.json -text filter= diff= merge=
