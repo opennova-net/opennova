@@ -508,6 +508,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# Effects drain synchronously during _world.tick(), before this HUD update.
 	# Flush afterward so GameHud.push_message stamps the current 62 Hz tick.
 	_flush_pending_hud_messages()
+	_flush_feed_events()
 	if timing:
 		var probe_t5 := Time.get_ticks_usec()
 		if probe_enabled:
@@ -1023,6 +1024,40 @@ func _queue_hud_message(text: String, text_id: int) -> void:
 	_pending_hud_messages.append({"text": text, "text_id": text_id})
 	while _pending_hud_messages.size() > MAX_PENDING_HUD_MESSAGES:
 		_pending_hud_messages.pop_front()
+
+
+## The message feed: this frame's folded S2C 0x1E game events, each resolved
+## into the game's own canned sentence and posted to the SYSTEM ring.
+## The sim hands over the actor names, the "Canned Msg" key and the witnessed
+## line color; here we look the key up in gametext and run the $A/$B
+## substitution through the engine formatter, so the sentence is always the
+## game's own text and never one we compose.
+## [orig: NetPacket_HandleGameEvent @0x426270 -> HUD_FormatKillEventMessage
+##  @0x422DA0 -> Chat_FormatMessage @0x422C60 -> Chat_AddDebugMessage @0x4987F0]
+func _flush_feed_events() -> void:
+	if _game_hud == null or _world == null:
+		return
+	var sim: Simulation = _world.get_sim()
+	if sim == null:
+		return
+	var rows: Array = sim.drain_feed_events()
+	if rows.is_empty():
+		return
+	var table: RtxtStringFile = Strings.get_table("gametext")
+	if table == null:
+		return
+	for row in rows:
+		var key := String(row.get("key", ""))
+		if key.is_empty() or not table.has_string_in_section("Canned Msg", key):
+			continue
+		var tmpl := table.get_string_in_section("Canned Msg", key)
+		if tmpl.is_empty():
+			continue
+		var line := String(sim.format_feed_line(tmpl,
+				String(row.get("attacker", "")), String(row.get("victim", ""))))
+		if line.is_empty():
+			continue
+		_game_hud.push_feed_line(line, int(row.get("color", -1)))
 
 
 func _flush_pending_hud_messages() -> void:

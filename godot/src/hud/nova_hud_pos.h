@@ -181,6 +181,7 @@ public:
 	Vector4i get_game_info_pos() const;
 	Vector4i get_wpd_info_pos() const;
 	Vector2i get_chat_text_pos() const;
+	Vector2i get_sys_text_pos() const;   // HUDSYSTEXT — the SYSTEM feed anchor
 	Vector2i get_clip_pos() const;
 	// ALPHAFADE raw file fields (base %, max %, seconds); the parse witness is
 	// on the to_dictionary misc block.

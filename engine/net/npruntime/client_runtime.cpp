@@ -233,6 +233,7 @@ std::vector<uint8_t> ClientRuntime::start() {
 	replay_mode_ = false;
 	view_.state() = netsim::ClientState{};
 	view_.drain_round_events();
+	view_.drain_game_events();
 	view_.drain_weapon_reloads();
 	view_.drain_entity_deaths();
 	view_.set_game_type(0);
@@ -338,6 +339,10 @@ bool ClientRuntime::queue_vehicle_detach(uint16_t vehicle_handle) {
 
 std::vector<netsim::ClientRoundEvent> ClientRuntime::drain_round_events() {
 	return view_.drain_round_events();
+}
+
+std::vector<netsim::ClientGameEvent> ClientRuntime::drain_game_events() {
+	return view_.drain_game_events();
 }
 
 std::vector<EntityDeathRecord> ClientRuntime::drain_entity_deaths() {

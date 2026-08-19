@@ -213,6 +213,10 @@ public:
 	// One-shot gameplay notifications surfaced by apply(). Draining keeps the
 	// decoded ClientState persistent while preventing event replay on later frames.
 	std::vector<ClientRoundEvent> drain_round_events();
+	// S2C 0x1E game events folded by apply() — the kill/objective/medic feed
+	// lane (client_replica_feed.cpp). Drained once per frame by the embedder,
+	// which owns the roster names the lines are formatted against.
+	std::vector<ClientGameEvent> drain_game_events();
 	std::vector<WeaponReload> drain_weapon_reloads();
 	// S2C 0x13 entity-death notifies folded by apply(): the row's health drops to
 	// zero and the record is surfaced once so the embedding sim can run the
@@ -286,6 +290,7 @@ private:
 	void apply_static_batch(const std::vector<uint8_t> &body);  // 0x10 pool-2
 	void apply_pool3_batch(const std::vector<uint8_t> &body);   // 0x20 pool-3
 	// The live placed-device lifecycle (client_replica_placed_device.cpp).
+	void apply_game_event(const std::vector<uint8_t> &body);   // 0x1E (the feed)
 	void apply_entity_routed(const std::vector<uint8_t> &body); // 0x44 (guided, §5.15)
 	void apply_deployed_item(const std::vector<uint8_t> &body); // 0x59 pool-1
 	void apply_entity_remove(const std::vector<uint8_t> &body);  // 0x12
@@ -321,6 +326,7 @@ private:
 	std::function<EntityClass(uint16_t)> resolver_;      // phase-1 heuristic fallback
 	std::unordered_map<uint16_t, EntityClass> learned_classes_;
 	std::vector<ClientRoundEvent> pending_round_events_;
+	std::vector<ClientGameEvent> pending_game_events_;
 	std::vector<WeaponReload> pending_weapon_reloads_;
 	std::vector<EntityDeathRecord> pending_entity_deaths_;
 	std::size_t unknown_tags_ = 0;

@@ -11,6 +11,7 @@
 #include <threedi/threedi_panm_pose.h> // the native PANM liveness gate (S3, ADR 0028)
 #include <npwire/ingame_decode.h> // kRoundEventFlag* (the fire-mode byte)
 #include <npwire/ingame_message_id.h>
+#include <hud/feed_format.h> // the witnessed feed line/color policy
 #include <npwire/net_ports.h> // lan_host_bind_ports (the D-NET-210 bind scan)
 #include <vfs/vfs.h> // vfs_expansion_version_checksum (the D-NET-166 JOIN CRC)
 #include <npwire/wire_handle.h>  // pool()/kPoolItem/kInvalid (the wire handle home)
@@ -1395,4 +1396,64 @@ bool Simulation::admit_test_remote_peer(Vector3 p_position, float p_yaw_deg, int
 					ctx_, *world_, peer, spawn, link.transport.get());
 	resolve_new_infantry_adm_ids();
 	return h.valid();
+}
+
+
+// Drain this frame's folded S2C 0x1E game events into feed rows. Actor names
+// resolve here against the decoded roster (a pool-0 INDEX on the wire becomes
+// the handle (0<<12)|index); the canned-message key, the camp key's team
+// suffix, and the line color all come from the witnessed policy in
+// engine/runtime/hud/feed_format.h. Suppressed types never surface
+// (retail: the LFP result set formats and returns @0x62051-0x62084; 58 posts
+// to the tip system only @0x62147).
+Array Simulation::drain_feed_events() {
+	Array out;
+	if (!runtime_) return out;
+	opennova::netsim::ClientState &cs = runtime_->state();
+	const uint16_t self_handle =
+			runtime_->has_self_handle() ? runtime_->self_handle() : 0xFFFF;
+	auto name_of = [&cs](uint8_t index) -> String {
+		if (index == 0xFF) return String();
+		const opennova::netsim::ClientEntityState *e =
+				cs.find(static_cast<uint16_t>(index));
+		return e != nullptr ? String::utf8(e->name.c_str()) : String();
+	};
+	for (const opennova::netsim::ClientGameEvent &ev : runtime_->drain_game_events()) {
+		if (opennova::hud::feed_event_suppressed(ev.event_type)) continue;
+		const bool own =
+				self_handle != 0xFFFF &&
+				(static_cast<uint16_t>(ev.attacker_index) == self_handle ||
+				 static_cast<uint16_t>(ev.victim_index) == self_handle);
+		// Camp events reuse the slots: attacker is the LEVEL index and victim
+		// is the TEAM byte, and their key gets a client-side team suffix
+		// (retail: case 59 @0x62165 / case 60 @0x62190).
+		const bool camp = ev.event_type == 59 || ev.event_type == 60;
+		const std::string camp_key =
+				camp ? opennova::hud::feed_camp_key(ev.event_type, ev.victim_index)
+				     : std::string();
+		if (camp && camp_key.empty()) continue;   // team outside 1/2 draws nothing
+		const char *key = camp ? camp_key.c_str()
+		                       : opennova::game_event_strcnd_key(ev.event_type);
+		if (key == nullptr) continue;   // team/gametype-keyed at runtime — not ported
+		Dictionary d;
+		d["event_type"] = ev.event_type;
+		d["kind"] = static_cast<int>(ev.kind);
+		d["key"] = String::utf8(key);
+		d["attacker"] = camp ? String() : name_of(ev.attacker_index);
+		d["victim"] = camp ? String() : name_of(ev.victim_index);
+		d["level"] = camp ? ev.attacker_index : 0;   // camp: the WPNames level index
+		d["color"] = static_cast<int64_t>(opennova::hud::feed_event_color(
+				ev.event_type, key, own, camp ? ev.victim_index : 0));
+		d["own"] = own;
+		out.push_back(d);
+	}
+	return out;
+}
+
+String Simulation::format_feed_line(const String &p_template, const String &p_attacker,
+		const String &p_victim) const {
+	return String::utf8(opennova::hud::feed_format_line(
+			p_template.utf8().get_data(), p_attacker.utf8().get_data(),
+			p_victim.utf8().get_data())
+			                    .c_str());
 }

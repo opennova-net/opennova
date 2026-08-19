@@ -64,6 +64,7 @@ end).
 | Friendly tags (overhead name labels) | **ported** (`world::collect_friendly_tags` + `HudFrameCompiler::element_friendly_tags` + `game_hud_presenter.gd`, D-HUD-20) | `[orig: HUD_DrawFriendlyTagsPass @0x5a4480]` → `[orig: HUD_DrawEntityLabel @0x5a39b0]` full witness; names `[orig: Entity_SpawnFromBMSRecord @0x40ecbf]` + the 36-name fallback `[orig: g_fallbackPeopleNames @0x840a78]`; modes/toggle `[orig: @0x49b573]`; eye-offset anchor `[orig: @0x4bf078..0x4bf14c]` + Arial label font `[orig: HUD_InitAllFonts @0x51ee20]` witnessed + ported 2026-08-11; ctest `hud_math`/`hud_frame_compiler`/`infantry`/`promote` |
 | Armory/vehicle-bay/FARP bottom prompts | witnessed — deferred with their systems (D-HUD-14) | `[orig: HUD_DrawGameplayOverlays @0x5bde60]` — preround/0x0A armory prompt, Flags 0x800 bay prompt, FARP wait/reload |
 | Mission triggered text (WAC/BMS `text`) | **ported** (`HudFrameCompiler::element_messages` + `game_hud_presenter.gd`, D-HUD-6) | `[orig: HUD_DisplayTriggeredText @0x51f190]` → `[orig: Chat_AddDebugMessage @0x4987f0]`; `hud_helpers_test.gd` expiry |
+| Message feed — the SYSTEM ring (kills / objectives / medic) | **ported** (`HudFrameCompiler::element_feed` + `hud::feed_format` + the `netsim` 0x1E fold, D-HUD-23) | `[orig: HUD_DrawMessageFeeds @ 0x59ad30]` fed by `[orig: NetPacket_HandleGameEvent @ 0x426270 -> HUD_FormatKillEventMessage @ 0x422DA0 -> Chat_FormatMessage @ 0x422C60]` |
 | `hudpos.def` parser token map + 4-field positions | ported (`engine/formats/def`) | `[orig: loc_59F370; AMMOCOUNTPOS @0x59fc3d]`; ctest `def_parse_hudpos` |
 | Parachute / armor status icons | witnessed — port pending (entity+44 flag writer unwalked) | `[orig: HUD_DrawParachuteAndArmorIcons @0x5925c0]` — entity+44 `&0x10` parachute / `&0x8` armor through the info struct's entity ptr; `ParachuteIcon`/`ArmorIcon` tokens |
 | MP objective status text + team tile | confirm-only — MP HUD phase | `[orig: HUD_DrawTeamIdLine @0x59aa30]` (ex "draw_objective_status_text") client/strcli* strings witnessed |
@@ -1716,6 +1717,41 @@ behind it.
   `STROVER_OBJECTIVEPOINT_SHORT`/`STROVER_DEFENSIVEPOSITION`, `%01.2fk`.
   The gameplay compiler is reusable substrate, but those surfaces require
   their distinct view state and UI orchestration — D-HUD-19.
+### The message feeds (`HUD_DrawMessageFeeds @ 0x59ad30`)
+
+One routine paints BOTH message channels, chat first then system. Three
+properties are witnessed and now ported (D-HUD-23):
+
+* **Only three ring rows are walked per channel** `[orig: the walk
+  @0x59ae5e..0x59aebf stepping -0x80 from 0xb427bc]`, and because the sink puts
+  the newest line in row 0, the OLDEST of the three sits at the anchor with each
+  newer line **18 design px BELOW** it `[orig: local_4 = 0x12 @0x59ad97, scaled
+  through Viewport_ScaleToVirtualCoords @0x5d2b20]` — the feed grows downward.
+* **The alpha ramp belongs to the CHAT ring only.** The loop computes
+  `clamp(timer * 255 / 186)` for both, but the system draw passes the STORED
+  color `[orig: @0x59ae97]`; only the chat path folds the computed alpha into it
+  `[orig: @0x59adef]`. A feed line therefore holds its color for its whole
+  930-tick life and vanishes, while a chat line fades over its last 186 ticks.
+* **The anchors differ**: the system feed sits at `HUDSYSTEXT` (already parsed
+  into `HudposFile.hud.sys_text`), the chat ring at `HUDCHATTEXT`.
+
+The line content is never composed by the client: the 0x1E handler picks a
+"Canned Msg" template and substitutes `$A` (attacker) / `$B` (victim)
+`[orig: HUD_FormatKillEventMessage @ 0x422DA0 -> Chat_FormatMessage @ 0x422C60]`.
+Colors are witnessed per class: own-kill white / other grey `[orig: the palette
+writer @0x51f240]`, the team palette when the canned key names BLUE/RED, the
+medic pair in `0xFF008CEE` `[orig: cases 38/45 @0x426270]`, and camp events
+59/60 in LITERAL colors that bypass the palette `[orig: @0x62172/@0x62179 and
+@0x62197/@0x62204]`. Four LFP result types format a line and post NOTHING
+`[orig: 50/51/52/53 @0x62051-0x62084]`, and type 58 reaches the tip system only
+`[orig: CTipSystem_HandleEvent 17 @0x62147]`.
+
+Two classification corrections landed with the port: the medic pair (38/45) is
+NOT a kill, and the killer-less deaths (1/2/3 suicide, 22/23/25/26) are their
+own class whose victim/aux slots are LITERAL ZERO on the wire `[orig:
+GameEvent_PlayerDeath @0x516DD0 leaves v41/v42 = 0]` — reading them charges the
+death to entity 0 (the host).
+
 - **Chat channel geometry** — the `dword_28E4DF8` table (rows 1/2 chat, 3/4
   system/debug) that `Chat_RebuildDisplayBuffers @0x498bd0` wraps against and
   the drawer anchors with; its writer is unwitnessed (D-HUD-6).

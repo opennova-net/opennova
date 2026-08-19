@@ -83,6 +83,7 @@ void HudFrameCompiler::reset_runtime_state() {
 	flash_prev_rounds_ = -1;
 	flash_stamp_ = 0;
 	messages_.clear();
+	feed_lines_.clear();
 	draw_list_ = HudDrawList{};
 }
 
@@ -100,6 +101,27 @@ void HudFrameCompiler::push_message(const std::string &text, int now_ticks) {
 	messages_.push_back(line);
 	while (messages_.size() > static_cast<size_t>(kMaxCarriedMessages)) {
 		messages_.erase(messages_.begin());
+	}
+}
+
+void HudFrameCompiler::push_feed_line(const std::string &text, uint32_t argb,
+		int now_ticks) {
+	// The SYSTEM ring sink — same slot policy as the chat sink
+	// [orig: Chat_AddDebugMessage @ 0x4987f0 — 930-tick life, >= 186-tick
+	// stagger, 119-char slots], but the caller's packed color is stored RAW
+	// and drawn as stored [orig: @0x59ae97 reads the stored dword].
+	if (text.empty()) {
+		return;
+	}
+	const bool has_prev = !feed_lines_.empty();
+	const int prev_expire = has_prev ? feed_lines_.back().expire_tick : 0;
+	HudMessageLine line;
+	line.text = text.substr(0, static_cast<size_t>(kMessageTextMax));
+	line.expire_tick = message_expire_tick(now_ticks, prev_expire, has_prev);
+	line.color = argb;
+	feed_lines_.push_back(line);
+	while (feed_lines_.size() > static_cast<size_t>(kMaxCarriedMessages)) {
+		feed_lines_.erase(feed_lines_.begin());
 	}
 }
 
@@ -204,6 +226,7 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	// @ 0x5a87cc, then HUD_DrawConsoleMessages @ 0x5a87d1].
 	element_friendly_tags(state, surface_w, surface_h);
 	element_messages(state, surface_w, surface_h);
+	element_feed(state, surface_w, surface_h);
 	return draw_list_;
 }
 
@@ -1120,6 +1143,57 @@ void HudFrameCompiler::element_messages(const HudFrameState &state, float w,
 		emit_text(live[static_cast<size_t>(i)]->text.c_str(), ax, row_y, w, h,
 				active_color(state), 0u);
 		row_y -= row_h;
+	}
+	++draw_list_.elements_drawn;
+}
+
+void HudFrameCompiler::element_feed(const HudFrameState &state, float w,
+		float h) {
+	// THE SYSTEM MESSAGE FEED — retail's kill/join/system channel, drawn by the
+	// same routine as the chat ring [orig: HUD_DrawMessageFeeds @ 0x59ad30].
+	// Three witnessed properties this element reproduces:
+	//   * only THREE ring rows are walked per channel [orig: the row walk
+	//     @0x59ae5e..0x59aebf], and since the sink puts the NEWEST line in row
+	//     0, the OLDEST of the three sits AT the anchor and each newer line is
+	//     18 design px BELOW it [orig: local_4 = 0x12 @0x59ad97, scaled through
+	//     Viewport_ScaleToVirtualCoords @0x5d2b20] — the feed grows downward,
+	//     unlike the chat sink's upward scroll.
+	//   * the stored per-line color is drawn AS STORED [orig: @0x59ae97]; the
+	//     computed `timer * 255 / 186` alpha belongs to the CHAT ring alone
+	//     [orig: the fold @0x59adef], so this ring does not fade.
+	//   * the anchor is HUDSYSTEXT, not HUDCHATTEXT.
+	// The declutter gate is the chat slot's (one site covers both feeds)
+	// [orig: both tests @ 0x59AD66].
+	if (!state.declutter_visible[kDeclutterChat] ||
+			state.hud_detail_level >= 2) {
+		return;
+	}
+	if (font_.font() == nullptr) {
+		return;
+	}
+	const float ax = static_cast<float>(
+			layout_.sys_text.present ? layout_.sys_text.x : 5);
+	const float ay = static_cast<float>(
+			layout_.sys_text.present ? layout_.sys_text.y : 94);
+	std::vector<const HudMessageLine *> live;
+	for (const HudMessageLine &line : feed_lines_) {
+		if (line.expire_tick > state.ticks) {
+			live.push_back(&line);
+		}
+	}
+	if (live.empty()) {
+		return;
+	}
+	// The three most recent lines, oldest first so the oldest lands on the
+	// anchor and newer lines step downward.
+	const int visible = std::min(static_cast<int>(live.size()), kFeedVisibleRows);
+	const int first = static_cast<int>(live.size()) - visible;
+	const float row_h = static_cast<float>(kFeedLineStepDesign);
+	float row_y = ay;
+	for (int i = first; i < static_cast<int>(live.size()); ++i) {
+		const HudMessageLine *line = live[static_cast<size_t>(i)];
+		emit_text(line->text.c_str(), ax, row_y, w, h, line->color, 0u);
+		row_y += row_h;
 	}
 	++draw_list_.elements_drawn;
 }

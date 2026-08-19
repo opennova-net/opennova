@@ -168,6 +168,7 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_game_info_pos"), &HudPos::get_game_info_pos);
 	ClassDB::bind_method(D_METHOD("get_wpd_info_pos"), &HudPos::get_wpd_info_pos);
 	ClassDB::bind_method(D_METHOD("get_chat_text_pos"), &HudPos::get_chat_text_pos);
+	ClassDB::bind_method(D_METHOD("get_sys_text_pos"), &HudPos::get_sys_text_pos);
 	ClassDB::bind_method(D_METHOD("get_clip_pos"), &HudPos::get_clip_pos);
 	ClassDB::bind_method(D_METHOD("get_alpha_fade"), &HudPos::get_alpha_fade);
 	ClassDB::bind_method(D_METHOD("get_hud_chline"), &HudPos::get_hud_chline);
@@ -318,6 +319,10 @@ Vector4i HudPos::get_game_info_pos() const {
 
 Vector4i HudPos::get_wpd_info_pos() const {
 	return loaded_ ? pos4(file_.hud.wpd_info) : Vector4i();
+}
+
+Vector2i HudPos::get_sys_text_pos() const {
+	return loaded_ ? pos2(file_.hud.sys_text) : Vector2i();
 }
 
 Vector2i HudPos::get_chat_text_pos() const {

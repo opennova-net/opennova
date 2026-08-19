@@ -999,6 +999,16 @@ enum class GameEventKind : uint8_t {
 	Other = 0,     // single-actor canned / misc HUD message
 	Kill,          // attacker killed victim (the kill feed proper)
 	Objective,     // flag / capture / zone control / camp events
+	// A death with NO killer: suicide (1/2/3, the emitter picks 1+rand(3)) and
+	// the killer-less deaths (22/23/25/26 "$A is dead/died/drowned."). The
+	// handler leaves the victim/aux slots LITERAL ZERO on these
+	// [orig: GameEvent_PlayerDeath @0x516DD0 leaves v41/v42 = 0], so a consumer
+	// that reads them charges the death to entity 0 (the host) — they must be
+	// ignored for this kind.
+	SelfDeath,
+	// The medic lines, drawn in their own light blue 0xFF008CEE and NOT kills
+	// [orig: 0x426270 cases 38 "$B has revived $A." / 45 "…medical attention…"].
+	Medic,
 };
 GameEventKind game_event_kind(uint8_t event_type);
 
@@ -1831,8 +1841,17 @@ struct ChatUplink {
 };
 bool decode_chat_uplink(const uint8_t *body, size_t len, ChatUplink &out);
 struct ChatBroadcast {
-	uint8_t     sender_slot = 0; // one of the two header bytes (see §5.52 note)
-	uint8_t     channel = 0;     // the other header byte
+	// CONTESTED HEADER ORDER (D-NET-215, unresolved): this decoder reads
+	// [sender_slot][channel], but a second RE pass reports the dispatcher as
+	// Chat_DispatchToChannel(body[1] = sender slot, body[0] = channel,
+	// &body[2] = text) [orig: NapiNPClientMsg_ChatMessage @0x42F240 ->
+	// @0x42B910] — i.e. SWAPPED. The only pin today is a synthetic fixture
+	// authored to match this reading, so it is not independent evidence.
+	// Nothing consumes chat yet, so the two orders are indistinguishable in
+	// behavior; resolve with a grill-ida pass over @0x42F240 before the chat
+	// channel is hosted, and swap both this struct and the fixture together.
+	uint8_t     sender_slot = 0; // body[0] under THIS reading
+	uint8_t     channel = 0;     // body[1] under THIS reading
 	std::string text;            // formatted "name(/squad): text" line
 };
 bool decode_chat_broadcast(const uint8_t *body, size_t len, ChatBroadcast &out);

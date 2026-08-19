@@ -177,6 +177,10 @@ public:
 	bool queue_vehicle_attach(uint16_t vehicle_handle, uint8_t model_bone_index);
 	bool queue_vehicle_detach(uint16_t vehicle_handle);
 	std::vector<netsim::ClientRoundEvent> drain_round_events();
+	// S2C 0x1E game events the recv fold surfaced this frame — the kill /
+	// objective / medic feed lane. The embedder formats each into a canned
+	// sentence against its roster + string table [orig: 0x426270 -> 0x422DA0].
+	std::vector<netsim::ClientGameEvent> drain_game_events();
 	std::vector<WeaponReload> drain_reload_notifications();
 	// S2C 0x13 death notifies the recv fold surfaced this frame. The embedding
 	// sim runs the class death callback on each world twin (reason 4 — the net
