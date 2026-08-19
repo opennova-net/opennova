@@ -52,6 +52,14 @@ func _run() -> void:
 		_fail("main_game lacks a World child")
 		return
 	var deadline := Time.get_ticks_msec() + int(LOAD_TIMEOUT_WALL_SECONDS * 1000.0)
+	# SP missions pause on the start-mission splash; leave it through the
+	# public seam or the HUD presenter never reaches WORLD state.
+	while game.is_world_loading():
+		game.dismiss_start_mission_splash()
+		if Time.get_ticks_msec() > deadline:
+			_fail("timed out dismissing the start splash")
+			return
+		await process_frame
 	while not (world.get_sim() != null and world.get_sim().has_local_player()):
 		if Time.get_ticks_msec() > deadline:
 			_fail("mission never produced a local player")
@@ -65,10 +73,20 @@ func _run() -> void:
 			return
 		hud = _find_hud(root)
 		await process_frame
-	var table: RtxtStringFile = Strings.get_table("gametext")
+	# The Strings autoload by node path — autoload globals are not compiled
+	# into -s SceneTree scripts.
+	var strings := root.get_node_or_null("Strings")
+	if strings == null:
+		_fail("Strings autoload missing")
+		return
+	var table: RtxtStringFile = strings.get_table("gametext")
 	if table == null:
 		_fail("gametext table unavailable")
 		return
+	# Let streaming and the frame rate settle before the capture.
+	var settle_end := Time.get_ticks_msec() + 3000
+	while Time.get_ticks_msec() < settle_end:
+		await process_frame
 
 	# Three lines, one per witnessed color class (the ring shows the newest
 	# three): an uninvolved kill (grey 0xFFAFAFAF), a medic line (0xFF008CEE),
