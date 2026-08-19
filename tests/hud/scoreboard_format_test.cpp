@@ -60,8 +60,9 @@ void test_trailing_s_is_outside_the_bracket() {
 	CHECK(scoreboard_status_glyphs(0x0401) == " [R]S");
 }
 
-// Non-team rows lead with the score; team rows have no score column. Both end
-// with the two-digit SLOT id in brackets.
+// Non-team PLAYER rows lead with the score; team rows have no score column,
+// and neither do spectator rows in EITHER mode (the spectator arm shares the
+// team format). Both end with the two-digit SLOT id in brackets.
 void test_row_formats() {
 	const ScoreboardEntry e = player("SPAGHETTI", 7, 12, 1);
 	CHECK(scoreboard_row_text(e, /*non_team=*/true) == " 12 SPAGHETTI [07]");
@@ -70,6 +71,17 @@ void test_row_formats() {
 	// three-column field.
 	const ScoreboardEntry big = player("A-99", 0, 100, 2);
 	CHECK(scoreboard_row_text(big, true) == "100 A-99 [00]");
+	// The score is the record's SIGN-EXTENDED read — a negative score prints
+	// negative, not as 65534 [orig: the movsx @0x42fb9d].
+	const ScoreboardEntry neg = player("OWN-GOAL", 4,
+			static_cast<uint16_t>(-2), 1);
+	CHECK(scoreboard_row_text(neg, true) == " -2 OWN-GOAL [04]");
+	// A spectator never shows a score, even in non-team mode
+	// [orig: the spectator arm @0x423e04 takes the no-score format].
+	ScoreboardEntry s = player("WATCHER", 9, 33, 0);
+	s.spectator = true;
+	CHECK(scoreboard_row_text(s, true) == "WATCHER [09]");
+	CHECK(scoreboard_row_text(s, false) == "WATCHER [09]");
 	// The glyph suffix rides on the end of either format.
 	ScoreboardEntry g = player("elk road", 3, 5, 1);
 	g.status_flags = 0x0001;

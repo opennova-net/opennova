@@ -55,16 +55,26 @@ enum HudTexture : int32_t {
 };
 
 // THE STDBOX GEOMETRY, as raw retail numbers. The border pieces and the fill
-// inset scale with the surface by s = surface_w / 1600; the fill's tile PERIOD
-// does not, so a wider surface gets bigger pieces but the same 32 px camo
-// grain [orig: the scale reciprocal _DAT_007cfe3c = 0.000625; the inset pair
-// rec+0x180 / rec+0x184; the /32 fill uv; the bottom-row crop flag1 @0x56b456
-// with _DAT_007c459c = 0.9].
+// inset scale with the surface by s = surface_w / 1600 [orig: the scale
+// 0.000625 double @0x51f02e in HUD_DrawLabelBox]; the fill's tile PERIOD does
+// not scale — it is the atlas cell's own size (texW/4, 32 px for the shipped
+// 128 px border.tga), because retail's fill is one wrap-addressed quad of the
+// EXTRACTED cell (3,0) with UV = (screen_px + 0.5) / cell
+// [orig: stdbox_draw_fill_wrap_tiled @0x56b5d0; the extraction + zeroing of
+// the source cell @0x56adbd-0x56ae44]. Insets 16*s / 24*s are the ctor's
+// literals [orig: the 16/24 stores @0x56b342/@0x56b351, read as rec+0x180 /
+// rec+0x184 by the fill arm @0x56b7bd-0x56b80d]; the bottom-row crop is 0.9
+// of BOTH dest and source [orig: the flag arm @0x56b454-0x56b470,
+// flt_7C459C = 0.9].
 inline constexpr float kBoxScaleRef = 1600.0f;
 inline constexpr float kBoxFillInsetX = 16.0f;
 inline constexpr float kBoxFillInsetY = 24.0f;
-inline constexpr float kBoxFillTilePx = 32.0f;
 inline constexpr float kBoxBottomCrop = 0.9f;
+// The titled top row's gap rule: the notch behind the title is the measured
+// bold title width + 2, less 12*s once it exceeds 12*s
+// [orig: HUD_DrawLabelBox @0x51f0ea-0x51f114].
+inline constexpr float kBoxTitlePad = 2.0f;
+inline constexpr float kBoxTitleTrim = 12.0f;
 
 struct HudQuad {
 	float x0 = 0.0f;
@@ -471,11 +481,14 @@ private:
 			float u1, float v1, uint32_t color, int32_t texture);
 	// The retail stdbox panel and the per-row connection icon. The box takes
 	// the surface width because its pieces and fill inset scale with it.
+	// title_gap_w > 0 draws the TITLED top row: the row-3 stub / title-bar /
+	// end-cap cells around a gap of that many output pixels
+	// [orig: the outTechnique arm @0x56b937, cells rec+0x108/0x120/0x138].
 	void emit_stdbox(float x0, float y0, float x1, float y1, float surface_w,
-			uint32_t color);
+			uint32_t color, float title_gap_w);
 	void emit_stdbox_piece(float x0, float y0, float x1, float y1, int col,
 			int row, bool crop_bottom, uint32_t color);
-	void emit_net_icon(float x, float y, float size, int quality);
+	void emit_net_icon(float x0, float y0, float x1, float y1, int quality);
 	void emit_wire_rect(float x0, float y0, float x1, float y1, uint32_t color);
 	void emit_text(const char *text, float design_x, float design_y,
 			float surface_w, float surface_h, uint32_t argb, uint32_t flags);

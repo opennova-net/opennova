@@ -497,6 +497,12 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	{
 		// The Tab board's stdbox atlases + the connection-icon strip. Absent
 		// files simply leave the board unframed rather than failing the HUD.
+		// The drawer samples only the border atlas today (the fill's brush
+		// cell lives inside it); boxtile.tga stays registered for the
+		// recorded border-x-camo combine residual, and the valid gate still
+		// requires it because retail's style ctor draws NOTHING without the
+		// secondary texture (the combined material rec+0x30 gates the whole
+		// drawer) [orig: @0x56af3c; the null gate @0x56b71f].
 		const Ref<Texture2D> border = load_hud_texture_("border.tga");
 		const Ref<Texture2D> brush = load_hud_texture_("boxtile.tga");
 		const Ref<Texture2D> icon = load_hud_texture_("neticon2.tga");
@@ -718,6 +724,7 @@ void HudOverlay::set_scoreboard(bool p_shown, int64_t p_game_type,
 			e.score1 = static_cast<uint16_t>(static_cast<int>(d.get("score", 0)));
 			e.team = static_cast<uint8_t>(static_cast<int>(d.get("team", 0)));
 			e.spectator = static_cast<bool>(d.get("spectator", false));
+			e.has_entity = static_cast<bool>(d.get("has_entity", false));
 			e.name = String(d.get("name", "")).utf8().get_data();
 			e.quality = static_cast<uint8_t>(static_cast<int>(d.get("quality", 0)));
 			sb.rows.push_back(e);

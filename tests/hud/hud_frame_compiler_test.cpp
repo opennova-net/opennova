@@ -1248,21 +1248,138 @@ void test_compiler_stdbox_geometry(const fnt_font_t *font) {
 	}
 	CHECK(saw_cropped, "the bottom-left corner piece is emitted");
 
-	// The fill tiles at a fixed 32 px period that does NOT scale with the
-	// surface: two adjacent tiles in the first row sit exactly 32 px apart.
+	// The fill tiles at the cell's own 32 px period, anchored to the ABSOLUTE
+	// screen grid — retail's fill is one wrap-addressed quad, so every tile
+	// boundary sits on a multiple of 32 regardless of where the inset rect
+	// starts [orig: stdbox_draw_fill_wrap_tiled @0x56b5d0, UV=(dest+0.5)/32].
 	std::vector<HudQuad> fill;
+	float fill_min_x = 1e9f;
+	float fill_max_x = -1e9f;
 	for (const HudQuad &q : wide) {
-		if (q.u0 > 3.0f * kCell - 0.01f) fill.push_back(q);
+		if (q.u0 > 3.0f * kCell - 0.01f) {
+			fill.push_back(q);
+			fill_min_x = std::min(fill_min_x, q.x0);
+			fill_max_x = std::max(fill_max_x, q.x1);
+		}
 	}
 	CHECK(fill.size() > 2, "the interior is tiled, not one stretched quad");
-	CHECK(std::fabs((fill[1].x0 - fill[0].x0) - 32.0f) < 0.01f,
-			"adjacent fill tiles are one 32 px screen period apart");
-	// A partial edge tile takes a proportional slice of the source cell rather
-	// than squashing the whole cell into it.
-	const HudQuad &last = fill.back();
-	const float frac = (last.x1 - last.x0) / 32.0f;
-	CHECK(std::fabs((last.u1 - last.u0) - kCell * frac) < 0.001f,
-			"a partial tile samples a proportional slice of the cell");
+	int full_tiles = 0;
+	bool grid_ok = true;
+	bool slice_ok = true;
+	for (const HudQuad &q : fill) {
+		// Every edge is either the inset rect's edge or a 32-grid boundary.
+		const auto on_grid = [](float v) {
+			return std::fabs(v - std::floor(v / 32.0f + 0.5f) * 32.0f) < 0.01f;
+		};
+		if (!(on_grid(q.x0) || std::fabs(q.x0 - fill_min_x) < 0.01f)) grid_ok = false;
+		if (!(on_grid(q.x1) || std::fabs(q.x1 - fill_max_x) < 0.01f)) grid_ok = false;
+		// Every tile — clipped on either side — samples the slice of the
+		// cell matching its screen-grid phase.
+		const float frac = (q.x1 - q.x0) / 32.0f;
+		if (std::fabs((q.u1 - q.u0) - kCell * frac) > 0.001f) slice_ok = false;
+		if (std::fabs((q.x1 - q.x0) - 32.0f) < 0.01f) ++full_tiles;
+	}
+	CHECK(grid_ok, "every fill tile edge sits on the 32 px screen grid or the inset edge");
+	CHECK(slice_ok, "every tile samples the cell slice matching its grid phase");
+	CHECK(full_tiles > 0, "the interior contains full-period tiles");
+
+	// The TITLED top row: a title swaps the top edge for the row-3 cells —
+	// the stub, the title bar stretched to the measured gap, the end cap —
+	// and the plain top edge resumes after [orig: the outTechnique arm
+	// @0x56b93d-0x56ba52; the gap rule @0x51f0ea-0x51f114].
+	state.scoreboard.title = "TEST";
+	const std::vector<HudQuad> titled = box_quads(1600.0f, 1200.0f);
+	GameFont measure_font;
+	measure_font.set_font(font);
+	int title_w = 0;
+	int title_h = 0;
+	measure_font.measure("TEST", 1.0f, 1.0f, &title_w, &title_h);
+	float expected_gap = static_cast<float>(title_w) + 2.0f;
+	if (expected_gap > 12.0f) expected_gap -= 12.0f; // s = 1 at surface 1600
+	bool saw_stub = false;
+	bool saw_bar = false;
+	bool saw_cap = false;
+	bool saw_plain_tl = false;
+	for (const HudQuad &q : titled) {
+		const bool row3 = std::fabs(q.v0 - 3.0f * kCell) < 0.001f;
+		if (row3 && q.u0 < 0.01f) saw_stub = true;
+		if (row3 && std::fabs(q.u0 - kCell) < 0.001f) {
+			saw_bar = true;
+			CHECK(std::fabs((q.x1 - q.x0) - expected_gap) < 0.01f,
+					"the title bar stretches to the measured gap");
+		}
+		if (row3 && std::fabs(q.u0 - 2.0f * kCell) < 0.001f) saw_cap = true;
+		if (q.u0 < 0.01f && q.v0 < 0.01f) saw_plain_tl = true;
+	}
+	CHECK(saw_stub && saw_bar && saw_cap,
+			"the titled top row draws the row-3 stub/bar/cap cells");
+	CHECK(!saw_plain_tl, "the plain (0,0) corner cell yields to the titled row");
+	state.scoreboard.title.clear();
+}
+
+// The row walk's geometry: the spectator column is seeded below the LONGER
+// player column plus two spacer rows, and the connection icon draws for every
+// row with a live band — spectators included, quality outside 1..3 never
+// [orig: the seed @0x423c3a; the icon block @0x4241e2-0x424244;
+//  NetIcon_DrawConnectionQualityBand @0x4c2ee0].
+void test_compiler_scoreboard_rows(const fnt_font_t *font) {
+	using opennova::hud::HudQuad;
+	using opennova::hud::ScoreboardEntry;
+	HudFrameCompiler compiler;
+	HudLayout layout;
+	layout.net_icon_texture_valid = true;
+	compiler.configure(layout, font);
+
+	HudFrameState state;
+	state.ticks = 100;
+	state.scoreboard.shown = true;
+	state.scoreboard.game_type = 0x10000; // TDM — team columns
+	const auto row = [](uint8_t slot, uint8_t team, bool spec, uint8_t quality) {
+		ScoreboardEntry e;
+		e.slot_id = slot;
+		e.team = team;
+		e.spectator = spec;
+		e.has_entity = !spec;
+		e.name = "P";
+		e.quality = quality;
+		return e;
+	};
+	state.scoreboard.rows.push_back(row(1, 1, false, 1));
+	state.scoreboard.rows.push_back(row(2, 2, false, 3));
+	state.scoreboard.rows.push_back(row(3, 1, false, 4)); // quality 4: no icon
+	state.scoreboard.rows.push_back(row(4, 0, true, 2));  // spectator, icon
+	// A team-mode row without a live entity vanishes entirely
+	// [orig: the entity-null fallthrough @0x423d1b].
+	ScoreboardEntry leaver = row(5, 2, false, 2);
+	leaver.has_entity = false;
+	state.scoreboard.rows.push_back(leaver);
+
+	// 1024x768 keeps the design->output scale at identity.
+	const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+	std::vector<HudQuad> icons;
+	for (const HudQuad &q : list.quads) {
+		if (q.texture == opennova::hud::kHudTexNetIcon) icons.push_back(q);
+	}
+	// Rows with quality 1..3 draw an icon (the spectator too); quality 4 and
+	// the vanished leaver do not.
+	CHECK(icons.size() == 3, "three rows carry a drawable quality band");
+	// The header has four rungs (no spectator line fed), so the list base is
+	// 105 + 4*20 + 20 = 205 and the first row of each column sits at 223.
+	// count_a = 2, count_b = 1 (the leaver dropped), spectators = 1 ->
+	// the spectator cursor seeds at 205 + 18*(2+2), first row at 295.
+	bool saw_team_first = false;
+	bool saw_spec = false;
+	for (const HudQuad &q : icons) {
+		if (std::fabs(q.y0 - 223.0f) < 0.75f) saw_team_first = true;
+		if (std::fabs(q.y0 - 295.0f) < 0.75f && std::fabs(q.x0 - 420.0f) < 0.75f)
+			saw_spec = true;
+	}
+	CHECK(saw_team_first, "the first team rows sit one pitch below the list base");
+	CHECK(saw_spec,
+			"the spectator row seeds below the longer column plus two spacers");
+	// The band is a quarter of the 4-row strip.
+	CHECK(std::fabs((icons[0].v1 - icons[0].v0) - 0.25f) < 0.001f,
+			"an icon samples exactly one band of the strip");
 }
 
 int main() {
@@ -1281,6 +1398,7 @@ int main() {
 	test_compiler_friendly_tags(&font);
 	test_compiler_label_fonts(&font);
 	test_compiler_stdbox_geometry(&font);
+	test_compiler_scoreboard_rows(&font);
 	fnt_free(&font);
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);

@@ -1546,8 +1546,15 @@ Dictionary Simulation::get_scoreboard() const {
 	out["timed"] = sb.timed;
 	out["in_game"] = sb.in_game_count;
 	out["spectators"] = sb.spectator_count;
+	// The drawer branches on the session game type (retail reads g_GameType
+	// @0x423acb); the header's session strings ride along — joiner-decoded,
+	// empty on a host until the host sessionvars are plumbed (D-HUD-24).
+	out["game_type"] = static_cast<int64_t>(runtime_->game_type());
+	out["server"] = String::utf8(runtime_->server_name().c_str());
+	out["mission"] = String::utf8(runtime_->mission_name().c_str());
 	Array rows;
 	for (const opennova::netsim::ClientScoreboardRow &r : sb.rows) {
+		const opennova::netsim::ClientRosterSlot &slot = cs.roster[r.slot_id];
 		Dictionary d;
 		d["slot"] = r.slot_id;
 		d["status_flags"] = r.status_flags;
@@ -1555,14 +1562,20 @@ Dictionary Simulation::get_scoreboard() const {
 		d["points"] = r.score2;
 		d["team"] = r.team;
 		d["spectator"] = r.spectator;
-		// "<clan> <name>" when the row carries a clan (retail: the sprintf
-		// @0x42fd46).
+		// The board's name is the ROW-carried join in the parser's own order
+		// — "clan name" (retail: sprintf("%s %s", clan, name) @0x42fd46 into
+		// the 56-byte record), which is what keeps a leaver's line readable
+		// after the 0x46 slot wipe.
 		String name = String::utf8(r.name.c_str());
 		if (!r.clan.empty())
 			name = String::utf8(r.clan.c_str()) + " " + name;
 		d["name"] = name;
-		// The connection-icon band still comes off the roster slot.
-		d["quality"] = cs.roster[r.slot_id].quality;
+		// The connection icon and the team-mode draw gate read the LIVE slot:
+		// a wiped slot's 0 quality draws no icon (retail's own out-of-band
+		// gate @0x4c2ee0), and a row without a live entity vanishes from team
+		// boards (retail: the entity-null fallthrough @0x423d1b).
+		d["quality"] = slot.quality;
+		d["has_entity"] = slot.bound && slot.entity_slot >= 0;
 		rows.push_back(d);
 	}
 	out["rows"] = rows;
