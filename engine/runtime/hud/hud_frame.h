@@ -54,6 +54,18 @@ enum HudTexture : int32_t {
 	kHudTexSightsBase, // authored SIGHTS rows: kHudTexSightsBase + row index
 };
 
+// THE STDBOX GEOMETRY, as raw retail numbers. The border pieces and the fill
+// inset scale with the surface by s = surface_w / 1600; the fill's tile PERIOD
+// does not, so a wider surface gets bigger pieces but the same 32 px camo
+// grain [orig: the scale reciprocal _DAT_007cfe3c = 0.000625; the inset pair
+// rec+0x180 / rec+0x184; the /32 fill uv; the bottom-row crop flag1 @0x56b456
+// with _DAT_007c459c = 0.9].
+inline constexpr float kBoxScaleRef = 1600.0f;
+inline constexpr float kBoxFillInsetX = 16.0f;
+inline constexpr float kBoxFillInsetY = 24.0f;
+inline constexpr float kBoxFillTilePx = 32.0f;
+inline constexpr float kBoxBottomCrop = 0.9f;
+
 struct HudQuad {
 	float x0 = 0.0f;
 	float y0 = 0.0f;
@@ -133,8 +145,11 @@ struct HudLayout {
 	// HUDSYSTEXT — the SYSTEM feed anchor (kills, joins, system lines). The
 	// def parser already produces it (def_hudpos.cpp HUDSYSTEXT -> sys_text).
 	HudPosRecord sys_text;
-	// The Tab board's atlases (hud_scoreboard.h).
+	// The Tab board's atlases (hud_scoreboard.h). The stdbox piece size is
+	// derived from the border atlas's own width (a 4x4 cell grid, so one cell
+	// is a quarter of it), the same texture-derived rule the icon strips use.
 	bool box_texture_valid = false;
+	int box_tex_w = 0;
 	bool net_icon_texture_valid = false;
 	HudPosRecord clip_pos;
 	HudPosRecord stance_pos;
@@ -454,8 +469,12 @@ private:
 			bool filled, int32_t texture = kHudTexNone, bool additive = false);
 	void emit_rect_uv(float x0, float y0, float x1, float y1, float u0, float v0,
 			float u1, float v1, uint32_t color, int32_t texture);
-	// The retail stdbox panel and the per-row connection icon.
-	void emit_stdbox(float x0, float y0, float x1, float y1, uint32_t color);
+	// The retail stdbox panel and the per-row connection icon. The box takes
+	// the surface width because its pieces and fill inset scale with it.
+	void emit_stdbox(float x0, float y0, float x1, float y1, float surface_w,
+			uint32_t color);
+	void emit_stdbox_piece(float x0, float y0, float x1, float y1, int col,
+			int row, bool crop_bottom, uint32_t color);
 	void emit_net_icon(float x, float y, float size, int quality);
 	void emit_wire_rect(float x0, float y0, float x1, float y1, uint32_t color);
 	void emit_text(const char *text, float design_x, float design_y,

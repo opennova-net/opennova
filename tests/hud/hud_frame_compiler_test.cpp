@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <vector>
 
 using opennova::hud::GameFont;
 using opennova::hud::GameFontState;
@@ -1169,6 +1170,101 @@ void test_compiler_label_fonts(const fnt_font_t *font) {
 
 } // namespace
 
+// The stdbox panel geometry: pieces and the fill inset scale with the surface,
+// the fill tiles at a fixed 32 px screen period off the BORDER atlas's own
+// cell (3,0), and the bottom row is cropped rather than squashed.
+// [orig: FUN_0056b700 @0x56b700; _DAT_007cfe3c = 0.000625; rec+0x180/+0x184;
+//  the bottom-row crop flag1 @0x56b456 with _DAT_007c459c = 0.9]
+void test_compiler_stdbox_geometry(const fnt_font_t *font) {
+	using opennova::hud::HudQuad;
+	HudFrameCompiler compiler;
+	HudLayout layout;
+	// The shipped border.tga is a 128 px 4x4 grid, so one source cell is 32 px.
+	layout.box_texture_valid = true;
+	layout.box_tex_w = 128;
+	compiler.configure(layout, font);
+
+	HudFrameState state;
+	state.ticks = 100;
+	state.scoreboard.shown = true;
+
+	// Collect the panel's quads at two surface widths.
+	auto box_quads = [&](float surface_w, float surface_h) {
+		std::vector<HudQuad> out;
+		const HudDrawList &list = compiler.compile(state, surface_w, surface_h);
+		for (const HudQuad &q : list.quads) {
+			if (q.texture == opennova::hud::kHudTexBoxBorder ||
+					q.texture == opennova::hud::kHudTexBoxTile) {
+				out.push_back(q);
+			}
+		}
+		return out;
+	};
+
+	const std::vector<HudQuad> wide = box_quads(1600.0f, 1200.0f);
+	CHECK(!wide.empty(), "the stdbox panel emits quads when its atlas loaded");
+
+	// The fill comes off the BORDER atlas's cell (3,0) — boxtile.tga is a flat
+	// camo sheet with no cell grid, so sampling a quarter-rect of it is wrong.
+	bool any_tile_slot = false;
+	for (const HudQuad &q : wide) {
+		if (q.texture == opennova::hud::kHudTexBoxTile) any_tile_slot = true;
+	}
+	CHECK(!any_tile_slot,
+			"every stdbox quad samples the border atlas, fill included");
+
+	// The eight border pieces are the quads whose UV cell is not (3,0).
+	// At surface 1600 the scale is exactly 1, so a piece is one full 32 px cell.
+	auto corner_tl = [](const std::vector<HudQuad> &qs) {
+		for (const HudQuad &q : qs) {
+			if (q.u0 < 0.01f && q.v0 < 0.01f) return q;
+		}
+		return HudQuad{};
+	};
+	const HudQuad tl_wide = corner_tl(wide);
+	CHECK(std::fabs((tl_wide.x1 - tl_wide.x0) - 32.0f) < 0.01f,
+			"at surface 1600 the scale is 1, so a piece is one 32 px cell");
+
+	// Halve the surface and the piece halves with it — the old hardcoded 32
+	// stayed put, which is what this pins.
+	const std::vector<HudQuad> narrow = box_quads(800.0f, 600.0f);
+	const HudQuad tl_narrow = corner_tl(narrow);
+	CHECK(std::fabs((tl_narrow.x1 - tl_narrow.x0) - 16.0f) < 0.01f,
+			"surface 800 -> s = 0.5 -> a 16 px piece");
+
+	// The bottom-left piece keeps its top 90% in BOTH the destination and the
+	// source cell: cropped, not squashed.
+	constexpr float kCell = 1.0f / 4.0f;
+	bool saw_cropped = false;
+	for (const HudQuad &q : wide) {
+		const bool bottom_row = std::fabs(q.v0 - 2.0f * kCell) < 0.001f;
+		const bool left_col = q.u0 < 0.01f;
+		if (!bottom_row || !left_col) continue;
+		saw_cropped = true;
+		CHECK(std::fabs((q.v1 - q.v0) - kCell * 0.9f) < 0.001f,
+				"the bottom row samples only the top 90% of its cell");
+		CHECK(std::fabs((q.y1 - q.y0) - 32.0f * 0.9f) < 0.01f,
+				"and draws into a correspondingly shorter rect");
+	}
+	CHECK(saw_cropped, "the bottom-left corner piece is emitted");
+
+	// The fill tiles at a fixed 32 px period that does NOT scale with the
+	// surface: two adjacent tiles in the first row sit exactly 32 px apart.
+	std::vector<HudQuad> fill;
+	for (const HudQuad &q : wide) {
+		if (q.u0 > 3.0f * kCell - 0.01f) fill.push_back(q);
+	}
+	CHECK(fill.size() > 2, "the interior is tiled, not one stretched quad");
+	CHECK(std::fabs((fill[1].x0 - fill[0].x0) - 32.0f) < 0.01f,
+			"adjacent fill tiles are one 32 px screen period apart");
+	// A partial edge tile takes a proportional slice of the source cell rather
+	// than squashing the whole cell into it.
+	const HudQuad &last = fill.back();
+	const float frac = (last.x1 - last.x0) / 32.0f;
+	CHECK(std::fabs((last.u1 - last.u0) - kCell * frac) < 0.001f,
+			"a partial tile samples a proportional slice of the cell");
+}
+
 int main() {
 	fnt_font_t font = make_font();
 	test_measure_advance_and_trailing_pad(&font);
@@ -1184,6 +1280,7 @@ int main() {
 	test_spinmap_mesh_layers_and_waypoint(&font);
 	test_compiler_friendly_tags(&font);
 	test_compiler_label_fonts(&font);
+	test_compiler_stdbox_geometry(&font);
 	fnt_free(&font);
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);

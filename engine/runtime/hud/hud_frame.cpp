@@ -1181,29 +1181,112 @@ void HudFrameCompiler::element_feed(const HudFrameState &state, float w,
 //
 // RECORDED GAP: the border x brush two-texture combine (op 2 @0x676ea0) was
 // never decompiled, so the cells are drawn directly rather than combined.
+// One border piece: cell (col,row) of the 4x4 atlas stretched into the dest
+// rect. The bottom row keeps only its top 90% of BOTH the destination and the
+// source cell — cropped, not squashed [orig: the flag1 arm @0x56b456,
+// _DAT_007c459c = 0.9].
+void HudFrameCompiler::emit_stdbox_piece(float x0, float y0, float x1, float y1,
+		int col, int row, bool crop_bottom, uint32_t color) {
+	if (x1 <= x0 || y1 <= y0) return;
+	constexpr float kCell = 1.0f / 4.0f;
+	const float u0 = static_cast<float>(col) * kCell;
+	const float v0 = static_cast<float>(row) * kCell;
+	const float vh = crop_bottom ? kCell * kBoxBottomCrop : kCell;
+	const float dh = crop_bottom ? (y1 - y0) * kBoxBottomCrop : (y1 - y0);
+	emit_rect_uv(x0, y0, x1, y0 + dh, u0, v0, u0 + kCell, v0 + vh, color,
+			kHudTexBoxBorder);
+}
+
+// THE RETAIL "stdbox" PANEL: an 8-piece stencil border from border.tga's 4x4
+// cell grid, drawn strictly INSIDE the rect, over an interior fill tiled from
+// that same atlas's cell (3,0)
+// [orig: FUN_0051efd0 @0x51efd0 -> the "stdbox" style lookup FUN_0056ab40 ->
+//  the drawer FUN_0056b700 @0x56b700; registered at mission load @0x525aa2 as
+//  stdbox(border.tga = stencil, boxtile.tga = brush, monogram.tga)].
+//
+// This is its OWN geometry, NOT the menu frame's model
+// (CUIElement_DrawFrame @0x64a210), where the pieces OVERHANG the rect.
+//
+// Retail binds ONE material for all eight pieces AND the fill: border.tga
+// combined with the boxtile camo sheet
+// [orig: FUN_00676ea0(border.tga, boxtile.tga, 0x651, 2) -> style+0x30, built
+//  in FUN_0056acd0 @0x56acd0, bound for the border pass @0x56b8f4]. We bind
+// the raw stencil instead, so the frame reads plain where retail reads camo —
+// a recorded divergence (D-HUD-25), not an unknown: the combine is witnessed
+// end to end (stage 1 = MODULATE(CURRENT, TEXTURE1) with a SCREEN-ANCHORED
+// UV1 = (screen_px + 0.5)/256 whose divisors are the boxtile TGA's own w/h
+// [orig: draw_textured_quad_0 @0x56B3E0 vertex +0x20/+0x24, divisors
+// @0x56B357/@0x56B361]), it just needs a second texture stage this quad
+// stream does not carry yet.
+//
+// Every retail quad's diffuse is alpha<<24 | 0x7F7F7F — half-bright under the
+// device's MODULATE2X stage, so 0.5 x 2 = 1 and the material lands at full
+// texture brightness [orig: the shl/lea prologue @0x56b70e..@0x56b713]. A
+// host without that stage reproduces it with a neutral white diffuse, which is
+// what the caller passes.
+//
+// The monogram watermark pass is deliberately NOT drawn: its material carries
+// flag word 0x622, whose LOW NIBBLE selects ONE/ONE — pure additive
+// [orig: FUN_00680f00 @0x680f00 -> D3DRS 0x13/0x14/0x1B via FUN_006817d0
+// @0x6817d0] — and the shipped monogram.tga is measured 100% pure black, so
+// the pass adds nothing. Drawing it as an opaque quad (the reading that
+// decodes only the colour op and never the blend nibble) paints a black slab
+// across the middle of every box.
 void HudFrameCompiler::emit_stdbox(float x0, float y0, float x1, float y1,
-		uint32_t color) {
+		float surface_w, uint32_t color) {
 	if (!layout_.box_texture_valid) return;
+	if (x1 - x0 < 2.0f || y1 - y0 < 2.0f) return;
 	constexpr float kCell = 1.0f / 4.0f;   // the 4x4 atlas step in UV
-	// The piece size scales with the surface the same way the fork witnessed
-	// (s = width / 1600 against the 32px cell); clamp so a small surface still
-	// leaves an interior.
-	const float piece = 32.0f;
-	const float pw = std::min(piece, (x1 - x0) * 0.5f);
-	const float ph = std::min(piece, (y1 - y0) * 0.5f);
-	// Interior brush first, tiled from cell (3,0).
-	emit_rect_uv(x0 + pw, y0 + ph, x1 - pw, y1 - ph,
-			3.0f * kCell, 0.0f, 4.0f * kCell, kCell, color, kHudTexBoxTile);
-	// Corners.
-	emit_rect_uv(x0, y0, x0 + pw, y0 + ph, 0.0f, 0.0f, kCell, kCell, color, kHudTexBoxBorder);
-	emit_rect_uv(x1 - pw, y0, x1, y0 + ph, 2.0f * kCell, 0.0f, 3.0f * kCell, kCell, color, kHudTexBoxBorder);
-	emit_rect_uv(x0, y1 - ph, x0 + pw, y1, 0.0f, 2.0f * kCell, kCell, 3.0f * kCell, color, kHudTexBoxBorder);
-	emit_rect_uv(x1 - pw, y1 - ph, x1, y1, 2.0f * kCell, 2.0f * kCell, 3.0f * kCell, 3.0f * kCell, color, kHudTexBoxBorder);
-	// Edges.
-	emit_rect_uv(x0 + pw, y0, x1 - pw, y0 + ph, kCell, 0.0f, 2.0f * kCell, kCell, color, kHudTexBoxBorder);
-	emit_rect_uv(x0 + pw, y1 - ph, x1 - pw, y1, kCell, 2.0f * kCell, 2.0f * kCell, 3.0f * kCell, color, kHudTexBoxBorder);
-	emit_rect_uv(x0, y0 + ph, x0 + pw, y1 - ph, 0.0f, kCell, kCell, 2.0f * kCell, color, kHudTexBoxBorder);
-	emit_rect_uv(x1 - pw, y0 + ph, x1, y1 - ph, 2.0f * kCell, kCell, 3.0f * kCell, 2.0f * kCell, color, kHudTexBoxBorder);
+	// The atlas is a 4x4 grid, so one source cell is a quarter of its width
+	// (32 px for the shipped 128 px border.tga).
+	const float src_cell = static_cast<float>(layout_.box_tex_w) * 0.25f;
+	if (src_cell <= 0.0f) return;
+	// Piece size and the fill inset scale with the surface; the fill's tile
+	// PERIOD does not [orig: _DAT_007cfe3c = 0.000625, i.e. 1/1600].
+	const float s = surface_w / kBoxScaleRef;
+	const float cw = src_cell * s;
+	const float ch = src_cell * s;
+
+	// 1. The interior fill: cell (3,0) of the SAME atlas, tiled at a 32 px
+	// screen period inside the inset rect [orig: the inset pair rec+0x180 /
+	// rec+0x184, the /32 uv].
+	const float fx1 = x0 + kBoxFillInsetX * s;
+	const float fy1 = y0 + kBoxFillInsetY * s;
+	const float fx2 = x1 - kBoxFillInsetX * s;
+	const float fy2 = y1 - kBoxFillInsetY * s;
+	if (fx2 > fx1 && fy2 > fy1) {
+		const float fu0 = 3.0f * kCell;
+		for (float yy = fy1; yy < fy2; yy += kBoxFillTilePx) {
+			const float th = std::min(kBoxFillTilePx, fy2 - yy);
+			for (float xx = fx1; xx < fx2; xx += kBoxFillTilePx) {
+				const float tw = std::min(kBoxFillTilePx, fx2 - xx);
+				// A partial edge tile takes a proportional slice of the
+				// source cell rather than squashing the whole cell into it.
+				emit_rect_uv(xx, yy, xx + tw, yy + th, fu0, 0.0f,
+						fu0 + kCell * (tw / kBoxFillTilePx),
+						kCell * (th / kBoxFillTilePx), color,
+						kHudTexBoxBorder);
+			}
+		}
+	}
+
+	// 2. The eight border pieces, over the fill.
+	const float ix1 = x0 + cw;   // inner x after the left column
+	const float ix2 = x1 - cw;   // inner x before the right column
+	const float iy1 = y0 + ch;
+	const float iy2 = y1 - ch;
+	emit_stdbox_piece(x0, y0, x0 + cw, y0 + ch, 0, 0, false, color);   // TL
+	emit_stdbox_piece(ix2, y0, x1, y0 + ch, 2, 0, false, color);       // TR
+	emit_stdbox_piece(x0, iy2, x0 + cw, y1, 0, 2, true, color);        // BL
+	emit_stdbox_piece(ix2, iy2, x1, y1, 2, 2, true, color);            // BR
+	if (ix2 > ix1) {
+		emit_stdbox_piece(ix1, y0, ix2, y0 + ch, 1, 0, false, color);  // top
+		emit_stdbox_piece(ix1, iy2, ix2, y1, 1, 2, true, color);       // bottom
+	}
+	if (iy2 > iy1) {
+		emit_stdbox_piece(x0, iy1, x0 + cw, iy2, 0, 1, false, color);  // left
+		emit_stdbox_piece(ix2, iy1, x1, iy2, 2, 1, false, color);      // right
+	}
 }
 
 // The per-row connection icon: a 16x16 quad sampling one band of a 4-row
@@ -1226,11 +1309,9 @@ void HudFrameCompiler::element_scoreboard(const HudFrameState &state, float w,
 	// header block @0x423060]. Held open by the player, so it is drawn last —
 	// above every other overlay.
 	//
-	// NOT DRAWN HERE (recorded residuals, both texture-dependent): the stdbox
-	// panel frame [orig: the call @0x423a72 -> FUN_0051efd0], which needs the
-	// border/boxtile atlas slots, and the 16x16 connection icon [orig:
-	// @0x4241fb + FUN_004c2ee0], which needs the neticon2 atlas. The text
-	// layout below is the witnessed one and lands where retail puts it.
+	// Draw order follows retail: the stdbox panel [orig: the call @0x423a72],
+	// then the title, the centred header ladder, the rows in their columns
+	// (each with its rank number and connection icon), then the paging footer.
 	if (!state.scoreboard.shown) return;
 	if (font_.font() == nullptr) return;
 
@@ -1238,7 +1319,7 @@ void HudFrameCompiler::element_scoreboard(const HudFrameState &state, float w,
 	// The panel frame, behind everything the board draws.
 	emit_stdbox(sx(static_cast<float>(kBoardX1), w), sy(static_cast<float>(kBoardY1), h),
 			sx(static_cast<float>(kBoardX2), w), sy(static_cast<float>(kBoardY2), h),
-			0xFFFFFFFFu);
+			w, 0xFFFFFFFFu);
 	// The title rides just inside the panel's top-left corner.
 	if (!state.scoreboard.title.empty())
 		emit_text(state.scoreboard.title.c_str(),

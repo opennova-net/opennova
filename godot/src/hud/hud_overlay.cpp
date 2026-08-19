@@ -504,6 +504,9 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		textures_[opennova::hud::kHudTexBoxTile] = brush;
 		textures_[opennova::hud::kHudTexNetIcon] = icon;
 		layout_.box_texture_valid = border.is_valid() && brush.is_valid();
+		// The piece size comes off the border atlas's own width, not a
+		// constant (retail: the 4x4 cell grid, see docs/interface/hud-re.md).
+		layout_.box_tex_w = border.is_valid() ? border->get_width() : 0;
 		layout_.net_icon_texture_valid = icon.is_valid();
 	}
 
