@@ -229,7 +229,7 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("drain_fire_sounds"),
 			&Simulation::drain_fire_sounds);
 	ClassDB::bind_method(D_METHOD("local_player_viewmodel_bias_view_units",
-					"pos_raw_units", "tpos_raw_units", "narrow_aspect"),
+					"pos_raw_units", "tpos_raw_units", "viewport_w", "viewport_h"),
 			&Simulation::local_player_viewmodel_bias_view_units);
 	ClassDB::bind_method(D_METHOD("get_tracer_trails"), &Simulation::get_tracer_trails);
 	ClassDB::bind_method(D_METHOD("get_round_glow_rows"),

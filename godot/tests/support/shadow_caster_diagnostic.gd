@@ -33,7 +33,7 @@ func _init(
 	sort_path = row_sort_path
 
 
-func to_json_value() -> Variant:
+func to_json_value() -> Dictionary:
 	return {
 		"bms_id": bms_id,
 		"item_id": item_id,

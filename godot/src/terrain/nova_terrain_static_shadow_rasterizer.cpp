@@ -1,3 +1,9 @@
+// Device leg only: FNV geometry cache keys, Texture2D mip extraction into the
+// alpha pyramid, Transform3D flattening, and CptFile/TrnConfig marshalling.
+// Every witnessed rule — the scanline walk, edge admission, mip LOD pick, the
+// planner's placement math — lives cited in engine/runtime/terrain/
+// terrain_static_shadow_{raster,planner,alpha,geometry}.cpp (see the class
+// header's witness block and docs/terrain/terrain-re.md).
 #include "terrain/nova_terrain_static_shadow_rasterizer.h"
 
 #include "mission/nova_mission_object_placer.h"

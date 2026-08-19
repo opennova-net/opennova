@@ -8,9 +8,9 @@ extends RefCounted
 ## never edited. The original state is restored between variants and at
 ## finish().
 
-const CaptureVariant := preload("res://game/world/render_capture_variant.gd")
+const CaptureVariant := preload("res://tests/support/render_capture_variant.gd")
 const CasterDiagnostic := preload(
-		"res://game/world/shadow_caster_diagnostic.gd")
+		"res://tests/support/shadow_caster_diagnostic.gd")
 
 var _world: GameWorld
 var _viewport: Viewport
@@ -51,11 +51,11 @@ func begin(world: GameWorld, viewport: Viewport) -> Error:
 	return OK
 
 
-func apply_variant(variant) -> Error:
+func apply_variant(variant: RenderCaptureVariant) -> Error:
 	if not _active or _world == null or not is_instance_valid(_world) \
 			or _viewport == null or not is_instance_valid(_viewport):
 		return ERR_UNCONFIGURED
-	if variant == null or not (variant is CaptureVariant):
+	if variant == null:
 		return ERR_INVALID_PARAMETER
 	_restore_suppressed_dynamic_casters()
 	_restore_suppressed_static_casters()

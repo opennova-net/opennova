@@ -1,3 +1,9 @@
+// Device leg only: Godot Image/Texture2DArray marshalling, the async worker
+// drain, and upload counters. Page identity, LRU, and invalidation — the
+// witnessed cache semantics — live in engine/runtime/terrain/
+// terrain_tile_composition_cache.{h,cpp}, held here as a member (see the
+// class header's witness block and docs/terrain/terrain-re.md; retail's
+// device-side twin is the D3D tile-texture pool the record maps).
 #include "nova_terrain_tile_cache_device.h"
 
 #include "nova_terrain_data.h"

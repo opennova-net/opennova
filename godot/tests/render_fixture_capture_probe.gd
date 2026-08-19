@@ -9,9 +9,9 @@ const HudHiddenCaptureWitness := preload(
 const FirstPersonArmsWitness := preload(
 		"res://game/world/first_person_arms_witness.gd")
 const CaptureVariant := preload(
-		"res://game/world/render_capture_variant.gd")
+		"res://tests/support/render_capture_variant.gd")
 const ShadowAttributionCaptureSession := preload(
-		"res://game/world/shadow_attribution_capture_session.gd")
+		"res://tests/support/shadow_attribution_capture_session.gd")
 
 const DEFAULT_CATALOG := "res://../docs/render/render-fixtures-v1.json"
 const DEFAULT_OUTPUT_ROOT := "res://../.scratch/golden/render/fixtures"

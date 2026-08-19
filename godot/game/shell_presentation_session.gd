@@ -61,7 +61,6 @@ func finish_world_load(
 
 
 func begin_world_only_capture(
-		shell: Node,
 		hud: CanvasLayer,
 		menu_layer: CanvasLayer,
 		camera: Camera3D) -> Error:
@@ -75,7 +74,7 @@ func begin_world_only_capture(
 	var layers: Array[CanvasLayer] = []
 	_append_layer_tree(hud, layers)
 	_append_layer_tree(menu_layer, layers)
-	var viewmodel_layer := _find_viewmodel_layer(shell, camera)
+	var viewmodel_layer := _find_viewmodel_layer(camera)
 	if viewmodel_layer != null:
 		_append_layer_tree(viewmodel_layer, layers)
 	for layer in layers:
@@ -186,14 +185,13 @@ static func _collect_nested_layers(
 		_collect_nested_layers(child, out)
 
 
-static func _find_viewmodel_layer(
-		shell: Node, camera: Camera3D) -> CanvasLayer:
+static func _find_viewmodel_layer(camera: Camera3D) -> CanvasLayer:
+	# The rig parents ViewmodelPass to the CAMERA's viewport, always
+	# (player_viewmodel_rig._build_viewmodel_pass) — the viewport lookup is
+	# authoritative and needs no name-search fallback. No camera means the
+	# pass was never built.
 	if camera != null and is_instance_valid(camera) \
 			and camera.get_viewport() != null:
-		var viewport_layer := camera.get_viewport().get_node_or_null(
+		return camera.get_viewport().get_node_or_null(
 				"ViewmodelPass") as CanvasLayer
-		if viewport_layer != null:
-			return viewport_layer
-	if shell != null and is_instance_valid(shell):
-		return shell.find_child("ViewmodelPass", true, false) as CanvasLayer
 	return null

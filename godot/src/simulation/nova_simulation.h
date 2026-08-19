@@ -1748,13 +1748,15 @@ public:
 	// The eased FP viewmodel view-offset in VIEW-FRAME world units (X=fwd,
 	// Y=left, Z=up) from raw weapon.def pos/tpos units — the /256 blend +
 	// NoCardSwitch suppression run in world/player_view (S8), then the
-	// per-frame motion lead (the damped movement-delta tracker) and, when the
-	// rig reports a 4:3-or-narrower viewport, the 0x500 z drop. The rig maps
-	// view axes onto its camera frame. [orig: Player_UpdateFirstPersonCamera
-	// @ 0x4dd380 — lead @ 0x4dd4f2..0x4dd56c, narrow-aspect drop @ 0x4dd571]
+	// per-frame motion lead (the damped movement-delta tracker) and the 0x500
+	// z drop when the viewport frames 4:3 or narrower — the rig samples the
+	// viewport SIZE (device work) and the 3w<=4h rule itself is the engine's
+	// (world/player_view.h player_view_narrow_aspect). The rig maps view axes
+	// onto its camera frame. [orig: Player_UpdateFirstPersonCamera @ 0x4dd380
+	// — lead @ 0x4dd4f2..0x4dd56c, narrow-aspect drop @ 0x4dd571]
 	Vector3 local_player_viewmodel_bias_view_units(
 			const Vector3 &p_pos_raw_units, const Vector3 &p_tpos_raw_units,
-			bool p_narrow_aspect);
+			int p_viewport_w, int p_viewport_h);
 
 	// The sound-profile chain [orig: SoundProfile_LoadAll @ 0x527490 /
 	// Entity_GetProfileSlotSound @ 0x528300]: feed SndProf.def text (VFS

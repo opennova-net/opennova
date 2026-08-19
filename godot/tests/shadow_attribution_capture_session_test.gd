@@ -1,9 +1,9 @@
 extends GutTest
 
 const CaptureSession := preload(
-		"res://game/world/shadow_attribution_capture_session.gd")
+		"res://tests/support/shadow_attribution_capture_session.gd")
 const CaptureVariant := preload(
-		"res://game/world/render_capture_variant.gd")
+		"res://tests/support/render_capture_variant.gd")
 
 
 class ItemDatabaseWorld:

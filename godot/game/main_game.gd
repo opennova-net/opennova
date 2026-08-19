@@ -1061,7 +1061,7 @@ func _on_exit_to_desktop() -> void: request_quit()
 
 ## Keep the public adapter callback while the capture module owns mutation.
 func mcp_begin_world_only_capture() -> Error:
-	return _shell_presentation.begin_world_only_capture(self, _hud, _menu_layer, _camera)
+	return _shell_presentation.begin_world_only_capture(_hud, _menu_layer, _camera)
 
 
 func mcp_end_world_only_capture() -> void: _shell_presentation.finish_world_only_capture()
@@ -1079,7 +1079,7 @@ func finish_hud_hidden_capture() -> void: _shell_presentation.finish_hud_hidden_
 
 
 ## Public semantic witness consumed by render-fixture capture probes. The
-## The presentation session combines presenter draw-list/effects/card facts
+## presentation session combines presenter draw-list/effects/card facts
 ## with the CanvasLayer boundary so a hidden parent cannot masquerade as an
 ## empty gameplay HUD.
 func hud_hidden_capture_witness() -> HudHiddenCaptureWitness:

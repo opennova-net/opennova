@@ -218,7 +218,7 @@ func _mirror_population_line(world: GameWorld) -> String:
 			elif (layers & Water.VISUAL_LAYER_WORLD_NO_MIRROR) != 0:
 				plain += 1
 		elif child is ObjectModel:
-			if bool((child as ObjectModel).get("mirror_reflected")):
+			if (child as ObjectModel).mirror_reflected:
 				mirrored += 1
 			else:
 				plain += 1
