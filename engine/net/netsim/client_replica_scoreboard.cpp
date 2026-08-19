@@ -88,7 +88,9 @@ void ClientReplicaPipeline::apply_player_list(const std::vector<uint8_t> &body) 
 		ClientScoreboardRow row;
 		row.slot_id = r.slot_id;
 		row.status_flags = r.status_flags;
-		row.score1 = r.score1;
+		// The one sign-extension site — the wire u16 lands signed in the
+		// record, retail's movsx [orig: @0x42fb9d].
+		row.score1 = static_cast<int16_t>(r.score1);
 		row.score2 = r.score2;
 		row.spectator = (r.flags & 0x01u) != 0u;
 		row.team = static_cast<uint8_t>(r.flags >> 1);

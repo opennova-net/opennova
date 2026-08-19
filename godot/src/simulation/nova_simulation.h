@@ -76,6 +76,10 @@
 
 #include "simulation/nova_mission_session_values.h"
 
+namespace opennova::hud {
+struct ScoreboardEntry; // hud/hud_scoreboard.h — the Tab-board drawer row
+}
+
 namespace godot {
 
 class TerrainData;
@@ -1512,11 +1516,20 @@ public:
 	// the keys against gametext and calls the format helpers below.
 	// Suppressed types (the LFP result set + the tip-only 58) never appear.
 	Array drain_feed_events();
-	// The folded Tab board (netsim ClientScoreboard + the 0x46 roster join):
-	// flags, counts, and one dictionary per row with its name resolved from the
-	// connection-slot roster. Rows stay in WIRE ORDER — the server sorts them
-	// (retail: Player_ComputeScore @0x500A80) and the client never re-sorts.
+	// The folded Tab board's HEADER (netsim ClientScoreboard counts + the
+	// session strings): known/team_mode/timed, the witnessed players count
+	// (accepted rows minus the spectator trailer, netsim::scoreboard_header),
+	// in_game/spectators, game_type, server and mission names. The rows no
+	// longer round-trip through script — HudOverlay pulls them natively via
+	// fill_scoreboard_rows.
 	Dictionary get_scoreboard() const;
+	// The native Tab-board row handoff: fills the drawer's entries via the
+	// netsim projection (netsim::project_scoreboard — wire order, the server
+	// sorts and the client never re-sorts). NOT ClassDB-bound; HudOverlay
+	// calls it through this typed seam. Returns false (rows cleared) when no
+	// runtime exists.
+	bool fill_scoreboard_rows(
+			std::vector<opennova::hud::ScoreboardEntry> &r_rows) const;
 	// Substitute actor names into a canned template (retail: Chat_FormatMessage
 	// @0x422C60): the STRCND48 bonus re-compose when `extra` names the local
 	// player, then $A/$B sequential case-insensitive replace-all. Exposed so

@@ -302,7 +302,8 @@ struct HudMessageLine {
 struct HudScoreboardState {
 	bool shown = false;
 	uint32_t game_type = 0;
-	int page = 0;
+	// (PgUp/PgDn paging is a recorded D-HUD-24 residual; the state grows a
+	// page cursor when that leg lands.)
 	std::string title;         // Overlays/STROVER_KILLLIST ("Player List")
 	std::string server_name;
 	std::string mission_title;

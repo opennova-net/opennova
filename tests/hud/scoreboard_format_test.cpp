@@ -19,7 +19,7 @@ static int failures = 0;
 
 namespace {
 
-ScoreboardEntry player(const char *name, uint8_t slot, uint16_t score,
+ScoreboardEntry player(const char *name, uint8_t slot, int16_t score,
                        uint8_t team) {
 	ScoreboardEntry e;
 	e.name = name;
@@ -72,9 +72,9 @@ void test_row_formats() {
 	const ScoreboardEntry big = player("A-99", 0, 100, 2);
 	CHECK(scoreboard_row_text(big, true) == "100 A-99 [00]");
 	// The score is the record's SIGN-EXTENDED read — a negative score prints
-	// negative, not as 65534 [orig: the movsx @0x42fb9d].
-	const ScoreboardEntry neg = player("OWN-GOAL", 4,
-			static_cast<uint16_t>(-2), 1);
+	// negative, not as 65534 [orig: the movsx @0x42fb9d]. The entry type is
+	// signed now, so the pin passes -2 as -2.
+	const ScoreboardEntry neg = player("OWN-GOAL", 4, -2, 1);
 	CHECK(scoreboard_row_text(neg, true) == " -2 OWN-GOAL [04]");
 	// A spectator never shows a score, even in non-team mode
 	// [orig: the spectator arm @0x423e04 takes the no-score format].

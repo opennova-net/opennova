@@ -36,7 +36,7 @@ func update(hud, world, chorded: bool, active: bool) -> void:
 	_was_down = down
 	if not _open:
 		if _pushed:
-			hud.set_scoreboard(false, 0, {}, [])
+			hud.set_scoreboard(false, 0, {}, null)
 			_pushed = false
 		return
 	var sim: Simulation = world.get_sim()
@@ -62,21 +62,22 @@ func update(hud, world, chorded: bool, active: bool) -> void:
 		var label_key := _game_type_label_key(game_type)
 		if label_key != "" and table.has_string_in_section("Overlays", label_key):
 			strings["game_type"] = table.get_string_in_section("Overlays", label_key)
-		# "<label> <count>": the HUD count is the accepted rows MINUS the
-		# trailer's spectator count [orig: the subtraction @0x4231dd inside
-		# the header block @0x423060].
-		var rows: Array = board.get("rows", [])
+		# "<label> <count>": the counts are engine-computed — the players
+		# count is netsim's witnessed rows-minus-spectators header arithmetic
+		# (scoreboard_header); this lane only pairs them with the strings.
 		var spectators := int(board.get("spectators", 0))
 		if table.has_string_in_section("Client", "STRCLI04"):
 			strings["players"] = "%s %d" % [
 					table.get_string_in_section("Client", "STRCLI04"),
-					max(0, rows.size() - spectators)]
+					int(board.get("players", 0))]
 		if spectators > 0 and table.has_string_in_section("Client", "STRCLI23"):
 			strings["spectators"] = "%s %d" % [
 					table.get_string_in_section("Client", "STRCLI23"), spectators]
 		if table.has_string_in_section("Text", "CHANGE_SCREEN"):
 			strings["footer"] = table.get_string_in_section("Text", "CHANGE_SCREEN")
-	hud.set_scoreboard(true, game_type, strings, board.get("rows", []))
+	# The rows never round-trip through script: the overlay pulls them
+	# natively from the sim (HudOverlay.set_scoreboard -> fill_scoreboard_rows).
+	hud.set_scoreboard(true, game_type, strings, sim)
 
 
 ## The game-type label row of the header ladder — retail's own key map

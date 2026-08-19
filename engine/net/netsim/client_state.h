@@ -49,10 +49,13 @@ struct ClientRosterSlot {
 struct ClientScoreboardRow {
 	uint8_t slot_id = 0;
 	uint16_t status_flags = 0;  // the glyph bitfield, NOT a ping [orig: store @0x42fdb4]
-	uint16_t score1 = 0;        // the mode's primary stat — the only score the
-	                            // Tab list draws [orig: @0x423e76]
+	int16_t score1 = 0;         // the mode's primary stat — the only score the
+	                            // Tab list draws, SIGN-EXTENDED into the record
+	                            // like retail's movsx [orig: @0x42fb9d; drawn
+	                            // "%3i" @0x423e76]
 	uint16_t score2 = 0;        // accumulated points/EXP (the server's team-mode
-	                            // sort key; the retail client never reads it)
+	                            // sort key; the retail client never reads it —
+	                            // no read width witnessed, stays the raw wire u16)
 	uint8_t team = 0;           // flags >> 1
 	bool spectator = false;     // flags bit0
 	std::string name;           // joined from the roster at apply time

@@ -42,7 +42,7 @@ std::string scoreboard_row_text(const ScoreboardEntry &e, bool non_team) {
 		// [orig: "%3i %s<ch>%s<co> [%02ld]" @0x7c4bc4 — the score is the
 		// record's SIGN-EXTENDED read, movsx @0x42fb9d]
 		std::snprintf(buf, sizeof(buf), "%3i %s [%02d]",
-				static_cast<int>(static_cast<int16_t>(e.score1)),
+				static_cast<int>(e.score1),
 				e.name.c_str(), static_cast<int>(e.slot_id));
 	} else {
 		// [orig: "%s<ch>%s<co> [%02ld]" @0x7c4c00 — team rows carry no score,

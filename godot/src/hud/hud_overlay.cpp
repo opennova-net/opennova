@@ -2,6 +2,7 @@
 
 #include "nova_hud_pos.h"
 #include "resource_index/nova_resource_root.h"
+#include "simulation/nova_simulation.h"
 #include "terrain/nova_terrain_data.h"
 
 #include <godot_cpp/classes/image.hpp>
@@ -145,7 +146,7 @@ void HudOverlay::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_objective_line", "text"), &HudOverlay::set_objective_line);
 	ClassDB::bind_method(D_METHOD("set_objectives_header", "text"), &HudOverlay::set_objectives_header);
 	ClassDB::bind_method(
-			D_METHOD("set_scoreboard", "shown", "game_type", "strings", "rows"),
+			D_METHOD("set_scoreboard", "shown", "game_type", "strings", "sim"),
 			&HudOverlay::set_scoreboard);
 	ClassDB::bind_method(D_METHOD("set_waypoint", "name", "distance_m",
 			"mission_position", "altitude_wu"),
@@ -702,7 +703,7 @@ void HudOverlay::set_objectives_header(const String &p_text) {
 }
 
 void HudOverlay::set_scoreboard(bool p_shown, int64_t p_game_type,
-		const Dictionary &p_strings, const Array &p_rows) {
+		const Dictionary &p_strings, Object *p_sim) {
 	opennova::hud::HudScoreboardState &sb = state_.scoreboard;
 	sb.shown = p_shown;
 	sb.game_type = static_cast<uint32_t>(p_game_type);
@@ -713,23 +714,13 @@ void HudOverlay::set_scoreboard(bool p_shown, int64_t p_game_type,
 	sb.players_line = String(p_strings.get("players", "")).utf8().get_data();
 	sb.spectators_line = String(p_strings.get("spectators", "")).utf8().get_data();
 	sb.footer = String(p_strings.get("footer", "")).utf8().get_data();
-	sb.rows.clear();
-	if (p_shown) {
-		sb.rows.reserve(static_cast<size_t>(p_rows.size()));
-		for (int i = 0; i < p_rows.size(); ++i) {
-			const Dictionary d = p_rows[i];
-			opennova::hud::ScoreboardEntry e;
-			e.slot_id = static_cast<uint8_t>(static_cast<int>(d.get("slot", 0)));
-			e.status_flags =
-					static_cast<uint16_t>(static_cast<int>(d.get("status_flags", 0)));
-			e.score1 = static_cast<uint16_t>(static_cast<int>(d.get("score", 0)));
-			e.team = static_cast<uint8_t>(static_cast<int>(d.get("team", 0)));
-			e.spectator = static_cast<bool>(d.get("spectator", false));
-			e.has_entity = static_cast<bool>(d.get("has_entity", false));
-			e.name = String(d.get("name", "")).utf8().get_data();
-			e.quality = static_cast<uint8_t>(static_cast<int>(d.get("quality", 0)));
-			sb.rows.push_back(e);
-		}
+	// Rows come straight from the netsim projection — no script-side
+	// Dictionary round-trip to drop fields or lose the score sign.
+	Simulation *sim = Object::cast_to<Simulation>(p_sim);
+	if (p_shown && sim != nullptr) {
+		sim->fill_scoreboard_rows(sb.rows);
+	} else {
+		sb.rows.clear();
 	}
 	queue_redraw();
 }
