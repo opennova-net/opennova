@@ -16,6 +16,7 @@ extends GutTest
 
 const RIGGED_3DI := "res://../fixtures/threedi/3di3/Shed.3di"
 const MUZZLE_3DI := "res://../fixtures/3dp/dapche2/dapche2.3di"
+const SECTIONED_3DI := "res://../fixtures/3dp/Pmpjk01/Pmpjk01.3di"
 
 
 # Builds the flat PF-layout snapshot Simulation.get_present_snapshot()
@@ -102,6 +103,12 @@ class Snapshot:
 					e.get("world_heat_glow", 0))
 			out[b + Simulation.PF_RIGHT_HAND_COLLAPSED] = float(
 					e.get("right_hand_collapsed", 0))
+			var section_mask := int(e.get("section_mask", 0)) & 0xFFFFFFFF
+			out[b + Simulation.PF_SECTION_MASK_VALID] = float(
+					e.get("section_mask_valid", 0))
+			out[b + Simulation.PF_SECTION_MASK_LO] = float(section_mask & 0xFFFF)
+			out[b + Simulation.PF_SECTION_MASK_HI] = float(
+					(section_mask >> 16) & 0xFFFF)
 			var angles: PackedVector3Array = e.get(
 					"aim_angles", PackedVector3Array())
 			for cls in range(mini(angles.size(), 9)):
@@ -118,6 +125,14 @@ func _model() -> ObjectModel:
 	var m := ObjectModel.new()
 	add_child_autofree(m)
 	m.set_process(false)
+	return m
+
+
+func _sectioned_model() -> ObjectModel:
+	var m := _model()
+	var data := ObjectData.new()
+	assert_eq(data.open_file(ProjectSettings.globalize_path(SECTIONED_3DI)), OK)
+	m.set_object_data(data)
 	return m
 
 
@@ -1074,6 +1089,29 @@ func test_visibility_from_hidden_and_alive() -> void:
 	assert_true(dead.visible, "a dead non-organic renders (husk swap / graphic fallback)")
 	assert_true(corpse.visible, "a dead organic renders as a corpse")
 	assert_false(despawned.visible, "the sim ends the corpse via PF_HIDDEN")
+
+
+func test_placed_model_applies_and_restores_dismemberment_sections() -> void:
+	var model := _sectioned_model()
+	var p := _make_pass(_index_of({ 6: model }))
+	var snap := Snapshot.new()
+	snap.entities = [{
+		"bms_id": 6,
+		"section_mask_valid": 1,
+		"section_mask": 0b00010,
+	}]
+	_present(p, snap)
+	var parts: Dictionary = model.get_render_part_nodes()
+	assert_eq(parts.size(), 5, "the fixture exposes five dismemberable sections")
+	assert_true((parts[0] as Node3D).visible)
+	assert_false((parts[1] as Node3D).visible,
+			"a set entity section bit hides the matching placed-model part")
+	assert_true((parts[2] as Node3D).visible)
+
+	snap.entities[0]["section_mask"] = 0
+	_present(p, snap)
+	assert_true((parts[1] as Node3D).visible,
+			"clearing the entity section mask restores the part")
 
 
 func test_local_first_person_usegun_parent_is_not_world_rendered() -> void:

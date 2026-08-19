@@ -943,6 +943,30 @@ void PresentApplier::present_snapshot(const PackedFloat32Array &snap,
 			row.present_visible = present_visible_int;
 		}
 		if ((output_channels_ & OUTPUT_VISIBILITY) != 0) {
+			// The row owns the model's section-mask channel only while it
+			// publishes PF_SECTION_MASK_VALID. Rows that never publish must
+			// not touch the channel at all — the occlusion frame pass drives
+			// the same ObjectModel call for buildings, and an unconditional
+			// release here would stomp its applied mask after a plan rebuild.
+			if (field_i(p, base, Simulation::PF_SECTION_MASK_VALID) != 0) {
+				const uint32_t hidden_mask =
+						static_cast<uint32_t>(field_i(
+								p, base, Simulation::PF_SECTION_MASK_LO)) |
+						(static_cast<uint32_t>(field_i(
+								p, base, Simulation::PF_SECTION_MASK_HI))
+								<< 16);
+				const int64_t section_visibility_mask = static_cast<int64_t>(
+						hidden_mask ^ 0xffffffffu);
+				if (section_visibility_mask != row.section_visibility_mask) {
+					model->set_section_visibility_mask(section_visibility_mask);
+					row.section_visibility_mask = section_visibility_mask;
+				}
+			} else if (row.section_visibility_mask != -2 &&
+					row.section_visibility_mask != -1) {
+				// One release when a previously owned row stops publishing.
+				model->set_section_visibility_mask(-1);
+				row.section_visibility_mask = -1;
+			}
 			// Death is not disappearance (corpses and husks keep rendering until
 			// the sim despawns via PF_HIDDEN); the local first-person UseGun
 			// parent's own world model is presentation-suppressed. Semantics and

@@ -18,6 +18,18 @@
 
 using namespace novasim;
 
+namespace {
+
+inline void write_present_section_mask(float *row, uint32_t hidden_mask) {
+	row[Simulation::PF_SECTION_MASK_VALID] = 1.0f;
+	row[Simulation::PF_SECTION_MASK_LO] =
+			static_cast<float>(hidden_mask & 0xFFFFu);
+	row[Simulation::PF_SECTION_MASK_HI] =
+			static_cast<float>((hidden_mask >> 16) & 0xFFFFu);
+}
+
+} // namespace
+
 Array Simulation::get_throwable_visuals() const {
 	Array out;
 	if (!world_) return out;
@@ -1471,6 +1483,7 @@ PackedFloat32Array Simulation::present_snapshot_from_client_replicas() const {
 			r[PF_ROLL_DEG] = static_cast<float>(ent->roll);
 			r[PF_HIDDEN] = ent->hidden ? 1.0f : 0.0f;
 			r[PF_ALIVE] = ent->alive ? 1.0f : 0.0f;
+			write_present_section_mask(r, ent->section_mask);
 			r[PF_RIGHT_HAND_COLLAPSED] =
 					mount_collapses_right_hand_row(*ent) ? 1.0f : 0.0f;
 			// The cveh render callback publishes directly from the live entity

@@ -164,6 +164,12 @@ GameEntitySnapshot snapshot_of(const world::Entity &e) {
 std::vector<GameEntitySnapshot> snapshot_world(const world::World &w) {
 	std::vector<GameEntitySnapshot> out;
 	w.registry.for_each([&](const world::Entity &e) {
+		// The dismemberment clone is an ordinary pool-0 slot on the wire: the
+		// original's 0x0A priority walk admits every live slot with a def
+		// (no dead/connection filter) [orig: Server_BuildEntityPriorityList
+		// admission @0x50e6cb-0x50e6da], so the clone streams compacts like
+		// any NPC corpse. Its section mask never rides the wire — no organic
+		// channel carries entity+0x134 (world-wac-ai-re §19.2).
 		GameEntitySnapshot s = snapshot_of(e);
 		if (s.entity_class == EntityClass::Unknown) return; // no 0x0A compact form
 		// Retail's infantry compact writer reads entity+0x2EC (target heading)
@@ -330,6 +336,11 @@ OrganicSpawnBatch build_pool0_organic_batch(const world::World &w, world::Entity
 	OrganicSpawnBatch batch;
 	w.registry.for_each([&](const world::Entity &e) {
 		if (e.handle.pool() != 0) return;
+		// The dismemberment clone is included: the original's join download
+		// serializes every pool-0 slot (single caller
+		// Server_SendInitialGameStateToPlayer @0x51bd24), and the 0x0C record
+		// carries no section mask — a late joiner materializes the clone as a
+		// whole-body corpse, exactly like retail (world-wac-ai-re §19.2).
 		OrganicSpawnRecord rec;
 		rec.slot_id = e.handle.packed;                 // the wire handle (pool<<12|slot)
 		rec.has_body = true;

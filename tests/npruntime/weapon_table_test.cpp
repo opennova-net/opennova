@@ -265,12 +265,16 @@ int main(void) {
 		source.recoil[0] = -1;
 		source.recoil[1] = 256;
 		source.recoil[2] = 511;
+		source.secondary_anim = 258;
+		source.kz_physics = -1;
 		DefAmmoFile af{&source, 1};
 		const world::AmmoTable ammo_table = np::build_ammo_table(af);
 		const world::AmmoTableEntry *baked = ammo_table.by_index(0);
 		CHECK(baked != nullptr && baked->spread_error_fp16 == 12345);
 		CHECK(baked != nullptr && baked->recoil[0] == 255 && baked->recoil[1] == 0 &&
 		      baked->recoil[2] == 255);
+		CHECK(baked != nullptr && baked->secondary_anim == 2 &&
+		      baked->kz_physics == 255);
 	}
 
 	def_free_weapons(&wf);

@@ -948,26 +948,28 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             // slot fallback. [orig: @0x4b4c4a-0x4b4c6a ->
             // SoundProfile_FindByEntityAndType @0x528180 type 5/0 ->
             // Entity_PlaySound3D_FullVolume]
-            const bool night_death =
-                (world.mission_attrib_flags & World::kMissionAttribEnableNVG) != 0;
-            if (inf.is_local_player) {
-                SoundSlotEvent scream;
-                scream.source_handle = e.handle.packed;
-                scream.pos[0] = e.pos[0];
-                scream.pos[1] = e.pos[1];
-                scream.pos[2] = e.pos[2];
-                scream.slot = static_cast<uint8_t>(
-                        night_death ? audio::kSlotNightDeath : audio::kSlotDeath);
-                audio::compose_entity_sound_set(
-                        ent != nullptr ? ent->anim_slot : 0,
-                        night_death ? audio::kEntitySoundDeathNight
-                                    : audio::kEntitySoundDeath,
-                        scream.set_name, sizeof(scream.set_name));
-                world.slot_sounds.push_back(scream);
-            } else {
-                emit_slot_sound(world, e,
-                                night_death ? audio::kSlotNightDeath : audio::kSlotDeath,
-                                e.pos);
+            if (ent == nullptr || !ent->dismemberment_piece) {
+                const bool night_death =
+                    (world.mission_attrib_flags & World::kMissionAttribEnableNVG) != 0;
+                if (inf.is_local_player) {
+                    SoundSlotEvent scream;
+                    scream.source_handle = e.handle.packed;
+                    scream.pos[0] = e.pos[0];
+                    scream.pos[1] = e.pos[1];
+                    scream.pos[2] = e.pos[2];
+                    scream.slot = static_cast<uint8_t>(
+                            night_death ? audio::kSlotNightDeath : audio::kSlotDeath);
+                    audio::compose_entity_sound_set(
+                            ent != nullptr ? ent->anim_slot : 0,
+                            night_death ? audio::kEntitySoundDeathNight
+                                        : audio::kEntitySoundDeath,
+                            scream.set_name, sizeof(scream.set_name));
+                    world.slot_sounds.push_back(scream);
+                } else {
+                    emit_slot_sound(world, e,
+                                    night_death ? audio::kSlotNightDeath : audio::kSlotDeath,
+                                    e.pos);
+                }
             }
             // Consume the kill's selection; none staged -> the generic death
             // (cause 4 -> 174 death_pungi) [orig: @0x4b9cc9 fallback + the

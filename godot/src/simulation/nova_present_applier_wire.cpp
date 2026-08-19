@@ -421,6 +421,28 @@ void PresentApplier::present_one_wire_row(WireRow &row, ObjectModel *model,
 	const bool next_visible =
 			wfield_i(p, base, Simulation::PF_HIDDEN) == 0 &&
 			wfield_i(p, base, Simulation::PF_LOCAL_VIEW_SUPPRESSED) == 0;
+	// Owned-channel contract as in the placed applier: only a row publishing
+	// PF_SECTION_MASK_VALID drives the model's section mask; a VALID -> clear
+	// transition releases once, and never-publishing rows leave the channel to
+	// its other writer (the occlusion frame pass on buildings).
+	if (wfield_i(p, base, Simulation::PF_SECTION_MASK_VALID) != 0) {
+		const uint32_t hidden_mask =
+				static_cast<uint32_t>(wfield_i(
+						p, base, Simulation::PF_SECTION_MASK_LO)) |
+				(static_cast<uint32_t>(wfield_i(
+						p, base, Simulation::PF_SECTION_MASK_HI))
+						<< 16);
+		const int64_t section_visibility_mask = static_cast<int64_t>(
+				hidden_mask ^ 0xffffffffu);
+		if (section_visibility_mask != row.section_visibility_mask) {
+			model->set_section_visibility_mask(section_visibility_mask);
+			row.section_visibility_mask = section_visibility_mask;
+		}
+	} else if (row.section_visibility_mask != -2 &&
+			row.section_visibility_mask != -1) {
+		model->set_section_visibility_mask(-1);
+		row.section_visibility_mask = -1;
+	}
 	update_wire_held_weapon(row, model, snap, next_visible);
 	wire_respawn_revisions_.insert(row.handle, respawn_revision);
 	if (model->is_visible() != next_visible) {

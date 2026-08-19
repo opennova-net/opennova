@@ -38,6 +38,8 @@ world::AmmoTable build_ammo_table(const DefAmmoFile &ammo) {
 		e.min_damage = d.min_damage;
 		e.max_damage = d.max_damage;
 		e.penetration_impact = d.penetration_impact;
+		e.secondary_anim = static_cast<uint8_t>(d.secondary_anim);
+		e.kz_physics = static_cast<uint8_t>(d.kz_physics);
 		// Kill-zone blast geometry + the blast armor gate (the explosion queue's
 		// consumers; docs/world/world-wac-ai-re.md §24).
 		e.penetration_kz = d.penetration_kz;

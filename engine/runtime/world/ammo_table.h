@@ -123,6 +123,8 @@ struct AmmoTableEntry {
     int32_t max_damage = 0;         // +192 damage cap when > 0 [orig: @0x4ecb42]
     int32_t penetration_impact = 0; // +196 — must reach the target itemDef+400 armor threshold
     int32_t penetration_kz = 0;     // +200 — must reach the target's blast armor (def+0x192)
+    uint8_t secondary_anim = 0;     // +224 `secondary_anim`; collision-force selector
+    uint8_t kz_physics = 0;         // +225 `kz_physics`; collision-force selector
     float kz_minradius = 0.0f;      // +52 (fp16 -> units) — linear-falloff start
     float kz_maxradius = 0.0f;      // +56 (fp16 -> units) — the blast radius when the
                                     // queue entry carries no float override

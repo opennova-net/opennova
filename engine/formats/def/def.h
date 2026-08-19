@@ -77,6 +77,8 @@ typedef struct DefAmmoDef {
     int max_damage;          /* +192 */
     int penetration_impact;  /* +196 — must reach the target itemDef+400 armor threshold */
     int penetration_kz;      /* +200 */
+    int secondary_anim;      /* byte +224: 'secondary_anim' (atol narrowed at bake) */
+    int kz_physics;          /* byte +225: 'kz_physics' (atol narrowed at bake) */
     int recoil[3];           /* bytes +227..229 */
     /* Authoritative round-sim fields (docs/net/novaworld-net-re.md §5.60). */
     unsigned int flags;      /* +0, DEF_AMMO_FLAG_* OR-mask */

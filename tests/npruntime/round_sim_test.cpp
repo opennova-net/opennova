@@ -25,6 +25,7 @@
 #include <netsim/connection.h>
 #include <netsim/loopback_channel.h>
 #include <netsim/client_replica_pipeline.h>
+#include <netsim/entity_wire_bridge.h>
 #include <netsim/session_transport.h>
 #include <netsim/udp_session_transport.h>
 
@@ -34,6 +35,7 @@
 #include <terrain_query/height_field.h>
 
 #include <world/ai.h>
+#include <world/collision.h>
 #include <world/geom.h>
 #include <world/infantry.h>
 #include <world/player_spawn.h>
@@ -357,11 +359,225 @@ bool test_spawn_spread_then_recoil() {
 	return true;
 }
 
+struct DismembermentRig {
+	w::World world;
+	w::AiSystem ai;
+	w::CollisionWorld collision;
+	w::EntityHandle shooter;
+	w::EntityHandle victim;
+
+	explicit DismembermentRig(size_t pool_capacity, uint32_t victim_attrib = 0) {
+		world.registry.configure_pool(0, pool_capacity);
+		world.ai = &ai;
+		world.projectile_authority = true;
+
+		w::Entity shooter_seed;
+		shooter_seed.kind = w::EntityKind::Organic;
+		shooter_seed.position = {0.0f, 0.0f, 0.0f};
+		shooter = world.registry.spawn(0, shooter_seed);
+
+		w::Entity victim_seed;
+		victim_seed.kind = w::EntityKind::Organic;
+		victim_seed.item_id = 1419;
+		victim_seed.has_item_def = true;
+		victim_seed.item_type = 3;
+		victim_seed.item_attrib = victim_attrib;
+		// The items.def *_function class stamp the host's item-traits sweep
+		// applies (ItemDef+356); the wire bridge admits rows by it, and the
+		// clone inherits it through the seed copy.
+		victim_seed.net_class_code =
+				static_cast<uint8_t>(EntityClass::Infantry);
+		victim_seed.position = {5.0f, 0.0f, 0.0f};
+		victim_seed.spawn_position = victim_seed.position;
+		victim_seed.yaw = 90; // engine heading 0; a +X round is rear quadrant 2
+		victim_seed.health = 10;
+		victim_seed.health_max = 20;
+		// A pre-hidden bit OUTSIDE every bone mask, so the "already hidden
+		// sections stay hidden on both halves" property stays observable.
+		victim_seed.section_mask = 0x2000000u;
+		victim = world.registry.spawn(0, victim_seed);
+
+		const int body_index = ai.attach(victim);
+		w::AiEntity *body = ai.at(body_index);
+		body->pos[0] = 5 * 65536;
+		body->heading = 0;
+		body->health = 10;
+		body->inf.active = true;
+		body->inf.anim_state = w::anim_state::kIdle;
+		body->inf.vel[0] = 100;
+		body->inf.vel[1] = 200;
+		body->inf.vel[2] = 300;
+
+		w::CollisionModel model;
+		model.sections.resize(4);
+		for (w::CollisionSection &section : model.sections)
+			section.radius = -1;
+		w::CollisionSection &bone3 = model.sections[3];
+		bone3.authored_bounds = true;
+		bone3.min_x = bone3.min_y = bone3.min_z = -0x4000;
+		bone3.max_x = bone3.max_y = bone3.max_z = 0x4000;
+		bone3.radius = 0x4000;
+		const int model_id = collision.add_model(std::move(model));
+		collision.assign_entity(victim, model_id);
+		const int32_t bone_at[3] = {5 * 65536, 0, 58982};
+		std::vector<w::CollisionMatrix> pose(
+				4, w::collision_matrix_from_heading(0, bone_at));
+		collision.publish_entity_section_matrices(victim, pose);
+		collision.build_tick_tables(world);
+
+		w::AmmoTableEntry ammo;
+		ammo.name = "DISMEMBER_TEST";
+		ammo.valid = true;
+		ammo.velocity = 620; // 10 world units/tick
+		ammo.weight_in_grains = 875;
+		ammo.min_damage = 10;
+		ammo.max_damage = 10;
+		ammo.max_age_ticks = 8;
+		ammo.flags = w::kAmmoFlagNoGravity;
+		world.ammo.entries.push_back(ammo);
+	}
+
+	void fire() {
+		w::RoundSpawnParams params;
+		params.owner = shooter;
+		params.shooter_handle = shooter.packed;
+		params.origin = {0.0f, 0.0f, 58982.0f / 65536.0f};
+		params.ammo_index = 0;
+		world.round_sim.spawn(world, params);
+		world.round_sim.tick(world, nullptr, &collision);
+	}
+
+	const w::Entity *piece() const {
+		const w::Entity *found = nullptr;
+		world.registry.for_each([&](const w::Entity &entity) {
+			if (entity.dismemberment_piece) found = &entity;
+		});
+		return found;
+	}
+};
+
+bool test_dismemberment_damage_path() {
+	// Each mask is the hit bone's own bit (1 << bone) OR the witnessed case
+	// addend [orig: @0x407601 + the switch @0x407608].
+	constexpr uint32_t kBone3Mask = (1u << 3) | 0x1E670u;
+	const std::array<uint32_t, 13> expected_masks{{
+		(1u << 1) | 0x1E67Cu, (1u << 2) | 0x1E678u, (1u << 3) | 0x1E670u,
+		(1u << 4) | 0x1E668u, (1u << 5) | 0x10200u, (1u << 6) | 0x08400u,
+		(1u << 7) | 0x20800u, (1u << 8) | 0x41000u, (1u << 9) | 0x10000u,
+		(1u << 10) | 0x08000u, (1u << 11) | 0x20000u, (1u << 12) | 0x40000u,
+		(1u << 13) | 0x04000u,
+	}};
+	for (int bone = 1; bone <= 13; ++bone) {
+		if (!expect(w::dismemberment_mask_for_bone(bone) ==
+					expected_masks[static_cast<size_t>(bone - 1)],
+				"bone-to-dismemberment mask table is exact"))
+			return false;
+	}
+	if (!expect(w::dismemberment_mask_for_bone(0) == 0 &&
+					w::dismemberment_mask_for_bone(-1) == 0,
+			"bone zero and negatives never dismember"))
+		return false;
+	if (!expect(w::dismemberment_mask_for_bone(14) == (1u << 14),
+			"bones past the table keep just their own section bit"))
+		return false;
+
+	{
+		DismembermentRig rig(3);
+		rig.fire();
+		const w::Entity *victim = rig.world.registry.get(rig.victim);
+		const w::Entity *piece = rig.piece();
+		if (!expect(victim != nullptr && victim->health == 0,
+				"bone hit kills the NPC victim"))
+			return false;
+		if (!expect(piece != nullptr && rig.world.registry.live_count() == 3,
+				"lethal authored bone hit allocates one pool-0 corpse clone"))
+			return false;
+		if (!expect(victim->section_mask == (0x2000000u | kBone3Mask),
+				"victim hides the selected cut sections"))
+			return false;
+		if (!expect(piece->section_mask == (0x2000000u | ~kBone3Mask),
+				"clone keeps exactly the complementary cut sections"))
+			return false;
+		if (!expect(piece->health == 0 && !piece->alive &&
+					piece->damage_state == -1 && piece->net_id == 0 &&
+					piece->spawn_origin == w::kSpawnOriginNone,
+				"corpse clone has no live gameplay or authored identity"))
+			return false;
+
+		const w::AiEntity *victim_body = rig.ai.for_handle(rig.victim);
+		const w::AiEntity *piece_body = rig.ai.for_handle(piece->handle);
+		// bodyRoll (entity+0x94 -> AiEntity::roll), rear quadrant 2 negative;
+		// the clone memcpy-inherits the freshly written roll. The torso
+		// overlay channel (+0x2DC) is not the death roll's store.
+		// [orig: @0x407575; clone copy @0x4398dc]
+		if (!expect(victim_body != nullptr && piece_body != nullptr &&
+					victim_body->roll == -0x05B05B00 &&
+					piece_body->roll == -0x05B05B00 &&
+					victim_body->inf.torso_roll == 0 &&
+					piece_body->inf.torso_roll == 0,
+				"torso death takes the exact rear-quadrant body roll on both halves"))
+			return false;
+		// X/Y only [orig: @0x4076b7/@0x4076c9] — the vertical component stays.
+		if (!expect(piece_body->inf.vel[0] == 100 + (10 * 65536 >> 8) &&
+					piece_body->inf.vel[1] == 200 &&
+					piece_body->inf.vel[2] == 300,
+				"clone velocity adds the witnessed horizontal round impulse only"))
+			return false;
+
+		// The clone is an ordinary pool-0 slot on the wire: the 0x0A priority
+		// walk has no dead/connection filter [orig: @0x50e6cb-0x50e6da] and
+		// the join download serializes every pool-0 slot. Its net_id/name are
+		// our cleared stand-ins (D-AI-9); no record carries the section mask.
+		const auto snapshots = ns::snapshot_world(rig.world);
+		const GameEntitySnapshot *piece_snapshot = nullptr;
+		for (const auto &snapshot : snapshots) {
+			if (snapshot.wire_handle == piece->handle.packed)
+				piece_snapshot = &snapshot;
+		}
+		if (!expect(piece_snapshot != nullptr &&
+					piece_snapshot->entity_class == EntityClass::Infantry,
+				"corpse clone streams live compact snapshots like any NPC"))
+			return false;
+		const OrganicSpawnBatch batch =
+				ns::build_pool0_organic_batch(rig.world);
+		const OrganicSpawnRecord *piece_record = nullptr;
+		for (const OrganicSpawnRecord &record : batch.records) {
+			if (record.slot_id == piece->handle.packed) piece_record = &record;
+		}
+		if (!expect(piece_record != nullptr && piece_record->has_body &&
+					piece_record->net_id == 0,
+				"corpse clone joins the pool-0 spawn batch with a cleared net id"))
+			return false;
+	}
+
+	{
+		DismembermentRig rig(3, w::kItemAttribNoDismember);
+		rig.fire();
+		if (!expect(rig.piece() == nullptr &&
+					rig.world.registry.get(rig.victim)->section_mask ==
+							0x2000000u,
+				"NoDismember kills without cloning or changing section masks"))
+			return false;
+	}
+
+	{
+		DismembermentRig rig(2); // shooter + victim fill the actor pool
+		rig.fire();
+		if (!expect(rig.piece() == nullptr &&
+					rig.world.registry.get(rig.victim)->section_mask ==
+							0x2000000u,
+				"pool exhaustion leaves the original section mask intact"))
+			return false;
+	}
+	return true;
+}
+
 } // namespace
 
 int main() {
 	if (!test_retail_random_spread_vectors()) return 1;
 	if (!test_spawn_spread_then_recoil()) return 1;
+	if (!test_dismemberment_damage_path()) return 1;
 	w::World world;
 	world.registry.configure_pool(0, 16);
 	w::AiSystem ai;
