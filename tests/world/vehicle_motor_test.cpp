@@ -636,6 +636,65 @@ void test_forward_sound_gain_pitch_and_idle_crossfade() {
     }
 }
 
+// A REMOTE (non-authority) vehicle drives the same witnessed fold: the client
+// pass reaches update_ground_vehicle_sound for every trait-ful pool-1 row, and
+// it reads `veh.speed` — which the joiner bridge restores from the wire's
+// prediction registers. This pins the moving-remote case the D-SND-17 row was
+// still carrying as open: identical inputs must produce the identical lane-10
+// emitter whether the speed came from the authority motor or the wire.
+void test_remote_speed_drives_the_same_movement_sound() {
+    Rig r;
+    VehicleTraits t = buggy_traits();
+    t.player_speed = 32000;
+    t.sound_profile = "SP_Transport";
+    load_transport_sound_profile(r.w);
+    r.drv().player_class = 0;
+    r.mount();
+    r.w.sound_emitters.clear();
+    // The wire-restored register — no local driver, no authority integration.
+    r.veh().veh.speed = 1000; // playerSpeed / 32, as above
+    r.veh().veh.cmd_speed = 1000;
+
+    update_ground_vehicle_sound(r.w, r.veh(), t, false, false);
+
+    CHECK(r.w.sound_emitters.size() == 2);
+    if (r.w.sound_emitters.size() == 2) {
+        const SoundEmitterEvent &drive = r.w.sound_emitters[0];
+        CHECK(drive.lane == 10);
+        CHECK(drive.volume_q8_8 == 0x8000);
+        CHECK(drive.pitch_q16 == 46694);   // the same witnessed pitch
+    }
+}
+
+// A frozen row must fall silent on the motion lane. The joiner bridge clears
+// the motor speed registers when a row goes wire-frozen (dead pose / carried /
+// state bit0), because the client pass still runs the movement-sound tail for
+// it — a row frozen mid-motion would otherwise keep its moving lane alive on
+// state nothing advances any more.
+void test_zero_speed_row_emits_only_the_idle_lane() {
+    Rig r;
+    VehicleTraits t = buggy_traits();
+    t.player_speed = 32000;
+    t.sound_profile = "SP_Transport";
+    load_transport_sound_profile(r.w);
+    r.drv().player_class = 0;
+    r.mount();
+    r.w.sound_emitters.clear();
+    r.veh().veh.speed = 0;
+    r.veh().veh.cmd_speed = 0;
+
+    update_ground_vehicle_sound(r.w, r.veh(), t, false, false);
+
+    // Stationary: the idle lane at full volume, no motion lane.
+    bool idle_full = false;
+    for (size_t i = 0; i < r.w.sound_emitters.size(); ++i) {
+        const SoundEmitterEvent &e = r.w.sound_emitters[i];
+        CHECK(e.lane != 10);
+        if (e.lane == 0 && e.volume_q8_8 == 0xFFFF) idle_full = true;
+    }
+    CHECK(idle_full);
+}
+
 // The p4>1 forward profile subdivides the speed range into repeating gear
 // ramps. Keep the sequential low/high quarter-drop arithmetic byte-faithful.
 // [orig: @0x52968f..0x529765]
@@ -944,6 +1003,8 @@ int main() {
     test_controller_without_claimant_is_silent();
     test_item_soundloop_override_wins_over_profile();
     test_forward_sound_gain_pitch_and_idle_crossfade();
+    test_remote_speed_drives_the_same_movement_sound();
+    test_zero_speed_row_emits_only_the_idle_lane();
     test_forward_sound_gear_pitch_sawtooth();
     test_reverse_sound_and_direction_shift_edges();
     test_claimant_detach_clears_motion_lanes_and_plays_stop();
