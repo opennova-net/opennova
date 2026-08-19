@@ -11,6 +11,7 @@
 #include <terrain_query/terrain_raycast.h>
 
 #include "collision_detail.h"
+#include "world/geom.h"
 
 #include "world/world.h"
 
@@ -497,11 +498,13 @@ bool CollisionWorld::sound_los_clear(World &world, EntityHandle listener, Entity
 }
 
 bool CollisionWorld::segment_hits_static(World &world, const int32_t a[3], const int32_t b[3],
-                                         int32_t radius) {
+                                         int32_t radius, EntityHandle exclude) {
     // [orig: raycast_find_collision_entity @ 0x539a70 with allowAllTypes = 1
     // (the iris sun-ray caller @ 0x5c7784) -> raycast_against_entity_pool
     // @ 0x538720 — the pool-2 statics walk with the same broad phase and
-    // radiused segment clip the sound leg ports; no building-kind gate.]
+    // radiused segment clip the sound leg ports; no building-kind gate. The
+    // entity walk skips the query entity's own entry (entry_entity !=
+    // entity_a @ the collision-entry loop head).]
     CollisionRay ray;
     ray.start[0] = a[0];
     ray.start[1] = a[1];
@@ -514,29 +517,113 @@ bool CollisionWorld::segment_hits_static(World &world, const int32_t a[3], const
 
     for (int32_t i = 0; i < static_count_; ++i) {
         const StaticSlot &s = statics_[i];
-        // The iris path can cast nine sun rays per rendered frame. Preserve the
-        // witnessed walker order here too: reject on cheap entity metadata
-        // before resolving live section matrices for the few gate survivors.
-        int32_t bound_pos[3];
-        int32_t bound_radius = 0;
-        if (!target_bound(world, s.h, bound_pos, bound_radius)) continue;
-        if (abs32(ray.mid[1] - bound_pos[1]) >
-                    bound_radius + broad_r + static_cast<int32_t>(ray.half[1]) ||
-            abs32(ray.mid[0] - bound_pos[0]) >
-                    bound_radius + broad_r + static_cast<int32_t>(ray.half[0]) ||
-            abs32(ray.mid[2] - bound_pos[2]) >
-                    bound_radius + broad_r + static_cast<int32_t>(ray.half[2]))
-            continue;
-        if (ray_line_distance(ray.start, ray.dir, bound_pos) > bound_radius + broad_r)
-            continue;
-
-        CollisionTargetView view;
-        std::vector<CollisionMatrix> mats;
-        const CollisionTargetView *tv = target_view(world, s.h, view, mats);
-        if (tv == nullptr) continue;
-        if (sound_segment_blocked(*tv, ray, radius)) return true;
+        if (s.h == exclude) continue;
+        if (static_slot_blocks_segment(world, s, ray, radius, broad_r)) return true;
     }
     return false;
+}
+
+bool CollisionWorld::static_slot_blocks_segment(World &world, const StaticSlot &s,
+                                                const CollisionRay &ray,
+                                                int32_t radius, int32_t broad_r) {
+    // The iris path can cast nine sun rays per rendered frame. Preserve the
+    // witnessed walker order here too: reject on cheap entity metadata
+    // before resolving live section matrices for the few gate survivors.
+    int32_t bound_pos[3];
+    int32_t bound_radius = 0;
+    if (!target_bound(world, s.h, bound_pos, bound_radius)) return false;
+    if (abs32(ray.mid[1] - bound_pos[1]) >
+                bound_radius + broad_r + static_cast<int32_t>(ray.half[1]) ||
+        abs32(ray.mid[0] - bound_pos[0]) >
+                bound_radius + broad_r + static_cast<int32_t>(ray.half[0]) ||
+        abs32(ray.mid[2] - bound_pos[2]) >
+                bound_radius + broad_r + static_cast<int32_t>(ray.half[2]))
+        return false;
+    if (ray_line_distance(ray.start, ray.dir, bound_pos) > bound_radius + broad_r)
+        return false;
+
+    CollisionTargetView view;
+    std::vector<CollisionMatrix> mats;
+    const CollisionTargetView *tv = target_view(world, s.h, view, mats);
+    if (tv == nullptr) return false;
+    return sound_segment_blocked(*tv, ray, radius);
+}
+
+int CollisionWorld::sun_visibility_blocked_rays(World &world, const Entity &e,
+                                                const int32_t sun_step_q16[3]) {
+    // The casts walk the query entity's OWN proximity-candidate slice, not the
+    // whole statics table: retail's ray walker iterates entity_a's +0x1BC arena
+    // slice bounded by the +0x1C0 count, so only candidates whose inflated
+    // bounding sphere overlaps the entity's bubble (the slice build's
+    // radius + 4u/6u pad) can ever block its sun — a building shading the
+    // entity from far across the map leaves it in full sun. An entity with no
+    // slice (statics, pool-1 rows the builder does not slice, the 16 sliceless
+    // mission-start ticks) blocks nothing and keeps quality 4, which is exactly
+    // retail's +0x1C0 == 0 skip. [orig: Entity_ComputeSunVisibility @ 0x5c6800
+    // — the +0x1C0 gate @ 0x5c6808; raycast_find_collision_entity @ 0x539a70 —
+    // the entity_a[+0x1BC]/[+0x1C0] entry walk]
+    int32_t slice_count = 0;
+    const EntityHandle *slice = candidate_slice(e.handle, slice_count);
+    if (slice == nullptr || slice_count <= 0) return 0;
+
+    // Origin = position + the RAW (unrotated) collision-bbox midpoint — the
+    // same raw add the cat-2 trigger LOS endpoints take; zero when unstamped,
+    // leaving the ray at the entity origin exactly like retail's zeroed pool
+    // memory. [orig: Entity_ComputeSunVisibility @ 0x5c6800 — start block
+    // @ 0x5c681f..0x5c6847]
+    int32_t origin[3];
+    entity_pos_fixed(e, origin);
+    origin[0] += to_fixed(e.bbox_center.x);
+    origin[1] += to_fixed(e.bbox_center.y);
+    origin[2] += to_fixed(e.bbox_center.z);
+    // End = origin + 200 u along the active light direction (the caller scales
+    // the direction; sub-1.0 verticals were already clamped by the light
+    // getter's consumers). [orig: end = start + dir*0xC8 @ 0x5c6850..0x5c6876]
+    const int32_t end[3] = {origin[0] + sun_step_q16[0],
+                            origin[1] + sun_step_q16[1],
+                            origin[2] + sun_step_q16[2]};
+
+    // Resolve the slice's static slots once. The slice also carries dynamic
+    // candidates — retail tests those too (allowAllTypes = 1 passes every
+    // solid type), but our casts stay statics-only, the documented D-RLIT-2
+    // posture. Slice build already excludes self; the exclude gate mirrors the
+    // walker's entry_entity != entity_a check. [orig: @ 0x539a70]
+    int32_t slot_indices[64];
+    int32_t slot_count = 0;
+    for (int32_t i = 0; i < static_count_ && slot_count < 64; ++i) {
+        const StaticSlot &s = statics_[i];
+        if (s.h == e.handle) continue;
+        for (int32_t k = 0; k < slice_count; ++k) {
+            if (slice[k] == s.h) {
+                slot_indices[slot_count++] = i;
+                break;
+            }
+        }
+    }
+    if (slot_count == 0) return 0;
+
+    CollisionRay ray;
+    ray.start[0] = origin[0];
+    ray.start[1] = origin[1];
+    ray.start[2] = origin[2];
+    ray.end[0] = end[0];
+    ray.end[1] = end[1];
+    ray.end[2] = end[2];
+    ray.refresh();
+
+    int blocked = 0;
+    for (int r = 0; r < 3; ++r) {
+        const int32_t radius = kSunOcclusionClipRadii[r];
+        const int32_t broad_r = radius > 0 ? radius : 0;
+        for (int32_t i = 0; i < slot_count; ++i) {
+            if (static_slot_blocks_segment(world, statics_[slot_indices[i]], ray,
+                                           radius, broad_r)) {
+                ++blocked;
+                break;
+            }
+        }
+    }
+    return blocked;
 }
 
 int32_t CollisionWorld::sound_occlusion_inflate(World &world, EntityHandle listener,

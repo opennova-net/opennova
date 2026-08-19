@@ -251,9 +251,17 @@ func update_viewmodel(view: PlayerLocalView, weapon_view: PlayerWeaponView,
 	var sim = _world.get_sim() if _world != null else null
 	var view_offset := _viewmodel_offset(PLAYER_VIEWMODEL_POS_UNITS)
 	if sim != null:
+		# The 4:3-or-narrower framing gate the sim's z drop keys on
+		# (retail: 3*w <= 4*h over the viewport block @0x4dd571; widescreen
+		# never takes it).
+		var vs := Vector2(4.0, 3.0)
+		if _world.is_inside_tree():
+			vs = _world.get_viewport().get_visible_rect().size
+		var narrow := 3.0 * vs.x <= 4.0 * vs.y
 		view_offset = _viewmodel_view_offset(
 				sim.local_player_viewmodel_bias_view_units(
-						PLAYER_VIEWMODEL_POS_UNITS, PLAYER_VIEWMODEL_TPOS_UNITS))
+						PLAYER_VIEWMODEL_POS_UNITS, PLAYER_VIEWMODEL_TPOS_UNITS,
+						narrow))
 	_viewmodel.global_transform = _camera.global_transform * Transform3D(
 		vm_basis, bias * view_offset)
 	# The FP overlay never enters the water mirror OR the main camera: retail draws it

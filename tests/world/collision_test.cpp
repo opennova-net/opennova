@@ -4392,6 +4392,103 @@ void test_idle_round_tick_clears_stale_terrain() {
     CHECK(collision.terrain == &old_field.field);
 }
 
+// The per-entity sun-visibility feed (D-RLIT-3): one segment from position +
+// raw bbox midpoint recast at the three witnessed clip radii, walking ONLY
+// the query entity's own proximity-candidate slice — an entity whose slice
+// is empty (or that never gets one: statics, the 16 sliceless mission-start
+// ticks) keeps full sun regardless of geometry.
+// [orig: Entity_ComputeSunVisibility @ 0x5c6800 — the +0x1C0 gate @ 0x5c6808;
+//  raycast_find_collision_entity @ 0x539a70 — the +0x1BC slice walk]
+void test_entity_sun_visibility_rays_and_eligibility() {
+    World world;
+    world.registry.configure_pool(0, 8);
+    world.registry.configure_pool(1, 8);
+    world.registry.configure_pool(2, 8);
+    CollisionWorld collision;
+    const int32_t roof_model = collision.add_model(box_model(1, 0, 6.0, 6.0, 1.0));
+
+    // A flat roof above the origin: the vertical sun segment from a person
+    // below it must hit at every clip radius.
+    Entity roof_seed;
+    roof_seed.kind = EntityKind::Building;
+    roof_seed.position = Vec3{0.0f, 0.0f, 5.0f};
+    roof_seed.alive = true;
+    const EntityHandle roof = world.registry.spawn(2, roof_seed);
+    CHECK(roof.valid());
+    collision.assign_entity(roof, roof_model);
+
+    Entity person_seed;
+    person_seed.kind = EntityKind::Organic;
+    person_seed.position = Vec3{0.0f, 0.0f, 0.0f};
+    person_seed.alive = true;
+    const EntityHandle person = world.registry.spawn(0, person_seed);
+    CHECK(person.valid());
+
+    Entity open_seed;
+    open_seed.kind = EntityKind::Organic;
+    open_seed.position = Vec3{50.0f, 0.0f, 0.0f};
+    open_seed.alive = true;
+    const EntityHandle open_person = world.registry.spawn(0, open_seed);
+    CHECK(open_person.valid());
+
+    // Down-shadow probe: geometrically under the roof's long evening shadow
+    // but outside its candidate bubble (30.4 u to the roof center vs the
+    // ~15 u slice range) — retail never dims it because its slice never
+    // carries the roof.
+    Entity far_seed;
+    far_seed.kind = EntityKind::Organic;
+    far_seed.position = Vec3{30.0f, 0.0f, 0.0f};
+    far_seed.alive = true;
+    const EntityHandle far_person = world.registry.spawn(0, far_seed);
+    CHECK(far_person.valid());
+
+    // A pillar beside the far person keeps its slice NON-empty (8.3 u, inside
+    // the bubble) while sitting clear of the slanted ray — so the roof miss
+    // below exercises slice MEMBERSHIP filtering, not the empty-slice gate.
+    const int32_t pillar_model = collision.add_model(box_model(1, 0, 1.0, 1.0, 2.0));
+    Entity pillar_seed;
+    pillar_seed.kind = EntityKind::Building;
+    pillar_seed.position = Vec3{32.0f, 8.0f, 1.0f};
+    pillar_seed.alive = true;
+    const EntityHandle pillar = world.registry.spawn(2, pillar_seed);
+    CHECK(pillar.valid());
+    collision.assign_entity(pillar, pillar_model);
+
+    collision.build_initial_tables(world);
+    CountingMatrixProvider provider;
+    collision.set_section_matrix_provider(&provider);
+
+    // Straight-up sun step: light_dir * 200 u.
+    const int32_t sun[3] = {0, 0, fx(200.0)};
+    Entity *p = world.registry.get(person);
+    CHECK(p != nullptr);
+    // Before the first slice epoch (retail: 16 sliceless mission-start
+    // ticks) nothing rays — the +0x1C0 gate.
+    CHECK(collision.sun_visibility_blocked_rays(world, *p, sun) == 0);
+    for (int i = 0; i < 17; ++i) collision.build_tick_tables(world);
+    CHECK(collision.sun_visibility_blocked_rays(world, *p, sun) == 3);
+    Entity *o = world.registry.get(open_person);
+    CHECK(o != nullptr);
+    CHECK(collision.sun_visibility_blocked_rays(world, *o, sun) == 0);
+
+    // Slice locality: the slanted sun ray from the far person passes through
+    // the roof slab (x 6..-0.9 over z 4..6), but the roof is outside its
+    // candidate bubble — full sun, where an all-statics walk would dim.
+    const int32_t slant[3] = {fx(-180.0), 0, fx(35.0)};
+    Entity *f = world.registry.get(far_person);
+    CHECK(f != nullptr);
+    CHECK(collision.sun_visibility_blocked_rays(world, *f, slant) == 0);
+    // The same slab blocks the person beneath it at that angle's mirror
+    // (sanity that the slant geometry is honest: straight up from beneath
+    // still blocks after the slice build).
+    CHECK(collision.sun_visibility_blocked_rays(world, *p, sun) == 3);
+
+    // Statics never ray: the roof has no candidate slice.
+    Entity *r = world.registry.get(roof);
+    CHECK(r != nullptr);
+    CHECK(collision.sun_visibility_blocked_rays(world, *r, sun) == 0);
+}
+
 int main() {
     test_matrix_roundtrip();
     test_retail_render_pose_matrix_roundtrip_and_order();
@@ -4466,6 +4563,7 @@ int main() {
     test_projectile_trace_world_ordering();
     test_projectile_trace_domain_switches_preserve_farther_pool_hit();
     test_idle_round_tick_clears_stale_terrain();
+    test_entity_sun_visibility_rays_and_eligibility();
     if (failures == 0) std::printf("collision_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

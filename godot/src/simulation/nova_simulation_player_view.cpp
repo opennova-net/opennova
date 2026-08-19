@@ -207,6 +207,18 @@ void Simulation::tick_local_player_view() {
 	const opennova::world::Entity *e = world_->registry.get(world_->cached.local_player);
 	if (!e) return;
 	refresh_local_player_view_effects();
+	// The per-tick movement delta the FP motion lead samples per render frame
+	// (retail: the (position - entity+0x80 prev-position) << 8 samples
+	// @ 0x437bb2/0x437b92/0x437ba2 — world/player_view.h carries the witness).
+	if (local_tick_prev_valid_) {
+		local_tick_delta_[0] = e->position.x - local_tick_prev_pos_[0];
+		local_tick_delta_[1] = e->position.y - local_tick_prev_pos_[1];
+		local_tick_delta_[2] = e->position.z - local_tick_prev_pos_[2];
+	}
+	local_tick_prev_pos_[0] = e->position.x;
+	local_tick_prev_pos_[1] = e->position.y;
+	local_tick_prev_pos_[2] = e->position.z;
+	local_tick_prev_valid_ = true;
 	// The anchor-chase target is Position + CameraOffset — the posed head-bone eye
 	// [orig: ThirdPersonCamera_Update @ 0x437b70..76], fed by the host's per-frame
 	// skeleton sample (see local_weapon_.eye_mission). Without a sample: Position + 1.0,
@@ -233,6 +245,14 @@ void Simulation::set_local_player_eye(const Vector3 &p_eye_godot, bool p_valid) 
 	local_weapon_.eye_mission[1] = -p_eye_godot.z;
 	local_weapon_.eye_mission[2] = p_eye_godot.y;
 	local_weapon_.eye_valid = p_valid;
+	// Mirror into the world so the infantry body tick can restamp the local
+	// eye-offset triple from the exact posed head (the D-HUD-20 local leg).
+	if (world_) {
+		world_->cached.local_head = opennova::world::Vec3{
+				local_weapon_.eye_mission[0], local_weapon_.eye_mission[1],
+				local_weapon_.eye_mission[2]};
+		world_->cached.local_head_valid = p_valid;
+	}
 }
 
 Dictionary Simulation::get_local_player_view() const {
@@ -347,7 +367,8 @@ Dictionary Simulation::get_local_player_view() const {
 // onto its camera frame and parents the node (world/player_view.h, S8).
 // [orig: Player_UpdateFirstPersonCamera @ 0x4dd380]
 Vector3 Simulation::local_player_viewmodel_bias_view_units(
-		const Vector3 &p_pos_raw_units, const Vector3 &p_tpos_raw_units) {
+		const Vector3 &p_pos_raw_units, const Vector3 &p_tpos_raw_units,
+		bool p_narrow_aspect) {
 	const opennova::world::WeaponSlotState *active_slot =
 			active_local_weapon_slot();
 	const bool suppress = local_weapon_.active &&
@@ -361,6 +382,19 @@ Vector3 Simulation::local_player_viewmodel_bias_view_units(
 	float out[3];
 	opennova::world::player_view_bias_view_units(player_view_, suppress, pos,
 			tpos, out);
+	// The per-frame motion lead: the witnessed pre-rotation add takes the
+	// world-delta components RAW onto the view-frame lanes (no frame
+	// conversion) (retail: @ 0x4dd549..0x4dd56c — see world/player_view.h).
+	int32_t lead[3];
+	opennova::world::player_view_motion_lead_update(fp_motion_lead_,
+			local_tick_delta_, lead);
+	for (int i = 0; i < 3; ++i)
+		out[i] += static_cast<float>(lead[i]) / 65536.0f;
+	// The 4:3 framing drop (retail: @ 0x4dd571..0x4dd578 — see
+	// world/player_view.h player_view_narrow_aspect).
+	if (p_narrow_aspect)
+		out[2] -= static_cast<float>(
+				opennova::world::kFpNarrowAspectDropQ16) / 65536.0f;
 	return Vector3(out[0], out[1], out[2]);
 }
 

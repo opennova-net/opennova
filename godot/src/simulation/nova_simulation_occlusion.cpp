@@ -6,6 +6,8 @@
 #include <netsim/connection_fan.h>
 #include <world/vehicle_motor.h> // carrier_pose_fixed + VehicleTraits probe boxes
 
+#include <unordered_set>
+
 using namespace novasim;
 
 void Simulation::occlusion_init_mission() {
@@ -199,6 +201,70 @@ PackedInt32Array Simulation::get_render_culled_changes() {
 	return out;
 }
 
+// The per-drawn-entity sun-visibility factor feed (D-RLIT-3). Retail computes
+// the factor inside the sector render walk for every entity it draws and
+// pushes it onto the render-state stack around that entity's submits
+// (retail: setup_terrain_effect_for_entity @0x5c74a0 -> Entity_ComputeSunVisibility
+// @0x5c6800, stack write @0x5c7bff, see docs/render/render-lighting-re.md);
+// contained entities take the interior light group instead and the factor
+// stays 1.0. The blocked-ray count and eligibility gate are engine-side
+// (world::CollisionWorld); this walk mirrors the drawn-entity set and diffs
+// the quality per bms_id so a steady frame emits nothing.
+PackedInt64Array Simulation::get_entity_sun_visibility_changes(
+		const Vector3 &p_light_dir) {
+	PackedInt64Array out;
+	if (!world_) return out;
+
+	// Sun step in mission fixed: light_dir * 200 u, the same tuple mapping the
+	// iris march uses (retail: end = start + 200 * lightdir @0x5c6858..0x5c6876).
+	const int32_t sun[3] = {
+		opennova::world::to_fixed(p_light_dir.x * 200.0f),
+		opennova::world::to_fixed(-p_light_dir.z * 200.0f),
+		opennova::world::to_fixed(p_light_dir.y * 200.0f)};
+
+	std::unordered_set<int32_t> culled(occlusion_culled_bms_.begin(),
+	                                   occlusion_culled_bms_.end());
+
+	const auto entity_quality = [&](const opennova::world::Entity &e) {
+		// Contained entities route through the interior light group; the
+		// outdoor factor stays 1.0 (retail: the blink-ref branch @0x5c74b7).
+		// The +0x1C0 slice gate (retail: @0x5c6808) lives inside the ray walk:
+		// an entity with no proximity-candidate slice blocks nothing and holds
+		// quality 4 — statics never ray, and only slice candidates (structures
+		// overlapping the entity's inflated bubble) can shade it.
+		if (e.blink_hits[0] != 0) return static_cast<uint8_t>(4);
+		const int blocked =
+				collision_world_.sun_visibility_blocked_rays(*world_, e, sun);
+		return static_cast<uint8_t>(4 - blocked);
+	};
+
+	// The local player is a spawned entity (bms_id 0, outside the placed-node
+	// walk); its quality feeds the presenter seam only — the FP parts keep the
+	// witnessed effectScale=1 exemption while the third-person body dims.
+	const opennova::world::Entity *local =
+			world_->registry.get(world_->cached.local_player);
+	local_sun_quality_ = local != nullptr ? entity_quality(*local) : 4;
+
+	world_->registry.for_each([&](const opennova::world::Entity &e) {
+		if (e.kind == opennova::world::EntityKind::Building ||
+		    e.kind == opennova::world::EntityKind::Marker)
+			return;
+		if (e.bms_id == 0) return; // wire avatars ride their own present path
+		if (e.handle == world_->cached.local_player) return;
+		// Retail only rays a drawn entity; a culled one keeps its last factor
+		// until it renders again (the stack slot is simply never pushed).
+		if (culled.count(e.bms_id) != 0) return;
+		const uint8_t quality = entity_quality(e);
+		const auto it = sun_quality_last_.find(e.bms_id);
+		const uint8_t last = it != sun_quality_last_.end() ? it->second : 4;
+		if (quality == last) return;
+		sun_quality_last_[e.bms_id] = quality;
+		out.push_back(e.bms_id);
+		out.push_back(quality);
+	});
+	return out;
+}
+
 // Mirrors the PF_HIDDEN row source (ent->hidden). The local-view-suppression
 // and joiner lifecycle folds only apply to rows without a bms_id, which the
 // occlusion frame never manages, so plain hidden is the whole intent here.
@@ -217,6 +283,8 @@ bool Simulation::entity_present_visible(int p_bms_id) const {
 void Simulation::reset_occlusion_apply_baseline() {
 	occl_apply_building_last_.clear();
 	occl_apply_culled_last_.clear();
+	sun_quality_last_.clear();
+	local_sun_quality_ = 4;
 }
 
 bool Simulation::occlusion_water_visible() const {
@@ -326,9 +394,8 @@ PackedInt32Array Simulation::compute_iris_samples(const Vector3 &p_cam_pos,
 	const int32_t sun[3] = {opennova::world::to_fixed(p_light_dir.x * 200.0f),
 	                        opennova::world::to_fixed(-p_light_dir.z * 200.0f),
 	                        opennova::world::to_fixed(p_light_dir.y * 200.0f)};
-	// The three ray clip radii [orig: the -0x2000/-0x5000/-0x8000 pushes
-	// @ 0x5c7767/0x5c7792/0x5c77ac].
-	static const int32_t kSunRayRadii[3] = {-0x2000, -0x5000, -0x8000};
+	// The three ray clip radii — the shared witnessed triple
+	// (world::CollisionWorld::kSunOcclusionClipRadii).
 
 	// Samples at end, end + (cam-end)/3, end + 2(cam-end)/3 [orig: the thirds
 	// march @ 0x5c7ad8..0x5c7b30].
@@ -356,7 +423,8 @@ PackedInt32Array Simulation::compute_iris_samples(const Vector3 &p_cam_pos,
 		int32_t level = 8;
 		const int32_t ray_end[3] = {p[0] + sun[0], p[1] + sun[1], p[2] + sun[2]};
 		for (int r = 0; r < 3; ++r) {
-			if (collision_world_.segment_hits_static(*world_, p, ray_end, kSunRayRadii[r]))
+			if (collision_world_.segment_hits_static(*world_, p, ray_end,
+					opennova::world::CollisionWorld::kSunOcclusionClipRadii[r]))
 				--level;
 		}
 		out.append(level);

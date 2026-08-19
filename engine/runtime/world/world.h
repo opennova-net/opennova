@@ -210,6 +210,13 @@ private:
 // [orig: WacScript_CacheLocalPlayerState @0x4f5780.]
 struct CachedFrameState {
     EntityHandle local_player;
+    // The shell-fed posed head-bone world position for the local player
+    // (mission units) — the embedder-feeds-back seam the exact eye-offset
+    // store consumes (engine/runtime/world carries no skeletal pose). False
+    // until the shell samples a skeleton; the capsule formula then stands in,
+    // like retail before the first bone build.
+    Vec3 local_head;
+    bool local_head_valid = false;
     int32_t local_health = 0;
     int32_t near_type = 0;
     int32_t near_dist = 0;

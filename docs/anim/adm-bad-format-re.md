@@ -116,7 +116,7 @@ All existing ledger IDs — this record mints none:
 | ID | Where tracked | One line |
 |---|---|---|
 | D-INF-13 | ledger (OPEN) | the world builder `@0x40c770` is ungrilled; the loaders' asserted equivalence with the composed builders (same path for FP and body rigs) awaits an IDA read of its table source, padding loop, and frame — see the ledger row for the four questions and the body-shaped oracle it needs |
-| D-INF-14 | ledger (OPEN, mechanism ported) | FP `model_bind` composition corrected to the skeleton-`.bad` bind; footage confirm of the sense tail pending |
+| D-INF-14 | ledger (OPEN, mechanism ported; narrowed 2026-08-19) | FP `model_bind` composition corrected to the skeleton-`.bad` bind; def `rot` signs hip-idle-confirmed vs the registered retail pairs, velocity lead + the 4:3 framing drop ported (net-re §5.40 seventh pass); reload-direction + finger/left-hand footage remains |
 | D-INF-15 | ledger (PERMANENT) | padded model-table rows: the original's flag-2 translation add reads uninitialized stack floats; ours zeroes them |
 
 ## Follow-ups

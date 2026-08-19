@@ -260,6 +260,30 @@ void player_view_floor_eye_to_terrain(const terrain::TerrainHeightField *terrain
     if (eye[2] < floor_z) eye[2] = floor_z;
 }
 
+void player_view_motion_lead_update(PlayerViewMotionLead &lead,
+                                    const float tick_delta_units[3],
+                                    int32_t out_lead_q16[3]) {
+    // [orig: per lane — diff = prev_sample - vel (x lane folds the fresh
+    // sample: diff - new); prev_sample = (tick position delta) << 8;
+    // vel += (diff - new_sample + 16) >> 5 @ 0x437bac..0x437c0e. The three
+    // lanes share the recurrence vel += (prev - new - vel + 16) >> 5.]
+    for (int i = 0; i < 3; ++i) {
+        const int32_t sample = static_cast<int32_t>(
+                static_cast<double>(tick_delta_units[i]) * 65536.0) << 8;
+        lead.vel[i] +=
+                (lead.prev_sample[i] - sample - lead.vel[i] + 16) >> 5;
+        lead.prev_sample[i] = sample;
+    }
+    // [orig: the >> 7 + clamps @ 0x4dd4f2..0x4dd54f]
+    for (int i = 0; i < 3; ++i) {
+        int32_t v = lead.vel[i] >> 7;
+        const int32_t clamp = i == 2 ? kFpLeadClampZ : kFpLeadClampXy;
+        if (v > clamp) v = clamp;
+        if (v < -clamp) v = -clamp;
+        out_lead_q16[i] = v;
+    }
+}
+
 void player_view_compose_camera(const PlayerViewState &v,
                                 const float position[3],
                                 const float anchor_eye[3], bool anchor_valid,
@@ -270,8 +294,11 @@ void player_view_compose_camera(const PlayerViewState &v,
                                 int32_t torso_roll_bam, int32_t lean_bam,
                                 PlayerCameraPose &out) {
     // The eye anchor: the shell-fed head-bone eye floored kEyeMinAbovePosition
-    // over Position, or the non-person +1.0 bump.
-    // [orig: the 0x2000 floor @ 0x4b6b98; the bump @ 0x437e8f]
+    // over Position, or the non-person +1.0 bump. The 0x2000-equivalent floor
+    // is a DEFENSIVE stand-in on this leg: retail floors only the sample-less
+    // capsule leg (retail: @ 0x4b6b98) — the head-bone legs store unfloored
+    // (on-foot @ 0x4b6bb3..0x4b6cc8, mounted @ 0x4b6908..0x4b696c; D-INF-18).
+    // [orig: the bump @ 0x437e8f]
     float eye[3];
     if (anchor_valid) {
         eye[0] = anchor_eye[0];
