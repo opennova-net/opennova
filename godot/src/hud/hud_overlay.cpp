@@ -502,7 +502,8 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		// recorded border-x-camo combine residual, and the valid gate still
 		// requires it because retail's style ctor draws NOTHING without the
 		// secondary texture (the combined material rec+0x30 gates the whole
-		// drawer) [orig: @0x56af3c; the null gate @0x56b71f].
+		// drawer) (retail: the combine @0x56af3c, the null gate @0x56b71f,
+		// see docs/interface/hud-re.md).
 		const Ref<Texture2D> border = load_hud_texture_("border.tga");
 		const Ref<Texture2D> brush = load_hud_texture_("boxtile.tga");
 		const Ref<Texture2D> icon = load_hud_texture_("neticon2.tga");

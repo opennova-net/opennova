@@ -16,6 +16,7 @@ const PlayerViewEffectsScript := preload("res://game/world/player_view_effects.g
 const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 const HudHiddenCaptureWitness := preload(
 		"res://game/world/hud_hidden_capture_witness.gd")
+const ScoreboardPresenterScript := preload("res://game/world/scoreboard_presenter.gd")
 
 var _world: GameWorld = null
 var _player_presenter = null     # LocalPlayerPresenter (reserved for the weapon-round anchors)
@@ -26,9 +27,7 @@ var _ui_parent: Node = null
 const MAX_PENDING_HUD_MESSAGES := 40
 
 var _game_hud = null        # HudOverlay, built on the first frame a mission has a local player
-var _scoreboard_open := false        # the toggled panel-visible flag [orig: g_scoreboardPanelVisible]
-var _playerlist_was_down := false    # the toggle's down-edge latch
-var _scoreboard_pushed := false      # so the board clears exactly once on close
+var _scoreboard := ScoreboardPresenterScript.new()  # the Tab player list lane
 var _sights_card = null     # HudSightsCard child of the overlay (per-row blend controls)
 var _view_effects = null    # PlayerViewEffects child of the overlay (binocular/NVG stack)
 var _warned_no_player := false
@@ -156,11 +155,7 @@ func teardown() -> void:
 	_hud_objective = ""
 	_endround_banner = ""
 	_objectives_visible = false
-	# The board flag clears with the mission, as retail's respawn/mission init
-	# clears its global [orig: @0x4993ae].
-	_scoreboard_open = false
-	_playerlist_was_down = false
-	_scoreboard_pushed = false
+	_scoreboard.reset()
 	_pending_hud_messages.clear()
 	Strings.register_table("mission", null)
 	_warned_no_player = false
@@ -517,7 +512,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# Flush afterward so GameHud.push_message stamps the current 62 Hz tick.
 	_flush_pending_hud_messages()
 	_flush_feed_events()
-	_update_scoreboard(hud_keys_chorded, gameplay_input_active)
+	_scoreboard.update(_game_hud, _world, hud_keys_chorded, gameplay_input_active)
 	if timing:
 		var probe_t5 := Time.get_ticks_usec()
 		if probe_enabled:
@@ -1043,91 +1038,6 @@ func _queue_hud_message(text: String, text_id: int) -> void:
 ## game's own text and never one we compose.
 ## [orig: NetPacket_HandleGameEvent @0x426270 -> HUD_FormatKillEventMessage
 ##  @0x422DA0 -> Chat_FormatMessage @0x422C60 -> Chat_AddDebugMessage @0x4987F0]
-## The Tab player list. Like every other HUD key this is an EDGE: the
-## playerlist action TOGGLES the panel-visible flag — retail keeps the board
-## up until the next press (or a respawn init clears it)
-## [orig: Scoreboard_TogglePlayerList @0x4244c0 from the action dispatch case
-## @0x49bb68; the respawn clear @0x4993ae; the drawer gate
-## HUD_DrawKillListIfVisible @0x424300]. The binding already ships in the
-## controls catalog as "playerlist_alt" (vk 0x09), so nothing new is bound.
-##
-## The shell owns the strings because it owns the string tables: the title
-## from gametext Overlays (with retail's literal fallback), the game-type
-## label from the witnessed Overlays row map, the two count lines from
-## Client, and the paging hint from Text. Server name and mission title ride
-## the session decode through get_scoreboard.
-func _update_scoreboard(chorded: bool, active: bool) -> void:
-	if _game_hud == null or _world == null:
-		return
-	var down := ControlsBindings.pressed("playerlist_alt")
-	if down and not _playerlist_was_down and active and not chorded:
-		_scoreboard_open = not _scoreboard_open
-	_playerlist_was_down = down
-	if not _scoreboard_open:
-		if _scoreboard_pushed:
-			_game_hud.set_scoreboard(false, 0, {}, [])
-			_scoreboard_pushed = false
-		return
-	var sim: Simulation = _world.get_sim()
-	if sim == null:
-		return
-	var board: Dictionary = sim.get_scoreboard()
-	_scoreboard_pushed = true
-	var table: RtxtStringFile = Strings.get_table("gametext")
-	var strings := {
-		# [orig: GameText_GetStringWithFallback("Overlays",
-		#  "STROVER_KILLLIST", "!Kill List") @0x423a75]
-		"title": "!Kill List",
-		# [orig: KeyHelp_GetStringWithFallback("Text", "CHANGE_SCREEN",
-		#  "!PgUp and PgDn to change pages") @0x424272]
-		"footer": "!PgUp and PgDn to change pages",
-		"server": str(board.get("server", "")),
-		"mission": str(board.get("mission", "")),
-	}
-	var game_type := int(board.get("game_type", 0))
-	if table != null:
-		if table.has_string_in_section("Overlays", "STROVER_KILLLIST"):
-			strings["title"] = table.get_string_in_section("Overlays", "STROVER_KILLLIST")
-		var label_key := _scoreboard_game_type_label_key(game_type)
-		if label_key != "" and table.has_string_in_section("Overlays", label_key):
-			strings["game_type"] = table.get_string_in_section("Overlays", label_key)
-		# "<label> <count>": the HUD count is the accepted rows MINUS the
-		# trailer's spectator count [orig: the subtraction @0x4231dd inside
-		# the header block @0x423060].
-		var rows: Array = board.get("rows", [])
-		var spectators := int(board.get("spectators", 0))
-		if table.has_string_in_section("Client", "STRCLI04"):
-			strings["players"] = "%s %d" % [
-					table.get_string_in_section("Client", "STRCLI04"),
-					max(0, rows.size() - spectators)]
-		if spectators > 0 and table.has_string_in_section("Client", "STRCLI23"):
-			strings["spectators"] = "%s %d" % [
-					table.get_string_in_section("Client", "STRCLI23"), spectators]
-		if table.has_string_in_section("Text", "CHANGE_SCREEN"):
-			strings["footer"] = table.get_string_in_section("Text", "CHANGE_SCREEN")
-	_game_hud.set_scoreboard(true, game_type, strings, board.get("rows", []))
-
-
-## The game-type label row of the header ladder — retail's own key map
-## [orig: HUD_GetGameTypeOverlayLabel @0x5b8680; the co-op mask arm
-## @0x5b8692]. An unlisted type draws no label (the rung stays blank).
-func _scoreboard_game_type_label_key(game_type: int) -> String:
-	if (game_type & ~0x20000) == 0x10020:
-		return "STROVER28"          # co-op (both 0x10020 and 0x30020)
-	match game_type:
-		0, 8: return "STROVER29"    # DM / the type-8 non-team mode
-		0x10000: return "STROVER64" # TDM
-		1: return "STROVER30"       # KOTH
-		0x10001: return "STROVER48" # team KOTH
-		0x10004: return "STROVER31" # CTF
-		0x90002: return "STROVER56" # SD
-		0x10002: return "STROVER57" # AD
-		0x10008: return "STROVER58" # FB
-		0x10010: return "STROVER92" # A&S
-		0x50010: return "STROVER93" # CAC
-	return ""
-
-
 func _flush_feed_events() -> void:
 	if _game_hud == null or _world == null:
 		return
