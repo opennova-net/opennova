@@ -47,6 +47,7 @@
 #include <cstdio>
 #include <limits>
 
+#include "audio/footstep_slot.h"
 #include <io/bam.h>
 #include <terrain_query/height_field.h>
 
@@ -2086,23 +2087,17 @@ void AiSystem::infantry_anim_sound_pass(AiEntity &e, World &world, uint32_t logi
     for (int foot = 0; foot < 2; ++foot) {
         if ((ev & (foot == 0 ? 0x1u : 0x2u)) == 0) continue;
         const int32_t pos[3] = {e.pos[0], e.pos[1], e.pos[2] - capsule_bottom};
-        int slot;
-        if (world.env.water_z != 0 && pos[2] < world.env.water_z) {
-            slot = audio::kSlotFootWater; // one slot for both feet
-        } else if (went != nullptr && went->ground_target.valid()) {
-            // [orig: the entity+0x28 groundEntity test — stored unconditionally
-            // (null on a miss) by the resolve's ground probe,
-            // Entity_RaycastGroundHeightAndObject @0x525fd0 / the +0x28 store
-            // @0x414370. This pass runs BEFORE this tick's resolve, so the read
-            // is last tick's link — same order as org1 (sound block @0x4bf23e
-            // precedes the resolve tail @0x4bf7b8+). Mounted bodies never get
-            // here: seat clips author no foot-event bits.]
-            slot = foot == 0 ? audio::kSlotFootLObject : audio::kSlotFootRObject;
-        } else if (terrain::surface_type_at_fixed(world.surface_map, pos[0], pos[1]) == 3) {
-            slot = foot == 0 ? audio::kSlotFootLSnow : audio::kSlotFootRSnow;
-        } else {
-            slot = foot == 0 ? audio::kSlotFootLGround : audio::kSlotFootRGround;
-        }
+        // The witnessed test order lives in audio::footstep_slot, shared with
+        // the wire-fed remote body channel so both consume one implementation.
+        // The on-entity read is last tick's link: this pass runs BEFORE this
+        // tick's resolve, the same order as org1 (sound block @0x4bf23e
+        // precedes the resolve tail @0x4bf7b8+). Mounted bodies never reach
+        // here — seat clips author no foot-event bits.
+        const int slot = audio::footstep_slot(
+                pos[2], world.env.water_z,
+                went != nullptr && went->ground_target.valid(),
+                terrain::surface_type_at_fixed(world.surface_map, pos[0], pos[1]),
+                foot);
         emit_slot_sound(world, e, slot, pos);
     }
 }

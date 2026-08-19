@@ -213,6 +213,14 @@ target_include_directories(sound_selector_test PRIVATE ${CMAKE_CURRENT_SOURCE_DI
 target_compile_features(sound_selector_test PRIVATE cxx_std_17)
 add_test(NAME sound_selector COMMAND sound_selector_test)
 
+# The footstep slot pick's witnessed test order (water > on-entity > snow >
+# ground), shared by the authority and wire-fed body channels.
+add_executable(footstep_slot_test audio/footstep_slot_test.cpp)
+target_link_libraries(footstep_slot_test PRIVATE opennova_runtime)
+target_include_directories(footstep_slot_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(footstep_slot_test PRIVATE cxx_std_17)
+add_test(NAME footstep_slot COMMAND footstep_slot_test)
+
 # Ambient marker emitter system: the staggered tick&7 registration cadence, tick-unit
 # slot keep-alives, and the per-frame live-slot mix, pushed down from
 # nova_mission_audio.gd (docs/audio/lwf-dbf-sound-re.md §driver cadence, D-SND-16).

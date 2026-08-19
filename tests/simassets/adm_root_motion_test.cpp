@@ -168,6 +168,46 @@ int main() {
         TEST_EXPECT(sum == idle_v0);
     }
 
+    // THE CROSSED-FRAME TRIGGER SCAN — one entry per authored frame entered,
+    // in order, never coalesced [orig: the per-frame consume org2
+    // @0x4b76e6-0x4b78a8]. Walked against the same clip `advance` uses.
+    {
+        uint32_t words[8] = {0};
+        // A fresh clip start (from_phase = -1) fires frame 0.
+        const int first = source.scan_triggers(soldier, opennova::world::anim_state::kReset, -1, 0,
+                                               words, 8);
+        TEST_EXPECT(first == 1);
+        // Re-scanning the SAME span from the same start does not double-fire
+        // (the scan is a pure function of the span, so the caller advances
+        // from_phase; this pins that a zero-width span yields nothing).
+        TEST_EXPECT(source.scan_triggers(soldier, opennova::world::anim_state::kReset, 0, 0, words, 8) == 0);
+        // Two half-frame ticks cross exactly one frame boundary.
+        const int one = source.scan_triggers(soldier, opennova::world::anim_state::kReset, 0, 2, words, 8);
+        TEST_EXPECT(one == 1);
+        // A wide span reports every frame it crossed, bounded by max_out.
+        const int many = source.scan_triggers(soldier, opennova::world::anim_state::kReset, 0, 64, words, 8);
+        TEST_EXPECT(many > 1);
+        TEST_EXPECT(many <= 8);
+        uint32_t two_only[2] = {0};
+        TEST_EXPECT(source.scan_triggers(soldier, opennova::world::anim_state::kReset, 0, 64, two_only, 2) == 2);
+        // An unauthored state falls back to RESET's channel, the same
+        // AnimMap registration rule the length/advance paths follow — so a
+        // scan of state 9999 reports RESET's words, not nothing.
+        TEST_EXPECT(source.scan_triggers(soldier, 9999, -1, 8, words, 8) ==
+                    source.scan_triggers(soldier, opennova::world::anim_state::kReset,
+                                         -1, 8, words, 8));
+        // An UNREGISTERED SET has no track at all.
+        TEST_EXPECT(source.scan_triggers(7, 0, -1, 8, words, 8) == 0);
+        // A null destination scans nothing rather than faulting.
+        TEST_EXPECT(source.scan_triggers(soldier, opennova::world::anim_state::kReset,
+                                         -1, 8, nullptr, 8) == 0);
+        // The capsule-bottom dip is readable at a position without advancing;
+        // it matches what advance() reports for the same frame.
+        TEST_EXPECT(source.capsule_bottom_at(
+                            soldier, opennova::world::anim_state::kReset, 0) == bottom0);
+        TEST_EXPECT(source.capsule_bottom_at(7, 0, 0) == 0);
+    }
+
     // clear() empties the registry.
     source.clear();
     TEST_EXPECT(source.empty());

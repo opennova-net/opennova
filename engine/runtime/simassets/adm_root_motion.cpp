@@ -198,6 +198,37 @@ uint32_t AdmRootMotion::sample_trigger(const Track &track, int32_t phase_ticks) 
 	return track.trigger[static_cast<size_t>(position_of(track, phase_ticks) >> 1)];
 }
 
+int AdmRootMotion::scan_triggers(int adm_id, int state_id, int32_t from_phase,
+                                 int32_t to_phase, uint32_t *out,
+                                 int max_out) const {
+	if (out == nullptr || max_out <= 0) return 0;
+	const Track *track = resolve_track(adm_id, state_id);
+	if (track == nullptr || track->trigger.empty()) return 0;
+	int written = 0;
+	// Walk the half-frame playhead one tick at a time and emit the authored
+	// word each time the FRAME index changes (or on the first step, which is
+	// the frame the playhead just entered). A non-looping clip clamps just
+	// below its end, so the walk terminates there.
+	int32_t prev_frame = from_phase < 0
+			? -1
+			: (position_of(*track, from_phase) >> 1);
+	for (int32_t phase = from_phase + 1; phase <= to_phase; ++phase) {
+		const int32_t frame = position_of(*track, phase) >> 1;
+		if (frame == prev_frame) continue;
+		prev_frame = frame;
+		out[written++] = track->trigger[static_cast<size_t>(frame)];
+		if (written >= max_out) break;
+	}
+	return written;
+}
+
+int32_t AdmRootMotion::capsule_bottom_at(int adm_id, int state_id,
+                                         int32_t phase_ticks) const {
+	const Track *track = resolve_track(adm_id, state_id);
+	if (track == nullptr || track->bottom.empty()) return 0;
+	return static_cast<int32_t>(sample(*track, track->bottom, phase_ticks) * 65536.0f);
+}
+
 bool AdmRootMotion::advance(int adm_id, int state_id, int32_t &phase_ticks,
                             opennova::world::RootMotionFrame &out) {
 	return advance_variant(adm_id, state_id, 0, phase_ticks, out);

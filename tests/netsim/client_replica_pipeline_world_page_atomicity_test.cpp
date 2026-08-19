@@ -149,10 +149,25 @@ bool test_player_character_identity_reaches_present_row() {
 	nw::np::ClientReplicaPresentContext context;
 	nw::np::project_client_replica_present_row(
 			present, *row, pipeline.state(), context);
-	return expect(
+	bool ok = expect(
 			static_cast<int>(present[nw::world::PF_CHARACTER_ID]) == rec.net_id,
 			"player character identity was dropped before presentation",
 			"player identity");
+	// The carrier link's one sentinel: a fresh spawn (no link, wire 0xFFFF)
+	// publishes -1, a linked row publishes the packed handle.
+	ok = expect(present[nw::world::PF_CARRIER_HANDLE] == -1.0f,
+			"an unlinked row must publish the -1 carrier sentinel",
+			"carrier sentinel") && ok;
+	ns::ClientEntityState linked = *row;
+	linked.carrier_handle = 0x1234u;
+	nw::np::initialize_client_replica_present_row(present);
+	nw::np::project_client_replica_present_row(
+			present, linked, pipeline.state(), context);
+	ok = expect(
+			static_cast<int>(present[nw::world::PF_CARRIER_HANDLE]) == 0x1234,
+			"the decoded carrier link was dropped before presentation",
+			"carrier link") && ok;
+	return ok;
 }
 
 nw::PoolSpawnRecord pool_spawn_record(
