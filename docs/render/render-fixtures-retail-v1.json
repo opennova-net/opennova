@@ -1,0 +1,368 @@
+{
+  "schema": "opennova.render-fixtures.v1",
+  "catalog_sha256": "6948682efc5e58d0ea887728e1318dd3c618b286a322b1bce430e9fbfff6ebf2",
+  "purpose": "Registered retail/OpenNova side-by-side poses. OpenNova renders the exact retail aspect-1.667 frustum at 2000x1200; comparison normalization performs one declared horizontal squeeze to the retail 1920x1200 backbuffer.",
+  "comparison_contract": {
+    "capture_mode": "hud_hidden",
+    "equipped_weapon": "WPN_M16BURST",
+    "weapon_clip": 30,
+    "weapon_reserve": 270,
+    "character_id": 1026,
+    "arms_graphic": "IndoArms.3di",
+    "arms_camo": [1, 0, 0],
+    "hud_detail_level": 3,
+    "gameplay_hud_visible": false,
+    "hud_canvas_layer_active": true,
+    "player_view_effects_active": true,
+    "terrain_enabled": true,
+    "viewmodel_enabled": true,
+    "ads_active": false,
+    "big_map_active": false,
+    "player_pose_source": "retail_player_bms.applied"
+  },
+  "retail_profile_contract": {
+    "path": "expansion/revx02/weapon.sav",
+    "sha256": "f4907820a58505a6988f140a27638dae7dbaaea2cc446642f0bc44c868905623",
+    "profile_slot": 0,
+    "blue": {
+      "player_class": 9,
+      "avatar_a": 2,
+      "avatar_b": 0,
+      "character_id": 1026,
+      "primary_weapon": "WPN_M16BURST"
+    },
+    "red": {
+      "player_class": 9,
+      "avatar_a": 7,
+      "avatar_b": 0,
+      "character_id": 33287
+    }
+  },
+  "coordinate_space": {
+    "camera": "BMS mission XYZ",
+    "godot_conversion": "(x,y,z) -> (x,z,-y)",
+    "yaw_pitch": "degrees"
+  },
+  "retail_eye_model": {
+    "derivation": "Legacy unverified calibration lead only: camera was estimated 0.91 above the player and 0.24 toward camera-right. A registered capture does not trust this model; camera_bms is recovered from the correlated retail view matrix while APPLY_POSE positions remain requests.",
+    "provenance_status": "legacy_unverified",
+    "eye_up": 0.91,
+    "eye_right": 0.24
+  },
+  "capture": {
+    "resolution": [2000, 1200],
+    "retail_resolution": [1920, 1200],
+    "normalization": "horizontal_only_bicubic_2000_to_1920",
+    "load_settle_frames": 132,
+    "visibility_settle_frames": 3,
+    "vertical_fov_deg": 53.4468,
+    "freeze_simulation": true,
+    "freeze_weather": true,
+    "capture_modes": ["world_only", "full_frame", "hud_hidden"],
+    "camera_registration": "inverse_frame_correlated_row_major_view_matrix"
+  },
+  "diagnostic_variants": [
+    "beauty",
+    "shadows_off",
+    "lighting_only",
+    "unshaded",
+    "directional_shadow_atlas"
+  ],
+  "missions": {
+    "00TRa.bms": "64dd18b3122a6c4ee4e173cac1b9a12d19004c32572bd2f1ad113a475fe57407",
+    "CP01.bms": "476219276170c1b26bcc5c2d9eb5aafdcfaccb583aad843f89867cb1f93b9863",
+    "CP12.bms": "24d498c38f694bcddecfe71567f64a5c12d7164f3566554fc5cde66e42216459",
+    "CP04.bms": "ade019ca4b3d8cd6851abeec6ca8ffa2357d2b9b83a2cd348eebf4a82f9e8346"
+  },
+  "clock": {
+    "derivation": "Each pair uses the authored mission start minute; retail time-of-day control is not inferred from elapsed capture time.",
+    "start_minutes": {
+      "00TRa.bms": 900,
+      "CP01.bms": 930,
+      "CP12.bms": 1260,
+      "CP04.bms": 120
+    }
+  },
+  "fixtures": [
+    {
+      "id": "00tra-courtyard-retail",
+      "mission": "00TRa.bms",
+      "capture_mode": "hud_hidden",
+      "retail_player_bms": {
+        "applied": [297.6972, -409.1305, 27.81005],
+        "provenance_status": "required_at_capture",
+        "derivation": "APPLY_POSE request retained from visual calibration; registered inverse view matrix is authoritative for camera_bms"
+      },
+      "camera_bms": {
+        "position": [297.879077956, -409.026410897, 28.852508545],
+        "yaw_deg": 0.0,
+        "pitch_deg": 0.0,
+        "vertical_fov_deg": 53.4468
+      },
+      "minutes_of_day": [900],
+      "coverage": ["retail_side_by_side", "directional_shadows", "outdoor_materials"]
+    },
+    {
+      "id": "00tra-armory-glass-retail",
+      "mission": "00TRa.bms",
+      "capture_mode": "hud_hidden",
+      "retail_player_bms": {
+        "applied": [294.319338, -419.289213, 31.09],
+        "provenance_status": "required_at_capture",
+        "derivation": "APPLY_POSE request retained from visual calibration; registered inverse view matrix is authoritative for camera_bms"
+      },
+      "camera_bms": {
+        "position": [294.375677038, -419.031196694, 31.935411006],
+        "yaw_deg": -45.0,
+        "pitch_deg": -7.5,
+        "vertical_fov_deg": 53.4468
+      },
+      "minutes_of_day": [900],
+      "coverage": ["retail_side_by_side", "ffp_glass", "cutout", "building_shadows"]
+    },
+    {
+      "id": "00tra-fire-barrel-east-retail",
+      "mission": "00TRa.bms",
+      "capture_mode": "hud_hidden",
+      "retail_player_bms": {
+        "applied": [283.129364, -357.799469, 27.0],
+        "legacy_observed": [283.129364, -357.799469, 27.9938],
+        "provenance_status": "legacy_unverified",
+        "derivation": "legacy APPLY_POSE request retained only as a calibration lead; registered inverse view matrix is authoritative for camera_bms"
+      },
+      "camera_bms": {
+        "position": [282.973686991, -357.586838009, 28.702848111],
+        "yaw_deg": -90.0,
+        "pitch_deg": -6.5,
+        "vertical_fov_deg": 53.4468
+      },
+      "minutes_of_day": [900],
+      "coverage": ["retail_side_by_side", "effectworld_point_light", "courtyard_daylight"]
+    },
+    {
+      "id": "00tra-fire-barrel-close-retail",
+      "mission": "00TRa.bms",
+      "capture_mode": "hud_hidden",
+      "retail_player_bms": {
+        "applied": [279.6, -357.8, 27.0],
+        "legacy_observed": [279.4504, -358.1085, 27.8688],
+        "provenance_status": "legacy_unverified",
+        "derivation": "legacy APPLY_POSE request retained only as a calibration lead; registered inverse view matrix is authoritative for camera_bms"
+      },
+      "camera_bms": {
+        "position": [279.364251128, -357.711858306, 28.705291954],
+        "yaw_deg": -90.0,
+        "pitch_deg": -10.0,
+        "vertical_fov_deg": 53.4468
+      },
+      "minutes_of_day": [900],
+      "coverage": ["retail_side_by_side", "fire_flame_closeup", "particles"]
+    },
+    {
+      "id": "cp01-water-wide-retail",
+      "mission": "CP01.bms",
+      "capture_mode": "hud_hidden",
+      "retail_player_bms": {
+        "applied": [-738.844223, -754.754196, 21.4],
+        "legacy_observed": [-738.844223, -754.754196, 21.4356],
+        "provenance_status": "legacy_unverified",
+        "derivation": "legacy APPLY_POSE request retained only as a calibration lead; registered inverse view matrix is authoritative for camera_bms"
+      },
+      "camera_bms": {
+        "position": [-738.786112325, -754.272227155, 22.021216855],
+        "yaw_deg": 0.0,
+        "pitch_deg": -8.1,
+        "vertical_fov_deg": 53.4468
+      },
+      "minutes_of_day": [930],
+      "expected_water_height": 21.0,
+      "coverage": ["retail_side_by_side", "water_surface", "reflection_admission"]
+    },
+    {
+      "id": "cp01-water-shallow-retail",
+      "mission": "CP01.bms",
+      "capture_mode": "hud_hidden",
+      "retail_player_bms": {
+        "applied": [-738.844223, -754.754196, 21.4],
+        "provenance_status": "required_at_capture",
+        "derivation": "APPLY_POSE request reuses the legacy water-wide calibration lead; camera_bms was recalibrated from the registered HUD-hidden inverse view matrix"
+      },
+      "camera_bms": {
+        "position": [-738.8314622233299, -754.2562303493884, 22.02728343982874],
+        "yaw_deg": 0.0,
+        "pitch_deg": -2.0,
+        "vertical_fov_deg": 53.4468
+      },
+      "minutes_of_day": [930],
+      "expected_water_height": 21.0,
+      "coverage": ["retail_side_by_side", "water_surface", "horizon"]
+    },
+    {
+      "id": "cp01-water-steep-retail",
+      "mission": "CP01.bms",
+      "capture_mode": "hud_hidden",
+      "retail_player_bms": {
+        "applied": [-738.844223, -754.754196, 21.4],
+        "provenance_status": "required_at_capture",
+        "derivation": "APPLY_POSE request reuses the legacy water-wide calibration lead; registered inverse view matrix is authoritative for camera_bms"
+      },
+      "camera_bms": {
+        "position": [-738.757798112, -754.144796132, 21.963021822],
+        "yaw_deg": 0.0,
+        "pitch_deg": -20.0,
+        "vertical_fov_deg": 53.4468
+      },
+      "minutes_of_day": [930],
+      "expected_water_height": 21.0,
+      "coverage": ["retail_side_by_side", "water_surface", "broad_reflection_response"]
+    },
+    {
+      "id": "cp01-waterline-above-retail",
+      "mission": "CP01.bms",
+      "capture_mode": "hud_hidden",
+      "retail_player_bms": {
+        "applied": [-739.084238, -754.754211, 20.34],
+        "provenance_status": "required_at_capture",
+        "derivation": "APPLY_POSE request retained from waterline calibration; registered inverse view matrix is authoritative for camera_bms"
+      },
+      "camera_bms": {
+        "position": [-738.844807088, -754.711917524, 21.208312988],
+        "yaw_deg": 0.0,
+        "pitch_deg": 0.0,
+        "vertical_fov_deg": 53.4468
+      },
+      "minutes_of_day": [930],
+      "expected_water_height": 21.0,
+      "coverage": ["retail_side_by_side", "above_water_branch", "waterline"]
+    },
+    {
+      "id": "cp01-waterline-below-retail",
+      "mission": "CP01.bms",
+      "capture_mode": "hud_hidden",
+      "retail_player_bms": {
+        "applied": [-739.084238, -754.754211, 20.08],
+        "provenance_status": "required_at_capture",
+        "derivation": "APPLY_POSE request retained from waterline calibration; registered inverse view matrix is authoritative for camera_bms"
+      },
+      "camera_bms": {
+        "position": [-738.843586297, -754.713748521, 20.94418335],
+        "yaw_deg": 0.0,
+        "pitch_deg": 0.0,
+        "vertical_fov_deg": 53.4468
+      },
+      "minutes_of_day": [930],
+      "expected_water_height": 21.0,
+      "coverage": ["retail_side_by_side", "underwater_branch", "waterline"]
+    },
+    {
+      "id": "cp01-water-oblique-retail",
+      "mission": "CP01.bms",
+      "capture_mode": "hud_hidden",
+      "retail_player_bms": {
+        "applied": [-738.844223, -754.754196, 21.4],
+        "provenance_status": "required_at_capture",
+        "derivation": "APPLY_POSE request retained from visual calibration; camera_bms was recalibrated from the registered HUD-hidden inverse view matrix"
+      },
+      "camera_bms": {
+        "position": [-738.5563172384901, -754.3033306500754, 22.034346508456707],
+        "yaw_deg": 30.0,
+        "pitch_deg": -8.0,
+        "vertical_fov_deg": 53.4468
+      },
+      "minutes_of_day": [930],
+      "coverage": ["retail_side_by_side", "water_surface", "oblique_reflection", "shoreline_materials"]
+    },
+    {
+      "id": "cp12-yard-road-retail",
+      "mission": "CP12.bms",
+      "capture_mode": "hud_hidden",
+      "retail_player_bms": {
+        "applied": [-429.856046, 1539.607326, 61.39],
+        "provenance_status": "required_at_capture",
+        "derivation": "APPLY_POSE request retained from the visually accepted road pose; registered inverse view matrix is authoritative for camera_bms"
+      },
+      "camera_bms": {
+        "position": [-429.602249396, 1539.691125971, 62.238982658],
+        "yaw_deg": 0.0,
+        "pitch_deg": -5.0,
+        "vertical_fov_deg": 53.4468
+      },
+      "minutes_of_day": [1260],
+      "coverage": ["retail_side_by_side", "night_ground_lighting", "vehicle_contact_shadow", "road_context"]
+    },
+    {
+      "id": "cp12-truck-material-retail",
+      "mission": "CP12.bms",
+      "capture_mode": "hud_hidden",
+      "retail_player_bms": {
+        "applied": [-429.856046, 1539.607326, 61.39],
+        "provenance_status": "required_at_capture",
+        "derivation": "APPLY_POSE request retained from visual calibration; registered inverse view matrix is authoritative for camera_bms"
+      },
+      "camera_bms": {
+        "position": [-429.612739114, 1539.624730381, 62.223579154],
+        "yaw_deg": 45.0,
+        "pitch_deg": -5.6,
+        "vertical_fov_deg": 53.4468
+      },
+      "minutes_of_day": [1260],
+      "coverage": ["retail_side_by_side", "vs_envphongt", "glass", "night_reflection"]
+    },
+    {
+      "id": "cp12-yard-tanks-retail",
+      "mission": "CP12.bms",
+      "capture_mode": "hud_hidden",
+      "retail_player_bms": {
+        "applied": [-429.856046, 1539.607326, 61.39],
+        "provenance_status": "required_at_capture",
+        "derivation": "APPLY_POSE request retained from visual calibration; registered inverse view matrix is authoritative for camera_bms"
+      },
+      "camera_bms": {
+        "position": [-429.697763087, 1539.44824301, 62.237518568],
+        "yaw_deg": 90.0,
+        "pitch_deg": -5.0,
+        "vertical_fov_deg": 53.4468
+      },
+      "minutes_of_day": [1260],
+      "coverage": ["retail_side_by_side", "tank_materials", "night_sky", "directional_shadow_context"]
+    },
+    {
+      "id": "cp04-checkpoint-fires-retail",
+      "mission": "CP04.bms",
+      "capture_mode": "hud_hidden",
+      "retail_player_bms": {
+        "applied": [516.0, -180.0, 30.0],
+        "legacy_observed": [516.0, -180.0, 30.0],
+        "provenance_status": "legacy_unverified",
+        "derivation": "legacy APPLY_POSE request retained only as a calibration lead; registered inverse view matrix is authoritative for camera_bms"
+      },
+      "camera_bms": {
+        "position": [516.23111036, -180.123436107, 30.846343697],
+        "yaw_deg": 50.0,
+        "pitch_deg": -5.0,
+        "vertical_fov_deg": 53.4468
+      },
+      "minutes_of_day": [120],
+      "coverage": ["retail_side_by_side", "night_fire_light", "effectworld_point_light"]
+    },
+    {
+      "id": "00tra-fire-barrel-full-composite-retail",
+      "mission": "00TRa.bms",
+      "capture_mode": "hud_hidden",
+      "retail_player_bms": {
+        "applied": [283.129364, -357.799469, 27.0],
+        "legacy_observed": [283.129364, -357.799469, 27.9938],
+        "provenance_status": "legacy_unverified",
+        "derivation": "legacy APPLY_POSE request reuses the fire-barrel calibration lead; registered inverse view matrix is authoritative for camera_bms"
+      },
+      "camera_bms": {
+        "position": [282.970707794, -357.610977134, 27.843963189],
+        "yaw_deg": -90.0,
+        "pitch_deg": -6.5,
+        "vertical_fov_deg": 53.4468
+      },
+      "minutes_of_day": [900],
+      "coverage": ["retail_side_by_side", "hud", "viewmodel", "caster_context"]
+    }
+  ]
+}

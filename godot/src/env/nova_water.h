@@ -41,11 +41,11 @@ class Water : public Node3D {
 	GDCLASS(Water, Node3D)
 
 public:
-	// Visual-layer allocation for the reflection contract (env #30): the
-	// mirror re-renders the world scene with a FILTERED entity set (above
-	// water only vehicles; below water unfiltered), never the water surface,
-	// never the FP overlay, never ANY person — the witness lives with the
-	// mirror view (environment/water_mirror.h).
+	// Visual-layer allocation for the reflection contract (env #30): above
+	// water the mirror renders only the flag-0x400 population (vehicles by
+	// item type + authored-Reflective records); below water it is unfiltered.
+	// It never renders the water surface, FP overlay, or a player/person leg.
+	// The witness lives with the mirror view (environment/water_mirror.h).
 	enum {
 		VISUAL_LAYER_WORLD = 1 << 0,
 		VISUAL_LAYER_WATER = 1 << 10,

@@ -128,6 +128,12 @@ target_link_libraries(mission_authoring_test PRIVATE opennova_formats)
 target_include_directories(mission_authoring_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mission_authoring COMMAND mission_authoring_test)
 
+add_executable(mission_placement_traits_test mission/placement_traits_test.cpp)
+target_link_libraries(mission_placement_traits_test PRIVATE opennova_runtime)
+target_include_directories(mission_placement_traits_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(mission_placement_traits_test PRIVATE cxx_std_17)
+add_test(NAME mission_placement_traits COMMAND mission_placement_traits_test)
+
 add_executable(mission_catalog_test mission/mission_catalog_test.cpp)
 target_link_libraries(mission_catalog_test PRIVATE opennova_runtime)
 target_include_directories(mission_catalog_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -634,7 +640,7 @@ target_include_directories(oed_error_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME oed_error COMMAND oed_error_test)
 
 # Object renderer/shader tests
-foreach(test light_runtime material_classify material_eval
+foreach(test light_runtime light_scene material_classify material_eval
         particle_atlas_contract particle_frame_compiler_contract render_order
         state_vectors tracer_frame)
     add_executable(renderer_${test}_test renderer/${test}_test.cpp)
@@ -830,6 +836,36 @@ add_executable(terrain_frame_compiler_test terrain/terrain_frame_compiler_test.c
 target_link_libraries(terrain_frame_compiler_test PRIVATE opennova_runtime)
 target_include_directories(terrain_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME terrain_frame_compiler COMMAND terrain_frame_compiler_test)
+
+add_executable(terrain_tile_composition_cache_test terrain/terrain_tile_composition_cache_test.cpp)
+target_link_libraries(terrain_tile_composition_cache_test PRIVATE opennova_runtime)
+target_include_directories(terrain_tile_composition_cache_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME terrain_tile_composition_cache COMMAND terrain_tile_composition_cache_test)
+
+add_executable(terrain_tile_composer_test terrain/terrain_tile_composer_test.cpp)
+target_link_libraries(terrain_tile_composer_test PRIVATE opennova_runtime)
+target_include_directories(terrain_tile_composer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME terrain_tile_composer COMMAND terrain_tile_composer_test)
+
+add_executable(terrain_static_shadow_collector_test terrain/terrain_static_shadow_collector_test.cpp)
+target_link_libraries(terrain_static_shadow_collector_test PRIVATE opennova_runtime)
+target_include_directories(terrain_static_shadow_collector_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME terrain_static_shadow_collector COMMAND terrain_static_shadow_collector_test)
+
+add_executable(terrain_static_shadow_planner_test terrain/terrain_static_shadow_planner_test.cpp)
+target_link_libraries(terrain_static_shadow_planner_test PRIVATE opennova_runtime)
+target_include_directories(terrain_static_shadow_planner_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME terrain_static_shadow_planner COMMAND terrain_static_shadow_planner_test)
+
+add_executable(terrain_static_shadow_raster_test terrain/terrain_static_shadow_raster_test.cpp)
+target_link_libraries(terrain_static_shadow_raster_test PRIVATE opennova_runtime)
+target_include_directories(terrain_static_shadow_raster_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME terrain_static_shadow_raster COMMAND terrain_static_shadow_raster_test)
+
+add_executable(terrain_static_shadow_alpha_test terrain/terrain_static_shadow_alpha_test.cpp)
+target_link_libraries(terrain_static_shadow_alpha_test PRIVATE opennova_runtime)
+target_include_directories(terrain_static_shadow_alpha_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME terrain_static_shadow_alpha COMMAND terrain_static_shadow_alpha_test)
 
 add_executable(hud_frame_compiler_test hud/hud_frame_compiler_test.cpp)
 target_link_libraries(hud_frame_compiler_test PRIVATE opennova_runtime)

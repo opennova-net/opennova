@@ -39,7 +39,7 @@ static func describe(ctx: McpToolContext, raw_path: String, depth := "summary", 
 		"sound":
 			_describe_lwf(ctx, out, resolved, full, limit)
 		"object_model":
-			_describe_3di(ctx, out, resolved)
+			_describe_3di(ctx, out, resolved, full, limit)
 		"pff":
 			_describe_pff(out, path, full, limit)
 		_:
@@ -308,14 +308,128 @@ static func _describe_lwf(ctx: McpToolContext, out: Dictionary, resolved: Dictio
 	out["summary"] = "LWF sound profile — %d trigger set(s)." % lwf.get_set_count()
 
 
-static func _describe_3di(ctx: McpToolContext, out: Dictionary, resolved: Dictionary) -> void:
+static func _describe_3di(
+		ctx: McpToolContext,
+		out: Dictionary,
+		resolved: Dictionary,
+		full: bool,
+		limit: int) -> void:
 	var object := ObjectData.new()
 	var err := _open_via(object, ctx, resolved)
 	if err != OK:
 		out["error"] = "3DI model failed to load (%s): %s" % [error_string(err), object.get_last_error()]
 		return
-	out["data"] = { "object_name": object.get_object_name() }
-	out["summary"] = "3DI model '%s'. Open it in the Object workspace for geometry; describe stays shallow (no LOD build)." % object.get_object_name()
+	var raw_materials: Array = object.get_materials()
+	var raw_lights: Array = object.get_lights()
+	var object_summary: Dictionary = object.get_summary()
+	var data := {
+		"object_name": object.get_object_name(),
+		"lod_count": int(object_summary.get("lod_count", 0)),
+		"userpoint_count": int(object_summary.get("userpoint_count", 0)),
+		"material_count": raw_materials.size(),
+		"material_total": raw_materials.size(),
+		"light_count": raw_lights.size(),
+		"light_total": raw_lights.size(),
+		"material_features": _3di_material_feature_counts(raw_materials),
+	}
+	if full:
+		var materials: Array = []
+		for index in range(mini(raw_materials.size(), limit)):
+			materials.append(_3di_material_summary(
+					object, raw_materials[index] as Dictionary))
+		var lights: Array = []
+		for index in range(mini(raw_lights.size(), limit)):
+			lights.append(_3di_light_summary(
+					object, raw_lights[index] as Dictionary))
+		data["materials"] = materials
+		data["material_returned"] = materials.size()
+		data["lights"] = lights
+		data["light_returned"] = lights.size()
+		out["truncated"] = raw_materials.size() > limit \
+				or raw_lights.size() > limit
+	out["data"] = data
+	out["summary"] = "3DI model '%s' — %d material(s), %d authored LGHT record(s), %d LOD(s)." % [
+		object.get_object_name(), raw_materials.size(), raw_lights.size(),
+		int(object_summary.get("lod_count", 0)),
+	]
+
+
+static func _3di_material_summary(
+		object: ObjectData,
+		raw: Dictionary) -> Dictionary:
+	var row := raw.duplicate(true)
+	var index := int(raw.get("index", -1))
+	var info: Dictionary = object.get_material_info(index)
+	# Keep the raw authored fields at top level for exact inspection, then group
+	# the renderer-relevant interpretation inputs so callers do not need to know
+	# ObjectData's flags or conflate an authored bit with final runtime policy.
+	row["technique"] = {
+		"shader_tag": String(raw.get("shader", "")),
+		"family": String(raw.get("shader_family", "unknown")),
+		"blend": String(raw.get("shader_blend", "opaque")),
+		"normal_space": String(raw.get("normal_space", "none")),
+		"shader_flags": int(raw.get("shader_flags", 0)),
+		"material_flags": int(raw.get("flags", 0)),
+	}
+	row["shadow_inputs"] = {
+		"alpha_test_enabled": bool(info.get("alpha_test_enabled", false)),
+		"alpha_test_byte": int(info.get("alpha_test", 0)),
+		"alpha_threshold": float(raw.get("alpha_threshold", 0.0)),
+		"alpha_invert": bool(info.get("alpha_invert", false)),
+		"two_sided": bool(info.get("two_sided", false)),
+	}
+	row["glass"] = {
+		"authored": bool(raw.get("is_glass", false)),
+		"shader_flag": bool(raw.get("is_glass_shader", false)),
+		"family": String(raw.get("shader_family", "unknown")),
+		"reflect_color": raw.get("reflect_color", Color.BLACK),
+	}
+	row["emissive"] = {
+		"authored_type": int(raw.get("emissive_type", 0)),
+		"full": bool(info.get("emissive", false)),
+		"shader_luminance": bool(raw.get("is_luminance", false)),
+		"glow_capable": bool(raw.get("is_glow_capable", false)),
+	}
+	return row
+
+
+static func _3di_light_summary(
+		object: ObjectData,
+		raw: Dictionary) -> Dictionary:
+	var row := raw.duplicate(true)
+	var info: Dictionary = object.get_light_info(int(raw.get("index", -1)))
+	row["kind"] = "target" if int(info.get("light_type", 0)) == 1 else "point"
+	row["affects"] = {
+		"objects": not bool(info.get("disable_lightobjects", false)),
+		"terrain": not bool(info.get("disable_lightterrain", false)),
+		"corona": not bool(info.get("disable_corona", false)),
+	}
+	return row
+
+
+static func _3di_material_feature_counts(materials: Array) -> Dictionary:
+	var counts := {
+		"glass": 0,
+		"emissive": 0,
+		"alpha": 0,
+		"glow_capable": 0,
+		"environment": 0,
+	}
+	for value in materials:
+		var material: Dictionary = value
+		if bool(material.get("is_glass", false)) \
+				or bool(material.get("is_glass_shader", false)):
+			counts["glass"] += 1
+		if int(material.get("emissive_type", 0)) != 0 \
+				or bool(material.get("is_luminance", false)):
+			counts["emissive"] += 1
+		if bool(material.get("is_alpha", false)):
+			counts["alpha"] += 1
+		if bool(material.get("is_glow_capable", false)):
+			counts["glow_capable"] += 1
+		if bool(material.get("uses_environment", false)):
+			counts["environment"] += 1
+	return counts
 
 
 static func _describe_pff(out: Dictionary, path: String, full: bool, limit: int) -> void:

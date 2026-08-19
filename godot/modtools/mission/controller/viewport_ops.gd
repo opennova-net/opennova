@@ -636,6 +636,10 @@ func _apply_selected_xform(xform: Transform3D) -> void:
 					shadow_moved.basis = \
 							shadow_moved.basis.scaled(Vector3.ZERO)
 				shadow_mm.set_instance_transform(slot, shadow_moved)
+	if _c._placer != null and not _c._selected_ref.is_empty():
+		_c._placer.update_static_terrain_shadow_source_transform(
+				int(_c._selected_ref.get("kind", -1)),
+				int(_c._selected_ref.get("index", -1)), _c._selected_xform)
 	# Move the pick body node in lockstep so a re-pick mid/after-drag stays exact. The body sits at
 	# the entity transform directly (render is direct; the ground anchor is baked into the stored
 	# position, not applied here). No-op for a marker (no body).

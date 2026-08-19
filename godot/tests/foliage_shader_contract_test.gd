@@ -48,10 +48,12 @@ func test_detail_passes_blend_srcalpha_and_emulate_secondary_less() -> void:
 		"LOW blends SRCALPHA/INVSRCALPHA and never writes depth.")
 
 
-func test_fd_sampling_is_anisotropic_with_retail_terminal_clamp() -> void:
+func test_fd_sampling_is_anisotropic_with_conservative_terminal_guard() -> void:
 	# The device-global texfilter mode applies to every stage, and the retail
-	# reference machine runs the anisotropic mode; the synthetic Godot 2x2/1x1
-	# tail past retail's 4x4 terminal stays unselectable via the gradient clamp.
+	# reference machine runs the anisotropic mode. The longest-gradient scale is
+	# a conservative guard that keeps the synthetic Godot 2x2/1x1 tail past
+	# retail's 4x4 terminal unselectable; it does not claim to reproduce the
+	# device's exact anisotropic LOD footprint.
 	# [orig: CGfxDevice_ApplyRenderStates per-stage loop @ 0x67e3b5..0x67e50e]
 	var sampling := _source("res://shaders/foliage_fd_sampling.gdshaderinc")
 	var detail := _source("res://shaders/foliage_detail.gdshaderinc")
@@ -60,7 +62,7 @@ func test_fd_sampling_is_anisotropic_with_retail_terminal_clamp() -> void:
 	assert_true(sampling.contains("floor(log2(max(min(dimensions.x, dimensions.y), 4.0))) - 2.0"),
 		"The terminal LOD must match retail's final 4x4 level.")
 	assert_true(sampling.contains("float gradient_scale = exp2(min(terminal_lod - requested_lod, 0.0));"),
-		"Requests past the retail terminal must scale gradients back onto it.")
+			"The conservative shader guard must keep requests out of the synthetic terminal tail.")
 	assert_true(sampling.contains("textureGrad(source, uv, dx * gradient_scale, dy * gradient_scale)"),
 		":fd sampling must stay implicit/anisotropic within the retail chain.")
 	assert_true(detail.contains("uniform sampler2D u_fd_texture : filter_linear_mipmap_anisotropic"),
@@ -152,4 +154,43 @@ func test_detail_fog_consumes_supplied_start_and_honors_disable() -> void:
 		detail.contains("start = safe_end * 0.5") or
 			detail.contains("start = safe_end * 0.25"),
 		"The foliage shader must not overwrite the supplied type 2/3 fog start."
+	)
+
+
+func test_runtime_detail_foliage_consumes_terrains_resident_tile_page() -> void:
+	var detail := _source("res://shaders/foliage_detail.gdshaderinc")
+	var dispatcher := _source("res://src/terrain/nova_foliage_dispatcher.cpp")
+
+	assert_true(
+		detail.contains("uniform sampler2DArray u_tile_cache") and
+			detail.contains("instance uniform bool u_instance_tile_cache_ready") and
+			detail.contains("instance uniform float u_instance_tile_cache_layer") and
+			detail.contains("instance uniform vec4 u_instance_tile_cache_origin_span"),
+		"Detail foliage must expose the same composed-page array and per-draw page binding as terrain."
+	)
+	assert_true(
+		detail.contains("texture(u_tile_cache, vec3(") and
+			detail.contains("u_instance_tile_cache_layer"),
+		"A ready foliage draw must sample its resident terrain-cache layer."
+	)
+	assert_true(
+		detail.contains("vec2 half_texel = vec2(0.5 / 256.0);") and
+			detail.contains("page_uv = clamp(page_uv, half_texel, vec2(1.0) - half_texel);"),
+		"Foliage and terrain must share the page RT's half-texel edge clamp."
+	)
+	assert_true(
+		dispatcher.contains("terrain_->get_tile_cache_texture()") and
+			dispatcher.contains("terrain_->get_tile_cache_binding_for_world_point_native("),
+		"Foliage must borrow both the Texture2DArray and the best-ready page binding from its owning Terrain."
+	)
+	assert_true(
+		dispatcher.contains('"u_instance_tile_cache_ready"') and
+			dispatcher.contains('"u_instance_tile_cache_layer"') and
+			dispatcher.contains('"u_instance_tile_cache_origin_span"'),
+		"The terrain-resident binding must reach every detail draw as instance state."
+	)
+	assert_true(
+		detail.contains("if (u_has_tile_cache && u_instance_tile_cache_ready)") and
+			detail.contains("if (u_has_colormap)"),
+		"Missing runtime pages and ONED preview must retain the analytic terrain-surface fallback."
 	)

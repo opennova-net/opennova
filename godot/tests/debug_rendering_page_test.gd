@@ -26,6 +26,10 @@ class StubWorld:
 		&"show_hit_meshes": false,
 	}
 	var drawable := {&"show_collision": 5}
+	var loaded_override := false
+
+	func is_loaded() -> bool:
+		return loaded_override
 
 	func set_skeleton_debug(value: bool) -> void:
 		enabled[&"show_skeletons"] = value
@@ -170,3 +174,30 @@ func test_rendering_reports_viewport_mode_and_active_overlay_artifacts() -> void
 	assert_string_contains(viewport_state.text, "SSAO")
 	assert_string_contains(viewport_state.text, "requires SSAO",
 			"feature-buffer modes explain why selecting them can show nothing")
+
+
+func test_rendering_reports_shadow_water_and_light_render_state() -> void:
+	var fixture := _make_page()
+	var page: DebugRenderingPage = fixture.page
+	var world: StubWorld = fixture.world
+
+	var shadow_state := page.find_child("ShadowState", true, false) as Label
+	var water_state := page.find_child("WaterMirrorState", true, false) as Label
+	var light_state := page.find_child("LightState", true, false) as Label
+	assert_not_null(shadow_state)
+	assert_not_null(water_state)
+	assert_not_null(light_state)
+	if shadow_state == null or water_state == null or light_state == null:
+		return
+	assert_string_contains(shadow_state.text, "No loaded world.",
+			"an unloaded world renders an explicit empty state")
+
+	world.loaded_override = true
+	page.refresh()
+
+	assert_string_contains(shadow_state.text, "Dynamic: absent",
+			"a world without a SunShadow reports the missing dynamic caster")
+	assert_string_contains(shadow_state.text, "Static terrain: absent")
+	assert_string_contains(water_state.text, "No water surface.")
+	assert_string_contains(light_state.text, "active of",
+			"the light census renders from the shared typed snapshot")

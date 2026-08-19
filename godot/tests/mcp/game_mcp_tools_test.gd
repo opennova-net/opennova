@@ -90,6 +90,12 @@ class AdapterStub:
 		"entities": [{"index": 0}, {"index": 1}],
 	}
 	var entity_card := {"index": 1, "name": "Guard"}
+	var capture_args := {}
+	var render_diagnostics := {
+		"schema": "OpenNovaRenderDiagnosticsV1",
+		"camera": {"available": true, "fov_deg": 50.534},
+		"passes": {"root": {"shadow_draw_calls": 17}},
+	}
 
 	func get_debug_session() -> DebugSession:
 		return debug
@@ -102,6 +108,27 @@ class AdapterStub:
 
 	func get_mcp_game_entity(_index: int) -> Variant:
 		return entity_card
+
+	func get_mcp_render_diagnostics() -> Variant:
+		return render_diagnostics
+
+	func capture_mcp_render_bundle(
+			args: Dictionary,
+			_cancel_requested: Callable = Callable()) -> Variant:
+		capture_args = args.duplicate(true)
+		return {
+			"schema": "OpenNovaRenderCaptureV1",
+			"capture_id": "probe-17",
+			"artifact": {
+				"png_path": "C:/capture/probe-17.png",
+				"state_path": "C:/capture/probe-17.json",
+				"width": 1600,
+				"height": 900,
+				"sha256": "abc123",
+			},
+			"diagnostics": render_diagnostics,
+			"image_bytes": PackedByteArray([0x89, 0x50, 0x4e, 0x47]),
+		}
 
 	func mcp_game_control(action: String) -> Error:
 		last_action = action
@@ -141,6 +168,8 @@ func test_shared_catalog_registers_all_runtime_tools() -> void:
 		"game_entities",
 		"game_control",
 		"game_debug",
+		"game_render_diagnostics",
+		"game_capture_bundle",
 		"game_screenshot",
 		"game_logs",
 	]:
@@ -426,3 +455,48 @@ func test_wrong_typed_screenshot_args_error_cleanly() -> void:
 	]:
 		var result := await _call("game_screenshot", args)
 		assert_true(result.is_error, "wrong-typed %s errors" % [args])
+
+
+func test_render_diagnostics_routes_exact_state_through_the_adapter_seam() -> void:
+	var result := await _call("game_render_diagnostics")
+	assert_false(result.is_error)
+	assert_eq(result.structured["schema"], "OpenNovaRenderDiagnosticsV1")
+	assert_eq(result.structured["camera"]["fov_deg"], 50.534)
+	assert_eq(result.structured["passes"]["root"]["shadow_draw_calls"], 17)
+
+
+func test_capture_bundle_returns_lossless_artifact_metadata_and_optional_image() -> void:
+	var result := await _call("game_capture_bundle", {
+		"label": "00TRa-courtyard",
+		"settle_frames": 3,
+		"world_only": true,
+		"include_image": true,
+	})
+	assert_false(result.is_error)
+	assert_eq(adapter.capture_args["label"], "00TRa-courtyard")
+	assert_eq(result.structured["schema"], "OpenNovaRenderCaptureV1")
+	assert_eq(result.structured["artifact"]["width"], 1600)
+	assert_eq(result.structured["artifact"]["height"], 900)
+	assert_false(result.structured.has("image_bytes"),
+			"transport-only PNG bytes stay out of structuredContent")
+	assert_eq(result.content[0]["type"], "image")
+	assert_eq(result.content[0]["mimeType"], "image/png")
+
+	result = await _call("game_capture_bundle", {"include_image": false})
+	assert_false(result.is_error)
+	for block in result.content:
+		assert_ne(block.get("type", ""), "image")
+
+
+func test_render_capture_arguments_reject_coercible_values_before_capture() -> void:
+	for args in [
+		{"label": ["courtyard"]},
+		{"settle_frames": "3"},
+		{"world_only": 1},
+		{"include_image": "yes"},
+	]:
+		adapter.capture_args = {}
+		var result := await _call("game_capture_bundle", args)
+		assert_true(result.is_error, "wrong-typed %s errors" % [args])
+		assert_true(adapter.capture_args.is_empty(),
+				"invalid arguments never reach the capture adapter")

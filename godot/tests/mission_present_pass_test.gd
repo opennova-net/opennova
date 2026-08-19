@@ -181,7 +181,7 @@ func _index_of(by_bms_id: Dictionary) -> EntityIndex:
 func _make_pass(index: EntityIndex, sim: Simulation = null,
 		options: Dictionary = {}) -> PresentApplier:
 	var p := PresentApplier.new()
-	p.setup(sim, index)
+	p.setup(sim, index, options.get("placer"))
 	var channels := int(PresentApplier.OUTPUT_ALL)
 	if not bool(options.get("drive_part_anim", true)):
 		channels &= ~PresentApplier.OUTPUT_PART_ANIM
@@ -220,6 +220,44 @@ func test_active_channel_poses_to_phase() -> void:
 	# 2 = the posed channel + the cold defensive release of the never-active
 	# channel 2 (a fresh plan clears controls a prior owner may have left).
 	assert_eq(_stat(p, "part_dispatches"), 2, "one channel posed, one cold release")
+
+
+func test_transform_presentation_advances_the_static_shadow_registry_once() -> void:
+	var model := _model()
+	var index := EntityIndex.new()
+	index.build([{ "model": model, "ref": {
+		"kind": MissionData.KIND_BUILDING, "index": 7, "bms_id": 501,
+		"group": -1, "team": -1, "position": Vector3.ZERO,
+	} }], [])
+	var placer := MissionObjectPlacer.new()
+	placer.register_static_instance(501, "Caster", 7,
+			Transform3D(Basis.IDENTITY, Vector3(-9, -9, -9)), true)
+	var p := _make_pass(index, null, { "placer": placer })
+	var snap := Snapshot.new()
+	snap.entities = [{
+		"kind": MissionData.KIND_BUILDING, "index": 7, "bms_id": 501,
+		"pos_x": 4.0, "pos_y": 5.0, "pos_z": 6.0, "yaw_deg": 30.0,
+	}]
+	var revision := placer.get_static_terrain_shadow_source_revision()
+	_present(p, snap)
+	assert_gt(placer.get_static_terrain_shadow_source_revision(), revision,
+			"the first live transform repairs the placement-time source snapshot")
+	var rows := placer.get_static_terrain_shadow_source_diagnostics()
+	assert_eq(rows.size(), 1)
+	if rows.size() != 1:
+		return
+	assert_eq((rows[0] as Dictionary).get("world_transform"), model.transform,
+			"the shadow source follows the exact transform applied to ObjectModel")
+	revision = placer.get_static_terrain_shadow_source_revision()
+	_present(p, snap)
+	assert_eq(placer.get_static_terrain_shadow_source_revision(), revision,
+			"an unchanged packed present row is a no-op for the terrain cache")
+	snap.entities[0]["pos_x"] = 8.0
+	_present(p, snap)
+	assert_gt(placer.get_static_terrain_shadow_source_revision(), revision,
+			"a later real movement invalidates the source exactly once")
+	rows = placer.get_static_terrain_shadow_source_diagnostics()
+	assert_eq((rows[0] as Dictionary).get("world_transform"), model.transform)
 
 
 func test_publication_ownership_writes_zero_and_releases_suppressed_channel() -> void:

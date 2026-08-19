@@ -279,6 +279,44 @@ func test_reset_runtime_state_restores_individual_visuals_and_retires_anchors() 
 			'reset is public and idempotent')
 
 
+func test_individual_husk_keeps_the_intact_models_mirror_population() -> void:
+	var fx := _make_fx()
+	var anchors := CaptureAnchors.new()
+	var placer := _husk_placer()
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var intact := ObjectModel.new()
+	intact.mirror_reflected = true
+	container.add_child(intact)
+	var index := _index_of([_entry(intact, 41)])
+	var events := {
+		'husk_swaps': [{
+			'bms_id': 41,
+			'item_id': BUGGY_ITEM_ID,
+		}],
+	}
+	var presenter := DestructionPresentPass.new()
+	presenter.setup(null, container, index, placer, _item_db, anchors,
+			Callable(), func(): return fx)
+
+	presenter.present_drained(events, [])
+
+	assert_eq(_husk_models(self).size(), 1)
+	if _husk_models(self).size() == 1:
+		var graft := _husk_models(self)[0] as ObjectModel
+		assert_true(graft.mirror_reflected,
+				"an individual husk inherits the intact entity's witnessed reflect bit")
+		var surfaces := graft.find_children("*", "MeshInstance3D", true, false)
+		assert_gt(surfaces.size(), 0, "the replacement fixture builds render surfaces")
+		for surface in surfaces:
+			var mesh := surface as MeshInstance3D
+			assert_ne(mesh.layers & Water.VISUAL_LAYER_WORLD, 0,
+					"the replacement is admitted by the above-water mirror camera")
+			assert_eq(mesh.layers & Water.VISUAL_LAYER_WORLD_NO_MIRROR, 0,
+					"the replacement leaves the main-scene-only population")
+	presenter.teardown()
+
+
 func test_reset_runtime_state_restores_batched_static_and_removes_husk_graft() -> void:
 	var fx := _make_fx()
 	var anchors := CaptureAnchors.new()
@@ -286,7 +324,7 @@ func test_reset_runtime_state_restores_batched_static_and_removes_husk_graft() -
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var placed := Transform3D(Basis.IDENTITY, Vector3(9, 8, 7))
-	placer.register_static_instance(77, 'StaticProp', 0, placed, true)
+	placer.register_static_instance(77, 'StaticProp', 0, placed, true, true)
 	var events := {
 		'husk_swaps': [{
 			'bms_id': 77,
@@ -305,6 +343,10 @@ func test_reset_runtime_state_restores_batched_static_and_removes_husk_graft() -
 	assert_eq(graft.transform, placed)
 	assert_true(graft.is_static_shadow_caster_enabled(),
 			"the batched husk inherits the carved slot's static-caster admission")
+	assert_true(bool(graft.get("mirror_reflected")),
+			"the husk keeps the carved slot's reflect policy: destruction "
+			+ "never clears entity flag 0x400 [orig: Entity_SpawnFromBMSRecord "
+			+ "@ 0x40ed1d..0x40ed2b]")
 
 	presenter.reset_runtime_state()
 

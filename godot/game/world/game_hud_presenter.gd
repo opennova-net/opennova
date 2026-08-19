@@ -14,6 +14,8 @@ extends Node
 const HudSightsCardScript := preload("res://game/world/hud_sights_card.gd")
 const PlayerViewEffectsScript := preload("res://game/world/player_view_effects.gd")
 const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
+const HudHiddenCaptureWitness := preload(
+		"res://game/world/hud_hidden_capture_witness.gd")
 
 var _world: GameWorld = null
 var _player_presenter = null     # LocalPlayerPresenter (reserved for the weapon-round anchors)
@@ -62,10 +64,16 @@ var _hud_color_was_down := false
 # level @0x55154d, saved @0x54c80d; the level drives
 # CRenderState_SetLayerVisibility @0x59B0F0]
 const HUD_DETAIL_CONFIG_KEY := "hud_detail"
+const HUD_HIDDEN_CAPTURE_DETAIL_LEVEL := 3
 var _hud_detail_level: int = clampi(
 		int(ConfigStore.read(HUD_COLOR_CONFIG_PATH, HUD_COLOR_SECTION,
 				HUD_DETAIL_CONFIG_KEY, 0)), 0, 3)
 var _hud_detail_was_down := false
+# Render-comparison declutter is a reversible runtime transaction. It must not
+# share set_hud_detail_level(), because that public gameplay action faithfully
+# persists the user's cfg token.
+var _hud_hidden_capture_active := false
+var _hud_hidden_saved_detail_level := 0
 # The showhud 2-bit FP-view flags, session state like retail's process-lifetime
 # global. Bit 0 = the FP gun/viewmodel draw, bit 1 = the corner spinmap block;
 # default 3 = both (the cfg gun-visible option writes 3/2). [orig:
@@ -135,6 +143,7 @@ func setup(world, player_presenter_in, ui_parent: Node) -> void:
 ## with it), its caches, the per-mission string table, and the mission-effects
 ## tap (the built menu-era teardown main_game carried).
 func teardown() -> void:
+	finish_hud_hidden_capture()
 	if _game_hud != null:
 		_game_hud.queue_free()
 		_game_hud = null
@@ -194,6 +203,8 @@ func _ensure_game_hud() -> void:
 	_view_effects.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_game_hud.add_child(_view_effects, false, Node.INTERNAL_MODE_BACK)
 	_view_effects.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_view_effects.set_environment(
+			_world.get_environment_node() if _world != null else null)
 	_sights_card = HudSightsCardScript.new()
 	_sights_card.name = "SightsCard"
 	_sights_card.show_behind_parent = true
@@ -875,6 +886,69 @@ func set_hud_detail_level(level: int) -> void:
 
 func hud_detail_level() -> int:
 	return _hud_detail_level
+
+
+## Temporarily apply retail's blank HUD declutter level without writing the
+## user's settings.cfg. The overlay, its PlayerViewEffects child, and the
+## shell HUD CanvasLayer stay mounted and active; only compiled gameplay HUD
+## commands are decluttered. Pair with finish_hud_hidden_capture().
+func begin_hud_hidden_capture() -> Error:
+	if _hud_hidden_capture_active:
+		return ERR_BUSY
+	if _game_hud == null or not is_instance_valid(_game_hud) \
+			or _view_effects == null or not is_instance_valid(_view_effects) \
+			or _sights_card == null or not is_instance_valid(_sights_card):
+		return ERR_UNCONFIGURED
+	_hud_hidden_saved_detail_level = _hud_detail_level
+	_hud_hidden_capture_active = true
+	_hud_detail_level = HUD_HIDDEN_CAPTURE_DETAIL_LEVEL
+	_game_hud.set_hud_detail_level(_hud_detail_level)
+	return OK
+
+
+## Idempotent capture cleanup: restore the exact in-memory level that was
+## active before capture, again without touching the persisted cfg token.
+func finish_hud_hidden_capture() -> void:
+	if not _hud_hidden_capture_active:
+		return
+	_hud_hidden_capture_active = false
+	_hud_detail_level = clampi(_hud_hidden_saved_detail_level, 0, 3)
+	if _game_hud != null and is_instance_valid(_game_hud):
+		_game_hud.set_hud_detail_level(_hud_detail_level)
+
+
+## Semantic presentation witness for a HUD-hidden capture. This compiles the
+## live overlay and observes every gameplay draw family instead of inferring
+## hidden state from the requested declutter number.
+func hud_hidden_capture_witness() -> HudHiddenCaptureWitness:
+	var witness := HudHiddenCaptureWitness.new()
+	if not _hud_hidden_capture_active:
+		witness.error = "HUD-hidden capture is not active"
+		return witness
+	if _game_hud == null or not is_instance_valid(_game_hud):
+		witness.error = "gameplay HUD is unavailable"
+		return witness
+	var stats: Dictionary = _game_hud.get_draw_list_stats()
+	var gameplay_draw_count := 0
+	for key in [
+		"quads", "tris", "lines", "glyphs", "underlines", "elements_drawn",
+	]:
+		gameplay_draw_count += int(stats.get(key, 0))
+	var map_active := bool(stats.get("map_visible", false))
+	# Fail closed against a stale native extension: absence of the independent
+	# large-map field is treated as active, never as safely hidden.
+	var big_map_active := bool(stats.get("big_map_visible", true))
+	witness.hud_detail_level = int(_game_hud.get_hud_detail_level())
+	witness.gameplay_hud_visible = gameplay_draw_count > 0 \
+			or map_active or big_map_active
+	witness.player_view_effects_active = _view_effects != null \
+			and is_instance_valid(_view_effects) \
+			and _view_effects.is_visible_in_tree()
+	witness.ads_active = _sights_card != null \
+			and is_instance_valid(_sights_card) \
+			and bool(_sights_card.is_card_up())
+	witness.big_map_active = big_map_active
+	return witness
 
 
 ## The death-screen edge forces the declutter level to max through the same

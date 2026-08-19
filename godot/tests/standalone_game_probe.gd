@@ -19,7 +19,8 @@ static func boot(
 		resource_dir: String,
 		mission_name: String,
 		expansion: String = "",
-		saved_mission_path: String = ""
+		saved_mission_path: String = "",
+		local_player_profile: Dictionary = {}
 ) -> Dictionary:
 	var dir: String = resource_dir.strip_edges()
 	var bms: String = mission_name.strip_edges().replace("\\", "/")
@@ -61,6 +62,15 @@ static func boot(
 	if world == null or camera == null or game.current_resource_root() == null:
 		game.queue_free()
 		return {"error": "MainGame failed to mount the requested runtime root"}
+	if not local_player_profile.is_empty():
+		if not game.has_method("set_local_player_profile"):
+			game.queue_free()
+			return {"error": "MainGame cannot install the requested local-player profile"}
+		# Stage the exact comparison kit before the mission load begins. This is
+		# the same public PLAYER_INFO -> spawn-loadout seam used by normal play;
+		# it avoids a post-spawn armory mutation and lets the first viewmodel,
+		# inventory, clip ring, and HUD all originate from one production spawn.
+		game.set_local_player_profile(local_player_profile)
 
 	var load_error: Array[String] = [""]
 	world.load_failed.connect(
@@ -84,6 +94,18 @@ static func boot(
 		if Time.get_ticks_msec() - started > LOAD_TIMEOUT_MSEC:
 			game.queue_free()
 			return {"error": "timed out loading %s" % bms}
+
+	# A loaded simulation is not yet a capturable presentation: single-player
+	# missions with custom art pause on the start-mission splash and keep the
+	# default shell camera alive. Leave that gate through MainGame's public seam,
+	# then wait until the normal reveal has placed the gameplay camera.
+	while game.is_world_loading():
+		game.dismiss_start_mission_splash()
+		await mount.get_tree().process_frame
+		if Time.get_ticks_msec() - started > LOAD_TIMEOUT_MSEC:
+			game.queue_free()
+			return {"error": "timed out dismissing the start splash for %s" % bms}
+	await mount.get_tree().process_frame
 
 	return {
 		"error": "",

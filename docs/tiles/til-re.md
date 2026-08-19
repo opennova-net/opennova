@@ -25,6 +25,7 @@ the format and transforms against the **retail** render path
 | Flip/rotate flags (0x01/0x02/0x04) | **MATCHING (rotate direction corrected 2026-07-15, D-TIL-2)** | `render_water_quad @ 0x604700`: `flags & 1` swaps U (@ 0x604782), `& 2` swaps V (@ 0x6047a9), `& 4` rotates the UV quad 90° **CCW** via the corner cycle `NW←NE, NE←SE, SE←SW, SW←NW` (@ 0x6047d4..0x604806) = per-corner `(u,v) → (1−v, u)`. The reimpl's prior `(v, 1−u)` was the CW transpose — every ROTATE_90 tile drew 180° off (visible as disoriented tire-track tiles on 00TRa) |
 | Half-texel UV shift | **MATCHING** | retail `u += ±0.5·flt_319F7C8`, `v += ±0.5·flt_319F7CC` (one uniform sign pair from the post-flag corner min/max comparison, applied to all four corners), like `til_build_entry_render_uv_quad`'s half-texel |
 | Z world-convention negation | **MATCHING** | retail stores `z` and reads `-z` (`waterOverlayCount = -*(v20-1)`); our `til_world_z_from_fixed` returns `-z_fixed/…` |
+| Tile-cache render-target alpha | **FIXED 2026-08-17 (D-TIL-3)** | base pass clears A; mode `0x631` blends overlay RGBA with `SRCALPHA/INVSRCALPHA`; the later DOT3 pass is additive `ONE/ONE`. The page composer formerly blended RGB only, leaving opaque CP12 road tiles at terrain-light A instead of retail's saturated A |
 | 128-entry tile cache (LRU) | **MATCHING** | `dword_319A2E4` 128-slot cache, LRU eviction by `dword_319FC04 - age`, matching the reference note (128-LRU) |
 | OUTLINE flag (0x08) | **FIXED (faithful) 2026-07-05** | D-TIL-1 — retail JO renders no outline; neither do we |
 
@@ -35,11 +36,12 @@ data streamed S2C by `serialize_terrain_tiles @ 0x6080F0` (§5.37, D-NET-83). Ea
 12-B entry, when its fixed-point AABB (`x .. x+0x100000`, `z .. z+0x100000`,
 `0x100000` = one 16-unit cell) intersects the sector, is drawn as a
 **water quad** via `render_water_quad(uv, pos, PolyTrn_TerrainTintHalf, flags)` —
-the HALF terrain tint (env #19) applied under the terrain's MODULATE combine. The
-render marches the tile-sized quad, resolves the atlas cell from `tile_index`, and
+the HALF terrain tint (env #19) copied into vertex diffuse and applied under the
+terrain's MODULATE2X combine. The render marches the tile-sized quad, resolves
+the atlas cell from `tile_index`, and
 applies the flip/rotate flags to the UV corners.
 
-`render_water_quad @ 0x604700`(`uv_coords`, `vertex_positions`, `height`,
+`render_water_quad @ 0x604700`(`uv_coords`, `vertex_positions`, `diffuse_packed`,
 `flip_flags`) — the flag transforms are exact:
 - `flip_flags & 1` → swap U0↔U2 (mirror horizontal) = `TIL_FLAG_FLIP_X`.
 - `flip_flags & 2` → swap V0↔V2 (mirror vertical) = `TIL_FLAG_FLIP_Y`.
@@ -57,6 +59,27 @@ applies the flip/rotate flags to the UV corners.
   space [`orig: PolyTrn_RenderTile overlay loop @ 0x60de23..0x60df1b`] — the
   stored `z` is negated on read, so the reimpl's `til_world_z_from_fixed` +16-unit
   span and north-edge `v_lo` both match retail exactly.
+
+The cache target's alpha is part of the overlay result, not a DOT3-only side
+channel. The base quad writes A=0 (`PolyTrn_RenderTile @ 0x60dce5`). Overlay
+view mode `0x631` decodes to `SRCALPHA/INVSRCALPHA`
+(`decode_blend_mode_to_d3d_states @ 0x680f2c..0x680f3a`), while its stage alpha
+selects texture A (`decode_mode_alpha_stage @ 0x680c8a..0x680c95`). The device
+applies no separate-alpha override (`GfxBlend_ApplyToDevice @ 0x6817d0`), so
+each draw updates target alpha as
+`srcA² + dstA·(1-srcA)`. Finally the tile DOT3 pass adds its light term with
+`ONE/ONE` blending (`PolyTrn_TileBakeDot3LightPass @ 0x60e385`). The exact pass
+order is therefore base RGB/A0 → ordered `.til` RGBA → additive DOT3 A. The
+asset-gated page-composer oracle pins this on CP12 entries 53 (tile 42, flags 7)
+and 1013 (tile 41, flags 7), whose sampled atlas alpha is fully opaque.
+
+The host also distinguishes "no authored overlays" from a broken overlay
+source. With tile overlays enabled, an unresolved TRN-declared tile-info source
+or a resolved/override table with entries sets `tile_overlay_required`. If its
+tilestrip cannot be converted, the page device rebuild fails instead of
+publishing a ready base-only texture array; an absent or empty authored tile
+table remains a valid base-only case. This is a fail-closed evidence invariant,
+not a claim about an additional retail rendering rule.
 
 ## Shared mission-tile foliage exclusion
 
@@ -81,6 +104,7 @@ exclusion, and listen-server initial state.
 
 | ID | Class | Disposition | One-liner |
 |---|---|---|---|
+| D-TIL-3 | A | **FIXED 2026-08-17** | The runtime page composer reproduced `.til` source-over in RGB but preserved bare-ground DOT3 A. Retail blends all four target channels before additively drawing DOT3, so CP12's opaque road-marking tiles saturate cache A and receive the witnessed lighting; composing ordered overlay A before the DOT3 add restores that result. |
 | D-TIL-2 | A | **FIXED 2026-07-15** | `ROTATE_90` rotated the wrong way: the reimpl applied the CW transpose `(v, 1−u)` where retail's corner cycle @ `render_water_quad 0x6047d4..0x604806` is the CCW `(1−v, u)` — every rotated tile rendered 180° off, scrambling multi-tile tire-track curves (user-reported on 00TRa). One shared helper (`til_transform_local_uv`) fixed; overlay bake, ONED preview, and the GDScript binding all inherit it. |
 | D-TIL-1 | B | **FIXED (faithful) 2026-07-05** | `TIL_FLAG_OUTLINE` (0x08): the LINELIST perimeter-outline pass is **jodemo-only** (`Terrain_DrawTileOverlays2D @ 0x5C79C0`). Retail JO's tile-overlay render `render_water_quad @ 0x604700` (via `PolyTrn_RenderTile @ 0x60df0d`) handles only bits 0/1/2 and draws a single TRIANGLESTRIP — no outline. Our code likewise **parses/preserves** the flag (in `TIL_FLAG_AUTHORED_MASK`, for round-trip) but renders no outline — so we already match retail JO (both omit it). Faithful, not a divergence; the flag is unconsumed-in-retail-JO (legitimately closed per the faithful-vs-open axis). |
 

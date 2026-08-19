@@ -68,6 +68,10 @@ struct ItemDeathTraits {
     // The piece model is huskFINAL first [orig: @ 0x4934af huskFinalModel ?:
     // huskModel], unlike the collision husk pick (@ 0x538720 husk first).
     int32_t husk_section_count = 0;
+    // The piece model's bound radius (units) — the death-flash light spawns
+    // at 2x this [orig: Entity_SpawnDeathPieces @ 0x49351a reads
+    // renderObj[5] off the huskFinal ?: husk pick]. 0 = model not loaded.
+    float husk_piece_bound_radius = 0.0f;
     // Per-section centers of the piece model (model-local, mission axes) —
     // baked into the piece spawn position through the complete authored pose
     // Rz(90-yaw) * Ry(-pitch) * Rx(roll)
@@ -223,10 +227,20 @@ struct HuskSwapEvent {
                                      // no node — the present pass grafts here)
 };
 
+// The death explosion flash for the presenter's light pool
+// [orig: Entity_SpawnDeathPieces @ 0x49351a — LightPool_SpawnGlowEffect at the
+// entity position, radius = 2x the piece model's bound radius, color 0xFFC080,
+// mode 2 / 31 ticks, corona disabled].
+struct DeathLightEvent {
+    Vec3 pos;
+    float radius = 0.0f;
+};
+
 struct DestructionEvents {
     std::vector<DestructionEffectEvent> effects;
     std::vector<DestructionSoundEvent> sounds;
     std::vector<HuskSwapEvent> husk_swaps;
+    std::vector<DeathLightEvent> death_lights;
     // Diagnostic counters (probes assert the legs actually ran).
     int32_t explosions_processed = 0;
     int32_t items_destroyed = 0;
@@ -238,6 +252,7 @@ struct DestructionEvents {
         effects.clear();
         sounds.clear();
         husk_swaps.clear();
+        death_lights.clear();
         debris_triangles = 0;
         glass_points = 0;
     }
@@ -251,7 +266,15 @@ inline constexpr const char *kSectionDebrisWoodEffect =
 inline constexpr const char *kGlassShatterEffects[4] = {
         "Effect_BldGlassExp", "Effect_BldPaperExp",
         "Effect_BldFireExp", "Effect_BldDustExp"};
-inline constexpr uint16_t kGlassShatterRollMax[4] = {33, 5, 5, 10};
+// The glass userpoint path rolls each effect's ALT probability column from the
+// surface-effect table (40 B rows {name[32], prob_main f32, prob_alt f32}) and
+// spawns on rand16 % 100 <= ftol(prob_alt * 100.0f) — float multiply then
+// TRUNCATION, so Glass 0.33f * 100 = 32.99998 gates at 32, not 33.
+// [orig: Effect_RollSurfaceEffectProbability @ 0x5CC1F0 scale @ 0x5CC25A;
+//  g_SurfaceEffectProbTable @ 0x8418B8; useAltProbability=1 pushes @
+//  0x5CF0B3/0x5CF0F4 in Terrain_SpawnEffectsAtUserPoint]
+inline constexpr float kGlassShatterAltProbability[4] = {
+        0.33f, 0.05f, 0.05f, 0.1f};
 
 // The wreck-fire random crackle, rolled per tick per burning wreck on the
 // world's rol-xor PRNG stand-in stream (the same generator as retail's

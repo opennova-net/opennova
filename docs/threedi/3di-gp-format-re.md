@@ -226,8 +226,11 @@ The global bus has 96 pairs. The even dword at
 `0x10000` is the exact 16.16 endpoint and negative values remain meaningful.
 The odd dword at `0x83FCEC + 8·ordinal` is adjacent state. PANM ignores it;
 controlled texture animation reads it to choose fractional-frame versus
-modulo-frame interpretation. No writer to that odd dword was found, so its
-static zero selects the fractional-frame branch. Integer consumers retain
+modulo-frame interpretation. No runtime writer to that odd dword was found,
+but the retail image statically initializes ordinals 92..95 (`TEX_TEAM`,
+`TEX_CAMO1/2/3`) to one and ordinals 0..91 to zero. The four texture selectors
+therefore use `value % frame_count`; ordinary controlled animations use the
+fractional-frame branch. Integer consumers retain
 two-operand `IMUL`'s wrapping low 32 bits before an arithmetic right shift
 rather than widening the product.
 
@@ -283,8 +286,8 @@ The producer census partitions all 96 ordinals without an unclassified tail:
 
 | Producer status | Count | Ordinals |
 |---|---:|---|
-| exact value/state projection hosted in its bounded semantic scope | 10 | **8, 54–56, 61–62, 71–72, 91–92** |
-| dedicated retail writer exists; exact original publisher remains open | 68 | **3–7, 9–10, 14–36, 41, 46–47, 52–53, 57–60, 63–70, 73–90, 93–95** |
+| exact value/state projection hosted in its bounded semantic scope | 13 | **8, 54–56, 61–62, 71–72, 91–95** |
+| dedicated retail writer exists; exact original publisher remains open | 65 | **3–7, 9–10, 14–36, 41, 46–47, 52–53, 57–60, 63–70, 73–90** |
 | no dedicated writer found; only the generic path can reach nonzero members | 18 | **0–2, 11–13, 37–40, 42–45, 48–51** |
 
 This is a producer-status partition, not a format-support partition: every one

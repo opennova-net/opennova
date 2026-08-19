@@ -1339,6 +1339,33 @@ func test_height_drift_counts_and_reground_grounds_markers() -> void:
 	assert_eq(controller.reconcile_with_terrain(), 0, "the applied re-ground settles the drift")
 
 
+func test_reground_syncs_the_static_shadow_source_registry() -> void:
+	# reground_ops feeds each moved non-marker into
+	# MissionObjectPlacer.update_static_terrain_shadow_source_transform so the
+	# native static-shadow registry follows authoring gestures; a silent no-op
+	# here would leave stale silhouettes under moved buildings.
+	var controller := _new_with_item_db()
+	var placer: MissionObjectPlacer = controller.get_placer()
+	assert_not_null(placer, "the authoring controller owns a real placer")
+	# The dvxi5 fixture root carries no .3di models; sources are recorded on
+	# the resolved-model path, so stage a real model under the fixture item's
+	# graphic name first.
+	var tower_data := ObjectData.new()
+	assert_eq(tower_data.open_file(ProjectSettings.globalize_path(
+			"res://../fixtures/threedi/3di3/House.3di")), OK)
+	assert_true(placer.register_object_data("GuardTwr1", tower_data))
+	assert_true(controller.place_entity_at_world(102001, Vector3(50, 10, -50)))
+	var rows: Array = placer.get_static_terrain_shadow_source_diagnostics()
+	assert_gt(rows.size(), 0,
+		"an authored building placement must record a static-shadow source")
+	var before := placer.get_static_terrain_shadow_source_revision()
+	_stub_drift(controller, 42.0)
+	assert_eq(controller.reconcile_with_terrain(), 1)
+	assert_eq(controller.reground_drifted(), 1)
+	assert_gt(placer.get_static_terrain_shadow_source_revision(), before,
+		"a re-grounded building must move its native static-shadow source")
+
+
 func test_reground_is_one_undo_step_and_undo_restores() -> void:
 	var controller := _new_with_item_db()
 	var mission := controller.get_mission()

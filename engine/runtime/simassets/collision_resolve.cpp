@@ -285,9 +285,17 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 					final_husk_m3 = deps.models.model_for(final_husk_name);
 			}
 			if (world::ItemDeathTraits *t =
-						world.item_death_traits.get_mutable(e->item_id))
+						world.item_death_traits.get_mutable(e->item_id)) {
 				t->husk_model_loaded =
 						first_husk_m3 != nullptr || final_husk_m3 != nullptr;
+				// The death-flash radius source is the PIECE model — huskFinal
+				// first [orig: @ 0x4934af huskFinalModel ?: huskModel].
+				const Threedi3di3 *piece_m3 =
+						final_husk_m3 != nullptr ? final_husk_m3 : first_husk_m3;
+				if (piece_m3 != nullptr && t->husk_piece_bound_radius <= 0.0f)
+					t->husk_piece_bound_radius =
+							model_bound_radius_from_3di(*piece_m3);
+			}
 			const std::string &husk_key = husk_name;
 			const Threedi3di3 *husk_m3 = first_husk_name.empty()
 					? final_husk_m3

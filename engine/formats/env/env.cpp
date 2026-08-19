@@ -195,6 +195,10 @@ Config make_default_config() {
 	return cfg;
 }
 
+float clamp_water_murk_upper(float value) {
+	return std::min(value, 0.99f);
+}
+
 bool load_env(std::istream &input, Config &out, std::string &error) {
 	// Semantic port of the line callback [orig: TimeOfDay_ParseProperty @ 0x57c590],
 	// invoked per tokenized line of .trn/.env. We do not emulate the fixed
@@ -348,9 +352,8 @@ bool load_env(std::istream &input, Config &out, std::string &error) {
 		} else if (key == "iris_center") {
 			out.iris_center = static_cast<float>(std::atof(value.c_str()));
 		} else if (key == "water_murk") {
-			// Engine clamps only the top (no lower bound)
-			// [orig: TimeOfDay_ParseProperty @ 0x57cba9].
-			out.water_murk = std::min(static_cast<float>(std::atof(value.c_str())), 0.99f);
+			out.water_murk = clamp_water_murk_upper(
+					static_cast<float>(std::atof(value.c_str())));
 		} else if (key == "advanced_clouds") {
 			out.advanced_clouds = std::atoi(value.c_str());
 		}

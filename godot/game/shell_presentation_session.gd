@@ -1,0 +1,199 @@
+class_name ShellPresentationSession
+extends RefCounted
+
+## Owns shell presentation visibility across menu entry, mission loading, and
+## reversible render captures. MainGame retains lifecycle state and public
+## callbacks; this module owns the CanvasItem mutations, capture validation,
+## and load-signal wiring that make each transition atomic.
+
+
+class SavedVisibility extends RefCounted:
+	var layer: CanvasLayer
+	var visible: bool
+
+	func _init(p_layer: CanvasLayer) -> void:
+		layer = p_layer
+		visible = p_layer.visible
+
+
+var _capture_active := false
+var _saved_visibility: Array[SavedVisibility] = []
+var _hud_hidden_capture_active := false
+var _saved_fps_label: CanvasItem = null
+var _saved_fps_visible := false
+
+
+## Hide the world and mounted HUD items before the menu is raised. This keeps
+## the pre-existing menu/load lifecycle policy separate from the reversible
+## layer-level transaction used by world-only captures below.
+func enter_menu(world: GameWorld, hud: CanvasLayer) -> void:
+	world.visible = false
+	_set_layer_children_visible(hud, false)
+
+
+## Every SP and network mission start crosses this presentation edge: only the
+## loading screen remains visible until the corresponding completion callback.
+## [orig: Game_StartMission -> render_loading_screen @ 0x521d10 /
+## LoadingScreen_UpdateAndPresent @ 0x586be0, released by
+## LoadingScreen_ReleaseEffect @ 0x525d52]
+func begin_world_load(
+		menu_shell: MenuShell,
+		world: GameWorld,
+		hud: CanvasLayer,
+		on_world_loaded: Callable,
+		on_load_failed: Callable) -> void:
+	menu_shell.hide_menu()
+	enter_menu(world, hud)
+	if not world.world_loaded.is_connected(on_world_loaded):
+		world.world_loaded.connect(on_world_loaded)
+	if not world.load_failed.is_connected(on_load_failed):
+		world.load_failed.connect(on_load_failed)
+
+
+## Complete the loading presentation and reveal the world and HUD together.
+func finish_world_load(
+		world_load: WorldLoadCoordinator,
+		world: GameWorld,
+		hud: CanvasLayer) -> void:
+	world_load.finish_presentation()
+	world.visible = true
+	_set_layer_children_visible(hud, true)
+
+
+func begin_world_only_capture(
+		shell: Node,
+		hud: CanvasLayer,
+		menu_layer: CanvasLayer,
+		camera: Camera3D) -> Error:
+	if _capture_active:
+		return ERR_BUSY
+	if hud == null or not is_instance_valid(hud) \
+			or menu_layer == null or not is_instance_valid(menu_layer):
+		return ERR_UNCONFIGURED
+
+	_saved_visibility.clear()
+	var layers: Array[CanvasLayer] = []
+	_append_layer_tree(hud, layers)
+	_append_layer_tree(menu_layer, layers)
+	var viewmodel_layer := _find_viewmodel_layer(shell, camera)
+	if viewmodel_layer != null:
+		_append_layer_tree(viewmodel_layer, layers)
+	for layer in layers:
+		_saved_visibility.append(SavedVisibility.new(layer))
+
+	_capture_active = true
+	for saved in _saved_visibility:
+		# Hide at the layer boundary. This also suppresses nested CanvasLayers
+		# (notably DebugOverlay) while leaving descendant state free to follow a
+		# real menu/HUD transition during the asynchronous capture.
+		saved.layer.visible = false
+	return OK
+
+
+## Idempotent so capture error and teardown paths can share cleanup.
+func finish_world_only_capture() -> void:
+	if not _capture_active:
+		return
+	for saved in _saved_visibility:
+		if is_instance_valid(saved.layer):
+			saved.layer.visible = saved.visible
+	_saved_visibility.clear()
+	_capture_active = false
+
+
+func begin_hud_hidden_capture(
+		hud_presenter: GameHudPresenter,
+		hud: CanvasLayer) -> Error:
+	if _hud_hidden_capture_active:
+		return ERR_BUSY
+	if hud_presenter == null or not is_instance_valid(hud_presenter) \
+			or hud == null or not is_instance_valid(hud):
+		return ERR_UNCONFIGURED
+	var fps_label := hud.get_node_or_null("FpsLabel") as CanvasItem
+	if fps_label == null or not is_instance_valid(fps_label):
+		return ERR_UNCONFIGURED
+	var error := hud_presenter.begin_hud_hidden_capture()
+	if error != OK:
+		return error
+	_saved_fps_label = fps_label
+	_saved_fps_visible = fps_label.visible
+	_hud_hidden_capture_active = true
+	fps_label.visible = false
+	return OK
+
+
+func finish_hud_hidden_capture(hud_presenter: GameHudPresenter) -> void:
+	if not _hud_hidden_capture_active:
+		return
+	if hud_presenter != null and is_instance_valid(hud_presenter):
+		hud_presenter.finish_hud_hidden_capture()
+	if _saved_fps_label != null and is_instance_valid(_saved_fps_label):
+		_saved_fps_label.visible = _saved_fps_visible
+	_saved_fps_label = null
+	_saved_fps_visible = false
+	_hud_hidden_capture_active = false
+
+
+func hud_hidden_capture_witness(
+		hud_presenter: GameHudPresenter,
+		hud: CanvasLayer) -> HudHiddenCaptureWitness:
+	if not _hud_hidden_capture_active:
+		var inactive := HudHiddenCaptureWitness.new()
+		inactive.error = "HUD-hidden capture presentation is not active"
+		return inactive
+	if hud_presenter == null or not is_instance_valid(hud_presenter) \
+			or hud == null or not is_instance_valid(hud):
+		var unavailable := HudHiddenCaptureWitness.new()
+		unavailable.error = "HUD-hidden capture presentation is unconfigured"
+		return unavailable
+	var witness := hud_presenter.hud_hidden_capture_witness()
+	if witness.is_valid():
+		witness.hud_canvas_layer_active = hud.visible
+		if _saved_fps_label == null or not is_instance_valid(_saved_fps_label):
+			witness.error = "FPS counter disappeared during HUD-hidden capture"
+		else:
+			witness.fps_counter_visible = _saved_fps_label.visible
+			if witness.fps_counter_visible:
+				witness.error = "FPS counter is visible during HUD-hidden capture"
+	return witness
+
+
+static func _set_layer_children_visible(layer: CanvasLayer, visible: bool) -> void:
+	if layer == null or not is_instance_valid(layer):
+		return
+	for child in layer.get_children():
+		if child is CanvasItem:
+			(child as CanvasItem).visible = visible
+
+
+## CanvasLayer visibility deliberately does not propagate to CanvasLayer
+## descendants, so each nested layer is an independent capture boundary.
+static func _append_layer_tree(
+		layer: CanvasLayer,
+		out: Array[CanvasLayer]) -> void:
+	if layer == null or out.has(layer):
+		return
+	out.append(layer)
+	_collect_nested_layers(layer, out)
+
+
+static func _collect_nested_layers(
+		node: Node,
+		out: Array[CanvasLayer]) -> void:
+	for child in node.get_children():
+		if child is CanvasLayer and not out.has(child as CanvasLayer):
+			out.append(child as CanvasLayer)
+		_collect_nested_layers(child, out)
+
+
+static func _find_viewmodel_layer(
+		shell: Node, camera: Camera3D) -> CanvasLayer:
+	if camera != null and is_instance_valid(camera) \
+			and camera.get_viewport() != null:
+		var viewport_layer := camera.get_viewport().get_node_or_null(
+				"ViewmodelPass") as CanvasLayer
+		if viewport_layer != null:
+			return viewport_layer
+	if shell != null and is_instance_valid(shell):
+		return shell.find_child("ViewmodelPass", true, false) as CanvasLayer
+	return null

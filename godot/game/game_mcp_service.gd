@@ -68,7 +68,11 @@ func setup_from_metadata(adapter: GameMcpAdapter, metadata: Dictionary) -> Error
 	server.name = "GameMcpServer"
 	server.server_name = "opennova-game"
 	server.server_title = "OpenNova Game Runtime"
-	server.instructions = "Inspect and control the editor-launched real game. "
+	server.instructions = (
+			"Inspect and control the editor-launched real game. For visual parity, "
+			+ "wait until MainGame.is_world_loading() is false and a gameplay camera "
+			+ "is current, inspect game_render_diagnostics, then use "
+			+ "game_capture_bundle for a lossless PNG and correlated JSON sidecar.")
 	server.context_factory = _make_context
 	server.log_sink = _on_server_log
 	add_child(server)

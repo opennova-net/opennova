@@ -1,6 +1,9 @@
 #include "env/nova_water.h"
 
 #include <godot_cpp/classes/array_mesh.hpp>
+#include <godot_cpp/classes/canvas_item_material.hpp>
+#include <godot_cpp/classes/canvas_layer.hpp>
+#include <godot_cpp/classes/color_rect.hpp>
 #include <godot_cpp/classes/geometry_instance3d.hpp>
 #include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
@@ -406,13 +409,36 @@ void Water::build() {
 		add_child(reflection_viewport_);
 		reflection_camera_ = memnew(Camera3D);
 		reflection_camera_->set_name("WaterReflectionCamera");
-		// The witnessed mirror scene: sky/terrain/celestials/foliage, world
-		// entities filtered to vehicles, no water surface, no FP overlay, no
-		// person — including the local body. _update_reflection_camera
-		// re-adds WORLD_NO_MIRROR for below-water views.
+		// The witnessed mirror scene: sky/terrain/celestials/foliage plus the
+		// flag-0x400 world population — vehicles by item type and records
+		// whose BMS attribute authors Reflective. It has no water surface, FP
+		// overlay, or player/person render leg. _update_reflection_camera
+		// re-adds WORLD_NO_MIRROR below water, where the retail collectors
+		// run unfiltered.
 		reflection_camera_->set_cull_mask(REFLECTION_CULL_MASK);
 		reflection_viewport_->add_child(reflection_camera_);
 		reflection_camera_->make_current();
+		// The witnessed post-scene dim: retail multiplies the finished mirror
+		// RTT by 64/255 before the water shader ever samples it. This
+		// viewport's canvas pass composites over its 3D scene, so a
+		// full-target multiply ColorRect is the same one-quad structural
+		// port (constant + witness map: env/water_mirror.h
+		// kReflectionDimFactor; celestial-after-dim residual noted there).
+		CanvasLayer *dim_layer = memnew(CanvasLayer);
+		dim_layer->set_name("ReflectionDimLayer");
+		reflection_viewport_->add_child(dim_layer);
+		ColorRect *dim_rect = memnew(ColorRect);
+		dim_rect->set_name("ReflectionDim");
+		Ref<CanvasItemMaterial> dim_material;
+		dim_material.instantiate();
+		dim_material->set_blend_mode(CanvasItemMaterial::BLEND_MODE_MUL);
+		dim_rect->set_material(dim_material);
+		const float dim = opennova::env::kReflectionDimFactor;
+		dim_rect->set_color(Color(dim, dim, dim, 1.0f));
+		dim_rect->set_size(Vector2(
+				static_cast<float>(opennova::env::kReflectionRttSize),
+				static_cast<float>(opennova::env::kReflectionRttSize)));
+		dim_layer->add_child(dim_rect);
 	}
 	reflection_viewport_->set_update_mode(SubViewport::UPDATE_DISABLED);
 	// Hold the RTT in a named Ref: passing the get_texture() temporary
@@ -511,7 +537,7 @@ void Water::advance_frame(double p_delta) {
 		}
 		water_material_->set_shader_parameter("u_water_uv", uv_state);
 		water_material_->set_shader_parameter("u_fog_color",
-				env->get_fog_color());
+				env->get_scene_fog_color());
 		water_material_->set_shader_parameter("u_water_murk", murk);
 	}
 

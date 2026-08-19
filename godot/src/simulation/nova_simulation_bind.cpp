@@ -223,6 +223,8 @@ void Simulation::_bind_methods() {
 					"pos_raw_units", "tpos_raw_units"),
 			&Simulation::local_player_viewmodel_bias_view_units);
 	ClassDB::bind_method(D_METHOD("get_tracer_trails"), &Simulation::get_tracer_trails);
+	ClassDB::bind_method(D_METHOD("get_round_glow_rows"),
+			&Simulation::get_round_glow_rows);
 	ClassDB::bind_static_method("Simulation",
 			D_METHOD("compile_tracer_ribbons", "rows", "camera"),
 			&Simulation::compile_tracer_ribbons);

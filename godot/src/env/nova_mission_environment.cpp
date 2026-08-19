@@ -1,5 +1,7 @@
 #include "env/nova_mission_environment.h"
 
+#include <environment/water_frame.h>
+
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
@@ -95,6 +97,28 @@ void MissionEnvironment::_bind_methods() {
 			&MissionEnvironment::is_weather_driven);
 	ClassDB::bind_method(D_METHOD("set_nvg_view", "active", "gain"),
 			&MissionEnvironment::set_nvg_view);
+	ClassDB::bind_method(D_METHOD("set_underwater_view", "underwater"),
+			&MissionEnvironment::set_underwater_view);
+	ClassDB::bind_method(D_METHOD("is_underwater_view"),
+			&MissionEnvironment::is_underwater_view);
+	ClassDB::bind_method(D_METHOD("set_underwater_overlay_view", "underwater"),
+			&MissionEnvironment::set_underwater_overlay_view);
+	ClassDB::bind_method(D_METHOD("apply_render_eye", "eye_y", "water_height",
+			"water_active"), &MissionEnvironment::apply_render_eye);
+	ClassDB::bind_method(D_METHOD("is_underwater_overlay_view"),
+			&MissionEnvironment::is_underwater_overlay_view);
+	ClassDB::bind_method(D_METHOD("get_underwater_overlay_color"),
+			&MissionEnvironment::get_underwater_overlay_color);
+	ClassDB::bind_method(D_METHOD("get_underwater_overlay_alpha_byte"),
+			&MissionEnvironment::get_underwater_overlay_alpha_byte);
+	ClassDB::bind_method(D_METHOD("get_scene_fog_color"),
+			&MissionEnvironment::get_scene_fog_color);
+	ClassDB::bind_method(D_METHOD("get_scene_fog_start"),
+			&MissionEnvironment::get_scene_fog_start);
+	ClassDB::bind_method(D_METHOD("get_scene_fog_end"),
+			&MissionEnvironment::get_scene_fog_end);
+	ClassDB::bind_method(D_METHOD("get_scene_fog_type"),
+			&MissionEnvironment::get_scene_fog_type);
 
 	ClassDB::bind_method(D_METHOD("get_sun_light"),
 			&MissionEnvironment::get_sun_light);
@@ -213,6 +237,8 @@ void MissionEnvironment::_bind_methods() {
 			&MissionEnvironment::set_color_src_gain);
 	ClassDB::bind_method(D_METHOD("get_env_generation"),
 			&MissionEnvironment::get_env_generation);
+	ClassDB::bind_method(D_METHOD("get_scene_generation"),
+			&MissionEnvironment::get_scene_generation);
 
 	ClassDB::bind_method(D_METHOD("get_fog_distance"),
 			&MissionEnvironment::get_fog_distance);
@@ -253,6 +279,7 @@ void MissionEnvironment::_bind_methods() {
 			&MissionEnvironment::advance_frame);
 
 	ADD_SIGNAL(MethodInfo("env_generation_changed"));
+	ADD_SIGNAL(MethodInfo("underwater_overlay_changed"));
 
 	ClassDB::bind_integer_constant(get_class_static(), "", "HOURS_PER_DAY", 24);
 	ClassDB::bind_integer_constant(get_class_static(), "", "HHMM_DAY", 2400);
@@ -393,12 +420,12 @@ void MissionEnvironment::_after_tod_update() {
 	}
 }
 
-void MissionEnvironment::flush_publication() {
+void MissionEnvironment::flush_publication(bool p_pass_changed) {
 	if (state_.env_generation() == last_published_generation_) {
 		return;
 	}
 	last_published_generation_ = state_.env_generation();
-	light_state_->publish(_build_light_values());
+	light_state_->publish(_build_light_values(), p_pass_changed);
 	emit_signal("env_generation_changed");
 }
 
@@ -409,7 +436,7 @@ Ref<EnvLightValues> MissionEnvironment::_build_light_values() const {
 		static_cast<float>(defaults->dir.x),
 		static_cast<float>(defaults->dir.y),
 		static_cast<float>(defaults->dir.z)};
-	if (!state_.build_light_values(default_dir, out)) {
+	if (!state_.build_light_values(default_dir, out, underwater_view_)) {
 		return defaults;
 	}
 	Ref<EnvLightValues> v;
@@ -432,7 +459,7 @@ Ref<EnvLightValues> MissionEnvironment::_build_light_values() const {
 void MissionEnvironment::write_shader_globals() {
 	RenderingServer *rs = RenderingServer::get_singleton();
 	const opennova::env::EnvShaderGlobals globals =
-			state_.build_shader_globals();
+			state_.build_shader_globals(underwater_view_);
 	rs->global_shader_parameter_set("opennova_fill_light",
 			to_vector3(globals.fill_light));
 	rs->global_shader_parameter_set("opennova_sun_light",
@@ -450,6 +477,17 @@ void MissionEnvironment::write_shader_globals() {
 			globals.wind_sway_amount);
 	rs->global_shader_parameter_set("opennova_wind_sway_phase",
 			globals.wind_sway_phase);
+}
+
+void MissionEnvironment::_write_scene_fog_globals() {
+	const opennova::env::SceneFogValues fog =
+			state_.build_scene_fog(underwater_view_);
+	RenderingServer *rs = RenderingServer::get_singleton();
+	rs->global_shader_parameter_set("opennova_fog_color",
+			to_vector3(fog.color));
+	rs->global_shader_parameter_set("opennova_fog_end", fog.end);
+	rs->global_shader_parameter_set("opennova_fog_start", fog.start);
+	rs->global_shader_parameter_set("opennova_fog_type", fog.type);
 }
 
 // --- mission clock ----------------------------------------------------------
@@ -563,6 +601,68 @@ void MissionEnvironment::set_nvg_view(bool p_active, int p_gain) {
 			to_vector3(state_.fill_light()));
 	rs->global_shader_parameter_set("opennova_sky_ambient",
 			to_vector3(state_.sky_ambient()));
+}
+
+void MissionEnvironment::set_underwater_view(bool p_underwater) {
+	if (underwater_view_ == p_underwater) {
+		return;
+	}
+	underwater_view_ = p_underwater;
+	// The authored/weather state did not change, but every retained material
+	// and immutable particle snapshot must observe this pass transition.
+	last_published_generation_ = -1;
+	flush_publication(true);
+	// Foliage submits before Weather's frame tail, so commit the selected fog
+	// immediately. Weather is pass-aware too and preserves it on later writes.
+	_write_scene_fog_globals();
+}
+
+void MissionEnvironment::apply_render_eye(float p_eye_y,
+		float p_water_height, bool p_water_active) {
+	// One sampled eye decides both flags; the strict-vs-inclusive comparison
+	// semantics live in the engine (see env::EnvironmentState::
+	// classify_render_eye — the fog selector is strict, the murk scissor
+	// includes exact waterline equality).
+	const opennova::env::EnvironmentState::RenderEyeClassification eye =
+			opennova::env::EnvironmentState::classify_render_eye(
+					p_eye_y, p_water_height, p_water_active);
+	set_underwater_view(eye.underwater_view);
+	set_underwater_overlay_view(eye.underwater_overlay_view);
+}
+
+void MissionEnvironment::set_underwater_overlay_view(bool p_underwater) {
+	if (underwater_overlay_view_ == p_underwater) {
+		return;
+	}
+	underwater_overlay_view_ = p_underwater;
+	emit_signal("underwater_overlay_changed");
+}
+
+Vector3 MissionEnvironment::get_underwater_overlay_color() const {
+	// The overlay always uses Env_WaterColorLit, including exact waterline
+	// equality where the independently selected device-fog pass remains dry.
+	return to_vector3(state_.build_scene_fog(true).color);
+}
+
+int MissionEnvironment::get_underwater_overlay_alpha_byte() const {
+	return static_cast<int>(opennova::env::underwater_murk_overlay_alpha_byte(
+			state_.water_murk()));
+}
+
+Vector3 MissionEnvironment::get_scene_fog_color() const {
+	return to_vector3(state_.build_scene_fog(underwater_view_).color);
+}
+
+float MissionEnvironment::get_scene_fog_start() const {
+	return state_.build_scene_fog(underwater_view_).start;
+}
+
+float MissionEnvironment::get_scene_fog_end() const {
+	return state_.build_scene_fog(underwater_view_).end;
+}
+
+int MissionEnvironment::get_scene_fog_type() const {
+	return state_.build_scene_fog(underwater_view_).type;
 }
 
 // --- reads ------------------------------------------------------------------
@@ -720,7 +820,7 @@ void MissionEnvironment::apply_terrain_uniforms(
 		return;
 	}
 	const opennova::env::TerrainEnvUniforms uniforms =
-			state_.build_terrain_uniforms();
+			state_.build_terrain_uniforms(underwater_view_);
 	Ref<ShaderMaterial> material = p_material;
 	material->set_shader_parameter("u_sun_light",
 			to_vector3(uniforms.sun_light));

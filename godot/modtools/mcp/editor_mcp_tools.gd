@@ -26,7 +26,7 @@ Conventions:
 Typical flows:
 - Study assets: list_assets(kind=...) -> describe_asset(path) / analyze_mission(path) / analyze_menu(path) -> read_file for raw bytes.
 - Author a mission: open_in_workspace(workspace="mission", path=...) -> list_items -> place_entities (grounded for you) -> edit_waypoint_path -> set_mission_header -> set_camera + screenshot to inspect. Repair floating/sunken layouts with reground_mission.
-- Test in the real game: run_game(op="start", mode="game"|"mission") -> game_state / game_debug / game_screenshot -> run_game(op="stop").
+- Test in the real game: run_game(op="start", mode="game"|"mission") -> ensure any player-paced start-mission splash has been dismissed (captures fail closed while it owns the viewport) -> game_render_diagnostics -> game_capture_bundle for a lossless PNG+state sidecar (game_state/game_debug/game_screenshot remain available) -> run_game(op="stop").
 - Author a menu: open_in_workspace(workspace="mnu", path=...) or menu_tabs(op="new") -> get_menu -> add_menu_widgets / edit_menu_widget / set_widget_actions -> menu_screenshot to look -> preview_menu to click through the navigation. describe_api(topic="menus") has the vocabulary.
 
 Be a good guest: narrate risky operations with show_status_message; the human's unsaved work matters."""

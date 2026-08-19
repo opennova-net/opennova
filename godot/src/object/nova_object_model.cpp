@@ -76,16 +76,22 @@ Ref<EnvLightValues> EnvLightValues::retail_noon_defaults() {
 }
 
 void EnvLightState::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("publish", "values"), &EnvLightState::publish);
+	ClassDB::bind_method(D_METHOD("publish", "values", "pass_changed"),
+			&EnvLightState::publish, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("get_values"), &EnvLightState::get_values);
 	ClassDB::bind_method(D_METHOD("get_generation"), &EnvLightState::get_generation);
 	ADD_SIGNAL(MethodInfo("changed"));
+	ADD_SIGNAL(MethodInfo("pass_changed"));
 }
 
-void EnvLightState::publish(const Ref<EnvLightValues> &p_values) {
+void EnvLightState::publish(const Ref<EnvLightValues> &p_values,
+		bool p_pass_changed) {
 	values_ = p_values;
 	++generation_;
 	emit_signal("changed");
+	if (p_pass_changed) {
+		emit_signal("pass_changed");
+	}
 }
 
 void PanmClock::_bind_methods() {
@@ -269,8 +275,13 @@ void ObjectModel::set_environment_state(const Ref<EnvLightState> &p_state) {
 	// (values + generation + a changed signal); the model never holds the
 	// environment object itself.
 	const Callable changed = callable_mp(this, &ObjectModel::on_env_generation_changed);
+	const Callable pass_changed = callable_mp(this, &ObjectModel::on_env_pass_changed);
 	if (env_state_.is_valid() && env_state_->is_connected("changed", changed)) {
 		env_state_->disconnect("changed", changed);
+	}
+	if (env_state_.is_valid() &&
+			env_state_->is_connected("pass_changed", pass_changed)) {
+		env_state_->disconnect("pass_changed", pass_changed);
 	}
 	env_state_ = p_state;
 	last_env_gen_ = -1;
@@ -278,6 +289,7 @@ void ObjectModel::set_environment_state(const Ref<EnvLightState> &p_state) {
 	last_section_env_values_.unref();
 	if (env_state_.is_valid()) {
 		env_state_->connect("changed", changed);
+		env_state_->connect("pass_changed", pass_changed);
 	}
 	wake_runtime_frame();
 	apply_environment_to_materials();
@@ -617,6 +629,23 @@ void ObjectModel::advance_awake_frame(double p_delta) {
 	}
 }
 
+void ObjectModel::refresh_awake_environment() {
+	if (awake_models_.is_empty()) {
+		return;
+	}
+	LocalVector<ObjectModel *> batch;
+	batch.reserve(awake_models_.size());
+	for (ObjectModel *model : awake_models_) {
+		batch.push_back(model);
+	}
+	for (ObjectModel *model : batch) {
+		if (awake_models_.has(model) && model->is_visible_in_tree()) {
+			model->apply_environment_to_materials();
+			model->sleep_runtime_frame_if_idle();
+		}
+	}
+}
+
 int64_t ObjectModel::awake_model_count() {
 	return static_cast<int64_t>(awake_models_.size());
 }
@@ -659,6 +688,19 @@ void ObjectModel::on_env_generation_changed() {
 		return;
 	}
 	wake_runtime_frame();
+}
+
+void ObjectModel::on_env_pass_changed() {
+	// Crossing the water plane changes fog by a large amount in one render
+	// pass. Unlike slow TOD/weather drift, it cannot ride the 16-frame stagger:
+	// the visible world and first-person weapon must share the new pass before
+	// the imminent draw (and before a frozen exact-pose capture).
+	if (is_visible_in_tree() && on_screen_) {
+		apply_environment_to_materials();
+	} else {
+		// Hidden/off-screen models catch up through the ordinary visibility gate.
+		wake_runtime_frame();
+	}
 }
 
 void ObjectModel::_notification(int p_what) {
@@ -902,10 +944,82 @@ bool ObjectModel::aabb_equal_approx(const AABB &p_a, const AABB &p_b) {
 			p_a.size.is_equal_approx(p_b.size);
 }
 
+AABB ObjectModel::get_world_bounds() const {
+	if (!is_inside_tree()) {
+		return AABB(get_position(), Vector3());
+	}
+	return get_global_transform().xform(model_bounds_);
+}
+
+void ObjectModel::apply_point_light_selection(int p_count,
+		const Vector4 *p_posr, const Vector4 *p_color) {
+	const int count = CLAMP(p_count, 0, 4);
+	uint64_t hash = 0xcbf29ce484222325ull;
+	const auto mix = [&hash](const void *data, size_t size) {
+		const uint8_t *bytes = static_cast<const uint8_t *>(data);
+		for (size_t i = 0; i < size; ++i) {
+			hash = (hash ^ bytes[i]) * 0x100000001b3ull;
+		}
+	};
+	mix(&count, sizeof(count));
+	for (int i = 0; i < count; ++i) {
+		mix(&p_posr[i], sizeof(Vector4));
+		mix(&p_color[i], sizeof(Vector4));
+	}
+	if (hash == last_point_light_selection_hash_) {
+		return;
+	}
+	last_point_light_selection_hash_ = hash;
+	// Applies are hash-gated and infrequent; per-call StringName construction
+	// avoids a DLL-teardown-ordered static against Godot's name table.
+	const StringName count_name("u_point_light_count");
+	const StringName posr_names[4] = {
+		StringName("u_point_light_posr_0"), StringName("u_point_light_posr_1"),
+		StringName("u_point_light_posr_2"), StringName("u_point_light_posr_3")
+	};
+	const StringName color_names[4] = {
+		StringName("u_point_light_color_0"),
+		StringName("u_point_light_color_1"),
+		StringName("u_point_light_color_2"),
+		StringName("u_point_light_color_3")
+	};
+	const auto apply_to = [&](Node *p_parent) {
+		if (p_parent == nullptr) {
+			return;
+		}
+		const int children = p_parent->get_child_count();
+		for (int child = 0; child < children; ++child) {
+			GeometryInstance3D *instance = Object::cast_to<GeometryInstance3D>(
+					p_parent->get_child(child));
+			if (instance == nullptr) {
+				continue;
+			}
+			instance->set_instance_shader_parameter(count_name,
+					static_cast<float>(count));
+			for (int i = 0; i < 4; ++i) {
+				const Vector4 posr = i < count ? p_posr[i] : Vector4();
+				const Vector4 color = i < count ? p_color[i] : Vector4();
+				instance->set_instance_shader_parameter(posr_names[i], posr);
+				instance->set_instance_shader_parameter(color_names[i], color);
+			}
+		}
+	};
+	// Surface instances are direct children of their Robj part node or the
+	// shared skeleton (nova_object_model_scene.cpp attach split).
+	for (int64_t entry = 0; entry < robj_dense_.size(); ++entry) {
+		apply_to(Object::cast_to<Node>(
+				static_cast<Object *>(robj_dense_[entry])));
+	}
+	apply_to(skeleton_);
+}
+
 void ObjectModel::_bind_methods() {
 	ClassDB::bind_static_method("ObjectModel",
 			D_METHOD("advance_awake_frame", "delta"),
 			&ObjectModel::advance_awake_frame);
+	ClassDB::bind_static_method("ObjectModel",
+			D_METHOD("refresh_awake_environment"),
+			&ObjectModel::refresh_awake_environment);
 	ClassDB::bind_static_method("ObjectModel",
 			D_METHOD("awake_model_count"), &ObjectModel::awake_model_count);
 	ClassDB::bind_method(D_METHOD("is_runtime_frame_awake"),

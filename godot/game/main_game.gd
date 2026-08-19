@@ -15,6 +15,8 @@ const GameDebugAdapterScript := preload("res://game/game_debug_adapter.gd")
 const LocalPlayerPresenterScript := preload("res://game/world/local_player_presenter.gd")
 const VegAssetsScript := preload("res://game/terrain/veg_assets.gd")
 const WorldLoadCoordinatorScript := preload("res://game/world_load_coordinator.gd")
+const ShellPresentationSessionScript := preload("res://game/shell_presentation_session.gd")
+const HudHiddenCaptureWitness := preload("res://game/world/hud_hidden_capture_witness.gd")
 # Re-summon the game-folder picker. The original engine has no "change game dir"
 # control (the game *is* its install folder); this is an OpenNova convenience so a
 # wrong / menu-less folder can be re-picked without restarting. Front-end only.
@@ -52,6 +54,7 @@ enum State { MENU, WORLD, PAUSED, ARMORY, DEPLOY }
 @onready var _world: GameWorld = $World
 @onready var _camera: FlyCamera = $Camera3D
 @onready var _hud: CanvasLayer = $HUD
+@onready var _menu_layer: CanvasLayer = $MenuLayer
 @onready var _menu_shell: MenuShell = $MenuLayer/MenuShell
 
 var _picker: FileDialog
@@ -104,6 +107,7 @@ var _shutdown_resources_released := false
 var _quit_requested := false
 var _quit_policy_installed := false
 var _previous_auto_accept_quit := true
+var _shell_presentation := ShellPresentationSessionScript.new()
 
 
 func _init() -> void:
@@ -133,6 +137,7 @@ func begin_runtime_shutdown() -> WorldLoadOperation:
 	var load_operation := _world_load.cancel_current()
 	_world_load_pending = false
 	_cleanup_picker()
+	finish_hud_hidden_capture()
 	for presenter in [
 		_player_presenter, _armory_presenter, _deploy_presenter, _hud_presenter,
 	]:
@@ -176,6 +181,12 @@ func is_world_loading() -> bool:
 ## into the transient LoadingScreen node.
 func has_loading_background() -> bool:
 	return _world_load.has_background()
+
+
+## Dismiss an active SP start-mission splash without manufacturing a key or
+## mouse event. The coordinator preserves the normal closing-frame/reveal
+## sequence, so rendered probes enter gameplay through the production seam.
+func dismiss_start_mission_splash() -> bool: return _world_load.dismiss_start_mission_splash()
 
 
 ## The mounted menu/runtime resource root (null before the first mount) —
@@ -428,6 +439,12 @@ func get_game_debug_adapter() -> GameDebugAdapter:
 		_debug_adapter.set_menu_shell_source(func(): return _menu_shell)
 		_debug_adapter.set_ingame_screen_actions(
 				mcp_open_ingame_menu, mcp_open_armory)
+		_debug_adapter.set_render_capture_actions(
+				mcp_begin_world_only_capture, mcp_end_world_only_capture)
+		_debug_adapter.set_hud_hidden_capture_actions(
+				begin_hud_hidden_capture,
+				finish_hud_hidden_capture,
+				hud_hidden_capture_witness)
 	return _debug_adapter
 func get_frame_stats_board() -> FrameStatsBoard:
 	return _frame_stats
@@ -562,8 +579,7 @@ func _enter_menu(dir: String) -> bool:
 	# GameWorld must not remount from mutable persisted settings after boot.
 	_world.set_resource_root(_root)
 	_state = State.MENU
-	_world.visible = false
-	_set_hud_visible(false)
+	_shell_presentation.enter_menu(_world, _hud)
 	_wire_shell()
 	if _player_info_companion != null:
 		_player_info_companion.set_persisted_profile(_chosen_avatar)
@@ -794,17 +810,8 @@ func join_lan_server(target: JoinTarget) -> void:
 
 
 
-## THE load seam every mission start (the menu's SP start and every one of
-## NetSessionController's LAN/NovaWorld/env entries) routes through: hide the
-## menu, raise the loading screen, enter WORLD
-# state, and connect the load-result signals. The caller then starts the specific
-# load. The world + HUD stay hidden until the load lands — during the load only
-# the loading screen presents [orig: Game_StartMission renders via
-# render_loading_screen @ 0x521d10 / LoadingScreen_UpdateAndPresent @ 0x586be0
-# until LoadingScreen_ReleaseEffect @ 0x525d52 at the end of the load].
-# `load_info` feeds the screen: mission_file, and for a net session the session
-# variables (in_session, server_name, mission_name, game_type, custom_text)
-# [orig: the SERVERNAME/MISSIONNAME/GAMETYPE/CUSTOMTEXT session vars @ 0x5202f0].
+## The common mission-start seam; ShellPresentationSession owns its visibility
+## transition while this shell owns load state and the operation handoff.
 func start_world_load(load_info: Dictionary, operation: Callable) -> void:
 	if not _world_load.can_start():
 		return
@@ -819,14 +826,9 @@ func start_world_load(load_info: Dictionary, operation: Callable) -> void:
 
 
 func _begin_world_load() -> void:
-	_menu_shell.hide_menu()
-	_world.visible = false
-	_set_hud_visible(false)
+	_shell_presentation.begin_world_load(
+			_menu_shell, _world, _hud, _on_world_loaded, _on_world_load_failed)
 	_state = State.WORLD
-	if not _world.world_loaded.is_connected(_on_world_loaded):
-		_world.world_loaded.connect(_on_world_loaded)
-	if not _world.load_failed.is_connected(_on_world_load_failed):
-		_world.load_failed.connect(_on_world_load_failed)
 
 
 
@@ -863,9 +865,7 @@ func _finish_world_load_presentation() -> void:
 	if not _world_load_pending:
 		return
 	_world_load_pending = false
-	_world_load.finish_presentation()
-	_world.visible = true
-	_set_hud_visible(true)
+	_shell_presentation.finish_world_load(_world_load, _world, _hud)
 
 
 func _on_join_admission_ready() -> void:
@@ -1028,6 +1028,7 @@ func mcp_open_armory() -> Error:
 # of the shell boundary rather than a menu-specific detail.
 func _teardown_world_to_menu() -> void:
 	_world_load.dismiss()
+	finish_hud_hidden_capture()
 	_round_ended = false
 	_end_winner = 0
 	_end_screen_delay = 0.0
@@ -1058,14 +1059,31 @@ func _teardown_world_to_menu() -> void:
 func _on_exit_to_desktop() -> void: request_quit()
 
 
-# CanvasLayer contents toggle: hide/show the HUD's CanvasItem children (the FPS
-# label + any mounted feeds) so they do not draw over the menu.
-func _set_hud_visible(v: bool) -> void:
-	if _hud == null:
-		return
-	for c in _hud.get_children():
-		if c is CanvasItem:
-			(c as CanvasItem).visible = v
+## Keep the public adapter callback while the capture module owns mutation.
+func mcp_begin_world_only_capture() -> Error:
+	return _shell_presentation.begin_world_only_capture(self, _hud, _menu_layer, _camera)
+
+
+func mcp_end_world_only_capture() -> void: _shell_presentation.finish_world_only_capture()
+
+
+## Begin a reversible retail HUD-detail-3 capture. Unlike world_only this
+## deliberately keeps the HUD CanvasLayer, PlayerViewEffects, viewmodel pass,
+## and world presentation mounted; the shell suppresses compiled gameplay HUD
+## commands and its FPS counter without persisting either override.
+func begin_hud_hidden_capture() -> Error:
+	return _shell_presentation.begin_hud_hidden_capture(_hud_presenter, _hud)
+
+
+func finish_hud_hidden_capture() -> void: _shell_presentation.finish_hud_hidden_capture(_hud_presenter)
+
+
+## Public semantic witness consumed by render-fixture capture probes. The
+## The presentation session combines presenter draw-list/effects/card facts
+## with the CanvasLayer boundary so a hidden parent cannot masquerade as an
+## empty gameplay HUD.
+func hud_hidden_capture_witness() -> HudHiddenCaptureWitness:
+	return _shell_presentation.hud_hidden_capture_witness(_hud_presenter, _hud)
 
 
 # Drive the loaded world's per-frame foliage coverage. Tick whenever a world is

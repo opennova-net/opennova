@@ -3,8 +3,8 @@
 // Material shader classification - derives rendering family + lighting/blend
 // caps from a `.3di` MTRL shader_tag and per-material flag bits.
 //
-// Pure C++, no Godot deps.  Used by the editor (godot/src/object) to pick
-// shader code and by the runtime/server when they need to know whether a
+// Pure C++, no Godot deps. Used by renderer adapters to select a typed
+// pipeline and by the runtime/server when they need to know whether a
 // surface is glass / two-sided / additively-blended.
 //
 // ONED uses an exact static descriptor table derived from OED's

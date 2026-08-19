@@ -535,7 +535,7 @@ public:
 				std::numeric_limits<std::int64_t>::min();
 		bool has_generation = false;
 		if (env != nullptr) {
-			generation = env->get_env_generation();
+			generation = env->get_scene_generation();
 			has_generation = true;
 		}
 		if (has_generation && source_id == cached_environment_source &&
@@ -551,7 +551,7 @@ public:
 		fog_end = 100000.0f;
 		fog_type = 1;
 		if (env != nullptr) {
-			const Vector3 color = env->get_fog_color();
+			const Vector3 color = env->get_scene_fog_color();
 			if (std::isfinite(color.x) && std::isfinite(color.y) &&
 					std::isfinite(color.z)) {
 				fog_color = {color.x, color.y, color.z};
@@ -559,9 +559,10 @@ public:
 			auto finite_or = [](float value, float fallback) {
 				return std::isfinite(value) ? value : fallback;
 			};
-			fog_start = finite_or(env->get_fog_start(), fog_start);
-			fog_end = finite_or(env->get_fog_level(), fog_end);
-			fog_type = std::clamp<std::int32_t>(env->get_fog_type(), 0, 3);
+			fog_start = finite_or(env->get_scene_fog_start(), fog_start);
+			fog_end = finite_or(env->get_scene_fog_end(), fog_end);
+			fog_type = std::clamp<std::int32_t>(
+					env->get_scene_fog_type(), 0, 3);
 		}
 		cached_environment_source = source_id;
 		cached_environment_generation = has_generation ? generation :
@@ -1521,6 +1522,13 @@ Dictionary ParticleRenderer::get_debug_draw_list_report() const {
 	result["world_compositor_inherited_effects"] =
 			impl_->inherited_world_compositor;
 	result["world_mesh_instance"] = false;
+	Dictionary environment_fog;
+	environment_fog["color"] = Vector3(impl_->fog_color[0],
+			impl_->fog_color[1], impl_->fog_color[2]);
+	environment_fog["start"] = impl_->fog_start;
+	environment_fog["end"] = impl_->fog_end;
+	environment_fog["type"] = impl_->fog_type;
+	result["environment_fog"] = environment_fog;
 	result["atlas_page_count"] = static_cast<int64_t>(impl_->pages.size());
 	result["atlas_entry_count"] = static_cast<int64_t>(impl_->entries.size());
 	std::size_t resolved_entries = 0;

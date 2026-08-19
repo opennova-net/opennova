@@ -58,6 +58,17 @@ struct EnvShaderGlobals {
 	float wind_sway_phase = 0.0f;
 };
 
+// The fog state selected for one rendered scene pass. Retail re-applies this
+// block for every pass; the underwater branch is derived from water murk and
+// Env_WaterColorLit without mutating the authored/current weather state.
+// [orig: Environment_ApplyFogAndAmbient @ 0x57e440]
+struct SceneFogValues {
+	Rgb color;
+	float start = 0.0f;
+	float end = 0.0f;
+	int type = 0;
+};
+
 // The env-derived terrain lighting + fog uniforms (terrain.gdshader /
 // terrain_editor.gdshader share them via terrain_lighting.gdshaderinc):
 // c1 <- the light block, c0 <- the sky block — the witnessed terrain PS
@@ -347,6 +358,10 @@ public:
 	float fog_start() const;
 	float fog_end_distance() const;
 	int fog_type() const;
+	// The authored murk, or retail's fresh-install default 0.8 when no .env
+	// config is loaded — the ONE source for every murk consumer
+	// [orig: the default env register block, water murk 0.8; clamp @ 0x57CBA9].
+	float water_murk() const;
 	float sky_speed() const;
 	// The SMOOTHED sky height when the weather tick drives it (env #27):
 	// retail eighth-snaps toward the parsed value and rebuilds the dome only
@@ -376,11 +391,28 @@ public:
 	// defaults record instead); `default_dir` is the fallback for a
 	// near-zero light direction.
 	bool build_light_values(const Vec3 &default_dir,
-			WorldLightValues &out) const;
+			WorldLightValues &out, bool underwater_view = false) const;
 	// The standalone-owner global refresh (weather absent): wind sway rests at
 	// its 1.0/0.0 idle values.
-	EnvShaderGlobals build_shader_globals() const;
-	TerrainEnvUniforms build_terrain_uniforms() const;
+	EnvShaderGlobals build_shader_globals(bool underwater_view = false) const;
+	TerrainEnvUniforms build_terrain_uniforms(bool underwater_view = false) const;
+	SceneFogValues build_scene_fog(bool underwater_view) const;
+
+	// The one witnessed render-eye/waterline rule. The device fog selector is
+	// STRICT below [orig: is_underwater = view_z < waterline, the
+	// Environment_ApplyFogAndAmbient selector feed @ 0x57E44C], while the
+	// murk scissor's cmp/jg gate INCLUDES exact equality [orig: the scissor
+	// draw gate @ 0x5C96C5..0x5C96FA — jg skips only strictly-above]. Both
+	// decisions must come from one sampled eye height.
+	struct RenderEyeClassification {
+		bool underwater_view = false;
+		bool underwater_overlay_view = false;
+	};
+	static RenderEyeClassification classify_render_eye(float eye_y,
+			float water_height, bool water_active) {
+		if (!water_active) return {};
+		return {eye_y < water_height, eye_y <= water_height};
+	}
 
 	// Global (non-TOD) colors stay raw on the document so editor/export
 	// round-trips do not bake envscale into authored values. The runtime view

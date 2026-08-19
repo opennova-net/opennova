@@ -5,7 +5,9 @@
 // generation discipline, the reset/prewarm epoch, the network wire units, and
 // the shader-global publication policy. RE record: docs/env/env-tod-re.md.
 #include <environment/environment_state.h>
+#include <environment/water_frame.h>
 #include <environment/weather_runtime.h>
+#include <env/env_weather.h>
 
 #include <cmath>
 #include <cstdio>
@@ -136,6 +138,55 @@ int main() {
 		ok &= expect(!env.set_nvg_view(true, 2), "identical NVG is idempotent");
 	}
 
+	// --- per-scene-pass underwater fog --------------------------------------
+	{
+		EnvironmentState env;
+		const opennova::env::Config cfg = make_config();
+		env.set_config(&cfg, true);
+		env.set_time_of_day(1200.0f);
+		const opennova::env::SceneFogValues dry =
+				env.build_scene_fog(false);
+		const opennova::env::SceneFogValues underwater =
+				env.build_scene_fog(true);
+		ok &= expect(rgb_near(dry.color, env.fog_color()) &&
+					near(dry.end, env.fog_end_distance()) &&
+					dry.type == env.fog_type(),
+				"the dry scene pass preserves current weather fog");
+		ok &= expect(rgb_near(underwater.color,
+					env.frame_clear_color_for(false, false)),
+				"the underwater scene fog target is Env_WaterColorLit");
+		ok &= expect(near(underwater.end,
+					opennova::env::fog_end_underwater(cfg.water_murk)) &&
+					near(underwater.start, 0.5f) && underwater.type == 1,
+				"underwater scene fog is murk-derived linear fog");
+
+		opennova::env::WorldLightValues object_values;
+		ok &= expect(env.build_light_values({}, object_values, true),
+				"a loaded underwater pass builds object values");
+		const opennova::env::TerrainEnvUniforms terrain_values =
+				env.build_terrain_uniforms(true);
+		const opennova::env::EnvShaderGlobals shader_values =
+				env.build_shader_globals(true);
+		ok &= expect(rgb_near(object_values.fog_color, underwater.color) &&
+					near(object_values.fog_end, underwater.end) &&
+					object_values.fog_type == underwater.type,
+				"ObjectModel values consume the selected scene fog");
+		ok &= expect(rgb_near(terrain_values.fog_color, underwater.color) &&
+					near(terrain_values.fog_end, underwater.end) &&
+					terrain_values.fog_type == underwater.type,
+				"terrain uniforms consume the selected scene fog");
+		ok &= expect(rgb_near(shader_values.fog_color, underwater.color) &&
+					near(shader_values.fog_end, underwater.end) &&
+					shader_values.fog_type == underwater.type,
+				"shader globals consume the selected scene fog");
+		ok &= expect(opennova::env::underwater_murk_overlay_alpha_byte(-0.5f) == 80 &&
+					opennova::env::underwater_murk_overlay_alpha_byte(0.0f) == 128 &&
+					opennova::env::underwater_murk_overlay_alpha_byte(0.6f) == 185 &&
+					opennova::env::underwater_murk_overlay_alpha_byte(0.8f) == 204 &&
+					opennova::env::underwater_murk_overlay_alpha_byte(0.99f) == 223,
+				"the underwater scissor uses raw 128 + trunc(96 * murk) alpha");
+	}
+
 	// --- WeatherRuntime reset epoch + prewarm + snapshot units --------------
 	{
 		EnvironmentState env;
@@ -196,6 +247,16 @@ int main() {
 				"night publication is not pinned to the solar vector");
 		ok &= expect(globals.base.wind_sway_amount >= 0.25f,
 				"the sway floor holds");
+		const opennova::env::WeatherShaderGlobals underwater_globals =
+				opennova::env::build_weather_shader_globals(env, weather, true);
+		const opennova::env::SceneFogValues underwater =
+				env.build_scene_fog(true);
+		ok &= expect(rgb_near(underwater_globals.base.fog_color,
+					underwater.color) &&
+					near(underwater_globals.base.fog_start, underwater.start) &&
+					near(underwater_globals.base.fog_end, underwater.end) &&
+					underwater_globals.base.fog_type == underwater.type,
+				"Weather's direct global write preserves the selected underwater pass fog");
 	}
 
 	// --- the 62 Hz autonomous accumulator clamp ------------------------------

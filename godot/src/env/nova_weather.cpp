@@ -167,7 +167,7 @@ void Weather::_post_runtime(MissionEnvironment *p_env) {
 	p_env->flush_publication();
 	const opennova::env::WeatherShaderGlobals globals =
 			opennova::env::build_weather_shader_globals(p_env->state(),
-					runtime_);
+					runtime_, p_env->is_underwater_view());
 	RenderingServer *rs = RenderingServer::get_singleton();
 	rs->global_shader_parameter_set("opennova_fill_light",
 			to_vector3(globals.base.fill_light));

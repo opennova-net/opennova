@@ -56,6 +56,18 @@ func test_encode_downscales_to_max_dim() -> void:
 	assert_eq(outcome["height"], 50, "Aspect preserved.")
 
 
+func test_encode_lossless_preserves_source_dimensions() -> void:
+	var outcome := McpScreenshot.encode(_gradient(400, 200), {
+		"format": "png",
+		"max_dim": 100,
+		"preserve_size": true,
+	})
+	assert_true(outcome["ok"])
+	assert_eq(outcome["mime"], "image/png")
+	assert_eq(outcome["width"], 400)
+	assert_eq(outcome["height"], 200)
+
+
 func test_encode_crops_region() -> void:
 	var outcome := McpScreenshot.encode(_gradient(64, 64), { "region": Rect2i(8, 8, 16, 12) })
 	assert_true(outcome["ok"])

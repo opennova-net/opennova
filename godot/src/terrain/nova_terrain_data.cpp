@@ -426,6 +426,8 @@ void TerrainData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("load"), &TerrainData::load);
 	ClassDB::bind_method(D_METHOD("load_from_resource_root", "resource_root", "name"), &TerrainData::load_from_resource_root);
 	ClassDB::bind_method(D_METHOD("is_loaded"), &TerrainData::is_loaded);
+	ClassDB::bind_method(D_METHOD("get_change_revision"),
+			&TerrainData::get_change_revision);
 	ClassDB::bind_method(D_METHOD("get_depth_raw16"), &TerrainData::get_depth_raw16);
 	ClassDB::bind_method(D_METHOD("set_heightmap_image", "image"), &TerrainData::set_heightmap_image);
 	ClassDB::bind_method(D_METHOD("get_heightmap_image"), &TerrainData::get_heightmap_image);
@@ -1000,6 +1002,8 @@ void TerrainData::_notify_terrain_changed() {
 	// rename-from-imported-to-exported step). Texture Ref setters call the
 	// filename sync themselves.
 	_sync_trn_scalars_from_properties();
+	++change_revision_;
+	if (change_revision_ == 0) ++change_revision_;
 	emit_signal("terrain_changed");
 	emit_changed();
 }
@@ -1261,6 +1265,7 @@ PackedByteArray TerrainData::get_depth_raw16() const {
 
 void TerrainData::set_heightmap_image(const Ref<Image> &p_image) {
 	heightmap_image = p_image;
+	_notify_terrain_changed();
 }
 
 Ref<Image> TerrainData::get_heightmap_image() const {
@@ -1269,6 +1274,7 @@ Ref<Image> TerrainData::get_heightmap_image() const {
 
 void TerrainData::set_colormap_image(const Ref<Image> &p_image) {
 	colormap_image = p_image;
+	_notify_terrain_changed();
 }
 
 Ref<Image> TerrainData::get_colormap_image() const {
@@ -1277,6 +1283,7 @@ Ref<Image> TerrainData::get_colormap_image() const {
 
 void TerrainData::set_blendmap_image(const Ref<Image> &p_image) {
 	blendmap_image = p_image;
+	_notify_terrain_changed();
 }
 
 Ref<Image> TerrainData::get_blendmap_image() const {

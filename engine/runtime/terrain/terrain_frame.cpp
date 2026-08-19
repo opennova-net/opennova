@@ -126,6 +126,12 @@ TerrainSceneSnapshot build_terrain_scene_snapshot(const CptFile &cpt,
 				static_cast<uint8_t>((tile.tile_x >> 9) & 1);
 		scene.tile_attributes[ti].quadrant_z =
 				static_cast<uint8_t>((tile.tile_y >> 9) & 1);
+		scene.tile_attributes[ti].local_page_x =
+				static_cast<uint16_t>(tile.tile_x & 0x1ff);
+		scene.tile_attributes[ti].local_page_z =
+				static_cast<uint16_t>(tile.tile_y & 0x1ff);
+		scene.tile_attributes[ti].source_page_x = tile.tile_x;
+		scene.tile_attributes[ti].source_page_z = tile.tile_y;
 	}
 
 	// Tile lookup by (x, z, size) for quadtree node -> tile resolution.
@@ -362,11 +368,20 @@ const TerrainDrawList &TerrainFrameCompiler::compile(
 		TerrainPatchDraw draw;
 		draw.tile_index = vp.tile_index;
 		draw.lod_family = lod;
+		draw.page_lod_level = vp.lod_level;
+		draw.sector_x = static_cast<int32_t>(std::lround(vp.sector_ox / 512.0f));
+		draw.sector_z = static_cast<int32_t>(std::lround(vp.sector_oz / 512.0f));
+		const TerrainTileDrawAttributes &attributes =
+				scene.tile_attributes[vp.tile_index];
+		draw.local_page_x = attributes.local_page_x;
+		draw.local_page_z = attributes.local_page_z;
+		draw.source_page_x = attributes.source_page_x;
+		draw.source_page_z = attributes.source_page_z;
 		draw.sector_ox = vp.sector_ox;
 		draw.sector_oz = vp.sector_oz;
 		draw.distance = vp.distance;
-		draw.quadrant_x = scene.tile_attributes[vp.tile_index].quadrant_x;
-		draw.quadrant_z = scene.tile_attributes[vp.tile_index].quadrant_z;
+		draw.quadrant_x = attributes.quadrant_x;
+		draw.quadrant_z = attributes.quadrant_z;
 		draw_list_.patches.push_back(draw);
 		++draw_list_.debug.lod_distribution[lod];
 	}

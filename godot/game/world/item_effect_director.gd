@@ -118,9 +118,8 @@ func on_effect_world_started() -> void:
 	# (resolved to the placed node's live transform).
 	effect_world.set_owner_position_provider(Callable(self, "_effect_owner_transform"))
 	reattach()
-	var runtime: MissionPresentation = _world.get_runtime()
-	if runtime != null:
-		runtime.set_wire_node_spawned_callback(Callable(self, "_on_wire_node_spawned"))
+	# The wire-spawn callback is single-subscriber; GameWorld registers one
+	# router that fans out to this director AND the effect-light director.
 
 
 ## Mission unload: forget every owner key / pending record. Per-item
@@ -235,7 +234,7 @@ func reattach() -> void:
 		print_verbose("GameWorld: item effects — %d emitter(s)" % attached)
 
 
-func _on_wire_node_spawned(node: ObjectModel, kind: int, item_id: int) -> void:
+func on_wire_node_spawned(node: ObjectModel, kind: int, item_id: int) -> void:
 	_attach_item_effect_to_node(node, kind, item_id)
 
 

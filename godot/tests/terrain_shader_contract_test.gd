@@ -75,12 +75,12 @@ func test_terrain_tile_light_uses_heightfield_texture_basis() -> void:
 		0.0794002, 0.000001, "08:00 Y-ramp normal must receive the witnessed dark DOT3 response.")
 
 
-func test_detail_mips_sample_anisotropically_with_terminal_clamp() -> void:
+func test_detail_mips_sample_anisotropically_with_conservative_terminal_guard() -> void:
 	# The witnessed device's anisotropic texfilter mode (MINFILTER=ANISOTROPIC
-	# + MAXANISOTROPY) matches the retail reference captures: minor-axis LOD
-	# keeps ground detail near mip 0 at grazing angles instead of washing to
-	# the paired far texture. The synthetic 2x2/1x1 Godot tail must stay
-	# unselectable via the terminal gradient clamp.
+	# + MAXANISOTROPY) matches the retail reference captures. The shader's
+	# longest-gradient scale is pinned only as a conservative guard that keeps
+	# the synthetic 2x2/1x1 Godot tail unselectable; it is not an oracle for the
+	# device's exact minor-axis/maximum-anisotropy LOD choice.
 	# [orig: per-stage filter select @ 0x67e38a..0x67e45b]
 	var terrain := _source("res://shaders/terrain_lighting.gdshaderinc")
 	assert_true(
@@ -92,9 +92,39 @@ func test_detail_mips_sample_anisotropically_with_terminal_clamp() -> void:
 			terrain.contains("u_blendmap : filter_linear_mipmap_anisotropic"),
 		"Every mipped terrain input must sample anisotropically like the retail reference.")
 	assert_true(terrain.contains("float gradient_scale = exp2(min(terminal_lod - requested_lod, 0.0));"),
-		"Requests past the 4x4 retail terminal must scale gradients back onto it.")
+			"The conservative shader guard must keep requests out of the synthetic terminal tail.")
 	assert_true(terrain.contains("textureGrad(source, uv, dx * gradient_scale, dy * gradient_scale)"),
 		"Detail sampling must stay implicit/anisotropic within the retail chain.")
+
+
+func test_detail_uv_uses_the_retail_512_unit_source_grid() -> void:
+	# Retail writes UV1 from the parsed detail density divided by 512. Runtime
+	# and ONED carry normalized coordinates for the full 1024 terrain atlas, so
+	# their shared conversion must restore that factor of two. Stage 3 derives
+	# its authored detail2/noise coordinates from the same retail UV1.
+	# [orig: density parse @ 0x60f993..0x60f9b3; config field +0x1738 passed
+	# @ 0x60e634; density/512 write @ 0x6029a0..0x6029aa; UV1 stores
+	# @ 0x602db5..0x602dbe; stage-3 matrices @ 0x609786..0x609810]
+	var shared := _compact(_source("res://shaders/terrain_lighting.gdshaderinc"))
+	var runtime := _compact(_source("res://shaders/terrain.gdshader"))
+	var editor := _compact(_source("res://shaders/terrain_editor.gdshader"))
+
+	assert_true(
+		shared.contains("vec2retail_detail_uv_from_atlas(vec2atlas_uv,floatdensity)") and
+			shared.contains("returnatlas_uv*(density*2.0);"),
+		"A 1024-atlas UV must convert to retail's density/512 detail coordinate.")
+	assert_true(runtime.contains(
+		"v_detail_uv=retail_detail_uv_from_atlas(UV,u_detail_density);"),
+		"Runtime terrain must use the shared retail detail coordinate.")
+	assert_true(editor.contains(
+		"v_detail_uv=retail_detail_uv_from_atlas(source_uv,u_detail_density);"),
+		"ONED terrain must use the same retail detail coordinate.")
+	assert_true(shared.contains(
+		"u_detail2,retail_detail_uv_from_atlas(colormap_uv,u_detail2_density)"),
+		"The authored stage-3 detail must use density2/512 coordinates.")
+	assert_true(shared.contains(
+		"texture(u_water_noise,retail_detail_uv_from_atlas(colormap_uv,8.0))"),
+		"The underwater stage-3 swap must use the retail 8/512 coordinate.")
 
 
 func test_splat_modulation_is_the_second_detail_dp3() -> void:
@@ -104,7 +134,7 @@ func test_splat_modulation_is_the_second_detail_dp3() -> void:
 	# [orig: stage bind @ 0x6043ff; PS variant select @ 0x604544/0x6044e8;
 	# texcoord transform density2/density @ 0x609810]
 	var terrain := _source("res://shaders/terrain_lighting.gdshaderinc")
-	assert_true(terrain.contains("u_detail2, colormap_uv * u_detail2_density"),
+	assert_true(terrain.contains("u_detail2, retail_detail_uv_from_atlas("),
 		"The second detail must sample at its own authored density.")
 	assert_true(terrain.contains("normal_factor = dot(modulator, blend) * 2.0;"),
 		"The stage-3 modulation is dot(stage-3 input, normalized blend) doubled.")
@@ -116,7 +146,7 @@ func test_splat_modulation_is_the_second_detail_dp3() -> void:
 
 func test_below_water_swaps_the_stage3_input_to_the_water_noise() -> void:
 	# D-TERRAIN-8: underwater the LIVE stage-3 bind is the water noise at the
-	# swapped 8/density texcoord (colormap_uv * 8 after the density cancel);
+	# swapped 8/density texcoord (atlas colormap_uv * 16 after density cancels);
 	# the dp3 modulation is then the caustic term. Detail2-less maps run
 	# PS14Splat (no t3 consumer) and faithfully get NO underwater modulation.
 	# [orig: live t3 slot swap @ 0x6043f2; selector @ 0x6044b1..0x604556;
@@ -127,8 +157,9 @@ func test_below_water_swaps_the_stage3_input_to_the_water_noise() -> void:
 		"The live water noise texture must be a shared-include uniform.")
 	assert_true(compact.contains("uniformboolu_below_water=false;"),
 		"The below-water flag must default dry.")
-	assert_true(compact.contains("texture(u_water_noise,colormap_uv*8.0)"),
-		"The underwater stage-3 input samples the noise at colormap_uv * 8.")
+	assert_true(compact.contains(
+		"texture(u_water_noise,retail_detail_uv_from_atlas(colormap_uv,8.0))"),
+		"The underwater stage-3 input samples at source*8/512 (atlas UV * 16).")
 	assert_true(compact.contains("vec3modulator=u_below_water"),
 		"The underwater swap must replace the dp3 INPUT, inside the detail2 gate.")
 	# The swap lives inside the u_has_detail2 branch: no detail2, no modulation.

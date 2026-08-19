@@ -76,6 +76,25 @@ public:
 
 	// --- NVG ----------------------------------------------------------------
 	void set_nvg_view(bool p_active, int p_gain);
+	// The main scene pass selection, sampled from the render eye after local
+	// camera placement and before terrain/foliage submit. This does not mutate
+	// authored/current weather state; it selects the derived pass fog payload.
+	void set_underwater_view(bool p_underwater);
+	void apply_render_eye(float p_eye_y, float p_water_height,
+			bool p_water_active);
+	bool is_underwater_view() const { return underwater_view_; }
+	// The later full-frame murk scissor has an independently witnessed side
+	// test: camera <= water, while device fog above stays strict camera < water.
+	void set_underwater_overlay_view(bool p_underwater);
+	bool is_underwater_overlay_view() const {
+		return underwater_overlay_view_;
+	}
+	Vector3 get_underwater_overlay_color() const;
+	int get_underwater_overlay_alpha_byte() const;
+	Vector3 get_scene_fog_color() const;
+	float get_scene_fog_start() const;
+	float get_scene_fog_end() const;
+	int get_scene_fog_type() const;
 
 	// --- current render colors ----------------------------------------------
 	Vector3 get_sun_light() const;
@@ -150,6 +169,9 @@ public:
 			const Vector3 &p_cloud_edge);
 	void set_color_src_gain(const Vector3 &p_value);
 	int64_t get_env_generation() const;
+	int64_t get_scene_generation() const {
+		return light_state_.is_valid() ? light_state_->get_generation() : 0;
+	}
 
 	// --- env #27 smoothed scalars -------------------------------------------
 	float get_fog_distance() const;
@@ -176,7 +198,7 @@ public:
 	const opennova::env::EnvironmentState &state() const { return state_; }
 	// Publish the typed light record + emit env_generation_changed when the
 	// engine generation moved since the last publish.
-	void flush_publication();
+	void flush_publication(bool p_pass_changed = false);
 	// The standalone-owner full global refresh (the weather node owns the
 	// per-frame write while present).
 	void write_shader_globals();
@@ -201,11 +223,14 @@ private:
 	// globals to the weather writeback).
 	void _after_tod_update();
 	Ref<EnvLightValues> _build_light_values() const;
+	void _write_scene_fog_globals();
 
 	Ref<EnvFile> environment_data_;
 	opennova::env::EnvironmentState state_;
 	Ref<EnvLightState> light_state_;
 	int64_t last_published_generation_ = 0;
+	bool underwater_view_ = false;
+	bool underwater_overlay_view_ = false;
 	float day_speed_ = 0.0f;
 };
 

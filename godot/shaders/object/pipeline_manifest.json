@@ -1,0 +1,281 @@
+{
+  "schema": 1,
+  "resource_count": 104,
+  "description": "Reachable object shader techniques and static render policies. Runtime selection must fail closed outside this table.",
+  "policies": {
+    "opaque": {
+      "blend": "mix",
+      "depth": "opaque",
+      "coverage": "full",
+      "writes_alpha": false
+    },
+    "alpha": {
+      "blend": "mix",
+      "depth": "never",
+      "coverage": "full",
+      "writes_alpha": true
+    },
+    "additive": {
+      "blend": "add",
+      "depth": "never",
+      "coverage": "full",
+      "writes_alpha": false
+    },
+    "cutout_mix": {
+      "blend": "mix",
+      "depth": "alpha_prepass_opaque",
+      "coverage": "cutout",
+      "writes_alpha": false
+    },
+    "cutout_alpha": {
+      "blend": "mix",
+      "depth": "alpha_prepass_opaque",
+      "coverage": "cutout",
+      "writes_alpha": true
+    },
+    "cutout_additive": {
+      "blend": "add",
+      "depth": "alpha_prepass_opaque",
+      "coverage": "cutout",
+      "writes_alpha": false
+    }
+  },
+  "cull_variants": [
+    "back",
+    "disabled"
+  ],
+  "techniques": [
+    {
+      "engine_enum": "Fixed",
+      "directory": "fixed",
+      "policies": [
+        "opaque",
+        "alpha",
+        "additive",
+        "cutout_mix",
+        "cutout_alpha",
+        "cutout_additive"
+      ],
+      "sampling": "single",
+      "normal": "none",
+      "vertex": "standard",
+      "implementation": "fixed"
+    },
+    {
+      "engine_enum": "FixedDetail",
+      "directory": "fixed_detail",
+      "policies": [
+        "opaque",
+        "alpha",
+        "additive",
+        "cutout_mix",
+        "cutout_alpha",
+        "cutout_additive"
+      ],
+      "sampling": "detail",
+      "normal": "none",
+      "vertex": "standard",
+      "implementation": "fixed"
+    },
+    {
+      "engine_enum": "SelfLit",
+      "directory": "self_lit",
+      "policies": [
+        "opaque",
+        "alpha",
+        "additive",
+        "cutout_mix",
+        "cutout_alpha",
+        "cutout_additive"
+      ],
+      "sampling": "single",
+      "normal": "none",
+      "vertex": "standard",
+      "implementation": "self_lit"
+    },
+    {
+      "engine_enum": "SelfLitDetail",
+      "directory": "self_lit_detail",
+      "policies": [
+        "opaque",
+        "alpha",
+        "additive",
+        "cutout_mix",
+        "cutout_alpha",
+        "cutout_additive"
+      ],
+      "sampling": "detail",
+      "normal": "none",
+      "vertex": "standard",
+      "implementation": "self_lit"
+    },
+    {
+      "engine_enum": "Tracer",
+      "directory": "tracer",
+      "policies": [
+        "additive",
+        "cutout_additive"
+      ],
+      "sampling": "single",
+      "normal": "none",
+      "vertex": "standard",
+      "implementation": "tracer"
+    },
+    {
+      "engine_enum": "Flag",
+      "directory": "flag",
+      "policies": [
+        "opaque",
+        "cutout_mix"
+      ],
+      "sampling": "single",
+      "normal": "none",
+      "vertex": "flag",
+      "implementation": "flag"
+    },
+    {
+      "engine_enum": "FlagSelfLit",
+      "directory": "flag_self_lit",
+      "policies": [
+        "opaque",
+        "cutout_mix"
+      ],
+      "sampling": "single",
+      "normal": "none",
+      "vertex": "flag",
+      "implementation": "flag_self_lit"
+    },
+    {
+      "engine_enum": "PhongTangentDiffuse",
+      "directory": "phong_tangent_diffuse",
+      "policies": [
+        "opaque",
+        "cutout_mix"
+      ],
+      "sampling": "single",
+      "normal": "tangent_uv1",
+      "vertex": "standard",
+      "implementation": "phong_diffuse"
+    },
+    {
+      "engine_enum": "PhongTangentSpecular",
+      "directory": "phong_tangent_specular",
+      "policies": [
+        "opaque",
+        "cutout_mix"
+      ],
+      "sampling": "single",
+      "normal": "tangent_uv1",
+      "vertex": "standard",
+      "implementation": "phong_specular"
+    },
+    {
+      "engine_enum": "PhongObjectDiffuse",
+      "directory": "phong_object_diffuse",
+      "policies": [
+        "opaque",
+        "cutout_mix"
+      ],
+      "sampling": "single",
+      "normal": "object_uv1",
+      "vertex": "standard",
+      "implementation": "phong_diffuse"
+    },
+    {
+      "engine_enum": "PhongObjectSpecular",
+      "directory": "phong_object_specular",
+      "policies": [
+        "opaque",
+        "cutout_mix"
+      ],
+      "sampling": "single",
+      "normal": "object_uv1",
+      "vertex": "standard",
+      "implementation": "phong_specular"
+    },
+    {
+      "engine_enum": "Dot3Tangent",
+      "directory": "dot3_tangent",
+      "policies": [
+        "opaque",
+        "cutout_mix"
+      ],
+      "sampling": "single",
+      "normal": "tangent_uv1",
+      "vertex": "standard",
+      "implementation": "dot3"
+    },
+    {
+      "engine_enum": "Dot3TangentDetail",
+      "directory": "dot3_tangent_detail",
+      "policies": [
+        "opaque",
+        "cutout_mix"
+      ],
+      "sampling": "detail",
+      "normal": "tangent_uv1",
+      "vertex": "standard",
+      "implementation": "dot3"
+    },
+    {
+      "engine_enum": "Dot3Object",
+      "directory": "dot3_object",
+      "policies": [
+        "opaque",
+        "cutout_mix"
+      ],
+      "sampling": "single",
+      "normal": "object_uv1",
+      "vertex": "standard",
+      "implementation": "dot3"
+    },
+    {
+      "engine_enum": "Dot3ObjectDetail",
+      "directory": "dot3_object_detail",
+      "policies": [
+        "opaque",
+        "cutout_mix"
+      ],
+      "sampling": "detail",
+      "normal": "object_uv1",
+      "vertex": "standard",
+      "implementation": "dot3"
+    },
+    {
+      "engine_enum": "EnvironmentTangent",
+      "directory": "environment_tangent",
+      "policies": [
+        "opaque",
+        "cutout_mix"
+      ],
+      "sampling": "single",
+      "normal": "tangent_uv1",
+      "vertex": "standard",
+      "implementation": "environment"
+    },
+    {
+      "engine_enum": "EnvironmentTangentSpecular",
+      "directory": "environment_tangent_specular",
+      "policies": [
+        "opaque",
+        "cutout_mix"
+      ],
+      "sampling": "single",
+      "normal": "tangent_uv1",
+      "vertex": "standard",
+      "implementation": "environment_specular"
+    },
+    {
+      "engine_enum": "Glass",
+      "directory": "glass",
+      "policies": [
+        "additive",
+        "cutout_additive"
+      ],
+      "sampling": "single",
+      "normal": "none",
+      "vertex": "standard",
+      "implementation": "glass"
+    }
+  ]
+}

@@ -43,10 +43,6 @@ int clamp_time(int time) {
 	return std::max(0, std::min(2359, time));
 }
 
-float clamp_water_murk(float value) {
-	return std::max(0.0f, std::min(0.99f, value));
-}
-
 } // namespace
 
 EnvFile::EnvFile() {
@@ -200,7 +196,7 @@ IMPL_SET_GET(vertex_tint, set_vertex_tint, get_vertex_tint, const Color &, Color
 IMPL_SET_GET(lightning_color, set_lightning_color, get_lightning_color, const Color &, Color)
 IMPL_SET_GET(ceiling_color, set_ceiling_color, get_ceiling_color, const Color &, Color)
 IMPL_SET_GET(floor_color, set_floor_color, get_floor_color, const Color &, Color)
-void EnvFile::set_water_murk(float p_value) { water_murk = clamp_water_murk(p_value); _notify_environment_changed(); }
+void EnvFile::set_water_murk(float p_value) { water_murk = opennova::env::clamp_water_murk_upper(p_value); _notify_environment_changed(); }
 float EnvFile::get_water_murk() const { return water_murk; }
 IMPL_SET_GET(iris_percent, set_iris_percent, get_iris_percent, float, float)
 IMPL_SET_GET(iris_center, set_iris_center, get_iris_center, float, float)

@@ -373,6 +373,18 @@ func _proxy_game_debug(args: Dictionary, ctx: McpToolContext) -> McpToolResult:
 	return await _proxy_runtime("game_debug", args, ctx)
 
 
+func _proxy_game_render_diagnostics(
+		args: Dictionary,
+		ctx: McpToolContext) -> McpToolResult:
+	return await _proxy_runtime("game_render_diagnostics", args, ctx)
+
+
+func _proxy_game_capture_bundle(
+		args: Dictionary,
+		ctx: McpToolContext) -> McpToolResult:
+	return await _proxy_runtime("game_capture_bundle", args, ctx)
+
+
 func _proxy_game_menu(args: Dictionary, ctx: McpToolContext) -> McpToolResult:
 	return await _proxy_runtime("game_menu", args, ctx)
 

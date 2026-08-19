@@ -26,6 +26,11 @@ var _quit_action: Callable
 var _menu_shell_source: Callable
 var _open_ingame_menu_action: Callable
 var _open_armory_action: Callable
+var _render_capture_begin_action: Callable
+var _render_capture_end_action: Callable
+var _hud_hidden_capture_begin_action: Callable
+var _hud_hidden_capture_end_action: Callable
+var _hud_hidden_capture_witness_source: Callable
 
 
 func configure(
@@ -115,6 +120,94 @@ func get_mcp_game_state() -> Variant:
 	}
 
 
+## One transport-ready view of the world's typed renderer snapshot. Shell
+## ownership stays explicit because a loaded simulation can coexist briefly
+## with the start-mission splash that still owns the viewport.
+func get_mcp_render_diagnostics() -> Variant:
+	var world := _current_world()
+	if world == null or not world.is_loaded():
+		return {}
+	var viewport := _current_viewport()
+	var camera := viewport.get_camera_3d() if viewport != null else null
+	var snapshot: GameRenderDiagnostics = world.get_render_diagnostics(camera)
+	var value := snapshot.to_json_value()
+	value["shell"] = {
+		"state": String(_shell_state_source.call()),
+		"world_loading": _is_world_loading(),
+		"gameplay_camera_available": camera != null and camera.is_current(),
+	}
+	return value
+
+
+## Lossless comparison capture. Fail closed while a loading/splash layer owns
+## the viewport and when no current Camera3D can identify a gameplay frame.
+## Capture presentation delegates through injected shell actions and is armed
+## only after settle frames. The adapter never reaches into HUD/MenuLayer
+## children itself; HUD-hidden evidence is sampled on the correlated draw.
+func capture_mcp_render_bundle(
+		args: Dictionary,
+		cancel_requested: Callable = Callable()) -> Variant:
+	var world := _current_world()
+	if _is_world_loading():
+		return {"error": (
+				"The mission is still loading or the start-mission splash still owns "
+				+ "the viewport; dismiss it and wait for MainGame.is_world_loading() "
+				+ "to become false before capture.")}
+	if world == null or not world.is_loaded():
+		return {"error": "No loaded render world is available; start a playable mission first."}
+	var viewport := _current_viewport()
+	var camera := viewport.get_camera_3d() if viewport != null else null
+	if camera == null or not camera.is_inside_tree() or not camera.is_current():
+		return {"error": (
+				"No current gameplay camera is available; wait for the local-player "
+				+ "presenter before capture.")}
+
+	var world_only := bool(args.get("world_only", true))
+	var presentation_mode := String(args.get(
+			"presentation_mode", "world_only" if world_only else "full_frame"))
+	if presentation_mode not in ["world_only", "full_frame", "hud_hidden"]:
+		return {"error": "Unknown render capture presentation mode '%s'." \
+				% presentation_mode}
+	var presentation_begin := Callable()
+	var presentation_finish := Callable()
+	var diagnostics_source := get_mcp_render_diagnostics
+	match presentation_mode:
+		"world_only":
+			presentation_begin = _render_capture_begin_action
+			presentation_finish = _render_capture_end_action
+		"hud_hidden":
+			presentation_begin = _hud_hidden_capture_begin_action
+			presentation_finish = _hud_hidden_capture_end_action
+			if not _hud_hidden_capture_witness_source.is_valid():
+				return {"error": "HUD-hidden render capture witness is unavailable in this game shell."}
+			diagnostics_source = func() -> Variant:
+				var diagnostics_value: Variant = get_mcp_render_diagnostics()
+				if not (diagnostics_value is Dictionary):
+					return {}
+				var witness_value := _hud_hidden_capture_witness_json()
+				if witness_value.is_empty():
+					return {}
+				var diagnostics := (diagnostics_value as Dictionary).duplicate(true)
+				diagnostics["presentation"] = {
+					"mode": "hud_hidden",
+					"hud_hidden_capture": witness_value,
+				}
+				return diagnostics
+		"full_frame":
+			pass
+	if presentation_mode != "full_frame" and (not presentation_begin.is_valid() \
+			or not presentation_finish.is_valid()):
+		return {"error": "%s render capture is unavailable in this game shell." \
+				% presentation_mode.capitalize()}
+
+	var capture_args := args.duplicate(false)
+	if presentation_mode != "full_frame":
+		capture_args[GameRenderCapture.PRESENTATION_BEGIN_OPTION] = presentation_begin
+		capture_args[GameRenderCapture.PRESENTATION_FINISH_OPTION] = presentation_finish
+	return await GameRenderCapture.capture(
+			viewport, diagnostics_source, capture_args, cancel_requested)
+
+
 ## Bounded MCP counterpart to F3's entity discovery. `index` addresses the
 ## current discovery view; authoritative edits still require a row's ai_index.
 func get_mcp_game_entities(offset: int, limit: int) -> Variant:
@@ -177,6 +270,46 @@ func set_ingame_screen_actions(
 		open_armory: Callable) -> void:
 	_open_ingame_menu_action = open_ingame_menu
 	_open_armory_action = open_armory
+
+
+## Additive shell-owned presentation seam for `world_only` captures. The begin
+## action returns Error after snapshotting/hiding presentation; end restores the
+## exact prior state after the async readback, including failure/cancellation.
+func set_render_capture_actions(
+		begin_action: Callable,
+		end_action: Callable) -> void:
+	_render_capture_begin_action = begin_action
+	_render_capture_end_action = end_action
+
+
+## Screenshot-scoped counterpart to world-only presentation. The witness is
+## sampled inside the correlated completed-draw callback while the transaction
+## is active; begin/finish never span settle frames or bundle persistence.
+func set_hud_hidden_capture_actions(
+		begin_action: Callable,
+		end_action: Callable,
+		witness_source: Callable) -> void:
+	_hud_hidden_capture_begin_action = begin_action
+	_hud_hidden_capture_end_action = end_action
+	_hud_hidden_capture_witness_source = witness_source
+
+
+func _hud_hidden_capture_witness_json() -> Dictionary:
+	var value: Variant = _hud_hidden_capture_witness_source.call()
+	if not (value is HudHiddenCaptureWitness):
+		return {}
+	var witness := value as HudHiddenCaptureWitness
+	if not witness.is_valid():
+		return {}
+	return {
+		"hud_detail_level": witness.hud_detail_level,
+		"gameplay_hud_visible": witness.gameplay_hud_visible,
+		"player_view_effects_active": witness.player_view_effects_active,
+		"ads_active": witness.ads_active,
+		"big_map_active": witness.big_map_active,
+		"hud_canvas_layer_active": witness.hud_canvas_layer_active,
+		"fps_counter_visible": witness.fps_counter_visible,
+	}
 
 
 func _menu_shell() -> MenuShell:
@@ -411,6 +544,11 @@ func _current_world() -> GameWorld:
 
 func _current_runtime() -> Variant:
 	return _runtime_source.call()
+
+
+func _is_world_loading() -> bool:
+	return _world_loading_source.is_valid() \
+			and bool(_world_loading_source.call())
 
 
 func _current_viewport() -> Viewport:

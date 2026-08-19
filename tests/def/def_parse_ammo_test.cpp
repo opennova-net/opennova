@@ -90,6 +90,19 @@ int main(void) {
         def_free_ammo(&ammo);
         return 1;
     }
+    /* The impact flash: `light_impact 10.0 255 192 96 0.2` [orig:
+       AmmoDef_ParseProperty @0x40af79 -> +132 fp16 / +128 packed /
+       +136 = (62 * 0.2 fp16 + 0x8000) >> 16 = 12 ticks; 0 -> 10 @0x40b005]. */
+    if (rocket->light_impact_radius_fp16 != 10 * 65536 ||
+        rocket->light_impact_color != ((255 << 16) | (192 << 8) | 96) ||
+        rocket->light_impact_ticks != 12) {
+        fprintf(stderr, "FAIL: ROCKET light_impact: got %d/0x%X/%d want %d/0x%X/12\n",
+                rocket->light_impact_radius_fp16, rocket->light_impact_color,
+                rocket->light_impact_ticks, 10 * 65536,
+                (255 << 16) | (192 << 8) | 96);
+        def_free_ammo(&ammo);
+        return 1;
+    }
 
     /* Find the AT_NULL entry — should have 0 velocity */
     const DefAmmoDef *null_ammo = NULL;

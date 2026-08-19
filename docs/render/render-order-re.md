@@ -5,7 +5,8 @@ batch queues, the sort keys, the render-state stack, the technique-class
 selection, and the frame's pass sequence, witnessed in retail `Jointops.exe`
 (imagebase `0x400000`, IDB `Jointops.exe.kong.i64`). Implementing code:
 `engine/runtime/renderer` (`render_order`, this slice's port; `material_classify` /
-`object_shader_template` from REN-2), `godot/src/object/nova_object_model.cpp`
+`object_shader_template` typed descriptor from REN-2),
+`godot/src/object/nova_object_model.cpp`
 + `nova_object_shader_cache.cpp` (ladder application),
 `godot/src/env/{nova_celestial,nova_water}.cpp` (the generalized
 priority ladder). Landed by maturity REN-3
@@ -207,8 +208,22 @@ driver; camera above water shown — the sides mirror when underwater):
    - **flush(2)** — the camera-side (above-water) transparents
    - trails + particle pass B; per-entity projectile trails; weather
      particles; foliage billboards; sun-glare occlusion update
-   - underwater murk scissor overlay (camera below water only); skybox sun
-     glow last (modulator swapped around it) — the lens-glare overlay.
+   - underwater murk scissor overlay (`Terrain_RenderSceneWithReflection
+     @ 0x5c96c5..0x5c96fa`): the independent gate is
+     `camera_z <= Env_WaterHeightFixed` (`jg` skips), so equality is covered
+     even though the environment fog classifier uses strict `<`. It calls
+     `Terrain_DrawScissorRect @ 0x5c38e0` for the full current viewport with
+     RGB = `Env_WaterColorLit` and
+     `alpha = 0x80 - trunc(Env_WaterMurk * -96.0)` =
+     `128 + trunc(96 * murk)` (CP01 `0.8` -> `204/255`). The shader state is
+     standard `SRCALPHA` / `INVSRCALPHA`, so
+     `out = lit_water * alpha + prior * (1 - alpha)`; pass flags disable
+     Z-write and force ZFUNC ALWAYS. The early first-person viewmodel, world,
+     particles, weather, and foliage are therefore all attenuated, while the
+     HUD is not.
+   - skybox sun glow is drawn after the murk overlay (`@ 0x5c9714`) and before
+     the later HUD (`@ 0x5cad04`), so retail glare is deliberately not
+     attenuated by the underwater quad.
    With reflection enabled, each entity wave adds a mirrored sub-pass +
    flush(1) under mirrored lighting (`CTerrainRenderer_BuildLightingShaderConstants
    @ 0x5c8090` arg 1), using the mirror matrix/CLIP machinery above and the
@@ -252,6 +267,7 @@ pure functions in `engine/runtime/renderer/render_order.{h,cpp}`:
 | D-RORD-6 | Not reproduced | two original key quirks: opaque key bits 15+ carry residual stack garbage (`@ 0x5d92b9`), and the transparent key lags one strip within a render object (`@ 0x5d9326` vs the `fst @ 0x5d9347` overwrite) | PERMANENT-candidates (original-bug/garbage class): reproducing either manufactures garbage (ADR 0022) |
 | D-RORD-7 | One main-camera POST_TRANSPARENT EffectWorld particle draw, after water and both transparent sides | two calls to the global particle manager: pass A between far-side transparents and water, pass B after camera-side transparents (`[orig: @0x5c93a0; EffectWorld_RenderParticlePass @0x5f7240]`) | OPEN (bounded ordering/pass-placement residual) — packet command preservation, blend state, scene-color capture, and viewmodel occlusion match; exact recursive sort equivalence remains unproven, and the pass should split only if a water-intersection parity scene demonstrates the visible need |
 | D-RORD-8 | FIXED 2026-08-12. `GameFramePipeline` now runs session tick → local-view placement → terrain → foliage → the remaining device legs. Terrain samples the live viewport camera internally and foliage receives `GameWorld._render_camera_xform()`, so both compile from the view this frame's player state produced; foliage retains the frame-entry transform when no live camera exists, while terrain has no headless draw. Occlusion's post-present slot stands — present re-asserts base visibility, occlusion layers hides, Godot renders after both | collect-then-submit runs inside the render frame, before submission, against the view built from current player state (`Render_ProcessMainSceneFrame @0x5ca0f0`) | MATCHING for the camera-phase contract; `game_frame_pipeline_test` pins the order and a post-present camera-generation marker for both terrain and foliage |
+| D-RORD-9 | The underwater murk quad is a `PlayerViewEffects` overlay after the shared-world `ViewmodelPass` (CanvasLayer 0) and behind the HUD (CanvasLayer 1), so it correctly covers scene + weapon and excludes HUD; it currently also covers the reimpl's 3D celestial/glow. `PlayerViewEffects` is created with the local-player HUD, so no-local-player/spectator views currently receive no murk quad | retail draws the source-over murk quad after the viewmodel/world/weather/foliage and then draws sun glow bright on top (`[orig: @ 0x5c96c5..0x5c9714]`) | MATCHING for CP01 and the registered full-frame fixtures, whose capture contract requires a spawned local player and HUD; OPEN bounded residuals are glare ordering and generic spectator/no-local-player parity |
 
 ## IDB changes made during the session
 

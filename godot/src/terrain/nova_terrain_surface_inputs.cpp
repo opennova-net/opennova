@@ -5,6 +5,7 @@
 
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
+#include <godot_cpp/variant/vector2i.hpp>
 
 #include <terrain/texture_preprocess.h>
 #include <til/til_overlay_bake.h>
@@ -53,6 +54,24 @@ bool image_to_rgba8(const Ref<Image> &p_source,
 bool texture_to_rgba8(const Ref<Texture2D> &p_texture,
 		opennova::terrain::Rgba8Image &r_out) {
 	return p_texture.is_valid() && image_to_rgba8(p_texture->get_image(), r_out);
+}
+
+Dictionary texture_diagnostics(const Ref<Texture2D> &p_texture) {
+	Dictionary result;
+	result["available"] = p_texture.is_valid();
+	if (p_texture.is_null()) {
+		result["size"] = Vector2i();
+		result["mipmap_count"] = 0;
+		result["level_count"] = 0;
+		return result;
+	}
+
+	result["size"] = Vector2i(p_texture->get_width(), p_texture->get_height());
+	const Ref<Image> image = p_texture->get_image();
+	const int mipmap_count = image.is_valid() ? image->get_mipmap_count() : -1;
+	result["mipmap_count"] = mipmap_count;
+	result["level_count"] = mipmap_count >= 0 ? mipmap_count + 1 : 0;
+	return result;
 }
 
 PackedByteArray to_packed_bytes(const std::vector<uint8_t> &p_bytes) {
@@ -604,5 +623,30 @@ Dictionary TerrainSurfaceInputs::get_diagnostics() const {
 	result["heightfield_normal"] = has_heightfield_normal();
 	result["tile_overlay_enabled"] = tile_overlay_enabled;
 	result["tile_overlay"] = has_tile_overlay();
+	result["tile_overlay_available"] = has_tile_overlay();
+	Ref<TerrainTileInfo> tile_info = tile_info_override;
+	if (tile_info.is_null() && terrain_data.is_valid()) {
+		tile_info = terrain_data->get_tileinfo_resource();
+	}
+	result["tile_info_available"] = tile_info.is_valid();
+	result["tile_entry_count"] =
+		tile_info.is_valid() ? tile_info->get_entry_count() : 0;
+	result["tilestrip_available"] = terrain_data.is_valid() &&
+		terrain_data->get_tilestrip_tex().is_valid();
+	result["detail_density"] = get_detail_density();
+	result["detail2_density"] = get_detail2_density();
+
+	Dictionary textures;
+	textures["colormap"] = texture_diagnostics(get_colormap_texture());
+	textures["detailmap"] = texture_diagnostics(get_detailmap_texture());
+	textures["blendmap"] = texture_diagnostics(get_blend_texture());
+	textures["detail_c1"] = texture_diagnostics(get_detail_c1_texture());
+	textures["detail_c2"] = texture_diagnostics(get_detail_c2_texture());
+	textures["detail_c3"] = texture_diagnostics(get_detail_c3_texture());
+	textures["detail2"] = texture_diagnostics(get_detail2_texture());
+	textures["heightfield_normal"] =
+		texture_diagnostics(get_heightfield_normal_texture());
+	textures["tile_overlay"] = texture_diagnostics(get_tile_overlay_texture());
+	result["textures"] = textures;
 	return result;
 }

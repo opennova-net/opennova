@@ -20,6 +20,7 @@
 #include <godot_cpp/classes/shader.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/classes/skeleton3d.hpp>
+#include <godot_cpp/variant/vector4.hpp>
 #include <godot_cpp/classes/skin.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/classes/visible_on_screen_notifier3d.hpp>
@@ -108,7 +109,8 @@ protected:
 	static void _bind_methods();
 
 public:
-	void publish(const Ref<EnvLightValues> &p_values);
+	void publish(const Ref<EnvLightValues> &p_values,
+			bool p_pass_changed = false);
 	Ref<EnvLightValues> get_values() const { return values_; }
 	int64_t get_generation() const { return generation_; }
 };
@@ -138,8 +140,8 @@ class ObjectModel : public Node3D {
 public:
 	// The witnessed lighting uniform surface defaults — the RETAIL NOON
 	// register (shipped full_00.env tod 1200 bytes /255), so an un-enved
-	// preview lights like a JO noon world. Must stay equal to the composer's
-	// uniform defaults (engine/runtime/renderer/object_shader_template.cpp).
+	// preview lights like a JO noon world. Must stay equal to the checked-in
+	// shader defaults (res://shaders/object/shared.gdshaderinc).
 	static Vector3 default_hemi_sky_color() { return Vector3(84.0f / 255.0f, 88.0f / 255.0f, 89.0f / 255.0f); }
 	static Vector3 default_dir_light_dir() { return Vector3(-0.4082f, -0.8165f, -0.4082f); }
 	static Vector3 default_dir_light_color() { return Vector3(170.0f / 255.0f, 170.0f / 255.0f, 167.0f / 255.0f); }
@@ -187,6 +189,9 @@ private:
 	Vector3 last_light_position_;
 	Color last_light_color_ = Color(1, 1, 1, 1);
 	float last_light_intensity_ = 0.0f;
+	// The last applied point-light selection (FNV over count + packed
+	// vectors); 0 = never applied.
+	uint64_t last_point_light_selection_hash_ = 0;
 	float last_light_atten_start_ = 0.0f;
 	float last_light_atten_end_ = 0.0f;
 	// Dense part-index -> Node3D array + the PANM revision this model last
@@ -317,6 +322,7 @@ private:
 	int64_t last_object_update_mask() const;
 	void on_object_changed();
 	void on_env_generation_changed();
+	void on_env_pass_changed();
 	void wake_runtime_frame();
 	void sleep_runtime_frame_if_idle();
 	bool needs_runtime_frame_work() const;
@@ -390,6 +396,9 @@ public:
 	// loop. Models self-park out of the set the first frame they hold no live
 	// work; there is no per-node _process.
 	static void advance_awake_frame(double p_delta);
+	// Exact-pose capture tail: stamp current env values on awake visible models
+	// without advancing any clock-derived render state.
+	static void refresh_awake_environment();
 	static int64_t awake_model_count();
 	// True while this model is in the shared awake set (the park/re-arm gate's
 	// observable — replaces the ex-per-node is_processing() the tests read).
@@ -417,6 +426,15 @@ public:
 			float p_interior_daylight);
 	void set_interior_section_light_transfer(float p_daylight);
 	AABB get_model_bounds() const { return model_bounds_; }
+	// The model bounds in world space — the per-draw light query box
+	// (retail queries per draw context, see docs/render/render-lighting-re.md).
+	AABB get_world_bounds() const;
+	// Write one frame's selected point lights (packed posr = xyz world +
+	// atten2, color = premultiplied rgb + range) as per-instance shader
+	// parameters on every surface instance. A selection hash gates redundant
+	// RenderingServer writes; count 0 clears.
+	void apply_point_light_selection(int p_count, const Vector4 *p_posr,
+			const Vector4 *p_color);
 	Dictionary get_render_part_nodes() const;
 	void set_section_visibility_mask(int64_t p_mask);
 	PackedInt32Array get_surface_material_indices() const { return surface_material_indices_; }

@@ -79,6 +79,64 @@ func _tool_game_entities(args: Dictionary, _ctx: McpToolContext) -> Variant:
 					"Unknown game_entities op '%s'." % op)
 
 
+func _tool_game_render_diagnostics(
+		_args: Dictionary,
+		_ctx: McpToolContext) -> Variant:
+	if adapter == null:
+		return McpToolResult.error("The game's renderer diagnostics are unavailable.")
+	var value: Variant = adapter.get_mcp_render_diagnostics()
+	if not (value is Dictionary) or (value as Dictionary).is_empty():
+		return McpToolResult.error(
+				"The game has no render world to inspect yet; start or load a mission first.")
+	return value
+
+
+func _tool_game_capture_bundle(
+		args: Dictionary,
+		ctx: McpToolContext) -> Variant:
+	if adapter == null:
+		return McpToolResult.error("The game's render capture is unavailable.")
+	var label: Variant = args.get("label", "render")
+	var settle_frames: Variant = _integer_number(args.get("settle_frames", 2))
+	var world_only: Variant = args.get("world_only", true)
+	var include_image: Variant = args.get("include_image", true)
+	if typeof(label) != TYPE_STRING or String(label).length() > 80 \
+			or settle_frames == null or int(settle_frames) < 0 \
+			or int(settle_frames) > 180 \
+			or typeof(world_only) != TYPE_BOOL \
+			or typeof(include_image) != TYPE_BOOL:
+		return McpToolResult.error(
+				"game_capture_bundle requires label as a string up to 80 characters, "
+				+ "settle_frames from 0 to 180, and boolean world_only/include_image.")
+	var normalized := {
+		"label": String(label),
+		"settle_frames": int(settle_frames),
+		"world_only": bool(world_only),
+		"include_image": bool(include_image),
+	}
+	var value: Variant = await adapter.capture_mcp_render_bundle(
+			normalized, func() -> bool: return ctx.cancelled)
+	if ctx.cancelled:
+		return McpToolResult.error("Game render capture was cancelled.")
+	if not (value is Dictionary):
+		return McpToolResult.error("The game returned an invalid render capture bundle.")
+	var bundle: Dictionary = value
+	if bundle.has("error"):
+		return McpToolResult.error(String(bundle["error"]))
+	var image_bytes: Variant = bundle.get("image_bytes")
+	if not (image_bytes is PackedByteArray) or image_bytes.is_empty():
+		return McpToolResult.error("The game render capture returned no lossless PNG bytes.")
+	var structured := bundle.duplicate(true)
+	structured.erase("image_bytes")
+	var safe: Variant = McpJson.sanitize(structured)
+	var result := McpToolResult.new()
+	if bool(include_image):
+		result.add_image(image_bytes, "image/png")
+	result.add_text(JSON.stringify(safe, "\t"))
+	result.structured = safe
+	return result
+
+
 func _tool_game_control(args: Dictionary, _ctx: McpToolContext) -> Variant:
 	var action := String(args.get("action", ""))
 	if action == INTERNAL_SHUTDOWN_ACTION:

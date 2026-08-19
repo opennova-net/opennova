@@ -379,6 +379,17 @@ Array Simulation::drain_round_impacts() {
 		d["age_ticks"] = static_cast<int64_t>(age_ticks);
 		d["source_tick"] = static_cast<int64_t>(imp.tick);
 		d["source_order"] = static_cast<int64_t>(imp.source_order);
+		// The impact flash light rides the effect leg's own gate — retail
+		// requires the effect entry AND the ammo light_impact radius (the
+		// witness map on renderer/light_scene.h).
+		if (has_effect && ammo->light_impact_radius > 0.0f) {
+			d["light_radius"] = ammo->light_impact_radius;
+			d["light_color"] = Color(
+					static_cast<float>((ammo->light_impact_color >> 16) & 0xFF) / 255.0f,
+					static_cast<float>((ammo->light_impact_color >> 8) & 0xFF) / 255.0f,
+					static_cast<float>(ammo->light_impact_color & 0xFF) / 255.0f);
+			d["light_ticks"] = ammo->light_impact_ticks;
+		}
 		out.push_back(d);
 	}
 	world_->round_sim.impacts.clear();
@@ -559,9 +570,17 @@ Dictionary Simulation::drain_destruction_events() {
 		d["pos"] = to_godot(h.pos);
 		husks.push_back(d);
 	}
+	Array death_lights;
+	for (const opennova::world::DeathLightEvent &l : ev.death_lights) {
+		Dictionary d;
+		d["pos"] = to_godot(l.pos);
+		d["radius"] = l.radius;
+		death_lights.push_back(d);
+	}
 	out["effects"] = effects;
 	out["sounds"] = sounds;
 	out["husk_swaps"] = husks;
+	out["death_lights"] = death_lights;
 	out["explosions_processed"] = ev.explosions_processed;
 	out["items_destroyed"] = ev.items_destroyed;
 	out["crackles"] = ev.crackles; // wreck-fire crackle rolls fired (S12b)
@@ -681,6 +700,33 @@ PackedFloat32Array Simulation::get_tracer_trails() const {
 			pw[2] = -p.pos.y;
 			pw[3] = p.w;
 		}
+	}
+	return out;
+}
+
+// The in-flight round glows — see the header note. One row per active round
+// whose ammo authors `light_move`; the id is the round's presentation
+// generation so pool-slot reuse never teleports a glow.
+Array Simulation::get_round_glow_rows() const {
+	Array out;
+	if (!world_installed_) return out;
+	for (const opennova::world::LiveRound &r : world_->round_sim.rounds) {
+		if (!r.active || r.ammo_index < 0) continue;
+		const opennova::world::AmmoTableEntry *ammo =
+				world_->ammo.by_index(r.ammo_index);
+		if (ammo == nullptr || ammo->light_move_radius <= 0.0f) continue;
+		Dictionary d;
+		d["id"] = static_cast<int64_t>(r.presentation_generation);
+		// The spawn rides radius/2 above the round and the per-tick follow
+		// re-centers at the round position (retail: @0x4ec8d6 / @0x4eaa9f,
+		// see renderer/light_scene.h).
+		d["pos"] = Vector3(r.pos.x, r.pos.z, -r.pos.y);
+		d["radius"] = ammo->light_move_radius;
+		d["color"] = Color(
+				static_cast<float>((ammo->light_move_color >> 16) & 0xFF) / 255.0f,
+				static_cast<float>((ammo->light_move_color >> 8) & 0xFF) / 255.0f,
+				static_cast<float>(ammo->light_move_color & 0xFF) / 255.0f);
+		out.push_back(d);
 	}
 	return out;
 }

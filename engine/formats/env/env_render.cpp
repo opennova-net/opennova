@@ -1464,7 +1464,7 @@ void apply_bms_overrides(Config &config, const BmsEnvOverrides &overrides) {
 		config.water_rgb = overrides.water_color;
 	}
 	if (overrides.has_water_murk) {
-		config.water_murk = std::min(overrides.water_murk, 0.99f);
+		config.water_murk = clamp_water_murk_upper(overrides.water_murk);
 	}
 	if (overrides.has_start_time) {
 		config.curtime = overrides.start_time;

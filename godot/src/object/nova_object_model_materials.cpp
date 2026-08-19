@@ -127,7 +127,7 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_index,
 		// (render-material-re.md §FF technique tables).
 		key &= ~renderer::OSCAP_DETAIL;
 	}
-	material->set_shader(shader_cache->get_shader_for_key(key));
+	shader_cache->configure_material_for_key(material, key);
 	const int32_t blend_mode = shader_cache->blend_for_key(key);
 	if (blend_mode != static_cast<int32_t>(renderer::ObjectBlendMode::Opaque)) {
 		// Water-side rung applied by refresh_render_order() once placed.
@@ -169,8 +169,6 @@ Ref<ShaderMaterial> ObjectModel::create_material(int p_index,
 	material->set_shader_parameter("u_uv_transform_v", Vector3(0.0f, 1.0f, 0.0f));
 	material->set_shader_parameter("u_rgb_mod", Vector3(1, 1, 1));
 	material->set_shader_parameter("u_alpha_mod", 1.0f);
-	material->set_shader_parameter("u_emissive",
-			bool(info.get("emissive", false)) ? 1.0f : 0.0f);
 	material->set_shader_parameter("u_local_light_count", 0);
 	material->set_shader_parameter("u_local_light_position", Vector3());
 	material->set_shader_parameter("u_local_light_color", Vector3(1, 1, 1));
@@ -403,9 +401,10 @@ void ObjectModel::apply_environment_to_materials() {
 }
 
 void ObjectModel::apply_lights() {
-	// Gameplay deliberately leaves parsed LGHT records inactive: retail never
-	// submits model-authored LGHT [orig: parse_lights_chunk @0x5B47B0; model
-	// field +0xCC has no post-load renderer read]. Editor preview opt-in only.
+	// This per-material local-light route is editor preview only. Gameplay
+	// evaluates authored LGHT into the shared EffectWorld light pool, whose
+	// selected lights arrive through the global object-shader uniforms; it must
+	// not also inject the same record through u_local_light_*.
 	if (!model_light_preview_enabled_ || !has_lights_) {
 		return;
 	}

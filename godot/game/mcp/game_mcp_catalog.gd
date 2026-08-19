@@ -95,6 +95,36 @@ static func definitions() -> Array[McpToolDef]:
 				"filter": {"type": "string"},
 				"confirm_authority": {"type": "boolean", "default": false},
 			}, ["op"]),
+		McpToolDef.make("game_render_diagnostics",
+			"Read one frame-correlated rendering snapshot from the real game: exact camera "
+			+ "and projection matrices, environment/weather/sky/water state, active lights, "
+			+ "directional-shadow configuration, and root/shadow/reflection pass counts. "
+			+ "This is a read-only diagnostic; capture a durable PNG + JSON pair with "
+			+ "game_capture_bundle.",
+			{}, [], false),
+		McpToolDef.make("game_capture_bundle",
+			"Capture the real game's next completed render frame as a full-resolution, "
+			+ "lossless PNG and a frame-correlated render-diagnostics JSON sidecar under "
+			+ "user://render-captures. world_only hides game Canvas UI for the captured "
+			+ "frame and restores it immediately. The result always returns absolute paths, "
+			+ "dimensions and SHA-256; include_image also returns the PNG as MCP image content.",
+			{
+				"label": {
+					"type": "string",
+					"maxLength": 80,
+					"default": "render",
+					"description": "Short fixture/pose label used in the generated filenames.",
+				},
+				"settle_frames": {
+					"type": "integer",
+					"minimum": 0,
+					"maximum": 180,
+					"default": 2,
+					"description": "Completed process frames to wait before the captured draw.",
+				},
+				"world_only": {"type": "boolean", "default": true},
+				"include_image": {"type": "boolean", "default": true},
+			}, [], true, SCREENSHOT_TIMEOUT_MS),
 		McpToolDef.make("game_menu",
 			"Drive the compiled menu. op=state returns the current file/screen + widget rows "
 			+ "(design-space rects); press activates a named widget through the real mouse pump "

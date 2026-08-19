@@ -19,7 +19,7 @@ const BUILTIN_TOOLS := [
 	"edit_menu_widget", "set_widget_actions", "edit_widget_items",
 	"preview_menu", "menu_screenshot", "analyze_menu", "save_menu",
 	"run_game", "game_state", "game_entities", "game_control", "game_debug",
-	"game_screenshot", "game_logs",
+	"game_render_diagnostics", "game_capture_bundle", "game_screenshot", "game_logs",
 ]
 
 
@@ -139,6 +139,8 @@ func test_builtins_registered() -> void:
 		"game_entities",
 		"game_control",
 		"game_debug",
+		"game_render_diagnostics",
+		"game_capture_bundle",
 		"game_screenshot",
 		"game_logs",
 	]:

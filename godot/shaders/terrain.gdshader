@@ -10,11 +10,22 @@ render_mode unshaded;
 // Debug: 0=off, 1=LOD colors, 2=sector colors, 3=normals, 4=heightmap
 uniform int u_debug_mode = 0;
 
+// Runtime tile-composition cache: one shared 128-layer, single-level array.
+// Page identity/LRU/pixels come from engine/runtime/terrain; this shader only
+// selects the layer bound to the current terrain instance. The analytic path
+// below remains the fail-closed editor/cold-cache fallback.
+uniform sampler2DArray u_tile_cache : filter_linear, repeat_disable;
+uniform bool u_has_tile_cache = false;
+
 // Per-instance debug data (set via instance_geometry_set_shader_parameter)
 instance uniform float u_instance_lod : hint_range(0.0, 7.0) = 0.0;
 instance uniform float u_instance_sector_x = 0.0;
 instance uniform float u_instance_sector_z = 0.0;
 instance uniform vec2 u_instance_source_quadrant = vec2(0.0);
+instance uniform bool u_instance_tile_cache_ready = false;
+instance uniform float u_instance_tile_cache_layer = 0.0;
+// world origin X/Z, inverse world span, world span (diagnostic mirror).
+instance uniform vec4 u_instance_tile_cache_origin_span = vec4(0.0);
 
 varying vec2 v_colormap_uv;
 varying vec2 v_detail_uv;
@@ -24,7 +35,7 @@ varying float v_eye_depth;
 
 void vertex() {
 	v_colormap_uv = UV;
-	v_detail_uv = UV * u_detail_density;
+	v_detail_uv = retail_detail_uv_from_atlas(UV, u_detail_density);
 	v_world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	v_world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
 	v_eye_depth = max(-(MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).z, 0.0);
@@ -64,12 +75,23 @@ vec3 sector_color(float sx, float sz) {
 }
 
 void fragment() {
-	vec2 sampled_colormap_uv = clamp_retail_quadrant_uv(
-		v_colormap_uv, u_instance_source_quadrant, textureSize(u_colormap, 0));
-	vec4 colormap = retail_bare_terrain_tile(
-		texture(u_colormap, sampled_colormap_uv).rgb, v_world_normal,
-		v_colormap_uv, u_instance_source_quadrant);
-	colormap = compose_retail_tile_overlay(colormap, v_world_pos);
+	vec4 colormap;
+	if (u_has_tile_cache && u_instance_tile_cache_ready) {
+		vec2 page_uv = (v_world_pos.xz -
+			u_instance_tile_cache_origin_span.xy) *
+			u_instance_tile_cache_origin_span.z;
+		vec2 half_texel = vec2(0.5 / 256.0);
+		page_uv = clamp(page_uv, half_texel, vec2(1.0) - half_texel);
+		colormap = texture(u_tile_cache,
+			vec3(page_uv, u_instance_tile_cache_layer));
+	} else {
+		vec2 sampled_colormap_uv = clamp_retail_quadrant_uv(
+			v_colormap_uv, u_instance_source_quadrant, textureSize(u_colormap, 0));
+		colormap = retail_bare_terrain_tile(
+			texture(u_colormap, sampled_colormap_uv).rgb, v_world_normal,
+			v_colormap_uv, u_instance_source_quadrant);
+		colormap = compose_retail_tile_overlay(colormap, v_world_pos);
+	}
 	vec3 result = terrain_surface_color_from_colormap(
 		colormap, v_colormap_uv, v_detail_uv, u_instance_source_quadrant);
 

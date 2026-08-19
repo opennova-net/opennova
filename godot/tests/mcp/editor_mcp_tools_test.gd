@@ -154,6 +154,69 @@ func test_describe_asset_3di_fixture() -> void:
 	assert_false(result.is_error)
 	assert_eq(result.structured["kind"], "object_model")
 	assert_false(String(result.structured["data"]["object_name"]).is_empty())
+	var full: McpToolResult = await _call("describe_asset", {
+		"path": path,
+		"depth": "full",
+		"limit": 2,
+	})
+	assert_false(full.is_error)
+	var data: Dictionary = full.structured["data"]
+	assert_true(data.has("materials"))
+	assert_true(data.has("lights"))
+	assert_lte((data["materials"] as Array).size(), 2,
+			"deep 3DI material summaries honor the shared limit")
+	assert_lte((data["lights"] as Array).size(), 2,
+			"deep 3DI LGHT summaries honor the shared limit")
+	if not (data["materials"] as Array).is_empty():
+		var material: Dictionary = data["materials"][0]
+		for key in [
+			"index", "shader", "is_glass", "emissive_type", "textures",
+			"technique", "shadow_inputs", "glass", "emissive",
+		]:
+			assert_true(material.has(key), "material summary carries %s" % key)
+	if not (data["lights"] as Array).is_empty():
+		var light: Dictionary = data["lights"][0]
+		for key in ["index", "offset", "attenuation_end", "affects"]:
+			assert_true(light.has(key), "LGHT summary carries %s" % key)
+	assert_eq(int(data["material_count"]), int(data["material_total"]))
+	assert_eq(int(data["light_count"]), int(data["light_total"]))
+
+
+func test_describe_asset_fire_fixture_distinguishes_emissive_from_lght() -> void:
+	var path := ProjectSettings.globalize_path("res://").path_join(
+			"../fixtures/3dp/CmpFireN/CmpFireN.3di")
+	if not FileAccess.file_exists(path):
+		pass_test("CmpFireN 3di fixture not present in this checkout")
+		return
+	var result: McpToolResult = await _call("describe_asset", {"path": path})
+	assert_false(result.is_error)
+	var data: Dictionary = result.structured["data"]
+	assert_gt(int(data["material_features"]["emissive"]), 0,
+			"the camp-fire fixture exposes its emissive material classification")
+	assert_eq(int(data["light_count"]), 0,
+			"emissive fire art is not misreported as an authored LGHT record")
+
+
+func test_describe_asset_lght_fixture_exposes_authored_light_fields() -> void:
+	var path := ProjectSettings.globalize_path("res://").path_join(
+			"../fixtures/3dp/DLabA1/DLabA1.3di")
+	if not FileAccess.file_exists(path):
+		pass_test("DLabA1 3di fixture not present in this checkout")
+		return
+	var result: McpToolResult = await _call("describe_asset", {
+		"path": path,
+		"depth": "full",
+		"limit": 1,
+	})
+	assert_false(result.is_error)
+	var data: Dictionary = result.structured["data"]
+	assert_gt(int(data["light_count"]), 0,
+			"the DLabA1 fixture pins a real authored LGHT record")
+	assert_eq((data["lights"] as Array).size(), 1)
+	var light: Dictionary = data["lights"][0]
+	assert_true(light.has("color_start"))
+	assert_true(light.has("color_end"))
+	assert_true(light.has("affects"))
 
 
 func test_script_surface_is_gone() -> void:

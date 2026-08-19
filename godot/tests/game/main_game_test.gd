@@ -7,6 +7,10 @@ extends GutTest
 
 const MainGameScript := preload("res://game/main_game.gd")
 const MainGameScene := preload("res://game/main_game.tscn")
+const ShellPresentationSessionScript := preload(
+		"res://game/shell_presentation_session.gd")
+const HudHiddenCaptureWitness := preload(
+		"res://game/world/hud_hidden_capture_witness.gd")
 const STATE_CONFIG_PATH := "user://terrain_editor_state.cfg"
 const FIXTURE_DIR := "res://../fixtures/minimal/resources"
 const POLICY_FILE := "policy.bin"
@@ -26,6 +30,33 @@ class FakeGameHud:
 
 	func set_crosshair_style(style: int) -> void:
 		crosshair_style = style
+
+
+class HudHiddenPresenterHarness:
+	extends GameHudPresenter
+	var begin_calls := 0
+	var finish_calls := 0
+	var capture_active := false
+
+	func begin_hud_hidden_capture() -> Error:
+		begin_calls += 1
+		capture_active = true
+		return OK
+
+	func finish_hud_hidden_capture() -> void:
+		finish_calls += 1
+		capture_active = false
+
+	func hud_hidden_capture_witness() -> HudHiddenCaptureWitness:
+		var witness := HudHiddenCaptureWitness.new()
+		if not capture_active:
+			witness.error = "HUD-hidden capture is not active"
+			return witness
+		witness.hud_detail_level = 3
+		witness.gameplay_hud_visible = false
+		witness.player_view_effects_active = true
+		witness.fps_counter_visible = false
+		return witness
 
 
 func before_each() -> void:
@@ -65,7 +96,7 @@ func after_each() -> void:
 	Strings.clear()
 
 
-func _make() -> Node:
+func _make() -> MainGame:
 	# Not added to the tree on purpose: the predicate only reads _state/_picker, and
 	# staying out of the tree keeps _ready/@onready (which need the full scene) from running.
 	var game = MainGameScript.new()
@@ -102,6 +133,205 @@ func test_loading_background_query_is_false_without_a_live_handoff() -> void:
 	var game := _make()
 	assert_false(game.has_loading_background(),
 			"the public loading-art query is safe while the shell is idle")
+
+
+func test_main_game_scene_mounts_the_gameplay_fps_counter() -> void:
+	var game := MainGameScene.instantiate()
+	autofree(game)
+	var fps_label := game.get_node_or_null("HUD/FpsLabel") as Label
+	assert_not_null(fps_label,
+			"ordinary gameplay mounts the player-visible FPS counter")
+	if fps_label != null:
+		assert_true(fps_label.visible,
+				"the FPS counter starts visible outside screenshot capture")
+
+
+func test_world_only_capture_hides_layers_without_overwriting_descendant_state() -> void:
+	var game := _make()
+	var hud := CanvasLayer.new()
+	var menu_layer := CanvasLayer.new()
+	var viewmodel_layer := CanvasLayer.new()
+	var nested_owner := Node.new()
+	var nested_overlay := CanvasLayer.new()
+	viewmodel_layer.name = "ViewmodelPass"
+	nested_overlay.name = "DebugOverlay"
+	game.add_child(hud)
+	game.add_child(menu_layer)
+	game.add_child(viewmodel_layer)
+	game.set("_hud", hud)
+	game.set("_menu_layer", menu_layer)
+
+	var visible_hud := Control.new()
+	var hidden_hud := Control.new()
+	var visible_menu := Control.new()
+	var visible_viewmodel := Control.new()
+	hidden_hud.visible = false
+	hud.add_child(visible_hud)
+	hud.add_child(hidden_hud)
+	hud.add_child(nested_owner)
+	nested_owner.add_child(nested_overlay)
+	menu_layer.add_child(visible_menu)
+	viewmodel_layer.add_child(visible_viewmodel)
+
+	assert_eq(game.mcp_begin_world_only_capture(), OK)
+	assert_false(hud.visible,
+			"the HUD layer hides nested CanvasLayers such as DebugOverlay")
+	assert_false(menu_layer.visible)
+	assert_false(viewmodel_layer.visible)
+	assert_false(nested_overlay.visible,
+			"CanvasLayer visibility does not propagate to nested layers")
+	assert_true(visible_hud.visible,
+			"capture suppression must not rewrite descendant UI state")
+	assert_false(hidden_hud.visible)
+	assert_true(visible_menu.visible)
+	assert_true(visible_viewmodel.visible)
+	assert_eq(game.mcp_begin_world_only_capture(), ERR_BUSY,
+			"a nested capture cannot overwrite the saved visibility snapshot")
+
+	# A real shell transition may update descendants while the async capture is
+	# settling. Cleanup must reveal that new state, not replay a stale child copy.
+	visible_menu.visible = false
+	game.mcp_end_world_only_capture()
+	assert_true(hud.visible)
+	assert_true(menu_layer.visible)
+	assert_true(viewmodel_layer.visible)
+	assert_true(nested_overlay.visible)
+	assert_true(visible_hud.visible)
+	assert_false(hidden_hud.visible, "an initially hidden child stays hidden")
+	assert_false(visible_menu.visible,
+			"a visibility change made during capture survives cleanup")
+	assert_true(visible_viewmodel.visible)
+	game.mcp_end_world_only_capture() # idempotent cleanup
+
+
+func test_world_only_capture_rejects_an_unconfigured_shell() -> void:
+	var game := _make()
+	assert_eq(game.mcp_begin_world_only_capture(), ERR_UNCONFIGURED)
+
+
+func test_hud_hidden_capture_delegates_through_main_game_and_keeps_canvas_active() -> void:
+	var game := _make()
+	var hud := CanvasLayer.new()
+	var fps_label := Label.new()
+	fps_label.name = "FpsLabel"
+	hud.add_child(fps_label)
+	var presenter := HudHiddenPresenterHarness.new()
+	game.add_child(hud)
+	game.add_child(presenter)
+	game.set("_hud", hud)
+	game.set("_hud_presenter", presenter)
+
+	assert_eq(game.begin_hud_hidden_capture(), OK)
+	assert_eq(presenter.begin_calls, 1)
+	var witness: HudHiddenCaptureWitness = game.hud_hidden_capture_witness()
+	assert_eq(witness.hud_detail_level, 3)
+	assert_false(witness.gameplay_hud_visible)
+	assert_true(witness.player_view_effects_active)
+	assert_false(witness.ads_active)
+	assert_false(witness.big_map_active)
+	assert_true(witness.hud_canvas_layer_active)
+	assert_false(witness.fps_counter_visible)
+	game.finish_hud_hidden_capture()
+	assert_eq(presenter.finish_calls, 1)
+	assert_true(fps_label.visible)
+
+	var unconfigured := _make()
+	assert_eq(unconfigured.begin_hud_hidden_capture(), ERR_UNCONFIGURED)
+	assert_false(unconfigured.hud_hidden_capture_witness().is_valid())
+
+
+func test_runtime_shutdown_restores_an_active_hud_hidden_capture() -> void:
+	var game := _make()
+	var hud := CanvasLayer.new()
+	var fps_label := Label.new()
+	fps_label.name = "FpsLabel"
+	hud.add_child(fps_label)
+	var presenter := HudHiddenPresenterHarness.new()
+	game.add_child(hud)
+	game.add_child(presenter)
+	game.set("_hud", hud)
+	game.set("_hud_presenter", presenter)
+
+	assert_eq(game.begin_hud_hidden_capture(), OK)
+	assert_false(fps_label.visible)
+	game.begin_runtime_shutdown()
+	assert_true(fps_label.visible,
+			"runtime cancellation restores screenshot-only FPS suppression")
+	assert_false(presenter.capture_active,
+			"runtime cancellation also restores the gameplay HUD detail")
+
+
+func test_shell_presentation_session_rejects_unconfigured_hud_hidden_capture() -> void:
+	var session := ShellPresentationSessionScript.new()
+	assert_eq(session.begin_hud_hidden_capture(null, null), ERR_UNCONFIGURED)
+	assert_false(session.hud_hidden_capture_witness(null, null).is_valid())
+	session.finish_hud_hidden_capture(null)
+
+
+func test_shell_presentation_session_owns_hud_hidden_capture_boundary() -> void:
+	var session := ShellPresentationSessionScript.new()
+	var presenter := HudHiddenPresenterHarness.new()
+	var hud := CanvasLayer.new()
+	var fps_label := Label.new()
+	fps_label.name = "FpsLabel"
+	hud.add_child(fps_label)
+	autofree(presenter)
+	autofree(hud)
+
+	assert_eq(session.begin_hud_hidden_capture(presenter, hud), OK)
+	assert_false(fps_label.visible,
+			"the FPS counter is hidden only while screenshot presentation is active")
+	assert_eq(session.begin_hud_hidden_capture(presenter, hud), ERR_BUSY,
+			"a nested screenshot cannot replace the visibility snapshot")
+	var witness: HudHiddenCaptureWitness = \
+			session.hud_hidden_capture_witness(presenter, hud)
+	assert_true(witness.is_valid())
+	assert_eq(witness.hud_detail_level, 3)
+	assert_false(witness.gameplay_hud_visible)
+	assert_true(witness.player_view_effects_active)
+	assert_true(witness.hud_canvas_layer_active)
+
+	session.finish_hud_hidden_capture(presenter)
+	assert_true(fps_label.visible,
+			"screenshot cleanup restores the exact ordinary FPS visibility")
+	session.finish_hud_hidden_capture(presenter)
+	assert_true(fps_label.visible, "screenshot cleanup is idempotent")
+	assert_false(session.hud_hidden_capture_witness(presenter, hud).is_valid())
+
+	# An already-hidden FPS label remains hidden after the capture transaction;
+	# cleanup restores state rather than unconditionally showing telemetry.
+	fps_label.visible = false
+	assert_eq(session.begin_hud_hidden_capture(presenter, hud), OK)
+	assert_false(fps_label.visible)
+	session.finish_hud_hidden_capture(presenter)
+	assert_false(fps_label.visible,
+			"capture restores an initially hidden FPS counter exactly")
+
+
+func test_shell_presentation_session_stages_and_reveals_world_atomically() -> void:
+	var session := ShellPresentationSessionScript.new()
+	var menu := MenuShell.new()
+	var world := GameWorld.new()
+	var hud := CanvasLayer.new()
+	var hud_item := Control.new()
+	var loaded_callback := func() -> void: pass
+	var failed_callback := func(_reason: String) -> void: pass
+	autofree(menu)
+	autofree(world)
+	autofree(hud)
+	hud.add_child(hud_item)
+
+	session.begin_world_load(
+			menu, world, hud, loaded_callback, failed_callback)
+	assert_false(menu.visible)
+	assert_false(world.visible)
+	assert_false(hud_item.visible)
+	assert_true(world.world_loaded.is_connected(loaded_callback))
+	assert_true(world.load_failed.is_connected(failed_callback))
+
+	session.finish_world_load(WorldLoadCoordinator.new(), world, hud)
+	assert_true(world.visible)
+	assert_true(hud_item.visible)
 
 
 func test_main_frame_probe_spans_are_default_off() -> void:

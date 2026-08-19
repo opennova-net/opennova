@@ -172,6 +172,18 @@ func test_overlay_draws_health_from_fixture_layout() -> void:
 	assert_eq(int(stats["quads_wire"]), 1, "and the wireframe border on top")
 	assert_eq(int(stats["tris"]), 0, "no weapon -> no reticle")
 	assert_eq(int(stats["glyphs"]), 0, "no font -> no text")
+	hud.set_hud_detail_level(3)
+	stats = hud.get_draw_list_stats()
+	assert_eq(int(stats["elements_drawn"]), 0,
+			"retail HUD detail 3 emits no gameplay HUD elements")
+	assert_eq(int(stats["quads"]), 0)
+	assert_eq(int(stats["tris"]), 0)
+	assert_eq(int(stats["lines"]), 0)
+	assert_eq(int(stats["glyphs"]), 0)
+	assert_false(bool(stats["map_visible"]))
+	assert_false(bool(stats["big_map_visible"]))
+	assert_true(hud.visible,
+			"declutter leaves the overlay mounted for PlayerViewEffects")
 	await get_tree().process_frame
 	assert_true(is_instance_valid(hud), "HUD survives a draw with the fixture layout.")
 
@@ -280,6 +292,11 @@ func test_spinmap_compiles_terrain_retained_markers_and_waypoint() -> void:
 			PackedInt32Array([3, 16, 0]))
 	await get_tree().process_frame
 	stats = hud.get_draw_list_stats()
+	assert_true(bool(stats["big_map_visible"]),
+			"The stats seam reports the actual large-map draw list, not the corner map.")
+	assert_eq(int(stats["big_map_backing_tris"]), 2,
+			"The fullscreen large map owns its independent rectangular backing.")
+	assert_gt(int(stats["big_map_terrain_tris"]), 0)
 	assert_eq(int(stats["big_map_texture_filter"]), 4,
 			"The enlarged map icon strip uses explicit linear mip filtering.")
 	assert_eq(int(stats["big_map_texture_repeat"]), 1,
@@ -645,9 +662,41 @@ func test_player_view_effects_draw_retail_asset_stack() -> void:
 	assert_eq(RenderingServer.debug_canvas_item_get_rect(effects.get_canvas_item()),
 			Rect2(0, 0, 1024, 768),
 			"Retail masks cover the viewport while inset art stays in design coordinates.")
-	assert_eq(effects.get_child_count(true), 1, "The NVG post-process is an internal child.")
-	assert_true((effects.get_child(0, true) as CanvasItem).visible,
+	assert_eq(effects.get_child_count(true), 2,
+			"The underwater murk and NVG post-processes are internal children.")
+	var murk := effects.get_node("UnderwaterMurk") as ColorRect
+	var nvg := effects.get_node("NvgPost") as ColorRect
+	assert_not_null(murk)
+	assert_not_null(nvg)
+	assert_lt(murk.get_index(true), nvg.get_index(true),
+			"Retail composites underwater murk before later first-person HUD effects.")
+	assert_true(nvg.visible,
 			"First-person-visible NVG enables the post-process.")
 	effects.update_info({"nvg_visible": false})
-	assert_false((effects.get_child(0, true) as CanvasItem).visible,
+	assert_false(nvg.visible,
 			"Camera suppression hides the post-process without consuming simulation state.")
+
+
+func test_player_view_effects_tracks_exact_underwater_murk_pass() -> void:
+	var effects := PlayerViewEffectsScript.new()
+	effects.size = Vector2(1024, 768)
+	add_child_autofree(effects)
+	var env := MissionEnvironment.new()
+	add_child_autofree(env)
+	effects.set_environment(env)
+	var murk := effects.get_node("UnderwaterMurk") as ColorRect
+	assert_not_null(murk)
+	assert_false(murk.visible, "The dry view has no murk scissor.")
+
+	env.set_underwater_overlay_view(true)
+	assert_true(murk.visible,
+			"The render-pass edge updates synchronously even when the shell is frozen.")
+	var lit := env.get_underwater_overlay_color()
+	assert_true(Vector3(murk.color.r, murk.color.g, murk.color.b).is_equal_approx(lit))
+	assert_almost_eq(murk.color.a, 204.0 / 255.0, 0.000001,
+			"Default murk 0.8 becomes the witnessed alpha byte 204.")
+	assert_true(murk.show_behind_parent,
+			"The murk quad stays behind the ordinary HUD draw list.")
+
+	env.set_underwater_overlay_view(false)
+	assert_false(murk.visible, "Surfacing retires the murk quad synchronously.")

@@ -35,6 +35,10 @@ func advance(camera_pos: Vector3, camera_xform: Transform3D, delta: float,
 	# Place the local-player camera/viewmodel from the state the session tick
 	# just produced, BEFORE every camera-driven render leg reads it (D-RORD-8).
 	_world.present_local_view_frame()
+	# Retail re-applies fog/ambient per scene pass. Classify the adjusted render
+	# eye after camera placement and publish that pass payload before terrain,
+	# foliage, objects, viewmodel, and particles consume it.
+	_world.apply_scene_environment_frame()
 	# Terrain samples the viewport camera directly; foliage receives the same
 	# live render transform. Their producer order stays terrain then foliage so
 	# foliage consumes this frame's detail-cell handoff.
@@ -47,6 +51,10 @@ func advance(camera_pos: Vector3, camera_xform: Transform3D, delta: float,
 		_world.apply_blink_frame()
 	_world.apply_occlusion_frame()
 	_world.sample_iris_frame()
+	# The EffectWorld point-light select for this camera (after iris publishes
+	# the frame's ambient scale, before the lit material draws consume the
+	# pushed globals).
+	_world.render_light_frame()
 	# Per-model runtime advance (ex-self-clocked ObjectModel _process): after
 	# occlusion resolves visibility, before the particle composite over it.
 	_world.render_material_frame()

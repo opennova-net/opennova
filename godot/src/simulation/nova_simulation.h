@@ -1729,6 +1729,15 @@ public:
 	// in world/tracer_trails.h.]
 	PackedFloat32Array get_tracer_trails() const;
 
+	// The in-flight round glows: one row per active round whose ammo authors
+	// `light_move` — {id (presentation generation), pos (godot space), radius,
+	// color}. The presenter's light pool spawns a permanent (mode 1) light per
+	// id, follows it per tick, and despawns dropped ids (retail:
+	// RoundData_SpawnRound @0x4ec8da spawn, the per-tick follow @0x4eaa9f,
+	// Projectile_ReleaseEffects clear — witness map on
+	// engine/runtime/renderer/light_scene.h).
+	Array get_round_glow_rows() const;
+
 	// The styled ribbon compile over trail rows (renderer/tracer_frame.h owns
 	// the witnessed style tables and the camera-facing build
 	// [orig: CEffectChannel_RenderRibbon @ 0x5DB8A0]). Static so the present

@@ -1,5 +1,5 @@
-// Unit tests for renderer::classify_object_material + the GLSL composer in
-// engine/runtime/renderer.  Verifies the static shader_tag -> family/blend table without
+// Unit tests for renderer::classify_object_material + its typed pipeline
+// descriptor in engine/runtime/renderer. Verifies the static shader_tag -> family/blend table without
 // `.fx` parsing matches the canonical's runtime classifications for every
 // shader_tag in the original OED's gMaterialInfoTable.
 
@@ -193,9 +193,9 @@ int main() {
 		expect(tracer.view_angle_fade, "VS_TRACER carries the view-angle fade");
 		const auto tracer_key = build_object_shader_key(tracer);
 		expect((tracer_key & OSCAP_VIEW_FADE) != 0, "tracer key carries OSCAP_VIEW_FADE");
-		const std::string tracer_glsl = compose_object_shader_glsl(tracer_key);
-		expect(tracer_glsl.find("vf * vf") != std::string::npos,
-		       "tracer GLSL contains the |dot(eye,normal)|^2 fade [orig: vsTracer]");
+		const auto tracer_pipeline = describe_object_shader_pipeline(tracer_key);
+		expect(tracer_pipeline.view_angle_fade,
+		       "tracer pipeline carries the |dot(eye,normal)|^2 fade capability [orig: vsTracer]");
 	}
 
 	// 9. Environment mirror effects are reflective but their normal pass is opaque.
@@ -254,68 +254,93 @@ int main() {
 		       "key decodes Opaque blend");
 	}
 
-	// 13. GLSL composer emits sane shader source for each family.
+	// 13. The renderer-neutral pipeline descriptor carries every behavior the
+	// Godot adapter needs to select a checked-in shader and bind capabilities.
 	{
 		const auto fk = build_object_shader_key(classify_object_material("FF_ST_OP", 0, 0, 0, 128));
-		const std::string ff_glsl = compose_object_shader_glsl(fk);
-		expect(contains(ff_glsl, "shader_type spatial"), "FF GLSL is spatial");
-		expect(contains(ff_glsl, "obj_ff_lighting"), "FF GLSL uses ff lighting helper");
-		expect(contains(ff_glsl, "cull_back"), "FF cull_back default");
-		expect(contains(ff_glsl, "uniform vec3 u_uv_transform_u"),
-		       "Object GLSL exposes the retail affine U coefficients");
-		expect(contains(ff_glsl, "uniform vec3 u_uv_transform_v"),
-		       "Object GLSL exposes the retail affine V coefficients");
-		expect(contains(ff_glsl,
-		                "vec2(dot(uv1, u_uv_transform_u), dot(uv1, u_uv_transform_v))"),
-		       "Object GLSL applies the full affine UV transform");
-		expect(!contains(ff_glsl, "u_uv_rotation"),
-		       "Object GLSL should not collapse the retail affine matrix to rotation");
+		const auto ff = describe_object_shader_pipeline(fk);
+		expect(ff.family == ObjectShaderFamily::FixedFunction, "FF pipeline family");
+		expect(ff.blend == ObjectBlendMode::Opaque, "FF pipeline blend");
+		expect(ff.depth == ObjectDepthPolicy::Opaque, "FF writes opaque depth");
+		expect(ff.cull == ObjectCullPolicy::Back, "FF culls back faces");
+		expect(ff.technique == ObjectShaderTechnique::Fixed, "FF technique is structural");
+		expect(!ff.writes_alpha, "opaque FF does not write fragment alpha");
+		expect(!ff.uses_detail && !ff.uses_normal_map, "plain FF has no extra texture stages");
 
 		const auto mk = build_object_shader_key(classify_object_material("FF_MT_OP", 0, 0, 0, 128));
-		const std::string mt_glsl = compose_object_shader_glsl(mk);
-		expect(contains(mt_glsl, "texture(u_detail, v_uv2)"),
-		       "Multi-texture GLSL samples detail maps from secondary UVs");
-		expect(!contains(mt_glsl, "v_uv * 4.0"),
-		       "Multi-texture GLSL should not re-scale baked detail UVs");
+		const auto mt = describe_object_shader_pipeline(mk);
+		expect(mt.uses_detail, "multi-texture pipeline enables the detail stage");
+		expect(mt.technique == ObjectShaderTechnique::FixedDetail,
+		       "multi-texture pipeline selects the checked-in detail technique");
 
 		const auto gk = build_object_shader_key(classify_object_material("FFP_GLASS", 0, 0, 1, 128));
-		const std::string glass_glsl = compose_object_shader_glsl(gk);
-		expect(contains(glass_glsl, "blend_add"), "Glass emits additive render mode");
-		expect(contains(glass_glsl, "u_reflect_color"), "Glass exposes reflect color");
-		expect(contains(glass_glsl, "fresnel"), "Glass fragment computes fresnel");
-		expect(!contains(glass_glsl, "ALPHA ="), "Additive glass does not write AlphaBlend opacity");
+		const auto glass = describe_object_shader_pipeline(gk);
+		expect(glass.family == ObjectShaderFamily::Glass, "glass pipeline family");
+		expect(glass.blend == ObjectBlendMode::Additive, "glass pipeline is additive");
+		expect(glass.depth == ObjectDepthPolicy::TransparentNoWrite,
+		       "additive glass does not write depth");
+		expect(glass.environment_source == ObjectEnvironmentSource::HemisphereApproximation,
+		       "glass explicitly reports the tracked hemisphere environment stand-in");
+		expect(glass.technique == ObjectShaderTechnique::Glass,
+		       "glass selects its checked-in technique");
+		expect(!glass.writes_alpha, "additive glass does not write AlphaBlend opacity");
 
 		const auto lk = build_object_shader_key(classify_object_material("VS_FLAG", 0, 0, 0, 128));
-		const std::string flag_glsl = compose_object_shader_glsl(lk);
-		expect(contains(flag_glsl, "u_wind_amount"), "Flag exposes wind amount");
-		expect(contains(flag_glsl, "TIME"), "Flag uses TIME for sway");
+		const auto flag = describe_object_shader_pipeline(lk);
+		expect(flag.family == ObjectShaderFamily::Flag, "flag pipeline selects wind deformation");
+		expect(flag.technique == ObjectShaderTechnique::Flag,
+		       "flag selects its checked-in technique");
 
 		const auto pk = build_object_shader_key(classify_object_material("VS_PHONGT", 0, 0, 0, 128));
-		const std::string phong_glsl = compose_object_shader_glsl(pk);
-		expect(contains(phong_glsl, "u_normal_map"), "Phong samples normal map");
-		expect(contains(phong_glsl, "spec"), "Phong has specular term");
+		const auto phong = describe_object_shader_pipeline(pk);
+		expect(phong.uses_normal_map, "Phong pipeline samples a normal map");
+		expect(phong.normal_space == ObjectNormalSpace::Tangent,
+		       "Phong pipeline reports tangent-space normals");
+		expect(phong.specular_source == ObjectSpecularSource::AnalyticPow16,
+		       "Phong explicitly reports the tracked pow-16 specular stand-in");
+		expect(phong.technique == ObjectShaderTechnique::PhongTangentSpecular,
+		       "Phong tangent/specular topology is selected at classification time");
 
 		const auto skinned_key = build_object_shader_key(classify_object_material("VS_SKBUMPDIFFT2", 0, 0, 0, 128));
-		const std::string skinned_glsl = compose_object_shader_glsl(skinned_key);
-		expect(contains(skinned_glsl, "depth_draw_opaque"),
-		       "Skinned bump/detail GLSL writes depth as opaque");
-		expect(!contains(skinned_glsl, "ALPHA ="),
-		       "Skinned bump/detail GLSL does not use texture alpha as opacity");
+		const auto skinned = describe_object_shader_pipeline(skinned_key);
+		expect(skinned.depth == ObjectDepthPolicy::Opaque,
+		       "skinned bump/detail pipeline writes depth as opaque");
+		expect(!skinned.writes_alpha,
+		       "skinned bump/detail pipeline does not use texture alpha as opacity");
 
 		ObjectMaterialClassification normal_b_cls;
 		normal_b_cls.family = ObjectShaderFamily::Dot3;
 		normal_b_cls.needs_normal_map = true;
 		normal_b_cls.normal_uses_uv2 = true;
 		normal_b_cls.normal_space = ObjectNormalSpace::Tangent;
-		const std::string normal_b_glsl = compose_object_shader_glsl(build_object_shader_key(normal_b_cls));
-		expect(contains(normal_b_glsl, "texture(u_normal_map, v_uv2)"),
-		       "Normal-B GLSL samples normal maps from secondary UVs");
+		const auto normal_b = describe_object_shader_pipeline(build_object_shader_key(normal_b_cls));
+		expect(normal_b.normal_uses_uv2,
+		       "Normal-B pipeline samples normal maps from secondary UVs");
+		expect(normal_b.technique == ObjectShaderTechnique::Unsupported,
+		       "unreachable normal-UV2 topology fails closed in backend selection");
 
 		const auto two_sided_key = build_object_shader_key(classify_object_material(
 			"FF_ST_OP", THREEDI_MATERIAL_FLAG_TWO_SIDED, 0, 0, 128));
-		const std::string two_sided_glsl = compose_object_shader_glsl(two_sided_key);
-		expect(contains(two_sided_glsl, "cull_disabled"),
-		       "two-sided emits cull_disabled");
+		const auto two_sided = describe_object_shader_pipeline(two_sided_key);
+		expect(two_sided.cull == ObjectCullPolicy::Disabled,
+		       "two-sided pipeline disables culling");
+
+		const auto cutout_key = build_object_shader_key(classify_object_material(
+			"FF_ST_OP", THREEDI_MATERIAL_FLAG_ALPHA_TEST, 0, 0, 128));
+		const auto cutout = describe_object_shader_pipeline(cutout_key);
+		expect(cutout.alpha_test && cutout.depth == ObjectDepthPolicy::AlphaPrepass,
+		       "alpha-tested pipeline selects the alpha depth prepass");
+
+		const auto alpha_key = build_object_shader_key(classify_object_material(
+			"FF_ST_AB", 0, 0, 0, 128));
+		const auto alpha = describe_object_shader_pipeline(alpha_key);
+		expect(alpha.writes_alpha && alpha.depth == ObjectDepthPolicy::TransparentNoWrite,
+		       "alpha-blended pipeline owns ALPHA and does not write depth");
+
+		const auto self_lit = describe_object_shader_pipeline(build_object_shader_key(
+			classify_object_material("FF_MT_OP_LUM", 0, 2, 0, 128)));
+		expect(self_lit.technique == ObjectShaderTechnique::SelfLitDetail,
+		       "self-lit detail topology is selected without a runtime cap branch");
 	}
 
 	std::cerr << "renderer_material_classify_test ok\n";

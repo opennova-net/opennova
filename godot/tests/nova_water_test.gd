@@ -17,6 +17,7 @@ extends GutTest
 # =============================================================================
 
 const WATER_SHADER := "res://shaders/water.gdshader"
+const FULL_00_ENV_FIXTURE := "res://../fixtures/env/full_00.env"
 
 # The engine tick [docs/engine-primer.md: 62 Hz].
 const TICK := 1.0 / 62.0
@@ -149,6 +150,34 @@ func test_reflection_rtt_is_retail_square_and_preserves_horizontal_fov() -> void
 	uv_scale = water.get_water_material().get_shader_parameter("u_reflection_uv_scale")
 	assert_almost_eq(uv_scale.y, 900.0 / 1600.0, 0.000001,
 			"display resizing refreshes the source-to-square V correction")
+
+
+func test_reflection_rtt_carries_the_witnessed_post_scene_dim() -> void:
+	var fixture := _make_water_fixture()
+	var water: Node = fixture["water"]
+	water.advance_frame(TICK)
+	var mirror_vp: SubViewport = water.get_reflection_viewport()
+	var dim := mirror_vp.get_node_or_null(
+			NodePath("ReflectionDimLayer/ReflectionDim")) as ColorRect
+	assert_not_null(dim,
+			"the mirror composites the witnessed post-scene dim quad " +
+			"(env/water_mirror.h kReflectionDimFactor)")
+	if dim == null:
+		return
+	assert_almost_eq(dim.color.r, 64.0 / 255.0, 0.0001,
+			"the dim multiplies by the witnessed 0x404040 vertex color")
+	assert_almost_eq(dim.color.g, 64.0 / 255.0, 0.0001,
+			"the dim is achromatic")
+	assert_almost_eq(dim.color.b, 64.0 / 255.0, 0.0001,
+			"the dim is achromatic")
+	assert_almost_eq(dim.color.a, 1.0, 0.0001,
+			"the multiply carries no alpha attenuation")
+	var dim_material := dim.material as CanvasItemMaterial
+	assert_not_null(dim_material, "the dim quad blends, it does not overpaint")
+	if dim_material == null:
+		return
+	assert_eq(dim_material.blend_mode, CanvasItemMaterial.BLEND_MODE_MUL,
+			"out = dst x 64/255 — SRCBLEND=DESTCOLOR/DESTBLEND=ZERO's multiply")
 
 
 func test_reflection_camera_matches_orthogonal_and_frustum_sources() -> void:
@@ -353,14 +382,27 @@ func test_underwater_swaps_to_opaque_side() -> void:
 	var fixture := _make_water_fixture()
 	var water: Node = fixture["water"]
 	var cam: Camera3D = fixture["camera"]
+	var env_data := EnvFile.new()
+	env_data.set_source_path(ProjectSettings.globalize_path(FULL_00_ENV_FIXTURE))
+	assert_eq(env_data.load(), OK)
+	var env := MissionEnvironment.new()
+	env.name = "UnderwaterWaterEnv"
+	env.environment_data = env_data
+	fixture["viewport"].add_child(env)
+	water.environment_path = NodePath("../UnderwaterWaterEnv")
+	water.set_height_override(7.0)
 	water.advance_frame(TICK)
 	# Drop the camera below the 7.0 plane: the pass swaps to the OPAQUE
 	# material [orig: Water_ShaderOpaque @ 0x28ee8c8; selection
 	# @ 0x5c33e6..0x5c34ea].
 	cam.global_position = Vector3(100.3, 1.0, -33.7)
+	env.set_underwater_view(true)
 	water.advance_frame(TICK)
 	assert_eq(water.get_water_material().get_shader_parameter("u_underwater_view"), true,
 			"camera below -> the OPAQUE material side")
+	assert_true(Vector3(water.get_water_material().get_shader_parameter("u_fog_color"))
+			.is_equal_approx(env.get_scene_fog_color()),
+			"the underwater surface strip fogs toward the selected lit-water color")
 
 
 func test_water_material_has_no_far_discard_uniforms() -> void:

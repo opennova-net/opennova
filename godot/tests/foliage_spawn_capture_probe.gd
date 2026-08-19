@@ -19,6 +19,7 @@ const DEFAULT_OUT_DIR := "res://../.scratch/00tre-spawn"
 const PLAY_SETTLE_FRAMES := 132
 const VISIBILITY_SETTLE_FRAMES := 3
 const CAPTURE_VIEWPORT_SIZE := Vector2i(1600, 900)
+const EXPECTED_VERTICAL_FOV_DEG := 50.534
 const FLICKER_CAPTURE_COUNT := 6
 const FLICKER_MASK_DELTA := 6
 const FLICKER_FADE_STEP := 0.25 / 22.0
@@ -108,8 +109,11 @@ func _ready() -> void:
 		_fail("game viewport unavailable")
 		return
 
-	# Freeze the real game loop. Rendering stays live, while the player,
-	# camera, mission clock, and foliage dispatch stay bit-identical for the A/B.
+	# Freeze the real shell loop. MainGame owns the presenter/camera tick and
+	# calls GameWorld explicitly, so disabling only the world still lets camera
+	# state drift between A/B frames. Rendering remains live while the complete
+	# simulation/presentation input state stays bit-identical.
+	_game.process_mode = Node.PROCESS_MODE_DISABLED
 	world.process_mode = Node.PROCESS_MODE_DISABLED
 	var dispatcher = world.get_node_or_null("Terrain/FoliageDispatcher")
 	var foliage_error := runtime_foliage_validation_error(
@@ -520,7 +524,11 @@ func _valid_snapshot(state: Dictionary) -> bool:
 	for value in [state["yaw"], state["pitch"], state["fov"], state["tod"]]:
 		if not is_finite(float(value)):
 			return false
-	return size.x > 0.0 and size.y > 0.0 and float(state["fov"]) > 0.0
+	if transform.origin.distance_to(position) > 5.0:
+		return false
+	if absf(float(state["fov"]) - EXPECTED_VERTICAL_FOV_DEG) > 0.01:
+		return false
+	return size.x > 0.0 and size.y > 0.0
 
 
 func _same_snapshot(a: Dictionary, b: Dictionary) -> bool:
@@ -567,6 +575,8 @@ func _fail(reason: String) -> void:
 
 
 func _shutdown(exit_code: int) -> void:
+	if _game != null and is_instance_valid(_game):
+		_game.process_mode = Node.PROCESS_MODE_INHERIT
 	if _world != null and is_instance_valid(_world):
 		_world.process_mode = Node.PROCESS_MODE_INHERIT
 	get_tree().quit(exit_code)
@@ -606,7 +616,7 @@ func _print_runtime_metadata(world, environment) -> void:
 	})
 
 	var sky = world.get_node_or_null("SkyDome")
-	var sky_material: ShaderMaterial = sky.sky_material if sky != null else null
+	var sky_material: ShaderMaterial = sky.get_sky_material() if sky != null else null
 	var cloud1: Texture2D = environment.get_sky_map1_tex()
 	var cloud2: Texture2D = environment.get_sky_map2_tex()
 	print("[spawn-capture] sky material: ", {

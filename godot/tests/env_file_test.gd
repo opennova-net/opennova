@@ -31,6 +31,16 @@ func test_full_00_env_loads_and_parses() -> void:
 	assert_not_null(env.get_sky_map2_tex(), "Sky map 2 should resolve through the shared texture resolver.")
 
 
+func test_water_murk_matches_retail_upper_only_clamp() -> void:
+	var env := EnvFile.new()
+	env.set_water_murk(-0.5)
+	assert_almost_eq(env.get_water_murk(), -0.5, 0.000001,
+			"retail retains a negative authored murk value")
+	env.set_water_murk(1.5)
+	assert_almost_eq(env.get_water_murk(), 0.99, 0.000001,
+			"retail clamps murk only at the witnessed 0.99 upper bound")
+
+
 func test_env_interpolation_and_export_round_trip() -> void:
 	var env := _load_full_00()
 	assert_not_null(env, "Fixture should load before interpolation.")
@@ -224,6 +234,35 @@ func test_smoothed_fog_start_tracks_current_end_and_invalidates_consumers() -> v
 	env_node.set_smoothed_scalars(640.001, env_node.get_sky_height_target(), 0.0)
 	assert_eq(env_node.get_env_generation(), settled_generation,
 			"a settled fog spring does not churn renderer generations")
+
+
+func test_underwater_pass_transition_publishes_once_and_is_idempotent() -> void:
+	var env_node := MissionEnvironment.new()
+	add_child_autofree(env_node)
+	env_node.environment_data = _load_full_00()
+	var state: EnvLightState = env_node.get_light_state()
+	var pass_events: Array[bool] = []
+	state.pass_changed.connect(func() -> void:
+		pass_events.append(true))
+	var dry_generation := state.get_generation()
+
+	env_node.set_underwater_view(false)
+	assert_eq(state.get_generation(), dry_generation,
+			"reselecting the current dry pass is a no-op")
+	assert_eq(pass_events.size(), 0)
+	env_node.set_underwater_view(true)
+	assert_eq(pass_events.size(), 1,
+			"crossing below emits one immediate-restamp event")
+	assert_gt(state.get_generation(), dry_generation)
+	var underwater_generation := state.get_generation()
+	env_node.set_underwater_view(true)
+	assert_eq(state.get_generation(), underwater_generation,
+			"reselecting underwater neither republishes nor re-restamps")
+	assert_eq(pass_events.size(), 1)
+	env_node.set_underwater_view(false)
+	assert_eq(pass_events.size(), 2,
+			"surfacing emits the matching dry-pass restamp")
+	assert_gt(state.get_generation(), underwater_generation)
 
 
 func test_object_lighting_uses_the_active_moon_direction_at_night() -> void:

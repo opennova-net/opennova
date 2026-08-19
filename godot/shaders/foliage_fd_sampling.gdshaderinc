@@ -3,7 +3,9 @@
 // applies to every stage [orig: CGfxDevice_ApplyRenderStates per-stage loop
 // @ 0x67e3b5..0x67e50e], and the reference machine runs the anisotropic
 // mode, so the foliage :fd mask samples anisotropically like the terrain
-// inputs; only the synthetic Godot tail is clamped out of the selection.
+// inputs. The longest-gradient scale is a conservative terminal guard: it
+// keeps the synthetic Godot tail out, without claiming exact reconstruction
+// of the device's minor-axis/maximum-anisotropy LOD choice.
 vec4 sample_retail_foliage_fd(sampler2D source, vec2 uv) {
 	vec2 dimensions = vec2(textureSize(source, 0));
 	vec2 dx = dFdx(uv);

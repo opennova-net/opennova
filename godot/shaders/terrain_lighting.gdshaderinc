@@ -48,8 +48,9 @@ uniform bool u_has_detail2 = false;
 uniform float u_detail2_density = 8.0;
 // D-TERRAIN-8: camera-below-water swaps the LIVE stage-3 input from the
 // authored second detail to the per-frame regenerated water noise color
-// texture, and the stage-3 texcoord matrix becomes 8/density — colormap_uv*8
-// after the mesh detail-UV scale cancels. The animation rides the texture
+// texture, and the stage-3 texcoord matrix becomes 8/density. Retail UV1 is
+// source*detaildensity/512, so the result is source*8/512 — atlas_uv*16 for
+// our normalized 1024 terrain atlas. The animation rides the texture
 // CONTENT (the 128x128 pair regenerates every frame), not a UV scroll. The
 // selector keeps PS14SplatNormalMap on full-splat+detail2 maps (the noise
 // rides its dp3), and detail2-less splat maps faithfully render NO underwater
@@ -87,16 +88,25 @@ uniform float u_fog_start = 0.0;
 uniform float u_fog_end = 1024.0;
 uniform int u_fog_type = 0;
 
+vec2 retail_detail_uv_from_atlas(vec2 atlas_uv, float density) {
+	// Retail writes UV1 as source_position * (polytrn_detaildensity / 512).
+	// Runtime and ONED instead carry normalized UVs for the full 1024 terrain
+	// atlas, so multiply by two before applying either authored density.
+	// [orig: configData+0x1738 @ 0x31BE270; density/512 global write
+	// @ 0x6029a0..0x6029aa; UV1 stores @ 0x602db5..0x602dbe]
+	return atlas_uv * (density * 2.0);
+}
+
 vec4 sample_retail_detail_mips(sampler2D source, vec2 uv) {
 	// The witnessed device supports texfilter modes 0-4; modes 3/4 select
 	// MINFILTER=ANISOTROPIC with MAXANISOTROPY [orig: per-stage filter select
 	// @ 0x67e38a..0x67e45b; device init @ 0x679c28..0x679c9c]. The retail
-	// reference captures show minor-axis LOD ground sampling (near-mip-0 grain
-	// at grazing angles, textured distant slopes) — the anisotropic mode —
-	// so the host pins it: anisotropic implicit sampling, with the gradients
-	// scaled down only when the request would pass the 4x4 terminal level
-	// (the 2x2/1x1 tail exists solely for Godot Image completeness and must
-	// never be selected).
+	// reference captures show the grain/textured-slope result of anisotropic
+	// ground sampling, which pins the sampler mode but not an exact host LOD
+	// reconstruction. The explicit longest-gradient scale below is a
+	// conservative terminal guard: it keeps Godot's synthetic 2x2/1x1 tail
+	// unselectable, but can bias a grazing anisotropic footprint sharper than
+	// the reference device's minor-axis/maximum-anisotropy selection.
 	vec2 dimensions = vec2(textureSize(source, 0));
 	vec2 dx = dFdx(uv);
 	vec2 dy = dFdy(uv);
@@ -153,8 +163,10 @@ vec4 compose_retail_tile_overlay(vec4 colormap, vec3 world_pos) {
 	if (u_has_tile_overlay) {
 		vec2 tile_uv = fract(vec2(world_pos.x, -world_pos.z) * (1.0 / 1024.0));
 		vec4 tile = texture(u_tile_overlay, tile_uv);
-		// Preserve the bare-ground DOT3 alpha while replacing only base RGB,
-		// matching the pre-lighting PolyTrn_RenderTile composite.
+		// Analytic/editor fallback: the legacy full-atlas surrogate retains
+		// standard coverage but not retail's ordered render-target alpha. The
+		// canonical runtime page cache composes exact overlay RGBA before DOT3;
+		// this cold path therefore applies the overlay to RGB only.
 		colormap.rgb = mix(colormap.rgb, tile.rgb * u_tile_overlay_tint, tile.a);
 	}
 	return colormap;
@@ -190,14 +202,17 @@ vec3 terrain_surface_color_from_colormap(vec4 cm, vec2 colormap_uv,
 		// The noise pair is a per-frame mipless dynamic texture — plain
 		// bilinear, no retail mip chain to emulate.
 		vec3 modulator = u_below_water
-			? texture(u_water_noise, colormap_uv * 8.0).rgb
+			? texture(u_water_noise,
+				retail_detail_uv_from_atlas(colormap_uv, 8.0)).rgb
 			: sample_retail_detail_mips(
-				u_detail2, colormap_uv * u_detail2_density).rgb;
+				u_detail2, retail_detail_uv_from_atlas(
+					colormap_uv, u_detail2_density)).rgb;
 		normal_factor = dot(modulator, blend) * 2.0;
 	}
 
 	// mad_d2: light = (tile.a * c1 + c0) / 2 with the WITNESSED constants.
-	// tile.a is the additive, byte-quantized heightfield-normal DOT3 bake; raw
+	// tile.a is the ordered overlay render-target alpha plus the additive,
+	// byte-quantized heightfield-normal DOT3 bake on canonical cache pages; raw
 	// authored colormap alpha is cleared by the base pass and never reaches t0.
 	// [orig: PolyTrn_RenderTile @ 0x60da70; Terrain_GenerateNormalMap
 	// @ 0x603210; terrain_setup_lighting_and_shader @ 0x604420 pushes

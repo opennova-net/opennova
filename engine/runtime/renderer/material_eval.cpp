@@ -26,6 +26,11 @@ static int32_t regValue(int idx,
     return ctrl_bus[localCtrlOrdinal(idx, ctrl_names)];
 }
 
+static bool ctrlUsesDiscreteFrameSelector(uint8_t ordinal) {
+    return ordinal >= THREEDI_CTRL_TEX_TEAM &&
+           ordinal <= THREEDI_CTRL_TEX_CAMO3;
+}
+
 static int64_t roundNearest(double value) {
     return value >= 0.0 ? static_cast<int64_t>(value + 0.5)
                         : static_cast<int64_t>(value - 0.5);
@@ -305,10 +310,21 @@ int compute_anim_frame(const ThreediMaterial& mat,
     }
 
     const int reg_index = static_cast<int>(mat.animation.cycle_frame_time);
-    const int32_t ctrl = regValue(reg_index, ctrl_names, ctrl_bus);
+    const uint8_t ctrl_ordinal = localCtrlOrdinal(reg_index, ctrl_names);
+    const int32_t ctrl = ctrl_bus[ctrl_ordinal];
+    // TEX_TEAM and TEX_CAMO1/2/3 are discrete texture selectors; avatar CAMO
+    // writers zero-extend their bytes while TEX_TEAM retains its signed input.
+    // Their adjacent state dwords are statically 1, so retail takes the
+    // modulo-frame branch instead of interpreting these values as signed 16.16.
+    // [orig: Avatar_SetArmsCamoCtrl @ 0x57A3B0;
+    //  dword_83FFCC/dword_83FFD4/dword_83FFDC/dword_83FFE4 = 1;
+    //  apply_shader_parameters @ 0x58DC36..0x58DC42]
+    if (ctrlUsesDiscreteFrameSelector(ctrl_ordinal)) {
+        return ctrl % frame_count;
+    }
     // The odd dword in retail's 8-byte CTRL slot selects an alternate modulo
-    // mode, but has no writer in Joint Operations. The live path is therefore
-    // always the signed low-dword IMUL/SAR fractional-frame branch.
+    // mode. Ordinary animation controls retain the signed low-dword IMUL/SAR
+    // fractional-frame branch; the static texture-selector state is handled above.
     // [orig: apply_shader_parameters @ 0x58DB80]
     int frame = mulShift16(frame_count, ctrl);
     if (frame >= frame_count) frame = frame_count - 1;

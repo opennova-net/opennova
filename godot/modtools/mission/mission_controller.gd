@@ -467,6 +467,12 @@ func reground_drifted() -> int:
 	return _reground.reground_drifted()
 
 
+## The authoring placer: the native registry the workspace ops keep in sync
+## (static-shadow sources, destruction instances, model caches).
+func get_placer() -> MissionObjectPlacer:
+	return _placer
+
+
 func reground_all() -> Dictionary:
 	return _reground.reground_all()
 

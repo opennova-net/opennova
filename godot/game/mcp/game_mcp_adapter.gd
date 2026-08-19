@@ -17,6 +17,20 @@ func get_mcp_game_entity(_index: int) -> Variant:
 	return {}
 
 
+## Exact read-only renderer state at the game-shell seam. The concrete adapter
+## samples the current GameWorld; transports never inspect its scene internals.
+func get_mcp_render_diagnostics() -> Variant:
+	return {}
+
+
+## Durable lossless capture at the same seam. Successful implementations return
+## bundle metadata plus a transport-only `image_bytes` PackedByteArray.
+func capture_mcp_render_bundle(
+		_args: Dictionary,
+		_cancel_requested: Callable = Callable()) -> Variant:
+	return {}
+
+
 func mcp_game_control(_action: String) -> Error:
 	return ERR_UNAVAILABLE
 

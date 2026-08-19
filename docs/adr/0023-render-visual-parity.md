@@ -15,13 +15,19 @@ the one substantially **reimplemented but unwitnessed** subsystem. The 45-entry
 shader-tag table (`libs/oed/include/oed/material_descriptor.h`, static_assert-locked
 to the raw `gMaterialInfoTable` dump in `oed/types.h`) and its consumption chain —
 `libs/renderer` `classify_object_material()` → `ObjectMaterialClassification` →
-`compose_object_shader_glsl()` → `ObjectShaderCache` → the ShaderMaterials
-`nova_object_model.gd` builds — carry only ModSuperOed-side `[orig]` citations. Not
+runtime-composed Godot shader source → `ObjectShaderCache` → the ShaderMaterials
+`nova_object_model.gd` builds — carried only ModSuperOed-side `[orig]` citations. Not
 one Jointops runtime render address is cited anywhere in `libs/` outside `libs/env`,
 no RE record covers the runtime material path, batching/draw order, the runtime TSS
 stage tables, or lighting application, and draw order has no reimplementation at all
 (the celestial priority ladder is the only ordering machinery in the tree; world
 objects all render at priority 0).
+
+The 2026-08-15 parity slice removed that runtime source-composition seam. The
+engine now returns a renderer-neutral typed pipeline descriptor; the Godot
+adapter fail-closed selects finite checked-in family/technique shader resources.
+This updates the implementation chosen after this ADR without changing the
+historical diagnosis or the evidence tiers below.
 
 Three islands ARE witnessed and are reused, never re-grilled: the env record's sky
 TSS tables + vs_1_1 sources + dome→bodies→world order, the ptl record's
@@ -38,9 +44,11 @@ when there is no clean vector equivalent like ENG-1's env grid.
 Rendering ports reproduce the witnessed fixed-function pipeline (TSS combiner
 semantics, per-vertex lighting, the modulator scales, fog and blend behavior) as
 structural translations with `[orig]` citations. Godot's PBR machinery is host
-plumbing, not a look: materials that need fixed-function semantics get composed
-shaders (the existing generated-GLSL path) or cited `.gdshader` ports (the sky C7
-pattern), never `BaseMaterial3D` approximations of a different lighting model.
+plumbing, not a look: materials that need fixed-function semantics get cited,
+checked-in technique-specific `.gdshader` resources selected from a typed engine
+descriptor, never runtime-generated source or `BaseMaterial3D` approximations of
+a different lighting model. *(Amended 2026-08-15 when the generated-GLSL seam was
+retired; the target semantics and evidence rule are unchanged.)*
 
 **2. The D3D device layer is the WITNESS SOURCE, never a port target.** D3D is an
 excluded platform primitive (CLAUDE.md): the state-setting call sites

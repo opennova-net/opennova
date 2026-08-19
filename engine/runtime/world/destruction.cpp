@@ -305,7 +305,8 @@ void shatter_glass_points(World &world, Entity &target, const Vec3 &blast_pos,
         for (size_t effect_index = 0; effect_index < 4; ++effect_index) {
             (void)death_rand16(world); // retail seeds the intermediate CRT roll
             const uint16_t roll = death_rand16(world) % 100u;
-            if (roll <= kGlassShatterRollMax[effect_index])
+            if (static_cast<int>(roll) <= static_cast<int>(
+                        kGlassShatterAltProbability[effect_index] * 100.0f))
                 events.effects.push_back(DestructionEffectEvent{
                         kGlassShatterEffects[effect_index], world_pos, world_dir});
         }
@@ -590,9 +591,14 @@ uint32_t spawn_death_pieces(World &world, Entity &target) {
     if (traits == nullptr || !traits->has_husk) return 0;
     if ((target.engine_flags & kEntityFlagHusk) != 0) return 0;
     if (target.position.z + target.bound_radius < world_water_z(world)) return 0;
-    // The explosion glow light (LightPool_SpawnGlowEffect @ 0x49351a, 2x model
-    // radius, non-decorations) — no light-pool port (tracked, the D-AI-8d
-    // family).
+    // The explosion glow flash [orig: the LightPool_SpawnGlowEffect
+    // (@ 0x5a8d83) call inside Entity_SpawnDeathPieces @ 0x49351a — 2x the
+    // piece model's bound radius, non-decorations only; the presenter's light
+    // pool renders it (renderer/light_scene.h)].
+    if (!traits->is_decoration && traits->husk_piece_bound_radius > 0.0f) {
+        world.destruction.death_lights.push_back(DeathLightEvent{
+                target.position, 2.0f * traits->husk_piece_bound_radius});
+    }
     uint32_t mask = 0;
     // The loop bound is the HUSK MODEL's section count [orig: renderObj[8]+52
     // @ 0x49361a]; the items.def husk_sub_parts token is only the authored hint

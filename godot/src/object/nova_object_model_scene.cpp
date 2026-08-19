@@ -85,9 +85,9 @@ void ObjectModel::rebuild_scene() {
 		instance->set_cast_shadows_setting(shadow_caster_layers_ != 0
 						? GeometryInstance3D::SHADOW_CASTING_SETTING_ON
 						: GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
-		// Base visual layer from the witnessed reflection filter (env #30):
-		// vehicles ride the mirror-visible world layer [orig:
-		// Entity_InitFromModel @ 0x40e20a entity+36 |= 0x400 iff vehicle].
+		// Mission placement has already resolved the engine's two-part
+		// building/vehicle reflection policy; this device leg only maps that
+		// typed decision to Godot visibility layers.
 		instance->set_layer_mask(
 				(mirror_reflected_ ? LAYER_WORLD : LAYER_WORLD_NO_MIRROR) |
 				shadow_caster_layers_);

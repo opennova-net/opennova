@@ -17,9 +17,13 @@
 // while preserving the source's horizontal field
 // [orig: Viewport_BuildProjectionMatrix @ 0x410fb0; bounds @ 0x5c1476].
 // The witnessed collection filter follows the LIVE view side per frame:
-// above water only vehicles enter the mirror; a below-water view collects
-// unfiltered [orig: Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0
-// — filterMask = camera_below_water ? 0 : 0x400].
+// above water only the flag-0x400 population enters the mirror — vehicles by
+// item type [orig: Entity_InitFromModel @ 0x40e208..0x40e20a] plus records
+// whose BMS attribute authors Reflective [orig: Entity_SpawnFromBMSRecord
+// @ 0x40ed1d..0x40ed2b] — while a below-water view collects unfiltered
+// [orig: Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0
+// — filterMask = camera_below_water ? 0 : 0x400, applied by every collector
+// including the sector-building walk @ 0x5c6c32..0x5c6c39].
 // NEAR-PLANE NOTE (TRACKED approximation, env #30 ledger): retail clips the
 // mirrored scene against the water surface at waterHeight - 0.1
 // [orig: plane block wh - 0.1, render_main_scene @ 0x5c1240]; the reimpl
@@ -38,6 +42,20 @@ namespace opennova::env {
 // The reimpl has no higher-detail/capture selector, so its witnessed mapping
 // is 256.
 inline constexpr int kReflectionRttSize = 256;
+
+// The witnessed reflected-scene dim (env #37's mechanism): after the mirrored
+// sky/terrain/world render into the RTT, detail >= 2 multiplies the WHOLE
+// target by vertex color 0x404040 — a fullscreen 4-vertex strip drawn with
+// SetRenderState(D3DRS_SRCBLEND = D3DBLEND_DESTCOLOR, D3DRS_DESTBLEND =
+// D3DBLEND_ZERO), i.e. out = dst * 64/255, then SRCALPHA/INVSRCALPHA restored
+// [orig: render_main_scene @ 0x5c1727 detail gate; blend states
+// @ 0x5c1856..0x5c186a; quad color 0xFF404040 + TRIANGLESTRIP draw
+// @ 0x5c186c..0x5c189e; restore @ 0x5c18a3..0x5c18bf]. The celestial bodies
+// and the sun glow render AFTER the dim [orig: @ 0x5c18fb/0x5c1904], so
+// retail's mirrored sun/moon/glare stay bright; the reimpl's celestials live
+// in the shared 3D world and dim with the scene — a TRACKED residual on the
+// env #37 row.
+inline constexpr float kReflectionDimFactor = 64.0f / 255.0f;
 
 enum class MirrorProjection {
 	kPerspective,
