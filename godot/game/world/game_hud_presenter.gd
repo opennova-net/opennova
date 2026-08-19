@@ -16,6 +16,7 @@ const PlayerViewEffectsScript := preload("res://game/world/player_view_effects.g
 const ResourceDirSettings := preload("res://game/resource_index/resource_dir_settings.gd")
 const HudHiddenCaptureWitness := preload(
 		"res://game/world/hud_hidden_capture_witness.gd")
+const ScoreboardPresenterScript := preload("res://game/world/scoreboard_presenter.gd")
 
 var _world: GameWorld = null
 var _player_presenter = null     # LocalPlayerPresenter (reserved for the weapon-round anchors)
@@ -26,6 +27,7 @@ var _ui_parent: Node = null
 const MAX_PENDING_HUD_MESSAGES := 40
 
 var _game_hud = null        # HudOverlay, built on the first frame a mission has a local player
+var _scoreboard := ScoreboardPresenterScript.new()  # the Tab player list lane
 var _sights_card = null     # HudSightsCard child of the overlay (per-row blend controls)
 var _view_effects = null    # PlayerViewEffects child of the overlay (binocular/NVG stack)
 var _warned_no_player := false
@@ -153,6 +155,7 @@ func teardown() -> void:
 	_hud_objective = ""
 	_endround_banner = ""
 	_objectives_visible = false
+	_scoreboard.reset()
 	_pending_hud_messages.clear()
 	Strings.register_table("mission", null)
 	_warned_no_player = false
@@ -509,6 +512,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# Flush afterward so GameHud.push_message stamps the current 62 Hz tick.
 	_flush_pending_hud_messages()
 	_flush_feed_events()
+	_scoreboard.update(_game_hud, _world, hud_keys_chorded, gameplay_input_active)
 	if timing:
 		var probe_t5 := Time.get_ticks_usec()
 		if probe_enabled:

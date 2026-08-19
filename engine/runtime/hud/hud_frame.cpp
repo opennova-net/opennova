@@ -115,6 +115,26 @@ void HudFrameCompiler::push_feed_line(const std::string &text, uint32_t argb,
 	}
 }
 
+// One atlas cell. emit_rect covers the whole-texture case; the stdbox border
+// and the connection icon both need a sub-rect, so they push the quad directly.
+void HudFrameCompiler::emit_rect_uv(float x0, float y0, float x1, float y1,
+		float u0, float v0, float u1, float v1, uint32_t color,
+		int32_t texture) {
+	HudQuad q;
+	q.x0 = x0;
+	q.y0 = y0;
+	q.x1 = x1;
+	q.y1 = y1;
+	q.u0 = u0;
+	q.v0 = v0;
+	q.u1 = u1;
+	q.v1 = v1;
+	q.color = color;
+	q.texture = texture;
+	q.filled = true;
+	draw_list_.quads.push_back(q);
+}
+
 void HudFrameCompiler::emit_rect(float x0, float y0, float x1, float y1,
 		uint32_t color, bool filled, int32_t texture, bool additive) {
 	HudQuad quad;
@@ -216,6 +236,7 @@ const HudDrawList &HudFrameCompiler::compile(const HudFrameState &state,
 	// @ 0x5a87cc, then HUD_DrawConsoleMessages @ 0x5a87d1].
 	element_friendly_tags(state, surface_w, surface_h);
 	element_feed(state, surface_w, surface_h);
+	element_scoreboard(state, surface_w, surface_h);
 	return draw_list_;
 }
 
@@ -1148,6 +1169,342 @@ void HudFrameCompiler::element_feed(const HudFrameState &state, float w,
 		emit_text(line->text.c_str(), ax, row_y, w, h, line->color, 0u);
 		row_y += row_h;
 	}
+	++draw_list_.elements_drawn;
+}
+
+
+// THE RETAIL "stdbox" PANEL [orig: HUD_DrawLabelBox @0x51efd0 -> the "stdbox"
+// style slot @0x51f00a -> render_hud_box_overlay @0x56b700; registered at
+// mission load @0x525aa2 as stdbox(border.tga, boxtile.tga, monogram.tga)
+// with a ZERO fourth arg, which selects the plain-fill path below].
+//
+// border.tga is a 4x4 cell grid (one cell = texW/4): row 0 holds the
+// top-left/top/top-right pieces, row 1 columns 0/2 the sides, row 2 the
+// bottom trio, row 3 columns 0..2 the TITLED top row (stub / title bar /
+// end cap), and cell (3,0) is the interior brush. The style ctor EXTRACTS
+// cell (3,0) into its own texture and zeroes it out of the atlas
+// [orig: BoxTexture_LoadAndSetupUVRegions @0x56acd0 — the copy+zero loop
+// @0x56adbd-0x56ae44; the per-cell UV table at rec+0x40..0x174].
+//
+// This is its OWN geometry, NOT the menu frame's model
+// (CUIElement_DrawFrame @0x64a210), where the pieces OVERHANG the rect.
+//
+// What binds where, and the one recorded divergence (D-HUD-24):
+//  - The BORDER PIECES bind border x boxtile — one combined material
+//    [orig: sub_676EA0(BoxTexA, BoxTexB, 0x651, 2) -> style+0x30 @0x56af3c,
+//    applied for the piece pass @0x56b902]. Stage 1 is MODULATE(CURRENT,
+//    TEXTURE1) with a SCREEN-ANCHORED UV1 = (screen_px + 0.5)/boxtile_dim
+//    [orig: draw_textured_quad_0 @0x56b3e0 — the dest-derived second UV pair
+//    @0x56b560-0x56b592; the divisors are the boxtile TGA's own w/h, stored
+//    into the style @0x56b357/@0x56b361]. We bind the raw stencil instead,
+//    so the pieces read plain where retail reads camo — recorded, not
+//    unknown; it needs a second texture stage this quad stream does not
+//    carry yet.
+//  - The FILL does NOT ride that combine: with the registration's zero
+//    fourth arg the drawer takes the plain path — the extracted cell's own
+//    single-texture material, one wrap-addressed quad whose UV is
+//    (screen_px + 0.5)/cell, i.e. a screen-anchored tiling at the cell's own
+//    UNSCALED size [orig: the rec+0x3C == 0 arm @0x56b739 ->
+//    stdbox_draw_fill_wrap_tiled @0x56b5d0]. Sampling cell (3,0) of the
+//    atlas slot here is the same pixels, so the fill matches retail; the
+//    tile loop stands in for hardware wrap (an atlas sub-rect cannot wrap),
+//    anchored to the same absolute screen grid.
+//
+// Every retail quad's diffuse is alpha<<24 | 0x7F7F7F — half-bright under the
+// device's MODULATE2X stage, so 0.5 x 2 = 1 and the material lands at full
+// texture brightness [orig: the shl/lea prologue @0x56b70e-0x56b713]. A host
+// without that stage reproduces it with a neutral white diffuse, which is
+// what the caller passes.
+//
+// The monogram watermark pass is deliberately NOT drawn: its material carries
+// flag word 0x622, whose LOW NIBBLE selects ONE/ONE — pure additive
+// [orig: FUN_00680f00 @0x680f00 -> D3DRS 0x13/0x14/0x1B via FUN_006817d0
+// @0x6817d0], its diffuse is the darker alpha<<24 | 0x282828 [orig: the lea
+// @0x56b8db], and the shipped monogram.tga is measured 100% pure black, so
+// the pass adds nothing. Drawing it as an opaque quad (the reading that
+// decodes only the colour op and never the blend nibble) paints a black slab
+// across the middle of every box.
+
+// One border piece: cell (col,row) of the 4x4 atlas stretched into the dest
+// rect. The bottom row keeps only its top 90% of BOTH the destination and the
+// source cell — cropped, not squashed [orig: the crop arm @0x56b454-0x56b470,
+// flt_7C459C = 0.9; the bottom trio passes the flag @0x56bbc0/@0x56bc22/
+// @0x56bc80].
+void HudFrameCompiler::emit_stdbox_piece(float x0, float y0, float x1, float y1,
+		int col, int row, bool crop_bottom, uint32_t color) {
+	if (x1 <= x0 || y1 <= y0) return;
+	constexpr float kCell = 1.0f / 4.0f;
+	const float u0 = static_cast<float>(col) * kCell;
+	const float v0 = static_cast<float>(row) * kCell;
+	const float vh = crop_bottom ? kCell * kBoxBottomCrop : kCell;
+	const float dh = crop_bottom ? (y1 - y0) * kBoxBottomCrop : (y1 - y0);
+	emit_rect_uv(x0, y0, x1, y0 + dh, u0, v0, u0 + kCell, v0 + vh, color,
+			kHudTexBoxBorder);
+}
+
+void HudFrameCompiler::emit_stdbox(float x0, float y0, float x1, float y1,
+		float surface_w, uint32_t color, float title_gap_w) {
+	if (!layout_.box_texture_valid) return;
+	if (x1 - x0 < 2.0f || y1 - y0 < 2.0f) return;
+	constexpr float kCell = 1.0f / 4.0f;   // the 4x4 atlas step in UV
+	// One source cell is a quarter of the atlas (32 px for the shipped 128 px
+	// border.tga) [orig: quarterW/H = dims >> 2 @0x56adb6/@0x56adbd].
+	const float src_cell = static_cast<float>(layout_.box_tex_w) * 0.25f;
+	if (src_cell <= 0.0f) return;
+	// Piece size and the fill inset scale with the surface; the fill's tile
+	// PERIOD does not [orig: s = surface_w * 0.000625 @0x51f02e].
+	const float s = surface_w / kBoxScaleRef;
+	const float cw = src_cell * s;
+	const float ch = src_cell * s;
+
+	// 1. The interior fill: the brush cell (3,0), wrap-tiled on the ABSOLUTE
+	// screen grid at the cell's own unscaled period, inside the 16*s / 24*s
+	// inset rect [orig: the insets @0x56b7bd-0x56b80d (rec+0x180/0x184);
+	// stdbox_draw_fill_wrap_tiled @0x56b5d0 — UV = (dest + 0.5)/cell, wrap].
+	const float fx1 = x0 + kBoxFillInsetX * s;
+	const float fy1 = y0 + kBoxFillInsetY * s;
+	const float fx2 = x1 - kBoxFillInsetX * s;
+	const float fy2 = y1 - kBoxFillInsetY * s;
+	if (fx2 > fx1 && fy2 > fy1) {
+		const float fu0 = 3.0f * kCell;
+		const float period = src_cell;
+		const float x_start = std::floor(fx1 / period) * period;
+		const float y_start = std::floor(fy1 / period) * period;
+		for (float ty = y_start; ty < fy2; ty += period) {
+			const float cy1 = std::max(ty, fy1);
+			const float cy2 = std::min(ty + period, fy2);
+			if (cy2 <= cy1) continue;
+			for (float tx = x_start; tx < fx2; tx += period) {
+				const float cx1 = std::max(tx, fx1);
+				const float cx2 = std::min(tx + period, fx2);
+				if (cx2 <= cx1) continue;
+				// A clipped tile samples the matching slice of the cell, so
+				// the texel phase stays locked to the screen grid.
+				emit_rect_uv(cx1, cy1, cx2, cy2,
+						fu0 + kCell * ((cx1 - tx) / period),
+						kCell * ((cy1 - ty) / period),
+						fu0 + kCell * ((cx2 - tx) / period),
+						kCell * ((cy2 - ty) / period), color,
+						kHudTexBoxBorder);
+			}
+		}
+	}
+
+	// 2. The border pieces, over the fill.
+	const float ix1 = x0 + cw;   // inner x after the left column
+	const float ix2 = x1 - cw;   // inner x before the right column
+	const float iy1 = y0 + ch;
+	const float iy2 = y1 - ch;
+	if (title_gap_w > 0.0f) {
+		// The TITLED top row rides the row-3 cells: the stub, the title bar
+		// stretched to the measured gap, the end cap — then the plain top
+		// edge resumes to the right corner [orig: the outTechnique arm
+		// @0x56b93d-0x56ba52 — stub (0,3) at x0 width cw, bar (1,3) to
+		// x0+cw+gap, cap (2,3) width cw; the shared edge pick-up @0x56ba57].
+		const float bar_x2 = x0 + cw + title_gap_w;
+		const float cap_x2 = bar_x2 + cw;
+		emit_stdbox_piece(x0, y0, x0 + cw, y0 + ch, 0, 3, false, color);
+		emit_stdbox_piece(x0 + cw, y0, bar_x2, y0 + ch, 1, 3, false, color);
+		emit_stdbox_piece(bar_x2, y0, cap_x2, y0 + ch, 2, 3, false, color);
+		if (ix2 > cap_x2)
+			emit_stdbox_piece(cap_x2, y0, ix2, y0 + ch, 1, 0, false, color);
+	} else {
+		emit_stdbox_piece(x0, y0, x0 + cw, y0 + ch, 0, 0, false, color);   // TL
+		if (ix2 > ix1)
+			emit_stdbox_piece(ix1, y0, ix2, y0 + ch, 1, 0, false, color);  // top
+	}
+	emit_stdbox_piece(ix2, y0, x1, y0 + ch, 2, 0, false, color);       // TR
+	emit_stdbox_piece(x0, iy2, x0 + cw, y1, 0, 2, true, color);        // BL
+	emit_stdbox_piece(ix2, iy2, x1, y1, 2, 2, true, color);            // BR
+	if (ix2 > ix1)
+		emit_stdbox_piece(ix1, iy2, ix2, y1, 1, 2, true, color);       // bottom
+	if (iy2 > iy1) {
+		emit_stdbox_piece(x0, iy1, x0 + cw, iy2, 0, 1, false, color);  // left
+		emit_stdbox_piece(ix2, iy1, x1, iy2, 2, 1, false, color);      // right
+	}
+}
+
+// The per-row connection icon: one band of the neticon2.tga 4-row vertical
+// atlas, band = quality - 1. Any quality outside 1..3 draws NOTHING —
+// retail's own gate (the parser clamps the byte at 4, and 4 still selects no
+// band) [orig: NetIcon_DrawConnectionQualityBand @0x4c2ee0 — the 1..3
+// switch, default returns; the atlas load @0x4c2cf0 sets band = tgaH/4].
+void HudFrameCompiler::emit_net_icon(float x0, float y0, float x1, float y1,
+		int quality) {
+	if (!layout_.net_icon_texture_valid) return;
+	if (quality < 1 || quality > 3) return;
+	const float band = 1.0f / 4.0f;
+	const float v0 = static_cast<float>(quality - 1) * band;
+	emit_rect_uv(x0, y0, x1, y1, 0.0f, v0, 1.0f, v0 + band, 0xFFFFFFFFu,
+			kHudTexNetIcon);
+}
+
+void HudFrameCompiler::element_scoreboard(const HudFrameState &state, float w,
+		float h) {
+	// THE TAB PLAYER LIST [orig: HUD_DrawKillListIfVisible @0x424300 gates on
+	// g_scoreboardPanelVisible — TOGGLED by the playerlist input action
+	// (Scoreboard_TogglePlayerList @0x4244c0), cleared on respawn init
+	// @0x4993ae; rows HUD_DrawKillList @0x423a30; the centred header block
+	// HUD_DrawGameScoreOverlay @0x423060]. Drawn last — above every other
+	// overlay.
+	if (!state.scoreboard.shown) return;
+
+	// Every string on the board rides the BOLD label font at the slot scale
+	// [orig: g_hudLabelFontBold at every draw site — the title @0x51f13a, the
+	// header rungs, the rank/rows/footer sub_5D3F30 calls]; layout-only
+	// embedders fall back to the hudpos font.
+	const bool have_bold = label_font_bold_.font() != nullptr;
+	const GameFont &bf = have_bold ? label_font_bold_ : font_;
+	const float bscale = have_bold ? label_scale_ : 1.0f;
+	if (bf.font() == nullptr) return;
+	const auto text = [&](const char *t, float design_x, float design_y,
+			uint32_t argb, uint32_t flags) {
+		if (t == nullptr || t[0] == 0) return;
+		const GameFontRun run = bf.layout(t, sx(design_x, w), sy(design_y, h),
+				bscale, bscale, flags, argb);
+		draw_list_.glyphs.insert(draw_list_.glyphs.end(), run.quads.begin(),
+				run.quads.end());
+		draw_list_.underlines.insert(draw_list_.underlines.end(),
+				run.underlines.begin(), run.underlines.end());
+	};
+
+	const uint32_t hud = active_color(state);
+	// The panel frame behind everything, with the title's bar notched into
+	// the top border: the gap is the measured bold title + 2, less 12*s once
+	// it exceeds that [orig: HUD_DrawLabelBox @0x51f0ea-0x51f114].
+	const float s = w / kBoxScaleRef;
+	float title_gap = 0.0f;
+	if (!state.scoreboard.title.empty()) {
+		int tw = 0;
+		int th = 0;
+		bf.measure(state.scoreboard.title.c_str(), bscale, bscale, &tw, &th);
+		title_gap = static_cast<float>(tw) + kBoxTitlePad;
+		if (title_gap > kBoxTitleTrim * s) title_gap -= kBoxTitleTrim * s;
+	}
+	emit_stdbox(sx(static_cast<float>(kBoardX1), w),
+			sy(static_cast<float>(kBoardY1), h),
+			sx(static_cast<float>(kBoardX2), w),
+			sy(static_cast<float>(kBoardY2), h), w, 0xFFFFFFFFu, title_gap);
+	// The title just inside the panel's top-left corner, white, left-aligned
+	// [orig: (x+15, y+2) @0x51f002/@0x51f006; the caller's -1 @0x423a90].
+	text(state.scoreboard.title.c_str(),
+			static_cast<float>(kBoardX1 + kTitleDx),
+			static_cast<float>(kBoardY1 + kTitleDy), 0xFFFFFFFFu, 0u);
+
+	// The centred header ladder on its FIXED rungs — a missing string leaves
+	// its rung blank rather than compacting the ladder [orig: the
+	// unconditional +0x14 steps @0x42315c/@0x423184/@0x4231da/@0x423225].
+	// Server name and mission title render white (retail embeds an explicit
+	// <cFFFFFF> run [orig: @0x51f42d/@0x51f497]); the rest take the HUD color.
+	float hy = static_cast<float>(kHeaderY);
+	text(state.scoreboard.server_name.c_str(), kHeaderX, hy, 0xFFFFFFFFu,
+			kFontAlignCenter);
+	hy += kHeaderStep;
+	text(state.scoreboard.mission_title.c_str(), kHeaderX, hy, 0xFFFFFFFFu,
+			kFontAlignCenter);
+	hy += kHeaderStep;
+	text(state.scoreboard.game_type_label.c_str(), kHeaderX, hy, hud,
+			kFontAlignCenter);
+	hy += kHeaderStep;
+	text(state.scoreboard.players_line.c_str(), kHeaderX, hy, hud,
+			kFontAlignCenter);
+	hy += kHeaderStep;
+	// Only the spectator rung is conditional [orig: the nonzero gate
+	// @0x42322a].
+	if (!state.scoreboard.spectators_line.empty()) {
+		text(state.scoreboard.spectators_line.c_str(), kHeaderX, hy, hud,
+				kFontAlignCenter);
+		hy += kHeaderStep;
+	}
+	// The per-mode team-score block and the flag-carrier line would advance
+	// hy further here — recorded residuals [orig: @0x4232bf-0x423a12].
+
+	// The list base sits one step below the header's return, and every row
+	// cursor PRE-increments before its row draws [orig: base = return + 0x14
+	// @0x423aad; row_y = cursor + 18 @0x423d30]. Paging is a recorded
+	// residual, so the base never scrolls [orig: the page fold @0x423c1c].
+	const float list_base = hy + static_cast<float>(kListGap);
+	const bool non_team = scoreboard_is_non_team(state.scoreboard.game_type);
+
+	// The pre-pass mirrors the draw rules to seed the spectator cursor below
+	// the LONGER player column, plus two spacer rows when both players and
+	// spectators exist [orig: the count loop @0x423af1-0x423b93; the seed
+	// @0x423c3a; header_rows @0x423ba1-0x423baa].
+	int count_a = 0;
+	int count_b = 0;
+	int spectators = 0;
+	{
+		int toggle = 0;
+		for (const ScoreboardEntry &e : state.scoreboard.rows) {
+			if (e.spectator) {
+				++spectators;
+			} else if (non_team) {
+				toggle ^= 1;
+				if (toggle) ++count_a;
+				else ++count_b;
+			} else if (e.has_entity && e.team == 1) {
+				++count_a;
+			} else if (e.has_entity && e.team == 2) {
+				++count_b;
+			}
+		}
+	}
+	const int header_rows = (spectators > 0 && (count_a > 0 || count_b > 0))
+			? kSpectatorGapRows
+			: 0;
+	float y_a = list_base;
+	float y_b = list_base;
+	float y_spec = list_base + static_cast<float>(kRowPitch) *
+			static_cast<float>(std::max(count_a, count_b) + header_rows);
+
+	// One GLOBAL rank counter in wire order — both columns share it, and it
+	// advances for every non-spectator row whether or not the row draws
+	// [orig: the ++ @0x42424f sits outside the visibility test].
+	int rank = 1;
+	int ordinal = 0;
+	for (const ScoreboardEntry &e : state.scoreboard.rows) {
+		// Team modes draw only rows whose slot still binds a live entity on
+		// team 1/2 — a leaver's row vanishes; the 4-team variant is a
+		// recorded residual [orig: the entity-null fallthrough @0x423d1b].
+		if (!non_team && !e.spectator &&
+				!(e.has_entity && (e.team == 1 || e.team == 2))) {
+			continue;
+		}
+		const int col = scoreboard_column_x(e, non_team, ordinal);
+		if (!e.spectator) ++ordinal;
+		const int row_rank = rank;
+		if (!e.spectator) ++rank;
+		float *cursor = e.spectator ? &y_spec
+				: (col == kColumnAX ? &y_a : &y_b);
+		*cursor += static_cast<float>(kRowPitch);
+		const float row_y = *cursor;
+		// Rows draw only inside the panel [orig: the < 490 arm @0x424168;
+		// the >= base arm only matters once paging lands].
+		if (row_y >= static_cast<float>(kListBottom)) continue;
+		const uint32_t color = scoreboard_row_color(e, non_team, hud);
+		// Spectators carry no rank [orig: the rank sprintf sits inside the
+		// non-spectator arm @0x42416e].
+		if (!e.spectator) {
+			char rankbuf[16];
+			std::snprintf(rankbuf, sizeof(rankbuf), "%2d.", row_rank);
+			// [orig: "%2ld." @0x424186 at column - 40, yellow -256 @0x4241b0]
+			text(rankbuf, static_cast<float>(col + kRankDx), row_y, kRankColor,
+					0u);
+		}
+		// The connection icon draws for EVERY row with a live slot —
+		// spectators included; a wiped slot's quality 0 is the no-draw gate
+		// [orig: the slot test @0x4241e2, the 16x16 quad @0x424203-0x424244].
+		emit_net_icon(sx(static_cast<float>(col + kIconDx), w), sy(row_y, h),
+				sx(static_cast<float>(col + kIconDx + kIconSize), w),
+				sy(row_y + static_cast<float>(kIconSize), h), e.quality);
+		const std::string line = scoreboard_row_text(e, non_team);
+		text(line.c_str(), static_cast<float>(col), row_y, color, 0u);
+	}
+
+	// The paging hint, centred yellow [orig: the draw @0x4242d4]; PgUp/PgDn
+	// paging itself is a recorded residual [orig: @0x49c912/@0x49c93e].
+	text(state.scoreboard.footer.c_str(), static_cast<float>(kFooterX),
+			static_cast<float>(kFooterY), kRankColor, kFontAlignCenter);
 	++draw_list_.elements_drawn;
 }
 

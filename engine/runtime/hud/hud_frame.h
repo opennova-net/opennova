@@ -12,6 +12,7 @@
 #include "hud/game_font.h"
 #include "hud/hud_declutter.h"
 #include "hud/hud_math.h"
+#include "hud/hud_scoreboard.h"
 #include "hud/hud_minimap.h"
 
 #include <array>
@@ -41,8 +42,39 @@ enum HudTexture : int32_t {
 	kHudTexMapCompass,
 	kHudTexMapRadar,
 	kHudTexMapWpIndicator, // WPIndctr.tga [orig: HUD_LoadAllTextures @0x59e079]
+	// The Tab board's stdbox: the 4x4 border stencil atlas and the tiled
+	// interior brush [orig: the panel call @0x423a72 -> FUN_0051efd0 ->
+	// FUN_0056b700, "stdbox" registered @0x51effa]. Inserted BEFORE the sights
+	// sentinel, which sizes the device slot array.
+	kHudTexBoxBorder,
+	kHudTexBoxTile,
+	// The 16x16 connection-quality icon, a 4-row vertical atlas
+	// [orig: the quad @0x4241fb; the atlas load FUN_004c2cf0 @0x4c2cf0].
+	kHudTexNetIcon,
 	kHudTexSightsBase, // authored SIGHTS rows: kHudTexSightsBase + row index
 };
+
+// THE STDBOX GEOMETRY, as raw retail numbers. The border pieces and the fill
+// inset scale with the surface by s = surface_w / 1600 [orig: the scale
+// 0.000625 double @0x51f02e in HUD_DrawLabelBox]; the fill's tile PERIOD does
+// not scale — it is the atlas cell's own size (texW/4, 32 px for the shipped
+// 128 px border.tga), because retail's fill is one wrap-addressed quad of the
+// EXTRACTED cell (3,0) with UV = (screen_px + 0.5) / cell
+// [orig: stdbox_draw_fill_wrap_tiled @0x56b5d0; the extraction + zeroing of
+// the source cell @0x56adbd-0x56ae44]. Insets 16*s / 24*s are the ctor's
+// literals [orig: the 16/24 stores @0x56b342/@0x56b351, read as rec+0x180 /
+// rec+0x184 by the fill arm @0x56b7bd-0x56b80d]; the bottom-row crop is 0.9
+// of BOTH dest and source [orig: the flag arm @0x56b454-0x56b470,
+// flt_7C459C = 0.9].
+inline constexpr float kBoxScaleRef = 1600.0f;
+inline constexpr float kBoxFillInsetX = 16.0f;
+inline constexpr float kBoxFillInsetY = 24.0f;
+inline constexpr float kBoxBottomCrop = 0.9f;
+// The titled top row's gap rule: the notch behind the title is the measured
+// bold title width + 2, less 12*s once it exceeds 12*s
+// [orig: HUD_DrawLabelBox @0x51f0ea-0x51f114].
+inline constexpr float kBoxTitlePad = 2.0f;
+inline constexpr float kBoxTitleTrim = 12.0f;
 
 struct HudQuad {
 	float x0 = 0.0f;
@@ -123,6 +155,12 @@ struct HudLayout {
 	// HUDSYSTEXT — the SYSTEM feed anchor (kills, joins, system lines). The
 	// def parser already produces it (def_hudpos.cpp HUDSYSTEXT -> sys_text).
 	HudPosRecord sys_text;
+	// The Tab board's atlases (hud_scoreboard.h). The stdbox piece size is
+	// derived from the border atlas's own width (a 4x4 cell grid, so one cell
+	// is a quarter of it), the same texture-derived rule the icon strips use.
+	bool box_texture_valid = false;
+	int box_tex_w = 0;
+	bool net_icon_texture_valid = false;
 	HudPosRecord clip_pos;
 	HudPosRecord stance_pos;
 	HudPosRecord frame_pos;
@@ -257,6 +295,24 @@ struct HudMessageLine {
 	uint32_t color = 0xFFFFFFFFu;
 };
 
+// The Tab player list's per-frame state. The embedder resolves the header
+// strings (server name, mission title, game-type label) and joins each row's
+// name from the roster, exactly as it already does for the objectives header;
+// the compiler owns the witnessed layout, ordering and colors.
+struct HudScoreboardState {
+	bool shown = false;
+	uint32_t game_type = 0;
+	int page = 0;
+	std::string title;         // Overlays/STROVER_KILLLIST ("Player List")
+	std::string server_name;
+	std::string mission_title;
+	std::string game_type_label;
+	std::string players_line;  // "<Client/STRCLI04> <count>"
+	std::string spectators_line; // "<Client/STRCLI23> <count>", empty when none
+	std::string footer;        // Text/CHANGE_SCREEN paging hint
+	std::vector<ScoreboardEntry> rows;   // wire order; the server sorts
+};
+
 struct HudFrameState {
 	int ticks = 0;
 	float health_fraction = 1.0f;
@@ -286,6 +342,8 @@ struct HudFrameState {
 	HudWeaponState weapon;
 	HudWaypointState waypoint;
 	std::vector<HudObjectiveRow> objectives;
+	// The Tab board (hud/hud_scoreboard.h owns its policy).
+	HudScoreboardState scoreboard;
 	std::vector<HudAttachLabel> attach_labels;
 	// Friendly tags (D-HUD-20). Mode default 2 = FULL [orig: Game_Run
 	// @ 0x4a7fed]; fog cull against the environment's current fog distance
@@ -419,6 +477,18 @@ private:
 	uint32_t active_color(const HudFrameState &state) const;
 	void emit_rect(float x0, float y0, float x1, float y1, uint32_t color,
 			bool filled, int32_t texture = kHudTexNone, bool additive = false);
+	void emit_rect_uv(float x0, float y0, float x1, float y1, float u0, float v0,
+			float u1, float v1, uint32_t color, int32_t texture);
+	// The retail stdbox panel and the per-row connection icon. The box takes
+	// the surface width because its pieces and fill inset scale with it.
+	// title_gap_w > 0 draws the TITLED top row: the row-3 stub / title-bar /
+	// end-cap cells around a gap of that many output pixels
+	// [orig: the outTechnique arm @0x56b937, cells rec+0x108/0x120/0x138].
+	void emit_stdbox(float x0, float y0, float x1, float y1, float surface_w,
+			uint32_t color, float title_gap_w);
+	void emit_stdbox_piece(float x0, float y0, float x1, float y1, int col,
+			int row, bool crop_bottom, uint32_t color);
+	void emit_net_icon(float x0, float y0, float x1, float y1, int quality);
 	void emit_wire_rect(float x0, float y0, float x1, float y1, uint32_t color);
 	void emit_text(const char *text, float design_x, float design_y,
 			float surface_w, float surface_h, uint32_t argb, uint32_t flags);
@@ -438,6 +508,7 @@ private:
 	void element_friendly_tags(const HudFrameState &state, float w, float h);
 	void element_objective_line(const HudFrameState &state, float w, float h);
 	void element_feed(const HudFrameState &state, float w, float h);
+	void element_scoreboard(const HudFrameState &state, float w, float h);
 	void element_sights_card(const HudFrameState &state, float w, float h);
 	void element_crosshair(const HudFrameState &state, float w, float h);
 	void element_clip_indicator(const HudFrameState &state, float w, float h);
