@@ -49,6 +49,11 @@ public:
 	bool has_clip(int adm_id, int state_id) const override;
 	bool advance(int adm_id, int state_id, int32_t &phase_ticks,
 	             opennova::world::RootMotionFrame &out) override;
+	// The per-state variant ring: every quoted token on the .adm row is its own
+	// clip with its own root track [orig: AnimMap_ParseConfigLine @0x40cb60].
+	int variant_count(int adm_id, int state_id) const override;
+	bool advance_variant(int adm_id, int state_id, int variant, int32_t &phase_ticks,
+	                     opennova::world::RootMotionFrame &out) override;
 	bool advance_blended(int adm_id,
 	                     int primary_state, int32_t &primary_phase_ticks,
 	                     int target_state, int32_t &target_phase_ticks,
@@ -76,16 +81,19 @@ private:
 		bool loop = false;
 	};
 
-	// One model's .adm reduced to its per-state root tracks.
+	// One model's .adm reduced to its per-state root tracks. Each state owns the
+	// RING of tracks its .adm row authored, in file order (index = variant).
 	struct ClipSet {
-		std::unordered_map<int, Track> tracks;
+		std::unordered_map<int, std::vector<Track>> tracks;
 		std::string adm_name;
 	};
 
 	// Parse adm_name into `out`; returns the number of states with a usable track.
 	static int parse_adm(const opennova::ResourceIndex *index,
 	                     const std::string &adm_name, ClipSet &out);
-	const Track *resolve_track(int adm_id, int state_id) const;
+	// Variant wraps modulo the ring size, so a stale cursor from a shorter row on
+	// another rig still resolves; missing states bind RESET's ring.
+	const Track *resolve_track(int adm_id, int state_id, int variant = 0) const;
 	static int32_t position_of(const Track &track, int32_t phase_ticks);
 	static float sample(const Track &track, const std::vector<float> &channel,
 	                    int32_t phase_ticks);

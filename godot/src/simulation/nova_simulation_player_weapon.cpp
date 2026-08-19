@@ -623,6 +623,15 @@ Dictionary Simulation::get_local_player_weapon_state() const {
 	// [orig: gate @ 0x4b14a7; producer @ 0x4b5dad; world-wac-ai-re.md §14.8].
 	out["body_anim_key"] = String();
 	out["body_anim_phase"] = 0;
+	// The secondary channel's cross-fade + served variant ride beside the key: the
+	// outgoing clip at its own playhead, the ramping weight, and the ring entry each
+	// play latched (retail: the AnimMap_UpdateEntity @0x40b5f0 re-init + the +68
+	// latch, see docs/world/world-wac-ai-re.md §14.8.7).
+	out["body_anim_prev_key"] = String();
+	out["body_anim_prev_phase"] = 0;
+	out["body_anim_blend_weight"] = 1.0f;
+	out["body_anim_variant"] = 0;
+	out["body_anim_prev_variant"] = 0;
 	if (world_ && world_->ai && world_->cached.local_player.valid()) {
 		const AiEntity *p = world_->ai->for_handle(world_->cached.local_player);
 		const opennova::world::Entity *entity =
@@ -633,6 +642,13 @@ Dictionary Simulation::get_local_player_weapon_state() const {
 					p->inf, w.active, blocked_mount)) {
 			out["body_anim_key"] = infantry_anim_key(p->inf.wpn_state);
 			out["body_anim_phase"] = p->inf.wpn_clip_phase;
+			out["body_anim_variant"] = p->inf.wpn_variant;
+			if (p->inf.weapon_blend_active()) {
+				out["body_anim_prev_key"] = infantry_anim_key(p->inf.wpn_prev);
+				out["body_anim_prev_phase"] = p->inf.wpn_prev_clip_phase;
+				out["body_anim_blend_weight"] = p->inf.wpn_blend_weight;
+				out["body_anim_prev_variant"] = p->inf.wpn_prev_variant;
+			}
 		}
 	}
 	return out;

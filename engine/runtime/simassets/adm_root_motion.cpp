@@ -82,13 +82,20 @@ int AdmRootMotion::parse_adm(const opennova::ResourceIndex *index,
 	};
 
 	// adm key lookup, case-insensitive (keys are authored "anim_<name>", same names as
-	// the state table off_8135F0).
-	std::unordered_map<std::string, std::string> values;
+	// the state table off_8135F0). EVERY quoted token on a row registers on that one
+	// slot, in authored order — the variant ring [orig: AnimMap_ParseConfigLine
+	// @0x40cb60 -> AnimMap_RegisterBoneNode @0x40c2d0 links each into the slot's
+	// circular list; duplication is the rotation weighting].
+	std::unordered_map<std::string, std::vector<std::string>> values;
 	for (size_t i = 0; i < adm.count; ++i) {
 		const std::string key = strutil::to_lower(adm.entries[i].key);
-		const std::string value = adm.entries[i].value;
-		if (!value.empty()) {
-			values.emplace(key, value);
+		std::vector<std::string> ring;
+		for (size_t v = 0; v < adm.entries[i].value_count; ++v) {
+			const std::string value = adm.entries[i].values[v];
+			if (!value.empty()) ring.push_back(value);
+		}
+		if (!ring.empty()) {
+			values.emplace(key, std::move(ring));
 		}
 	}
 	adm_free(&adm);
@@ -101,8 +108,14 @@ int AdmRootMotion::parse_adm(const opennova::ResourceIndex *index,
 		if (it == values.end()) {
 			continue;
 		}
-		if (const Track *t = track_for(it->second)) {
-			out.tracks.emplace(state, *t);
+		std::vector<Track> ring;
+		for (const std::string &value : it->second) {
+			if (const Track *t = track_for(value)) {
+				ring.push_back(*t);
+			}
+		}
+		if (!ring.empty()) {
+			out.tracks.emplace(state, std::move(ring));
 		}
 	}
 	return static_cast<int>(out.tracks.size());
@@ -130,19 +143,38 @@ bool AdmRootMotion::has_clip(int adm_id, int state_id) const {
 }
 
 const AdmRootMotion::Track *AdmRootMotion::resolve_track(int adm_id,
-                                                         int state_id) const {
+                                                         int state_id,
+                                                         int variant) const {
 	if (adm_id < 0 || adm_id >= static_cast<int>(sets_.size())) {
 		return nullptr;
 	}
 	const auto &tracks = sets_[adm_id].tracks;
 	auto it = tracks.find(state_id);
-	if (it != tracks.end()) {
-		return &it->second;
+	if (it == tracks.end()) {
+		// Missing semantic keys are bound to state-0 RESET's channel during retail
+		// AnimMap registration; the requested semantic state id itself is retained.
+		it = tracks.find(opennova::world::anim_state::kReset);
+		if (it == tracks.end()) return nullptr;
 	}
-	// Missing semantic keys are bound to state-0 RESET's channel during retail
-	// AnimMap registration; the requested semantic state id itself is retained.
-	it = tracks.find(opennova::world::anim_state::kReset);
-	return it != tracks.end() ? &it->second : nullptr;
+	const std::vector<Track> &ring = it->second;
+	if (ring.empty()) return nullptr;
+	const int n = static_cast<int>(ring.size());
+	int v = variant % n;
+	if (v < 0) v += n;
+	return &ring[static_cast<size_t>(v)];
+}
+
+int AdmRootMotion::variant_count(int adm_id, int state_id) const {
+	if (adm_id < 0 || adm_id >= static_cast<int>(sets_.size())) {
+		return 1;
+	}
+	const auto &tracks = sets_[adm_id].tracks;
+	auto it = tracks.find(state_id);
+	if (it == tracks.end()) {
+		it = tracks.find(opennova::world::anim_state::kReset);
+		if (it == tracks.end()) return 1;
+	}
+	return it->second.empty() ? 1 : static_cast<int>(it->second.size());
 }
 
 int32_t AdmRootMotion::position_of(const Track &track, int32_t phase_ticks) {
@@ -168,7 +200,13 @@ uint32_t AdmRootMotion::sample_trigger(const Track &track, int32_t phase_ticks) 
 
 bool AdmRootMotion::advance(int adm_id, int state_id, int32_t &phase_ticks,
                             opennova::world::RootMotionFrame &out) {
-	const Track *track = resolve_track(adm_id, state_id);
+	return advance_variant(adm_id, state_id, 0, phase_ticks, out);
+}
+
+bool AdmRootMotion::advance_variant(int adm_id, int state_id, int variant,
+                                    int32_t &phase_ticks,
+                                    opennova::world::RootMotionFrame &out) {
+	const Track *track = resolve_track(adm_id, state_id, variant);
 	if (track == nullptr) {
 		return false;
 	}

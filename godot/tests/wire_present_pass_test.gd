@@ -138,6 +138,16 @@ class Snapshot:
 					entity.get("wpn_anim_state", -1))
 			out[base + Simulation.PF_WPN_PHASE_TICKS] = float(
 					entity.get("wpn_phase_ticks", -1))
+			out[base + Simulation.PF_WPN_SOURCE_STATE] = float(
+					entity.get("wpn_source_state", -1))
+			out[base + Simulation.PF_WPN_SOURCE_PHASE_TICKS] = float(
+					entity.get("wpn_source_phase", -1))
+			out[base + Simulation.PF_WPN_BLEND_WEIGHT] = float(
+					entity.get("wpn_blend_weight", 1.0))
+			out[base + Simulation.PF_WPN_VARIANT] = float(
+					entity.get("wpn_variant", 0))
+			out[base + Simulation.PF_WPN_SOURCE_VARIANT] = float(
+					entity.get("wpn_source_variant", 0))
 			var angles: PackedVector3Array = entity.get(
 					"aim_angles", PackedVector3Array())
 			for cls in range(mini(angles.size(), 9)):

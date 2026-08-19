@@ -1164,8 +1164,11 @@ void ObjectModel::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("clear_part_anims"), &ObjectModel::clear_part_anims);
 	ClassDB::bind_method(D_METHOD("get_active_part_anims"),
 			&ObjectModel::get_active_part_anims);
-	ClassDB::bind_method(D_METHOD("set_weapon_channel", "key", "phase_ticks"),
-			&ObjectModel::set_weapon_channel);
+	ClassDB::bind_method(D_METHOD("set_weapon_channel", "key", "phase_ticks",
+								 "prev_key", "prev_phase_ticks", "blend_weight",
+								 "variant", "prev_variant"),
+			&ObjectModel::set_weapon_channel, DEFVAL(String()), DEFVAL(0),
+			DEFVAL(1.0f), DEFVAL(0), DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("get_weapon_channel"),
 			&ObjectModel::get_weapon_channel);
 	ClassDB::bind_method(D_METHOD("set_aim_overlay", "deltas"),

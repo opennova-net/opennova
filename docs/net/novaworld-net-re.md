@@ -5400,21 +5400,26 @@ gun+arms are rendered with that same transform.
 character arms (`g_local_player_entity->CharacterEntity`) with it. So **`pos`/`tpos` move the gun AND
 the arms together** (one unit at the view root); they enter via the camera, never here.
 
-**OpenNova port (2026-06-21).** `main_game._update_player_camera` places the host viewmodel at
-`camera.global_transform × Transform3D(model_facing, offset)` where `offset = (x, z, −y) / 256` from
-the weapon.def `pos` units (`_viewmodel_offset`), replacing an eyeballed constant. The view-local frame
-is **(x = right, y = forward, z = up)** — derived from the camera adding `ftol(Bone.pos)` straight onto
-`g_view_pos` (world Z up) under an identity view matrix at a level look, so component *i* lands on world
-axis *i*. Hence **`pos[2]` is the grip's DOWN offset (the dominant −183 → ~0.7u below the eye; the
-barrel reaches forward via the model), NOT depth.** Godot camera-local is (x right, y up, −z forward),
-so file `x→x`, `y→−z`, `z→y`. (A first cut mistakenly sent `pos[2]` into forward depth, producing a
-gun floating ~0.7u in front of the camera — the screensnapr.io/s/8e9d030 symptom; corrected here.
-oscarmike `WeaponManager._jo_to_godot_position` independently agrees on `/256` + `pos[2]→up/down`.)
-Hardcoded to WPN_MP5SD until a weapon.def Godot binding resolves the equipped weapon. **Deferrals:**
-per-weapon `pos`/`tpos` from a weapon.def binding *(landed — the fifth-pass def plumbing above)*; the
-`pos`→`tpos` ADS swap (entity `Flags & 2`); the small per-weapon `Bone.rot` *(landed, same pass)*;
-velocity lead + prone drop; the model-facing basis and the two small
-lateral/forward signs are dialed by drive (the `pos[2]→down` term is the certain one).
+**OpenNova port (2026-06-21) — SUPERSEDED on the axis map, see below.** `main_game._update_player_camera`
+placed the host viewmodel at `camera.global_transform × Transform3D(model_facing, offset)` with
+`offset = (x, z, −y) / 256` from the weapon.def `pos` units, replacing an eyeballed constant. This
+pass read the view-local frame as **(x = right, y = forward, z = up)** with the map `x→x`, `y→−z`,
+`z→y`; the `pos[2]→down` term was the certain one (the −183 → ~0.7u below the eye; the earlier cut
+that sent `pos[2]` into forward depth was the screensnapr.io/s/8e9d030 floating-gun symptom).
+Hardcoded to WPN_MP5SD until the def plumbing landed (the fifth pass above).
+
+**Axis-map correction (2026-07-11 grill; recorded here 2026-08-17 — this paragraph had never been
+updated).** The x=right / y=forward reading above is WRONG and was refuted by the grill: the view/def
+frame is **X = FORWARD, Y = LEFT, Z = UP**, proven by the aim ray's far point being `{+65536000, 0, 0}`
+through the SAME transform `[orig: HUD_DrawCrosshair @0x592a0f aim_direction = (1000.0, 0, 0) q16;
+the view-local rotate Math_FixedPointTransformPoint22 @0x4dd5d8]`. The AK's `|x| ≈ |y|` had masked
+the swap; the JOX/REVX M4 `tpos` made it glare (the canted-ADS report). Godot camera-local is
+(x right, y up, −z forward), so the map is `view x (forward) → −z`, `view y (left) → −x`,
+`view z (up) → y` — i.e. `Vector3(−y, z, −x)`, `player_viewmodel_rig.gd::_viewmodel_view_offset`
+(oscarmike's onhook-derived map agrees). Only the `z→up` term of the 2026-06-21 reading survives.
+**Deferrals:** the `pos`→`tpos` ADS swap and the per-weapon `Bone.rot` *(both landed)*; the velocity
+lead (`>>7`, clamps `@0x4dd4f2..`) and the prone Z drop (`−1280 @0x4dd578`) remain unported tails
+(their exact clamp constants need an IDA read; recorded at the rig's `_viewmodel_view_offset`).
 
 ### 5.41 `Player_*` family — naming validation + decomp cleanup grill (2026-06-26)
 

@@ -1114,12 +1114,17 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         infantry_torso_roll_tick(e);
     }
 
-    // The secondary (weapon) channel and its arms/pitch-kick block run on every
-    // local-player body tick, including death ticks. The primary death state disables
-    // rendering through its flag gate, but the independent playhead/timers do not
-    // freeze on the corpse. NPC/remote threading remains tracked by D-INF-11.
-    // [orig: the same body updater drives both pairs @0x4b40e0; witness §14.8]
+    // The secondary (weapon) channel. The org2 body runs the full producer — arms-dip
+    // block, reload window, the 16-tick selection ladder, then the shared advance —
+    // on every local-player body tick, including death ticks (the primary death state
+    // disables rendering through its flag gate, but the independent playhead/timers
+    // do not freeze on the corpse) [orig: Entity_UpdateInfantryPlayerBody @0x4b40e0;
+    // witness §14.8]. The org1 body runs ONLY the shared dual-channel advance: both
+    // updaters pass their out-array to AnimMap_UpdateDualChannels @0x40b8c0, so an AI
+    // body's secondary channel promotes and steps like anyone's — but its SELECTION
+    // writer @0x4b9a28 is unwitnessed, so its state is never re-selected here.
     if (inf.is_local_player) infantry_weapon_channel(e, world, logic_tick);
+    else infantry_weapon_channel_advance(e);
 
     // 3. Advance the selected playing clip and fetch its root motion (every tick).
     if (reset_capsule_bottom_state(inf.anim_state)) inf.prev_capsule_bottom = 0;

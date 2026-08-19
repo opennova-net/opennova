@@ -638,7 +638,10 @@ func _update_avatar(pos: Vector3) -> void:
 	# [orig: producer @0x4b5dad, override @0x4b14db; world-wac-ai-re.md §14.8]
 	var weapon_view: PlayerWeaponView = 			_weapon_effects.weapon_view() if _weapon_effects != null else null
 	if weapon_view != null:
-		_avatar.set_weapon_channel(weapon_view.body_anim_key, weapon_view.body_anim_phase)
+		_avatar.set_weapon_channel(weapon_view.body_anim_key, weapon_view.body_anim_phase,
+				weapon_view.body_anim_prev_key, weapon_view.body_anim_prev_phase,
+				weapon_view.body_anim_blend_weight, weapon_view.body_anim_variant,
+				weapon_view.body_anim_prev_variant)
 	else:
 		_avatar.set_weapon_channel("", 0)
 	if (not anim_source_key.is_empty() and not anim_key.is_empty()

@@ -322,6 +322,7 @@ void PresentApplier::present_one_wire_row(WireRow &row, ObjectModel *model,
 		row.ctrl_cache_valid = false;
 		row.aim_cache_valid = false;
 		row.wpn_state = INT32_MIN;
+		row.wpn_src_state = INT32_MIN;
 		row.wpn_phase = INT32_MIN;
 	}
 	apply_wire_body_anim(row, model, snap, tick_delta);
@@ -337,12 +338,30 @@ void PresentApplier::present_one_wire_row(WireRow &row, ObjectModel *model,
 				wfield_i(p, base, Simulation::PF_WPN_ANIM_STATE);
 		const int32_t wpn_phase =
 				wfield_i(p, base, Simulation::PF_WPN_PHASE_TICKS);
-		if (wpn_state != row.wpn_state || wpn_phase != row.wpn_phase) {
+		const int32_t wpn_src_state =
+				wfield_i(p, base, Simulation::PF_WPN_SOURCE_STATE);
+		const int32_t wpn_src_phase =
+				wfield_i(p, base, Simulation::PF_WPN_SOURCE_PHASE_TICKS);
+		const float wpn_weight = p[base + Simulation::PF_WPN_BLEND_WEIGHT];
+		const int32_t wpn_variant = wfield_i(p, base, Simulation::PF_WPN_VARIANT);
+		const int32_t wpn_src_variant =
+				wfield_i(p, base, Simulation::PF_WPN_SOURCE_VARIANT);
+		if (wpn_state != row.wpn_state || wpn_phase != row.wpn_phase ||
+				wpn_src_state != row.wpn_src_state || wpn_src_phase != row.wpn_src_phase ||
+				wpn_weight != row.wpn_weight || wpn_variant != row.wpn_variant ||
+				wpn_src_variant != row.wpn_src_variant) {
 			model->set_weapon_channel(
 					wpn_state >= 0 ? infantry_key_cached(wpn_state) : String(),
-					wpn_phase);
+					wpn_phase,
+					wpn_src_state >= 0 ? infantry_key_cached(wpn_src_state) : String(),
+					wpn_src_phase, wpn_weight, wpn_variant, wpn_src_variant);
 			row.wpn_state = wpn_state;
 			row.wpn_phase = wpn_phase;
+			row.wpn_src_state = wpn_src_state;
+			row.wpn_src_phase = wpn_src_phase;
+			row.wpn_weight = wpn_weight;
+			row.wpn_variant = wpn_variant;
+			row.wpn_src_variant = wpn_src_variant;
 		}
 	}
 	const bool next_visible =

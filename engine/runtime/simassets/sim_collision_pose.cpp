@@ -249,23 +249,45 @@ bool SimCollisionPoseProvider::eval_entity_pose(world::World &world,
 
 	std::string weapon_key;
 	double weapon_seconds = 0.0;
+	std::string weapon_prev_key;
+	double weapon_prev_seconds = 0.0;
+	float weapon_blend = 1.0f;
+	int weapon_variant = 0;
+	int weapon_prev_variant = 0;
 	if (world.cached.local_player.valid() &&
 			entity.packed == world.cached.local_player.packed &&
 			world::infantry_weapon_channel_visible(
 					r_ai->inf, weapon_active,
 					mount_blocks_weapon_channel(*r_entity))) {
 		weapon_key = infantry_anim_key(r_ai->inf.wpn_state);
-		const float weapon_fps = rig->clip_fps(weapon_key, 0);
+		weapon_variant = r_ai->inf.wpn_variant;
+		const float weapon_fps = rig->clip_fps(weapon_key, weapon_variant);
 		if (weapon_fps > 0.0f)
 			weapon_seconds =
 					static_cast<double>(
 							std::max(r_ai->inf.wpn_clip_phase, 0)) /
 					(2.0 * weapon_fps);
+		// The secondary channel's own cross-fade rides into the authoritative pose
+		// exactly as it does into presentation, so hitboxes and the drawn body
+		// agree through the window [orig: the shared AnimMap_UpdateEntity re-init].
+		if (r_ai->inf.weapon_blend_active()) {
+			weapon_prev_key = infantry_anim_key(r_ai->inf.wpn_prev);
+			weapon_prev_variant = r_ai->inf.wpn_prev_variant;
+			weapon_blend = r_ai->inf.wpn_blend_weight;
+			const float prev_fps = rig->clip_fps(weapon_prev_key, weapon_prev_variant);
+			if (prev_fps > 0.0f)
+				weapon_prev_seconds =
+						static_cast<double>(
+								std::max(r_ai->inf.wpn_prev_clip_phase, 0)) /
+						(2.0 * prev_fps);
+		}
 	}
 
 	rig->eval_composed_pose(primary_key, primary_seconds, primary_blend,
 			source_key, source_seconds, r_ai->inf.anim_blend_weight,
-			deltas, weapon_key, weapon_seconds, r_pose);
+			deltas, weapon_key, weapon_seconds, r_pose,
+			weapon_prev_key, weapon_prev_seconds, weapon_blend,
+			weapon_variant, weapon_prev_variant);
 	return true;
 }
 

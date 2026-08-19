@@ -1032,6 +1032,15 @@ public:
     // original gates it to `(current_tick & 0xF) == 0` while the advance around it runs
     // every tick from AnimMap_UpdateDualChannels @0x40b8c0.
     void infantry_weapon_channel_select(AiEntity &e);
+    // The SHARED dual-channel advance — the part of the secondary channel that runs
+    // for EVERY organic entity, player or AI: the clip-end deferred promotion and the
+    // playhead/blend step. Both body updaters pass their out-array to it
+    // [orig: AnimMap_UpdateDualChannels @0x40b8c0, called from the org2 body
+    //  @0x4b40e0 AND the org1 body @0x4b9910; witness world-wac-ai-re.md §14.8.1].
+    // The org1 SELECTION writer (@0x4b9a28) is unwitnessed, so an AI body's
+    // secondary state stays where its reset left it (RESET-backfilled idle) — the
+    // witnessed retail appearance for AI bodies lacking hold keys — until it is read.
+    void infantry_weapon_channel_advance(AiEntity &e);
     // Availability resolution against root_motion->has_clip with the cited fallback chains.
     int infantry_resolve_state(int adm_id, int state) const;
     // The slope pass: 4 ground probes around the entity feeding the slide impulse and

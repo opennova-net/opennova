@@ -502,7 +502,8 @@ Array SkeletalAnim::eval_pose(const String &p_key, double p_playhead_seconds,
 
 Array SkeletalAnim::eval_pose_blended(const String &p_source_key,
 		double p_source_playhead_seconds, const String &p_target_key,
-		double p_target_playhead_seconds, float p_weight) const {
+		double p_target_playhead_seconds, float p_weight,
+		int p_source_variant, int p_target_variant) const {
 	String source_key = p_source_key;
 	String target_key = p_target_key;
 	const String reset_key("anim_reset");
@@ -516,25 +517,25 @@ Array SkeletalAnim::eval_pose_blended(const String &p_source_key,
 	const bool source_valid = find_clip(source_key) != nullptr;
 	const bool target_valid = find_clip(target_key) != nullptr;
 	if (!source_valid) {
-		return eval_pose(target_key, p_target_playhead_seconds);
+		return eval_pose(target_key, p_target_playhead_seconds, p_target_variant);
 	}
 	if (!target_valid) {
-		return eval_pose(source_key, p_source_playhead_seconds);
+		return eval_pose(source_key, p_source_playhead_seconds, p_source_variant);
 	}
 	const float weight = CLAMP(p_weight, 0.0f, 1.0f);
 	if (weight <= 0.0f) {
-		return eval_pose(source_key, p_source_playhead_seconds);
+		return eval_pose(source_key, p_source_playhead_seconds, p_source_variant);
 	}
 	if (weight >= 1.0f) {
-		return eval_pose(target_key, p_target_playhead_seconds);
+		return eval_pose(target_key, p_target_playhead_seconds, p_target_variant);
 	}
 
 	// Semantic states can map to the same BAD (including missing states that both
 	// bind RESET) while retaining independent channel playheads. They must still
 	// blend; key equality alone is not a valid single-sample shortcut. The mix
 	// itself (rotation slerp + origin lerp) is anim::blend_poses's.
-	const Array source = eval_pose(source_key, p_source_playhead_seconds);
-	const Array target = eval_pose(target_key, p_target_playhead_seconds);
+	const Array source = eval_pose(source_key, p_source_playhead_seconds, p_source_variant);
+	const Array target = eval_pose(target_key, p_target_playhead_seconds, p_target_variant);
 	if (source.size() != target.size()) {
 		return target;
 	}
@@ -558,16 +559,29 @@ PackedInt32Array SkeletalAnim::get_overlay_classes() const {
 }
 
 void SkeletalAnim::splice_weapon_channel(Array &p_pose, const String &p_wpn_key,
-		double p_wpn_playhead_seconds) const {
+		double p_wpn_playhead_seconds, const String &p_wpn_prev_key,
+		double p_wpn_prev_playhead_seconds, float p_wpn_weight,
+		int p_wpn_variant, int p_wpn_prev_variant) const {
 	// Hard override of the mask bones' WORLD rotations with the weapon channel's clip at
 	// its own playhead, then re-localize the complete mixed hierarchy. The primary pose
 	// keeps every local origin (the shared skeleton/model pivots own translation).
 	// [orig: mask @0x4b14db, second AnimChannel_ComputeBoneMatrices @0x4b16a7;
 	// world-wac-ai-re.md §14.8.6]
-	if (p_wpn_key.is_empty() || find_clip(p_wpn_key) == nullptr) {
+	//
+	// Empty key = the gate is off; that is the ONLY no-splice case. A key whose clip is
+	// absent binds RESET at registration instead of no-opping (retail: the backfill
+	// loops @0x40bc24 / @0x40bd2e, see docs/world/world-wac-ai-re.md §14.8.1), and
+	// eval_pose_blended already owns that fallback for the primary channel — routing
+	// through it keeps one rule for both channels and gives the secondary its own
+	// cross-fade in the same call.
+	if (p_wpn_key.is_empty()) {
 		return;
 	}
-	const Array wpose = eval_pose(p_wpn_key, p_wpn_playhead_seconds);
+	const String wpn_prev_key = p_wpn_prev_key.is_empty() ? p_wpn_key : p_wpn_prev_key;
+	const Array wpose = eval_pose_blended(wpn_prev_key, p_wpn_prev_playhead_seconds,
+			p_wpn_key, p_wpn_playhead_seconds, p_wpn_weight,
+			p_wpn_prev_key.is_empty() ? p_wpn_variant : p_wpn_prev_variant,
+			p_wpn_variant);
 	const int n = static_cast<int>(p_pose.size());
 	if (wpose.size() != n || static_cast<size_t>(n) != bones_.size()) {
 		return;
@@ -615,10 +629,13 @@ void SkeletalAnim::splice_weapon_channel(Array &p_pose, const String &p_wpn_key,
 Array SkeletalAnim::eval_pose_overlay(const String &p_key, double p_playhead_seconds,
 		const PackedInt32Array &p_classes, const Array &p_deltas,
 		const String &p_wpn_key, double p_wpn_playhead_seconds,
-		bool p_collapse_right_hand) const {
+		bool p_collapse_right_hand, const String &p_wpn_prev_key,
+		double p_wpn_prev_playhead_seconds, float p_wpn_weight,
+		int p_wpn_variant, int p_wpn_prev_variant) const {
 	return apply_pose_overlay(eval_pose(p_key, p_playhead_seconds),
 			p_classes, p_deltas, p_wpn_key, p_wpn_playhead_seconds,
-			p_collapse_right_hand);
+			p_collapse_right_hand, p_wpn_prev_key, p_wpn_prev_playhead_seconds,
+			p_wpn_weight, p_wpn_variant, p_wpn_prev_variant);
 }
 
 Array SkeletalAnim::eval_pose_blended_overlay(
@@ -626,22 +643,29 @@ Array SkeletalAnim::eval_pose_blended_overlay(
 		const String &p_target_key, double p_target_playhead_seconds,
 		float p_weight, const PackedInt32Array &p_classes,
 		const Array &p_deltas, const String &p_wpn_key,
-		double p_wpn_playhead_seconds, bool p_collapse_right_hand) const {
+		double p_wpn_playhead_seconds, bool p_collapse_right_hand,
+		const String &p_wpn_prev_key, double p_wpn_prev_playhead_seconds,
+		float p_wpn_weight, int p_wpn_variant, int p_wpn_prev_variant) const {
 	return apply_pose_overlay(eval_pose_blended(
 					p_source_key, p_source_playhead_seconds,
 					p_target_key, p_target_playhead_seconds, p_weight),
 			p_classes, p_deltas, p_wpn_key, p_wpn_playhead_seconds,
-			p_collapse_right_hand);
+			p_collapse_right_hand, p_wpn_prev_key, p_wpn_prev_playhead_seconds,
+			p_wpn_weight, p_wpn_variant, p_wpn_prev_variant);
 }
 
 Array SkeletalAnim::apply_pose_overlay(Array pose,
 		const PackedInt32Array &p_classes, const Array &p_deltas,
 		const String &p_wpn_key, double p_wpn_playhead_seconds,
-		bool p_collapse_right_hand) const {
+		bool p_collapse_right_hand, const String &p_wpn_prev_key,
+		double p_wpn_prev_playhead_seconds, float p_wpn_weight,
+		int p_wpn_variant, int p_wpn_prev_variant) const {
 	// The witnessed order: primary sample -> weapon-channel mask override -> the aim
 	// overlay multiplies ON TOP of the composed pose [orig: @0x4b14a7..@0x4b16a7 run
 	// before the per-bone overlay loop; world-wac-ai-re.md §14.8.6].
-	splice_weapon_channel(pose, p_wpn_key, p_wpn_playhead_seconds);
+	splice_weapon_channel(pose, p_wpn_key, p_wpn_playhead_seconds,
+			p_wpn_prev_key, p_wpn_prev_playhead_seconds, p_wpn_weight,
+			p_wpn_variant, p_wpn_prev_variant);
 	const int n = static_cast<int>(pose.size());
 	if (n == 0 || static_cast<size_t>(n) != bones_.size() || p_classes.size() < n ||
 			p_deltas.size() < static_cast<int>(opennova::anim::kOverlayClassCount)) {
@@ -690,13 +714,17 @@ void SkeletalAnim::pose_skeleton(Skeleton3D *p_skeleton, const String &p_key,
 		double p_playhead_seconds, int p_variant,
 		const PackedInt32Array &p_classes, const Array &p_deltas,
 		const String &p_wpn_key, double p_wpn_playhead_seconds,
-		bool p_collapse_right_hand) const {
+		bool p_collapse_right_hand, const String &p_wpn_prev_key,
+		double p_wpn_prev_playhead_seconds, float p_wpn_weight,
+		int p_wpn_variant, int p_wpn_prev_variant) const {
 	// Branch mirror of ObjectModel.advance_body_animation: overlay inputs
 	// present -> the composed overlay pose, else the plain clip pose.
 	Array pose;
 	if (!p_deltas.is_empty() && !p_classes.is_empty()) {
 		pose = eval_pose_overlay(p_key, p_playhead_seconds, p_classes, p_deltas,
-				p_wpn_key, p_wpn_playhead_seconds, p_collapse_right_hand);
+				p_wpn_key, p_wpn_playhead_seconds, p_collapse_right_hand,
+				p_wpn_prev_key, p_wpn_prev_playhead_seconds, p_wpn_weight,
+				p_wpn_variant, p_wpn_prev_variant);
 	} else {
 		pose = eval_pose(p_key, p_playhead_seconds, p_variant);
 	}
@@ -708,14 +736,18 @@ void SkeletalAnim::pose_skeleton_blended(Skeleton3D *p_skeleton,
 		const String &p_target_key, double p_target_playhead_seconds,
 		float p_weight, const PackedInt32Array &p_classes,
 		const Array &p_deltas, const String &p_wpn_key,
-		double p_wpn_playhead_seconds, bool p_collapse_right_hand) const {
+		double p_wpn_playhead_seconds, bool p_collapse_right_hand,
+		const String &p_wpn_prev_key, double p_wpn_prev_playhead_seconds,
+		float p_wpn_weight, int p_wpn_variant, int p_wpn_prev_variant) const {
 	Array pose;
 	if (!p_deltas.is_empty() && !p_classes.is_empty()) {
 		pose = eval_pose_blended_overlay(
 				p_source_key, p_source_playhead_seconds,
 				p_target_key, p_target_playhead_seconds, p_weight,
 				p_classes, p_deltas, p_wpn_key,
-				p_wpn_playhead_seconds, p_collapse_right_hand);
+				p_wpn_playhead_seconds, p_collapse_right_hand,
+				p_wpn_prev_key, p_wpn_prev_playhead_seconds, p_wpn_weight,
+				p_wpn_variant, p_wpn_prev_variant);
 	} else {
 		pose = eval_pose_blended(
 				p_source_key, p_source_playhead_seconds,
@@ -768,10 +800,10 @@ void SkeletalAnim::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_clip_length", "key", "variant"), &SkeletalAnim::get_clip_length, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("is_clip_looping", "key", "variant"), &SkeletalAnim::is_clip_looping, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("eval_pose", "key", "playhead_seconds", "variant"), &SkeletalAnim::eval_pose, DEFVAL(0));
-	ClassDB::bind_method(D_METHOD("eval_pose_blended", "source_key", "source_playhead_seconds", "target_key", "target_playhead_seconds", "weight"), &SkeletalAnim::eval_pose_blended);
+	ClassDB::bind_method(D_METHOD("eval_pose_blended", "source_key", "source_playhead_seconds", "target_key", "target_playhead_seconds", "weight", "source_variant", "target_variant"), &SkeletalAnim::eval_pose_blended, DEFVAL(0), DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("get_overlay_classes"), &SkeletalAnim::get_overlay_classes);
-	ClassDB::bind_method(D_METHOD("eval_pose_overlay", "key", "playhead_seconds", "classes", "deltas", "wpn_key", "wpn_playhead_seconds", "collapse_right_hand"), &SkeletalAnim::eval_pose_overlay, DEFVAL(String()), DEFVAL(0.0), DEFVAL(false));
-	ClassDB::bind_method(D_METHOD("eval_pose_blended_overlay", "source_key", "source_playhead_seconds", "target_key", "target_playhead_seconds", "weight", "classes", "deltas", "wpn_key", "wpn_playhead_seconds", "collapse_right_hand"), &SkeletalAnim::eval_pose_blended_overlay, DEFVAL(String()), DEFVAL(0.0), DEFVAL(false));
-	ClassDB::bind_method(D_METHOD("pose_skeleton", "skeleton", "key", "playhead_seconds", "variant", "classes", "deltas", "wpn_key", "wpn_playhead_seconds", "collapse_right_hand"), &SkeletalAnim::pose_skeleton, DEFVAL(String()), DEFVAL(0.0), DEFVAL(false));
-	ClassDB::bind_method(D_METHOD("pose_skeleton_blended", "skeleton", "source_key", "source_playhead_seconds", "target_key", "target_playhead_seconds", "weight", "classes", "deltas", "wpn_key", "wpn_playhead_seconds", "collapse_right_hand"), &SkeletalAnim::pose_skeleton_blended, DEFVAL(String()), DEFVAL(0.0), DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("eval_pose_overlay", "key", "playhead_seconds", "classes", "deltas", "wpn_key", "wpn_playhead_seconds", "collapse_right_hand", "wpn_prev_key", "wpn_prev_playhead_seconds", "wpn_weight", "wpn_variant", "wpn_prev_variant"), &SkeletalAnim::eval_pose_overlay, DEFVAL(String()), DEFVAL(0.0), DEFVAL(false), DEFVAL(String()), DEFVAL(0.0), DEFVAL(1.0f), DEFVAL(0), DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("eval_pose_blended_overlay", "source_key", "source_playhead_seconds", "target_key", "target_playhead_seconds", "weight", "classes", "deltas", "wpn_key", "wpn_playhead_seconds", "collapse_right_hand", "wpn_prev_key", "wpn_prev_playhead_seconds", "wpn_weight", "wpn_variant", "wpn_prev_variant"), &SkeletalAnim::eval_pose_blended_overlay, DEFVAL(String()), DEFVAL(0.0), DEFVAL(false), DEFVAL(String()), DEFVAL(0.0), DEFVAL(1.0f), DEFVAL(0), DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("pose_skeleton", "skeleton", "key", "playhead_seconds", "variant", "classes", "deltas", "wpn_key", "wpn_playhead_seconds", "collapse_right_hand", "wpn_prev_key", "wpn_prev_playhead_seconds", "wpn_weight", "wpn_variant", "wpn_prev_variant"), &SkeletalAnim::pose_skeleton, DEFVAL(String()), DEFVAL(0.0), DEFVAL(false), DEFVAL(String()), DEFVAL(0.0), DEFVAL(1.0f), DEFVAL(0), DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("pose_skeleton_blended", "skeleton", "source_key", "source_playhead_seconds", "target_key", "target_playhead_seconds", "weight", "classes", "deltas", "wpn_key", "wpn_playhead_seconds", "collapse_right_hand", "wpn_prev_key", "wpn_prev_playhead_seconds", "wpn_weight", "wpn_variant", "wpn_prev_variant"), &SkeletalAnim::pose_skeleton_blended, DEFVAL(String()), DEFVAL(0.0), DEFVAL(false), DEFVAL(String()), DEFVAL(0.0), DEFVAL(1.0f), DEFVAL(0), DEFVAL(0));
 }
