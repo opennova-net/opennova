@@ -42,15 +42,19 @@ namespace opennova::netsim {
 namespace {
 
 // Both 0x16 rows and the 0x46 team byte write the live entity team through
-// the slot's entity binding [orig: @0x42fc88 / @0x4315fc].
+// the slot's entity binding [orig: @0x42fc88 / @0x4315fc]. Entity rows are
+// ClientState.revision-covered presenter state, so an actual change bumps it —
+// the same on-change form as the 0x50 sibling (apply_team_assign).
 void apply_team_to_entity(ClientState &state, const ClientRosterSlot &slot,
 		uint8_t team) {
 	if (slot.entity_slot < 0) return;
 	const uint16_t handle = static_cast<uint16_t>(slot.entity_slot); // pool 0
 	for (ClientEntityState &es : state.entities) {
 		if (es.handle != handle) continue;
+		if (es.team == team && es.team_known) return;
 		es.team = team;
 		es.team_known = true;
+		state.mark_changed();
 		return;
 	}
 }

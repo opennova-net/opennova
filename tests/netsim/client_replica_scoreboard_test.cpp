@@ -264,9 +264,17 @@ void test_row_team_refreshes_entity() {
 	view.apply(s2c::PLAYER_LIST, make_list(0x01, {{3, 0, 0, 0, 0x04}}, 1, 0));
 	CHECK(view.state().entities[0].team == 2);
 	CHECK(view.state().entities[0].team_known);
+	// Entity rows are ClientState.revision-covered presenter state: the write
+	// bumps on change (the apply_team_assign form) and holds on a same-team
+	// re-apply, so row-plan invalidation stays edge-triggered.
+	const std::uint64_t rev_after_list = view.state().revision;
+	CHECK(rev_after_list > 0);
+	view.apply(s2c::PLAYER_LIST, make_list(0x01, {{3, 0, 0, 0, 0x04}}, 1, 0));
+	CHECK(view.state().revision == rev_after_list);
 	view.apply(s2c::PLAYER_SYNC,
 			make_sync(3, 5, kPlayerSyncHasTeamByte, nullptr, nullptr, 1));
 	CHECK(view.state().entities[0].team == 1);
+	CHECK(view.state().revision == rev_after_list + 1);
 }
 
 // A malformed body is counted, not folded.
