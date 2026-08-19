@@ -75,6 +75,8 @@ world::AmmoTable build_ammo_table(const DefAmmoFile &ammo) {
 				static_cast<float>(d.light_impact_radius_fp16) / 65536.0f;
 		e.light_impact_color = static_cast<uint32_t>(d.light_impact_color);
 		e.light_impact_ticks = d.light_impact_ticks;
+		e.turnrate_maxpit = d.turnrate_maxpit;
+		e.turnrate_maxyaw = d.turnrate_maxyaw;
 		table.entries.push_back(std::move(e));
 	}
 	return table;

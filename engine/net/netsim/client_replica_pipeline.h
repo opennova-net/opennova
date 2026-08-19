@@ -66,6 +66,10 @@ public:
 	// [orig: update_map_overlay_timers @0x5BFCE0;
 	//  render_minimap_slot_blip @0x5be4ac]
 	void tick_minimap_overlays();
+	// Advance every active client-flown guided missile one 62 Hz tick. The
+	// client only flies — termination arrives solely as the wire's group 1
+	// (client_replica_guided.cpp; §5.15, D-NET-64).
+	void tick_guided_missiles();
 
 	// JOINER role only (net-re §5.38e, D-NET-196): switch the 0x0A fold from
 	// live-pose snap to smooth-target STAGING, and enable tick_remote_motion.
@@ -282,6 +286,7 @@ private:
 	void apply_static_batch(const std::vector<uint8_t> &body);  // 0x10 pool-2
 	void apply_pool3_batch(const std::vector<uint8_t> &body);   // 0x20 pool-3
 	// The live placed-device lifecycle (client_replica_placed_device.cpp).
+	void apply_entity_routed(const std::vector<uint8_t> &body); // 0x44 (guided, §5.15)
 	void apply_deployed_item(const std::vector<uint8_t> &body); // 0x59 pool-1
 	void apply_entity_remove(const std::vector<uint8_t> &body);  // 0x12
 	void erase_entity_tree(uint16_t root_handle);

@@ -86,7 +86,7 @@ record splits a divergence into facets (e.g. D-NET-133), the facets get separate
 
 | ID | One-liner | Class | Disposition | Slice |
 |---|---|---|---|---|
-| D-NET-64 | Guided-weapon record: structural port done, 0x0C-dispatch wiring deferred, wire-unvalidated (no capture carries guided traffic) | B | WITNESSED-READY-DEFERRED + NEEDS-RE (capture) | PAR-NET |
+| D-NET-64 | Guided-weapon record ADVANCED 2026-08-18: the S2C 0x44 dispatch is wired (`ClientReplicaPipeline::apply_entity_routed` folds §5.36 sub-header + §5.15 groups 1/2/3/4/5 into typed `ClientGuidedMissile` state — 5 clears the lock like 2, the witnessed read semantic; 6 dropped, no presented surface) and the flight integrator is hosted (`world::GuidedFlight` `[orig: Entity_UpdateGuidedMissile_0 @0x446060]`: 31-tick ignition hold, integer-truncated boost ramp, per-axis BAM turn clamp; the overshoot/steer-guard detonation + proximity AI-notify leg is AUTHORITY-only `[orig: gate @0x4463cb]` — the non-authority client flies until the wire's group 1 ends it), ticked per client pump. Wire validation runs against the local Karo reference capture (`nw_karo_guided_test`, asset-gated NW_KARO_GUIDED_PCAP; our pinned slice: 649 records, 0 undecodable, 12 missiles, 3 shooters — the fork measured a different slice of the same match: 709 records, 100% stng, 4 shooters). Residuals: flight velocity/turn clamps use the integrator defaults until the missile's ammo identity resolves through its entity class (`turnrate_maxpit/maxyaw` parsed + carried already); missile presentation (model + trail) unhosted; the authority seeker branch (target acquisition, flare preference, the 0x44 write side) unported; C2S command-map 0x44 overload shape-guard only | B | OPEN (partial — dispatch + flight + capture validation ported; presentation/ammo-resolve/authority-seeker residuals remain) | PAR-NET |
 | D-NET-97 | Host pool routing still follows BMS `EntityKind`; retail's `Pool_Alloc` caller and exact item-definition allocation predicate remain unwitnessed. `ItemReplicationCatalog` now keeps raw type/attrib/attrib2/capability inputs on an independent `StoragePool::Unresolved` axis, so wire codec, motion family, and BMS kind can no longer silently masquerade as allocation evidence. The pool-1 trailer crash remains fixed; allocation parity remains open. | A | OPEN + NEEDS-RE | PAR-NET |
 | D-NET-116 | Pending-spawn load-complete gate (`dword_24D1DE0`) not modeled; latent for a driver that wires `ctx.world` during load | A | WITNESSED-READY-DEFERRED (latent) | PAR-NET |
 | D-NET-123 | `Server_TickUpdate` owns the logic tick; the double-tick guardrail is comment-only | A | WITNESSED-READY-DEFERRED (latent) | PAR-NET |
@@ -961,7 +961,7 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 
 | Domain | OPEN | NEEDS-RE | WITNESSED-READY-DEFERRED | Domain open total | Closed rows still tabled |
 |---|---|---|---|---|---|
-| Net | 17 | 0 | 7 | 24 | 0 |
+| Net | 18 | 0 | 6 | 24 | 0 |
 | Environment | 0 | 0 | 3 | 3 | 0 |
 | World / AI + events | 52 | 4 | 5 | 61 | 6 |
 | UI (menu/ctrl/sound/playerinfo/HUD) | 36 | 0 | 3 | 39 | 13 |
@@ -977,9 +977,9 @@ drops off the scoreboard (first to do it: Item def, D-ITEMDEF-1, 2026-07-05).
 | Render — materials/state | 0 | 0 | 1 | 1 | 0 |
 | Render — draw order | 2 | 0 | 1 | 3 | 0 |
 | Render — lighting | 4 | 0 | 1 | 5 | 0 |
-| **Total** | **117** | **11** | **23** | **151** | 20 |
+| **Total** | **118** | **11** | **22** | **151** | 20 |
 
-Dual-flagged rows (also carry a NEEDS-RE facet): D-INF-20, D-NET-136, D-NET-169, D-NET-179, D-NET-64, D-NET-97.
+Dual-flagged rows (also carry a NEEDS-RE facet): D-INF-20, D-NET-136, D-NET-169, D-NET-179, D-NET-97.
 
 <!-- scoreboard:generated:end -->
 

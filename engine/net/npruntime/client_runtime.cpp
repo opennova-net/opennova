@@ -589,6 +589,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(const PlayerExtendedU
 	// [orig: Client_ProcessNetworkFrame @0x42C2E1..0x42C2E6]
 	advance_zone_timers();
 	view_.tick_minimap_overlays();
+	view_.tick_guided_missiles();   // the client-flown §5.15 pursuit (D-NET-64)
 
 	// The remote lean integrator runs once per client frame regardless of role —
 	// the body tick that owns it in retail. [orig: decay @0x4b5c97, then the ramp

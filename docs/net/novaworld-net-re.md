@@ -2720,10 +2720,19 @@ serializer layer.
 **Port + status.** `GuidedRecord` + `encode_guided_field_group` /
 `decode_guided_field_group` (`ingame_encode.cpp` / `ingame_decode.cpp`) port the
 write/read switches; `nw_ingame_guided_test` round-trips every (mode, group).
-**Deferred** (D-NET-64): wiring the codec into the 0x0C entity-packet dispatch and
-validating the per-group field semantics against the wire — no capture in hand
-carries guided traffic (the 2026-06-16b loopback fired no rockets). Verdict:
-**partial** (IDA-structural; round-trip-pinned; wire-unvalidated).
+**Advanced 2026-08-18** (D-NET-64): the S2C 0x44 dispatch is wired —
+`netsim::ClientReplicaPipeline::apply_entity_routed` folds groups 1/2/3/4/5 into
+typed `ClientGuidedMissile` state and the flight is hosted
+(`world::GuidedFlight` `[orig: Entity_UpdateGuidedMissile_0 @0x446060]`;
+the overshoot/steer-guard detonation and the proximity AI-notify are
+AUTHORITY-only `[orig: the role gate @0x4463cb]` — a non-authority client
+flies until the wire's group 1 sets the dead bit) — and
+the per-group field semantics are validated against a local retail Karo Stinger
+capture (`nw_karo_guided_test`, asset-gated NW_KARO_GUIDED_PCAP; the earlier
+"no capture in hand" blocker is closed by that capture). Still deferred: the
+authority seeker branch (the 0x44 write side), missile presentation, and the
+per-missile ammo resolve for velocity/turn clamps. Verdict: **ported**
+(dispatch + flight + capture-validated; residuals in the ledger row).
 
 ### 5.16 C2S 0x06 — client-fired-round (3-player loopback 2026-06-16d)
 
@@ -4010,9 +4019,10 @@ while the host skips loopback (`npruntime_placed_device_relay`).
 **S2C `0x44` — entity-routed sub-packet.** A 5-B sub-header `[u16 field0][i16 netId][u8 subtype]` then a
 class-dependent body the dispatcher routes to the target entity's per-class serialize callback (`entity
 def+356`, `source_type=2`) — the **same per-class path** the C2S `0x0C` entity-uplink uses (§5.10b). We
-decode the sub-header + expose the body slice; the body's field layout is class-specific and is **not yet
-fully mapped** (PARTIAL — same deferral as the §5.15 guided record; the `subtype` here plays the field-group
-role the C2S 0x0C `sub_op` does). [orig: `NapiNPClientMsg_0x044 @ 0x422710` →
+decode the sub-header + expose the body slice; for the GUIDED class the body is fully mapped and folded
+(§5.15, `apply_entity_routed`; the `subtype` plays the field-group role the C2S 0x0C `sub_op` does), and
+`field0` is witnessed as the SHOOTER handle (entity+368 — the fork's Karo RE corrected the earlier
+"not read by the dispatcher" gloss); other classes' bodies remain unmapped. [orig: `NapiNPClientMsg_0x044 @ 0x422710` →
 `NetPacket_DispatchToEntityByNetId @ 0x4D6960`]. **Witness:** probe3_again ×12 — `subtype` 1/2/3 with body
 sizes 1/1/14 B; sub-header consumes, body left raw.
 
