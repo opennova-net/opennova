@@ -387,7 +387,9 @@ struct DismembermentRig {
 		victim_seed.yaw = 90; // engine heading 0; a +X round is rear quadrant 2
 		victim_seed.health = 10;
 		victim_seed.health_max = 20;
-		victim_seed.section_mask = 0x20u;
+		// A pre-hidden bit OUTSIDE every bone mask, so the "already hidden
+		// sections stay hidden on both halves" property stays observable.
+		victim_seed.section_mask = 0x2000000u;
 		victim = world.registry.spawn(0, victim_seed);
 
 		const int body_index = ai.attach(victim);
@@ -450,11 +452,15 @@ struct DismembermentRig {
 };
 
 bool test_dismemberment_damage_path() {
-	constexpr uint32_t kBone3Mask = 0x1E670u;
+	// Each mask is the hit bone's own bit (1 << bone) OR the witnessed case
+	// addend [orig: @0x407601 + the switch @0x407608].
+	constexpr uint32_t kBone3Mask = (1u << 3) | 0x1E670u;
 	const std::array<uint32_t, 13> expected_masks{{
-		0x1E67Cu, 0x1E678u, 0x1E670u, 0x1E668u, 0x10200u,
-		0x08400u, 0x20800u, 0x41000u, 0x10000u, 0x08000u,
-		0x20000u, 0x40000u, 0x04000u,
+		(1u << 1) | 0x1E67Cu, (1u << 2) | 0x1E678u, (1u << 3) | 0x1E670u,
+		(1u << 4) | 0x1E668u, (1u << 5) | 0x10200u, (1u << 6) | 0x08400u,
+		(1u << 7) | 0x20800u, (1u << 8) | 0x41000u, (1u << 9) | 0x10000u,
+		(1u << 10) | 0x08000u, (1u << 11) | 0x20000u, (1u << 12) | 0x40000u,
+		(1u << 13) | 0x04000u,
 	}};
 	for (int bone = 1; bone <= 13; ++bone) {
 		if (!expect(w::dismemberment_mask_for_bone(bone) ==
@@ -463,8 +469,11 @@ bool test_dismemberment_damage_path() {
 			return false;
 	}
 	if (!expect(w::dismemberment_mask_for_bone(0) == 0 &&
-					w::dismemberment_mask_for_bone(14) == 0,
-			"non-dismemberable bones map to zero"))
+					w::dismemberment_mask_for_bone(-1) == 0,
+			"bone zero and negatives never dismember"))
+		return false;
+	if (!expect(w::dismemberment_mask_for_bone(14) == (1u << 14),
+			"bones past the table keep just their own section bit"))
 		return false;
 
 	{
@@ -478,10 +487,10 @@ bool test_dismemberment_damage_path() {
 		if (!expect(piece != nullptr && rig.world.registry.live_count() == 3,
 				"lethal authored bone hit allocates one pool-0 corpse clone"))
 			return false;
-		if (!expect(victim->section_mask == (0x20u | kBone3Mask),
+		if (!expect(victim->section_mask == (0x2000000u | kBone3Mask),
 				"victim hides the selected cut sections"))
 			return false;
-		if (!expect(piece->section_mask == (0x20u | ~kBone3Mask),
+		if (!expect(piece->section_mask == (0x2000000u | ~kBone3Mask),
 				"clone keeps exactly the complementary cut sections"))
 			return false;
 		if (!expect(piece->health == 0 && !piece->alive &&
@@ -492,16 +501,22 @@ bool test_dismemberment_damage_path() {
 
 		const w::AiEntity *victim_body = rig.ai.for_handle(rig.victim);
 		const w::AiEntity *piece_body = rig.ai.for_handle(piece->handle);
+		// bodyRoll (entity+0x94 -> AiEntity::roll), rear quadrant 2 negative;
+		// the clone memcpy-inherits the freshly written roll. The torso
+		// overlay channel (+0x2DC) is not the death roll's store.
+		// [orig: @0x407575; clone copy @0x4398dc]
 		if (!expect(victim_body != nullptr && piece_body != nullptr &&
-					victim_body->inf.torso_roll == -0x05B00000 &&
-					piece_body->inf.torso_roll == -0x05B00000 &&
-					victim_body->roll == 0 && piece_body->roll == 0,
-				"torso death takes the exact rear-quadrant roll on both halves"))
+					victim_body->roll == -0x05B05B00 &&
+					piece_body->roll == -0x05B05B00 &&
+					victim_body->inf.torso_roll == 0 &&
+					piece_body->inf.torso_roll == 0,
+				"torso death takes the exact rear-quadrant body roll on both halves"))
 			return false;
+		// X/Y only [orig: @0x4076b7/@0x4076c9] — the vertical component stays.
 		if (!expect(piece_body->inf.vel[0] == 100 + (10 * 65536 >> 8) &&
 					piece_body->inf.vel[1] == 200 &&
 					piece_body->inf.vel[2] == 300,
-				"clone velocity adds the witnessed round velocity >> 8 impulse"))
+				"clone velocity adds the witnessed horizontal round impulse only"))
 			return false;
 
 		const auto snapshots = ns::snapshot_world(rig.world);
@@ -523,7 +538,8 @@ bool test_dismemberment_damage_path() {
 		DismembermentRig rig(3, w::kItemAttribNoDismember);
 		rig.fire();
 		if (!expect(rig.piece() == nullptr &&
-					rig.world.registry.get(rig.victim)->section_mask == 0x20u,
+					rig.world.registry.get(rig.victim)->section_mask ==
+							0x2000000u,
 				"NoDismember kills without cloning or changing section masks"))
 			return false;
 	}
@@ -532,7 +548,8 @@ bool test_dismemberment_damage_path() {
 		DismembermentRig rig(2); // shooter + victim fill the actor pool
 		rig.fire();
 		if (!expect(rig.piece() == nullptr &&
-					rig.world.registry.get(rig.victim)->section_mask == 0x20u,
+					rig.world.registry.get(rig.victim)->section_mask ==
+							0x2000000u,
 				"pool exhaustion leaves the original section mask intact"))
 			return false;
 	}

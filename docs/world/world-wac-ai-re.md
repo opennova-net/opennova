@@ -3475,15 +3475,30 @@ This is the person item's `entity+0x1C8` damage/death callback (`Entity_InitFrom
 - ammo dword +72 (a burn effect id) → spawn attached emitter (`entity+0x1CC` handle)
   and OVERRIDE the selection to 173 `death_fire` `[orig: @ 0x4076d5]` — incendiary
   kills burn regardless of bone.
-- bodyRoll nudge on torso-region hits (`bone < 5`, not yet dead): quadrant 0 →
-  `bodyRoll = +0x5B00000`, quadrant 2 → `−0x5B00000` `[orig: @ 0x407562]`.
+- bodyRoll nudge on torso-region hits (signed `bone < 5`, not yet dead), on any
+  machine processing the trigger (this leg sits BEFORE the authority gate):
+  quadrant 0 → `bodyRoll (+0x94) = +0x5B05B00` (~8.0°) `[orig: @ 0x407564]`,
+  quadrant 2 → `−0x5B05B00` `[orig: @ 0x407575]`; the slope conform then chases
+  the grounded corpse's bodyRoll toward terrain (§3.5 item 4).
 - DISMEMBERMENT (authority, NPC, bone > 0, `!(attrib & 0x800000 NoDismember)`,
-  `health <= 0`, `health <= healthMax >> 1`, not yet dead): per-section bone MASKS
-  (case 1 `0x1E67C`, 2 `0x1E678`, 3 `0x1E670`, 4 `0x1E668`, 5 `0x10200`, 6 `0x8400`,
-  7 `0x20800`, 8 `0x41000`, 9 `0x10000`, 10 `0x8000`, 11 `0x20000`, 12 `0x40000`,
-  13 `0x4000`), `Entity_CloneFromTemplateByType` spawns the severed-part entity
-  (mask complement at +308, health 0, velocity += roundVel >> 8)
-  `[orig: @ 0x4075f6-0x4076c9]`. JO CP01 soldiers author `nodismember`.
+  `health <= 0`, `health <= healthMax >> 1` — structurally redundant after the
+  `<= 0` test, kept as written — not yet dead): the cut mask starts as the hit
+  bone's own bit `1 << bone` `[orig: @ 0x407601]` and the 13-case switch ORs a
+  linked-section addend (case 1 `0x1E67C`, 2 `0x1E678`, 3 `0x1E670`, 4 `0x1E668`,
+  5 `0x10200`, 6 `0x8400`, 7 `0x20800`, 8 `0x41000`, 9 `0x10000`, 10 `0x8000`,
+  11 `0x20000`, 12 `0x40000`, 13 `0x4000`; bones past 13 keep just their own
+  bit) `[orig: @ 0x407608-0x40766f]`. The victim takes `sectionMask |=
+  newBoneBits` (`newBoneBits = ~old & cutMask`) BEFORE the clone call
+  `[orig: @ 0x407675-0x407684]`; `Entity_CloneFromTemplateByType @ 0x4398a0`
+  (person → pool 0, memcpy of the FIRST `0x2B4` entity bytes + the `0xAC` AI
+  block — NetId/Ssn/Team and `animSlotPtr +0x188` are inherited, so the two
+  halves SHARE one anim slot; the tail past +0x2B4 keeps recycled-slot data)
+  returns the clone, unchecked (pool exhaustion would fault). The clone then
+  takes `sectionMask = ~newBoneBits` `[orig: @ 0x407691]`, `Health = 0`
+  `[orig: @ 0x407697]`, emitter link `+0x1CC = 0`, `shadowSlot0 +0x1B6 = 0`,
+  `DcbId +0x7C = 0` `[orig: @ 0x40769e-0x4076ab]`, and `velocity X/Y +=
+  roundVel X/Y >> 8` — no Z kick `[orig: @ 0x4076b7/@ 0x4076c9]`. JO CP01
+  soldiers author `nodismember`.
 - Type 4 = reset/re-kill: health = 0 + re-select from the hit record. Any other
   type (the damage appliers call mode 2) → `entity+0x148 = 62` (a 1 s
   recently-damaged hold on the same field the corpse timer reuses).
@@ -3493,18 +3508,34 @@ selects inline instead: bone hardcoded 1 (torso), quadrant from the IMPACT-to-vi
 position delta, cause 2 — with a 25% fire roll in the 4..8 u band and cause 4 for
 ammo type 7 — then `deathCallback(entity, 2, 0)`.
 
-#### Port status (2026-08-15)
+#### Port status (2026-08-15; corrected to the re-witness 2026-08-19)
 
-The authoritative bullet/person path now ports the witnessed torso-roll and
-dismemberment legs. `RoundSim` applies the exact quadrant-0/2 `bodyRoll` nudge,
-the 13-entry bone-mask table and every gate above; it allocates a pool-0 corpse
-clone before committing the victim mask, so pool exhaustion leaves the original
-body intact. The victim hides `oldMask | cutMask`; the clone hides
-`oldMask | ~cutMask`, starts at health zero, inherits the current corpse pose and
-animation state, and adds the witnessed `roundVel >> 8` velocity. The clone has
-no score, authored-origin, or LAN identity. Host/standalone presentation appends
-it as a synthetic row, while both halves transport the 32-bit hidden-section
-mask as exact 16-bit words into `ObjectModel` part visibility.
+The authoritative bullet/person path ports the witnessed body-roll and
+dismemberment legs. `RoundSim` writes the exact quadrant-0/2
+`bodyRoll = ±0x5B05B00` into the AI body's roll (`AiEntity::roll`, the same
+`+0x94` store the §3.5 slope pass chases for a grounded corpse) and applies the
+`(1 << bone) | addend` mask table plus every gate above. The victim hides
+`oldMask | cutMask`; the pool-0 clone hides `~newBoneBits` (equivalently
+`oldMask | ~cutMask`), starts at health zero, and adds the witnessed
+`roundVel X/Y >> 8` horizontal kick. Two deliberate divergences, both
+crash-guards on the original's unchecked clone: the victim mask commits only
+AFTER a successful allocation (retail commits first and would fault through the
+null return on actor-pool exhaustion), and the clone gets an independent
+AiEntity copy seeded to the victim's pose/anim state instead of sharing the
+victim's anim slot pointer (both halves start the same death clip on the same
+tick, so the observable pose matches). How the retail CLONE's own §19.3 death
+edge behaves is unwalked (its copied `Flags` lack bit 2, so the edge would run
+against a recycled-slot `+0x2C0`; whether that doubles the scream is unknown) —
+the port suppresses the clone's scream and seeds its selection explicitly.
+
+Identity: retail severs the connection id, shadow slot, and burn-emitter link
+but memcpy-inherits NetId/Ssn/Team; whether the retail clone reaches the
+compact/spawn wire is an OPEN question (the compact writer's row filter is
+unwalked for it). Our port keeps the clone out of `snapshot_world` and the
+pool-0 organic batches entirely — host/standalone presentation appends it as a
+synthetic row, and both halves transport the 32-bit hidden-section mask as
+exact 16-bit words into `ObjectModel` part visibility. The LAN leg is a
+ledgered D-AI-9 residual either way.
 
 Ammo properties `secondary_anim` and `kz_physics` now parse and bake into their
 witnessed +224/+225 byte slots. They are deliberately not interpreted yet: the

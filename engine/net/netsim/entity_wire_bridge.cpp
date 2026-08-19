@@ -164,7 +164,9 @@ GameEntitySnapshot snapshot_of(const world::Entity &e) {
 std::vector<GameEntitySnapshot> snapshot_world(const world::World &w) {
 	std::vector<GameEntitySnapshot> out;
 	w.registry.for_each([&](const world::Entity &e) {
-		if (e.dismemberment_piece) return; // host-only corpse clone; no LAN identity
+		// Host-only corpse clone: excluded from the compact stream until the
+		// retail clone's wire story is walked (divergence-ledger D-AI-9).
+		if (e.dismemberment_piece) return;
 		GameEntitySnapshot s = snapshot_of(e);
 		if (s.entity_class == EntityClass::Unknown) return; // no 0x0A compact form
 		// Retail's infantry compact writer reads entity+0x2EC (target heading)
@@ -331,7 +333,8 @@ OrganicSpawnBatch build_pool0_organic_batch(const world::World &w, world::Entity
 	OrganicSpawnBatch batch;
 	w.registry.for_each([&](const world::Entity &e) {
 		if (e.handle.pool() != 0) return;
-		if (e.dismemberment_piece) return; // host-only corpse clone; no spawn record
+		// Host-only corpse clone: no spawn record either (see snapshot_world).
+		if (e.dismemberment_piece) return;
 		OrganicSpawnRecord rec;
 		rec.slot_id = e.handle.packed;                 // the wire handle (pool<<12|slot)
 		rec.has_body = true;

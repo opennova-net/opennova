@@ -161,20 +161,36 @@ void push_round_debug(RoundSim &sim, const RoundDebugEvent &event) {
         ++sim.debug_trail_count;
 }
 
-void apply_torso_death_roll(AiEntity *body, int32_t bone, int quadrant) {
-    if (body == nullptr || bone < 0 || bone >= 5) return;
+// The kill-time body roll: a torso-stack hit (bone < 5) on a not-yet-dead body
+// tips the corpse ~8 deg toward the shot — front quadrant positive, rear
+// negative. The store is bodyRoll (entity+0x94), our AiEntity::roll — the same
+// field the slope pass then chases toward the ground slope for a grounded
+// corpse (infantry_slope_pass conform leg), which is what settles the tipped
+// body onto the terrain. [orig: gate @0x40755e; +0x05B05B00 @0x407564;
+// -0x05B05B00 @0x407575]
+void apply_death_body_roll(AiEntity *body, int32_t bone, int quadrant) {
+    if (body == nullptr || bone >= 5) return;
     if (quadrant == 0) {
-        body->inf.torso_roll = 0x05B00000;
+        body->roll = 0x05B05B00;
     } else if (quadrant == 2) {
-        body->inf.torso_roll = -0x05B00000;
+        body->roll = -0x05B05B00;
     }
 }
 
 Entity make_dismemberment_piece_seed(const Entity &victim, uint32_t cut_mask,
                                      int32_t death_anim_state) {
-    // Retail clones the victim entity before splitting the two section masks.
-    // Keep the authored/model traits, then sever every gameplay identity and
-    // relationship which must not be inherited by this host-only corpse row.
+    // The original clones by memcpy of the first 0x2B4 entity bytes plus the
+    // 0xAC AI block (person -> pool 0), which INHERITS NetId/Ssn/Team and even
+    // the anim-slot pointer (the halves share one skeletal evaluation), while
+    // the tail past +0x2B4 keeps recycled-slot data. It then severs exactly:
+    // sectionMask (complement swap @0x407691), Health = 0 (@0x407697), the
+    // burn-emitter link +0x1CC (@0x40769e), shadowSlot0 +0x1B6 (@0x4076a4),
+    // and DcbId +0x7C (@0x4076ab). [orig: Entity_CloneFromTemplateByType
+    // @0x4398a0 person leg @0x4398c1-0x439924; the sever set above]
+    // Our registry/AI split cannot memcpy an entity row, so this seed keeps
+    // the authored/model traits and clears every runtime relationship a copied
+    // struct would otherwise alias (weapon slots, mounts, emplacement poses) —
+    // a superset of the original's sever list, same observable corpse.
     Entity piece = victim;
     piece.net_id = 0;
     piece.bms_id = 0;
@@ -214,6 +230,8 @@ Entity make_dismemberment_piece_seed(const Entity &victim, uint32_t cut_mask,
     piece.last_attacker = EntityHandle{};
     piece.death_blast_center = Vec3{};
     piece.death_tick = 0;
+    // Equivalent to the original's ~newBoneBits, since ~(~old & cut) =
+    // old | ~cut. [orig: clone sectionMask store @0x407691]
     piece.section_mask = victim.section_mask | ~cut_mask;
     piece.dismemberment_piece = true;
     piece.spawned_piece_mask = 0;
@@ -281,15 +299,23 @@ void try_spawn_dismemberment_piece(World &world, Entity &victim,
     const EntityHandle piece_handle = world.registry.spawn(0, piece);
     if (!piece_handle.valid()) return;
 
+    // The horizontal kick only: the original adds roundVel X/Y >> 8 to the
+    // clone's velocity pair and leaves the vertical component alone.
+    // [orig: +152 add @0x4076b7; +156 add @0x4076c9]
     const int32_t impulse_q16[3] = {
         round_velocity_q16.x >> 8,
         round_velocity_q16.y >> 8,
-        round_velocity_q16.z >> 8,
+        0,
     };
     world.ai->attach_dismemberment_piece(piece_handle, *source, impulse_q16);
 
-    // Commit the victim-side half only after the registry allocation and AI
-    // body attachment succeed. A full actor pool leaves the original intact.
+    // Deliberate divergence (docs/divergence-ledger.md D-AI-9): the original
+    // commits the victim mask BEFORE the clone call (sectionMask |= newBoneBits
+    // @0x407684) and never null-checks the allocation (@0x407691 writes through
+    // the Entity_CloneFromTemplateByType return, so actor-pool exhaustion would
+    // fault). We commit after a successful allocation + AI attachment instead,
+    // so a full pool leaves the original body intact. The |= is equivalent to
+    // the original's ~old & boneMask two-step. [orig: @0x407675-0x407684]
     victim.section_mask |= cut_mask;
 }
 
@@ -1397,16 +1423,20 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                         target->death_anim_state =
                             compute_death_anim_state(death_section, quadrant,
                                                      death_cause::kBullet);
+                        // The roll, the mask switch, and the anim selector all
+                        // consume the SAME hit-record bone (hitRecord[14]);
+                        // death_section is our preserved copy of that record
+                        // field. [orig: @0x40755e / @0x4075f6 / @0x407483]
                         AiEntity *victim_body = world.ai != nullptr
                             ? world.ai->for_handle(target->handle)
                             : nullptr;
                         if (target_was_alive) {
-                            apply_torso_death_roll(
-                                victim_body, collision.bone_index, quadrant);
+                            apply_death_body_roll(
+                                victim_body, death_section, quadrant);
                         }
                         try_spawn_dismemberment_piece(
                             world, *target, velocity_q16,
-                            collision.bone_index, target->death_anim_state,
+                            death_section, target->death_anim_state,
                             target_was_alive);
                     }
                     world.relations.group(target->group_id).alert =

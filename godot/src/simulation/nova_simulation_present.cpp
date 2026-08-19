@@ -1704,10 +1704,13 @@ PackedFloat32Array Simulation::present_snapshot_from_client_replicas() const {
 			}
 		}
 	}
-	// Dismemberment clones deliberately have no LAN spawn/compact record. A
-	// listen server or standalone game appends them as synthetic-origin rows,
-	// which the existing runtime-model WirePresentPass owns. Their packed local
-	// handle is only a presenter key; entity_wire_bridge excludes these rows.
+	// Dismemberment clones have no LAN spawn/compact record in this port:
+	// entity_wire_bridge excludes them, and whether the retail clone reaches
+	// the compact/spawn wire is an open D-AI-9 residual (retail memcpy-inherits
+	// NetId/Ssn but severs the connection id). A listen server or standalone
+	// game appends them as synthetic-origin rows, which the existing
+	// runtime-model WirePresentPass owns. Their packed local handle is only a
+	// presenter key.
 	int piece_row = count;
 	if (!joiner_) {
 		world_->registry.for_each([&](const opennova::world::Entity &ent) {

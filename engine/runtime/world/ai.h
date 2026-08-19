@@ -654,7 +654,9 @@ public:
     int attach(EntityHandle h);
     // Attach the synthetic half-corpse produced by dismemberment. The body
     // keeps the source pose/AnimMap state and corpse motor, while all active
-    // combat/network inputs are cleared. impulse_q16 is round velocity >> 8.
+    // combat/network inputs are cleared. impulse_q16 is round velocity >> 8,
+    // horizontal only — the original kicks the clone's X/Y velocity pair and
+    // leaves Z alone [orig: @0x4076b7/@0x4076c9].
     int attach_dismemberment_piece(EntityHandle h, const AiEntity &source,
                                    const int32_t impulse_q16[3]);
     AiEntity *at(int ai_index);
