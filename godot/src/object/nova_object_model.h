@@ -299,6 +299,17 @@ private:
 	bool collapse_right_hand_ = false;
 	String wpn_key_;
 	int wpn_phase_ticks_ = 0;
+	// The secondary channel's outgoing clip + cross-fade weight (the sim's
+	// wpn_prev / wpn_prev_clip_phase / wpn_blend_weight). Empty prev key = the
+	// channel is not blending (retail: the AnimMap_UpdateEntity @0x40b5f0
+	// re-init, see docs/world/world-wac-ai-re.md §14.8.7).
+	String wpn_prev_key_;
+	int wpn_prev_phase_ticks_ = 0;
+	float wpn_blend_weight_ = 1.0f;
+	// The served variant-ring entries for the target and outgoing weapon clips
+	// (the sim's wpn_variant / wpn_prev_variant — the +68 play latch).
+	int wpn_variant_ = 0;
+	int wpn_prev_variant_ = 0;
 
 	// Per-frame work skips.
 	bool has_lights_ = false;
@@ -500,7 +511,9 @@ public:
 	void clear_part_phase(int p_channel);
 	void clear_part_anims();
 	Dictionary get_active_part_anims() const;
-	void set_weapon_channel(const String &p_key, int p_phase_ticks);
+	void set_weapon_channel(const String &p_key, int p_phase_ticks,
+			const String &p_prev_key = String(), int p_prev_phase_ticks = 0,
+			float p_blend_weight = 1.0f, int p_variant = 0, int p_prev_variant = 0);
 	// The applied weapon-channel pose ({key, phase_ticks}; empty when no
 	// channel is held) — presentation-state read-back.
 	Dictionary get_weapon_channel() const;

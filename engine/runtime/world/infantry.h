@@ -5,6 +5,7 @@
 #define OPENNOVA_WORLD_INFANTRY_H
 
 #include <cstdint>
+#include <unordered_map>
 
 #include "world/body_anim.h"
 #include "world/entity.h" // EntityHandle (the combat-pass target/focus fields)
@@ -229,6 +230,19 @@ public:
     virtual ~IRootMotionSource() = default;
     virtual bool has_clip(int adm_id, int state_id) const = 0;
     virtual bool advance(int adm_id, int state_id, int32_t &phase_ticks, RootMotionFrame &out) = 0;
+    // The variant ring. A .adm row may list several quoted clips; the slot is a
+    // circular list served-then-advanced per play, so repeated plays of one state
+    // rotate through its clips. variant_count reports the ring size (1 when the
+    // row authors one clip, or for providers without variants); advance_variant
+    // plays a specific ring entry, wrapping modulo the count. The default routes to
+    // the variant-less advance so headless/test providers need no changes.
+    // [orig: AnimMap_ParseConfigLine @0x40cb60 registers every token on one slot;
+    //  AnimMap_PlayAnimBySlot @0x40bda0 serves the head and advances it]
+    virtual int variant_count(int /*adm_id*/, int /*state_id*/) const { return 1; }
+    virtual bool advance_variant(int adm_id, int state_id, int /*variant*/,
+                                 int32_t &phase_ticks, RootMotionFrame &out) {
+        return advance(adm_id, state_id, phase_ticks, out);
+    }
     // Advance a stable primary plus the current target and return their blended
     // output. The default composes already-quantized RootMotionFrames for test and
     // headless providers. Asset-backed providers may override this to blend raw
@@ -333,6 +347,7 @@ struct InfantryState {
         move_mode = 0;
         target_dist = 0;
         reset_body_animation(anim_state::kIdle);
+        reset_weapon_animation(anim_state::kIdle);
         reload_anim_ticks = 0;
         arms_dip_ticks = 0;
         pitch_kick_accum = 0;
@@ -365,6 +380,77 @@ struct InfantryState {
     int wpn_state = anim_state::kIdle;    // entity+0x2C8
     int wpn_deferred = 0;                 // entity+0x2C4
     int32_t wpn_clip_phase = 0;
+    // The secondary channel cross-fades its state changes exactly as the primary
+    // does: AnimMap_UpdateEntity is the SHARED body both channels run through
+    // (AnimMap_UpdateDualChannels swaps the secondary pair into the primary's
+    // fields and calls it), so the blend-10 / blend-15 re-init applies to the
+    // weapon layer too. wpn_prev owns the outgoing clip's independent playhead.
+    // [orig: AnimMap_UpdateDualChannels @0x40b8c0 -> AnimMap_UpdateEntity
+    //  @0x40b5f0; AnimChannel_InitFromParams @0x410640; the 0x400 slow-blend flag]
+    int wpn_prev = anim_state::kIdle;
+    int32_t wpn_prev_clip_phase = 0;
+    float wpn_blend_weight = 1.0f;
+    float wpn_blend_step = 0.0f;
+    // The secondary channel's variant-ring cursor. A .adm row may list several
+    // clips; the slot is a circular list served-then-advanced per play, so
+    // repeated plays of one state rotate through its clips.
+    // [orig: AnimMap_ParseConfigLine @0x40cb60 registers every token;
+    //  AnimMap_PlayAnimBySlot @0x40bda0 serves the head and advances it]
+    int32_t wpn_variant = 0;
+    int32_t wpn_prev_variant = 0; // the outgoing clip's served variant
+
+    bool weapon_blend_active() const { return wpn_blend_weight < 1.0f; }
+
+    // Re-init the secondary channel onto `target_state`, keeping the outgoing
+    // clip alive for the blend window. Mirrors begin_body_transition: retargeting
+    // an in-flight A->B blend keeps A as the stable outgoing and replaces only B.
+    // `ring_size` is the target state's variant count (1 = no ring); the play
+    // serves the ring HEAD as this play's variant and advances the head, so the
+    // latched wpn_variant follows the served entry while the head moves on
+    // [orig: AnimMap_PlayAnimBySlot @0x40bda0: animEntry = slot[i]; slot[i] = next;
+    //  animState+68 = animEntry].
+    void begin_weapon_transition(int target_state, int ring_size = 1) {
+        if (target_state == wpn_state) return;
+        if (!weapon_blend_active()) {
+            wpn_prev = wpn_state;
+            wpn_prev_clip_phase = wpn_clip_phase;
+            wpn_prev_variant = wpn_variant;
+        }
+        wpn_state = target_state;
+        wpn_clip_phase = 0;
+        wpn_blend_weight = 0.0f;
+        wpn_blend_step =
+                (infantry_anim_flags(target_state) & 0x400u) != 0
+                        ? (1.0f / 15.0f)
+                        : 0.1f;
+        wpn_variant = wpn_ring_serve(target_state, ring_size);
+    }
+
+    // The per-state ring HEADS for this entity's secondary channel: the served
+    // index per state, advanced on every play [orig: the per-entity animState
+    // slot array +72 — each slot's list cursor]. Sparse; states never played sit
+    // at head 0. Cleared with the channel.
+    std::unordered_map<int, int32_t> wpn_ring_heads;
+    int32_t wpn_ring_serve(int state, int ring_size) {
+        if (ring_size <= 1) return 0;
+        int32_t &head = wpn_ring_heads[state];
+        const int32_t served = head % ring_size;
+        head = (served + 1) % ring_size;
+        return served;
+    }
+
+    void reset_weapon_animation(int state = opennova::world::anim_state::kIdle) {
+        wpn_state = state;
+        wpn_deferred = 0;
+        wpn_prev = state;
+        wpn_clip_phase = 0;
+        wpn_prev_clip_phase = 0;
+        wpn_blend_weight = 1.0f;
+        wpn_blend_step = 0.0f;
+        wpn_variant = 0;
+        wpn_prev_variant = 0;
+        wpn_ring_heads.clear();
+    }
     // The 3P reload-anim window: 80 ticks, stamped by the reload refill and counted
     // down once per tick; while nonzero the weapon channel wants state 65 reload
     // (66 reload2 when the hold kind is 2, pistol). [orig: entity+0x372 byte;
@@ -436,13 +522,23 @@ struct InfantryState {
     bool wpn_force_crouch = false;
     uint32_t last_events = 0;
     int32_t prev_capsule_bottom = 0;      // anim_slot[19]
-    // The eye-offset z (entity+0x74, 16.16), restamped after every clip advance
-    // from the capsule extents tilted by the lean angle; mirrored onto the world
-    // Entity by mirror_wire_anim. NPC leg: max(top - bottom, 0x9000) * cos(lean)
-    // [orig: Entity_UpdateInfantryAI @0x4bf078..0x4bf14c]. Player leg:
-    // min(top - bottom, 0xD000) * cos(lean), floored 0x2000 at the store [orig:
-    // Entity_UpdateInfantryPlayerBody @0x4b6984..0x4b68f5; the local head-bone
-    // exact leg @0x4b6908..0x4b696c is the tracked residue, D-HUD-20].
+    // The eye/camera-offset triple (entity+0x6C/+0x70/+0x74, 16.16), restamped
+    // after every clip advance; mirrored onto the world Entity by
+    // mirror_wire_anim. NPC leg: z = max(top - bottom, 0x9000) * cosQ22(lean),
+    // lateral = (delta * sinQ22(lean) * 3) >> 2 rotated by heading —
+    // x = +lat*sin(yaw), y = -lat*cos(yaw) [orig: Entity_UpdateInfantryAI
+    // @0x4bf078..0x4bf14c — stores @0x4bf141/0x4bf149/0x4bf14c]. LOCAL player
+    // with a shell-fed head sample: the exact posed-head-minus-Position triple,
+    // the head z first floored to the five-tap terrain column when on foot
+    // (indoors exempt), no 0x2000 floor on either exact leg [orig: on-foot
+    // @0x4b6bb3..0x4b6cc8 (taps @0x4b6c1e..0x4b6c95); mounted
+    // @0x4b6908..0x4b696c]. Player leg without a sample: z = min(top - bottom,
+    // 0xD000) * cos(lean), floored 0x2000 at the store [orig: on-foot
+    // @0x4b6984..0x4b6bab, floor @0x4b6b98; mounted floor @0x4b68e7]; that
+    // leg's full 3-angle lateral tilt (on-foot @0x4b69ab..0x4b6b7c, mounted
+    // @0x4b66fc..0x4b68e5) is the tracked residue, D-HUD-20.
+    int32_t eye_offset_x = 0;
+    int32_t eye_offset_y = 0;
     int32_t eye_offset_z = 0;
     int32_t adm_id = 0;
 
@@ -544,7 +640,7 @@ void infantry_weapon_weight_spread_tick(
 // fire plays only the FP clip on the weapon adm + the .3di control registers). Written
 // IMMEDIATELY — it bypasses the selection commit's locked/emote defer.
 // [orig: WeaponAction_Fire @ 0x542bbc..0x542bea — +0x2C8 = state, +0x2C4 = 0]
-void infantry_weapon_attack_stamp(InfantryState &inf, int attack_kind);
+void infantry_weapon_attack_stamp(InfantryState &inf, int attack_kind, int ring_size = 1);
 
 // Stamp the witnessed 20-tick arms dip when this entity observes a different resolved
 // held AnimMap identity. Serial 0 means no mounted weapon map. Keeping the observed

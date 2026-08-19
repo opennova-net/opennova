@@ -417,8 +417,9 @@ func _aim_angles_deg() -> Vector2:
 # and the jump arc all move the eye exactly as the animation moves the head.
 # [orig: the local bone path @0x4b6bb3 (Entity_BuildBoneTransformMatrices -> head,
 # CameraOffset = head - Position); consumed by the on-foot person leg @0x437f9c.
-# Unported tails: the 4-sample terrain clamp @0x4b6c1c and the remote trig
-# approximation @0x4b6984; the 0.125u floor is the witnessed min @0x4b6b98.]
+# Unported tail: the remote trig approximation @0x4b6984. The 0.125u floor here
+# is a DEFENSIVE stand-in — retail floors only the sample-less capsule leg
+# (retail: @0x4b6b98); the head-bone legs store unfloored (D-INF-18).]
 func _eye_position(pos: Vector3) -> Vector3:
 	var head := avatar_head_world()
 	if head == Vector3.INF:
@@ -542,21 +543,28 @@ func _update_model_lighting_context() -> void:
 		transfer = float(item_db.get_light_transfer(interior_item_id))
 	var interior := interior_item_id != 0
 
-	# Ordinary world models take the player's current entity context. The FP
-	# submit deliberately keeps effectScale=1 (retail computes then discards its
-	# outdoor sun sample) but still keys the interior group from blink_hits[0].
-	# Updating on every presentation frame makes portal crossings live.
-	# [orig: Player_RenderFirstPersonViewModel @0x4DEEA4..0x4DEF52]
-	_set_model_lighting_context(_avatar, interior, transfer)
-	_set_model_lighting_context(_held_weapon, interior, transfer)
+	# The third-person body and its held gun take the entity's outdoor sun
+	# factor like any sector-drawn entity (D-RLIT-3; the sim computes the
+	# local quality each occlusion frame). The FP submit deliberately keeps
+	# effectScale=1 (retail computes then discards its outdoor sun sample)
+	# but still keys the interior group from blink_hits[0]. Updating on every
+	# presentation frame makes portal crossings live.
+	# [orig: Player_RenderFirstPersonViewModel @0x4DEEA4..0x4DEF52 — the
+	# setup_terrain_effect_for_entity return is dropped on the FP leg;
+	# Terrain_RenderSectorEntities stacks it for the world body @0x5c7bff]
+	var body_scale := 1.0
+	if sim != null:
+		body_scale = float(sim.get_local_player_sun_quality()) * 0.25
+	_set_model_lighting_context(_avatar, interior, transfer, body_scale)
+	_set_model_lighting_context(_held_weapon, interior, transfer, body_scale)
 	for part in vm_parts():
 		_set_model_lighting_context(part, interior, transfer)
 
 
 func _set_model_lighting_context(model: Node, interior: bool,
-		transfer: float) -> void:
+		transfer: float, effect_scale := 1.0) -> void:
 	if model != null and is_instance_valid(model):
-		model.set_entity_lighting_context(1.0, interior, transfer)
+		model.set_entity_lighting_context(effect_scale, interior, transfer)
 
 
 # The ADS camera: the fov POLICY is sim state (80 base, 80/mag for sighted defs,
@@ -638,7 +646,10 @@ func _update_avatar(pos: Vector3) -> void:
 	# [orig: producer @0x4b5dad, override @0x4b14db; world-wac-ai-re.md §14.8]
 	var weapon_view: PlayerWeaponView = 			_weapon_effects.weapon_view() if _weapon_effects != null else null
 	if weapon_view != null:
-		_avatar.set_weapon_channel(weapon_view.body_anim_key, weapon_view.body_anim_phase)
+		_avatar.set_weapon_channel(weapon_view.body_anim_key, weapon_view.body_anim_phase,
+				weapon_view.body_anim_prev_key, weapon_view.body_anim_prev_phase,
+				weapon_view.body_anim_blend_weight, weapon_view.body_anim_variant,
+				weapon_view.body_anim_prev_variant)
 	else:
 		_avatar.set_weapon_channel("", 0)
 	if (not anim_source_key.is_empty() and not anim_key.is_empty()

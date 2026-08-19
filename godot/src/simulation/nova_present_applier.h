@@ -234,6 +234,11 @@ private:
 		bool ctrl_cache_valid = false;
 		bool aim_cache_valid = false;
 		int32_t wpn_state = INT32_MIN;
+		int32_t wpn_src_state = INT32_MIN;
+		int32_t wpn_src_phase = -1;
+		float wpn_weight = 1.0f;
+		int32_t wpn_variant = 0;
+		int32_t wpn_src_variant = 0;
 		int32_t wpn_phase = INT32_MIN;
 	};
 

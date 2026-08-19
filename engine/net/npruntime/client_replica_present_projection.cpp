@@ -24,6 +24,12 @@ void initialize_client_replica_present_row(float *row) {
 	row[world::PF_ANIM_PULSE_TICKS] = -1.0f;
 	row[world::PF_WPN_ANIM_STATE] = -1.0f;
 	row[world::PF_WPN_PHASE_TICKS] = -1.0f;
+	row[world::PF_WPN_SOURCE_STATE] = -1.0f;
+	row[world::PF_WPN_SOURCE_PHASE_TICKS] = -1.0f;
+	row[world::PF_WPN_BLEND_WEIGHT] = 1.0f;
+	row[world::PF_WPN_VARIANT] = 0.0f;
+	row[world::PF_WPN_SOURCE_VARIANT] = 0.0f;
+	row[world::PF_CARRIER_HANDLE] = -1.0f;
 	row[world::PF_ALIVE] = 1.0f;
 }
 
@@ -36,6 +42,11 @@ void project_client_replica_present_row(
 
 	row[world::PF_TYPE_ID] = static_cast<float>(entity.type_id);
 	row[world::PF_WIRE_HANDLE] = static_cast<float>(entity.handle);
+	// The decoded groundEntity link, for the on-entity footstep slot. 0xFFFF
+	// (no link) publishes as -1 so presentation reads one sentinel.
+	row[world::PF_CARRIER_HANDLE] = entity.carrier_handle != 0xFFFFu
+			? static_cast<float>(entity.carrier_handle)
+			: -1.0f;
 	if (entity.cls == EntityClass::Player) {
 		// A player's wire net_id IS its packed character id (entity+0x15C).
 		row[world::PF_CHARACTER_ID] = static_cast<float>(entity.net_id);

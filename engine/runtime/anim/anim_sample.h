@@ -26,10 +26,15 @@
 // clip start by construction and freezes the FP rig at its authored T-pose -- that was the
 // 2026-07-08 misreading. The composed builders (@0x40c400/@0x40c770) then treat the result
 // as the bone's rotation with a PURE-TRANSLATION bind: the skinning bind-inverse is
-// T(-pivot), no rotation. `model_bind` below enables that faithful interpretation; the
-// default (absolute channel rotations + bind-matrix rest) is the witnessed BODY pipeline
-// (both modes are retail), byte-identical for healthy exports where
-// channel-at-reset == bind.
+// T(-pivot), no rotation. `model_bind` below is the DIRECT reference implementation of
+// that composition, exercised by ctest (anim_sample); it has no production call site.
+// Every rig loader — FP viewmodel and body alike — passes `model_bind=false` and runs the
+// rest-carrying factorization (absolute channel rotations over the bind-rotation rests),
+// which the loaders assert is the proven-equivalent form of the composed builders and
+// which is byte-identical for healthy exports where channel-at-reset == bind. That
+// equivalence is asserted, not yet grilled against the WORLD builder @0x40c770 — the
+// open D-INF-13 question (docs/divergence-ledger.md): its bone-table source, whether it
+// carries the FP builder's bone-0 padding loop @0x40c5a1, and its frame map.
 
 #ifndef OPENNOVA_ANIM_SAMPLE_H
 #define OPENNOVA_ANIM_SAMPLE_H

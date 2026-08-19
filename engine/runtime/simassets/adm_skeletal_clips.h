@@ -72,9 +72,12 @@ public:
 	// blend the composed pose builds on.
 	void eval_pose(const std::string &key, double playhead_seconds, int variant,
 	               std::vector<anim::PoseBone> &r_pose) const;
+	// source_variant / target_variant select each channel's served ring entry
+	// (0-based file order, wrapped modulo the count — the +68 play latch).
 	void eval_pose_blended(const std::string &source_key, double source_seconds,
 	                       const std::string &target_key, double target_seconds,
-	                       float weight, std::vector<anim::PoseBone> &r_pose) const;
+	                       float weight, std::vector<anim::PoseBone> &r_pose,
+	                       int source_variant = 0, int target_variant = 0) const;
 
 	// The composed witnessed pose: primary sample (optionally blended from the
 	// source key over the retail window) -> weapon-channel mask override ->
@@ -90,7 +93,12 @@ public:
 	                        float blend_weight,
 	                        const anim::Quat deltas[],
 	                        const std::string &weapon_key, double weapon_seconds,
-	                        std::vector<anim::PoseBone> &r_pose) const;
+	                        std::vector<anim::PoseBone> &r_pose,
+	                        const std::string &weapon_prev_key = std::string(),
+	                        double weapon_prev_seconds = 0.0,
+	                        float weapon_blend_weight = 1.0f,
+	                        int weapon_variant = 0, int weapon_prev_variant = 0,
+	                        int primary_variant = 0, int source_variant = 0) const;
 
 private:
 	struct LoadedClip {
@@ -102,7 +110,12 @@ private:
 	const LoadedClip *find_clip_variant(const std::string &key, int variant) const;
 	void splice_weapon_channel(std::vector<anim::PoseBone> &pose,
 	                           const std::string &weapon_key,
-	                           double weapon_seconds) const;
+	                           double weapon_seconds,
+	                           const std::string &weapon_prev_key = std::string(),
+	                           double weapon_prev_seconds = 0.0,
+	                           float weapon_blend_weight = 1.0f,
+	                           int weapon_variant = 0,
+	                           int weapon_prev_variant = 0) const;
 	void rebuild_clip_index();
 
 	bool loaded_ = false;

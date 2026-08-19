@@ -120,6 +120,9 @@ struct HudLayout {
 	HudPosRecord game_info;
 	HudPosRecord wpd_info;
 	HudPosRecord chat_text;
+	// HUDSYSTEXT — the SYSTEM feed anchor (kills, joins, system lines). The
+	// def parser already produces it (def_hudpos.cpp HUDSYSTEXT -> sys_text).
+	HudPosRecord sys_text;
 	HudPosRecord clip_pos;
 	HudPosRecord stance_pos;
 	HudPosRecord frame_pos;
@@ -246,6 +249,12 @@ struct HudFriendlyTag {
 struct HudMessageLine {
 	std::string text;
 	int expire_tick = 0;
+	// The stored packed ARGB. Retail stores the caller's color raw and the
+	// SYSTEM ring draws THAT value; only the CHAT ring folds a computed alpha
+	// over it [orig: the stored-color read @0x59ae97 vs the chat fold
+	// @0x59adef]. `-1` (0xFFFFFFFF) is the triggered-text default
+	// [orig: Chat_AddDebugMessage(text, -1, 930) @0x51f216].
+	uint32_t color = 0xFFFFFFFFu;
 };
 
 struct HudFrameState {
@@ -300,7 +309,7 @@ struct HudFrameState {
 	// everything; a real hudpos feed replaces the table with the authored
 	// masks (unauthored slot = hidden). The level itself rides along for the
 	// two draw sites that read it directly: the level-3 whole-pass early-out
-	// [orig: @ 0x5A80C4] and the chat hard cull [orig: level >= 2 @ 0x59AD66].
+	// [orig: @ 0x5A80C4] and the chat hard cull [orig: level >= 2 @ 0x59AD43].
 	std::array<bool, kDeclutterSlotCount> declutter_visible =
 			declutter_all_visible();
 	int hud_detail_level = 0;
@@ -378,7 +387,16 @@ public:
 
 	// The stance cross-fade restamp [orig: @ 0x599f8a] and the message ring
 	// [orig: Chat_AddDebugMessage @ 0x4987f0] are compiler state.
+	// Mission triggered text — posts into the one system ring with the default
+	// white [orig: Chat_AddDebugMessage(text, -1, 930) @0x51f216].
 	void push_message(const std::string &text, int now_ticks);
+	// Post one line to the SYSTEM feed — the ring every Chat_AddDebugMessage
+	// caller shares (kill/objective/medic lines, triggered text, and later the
+	// join/system lines) [orig: the sink @0x4987f0; drawn by the second
+	// HUD_DrawConsoleMessages loop @0x59ad30]. 930-tick life, >= 186-tick
+	// expiry stagger; the packed ARGB is stored raw and drawn as stored (no
+	// fade on this ring).
+	void push_feed_line(const std::string &text, uint32_t argb, int now_ticks);
 	void reset_runtime_state();
 
 	const HudDrawList &compile(const HudFrameState &state, float surface_w,
@@ -419,7 +437,7 @@ private:
 	void element_attach_labels(const HudFrameState &state, float w, float h);
 	void element_friendly_tags(const HudFrameState &state, float w, float h);
 	void element_objective_line(const HudFrameState &state, float w, float h);
-	void element_messages(const HudFrameState &state, float w, float h);
+	void element_feed(const HudFrameState &state, float w, float h);
 	void element_sights_card(const HudFrameState &state, float w, float h);
 	void element_crosshair(const HudFrameState &state, float w, float h);
 	void element_clip_indicator(const HudFrameState &state, float w, float h);
@@ -445,7 +463,7 @@ private:
 	// @ 0x599af9]: the round count drop stamps the flash start.
 	int flash_prev_rounds_ = -1;
 	int flash_stamp_ = 0;
-	std::vector<HudMessageLine> messages_;
+	std::vector<HudMessageLine> feed_lines_;   // the SYSTEM ring
 };
 
 } // namespace opennova::hud

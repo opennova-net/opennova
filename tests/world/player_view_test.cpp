@@ -473,6 +473,44 @@ void test_bias_view_units() {
     CHECK(near_eq(out[1], 21.19f / 256.0f));
 }
 
+// The FP motion lead: the damped movement-delta tracker whose >>7 clamped
+// output rides the view-local offset. A movement ONSET swings the lead
+// against the delta; steady movement decays it back toward zero; the clamps
+// bound it at +/-1024 xy / +/-4096 z.
+// [orig: tracker @ 0x437bac..0x437c0e; >>7 + clamps @ 0x4dd4f2..0x4dd54f]
+void test_motion_lead_tracker() {
+    PlayerViewMotionLead lead;
+    int32_t out[3];
+    const float still[3] = {0.0f, 0.0f, 0.0f};
+    player_view_motion_lead_update(lead, still, out);
+    CHECK(out[0] == 0 && out[1] == 0 && out[2] == 0);
+
+    // A 0.2 u/tick onset: the first frame swings the lead opposite the delta.
+    const float onset[3] = {0.2f, 0.0f, 0.0f};
+    player_view_motion_lead_update(lead, onset, out);
+    CHECK(out[0] < 0);
+    CHECK(out[1] == 0 && out[2] == 0);
+
+    // Steady movement decays the lead toward zero (the tracker responds to
+    // speed changes, not speed).
+    int32_t first = out[0];
+    for (int i = 0; i < 300; ++i)
+        player_view_motion_lead_update(lead, onset, out);
+    CHECK(std::abs(out[0]) < std::abs(first));
+    CHECK(std::abs(out[0]) <= 1);
+
+    // A violent delta clamps at the witnessed bounds.
+    PlayerViewMotionLead hard;
+    const float lurch[3] = {50.0f, 50.0f, 50.0f};
+    for (int i = 0; i < 8; ++i)
+        player_view_motion_lead_update(hard, lurch, out);
+    const float stop[3] = {-50.0f, -50.0f, -50.0f};
+    player_view_motion_lead_update(hard, stop, out);
+    CHECK(std::abs(out[0]) <= 1024);
+    CHECK(std::abs(out[1]) <= 1024);
+    CHECK(std::abs(out[2]) <= 4096);
+}
+
 int main() {
     test_scope_ease_is_fifteen_ticks_exactly();
     test_equal_ticks_equal_state_regardless_of_frame_grouping();
@@ -490,6 +528,7 @@ int main() {
     test_compose_camera_terrain_floor();
     test_compose_camera_third_person();
     test_bias_view_units();
+    test_motion_lead_tracker();
     if (failures == 0) std::printf("player_view_test: all passed\n");
     return failures == 0 ? 0 : 1;
 }

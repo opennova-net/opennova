@@ -201,6 +201,14 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_local_player_weapon_state"), &Simulation::get_local_player_weapon_state);
 	ClassDB::bind_method(D_METHOD("drain_local_player_weapon_events"), &Simulation::drain_local_player_weapon_events);
 	ClassDB::bind_method(D_METHOD("drain_round_impacts"), &Simulation::drain_round_impacts);
+	ClassDB::bind_method(D_METHOD("drain_feed_events"), &Simulation::drain_feed_events);
+	ClassDB::bind_method(
+			D_METHOD("format_feed_line", "template", "attacker", "victim",
+					"extra", "bonus_template"),
+			&Simulation::format_feed_line);
+	ClassDB::bind_method(
+			D_METHOD("format_feed_camp_line", "template", "wpname"),
+			&Simulation::format_feed_camp_line);
 	ClassDB::bind_method(D_METHOD("get_local_player_health"), &Simulation::get_local_player_health);
 	ClassDB::bind_method(D_METHOD("get_local_player_health_percent"),
 			&Simulation::get_local_player_health_percent);
@@ -220,7 +228,7 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("drain_fire_sounds"),
 			&Simulation::drain_fire_sounds);
 	ClassDB::bind_method(D_METHOD("local_player_viewmodel_bias_view_units",
-					"pos_raw_units", "tpos_raw_units"),
+					"pos_raw_units", "tpos_raw_units", "narrow_aspect"),
 			&Simulation::local_player_viewmodel_bias_view_units);
 	ClassDB::bind_method(D_METHOD("get_tracer_trails"), &Simulation::get_tracer_trails);
 	ClassDB::bind_method(D_METHOD("get_round_glow_rows"),
@@ -369,6 +377,10 @@ void Simulation::_bind_methods() {
 	                     &Simulation::get_building_visibility_changes);
 	ClassDB::bind_method(D_METHOD("get_render_culled_changes"),
 	                     &Simulation::get_render_culled_changes);
+	ClassDB::bind_method(D_METHOD("get_entity_sun_visibility_changes", "light_dir"),
+	                     &Simulation::get_entity_sun_visibility_changes);
+	ClassDB::bind_method(D_METHOD("get_local_player_sun_quality"),
+	                     &Simulation::get_local_player_sun_quality);
 	ClassDB::bind_method(D_METHOD("entity_present_visible", "bms_id"),
 	                     &Simulation::entity_present_visible);
 	ClassDB::bind_method(D_METHOD("reset_occlusion_apply_baseline"),
@@ -538,6 +550,11 @@ void Simulation::_bind_methods() {
 	BIND_ENUM_CONSTANT(PF_HELD_WEAPON_HAND_FRAME);
 	BIND_ENUM_CONSTANT(PF_WPN_ANIM_STATE);
 	BIND_ENUM_CONSTANT(PF_WPN_PHASE_TICKS);
+	BIND_ENUM_CONSTANT(PF_WPN_SOURCE_STATE);
+	BIND_ENUM_CONSTANT(PF_WPN_SOURCE_PHASE_TICKS);
+	BIND_ENUM_CONSTANT(PF_WPN_BLEND_WEIGHT);
+	BIND_ENUM_CONSTANT(PF_WPN_VARIANT);
+	BIND_ENUM_CONSTANT(PF_WPN_SOURCE_VARIANT);
 	BIND_ENUM_CONSTANT(PF_HIDDEN);
 	BIND_ENUM_CONSTANT(PF_LOCAL_VIEW_SUPPRESSED);
 	BIND_ENUM_CONSTANT(PF_ALIVE);

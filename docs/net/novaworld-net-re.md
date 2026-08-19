@@ -4982,7 +4982,9 @@ kill-cam distance reel, the weather/impact shake.
 
 **Port re-home (2026-08-07, S8/ADR 0028):** the camera COMPOSITION moved into the
 engine — `world/player_view.h` `player_view_compose_camera` builds the whole
-mission-space pose per drain (FP: the CameraOffset floor `@ 0x4b6b98` + non-person
+mission-space pose per drain (FP: the CameraOffset floor — witnessed `@ 0x4b6b98` on
+the sample-less capsule leg only; the head-bone legs store unfloored (2026-08-19,
+D-INF-18) — + non-person
 bump `@ 0x437e8f`, the recoil-doubled pitch `@ 0x437fc7`, roll = torsoRoll + lean/4
 `@ 0x437fe6`, the −0x3000 forward pull-back `@ 0x438001`; TP: the chased anchor +
 the 0.125u pivot nudge `@ 0x43818a` backed off by the march's no-collision landing
@@ -5122,7 +5124,8 @@ view axes; `rot` degrees added about the eye `[orig: Player_UpdateFirstPersonCam
 Verified: reset/idle identity oracle in ctest (`anim_sample`) + on-asset probes
 (`godot/tests/fp_clean_probe.gd`, `vm_mesh_probe.gd`). **Still open:** the dedicated FP render pass
 (weapon `renderfov` @Def+0x148, near-Z 0.05 swap + viewport depth [0, 0.1] — D-RORD-4) which gives
-retail its close-up framing; def `rot` bias sign confirmation against retail footage; the delta
+retail its close-up framing; def `rot` bias sign confirmation against retail footage *(hip-idle
+confirmed 2026-08-19 — the seventh pass below)*; the delta
 sense final pin (D-INF-14); body-rig unification onto the same semantics (D-INF-13).
 
 **§5.40 bind-source correction — the T-pose freeze (2026-07-09 grill, second pass).** Point (2)
@@ -5180,7 +5183,8 @@ restore 0.2 @0x4df0aa; depth remap @0x58a7b0; default flt_7D1898=80.0 @0x53ff31;
 confirmed yaw-180 is the only map that places the rig in frame — 0 puts it behind the eye,
 ±90 off-frame laterally. The stored ak47_RST binds are all proper rotations (det +1 across the
 39 bones), so the quat composition is exact — no reflection caveat. **Still open:** def `rot`
-bias signs + reload direction vs retail footage (the D-INF-14 tail); left-hand/finger pose
+bias signs *(hip-idle confirmed 2026-08-19 — the seventh pass below)* + reload direction vs
+retail footage (the D-INF-14 tail); left-hand/finger pose
 fidelity vs retail footage (retail's hip idle is a low-ready — compare before judging); per-weapon
 `renderfov`/`pos`/`tpos` def plumbing *(landed — the fifth pass below)*; D-INF-13 (bodies onto
 model_bind — the part↔bone question
@@ -5326,10 +5330,38 @@ Two loose ends of the series closed together, validated end to end on both SKUs:
    `mission_play` for the now-retired Play-in-Editor path). Current live mission validation
    launches the exact saved loose `.bms` in the standalone game with F6 and attaches runtime
    MCP to that child.
-5. **Still open** (unchanged): the D-INF-14 tail — def `rot` bias signs + reload direction
-   + left-hand/finger pose vs retail footage; the `pos`→`tpos` ADS swap (value plumbed,
-   swap unwired) *(landed — the §5.62 FSM/ADS pass)*; velocity lead + prone drop; D-INF-13 (bodies onto the world table
-   @ 0x40c770); D-INF-15.
+5. **Still open**: the D-INF-14 tail — reload direction + left-hand/finger pose vs retail
+   footage (def `rot` bias signs *hip-idle confirmed, seventh pass*); the `pos`→`tpos` ADS
+   swap (value plumbed, swap unwired) *(landed — the §5.62 FSM/ADS pass)*; velocity lead +
+   the narrow-aspect drop *(landed — the seventh pass)*; D-INF-13 (bodies onto the world
+   table @ 0x40c770); D-INF-15.
+
+**§5.40, seventh pass (2026-08-19 — the viewmodel-parity slice).** Three movements:
+
+1. **Velocity lead ported.** The FP motion lead is a per-render-frame damped tracker of the
+   entity's per-tick movement delta: sample = `(position − prevTickPosition) << 8` per lane,
+   `vel += (prev_sample − new_sample − vel + 16) >> 5` `[orig: ThirdPersonCamera_Update
+   @ 0x437bac..0x437c0e — the same globals feed both camera modes]`, output `vel >> 7`
+   clamped ±1024 xy / ±4096 z and added component-wise onto the view-LOCAL camera offset
+   BEFORE the view rotation — the witnessed pre-rotation add takes the world-delta
+   components raw, no frame conversion `[orig: Player_UpdateFirstPersonCamera
+   @ 0x4dd4f2..0x4dd56c]`. Steady velocity decays the lead to zero: it answers speed
+   CHANGES, not speed. Ported as `world::player_view_motion_lead_update` (ctest
+   `player_view`), summed into `Simulation::local_player_viewmodel_bias_view_units`.
+2. **The "prone drop" was a mislabel — it is the 4:3 framing drop.** The `−0x500` z
+   adjustment's gate reads the viewport block (`3·dword_A78394 <= 4·dword_A78398`, the same
+   dwords `HUD_DrawEntityLabel @ 0x5a3b6a` projects with): TRUE at 4:3-or-narrower aspects,
+   never on widescreen `[orig: @ 0x4dd571..0x4dd578]`. Ported as the rig-fed
+   `narrow_aspect` gate (`world::player_view_narrow_aspect` + `kFpNarrowAspectDropQ16`);
+   the earlier "prone Z drop (stance ratio)" reading in the fifth pass is corrected here.
+3. **def `rot` bias signs — hip-idle CONFIRMED.** The registered 2026-08-18 retail pairs
+   carry the M16 viewmodel in every frame; the `viewmodel_arms` ROI of
+   `00tra-courtyard-retail` (OpenNova beauty vs `retail.png`, identical pose/clock) shows
+   the same cant sense and sight/rail alignment — a wrong yaw/pitch/roll sign at the
+   authored magnitudes would visibly rotate the weapon. The rig's mapping (yaw/pitch
+   direct, roll negated, `_wrap180` fold) stands. The remaining tail is reload direction +
+   left-hand/finger pose, which need MOTION/close-up footage (control for the
+   `anim_wpn_reload` variant ring — the first reload PLAY serves entry 1).
 
 **§5.40 frame correction — rig positions COMPUTED from the model; the native+container
 realization was X-mirrored (2026-07-09, sixth pass).** The model-table port's Godot
@@ -5400,21 +5432,26 @@ gun+arms are rendered with that same transform.
 character arms (`g_local_player_entity->CharacterEntity`) with it. So **`pos`/`tpos` move the gun AND
 the arms together** (one unit at the view root); they enter via the camera, never here.
 
-**OpenNova port (2026-06-21).** `main_game._update_player_camera` places the host viewmodel at
-`camera.global_transform × Transform3D(model_facing, offset)` where `offset = (x, z, −y) / 256` from
-the weapon.def `pos` units (`_viewmodel_offset`), replacing an eyeballed constant. The view-local frame
-is **(x = right, y = forward, z = up)** — derived from the camera adding `ftol(Bone.pos)` straight onto
-`g_view_pos` (world Z up) under an identity view matrix at a level look, so component *i* lands on world
-axis *i*. Hence **`pos[2]` is the grip's DOWN offset (the dominant −183 → ~0.7u below the eye; the
-barrel reaches forward via the model), NOT depth.** Godot camera-local is (x right, y up, −z forward),
-so file `x→x`, `y→−z`, `z→y`. (A first cut mistakenly sent `pos[2]` into forward depth, producing a
-gun floating ~0.7u in front of the camera — the screensnapr.io/s/8e9d030 symptom; corrected here.
-oscarmike `WeaponManager._jo_to_godot_position` independently agrees on `/256` + `pos[2]→up/down`.)
-Hardcoded to WPN_MP5SD until a weapon.def Godot binding resolves the equipped weapon. **Deferrals:**
-per-weapon `pos`/`tpos` from a weapon.def binding *(landed — the fifth-pass def plumbing above)*; the
-`pos`→`tpos` ADS swap (entity `Flags & 2`); the small per-weapon `Bone.rot` *(landed, same pass)*;
-velocity lead + prone drop; the model-facing basis and the two small
-lateral/forward signs are dialed by drive (the `pos[2]→down` term is the certain one).
+**OpenNova port (2026-06-21) — SUPERSEDED on the axis map, see below.** `main_game._update_player_camera`
+placed the host viewmodel at `camera.global_transform × Transform3D(model_facing, offset)` with
+`offset = (x, z, −y) / 256` from the weapon.def `pos` units, replacing an eyeballed constant. This
+pass read the view-local frame as **(x = right, y = forward, z = up)** with the map `x→x`, `y→−z`,
+`z→y`; the `pos[2]→down` term was the certain one (the −183 → ~0.7u below the eye; the earlier cut
+that sent `pos[2]` into forward depth was the screensnapr.io/s/8e9d030 floating-gun symptom).
+Hardcoded to WPN_MP5SD until the def plumbing landed (the fifth pass above).
+
+**Axis-map correction (2026-07-11 grill; recorded here 2026-08-17 — this paragraph had never been
+updated).** The x=right / y=forward reading above is WRONG and was refuted by the grill: the view/def
+frame is **X = FORWARD, Y = LEFT, Z = UP**, proven by the aim ray's far point being `{+65536000, 0, 0}`
+through the SAME transform `[orig: HUD_DrawCrosshair @0x592a0f aim_direction = (1000.0, 0, 0) q16;
+the view-local rotate Math_FixedPointTransformPoint22 @0x4dd5d8]`. The AK's `|x| ≈ |y|` had masked
+the swap; the JOX/REVX M4 `tpos` made it glare (the canted-ADS report). Godot camera-local is
+(x right, y up, −z forward), so the map is `view x (forward) → −z`, `view y (left) → −x`,
+`view z (up) → y` — i.e. `Vector3(−y, z, −x)`, `player_viewmodel_rig.gd::_viewmodel_view_offset`
+(oscarmike's onhook-derived map agrees). Only the `z→up` term of the 2026-06-21 reading survives.
+**Deferrals:** the `pos`→`tpos` ADS swap and the per-weapon `Bone.rot` *(both landed)*; the velocity
+lead (`>>7`, clamps `@0x4dd4f2..`) and the prone Z drop (`−1280 @0x4dd578`) remain unported tails
+(their exact clamp constants need an IDA read; recorded at the rig's `_viewmodel_view_offset`).
 
 ### 5.41 `Player_*` family — naming validation + decomp cleanup grill (2026-06-26)
 

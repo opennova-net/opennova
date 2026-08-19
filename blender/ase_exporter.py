@@ -245,10 +245,17 @@ class AseExporter:
             helper_mesh_objects = [o for o in mesh_objects if self._is_helper_mesh(o)]
 
             light_objects = [o for o in scene.objects if o.type == 'LIGHT']
+            # Only BN## bones export: the rig IS the BN## rows (node_id = ##-1, the .bad channel
+            # and the 3DI subobject index). Non-BN bones (IK targets, controls, helpers kept in
+            # the armature for authoring) are invisible here, exactly as they are to
+            # anim_exporter._sorted_export_pose_bones — so a scene may keep its rig controls
+            # without leaking them as helper nodes into the .ase.
             bone_list = []
             for o in scene.objects:
                 if o.type == 'ARMATURE' and o.pose:
                     for bone in sorted(o.pose.bones, key=lambda b: b.name):
+                        if not (bone.name.startswith("BN") and len(bone.name) >= 4 and bone.name[2:4].isdigit()):
+                            continue
                         bone_list.append((o, bone))
 
             total_objects = (

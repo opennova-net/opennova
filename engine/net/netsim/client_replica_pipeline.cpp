@@ -183,6 +183,9 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 	case s2c::MINIMAP_OVERLAY:
 		apply_minimap_overlay_batch(body);
 		break;
+	case s2c::GAME_EVENT: // §5.26 the kill/objective/medic feed lane (0x1E)
+		apply_game_event(body);
+		break;
 	case s2c::ENTITY_ROUTED: // §5.36 sub-header + §5.15 guided body (0x44)
 		apply_entity_routed(body);
 		break;
@@ -202,6 +205,12 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 std::vector<ClientRoundEvent> ClientReplicaPipeline::drain_round_events() {
 	std::vector<ClientRoundEvent> out;
 	out.swap(pending_round_events_);
+	return out;
+}
+
+std::vector<ClientGameEvent> ClientReplicaPipeline::drain_game_events() {
+	std::vector<ClientGameEvent> out;
+	out.swap(pending_game_events_);
 	return out;
 }
 

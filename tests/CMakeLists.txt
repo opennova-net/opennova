@@ -213,6 +213,14 @@ target_include_directories(sound_selector_test PRIVATE ${CMAKE_CURRENT_SOURCE_DI
 target_compile_features(sound_selector_test PRIVATE cxx_std_17)
 add_test(NAME sound_selector COMMAND sound_selector_test)
 
+# The footstep slot pick's witnessed test order (water > on-entity > snow >
+# ground), shared by the authority and wire-fed body channels.
+add_executable(footstep_slot_test audio/footstep_slot_test.cpp)
+target_link_libraries(footstep_slot_test PRIVATE opennova_runtime)
+target_include_directories(footstep_slot_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(footstep_slot_test PRIVATE cxx_std_17)
+add_test(NAME footstep_slot COMMAND footstep_slot_test)
+
 # Ambient marker emitter system: the staggered tick&7 registration cadence, tick-unit
 # slot keep-alives, and the per-frame live-slot mix, pushed down from
 # nova_mission_audio.gd (docs/audio/lwf-dbf-sound-re.md §driver cadence, D-SND-16).
@@ -612,6 +620,11 @@ add_executable(simassets_adm_clip_index_test simassets/adm_clip_index_test.cpp)
 target_link_libraries(simassets_adm_clip_index_test PRIVATE opennova_runtime)
 target_include_directories(simassets_adm_clip_index_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME simassets_adm_clip_index COMMAND simassets_adm_clip_index_test)
+
+add_executable(simassets_adm_skeletal_clips_weapon_channel_test simassets/adm_skeletal_clips_weapon_channel_test.cpp)
+target_link_libraries(simassets_adm_skeletal_clips_weapon_channel_test PRIVATE opennova_runtime)
+target_include_directories(simassets_adm_skeletal_clips_weapon_channel_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME simassets_adm_skeletal_clips_weapon_channel COMMAND simassets_adm_skeletal_clips_weapon_channel_test)
 
 add_executable(simassets_item_traits_test simassets/item_traits_test.cpp)
 target_link_libraries(simassets_item_traits_test PRIVATE opennova_runtime)
@@ -1129,6 +1142,14 @@ target_link_libraries(guided_missile_flight_test PRIVATE opennova_runtime)
 target_include_directories(guided_missile_flight_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(guided_missile_flight_test PRIVATE cxx_std_17)
 add_test(NAME guided_missile_flight COMMAND guided_missile_flight_test)
+
+# The message-feed line policy (0x1E -> canned sentence + color) and the
+# witnessed game-event classification corrections.
+add_executable(feed_format_test hud/feed_format_test.cpp)
+target_link_libraries(feed_format_test PRIVATE opennova_runtime opennova_net)
+target_include_directories(feed_format_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(feed_format_test PRIVATE cxx_std_17)
+add_test(NAME feed_format COMMAND feed_format_test)
 
 # AI subsystem (byte-exact foundation): state enum + struct layout, AIEvent ring,
 # budget gate (AI_BeginUpdate), the infantry state-machine dispatcher + transitions,

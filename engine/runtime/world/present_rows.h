@@ -58,6 +58,16 @@ enum PresentField : int {
 	// zero-filled weapon state would splice the reset clip over every arm.
 	PF_WPN_ANIM_STATE,
 	PF_WPN_PHASE_TICKS, // secondary clip phase in IDA half-frame ticks
+	// The secondary channel's cross-fade + served variants, mirroring the primary's
+	// PF_ANIM_SOURCE_* trio: outgoing state/phase (-1 = not blending), the ramping
+	// weight (1 = settled), and the ring entries latched for target and outgoing.
+	// Same seeding rule as above — ahead of PF_AIM_OVERLAY_VALID.
+	// [orig: AnimMap_UpdateEntity @0x40b5f0 re-init; the +68 play latch]
+	PF_WPN_SOURCE_STATE,
+	PF_WPN_SOURCE_PHASE_TICKS,
+	PF_WPN_BLEND_WEIGHT,
+	PF_WPN_VARIANT,
+	PF_WPN_SOURCE_VARIANT,
 	PF_HIDDEN,     // 1 when the entity is hidden
 	// Local render-only verdict: skip this placed entity's own world model.
 	// Does not mutate Entity.hidden, collision, simulation, or attached actors.
@@ -70,6 +80,15 @@ enum PresentField : int {
 	// 0x0C spawn echoes for a player; 0 when not a player. Keys the composed
 	// head/body the joiner presents for that row.
 	PF_CHARACTER_ID,
+	// The decoded wire carrier link, -1 for none: for a standing player this
+	// is the groundEntity it stands on (entity+0x28) — the same link the
+	// authority body channel takes from Entity::ground_target for the
+	// on-entity footstep slot [orig: the +0x28 store by
+	// Entity_RaycastGroundHeightAndObject @0x525fd0]. For a SEATED body the
+	// wire reuses the field for the seat carrier (mount_bone distinguishes);
+	// seat clips author no foot-event bits, so the footstep consumer never
+	// reads it in that state.
+	PF_CARRIER_HANDLE,
 	// Final output of anim::compute_aim_overlay_angles. Presentation consumes
 	// this result; it never repeats the mounted config selector.
 	PF_AIM_OVERLAY_VALID,

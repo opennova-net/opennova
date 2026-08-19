@@ -968,16 +968,28 @@ bool decode_game_event(const uint8_t *body, size_t len, GameEventRecord &out,
 	return consumed == 8;
 }
 
-// Coarse event_type classification — a structural read of the 0x426270 switch:
-// the cases that resolve attacker+victim (HUD_FormatKillEventMessage with both)
-// are kills; the flag/zone/camp/base cases are objectives; the rest are misc.
+// event_type classification — the 0x426270 switch. The cases that resolve
+// attacker+victim (HUD_FormatKillEventMessage with both) are kills; the
+// flag/zone/camp/base cases are objectives; killer-less deaths are SelfDeath
+// (their victim/aux slots are literal zero on the wire) and the two medic
+// lines carry their own color. Corrected 2026-08-19: 38/39/45 were misfiled
+// as kills and 1/2/3 + 22/23/25/26 as Other by the earlier structural read.
 GameEventKind game_event_kind(uint8_t t) {
 	switch (t) {
 	case 4: case 5: case 6: case 7: case 8: case 9:
 	case 10: case 11: case 12: case 13: case 14: case 15:
-	case 24: case 32: case 33: case 34: case 38: case 39:
-	case 45: case 49:
+	case 24: case 32: case 33: case 34: case 49:
 		return GameEventKind::Kill;
+	// Deaths with no killer — the handler leaves victim/aux zero
+	// [orig: GameEvent_PlayerDeath @0x516DD0].
+	case 1: case 2: case 3: case 22: case 23: case 25: case 26:
+		return GameEventKind::SelfDeath;
+	// The medic trio, previously misfiled as kills by this structural read.
+	// 39 has no emitter in the image but the handler files it with 38/45 —
+	// all three share the one 0xFF008CEE post [orig: cases 38 @0x42640F /
+	// 39 @0x426456 / 45 @0x426442 fall into the shared sink call].
+	case 38: case 39: case 45:
+		return GameEventKind::Medic;
 	case 19: case 20: case 21:
 	case 41: case 42: case 43: case 44:
 	case 50: case 51: case 52: case 53:

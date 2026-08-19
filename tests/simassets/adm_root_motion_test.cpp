@@ -5,8 +5,17 @@
    tests/anim/root_motion_test.cpp; this pins the registry/resolution/advance
    plumbing of the ported source. */
 
+#include <climits>
 #include <cstdio>
+#include <fstream>
 #include <string>
+#include <vector>
+
+#ifdef _WIN32
+#include <direct.h>
+#else
+#include <sys/stat.h>
+#endif
 
 #include "common/test_expect.h"
 #include "common/test_paths.h"
@@ -84,6 +93,120 @@ int main() {
     TEST_EXPECT(blended.dx == frame.dx);
     TEST_EXPECT(blended.capsule_bottom == bottom0);
     TEST_EXPECT(blended.capsule_top == top0);
+
+    // ---- the variant ring: every quoted token on a row is its own clip ----
+    // A two-clip idle row over the two committed .bads: idle.bad (no root travel)
+    // and walk.bad (forward travel). Variant 0 must sample idle, variant 1 walk,
+    // variant 2 wraps back to idle, and a single-clip row reports a ring of 1.
+    // [orig: AnimMap_ParseConfigLine @0x40cb60 registers every token on the slot;
+    //  AnimMap_PlayAnimBySlot @0x40bda0 serves the head and advances it]
+    {
+        const std::string dir = std::string(test_paths_temp_dir()) + "/opennova_rm_ring";
+#ifdef _WIN32
+        _mkdir(dir.c_str());
+#else
+        mkdir(dir.c_str(), 0777);
+#endif
+        auto copy_file = [&](const char *name) {
+            std::vector<uint8_t> bytes;
+            if (!index.read_file(name, bytes)) return false;
+            std::ofstream f(dir + "/" + name, std::ios::binary);
+            f.write(reinterpret_cast<const char *>(bytes.data()),
+                    static_cast<std::streamsize>(bytes.size()));
+            return static_cast<bool>(f);
+        };
+        TEST_EXPECT(copy_file("idle.bad"));
+        TEST_EXPECT(copy_file("walk.bad"));
+        {
+            std::ofstream f(dir + "/ring.adm", std::ios::binary);
+            f << "\r\nanim_reset\t\t\t\t\"idle\"\r\n"
+                 "anim_idle\t\t\t\t\"idle\" \"walk\"\r\n"
+                 "anim_walk_forward\t\t\t\"walk\"\r\n\r\n\r\n";
+            TEST_EXPECT(static_cast<bool>(f));
+        }
+        opennova::ResourceIndex ring_index;
+        TEST_EXPECT(ring_index.scan(dir));
+        AdmRootMotion rings;
+        const int rid = rings.register_adm(&ring_index, "ring.adm");
+        TEST_EXPECT(rid == 0);
+        using opennova::world::anim_state::kIdle;
+        using opennova::world::anim_state::kWalkForward;
+        TEST_EXPECT(rings.variant_count(rid, kIdle) == 2);
+        TEST_EXPECT(rings.variant_count(rid, kWalkForward) == 1);
+        // A missing state binds RESET's ring (size 1).
+        TEST_EXPECT(rings.variant_count(rid, 199) == 1);
+
+        // Sample several ticks of each variant and compare forward travel.
+        auto travel = [&](int state, int variant) {
+            int32_t ph = -1;
+            int32_t sum = 0;
+            for (int i = 0; i < 8; ++i) {
+                RootMotionFrame fr{};
+                if (!rings.advance_variant(rid, state, variant, ph, fr)) return INT32_MIN;
+                sum += fr.dx;
+            }
+            return sum;
+        };
+        const int32_t idle_v0 = travel(kIdle, 0);
+        const int32_t idle_v1 = travel(kIdle, 1);
+        const int32_t idle_v2 = travel(kIdle, 2); // wraps -> variant 0
+        const int32_t walk_v0 = travel(kWalkForward, 0);
+        std::printf("[adm] ring travel idle[0]=%d idle[1]=%d idle[2]=%d walk=%d\n",
+                idle_v0, idle_v1, idle_v2, walk_v0);
+        TEST_EXPECT(idle_v0 != INT32_MIN && idle_v1 != INT32_MIN);
+        TEST_EXPECT(idle_v1 == walk_v0);   // variant 1 IS the walk clip
+        TEST_EXPECT(idle_v1 != idle_v0);   // and it differs from variant 0
+        TEST_EXPECT(idle_v2 == idle_v0);   // wrap modulo the ring size
+        // The variant-less advance is variant 0.
+        int32_t ph = -1;
+        int32_t sum = 0;
+        for (int i = 0; i < 8; ++i) {
+            RootMotionFrame fr{};
+            TEST_EXPECT(rings.advance(rid, kIdle, ph, fr));
+            sum += fr.dx;
+        }
+        TEST_EXPECT(sum == idle_v0);
+    }
+
+    // THE CROSSED-FRAME TRIGGER SCAN — one entry per authored frame entered,
+    // in order, never coalesced [orig: the per-frame consume org2
+    // @0x4b76e6-0x4b78a8]. Walked against the same clip `advance` uses.
+    {
+        uint32_t words[8] = {0};
+        // A fresh clip start (from_phase = -1) fires frame 0.
+        const int first = source.scan_triggers(soldier, opennova::world::anim_state::kReset, -1, 0,
+                                               words, 8);
+        TEST_EXPECT(first == 1);
+        // Re-scanning the SAME span from the same start does not double-fire
+        // (the scan is a pure function of the span, so the caller advances
+        // from_phase; this pins that a zero-width span yields nothing).
+        TEST_EXPECT(source.scan_triggers(soldier, opennova::world::anim_state::kReset, 0, 0, words, 8) == 0);
+        // Two half-frame ticks cross exactly one frame boundary.
+        const int one = source.scan_triggers(soldier, opennova::world::anim_state::kReset, 0, 2, words, 8);
+        TEST_EXPECT(one == 1);
+        // A wide span reports every frame it crossed, bounded by max_out.
+        const int many = source.scan_triggers(soldier, opennova::world::anim_state::kReset, 0, 64, words, 8);
+        TEST_EXPECT(many > 1);
+        TEST_EXPECT(many <= 8);
+        uint32_t two_only[2] = {0};
+        TEST_EXPECT(source.scan_triggers(soldier, opennova::world::anim_state::kReset, 0, 64, two_only, 2) == 2);
+        // An unauthored state falls back to RESET's channel, the same
+        // AnimMap registration rule the length/advance paths follow — so a
+        // scan of state 9999 reports RESET's words, not nothing.
+        TEST_EXPECT(source.scan_triggers(soldier, 9999, -1, 8, words, 8) ==
+                    source.scan_triggers(soldier, opennova::world::anim_state::kReset,
+                                         -1, 8, words, 8));
+        // An UNREGISTERED SET has no track at all.
+        TEST_EXPECT(source.scan_triggers(7, 0, -1, 8, words, 8) == 0);
+        // A null destination scans nothing rather than faulting.
+        TEST_EXPECT(source.scan_triggers(soldier, opennova::world::anim_state::kReset,
+                                         -1, 8, nullptr, 8) == 0);
+        // The capsule-bottom dip is readable at a position without advancing;
+        // it matches what advance() reports for the same frame.
+        TEST_EXPECT(source.capsule_bottom_at(
+                            soldier, opennova::world::anim_state::kReset, 0) == bottom0);
+        TEST_EXPECT(source.capsule_bottom_at(7, 0, 0) == 0);
+    }
 
     // clear() empties the registry.
     source.clear();

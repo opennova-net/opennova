@@ -49,6 +49,11 @@ public:
 	bool has_clip(int adm_id, int state_id) const override;
 	bool advance(int adm_id, int state_id, int32_t &phase_ticks,
 	             opennova::world::RootMotionFrame &out) override;
+	// The per-state variant ring: every quoted token on the .adm row is its own
+	// clip with its own root track [orig: AnimMap_ParseConfigLine @0x40cb60].
+	int variant_count(int adm_id, int state_id) const override;
+	bool advance_variant(int adm_id, int state_id, int variant, int32_t &phase_ticks,
+	                     opennova::world::RootMotionFrame &out) override;
 	bool advance_blended(int adm_id,
 	                     int primary_state, int32_t &primary_phase_ticks,
 	                     int target_state, int32_t &target_phase_ticks,
@@ -56,6 +61,27 @@ public:
 	                     opennova::world::RootMotionFrame &out) override;
 	int32_t clip_length_ticks(int adm_id, int state_id) const override;
 	bool clip_loops(int adm_id, int state_id) const override;
+
+	// THE CROSSED-FRAME TRIGGER SCAN — the authored event words a body crossed
+	// between two playhead positions, in order, one entry per authored clip
+	// FRAME [orig: the per-frame consume org2 @0x4b76e6-0x4b78a8; .bad v1
+	// event stride 24, trigger i32 @+20].
+	//
+	// Retail consumes the trigger word once per authored frame the playhead
+	// enters, so a body that crosses two frames in one advance fires both —
+	// this returns them in order rather than coalescing. `from_phase` is
+	// EXCLUSIVE and `to_phase` INCLUSIVE (the frame just entered fires), both
+	// in the same IDA half-frame ticks `advance` uses. A fresh clip start
+	// passes from_phase = -1 so frame 0 fires; a mid-clip attach passes the
+	// attach phase so nothing back-fires. Writes at most `max_out` words and
+	// returns how many were written.
+	int scan_triggers(int adm_id, int state_id, int32_t from_phase,
+	                  int32_t to_phase, uint32_t *out, int max_out) const;
+
+	// The frame's capsule bottom (out[3] = bottom * 65536) at one playhead
+	// position — the dip that puts a footstep at FOOT level rather than the
+	// body origin [orig: the AnimMap out[3] cell @0x4b77d3].
+	int32_t capsule_bottom_at(int adm_id, int state_id, int32_t phase_ticks) const;
 
 	bool empty() const { return sets_.empty(); }
 	int set_count() const { return static_cast<int>(sets_.size()); }
@@ -76,16 +102,19 @@ private:
 		bool loop = false;
 	};
 
-	// One model's .adm reduced to its per-state root tracks.
+	// One model's .adm reduced to its per-state root tracks. Each state owns the
+	// RING of tracks its .adm row authored, in file order (index = variant).
 	struct ClipSet {
-		std::unordered_map<int, Track> tracks;
+		std::unordered_map<int, std::vector<Track>> tracks;
 		std::string adm_name;
 	};
 
 	// Parse adm_name into `out`; returns the number of states with a usable track.
 	static int parse_adm(const opennova::ResourceIndex *index,
 	                     const std::string &adm_name, ClipSet &out);
-	const Track *resolve_track(int adm_id, int state_id) const;
+	// Variant wraps modulo the ring size, so a stale cursor from a shorter row on
+	// another rig still resolves; missing states bind RESET's ring.
+	const Track *resolve_track(int adm_id, int state_id, int variant = 0) const;
 	static int32_t position_of(const Track &track, int32_t phase_ticks);
 	static float sample(const Track &track, const std::vector<float> &channel,
 	                    int32_t phase_ticks);
