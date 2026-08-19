@@ -29,7 +29,7 @@ class Row:
 		return row
 
 
-	func to_json_value() -> Variant:
+	func to_json_value() -> Dictionary:
 		return {
 			"position": position,
 			"color": color,
@@ -63,7 +63,7 @@ static func from_ffi_dictionary(value: Dictionary) -> EffectLightReport:
 	return report
 
 
-func to_json_value() -> Variant:
+func to_json_value() -> Dictionary:
 	var encoded_rows: Array = []
 	for row in rows:
 		encoded_rows.append(row.to_json_value())

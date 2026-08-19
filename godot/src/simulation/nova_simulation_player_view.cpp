@@ -368,7 +368,7 @@ Dictionary Simulation::get_local_player_view() const {
 // [orig: Player_UpdateFirstPersonCamera @ 0x4dd380]
 Vector3 Simulation::local_player_viewmodel_bias_view_units(
 		const Vector3 &p_pos_raw_units, const Vector3 &p_tpos_raw_units,
-		bool p_narrow_aspect) {
+		int p_viewport_w, int p_viewport_h) {
 	const opennova::world::WeaponSlotState *active_slot =
 			active_local_weapon_slot();
 	const bool suppress = local_weapon_.active &&
@@ -390,9 +390,10 @@ Vector3 Simulation::local_player_viewmodel_bias_view_units(
 			local_tick_delta_, lead);
 	for (int i = 0; i < 3; ++i)
 		out[i] += static_cast<float>(lead[i]) / 65536.0f;
-	// The 4:3 framing drop (retail: @ 0x4dd571..0x4dd578 — see
-	// world/player_view.h player_view_narrow_aspect).
-	if (p_narrow_aspect)
+	// The 4:3 framing drop — the 3w<=4h rule is the engine's own
+	// (retail: @ 0x4dd571..0x4dd578 — world/player_view.h
+	// player_view_narrow_aspect); the caller only samples the viewport.
+	if (opennova::world::player_view_narrow_aspect(p_viewport_w, p_viewport_h))
 		out[2] -= static_cast<float>(
 				opennova::world::kFpNarrowAspectDropQ16) / 65536.0f;
 	return Vector3(out[0], out[1], out[2]);

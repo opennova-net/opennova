@@ -197,7 +197,7 @@ func test_capture_variants_control_page_shadows_without_a_static_shadow_map() ->
 		"res://src/terrain/nova_terrain_tile_cache_device.h")
 	var world := _source("res://game/world/game_world.gd")
 	var session := _source(
-		"res://game/world/shadow_attribution_capture_session.gd")
+		"res://tests/support/shadow_attribution_capture_session.gd")
 	assert_true(terrain_header.contains("set_static_terrain_shadow_enabled("))
 	assert_true(terrain_header.contains(
 			"set_suppressed_static_shadow_bms_ids("))

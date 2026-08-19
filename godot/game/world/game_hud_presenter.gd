@@ -1064,10 +1064,12 @@ func _flush_feed_events() -> void:
 		if tmpl.is_empty():
 			continue
 		var line := ""
-		var wpname_key := String(row.get("wpname_key", ""))
-		if not wpname_key.is_empty():
+		# The compose form is the engine's decision (the camp discriminant
+		# rides the row), not an inference from which keys are present.
+		if bool(row.get("camp", false)):
 			# Camp line: the template's %s takes the level's WPNames string
 			# [orig: sprintf @0x427327/@0x42736B].
+			var wpname_key := String(row.get("wpname_key", ""))
 			var wpname := ""
 			if table.has_string_in_section("WPNames", wpname_key):
 				wpname = table.get_string_in_section("WPNames", wpname_key)

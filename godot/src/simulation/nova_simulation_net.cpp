@@ -1458,6 +1458,9 @@ Array Simulation::drain_feed_events() {
 		Dictionary d;
 		d["event_type"] = ev.event_type;
 		d["kind"] = static_cast<int>(ev.kind);
+		// The engine decides the line's compose form; the presenter branches
+		// on this, never on which keys happen to be present.
+		d["camp"] = camp;
 		d["key"] = String::utf8(key);
 		d["attacker"] = camp ? String() : name_of(ev.attacker_index);
 		d["victim"] = camp ? String() : name_of(ev.victim_index);

@@ -29,7 +29,7 @@ func _init(
 	suppressed_static_caster_bms_ids = suppressed_static_bms_ids.duplicate()
 
 
-func to_json_value() -> Variant:
+func to_json_value() -> Dictionary:
 	return {
 		"id": id,
 		"debug_draw": debug_draw,

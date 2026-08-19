@@ -15,7 +15,7 @@ var _value: Dictionary = {}
 
 
 static func from_world(
-		world: Variant,
+		world: GameWorld,
 		camera: Camera3D,
 		viewport: Viewport) -> GameRenderDiagnostics:
 	var snapshot := GameRenderDiagnostics.new()
@@ -27,7 +27,7 @@ func to_json_value() -> Dictionary:
 	return _value.duplicate(true)
 
 
-func _sample(world: Variant, camera: Camera3D, viewport: Viewport) -> void:
+func _sample(world: GameWorld, camera: Camera3D, viewport: Viewport) -> void:
 	var env: MissionEnvironment = world.get_environment_node()
 	var weather: Weather = world.get_weather_node()
 	var water: Water = world.get_water_node()
@@ -78,8 +78,7 @@ func _sample(world: Variant, camera: Camera3D, viewport: Viewport) -> void:
 	}
 
 
-static func _terrain_state(world_value: Variant) -> Dictionary:
-	var world := world_value as GameWorld
+static func _terrain_state(world: GameWorld) -> Dictionary:
 	if world == null:
 		return {"available": false, "surface_inputs": {}}
 	var terrain: Terrain = world.get_terrain_node()
@@ -151,8 +150,8 @@ static func _projection_label(mode: int) -> String:
 static func _environment_state(env: MissionEnvironment) -> Dictionary:
 	if env == null:
 		return {"available": false, "loaded": false}
-	var light_state: Variant = env.get_light_state()
-	var values: Variant = light_state.get_values() \
+	var light_state: EnvLightState = env.get_light_state()
+	var values: EnvLightValues = light_state.get_values() \
 			if light_state != null else null
 	return {
 		"available": true,
@@ -188,7 +187,7 @@ static func _environment_state(env: MissionEnvironment) -> Dictionary:
 	}
 
 
-static func _light_values_state(values: Variant) -> Dictionary:
+static func _light_values_state(values: EnvLightValues) -> Dictionary:
 	if values == null:
 		return {"available": false}
 	return {
