@@ -760,7 +760,13 @@ std::vector<uint8_t> encode_player_list(const std::vector<PlayerListEntry> &play
 	w.u8(static_cast<uint8_t>(players.size()));  // row count
 	for (const PlayerListEntry &e : players) {
 		w.u8(e.slot);
-		w.u16(0); // statusFlags (the glyph bitfield; zero until stats exist)
+		// The status/score fields read the CPlayerStats record system the
+		// port does not carry yet — a recorded D-HUD-24 residual, not a
+		// stub: an opennova-hosted board draws zero scores until that system
+		// lands [orig: the serializer fills @0x504c2e..0x504d20 from
+		// CRenderState_GetFieldByIndex @0x52d7d6 / Player_ComputeScore
+		// @0x500A80].
+		w.u16(0); // statusFlags (the glyph bitfield)
 		w.u16(0); // score1 (the mode stat)
 		w.u16(0); // score2 (accumulated points)
 		w.u8(static_cast<uint8_t>(e.team << 1)); // bits1+ team, bit0 SPECTATOR (unmodeled 0)
